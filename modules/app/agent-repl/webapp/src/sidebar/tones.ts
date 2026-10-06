@@ -45,6 +45,7 @@ export const ROSTER_STATUS_CASES = [
   "startFailed",
   "degraded",
   "dead",
+  "turnDied",
   "merging",
   "mergeQueued",
   "mergeFailed",

@@ -48,8 +48,8 @@ func TestAFailedTurnFilesItsErroredLineAndClass(t *testing.T) {
 	if ending.Error != want || want == "" {
 		t.Fatalf("error = %q, want the drawn headline %q", ending.Error, want)
 	}
-	if ending.Failure != ladder.TurnFailed {
-		t.Fatalf("failure = %s, want turn_failed", ending.Failure)
+	if ending.Failure != ladder.VendorFailed {
+		t.Fatalf("failure = %s, want vendor_failed", ending.Failure)
 	}
 }
 

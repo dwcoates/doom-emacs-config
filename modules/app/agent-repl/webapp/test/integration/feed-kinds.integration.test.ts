@@ -969,11 +969,18 @@ describe.each(SEPARATION_ARMS)("a %s separation", (arm) => {
     expect(row.dataset.state).toBe(arm);
   });
 
-  it("draws the composed label verbatim", async () => {
+  it(arm === "compactionFailed" ? "draws its outcome marker, and no label (owner ruling 2026-10-06)" : "draws the composed label verbatim", async () => {
     // Arrange / Act
     const row = await drawRow(separationRow(arm));
     // Assert
-    expect(row.textContent).toContain(`separation: ${arm}`);
+    if (arm === "compactionFailed") {
+      expect([row.querySelector(".sep-label"), row.querySelector(".outcome-marker-label")?.textContent]).toEqual([
+        null,
+        "compaction failed",
+      ]);
+    } else {
+      expect(row.textContent).toContain(`separation: ${arm}`);
+    }
   });
 });
 

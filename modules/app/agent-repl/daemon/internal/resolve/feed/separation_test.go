@@ -327,7 +327,9 @@ func TestAFailedCompactionWarns(t *testing.T) {
 	}
 }
 
-func TestAFailedCompactionAlsoRidesTheTurnsEvidence(t *testing.T) {
+// A FAILED COMPACTION IS ITS OWN MARKER ALONE (owner ruling, 2026-10-06): it
+// no longer rides the turn's headline as evidence.
+func TestAFailedCompactionNoLongerRidesTheTurnsHeadline(t *testing.T) {
 	// Arrange: a turn in flight that then fails of something else.
 	h := newHarness(t)
 	h.deliverPrompt("turn-1", "compact please")
@@ -340,8 +342,50 @@ func TestAFailedCompactionAlsoRidesTheTurnsEvidence(t *testing.T) {
 
 	// Assert.
 	headline := h.terminalRow("turn-1").GetErrored().GetHeadline().GetText()
-	if !contains(headline, "the summarizer refused") {
-		t.Fatalf("headline = %q, want the compaction failure as evidence", headline)
+	if contains(headline, "the summarizer refused") {
+		t.Fatalf("headline = %q, want no compaction evidence on it", headline)
+	}
+}
+
+func TestAFailedCompactionDrawsAVendorFaultMarker(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "compact please")
+
+	// Act.
+	failedCompaction(h, "the summarizer refused")
+
+	// Assert.
+	m := h.separationRow().GetSeparation().GetCompactionFailed().GetMarker()
+	if m.GetLabel().GetText() != "compaction failed" || m.Detail != nil {
+		t.Fatalf("marker = %+v, want \"compaction failed\" with no detail", m)
+	}
+	x := m.GetVendorFault().GetExpansion()
+	if x.GetErrorType().GetText() != "compaction_failed" || x.GetMessage().GetText() != "the summarizer refused" {
+		t.Fatalf("expansion = %+v, want the cut's word and the producer's account", x)
+	}
+	if x.GetTime().GetAtMs() != h.nowMs {
+		t.Fatalf("time = %+v, want the live receipt's instant", x.GetTime())
+	}
+}
+
+func TestAReplayedFailedCompactionsMarkerCarriesNoInstant(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	page := historyPage(&conversationv1.HistoryFloor{},
+		cutEntry(&conversationv1.ContextCut{Cut: &conversationv1.ContextCut_CompactionFailed{
+			CompactionFailed: &conversationv1.ContextCompactionFailed{Error: "the summarizer refused"},
+		}}),
+		promptEntry("turn-1", "before"),
+	)
+
+	// Act.
+	h.replay(page)
+
+	// Assert.
+	x := h.separationRow().GetSeparation().GetCompactionFailed().GetMarker().GetVendorFault().GetExpansion()
+	if x == nil || x.Time != nil {
+		t.Fatalf("expansion = %+v, want one with no time: a cut states no instant", x)
 	}
 }
 

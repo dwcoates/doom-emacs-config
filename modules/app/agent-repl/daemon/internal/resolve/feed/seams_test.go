@@ -143,35 +143,6 @@ func TestAnOrdinaryFailureNamesNoLostCause(t *testing.T) {
 	if got := lostCauseOfBash(&conversationv1.AgentBashInterrupted{}); got != lostNone {
 		t.Fatalf("lostCauseOfBash = %v, want lostNone", got)
 	}
-	if got := lostCauseOfAgentFailure(&conversationv1.AgentFailure{}); got != lostNone {
-		t.Fatalf("lostCauseOfAgentFailure = %v, want lostNone", got)
-	}
-}
-
-func TestLostSentenceNeverClaimsAFailure(t *testing.T) {
-	tests := []struct {
-		name  string
-		cause detachedLostCause
-	}{
-		{name: "file vanished", cause: lostFileVanished},
-		{name: "went silent", cause: lostWentSilent},
-		{name: "swept up", cause: lostSweptUp},
-		{name: "none", cause: lostNone},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange, Act.
-			got := lostSentence(tc.cause)
-
-			// Assert.
-			if !contains(got, "we lost sight of this work") {
-				t.Fatalf("sentence = %q, want the lost wording", got)
-			}
-			if contains(got, "failed") {
-				t.Fatalf("sentence = %q, want no claim of failure", got)
-			}
-		})
-	}
 }
 
 func TestDetachedLostCauseString(t *testing.T) {

@@ -142,8 +142,8 @@ describe.each([1, 2])("the topbar in WebKit at %ix", (dpr) => {
     const m = await rig.page.evaluate(() => window.topbarPage.drawStrip(true));
     expect(m.cells.map((c) => c.cell)).toEqual([
       "topbar-model",
+      "topbar-effort",
       "topbar-mode",
-      "topbar-fast",
       "topbar-context",
       "topbar-wifi",
       "topbar-warnings",

@@ -247,6 +247,27 @@ message FooterStrip {
 // `bounce_disposition` is the one recorded kind with no footer cell, for the
 // same reason it has no wire arm: it is opened and closed in one breath as
 // per-session accounting, and never stands.
+//
+// TURN FAULTS — the workspace status takes the fault a failed turn ended on
+// (owner ruling, 2026-10-06; the feed draws the event as an outcome marker,
+// FeedOutcomeMarker, never as a bubble). The cause decides the domain:
+//
+//   | cause                                   | status · substatus           |
+//   |-----------------------------------------|------------------------------|
+//   | every cause the vendor ended or refused | vendor_fault · vendor_error  |
+//   |  (every api error, an account cause,    |  (a standing account block   |
+//   |  the token ceiling, max turns, max      |  keeps its own `auth`,       |
+//   |  budget, a refusal, an execution error, |  `usage_limit` or `billing`) |
+//   |  every turn_failed stop reason)         |                              |
+//   | the vendor query died, or the agent     | agent_repl_fault · turn_died |
+//   |  process died, with the turn            |                              |
+//   | an interrupt, a Stop hook that ended    | no fault                     |
+//   |  the run, a deferred tool               |                              |
+//
+// The activity cell carries the daemon's per-cause sentence, the same one
+// the feed's turn-end row carries as its headline (`turn_ended`), with the
+// vendor's wait counted down for a rate limit or an overload. A turn fault
+// stands until the next turn starts.
 message FooterStatus {
   // What the session is doing now, at the coarsest resolution. Exactly one
   // arm is set; a frame with none is malformed and rejected loudly.
@@ -301,11 +322,9 @@ message FooterStatus {
     // arm. GREEN. TERMINAL: the merge no longer holds the session, so the
     // composer is OPEN.
     FooterStatusMerged merged = 14;
-    // The last turn FAILED for a reason that is not the vendor's or the
-    // account's: the same turn end the roster draws `turn_failed`. TURQUOISE
-    // (owner ruling, 2026-09-28): something went wrong that wants the user's
-    // attention, but the workspace is USABLE, so the composer is OPEN. It
-    // replaces `idle · turn_failed`, which is no longer emitted.
+    // NO LONGER EMITTED: a failed turn's status is the fault its cause
+    // names (owner ruling, 2026-10-06): `vendor_fault · vendor_error` or
+    // `agent_repl_fault · turn_died`. Kept so an older frame still decodes.
     FooterStatusTurnFailed turn_failed = 15;
     // The session SERVES, but the daemon's view of it is compromised: a shim
     // component is dropping or delaying what it observes, or a shim taken
@@ -404,10 +423,11 @@ message FooterSubStatusIdleDone {}
 // The last turn failed for a reason that is not the vendor's or the account's.
 message FooterSubStatusIdleTurnFailed {}
 
-// The last turn failed for a reason that is not the vendor's or the account's.
+// NO LONGER EMITTED (owner ruling, 2026-10-06): a failed turn's status is
+// the fault its cause names, and the footer carries the cause. Kept so an
+// older frame still decodes.
 message FooterStatusTurnFailed {
-  // No substatus: the feed's turn-end row carries the account, so the
-  // substatus cell merges into the status cell.
+  // No substatus: the substatus cell merges into the status cell.
   // The activity cell. ALWAYS SET, the same cell an idle session carries.
   // When the turn failed because the vendor query died, the cell is the
   // salient dead-query line.
@@ -1065,7 +1085,9 @@ message FooterStatusVendorFault {
     FooterSubStatusVendorFaultAuth auth = 1;
     // The usage allowance is exhausted.
     FooterSubStatusVendorFaultUsageLimit usage_limit = 2;
-    // The vendor is refusing requests.
+    // The vendor is refusing requests, or the vendor ended or refused the
+    // last turn (a TURN FAULT, standing until the next turn starts; the
+    // activity cell's `turn_ended` line names the cause).
     FooterSubStatusVendorFaultVendorError vendor_error = 3;
     // The account's billing state refuses requests.
     FooterSubStatusVendorFaultBilling billing = 4;
@@ -1172,6 +1194,10 @@ message FooterStatusVendorFaultSalient {
     // exhausted window with the way out. It ranks first, because it explains
     // the step.
     FooterStatusActivityVendorStart vendor_start = 10;
+    // HOW THE VENDOR ENDED THE LAST TURN, standing with the turn fault until
+    // the next turn starts. It explains `vendor_error`, so it ranks with the
+    // lines that explain the step, after the auth prompt.
+    FooterStatusActivityTurnEnded turn_ended = 11;
   }
   // Tag 6 (`rate_limit`) is RETIRED: the enduring usage line carries
   // the vendor's allowance figures (owner ruling, 2026-10-01).
@@ -1181,6 +1207,19 @@ message FooterStatusVendorFaultSalient {
 }
 // The daemon itself is impaired; the fault line says how.
 message FooterSubStatusAgentReplFaultDaemonImpaired {}
+// A TURN FAULT'S LINE: the daemon's per-cause sentence for how the last turn
+// ended, the same sentence the feed's turn-end row carries as its headline
+// ("rate limited by the vendor", "the agent process died, and the turn it was
+// running ended with it"). Drawn verbatim.
+message FooterStatusActivityTurnEnded {
+  // The sentence, drawn verbatim. Never empty.
+  string text = 1;
+  // WHEN THE VENDOR'S WAIT ENDS, for a turn ended by a rate limit or an
+  // overload that stated one: the client counts down to it beside the
+  // sentence. UNSET for every other cause, and when the vendor stated no wait.
+  optional FooterStatusActivityAt retry_at = 2;
+}
+
 // The dead-query line.
 message FooterStatusActivityQueryDied {
   // The composed line, drawn verbatim.
@@ -1346,6 +1385,13 @@ message FooterStatusAgentReplFault {
     // something it needs from the daemon — its prompts directory, its state
     // client, its durable log sink, its own redeploy.
     FooterSubStatusAgentReplFaultDaemonImpaired daemon_impaired = 10;
+    // THE LAST TURN DIED WITH AGENT-REPL'S OWN MACHINERY: its vendor query
+    // died, or the agent process died under it (a TURN FAULT, owner ruling,
+    // 2026-10-06). It stands until the next turn starts, and the activity
+    // cell's `turn_ended` line names which. The composer stays OPEN under it
+    // (render-colors.json#composer_open_substatuses): the next prompt is what
+    // ends it, so a closed composer would make the fault permanent.
+    FooterSubStatusAgentReplFaultTurnDied turn_died = 11;
   }
   // Tags 7–9 (`vendor_retry`, `vendor_rejection`, `vendor_failed`) moved to
   // `vendor_fault`: a vendor that will not start is the vendor's fault.
@@ -1366,6 +1412,8 @@ message FooterSubStatusAgentReplFaultSevered {}
 message FooterSubStatusAgentReplFaultDead {}
 // The shim failed to start.
 message FooterSubStatusAgentReplFaultStartFailed {}
+// The last turn died with agent-repl's own machinery.
+message FooterSubStatusAgentReplFaultTurnDied {}
 // The vendor did not start and is being retried.
 message FooterSubStatusVendorFaultVendorRetry {}
 // The vendor refused the start; nothing retries.
@@ -1398,6 +1446,11 @@ message FooterStatusAgentReplFaultSalient {
     // WHY the session's bring-up failed, and what the failure cost, standing
     // until the next successful link edge clears it.
     FooterStatusActivityStartFailed start_failed = 2;
+    // HOW AGENT-REPL'S MACHINERY ENDED THE LAST TURN (the query died, the
+    // agent process died), standing with the `turn_died` fault until the next
+    // turn starts. It explains `turn_died`, so it ranks first beside
+    // `start_failed`.
+    FooterStatusActivityTurnEnded turn_ended = 9;
     // An ESCALATING daemon fault that claims `agent_repl_fault`, standing until
     // it is retracted. Only faults the partition above maps to
     // `agent_repl_fault` land here; a non-escalating fault is a transient, never

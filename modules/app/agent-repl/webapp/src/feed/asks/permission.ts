@@ -58,6 +58,7 @@ import { refusalOf, type SentenceTable } from "../../rpc/refuse.js";
 import { armName } from "../renderers.js";
 import type { RowContext } from "../renderers.js";
 import { tick } from "../ticking.js";
+import { drawOutcomeMarker } from "../marker.js";
 import { stampedAge } from "./stamped-age.js";
 import { buildAnswerPermissionRequest, type PermissionAnswer } from "./requests.js";
 
@@ -76,16 +77,16 @@ const BUTTON_LABELS = {
   deny: "deny",
 } as const satisfies Record<(typeof PERMISSION_BUTTONS)[number], string>;
 
-/** The verdict line each answered arm draws. */
+/** The verdict line each allowing arm draws. */
 const VERDICT_WORDS = {
   allowedOnce: "allowed once",
   allowedStanding: "allowed with standing",
-  deniedByUser: "denied by user",
 } as const satisfies Record<string, string>;
 
 /** Every answered arm this build draws, for the suite to hold to the schema. */
 export const PERMISSION_ANSWERED_ARMS: readonly string[] = [
   ...Object.keys(VERDICT_WORDS),
+  "deniedByUser",
   "deniedByPolicy",
   "deniedUndecidable",
 ];
@@ -235,6 +236,19 @@ export function drawFeedPermissionAnswered(
   el.setAttribute("data-arm", answer.case);
   el.setAttribute(VERDICT_ATTRIBUTE, answer.case);
 
+  // A DENIAL BY THE USER IS AN ANSWER, NOT AN ERROR (owner ruling,
+  // 2026-10-06): it draws its neutral outcome marker, never the red badge.
+  if (answer.case === "deniedByUser") {
+    el.append(
+      drawOutcomeMarker(
+        requireMessage(answer.value.marker, `${path}.denied_by_user.marker`),
+        { ctx: rc.ctx, previous: rc.previous },
+        `${path}.denied_by_user.marker`,
+      ),
+      stampedAge(u.atMs, `${path}.at_ms`, rc, "perm-when"),
+    );
+    return el;
+  }
   const word = document.createElement("span");
   word.className =
     answer.case === "allowedOnce" || answer.case === "allowedStanding"
@@ -243,7 +257,6 @@ export function drawFeedPermissionAnswered(
   switch (answer.case) {
     case "allowedOnce":
     case "allowedStanding":
-    case "deniedByUser":
       word.textContent = VERDICT_WORDS[answer.case];
       break;
     case "deniedByPolicy":

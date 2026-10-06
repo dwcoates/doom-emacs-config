@@ -11,6 +11,7 @@ import (
 
 	"claude-repld/internal/feedid"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/resolve/turnfault"
 	"claude-repld/internal/sourcescan"
 	"claude-repld/internal/wsm"
 )
@@ -1538,6 +1539,64 @@ func TestALeftoverDetachmentIsReportedOnlyWhenItArrivedLive(t *testing.T) {
 			}
 			if !h.hasRecord(level, tc.wantRecord) {
 				t.Fatalf("records = %+v, want %s %s", h.records(), level, tc.wantRecord)
+			}
+		})
+	}
+}
+
+// THE FEED'S HEADLINE IS TURNFAULT'S SENTENCE, for every arm a failure can
+// take: the footer's turn-fault line is that same sentence, so a feed that
+// worded a cause on its own would tell one end two ways.
+func TestEveryFailureHeadlineIsTheSharedTurnFaultSentence(t *testing.T) {
+	oneof := (&conversationv1.AgentFailure{}).ProtoReflect().Descriptor().Oneofs().ByName("failure")
+	fields := oneof.Fields()
+	for i := 0; i < fields.Len(); i++ {
+		field := fields.Get(i)
+		t.Run(string(field.Name()), func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.deliverPrompt("turn-1", "hello")
+			failure := &conversationv1.AgentFailure{}
+			m := failure.ProtoReflect()
+			m.Set(field, m.NewField(field))
+
+			// Act
+			h.terminal("turn-1", nil, failure)
+
+			// Assert
+			got := h.terminalRow("turn-1").GetErrored().GetHeadline().GetText()
+			want := turnfault.OfAgentFailure(failure, false).Sentence
+			if got != want {
+				t.Fatalf("headline = %q, want turnfault's sentence %q", got, want)
+			}
+		})
+	}
+}
+
+// A CLOSE WITH NO TERMINAL is headlined by turnfault's sentence too.
+func TestEveryFailingCloseHeadlineIsTheSharedTurnFaultSentence(t *testing.T) {
+	cases := []struct {
+		name string
+		how  wsm.TurnClose
+	}{
+		{name: "agent died", how: wsm.CloseAgentDied},
+		{name: "orphaned", how: wsm.CloseOrphaned},
+		{name: "failed", how: wsm.CloseFailed},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.deliverPrompt("turn-1", "hello")
+
+			// Act
+			h.closeTurn("turn-1", tc.how)
+
+			// Assert
+			got := h.terminalRow("turn-1").GetErrored().GetHeadline().GetText()
+			want, _ := turnfault.OfClose(tc.how)
+			if got != want.Sentence {
+				t.Fatalf("headline = %q, want turnfault's sentence %q", got, want.Sentence)
 			}
 		})
 	}

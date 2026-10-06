@@ -17,6 +17,7 @@ var rosterArmClaims = map[string]Claim{
 	"severed":        AgentReplFault,
 	"dead":           AgentReplFault,
 	"start_failed":   AgentReplFault,
+	"turn_died":      AgentReplFault,
 	"network_fault":  NetworkFault,
 	"degraded":       Degraded,
 	"merge_failed":   MergeFailed,

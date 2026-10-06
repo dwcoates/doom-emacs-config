@@ -34,7 +34,7 @@ afterAll(async () => {
 });
 
 it(
-  "names an iterator failure on the turn-error line",
+  "names an iterator failure on the turn's agent-repl outcome marker",
   async () => {
     // Arrange
     const before = rows(app, "turnEnded").length;
@@ -53,9 +53,14 @@ it(
     expect(row.querySelector("[data-turn-error]")?.getAttribute("data-turn-error")).toBe(
       "queryDied",
     );
-    expect(row.querySelector("[data-query-cause]")?.getAttribute("data-query-cause")).toBe(
-      "iteratorFailure",
+    // The ending is agent-repl's outcome marker (owner ruling, 2026-10-06),
+    // its expansion naming the query's death by the iterator and what it threw.
+    const marker = row.querySelector(".outcome-marker");
+    expect(marker?.getAttribute("data-family")).toBe("agentReplFault");
+    expect(marker?.querySelector('[data-line="what-died"] .outcome-marker-value')?.textContent).toContain(
+      "the SDK's iterator threw",
     );
+    expect(marker?.querySelector('[data-line="thrown"]')).not.toBeNull();
   },
   TURN_TEST_MS,
 );

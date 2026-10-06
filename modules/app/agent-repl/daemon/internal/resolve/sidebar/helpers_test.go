@@ -33,7 +33,7 @@ func testColors() vocab.RenderColors {
 	for _, arm := range []string{
 		"submitting", "thinking", "clearing", "compacting", "permission", "done",
 		"interrupted", "turn_failed", "ready", "idle_async", "vendor_blocked", "vendor_fault", "network_fault", "api_retrying", "init", "severed",
-		"start_failed", "degraded", "dead", "merging",
+		"start_failed", "degraded", "dead", "turn_died", "merging",
 		"merge_queued", "merge_failed", "merged", "none",
 		"inactive",
 	} {
@@ -201,6 +201,8 @@ func statusName(row *frontendv1.RosterRow) string {
 		return "degraded"
 	case *frontendv1.RosterRow_Dead:
 		return "dead"
+	case *frontendv1.RosterRow_TurnDied:
+		return "turn_died"
 	case *frontendv1.RosterRow_Merging:
 		return "merging"
 	case *frontendv1.RosterRow_MergeQueued:

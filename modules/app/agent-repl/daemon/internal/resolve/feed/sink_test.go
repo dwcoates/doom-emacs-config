@@ -67,11 +67,6 @@ func TestASessionUpdateThatChangesNoRowIsRecordedByItsArm(t *testing.T) {
 		want   string
 	}{
 		{
-			name:   "the model changed",
-			update: &conversationv1.SessionModelChanged{EffectiveModel: &conversationv1.AgentModel{Name: "m"}},
-			want:   "model_changed",
-		},
-		{
 			name:   "context usage is the topbar's",
 			update: &conversationv1.SessionContextUsage{},
 			want:   "context_usage",

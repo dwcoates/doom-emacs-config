@@ -273,7 +273,7 @@ func (r *resolver) replayFrame(s *wsState, frame *conversationv1.AgentFrame, at 
 			// and replaying it as one would invent a turn ending. The wording
 			// is the live sink's own, so a replayed turn reads exactly as the
 			// watched one did.
-			r.addEvidence(s, apiErrorEvidence(update.ApiError.GetMessage()))
+			r.addEvidence(s, apiErrorEvidence(update.ApiError))
 		default:
 			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "replayFrame", "branch": "default"})
 			r.logger(s.id).Warn("daemon.feed.history_update_unset",

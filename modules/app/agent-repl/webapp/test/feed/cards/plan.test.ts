@@ -107,8 +107,45 @@ describe("drawFeedPlan", () => {
   const states = [
     { arm: "planning", state: { case: "planning", value: {} }, badge: "planning" },
     { arm: "planned", state: planned("# the plan"), badge: "plan" },
-    { arm: "failed", state: { case: "failed", value: { text: "turn ended in plan mode" } }, badge: "failed" },
   ] as const;
+
+  /** A broken episode, with the neutral marker the daemon sends for it. */
+  const failedState = {
+    case: "failed",
+    value: {
+      text: "turn ended in plan mode",
+      marker: {
+        label: { text: "plan failed" },
+        detail: { text: "turn ended in plan mode" },
+        family: { case: "neutral", value: {} },
+      },
+    },
+  } as const;
+
+  it("carries failed as the bubble's state", () => {
+    const el = drawFeedPlan(plan(failedState), harness().rc);
+    expect(el.getAttribute("data-state")).toBe("failed");
+  });
+
+  it("badges nothing for a broken episode: it draws its neutral outcome marker (owner ruling 2026-10-06)", () => {
+    const el = drawFeedPlan(plan(failedState), harness().rc);
+    expect(el.querySelector(".badge")).toBeNull();
+  });
+
+  it("draws a broken episode's neutral marker with its reason", () => {
+    const el = drawFeedPlan(plan(failedState), harness().rc);
+    const marker = el.querySelector(".plan-failed .outcome-marker");
+    expect([marker?.getAttribute("data-family"), marker?.textContent]).toEqual([
+      "neutral",
+      "◼plan failed · turn ended in plan mode",
+    ]);
+  });
+
+  it("refuses a broken episode with no marker", () => {
+    expect(() =>
+      drawFeedPlan(plan({ case: "failed", value: { text: "turn ended in plan mode" } }), harness().rc),
+    ).toThrow(MalformedView);
+  });
 
   for (const c of states) {
     it(`carries ${c.arm} as the bubble's state`, () => {
@@ -199,12 +236,12 @@ describe("drawFeedPlan", () => {
     ).toBe("pathEscapesWorkspace");
   });
 
-  it("draws the failed reason verbatim", () => {
+  it("draws the failed reason verbatim, as the marker's detail", () => {
     const el = drawFeedPlan(
-      plan({ case: "failed", value: { text: "turn ended in plan mode" } }),
+      plan(failedState),
       harness().rc,
     );
-    expect(el.querySelector(".plan-failed")?.textContent).toBe("turn ended in plan mode");
+    expect(el.querySelector(".plan-failed .outcome-marker-detail")?.textContent).toBe(" · turn ended in plan mode");
   });
 });
 
