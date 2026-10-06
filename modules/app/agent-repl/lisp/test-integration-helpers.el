@@ -204,9 +204,31 @@ letting a path-only fixture silently route as a workspace."
     (make-directory value t))
   (funcall original ws key value))
 
+(defun agent-repl-itest--remove-tree (dir)
+  "Remove DIR and everything under it, if it exists.
+An absent DIR is already the state asked for.  ANY OTHER FAILURE SIGNALS:
+a cleanup that could not remove what a scenario made leaves the next one
+reading it, which the run must say rather than swallow."
+  (when (file-exists-p dir)
+    (delete-directory dir t)))
+
+(defun agent-repl-itest--at-exit (what fn)
+  "Run FN, a cleanup of WHAT, from `kill-emacs-hook'; print a failure.
+An error escaping `kill-emacs-hook' is reported by Emacs with no context
+and the exit status left untouched, so a failed exit-time cleanup is
+printed to stderr here, naming WHAT, in the batch temp root's form."
+  (condition-case err
+      (funcall fn)
+    (error
+     (princ (format "agent-repl-itest: ERROR: could not %s: %S\n" what err)
+            #'external-debugging-output))))
+
 (defun agent-repl-itest--delete-fixture-root ()
-  "Delete this process's fixture root.  Runs on `kill-emacs-hook'."
-  (ignore-errors (delete-directory agent-repl-itest--fixture-root t)))
+  "Delete this process's fixture root.  Runs on `kill-emacs-hook'.
+A failure is printed to stderr rather than swallowed."
+  (agent-repl-itest--at-exit
+   (format "remove the fixture root %s" agent-repl-itest--fixture-root)
+   (lambda () (agent-repl-itest--remove-tree agent-repl-itest--fixture-root))))
 
 (add-hook 'kill-emacs-hook #'agent-repl-itest--delete-fixture-root)
 
@@ -312,7 +334,7 @@ Unless KEEP-STATE-DIR, deletes its private state dir."
   (unless (or keep-state-dir
               (equal (agent-repl-itest-daemon-state-dir daemon)
                      agent-repl-itest--shared-state-dir))
-    (ignore-errors (delete-directory (agent-repl-itest-daemon-state-dir daemon) t))))
+    (agent-repl-itest--remove-tree (agent-repl-itest-daemon-state-dir daemon))))
 
 ;;;; ---- The control plane ----
 ;;
@@ -789,11 +811,15 @@ into the same state root.")
   (when agent-repl-itest--shared-daemon
     (let ((daemon agent-repl-itest--shared-daemon))
       (setq agent-repl-itest--shared-daemon nil)
-      (ignore-errors (agent-repl-itest--stop-daemon daemon t))))
+      (agent-repl-itest--at-exit
+       "stop the shared fake daemon"
+       (lambda () (agent-repl-itest--stop-daemon daemon t)))))
   (when agent-repl-itest--shared-state-dir
     (let ((dir agent-repl-itest--shared-state-dir))
       (setq agent-repl-itest--shared-state-dir nil)
-      (ignore-errors (delete-directory dir t)))))
+      (agent-repl-itest--at-exit
+       (format "remove the shared state root %s" dir)
+       (lambda () (agent-repl-itest--remove-tree dir))))))
 
 (defun agent-repl-itest--shared-daemon ()
   "Return the shared fake daemon, starting or restarting it when needed."
@@ -815,10 +841,11 @@ be exactly the leak a fresh process used to prevent."
   (let ((dir (agent-repl-itest-daemon-state-dir daemon)))
     (dolist (entry (directory-files dir t directory-files-no-dot-files-regexp t))
       (unless (equal (file-name-nondirectory entry) "daemon.addr")
-        (ignore-errors
-          (if (file-directory-p entry)
-              (delete-directory entry t)
-            (delete-file entry)))))))
+        ;; A failed sweep SIGNALS: a leftover is exactly the cross-scenario
+        ;; leak the sweep exists to prevent.
+        (if (file-directory-p entry)
+            (agent-repl-itest--remove-tree entry)
+          (delete-file entry))))))
 
 (defun agent-repl-itest--sweep-fixture-root ()
   "Empty this process\='s fixture root, so no scenario inherits a log sink.
@@ -837,8 +864,11 @@ behind it then reads THAT record\='s arguments -- the refusal fields, the
 arm keyword -- and fails on a scenario whose own answer had not arrived
 yet.  Sweeping the root is what makes a record found a record this
 scenario wrote; production recreates the `.claude\=' tree the moment it
-routes one."
-  (ignore-errors (delete-directory agent-repl-itest--fixture-root t)))
+routes one.
+
+A sweep that fails SIGNALS, failing the scenario it begins: the leftover
+it could not remove is the very cross-scenario leak described above."
+  (agent-repl-itest--remove-tree agent-repl-itest--fixture-root))
 
 (defun agent-repl-itest--republish-addr (daemon)
   "Point DAEMON\='s state root at DAEMON, whatever last wrote `daemon.addr'.
