@@ -3,6 +3,7 @@ package dlog
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sync"
@@ -56,6 +57,14 @@ type surfaces struct {
 	// record that met it, and a per-record report is the error flood this set
 	// exists to prevent.
 	centralFallbacks map[string]struct{}
+	// clientCentral are the workspace directories whose FORWARDED CLIENT
+	// RECORDS already went to the central sink because the directory is gone.
+	// Its own set, not centralFallbacks: that report is DEBUG narration of
+	// the daemon's own loggers, and a set shared with it would let a DEBUG
+	// note swallow the one INFO this condition is owed. An entry is dropped
+	// when the directory resolves again (a restored worktree), so a second
+	// disappearance is stated afresh.
+	clientCentral map[string]struct{}
 	// detached are the workspace directories the daemon is REMOVING (or has
 	// removed), by clean path: DetachDir adds one before the removal starts
 	// and AttachDir drops it once a worktree is created there again. A sink
@@ -159,6 +168,13 @@ func (s *surfaces) BindWorkspaceIDs(lookup WorkspaceIDLookup) {
 func (s *surfaces) Global() Logger {
 	return &logger{s: s, dest: s.runLog, runtime: RuntimeDaemon}
 }
+
+// errWorkspaceDirGone marks a resolve whose workspace directory does not
+// exist. It is a sentinel, and not a test for fs.ErrNotExist on whatever
+// resolve returned, because a sink open failing with ENOENT (a logs directory
+// that went away) is a broken sink, not a vanished workspace: only the stat of
+// the workspace directory itself may say "gone".
+var errWorkspaceDirGone = errors.New("the workspace directory is gone")
 
 // errSurfacesClosed is resolve's refusal once Close has run. It is a sentinel
 // because Workspace has to tell "this daemon is shutting down" apart from
@@ -370,19 +386,45 @@ func (s *surfaces) ClientLog(dir string, rec ClientRecord) error {
 	if !s.level.enabled(rec.Level) {
 		return nil
 	}
-	ws, sk, err := s.resolve(dir, name)
-	if err != nil {
-		return err
-	}
 	at, stamped, err := clientInstant(rec.Timestamp, s.now)
 	if err != nil {
 		return err
 	}
-	ctx := merge(rec.Context, Context{
-		KeyWorkspaceDir:     ws.dir,
-		KeyWorkspaceID:      ws.id,
-		KeyWorkspaceDirHash: ws.dirHash,
-	})
+	// A WORKSPACE WHOSE DIRECTORY IS GONE STILL OWNS ITS RECORDS. A client
+	// (the sidecar tailing a transcript, a webapp tab left open) can go on
+	// reporting about a workspace whose worktree was deleted underneath it;
+	// the record has no per-workspace sink to land in, and refusing it failed
+	// the rpc at ERROR for every record while the client retried and wrote it
+	// to its own global sink at WARN. It is not a fault of the rpc: the
+	// record lands in the CENTRAL sink, still naming its workspace, and the
+	// condition is stated once per workspace. Every other resolve failure
+	// stays a failure.
+	var dest interface{ write([]byte) error }
+	var who workspaceIdentity
+	central := false
+	ws, sk, err := s.resolve(dir, name)
+	switch {
+	case err == nil:
+		dest, who = sk, workspaceIdentity{dir: ws.dir, id: ws.id, dirHash: ws.dirHash}
+	case errors.Is(err, errWorkspaceDirGone):
+		gone, gerr := s.goneWorkspace(dir)
+		if gerr != nil {
+			return gerr
+		}
+		s.noteClientCentral(gone, rec.ClientKind, err)
+		dest, who, central = s.runLog, gone, true
+	default:
+		return err
+	}
+	fields := Context{
+		KeyWorkspaceDir:     who.dir,
+		KeyWorkspaceID:      who.id,
+		KeyWorkspaceDirHash: who.dirHash,
+	}
+	if central {
+		fields[KeyUnroutableWorkspace] = who.dir
+	}
+	ctx := merge(rec.Context, fields)
 	if stamped {
 		// The client sent no instant; say whose clock the timestamp is,
 		// rather than let it read as the client's own.
@@ -396,11 +438,55 @@ func (s *surfaces) ClientLog(dir string, rec ClientRecord) error {
 	}
 	out := newRecordWithVerbosity(at, runtime, rec.Level, verbosity, rec.Operation, rec.Message, ctx, 0)
 	line := out.marshal()
-	if err := sk.write(line); err != nil {
+	if err := dest.write(line); err != nil {
 		return err
 	}
 	s.mirror.enqueue(line)
 	return nil
+}
+
+// goneWorkspace answers the identity a record about a workspace whose
+// directory is gone carries: its sink key, its minted id and its directory
+// hash, exactly as a resolvable one's records carry them. NOTHING IS OPENED
+// AND NOTHING IS REMEMBERED: the entry is not added to the sink map, so the
+// directory is stat-ed afresh on the next record and a restored worktree gets
+// its own sinks back. A workspace the registry cannot name is still a refusal.
+func (s *surfaces) goneWorkspace(dir string) (workspaceIdentity, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	clean, err := s.sinkKeyLocked(dir)
+	if err != nil {
+		return workspaceIdentity{}, err
+	}
+	return s.identityLocked(clean)
+}
+
+// noteClientCentral states, ONCE per workspace directory, that its forwarded
+// client records go to the central sink because the directory is gone. It is
+// INFO: a workspace whose worktree was removed is an ordinary state of the
+// registry, not a fault, and the per-record report is the flood this exists
+// to prevent. The lock is released before the record is written so the write
+// cannot re-enter the surfaces' own mutex.
+func (s *surfaces) noteClientCentral(ws workspaceIdentity, clientKind string, cause error) {
+	s.mu.Lock()
+	if s.clientCentral == nil {
+		s.clientCentral = make(map[string]struct{})
+	}
+	_, reported := s.clientCentral[ws.dir]
+	s.clientCentral[ws.dir] = struct{}{}
+	s.mu.Unlock()
+	if reported {
+		return
+	}
+	s.Global().Info("daemon.dlog.client_central_fallback",
+		"the workspace's directory is gone; its forwarded client records go to the central sink",
+		Context{
+			KeyWorkspaceDir:        ws.dir,
+			KeyWorkspaceID:         ws.id,
+			KeyUnroutableWorkspace: ws.dir,
+			"client_kind":          clientKind,
+			"cause":                cause.Error(),
+		})
 }
 
 // Evict closes one workspace's sinks when the workspace closes. The canonical
@@ -557,6 +643,9 @@ func (s *surfaces) resolve(dir, name string) (*workspaceSinks, *sink, error) {
 		// still lists under recently_merged -- fail with "no such file or
 		// directory" and record an ERROR for a teardown the daemon ordered.
 		info, err := os.Stat(clean)
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil, fmt.Errorf("resolve workspace %q for its log sink: %w: %w", clean, errWorkspaceDirGone, err)
+		}
 		if err != nil {
 			return nil, nil, fmt.Errorf("resolve workspace %q for its log sink: %w", clean, err)
 		}
@@ -571,6 +660,18 @@ func (s *surfaces) resolve(dir, name string) (*workspaceSinks, *sink, error) {
 	}
 	if sk, ok := ws.sinks[name]; ok {
 		return ws, sk, nil
+	}
+	if !ws.detached {
+		// A NEW SINK OF A LINKED WORKSPACE IS A MkdirAll INSIDE ITS DIRECTORY,
+		// so it is never opened once that directory is gone: the open would
+		// RESURRECT the deleted worktree as a bare `.claude/emacs` tree, and a
+		// later OpenWorkspace would then find a directory, skip restoring the
+		// worktree, and spawn a shim in a directory that is no checkout. Sinks
+		// already open are untouched (their records live in logsDir), which
+		// is why this is checked only here and not on every resolve.
+		if _, err := os.Stat(ws.dir); errors.Is(err, fs.ErrNotExist) {
+			return nil, nil, fmt.Errorf("resolve workspace %q for its %s log sink: %w: %w", ws.dir, name, errWorkspaceDirGone, err)
+		}
 	}
 	key := ws.id + "/" + name
 	remembered := s.targets[key] != ""
@@ -588,17 +689,35 @@ func (s *surfaces) resolve(dir, name string) (*workspaceSinks, *sink, error) {
 // minted id, its directory hash, and whether its directory is detached. It is
 // the ONE place an entry is built, for a detached directory and a live one alike.
 func (s *surfaces) newWorkspaceEntryLocked(clean string, detached bool) (*workspaceSinks, error) {
-	id, err := s.mintedIDLocked(clean)
+	who, err := s.identityLocked(clean)
 	if err != nil {
 		return nil, err
+	}
+	id, hash := who.id, who.dirHash
+	ws := &workspaceSinks{dir: clean, id: id, dirHash: hash, sinks: make(map[string]*sink, len(SinkNames)), detached: detached}
+	s.workspaces[clean] = ws
+	delete(s.clientCentral, clean)
+	return ws, nil
+}
+
+// workspaceIdentity is what every record about a workspace carries: its sink
+// key, its daemon-minted id and its directory hash.
+type workspaceIdentity struct {
+	dir, id, dirHash string
+}
+
+// identityLocked resolves one sink key's identity. It is the ONE derivation, for
+// an entry the surfaces keep and for a gone directory they keep nothing for.
+func (s *surfaces) identityLocked(clean string) (workspaceIdentity, error) {
+	id, err := s.mintedIDLocked(clean)
+	if err != nil {
+		return workspaceIdentity{}, err
 	}
 	hash, err := WorkspaceDirHash(clean)
 	if err != nil {
-		return nil, err
+		return workspaceIdentity{}, err
 	}
-	ws := &workspaceSinks{dir: clean, id: id, dirHash: hash, sinks: make(map[string]*sink, len(SinkNames)), detached: detached}
-	s.workspaces[clean] = ws
-	return ws, nil
+	return workspaceIdentity{dir: clean, id: id, dirHash: hash}, nil
 }
 
 // mintedIDLocked resolves a workspace directory to its daemon-minted

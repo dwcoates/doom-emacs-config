@@ -618,6 +618,12 @@ export function openWorkspaceRefusal(cause: CauseOf<OpenWorkspaceError>): string
         "no other process owns this conversation"
       );
     }
+    case "worktreeUnrestorable":
+      // NOT A FAULT, and ONE ARM FOR SEVERAL REASONS: the branch is gone,
+      // none was recorded, the repository is gone, or the workspace was
+      // merged. The daemon's own sentence names which, with the directory and
+      // branch, so it is drawn as it came -- the same sentence Emacs shows.
+      return cause.value.detail;
     default:
       return unreachableArm("OpenWorkspaceError.cause", cause.case);
   }

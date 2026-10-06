@@ -290,13 +290,27 @@ sentence the shim and the daemon word it with."
 
 (defun agent-repl-verbs--on-refusal (ws op value)
   "Report a daemon-authored refusal of OP for WS, or route it to the handover.
-The two handover arms are silent by design.  Every other arm is logged at
-WARNING with its keyword and its own fields in the context, and drawn to
-the user as the verb, the word refused, the arm keyword, and the fields."
+The two handover arms are silent by design.  `worktree_unrestorable' is an
+ordinary answer: logged at INFO and drawn as the daemon's own sentence.
+Every other arm is logged at WARNING with its keyword and its own fields in
+the context, and drawn to the user as the verb, the word refused, the arm
+keyword, and the fields."
   (let* ((arm (agent-repl-verbs--refusal-arm value))
          (keyword (plist-get arm :arm)))
     (cond
      ((agent-repl-host-route-handover ws arm (format "elisp.verbs.%s-handover-refusal" op)))
+     ((eq keyword :worktree-unrestorable)
+      ;; NOT A FAULT OF AGENT-REPL.  The user picked a row whose directory is
+      ;; gone with nothing left to restore it from (its branch is gone, none
+      ;; was recorded, its repository is gone, or it was merged); a deleted
+      ;; worktree whose branch survives is restored by the daemon and never
+      ;; reaches here.  So it is an ordinary answer, recorded at INFO, and the
+      ;; daemon's own sentence -- which names the directory, the branch and
+      ;; the reason -- is what the user reads, not an arm keyword.
+      (let ((fields (plist-get arm :value)))
+        (agent-repl--info ws (format "elisp.verbs.%s-unrestorable ws=%%s dir=%%S branch=%%S" op)
+                          ws (plist-get fields :dir) (plist-get fields :branch))
+        (message "%s refused: %s" op (plist-get fields :detail))))
      ((eq keyword :lock-holder-unavailable)
       ;; THE ONE ARM WHOSE KEYWORD WOULD MISLEAD ON ITS OWN.  Nobody owns
       ;; the conversation: the shim's own lock helper failed, and the binary

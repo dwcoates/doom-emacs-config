@@ -293,8 +293,8 @@ and it failed -- that is what makes the vocabulary one vocabulary."
 A stage with none would reach the user as the caller bug report instead of
 as progress."
   ;; Arrange / Act / Assert.
-  (dolist (stage '(:checking-worktree :starting-session :reviving
-                   :clearing-closed :checking-build))
+  (dolist (stage '(:checking-worktree :restoring-worktree :starting-session
+                   :reviving :clearing-closed :checking-build))
     (should (alist-get stage (alist-get :open agent-repl-workspace-progress-phases)))))
 
 (ert-deftest agent-repl-test-mp-create-states-every-daemon-stage ()

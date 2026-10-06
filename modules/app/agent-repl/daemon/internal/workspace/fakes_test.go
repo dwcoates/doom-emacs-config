@@ -567,7 +567,21 @@ type fakeGit struct {
 	createErr error
 	nuked     []nukedWorktree
 	nukeErr   error
+
+	// gitCalls records the restore path's git, in order, so a test can tell
+	// a prune that came BEFORE the add from one that came after it.
+	gitCalls []string
+	// worktrees is what ListWorktrees answers. An entry whose directory is
+	// gone is a STALE registration: RestoreWorktree refuses its path exactly
+	// as `git worktree add` does, and UnregisterMissingWorktree retires it.
+	worktrees     []gitclient.Worktree
+	listErr       error
+	unregisterErr error
+	restored      []restoredWorktree
+	restoreErr    error
 }
+
+type restoredWorktree struct{ RepoDir, WorktreeDir, Branch string }
 
 type createdWorktree struct{ RepoDir, Branch, BaseRef, WorktreeDir string }
 type nukedWorktree struct{ RepoDir, WorktreeDir, Branch string }
@@ -620,6 +634,43 @@ func (g *fakeGit) CreateWorktree(_ context.Context, repoDir, branch, baseRef, wo
 		return g.createErr
 	}
 	g.created = append(g.created, createdWorktree{repoDir, branch, baseRef, worktreeDir})
+	return os.MkdirAll(filepath.Join(worktreeDir, ".git"), 0o755)
+}
+
+func (g *fakeGit) ListWorktrees(_ context.Context, repoDir string) ([]gitclient.Worktree, error) {
+	g.gitCalls = append(g.gitCalls, "list "+repoDir)
+	return g.worktrees, g.listErr
+}
+
+func (g *fakeGit) UnregisterMissingWorktree(_ context.Context, _, worktreeDir string) error {
+	g.gitCalls = append(g.gitCalls, "unregister "+worktreeDir)
+	if g.unregisterErr != nil {
+		return g.unregisterErr
+	}
+	kept := g.worktrees[:0]
+	for _, wt := range g.worktrees {
+		if wt.Dir != worktreeDir {
+			kept = append(kept, wt)
+		}
+	}
+	g.worktrees = kept
+	return nil
+}
+
+// RestoreWorktree checks the branch out at worktreeDir, materializing the
+// directory as the real add does, and refuses a path git still registers,
+// with git's own words, as `git worktree add` does.
+func (g *fakeGit) RestoreWorktree(_ context.Context, repoDir, worktreeDir, branch string) error {
+	g.gitCalls = append(g.gitCalls, "restore "+worktreeDir)
+	if g.restoreErr != nil {
+		return g.restoreErr
+	}
+	for _, wt := range g.worktrees {
+		if wt.Dir == worktreeDir {
+			return fmt.Errorf("fatal: '%s' is a missing but already registered worktree;\nuse 'add -f' to override, or 'prune' or 'remove' to clear", worktreeDir)
+		}
+	}
+	g.restored = append(g.restored, restoredWorktree{repoDir, worktreeDir, branch})
 	return os.MkdirAll(filepath.Join(worktreeDir, ".git"), 0o755)
 }
 
