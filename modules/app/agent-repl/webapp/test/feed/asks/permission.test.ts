@@ -333,7 +333,6 @@ describe("the settled card", () => {
   const answers = [
     { arm: "allowedOnce", value: {}, text: "allowed once" },
     { arm: "allowedStanding", value: {}, text: "allowed with standing" },
-    { arm: "deniedByUser", value: {}, text: "denied by user" },
     { arm: "deniedByPolicy", value: { text: "denied by rule" }, text: "denied by rule" },
     {
       arm: "deniedUndecidable",
@@ -371,6 +370,43 @@ describe("the settled card", () => {
       expect(el.querySelector(".perm-verdict")?.getAttribute("data-arm")).toBe(c.arm);
     });
   }
+
+  /** The user's denial, with the neutral marker the daemon sends for it. */
+  function deniedByUser() {
+    return drawFeedPermission(
+      permission({
+        case: "answered",
+        value: create(FeedPermissionAnsweredSchema, {
+          atMs: 0n,
+          answer: {
+            case: "deniedByUser",
+            value: {
+              marker: { label: { text: "permission denied by you" }, family: { case: "neutral", value: {} } },
+            },
+          },
+        }),
+      }),
+      askHarness().rc,
+    );
+  }
+
+  it("draws the user's denial as its neutral outcome marker, never the red badge (owner ruling 2026-10-06)", () => {
+    const el = deniedByUser();
+    const marker = el.querySelector(".perm-verdict .outcome-marker");
+    expect([marker?.getAttribute("data-family"), marker?.textContent, el.querySelector(".perm-verdict .badge")]).toEqual([
+      "neutral",
+      "◼permission denied by you",
+      null,
+    ]);
+  });
+
+  it("carries deniedByUser as the verdict's arm", () => {
+    expect(deniedByUser().querySelector(".perm-verdict")?.getAttribute("data-arm")).toBe("deniedByUser");
+  });
+
+  it("still stamps when the user denied it", () => {
+    expect(deniedByUser().querySelector(".perm-verdict .perm-when")).not.toBeNull();
+  });
 
   it("gives the undecidable denial its own verdict value, apart from the policy denial", () => {
     // Arrange

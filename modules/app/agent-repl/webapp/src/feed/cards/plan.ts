@@ -35,6 +35,7 @@ import type { AppContext } from "../../rpc/context.js";
 import { requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import { armName } from "../renderers.js";
 import type { RowContext } from "../renderers.js";
+import { drawOutcomeMarker } from "../marker.js";
 import { agenticBubble } from "./controls.js";
 
 const PATH = "FeedPlan";
@@ -42,15 +43,18 @@ const PATH = "FeedPlan";
 /** The word the edit affordance says. */
 export const EDIT_PLAN_TEXT = "edit plan";
 
-/** The badge each state wears, and the word it says. */
+/**
+ * The badge each LIVE state wears, and the word it says. A failed episode
+ * wears no badge: it draws its neutral outcome marker instead (owner ruling,
+ * 2026-10-06), the one component every non-message event draws.
+ */
 const STATE_BADGES = {
   planning: { className: "badge run", text: "planning" },
   planned: { className: "badge ok", text: "plan" },
-  failed: { className: "badge err", text: "failed" },
 } as const satisfies Record<string, { className: string; text: string }>;
 
 /** Every state this build draws, for the suite to hold to the schema. */
-export const PLAN_STATE_ARMS: readonly string[] = Object.keys(STATE_BADGES);
+export const PLAN_STATE_ARMS: readonly string[] = [...Object.keys(STATE_BADGES), "failed"];
 
 /** The plan bubble. */
 export function drawFeedPlan(u: FeedPlan, rc: RowContext): HTMLElement {
@@ -79,7 +83,7 @@ export function drawFeedPlan(u: FeedPlan, rc: RowContext): HTMLElement {
       return agenticBubble({
         previous: rc.previous,
         state: state.case,
-        content: [badge(state.case), drawFeedPlanFailed(state.value, `${PATH}.failed`)],
+        content: [drawFeedPlanFailed(state.value, rc, `${PATH}.failed`)],
       });
     default:
       return unreachableArm(`${PATH}.state`, armName(state));
@@ -143,15 +147,18 @@ export function drawFeedPlanEditTarget(
   return el;
 }
 
-/** The failed state's composed reason, drawn verbatim. */
-export function drawFeedPlanFailed(u: FeedPlanFailed, path: string): HTMLElement {
+/**
+ * The failed state: its neutral OUTCOME MARKER ("plan failed · <reason>"),
+ * drawn verbatim, in place of the old red badge and reason line.
+ */
+export function drawFeedPlanFailed(u: FeedPlanFailed, rc: RowContext, path: string): HTMLElement {
   log.debug("drawing a failed plan episode", {
     operation: "feed.cards.plan.failed",
     context: { path },
   });
   const el = document.createElement("div");
   el.className = "plan-failed";
-  el.textContent = u.text;
+  el.append(drawOutcomeMarker(requireMessage(u.marker, `${path}.marker`), { ctx: rc.ctx, previous: rc.previous }, `${path}.marker`));
   return el;
 }
 

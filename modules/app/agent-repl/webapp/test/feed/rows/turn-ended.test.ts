@@ -7,19 +7,10 @@ import {
   type FeedTurnEnded,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { MalformedView } from "../../../src/rpc/malformed.js";
-import {
-  INTERRUPTED_SENTENCE,
-  QUERY_CAUSE_WORDS,
-  TURN_ENDED_BUBBLE_CLASS,
-  TURN_ENDED_BUBBLE_SAYS_CLASS,
-  TURN_ERROR_WAIT_ARMS,
-  drawFeedTurnEnded,
-  drawFeedTurnEndedErrored,
-} from "../../../src/feed/rows/turn-ended.js";
-import { countingTicker, feedId, harness, rowContext, userPromptRow } from "../harness.js";
+import { drawFeedTurnEnded } from "../../../src/feed/rows/turn-ended.js";
+import { OUTCOME_MARKER_CLASS } from "../../../src/feed/marker.js";
+import { feedId, harness, rowContext, userPromptRow, type countingTicker } from "../harness.js";
 import { captureLogRecords, forwardedRecord } from "../../log-capture.js";
-import { BUBBLE_CAP_ATTRIBUTE, BUBBLE_UNCAPPED } from "../../../src/bubble/draw.js";
-import { BUBBLE_SCROLL_CLASS } from "../../../src/feed/bubble-scroll.js";
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -44,6 +35,24 @@ function contextWithRow(element: HTMLElement | null, ticker?: ReturnType<typeof 
   });
 }
 
+/** The neutral "interrupted" marker the daemon sends with a stop. */
+const INTERRUPTED_MARKER = {
+  label: { text: "interrupted" },
+  family: { case: "neutral" as const, value: {} },
+};
+
+/** A vendor-fault marker, as the daemon composes one. */
+function vendorMarker(detail: string) {
+  return {
+    label: { text: "vendor error" },
+    detail: { text: detail },
+    family: {
+      case: "vendorFault" as const,
+      value: { expansion: { time: { atMs: 1_000_000n }, errorType: { text: detail } } },
+    },
+  };
+}
+
 describe("drawFeedTurnEnded: the arms", () => {
   it("draws a concluded turn as an invisible marker, saying nothing in prose", () => {
     const el = drawFeedTurnEnded(
@@ -55,7 +64,7 @@ describe("drawFeedTurnEnded: the arms", () => {
 
   it("draws the user's stop as the user's act, not as a failure", () => {
     const el = drawFeedTurnEnded(
-      ended({ case: "interrupted", value: {} }),
+      ended({ case: "interrupted", value: { marker: INTERRUPTED_MARKER } }),
       contextWithRow(null),
     );
     expect(el.getAttribute("data-arm")).toBe("interrupted");
@@ -71,17 +80,18 @@ describe("drawFeedTurnEnded: the arms", () => {
 describe("drawFeedTurnEnded: an interrupt's command", () => {
   /** An interrupted ending stating the given command. */
   function interruptedBy(command: "direct" | "interjection" | undefined): FeedTurnEnded {
+    const marker = command === "interjection" ? {} : { marker: INTERRUPTED_MARKER };
     return ended({
       case: "interrupted",
-      value: command === undefined ? {} : { command: { case: command, value: {} } },
+      value: command === undefined ? { ...marker } : { command: { case: command, value: {} }, ...marker },
     });
   }
 
-  it("draws no bubble for an interjection", () => {
+  it("draws no marker for an interjection", () => {
     // ACT
     const el = drawFeedTurnEnded(interruptedBy("interjection"), contextWithRow(null));
     // ASSERT
-    expect(el.querySelector(`.${TURN_ENDED_BUBBLE_CLASS}`)).toBeNull();
+    expect(el.querySelector(`.${OUTCOME_MARKER_CLASS}`)).toBeNull();
   });
 
   it("draws no words for an interjection", () => {
@@ -111,18 +121,33 @@ describe("drawFeedTurnEnded: an interrupt's command", () => {
     expect(record.level.case).toBe("debug");
   });
 
-  it("draws the interruption bubble for a direct stop", () => {
+  it("draws the neutral interrupted marker for a direct stop", () => {
     // ACT
     const el = drawFeedTurnEnded(interruptedBy("direct"), contextWithRow(null));
     // ASSERT
-    expect(el.querySelector(`.${TURN_ENDED_BUBBLE_SAYS_CLASS}`)?.textContent).toBe(INTERRUPTED_SENTENCE);
+    const marker = el.querySelector(`.${OUTCOME_MARKER_CLASS}`);
+    expect([marker?.getAttribute("data-family"), marker?.textContent]).toEqual(["neutral", "◼interrupted"]);
   });
 
-  it("draws the interruption bubble for a stop whose command is unset", () => {
+  it("draws the neutral interrupted marker for a stop whose command is unset", () => {
     // ACT
     const el = drawFeedTurnEnded(interruptedBy(undefined), contextWithRow(null));
     // ASSERT
-    expect(el.querySelector(`.${TURN_ENDED_BUBBLE_SAYS_CLASS}`)?.textContent).toBe(INTERRUPTED_SENTENCE);
+    expect(el.querySelector(`.${OUTCOME_MARKER_CLASS}`)?.getAttribute("data-family")).toBe("neutral");
+  });
+
+  it("refuses a direct stop that carries no marker", () => {
+    // ARRANGE
+    const bare = ended({ case: "interrupted", value: { command: { case: "direct", value: {} } } });
+    // ACT, ASSERT
+    expect(() => drawFeedTurnEnded(bare, contextWithRow(null))).toThrow(MalformedView);
+  });
+
+  it("draws no bubble for a stop", () => {
+    // ACT
+    const el = drawFeedTurnEnded(interruptedBy("direct"), contextWithRow(null));
+    // ASSERT
+    expect(el.querySelector(".bubble")).toBeNull();
   });
 
   it("refuses a command arm this client does not know", () => {
@@ -214,364 +239,57 @@ describe("drawFeedTurnEnded: every error arm", () => {
     .filter((oneof) => oneof.name === "error")
     .flatMap((oneof) => oneof.fields.map((field) => field.localName));
 
-  /** The arms whose message CARRIES a wait, read off the schema itself. */
-  const schemaWaitArms = FeedTurnEndedErroredSchema.oneofs
-    .filter((oneof) => oneof.name === "error")
-    .flatMap((oneof) => oneof.fields)
-    .filter((field) =>
-      (field.message?.fields ?? []).some((inner) => inner.name === "retry_after_ms"),
-    )
-    .map((field) => field.localName);
-
-  it("counts down on exactly the arms the schema gives a wait", () => {
-    expect([...TURN_ERROR_WAIT_ARMS].sort()).toEqual([...schemaWaitArms].sort());
-  });
+  /** An errored ending of ARM, carrying its marker. */
+  function errored(arm: string): FeedTurnEnded {
+    return ended({
+      case: "errored",
+      value: create(FeedTurnEndedErroredSchema, {
+        headline: { text: "the turn died" },
+        error: { case: arm as never, value: { type: "x" } as never },
+        marker: vendorMarker(arm),
+      }),
+    });
+  }
 
   it.each(schemaArms)("draws %s distinctly, by its own arm", (arm) => {
-    const el = drawFeedTurnEnded(
-      ended({
-        case: "errored",
-        value: create(FeedTurnEndedErroredSchema, {
-          headline: { text: "the turn died" },
-          error: { case: arm as never, value: { type: "x" } as never },
-        }),
-      }),
-      contextWithRow(null),
-    );
+    const el = drawFeedTurnEnded(errored(arm), contextWithRow(null));
     expect(el.getAttribute("data-turn-error")).toBe(arm);
   });
 
-  it.each(schemaArms)("draws %s's headline and no wording of its own", (arm) => {
-    const el = drawFeedTurnEnded(
-      ended({
-        case: "errored",
-        value: create(FeedTurnEndedErroredSchema, {
-          headline: { text: `the daemon's words for ${arm}` },
-          error: { case: arm as never, value: { type: "x" } as never },
-        }),
-      }),
-      contextWithRow(null),
-    );
-    expect(el.querySelector(".turn-ended-cause")?.textContent).toBe(
-      `the daemon's words for ${arm}`,
+  it.each(schemaArms)("draws %s as its outcome marker alone", (arm) => {
+    const el = drawFeedTurnEnded(errored(arm), contextWithRow(null));
+    expect(el.querySelector(`.${OUTCOME_MARKER_CLASS} .outcome-marker-pill`)?.textContent).toBe(
+      `◆vendor error · ${arm}›`,
     );
   });
 
-  it("draws the daemon's headline verbatim, wording nothing itself", () => {
-    const el = drawFeedTurnEnded(
-      ended({
-        case: "errored",
-        value: create(FeedTurnEndedErroredSchema, {
-          headline: { text: "an API error this build does not model: teapot_error" },
-          error: { case: "vendorUnmodeled", value: { type: "teapot_error" } },
-        }),
-      }),
-      contextWithRow(null),
-    );
-    expect(el.querySelector(".turn-ended-cause")?.textContent).toBe(
-      "an API error this build does not model: teapot_error",
-    );
+  it.each(schemaArms)("draws no bubble for %s", (arm) => {
+    const el = drawFeedTurnEnded(errored(arm), contextWithRow(null));
+    expect(el.querySelector(".bubble")).toBeNull();
   });
 
-  it("states the vendor's own type name on the unmodeled arm", () => {
-    // Arrange / Act: the field is "the vendor's type name, drawn verbatim"
-    // (feed.proto), and it is the only handle the reader has on what happened.
-    const el = drawFeedTurnEndedErrored(
-      create(FeedTurnEndedErroredSchema, {
-        headline: { text: "an API error this build does not model" },
-        error: { case: "vendorUnmodeled", value: { type: "teapot_error" } },
-      }),
-      9_000,
-      contextWithRow(null),
-    );
-    // Assert
-    expect(el.querySelector("[data-vendor-type]")?.textContent).toBe("teapot_error");
+  it("draws no headline of its own beside the marker", () => {
+    const el = drawFeedTurnEnded(errored("overloaded"), contextWithRow(null));
+    expect(el.textContent).not.toContain("the turn died");
   });
 
-  it("draws no vendor-type element on a modeled arm", () => {
-    // Arrange / Act
-    const el = drawFeedTurnEndedErrored(
-      create(FeedTurnEndedErroredSchema, {
-        headline: { text: "the vendor failed internally" },
+  it("refuses an errored row with no marker to draw", () => {
+    const bare = ended({
+      case: "errored",
+      value: create(FeedTurnEndedErroredSchema, {
+        headline: { text: "the turn died" },
         error: { case: "internal", value: {} },
       }),
-      9_000,
-      contextWithRow(null),
-    );
-    // Assert
-    expect(el.querySelector("[data-vendor-type]")).toBeNull();
-  });
-
-  it("refuses an errored row with no headline to draw", () => {
-    expect(() =>
-      drawFeedTurnEnded(
-        ended({
-          case: "errored",
-          value: create(FeedTurnEndedErroredSchema, {
-            error: { case: "internal", value: {} },
-          }),
-        }),
-        contextWithRow(null),
-      ),
-    ).toThrow(MalformedView);
-  });
-
-  it("draws the vendor's sentence when the record carried one", () => {
-    const el = drawFeedTurnEnded(
-      ended({
-        case: "errored",
-        value: create(FeedTurnEndedErroredSchema, { headline: { text: "the turn died" },
-          message: { text: "overloaded_error" },
-          error: { case: "internal", value: {} },
-        }),
-      }),
-      contextWithRow(null),
-    );
-    expect(el.querySelector(".turn-ended-vendor")?.textContent).toBe("overloaded_error");
-  });
-
-  it("draws no vendor line for a cause with no vendor wording", () => {
-    const el = drawFeedTurnEnded(
-      ended({
-        case: "errored",
-        value: create(FeedTurnEndedErroredSchema, { headline: { text: "the turn died" },
-          error: { case: "queryDied", value: {} },
-        }),
-      }),
-      contextWithRow(null),
-    );
-    expect(el.querySelector(".turn-ended-vendor")).toBeNull();
-  });
-
-  it("names an unexpected eof as the cause the query died of", () => {
-    // Arrange / Act
-    const el = drawFeedTurnEnded(
-      ended({
-        case: "errored",
-        value: create(FeedTurnEndedErroredSchema, {
-          headline: { text: "the query died" },
-          error: {
-            case: "queryDied",
-            value: { cause: { case: "unexpectedEof", value: {} } },
-          },
-        }),
-      }),
-      contextWithRow(null),
-    );
-
-    // Assert
-    expect(el.querySelector("[data-query-cause]")?.getAttribute("data-query-cause")).toBe(
-      "unexpectedEof",
-    );
-  });
-
-  it("names an iterator failure as the cause the query died of", () => {
-    // Arrange / Act
-    const el = drawFeedTurnEnded(
-      ended({
-        case: "errored",
-        value: create(FeedTurnEndedErroredSchema, {
-          headline: { text: "the query died" },
-          error: {
-            case: "queryDied",
-            value: { cause: { case: "iteratorFailure", value: {} } },
-          },
-        }),
-      }),
-      contextWithRow(null),
-    );
-
-    // Assert
-    expect(el.querySelector("[data-query-cause]")?.textContent).toBe(
-      QUERY_CAUSE_WORDS.iteratorFailure,
-    );
-  });
-
-  it("keeps the line as it was when the query death names no cause", () => {
-    // Arrange / Act
-    const el = drawFeedTurnEnded(
-      ended({
-        case: "errored",
-        value: create(FeedTurnEndedErroredSchema, {
-          headline: { text: "the query died" },
-          error: { case: "queryDied", value: {} },
-        }),
-      }),
-      contextWithRow(null),
-    );
-
-    // Assert
-    expect(el.querySelector("[data-query-cause]")).toBeNull();
-  });
-
-  it("refuses a query-died cause this build does not know", () => {
-    // Arrange — set after construction: the fixture builder drops an arm the
-    // schema does not carry, and the case under test is exactly such an arm
-    // reaching the renderer.
-    const errored = create(FeedTurnEndedErroredSchema, {
-      headline: { text: "the query died" },
-      error: { case: "queryDied", value: {} },
     });
-    const died = errored.error.value as { cause: { case: string; value: unknown } };
-    died.cause = { case: "invented", value: {} };
-
-    // Act / Assert
-    expect(() =>
-      drawFeedTurnEnded(ended({ case: "errored", value: errored }), contextWithRow(null)),
-    ).toThrow(MalformedView);
-  });
-
-  it("distinguishes the cut response from the refused request by headline", () => {
-    const cut = drawFeedTurnEnded(
-      ended({
-        case: "errored",
-        value: create(FeedTurnEndedErroredSchema, {
-          headline: { text: "cut short at the output ceiling" },
-          error: { case: "maxTokens", value: {} },
-        }),
-      }),
-      contextWithRow(null),
-    ).querySelector(".turn-ended-cause")?.textContent;
-    const refused = drawFeedTurnEnded(
-      ended({
-        case: "errored",
-        value: create(FeedTurnEndedErroredSchema, {
-          headline: { text: "refused: asked for more output than the model produces" },
-          error: { case: "maxOutputTokens", value: {} },
-        }),
-      }),
-      contextWithRow(null),
-    ).querySelector(".turn-ended-cause")?.textContent;
-    expect(cut).not.toBe(refused);
+    expect(() => drawFeedTurnEnded(bare, contextWithRow(null))).toThrow(MalformedView);
   });
 
   it("refuses an errored row whose cause arm is unset", () => {
-    expect(() =>
-      drawFeedTurnEnded(
-        ended({ case: "errored", value: create(FeedTurnEndedErroredSchema, { headline: { text: "the turn died" },}) }),
-        contextWithRow(null),
-      ),
-    ).toThrow(MalformedView);
-  });
-});
-
-describe("drawFeedTurnEnded: the retry countdown", () => {
-  it("counts down from the turn's end plus the vendor's wait", () => {
-    const el = drawFeedTurnEnded(
-      ended(
-        {
-          case: "errored",
-          value: create(FeedTurnEndedErroredSchema, { headline: { text: "the turn died" },
-            error: { case: "rateLimited", value: { retryAfterMs: 30_000n } },
-          }),
-        },
-        1_000_000n,
-      ),
-      contextWithRow(null),
-    );
-    expect(el.querySelector(".turn-ended-retry")?.textContent).toBe("retry in 30s");
-  });
-
-  it("ticks the figure down on the shared clock", () => {
-    const el = drawFeedTurnEnded(
-      ended(
-        {
-          case: "errored",
-          value: create(FeedTurnEndedErroredSchema, { headline: { text: "the turn died" },
-            error: { case: "overloaded", value: { retryAfterMs: 30_000n } },
-          }),
-        },
-        1_000_000n,
-      ),
-      contextWithRow(null),
-    );
-    document.body.append(el);
-    vi.advanceTimersByTime(10_000);
-    expect(el.querySelector(".turn-ended-retry")?.textContent).toBe("retry in 20s");
-  });
-
-  it("says the wait is over once the deadline passes", () => {
-    const el = drawFeedTurnEnded(
-      ended(
-        {
-          case: "errored",
-          value: create(FeedTurnEndedErroredSchema, { headline: { text: "the turn died" },
-            error: { case: "rateLimited", value: { retryAfterMs: 1_000n } },
-          }),
-        },
-        1_000_000n,
-      ),
-      contextWithRow(null),
-    );
-    vi.advanceTimersByTime(5_000);
-    expect(el.querySelector(".turn-ended-retry")?.textContent).toBe("ready to retry");
-  });
-
-  it("stops the countdown the moment it expires, rather than rewriting its last line", () => {
-    // Arrange: a wait that runs out a second after the turn ended.
-    const ticker = countingTicker();
-    const el = drawFeedTurnEnded(
-      ended(
-        {
-          case: "errored",
-          value: create(FeedTurnEndedErroredSchema, { headline: { text: "the turn died" },
-            error: { case: "rateLimited", value: { retryAfterMs: 1_000n } },
-          }),
-        },
-        1_000_000n,
-      ),
-      contextWithRow(null, ticker),
-    );
-    document.body.append(el);
-    // Act.
-    vi.advanceTimersByTime(5_000);
-    // Assert: an expired countdown holds no subscription.
-    expect(ticker.live()).toBe(0);
-    el.remove();
-  });
-
-  it("keeps counting while the wait is still running", () => {
-    const ticker = countingTicker();
-    const el = drawFeedTurnEnded(
-      ended(
-        {
-          case: "errored",
-          value: create(FeedTurnEndedErroredSchema, { headline: { text: "the turn died" },
-            error: { case: "rateLimited", value: { retryAfterMs: 30_000n } },
-          }),
-        },
-        1_000_000n,
-      ),
-      contextWithRow(null, ticker),
-    );
-    document.body.append(el);
-    vi.advanceTimersByTime(5_000);
-    expect(ticker.live()).toBe(1);
-    el.remove();
-  });
-
-  it("words an UNSET wait as its own fact, distinct from a zero", () => {
-    const el = drawFeedTurnEnded(
-      ended({
-        case: "errored",
-        value: create(FeedTurnEndedErroredSchema, { headline: { text: "the turn died" },
-          error: { case: "rateLimited", value: {} },
-        }),
-      }),
-      contextWithRow(null),
-    );
-    expect(el.querySelector(".turn-ended-retry")?.textContent).toBe("retry when ready");
-  });
-
-  it("draws no countdown on a cause that carries no wait", () => {
-    const el = drawFeedTurnEnded(
-      ended({
-        case: "errored",
-        value: create(FeedTurnEndedErroredSchema, { headline: { text: "the turn died" }, error: { case: "notFound", value: {} } }),
-      }),
-      contextWithRow(null),
-    );
-    expect(el.querySelector(".turn-ended-retry")).toBeNull();
+    const bare = ended({
+      case: "errored",
+      value: create(FeedTurnEndedErroredSchema, { headline: { text: "x" }, marker: vendorMarker("x") }),
+    });
+    expect(() => drawFeedTurnEnded(bare, contextWithRow(null))).toThrow(MalformedView);
   });
 });
 
@@ -632,6 +350,7 @@ describe("drawFeedTurnEnded: the records of the turn's end", () => {
         value: create(FeedTurnEndedErroredSchema, {
           headline: { text: "the query died" },
           error: { case: "queryDied", value: {} },
+          marker: vendorMarker("query died"),
         }),
       }),
       contextWithRow(null),
@@ -642,94 +361,3 @@ describe("drawFeedTurnEnded: the records of the turn's end", () => {
   });
 });
 
-/** An errored ending with this arm and headline. */
-function erroredEnding(arm: string, headline: string): FeedTurnEnded {
-  return ended({
-    case: "errored",
-    value: create(FeedTurnEndedErroredSchema, {
-      headline: { text: headline },
-      error: { case: arm as never, value: {} as never },
-    }),
-  });
-}
-
-describe("drawFeedTurnEnded: the ended-turn bubble (owner ruling 2026-09-24)", () => {
-  it("draws no bubble for a normal completed turn", () => {
-    // ACT
-    const el = drawFeedTurnEnded(ended({ case: "concluded", value: {} }), contextWithRow(null));
-    // ASSERT
-    expect(el.querySelector(`.${TURN_ENDED_BUBBLE_CLASS}`)).toBeNull();
-  });
-
-  it("draws a failed turn's bubble as a response bubble of the turn-ended variant", () => {
-    // ACT
-    const el = drawFeedTurnEnded(erroredEnding("internal", "the vendor failed"), contextWithRow(null));
-    // ASSERT
-    const bubble = el.querySelector(`.${TURN_ENDED_BUBBLE_CLASS}`);
-    expect([bubble?.getAttribute("data-role"), bubble?.getAttribute("data-variant")]).toEqual([
-      "response",
-      "turn-ended",
-    ]);
-  });
-
-  it("draws the bubble uncapped, at its full height with no scroll box", () => {
-    // ACT
-    const el = drawFeedTurnEnded(erroredEnding("internal", "the vendor failed"), contextWithRow(null));
-    // ASSERT
-    const bubble = el.querySelector(`.${TURN_ENDED_BUBBLE_CLASS}`);
-    expect([bubble?.getAttribute(BUBBLE_CAP_ATTRIBUTE), bubble?.querySelector(`.${BUBBLE_SCROLL_CLASS}`)]).toEqual([
-      BUBBLE_UNCAPPED,
-      null,
-    ]);
-  });
-
-  it("states the daemon's headline in a failed turn's bubble", () => {
-    // ACT
-    const el = drawFeedTurnEnded(erroredEnding("internal", "the vendor failed"), contextWithRow(null));
-    // ASSERT
-    expect(el.querySelector(`.${TURN_ENDED_BUBBLE_SAYS_CLASS}`)?.textContent).toBe("the vendor failed");
-  });
-
-  it("states the agent process's death in its bubble", () => {
-    // ACT
-    const el = drawFeedTurnEnded(
-      erroredEnding("agentProcessDied", "the agent process died, and the turn it was running ended with it"),
-      contextWithRow(null),
-    );
-    // ASSERT
-    expect(el.querySelector(`.${TURN_ENDED_BUBBLE_SAYS_CLASS}`)?.textContent).toBe(
-      "the agent process died, and the turn it was running ended with it",
-    );
-  });
-
-  it("states an interrupt in plain words in its bubble", () => {
-    // ACT
-    const el = drawFeedTurnEnded(ended({ case: "interrupted", value: {} }), contextWithRow(null));
-    // ASSERT
-    expect(el.querySelector(`.${TURN_ENDED_BUBBLE_SAYS_CLASS}`)?.textContent).toBe(INTERRUPTED_SENTENCE);
-  });
-
-  it("draws the bubble above the row's own line", () => {
-    // ACT
-    const el = drawFeedTurnEnded(ended({ case: "interrupted", value: {} }), contextWithRow(null));
-    // ASSERT
-    expect([...el.children].map((child) => child.classList.contains(TURN_ENDED_BUBBLE_CLASS))).toEqual([
-      true,
-      false,
-    ]);
-  });
-
-  it("updates the bubble in place on a re-push", () => {
-    // ARRANGE
-    const first = drawFeedTurnEnded(erroredEnding("internal", "first"), contextWithRow(null));
-    const bubble = first.querySelector(`.${TURN_ENDED_BUBBLE_CLASS}`);
-    const { ctx } = harness({});
-    // ACT
-    const second = drawFeedTurnEnded(
-      erroredEnding("internal", "second"),
-      rowContext(ctx, userPromptRow("p1", "hi"), { previous: first, findRowElement: () => null }),
-    );
-    // ASSERT
-    expect(second.querySelector(`.${TURN_ENDED_BUBBLE_CLASS}`)).toBe(bubble);
-  });
-});

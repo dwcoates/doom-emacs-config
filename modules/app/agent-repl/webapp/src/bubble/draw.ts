@@ -50,7 +50,7 @@ import {
 export type BubbleRole = "prompt" | "response";
 
 /** The response kinds: purple, left rail. */
-export type ResponseVariant = "response" | "thinking" | "agentic" | "compaction" | "turn-ended";
+export type ResponseVariant = "response" | "thinking" | "agentic" | "compaction";
 
 /** The prompt kinds: blue (a held prompt grey-blue), right rail. */
 export type PromptVariant = "user" | "agent" | "peer" | "held";
@@ -61,7 +61,6 @@ export const BUBBLE_VARIANTS = {
   thinking: "response",
   agentic: "response",
   compaction: "response",
-  "turn-ended": "response",
   user: "prompt",
   agent: "prompt",
   peer: "prompt",

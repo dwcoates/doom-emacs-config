@@ -501,7 +501,7 @@
    They are drawn here to the native bezel's measured geometry and colors
    (test/webkit/control.webkit.test.ts holds the geometry to a real button's):
    the same box, a rounded fill, a hairline ring and a soft drop. */
-:where(.perm-actions ar-button, ar-button.composer-send, ar-button.command-refused-support) {
+:where(.perm-actions ar-button, .outcome-marker-actions ar-button, ar-button.composer-send, ar-button.command-refused-support) {
   min-height: 15px;
   padding: 1px 8px 2px 8px;
   border: 1px solid transparent;
@@ -512,15 +512,15 @@
   background-color: #ffffff;
   box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.14), inset 0 -0.5px 0 rgba(0, 0, 0, 0.18);
 }
-:where(.perm-actions ar-button, ar-button.composer-send, ar-button.command-refused-support)[aria-disabled="true"] {
+:where(.perm-actions ar-button, .outcome-marker-actions ar-button, ar-button.composer-send, ar-button.command-refused-support)[aria-disabled="true"] {
   box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.08), inset 0 -0.5px 0 rgba(0, 0, 0, 0.1);
 }
 @media (prefers-color-scheme: dark) {
-  :where(.perm-actions ar-button, ar-button.composer-send, ar-button.command-refused-support) {
+  :where(.perm-actions ar-button, .outcome-marker-actions ar-button, ar-button.composer-send, ar-button.command-refused-support) {
     background-color: rgb(86, 86, 86);
     box-shadow: inset 0 0.5px 0 rgba(255, 255, 255, 0.09), inset 0 0 0 0.5px rgba(0, 0, 0, 0.25);
   }
-  :where(.perm-actions ar-button, ar-button.composer-send, ar-button.command-refused-support)[aria-disabled="true"] {
+  :where(.perm-actions ar-button, .outcome-marker-actions ar-button, ar-button.composer-send, ar-button.command-refused-support)[aria-disabled="true"] {
     background-color: rgb(58, 58, 58);
   }
 }
@@ -1881,7 +1881,6 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
 .bubble.final-response:not([data-variant="thinking"]) { border-color: var(--final-response); }
 /* A TURN THAT ENDED any way but a normal completed answer (owner ruling,
    2026-09-24): its bubble keeps the response's purple fill and wears red. */
-.bubble[data-variant="turn-ended"] { border-color: var(--err); }
 /* THE SELECTED ENTRY (src/feed/selected-entry.ts): the one mark a feed entry
    wears while a footer detached-work jump has landed on it or the feed's
    selection names it — ON THE CARD ITSELF, so a centered, width-capped card is
@@ -4886,9 +4885,6 @@ bubble-body.bubble-body { display: block; }
 .sep-accent-cleared { background: var(--clear-divider); }
 .sep-accent-compacted { background: var(--compact-rule); }
 .sep-accent-worktree { background: var(--init); }
-/* The compaction that did not happen takes the FAILURE accent: it sits in the
-   slot the compacted divider would have taken, and must not read as one. */
-.sep-accent-compaction-failed { background: var(--err); }
 .sep-label {
   text-align: center;
   color: var(--muted);
@@ -4896,7 +4892,6 @@ bubble-body.bubble-body { display: block; }
 }
 .sep-tokens { color: var(--muted); }
 .sep-compacted,
-.sep-compaction-failed,
 .sep-worktree {
   width: var(--agent-bubble-cap);
   margin-left: auto;
@@ -4906,8 +4901,13 @@ bubble-body.bubble-body { display: block; }
 /* The cold read is a WARNING on a compaction that happened, not a failure of
    it, so it takes the warning register rather than the error one. */
 .sep-cold-read { color: var(--thinking); }
-/* The producer's account of a compaction that failed, in the error register. */
-.sep-compaction-failed { color: var(--err); text-align: center; }
+/* A compaction that failed draws NO divider (owner ruling, 2026-10-06): its
+   outcome marker sits in the feed column, left-aligned like the turn's own. */
+.sep-compaction-failed {
+  width: var(--agent-bubble-cap);
+  margin-left: auto;
+  margin-right: auto;
+}
 
 /* A removed worktree that took work with it says so LOUDLY. */
 .sep-discarded { color: var(--err); }
@@ -4919,10 +4919,71 @@ bubble-body.bubble-body { display: block; }
   margin-right: auto;
   font-size: 0.75rem;
 }
-.turn-ended-errored { color: var(--err); }
-.turn-ended-vendor,
-.turn-ended-retry { color: var(--muted); }
-.turn-ended-interrupted { color: var(--muted); }
+
+/* ---- the outcome marker (src/feed/marker.ts; owner ruling, 2026-10-06) ----
+
+   ONE inline pill for every event that is not a message: a turn's ending, a
+   denial, a broken plan, a failed compaction. About a badge's height, left-
+   aligned in the feed column, no wider than its text, and TRUNCATING with an
+   ellipsis rather than overflowing the column. No bubble and no fill.
+
+   COLOR IS ONLY ON THE GLYPH AND THE THIN LEFT EDGE: the root carries the
+   family's `.tone-<color>` (src/vocab.ts, from render-colors.json), the glyph
+   and the edge take it as currentColor, and the words are reset to the
+   normal foreground. The neutral family's `none` is drawn grey. */
+.outcome-marker {
+  display: block;
+  max-width: 100%;
+  min-width: 0;
+  font-size: calc(0.7rem * var(--feed-text-scale));
+}
+.outcome-marker.tone-none { color: var(--muted); }
+.outcome-marker-pill {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35em;
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: 0.05rem 0.4rem;
+  border-left: 2px solid currentColor;
+  border-radius: 0 3px 3px 0;
+  color: inherit;
+  font: inherit;
+  line-height: 1.4;
+}
+ar-button.outcome-marker-pill {
+  cursor: pointer;
+  background: none;
+  box-shadow: none;
+  min-height: 0;
+}
+.outcome-marker-glyph { flex: none; }
+.outcome-marker-text {
+  min-width: 0;
+  color: var(--fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.outcome-marker-chevron { flex: none; color: var(--muted); }
+/* THE EXPANSION opens in place, inside the column, under the same edge. Long
+   vendor text wraps rather than widening the column. */
+.outcome-marker-expansion {
+  margin-top: 0.15rem;
+  padding: 0.1rem 0.4rem 0.15rem 0.6rem;
+  border-left: 2px solid currentColor;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow-wrap: anywhere;
+}
+.outcome-marker-line { color: var(--fg); }
+.outcome-marker-key { color: var(--muted); margin-right: 0.5em; }
+.outcome-marker-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.2rem;
+}
 
 /* The prompt's author line, above its body inside the existing bubble. */
 .prompt-author {
@@ -5809,8 +5870,6 @@ bubble-body.bubble-body { display: block; }
 }
 .plan-failed {
   margin-top: 0.25rem;
-  color: var(--err);
-  font-size: 0.8rem;
 }
 
 /* ---- feed cards: findings (src/feed/cards/findings.ts) ------------------ */
@@ -7057,11 +7116,6 @@ bubble-body.bubble-body { display: block; }
   opacity: 0.85;
 }
 
-/* ---- query-died cause (src/feed/rows/turn-ended.ts) ---- */
-.turn-ended-query-cause {
-  font-size: 0.85em;
-  opacity: 0.75;
-}
 
 /* ---- cold gate attention (src/topbar/model.ts) ---- */
 [data-attention="coldGate"] {

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { RosterRowSchema } from "../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { FooterStatusSchema } from "../../proto/gen/ts/frontend/v1/footer_pb";
 import {
+  FeedOutcomeMarkerSchema,
   FeedShellSchema,
   FeedShellSettledSchema,
   FeedShellCompletedSchema,
@@ -15,6 +16,10 @@ import { ForwardingLogger, setLogger } from "../src/log.js";
 import {
   FEED_MERGE_HEAD_GLYPH,
   composerClosedFor,
+  FEED_OUTCOME_MARKER_GLYPH_KEYS,
+  FEED_OUTCOME_MARKER_KEYS,
+  feedOutcomeMarkerColor,
+  feedOutcomeMarkerGlyph,
   FEED_SHELL_DOT_KEYS,
   FEED_SUBAGENT_DOT_KEYS,
   feedShellDotColor,
@@ -356,6 +361,7 @@ describe("composerClosedFor", () => {
     ["a vendor that refused to start", "vendorFault", "vendorRejection", false],
     ["a call the vendor retries", "vendorFault", "apiRetrying", false],
     ["a close under way", "closing", "blocked", true],
+    ["a turn that died with agent-repl's machinery", "agentReplFault", "turnDied", false],
     ["a red status", "working", undefined, false],
   ])("%s", (_name, arm, substatus, closed) => {
     // Act
@@ -365,8 +371,39 @@ describe("composerClosedFor", () => {
     expect(got).toBe(closed);
   });
 
-  it("declares no composer-open exception", () => {
+  it("declares the turn-died fault as its one composer-open exception (owner ruling 2026-10-06)", () => {
     // Assert
-    expect(renderColors.composer_open_substatuses).toEqual({});
+    expect(renderColors.composer_open_substatuses).toEqual({ agent_repl_fault: ["turn_died"] });
+  });
+});
+
+describe("the outcome marker's families", () => {
+  it("colors every family the schema declares, and no other", () => {
+    expect([...FEED_OUTCOME_MARKER_KEYS].sort()).toEqual(oneofArmNames(FeedOutcomeMarkerSchema, "family").sort());
+  });
+
+  it("names a glyph for every family the schema declares, and no other", () => {
+    expect([...FEED_OUTCOME_MARKER_GLYPH_KEYS].sort()).toEqual(oneofArmNames(FeedOutcomeMarkerSchema, "family").sort());
+  });
+
+  it.each([
+    ["neutral", "none", "stop"],
+    ["vendorFault", "turquoise", "diamond"],
+    ["agentReplFault", "blue", "cross"],
+  ])("paints the %s family %s with the %s glyph", (family, color, glyph) => {
+    expect([feedOutcomeMarkerColor(family), feedOutcomeMarkerGlyph(family)]).toEqual([color, glyph]);
+  });
+
+  it("spends only the file's colors or none", () => {
+    const allowed = ["none", ...renderColors.colors];
+    expect(Object.values(renderColors.feed_outcome_marker).filter((c) => !allowed.includes(c))).toEqual([]);
+  });
+
+  it("refuses a family the table does not color", () => {
+    expect(() => feedOutcomeMarkerColor("nonesuch")).toThrow(MalformedView);
+  });
+
+  it("refuses a family the table names no glyph for", () => {
+    expect(() => feedOutcomeMarkerGlyph("nonesuch")).toThrow(MalformedView);
   });
 });

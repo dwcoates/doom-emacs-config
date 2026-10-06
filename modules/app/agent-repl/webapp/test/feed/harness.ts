@@ -36,6 +36,11 @@ import {
   type SelectFeedRowResponse,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_feed_row_pb";
 import {
+  SubmitPromptResponseSchema,
+  type SubmitPromptRequest,
+  type SubmitPromptResponse,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_submit_prompt_pb";
+import {
   type LoadFeedThroughRequest,
   type LoadFeedThroughResponse,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_load_feed_through_pb";
@@ -181,6 +186,8 @@ export interface FeedScript {
   loadFeedThrough?: (req: LoadFeedThroughRequest) => AsyncIterable<LoadFeedThroughResponse>;
   /** Answers SelectFeedRow; a success selecting nothing when unscripted. */
   selectFeedRow?: (req: SelectFeedRowRequest) => SelectFeedRowResponse;
+  /** Answers SubmitPrompt (an outcome marker's resend); a minted turn when unscripted. */
+  submitPrompt?: (req: SubmitPromptRequest) => SubmitPromptResponse;
   /** The page's clock. Pass a `countingTicker` to assert on live subscriptions. */
   ticker?: Ticker;
 }
@@ -193,6 +200,7 @@ export interface FeedCalls {
   interrupt: InterruptRequest[];
   loadFeedThrough: LoadFeedThroughRequest[];
   selectFeedRow: SelectFeedRowRequest[];
+  submitPrompt: SubmitPromptRequest[];
 }
 
 export interface Harness {
@@ -204,7 +212,7 @@ export interface Harness {
 
 /** A context whose client speaks to the scripted daemon. */
 export function harness(script: FeedScript = {}): Harness {
-  const calls: FeedCalls = { openFeed: [], watchFeed: [], getFeedPage: [], interrupt: [], loadFeedThrough: [], selectFeedRow: [] };
+  const calls: FeedCalls = { openFeed: [], watchFeed: [], getFeedPage: [], interrupt: [], loadFeedThrough: [], selectFeedRow: [], submitPrompt: [] };
   const channels = script.channels ?? new Map<string, Channel<WatchFeedResponse>>();
   const sink = new RecordingSink();
   const transport = createRouterTransport(({ service }) => {
@@ -244,6 +252,15 @@ export function harness(script: FeedScript = {}): Harness {
               case: "success",
               value: { outcome: { case: "interruptedDetached", value: { count: 1n } } },
             },
+          })
+        );
+      },
+      submitPrompt: (req) => {
+        calls.submitPrompt.push(req);
+        return (
+          script.submitPrompt?.(req) ??
+          create(SubmitPromptResponseSchema, {
+            result: { case: "success", value: { outcome: { case: "turn", value: { turn: { value: "resent-turn" } } } } },
           })
         );
       },
@@ -412,7 +429,19 @@ export function separationRow(
     arm === "cleared"
       ? { case: "cleared", value: {} }
       : arm === "compactionFailed"
-        ? { case: "compactionFailed", value: { error: "the summarizer refused" } }
+        ? {
+            case: "compactionFailed",
+            value: {
+              error: "the summarizer refused",
+              marker: {
+                label: { text: "compaction failed" },
+                family: {
+                  case: "vendorFault",
+                  value: { expansion: { errorType: { text: "compaction_failed" }, message: { text: "the summarizer refused" } } },
+                },
+              },
+            },
+          }
         : { case: "compacted", value: { summary: { markdown: summary } } };
   return create(FeedRowSchema, {
     id: feedId(id),

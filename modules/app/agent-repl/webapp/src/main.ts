@@ -42,6 +42,7 @@ import { mountFeed } from "./feed/feed.js";
 import { mountFooter } from "./footer/footer.js";
 import { adoptAtBoot, startLifecycle } from "./lifecycle/lifecycle.js";
 import { mountLoginOverlay } from "./login/login.js";
+import { answerLoginRequests } from "./login/request.js";
 import { mountNewsDigest } from "./news-digest/news-digest.js";
 import { drawCommandPanel } from "./panels/panels.js";
 import { createPromptWaveDriver } from "./prompt-wave-driver.js";
@@ -261,6 +262,9 @@ export async function boot(): Promise<void> {
     const login = mountLoginOverlay(shell.loginOverlay, ctx);
 
     topbar.watch(ctx, { openLogin: (control) => login.open(control) });
+    // A FEED ROW'S "sign in" (an outcome marker's account cause) opens this
+    // same overlay: one login flow, whichever control asked for it.
+    answerLoginRequests((control) => login.open(control));
 
     const feed = mountFeed(shell.feed, ctx, {
       renderers: createRowRenderers(ctx),
