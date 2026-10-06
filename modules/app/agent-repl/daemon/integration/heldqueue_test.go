@@ -3,6 +3,7 @@
 package integration
 
 import (
+	"strings"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -30,6 +31,21 @@ func TestTheOwnersWorkedExampleOfTheHeldQueue(t *testing.T) {
 
 	// Arrange: the first prompt runs.
 	f := newOpened(t, harness.Opts{})
+	// A FAILURE QUOTES THE QUEUE'S OWN ACCOUNT. This test once timed out
+	// waiting for the join's StartTurn (35s, a full-suite run, 2026-10-06; 1
+	// in ~60 under load, 0 in 400 alone), and the record of what the queue
+	// decided about the prompt -- held, judged against what, routed where --
+	// is the only evidence of which step it stopped at.
+	t.Cleanup(func() {
+		if !t.Failed() {
+			return
+		}
+		for _, r := range f.d.WorkspaceLog(f.repo.Dir, "daemon") {
+			if strings.HasPrefix(r.Operation, "daemon.promptqueue") || strings.HasPrefix(r.Operation, "daemon.prompthandler") || strings.HasPrefix(r.Operation, "daemon.classifier") || strings.HasPrefix(r.Operation, "daemon.shimclient.start_turn") {
+				t.Logf("queue record: %s %s %s %s %v", r.Timestamp, r.Level, r.Operation, r.Message, r.Context)
+			}
+		}
+	})
 	holds := f.d.WatchHolds(f.ws)
 	f.submit("hey update the doc", "k-doc", origin)
 	f.shim.ExpectStartTurn()
