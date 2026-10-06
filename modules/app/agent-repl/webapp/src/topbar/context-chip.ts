@@ -28,9 +28,8 @@ import type {
   TopbarContextChip,
 } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
 import { log } from "../log.js";
-import { MalformedView } from "../rpc/malformed.js";
 import { msOf, requireMessage } from "../rpc/strict.js";
-import { pressurePercentColor } from "../pressure-color.js";
+import { pressurePercentColor, windowFillPercent } from "../pressure-color.js";
 import type { TopbarContext } from "./context.js";
 import { asAnchor } from "./strip.js";
 
@@ -81,10 +80,7 @@ export function drawTopbarContextChip(u: TopbarContextChip, tc: TopbarContext): 
  * [0, 1] breaks the contract (the daemon clamps) and is refused, never painted.
  */
 export function contextFigureColor(windowFill: number): string {
-  if (!(windowFill >= 0 && windowFill <= 1)) {
-    throw new MalformedView("TopbarContextChip.window_fill", `${String(windowFill)} is outside [0, 1]`);
-  }
-  return pressurePercentColor(Math.round(windowFill * 100));
+  return pressurePercentColor(windowFillPercent(windowFill, "TopbarContextChip.window_fill"));
 }
 
 /** The menu: titled sections of rows, in the served order. */
