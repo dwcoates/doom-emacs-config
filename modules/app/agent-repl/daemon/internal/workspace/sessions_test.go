@@ -3844,6 +3844,43 @@ func TestFleetWorkspacesAnswersTheHeldSessions(t *testing.T) {
 	}
 }
 
+func TestFleetShimPIDsAnswersTheLiveShims(t *testing.T) {
+	cases := []struct {
+		name   string
+		start  bool
+		reaped bool
+		pid    int
+		want   []int
+	}{
+		{name: "no session is held", want: []int{}},
+		{name: "a held shim answers its pid", start: true, pid: 4242, want: []int{4242}},
+		{name: "a reaped shim is no live process", start: true, pid: 4242, reaped: true, want: []int{}},
+		{name: "a shim whose pid is unknown names nothing", start: true, pid: 0, want: []int{}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			f := newFleetFixture(t)
+			ws := f.workspace("w1")
+			f.client.pid = tc.pid
+			if tc.start {
+				if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+					t.Fatalf("Start: %v", err)
+				}
+			}
+			f.client.reaped = tc.reaped
+
+			// Act.
+			got := f.fleet.ShimPIDs()
+
+			// Assert.
+			if !slices.Equal(got, tc.want) {
+				t.Fatalf("ShimPIDs() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 // ---- THE LIVE-SHIM INVARIANT ----------------------------------------------
 //
 // A workspace whose shim is live in the fleet carries no terminal session
