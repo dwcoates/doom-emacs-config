@@ -563,11 +563,14 @@ export function drawFooterActivityTransientSessionChange(
 }
 
 /**
- * A FINISHED DEPLOY: "updated", then what it left for later on this
+ * A FINISHED DEPLOY: "agent-repl hot reloaded", then what it left for later on this
  * workspace — the deploy line's own shape and hooks (`.footer-activity-update`,
  * `data-phase="updated"`), since it is that line's last word, now announced by
  * the successor as a transient.
  */
+/** The finished deploy's words (owner ruling 2026-10-06: "updated" alone named nothing). */
+export const UPDATED_TEXT = "agent-repl hot reloaded";
+
 export function drawFooterActivityTransientUpdated(
   u: FooterActivityTransientUpdated,
   path: string,
@@ -575,7 +578,7 @@ export function drawFooterActivityTransientUpdated(
   const line = document.createElement("span");
   line.className = "footer-activity-update";
   line.setAttribute("data-phase", "updated");
-  line.appendChild(document.createTextNode(statusWords("updated")));
+  line.appendChild(document.createTextNode(UPDATED_TEXT));
   appendUpdateNotes(line, u.notes, path);
   return line;
 }
