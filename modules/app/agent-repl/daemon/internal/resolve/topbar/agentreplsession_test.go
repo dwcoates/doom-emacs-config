@@ -8,13 +8,11 @@ import (
 	"claude-repld/internal/ids"
 )
 
-// loginSession is a session a login began, with some traffic.
+// loginSession is a session a login began.
 func loginSession() *frontendv1.TopbarAgentReplSession {
 	return &frontendv1.TopbarAgentReplSession{
-		StartedAtMs:   1_791_270_000_000,
-		Began:         &frontendv1.TopbarAgentReplSession_Login{Login: &frontendv1.TopbarSessionBeganLogin{}},
-		BytesReceived: 412 << 20,
-		BytesSent:     38 << 20,
+		StartedAtMs: 1_791_270_000_000,
+		Began:       &frontendv1.TopbarAgentReplSession_Login{Login: &frontendv1.TopbarSessionBeganLogin{}},
 	}
 }
 
@@ -66,8 +64,8 @@ func TestTheSessionStandsOnEveryStrip(t *testing.T) {
 					t.Fatalf("no topbar for %s", ws)
 				}
 				got := view.GetConnectivity().GetSession()
-				if got.GetLogin() == nil || got.GetBytesReceived() != 412<<20 || got.GetBytesSent() != 38<<20 {
-					t.Fatalf("%s session = %v, want the login session with its traffic", ws, got)
+				if got.GetLogin() == nil || got.GetStartedAtMs() != 1_791_270_000_000 {
+					t.Fatalf("%s session = %v, want the login session", ws, got)
 				}
 			}
 		})
@@ -90,7 +88,7 @@ func TestANewerSessionReplacesTheOneOnTheStrip(t *testing.T) {
 	// Assert.
 	view, _ := h.r.Topic(testWS).Latest()
 	got := view.GetConnectivity().GetSession()
-	if got.GetEditorStart() == nil || got.GetStartedAtMs() != 1_791_280_000_000 || got.GetBytesReceived() != 0 {
+	if got.GetEditorStart() == nil || got.GetStartedAtMs() != 1_791_280_000_000 {
 		t.Fatalf("session = %v, want the editor-start session", got)
 	}
 }
