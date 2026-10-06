@@ -738,6 +738,28 @@ func statusName(status *frontendv1.FooterStatus) string {
 	}
 }
 
+// substatusName names the published arm's substatus by its oneof field, "unset"
+// when the arm states no finer step and "none" when the arm has no substatus at
+// all. It is read off the descriptor so a substatus added to the contract is
+// named without an edit here.
+func substatusName(status *frontendv1.FooterStatus) string {
+	m := status.ProtoReflect()
+	armField := m.WhichOneof(m.Descriptor().Oneofs().ByName("status"))
+	if armField == nil {
+		return "none"
+	}
+	arm := m.Get(armField).Message()
+	oneof := arm.Descriptor().Oneofs().ByName("substatus")
+	if oneof == nil {
+		return "none"
+	}
+	field := arm.WhichOneof(oneof)
+	if field == nil {
+		return "unset"
+	}
+	return string(field.Name())
+}
+
 // coldGateCostLine is the cold gate's cost line on the wire: the whole line
 // and the parts it is exactly made of, the figure carrying its window fill.
 func coldGateCostLine(c ColdGateCost) *frontendv1.FooterStatusActivityColdGateCost {

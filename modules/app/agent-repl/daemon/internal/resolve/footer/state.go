@@ -581,6 +581,9 @@ type wsState struct {
 	// lastArm is the status arm the last published view carried, so a CHANGE
 	// of arm is recorded once rather than on every push.
 	lastArm string
+	// lastSubstatus is the substatus the last published view carried, so a
+	// CHANGE of step is recorded once rather than on every push.
+	lastSubstatus string
 	// lastLine is the activity line the last published view carried, so a
 	// CHANGE to it can be recorded and a push that leaves it standing is not.
 	lastLine activityLine
@@ -702,6 +705,21 @@ func (s *wsState) observeArm(view *frontendv1.FooterView) (arm string, changed b
 	}
 	s.lastArm = arm
 	return arm, true, previous
+}
+
+// observeSubstatus folds the published view's substatus in, answering it,
+// whether it CHANGED, and the substatus it replaced.
+func (s *wsState) observeSubstatus(view *frontendv1.FooterView) (sub string, changed bool, previous string) {
+	sub = substatusName(view.GetStrip().GetStatus())
+	previous = s.lastSubstatus
+	if previous == "" {
+		previous = "none"
+	}
+	if sub == s.lastSubstatus {
+		return sub, false, previous
+	}
+	s.lastSubstatus = sub
+	return sub, true, previous
 }
 
 // observeLine folds the published view's activity line in, answering the line,
