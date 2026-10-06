@@ -187,12 +187,12 @@ func TestPromptDuringKeepAliveRewindsPastTheKeepAliveAlone(t *testing.T) {
 	}
 }
 
-// TestCompletedTaskBesideKeepAliveRefusesTheRewind — a background task that
-// completes while a keep-alive is outstanding starts a genuine vendor turn:
-// it is served, it lies past the anchor, and the next rewind would discard it,
-// so the invariant refuses that rewind at ERROR naming the vendor-started
-// turn, and the conversation keeps serving.
-func TestCompletedTaskBesideKeepAliveRefusesTheRewind(t *testing.T) {
+// TestCompletedTaskBesideKeepAliveAnchorsTheRewind — a background task that
+// completes while a keep-alive is outstanding starts a genuine vendor turn. It
+// is real conversation (ruled 2026-10-06): it is served, it anchors the next
+// rewind, which keeps it and discards only the keep-alive, and nothing is
+// refused.
+func TestCompletedTaskBesideKeepAliveAnchorsTheRewind(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	w, ws, shimLog := keepaliveWorld(t)
@@ -200,16 +200,21 @@ func TestCompletedTaskBesideKeepAliveRefusesTheRewind(t *testing.T) {
 	AwaitTurnEnded(t, w, ws, queued)
 
 	// Act
-	refused := w.Daemon.AwaitLogRecord(shimLog, "the invariant refusing the rewind", isRefusal)
-	after := SubmitPrompt(t, w, ws, "after the refused rewind")
+	rewind := w.Daemon.AwaitLogRecord(shimLog, "the first rewind before a beat", isRewind("keepalive"))
+	after := SubmitPrompt(t, w, ws, "after the completed task")
 	AwaitTurnEnded(t, w, ws, after)
 
 	// Assert
-	if !strings.EqualFold(refused.Level, "error") {
-		t.Errorf("the refusal is recorded at %q, want ERROR", refused.Level)
+	if got := fmt.Sprint(rewind.Context["anchor_turn_id"]); got == queued.GetValue() || !strings.HasPrefix(got, "adopted-") {
+		t.Errorf("the rewind anchors on turn %q, want the completed task's adopted turn", got)
 	}
-	if got := spanKinds(t, refused, "offending"); fmt.Sprint(got) != "[vendor_started]" {
-		t.Errorf("the refusal names offending kinds %v, want exactly the vendor-started turn", got)
+	if got := spanKinds(t, rewind, "discarded_span"); fmt.Sprint(got) != "[keepalive]" {
+		t.Errorf("the rewind discards span kinds %v, want exactly the keep-alive", got)
+	}
+	for _, r := range shimRecords(t, shimLog) {
+		if isRefusal(r) {
+			t.Errorf("the shim refused a rewind %v, want the completed task's turn kept by anchoring on it", r.Context)
+		}
 	}
 	var vendorTurnDrawn bool
 	for _, row := range feedRows(t, w, ws) {

@@ -1738,28 +1738,31 @@ describe("keep-alives", () => {
   const rewoundBeforeBeat = (record: { message: string; context: Record<string, unknown> }): boolean =>
     record.message.startsWith("REWINDING the vendor context") && record.context.before === "keepalive";
 
-  test("a task completing beside a keep-alive refuses the rewind that would discard its served turn, at ERROR", async () => {
-    // THE SPAN INVARIANT: the vendor's own turn is real conversation the
-    // anchor lies behind, so no rewind may discard it.
+  test("a task completing beside a keep-alive anchors the next rewind, which keeps its served turn", async () => {
+    // A completed task's turn is real conversation: it anchors (ruled
+    // 2026-10-06), so the rewind after it discards only the keep-alive.
     const shim = await spawnBeating();
     await shim.clients.h1.startSession(freshSession());
     await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!queue-vendor-turn" }));
 
-    const refused = await shim.log.record((record) => record.message.startsWith(REFUSED));
+    const rewound = await shim.log.record(rewoundBeforeBeat);
 
-    const offending = refused.context.offending as { kind: string }[];
-    expect([refused.level, offending.map((turn) => turn.kind)]).toEqual(["error", ["vendor_started"]]);
+    expect([
+      String(rewound.context.anchor_turn_id).startsWith("adopted-"),
+      (rewound.context.discarded_span as { kind: string }[]).map((turn) => turn.kind),
+    ]).toEqual([true, ["keepalive"]]);
   });
 
-  test("a refused rewind keeps the conversation serving the next real prompt", async () => {
+  test("a task completing beside a keep-alive trips no refusal, and the next prompt is served", async () => {
     const shim = await spawnBeating();
     await shim.clients.h1.startSession(freshSession());
     await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!queue-vendor-turn" }));
-    await shim.log.record((record) => record.message.startsWith(REFUSED));
+    await shim.log.record(rewoundBeforeBeat);
 
-    turnStarted(await shim.clients.h1.startTurn(startTurnRequest({ turn: "t2", text: "after the refusal" })));
+    turnStarted(await shim.clients.h1.startTurn(startTurnRequest({ turn: "t2", text: "after the completed task" })));
+    await servedLanded(shim, "after the completed task");
 
-    expect((await servedLanded(shim, "after the refusal")).upsertKey).not.toBe("");
+    expect(shim.log.records().filter((record) => record.message.startsWith(REFUSED))).toEqual([]);
   });
 
   test("a stop every rewind replays never loops: each rewind resumes at the same real anchor", async () => {

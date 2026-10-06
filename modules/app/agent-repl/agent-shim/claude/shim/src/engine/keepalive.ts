@@ -182,7 +182,9 @@ export interface RecordTurn {
   readonly keepalive: boolean;
   /**
    * True when the VENDOR started this turn on its own (an adopted turn): a
-   * replayed task notification, a background hand-back. Never an anchor.
+   * background task's completion, a hand-back. Real conversation, so its
+   * assistant records anchor like any real turn's; a turn answering a stop
+   * the rewind caused is never adopted (it is the keep-alive's, tagged).
    */
   readonly adopted?: boolean;
   /**
@@ -194,18 +196,22 @@ export interface RecordTurn {
 }
 
 /**
- * Whether a record of `turn` may anchor a rewind: a REAL turn the shim started.
+ * Whether a record of `turn` may anchor a rewind: a turn of REAL conversation.
  *
  * Not a keep-alive's: its answer is exactly the material the rewind exists to
  * discard. Not one with no turn: it belongs to no turn this shim asked for.
- * Not an ADOPTED turn: a turn the vendor started on its own is not the user's
- * conversation's last word -- anchoring on one made the next rewind resume at
- * a replayed task notification, which the vendor ran again as a fresh turn,
- * which became the next anchor, a loop that filled a workspace's newest page
- * with empty turns every keep-alive (ship-gns, from 2026-10-02 01:45).
+ *
+ * A GENUINE ADOPTED TURN ANCHORS (ruled 2026-10-06). Adopted turns once never
+ * anchored, because a turn answering a task the rewind itself had STOPPED
+ * anchored the next rewind, which replayed the stop, whose answer anchored the
+ * next -- the ship-gns loop of 2026-10-02. Those answers are now tagged as the
+ * keep-alive's (see {@link KeepaliveScope}) and never reach here as adopted, so
+ * the rule is no longer needed, and it cost real content: a completed task's
+ * turn after the anchor was discarded by the next rewind (or, under the span
+ * invariant, refused it at ERROR every time a task finished while idle).
  */
 function anchors(turn: RecordTurn | undefined): turn is RecordTurn {
-  return turn !== undefined && !turn.keepalive && turn.adopted !== true;
+  return turn !== undefined && !turn.keepalive;
 }
 
 /** The span kind of a record that arrived under `turn`. */
@@ -233,6 +239,12 @@ export class KeepaliveRewind {
   private keepaliveTurns = 0;
   /** Every turn with a record after the anchor, in first-arrival order. Empty with no anchor. */
   private readonly spanTurns: MutableSpanTurn[] = [];
+  /**
+   * The keep-alive send pushed and not yet ended. A vendor turn may run AHEAD
+   * of it (a task's completion queued before the send), and its anchor lies
+   * before the keep-alive's prompt record, so a new anchor keeps this entry.
+   */
+  private outstandingKeepalive: { readonly uuid: string; readonly turnId: string } | undefined;
 
   /**
    * A message arrived under `turn`; it becomes the anchor only if it qualifies.
@@ -267,6 +279,7 @@ export class KeepaliveRewind {
    * The caller names the send's turn exactly as {@link noteRecord} takes it.
    */
   noteSend(uuid: string, turn: RecordTurn): void {
+    if (turn.keepalive) this.outstandingKeepalive = { uuid, turnId: turn.turnId };
     this.noteSpan(uuid, turn);
   }
 
@@ -299,6 +312,8 @@ export class KeepaliveRewind {
   private takeAnchor(uuid: string, turnId: string): void {
     this.anchor = { uuid, turnId };
     this.spanTurns.length = 0;
+    const pending = this.outstandingKeepalive;
+    if (pending !== undefined) this.noteSpan(pending.uuid, { turnId: pending.turnId, keepalive: true });
     // THE DEBT IS "KEEP-ALIVE TURNS SINCE THE LAST REAL RECORD", so a new
     // anchor starts it over. A keep-alive counted before this record — one that
     // ran ahead of the session's first real prompt, or after a cleared anchor,
@@ -337,6 +352,7 @@ export class KeepaliveRewind {
   /** A keep-alive turn ended; the context now carries material a real prompt must not see. */
   noteKeepaliveTurn(): void {
     this.keepaliveTurns++;
+    this.outstandingKeepalive = undefined;
   }
 
   /**

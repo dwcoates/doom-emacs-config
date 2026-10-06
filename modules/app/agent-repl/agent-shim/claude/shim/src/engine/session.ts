@@ -2076,10 +2076,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
 
   /**
    * The turn a vendor record arrived under, as the rewind anchor and its span
-   * need it: the turn its echo attributes it to. A vendor-started turn is real
-   * conversation but never an anchor (engine/keepalive.ts), so its records sit
-   * in the span, and the span invariant refuses a rewind that would discard
-   * them.
+   * need it: the turn its echo attributes it to. A genuine vendor-started turn
+   * is real conversation and anchors like any real turn (engine/keepalive.ts);
+   * a turn answering a stop a rewind caused is tagged, and never anchors.
    */
   function recordTurn(attribution: KeepaliveAttribution, running: VendorTurn): RecordTurn | undefined {
     // A keep-alive-tagged record of a VENDOR turn is one the keep-alive's own
