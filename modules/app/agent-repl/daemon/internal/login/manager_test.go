@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -48,6 +49,50 @@ type fixture struct {
 	routeErr error
 	// log is the manager's logger, so a test can assert what it recorded.
 	log *dlog.TestLogger
+	// observer records every flow's opening and ending.
+	observer *fakeObserver
+}
+
+// fakeObserver records every opening and ending, in order, and signals each.
+type fakeObserver struct {
+	mu     sync.Mutex
+	events []string
+	seen   chan string
+}
+
+func newFakeObserver() *fakeObserver { return &fakeObserver{seen: make(chan string, 16)} }
+
+func (o *fakeObserver) LoginOpened(configDir string) { o.note("opened " + configDir) }
+func (o *fakeObserver) LoginEnded(configDir string)  { o.note("ended " + configDir) }
+
+func (o *fakeObserver) note(event string) {
+	o.mu.Lock()
+	o.events = append(o.events, event)
+	o.mu.Unlock()
+	o.seen <- event
+}
+
+// recorded answers every event so far.
+func (o *fakeObserver) recorded() []string {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return append([]string(nil), o.events...)
+}
+
+// await waits for event, bounded.
+func (o *fakeObserver) await(t *testing.T, event string) {
+	t.Helper()
+	deadline := time.After(readDeadline)
+	for {
+		select {
+		case got := <-o.seen:
+			if got == event {
+				return
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for %q; recorded %v", event, o.recorded())
+		}
+	}
 }
 
 // newFixture builds a manager whose fake vendor binary is an explicit path, so
@@ -67,7 +112,8 @@ func newFixture(t *testing.T, routes map[ids.WorkspaceID]string) *fixture {
 	}
 
 	f.log = dlog.NewTestLogger()
-	m, err := login.New(envc.NewVendorGuard(envc.Load()), bin, f.route, f.log)
+	f.observer = newFakeObserver()
+	m, err := login.New(envc.NewVendorGuard(envc.Load()), bin, f.route, f.log, f.observer)
 	if err != nil {
 		t.Fatalf("login.New() = %v, want nil", err)
 	}
@@ -472,7 +518,7 @@ func TestOpenRefusesTheDefaultVendorBinaryWhenVendorCallsAreForbidden(t *testing
 	t.Setenv(envc.EnvForbidVendorCalls, "1")
 	t.Setenv(login.EnvClaudeBin, "")
 	route := func(ids.WorkspaceID) (string, error) { return "/roots/default", nil }
-	m, err := login.New(envc.NewVendorGuard(envc.Load()), "", route, dlog.NewTestLogger())
+	m, err := login.New(envc.NewVendorGuard(envc.Load()), "", route, dlog.NewTestLogger(), newFakeObserver())
 	if err != nil {
 		t.Fatalf("login.New() = %v", err)
 	}
@@ -596,4 +642,65 @@ func TestCloseAllEndsEveryLogin(t *testing.T) {
 	// Assert.
 	awaitClosed(t, outA)
 	awaitClosed(t, outC)
+}
+
+func TestOpeningAFlowTellsTheObserverOnce(t *testing.T) {
+	// Arrange: two workspaces on one account root.
+	routes, defaultRoot, _ := twoWorkspaces(t)
+	f := newFixture(t, routes)
+
+	// Act: the second open joins the first flow.
+	for _, ws := range []ids.WorkspaceID{"ws-a", "ws-b"} {
+		if _, err := f.m.Open(context.Background(), ws); err != nil {
+			t.Fatalf("Open(%s) = %v", ws, err)
+		}
+	}
+
+	// Assert.
+	if got := f.observer.recorded(); len(got) != 1 || got[0] != "opened "+defaultRoot {
+		t.Fatalf("observed %v, want one opening of %s", got, defaultRoot)
+	}
+}
+
+func TestTheChildExitingTellsTheObserverTheFlowEnded(t *testing.T) {
+	// Arrange.
+	routes, defaultRoot, _ := twoWorkspaces(t)
+	f := newFixture(t, routes)
+	if _, err := f.m.Open(context.Background(), "ws-a"); err != nil {
+		t.Fatalf("Open() = %v", err)
+	}
+	out, err := f.m.Watch(context.Background(), "ws-a")
+	if err != nil {
+		t.Fatalf("Watch() = %v", err)
+	}
+	awaitText(t, out, "READY")
+
+	// Act.
+	if err := f.m.SendKeystrokes(context.Background(), "ws-a", []byte("QUIT\n")); err != nil {
+		t.Fatalf("SendKeystrokes() = %v", err)
+	}
+	f.observer.await(t, "ended "+defaultRoot)
+
+	// Assert.
+	want := []string{"opened " + defaultRoot, "ended " + defaultRoot}
+	if got := f.observer.recorded(); strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("observed %v, want %v", got, want)
+	}
+}
+
+func TestClosingAFlowTellsTheObserverItEnded(t *testing.T) {
+	// Arrange.
+	routes, defaultRoot, _ := twoWorkspaces(t)
+	f := newFixture(t, routes)
+	if _, err := f.m.Open(context.Background(), "ws-a"); err != nil {
+		t.Fatalf("Open() = %v", err)
+	}
+
+	// Act.
+	if err := f.m.Close(context.Background(), "ws-a"); err != nil {
+		t.Fatalf("Close() = %v", err)
+	}
+
+	// Assert.
+	f.observer.await(t, "ended "+defaultRoot)
 }

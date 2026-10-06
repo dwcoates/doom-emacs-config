@@ -24,18 +24,20 @@ type manager struct {
 	vendorBin    string
 	configDirFor ConfigDirFunc
 	log          dlog.Logger
+	observer     Observer
 
 	mu       sync.Mutex
 	sessions map[string]*session
 }
 
 // newManager resolves the vendor binary and builds the manager.
-func newManager(guard envc.VendorGuard, vendorBin string, configDirFor ConfigDirFunc, log dlog.Logger) *manager {
+func newManager(guard envc.VendorGuard, vendorBin string, configDirFor ConfigDirFunc, log dlog.Logger, observer Observer) *manager {
 	m := &manager{
 		guard:        guard,
 		vendorBin:    vendorBin,
 		configDirFor: configDirFor,
 		log:          log,
+		observer:     observer,
 		sessions:     map[string]*session{},
 	}
 	if m.vendorBin == "" {
@@ -65,13 +67,20 @@ func (m *manager) Open(ctx context.Context, ws ids.WorkspaceID) (string, error) 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if live, ok := m.sessions[configDir]; ok && !live.Exited() {
-		m.log.Debug("daemon.login.open", "joined the login already running for this account root", dlog.Context{
-			"workspace":  string(ws),
-			"config_dir": configDir,
-			"branch":     "joined",
-		})
-		return configDir, nil
+	if live, ok := m.sessions[configDir]; ok {
+		if !live.Exited() {
+			m.log.Debug("daemon.login.open", "joined the login already running for this account root", dlog.Context{
+				"workspace":  string(ws),
+				"config_dir": configDir,
+				"branch":     "joined",
+			})
+			return configDir, nil
+		}
+		// AN EXITED FLOW NOT YET FORGOTTEN ENDS HERE, before its successor
+		// opens: its exit's forget will find the new flow standing and leave
+		// it, so this is the one place its ending can be told.
+		delete(m.sessions, configDir)
+		m.observer.LoginEnded(configDir)
 	}
 
 	sess, err := m.spawn(configDir)
@@ -86,6 +95,9 @@ func (m *manager) Open(ctx context.Context, ws ids.WorkspaceID) (string, error) 
 		return "", err
 	}
 	m.sessions[configDir] = sess
+	// Told BEFORE the pump starts, under the lock the exit's forget takes, so
+	// the observer always hears the opening before the ending.
+	m.observer.LoginOpened(configDir)
 	go sess.pump()
 
 	m.log.Info("daemon.login.open", "login terminal opened", dlog.Context{
@@ -302,5 +314,6 @@ func (m *manager) forget(configDir string) {
 			"config_dir": configDir,
 			"branch":     "removed",
 		})
+		m.observer.LoginEnded(configDir)
 	}
 }
