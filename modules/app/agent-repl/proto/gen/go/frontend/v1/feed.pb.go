@@ -9093,9 +9093,13 @@ func (*FeedTurnEndedInterruptedInterjection) Descriptor() ([]byte, []int) {
 // THE OUTCOME MARKER (owner ruling, 2026-10-06): the one standardized
 // component the feed draws for an event that is not a message — how a turn
 // ended (FeedTurnEndedErrored.marker, FeedTurnEndedInterrupted.marker), a
-// permission the user denied (FeedPermissionDeniedByUser.marker), and a plan
-// episode that broke (FeedPlanFailed.marker). It is placed exactly where the
+// permission the user denied (FeedPermissionDeniedByUser.marker), a plan
+// episode that broke (FeedPlanFailed.marker), and a compaction that failed
+// (FeedContextCutCompactionFailed.marker). It is placed exactly where the
 // event happened: a turn's ending marker after that turn's last output.
+//
+// A FAILED MERGE NEVER DRAWS ONE (owner ruling, 2026-10-06): its merge bubble,
+// continually updated, is its whole account in the feed.
 //
 // A small inline pill, about the height of the feed's badges, LEFT-ALIGNED in
 // the feed stream column, no wider than its text, and TRUNCATING rather than
@@ -9482,8 +9486,10 @@ func (x *FeedOutcomeMarkerAgentReplFault) GetExpansion() *FeedOutcomeAgentReplFa
 // draw and no field for it.
 type FeedOutcomeVendorFaultExpansion struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// When it happened.
-	Time *FeedOutcomeTime `protobuf:"bytes,1,opt,name=time,proto3" json:"time,omitempty"`
+	// When it happened. UNSET when the daemon holds no instant for the event:
+	// a failed compaction states none, and one drawn from history has only
+	// its replay's.
+	Time *FeedOutcomeTime `protobuf:"bytes,1,opt,name=time,proto3,oneof" json:"time,omitempty"`
 	// The vendor's error type, verbatim: the api error class it reported
 	// ("rate_limited", "overloaded", an unmodeled class by the vendor's own
 	// name) or the run's own stop word ("max_turns", "prompt_too_long").
@@ -15742,9 +15748,10 @@ type FeedSessionSeparation struct {
 	// ONE LEVEL: a separation is a recorded fact; it is never in flight (a
 	// compaction that read cold still compacted — see the cold-read notice; a
 	// worktree call that failed is a tool failure, not a divider). The one
-	// failed shape it records is `compaction_failed`: the divider that was
+	// failed shape it records is `compaction_failed`: the compaction that was
 	// offered (the /compact command, the cold gate's compact remedy) and did
-	// not happen, drawn in the slot the compacted divider would have taken.
+	// not happen, which the client draws as its outcome marker ALONE, with no
+	// divider (owner ruling, 2026-10-06).
 	//
 	// Types that are valid to be assigned to Kind:
 	//
@@ -17173,11 +17180,20 @@ func (x *FeedMergeAbandoned) GetSummary() string {
 	return ""
 }
 
-// The failed-compaction divider. The producer's account, verbatim, is the
-// only evidence anyone has; the daemon composes the label.
+// The failed compaction. DRAWN AS ITS OUTCOME MARKER ALONE (owner ruling,
+// 2026-10-06): no divider rule, no label under one — a compaction that did not
+// happen cut nothing, so a dividing line there was mistaken. The producer's
+// account, verbatim, is the only evidence anyone has; the footer's
+// context-budget line still says the context is as it was.
 type FeedContextCutCompactionFailed struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Error         string                 `protobuf:"bytes,1,opt,name=error,proto3" json:"error,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The producer's account, verbatim. The marker's expansion carries it as
+	// the vendor's message; kept so an older client still decodes the row.
+	Error string `protobuf:"bytes,1,opt,name=error,proto3" json:"error,omitempty"`
+	// THE MARKER the client draws for the row, and nothing else: a
+	// `vendor_fault` marker labelled "compaction failed", expanding to the
+	// producer's account.
+	Marker        *FeedOutcomeMarker `protobuf:"bytes,2,opt,name=marker,proto3" json:"marker,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -17217,6 +17233,13 @@ func (x *FeedContextCutCompactionFailed) GetError() string {
 		return x.Error
 	}
 	return ""
+}
+
+func (x *FeedContextCutCompactionFailed) GetMarker() *FeedOutcomeMarker {
+	if x != nil {
+		return x.Marker
+	}
+	return nil
 }
 
 // The ▸/▾ state. UI preference the daemon holds; see the roster's fold.
@@ -20276,18 +20299,19 @@ const file_frontend_v1_feed_proto_rawDesc = "" +
 	"\x1cFeedOutcomeMarkerVendorFault\x12J\n" +
 	"\texpansion\x18\x01 \x01(\v2,.frontend.v1.FeedOutcomeVendorFaultExpansionR\texpansion\"p\n" +
 	"\x1fFeedOutcomeMarkerAgentReplFault\x12M\n" +
-	"\texpansion\x18\x01 \x01(\v2/.frontend.v1.FeedOutcomeAgentReplFaultExpansionR\texpansion\"\xad\x05\n" +
-	"\x1fFeedOutcomeVendorFaultExpansion\x120\n" +
-	"\x04time\x18\x01 \x01(\v2\x1c.frontend.v1.FeedOutcomeTimeR\x04time\x12F\n" +
+	"\texpansion\x18\x01 \x01(\v2/.frontend.v1.FeedOutcomeAgentReplFaultExpansionR\texpansion\"\xbb\x05\n" +
+	"\x1fFeedOutcomeVendorFaultExpansion\x125\n" +
+	"\x04time\x18\x01 \x01(\v2\x1c.frontend.v1.FeedOutcomeTimeH\x00R\x04time\x88\x01\x01\x12F\n" +
 	"\n" +
 	"error_type\x18\x02 \x01(\v2'.frontend.v1.FeedOutcomeVendorErrorTypeR\terrorType\x12D\n" +
-	"\amessage\x18\x03 \x01(\v2%.frontend.v1.FeedOutcomeVendorMessageH\x00R\amessage\x88\x01\x01\x12B\n" +
-	"\aretries\x18\x04 \x01(\v2#.frontend.v1.FeedOutcomeRetriesMadeH\x01R\aretries\x88\x01\x01\x12?\n" +
-	"\bretry_at\x18\x05 \x01(\v2\x1f.frontend.v1.FeedOutcomeRetryAtH\x02R\aretryAt\x88\x01\x01\x128\n" +
-	"\x05model\x18\x06 \x01(\v2\x1d.frontend.v1.FeedOutcomeModelH\x03R\x05model\x88\x01\x01\x12>\n" +
-	"\aaccount\x18\a \x01(\v2\x1f.frontend.v1.FeedOutcomeAccountH\x04R\aaccount\x88\x01\x01\x12<\n" +
-	"\asign_in\x18\b \x01(\v2\x1e.frontend.v1.FeedOutcomeSignInH\x05R\x06signIn\x88\x01\x01\x12;\n" +
-	"\x06resend\x18\t \x01(\v2\x1e.frontend.v1.FeedOutcomeResendH\x06R\x06resend\x88\x01\x01B\n" +
+	"\amessage\x18\x03 \x01(\v2%.frontend.v1.FeedOutcomeVendorMessageH\x01R\amessage\x88\x01\x01\x12B\n" +
+	"\aretries\x18\x04 \x01(\v2#.frontend.v1.FeedOutcomeRetriesMadeH\x02R\aretries\x88\x01\x01\x12?\n" +
+	"\bretry_at\x18\x05 \x01(\v2\x1f.frontend.v1.FeedOutcomeRetryAtH\x03R\aretryAt\x88\x01\x01\x128\n" +
+	"\x05model\x18\x06 \x01(\v2\x1d.frontend.v1.FeedOutcomeModelH\x04R\x05model\x88\x01\x01\x12>\n" +
+	"\aaccount\x18\a \x01(\v2\x1f.frontend.v1.FeedOutcomeAccountH\x05R\aaccount\x88\x01\x01\x12<\n" +
+	"\asign_in\x18\b \x01(\v2\x1e.frontend.v1.FeedOutcomeSignInH\x06R\x06signIn\x88\x01\x01\x12;\n" +
+	"\x06resend\x18\t \x01(\v2\x1e.frontend.v1.FeedOutcomeResendH\aR\x06resend\x88\x01\x01B\a\n" +
+	"\x05_timeB\n" +
 	"\n" +
 	"\b_messageB\n" +
 	"\n" +
@@ -20686,9 +20710,10 @@ const file_frontend_v1_feed_proto_rawDesc = "" +
 	"\x0fFeedMergeFailed\x12\x18\n" +
 	"\asummary\x18\x01 \x01(\tR\asummary\".\n" +
 	"\x12FeedMergeAbandoned\x12\x18\n" +
-	"\asummary\x18\x01 \x01(\tR\asummary\"6\n" +
+	"\asummary\x18\x01 \x01(\tR\asummary\"n\n" +
 	"\x1eFeedContextCutCompactionFailed\x12\x14\n" +
-	"\x05error\x18\x01 \x01(\tR\x05error\"'\n" +
+	"\x05error\x18\x01 \x01(\tR\x05error\x126\n" +
+	"\x06marker\x18\x02 \x01(\v2\x1e.frontend.v1.FeedOutcomeMarkerR\x06marker\"'\n" +
 	"\rFeedMergeFold\x12\x16\n" +
 	"\x06folded\x18\x01 \x01(\bR\x06folded\"\xa8\x05\n" +
 	"\fFeedMergeTab\x124\n" +
@@ -21498,66 +21523,67 @@ var file_frontend_v1_feed_proto_depIdxs = []int32{
 	279, // 321: frontend.v1.FeedMergeHead.fold:type_name -> frontend.v1.FeedMergeFold
 	276, // 322: frontend.v1.FeedMergeError.failed:type_name -> frontend.v1.FeedMergeFailed
 	277, // 323: frontend.v1.FeedMergeError.abandoned:type_name -> frontend.v1.FeedMergeAbandoned
-	281, // 324: frontend.v1.FeedMergeTab.label:type_name -> frontend.v1.FeedMergeTabLabel
-	286, // 325: frontend.v1.FeedMergeTab.queue:type_name -> frontend.v1.FeedMergeTabQueue
-	287, // 326: frontend.v1.FeedMergeTab.pre_prompt:type_name -> frontend.v1.FeedMergeTabPrePrompt
-	288, // 327: frontend.v1.FeedMergeTab.rebasing:type_name -> frontend.v1.FeedMergeTabRebasing
-	291, // 328: frontend.v1.FeedMergeTab.conflicts:type_name -> frontend.v1.FeedMergeTabConflicts
-	292, // 329: frontend.v1.FeedMergeTab.tests:type_name -> frontend.v1.FeedMergeTabTests
-	301, // 330: frontend.v1.FeedMergeTab.fixes:type_name -> frontend.v1.FeedMergeTabFixes
-	303, // 331: frontend.v1.FeedMergeTab.committing:type_name -> frontend.v1.FeedMergeTabCommitting
-	305, // 332: frontend.v1.FeedMergeTab.updating_main:type_name -> frontend.v1.FeedMergeTabUpdatingMain
-	309, // 333: frontend.v1.FeedMergeTab.post_prompt:type_name -> frontend.v1.FeedMergeTabPostPrompt
-	284, // 334: frontend.v1.FeedMergeTabSettled.succeeded:type_name -> frontend.v1.FeedMergeTabSucceeded
-	285, // 335: frontend.v1.FeedMergeTabSettled.failed:type_name -> frontend.v1.FeedMergeTabFailed
-	282, // 336: frontend.v1.FeedMergeTabQueue.live:type_name -> frontend.v1.FeedMergeTabLive
-	283, // 337: frontend.v1.FeedMergeTabQueue.settled:type_name -> frontend.v1.FeedMergeTabSettled
-	310, // 338: frontend.v1.FeedMergeTabQueue.queue:type_name -> frontend.v1.FeedMergeQueue
-	282, // 339: frontend.v1.FeedMergeTabPrePrompt.live:type_name -> frontend.v1.FeedMergeTabLive
-	283, // 340: frontend.v1.FeedMergeTabPrePrompt.settled:type_name -> frontend.v1.FeedMergeTabSettled
-	282, // 341: frontend.v1.FeedMergeTabRebasing.live:type_name -> frontend.v1.FeedMergeTabLive
-	283, // 342: frontend.v1.FeedMergeTabRebasing.settled:type_name -> frontend.v1.FeedMergeTabSettled
-	289, // 343: frontend.v1.FeedMergeTabRebasing.progress:type_name -> frontend.v1.FeedMergeRebaseProgress
-	290, // 344: frontend.v1.FeedMergeTabRebasing.lines:type_name -> frontend.v1.FeedMergeRebaseLine
-	282, // 345: frontend.v1.FeedMergeTabConflicts.live:type_name -> frontend.v1.FeedMergeTabLive
-	283, // 346: frontend.v1.FeedMergeTabConflicts.settled:type_name -> frontend.v1.FeedMergeTabSettled
-	282, // 347: frontend.v1.FeedMergeTabTests.live:type_name -> frontend.v1.FeedMergeTabLive
-	283, // 348: frontend.v1.FeedMergeTabTests.settled:type_name -> frontend.v1.FeedMergeTabSettled
-	296, // 349: frontend.v1.FeedMergeTabTests.suites:type_name -> frontend.v1.FeedMergeTestSuite
-	293, // 350: frontend.v1.FeedMergeTabTests.log:type_name -> frontend.v1.FeedMergeTestLog
-	294, // 351: frontend.v1.FeedMergeTestLog.token:type_name -> frontend.v1.FeedMergeTestLogToken
-	295, // 352: frontend.v1.FeedMergeTestLog.label:type_name -> frontend.v1.FeedMergeTestLogLabel
-	297, // 353: frontend.v1.FeedMergeTestSuite.running:type_name -> frontend.v1.FeedMergeTestSuiteRunning
-	298, // 354: frontend.v1.FeedMergeTestSuite.passed:type_name -> frontend.v1.FeedMergeTestSuitePassed
-	299, // 355: frontend.v1.FeedMergeTestSuite.failed:type_name -> frontend.v1.FeedMergeTestSuiteFailed
-	300, // 356: frontend.v1.FeedMergeTestSuite.output:type_name -> frontend.v1.FeedMergeTestSpan
-	282, // 357: frontend.v1.FeedMergeTabFixes.live:type_name -> frontend.v1.FeedMergeTabLive
-	283, // 358: frontend.v1.FeedMergeTabFixes.settled:type_name -> frontend.v1.FeedMergeTabSettled
-	302, // 359: frontend.v1.FeedMergeTabFixes.attempt:type_name -> frontend.v1.FeedMergeFixAttempt
-	282, // 360: frontend.v1.FeedMergeTabCommitting.live:type_name -> frontend.v1.FeedMergeTabLive
-	283, // 361: frontend.v1.FeedMergeTabCommitting.settled:type_name -> frontend.v1.FeedMergeTabSettled
-	304, // 362: frontend.v1.FeedMergeTabCommitting.subject:type_name -> frontend.v1.FeedMergeCommitSubject
-	282, // 363: frontend.v1.FeedMergeTabUpdatingMain.live:type_name -> frontend.v1.FeedMergeTabLive
-	283, // 364: frontend.v1.FeedMergeTabUpdatingMain.settled:type_name -> frontend.v1.FeedMergeTabSettled
-	306, // 365: frontend.v1.FeedMergeTabUpdatingMain.step:type_name -> frontend.v1.FeedMergeUpdatingMainStep
-	307, // 366: frontend.v1.FeedMergeUpdatingMainStep.fetching:type_name -> frontend.v1.FeedMergeUpdatingMainFetching
-	308, // 367: frontend.v1.FeedMergeUpdatingMainStep.fast_forwarding:type_name -> frontend.v1.FeedMergeUpdatingMainFastForwarding
-	282, // 368: frontend.v1.FeedMergeTabPostPrompt.live:type_name -> frontend.v1.FeedMergeTabLive
-	283, // 369: frontend.v1.FeedMergeTabPostPrompt.settled:type_name -> frontend.v1.FeedMergeTabSettled
-	311, // 370: frontend.v1.FeedMergeQueue.ahead:type_name -> frontend.v1.FeedMergeQueueEntry
-	311, // 371: frontend.v1.FeedMergeQueue.current:type_name -> frontend.v1.FeedMergeQueueEntry
-	311, // 372: frontend.v1.FeedMergeQueue.behind:type_name -> frontend.v1.FeedMergeQueueEntry
-	312, // 373: frontend.v1.FeedMergeQueueEntry.workspace:type_name -> frontend.v1.FeedMergeQueueWorkspace
-	313, // 374: frontend.v1.FeedMergeQueueEntry.label:type_name -> frontend.v1.FeedMergeQueueLabel
-	314, // 375: frontend.v1.FeedMergeQueueEntry.merging:type_name -> frontend.v1.FeedMergeQueueMerging
-	315, // 376: frontend.v1.FeedMergeQueueEntry.waiting:type_name -> frontend.v1.FeedMergeQueueWaiting
-	331, // 377: frontend.v1.FeedMergeQueueWorkspace.ref:type_name -> workspace.v1.WorkspaceRef
-	281, // 378: frontend.v1.FeedMergeQueueMerging.active_tab:type_name -> frontend.v1.FeedMergeTabLabel
-	379, // [379:379] is the sub-list for method output_type
-	379, // [379:379] is the sub-list for method input_type
-	379, // [379:379] is the sub-list for extension type_name
-	379, // [379:379] is the sub-list for extension extendee
-	0,   // [0:379] is the sub-list for field type_name
+	141, // 324: frontend.v1.FeedContextCutCompactionFailed.marker:type_name -> frontend.v1.FeedOutcomeMarker
+	281, // 325: frontend.v1.FeedMergeTab.label:type_name -> frontend.v1.FeedMergeTabLabel
+	286, // 326: frontend.v1.FeedMergeTab.queue:type_name -> frontend.v1.FeedMergeTabQueue
+	287, // 327: frontend.v1.FeedMergeTab.pre_prompt:type_name -> frontend.v1.FeedMergeTabPrePrompt
+	288, // 328: frontend.v1.FeedMergeTab.rebasing:type_name -> frontend.v1.FeedMergeTabRebasing
+	291, // 329: frontend.v1.FeedMergeTab.conflicts:type_name -> frontend.v1.FeedMergeTabConflicts
+	292, // 330: frontend.v1.FeedMergeTab.tests:type_name -> frontend.v1.FeedMergeTabTests
+	301, // 331: frontend.v1.FeedMergeTab.fixes:type_name -> frontend.v1.FeedMergeTabFixes
+	303, // 332: frontend.v1.FeedMergeTab.committing:type_name -> frontend.v1.FeedMergeTabCommitting
+	305, // 333: frontend.v1.FeedMergeTab.updating_main:type_name -> frontend.v1.FeedMergeTabUpdatingMain
+	309, // 334: frontend.v1.FeedMergeTab.post_prompt:type_name -> frontend.v1.FeedMergeTabPostPrompt
+	284, // 335: frontend.v1.FeedMergeTabSettled.succeeded:type_name -> frontend.v1.FeedMergeTabSucceeded
+	285, // 336: frontend.v1.FeedMergeTabSettled.failed:type_name -> frontend.v1.FeedMergeTabFailed
+	282, // 337: frontend.v1.FeedMergeTabQueue.live:type_name -> frontend.v1.FeedMergeTabLive
+	283, // 338: frontend.v1.FeedMergeTabQueue.settled:type_name -> frontend.v1.FeedMergeTabSettled
+	310, // 339: frontend.v1.FeedMergeTabQueue.queue:type_name -> frontend.v1.FeedMergeQueue
+	282, // 340: frontend.v1.FeedMergeTabPrePrompt.live:type_name -> frontend.v1.FeedMergeTabLive
+	283, // 341: frontend.v1.FeedMergeTabPrePrompt.settled:type_name -> frontend.v1.FeedMergeTabSettled
+	282, // 342: frontend.v1.FeedMergeTabRebasing.live:type_name -> frontend.v1.FeedMergeTabLive
+	283, // 343: frontend.v1.FeedMergeTabRebasing.settled:type_name -> frontend.v1.FeedMergeTabSettled
+	289, // 344: frontend.v1.FeedMergeTabRebasing.progress:type_name -> frontend.v1.FeedMergeRebaseProgress
+	290, // 345: frontend.v1.FeedMergeTabRebasing.lines:type_name -> frontend.v1.FeedMergeRebaseLine
+	282, // 346: frontend.v1.FeedMergeTabConflicts.live:type_name -> frontend.v1.FeedMergeTabLive
+	283, // 347: frontend.v1.FeedMergeTabConflicts.settled:type_name -> frontend.v1.FeedMergeTabSettled
+	282, // 348: frontend.v1.FeedMergeTabTests.live:type_name -> frontend.v1.FeedMergeTabLive
+	283, // 349: frontend.v1.FeedMergeTabTests.settled:type_name -> frontend.v1.FeedMergeTabSettled
+	296, // 350: frontend.v1.FeedMergeTabTests.suites:type_name -> frontend.v1.FeedMergeTestSuite
+	293, // 351: frontend.v1.FeedMergeTabTests.log:type_name -> frontend.v1.FeedMergeTestLog
+	294, // 352: frontend.v1.FeedMergeTestLog.token:type_name -> frontend.v1.FeedMergeTestLogToken
+	295, // 353: frontend.v1.FeedMergeTestLog.label:type_name -> frontend.v1.FeedMergeTestLogLabel
+	297, // 354: frontend.v1.FeedMergeTestSuite.running:type_name -> frontend.v1.FeedMergeTestSuiteRunning
+	298, // 355: frontend.v1.FeedMergeTestSuite.passed:type_name -> frontend.v1.FeedMergeTestSuitePassed
+	299, // 356: frontend.v1.FeedMergeTestSuite.failed:type_name -> frontend.v1.FeedMergeTestSuiteFailed
+	300, // 357: frontend.v1.FeedMergeTestSuite.output:type_name -> frontend.v1.FeedMergeTestSpan
+	282, // 358: frontend.v1.FeedMergeTabFixes.live:type_name -> frontend.v1.FeedMergeTabLive
+	283, // 359: frontend.v1.FeedMergeTabFixes.settled:type_name -> frontend.v1.FeedMergeTabSettled
+	302, // 360: frontend.v1.FeedMergeTabFixes.attempt:type_name -> frontend.v1.FeedMergeFixAttempt
+	282, // 361: frontend.v1.FeedMergeTabCommitting.live:type_name -> frontend.v1.FeedMergeTabLive
+	283, // 362: frontend.v1.FeedMergeTabCommitting.settled:type_name -> frontend.v1.FeedMergeTabSettled
+	304, // 363: frontend.v1.FeedMergeTabCommitting.subject:type_name -> frontend.v1.FeedMergeCommitSubject
+	282, // 364: frontend.v1.FeedMergeTabUpdatingMain.live:type_name -> frontend.v1.FeedMergeTabLive
+	283, // 365: frontend.v1.FeedMergeTabUpdatingMain.settled:type_name -> frontend.v1.FeedMergeTabSettled
+	306, // 366: frontend.v1.FeedMergeTabUpdatingMain.step:type_name -> frontend.v1.FeedMergeUpdatingMainStep
+	307, // 367: frontend.v1.FeedMergeUpdatingMainStep.fetching:type_name -> frontend.v1.FeedMergeUpdatingMainFetching
+	308, // 368: frontend.v1.FeedMergeUpdatingMainStep.fast_forwarding:type_name -> frontend.v1.FeedMergeUpdatingMainFastForwarding
+	282, // 369: frontend.v1.FeedMergeTabPostPrompt.live:type_name -> frontend.v1.FeedMergeTabLive
+	283, // 370: frontend.v1.FeedMergeTabPostPrompt.settled:type_name -> frontend.v1.FeedMergeTabSettled
+	311, // 371: frontend.v1.FeedMergeQueue.ahead:type_name -> frontend.v1.FeedMergeQueueEntry
+	311, // 372: frontend.v1.FeedMergeQueue.current:type_name -> frontend.v1.FeedMergeQueueEntry
+	311, // 373: frontend.v1.FeedMergeQueue.behind:type_name -> frontend.v1.FeedMergeQueueEntry
+	312, // 374: frontend.v1.FeedMergeQueueEntry.workspace:type_name -> frontend.v1.FeedMergeQueueWorkspace
+	313, // 375: frontend.v1.FeedMergeQueueEntry.label:type_name -> frontend.v1.FeedMergeQueueLabel
+	314, // 376: frontend.v1.FeedMergeQueueEntry.merging:type_name -> frontend.v1.FeedMergeQueueMerging
+	315, // 377: frontend.v1.FeedMergeQueueEntry.waiting:type_name -> frontend.v1.FeedMergeQueueWaiting
+	331, // 378: frontend.v1.FeedMergeQueueWorkspace.ref:type_name -> workspace.v1.WorkspaceRef
+	281, // 379: frontend.v1.FeedMergeQueueMerging.active_tab:type_name -> frontend.v1.FeedMergeTabLabel
+	380, // [380:380] is the sub-list for method output_type
+	380, // [380:380] is the sub-list for method input_type
+	380, // [380:380] is the sub-list for extension type_name
+	380, // [380:380] is the sub-list for extension extendee
+	0,   // [0:380] is the sub-list for field type_name
 }
 
 func init() { file_frontend_v1_feed_proto_init() }
