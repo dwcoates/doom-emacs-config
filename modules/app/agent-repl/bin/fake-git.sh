@@ -18,6 +18,13 @@
 #                         --is-inside-work-tree | --git-dir |
 #                         --git-common-dir, diff --cached --name-only,
 #                         config KEY VALUE, config --type=bool --get KEY,
+#   linked worktrees:     worktree add [--quiet] -b BRANCH PATH
+#
+# A LINKED WORKTREE is a directory whose .fakegit is a FILE naming the main
+# worktree ("main <path>"), as a real linked worktree's .git file names its
+# repository. Only where a linked worktree belongs is modelled -- rev-parse
+# --git-dir / --git-common-dir / --show-toplevel and worktree list -- and not
+# its own content, index or branch: any other call inside one exits 2.
 #                         status --porcelain,
 #                         ls-files -s, log -1 --format, show -s --format=%ct,
 #                         rev-list --count A..B, worktree list --porcelain
@@ -62,7 +69,7 @@ CMD="$1"; shift
 find_top() {
     local dir="$CWD"
     while :; do
-        if [ -d "$dir/.fakegit" ]; then printf '%s' "$dir"; return 0; fi
+        if [ -e "$dir/.fakegit" ]; then printf '%s' "$dir"; return 0; fi
         [ -n "${GIT_CEILING_DIRECTORIES:-}" ] && [ "$dir" = "$GIT_CEILING_DIRECTORIES" ] && return 1
         [ "$dir" = "/" ] && return 1
         dir="${dir%/*}"; [ -n "$dir" ] || dir=/
@@ -77,6 +84,15 @@ fi
 
 TOP="$(find_top)" || die "not a git repository (or any of the parent directories)"
 G="$TOP/.fakegit"
+# MAIN is the main worktree's top; LINKED is set inside a linked worktree.
+MAIN="$TOP"
+LINKED=""
+if [ -f "$G" ]; then
+    read -r tag MAIN < "$G" || true
+    [ "$tag" = main ] && [ -d "$MAIN/.fakegit" ] || die "a broken linked worktree at $TOP"
+    G="$MAIN/.fakegit"
+    LINKED=1
+fi
 # Where the -C directory sits in the tree: relative pathspecs resolve from it.
 PREFIX="${CWD#"$TOP"}"; PREFIX="${PREFIX#/}"
 
@@ -284,6 +300,14 @@ format_commit() { # FORMAT SHA
 # ---- subcommands ------------------------------------------------------------
 
 split_dashdash "$@"
+if [ -n "$LINKED" ]; then
+    case "$CMD $*" in
+        "rev-parse --git-dir") printf '%s/worktrees/%s\n' "$G" "${TOP##*/}"; exit 0 ;;
+        "rev-parse --git-common-dir") printf '%s\n' "$G"; exit 0 ;;
+        "rev-parse --show-toplevel" | "worktree list --porcelain" | "worktree add "*) ;;
+        *) EXIT=2 die "unmodelled invocation inside a linked worktree: $CMD $*" ;;
+    esac
+fi
 case "$CMD $*" in
     "rev-parse HEAD")
         head_sha || die "ambiguous argument 'HEAD': unknown revision"
@@ -325,7 +349,34 @@ case "$CMD $*" in
             if path_matches "$path"; then printf '%s\n' "$path"; fi
         done
         ;;
-    "worktree list --porcelain") printf 'worktree %s\n\n' "$TOP" ;;
+    # The main worktree first, then every linked one in the order added, each
+    # by its physical path as real git prints it.
+    "worktree list --porcelain")
+        printf 'worktree %s\n\n' "$(cd "$MAIN" && pwd -P)"
+        if [ -f "$G/worktrees" ]; then
+            while IFS= read -r wt; do printf 'worktree %s\n\n' "$wt"; done < "$G/worktrees"
+        fi
+        ;;
+    "worktree add "*)
+        wt=""
+        branch=""
+        i=1
+        while [ "$i" -lt "${#OPTS[@]}" ]; do
+            case "${OPTS[$i]}" in
+                --quiet | -q) ;;
+                -b) i=$((i + 1)); branch="${OPTS[$i]:-}" ;;
+                -*) EXIT=2 die "unmodelled worktree add form: $*" ;;
+                *) [ -z "$wt" ] || EXIT=2 die "unmodelled worktree add form: $*"; wt="${OPTS[$i]}" ;;
+            esac
+            i=$((i + 1))
+        done
+        [ -n "$wt" ] && [ -n "$branch" ] || EXIT=2 die "unmodelled worktree add form: $*"
+        case "$wt" in /*) ;; *) wt="$CWD/$wt" ;; esac
+        [ ! -e "$wt" ] || die "'$wt' already exists"
+        mkdir -p "$wt"
+        printf 'main %s\n' "$MAIN" > "$wt/.fakegit"
+        printf '%s\n' "$(cd "$wt" && pwd -P)" >> "$G/worktrees"
+        ;;
     "add -A")
         set_specs
         stage

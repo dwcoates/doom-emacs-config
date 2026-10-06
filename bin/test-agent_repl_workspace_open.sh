@@ -21,9 +21,8 @@
 
 set -euo pipefail
 
-# A pre-commit hook exports its live index to children. This harness owns only
-# scratch repositories, so inheriting that binding would let fixture `git add`
-# and `git commit` rewrite the caller's real staging index.
+# A pre-commit hook exports its live index to children. The fake git ignores
+# them, but nothing here should carry a binding to the caller's repository.
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX
 
 THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -80,11 +79,22 @@ export AGENT_REPL_CLAUDE_BIN="$STUB_BIN/claude"
 # --- fixture repository -----------------------------------------------------
 # A main worktree plus one linked worktree, which is the shape every workspace
 # this script is run from has.
-git_q() { git -c user.name=t -c user.email=t@t.invalid -c commit.gpgsign=false -C "$@"; }
+#
+# NO REAL GIT RUNS HERE (owner rule). The repository is bin/fake-git.sh's model,
+# installed as the only `git` on PATH for the harness AND the script it runs;
+# the harness refuses to start if any other `git` would answer.
+FAKE_GIT_BIN="$WORK/fake-git-bin"
+mkdir -p "$FAKE_GIT_BIN"
+ln -s "$THIS_DIR/../modules/app/agent-repl/bin/fake-git.sh" "$FAKE_GIT_BIN/git"
+export PATH="$FAKE_GIT_BIN:$PATH"
+if [ "$(command -v git)" != "$FAKE_GIT_BIN/git" ]; then
+    echo "$(basename "$0"): the fake git is not the git on PATH; refusing to run real git" >&2
+    exit 2
+fi
+git_q() { git -C "$@"; }
 REPO="$WORK/repo"
 mkdir -p "$REPO"
 git_q "$REPO" init --quiet
-git_q "$REPO" symbolic-ref HEAD refs/heads/master
 echo seed > "$REPO/seed.txt"
 git_q "$REPO" add seed.txt
 git_q "$REPO" commit --quiet -m seed
