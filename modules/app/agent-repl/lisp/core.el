@@ -2268,80 +2268,106 @@ differently:
   - NO WORKSPACE AT ALL is missing attribution at the call site, which no
     directory can supply.  It keeps its `log-routing-error' line at ERROR
     beside the rerouted original."
-  (let* ((routing (agent-repl--resolve-log-workspace ws (or operation-fmt fmt)))
-         (routing-error (plist-get routing :routing-error))
-         (sink-ws (plist-get routing :workspace))
-         (pseudo-ws (plist-get routing :pseudo))
-         (unroutable-ws (plist-get routing :unroutable)))
-    ;; THE LEVEL FOLLOWS THE CLASS, and the record is still built and written
-    ;; here rather than handed to a rung: `agent-repl--emit-log-record' is the
-    ;; one builder and the one writer, and re-entering a rung from inside it
-    ;; would break that and strip the `unroutable_workspace' stamp this record
-    ;; exists to carry.  A stale registry row is a real inconsistency in
-    ;; durable state, so it is recorded at WARN; a workspace that simply has
-    ;; no durable home of its own is ordinary, so it is recorded at INFO.
-    (when-let* ((class (and unroutable-ws
-                            (agent-repl--claim-central-log-fallback
-                             unroutable-ws)))
-                (fallback-level (if (eq class 'stale-registration)
-                                    "warn"
-                                  "info")))
-      (when (and agent-repl-log-to-file
-                 (agent-repl--log-record-persists-p fallback-level "normal"))
-        (agent-repl--do-log-to-file
-         (agent-repl--log-record nil fallback-level "normal"
-                                 agent-repl--central-log-fallback-format
-                                 (list unroutable-ws (plist-get routing :reason))
-                                 nil nil unroutable-ws)
-         nil)))
-    (if routing-error
-        (let* ((offender (plist-get routing :offender))
-               (reason (plist-get routing :reason))
-               (route-fmt "elisp.core.log-routing-error workspace=%S reason=%s original-operation=%s")
-               (route-args (list offender reason
-                                 (agent-repl--log-operation (or operation-fmt fmt))))
-               (record (agent-repl--log-record nil "error" "normal"
-                                               route-fmt route-args))
-               (original (agent-repl--log-record nil level verbosity fmt args
-                                                 nil operation-fmt offender))
-               (text (agent-repl--build-log-text nil fmt args)))
-          (when agent-repl-log-to-file
-            (agent-repl--do-log-to-file record nil))
-          (agent-repl--note-unroutable-log-workspace offender)
-          (when (and agent-repl-log-to-file
-                     (agent-repl--log-record-persists-p level verbosity))
-            (agent-repl--do-log-to-file original nil))
-          (unless fatal
-            (pcase message-mode
-              ('quiet (agent-repl--emit-message text nil))
-              ('echo (agent-repl--emit-message text t))
-              ('backend
-               (agent-repl--emit-message
-                (concat "agent-repl: " (apply #'format fmt args)) t))))
-          (when fatal
-            (error "%s" text))
-          original)
-      (let* ((record (agent-repl--log-record sink-ws level verbosity fmt args
-                                             pseudo-ws operation-fmt unroutable-ws))
-             (text (agent-repl--build-log-text sink-ws fmt args))
-             (to-file (and agent-repl-log-to-file
-                           (agent-repl--log-record-persists-p level verbosity)))
-             (to-buffer (and agent-repl--workspace-log-buffer-enabled sink-ws
-                             (agent-repl--log-record-displays-p level verbosity))))
-        (when to-file
-          (agent-repl--do-log-to-file record sink-ws))
-        (when to-buffer
-          (agent-repl--append-workspace-log sink-ws record))
-        (unless fatal
-          (pcase message-mode
-            ('quiet (agent-repl--emit-message text nil))
-            ('echo (agent-repl--emit-message text t))
-            ('backend
-             (agent-repl--emit-message
-              (concat "agent-repl: " (apply #'format fmt args)) t))))
-        (when fatal
-          (error "%s" text))
-        record))))
+  (cl-flet
+      ;; Record, once per workspace, that its records go to the central sink.
+      ;; The level follows the class: a stale registry row is WARN, every
+      ;; other class INFO.  A local function so the one builder and the one
+      ;; writer stay this function's own.
+      ((announce-central-fallback (unroutable reason)
+         (when-let* ((class (agent-repl--claim-central-log-fallback unroutable))
+                     (fallback-level (if (eq class 'stale-registration)
+                                         "warn"
+                                       "info")))
+           (when (and agent-repl-log-to-file
+                      (agent-repl--log-record-persists-p fallback-level "normal"))
+             (agent-repl--do-log-to-file
+              (agent-repl--log-record nil fallback-level "normal"
+                                      agent-repl--central-log-fallback-format
+                                      (list unroutable reason)
+                                      nil nil unroutable)
+              nil)))))
+    (let* ((routing (agent-repl--resolve-log-workspace ws (or operation-fmt fmt)))
+           (routing-error (plist-get routing :routing-error))
+           (sink-ws (plist-get routing :workspace))
+           (pseudo-ws (plist-get routing :pseudo))
+           (unroutable-ws (plist-get routing :unroutable)))
+      ;; THE LEVEL FOLLOWS THE CLASS, and the record is still built and written
+      ;; here rather than handed to a rung: `agent-repl--emit-log-record' is the
+      ;; one builder and the one writer, and re-entering a rung from inside it
+      ;; would break that and strip the `unroutable_workspace' stamp this record
+      ;; exists to carry.  A stale registry row is a real inconsistency in
+      ;; durable state, so it is recorded at WARN; a workspace that simply has
+      ;; no durable home of its own is ordinary, so it is recorded at INFO.
+      (when unroutable-ws
+	(announce-central-fallback unroutable-ws (plist-get routing :reason)))
+      (if routing-error
+          (let* ((offender (plist-get routing :offender))
+		 (reason (plist-get routing :reason))
+		 (route-fmt "elisp.core.log-routing-error workspace=%S reason=%s original-operation=%s")
+		 (route-args (list offender reason
+                                   (agent-repl--log-operation (or operation-fmt fmt))))
+		 (record (agent-repl--log-record nil "error" "normal"
+						 route-fmt route-args))
+		 (original (agent-repl--log-record nil level verbosity fmt args
+                                                   nil operation-fmt offender))
+		 (text (agent-repl--build-log-text nil fmt args)))
+            (when agent-repl-log-to-file
+              (agent-repl--do-log-to-file record nil))
+            (agent-repl--note-unroutable-log-workspace offender)
+            (when (and agent-repl-log-to-file
+                       (agent-repl--log-record-persists-p level verbosity))
+              (agent-repl--do-log-to-file original nil))
+            (unless fatal
+              (pcase message-mode
+		('quiet (agent-repl--emit-message text nil))
+		('echo (agent-repl--emit-message text t))
+		('backend
+		 (agent-repl--emit-message
+                  (concat "agent-repl: " (apply #'format fmt args)) t))))
+            (when fatal
+              (error "%s" text))
+            original)
+	(let* ((to-file (and agent-repl-log-to-file
+                             (agent-repl--log-record-persists-p level verbosity)))
+               (record nil))
+          ;; THE DIRECTORY CAN GO BETWEEN ROUTING AND WRITING.  A worktree a
+          ;; merge or a plain `rm' removes is removed by another process, so a
+          ;; workspace routed to its own sink a moment ago may own none by the
+          ;; time its identity is stamped or its link re-made.  That is the same
+          ;; fact routing would have found a moment later, so the record takes
+          ;; the same central fallback rather than signalling into its caller.
+          ;; A failure while the workspace is STILL routable is not that fact
+          ;; and is signalled unchanged.
+          (condition-case err
+              (progn
+		(setq record (agent-repl--log-record sink-ws level verbosity fmt args
+                                                     pseudo-ws operation-fmt unroutable-ws))
+		(when to-file
+                  (agent-repl--do-log-to-file record sink-ws)))
+            (error
+             (unless (and sink-ws (not (agent-repl--ws-log-routable-p sink-ws)))
+               (signal (car err) (cdr err)))
+             (announce-central-fallback sink-ws (error-message-string err))
+             (setq record (agent-repl--log-record nil level verbosity fmt args
+                                                  nil operation-fmt sink-ws))
+             (when to-file
+               (agent-repl--do-log-to-file record nil))
+             (setq sink-ws nil)))
+          (let ((text (agent-repl--build-log-text sink-ws fmt args))
+		(to-buffer (and agent-repl--workspace-log-buffer-enabled sink-ws
+				(agent-repl--log-record-displays-p level verbosity))))
+            (when to-buffer
+              (agent-repl--append-workspace-log sink-ws record))
+            (unless fatal
+              (pcase message-mode
+		('quiet (agent-repl--emit-message text nil))
+		('echo (agent-repl--emit-message text t))
+		('backend
+		 (agent-repl--emit-message
+                  (concat "agent-repl: " (apply #'format fmt args)) t))))
+            (when fatal
+              (error "%s" text))
+            record))))))
 
 ;;;; ---- Echo-area (modeline) severity gate ----
 ;;
