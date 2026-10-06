@@ -152,6 +152,10 @@ func raArm(r *frontendv1.WorkspaceRoster, id string) string {
 			arm = "interrupted"
 		case row.GetTurnFailed() != nil:
 			arm = "turn_failed"
+		case row.GetTurnDied() != nil:
+			arm = "turn_died"
+		case row.GetVendorBlocked() != nil:
+			arm = "vendor_blocked"
 		case row.GetIdleAsync() != nil:
 			arm = "idle_async"
 		case row.GetSevered() != nil:

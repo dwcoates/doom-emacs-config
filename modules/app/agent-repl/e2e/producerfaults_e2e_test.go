@@ -220,13 +220,13 @@ func TestQueryEofEndsTheTurnAsQueryDied(t *testing.T) {
 	}
 }
 
-// TestQueryDiedFailsTheFootersTurn is the same death seen on the FOOTER. A
-// dead query is a FAILED TURN, not a block (owner ruling, 2026-09-28): the
-// strip draws the turquoise `turn_failed` status arm (FooterStatusTurnFailed,
-// which replaced `idle · turn_failed`), the same turn end the roster draws
-// `turn_failed`, and its activity line is the daemon-composed
-// FooterStatusActivityQueryDied.
-func TestQueryDiedFailsTheFootersTurn(t *testing.T) {
+// TestQueryDiedRaisesTheFootersTurnDiedFault is the same death seen on the
+// FOOTER. A dead query is agent-repl's fault, not a block (owner rulings,
+// 2026-09-28 and 2026-10-06): the strip draws `agent_repl_fault · turn_died`,
+// the same fault the roster draws `turn_died`, and its activity line is the
+// daemon's per-cause sentence (FooterStatusActivityTurnEnded), the one the
+// feed's turn-end row carries as its headline.
+func TestQueryDiedRaisesTheFootersTurnDiedFault(t *testing.T) {
 	t.Parallel()
 	// Arrange: the footer stream is opened BEFORE the prompt so the failed
 	// turn's push is queued in order rather than possibly missed.
@@ -240,12 +240,12 @@ func TestQueryDiedFailsTheFootersTurn(t *testing.T) {
 	SubmitPrompt(t, w, ws, "!query-eof")
 
 	// Assert
-	view := pfAwaitView(t, w, footer.Stream, "the footer's failed turn after the query died", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetTurnFailed() != nil
+	view := pfAwaitView(t, w, footer.Stream, "the footer's turn_died fault after the query died", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetStatus().GetAgentReplFault().GetTurnDied() != nil
 	})
-	failed := view.GetStrip().GetStatus().GetTurnFailed()
-	if got := failed.GetActivity().GetSalient().GetQueryDied().GetText(); got == "" {
-		t.Errorf("footer turn_failed activity query_died text = %q, want the daemon's composed dead-query line", got)
+	fault := view.GetStrip().GetStatus().GetAgentReplFault()
+	if got := fault.GetActivity().GetSalient().GetTurnEnded().GetText(); got == "" {
+		t.Errorf("footer turn_died activity turn_ended text = %q, want the daemon's per-cause sentence", got)
 	}
 }
 
