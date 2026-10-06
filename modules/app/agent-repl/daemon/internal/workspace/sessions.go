@@ -611,6 +611,11 @@ func (f *Fleet) Health(ws ids.WorkspaceID) (bool, bool) {
 type coldGate struct {
 	served    ServedColdGate
 	answering bool
+	// remediated is set once the shim ACCEPTED the answer's remediated resume:
+	// the conversation is no longer cold, so a prompt is no longer refused by
+	// the gate's name, though the gate itself retires only when the bring-up
+	// settles (EndColdGate) and a failed bring-up raises it again.
+	remediated bool
 	// configDir is the account root the parked session spends from, kept so
 	// a gate raised again serves the same menu.
 	configDir string
@@ -664,6 +669,32 @@ func (f *Fleet) EndColdGate(ws ids.WorkspaceID, vendorSessionID string) {
 	f.mu.Unlock()
 	if ended {
 		f.logTransition(ws, "cold_gate_answering", true, false, dlog.Context{"reason": "remediated"})
+	}
+}
+
+// remediateColdGate marks the TAKEN gate for VENDORSESSIONID remediated: the
+// shim accepted the answer's resume, so the conversation is warm again and the
+// prompt queue stops refusing by the gate's name (ColdGateDetail).
+//
+// IT RUNS BEFORE THE SESSION IS BROUGHT UP, NOT AFTER IT SETTLES. The bring-up
+// publishes the host view live -- watcher attached, composer open -- and the
+// gate used to retire only once the whole bring-up had returned
+// (coldGateSettled -> EndColdGate). A prompt sent the moment the session
+// showed live was refused `cold_gate: the conversation is cold at ...` for a
+// conversation that had just been paid for (e2e TestColdGate/Pay and /Compact,
+// 2026-10-03: host view live at .760, submit refused at .769, gate ended at
+// .772). From here on the workspace is an ordinary session coming up.
+func (f *Fleet) remediateColdGate(ws ids.WorkspaceID, vendorSessionID string) {
+	f.mu.Lock()
+	held, ok := f.coldGates[ws]
+	marked := ok && held.answering && !held.remediated && held.served.VendorSessionID == vendorSessionID
+	if marked {
+		held.remediated = true
+		f.coldGates[ws] = held
+	}
+	f.mu.Unlock()
+	if marked {
+		f.logTransition(ws, "cold_gate_refusing_prompts", true, false, dlog.Context{"reason": "remediation accepted"})
 	}
 }
 
@@ -1448,6 +1479,9 @@ func (f *Fleet) ResumeCold(ctx context.Context, ws ids.WorkspaceID, resume ColdR
 		return refuse(log, "AnswerColdGate", ArmNoSession,
 			fmt.Sprintf("the shim refused the remediated resume of %q as cold again", ws), false)
 	}
+	// THE PROMPT REFUSAL LIFTS BEFORE THE SESSION SHOWS LIVE. See
+	// remediateColdGate.
+	f.remediateColdGate(ws, resume.VendorSessionID)
 	return f.sessionUp(ctx, log, ws, session.client, started, previous, configDir, hostSessionID)
 }
 
@@ -2457,7 +2491,7 @@ func (f *Fleet) ColdGateDetail(ws ids.WorkspaceID) (string, bool) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	held, ok := f.coldGates[ws]
-	if !ok {
+	if !ok || held.remediated {
 		return "", false
 	}
 	return held.served.Detail, true
