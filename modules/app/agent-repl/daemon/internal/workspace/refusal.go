@@ -17,6 +17,10 @@ import (
 // not borrow it.
 const opRefusal = "daemon.refusal.typed"
 
+// opTemporarySeam is the ERROR a test-run daemon records when it refuses a
+// temporary folder with no test registration root (temporaryRefusal).
+const opTemporarySeam = "daemon.refusal.temporary_seam_missing"
+
 // The arm names this package refuses under. They exist as constants because
 // each one is a row in daemon/ERROR-ARMS.md and the two must not drift.
 const (
@@ -303,6 +307,17 @@ func temporaryRefusal(log dlog.Logger, rpc string, err error) *Refusal {
 	inside, ok := tempdirs.AsInside(err)
 	if !ok {
 		return nil
+	}
+	if inside.SeamMissing {
+		// A TEST HARNESS THAT NEVER STATED ITS SEAM. The refusal stands and
+		// is answered as ever, but a test-run daemon refusing a temporary
+		// folder with no exempt root is a launcher defect, and at INFO it
+		// passed silently: the e2e-emacs layer's workspaces simply never
+		// appeared (2026-10-06). At ERROR every harness's warning sweep fails
+		// the run that hit it, naming the variable to set.
+		log.Error(opTemporarySeam, inside.MissingSeam(), dlog.Context{
+			"rpc": rpc, "dir": inside.Dir, "temporary_root": inside.Root,
+		})
 	}
 	return refuseWith(log, rpc, ArmInsideTemporaryDirectory, inside.Error(), false, map[string]any{
 		"dir": inside.Dir, "temporary_root": inside.Root,
