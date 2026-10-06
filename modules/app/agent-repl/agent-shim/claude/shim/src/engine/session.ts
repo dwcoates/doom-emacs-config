@@ -470,8 +470,9 @@ const LIVE_SIGNAL_TIMEOUT_MS = 3_000;
  * messages already in hand — a `SessionStart:resume` hook that started and then
  * SUCCEEDED — and nothing in any log said so, so the only way to learn what the
  * vendor had emitted was to decode the store's frames by hand. The kinds are
- * bounded because the list is a diagnosis, not a transcript: everything the
- * vendor emitted is on the record plane already.
+ * bounded because the list is a diagnosis, not a transcript: everything else the
+ * vendor emitted is on the record plane already, bar the hook records, which
+ * are never stored (convert/hooks.ts) and are logged as they are folded.
  */
 const PRE_INIT_KINDS_KEPT = 24;
 
