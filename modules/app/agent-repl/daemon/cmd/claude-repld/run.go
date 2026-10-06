@@ -385,6 +385,7 @@ func run(ctx context.Context, opts options, h hooks) error {
 		"orphans_closed":       len(report.Orphaned),
 		"missing_dir_closed":   len(report.MissingDirClosed),
 		"missing_dir_restored": len(report.MissingDirRestored),
+		"repositories_retired": len(report.RetiredRepositories),
 		"holds_restored":       report.HoldsRestored,
 		"pending_bring_up":     len(report.PendingBringUp),
 		"orphan_leases":        len(report.OrphanLeases),

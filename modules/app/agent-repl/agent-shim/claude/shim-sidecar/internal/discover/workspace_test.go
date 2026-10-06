@@ -34,14 +34,14 @@ func TestResolveWorkspaceReadsCWDWithoutDecodingTheProjectSlug(t *testing.T) {
 	}
 
 	// Act.
-	gotDir, gotID, err := ResolveWorkspace(target)
+	got, err := ResolveWorkspace(target)
 
 	// Assert.
 	if err != nil {
 		t.Fatalf("ResolveWorkspace = %v", err)
 	}
-	if gotDir != workspaceDir || gotID != wantID {
-		t.Fatalf("workspace = (%q, %q), want (%q, %q)", gotDir, gotID, workspaceDir, wantID)
+	if got != (Attribution{Dir: workspaceDir, ID: wantID}) {
+		t.Fatalf("attribution = %+v, want (%q, %q) matched to its project folder", got, workspaceDir, wantID)
 	}
 }
 
@@ -59,14 +59,14 @@ func TestResolveWorkspaceNeverDecodesTheLossyProjectDirectory(t *testing.T) {
 	target := Target{Path: transcript, Kind: tail.KindSessionTranscript, SessionID: "session-1", ConfigRoot: filepath.Join(root, "config")}
 
 	// Act.
-	gotDir, _, err := ResolveWorkspace(target)
+	got, err := ResolveWorkspace(target)
 
 	// Assert.
 	if err != nil {
 		t.Fatalf("ResolveWorkspace = %v", err)
 	}
-	if gotDir != "/actual/project" {
-		t.Fatalf("workspace dir = %q, want the transcript cwd rather than a decoded slug", gotDir)
+	if got.Dir != "/actual/project" {
+		t.Fatalf("workspace dir = %q, want the transcript cwd rather than a decoded slug", got.Dir)
 	}
 }
 
@@ -78,7 +78,7 @@ func TestTranscriptCWDReadsACompleteTokenFromAGrowingRecord(t *testing.T) {
 	}
 
 	// Act.
-	got, err := transcriptCWD(path)
+	got, _, err := transcriptCWD(path, "-work-project")
 
 	// Assert.
 	if err != nil {
@@ -86,6 +86,89 @@ func TestTranscriptCWDReadsACompleteTokenFromAGrowingRecord(t *testing.T) {
 	}
 	if got != "/work/project" {
 		t.Fatalf("cwd = %q, want the complete token from the growing record", got)
+	}
+}
+
+// sessionTranscript writes a main transcript into the project folder named
+// slug, one record per cwd, and answers the target that names it.
+func sessionTranscript(t *testing.T, slug string, cwds ...string) Target {
+	t.Helper()
+	configRoot := filepath.Join(t.TempDir(), "config")
+	projectDir := filepath.Join(configRoot, "projects", slug)
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatalf("create project fixture: %v", err)
+	}
+	var contents string
+	for _, cwd := range cwds {
+		contents += "{\"cwd\":" + quotedJSON(t, cwd) + ",\"type\":\"user\"}\n"
+	}
+	transcript := filepath.Join(projectDir, "session-1.jsonl")
+	if err := os.WriteFile(transcript, []byte(contents), 0o600); err != nil {
+		t.Fatalf("write transcript fixture: %v", err)
+	}
+	return Target{Path: transcript, Kind: tail.KindSessionTranscript, SessionID: "session-1", ConfigRoot: configRoot}
+}
+
+func TestResolveWorkspaceAttributesTheCWDThatEncodesToTheProjectFolder(t *testing.T) {
+	tests := []struct {
+		name         string
+		slug         string
+		cwds         []string
+		wantDir      string
+		wantFallback bool
+	}{
+		{
+			name:    "a single cwd matching its folder is attributed as before",
+			slug:    "-work-ship-gns",
+			cwds:    []string{"/work/ship-gns"},
+			wantDir: "/work/ship-gns",
+		},
+		{
+			name:    "a later cwd matching the folder wins over the first",
+			slug:    "-work-ship-gns",
+			cwds:    []string{"/work/iterm-2", "/work/iterm-2", "/work/ship-gns", "/work/iterm-2"},
+			wantDir: "/work/ship-gns",
+		},
+		{
+			name:         "no cwd matching the folder falls back to the first",
+			slug:         "-elsewhere",
+			cwds:         []string{"/work/iterm-2", "/work/ship-gns"},
+			wantDir:      "/work/iterm-2",
+			wantFallback: true,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange.
+			target := sessionTranscript(t, test.slug, test.cwds...)
+
+			// Act.
+			got, err := ResolveWorkspace(target)
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("ResolveWorkspace = %v", err)
+			}
+			if got.Dir != test.wantDir || got.FirstCWDFallback != test.wantFallback {
+				t.Fatalf("attribution = %+v, want dir %q fallback %v", got, test.wantDir, test.wantFallback)
+			}
+		})
+	}
+}
+
+func TestTranscriptCWDRefusesATranscriptWithNoCWDYet(t *testing.T) {
+	// Arrange.
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	if err := os.WriteFile(path, []byte("{\"type\":\"queue-operation\"}\n"), 0o600); err != nil {
+		t.Fatalf("write transcript fixture: %v", err)
+	}
+
+	// Act.
+	_, _, err := transcriptCWD(path, "-work-project")
+
+	// Assert.
+	if err == nil {
+		t.Fatal("transcriptCWD attributed a transcript that records no cwd")
 	}
 }
 

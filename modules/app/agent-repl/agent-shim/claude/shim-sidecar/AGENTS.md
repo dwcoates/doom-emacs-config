@@ -478,7 +478,10 @@ because neither spelling may make a spool invisible.
   POSITIONALLY and its content is never read; every identity comes from what is
   INSIDE it — the session uuid file names, `subagents/`, `wf_*`, `agent-<id>`,
   and the `tasks/` basenames. Never add a slug-to-path decoder, and never
-  compare slugs across roots as though they were paths.
+  compare slugs across roots as though they were paths. ENCODING a known cwd
+  and comparing it to the folder it sits in is not decoding: that is how a
+  transcript's workspace is chosen (below), with the one shared spelling of the
+  rule, `agentrepl/logging.VendorProjectSlug`.
 - The `<vendor session>` directory segment of a spool path is not read either:
   it is the harness's RUNTIME session id (see below).
 
@@ -1098,7 +1101,15 @@ foreground harnesses may use `logging.NewAtLevel`.
   offset is absent rather than a zero that reads as the start of the file.
 - Every config-root file resolves `workspace_dir` from an authoritative
   transcript `cwd`, never by decoding the lossy project slug,
-  and derives `workspace_id` with the shared workspace digest. Spawn
+  and derives `workspace_id` with the shared workspace digest. A SESSION CAN
+  CHANGE DIRECTORY, so a transcript can record several cwds, and the vendor
+  files it under the project folder of the cwd it is kept for: the attributed
+  cwd is the first one whose `VendorProjectSlug` equals the folder the file
+  lives in, wherever in the file it appears (a session begun in a worktree and
+  continued elsewhere is the second directory's, not the first's). When NO cwd
+  encodes to the folder, the transcript's FIRST cwd is used and that is stated
+  once per file at `info` (`resolve-transcript-workspace`, reason
+  `first_cwd_fallback`); ingestion is never held back for it. Spawn
   observations carry that identity plus `claude_session_id` to task spools.
   These three identifiers are promoted top-level record fields and every
   downstream tail/handler/converter logger inherits them.

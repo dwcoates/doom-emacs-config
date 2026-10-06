@@ -29,6 +29,12 @@ var ErrSessionIdentityMissing = errors.New("wsm: a session record carries no hos
 // tombstoned hold never resurrects.
 var ErrTombstoned = errors.New("wsm: held prompt is tombstoned")
 
+// ErrRepositoryInUse refuses a repository retirement while one of its
+// workspaces is open or still holds live state. Retiring it would delete
+// records a user can still act on, so the repository is kept and the refusal
+// names what kept it.
+var ErrRepositoryInUse = errors.New("wsm: repository still has an open workspace or live state")
+
 // ErrMergeLeaseGone refuses a merge hold recorded after the merge it waits on
 // released its lease: the merge has already decided whether its requester
 // closes, so the prompt must take the path a workspace with no merge takes.

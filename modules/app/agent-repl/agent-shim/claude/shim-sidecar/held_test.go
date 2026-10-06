@@ -584,3 +584,66 @@ func TestAPresentTranscriptThatCannotBeAttributedStillWarns(t *testing.T) {
 	// Assert.
 	h.requireOnce(t, "resolve-transcript-workspace", "warn")
 }
+
+// --- a transcript whose cwds do not name its project folder -----------------
+
+// cwdTranscript writes a main transcript into project folder slug of root A,
+// one record per cwd, and answers the target that names it.
+func (h *harness) cwdTranscript(t *testing.T, slug, session string, cwds ...string) discover.Target {
+	t.Helper()
+	path := filepath.Join(h.rootA, "projects", slug, session+".jsonl")
+	var contents string
+	for _, cwd := range cwds {
+		contents += `{"cwd":"` + cwd + `","type":"user"}` + "\n"
+	}
+	h.write(t, path, contents)
+	return discover.Target{
+		Path: path, Kind: tail.KindSessionTranscript, ConfigRoot: h.rootA, ProjectKey: slug, SessionID: session,
+	}
+}
+
+func TestATranscriptAttributedToItsFirstCWDIsStatedAtInfo(t *testing.T) {
+	// Arrange: neither cwd encodes to the folder the file lives in.
+	h := newHarness(t, &fakeStore{})
+	target := h.cwdTranscript(t, "proj", "a0000000-0000-4000-8000-000000000001", "/work/iterm-2", "/work/ship-gns")
+
+	// Act.
+	got, ok := h.sc.resolveTranscriptWorkspace(target)
+
+	// Assert.
+	if !ok || got.WorkspaceDir != "/work/iterm-2" {
+		t.Fatalf("attribution = (%q, %v), want the first cwd, never held back", got.WorkspaceDir, ok)
+	}
+	rec := h.requireOnce(t, "resolve-transcript-workspace", "info")
+	if got := ctxString(t, rec, "reason"); got != reasonFirstCWDFallback {
+		t.Fatalf("the record's reason = %q, want %q", got, reasonFirstCWDFallback)
+	}
+}
+
+func TestAFirstCWDFallbackIsStatedOncePerFile(t *testing.T) {
+	// Arrange: a rescan re-checks every discovered transcript each pass.
+	h := newHarness(t, &fakeStore{})
+	target := h.cwdTranscript(t, "proj", "a0000000-0000-4000-8000-000000000002", "/work/iterm-2")
+
+	// Act.
+	h.sc.resolveTranscriptWorkspace(target)
+	h.sc.resolveTranscriptWorkspace(target)
+
+	// Assert.
+	h.requireOnce(t, "resolve-transcript-workspace", "info")
+}
+
+func TestATranscriptMatchedToItsProjectFolderStatesNoFallback(t *testing.T) {
+	// Arrange: the later cwd encodes to the folder the file lives in.
+	h := newHarness(t, &fakeStore{})
+	target := h.cwdTranscript(t, "-work-ship-gns", "a0000000-0000-4000-8000-000000000003", "/work/iterm-2", "/work/ship-gns")
+
+	// Act.
+	got, ok := h.sc.resolveTranscriptWorkspace(target)
+
+	// Assert.
+	if !ok || got.WorkspaceDir != "/work/ship-gns" {
+		t.Fatalf("attribution = (%q, %v), want the cwd that encodes to the project folder", got.WorkspaceDir, ok)
+	}
+	h.requireNone(t, "resolve-transcript-workspace", "info")
+}
