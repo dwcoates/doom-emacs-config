@@ -371,8 +371,26 @@ func (c *claim) AwaitBootClaim(ctx context.Context) error {
 		return nil
 	}
 	if c.bootWait == nil {
+		// A CLOSED CLAIM STARTS NO WAIT. Close is the end of this claim's
+		// footprint on the state root; a wait begun after it would open (and
+		// so create) the lock file once its owner had already let go.
+		if c.closed {
+			c.mu.Unlock()
+			return fmt.Errorf("await the boot claim beside %q: the claim was closed", c.addrPath)
+		}
+		// THE LOCK FILE IS OPENED UNDER c.mu, before the wait goes to its
+		// goroutine, so Close -- which takes c.mu -- either precedes the
+		// open (and the wait never starts) or follows it. A goroutine that
+		// opened the file itself was free to do so after Close had returned
+		// and the state root was being removed, recreating daemon.lock in a
+		// directory its owner was tearing down.
+		f, err := openBootLock(LockPath(c.addrPath))
+		if err != nil {
+			c.mu.Unlock()
+			return fmt.Errorf("await the boot claim beside %q: %w", c.addrPath, err)
+		}
 		c.bootWait = make(chan struct{})
-		go c.waitForBootClaim(c.bootWait)
+		go c.waitForBootClaim(f, c.bootWait)
 	}
 	settled, taken := c.bootWait, c.taken
 	c.mu.Unlock()
@@ -391,12 +409,13 @@ func (c *claim) AwaitBootClaim(ctx context.Context) error {
 	}
 }
 
-// waitForBootClaim blocks in the kernel for the boot claim and keeps it as
+// waitForBootClaim blocks in the kernel for the boot claim on F, the lock
+// file AwaitBootClaim already opened, and keeps it as
 // this claim's, then closes SETTLED. A claim taken some other way meanwhile
 // (Publish's own single-shot attempt) or closed meanwhile releases the one
 // this wait took.
-func (c *claim) waitForBootClaim(settled chan struct{}) {
-	lock, err := blockForBootLock(LockPath(c.addrPath))
+func (c *claim) waitForBootClaim(f *os.File, settled chan struct{}) {
+	lock, err := blockForBootLock(f, LockPath(c.addrPath))
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	defer close(settled)
