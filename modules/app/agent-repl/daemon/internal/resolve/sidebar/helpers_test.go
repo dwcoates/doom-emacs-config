@@ -107,6 +107,7 @@ func registry(workspaces ...wsm.Workspace) sidebar.Registry {
 	return sidebar.Registry{
 		Workspaces:   workspaces,
 		Repositories: []wsm.Repository{repo},
+		View:         wsm.DefaultSidebarView,
 	}
 }
 

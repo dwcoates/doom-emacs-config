@@ -148,12 +148,17 @@ func (v *verbs) republishRegistry(ctx context.Context, log dlog.Logger, operatio
 		log.Error(operation, "could not read the current workspace for the roster", dlog.Context{"cause": err.Error()})
 		return
 	}
+	view, err := v.deps.DB.SidebarView(ctx)
+	if err != nil {
+		log.Error(operation, "could not read the sidebar's view state for the roster", dlog.Context{"cause": err.Error()})
+		return
+	}
 	sessions, err := sessionRecords(ctx, v.deps.DB, workspaces)
 	if err != nil {
 		log.Error(operation, "could not read the session records for the roster", dlog.Context{"cause": err.Error()})
 		return
 	}
-	v.deps.Sidebar.SetRegistry(sidebarRegistry(log, workspaces, repositories, tasks, sessions, current))
+	v.deps.Sidebar.SetRegistry(sidebarRegistry(log, workspaces, repositories, tasks, sessions, current, view))
 	// THE ROSTER REPUBLISH STANDS AT INFO. Every verb that reaches here has
 	// just changed the roster clients read — a select above all, whose switch
 	// otherwise left no trace in an info-level log. It is one concise line per
