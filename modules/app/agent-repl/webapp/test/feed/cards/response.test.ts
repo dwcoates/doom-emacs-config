@@ -28,7 +28,9 @@ import {
   responseCap,
   responseCapLines,
   thinkingLanded,
+  REVEAL_SPEED_ATTRIBUTE,
   revealedSoFar,
+  revealSpeedSoFar,
   revealWindowMs,
   usageAgeWithinReserve,
   usageReserveLabelsCss,
@@ -77,6 +79,15 @@ function rowContext(previous?: HTMLElement): RowContext {
 
 function response(init: MessageInitShape<typeof FeedResponseSchema>): FeedResponse {
   return create(FeedResponseSchema, init);
+}
+
+/**
+ * The rendered prose's length as the reveal counts it (src/bubble/text-reveal.ts):
+ * characters of the RENDER, which carries the newline markdown-it ends each
+ * block with. Read once the prose is fully revealed.
+ */
+function renderedLength(el: HTMLElement): string {
+  return String(el.querySelector(`.${RESPONSE_PROSE_CLASS}`)?.textContent?.length);
 }
 
 /**
@@ -147,7 +158,7 @@ describe("the settled state", () => {
       response({ result: { case: "success", value: { prose: { markdown: "hello" } } } }),
       rowContext(),
     );
-    expect(el.getAttribute(REVEALED_ATTRIBUTE)).toBe("5");
+    expect(el.getAttribute(REVEALED_ATTRIBUTE)).toBe(renderedLength(el));
   });
 
   it("re-renders a metaprompt tree as tree lines rather than markdown", () => {
@@ -216,7 +227,7 @@ describe("the arriving state", () => {
     );
     document.body.appendChild(el);
     vi.advanceTimersByTime(1000);
-    expect(Number(el.getAttribute(REVEALED_ATTRIBUTE))).toBe("hello world".length);
+    expect(el.getAttribute(REVEALED_ATTRIBUTE)).toBe(renderedLength(el));
   });
 
   it("resumes from the previous draw's position rather than restarting", () => {
@@ -281,7 +292,7 @@ describe("the daemon's reveal window", () => {
     // Act
     vi.advanceTimersByTime(150);
     // Assert
-    expect(el.getAttribute(REVEALED_ATTRIBUTE)).toBe("11");
+    expect(el.getAttribute(REVEALED_ATTRIBUTE)).toBe(renderedLength(el));
   });
 
   it("spreads from what the previous push left on screen", () => {
@@ -299,7 +310,7 @@ describe("the daemon's reveal window", () => {
     const atDraw = el.getAttribute(REVEALED_ATTRIBUTE);
     vi.advanceTimersByTime(150);
     // Assert
-    expect([atDraw, el.getAttribute(REVEALED_ATTRIBUTE)]).toEqual(["5", "11"]);
+    expect([atDraw, el.getAttribute(REVEALED_ATTRIBUTE)]).toEqual(["5", renderedLength(el)]);
   });
 
   it("draws an unpaced settled bubble whole at once", () => {
@@ -309,7 +320,54 @@ describe("the daemon's reveal window", () => {
       rowContext(previousAt(5)),
     );
     // Assert
-    expect(el.getAttribute(REVEALED_ATTRIBUTE)).toBe("11");
+    expect(el.getAttribute(REVEALED_ATTRIBUTE)).toBe(renderedLength(el));
+  });
+
+  it("records how fast a paced reveal is moving, for the next push to ease from", () => {
+    // Arrange
+    const el = drawFeedResponse(paced("update", "x".repeat(1000), 1000), rowContext());
+    document.body.appendChild(el);
+    // Act
+    vi.advanceTimersByTime(500);
+    // Assert: a window with no carried speed moves at its average, 1 char/ms.
+    expect(Number(el.getAttribute(REVEAL_SPEED_ATTRIBUTE))).toBeCloseTo(1);
+  });
+
+  it("eases a paced push up from the speed the previous push was moving at", () => {
+    // Arrange: the previous push's reveal had come to rest.
+    const previous = previousAt(0);
+    previous.setAttribute(REVEAL_SPEED_ATTRIBUTE, "0");
+    const el = drawFeedResponse(paced("update", "x".repeat(1000), 1000), rowContext(previous));
+    document.body.appendChild(el);
+    // Act
+    vi.advanceTimersByTime(100);
+    // Assert: well short of the 100 an even spread would show by now.
+    expect(Number(el.getAttribute(REVEALED_ATTRIBUTE))).toBeLessThan(60);
+  });
+
+  it("carries no speed out of an unpaced reveal", () => {
+    // Arrange
+    const previous = previousAt(0);
+    previous.setAttribute(REVEAL_SPEED_ATTRIBUTE, "0.5");
+    const el = drawFeedResponse(
+      response({ result: { case: "update", value: { prose: { markdown: "hello world" } } } }),
+      rowContext(previous),
+    );
+    document.body.appendChild(el);
+    // Act
+    vi.advanceTimersByTime(16);
+    // Assert
+    expect(el.hasAttribute(REVEAL_SPEED_ATTRIBUTE)).toBe(false);
+  });
+
+  it("never shows a half-typed construct's raw syntax while typing it out", () => {
+    // Arrange
+    const el = drawFeedResponse(paced("update", "**bold** and more", 1000), rowContext());
+    document.body.appendChild(el);
+    // Act
+    vi.advanceTimersByTime(100);
+    // Assert
+    expect(el.querySelector(`.${RESPONSE_PROSE_CLASS}`)?.textContent?.includes("*")).toBe(false);
   });
 
   it("answers no window when the daemon sent none", () => {
@@ -1123,29 +1181,45 @@ describe("the notice register", () => {
 
 describe("revealedSoFar", () => {
   it("starts from nothing on a row's first draw", () => {
-    expect(revealedSoFar(undefined, 10)).toBe(0);
+    expect(revealedSoFar(undefined)).toBe(0);
   });
 
   it("starts from nothing when the previous element carried no position", () => {
-    expect(revealedSoFar(document.createElement("div"), 10)).toBe(0);
+    expect(revealedSoFar(document.createElement("div"))).toBe(0);
   });
 
-  it("clamps a position past the prose that has arrived", () => {
-    const previous = document.createElement("div");
-    previous.setAttribute(REVEALED_ATTRIBUTE, "99");
-    expect(revealedSoFar(previous, 10)).toBe(10);
-  });
-
-  it("resumes from a position within the prose", () => {
+  it("resumes from the position the previous draw recorded", () => {
     const previous = document.createElement("div");
     previous.setAttribute(REVEALED_ATTRIBUTE, "4");
-    expect(revealedSoFar(previous, 10)).toBe(4);
+    expect(revealedSoFar(previous)).toBe(4);
   });
 
   it("starts from nothing for a value that is not a position", () => {
     const previous = document.createElement("div");
     previous.setAttribute(REVEALED_ATTRIBUTE, "not-a-number");
-    expect(revealedSoFar(previous, 10)).toBe(0);
+    expect(revealedSoFar(previous)).toBe(0);
+  });
+});
+
+describe("revealSpeedSoFar", () => {
+  it("carries no speed on a row's first draw", () => {
+    expect(revealSpeedSoFar(undefined)).toBeUndefined();
+  });
+
+  it("carries no speed when the previous element recorded none", () => {
+    expect(revealSpeedSoFar(document.createElement("div"))).toBeUndefined();
+  });
+
+  it("resumes the speed the previous draw recorded", () => {
+    const previous = document.createElement("div");
+    previous.setAttribute(REVEAL_SPEED_ATTRIBUTE, "0.25");
+    expect(revealSpeedSoFar(previous)).toBe(0.25);
+  });
+
+  it("carries no speed for a value that is not a speed", () => {
+    const previous = document.createElement("div");
+    previous.setAttribute(REVEAL_SPEED_ATTRIBUTE, "-1");
+    expect(revealSpeedSoFar(previous)).toBeUndefined();
   });
 });
 
@@ -1190,7 +1264,7 @@ describe("a host with no animation frames", () => {
     expect([
       el.querySelector(".bubble-body")?.textContent?.trim(),
       el.getAttribute(REVEALED_ATTRIBUTE),
-    ]).toEqual(["hello world", String("hello world".length)]);
+    ]).toEqual(["hello world", renderedLength(el)]);
   });
 
   it("wears no arriving indicator even with no animation frames", () => {
@@ -1758,7 +1832,7 @@ describe("the incremental reveal reconciles the prose without rebuilding it", ()
     let before: Element[] = [];
     for (let i = 0; i < 60 && before.length < 2; i++) {
       vi.advanceTimersByTime(16);
-      const lines = [...body.querySelectorAll(".mp-tree .mp-line")];
+      const lines = [...body.querySelectorAll(".mp-tree .mp-line:not([data-unrevealed])")];
       const shown = Number(el.getAttribute(REVEALED_ATTRIBUTE));
       if (lines.length >= 2 && shown < SHOWCASE_TREE.length) before = lines;
     }
@@ -1768,7 +1842,7 @@ describe("the incremental reveal reconciles the prose without rebuilding it", ()
     let after: Element[] = [];
     for (let i = 0; i < 60 && after.length <= before.length; i++) {
       vi.advanceTimersByTime(16);
-      after = [...body.querySelectorAll(".mp-tree .mp-line")];
+      after = [...body.querySelectorAll(".mp-tree .mp-line:not([data-unrevealed])")];
     }
     // Assert — the tail grew and the leading line is the SAME node, never rebuilt.
     expect(after.length).toBeGreaterThan(before.length);
@@ -2437,7 +2511,7 @@ describe("the thinking bubble while its text arrives", () => {
       // Act
       const redrawn = drawFeedResponse(thinking("success"), rowContext(bubble));
       // Assert
-      expect([redrawn.getAttribute(REVEALED_ATTRIBUTE), capOf(redrawn)]).toEqual([String("weighing".length), "1"]);
+      expect([redrawn.getAttribute(REVEALED_ATTRIBUTE), capOf(redrawn)]).toEqual([renderedLength(redrawn), "1"]);
     } finally {
       teardown();
     }
