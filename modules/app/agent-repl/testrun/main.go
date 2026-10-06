@@ -68,8 +68,8 @@ func runCmd(log *run.Log, argv []string) int {
 	// files and everything else the suites write never reach the SSD the
 	// owner's live store shares; a RAM disk that cannot be made falls back to
 	// the disk, saying so.
-	parent, release := runParent(log)
-	code := runRooted(log, args, self, histPath, parent)
+	parent, prefix, release := runParent(log)
+	code := runRooted(log, args, self, histPath, parent, prefix)
 	if err := release(); err != nil {
 		log.Errorf("%v", err)
 		return 1
@@ -78,7 +78,7 @@ func runCmd(log *run.Log, argv []string) int {
 }
 
 // runRooted runs in a fresh temp root under parent and removes it after.
-func runRooted(log *run.Log, args cli.Args, self, histPath, parent string) int {
+func runRooted(log *run.Log, args cli.Args, self, histPath, parent string, prefix []string) int {
 	// THE RUN LIVES IN ITS OWN TEMP ROOT, and so does each unit under it
 	// (run.OSExec). TMPDIR moves to the root, so even planning's
 	// `go list`/`vitest list` write nothing in the user's temp directory.
@@ -87,7 +87,7 @@ func runRooted(log *run.Log, args cli.Args, self, histPath, parent string) int {
 		log.Errorf("create the run's temp root: %v", err)
 		return 1
 	}
-	code := runIn(log, args, self, histPath, root)
+	code := runIn(log, args, self, histPath, root, prefix)
 	if err := os.RemoveAll(root); err != nil {
 		log.Errorf("remove the run's temp root %s: %v", root, err)
 		return 1
@@ -99,10 +99,10 @@ func runRooted(log *run.Log, args cli.Args, self, histPath, parent string) int {
 // answers the directory the run's root goes in with the release to call after
 // it. On a RAM disk it also exports ramdisk.EnvShortBase, the base the
 // harnesses that need short, socket-safe roots make them in instead of /tmp.
-func runParent(log *run.Log) (string, func() error) {
+func runParent(log *run.Log) (string, []string, func() error) {
 	disk := func() error { return nil }
 	if runtime.GOOS != "darwin" {
-		return run.DefaultTmpParent, disk
+		return run.DefaultTmpParent, nil, disk
 	}
 	m := ramdisk.Default()
 	reclaimed, err := m.Reclaim()
@@ -115,18 +115,18 @@ func runParent(log *run.Log) (string, func() error) {
 	size, err := ramdisk.SizeFromEnv(os.Getenv)
 	if err != nil {
 		log.Errorf("RAM DISK UNAVAILABLE, this run's root falls back to the disk at %s: %v", run.DefaultTmpParent, err)
-		return run.DefaultTmpParent, disk
+		return run.DefaultTmpParent, nil, disk
 	}
 	v, err := m.Acquire(size)
 	if err != nil {
 		log.Errorf("RAM DISK UNAVAILABLE, this run's root falls back to the disk at %s: %v", run.DefaultTmpParent, err)
-		return run.DefaultTmpParent, disk
+		return run.DefaultTmpParent, nil, disk
 	}
 	if err := os.Setenv(ramdisk.EnvShortBase, v.Mount); err != nil {
 		log.Errorf("export %s: %v", ramdisk.EnvShortBase, err)
 	}
-	log.Infof("the run's root is on a %d MiB RAM disk at %s (%s)", size, v.Mount, v.Device)
-	return v.Mount, func() error {
+	log.Infof("the run's root is on a %d MiB RAM disk at %s (%s); units run at the %s I/O tier", size, v.Mount, v.Device, ramdisk.UnitIOTier)
+	return v.Mount, ramdisk.UnitPrefix(), func() error {
 		if err := v.Release(); err != nil {
 			return fmt.Errorf("release the run's RAM disk: %w", err)
 		}
@@ -134,7 +134,7 @@ func runParent(log *run.Log) (string, func() error) {
 	}
 }
 
-func runIn(log *run.Log, args cli.Args, self, histPath, root string) int {
+func runIn(log *run.Log, args cli.Args, self, histPath, root string, prefix []string) int {
 	if err := os.Setenv("TMPDIR", root); err != nil {
 		log.Errorf("point TMPDIR at the run's temp root %s: %v", root, err)
 		return 1
@@ -149,7 +149,7 @@ func runIn(log *run.Log, args cli.Args, self, histPath, root string) int {
 	defer stop()
 	return cli.Run(ctx, cli.Deps{
 		Log:         log,
-		Exec:        run.OSExec{Log: log, Grace: run.KillGrace, TmpParent: root},
+		Exec:        run.OSExec{Log: log, Grace: run.KillGrace, TmpParent: root, Prefix: prefix},
 		Clock:       run.WallClock{},
 		Slots:       slots,
 		HistoryPath: histPath,
