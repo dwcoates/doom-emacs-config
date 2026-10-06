@@ -83,6 +83,8 @@ interface Harness {
    * is the only handle a test has on the conclusion the handler observes.
    */
   readonly watchers: AgentPageSession[];
+  /** How many of those registrations the engine has dropped. */
+  watchersEnded: number;
   /** What `SessionContext.shellRunStart` answers, by run value. */
   readonly shellStarts: Map<string, PersistEntry>;
   /**
@@ -141,6 +143,7 @@ async function harness(persistence: RecordingPersistence = new RecordingPersiste
     keepaliveEnd: undefined,
     yieldBudgetMs: 60_000,
     watchers: [] as AgentPageSession[],
+    watchersEnded: 0,
     stopCommands: [],
     shellStarts: new Map<string, PersistEntry>(),
     userDetaches: [],
@@ -167,7 +170,9 @@ async function harness(persistence: RecordingPersistence = new RecordingPersiste
     },
     watcherOpened: (_agent, page) => {
       state.watchers.push(page);
-      return () => undefined;
+      return () => {
+        state.watchersEnded++;
+      };
     },
     bashWatcherOpened: () => () => undefined,
     shellRunStart: (work) => state.shellStarts.get(work.value),
@@ -2718,6 +2723,115 @@ describe("WatchAgent", () => {
         message: "the WatchAgent stream ended: its consumer stopped consuming it",
       }),
     );
+  });
+
+  it("drops its registration the moment the consumer's call aborts, while parked at a yield", async () => {
+    // A parked generator is never resumed by an adapter whose peer left, so
+    // only the signal can tell the teardown not to wait on this tail.
+    // Arrange. A standing tail, pulled up to its page and left parked there.
+    const persistence = new RecordingPersistence();
+    persistence.standingTail = true;
+    const h = await harness(persistence);
+    const call = new AbortController();
+    const stream = h.turns.watchAgent(create(shimv1.WatchAgentRequestSchema, {}), call.signal)[Symbol.asyncIterator]();
+    await stream.next();
+
+    // Act.
+    call.abort();
+
+    // Assert.
+    expect(h.watchersEnded).toBe(1);
+  });
+
+  it("closes the reading session the moment the consumer's call aborts", async () => {
+    // Arrange.
+    const persistence = new RecordingPersistence();
+    persistence.standingTail = true;
+    const h = await harness(persistence);
+    const call = new AbortController();
+    const stream = h.turns.watchAgent(create(shimv1.WatchAgentRequestSchema, {}), call.signal)[Symbol.asyncIterator]();
+    await stream.next();
+
+    // Act.
+    call.abort();
+
+    // Assert.
+    expect(persistence.closedPages).toBe(1);
+  });
+
+  it("records the consumer's departure at info when its call aborts", async () => {
+    // Arrange.
+    const persistence = new RecordingPersistence();
+    persistence.standingTail = true;
+    const h = await harness(persistence);
+    const call = new AbortController();
+    const stream = h.turns.watchAgent(create(shimv1.WatchAgentRequestSchema, {}), call.signal)[Symbol.asyncIterator]();
+    await stream.next();
+    const before = logSinkMark();
+
+    // Act.
+    call.abort();
+
+    // Assert.
+    expect(logRecordsSince(before)).toContainEqual(
+      expect.objectContaining({
+        level: "info",
+        message: "the WatchAgent consumer departed; its tail is closed and nothing more is written to it",
+      }),
+    );
+  });
+
+  it("yields nothing for a frame the tail hands over after the consumer left", async () => {
+    // Arrange. A tail with an entry still to hand over when the call aborts.
+    const persistence = new RecordingPersistence();
+    persistence.tail = [{ case: "entry", value: create(conversationv1.HistoryEntryAtSchema, {}) }];
+    const h = await harness(persistence);
+    const call = new AbortController();
+    const stream = h.turns.watchAgent(create(shimv1.WatchAgentRequestSchema, {}), call.signal)[Symbol.asyncIterator]();
+    await stream.next();
+
+    // Act.
+    call.abort();
+    const next = await stream.next();
+
+    // Assert.
+    expect(next.done).toBe(true);
+  });
+
+  it("serves not even the page to a call that had already closed", async () => {
+    // Arrange.
+    const h = await harness();
+    const call = new AbortController();
+    call.abort();
+
+    // Act.
+    const frames: shimv1.WatchAgentResponse[] = [];
+    for await (const frame of h.turns.watchAgent(create(shimv1.WatchAgentRequestSchema, {}), call.signal)) {
+      frames.push(frame);
+    }
+
+    // Assert.
+    expect(frames).toEqual([]);
+  });
+
+  it("records no unasked ending for a tail its departed consumer closed", async () => {
+    // The tail running out because the departure closed it is the consumer's
+    // ending, not the silent one the error record exists for.
+    // Arrange.
+    const persistence = new RecordingPersistence();
+    persistence.tail = [{ case: "entry", value: create(conversationv1.HistoryEntryAtSchema, {}) }];
+    const h = await harness(persistence);
+    const call = new AbortController();
+    const stream = h.turns.watchAgent(create(shimv1.WatchAgentRequestSchema, {}), call.signal)[Symbol.asyncIterator]();
+    await stream.next();
+    const before = logSinkMark();
+
+    // Act.
+    call.abort();
+    await stream.next();
+
+    // Assert.
+    expect(logRecordsSince(before).filter((record) => record.level === "error")).toEqual([]);
   });
 
   it("passes the teardown's conclusion through to the reading session", async () => {
