@@ -582,38 +582,6 @@ func apiBlockKind(failed *conversationv1.ApiRequestFailed) blockedKind {
 	}
 }
 
-// apiErrorKind names a mid-turn api failure's arm for the record.
-func apiErrorKind(failed *conversationv1.ApiRequestFailed) string {
-	switch failed.GetKind().(type) {
-	case *conversationv1.ApiRequestFailed_RateLimited:
-		return "rate_limited"
-	case *conversationv1.ApiRequestFailed_Overloaded:
-		return "overloaded"
-	case *conversationv1.ApiRequestFailed_AuthenticationFailed:
-		return "authentication_failed"
-	case *conversationv1.ApiRequestFailed_PermissionDenied:
-		return "permission_denied"
-	case *conversationv1.ApiRequestFailed_InvalidRequest:
-		return "invalid_request"
-	case *conversationv1.ApiRequestFailed_RequestTooLarge:
-		return "request_too_large"
-	case *conversationv1.ApiRequestFailed_NotFound:
-		return "not_found"
-	case *conversationv1.ApiRequestFailed_Internal:
-		return "internal"
-	case *conversationv1.ApiRequestFailed_BillingError:
-		return "billing_error"
-	case *conversationv1.ApiRequestFailed_OauthOrgNotAllowed:
-		return "oauth_org_not_allowed"
-	case *conversationv1.ApiRequestFailed_MaxOutputTokens:
-		return "max_output_tokens"
-	case *conversationv1.ApiRequestFailed_Unmodeled:
-		return "unmodeled"
-	default:
-		return "unset"
-	}
-}
-
 // OnDetachedWork adds or updates a live-work chip. It is what makes a shell,
 // a subagent or a monitor outlive the turn that started it.
 func (r *resolver) OnDetachedWork(ws ids.WorkspaceID, agent *conversationv1.AgentId, work *conversationv1.AgentDetachedWork) {

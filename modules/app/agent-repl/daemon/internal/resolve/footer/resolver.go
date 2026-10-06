@@ -13,6 +13,7 @@ import (
 	"claude-repld/internal/ids"
 	"claude-repld/internal/publish"
 	"claude-repld/internal/resolve/ladder"
+	"claude-repld/internal/resolve/turnfault"
 	"claude-repld/internal/sessionwatcher"
 	"claude-repld/internal/shimclient"
 	"claude-repld/internal/vocab"
@@ -1109,7 +1110,7 @@ func (r *resolver) OnApiError(ws ids.WorkspaceID, agent *conversationv1.AgentId,
 		return
 	}
 	r.mutate(ws, "daemon.footer.on_api_error", "the footer took mid-turn api failure evidence",
-		dlog.Context{"kind": apiErrorKind(failed), "agent_id": agent.GetValue()}, func(s *wsState) {
+		dlog.Context{"kind": turnfault.OfApiFailure(failed).Cause, "agent_id": agent.GetValue()}, func(s *wsState) {
 			next := &retryState{
 				agent:  agent.GetValue(),
 				status: truncate(failed.GetMessage(), DefaultWarningRowWidth),
