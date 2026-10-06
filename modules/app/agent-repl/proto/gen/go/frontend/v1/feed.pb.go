@@ -15185,9 +15185,11 @@ type FeedColdGateStanding struct {
 	// The session's model — what the re-read would run on.
 	Model *FeedColdGateModel `protobuf:"bytes,3,opt,name=model,proto3" json:"model,omitempty"`
 	// The compact submenu: summarizers and the offered compaction types.
-	// UNSET when this session's account does not offer compaction: the client
+	// EVERY ACCOUNT IS OFFERED COMPACTION (owner ruling 2026-10-06, reversing the
+	// 2026-09-30 work-account exclusion), so the daemon always sets it. It stays
+	// optional so a gate served without a menu still decodes: the client then
 	// draws only the pay and clear choices, and the daemon refuses a compact
-	// answer to this gate.
+	// answer to that gate.
 	Compact       *FeedColdGateCompactMenu `protobuf:"bytes,4,opt,name=compact,proto3,oneof" json:"compact,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
