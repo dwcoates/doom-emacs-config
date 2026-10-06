@@ -230,7 +230,10 @@ func (c *Converter) injectedMemory(attachment map[string]any, at Attribution, en
 // SYNTHETIC, AND SAID SO. No capture in testdata/corpus or in the checked-in
 // transcript carries this record, so the spelling is taken from the proto's
 // description of it (a prompt-injected attachment whose text is the warning)
-// rather than from an observed line. It is the one conversion here not grounded
+// rather than from an observed line. Checked against the real CLI (2.1.289 and
+// the SDK's bundled build) and every transcript under the owner's config
+// roots on 2026-10-06: neither contains this type, nor any other
+// budget-warning attachment. It is the one conversion here not grounded
 // in a real fixture, and it is a CONCERN for the next capture run: if the vendor
 // names the type differently, this converter withholds the record as
 // vendor_specific like any other unmodeled attachment, which is a visible
@@ -247,10 +250,16 @@ const contextBudgetAttachment = "context_budget_warning"
 func (c *Converter) contextBudgetWarning(attachment map[string]any, at Attribution, env envelope, agent string) *storev1.StoreEntry {
 	// The vendor composes the sentence; no structured figure rides the record,
 	// so the text is carried verbatim and nothing is parsed out of it.
+	//
+	// ONE READING, SHARED WITH THE SHIM: `content`, else `text`, exactly as the
+	// shim's convertContextBudgetWarning reads it and as the mocked vendor
+	// writes it. The real CLI writes no budget-warning record under any
+	// spelling (its low-context warning is a terminal status line, never a
+	// transcript record), so no observed shape outranks this one; two readers
+	// guessing different fields was what left the warning undrawn.
 	text := firstNonEmpty(
+		str(attachment["content"]),
 		str(attachment["text"]),
-		str(pick(attachment, "warning", "message")),
-		str(obj(attachment["content"])["text"]),
 	)
 	key := SessionKey(contextBudgetAttachment, env.uuid)
 	if text == "" {
