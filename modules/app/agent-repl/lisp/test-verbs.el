@@ -986,6 +986,23 @@ refusal still reaches the generic reporting."
     (should (agent-repl-test-verbs--messaged-p
              "agent-repl: workspace creation FAILED: the daemon refused it: base-ref-unresolved"))))
 
+(ert-deftest agent-repl-verbs-create-temporary-repository-names-the-folder ()
+  "A create refused for a temporary repository names the folder and why."
+  (agent-repl-test-verbs--with
+      '((:create . (:response (:arm :error
+                               :value (:cause (:arm :inside-temporary-directory
+                                               :value (:dir "/private/tmp/scratch"
+                                                       :temporary-root "/private/tmp")))))))
+    (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard)
+    (should (agent-repl-test-verbs--messaged-p
+             "agent-repl: workspace creation FAILED: /private/tmp/scratch is inside the temporary directory /private/tmp; agent-repl does not register temporary folders"))))
+
+(ert-deftest agent-repl-verbs-register-refusal-sentence-falls-through-an-unknown-arm ()
+  "A RegisterWorkspace arm with no sentence is named by keyword, never dropped."
+  (should (equal (agent-repl-verbs-register-refusal-sentence
+                  "/w/x" '(:cause (:arm :some-new-arm :value nil)))
+                 "the daemon refused /w/x: some-new-arm")))
+
 (ert-deftest agent-repl-verbs-create-naming-failed-names-the-cause ()
   "A create refused because the workspace could not be named states the cause
 the daemon read off the failure."
@@ -2965,6 +2982,23 @@ user where they were."
       ;; Assert.
       (should (agent-repl-test-verbs--messaged-p
                "that path cannot be read: /tmp/absent.txt")))))
+
+(ert-deftest agent-repl-verbs-register-repository-reports-a-temporary-folder ()
+  "The `inside_temporary_directory' arm names the refused folder and why."
+  ;; Arrange.
+  (agent-repl-test-verbs--with
+      (list (cons :register-repository
+                  (list :response
+                        (list :arm :error
+                              :value (list :cause (list :arm :inside-temporary-directory
+                                                        :value (list :dir "/private/tmp/scratch"
+                                                                     :temporary-root "/private/tmp")))))))
+    (agent-repl-test-verbs--picking-file "/tmp/scratch/README.md"
+      ;; Act.
+      (agent-repl-register-repository)
+      ;; Assert.
+      (should (agent-repl-test-verbs--messaged-p
+               "/private/tmp/scratch is inside the temporary directory /private/tmp; agent-repl does not register temporary folders")))))
 
 (ert-deftest agent-repl-verbs-register-repository-falls-through-an-arm-it-has-no-sentence-for ()
   "An arm this command does not know still reports, through the generic path.

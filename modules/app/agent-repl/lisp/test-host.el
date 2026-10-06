@@ -360,6 +360,36 @@ unary rpc can produce, which the contract never collapses into one."
       ;; Assert
       (should (agent-repl-test-host--logged-p :error "elisp.host.register-refused")))))
 
+(ert-deftest agent-repl-test-host-register-refusal-goes-to-its-owner ()
+  "A caller that owns refusals is handed the decoded error, not a nil ref."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-connect-open "127.0.0.1:9001"))
+          (refusal '(:cause (:arm :not-a-worktree :value nil)))
+          (done :unset)
+          received)
+      (setq agent-repl-test-host--register-answer
+            (list :response (list :arm :error :value refusal)))
+      ;; Act
+      (agent-repl-host-register conn "/tmp/ws" (lambda (ref) (setq done ref)) nil
+                                (lambda (value) (setq received value)))
+      ;; Assert
+      (should (equal received refusal))
+      (should (eq done :unset)))))
+
+(ert-deftest agent-repl-test-host-register-owned-refusal-is-an-answer-at-info ()
+  "A refusal its caller reports is an answer: INFO, never ERROR."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-connect-open "127.0.0.1:9001")))
+      (setq agent-repl-test-host--register-answer
+            (list :response (list :arm :error :value nil)))
+      ;; Act
+      (agent-repl-host-register conn "/tmp/ws" #'ignore nil #'ignore)
+      ;; Assert
+      (should (agent-repl-test-host--logged-p :info "elisp.host.register-refused"))
+      (should-not (agent-repl-test-host--logged-p :error "elisp.host.register-refused")))))
+
 (ert-deftest agent-repl-test-host-register-transport-failure-answers-nil ()
   "A transport failure and a daemon error arm are different facts, same outcome."
   (agent-repl-test-host--with-harness
