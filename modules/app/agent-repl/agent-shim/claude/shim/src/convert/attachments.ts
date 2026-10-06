@@ -31,7 +31,7 @@ import { bindLog } from "../log.js";
 import { conversationv1 } from "../proto.js";
 import { activityUpsertKey } from "../store/keys.js";
 import type { PersistEntry } from "../store/persistence.js";
-import { agentActivity, pageLineEntry, updateFrame } from "./entries.js";
+import { agentActivity, updateFrame } from "./entries.js";
 import type { FoldContext, LastChange } from "./fold-context.js";
 import { residueEntry, residueForMessage, vendorSpecificResidue } from "./residue.js";
 
