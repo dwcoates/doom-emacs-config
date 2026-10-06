@@ -379,3 +379,35 @@ func TestATurnDiedFaultCarriesItsLineUnderTheLinksStep(t *testing.T) {
 		t.Fatalf("the turn's cause line is missing under the severed step")
 	}
 }
+
+// THE FOOTER NAMES A MID-TURN API FAILURE BY TURNFAULT'S CAUSE WORD: one
+// vocabulary of api causes, shared with the feed and the turn fault's line.
+func TestAMidTurnApiFailureIsRecordedByTheSharedCauseWord(t *testing.T) {
+	cases := []struct {
+		name   string
+		failed *conversationv1.ApiRequestFailed
+	}{
+		{name: "an overload", failed: &conversationv1.ApiRequestFailed{Kind: &conversationv1.ApiRequestFailed_Overloaded{Overloaded: &conversationv1.ApiOverloaded{}}}},
+		{name: "an unmodeled class, by the vendor's own name", failed: &conversationv1.ApiRequestFailed{Kind: &conversationv1.ApiRequestFailed_Unmodeled{Unmodeled: &conversationv1.ApiUnmodeledError{Type: "quota_v2"}}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+			h.r.SetTurn(testWS, &TurnStarted{At: instant})
+
+			// Act
+			h.r.OnApiError(testWS, mainAgent, tc.failed)
+
+			// Assert
+			want := turnfault.OfApiFailure(tc.failed).Cause
+			for _, rec := range h.log.Records() {
+				if rec.Operation == "daemon.footer.on_api_error" && rec.Context["kind"] == want {
+					return
+				}
+			}
+			t.Fatalf("records = %+v, want daemon.footer.on_api_error with kind %q", h.log.Records(), want)
+		})
+	}
+}
