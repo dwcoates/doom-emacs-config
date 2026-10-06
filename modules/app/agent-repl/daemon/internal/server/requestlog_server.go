@@ -426,6 +426,23 @@ func (s *requestLoggingServer) FoldRepository(
 	return s.server.FoldRepository(ctx, req)
 }
 
+func (s *requestLoggingServer) UpdateSidebarView(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.UpdateSidebarViewRequest],
+) (resp *connect.Response[agentreplv1.UpdateSidebarViewResponse], err error) {
+	boundary, err := s.server.beginRequest(ctx, "UpdateSidebarView", req.Header().Get(requestIDHeader), requestMessage(req))
+	if err != nil {
+		return nil, boundaryFailure(err)
+	}
+	boundary.log.Debug("daemon.server.update_sidebar_view", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
+	defer func() {
+		boundary.log.Debug("daemon.server.update_sidebar_view", "completed the rpc handler", boundary.completionContext(err))
+	}()
+	return s.server.UpdateSidebarView(ctx, req)
+}
+
 func (s *requestLoggingServer) SetWorkspacePriority(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.SetWorkspacePriorityRequest],
