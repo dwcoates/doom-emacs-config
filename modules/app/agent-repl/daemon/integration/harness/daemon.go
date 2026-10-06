@@ -26,6 +26,7 @@ import (
 	"claude-repld/internal/daemonaddr"
 	"claude-repld/internal/stateroot"
 	"claude-repld/internal/tempdirs"
+	"claude-repld/internal/wsm"
 
 	"connectrpc.com/connect"
 	"golang.org/x/net/http2"
@@ -603,6 +604,8 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 		// Production's empty setting is info; the suite states debug explicitly.
 		"AGENT_REPL_LOG_LEVEL=debug",
 		"AGENT_REPL_FORBID_VENDOR_CALLS=1",
+		// The state database is thrown away with the test: no forced flushes.
+		wsm.EnvTestUnsyncedWrites+"=1",
 		"AGENT_REPL_LOCK_DIR="+d.LockDir,
 		"AGENT_REPL_STORE_SOCKET="+filepath.Join(sockRoot, "unused-store.sock"),
 		"MULTI_REPO_ROOT="+multiRoot,

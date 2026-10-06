@@ -70,6 +70,7 @@ func newTestHooks() *testHooks {
 func runIn(t *testing.T, root string, adjust ...func(*options)) error {
 	t.Helper()
 	t.Setenv("AGENT_REPL_FORBID_VENDOR_CALLS", "1")
+	t.Setenv(wsm.EnvTestUnsyncedWrites, "1")
 	t.Setenv(dlog.LevelEnvironment, "info")
 	opts := options{stateDir: root}
 	for _, a := range adjust {
@@ -129,6 +130,47 @@ func TestRunRecordsProcessShutdownAtInfo(t *testing.T) {
 	}
 	if !hasRunLogLevel(t, raw, "daemon.cmd.exit", dlog.LevelInfo) {
 		t.Fatalf("daemon.run.log = %q, want an INFO daemon.cmd.exit record", string(raw))
+	}
+}
+
+// TestAnUnsyncedStateDatabaseIsRecordedAtBoot pins that a test run's daemon
+// says, at INFO, that its state database skips SQLite's forced flushes.
+func TestAnUnsyncedStateDatabaseIsRecordedAtBoot(t *testing.T) {
+	// Arrange.
+	root := shortRoot(t)
+
+	// Act.
+	_ = runIn(t, root)
+
+	// Assert.
+	raw, err := os.ReadFile(filepath.Join(root, "logs", "daemon.run.log"))
+	if err != nil {
+		t.Fatalf("ReadFile daemon.run.log: %v", err)
+	}
+	if !strings.Contains(string(raw), "skips SQLite's forced flushes") {
+		t.Fatalf("daemon.run.log = %q, want the unsynced state database recorded", string(raw))
+	}
+}
+
+// TestTheUnsyncedFlagWithoutTheVendorGuardRefusesToBoot pins that a live
+// daemon handed the test run's flag refuses to boot rather than run its state
+// database without durability.
+func TestTheUnsyncedFlagWithoutTheVendorGuardRefusesToBoot(t *testing.T) {
+	// Arrange.
+	root := shortRoot(t)
+	t.Setenv("AGENT_REPL_FORBID_VENDOR_CALLS", "")
+	t.Setenv(wsm.EnvTestUnsyncedWrites, "1")
+	t.Setenv(dlog.LevelEnvironment, "info")
+
+	// Act.
+	got := run(context.Background(), options{stateDir: root}, newTestHooks().hooks)
+
+	// Assert.
+	if got == nil || !strings.Contains(got.Error(), wsm.EnvTestUnsyncedWrites) {
+		t.Fatalf("run error = %v, want a refusal naming %s", got, wsm.EnvTestUnsyncedWrites)
+	}
+	if _, err := os.Stat(filepath.Join(root, "wsm.db")); !os.IsNotExist(err) {
+		t.Fatalf("the refused boot opened the state database (stat err = %v)", err)
 	}
 }
 
