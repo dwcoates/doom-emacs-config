@@ -36,6 +36,17 @@ func submitAll(t *testing.T, h *harness, turns ...ids.TurnID) {
 	}
 }
 
+// heldUnderBlock stands a usage limit and holds TURNS under it while a turn
+// is in flight, so none of the submissions is a try-now (trynow.go); the turn
+// then ends, leaving them held after reconnect with nothing running.
+func heldUnderBlock(t *testing.T, h *harness, block string, turns ...ids.TurnID) {
+	t.Helper()
+	h.footer.standVendorBlock(block)
+	h.watcher.running("t-busy")
+	submitAll(t, h, turns...)
+	h.watcher.idle()
+}
+
 // vendorServes tells the queue the vendor serves again and joins the release.
 func vendorServes(h *harness) {
 	h.footer.standVendorBlock("")
@@ -151,8 +162,7 @@ func TestWithNoVendorBlockAPromptIsDeliveredAsBefore(t *testing.T) {
 func TestWhileTheBlockStandsTheHeldPromptsStayUnclassified(t *testing.T) {
 	// Arrange
 	h := newVendorBlockHarness(t)
-	h.footer.standVendorBlock("usage_limit")
-	submitAll(t, h, "t1", "t2")
+	heldUnderBlock(t, h, "usage_limit", "t1", "t2")
 
 	// Act
 	h.q.ReleaseReconnectHolds(theWorkspace)
@@ -169,8 +179,7 @@ func TestWhileTheBlockStandsTheHeldPromptsStayUnclassified(t *testing.T) {
 func TestWhenTheVendorServesTheFirstHeldPromptIsDelivered(t *testing.T) {
 	// Arrange
 	h := newVendorBlockHarness(t)
-	h.footer.standVendorBlock("usage_limit")
-	submitAll(t, h, "t1", "t2", "t3")
+	heldUnderBlock(t, h, "usage_limit", "t1", "t2", "t3")
 
 	// Act
 	vendorServes(h)
@@ -184,8 +193,7 @@ func TestWhenTheVendorServesTheFirstHeldPromptIsDelivered(t *testing.T) {
 func TestWhenTheVendorServesTheRestAreClassifiedInOrder(t *testing.T) {
 	// Arrange
 	h := newVendorBlockHarness(t)
-	h.footer.standVendorBlock("usage_limit")
-	submitAll(t, h, "t1", "t2", "t3")
+	heldUnderBlock(t, h, "usage_limit", "t1", "t2", "t3")
 
 	// Act
 	vendorServes(h)
@@ -202,8 +210,7 @@ func TestWhenTheVendorServesTheRestAreClassifiedInOrder(t *testing.T) {
 func TestReleasedPromptsAreJudgedAgainstWhatIsAheadOfEach(t *testing.T) {
 	// Arrange
 	h := newVendorBlockHarness(t)
-	h.footer.standVendorBlock("usage_limit")
-	submitAll(t, h, "t1", "t2")
+	heldUnderBlock(t, h, "usage_limit", "t1", "t2")
 
 	// Act
 	vendorServes(h)
@@ -238,8 +245,7 @@ func TestWhenTheRetriedCallIsAnsweredTheHeldPromptIsClassifiedAgainstTheRunningT
 func TestADroppedHeldPromptIsNotDeliveredWhenTheVendorServes(t *testing.T) {
 	// Arrange
 	h := newVendorBlockHarness(t)
-	h.footer.standVendorBlock("usage_limit")
-	submitAll(t, h, "t1", "t2")
+	heldUnderBlock(t, h, "usage_limit", "t1", "t2")
 	if err := h.q.Drop(context.Background(), theWorkspace, "t1"); err != nil {
 		t.Fatalf("Drop: %v", err)
 	}
@@ -365,8 +371,7 @@ func TestHeldPromptsSurviveADaemonRestartAndGoWhenTheSessionComesUp(t *testing.T
 	// Arrange: the holds are durable; a fresh queue over the same store is
 	// the restarted daemon, whose adoption brings the session up.
 	h := newVendorBlockHarness(t)
-	h.footer.standVendorBlock("usage_limit")
-	submitAll(t, h, "t1", "t2")
+	heldUnderBlock(t, h, "usage_limit", "t1", "t2")
 	restarted, err := newQueue(h.q.deps)
 	if err != nil {
 		t.Fatalf("newQueue: %v", err)
