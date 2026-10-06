@@ -240,6 +240,17 @@ type DB interface {
 	UpdateTask(ctx context.Context, id TaskID, change TaskChange) error
 	// Tasks loads every task, all-or-nothing.
 	Tasks(ctx context.Context) ([]Task, error)
+	// SetTaskFolded records whether a task's roster section is collapsed; an
+	// unknown task is ErrNotFound.
+	SetTaskFolded(ctx context.Context, id TaskID, folded bool) error
+	// SetMergedSectionFolded records whether the recently-merged band is
+	// collapsed.
+	SetMergedSectionFolded(ctx context.Context, folded bool) error
+	// SetGrouping records which grouping every page shows.
+	SetGrouping(ctx context.Context, grouping Grouping) error
+	// SidebarView loads the sidebar's view state that belongs to no row, or
+	// DefaultSidebarView when nobody has changed it.
+	SidebarView(ctx context.Context) (SidebarView, error)
 	// AssignWorkspaceTask assigns a workspace to a task, or unassigns it when
 	// task is nil.
 	AssignWorkspaceTask(ctx context.Context, id WorkspaceID, task *TaskID) error
