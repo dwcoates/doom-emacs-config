@@ -91,6 +91,8 @@ export interface StoreClient {
   getAgentByVendorTask(
     request: storev1.GetAgentByVendorTaskRequest,
   ): Promise<storev1.GetAgentByVendorTaskResponse>;
+  /** What kind of detached work one unit left as, and whether the record holds it as ended. */
+  getDetachedWork(request: storev1.GetDetachedWorkRequest): Promise<storev1.GetDetachedWorkResponse>;
   /** One batch, durable or nothing, cursor advance in the same transaction. */
   writeBatch(request: storev1.WriteBatchRequest): Promise<storev1.WriteBatchResponse>;
 }
@@ -148,6 +150,7 @@ export function createStoreClient(socketPath: string): StoreClient {
     getLiveWork: (request) => unaryRoundTrip("GetLiveWork", () => client.getLiveWork(request)),
     getAgentByVendorTask: (request) =>
       unaryRoundTrip("GetAgentByVendorTask", () => client.getAgentByVendorTask(request)),
+    getDetachedWork: (request) => unaryRoundTrip("GetDetachedWork", () => client.getDetachedWork(request)),
     writeBatch: (request) => unaryRoundTrip("WriteBatch", () => client.writeBatch(request)),
   };
 }

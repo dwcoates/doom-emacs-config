@@ -81,9 +81,13 @@ import {
   createTaskKindRegistry,
   taskAgentKnowledge,
   taskAwaitingAgent,
+  taskAwaitingKind,
+  vendorTaskTypeOf,
   type TaskAgentKnowledge,
+  type TaskAwaitingKind,
   type TaskKindRegistry,
 } from "./detached.js";
+import { describeDetachedWorkAnswer, type DetachedWorkAnswer } from "../store/detached-work.js";
 import { describeVendorTaskAnswer, type VendorTaskAnswer } from "../store/locator.js";
 import { attachmentActivityId } from "./ids.js";
 import { placeRecordEntries } from "./place.js";
@@ -202,6 +206,19 @@ interface Fold {
    * it; any other answer is kept for the refusal record that follows.
    */
   learnTaskAgent(taskId: string, answer: VendorTaskAnswer): void;
+  /**
+   * The task whose kind the STORE must state before `message` is folded, and
+   * the unit it is asked by, or `undefined` (convert/detached.ts
+   * `taskAwaitingKind`). A read: it records nothing.
+   */
+  taskAwaitingKind(message: SdkMessage, context: FoldContext): TaskAwaitingKind | undefined;
+  /**
+   * The store's answer for a task {@link Fold.taskAwaitingKind} named: a
+   * recorded kind becomes the task's kind, exactly as a start seen here would
+   * have stated it; a recorded end marks a notification of it a re-report; any
+   * answer is kept for the refusal record that may follow.
+   */
+  learnTaskKind(taskId: string, answer: DetachedWorkAnswer): void;
   /** The shim asked the vendor to move this unit at the user's request (`TaskKindRegistry.noteUserDetach`). */
   noteUserDetach(toolUseId: string): void;
   /** Retire such a request whose move will not come (`TaskKindRegistry.retireUserDetach`). */
@@ -299,6 +316,13 @@ export function createFold(): Fold {
         return;
       }
       state.taskKinds.rememberStoreAnswer(taskId, describeVendorTaskAnswer(answer));
+    },
+    taskAwaitingKind: (message, context) => taskAwaitingKind(message, context, state.taskKinds),
+    learnTaskKind(taskId, answer) {
+      state.taskKinds.rememberKindAnswer(taskId, describeDetachedWorkAnswer(answer));
+      if (answer.kind !== "found") return;
+      if (answer.workKind !== undefined) state.taskKinds.remember(taskId, vendorTaskTypeOf(answer.workKind));
+      if (answer.ended) state.taskKinds.rememberConcludedOnRecord(taskId);
     },
     taskAgent: (taskId) => taskAgentKnowledge(state.taskKinds, taskId),
     concludeAbsorbedTurn: (context, coordinate) => absorbedTurnTerminal(context, coordinate, consumeAnswer(state)),

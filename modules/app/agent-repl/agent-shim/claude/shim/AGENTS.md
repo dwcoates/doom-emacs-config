@@ -318,6 +318,9 @@ is still a contract — but nothing has confirmed the vendor spells them this wa
   or `Skill` instead: `!glob`, `!grep-content`, `!grep-files`, `!grep-count`,
   `!artifact-publish`, `!artifact-list`, `!wakeup-schedule`, `!wakeup-stop`,
   `!worktree-keep`, `!worktree-remove`, `!memory`, `!skills-injected`;
+- `!bash-rereported` — no capture spans a keep-alive rewind; its untyped
+  `stopped` notification is a live session's log (2026-10-02, workspace
+  ship-gns);
 - `!send-message-resumed` / `!send-message-refused` / `!subagent-resumed` — no
   capture addresses a subagent; `!subagent-resumed`'s resume `task_started`
   from the send is the shape a live session's log showed (2026-09-27);
@@ -373,6 +376,7 @@ is still a contract — but nothing has confirmed the vendor spells them this wa
 | `!bash-detach-fail` | a detached `Bash` that ends non-zero: `task_updated{status:"failed"}` and a failed `task_notification` | the tool_use and tool_result lines, and a spool terminated by `EXIT=3` | AgentBash detached_work terminating in a non-zero exit |
 | `!bash-detach-live` | a detached `Bash` that NEVER finishes: no terminal notification, and the task stays in the live set | an unterminated spool with no `EXIT=` line — the corpus's `bash-midoutput.output` shape | AgentBash detached_work still live; what a fan-wide cancel and a StopBash act on |
 | `!vendor-backgrounded` | a FOREGROUND `Bash` the vendor detaches mid-flight: the scenario parks, `backgroundTasks(toolUseId)` marks it `is_backgrounded`, and the foreground result then reports `backgroundedByUser: true` | the tool_use line, the tool_result line carrying `backgroundedByUser`, an unterminated spool | AgentBackgrounded — a vendor-backgrounded foreground unit |
+| `!bash-rereported <task_id> <tool_use_id>` | a `task_notification` with `status: "stopped"` for a backgrounded shell task this query never started — no `task_started`, no `task_type` — naming the prompt's task id and spawning call, then a conclusion. A keep-alive rewind's replacement query re-reports an earlier query's ended shell exactly so | the closing text line | nothing for the re-reported task: its conclusion is already on record |
 | `!web-fetch` | a `WebFetch` answered with the corpus shape: bytes, code, codeText, result, durationMs, url | the tool_use line, the tool_result line, the closing text line | AgentWebFetch.start + AgentWebFetchSuccess |
 | `!web-fetch-redirect` | a `WebFetch` answered with a 302 and the vendor's redirect instruction as the result body | the tool_use line, the tool_result line, the closing text line | AgentWebFetchSuccess carrying a non-2xx status |
 | `!web-search` | a `WebSearch` answered with BOTH result kinds — a hit list keyed by a server tool_use id, and a bare commentary string | the tool_use line, the tool_result line, the closing text line | AgentWebSearch.start + AgentWebSearchSuccess with entry=link AND entry=note |
@@ -1234,6 +1238,33 @@ found, ERROR not-found or failed.
   resumed agent's ask is never credited to the send; anything nothing on the
   stream names is looked up by its id. `agentFor` answers a promise only then,
   and an ask whose lookup spans a stand-down is denied with that stand-down.
+
+## A task message the fold cannot type is typed by the store (2026-10-06)
+
+Only `task_started` states a task's kind; a `task_notification` states none,
+and the fold forgets a kind once its task settles. A keep-alive rewind's
+replacement vendor query re-reports an earlier query's ended background shell
+as `stopped`, with no start and no type, so every rewind recorded an ERROR
+refusal (workspace ship-gns, 2026-10-02 onward). The record holds the run's kind
+and end by its spawning call's unit (`store.v1.GetDetachedWork`,
+`src/store/detached-work.ts`).
+
+- **The ask.** `EngineFold.taskAwaitingKind` (convert/detached.ts
+  `taskAwaitingKind`) names a `task_started`, a backgrounding `task_updated`, or
+  a `task_notification` whose kind nothing this process holds names, once per
+  task. `kindFromStore` in `engine/session.ts` awaits the store inside the
+  serial message loop BEFORE the agent ask (which needs the kind), and hands
+  the answer to the fold (`EngineFold.learnTaskKind`).
+- **A recorded kind** becomes the task's kind (`vendorTaskTypeOf`), so a live
+  run is folded exactly as if its start had been seen.
+- **A recorded end** makes a notification a RE-REPORT: recorded at INFO ("a
+  re-report of a concluded task; nothing to restate"), nothing written, the
+  task's facts forgotten.
+- **Not on record** keeps the fold's ERROR refusal ("a task names no kind this
+  shim knows"), now with `store_answer`; the lookup itself is INFO.
+- **A store that cannot answer** is recorded at ERROR by `kindFromStore`, and
+  the fold refuses as before; it is never masked.
+- Mocked vendor: `!bash-rereported <task_id> <tool_use_id>`.
 
 ## A background subagent a network outage killed is resumed (2026-09-27)
 

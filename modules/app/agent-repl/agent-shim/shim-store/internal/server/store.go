@@ -76,6 +76,10 @@ type Store interface {
 	// record holds it from the agent's spawn start; `found` false with no
 	// error when the record holds no start for it.
 	AgentCommission(ctx context.Context, agentID string) (commission *conversationv1.AgentSubagentPrompt, found bool, err error)
+	// DetachedWorkByUnit answers the kind and end of the detached work that
+	// left a unit (the spawning call's activity id); `found` false with no
+	// error is the not-found answer.
+	DetachedWorkByUnit(ctx context.Context, unit string) (work *storev1.GetDetachedWorkSuccess, found bool, err error)
 	// ShellRunClaims answers every claim on record for the asked task ids, each
 	// with its run's owning book when that is on record.
 	ShellRunClaims(ctx context.Context, vendorTaskIDs []string) ([]db.ClaimedRun, error)
