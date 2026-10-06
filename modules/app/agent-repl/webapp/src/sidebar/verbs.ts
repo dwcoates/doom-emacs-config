@@ -618,9 +618,24 @@ export function openWorkspaceRefusal(cause: CauseOf<OpenWorkspaceError>): string
         "no other process owns this conversation"
       );
     }
+    case "worktreeUnrestorable":
+      // NOT A FAULT: the row names a workspace whose directory and branch are
+      // both gone, so the sentence says exactly that and what it means.
+      return unrestorableWorktreeText(cause.value.dir, cause.value.branch);
     default:
       return unreachableArm("OpenWorkspaceError.cause", cause.case);
   }
+}
+
+/**
+ * A workspace that cannot be opened because there is nothing left to restore
+ * its worktree from: its directory is gone, and so is its branch (or none was
+ * ever recorded). The same sentence Emacs draws for the arm.
+ */
+export function unrestorableWorktreeText(dir: string, branch: string): string {
+  return branch === ""
+    ? `its directory ${dir} is gone and no branch was recorded to restore it from`
+    : `its directory ${dir} is gone and its branch ${branch} no longer exists, so there is nothing to restore it from`;
 }
 
 /**
