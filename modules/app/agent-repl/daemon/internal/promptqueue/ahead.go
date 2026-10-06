@@ -222,7 +222,7 @@ func (q *queue) coalesce(ctx context.Context, sub Submission, into wsm.HeldPromp
 	log.Info(opClassify, "the prompt was ruled to interrupt a prompt that had not started; it is folded into it", dlog.Context{
 		"turn": string(sub.Turn), "into_turn": string(into.Turn),
 	})
-	q.deps.Footer.OnSubmission(sub.WS, footer.Submission{Prompt: saidText(sub.Said), Stage: footer.StageCoalesced})
+	q.deps.Footer.OnSubmission(sub.WS, footer.Submission{Stage: footer.StageCoalesced})
 	return q.pushTray(ctx, sub.WS, log)
 }
 

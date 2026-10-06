@@ -75,10 +75,9 @@ func subscriptionScenarioFor(name string) (subscriptionScenario, bool) {
 				f.submit("start the work", "k-sub-inv-footer-1", origin)
 				f.shim.ExpectStartTurn()
 			},
-			// The turn's LAST view of the drive: accepted (working), which
-			// raises the `submitting` transient's delivered stage.
+			// The turn's LAST view of the drive: accepted (working).
 			isFirst: func(msg proto.Message) bool {
-				return msg.(*frontendv1.FooterView).GetStrip().GetStatus().GetWorking().GetActivity().GetUnpinned().GetTransient().GetSubmitting().GetDelivered() != nil
+				return msg.(*frontendv1.FooterView).GetStrip().GetStatus().GetWorking() != nil
 			},
 			drive2: func(t *testing.T, f *fixture) {
 				f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))

@@ -1,7 +1,6 @@
 package footer
 
 import (
-	"strings"
 	"testing"
 	"time"
 
@@ -298,48 +297,6 @@ func TestASubagentWithNoDescriptionIsLabelledByItsType(t *testing.T) {
 	// Assert
 	if got := transientOf(t, h).GetAgent().GetLabel(); got != "Explore" {
 		t.Fatalf("agent label = %q, want the subagent's type", got)
-	}
-}
-
-func TestSubmittingATurnRaisesThePromptsFirstLine(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	connected(h)
-
-	// Act
-	h.r.SetTurn(testWS, &TurnStarted{At: instant, Prompt: "\n  fix the flaky test  \nand then commit"})
-
-	// Assert
-	if got := transientOf(t, h).GetSubmitting().GetPromptLead(); got != "fix the flaky test" {
-		t.Fatalf("prompt lead = %q, want the first non-blank line", got)
-	}
-}
-
-func TestATurnWithNoPromptTextRaisesNoSubmittingLine(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	connected(h)
-
-	// Act
-	h.r.SetTurn(testWS, &TurnStarted{At: instant})
-
-	// Assert
-	if got := transientOf(t, h); got != nil {
-		t.Fatalf("transient = %+v, want none for a turn with no text", got)
-	}
-}
-
-func TestTheSubmittingLineIsCapped(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	connected(h)
-
-	// Act
-	h.r.SetTurn(testWS, &TurnStarted{At: instant, Prompt: strings.Repeat("x", 400)})
-
-	// Assert
-	if got := []rune(transientOf(t, h).GetSubmitting().GetPromptLead()); len(got) != DefaultWarningRowWidth {
-		t.Fatalf("prompt lead is %d runes, want capped at %d", len(got), DefaultWarningRowWidth)
 	}
 }
 

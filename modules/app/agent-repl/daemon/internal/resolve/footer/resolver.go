@@ -379,36 +379,31 @@ func (r *resolver) OnTurnOpened(ws ids.WorkspaceID, turn ids.TurnID) {
 		})
 }
 
-// SetTurn installs the accepted turn, and raises the `submitting` transient's
-// delivered stage with the first line of what it delivers. A delivered prompt
-// is a next prompt, so it ends the agent's push notification.
+// SetTurn installs the accepted turn. A delivered prompt is a next prompt, so
+// it ends the agent's push notification. The delivery draws no activity line:
+// the `submitting` substatus states the step (owner ruling, 2026-10-06).
 func (r *resolver) SetTurn(ws ids.WorkspaceID, turn *TurnStarted) {
 	r.mutate(ws, "daemon.footer.set_turn", "the footer took the accepted turn",
 		dlog.Context{"in_flight": turn != nil}, func(s *wsState) {
 			r.applyTurnStarted(s, turn)
 			if turn != nil {
 				r.endNotification(ws, s, "daemon.footer.set_turn")
-				r.raiseSubmitting(ws, s, turn.Prompt, &frontendv1.FooterActivityTransientSubmitting{
-					Stage: &frontendv1.FooterActivityTransientSubmitting_Delivered{
-						Delivered: &frontendv1.FooterActivityTransientSubmittingDelivered{}}})
 			}
 		})
 }
 
-// OnSubmission raises the `submitting` transient for one move of a prompt's
-// delivery, and ends the agent's push notification: the prompt is the next
-// prompt the notification stood until.
+// OnSubmission takes one move of a prompt's delivery and ends the agent's push
+// notification: the prompt is the next prompt the notification stood until.
+// The move draws no activity line (owner ruling, 2026-10-06); it is recorded.
 func (r *resolver) OnSubmission(ws ids.WorkspaceID, sub Submission) {
+	stage, declared := stageName(sub.Stage)
 	r.mutate(ws, "daemon.footer.on_submission", "the footer took a move of a prompt's delivery",
-		dlog.Context{"stage": stageName(sub.Stage), "position": sub.Position, "queued": sub.Queued}, func(s *wsState) {
+		dlog.Context{"stage": stage, "position": sub.Position, "queued": sub.Queued}, func(s *wsState) {
 			r.endNotification(ws, s, "daemon.footer.on_submission")
-			line, ok := submittingStage(sub)
-			if !ok {
-				r.logOf(ws, s).Error("daemon.footer.on_submission", "a submission names no stage the footer draws",
+			if !declared {
+				r.logOf(ws, s).Error("daemon.footer.on_submission", "a submission names no stage the footer declares",
 					dlog.Context{"stage": int(sub.Stage), "invariant_violation": "every submission names one of the declared stages"})
-				return
 			}
-			r.raiseSubmitting(ws, s, sub.Prompt, line)
 		})
 }
 

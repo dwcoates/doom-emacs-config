@@ -334,14 +334,15 @@ func TestAJoinThatRunsAsItsOwnTurnTakesTheTurnFact(t *testing.T) {
 	h := newHarness(t)
 	sentToJoin(t, h)
 	h.watcher.running("t1")
+	before := len(h.footer.startedTurns())
 
 	// Act
 	h.q.OnTurnEnded(theWorkspace, "running-turn", wsm.CloseCompleted)
 
 	// Assert
 	turns := h.footer.startedTurns()
-	if len(turns) == 0 || turns[len(turns)-1].Prompt != "also cover the edge case" {
-		t.Fatalf("footer turns = %+v, want the joining prompt's turn fact", turns)
+	if len(turns) != before+1 || turns[len(turns)-1] == nil || turns[len(turns)-1].Act != footer.ActPrompt {
+		t.Fatalf("footer turns = %+v, want the joining prompt's turn fact stood after the %d before it", turns, before)
 	}
 	if started := h.sender.started(); len(started) != 0 {
 		t.Fatalf("started = %v, want nothing popped into the prompt's own turn", started)

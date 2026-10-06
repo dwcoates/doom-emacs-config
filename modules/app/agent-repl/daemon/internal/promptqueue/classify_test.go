@@ -1181,7 +1181,7 @@ func TestAJudgedPromptReportsClassifyingThenItsPlaceInTheQueue(t *testing.T) {
 	if got := stagesOf(subs); !reflect.DeepEqual(got, want) {
 		t.Fatalf("stages = %v, want %v", got, want)
 	}
-	if held := subs[1]; held.Position != 1 || held.Queued != 1 || held.Prompt != "and then this" {
+	if held := subs[1]; held.Position != 1 || held.Queued != 1 {
 		t.Fatalf("held = %+v, want place 1 of 1 for the prompt", held)
 	}
 }
