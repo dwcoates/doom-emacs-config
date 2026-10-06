@@ -100,6 +100,16 @@ func TestDecodeStandingRefusesAnIncompleteOverlay(t *testing.T) {
 			Id:       &frontendv1.NewsDigestId{Value: "d"},
 			Sections: []*frontendv1.NewsDigestSection{{Kind: kinds[0].arm()}},
 		}},
+		{name: "a week with no outcome", overlay: &frontendv1.NewsDigestOverlay{
+			Id:   &frontendv1.NewsDigestId{Value: "d"},
+			Week: &frontendv1.NewsDigestWeek{Heading: &frontendv1.NewsDigestSectionHeading{Text: "Since last week"}},
+		}},
+		{name: "a week of no risks", overlay: &frontendv1.NewsDigestOverlay{
+			Id: &frontendv1.NewsDigestId{Value: "d"},
+			Week: &frontendv1.NewsDigestWeek{Outcome: &frontendv1.NewsDigestWeek_Risks{
+				Risks: &frontendv1.NewsDigestWeekRisks{},
+			}},
+		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -117,6 +127,19 @@ func TestDecodeStandingRefusesAnIncompleteOverlay(t *testing.T) {
 				t.Fatal("decodeStanding = nil, want a refusal")
 			}
 		})
+	}
+}
+
+func TestDecodeStandingAcceptsADigestMadeBeforeTheWeek(t *testing.T) {
+	// Arrange
+	encoded := encodedOverlay(t, "d", now.UnixMilli())
+
+	// Act
+	overlay, err := decodeStanding(encoded)
+
+	// Assert
+	if err != nil || overlay.Week != nil {
+		t.Fatalf("decodeStanding = (%v, %v), want the earlier digest with no week", overlay, err)
 	}
 }
 

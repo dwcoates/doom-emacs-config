@@ -23,7 +23,7 @@ func TestParseAnswerOrdersSectionsByRankWithTheDaemonsHeadings(t *testing.T) {
 	text := `{"sections":[{"kind":"feature","items":[` + item + `]},{"kind":"backend","items":[` + item + `]}]}`
 
 	// Act
-	sections, err := parseAnswer(text, allowedFixture)
+	sections, _, err := parseAnswer(text, allowedFixture)
 
 	// Assert
 	if err != nil {
@@ -39,7 +39,7 @@ func TestParseAnswerOrdersSectionsByRankWithTheDaemonsHeadings(t *testing.T) {
 
 func TestParseAnswerKeepsAnItemWhole(t *testing.T) {
 	// Act
-	sections, err := parseAnswer(answerJSON, allowedFixture)
+	sections, _, err := parseAnswer(answerJSON, allowedFixture)
 
 	// Assert
 	if err != nil {
@@ -55,7 +55,7 @@ func TestParseAnswerKeepsAnItemWhole(t *testing.T) {
 
 func TestParseAnswerLeavesAnUnstatedEffectiveDateUnset(t *testing.T) {
 	// Act
-	sections, err := parseAnswer(`{"sections":[{"kind":"release","items":[`+item+`]}]}`, allowedFixture)
+	sections, _, err := parseAnswer(`{"sections":[{"kind":"release","items":[`+item+`]}]}`, allowedFixture)
 
 	// Assert
 	if err != nil || sections[0].GetItems()[0].Effective != nil {
@@ -65,7 +65,7 @@ func TestParseAnswerLeavesAnUnstatedEffectiveDateUnset(t *testing.T) {
 
 func TestParseAnswerAcceptsOneEnclosingCodeFence(t *testing.T) {
 	// Act
-	sections, err := parseAnswer("```json\n"+answerJSON+"\n```", allowedFixture)
+	sections, _, err := parseAnswer("```json\n"+answerJSON+"\n```", allowedFixture)
 
 	// Assert
 	if err != nil || len(sections) != 1 {
@@ -75,7 +75,7 @@ func TestParseAnswerAcceptsOneEnclosingCodeFence(t *testing.T) {
 
 func TestParseAnswerReadsNoSectionsAsNothingWorthReporting(t *testing.T) {
 	// Act
-	sections, err := parseAnswer(`{"sections":[]}`, allowedFixture)
+	sections, _, err := parseAnswer(`{"sections":[]}`, allowedFixture)
 
 	// Assert
 	if err != nil || len(sections) != 0 {
@@ -101,16 +101,50 @@ func TestParseAnswerRefusesAMalformedAnswer(t *testing.T) {
 		{name: "a blank effective date", text: `{"sections":[{"kind":"release","items":[{"title":"T","summary":"S","effective":" ","links":[{"label":"L","url":"https://fixture.test/news"}]}]}]}`},
 		{name: "a link with no label", text: `{"sections":[{"kind":"release","items":[{"title":"T","summary":"S","links":[{"label":"","url":"https://fixture.test/news"}]}]}]}`},
 		{name: "a link that is not https", text: `{"sections":[{"kind":"release","items":[{"title":"T","summary":"S","links":[{"label":"L","url":"http://fixture.test/news"}]}]}]}`},
+		{name: "a blank risk reason", text: `{"sections":[{"kind":"release","items":[{"title":"T","summary":"S","risk":"  ","links":[{"label":"L","url":"https://fixture.test/news"}]}]}]}`},
+		{name: "a risk reason over two lines", text: `{"sections":[{"kind":"release","items":[{"title":"T","summary":"S","risk":"one\ntwo","links":[{"label":"L","url":"https://fixture.test/news"}]}]}]}`},
+		{name: "a risk that is not a string", text: `{"sections":[{"kind":"release","items":[{"title":"T","summary":"S","risk":true,"links":[{"label":"L","url":"https://fixture.test/news"}]}]}]}`},
 		{name: "a link the sources never gave", text: `{"sections":[{"kind":"release","items":[{"title":"T","summary":"S","links":[{"label":"L","url":"https://elsewhere.test/made-up"}]}]}]}`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Act
-			_, err := parseAnswer(tt.text, allowedFixture)
+			_, _, err := parseAnswer(tt.text, allowedFixture)
 
 			// Assert
 			if err == nil {
 				t.Fatal("parseAnswer = nil, want a refusal")
+			}
+		})
+	}
+}
+
+func TestParseAnswerReadsTheRiskMarks(t *testing.T) {
+	tests := []struct {
+		name       string
+		risk       string
+		wantMarked bool
+		wantReason string
+	}{
+		{name: "a marked item carries its trimmed reason", risk: `,"risk":" Breaks the shim's resume. "`, wantMarked: true, wantReason: "Breaks the shim's resume."},
+		{name: "an unmarked item is absent", risk: ``, wantMarked: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			text := `{"sections":[{"kind":"backend","items":[{"title":"T","summary":"S"` + tt.risk +
+				`,"links":[{"label":"L","url":"https://fixture.test/news"}]}]}]}`
+
+			// Act
+			sections, marked, err := parseAnswer(text, allowedFixture)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("parseAnswer: %v", err)
+			}
+			reason, ok := marked[sections[0].GetItems()[0]]
+			if ok != tt.wantMarked || reason != tt.wantReason || len(marked) != map[bool]int{true: 1, false: 0}[tt.wantMarked] {
+				t.Fatalf("marked = %v, want marked=%v with %q", marked, tt.wantMarked, tt.wantReason)
 			}
 		})
 	}
@@ -149,7 +183,7 @@ func TestCondenseAsksSonnetUnderTheDigestsSiteWithTheMaterial(t *testing.T) {
 	c := condenser{headless: runner, promptsDir: repoPromptsDir, configDir: "/accounts/default", timeout: DefaultModelTimeout}
 
 	// Act
-	_, err := c.condense(context.Background(), "yesterday to today", material, nil)
+	_, _, err := c.condense(context.Background(), "yesterday to today", material, nil)
 
 	// Assert
 	if err != nil {
@@ -182,7 +216,7 @@ func TestCondenseHandsTheModelTheStillUnreadDigest(t *testing.T) {
 	}}
 
 	// Act
-	_, err := c.condense(context.Background(), "p", material, carried)
+	_, _, err := c.condense(context.Background(), "p", material, carried)
 
 	// Assert
 	if err != nil {
@@ -205,7 +239,7 @@ func TestCondenseAllowsTheCarriedDigestsLinks(t *testing.T) {
 	}}}}
 
 	// Act
-	sections, err := c.condense(context.Background(), "p", material, carried)
+	sections, _, err := c.condense(context.Background(), "p", material, carried)
 
 	// Assert
 	if err != nil || len(sections) != 1 {
@@ -219,7 +253,7 @@ func TestCondenseReportsAFailedCallAsAModelFailure(t *testing.T) {
 	c := condenser{headless: runner, promptsDir: repoPromptsDir}
 
 	// Act
-	_, err := c.condense(context.Background(), "p", material, nil)
+	_, _, err := c.condense(context.Background(), "p", material, nil)
 
 	// Assert
 	var failed *ModelFailedError
@@ -233,7 +267,7 @@ func TestCondenseReportsAMalformedAnswerAsAModelFailure(t *testing.T) {
 	c := condenser{headless: &fakeRunner{text: "Sure! Here is your digest."}, promptsDir: repoPromptsDir}
 
 	// Act
-	_, err := c.condense(context.Background(), "p", material, nil)
+	_, _, err := c.condense(context.Background(), "p", material, nil)
 
 	// Assert
 	var failed *ModelFailedError
@@ -242,12 +276,54 @@ func TestCondenseReportsAMalformedAnswerAsAModelFailure(t *testing.T) {
 	}
 }
 
+func TestCondenseReportsAMalformedRiskMarkAsAModelFailure(t *testing.T) {
+	// Arrange
+	text := `{"sections":[{"kind":"backend","items":[{"title":"T","summary":"S","risk":"","links":[{"label":"L","url":"https://fixture.test/releases/new"}]}]}]}`
+	c := condenser{headless: &fakeRunner{text: text}, promptsDir: repoPromptsDir}
+
+	// Act
+	sections, marked, err := c.condense(context.Background(), "p", material, nil)
+
+	// Assert
+	var failed *ModelFailedError
+	if !errors.As(err, &failed) || !strings.Contains(failed.Reason, "risk reason is blank") || sections != nil || marked != nil {
+		t.Fatalf("condense = (%v, %v, %v), want a model failure naming the blank risk and nothing kept", sections, marked, err)
+	}
+}
+
+func TestCondenseAnswersTheMarkedItems(t *testing.T) {
+	// Arrange
+	text := `{"sections":[{"kind":"backend","items":[{"title":"T","summary":"S","risk":"Breaks the shim.","links":[{"label":"L","url":"https://fixture.test/releases/new"}]}]}]}`
+	c := condenser{headless: &fakeRunner{text: text}, promptsDir: repoPromptsDir}
+
+	// Act
+	sections, marked, err := c.condense(context.Background(), "p", material, nil)
+
+	// Assert
+	if err != nil || marked[sections[0].GetItems()[0]] != "Breaks the shim." {
+		t.Fatalf("condense = (%v, %v, %v), want the item marked", sections, marked, err)
+	}
+}
+
+func TestTheBriefAsksForTheRiskMark(t *testing.T) {
+	// Act
+	brief, err := prompts.Load(repoPromptsDir, Brief)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !strings.Contains(brief.Body, `"risk":"..."`) || !strings.Contains(brief.Body, "REGRESS agent-repl") {
+		t.Fatalf("the brief does not ask for the risk mark:\n%s", brief.Body)
+	}
+}
+
 func TestCondenseReportsAMissingBriefAsAModelFailure(t *testing.T) {
 	// Arrange
 	c := condenser{headless: &fakeRunner{text: answerJSON}, promptsDir: t.TempDir()}
 
 	// Act
-	_, err := c.condense(context.Background(), "p", material, nil)
+	_, _, err := c.condense(context.Background(), "p", material, nil)
 
 	// Assert
 	var failed *ModelFailedError

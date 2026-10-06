@@ -67,6 +67,9 @@ type fakeStore struct {
 	recordErr  error
 	dismissErr error
 	restandErr error
+	risksErr   error
+	// kept are the marked items recorded runs kept, as the store answers them.
+	kept []wsm.NewsDigestRisk
 	// onRecord runs inside RecordNewsDigestRun, before it records.
 	onRecord func()
 	// reads counts NewsDigestState calls; afterRead runs after each one with
@@ -114,6 +117,23 @@ func (s *fakeStore) RecordNewsDigestRun(_ context.Context, run wsm.NewsDigestRun
 			s.state.Snapshots[k] = v
 		}
 	}
+	if h := run.History; h != nil {
+		if s.state.HistorySince.IsZero() {
+			s.state.HistorySince = h.CoversFrom
+		}
+		for _, it := range h.Items {
+			if it.Risk != "" {
+				s.kept = append(s.kept, wsm.NewsDigestRisk{RunEnd: run.EndedAt, Item: it.Item, Reason: it.Risk})
+			}
+		}
+		var fresh []wsm.NewsDigestRisk
+		for _, k := range s.kept {
+			if !k.RunEnd.Before(h.KeepSince) {
+				fresh = append(fresh, k)
+			}
+		}
+		s.kept = fresh
+	}
 	if run.Digest != nil {
 		s.state.LatestID = run.Digest.ID
 		s.state.Standing = run.Digest.Overlay
@@ -121,6 +141,21 @@ func (s *fakeStore) RecordNewsDigestRun(_ context.Context, run wsm.NewsDigestRun
 		s.state.LatestMadeAt = run.EndedAt
 	}
 	return nil
+}
+
+func (s *fakeStore) NewsDigestRisksSince(_ context.Context, since time.Time) ([]wsm.NewsDigestRisk, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.risksErr != nil {
+		return nil, s.risksErr
+	}
+	var out []wsm.NewsDigestRisk
+	for _, k := range s.kept {
+		if !k.RunEnd.Before(since) {
+			out = append(out, k)
+		}
+	}
+	return out, nil
 }
 
 func (s *fakeStore) DismissNewsDigest(_ context.Context, id string) (bool, error) {
@@ -193,11 +228,14 @@ func (f *fakeFetcher) Fetch(ctx context.Context, url string) ([]byte, error) {
 	return []byte(body), nil
 }
 
-// fakeRunner answers the condensing call from a script.
+// fakeRunner answers the condensing call, and the week's merge call (asked
+// under WeekSite), from a script.
 type fakeRunner struct {
 	mu       sync.Mutex
 	text     string
 	err      error
+	weekText string
+	weekErr  error
 	requests []headless.Request
 	// onRun runs inside Run, before it answers.
 	onRun func(ctx context.Context)
@@ -210,6 +248,12 @@ func (r *fakeRunner) Run(ctx context.Context, req headless.Request) (headless.Re
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.requests = append(r.requests, req)
+	if req.Site == WeekSite {
+		if r.weekErr != nil {
+			return headless.Response{}, r.weekErr
+		}
+		return headless.Response{Text: r.weekText, Model: req.Model}, nil
+	}
 	if r.err != nil {
 		return headless.Response{}, r.err
 	}
@@ -256,6 +300,8 @@ type world struct {
 	lock    string
 	minted  int
 	sources []Source
+	// sdk is the Agent SDK version the digester is told; empty is unknown.
+	sdk string
 }
 
 func newWorld(t *testing.T) *world {
@@ -272,9 +318,10 @@ func (w *world) digester() *Digester {
 	d, err := New(Deps{
 		Sources: w.sources, Fetcher: w.fetcher, Headless: w.runner, PromptsDir: repoPromptsDir,
 		ConfigDir: "/accounts/default", Store: w.store, Clock: w.clock, LockPath: w.lock,
-		Serves: func() bool { return w.serves },
-		MintID: func() string { w.minted++; return fmt.Sprintf("digest-%d", w.minted) },
-		Every:  DefaultEvery, StartDelay: DefaultStartDelay, Recheck: DefaultRecheck, Log: w.log,
+		Serves:     func() bool { return w.serves },
+		MintID:     func() string { w.minted++; return fmt.Sprintf("digest-%d", w.minted) },
+		SDKVersion: func() (string, bool) { return w.sdk, w.sdk != "" },
+		Every:      DefaultEvery, StartDelay: DefaultStartDelay, Recheck: DefaultRecheck, Log: w.log,
 	})
 	if err != nil {
 		w.t.Fatalf("New: %v", err)
