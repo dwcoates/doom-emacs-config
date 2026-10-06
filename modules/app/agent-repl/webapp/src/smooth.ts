@@ -235,3 +235,19 @@ export class SmoothReveal {
     return Math.min(full, track.revealed + cps * dt);
   }
 }
+
+/**
+ * The shown length `elapsedMs` into a reveal the daemon has paced
+ * (frontend.v1.FeedResponseRevealWindow): everything from `from` to `to` is
+ * spread evenly across `windowMs`, the time the daemon expects to pass before
+ * the next fragment arrives, so a steady stream reads as one continuous
+ * type-out rather than a burst and a stall per push.
+ *
+ * `from` is what was already on screen when the push was drawn, so text still
+ * unrevealed from the previous push is spread along with the new text rather
+ * than left behind. The answer is fractional, for `revealSlice` to floor.
+ */
+export function windowedReveal(from: number, to: number, elapsedMs: number, windowMs: number): number {
+  if (elapsedMs >= windowMs) return to;
+  return from + ((to - from) * Math.max(0, elapsedMs)) / windowMs;
+}
