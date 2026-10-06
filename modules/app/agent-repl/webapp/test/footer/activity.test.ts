@@ -999,12 +999,12 @@ describe("the transient kinds", () => {
       ".footer-activity-session-change",
       "model → opus",
     ],
-    ["updated", {}, ".footer-activity-update", "updated"],
+    ["updated", {}, ".footer-activity-update", "agent-repl hot reloaded"],
     [
       "updated",
       { notes: [{ note: { case: "shimWhenIdle", value: {} } }] },
       ".footer-activity-update",
-      "updated · shim when idle",
+      "agent-repl hot reloaded · shim when idle",
     ],
     [
       "compactionConcluded",
