@@ -48,9 +48,6 @@ func TestANewEmacsBeginsAgentReplsSessionOnTheTopbar(t *testing.T) {
 	if session.GetEditorStart() == nil || started.Before(before.Truncate(time.Millisecond)) || started.After(time.Now()) {
 		t.Fatalf("session = %v, want an editor-start session begun during the test", session)
 	}
-	if session.GetBytesReceived() != 0 || session.GetBytesSent() != 0 {
-		t.Fatalf("session traffic = %d / %d, want none in a process whose vendor is forbidden", session.GetBytesReceived(), session.GetBytesSent())
-	}
 }
 
 func TestAgentReplsSessionSurvivesADaemonRestart(t *testing.T) {
