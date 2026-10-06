@@ -15,13 +15,15 @@ import (
 // rulings that the roster agrees with the footer (2026-09-14) and that
 // vendor_blocked is ONLY for the vendor or the account (2026-09-28).
 //
-// The footer's `blocked` arm and the roster's `vendor_blocked` and
-// `turn_failed` arms decide the same failure through ONE classifier
-// (ladder.ClassifyFailure), so they cannot drift. This drives failures from
-// each class through a real turn on the same workspace and asserts BOTH
-// surfaces draw the class: a vendor or account refusal as `blocked` and
-// `vendor_blocked`; the turn's own failure as `idle · turn_failed` and
-// `turn_failed`; an expected stop as `idle · done` and `done`. The regression
+// The footer's `vendor_fault` and `agent_repl_fault · turn_died` and the
+// roster's `vendor_blocked` and `turn_died` decide the same failure through
+// ONE classifier (ladder.ClassifyFailure, ladder.ResolveTurnFault), so they
+// cannot drift. This drives failures from each class through a real turn on
+// the same workspace and asserts BOTH surfaces draw the class: a vendor or
+// account refusal as `vendor_fault` and `vendor_blocked`; every other cause
+// the vendor ended (owner ruling, 2026-10-06) as `vendor_fault · vendor_error`
+// and `vendor_blocked`; the query dying as `agent_repl_fault · turn_died` and
+// `turn_died`; an expected stop as `idle · done` and `done`. The regression
 // it first guarded is the one the 2026-09-14 ruling named: an
 // authentication_failed failure the footer painted `blocked` used to fall
 // through the roster's private allowlist to a green arm.
@@ -54,25 +56,25 @@ func TestRosterAndFooterAgreeOnBlocked(t *testing.T) {
 		{"rapid_refill_breaker", &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_RapidRefillBreaker{
 			RapidRefillBreaker: &conversationv1.AgentStoppedByRapidRefillBreaker{}}}, "vendor"},
 		{"budget_exhausted", &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_BudgetExhausted{
-			BudgetExhausted: &conversationv1.AgentBudgetExhausted{}}}, "turn"},
+			BudgetExhausted: &conversationv1.AgentBudgetExhausted{}}}, "vendor_turn"},
 		{"max_turns", &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_MaxTurns{
-			MaxTurns: &conversationv1.AgentMaxTurnsReached{}}}, "turn"},
+			MaxTurns: &conversationv1.AgentMaxTurnsReached{}}}, "vendor_turn"},
 		{"execution_error", &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ExecutionError{
-			ExecutionError: &conversationv1.AgentExecutionError{}}}, "turn"},
+			ExecutionError: &conversationv1.AgentExecutionError{}}}, "vendor_turn"},
 		{"structured_output_retry_exhausted", &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_StructuredOutputRetryExhausted{
-			StructuredOutputRetryExhausted: &conversationv1.AgentStructuredOutputRetriesExhausted{}}}, "turn"},
+			StructuredOutputRetryExhausted: &conversationv1.AgentStructuredOutputRetriesExhausted{}}}, "vendor_turn"},
 		{"model_error", &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ModelError{
-			ModelError: &conversationv1.AgentModelError{}}}, "turn"},
+			ModelError: &conversationv1.AgentModelError{}}}, "vendor_turn"},
 		{"api_overloaded", &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ApiRequestFailed{
 			ApiRequestFailed: &conversationv1.ApiRequestFailed{
 				Kind: &conversationv1.ApiRequestFailed_Overloaded{
-					Overloaded: &conversationv1.ApiOverloaded{}}}}}, "turn"},
+					Overloaded: &conversationv1.ApiOverloaded{}}}}}, "vendor_turn"},
 		{"stop_hook_prevented", &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_StopHookPrevented{
 			StopHookPrevented: &conversationv1.AgentStoppedByStopHook{}}}, "expected"},
 		{"prompt_too_long", &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_PromptTooLong{
-			PromptTooLong: &conversationv1.AgentPromptTooLong{}}}, "turn"},
+			PromptTooLong: &conversationv1.AgentPromptTooLong{}}}, "vendor_turn"},
 		{"query_died", &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_QueryDied{
-			QueryDied: &conversationv1.SessionQueryDied{}}}, "turn"},
+			QueryDied: &conversationv1.SessionQueryDied{}}}, "agent_repl"},
 	}
 
 	for _, tc := range tests {
@@ -97,12 +99,23 @@ func TestRosterAndFooterAgreeOnBlocked(t *testing.T) {
 				awaitRoster(t, f.d, roster, "the roster paints vendor_blocked", func(r *frontendv1.WorkspaceRoster) bool {
 					return rosterRow(r, f.ws.GetId()).GetVendorBlocked() != nil
 				})
-			case "turn":
-				awaitFooter(t, f, footer, "the footer draws turn_failed", func(v *frontendv1.FooterView) bool {
-					return v.GetStrip().GetStatus().GetTurnFailed() != nil
+			case "vendor_turn":
+				// A TURN THE VENDOR ENDED IS A VENDOR FAULT (owner ruling,
+				// 2026-10-06): vendor_fault · vendor_error and vendor_blocked.
+				awaitFooter(t, f, footer, "the footer draws vendor_fault · vendor_error", func(v *frontendv1.FooterView) bool {
+					return v.GetStrip().GetStatus().GetVendorFault().GetVendorError() != nil
 				})
-				awaitRoster(t, f.d, roster, "the roster paints turn_failed", func(r *frontendv1.WorkspaceRoster) bool {
-					return rosterRow(r, f.ws.GetId()).GetTurnFailed() != nil
+				awaitRoster(t, f.d, roster, "the roster paints vendor_blocked", func(r *frontendv1.WorkspaceRoster) bool {
+					return rosterRow(r, f.ws.GetId()).GetVendorBlocked() != nil
+				})
+			case "agent_repl":
+				// A TURN THE QUERY'S DEATH ENDED IS AN AGENT-REPL FAULT (owner
+				// ruling, 2026-10-06): agent_repl_fault · turn_died and turn_died.
+				awaitFooter(t, f, footer, "the footer draws agent_repl_fault · turn_died", func(v *frontendv1.FooterView) bool {
+					return v.GetStrip().GetStatus().GetAgentReplFault().GetTurnDied() != nil
+				})
+				awaitRoster(t, f.d, roster, "the roster paints turn_died", func(r *frontendv1.WorkspaceRoster) bool {
+					return rosterRow(r, f.ws.GetId()).GetTurnDied() != nil
 				})
 			case "expected":
 				awaitFooter(t, f, footer, "the footer draws idle · done", func(v *frontendv1.FooterView) bool {
