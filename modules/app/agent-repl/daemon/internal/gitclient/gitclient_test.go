@@ -565,6 +565,35 @@ func TestRestoreWorktreeAttachFailureIsReturnedAndLogged(t *testing.T) {
 	}
 }
 
+func TestUnregisterMissingWorktreeRemovesOnlyThatRegistration(t *testing.T) {
+	// Arrange.
+	git, _ := newTestClient(t)
+	fake := newFakeGit(t, ok(""))
+
+	// Act.
+	if err := git.UnregisterMissingWorktree(context.Background(), "/repo", "/wt"); err != nil {
+		t.Fatalf("UnregisterMissingWorktree: %v", err)
+	}
+
+	// Assert: no --force (git must still refuse a locked one), and no prune.
+	fake.assertSubject(0, "worktree", "remove", "/wt")
+}
+
+func TestUnregisterMissingWorktreeFailurePropagatesTheGitEvidence(t *testing.T) {
+	// Arrange.
+	git, _ := newTestClient(t)
+	newFakeGit(t, fails(128, "fatal: cannot remove a locked working tree;\nuse 'remove -f -f' to override or unlock first\n"))
+
+	// Act.
+	err := git.UnregisterMissingWorktree(context.Background(), "/repo", "/wt")
+
+	// Assert.
+	var failure *Error
+	if !errors.As(err, &failure) || !strings.Contains(failure.Stderr, "locked working tree") {
+		t.Fatalf("UnregisterMissingWorktree error = %v, want git's own refusal as a *gitclient.Error", err)
+	}
+}
+
 func TestAddDetachedWorktreeChecksTheCommitOutWithNoBranch(t *testing.T) {
 	// Arrange: the merge queue's scratch tree names no branch.
 	git, _ := newTestClient(t)

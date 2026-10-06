@@ -483,6 +483,9 @@ func worktree(s *State, repo *Repo, subject []string) Result {
 		return addDetached(s, repo, subject)
 
 	case len(subject) >= 2 && subject[1] == "add":
+		if refused, ok := refuseMissingRegistered(repo, subject); ok {
+			return refused
+		}
 		var branchName, dir, base string
 		for i := 2; i < len(subject); i++ {
 			switch subject[i] {
@@ -531,6 +534,10 @@ func worktree(s *State, repo *Repo, subject []string) Result {
 		target := repo.Worktree(dir)
 		if target == nil {
 			return Result{Stderr: fmt.Sprintf("fatal: '%s' is not a working tree\n", dir), Exit: 128}
+		}
+		// Git refuses a LOCKED tree unless it is forced twice, missing or not.
+		if target.Locked && forceCount(subject) < 2 {
+			return Result{Stderr: "fatal: cannot remove a locked working tree;\nuse 'remove -f -f' to override or unlock first\n", Exit: 128}
 		}
 		// Real git refuses a tree with modified or untracked content unless
 		// it is forced.
@@ -582,6 +589,52 @@ func worktree(s *State, repo *Repo, subject []string) Result {
 		return Result{}
 	}
 	return Result{Stderr: "fatal: fakegit: unsupported worktree command\n", Exit: 128}
+}
+
+// refuseMissingRegistered is `worktree add`'s check_candidate_path: a path git
+// still registers although its directory is gone is refused, in git's own
+// words and exit code, unless forced (twice for a locked one). It runs before
+// any branch check, exactly as git's does.
+func refuseMissingRegistered(repo *Repo, subject []string) (Result, bool) {
+	var dir string
+	for i := 2; i < len(subject); i++ {
+		switch subject[i] {
+		case "-b":
+			i++
+		case "-f", "--force", "--detach":
+		default:
+			if dir == "" {
+				dir = subject[i]
+			}
+		}
+	}
+	wt := repo.Worktree(dir)
+	if dir == "" || wt == nil {
+		return Result{}, false
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		return Result{}, false
+	}
+	forced := forceCount(subject)
+	if wt.Locked && forced < 2 {
+		return Result{Stderr: fmt.Sprintf("fatal: '%s' is a missing but locked worktree;\nuse 'add -f -f' to override, or 'unlock' and 'prune' or 'remove' to clear\n", dir), Exit: 128}, true
+	}
+	if !wt.Locked && forced < 1 {
+		return Result{Stderr: fmt.Sprintf("fatal: '%s' is a missing but already registered worktree;\nuse 'add -f' to override, or 'prune' or 'remove' to clear\n", dir), Exit: 128}, true
+	}
+	return Result{}, false
+}
+
+// forceCount counts a command's -f/--force flags: git reads a doubled one as
+// a stronger override.
+func forceCount(subject []string) int {
+	n := 0
+	for _, a := range subject {
+		if a == "-f" || a == "--force" {
+			n++
+		}
+	}
+	return n
 }
 
 // addDetached implements `worktree add --detach <dir> <commit>`: the merge

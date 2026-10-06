@@ -170,6 +170,20 @@ func (c *client) RestoreWorktree(ctx context.Context, repoDir, worktreeDir, bran
 	return nil
 }
 
+// UnregisterMissingWorktree retires the ONE registration git still holds for a
+// worktree whose directory is gone: `git worktree remove <dir>`, which git
+// accepts for a missing tree and which then deletes only that tree's
+// `.git/worktrees/<name>` entry. It is the safe answer to `worktree add`'s
+// "missing but already registered worktree" refusal: `git worktree prune`
+// would retire EVERY missing registration in the repository, some of which
+// are not this daemon's to retire, and `worktree add -f` would also override
+// the refusal to check out a branch another live worktree holds. No --force
+// is passed, so git still refuses a LOCKED registration.
+func (c *client) UnregisterMissingWorktree(ctx context.Context, repoDir, worktreeDir string) error {
+	_, err := c.run(ctx, "daemon.gitclient.unregister_missing_worktree", repoDir, "worktree", "remove", worktreeDir)
+	return err
+}
+
 // AddDetachedWorktree checks commit out at worktreeDir with a detached HEAD.
 // No branch is created, so nothing but the directory names the tree and its
 // removal leaves no ref behind. It is NOT a workspace: no log sink is attached

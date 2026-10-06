@@ -811,6 +811,12 @@ func (g *fakeGit) RestoreWorktree(context.Context, string, string, string) error
 	return errors.New("fakeGit: the merge never restores a workspace's worktree")
 }
 
+// UnregisterMissingWorktree is never the merge's to call either.
+func (g *fakeGit) UnregisterMissingWorktree(context.Context, string, string) error {
+	g.record("unregister_missing_worktree")
+	return errors.New("fakeGit: the merge never unregisters a missing worktree")
+}
+
 func (g *fakeGit) Fetch(_ context.Context, dir, remote string) error {
 	g.record("fetch")
 	g.mu.Lock()
