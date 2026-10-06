@@ -347,6 +347,15 @@ export function noteAnnouncedWindow(announced: AnnouncedWindows, message: Record
   announced[sampled] = Math.round(utilization * 100);
 }
 
+/** A per-seat account's spend: $223.88 of a $12,000 monthly allotment. */
+const FAKE_SEAT_SPEND = {
+  is_enabled: true,
+  monthly_limit: 1_200_000,
+  used_credits: 22_388,
+  utilization: 1.87,
+  currency: "USD",
+};
+
 /**
  * The account-usage answer for one arm.
  *
@@ -399,6 +408,23 @@ export function fakeAccountUsage(
     case "utilization_unavailable":
       // The window exists and its utilization does not.
       return { ...base, rate_limits: { ...allWindows, five_hour: window(null, sessionResetsAt) } };
+    case "seat_spend":
+      // A PER-SEAT ENTERPRISE ACCOUNT, in the shape the work account's usage
+      // answer takes (the vendor CLI's cached answer, 2026-10-06): every
+      // window null, the seat's monthly allotment and its month-to-date spend
+      // in minor units under `extra_usage`.
+      return {
+        ...base,
+        subscription_type: "enterprise",
+        rate_limits: { five_hour: null, seven_day: null, extra_usage: FAKE_SEAT_SPEND },
+      };
+    case "seat_spend_unreported":
+      // The same seat before the vendor reports any spend figure.
+      return {
+        ...base,
+        subscription_type: "enterprise",
+        rate_limits: { five_hour: null, seven_day: null, extra_usage: { ...FAKE_SEAT_SPEND, used_credits: null, utilization: null } },
+      };
     case "sampling_failure":
       // THE SHIM'S OWN SAMPLING FAILING IS A THROW, NOT A SHAPE. This arm used
       // to answer `{ ...base, behaviors: null }`, which the converter never
