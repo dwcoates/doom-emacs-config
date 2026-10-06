@@ -387,7 +387,7 @@ func TestRunKilledByItsCancelledContextIsRecordedAtInfo(t *testing.T) {
 	}
 }
 
-func TestRunCancelledReturnsWhileAChildStillHoldsItsOutput(t *testing.T) {
+func TestRunCancelledTakesTheChildHoldingItsOutputWithIt(t *testing.T) {
 	// Arrange: the script starts a child that inherits its output and blocks
 	// reading a fifo; the fifo is written at cleanup so the child then exits.
 	dir := t.TempDir()
@@ -396,7 +396,12 @@ func TestRunCancelledReturnsWhileAChildStillHoldsItsOutput(t *testing.T) {
 		t.Fatalf("mkfifo: %v", err)
 	}
 	t.Cleanup(func() {
-		f, err := os.OpenFile(fifo, os.O_WRONLY, 0)
+		// A child still reading is released; one the cancellation killed
+		// leaves no reader, which a non-blocking open answers with ENXIO.
+		f, err := os.OpenFile(fifo, os.O_WRONLY|syscall.O_NONBLOCK, 0)
+		if errors.Is(err, syscall.ENXIO) {
+			return
+		}
 		if err != nil {
 			t.Errorf("release the child: %v", err)
 			return
@@ -411,5 +416,20 @@ func TestRunCancelledReturnsWhileAChildStillHoldsItsOutput(t *testing.T) {
 	// Assert.
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("Run error = %v, want one wrapping context.Canceled", err)
+	}
+}
+
+func TestRunWaitsForTheWholeOutputOfAScriptWhoseChildOutlivesIt(t *testing.T) {
+	// Arrange: the script exits at once; a child it started writes after it.
+	dir := t.TempDir()
+	script := writeScript(t, dir, "late.sh", "(read _ < /dev/null; echo late) &\nexit 0\n")
+	r := newRunner(t)
+
+	// Act.
+	out, code, err := r.Run(context.Background(), dir, []string{script})
+
+	// Assert: an ordinary exit is never cut short of its output.
+	if err != nil || code != 0 || strings.TrimSpace(out) != "late" {
+		t.Fatalf("Run = (%q, %d, %v), want the child's late line, 0, nil", out, code, err)
 	}
 }
