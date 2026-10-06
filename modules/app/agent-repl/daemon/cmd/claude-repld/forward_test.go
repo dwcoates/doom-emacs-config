@@ -7,7 +7,9 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
+	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/promptqueue"
 )
 
 // recordingRelay is a workspace.HostRelay that records feed tail returns.
@@ -70,4 +72,44 @@ func TestHistoryForwarderBeforeTheFleetIsAnError(t *testing.T) {
 	if err == nil {
 		t.Fatal("ReadHistory before the fleet was bound answered no error")
 	}
+}
+
+// servedQueue records the vendor-serves edges the forwarder carried.
+type servedQueue struct {
+	promptqueue.Queue
+	served []ids.WorkspaceID
+}
+
+func (q *servedQueue) OnVendorServes(ws ids.WorkspaceID) { q.served = append(q.served, ws) }
+
+func TestVendorServesForwarderCarriesTheEdgeToTheBoundQueue(t *testing.T) {
+	// Arrange
+	queue := &servedQueue{}
+	f := &vendorServesForwarder{log: dlog.NewTestLogger()}
+	f.bind(queue)
+
+	// Act
+	f.VendorServes("ws-1", "usage_limit")
+
+	// Assert
+	if !slices.Equal(queue.served, []ids.WorkspaceID{"ws-1"}) {
+		t.Fatalf("served = %v, want [ws-1]", queue.served)
+	}
+}
+
+func TestVendorServesForwarderWithNoQueueIsAWiringDefectAtError(t *testing.T) {
+	// Arrange
+	log := dlog.NewTestLogger()
+	f := &vendorServesForwarder{log: log}
+
+	// Act
+	f.VendorServes("ws-1", "usage_limit")
+
+	// Assert
+	for _, rec := range log.Records() {
+		if rec.Level == "error" && rec.Operation == "daemon.cmd.vendor_serves" {
+			return
+		}
+	}
+	t.Fatalf("no ERROR record of an edge before the queue was bound")
 }
