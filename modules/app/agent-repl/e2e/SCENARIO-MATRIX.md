@@ -140,7 +140,7 @@ Two further limits, stated rather than hidden:
 | `!hook-success` | grounded | hooks_e2e_test.go | feed-families.layer.test.ts | — | Go: TestHookSucceeded asserts no hook card drawn plus exact log Context[hook]==PreToolUse:Read. Web: feed-families.layer asserts specific negative (no hook row). | covered |
 | `!ide-diagnostics` | grounded | filetools_e2e_test.go | — | — | Go: TestIdeDiagnosticsAfterEdit asserts a diff form alongside Diagnostics with composed lines. | covered |
 | `!ide-diagnostics-write` | grounded | filetools_e2e_test.go | — | — | Go: TestIdeDiagnosticsAfterWrite asserts the diagnostics hang off the tool card NAMED "Write", with composed lines — the write arm of the adjacency join, which a defect once folded onto the edit arm. | covered |
-| `!interrupt` | grounded | interrupt_e2e_test.go | — | emacs_interrupt_e2e_test.go | Go: TestInterruptAfterTextDelta asserts InterruptedTurn!=nil, terminal specifically Interrupted. Emacs: TestEmacsForcedRestartInterruptsTheTurn asserts roster arm settles to :interrupted specifically. | covered |
+| `!interrupt` | grounded | interrupt_e2e_test.go, keepalive_e2e_test.go | — | emacs_interrupt_e2e_test.go | Go: TestInterruptAfterTextDelta asserts InterruptedTurn!=nil, terminal specifically Interrupted. Emacs: TestEmacsForcedRestartInterruptsTheTurn asserts roster arm settles to :interrupted specifically. | covered |
 | `!keepalive` | ungrounded | producerfaults_e2e_test.go | — | — | Go: TestKeepaliveTurnIsOrdinaryAndUnmarked asserts the ordinary conclusion, the exact row set (prompt + response + terminal and nothing more), and the specific negative that no `<!--agent-repl:keepalive-->` marker is minted onto the prompt row. (TestKeepAliveNeverAppearsOnWire in hibernation_e2e_test.go is the daemon-minted keep-alive, a different fact.) | covered |
 | `!max-tokens` | grounded | turnlifecycle_e2e_test.go | — | — | Go: TestMaxTokens asserts Concluded plus an exact truncated prose string. | covered |
 | `!mcp-all` | grounded | mcpmonitors_e2e_test.go, sessionfacts_e2e_test.go | — | — | Go: TestMcpServerHealths asserts exact per-server oneof-arm mapping and exact Failed.Detail.Text. | covered |
@@ -168,7 +168,7 @@ Two further limits, stated rather than hidden:
 | `!query-eof` | ungrounded | producerfaults_e2e_test.go | feed-families.layer.test.ts | — | Go: TestQueryEofEndsTheTurnAsQueryDied asserts the terminal is specifically FeedTurnEndedErrored.query_died with cause unexpected_eof (never concluded, never a generic vendor failure) plus a composed headline; TestQueryDiedFailsTheFootersTurn asserts the footer's failed turn (FooterSubStatusIdleTurnFailed; a dead query is a failed turn, never a block) and its FooterStatusActivityQueryDied line. | covered |
 | `!query-eof-mid-ask` | ungrounded | producerfaults_e2e_test.go | — | — | Go: TestQueryEofMidAskDeniesTheOpenAsk asserts the ask genuinely OPENED, then that the death settles it — FeedPermissionAnswered.denied_by_user, the gate's stand-down — and that the turn still ends on query_died. The fate of the in-flight ask, not only the notice. | covered |
 | `!query-fail` | ungrounded | producerfaults_e2e_test.go | query-death.layer.test.ts | — | Go: TestQueryFailEndsTheTurnAsQueryDied asserts FeedTurnEndedErrored.query_died with cause iterator_failure specifically, separating the rejecting iterable from the EOF half. | covered |
-| `!queue-vendor-turn` | TODO | hibernation_e2e_test.go | — | — | TODO — newly derived as driven; a human must read the test and state its strongest assertion. | weak |
+| `!queue-vendor-turn` | ungrounded | hibernation_e2e_test.go, keepalive_e2e_test.go | — | — | Go: TestCompletedTaskBesideKeepAliveRefusesTheRewind asserts the shim's span invariant refuses the next rewind at ERROR naming exactly [vendor_started], the vendor's own answer is drawn, and the prompt after the refusal ends; TestKeepAliveAnswerAfterVendorTurnNeverServed asserts no keep-alive row is served beside it. | covered |
 | `!rate-limit` | ungrounded | sessionfacts_e2e_test.go | — | — | Go: TestRateLimitOverageWindowFeedsTheOverageAllowance asserts the exact conclusion prose, the event's `allowed_warning` verdict and 0.79 utilization on the overage `FooterAllowance` of the enduring usage line, a non-zero `resets_at_s`, and the specific negative that no salient line stands, with the harness warning sweep holding that the retired `daemon.footer.rate_limit_overage` warn stays gone. | covered |
 | `!rate-limit-five-hour` | ungrounded | sessionfacts_e2e_test.go | — | — | Go: TestRateLimitFiveHourWindowFeedsTheSessionAllowance asserts the session `FooterAllowance` of the enduring usage line carries the event's `allowed_warning` verdict, its 0.82 utilization and a non-zero `resets_at_s`, and the specific negative that no salient line stands. | covered |
 | `!rate-limit-seven-day` | ungrounded | sessionfacts_e2e_test.go | — | — | Go: TestRateLimitSevenDayWindowFeedsTheWeeklyAllowance asserts the weekly `FooterAllowance` of the enduring usage line carries the event's `allowed_warning` verdict, its 0.91 utilization and a non-zero `resets_at_s`, the specific negative that no salient line stands, and the event's session-arm record. | covered |
@@ -190,6 +190,7 @@ Two further limits, stated rather than hidden:
 | `!slash` | grounded | slashcommands_e2e_test.go | — | — | Go: TestVendorAnsweredSlashCommand/TestSlashShapeBViaSlash assert exact answering prose string and exact transcript record shape. | covered |
 | `!slash-shape-a` | ungrounded | slashcommands_e2e_test.go | — | — | Go: TestSlashShapeANamed asserts exact transcript content string and exact conclusion text. | covered |
 | `!slash-shape-a-unnamed` | ungrounded | slashcommands_e2e_test.go | — | — | Go: TestSlashShapeAUnnamed asserts exact transcript content string, absence of command-name, exact conclusion text. | covered |
+| `!stop-on-rewind` | ungrounded | keepalive_e2e_test.go | — | — | Go: TestStopReplayedByEveryRewindNeverLoops asserts, over three replayed stops, that every rewind anchors on the arming real turn, the last rewind discards exactly [keepalive keepalive_consequence], no rewind is refused, and the feed holds exactly the two real turns. | covered |
 | `!subagent` | grounded | refusals_e2e_test.go, subagents_e2e_test.go | feed-families.layer.test.ts, subfeeds.layer.test.ts | — | Go: TestSubagentSyncNestedActivity/TestBubbleRefusedNotDeliverable assert exact Label/Description text, sub-feed confinement. Web: subfeeds.layer asserts exact SYNC_COMMISSION string, feedContainer structure. | covered |
 | `!subagent-detached` | grounded | subagents_e2e_test.go | feed-families.layer.test.ts, subfeeds.layer.test.ts | — | Go: TestSubagentDetached asserts root row is the detached wrapper, exact completion text confined to sub-feed. Web: subfeeds.layer asserts exact DETACHED_COMMISSION string. | covered |
 | `!subagent-detached-hold` | ungrounded | subagents_e2e_test.go | — | — | Go: TestSubagentDetachedSurvivesAnInterjection interjects the held turn with an explicit `stop` and asserts turn_ended.interrupted, then proves the agent is still LIVE by an answer (Interrupt(detached) on its bubble succeeds with interrupted_detached, which a stopped agent refuses) and that the bubble then settles cancelled. | covered |
@@ -231,13 +232,13 @@ a disagreement, so these are not hand tallies (they were, and they were
 wrong: the by-layer lines once read 33 and 5 where the table's columns held
 32 and 3).
 
-- Covered (at least one STRONG, specific-shape assertion in a counted layer): **151**
-- Weak (a counted layer drives the scenario but only asserts turn-completion or a non-specific field, never a named arm/shape): **1**
+- Covered (at least one STRONG, specific-shape assertion in a counted layer): **153**
+- Weak (a counted layer drives the scenario but only asserts turn-completion or a non-specific field, never a named arm/shape): **0**
 - Uncovered (no counted layer drives the scenario at all): **5**
-- Total canonical scenarios: 157
+- Total canonical scenarios: 158
 
 By layer, scenarios with at least one hit:
-- Go e2e (non-emacs): 151 scenarios referenced across 27 files
+- Go e2e (non-emacs): 152 scenarios referenced across 28 files
 - Webapp layer: 36 scenarios referenced across 8 files
 - Emacs e2e: 3 scenarios referenced across 3 files
 
@@ -270,7 +271,7 @@ scenario named here really is driven, not that the reading is right.
 
 <!-- BEGIN DERIVED: weak -->
 
-- `!queue-vendor-turn`
+_None._
 
 <!-- END DERIVED: weak -->
 
