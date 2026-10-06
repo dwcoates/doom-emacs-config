@@ -29,6 +29,7 @@ import {
 } from "../../src/composer/composer.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import { DROPPED_EVENT } from "../../src/tray/held-prompt.js";
+import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 
 const WORKSPACE = create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" });
 const FEED = create(FeedIdSchema, { value: "feed-9" });
@@ -134,7 +135,7 @@ interface Harness {
 }
 
 function mount(
-  answer: () => SubmitPromptResponse = turnSuccess,
+  answer: () => SubmitPromptResponse | Promise<SubmitPromptResponse> = turnSuccess,
   opts: { composerEnabled?: boolean; feed?: typeof FEED; throws?: Error } = {},
 ): Harness {
   const seen: SubmitPromptRequest[] = [];
@@ -178,6 +179,21 @@ function mount(
 }
 
 const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+
+/** An answer the test releases, so a submission stays in flight until it does. */
+function heldAnswer(): { answer: () => Promise<SubmitPromptResponse>; release: () => void } {
+  let release = (): void => undefined;
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return {
+    answer: async () => {
+      await released;
+      return turnSuccess();
+    },
+    release: () => release(),
+  };
+}
 
 /** Type TEXT and press Enter, which is the composer's send. */
 async function sendText(h: Harness, text: string): Promise<void> {
@@ -274,6 +290,74 @@ describe("the gate", () => {
     h.handle.dispose();
   });
 
+  it("keeps the send control disabled when the gate opens while a submission is in flight", async () => {
+    // Arrange: a submission whose answer has not arrived.
+    const held = heldAnswer();
+    const h = mount(held.answer);
+    await sendText(h, "first");
+
+    // Act: the footer restates an open gate, as every footer push does.
+    h.gate.set("open");
+
+    // Assert: the press it would invite is one the composer drops.
+    expect(h.send.disabled).toBe(true);
+    held.release();
+    await settle();
+    h.handle.dispose();
+  });
+
+  it("re-enables the send control once the in-flight submission answers", async () => {
+    // Arrange
+    const held = heldAnswer();
+    const h = mount(held.answer);
+    await sendText(h, "first");
+    h.gate.set("open");
+
+    // Act
+    held.release();
+    await settle();
+
+    // Assert
+    expect(h.send.disabled).toBe(false);
+    h.handle.dispose();
+  });
+
+  it("records a press it drops while a submission is in flight", async () => {
+    // Arrange
+    const held = heldAnswer();
+    const h = mount(held.answer);
+    await sendText(h, "first");
+    const capture = captureLogRecords();
+
+    // Act: Enter reaches submit() even with the button disabled.
+    await sendText(h, "second");
+
+    // Assert
+    const record = await forwardedRecord(capture, "composer.press-dropped");
+    expect([record.level.case, record.context]).toEqual([
+      "info",
+      expect.objectContaining({ reason: "in_flight" }),
+    ]);
+    held.release();
+    await settle();
+    h.handle.dispose();
+  });
+
+  it("records a press it drops while the gate is shut", async () => {
+    // Arrange
+    const h = mount();
+    h.gate.set("closed", "merging");
+    const capture = captureLogRecords();
+
+    // Act
+    await sendText(h, "hello");
+
+    // Assert
+    const record = await forwardedRecord(capture, "composer.press-dropped");
+    expect(record.context).toEqual(expect.objectContaining({ reason: "gate_closed" }));
+    h.handle.dispose();
+  });
+
   it("submits nothing while the gate is shut", async () => {
     const h = mount();
     h.gate.set("closed", "merging");
@@ -308,6 +392,20 @@ describe("the keys", () => {
     h.send.click();
     await settle();
     expect(h.seen).toHaveLength(1);
+    h.handle.dispose();
+  });
+
+  it("records a press it drops for an empty box", async () => {
+    // Arrange
+    const h = mount();
+    const capture = captureLogRecords();
+
+    // Act
+    await sendText(h, "   ");
+
+    // Assert
+    const record = await forwardedRecord(capture, "composer.press-dropped");
+    expect(record.context).toEqual(expect.objectContaining({ reason: "empty" }));
     h.handle.dispose();
   });
 
