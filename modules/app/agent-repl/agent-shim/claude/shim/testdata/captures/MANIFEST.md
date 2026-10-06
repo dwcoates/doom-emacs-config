@@ -448,6 +448,12 @@ the narrower/alternate state**:
   2026-09-23 (a turn's `init` and `result` arriving between a keep-alive's
   send and its answer), not in a capture: the captures predate the shim
   sending a client uuid at all.
+- `!stop-on-rewind` — a DECLARED lever: once armed, every truncating resume
+  of the session replays a `task_notification{status:"stopped"}` and a
+  vendor-started turn answering it ahead of the next send. Grounded in the
+  owner's ship-gns workspace of 2026-10-02 (each keep-alive rewind replaced the
+  query, the stop replayed, and 13 empty vendor turns were stored), not in a
+  capture: no capture records a truncating resume.
 - `!query-fail` — PARTIALLY GROUNDED, evidence only, not a golden: a Haiku
   run (2026-09-03, `--only prose-streamed` into a scratch `--out`, not this
   repo's `captures/`) had its spawned vendor child `kill -9`'d mid-stream
