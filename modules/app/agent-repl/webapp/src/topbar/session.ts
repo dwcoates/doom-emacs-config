@@ -1,6 +1,9 @@
 /**
  * The connectivity indicator's dropdown: agent-repl's SESSION (owner ruling,
- * 2026-10-06) — how long it has run and the vendor traffic since it began.
+ * 2026-10-06) — how long it has run and what began it. The vendor traffic it
+ * once also drew was removed with the traffic measurement (owner ruling,
+ * 2026-10-06), whose kernel sockets are the inferred cause of the kernel's
+ * network buffer exhaustion.
  *
  * THE DAEMON STATES THE INSTANT, THE CLIENT TICKS THE SPAN. `started_at_ms` is
  * the session's start; the duration is this page's now against it, repainted
@@ -29,10 +32,6 @@ import { asAnchor } from "./strip.js";
 /** The reveal's name, and its anchor's. */
 export const SESSION_REVEAL = "agent-repl-session";
 
-/** Bytes in a megabyte and a gigabyte: decimal, as the operating system counts. */
-const MB = 1_000_000;
-const GB = 1_000_000_000;
-
 /**
  * Wire the connectivity glyph's dropdown, when the view carries a session.
  */
@@ -45,7 +44,7 @@ export function bindAgentReplSessionReveal(
   asAnchor(glyph, SESSION_REVEAL);
   const body = (): HTMLElement => drawAgentReplSession(session, tc);
   // Registered as it is drawn, so a push arriving while the dropdown is open
-  // re-opens it with THIS push's traffic.
+  // re-opens it with THIS push's session.
   tc.reveals.register(SESSION_REVEAL, SESSION_REVEAL, body);
   glyph.addEventListener("click", (event) => {
     event.stopPropagation();
@@ -53,13 +52,13 @@ export function bindAgentReplSessionReveal(
   });
 }
 
-/** The dropdown: the session's span, ticking, and its traffic. */
+/** The dropdown: the session's span, ticking, labeled by what began it. */
 export function drawAgentReplSession(u: TopbarAgentReplSession, tc: TopbarContext): HTMLElement {
   const began = requireCase(u.began, "TopbarAgentReplSession.began");
   const startedAt = msOf(u.startedAtMs, "TopbarAgentReplSession.started_at_ms");
   log.debug("drawing agent-repl's session", {
     operation: "topbar.agent-repl-session",
-    context: { began: began.case, bytes_received: u.bytesReceived.toString(), bytes_sent: u.bytesSent.toString() },
+    context: { began: began.case, started_at_ms: startedAt },
   });
 
   const panel = document.createElement("div");
@@ -72,10 +71,7 @@ export function drawAgentReplSession(u: TopbarAgentReplSession, tc: TopbarContex
     span.textContent = formatTickedAge(nowMs - startedAt);
   });
 
-  const traffic = row("topbar-session-traffic", "vendor traffic");
-  traffic.value.textContent = formatTraffic(u.bytesReceived, u.bytesSent);
-
-  panel.append(duration.element, traffic.element);
+  panel.append(duration.element);
   return panel;
 }
 
@@ -102,38 +98,4 @@ function row(className: string, label: string): { element: HTMLElement; value: H
   value.className = "topbar-session-value";
   element.append(name, value);
   return { element, value };
-}
-
-/** The traffic line: received first, then sent. */
-export function formatTraffic(received: bigint, sent: bigint): string {
-  return `${formatBytes(received)} ↓ · ${formatBytes(sent)} ↑`;
-}
-
-/**
- * A byte count as the reader weighs it, in decimal megabytes or gigabytes:
- * `0 MB`, `< 0.1 MB`, `3.4 MB`, `412 MB`, `1.2 GB`, `38 GB`, `120 GB`.
- *
- * One fractional digit while the figure is under ten of its unit, none above
- * it, so the line keeps two or three significant figures whatever the size.
- * THE UNIT IS CHOSEN BY THE RENDERED VALUE: 999.95 MB rounds to 1000 MB, which
- * no reader should be shown, so it reads `1 GB`.
- */
-export function formatBytes(n: bigint): string {
-  if (n < 0n) throw new RangeError(`a byte count is never negative: ${n.toString()}`);
-  if (n === 0n) return "0 MB";
-  const bytes = Number(n);
-  if (bytes < MB / 10) return "< 0.1 MB";
-  const mb = round(bytes / MB);
-  if (mb < 1000) return `${trim(mb)} MB`;
-  return `${trim(round(bytes / GB))} GB`;
-}
-
-/** One fractional digit under ten, none at or above it. */
-function round(value: number): number {
-  return value < 10 ? Math.round(value * 10) / 10 : Math.round(value);
-}
-
-/** The figure, with a bare ".0" dropped. */
-function trim(value: number): string {
-  return value.toFixed(value < 10 ? 1 : 0).replace(/\.0$/, "");
 }
