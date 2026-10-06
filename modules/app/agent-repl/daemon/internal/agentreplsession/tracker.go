@@ -206,12 +206,5 @@ func view(s wsm.AgentReplSession) *frontendv1.TopbarAgentReplSession {
 	return out
 }
 
-// fields is a session's structured context.
-func fields(s wsm.AgentReplSession) dlog.Context {
-	return dlog.Context{
-		"started_at":     s.StartedAt.UTC().Format(time.RFC3339Nano),
-		"began":          string(s.Began),
-		"bytes_received": s.BytesReceived,
-		"bytes_sent":     s.BytesSent,
-	}
-}
+// fields is a session's structured context (wsm.AgentReplSession.LogContext).
+func fields(s wsm.AgentReplSession) dlog.Context { return s.LogContext() }

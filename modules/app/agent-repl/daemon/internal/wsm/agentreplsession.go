@@ -53,6 +53,17 @@ type AgentReplSession struct {
 	BytesSent     uint64
 }
 
+// LogContext is the session's structured context, the one shape every record
+// about a session carries.
+func (s AgentReplSession) LogContext() dlog.Context {
+	return dlog.Context{
+		"started_at":     s.StartedAt.UTC().Format(time.RFC3339Nano),
+		"began":          string(s.Began),
+		"bytes_received": s.BytesReceived,
+		"bytes_sent":     s.BytesSent,
+	}
+}
+
 // validate refuses a session the table could not hold faithfully.
 func (s AgentReplSession) validate() error {
 	switch {
@@ -105,12 +116,7 @@ func (s *store) AgentReplSession(ctx context.Context) (AgentReplSession, bool, e
 // PutAgentReplSession replaces the session whole.
 func (s *store) PutAgentReplSession(ctx context.Context, session AgentReplSession) error {
 	const op = "daemon.wsm.put_agent_repl_session"
-	fields := dlog.Context{
-		"started_at":     session.StartedAt.UTC().Format(time.RFC3339Nano),
-		"began":          string(session.Began),
-		"bytes_received": session.BytesReceived,
-		"bytes_sent":     session.BytesSent,
-	}
+	fields := session.LogContext()
 	if err := session.validate(); err != nil {
 		s.log.Error(op, "refused a session the table cannot hold", withError(fields, err))
 		return err

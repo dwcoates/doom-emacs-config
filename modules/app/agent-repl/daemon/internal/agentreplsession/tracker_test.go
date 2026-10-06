@@ -456,3 +456,28 @@ func TestViewPanicsOnACauseWsmNeverHolds(t *testing.T) {
 	// Act.
 	view(wsm.AgentReplSession{StartedAt: t0, Began: "reboot"})
 }
+
+// TestRecordsCarryTheSessionsSharedContext asserts the tracker's records use
+// the one context shape wsm defines, rather than a hand-rolled divergent one.
+func TestRecordsCarryTheSessionsSharedContext(t *testing.T) {
+	// Arrange.
+	tr, _, log := newTracker(t, &fakeStore{})
+
+	// Act.
+	tr.EditorStarted(context.Background(), t0)
+
+	// Assert.
+	want := wsm.AgentReplSession{StartedAt: t0, Began: wsm.SessionBeganEditorStart}.LogContext()
+	for _, r := range log.Records() {
+		if r.Operation != "daemon.agentreplsession.begin" {
+			continue
+		}
+		for k, v := range want {
+			if r.Context[k] != v {
+				t.Fatalf("record context %v, want the shared %v", r.Context, want)
+			}
+		}
+		return
+	}
+	t.Fatalf("no begin record: %v", log.Records())
+}
