@@ -7,6 +7,8 @@
 [[ -n ${AGENT_REPL_BACKGROUND_PRIORITY:-} ]] || exec "$(dirname "${BASH_SOURCE[0]}")/background.sh" bash "${BASH_SOURCE[0]}" "$@"
 
 set -uo pipefail
+# shellcheck source=/dev/null
+. "$(dirname "${BASH_SOURCE[0]}")/lib-grep-in.sh"
 
 THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_SRC="$THIS_DIR/e2e-coverage.sh"
@@ -245,7 +247,7 @@ JSON
     out="$(node "$SUMMARY_SRC" "$dir" 2>&1)"
     local rc=$?
     set -e
-    if [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q "no agent-shim source survived the remap"; then
+    if [ "$rc" -ne 0 ] && grep_in "$out" -q "no agent-shim source survived the remap"; then
         pass "a remap that produced no shim source is reported"
     else
         fail "a remap that produced no shim source is reported"
