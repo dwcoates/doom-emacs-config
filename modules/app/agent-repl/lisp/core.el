@@ -910,15 +910,29 @@ component) was two-thirds of Emacs's CPU while workspaces were switched
 while it exists, so it is resolved once.  Only an EXISTING directory is
 remembered: one that does not exist yet is asked again, so it routes the
 moment it appears.  A workspace that leaves the registry stops routing at
-the registry lookup, before this is consulted.")
+the registry lookup, before this is consulted.
+
+THE SPELLING IS REMEMBERED, NOT THE EXISTENCE.  A remembered directory is
+still `stat'ed on every lookup (one call, never the `file-truename' walk),
+and one that has gone is forgotten.  A worktree a merge or a plain `rm'
+removed while its tab still stands is otherwise routable forever: every
+record of that workspace then tried to re-make its `.claude/emacs' link
+under the vanished directory and signalled out of whatever handler logged
+-- a roster push, a successor's link-up -- instead of landing centrally.")
 
 (defun agent-repl--log-dir-truename (dir)
   "Return DIR's canonical spelling when it is an existing directory, else nil.
-Resolved once per DIR (`agent-repl--log-dir-truenames')."
-  (or (gethash dir agent-repl--log-dir-truenames)
+The spelling is resolved once per DIR (`agent-repl--log-dir-truenames');
+its existence is confirmed on every call, and a directory that has gone
+is forgotten."
+  (let ((remembered (gethash dir agent-repl--log-dir-truenames)))
+    (if (and remembered (file-directory-p remembered))
+        remembered
+      (when remembered
+        (remhash dir agent-repl--log-dir-truenames))
       (and (file-directory-p dir)
            (puthash dir (directory-file-name (file-truename dir))
-                    agent-repl--log-dir-truenames))))
+                    agent-repl--log-dir-truenames)))))
 
 (defun agent-repl--ws-log-routable-p (ws)
   "Return non-nil when WS can be resolved to a durable workspace log sink.
