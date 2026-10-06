@@ -3612,6 +3612,23 @@ describe("the keep-alive rewind's span invariant", () => {
     expect(adoptions(h)).toBe(0);
   });
 
+  it("never adopts the REPLY-LESS turn answering a replayed stop (the real CLI's shape)", async () => {
+    // Arrange: ship-gns 2026-10-02 -- the stop, then a lone result.
+    const h = harness();
+    await started(h);
+    await realTurn(h, "turn-0", [assistantMessage("real-uuid")]);
+    await keepaliveTurn(h, []);
+    h.scheduler.fire(0);
+    await drainTurns();
+    await h.engine.onSdkMessage(notification("notif-1", "stopped"));
+
+    // Act
+    await h.engine.onSdkMessage(resultMessage("stop-result"));
+
+    // Assert
+    expect(adoptions(h)).toBe(0);
+  });
+
   it("discards the stop's answer with the keep-alive at the next rewind", async () => {
     // Arrange
     const h = harness();
@@ -3649,9 +3666,44 @@ describe("the keep-alive rewind's span invariant", () => {
     expect(adoptions(h)).toBe(0);
   });
 
+  /** A main-thread user record: a tool result, or the vendor's interrupt marker. */
+  const userRecord = (uuid: string): SdkMessage =>
+    ({ type: "user", uuid, session_id: "s", parent_tool_use_id: null, message: { role: "user", content: [] } }) as never;
+
+  it("anchors the next rewind on an interrupted turn's own last record, keeping it", async () => {
+    // Arrange: the turn's tool result (or the vendor's interrupt marker) lands
+    // after its last answer, as an interrupt mid-tool leaves it.
+    const h = harness();
+    await started(h);
+    await realTurn(h, "turn-0", [assistantMessage("real-uuid"), userRecord("tool-result-uuid")]);
+    await keepaliveTurn(h, []);
+
+    // Act
+    await keepaliveTurn(h, []);
+
+    // Assert
+    expect(h.queries.at(-1)?.spec.resumeSessionAt).toBe("tool-result-uuid");
+  });
+
+  it("records no refusal for an interrupted turn's own last record", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await realTurn(h, "turn-0", [assistantMessage("real-uuid"), userRecord("tool-result-uuid")]);
+    await keepaliveTurn(h, []);
+    const mark = logSinkMark();
+
+    // Act
+    await keepaliveTurn(h, []);
+
+    // Assert
+    expect(refusal(mark)).toBeUndefined();
+  });
+
   it("REFUSES a rewind past a real prompt the vendor never answered, keeping it", async () => {
-    // Arrange: turn-1 ended with no reply (an interrupt before any answer),
-    // so its prompt record lies past turn-0's anchor.
+    // Arrange: turn-1 ended with NO record at all -- not even the interrupt
+    // marker an interrupted turn streams -- so its prompt record lies past
+    // turn-0's anchor with nothing of the turn to anchor on.
     const h = harness();
     await started(h);
     await realTurn(h, "turn-0", [assistantMessage("real-uuid")]);
