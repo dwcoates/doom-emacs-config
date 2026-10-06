@@ -28,6 +28,11 @@ const (
 	markerLabelInterrupted = "interrupted"
 	markerLabelPlanFailed  = "plan failed"
 	markerLabelDeniedByYou = "permission denied by you"
+	// markerLabelCompactionFailed is a failed compaction's label.
+	markerLabelCompactionFailed = "compaction failed"
+	// compactionFailedType is a failed compaction's error type: the
+	// producer's own word for the cut (conversation.v1 ContextCut).
+	compactionFailedType = "compaction_failed"
 )
 
 // neutralMarker is a marker of the user's own act or a hook's. It carries no
@@ -301,5 +306,31 @@ func (r *resolver) SetAccount(ws ids.WorkspaceID, email string) {
 func (s *wsState) modelOf(update *conversationv1.SessionUpdate) {
 	if model := update.GetModelChanged().GetEffectiveModel().GetName(); model != "" {
 		s.model = model
+	}
+}
+
+// compactionFailedMarker is a failed compaction's marker: a vendor fault,
+// expanding to the producer's account. The cut states no instant, so the time
+// line is set only for one drawn live, where receipt is when it happened; a
+// replayed one carries none rather than its replay's.
+func (r *resolver) compactionFailedMarker(s *wsState, reason string) *frontendv1.FeedOutcomeMarker {
+	expansion := &frontendv1.FeedOutcomeVendorFaultExpansion{
+		ErrorType: &frontendv1.FeedOutcomeVendorErrorType{Text: compactionFailedType},
+	}
+	if s.plane == planeLive {
+		expansion.Time = &frontendv1.FeedOutcomeTime{AtMs: r.deps.Now().UnixMilli()}
+		if s.model != "" {
+			expansion.Model = &frontendv1.FeedOutcomeModel{Name: s.model}
+		}
+		if s.accountKnown {
+			expansion.Account = &frontendv1.FeedOutcomeAccount{Email: s.account}
+		}
+	}
+	if reason != "" {
+		expansion.Message = &frontendv1.FeedOutcomeVendorMessage{Text: reason}
+	}
+	return &frontendv1.FeedOutcomeMarker{
+		Label:  &frontendv1.FeedOutcomeMarkerLabel{Text: markerLabelCompactionFailed},
+		Family: &frontendv1.FeedOutcomeMarker_VendorFault{VendorFault: &frontendv1.FeedOutcomeMarkerVendorFault{Expansion: expansion}},
 	}
 }

@@ -1,7 +1,10 @@
 package feed
 
 import (
+	"strings"
 	"testing"
+
+	"google.golang.org/protobuf/reflect/protoreflect"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -479,5 +482,50 @@ func TestABrokenPlanDrawsTheNeutralMarkerWithItsReason(t *testing.T) {
 	m := h.planBubble().GetFailed().GetMarker()
 	if m.GetNeutral() == nil || m.GetLabel().GetText() != "plan failed" || m.GetDetail().GetText() != "plan mode is unavailable" {
 		t.Fatalf("marker = %+v, want the neutral plan-failed marker with its reason", m)
+	}
+}
+
+// A FAILED MERGE NEVER DRAWS A MARKER (owner ruling, 2026-10-06): its merge
+// bubble is its whole account, so no merge message can carry one.
+func TestNoMergeMessageCanCarryAnOutcomeMarker(t *testing.T) {
+	// Arrange
+	file := (&frontendv1.FeedOutcomeMarker{}).ProtoReflect().Descriptor().ParentFile()
+	marker := (&frontendv1.FeedOutcomeMarker{}).ProtoReflect().Descriptor().FullName()
+	var reaches func(md protoreflect.MessageDescriptor, seen map[protoreflect.FullName]bool) bool
+	reaches = func(md protoreflect.MessageDescriptor, seen map[protoreflect.FullName]bool) bool {
+		if md.FullName() == marker {
+			return true
+		}
+		if seen[md.FullName()] {
+			return false
+		}
+		seen[md.FullName()] = true
+		fields := md.Fields()
+		for i := 0; i < fields.Len(); i++ {
+			if sub := fields.Get(i).Message(); sub != nil && reaches(sub, seen) {
+				return true
+			}
+		}
+		return false
+	}
+	messages := file.Messages()
+	checked := 0
+	for i := 0; i < messages.Len(); i++ {
+		md := messages.Get(i)
+		if !strings.HasPrefix(string(md.Name()), "FeedMerge") {
+			continue
+		}
+		checked++
+
+		// Act
+		got := reaches(md, map[protoreflect.FullName]bool{})
+
+		// Assert
+		if got {
+			t.Fatalf("%s can carry a FeedOutcomeMarker; a failed merge draws none", md.FullName())
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no FeedMerge message was checked")
 	}
 }
