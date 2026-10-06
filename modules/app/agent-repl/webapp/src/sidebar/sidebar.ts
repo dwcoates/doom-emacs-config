@@ -26,6 +26,7 @@ import type { AppContext } from "../rpc/context.js";
 import { requireCase, requireMessage, unreachablePushArm } from "../rpc/strict.js";
 import { watchStream } from "../rpc/streams.js";
 import { AttentionRegistry, type BlinkTimers } from "./attention.js";
+import { createDropdowns } from "./dropdowns.js";
 import { changeView } from "./view-change.js";
 import { createSidebarView, GROUPING_VIEW_KEY } from "./view.js";
 import type { Grouping, SidebarContext } from "./context.js";
@@ -132,6 +133,7 @@ export function mountSidebar(host: HTMLElement, ctx: AppContext, deps: SidebarDe
     ctx,
     view,
     openDetails: new Set<string>(),
+    dropdowns: createDropdowns(),
     attention,
     tasks: [],
     onDispose: (fn) => {
@@ -154,6 +156,12 @@ export function mountSidebar(host: HTMLElement, ctx: AppContext, deps: SidebarDe
   };
   window.addEventListener("resize", replace);
   window.addEventListener("scroll", replace, true);
+  // ANY CLICK IN THE RAIL OUTSIDE AN OPEN DROPDOWN CLOSES IT (owner ruling,
+  // 2026-10-06), empty space included; `dropdowns.ts` is the one rule.
+  const dismiss = (event: MouseEvent): void => {
+    sc.dropdowns.dismissOutside(event.target);
+  };
+  host.addEventListener("click", dismiss);
 
   const stream = watchStream(ctx, {
     name: "WatchWorkspaceRoster",
@@ -199,6 +207,7 @@ export function mountSidebar(host: HTMLElement, ctx: AppContext, deps: SidebarDe
       stream.cancel();
       window.removeEventListener("resize", replace);
       window.removeEventListener("scroll", replace, true);
+      host.removeEventListener("click", dismiss);
       clear();
       attention.dispose();
       host.replaceChildren();

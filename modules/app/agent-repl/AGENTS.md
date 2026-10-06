@@ -1571,7 +1571,10 @@ The rules that keep this true:
   which hides a collapsed repository's workspaces, numbering and navigating
   only the drawn tabs (`agent-repl-roster-drawn-tab-order`). A dropdown (a
   row's menu, a task's menu, a row's detail popover) or a form is NOT view
-  state: it is transient to the page that opened it.
+  state: it is transient to the page that opened it. Every sidebar dropdown
+  shares ONE dismiss rule (`webapp/src/sidebar/dropdowns.ts`): a click in the
+  rail outside it closes it, a click inside it or on its opener keeps it, and
+  opening one closes the other.
 - **The webapp composer is closed exactly when the footer is blue**
   (`render-colors.json#composer_closed_colors`, read by
   `webapp/src/vocab.ts#composerClosedFor`). The gate is derived from the color,

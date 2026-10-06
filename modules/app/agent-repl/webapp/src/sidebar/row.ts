@@ -514,6 +514,7 @@ function installHoverPanel(
   sc: SidebarContext,
   workspaceId: string,
 ): void {
+  const detail = ws.querySelector<HTMLElement>(":scope > .detail");
   let pointerOverRow = false;
   let pointerOverPanel = false;
   let focusWithin = false;
@@ -540,6 +541,26 @@ function installHoverPanel(
     if (open) sc.openDetails.add(workspaceId);
     else sc.openDetails.delete(workspaceId);
     paintRowDetail(ws, open);
+    if (open) registerDetail();
+    else if (detail !== null) sc.dropdowns.released(detail);
+  };
+
+  // THE POPOVER IS A DROPDOWN: a click in the rail outside it (and outside its
+  // row's line, which opens it on focus) closes it, and opening another
+  // dropdown closes it.
+  const registerDetail = (): void => {
+    if (detail === null) return;
+    sc.dropdowns.opened({
+      kind: "row-detail",
+      key: `row-detail:${workspaceId}`,
+      element: detail,
+      openers: [line],
+      close: () => {
+        cancelTimers();
+        sc.openDetails.delete(workspaceId);
+        paintRowDetail(ws, false);
+      },
+    });
   };
 
   const scheduleOpen = (): void => {
@@ -570,7 +591,6 @@ function installHoverPanel(
     scheduleClose();
   });
 
-  const detail = ws.querySelector<HTMLElement>(":scope > .detail");
   if (detail !== null) {
     detail.addEventListener("mouseenter", () => {
       pointerOverPanel = true;
@@ -581,6 +601,9 @@ function installHoverPanel(
       scheduleClose();
     });
   }
+
+  // A row a redraw drew open is still the page's open dropdown.
+  if (ws.classList.contains("open")) registerDetail();
 
   line.addEventListener("focusin", () => {
     focusWithin = true;
@@ -682,10 +705,22 @@ function drawMenuControl(ws: HTMLElement, target: VerbTarget): HTMLElement {
  * stylesheet caps its height and scrolls it if the rail is short.
  */
 export function toggleRowMenu(ws: HTMLElement, target: VerbTarget): void {
-  void target;
   const menu = ws.querySelector<HTMLElement>(":scope > .sb-menu");
   if (menu === null) return;
   menu.hidden = !menu.hidden;
+  if (menu.hidden) {
+    target.sc.dropdowns.released(menu);
+    return;
+  }
+  const more = ws.querySelector<HTMLElement>(":scope > .row .sb-more");
+  target.sc.dropdowns.opened({
+    kind: "row-menu",
+    element: menu,
+    openers: more === null ? [] : [more],
+    close: () => {
+      menu.hidden = true;
+    },
+  });
 }
 
 /** The row click: SelectWorkspace, echoed, idempotent, and nothing else. */
