@@ -146,6 +146,46 @@ func TestAReadThatTookTheHandleBeforeAPromotionStillReads(t *testing.T) {
 	}
 }
 
+// TestAWriteRacingAPromotionSeesOneWholeHandle pins that a write running
+// while Promote swaps the handle reads the handle and its read-only flag as
+// one: either the read-only handle, refused, or the writing one, committed.
+// write() used to read both fields with no synchronization while Promote
+// assigned them under mu, a data race `go test -race` reports here.
+func TestAWriteRacingAPromotionSeesOneWholeHandle(t *testing.T) {
+	// Arrange
+	path := writableStore(t)
+	ro, err := OpenReadOnly(context.Background(), path, WithUnsyncedWrites())
+	if err != nil {
+		t.Fatalf("OpenReadOnly: %v", err)
+	}
+	t.Cleanup(func() { ro.Close() })
+	// The writer keeps writing until one commits, so some of its writes run
+	// after the swap with nothing ordering them after it but the handle
+	// itself.
+	wrote := make(chan error, 1)
+	go func() {
+		for {
+			_, err := ro.CreateTask(context.Background(), "racing")
+			if !errors.Is(err, ErrReadOnly) {
+				wrote <- err
+				return
+			}
+		}
+	}()
+
+	// Act
+	promoteErr := ro.Promote(context.Background())
+	writeErr := <-wrote
+
+	// Assert
+	if promoteErr != nil {
+		t.Fatalf("Promote: %v", promoteErr)
+	}
+	if writeErr != nil {
+		t.Fatalf("the first write past the promotion = %v, want it committed", writeErr)
+	}
+}
+
 // TestCloseClosesTheHandleAPromotionRetired pins the other half: the
 // read-only handle a promotion retires lives exactly as long as the store,
 // so Close ends it.
