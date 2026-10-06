@@ -2119,6 +2119,52 @@ describe("a prompt joining the running turn", () => {
       return [];
     });
 
+  /** The turns a REFUSED keep-alive rewind named since `mark`, as [turn, kind, uuids]. */
+  const refusedTurns = (mark: number): [string, string, string[]][] => {
+    const record = logRecordsSince(mark).find((entry) => entry.message.startsWith("the keep-alive rewind is REFUSED"));
+    const offending = (record?.context.offending ?? []) as { turn_id: string; kind: string; uuids: string[] }[];
+    return offending.map((turn) => [turn.turn_id, turn.kind, turn.uuids]);
+  };
+
+  it("books an unfolded join into the rewind's span as its own turn's record", async () => {
+    // Arrange: turn-1 anchors, the join runs after it and ends unanswered.
+    const h = harness();
+    await started(h);
+    await realPrompt(h, "turn-1");
+    const running = h.minted.at(-1) ?? "";
+    await h.engine.onSdkMessage(consumed(assistantMessage("turn-1-reply"), running, [running]));
+    const joined = await join(h, "turn-2");
+    await h.engine.onSdkMessage(consumed(resultMessage("turn-1-result"), running, [running]));
+    await h.engine.onSdkMessage(consumed(resultMessage("turn-2-result"), joined, [joined]));
+    await keepaliveTurn(h, []);
+    const mark = logSinkMark();
+
+    // Act
+    await keepaliveTurn(h, []);
+
+    // Assert
+    expect(refusedTurns(mark)).toEqual([["turn-2", "real", [joined]]]);
+  });
+
+  it("books a folded join into the rewind's span under the turn it was folded into", async () => {
+    // Arrange: the fold lands on turn-1's result, after its last reply.
+    const h = harness();
+    await started(h);
+    await realPrompt(h, "turn-1");
+    const running = h.minted.at(-1) ?? "";
+    await h.engine.onSdkMessage(consumed(assistantMessage("turn-1-reply"), running, [running]));
+    const joined = await join(h, "turn-2");
+    await h.engine.onSdkMessage(consumed(resultMessage("turn-1-result"), running, [running, joined]));
+    await keepaliveTurn(h, []);
+    const mark = logSinkMark();
+
+    // Act
+    await keepaliveTurn(h, []);
+
+    // Assert
+    expect(refusedTurns(mark)).toEqual([["turn-1", "real", [joined]]]);
+  });
+
   it("writes the folded prompt's row naming the turn the vendor folded it into", async () => {
     // Arrange
     const h = harness();
@@ -3355,6 +3401,427 @@ describe("the keep-alive rewind between beats", () => {
     }
     expect(texts.length).toBeGreaterThanOrEqual(2);
     expect(new Set(texts).size).toBe(texts.length);
+  });
+});
+
+/**
+ * THE REWIND'S SPAN INVARIANT, end to end through the engine.
+ *
+ * Before any rewind discards anything, every turn between the anchor and now
+ * must be keep-alive material: the keep-alive's own turn, or a vendor turn its
+ * own rewind set off. A rewind that would discard anything else is refused at
+ * ERROR, and the content is kept.
+ */
+describe("the keep-alive rewind's span invariant", () => {
+  /** The REFUSED record, when one was written since `mark`. */
+  const refusal = (mark: number) =>
+    logRecordsSince(mark).find((entry) => entry.message.startsWith("the keep-alive rewind is REFUSED"));
+
+  /** Every REWINDING record since `mark`, as the span kinds it discarded. */
+  const rewoundSpans = (mark: number): string[][] =>
+    logRecordsSince(mark)
+      .filter((entry) => entry.message.startsWith("REWINDING the vendor context"))
+      .map((entry) => (entry.context.discarded_span as { kind: string }[]).map((turn) => turn.kind));
+
+  /** Every VENDOR_STARTED prompt row written. */
+  const adoptions = (h: Harness): number =>
+    h.persistence.buffered.filter(
+      (entry) => entry.item.kind === "prompt" && entry.item.prompt.origin === conversationv1.PromptOrigin.VENDOR_STARTED,
+    ).length;
+
+  /** A background task's notification, with the vendor's status. */
+  const notification = (uuid: string, status: "completed" | "stopped"): SdkMessage =>
+    ({ type: "system", subtype: "task_notification", task_id: "bujbjom65", status, uuid, session_id: "s" }) as never;
+
+  /** Beat the keep-alive, let the vendor run a turn of its own first, then answer the keep-alive. */
+  async function keepaliveBesideVendorTurn(h: Harness, status: "completed" | "stopped", tag: string): Promise<void> {
+    h.scheduler.fire(0);
+    await drainTurns();
+    await h.engine.onSdkMessage(notification(`notif-${tag}`, status));
+    await h.engine.onSdkMessage(assistantMessage(`vendor-reply-${tag}`));
+    await h.engine.onSdkMessage(resultMessage(`vendor-result-${tag}`));
+    await h.engine.onSdkMessage(answering(h, resultMessage(`keepalive-result-${tag}`)));
+  }
+
+  it("carries a keep-alive that beat before the first real prompt, with no rewind", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    const opened = h.queries.length;
+    await keepaliveTurn(h, []);
+
+    // Act
+    await realTurn(h, "turn-0", [assistantMessage("real-uuid")]);
+
+    // Assert
+    expect(h.queries.length).toBe(opened);
+  });
+
+  it("owes the next keep-alive no rewind for a keep-alive the first prompt carried", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    const opened = h.queries.length;
+    await keepaliveTurn(h, []);
+    await realTurn(h, "turn-0", [assistantMessage("real-uuid")]);
+
+    // Act
+    await keepaliveTurn(h, []);
+
+    // Assert
+    expect(h.queries.length).toBe(opened);
+  });
+
+  it("discards only keep-alive turns across several beats and the real prompt after them", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await realTurn(h, "turn-0", [assistantMessage("real-uuid")]);
+    const mark = logSinkMark();
+
+    // Act
+    await keepaliveTurn(h, [assistantMessage("ka-1")]);
+    await keepaliveTurn(h, [assistantMessage("ka-2")]);
+    await keepaliveTurn(h, [assistantMessage("ka-3")]);
+    await realPrompt(h, "turn-1");
+
+    // Assert: three rewinds (two beats and the prompt), each of one keep-alive.
+    expect(rewoundSpans(mark)).toEqual([["keepalive"], ["keepalive"], ["keepalive"]]);
+  });
+
+  it("names the keep-alive's send and answer in the span a rewind discards", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await realTurn(h, "turn-0", [assistantMessage("real-uuid")]);
+    await keepaliveTurn(h, [assistantMessage("ka-answer")]);
+    const keepaliveSend = h.minted.at(-1);
+    const mark = logSinkMark();
+
+    // Act
+    await realPrompt(h, "turn-1");
+
+    // Assert
+    const record = logRecordsSince(mark).find((entry) => entry.message.startsWith("REWINDING the vendor context"));
+    expect((record?.context.discarded_span as { uuids: string[] }[])[0]?.uuids).toEqual([keepaliveSend, "ka-answer"]);
+  });
+
+  it("rewinds a real prompt that arrived mid-keep-alive past that keep-alive alone", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await realTurn(h, "turn-0", [assistantMessage("real-uuid")]);
+    h.scheduler.fire(0);
+    await drainTurns();
+    await h.engine.onSdkMessage(answering(h, assistantMessage("ka-reply")));
+    const starting = startDuring(h, "turn-1");
+    const mark = logSinkMark();
+
+    // Act
+    await h.engine.onSdkMessage(answering(h, resultMessage("ka-result")));
+    await starting;
+
+    // Assert
+    expect([rewoundSpans(mark), h.queries.at(-1)?.spec.resumeSessionAt]).toEqual([[["keepalive"]], "real-uuid"]);
+  });
+
+  it("serves a turn answering a task that COMPLETED during a keep-alive", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await realTurn(h, "turn-0", [assistantMessage("real-uuid")]);
+
+    // Act
+    await keepaliveBesideVendorTurn(h, "completed", "1");
+
+    // Assert
+    expect(adoptions(h)).toBe(1);
+  });
+
+  it("anchors the next rewind on a completed task's served turn, keeping it", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await realTurn(h, "turn-0", [assistantMessage("real-uuid")]);
+    await keepaliveBesideVendorTurn(h, "completed", "1");
+
+    // Act
+    await realPrompt(h, "turn-1");
+
+    // Assert
+    expect(h.queries.at(-1)?.spec.resumeSessionAt).toBe("vendor-reply-1");
+  });
+
+  it("discards only the keep-alive past a completed task's served turn", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await realTurn(h, "turn-0", [assistantMessage("real-uuid")]);
+    await keepaliveBesideVendorTurn(h, "completed", "1");
+    const mark = logSinkMark();
+
+    // Act
+    await realPrompt(h, "turn-1");
+
+    // Assert
+    expect(rewoundSpans(mark)).toEqual([["keepalive"]]);
+  });
+
+  it("records no refusal for a completed task's served turn", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await realTurn(h, "turn-0", [assistantMessage("real-uuid")]);
+    await keepaliveBesideVendorTurn(h, "completed", "1");
+    const mark = logSinkMark();
+
+    // Act
+    await realPrompt(h, "turn-1");
+
+    // Assert
+    expect(refusal(mark)).toBeUndefined();
+  });
+
+  it("delivers the real prompt the refused rewind preceded", async () => {
+    // Arrange
+    const sends: SdkUserMessage[] = [];
+    const h = harness({ drainSends: sends });
+    await started(h);
+    await realTurn(h, "turn-0", [assistantMessage("real-uuid")]);
+    await keepaliveBesideVendorTurn(h, "completed", "1");
+
+    // Act
+    await realPrompt(h, "turn-1");
+    await drainTurns();
+
+    // Assert
+    expect(sendKinds(sends).at(-1)).toBe("real");
+  });
+
+  it("never adopts the turn answering a task the keep-alive's rewind STOPPED", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await realTurn(h, "turn-0", [assistantMessage("real-uuid")]);
+    await keepaliveTurn(h, []);
+
+    // Act: the second beat rewinds, which stops the old query's task.
+    await keepaliveBesideVendorTurn(h, "stopped", "1");
+
+    // Assert
+    expect(adoptions(h)).toBe(0);
+  });
+
+  it("never adopts the REPLY-LESS turn answering a replayed stop (the real CLI's shape)", async () => {
+    // Arrange: ship-gns 2026-10-02 -- the stop, then a lone result.
+    const h = harness();
+    await started(h);
+    await realTurn(h, "turn-0", [assistantMessage("real-uuid")]);
+    await keepaliveTurn(h, []);
+    h.scheduler.fire(0);
+    await drainTurns();
+    await h.engine.onSdkMessage(notification("notif-1", "stopped"));
+
+    // Act
+    await h.engine.onSdkMessage(resultMessage("stop-result"));
+
+    // Assert
+    expect(adoptions(h)).toBe(0);
+  });
+
+  it("discards the stop's answer with the keep-alive at the next rewind", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await realTurn(h, "turn-0", [assistantMessage("real-uuid")]);
+    await keepaliveTurn(h, []);
+    await keepaliveBesideVendorTurn(h, "stopped", "1");
+    const mark = logSinkMark();
+
+    // Act
+    await realPrompt(h, "turn-1");
+
+    // Assert
+    expect([rewoundSpans(mark), h.queries.at(-1)?.spec.resumeSessionAt]).toEqual([
+      [["keepalive", "keepalive_consequence"]],
+      "real-uuid",
+    ]);
+  });
+
+  it("never adopts the turn answering a stop a REAL prompt's rewind caused", async () => {
+    // Arrange: the prompt's rewind replaced the query; the vendor reports the
+    // old query's task stopped ahead of the prompt's own turn.
+    const h = harness();
+    await started(h);
+    await realTurn(h, "turn-0", [assistantMessage("real-uuid")]);
+    await keepaliveTurn(h, []);
+    await realPrompt(h, "turn-1");
+
+    // Act
+    await h.engine.onSdkMessage(notification("notif-1", "stopped"));
+    await h.engine.onSdkMessage(assistantMessage("stop-reply"));
+    await h.engine.onSdkMessage(resultMessage("stop-result"));
+
+    // Assert
+    expect(adoptions(h)).toBe(0);
+  });
+
+  /** A main-thread user record: a tool result, or the vendor's interrupt marker. */
+  const userRecord = (uuid: string): SdkMessage =>
+    ({ type: "user", uuid, session_id: "s", parent_tool_use_id: null, message: { role: "user", content: [] } }) as never;
+
+  it("anchors the next rewind on an interrupted turn's own last record, keeping it", async () => {
+    // Arrange: the turn's tool result (or the vendor's interrupt marker) lands
+    // after its last answer, as an interrupt mid-tool leaves it.
+    const h = harness();
+    await started(h);
+    await realTurn(h, "turn-0", [assistantMessage("real-uuid"), userRecord("tool-result-uuid")]);
+    await keepaliveTurn(h, []);
+
+    // Act
+    await keepaliveTurn(h, []);
+
+    // Assert
+    expect(h.queries.at(-1)?.spec.resumeSessionAt).toBe("tool-result-uuid");
+  });
+
+  it("records no refusal for an interrupted turn's own last record", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await realTurn(h, "turn-0", [assistantMessage("real-uuid"), userRecord("tool-result-uuid")]);
+    await keepaliveTurn(h, []);
+    const mark = logSinkMark();
+
+    // Act
+    await keepaliveTurn(h, []);
+
+    // Assert
+    expect(refusal(mark)).toBeUndefined();
+  });
+
+  it("REFUSES a rewind past a real prompt the vendor never answered, keeping it", async () => {
+    // Arrange: turn-1 ended with NO record at all -- not even the interrupt
+    // marker an interrupted turn streams -- so its prompt record lies past
+    // turn-0's anchor with nothing of the turn to anchor on.
+    const h = harness();
+    await started(h);
+    await realTurn(h, "turn-0", [assistantMessage("real-uuid")]);
+    await realTurn(h, "turn-1", []);
+    await keepaliveTurn(h, []);
+    const opened = h.queries.length;
+
+    // Act
+    await keepaliveTurn(h, []);
+
+    // Assert
+    expect(h.queries.length).toBe(opened);
+  });
+
+  it("names the unanswered real prompt's turn and record in that refusal", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await realTurn(h, "turn-0", [assistantMessage("real-uuid")]);
+    await realPrompt(h, "turn-1");
+    const promptRecord = h.minted.at(-1);
+    await h.engine.onSdkMessage(answering(h, resultMessage("turn-1-result")));
+    await keepaliveTurn(h, []);
+    const mark = logSinkMark();
+
+    // Act
+    await keepaliveTurn(h, []);
+
+    // Assert
+    const offending = refusal(mark)?.context.offending as { turn_id: string; kind: string; uuids: string[] }[];
+    expect(offending.map((turn) => [turn.turn_id, turn.kind, turn.uuids])).toEqual([
+      ["turn-1", "real", [promptRecord]],
+    ]);
+  });
+
+  it("refuses ONCE: the beat after a refusal rewinds nothing and refuses nothing", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await realTurn(h, "turn-0", [assistantMessage("real-uuid")]);
+    await realTurn(h, "turn-1", []);
+    await keepaliveTurn(h, []);
+    await keepaliveTurn(h, []);
+    const mark = logSinkMark();
+
+    // Act
+    await keepaliveTurn(h, []);
+
+    // Assert
+    expect(refusal(mark)).toBeUndefined();
+  });
+
+  it("anchors afresh on the next real reply after a refusal", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await realTurn(h, "turn-0", [assistantMessage("real-uuid")]);
+    await realTurn(h, "turn-1", []);
+    await keepaliveTurn(h, []);
+    await keepaliveTurn(h, []);
+    await realTurn(h, "turn-2", [assistantMessage("real-uuid-2")]);
+    await keepaliveTurn(h, []);
+
+    // Act
+    await keepaliveTurn(h, []);
+
+    // Assert
+    expect(h.queries.at(-1)?.spec.resumeSessionAt).toBe("real-uuid-2");
+  });
+
+  it("never loops on a stop every rewind replays: each rewind resumes at the same real anchor", async () => {
+    // THE SHIP-GNS LOOP (2026-10-02): every keep-alive's rewind stopped a task,
+    // and the vendor answered the stop in a turn of its own.
+    // Arrange
+    const h = harness();
+    await started(h);
+    await realTurn(h, "turn-0", [assistantMessage("real-uuid")]);
+    await keepaliveTurn(h, []);
+    const opened = h.queries.length;
+
+    // Act
+    for (const beat of ["1", "2", "3"]) await keepaliveBesideVendorTurn(h, "stopped", beat);
+
+    // Assert: one rewind per beat, every one to the real anchor.
+    expect(h.queries.slice(opened).map((query) => query.spec.resumeSessionAt)).toEqual([
+      "real-uuid",
+      "real-uuid",
+      "real-uuid",
+    ]);
+  });
+
+  it("never adopts a turn across a stop every rewind replays", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await realTurn(h, "turn-0", [assistantMessage("real-uuid")]);
+    await keepaliveTurn(h, []);
+
+    // Act
+    for (const beat of ["1", "2", "3"]) await keepaliveBesideVendorTurn(h, "stopped", beat);
+
+    // Assert
+    expect(adoptions(h)).toBe(0);
+  });
+
+  it("never refuses a rewind across a stop every rewind replays", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await realTurn(h, "turn-0", [assistantMessage("real-uuid")]);
+    await keepaliveTurn(h, []);
+    const mark = logSinkMark();
+
+    // Act
+    for (const beat of ["1", "2", "3"]) await keepaliveBesideVendorTurn(h, "stopped", beat);
+
+    // Assert
+    expect(refusal(mark)).toBeUndefined();
   });
 });
 

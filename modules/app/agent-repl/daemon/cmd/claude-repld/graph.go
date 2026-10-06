@@ -13,6 +13,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"claude-repld/internal/account"
+	"claude-repld/internal/agentreplsession"
 	"claude-repld/internal/boot"
 	"claude-repld/internal/bringup"
 	"claude-repld/internal/buildid"
@@ -54,6 +55,7 @@ import (
 	"claude-repld/internal/shimclient"
 	"claude-repld/internal/startup"
 	"claude-repld/internal/titlesynth"
+	"claude-repld/internal/vendortraffic"
 	"claude-repld/internal/vocab"
 	"claude-repld/internal/workspace"
 	"claude-repld/internal/wsm"
@@ -678,6 +680,20 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	if err != nil {
 		return nil, fmt.Errorf("claude-repld: build the persistent-wifi controller: %w", err)
 	}
+	// ---- agent-repl's session ----
+	//
+	// The span the connectivity indicator's dropdown reports (owner ruling,
+	// 2026-10-06): begun by a login made through the daemon's own login flow
+	// or by a new Emacs, whichever came later, and durable across daemon
+	// restarts. Its traffic is the vendor traffic sampler's (below).
+	agentReplSession, err := agentreplsession.New(ctx, p.DB, topbarResolver, log)
+	if err != nil {
+		return nil, fmt.Errorf("claude-repld: build agent-repl's session: %w", err)
+	}
+	loginWatch, err := agentreplsession.NewLoginWatch(account.ReadLoginRecord, agentReplSession, time.Now, log)
+	if err != nil {
+		return nil, fmt.Errorf("claude-repld: build the login watch: %w", err)
+	}
 	selfExe, err := os.Executable()
 	if err != nil {
 		return nil, fmt.Errorf("claude-repld: resolve this daemon's own binary: %w", err)
@@ -867,7 +883,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			return "", err
 		}
 		return accounts.ConfigDirFor(dir), nil
-	}, log)
+	}, log, loginWatch)
 	if err != nil {
 		return nil, fmt.Errorf("claude-repld: build the login manager: %w", err)
 	}
@@ -986,9 +1002,47 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// A FULL EMACS RESTART is told apart from a reconnect by the Emacs
 	// process identity every Emacs WatchDaemon carries, judged only by the
 	// daemon that serves (a joining successor's state client is read-only).
-	editors, err := editorinstance.New(p.DB, rolloutController.ServesIntake, time.Now, log)
+	editors, err := editorinstance.New(p.DB, rolloutController.ServesIntake, time.Now, log, agentReplSession)
 	if err != nil {
 		return nil, fmt.Errorf("claude-repld: build the editor instance tracker: %w", err)
+	}
+
+	// THE VENDOR TRAFFIC SAMPLER measures every live shim's processes through
+	// the kernel, only while this daemon serves, and states what it counted to
+	// agent-repl's session once per round.
+	background := []backgroundLoop{
+		{Name: "drain", Run: drainController.Run},
+		{Name: "command_file_ingress", Run: ingress.Run},
+		{Name: "held_prompt_ingress", Run: held.Run},
+		{Name: "shim_log_roll", Run: func(ctx context.Context) error {
+			return runShimLogRolls(ctx, p.Surfaces.ShimRollRequests(), p.DB, rolloutController)
+		}},
+		{Name: "worktree_reaper", Run: reaper.Run},
+		{Name: "lock_watchdog", Run: stalls.Run},
+		{Name: "persistent_wifi", Run: wifi.Run},
+		{Name: "news_digest", Run: digest.Run},
+	}
+	// A PROCESS WHOSE VENDOR IS FORBIDDEN MEASURES NOTHING: every test process
+	// sets AGENT_REPL_FORBID_VENDOR_CALLS, its vendor is the fake SDK, and no
+	// test reads the real kernel's network statistics.
+	if !p.Contracts.ForbidVendorCalls() {
+		sampler, err := vendortraffic.New(vendortraffic.Config{
+			ShimPIDs:  fleet.ShimPIDs,
+			Serves:    rolloutController.ServesIntake,
+			Processes: vendortraffic.KernelProcesses{},
+			Dial:      vendortraffic.DialStatistics,
+			Sink:      agentReplSession,
+			Log:       log,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("claude-repld: build the vendor traffic sampler: %w", err)
+		}
+		background = append(background, backgroundLoop{Name: "vendor_traffic", Run: func(ctx context.Context) error {
+			sampler.Run(ctx)
+			return nil
+		}})
+	} else {
+		log.Info(graphOperation, "vendor traffic is not measured: vendor calls are forbidden in this process", dlog.Context{envc.EnvForbidVendorCalls: "1"})
 	}
 
 	log.Debug(graphOperation, "the component graph is built", dlog.Context{
@@ -1028,23 +1082,24 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			Log:              p.Surfaces,
 		},
 		Boot: boot.Deps{
-			BindViews:      verbs.BindViews,
-			Layout:         p.Layout,
-			DB:             p.DB,
-			Supervisor:     supervisor,
-			Queue:          queue,
-			Merge:          mergeOrchestrator,
-			Rollout:        rolloutController,
-			RunDir:         paths.RunDir,
-			JoiningAddress: p.Opts.joining,
-			Adopted:        fleet.Install,
-			SessionAdopted: fleet.NoteAdoptedSession,
-			StartSession:   fleet.Start,
-			EnsureServices: services.step(bootServiceStep(p.Opts.joining != "", restarter.EnsureLoaded, restarter.EnsureCurrent)),
-			Unserved:       fleet.MarkUnserved,
-			BringingUp:     sidebarResolver.SetBringingUp,
-			AdoptBound:     adoptBound,
-			Log:            p.Surfaces,
+			BindViews:              verbs.BindViews,
+			RestoreMissingWorktree: verbs.RestoreMissingWorktree,
+			Layout:                 p.Layout,
+			DB:                     p.DB,
+			Supervisor:             supervisor,
+			Queue:                  queue,
+			Merge:                  mergeOrchestrator,
+			Rollout:                rolloutController,
+			RunDir:                 paths.RunDir,
+			JoiningAddress:         p.Opts.joining,
+			Adopted:                fleet.Install,
+			SessionAdopted:         fleet.NoteAdoptedSession,
+			StartSession:           fleet.Start,
+			EnsureServices:         services.step(bootServiceStep(p.Opts.joining != "", restarter.EnsureLoaded, restarter.EnsureCurrent)),
+			Unserved:               fleet.MarkUnserved,
+			BringingUp:             sidebarResolver.SetBringingUp,
+			AdoptBound:             adoptBound,
+			Log:                    p.Surfaces,
 		},
 		// PRIME IS WHERE A STANDING DRAIN COMES BACK. The daemon topic replays
 		// only this process's own latest value, so a schedule that outlived a
@@ -1083,18 +1138,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			clicks.bind(srv)
 			clients.bind(srv)
 		},
-		Background: []backgroundLoop{
-			{Name: "drain", Run: drainController.Run},
-			{Name: "command_file_ingress", Run: ingress.Run},
-			{Name: "held_prompt_ingress", Run: held.Run},
-			{Name: "shim_log_roll", Run: func(ctx context.Context) error {
-				return runShimLogRolls(ctx, p.Surfaces.ShimRollRequests(), p.DB, rolloutController)
-			}},
-			{Name: "worktree_reaper", Run: reaper.Run},
-			{Name: "lock_watchdog", Run: stalls.Run},
-			{Name: "persistent_wifi", Run: wifi.Run},
-			{Name: "news_digest", Run: digest.Run},
-		},
+		Background:    background,
 		CloseWatchers: fleet.CloseWatchers,
 		CloseBanners:  notifier.Close,
 		DrainQueue:    queue.Drain,

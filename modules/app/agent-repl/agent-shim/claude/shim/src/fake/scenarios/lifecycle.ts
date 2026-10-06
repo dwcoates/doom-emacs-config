@@ -143,6 +143,29 @@ const QUEUE_VENDOR_TURN = scenario({
   },
 });
 
+const STOP_ON_REWIND = scenario({
+  name: "stop-on-rewind",
+  prompt: "!stop-on-rewind",
+  emits:
+    "an ordinary short turn, and it ARMS the session: from then on every truncating resume (a keep-alive " +
+    "rewind's `resumeSessionAt`) reports, ahead of that query's first send, a background shell the previous " +
+    "process left unfinished: `task_notification{status:\"stopped\"}` naming no task kind, then a turn the " +
+    "vendor runs ON ITS OWN that answers nothing (a lone result with `origin: {kind: \"task-notification\"}`)",
+  writes:
+    "the assistant line, the prompt line and the turn record, a per-session mark under the account root, and on " +
+    "each replay an enqueue/dequeue pair and a TRANSCRIPT-ONLY task-notification user record (`queueTranscriptOnly`, " +
+    "`promptSource: system`) parented on the fork point, which the next send's prompt parents on; no reply, no turn record",
+  arms:
+    "AgentResponse.from_model, AgentSuccess.completed — and on each rewind a reply-less turn answering nobody. " +
+    "Grounded in the ship-gns transcript and shim log of 2026-10-02 15:17:08Z (CLI 2.1.280), where every " +
+    "keep-alive rewind replayed the stop",
+  run(ctx) {
+    ctx.log.debug({ turn: ctx.turn, branch: "stop-on-rewind" }, "fake turn that arms the stop replay on every rewind");
+    ctx.armStopOnRewind();
+    conclude(ctx, "ok");
+  },
+});
+
 export const LIFECYCLE_SCENARIOS = [
   HOLD,
   INTERRUPT_MID_TOOL,
@@ -151,4 +174,5 @@ export const LIFECYCLE_SCENARIOS = [
   QUERY_FAIL,
   KEEPALIVE_ECHO,
   QUEUE_VENDOR_TURN,
+  STOP_ON_REWIND,
 ];

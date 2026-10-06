@@ -32,6 +32,9 @@ type resolver struct {
 	// persistentWifi is the machine's persistent-wifi standing, which every
 	// strip draws alike; nil before the controller's first read.
 	persistentWifi *agentreplv1.PersistentWifiState
+	// agentReplSession is agent-repl's session, which every strip's
+	// connectivity indicator carries; nil before any session began.
+	agentReplSession *frontendv1.TopbarAgentReplSession
 }
 
 // newResolver builds the resolver with the injectable knobs resolved.
@@ -217,6 +220,9 @@ func (r *resolver) render(s *wsState) (*frontendv1.TopbarView, error) {
 	if err != nil {
 		return nil, err
 	}
+	// THE SESSION RIDES THE INDICATOR, whatever the link state: it is
+	// agent-repl's, not the workspace's, and it is ABSENT until one began.
+	connectivity.Session = r.agentReplSession
 	if !s.ready() {
 		return nil, nil
 	}

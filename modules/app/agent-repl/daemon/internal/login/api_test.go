@@ -14,7 +14,7 @@ func TestNewRejectsAMissingConfigDirResolver(t *testing.T) {
 	guard := envc.NewVendorGuard(envc.Load())
 
 	// Act.
-	_, err := login.New(guard, "/bin/true", nil, dlog.NewTestLogger())
+	_, err := login.New(guard, "/bin/true", nil, dlog.NewTestLogger(), newFakeObserver())
 
 	// Assert.
 	if err == nil {
@@ -28,7 +28,7 @@ func TestNewRejectsAMissingLogger(t *testing.T) {
 	route := func(ids.WorkspaceID) (string, error) { return "/roots/default", nil }
 
 	// Act.
-	_, err := login.New(guard, "/bin/true", route, nil)
+	_, err := login.New(guard, "/bin/true", route, nil, newFakeObserver())
 
 	// Assert.
 	if err == nil {
@@ -46,5 +46,18 @@ func TestResizeWinsize(t *testing.T) {
 	// Assert.
 	if got.Rows != 50 || got.Cols != 200 {
 		t.Fatalf("Winsize() = %dx%d, want 50x200", got.Rows, got.Cols)
+	}
+}
+
+func TestNewRejectsAMissingObserver(t *testing.T) {
+	// Arrange.
+	route := func(ids.WorkspaceID) (string, error) { return "/roots/default", nil }
+
+	// Act.
+	_, err := login.New(envc.NewVendorGuard(envc.Load()), "/bin/true", route, dlog.NewTestLogger(), nil)
+
+	// Assert.
+	if err == nil {
+		t.Fatal("New() = nil error, want a refusal for the missing observer")
 	}
 }

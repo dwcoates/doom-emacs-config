@@ -17,7 +17,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_open_workspace.proto.
  */
 export const file_agentrepl_v1_endpoint_open_workspace: GenFile = /*@__PURE__*/
-  fileDesc("CiphZ2VudHJlcGwvdjEvZW5kcG9pbnRfb3Blbl93b3Jrc3BhY2UucHJvdG8SDGFnZW50cmVwbC52MSJUChRPcGVuV29ya3NwYWNlUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEg0KBW9wX2lkGAIgASgJIosBChVPcGVuV29ya3NwYWNlUmVzcG9uc2USNQoHc3VjY2VzcxgBIAEoCzIiLmFnZW50cmVwbC52MS5PcGVuV29ya3NwYWNlU3VjY2Vzc0gAEjEKBWVycm9yGAIgASgLMiAuYWdlbnRyZXBsLnYxLk9wZW5Xb3Jrc3BhY2VFcnJvckgAQggKBnJlc3VsdCIWChRPcGVuV29ya3NwYWNlU3VjY2VzcyK9BQoST3BlbldvcmtzcGFjZUVycm9yEkgKEXVua25vd25fd29ya3NwYWNlGAEgASgLMisuYWdlbnRyZXBsLnYxLk9wZW5Xb3Jrc3BhY2VVbmtub3duV29ya3NwYWNlSAASUQoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzIvLmFnZW50cmVwbC52MS5PcGVuV29ya3NwYWNlV29ya3NwYWNlUmVmTWlzbWF0Y2hIABJIChF0cmFuc2ZlcnJpbmdfYXdheRgDIAEoCzIrLmFnZW50cmVwbC52MS5PcGVuV29ya3NwYWNlVHJhbnNmZXJyaW5nQXdheUgAEkMKD25vdF95ZXRfYWRvcHRlZBgEIAEoCzIoLmFnZW50cmVwbC52MS5PcGVuV29ya3NwYWNlTm90WWV0QWRvcHRlZEgAEkQKD3Nlc3Npb25fZGVsZXRlZBgFIAEoCzIpLmFnZW50cmVwbC52MS5PcGVuV29ya3NwYWNlU2Vzc2lvbkRlbGV0ZWRIABJKChJ0cmFuc2NyaXB0X21pc3NpbmcYBiABKAsyLC5hZ2VudHJlcGwudjEuT3BlbldvcmtzcGFjZVRyYW5zY3JpcHRNaXNzaW5nSAASPgoMc3Bhd25fZmFpbGVkGAcgASgLMiYuYWdlbnRyZXBsLnYxLk9wZW5Xb3Jrc3BhY2VTcGF3bkZhaWxlZEgAEksKE3ZlbmRvcl9zdGFydF9mYWlsZWQYCCABKAsyLC5hZ2VudHJlcGwudjEuT3BlbldvcmtzcGFjZVZlbmRvclN0YXJ0RmFpbGVkSAASUwoXbG9ja19ob2xkZXJfdW5hdmFpbGFibGUYCSABKAsyMC5hZ2VudHJlcGwudjEuT3BlbldvcmtzcGFjZUxvY2tIb2xkZXJVbmF2YWlsYWJsZUgAQgcKBWNhdXNlIncKIk9wZW5Xb3Jrc3BhY2VMb2NrSG9sZGVyVW5hdmFpbGFibGUSMwoHZmFpbHVyZRgDIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5Mb2NrSG9sZGVyRmFpbHVyZUoECAEQAkoECAIQA1IGYmluYXJ5Ughvc19lcnJvciIwCh5PcGVuV29ya3NwYWNlVmVuZG9yU3RhcnRGYWlsZWQSDgoGZGV0YWlsGAEgASgJIh8KHU9wZW5Xb3Jrc3BhY2VVbmtub3duV29ya3NwYWNlIjkKIU9wZW5Xb3Jrc3BhY2VXb3Jrc3BhY2VSZWZNaXNtYXRjaBIUCgxyZWdpc3RyeV9kaXIYASABKAkiMAodT3BlbldvcmtzcGFjZVRyYW5zZmVycmluZ0F3YXkSDwoHYWRkcmVzcxgBIAEoCSIcChpPcGVuV29ya3NwYWNlTm90WWV0QWRvcHRlZCIdChtPcGVuV29ya3NwYWNlU2Vzc2lvbkRlbGV0ZWQiUwoeT3BlbldvcmtzcGFjZVRyYW5zY3JpcHRNaXNzaW5nEhkKEXZlbmRvcl9zZXNzaW9uX2lkGAEgASgJEhYKDnNlYXJjaGVkX3BhdGhzGAIgAygJIioKGE9wZW5Xb3Jrc3BhY2VTcGF3bkZhaWxlZBIOCgZkZXRhaWwYASABKAlCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_conversation_v1_session, file_workspace_v1_workspace]);
+  fileDesc("CiphZ2VudHJlcGwvdjEvZW5kcG9pbnRfb3Blbl93b3Jrc3BhY2UucHJvdG8SDGFnZW50cmVwbC52MSJUChRPcGVuV29ya3NwYWNlUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEg0KBW9wX2lkGAIgASgJIosBChVPcGVuV29ya3NwYWNlUmVzcG9uc2USNQoHc3VjY2VzcxgBIAEoCzIiLmFnZW50cmVwbC52MS5PcGVuV29ya3NwYWNlU3VjY2Vzc0gAEjEKBWVycm9yGAIgASgLMiAuYWdlbnRyZXBsLnYxLk9wZW5Xb3Jrc3BhY2VFcnJvckgAQggKBnJlc3VsdCIWChRPcGVuV29ya3NwYWNlU3VjY2VzcyKPBgoST3BlbldvcmtzcGFjZUVycm9yEkgKEXVua25vd25fd29ya3NwYWNlGAEgASgLMisuYWdlbnRyZXBsLnYxLk9wZW5Xb3Jrc3BhY2VVbmtub3duV29ya3NwYWNlSAASUQoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzIvLmFnZW50cmVwbC52MS5PcGVuV29ya3NwYWNlV29ya3NwYWNlUmVmTWlzbWF0Y2hIABJIChF0cmFuc2ZlcnJpbmdfYXdheRgDIAEoCzIrLmFnZW50cmVwbC52MS5PcGVuV29ya3NwYWNlVHJhbnNmZXJyaW5nQXdheUgAEkMKD25vdF95ZXRfYWRvcHRlZBgEIAEoCzIoLmFnZW50cmVwbC52MS5PcGVuV29ya3NwYWNlTm90WWV0QWRvcHRlZEgAEkQKD3Nlc3Npb25fZGVsZXRlZBgFIAEoCzIpLmFnZW50cmVwbC52MS5PcGVuV29ya3NwYWNlU2Vzc2lvbkRlbGV0ZWRIABJKChJ0cmFuc2NyaXB0X21pc3NpbmcYBiABKAsyLC5hZ2VudHJlcGwudjEuT3BlbldvcmtzcGFjZVRyYW5zY3JpcHRNaXNzaW5nSAASPgoMc3Bhd25fZmFpbGVkGAcgASgLMiYuYWdlbnRyZXBsLnYxLk9wZW5Xb3Jrc3BhY2VTcGF3bkZhaWxlZEgAEksKE3ZlbmRvcl9zdGFydF9mYWlsZWQYCCABKAsyLC5hZ2VudHJlcGwudjEuT3BlbldvcmtzcGFjZVZlbmRvclN0YXJ0RmFpbGVkSAASUwoXbG9ja19ob2xkZXJfdW5hdmFpbGFibGUYCSABKAsyMC5hZ2VudHJlcGwudjEuT3BlbldvcmtzcGFjZUxvY2tIb2xkZXJVbmF2YWlsYWJsZUgAElAKFXdvcmt0cmVlX3VucmVzdG9yYWJsZRgKIAEoCzIvLmFnZW50cmVwbC52MS5PcGVuV29ya3NwYWNlV29ya3RyZWVVbnJlc3RvcmFibGVIAEIHCgVjYXVzZSJQCiFPcGVuV29ya3NwYWNlV29ya3RyZWVVbnJlc3RvcmFibGUSCwoDZGlyGAEgASgJEg4KBmJyYW5jaBgCIAEoCRIOCgZkZXRhaWwYAyABKAkidwoiT3BlbldvcmtzcGFjZUxvY2tIb2xkZXJVbmF2YWlsYWJsZRIzCgdmYWlsdXJlGAMgASgLMiIuY29udmVyc2F0aW9uLnYxLkxvY2tIb2xkZXJGYWlsdXJlSgQIARACSgQIAhADUgZiaW5hcnlSCG9zX2Vycm9yIjAKHk9wZW5Xb3Jrc3BhY2VWZW5kb3JTdGFydEZhaWxlZBIOCgZkZXRhaWwYASABKAkiHwodT3BlbldvcmtzcGFjZVVua25vd25Xb3Jrc3BhY2UiOQohT3BlbldvcmtzcGFjZVdvcmtzcGFjZVJlZk1pc21hdGNoEhQKDHJlZ2lzdHJ5X2RpchgBIAEoCSIwCh1PcGVuV29ya3NwYWNlVHJhbnNmZXJyaW5nQXdheRIPCgdhZGRyZXNzGAEgASgJIhwKGk9wZW5Xb3Jrc3BhY2VOb3RZZXRBZG9wdGVkIh0KG09wZW5Xb3Jrc3BhY2VTZXNzaW9uRGVsZXRlZCJTCh5PcGVuV29ya3NwYWNlVHJhbnNjcmlwdE1pc3NpbmcSGQoRdmVuZG9yX3Nlc3Npb25faWQYASABKAkSFgoOc2VhcmNoZWRfcGF0aHMYAiADKAkiKgoYT3BlbldvcmtzcGFjZVNwYXduRmFpbGVkEg4KBmRldGFpbBgBIAEoCUIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_conversation_v1_session, file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.OpenWorkspaceRequest
@@ -184,6 +184,19 @@ export type OpenWorkspaceError = Message<"agentrepl.v1.OpenWorkspaceError"> & {
      */
     value: OpenWorkspaceLockHolderUnavailable;
     case: "lockHolderUnavailable";
+  } | {
+    /**
+     * The workspace's directory is gone AND its branch no longer exists in
+     * the repository, so there is nothing to restore its worktree from. A
+     * directory that is gone while its branch survives is NOT refused: the
+     * open checks the branch out at the recorded directory again
+     * (WorkspaceOpenStage.restoring_worktree) and proceeds. A user picking a
+     * row that cannot be restored is an ordinary answer, not a fault.
+     *
+     * @generated from field: agentrepl.v1.OpenWorkspaceWorktreeUnrestorable worktree_unrestorable = 10;
+     */
+    value: OpenWorkspaceWorktreeUnrestorable;
+    case: "worktreeUnrestorable";
   } | { case: undefined; value?: undefined };
 };
 
@@ -193,6 +206,41 @@ export type OpenWorkspaceError = Message<"agentrepl.v1.OpenWorkspaceError"> & {
  */
 export const OpenWorkspaceErrorSchema: GenMessage<OpenWorkspaceError> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_open_workspace, 3);
+
+/**
+ * @generated from message agentrepl.v1.OpenWorkspaceWorktreeUnrestorable
+ */
+export type OpenWorkspaceWorktreeUnrestorable = Message<"agentrepl.v1.OpenWorkspaceWorktreeUnrestorable"> & {
+  /**
+   * The recorded directory, which is gone.
+   *
+   * @generated from field: string dir = 1;
+   */
+  dir: string;
+
+  /**
+   * The recorded branch, which no longer exists. EMPTY when the registry
+   * recorded none for the workspace.
+   *
+   * @generated from field: string branch = 2;
+   */
+  branch: string;
+
+  /**
+   * The daemon's sentence saying both, for a human and for logs; never
+   * switched on.
+   *
+   * @generated from field: string detail = 3;
+   */
+  detail: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.OpenWorkspaceWorktreeUnrestorable.
+ * Use `create(OpenWorkspaceWorktreeUnrestorableSchema)` to create a new message.
+ */
+export const OpenWorkspaceWorktreeUnrestorableSchema: GenMessage<OpenWorkspaceWorktreeUnrestorable> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_open_workspace, 4);
 
 /**
  * @generated from message agentrepl.v1.OpenWorkspaceLockHolderUnavailable
@@ -212,7 +260,7 @@ export type OpenWorkspaceLockHolderUnavailable = Message<"agentrepl.v1.OpenWorks
  * Use `create(OpenWorkspaceLockHolderUnavailableSchema)` to create a new message.
  */
 export const OpenWorkspaceLockHolderUnavailableSchema: GenMessage<OpenWorkspaceLockHolderUnavailable> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_workspace, 4);
+  messageDesc(file_agentrepl_v1_endpoint_open_workspace, 5);
 
 /**
  * @generated from message agentrepl.v1.OpenWorkspaceVendorStartFailed
@@ -229,7 +277,7 @@ export type OpenWorkspaceVendorStartFailed = Message<"agentrepl.v1.OpenWorkspace
  * Use `create(OpenWorkspaceVendorStartFailedSchema)` to create a new message.
  */
 export const OpenWorkspaceVendorStartFailedSchema: GenMessage<OpenWorkspaceVendorStartFailed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_workspace, 5);
+  messageDesc(file_agentrepl_v1_endpoint_open_workspace, 6);
 
 /**
  * @generated from message agentrepl.v1.OpenWorkspaceUnknownWorkspace
@@ -242,7 +290,7 @@ export type OpenWorkspaceUnknownWorkspace = Message<"agentrepl.v1.OpenWorkspaceU
  * Use `create(OpenWorkspaceUnknownWorkspaceSchema)` to create a new message.
  */
 export const OpenWorkspaceUnknownWorkspaceSchema: GenMessage<OpenWorkspaceUnknownWorkspace> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_workspace, 6);
+  messageDesc(file_agentrepl_v1_endpoint_open_workspace, 7);
 
 /**
  * @generated from message agentrepl.v1.OpenWorkspaceWorkspaceRefMismatch
@@ -261,7 +309,7 @@ export type OpenWorkspaceWorkspaceRefMismatch = Message<"agentrepl.v1.OpenWorksp
  * Use `create(OpenWorkspaceWorkspaceRefMismatchSchema)` to create a new message.
  */
 export const OpenWorkspaceWorkspaceRefMismatchSchema: GenMessage<OpenWorkspaceWorkspaceRefMismatch> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_workspace, 7);
+  messageDesc(file_agentrepl_v1_endpoint_open_workspace, 8);
 
 /**
  * @generated from message agentrepl.v1.OpenWorkspaceTransferringAway
@@ -280,7 +328,7 @@ export type OpenWorkspaceTransferringAway = Message<"agentrepl.v1.OpenWorkspaceT
  * Use `create(OpenWorkspaceTransferringAwaySchema)` to create a new message.
  */
 export const OpenWorkspaceTransferringAwaySchema: GenMessage<OpenWorkspaceTransferringAway> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_workspace, 8);
+  messageDesc(file_agentrepl_v1_endpoint_open_workspace, 9);
 
 /**
  * @generated from message agentrepl.v1.OpenWorkspaceNotYetAdopted
@@ -293,7 +341,7 @@ export type OpenWorkspaceNotYetAdopted = Message<"agentrepl.v1.OpenWorkspaceNotY
  * Use `create(OpenWorkspaceNotYetAdoptedSchema)` to create a new message.
  */
 export const OpenWorkspaceNotYetAdoptedSchema: GenMessage<OpenWorkspaceNotYetAdopted> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_workspace, 9);
+  messageDesc(file_agentrepl_v1_endpoint_open_workspace, 10);
 
 /**
  * @generated from message agentrepl.v1.OpenWorkspaceSessionDeleted
@@ -306,7 +354,7 @@ export type OpenWorkspaceSessionDeleted = Message<"agentrepl.v1.OpenWorkspaceSes
  * Use `create(OpenWorkspaceSessionDeletedSchema)` to create a new message.
  */
 export const OpenWorkspaceSessionDeletedSchema: GenMessage<OpenWorkspaceSessionDeleted> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_workspace, 10);
+  messageDesc(file_agentrepl_v1_endpoint_open_workspace, 11);
 
 /**
  * @generated from message agentrepl.v1.OpenWorkspaceTranscriptMissing
@@ -332,7 +380,7 @@ export type OpenWorkspaceTranscriptMissing = Message<"agentrepl.v1.OpenWorkspace
  * Use `create(OpenWorkspaceTranscriptMissingSchema)` to create a new message.
  */
 export const OpenWorkspaceTranscriptMissingSchema: GenMessage<OpenWorkspaceTranscriptMissing> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_workspace, 11);
+  messageDesc(file_agentrepl_v1_endpoint_open_workspace, 12);
 
 /**
  * @generated from message agentrepl.v1.OpenWorkspaceSpawnFailed
@@ -351,5 +399,5 @@ export type OpenWorkspaceSpawnFailed = Message<"agentrepl.v1.OpenWorkspaceSpawnF
  * Use `create(OpenWorkspaceSpawnFailedSchema)` to create a new message.
  */
 export const OpenWorkspaceSpawnFailedSchema: GenMessage<OpenWorkspaceSpawnFailed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_workspace, 12);
+  messageDesc(file_agentrepl_v1_endpoint_open_workspace, 13);
 

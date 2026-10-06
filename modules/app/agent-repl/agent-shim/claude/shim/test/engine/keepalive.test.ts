@@ -17,6 +17,7 @@ import {
   KeepaliveScope,
   keepalivePromptText,
   REAL_SCHEDULER,
+  SPAN_UUIDS_PER_TURN,
   type KeepaliveAttribution,
 } from "../../src/engine/keepalive.js";
 import { SendLedger } from "../../src/engine/sends.js";
@@ -89,13 +90,22 @@ describe("the yield obligation", () => {
     expect(rewind.obligation()).toBeUndefined();
   });
 
-  it("never anchors on a turn the vendor started on its own", () => {
+  it("anchors on a GENUINE turn the vendor started on its own", () => {
+    // Ruled 2026-10-06: a completed task's turn is real conversation, and a
+    // rewind past it would lose it. (A stop's answer is tagged, never adopted.)
     const rewind = new KeepaliveRewind();
     rewind.noteRecord(assistant("real-1"), realTurn);
     rewind.noteRecord(assistant("adopted-1"), { turnId: "adopted-1", keepalive: false, adopted: true });
-    rewind.noteKeepaliveTurn();
 
-    expect(rewind.obligation()?.resumeSessionAt).toBe("real-1");
+    expect(rewind.anchorUuid()).toBe("adopted-1");
+  });
+
+  it("never anchors on the answer to a stop the keep-alive's rewind caused", () => {
+    const rewind = new KeepaliveRewind();
+    rewind.noteRecord(assistant("real-1"), realTurn);
+    rewind.noteRecord(assistant("stop-answer-1"), { turnId: "keepalive-1", keepalive: true, consequence: true });
+
+    expect(rewind.anchorUuid()).toBe("real-1");
   });
 
   it("names the last REAL assistant record as the resume anchor", () => {
@@ -143,19 +153,45 @@ describe("the yield obligation", () => {
     expect(rewind.obligation()?.resumeSessionAt).toBe("real-1");
   });
 
-  it("never anchors on the user echo", () => {
+  it("advances the anchor to a real turn's user record, an interrupted turn's tool result", () => {
+    // Ruled 2026-10-06: the turn's own last record anchors, so the next rewind
+    // keeps the result an interrupt left after the turn's last answer.
     const rewind = new KeepaliveRewind();
     rewind.noteRecord(assistant("real-1"), realTurn);
-    rewind.noteRecord(other("user", "echo-1"), realTurn);
-    rewind.noteKeepaliveTurn();
+    rewind.noteRecord(userRecord("tool-result-1"), realTurn);
 
-    expect(rewind.obligation()?.resumeSessionAt).toBe("real-1");
+    expect(rewind.anchorUuid()).toBe("tool-result-1");
+  });
+
+  it("advances the anchor to a genuine vendor-started turn's user record", () => {
+    const rewind = new KeepaliveRewind();
+    rewind.noteRecord(assistant("real-1"), realTurn);
+    rewind.noteRecord(userRecord("vendor-result-1"), vendorTurn);
+
+    expect(rewind.anchorUuid()).toBe("vendor-result-1");
+  });
+
+  it("never anchors on a keep-alive's own user record", () => {
+    const rewind = new KeepaliveRewind();
+    rewind.noteRecord(assistant("real-1"), realTurn);
+    rewind.noteRecord(userRecord("keepalive-tool-result-1"), keepaliveTurn);
+
+    expect(rewind.anchorUuid()).toBe("real-1");
   });
 
   it("never anchors on a stream event", () => {
     const rewind = new KeepaliveRewind();
     rewind.noteRecord(assistant("real-1"), realTurn);
     rewind.noteRecord(other("stream_event", "stream-1"), realTurn);
+    rewind.noteKeepaliveTurn();
+
+    expect(rewind.obligation()?.resumeSessionAt).toBe("real-1");
+  });
+
+  it("never anchors on a subagent's assistant record, which lives in the subagent's own transcript", () => {
+    const rewind = new KeepaliveRewind();
+    rewind.noteRecord(assistant("real-1"), realTurn);
+    rewind.noteRecord({ ...assistant("subagent-1"), parent_tool_use_id: "toolu_spawn" } as SdkMessage, realTurn);
     rewind.noteKeepaliveTurn();
 
     expect(rewind.obligation()?.resumeSessionAt).toBe("real-1");
@@ -241,6 +277,228 @@ describe("the yield obligation", () => {
     rewind.settled();
 
     expect(rewind.anchorUuid()).toBe("real-1");
+  });
+});
+
+/** A `user` record (a tool result, a prompt) of the main conversation. */
+const userRecord = (uuid: string): SdkMessage =>
+  ({
+    type: "user",
+    uuid,
+    session_id: "vendor-1",
+    parent_tool_use_id: null,
+    message: { role: "user", content: [] },
+  }) as unknown as SdkMessage;
+
+/** A vendor turn the keep-alive's own rewind set off. */
+const consequenceTurn = { turnId: "keepalive-1", keepalive: true, consequence: true } as const;
+/** A genuine turn the vendor started on its own. */
+const vendorTurn = { turnId: "adopted-1", keepalive: false, adopted: true } as const;
+
+/** A rewind anchored on a real turn, with one whole keep-alive turn after it. */
+function anchoredWithKeepalive(): KeepaliveRewind {
+  const rewind = new KeepaliveRewind();
+  rewind.noteRecord(assistant("real-1"), realTurn);
+  rewind.noteSend("keepalive-send-1", keepaliveTurn);
+  rewind.noteRecord(assistant("keepalive-answer-1"), keepaliveTurn);
+  rewind.noteKeepaliveTurn();
+  return rewind;
+}
+
+/**
+ * THE SPAN INVARIANT: a rewind discards only keep-alive material.
+ *
+ * Everything between the anchor and now must be the keep-alive's own turn or
+ * a vendor turn its rewind set off; anything else refuses the rewind, at
+ * ERROR, with the content kept.
+ */
+describe("the span invariant", () => {
+  it("lets a rewind discard the keep-alive's own send and answer", () => {
+    const rewind = anchoredWithKeepalive();
+
+    expect(rewind.obligation()?.span).toEqual([
+      { turnId: "keepalive-1", kind: "keepalive", uuids: ["keepalive-send-1", "keepalive-answer-1"], records: 2 },
+    ]);
+  });
+
+  it("lets one rewind discard several keep-alives in a row", () => {
+    const rewind = anchoredWithKeepalive();
+    rewind.noteSend("keepalive-send-2", { turnId: "keepalive-2", keepalive: true });
+    rewind.noteKeepaliveTurn();
+
+    expect(rewind.obligation()?.span.map((turn) => turn.turnId)).toEqual(["keepalive-1", "keepalive-2"]);
+  });
+
+  it("lets a rewind discard a vendor turn the keep-alive's rewind set off", () => {
+    const rewind = anchoredWithKeepalive();
+    rewind.noteRecord(assistant("stop-answer-1"), consequenceTurn);
+
+    expect(rewind.obligation()?.span.map((turn) => turn.kind)).toEqual(["keepalive", "keepalive_consequence"]);
+  });
+
+  it("refuses a rewind whose span holds a real prompt", () => {
+    const rewind = anchoredWithKeepalive();
+    rewind.noteSend("real-send-2", { turnId: "turn-2", keepalive: false });
+
+    expect(rewind.obligation()).toBeUndefined();
+  });
+
+  it("refuses a rewind whose span holds a record no turn owns", () => {
+    const rewind = anchoredWithKeepalive();
+    rewind.noteRecord(assistant("orphan-1"), undefined);
+
+    expect(rewind.obligation()).toBeUndefined();
+  });
+
+  it("records a refusal at ERROR, naming each offending turn, its kind and its records", () => {
+    const rewind = anchoredWithKeepalive();
+    rewind.noteSend("real-send-2", { turnId: "turn-2", keepalive: false });
+    const mark = logSinkMark();
+
+    rewind.obligation();
+
+    const record = logRecordsSince(mark).find((entry) => entry.message.startsWith("the keep-alive rewind is REFUSED"));
+    expect({ level: record?.level, offending: record?.context.offending }).toEqual({
+      level: "error",
+      offending: [{ turn_id: "turn-2", kind: "real", records: 1, uuids: ["real-send-2"] }],
+    });
+  });
+
+  it("states the offending turns in the refusal's detail text", () => {
+    const rewind = anchoredWithKeepalive();
+    rewind.noteSend("real-send-2", { turnId: "turn-2", keepalive: false });
+    const mark = logSinkMark();
+
+    rewind.obligation();
+
+    const record = logRecordsSince(mark).find((entry) => entry.message.startsWith("the keep-alive rewind is REFUSED"));
+    expect(record?.context.detail).toBe("real turn turn-2: real-send-2");
+  });
+
+  it("names the anchor the refused rewind would have resumed at", () => {
+    const rewind = anchoredWithKeepalive();
+    rewind.noteSend("real-send-2", { turnId: "turn-2", keepalive: false });
+    const mark = logSinkMark();
+
+    rewind.obligation();
+
+    const record = logRecordsSince(mark).find((entry) => entry.message.startsWith("the keep-alive rewind is REFUSED"));
+    expect(record?.context.resume_session_at).toBe("real-1");
+  });
+
+  it("drops the anchor on a refusal, so the content stays for good", () => {
+    const rewind = anchoredWithKeepalive();
+    rewind.noteSend("real-send-2", { turnId: "turn-2", keepalive: false });
+
+    rewind.obligation();
+
+    expect(rewind.anchorUuid()).toBeUndefined();
+  });
+
+  it("settles the debt on a refusal, so it is refused once, not every beat", () => {
+    const rewind = anchoredWithKeepalive();
+    rewind.noteSend("real-send-2", { turnId: "turn-2", keepalive: false });
+
+    rewind.obligation();
+
+    expect(rewind.debt()).toBe(0);
+  });
+
+  it("keeps an outstanding keep-alive's send in the span across a vendor turn that anchored ahead of it", () => {
+    // The vendor ran a completed task's turn before answering the keep-alive's
+    // send: the anchor lies before the keep-alive's prompt record.
+    const rewind = new KeepaliveRewind();
+    rewind.noteRecord(assistant("real-1"), realTurn);
+    rewind.noteSend("keepalive-send-1", keepaliveTurn);
+
+    rewind.noteRecord(assistant("vendor-answer-1"), vendorTurn);
+
+    expect(rewind.span()).toEqual([
+      { turnId: "keepalive-1", kind: "keepalive", uuids: ["keepalive-send-1"], records: 1 },
+    ]);
+  });
+
+  it("forgets the keep-alive's send once its turn ended", () => {
+    const rewind = anchoredWithKeepalive();
+
+    rewind.noteRecord(assistant("vendor-answer-1"), vendorTurn);
+
+    expect(rewind.span()).toEqual([]);
+  });
+
+  it("empties the span on a new anchor", () => {
+    const rewind = anchoredWithKeepalive();
+
+    rewind.noteRecord(assistant("real-2"), { turnId: "turn-2", keepalive: false });
+
+    expect(rewind.span()).toEqual([]);
+  });
+
+  it("empties the span once a rewind is settled", () => {
+    const rewind = anchoredWithKeepalive();
+
+    rewind.settled();
+
+    expect(rewind.span()).toEqual([]);
+  });
+
+  it("empties the span when the anchor is cleared at a boundary", () => {
+    const rewind = anchoredWithKeepalive();
+
+    rewind.clearAnchor("the vendor compacted the conversation");
+
+    expect(rewind.span()).toEqual([]);
+  });
+
+  it("tracks nothing while no anchor stands", () => {
+    const rewind = new KeepaliveRewind();
+
+    rewind.noteSend("keepalive-send-1", keepaliveTurn);
+
+    expect(rewind.span()).toEqual([]);
+  });
+
+  it("keeps a subagent's records out of the span", () => {
+    const rewind = anchoredWithKeepalive();
+
+    rewind.noteRecord({ ...assistant("subagent-1"), parent_tool_use_id: "toolu_spawn" } as SdkMessage, vendorTurn);
+
+    expect(rewind.obligation()?.span.map((turn) => turn.kind)).toEqual(["keepalive"]);
+  });
+
+  it("keeps a `result` uuid out of the span", () => {
+    const rewind = anchoredWithKeepalive();
+
+    rewind.noteRecord(other("result", "vendor-result-1", "success"), vendorTurn);
+
+    expect(rewind.obligation()?.span.map((turn) => turn.kind)).toEqual(["keepalive"]);
+  });
+
+  it("lists a re-delivered send's uuid once", () => {
+    const rewind = anchoredWithKeepalive();
+
+    rewind.noteSend("keepalive-send-1", keepaliveTurn);
+
+    expect(rewind.span()[0]?.uuids).toEqual(["keepalive-send-1", "keepalive-answer-1"]);
+  });
+
+  it("caps the uuids a span turn lists while its record count stays exact", () => {
+    const rewind = anchoredWithKeepalive();
+
+    for (let index = 0; index < SPAN_UUIDS_PER_TURN; index++) {
+      rewind.noteRecord(assistant(`keepalive-block-${index}`), keepaliveTurn);
+    }
+
+    expect([rewind.span()[0]?.uuids.length, rewind.span()[0]?.records]).toEqual([
+      SPAN_UUIDS_PER_TURN,
+      SPAN_UUIDS_PER_TURN + 2,
+    ]);
+  });
+
+  it("states the keep-alive debt for a caller that must assert none is owed", () => {
+    const rewind = anchoredWithKeepalive();
+
+    expect(rewind.debt()).toBe(1);
   });
 });
 
@@ -446,6 +704,16 @@ class LedgeredScope {
 
   pendingUuid(): string | undefined {
     return this.scope.pendingUuid();
+  }
+
+  /** A real send pushed onto the query, as the session registers it. */
+  sent(uuid: string, turnId: string): void {
+    this.ledger.sent({ uuid, turnId, keepalive: false });
+  }
+
+  rewound(): void {
+    this.queryBound();
+    this.scope.rewound();
   }
 
   producing(): boolean {
@@ -749,6 +1017,50 @@ describe("the keep-alive turn scope", () => {
     // Arrange: a completed background task, not a stop.
     const scope = pendingScope();
     scope.attribute({ ...other("system", "notif-1", "task_notification"), task_id: "t-1", status: "completed" } as SdkMessage);
+
+    // Act
+    const tagged = scope.attribute(reply());
+
+    // Assert
+    expect(tagged.keepalive).toBe(false);
+  });
+
+  it("tags the turn answering a stop a REAL prompt's rewind caused, with no keep-alive pending", () => {
+    // Arrange: the rewind ran for a real prompt; the stop is reported ahead
+    // of that prompt's own turn (the ship-gns replay).
+    const scope = idleScope();
+    scope.rewound();
+    scope.sent("real-send-1", "turn-1");
+    scope.attribute({ ...other("system", "notif-1", "task_notification"), task_id: "t-1", status: "stopped" } as SdkMessage);
+
+    // Act
+    const tagged = scope.attribute(reply());
+
+    // Assert
+    expect(tagged.keepalive).toBe(true);
+  });
+
+  it("stops watching for the rewind's stop once the send's own turn began", () => {
+    // Arrange
+    const scope = idleScope();
+    scope.rewound();
+    scope.sent("real-send-1", "turn-1");
+    scope.attribute(reply(stampedWith("real-send-1")));
+    scope.attribute(result(stampedWith("real-send-1")));
+    scope.attribute({ ...other("system", "notif-1", "task_notification"), task_id: "t-1", status: "stopped" } as SdkMessage);
+
+    // Act
+    const tagged = scope.attribute(reply());
+
+    // Assert
+    expect(tagged.keepalive).toBe(false);
+  });
+
+  it("serves a stop's answer after a query binding that was no rewind", () => {
+    // Arrange: a user's own stop of a task, on an ordinary query.
+    const scope = idleScope();
+    scope.queryBound();
+    scope.attribute({ ...other("system", "notif-1", "task_notification"), task_id: "t-1", status: "stopped" } as SdkMessage);
 
     // Act
     const tagged = scope.attribute(reply());

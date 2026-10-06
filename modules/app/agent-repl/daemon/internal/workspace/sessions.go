@@ -2657,6 +2657,27 @@ func (f *Fleet) Workspaces() []ids.WorkspaceID {
 	return out
 }
 
+// ShimPIDs answers the pid of every live shim this fleet holds, sorted: the
+// processes agent-repl's vendor traffic is measured under (internal/
+// vendortraffic). A reaped client is no live process, and an adopted one whose
+// pid its socket could not answer (pid 0, recorded at WARN by the adoption)
+// names nothing to measure, so neither is answered.
+func (f *Fleet) ShimPIDs() []int {
+	f.mu.RLock()
+	out := make([]int, 0, len(f.sessions))
+	for _, session := range f.sessions {
+		if _, reaped := session.client.Reaped(); reaped {
+			continue
+		}
+		if pid := session.client.PID(); pid > 0 {
+			out = append(out, pid)
+		}
+	}
+	f.mu.RUnlock()
+	slices.Sort(out)
+	return out
+}
+
 // CloseWatchers closes every live session's watcher and JOINS whatever sink
 // work each of them still had in flight. It KILLS NOTHING -- a watcher's close
 // ends watching, never the session -- and it is the daemon's teardown step
