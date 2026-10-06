@@ -1,6 +1,7 @@
 package main
 
 import (
+	"claude-repld/internal/tempdirs/tempdirstest"
 	"context"
 	"encoding/json"
 	"errors"
@@ -28,7 +29,11 @@ import (
 // actually serve from.
 func shortRoot(t *testing.T) string {
 	t.Helper()
-	root, err := os.MkdirTemp("/tmp", "arb")
+	base, err := tempdirstest.ShortBase(os.Getenv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, err := os.MkdirTemp(base, "arb")
 	if err != nil {
 		t.Fatalf("MkdirTemp: %v", err)
 	}
