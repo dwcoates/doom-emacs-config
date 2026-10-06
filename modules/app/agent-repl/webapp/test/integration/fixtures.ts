@@ -1678,9 +1678,7 @@ export const FOOTER_STATUS_SALIENTS: Record<string, readonly string[]> = {
 
 /** Every TRANSIENT kind arm, with a complete payload for each. */
 export const FOOTER_TRANSIENT_KINDS: Record<string, object> = {
-  toolCall: { tool: "Bash", summary: "npm test" },
   task: { subject: "write the harness", completed: 2, total: 5 },
-  submitting: { promptLead: "port the footer", stage: { case: "delivered", value: {} } },
   hook: { name: "PreToolUse" },
   contextInjected: { text: "CLAUDE.md loaded" },
   fault: { kind: "shim_reported", detail: "the shim said so" },

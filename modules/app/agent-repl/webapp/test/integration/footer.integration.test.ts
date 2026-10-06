@@ -460,8 +460,8 @@ describe("the activity cell", () => {
   });
 
   it("prefixes a subagent's transient with its label", async () => {
-    await withFooter({ status: "working", activity: "toolCall", agent: "Explore" });
-    expect(harness.text(".footer-activity-transient")).toBe("Explore · Bash: npm test");
+    await withFooter({ status: "working", activity: "hook", agent: "Explore" });
+    expect(harness.text(".footer-activity-transient")).toBe("Explore · PreToolUse");
   });
 
   // A FAILED DEPLOY (owner request, 2026-09-28) stands on every strip's
