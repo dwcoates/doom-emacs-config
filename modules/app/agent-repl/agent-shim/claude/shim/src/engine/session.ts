@@ -55,6 +55,7 @@ import {
 } from "./start-failure.js";
 import { terminalUpsertKey } from "../store/keys.js";
 import { PersistenceError, REPAINT } from "../store/persistence.js";
+import { describeDetachedWorkAnswer } from "../store/detached-work.js";
 import { describeVendorTaskAnswer } from "../store/locator.js";
 import type { AgentPageSession, PersistEntry, Persistence, RecordPlace } from "../store/persistence.js";
 import {
@@ -2009,6 +2010,12 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // locator with its agent is the sidecar's, on record since the agent first
     // ran. Awaited HERE, inside the one serial message loop, so no later
     // message can be folded ahead of this one.
+    // A TASK MESSAGE THE FOLD CANNOT TYPE IS TYPED BY THE STORE first, the same
+    // way and for the same reason: only a start states a kind, and a
+    // notification after a restart or a keep-alive rewind follows no start
+    // this process saw. Asked BEFORE the agent, whose ask needs the kind.
+    const awaitingKind = deps.fold.taskAwaitingKind(message, foldContext(attribution, verdict.turn));
+    if (awaitingKind !== undefined) await kindFromStore(awaitingKind.taskId, awaitingKind.unit);
     const awaitingAgent = deps.fold.taskAwaitingAgent(message, foldContext(attribution, verdict.turn));
     if (awaitingAgent !== undefined) await agentFromStore(awaitingAgent, "announcement");
     converterDefectThisMessage = false;
@@ -5099,6 +5106,37 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       "the store named no agent for a vendor task this process cannot name itself",
     );
     return undefined;
+  }
+
+  /**
+   * WHAT KIND OF WORK a task is, AS THE STORE'S RECORD HOLDS IT, for a task
+   * message the fold cannot type (convert/detached.ts `taskAwaitingKind`).
+   *
+   * THE ANSWER IS HANDED TO THE FOLD whatever it is: a recorded kind becomes
+   * the task's kind, a recorded end makes its notification a re-report, and a
+   * miss rides the refusal record the fold may write next. This is the ONE
+   * record of the lookup itself: INFO when the store answered (found or not —
+   * an unknown task is the fold's to refuse, at ERROR, with this answer in its
+   * record), ERROR when the store could not answer, a store fault that is never
+   * masked.
+   */
+  async function kindFromStore(taskId: string, unit: conversationv1.AgentActivityId): Promise<void> {
+    const answer = await deps.persistence.detachedWork(unit);
+    deps.fold.learnTaskKind(taskId, answer);
+    const described = describeDetachedWorkAnswer(answer);
+    if (answer.kind === "failed") {
+      LOGGER.error(
+        { task_id: taskId, activity_id: unit.value, answer: described, detail: answer.detail },
+        "the store could not state the kind of a task this process cannot type itself",
+      );
+      return;
+    }
+    LOGGER.info(
+      { task_id: taskId, activity_id: unit.value, answer: described },
+      answer.kind === "found"
+        ? "the store stated the work a task this process cannot type itself left as"
+        : "the store holds no work for a task this process cannot type itself",
+    );
   }
 
   /**

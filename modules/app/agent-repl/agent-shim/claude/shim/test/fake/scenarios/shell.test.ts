@@ -537,3 +537,32 @@ describe("VendorBackgrounded", () => {
     expect(results[0]?.terminal_reason).toBe("aborted_streaming");
   });
 });
+
+describe("a shell re-reported by a keep-alive rewind's replacement query", () => {
+  it("re-reports the prompt's task as stopped, naming its spawning call", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!bash-rereported bujbjom65 toolu_ended"]);
+    const notifications = ofType(driven, "system", "task_notification");
+
+    // Assert
+    expect(notifications.map((m) => [m.task_id, m.tool_use_id, m.status])).toEqual([
+      ["bujbjom65", "toolu_ended", "stopped"],
+    ]);
+  });
+
+  it("states no task_type, as no notification does", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!bash-rereported bujbjom65 toolu_ended"]);
+
+    // Assert
+    expect(ofType(driven, "system", "task_notification")[0]?.task_type).toBeUndefined();
+  });
+
+  it("starts no task, because the query re-reporting it never ran it", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!bash-rereported bujbjom65 toolu_ended"]);
+
+    // Assert
+    expect(ofType(driven, "system", "task_started")).toEqual([]);
+  });
+});

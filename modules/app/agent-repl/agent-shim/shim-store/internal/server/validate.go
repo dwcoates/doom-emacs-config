@@ -43,6 +43,7 @@ const (
 	SiteRunEmpty               = "run_empty"
 	SiteVendorTaskEmpty        = "vendor_task_empty"
 	SiteRunIDEmpty             = "run_id_empty"
+	SiteUnitEmpty              = "unit_empty"
 	SiteUnknownBashRun         = "unknown_bash_run"
 	SiteWatchBufferOverflow    = "watch_buffer_overflow"
 	// SitePositionUnset is a ReadAgentPage that names no position arm: the
@@ -460,6 +461,16 @@ func validateGetAgentByVendorTaskRequest(req *storev1.GetAgentByVendorTaskReques
 	}
 	if req.GetVendorTaskId() == "" {
 		return refuse(SiteVendorTaskEmpty, "vendor_task_id", "vendor_task_id: the lookup names no vendor task locator")
+	}
+	return nil
+}
+
+// validateGetDetachedWorkRequest is the use site for GetDetachedWork: the unit
+// the work detached from, set and non-empty. Unscoped on purpose, exactly as
+// GetRunSettlements is.
+func validateGetDetachedWorkRequest(req *storev1.GetDetachedWorkRequest) *refusal {
+	if req.GetUnit().GetValue() == "" {
+		return refuse(SiteUnitEmpty, "unit", "unit: the lookup names no unit the work detached from")
 	}
 	return nil
 }

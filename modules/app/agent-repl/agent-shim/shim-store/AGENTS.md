@@ -945,6 +945,15 @@ and not something this change touches.
   answer is NOT settled (no row yet, or a row still live), never an error.
   Empty `run_ids` or an empty id is refused (`run_id_empty`). Design record:
   `../../docs/protobuf-design/run-settlements.md`.
+- **`GetDetachedWork` IS ONE UNIT'S KIND AND END, BY UNIT AND UNSCOPED**
+  (`internal/db/detachedwork.go`, 2026-10-06). The shim asks it before folding a
+  task message whose kind it does not hold (a `task_notification` never states
+  one), by the spawning call's activity id (the row's `origin_unit`), exactly
+  as `GetRunSettlements` locates a run. The kind is served as recorded: the
+  `detached` marker is the `unstated` arm, never a guess. No row is
+  `not_found`; two rows for one unit, or a kind the store never writes, is a
+  storage failure at ERROR. An unset unit is refused (`unit_empty`). Design
+  record: `../../docs/protobuf-design/task-kind-from-store.md`.
 - **`GetLiveWork` IS SCOPED TO ONE SESSION, AND NEVER ANSWERED UNSCOPED.** This
   store serves every workspace and session on the host, and the shim writes a
   closing terminal for every item its own vendor does not hold — so on

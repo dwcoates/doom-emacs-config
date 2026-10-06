@@ -1780,3 +1780,106 @@ describe("the conversation place", () => {
     expect(response.result.case === "failure" ? response.result.value.kind.case : "").toBe("invalidRequest");
   });
 });
+
+describe("GetDetachedWork", () => {
+  /** The fake's answer for one unit. */
+  const detachedWorkOf = (client: StoreClient, unit: string): Promise<storev1.GetDetachedWorkResponse> =>
+    client.getDetachedWork(
+      create(storev1.GetDetachedWorkRequestSchema, { unit: create(conversationv1.AgentActivityIdSchema, { value: unit }) }),
+    );
+
+  it("answers not_found for a unit no write located", async () => {
+    // Arrange.
+    const { client } = await store();
+
+    // Act.
+    const response = await detachedWorkOf(client, "toolu_unknown");
+
+    // Assert.
+    expect(response.result.case).toBe("notFound");
+  });
+
+  it("answers an ended bash run by its terminal row", async () => {
+    // Arrange.
+    const { client } = await store();
+    await write(client, bashTerminalEntry("run1"));
+
+    // Act.
+    const response = await detachedWorkOf(client, "run1");
+
+    // Assert.
+    const success = response.result.case === "success" ? response.result.value : undefined;
+    expect([success?.kind?.kind.case, success?.state.case]).toEqual(["bash", "ended"]);
+  });
+
+  it("answers a run only a detached-origin announcement wrote as live work of no recorded kind", async () => {
+    // Arrange.
+    const { client } = await store();
+    await write(client, detachedEntry("main", "detached:w1", "w1", "run1"));
+
+    // Act.
+    const response = await detachedWorkOf(client, "run1");
+
+    // Assert.
+    const success = response.result.case === "success" ? response.result.value : undefined;
+    expect([success?.kind?.kind.case, success?.state.case]).toEqual(["unstated", "live"]);
+  });
+
+  it("answers a run's own bash rows over the announcement's unstated kind", async () => {
+    // Arrange.
+    const { client } = await store();
+    await write(client, detachedEntry("main", "detached:w1", "w1", "run1"));
+    await write(client, bashTerminalEntry("run1"));
+
+    // Act.
+    const response = await detachedWorkOf(client, "run1");
+
+    // Assert.
+    expect(response.result.case === "success" ? response.result.value.kind?.kind.case : undefined).toBe("bash");
+  });
+
+  it("refuses an unset unit as invalid_request naming unit", async () => {
+    // Arrange.
+    const { client } = await store();
+
+    // Act.
+    const response = await client.getDetachedWork(create(storev1.GetDetachedWorkRequestSchema, {}));
+
+    // Assert.
+    const failure = response.result.case === "failure" ? response.result.value.kind : undefined;
+    expect(failure?.case === "invalidRequest" ? failure.value.field : undefined).toBe("unit");
+  });
+
+  it("refuses under storage_failure when made to", async () => {
+    // Arrange.
+    const { store: fake, client } = await store();
+    fake.failReads("GetDetachedWork", "storage_failure", "the disk is full");
+
+    // Act.
+    const response = await detachedWorkOf(client, "run1");
+
+    // Assert.
+    expect(response.result.case === "failure" ? response.result.value.kind.case : undefined).toBe("storageFailure");
+  });
+
+  it("REFUSES to serve GetDetachedWork an arm the proto does not declare", async () => {
+    // Arrange.
+    const { store: fake } = await store();
+
+    // Act, Assert.
+    expect(() => fake.failReads("GetDetachedWork", "stale_pointer")).toThrow(
+      /GetDetachedWork declares invalid_request and storage_failure/,
+    );
+  });
+
+  it("notes every lookup it served", async () => {
+    // Arrange.
+    const { store: fake, client } = await store();
+
+    // Act.
+    await detachedWorkOf(client, "run1");
+
+    // Assert.
+    expect(fake.reads().map((read) => read.rpc)).toEqual(["GetDetachedWork"]);
+  });
+});
