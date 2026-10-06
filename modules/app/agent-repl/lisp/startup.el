@@ -64,6 +64,8 @@
 
 ;;;; ---- State --------------------------------------------------------------
 
+(defvar agent-repl--webview-precreate-parked)
+
 (defvar agent-repl-startup--phase 'expected
   "Where this Emacs process's startup stands.
 `expected' from process start until the daemon's run begins, `running'
@@ -177,13 +179,20 @@ directory's base name -- the name the daemon itself registers by default."
                               "elisp.startup.unknown-event arm=%S" arm)))))
 
 (defun agent-repl-startup--page-ready-p (ws)
-  "Return non-nil when WS's page has drawn, or WS can have no page at all.
-An Emacs with no webview support, or a workspace whose frontend is not
-the web gui, has no page to wait for."
+  "Return non-nil when WS's tab need not wait for its page any longer.
+Its page has drawn; or WS can have no page at all (an Emacs with no
+webview support, or a frontend that is not the web gui); or page creation
+is PARKED for a visible but unfocused Emacs.  THE TABS OPEN IMMEDIATELY,
+EVEN UNSEEN (owner ruling, 2026-10-06): the park keeps a page from being
+created while Emacs is not focused -- it never steals focus -- but no tab
+waits for it; the page loads once Emacs is focused."
   (or (gethash ws agent-repl-startup--loaded)
       (memq (and (fboundp 'agent-repl--frontend-precreate-refusal)
                  (agent-repl--frontend-precreate-refusal ws))
-            '(:no-xwidget :not-gui))))
+            '(:no-xwidget :not-gui))
+      (and (boundp 'agent-repl--webview-precreate-parked)
+           agent-repl--webview-precreate-parked
+           t)))
 
 (defun agent-repl-startup--advance ()
   "Open every tab now due, strictly in go-ahead order, then finish if done."
@@ -322,8 +331,9 @@ The tab waits for the conversation on screen, not for the HTML."
 (defun agent-repl-startup-precreate (ws)
   "Pre-create WS's input buffer while the startup holds its tab.
 Its webview is pre-created by the paced drain (webview-recovery.el), which
-keeps its focus park: a visible but unfocused Emacs creates no page, and
-so opens no tab, until it is looked at."
+keeps its focus park: a visible but unfocused Emacs creates no page until
+it is looked at -- its tab opens regardless
+\(`agent-repl-startup--page-ready-p')."
   (when (agent-repl-startup-active-p)
     (agent-repl--ensure-input-buffer ws)
     (agent-repl--log ws "elisp.startup.precreated ws=%s" ws)))

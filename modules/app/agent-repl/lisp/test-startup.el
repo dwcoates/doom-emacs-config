@@ -192,6 +192,18 @@ reaches Emacs first cannot open a tab ahead of its go-ahead."
     ;; Assert
     (should-not (agent-repl-startup-choosing-p))))
 
+(ert-deftest agent-repl-test-startup-opens-a-tab-while-page-creation-is-parked ()
+  "A visible but unfocused Emacs parks page creation; the tab opens anyway."
+  (agent-repl-test-startup--with-run
+    ;; Arrange
+    (setq agent-repl-test-startup--known '("a"))
+    (let ((agent-repl--webview-precreate-parked t))
+      (agent-repl-startup-handle (agent-repl-test-startup--opening 1))
+      ;; Act
+      (agent-repl-startup-handle (agent-repl-test-startup--go-ahead "a"))
+      ;; Assert
+      (should (equal (agent-repl-test-startup--opened) '("a"))))))
+
 (ert-deftest agent-repl-test-startup-a-go-ahead-waits-for-its-page ()
   "A go-ahead whose page has not drawn opens nothing and says it is loading."
   (agent-repl-test-startup--with-run
