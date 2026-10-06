@@ -106,6 +106,7 @@ type shimclientSender interface {
 	KillTurn(ctx context.Context, req *shimv1.KillTurnRequest) (*shimv1.KillTurnResponse, error)
 	SetSessionModel(ctx context.Context, req *shimv1.SetSessionModelRequest) (*shimv1.SetSessionModelResponse, error)
 	SetSessionPermissionMode(ctx context.Context, req *shimv1.SetSessionPermissionModeRequest) (*shimv1.SetSessionPermissionModeResponse, error)
+	RollBackSession(ctx context.Context, req *shimv1.RollBackSessionRequest) (*shimv1.RollBackSessionResponse, error)
 }
 
 // StartTurn opens the turn and hands back the shim's success WHOLE: the queue
@@ -196,6 +197,18 @@ func (s *sender) PromptAgent(ctx context.Context, agent *conversationv1.AgentId,
 // KillTurn interrupts the open turn for an interjection.
 func (s *sender) KillTurn(ctx context.Context, turn ids.TurnID, force bool, commandedBy *conversationv1.AgentInterruptedByUser) error {
 	return killTurn(ctx, s.client, turn, force, commandedBy)
+}
+
+// RollBackTurn cuts one failed turn's prompt out of the vendor conversation,
+// files kept. A prompt the vendor never recorded answers
+// promptqueue.ErrPromptNotRecorded (wrapping the shim's refusal): there is
+// nothing to cut, which is the outcome the caller wanted.
+func (s *sender) RollBackTurn(ctx context.Context, turn ids.TurnID) error {
+	_, err := rollBackSession(ctx, s.client, []ids.TurnID{turn}, false)
+	if refusal, ok := AsShimRefusal(err); ok && refusal.Arm == ArmShimPromptNotRecorded {
+		return fmt.Errorf("%w: %w", promptqueue.ErrPromptNotRecorded, err)
+	}
+	return err
 }
 
 // turnKiller is the one shim call killTurn needs, satisfied by both the queue's
