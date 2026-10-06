@@ -24,6 +24,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"syscall"
 	"testing"
@@ -375,9 +376,28 @@ func fakeGitMain() {
 				fmt.Fprintf(os.Stderr, "fake git: killing itself with %d: %v\n", fixture.KillSelfWith, err)
 				os.Exit(120)
 			}
-			// SIGKILL cannot be caught, so this is unreachable for the signal
-			// the tests use; a catchable one would fall through, and saying so
-			// is better than pretending the fixture answered.
+			// A SIGKILL SENT TO ITSELF IS NOT DEATH BEFORE kill(2) RETURNS.
+			// The kernel tears the process down on some thread's way back to
+			// user space, and this thread raced on to the "survived" exit
+			// below and exited 120 under load (TestAGitKilledByASignalIsRecordedWithTheSignal
+			// read a record with no signal, 2026-10-06). SIGKILL cannot be
+			// survived, so it is waited for: a read on a pipe this process
+			// holds both ends of blocks until the process is gone (blocked I/O
+			// is not a deadlock to the Go runtime, as an empty select is).
+			if syscall.Signal(fixture.KillSelfWith) == syscall.SIGKILL {
+				r, w, err := os.Pipe()
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "fake git: a pipe to await its own SIGKILL: %v\n", err)
+					os.Exit(120)
+				}
+				var one [1]byte
+				_, err = r.Read(one[:])
+				runtime.KeepAlive(w)
+				fmt.Fprintf(os.Stderr, "fake git: awaiting its own SIGKILL: %v\n", err)
+				os.Exit(120)
+			}
+			// A catchable signal can be survived, and saying so is better
+			// than pretending the fixture answered.
 			fmt.Fprintf(os.Stderr, "fake git: survived signal %d\n", fixture.KillSelfWith)
 			os.Exit(120)
 		}

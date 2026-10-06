@@ -513,7 +513,10 @@ func TestAGitKilledByASignalIsRecordedWithTheSignal(t *testing.T) {
 		t.Fatalf("no error record for a killed git in %+v", surfaces.records())
 	}
 	if got := record.Context["signal"]; got != syscall.SIGKILL.String() {
-		t.Fatalf("the record's signal = %v, want %q", got, syscall.SIGKILL.String())
+		// The whole record is quoted: a record with no signal is either git
+		// exiting on its own (its stderr says why) or git never starting
+		// (the spawn error stands in its stderr), and only the record tells.
+		t.Fatalf("the record's signal = %v, want %q; the record: %+v", got, syscall.SIGKILL.String(), record)
 	}
 }
 
