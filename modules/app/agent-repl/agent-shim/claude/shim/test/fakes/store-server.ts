@@ -99,6 +99,14 @@ interface WatchSessionState {
   closed: boolean;
 }
 
+/** A hold on the fake's writes: see {@link FakeStore.holdWrites}. */
+export interface WriteHold {
+  /** Answer every held write, and stop holding new ones. */
+  release(): void;
+  /** Settles once at least one write is being held. */
+  readonly arrived: Promise<void>;
+}
+
 /** The running fake, and the levers a test pulls on it. */
 export interface FakeStore {
   /** The unix socket it is listening on. */
@@ -125,6 +133,14 @@ export interface FakeStore {
    * one. Pass `null` to accept writes again.
    */
   failWritesWith(arm: StoreWriteFailureArm | null, detail: string): void;
+  /**
+   * HOLD every WriteBatch from now on: each is received but answered only once
+   * the returned release is called, and then under whatever failure setting
+   * stands AT RELEASE. It is how a test orders "the store comes back" before
+   * an attempt the writer has already made, instead of racing the writer's
+   * retry clock. `arrived` settles once a held write has been received.
+   */
+  holdWrites(): WriteHold;
   /**
    * Make every subsequent read of `verb` answer a `failure` under a NAMED arm,
    * or pass `null` for the arm to serve that verb again.
@@ -348,6 +364,8 @@ export async function startFakeStore(socketPath: string, options: FakeStoreOptio
   let nextPointer = 1;
   let nextToken = 1;
   let writeFailure: { arm: StoreWriteFailureArm; detail: string } | null = null;
+  /** While set, every WriteBatch waits on it before it is answered. */
+  let writeHold: { gate: Promise<void>; arrive: () => void } | null = null;
   /** Which read verbs are currently refusing, and under which arm. */
   const readFailures = new Map<StoreReadVerb, { arm: StoreReadFailureArm; detail: string }>();
   /** Watch tokens whose tail is streaming right now — see {@link FakeStore.openTails}. */
@@ -1138,6 +1156,11 @@ export async function startFakeStore(socketPath: string, options: FakeStoreOptio
 
       async writeBatch(request) {
         receivedWrites.push(request);
+        if (writeHold !== null) {
+          const hold = writeHold;
+          hold.arrive();
+          await hold.gate;
+        }
         // AN UNCLASSIFIED WRITE IS REFUSED, as the real store refuses it: the
         // class decides which queue the write takes, and nothing guesses it.
         if (request.writeClass?.writeClass.case === undefined) {
@@ -1237,6 +1260,25 @@ export async function startFakeStore(socketPath: string, options: FakeStoreOptio
     },
     failWritesWith: (arm, detail) => {
       writeFailure = arm === null ? null : { arm, detail };
+    },
+    holdWrites: () => {
+      let open = (): void => undefined;
+      let arrive = (): void => undefined;
+      const gate = new Promise<void>((resolve) => {
+        open = resolve;
+      });
+      const arrived = new Promise<void>((resolve) => {
+        arrive = resolve;
+      });
+      const hold = { gate, arrive };
+      writeHold = hold;
+      return {
+        arrived,
+        release: () => {
+          if (writeHold === hold) writeHold = null;
+          open();
+        },
+      };
     },
     failReads: (verb, arm, detail) => {
       if (arm === null) {
