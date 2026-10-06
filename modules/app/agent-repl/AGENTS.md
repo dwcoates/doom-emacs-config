@@ -121,10 +121,13 @@ is how broad a run is at each moment.
   `daemon,webapp,ert`). Add `e2e` only with a stated reason — the change could
   have systemic knock-on effects. A failure goes back to targeted runs; the set
   then finishes with one more full run.
-- AFTER MERGING INTO MASTER (or otherwise applying changes there): the full
-  suite, unit + integration + e2e — `bin/test-all.sh` with no `--suites`.
-  Merges landed back to back with no run between them share one run, which
-  verifies the combined result.
+- AFTER A GIT MERGE YOU MADE YOURSELF, onto any branch: the full suite,
+  unit + integration + e2e — `bin/test-all.sh` with no `--suites`. Merges
+  landed back to back with no run between them share one run, which verifies
+  the combined result.
+  - NOT after a merge routed through the merge queue (the daemon's
+    workspace-merge flow): the queue already runs the full suite as its gate,
+    so an agent never runs it again (owner ruling, 2026-10-06).
 - Full runs go through `bin/test-all.sh`, never a hand-assembled set of
   per-suite commands: the scheduler holds the host's one suite slot, so two
   agents' full runs never overlap.
