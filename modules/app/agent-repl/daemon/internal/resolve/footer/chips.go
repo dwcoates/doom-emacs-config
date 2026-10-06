@@ -41,10 +41,6 @@ func (r *resolver) OnActivity(ws ids.WorkspaceID, agent *conversationv1.AgentId,
 			r.recordSpawnOwner(s, agent, act)
 			r.applyActivity(ws, s, agent, label, unit, act)
 			r.trackFeed(ws, s, agent, unit, act)
-			if call, started := toolCallStart(act); started {
-				r.raiseTransient(ws, s, label, &frontendv1.FooterActivityTransient{
-					Kind: &frontendv1.FooterActivityTransient_ToolCall{ToolCall: call}})
-			}
 		})
 }
 
