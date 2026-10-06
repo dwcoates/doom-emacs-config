@@ -2095,3 +2095,135 @@ describe("a fan-wide cancel", () => {
     stream.close();
   });
 });
+
+/**
+ * A SHELL RE-REPORTED BY A KEEP-ALIVE REWIND (2026-10-02 onward, workspace
+ * ship-gns): the replacement vendor query re-reports an earlier query's
+ * backgrounded shell as `stopped`, with no start and no type, so this process
+ * cannot type it. The store's record can, by the spawning call's unit.
+ */
+describe("a task notification this process cannot type", () => {
+  const TASK = "bujbjom65";
+  const UNIT = "toolu_018xxcFy2bK97h1Xrh1KqbE2";
+  const REFUSED = "a task names no kind this shim knows; its announcement is malformed and is refused";
+  const REREPORT = "a re-report of a concluded task; nothing to restate";
+
+  /** A started shim whose store holds the shell run `UNIT` as the sidecar wrote it, ended or live. */
+  async function shimHolding(exitCode: number | null): Promise<Awaited<ReturnType<typeof spawnShim>>> {
+    const shim = await spawnShim();
+    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    await seedBashLifecycle(createStoreClient(shim.dirs.storeSocket), sidecarProducer(started.vendorSessionId), {
+      run: UNIT,
+      work: UNIT,
+      command: "sleep 600",
+      startedAtMs: 1_700_000_000_000,
+      chunks: [],
+      exitCode,
+      topLevel: started.vendorSessionId,
+    });
+    return shim;
+  }
+
+  /** Re-report the shell, as the replacement query does. */
+  async function rereport(shim: Awaited<ReturnType<typeof spawnShim>>): Promise<void> {
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: `!bash-rereported ${TASK} ${UNIT}` }));
+  }
+
+  test("a re-report of a run the store holds as ended is recorded at INFO", async () => {
+    // Arrange.
+    const shim = await shimHolding(0);
+
+    // Act.
+    await rereport(shim);
+    const recorded = await shim.log.record((record) => record.message === REREPORT);
+
+    // Assert.
+    expect([recorded.level, recorded.context.task_id]).toEqual(["info", TASK]);
+  });
+
+  test("a re-report of a run the store holds as ended is not refused", async () => {
+    // Arrange.
+    const shim = await shimHolding(0);
+
+    // Act.
+    await rereport(shim);
+    await shim.log.record((record) => record.message === REREPORT);
+
+    // Assert.
+    expect(shim.log.records().filter((record) => record.level === "error").map((record) => record.message)).toEqual([]);
+  });
+
+  test("a re-report of a run the store holds as ended writes nothing for the run", async () => {
+    // Arrange.
+    const shim = await shimHolding(0);
+
+    // Act.
+    await rereport(shim);
+    await shim.log.record((record) => record.message === REREPORT);
+
+    // Assert.
+    const shimWrites = (shim.store?.writes() ?? []).filter((request) => request.producer.startsWith("claude-shim"));
+    const keys = shimWrites.flatMap((request) => request.batch?.entries.map((entry) => entry.upsertKey) ?? []);
+    expect(keys.filter((key) => key.includes(UNIT))).toEqual([]);
+  });
+
+  test("the shim asks the store by the run's unit", async () => {
+    // Arrange.
+    const shim = await shimHolding(0);
+
+    // Act.
+    await rereport(shim);
+    await shim.log.record((record) => record.message === REREPORT);
+
+    // Assert.
+    const asked = (shim.store?.reads() ?? [])
+      .filter((read) => read.rpc === "GetDetachedWork")
+      .map((read) => (read.request as storev1.GetDetachedWorkRequest).unit?.value);
+    expect(asked).toEqual([UNIT]);
+  });
+
+  test("a notification of a run the store holds as a live shell is announced as a shell", async () => {
+    // Arrange.
+    const shim = await shimHolding(null);
+    const stream = await openAgentStream(shim);
+
+    // Act.
+    await rereport(shim);
+    const announced = await awaitAnnouncement(stream, true);
+    stream.close();
+
+    // Assert.
+    expect([announced.work?.value, announced.kind?.kind.case]).toEqual([UNIT, "bash"]);
+  });
+
+  test("a notification of a task neither this process nor the store knows is refused at ERROR", async () => {
+    // Arrange.
+    const shim = await spawnShim();
+    sessionStarted(await shim.clients.h1.startSession(freshSession()));
+
+    // Act.
+    await rereport(shim);
+    const refused = await shim.log.record((record) => record.message === REFUSED);
+
+    // Assert.
+    expect([refused.level, refused.context.store_answer]).toEqual([
+      "error",
+      "not_found: no detached work on record left the unit",
+    ]);
+  });
+
+  test("a store that cannot answer is recorded at ERROR", async () => {
+    // Arrange.
+    const shim = await shimHolding(0);
+    shim.store?.failReads("GetDetachedWork", "storage_failure", "sqlite: disk I/O error");
+
+    // Act.
+    await rereport(shim);
+    const failed = await shim.log.record(
+      (record) => record.message === "the store could not state the kind of a task this process cannot type itself",
+    );
+
+    // Assert.
+    expect(failed.level).toBe("error");
+  });
+});

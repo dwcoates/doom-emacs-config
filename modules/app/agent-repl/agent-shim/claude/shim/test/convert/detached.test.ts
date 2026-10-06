@@ -26,6 +26,7 @@ import {
   isAgentTaskType,
   taskKindOf,
   TASK_KIND_CAPACITY,
+  vendorTaskTypeOf,
   lostAgentEntry,
   lostBashEntry,
   lostSubagentEntry,
@@ -36,6 +37,7 @@ import {
   startedInForeground,
   taskAgentKnowledge,
   taskAwaitingAgent,
+  taskAwaitingKind,
   taskCommission,
   taskUnitTarget,
   wentSilent,
@@ -2781,5 +2783,189 @@ describe("convertDetached: where a run's own frames land", () => {
     // Assert.
     const kind = kindOf(entries[0]);
     expect(kind.case === "subagent" ? kind.value.commission?.subagentType : "").toBe("opus-medium");
+  });
+});
+
+/** The task (and unit) the store must type before the fold converts `fields`' message. */
+function awaitingKind(
+  fields: Record<string, unknown>,
+  registry = createTaskKindRegistry(),
+): { taskId: string; unit: string } | undefined {
+  const asked = taskAwaitingKind(taskMessage(fields), foldContext({}), registry);
+  return asked === undefined ? undefined : { taskId: asked.taskId, unit: asked.unit.value };
+}
+
+/** A keep-alive rewind's re-report of a shell an earlier query backgrounded: no start, no type. */
+const REREPORTED = {
+  subtype: "task_notification",
+  task_id: "bujbjom65",
+  tool_use_id: "toolu_018xxcFy2bK97h1Xrh1KqbE2",
+  status: "stopped",
+  output_file: "/tmp/tasks/bujbjom65.output",
+};
+
+describe("taskAwaitingKind: the task the store must type", () => {
+  it("names a notification's task and unit when nothing this process holds names its kind", () => {
+    // Arrange, Act, Assert.
+    expect(awaitingKind(REREPORTED)).toEqual({ taskId: "bujbjom65", unit: "toolu_018xxcFy2bK97h1Xrh1KqbE2" });
+  });
+
+  it("names nothing when the registry holds the task's kind", () => {
+    // Arrange.
+    const registry = createTaskKindRegistry();
+    registry.remember("bujbjom65", "local_bash");
+
+    // Act, Assert.
+    expect(awaitingKind(REREPORTED, registry)).toBeUndefined();
+  });
+
+  it("names nothing when the message states its own kind", () => {
+    // Arrange, Act, Assert.
+    expect(awaitingKind({ ...REREPORTED, subtype: "task_started", task_type: "local_bash" })).toBeUndefined();
+  });
+
+  it("names nothing when the store was already asked for the task", () => {
+    // Arrange.
+    const registry = createTaskKindRegistry();
+    registry.rememberKindAnswer("bujbjom65", "not_found: no detached work on record left the unit");
+
+    // Act, Assert.
+    expect(awaitingKind(REREPORTED, registry)).toBeUndefined();
+  });
+
+  it("names nothing when the task names no call and none is remembered", () => {
+    // Arrange, Act, Assert.
+    expect(awaitingKind({ ...REREPORTED, tool_use_id: undefined })).toBeUndefined();
+  });
+
+  it("names the remembered call's unit when the message states none", () => {
+    // Arrange.
+    const registry = createTaskKindRegistry();
+    registry.rememberToolUse("bujbjom65", "toolu_remembered");
+
+    // Act, Assert.
+    expect(awaitingKind({ ...REREPORTED, tool_use_id: undefined }, registry)?.unit).toBe("toolu_remembered");
+  });
+
+  it("names nothing for a patch that does not move the work", () => {
+    // Arrange, Act, Assert.
+    expect(awaitingKind({ ...REREPORTED, subtype: "task_updated", patch: { status: "completed" } })).toBeUndefined();
+  });
+
+  it("names a patch's task when the patch moves the work", () => {
+    // Arrange, Act, Assert.
+    expect(awaitingKind({ ...REREPORTED, subtype: "task_updated", patch: { is_backgrounded: true } })?.taskId).toBe(
+      "bujbjom65",
+    );
+  });
+
+  it("names nothing for a task message that types nothing", () => {
+    // Arrange, Act, Assert.
+    expect(awaitingKind({ ...REREPORTED, subtype: "task_progress" })).toBeUndefined();
+  });
+
+  it("names nothing for an ambient task", () => {
+    // Arrange, Act, Assert.
+    expect(awaitingKind({ ...REREPORTED, skip_transcript: true })).toBeUndefined();
+  });
+
+  it("names nothing for a message that is not a system message", () => {
+    // Arrange.
+    const message = { type: "assistant", uuid: "u", session_id: "s" } as unknown as SdkMessage;
+
+    // Act, Assert.
+    expect(taskAwaitingKind(message, foldContext({}), createTaskKindRegistry())).toBeUndefined();
+  });
+});
+
+describe("taskAwaitingAgent: a re-report of a concluded task", () => {
+  it("names nothing for a notification of a task the record holds as ended", () => {
+    // Arrange.
+    const registry = createTaskKindRegistry();
+    registry.remember("a5583", "local_agent");
+    registry.rememberConcludedOnRecord("a5583");
+
+    // Act, Assert.
+    expect(awaiting({ ...RESUME_STARTED, subtype: "task_notification" }, registry)).toBeUndefined();
+  });
+});
+
+describe("convertDetached: a notification of a task the record holds as ended", () => {
+  it("writes nothing", () => {
+    // Arrange.
+    const registry = createTaskKindRegistry();
+    registry.rememberConcludedOnRecord("bujbjom65");
+
+    // Act.
+    const entries = convert(REREPORTED, {}, registry);
+
+    // Assert.
+    expect(entries).toEqual([]);
+  });
+
+  it("records the re-report at INFO and nothing louder", () => {
+    // Arrange.
+    const registry = createTaskKindRegistry();
+    registry.rememberConcludedOnRecord("bujbjom65");
+    const before = logSinkMark();
+
+    // Act.
+    convert(REREPORTED, {}, registry);
+
+    // Assert.
+    expect(
+      logRecordsSince(before)
+        .filter((record) => record.level === "info" || record.level === "warn" || record.level === "error")
+        .map((record) => [record.level, record.message]),
+    ).toEqual([["info", "a re-report of a concluded task; nothing to restate"]]);
+  });
+
+  it("forgets the task's facts", () => {
+    // Arrange.
+    const registry = createTaskKindRegistry();
+    registry.rememberConcludedOnRecord("bujbjom65");
+    registry.rememberKindAnswer("bujbjom65", "found ended bash");
+
+    // Act.
+    convert(REREPORTED, {}, registry);
+
+    // Assert.
+    expect([registry.concludedOnRecord("bujbjom65"), registry.kindAnswerOf("bujbjom65")]).toEqual([false, undefined]);
+  });
+});
+
+describe("convertDetached: a notification no one can type", () => {
+  it("is refused at ERROR naming the store's answer", () => {
+    // Arrange.
+    const registry = createTaskKindRegistry();
+    registry.rememberKindAnswer("bujbjom65", "not_found: no detached work on record left the unit");
+    const before = logSinkMark();
+
+    // Act.
+    convert(REREPORTED, {}, registry);
+
+    // Assert.
+    expect(
+      logRecordsSince(before)
+        .filter((record) => record.level === "error")
+        .map((record) => [record.message, record.context.store_answer]),
+    ).toEqual([
+      [
+        "a task names no kind this shim knows; its announcement is malformed and is refused",
+        "not_found: no detached work on record left the unit",
+      ],
+    ]);
+  });
+});
+
+describe("vendorTaskTypeOf", () => {
+  it.each([
+    { kind: "subagent", word: "local_agent" },
+    { kind: "bash", word: "local_bash" },
+    { kind: "workflow", word: "local_workflow" },
+    { kind: "monitor", word: "monitor" },
+  ] as const)("names the $kind kind as $word", ({ kind, word }) => {
+    // Arrange, Act, Assert.
+    expect(vendorTaskTypeOf(kind)).toBe(word);
   });
 });

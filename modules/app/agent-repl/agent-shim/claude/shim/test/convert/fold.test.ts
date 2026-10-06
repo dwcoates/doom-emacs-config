@@ -770,6 +770,141 @@ describe("a subagent resumed by a send whose spawn this fold never saw", () => {
   });
 });
 
+describe("a task notification whose kind this fold does not hold", () => {
+  /** A keep-alive rewind's re-report of a shell an earlier query backgrounded: no start, no type. */
+  const rereported = {
+    type: "system",
+    subtype: "task_notification",
+    uuid: "uuid-rereport",
+    session_id: "session-1",
+    task_id: "bujbjom65",
+    tool_use_id: "toolu_018xxcFy2bK97h1Xrh1KqbE2",
+    status: "stopped",
+    output_file: "/tmp/tasks/bujbjom65.output",
+  } as unknown as SdkMessage;
+
+  /** The kind arm the notification's announcement states, or the arms of every entry it wrote. */
+  const announcedKinds = (output: FoldOutput): (string | undefined)[] =>
+    output.entries.flatMap((entry) => {
+      const frame = entry.item.kind === "frame" ? entry.item.frame : undefined;
+      return frame?.result.case === "detachedWork" ? [frame.result.value.kind?.kind.case] : [];
+    });
+
+  /** The WARN-or-louder records the fold wrote while `act` ran, each as its level and message. */
+  const loudRecords = (act: () => void): [string, string][] => {
+    const before = logSinkMark();
+    act();
+    return logRecordsSince(before)
+      .filter((record) => record.level === "warn" || record.level === "error")
+      .map((record) => [record.level, record.message]);
+  };
+
+  it("awaits the store's statement of the task's kind, by its unit", () => {
+    // Arrange.
+    const fold = createFold();
+
+    // Act.
+    const asked = fold.taskAwaitingKind(rereported, foldContext());
+
+    // Assert.
+    expect([asked?.taskId, asked?.unit.value]).toEqual(["bujbjom65", "toolu_018xxcFy2bK97h1Xrh1KqbE2"]);
+  });
+
+  it("awaits nothing for a task whose start this fold saw", () => {
+    // Arrange.
+    const fold = createFold();
+    fold.onSdkMessage(
+      {
+        ...(rereported as unknown as Record<string, unknown>),
+        subtype: "task_started",
+        task_type: "local_bash",
+        uuid: "uuid-start",
+      } as unknown as SdkMessage,
+      foldContext(),
+    );
+
+    // Act, Assert.
+    expect(fold.taskAwaitingKind(rereported, foldContext())).toBeUndefined();
+  });
+
+  it("writes nothing, and records nothing louder than INFO, for a task the record holds as ended", () => {
+    // Arrange.
+    const fold = createFold();
+    fold.learnTaskKind("bujbjom65", { kind: "found", workKind: "bash", ended: true });
+    let output: FoldOutput = EMPTY_FOLD_OUTPUT;
+
+    // Act.
+    const loud = loudRecords(() => {
+      output = fold.onSdkMessage(rereported, foldContext());
+    });
+
+    // Assert.
+    expect([output.entries, loud]).toEqual([[], []]);
+  });
+
+  it("announces a task the record holds as a live shell as a shell", () => {
+    // Arrange.
+    const fold = createFold();
+    fold.learnTaskKind("bujbjom65", { kind: "found", workKind: "bash", ended: false });
+
+    // Act.
+    const output = fold.onSdkMessage(rereported, foldContext());
+
+    // Assert.
+    expect(announcedKinds(output)).toEqual(["bash"]);
+  });
+
+  it("writes no subagent terminal for a task the record holds as a live shell", () => {
+    // Arrange.
+    const fold = createFold();
+    fold.learnTaskKind("bujbjom65", { kind: "found", workKind: "bash", ended: false });
+
+    // Act.
+    const output = fold.onSdkMessage(rereported, foldContext());
+
+    // Assert.
+    expect(output.entries.some((entry) => activityOf(entry)?.item.case === "subagent")).toBe(false);
+  });
+
+  it("refuses the announcement at ERROR when the store holds no such work", () => {
+    // Arrange.
+    const fold = createFold();
+    fold.learnTaskKind("bujbjom65", { kind: "not_found" });
+
+    // Act.
+    const loud = loudRecords(() => fold.onSdkMessage(rereported, foldContext()));
+
+    // Assert.
+    expect(loud).toContainEqual(["error", "a task names no kind this shim knows; its announcement is malformed and is refused"]);
+  });
+
+  it("refuses the announcement at ERROR naming the failure when the store could not answer", () => {
+    // Arrange.
+    const fold = createFold();
+    fold.learnTaskKind("bujbjom65", { kind: "failed", detail: "connect ECONNREFUSED" });
+    const before = logSinkMark();
+
+    // Act.
+    fold.onSdkMessage(rereported, foldContext());
+
+    // Assert.
+    expect(
+      logRecordsSince(before)
+        .filter((record) => record.level === "error")
+        .map((record) => record.context.store_answer),
+    ).toContain("failed: connect ECONNREFUSED");
+  });
+
+  it("awaits the store no more once it answered for the task", () => {
+    // Arrange.
+    const fold = createFold();
+    fold.learnTaskKind("bujbjom65", { kind: "not_found" });
+
+    // Act, Assert.
+    expect(fold.taskAwaitingKind(rereported, foldContext())).toBeUndefined();
+  });
+});
+
 describe("hooks", () => {
   it("opens a hook unit on the vendor's own firing record", () => {
     const fold = createFold();
