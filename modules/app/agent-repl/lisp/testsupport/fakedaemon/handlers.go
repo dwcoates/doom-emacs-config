@@ -127,6 +127,10 @@ func (s *fakeServer) FoldRepository(ctx context.Context, req *connect.Request[v1
 	return handleUnary[v1.FoldRepositoryRequest, v1.FoldRepositoryResponse](ctx, s, "FoldRepository", req.Msg)
 }
 
+func (s *fakeServer) UpdateSidebarView(ctx context.Context, req *connect.Request[v1.UpdateSidebarViewRequest]) (*connect.Response[v1.UpdateSidebarViewResponse], error) {
+	return handleUnary[v1.UpdateSidebarViewRequest, v1.UpdateSidebarViewResponse](ctx, s, "UpdateSidebarView", req.Msg)
+}
+
 func (s *fakeServer) CreateTask(ctx context.Context, req *connect.Request[v1.CreateTaskRequest]) (*connect.Response[v1.CreateTaskResponse], error) {
 	return handleUnary[v1.CreateTaskRequest, v1.CreateTaskResponse](ctx, s, "CreateTask", req.Msg)
 }
