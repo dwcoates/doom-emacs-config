@@ -877,6 +877,37 @@ export function createPersistence(options: PersistenceOptions): Persistence {
   const bookPendingInQueue = (agent: string): boolean =>
     queue.some((row) => booksRegisteredBy([row.entry]).has(agent));
 
+  /**
+   * A BOOK WHOSE FIRST ROW IS STILL IN THIS WRITER'S QUEUE IS ASKED FOR ONCE
+   * IT LANDS. A one-shot read always asks the store (reader.ts), and asked a
+   * moment early — a reader's page opened while a fresh session's first prompt
+   * is being written — the store refuses a book that is about to exist, which
+   * is a refusal in its log on a bring-up going exactly as it should. The wait
+   * is bounded: a row the store is not taking leaves the read to ask, and to
+   * surface what it is told.
+   */
+  const awaitQueuedFirstRow = async (agent: conversationv1.AgentId): Promise<void> => {
+    if (!bookPendingInQueue(agent.value)) return;
+    await new Promise<void>((resolve) => {
+      const waiting = bookLandingWaiters.get(agent.value) ?? new Set<() => void>();
+      const finish = (): void => {
+        clearTimeout(timer);
+        waiting.delete(finish);
+        resolve();
+      };
+      const timer = setTimeout(() => {
+        LOGGER.info(
+          { agent: agent.value, bound_ms: FIRST_ROW_LANDING_BOUND_MS },
+          "a book's first row did not land within the bound; the read asks the store as it stands",
+        );
+        finish();
+      }, FIRST_ROW_LANDING_BOUND_MS);
+      timer.unref?.();
+      waiting.add(finish);
+      bookLandingWaiters.set(agent.value, waiting);
+    });
+  };
+
   /** Everything owed once a batch is durable. */
   const landed = (batch: readonly QueuedRow[], attempts: number, durationMs: number): void => {
     // WOKEN ONLY ONCE THE ROWS ARE DURABLE: a `WatchAgent` that opened before
@@ -1190,34 +1221,18 @@ export function createPersistence(options: PersistenceOptions): Persistence {
       opening: AgentOpening,
       known?: () => boolean,
     ): Promise<conversationv1.HistoryPage> {
-      // A BOOK WHOSE FIRST ROW IS STILL IN THIS WRITER'S QUEUE IS ASKED FOR
-      // ONCE IT LANDS. The one-shot read always asks the store (reader.ts),
-      // and asked a moment early — a reader's page opened while a fresh
-      // session's first prompt is being written — the store refuses a book
-      // that is about to exist, which is a refusal in its log on a bring-up
-      // going exactly as it should. The wait is bounded: a row the store is
-      // not taking leaves the read to ask, and to surface what it is told.
-      if (bookPendingInQueue(agent.value)) {
-        await new Promise<void>((resolve) => {
-          const waiting = bookLandingWaiters.get(agent.value) ?? new Set<() => void>();
-          const finish = (): void => {
-            clearTimeout(timer);
-            waiting.delete(finish);
-            resolve();
-          };
-          const timer = setTimeout(() => {
-            LOGGER.info(
-              { agent: agent.value, bound_ms: FIRST_ROW_LANDING_BOUND_MS },
-              "a book's first row did not land within the bound; the read asks the store as it stands",
-            );
-            finish();
-          }, FIRST_ROW_LANDING_BOUND_MS);
-          timer.unref?.();
-          waiting.add(finish);
-          bookLandingWaiters.set(agent.value, waiting);
-        });
-      }
+      await awaitQueuedFirstRow(agent);
       return reader.readFirstPage(agent, opening, known);
+    },
+
+    async readBookHead(
+      agent: conversationv1.AgentId,
+      known?: () => boolean,
+    ): Promise<conversationv1.HistoryPointer | undefined> {
+      // The same wait as the page read: a head asked for while the book's
+      // first row is still queued would name a book that is about to exist.
+      await awaitQueuedFirstRow(agent);
+      return reader.readBookHead(agent, known);
     },
 
     readAgentPage(
