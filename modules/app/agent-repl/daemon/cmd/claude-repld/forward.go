@@ -8,8 +8,10 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 
+	"claude-repld/internal/dlog"
 	"claude-repld/internal/health"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/promptqueue"
 	"claude-repld/internal/resolve/feed"
 	"claude-repld/internal/rollout"
 	"claude-repld/internal/workspace"
@@ -232,4 +234,34 @@ func (h *historyForwarder) ReadHistory(ctx context.Context, ws ids.WorkspaceID, 
 		return nil, errors.New("claude-repld: history was read before the session fleet was built")
 	}
 	return fleet.ReadHistory(ctx, ws, target, after)
+}
+
+// vendorServesForwarder carries the footer's vendor-serves edge
+// (footer.WithVendorServes) to the prompt queue, which is built after the
+// footer. An edge before the queue is bound is a wiring defect, said at ERROR:
+// the prompts held after reconnect would wait for the next edge.
+type vendorServesForwarder struct {
+	mu    sync.RWMutex
+	queue promptqueue.Queue
+	log   dlog.Logger
+}
+
+func (f *vendorServesForwarder) bind(queue promptqueue.Queue) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.queue = queue
+}
+
+// VendorServes tells the queue the workspace's vendor serves again.
+func (f *vendorServesForwarder) VendorServes(ws ids.WorkspaceID, was string) {
+	f.mu.RLock()
+	queue := f.queue
+	f.mu.RUnlock()
+	if queue == nil {
+		f.log.Error("daemon.cmd.vendor_serves", "the vendor served again before the prompt queue was wired; its after-reconnect holds were not released", dlog.Context{
+			"workspace": string(ws), "vendor_block": was, "invariant_violation": "the queue is bound before any footer edge",
+		})
+		return
+	}
+	queue.OnVendorServes(ws)
 }

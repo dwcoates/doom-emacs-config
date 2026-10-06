@@ -174,6 +174,9 @@ type queue struct {
 	// departing tracks the departure decisions (OnDeparted) running on their
 	// own goroutines, so Drain joins them too.
 	departing sync.WaitGroup
+	// releasing tracks the after-reconnect releases a vendor serving again
+	// started (OnVendorServes), so Drain joins them too.
+	releasing sync.WaitGroup
 	// exiting is set by Drain, under mu, before it joins: a departure told
 	// after it (the exit's own watcher closes run after the drain) decides
 	// nothing, because the state client it would read is about to close and
@@ -353,6 +356,7 @@ func (q *queue) Drain(bound time.Duration) bool {
 	go func() {
 		q.classifying.Wait()
 		q.reviving.Wait()
+		q.releasing.Wait()
 		// A departure decision can START a bounce, so it is joined first.
 		q.departing.Wait()
 		q.bouncing.Wait()
