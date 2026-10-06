@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"database/sql"
 	"time"
 
 	"agentrepl/shim-store/internal/logging"
@@ -103,6 +104,21 @@ const ledgerPruneBatch = 2000
 // it can remove, so an interactive write waits for one page's seeks at most.
 const ledgerSweepCursorsPerBatch = 256
 
+// THE ROW AND CURSOR LIMITS BOUND A BATCH'S WORK, NOT ITS HOLD. Neither can
+// predict a cold page cache or a loaded host, and the owner's store showed it:
+// with both limits in place, single sweep batches held the writer for 451ms,
+// 1914ms and 2856ms while removing NOTHING (`store.db.slow-query`
+// statement=ledger_sweep rows=0, lock_wait_ms=0, 2026-10-02 to 2026-10-06), and
+// interactive write_batch records carried lock waits ending the same
+// millisecond a sweep batch did (3237ms behind one at 2026-09-27 18:47:12,
+// 6401ms at 2026-09-28 01:42:27). So a sweep transaction is ALSO bounded in
+// time, by the same `bulkBounds.time` a producer's bulk transaction is: the
+// sweep removes file by file and checks the clock after each, committing once
+// the bound has passed. An interactive write therefore waits for at most the
+// time bound plus ONE file's delete, whatever the host is doing. The check is
+// after the file, so a transaction always sweeps at least one and a sweep
+// always makes progress.
+
 // PruneResult reports what one sweep removed.
 type PruneResult struct {
 	// Deleted is the ledger rows removed across the whole sweep.
@@ -127,30 +143,28 @@ func (d *DB) PruneWriteLedger(ctx context.Context) (PruneResult, error) {
 		return result, nil
 	}
 	started := d.mono()
-	// THE SWEEP WALKS `cursor` A PAGE AT A TIME, keyed by file_id. A page is
-	// swept again while it keeps filling a batch, and the walk moves on once a
-	// batch comes back short; it ends on the first short page.
+	// THE SWEEP WALKS `cursor` IN file_id ORDER, a page at a time. Each batch
+	// resumes past the last file it finished; a file whose delete filled the
+	// batch's row limit is not finished and is asked about again. The walk ends
+	// on a batch that finished every file of a short page.
 	after := ""
 	for {
 		if err := ctx.Err(); err != nil {
 			return result, d.refuse(base, err)
 		}
-		page, err := d.pruneLedgerBatch(ctx, after, result.Batches+1)
+		batch, err := d.pruneLedgerBatch(ctx, after, result.Batches+1)
 		if err != nil {
 			return result, err
 		}
-		result.Deleted += page.deleted
+		result.Deleted += batch.deleted
 		result.Batches++
 		if d.afterPruneBatch != nil {
 			d.afterPruneBatch()
 		}
-		if page.deleted >= ledgerPruneBatch {
-			continue
-		}
-		if page.files < ledgerSweepCursorsPerBatch {
+		if batch.ended == sweepEndedLastPage {
 			break
 		}
-		after = page.last
+		after = batch.resume
 	}
 	elapsed := d.mono().Sub(started)
 	if result.Deleted == 0 {
@@ -165,66 +179,92 @@ func (d *DB) PruneWriteLedger(ctx context.Context) (PruneResult, error) {
 	return result, nil
 }
 
-// ledgerPruneDeleteSQL is the sweep's one statement, at package scope so the
-// plan it is judged by is EXPLAINed from the statement itself rather than from
-// a copy in a test that can drift away from it.
+// ledgerSweepPageSQL reads the page of cursors one sweep batch asks about: a
+// seek on the cursor primary key past the previous batch's last finished file,
+// so no batch asks about more files than a page holds however many the store
+// tracks.
+const ledgerSweepPageSQL = `SELECT file_id, offset FROM cursor WHERE file_id > ? ORDER BY file_id LIMIT ?`
+
+// ledgerPruneDeleteSQL is the sweep's delete for ONE file, at package scope so
+// the plan it is judged by is EXPLAINed from the statement itself rather than
+// from a copy in a test that can drift away from it.
 //
-// The join to `cursor` is what makes the window a per-FILE question: each
-// row is measured against its own file's committed position, never against
-// a global one.
+// THE BOUND IS A CONSTANT, COMPUTED FROM THE FILE'S OWN CURSOR. Each row is
+// measured against its own file's committed position, never against a global
+// one, and the position is read from the page in the same transaction.
 //
-// `cursor` IS THE OUTER TABLE, AND THE `CROSS JOIN` IS WHAT FIXES IT THERE.
-// The retention bound is `c.offset - ?`, which is not a constant: it is a
-// column of the OTHER table. Written with the ledger outermost, SQLite can
-// use `write_ledger_source` for nothing — the bound is unknown until `c` is
-// resolved — so it read the whole covering index and probed `cursor` per
-// row: `SCAN l USING COVERING INDEX write_ledger_source`, 318k rows and
-// 111ms PER BATCH on the owner's store, paid even by the final batch that
-// deletes nothing, and paid while HOLDING THE WRITE SLOT every producer's
-// WriteBatch queues on. It is also why a sweep of 21 batches took 4650ms
-// (2026-09-13 16:20:00) — the scan is repeated once per batch, so the sweep
-// is quadratic in the ledger.
-//
-// Driven from `cursor` (2844 rows against 318k) the same index is an
-// ordinary seek: `SEARCH l USING COVERING INDEX write_ledger_source
-// (source_file_id=? AND source_offset>? AND source_offset<?)`, with the
-// LIMIT stopping the outer loop as soon as a batch is full. SQLite's
-// planner reorders a plain JOIN by its own row estimates and picked the
-// scan; `CROSS JOIN` is the documented way to state the order and have it
-// kept, which is why the order is not left to an estimate that can flip
-// back the next time the table statistics move.
-//
-// THE OUTER SIDE IS ONE PAGE OF `cursor`, NOT THE WHOLE TABLE (see
-// ledgerSweepCursorsPerBatch): a seek on the cursor primary key past the
-// previous page's last file_id, so no batch asks about more files than a page
-// holds however many the store tracks.
+// THAT IS WHAT KEEPS IT A SEEK. The sweep's earlier one-statement form joined
+// `cursor` to the ledger, and with the ledger outermost the bound `c.offset -
+// ?` was unknown until `c` was resolved, so `write_ledger_source` was usable
+// for nothing: SQLite read the whole covering index, 318k rows and 111ms PER
+// BATCH on the owner's store, while HOLDING THE WRITE SLOT (a 21-batch sweep
+// took 4650ms at 2026-09-13 16:20:00). With `source_file_id = ?` and a constant
+// `source_offset < ?` the statement is `SEARCH write_ledger USING COVERING
+// INDEX write_ledger_source (source_file_id=? AND ...)` whatever the table
+// statistics say, and the LIMIT stops it at the batch's remaining row budget.
 const ledgerPruneDeleteSQL = `DELETE FROM write_ledger WHERE rowid IN (
-  SELECT l.rowid FROM (
-      SELECT file_id, offset FROM cursor WHERE file_id > ? ORDER BY file_id LIMIT ?
-    ) c
-    CROSS JOIN write_ledger l
-      ON l.source_file_id = c.file_id
-     AND l.source_offset IS NOT NULL
-     AND l.source_offset < c.offset - ?
+  SELECT rowid FROM write_ledger
+   WHERE source_file_id = ?
+     AND source_offset IS NOT NULL
+     AND source_offset < ?
    LIMIT ?)`
 
-// ledgerSweepPageSQL reads the page a sweep batch covered: how many cursors it
-// asked about and the last file_id among them, where the next page starts.
-const ledgerSweepPageSQL = `SELECT COUNT(*), COALESCE(MAX(file_id), '') FROM (
-  SELECT file_id FROM cursor WHERE file_id > ? ORDER BY file_id LIMIT ?)`
+// sweepEnd is why one sweep batch committed.
+type sweepEnd int
 
-// sweptPage is what one sweep batch did.
-type sweptPage struct {
-	deleted int64
-	files   int
-	last    string
+const (
+	// sweepEndedRows: the batch removed ledgerPruneBatch rows, and the file it
+	// was on may hold more, so the next batch asks about that file again.
+	sweepEndedRows sweepEnd = iota + 1
+	// sweepEndedTime: the batch's time bound passed after a file.
+	sweepEndedTime
+	// sweepEndedPage: the batch finished every file of a full page, so there
+	// may be a next one.
+	sweepEndedPage
+	// sweepEndedLastPage: the batch finished every file of a short page — the
+	// last of the cursor table — and the sweep is done.
+	sweepEndedLastPage
+)
+
+// String names the end the way the per-batch record spells it.
+func (e sweepEnd) String() string {
+	switch e {
+	case sweepEndedRows:
+		return "rows"
+	case sweepEndedTime:
+		return "time"
+	case sweepEndedPage:
+		return "page"
+	case sweepEndedLastPage:
+		return "last_page"
+	default:
+		return "unset"
+	}
 }
 
-// pruneLedgerBatch removes at most ledgerPruneBatch rows, among the files of
-// ONE page of at most ledgerSweepCursorsPerBatch cursors after `after`, in ONE
-// transaction, through the same write slot every producer's batch goes
-// through — and times it like one, by class.
-func (d *DB) pruneLedgerBatch(ctx context.Context, after string, transaction int) (page sweptPage, err error) {
+// sweptBatch is what one sweep batch did.
+type sweptBatch struct {
+	deleted int64
+	// files is how many cursors the batch asked about.
+	files int
+	// resume is the file_id the next batch reads past: the last file this
+	// batch FINISHED, or the batch's own starting point if it finished none.
+	resume string
+	ended  sweepEnd
+}
+
+// sweepCursor is one file's committed position, as a sweep batch read it.
+type sweepCursor struct {
+	fileID string
+	offset int64
+}
+
+// pruneLedgerBatch removes, in ONE transaction and through the same write slot
+// every producer's batch goes through, the ledger rows past the window of the
+// files after `after` — one file at a time, stopping at the first of: the row
+// limit, the bulk time bound, or the end of the page — and times it like a
+// write, by class.
+func (d *DB) pruneLedgerBatch(ctx context.Context, after string, transaction int) (batch sweptBatch, err error) {
 	base := logging.Fields{Operation: "store.db.ledger-sweep", Table: "write_ledger", WriteClass: WriteBulk.String()}
 
 	started := d.mono()
@@ -232,39 +272,99 @@ func (d *DB) pruneLedgerBatch(ctx context.Context, after string, transaction int
 	defer func() {
 		fields := base
 		fields.LockWait = lockWait
-		d.observeQuery(StatementLedgerSweep, "write_ledger", fields, started, page.deleted)
-		d.traceWriteTiming(StatementLedgerSweep, fields, started, page.deleted, transaction)
+		d.observeQuery(StatementLedgerSweep, "write_ledger", fields, started, batch.deleted)
+		d.traceWriteTiming(StatementLedgerSweep, fields, started, batch.deleted, transaction)
 	}()
 
 	// THE SWEEP IS BULK. It is the store's own upkeep and nobody is waiting on
 	// it, so an interactive write is always taken ahead of its next batch.
 	tx, release, err := d.beginWrite(ctx, WriteBulk)
-	lockWait = d.mono().Sub(started)
+	began := d.mono()
+	lockWait = began.Sub(started)
 	if err != nil {
 		if isContextError(err) {
-			return sweptPage{}, d.refuse(base, err)
+			return sweptBatch{}, d.refuse(base, err)
 		}
-		return sweptPage{}, d.refuse(base, storagef(err, "begin ledger sweep transaction"))
+		return sweptBatch{}, d.refuse(base, storagef(err, "begin ledger sweep transaction"))
 	}
 	defer release()
 	defer d.endTx(tx, base)
 
-	if err := tx.QueryRowContext(ctx, ledgerSweepPageSQL, after, ledgerSweepCursorsPerBatch).Scan(&page.files, &page.last); err != nil {
-		return sweptPage{}, d.refuse(base, storagef(err, "reading the ledger sweep's cursor page"))
-	}
-	res, err := tx.ExecContext(ctx, ledgerPruneDeleteSQL, after, ledgerSweepCursorsPerBatch, d.ledgerRetention, ledgerPruneBatch)
+	cursors, err := d.readSweepPage(ctx, tx, after)
 	if err != nil {
-		return sweptPage{}, d.refuse(base, storagef(err, "pruning the write ledger"))
+		return sweptBatch{}, d.refuse(base, err)
 	}
-	deleted, err := res.RowsAffected()
+	remove, err := tx.PrepareContext(ctx, ledgerPruneDeleteSQL)
 	if err != nil {
-		return sweptPage{}, d.refuse(base, storagef(err, "counting the pruned write_ledger rows"))
+		return sweptBatch{}, d.refuse(base, storagef(err, "preparing the ledger sweep's delete"))
+	}
+	defer remove.Close() //nolint:errcheck // the early-return paths only; the success path closes it below and checks
+
+	swept := sweptBatch{resume: after, ended: sweepEndedLastPage}
+	if len(cursors) == ledgerSweepCursorsPerBatch {
+		swept.ended = sweepEndedPage
+	}
+	for _, c := range cursors {
+		remaining := ledgerPruneBatch - swept.deleted
+		res, err := remove.ExecContext(ctx, c.fileID, c.offset-d.ledgerRetention, remaining)
+		if err != nil {
+			return sweptBatch{}, d.refuse(base, storagef(err, "pruning the write ledger"))
+		}
+		deleted, err := res.RowsAffected()
+		if err != nil {
+			return sweptBatch{}, d.refuse(base, storagef(err, "counting the pruned write_ledger rows"))
+		}
+		swept.deleted += deleted
+		swept.files++
+		if d.ledgerFileSwept != nil {
+			d.ledgerFileSwept()
+		}
+		if deleted >= remaining {
+			swept.ended = sweepEndedRows
+			break
+		}
+		swept.resume = c.fileID
+		if swept.files < len(cursors) && d.mono().Sub(began) >= d.bulk.time {
+			swept.ended = sweepEndedTime
+			break
+		}
+	}
+	if err := remove.Close(); err != nil {
+		return sweptBatch{}, d.refuse(base, storagef(err, "closing the ledger sweep's delete"))
 	}
 	if err := tx.Commit(); err != nil {
-		return sweptPage{}, d.refuse(base, storagef(err, "commit ledger sweep transaction"))
+		return sweptBatch{}, d.refuse(base, storagef(err, "commit ledger sweep transaction"))
 	}
-	page.deleted = deleted
-	return page, nil
+	batch = swept
+	d.log.LogVerbose(base, "ledger sweep transaction %d committed deleted=%d files=%d ended_by=%s",
+		transaction, batch.deleted, batch.files, batch.ended)
+	return batch, nil
+}
+
+// readSweepPage reads the page of cursors a sweep batch asks about, inside
+// the batch's own transaction so each file's bound is its committed position
+// as of the delete.
+func (d *DB) readSweepPage(ctx context.Context, tx *sql.Tx, after string) ([]sweepCursor, error) {
+	rows, err := tx.QueryContext(ctx, ledgerSweepPageSQL, after, ledgerSweepCursorsPerBatch)
+	if err != nil {
+		return nil, storagef(err, "reading the ledger sweep's cursor page")
+	}
+	defer rows.Close() //nolint:errcheck // the early-return paths only; the success path closes it below and checks
+	var cursors []sweepCursor
+	for rows.Next() {
+		var c sweepCursor
+		if err := rows.Scan(&c.fileID, &c.offset); err != nil {
+			return nil, storagef(err, "reading the ledger sweep's cursor page")
+		}
+		cursors = append(cursors, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, storagef(err, "reading the ledger sweep's cursor page")
+	}
+	if err := rows.Close(); err != nil {
+		return nil, storagef(err, "closing the ledger sweep's cursor page")
+	}
+	return cursors, nil
 }
 
 // SweepWriteLedger runs PruneWriteLedger on `interval` until ctx ends. It is
