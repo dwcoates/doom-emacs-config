@@ -2057,6 +2057,12 @@ message FeedColdGateStanding {
 message FeedColdGateContextTokens {
   // The count, raw.
   int64 tokens = 1;
+  // How full the model's context window this count is, in [0, 1] (the daemon
+  // clamps): what the figure is COLORED by, through the cold-gate gradient
+  // (green below 20%, yellow at 35%, orange at 50%, red at 70%; owner,
+  // 2026-10-06) -- a warning of how costly paying to pass the gate is, which
+  // is why it is not the context chip's pressure gradient.
+  double window_fill = 2;
 }
 // The lapse element.
 message FeedColdGateLastRequest {
