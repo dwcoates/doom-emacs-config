@@ -210,6 +210,8 @@ Two further limits, stated rather than hidden:
 | `!usage-historical` | ungrounded | subagents_e2e_test.go | — | — | Go: TestNestedSubagentHistoricalUsage asserts specifically that NO subagent bubble row is fabricated on the root feed (a shape-absence check) alongside Concluded. | covered |
 | `!usage-opus-absent` | ungrounded | sessionfacts_e2e_test.go | — | — | Go: TestAccountUsageOpusAbsentIsReadAndRetiresTheLine stands a rate line on the weekly EVENT over an unread probe, drives this scenario, and asserts the drawn consequence of an available outcome that is NOT an unavailability: its reprobe READS and re-files the sub-threshold weekly figure, so `FooterStatusActivityRateLimited` goes away entirely (a specific negative an unread arm would not produce). Exact conclusion prose pinned too. | covered |
 | `!usage-sampling-failure` | ungrounded | sessionfacts_e2e_test.go | — | — | Go: the /sampling_failure subtest of TestAccountUsageUnreadArmsLeaveTheReadFiguresStanding (the standing 0.41 figure, its read instant, and NO caveat drawn, per the 2026-09-15 ruling). TestAccountUsageSamplingFailureCarriesACause additionally pins the shim's own cause on the daemon's `usage_sample_unreadable` breadcrumb. This arm was UNREACHABLE until the mock was fixed to raise (see PROTO-CHANGES Landing 13's dead-trigger note). | covered |
+| `!usage-seat-spend` | ungrounded | accounting_e2e_test.go | — | — | Go: TestAccountUsageSeatSpendDrawsTheSeatsSpend asserts the footer's enduring line becomes the seat_spend arm carrying the mocked seat's exact 22388 of 1200000 minor units. | covered |
+| `!usage-seat-spend-unreported` | ungrounded | — | — | — | No counted e2e layer drives this scenario. | uncovered |
 | `!usage-service-unavailable` | ungrounded | sessionfacts_e2e_test.go | — | — | Go: TestAccountUsageUnreadArmsLeaveTheReadFiguresStanding/service_unavailable asserts the daemon's `usage_sample_unreadable` breadcrumb names this reason, and that the line the weekly event then opens still draws the session 0.41 a prior READABLE sample filed, with that reading's `figures_read_at_ms` and no unread caveat (owner ruling fc4917be4). Exact conclusion prose pinned. | covered |
 | `!usage-utilization-unavailable` | ungrounded | sessionfacts_e2e_test.go | — | — | Go: the /utilization_unavailable subtest of the same table — the breadcrumb names the reason, the standing 0.41 figure and its read instant are untouched, no caveat is drawn, and the exact conclusion prose. | covered |
 | `!usage-window-unavailable` | ungrounded | sessionfacts_e2e_test.go | — | — | Go: the /window_unavailable subtest of the same table — the breadcrumb names the reason, the standing 0.41 figure and its read instant are untouched, no caveat is drawn, and the exact conclusion prose. | covered |
@@ -232,13 +234,13 @@ a disagreement, so these are not hand tallies (they were, and they were
 wrong: the by-layer lines once read 33 and 5 where the table's columns held
 32 and 3).
 
-- Covered (at least one STRONG, specific-shape assertion in a counted layer): **152**
+- Covered (at least one STRONG, specific-shape assertion in a counted layer): **153**
 - Weak (a counted layer drives the scenario but only asserts turn-completion or a non-specific field, never a named arm/shape): **0**
-- Uncovered (no counted layer drives the scenario at all): **6**
-- Total canonical scenarios: 158
+- Uncovered (no counted layer drives the scenario at all): **7**
+- Total canonical scenarios: 160
 
 By layer, scenarios with at least one hit:
-- Go e2e (non-emacs): 151 scenarios referenced across 28 files
+- Go e2e (non-emacs): 152 scenarios referenced across 28 files
 - Webapp layer: 36 scenarios referenced across 8 files
 - Emacs e2e: 3 scenarios referenced across 3 files
 
@@ -260,6 +262,7 @@ each row's `Strongest assertion` cell, which is where a reader can act on it.
 - `!fast-off`
 - `!subagent-network-failed`
 - `!subagent-resumed`
+- `!usage-seat-spend-unreported`
 - `<!--agent-repl:network-resume-->` (marker)
 
 <!-- END DERIVED: uncovered -->

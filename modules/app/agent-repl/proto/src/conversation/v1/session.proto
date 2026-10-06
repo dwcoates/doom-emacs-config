@@ -558,22 +558,76 @@ message SessionMcpServerFailed {
   string error = 1;
 }
 
-// What the account's allowance looked like when sampled. LIVE, whenever the
+// What the account's usage looked like when sampled. LIVE, whenever the
 // shim observes it — not pinned to a turn boundary.
+//
+// THE OUTCOME IS BY BILLING MODE (owner ruling, 2026-10-06): an account billed
+// by allowance windows (a Pro or Max subscription) reads `available`; an
+// account billed by a monthly per-seat spend allotment reads `seat_spend`;
+// never both. The shim picks `seat_spend` exactly when the subscription type
+// is enterprise AND the vendor reports a monthly limit with no five-hour
+// window; anything else that reports windows is `available`.
 message SessionAccountUsage {
   // When it was sampled, in unix millis.
   int64 observed_at_ms = 1;
-  // The vendor's subscription word, verbatim; its vocabulary is not in
-  // evidence.
-  string subscription_type = 2;
-  // THE ARM IS WHETHER A FIGURE WAS READ.
+  // Tag 2 (`subscription_type`, the vendor's word as a free string) is
+  // RETIRED: the plan is typed (tag 6).
+  reserved 2;
+  // THE ARM IS THE BILLING MODE, or why no figure could be read.
   oneof outcome {
+    // The account's allowance windows were read (subscription billing).
     SessionAccountUsageAvailable available = 3;
+    // No figure could be read.
     SessionAccountUsageUnavailable unavailable = 4;
+    // The account is billed by a monthly per-seat spend allotment.
+    SessionAccountUsageSeatSpend seat_spend = 5;
   }
+  // The account's plan as the vendor names it. UNSET when the vendor named
+  // none (an API key or third-party provider session, or a failed sample).
+  // SET WITH ITS ONEOF UNASSIGNED when the vendor named a plan this schema
+  // revision does not.
+  optional SessionSubscriptionType subscription_type = 6;
 }
 
-// A figure was read.
+// The account's plan (the SDK's `subscription_type`). THE ARM IS THE PLAN.
+message SessionSubscriptionType {
+  oneof plan {
+    SessionSubscriptionTypePro pro = 1;
+    SessionSubscriptionTypeMax max = 2;
+    SessionSubscriptionTypeTeam team = 3;
+    SessionSubscriptionTypeEnterprise enterprise = 4;
+  }
+}
+// A Claude Pro subscription.
+message SessionSubscriptionTypePro {}
+// A Claude Max subscription.
+message SessionSubscriptionTypeMax {}
+// A Claude Team subscription.
+message SessionSubscriptionTypeTeam {}
+// A Claude Enterprise seat.
+message SessionSubscriptionTypeEnterprise {}
+
+// The account's seat spend for the current month: what has been spent
+// against the seat's monthly allotment. The vendor states no billing-period
+// reset, so none is carried.
+message SessionAccountUsageSeatSpend {
+  // The seat's monthly allotment (the vendor's extra_usage.monthly_limit).
+  SessionMoney allotment = 1;
+  // Month-to-date spend (the vendor's extra_usage.used_credits), in the
+  // allotment's currency. UNSET while the vendor has reported no spend
+  // figure.
+  optional SessionMoney spent = 2;
+}
+
+// An amount of money as the vendor states it.
+message SessionMoney {
+  // The amount in minor units of the currency (cents for USD).
+  int64 amount_minor = 1;
+  // The ISO 4217 currency code, verbatim (e.g. "USD").
+  string currency = 2;
+}
+
+// The allowance windows were read.
 message SessionAccountUsageAvailable {
   // The rolling five-hour window.
   SessionUsageWindow five_hour = 1;

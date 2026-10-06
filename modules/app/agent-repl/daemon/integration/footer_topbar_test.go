@@ -726,6 +726,36 @@ func TestFooterAllowanceComposedFromAccountUsageAndRateLimitStatus(t *testing.T)
 	}
 }
 
+func TestFooterSeatSpendDrawnFromASeatSpendSample(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	footer := f.d.WatchFooter(f.ws)
+	awaitFooter(t, f, footer, "idle before any usage sample", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetStatus().GetIdle() != nil
+	})
+
+	// Act: a per-seat account's sample, $223.88 of $12,000.
+	f.shim.PushSessionUpdate(&conversationv1.SessionUpdate{
+		Update: &conversationv1.SessionUpdate_AccountUsage{AccountUsage: &conversationv1.SessionAccountUsage{
+			ObservedAtMs: 1_700_000_000_000,
+			Outcome: &conversationv1.SessionAccountUsage_SeatSpend{SeatSpend: &conversationv1.SessionAccountUsageSeatSpend{
+				Allotment: &conversationv1.SessionMoney{AmountMinor: 1_200_000, Currency: "USD"},
+				Spent:     &conversationv1.SessionMoney{AmountMinor: 22_388, Currency: "USD"},
+			}},
+		}},
+	})
+
+	// Assert: the enduring line is the seat's spend, with its utilization.
+	got := awaitFooter(t, f, footer, "the seat's spend drawn", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetStatus().GetIdle().GetActivity().GetUnpinned().GetEnduring().GetSeatSpend() != nil
+	})
+	seat := got.GetStrip().GetStatus().GetIdle().GetActivity().GetUnpinned().GetEnduring().GetSeatSpend()
+	if seat.GetSpent().GetAmountMinor() != 22_388 || seat.GetUtilization() != 22_388.0/1_200_000.0 {
+		t.Fatalf("seat_spend = %+v, want 22388 minor spent at 22388/1200000 utilization", seat)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Deny-and-continue.
 // ---------------------------------------------------------------------------

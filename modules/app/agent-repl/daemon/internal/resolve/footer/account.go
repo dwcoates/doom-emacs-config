@@ -22,13 +22,18 @@ import (
 // spoken.
 
 // accountUsage is ONE account root's usage evidence.
+//
+// THE BILLING MODE IS ONE OF TWO (owner ruling, 2026-10-06): allowance
+// windows (`rate`, a subscription) or a seat's spend (`seat`, a per-seat
+// account), never both. A seat-spend sample clears the windows and a
+// windows sample clears the seat, so whichever the vendor reported last is
+// the mode drawn.
 type accountUsage struct {
 	// rate is the drawn allowances.
 	rate rateState
-	// noAllowance reports that the vendor's usage service answered for the
-	// account with NO five-hour window: an account billed by spend rather
-	// than by allowance windows. Any figure for a window outranks it.
-	noAllowance bool
+	// seat is a per-seat account's spend, nil unless the account's newest
+	// sample said it is billed per seat.
+	seat *seatSpend
 	// generation counts the changes to this evidence. `mutate` compares it
 	// across a change to know the root's other workspaces need republishing
 	// and the evidence persisting, and the persister orders its writes by it.
@@ -42,19 +47,33 @@ func (u *accountUsage) figured() bool {
 
 // observed reports whether anything at all is known about the account.
 func (u *accountUsage) observed() bool {
-	return u.figured() || u.noAllowance
+	return u.figured() || u.seat != nil
 }
 
 // arm names what the enduring line draws from this evidence, for the logs.
 func (u *accountUsage) arm() string {
 	switch {
+	case u.seat != nil:
+		return "seat_spend"
 	case u.figured():
 		return "usage"
-	case u.noAllowance:
-		return "no_allowance"
 	default:
 		return "unobserved"
 	}
+}
+
+// seatSpend is a per-seat account's month-to-date spend against its monthly
+// allotment, in minor units of one currency.
+type seatSpend struct {
+	// allotmentMinor is the seat's monthly allotment.
+	allotmentMinor int64
+	// spentMinor is the month-to-date spend, nil while none is reported.
+	spentMinor *int64
+	// currency is the ISO 4217 code both amounts are in.
+	currency string
+	// sampledAtMs is the shim's stamp on the sample that read it, which
+	// keeps an older sample from overwriting a newer one.
+	sampledAtMs int64
 }
 
 // touch records that new evidence was filed at `at`.
@@ -65,23 +84,39 @@ func (u *accountUsage) touch(at time.Time) {
 
 // record is the evidence as the state store keeps it.
 func (u *accountUsage) record(root string) wsm.AccountUsage {
-	return wsm.AccountUsage{
-		ConfigDir:   root,
-		ObservedAt:  u.rate.at,
-		NoAllowance: u.noAllowance,
-		Session:     u.rate.session.figures(),
-		Weekly:      u.rate.weekly.figures(),
-		Overage:     u.rate.overage.figures(),
+	rec := wsm.AccountUsage{
+		ConfigDir:  root,
+		ObservedAt: u.rate.at,
+		Session:    u.rate.session.figures(),
+		Weekly:     u.rate.weekly.figures(),
+		Overage:    u.rate.overage.figures(),
 	}
+	if u.seat != nil {
+		rec.Seat = &wsm.SeatSpend{
+			AllotmentMinor: u.seat.allotmentMinor,
+			SpentMinor:     u.seat.spentMinor,
+			Currency:       u.seat.currency,
+			SampledAtMs:    u.seat.sampledAtMs,
+		}
+	}
+	return rec
 }
 
 // usageFromRecord rebuilds an account's evidence from its stored row.
 func usageFromRecord(rec wsm.AccountUsage) *accountUsage {
-	u := &accountUsage{noAllowance: rec.NoAllowance}
+	u := &accountUsage{}
 	u.rate.at = rec.ObservedAt
 	u.rate.session.restore(rec.Session)
 	u.rate.weekly.restore(rec.Weekly)
 	u.rate.overage.restore(rec.Overage)
+	if rec.Seat != nil {
+		u.seat = &seatSpend{
+			allotmentMinor: rec.Seat.AllotmentMinor,
+			spentMinor:     rec.Seat.SpentMinor,
+			currency:       rec.Seat.Currency,
+			sampledAtMs:    rec.Seat.SampledAtMs,
+		}
+	}
 	return u
 }
 

@@ -22,13 +22,13 @@ func (f *fakeUsageWriter) SetAccountUsage(_ context.Context, usage wsm.AccountUs
 func TestAccountUsageSinkWritesTheEvidence(t *testing.T) {
 	// Arrange.
 	db := &fakeUsageWriter{}
-	usage := wsm.AccountUsage{ConfigDir: "/config", NoAllowance: true}
+	usage := wsm.AccountUsage{ConfigDir: "/config", Seat: &wsm.SeatSpend{AllotmentMinor: 1, Currency: "USD"}}
 
 	// Act.
 	err := accountUsageSink(db)(usage)
 
 	// Assert.
-	if err != nil || len(db.calls) != 1 || db.calls[0].ConfigDir != "/config" || !db.calls[0].NoAllowance {
+	if err != nil || len(db.calls) != 1 || db.calls[0].ConfigDir != "/config" || db.calls[0].Seat == nil {
 		t.Fatalf("sink = %v, calls = %+v, want exactly the evidence written", err, db.calls)
 	}
 }
