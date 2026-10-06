@@ -235,7 +235,7 @@ CREATE TABLE drain_schedule (
   deadline INTEGER NOT NULL,
   set_at   INTEGER NOT NULL
 );
-` + feedTextScaleDDL + durableFeedRowsDDL + rolledBackTurnsDDL + newsDigestDDL + newsDigestRedisplayDDL + agentReplSessionDDL + newsDigestHistoryDDL
+` + feedTextScaleDDL + durableFeedRowsDDL + rolledBackTurnsDDL + newsDigestDDL + newsDigestRedisplayDDL + agentReplSessionDDL + newsDigestHistoryDDL + sidebarViewDDL
 
 // durableFeedRowsDDL is the layout-16 addition: the daemon-synthesized feed
 // rows a NEW DAEMON must draw again (a merge's bubble), each with the order key

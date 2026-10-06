@@ -78,7 +78,7 @@ func (s *store) UpdateTask(ctx context.Context, id TaskID, change TaskChange) er
 func (s *store) Tasks(ctx context.Context) ([]Task, error) {
 	var out []Task
 	err := s.read(ctx, "daemon.wsm.tasks", dlog.Context{}, func(ctx context.Context) error {
-		rows, err := s.db().QueryContext(ctx, `SELECT id, title, done, created_at FROM tasks ORDER BY created_at, id`)
+		rows, err := s.db().QueryContext(ctx, `SELECT id, title, done, folded, created_at FROM tasks ORDER BY created_at, id`)
 		if err != nil {
 			return err
 		}
@@ -89,7 +89,7 @@ func (s *store) Tasks(ctx context.Context) ([]Task, error) {
 				task    Task
 				created int64
 			)
-			if err := rows.Scan(&task.ID, &task.Title, &task.Done, &created); err != nil {
+			if err := rows.Scan(&task.ID, &task.Title, &task.Done, &task.Folded, &created); err != nil {
 				return err
 			}
 			task.CreatedAt = fromNanos(created)
