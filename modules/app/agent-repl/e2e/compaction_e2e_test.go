@@ -1,5 +1,5 @@
 // compaction_e2e_test.go — SPEC.md section C, "Compaction + rotation" (§C
-// #22-26). Drives the real `!compact`, `!compact-auto` and `!compact-failed`
+// #22-25; #26 retired 2026-10-06). Drives the real `!compact`, `!compact-auto` and `!compact-failed`
 // fake-SDK scenarios (agent-shim/claude/shim/src/fake/scenarios/session.ts)
 // through the real shim, and asserts the resulting facts on the daemon's
 // real Connect API — never a hand-written store row.
@@ -27,8 +27,9 @@
 //     (Landing 8, docs/overhaul/PROTO-CHANGES.md) FeedContextCutCompactionFailed
 //     — see TestCompactionFailed's header for the exact shape.
 //   - proto/src/frontend/v1/footer.proto: FooterSubStatusWorkingCompacting
-//     (the in-progress signal) and FooterStatusActivityContextBudget (the
-//     context-budget-warning carrier).
+//     (the in-progress signal). No footer line warns that the context is
+//     nearly full (owner ruling, 2026-10-06), so a failed compaction raises
+//     no salient line.
 //
 // Scenario shapes were resolved by reading
 // agent-shim/claude/shim/src/fake/scenarios/session.ts's COMPACT, COMPACT_AUTO
@@ -125,13 +126,6 @@ func cpFindCompactionFailedSeparation(rows []*frontendv1.FeedRow) *frontendv1.Fe
 		}
 	}
 	return nil
-}
-
-// cpContextBudgetText answers the footer's standing context-budget line,
-// whichever status arm it stands under — it rides every arm's salient oneof —
-// or "" if none stands.
-func cpContextBudgetText(v *frontendv1.FooterView) string {
-	return footerContextBudget(v)
 }
 
 // cpDriveObservingInProgress submits prompt, awaits the footer's
@@ -343,10 +337,12 @@ func TestCompactionFailed(t *testing.T) {
 	w := NewWorld(t, WorldOpts{})
 	// THE FAILED COMPACTION IS THE SUBJECT. `!compact-failed` asks the vendor
 	// to reject the summarizing request, and both records below are the
-	// daemon stating that outcome: the feed's divider says nothing was cut,
-	// and the footer says the context is still too large.
+	// daemon stating that outcome: the feed's marker says nothing was cut,
+	// and the footer records the failure without raising a line.
 	w.ExpectWarnings("daemon.feed.compaction_failed", "daemon.footer.on_context_cut")
 	ws, configDir := cpNewWorkspace(t, w)
+	footer := w.WatchFooter(ws)
+	defer footer.Close()
 	const wantError = "the summarizing request was rejected"
 
 	// Act
@@ -378,55 +374,15 @@ func TestCompactionFailed(t *testing.T) {
 	if compacted := cpFindCompactedSeparation(rows); compacted != nil {
 		t.Errorf("found a FeedContextCutCompacted separation row after !compact-failed, want only compaction_failed: %v", compacted)
 	}
-}
 
-// ---------------------------------------------------------------------------
-// #26 ContextBudgetWarning — `!context-budget-warning`. PROTO-CHANGES.md
-// Landing 4/5: AgentUpdate.context_budget_warning = 7. Marked
-// UNGROUNDED/INVENTED in the shim's own manifest (no vendor capture — not
-// even the one literally named `context-budget-warning` — carries a record
-// of this spelling; session.ts's own doc comment on the scenario says so
-// outright, "pending a grounding capture... ruling 6... LANDING 5 IS NOT
-// OVERTURNED"). This test asserts the WIRE SHAPE reaches a client-visible
-// surface, not that it matches a real vendor recording.
-//
-// SETTLED (docs/overhaul/PROTO-CHANGES.md "Landing 8", 2026-09-02, RULED, no
-// proto change): context_budget_warning gets NO feed row — it is footer
-// only. The surface used below, FooterStatusActivityContextBudget
-// (proto/src/frontend/v1/footer.proto), legal under BOTH the thinking and
-// idle status arms ("standing while it holds"), is therefore the ONLY
-// client-visible carrier of this fact by design, not merely the only one
-// this suite could find in the contract docs.
-// ---------------------------------------------------------------------------
-
-func TestContextBudgetWarning(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	w := NewWorld(t, WorldOpts{})
-	ws, configDir := cpNewWorkspace(t, w)
-	footer := w.WatchFooter(ws)
-	defer footer.Close()
-
-	// Act: drive the (UNGROUNDED, invented per the shim manifest — see
-	// header) scenario to completion.
-	driveScenarioToCompletion(t, w, ws, configDir, "context-budget-warning")
-
-	// Assert: the footer's standing activity line carries the warning text
-	// VERBATIM. FooterStatusActivityContextBudget.text is "the composed line,
-	// drawn verbatim" (proto/src/frontend/v1/footer.proto:664-667), and the
-	// converter copies the attachment's `content` through unchanged
-	// (agent-shim/claude/shim/src/convert/attachments.ts's
-	// convertContextBudgetWarning: `const text = record.attachment?.content`,
-	// then ContextBudgetWarningSchema{text}), which the footer resolver in turn
-	// stores as `warning.GetText()` with no composition of its own
-	// (daemon/internal/resolve/footer/resolver.go OnContextBudgetWarning). So
-	// the whole path is pinned by one exact string: the scenario's own
-	// attachment content (session.ts's CONTEXT_BUDGET_WARNING).
-	const wantBudgetText = "The conversation is approaching its context window budget."
-	view := cpAwaitFooterView(t, w, footer.Stream, "context-budget activity line", func(v *frontendv1.FooterView) bool {
-		return cpContextBudgetText(v) != ""
+	// Assert: the footer raises NO salient line for it (owner ruling,
+	// 2026-10-06): the feed's outcome marker is the failure's whole account.
+	// The first idle view follows the cut, since the cut and the terminal
+	// after it are the only edges that end the compacting turn.
+	idle := cpAwaitFooterView(t, w, footer.Stream, "the idle footer after !compact-failed", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetStatus().GetIdle() != nil
 	})
-	if got := cpContextBudgetText(view); got != wantBudgetText {
-		t.Errorf("footer context-budget activity text = %q, want %q", got, wantBudgetText)
+	if salient := footerTier(idle, "salient"); salient != nil {
+		t.Errorf("footer raised a salient line %v after a failed compaction, want none", salient.Interface())
 	}
 }
