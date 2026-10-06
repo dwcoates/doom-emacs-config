@@ -136,6 +136,12 @@ export interface ToolResultOptions {
 
 /** How the turn ends. */
 export interface ResultSpec {
+  /**
+   * The turn wrote NO turn record to the transcript: a turn the CLI ran only
+   * on the stream, answering a transcript-only queued notification (the
+   * stop a resume replays). Absent for every ordinary turn.
+   */
+  readonly streamOnly?: boolean;
   /** `success` or one of the four declared error subtypes. */
   readonly subtype:
     | "success"

@@ -144,11 +144,14 @@ describe("a stopped task every rewind replays (ship-gns)", () => {
   ) {
     const first = await driveScenario([arm ? "!stop-on-rewind" : "hello"]);
     const at = resumeSessionAt(first);
-    return driveScenario(["next send"], {
+    const driven = await driveScenario(["next send"], {
       resume: first.sessionId,
       clientUuids: ["client-send-2"],
       opts: { configDir: first.configDir, cwd: first.cwd, ...(at === undefined ? {} : { resumeSessionAt: at }) },
     });
+    // THE ONE FILE BOTH QUERIES WROTE is under the FIRST drive's roots: the
+    // second drive's own `transcript()` reads its unused temp workspace.
+    return { ...driven, transcript: () => first.transcript() };
   }
 
   /** The `stopped` task notifications a drive delivered. */
@@ -193,6 +196,54 @@ describe("a stopped task every rewind replays (ship-gns)", () => {
 
     // Assert
     expect(driven.messages.slice(0, end + 1).filter((message) => "user_message_uuid" in message)).toEqual([]);
+  });
+
+  it("writes the stop as a transcript-only notification record parented on the fork point", async () => {
+    // Arrange + Act
+    const driven = await rewound(true);
+    const fork = String(driven.transcript().find((line) => line.type === "assistant")?.uuid);
+    const notice = driven.transcript().find((line) => line.queueTranscriptOnly === true);
+
+    // Assert: the real CLI's shape (ship-gns, 2026-10-02).
+    expect({
+      parent: notice?.parentUuid,
+      origin: notice?.origin,
+      source: notice?.promptSource,
+      promptId: typeof notice?.promptId,
+      stopped: String((notice?.message as { content: string }).content).includes("<status>stopped</status>"),
+    }).toEqual({ parent: fork, origin: { kind: "task-notification" }, source: "system", promptId: "string", stopped: true });
+  });
+
+  it("answers the stop with no reply and no turn record", async () => {
+    // Arrange + Act
+    const driven = await rewound(true);
+    const end = driven.messages.indexOf(ofType(driven, "result")[0] as never);
+
+    // Assert: one turn record for the arming turn, one for the next send.
+    expect([
+      driven.messages.slice(0, end).filter((message) => (message as { type: string }).type === "assistant"),
+      driven.transcript().filter((line) => line.subtype === "turn_duration").length,
+    ]).toEqual([[], 2]);
+  });
+
+  it("parents the next send's prompt on the stop's notification", async () => {
+    // Arrange + Act
+    const driven = await rewound(true);
+    const notice = driven.transcript().find((line) => line.queueTranscriptOnly === true);
+    const prompt = driven.transcript().filter((line) => line.promptSource === "sdk").at(-1);
+
+    // Assert
+    expect([typeof notice?.uuid, prompt?.parentUuid === notice?.uuid]).toEqual(["string", true]);
+  });
+
+  it("names no task kind on the stream's stop, as the CLI does for a previous session's run", async () => {
+    // Arrange + Act
+    const driven = await rewound(true);
+
+    // Assert
+    expect(stops(driven).map((message) => [(message as { task_type?: string }).task_type, typeof (message as { tool_use_id?: string }).tool_use_id])).toEqual([
+      [undefined, "string"],
+    ]);
   });
 
   it("replays nothing on a plain resume of an armed session", async () => {

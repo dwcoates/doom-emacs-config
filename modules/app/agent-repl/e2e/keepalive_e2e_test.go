@@ -2,12 +2,18 @@
 //
 // Contract: agent-shim/claude/shim/src/engine/keepalive.ts's "THE SPAN
 // INVARIANT" (owner requirement, 2026-10-06). The shim's keep-alive rewinds
-// the vendor context to an anchor (the last assistant record of a real turn),
-// and before any rewind discards anything it asserts that every turn between
-// the anchor and now is keep-alive material: the keep-alive's own turn, or a
-// vendor turn the keep-alive's own rewind set off. A real prompt, a real
-// record or a genuine vendor-started turn in that span REFUSES the rewind at
-// ERROR and keeps the content.
+// the vendor context to an anchor (the last record of real conversation: an
+// assistant or a user record of a real or genuine vendor-started turn), and
+// before any rewind discards anything it asserts that every turn between the
+// anchor and now is keep-alive material: the keep-alive's own turn, or a
+// vendor turn the keep-alive's own rewind set off. Anything else REFUSES the
+// rewind at ERROR and keeps the content.
+//
+// ORDINARY USE NEVER REFUSES, and that is what this file proves: a completed
+// task's turn and an interrupted turn's own record both ADVANCE the anchor,
+// so every scenario here rewinds exactly the keep-alive. The refusal itself
+// (a send the vendor left no record of, or a record no turn owns) has no
+// realistic path through a daemon world; the shim's unit suites drive it.
 //
 // Everything runs for real except the vendor (the shim's `--fake` engine) and
 // git (the scripted fake); the keep-alive cadence is compressed by the shim's
@@ -25,12 +31,13 @@
 // starts the shim's session with the first prompt, so no beat can precede it
 // deterministically. The shim's unit and integration suites cover it.
 //
-// The shim's ERROR records are not part of the daemon harness's warning sweep
-// (which reads the daemon's own pid), so the refusal tests assert the ERROR
-// level directly on the shim's record.
+// The shim's records are not part of the daemon harness's warning sweep (which
+// reads the daemon's own pid), so each test reads the shim's log for a
+// refusal itself.
 package e2e
 
 import (
+	"database/sql"
 	"fmt"
 	"strings"
 	"testing"
@@ -41,6 +48,8 @@ import (
 	"connectrpc.com/connect"
 
 	"claude-repld/integration/harness"
+
+	_ "modernc.org/sqlite"
 )
 
 const (
@@ -50,6 +59,8 @@ const (
 	rewindingPrefix = "REWINDING the vendor context"
 	// The fake vendor's ship-gns replay, run on each truncating resume once
 	// `!stop-on-rewind` armed the session.
+	// The CLI's own summary of the replayed stop, on both planes.
+	stopReplaySummary = "didn't finish before the previous session ended"
 	stopReplayMessage = "fake vendor replays a task STOPPED by the rewind and answers it in a turn of its OWN before the next send"
 )
 
@@ -227,11 +238,12 @@ func TestCompletedTaskBesideKeepAliveAnchorsTheRewind(t *testing.T) {
 	}
 }
 
-// TestRealRecordInTheSpanRefusesTheRewind — a real turn interrupted inside a
-// tool call leaves its tool result past its last assistant record (the
-// anchor). A rewind would drop that result, so the invariant refuses it at
-// ERROR, naming the real turn and the record.
-func TestRealRecordInTheSpanRefusesTheRewind(t *testing.T) {
+// TestInterruptedTurnAnchorsTheRewindOnItsOwnRecord — interrupting a turn
+// mid-tool is ordinary use: the turn's tool result lands after its last
+// assistant record. That result is the turn's own real record, so it advances
+// the anchor (ruled 2026-10-06), the next rewind keeps it, and nothing is
+// refused.
+func TestInterruptedTurnAnchorsTheRewindOnItsOwnRecord(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	w, ws, shimLog := keepaliveWorld(t)
@@ -251,15 +263,19 @@ func TestRealRecordInTheSpanRefusesTheRewind(t *testing.T) {
 	AwaitTurnEnded(t, w, ws, turn)
 
 	// Act
-	refused := w.Daemon.AwaitLogRecord(shimLog, "the invariant refusing the rewind", isRefusal)
+	rewind := w.Daemon.AwaitLogRecord(shimLog, "the first rewind before a beat", isRewind("keepalive"))
 
 	// Assert
-	offending := spanTurns(t, refused, "offending")
-	if len(offending) != 1 || offending[0]["kind"] != "real" || offending[0]["turn_id"] != turn.GetValue() {
-		t.Errorf("the refusal names offending turns %v, want exactly the interrupted real turn %q", offending, turn.GetValue())
+	if got := fmt.Sprint(rewind.Context["anchor_turn_id"]); got != turn.GetValue() {
+		t.Errorf("the rewind anchors on turn %q, want the interrupted turn %q", got, turn.GetValue())
 	}
-	if uuids, _ := offending[0]["uuids"].([]any); len(uuids) == 0 {
-		t.Errorf("the refusal names no record of the interrupted turn, want its tool result's uuid")
+	if got := spanKinds(t, rewind, "discarded_span"); fmt.Sprint(got) != "[keepalive]" {
+		t.Errorf("the rewind discards span kinds %v, want exactly the keep-alive", got)
+	}
+	for _, r := range shimRecords(t, shimLog) {
+		if isRefusal(r) {
+			t.Errorf("the shim refused a rewind %v, want the interrupted turn's record anchored", r.Context)
+		}
 	}
 }
 
@@ -286,11 +302,15 @@ func TestStopReplayedByEveryRewindNeverLoops(t *testing.T) {
 			},
 		},
 		{
-			name: "the stop's answer is discarded with the keep-alive",
+			// THE REAL SHAPE ANSWERS THE STOP WITH NO REPLY (a lone result), and
+			// its notification is a transcript-only record the stream never
+			// carries: the span the shim sees past the anchor is the keep-alive.
+			name: "every rewind discards exactly the keep-alive",
 			assert: func(t *testing.T, _ *World, _ *workspacev1.WorkspaceRef, _, _ string, rewinds []harness.LogRecord) {
-				last := rewinds[len(rewinds)-1]
-				if got := spanKinds(t, last, "discarded_span"); fmt.Sprint(got) != "[keepalive keepalive_consequence]" {
-					t.Errorf("the last rewind discards span kinds %v, want the keep-alive and the stop's answer", got)
+				for i, r := range rewinds {
+					if got := spanKinds(t, r, "discarded_span"); fmt.Sprint(got) != "[keepalive]" {
+						t.Errorf("rewind #%d discards span kinds %v, want exactly the keep-alive", i+1, got)
+					}
 				}
 			},
 		},
@@ -301,6 +321,43 @@ func TestStopReplayedByEveryRewindNeverLoops(t *testing.T) {
 					if isRefusal(r) {
 						t.Errorf("the shim refused a rewind %v, want the stop's answer judged keep-alive material", r.Context)
 					}
+				}
+			},
+		},
+		{
+			name: "nothing of the replayed stop is served",
+			assert: func(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, _, _ string, _ []harness.LogRecord) {
+				for _, row := range feedRows(t, w, ws) {
+					if strings.Contains(row.String(), stopReplaySummary) {
+						t.Errorf("feed row %v draws the replayed stop, want it never served", row)
+					}
+				}
+			},
+		},
+		{
+			name: "nothing of the replayed stop is stored",
+			assert: func(t *testing.T, w *World, _ *workspacev1.WorkspaceRef, _, _ string, _ []harness.LogRecord) {
+				db, err := sql.Open("sqlite", "file:"+w.Store.DBPath+"?mode=ro")
+				if err != nil {
+					t.Fatalf("e2e: opening the store database read-only: %v", err)
+				}
+				defer db.Close()
+				rows, err := db.QueryContext(w.Ctx(),
+					`SELECT kind, COUNT(*) FROM entry WHERE instr(frame, CAST(? AS BLOB)) > 0 GROUP BY kind`, stopReplaySummary)
+				if err != nil {
+					t.Fatalf("e2e: counting rows carrying the replayed stop: %v", err)
+				}
+				defer rows.Close()
+				for rows.Next() {
+					var kind string
+					var count int
+					if err := rows.Scan(&kind, &count); err != nil {
+						t.Fatalf("e2e: reading a row count: %v", err)
+					}
+					t.Errorf("the store holds %d %q row(s) carrying the replayed stop, want none", count, kind)
+				}
+				if err := rows.Err(); err != nil {
+					t.Fatalf("e2e: iterating row counts: %v", err)
 				}
 			},
 		},
