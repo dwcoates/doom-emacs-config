@@ -221,3 +221,18 @@ func TestLoadOlderAtTheConversationsStartLoadsNothing(t *testing.T) {
 		t.Fatalf("reads = %d, want no read past the start", got)
 	}
 }
+
+func TestLoadThroughWithNoSourceIsHistoryUnavailableNotNotFound(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.mainBook(2, promptsBook(4)).noSource = true
+	h.openPage(rootFeed(), "reader-1")
+
+	// Act.
+	_, _, err := h.loadThrough("turn-0")
+
+	// Assert: no shim to read from says nothing about where the target is.
+	if !errors.Is(err, ErrHistoryUnavailable) || !errors.Is(err, ErrNoHistorySource) {
+		t.Fatalf("LoadThrough err = %v, want ErrHistoryUnavailable wrapping ErrNoHistorySource", err)
+	}
+}
