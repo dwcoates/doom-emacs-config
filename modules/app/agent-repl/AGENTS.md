@@ -83,22 +83,26 @@ How each kind of entry point routes through it:
 and fails on any entry point that bypasses the helper, and on any live-runtime
 or deploy path that references it.
 
-### CPU load only when the owner asks, and only through `bin/with-cpu-load.sh`
+### Never load the machine to reproduce a flake (owner ruling, 2026-10-06)
 
-The owner does not want the machine under load (2026-09-30). Reproducing a
-flake under CPU load is done ONLY when the owner asks for it, and then ONLY
-through `bin/with-cpu-load.sh <nloops> <command...>`. Never hand-write busy
-loops: in one evening a `( while :; do :; done ) &` generator outlived its
-author twice (zsh does not word-split `kill $PIDS`, so nothing was killed and a
-`wait` hung on the loops; and a `trap` cleanup never runs when its shell is
-killed outright).
+No artificial CPU load, ever, to reproduce a flaky or timing-dependent failure:
+no `bin/with-cpu-load.sh`, no busy loops, no batches oversubscribed to stress
+the host. The host is the owner's working machine; on 2026-10-06 an agent's
+32 load loops plus 48 test processes (load average 173) preceded the owner's
+keyboard dying, twice that evening.
 
-- Each of the helper's loops polls the helper's pid and exits the moment it is
-  gone, so no ending of the helper -- an exit, a signal, a SIGKILL -- leaves a
-  loop spinning.
-- The command runs as its own process group and is waited on, so a TERM stops
-  it, everything it started, and the loops at once.
-- `bin/test-with-cpu-load.sh` (the `cpu-load-harness` suite) holds all of this.
+Instead:
+
+- INSTRUMENT FIRST: add the log records that would show every link of the
+  suspected chain (see "A diagnosis is evidenced in the logs, end to end").
+- TRY TO REPRODUCE under ordinary conditions only: the suite as it normally
+  runs, or the targeted test repeated at its normal parallelism.
+- IF IT DOES NOT REPRODUCE, LAND THE INSTRUMENTATION AND MOVE ON. The next
+  occurrence, in a test run or in production, carries the evidence, and the
+  diagnosis resumes from those records.
+
+`bin/with-cpu-load.sh` and its harness (`bin/test-with-cpu-load.sh`, the
+`cpu-load-harness` suite) remain for the owner's own use only; no agent runs it.
 
 ### When to run which tests (owner ruling, 2026-10-06)
 
