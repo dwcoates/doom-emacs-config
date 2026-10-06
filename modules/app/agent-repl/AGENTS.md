@@ -320,8 +320,12 @@ unreachable from a live process.
     non-SSD device), and a whole run under it took twice as long and missed
     timing bounds. Utility still yields to the live runtime's normal-tier I/O
     on the SSD. A run that fell back to `/tmp` keeps the throttle tier.
+  - MOUNTED NOBROWSE, which keeps Spotlight off it: mounted plainly, mds
+    opened an index store on every run's volume and took part in its
+    unmount (macOS 26.2); a `.metadata_never_index` did not stop it.
   - Always detached when the run ends; a refused detach is forced and
-    reported. A run killed outright leaves an flock'd record in
+    reported, naming what held it (`lsof +f -- <mount>`, read before the
+    force). A run killed outright leaves an flock'd record in
     `/tmp/agent-repl-test-ramdisks`, and the next run reclaims the disk.
   - A RAM disk that cannot be made falls back to `/tmp` with an ERROR line.
 
