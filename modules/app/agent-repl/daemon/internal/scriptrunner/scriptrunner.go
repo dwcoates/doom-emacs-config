@@ -20,6 +20,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"claude-repld/internal/dlog"
 )
@@ -54,6 +55,13 @@ func cleanEnv(env []string) []string {
 	}
 	return out
 }
+
+// cancelOutputBound is how long a run whose context ended waits, after the
+// kill, for the script's output pipe to close. It covers the kernel closing a
+// killed process's descriptors; a child still holding the pipe past it is
+// cut off. It sits well under the daemon's own background-loop join bound
+// (claude-repld's loopJoinBound, 2s), so a cancelled run never spends it.
+const cancelOutputBound = 250 * time.Millisecond
 
 // Runner runs a script in a directory. It is stateless beyond its logger, so
 // one instance serves every caller in the daemon.
@@ -104,6 +112,11 @@ func (r *Runner) RunLines(ctx context.Context, dir string, argv []string, onLine
 
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir = dir
+	// A CANCELLED RUN RETURNS WITHIN cancelOutputBound. The context's end
+	// kills the script, but the output is a pipe, and a child the script
+	// started still holds it open: without a bound, Wait waits for that child
+	// as long as it lives, and the caller's cancellation is not honored.
+	cmd.WaitDelay = cancelOutputBound
 	cmd.Env = cleanEnv(os.Environ())
 	// stdout and stderr are combined, in order, into one buffer: a caller
 	// painting a test gate's output or a deploy step's log wants what a
@@ -116,7 +129,14 @@ func (r *Runner) RunLines(ctx context.Context, dir string, argv []string, onLine
 	out.flush()
 	output := out.buf.String()
 
+	// A SCRIPT THE CONTEXT KILLED DID NOT ANSWER. exec reports the kill as an
+	// *ExitError (signal: killed, exit code -1), which read below as a script
+	// that ran and failed with code -1; it is the context ending, and is
+	// classified as that.
 	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == -1 && ctx.Err() != nil {
+		err = fmt.Errorf("%w (%v)", ctx.Err(), err)
+	}
 	if err == nil {
 		r.log.Debug("daemon.scriptrunner.run", "script ran to completion", dlog.Context{
 			"script": argv[0], "dir": dir, "exit_code": 0,

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -333,5 +334,82 @@ func TestRunPastItsDeadlineIsRecordedAtError(t *testing.T) {
 	}
 	if strings.Join(levels, ",") != "error" {
 		t.Fatalf("record levels = %v, want exactly one error record", levels)
+	}
+}
+
+// runCancelledMidway runs body, cancels the run once the script prints
+// "started", and answers what Run answered.
+func runCancelledMidway(t *testing.T, r *Runner, body string) (int, error) {
+	t.Helper()
+	dir := t.TempDir()
+	script := writeScript(t, dir, "blocks.sh", body)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	_, code, err := r.RunLines(ctx, dir, []string{script}, func(line string) {
+		if line == "started" {
+			cancel()
+		}
+	})
+	return code, err
+}
+
+func TestRunKilledByItsCancelledContextIsACancellationNotAnExitCode(t *testing.T) {
+	// Arrange: a script that blocks until it is killed.
+	r := newRunner(t)
+
+	// Act.
+	_, err := runCancelledMidway(t, r, "echo started\nexec sleep 600\n")
+
+	// Assert.
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Run error = %v, want one wrapping context.Canceled", err)
+	}
+}
+
+func TestRunKilledByItsCancelledContextIsRecordedAtInfo(t *testing.T) {
+	// Arrange.
+	log := dlog.NewTestLogger()
+	r, err := New(log)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// Act.
+	_, _ = runCancelledMidway(t, r, "echo started\nexec sleep 600\n")
+
+	// Assert.
+	var levels []string
+	for _, rec := range log.Records() {
+		levels = append(levels, rec.Level)
+	}
+	if strings.Join(levels, ",") != "info" {
+		t.Fatalf("record levels = %v, want exactly one info record", levels)
+	}
+}
+
+func TestRunCancelledReturnsWhileAChildStillHoldsItsOutput(t *testing.T) {
+	// Arrange: the script starts a child that inherits its output and blocks
+	// reading a fifo; the fifo is written at cleanup so the child then exits.
+	dir := t.TempDir()
+	fifo := filepath.Join(dir, "hold")
+	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
+		t.Fatalf("mkfifo: %v", err)
+	}
+	t.Cleanup(func() {
+		f, err := os.OpenFile(fifo, os.O_WRONLY, 0)
+		if err != nil {
+			t.Errorf("release the child: %v", err)
+			return
+		}
+		_ = f.Close()
+	})
+	r := newRunner(t)
+
+	// Act: Run returning at all is the assertion's subject.
+	_, err := runCancelledMidway(t, r, "cat '"+fifo+"' &\necho started\nwait\n")
+
+	// Assert.
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Run error = %v, want one wrapping context.Canceled", err)
 	}
 }
