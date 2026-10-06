@@ -183,12 +183,14 @@ func (r *resolver) mutate(ws ids.WorkspaceID, operation, message string, ctx dlo
 	r.mu.Lock()
 	s := r.stateLocked(ws)
 	s.seen = true
+	blockBefore := s.vendorBlock()
 	apply(s)
 	view := r.render(ws, s)
 	arm, armChanged, previousArm := s.observeArm(view)
 	line, lineChanged, previousLine := s.observeLine(view)
 	jumps := s.drainJumpNotes()
 	log := r.logOf(ws, s)
+	served, servedNow := servedEdge(ws, blockBefore, s, log)
 	// PUBLISHED UNDER THE LOCK THAT RENDERED IT, so views reach the topic in
 	// the order the changes were made. Published after the unlock, a change
 	// rendered first could be published second, and a stale view overwrote a
@@ -205,6 +207,9 @@ func (r *resolver) mutate(ws ids.WorkspaceID, operation, message string, ctx dlo
 	logArmChange(log, operation, arm, armChanged, previousArm)
 	logLineChange(log, operation, arm, line, lineChanged, previousLine)
 	logJumpNotes(log, jumps)
+	if servedNow {
+		r.tellVendorServes(operation, []vendorServed{served})
+	}
 }
 
 // logArmChange records the PUBLISHED status arm whenever it changes, and only
@@ -269,11 +274,16 @@ func (r *resolver) mutateAll(operation, message string, ctx dlog.Context, apply 
 	r.mu.Lock()
 	global()
 	out := make([]publication, 0, len(r.states))
+	var served []vendorServed
 	for ws, s := range r.states {
 		if !s.seen {
 			continue
 		}
+		blockBefore := s.vendorBlock()
 		apply(s)
+		if edge, ok := servedEdge(ws, blockBefore, s, r.logOf(ws, s)); ok {
+			served = append(served, edge)
+		}
 		view := r.render(ws, s)
 		arm, armChanged, previousArm := s.observeArm(view)
 		line, lineChanged, previousLine := s.observeLine(view)
@@ -301,6 +311,7 @@ func (r *resolver) mutateAll(operation, message string, ctx dlog.Context, apply 
 		logLineChange(p.log, operation, p.arm, p.line, p.lineChanged, p.previousLine)
 		logJumpNotes(p.log, p.jumps)
 	}
+	r.tellVendorServes(operation, served)
 }
 
 // render builds the whole view from the accumulation. Nothing partial is ever
