@@ -170,6 +170,7 @@ a scenario names which pids are alive rather than depending on the host.")
          (agent-repl-test-daemon--link-live nil)
          (agent-repl-daemon--parked-exit nil)
          (agent-repl-daemon--announced-departure nil)
+         (agent-repl-daemon--handed-over nil)
          (agent-repl-link-down-planned nil)
          (agent-repl-test-daemon--timers nil)
          (agent-repl-test-daemon--logs nil)
@@ -1270,6 +1271,53 @@ the spawn, called the daemon booted, and linked to a refused port."
       (agent-repl-daemon--sentinel 'the-daemon-process "finished\n")
       ;; Assert
       (should-not (agent-repl-test-daemon--logged-p :warn "elisp.daemon.exited")))))
+
+(ert-deftest agent-repl-test-daemon-an-exit-after-its-handover-promoted-is-info ()
+  "The successor was promoted off this daemon first; its exit is the handover's."
+  (agent-repl-test-daemon--with-harness
+    (agent-repl-test-daemon--with-own-linked-daemon
+      ;; Arrange: the promotion, then the link standing on the successor.
+      (agent-repl-daemon-on-link-promote conn (agent-repl-connect-open "127.0.0.1:9002"))
+      (setq agent-repl-test-daemon--link-live (agent-repl-connect-open "127.0.0.1:9002"))
+      ;; Act
+      (agent-repl-daemon--sentinel 'the-daemon-process "finished\n")
+      ;; Assert
+      (should (agent-repl-test-daemon--logged-p
+               :info "elisp.daemon.exited status=0 event=finished requested=handover")))))
+
+(ert-deftest agent-repl-test-daemon-an-exit-after-its-handover-promoted-writes-no-warning ()
+  "No WARN for the outgoing daemon of a completed handover."
+  (agent-repl-test-daemon--with-harness
+    (agent-repl-test-daemon--with-own-linked-daemon
+      ;; Arrange
+      (agent-repl-daemon-on-link-promote conn (agent-repl-connect-open "127.0.0.1:9002"))
+      (setq agent-repl-test-daemon--link-live (agent-repl-connect-open "127.0.0.1:9002"))
+      ;; Act
+      (agent-repl-daemon--sentinel 'the-daemon-process "finished\n")
+      ;; Assert
+      (should-not (agent-repl-test-daemon--logged-p :warn "elisp.daemon.exited")))))
+
+(ert-deftest agent-repl-test-daemon-a-parked-exit-decided-by-a-promotion-is-info ()
+  "An exit parked on the link it stood on is the handover's when that link promotes."
+  (agent-repl-test-daemon--with-harness
+    (agent-repl-test-daemon--with-own-linked-daemon
+      ;; Arrange
+      (agent-repl-daemon--sentinel 'the-daemon-process "finished\n")
+      ;; Act
+      (agent-repl-daemon-on-link-promote conn (agent-repl-connect-open "127.0.0.1:9002"))
+      ;; Assert
+      (should (agent-repl-test-daemon--logged-p
+               :info "elisp.daemon.exited status=0 event=finished requested=handover")))))
+
+(ert-deftest agent-repl-test-daemon-a-promotion-off-another-daemon-excuses-nothing ()
+  "A promotion off a daemon this Emacs did not spawn names no process."
+  (agent-repl-test-daemon--with-harness
+    (agent-repl-test-daemon--with-own-linked-daemon
+      ;; Act
+      (agent-repl-daemon-on-link-promote (agent-repl-connect-open "127.0.0.1:9555")
+                                         (agent-repl-connect-open "127.0.0.1:9002"))
+      ;; Assert
+      (should-not agent-repl-daemon--handed-over))))
 
 (ert-deftest agent-repl-test-daemon-a-parked-exit-whose-link-went-down-planned-is-info ()
   "A parked exit whose link then carried the planned ending is INFO, announced."
