@@ -971,3 +971,4 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - 2026-10-06 no script pipes into a reader that can stop early (head, awk exit, sed q, grep -q/-m), the doctor reads launchctl whole, and the roster scan skips nested checkouts(scripts, testrun scans).
 - 2026-10-06 a steady-state transcript with no cwd YET is held at info (reason first_cwd_pending) and warned only past FirstCWDWindow, since the vendor writes a cwd-less queue line first(sidecar held.go).
 - 2026-10-06 the half-written command-file test pins the partial's youth with a future mtime and waits on the sweep's own leave record, never a 150ms probe racing the 250ms settle window(daemon/integration commandfile_test.go).
+- 2026-10-06 the ShutdownNow wedged-shim tests pin the stand-down's arriving deadline against StandBound instead of a 10x wall-clock ceiling a loaded run overran at 524ms(daemon/internal/drain).
