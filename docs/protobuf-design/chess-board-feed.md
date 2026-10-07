@@ -229,3 +229,11 @@ then `frontend.v1`, then the square-click endpoint, then the skill text.
   - `AgentChessBoardFailure.session` is optional, because a call whose input
     named no session is one of the ways the call fails.
 - **Sweep:** nothing obviated; the change only adds.
+
+### 2. `AgentChessBoard`'s oneof is `result`
+
+- **What landed:** `AgentChessBoard.state` became `AgentChessBoard.result`,
+  the name every tool call's lifecycle oneof carries.
+- **Why:** the shim reads a unit's settledness off a `result` oneof
+  (`engine/session.ts`, where foreground work is noted); under any other name
+  the board's start arm read as settled.
