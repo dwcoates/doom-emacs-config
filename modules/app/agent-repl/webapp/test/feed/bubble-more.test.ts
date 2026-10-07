@@ -388,7 +388,7 @@ describe("shouldShowMore: a card title is the other kind it serves", () => {
     expect(shouldShowMore(title)).toBe(shows);
   });
 
-  it("never shows on a title that fits its two lines", () => {
+  it("never shows on a title that fits its one line", () => {
     // Arrange
     const title = titleUnder("tool-fold", false);
     Object.defineProperty(title, "scrollHeight", { configurable: true, value: 40 });

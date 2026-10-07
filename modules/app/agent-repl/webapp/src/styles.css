@@ -2536,18 +2536,20 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
 }
 
 /* ---- title fold (src/feed/title-fold.ts) ---- */
-/* THE TITLE FOLD (owner ruling, 2026-09-23): a tool card's TITLE — the command
-   a shell bubble runs, a tool call's input line (command, path, query or plain
-   input), a skill's invocation, a hook's headline, a subagent's description —
-   is capped at TWO LINES while the fold that owns it is collapsed, and wears the
-   response bubble's fade (the `has-more` rules below) when it
-   actually overflows them. `line-clamp` caps by text rows and `max-height: none`
-   drops each line's own preview cap (`.tool-input`, `.bash-input`), so the two
-   rows are the only limit. This is the ONE title cap: title-fold.ts marks every
-   title site, and no card caps its title any other way. */
+/* THE TITLE FOLD (owner ruling, 2026-10-07, superseding the two-line fade of
+   2026-09-23): a tool card's TITLE — the command a shell bubble runs, a tool
+   call's input line (command, path, query or plain input), a skill's
+   invocation, a hook's headline, a subagent's description — is capped at ONE
+   LINE while the fold that owns it is collapsed, and that line ends in `…`
+   exactly when anything follows it: the clamp makes the engine write the
+   ellipsis, as it does for the ellipsis bubbles below. No fade. `line-clamp`
+   caps by text rows and `max-height: none` drops each line's own preview cap
+   (`.tool-input`, `.bash-input`), so the one row is the only limit. This is
+   the ONE title cap: title-fold.ts marks every title site, and no card caps
+   its title any other way. */
 .title-fold {
   display: -webkit-box;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 1;
   -webkit-box-orient: vertical;
   overflow: hidden;
   max-height: none;
@@ -2575,8 +2577,6 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
 /* A standalone title is its own click-to-expand fold (CAPPED_CLASSES); the
    cursor offers the click only while there is more to reveal. */
 .title-fold-standalone.has-more { cursor: zoom-in; }
-/* Each title's fade blends into its own card's background. */
-.tool-card { --title-fold-bg: var(--tool-card-bg); }
 
 /* FIX2 "MORE BELOW" (owner ruling, 2026-09-15: "a signal that there's more to
    reveal"). A COLLAPSED response or prompt bubble whose content overruns its cap
@@ -2588,21 +2588,18 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
    The fade is absolutely positioned against the box, which the cap holds
    still while collapsed (overflow-y: hidden), so bottom:0 is the visible
    fold. `pointer-events: none` keeps a click on it falling through to
-   click-to-expand. A tool card's TITLE fold (above) wears the same fade from
-   the same rule, fading into its card's `--title-fold-bg`; an output section
-   still never does.
+   click-to-expand. A tool card's TITLE fold (above) never wears it: its
+   ellipsis is its whole signal. An output section never does either.
    THE CLASS NEVER CHANGES LAYOUT (owner rule, 2026-09-23: the user owns the
    scroll). The box it lands on is ALWAYS the pseudo-elements' containing block
    (`position: relative` on the box itself, not on `.has-more`), and the fade
    is out of flow, so the measurer toggling the class moves
    nothing inside or around the box. */
-.bubble > .bubble-box,
-.title-fold {
+.bubble > .bubble-box {
   position: relative;
 }
 /* The bottom fade, over the last ~1.5em, blending content into the bubble bg. */
-.bubble > .bubble-scroll.has-more::after,
-.title-fold.has-more::after {
+.bubble > .bubble-scroll.has-more::after {
   content: "";
   position: absolute;
   left: 0;
@@ -2614,11 +2611,8 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
 .bubble > .bubble-scroll.has-more::after {
   background: linear-gradient(to bottom, transparent, var(--bubble-bg));
 }
-.title-fold.has-more::after {
-  background: linear-gradient(to bottom, transparent, var(--title-fold-bg));
-}
 /* "MORE BELOW" IS THE FADE ONLY, NEVER A CHEVRON (owner ruling, 2026-09-23),
-   on every bubble and every title fold: nothing draws a glyph from `has-more`,
+   on every bubble: nothing draws a glyph from `has-more`,
    and no `::before` keys on it. styles.test.ts fails any rule that does. */
 /* THE ELLIPSIS INSTEAD OF THE FADE (owner rulings, 2026-09-27). A bubble whose
    spec chooses it (`data-more="ellipsis"`, src/bubble/draw.ts: a held prompt)
@@ -4863,9 +4857,9 @@ bubble-body.bubble-body { display: block; }
    adopt it. Yellow for now (var(--token-yellow)). */
 .token-count { color: var(--token-yellow); }
 .subagent-tokens { font-size: 0.7rem; }
-/* The description is the bubble's TITLE: the shared two-line title fold
-   (`.title-fold`, title-fold.ts) caps it, in place of the one-line ellipsis it
-   wore before (owner ruling, 2026-09-23). The width cap stays. */
+/* The description is the bubble's TITLE: the shared one-line title fold
+   (`.title-fold`, title-fold.ts) caps it and writes its ellipsis. The width
+   cap stays. */
 .subagent-description {
   max-width: 24rem;
 }
