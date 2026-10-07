@@ -81,17 +81,25 @@ func (n *Notifier) Post(ws ids.WorkspaceID, kind string, compose Compose) {
 		log.Info(opPost, "Emacs is focused; no desktop banner", nil)
 		return
 	}
+	if !n.spawn(func() { n.show(ws, log, compose) }) {
+		log.Info(opPost, "the daemon is standing down; no desktop banner", nil)
+	}
+}
+
+// spawn runs work on a goroutine Close joins, answering false (and running
+// nothing) once Close has begun.
+func (n *Notifier) spawn(work func()) bool {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	if n.closed {
-		log.Info(opPost, "the daemon is standing down; no desktop banner", nil)
-		return
+		return false
 	}
 	n.wg.Add(1)
 	go func() {
 		defer n.wg.Done()
-		n.show(ws, log, compose)
+		work()
 	}()
+	return true
 }
 
 // Raise posts an agent notification's banner: a permission ask, a question,

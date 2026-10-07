@@ -149,15 +149,25 @@ type programBackend struct {
 // when set (override), else the platform's program on PATH. An error names a
 // platform with no banner program or a program that is not installed.
 func NewBackend(platform Platform, override string, lookPath func(string) (string, error), runner Runner) (Backend, error) {
-	bin := override
-	if bin == "" {
-		found, err := lookPath(platform.Program)
-		if err != nil {
-			return nil, fmt.Errorf("the banner program %q is not installed: %w", platform.Program, err)
-		}
-		bin = found
+	bin, err := resolveProgram("banner", platform.Program, override, lookPath)
+	if err != nil {
+		return nil, err
 	}
 	return &programBackend{bin: bin, platform: platform, runner: runner}, nil
+}
+
+// resolveProgram answers the binary one of the notifier's programs runs:
+// override when set, else program on PATH. role names the program in the
+// error a program that is not installed answers.
+func resolveProgram(role, program, override string, lookPath func(string) (string, error)) (string, error) {
+	if override != "" {
+		return override, nil
+	}
+	found, err := lookPath(program)
+	if err != nil {
+		return "", fmt.Errorf("the %s program %q is not installed: %w", role, program, err)
+	}
+	return found, nil
 }
 
 // Program implements Backend.
