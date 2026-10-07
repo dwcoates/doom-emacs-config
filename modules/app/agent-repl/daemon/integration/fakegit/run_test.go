@@ -1808,3 +1808,103 @@ func TestAnUpstreamBranchResolvesToWhatTheFetchBringsIn(t *testing.T) {
 		t.Fatalf("fetch %+v, rev-parse %+v; want origin/main resolved", fetched, got)
 	}
 }
+
+func TestUpdateRefCreatesANewRef(t *testing.T) {
+	// Arrange.
+	s, repo, dir := world(t)
+	head := repo.BranchHeads["main"]
+
+	// Act.
+	got := Run(s, "/", []string{"-C", dir, "update-ref", "-m", "keep", "refs/agent-repl/reaped/x/1", head, ""})
+
+	// Assert.
+	if got.Exit != 0 || repo.Refs["refs/agent-repl/reaped/x/1"] != head {
+		t.Fatalf("update-ref create = %+v, refs %v, want the ref at %s", got, repo.Refs, head)
+	}
+}
+
+func TestUpdateRefCreateRefusesAnExistingRef(t *testing.T) {
+	// Arrange.
+	s, repo, dir := world(t)
+	head := repo.BranchHeads["main"]
+	Run(s, "/", []string{"-C", dir, "update-ref", "-m", "keep", "refs/agent-repl/reaped/x/1", head, ""})
+
+	// Act.
+	got := Run(s, "/", []string{"-C", dir, "update-ref", "-m", "keep", "refs/agent-repl/reaped/x/1", head, ""})
+
+	// Assert.
+	if got.Exit != 128 || !strings.Contains(got.Stderr, "already exists") {
+		t.Fatalf("second update-ref create = %+v, want git's refusal", got)
+	}
+}
+
+func TestUpdateRefCreateRefusesAnUnknownCommit(t *testing.T) {
+	// Arrange.
+	s, repo, dir := world(t)
+
+	// Act.
+	got := Run(s, "/", []string{"-C", dir, "update-ref", "-m", "keep", "refs/agent-repl/reaped/x/1", "0123456789012345678901234567890123456789", ""})
+
+	// Assert.
+	if got.Exit != 128 || len(repo.Refs) != 0 {
+		t.Fatalf("update-ref create of an unknown commit = %+v, refs %v, want a refusal", got, repo.Refs)
+	}
+}
+
+func TestASnapshotCommitsOnTopOfHEAD(t *testing.T) {
+	// Arrange.
+	s, repo, dir := world(t)
+	head := repo.BranchHeads["main"]
+
+	// Act.
+	read := Run(s, "/", []string{"-C", dir, "read-tree", "HEAD"})
+	add := Run(s, "/", []string{"-C", dir, "add", "--all"})
+	tree := Run(s, "/", []string{"-C", dir, "write-tree"})
+	commit := Run(s, "/", []string{"-C", dir, "commit-tree", strings.TrimSpace(tree.Stdout), "-p", "HEAD", "-m", "snap"})
+
+	// Assert.
+	if read.Exit != 0 || add.Exit != 0 || tree.Exit != 0 || commit.Exit != 0 {
+		t.Fatalf("snapshot steps = %+v %+v %+v %+v, want all to succeed", read, add, tree, commit)
+	}
+	c := s.Commits[strings.TrimSpace(commit.Stdout)]
+	if c == nil || len(c.Parents) != 1 || c.Parents[0] != head || repo.BranchHeads["main"] != head {
+		t.Fatalf("snapshot commit = %+v, main at %s, want a commit on top of %s that moved no branch", c, repo.BranchHeads["main"], head)
+	}
+}
+
+func TestWriteTreeOfADirtyWorktreeDiffersFromHEADs(t *testing.T) {
+	// Arrange.
+	s, repo, dir := world(t)
+	clean := Run(s, "/", []string{"-C", dir, "write-tree"})
+	repo.Worktrees[0].Dirty = true
+
+	// Act.
+	dirty := Run(s, "/", []string{"-C", dir, "write-tree"})
+
+	// Assert.
+	if dirty.Exit != 0 || dirty.Stdout == clean.Stdout {
+		t.Fatalf("write-tree dirty = %+v, clean = %+v, want a tree of its own", dirty, clean)
+	}
+}
+
+func TestOnlyTheModeledSnapshotFormsAreAnswered(t *testing.T) {
+	cases := [][]string{
+		{"read-tree", "main"},
+		{"add", "file.txt"},
+		{"commit-tree", "tree", "-m", "x"},
+	}
+	for _, subject := range cases {
+		t.Run(strings.Join(subject, " "), func(t *testing.T) {
+			// Arrange.
+			s, _, dir := world(t)
+
+			// Act.
+			got := Run(s, "/", append([]string{"-C", dir}, subject...))
+
+			// Assert.
+			if got.Exit != 128 {
+				t.Fatalf("%v = %+v, want a refusal", subject, got)
+			}
+		})
+	}
+}

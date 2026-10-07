@@ -995,6 +995,10 @@ func (g *fakeGit) RemoveCleanWorktree(context.Context, string, string) error {
 	return errors.New("merge fake git: RemoveCleanWorktree is not a merge operation")
 }
 
+func (g *fakeGit) PreserveWorktree(context.Context, string, string, string, string) (string, error) {
+	return "", errors.New("merge fake git: PreserveWorktree is not a merge operation")
+}
+
 func (g *fakeGit) AdminDir(context.Context, string) (string, error) {
 	return "", errors.New("merge fake git: AdminDir is not a merge operation")
 }

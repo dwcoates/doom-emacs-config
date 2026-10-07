@@ -1,6 +1,7 @@
 // Package worktreereap is the daemon's LANDED-WORKTREE REAPER: a low-priority
 // background sweep that removes every linked worktree whose changes have
 // already landed on its repository's default branch, and deletes its branch.
+// It also EXPIRES the linked worktrees that never land: see expiry.go.
 //
 // The merge queue retires the worktrees it merges. This covers the ones it
 // never saw -- worktrees agents cut for themselves, and branches that landed
@@ -40,6 +41,7 @@ const (
 	opJudge  = "daemon.worktreereap.judge"
 	opRemove = "daemon.worktreereap.remove"
 	opBranch = "daemon.worktreereap.branch"
+	opExpire = "daemon.worktreereap.expire"
 	opRun    = "daemon.worktreereap.run"
 )
 
@@ -57,6 +59,10 @@ const (
 	DefaultStartDelay = 5 * time.Minute
 	// DefaultEvery is the cadence after the first sweep.
 	DefaultEvery = 24 * time.Hour
+	// DefaultExpireAfter is how long a worktree that never lands may exist,
+	// counted over unbroken repository activity (see expiry.go), before it
+	// is preserved and removed.
+	DefaultExpireAfter = 14 * 24 * time.Hour
 )
 
 // ErrSweepRunning is Sweep's refusal while another sweep of this reaper is in
@@ -75,6 +81,9 @@ type Git interface {
 	IsClean(ctx context.Context, dir string) (bool, error)
 	MergeTree(ctx context.Context, dir, base, other string) (gitclient.MergeTreeOutcome, error)
 	RemoveCleanWorktree(ctx context.Context, repoDir, worktreeDir string) error
+	RemoveWorktree(ctx context.Context, repoDir, worktreeDir string) error
+	CommonDir(ctx context.Context, dir string) (string, error)
+	PreserveWorktree(ctx context.Context, repoDir, worktreeDir, ref, message string) (string, error)
 	DeleteBranchAt(ctx context.Context, repoDir, branch, head string) error
 }
 
@@ -99,10 +108,12 @@ type Deps struct {
 	// LockPath is the kernel lock one sweep holds for its whole run, so two
 	// daemons (an incumbent and its handover successor) never sweep at once.
 	LockPath string
-	// IdleAfter, StartDelay and Every are the windows; see the defaults.
-	IdleAfter  time.Duration
-	StartDelay time.Duration
-	Every      time.Duration
+	// IdleAfter, ExpireAfter, StartDelay and Every are the windows; see the
+	// defaults.
+	IdleAfter   time.Duration
+	ExpireAfter time.Duration
+	StartDelay  time.Duration
+	Every       time.Duration
 	// Log is the global logger: most of what the reaper judges is no
 	// workspace's.
 	Log dlog.Logger
@@ -131,9 +142,9 @@ func New(deps Deps) (*Reaper, error) {
 		return nil, errors.New("worktreereap: LockPath is required")
 	case deps.Log == nil:
 		return nil, errors.New("worktreereap: Log is required")
-	case deps.IdleAfter <= 0, deps.StartDelay <= 0, deps.Every <= 0:
-		return nil, fmt.Errorf("worktreereap: the windows must be positive (idle after %v, start delay %v, every %v)",
-			deps.IdleAfter, deps.StartDelay, deps.Every)
+	case deps.IdleAfter <= 0, deps.ExpireAfter <= 0, deps.StartDelay <= 0, deps.Every <= 0:
+		return nil, fmt.Errorf("worktreereap: the windows must be positive (idle after %v, expire after %v, start delay %v, every %v)",
+			deps.IdleAfter, deps.ExpireAfter, deps.StartDelay, deps.Every)
 	}
 	return &Reaper{deps: deps}, nil
 }
@@ -155,6 +166,7 @@ const (
 	keepConflicts      = "merge_conflicts"
 	keepUnlanded       = "unlanded"
 	reasonRemoveFailed = "remove_failed"
+	reasonPreserveFail = "preserve_failed"
 )
 
 // Report is one sweep's account.
@@ -165,6 +177,8 @@ type Report struct {
 	Worktrees int
 	// Removed lists every removed worktree directory.
 	Removed []string
+	// Expired lists every worktree directory removed by the expiry rule.
+	Expired []string
 	// BranchesDeleted counts the branches deleted after their removal.
 	BranchesDeleted int
 	// Pruned counts the repositories whose stale registrations were pruned.
@@ -220,13 +234,13 @@ func (r *Reaper) Sweep(ctx context.Context) (Report, error) {
 	known := newRegistryView(workspaces, r.deps.LiveSessions())
 
 	r.deps.Log.Info(opSweep, "sweeping for landed worktrees", dlog.Context{
-		"repositories": len(repos), "idle_after": r.deps.IdleAfter.String(),
+		"repositories": len(repos), "idle_after": r.deps.IdleAfter.String(), "expire_after": r.deps.ExpireAfter.String(),
 	})
 	for _, repo := range repos {
 		if ctx.Err() != nil {
 			break
 		}
-		(&repoSweep{r: r, repo: repo, known: known, now: now, report: &report}).run(ctx)
+		(&repoSweep{r: r, repo: repo, known: known, workspaces: workspaces, now: now, report: &report}).run(ctx)
 	}
 	if ctx.Err() != nil {
 		r.deps.Log.Info(opSweep, "the sweep stopped with the daemon", summary(report))
@@ -254,6 +268,8 @@ func summary(report Report) dlog.Context {
 		"worktrees":        report.Worktrees,
 		"removed":          len(report.Removed),
 		"removed_dirs":     report.Removed,
+		"expired":          len(report.Expired),
+		"expired_dirs":     report.Expired,
 		"branches_deleted": report.BranchesDeleted,
 		"pruned":           report.Pruned,
 		"kept":             report.Kept,
@@ -301,15 +317,19 @@ func newRegistryView(workspaces []wsm.Workspace, live []ids.WorkspaceID) registr
 
 // repoSweep is one repository's pass.
 type repoSweep struct {
-	r      *Reaper
-	repo   wsm.Repository
-	known  registryView
-	now    time.Time
-	report *Report
+	r          *Reaper
+	repo       wsm.Repository
+	known      registryView
+	workspaces []wsm.Workspace
+	now        time.Time
+	report     *Report
 
 	defaultBranch string
 	base          string
 	baseTree      string
+	// activeSince is when the repository's current unbroken run of activity
+	// began: no worktree's expiry clock starts before it.
+	activeSince time.Time
 }
 
 // run sweeps the repository. Every failure is recorded and counted here; none
@@ -347,6 +367,21 @@ func (s *repoSweep) run(ctx context.Context) {
 		s.fail(ctx, opRepo, "the repository's worktrees could not be listed; it is not swept", repoFields, err)
 		return
 	}
+
+	// THE REPOSITORY'S ACTIVITY IS READ BEFORE THE PRUNE AND EVERY PROBE: the
+	// prune deletes stale worktrees' reflogs, which are history too.
+	commonDir, err := s.r.deps.Git.CommonDir(ctx, s.repo.Dir)
+	if err != nil {
+		s.fail(ctx, opRepo, "the repository's common dir could not be resolved; it is not swept", repoFields, err)
+		return
+	}
+	instants, err := repoActivity(commonDir, s.repo.ID, s.workspaces)
+	if err != nil {
+		repoFields["common_dir"] = commonDir
+		s.fail(ctx, opRepo, "the repository's activity could not be read; it is not swept", repoFields, err)
+		return
+	}
+	s.activeSince = activeSince(instants, s.now)
 
 	s.prune(ctx, worktrees)
 	mainDir := canonical(s.repo.Dir)
@@ -442,7 +477,12 @@ func (s *repoSweep) judge(ctx context.Context, wt gitclient.Worktree) {
 	if registered {
 		record = &ws
 	}
-	last, err := lastActivity(ctx, s.r.deps.Git, s.repo.Dir, wt, record)
+	admin, err := s.r.deps.Git.AdminDir(ctx, wt.Dir)
+	if err != nil {
+		s.fail(ctx, opJudge, "the worktree's admin directory could not be resolved; it is kept", fields, err)
+		return
+	}
+	last, err := lastActivity(ctx, s.r.deps.Git, s.repo.Dir, admin, wt, record)
 	if err != nil {
 		s.fail(ctx, opJudge, "the worktree's last activity could not be read; it is kept", fields, err)
 		return
@@ -461,26 +501,89 @@ func (s *repoSweep) judge(ctx context.Context, wt gitclient.Worktree) {
 		s.fail(ctx, opJudge, "the worktree's cleanliness could not be read; it is kept", fields, err)
 		return
 	}
-	if !clean {
-		s.keep(keepDirty, fields)
-		return
+	unlandedReason := keepDirty
+	if clean {
+		merged, err := s.r.deps.Git.MergeTree(ctx, s.repo.Dir, s.base, wt.Head)
+		if err != nil {
+			s.fail(ctx, opJudge, "the worktree's merge into the default branch could not be computed; it is kept", fields, err)
+			return
+		}
+		switch {
+		case merged.Conflicted:
+			unlandedReason = keepConflicts
+		case merged.Tree != s.baseTree:
+			unlandedReason = keepUnlanded
+		default:
+			s.remove(ctx, wt, fields)
+			return
+		}
 	}
 
-	merged, err := s.r.deps.Git.MergeTree(ctx, s.repo.Dir, s.base, wt.Head)
+	expired, err := s.expired(admin, fields)
 	if err != nil {
-		s.fail(ctx, opJudge, "the worktree's merge into the default branch could not be computed; it is kept", fields, err)
+		s.fail(ctx, opJudge, "the worktree's birth could not be read; it is kept", fields, err)
 		return
 	}
-	if merged.Conflicted {
-		s.keep(keepConflicts, fields)
+	if !expired {
+		s.keep(unlandedReason, fields)
 		return
 	}
-	if merged.Tree != s.baseTree {
-		s.keep(keepUnlanded, fields)
-		return
-	}
+	fields["unlanded_reason"] = unlandedReason
+	s.expire(ctx, wt, admin, clean, fields)
+}
 
-	s.remove(ctx, wt, fields)
+// expired applies the expiry rule. The worktree's birth is read only when the
+// repository's own run of activity is already long enough to expire it, since
+// the clock starts at the later of the two.
+func (s *repoSweep) expired(admin string, fields dlog.Context) (bool, error) {
+	fields["repo_active_since"] = s.activeSince.Format(time.RFC3339)
+	if s.now.Sub(s.activeSince) < s.r.deps.ExpireAfter {
+		return false, nil
+	}
+	born, err := bornAt(admin)
+	if err != nil {
+		return false, err
+	}
+	start := s.activeSince
+	if born.After(start) {
+		start = born
+	}
+	fields["born"] = born.Format(time.RFC3339)
+	fields["expiry_age"] = s.now.Sub(start).Round(time.Second).String()
+	return s.now.Sub(start) >= s.r.deps.ExpireAfter, nil
+}
+
+// expire preserves an expired worktree under refs/agent-repl/reaped/ and then
+// removes it. Its branch is KEPT: what the branch holds never landed. A tree
+// judged clean goes through the clean door, so one that became dirty after the
+// preservation is refused by git and kept; only a tree judged dirty is forced,
+// and what made it dirty is in the preservation commit.
+func (s *repoSweep) expire(ctx context.Context, wt gitclient.Worktree, admin string, clean bool, fields dlog.Context) {
+	ref := reapedRef(admin, s.now)
+	fields["preserved_ref"] = ref
+	fields["expire_after"] = s.r.deps.ExpireAfter.String()
+	message := fmt.Sprintf("agent-repl: %s (branch %q, head %s) preserved before its removal: it existed for %s of unbroken repository activity without landing",
+		wt.Dir, wt.Branch, wt.Head, s.r.deps.ExpireAfter)
+
+	sha, err := s.r.deps.Git.PreserveWorktree(ctx, s.repo.Dir, wt.Dir, ref, message)
+	if err != nil {
+		s.report.Kept[reasonPreserveFail]++
+		s.fail(ctx, opExpire, "the expired worktree could not be preserved; it is kept", fields, err)
+		return
+	}
+	fields["preserved_sha"] = sha
+
+	remove := s.r.deps.Git.RemoveWorktree
+	if clean {
+		remove = s.r.deps.Git.RemoveCleanWorktree
+	}
+	if err := remove(ctx, s.repo.Dir, wt.Dir); err != nil {
+		s.report.Kept[reasonRemoveFailed]++
+		s.fail(ctx, opExpire, "the expired worktree could not be removed; it is kept, and so is its preservation", fields, err)
+		return
+	}
+	s.report.Expired = append(s.report.Expired, wt.Dir)
+	s.r.deps.Log.Info(opExpire, "removed an expired worktree; its content is preserved and its branch is kept", fields)
 }
 
 // remove retires a landed worktree and then its branch. The branch goes ONLY
