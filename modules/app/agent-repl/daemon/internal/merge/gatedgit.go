@@ -387,6 +387,14 @@ func (g *gatedGit) DeleteBranchAt(ctx context.Context, repoDir, branch, head str
 	return g.inner.DeleteBranchAt(ctx, repoDir, branch, head)
 }
 
+func (g *gatedGit) PreserveWorktree(ctx context.Context, repoDir, worktreeDir, ref, message string) (string, error) {
+	if err := g.enter("PreserveWorktree"); err != nil {
+		return "", err
+	}
+	defer g.leave()
+	return g.inner.PreserveWorktree(ctx, repoDir, worktreeDir, ref, message)
+}
+
 func (g *gatedGit) CommitsBetween(ctx context.Context, dir, base, tip string) ([]gitclient.Commit, error) {
 	if err := g.enter("CommitsBetween"); err != nil {
 		return nil, err

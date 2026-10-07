@@ -2576,3 +2576,131 @@ func TestCommitPathFailureCarriesGitsEvidence(t *testing.T) {
 		t.Fatalf("CommitPath error = %v, want a *gitclient.Error with git's words", err)
 	}
 }
+
+// --- PreserveWorktree ----------------------------------------------------
+
+func TestPreserveWorktreeSnapshotsThroughAPrivateIndexThenCreatesTheRef(t *testing.T) {
+	// Arrange.
+	git, _ := newTestClient(t)
+	fake := newFakeGit(t,
+		ok("", "read-tree"),
+		ok("", "add"),
+		ok("tttt\n", "write-tree"),
+		ok("ssss\n", "commit-tree"),
+		ok("", "update-ref"),
+	)
+
+	// Act.
+	sha, err := git.PreserveWorktree(context.Background(), "/repo", "/wt", "refs/agent-repl/reaped/wt/x", "reaped")
+
+	// Assert.
+	if err != nil || sha != "ssss" {
+		t.Fatalf("PreserveWorktree = (%q, %v), want the snapshot commit", sha, err)
+	}
+	fake.assertSubject(0, "read-tree", "HEAD")
+	fake.assertSubject(1, "add", "--all")
+	fake.assertSubject(2, "write-tree")
+	fake.assertSubject(3, "commit-tree", "tttt", "-p", "HEAD", "-m", "reaped")
+	fake.assertSubject(4, "update-ref", "-m", "reaped", "refs/agent-repl/reaped/wt/x", "ssss", "")
+	if dir := fake.call(4).dashCDir(); dir != "/repo" {
+		t.Fatalf("update-ref ran in %s, want the repository", dir)
+	}
+}
+
+func TestPreserveWorktreeStagesOnlyIntoThePrivateIndex(t *testing.T) {
+	// Arrange.
+	git, _ := newTestClient(t)
+	fake := newFakeGit(t,
+		ok("", "read-tree"), ok("", "add"), ok("tttt\n", "write-tree"),
+		ok("ssss\n", "commit-tree"), ok("", "update-ref"),
+	)
+
+	// Act.
+	if _, err := git.PreserveWorktree(context.Background(), "/repo", "/wt", "refs/agent-repl/reaped/wt/x", "reaped"); err != nil {
+		t.Fatalf("PreserveWorktree: %v", err)
+	}
+
+	// Assert: the three index-writing steps share one private index, which
+	// is gone afterwards; the commit and the ref carry none.
+	first := envValues(fake.call(0).Env, "GIT_INDEX_FILE")
+	if len(first) != 1 {
+		t.Fatalf("read-tree carried GIT_INDEX_FILE %v, want exactly one private index", first)
+	}
+	for n := 1; n <= 2; n++ {
+		if got := envValues(fake.call(n).Env, "GIT_INDEX_FILE"); !reflect.DeepEqual(got, first) {
+			t.Fatalf("call %d carried GIT_INDEX_FILE %v, want %v", n, got, first)
+		}
+	}
+	for n := 3; n <= 4; n++ {
+		if got := envValues(fake.call(n).Env, "GIT_INDEX_FILE"); len(got) != 0 {
+			t.Fatalf("call %d carried GIT_INDEX_FILE %v, want none", n, got)
+		}
+	}
+	scratch := filepath.Dir(strings.TrimPrefix(first[0], "GIT_INDEX_FILE="))
+	if _, err := os.Stat(scratch); !os.IsNotExist(err) {
+		t.Fatalf("the private index's directory %s survived (%v)", scratch, err)
+	}
+}
+
+func TestPreserveWorktreeFailingStepCreatesNoRef(t *testing.T) {
+	// Arrange.
+	git, surfaces := newTestClient(t)
+	fake := newFakeGit(t,
+		ok("", "read-tree"),
+		fails(128, "fatal: unable to index file\n", "add"),
+	)
+
+	// Act.
+	_, err := git.PreserveWorktree(context.Background(), "/repo", "/wt", "refs/agent-repl/reaped/wt/x", "reaped")
+
+	// Assert.
+	var failure *Error
+	if !errors.As(err, &failure) {
+		t.Fatalf("PreserveWorktree = %v, want git's failure", err)
+	}
+	fake.assertNever("commit-tree")
+	fake.assertNever("update-ref")
+	if _, found := recordFor(surfaces.records(), "error", "daemon.gitclient.preserve_worktree"); !found {
+		t.Fatal("the failed step was not recorded at ERROR")
+	}
+}
+
+func TestPreserveWorktreeExistingRefIsARefusal(t *testing.T) {
+	// Arrange: an earlier preservation already holds the ref.
+	git, _ := newTestClient(t)
+	newFakeGit(t,
+		ok("", "read-tree"), ok("", "add"), ok("tttt\n", "write-tree"), ok("ssss\n", "commit-tree"),
+		fails(128, "fatal: update_ref failed for ref 'refs/agent-repl/reaped/wt/x': reference already exists\n", "update-ref"),
+	)
+
+	// Act.
+	_, err := git.PreserveWorktree(context.Background(), "/repo", "/wt", "refs/agent-repl/reaped/wt/x", "reaped")
+
+	// Assert.
+	var failure *Error
+	if !errors.As(err, &failure) || !strings.Contains(failure.Stderr, "already exists") {
+		t.Fatalf("PreserveWorktree = %v, want git's refusal", err)
+	}
+}
+
+func TestPreserveWorktreeWithoutAPrivateIndexRunsNoGit(t *testing.T) {
+	// Arrange: no temp directory can be made.
+	git, surfaces := newTestClient(t)
+	fake := newFakeGit(t)
+	t.Setenv("TMPDIR", filepath.Join(t.TempDir(), "missing"))
+
+	// Act.
+	_, err := git.PreserveWorktree(context.Background(), "/repo", "/wt", "refs/agent-repl/reaped/wt/x", "reaped")
+
+	// Assert.
+	if err == nil {
+		t.Fatal("PreserveWorktree = nil error without a private index, want a refusal")
+	}
+	if calls := fake.calls(); len(calls) != 0 {
+		t.Fatalf("git ran %v without a private index", subjects(calls))
+	}
+	record, found := recordFor(surfaces.records(), "error", "daemon.gitclient.preserve_worktree")
+	if !found || record.Context["worktree_dir"] != "/wt" || record.Context["ref"] != "refs/agent-repl/reaped/wt/x" {
+		t.Fatalf("the refusal record = %v (found %v), want the worktree and ref", record, found)
+	}
+}
