@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"claude-repld/internal/atomicfile"
 )
 
 // LoopbackHost is the only interface the daemon ever binds. The daemon serves
@@ -229,33 +231,8 @@ func (c *claim) Publish() error {
 		}
 		c.holdLocked(lock)
 	}
-	dir := filepath.Dir(c.addrPath)
-	tmp, err := os.CreateTemp(dir, "."+filepath.Base(c.addrPath)+".*")
-	if err != nil {
-		return fmt.Errorf("create a temporary daemon.addr beside %q: %w", c.addrPath, err)
-	}
-	name := tmp.Name()
-	if _, err := tmp.WriteString(c.advertisement()); err != nil {
-		tmp.Close()
-		os.Remove(name)
-		return fmt.Errorf("write the daemon address to %q: %w", name, err)
-	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		os.Remove(name)
-		return fmt.Errorf("flush %q: %w", name, err)
-	}
-	if err := tmp.Close(); err != nil {
-		os.Remove(name)
-		return fmt.Errorf("close %q: %w", name, err)
-	}
-	if err := os.Chmod(name, 0o644); err != nil {
-		os.Remove(name)
-		return fmt.Errorf("set the mode of %q: %w", name, err)
-	}
-	if err := os.Rename(name, c.addrPath); err != nil {
-		os.Remove(name)
-		return fmt.Errorf("atomically replace %q: %w", c.addrPath, err)
+	if err := atomicfile.Replace(c.addrPath, []byte(c.advertisement()), atomicfile.Options{Mode: 0o644, Sync: true}); err != nil {
+		return fmt.Errorf("advertise the daemon address in %q: %w", c.addrPath, err)
 	}
 	c.published = true
 	return nil

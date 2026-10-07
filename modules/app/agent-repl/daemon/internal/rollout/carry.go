@@ -14,6 +14,7 @@ import (
 
 	"google.golang.org/protobuf/encoding/protojson"
 
+	"claude-repld/internal/atomicfile"
 	"claude-repld/internal/bounce"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
@@ -194,20 +195,7 @@ func writeAtomically(dir, path, pattern string, body []byte) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("create %s: %w", dir, err)
 	}
-	tmp, err := os.CreateTemp(dir, pattern)
-	if err != nil {
-		return fmt.Errorf("create a temporary file in %s: %w", dir, err)
-	}
-	if _, err := tmp.Write(body); err != nil {
-		return errors.Join(err, tmp.Close(), os.Remove(tmp.Name()))
-	}
-	if err := tmp.Close(); err != nil {
-		return errors.Join(err, os.Remove(tmp.Name()))
-	}
-	if err := os.Rename(tmp.Name(), path); err != nil {
-		return errors.Join(err, os.Remove(tmp.Name()))
-	}
-	return nil
+	return atomicfile.Replace(path, body, atomicfile.Options{Pattern: pattern})
 }
 
 // sealedMove is what an incumbent's transfer sealed and carried for one

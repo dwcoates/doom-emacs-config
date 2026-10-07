@@ -11,6 +11,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"claude-repld/internal/atomicfile"
 )
 
 // JoiningFlag is the successor's binding argv spelling. Go's flag package
@@ -65,18 +67,8 @@ func ReportJoiningAddr(stateDir, address string) error {
 	if err := os.MkdirAll(stateDir, 0o755); err != nil {
 		return fmt.Errorf("rollout: create the state root %s: %w", stateDir, err)
 	}
-	tmp, err := os.CreateTemp(stateDir, "joining-*.addr")
-	if err != nil {
-		return fmt.Errorf("rollout: create the joining address report: %w", err)
-	}
-	if _, err := tmp.WriteString(address + "\n"); err != nil {
-		return fmt.Errorf("rollout: write the joining address report: %w", errors.Join(err, tmp.Close(), os.Remove(tmp.Name())))
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("rollout: close the joining address report: %w", errors.Join(err, os.Remove(tmp.Name())))
-	}
-	if err := os.Rename(tmp.Name(), path); err != nil {
-		return fmt.Errorf("rollout: install the joining address report: %w", errors.Join(err, os.Remove(tmp.Name())))
+	if err := atomicfile.Replace(path, []byte(address+"\n"), atomicfile.Options{Pattern: "joining-*.addr"}); err != nil {
+		return fmt.Errorf("rollout: write the joining address report: %w", err)
 	}
 	return nil
 }
