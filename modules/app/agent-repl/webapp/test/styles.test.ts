@@ -2930,6 +2930,18 @@ function rgbOf(block: string, token: string): [number, number, number] {
 /** The spread between an RGB triple's strongest and weakest channel. */
 const chroma = ([r, g, b]: [number, number, number]): number => Math.max(r, g, b) - Math.min(r, g, b);
 
+describe("the feed's background is green (owner, 2026-10-07)", () => {
+  it.each([
+    ["light", () => declarationsOf(":root") ?? ""],
+    ["dark", darkThemeBlock],
+  ])("paints the %s theme's --bg with green as its strongest channel", (_theme, block) => {
+    // Arrange / Act
+    const [r, g, b] = rgbOf(block(), "--bg");
+    // Assert
+    expect(g).toBeGreaterThan(Math.max(r, b));
+  });
+});
+
 describe("the held prompt's tint: much more grey than blue", () => {
   it.each([
     ["light", () => declarationsOf(":root") ?? ""],
