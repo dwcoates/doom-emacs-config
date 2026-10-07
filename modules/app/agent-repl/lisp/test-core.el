@@ -441,12 +441,12 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
      "tells the user their prompt could not be held, with its words")
     ("keybindings.el" agent-repl-reload-config "[agent-repl] Reloaded %s"
      "confirms the interactive source reload")
-    ("magit.el" +dwc/magit-toggle-tags-in-log "magit commit-list tags %s"
+    ("magit.el" agent-repl-magit-toggle-tags-in-log "magit commit-list tags %s"
      "confirms the interactive Magit display toggle")
-    ("magit.el" +dwc/magit-copy-commit-link
+    ("magit.el" agent-repl-magit-copy-commit-link
      "GitHub commit link copied to clipboard: %s"
      "confirms an interactive clipboard write")
-    ("magit.el" +dwc/open-workspace-pr-in-browser "Opened PR: %s"
+    ("magit.el" agent-repl-open-workspace-pr-in-browser "Opened PR: %s"
      "confirms the interactive browser action")
     ("panels.el" agent-repl-workspace-push-to-back
      "Pushed '%s' to the back; switched to '%s'."
