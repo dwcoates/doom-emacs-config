@@ -1,30 +1,59 @@
 package recorded_test
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"agentrepl/shim-claude-sidecar/internal/recorded"
 )
 
+// homeTokenVectors are shared with the capture tooling's expandHome
+// (anonymize.mjs), so the two expansions cannot drift apart.
+type homeTokenVectors struct {
+	Home    string `json:"home"`
+	Vectors []struct {
+		Name string `json:"name"`
+		Text string `json:"text"`
+		Want string `json:"want"`
+	} `json:"vectors"`
+}
+
 func TestExpand(t *testing.T) {
-	tests := []struct {
-		name string
-		text string
-		want string
-	}{
-		{name: "the token becomes the home", text: `{"cwd":"${HOME}/p"}`, want: `{"cwd":"/Users/bo/p"}`},
-		{name: "the token's slug becomes the home's slug", text: "projects/--HOME---p/s.jsonl", want: "projects/-Users-bo--p/s.jsonl"},
-		{name: "text with no token is unchanged", text: "/private/tmp/x", want: "/private/tmp/x"},
+	// Arrange.
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "shim", "scripts", "capture", "home-token-vectors.json"))
+	if err != nil {
+		t.Fatalf("read the shared home-token vectors: %v", err)
 	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
+	var shared homeTokenVectors
+	if err := json.Unmarshal(raw, &shared); err != nil {
+		t.Fatalf("parse the shared home-token vectors: %v", err)
+	}
+	if len(shared.Vectors) == 0 {
+		t.Fatal("the shared home-token vectors are empty")
+	}
+	for _, tc := range shared.Vectors {
+		t.Run(tc.Name, func(t *testing.T) {
 			// Act.
-			got := recorded.Expand(tc.text, "/Users/bo")
+			got := recorded.Expand(tc.Text, shared.Home)
 
 			// Assert.
-			if got != tc.want {
-				t.Fatalf("Expand(%q) = %q, want %q", tc.text, got, tc.want)
+			if got != tc.Want {
+				t.Fatalf("Expand(%q) = %q, want %q", tc.Text, got, tc.Want)
 			}
 		})
+	}
+}
+
+func TestHomeTokenMatchesTheCaptureTooling(t *testing.T) {
+	// Assert: the sidecar expands the very token the capture scrub writes.
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "shim", "scripts", "capture", "anonymize.mjs"))
+	if err != nil {
+		t.Fatalf("read anonymize.mjs: %v", err)
+	}
+	if want := `export const HOME_TOKEN = "` + recorded.HomeToken + `";`; !strings.Contains(string(raw), want) {
+		t.Fatalf("anonymize.mjs does not declare %s", want)
 	}
 }
