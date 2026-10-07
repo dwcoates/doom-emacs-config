@@ -27,7 +27,7 @@ func TestAMalformedMetaHoldsTheTranscriptLoudly(t *testing.T) {
 	defer cancel()
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
-	cwd := "/Users/dodgecoates/subagent-meta-malformed-probe"
+	cwd := "/work/subagent-meta-malformed-probe"
 	slug := cwdSlug(cwd)
 	session := "3d3d3d3d-3d3d-43d3-83d3-3d3d3d3d3d3d"
 	opts := defaultSidecarOptions(t, fake.Socket, tree)

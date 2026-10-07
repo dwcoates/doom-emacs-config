@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/usersetup"
 )
 
 const (
@@ -24,11 +25,6 @@ const (
 	// the requested profile, which is the only invocation that lands the tab in
 	// a specific profile's window reliably.
 	DefaultBinary = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-
-	// DefaultProfileDirectory is the profile every hyperlink opens in. The
-	// value is the on-disk directory name under the browser's user-data dir,
-	// which is what --profile-directory takes — not an account address.
-	DefaultProfileDirectory = "Profile 6"
 
 	// DefaultApp is the application name used to raise the browser BEFORE the
 	// url is handed over. See openDefault for why the activation goes first.
@@ -47,7 +43,6 @@ type opener struct {
 	launcherCmd    string
 	defaultBin     string
 	activateBin    string
-	profile        string
 	localStatePath string
 	launchWindow   time.Duration
 	log            dlog.Logger
@@ -59,7 +54,6 @@ func newOpener(cfg Config) *opener {
 		launcherCmd:    cfg.LauncherCmd,
 		defaultBin:     cfg.DefaultLauncherBin,
 		activateBin:    cfg.ActivateBin,
-		profile:        cfg.Profile,
 		localStatePath: cfg.LocalStatePath,
 		launchWindow:   cfg.LaunchWindow,
 		log:            cfg.Logger,
@@ -73,9 +67,6 @@ func newOpener(cfg Config) *opener {
 	if o.activateBin == "" {
 		o.activateBin = activateBinary
 	}
-	if o.profile == "" {
-		o.profile = DefaultProfileDirectory
-	}
 	if o.localStatePath == "" {
 		o.localStatePath = DefaultLocalStatePath()
 	}
@@ -85,7 +76,6 @@ func newOpener(cfg Config) *opener {
 	o.log.Debug("daemon.externalbrowser.new", "external browser opener built", dlog.Context{
 		"launcher":      o.launcherName(),
 		"overridden":    o.launcherCmd != "",
-		"profile":       o.profile,
 		"launch_window": o.launchWindow.String(),
 	})
 	return o
@@ -116,9 +106,13 @@ func Validate(url string) error {
 	return nil
 }
 
-// LaunchArgv is the argument list that opens url in the pinned profile on the
-// default path.
+// LaunchArgv is the argument list that opens url on the default path: in the
+// named profile, or with no profile flag at all when profile is empty, which
+// leaves the choice of window to the browser.
 func LaunchArgv(profile, url string) []string {
+	if profile == "" {
+		return []string{url}
+	}
 	return []string{"--profile-directory=" + profile, url}
 }
 
@@ -128,7 +122,7 @@ func ActivateArgv(app string) []string {
 }
 
 // Open implements Opener.
-func (o *opener) Open(ctx context.Context, url, profile string) error {
+func (o *opener) Open(ctx context.Context, url, accountEmail string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -143,64 +137,59 @@ func (o *opener) Open(ctx context.Context, url, profile string) error {
 	if o.launcherCmd != "" {
 		return o.openOverridden(ctx, url)
 	}
-	if profile == "" {
-		profile = o.profile
+	profile, err := o.profileFor(url, accountEmail)
+	if err != nil {
+		return err
 	}
 	return o.openDefault(ctx, url, profile)
 }
 
-// ProfileForAccount implements Opener.
+// profileFor resolves the Chrome profile directory accountEmail signs in as,
+// reading Chrome's own Local State.
 //
-// FALLBACK IS LOUD, NEVER SILENT. A blank email is the logged-out state — an
-// answer, not a fault — so it routes to the pinned default at DEBUG. A
-// non-empty email that Chrome's Local State cannot be read for, or that no
-// profile claims, routes to the pinned default at WARN naming the email: the
-// account is real but its Chrome window could not be found, and a link that
-// quietly landed in the wrong profile is exactly the confusion this exists to
-// prevent.
-func (o *opener) ProfileForAccount(email string) string {
+// THERE IS NO PINNED DEFAULT. A blank email is the logged-out state, an answer
+// rather than a fault, and it answers no profile at all: the url goes to the
+// browser with no profile flag. A non-empty email whose profile cannot be
+// found is an error naming the email, because the account is real and a link
+// that quietly landed in some other profile's window is exactly what the
+// routing exists to prevent.
+func (o *opener) profileFor(url, email string) (string, error) {
 	if strings.TrimSpace(email) == "" {
-		o.log.Debug("daemon.externalbrowser.profile_for_account", "no account email; routing to the pinned default profile", dlog.Context{
-			"profile": o.profile,
-			"branch":  "logged-out",
+		o.log.Debug("daemon.externalbrowser.profile_for_account", "no account email; opening with no profile flag", dlog.Context{
+			"url":    url,
+			"branch": "logged-out",
 		})
-		return o.profile
+		return "", nil
+	}
+	fail := func(branch string, err error, ctx dlog.Context) (string, error) {
+		ctx["url"], ctx["email"], ctx["branch"], ctx["error"] = url, email, branch, err.Error()
+		o.log.Error("daemon.externalbrowser.profile_for_account", "could not route the account to its Chrome profile", ctx)
+		return "", err
 	}
 	if o.localStatePath == "" {
-		o.log.Warn("daemon.externalbrowser.profile_for_account", "no Chrome Local State path; routing the account to the pinned default profile", dlog.Context{
-			"email":   email,
-			"profile": o.profile,
-			"branch":  "no-local-state-path",
-		})
-		return o.profile
+		return fail("no-local-state-path",
+			usersetup.Errorf("externalbrowser: no Chrome Local State path to find the profile %s signs in as", email),
+			dlog.Context{})
 	}
 	data, err := os.ReadFile(o.localStatePath) //nolint:gosec // daemon-derived Chrome path, never client input
 	if err != nil {
-		o.log.Warn("daemon.externalbrowser.profile_for_account", "could not read Chrome Local State; routing the account to the pinned default profile", dlog.Context{
-			"email":            email,
-			"profile":          o.profile,
-			"local_state_path": o.localStatePath,
-			"branch":           "local-state-unreadable",
-			"error":            err.Error(),
-		})
-		return o.profile
+		return fail("local-state-unreadable",
+			usersetup.Errorf("externalbrowser: reading Chrome Local State to find the profile %s signs in as: %w", email, err),
+			dlog.Context{"local_state_path": o.localStatePath})
 	}
 	profile, matched := ProfileForEmail(data, email)
 	if !matched {
-		o.log.Warn("daemon.externalbrowser.profile_for_account", "no Chrome profile matches the account; routing to the pinned default profile", dlog.Context{
-			"email":            email,
-			"profile":          o.profile,
-			"local_state_path": o.localStatePath,
-			"branch":           "no-profile-match",
-		})
-		return o.profile
+		return fail("no-profile-match",
+			usersetup.Errorf("externalbrowser: no Chrome profile is signed in as %s", email),
+			dlog.Context{"local_state_path": o.localStatePath})
 	}
 	o.log.Debug("daemon.externalbrowser.profile_for_account", "routed the account to its Chrome profile", dlog.Context{
+		"url":     url,
 		"email":   email,
 		"profile": profile,
 		"branch":  "matched",
 	})
-	return profile
+	return profile, nil
 }
 
 // openOverridden hands the url to the configured launcher and nothing else. An
@@ -225,7 +214,7 @@ func (o *opener) openOverridden(ctx context.Context, url string) error {
 	return nil
 }
 
-// openDefault raises the browser and then hands url to the pinned profile.
+// openDefault raises the browser and then hands url to the routed profile.
 //
 // ORDER MATTERS, and it is the reason focus lands on the right WINDOW. Chrome
 // raises the profile window it puts the new tab in, but it does not bring
@@ -257,7 +246,7 @@ func (o *opener) openDefault(ctx context.Context, url, profile string) error {
 		})
 		return wrapped
 	}
-	o.log.Debug("daemon.externalbrowser.open", "external link handed to the pinned profile", dlog.Context{
+	o.log.Debug("daemon.externalbrowser.open", "external link handed to the routed profile", dlog.Context{
 		"url":     url,
 		"profile": profile,
 		"branch":  "default",

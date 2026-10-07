@@ -1821,7 +1821,7 @@ two-line contract therefore requires the redraw path never to call it."
       (should (equal tabs-set '((current-tabs))))
       (should mode-line-forced))))
 
-;;;; ---- Tests: workspace-tabline-formatted (extracted from +dwc/) ----
+;;;; ---- Tests: workspace-tabline-formatted (extracted from the personal config) ----
 
 (ert-deftest agent-repl-test-workspace-tabline-formatted-alternates-across-toggle ()
   "Consecutive renders with opposite toggle values produce different strings.
@@ -2070,7 +2070,7 @@ standing in still says when its status moves."
           (should (= 2 (cl-count ?\[ visible)))
           (should (string-match-p "\\[1\\] first .*\\[2\\] second" visible)))))))
 
-;;;; ---- Tests: current-workspace-name-segment (extracted from +dwc/) ----
+;;;; ---- Tests: current-workspace-name-segment (extracted from the personal config) ----
 
 (ert-deftest agent-repl-test-current-workspace-name-segment-is-invisible ()
   "The right-aligned current-workspace segment carries `invisible t' so its only

@@ -91,7 +91,7 @@ func TestCyclingRightThenLeftReturnsToTheStartingTab(t *testing.T) {
 	r, _ := newResolver(t)
 	reg := registry(
 		workspace("w-ee", "explanation-engine"),
-		workspace("w-dwc", "DWC/chess960-review-failures-enm"),
+		workspace("w-abc", "ABC/chess960-review-failures-enm"),
 		workspace("w-rt4", "rt4-bootstrap-1"),
 	)
 	r.SetRegistry(reg)

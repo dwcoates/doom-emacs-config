@@ -5,6 +5,7 @@ The golden corpus (design doc §14.1 G13, §5.3 shape inventory). Every fixture 
 - Harvest date: 2026-07-23
 - Source machine: developer workstation (`~/.claude`, `~/.claude-chesscom` session stores; `/tmp/sdk-probe` SDK stream probes; `/tmp/claude-501` background-task spools).
 - Anonymization (applied by a shared walker, see notes column):
+  - Personal values, first and in keys too: the home directory becomes `~` (and its project-directory slug becomes `-`), each account email becomes `personN@example.com`, and each name of the person who ran the capture becomes `Someone`/`someone`.
   - Secret-looking tokens (Anthropic/GitHub/AWS/Slack keys, Bearer/JWT, `authorization`/`api-key`/`password`/`secret` values) -> `REDACTED`. No selected sample actually contained a secret, so no `REDACTED` markers appear.
   - Strings > 900 chars truncated to first 400 + `…[TRUNCATED N chars for corpus]`.
   - Opaque blobs (`signature`, base64 image `data`) truncated to a short prefix + `…[TRUNCATED N chars]`.

@@ -441,12 +441,12 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
      "tells the user their prompt could not be held, with its words")
     ("keybindings.el" agent-repl-reload-config "[agent-repl] Reloaded %s"
      "confirms the interactive source reload")
-    ("magit.el" +dwc/magit-toggle-tags-in-log "magit commit-list tags %s"
+    ("magit.el" agent-repl-magit-toggle-tags-in-log "magit commit-list tags %s"
      "confirms the interactive Magit display toggle")
-    ("magit.el" +dwc/magit-copy-commit-link
+    ("magit.el" agent-repl-magit-copy-commit-link
      "GitHub commit link copied to clipboard: %s"
      "confirms an interactive clipboard write")
-    ("magit.el" +dwc/open-workspace-pr-in-browser "Opened PR: %s"
+    ("magit.el" agent-repl-open-workspace-pr-in-browser "Opened PR: %s"
      "confirms the interactive browser action")
     ("panels.el" agent-repl-workspace-push-to-back
      "Pushed '%s' to the back; switched to '%s'."
@@ -3175,8 +3175,8 @@ The master kill-switch overrides the always-on file-write decoupling."
 (ert-deftest agent-repl-test-workspace-prefix-env-set ()
   "workspace-prefix falls back to the legacy CLAUDE_WORKSPACE_PREFIX."
   (cl-letf (((symbol-function 'getenv)
-             (lambda (k) (and (equal k "CLAUDE_WORKSPACE_PREFIX") "DWC"))))
-    (should (equal (agent-repl--workspace-prefix) "DWC"))))
+             (lambda (k) (and (equal k "CLAUDE_WORKSPACE_PREFIX") "ABC"))))
+    (should (equal (agent-repl--workspace-prefix) "ABC"))))
 
 (ert-deftest agent-repl-test-workspace-prefix-new-env-set ()
   "workspace-prefix returns the AGENT_WORKSPACE_PREFIX value when set."
@@ -3188,15 +3188,15 @@ The master kill-switch overrides the always-on file-write decoupling."
   "workspace-prefix prefers AGENT_WORKSPACE_PREFIX over the legacy var."
   (cl-letf (((symbol-function 'getenv)
              (lambda (k) (cond ((equal k "AGENT_WORKSPACE_PREFIX") "AWP")
-                               ((equal k "CLAUDE_WORKSPACE_PREFIX") "DWC")))))
+                               ((equal k "CLAUDE_WORKSPACE_PREFIX") "ABC")))))
     (should (equal (agent-repl--workspace-prefix) "AWP"))))
 
 (ert-deftest agent-repl-test-workspace-prefix-empty-new-env-falls-back ()
   "workspace-prefix treats an empty AGENT_WORKSPACE_PREFIX as unset."
   (cl-letf (((symbol-function 'getenv)
              (lambda (k) (cond ((equal k "AGENT_WORKSPACE_PREFIX") "")
-                               ((equal k "CLAUDE_WORKSPACE_PREFIX") "DWC")))))
-    (should (equal (agent-repl--workspace-prefix) "DWC"))))
+                               ((equal k "CLAUDE_WORKSPACE_PREFIX") "ABC")))))
+    (should (equal (agent-repl--workspace-prefix) "ABC"))))
 
 (ert-deftest agent-repl-test-workspace-prefix-env-unset ()
   "workspace-prefix returns the empty string when the env var is unset."

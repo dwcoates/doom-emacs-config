@@ -466,7 +466,7 @@ func driveRealTranscript(t *testing.T) []*storev1.StoreEntry {
 	return h.Handle(framesFrom(t, readFixture(t, path)), sessionContext(path, session))
 }
 
-// realTranscriptPath locates the one captured session under projects/.
+// realTranscriptPath locates the one captured session under testdata/projects/.
 func realTranscriptPath(t *testing.T) string {
 	t.Helper()
 	var found string

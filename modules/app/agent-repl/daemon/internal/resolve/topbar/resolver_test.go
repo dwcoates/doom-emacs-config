@@ -286,11 +286,11 @@ func TestTheTitleShowsABranchThatDiffersFromTheDefault(t *testing.T) {
 
 	// Act
 	h.r.SetNaming(testWS, Naming{
-		Title: "DWC", Branch: "fix-flaky-reconnect", DefaultBranch: "main", ConfigDir: "/root",
+		Title: "ABC", Branch: "fix-flaky-reconnect", DefaultBranch: "main", ConfigDir: "/root",
 	})
 
 	// Assert
-	if got := h.view(t).GetTitle().GetText(); got != "DWC · fix-flaky-reconnect" {
+	if got := h.view(t).GetTitle().GetText(); got != "ABC · fix-flaky-reconnect" {
 		t.Fatalf("title = %q, want the name and the branch", got)
 	}
 }
@@ -309,14 +309,14 @@ func TestTheTitleDropsABranchThatSaysNothing(t *testing.T) {
 		},
 		{
 			name:   "a branch equal to the name shown says nothing",
-			naming: Naming{Title: "DWC/chess960-review-failures-enm", Branch: "DWC/chess960-review-failures-enm", DefaultBranch: "main", ConfigDir: "/root"},
-			want:   "DWC/chess960-review-failures-enm",
+			naming: Naming{Title: "ABC/chess960-review-failures-enm", Branch: "ABC/chess960-review-failures-enm", DefaultBranch: "main", ConfigDir: "/root"},
+			want:   "ABC/chess960-review-failures-enm",
 		},
 		{
 			name:         "a branch equal to the slug still differs from the vendor title shown",
-			naming:       Naming{Slug: "DWC/chess960-review-failures-enm", Branch: "DWC/chess960-review-failures-enm", DefaultBranch: "main", ConfigDir: "/root"},
+			naming:       Naming{Slug: "ABC/chess960-review-failures-enm", Branch: "ABC/chess960-review-failures-enm", DefaultBranch: "main", ConfigDir: "/root"},
 			sessionTitle: "Add SPC j keybinding support",
-			want:         "Add SPC j keybinding support · DWC/chess960-review-failures-enm",
+			want:         "Add SPC j keybinding support · ABC/chess960-review-failures-enm",
 		},
 	}
 
@@ -1199,14 +1199,14 @@ func TestTheVendorsSummaryKeepsTheBranchBesideIt(t *testing.T) {
 	h := newHarness(t)
 	h.ready(t)
 	h.r.SetNaming(testWS, Naming{
-		Title: "fix-flaky-reconnect", Branch: "DWC/fix", DefaultBranch: "main", ConfigDir: "/root",
+		Title: "fix-flaky-reconnect", Branch: "ABC/fix", DefaultBranch: "main", ConfigDir: "/root",
 	})
 
 	// Act
 	h.r.OnSessionUpdate(testWS, sessionTitle("Add SPC j keybinding support"))
 
 	// Assert
-	if got, want := h.view(t).GetTitle().GetText(), "Add SPC j keybinding support · DWC/fix"; got != want {
+	if got, want := h.view(t).GetTitle().GetText(), "Add SPC j keybinding support · ABC/fix"; got != want {
 		t.Fatalf("title = %q, want %q", got, want)
 	}
 }

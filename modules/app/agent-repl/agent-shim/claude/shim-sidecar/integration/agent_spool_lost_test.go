@@ -29,7 +29,7 @@ func TestASilentAgentSpoolSettlesItsSpawnUnitLostOnTheWire(t *testing.T) {
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
 	session := "e1e1e1e1-e1e1-4e1e-8e1e-e1e1e1e1e1e1"
-	_, spoolPath, parent := seedBackgroundedAgent(t, tree, "/Users/dodgecoates/agent-spool-lost-probe", session)
+	_, spoolPath, parent := seedBackgroundedAgent(t, tree, "/work/agent-spool-lost-probe", session)
 	opts := lostOptions(t, fake.Socket, tree)
 	opts.StaleAgentSilence = shortSilence
 

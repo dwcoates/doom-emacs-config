@@ -148,7 +148,7 @@ func headRow(ws ids.WorkspaceID, lease ids.LeaseID, label string, startedMS int6
 	}
 }
 
-// branchLabel resolves the head's branch line ("DWC/fix-flaky → master").
+// branchLabel resolves the head's branch line ("ABC/fix-flaky → master").
 func branchLabel(source, target string) string {
 	return fmt.Sprintf("%s → %s", source, target)
 }

@@ -841,7 +841,8 @@ export const AgentRepl: GenService<{
     output: typeof CloseLoginResponseSchema;
   },
   /**
-   * Open a clicked link in the pinned external browser profile. See
+   * Open a clicked link in the browser profile the session's account signs
+   * in as. See
    * endpoint_open_external.proto.
    *
    * @generated from rpc agentrepl.v1.AgentRepl.OpenExternal

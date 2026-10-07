@@ -11,10 +11,13 @@ import (
 
 // fakeStore answers scripted verdicts and records what it was told.
 type fakeStore struct {
-	isNew bool
-	err   error
-	noted []string
+	isNew    bool
+	err      error
+	readOnly bool
+	noted    []string
 }
+
+func (s *fakeStore) ReadOnly() bool { return s.readOnly }
 
 func (s *fakeStore) NoteEditorInstance(_ context.Context, instance string, _ time.Time) (bool, error) {
 	s.noted = append(s.noted, instance)
@@ -36,6 +39,7 @@ func TestConnected(t *testing.T) {
 	tests := []struct {
 		name      string
 		serves    bool
+		readOnly  bool
 		isNew     bool
 		wantNew   bool
 		wantNoted int
@@ -45,11 +49,12 @@ func TestConnected(t *testing.T) {
 		{name: "a new process on the serving daemon is new", serves: true, isNew: true, wantNew: true, wantNoted: 1, wantLevel: "info", wantBegan: 1},
 		{name: "a reconnect on the serving daemon is not new", serves: true, isNew: false, wantNew: false, wantNoted: 1, wantLevel: "debug"},
 		{name: "a joining daemon judges nothing and writes nothing", serves: false, isNew: true, wantNew: false, wantNoted: 0, wantLevel: "debug"},
+		{name: "a serving daemon whose handle is not promoted yet writes nothing", serves: true, readOnly: true, isNew: true, wantNew: false, wantNoted: 0, wantLevel: "debug"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
-			store := &fakeStore{isNew: tt.isNew}
+			store := &fakeStore{isNew: tt.isNew, readOnly: tt.readOnly}
 			starts := &fakeStarts{}
 			logs := dlog.NewTestSurfaces()
 			tracker, err := New(store, func() bool { return tt.serves }, epoch, logs.Global(), starts)

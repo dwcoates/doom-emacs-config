@@ -140,7 +140,7 @@ metacharacters are never reachable as shell syntax."
         ;; code level.
         (should (equal (nth 2 captured-args) "feat;rm -rf /"))))))
 
-;;;; ---- Tests: +dwc/open-workspace-pr-in-browser ----
+;;;; ---- Tests: agent-repl-open-workspace-pr-in-browser ----
 
 (ert-deftest agent-repl-test-open-workspace-pr-browses-resolved-url ()
   "Calls `browse-url' with the URL returned by the gh resolver."
@@ -159,7 +159,7 @@ metacharacters are never reachable as shell syntax."
                    "https://github.com/ChessCom/repo/pull/7"))
                 ((symbol-function 'browse-url)
                  (lambda (url) (setq browsed url))))
-        (+dwc/open-workspace-pr-in-browser)
+        (agent-repl-open-workspace-pr-in-browser)
         (should (equal browsed "https://github.com/ChessCom/repo/pull/7"))))))
 
 (ert-deftest agent-repl-test-open-workspace-pr-errors-when-no-pr ()
@@ -173,9 +173,9 @@ metacharacters are never reachable as shell syntax."
                (lambda (_dir _branch) nil))
               ((symbol-function 'browse-url)
                (lambda (_url) (error "browse-url should not be called"))))
-      (should-error (+dwc/open-workspace-pr-in-browser) :type 'user-error))))
+      (should-error (agent-repl-open-workspace-pr-in-browser) :type 'user-error))))
 
-;;;; ---- Tests: +dwc/magit-status-workspace (always-replace-current-buffer) ----
+;;;; ---- Tests: agent-repl-magit-status-workspace (always-replace-current-buffer) ----
 
 (ert-deftest agent-repl-test-magit-status-workspace-calls-magit-status-with-ws-dir ()
   "Calls magit's status setup with the workspace's project directory."
@@ -186,7 +186,7 @@ metacharacters are never reachable as shell syntax."
                 ((symbol-function 'window-parameter) (lambda (_w _p) nil))
                 ((symbol-function 'magit-status-setup-buffer)
                  (lambda (&rest args) (setq magit-status-args args))))
-        (+dwc/magit-status-workspace)
+        (agent-repl-magit-status-workspace)
         (should (equal magit-status-args '("/tmp/proj/")))))))
 
 (ert-deftest agent-repl-test-magit-status-workspace-never-splits ()
@@ -199,7 +199,7 @@ metacharacters are never reachable as shell syntax."
                 ((symbol-function 'magit-status-setup-buffer) #'ignore)
                 ((symbol-function 'split-window)
                  (lambda (&rest _) (cl-incf split-calls) 'should-not-happen)))
-        (+dwc/magit-status-workspace)
+        (agent-repl-magit-status-workspace)
         (should (= split-calls 0))))))
 
 (ert-deftest agent-repl-test-magit-status-workspace-clears-fullscreen-config ()
@@ -211,7 +211,7 @@ buffer means claude is no longer fullscreen."
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
               ((symbol-function 'window-parameter) (lambda (_w _p) nil))
               ((symbol-function 'magit-status-setup-buffer) #'ignore))
-      (+dwc/magit-status-workspace)
+      (agent-repl-magit-status-workspace)
       (should (null (agent-repl--ws-get "test-ws" :fullscreen-config))))))
 
 (ert-deftest agent-repl-test-magit-status-workspace-binds-same-window-display-fn ()
@@ -226,7 +226,7 @@ window via the default traditional display behavior."
                 ((symbol-function 'magit-status-setup-buffer)
                  (lambda (&rest _)
                    (setq observed-fn magit-display-buffer-function))))
-        (+dwc/magit-status-workspace)
+        (agent-repl-magit-status-workspace)
         (should (eq observed-fn
                     #'agent-repl--magit-display-buffer-same-window))))))
 
@@ -239,7 +239,7 @@ is unchanged -- other magit buffers (diffs, logs) keep normal display."
                 ((symbol-function 'agent-repl--ws-dir) (lambda (_ws) "/tmp/proj"))
                 ((symbol-function 'window-parameter) (lambda (_w _p) nil))
                 ((symbol-function 'magit-status-setup-buffer) #'ignore))
-        (+dwc/magit-status-workspace)
+        (agent-repl-magit-status-workspace)
         (should (eq magit-display-buffer-function 'global-default))))))
 
 (ert-deftest agent-repl-test-magit-status-workspace-pops-out-of-side-window ()
@@ -257,7 +257,7 @@ buffer rather than failing on the dedicated side window."
                 ((symbol-function 'select-window)
                  (lambda (w) (setq selected-window-arg w)))
                 ((symbol-function 'magit-status-setup-buffer) #'ignore))
-        (+dwc/magit-status-workspace)
+        (agent-repl-magit-status-workspace)
         (should (eq selected-window-arg 'fake-main))))))
 
 (ert-deftest agent-repl-test-magit-status-workspace-skips-pop-when-not-side-window ()
@@ -272,7 +272,7 @@ buffer rather than failing on the dedicated side window."
                 ((symbol-function 'select-window)
                  (lambda (_w) (cl-incf select-calls)))
                 ((symbol-function 'magit-status-setup-buffer) #'ignore))
-        (+dwc/magit-status-workspace)
+        (agent-repl-magit-status-workspace)
         (should (= select-calls 0))))))
 
 (ert-deftest agent-repl-test-magit-status-workspace-falls-back-to-default-directory ()
@@ -287,7 +287,7 @@ hash entry has been killed."
                 ((symbol-function 'window-parameter) (lambda (_w _p) nil))
                 ((symbol-function 'magit-status-setup-buffer)
                  (lambda (&rest args) (setq magit-status-args args))))
-        (+dwc/magit-status-workspace)
+        (agent-repl-magit-status-workspace)
         (should (equal magit-status-args '("/tmp/fallback-dir/")))))))
 
 (ert-deftest agent-repl-test-magit-status-workspace-no-stub-when-untracked ()
@@ -301,7 +301,7 @@ so no STUB-CREATE entry leaks into the workspace state table."
                 ((symbol-function 'agent-repl--ws-put)
                  (lambda (&rest _) (cl-incf ws-put-calls)))
                 ((symbol-function 'magit-status-setup-buffer) #'ignore))
-        (+dwc/magit-status-workspace)
+        (agent-repl-magit-status-workspace)
         (should (= ws-put-calls 0))))))
 
 (ert-deftest agent-repl-test-magit-status-workspace-still-clears-fullscreen-when-tracked ()
@@ -313,10 +313,10 @@ Guards against the untracked-fallback regressing the tracked path."
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
               ((symbol-function 'window-parameter) (lambda (_w _p) nil))
               ((symbol-function 'magit-status-setup-buffer) #'ignore))
-      (+dwc/magit-status-workspace)
+      (agent-repl-magit-status-workspace)
       (should (null (agent-repl--ws-get "test-ws" :fullscreen-config))))))
 
-;;;; ---- Tests: +dwc/magit-status-workspace (fullscreen panel handling) ----
+;;;; ---- Tests: agent-repl-magit-status-workspace (fullscreen panel handling) ----
 
 (ert-deftest agent-repl-test-magit-status-workspace-fullscreen-closes-input-window ()
   "When the panels are visible, closes the input window so magit can fill the webview window."
@@ -335,7 +335,7 @@ Guards against the untracked-fallback regressing the tracked path."
                 ((symbol-function 'set-window-dedicated-p) #'ignore)
                 ((symbol-function 'select-window) #'ignore)
                 ((symbol-function 'magit-status-setup-buffer) #'ignore))
-        (+dwc/magit-status-workspace)
+        (agent-repl-magit-status-workspace)
         (should (memq 'fake-input-buf closed-bufs))))))
 
 (ert-deftest agent-repl-test-magit-status-workspace-fullscreen-undedicates-webview-window ()
@@ -355,7 +355,7 @@ Guards against the untracked-fallback regressing the tracked path."
                  (lambda (win dedicated) (setq dedicate-args (list win dedicated))))
                 ((symbol-function 'select-window) #'ignore)
                 ((symbol-function 'magit-status-setup-buffer) #'ignore))
-        (+dwc/magit-status-workspace)
+        (agent-repl-magit-status-workspace)
         (should (equal dedicate-args '(fake-webview-win nil)))))))
 
 (ert-deftest agent-repl-test-magit-status-workspace-fullscreen-selects-webview-window ()
@@ -375,7 +375,7 @@ Guards against the untracked-fallback regressing the tracked path."
                 ((symbol-function 'select-window)
                  (lambda (w) (push w selected-wins)))
                 ((symbol-function 'magit-status-setup-buffer) #'ignore))
-        (+dwc/magit-status-workspace)
+        (agent-repl-magit-status-workspace)
         (should (memq 'fake-webview-win selected-wins))))))
 
 (ert-deftest agent-repl-test-magit-status-workspace-not-fullscreen-no-panel-close ()
@@ -390,7 +390,7 @@ Guards against the untracked-fallback regressing the tracked path."
                 ((symbol-function 'agent-repl--close-buffer-window)
                  (lambda (_buf) (cl-incf close-calls)))
                 ((symbol-function 'magit-status-setup-buffer) #'ignore))
-        (+dwc/magit-status-workspace)
+        (agent-repl-magit-status-workspace)
         (should (= close-calls 0))))))
 
 (ert-deftest agent-repl-test-magit-status-workspace-fullscreen-no-input-buf-no-error ()
@@ -405,7 +405,7 @@ Guards against the untracked-fallback regressing the tracked path."
                 ((symbol-function 'agent-repl--close-buffer-window)
                  (lambda (_buf) (cl-incf close-calls)))
                 ((symbol-function 'magit-status-setup-buffer) #'ignore))
-        (+dwc/magit-status-workspace)
+        (agent-repl-magit-status-workspace)
         (should (= close-calls 0))))))
 
 ;;;; ---- Tests: agent-repl--magit-display-buffer-same-window ----
@@ -572,14 +572,14 @@ the first-restored-workspace splash-screen bug."
                  'magit-format-ref-labels)
     (should found)))
 
-;;;; ---- Tests: +dwc/magit-toggle-tags-in-log ----
+;;;; ---- Tests: agent-repl-magit-toggle-tags-in-log ----
 
 (ert-deftest agent-repl-test-magit-toggle-tags-in-log-flips-from-nil-to-t ()
   "Toggle flips the option from nil to t."
   (let ((agent-repl-magit-show-tags-in-log nil))
     (cl-letf (((symbol-function 'derived-mode-p) (lambda (&rest _) nil))
               ((symbol-function 'message) (lambda (&rest _) nil)))
-      (+dwc/magit-toggle-tags-in-log)
+      (agent-repl-magit-toggle-tags-in-log)
       (should (eq agent-repl-magit-show-tags-in-log t)))))
 
 (ert-deftest agent-repl-test-magit-toggle-tags-in-log-flips-from-t-to-nil ()
@@ -587,7 +587,7 @@ the first-restored-workspace splash-screen bug."
   (let ((agent-repl-magit-show-tags-in-log t))
     (cl-letf (((symbol-function 'derived-mode-p) (lambda (&rest _) nil))
               ((symbol-function 'message) (lambda (&rest _) nil)))
-      (+dwc/magit-toggle-tags-in-log)
+      (agent-repl-magit-toggle-tags-in-log)
       (should (null agent-repl-magit-show-tags-in-log)))))
 
 (ert-deftest agent-repl-test-magit-toggle-tags-in-log-refreshes-in-magit-mode ()
@@ -599,7 +599,7 @@ the first-restored-workspace splash-screen bug."
               ((symbol-function 'magit-refresh)
                (lambda (&rest _) (cl-incf refresh-calls)))
               ((symbol-function 'message) (lambda (&rest _) nil)))
-      (+dwc/magit-toggle-tags-in-log)
+      (agent-repl-magit-toggle-tags-in-log)
       (should (= refresh-calls 1)))))
 
 (ert-deftest agent-repl-test-magit-toggle-tags-in-log-no-refresh-outside-magit ()
@@ -610,12 +610,12 @@ the first-restored-workspace splash-screen bug."
               ((symbol-function 'magit-refresh)
                (lambda (&rest _) (cl-incf refresh-calls)))
               ((symbol-function 'message) (lambda (&rest _) nil)))
-      (+dwc/magit-toggle-tags-in-log)
+      (agent-repl-magit-toggle-tags-in-log)
       (should (= refresh-calls 0)))))
 
 (ert-deftest agent-repl-test-magit-toggle-tags-in-log-is-interactive ()
   "Toggle is an interactive command so it can be bound to a key."
-  (should (commandp #'+dwc/magit-toggle-tags-in-log)))
+  (should (commandp #'agent-repl-magit-toggle-tags-in-log)))
 
 ;;;; ---- Tests: agent-repl-magit-merge-base-ref (defcustom default) ----
 
@@ -756,7 +756,7 @@ the first-restored-workspace splash-screen bug."
                        "cafebabe"
                      "https://github.com/ChessCom/repo.git")))
                 ((symbol-function 'browse-url) (lambda (url) (setq browsed url))))
-        (+dwc/magit-open-commit-in-github)
+        (agent-repl-magit-open-commit-in-github)
         (should (equal browsed
                        "https://github.com/ChessCom/repo/commit/cafebabe"))))))
 
@@ -771,7 +771,7 @@ the first-restored-workspace splash-screen bug."
                      "cafebabe"
                    "https://example.com/someone/repo.git")))
               ((symbol-function 'browse-url) (lambda (_url) (error "must not browse"))))
-      (should-error (+dwc/magit-open-commit-in-github)))))
+      (should-error (agent-repl-magit-open-commit-in-github)))))
 
 (ert-deftest agent-repl-test-magit-copy-commit-link-kills-the-commit-url ()
   "The command puts the commit URL for the commit at point on the kill ring."
@@ -782,7 +782,7 @@ the first-restored-workspace splash-screen bug."
                 ((symbol-function 'magit-commit-at-point) (lambda () "d00dfeed"))
                 ((symbol-function 'agent-repl--git-string)
                  (lambda (&rest _args) "https://github.com/ChessCom/repo.git")))
-        (+dwc/magit-copy-commit-link)
+        (agent-repl-magit-copy-commit-link)
         (should (equal (car kill-ring)
                        "https://github.com/ChessCom/repo/commit/d00dfeed"))))))
 
@@ -799,7 +799,7 @@ the first-restored-workspace splash-screen bug."
 ;; the fix is pinned exactly where the bug lived.
 
 (defun agent-repl-test--magit-commit-url-for-remote (remote-url)
-  "Return the GitHub commit URL `+dwc/magit-open-commit-in-github' browses
+  "Return the GitHub commit URL `agent-repl-magit-open-commit-in-github' browses
 for REMOTE-URL, or signal whatever error the command signals."
   (let ((browsed nil))
     (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
@@ -810,7 +810,7 @@ for REMOTE-URL, or signal whatever error the command signals."
                      "cafebabe"
                    remote-url)))
               ((symbol-function 'browse-url) (lambda (url) (setq browsed url))))
-      (+dwc/magit-open-commit-in-github))
+      (agent-repl-magit-open-commit-in-github))
     browsed))
 
 (ert-deftest agent-repl-test-magit-commit-url-ssh-remote ()

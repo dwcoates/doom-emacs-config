@@ -47,7 +47,7 @@ func TestAnAsyncSpawnNamesTheSameAgentTheSidechainsMetaDoes(t *testing.T) {
 	defer cancel()
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
-	cwd := "/Users/dodgecoates/subagent-join-probe"
+	cwd := "/work/subagent-join-probe"
 	slug := cwdSlug(cwd)
 	session := "3a3a3a3a-3a3a-43a3-83a3-3a3a3a3a3a3a"
 
@@ -103,7 +103,7 @@ func TestAMetaThatParsesButNamesNoToolUseIdIsRefusedLoudly(t *testing.T) {
 	defer cancel()
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
-	cwd := "/Users/dodgecoates/subagent-meta-anonymous-probe"
+	cwd := "/work/subagent-meta-anonymous-probe"
 	slug := cwdSlug(cwd)
 	session := "3b3b3b3b-3b3b-43b3-83b3-3b3b3b3b3b3b"
 	opts := defaultSidecarOptions(t, fake.Socket, tree)
@@ -166,7 +166,7 @@ func TestASubagentsBookNamesNoVendorLocator(t *testing.T) {
 	defer cancel()
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
-	cwd := "/Users/dodgecoates/subagent-locator-join-probe"
+	cwd := "/work/subagent-locator-join-probe"
 	slug := cwdSlug(cwd)
 	session := "3c3c3c3c-3c3c-43c3-83c3-3c3c3c3c3c3c"
 	launch := corpusRecord(t, "tool-results/agent_async_launch.jsonl", 0)

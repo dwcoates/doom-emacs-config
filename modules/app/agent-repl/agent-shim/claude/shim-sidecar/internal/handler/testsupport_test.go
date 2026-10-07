@@ -84,7 +84,7 @@ func corpusRoot(t *testing.T) string {
 // projectsRoot locates the real captured transcript tree.
 func projectsRoot(t *testing.T) string {
 	t.Helper()
-	return filepath.Join(repoModuleRoot(t), "projects")
+	return filepath.Join(repoModuleRoot(t), "testdata", "projects")
 }
 
 // repoModuleRoot walks up to modules/app/agent-repl, which holds both testdata

@@ -31,7 +31,7 @@ func TestARenamedTranscriptKeepsItsFileIdCursor(t *testing.T) {
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
 	opts := defaultSidecarOptions(t, store.Socket, tree)
-	movedSlug := cwdSlug("/Users/dodgecoates/transcript-rename-probe")
+	movedSlug := cwdSlug("/work/transcript-rename-probe")
 	cut := 9
 
 	// Act: read the head, move the file, and keep appending to it in its new home.
@@ -74,7 +74,7 @@ func TestARenamedSpoolKeepsItsFileIdCursor(t *testing.T) {
 	defer cancel()
 	store := startRealStore(t)
 	tree := newVendorTree(t)
-	fx := seedDetachedShell(t, tree, "/Users/dodgecoates/spool-rename-probe",
+	fx := seedDetachedShell(t, tree, "/work/spool-rename-probe",
 		"d1d1d1d1-d1d1-4d1d-8d1d-d1d1d1d1d1d1")
 	movedPath := tree.spoolPath(fx.Slug, "d2d2d2d2-d2d2-4d2d-8d2d-d2d2d2d2d2d2", fx.TaskID)
 
@@ -136,7 +136,7 @@ func TestARenamedTranscriptResumesFromItsFileIdCursorOnTheNextCycle(t *testing.T
 	// levels; this subject asserts the per-item record, so it reads the log at
 	// the threshold that record is written to.
 	opts.ExtraEnv = []string{"AGENT_REPL_LOG_LEVEL=debug"}
-	movedSlug := cwdSlug("/Users/dodgecoates/transcript-rename-resume-probe")
+	movedSlug := cwdSlug("/work/transcript-rename-resume-probe")
 	cut := 9
 
 	// Act: read the head, rename the file, and start a fresh reader over it.
@@ -191,7 +191,7 @@ func TestARenamedTranscriptIsNotReReadFromZeroWithinOneCycle(t *testing.T) {
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
 	opts := defaultSidecarOptions(t, store.Socket, tree)
-	movedSlug := cwdSlug("/Users/dodgecoates/transcript-rename-incycle-probe")
+	movedSlug := cwdSlug("/work/transcript-rename-incycle-probe")
 	cut := 9
 
 	// Act: no restart — one cycle throughout.
@@ -241,8 +241,8 @@ func TestARenamedTranscriptIsRewoundOnceForTheWholeFile(t *testing.T) {
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
 	opts := defaultSidecarOptions(t, store.Socket, tree)
-	firstSlug := cwdSlug("/Users/dodgecoates/transcript-rewind-once-a-probe")
-	secondSlug := cwdSlug("/Users/dodgecoates/transcript-rewind-once-b-probe")
+	firstSlug := cwdSlug("/work/transcript-rewind-once-a-probe")
+	secondSlug := cwdSlug("/work/transcript-rewind-once-b-probe")
 	cut := 9
 
 	// Act: TWO renames, so a path-keyed bound would spend the rewind twice.

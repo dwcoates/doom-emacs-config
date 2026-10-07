@@ -9,9 +9,14 @@
 // What else a new Emacs is owed (the day's digest stood
 // again; the startup bring-up) is the caller's to do.
 //
-// Only the daemon that SERVES judges: a joining successor holds a read-only
-// state client and the incumbent already recorded the Emacs that is attaching
-// to it, so a successor answers "not new" without writing.
+// Only the daemon that SERVES, on a WRITING state handle, judges: a joining
+// successor holds a read-only state client and the incumbent already recorded
+// the Emacs that is attaching to it, so a successor answers "not new" without
+// writing. Both are asked because they flip at different moments: a successor
+// can serve intake before its handle is promoted, and a write on the read-only
+// handle would fail the attaching Emacs's stream (2026-10-07, the e2e handover
+// at freeness never promoted). A handle never returns to read-only once
+// promoted, so asking it first cannot race the write.
 package editorinstance
 
 import (
@@ -37,6 +42,8 @@ type Store interface {
 	// NoteEditorInstance records instance and answers whether it differs from
 	// the last one recorded.
 	NoteEditorInstance(ctx context.Context, instance string, at time.Time) (bool, error)
+	// ReadOnly reports whether the handle refuses writes right now.
+	ReadOnly() bool
 }
 
 // Tracker judges each Emacs WatchDaemon's instance.
@@ -72,6 +79,10 @@ func (t *Tracker) Connected(ctx context.Context, instance string) (bool, error) 
 	fields := dlog.Context{"instance": instance}
 	if !t.serves() {
 		t.log.Debug(op, "this daemon does not serve yet; an attaching Emacs is the one the incumbent recorded", fields)
+		return false, nil
+	}
+	if t.store.ReadOnly() {
+		t.log.Debug(op, "this daemon serves but its state handle is not promoted yet; an attaching Emacs is the one the incumbent recorded", fields)
 		return false, nil
 	}
 	at := t.now()

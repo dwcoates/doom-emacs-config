@@ -25,7 +25,7 @@ func TestABackgroundedAgentSpoolsFramesNameTheSubagentAsTopLevel(t *testing.T) {
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
 	session := "a5a5a5a5-a5a5-4a5a-8a5a-a5a5a5a5a5a5"
-	_, spoolPath, parent := seedBackgroundedAgent(t, tree, "/Users/dodgecoates/agent-spool-toplevel-probe", session)
+	_, spoolPath, parent := seedBackgroundedAgent(t, tree, "/work/agent-spool-toplevel-probe", session)
 
 	// Act.
 	startSidecar(t, defaultSidecarOptions(t, fake.Socket, tree))
@@ -73,7 +73,7 @@ func TestTheMidOutputCorpusSpoolIsNeverSettled(t *testing.T) {
 	defer cancel()
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
-	fx := seedDetachedShell(t, tree, "/Users/dodgecoates/spool-midoutput-probe",
+	fx := seedDetachedShell(t, tree, "/work/spool-midoutput-probe",
 		"1c1c1c1c-1c1c-41c1-81c1-1c1c1c1c1c1c")
 	payload := corpusBytes(t, "spools/bash-midoutput.output")
 

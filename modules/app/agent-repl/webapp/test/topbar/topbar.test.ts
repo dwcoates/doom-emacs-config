@@ -25,7 +25,7 @@ import { cascadedValue, installStylesheet } from "../stylesheet.js";
 /** A complete view; each test overrides only what it is about. */
 function view(overrides: Partial<TopbarView> = {}): TopbarView {
   const base = create(TopbarViewSchema, {
-    title: { text: "DWC/fix" },
+    title: { text: "ABC/fix" },
     sessionLine: { text: "session abc" },
     account: {
       state: { case: "loggedIn", value: { email: "a@b.test" } },
@@ -58,7 +58,7 @@ function view(overrides: Partial<TopbarView> = {}): TopbarView {
  */
 function sessionlessView(reason: string, context = "0"): TopbarView {
   return create(TopbarViewSchema, {
-    title: { text: "DWC/fix" },
+    title: { text: "ABC/fix" },
     account: { state: { case: "loggedIn", value: { email: "a@b.test" } } },
     connectivity: { tone: "none", glyph: "○", title: "no session" },
     context: { text: context, breakdown: { sections: [{ heading: { text: reason }, rows: [] }] } },
@@ -260,7 +260,7 @@ describe("mountTopbar", () => {
     const handle = mountWatching(host, daemon([view()]));
     await settle();
     // ASSERT
-    expect(host.querySelector(".topbar-title")?.textContent).toBe("DWC/fix");
+    expect(host.querySelector(".topbar-title")?.textContent).toBe("ABC/fix");
     handle.dispose();
   });
 
@@ -484,7 +484,7 @@ describe("mountTopbar: the chip's client-local failures", () => {
     await settle();
     // ASSERT: the stale view stays drawn, and the chip lists the dropped link.
     expect([host.querySelector(".topbar-title")?.textContent, listedArms(host)]).toEqual([
-      "DWC/fix",
+      "ABC/fix",
       ["daemonUnreachable"],
     ]);
     handle.dispose();

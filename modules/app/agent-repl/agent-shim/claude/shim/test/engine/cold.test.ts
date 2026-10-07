@@ -60,7 +60,7 @@ describe("the project-directory slug", () => {
   });
 
   it("preserves case", () => {
-    expect(cwdSlug("/Users/DodgeC")).toBe("-Users-DodgeC");
+    expect(cwdSlug("/Work/MixedC")).toBe("-Work-MixedC");
   });
 });
 

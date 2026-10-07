@@ -226,7 +226,7 @@ func TestAnInvalidRequestRefusalIsStatedExactlyOnce(t *testing.T) {
 	// Assert: it CONVERGES. A SECOND file appearing and reaching the store is the
 	// observable proof that further cycles ran; the defect is still stated once.
 	other := "71717171-7171-4171-8171-717171717171"
-	cwd := "/Users/dodgecoates/producer-defect-convergence-probe"
+	cwd := "/work/producer-defect-convergence-probe"
 	second := newGrowingFile(t, tree.sessionPath(cwdSlug(cwd), other))
 	second.AppendLine(encodeRecord(t, retargetSession(t, decodeRecord(t, captured.Lines[7]), other, cwd)))
 	awaitCursorInBatches(ctx, t, fake, second.Path(), second.Offset())

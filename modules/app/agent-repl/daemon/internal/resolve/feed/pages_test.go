@@ -294,14 +294,14 @@ func TestBreadcrumbLabelIsTheMergesBranchLine(t *testing.T) {
 	h := newHarness(t)
 	lease := ids.LeaseID("lease-7")
 	head := &frontendv1.FeedId{Value: "row|merge-head"}
-	h.resolver.MintSubFeedHead(testWorkspace, head, feedid.Feed{Root: true}, feedid.Feed{Merge: &lease}, "DWC/fix-flaky → master")
+	h.resolver.MintSubFeedHead(testWorkspace, head, feedid.Feed{Root: true}, feedid.Feed{Merge: &lease}, "ABC/fix-flaky → master")
 
 	// Act.
 	page, _ := h.openPage(feedid.Feed{Merge: &lease}, "reader-1")
 
 	// Assert.
 	crumbs := page.GetResult().(*frontendv1.FeedPage_Success).Success.GetBreadcrumbs().GetCrumbs()
-	if len(crumbs) != 1 || crumbs[0].GetLabel() != "DWC/fix-flaky → master" {
+	if len(crumbs) != 1 || crumbs[0].GetLabel() != "ABC/fix-flaky → master" {
 		t.Fatalf("crumbs = %+v, want the merge's branch line", crumbs)
 	}
 }

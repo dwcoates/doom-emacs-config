@@ -74,7 +74,6 @@ STAGE_ENTRIES=(
   testdata
   prompts
   skills
-  projects
   plans
   docs
   images

@@ -3293,7 +3293,7 @@ export const FeedDiffLineContextSchema: GenMessage<FeedDiffLineContext> = /*@__P
 export type FeedSkill = Message<"frontend.v1.FeedSkill"> & {
   /**
    * The invocation as one composed line — "/graphify" or "/workspace merge
-   * DWC/fix-flaky" — the line a user would have typed. Daemon-composed.
+   * ABC/fix-flaky" — the line a user would have typed. Daemon-composed.
    *
    * @generated from field: frontend.v1.FeedSkillInvocation invocation = 1;
    */
@@ -8088,7 +8088,7 @@ export const FeedWorktreeBranchSchema: GenMessage<FeedWorktreeBranch> = /*@__PUR
  * transfers nothing but this head, and a settled merge pages like any
  * settled bubble.
  *
- *   │ ⇄ merge  DWC/fix-flaky → master           6:31  ● merging  ▾      │
+ *   │ ⇄ merge  ABC/fix-flaky → master           6:31  ● merging  ▾      │
  *   │ ┌───────────────────────────────────────────────────────────────┐ │
  *   │ │ queue ✓ │ rebasing ✓ │ tests ✗ │ fixing ✓ │ tests (2) ● 8/12  │ │
  *   │ ├───────────────────────────────────────────────────────────────┤ │
@@ -8196,7 +8196,7 @@ export const FeedMergeGlyphSchema: GenMessage<FeedMergeGlyph> = /*@__PURE__*/
   messageDesc(file_frontend_v1_feed, 275);
 
 /**
- * The branch line, resolved ("DWC/fix-flaky-test → master").
+ * The branch line, resolved ("ABC/fix-flaky-test → master").
  *
  * @generated from message frontend.v1.FeedMergeLabel
  */

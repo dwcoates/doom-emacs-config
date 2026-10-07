@@ -114,7 +114,7 @@ func TestARejectedTaskUpdateNeverResolvesTheStatusItAskedFor(t *testing.T) {
 	defer cancel()
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
-	cwd := "/Users/dodgecoates/task-reject-probe"
+	cwd := "/work/task-reject-probe"
 	session := "5a5a5a5a-5a5a-45a5-85a5-5a5a5a5a5a5a"
 	callID := "toolu_task_update_rejected"
 
@@ -146,7 +146,7 @@ func TestAnEdgeOnlyTaskUpdateLeavesTheStatusUnset(t *testing.T) {
 	defer cancel()
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
-	cwd := "/Users/dodgecoates/task-edge-probe"
+	cwd := "/work/task-edge-probe"
 	session := "5b5b5b5b-5b5b-45b5-85b5-5b5b5b5b5b5b"
 	callID := "toolu_task_update_edge_only"
 

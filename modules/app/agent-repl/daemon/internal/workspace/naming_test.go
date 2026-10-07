@@ -42,7 +42,7 @@ func TestValidateSlugRefusesWhatTheRuleForbids(t *testing.T) {
 		{name: "a sentence around the name", slug: "the name is fix-login"},
 		{name: "leading hyphen", slug: "-fix-login"},
 		{name: "trailing hyphen", slug: "fix-login-"},
-		{name: "a slash", slug: "DWC/fix-login"},
+		{name: "a slash", slug: "ABC/fix-login"},
 		{name: "a path component", slug: "../escape"},
 		{name: "punctuation", slug: "fix_login"},
 		{name: "over the length bound", slug: strings.Repeat("a", SlugMaxLen+1)},
@@ -101,11 +101,11 @@ func TestValidateSlugNamesAnOverLongAnswersWordCount(t *testing.T) {
 
 func TestNamePrefixesTheSlug(t *testing.T) {
 	// Arrange. Act.
-	got := Name("DWC", "fix-login")
+	got := Name("ABC", "fix-login")
 
 	// Assert.
-	if got != "DWC/fix-login" {
-		t.Fatalf("Name() = %q, want DWC/fix-login", got)
+	if got != "ABC/fix-login" {
+		t.Fatalf("Name() = %q, want ABC/fix-login", got)
 	}
 }
 
@@ -121,7 +121,7 @@ func TestNameWithoutAPrefixIsTheBareSlug(t *testing.T) {
 
 func TestBareNameStripsThePrefix(t *testing.T) {
 	// Arrange. Act.
-	got := BareName("DWC/fix-login")
+	got := BareName("ABC/fix-login")
 
 	// Assert.
 	if got != "fix-login" {
@@ -166,7 +166,7 @@ func TestWorktreeDirOfAMainWorktreeIsTheSiblingWorktreesDirectory(t *testing.T) 
 	}
 
 	// Act.
-	got, err := WorktreeDir(repo, "DWC/fix-login")
+	got, err := WorktreeDir(repo, "ABC/fix-login")
 
 	// Assert.
 	want := filepath.Join(parent, "doom-worktrees", "fix-login")
@@ -187,7 +187,7 @@ func TestWorktreeDirOfALinkedWorktreeStaysASibling(t *testing.T) {
 	}
 
 	// Act.
-	got, err := WorktreeDir(worktree, "DWC/fix-login")
+	got, err := WorktreeDir(worktree, "ABC/fix-login")
 
 	// Assert.
 	want := filepath.Join(parent, "fix-login")
@@ -241,7 +241,7 @@ func TestWorktreeDirOfACommonDirReadsBackToTheMainWorktree(t *testing.T) {
 	}
 
 	// Act.
-	got, err := WorktreeDir(filepath.Join(repo, ".git"), "DWC/fix-login")
+	got, err := WorktreeDir(filepath.Join(repo, ".git"), "ABC/fix-login")
 
 	// Assert.
 	want := filepath.Join(parent, "doom-worktrees", "fix-login")

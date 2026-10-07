@@ -27,7 +27,7 @@ func TestATaskStopOnAnAgentTaskCancelsItsSpawnUnit(t *testing.T) {
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
-	cwd := "/Users/dodgecoates/taskstop-agent-probe"
+	cwd := "/work/taskstop-agent-probe"
 	session := "6a6a6a6a-6a6a-46a6-86a6-6a6a6a6a6a6a"
 	launch := corpusRecord(t, "tool-results/agent_async_launch.jsonl", 0)
 	vendorTask, _ := launch["toolUseResult"].(map[string]any)["agentId"].(string)
@@ -85,7 +85,7 @@ func TestATaskStopForATaskNoLaunchOpenedIsClassifiedWholeAndLoudly(t *testing.T)
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
-	cwd := "/Users/dodgecoates/taskstop-unlaunched-probe"
+	cwd := "/work/taskstop-unlaunched-probe"
 	slug := cwdSlug(cwd)
 	session := "6b6b6b6b-6b6b-46b6-86b6-6b6b6b6b6b6b"
 	// The per-record withholding statement is DEBUG, and it is this subject's

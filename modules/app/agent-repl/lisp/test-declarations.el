@@ -48,7 +48,7 @@ rather than calling it.
 An entry here is a claim about a guard, so adding one means pointing at
 the guard.  A declare that is merely stale is a defect, not an entry.")
 
-(defconst agent-repl-test-declarations--own-prefixes '("agent-repl" "+dwc/")
+(defconst agent-repl-test-declarations--own-prefixes '("agent-repl")
   "Prefixes marking a symbol this tree is responsible for defining.
 Everything else a `declare-function' names belongs to Emacs itself or to a
 package the module depends on, and is not this suite's business.")

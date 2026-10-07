@@ -719,7 +719,7 @@ generated arms when the landing merges (one place each):
   untouched; stream-request validation runs BEFORE registration so refusals
   stay refusals. A proven copy (read-only reference): branch
   overhaul/elisp-integration, worktree
-  /Users/dodgecoates/.config/doom-overhaul/elisp-agents/integration, file
+  ~/.config/doom-overhaul/elisp-agents/integration, file
   modules/app/agent-repl/lisp/testsupport/fakedaemon/accept.go (+ test).
   Verify in the integration suite: a Watch* open on a workspace with no
   published view returns headers before any frame.

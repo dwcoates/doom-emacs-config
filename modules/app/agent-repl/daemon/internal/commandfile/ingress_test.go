@@ -165,7 +165,7 @@ func TestApplyFileMapsCreateOntoTheCreationVerb(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
 	path := f.write(t, "workspace_commands_c.json",
-		`[{"type":"create","name":"DWC/x","git_root":"/repo","prompt":"do a thing"}]`)
+		`[{"type":"create","name":"ABC/x","git_root":"/repo","prompt":"do a thing"}]`)
 
 	// Act.
 	if err := f.ingress.ApplyFile(context.Background(), path); err != nil {
@@ -177,7 +177,7 @@ func TestApplyFileMapsCreateOntoTheCreationVerb(t *testing.T) {
 		t.Fatalf("verb calls = %v, want one create", verbNames(f.verbs.calls))
 	}
 	spec := f.verbs.calls[0].Spec
-	if spec.RepoDir != "/repo" || spec.Name != "DWC/x" || spec.InitialPrompt != "do a thing" {
+	if spec.RepoDir != "/repo" || spec.Name != "ABC/x" || spec.InitialPrompt != "do a thing" {
 		t.Fatalf("create spec = %+v, want the entry's own fields", spec)
 	}
 }

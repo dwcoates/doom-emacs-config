@@ -281,7 +281,7 @@ the new no-scope path didn't accidentally rewrite this case."
 (ert-deftest agent-repl-test-prefix-no-scope-special-char-branch ()
   "Branch names with slashes/dots are injected as scope literally."
   (let ((agent-repl-emoji-wildcard-chance 0))
-    (let* ((branch "DWC/feat.bar")
+    (let* ((branch "ABC/feat.bar")
            (result (agent-repl--emoji-prefix-commit-message
                     "feat: ship it" branch)))
       (should (string-prefix-p (concat "feat(" branch "): ") result))

@@ -60,7 +60,7 @@ func oneShotBriefs(f *fixture) {
 func TestCreateNamesTheBranchFromTheModelsAnswer(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
-	t.Setenv(PrefixEnv, "DWC")
+	t.Setenv(PrefixEnv, "ABC")
 	t.Setenv(LegacyPrefixEnv, "")
 
 	// Act.
@@ -69,15 +69,15 @@ func TestCreateNamesTheBranchFromTheModelsAnswer(t *testing.T) {
 	}
 
 	// Assert.
-	if len(f.git.created) != 1 || f.git.created[0].Branch != "DWC/"+FixtureMintedName {
-		t.Fatalf("created worktrees = %+v, want branch DWC/%s", f.git.created, FixtureMintedName)
+	if len(f.git.created) != 1 || f.git.created[0].Branch != "ABC/"+FixtureMintedName {
+		t.Fatalf("created worktrees = %+v, want branch ABC/%s", f.git.created, FixtureMintedName)
 	}
 }
 
 func TestCreatePutsTheWorktreeInTheSiblingWorktreesDirectory(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
-	t.Setenv(PrefixEnv, "DWC")
+	t.Setenv(PrefixEnv, "ABC")
 	spec := standardSpec(t, f)
 
 	// Act.
@@ -95,7 +95,7 @@ func TestCreatePutsTheWorktreeInTheSiblingWorktreesDirectory(t *testing.T) {
 func TestCreateUsesTheSuppliedName(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
-	t.Setenv(PrefixEnv, "DWC")
+	t.Setenv(PrefixEnv, "ABC")
 	spec := standardSpec(t, f)
 	spec.Name = "chosen-name"
 
@@ -105,15 +105,15 @@ func TestCreateUsesTheSuppliedName(t *testing.T) {
 	}
 
 	// Assert.
-	if f.git.created[0].Branch != "DWC/chosen-name" {
-		t.Fatalf("branch = %q, want DWC/chosen-name", f.git.created[0].Branch)
+	if f.git.created[0].Branch != "ABC/chosen-name" {
+		t.Fatalf("branch = %q, want ABC/chosen-name", f.git.created[0].Branch)
 	}
 }
 
 func TestCreateKeepsASuppliedNameThatAlreadyCarriesAPrefix(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
-	t.Setenv(PrefixEnv, "DWC")
+	t.Setenv(PrefixEnv, "ABC")
 	spec := standardSpec(t, f)
 	spec.Name = "OTHER/chosen"
 
@@ -732,7 +732,7 @@ func TestCreateWithNeitherANameNorAPromptNamesTheBranchAfterTheWorkspaceID(t *te
 	// Arrange: the empty standard form, which the create contract calls an
 	// empty workspace rather than a refusal.
 	f := newFixture(t)
-	t.Setenv(PrefixEnv, "DWC")
+	t.Setenv(PrefixEnv, "ABC")
 	t.Setenv(LegacyPrefixEnv, "")
 	spec := standardSpec(t, f)
 	spec.InitialPrompt = ""
@@ -747,7 +747,7 @@ func TestCreateWithNeitherANameNorAPromptNamesTheBranchAfterTheWorkspaceID(t *te
 		t.Fatalf("created worktrees = %+v, want exactly one", f.git.created)
 	}
 	branch := f.git.created[0].Branch
-	if !strings.HasPrefix(branch, "DWC/"+UnnamedSlugPrefix) {
+	if !strings.HasPrefix(branch, "ABC/"+UnnamedSlugPrefix) {
 		t.Fatalf("branch = %q, want it named after the minted workspace id", branch)
 	}
 }
@@ -992,7 +992,7 @@ func TestCreateReportsItsStageSequencePerForm(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange.
-			t.Setenv(PrefixEnv, "DWC")
+			t.Setenv(PrefixEnv, "ABC")
 			f, spec := tc.arrange(t)
 			rec := &recordingProgress{}
 			spec.Progress = rec
@@ -1040,7 +1040,7 @@ func TestCreateEndsItsStagesAtTheFailingStep(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange.
 			f := newFixture(t)
-			t.Setenv(PrefixEnv, "DWC")
+			t.Setenv(PrefixEnv, "ABC")
 			spec := standardSpec(t, f)
 			spec.Name = "chosen-name"
 			rec := &recordingProgress{}

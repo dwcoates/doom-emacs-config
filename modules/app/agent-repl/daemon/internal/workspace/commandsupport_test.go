@@ -89,7 +89,7 @@ func TestRequestCommandSupportNamesTheWorkspaceAfterTheCommand(t *testing.T) {
 	// Arrange: a slug derived from a thousand-word brief would name the brief
 	// rather than the command.
 	f, _ := supportFixture(t)
-	t.Setenv(PrefixEnv, "DWC")
+	t.Setenv(PrefixEnv, "ABC")
 
 	// Act.
 	if _, err := f.verbs.RequestCommandSupport(context.Background(), "w1", "/status"); err != nil {
@@ -97,8 +97,8 @@ func TestRequestCommandSupportNamesTheWorkspaceAfterTheCommand(t *testing.T) {
 	}
 
 	// Assert.
-	if f.git.created[0].Branch != "DWC/support-status" {
-		t.Fatalf("branch = %q, want DWC/support-status", f.git.created[0].Branch)
+	if f.git.created[0].Branch != "ABC/support-status" {
+		t.Fatalf("branch = %q, want ABC/support-status", f.git.created[0].Branch)
 	}
 }
 

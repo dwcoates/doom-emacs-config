@@ -209,7 +209,7 @@ func TestAVanishedSpoolIsConcludedFileVanished(t *testing.T) {
 	defer cancel()
 	store := startRealStore(t)
 	tree := newVendorTree(t)
-	fx := seedDetachedShell(t, tree, "/Users/dodgecoates/lost-vanished-probe",
+	fx := seedDetachedShell(t, tree, "/work/lost-vanished-probe",
 		"a1a1a1a1-a1a1-4a1a-8a1a-a1a1a1a1a1a1")
 	opts := lostOptions(t, store.Socket, tree)
 	opts.StaleGrace = shortGrace
@@ -236,7 +236,7 @@ func TestAVanishedSpoolSettlesItsRunAsInterrupted(t *testing.T) {
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
 	session := "a2a2a2a2-a2a2-4a2a-8a2a-a2a2a2a2a2a2"
-	fx := seedDetachedShell(t, tree, "/Users/dodgecoates/lost-vanished-terminal-probe", session)
+	fx := seedDetachedShell(t, tree, "/work/lost-vanished-terminal-probe", session)
 	opts := lostOptions(t, fake.Socket, tree)
 	opts.StaleGrace = shortGrace
 
@@ -274,7 +274,7 @@ func TestASpoolThatStopsGrowingIsConcludedWentSilent(t *testing.T) {
 	defer cancel()
 	store := startRealStore(t)
 	tree := newVendorTree(t)
-	fx := seedDetachedShell(t, tree, "/Users/dodgecoates/lost-silent-probe",
+	fx := seedDetachedShell(t, tree, "/work/lost-silent-probe",
 		"b1b1b1b1-b1b1-4b1b-8b1b-b1b1b1b1b1b1")
 	opts := lostOptions(t, store.Socket, tree)
 	opts.StaleShellSilence = shortSilence
@@ -300,7 +300,7 @@ func TestASilentSpoolSettlesItsRunAsInterrupted(t *testing.T) {
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
 	session := "b2b2b2b2-b2b2-4b2b-8b2b-b2b2b2b2b2b2"
-	fx := seedDetachedShell(t, tree, "/Users/dodgecoates/lost-silent-terminal-probe", session)
+	fx := seedDetachedShell(t, tree, "/work/lost-silent-terminal-probe", session)
 	opts := lostOptions(t, fake.Socket, tree)
 	opts.StaleShellSilence = shortSilence
 
@@ -363,7 +363,7 @@ func TestAPreBootUnclaimedSpoolIsNeverRead(t *testing.T) {
 	tree := newVendorTree(t)
 	opts := debugLogging(lostOptions(t, fake.Socket, tree))
 	opts.UnownedSpoolWindow = time.Millisecond
-	spoolPath := seedPreBootSpool(t, tree, "/Users/dodgecoates/lost-swept-residue-probe",
+	spoolPath := seedPreBootSpool(t, tree, "/work/lost-swept-residue-probe",
 		"c2c2c2c2-c2c2-4c2c-8c2c-c2c2c2c2c2c2", "output from before the reboot\n")
 
 	// Act.
@@ -401,7 +401,7 @@ func TestASpoolThatKeepsGrowingIsNeverConcludedLost(t *testing.T) {
 	store := startRealStore(t)
 	tree := newVendorTree(t)
 	session := "d1d1d1d1-d1d1-4d1d-8d1d-d1d1d1d1d1d1"
-	fx := seedDetachedShell(t, tree, "/Users/dodgecoates/lost-growing-probe", session)
+	fx := seedDetachedShell(t, tree, "/work/lost-growing-probe", session)
 	opts := lostOptions(t, store.Socket, tree)
 	opts.StaleShellSilence = growthSilence
 	// The fence: a second claimed run that says one line and goes silent, so it

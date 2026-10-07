@@ -12,9 +12,9 @@ func TestConfigFromEnv(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name: "unset is the production layout and the default hotspot",
+			name: "unset is the production layout and no hotspot",
 			env:  map[string]string{},
-			want: Config{Tools: DefaultTools(), Hotspot: DefaultHotspot},
+			want: Config{Tools: DefaultTools()},
 		},
 		{
 			name: "a tools dir resolves every tool there by its base name",
@@ -23,7 +23,7 @@ func TestConfigFromEnv(t *testing.T) {
 				Sudo: "/fake/bin/sudo", Pmset: "/fake/bin/pmset", Ipconfig: "/fake/bin/ipconfig",
 				Networksetup: "/fake/bin/networksetup", WifiUtil: "/fake/bin/wifi-util",
 				Brightness: "/fake/bin/mac-brightness",
-			}, Hotspot: DefaultHotspot},
+			}},
 		},
 		{
 			name: "a hotspot override names the hotspot",
@@ -71,9 +71,9 @@ func TestSameNetworkFoldsTheApostropheSpellings(t *testing.T) {
 		a, b string
 		want bool
 	}{
-		{"Dodge's iPhone", "Dodge’s iPhone", true},
-		{"Dodge‘s iPhone", "Dodge’s iPhone", true},
-		{"Dodge's iPhone", "Dodges iPhone", false},
+		{"Someone's iPhone", "Someone’s iPhone", true},
+		{"Someone‘s iPhone", "Someone’s iPhone", true},
+		{"Someone's iPhone", "Someones iPhone", false},
 		{"", "", false},
 	}
 	for _, tc := range cases {
@@ -88,17 +88,10 @@ func TestSameNetworkFoldsTheApostropheSpellings(t *testing.T) {
 
 func TestPreferredNetworksParsesTheIndentedSSIDs(t *testing.T) {
 	// Act.
-	got := preferredNetworks("Preferred networks on en0:\n\tHome\n\tDodge’s iPhone\n")
+	got := preferredNetworks("Preferred networks on en0:\n\tHome\n\tSomeone’s iPhone\n")
 
 	// Assert.
-	if len(got) != 2 || got[0] != "Home" || got[1] != "Dodge’s iPhone" {
+	if len(got) != 2 || got[0] != "Home" || got[1] != "Someone’s iPhone" {
 		t.Fatalf("preferredNetworks = %q, want the two saved SSIDs", got)
-	}
-}
-
-func TestTheDefaultHotspotIsSpelledAsTheIPhoneNamesItself(t *testing.T) {
-	// Assert.
-	if DefaultHotspot != "Dodge’s iPhone" {
-		t.Fatalf("DefaultHotspot = %q, want the curly apostrophe", DefaultHotspot)
 	}
 }
