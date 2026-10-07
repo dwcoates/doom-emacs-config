@@ -640,8 +640,10 @@ looked at."
     ;; Assert
     (should (null agent-repl-host-last-selected-id))))
 
-(ert-deftest agent-repl-test-host-select-transport-failure-does-not-record-the-id ()
-  "Nobody answering is not the daemon stamping the workspace either."
+(ert-deftest agent-repl-test-host-select-transport-failure-records-the-selection-to-reassert ()
+  "Nobody answering leaves the user's choice standing, even with the link
+still up as the failure lands: the next link-up re-asserts it, so the
+order of the failure and the link-down edge decides nothing (2026-10-07)."
   (agent-repl-test-host--with-harness
     ;; Arrange
     (agent-repl-test-host--subscribe "ws-1")
@@ -650,7 +652,19 @@ looked at."
     ;; Act
     (agent-repl-host-select "ws-1")
     ;; Assert
-    (should (null agent-repl-host-last-selected-id))))
+    (should (equal agent-repl-host-last-selected-id "ws-id-1"))))
+
+(ert-deftest agent-repl-test-host-select-transport-failure-with-the-link-up-is-logged-at-error ()
+  "With the link up, a select nobody answered is the error it is."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (setq agent-repl-test-host--select-answer
+          (list :failure (list :kind :transport :message "no route")))
+    ;; Act
+    (agent-repl-host-select "ws-1")
+    ;; Assert
+    (should (agent-repl-test-host--logged-p :error "elisp.host.select-failed ws=ws-1"))))
 
 (defun agent-repl-test-host--select-failing-as-the-daemon-goes ()
   "Arrange a select whose daemon goes away under it: the link is down as
