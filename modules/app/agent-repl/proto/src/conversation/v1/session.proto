@@ -63,6 +63,10 @@ message SessionStarted {
   repeated AgentDetachedWork live_work = 6;
 
   // Tag 8 is RETIRED: the vendor handshake block is deferred.
+
+  // The session contract this shim speaks. UNSPECIFIED means it predates the
+  // stamp. See SessionContract.
+  SessionContract contract = 10;
 }
 
 // The shim and the SDK it drives. Fixed for the process; stated once.
@@ -256,6 +260,10 @@ message SessionUpdate {
     // for the effort a session runs at; a level read from settings files is
     // only what stands before the first push (owner ruling, 2026-10-02).
     SessionEffortChanged effort_changed = 33;
+    // THE LIVE-WORK LEVEL: every detached item the session's CURRENT vendor
+    // process holds running, pushed whenever that membership changes. See
+    // SessionLiveWork, which carries the level's whole contract.
+    SessionLiveWork live_work = 34;
   }
 }
 
@@ -481,6 +489,64 @@ message SessionQueryIteratorFailure {
 message SessionPermissionModeChanged {
   // The mode now in effect.
   AgentPermissionMode permission_mode = 1;
+}
+
+// THE LIVE-WORK LEVEL (owner ruling, 2026-10-07): which detached work is
+// running is a LEVEL owned by the vendor process that runs it, never an edge
+// read out of a record.
+//
+// - REPLACE SEMANTICS. Each push is the WHOLE set; a consumer swaps its set
+//   for it and never pairs it with announcements or terminals, so a missed
+//   bookend cannot leave work standing as live.
+// - SCOPED TO ONE VENDOR PROCESS. The shim pushes an EMPTY level the moment
+//   the vendor process it drives ends or restarts, before anything the next
+//   process states, so no item outlives the process that ran it. With the
+//   shim's own process gone the stream ends, and the consumer empties its set.
+// - THE ONLY ADMISSION. A consumer counts an item live only while the latest
+//   level (or SessionStarted.live_work, the same level stated at an opening)
+//   names it. An AgentDetachedWork announcement, live or replayed from
+//   history, DESCRIBES the item and never makes it live; a terminal states
+//   how it ENDED and never decides whether it is running.
+// - IDS ONLY, as the vendor's own level is. What an item is (its kind, its
+//   agent) comes from its announcement, or from SessionStarted.live_work at
+//   an opening. A named item whose announcement has not arrived yet is still
+//   live, counted by its handle until its description lands.
+// - ONLY A SHIM STAMPED SESSION_CONTRACT_LIVE_WORK_LEVEL (or later) pushes
+//   it; see SessionContract.
+//
+// SHELLS ARE NOT IN IT. A detached shell's end has ONE writer, the sidecar,
+// which writes the run's terminal once it has read the spool to its end, so
+// the record is complete for a shell and its liveness is read from its
+// announcement and that terminal. A shell the vendor already finished is
+// still live until its output is all ingested and drawn. The level names
+// every other kind: subagents and monitors.
+//
+// An item that leaves the level with no terminal stated yet is SETTLING: the
+// vendor states the outcome on its own edge, which may follow the level. One
+// whose process ended with no outcome ever stated is LOST, how
+// `process_ended` (DetachedLost).
+message SessionLiveWork {
+  // Every detached item live now, by its handle, shells excepted. EMPTY means
+  // nothing but shells runs.
+  repeated DetachedWorkId live_work = 1;
+}
+
+// The revision of the session contract a shim speaks, stated once on
+// SessionStarted. Ordered: each revision keeps every guarantee of the ones
+// before it. A consumer compares revisions by order.
+//
+// A closed set of scalar revisions, not a state: an enum by the same carve-out
+// AgentActivityContract takes.
+enum SessionContract {
+  // The shim predates the stamp: it pushes no live-work level, so its live
+  // membership is what its announcements and terminals state, read as the
+  // expected old data it is. It is replaced at the next deploy that finds it
+  // free.
+  SESSION_CONTRACT_UNSPECIFIED = 0;
+  // The shim pushes SessionUpdate.live_work on every membership change and an
+  // empty level whenever its vendor process ends or restarts, so liveness is
+  // the level and nothing else (owner ruling, 2026-10-07).
+  SESSION_CONTRACT_LIVE_WORK_LEVEL = 1;
 }
 
 // The model in effect for subsequent responses.

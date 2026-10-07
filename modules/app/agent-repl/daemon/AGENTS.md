@@ -633,6 +633,40 @@ ids the watcher ADOPTED (an `OnDetachedWork` with no announcer, the one shape
 adoption takes) and ids already retired (a replay). A re-take of the same set
 mints nothing, and crons, tasks and workflows are never in the set.
 
+### Detached-work liveness is the vendor process's LEVEL
+
+Owner ruling, 2026-10-07 (`docs/protobuf-design/2026-10-07-subagent-liveness.md`).
+For a shim stamped `SESSION_CONTRACT_LIVE_WORK_LEVEL`
+(`conversation.v1.SessionStarted.contract`), WHICH SUBAGENTS AND MONITORS ARE
+LIVE is exactly what the shim's latest `conversation.v1.SessionUpdate.live_work`
+level (or `SessionStarted.live_work` at an opening) names, and nothing else
+(`internal/sessionwatcher/level.go`):
+
+- An `AgentDetachedWork` announcement, live or replayed from history, only
+  DESCRIBES an item. It never admits one, so a catch-up page can never make
+  finished work live again (the 2026-10-07 regression: 13 finished subagents
+  re-admitted after a handover, 3 of them drawn in the footer for good).
+- A level naming an undescribed handle holds it PENDING
+  (`LiveWorkSet.Pending`, counted for freeness) until its announcement lands.
+- A level no longer naming an item concludes it `left_level`; a terminal
+  still concludes one, and a concluded handle never comes back.
+- SHELLS ARE NOT IN THE LEVEL: their end has one writer (the sidecar's
+  terminal, once the spool is read to its end), so a shell is admitted at its
+  announcement and concluded by that terminal, as before.
+- The process ending (a departure, the query dying) publishes the empty set
+  with `LiveWorkSet.ProcessEnded`, so the feed draws lost `process_ended`
+  rather than settling.
+
+The FEED follows the same set (`internal/resolve/feed/subagent.go`): a head
+that leaves it with no terminal is `settling`; a head a HISTORY PAGE drew
+running that no set names ran in an earlier process and is lost
+`process_ended`; a head drawn from the live tail is never judged that way,
+because its level push may still follow. A terminal always replaces either.
+
+A shim whose SessionStarted predates the stamp is read the old way (from its
+announcements and terminals) until the next deploy replaces it; a level from
+such a shim is refused at ERROR (`daemon.sessionwatcher.level_unexpected`).
+
 ### The footer draws only the MAIN AGENT's live work
 
 Owner ruling, 2026-09-30: "work the subagents started should not appear in the

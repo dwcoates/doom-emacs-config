@@ -29,8 +29,10 @@ package convert
 //     the only writer of a shell run's terminal, so nothing can land after it;
 //   - a run whose launch this stream never read (a different file's, or one
 //     behind this reader's cursor);
-//   - a notification naming no spawning call (a monitor's event, the vendor's
-//     account of runs a previous session left behind);
+//   - a notification naming no spawning call and no task this stream launched
+//     (a monitor's event). A `stopped` naming no call but a task this stream
+//     DID launch is the vendor's account of a run a previous process left
+//     behind, and settles that run as restarted;
 //   - a status the stream plane has no arm for.
 
 import (
@@ -85,8 +87,21 @@ func (c *Converter) taskNotification(record map[string]any, text string, at Attr
 		bound.LogVerbose("task notification (status=%q) withheld as vendor_specific, never a prompt: %s", notice.status, why)
 		return []*storev1.StoreEntry{VendorSpecificEntry(at, kindUserTaskNotification, record)}
 	}
+	restarted := false
 	if notice.toolUseID == "" {
-		return residue("it names no spawning call, so no unit is settled by it")
+		// A STOP THAT NAMES NO CALL IS THE VENDOR'S ACCOUNT OF A RUN THE
+		// PREVIOUS PROCESS LEFT BEHIND: the resumed process writes it for each
+		// task it found orphaned ("didn't finish before the previous session
+		// ended"), the transcript form of the stream's `worker_restart`. Its
+		// task id names the run, and this stream's own launch receipt maps it
+		// to the spawning call -- the one lookup, never a guess.
+		run, known := c.spawnedRuns[notice.taskID]
+		if notice.status != taskStatusStopped || notice.taskID == "" || !known {
+			return residue("it names no spawning call, and no launch this stream read carries its task id, so no unit is settled by it")
+		}
+		notice.toolUseID = run
+		restarted = true
+		bound = bound.With(logging.Context{ActivityID: run})
 	}
 	spawn, launched := c.spawns[notice.toolUseID]
 	if !launched {
@@ -125,12 +140,18 @@ func (c *Converter) taskNotification(record map[string]any, text string, at Attr
 			}},
 		}})
 	case taskStatusStopped:
+		failure := &conversationv1.AgentSubagentFailure{
+			Cause:          &conversationv1.AgentSubagentFailure_StoppedByUser{StoppedByUser: &conversationv1.AgentSubagentStoppedByUser{}},
+			Prompt:         c.spawnPrompt(notice.toolUseID),
+			CreatedAgentId: agentID(notice.toolUseID),
+		}
+		// A RESTART IS NOT A PERSON STOPPING IT, exactly as the stream plane
+		// reads the vendor's `worker_restart`.
+		if restarted {
+			failure.Cause = &conversationv1.AgentSubagentFailure_WorkerRestarted{WorkerRestarted: &conversationv1.AgentSubagentWorkerRestarted{}}
+		}
 		activity = item(&conversationv1.AgentActivity_Subagent{Subagent: &conversationv1.AgentSubagent{
-			Result: &conversationv1.AgentSubagent_Failure{Failure: &conversationv1.AgentSubagentFailure{
-				Cause:          &conversationv1.AgentSubagentFailure_StoppedByUser{StoppedByUser: &conversationv1.AgentSubagentStoppedByUser{}},
-				Prompt:         c.spawnPrompt(notice.toolUseID),
-				CreatedAgentId: agentID(notice.toolUseID),
-			}},
+			Result: &conversationv1.AgentSubagent_Failure{Failure: failure},
 		}})
 	default:
 		return residue("the status is not one the stream plane settles a spawn with")
@@ -140,6 +161,6 @@ func (c *Converter) taskNotification(record map[string]any, text string, at Attr
 		c.observer.TaskConcluded(notice.taskID)
 	}
 	bound.With(logging.Context{UpsertKey: ActivityKey(notice.toolUseID)}).
-		LogVerbose("task notification (status=%q) settles its backgrounded spawn, as the stream plane's task_notification does", notice.status)
+		Log("task notification (status=%q, restarted=%t) settles its backgrounded spawn, as the stream plane's task_notification does", notice.status, restarted)
 	return []*storev1.StoreEntry{c.settledEntry(at, agent, notice.toolUseID, activity)}
 }

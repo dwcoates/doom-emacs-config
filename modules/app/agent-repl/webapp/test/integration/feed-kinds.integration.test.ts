@@ -785,6 +785,22 @@ describe("a live subagent", () => {
   });
 });
 
+describe("a settling subagent", () => {
+  it("carries the settling state", async () => {
+    // Arrange / Act
+    const row = await drawRow(activityRow(subagentUnit("settling")));
+    // Assert
+    expect(row.dataset.state).toBe("settling");
+  });
+
+  it("says its outcome is on its way", async () => {
+    // Arrange / Act
+    const row = await drawRow(activityRow(subagentUnit("settling")));
+    // Assert
+    expect(row.querySelector(".subagent-outcome")?.textContent).toBe("settling");
+  });
+});
+
 describe.each(SUBAGENT_OUTCOMES)("a settled (%s) subagent", (outcome) => {
   it("carries its outcome as the state", async () => {
     // Arrange / Act
