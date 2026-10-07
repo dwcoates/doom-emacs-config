@@ -203,18 +203,8 @@ func setMergedFold(section *frontendv1.RosterMergedSection, folded bool) {
 func sectionHeader(label string, rows *frontendv1.RosterRows) *frontendv1.RosterSectionHeader {
 	return &frontendv1.RosterSectionHeader{
 		Label: &frontendv1.RosterLabel{Text: label},
-		Count: &frontendv1.RosterSectionCount{Workspaces: countRows(rows.GetRows())},
+		Count: &frontendv1.RosterSectionCount{Workspaces: uint32(len(FlattenRows(rows.GetRows())))},
 	}
-}
-
-// countRows counts every row in a rows region, each nested family row
-// included.
-func countRows(rows []*frontendv1.RosterRow) uint32 {
-	var n uint32
-	for _, row := range rows {
-		n += 1 + countRows(row.GetChildren())
-	}
-	return n
 }
 
 // sectionRows nests one section's workspaces and composes their rows. Nesting
