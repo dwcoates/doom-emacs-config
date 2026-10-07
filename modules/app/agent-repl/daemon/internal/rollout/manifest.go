@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"claude-repld/internal/atomicfile"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/health"
 	"claude-repld/internal/ids"
@@ -218,25 +219,9 @@ func (c *controller) writeManifest(ctx context.Context, m Manifest) error {
 		c.log.Error(opManifest, "could not create the intent directory", withCause(fields, err))
 		return fmt.Errorf("rollout: create %s: %w", dir, err)
 	}
-	tmp, err := os.CreateTemp(dir, "manifest-*.json")
-	if err != nil {
-		c.log.Error(opManifest, "could not open the intent manifest for writing", withCause(fields, err))
-		return fmt.Errorf("rollout: create the intent manifest: %w", err)
-	}
-	if _, err := tmp.Write(body); err != nil {
-		err = errors.Join(err, tmp.Close(), os.Remove(tmp.Name()))
+	if err := atomicfile.Replace(c.deps.IntentManifest, body, atomicfile.Options{Pattern: "manifest-*.json"}); err != nil {
 		c.log.Error(opManifest, "could not write the intent manifest", withCause(fields, err))
 		return fmt.Errorf("rollout: write the intent manifest: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		err = errors.Join(err, os.Remove(tmp.Name()))
-		c.log.Error(opManifest, "could not close the intent manifest", withCause(fields, err))
-		return fmt.Errorf("rollout: close the intent manifest: %w", err)
-	}
-	if err := os.Rename(tmp.Name(), c.deps.IntentManifest); err != nil {
-		err = errors.Join(err, os.Remove(tmp.Name()))
-		c.log.Error(opManifest, "could not install the intent manifest", withCause(fields, err))
-		return fmt.Errorf("rollout: install the intent manifest: %w", err)
 	}
 	c.log.Info(opManifest, "wrote the stand-down intent manifest", fields)
 	_ = ctx

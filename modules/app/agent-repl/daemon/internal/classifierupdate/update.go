@@ -27,11 +27,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
+	"claude-repld/internal/atomicfile"
 	"claude-repld/internal/classifier"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/headless"
@@ -356,21 +356,5 @@ func (OnDisk) Write(path string, content []byte) error {
 	if err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.Write(content); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Chmod(info.Mode().Perm()); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp.Name(), path)
+	return atomicfile.Replace(path, content, atomicfile.Options{Mode: info.Mode().Perm()})
 }
