@@ -26,7 +26,9 @@ unverified assumptions about the CEE CLI (explanation-engine `sdks/cli`).
 - **Affected:** the daemon's start-up of cee-webapp.
 - **How to verify:** run `gns cee debug webapp` with the plugin installed and
   read its stdout; confirm the gns envelope does not wrap the result.
-- **Status:** OPEN.
+- **Status:** CONFIRMED 2026-10-07: it printed `{"url":"http://127.0.0.1:60258"}`
+  unwrapped, and a repeat call answered in about 80ms, reusing the live
+  singleton.
 
 ## V3. The widget's npm build runs from a clean checkout
 
@@ -48,4 +50,8 @@ unverified assumptions about the CEE CLI (explanation-engine `sdks/cli`).
 - **Affected:** the `show_chess_board` tool's input and the skill text.
 - **How to verify:** create a session with a game, run the poll op against it,
   read `game_id`.
-- **Status:** OPEN.
+- **Status:** PARTLY CONFIRMED 2026-10-07: `gns cee session poll <id>` takes the
+  id positionally and answers `active`, `has_game`, `root_gamepoint` (shown for
+  a session that does not exist); `game_id` is declared `omitempty` in
+  `internal/daemon/poll.go`, so it appears only for a session holding a game.
+  A poll of a live session with a game is still owed.
