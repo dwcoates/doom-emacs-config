@@ -22,6 +22,7 @@ import (
 	"agentrepl/proto/agentrepl/v1/agentreplv1connect"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	"claude-repld/internal/chessboard"
 	"claude-repld/internal/commandfile"
 	"claude-repld/internal/deploy"
 	"claude-repld/internal/desktopnotify"
@@ -146,6 +147,13 @@ type Deps struct {
 	// load without a second host. It is REQUIRED like every other dependency:
 	// a daemon that cannot draw an attached image is not one to start.
 	ImageOrigin http.Handler
+	// ChessBoards answers a feed chess board's square clicks
+	// (chessboard.Boards). REQUIRED, like every dependency.
+	ChessBoards ChessSquares
+	// ChessWidgetBundle serves the chess widget's script and stylesheet,
+	// mounted on chessboard.BundleRoute beneath the webapp's origin so the
+	// webapp imports the widget same-origin (chessboard.Boards). REQUIRED.
+	ChessWidgetBundle http.Handler
 	// Log is the server's logger.
 	Log dlog.Surfaces
 }
@@ -406,6 +414,10 @@ func New(deps Deps) (Server, error) {
 		return nil, missing("the webapp dist directory")
 	case deps.ImageOrigin == nil:
 		return nil, missing("an image origin")
+	case deps.ChessBoards == nil:
+		return nil, missing("the chess boards")
+	case deps.ChessWidgetBundle == nil:
+		return nil, missing("the chess widget bundle")
 	case deps.Log == nil:
 		return nil, missing("log surfaces")
 	case deps.SessionFacts == nil:
@@ -448,6 +460,7 @@ func New(deps Deps) (Server, error) {
 	// prefixes, so http.ServeMux gives them precedence over the asset origin
 	// at "/".
 	mux.Handle(imageorigin.Route, deps.ImageOrigin)
+	mux.Handle(chessboard.BundleRoute, deps.ChessWidgetBundle)
 	mux.Handle("/", s.assets())
 	s.mux = withAcceptWriter(mux)
 	return s, nil
