@@ -125,9 +125,9 @@ export function peerUpsertKey(vendorRecordUuid: string): string {
  * one that carries the hook's name and event and a turn), and the sidecar
  * classifies its transcript hook attachments as unserved items.
  *
- * ONLY A DRAWN FIRING IS WRITTEN (owner ruling 2026-10-06): a failed or
- * blocked one (convert/hooks.ts). A hook row that draws nothing is never
- * written, and the store's hook sweep drops any it holds (`hook_dropped`).
+ * THE ROW IS DELIVERED, NOT KEPT (owner rulings 2026-10-06): only a failed or
+ * blocked firing is written at all (convert/hooks.ts), and the store publishes
+ * it to the standing watches and keeps none of it (shim-store `hook_dropped`).
  */
 
 /** An open question to the user (the AskUserQuestion call's own tool_use_id). */
