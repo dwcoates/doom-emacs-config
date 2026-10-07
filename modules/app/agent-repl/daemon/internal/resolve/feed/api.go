@@ -17,6 +17,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	"claude-repld/internal/chessboard"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
 	"claude-repld/internal/ids"
@@ -126,6 +127,10 @@ type Resolver interface {
 	// IT starts drawn at; nil withdraws it. It redirects no other turn and
 	// moves no row: the prompt queue records it on a turn the holder starts,
 	// and only that turn draws there (turnaddress.go).
+	// RefreshChessBoards re-publishes every drawn board of the named sessions,
+	// whose board state changed (chessboard.Boards.Run drives it).
+	RefreshChessBoards(sessions []chessboard.Session)
+
 	SetOutputAddress(ws ids.WorkspaceID, addr *sessionwatcher.OutputAddress)
 	// OutputAddress answers a copy of the address standing for one
 	// workspace, nil when none stands. The prompt queue reads it as it
@@ -407,6 +412,11 @@ type Deps struct {
 	// TailRetention is how many published rows a feed retains for a tail's
 	// replay. Defaults to DefaultTailRetention.
 	TailRetention int
+	// ChessBoards is the daemon's chess board state (internal/chessboard),
+	// which a board row's body is drawn from. nil draws no board: a board
+	// frame arriving then is reported as undrawable, which is what a test that
+	// is not about boards never sends. Production always wires it.
+	ChessBoards ChessBoards
 	// Pacing is the daemon's record of streamed-fragment gaps, which puts a
 	// reveal window on the main agent's live prose and thinking bubbles
 	// (revealpace.go). nil measures nothing and serves no window, which is

@@ -1806,6 +1806,8 @@ func ActivityToolName(act *conversationv1.AgentActivity) string {
 		return "ExitPlanMode"
 	case *conversationv1.AgentActivity_ReportFindings:
 		return "ReportFindings"
+	case *conversationv1.AgentActivity_ChessBoard:
+		return ShowChessBoardToolName
 	case *conversationv1.AgentActivity_Worktree:
 		return "Worktree"
 	case *conversationv1.AgentActivity_Cron:
@@ -1820,6 +1822,10 @@ func ActivityToolName(act *conversationv1.AgentActivity) string {
 		return ""
 	}
 }
+
+// ShowChessBoardToolName is agent-repl's own board tool as the agent names
+// it, pinned across languages by proto/vocab/agent-repl-tools.json.
+const ShowChessBoardToolName = "mcp__agent-repl__show_chess_board"
 
 // mcpToolName is the tool an MCP call named, from whichever of its frames
 // carried it. A progress beat names none.

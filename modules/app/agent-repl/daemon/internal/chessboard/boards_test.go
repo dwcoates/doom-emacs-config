@@ -463,3 +463,36 @@ func TestTheBundleRouteLogsAMissingBuildFile(t *testing.T) {
 	}
 	t.Fatalf("no ERROR %s record in %+v", opBundle, f.log.Records())
 }
+
+func TestViewAnswersTheBoardWithoutResolvingItAgain(t *testing.T) {
+	// Arrange.
+	f := newBoardsFixture(t)
+	f.webapp.answerWidget(nil)
+	f.boards.Board(testSession)
+	want := f.settled(t, testSession)
+
+	// Act.
+	got := f.boards.View(testSession)
+
+	// Assert.
+	f.boards.mu.Lock()
+	resolving := f.boards.boards[testSession].resolving
+	f.boards.mu.Unlock()
+	if got.GetReady() == nil || want.GetReady() == nil || resolving {
+		t.Fatalf("View() = %v (resolving %t), want the ready board with no new resolution", got, resolving)
+	}
+}
+
+func TestViewOfANeverDrawnSessionPanics(t *testing.T) {
+	// Arrange.
+	f := newBoardsFixture(t)
+	defer func() {
+		// Assert.
+		if recover() == nil {
+			t.Fatal("View of a never-drawn session did not panic")
+		}
+	}()
+
+	// Act.
+	f.boards.View(testSession)
+}
