@@ -275,6 +275,12 @@ func (r *resolver) OnSessionStarted(ws ids.WorkspaceID, started *conversationv1.
 	if model := started.GetEffectiveModel().GetName(); model != "" {
 		s.model = model
 	}
+	// THE CONTRACT DECIDES WHAT A LIVE SET MEANS. Under the live-work level a
+	// bubble the set does not name is not running; before it, the set is only
+	// the announcements' account. A new SessionStarted is judged afresh: no
+	// set has been published against it yet.
+	s.levelMode = started.GetContract() >= conversationv1.SessionContract_SESSION_CONTRACT_LIVE_WORK_LEVEL
+	s.levelKnown = false
 	watches := s.awaitingRestart
 	s.awaitingRestart = nil
 	now := r.deps.Now().UnixMilli()

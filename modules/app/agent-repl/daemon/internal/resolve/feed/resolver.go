@@ -152,6 +152,19 @@ type wsState struct {
 	// handle). A bubble whose subagent leaves it still drawn live is settled
 	// lost (settleSubagentsLeftLive).
 	liveAgents map[string]struct{}
+	// levelMode records that the session's shim speaks the live-work level
+	// (conversation.v1 SessionContract), so the live set is the vendor
+	// process's own statement and a bubble it does not name is NOT running.
+	levelMode bool
+	// levelKnown records that a live set has been published since the
+	// session's facts were taken: until then nothing may be judged against it.
+	levelKnown bool
+	// everLive is every id any published live set has named, so a bubble that
+	// LEFT the set (settling) is told from one no set ever named (lost).
+	everLive map[string]struct{}
+	// replaying is true while a history page is being drawn, so a bubble
+	// created by the page is marked as drawn from the record (fromHistory).
+	replaying bool
 	// heldDetachments are what a held detachment's announcement said about
 	// whose work it is, by unit, kept so the claim can check it against the
 	// agent that turns out to carry the unit, and so a detachment that never
@@ -664,6 +677,7 @@ func newWSState(ws ids.WorkspaceID) *wsState {
 		liveShells:           map[string]struct{}{},
 		liveMonitors:         map[string]struct{}{},
 		liveAgents:           map[string]struct{}{},
+		everLive:             map[string]struct{}{},
 		detachedUnits:        map[string]string{},
 		heldDetachments:      map[string]heldDetachment{},
 		announcedAgents:      map[string]*conversationv1.AgentId{},
