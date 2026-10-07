@@ -182,7 +182,8 @@ captures/SKIPPED.json              the manual scenarios, and why
 Everything is passed through `anonymize.mjs` before it lands — the walker
 `testdata/corpus/MANIFEST.md` specifies: the personal values of whoever ran
 it are scrubbed first, in keys and file names too (the home directory becomes
-`~`, account emails become `personN@example.com`, and the login name, the git
+`${HOME}`, which a reader replaying the recording expands back with
+`expandHome`; account emails become `personN@example.com`, and the login name, the git
 user name's words and anything in `$CAPTURE_PERSONAL_NAMES` become `Someone`;
 extra emails go in `$CAPTURE_PERSONAL_EMAILS`); credential-shaped values become
 `REDACTED`, strings over 900 chars are truncated to 400, declared opaque blobs
