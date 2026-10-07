@@ -125,6 +125,21 @@ syntax-checks without emitting. The structural invariants protoc cannot see
 Dependencies: protoc, protoc-gen-go, protoc-gen-connect-go,
 @bufbuild/protoc-gen-es.
 
+### Hand-written Go helpers (`helpers/go`)
+
+`gen/go` is generated output only (`make clean` deletes it), so Go helpers
+over the generated types that more than one module needs live in their own
+module, `helpers/go` (`agentrepl/protohelpers`), which every consumer requires
+and replaces by path exactly as it does `agentrepl/proto`.
+
+- `rosterwalk` is THE ONE WALK over a `frontend.v1.WorkspaceRoster`'s rows:
+  `FlattenRows` (a rows region, children depth-first) and `AllRows` (every
+  grouping). The daemon and the sidecar both read the roster through it, and
+  its test fails if any Go file in agent-repl walks `RosterRow.children` by
+  hand, which is how the merge-queue verb once missed every child workspace.
+- It sits under `proto/`, so the deploy staleness pathspec that already covers
+  the proto tree covers it too; `bin/build-frontend.sh` checks it is present.
+
 ### Generator version pins
 
 Every generator that touches the committed `gen/` tree is pinned to an exact
