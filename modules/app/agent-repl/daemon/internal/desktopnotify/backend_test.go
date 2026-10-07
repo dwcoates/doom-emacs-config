@@ -198,3 +198,35 @@ func TestBackendSurfacesAFailedProgram(t *testing.T) {
 		t.Fatalf("Post = (%v, %v), want (false, the program's failure)", clicked, err)
 	}
 }
+
+func TestResolveProgram(t *testing.T) {
+	cases := []struct {
+		name     string
+		override string
+		lookPath func(string) (string, error)
+		want     string
+		wantErr  string
+	}{
+		{name: "override wins", override: "/tmp/fake", lookPath: noLookPath, want: "/tmp/fake"},
+		{name: "found on PATH", lookPath: onPath, want: "/usr/bin/player"},
+		{name: "missing names the role and program", lookPath: noLookPath,
+			wantErr: `the banner program "player" is not installed: not on PATH`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got, err := resolveProgram("banner", "player", tc.override, tc.lookPath)
+
+			// Assert
+			if tc.wantErr != "" {
+				if err == nil || err.Error() != tc.wantErr {
+					t.Fatalf("err = %v, want %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil || got != tc.want {
+				t.Fatalf("resolveProgram = (%q, %v), want %q", got, err, tc.want)
+			}
+		})
+	}
+}
