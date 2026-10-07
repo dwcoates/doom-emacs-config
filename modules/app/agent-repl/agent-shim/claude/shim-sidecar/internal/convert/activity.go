@@ -231,6 +231,19 @@ func (c *Converter) callItem(kind toolKind, name string, input map[string]any, t
 				StartedAt: startedAt(ts),
 			}},
 		}})
+	case kindChessBoard:
+		session := chessBoardSession(input)
+		if session == nil {
+			// A call naming no session has nothing to announce; its result
+			// settles it as the failure arm.
+			return nil
+		}
+		return item(&conversationv1.AgentActivity_ChessBoard{ChessBoard: &conversationv1.AgentChessBoard{
+			Result: &conversationv1.AgentChessBoard_Start{Start: &conversationv1.AgentChessBoardStart{
+				Session:   session,
+				StartedAt: startedAt(ts),
+			}},
+		}})
 	case kindWorktree:
 		return item(&conversationv1.AgentActivity_Worktree{Worktree: &conversationv1.AgentWorktree{
 			State: &conversationv1.AgentWorktree_Start{Start: worktreeStart(name, input, ts)},
@@ -472,6 +485,16 @@ func cronStart(name string, input map[string]any, ts int64) *conversationv1.Agen
 	return start
 }
 
+
+// chessBoardSession reads the CEE session and game a board call named, or nil
+// when its input names either as empty or not at all.
+func chessBoardSession(input map[string]any) *conversationv1.AgentChessBoardSession {
+	sessionID, gameID := str(input["session_id"]), str(input["game_id"])
+	if sessionID == "" || gameID == "" {
+		return nil
+	}
+	return &conversationv1.AgentChessBoardSession{SessionId: sessionID, GameId: gameID}
+}
 // item wraps one built arm as the activity carrying it. The generated oneof
 // interface is unexported, so a builder outside the proto package returns the
 // message rather than the arm.
@@ -509,6 +532,8 @@ func item(arm any) *conversationv1.AgentActivity {
 	case *conversationv1.AgentActivity_PlanMode:
 		activity.Item = a
 	case *conversationv1.AgentActivity_ReportFindings:
+		activity.Item = a
+	case *conversationv1.AgentActivity_ChessBoard:
 		activity.Item = a
 	case *conversationv1.AgentActivity_Worktree:
 		activity.Item = a
