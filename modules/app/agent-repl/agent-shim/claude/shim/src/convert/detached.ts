@@ -1721,22 +1721,42 @@ function subagentTerminalEntries(
   const settled = settledAt(context.nowMs(), spawnCall?.startedAtMs);
   const totalTokens = raw.usage?.total_tokens;
   if (raw.status === "stopped") {
-    LOGGER.info({ task_id: raw.task_id }, "a person stopped the detached run");
+    // A RESTART IS NOT A PERSON STOPPING IT: the vendor's `worker_restart`
+    // says the process restarted and the resumed one found the run orphaned
+    // (sdk.d.ts SDKTaskNotificationMessage.reason). Every other stop is one a
+    // person asked for.
+    const restarted = raw.reason === "worker_restart";
+    LOGGER.info(
+      { task_id: raw.task_id, reason: raw.reason ?? "" },
+      restarted
+        ? "the vendor process restarted under the detached run, which the resumed process found orphaned"
+        : "a person stopped the detached run",
+    );
     return [
       taskUnitEntry(
         context,
         target,
-        { vendorUuid, discriminator: "activity.subagent.failure.stopped_by_user" },
+        {
+          vendorUuid,
+          discriminator: restarted
+            ? "activity.subagent.failure.worker_restarted"
+            : "activity.subagent.failure.stopped_by_user",
+        },
         agentActivity(activityId, {
           case: "subagent",
           value: create(conversationv1.AgentSubagentSchema, {
             result: {
               case: "failure",
               value: create(conversationv1.AgentSubagentFailureSchema, {
-                cause: {
-                  case: "stoppedByUser",
-                  value: create(conversationv1.AgentSubagentStoppedByUserSchema, {}),
-                },
+                cause: restarted
+                  ? {
+                      case: "workerRestarted",
+                      value: create(conversationv1.AgentSubagentWorkerRestartedSchema, {}),
+                    }
+                  : {
+                      case: "stoppedByUser",
+                      value: create(conversationv1.AgentSubagentStoppedByUserSchema, {}),
+                    },
                 // RESTATED, so the stopped spawn a replay serves alone still
                 // draws its label and addresses its sub-feed: the spawning
                 // call's prompt, and the created agent the minting rule names.

@@ -973,6 +973,23 @@ describe("convertDetached: task_notification", () => {
     expect(entries[0]?.source.discriminator).toBe("activity.subagent.failure.stopped_by_user");
   });
 
+  it("settles a run the restarted process found orphaned as worker_restarted, never as a person's stop", () => {
+    const entries = convert({
+      subtype: "task_notification",
+      task_id: "t1",
+      tool_use_id: "toolu_1",
+      status: "stopped",
+      reason: "worker_restart",
+    });
+
+    const subagent = activityOf(entries[0])?.item.value as conversationv1.AgentSubagent;
+    const failure = subagent.result.value as conversationv1.AgentSubagentFailure;
+    expect([entries[0]?.source.discriminator, failure.cause.case]).toEqual([
+      "activity.subagent.failure.worker_restarted",
+      "workerRestarted",
+    ]);
+  });
+
   it("settles a FAILED run as a subagent failure carrying the vendor's summary", () => {
     const entries = convert({
       subtype: "task_notification",
