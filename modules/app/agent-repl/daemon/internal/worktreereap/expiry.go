@@ -88,11 +88,8 @@ func repoActivity(commonDir string, repo ids.RepoID, workspaces []wsm.Workspace)
 		if ws.Repo != repo {
 			continue
 		}
-		instants = append(instants, ws.CreatedAt)
-		for _, stamp := range []*time.Time{ws.LastActivityAt, ws.LastSelectedAt, ws.MergedAt} {
-			if stamp != nil {
-				instants = append(instants, *stamp)
-			}
+		for _, stamp := range workspaceStamps(ws) {
+			instants = append(instants, stamp.At)
 		}
 	}
 	return instants, nil
