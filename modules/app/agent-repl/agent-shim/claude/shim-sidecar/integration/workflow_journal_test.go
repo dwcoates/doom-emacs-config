@@ -32,7 +32,7 @@ func TestAWorkflowJournalIsClassifiedAsDeclaredResidueAndReachesNoPage(t *testin
 	defer cancel()
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
-	cwd := "/Users/dodgecoates/workflow-journal-probe"
+	cwd := "/work/workflow-journal-probe"
 	slug := cwdSlug(cwd)
 	session := "a6a6a6a6-a6a6-4a6a-8a6a-a6a6a6a6a6a6"
 	journalPath := filepath.Join(tree.projectDir(slug), session, "subagents", "workflows", "wf_0001", "journal.jsonl")

@@ -89,7 +89,7 @@ func TestAnUnownedSpoolIsNeverReadEvenAfterItsWindowLapses(t *testing.T) {
 	defer cancel()
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
-	cwd := "/Users/dodgecoates/spool-orphan-probe"
+	cwd := "/work/spool-orphan-probe"
 	slug := cwdSlug(cwd)
 	session := "10101010-1010-4010-8010-101010101010"
 	spoolPath := tree.spoolPath(slug, session, capturedSpoolTask1)
@@ -125,7 +125,7 @@ func TestTheLapseOfAnUnownedSpoolIsStatedAtInfo(t *testing.T) {
 	defer cancel()
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
-	cwd := "/Users/dodgecoates/spool-orphan-warning-probe"
+	cwd := "/work/spool-orphan-warning-probe"
 	slug := cwdSlug(cwd)
 	session := "11111111-1111-4111-8111-111111111111"
 	spoolPath := tree.spoolPath(slug, session, capturedSpoolTask1)
@@ -166,7 +166,7 @@ func TestStartupCatchUpSummarizesABacklogOfUnownedSpools(t *testing.T) {
 	defer cancel()
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
-	cwd := "/Users/dodgecoates/spool-catchup-probe"
+	cwd := "/work/spool-catchup-probe"
 	slug := cwdSlug(cwd)
 	session := "12121212-1212-4212-8212-121212121212"
 	// The re-resolution the never-read half waits on is stated at DEBUG.
@@ -230,7 +230,7 @@ func TestAnUnownedSpoolIsAttributedOnceItsOwnerAppears(t *testing.T) {
 	defer cancel()
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
-	cwd := "/Users/dodgecoates/spool-late-owner-probe"
+	cwd := "/work/spool-late-owner-probe"
 	slug := cwdSlug(cwd)
 	session := "20202020-2020-4020-8020-202020202020"
 	captured := loadCapturedSession(t)
@@ -294,7 +294,7 @@ func TestAnUnclassifiableSpoolPrefixIsRefusedLoudly(t *testing.T) {
 	defer cancel()
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
-	cwd := "/Users/dodgecoates/spool-prefix-probe"
+	cwd := "/work/spool-prefix-probe"
 	slug := cwdSlug(cwd)
 	session := "30303030-3030-4030-8030-303030303030"
 	opts := defaultSidecarOptions(t, fake.Socket, tree)
@@ -324,7 +324,7 @@ func TestAnUnclassifiableSpoolIsNeverRead(t *testing.T) {
 	defer cancel()
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
-	cwd := "/Users/dodgecoates/spool-residue-probe"
+	cwd := "/work/spool-residue-probe"
 	slug := cwdSlug(cwd)
 	session := "40404040-4040-4040-8040-404040404040"
 	spoolPath := tree.spoolPath(slug, session, "z0uncla551f1able")
@@ -371,7 +371,7 @@ func TestOneSpoolReachedByTwoPathSpellingsIsOneFile(t *testing.T) {
 	tree := &vendorTree{t: t, Root: filepath.Join(base, "config-root"), SpoolRoot: linkSpoolRoot, live: liveRootFor(t)}
 	mustMkdirAll(t, filepath.Join(tree.Root, "projects"))
 
-	cwd := "/Users/dodgecoates/spool-symlink-probe"
+	cwd := "/work/spool-symlink-probe"
 	slug := cwdSlug(cwd)
 	session := "50505050-5050-4050-8050-505050505050"
 	captured := loadCapturedSession(t)
@@ -428,7 +428,7 @@ func TestTheSpoolRootIsAcceptedAtEitherLevel(t *testing.T) {
 	defer cancel()
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
-	cwd := "/Users/dodgecoates/spool-uid-level-probe"
+	cwd := "/work/spool-uid-level-probe"
 	slug := cwdSlug(cwd)
 	session := "60606060-6060-4060-8060-60606060aaaa"
 	spoolPath := tree.spoolPath(slug, session, capturedSpoolTask1)

@@ -99,7 +99,7 @@ describe("readConverter.settle", () => {
     // Arrange.
     const pending = call({
       file_path:
-        "/Users/dodgecoates/.config/doom-worktrees/agent-repl-startup-sync/modules/app/agent-repl/frontends.el",
+        "/work/.config/doom-worktrees/agent-repl-startup-sync/modules/app/agent-repl/frontends.el",
       offset: 289,
       limit: 56,
     });

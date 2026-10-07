@@ -35,7 +35,7 @@ func TestATruncatedSpoolIsReReadFromItsNewStart(t *testing.T) {
 	defer cancel()
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
-	fx := seedDetachedShell(t, tree, "/Users/dodgecoates/spool-truncation-probe",
+	fx := seedDetachedShell(t, tree, "/work/spool-truncation-probe",
 		"1d1d1d1d-1d1d-41d1-81d1-1d1d1d1d1d1d")
 	before := "a long first life of this spool, several lines worth of it\nand a second line too\n"
 	after := "a shorter second life\n"

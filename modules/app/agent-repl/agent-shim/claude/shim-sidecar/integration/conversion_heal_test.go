@@ -39,7 +39,7 @@ import (
 )
 
 const (
-	healCwd          = "/Users/dodgecoates/conversion-heal-probe"
+	healCwd          = "/work/conversion-heal-probe"
 	healSession      = "c1c1c1c1-c1c1-4c1c-8c1c-c1c1c1c1c1c1"
 	healTypedUUID    = "c1c1c1c1-0000-4000-8000-00000000c0p1"
 	healNoticeUUID   = "c1c1c1c1-0000-4000-8000-00000000c0n1"
