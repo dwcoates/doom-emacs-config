@@ -32,6 +32,17 @@ func (p *fakePoster) Post(_ ids.WorkspaceID, kind string, compose Compose) {
 	p.banners = append(p.banners, compose(context.Background(), "my-ws"))
 }
 
+// fakeChimes records each ring.
+type fakeChimes struct {
+	rings []ids.WorkspaceID
+	kinds []string
+}
+
+func (c *fakeChimes) Ring(ws ids.WorkspaceID, kind string) {
+	c.rings = append(c.rings, ws)
+	c.kinds = append(c.kinds, kind)
+}
+
 // fakeSummaries answers a fixed summary and records the answer it was handed.
 type fakeSummaries struct{ answer string }
 
@@ -42,15 +53,21 @@ func (s *fakeSummaries) Summarize(_ context.Context, _ ids.WorkspaceID, answer s
 
 var turnEndedAt = time.Date(2026, 9, 29, 14, 7, 0, 0, time.Local)
 
-func newTurnBanners(endings fakeEndings) (*TurnBanners, *fakePoster, *fakeSummaries, *dlog.TestLogger) {
-	poster := &fakePoster{}
-	summaries := &fakeSummaries{}
-	log := dlog.NewTestLogger()
-	t := NewTurnBanners(TurnDeps{
-		Endings: endings, Poster: poster, Summaries: summaries,
-		Now: func() time.Time { return turnEndedAt }, Log: log,
+type turnFixture struct {
+	banners   *TurnBanners
+	poster    *fakePoster
+	chimes    *fakeChimes
+	summaries *fakeSummaries
+	log       *dlog.TestLogger
+}
+
+func newTurnBanners(endings fakeEndings) turnFixture {
+	f := turnFixture{poster: &fakePoster{}, chimes: &fakeChimes{}, summaries: &fakeSummaries{}, log: dlog.NewTestLogger()}
+	f.banners = NewTurnBanners(TurnDeps{
+		Endings: endings, Poster: f.poster, Chimes: f.chimes, Summaries: f.summaries,
+		Now: func() time.Time { return turnEndedAt }, Log: f.log,
 	})
-	return t, poster, summaries, log
+	return f
 }
 
 func TestTurnBannerForEachTurnEnd(t *testing.T) {
@@ -77,18 +94,22 @@ func TestTurnBannerForEachTurnEnd(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
-			banners, poster, _, _ := newTurnBanners(fakeEndings{"turn-1": tc.ending})
+			f := newTurnBanners(fakeEndings{"turn-1": tc.ending})
 
 			// Act
-			banners.OnTurnEnded("ws1", "turn-1", tc.how)
+			f.banners.OnTurnEnded("ws1", "turn-1", tc.how)
 
 			// Assert
-			if len(poster.banners) != 1 {
-				t.Fatalf("posted %d banners, want 1", len(poster.banners))
+			if len(f.poster.banners) != 1 {
+				t.Fatalf("posted %d banners, want 1", len(f.poster.banners))
 			}
-			got := poster.banners[0]
-			if got.Title != tc.wantTitle || got.Body != tc.wantBody || poster.kinds[0] != KindTurnEnded {
-				t.Fatalf("banner = %+v (kind %s), want %q / %q", got, poster.kinds[0], tc.wantTitle, tc.wantBody)
+			got := f.poster.banners[0]
+			want := Banner{Title: tc.wantTitle, Body: tc.wantBody, Silent: true}
+			if got != want || f.poster.kinds[0] != KindTurnEnded {
+				t.Fatalf("banner = %+v (kind %s), want %+v", got, f.poster.kinds[0], want)
+			}
+			if len(f.chimes.rings) != 1 || f.chimes.rings[0] != "ws1" || f.chimes.kinds[0] != KindTurnEnded {
+				t.Fatalf("rang %v (kinds %v), want one turn_ended chime for ws1", f.chimes.rings, f.chimes.kinds)
 			}
 		})
 	}
@@ -96,45 +117,45 @@ func TestTurnBannerForEachTurnEnd(t *testing.T) {
 
 func TestTurnBannerSummarizesTheFinalAnswer(t *testing.T) {
 	// Arrange
-	banners, _, summaries, _ := newTurnBanners(fakeEndings{"turn-1": {Answer: "the final answer"}})
+	f := newTurnBanners(fakeEndings{"turn-1": {Answer: "the final answer"}})
 
 	// Act
-	banners.OnTurnEnded("ws1", "turn-1", wsm.CloseCompleted)
+	f.banners.OnTurnEnded("ws1", "turn-1", wsm.CloseCompleted)
 
 	// Assert
-	if summaries.answer != "the final answer" {
-		t.Fatalf("summarized %q, want the final answer", summaries.answer)
+	if f.summaries.answer != "the final answer" {
+		t.Fatalf("summarized %q, want the final answer", f.summaries.answer)
 	}
 }
 
 func TestTurnBannerRaisesNothingWithoutALiveEnding(t *testing.T) {
 	// Arrange
-	banners, poster, _, log := newTurnBanners(fakeEndings{})
+	f := newTurnBanners(fakeEndings{})
 
 	// Act
-	banners.OnTurnEnded("ws1", "turn-1", wsm.CloseCompleted)
+	f.banners.OnTurnEnded("ws1", "turn-1", wsm.CloseCompleted)
 
 	// Assert
-	if len(poster.banners) != 0 {
-		t.Fatalf("posted %d banners for a turn with no live ending", len(poster.banners))
+	if len(f.poster.banners) != 0 || len(f.chimes.rings) != 0 {
+		t.Fatalf("posted %d banners and rang %d chimes for a turn with no live ending", len(f.poster.banners), len(f.chimes.rings))
 	}
-	if _, ok := hasRecord(log, "info", "the turn drew no live ending (a /clear, or a turn this feed never saw); no banner"); !ok {
+	if _, ok := hasRecord(f.log, "info", "the turn drew no live ending (a /clear, or a turn this feed never saw); no banner"); !ok {
 		t.Fatal("the missing ending left no record")
 	}
 }
 
 func TestTurnBannerRefusesAnUnknownClose(t *testing.T) {
 	// Arrange
-	banners, poster, _, log := newTurnBanners(fakeEndings{"turn-1": {}})
+	f := newTurnBanners(fakeEndings{"turn-1": {}})
 
 	// Act
-	banners.OnTurnEnded("ws1", "turn-1", wsm.TurnClose(99))
+	f.banners.OnTurnEnded("ws1", "turn-1", wsm.TurnClose(99))
 
 	// Assert
-	if len(poster.banners) != 0 {
-		t.Fatal("an unknown close raised a banner")
+	if len(f.poster.banners) != 0 || len(f.chimes.rings) != 0 {
+		t.Fatal("an unknown close raised a banner or rang a chime")
 	}
-	r, ok := hasRecord(log, "error", "a turn close has no turn end; no banner")
+	r, ok := hasRecord(f.log, "error", "a turn close has no turn end; no banner")
 	if !ok || r.Context["close"] != 99 || r.Context["turn"] != "turn-1" {
 		t.Fatalf("record = %+v (found %v), want the close and turn", r, ok)
 	}
