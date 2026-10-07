@@ -2478,14 +2478,15 @@ func (x *AgentReportFindingsFailure) GetError() *AgentToolFailure {
 // rather than from anything recorded here.
 type AgentChessBoard struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Where the call stands. The set arm IS the state.
+	// Where the call stands: the tool-call lifecycle every call shares. The set
+	// arm IS the state.
 	//
-	// Types that are valid to be assigned to State:
+	// Types that are valid to be assigned to Result:
 	//
 	//	*AgentChessBoard_Start
 	//	*AgentChessBoard_Success
 	//	*AgentChessBoard_Failure
-	State         isAgentChessBoard_State `protobuf_oneof:"state"`
+	Result        isAgentChessBoard_Result `protobuf_oneof:"result"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2520,16 +2521,16 @@ func (*AgentChessBoard) Descriptor() ([]byte, []int) {
 	return file_conversation_v1_agent_activity_proto_rawDescGZIP(), []int{23}
 }
 
-func (x *AgentChessBoard) GetState() isAgentChessBoard_State {
+func (x *AgentChessBoard) GetResult() isAgentChessBoard_Result {
 	if x != nil {
-		return x.State
+		return x.Result
 	}
 	return nil
 }
 
 func (x *AgentChessBoard) GetStart() *AgentChessBoardStart {
 	if x != nil {
-		if x, ok := x.State.(*AgentChessBoard_Start); ok {
+		if x, ok := x.Result.(*AgentChessBoard_Start); ok {
 			return x.Start
 		}
 	}
@@ -2538,7 +2539,7 @@ func (x *AgentChessBoard) GetStart() *AgentChessBoardStart {
 
 func (x *AgentChessBoard) GetSuccess() *AgentChessBoardSuccess {
 	if x != nil {
-		if x, ok := x.State.(*AgentChessBoard_Success); ok {
+		if x, ok := x.Result.(*AgentChessBoard_Success); ok {
 			return x.Success
 		}
 	}
@@ -2547,15 +2548,15 @@ func (x *AgentChessBoard) GetSuccess() *AgentChessBoardSuccess {
 
 func (x *AgentChessBoard) GetFailure() *AgentChessBoardFailure {
 	if x != nil {
-		if x, ok := x.State.(*AgentChessBoard_Failure); ok {
+		if x, ok := x.Result.(*AgentChessBoard_Failure); ok {
 			return x.Failure
 		}
 	}
 	return nil
 }
 
-type isAgentChessBoard_State interface {
-	isAgentChessBoard_State()
+type isAgentChessBoard_Result interface {
+	isAgentChessBoard_Result()
 }
 
 type AgentChessBoard_Start struct {
@@ -2573,11 +2574,11 @@ type AgentChessBoard_Failure struct {
 	Failure *AgentChessBoardFailure `protobuf:"bytes,3,opt,name=failure,proto3,oneof"`
 }
 
-func (*AgentChessBoard_Start) isAgentChessBoard_State() {}
+func (*AgentChessBoard_Start) isAgentChessBoard_Result() {}
 
-func (*AgentChessBoard_Success) isAgentChessBoard_State() {}
+func (*AgentChessBoard_Success) isAgentChessBoard_Result() {}
 
-func (*AgentChessBoard_Failure) isAgentChessBoard_State() {}
+func (*AgentChessBoard_Failure) isAgentChessBoard_Result() {}
 
 // A board request this stream has begun carrying.
 type AgentChessBoardStart struct {
@@ -20827,12 +20828,12 @@ const file_conversation_v1_agent_activity_proto_rawDesc = "" +
 	"\x1aAgentFindingNoChangeNeeded\"d\n" +
 	"\x1aAgentReportFindingsFailure\x12<\n" +
 	"\x05error\x18\x01 \x01(\v2!.conversation.v1.AgentToolFailureH\x00R\x05error\x88\x01\x01B\b\n" +
-	"\x06_error\"\xe3\x01\n" +
+	"\x06_error\"\xe4\x01\n" +
 	"\x0fAgentChessBoard\x12=\n" +
 	"\x05start\x18\x01 \x01(\v2%.conversation.v1.AgentChessBoardStartH\x00R\x05start\x12C\n" +
 	"\asuccess\x18\x02 \x01(\v2'.conversation.v1.AgentChessBoardSuccessH\x00R\asuccess\x12C\n" +
-	"\afailure\x18\x03 \x01(\v2'.conversation.v1.AgentChessBoardFailureH\x00R\afailureB\a\n" +
-	"\x05state\"\xa1\x01\n" +
+	"\afailure\x18\x03 \x01(\v2'.conversation.v1.AgentChessBoardFailureH\x00R\afailureB\b\n" +
+	"\x06result\"\xa1\x01\n" +
 	"\x14AgentChessBoardStart\x12A\n" +
 	"\asession\x18\x01 \x01(\v2'.conversation.v1.AgentChessBoardSessionR\asession\x12F\n" +
 	"\n" +

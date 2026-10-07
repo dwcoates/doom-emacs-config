@@ -453,8 +453,9 @@ message AgentReportFindingsFailure {
 // board, so a board whose session has since gone away is drawn as unavailable
 // rather than from anything recorded here.
 message AgentChessBoard {
-  // Where the call stands. The set arm IS the state.
-  oneof state {
+  // Where the call stands: the tool-call lifecycle every call shares. The set
+  // arm IS the state.
+  oneof result {
     // The call was issued.
     AgentChessBoardStart start = 1;
     // The call returned: the board was requested.
