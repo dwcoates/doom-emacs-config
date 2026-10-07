@@ -12,6 +12,7 @@
  * `Agent` and `Task`, and the plan-mode and worktree pairs are two calls each of
  * one unit kind, distinguished by the `act` arm the converter reads off the name.
  */
+import { SHOW_CHESS_BOARD_TOOL_NAME } from "../../sdk/agent-repl-mcp.js";
 import { MCP_KEY, UNMODELED_KEY, type ToolConverter } from "../tool-calls.js";
 import { artifactConverter } from "./artifact.js";
 import { bashConverter } from "./bash.js";
@@ -25,6 +26,7 @@ import { planModeConverter } from "./plan-mode.js";
 import { pushNotificationConverter } from "./push-notification.js";
 import { readConverter } from "./read.js";
 import { reportFindingsConverter } from "./report-findings.js";
+import { showChessBoardConverter } from "./show-chess-board.js";
 import { scheduleWakeupConverter } from "./schedule-wakeup.js";
 import { sendMessageConverter } from "./send-message.js";
 import { skillUseConverter } from "./skill-use.js";
@@ -80,6 +82,9 @@ export const TOOL_CONVERTERS: ReadonlyMap<string, ToolConverter> = new Map<strin
   ["CronList", cronConverter],
   // Outbound attention.
   ["PushNotification", pushNotificationConverter],
+  // agent-repl's OWN MCP tools, which it draws itself; an exact name wins over
+  // the MCP prefix below.
+  [SHOW_CHESS_BOARD_TOOL_NAME, showChessBoardConverter],
   // Every MCP server's tool (`mcp__<server>__<tool>`), matched by prefix and
   // filed under a key no vendor tool can be named.
   [MCP_KEY, mcpToolConverter],
