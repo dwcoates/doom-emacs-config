@@ -2360,3 +2360,99 @@ func TestDeleteBranchAtMovedBranchIsARefusal(t *testing.T) {
 		t.Fatalf("DeleteBranchAt = %v, want git's refusal", err)
 	}
 }
+func TestRecordCommitRunsTheCommitThenReadsHeadBack(t *testing.T) {
+	// Arrange.
+	git, _ := newTestClient(t)
+	fake := newFakeGit(t, ok("aaaabbbbccccdddd", "rev-parse"), ok(""))
+
+	// Act.
+	sha, err := git.(*client).recordCommit(context.Background(), "op", "/repo", "commit", "-m", "x")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("recordCommit: %v", err)
+	}
+	fake.assertSubject(0, "commit", "-m", "x")
+	fake.assertSubject(1, "rev-parse", "HEAD")
+	if sha != "aaaabbbbccccdddd" {
+		t.Fatalf("recordCommit sha = %q, want the rev-parse answer", sha)
+	}
+}
+
+func TestRecordCommitNeverReadsHeadAfterAFailedCommit(t *testing.T) {
+	// Arrange.
+	git, _ := newTestClient(t)
+	fake := newFakeGit(t, fails(1, "nothing to commit\n"))
+
+	// Act.
+	_, err := git.(*client).recordCommit(context.Background(), "op", "/repo", "commit", "-m", "x")
+
+	// Assert.
+	if err == nil {
+		t.Fatalf("recordCommit = nil error, want the commit's failure")
+	}
+	fake.assertNever("rev-parse")
+}
+
+func TestStatusEmptyWithNoPathspecProbesTheWholeTree(t *testing.T) {
+	// Arrange.
+	git, _ := newTestClient(t)
+	fake := newFakeGit(t, ok(""))
+
+	// Act.
+	if _, err := git.(*client).statusEmpty(context.Background(), "op", "/repo"); err != nil {
+		t.Fatalf("statusEmpty: %v", err)
+	}
+
+	// Assert.
+	fake.assertSubject(0, "--no-optional-locks", "status", "--porcelain")
+}
+
+func TestStatusEmptyIsFalseForAnyListedEntry(t *testing.T) {
+	// Arrange.
+	git, _ := newTestClient(t)
+	newFakeGit(t, ok(" M a.go\n"))
+
+	// Act.
+	clean, err := git.(*client).statusEmpty(context.Background(), "op", "/repo")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("statusEmpty: %v", err)
+	}
+	if clean {
+		t.Fatalf("statusEmpty = true for a listed entry, want false")
+	}
+}
+
+func TestCommitSharesTheRecordCommitShape(t *testing.T) {
+	// Arrange: Commit's argv is recordCommit's — the commit, then the
+	// read-back — so a hand-rolled divergent commit path fails here.
+	git, _ := newTestClient(t)
+	fake := newFakeGit(t, ok("aaaabbbbccccdddd", "rev-parse"), ok(""))
+
+	// Act.
+	if _, err := git.Commit(context.Background(), "/repo", "m"); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+
+	// Assert.
+	if n := len(fake.calls()); n != 2 {
+		t.Fatalf("Commit issued %d gits, want the commit and its read-back", n)
+	}
+	fake.assertSubject(1, "rev-parse", "HEAD")
+}
+
+func TestIsCleanSharesTheStatusEmptyShape(t *testing.T) {
+	// Arrange.
+	git, _ := newTestClient(t)
+	fake := newFakeGit(t, ok(""))
+
+	// Act.
+	if _, err := git.IsClean(context.Background(), "/repo"); err != nil {
+		t.Fatalf("IsClean: %v", err)
+	}
+
+	// Assert: the whole-tree probe, with no pathspec separator.
+	fake.assertSubject(0, "--no-optional-locks", "status", "--porcelain")
+}
