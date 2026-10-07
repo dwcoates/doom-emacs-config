@@ -15,9 +15,13 @@ func TestHostNeutralCheckoutEnvClearsTheEngineDir(t *testing.T) {
 	}
 }
 
-func TestHostNeutralCheckoutEnvClearsTheMultiRepoRoot(t *testing.T) {
-	if !envHas(HostNeutralCheckoutEnv(), chessboard.MultiRepoRootEnv+"=") {
-		t.Fatalf("HostNeutralCheckoutEnv() = %v, want %s stated empty", HostNeutralCheckoutEnv(), chessboard.MultiRepoRootEnv)
+func TestHostNeutralCheckoutEnvLeavesTheWorldsMultiRepoRootInForce(t *testing.T) {
+	// StartDaemon states MULTI_REPO_ROOT as the world's own tree, which the
+	// account routing reads; a cleared value here would override it.
+	for _, kv := range HostNeutralCheckoutEnv() {
+		if strings.HasPrefix(kv, chessboard.MultiRepoRootEnv+"=") {
+			t.Fatalf("HostNeutralCheckoutEnv() = %v, want no %s", HostNeutralCheckoutEnv(), chessboard.MultiRepoRootEnv)
+		}
 	}
 }
 
