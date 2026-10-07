@@ -69,7 +69,7 @@ export const BUBBLE_VARIANTS = {
 
 /**
  * A CAPPED bubble's collapsed line limit: the shared feed cap, five lines (a
- * user or subagent prompt), one line (a held prompt, a landed thinking bubble),
+ * user or subagent prompt), one line (a held prompt),
  * or none past the header strip (a peer message). Each kind states its limit itself, never through another kind's
  * constant, so changing one kind's cap never moves another's. A closed set,
  * because the stylesheet maps each value to its line count

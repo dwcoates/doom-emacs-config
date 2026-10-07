@@ -74,9 +74,7 @@ import type {
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { log } from "../../log.js";
 import {
-  BUBBLE_MORE_ELLIPSIS,
   BUBBLE_UNCAPPED,
-  ELLIPSIS_CAP_LINES,
   SAYS_ATTRIBUTE,
   drawBubble,
   type BubbleCapLines,
@@ -118,12 +116,12 @@ export const REVEAL_SPEED_ATTRIBUTE = "data-reveal-speed";
 export const THINKING_BUBBLE_CLASS = "thinking-bubble";
 
 /**
- * A landed thinking bubble's collapsed line limit: ONE line, stated here, never
- * through another kind's constant. It is the ellipsis's one-line cap too
- * (`ELLIPSIS_CAP_LINES`), which the landed thinking cap's more signal needs
- * (`responseCap`), so the type holds it there.
+ * A thinking bubble's line limit: the shared FIXED feed cap, in EVERY arm
+ * (owner request, 2026-10-07). Arriving or landed, it is the same height, so
+ * its own text landing changes nothing about its box and reflows nothing; it
+ * never collapses further once it lands.
  */
-export const THINKING_CAP_LINES = 1 satisfies typeof ELLIPSIS_CAP_LINES;
+export const THINKING_CAP_LINES = "feed" satisfies BubbleCapLines;
 
 /**
  * How many prose blocks one response row draws.
@@ -292,13 +290,11 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
  * scroll and no fold. It is uncapped from its first fragment, so settling
  * changes nothing about its box and reflows nothing.
  *
- * A THINKING BUBBLE IS SHOWN IN FULL WHILE ITS OWN TEXT IS STILL ARRIVING, and
- * collapses to the one-line thinking cap the moment it LANDS: when the daemon
- * re-pushes the row in a terminal arm (`thinkingLanded`), which is exactly when
- * its final text is whole and painted in full. Nothing here waits on, or looks
- * at, any other row. Only the DEFAULT limit changes: a bubble the reader
- * expanded wears `.expanded` on its scroll box, which the in-place redraw keeps
- * (src/bubble/draw.ts), so it stays open.
+ * A THINKING BUBBLE IS A FIXED HEIGHT FROM ITS FIRST FRAGMENT TO LONG AFTER
+ * IT LANDS (`THINKING_CAP_LINES`): its arm never changes its cap, so it never
+ * collapses when its own text lands. Only the DEFAULT limit is fixed: a bubble
+ * the reader expanded wears `.expanded` on its scroll box, which the in-place
+ * redraw keeps (src/bubble/draw.ts), so it stays open.
  */
 export function responseCapLines(u: FeedResponse): BubbleCapLines {
   return responseCap(u).capLines;
@@ -306,34 +302,11 @@ export function responseCapLines(u: FeedResponse): BubbleCapLines {
 
 /**
  * The bubble's cap: its collapsed line limit (`responseCapLines`) and its more
- * signal. A LANDED THINKING BUBBLE SAYS "MORE" WITH THE ELLIPSIS, never the
- * fade (owner ruling, 2026-09-27): its one collapsed line ends in `…` exactly
- * when anything follows it. A thinking bubble still arriving is under the
- * shared feed cap, which the ellipsis cannot state (no whole line count), so it
- * keeps the default fade until it lands.
+ * signal. A thinking bubble is under the shared feed cap, which the ellipsis
+ * cannot state (no whole line count), so it says "more" with the default fade.
  */
 export function responseCap(u: FeedResponse): BubbleCapSpec {
-  if (!u.thinking) return { capLines: BUBBLE_UNCAPPED };
-  return thinkingLanded(u) ? { capLines: THINKING_CAP_LINES, more: BUBBLE_MORE_ELLIPSIS } : { capLines: "feed" };
-}
-
-/**
- * Whether U is a thinking row whose own final text has arrived: its arm is a
- * terminal one (`success`, or `error` for reasoning the turn's death cut short,
- * whose prose is equally final). An arriving `update` has not landed. An unset
- * arm has not landed either, and is not decided here: the draw refuses that row
- * as malformed (`drawFeedResponse`'s `requireCase`) before it paints anything.
- */
-export function thinkingLanded(u: FeedResponse): boolean {
-  if (!u.thinking) return false;
-  switch (u.result.case) {
-    case "success":
-    case "error":
-      return true;
-    case "update":
-    case undefined:
-      return false;
-  }
+  return { capLines: u.thinking ? THINKING_CAP_LINES : BUBBLE_UNCAPPED };
 }
 
 /**
