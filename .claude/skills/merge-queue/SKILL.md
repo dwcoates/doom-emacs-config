@@ -7,15 +7,15 @@ allowed-tools: Bash(.claude/skills/merge-queue/run.sh:*)
 
 ## What This Skill Does
 
-Asks the merge queue, from this workspace, to land a finished branch on master. The merge runs in this workspace once the turn ends, and its outcome reports into this session; nothing merges by hand. It also removes a queued merge and pauses or resumes the queue, answering at once.
+Asks the merge queue, from this workspace, to land a finished branch in its merge target: master for a workspace made off the main checkout, the PARENT workspace's checkout for a workspace created explicitly as a child of another. The merge runs in this workspace once the turn ends, and its outcome reports into this session; nothing merges by hand. It also removes a queued merge and pauses or resumes the queue, answering at once.
 
 ## Arguments
 
 | Argument | Behaviour |
 |---|---|
-| `own` | Merge the branch checked out in this workspace's worktree now; this workspace closes once it lands. |
-| `own keep-open` | Merge the branch checked out in this workspace's worktree now, and keep this workspace open once it lands. |
-| `workspace <worktree-dir>` | Merge the branch checked out in ANOTHER workspace's worktree (for example a one-shot a subagent ran in); that workspace closes once it lands. |
+| `own` | Merge the branch checked out in this workspace's worktree now, into master, or into its parent workspace when it is a child; this workspace closes once it lands. |
+| `own keep-open` | Merge the branch checked out in this workspace's worktree now, into master, or into its parent workspace when it is a child, and keep this workspace open once it lands. |
+| `workspace <worktree-dir>` | Merge the branch checked out in ANOTHER workspace's worktree (for example a one-shot a subagent ran in), into master, or into that workspace's parent when it is a child; that workspace closes once it lands. |
 | `branch <branch-name>` | Merge a branch that is no workspace (a subagent's `Agent`-tool branch). |
 | `pr-merged` | This workspace's branch already merged upstream; update master from upstream and close this workspace. |
 | `dequeue own` | Take this workspace's own merge off the queue. |
