@@ -598,10 +598,7 @@ func (c *client) MergeNoFF(ctx context.Context, targetDir, sourceBranch, message
 func (c *client) Commit(ctx context.Context, dir, message string) (string, error) {
 	const operation = "daemon.gitclient.commit"
 
-	if _, err := c.run(ctx, operation, dir, "commit", "--no-edit", "-m", message); err != nil {
-		return "", err
-	}
-	sha, err := c.run(ctx, operation, dir, "rev-parse", "HEAD")
+	sha, err := c.recordCommit(ctx, operation, dir, "commit", "--no-edit", "-m", message)
 	if err != nil {
 		return "", err
 	}
@@ -610,6 +607,18 @@ func (c *client) Commit(ctx context.Context, dir, message string) (string, error
 		"sha": sha,
 	})
 	return sha, nil
+}
+
+// recordCommit runs one `git commit` (COMMIT is its whole argument vector)
+// and answers the new HEAD's full sha. The sha is read back with a separate
+// `rev-parse HEAD` rather than parsed out of commit's own chatter, whose shape
+// is porcelain and not a contract; every commit this client makes goes
+// through here so that rule is stated once.
+func (c *client) recordCommit(ctx context.Context, operation, dir string, commit ...string) (string, error) {
+	if _, err := c.run(ctx, operation, dir, commit...); err != nil {
+		return "", err
+	}
+	return c.run(ctx, operation, dir, "rev-parse", "HEAD")
 }
 
 // ConflictedFiles lists the paths currently in conflict. `-z` is not a detail:
@@ -684,7 +693,19 @@ func (c *client) ChangedPaths(ctx context.Context, dir, rangeSpec string) ([]str
 // reaper reads as a sign of activity, so its own probe would otherwise keep a
 // tree looking busy.
 func (c *client) IsClean(ctx context.Context, dir string) (bool, error) {
-	out, err := c.run(ctx, "daemon.gitclient.is_clean", dir, "--no-optional-locks", "status", "--porcelain")
+	return c.statusEmpty(ctx, "daemon.gitclient.is_clean", dir)
+}
+
+// statusEmpty reports whether `status --porcelain` lists nothing, narrowed to
+// PATHSPEC when one is given. It is the one status probe this client makes,
+// so every caller's probe takes no optional lock (see IsClean) and reads
+// untracked content as unclean.
+func (c *client) statusEmpty(ctx context.Context, operation, dir string, pathspec ...string) (bool, error) {
+	args := []string{"--no-optional-locks", "status", "--porcelain"}
+	if len(pathspec) > 0 {
+		args = append(append(args, "--"), pathspec...)
+	}
+	out, err := c.run(ctx, operation, dir, args...)
 	if err != nil {
 		return false, err
 	}
