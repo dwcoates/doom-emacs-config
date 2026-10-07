@@ -11,6 +11,7 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/usersetup"
 )
 
 // harness is one controller over a fake runner.
@@ -93,7 +94,6 @@ func TestNewRefusesAnIncompleteDeps(t *testing.T) {
 		{name: "no clock", break_: func(d *Deps) { d.Clock = nil }},
 		{name: "no logger", break_: func(d *Deps) { d.Log = nil }},
 		{name: "a negative cadence", break_: func(d *Deps) { d.Every = -time.Second }},
-		{name: "no hotspot", break_: func(d *Deps) { d.Config.Hotspot = "" }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -421,6 +421,49 @@ func TestUpdateOffLeavesTheHotspot(t *testing.T) {
 	}
 }
 
+// TestUpdateWithNoHotspotConfiguredFailsTheHotspotStepOnly pins that a host
+// that named no hotspot runs no network tool, answers the hotspot step as
+// failed with a detail naming the variable and the user guide, records it at
+// ERROR, and still changes the mode.
+func TestUpdateWithNoHotspotConfiguredFailsTheHotspotStepOnly(t *testing.T) {
+	cases := []struct {
+		name   string
+		action string
+		pmset  string
+		power  string
+	}{
+		{name: "turning on", action: "on", pmset: pmsetOff, power: "1"},
+		{name: "turning off", action: "off", pmset: pmsetOn, power: "0"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarnessFor(t, "")
+			h.standing(tc.pmset, summary(true, "Home"))
+			scriptPower(h.r, tc.power)
+			h.r.on(argDim, answer{})
+			h.r.on(argRestore, answer{})
+
+			// Act.
+			resp := h.c.Update(context.Background(), update(tc.action))
+
+			// Assert.
+			failed := resp.GetSuccess().GetHotspot().GetFailed()
+			if failed == nil || !strings.Contains(failed.GetDetail(), EnvHotspot) || !strings.Contains(failed.GetDetail(), usersetup.Doc) {
+				t.Fatalf("hotspot = %v, want failed naming %s and the user guide", resp.GetSuccess().GetHotspot(), EnvHotspot)
+			}
+			for _, ran := range h.r.ran() {
+				if strings.Contains(ran, "networksetup -setairport") || strings.Contains(ran, "wifi-util") {
+					t.Fatalf("ran %q with no hotspot configured", ran)
+				}
+			}
+			if len(h.records(dlog.LevelError, opUpdate)) != 1 {
+				t.Fatalf("records = %+v, want one ERROR under %s", h.log.Records(), opUpdate)
+			}
+		})
+	}
+}
+
 func TestUpdateOffLeavesNothingItCannotIdentify(t *testing.T) {
 	cases := []struct {
 		name string
@@ -622,8 +665,8 @@ func TestRefreshAbandonedByItsCallerIsRecordedAtInfo(t *testing.T) {
 // Two spellings of one hotspot: the ASCII apostrophe a person types, and the
 // right single quotation mark an iPhone names itself with.
 const (
-	straightHotspot = "Dodge's iPhone"
-	curlyHotspot    = "Dodge\u2019s iPhone"
+	straightHotspot = "Someone's iPhone"
+	curlyHotspot    = "Someone\u2019s iPhone"
 )
 
 func TestUpdateOnJoinsTheSavedSpellingOfTheHotspot(t *testing.T) {
@@ -662,7 +705,7 @@ func TestUpdateOnTriesTheConfiguredNameWhenNoSavedNetworkMatches(t *testing.T) {
 	// Arrange: nothing saved matches; the join of the configured name fails.
 	h := newHarnessFor(t, straightHotspot).standing(pmsetOff, summary(true, "Home"))
 	h.r.on(argPreferred, answer{out: preferred("Home")})
-	h.r.on("/t/networksetup -setairportnetwork en0 "+straightHotspot, answer{out: "Could not find network Dodge's iPhone."})
+	h.r.on("/t/networksetup -setairportnetwork en0 "+straightHotspot, answer{out: "Could not find network Someone's iPhone."})
 	scriptPower(h.r, "1")
 	h.r.on(argDim, answer{})
 
