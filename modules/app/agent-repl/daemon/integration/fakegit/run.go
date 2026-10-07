@@ -122,7 +122,13 @@ func answer(s *State, cwd string, args []string) Result {
 	case "merge-tree":
 		return mergeTree(s, repo, wt, subject)
 	case "update-ref":
-		return updateRef(repo, subject)
+		return updateRef(s, repo, subject)
+	case "read-tree", "add":
+		return snapshotStep(wt, subject)
+	case "write-tree":
+		return writeTree(s, wt)
+	case "commit-tree":
+		return commitTree(s, repo, wt, subject)
 	case "rebase":
 		return rebase(s, repo, wt, subject)
 	case "fetch":
@@ -1375,10 +1381,15 @@ func mergeTree(s *State, repo *Repo, wt *Worktree, subject []string) Result {
 }
 
 // updateRef answers `update-ref -d refs/heads/<branch> <old>`: git's
-// compare-and-delete, refused when the branch no longer points at old.
-func updateRef(repo *Repo, subject []string) Result {
+// compare-and-delete, refused when the branch no longer points at old; and
+// `update-ref -m <message> <ref> <new> ""`: git's create-only form, refused
+// when the ref already exists.
+func updateRef(s *State, repo *Repo, subject []string) Result {
+	if len(subject) == 6 && subject[1] == "-m" && subject[5] == "" {
+		return createRef(s, repo, subject[3], subject[4])
+	}
 	if len(subject) != 4 || subject[1] != "-d" || !strings.HasPrefix(subject[2], "refs/heads/") {
-		return Result{Stderr: "fatal: fakegit: only `update-ref -d refs/heads/<branch> <old>` is modeled\n", Exit: 128}
+		return Result{Stderr: "fatal: fakegit: only `update-ref -d refs/heads/<branch> <old>` and `update-ref -m <msg> <ref> <new> \"\"` are modeled\n", Exit: 128}
 	}
 	name := strings.TrimPrefix(subject[2], "refs/heads/")
 	head, ok := repo.BranchHeads[name]
@@ -1496,4 +1507,62 @@ func rebase(s *State, repo *Repo, wt *Worktree, subject []string) Result {
 		return Result{Stderr: err.Error() + "\n", Exit: 128}
 	}
 	return Result{Stdout: "Successfully rebased and updated refs/heads/" + wt.Branch + ".\n"}
+}
+
+// createRef is `update-ref`'s create-only form: the ref must not exist and the
+// commit must.
+func createRef(s *State, repo *Repo, ref, sha string) Result {
+	if _, taken := repo.Refs[ref]; taken {
+		return Result{Stderr: fmt.Sprintf("fatal: update_ref failed for ref '%s': reference already exists\n", ref), Exit: 128}
+	}
+	if s.Commits[sha] == nil {
+		return Result{Stderr: fmt.Sprintf("fatal: %s: not a valid SHA1\n", sha), Exit: 128}
+	}
+	if repo.Refs == nil {
+		repo.Refs = map[string]string{}
+	}
+	repo.Refs[ref] = sha
+	return Result{}
+}
+
+// snapshotStep answers the index-staging steps of a snapshot (`read-tree
+// HEAD`, `add --all`): the fake has no index, so they only need a worktree.
+func snapshotStep(wt *Worktree, subject []string) Result {
+	if wt == nil {
+		return Result{Stderr: "fatal: this operation must be run in a work tree\n", Exit: 128}
+	}
+	if subject[0] == "read-tree" && (len(subject) != 2 || subject[1] != "HEAD") {
+		return Result{Stderr: "fatal: fakegit: only `read-tree HEAD` is modeled\n", Exit: 128}
+	}
+	if subject[0] == "add" && (len(subject) != 2 || subject[1] != "--all") {
+		return Result{Stderr: "fatal: fakegit: only `add --all` is modeled\n", Exit: 128}
+	}
+	return Result{}
+}
+
+// writeTree answers `write-tree`: HEAD's own tree for a clean worktree, and a
+// tree of its own for a dirty one.
+func writeTree(s *State, wt *Worktree) Result {
+	if wt == nil || s.Commits[wt.Head] == nil {
+		return Result{Stderr: "fatal: git-write-tree: error building trees\n", Exit: 128}
+	}
+	tree := s.Commits[wt.Head].TreeOf()
+	if wt.Dirty {
+		tree = "4" + tree[1:]
+	}
+	return Result{Stdout: tree + "\n"}
+}
+
+// commitTree answers `commit-tree <tree> -p <parent> -m <message>`: a new
+// commit on no branch, its sha printed.
+func commitTree(s *State, repo *Repo, wt *Worktree, subject []string) Result {
+	if len(subject) != 6 || subject[2] != "-p" || subject[4] != "-m" {
+		return Result{Stderr: "fatal: fakegit: only `commit-tree <tree> -p <parent> -m <message>` is modeled\n", Exit: 128}
+	}
+	parent, ok := s.resolve(repo, wt, subject[3])
+	if !ok {
+		return Result{Stderr: fmt.Sprintf("fatal: not a valid object name %s\n", subject[3]), Exit: 128}
+	}
+	c := s.AddCommit(repo, "", subject[5], []string{parent}, nil)
+	return Result{Stdout: c.SHA + "\n"}
 }

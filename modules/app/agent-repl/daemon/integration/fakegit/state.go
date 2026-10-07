@@ -100,7 +100,10 @@ type Repo struct {
 	// RemoteHeads maps a branch of the `origin` remote to the commit a fetch
 	// brings in; `refs/remotes/origin/<branch>` resolves to it.
 	RemoteHeads map[string]string `json:"remote_heads,omitempty"`
-	Worktrees   []*Worktree       `json:"worktrees"`
+	// Refs maps every other full ref `update-ref` created (the reaper's
+	// preservations under refs/agent-repl/) to its commit.
+	Refs      map[string]string `json:"refs,omitempty"`
+	Worktrees []*Worktree       `json:"worktrees"`
 }
 
 // Conflict scripts a conflict between Branch and the repository Dir belongs
