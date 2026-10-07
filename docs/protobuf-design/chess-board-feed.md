@@ -36,6 +36,42 @@ Scoping (step 1) in progress.
   import it. The widget's `dist/` is not built in the checkout inspected on
   2026-10-07.
 
+### cee-webapp is the widget backend, and it serves the bundle too
+
+- **What (code tier):** `cee-webapp` (`sdks/cli/cmd/cee-webapp`) serves the
+  widget bundle under `/v1/widget/` (`internal/webapp/static/static.go`
+  `WidgetRoute`) and answers `CeeWebWidgetService` and `CeeSessionService`
+  over the same loopback listener (`cmd/cee-webapp/mux.go`). It is a per-user
+  singleton that binds a free loopback port and publishes the bound address to
+  an address file (`internal/webapp/lifecycle`). The gns cee plugin installs
+  it at `~/.gns/plugins/cee/cee-webapp` (`sdks/cli/justfile`), beside
+  `cee-cli-daemon`.
+- **Consequence:** agent-repl neither builds nor serves widget assets; the
+  bundle comes from cee-webapp. The widget itself knows no backend: it renders
+  the bytes and reports clicks, and its host does all calling.
+
+### The agent-repl daemon is the widget's host-side caller
+
+- **Decision:** the agent-repl daemon calls `GetCeeWebWidget` and
+  `GetSquareEvents`. The webapp mounts the widget from what the daemon serves
+  and relays square clicks; it never calls cee-webapp itself.
+- **Why:** the server resolves and the client renders verbatim, the same rule
+  every other feed component follows.
+
+### agent-repl starts cee-webapp when a board needs it
+
+- **Decision:** when a board must be resolved and no cee-webapp is running,
+  agent-repl starts it, rather than requiring the user to have started it.
+
+### A board whose session is gone shows as unavailable
+
+- **Decision:** once the CEE session behind a board no longer exists (the CEE
+  daemon sweeps idle sessions after an hour by default), the board shows as
+  unavailable. The widget data is not saved with the response.
+- **Why lost:** saving the widget data at response time would keep the board
+  browsable, but square clicks would still fail against a missing session, so
+  the board would work only partly.
+
 ## Core design principles
 
 ### agent-repl only renders the widget
