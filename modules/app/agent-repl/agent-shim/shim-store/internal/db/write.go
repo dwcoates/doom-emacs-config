@@ -546,7 +546,9 @@ func (d *DB) applyEntry(ctx context.Context, tx *sql.Tx, base logging.Fields, r 
 	}
 	result.Written++
 	switch r.kind {
-	case kindPageLine:
+	case kindPageLine, kindHookDropped:
+		// A HOOK LINE IS PUBLISHED LIKE ANY LINE, and that is the only time it
+		// is ever served: the row keeps none of it (kindHookDropped).
 		result.Lines = append(result.Lines, LineWritten{
 			AgentID:  r.book.String,
 			Line:     lineAt(position, r.pageLine, r.entry.GetTurn(), place),
@@ -721,6 +723,11 @@ func (d *DB) recordApplied(ctx context.Context, tx *sql.Tx, r routed, cursor *st
 // already served for it names the line again. Into another book it is the
 // ordinary book-move skip, and as any other kind the ordinary refusal.
 //
+// A HOOK LINE LANDING ON A ROW STORED AS A PAGE LINE IS NOT AN IDENTITY CHANGE
+// EITHER (hookLineDropsStoredLine): it is the same line, stored before the
+// store stopped keeping hook records, and the write supersedes it in place as
+// any same-kind write would.
+//
 // The stored row is handed back (`prior`) whenever it was superseded in place,
 // so the caller can see whether the write changes anything at all.
 func (d *DB) applyIdentityPolicy(ctx context.Context, tx *sql.Tx, fields logging.Fields, r *routed) (skip *SkippedEntry, retiredFrom string, prior *storedRow, err error) {
@@ -743,7 +750,7 @@ func (d *DB) applyIdentityPolicy(ctx context.Context, tx *sql.Tx, fields logging
 		}
 		return nil, row.kind, nil, d.carryStoredStamps(fields, r, row.frame)
 	}
-	if row.kind != r.kind {
+	if row.kind != r.kind && !hookLineDropsStoredLine(row.kind, r.kind) {
 		return nil, "", nil, invalidSitef(SiteUpsertChangesIdentity,
 			entryField(r.index, "agent_update"),
 			"entries[%d] (upsert_key=%q) would change the row's kind from %q to %q — an upsert supersedes a row's content, never its identity",
@@ -760,6 +767,14 @@ func (d *DB) applyIdentityPolicy(ctx context.Context, tx *sql.Tx, fields logging
 		return nil, "", nil, err
 	}
 	return nil, "", row, nil
+}
+
+// hookLineDropsStoredLine reports whether a write of kind `incoming` onto a row
+// of kind `stored` is a hook line superseding the page line its key held from
+// before kindHookDropped existed (a pre-rule shim's start, its outcome landing
+// after the store began dropping hook records).
+func hookLineDropsStoredLine(stored, incoming string) bool {
+	return stored == kindPageLine && incoming == kindHookDropped
 }
 
 // placeUnownedLine places a page line its producer wrote `owner_unknown` in the
@@ -966,9 +981,18 @@ func (d *DB) upsertEntry(ctx context.Context, tx *sql.Tx, r routed, writeSeq uin
 	    frame = excluded.frame,
 	    last_written_at_ms = excluded.last_written_at_ms
 	  RETURNING position, first_inserted_at_ms`
+	frame := r.frame
+	if r.kind == kindHookDropped {
+		// THE RECORD IS NOT KEPT: only the envelope's identity and stamps.
+		stamps, err := hookStampsFrame(r.entry)
+		if err != nil {
+			return 0, 0, storagef(err, "serializing the stamps of hook line upsert_key=%q", r.upsertKey)
+		}
+		frame = stamps
+	}
 	var position, firstInsertedAtMs int64
 	err := tx.QueryRowContext(ctx, upsertSQL,
-		r.upsertKey, r.writeID, writeSeq, r.plane, r.kind, r.book, r.runID, r.topLevel, r.frame, now, now,
+		r.upsertKey, r.writeID, writeSeq, r.plane, r.kind, r.book, r.runID, r.topLevel, frame, now, now,
 	).Scan(&position, &firstInsertedAtMs)
 	if err != nil {
 		return 0, 0, storagef(err, "writing entry upsert_key=%q write_id=%q", r.upsertKey, r.writeID)

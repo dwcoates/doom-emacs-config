@@ -446,7 +446,7 @@ describe("recovering from a converter fault", () => {
     });
   });
 
-  it("folds to the FRAME the malformed turn could not produce", async () => {
+  it("folds the recovered start without the defect the malformed turn tripped", async () => {
     // Arrange
     const driven = await driveScenario(["!fault-recover"]);
     const started = hookStarts(driven.messages)[0] as unknown as SdkMessage;
@@ -454,8 +454,10 @@ describe("recovering from a converter fault", () => {
     // Act
     const folded = foldEverything([started]);
 
-    // Assert
-    expect(folded).toEqual({ frames: 1, residue: 0 });
+    // Assert. A hook's start is never stored (owner ruling 2026-10-06), so the
+    // recovered start folds to nothing at all — and, unlike the malformed one,
+    // to no residue.
+    expect(folded).toEqual({ frames: 0, residue: 0 });
   });
 
   it("settles the hook, so the recovery is a whole unit and not half of one", async () => {

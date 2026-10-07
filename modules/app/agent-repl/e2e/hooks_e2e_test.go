@@ -42,6 +42,7 @@ import (
 	"testing"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
+	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
@@ -69,7 +70,14 @@ func newHookWorld(t *testing.T) (*World, *harness.Repo, *workspacev1.WorkspaceRe
 // turn still running.
 func openFeedPage(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) []*frontendv1.FeedRow {
 	t.Helper()
-	resp, err := w.Client().OpenFeed(w.Ctx(), connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ws}))
+	return openFeedPageOn(t, w.Daemon, ws)
+}
+
+// openFeedPageOn is openFeedPage against one named daemon — a relaunched
+// successor as well as the World's own.
+func openFeedPageOn(t *testing.T, d *harness.Daemon, ws *workspacev1.WorkspaceRef) []*frontendv1.FeedRow {
+	t.Helper()
+	resp, err := d.Client().OpenFeed(d.Ctx(), connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ws}))
 	if err != nil {
 		t.Fatalf("OpenFeed: %v", err)
 	}
@@ -78,6 +86,23 @@ func openFeedPage(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) []*front
 		t.Fatalf("OpenFeed = %v, want success", resp.Msg)
 	}
 	return success.GetPage().GetSuccess().GetRows()
+}
+
+// driveHookScenarioWatched drives one hook scenario to completion in a session
+// whose feed watch already stands, and answers its turn.
+//
+// A FAILED OR BLOCKED HOOK'S CARD IS DRAWN LIVE ONLY (owner rulings
+// 2026-10-06): the store delivers the hook line to the standing watches and
+// keeps none of it. A fresh session's first hook can land before the feed's
+// watch subscribes, and such a card is simply not drawn, which the owner
+// accepted (shim-store's TestAHookLineWrittenBeforeTheWatchSubscribesIsNotReplayed
+// pins it). So the card is asserted only where the watch stood first: an
+// ordinary turn runs to its end — which reached the feed through that very
+// watch — before the hook scenario is prompted.
+func driveHookScenarioWatched(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, scenario string) *conversationv1.TurnId {
+	t.Helper()
+	driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "prose-streamed")
+	return driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, scenario)
 }
 
 // hookRow answers the one FeedHook card in a feed snapshot, or nil if the
@@ -157,7 +182,7 @@ func TestHookBlocked(t *testing.T) {
 	w, _, ws := newHookWorld(t)
 
 	// Act
-	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "hook-blocked")
+	turn := driveHookScenarioWatched(t, w, ws, "hook-blocked")
 
 	// Assert: the turn still concludes ordinarily — a blocked TOOL is not a
 	// stopped turn (hooks.ts's own header comment; shim.md).
@@ -182,13 +207,18 @@ func TestHookBlocked(t *testing.T) {
 
 // TestHookFailed is #79 (golden hook-failed): the fake SDK's non-blocking
 // failing SessionStart hook (exit 1 on stderr, no gated tool call at all).
+//
+// THE CARD IS LIVE ONLY: it is drawn by the daemon that watched the firing,
+// and a relaunched daemon, which reads history from a store that kept nothing
+// of the hook, draws the turn and no card (owner rulings 2026-10-06).
 func TestHookFailed(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	w, _, ws := newHookWorld(t)
+	w, repo, ws := newHookWorld(t)
+	w.ExpectWarnings("daemon.rollout.reconcile")
 
 	// Act
-	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "hook-failed")
+	turn := driveHookScenarioWatched(t, w, ws, "hook-failed")
 
 	// Assert: a failed startup hook blocks nothing, so the turn still
 	// concludes ordinarily.
@@ -211,6 +241,16 @@ func TestHookFailed(t *testing.T) {
 	const wantOutput = "Failed to run: no interpreter on PATH."
 	if got := failed.GetOutput().GetText(); got != wantOutput {
 		t.Fatalf("failed hook output = %q, want %q", got, wantOutput)
+	}
+
+	// Act: the host's stop and a fresh daemon over the same store.
+	successor := rlStopAndRelaunch(t, w)
+	again := harness.Register(t, successor, repo.Dir)
+
+	// Assert: the turn is replayed from the store, and the card is not.
+	adAwaitReplayedFeedRow(t, successor, again, "the hook turn's terminal, replayed after the relaunch", endsTurn(turn))
+	if h := hookRow(openFeedPageOn(t, successor, again)); h != nil {
+		t.Fatalf("the relaunched daemon drew hook card %v from history, want none: no hook record is stored", h)
 	}
 }
 

@@ -1,6 +1,7 @@
 package feed
 
 import (
+	"context"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -908,5 +909,58 @@ func TestACancelledHookDrawsNothing(t *testing.T) {
 	// Assert.
 	if rows := h.rows(rootFeed()); len(rows) != 0 {
 		t.Fatalf("rows = %d, want none for a cancelled hook", len(rows))
+	}
+}
+
+// ---- A HOOK CARD DRAWN LIVE IS HELD BY THE DAEMON ----
+//
+// A failed or blocked firing's card is a row this daemon holds once it drew
+// it from the live stream, so a page reload — a new reader's OpenFeed — is
+// served it whether or not any history page carries the record (owner ruling
+// 2026-10-06: hook records are not to be stored).
+
+// failHookLive draws a failed hook's card from the live stream, as the shim
+// sends it: the start and the outcome together.
+func (h *harness) failHookLive(unit string) {
+	h.t.Helper()
+	h.hookStart(unit, "SessionStart:startup", conversationv1.AgentHookEvent_AGENT_HOOK_EVENT_SESSION_START, "")
+	h.send(&conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: unit},
+		Item: &conversationv1.AgentActivity_Hook{Hook: &conversationv1.AgentHook{
+			Result: &conversationv1.AgentHook_NonBlockingError{
+				NonBlockingError: &conversationv1.AgentHookNonBlockingError{Command: "SessionStart:startup", ExitCode: 1},
+			},
+		}},
+	})
+}
+
+// hookCardsOn counts the hook cards one served page carries.
+func hookCardsOn(t *testing.T, page *frontendv1.FeedPage) int {
+	t.Helper()
+	n := 0
+	for _, row := range pageRows(t, page) {
+		if row.GetActivity().GetHook() != nil {
+			n++
+		}
+	}
+	return n
+}
+
+func TestALiveHookCardIsServedToAReaderThatOpensAfterIt(t *testing.T) {
+	// Arrange: the history holds the conversation's prompts and no hook
+	// record; the card was drawn live. A page reload is a new reader's open.
+	h := newHarness(t)
+	h.mainBook(3, promptsBook(2))
+	h.failHookLive("hook-1")
+
+	// Act.
+	page, _, err := h.resolver.OpenPage(context.Background(), testWorkspace, rootFeed(), "reader-1")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("OpenPage: %v", err)
+	}
+	if n := hookCardsOn(t, page); n != 1 {
+		t.Fatalf("hook cards on the reloaded page = %d, want the live one", n)
 	}
 }
