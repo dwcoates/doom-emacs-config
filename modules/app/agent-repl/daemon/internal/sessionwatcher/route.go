@@ -21,6 +21,30 @@ import (
 // footer's, and the session's death is everyone's.
 func (w *watcher) routeSessionUpdateLocked(update *conversationv1.SessionUpdate) {
 	switch u := update.GetUpdate().(type) {
+	case *conversationv1.SessionUpdate_LiveWork:
+		// A LEVEL AHEAD OF THE FACTS IS NOT JUDGED: the shim's update stream
+		// can yield a push before its re-announcement, and the contract that
+		// says what a level means rides that re-announcement, which states the
+		// same membership at its own instant.
+		if !w.started {
+			w.log.Debug("daemon.sessionwatcher.level_before_facts", "a live-work level arrived before the session facts; the facts state the membership", dlog.Context{
+				"named": len(u.LiveWork.GetLiveWork()),
+			})
+			return
+		}
+		// THE LEVEL IS THE LEDGER, for a shim that speaks it (level.go). A
+		// shim whose SessionStarted predates the stamp pushing one is a
+		// producer breach: its liveness is being read from its announcements,
+		// and mixing the two would let either undo the other.
+		if !w.levelModeLocked() {
+			w.log.Error("daemon.sessionwatcher.level_unexpected", "a shim that did not state the live-work level contract pushed a level; it is not applied", dlog.Context{
+				"contract": w.contract.String(), "named": len(u.LiveWork.GetLiveWork()),
+			})
+			return
+		}
+		if w.applyLevelLocked(u.LiveWork.GetLiveWork(), "session_update") {
+			w.publishLiveWorkLocked()
+		}
 	case *conversationv1.SessionUpdate_Diagnostics:
 		w.log.Debug("daemon.sessionwatcher.session_update", "session fact routed to the health reporter, the topbar and the roster", dlog.Context{
 			"arm": sessionArm(update),
@@ -181,7 +205,7 @@ func (w *watcher) routeQueryDiedLocked(update *conversationv1.SessionUpdate) {
 	}
 	// NOTHING SURVIVES THE SESSION'S QUERY, so every live item concludes here.
 	if changed := w.concludeAllLocked(concludedQueryDied); changed {
-		w.publishLiveWorkLocked()
+		w.publishProcessEndedLocked()
 	}
 	// THE DAEMON RESTARTS THE SESSION: nothing in the shim restarts a query
 	// it lost, so the lifecycle sink is told once the lock is let go.
@@ -191,6 +215,8 @@ func (w *watcher) routeQueryDiedLocked(update *conversationv1.SessionUpdate) {
 // sessionArm names a SessionUpdate's set arm for a log record.
 func sessionArm(update *conversationv1.SessionUpdate) string {
 	switch update.GetUpdate().(type) {
+	case *conversationv1.SessionUpdate_LiveWork:
+		return "live_work"
 	case *conversationv1.SessionUpdate_Diagnostics:
 		return "diagnostics"
 	case *conversationv1.SessionUpdate_ContextUsage:
@@ -929,6 +955,14 @@ func (w *watcher) reapSettledDetachedSubagentLocked(work *conversationv1.Detache
 	if sub.GetSuccess() == nil && sub.GetFailure() == nil {
 		return
 	}
+	// A PENDING RUN SETTLES THE SAME WAY: the level named it before its
+	// announcement arrived, and its terminal retires it for good.
+	if _, waiting := w.pending[work.GetValue()]; waiting {
+		if w.concludeLocked(work.GetValue(), concludedUnitTerminal) {
+			w.publishLiveWorkLocked()
+		}
+		return
+	}
 	// BY THE HANDLE ALONE, which is what the ledger is keyed by: the run's
 	// watch -- open, still opening, or never possible -- has no say in it.
 	item, ok := w.liveHandleLocked(work.GetValue())
@@ -969,6 +1003,12 @@ func (w *watcher) detachedHandleForLocked(agent *conversationv1.AgentId, act *co
 	// own terminal.
 	if item, live := w.liveHandleLocked(unit); live && item.kind == kindSubagent {
 		return item.work
+	}
+	// A PENDING HANDLE IS THE RUN BY THE CONTRACT'S EQUALITY: the level named
+	// it before any announcement described it, and its unit's own terminal is
+	// still what settles it.
+	if handle, waiting := w.pending[unit]; waiting {
+		return handle
 	}
 	entry, ok := w.agents[agent.GetValue()]
 	if !ok || entry.work == nil {
@@ -1349,7 +1389,9 @@ func (w *watcher) routeDetachedWorkLocked(announcer *conversationv1.AgentId, wor
 	}
 	handle := work.GetWork()
 	if kind == kindSubagent && agent.GetValue() == "" {
-		w.admitUnaddressableLocked(handle)
+		if w.describeLocked(work) && w.admitUnaddressableLocked(handle) {
+			w.publishLiveWorkLocked()
+		}
 		return
 	}
 	w.sinks.Feed.OnDetachedWork(w.ws, announcer, work, turn, place)
@@ -1370,6 +1412,27 @@ func (w *watcher) routeDetachedWorkLocked(announcer *conversationv1.AgentId, wor
 		return
 	}
 
+	if !w.describeLocked(work) {
+		return
+	}
+	if w.admitDescribedLocked(work) {
+		w.publishLiveWorkLocked()
+	}
+}
+
+// admitDescribedLocked admits one described item to the ledger and opens its
+// watch, reporting whether the live set changed. The caller publishes. In
+// level mode it is reached only for an item the latest level names; before
+// the level contract, at the item's announcement.
+func (w *watcher) admitDescribedLocked(work *conversationv1.AgentDetachedWork) bool {
+	kind, agent, ok := w.resolveDetachedLocked(work)
+	if !ok {
+		return false
+	}
+	handle := work.GetWork()
+	if kind == kindSubagent && agent.GetValue() == "" {
+		return w.admitUnaddressableLocked(handle)
+	}
 	switch kind {
 	case kindSubagent:
 		if entry, ok := w.agents[agent.GetValue()]; ok {
@@ -1384,15 +1447,14 @@ func (w *watcher) routeDetachedWorkLocked(announcer *conversationv1.AgentId, wor
 				w.log.Debug("daemon.sessionwatcher.detached_work_promoted", "a watched subagent became detached work", dlog.Context{
 					"agent_id": agent.GetValue(), "work_id": handle.GetValue(),
 				})
-				w.admitLocked(handle, kindSubagent, agent)
-				w.publishLiveWorkLocked()
+				admitted := w.admitLocked(handle, kindSubagent, agent)
 				// The promotion is not an excuse to leave a refused watch
 				// dark: a spawn whose open the shim refused has no stream,
 				// and this announcement is an occasion to open one.
 				if entry.stream == nil && !w.inFlightLocked(entry.opening) {
 					w.openAgentStreamLocked(entry)
 				}
-				return
+				return admitted
 			}
 			// A REPEAT IS ALSO A RETRY, exactly as it is for a shell: the
 			// shim refuses WatchAgent for a book it has not registered yet,
@@ -1403,23 +1465,23 @@ func (w *watcher) routeDetachedWorkLocked(announcer *conversationv1.AgentId, wor
 					"agent_id": agent.GetValue(),
 				})
 				w.openAgentStreamLocked(entry)
-				return
+				return w.admitLocked(handle, kindSubagent, agent)
 			}
 			w.log.Debug("daemon.sessionwatcher.detached_work_repeat", "the subagent is already watched", dlog.Context{
 				"agent_id": agent.GetValue(),
 			})
-			return
+			return w.admitLocked(handle, kindSubagent, agent)
 		}
 		entry := &agentWatch{id: agent, work: handle}
 		w.agents[agent.GetValue()] = entry
-		w.admitLocked(handle, kindSubagent, agent)
+		admitted := w.admitLocked(handle, kindSubagent, agent)
 		w.openAgentStreamLocked(entry)
-		w.publishLiveWorkLocked()
+		return admitted
 
 	case kindBash:
 		if handle.GetValue() == "" {
 			w.log.Error("daemon.sessionwatcher.detached_shell_unaddressable", "a detached shell named no handle to watch", nil)
-			return
+			return false
 		}
 		if entry, ok := w.shells[handle.GetValue()]; ok {
 			// A REPEAT IS ALSO A RETRY. The shim refuses WatchBash while its
@@ -1432,12 +1494,12 @@ func (w *watcher) routeDetachedWorkLocked(announcer *conversationv1.AgentId, wor
 					"work_id": handle.GetValue(),
 				})
 				w.openShellStreamLocked(entry)
-				return
+				return w.admitLocked(handle, kindBash, nil)
 			}
 			w.log.Debug("daemon.sessionwatcher.detached_work_repeat", "the shell is already watched", dlog.Context{
 				"work_id": handle.GetValue(),
 			})
-			return
+			return w.admitLocked(handle, kindBash, nil)
 		}
 		// THE SHELL IS LIVE FROM THE ANNOUNCEMENT, and its open is made off
 		// the lock; it is published here rather than at an install nobody can
@@ -1446,17 +1508,15 @@ func (w *watcher) routeDetachedWorkLocked(announcer *conversationv1.AgentId, wor
 		// the shim concludes it.
 		entry := &shellWatch{work: handle}
 		w.shells[handle.GetValue()] = entry
-		w.admitLocked(handle, kindBash, nil)
+		admitted := w.admitLocked(handle, kindBash, nil)
 		w.openShellStreamLocked(entry)
-		w.publishLiveWorkLocked()
+		return admitted
 
 	case kindMonitor:
 		w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "routeDetachedWorkLocked", "branch": "case kindMonitor"})
 		// NO STREAM: the contract gives a monitor none, so the ledger entry is
 		// all it has until the monitor activity's own terminal concludes it.
-		if w.admitLocked(handle, kindMonitor, nil) {
-			w.publishLiveWorkLocked()
-		}
+		return w.admitLocked(handle, kindMonitor, nil)
 
 	case kindWorkflow:
 		w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "routeDetachedWorkLocked", "branch": "case kindWorkflow"})
@@ -1465,6 +1525,7 @@ func (w *watcher) routeDetachedWorkLocked(announcer *conversationv1.AgentId, wor
 		w.log.Info("daemon.sessionwatcher.workflow_kicked", "a workflow run is not watched", dlog.Context{
 			"work_id": handle.GetValue(),
 		})
+		return false
 
 	default:
 		// UNREACHABLE: resolveDetachedLocked refuses every announcement whose
@@ -1472,6 +1533,7 @@ func (w *watcher) routeDetachedWorkLocked(announcer *conversationv1.AgentId, wor
 		w.log.Error("daemon.sessionwatcher.detached_kind_unrouted", "a resolved detached kind has no route; the announcement was not routed", dlog.Context{
 			"work_id": handle.GetValue(), "kind": kind.String(),
 		})
+		return false
 	}
 }
 
@@ -1482,16 +1544,14 @@ func (w *watcher) routeDetachedWorkLocked(announcer *conversationv1.AgentId, wor
 // its handle alone, and its spawn unit's own terminal -- which retires the
 // handle by equality -- or a re-announcement concludes it like any other item.
 // The malformation itself was recorded at ERROR by resolveDetachedLocked.
-func (w *watcher) admitUnaddressableLocked(handle *conversationv1.DetachedWorkId) {
+func (w *watcher) admitUnaddressableLocked(handle *conversationv1.DetachedWorkId) bool {
 	if _, retired := w.retiredWork[handle.GetValue()]; retired {
 		w.log.Debug("daemon.sessionwatcher.detached_work_retired", "an announcement for work that already settled; it stays out of the live set", dlog.Context{
 			"work_id": handle.GetValue(), "kind": kindSubagent.String(),
 		})
-		return
+		return false
 	}
-	if w.admitLocked(handle, kindSubagent, nil) {
-		w.publishLiveWorkLocked()
-	}
+	return w.admitLocked(handle, kindSubagent, nil)
 }
 
 // resolveDetachedLocked answers what KIND of work an announcement names, and
