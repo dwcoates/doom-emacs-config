@@ -617,7 +617,7 @@ export function anonymizeMeta(meta, personal) {
 }
 
 /** Split a comma-separated environment list, dropping blanks. */
-function envList(value) {
+export function envList(value) {
   return (value ?? "").split(",").map((item) => item.trim()).filter((item) => item !== "");
 }
 
