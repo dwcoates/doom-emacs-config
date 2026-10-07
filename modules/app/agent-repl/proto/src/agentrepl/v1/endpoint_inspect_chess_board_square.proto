@@ -20,8 +20,9 @@ message InspectChessBoardSquareRequest {
   // The board, by the token its ready state carries, echoed unchanged.
   frontend.v1.FeedChessBoardSquareToken board = 1;
   // The position the square is read at: the gamepoint the widget displays,
-  // as its `onPositionChange` last reported it, or the widget data's root
-  // when it has reported none. A CEE gamepoint handle, relayed verbatim.
+  // as its `onPositionChange` last reported it, or the board's
+  // `FeedChessBoardReady.start_position` when it has reported none. A CEE
+  // gamepoint handle, relayed verbatim.
   int64 game_point = 2;
   // The clicked square as the widget reported it: the numeric value of CEE's
   // `chesscom.chess.v1.Square` enum, relayed verbatim. agent-repl holds no

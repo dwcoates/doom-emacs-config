@@ -407,7 +407,9 @@ type FeedChessBoardReady struct {
 	// Where the widget's script and stylesheet are served.
 	Bundle *FeedChessBoardBundle `protobuf:"bytes,2,opt,name=bundle,proto3" json:"bundle,omitempty"`
 	// What a square click hands back to the daemon.
-	SquareToken   *FeedChessBoardSquareToken `protobuf:"bytes,3,opt,name=square_token,json=squareToken,proto3" json:"square_token,omitempty"`
+	SquareToken *FeedChessBoardSquareToken `protobuf:"bytes,3,opt,name=square_token,json=squareToken,proto3" json:"square_token,omitempty"`
+	// The position the widget shows when it is mounted.
+	StartPosition *FeedChessBoardStartPosition `protobuf:"bytes,4,opt,name=start_position,json=startPosition,proto3" json:"start_position,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -463,6 +465,63 @@ func (x *FeedChessBoardReady) GetSquareToken() *FeedChessBoardSquareToken {
 	return nil
 }
 
+func (x *FeedChessBoardReady) GetStartPosition() *FeedChessBoardStartPosition {
+	if x != nil {
+		return x.StartPosition
+	}
+	return nil
+}
+
+// THE POSITION A FRESHLY MOUNTED WIDGET SHOWS: the root of the session's
+// game. The widget reports a position only when the reader navigates
+// (`onPositionChange`), so until it has, a square click is read at this one;
+// after, at the last position it reported.
+type FeedChessBoardStartPosition struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The root's CEE gamepoint handle, as the session's poll reports it, relayed
+	// verbatim.
+	GamePoint     int64 `protobuf:"varint,1,opt,name=game_point,json=gamePoint,proto3" json:"game_point,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FeedChessBoardStartPosition) Reset() {
+	*x = FeedChessBoardStartPosition{}
+	mi := &file_frontend_v1_chess_board_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FeedChessBoardStartPosition) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FeedChessBoardStartPosition) ProtoMessage() {}
+
+func (x *FeedChessBoardStartPosition) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_chess_board_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FeedChessBoardStartPosition.ProtoReflect.Descriptor instead.
+func (*FeedChessBoardStartPosition) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_chess_board_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *FeedChessBoardStartPosition) GetGamePoint() int64 {
+	if x != nil {
+		return x.GamePoint
+	}
+	return 0
+}
+
 // The widget's data: what `mountCeeWebWidget` takes as `widgetBytes`.
 type FeedChessBoardWidget struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -480,7 +539,7 @@ type FeedChessBoardWidget struct {
 
 func (x *FeedChessBoardWidget) Reset() {
 	*x = FeedChessBoardWidget{}
-	mi := &file_frontend_v1_chess_board_proto_msgTypes[7]
+	mi := &file_frontend_v1_chess_board_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -492,7 +551,7 @@ func (x *FeedChessBoardWidget) String() string {
 func (*FeedChessBoardWidget) ProtoMessage() {}
 
 func (x *FeedChessBoardWidget) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_chess_board_proto_msgTypes[7]
+	mi := &file_frontend_v1_chess_board_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -505,7 +564,7 @@ func (x *FeedChessBoardWidget) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedChessBoardWidget.ProtoReflect.Descriptor instead.
 func (*FeedChessBoardWidget) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_chess_board_proto_rawDescGZIP(), []int{7}
+	return file_frontend_v1_chess_board_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *FeedChessBoardWidget) GetCeeWebWidget() []byte {
@@ -532,7 +591,7 @@ type FeedChessBoardBundle struct {
 
 func (x *FeedChessBoardBundle) Reset() {
 	*x = FeedChessBoardBundle{}
-	mi := &file_frontend_v1_chess_board_proto_msgTypes[8]
+	mi := &file_frontend_v1_chess_board_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -544,7 +603,7 @@ func (x *FeedChessBoardBundle) String() string {
 func (*FeedChessBoardBundle) ProtoMessage() {}
 
 func (x *FeedChessBoardBundle) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_chess_board_proto_msgTypes[8]
+	mi := &file_frontend_v1_chess_board_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -557,7 +616,7 @@ func (x *FeedChessBoardBundle) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedChessBoardBundle.ProtoReflect.Descriptor instead.
 func (*FeedChessBoardBundle) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_chess_board_proto_rawDescGZIP(), []int{8}
+	return file_frontend_v1_chess_board_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *FeedChessBoardBundle) GetScriptUrl() string {
@@ -588,7 +647,7 @@ type FeedChessBoardSquareToken struct {
 
 func (x *FeedChessBoardSquareToken) Reset() {
 	*x = FeedChessBoardSquareToken{}
-	mi := &file_frontend_v1_chess_board_proto_msgTypes[9]
+	mi := &file_frontend_v1_chess_board_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -600,7 +659,7 @@ func (x *FeedChessBoardSquareToken) String() string {
 func (*FeedChessBoardSquareToken) ProtoMessage() {}
 
 func (x *FeedChessBoardSquareToken) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_chess_board_proto_msgTypes[9]
+	mi := &file_frontend_v1_chess_board_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -613,7 +672,7 @@ func (x *FeedChessBoardSquareToken) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedChessBoardSquareToken.ProtoReflect.Descriptor instead.
 func (*FeedChessBoardSquareToken) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_chess_board_proto_rawDescGZIP(), []int{9}
+	return file_frontend_v1_chess_board_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *FeedChessBoardSquareToken) GetValue() string {
@@ -643,11 +702,15 @@ const file_frontend_v1_chess_board_proto_rawDesc = "" +
 	"\x19FeedChessBoardUnavailable\x12D\n" +
 	"\x06reason\x18\x01 \x01(\v2,.frontend.v1.FeedChessBoardUnavailableReasonR\x06reason\"5\n" +
 	"\x1fFeedChessBoardUnavailableReason\x12\x12\n" +
-	"\x04text\x18\x01 \x01(\tR\x04text\"\xd6\x01\n" +
+	"\x04text\x18\x01 \x01(\tR\x04text\"\xa7\x02\n" +
 	"\x13FeedChessBoardReady\x129\n" +
 	"\x06widget\x18\x01 \x01(\v2!.frontend.v1.FeedChessBoardWidgetR\x06widget\x129\n" +
 	"\x06bundle\x18\x02 \x01(\v2!.frontend.v1.FeedChessBoardBundleR\x06bundle\x12I\n" +
-	"\fsquare_token\x18\x03 \x01(\v2&.frontend.v1.FeedChessBoardSquareTokenR\vsquareToken\"<\n" +
+	"\fsquare_token\x18\x03 \x01(\v2&.frontend.v1.FeedChessBoardSquareTokenR\vsquareToken\x12O\n" +
+	"\x0estart_position\x18\x04 \x01(\v2(.frontend.v1.FeedChessBoardStartPositionR\rstartPosition\"<\n" +
+	"\x1bFeedChessBoardStartPosition\x12\x1d\n" +
+	"\n" +
+	"game_point\x18\x01 \x01(\x03R\tgamePoint\"<\n" +
 	"\x14FeedChessBoardWidget\x12$\n" +
 	"\x0ecee_web_widget\x18\x01 \x01(\fR\fceeWebWidget\"\\\n" +
 	"\x14FeedChessBoardBundle\x12\x1d\n" +
@@ -669,7 +732,7 @@ func file_frontend_v1_chess_board_proto_rawDescGZIP() []byte {
 	return file_frontend_v1_chess_board_proto_rawDescData
 }
 
-var file_frontend_v1_chess_board_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
+var file_frontend_v1_chess_board_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
 var file_frontend_v1_chess_board_proto_goTypes = []any{
 	(*FeedChessBoard)(nil),                  // 0: frontend.v1.FeedChessBoard
 	(*FeedChessBoardHeading)(nil),           // 1: frontend.v1.FeedChessBoardHeading
@@ -678,25 +741,27 @@ var file_frontend_v1_chess_board_proto_goTypes = []any{
 	(*FeedChessBoardUnavailable)(nil),       // 4: frontend.v1.FeedChessBoardUnavailable
 	(*FeedChessBoardUnavailableReason)(nil), // 5: frontend.v1.FeedChessBoardUnavailableReason
 	(*FeedChessBoardReady)(nil),             // 6: frontend.v1.FeedChessBoardReady
-	(*FeedChessBoardWidget)(nil),            // 7: frontend.v1.FeedChessBoardWidget
-	(*FeedChessBoardBundle)(nil),            // 8: frontend.v1.FeedChessBoardBundle
-	(*FeedChessBoardSquareToken)(nil),       // 9: frontend.v1.FeedChessBoardSquareToken
+	(*FeedChessBoardStartPosition)(nil),     // 7: frontend.v1.FeedChessBoardStartPosition
+	(*FeedChessBoardWidget)(nil),            // 8: frontend.v1.FeedChessBoardWidget
+	(*FeedChessBoardBundle)(nil),            // 9: frontend.v1.FeedChessBoardBundle
+	(*FeedChessBoardSquareToken)(nil),       // 10: frontend.v1.FeedChessBoardSquareToken
 }
 var file_frontend_v1_chess_board_proto_depIdxs = []int32{
-	1, // 0: frontend.v1.FeedChessBoard.heading:type_name -> frontend.v1.FeedChessBoardHeading
-	2, // 1: frontend.v1.FeedChessBoard.preparing:type_name -> frontend.v1.FeedChessBoardPreparing
-	4, // 2: frontend.v1.FeedChessBoard.unavailable:type_name -> frontend.v1.FeedChessBoardUnavailable
-	6, // 3: frontend.v1.FeedChessBoard.ready:type_name -> frontend.v1.FeedChessBoardReady
-	3, // 4: frontend.v1.FeedChessBoardPreparing.step:type_name -> frontend.v1.FeedChessBoardPreparingStep
-	5, // 5: frontend.v1.FeedChessBoardUnavailable.reason:type_name -> frontend.v1.FeedChessBoardUnavailableReason
-	7, // 6: frontend.v1.FeedChessBoardReady.widget:type_name -> frontend.v1.FeedChessBoardWidget
-	8, // 7: frontend.v1.FeedChessBoardReady.bundle:type_name -> frontend.v1.FeedChessBoardBundle
-	9, // 8: frontend.v1.FeedChessBoardReady.square_token:type_name -> frontend.v1.FeedChessBoardSquareToken
-	9, // [9:9] is the sub-list for method output_type
-	9, // [9:9] is the sub-list for method input_type
-	9, // [9:9] is the sub-list for extension type_name
-	9, // [9:9] is the sub-list for extension extendee
-	0, // [0:9] is the sub-list for field type_name
+	1,  // 0: frontend.v1.FeedChessBoard.heading:type_name -> frontend.v1.FeedChessBoardHeading
+	2,  // 1: frontend.v1.FeedChessBoard.preparing:type_name -> frontend.v1.FeedChessBoardPreparing
+	4,  // 2: frontend.v1.FeedChessBoard.unavailable:type_name -> frontend.v1.FeedChessBoardUnavailable
+	6,  // 3: frontend.v1.FeedChessBoard.ready:type_name -> frontend.v1.FeedChessBoardReady
+	3,  // 4: frontend.v1.FeedChessBoardPreparing.step:type_name -> frontend.v1.FeedChessBoardPreparingStep
+	5,  // 5: frontend.v1.FeedChessBoardUnavailable.reason:type_name -> frontend.v1.FeedChessBoardUnavailableReason
+	8,  // 6: frontend.v1.FeedChessBoardReady.widget:type_name -> frontend.v1.FeedChessBoardWidget
+	9,  // 7: frontend.v1.FeedChessBoardReady.bundle:type_name -> frontend.v1.FeedChessBoardBundle
+	10, // 8: frontend.v1.FeedChessBoardReady.square_token:type_name -> frontend.v1.FeedChessBoardSquareToken
+	7,  // 9: frontend.v1.FeedChessBoardReady.start_position:type_name -> frontend.v1.FeedChessBoardStartPosition
+	10, // [10:10] is the sub-list for method output_type
+	10, // [10:10] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_frontend_v1_chess_board_proto_init() }
@@ -715,7 +780,7 @@ func file_frontend_v1_chess_board_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_frontend_v1_chess_board_proto_rawDesc), len(file_frontend_v1_chess_board_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   10,
+			NumMessages:   11,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
