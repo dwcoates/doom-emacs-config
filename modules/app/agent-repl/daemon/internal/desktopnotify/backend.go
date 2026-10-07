@@ -38,6 +38,10 @@ type Banner struct {
 	Title string
 	// Body is the banner's text below the title.
 	Body string
+	// Silent posts the banner without the platform's sound. A turn end rings
+	// its own chime (Notifier.Ring) whether or not its banner is posted, so
+	// its banner is silent and the turn sounds exactly once.
+	Silent bool
 }
 
 // Runner executes one banner program and answers its standard output. It is
@@ -99,14 +103,18 @@ func PlatformFor(goos string) (Platform, error) {
 // Swift ArgumentParser build refuses single-dash spellings and posts nothing),
 // and the --group keyed to the workspace coalesces that workspace's banners.
 func alerterArgs(ws ids.WorkspaceID, banner Banner) []string {
-	return []string{
+	args := []string{
 		"--title", banner.Title,
 		"--message", banner.Body,
-		"--sound", "default",
-		"--sender", EmacsBundleID,
-		"--timeout", strconv.Itoa(int(ClickTimeout / time.Second)),
-		"--group", "agent-repl:" + string(ws),
 	}
+	if !banner.Silent {
+		args = append(args, "--sound", "default")
+	}
+	return append(args,
+		"--sender", EmacsBundleID,
+		"--timeout", strconv.Itoa(int(ClickTimeout/time.Second)),
+		"--group", "agent-repl:"+string(ws),
+	)
 }
 
 // alerterClicked reads alerter's activation token: @CONTENTCLICKED for the
@@ -149,15 +157,25 @@ type programBackend struct {
 // when set (override), else the platform's program on PATH. An error names a
 // platform with no banner program or a program that is not installed.
 func NewBackend(platform Platform, override string, lookPath func(string) (string, error), runner Runner) (Backend, error) {
-	bin := override
-	if bin == "" {
-		found, err := lookPath(platform.Program)
-		if err != nil {
-			return nil, fmt.Errorf("the banner program %q is not installed: %w", platform.Program, err)
-		}
-		bin = found
+	bin, err := resolveProgram("banner", platform.Program, override, lookPath)
+	if err != nil {
+		return nil, err
 	}
 	return &programBackend{bin: bin, platform: platform, runner: runner}, nil
+}
+
+// resolveProgram answers the binary one of the notifier's programs runs:
+// override when set, else program on PATH. role names the program in the
+// error a program that is not installed answers.
+func resolveProgram(role, program, override string, lookPath func(string) (string, error)) (string, error) {
+	if override != "" {
+		return override, nil
+	}
+	found, err := lookPath(program)
+	if err != nil {
+		return "", fmt.Errorf("the %s program %q is not installed: %w", role, program, err)
+	}
+	return found, nil
 }
 
 // Program implements Backend.
@@ -172,4 +190,72 @@ func (b *programBackend) Post(ctx context.Context, ws ids.WorkspaceID, banner Ba
 		return false, err
 	}
 	return b.platform.clicked(stdout), nil
+}
+
+// EnvChimeCmd overrides the chime program's binary, exactly as EnvNotifierCmd
+// does the banner program's: the platform's argv is unchanged, so a test
+// points it at a recorder and no test ever plays a real sound.
+const EnvChimeCmd = "AGENT_REPL_CHIME_CMD"
+
+// chimeBound bounds one chime program's run. The sound is a second or so; a
+// run past this is a hung program.
+const chimeBound = 10 * time.Second
+
+// Chime plays the short sound a turn end rings.
+type Chime interface {
+	// Program names the chime program, for the record.
+	Program() string
+	// Play plays the sound once and returns when it has finished.
+	Play(ctx context.Context) error
+}
+
+// ChimePlatform names a platform's sound player and the argv that plays the
+// turn-end sound.
+type ChimePlatform struct {
+	// Program is the player's default binary name, looked up on PATH.
+	Program string
+	// Args is the player's argv for the sound.
+	Args []string
+}
+
+// ChimePlatformFor answers the sound player for a GOOS: afplay with a system
+// sound on macOS, and canberra-gtk-play with the freedesktop `complete` event
+// on Linux.
+func ChimePlatformFor(goos string) (ChimePlatform, error) {
+	switch goos {
+	case "darwin":
+		return ChimePlatform{Program: "afplay", Args: []string{"/System/Library/Sounds/Glass.aiff"}}, nil
+	case "linux":
+		return ChimePlatform{Program: "canberra-gtk-play", Args: []string{"--id=complete"}}, nil
+	default:
+		return ChimePlatform{}, fmt.Errorf("a turn-end chime is not supported on %s", goos)
+	}
+}
+
+// programChime is a Chime over one platform's sound player.
+type programChime struct {
+	bin      string
+	platform ChimePlatform
+	runner   Runner
+}
+
+// NewChime resolves the platform's sound player: $AGENT_REPL_CHIME_CMD when
+// set (override), else the platform's player on PATH.
+func NewChime(platform ChimePlatform, override string, lookPath func(string) (string, error), runner Runner) (Chime, error) {
+	bin, err := resolveProgram("chime", platform.Program, override, lookPath)
+	if err != nil {
+		return nil, err
+	}
+	return &programChime{bin: bin, platform: platform, runner: runner}, nil
+}
+
+// Program implements Chime.
+func (c *programChime) Program() string { return c.bin }
+
+// Play implements Chime.
+func (c *programChime) Play(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, chimeBound)
+	defer cancel()
+	_, err := c.runner.Run(ctx, c.bin, c.platform.Args)
+	return err
 }

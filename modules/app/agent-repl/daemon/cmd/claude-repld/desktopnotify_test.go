@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"errors"
+	"os"
+	"strings"
 	"testing"
 
 	"claude-repld/internal/dlog"
@@ -97,5 +99,86 @@ func TestResolveBannerBackendTakesTheOverride(t *testing.T) {
 	}
 	if backend.Program() != "/tmp/fake-banner" {
 		t.Fatalf("program = %q, want the override", backend.Program())
+	}
+}
+
+func TestResolveChimeTakesTheOverride(t *testing.T) {
+	// Arrange
+	t.Setenv("AGENT_REPL_CHIME_CMD", "/tmp/fake-chime")
+	log := dlog.NewTestLogger()
+
+	// Act
+	chime, err := resolveChime(log)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("resolveChime: %v", err)
+	}
+	if chime.Program() != "/tmp/fake-chime" {
+		t.Fatalf("program = %q, want the override", chime.Program())
+	}
+}
+
+// fakeProgram is a resolved program for resolveNotifyProgram.
+type fakeProgram struct{ bin string }
+
+func (p fakeProgram) Program() string { return p.bin }
+
+func TestResolveNotifyProgramRecordsTheResolvedProgram(t *testing.T) {
+	// Arrange
+	t.Setenv("AGENT_REPL_TEST_OVERRIDE", "/tmp/override")
+	log := dlog.NewTestLogger()
+
+	// Act
+	got, err := resolveNotifyProgram(log, "chime", "AGENT_REPL_TEST_OVERRIDE", func(_, override string) (fakeProgram, error) {
+		return fakeProgram{bin: override}, nil
+	})
+
+	// Assert
+	if err != nil || got.bin != "/tmp/override" {
+		t.Fatalf("resolveNotifyProgram = (%+v, %v), want the override", got, err)
+	}
+	r := findRecord(t, log.Records(), "resolved the desktop chime program")
+	if r.Level != "info" || r.Context["role"] != "chime" || r.Context["program"] != "/tmp/override" {
+		t.Fatalf("record = %+v, want the role and program at info", r)
+	}
+}
+
+func TestResolveNotifyProgramRecordsAMissingProgram(t *testing.T) {
+	// Arrange
+	log := dlog.NewTestLogger()
+	cause := errors.New("not installed")
+
+	// Act
+	_, err := resolveNotifyProgram(log, "banner", "AGENT_REPL_TEST_UNSET", func(_, _ string) (fakeProgram, error) {
+		return fakeProgram{}, cause
+	})
+
+	// Assert
+	if !errors.Is(err, cause) {
+		t.Fatalf("err = %v, want the build's cause", err)
+	}
+	r := findRecord(t, log.Records(), "no desktop banner program; it will not run")
+	if r.Level != "error" || r.Context["role"] != "banner" || r.Context["cause"] != "not installed" || r.Context["override_env"] != "AGENT_REPL_TEST_UNSET" {
+		t.Fatalf("record = %+v, want the role, cause and override env at error", r)
+	}
+}
+
+// TestNotifyProgramsResolveThroughOneHelper fails a resolver that hand-rolls
+// its boot record instead of asking resolveNotifyProgram.
+func TestNotifyProgramsResolveThroughOneHelper(t *testing.T) {
+	// Arrange
+	src, err := os.ReadFile("desktopnotify.go")
+	if err != nil {
+		t.Fatalf("read desktopnotify.go: %v", err)
+	}
+
+	// Act
+	asks := strings.Count(string(src), "return resolveNotifyProgram(")
+	records := strings.Count(string(src), "log.Error(opDesktopNotify")
+
+	// Assert
+	if asks != 2 || records != 1 {
+		t.Fatalf("resolveNotifyProgram( x%d (want 2), log.Error(opDesktopNotify x%d (want 1)", asks, records)
 	}
 }

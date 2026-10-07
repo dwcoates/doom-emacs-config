@@ -348,6 +348,9 @@ type Daemon struct {
 	// Notifier records every desktop banner the daemon posted
 	// (AGENT_REPL_NOTIFIER_CMD), so no test ever raises a real one.
 	Notifier *Recorder
+	// Chime records every turn-end chime the daemon rang
+	// (AGENT_REPL_CHIME_CMD), so no test ever plays a real sound.
+	Chime *Recorder
 	// HostToolsDir holds the fake persistent-wifi host tools
 	// (AGENT_REPL_PERSISTENT_WIFI_TOOLS_DIR), so no test ever reads or changes
 	// the real machine's power or network settings.
@@ -503,6 +506,7 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 		Browser:            NewFakeBrowser(t, filepath.Join(root, "bin")),
 		Launchctl:          NewFakeLaunchctl(t, filepath.Join(root, "bin")),
 		Notifier:           NewFakeNotifier(t, filepath.Join(root, "bin")),
+		Chime:              NewFakeChime(t, filepath.Join(root, "bin")),
 		HostToolsDir:       NewFakeHostTools(t, filepath.Join(root, "host-tools")),
 		t:                  t,
 		expected:           map[string]bool{},
@@ -671,6 +675,7 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 		"AGENT_REPL_DEPLOY_BUILDER="+d.Deploy.Path,
 		"AGENT_REPL_LAUNCHCTL="+d.Launchctl.Path,
 		"AGENT_REPL_NOTIFIER_CMD="+d.Notifier.Path,
+		"AGENT_REPL_CHIME_CMD="+d.Chime.Path,
 		"AGENT_REPL_PERSISTENT_WIFI_TOOLS_DIR="+d.HostToolsDir,
 		"AGENT_REPL_PERSISTENT_WIFI_HOTSPOT="+FakeHotspot,
 		"AGENT_REPL_LAUNCH_AGENTS_DIR="+filepath.Join(root, "LaunchAgents"),

@@ -619,14 +619,17 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// relayed to the host stream through the server, bound late.
 	focus := desktopnotify.NewFocus(log)
 	backend, backendErr := resolveBannerBackend(log)
+	chime, chimeErr := resolveChime(log)
 	clicks := &clickForwarder{}
 	notifier := desktopnotify.New(desktopnotify.Deps{
 		Focus: focus, Backend: backend, BackendErr: backendErr,
+		Chime: chime, ChimeErr: chimeErr,
 		Clicks: clicks, Names: workspaceNames{db: p.DB}, Log: log,
 	})
 	turnBanners := desktopnotify.NewTurnBanners(desktopnotify.TurnDeps{
 		Endings: feedResolver,
 		Poster:  notifier,
+		Chimes:  notifier,
 		Summaries: desktopnotify.Summarizer{
 			Headless: headlessClient, ConfigDirs: configDirs, PromptsDir: paths.PromptsDir, Log: log,
 		},
