@@ -50,11 +50,22 @@ type LiveWorkSet struct {
 	// activity's own terminal. It counts toward freeness like any other
 	// detached item: a session with a live monitor is not free.
 	Monitors []*conversationv1.DetachedWorkId
+	// Pending are the items the shim's live-work level names whose
+	// announcement has not arrived yet, so nothing says what they are. They
+	// are LIVE -- freeness counts them -- and a view draws them once their
+	// announcement describes them and they move to their own kind's list.
+	Pending []*conversationv1.DetachedWorkId
+	// ProcessEnded is true on the one publication that follows the vendor
+	// process ending -- the shim departing, or the session's query dying --
+	// so a view can tell work that LOST its process (nothing will ever state
+	// its outcome from that process) from work that simply left the level
+	// (whose outcome is on its way).
+	ProcessEnded bool
 }
 
 // Empty reports whether any detached work is live.
 func (s LiveWorkSet) Empty() bool {
-	return len(s.Agents) == 0 && len(s.Shells) == 0 && len(s.Monitors) == 0
+	return len(s.Agents) == 0 && len(s.Shells) == 0 && len(s.Monitors) == 0 && len(s.Pending) == 0
 }
 
 // NotificationKind names what a host notification is about. A typed spelling
