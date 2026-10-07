@@ -140,8 +140,8 @@ environment, which today means one for :bare-metal."
 ;;
 ;; NOTE: workspace name != git branch name.
 ;; The daemon derives the workspace name from the *last path component* of
-;; the requested name (e.g. "DWC/fix-login" -> workspace "fix-login"), while
-;; the full request becomes the branch name ("DWC/fix-login").  Never assume
+;; the requested name (e.g. "ABC/fix-login" -> workspace "fix-login"), while
+;; the full request becomes the branch name ("ABC/fix-login").  Never assume
 ;; the two are equal.  To resolve a workspace to its branch, retrieve its
 ;; :project-dir from this hash and run `git rev-parse --abbrev-ref HEAD' there.
 (defvar agent-repl--workspaces (make-hash-table :test 'equal)

@@ -33,7 +33,7 @@ const OBSERVED_AMBIENT = {
   cwd: "/Users/x/.config/doom-worktrees/w",
   sessionId: "4ebb8f3a-05d9-4952-88ca-16eade326d1d",
   version: "2.1.226",
-  gitBranch: "DWC/w",
+  gitBranch: "ABC/w",
   slug: "golden-sleeping-kettle",
 };
 
@@ -376,9 +376,9 @@ describe("the ambient fields a bookkeeping last line must not erase", () => {
   it("still lets a later line CHANGE a field", () => {
     // The merge is "a line that does not state a field says nothing about it",
     // not "the first value wins": `gitBranch` and `slug` really do move.
-    const moved = { ...said, gitBranch: "DWC/later", uuid: "c0000000-0000-4000-8000-000000000001" };
+    const moved = { ...said, gitBranch: "ABC/later", uuid: "c0000000-0000-4000-8000-000000000001" };
 
-    expect(readAmbient(transcript([said, moved])).gitBranch).toBe("DWC/later");
+    expect(readAmbient(transcript([said, moved])).gitBranch).toBe("ABC/later");
   });
 
   it("writes a boundary carrying every field the vendor's own boundary carries", () => {

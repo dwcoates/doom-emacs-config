@@ -422,7 +422,7 @@ func TestASeparationBelongsToNoTurn(t *testing.T) {
 func TestEnteringAWorktreeDrawsADividerAndNotAToolCard(t *testing.T) {
 	// Arrange, Act.
 	h := newHarness(t)
-	branch := "DWC/fix-flaky"
+	branch := "ABC/fix-flaky"
 	h.send(&conversationv1.AgentActivity{
 		ActivityId: &conversationv1.AgentActivityId{Value: "unit-1"},
 		Item: &conversationv1.AgentActivity_Worktree{Worktree: &conversationv1.AgentWorktree{

@@ -7,7 +7,7 @@
 // The strip stands off the window's edges exactly as far as its cells stand
 // off each other.
 //
-//   │● dodge@…com        DWC/fix-flaky-reconnect    haiku 4.5 ▾  142.3k  ᯤ  ⚠ 2│
+//   │● work@…com         ABC/fix-flaky-reconnect    haiku 4.5 ▾  142.3k  ᯤ  ⚠ 2│
 //
 // REVEAL CONVENTION: every strip element's detail (session line, model
 // options, the context chip's usage breakdown, the warning dropdown and

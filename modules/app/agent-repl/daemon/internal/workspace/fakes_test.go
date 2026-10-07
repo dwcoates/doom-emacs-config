@@ -2131,7 +2131,7 @@ func (f *fixture) workspace(id ids.WorkspaceID, dir string) wsm.Workspace {
 		panic(err)
 	}
 	dir = normalized
-	ws := wsm.Workspace{ID: id, Dir: dir, Repo: "repo-1", Name: "sample", Branch: "DWC/sample"}
+	ws := wsm.Workspace{ID: id, Dir: dir, Repo: "repo-1", Name: "sample", Branch: "ABC/sample"}
 	f.db.with(ws)
 	// A REAL DIRECTORY, because the roster no longer publishes a repository
 	// whose main worktree is gone (`withoutGoneRepositories'). The workspace's

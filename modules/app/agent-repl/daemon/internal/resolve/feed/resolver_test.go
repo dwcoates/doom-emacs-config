@@ -961,7 +961,7 @@ func TestAMergeHeadIsUpsertedWhereTheOrchestratorPlacesIt(t *testing.T) {
 			Unit: &frontendv1.FeedTurnActivity_Merge{Merge: &frontendv1.FeedMerge{
 				Head: &frontendv1.FeedMergeHead{
 					Glyph:   &frontendv1.FeedMergeGlyph{Icon: "merge"},
-					Label:   &frontendv1.FeedMergeLabel{Text: "DWC/fix-flaky → master"},
+					Label:   &frontendv1.FeedMergeLabel{Text: "ABC/fix-flaky → master"},
 					Runtime: &frontendv1.FeedMergeRuntime{StartedAtMs: 1_000},
 					Fold:    &frontendv1.FeedMergeFold{Folded: false},
 				},
@@ -972,7 +972,7 @@ func TestAMergeHeadIsUpsertedWhereTheOrchestratorPlacesIt(t *testing.T) {
 
 	// Act.
 	h.resolver.UpsertSynthesized(testWorkspace, rootFeed(), row)
-	h.resolver.MintSubFeedHead(testWorkspace, head, feedid.Feed{Root: true}, feedid.Feed{Merge: &lease}, "DWC/fix-flaky → master")
+	h.resolver.MintSubFeedHead(testWorkspace, head, feedid.Feed{Root: true}, feedid.Feed{Merge: &lease}, "ABC/fix-flaky → master")
 
 	// Assert: on the root feed, and its sub-feed is addressable.
 	rows := h.rows(rootFeed())

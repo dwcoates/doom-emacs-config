@@ -1156,7 +1156,7 @@ message FeedDiffLineContext {}
 // scope at the source.
 message FeedSkill {
   // The invocation as one composed line — "/graphify" or "/workspace merge
-  // DWC/fix-flaky" — the line a user would have typed. Daemon-composed.
+  // ABC/fix-flaky" — the line a user would have typed. Daemon-composed.
   FeedSkillInvocation invocation = 1;
   // The card's state.
   oneof outcome {
@@ -2566,7 +2566,7 @@ message FeedWorktreeBranch {
 // transfers nothing but this head, and a settled merge pages like any
 // settled bubble.
 //
-//   │ ⇄ merge  DWC/fix-flaky → master           6:31  ● merging  ▾      │
+//   │ ⇄ merge  ABC/fix-flaky → master           6:31  ● merging  ▾      │
 //   │ ┌───────────────────────────────────────────────────────────────┐ │
 //   │ │ queue ✓ │ rebasing ✓ │ tests ✗ │ fixing ✓ │ tests (2) ● 8/12  │ │
 //   │ ├───────────────────────────────────────────────────────────────┤ │
@@ -2604,7 +2604,7 @@ message FeedMergeGlyph {
   string icon = 1;
 }
 
-// The branch line, resolved ("DWC/fix-flaky-test → master").
+// The branch line, resolved ("ABC/fix-flaky-test → master").
 message FeedMergeLabel {
   string text = 1;
 }

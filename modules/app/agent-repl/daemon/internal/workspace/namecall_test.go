@@ -78,7 +78,7 @@ func TestCreateTrimsTheModelsAnswer(t *testing.T) {
 func TestCreatePrefixesTheModelsName(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
-	t.Setenv(PrefixEnv, "DWC")
+	t.Setenv(PrefixEnv, "ABC")
 	script(f, headlessAnswer{text: "flaky-login-test"})
 
 	// Act.
@@ -88,7 +88,7 @@ func TestCreatePrefixesTheModelsName(t *testing.T) {
 
 	// Assert: the model answers a BARE slug and the daemon prefixes it, so the
 	// model has no way to get the prefix wrong.
-	if f.git.created[0].Branch != "DWC/flaky-login-test" {
+	if f.git.created[0].Branch != "ABC/flaky-login-test" {
 		t.Fatalf("branch = %q, want the daemon's prefix on the model's bare slug", f.git.created[0].Branch)
 	}
 }

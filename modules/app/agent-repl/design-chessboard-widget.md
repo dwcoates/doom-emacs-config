@@ -48,7 +48,7 @@ TS shim → Agent SDK → Claude
 
 ### Local ground truth
 
-- Running build: GNU Emacs 30.2, hand-rolled from `/Users/dodgecoates/src/emacs` (`--with-ns --with-xwidgets`, WKWebView-backed). `(featurep 'xwidget-internal)` → `t` in the live daemon. ATS allows `http://` loads.
+- Running build: GNU Emacs 30.2, hand-rolled from `~/src/emacs` (`--with-ns --with-xwidgets`, WKWebView-backed). `(featurep 'xwidget-internal)` → `t` in the live daemon. ATS allows `http://` loads.
 
 ### NS/macOS failure modes (severity scored for THIS feature)
 

@@ -607,7 +607,7 @@ workspace name."
   "Return the workspace-name prefix from the workspace-prefix env vars.
 Reads AGENT_WORKSPACE_PREFIX first, falling back to the legacy
 CLAUDE_WORKSPACE_PREFIX (external launchers still set the old name).
-Returns the bare prefix with no trailing slash (e.g. \"DWC\"), or the
+Returns the bare prefix with no trailing slash (e.g. \"ABC\"), or the
 empty string when neither env var is set or non-empty.  This mirrors how
 the workspace-dispatch run.sh derives the branch prefix solely from the
 same env vars, so the Emacs process must be launched with one of them

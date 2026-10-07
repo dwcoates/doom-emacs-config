@@ -16,8 +16,8 @@ var nonAlphanumeric = regexp.MustCompile(`[^A-Za-z0-9]`)
 // THE RULE, verified against the live install's ~/.claude/projects layout
 // (2026-08-29): every byte of the absolute path that is not [A-Za-z0-9]
 // becomes "-". That is broader than "slashes become dashes" and the breadth
-// matters — `/Users/dodgecoates/.config/doom` files under
-// `-Users-dodgecoates--config-doom` (the dot becomes a dash too, giving the
+// matters — `/Users/someone/.config/doom` files under
+// `-Users-someone--config-doom` (the dot becomes a dash too, giving the
 // doubled dash), and `/private/var/folders/_m/…` files under
 // `-private-var-folders--m-…` (the underscore likewise). Case is preserved,
 // and an existing dash is left alone, which is why a uuid inside the path

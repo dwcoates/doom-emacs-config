@@ -28,7 +28,7 @@ const (
 	// the spelling `agent-repl-worktree-dir-suffix' has carried all along.
 	WorktreeDirSuffix = "-worktrees"
 	// PrefixEnv names the workspace-name prefix. A prefix makes names
-	// "<prefix>/<slug>" (the "DWC/" convention), and the worktree directory is
+	// "<prefix>/<slug>" (the "ABC/" convention), and the worktree directory is
 	// still the bare slug.
 	PrefixEnv = "AGENT_WORKSPACE_PREFIX"
 	// LegacyPrefixEnv is the older spelling of PrefixEnv external launchers
@@ -95,7 +95,7 @@ func Name(prefix, slug string) string {
 }
 
 // BareName strips a name's prefix, which is the component the worktree
-// directory is named after ("DWC/foo" yields "foo").
+// directory is named after ("ABC/foo" yields "foo").
 func BareName(name string) string {
 	return filepath.Base(name)
 }

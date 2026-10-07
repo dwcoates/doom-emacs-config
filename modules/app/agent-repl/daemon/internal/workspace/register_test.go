@@ -84,7 +84,7 @@ func TestRegisterDerivesTheRepositoryFromGitsMainWorktree(t *testing.T) {
 func TestRegisterDerivesTheBranchFromGit(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
-	f.git.currentBranch = "DWC/derived"
+	f.git.currentBranch = "ABC/derived"
 
 	// Act.
 	if _, err := f.verbs.Register(context.Background(), worktreeDir(t), wsm.RegisterFacts{}); err != nil {
@@ -92,8 +92,8 @@ func TestRegisterDerivesTheBranchFromGit(t *testing.T) {
 	}
 
 	// Assert.
-	if f.db.registered[0].Branch != "DWC/derived" {
-		t.Fatalf("registered branch = %q, want DWC/derived", f.db.registered[0].Branch)
+	if f.db.registered[0].Branch != "ABC/derived" {
+		t.Fatalf("registered branch = %q, want ABC/derived", f.db.registered[0].Branch)
 	}
 }
 
