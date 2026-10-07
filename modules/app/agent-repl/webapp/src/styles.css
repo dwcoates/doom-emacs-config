@@ -1,6 +1,6 @@
 :root {
   color-scheme: light dark;
-  --bg: #ffffff;
+  --bg: #ffd6d6;
   --fg: #1a1a1a;
   --muted: #6b7280;
   /* A REPOSITORY HEADER'S GREY SAYS ITS FOLD (owner ruling, 2026-10-01): a
@@ -29,9 +29,9 @@
   --tool-card-bg: var(--card);
   /* The workspaces rail's fill: a touch LIGHTER than the feed (--bg), so the
      sidebar reads as a lifted dock rather than the same sheet the
-     conversation scrolls on. In the light theme --bg is already pure white —
-     the lightness ceiling — so the lift only shows in the dark theme, where
-     --bg has headroom; the border-right still delimits the rail in both. Kept
+     conversation scrolls on. The light theme's rail is pure white over the
+     red feed (owner, 2026-10-07); the dark theme sets its own lift; the
+     border-right still delimits the rail in both. Kept
      BELOW --card so the row-hover and detail-panel washes (both --card) still
      read as a further lift over the rail instead of inverting against it. */
   --sidebar-bg: #ffffff;
@@ -361,7 +361,7 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #111318;
+    --bg: #1f0a0a;
     --fg: #e5e7eb;
     --muted: #9ca3af;
     --repo-head-expanded: #e5e7eb;
@@ -369,10 +369,10 @@
     --border: #2a2e37;
     --card: #16191f;
     /* The dark theme's tool card and footer dock (owner ruling, 2026-09-27):
-       a notch darker than --card, still lighter than the feed's #111318, so
+       a notch darker than --card, still lighter than the feed's #1f0a0a, so
        the response grey above it reads as the lighter surface. */
     --tool-card-bg: #14171c;
-    /* Lighter than the feed's #111318, darker than --card, so the rail lifts
+    /* Lighter than the feed's #1f0a0a, darker than --card, so the rail lifts
        off the conversation while its --card hover/detail washes still lift
        off the rail. */
     --sidebar-bg: #14161b;
