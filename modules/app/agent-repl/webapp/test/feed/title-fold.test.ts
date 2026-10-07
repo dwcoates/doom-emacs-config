@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 /**
- * THE TITLE FOLD (owner ruling, 2026-09-23): every tool card's title is capped
- * at two lines while the fold that owns it is collapsed, and wears the response
- * bubble's fade + chevron (`has-more`) only when it actually overflows them.
+ * THE TITLE FOLD (owner ruling, 2026-10-07): every tool card's title is capped
+ * at one line while the fold that owns it is collapsed, and wears `has-more`
+ * only when it actually overflows that line.
  *
  * This suite pins the marking, the measurement against each owner's fold, the
  * two error paths, and — reading the sources — that every title site comes
@@ -101,7 +101,7 @@ describe("foldTitle: the marking", () => {
 });
 
 describe("the measurement: has-more follows overflow and the owner's fold", () => {
-  it("shows on a collapsed title that overflows its two lines", () => {
+  it("shows on a collapsed title that overflows its one line", () => {
     // Arrange
     const { title } = toolFoldTitle(true);
 
@@ -112,7 +112,7 @@ describe("the measurement: has-more follows overflow and the owner's fold", () =
     expect(title.classList.contains(HAS_MORE_CLASS)).toBe(true);
   });
 
-  it("stays off a collapsed title that fits its two lines", () => {
+  it("stays off a collapsed title that fits its one line", () => {
     // Arrange
     const { title } = toolFoldTitle(false);
 

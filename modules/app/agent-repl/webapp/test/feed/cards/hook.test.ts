@@ -274,7 +274,7 @@ describe("the title fold on the headline", () => {
     expect([...title.classList]).toEqual(["tool-name", TITLE_FOLD_CLASS, TITLE_FOLD_STANDALONE_CLASS]);
   });
 
-  it("wears has-more when the headline overflows its two lines", () => {
+  it("wears has-more when the headline overflows its one line", () => {
     // Arrange
     const { title } = drawn();
     measureTitle(title, true);
@@ -286,7 +286,7 @@ describe("the title fold on the headline", () => {
     expect(title.classList.contains(HAS_MORE_CLASS)).toBe(true);
   });
 
-  it("keeps has-more off a headline that fits its two lines", () => {
+  it("keeps has-more off a headline that fits its one line", () => {
     // Arrange
     const { title } = drawn();
     measureTitle(title, false);
@@ -327,14 +327,14 @@ describe("the title fold on the headline", () => {
     expect(title.classList.contains(HAS_MORE_CLASS)).toBe(false);
   });
 
-  it("clamps a collapsed headline to two lines", () => {
+  it("clamps a collapsed headline to one line", () => {
     // Arrange
     const remove = installStylesheet();
     try {
       const { title } = drawn();
 
       // Act / Assert
-      expect(cascadedValue(title, "-webkit-line-clamp")).toBe("2");
+      expect(cascadedValue(title, "-webkit-line-clamp")).toBe("1");
     } finally {
       remove();
     }

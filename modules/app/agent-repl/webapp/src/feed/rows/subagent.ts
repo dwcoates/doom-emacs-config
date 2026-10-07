@@ -219,8 +219,8 @@ export function drawFeedSubagent(msg: FeedSubagent, rc: RowContext): HTMLElement
   // one (a detached bubble); a synchronous spawn names none.
   const workId = drawDetachedWorkId(msg.workId);
   if (workId !== null) el.append(workId);
-  // THE DESCRIPTION IS THE BUBBLE'S TITLE (owner ruling, 2026-09-23): the one
-  // two-line title fold, owned by the bubble's fold (bubble.ts). Folded AFTER a
+  // THE DESCRIPTION IS THE BUBBLE'S TITLE (owner ruling, 2026-09-23): the
+  // one-line title fold, owned by the bubble's fold (bubble.ts). Folded AFTER a
   // settled draw's stop, which would otherwise tear down the fold's measurer.
   if (description !== null) foldTitle(description, "card");
   return el;

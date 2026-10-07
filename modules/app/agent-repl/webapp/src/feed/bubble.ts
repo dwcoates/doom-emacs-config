@@ -207,7 +207,7 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
     headLine.setAttribute("aria-expanded", next ? "true" : "false");
     panel.hidden = !next;
     // The head's title fold follows this fold (title-fold.ts): re-measure it on
-    // the toggle, which lifts or restores its two-line cap.
+    // the toggle, which lifts or restores its one-line cap.
     refreshTitleFolds(headLine);
   }
 

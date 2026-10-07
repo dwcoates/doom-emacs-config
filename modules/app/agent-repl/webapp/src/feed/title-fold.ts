@@ -1,11 +1,11 @@
 /**
- * title-fold — THE ONE two-line fold every tool card's TITLE wears.
+ * title-fold — THE ONE one-line fold every tool card's TITLE wears.
  *
- * OWNER RULING, 2026-09-23: a tool-call bubble's TITLE is the command being run
+ * OWNER RULING, 2026-10-07 (superseding the two-line fade of 2026-09-23): a
+ * tool-call bubble's TITLE is the command being run
  * ("$ cd /some/path && cat some_file.txt"). Collapsed, it is truncated after
- * TWO lines and — only when it actually overflows them — wears the same bottom
- * fade a response bubble wears for "more to expand" (the fade only, never a
- * chevron: owner ruling, 2026-09-23).
+ * ONE line, which ends in `…` exactly when anything follows it (the
+ * stylesheet's clamp writes the ellipsis; no fade, never a chevron).
  * Expanded, the whole title shows, alongside the card's output and details.
  *
  * Every title site goes through `foldTitle`, and nothing else caps a title: the
@@ -24,11 +24,11 @@
  * owns a title is `TITLE_FOLD_OPEN_SELECTOR` (bubble-more.ts), read by both the
  * measurer and the stylesheet.
  *
- * THE FADE IS THE RESPONSE BUBBLE'S RULE, generalized to
- * `.title-fold.has-more` (styles.css); the measurer is bubble-more.ts's, which
- * already served the response bubble. So there is one cap, one fade and one
- * measurer, and this module only marks the element and arms
- * the measurement on it.
+ * THE ELLIPSIS IS THE CLAMP'S (styles.css `.title-fold`); `has-more` still
+ * marks an overflowing title (a standalone one offers its click from it), and
+ * the measurer is bubble-more.ts's, which already served the response bubble.
+ * So there is one cap and one measurer, and this module only marks the element
+ * and arms the measurement on it.
  *
  * CALL IT LAST. A card whose draw ends terminal calls `stopTicking` on itself,
  * which also tears down every `onDiscard` hook under it — this fold's
@@ -59,20 +59,20 @@ export const CARD_FOLD_SELECTOR = ".tool-fold, .bubble-fold";
 const reportedOrphans = new WeakSet<Element>();
 
 /**
- * Mark TITLE as a two-line title fold owned by OWNER, arm the overflow
+ * Mark TITLE as a one-line title fold owned by OWNER, arm the overflow
  * measurement that puts `has-more` on it, and hand it back.
  */
 export function foldTitle(title: HTMLElement, owner: TitleFoldOwner): HTMLElement {
   title.classList.add(TITLE_FOLD_CLASS);
   if (owner === "standalone") title.classList.add(TITLE_FOLD_STANDALONE_CLASS);
-  log.debug("folding a card title to two lines", {
+  log.debug("folding a card title to one line", {
     operation: "feed.title-fold",
     context: { owner, element: title.className },
   });
   const view = title.ownerDocument.defaultView;
   if (view === null || typeof view.ResizeObserver !== "function") {
     // Without an observer nothing ever measures this title, so an overflowing
-    // one would be clipped at two lines with no fade to say so.
+    // one would never be marked `has-more`, and a standalone one could not offer its click.
     log.error("a card title cannot measure its overflow: the page has no ResizeObserver", {
       operation: "feed.title-fold.unmeasured",
       context: { owner, element: title.className },
@@ -97,7 +97,7 @@ export function refreshTitleFolds(root: Element): void {
 /**
  * One title's re-measure: `has-more` follows its overflow and its owner's fold,
  * and a card-owned title that sits in no card fold is reported — it would be
- * capped at two lines with nothing on the page able to open it.
+ * capped at one line with nothing on the page able to open it.
  */
 function refreshTitle(title: HTMLElement): void {
   checkOwned(title);
@@ -110,7 +110,7 @@ function checkOwned(title: HTMLElement): void {
   if (title.closest(CARD_FOLD_SELECTOR) !== null) return;
   if (reportedOrphans.has(title)) return;
   reportedOrphans.add(title);
-  log.error("a card title is folded to two lines but no card fold can open it", {
+  log.error("a card title is folded to one line but no card fold can open it", {
     operation: "feed.title-fold.orphan",
     context: { element: title.className, open: title.matches(TITLE_FOLD_OPEN_SELECTOR) },
   });

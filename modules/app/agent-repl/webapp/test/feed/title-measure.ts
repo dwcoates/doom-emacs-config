@@ -2,13 +2,13 @@
  * title-measure — the box a title fold is measured against, for jsdom.
  *
  * NOT A SUITE. jsdom lays nothing out, so a title's overflow is whatever a test
- * says it is: `measureTitle` gives the title a two-line client height and a
+ * says it is: `measureTitle` gives the title a one-line client height and a
  * content height that does or does not exceed it, and `inBubbleFold` seats a
  * bubble head where bubble.ts seats it, so a head's title has the card fold
  * that owns it (title-fold.ts) and is never reported as orphaned.
  */
 
-/** Give TITLE a two-line box whose content does, or does not, overflow it. */
+/** Give TITLE a one-line box whose content does, or does not, overflow it. */
 export function measureTitle(title: HTMLElement, overflow: boolean): void {
   Object.defineProperty(title, "clientHeight", { configurable: true, value: 40 });
   Object.defineProperty(title, "scrollHeight", { configurable: true, value: overflow ? 120 : 40 });
