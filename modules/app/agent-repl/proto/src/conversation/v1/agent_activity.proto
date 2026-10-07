@@ -196,6 +196,10 @@ message AgentActivity {
     // Arrives on the subagent's own stream, as the last substantive thing the
     // subagent does.
     AgentSubagentHandback subagent_handback = 35;
+    // The agent showing the reader a chess board: a CEE CLI session's game,
+    // which the daemon draws as the CEE CLI webapp's interactive widget. The
+    // call names the session and nothing else.
+    AgentChessBoard chess_board = 36;
   }
 }
 
@@ -438,6 +442,66 @@ message AgentFindingNoChangeNeeded {}
 message AgentReportFindingsFailure {
   // What the call said when it failed, and when it settled.
   optional AgentToolFailure error = 1;
+}
+
+// ---- Chess board: a CEE CLI session's game shown to the reader ----
+
+// The agent asked agent-repl to show the reader a chess board for a CEE CLI
+// session, through agent-repl's own `show_chess_board` tool. The call names
+// the session and nothing else: agent-repl reads no chess data, and what the
+// board draws is resolved from the session by the daemon when it draws the
+// board, so a board whose session has since gone away is drawn as unavailable
+// rather than from anything recorded here.
+message AgentChessBoard {
+  // Where the call stands. The set arm IS the state.
+  oneof state {
+    // The call was issued.
+    AgentChessBoardStart start = 1;
+    // The call returned: the board was requested.
+    AgentChessBoardSuccess success = 2;
+    // The call failed, and no board was requested.
+    AgentChessBoardFailure failure = 3;
+  }
+}
+
+// A board request this stream has begun carrying.
+message AgentChessBoardStart {
+  // The session the board shows.
+  AgentChessBoardSession session = 1;
+  // When the call was issued.
+  AgentActivityStartedAt started_at = 2;
+}
+
+// The board was requested.
+message AgentChessBoardSuccess {
+  // The session the board shows, restated from the start so the settled frame
+  // alone draws the board.
+  AgentChessBoardSession session = 1;
+  // When the call settled. UNSET when the producer observed no instant.
+  optional AgentActivitySettledAt settled_at = 2;
+}
+
+// The call failed before a board was requested.
+message AgentChessBoardFailure {
+  // What the call said when it failed, and when it settled.
+  AgentToolFailure error = 1;
+  // The session the call named, restated from the start. UNSET when the
+  // call's input named none, which is one way the call fails.
+  optional AgentChessBoardSession session = 2;
+}
+
+// A CEE CLI session and the game loaded in it: the pair every CEE request
+// that reads a session's game carries (CEE's own `CeeSessionMetadata`).
+// Both values are CEE's, handed through verbatim; agent-repl never
+// interprets either.
+message AgentChessBoardSession {
+  // The CEE CLI daemon's session id, as `gns cee session list` names it.
+  string session_id = 1;
+  // The liveness token of the game incarnation loaded in that session, as the
+  // session's poll reports it. CEE refuses a request whose game id is not the
+  // session's current one, so a board names the exact game it was asked for
+  // and never silently draws a game loaded later in the same session.
+  string game_id = 2;
 }
 
 // ---- The worktree pair: into an isolated tree, and back ----
