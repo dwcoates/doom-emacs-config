@@ -130,3 +130,46 @@ func TestRosterAndFooterAgreeOnBlocked(t *testing.T) {
 		})
 	}
 }
+
+// TestRosterLeavesApiRetryingWithTheFooterWhenTheVendorAnswers holds the
+// recovery edge on both surfaces: a turn whose call the vendor retried (the
+// connection dropped) stands `api_retrying` on the roster and `vendor_fault ·
+// api_retrying` on the footer, and the vendor answering the retried call (the
+// connection back) returns BOTH to the running turn, with the turn still in
+// flight. The roster was never handed the answer before, and stood teal after
+// every reconnect until the turn ended.
+func TestRosterLeavesApiRetryingWithTheFooterWhenTheVendorAnswers(t *testing.T) {
+	t.Parallel()
+	// Arrange: a running turn whose call the vendor is retrying.
+	f := newOpened(t, harness.Opts{})
+	// The sweep covers every test; the declared record is the vendor failure the test feeds, stated once by its owner.
+	f.d.ExpectWarnings("daemon.sessionwatcher.api_error")
+	footer := f.d.WatchFooter(f.ws)
+	roster := f.d.WatchRoster()
+	f.submit("go", "k-api-retry-recovers", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	f.shim.PushAgentFrame(mainAgent, updateFrame(mainAgent, &conversationv1.AgentUpdate{
+		Update: &conversationv1.AgentUpdate_ApiError{ApiError: &conversationv1.ApiRequestFailed{
+			Message: "Connection lost while your computer was asleep",
+		}},
+	}))
+	awaitFooter(t, f, footer, "the footer draws vendor_fault · api_retrying", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetStatus().GetVendorFault().GetApiRetrying() != nil
+	})
+	awaitRoster(t, f.d, roster, "the roster paints api_retrying", func(r *frontendv1.WorkspaceRoster) bool {
+		return rosterRow(r, f.ws.GetId()).GetApiRetrying() != nil
+	})
+
+	// Act: the retried call answers.
+	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
+		ActivityId: activityID("think-reconnected"),
+		Item:       &conversationv1.AgentActivity_Thinking{Thinking: &conversationv1.AgentThinking{Result: &conversationv1.AgentThinking_Start{Start: &conversationv1.AgentThinkingStart{}}}},
+	}))
+
+	// Assert: both surfaces are back on the running turn.
+	awaitFooter(t, f, footer, "the footer is working again", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetStatus().GetWorking() != nil
+	})
+	awaitRoster(t, f.d, roster, "the roster is thinking again", func(r *frontendv1.WorkspaceRoster) bool {
+		return rosterRow(r, f.ws.GetId()).GetThinking() != nil
+	})
+}
