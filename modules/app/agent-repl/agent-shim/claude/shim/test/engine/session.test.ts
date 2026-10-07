@@ -1510,6 +1510,18 @@ describe("the fold's calls at a query's end", () => {
     // Assert
     expect(h.fold.queryEnds).toEqual(["the query was replaced"]);
   });
+
+  it("has the fold summarize the hook records it dropped when the session stands down", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+
+    // Act
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
+
+    // Assert
+    expect(h.fold.droppedHookReports).toEqual(["the session stood down: KillSession"]);
+  });
 });
 
 /** Let pending microtasks and I/O settle, up to a bound, until `done` holds. */

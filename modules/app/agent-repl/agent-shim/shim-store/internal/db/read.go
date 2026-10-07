@@ -428,7 +428,7 @@ func validateBook(agentID string) error {
 // its page would serve one agent's lines under another's name.
 func (d *DB) pointerInBook(ctx context.Context, tx *sql.Tx, agentID string, position int64, field, value string) error {
 	var one int
-	err := tx.QueryRowContext(ctx, pointerInBookSQL, position, agentID, kindPageLine, kindRetired).Scan(&one)
+	err := tx.QueryRowContext(ctx, pointerInBookSQL, position, agentID, kindPageLine, kindRetired, kindHookDropped).Scan(&one)
 	switch {
 	case err == nil:
 		return nil
@@ -452,10 +452,11 @@ const (
 	  ORDER BY e.write_seq ASC`
 
 	// pointerInBookSQL binds (position, book, the page-line kind, the retired
-	// kind). A RETIRED ROW'S POSITION IS STILL A PLACE IN ITS BOOK: a reader
-	// whose high-water mark was that line walks on from it rather than being
-	// sent to repaint a book that only lost a line.
-	pointerInBookSQL = `SELECT 1 FROM entry WHERE position = ? AND book_agent_id = ? AND kind IN (?, ?)`
+	// kind, the hook kind). A RETIRED ROW'S POSITION IS STILL A PLACE IN ITS
+	// BOOK: a reader whose high-water mark was that line walks on from it rather
+	// than being sent to repaint a book that only lost a line. A HOOK LINE'S is
+	// too: it was published live with that pointer (kindHookDropped).
+	pointerInBookSQL = `SELECT 1 FROM entry WHERE position = ? AND book_agent_id = ? AND kind IN (?, ?, ?)`
 )
 
 // THE PAGE STATEMENTS. A book is served in DESCENDING CONVERSATION PLACE —

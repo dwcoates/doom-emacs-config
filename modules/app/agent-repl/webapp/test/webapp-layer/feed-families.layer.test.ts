@@ -274,6 +274,11 @@ it(
   TURN_TEST_MS,
 );
 
+// A FAILED OR BLOCKED HOOK'S CARD IS DRAWN LIVE ONLY (owner rulings
+// 2026-10-06): the store delivers it to the standing watch and keeps nothing,
+// so a restarted daemon never redraws it (e2e TestHookFailed pins that). This
+// page's earlier turns stood the feed's watch before either hook scenario runs;
+// a card written before a watch subscribes is accepted as not drawn.
 it(
   "draws a failed hook's card, exactly once, with the composed headline",
   async () => {

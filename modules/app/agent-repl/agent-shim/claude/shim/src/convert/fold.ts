@@ -95,6 +95,7 @@ import { spawningCallOf, type FoldContext } from "./fold-context.js";
 import {
   convertHookResponse,
   convertHookStarted,
+  convertHookProgress,
   createHookRegistry,
   type HookRegistry,
 } from "./hooks.js";
@@ -194,6 +195,12 @@ interface Fold {
    * it — so nothing it announced can settle: every call still held is let go.
    */
   endQuery(why: string): void;
+  /**
+   * The session is standing down: write the INFO summary of the hook records
+   * the current query dropped (convert/hooks.ts). {@link Fold.endQuery} writes
+   * the same summary for a query that ends while the session goes on.
+   */
+  reportDroppedHooks(why: string): void;
   /**
    * The vendor task whose agent the STORE must name before `message` is
    * folded, or `undefined` (convert/detached.ts `taskAwaitingAgent`). A read:
@@ -298,8 +305,10 @@ export function createFold(): Fold {
     inFlightCalls: () => state.calls.open(),
     endQuery(why) {
       endQueryCalls(state.calls, why);
+      state.hooks.reportDropped(why);
       state.taskKinds.clearUserDetaches(why);
     },
+    reportDroppedHooks: (why) => state.hooks.reportDropped(why),
     noteUserDetach: (toolUseId) => state.taskKinds.noteUserDetach(toolUseId),
     retireUserDetach: (toolUseId, why) => state.taskKinds.retireUserDetach(toolUseId, why),
     taskAwaitingAgent: (message, context) => taskAwaitingAgent(message, context, state.taskKinds, state.calls),
@@ -482,6 +491,8 @@ function convertSystemMessage(
       return convertHookStarted(message, context, state.hooks);
     case "hook_response":
       return convertHookResponse(message, context, state.hooks);
+    case "hook_progress":
+      return convertHookProgress(message, state.hooks);
     case "thinking_tokens":
       return convertThinkingTokens(message, context, state.streams);
     case "model_refusal_no_fallback":
