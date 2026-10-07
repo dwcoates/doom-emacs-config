@@ -107,7 +107,7 @@ func TestABoundaryWithoutItsSummaryParksTheCursorShort(t *testing.T) {
 	defer cancel()
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
-	fx := seedCompactionBoundary(t, tree, "/Users/dodgecoates/hold-cursor-probe",
+	fx := seedCompactionBoundary(t, tree, "/work/hold-cursor-probe",
 		"70707070-7070-4070-8070-707070707070")
 
 	// Act: the producer is STOPPED inside the write that parks the cursor, so
@@ -144,7 +144,7 @@ func TestABoundaryWithoutItsSummaryWritesNothingForIt(t *testing.T) {
 	defer cancel()
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
-	fx := seedCompactionBoundary(t, tree, "/Users/dodgecoates/hold-nothing-probe",
+	fx := seedCompactionBoundary(t, tree, "/work/hold-nothing-probe",
 		"80808080-8080-4080-8080-808080808080")
 
 	// Act: the producer is STOPPED inside the write that parks the cursor, so
@@ -176,7 +176,7 @@ func TestTheSummaryCoalescesWithItsBoundaryIntoOneRecord(t *testing.T) {
 	defer cancel()
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
-	fx := seedCompactionBoundary(t, tree, "/Users/dodgecoates/hold-coalesce-probe",
+	fx := seedCompactionBoundary(t, tree, "/work/hold-coalesce-probe",
 		"90909090-9090-4090-8090-909090909090")
 	summaryText := "Previously: the harness held a background probe alive."
 
@@ -231,7 +231,7 @@ func TestABoundaryRedeliveredTwiceIsConvertedRegardless(t *testing.T) {
 	defer cancel()
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
-	fx := seedCompactionBoundary(t, tree, "/Users/dodgecoates/hold-bounded-probe",
+	fx := seedCompactionBoundary(t, tree, "/work/hold-bounded-probe",
 		"a0a0a0a0-a0a0-40a0-80a0-a0a0a0a0a0a0")
 
 	// Act: the summary NEVER arrives; the file simply keeps being polled.
@@ -319,7 +319,7 @@ func TestABoundaryHeldOnceIsNotWrittenTwice(t *testing.T) {
 	defer cancel()
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
-	fx := seedCompactionBoundary(t, tree, "/Users/dodgecoates/hold-once-probe",
+	fx := seedCompactionBoundary(t, tree, "/work/hold-once-probe",
 		"b0b0b0b0-b0b0-40b0-80b0-b0b0b0b0b0b0")
 	summaryText := "Previously: nothing much."
 

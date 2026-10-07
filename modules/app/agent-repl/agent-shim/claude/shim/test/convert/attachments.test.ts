@@ -19,6 +19,7 @@ import {
 } from "../../src/convert/attachments.js";
 import { activityOf, corpusLine, foldContext, residueOf } from "./fold-harness.js";
 import { join } from "node:path";
+import { HOME_TOKEN } from "../../scripts/capture/anonymize.mjs";
 
 const UNIT = create(conversationv1.AgentActivityIdSchema, { value: "injected-1" });
 const LAST_EDIT = {
@@ -67,7 +68,8 @@ describe("injected context", () => {
     const injected = activityOf(entries[0])?.item.value as conversationv1.AgentContextInjected;
     const skills = injected.injected.value as conversationv1.AgentInjectedSkills;
     expect(skills.skills[0]?.content).toBeUndefined();
-    expect(skills.skills[0]?.path).toBe("/Users/dodgecoates/.claude/skills");
+    // The recording names no one: its home is the capture scrub's token.
+    expect(skills.skills[0]?.path).toBe(`${HOME_TOKEN}/.claude/skills`);
   });
 
   it("is INSTANTANEOUS: one record, one row, no lifecycle", () => {

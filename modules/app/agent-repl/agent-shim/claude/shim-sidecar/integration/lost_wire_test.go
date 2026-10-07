@@ -80,7 +80,7 @@ func TestALostTerminalNamesHowItWasConcludedOnTheWire(t *testing.T) {
 			defer cancel()
 			fake := startFakeStore(t)
 			tree := newVendorTree(t)
-			fx := seedDetachedShell(t, tree, "/Users/dodgecoates/lost-wire-"+tc.arm,
+			fx := seedDetachedShell(t, tree, "/work/lost-wire-"+tc.arm,
 				sessionUUIDFor(tc.arm))
 			opts := lostOptions(t, fake.Socket, tree)
 			tc.tune(&opts)
@@ -142,7 +142,7 @@ func TestAClaimedPreBootSpoolSettlesSweptUpOnTheWire(t *testing.T) {
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
 	session := "e3e3e3e3-e3e3-4e3e-8e3e-e3e3e3e3e3e3"
-	fx := seedDetachedShell(t, tree, "/Users/dodgecoates/lost-swept-wire-probe", session)
+	fx := seedDetachedShell(t, tree, "/work/lost-swept-wire-probe", session)
 	// The spool the transcript already names, written and then stamped back
 	// before any possible boot. Stamped rather than grown: an appended byte
 	// would make the file look alive, which is the opposite of the fixture.
@@ -201,7 +201,7 @@ func TestASweptUpTerminalStatesNotObservedForItsOutput(t *testing.T) {
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
 	session := "e4e4e4e4-e4e4-4e4e-8e4e-e4e4e4e4e4e4"
-	fx := seedDetachedShell(t, tree, "/Users/dodgecoates/lost-swept-notobserved-probe", session)
+	fx := seedDetachedShell(t, tree, "/work/lost-swept-notobserved-probe", session)
 	mustMkdirAll(t, filepath.Dir(fx.SpoolPath))
 	if err := os.WriteFile(fx.SpoolPath, nil, 0o644); err != nil {
 		t.Fatalf("write %s: %v", fx.SpoolPath, err)
@@ -245,7 +245,7 @@ func TestAnExitedRunIsNeverRestatedLost(t *testing.T) {
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
 	session := "e5e5e5e5-e5e5-4e5e-8e5e-e5e5e5e5e5e5"
-	fx := seedDetachedShell(t, tree, "/Users/dodgecoates/lost-exited-probe", session)
+	fx := seedDetachedShell(t, tree, "/work/lost-exited-probe", session)
 	// The fence is a second CLAIMED run: only a claimed spool is read, so only a
 	// claimed one can go silent and be concluded under the same window.
 	fence := appendDetachedLaunch(t, fx, "b0fence", capturedBashCall2)
@@ -305,7 +305,7 @@ func TestBytesAppendedAfterAWentSilentVerdictStillLand(t *testing.T) {
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
 	session := "e6e6e6e6-e6e6-4e6e-8e6e-e6e6e6e6e6e6"
-	fx := seedDetachedShell(t, tree, "/Users/dodgecoates/lost-resumed-probe", session)
+	fx := seedDetachedShell(t, tree, "/work/lost-resumed-probe", session)
 	opts := lostOptions(t, fake.Socket, tree)
 	opts.StaleShellSilence = shortSilence
 

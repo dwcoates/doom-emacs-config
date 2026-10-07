@@ -39,7 +39,7 @@ func TestATranscriptLineSplitAcrossThreePollsConvertsOnceAndWhole(t *testing.T) 
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
-	cwd := "/Users/dodgecoates/transcript-carry-probe"
+	cwd := "/work/transcript-carry-probe"
 	slug := cwdSlug(cwd)
 	session := "0a0a0a0a-0a0a-40a0-80a0-0a0a0a0a0a0a"
 	line := encodeRecord(t, retargetSession(t, decodeRecord(t, captured.Lines[7]), session, cwd)) + "\n"
@@ -77,7 +77,7 @@ func TestATranscriptLineSplitAcrossThreePollsIsNeverPartiallyConverted(t *testin
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
-	cwd := "/Users/dodgecoates/transcript-carry-partial-probe"
+	cwd := "/work/transcript-carry-partial-probe"
 	slug := cwdSlug(cwd)
 	session := "0b0b0b0b-0b0b-40b0-80b0-0b0b0b0b0b0b"
 	line := encodeRecord(t, retargetSession(t, decodeRecord(t, captured.Lines[7]), session, cwd)) + "\n"
@@ -119,7 +119,7 @@ func TestASeededCarryIsResumedFromTheStoreOnBoot(t *testing.T) {
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
-	cwd := "/Users/dodgecoates/transcript-carry-boot-probe"
+	cwd := "/work/transcript-carry-boot-probe"
 	slug := cwdSlug(cwd)
 	session := "0c0c0c0c-0c0c-40c0-80c0-0c0c0c0c0c0c"
 	line := encodeRecord(t, retargetSession(t, decodeRecord(t, captured.Lines[7]), session, cwd)) + "\n"

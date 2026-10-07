@@ -24,7 +24,7 @@ func TestUsageRidesATooluseFirstBlock(t *testing.T) {
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
-	cwd := "/Users/dodgecoates/usage-tooluse-probe"
+	cwd := "/work/usage-tooluse-probe"
 	slug := cwdSlug(cwd)
 	session := "4a4a4a4a-4a4a-44a4-84a4-4a4a4a4a4a4a"
 	messageID := "msg_usage_first_tool_use"
@@ -73,7 +73,7 @@ func TestUsageIsCarriedByExactlyOneUnitWhenTheFirstBlockIsATooluse(t *testing.T)
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
-	cwd := "/Users/dodgecoates/usage-tooluse-once-probe"
+	cwd := "/work/usage-tooluse-once-probe"
 	slug := cwdSlug(cwd)
 	session := "4b4b4b4b-4b4b-44b4-84b4-4b4b4b4b4b4b"
 	messageID := "msg_usage_tool_use_then_thinking"

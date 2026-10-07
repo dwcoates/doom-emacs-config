@@ -35,7 +35,7 @@ func TestAClearEnvelopeLandsAsAClearedCutAndAQuotedClearDoesNot(t *testing.T) {
 	defer cancel()
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
-	cwd := "/Users/dodgecoates/clear-cut-probe"
+	cwd := "/work/clear-cut-probe"
 	slug := cwdSlug(cwd)
 	session := "9a9a9a9a-9a9a-49a9-89a9-9a9a9a9a9a9a"
 

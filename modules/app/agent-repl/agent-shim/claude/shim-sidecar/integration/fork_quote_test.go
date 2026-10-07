@@ -69,7 +69,7 @@ func TestAForkQuotingAParentMessageDoesNotMoveItsRowAndItsOwnWorkCommits(t *test
 	defer cancel()
 	store := startRealStore(t)
 	tree := newVendorTree(t)
-	cwd := "/Users/dodgecoates/fork-quote-probe"
+	cwd := "/work/fork-quote-probe"
 	slug := cwdSlug(cwd)
 	session := "f0f0f0f0-f0f0-4f0f-8f0f-f0f0f0f0f0f0"
 	opts := defaultSidecarOptions(t, store.Socket, tree)

@@ -31,7 +31,7 @@ func TestABashRunReplaysThenFollowsOnOneStream(t *testing.T) {
 	defer cancel()
 	store := startRealStore(t)
 	tree := newVendorTree(t)
-	fx := seedDetachedShell(t, tree, "/Users/dodgecoates/bash-readback-probe",
+	fx := seedDetachedShell(t, tree, "/work/bash-readback-probe",
 		"c1c1c1c1-c1c1-4c1c-8c1c-c1c1c1c1c1c1")
 	before := "output written before the consumer opened its stream\n"
 	after := "output written while the stream was already open\n"
@@ -81,7 +81,7 @@ func TestABashRunsStreamEndsAfterItsTerminalRow(t *testing.T) {
 	defer cancel()
 	store := startRealStore(t)
 	tree := newVendorTree(t)
-	fx := seedDetachedShell(t, tree, "/Users/dodgecoates/bash-terminal-probe",
+	fx := seedDetachedShell(t, tree, "/work/bash-terminal-probe",
 		"c2c2c2c2-c2c2-4c2c-8c2c-c2c2c2c2c2c2")
 
 	// Act: a run that is finished on disk before anyone reads it.

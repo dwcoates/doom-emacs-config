@@ -29,7 +29,7 @@ func TestASpoolMarkerOnItsOwnReadEndsTheRunExactlyOnce(t *testing.T) {
 	defer cancel()
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
-	fx := seedDetachedShell(t, tree, "/Users/dodgecoates/spool-marker-own-read-probe",
+	fx := seedDetachedShell(t, tree, "/work/spool-marker-own-read-probe",
 		"1a1a1a1a-1a1a-41a1-81a1-1a1a1a1a1a1a")
 
 	// Act.
@@ -68,7 +68,7 @@ func TestASpoolMarkerCutMidTokenIsNotMatched(t *testing.T) {
 	defer cancel()
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
-	fx := seedDetachedShell(t, tree, "/Users/dodgecoates/spool-marker-cut-probe",
+	fx := seedDetachedShell(t, tree, "/work/spool-marker-cut-probe",
 		"1b1b1b1b-1b1b-41b1-81b1-1b1b1b1b1b1b")
 
 	// Act.

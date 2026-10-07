@@ -239,7 +239,7 @@ describe("session lock", () => {
 // The workspace lock is the claim the session lock cannot make: two daemon
 // session ids over one workspace take two session locks and exclude nothing.
 describe("workspace lock", () => {
-  const WORKTREE = "/Users/dodgecoates/.config/doom-worktrees/model-selection-convergence-hwx";
+  const WORKTREE = "/work/.config/doom-worktrees/model-selection-convergence-hwx";
 
   it.each([
     ["a worktree path", WORKTREE],
@@ -253,7 +253,7 @@ describe("workspace lock", () => {
     const p = workspaceLockPath(cwd);
     // Assert
     expect(path.basename(path.dirname(p))).toBe("run");
-    expect(path.basename(p)).toBe("workspace-0b96ccc5.lock");
+    expect(path.basename(p)).toBe("workspace-5c78c72d.lock");
   });
 
   it("keeps the root directory itself as a workspace, separator and all", () => {

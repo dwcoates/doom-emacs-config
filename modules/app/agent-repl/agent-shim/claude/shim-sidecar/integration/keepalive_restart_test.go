@@ -89,7 +89,7 @@ func (p *restartProbe) runAcrossARestart(t *testing.T, before, after []map[strin
 func TestAKeepAliveTurnInProgressAtRestartStoresNothing(t *testing.T) {
 	t.Parallel()
 	// Arrange.
-	p := newRestartProbe(t, "/Users/dodgecoates/keepalive-restart-probe", "f4f4f4f4-f4f4-4f4f-8f4f-f4f4f4f4f4f4")
+	p := newRestartProbe(t, "/work/keepalive-restart-probe", "f4f4f4f4-f4f4-4f4f-8f4f-f4f4f4f4f4f4")
 	turn := chained(t,
 		setUserText(t, p.line(t, 3), keepaliveMarker+"cache ping"),
 		p.line(t, 7), p.line(t, 8), p.line(t, 12), p.line(t, 13))
@@ -112,7 +112,7 @@ func TestAKeepAliveTurnInProgressAtRestartStoresNothing(t *testing.T) {
 func TestAKeepAliveReplyBehindAnInterleavedPromptStaysUnstoredAcrossARestart(t *testing.T) {
 	t.Parallel()
 	// Arrange.
-	p := newRestartProbe(t, "/Users/dodgecoates/keepalive-interleave-probe", "f5f5f5f5-f5f5-4f5f-8f5f-f5f5f5f5f5f5")
+	p := newRestartProbe(t, "/work/keepalive-interleave-probe", "f5f5f5f5-f5f5-4f5f-8f5f-f5f5f5f5f5f5")
 	keepalive := setUserText(t, p.line(t, 3), keepaliveMarker+"cache ping")
 	real := chained(t,
 		p.prompt(t, "the real question", "f5f5f5f5-0000-4000-8000-000000000001", "f5f5f5f5-0000-4000-8000-0000000000aa"),
@@ -139,7 +139,7 @@ func TestAKeepAliveReplyBehindAnInterleavedPromptStaysUnstoredAcrossARestart(t *
 func TestAKeepAliveReplyAfterATaskNotificationStaysUnstoredAcrossARestart(t *testing.T) {
 	t.Parallel()
 	// Arrange.
-	p := newRestartProbe(t, "/Users/dodgecoates/keepalive-notification-probe", "f6f6f6f6-f6f6-4f6f-8f6f-f6f6f6f6f6f6")
+	p := newRestartProbe(t, "/work/keepalive-notification-probe", "f6f6f6f6-f6f6-4f6f-8f6f-f6f6f6f6f6f6")
 	keepalive := setUserText(t, p.line(t, 3), keepaliveMarker+"cache ping")
 	notification := withFields(t,
 		p.prompt(t, "<task-notification>a background task finished</task-notification>",
