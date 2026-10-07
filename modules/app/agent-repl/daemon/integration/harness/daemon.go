@@ -213,14 +213,16 @@ func HostNeutralNamingEnv() []string {
 
 // HostNeutralCheckoutEnv clears the host's explanation-engine checkout for a
 // test daemon. A daemon that resolves a checkout (chessboard.EngineDirEnv,
-// else chessboard.MultiRepoRootEnv) builds and starts the CEE CLI's widget
-// backend from it with real npm, go and gns; inherited from a developer's
-// shell, a chess board drawn in a test would do exactly that. Both are stated
-// EMPTY, which the daemon reads as unset, so every test board resolves to "no
-// checkout" deterministically; os/exec keeps the last value of a repeated
-// key, so this wins over the inherited one.
+// else chessboard.MultiRepoRootEnv's explanation-engine) builds and starts the
+// CEE CLI's widget backend from it with real npm, go and gns; inherited from a
+// developer's shell, a chess board drawn in a test would do exactly that.
+// EngineDirEnv is stated EMPTY, which the daemon reads as unset, and os/exec
+// keeps the last value of a repeated key, so this wins over the inherited
+// one. MultiRepoRootEnv needs no clearing: StartDaemon states it as the
+// world's own temporary tree, which holds no explanation-engine, so every test
+// board resolves to "no checkout" deterministically.
 func HostNeutralCheckoutEnv() []string {
-	return []string{chessboard.EngineDirEnv + "=", chessboard.MultiRepoRootEnv + "="}
+	return []string{chessboard.EngineDirEnv + "="}
 }
 
 // ServiceBinaries are the real launchd services a world runs beside its
