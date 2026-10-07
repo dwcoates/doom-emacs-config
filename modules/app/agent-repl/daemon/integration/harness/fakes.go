@@ -224,6 +224,14 @@ func NewFakeNotifier(t *testing.T, dir string) *Recorder {
 	return NewRecorderExecutable(t, dir, "notifier")
 }
 
+// NewFakeChime writes the turn-end sound player the daemon rings through
+// (AGENT_REPL_CHIME_CMD). It records the platform argv and plays nothing, so
+// no test ever sounds on the host.
+func NewFakeChime(t *testing.T, dir string) *Recorder {
+	t.Helper()
+	return NewRecorderExecutable(t, dir, "chime")
+}
+
 // FakeDeployBuildRefusal is what the fake deploy builder prints before it
 // fails: a harness NEVER builds, so every deploy it drives is a build failure
 // that deploys nothing.

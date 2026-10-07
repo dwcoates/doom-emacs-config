@@ -11,6 +11,9 @@ import (
 // opPost is the operation a banner's records carry.
 const opPost = "daemon.desktopnotify.post"
 
+// opChime is the operation a chime's records carry.
+const opChime = "daemon.desktopnotify.chime"
+
 // ClickSink is told a banner was clicked: the server pushes the host stream's
 // notification_clicked, and Emacs raises its frame and selects the tab.
 type ClickSink interface {
@@ -36,6 +39,11 @@ type Deps struct {
 	Backend Backend
 	// BackendErr is why no Backend was resolved.
 	BackendErr error
+	// Chime is the platform's sound player. Nil when none could be resolved,
+	// in which case ChimeErr says why and every chime records it.
+	Chime Chime
+	// ChimeErr is why no Chime was resolved.
+	ChimeErr error
 	// Clicks is told each clicked banner's workspace.
 	Clicks ClickSink
 	// Names titles each banner.
@@ -44,17 +52,18 @@ type Deps struct {
 	Log dlog.Logger
 }
 
-// Notifier posts desktop banners. Every banner runs on a goroutine of its own,
-// because the banner program blocks until the banner is clicked or dismissed;
-// Close cancels and joins them all.
+// Notifier posts desktop banners and rings chimes. Every banner and chime runs
+// on a goroutine of its own, because the banner program blocks until the
+// banner is clicked or dismissed and the player until the sound ends; Close
+// cancels and joins them all.
 type Notifier struct {
 	deps   Deps
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 
-	// mu orders every banner's start against Close: a banner is either
-	// started before Close (and joined by it) or refused after it.
+	// mu orders every banner's and chime's start against Close: each is
+	// either started before Close (and joined by it) or refused after it.
 	mu     sync.Mutex
 	closed bool
 }
@@ -67,6 +76,9 @@ func New(deps Deps) *Notifier {
 	}
 	if (deps.Backend == nil) == (deps.BackendErr == nil) {
 		panic("desktopnotify: New requires exactly one of Backend and BackendErr")
+	}
+	if (deps.Chime == nil) == (deps.ChimeErr == nil) {
+		panic("desktopnotify: New requires exactly one of Chime and ChimeErr")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Notifier{deps: deps, ctx: ctx, cancel: cancel}
@@ -86,6 +98,16 @@ func (n *Notifier) Post(ws ids.WorkspaceID, kind string, compose Compose) {
 	}
 }
 
+// Ring plays the chime for ws, WHETHER OR NOT EMACS IS FOCUSED: a focused
+// Emacs may be showing another workspace, and the sound is what tells the
+// user this one is done.
+func (n *Notifier) Ring(ws ids.WorkspaceID, kind string) {
+	log := n.deps.Log.With(dlog.Context{"workspace": string(ws), "kind": kind})
+	if !n.spawn(func() { n.play(log) }) {
+		log.Info(opChime, "the daemon is standing down; no chime", nil)
+	}
+}
+
 // spawn runs work on a goroutine Close joins, answering false (and running
 // nothing) once Close has begun.
 func (n *Notifier) spawn(work func()) bool {
@@ -100,6 +122,28 @@ func (n *Notifier) spawn(work func()) bool {
 		work()
 	}()
 	return true
+}
+
+// play plays one chime.
+func (n *Notifier) play(log dlog.Logger) {
+	if n.deps.Chime == nil {
+		log.Error(opChime, "no chime program; the chime was not played", dlog.Context{
+			"cause": n.deps.ChimeErr.Error(),
+		})
+		return
+	}
+	log.Info(opChime, "playing the chime", dlog.Context{"program": n.deps.Chime.Program()})
+	err := n.deps.Chime.Play(n.ctx)
+	switch {
+	case stoodDown(n.ctx, err):
+		log.Info(opChime, "the daemon stood down while the chime played", dlog.Context{"cause": err.Error()})
+	case err != nil:
+		log.Error(opChime, "the chime program failed", dlog.Context{
+			"program": n.deps.Chime.Program(), "cause": err.Error(),
+		})
+	default:
+		log.Debug(opChime, "the chime played", nil)
+	}
 }
 
 // Raise posts an agent notification's banner: a permission ask, a question,
@@ -152,7 +196,8 @@ func (n *Notifier) show(ws ids.WorkspaceID, log dlog.Logger, compose Compose) {
 	}
 }
 
-// Close cancels every banner still awaiting its click and joins them.
+// Close cancels every banner still awaiting its click and every chime still
+// playing, and joins them.
 func (n *Notifier) Close() {
 	n.mu.Lock()
 	n.closed = true
