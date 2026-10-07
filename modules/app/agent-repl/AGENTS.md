@@ -755,6 +755,11 @@ daemon (`claude-repld merge-queue`) and reports landed, parked or failed; on a
 park, failure or refusal it reports and stops, and never merges by hand.
 
 - The metaprompt carries the same rule, so every session has it loaded.
+- A workspace's own merge lands in the target recorded at its creation: master
+  for a workspace made off the main checkout, its PARENT's checkout for a child
+  workspace (one created explicitly as a child of another). A child reaches
+  master only when its parent lands. The verb finds a child's own row wherever
+  the roster nests it (`sidebar.FlattenRows`).
 - `.githooks/reference-transaction` refuses any move of master the queue did
   not make (its fast-forward runs git with `AGENT_REPL_MERGE_QUEUE=1`), and names
   the skill in its refusal. `AGENT_REPL_OWNER_OVERRIDE=1` is the owner's escape
