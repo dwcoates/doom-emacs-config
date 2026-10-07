@@ -1,33 +1,32 @@
 package db
 
-// hooksweep.go — THE STORE DROPS THE HOOK RECORDS THAT DRAW NOTHING ITSELF,
-// never by a hand-run statement.
+// hooksweep.go — THE HOOK RECORDS STORED BEFORE THE STORE STOPPED KEEPING
+// THEM ARE DROPPED BY THE STORE ITSELF, never by a hand-run statement.
 //
-// Owner ruling 2026-10-06: "we should stop storing hook records, they are just
-// bloat." The shim stopped writing a hook's start, success and cancellation;
-// the rows written before that — and the ones a shim still running a pre-rule
-// build writes until it is replaced — are page lines that draw nothing, and a
+// Owner rulings 2026-10-06: "we should stop storing hook records, they are
+// just bloat", and a failed or blocked hook's card is drawn live only. A write
+// that carries a hook line keeps only its identity from then on
+// (kindHookDropped). The rows written before are page lines, and a
 // SessionStart:resume firing per resume filled whole history pages with them
 // (the feed's `history_loaded drew_rows=false`). This sweep turns each into
-// the row the rule implies: kind hook_dropped, frame reduced to its stamps.
-//
-// A FAILED OR BLOCKED FIRING IS NOT DROPPED HERE. Its card is drawn, and the
-// ruling that it be drawn live and never replayed needs a carrier for a line
-// that is delivered but not kept, which is an open contract question; until it
-// is settled the row stays a page line.
+// the row the rule would have written: kind hook_dropped, frame reduced to its
+// stamps — failed and blocked firings included, which a restarted daemon
+// therefore no longer redraws.
 //
 // NO WRITE_SEQ IS BUMPED, so no standing watch is told and no replay reads
-// the row: a dropped row drew nothing, so nothing drawn has to be withdrawn.
-// The position stays a valid pointer (pointerInBookSQL).
+// the row: a reader that drew a failed card from it keeps the card until it
+// restarts, which is exactly the live-only rule. The position stays a valid
+// pointer (pointerInBookSQL).
 //
 // ONLY STREAM-PLANE ACTIVITY ROWS ARE READ. The stream plane is the one that
 // ever wrote a hook line (the file plane's hook attachments are residue, which
 // the sidecar never persists), and every hook line is keyed `activity:<id>`.
 // OPTIMIZATION: that predicate keeps the sweep from decoding the file plane's
 // tens of thousands of activity frames (80 MB on the owner's store, 2026-10-06);
-// the stream plane held 776 activity rows. And each sweep reads only past the
-// highest position an earlier sweep of this process judged, so after the first
-// one per boot a sweep reads only the rows written since.
+// the stream plane held 776 activity rows. Each sweep reads only past the
+// highest position an earlier sweep of this process judged, so after the
+// first pass per boot a sweep reads only the rows written since — which,
+// since classify gives every hook line its own kind, holds no hook page line.
 
 import (
 	"context"
@@ -151,7 +150,7 @@ func (d *DB) readHookCandidates(ctx context.Context, base logging.Fields, after 
 		if err := proto.Unmarshal(frame, entry); err != nil {
 			return nil, 0, 0, d.refuse(base, storagef(err, "the stored frame at position %d cannot be decoded to judge whether it is a hook", position))
 		}
-		if !hookDrawsNothing(entry.GetAgentUpdate().GetServeableFrame().GetAgentItem().GetAgentFrame()) {
+		if !isHookFrame(entry.GetAgentUpdate().GetServeableFrame().GetAgentItem().GetAgentFrame()) {
 			continue
 		}
 		stamps, err := hookStampsFrame(entry)

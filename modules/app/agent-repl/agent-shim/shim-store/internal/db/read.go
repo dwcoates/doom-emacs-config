@@ -454,8 +454,8 @@ const (
 	// pointerInBookSQL binds (position, book, the page-line kind, the retired
 	// kind, the hook kind). A RETIRED ROW'S POSITION IS STILL A PLACE IN ITS
 	// BOOK: a reader whose high-water mark was that line walks on from it rather
-	// than being sent to repaint a book that only lost a line. A DROPPED HOOK
-	// ROW'S is too (kindHookDropped).
+	// than being sent to repaint a book that only lost a line. A HOOK LINE'S is
+	// too: it was published live with that pointer (kindHookDropped).
 	pointerInBookSQL = `SELECT 1 FROM entry WHERE position = ? AND book_agent_id = ? AND kind IN (?, ?, ?)`
 )
 

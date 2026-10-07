@@ -5,6 +5,7 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	storev1 "agentrepl/proto/store/v1"
+	"google.golang.org/protobuf/proto"
 )
 
 // ---- hook fixtures ----
@@ -23,20 +24,30 @@ func succeededHook() *conversationv1.AgentHook {
 	}}
 }
 
+// startedHook is a hook's start: it draws nothing on its own.
+func startedHook() *conversationv1.AgentHook {
+	return &conversationv1.AgentHook{Result: &conversationv1.AgentHook_Start{Start: &conversationv1.AgentHookStart{HookName: "SessionStart:startup"}}}
+}
+
 // hookEntry is a stream-plane hook line in agent-1's book.
 func hookEntry(writeID, hookID string, hook *conversationv1.AgentHook) *storev1.StoreEntry {
 	return stampedTurn(pageEntry(writeID, "activity:"+hookID, "agent-1", frameItem(activityFrame("agent-1", hookID, hook))), "turn-1")
 }
 
-// legacyHookLine stores a succeeded hook line as a pre-rule shim wrote it.
-func legacyHookLine(t *testing.T, d *DB, hookID string) {
+// legacyHookLine stores a hook line as a pre-rule store kept it: a whole page
+// line. It is written through the store and then rewritten in place, because
+// the store no longer keeps one.
+func legacyHookLine(t *testing.T, d *DB, hookID string, hook *conversationv1.AgentHook) {
 	t.Helper()
-	writeOK(t, d, hookEntry("w-"+hookID, hookID, succeededHook()))
-}
-
-// startedHook is a hook's start: it draws nothing.
-func startedHook() *conversationv1.AgentHook {
-	return &conversationv1.AgentHook{Result: &conversationv1.AgentHook_Start{Start: &conversationv1.AgentHookStart{HookName: "SessionStart:startup"}}}
+	entry := hookEntry("w-"+hookID, hookID, hook)
+	writeOK(t, d, entry)
+	frame, err := proto.Marshal(entry)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if _, err := d.sql.Exec(`UPDATE entry SET kind = ?, frame = ? WHERE upsert_key = ?`, kindPageLine, frame, "activity:"+hookID); err != nil {
+		t.Fatalf("rewriting the row as a pre-rule page line: %v", err)
+	}
 }
 
 func sweepHooks(t *testing.T, d *DB) HookSweepResult {
@@ -48,12 +59,168 @@ func sweepHooks(t *testing.T, d *DB) HookSweepResult {
 	return result
 }
 
-// ---- the sweep of hook records stored before the rule ----
+// ---- a hook line is delivered and not kept ----
 
-func TestTheHookSweepDropsAStoredHookPageLine(t *testing.T) {
+func TestAHookLineIsPublishedToItsBook(t *testing.T) {
 	// Arrange
 	d, _ := newStore(t)
-	legacyHookLine(t, d, "h1")
+
+	// Act
+	result := writeOK(t, d, hookEntry("w1", "h1", failedHook()))
+
+	// Assert
+	if len(result.Lines) != 1 || result.Lines[0].Line.GetLine().GetAgentItem().GetAgentFrame().GetUpdate().GetActivity().GetHook() == nil {
+		t.Fatalf("published lines = %+v, want the hook line", result.Lines)
+	}
+}
+
+func TestAHookLineIsStoredAsAHookDroppedRow(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+
+	// Act
+	writeOK(t, d, hookEntry("w1", "h1", failedHook()))
+
+	// Assert
+	if got := kindOf(t, d, "activity:h1"); got != kindHookDropped {
+		t.Fatalf("kind = %q, want %q", got, kindHookDropped)
+	}
+}
+
+func TestAHookRowKeepsNoneOfTheRecord(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+
+	// Act
+	writeOK(t, d, hookEntry("w1", "h1", failedHook()))
+
+	// Assert
+	if stored := storedEntry(t, d, "activity:h1"); stored.GetAgentUpdate() != nil {
+		t.Fatalf("stored agent_update = %v, want none", stored.GetAgentUpdate())
+	}
+}
+
+func TestAHookRowKeepsItsTurnStamp(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+
+	// Act
+	writeOK(t, d, hookEntry("w1", "h1", failedHook()))
+
+	// Assert
+	if got := storedEntry(t, d, "activity:h1").GetTurn().GetValue(); got != "turn-1" {
+		t.Fatalf("stored turn = %q, want turn-1", got)
+	}
+}
+
+func TestNoPageServesAHookLine(t *testing.T) {
+	// Arrange: what a restarted daemon's history read sees.
+	d, _ := newStore(t)
+	writeOK(t, d, hookEntry("w1", "h1", failedHook()))
+
+	// Act
+	opened, err := d.OpenPage(ctx(), "agent-1", Repaint())
+
+	// Assert
+	if err != nil {
+		t.Fatalf("OpenPage: %v", err)
+	}
+	if n := len(opened.Page.GetLines()); n != 0 {
+		t.Fatalf("page lines = %d, want 0", n)
+	}
+}
+
+// TestAHookLineWrittenBeforeTheWatchSubscribesIsNotReplayed pins the race the
+// owner ACCEPTED (2026-10-06): a watch replays what was written between its
+// page's pin and its subscription, and a hook line is not among it. A failed
+// or blocked card written in that gap — a fresh session's first hook, before
+// the feed's watch stands — is simply not drawn.
+func TestAHookLineWrittenBeforeTheWatchSubscribesIsNotReplayed(t *testing.T) {
+	// Arrange: the page is pinned, then the hook lands before the watch
+	// subscribes.
+	d, _ := newStore(t)
+	writeOK(t, d, pageEntry("w0", "prompt:u1", "agent-1", promptItem("agent-1")))
+	opened, err := d.OpenPage(ctx(), "agent-1", Repaint())
+	if err != nil {
+		t.Fatalf("OpenPage: %v", err)
+	}
+	writeOK(t, d, hookEntry("w1", "h1", failedHook()))
+
+	// Act
+	lines, err := d.LinesSince(ctx(), "agent-1", opened.PinSeq)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("LinesSince: %v", err)
+	}
+	if len(lines) != 0 {
+		t.Fatalf("replay = %+v, want nothing: the card is accepted as not drawn", lines)
+	}
+}
+
+func TestAHookLinesPointerStaysAValidKnownThrough(t *testing.T) {
+	// Arrange: a live reader's mark is the hook line it was handed.
+	d, _ := newStore(t)
+	writeOK(t, d, pageEntry("w0", "prompt:u1", "agent-1", promptItem("agent-1")))
+	result := writeOK(t, d, hookEntry("w1", "h1", failedHook()))
+	pointer := result.Lines[0].Line.GetAt()
+
+	// Act
+	_, err := d.OpenPage(ctx(), "agent-1", CatchUp(pointer))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("re-open from the hook line's pointer: %v, want an ordinary page", err)
+	}
+}
+
+func TestAHookOutcomeSupersedesItsStartInOneRow(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+
+	// Act
+	writeOK(t, d, hookEntry("w1", "h1", startedHook()), hookEntry("w2", "h1", failedHook()))
+
+	// Assert
+	if n := scalar[int](t, d, `SELECT COUNT(*) FROM entry WHERE upsert_key = ?`, "activity:h1"); n != 1 {
+		t.Fatalf("rows under the key = %d, want 1", n)
+	}
+}
+
+func TestAHookLineSupersedesAPreRuleHookPageLine(t *testing.T) {
+	// Arrange: a pre-rule store kept the start; the outcome lands after.
+	d, _ := newStore(t)
+	legacyHookLine(t, d, "h1", startedHook())
+
+	// Act
+	_, err := d.WriteBatch(ctx(), "test-producer", WriteInteractive, batch(hookEntry("w2", "h1", failedHook())), nil)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("WriteBatch: %v, want the hook line to supersede the stored one", err)
+	}
+}
+
+// ---- the sweep of hook records stored before the rule ----
+
+func TestTheHookSweepDropsAStoredSucceededHook(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+	legacyHookLine(t, d, "h1", succeededHook())
+
+	// Act
+	sweepHooks(t, d)
+
+	// Assert
+	if got := kindOf(t, d, "activity:h1"); got != kindHookDropped {
+		t.Fatalf("kind = %q, want %q", got, kindHookDropped)
+	}
+}
+
+func TestTheHookSweepDropsAStoredFailedHook(t *testing.T) {
+	// Arrange: a failed card is drawn live only, so its stored row goes too.
+	d, _ := newStore(t)
+	legacyHookLine(t, d, "h1", failedHook())
 
 	// Act
 	sweepHooks(t, d)
@@ -67,7 +234,7 @@ func TestTheHookSweepDropsAStoredHookPageLine(t *testing.T) {
 func TestTheHookSweepKeepsNoneOfTheRecord(t *testing.T) {
 	// Arrange
 	d, _ := newStore(t)
-	legacyHookLine(t, d, "h1")
+	legacyHookLine(t, d, "h1", succeededHook())
 
 	// Act
 	sweepHooks(t, d)
@@ -75,6 +242,20 @@ func TestTheHookSweepKeepsNoneOfTheRecord(t *testing.T) {
 	// Assert
 	if stored := storedEntry(t, d, "activity:h1"); stored.GetAgentUpdate() != nil {
 		t.Fatalf("stored agent_update = %v, want none", stored.GetAgentUpdate())
+	}
+}
+
+func TestTheHookSweepKeepsADroppedRowsTurnStamp(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+	legacyHookLine(t, d, "h1", succeededHook())
+
+	// Act
+	sweepHooks(t, d)
+
+	// Assert
+	if got := storedEntry(t, d, "activity:h1").GetTurn().GetValue(); got != "turn-1" {
+		t.Fatalf("stored turn = %q, want turn-1", got)
 	}
 }
 
@@ -93,9 +274,9 @@ func TestTheHookSweepLeavesAnotherActivity(t *testing.T) {
 }
 
 func TestTheHookSweepBumpsNoWriteSeq(t *testing.T) {
-	// Arrange: a dropped row drew nothing, so no watcher is told.
+	// Arrange: no watcher is told; a drawn card stays until its reader restarts.
 	d, _ := newStore(t)
-	legacyHookLine(t, d, "h1")
+	legacyHookLine(t, d, "h1", failedHook())
 	before := scalar[int64](t, d, `SELECT write_seq FROM entry WHERE upsert_key = ?`, "activity:h1")
 
 	// Act
@@ -110,7 +291,7 @@ func TestTheHookSweepBumpsNoWriteSeq(t *testing.T) {
 func TestTheHookSweepTakesTheRowOffItsPage(t *testing.T) {
 	// Arrange
 	d, _ := newStore(t)
-	legacyHookLine(t, d, "h1")
+	legacyHookLine(t, d, "h1", failedHook())
 
 	// Act
 	sweepHooks(t, d)
@@ -125,98 +306,10 @@ func TestTheHookSweepTakesTheRowOffItsPage(t *testing.T) {
 	}
 }
 
-func TestTheHookSweepFindsNothingTheSecondTime(t *testing.T) {
-	// Arrange
-	d, _ := newStore(t)
-	legacyHookLine(t, d, "h1")
-	sweepHooks(t, d)
-
-	// Act
-	result := sweepHooks(t, d)
-
-	// Assert
-	if result.Dropped != 0 {
-		t.Fatalf("dropped = %d, want 0", result.Dropped)
-	}
-}
-
-func TestTheHookSweepReadsPastAFullBatch(t *testing.T) {
-	// Arrange: one more stream activity than a batch holds, the hook last.
-	d, _ := newStore(t)
-	for i := 0; i < hookSweepBatch; i++ {
-		id := "r" + string(rune('a'+i%26)) + string(rune('a'+i/26%26)) + string(rune('a'+i/676))
-		writeOK(t, d, pageEntry("w-"+id, "activity:"+id, "agent-1", frameItem(activityFrame("agent-1", id, prose()))))
-	}
-	legacyHookLine(t, d, "h1")
-
-	// Act
-	result := sweepHooks(t, d)
-
-	// Assert
-	if result.Dropped != 1 {
-		t.Fatalf("dropped = %d, want 1", result.Dropped)
-	}
-}
-
-func TestTheHookSweepLogsWhatItDroppedAtInfo(t *testing.T) {
-	// Arrange
-	d, s := newStore(t)
-	legacyHookLine(t, d, "h1")
-
-	// Act
-	sweepHooks(t, d)
-
-	// Assert
-	s.assertLogged(t, "info", "hook sweep dropped 1 stored hook records")
-}
-
-func TestTheHookSweepDropsAStartWhoseOutcomeNeverCame(t *testing.T) {
-	// Arrange
-	d, _ := newStore(t)
-	writeOK(t, d, hookEntry("w1", "h1", startedHook()))
-
-	// Act
-	sweepHooks(t, d)
-
-	// Assert
-	if got := kindOf(t, d, "activity:h1"); got != kindHookDropped {
-		t.Fatalf("kind = %q, want %q", got, kindHookDropped)
-	}
-}
-
-func TestTheHookSweepKeepsAFailedHooksCard(t *testing.T) {
-	// Arrange: a failed firing draws a card, and stays a page line until the
-	// live-only carrier is settled.
-	d, _ := newStore(t)
-	writeOK(t, d, hookEntry("w1", "h1", failedHook()))
-
-	// Act
-	sweepHooks(t, d)
-
-	// Assert
-	if got := kindOf(t, d, "activity:h1"); got != kindPageLine {
-		t.Fatalf("kind = %q, want %q", got, kindPageLine)
-	}
-}
-
-func TestTheHookSweepKeepsADroppedRowsTurnStamp(t *testing.T) {
-	// Arrange
-	d, _ := newStore(t)
-	legacyHookLine(t, d, "h1")
-
-	// Act
-	sweepHooks(t, d)
-
-	// Assert
-	if got := storedEntry(t, d, "activity:h1").GetTurn().GetValue(); got != "turn-1" {
-		t.Fatalf("stored turn = %q, want turn-1", got)
-	}
-}
-
 func TestADroppedHookRowsPointerStaysAValidKnownThrough(t *testing.T) {
 	// Arrange: a reader's mark is the hook line it was served before the sweep.
 	d, _ := newStore(t)
-	legacyHookLine(t, d, "h1")
+	legacyHookLine(t, d, "h1", succeededHook())
 	opened, err := d.OpenPage(ctx(), "agent-1", Repaint())
 	if err != nil {
 		t.Fatalf("OpenPage: %v", err)
@@ -233,43 +326,27 @@ func TestADroppedHookRowsPointerStaysAValidKnownThrough(t *testing.T) {
 	}
 }
 
-func TestAFailedOutcomeTakesBackItsDroppedStart(t *testing.T) {
-	// Arrange: a pre-rule shim wrote the start, the sweep dropped it, and the
-	// firing failed after.
-	d, _ := newStore(t)
-	writeOK(t, d, hookEntry("w1", "h1", startedHook()))
-	sweepHooks(t, d)
-
-	// Act
-	writeOK(t, d, hookEntry("w2", "h1", failedHook()))
-
-	// Assert
-	if got := kindOf(t, d, "activity:h1"); got != kindPageLine {
-		t.Fatalf("kind = %q, want the failed card's page line", got)
-	}
-}
-
-func TestASucceededOutcomeLeavesItsDroppedStartDropped(t *testing.T) {
+func TestTheHookSweepFindsNothingTheSecondTime(t *testing.T) {
 	// Arrange
 	d, _ := newStore(t)
-	writeOK(t, d, hookEntry("w1", "h1", startedHook()))
+	legacyHookLine(t, d, "h1", succeededHook())
 	sweepHooks(t, d)
 
 	// Act
-	result := writeOK(t, d, hookEntry("w2", "h1", succeededHook()))
+	result := sweepHooks(t, d)
 
 	// Assert
-	if got := kindOf(t, d, "activity:h1"); got != kindHookDropped || result.Absorbed != 1 {
-		t.Fatalf("kind = %q absorbed = %d, want %q and the write absorbed", got, result.Absorbed, kindHookDropped)
+	if result.Dropped != 0 {
+		t.Fatalf("dropped = %d, want 0", result.Dropped)
 	}
 }
 
 func TestALaterSweepReadsOnlyWhatWasWrittenSince(t *testing.T) {
 	// Arrange
 	d, _ := newStore(t)
-	legacyHookLine(t, d, "h1")
+	legacyHookLine(t, d, "h1", succeededHook())
 	sweepHooks(t, d)
-	legacyHookLine(t, d, "h2")
+	legacyHookLine(t, d, "h2", succeededHook())
 
 	// Act
 	result := sweepHooks(t, d)
@@ -278,4 +355,34 @@ func TestALaterSweepReadsOnlyWhatWasWrittenSince(t *testing.T) {
 	if result.Scanned != 1 || result.Dropped != 1 {
 		t.Fatalf("scanned = %d dropped = %d, want only the new row, dropped", result.Scanned, result.Dropped)
 	}
+}
+
+func TestTheHookSweepReadsPastAFullBatch(t *testing.T) {
+	// Arrange: one more stream activity than a batch holds, the hook last.
+	d, _ := newStore(t)
+	for i := 0; i < hookSweepBatch; i++ {
+		id := "r" + string(rune('a'+i%26)) + string(rune('a'+i/26%26)) + string(rune('a'+i/676))
+		writeOK(t, d, pageEntry("w-"+id, "activity:"+id, "agent-1", frameItem(activityFrame("agent-1", id, prose()))))
+	}
+	legacyHookLine(t, d, "h1", succeededHook())
+
+	// Act
+	result := sweepHooks(t, d)
+
+	// Assert
+	if result.Dropped != 1 {
+		t.Fatalf("dropped = %d, want 1", result.Dropped)
+	}
+}
+
+func TestTheHookSweepLogsWhatItDroppedAtInfo(t *testing.T) {
+	// Arrange
+	d, s := newStore(t)
+	legacyHookLine(t, d, "h1", succeededHook())
+
+	// Act
+	sweepHooks(t, d)
+
+	// Assert
+	s.assertLogged(t, "info", "hook sweep dropped 1 stored hook records")
 }

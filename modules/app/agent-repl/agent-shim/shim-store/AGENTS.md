@@ -325,24 +325,27 @@ the detector shadows every access, which makes the number about the detector.
 There is no `--` flag: the window is `Options.LedgerRetentionBytes`, which only
 a test sets, and a NEGATIVE value disables the sweep entirely.
 
-### Hook rows that draw nothing are dropped by the store's own sweep
+### A hook line is delivered live and never kept
 
-Owner ruling 2026-10-06: "we should stop storing hook records, they are just
-bloat." The shim no longer writes a hook's start, success, cancellation or
-progress. `SweepHookLines` (`db/hooksweep.go`) drops the ones already stored,
-and the ones a shim still running a pre-rule build writes:
+Owner rulings 2026-10-06: "we should stop storing hook records, they are just
+bloat", and a failed or blocked hook's card is drawn live only. An agent frame
+whose update is an `AgentHook` activity, of any arm, is classified
+`hook_dropped` (`db/route.go`), whichever producer build wrote it:
 
-- It runs before every ledger sweep pass; the first pass per boot reads every
-  stream-plane `activity:` row, later passes only rows past its mark.
-- A dropped row becomes kind `hook_dropped`: key, book, position, ledger row,
-  and a frame reduced to the envelope's turn and place (`hookStampsFrame`).
-- No `write_seq` bump: the row drew nothing, so no watcher withdraws anything.
+- The write PUBLISHES the whole line to every standing watch of its book, so a
+  failed or blocked card is drawn while the session runs.
+- The row keeps only its identity: key, book, position, ledger row, and a frame
+  reduced to the envelope's turn and place (`hookStampsFrame`).
+- No page and no `LinesSince` replay reads it: a restarted daemon never redraws
+  it, and a card written before the feed's watch subscribed (a fresh
+  session's first hook) is not drawn at all, which the owner accepted.
 - Its pointer stays a valid `known_through` / `after`.
-- A failed or blocked outcome landing on a dropped start takes the row back as
-  a page line; a success landing on it is absorbed.
-- A failed or blocked firing is NOT dropped: the ruling that its card is drawn
-  live and never replayed needs a carrier for a line delivered but not kept,
-  which is an open contract question.
+
+`SweepHookLines` (`db/hooksweep.go`) turns the hook page lines stored before
+the rule, of every arm, into the same row. It runs before every ledger-sweep
+pass (the first per boot reads every stream-plane `activity:` row, later ones
+only rows past its mark), takes the bulk write slot per batch, bumps no
+`write_seq`, and writes one INFO record with the count when it dropped any.
 
 ### The store is NUKED, never migrated
 
