@@ -583,7 +583,7 @@ describe("the 'more below' affordance", () => {
 
   it("makes the box the affordance's containing block whether or not it wears has-more", () => {
     // Arrange
-    const boxes = [".bubble > .bubble-box", ".title-fold"];
+    const boxes = [".bubble > .bubble-box"];
 
     // Act — whether any rule on the bare box (no has-more) makes it relative.
     const relative = boxes.map((box) =>
@@ -593,7 +593,7 @@ describe("the 'more below' affordance", () => {
     );
 
     // Assert
-    expect(relative).toEqual([true, true]);
+    expect(relative).toEqual([true]);
   });
 
   it("never puts the affordance on a tool-call section", () => {
@@ -1857,7 +1857,7 @@ describe("the feed text zoom scoping", () => {
  * THE CARD-LEVEL TOOL FOLD (owner ruling, 2026-09-15).
  *
  * A tool-call and a skill card are ONE click-to-expand unit: collapsed shows
- * the head (the title in full) and the input line (capped at two rows), with the
+ * the head (the title in full) and the input line (capped at one row), with the
  * output section HIDDEN — no preview — until the whole `.tool-fold` card is
  * `.expanded`. These pin that model to the file, and — the load-bearing part —
  * that it never reaches the response/prompt bubble.
@@ -1906,11 +1906,12 @@ describe("the card-level tool fold", () => {
 });
 
 /**
- * THE TITLE FOLD (owner ruling, 2026-09-23). A tool card's TITLE — the shell
- * bubble's command, a tool call's input line, a skill's invocation, a hook's
- * headline, a subagent's description — is capped at two lines while the fold
- * that owns it is collapsed, and wears the response bubble's fade (never a
- * chevron, owner ruling 2026-09-23) when it overflows. It replaced the tool-call card's own input-line clamp
+ * THE TITLE FOLD (owner ruling, 2026-10-07, superseding the two-line fade of
+ * 2026-09-23). A tool card's TITLE — the shell bubble's command, a tool call's
+ * input line, a skill's invocation, a hook's headline, a subagent's
+ * description — is capped at ONE line while the fold that owns it is
+ * collapsed, and the clamp ends that line in `…` when anything follows it: no
+ * fade, never a chevron. It replaced the tool-call card's own input-line clamp
  * (`.tool-fold:not(.expanded) > .bash-input` and its three siblings), which had
  * no fade; the input line is now one of the title fold's sites.
  */
@@ -1926,16 +1927,25 @@ describe("the title fold", () => {
     ".subagent-description",
   ];
 
-  it("caps a collapsed title at two text rows", () => {
+  it("caps a collapsed title at one text row", () => {
     // Arrange / Act
     const rule = declarationsOf(".title-fold");
 
     // Assert
-    expect(rule).toMatch(/-webkit-line-clamp:\s*2/);
+    expect(rule).toMatch(/-webkit-line-clamp:\s*1\s*;/);
     expect(rule).toMatch(/overflow:\s*hidden/);
   });
 
-  it("drops each title line's own preview cap so two rows are the only limit", () => {
+  it("clamps as a vertical box, the shape that makes the engine write the ellipsis", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".title-fold");
+
+    // Assert
+    expect(rule).toMatch(/display:\s*-webkit-box/);
+    expect(rule).toMatch(/-webkit-box-orient:\s*vertical/);
+  });
+
+  it("drops each title line's own preview cap so one row is the only limit", () => {
     // Arrange / Act
     const rule = declarationsOf(".title-fold");
 
@@ -1943,9 +1953,9 @@ describe("the title fold", () => {
     expect(rule).toMatch(/max-height:\s*none/);
   });
 
-  it("is the only two-row clamp: no title class is clamped by its own name", () => {
-    // Arrange / Act — every rule that clamps to two rows.
-    const clamps = rulesOf(stylesheet).filter((r) => /-webkit-line-clamp:\s*2/.test(r.declarations));
+  it("is the only literal one-row clamp: no title class is clamped by its own name", () => {
+    // Arrange / Act — every rule that clamps to a literal row count.
+    const clamps = rulesOf(stylesheet).filter((r) => /-webkit-line-clamp:\s*\d/.test(r.declarations));
 
     // Assert — one shared cap, keyed on the one class every title site wears.
     expect(clamps.map((r) => r.selectors)).toEqual([[".title-fold"]]);
@@ -1981,15 +1991,14 @@ describe("the title fold", () => {
     expect(rule).toMatch(/overflow:\s*visible/);
   });
 
-  it("draws the fade from the response bubble's shared fade rule", () => {
-    // Arrange / Act — the geometry rule the response bubble's fade lives in.
-    const fade = rulesOf(stylesheet).find((r) =>
-      r.selectors.includes(".bubble > .bubble-scroll.has-more::after") &&
-      /height:\s*1\.5em/.test(r.declarations),
+  it("draws no fade on a title: the ellipsis is its whole signal", () => {
+    // Arrange / Act — every selector drawing a pseudo-element on a title fold.
+    const pseudo = rulesOf(stylesheet).flatMap((r) =>
+      r.selectors.filter((sel) => sel.includes(".title-fold") && sel.includes("::after")),
     );
 
     // Assert
-    expect(fade?.selectors).toContain(".title-fold.has-more::after");
+    expect(pseudo).toEqual([]);
   });
 
   it("draws no chevron on a title", () => {
@@ -2000,19 +2009,7 @@ describe("the title fold", () => {
     expect(chevron).toBeUndefined();
   });
 
-  it("fades a title into its own card's background", () => {
-    // Arrange / Act
-    const gradient = rulesOf(stylesheet).find(
-      (r) => r.selectors.includes(".title-fold.has-more::after") && /linear-gradient/.test(r.declarations),
-    );
-
-    // Assert
-    expect(gradient?.declarations).toMatch(
-      /linear-gradient\(to bottom, transparent, var\(--title-fold-bg\)\)/,
-    );
-  });
-
-  it("lets a subagent's description wrap to its two rows, not a one-line ellipsis", () => {
+  it("lets a subagent's description wrap so the clamp writes its ellipsis, not nowrap", () => {
     // Arrange / Act
     const rule = declarationsOf(".subagent-description");
 
@@ -2020,14 +2017,12 @@ describe("the title fold", () => {
     expect(rule).not.toMatch(/white-space:\s*nowrap/);
   });
 
-  it("sets the fade's background to the tool card's own fill", () => {
+  it("leaves no title fade background behind", () => {
     // Arrange / Act
-    const card = rulesOf(stylesheet).find(
-      (r) => r.selectors.includes(".tool-card") && /--title-fold-bg/.test(r.declarations),
-    );
+    const fadeBg = rulesOf(stylesheet).filter((r) => /--title-fold-bg/.test(r.declarations));
 
     // Assert
-    expect(card?.declarations).toMatch(/--title-fold-bg:\s*var\(--tool-card-bg\)/);
+    expect(fadeBg).toEqual([]);
   });
 });
 

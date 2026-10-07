@@ -278,7 +278,7 @@ describe("drawFeedSkill: the title fold", () => {
     expect([...title.classList]).toEqual(["tool-name", TITLE_FOLD_CLASS, TITLE_FOLD_STANDALONE_CLASS]);
   });
 
-  it("wears has-more when the invocation overflows its two lines", () => {
+  it("wears has-more when the invocation overflows its one line", () => {
     // Arrange
     const { title } = drawn(loaded("# doc"));
     measureTitle(title, true);
@@ -290,7 +290,7 @@ describe("drawFeedSkill: the title fold", () => {
     expect(title.classList.contains(HAS_MORE_CLASS)).toBe(true);
   });
 
-  it("keeps has-more off an invocation that fits its two lines", () => {
+  it("keeps has-more off an invocation that fits its one line", () => {
     // Arrange
     const { title } = drawn(loaded("# doc"));
     measureTitle(title, false);
@@ -345,14 +345,14 @@ describe("drawFeedSkill: the title fold", () => {
     expect(title.classList.contains(HAS_MORE_CLASS)).toBe(false);
   });
 
-  it("clamps a collapsed card's invocation to two lines", () => {
+  it("clamps a collapsed card's invocation to one line", () => {
     // Arrange
     const remove = installStylesheet();
     try {
       const { title } = drawn(loaded("# doc"));
 
       // Act / Assert
-      expect(cascadedValue(title, "-webkit-line-clamp")).toBe("2");
+      expect(cascadedValue(title, "-webkit-line-clamp")).toBe("1");
     } finally {
       remove();
     }

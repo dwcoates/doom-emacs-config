@@ -540,7 +540,7 @@ describe("drawFeedSubagent: the title fold", () => {
     expect(el.querySelector(`.${TITLE_FOLD_CLASS}`)).toBeNull();
   });
 
-  it("wears has-more when the description overflows its two lines", () => {
+  it("wears has-more when the description overflows its one line", () => {
     // Arrange
     const { title } = seated();
     measureTitle(title, true);
@@ -552,7 +552,7 @@ describe("drawFeedSubagent: the title fold", () => {
     expect(title.classList.contains(HAS_MORE_CLASS)).toBe(true);
   });
 
-  it("keeps has-more off a description that fits its two lines", () => {
+  it("keeps has-more off a description that fits its one line", () => {
     // Arrange
     const { title } = seated();
     measureTitle(title, false);
@@ -595,20 +595,20 @@ describe("drawFeedSubagent: the title fold", () => {
     expect(title.classList.contains(HAS_MORE_CLASS)).toBe(true);
   });
 
-  it("clamps the description to two lines while the bubble is collapsed", () => {
+  it("clamps the description to one line while the bubble is collapsed", () => {
     // Arrange
     const remove = installStylesheet();
     try {
       const { title } = seated();
 
       // Act / Assert
-      expect(cascadedValue(title, "-webkit-line-clamp")).toBe("2");
+      expect(cascadedValue(title, "-webkit-line-clamp")).toBe("1");
     } finally {
       remove();
     }
   });
 
-  it("wraps the description onto its two lines rather than a one-line ellipsis", () => {
+  it("wraps the description so its one-line clamp writes the ellipsis, not nowrap", () => {
     // Arrange
     const remove = installStylesheet();
     try {

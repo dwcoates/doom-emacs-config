@@ -102,7 +102,7 @@ export function drawFeedSimpleToolCall(u: FeedSimpleToolCall, rc: RowContext): H
   // CARD-LEVEL FOLD (owner ruling, 2026-09-15). The whole card is ONE
   // click-to-expand unit (`.tool-fold`, CAPPED_CLASSES in expand.ts): collapsed
   // it shows only the head (the tool name, in full) and its input line (the
-  // title fold, capped at two rows — title-fold.ts); its output section is
+  // title fold, capped at one row — title-fold.ts); its output section is
   // HIDDEN — no preview — until the card is `.expanded`, at which point the
   // section is revealed (scrolling at 50vh) and the input line's cap is
   // lifted. The stylesheet keys all of that off `.tool-fold`/`.tool-fold.expanded`
@@ -128,8 +128,8 @@ export function drawFeedSimpleToolCall(u: FeedSimpleToolCall, rc: RowContext): H
   // element still holds (a live clock a previous draw left on a REUSED
   // element) is dropped here rather than left to a replace site upstream.
   if (outcome.case !== "running") stopTicking(card);
-  // THE INPUT LINE IS THE CARD'S TITLE (owner ruling, 2026-09-23): the one
-  // two-line title fold, owned by this card's fold. Folded AFTER the terminal
+  // THE INPUT LINE IS THE CARD'S TITLE (owner ruling, 2026-09-23): the
+  // one-line title fold, owned by this card's fold. Folded AFTER the terminal
   // stop above, which would otherwise tear down the fold's measurer.
   foldTitle(input, "card");
   return card;
