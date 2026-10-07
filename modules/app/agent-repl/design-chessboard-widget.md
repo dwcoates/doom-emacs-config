@@ -1,3 +1,7 @@
+> **SUPERSEDED (2026-10-07).** The chess board was rebuilt from scratch; the
+> current design is `docs/protobuf-design/chess-board-feed.md` at the repository
+> root. Nothing below describes the running system.
+
 # Design proposal: interactive chessboard widget in agent-repl response bubbles
 
 Status: research complete, no implementation. Comparison of three candidate approaches with a recommendation, per the four investigation axes (chess.com embed, ChessCom internal widget, xwidget limitations, from-scratch).
