@@ -53,8 +53,8 @@ export function drawFeedHook(u: FeedHook, rc: RowContext): HTMLElement {
 
   const head = document.createElement("div");
   head.className = "tool-head";
-  // THE HEADLINE IS THE CARD'S TITLE (owner ruling, 2026-09-23): the one
-  // two-line title fold. A hook card has no card-level fold, so the headline is
+  // THE HEADLINE IS THE CARD'S TITLE (owner ruling, 2026-09-23): the
+  // one-line title fold. A hook card has no card-level fold, so the headline is
   // its own (title-fold.ts). No draw here stops the card's ticking, so folding
   // it at once keeps its measurer.
   head.appendChild(

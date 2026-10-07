@@ -14,9 +14,10 @@
  *
  * TITLE FOLDS (owner ruling, 2026-09-23): a tool card's TITLE — the command a
  * shell bubble runs, a tool call's input line, and the other title lines
- * title-fold.ts marks — is capped at two lines while its fold is collapsed and
- * wears the SAME fade when it overflows them. It is the one other
- * kind in MORE_KINDS; an output section still never wears the affordance.
+ * title-fold.ts marks — is capped at one line while its fold is collapsed; it
+ * wears `has-more` when it overflows that line, but draws no fade from it (its
+ * clamp writes an ellipsis). It is the one other kind in MORE_KINDS; an output
+ * section still never wears the affordance.
  *
  * THE ELLIPSIS (owner rulings, 2026-09-27): a bubble whose spec chooses it
  * (`data-more="ellipsis"`: a held prompt) shows no
@@ -70,7 +71,7 @@ export const MORE_BUBBLE_SELECTOR = ".bubble > .bubble-scroll";
 /**
  * The class every TITLE fold wears (title-fold.ts): a tool card's title line —
  * the command a shell runs, a tool call's input line, a skill's invocation, a
- * hook's headline, a subagent's description — capped at two lines while its
+ * hook's headline, a subagent's description — capped at one line while its
  * fold is collapsed. Declared HERE rather than in title-fold.ts because the
  * measurer must know every kind it serves, and title-fold.ts imports the
  * measurer; the reverse import would be a module cycle.
@@ -89,7 +90,7 @@ export const TITLE_FOLD_STANDALONE_CLASS = "title-fold-standalone";
  * When a title fold's FOLD is open — whichever fold owns it: the title itself
  * (a standalone title), the tool-call/skill card it sits in (`.tool-fold`,
  * toggled by expand.ts), or the bubble whose head it heads (`.bubble-fold`,
- * toggled by bubble.ts). The stylesheet lifts the two-line cap on exactly this
+ * toggled by bubble.ts). The stylesheet lifts the one-line cap on exactly this
  * selector list, and styles.test.ts holds the two to each other.
  *
  * Child combinators on the bubble arm keep an OPEN bubble from lifting the cap
@@ -102,7 +103,7 @@ export const TITLE_FOLD_OPEN_SELECTOR = [
   `.bubble-fold[data-expanded="true"] > .bubble-head .${TITLE_FOLD_CLASS}`,
 ].join(", ");
 
-/** True when a title's text is taller than its two-line clamp can show. */
+/** True when a title's text is taller than its one-line clamp can show. */
 export function overflowsCap(box: { scrollHeight: number; clientHeight: number }): boolean {
   return box.scrollHeight > box.clientHeight;
 }

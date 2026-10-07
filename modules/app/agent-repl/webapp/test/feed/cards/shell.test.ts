@@ -795,7 +795,7 @@ describe("drawFeedShellHead title fold", () => {
     expect(title.classList.contains(TITLE_FOLD_STANDALONE_CLASS)).toBe(false);
   });
 
-  it("wears has-more when the command overflows its two lines", () => {
+  it("wears has-more when the command overflows its one line", () => {
     // Arrange
     const { title } = seated();
     measureTitle(title, true);
@@ -807,7 +807,7 @@ describe("drawFeedShellHead title fold", () => {
     expect(title.classList.contains(HAS_MORE_CLASS)).toBe(true);
   });
 
-  it("keeps has-more off a command that fits its two lines", () => {
+  it("keeps has-more off a command that fits its one line", () => {
     // Arrange
     const { title } = seated();
     measureTitle(title, false);
@@ -845,14 +845,14 @@ describe("drawFeedShellHead title fold", () => {
     expect(title.classList.contains(HAS_MORE_CLASS)).toBe(true);
   });
 
-  it("clamps the command to two lines while the bubble is collapsed", () => {
+  it("clamps the command to one line while the bubble is collapsed", () => {
     // Arrange
     const remove = installStylesheet();
     try {
       const { title } = seated();
 
       // Act / Assert
-      expect(cascadedValue(title, "-webkit-line-clamp")).toBe("2");
+      expect(cascadedValue(title, "-webkit-line-clamp")).toBe("1");
     } finally {
       remove();
     }

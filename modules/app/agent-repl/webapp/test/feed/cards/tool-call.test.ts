@@ -1153,15 +1153,16 @@ describe("the card-level fold", () => {
     }
   });
 
-  it("caps the collapsed header's input line at two rows", () => {
+  it("caps the collapsed header's input line at one row", () => {
     // Arrange
     const remove = installStylesheet();
     try {
       const el = bashCard();
       document.body.replaceChildren(el);
-      // Act / Assert — the non-title header content is clamped to two text rows.
+      // Act / Assert — the non-title header content is clamped to one text row,
+      // which the engine ends in an ellipsis when more follows.
       expect(cascadedValue(el.querySelector(".bash-input") as Element, "-webkit-line-clamp")).toBe(
-        "2",
+        "1",
       );
     } finally {
       remove();
