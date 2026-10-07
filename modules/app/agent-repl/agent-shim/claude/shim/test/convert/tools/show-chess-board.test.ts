@@ -140,6 +140,10 @@ describe("showChessBoardConverter.settle", () => {
 
     // Assert.
     const record = logRecordsSince(before).find((candidate) => candidate.message.includes("named no session"));
-    expect([record?.level, record?.context.tool_use_id]).toEqual(["error", "toolu_board"]);
+    expect([record?.level, record?.context.tool_use_id, typeof record?.context.cause]).toEqual([
+      "error",
+      "toolu_board",
+      "string",
+    ]);
   });
 });

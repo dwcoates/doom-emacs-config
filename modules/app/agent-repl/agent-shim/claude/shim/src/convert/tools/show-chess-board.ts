@@ -78,7 +78,11 @@ export const showChessBoardConverter: ToolConverter = {
       // The SDK validates the input before the handler runs, so a returned
       // call always named its session; one that did not is a vendor change.
       LOGGER.error(
-        { tool_use_id: call.toolUseId },
+        {
+          tool_use_id: call.toolUseId,
+          cause: "the call returned, but its input names no session_id and game_id",
+          input_keys: Object.keys(call.input ?? {}).join(","),
+        },
         "a board request returned although its input named no session; no frame is produced",
       );
       return undefined;
