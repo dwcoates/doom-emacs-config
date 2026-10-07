@@ -1,8 +1,8 @@
 // endpoint_open_external.proto — OpenExternal: open a clicked link in the
-// user's pinned external browser profile. WEB LINK section. The ONLY
-// thing between a clicked link and the webview navigating away (or
-// nothing happening): the shared link component calls this instead of
-// following the href; the daemon owns the pinned-profile launch.
+// external browser profile the session's account signs in as. WEB LINK
+// section. The ONLY thing between a clicked link and the webview navigating
+// away (or nothing happening): the shared link component calls this instead
+// of following the href; the daemon owns the routed-profile launch.
 
 syntax = "proto3";
 
@@ -46,7 +46,8 @@ message OpenExternalError {
     OpenExternalInvalidUrl invalid_url = 5;
     // No browser is configured to open it with.
     OpenExternalNoBrowserConfigured no_browser_configured = 6;
-    // Launching the browser failed.
+    // Launching the browser failed, or the session's account could not be
+    // routed to the browser profile it signs in as.
     OpenExternalLaunchFailed launch_failed = 7;
   }
 }

@@ -1,8 +1,9 @@
-// Package externalbrowser opens a link in the pinned external browser profile.
+// Package externalbrowser opens a link in the external browser profile the
+// session's account signs in as.
 //
 // It is the OpenExternal verb's whole implementation: a clicked link never
-// navigates the webview, and the browser profile is pinned so a link does not
-// land in whatever window happened to be frontmost.
+// navigates the webview, and the browser profile is routed by account so a link
+// does not land in whatever window happened to be frontmost.
 //
 // WHY THE DAEMON OPENS LINKS AT ALL. The gui frontend is the webapp mounted
 // inside Emacs as an xwidget. A markdown link in a response bubble renders as
@@ -51,36 +52,27 @@ func DefaultLauncherConfiguredAt(path string) bool {
 
 // Opener opens links externally.
 type Opener interface {
-	// Open launches url in the named Chrome profile directory (e.g.
-	// "Profile 6"). An empty profile takes the opener's pinned default. A
-	// refused or malformed url is an error the caller surfaces; nothing is
-	// opened silently.
-	Open(ctx context.Context, url, profile string) error
-	// ProfileForAccount resolves the Chrome profile directory the session's
-	// account signs in as, reading Chrome's own Local State. A blank email, an
-	// unreadable Local State, or no matching profile all FALL BACK to the
-	// pinned default, and every fall-through is logged loudly (WARN for a
-	// non-empty email that could not be matched) rather than swallowed. It
-	// never fails: a link the user clicked must open somewhere, and the pinned
-	// default is that somewhere.
-	ProfileForAccount(email string) string
+	// Open launches url in the Chrome profile accountEmail signs in as,
+	// resolved from Chrome's own Local State. A blank email opens with no
+	// profile flag. An email no profile is signed in as, a refused or
+	// malformed url, and a launcher that will not run are all errors the
+	// caller surfaces; nothing is opened silently or in a guessed profile.
+	// A configured launcher override skips the routing entirely: it names the
+	// whole launch.
+	Open(ctx context.Context, url, accountEmail string) error
 }
 
 // Config assembles an Opener.
 type Config struct {
 	// LauncherCmd is the command a url is handed to. Empty takes
 	// $AGENT_REPL_BROWSER_CMD, and an unset environment takes DefaultBinary
-	// (with the pinned-profile argv and the activation step). A command from
+	// (with the routed-profile argv and the activation step). A command from
 	// either override is invoked as `<cmd> <url>` and nothing else.
 	LauncherCmd string
-	// Profile is the pinned browser profile directory, used only on the
-	// default path and as the FALLBACK when an account cannot be routed to a
-	// profile. Empty takes DefaultProfileDirectory.
-	Profile string
-	// LocalStatePath is Chrome's Local State document, read by
-	// ProfileForAccount to route an account email to its on-disk profile
-	// directory. Empty takes DefaultLocalStatePath; a path that cannot be read
-	// is the fallback case, logged and routed to the pinned default.
+	// LocalStatePath is Chrome's Local State document, read on the default
+	// path to route an account email to its on-disk profile directory. Empty
+	// takes DefaultLocalStatePath; a path that cannot be read fails the open
+	// of any link whose account has an email.
 	LocalStatePath string
 	// DefaultLauncherBin is the browser executable the DEFAULT path hands a
 	// url to. Empty takes DefaultBinary. It exists for the same reason
@@ -104,7 +96,7 @@ type Config struct {
 //
 // ARCHITECTURE.md does not fix the launcher's spelling, so it is injected
 // rather than hardcoded: the constructor takes the command, falls back to
-// $AGENT_REPL_BROWSER_CMD, and only then to the pinned-profile default.
+// $AGENT_REPL_BROWSER_CMD, and only then to Chrome with the routed profile.
 func New(cfg Config) (Opener, error) {
 	if cfg.Logger == nil {
 		return nil, errors.New("externalbrowser: a logger is required")
