@@ -864,7 +864,7 @@ func (r *resolver) sessionArm(ws ids.WorkspaceID, update *conversationv1.Session
 	case *conversationv1.SessionUpdate_Diagnostics:
 		return "diagnostics", func(s *wsState) {
 			r.logSessionArm(ws, s, "diagnostics")
-			s.degraded = anyWindowOpen(u.Diagnostics)
+			s.degraded = ladder.DegradedWindowOpen(u.Diagnostics)
 		}
 	case *conversationv1.SessionUpdate_ModelChanged,
 		*conversationv1.SessionUpdate_PermissionModeChanged,
@@ -921,17 +921,6 @@ func sessionChangeArm(update *conversationv1.SessionUpdate) string {
 func (r *resolver) logSessionArm(ws ids.WorkspaceID, s *wsState, arm string) {
 	r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer session-update arm",
 		dlog.Context{"arm": arm})
-}
-
-// anyWindowOpen reports whether the diagnostics carry an open degraded window,
-// which is what makes a serving link read as degraded.
-func anyWindowOpen(d *conversationv1.SessionDiagnostics) bool {
-	for _, w := range d.GetDegradedWindows() {
-		if _, open := w.GetExtent().(*conversationv1.SessionDegradedWindow_Open); open {
-			return true
-		}
-	}
-	return false
 }
 
 // observeAccountUsage takes one usage sample and files it BY BILLING MODE
