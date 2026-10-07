@@ -677,6 +677,7 @@ export function stubRenderers(overrides: Partial<RowRenderers> = {}): RowRendere
     artifact: stub("artifact"),
     plan: stub("plan"),
     findings: stub("findings"),
+    chessBoard: stub("chessBoard"),
     subagentResult: stub("subagentResult"),
     shell: stub("shell"),
     shellHead: stub("shellHead"),

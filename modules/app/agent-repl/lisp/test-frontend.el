@@ -1572,8 +1572,6 @@ purely daemon-driven."
 
 ;;; test-frontend.el ends here
 
-;;;; ---- Chess-board keyboard navigation ---------------------------------------
-
 ;;;; ---- Refreshing live webviews -----------------------------------------
 
 (defmacro agent-repl-test--with-webview-buffers (names &rest body)

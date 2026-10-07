@@ -22,6 +22,9 @@
  *     all; without it a subagent is a black box between spawn and result.
  *   - `perTaskStopAffordance` is what keeps an interrupt to the turn alone;
  *     without it the CLI kills every background task on an interrupt.
+ *   - `mcpServers` carries agent-repl's OWN MCP server (sdk/agent-repl-mcp.ts),
+ *     whose tools agent-repl itself draws, and `allowedTools` pre-allows them:
+ *     they change nothing on the machine, so a prompt would only stall the turn.
  *
  * THE BINARY IS THE SDK'S OWN. `pathToClaudeCodeExecutable` is deliberately
  * NOT set (ruling R12): the shim drives the SDK's bundled, pinned agent binary
@@ -30,10 +33,11 @@
  * engine.
  */
 import { spawn } from "node:child_process";
-import type { Options, SpawnedProcess, SpawnOptions } from "@anthropic-ai/claude-agent-sdk";
+import type { McpServerConfig, Options, SpawnedProcess, SpawnOptions } from "@anthropic-ai/claude-agent-sdk";
 import { bindLog } from "../log.js";
 import { systemPromptOption } from "../metaprompt.js";
 import { importRealSDK } from "../vendor-guard.js";
+import { AGENT_REPL_AUTO_ALLOWED_TOOLS, agentReplMcpServers } from "./agent-repl-mcp.js";
 import type {
   CanUseToolLike,
   PermissionModeLike,
@@ -224,11 +228,14 @@ function defaultSpawn(options: SpawnOptions): SpawnedProcess {
  * Exported separately from {@link createRealQuery} because the factory itself
  * needs the live SDK and therefore cannot run in a unit test, while the options
  * are pure and carry every load-bearing decision above — so they are what the
- * suite asserts.
+ * suite asserts. `mcpServers` is agent-repl's own servers, built from the live
+ * SDK by the factory and passed in for the same reason.
  */
-export function realQueryOptions(spec: RealQuerySpec): Options {
+export function realQueryOptions(spec: RealQuerySpec, mcpServers: Record<string, McpServerConfig>): Options {
   const options: Options = {
     systemPrompt: systemPromptOption(spec.home),
+    mcpServers,
+    allowedTools: [...AGENT_REPL_AUTO_ALLOWED_TOOLS],
     settingSources: ["user", "project", "local"],
     includePartialMessages: true,
     forwardSubagentText: true,
@@ -299,7 +306,7 @@ export async function createRealQuery(
     "constructing the real vendor query",
   );
   const sdk = await importRealSDK("createRealQuery");
-  return asQueryLike(sdk.query({ prompt, options: realQueryOptions(spec) }));
+  return asQueryLike(sdk.query({ prompt, options: realQueryOptions(spec, agentReplMcpServers(sdk)) }));
 }
 
 /**

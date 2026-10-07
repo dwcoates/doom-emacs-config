@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,6 +19,7 @@ import (
 	"claude-repld/internal/bringup"
 	"claude-repld/internal/buildid"
 	"claude-repld/internal/checkout"
+	"claude-repld/internal/chessboard"
 	"claude-repld/internal/classifier"
 	"claude-repld/internal/classifierupdate"
 	"claude-repld/internal/clock"
@@ -456,6 +458,31 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		return nil, fmt.Errorf("claude-repld: load the reveal pacer: %w", err)
 	}
 
+	scripts, err := scriptrunner.New(log)
+	if err != nil {
+		return nil, fmt.Errorf("claude-repld: build the script runner: %w", err)
+	}
+
+	// THE CHESS BOARDS are built before the feed that draws them: a board's
+	// body is their state, and a change to it re-publishes the board's row
+	// (the chess_boards loop below). They build, start and call the CEE CLI's
+	// widget backend through the one script runner, for the serving lifetime.
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("claude-repld: resolve the home directory for the gns cee plugin: %w", err)
+	}
+	chessBoards, err := chessboard.New(chessboard.Deps{
+		Log:       log,
+		Run:       scripts,
+		Getenv:    os.Getenv,
+		PluginDir: filepath.Join(home, ".gns", "plugins", "cee"),
+		HTTP:      &http.Client{},
+		Life:      ctx,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("claude-repld: build the chess boards: %w", err)
+	}
+
 	history := &historyForwarder{}
 	feedResolver, err := feed.New(feed.Deps{
 		Log: p.Surfaces,
@@ -498,6 +525,8 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// THE REVEAL WINDOW on the main agent's live bubbles, measured from the
 		// gaps between their streamed fragments.
 		Pacing: pacer,
+		// A CHESS BOARD's body is the board state's.
+		ChessBoards: chessBoards,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("claude-repld: build the feed resolver: %w", err)
@@ -682,11 +711,6 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	}
 
 	// ---- the rollout and drain controllers ----
-
-	scripts, err := scriptrunner.New(log)
-	if err != nil {
-		return nil, fmt.Errorf("claude-repld: build the script runner: %w", err)
-	}
 
 	// ---- the persistent-wifi controller ----
 	//
@@ -1055,6 +1079,10 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		{Name: "lock_watchdog", Run: stalls.Run},
 		{Name: "persistent_wifi", Run: wifi.Run},
 		{Name: "news_digest", Run: digest.Run},
+		{Name: "chess_boards", Run: func(ctx context.Context) error {
+			chessBoards.Run(ctx, feedResolver.RefreshChessBoards)
+			return nil
+		}},
 	}
 	log.Debug(graphOperation, "the component graph is built", dlog.Context{
 		"joining": p.Opts.joining != "",
@@ -1062,36 +1090,38 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 
 	return &graph{
 		Server: server.Deps{
-			Instance:         p.Instance,
-			SessionFacts:     hostSessionFacts{fleet: fleet},
-			DB:               p.DB,
-			Prompts:          handler,
-			Queue:            queue,
-			Verbs:            verbs,
-			Merge:            mergeOrchestrator,
-			Drain:            drainController,
-			Rollout:          rolloutController,
-			Deploy:           deployer,
-			Health:           healthReporter,
-			Login:            loginManager,
-			Commands:         ingress,
-			Ownership:        ownership,
-			SuccessorAddress: rolloutController.SuccessorAddress,
-			Feed:             feedResolver,
-			Footer:           footerResolver,
-			Topbar:           topbarResolver,
-			Sidebar:          sidebarResolver,
-			Holds:            holdsResolver,
-			LoudFaults:       loudFaults.Topic(),
-			Focus:            focus,
-			PersistentWifi:   wifi,
-			NewsDigest:       digest,
-			ClassifierPrompt: classifierPrompt,
-			EditorInstances:  editors,
-			Startup:          startupRuns,
-			WebappDist:       paths.WebappDist,
-			ImageOrigin:      images.Handler(),
-			Log:              p.Surfaces,
+			Instance:          p.Instance,
+			SessionFacts:      hostSessionFacts{fleet: fleet},
+			DB:                p.DB,
+			Prompts:           handler,
+			Queue:             queue,
+			Verbs:             verbs,
+			Merge:             mergeOrchestrator,
+			Drain:             drainController,
+			Rollout:           rolloutController,
+			Deploy:            deployer,
+			Health:            healthReporter,
+			Login:             loginManager,
+			Commands:          ingress,
+			Ownership:         ownership,
+			SuccessorAddress:  rolloutController.SuccessorAddress,
+			Feed:              feedResolver,
+			Footer:            footerResolver,
+			Topbar:            topbarResolver,
+			Sidebar:           sidebarResolver,
+			Holds:             holdsResolver,
+			LoudFaults:        loudFaults.Topic(),
+			Focus:             focus,
+			PersistentWifi:    wifi,
+			NewsDigest:        digest,
+			ClassifierPrompt:  classifierPrompt,
+			EditorInstances:   editors,
+			Startup:           startupRuns,
+			WebappDist:        paths.WebappDist,
+			ImageOrigin:       images.Handler(),
+			ChessBoards:       chessBoards,
+			ChessWidgetBundle: chessBoards,
+			Log:               p.Surfaces,
 		},
 		Boot: boot.Deps{
 			BindViews:              verbs.BindViews,

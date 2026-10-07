@@ -23,6 +23,7 @@ import (
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"claude-repld/integration/fakegit"
+	"claude-repld/internal/chessboard"
 	"claude-repld/internal/daemonaddr"
 	"claude-repld/internal/stateroot"
 	"claude-repld/internal/tempdirs"
@@ -207,7 +208,33 @@ func BuildIdentityEnv(checkout string) []string {
 // inherited one. A test that wants a prefix sets it through ExtraEnv, which
 // StartDaemon appends after this.
 func HostNeutralNamingEnv() []string {
-	return []string{workspace.PrefixEnv + "=", workspace.LegacyPrefixEnv + "="}
+	return statedEmpty(workspace.PrefixEnv, workspace.LegacyPrefixEnv)
+}
+
+// HostNeutralCheckoutEnv clears the host's explanation-engine checkout for a
+// test daemon. A daemon that resolves a checkout (chessboard.EngineDirEnv,
+// else chessboard.MultiRepoRootEnv's explanation-engine) builds and starts the
+// CEE CLI's widget backend from it with real npm, go and gns; inherited from a
+// developer's shell, a chess board drawn in a test would do exactly that.
+// EngineDirEnv is stated EMPTY, which the daemon reads as unset, and os/exec
+// keeps the last value of a repeated key, so this wins over the inherited
+// one. MultiRepoRootEnv needs no clearing: StartDaemon states it as the
+// world's own temporary tree, which holds no explanation-engine, so every test
+// board resolves to "no checkout" deterministically.
+func HostNeutralCheckoutEnv() []string {
+	return statedEmpty(chessboard.EngineDirEnv)
+}
+
+// statedEmpty answers each key stated EMPTY, the one form every host-neutral
+// env takes: a daemon reads an empty variable as unset, and os/exec keeps the
+// last value of a repeated key, so a stated-empty key appended after
+// os.Environ() wins over the host's.
+func statedEmpty(keys ...string) []string {
+	out := make([]string, 0, len(keys))
+	for _, key := range keys {
+		out = append(out, key+"=")
+	}
+	return out
 }
 
 // ServiceBinaries are the real launchd services a world runs beside its
@@ -702,6 +729,7 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 	)
 	env = append(env, BuildIdentityEnv(PinnedCheckout(t))...)
 	env = append(env, HostNeutralNamingEnv()...)
+	env = append(env, HostNeutralCheckoutEnv()...)
 	env = append(env, TemporaryRegistrationEnv(t)...)
 	// The daemon's OWN checkout identity is always overridden, whether or not
 	// a test cares which repository it is. The merge orchestrator's two

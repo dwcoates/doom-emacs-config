@@ -63,6 +63,10 @@ func (s *fakeServer) GetFeedPage(ctx context.Context, req *connect.Request[v1.Ge
 	return handleUnary[v1.GetFeedPageRequest, v1.GetFeedPageResponse](ctx, s, "GetFeedPage", req.Msg)
 }
 
+func (s *fakeServer) InspectChessBoardSquare(ctx context.Context, req *connect.Request[v1.InspectChessBoardSquareRequest]) (*connect.Response[v1.InspectChessBoardSquareResponse], error) {
+	return handleUnary[v1.InspectChessBoardSquareRequest, v1.InspectChessBoardSquareResponse](ctx, s, "InspectChessBoardSquare", req.Msg)
+}
+
 func (s *fakeServer) Interrupt(ctx context.Context, req *connect.Request[v1.InterruptRequest]) (*connect.Response[v1.InterruptResponse], error) {
 	return handleUnary[v1.InterruptRequest, v1.InterruptResponse](ctx, s, "Interrupt", req.Msg)
 }

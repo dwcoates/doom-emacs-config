@@ -351,7 +351,16 @@ func (m Manager) reclaimOne(path string) (Reclaimed, bool, error) {
 		}
 	}
 	if mount != "" {
-		if err := os.Remove(mount); err != nil && !errors.Is(err, os.ErrNotExist) {
+		// THE MOUNT POINT GOES WITH EVERYTHING UNDER IT. Once the disk is
+		// detached, whatever the dead run left under its mount point sits on
+		// the host's own filesystem (a write that landed after the volume went
+		// away), and all of it is that dead run's. The record must name the
+		// mount point a run of that pid is given, or nothing is removed: a
+		// recursive removal never follows a record it cannot vouch for.
+		if !filepath.IsAbs(mount) || filepath.Base(mount) != fmt.Sprintf("artr-%d", pid) {
+			return r, false, fmt.Errorf("the RAM disk record %s names %q, which is no mount point a run of pid %d is given", path, mount, pid)
+		}
+		if err := os.RemoveAll(mount); err != nil {
 			return r, false, fmt.Errorf("remove the dead run's mount point %s: %w", mount, err)
 		}
 	}

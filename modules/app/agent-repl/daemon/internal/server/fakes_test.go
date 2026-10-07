@@ -1153,6 +1153,7 @@ type harness struct {
 	ClassifierPrompt *fakeClassifierPrompt
 	EditorInstances  *fakeEditorInstances
 	Startup          *fakeStartup
+	ChessBoards      *fakeChessSquares
 	Surfaces         *fakeSurfaces
 	WebappDist       string
 }
@@ -1202,37 +1203,40 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		ClassifierPrompt: &fakeClassifierPrompt{},
 		EditorInstances:  &fakeEditorInstances{},
 		Startup:          &fakeStartup{},
+		ChessBoards:      &fakeChessSquares{},
 	}
 
 	deps := Deps{
-		DB:               h.DB,
-		Prompts:          h.Prompts,
-		Queue:            h.Queue,
-		Verbs:            h.Verbs,
-		Merge:            h.Merge,
-		Drain:            h.Drain,
-		Rollout:          h.Rollout,
-		Deploy:           h.Deployer,
-		Health:           h.Health,
-		SessionFacts:     h.Facts,
-		Login:            h.Login,
-		Ownership:        h.Ownership,
-		SuccessorAddress: func() string { return "127.0.0.1:9999" },
-		Feed:             h.Feed,
-		Footer:           h.Footer,
-		Topbar:           h.Topbar,
-		Sidebar:          h.Sidebar,
-		Holds:            h.Holds,
-		LoudFaults:       &h.LoudFaults,
-		Focus:            h.Focus,
-		PersistentWifi:   h.PersistentWifi,
-		NewsDigest:       h.NewsDigest,
-		ClassifierPrompt: h.ClassifierPrompt,
-		EditorInstances:  h.EditorInstances,
-		Startup:          h.Startup,
-		WebappDist:       dist,
-		ImageOrigin:      http.NotFoundHandler(),
-		Log:              h.Surfaces,
+		DB:                h.DB,
+		Prompts:           h.Prompts,
+		Queue:             h.Queue,
+		Verbs:             h.Verbs,
+		Merge:             h.Merge,
+		Drain:             h.Drain,
+		Rollout:           h.Rollout,
+		Deploy:            h.Deployer,
+		Health:            h.Health,
+		SessionFacts:      h.Facts,
+		Login:             h.Login,
+		Ownership:         h.Ownership,
+		SuccessorAddress:  func() string { return "127.0.0.1:9999" },
+		Feed:              h.Feed,
+		Footer:            h.Footer,
+		Topbar:            h.Topbar,
+		Sidebar:           h.Sidebar,
+		Holds:             h.Holds,
+		LoudFaults:        &h.LoudFaults,
+		Focus:             h.Focus,
+		PersistentWifi:    h.PersistentWifi,
+		NewsDigest:        h.NewsDigest,
+		ClassifierPrompt:  h.ClassifierPrompt,
+		EditorInstances:   h.EditorInstances,
+		Startup:           h.Startup,
+		WebappDist:        dist,
+		ImageOrigin:       http.NotFoundHandler(),
+		ChessBoards:       h.ChessBoards,
+		ChessWidgetBundle: http.NotFoundHandler(),
+		Log:               h.Surfaces,
 	}
 	for _, apply := range opts {
 		apply(&deps)
