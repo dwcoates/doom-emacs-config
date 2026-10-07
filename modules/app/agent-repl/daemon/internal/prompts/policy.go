@@ -134,13 +134,13 @@ func (OnDisk) Text(dir, name string) (string, error) {
 	}
 	if len(prompt.Placeholders) > 0 {
 		return "", fmt.Errorf("prompts: %s declares placeholders %v, and a policy brief is submitted verbatim",
-			filepath.Join(dir, name+Suffix), prompt.Placeholders)
+			Path(dir, name), prompt.Placeholders)
 	}
 	return prompt.Body, nil
 }
 
 // Has reports whether dir holds the named brief as a regular file.
 func Has(dir, name string) bool {
-	info, err := os.Stat(filepath.Join(dir, name+Suffix))
+	info, err := os.Stat(Path(dir, name))
 	return err == nil && info.Mode().IsRegular()
 }

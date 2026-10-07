@@ -60,32 +60,44 @@ func Load(dir, name string) (Prompt, error) {
 	if name == "" {
 		return Prompt{}, fmt.Errorf("prompts: no brief name given")
 	}
-	path := filepath.Join(dir, name+Suffix)
+	path := Path(dir, name)
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return Prompt{}, fmt.Errorf("prompts: reading %s: %w", path, err)
 	}
-	content := string(raw)
+	return Parse(name, path, string(raw))
+}
+
+// Path is where the brief NAME lives in dir.
+func Path(dir, name string) string {
+	return filepath.Join(dir, name+Suffix)
+}
+
+// Parse reads one brief's whole file CONTENT, exactly as Load reads it off
+// disk; WHERE names the content in every error. It is Load's parse alone, so
+// content that is not on disk yet — a rewrite about to replace a brief — is
+// held to the same rules as a brief that is.
+func Parse(name, where, content string) (Prompt, error) {
 	if strings.TrimSpace(content) == "" {
-		return Prompt{}, fmt.Errorf("prompts: %s is empty", path)
+		return Prompt{}, fmt.Errorf("prompts: %s is empty", where)
 	}
 	headerLine, body, found := strings.Cut(content, "\n")
 	if !found {
-		return Prompt{}, fmt.Errorf("prompts: %s has a header and no body", path)
+		return Prompt{}, fmt.Errorf("prompts: %s has a header and no body", where)
 	}
 	header, declared, err := parseHeader(headerLine)
 	if err != nil {
-		return Prompt{}, fmt.Errorf("prompts: %s: %w", path, err)
+		return Prompt{}, fmt.Errorf("prompts: %s: %w", where, err)
 	}
 	// A file's final newline is the editor's line terminator and is dropped;
 	// everything before it is the prompt verbatim.
 	body = strings.TrimSuffix(body, "\n")
 	used, err := bodyPlaceholders(body)
 	if err != nil {
-		return Prompt{}, fmt.Errorf("prompts: %s: %w", path, err)
+		return Prompt{}, fmt.Errorf("prompts: %s: %w", where, err)
 	}
 	if err := sameSet("placeholders", declared, used); err != nil {
-		return Prompt{}, fmt.Errorf("prompts: %s: %w", path, err)
+		return Prompt{}, fmt.Errorf("prompts: %s: %w", where, err)
 	}
 	return Prompt{Name: name, Header: header, Body: body, Placeholders: used}, nil
 }
