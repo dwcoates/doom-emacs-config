@@ -103,6 +103,19 @@ func (b *backend) fail(stage, reason string, cause error, ctx dlog.Context) *fai
 	return &failure{reason: reason}
 }
 
+// unmet logs, at INFO, a prerequisite this machine does not have — no
+// explanation-engine checkout, no gns cee plugin — and answers the failure the
+// board shows. It is not a fault of the backend: the board says what is
+// missing, exactly as it says a session has gone.
+func (b *backend) unmet(stage, reason string, cause error, ctx dlog.Context) *failure {
+	fields := dlog.Context{"stage": stage, "cause": cause.Error(), "reason": reason}
+	for k, v := range ctx {
+		fields[k] = v
+	}
+	b.log.Info(opBackend, "the chess widget's backend lacks a prerequisite on this machine", fields)
+	return &failure{reason: reason}
+}
+
 // step tells waiting boards the step a readying run entered.
 func (b *backend) step(text string) {
 	b.onStep(text)
@@ -166,7 +179,7 @@ func (b *backend) readyOnce(ctx context.Context) (serving, *failure) {
 	b.step(stepGettingReady)
 	checkout, err := resolveCheckout(b.getenv)
 	if err != nil {
-		return serving{}, b.fail("checkout", fmt.Sprintf("The explanation-engine checkout was not found: set %s or %s.", EngineDirEnv, MultiRepoRootEnv), err, nil)
+		return serving{}, b.unmet("checkout", fmt.Sprintf("The explanation-engine checkout was not found: set %s or %s.", EngineDirEnv, MultiRepoRootEnv), err, nil)
 	}
 	cli := filepath.Join(checkout, cliDir)
 	stamp, f := b.ensureWidget(ctx, cli)
@@ -198,12 +211,12 @@ const webappBuildName = ".cee-webapp.agent-repl-build"
 func (b *backend) ensureWebappBinary(ctx context.Context, cli string) *failure {
 	installed := filepath.Join(b.pluginDir, webappBinary)
 	if _, err := os.Stat(b.pluginDir); err != nil {
-		return b.fail("webapp_install", "The gns cee plugin is not installed, so the chess widget's backend cannot run.", err, dlog.Context{"plugin_dir": b.pluginDir})
+		return b.unmet("webapp_install", "The gns cee plugin is not installed, so the chess widget's backend cannot run.", err, dlog.Context{"plugin_dir": b.pluginDir})
 	}
 	built := filepath.Join(b.pluginDir, webappBuildName)
 	b.step(stepBuildingBackend)
 	if f := b.runStep(ctx, "webapp_build", "Building the chess widget's backend failed", cli,
-		[]string{"go", "build", "-o", built, "./cmd/cee-webapp"}); f != nil {
+		[]string{"go", "build", "-buildvcs=false", "-o", built, "./cmd/cee-webapp"}); f != nil {
 		return f
 	}
 	same, err := sameFile(built, installed)
@@ -304,7 +317,7 @@ func (b *backend) startWebapp(ctx context.Context, checkout string) (string, *fa
 func (b *backend) webappURL(ctx context.Context) (string, *failure) {
 	checkout, err := resolveCheckout(b.getenv)
 	if err != nil {
-		return "", b.fail("checkout", fmt.Sprintf("The explanation-engine checkout was not found: set %s or %s.", EngineDirEnv, MultiRepoRootEnv), err, nil)
+		return "", b.unmet("checkout", fmt.Sprintf("The explanation-engine checkout was not found: set %s or %s.", EngineDirEnv, MultiRepoRootEnv), err, nil)
 	}
 	return b.startWebapp(ctx, checkout)
 }

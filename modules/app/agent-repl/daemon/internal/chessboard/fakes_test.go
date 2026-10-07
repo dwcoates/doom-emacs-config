@@ -124,7 +124,7 @@ func buildsTheWidget(r *fakeRunner, cli string) {
 // buildsTheWebapp installs a cee-webapp build that writes body to the -o path.
 func buildsTheWebapp(r *fakeRunner, body string) {
 	r.on("go build", func(_ string, argv []string) (string, int, error) {
-		return "", 0, os.WriteFile(argv[3], []byte(body), 0o755)
+		return "", 0, os.WriteFile(argv[4], []byte(body), 0o755)
 	})
 }
 

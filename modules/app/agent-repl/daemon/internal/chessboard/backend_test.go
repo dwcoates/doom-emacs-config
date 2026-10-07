@@ -111,7 +111,7 @@ func TestEnsureReportsAMissingCheckout(t *testing.T) {
 	if f == nil || !strings.HasPrefix(f.reason, "The explanation-engine checkout was not found") {
 		t.Fatalf("failure = %v, want the missing checkout", f)
 	}
-	assertErrorRecord(t, log, "checkout")
+	assertUnmetRecord(t, log, "checkout")
 }
 
 func TestEnsureReportsAMissingPlugin(t *testing.T) {
@@ -128,7 +128,7 @@ func TestEnsureReportsAMissingPlugin(t *testing.T) {
 	if f == nil || f.reason != "The gns cee plugin is not installed, so the chess widget's backend cannot run." {
 		t.Fatalf("failure = %v, want the missing plugin", f)
 	}
-	assertErrorRecord(t, log, "webapp_install")
+	assertUnmetRecord(t, log, "webapp_install")
 }
 
 func TestEnsureInstallsANewWebappBuildAndStopsTheOldSingleton(t *testing.T) {
@@ -355,4 +355,22 @@ func TestPollSessionReportsAnUnreadablePoll(t *testing.T) {
 		t.Fatalf("failure = %v, want the unreadable poll", f)
 	}
 	assertErrorRecord(t, log, "session_poll")
+}
+
+// assertUnmetRecord asserts the INFO record of a missing prerequisite for
+// stage, and that it raised no ERROR.
+func assertUnmetRecord(t *testing.T, log *dlog.TestLogger, stage string) {
+	t.Helper()
+	found := false
+	for _, rec := range log.Records() {
+		if rec.Level == "error" {
+			t.Fatalf("a missing prerequisite logged at ERROR: %+v", rec)
+		}
+		if rec.Level == "info" && rec.Operation == opBackend && rec.Context["stage"] == stage && rec.Context["cause"] != "" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("no INFO %s record for stage %q in %+v", opBackend, stage, log.Records())
+	}
 }
