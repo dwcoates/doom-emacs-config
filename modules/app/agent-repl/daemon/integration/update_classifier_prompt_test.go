@@ -4,7 +4,6 @@ package integration
 
 import (
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -24,14 +23,10 @@ const rewriteLine = "Interrupt whenever a message says something must happen aft
 // the brief it was shown, plus rewriteLine: a usable rewrite, slots intact.
 func rewritingClaudeEnv(t *testing.T) []string {
 	t.Helper()
-	claude := filepath.Join(t.TempDir(), "claude")
 	script := "#!/bin/sh\n" +
 		"sed -n '/^<current-prompt>$/,/^<\\/current-prompt>$/p' | sed '1d;$d'\n" +
 		"printf '%s\\n' '" + rewriteLine + "'\n"
-	if err := os.WriteFile(claude, []byte(script), 0o755); err != nil {
-		t.Fatalf("write the fake claude: %v", err)
-	}
-	return []string{"AGENT_REPL_CLAUDE_BIN=" + claude}
+	return []string{scriptedClaudeEnv(t, script)}
 }
 
 func updateClassifierPromptRequest() *agentreplv1.UpdateClassifierPromptRequest {
