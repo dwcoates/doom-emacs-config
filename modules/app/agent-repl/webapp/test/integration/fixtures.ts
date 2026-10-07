@@ -566,6 +566,33 @@ export const subagentResultUnit = (
   },
 });
 
+/** A chess board whose daemon-side state is STATE. */
+export const chessBoardUnit = (
+  state:
+    | { case: "preparing"; step: string }
+    | { case: "unavailable"; reason: string }
+    | { case: "ready"; bytes: Uint8Array },
+): ActivityUnit => ({
+  case: "chessBoard",
+  value: {
+    heading: { text: "Chess board · CEE session agent-a" },
+    state:
+      state.case === "preparing"
+        ? { case: "preparing", value: { step: { text: state.step } } }
+        : state.case === "unavailable"
+          ? { case: "unavailable", value: { reason: { text: state.reason } } }
+          : {
+              case: "ready",
+              value: {
+                widget: { ceeWebWidget: state.bytes },
+                bundle: { scriptUrl: "/chess-widget/s/cee-web-widget.js", stylesheetUrl: "/chess-widget/s/cee-web-widget.css" },
+                squareToken: { value: "v1.token" },
+                startPosition: { gamePoint: 7n },
+              },
+            },
+  },
+});
+
 export const findingsUnit = (): ActivityUnit => ({
   case: "findings",
   value: {
