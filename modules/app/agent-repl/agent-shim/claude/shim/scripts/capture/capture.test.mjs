@@ -60,7 +60,12 @@ import {
   resolvePermissionDecision,
   vendorChildPids,
   waitForVendorChildExit,
+  accountEmailIn,
+  anonymizeMeta,
+  copyTreeAnonymized,
+  personalValuesFromHost,
 } from "./capture.mjs";
+import { NO_PERSONAL_VALUES } from "./anonymize.mjs";
 import { AUTH_CONFIG_ROOT, AUTH_SEED_CREDENTIALS } from "./auth.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -915,7 +920,7 @@ describe("lateReclaimSlug", () => {
       '{"type":"user"}\n',
       "utf8",
     );
-    lateReclaimSlug({ accountRoot, slug, captureDir, report: { unparsed: [] } });
+    lateReclaimSlug({ accountRoot, slug, captureDir, report: { unparsed: [] }, personal: NO_PERSONAL_VALUES });
     expect(
       readFileSync(path.join(captureDir, "files", "projects", slug, "late.jsonl"), "utf8"),
     ).toContain('"type":"user"');
@@ -924,7 +929,7 @@ describe("lateReclaimSlug", () => {
   it("leaves the operator's root clean afterwards", () => {
     const { accountRoot, captureDir } = fakeRoot(slug);
     writeFileSync(path.join(accountRoot, "projects", slug, "late.jsonl"), "{}\n", "utf8");
-    lateReclaimSlug({ accountRoot, slug, captureDir, report: { unparsed: [] } });
+    lateReclaimSlug({ accountRoot, slug, captureDir, report: { unparsed: [] }, personal: NO_PERSONAL_VALUES });
     expect(existsSync(path.join(accountRoot, "projects", slug))).toBe(false);
   });
 
@@ -933,7 +938,7 @@ describe("lateReclaimSlug", () => {
     const other = path.join(accountRoot, "projects", "-Users-someone-real-project");
     mkdirSync(other, { recursive: true });
     writeFileSync(path.join(other, "session.jsonl"), "{}\n", "utf8");
-    lateReclaimSlug({ accountRoot, slug, captureDir, report: { unparsed: [] } });
+    lateReclaimSlug({ accountRoot, slug, captureDir, report: { unparsed: [] }, personal: NO_PERSONAL_VALUES });
     expect(existsSync(path.join(other, "session.jsonl"))).toBe(true);
   });
 
@@ -946,6 +951,7 @@ describe("lateReclaimSlug", () => {
       slug,
       captureDir,
       report: { unparsed: [] },
+      personal: NO_PERSONAL_VALUES,
       log: (line) => lines.push(line),
     });
     expect(lines.join("")).toContain(`late reclaim ${slug}`);
@@ -953,7 +959,7 @@ describe("lateReclaimSlug", () => {
 
   it("reports nothing moved when the vendor wrote nothing late", () => {
     const { accountRoot, captureDir } = fakeRoot(slug);
-    expect(lateReclaimSlug({ accountRoot, slug, captureDir, report: { unparsed: [] } })).toEqual({
+    expect(lateReclaimSlug({ accountRoot, slug, captureDir, report: { unparsed: [] }, personal: NO_PERSONAL_VALUES })).toEqual({
       slug,
       moved: [],
     });
@@ -970,7 +976,7 @@ describe("mergeTreeAnonymized", () => {
     const full = `${'{"a":1}\n'.repeat(20)}`;
     writeFileSync(path.join(to, "session.jsonl"), full, "utf8");
     writeFileSync(path.join(from, "session.jsonl"), '{"a":1}\n', "utf8");
-    mergeTreeAnonymized(from, to, { unparsed: [] });
+    mergeTreeAnonymized(from, to, { unparsed: [] }, NO_PERSONAL_VALUES);
     expect(readFileSync(path.join(to, "session.jsonl"), "utf8")).toBe(full);
   });
 
@@ -980,7 +986,7 @@ describe("mergeTreeAnonymized", () => {
     const to = path.join(base, "to");
     mkdirSync(from, { recursive: true });
     writeFileSync(path.join(from, "new.txt"), "hello", "utf8");
-    expect(mergeTreeAnonymized(from, to, { unparsed: [] })).toEqual([path.join(to, "new.txt")]);
+    expect(mergeTreeAnonymized(from, to, { unparsed: [] }, NO_PERSONAL_VALUES)).toEqual([path.join(to, "new.txt")]);
   });
 
   it("merges a nested subagent sidechain directory", () => {
@@ -989,7 +995,7 @@ describe("mergeTreeAnonymized", () => {
     const to = path.join(base, "to");
     mkdirSync(path.join(from, "sub"), { recursive: true });
     writeFileSync(path.join(from, "sub", "agent.json"), '{"id":"x"}', "utf8");
-    mergeTreeAnonymized(from, to, { unparsed: [] });
+    mergeTreeAnonymized(from, to, { unparsed: [] }, NO_PERSONAL_VALUES);
     expect(existsSync(path.join(to, "sub", "agent.json"))).toBe(true);
   });
 });
@@ -1710,4 +1716,101 @@ describe("resuming a session captured on an earlier run", () => {
     const world = createWorld(WORLD_AUTH, "ordinary");
     expect(world.cwd).toBe(path.join(world.scratch, "cwd"));
   });
+});
+
+describe("personal values", () => {
+  /** A fake home holding the given identity files (path -> JSON text). */
+  function fakeHome(files) {
+    const home = realpathSync(mkdtempSync(path.join(tmpdir(), "capture-home-")));
+    for (const [rel, text] of Object.entries(files)) {
+      mkdirSync(path.dirname(path.join(home, rel)), { recursive: true });
+      writeFileSync(path.join(home, rel), text, "utf8");
+    }
+    return home;
+  }
+  const identity = (email) => JSON.stringify({ oauthAccount: { emailAddress: email } });
+
+  it("collects every account root's email, the configured root's, and the env's", () => {
+    const home = fakeHome({
+      ".claude.json": identity("personal@host.test"),
+      ".claude-chesscom/.claude.json": identity("work@host.test"),
+      "other/.claude.json": identity("other@host.test"),
+    });
+    const got = personalValuesFromHost(
+      { CAPTURE_PERSONAL_EMAILS: "extra@host.test, " },
+      { home, username: "login", gitUserName: () => "", configRoot: path.join(home, "other") },
+    );
+    expect(got.emails.sort()).toEqual(
+      ["extra@host.test", "other@host.test", "personal@host.test", "work@host.test"],
+    );
+  });
+
+  it("collects the login, the home's last segment, the git name's words and the env's names", () => {
+    const home = fakeHome({});
+    const got = personalValuesFromHost(
+      { CAPTURE_PERSONAL_NAMES: "Nickname" },
+      { home, username: "login", gitUserName: () => "Ann Example\n" },
+    );
+    expect(got.home).toBe(home);
+    expect(got.names.sort()).toEqual(
+      ["Ann", "Example", "Nickname", path.basename(home), "login"].sort(),
+    );
+  });
+
+  it("leaves out name words under three letters", () => {
+    const home = fakeHome({});
+    const got = personalValuesFromHost({}, { home, username: "login", gitUserName: () => "Al B" });
+    expect(got.names).not.toContain("Al");
+    expect(got.names).not.toContain("B");
+  });
+
+  it("reads an absent identity file as no email", () => {
+    expect(accountEmailIn(path.join(fakeHome({}), "missing.json"))).toBeNull();
+  });
+
+  it("refuses an identity file that does not parse", () => {
+    const home = fakeHome({ ".claude.json": "{not json" });
+    expect(() => accountEmailIn(path.join(home, ".claude.json"))).toThrow();
+  });
+});
+
+describe("the capture writes scrub personal values", () => {
+  const personal = { home: "/Users/ann", emails: ["ann@host.test"], names: ["ann"] };
+
+  it("copyTreeAnonymized scrubs file names and contents", () => {
+    const base = realpathSync(mkdtempSync(path.join(tmpdir(), "capture-copy-")));
+    const from = path.join(base, "from", "-Users-ann-proj");
+    mkdirSync(from, { recursive: true });
+    writeFileSync(
+      path.join(from, "s.jsonl"),
+      `${JSON.stringify({ cwd: "/Users/ann/proj", email: "ann@host.test", who: "Ann" })}\n`,
+      "utf8",
+    );
+    copyTreeAnonymized(path.join(base, "from"), path.join(base, "to"), { unparsed: [] }, personal);
+    const written = readFileSync(path.join(base, "to", "--proj", "s.jsonl"), "utf8");
+    expect(JSON.parse(written)).toEqual({ cwd: "~/proj", email: "person1@example.com", who: "Someone" });
+  });
+
+  it("anonymizeMeta scrubs keys and strings and nothing else", () => {
+    expect(anonymizeMeta({ "/Users/ann/x": 1, note: "Ann ran it", n: 2 }, personal)).toEqual({
+      "~/x": 1,
+      note: "Someone ran it",
+      n: 2,
+    });
+  });
+
+  const missing = [
+    ["copyTreeAnonymized", () => copyTreeAnonymized("/nowhere", "/nowhere", { unparsed: [] })],
+    ["mergeTreeAnonymized", () => mergeTreeAnonymized("/nowhere", "/nowhere", { unparsed: [] })],
+    [
+      "lateReclaimSlug",
+      () => lateReclaimSlug({ accountRoot: "/nowhere", slug: "s", captureDir: "/nowhere", report: { unparsed: [] } }),
+    ],
+    ["anonymizeMeta", () => anonymizeMeta({})],
+  ];
+  for (const [site, call] of missing) {
+    it(`${site} refuses to run without personal values`, () => {
+      expect(call).toThrow(`${site} was called without the personal values to scrub`);
+    });
+  }
 });
