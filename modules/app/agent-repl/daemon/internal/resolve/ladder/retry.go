@@ -4,10 +4,11 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 )
 
-// A STANDING API RETRY IS A BLOCK (owner ruling, 2026-10-01). While the vendor
-// retries a call that failed mid-turn the turn cannot advance, so the
-// workspace is unusable and both surfaces claim the blocked rung: the footer
-// as `blocked · api_retrying`, the roster as `api_retrying`. The retry stands
+// A STANDING API RETRY IS A VENDOR FAULT (owner ruling, 2026-10-02,
+// superseding 2026-10-01's block). While the vendor retries a call that failed
+// mid-turn the turn cannot advance, and both surfaces claim the vendor-fault
+// rung, turquoise: the footer as `vendor_fault · api_retrying`, the roster as
+// `api_retrying`. The retry stands
 // from the failure the vendor reports until RetryAnswered says the retried
 // agent was answered, the turn ends, or a new turn opens.
 
