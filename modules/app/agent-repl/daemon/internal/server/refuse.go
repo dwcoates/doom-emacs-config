@@ -13,6 +13,7 @@ import (
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"claude-repld/internal/bounce"
+	"claude-repld/internal/classifierupdate"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/drain"
 	"claude-repld/internal/ids"
@@ -83,6 +84,9 @@ func (s *server) asRefusal(err error) (refusal, bool) {
 			Reason: fmt.Sprintf("%d detached agents are live", confirm.LiveAgentCount),
 			Fields: map[string]any{"live_agent_count": int64(confirm.LiveAgentCount)},
 		}), true
+	}
+	if updateRefusal, ok := classifierupdate.AsRefusal(err); ok {
+		return s.fill(refusal{Arm: updateRefusal.Arm, Reason: updateRefusal.Reason, Fields: updateRefusal.Fields}), true
 	}
 	var shimRefusal *workspace.ShimRefusal
 	if errors.As(err, &shimRefusal) {

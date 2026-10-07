@@ -20,7 +20,7 @@
  * merge stands — the footer's status and the feed's merge bubble already carry
  * that, and a second account of it would be a second thing to keep in step.
  */
-import { createControl, CONTROL_SELECTOR, type Control } from "../control.js";
+import { labelledControl, CONTROL_SELECTOR, type Control } from "../control.js";
 import type {
   HeldOffer,
   HeldOfferHeadline,
@@ -110,15 +110,14 @@ function decisionButton(
   extraClass: string,
   tc: TrayContext,
 ): Control {
-  const button = createControl();
-  button.className = extraClass;
-  button.setAttribute("data-offer-decision", decision);
-  button.textContent = label;
-  button.addEventListener("click", (event: MouseEvent) => {
-    event.preventDefault();
-    void guardMalformed(tc.ctx, "tray.held-offer.answer", answer(decision, tc, button));
+  return labelledControl({
+    className: extraClass,
+    hook: ["data-offer-decision", decision],
+    label,
+    onClick: (button) => {
+      void guardMalformed(tc.ctx, "tray.held-offer.answer", answer(decision, tc, button));
+    },
   });
-  return button;
 }
 
 /**

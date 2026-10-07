@@ -636,6 +636,22 @@ func validateFoldHeldPromptRequest(req *agentreplv1.FoldHeldPromptRequest) *conn
 	return nil
 }
 
+// validateUpdateClassifierPromptRequest is UpdateClassifierPromptRequest's
+// base function. The example's text may be empty (a prompt that was only an
+// image still had a verdict); its route may not.
+func validateUpdateClassifierPromptRequest(req *agentreplv1.UpdateClassifierPromptRequest) *connect.Error {
+	if strings.TrimSpace(req.GetInstruction()) == "" {
+		return invalid("instruction", "the change to make is required")
+	}
+	if req.GetExample() == nil {
+		return invalid("example", "the classified prompt the change was asked from is required")
+	}
+	if req.GetExample().GetRoute() == agentreplv1.ClassifierRoute_CLASSIFIER_ROUTE_UNSPECIFIED {
+		return invalid("example.route", "the classifier's verdict is required")
+	}
+	return nil
+}
+
 // validateAnswerHeldOfferRequest is AnswerHeldOfferRequest's base function.
 func validateAnswerHeldOfferRequest(req *agentreplv1.AnswerHeldOfferRequest) *connect.Error {
 	if err := validateWorkspaceRef("workspace", req.GetWorkspace()); err != nil {

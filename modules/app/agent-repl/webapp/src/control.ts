@@ -120,3 +120,32 @@ export function createControl(doc: Document = document): Control {
   });
   return el as Control;
 }
+
+/** What a labelled control is built from (`labelledControl`). */
+export interface LabelledControlSpec {
+  /** The control's whole class list. */
+  className: string;
+  /** The attribute it is found by, and that attribute's value. */
+  hook: readonly [attribute: string, value: string];
+  /** The words it shows. */
+  label: string;
+  /** What a click does; the click's default is prevented first. */
+  onClick: (control: Control) => void;
+}
+
+/**
+ * A control that says LABEL, wears its class, carries its hook and runs its
+ * click: the shape every row control shares, built once so no two rows hand
+ * roll it differently.
+ */
+export function labelledControl(spec: LabelledControlSpec): Control {
+  const control = createControl();
+  control.className = spec.className;
+  control.setAttribute(spec.hook[0], spec.hook[1]);
+  control.textContent = spec.label;
+  control.addEventListener("click", (event: MouseEvent) => {
+    event.preventDefault();
+    spec.onClick(control);
+  });
+  return control;
+}

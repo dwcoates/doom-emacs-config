@@ -2360,3 +2360,219 @@ func TestDeleteBranchAtMovedBranchIsARefusal(t *testing.T) {
 		t.Fatalf("DeleteBranchAt = %v, want git's refusal", err)
 	}
 }
+func TestRecordCommitRunsTheCommitThenReadsHeadBack(t *testing.T) {
+	// Arrange.
+	git, _ := newTestClient(t)
+	fake := newFakeGit(t, ok("aaaabbbbccccdddd", "rev-parse"), ok(""))
+
+	// Act.
+	sha, err := git.(*client).recordCommit(context.Background(), "op", "/repo", "commit", "-m", "x")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("recordCommit: %v", err)
+	}
+	fake.assertSubject(0, "commit", "-m", "x")
+	fake.assertSubject(1, "rev-parse", "HEAD")
+	if sha != "aaaabbbbccccdddd" {
+		t.Fatalf("recordCommit sha = %q, want the rev-parse answer", sha)
+	}
+}
+
+func TestRecordCommitNeverReadsHeadAfterAFailedCommit(t *testing.T) {
+	// Arrange.
+	git, _ := newTestClient(t)
+	fake := newFakeGit(t, fails(1, "nothing to commit\n"))
+
+	// Act.
+	_, err := git.(*client).recordCommit(context.Background(), "op", "/repo", "commit", "-m", "x")
+
+	// Assert.
+	if err == nil {
+		t.Fatalf("recordCommit = nil error, want the commit's failure")
+	}
+	fake.assertNever("rev-parse")
+}
+
+func TestStatusEmptyWithNoPathspecProbesTheWholeTree(t *testing.T) {
+	// Arrange.
+	git, _ := newTestClient(t)
+	fake := newFakeGit(t, ok(""))
+
+	// Act.
+	if _, err := git.(*client).statusEmpty(context.Background(), "op", "/repo"); err != nil {
+		t.Fatalf("statusEmpty: %v", err)
+	}
+
+	// Assert.
+	fake.assertSubject(0, "--no-optional-locks", "status", "--porcelain")
+}
+
+func TestStatusEmptyIsFalseForAnyListedEntry(t *testing.T) {
+	// Arrange.
+	git, _ := newTestClient(t)
+	newFakeGit(t, ok(" M a.go\n"))
+
+	// Act.
+	clean, err := git.(*client).statusEmpty(context.Background(), "op", "/repo")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("statusEmpty: %v", err)
+	}
+	if clean {
+		t.Fatalf("statusEmpty = true for a listed entry, want false")
+	}
+}
+
+func TestCommitSharesTheRecordCommitShape(t *testing.T) {
+	// Arrange: Commit's argv is recordCommit's — the commit, then the
+	// read-back — so a hand-rolled divergent commit path fails here.
+	git, _ := newTestClient(t)
+	fake := newFakeGit(t, ok("aaaabbbbccccdddd", "rev-parse"), ok(""))
+
+	// Act.
+	if _, err := git.Commit(context.Background(), "/repo", "m"); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+
+	// Assert.
+	if n := len(fake.calls()); n != 2 {
+		t.Fatalf("Commit issued %d gits, want the commit and its read-back", n)
+	}
+	fake.assertSubject(1, "rev-parse", "HEAD")
+}
+
+func TestIsCleanSharesTheStatusEmptyShape(t *testing.T) {
+	// Arrange.
+	git, _ := newTestClient(t)
+	fake := newFakeGit(t, ok(""))
+
+	// Act.
+	if _, err := git.IsClean(context.Background(), "/repo"); err != nil {
+		t.Fatalf("IsClean: %v", err)
+	}
+
+	// Assert: the whole-tree probe, with no pathspec separator.
+	fake.assertSubject(0, "--no-optional-locks", "status", "--porcelain")
+}
+
+func TestPathCleanProbesOnlyThePath(t *testing.T) {
+	// Arrange: the probe is narrowed by a pathspec after `--`, so a path that
+	// reads like a flag can never be taken for one.
+	git, _ := newTestClient(t)
+	fake := newFakeGit(t, ok(""))
+
+	// Act.
+	if _, err := git.PathClean(context.Background(), "/repo", "/repo/prompts/a.md"); err != nil {
+		t.Fatalf("PathClean: %v", err)
+	}
+
+	// Assert.
+	fake.assertSubject(0, "--no-optional-locks", "status", "--porcelain", "--", "/repo/prompts/a.md")
+}
+
+func TestPathCleanIsTrueForAnEmptyStatus(t *testing.T) {
+	// Arrange.
+	git, _ := newTestClient(t)
+	newFakeGit(t, ok(""))
+
+	// Act.
+	clean, err := git.PathClean(context.Background(), "/repo", "/repo/a.md")
+
+	// Assert.
+	if err != nil || !clean {
+		t.Fatalf("PathClean = (%v, %v), want (true, nil)", clean, err)
+	}
+}
+
+func TestPathCleanIsFalseForAModifiedPath(t *testing.T) {
+	// Arrange.
+	git, _ := newTestClient(t)
+	newFakeGit(t, ok(" M a.md\n"))
+
+	// Act.
+	clean, err := git.PathClean(context.Background(), "/repo", "/repo/a.md")
+
+	// Assert.
+	if err != nil || clean {
+		t.Fatalf("PathClean = (%v, %v), want (false, nil)", clean, err)
+	}
+}
+
+func TestPathCleanIsFalseForAnUntrackedPath(t *testing.T) {
+	// Arrange.
+	git, _ := newTestClient(t)
+	newFakeGit(t, ok("?? a.md\n"))
+
+	// Act.
+	clean, err := git.PathClean(context.Background(), "/repo", "/repo/a.md")
+
+	// Assert.
+	if err != nil || clean {
+		t.Fatalf("PathClean = (%v, %v), want (false, nil)", clean, err)
+	}
+}
+
+func TestPathCleanFailureCarriesGitsEvidence(t *testing.T) {
+	// Arrange.
+	git, _ := newTestClient(t)
+	newFakeGit(t, fails(128, "fatal: not a git repository\n"))
+
+	// Act.
+	_, err := git.PathClean(context.Background(), "/repo", "/repo/a.md")
+
+	// Assert.
+	var failure *Error
+	if !errors.As(err, &failure) || !strings.Contains(failure.Stderr, "not a git repository") {
+		t.Fatalf("PathClean error = %v, want a *gitclient.Error with git's words", err)
+	}
+}
+
+func TestCommitPathCommitsOnlyThePath(t *testing.T) {
+	// Arrange: `--only` commits the path through a temporary index, so
+	// nothing else staged rides along.
+	git, _ := newTestClient(t)
+	fake := newFakeGit(t, ok("aaaabbbbccccdddd", "rev-parse"), ok(""))
+
+	// Act.
+	if _, err := git.CommitPath(context.Background(), "/repo", "/repo/a.md", "update a"); err != nil {
+		t.Fatalf("CommitPath: %v", err)
+	}
+
+	// Assert.
+	fake.assertSubject(0, "commit", "--only", "-m", "update a", "--", "/repo/a.md")
+}
+
+func TestCommitPathAnswersTheReadBackSha(t *testing.T) {
+	// Arrange.
+	git, _ := newTestClient(t)
+	fake := newFakeGit(t, ok("aaaabbbbccccdddd", "rev-parse"), ok(""))
+
+	// Act.
+	sha, err := git.CommitPath(context.Background(), "/repo", "/repo/a.md", "update a")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("CommitPath: %v", err)
+	}
+	fake.assertSubject(1, "rev-parse", "HEAD")
+	if sha != "aaaabbbbccccdddd" {
+		t.Fatalf("CommitPath sha = %q, want the rev-parse answer", sha)
+	}
+}
+
+func TestCommitPathFailureCarriesGitsEvidence(t *testing.T) {
+	// Arrange.
+	git, _ := newTestClient(t)
+	newFakeGit(t, fails(1, "[merge-queue] REFUSED: master moves only through the agent-repl merge queue.\n"))
+
+	// Act.
+	_, err := git.CommitPath(context.Background(), "/repo", "/repo/a.md", "update a")
+
+	// Assert.
+	var failure *Error
+	if !errors.As(err, &failure) || !strings.Contains(failure.Stderr, "REFUSED") {
+		t.Fatalf("CommitPath error = %v, want a *gitclient.Error with git's words", err)
+	}
+}

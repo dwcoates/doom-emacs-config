@@ -75,3 +75,34 @@ func TestStoppingAGateAnswersWhenItsCommandEnds(t *testing.T) {
 	<-done
 	<-idle
 }
+
+func TestAStoppedGateRefusesThePathScopedCommands(t *testing.T) {
+	// Arrange.
+	tests := []struct {
+		name string
+		call func(g *gatedGit) error
+	}{
+		{name: "PathClean", call: func(g *gatedGit) error {
+			_, err := g.PathClean(context.Background(), "/repo", "/repo/a.md")
+			return err
+		}},
+		{name: "CommitPath", call: func(g *gatedGit) error {
+			_, err := g.CommitPath(context.Background(), "/repo", "/repo/a.md", "m")
+			return err
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gate := newGatedGit(newFakeGit(counter()), time.Now)
+			gate.stop()
+
+			// Act.
+			err := tt.call(gate)
+
+			// Assert.
+			if !errors.Is(err, errMergeStopping) {
+				t.Fatalf("%s on a stopped gate = %v, want errMergeStopping", tt.name, err)
+			}
+		})
+	}
+}
