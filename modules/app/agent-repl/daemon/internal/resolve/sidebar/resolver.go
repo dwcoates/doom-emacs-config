@@ -681,7 +681,7 @@ func sessionUpdateArm(update *conversationv1.SessionUpdate) (string, func(*wsSta
 	case *conversationv1.SessionUpdate_Compacting:
 		return "compacting", func(s *wsState) { s.compacting = true }
 	case *conversationv1.SessionUpdate_Diagnostics:
-		return "diagnostics", func(s *wsState) { s.degraded = anyWindowOpen(u.Diagnostics) }
+		return "diagnostics", func(s *wsState) { s.degraded = ladder.DegradedWindowOpen(u.Diagnostics) }
 	case *conversationv1.SessionUpdate_ModelChanged:
 		return "model_changed", func(*wsState) {}
 	case *conversationv1.SessionUpdate_PermissionModeChanged:
@@ -746,17 +746,6 @@ func terminalOutcome(success *conversationv1.AgentSuccess, failure *conversation
 	default:
 		return "unset"
 	}
-}
-
-// anyWindowOpen reports whether the diagnostics carry an open degraded window,
-// which is what makes a serving link read as degraded.
-func anyWindowOpen(d *conversationv1.SessionDiagnostics) bool {
-	for _, w := range d.GetDegradedWindows() {
-		if _, open := w.GetExtent().(*conversationv1.SessionDegradedWindow_Open); open {
-			return true
-		}
-	}
-	return false
 }
 
 // linkName spells a link state for the record.
