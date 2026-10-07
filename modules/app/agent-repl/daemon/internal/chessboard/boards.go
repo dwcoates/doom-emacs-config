@@ -209,6 +209,16 @@ func (b *Boards) resolve(s Session) {
 	b.setIfPreparing(s, stepLoadingGame)
 	ctx, cancel := context.WithTimeout(b.deps.Life, callTimeout)
 	defer cancel()
+	poll, f := b.backend.pollSession(ctx, srv.checkout, s)
+	if f != nil {
+		b.settle(s, unavailable(f.reason))
+		return
+	}
+	if !poll.live {
+		log.Info(opBoard, "the board's CEE session no longer holds its game; the board is unavailable", dlog.Context{"poll": poll.account})
+		b.settle(s, unavailable(fmt.Sprintf("CEE session %s no longer holds game %s.", s.ID, s.GameID)))
+		return
+	}
 	widget, err := getWidget(ctx, b.deps.HTTP, srv.baseURL, s)
 	switch {
 	case errors.Is(err, errSessionGone):
@@ -220,9 +230,10 @@ func (b *Boards) resolve(s Session) {
 	default:
 		log.Info(opBoard, "the board's widget data arrived; the board is ready", dlog.Context{"widget_bytes": len(widget), "widget_stamp": srv.widgetStamp})
 		b.settle(s, &frontendv1.FeedChessBoardReady{
-			Widget:      &frontendv1.FeedChessBoardWidget{CeeWebWidget: widget},
-			Bundle:      bundleFor(srv.widgetStamp),
-			SquareToken: s.Token(),
+			Widget:        &frontendv1.FeedChessBoardWidget{CeeWebWidget: widget},
+			Bundle:        bundleFor(srv.widgetStamp),
+			SquareToken:   s.Token(),
+			StartPosition: &frontendv1.FeedChessBoardStartPosition{GamePoint: poll.root},
 		})
 	}
 }

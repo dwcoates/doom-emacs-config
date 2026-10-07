@@ -37,7 +37,7 @@ func (r *fakeRunner) Run(_ context.Context, dir string, argv []string) (string, 
 	r.mu.Lock()
 	r.ran = append(r.ran, ranCommand{dir: dir, argv: append([]string(nil), argv...)})
 	r.mu.Unlock()
-	line := strings.Join(argv, " ")
+	line := strings.Join(commandOf(argv), " ")
 	best := ""
 	for prefix := range r.handlers {
 		if strings.HasPrefix(line, prefix) && len(prefix) > len(best) {
@@ -48,6 +48,19 @@ func (r *fakeRunner) Run(_ context.Context, dir string, argv []string) (string, 
 		return "", 0, nil
 	}
 	return r.handlers[best](dir, argv)
+}
+
+// commandOf is argv without a leading `env KEY=VALUE…`, so a handler names
+// the command itself.
+func commandOf(argv []string) []string {
+	if len(argv) == 0 || argv[0] != "env" {
+		return argv
+	}
+	rest := argv[1:]
+	for len(rest) > 0 && strings.Contains(rest[0], "=") {
+		rest = rest[1:]
+	}
+	return rest
 }
 
 // commands answers every run's argv, joined, in order.
@@ -117,10 +130,18 @@ func buildsTheWebapp(r *fakeRunner, body string) {
 
 // servesAt installs a `gns cee debug webapp` that answers url.
 func servesAt(r *fakeRunner, url string) {
-	r.on("env", func(string, []string) (string, int, error) {
+	r.on("gns cee debug webapp", func(string, []string) (string, int, error) {
 		return `{"url":"` + url + `"}`, 0, nil
 	})
 }
+
+// pollsAs installs a `gns cee session poll` answering body.
+func pollsAs(r *fakeRunner, body string) {
+	r.on("gns cee session poll", func(string, []string) (string, int, error) { return body, 0, nil })
+}
+
+// livePoll is the poll of testSession holding its game, rooted at 7.
+const livePoll = `{"active":true,"has_game":true,"game_id":"g-1","root_gamepoint":7,"id":"agent-a"}`
 
 // removeFile deletes path.
 func removeFile(t *testing.T, path string) {
