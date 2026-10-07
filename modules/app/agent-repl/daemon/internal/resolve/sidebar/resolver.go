@@ -130,7 +130,7 @@ func (r *resolver) mutate(operation, message string, ctx dlog.Context, log dlog.
 	ready := r.state.regSeen
 	var roster *frontendv1.WorkspaceRoster
 	if ready {
-		roster = r.render(log)
+		roster = r.render(log, operation)
 	}
 	changes := r.pendingResults
 	r.pendingResults = nil
@@ -179,9 +179,10 @@ func (r *resolver) mutateWorkspaceLogged(ws ids.WorkspaceID, operation, message 
 }
 
 // render builds the WHOLE roster: both groupings, the hoisted merged section
-// and the selection.
-func (r *resolver) render(log dlog.Logger) *frontendv1.WorkspaceRoster {
-	rc := rowContext{sessions: r.state.sessions(), selected: r.state.selected}
+// and the selection. CAUSE is the operation whose fact is being rendered, named
+// on every status arm change the render publishes.
+func (r *resolver) render(log dlog.Logger, cause string) *frontendv1.WorkspaceRoster {
+	rc := rowContext{sessions: r.state.sessions(), selected: r.state.selected, cause: cause}
 
 	var live, merged []wsm.Workspace
 	for _, ws := range r.state.reg.Workspaces {
