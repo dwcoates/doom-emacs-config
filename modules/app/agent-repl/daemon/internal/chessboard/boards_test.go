@@ -41,6 +41,7 @@ func newBoardsFixture(t *testing.T) *boardsFixture {
 	buildsTheWebapp(r, "webapp")
 	w := newFakeWebapp(t)
 	servesAt(r, w.server.URL)
+	pollsAs(r, livePoll)
 	log := dlog.NewTestLogger()
 	life, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -361,7 +362,7 @@ func TestInspectSquareWithNoAnswerIsABackendErrorAndLogged(t *testing.T) {
 func TestInspectSquareWhoseBackendWontStartIsABackendError(t *testing.T) {
 	// Arrange.
 	f := newBoardsFixture(t)
-	f.runner.on("env", func(string, []string) (string, int, error) { return "no plugin", 1, nil })
+	f.runner.on("gns cee debug webapp", func(string, []string) (string, int, error) { return "no plugin", 1, nil })
 
 	// Act.
 	_, err := f.boards.InspectSquare(context.Background(), testSession, 7, 1)
@@ -495,4 +496,52 @@ func TestViewOfANeverDrawnSessionPanics(t *testing.T) {
 
 	// Act.
 	f.boards.View(testSession)
+}
+
+func TestAReadyBoardStartsAtItsGamesRoot(t *testing.T) {
+	// Arrange.
+	f := newBoardsFixture(t)
+	f.webapp.answerWidget(nil)
+	f.boards.Board(testSession)
+
+	// Act.
+	ready := f.settled(t, testSession).GetReady()
+
+	// Assert.
+	if ready.GetStartPosition().GetGamePoint() != 7 {
+		t.Fatalf("start position = %v, want the poll's root 7", ready.GetStartPosition())
+	}
+}
+
+func TestABoardWhosePollFindsAnotherGameIsUnavailableWithoutAFetch(t *testing.T) {
+	// Arrange.
+	f := newBoardsFixture(t)
+	pollsAs(f.runner, `{"active":true,"has_game":true,"game_id":"g-9","root_gamepoint":1}`)
+	f.boards.Board(testSession)
+
+	// Act.
+	view := f.settled(t, testSession)
+
+	// Assert.
+	if view.GetUnavailable().GetReason().GetText() != "CEE session agent-a no longer holds game g-1." {
+		t.Fatalf("view = %v, want the session-gone line", view)
+	}
+	if _, fetched := f.webapp.requests[procGetCeeWebWidget]; fetched {
+		t.Fatal("a board whose poll found another game still fetched the widget")
+	}
+}
+
+func TestABoardWhosePollFailsIsUnavailable(t *testing.T) {
+	// Arrange.
+	f := newBoardsFixture(t)
+	f.runner.on("gns cee session poll", func(string, []string) (string, int, error) { return "boom", 1, nil })
+	f.boards.Board(testSession)
+
+	// Act.
+	view := f.settled(t, testSession)
+
+	// Assert.
+	if view.GetUnavailable().GetReason().GetText() != "The CEE session could not be read: boom" {
+		t.Fatalf("view = %v, want the failed poll's line", view)
+	}
 }

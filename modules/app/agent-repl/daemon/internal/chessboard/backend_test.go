@@ -212,7 +212,7 @@ func TestEnsureReportsASingletonThatWouldNotStart(t *testing.T) {
 	r := newFakeRunner()
 	b, checkout, _, log, _ := readyBackend(t, r)
 	fullyWorking(t, r, checkout)
-	r.on("env", func(string, []string) (string, int, error) { return "cee-webapp binary missing", 1, nil })
+	r.on("gns cee debug webapp", func(string, []string) (string, int, error) { return "cee-webapp binary missing", 1, nil })
 
 	// Act.
 	_, f := b.ensure(context.Background())
@@ -229,7 +229,7 @@ func TestEnsureReportsASingletonThatNamedNoURL(t *testing.T) {
 	r := newFakeRunner()
 	b, checkout, _, log, _ := readyBackend(t, r)
 	fullyWorking(t, r, checkout)
-	r.on("env", func(string, []string) (string, int, error) { return `{"other":1}`, 0, nil })
+	r.on("gns cee debug webapp", func(string, []string) (string, int, error) { return `{"other":1}`, 0, nil })
 
 	// Act.
 	_, f := b.ensure(context.Background())
@@ -280,4 +280,79 @@ func TestAJoinAfterARunStartsAFreshOne(t *testing.T) {
 	if first == second {
 		t.Fatal("a join after the run ended reused the finished run")
 	}
+}
+
+func TestPollSessionAsksForTheBoardsSessionWithTheCheckoutStated(t *testing.T) {
+	// Arrange.
+	r := newFakeRunner()
+	b, checkout, _, _, _ := readyBackend(t, r)
+	pollsAs(r, livePoll)
+
+	// Act.
+	got, f := b.pollSession(context.Background(), checkout, testSession)
+
+	// Assert.
+	want := "env " + EngineDirEnv + "=" + checkout + " gns cee session poll agent-a"
+	if f != nil || !got.live || got.root != 7 || r.commands()[0] != want {
+		t.Fatalf("pollSession() = %+v, %v after %v; want live at root 7 via %q", got, f, r.commands(), want)
+	}
+}
+
+func TestPollSessionFindsTheSessionGone(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "swept", body: `{"active":false,"has_game":false,"id":"agent-a"}`},
+		{name: "gameless", body: `{"active":true,"has_game":false,"id":"agent-a"}`},
+		{name: "another game", body: `{"active":true,"has_game":true,"game_id":"g-2","root_gamepoint":3}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			r := newFakeRunner()
+			b, checkout, _, _, _ := readyBackend(t, r)
+			pollsAs(r, tt.body)
+
+			// Act.
+			got, f := b.pollSession(context.Background(), checkout, testSession)
+
+			// Assert.
+			if f != nil || got.live {
+				t.Fatalf("pollSession() = %+v, %v; want a poll that is not live", got, f)
+			}
+		})
+	}
+}
+
+func TestPollSessionReportsAPollThatFailed(t *testing.T) {
+	// Arrange.
+	r := newFakeRunner()
+	b, checkout, _, log, _ := readyBackend(t, r)
+	r.on("gns cee session poll", func(string, []string) (string, int, error) { return "daemon unreachable", 1, nil })
+
+	// Act.
+	_, f := b.pollSession(context.Background(), checkout, testSession)
+
+	// Assert.
+	if f == nil || f.reason != "The CEE session could not be read: daemon unreachable" {
+		t.Fatalf("failure = %v, want the failed poll", f)
+	}
+	assertErrorRecord(t, log, "session_poll")
+}
+
+func TestPollSessionReportsAnUnreadablePoll(t *testing.T) {
+	// Arrange.
+	r := newFakeRunner()
+	b, checkout, _, log, _ := readyBackend(t, r)
+	pollsAs(r, "not json")
+
+	// Act.
+	_, f := b.pollSession(context.Background(), checkout, testSession)
+
+	// Assert.
+	if f == nil || f.reason != "The CEE session's poll answer could not be read." {
+		t.Fatalf("failure = %v, want the unreadable poll", f)
+	}
+	assertErrorRecord(t, log, "session_poll")
 }

@@ -52,6 +52,7 @@ type failure struct {
 // serving is a backend ready to answer: cee-webapp's base URL and the widget
 // build the board's bundle URLs name.
 type serving struct {
+	checkout    string
 	baseURL     string
 	widgetStamp string
 	widgetDist  string
@@ -179,7 +180,7 @@ func (b *backend) readyOnce(ctx context.Context) (serving, *failure) {
 	if f != nil {
 		return serving{}, f
 	}
-	return serving{baseURL: url, widgetStamp: stamp, widgetDist: widgetDist(cli)}, nil
+	return serving{checkout: checkout, baseURL: url, widgetStamp: stamp, widgetDist: widgetDist(cli)}, nil
 }
 
 // webappBinary is cee-webapp's installed name in the plugin directory, where
@@ -333,4 +334,47 @@ func tail(output string, n int) string {
 		return output
 	}
 	return output[len(output)-n:]
+}
+
+// sessionPoll is what `gns cee session poll` answers about a session.
+type sessionPoll struct {
+	Active        bool   `json:"active"`
+	HasGame       bool   `json:"has_game"`
+	GameID        string `json:"game_id"`
+	RootGamepoint int64  `json:"root_gamepoint"`
+}
+
+// polled is what a board needs from its session's poll.
+type polled struct {
+	// live is whether the session still holds the board's game.
+	live bool
+	// root is the game's root gamepoint, meaningful when live.
+	root int64
+	// account says what the poll found, for the record when not live.
+	account string
+}
+
+// pollSession asks the CEE CLI about a board's session. A poll that could not
+// run, or whose answer is unreadable, answers a failure.
+func (b *backend) pollSession(ctx context.Context, checkout string, s Session) (polled, *failure) {
+	argv := []string{"env", EngineDirEnv + "=" + checkout, "gns", "cee", "session", "poll", s.ID}
+	output, code, err := b.run.Run(ctx, checkout, argv)
+	if err != nil || code != 0 {
+		cause := err
+		if cause == nil {
+			cause = fmt.Errorf("%w: gns cee session poll exited %d", errBuildFailed, code)
+		}
+		return polled{}, b.fail("session_poll", "The CEE session could not be read: "+lastLine(output), cause,
+			dlog.Context{"cee_session_id": s.ID, "output_tail": tail(output, 2000)})
+	}
+	var poll sessionPoll
+	if err := json.Unmarshal([]byte(strings.TrimSpace(output)), &poll); err != nil {
+		return polled{}, b.fail("session_poll", "The CEE session's poll answer could not be read.", err,
+			dlog.Context{"cee_session_id": s.ID, "output_tail": tail(output, 2000)})
+	}
+	return polled{
+		live:    poll.Active && poll.HasGame && poll.GameID == s.GameID,
+		root:    poll.RootGamepoint,
+		account: fmt.Sprintf("active=%t has_game=%t game_id=%q", poll.Active, poll.HasGame, poll.GameID),
+	}, nil
 }
