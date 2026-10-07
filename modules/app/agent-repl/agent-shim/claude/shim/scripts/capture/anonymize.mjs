@@ -14,13 +14,19 @@
  *   - ALL structural fields preserved verbatim: uuids, session ids, paths,
  *     timestamps, tool-use ids, keys.
  *
+ * One rule runs before all of them and reaches keys too: the PERSONAL VALUES
+ * of whoever ran the capture — their home directory, their account emails and
+ * their names — are replaced wherever they appear (see `scrubPersonal`). A
+ * committed recording names nobody.
+ *
  * WHY THE RULES ARE IN THIS ORDER: key-based redaction runs FIRST, so a secret
  * that also happens to be long is redacted rather than truncated (a truncated
  * secret is still a leaked prefix). Blob truncation runs next, because a
  * signature under 900 chars must still be cut. Length truncation runs last, as
  * the general fallback.
  *
- * WHAT IS DELIBERATELY NOT TOUCHED: object KEYS, array ORDER, numbers,
+ * WHAT IS DELIBERATELY NOT TOUCHED: object KEYS (beyond the personal-value
+ * scrub), array ORDER, numbers,
  * booleans, null, and every string that is neither secret-looking, a declared
  * blob, nor over-long. The corpus's whole value is that its structure is real;
  * a walker that normalized ids or paths would destroy the joins the converters
@@ -103,6 +109,68 @@ export const SECRET_VALUE_PATTERNS = [
  */
 export const BLOB_KEYS = ["signature", "data", "base64", "thumbnail"];
 
+/**
+ * The personal values of the host a capture ran on: its home directory, the
+ * account emails signed in there, and the names of the person running it.
+ */
+export const NO_PERSONAL_VALUES = Object.freeze({ home: "", emails: [], names: [] });
+
+/** What a home directory becomes in a recording: the generic `~`. */
+export const HOME_TOKEN = "~";
+
+/**
+ * The vendor's project-directory spelling of an absolute path: every byte that
+ * is not [A-Za-z0-9] becomes `-`. The home's slug becomes `-`, which is
+ * exactly the slug of {@link HOME_TOKEN}, so a recorded path and the project
+ * directory named after it stay in agreement after the scrub.
+ */
+export function pathSlug(p) {
+  return p.replace(/[^A-Za-z0-9]/g, "-");
+}
+
+/** The address the i-th (0-based) personal email becomes. */
+export function scrubbedEmail(i) {
+  return `person${i + 1}@example.com`;
+}
+
+/** Escape a literal for use inside a RegExp. */
+function escapeRegExp(text) {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Replace every personal value inside a string.
+ *
+ * Order matters and is fixed: emails first (they contain names), then the home
+ * directory and its slug (they contain the login name), then each name as a
+ * whole word, case-insensitively, longest first. A name keeps its leading
+ * capital, so "Ann's" becomes "Someone's" and a login in a url becomes
+ * "someone". The email and home replacements are held as sentinels until the
+ * names have run, so a name can never rewrite a replacement (a person named
+ * "Example" leaves `person1@example.com` alone).
+ */
+export function scrubPersonal(text, personal = NO_PERSONAL_VALUES) {
+  const held = [];
+  const hold = (replacement) => {
+    held.push(replacement);
+    return `\u0000${held.length - 1}\u0000`;
+  };
+  let out = text;
+  personal.emails.forEach((email, i) => {
+    out = out.replace(new RegExp(escapeRegExp(email), "gi"), () => hold(scrubbedEmail(i)));
+  });
+  if (personal.home !== "") {
+    out = out.split(personal.home).join(hold(HOME_TOKEN));
+    out = out.split(pathSlug(personal.home)).join(hold(pathSlug(HOME_TOKEN)));
+  }
+  const names = [...personal.names].sort((a, b) => b.length - a.length);
+  for (const name of names) {
+    const word = new RegExp(`(?<![A-Za-z])${escapeRegExp(name)}(?![A-Za-z])`, "gi");
+    out = out.replace(word, (match) => (match[0] === match[0].toUpperCase() ? "Someone" : "someone"));
+  }
+  return out.replace(/\u0000(\d+)\u0000/g, (_, i) => held[Number(i)]);
+}
+
 /** Normalize a key for the secret/blob key rules (case and separators). */
 function normalizeKey(key) {
   return String(key).toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -149,14 +217,16 @@ export function truncateLong(text) {
 }
 
 /**
- * Apply the three string rules in their settled order.
+ * Apply the personal-value scrub, then the three string rules in their settled
+ * order.
  *
  * `key` is the object key the string was found under, or `undefined` for a
  * bare array element or a root string — the key-driven rules simply do not
  * apply there, and the value-pattern and length rules still do.
  */
-export function anonymizeString(text, key) {
+export function anonymizeString(text, key, personal = NO_PERSONAL_VALUES) {
   if (key !== undefined && isSecretKey(key)) return REDACTED;
+  text = scrubPersonal(text, personal);
   const redacted = redactSecretRuns(text);
   if (redacted !== text) return redacted;
   if (key !== undefined && isBlobKey(key)) return truncateBlob(text);
@@ -170,13 +240,15 @@ export function anonymizeString(text, key) {
  * long enough to anonymize it, and an in-place walker makes "did this file
  * already get processed" unanswerable.
  */
-export function anonymize(value, key) {
-  if (typeof value === "string") return anonymizeString(value, key);
-  if (Array.isArray(value)) return value.map((item) => anonymize(item, key));
+export function anonymize(value, key, personal = NO_PERSONAL_VALUES) {
+  if (typeof value === "string") return anonymizeString(value, key, personal);
+  if (Array.isArray(value)) return value.map((item) => anonymize(item, key, personal));
   if (value !== null && typeof value === "object") {
     const out = {};
     for (const [childKey, childValue] of Object.entries(value)) {
-      out[childKey] = anonymize(childValue, childKey);
+      // A key keeps its structure but not a personal value: the vendor keys
+      // some maps by absolute path.
+      out[scrubPersonal(childKey, personal)] = anonymize(childValue, childKey, personal);
     }
     return out;
   }
@@ -193,7 +265,7 @@ export function anonymize(value, key) {
  * unparsed line means either a partially flushed tail or a shape we have never
  * seen — both are findings, not noise.
  */
-export function anonymizeJsonl(text, onUnparsed = () => {}) {
+export function anonymizeJsonl(text, onUnparsed = () => {}, personal = NO_PERSONAL_VALUES) {
   const lines = text.split("\n");
   const out = [];
   for (let i = 0; i < lines.length; i += 1) {
@@ -207,10 +279,10 @@ export function anonymizeJsonl(text, onUnparsed = () => {}) {
       parsed = JSON.parse(line);
     } catch (err) {
       onUnparsed(i + 1, err);
-      out.push(anonymizePlainText(line));
+      out.push(anonymizePlainText(line, personal));
       continue;
     }
-    out.push(JSON.stringify(anonymize(parsed)));
+    out.push(JSON.stringify(anonymize(parsed, undefined, personal)));
   }
   return out.join("\n");
 }
@@ -218,12 +290,13 @@ export function anonymizeJsonl(text, onUnparsed = () => {}) {
 /**
  * Anonymize a NON-JSON artifact (a shell spool, a hook's stderr capture).
  *
- * Only the credential rules apply. The length rules deliberately do NOT: a
+ * Only the personal-value and credential rules apply. The length rules
+ * deliberately do NOT: a
  * spool's value to the sidecar tests is that it is a real byte stream ending
  * (or not) in its `EXIT=<code>` marker, and a walker that truncated it would
  * manufacture the very "caught mid-write" case the corpus keeps as a separate,
  * deliberately hand-truncated fixture.
  */
-export function anonymizePlainText(text) {
-  return redactSecretRuns(text);
+export function anonymizePlainText(text, personal = NO_PERSONAL_VALUES) {
+  return redactSecretRuns(scrubPersonal(text, personal));
 }
