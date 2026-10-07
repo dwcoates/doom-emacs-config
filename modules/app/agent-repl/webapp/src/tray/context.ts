@@ -14,6 +14,7 @@
  * rather than a cycle.
  */
 import type { AppContext } from "../rpc/context.js";
+import type { ClassifierUpdateForms } from "./classifier-update.js";
 
 /** What a tray card is told about the app it is drawing into. */
 export interface TrayContext {
@@ -24,4 +25,10 @@ export interface TrayContext {
    * Every ticker subscription a card opens is registered here.
    */
   onDispose(fn: () => void): void;
+  /**
+   * Every held turn's "Update classifier" form. It OUTLIVES the push, unlike
+   * everything else here: the tray hands the same registry to every drawing,
+   * so a form being typed into survives a redraw (classifier-update.ts).
+   */
+  classifierForms: ClassifierUpdateForms;
 }

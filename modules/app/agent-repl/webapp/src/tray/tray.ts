@@ -44,6 +44,7 @@ import { watchStream } from "../rpc/streams.js";
 import type { TrayContext } from "./context.js";
 import { drawHeldOffer } from "./held-offer.js";
 import { drawHeldPrompt } from "./held-prompt.js";
+import { ClassifierUpdateForms } from "./classifier-update.js";
 import { placeChildren } from "../dom.js";
 import { installClickExpand } from "../expand.js";
 import { refreshHasMore } from "../feed/bubble-more.js";
@@ -76,6 +77,9 @@ export function mountHoldTray(host: HTMLElement, ctx: AppContext, deps: HoldTray
   // toggle that moved no height needs (bubble-more.ts).
   const uninstallExpand = installClickExpand(host, undefined, (section) => refreshHasMore(section));
 
+  // The classifier update forms OUTLIVE every push (see TrayContext).
+  const classifierForms = new ClassifierUpdateForms(ctx);
+
   /** Teardowns the CURRENT drawing owns; replaced wholesale on every push. */
   let disposers: Array<() => void> = [];
   const clear = (): void => {
@@ -98,6 +102,7 @@ export function mountHoldTray(host: HTMLElement, ctx: AppContext, deps: HoldTray
         onDispose: (fn) => {
           disposers.push(fn);
         },
+        classifierForms,
       };
       // An EMPTY tray draws NOTHING, so the host is emptied rather than given
       // a region: `#hold-tray:empty` is what collapses the space, and it only
@@ -107,6 +112,8 @@ export function mountHoldTray(host: HTMLElement, ctx: AppContext, deps: HoldTray
       const drawn = drawDaemonHoldTray(tray, tc, current);
       if (current !== null && current !== drawn) stopTicking(current);
       placeChildren(host, drawn === null ? [] : [drawn]);
+      // A form whose card left with this push goes with it.
+      classifierForms.retain(heldTurns(host));
       // Only a FIRST draw parks, and only once it is placed; one park covers
       // every card the push landed, since each parks at the same tail.
       const landed = heldTurns(host).filter((turn) => !before.includes(turn));

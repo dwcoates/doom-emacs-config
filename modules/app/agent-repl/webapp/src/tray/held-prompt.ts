@@ -134,6 +134,11 @@ import {
   unreachableArm,
 } from "../rpc/strict.js";
 import type { TrayContext } from "./context.js";
+import {
+  UPDATE_CLASSIFIER_LABEL,
+  classifierRouteOf,
+  type ClassifierUpdateForm,
+} from "./classifier-update.js";
 
 /** The event a dropped prompt hands its text back on. */
 export const DROPPED_EVENT = "held-prompt-dropped";
@@ -239,10 +244,16 @@ export function drawHeldPrompt(
   );
   for (const detail of drawn.details) details.appendChild(detail);
   if (verdict.detail !== null) details.appendChild(verdict.detail);
+  // A CLASSIFIED PROMPT OFFERS "Update classifier": its form is this turn's
+  // one element, kept across pushes (classifier-update.ts).
+  const route = u.act === undefined ? classifierRouteOf(classification.case) : null;
+  const classifierForm =
+    route === null ? null : tc.classifierForms.formFor(turn.value, { text: spokenText(said), route });
   details.appendChild(
     drawHeldPromptActions({
       tc,
       turn,
+      classifierForm,
       text: spokenText(said),
       classification: classification.case,
       hold: hold === null ? null : hold.case,
@@ -264,7 +275,7 @@ export function drawHeldPrompt(
       working: false,
       strip: [head],
       content,
-      expandOnly: [details],
+      expandOnly: classifierForm === null ? [details] : [details, classifierForm.element],
       capLines: ELLIPSIS_CAP_LINES,
       more: BUBBLE_MORE_ELLIPSIS,
     },
@@ -679,6 +690,8 @@ interface ActionSpec {
   accept: boolean;
   /** The entry the "fold above" control folds into, or null when the daemon offers no fold. */
   foldAbove: TurnId | null;
+  /** The "Update classifier" form, or null on a card no classifier decided. */
+  classifierForm: ClassifierUpdateForm | null;
 }
 
 /** The three answers an entry takes, exactly as the request's arms name them. */
@@ -706,6 +719,7 @@ export function drawHeldPromptActions(spec: ActionSpec): HTMLElement {
       release: noReleaseTitle === undefined,
       accept: spec.accept,
       fold_above: spec.foldAbove?.value ?? null,
+      update_classifier: spec.classifierForm !== null,
     },
   });
 
@@ -737,6 +751,8 @@ export function drawHeldPromptActions(spec: ActionSpec): HTMLElement {
   // `fold_above` (FoldHeldPrompt).
   if (spec.foldAbove !== null)
     actions.appendChild(foldAboveButton(spec, spec.foldAbove));
+  if (spec.classifierForm !== null)
+    actions.appendChild(updateClassifierButton(spec.classifierForm));
   return actions;
 }
 
@@ -861,6 +877,22 @@ async function rowCall(
       setRowDisabled(row, false);
     }
   }
+}
+
+/**
+ * The "Update classifier" control: it reveals (or hides) this turn's form,
+ * which says the change and sends it (classifier-update.ts).
+ */
+function updateClassifierButton(form: ClassifierUpdateForm): Control {
+  const button = createControl();
+  button.className = "queued-action queued-action-update-classifier";
+  button.setAttribute("data-held-action", "update-classifier");
+  button.textContent = UPDATE_CLASSIFIER_LABEL;
+  button.addEventListener("click", (event: MouseEvent) => {
+    event.preventDefault();
+    form.toggle();
+  });
+  return button;
 }
 
 /** The fold control's label: what the reader sees it do. */
