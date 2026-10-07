@@ -106,8 +106,10 @@ first one arrives).")
 
 (defvar agent-repl-host-last-selected-id nil
   "The `WorkspaceRef' id of the last workspace Emacs itself selected.
-roster.el compares a daemon-originated `current' change against this so
-Emacs's own tab switch is not mistaken for a switch REQUEST (ruling R8).")
+Recorded when the daemon acknowledged it, when a leaving daemon answered
+`standing_down', and when nobody answered at all: in every case it is the
+selection the next link-up re-asserts (`agent-repl-host--selected-dir').
+A refusal records nothing, because the daemon said it stamped nothing.")
 
 (defvar agent-repl-host-reselect-pending nil
   "The project dir Emacs is re-asserting as the user's selection, or nil.
@@ -587,21 +589,24 @@ and this is the moment it is judged -- the last push wins."
   "Act on WS\='s selection of REF failing with DETAIL before any answer.
 ON-SETTLED is as `agent-repl-host-select' documents.
 
-A SELECTION WHOSE DAEMON LEFT BEFORE ANSWERING IS STILL THE USER\='S.  When
-the link is already down as the failure lands, the daemon went away under
-the call (a stop between the send and the answer is answered by the HTTP
-layer, before any handler can say `standing_down'), so it is carried to
-the next daemon exactly as a standing-down answer is: recorded as the
-selection the next link-up re-asserts (`agent-repl-host--selected-dir').
-Dropping it left the dead daemon's last `current' to win -- the user\='s
-choice lost across a restart (2026-10-07, e2e
-TestEmacsRestartKeepsTheSelectedWorkspace).  With the link up, the failure
-is the error it is."
+A SELECTION NOBODY ANSWERED IS STILL THE USER\='S, so it is ALWAYS recorded
+as the selection the next link-up re-asserts
+\(`agent-repl-host--selected-dir'), whatever the link\='s state when the
+failure lands.  A daemon stopping under the call answers it with no
+response, or with the HTTP layer\='s 503, before any handler can say
+`standing_down', and that failure can land before OR after the link-down
+edge -- deciding by the link\='s state left the user\='s choice to that
+order, and the dead daemon\='s last `current' won whenever the failure came
+first (2026-10-07, e2e TestEmacsRestartKeepsTheSelectedWorkspace).  The
+link\='s state decides only how the failure is told: with the link down the
+daemon is gone and the loss is expected (INFO, settled `:standing-down'),
+with it up the failure is the error it is (ERROR, settled `:failure')."
+  (setq agent-repl-host-last-selected-id (plist-get ref :id))
   (if (agent-repl-link-up-p)
       (progn
-        (agent-repl--error ws "elisp.host.select-failed ws=%s detail=%S" ws detail)
+        (agent-repl--error ws "elisp.host.select-failed ws=%s id=%S reassert=next-link-up detail=%S"
+                           ws (plist-get ref :id) detail)
         (when on-settled (funcall on-settled :failure)))
-    (setq agent-repl-host-last-selected-id (plist-get ref :id))
     (agent-repl--info ws "elisp.host.select-daemon-gone ws=%s id=%S reassert=next-daemon detail=%S"
                       ws (plist-get ref :id) detail)
     (when on-settled (funcall on-settled :standing-down))))
