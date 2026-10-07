@@ -544,7 +544,7 @@ func (r *resolver) OnActivity(ws ids.WorkspaceID, agent *conversationv1.AgentId,
 	r.mutateWorkspaceLogged(ws, "daemon.sidebar.on_activity", "the roster took a turn's activity",
 		dlog.Context{"agent_id": agent.GetValue()}, func(s *wsState, log dlog.Logger) {
 			s.sawActivity = true
-			if s.retrying != "" && s.retrying == agent.GetValue() && ladder.RetryAnswered(act) {
+			if s.retrying != "" && ladder.RetryAnsweredBy(s.retrying, agent.GetValue(), act) {
 				log.Debug("daemon.sidebar.retry_cleared", "the retried call was answered; the row leaves api_retrying",
 					dlog.Context{"agent_id": agent.GetValue()})
 				s.retrying = ""

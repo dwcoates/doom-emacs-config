@@ -24,3 +24,13 @@ func RetryAnswered(act *conversationv1.AgentActivity) bool {
 		return act.GetUsage() != nil
 	}
 }
+
+// RetryAnsweredBy reports whether ACT, a frame of AGENT's, ends the retry of
+// RETRIED's call: the frame is the retried agent's own and it answers
+// (RetryAnswered). Another agent's frame says nothing about this call. It is
+// the ONE retry-end rule the footer and the roster both apply to every
+// activity, so the two cannot leave `api_retrying` on different frames; each
+// keeps its own record of whether a retry stands at all.
+func RetryAnsweredBy(retried, agent string, act *conversationv1.AgentActivity) bool {
+	return retried == agent && RetryAnswered(act)
+}
