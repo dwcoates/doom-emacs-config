@@ -667,6 +667,23 @@ func (s *requestLoggingServer) FoldHeldPrompt(
 	return s.server.FoldHeldPrompt(ctx, req)
 }
 
+func (s *requestLoggingServer) UpdateClassifierPrompt(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.UpdateClassifierPromptRequest],
+) (resp *connect.Response[agentreplv1.UpdateClassifierPromptResponse], err error) {
+	boundary, err := s.server.beginRequest(ctx, "UpdateClassifierPrompt", req.Header().Get(requestIDHeader), requestMessage(req))
+	if err != nil {
+		return nil, boundaryFailure(err)
+	}
+	boundary.log.Debug("daemon.server.update_classifier_prompt", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
+	defer func() {
+		boundary.log.Debug("daemon.server.update_classifier_prompt", "completed the rpc handler", boundary.completionContext(err))
+	}()
+	return s.server.UpdateClassifierPrompt(ctx, req)
+}
+
 func (s *requestLoggingServer) AnswerHeldOffer(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.AnswerHeldOfferRequest],

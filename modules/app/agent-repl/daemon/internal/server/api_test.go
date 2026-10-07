@@ -290,3 +290,20 @@ func TestTransportClosedUsesNotFoundForAnUnknownID(t *testing.T) {
 		t.Fatalf("code = %v, want CodeNotFound", cerr.Code())
 	}
 }
+
+// TestNewRefusesAMissingClassifierPrompt pins that the routing brief's
+// updater is required: UpdateClassifierPrompt would otherwise answer nothing.
+func TestNewRefusesAMissingClassifierPrompt(t *testing.T) {
+	// Arrange: every other dependency is the harness's own.
+	var deps Deps
+	newHarness(t, func(d *Deps) { deps = *d })
+	deps.ClassifierPrompt = nil
+
+	// Act.
+	_, err := New(deps)
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "the classifier prompt updater") {
+		t.Fatalf("New = %v, want the refusal naming the classifier prompt updater", err)
+	}
+}

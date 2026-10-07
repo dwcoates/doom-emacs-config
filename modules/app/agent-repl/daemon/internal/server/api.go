@@ -126,6 +126,9 @@ type Deps struct {
 	// is the `news_digest` state every WEBVIEW WatchDaemon stream subscribes
 	// to (an Emacs stream's never does: only a webview draws the overlay).
 	NewsDigest NewsDigest
+	// ClassifierPrompt backs UpdateClassifierPrompt: the routing brief's
+	// rewrite and its commit (internal/classifierupdate).
+	ClassifierPrompt ClassifierPrompt
 	// EditorInstances judges each Emacs WatchDaemon's process identity, so a
 	// full Emacs restart is told apart from a reconnect.
 	EditorInstances EditorInstances
@@ -393,6 +396,8 @@ func New(deps Deps) (Server, error) {
 		return nil, missing("the persistent-wifi controller")
 	case deps.NewsDigest == nil:
 		return nil, missing("the news digest")
+	case deps.ClassifierPrompt == nil:
+		return nil, missing("the classifier prompt updater")
 	case deps.EditorInstances == nil:
 		return nil, missing("the editor instance tracker")
 	case deps.Startup == nil:
