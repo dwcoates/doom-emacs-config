@@ -125,6 +125,9 @@ the host suite alone passed every time.  So the harness records the
 schedule instead of arming it, and a test that wants the retry walked
 calls it itself.")
 
+(defvar agent-repl-test-host--link-up t
+  "What the stubbed `agent-repl-link-up-p' answers: an up link by default.")
+
 (defvar agent-repl-test-host--live nil
   "What the stubbed `agent-repl-link-live' answers: the live daemon, or nil.")
 
@@ -200,6 +203,7 @@ unary rpc can produce, which the contract never collapses into one."
          (agent-repl-test-host--timers nil)
          (agent-repl-test-host--dial-accepts t)
          (agent-repl-test-host--live nil)
+         (agent-repl-test-host--link-up t)
          (agent-repl-test-host--ending nil)
          (agent-repl-link-down-planned nil)
          (agent-repl-host--reattach-tokens 0)
@@ -213,7 +217,9 @@ unary rpc can produce, which the contract never collapses into one."
           (list :response (list :arm :success :value nil)))
          (agent-repl-test-host--adopt-answer
           (list :response (list :arm :success :value nil))))
-     (cl-letf (((symbol-function 'agent-repl-rpc-register-workspace)
+     (cl-letf (((symbol-function 'agent-repl-link-up-p)
+                (lambda () agent-repl-test-host--link-up))
+               ((symbol-function 'agent-repl-rpc-register-workspace)
                 (lambda (conn request &rest keys)
                   (push (list "RegisterWorkspace" conn request) agent-repl-test-host--calls)
                   (agent-repl-test-host--answer agent-repl-test-host--register-answer
@@ -645,6 +651,49 @@ looked at."
     (agent-repl-host-select "ws-1")
     ;; Assert
     (should (null agent-repl-host-last-selected-id))))
+
+(defun agent-repl-test-host--select-failing-as-the-daemon-goes ()
+  "Arrange a select whose daemon goes away under it: the link is down as
+the transport failure lands."
+  (agent-repl-test-host--subscribe "ws-1")
+  (setq agent-repl-test-host--link-up nil)
+  (setq agent-repl-test-host--select-answer
+        (list :failure (list :kind :http :code "unavailable" :status 503
+                             :message "the daemon is shutting down"))))
+
+(ert-deftest agent-repl-test-host-select-failing-as-the-daemon-goes-records-the-selection ()
+  "The user's choice is carried to the next daemon, as a standing-down
+answer's is: the link-up re-asserts it."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--select-failing-as-the-daemon-goes)
+    ;; Act
+    (agent-repl-host-select "ws-1")
+    ;; Assert
+    (should (equal agent-repl-host-last-selected-id "ws-id-1"))))
+
+(ert-deftest agent-repl-test-host-select-failing-as-the-daemon-goes-settles-as-standing-down ()
+  "Its caller hears the same outcome a leaving daemon's answer gives."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--select-failing-as-the-daemon-goes)
+    (let ((outcome nil))
+      ;; Act
+      (agent-repl-host-select "ws-1" (lambda (o) (setq outcome o)))
+      ;; Assert
+      (should (eq outcome :standing-down)))))
+
+(ert-deftest agent-repl-test-host-select-failing-as-the-daemon-goes-is-logged-at-info ()
+  "An expected loss, recorded at INFO with the failure's detail, and no ERROR."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--select-failing-as-the-daemon-goes)
+    ;; Act
+    (agent-repl-host-select "ws-1")
+    ;; Assert
+    (should (agent-repl-test-host--logged-p :info "elisp.host.select-daemon-gone ws=ws-1"))
+    (should-not (cl-find-if (lambda (entry) (eq (car entry) :error))
+                            agent-repl-test-host--logs))))
 
 ;;;; ---- Select: one at a time, the last press wins ----
 
