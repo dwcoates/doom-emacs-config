@@ -553,8 +553,9 @@ func (r *resolver) OnActivity(ws ids.WorkspaceID, agent *conversationv1.AgentId,
 }
 
 // OnApiError stands the vendor's mid-turn retry of AGENT's call: the row is
-// `api_retrying` (blue) until that agent is answered, the turn ends, or a new
-// turn opens — the same lifetime the footer's `blocked · api_retrying` has.
+// `api_retrying` (turquoise) until that agent is answered, the turn ends, or a
+// new turn opens — the same lifetime the footer's `vendor_fault ·
+// api_retrying` has.
 func (r *resolver) OnApiError(ws ids.WorkspaceID, agent *conversationv1.AgentId, failed *conversationv1.ApiRequestFailed) {
 	if failed == nil {
 		return
