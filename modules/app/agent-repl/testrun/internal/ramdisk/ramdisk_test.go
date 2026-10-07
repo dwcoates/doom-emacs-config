@@ -346,6 +346,54 @@ func TestReclaimAfterARebootRemovesOnlyTheRecord(t *testing.T) {
 	}
 }
 
+func TestReclaimRemovesWhatADeadRunLeftUnderItsDetachedMountPoint(t *testing.T) {
+	// Arrange: the disk is gone, but files the dead run wrote after it went
+	// sit on the host's filesystem under the mount point.
+	h := &fakeHost{info: "framework : 1\n"}
+	m := newManager(t, h)
+	mount := filepath.Join(t.TempDir(), "artr-7")
+	if err := os.MkdirAll(filepath.Join(mount, "tr-1", "tu-2"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(mount, "tr-1", "tu-2", "store.db"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	deadRecord(t, m, "7", "/dev/disk7", mount)
+
+	// Act
+	done, err := m.Reclaim()
+
+	// Assert
+	if err != nil || len(done) != 1 {
+		t.Fatalf("Reclaim = %+v, %v; want the dead run reclaimed", done, err)
+	}
+	if _, statErr := os.Stat(mount); !os.IsNotExist(statErr) {
+		t.Fatalf("the dead run's mount point survives (stat err = %v)", statErr)
+	}
+}
+
+func TestReclaimRefusesARecordNamingSomeoneElsesDirectory(t *testing.T) {
+	// Arrange: a record whose mount is not the one a run of its pid is given.
+	h := &fakeHost{info: "framework : 1\n"}
+	m := newManager(t, h)
+	elsewhere := filepath.Join(t.TempDir(), "precious")
+	if err := os.MkdirAll(elsewhere, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	deadRecord(t, m, "7", "/dev/disk7", elsewhere)
+
+	// Act
+	_, err := m.Reclaim()
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "no mount point a run of pid 7 is given") {
+		t.Fatalf("Reclaim error = %v, want the record refused", err)
+	}
+	if _, statErr := os.Stat(elsewhere); statErr != nil {
+		t.Fatalf("the directory a bad record named was touched (stat err = %v)", statErr)
+	}
+}
+
 func TestSizeFromEnv(t *testing.T) {
 	tests := []struct {
 		name    string
