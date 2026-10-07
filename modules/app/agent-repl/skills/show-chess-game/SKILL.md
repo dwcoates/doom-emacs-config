@@ -1,45 +1,45 @@
 ---
 name: show-chess-game
-description: Display an interactive chess board inside the agent-repl GUI response bubble. Use when the user asks to show, render, or display a chess game, position, or live analysis session on a board — from a PGN, a FEN, or a live engine session id. The response carries a one-line marker the GUI renders as the board.
+description: Show the reader an interactive chess board in the agent-repl feed for a game loaded in a CEE CLI session — the CEE CLI webapp's own widget, with its move list, engine lines and per-square engine answers. Finds the session and its live game id, then calls agent-repl's show_chess_board tool. Only CEE CLI sessions can be shown. Use when the user asks to show, render, or display a chess game, position, analysis, or CEE session on a board.
+allowed-tools: Bash(<skill_base_dir>/run.sh:*), mcp__agent-repl__show_chess_board
 lineage_root: user.dodge.skills.show-chess-game
 ---
 
-# Show Chess Game
+**Requires the gns cee plugin.** If `gns cee` is unavailable, install it with `gns skills install cee-cli`, then retry.
 
 ## What This Skill Does
 
-Renders an interactive chess board inside the current agent-repl response bubble. The game payload (PGN, FEN, or a live engine-session id) is piped into `run.sh`, and the response carries only the one-line marker `run.sh` prints, which the GUI replaces with the board. Text before and after the marker keeps flowing around the board in the same bubble.
+Shows a CEE CLI session's game as an interactive board in the agent-repl feed, at the point in the response where it is called. The board is the CEE CLI webapp's own widget. Everything after the call is handled downstream: the board appears in the feed and says what it is doing until it is ready, or why it cannot be shown.
 
 ## Arguments
 
 | Argument | Behaviour |
 |---|---|
-| (PGN source) | A PGN document — inline text, a file path, or a command that produces one — renders as a steppable, playable game board. |
-| (FEN source) | A single FEN line renders as a position board. |
-| (session id) | A live engine-session id renders as a board mirroring that session in real time. |
+| `<session-id>` | Show the game loaded in this CEE CLI session. |
+| (none) | Show the game of the session this conversation created or used, else of the only live session. |
 
 ## Steps
 
-1. Resolve the payload form from the request, then dispatch:
-   - a. If the game is a PGN document:
-     - i. When a command can produce it (a file on disk, an engine/API call), pipe that command's output DIRECTLY into `<skill_base_dir>/run.sh --write-game pgn` so the payload never transits the response.
-     - ii. Otherwise pipe the PGN text you hold into `<skill_base_dir>/run.sh --write-game pgn`.
-   - b. If the game is a single FEN position, pipe the FEN line into `<skill_base_dir>/run.sh --write-game fen`.
-   - c. If the game is a LIVE engine session, call `<skill_base_dir>/run.sh --write-session <session-id>`.
-2. React to the `run.sh` exit code:
-   - `EXIT CODE 0:` stdout is the marker line. Continue to step 3.
-   - `EXIT CODE 1:` usage error. IMMEDIATELY terminate and surface the raw error.
-   - `EXIT CODE 2:` environment or input error. IMMEDIATELY terminate and surface the raw error.
-   - `EXIT CODE 3:` the engine daemon's address was not discoverable. Ask the user for the backend URL, then re-run step 1c as `<skill_base_dir>/run.sh --write-session <session-id> <url>`.
-   - `EXIT CODE 4:` the chess-widget capability is unavailable, so no board can render. stdout is actionable remediation, NOT a marker. Surface the printed remediation to the user VERBATIM as plain text, and NEVER emit a marker line.
-3. Emit the marker line in the response:
-   - a. Re-emit the printed marker line VERBATIM, on its own line, as plain text.
-   - b. NEVER wrap the marker line in a code fence, inline code, or a blockquote — a fenced marker renders as literal text instead of a board.
-   - c. Place any commentary before and/or after the marker line; both render around the board in the same bubble.
+1. Resolve the session to show.
+  - a. If the user named a session, or this conversation created or used one, that is the session. Continue to step 2.
+  - b. Otherwise call `<skill_base_dir>/run.sh --list-sessions`.
+    - `EXIT CODE 0:` stdout is one session id per line. If it is exactly one, that is the session; continue to step 2. If it is several, ask the user which to show, and STOP until they answer.
+    - `EXIT CODE 1:` no CEE CLI session exists. Tell the user a board needs a CEE CLI session with a game loaded, and STOP.
+    - `EXIT CODE 2:` IMMEDIATELY terminate and surface the raw error.
+
+2. Read the session's live game.
+  - Call `<skill_base_dir>/run.sh --live-game <session-id>`.
+    - `EXIT CODE 0:` stdout is the game id. Continue to step 3.
+    - `EXIT CODE 1:` the session does not exist or holds no game. Surface the printed reason, and STOP.
+    - `EXIT CODE 2:` IMMEDIATELY terminate and surface the raw error.
+
+3. Show the board.
+  - Call the `mcp__agent-repl__show_chess_board` tool with `session_id` set to the session id and `game_id` set to the game id from step 2.
+  - Relay the tool's answer in one line. The board itself is in the feed; NEVER describe or re-draw the game in text.
 
 ## Notes
 
-- **CRITICAL NOTE: the marker line must be re-emitted verbatim and unfenced.** Any wrapping or edit breaks the board rendering.
-- **CRITICAL NOTE: never paste large game payloads into the response.** The payload travels through `run.sh`; the response carries only the marker line.
-- **IMPORTANT NOTE: do not self-remediate `run.sh` failures or read its internals.** React only to the documented exit codes.
-- **IMPORTANT NOTE: the board requires the agent-repl daemon's chess capability.** When `run.sh` exits 4 it has already printed the remediation to surface, so NEVER hand-write your own capability guidance and NEVER emit a marker anyway.
+- **CRITICAL NOTE: Only CEE CLI sessions can be shown.** NEVER pass a PGN, a FEN, or anything but a session id and its game id.
+- **CRITICAL NOTE: The game id is the session's LIVE one.** Always read it with step 2 immediately before calling the tool; NEVER reuse one remembered from earlier.
+- **IMPORTANT NOTE: Build, start, or probe nothing.** The board's backend is readied downstream; a board that cannot be shown says why in the feed.
+- **CRITICAL NOTE: Do not self-remediate a `run.sh` failure or read its internals.** React only to the documented exit codes.
