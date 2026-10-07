@@ -200,7 +200,7 @@ func BuildIdentityEnv(checkout string) []string {
 // daemon. The prefix is read from the daemon's own environment
 // (workspace.PrefixEnv, else workspace.LegacyPrefixEnv) and makes every
 // branch "<prefix>/<slug>"; inherited from a developer's shell (e.g.
-// CLAUDE_WORKSPACE_PREFIX=JB) it renames every test branch, so a scenario
+// CLAUDE_WORKSPACE_PREFIX=ABC) it renames every test branch, so a scenario
 // keyed on the bare branch (a scripted rebase conflict) never fires. Both
 // spellings are stated EMPTY, which workspace.Prefix reads as unset, and
 // os/exec keeps the last value of a repeated key, so this wins over the
