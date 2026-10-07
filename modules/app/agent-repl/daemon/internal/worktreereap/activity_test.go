@@ -21,7 +21,7 @@ func activityOf(t *testing.T, w *world, repo, dir string, record *wsm.Workspace)
 			wt = candidate
 		}
 	}
-	return lastActivity(context.Background(), w.git, repo, wt, record)
+	return lastActivity(context.Background(), w.git, repo, w.git.admin[dir], wt, record)
 }
 
 func TestTheNewestSignalIsTheLastActivity(t *testing.T) {

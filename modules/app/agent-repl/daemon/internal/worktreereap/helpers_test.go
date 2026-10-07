@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -50,8 +51,12 @@ type fakeGit struct {
 	merged           map[string]gitclient.MergeTreeOutcome
 	mergeErr         map[string]error
 	removeErr        map[string]error
+	forceRemoveErr   map[string]error
 	deleteErr        map[string]error
 	pruneErr         error
+	commonDir        map[string]string
+	commonErr        map[string]error
+	preserveErr      map[string]error
 
 	// entered and release, when set, hold DefaultBranch until the test
 	// releases it: the rendezvous a concurrency test needs.
@@ -73,7 +78,11 @@ func newFakeGit() *fakeGit {
 		merged:           map[string]gitclient.MergeTreeOutcome{},
 		mergeErr:         map[string]error{},
 		removeErr:        map[string]error{},
+		forceRemoveErr:   map[string]error{},
 		deleteErr:        map[string]error{},
+		commonDir:        map[string]string{},
+		commonErr:        map[string]error{},
+		preserveErr:      map[string]error{},
 	}
 }
 
@@ -180,6 +189,34 @@ func (g *fakeGit) RemoveCleanWorktree(_ context.Context, repoDir, worktreeDir st
 	return g.removeErr[worktreeDir]
 }
 
+func (g *fakeGit) RemoveWorktree(_ context.Context, repoDir, worktreeDir string) error {
+	g.record("force_remove %s", worktreeDir)
+	return g.forceRemoveErr[worktreeDir]
+}
+
+func (g *fakeGit) CommonDir(_ context.Context, dir string) (string, error) {
+	g.record("common_dir %s", dir)
+	if err := g.commonErr[dir]; err != nil {
+		return "", err
+	}
+	common, ok := g.commonDir[dir]
+	if !ok {
+		return "", fmt.Errorf("fake git: no common dir scripted for %s", dir)
+	}
+	return common, nil
+}
+
+// preservedSHA is the commit every scripted preservation answers.
+const preservedSHA = "5000000000000000000000000000000000000005"
+
+func (g *fakeGit) PreserveWorktree(_ context.Context, repoDir, worktreeDir, ref, message string) (string, error) {
+	g.record("preserve %s %s", worktreeDir, ref)
+	if err := g.preserveErr[worktreeDir]; err != nil {
+		return "", err
+	}
+	return preservedSHA, nil
+}
+
 func (g *fakeGit) DeleteBranchAt(_ context.Context, repoDir, branch, head string) error {
 	g.record("delete_branch %s %s", branch, head)
 	return g.deleteErr[branch]
@@ -254,6 +291,7 @@ func newWorld(t *testing.T) *world {
 func (w *world) addRepo(name string) string {
 	w.t.Helper()
 	dir := w.mkdir(name)
+	w.git.commonDir[dir] = w.mkdir(filepath.Join("common", name))
 	w.registry.repos = append(w.registry.repos, wsm.Repository{ID: ids.RepoID("repo-" + name), Dir: dir, Name: name})
 	w.git.worktrees[dir] = []gitclient.Worktree{{Dir: dir, Head: baseSHA, Branch: "main"}}
 	return dir
@@ -272,6 +310,9 @@ type tree struct {
 	missing bool
 	// touched is the admin files' mtime; zero is longAgo.
 	touched time.Time
+	// born is the worktree's creation (its admin `commondir` file's mtime);
+	// zero is longAgo.
+	born time.Time
 	// committed is the head's committer time; zero is longAgo.
 	committed time.Time
 	// outcome is merge-tree's answer; zero is the landed answer.
@@ -298,7 +339,12 @@ func (w *world) addTree(repoDir string, spec tree) string {
 		Locked: spec.locked, Prunable: spec.prunable,
 	})
 
-	admin := w.mkdir(filepath.Join("admin", spec.name))
+	admin := filepath.Join(w.git.commonDir[repoDir], "worktrees", spec.name)
+	born := spec.born
+	if born.IsZero() {
+		born = longAgo
+	}
+	w.writeAged(filepath.Join(admin, "commondir"), born)
 	touched := spec.touched
 	if touched.IsZero() {
 		touched = longAgo
@@ -366,7 +412,9 @@ func (w *world) writeAged(path string, at time.Time) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		w.t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
 	}
-	if err := os.WriteFile(path, []byte("x\n"), 0o644); err != nil {
+	// Every aged file reads as one reflog entry at its own mtime, so an admin
+	// file is also a valid reflog wherever the sweep reads one.
+	if err := os.WriteFile(path, []byte(reflogLine(at)), 0o644); err != nil {
 		w.t.Fatalf("write %s: %v", path, err)
 	}
 	if err := os.Chtimes(path, at, at); err != nil {
@@ -392,6 +440,7 @@ func (w *world) deps() Deps {
 		Clock:        w.clock,
 		LockPath:     w.lockPath,
 		IdleAfter:    DefaultIdleAfter,
+		ExpireAfter:  DefaultExpireAfter,
 		StartDelay:   DefaultStartDelay,
 		Every:        DefaultEvery,
 		Log:          w.log,
@@ -442,3 +491,26 @@ func (w *world) keptFor(dir string) string {
 }
 
 var errScripted = errors.New("scripted failure")
+
+// reflogLine is one reflog entry at an instant.
+func reflogLine(at time.Time) string {
+	return fmt.Sprintf("%040d %040d Test <test@example.com> %d +0000\tcommit: work\n", 0, 1, at.Unix())
+}
+
+// activeEvery writes a reflog into the repository's common dir with one entry
+// every step from `from` up to and including `to`: a repository somebody works
+// in steadily over that span.
+func (w *world) activeEvery(repoDir string, from, to time.Time, step time.Duration) {
+	w.t.Helper()
+	var body strings.Builder
+	for at := from; !at.After(to); at = at.Add(step) {
+		body.WriteString(reflogLine(at))
+	}
+	path := filepath.Join(w.git.commonDir[repoDir], "logs", "refs", "heads", "main")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		w.t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, []byte(body.String()), 0o644); err != nil {
+		w.t.Fatalf("write %s: %v", path, err)
+	}
+}

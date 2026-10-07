@@ -46,11 +46,7 @@ var adminFiles = []struct {
 //
 // Files in the TREE itself are not read: a tree only qualifies when it is
 // clean, and a clean tree's content is what its HEAD records.
-func lastActivity(ctx context.Context, git Git, repoDir string, wt gitclient.Worktree, record *wsm.Workspace) (activity, error) {
-	admin, err := git.AdminDir(ctx, wt.Dir)
-	if err != nil {
-		return activity{}, err
-	}
+func lastActivity(ctx context.Context, git Git, repoDir, admin string, wt gitclient.Worktree, record *wsm.Workspace) (activity, error) {
 	var newest activity
 	consider := func(at time.Time, signal string) {
 		if at.After(newest.At) {

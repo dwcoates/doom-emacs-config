@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -27,6 +28,7 @@ func TestNewRefusesAMissingCollaboratorOrWindow(t *testing.T) {
 		{"lock path", func(d *Deps) { d.LockPath = "" }},
 		{"log", func(d *Deps) { d.Log = nil }},
 		{"idle threshold", func(d *Deps) { d.IdleAfter = 0 }},
+		{"expiry", func(d *Deps) { d.ExpireAfter = 0 }},
 		{"start delay", func(d *Deps) { d.StartDelay = 0 }},
 		{"cadence", func(d *Deps) { d.Every = -time.Hour }},
 	}
@@ -793,4 +795,342 @@ func TestASweepLockThatCannotBeToldAboutIsAnError(t *testing.T) {
 	if len(w.records("error", opSweep)) != 1 {
 		t.Fatalf("sweep errors = %v, want one ERROR", w.records("error", opSweep))
 	}
+}
+
+// --- the expiry rule -----------------------------------------------------------
+
+// unlandedOutcome is merge-tree's answer for a tree whose changes are not on
+// the default branch.
+var unlandedOutcome = &gitclient.MergeTreeOutcome{Tree: "9999999999999999999999999999999999999999"}
+
+// daysAgo is an instant that many days before now.
+func daysAgo(d float64) time.Time {
+	return now.Add(-time.Duration(d * 24 * float64(time.Hour)))
+}
+
+// steadyRepo registers a repository somebody has worked in every 12 hours for
+// the last 20 days, up to an hour ago.
+func (w *world) steadyRepo(name string) string {
+	w.t.Helper()
+	repo := w.addRepo(name)
+	w.activeEvery(repo, daysAgo(20), now.Add(-time.Hour), 12*time.Hour)
+	return repo
+}
+
+func TestAnExpiredUnlandedWorktreeIsPreservedThenRemovedAndItsBranchKept(t *testing.T) {
+	// Arrange.
+	w := newWorld(t)
+	repo := w.steadyRepo("repo")
+	dir := w.addTree(repo, tree{name: "stale", born: daysAgo(30), outcome: unlandedOutcome})
+	ref := reapedRef(filepath.Join(w.git.commonDir[repo], "worktrees", "stale"), now)
+
+	// Act.
+	report := w.sweep()
+
+	// Assert.
+	if len(report.Expired) != 1 || report.Expired[0] != dir || len(report.Removed) != 0 {
+		t.Fatalf("Expired = %v, Removed = %v, want the stale tree expired", report.Expired, report.Removed)
+	}
+	calls := strings.Join(w.git.called(), "\n")
+	if !strings.Contains(calls, "preserve "+dir+" "+ref+"\nremove "+dir) {
+		t.Fatalf("git calls = %v, want the preservation at %s immediately before the clean removal", w.git.called(), ref)
+	}
+	if strings.Contains(calls, "delete_branch") || strings.Contains(calls, "force_remove") {
+		t.Fatalf("git calls = %v, want the branch kept and no forced removal", w.git.called())
+	}
+	w.assertNoWarnings()
+}
+
+func TestAnExpiryIsRecordedAtInfoWithItsFacts(t *testing.T) {
+	// Arrange.
+	w := newWorld(t)
+	repo := w.steadyRepo("repo")
+	dir := w.addTree(repo, tree{name: "stale", born: daysAgo(30), outcome: unlandedOutcome})
+
+	// Act.
+	w.sweep()
+
+	// Assert.
+	records := w.records("info", opExpire)
+	if len(records) != 1 {
+		t.Fatalf("expire records = %v, want one", records)
+	}
+	got := records[0].Context
+	for _, key := range []string{"preserved_ref", "born", "repo_active_since", "expiry_age", "expire_after", "last_activity"} {
+		if got[key] == nil {
+			t.Fatalf("expire record %v lacks %s", got, key)
+		}
+	}
+	if got["worktree"] != dir || got["preserved_sha"] != preservedSHA || got["unlanded_reason"] != keepUnlanded || got["branch"] != "feat/stale" {
+		t.Fatalf("expire record = %v, want the tree, the preservation, why it never landed and its kept branch", got)
+	}
+}
+
+func TestAnExpiredDirtyWorktreeIsForceRemovedAfterItsPreservation(t *testing.T) {
+	// Arrange.
+	w := newWorld(t)
+	repo := w.steadyRepo("repo")
+	dir := w.addTree(repo, tree{name: "dirty", born: daysAgo(30)})
+	w.git.dirty[dir] = true
+
+	// Act.
+	report := w.sweep()
+
+	// Assert.
+	calls := strings.Join(w.git.called(), "\n")
+	if len(report.Expired) != 1 || !strings.Contains(calls, "\nforce_remove "+dir) || strings.Index(calls, "preserve ") > strings.Index(calls, "force_remove ") {
+		t.Fatalf("Expired = %v, git calls = %v, want a preservation then a forced removal", report.Expired, w.git.called())
+	}
+}
+
+func TestAnExpiredConflictingWorktreeIsExpired(t *testing.T) {
+	// Arrange.
+	w := newWorld(t)
+	repo := w.steadyRepo("repo")
+	w.addTree(repo, tree{name: "conflicts", born: daysAgo(30), outcome: &gitclient.MergeTreeOutcome{Tree: baseTree, Conflicted: true}})
+
+	// Act.
+	report := w.sweep()
+
+	// Assert.
+	if len(report.Expired) != 1 || w.records("info", opExpire)[0].Context["unlanded_reason"] != keepConflicts {
+		t.Fatalf("Expired = %v, want the conflicting tree expired as such", report.Expired)
+	}
+}
+
+func TestAnExpiredLandedWorktreeTakesTheLandedPath(t *testing.T) {
+	// Arrange: landed beats expired, so its branch goes and nothing is
+	// preserved.
+	w := newWorld(t)
+	repo := w.steadyRepo("repo")
+	dir := w.addTree(repo, tree{name: "landed", born: daysAgo(30)})
+
+	// Act.
+	report := w.sweep()
+
+	// Assert.
+	if len(report.Removed) != 1 || len(report.Expired) != 0 || !w.git.saw("delete_branch feat/landed "+w.headOf(repo, dir)) {
+		t.Fatalf("Removed = %v, Expired = %v, calls %v, want the landed removal", report.Removed, report.Expired, w.git.called())
+	}
+	for _, call := range w.git.called() {
+		if strings.HasPrefix(call, "preserve ") {
+			t.Fatalf("git calls = %v, want no preservation of a landed tree", w.git.called())
+		}
+	}
+}
+
+func TestTheExpiryClock(t *testing.T) {
+	cases := []struct {
+		name   string
+		born   time.Time
+		active func(w *world, repo string)
+	}{
+		{
+			name:   "a tree younger than the expiry is kept",
+			born:   daysAgo(10),
+			active: func(w *world, repo string) { w.activeEvery(repo, daysAgo(20), now.Add(-time.Hour), 12*time.Hour) },
+		},
+		{
+			name: "a full idle day restarts the clock",
+			born: daysAgo(30),
+			active: func(w *world, repo string) {
+				// Steady work, then a 36-hour break ending 10 days ago.
+				w.activeEvery(repo, daysAgo(20), daysAgo(11.5), 12*time.Hour)
+				w.activeEvery(repo, daysAgo(10), now.Add(-time.Hour), 12*time.Hour)
+			},
+		},
+		{
+			name:   "a repository idle right now expires nothing",
+			born:   daysAgo(30),
+			active: func(w *world, repo string) { w.activeEvery(repo, daysAgo(20), daysAgo(2), 12*time.Hour) },
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			w := newWorld(t)
+			repo := w.addRepo("repo")
+			dir := w.addTree(repo, tree{name: "stale", born: tc.born, outcome: unlandedOutcome})
+			tc.active(w, repo)
+
+			// Act.
+			report := w.sweep()
+
+			// Assert.
+			if len(report.Expired) != 0 || w.keptFor(dir) != keepUnlanded {
+				t.Fatalf("Expired = %v, kept for %q, want the tree kept as unlanded", report.Expired, w.keptFor(dir))
+			}
+		})
+	}
+}
+
+func TestInterleavedReflogsFormOneActiveRun(t *testing.T) {
+	// Arrange: two reflogs whose entries interleave into one unbroken run,
+	// neither unbroken alone.
+	w := newWorld(t)
+	repo := w.addRepo("repo")
+	w.activeEvery(repo, daysAgo(20), now.Add(-time.Hour), 40*time.Hour)
+	other := filepath.Join(w.git.commonDir[repo], "logs", "HEAD")
+	var body strings.Builder
+	for at := daysAgo(20).Add(20 * time.Hour); at.Before(now); at = at.Add(40 * time.Hour) {
+		body.WriteString(reflogLine(at))
+	}
+	if err := os.WriteFile(other, []byte(body.String()), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	w.addTree(repo, tree{name: "stale", born: daysAgo(30), outcome: unlandedOutcome})
+
+	// Act.
+	report := w.sweep()
+
+	// Assert.
+	if len(report.Expired) != 1 {
+		t.Fatalf("Expired = %v, want the two reflogs read as one run", report.Expired)
+	}
+}
+
+func TestAnOpenWorkspacesExpiredCheckoutIsKept(t *testing.T) {
+	// Arrange: the safety gates run before the expiry rule.
+	w := newWorld(t)
+	repo := w.steadyRepo("repo")
+	dir := w.addTree(repo, tree{name: "open", born: daysAgo(30), outcome: unlandedOutcome})
+	w.register(repo, dir, wsm.Workspace{})
+
+	// Act.
+	report := w.sweep()
+
+	// Assert.
+	if len(report.Expired) != 0 || w.keptFor(dir) != keepOpenWorkspace {
+		t.Fatalf("Expired = %v, kept for %q, want the open workspace kept", report.Expired, w.keptFor(dir))
+	}
+}
+
+func TestAPreservationFailureKeepsTheExpiredWorktreeAtError(t *testing.T) {
+	// Arrange.
+	w := newWorld(t)
+	repo := w.steadyRepo("repo")
+	dir := w.addTree(repo, tree{name: "stale", born: daysAgo(30), outcome: unlandedOutcome})
+	w.git.preserveErr[dir] = errScripted
+
+	// Act.
+	report := w.sweep()
+
+	// Assert.
+	errs := w.records("error", opExpire)
+	if len(report.Expired) != 0 || len(errs) != 1 || report.Kept[reasonPreserveFail] != 1 || report.Failures != 1 {
+		t.Fatalf("Expired = %v, expire errors %v, kept %v, want the tree kept at ERROR", report.Expired, errs, report.Kept)
+	}
+	if errs[0].Context["worktree"] != dir || errs[0].Context["cause"] != errScripted.Error() || errs[0].Context["preserved_ref"] == nil {
+		t.Fatalf("expire error = %v, want the tree, the cause and the ref", errs[0].Context)
+	}
+	for _, call := range w.git.called() {
+		if strings.HasPrefix(call, "remove ") || strings.HasPrefix(call, "force_remove ") {
+			t.Fatalf("git calls = %v, want no removal of an unpreserved tree", w.git.called())
+		}
+	}
+}
+
+func TestAnExpiryRemovalFailureIsRecordedAtError(t *testing.T) {
+	// Arrange.
+	w := newWorld(t)
+	repo := w.steadyRepo("repo")
+	dir := w.addTree(repo, tree{name: "stale", born: daysAgo(30), outcome: unlandedOutcome})
+	w.git.removeErr[dir] = errScripted
+
+	// Act.
+	report := w.sweep()
+
+	// Assert.
+	errs := w.records("error", opExpire)
+	if len(report.Expired) != 0 || len(errs) != 1 || report.Kept[reasonRemoveFailed] != 1 || errs[0].Context["preserved_sha"] != preservedSHA {
+		t.Fatalf("Expired = %v, expire errors %v, kept %v, want the failed removal at ERROR naming the preservation", report.Expired, errs, report.Kept)
+	}
+}
+
+func TestAnExpiredWorktreeWithoutABirthIsKeptAtError(t *testing.T) {
+	// Arrange.
+	w := newWorld(t)
+	repo := w.steadyRepo("repo")
+	dir := w.addTree(repo, tree{name: "stale", born: daysAgo(30), outcome: unlandedOutcome})
+	if err := os.Remove(filepath.Join(w.git.commonDir[repo], "worktrees", "stale", "commondir")); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+
+	// Act.
+	report := w.sweep()
+
+	// Assert.
+	errs := w.records("error", opJudge)
+	if len(report.Expired) != 0 || len(errs) != 1 || errs[0].Context["worktree"] != dir {
+		t.Fatalf("Expired = %v, judge errors %v, want the tree kept at ERROR", report.Expired, errs)
+	}
+}
+
+func TestARepositoryWhoseActivityCannotBeReadIsNotSwept(t *testing.T) {
+	cases := []struct {
+		name    string
+		breakIt func(w *world, repo string)
+	}{
+		{"the common dir cannot be resolved", func(w *world, repo string) { w.git.commonErr[repo] = errScripted }},
+		{"a reflog is malformed", func(w *world, repo string) {
+			if err := os.WriteFile(filepath.Join(w.git.commonDir[repo], "logs", "refs", "heads", "main"), []byte("garbage\n"), 0o644); err != nil {
+				w.t.Fatalf("write: %v", err)
+			}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: even a landed tree waits for the activity.
+			w := newWorld(t)
+			repo := w.steadyRepo("repo")
+			w.addTree(repo, tree{name: "landed"})
+			tc.breakIt(w, repo)
+
+			// Act.
+			report := w.sweep()
+
+			// Assert.
+			if len(report.Removed) != 0 || report.Repositories != 0 || len(w.records("error", opRepo)) != 1 {
+				t.Fatalf("Removed = %v, swept %d, repo errors %d, want the repository skipped at ERROR", report.Removed, report.Repositories, len(w.records("error", opRepo)))
+			}
+		})
+	}
+}
+
+func TestTheActivityIsReadBeforeThePrune(t *testing.T) {
+	// Arrange: the prune deletes stale trees' reflogs.
+	w := newWorld(t)
+	repo := w.addRepo("repo")
+	w.addTree(repo, tree{name: "gone", prunable: true, missing: true})
+
+	// Act.
+	w.sweep()
+
+	// Assert.
+	calls := strings.Join(w.git.called(), "\n")
+	if strings.Index(calls, "common_dir ") > strings.Index(calls, "prune ") {
+		t.Fatalf("git calls = %v, want the common dir resolved before the prune", w.git.called())
+	}
+}
+
+func TestTheSweepSummaryCountsExpiries(t *testing.T) {
+	// Arrange.
+	w := newWorld(t)
+	repo := w.steadyRepo("repo")
+	dir := w.addTree(repo, tree{name: "stale", born: daysAgo(30), outcome: unlandedOutcome})
+
+	// Act.
+	w.sweep()
+
+	// Assert.
+	for _, r := range w.records("info", opSweep) {
+		if r.Message == "the sweep finished" {
+			dirs, _ := r.Context["expired_dirs"].([]string)
+			if r.Context["expired"] != 1 || len(dirs) != 1 || dirs[0] != dir {
+				t.Fatalf("summary = %v, want one expiry naming %s", r.Context, dir)
+			}
+			return
+		}
+	}
+	t.Fatal("no sweep summary was recorded")
 }
