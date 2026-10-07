@@ -696,6 +696,32 @@ func (c *client) IsClean(ctx context.Context, dir string) (bool, error) {
 	return c.statusEmpty(ctx, "daemon.gitclient.is_clean", dir)
 }
 
+// PathClean reports whether PATH carries no uncommitted change. It is
+// IsClean narrowed to one path: an untracked path counts as unclean, because
+// committing it would commit content nobody has reviewed as a change.
+func (c *client) PathClean(ctx context.Context, dir, path string) (bool, error) {
+	return c.statusEmpty(ctx, "daemon.gitclient.path_clean", dir, path)
+}
+
+// CommitPath records PATH alone as a commit. `--only` is the whole point: git
+// commits the path's working-tree content through a temporary index, so
+// nothing else the checkout's index holds staged is swept in, and that staged
+// content is still staged afterwards.
+func (c *client) CommitPath(ctx context.Context, dir, path, message string) (string, error) {
+	const operation = "daemon.gitclient.commit_path"
+
+	sha, err := c.recordCommit(ctx, operation, dir, "commit", "--only", "-m", message, "--", path)
+	if err != nil {
+		return "", err
+	}
+	c.log.Global().Debug(operation, "one path was recorded as a commit of its own", dlog.Context{
+		"dir":  dir,
+		"path": path,
+		"sha":  sha,
+	})
+	return sha, nil
+}
+
 // statusEmpty reports whether `status --porcelain` lists nothing, narrowed to
 // PATHSPEC when one is given. It is the one status probe this client makes,
 // so every caller's probe takes no optional lock (see IsClean) and reads

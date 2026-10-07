@@ -101,6 +101,13 @@ type Git interface {
 	ChangedPaths(ctx context.Context, dir, rangeSpec string) ([]string, error)
 	// IsClean reports whether the working tree and index are clean.
 	IsClean(ctx context.Context, dir string) (bool, error)
+	// PathClean reports whether one path carries no uncommitted change:
+	// nothing staged, nothing modified, and not untracked.
+	PathClean(ctx context.Context, dir, path string) (bool, error)
+	// CommitPath records one path's working-tree content as a commit of its
+	// own, leaving whatever else the index holds staged and uncommitted, and
+	// answers the commit's full sha.
+	CommitPath(ctx context.Context, dir, path, message string) (string, error)
 	// CurrentBranch reports the checked-out branch.
 	CurrentBranch(ctx context.Context, dir string) (string, error)
 
