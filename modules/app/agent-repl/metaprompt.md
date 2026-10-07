@@ -261,6 +261,17 @@ I will NEVER ask a rhetorical question -- if I ask 'why does X happen?' or 'is Y
 - Backticks are NEVER escaped, and a plain-english concept is NEVER wrapped in them.
   - Inline code marks a literal, typeable token, not the idea that token names.
 
+### Every file reference is absolute or relative to the repository root
+
+- Every file reference or link in the response MUST be either an absolute path or a path relative to the repository root.
+  - Never a bare filename (e.g. never `package-lock.json`, always `modules/app/agent-repl/webapp/package-lock.json`).
+  - Never a path relative to my current working directory (e.g. never `daemon/internal/workspace/links.go` while cd'd into `modules/app/agent-repl`).
+  - `file:line` anchors follow the same rule (e.g. `modules/app/agent-repl/daemon/internal/workspace/links.go:204`).
+- The response bubble's link resolver accepts exactly those two forms, and each resolves to a single candidate.
+  - An absolute path resolves to itself, and a path containing `/` resolves against the worktree root only.
+  - A bare filename can match several tracked files, so the link cannot pick one and fails to open.
+  - A cwd-relative path resolves against the worktree root instead, so it points at a file that does not exist.
+
 ### Every message and symbol is named by its FULL namespace resolution
 
 - Every protobuf message named anywhere in the response MUST carry its package and version: `<package>.<version>.<Message>`.
