@@ -570,3 +570,58 @@ func TestFoldHeldPromptRefusesAMalformedRequest(t *testing.T) {
 		})
 	}
 }
+
+func TestUpdateClassifierPromptRefusesAMalformedRequest(t *testing.T) {
+	// Arrange.
+	tests := []struct {
+		name string
+		req  func() *agentreplv1.UpdateClassifierPromptRequest
+	}{
+		{"a blank instruction", func() *agentreplv1.UpdateClassifierPromptRequest {
+			req := classifierPromptRequest()
+			req.Instruction = "  \n"
+			return req
+		}},
+		{"no example", func() *agentreplv1.UpdateClassifierPromptRequest {
+			req := classifierPromptRequest()
+			req.Example = nil
+			return req
+		}},
+		{"an unspecified route", func() *agentreplv1.UpdateClassifierPromptRequest {
+			req := classifierPromptRequest()
+			req.Example.Route = agentreplv1.ClassifierRoute_CLASSIFIER_ROUTE_UNSPECIFIED
+			return req
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newHarness(t)
+
+			// Act.
+			_, err := h.Client.UpdateClassifierPrompt(context.Background(), connect.NewRequest(tt.req()))
+
+			// Assert.
+			if code := connectCode(t, err); code != connect.CodeInvalidArgument {
+				t.Fatalf("code = %v, want InvalidArgument", code)
+			}
+			if len(h.ClassifierPrompt.updates) != 0 {
+				t.Fatalf("a malformed request reached the updater")
+			}
+		})
+	}
+}
+
+func TestUpdateClassifierPromptAcceptsAnExampleWithNoText(t *testing.T) {
+	// Arrange: a prompt that was only an image still had a verdict.
+	h := newHarness(t)
+	req := classifierPromptRequest()
+	req.Example.Text = ""
+
+	// Act.
+	_, err := h.Client.UpdateClassifierPrompt(context.Background(), connect.NewRequest(req))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("UpdateClassifierPrompt = %v, want it accepted", err)
+	}
+}
