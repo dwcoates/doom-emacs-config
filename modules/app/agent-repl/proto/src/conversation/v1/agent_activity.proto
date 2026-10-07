@@ -724,8 +724,12 @@ message DetachedLost {
     DetachedLostWentSilent went_silent = 2;
     // A boot sweep found the run open with no living producer.
     DetachedLostSweptUp swept_up = 3;
+    // The vendor process that ran the work ENDED (a crash, a kill, a stand
+    // down) and no outcome was ever stated for it. See SessionLiveWork.
+    DetachedLostProcessEnded process_ended = 4;
   }
 }
+message DetachedLostProcessEnded {}
 message DetachedLostFileVanished {}
 message DetachedLostWentSilent {}
 message DetachedLostSweptUp {}
@@ -2566,6 +2570,10 @@ message AgentSubagentFailure {
     // We stopped being able to see it — its transcript vanished or went
     // silent; not known to have failed. Draws as "lost".
     DetachedLost lost = 3;
+    // The vendor process running the subagent RESTARTED, and the resumed
+    // process found the run orphaned (the vendor's `worker_restart`). Not a
+    // person stopping it and not the subagent's own fault.
+    AgentSubagentWorkerRestarted worker_restarted = 6;
   }
 
   // What it was asked to do, restated so the settled frame stands alone,
@@ -2586,6 +2594,10 @@ message AgentSubagentFailure {
 
 // A person stopped the subagent by hand.
 message AgentSubagentStoppedByUser {}
+
+// The vendor process restarted under the run, which the resumed process found
+// orphaned.
+message AgentSubagentWorkerRestarted {}
 
 // ---- The skill: an invocation, and the document it loaded ----
 

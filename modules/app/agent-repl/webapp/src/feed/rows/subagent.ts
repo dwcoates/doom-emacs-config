@@ -69,6 +69,7 @@ const SETTLED_WORDS = {
   failed: "failed",
   cancelled: "stopped",
   lost: "lost sight of",
+  restarted: "ended by a restart",
 } as const satisfies Record<string, string>;
 
 /**
@@ -85,6 +86,7 @@ const SETTLED_BADGES = {
   failed: "badge err",
   cancelled: "badge muted",
   lost: "badge muted",
+  restarted: "badge muted",
 } as const satisfies Record<string, string>;
 
 /**
@@ -96,6 +98,7 @@ const LOST_CAUSE_WORDS = {
   fileVanished: "file vanished",
   wentSilent: "went silent",
   sweptUp: "swept up at boot",
+  processEnded: "process ended",
 } as const satisfies Record<string, string>;
 
 /** Every lost cause this build words, for the suite to hold to the schema. */
@@ -191,6 +194,21 @@ export function drawFeedSubagent(msg: FeedSubagent, rc: RowContext): HTMLElement
       // A CARD'S TIMER STOPS THE MOMENT ITS UNIT SETTLES. The settled clock is
       // frozen at the span the MESSAGE reports, and this element carries no
       // live subscription onward from a terminal draw.
+      stopTicking(el);
+      break;
+    }
+    case "settling": {
+      // STOPPED, OUTCOME ON ITS WAY (conversation.v1 SessionLiveWork): the
+      // clock stops where the run left the vendor's live set, and the head
+      // turns settled when the outcome lands.
+      el.setAttribute("data-state", "settling");
+      const startedMs = msOf(runtime.startedAtMs, `${PATH}.runtime.started_at_ms`);
+      const stoppedMs = msOf(state.value.stoppedAtMs, `${PATH}.settling.stopped_at_ms`);
+      el.append(settledElapsedClock("subagent-clock", stoppedMs - startedMs));
+      const word = document.createElement("span");
+      word.className = "subagent-outcome badge muted";
+      word.textContent = "settling";
+      el.append(word);
       stopTicking(el);
       break;
     }
