@@ -402,6 +402,11 @@ type subagentState struct {
 	durationMs uint64
 	// detached records that the bubble is drawn through the detached wrapper.
 	detached bool
+	// fromHistory records that a history page drew the bubble, so under the
+	// live-work level a bubble no live set names was running in an EARLIER
+	// vendor process and is judged lost (judgeHistoryBubbles). A bubble drawn
+	// from the live tail is never judged that way: its level push may follow.
+	fromHistory bool
 	// work is the run's detached-work id once it is detached work, empty while
 	// the spawn is the turn's own progress. The head draws it verbatim
 	// (FeedSubagent.work_id).
