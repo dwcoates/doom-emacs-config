@@ -124,6 +124,10 @@ export function peerUpsertKey(vendorRecordUuid: string): string {
  * owns the row (it is the plane that sees the firing's START, so it is the only
  * one that carries the hook's name and event and a turn), and the sidecar
  * classifies its transcript hook attachments as unserved items.
+ *
+ * THE ROW IS DELIVERED, NOT KEPT (owner rulings 2026-10-06): only a failed or
+ * blocked firing is written at all (convert/hooks.ts), and the store publishes
+ * it to the standing watches and keeps none of it (shim-store `hook_dropped`).
  */
 
 /** An open question to the user (the AskUserQuestion call's own tool_use_id). */

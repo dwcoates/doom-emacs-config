@@ -8,7 +8,7 @@
  */
 import { writeSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
-import { logRecordsSince, logSinkMark } from "../log-records.js";
+import { logRecordsDuring, logRecordsSince, logSinkMark } from "../log-records.js";
 import { create } from "@bufbuild/protobuf";
 import { conversationv1 } from "../../src/proto.js";
 import { EMPTY_FOLD_OUTPUT, createFold, type FoldOutput } from "../../src/convert/fold.js";
@@ -906,28 +906,81 @@ describe("a task notification whose kind this fold does not hold", () => {
 });
 
 describe("hooks", () => {
-  it("opens a hook unit on the vendor's own firing record", () => {
+  it("stores nothing for the vendor's own firing record", () => {
     const fold = createFold();
 
     const output = fold.onSdkMessage(streamMessage("hook_started"), foldContext());
 
-    expect(activityOf(output.entries[0])?.item.case).toBe("hook");
+    expect(output.entries).toEqual([]);
   });
 
-  it("settles a succeeded hook with the duration the shim spanned", () => {
+  it("stores nothing for a hook's progress report", () => {
+    const fold = createFold();
+
+    const output = fold.onSdkMessage(
+      {
+        type: "system",
+        subtype: "hook_progress",
+        hook_id: "hook-1",
+        hook_name: "PreToolUse:Read",
+        hook_event: "PreToolUse",
+        stdout: "working",
+        stderr: "",
+        output: "",
+        uuid: "uuid-hook-progress",
+        session_id: "session-1",
+      } as unknown as SdkMessage,
+      foldContext(),
+    );
+
+    expect(output.entries).toEqual([]);
+  });
+
+  it("settles a failed hook with the duration the shim spanned", () => {
     const fold = createFold();
     fold.onSdkMessage(streamMessage("hook_started"), foldContext({ nowMs: 1_000 }));
     const response = streamMessage("hook_response") as unknown as Record<string, unknown>;
 
     const output = fold.onSdkMessage(
-      { ...response, hook_id: "329470c7-5cbb-430d-be65-3fac50b869fb" } as unknown as SdkMessage,
+      {
+        ...response,
+        hook_id: "329470c7-5cbb-430d-be65-3fac50b869fb",
+        outcome: "error",
+        output: "",
+        exit_code: 1,
+      } as unknown as SdkMessage,
       foldContext({ nowMs: 1_250 }),
     );
 
-    const hook = activityOf(output.entries[0])?.item.value as conversationv1.AgentHook;
-    const succeeded = hook.result.value as conversationv1.AgentHookSucceeded;
-    expect(hook.result.case).toBe("succeeded");
-    expect(succeeded.durationMs).toBe(250n);
+    const hook = activityOf(output.entries[1])?.item.value as conversationv1.AgentHook;
+    const failed = hook.result.value as conversationv1.AgentHookNonBlockingError;
+    expect([hook.result.case, failed.durationMs]).toEqual(["nonBlockingError", 250n]);
+  });
+
+  it("summarizes the dropped hook records when the query ends", () => {
+    // Arrange
+    const fold = createFold();
+    fold.onSdkMessage(streamMessage("hook_started"), foldContext());
+
+    // Act
+    const records = logRecordsDuring(() => fold.endQuery("the query was replaced"));
+
+    // Assert
+    const summary = records.find((record) => record.message.startsWith("hook records this query produced"));
+    expect([summary?.level, summary?.context.dropped_total]).toEqual(["info", 1]);
+  });
+
+  it("summarizes the dropped hook records when the session stands down", () => {
+    // Arrange
+    const fold = createFold();
+    fold.onSdkMessage(streamMessage("hook_started"), foldContext());
+
+    // Act
+    const records = logRecordsDuring(() => fold.reportDroppedHooks("the session stood down: KillSession"));
+
+    // Assert
+    const summary = records.find((record) => record.message.startsWith("hook records this query produced"));
+    expect(summary?.context.why).toBe("the session stood down: KillSession");
   });
 
   it("never synthesizes a turn terminal from hook activity", () => {
