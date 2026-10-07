@@ -22,7 +22,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_inspect_chess_board_square.proto.
  */
 export const file_agentrepl_v1_endpoint_inspect_chess_board_square: GenFile = /*@__PURE__*/
-  fileDesc("CjZhZ2VudHJlcGwvdjEvZW5kcG9pbnRfaW5zcGVjdF9jaGVzc19ib2FyZF9zcXVhcmUucHJvdG8SDGFnZW50cmVwbC52MSJ7Ch5JbnNwZWN0Q2hlc3NCb2FyZFNxdWFyZVJlcXVlc3QSNQoFYm9hcmQYASABKAsyJi5mcm9udGVuZC52MS5GZWVkQ2hlc3NCb2FyZFNxdWFyZVRva2VuEhIKCmdhbWVfcG9pbnQYAiABKAMSDgoGc3F1YXJlGAMgASgNIqkBCh9JbnNwZWN0Q2hlc3NCb2FyZFNxdWFyZVJlc3BvbnNlEj8KB3N1Y2Nlc3MYASABKAsyLC5hZ2VudHJlcGwudjEuSW5zcGVjdENoZXNzQm9hcmRTcXVhcmVTdWNjZXNzSAASOwoFZXJyb3IYAiABKAsyKi5hZ2VudHJlcGwudjEuSW5zcGVjdENoZXNzQm9hcmRTcXVhcmVFcnJvckgAQggKBnJlc3VsdCJECh5JbnNwZWN0Q2hlc3NCb2FyZFNxdWFyZVN1Y2Nlc3MSIgoaZ2V0X3NxdWFyZV9ldmVudHNfcmVzcG9uc2UYASABKAwifwocSW5zcGVjdENoZXNzQm9hcmRTcXVhcmVFcnJvchJWChNiYWNrZW5kX3VucmVhY2hhYmxlGAEgASgLMjcuYWdlbnRyZXBsLnYxLkluc3BlY3RDaGVzc0JvYXJkU3F1YXJlQmFja2VuZFVucmVhY2hhYmxlSABCBwoFY2F1c2UiOwopSW5zcGVjdENoZXNzQm9hcmRTcXVhcmVCYWNrZW5kVW5yZWFjaGFibGUSDgoGZGV0YWlsGAEgASgJQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_frontend_v1_chess_board]);
+  fileDesc("CjZhZ2VudHJlcGwvdjEvZW5kcG9pbnRfaW5zcGVjdF9jaGVzc19ib2FyZF9zcXVhcmUucHJvdG8SDGFnZW50cmVwbC52MSJ7Ch5JbnNwZWN0Q2hlc3NCb2FyZFNxdWFyZVJlcXVlc3QSNQoFYm9hcmQYASABKAsyJi5mcm9udGVuZC52MS5GZWVkQ2hlc3NCb2FyZFNxdWFyZVRva2VuEhIKCmdhbWVfcG9pbnQYAiABKAMSDgoGc3F1YXJlGAMgASgNIqkBCh9JbnNwZWN0Q2hlc3NCb2FyZFNxdWFyZVJlc3BvbnNlEj8KB3N1Y2Nlc3MYASABKAsyLC5hZ2VudHJlcGwudjEuSW5zcGVjdENoZXNzQm9hcmRTcXVhcmVTdWNjZXNzSAASOwoFZXJyb3IYAiABKAsyKi5hZ2VudHJlcGwudjEuSW5zcGVjdENoZXNzQm9hcmRTcXVhcmVFcnJvckgAQggKBnJlc3VsdCJECh5JbnNwZWN0Q2hlc3NCb2FyZFNxdWFyZVN1Y2Nlc3MSIgoaZ2V0X3NxdWFyZV9ldmVudHNfcmVzcG9uc2UYASABKAwiyQEKHEluc3BlY3RDaGVzc0JvYXJkU3F1YXJlRXJyb3ISVgoTYmFja2VuZF91bnJlYWNoYWJsZRgBIAEoCzI3LmFnZW50cmVwbC52MS5JbnNwZWN0Q2hlc3NCb2FyZFNxdWFyZUJhY2tlbmRVbnJlYWNoYWJsZUgAEkgKDHNlc3Npb25fZ29uZRgCIAEoCzIwLmFnZW50cmVwbC52MS5JbnNwZWN0Q2hlc3NCb2FyZFNxdWFyZVNlc3Npb25Hb25lSABCBwoFY2F1c2UiOwopSW5zcGVjdENoZXNzQm9hcmRTcXVhcmVCYWNrZW5kVW5yZWFjaGFibGUSDgoGZGV0YWlsGAEgASgJIjQKIkluc3BlY3RDaGVzc0JvYXJkU3F1YXJlU2Vzc2lvbkdvbmUSDgoGZGV0YWlsGAEgASgJQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_frontend_v1_chess_board]);
 
 /**
  * @generated from message agentrepl.v1.InspectChessBoardSquareRequest
@@ -137,6 +137,16 @@ export type InspectChessBoardSquareError = Message<"agentrepl.v1.InspectChessBoa
      */
     value: InspectChessBoardSquareBackendUnreachable;
     case: "backendUnreachable";
+  } | {
+    /**
+     * The board's CEE session no longer holds its game: the session was swept
+     * or another game was loaded into it. The board itself becomes
+     * unavailable on its next resolution.
+     *
+     * @generated from field: agentrepl.v1.InspectChessBoardSquareSessionGone session_gone = 2;
+     */
+    value: InspectChessBoardSquareSessionGone;
+    case: "sessionGone";
   } | { case: undefined; value?: undefined };
 };
 
@@ -167,4 +177,25 @@ export type InspectChessBoardSquareBackendUnreachable = Message<"agentrepl.v1.In
  */
 export const InspectChessBoardSquareBackendUnreachableSchema: GenMessage<InspectChessBoardSquareBackendUnreachable> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_inspect_chess_board_square, 4);
+
+/**
+ * The board's session no longer holds the game the board was drawn from.
+ *
+ * @generated from message agentrepl.v1.InspectChessBoardSquareSessionGone
+ */
+export type InspectChessBoardSquareSessionGone = Message<"agentrepl.v1.InspectChessBoardSquareSessionGone"> & {
+  /**
+   * CEE's own account of the refusal.
+   *
+   * @generated from field: string detail = 1;
+   */
+  detail: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.InspectChessBoardSquareSessionGone.
+ * Use `create(InspectChessBoardSquareSessionGoneSchema)` to create a new message.
+ */
+export const InspectChessBoardSquareSessionGoneSchema: GenMessage<InspectChessBoardSquareSessionGone> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_inspect_chess_board_square, 5);
 

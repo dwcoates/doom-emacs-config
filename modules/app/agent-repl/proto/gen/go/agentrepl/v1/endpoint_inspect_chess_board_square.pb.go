@@ -241,6 +241,7 @@ type InspectChessBoardSquareError struct {
 	// Types that are valid to be assigned to Cause:
 	//
 	//	*InspectChessBoardSquareError_BackendUnreachable
+	//	*InspectChessBoardSquareError_SessionGone
 	Cause         isInspectChessBoardSquareError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -292,6 +293,15 @@ func (x *InspectChessBoardSquareError) GetBackendUnreachable() *InspectChessBoar
 	return nil
 }
 
+func (x *InspectChessBoardSquareError) GetSessionGone() *InspectChessBoardSquareSessionGone {
+	if x != nil {
+		if x, ok := x.Cause.(*InspectChessBoardSquareError_SessionGone); ok {
+			return x.SessionGone
+		}
+	}
+	return nil
+}
+
 type isInspectChessBoardSquareError_Cause interface {
 	isInspectChessBoardSquareError_Cause()
 }
@@ -301,7 +311,16 @@ type InspectChessBoardSquareError_BackendUnreachable struct {
 	BackendUnreachable *InspectChessBoardSquareBackendUnreachable `protobuf:"bytes,1,opt,name=backend_unreachable,json=backendUnreachable,proto3,oneof"`
 }
 
+type InspectChessBoardSquareError_SessionGone struct {
+	// The board's CEE session no longer holds its game: the session was swept
+	// or another game was loaded into it. The board itself becomes
+	// unavailable on its next resolution.
+	SessionGone *InspectChessBoardSquareSessionGone `protobuf:"bytes,2,opt,name=session_gone,json=sessionGone,proto3,oneof"`
+}
+
 func (*InspectChessBoardSquareError_BackendUnreachable) isInspectChessBoardSquareError_Cause() {}
+
+func (*InspectChessBoardSquareError_SessionGone) isInspectChessBoardSquareError_Cause() {}
 
 // The board's backend gave no answer.
 type InspectChessBoardSquareBackendUnreachable struct {
@@ -349,6 +368,52 @@ func (x *InspectChessBoardSquareBackendUnreachable) GetDetail() string {
 	return ""
 }
 
+// The board's session no longer holds the game the board was drawn from.
+type InspectChessBoardSquareSessionGone struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// CEE's own account of the refusal.
+	Detail        string `protobuf:"bytes,1,opt,name=detail,proto3" json:"detail,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InspectChessBoardSquareSessionGone) Reset() {
+	*x = InspectChessBoardSquareSessionGone{}
+	mi := &file_agentrepl_v1_endpoint_inspect_chess_board_square_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InspectChessBoardSquareSessionGone) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InspectChessBoardSquareSessionGone) ProtoMessage() {}
+
+func (x *InspectChessBoardSquareSessionGone) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_inspect_chess_board_square_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InspectChessBoardSquareSessionGone.ProtoReflect.Descriptor instead.
+func (*InspectChessBoardSquareSessionGone) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_inspect_chess_board_square_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *InspectChessBoardSquareSessionGone) GetDetail() string {
+	if x != nil {
+		return x.Detail
+	}
+	return ""
+}
+
 var File_agentrepl_v1_endpoint_inspect_chess_board_square_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_inspect_chess_board_square_proto_rawDesc = "" +
@@ -364,11 +429,14 @@ const file_agentrepl_v1_endpoint_inspect_chess_board_square_proto_rawDesc = "" +
 	"\x05error\x18\x02 \x01(\v2*.agentrepl.v1.InspectChessBoardSquareErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"]\n" +
 	"\x1eInspectChessBoardSquareSuccess\x12;\n" +
-	"\x1aget_square_events_response\x18\x01 \x01(\fR\x17getSquareEventsResponse\"\x93\x01\n" +
+	"\x1aget_square_events_response\x18\x01 \x01(\fR\x17getSquareEventsResponse\"\xea\x01\n" +
 	"\x1cInspectChessBoardSquareError\x12j\n" +
-	"\x13backend_unreachable\x18\x01 \x01(\v27.agentrepl.v1.InspectChessBoardSquareBackendUnreachableH\x00R\x12backendUnreachableB\a\n" +
+	"\x13backend_unreachable\x18\x01 \x01(\v27.agentrepl.v1.InspectChessBoardSquareBackendUnreachableH\x00R\x12backendUnreachable\x12U\n" +
+	"\fsession_gone\x18\x02 \x01(\v20.agentrepl.v1.InspectChessBoardSquareSessionGoneH\x00R\vsessionGoneB\a\n" +
 	"\x05cause\"C\n" +
 	")InspectChessBoardSquareBackendUnreachable\x12\x16\n" +
+	"\x06detail\x18\x01 \x01(\tR\x06detail\"<\n" +
+	"\"InspectChessBoardSquareSessionGone\x12\x16\n" +
 	"\x06detail\x18\x01 \x01(\tR\x06detailB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
@@ -383,25 +451,27 @@ func file_agentrepl_v1_endpoint_inspect_chess_board_square_proto_rawDescGZIP() [
 	return file_agentrepl_v1_endpoint_inspect_chess_board_square_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_inspect_chess_board_square_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_agentrepl_v1_endpoint_inspect_chess_board_square_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_agentrepl_v1_endpoint_inspect_chess_board_square_proto_goTypes = []any{
 	(*InspectChessBoardSquareRequest)(nil),            // 0: agentrepl.v1.InspectChessBoardSquareRequest
 	(*InspectChessBoardSquareResponse)(nil),           // 1: agentrepl.v1.InspectChessBoardSquareResponse
 	(*InspectChessBoardSquareSuccess)(nil),            // 2: agentrepl.v1.InspectChessBoardSquareSuccess
 	(*InspectChessBoardSquareError)(nil),              // 3: agentrepl.v1.InspectChessBoardSquareError
 	(*InspectChessBoardSquareBackendUnreachable)(nil), // 4: agentrepl.v1.InspectChessBoardSquareBackendUnreachable
-	(*v1.FeedChessBoardSquareToken)(nil),              // 5: frontend.v1.FeedChessBoardSquareToken
+	(*InspectChessBoardSquareSessionGone)(nil),        // 5: agentrepl.v1.InspectChessBoardSquareSessionGone
+	(*v1.FeedChessBoardSquareToken)(nil),              // 6: frontend.v1.FeedChessBoardSquareToken
 }
 var file_agentrepl_v1_endpoint_inspect_chess_board_square_proto_depIdxs = []int32{
-	5, // 0: agentrepl.v1.InspectChessBoardSquareRequest.board:type_name -> frontend.v1.FeedChessBoardSquareToken
+	6, // 0: agentrepl.v1.InspectChessBoardSquareRequest.board:type_name -> frontend.v1.FeedChessBoardSquareToken
 	2, // 1: agentrepl.v1.InspectChessBoardSquareResponse.success:type_name -> agentrepl.v1.InspectChessBoardSquareSuccess
 	3, // 2: agentrepl.v1.InspectChessBoardSquareResponse.error:type_name -> agentrepl.v1.InspectChessBoardSquareError
 	4, // 3: agentrepl.v1.InspectChessBoardSquareError.backend_unreachable:type_name -> agentrepl.v1.InspectChessBoardSquareBackendUnreachable
-	4, // [4:4] is the sub-list for method output_type
-	4, // [4:4] is the sub-list for method input_type
-	4, // [4:4] is the sub-list for extension type_name
-	4, // [4:4] is the sub-list for extension extendee
-	0, // [0:4] is the sub-list for field type_name
+	5, // 4: agentrepl.v1.InspectChessBoardSquareError.session_gone:type_name -> agentrepl.v1.InspectChessBoardSquareSessionGone
+	5, // [5:5] is the sub-list for method output_type
+	5, // [5:5] is the sub-list for method input_type
+	5, // [5:5] is the sub-list for extension type_name
+	5, // [5:5] is the sub-list for extension extendee
+	0, // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_inspect_chess_board_square_proto_init() }
@@ -415,6 +485,7 @@ func file_agentrepl_v1_endpoint_inspect_chess_board_square_proto_init() {
 	}
 	file_agentrepl_v1_endpoint_inspect_chess_board_square_proto_msgTypes[3].OneofWrappers = []any{
 		(*InspectChessBoardSquareError_BackendUnreachable)(nil),
+		(*InspectChessBoardSquareError_SessionGone)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -422,7 +493,7 @@ func file_agentrepl_v1_endpoint_inspect_chess_board_square_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_inspect_chess_board_square_proto_rawDesc), len(file_agentrepl_v1_endpoint_inspect_chess_board_square_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   5,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
