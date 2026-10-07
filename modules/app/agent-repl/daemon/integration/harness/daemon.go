@@ -208,7 +208,7 @@ func BuildIdentityEnv(checkout string) []string {
 // inherited one. A test that wants a prefix sets it through ExtraEnv, which
 // StartDaemon appends after this.
 func HostNeutralNamingEnv() []string {
-	return []string{workspace.PrefixEnv + "=", workspace.LegacyPrefixEnv + "="}
+	return statedEmpty(workspace.PrefixEnv, workspace.LegacyPrefixEnv)
 }
 
 // HostNeutralCheckoutEnv clears the host's explanation-engine checkout for a
@@ -222,7 +222,19 @@ func HostNeutralNamingEnv() []string {
 // world's own temporary tree, which holds no explanation-engine, so every test
 // board resolves to "no checkout" deterministically.
 func HostNeutralCheckoutEnv() []string {
-	return []string{chessboard.EngineDirEnv + "="}
+	return statedEmpty(chessboard.EngineDirEnv)
+}
+
+// statedEmpty answers each key stated EMPTY, the one form every host-neutral
+// env takes: a daemon reads an empty variable as unset, and os/exec keeps the
+// last value of a repeated key, so a stated-empty key appended after
+// os.Environ() wins over the host's.
+func statedEmpty(keys ...string) []string {
+	out := make([]string, 0, len(keys))
+	for _, key := range keys {
+		out = append(out, key+"=")
+	}
+	return out
 }
 
 // ServiceBinaries are the real launchd services a world runs beside its
