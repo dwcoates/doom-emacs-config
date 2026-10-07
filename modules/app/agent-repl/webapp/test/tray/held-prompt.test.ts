@@ -58,6 +58,8 @@ import {
 } from "../../src/tray/held-prompt.js";
 import * as heldPromptModule from "../../src/tray/held-prompt.js";
 import type { TrayContext } from "../../src/tray/context.js";
+import { testTrayContext } from "./tray-context.js";
+import { UPDATE_CLASSIFIER_LABEL } from "../../src/tray/classifier-update.js";
 import {
   BUBBLE_CAP_ATTRIBUTE,
   BUBBLE_EXPAND_ONLY_CLASS,
@@ -129,7 +131,7 @@ function trayContext(
     failures: SINK,
     composerEnabled: false,
   });
-  return { tc: { ctx, onDispose: () => undefined }, seen, ctx };
+  return { tc: testTrayContext(ctx), seen, ctx };
 }
 
 const successResponse = () =>
@@ -890,7 +892,7 @@ describe("the queued-at age", () => {
   it("registers its unsubscriber with the tray's teardown", () => {
     const { ctx } = trayContext();
     const disposers: Array<() => void> = [];
-    const tc: TrayContext = { ctx, onDispose: (fn) => disposers.push(fn) };
+    const tc: TrayContext = testTrayContext(ctx, (fn) => disposers.push(fn));
     drawHeldPrompt(heldPrompt(), tc);
     expect(disposers).toHaveLength(1);
   });
@@ -1913,7 +1915,7 @@ function editContext(
     },
     composerEnabled: false,
   });
-  return { tc: { ctx, onDispose: () => undefined }, seen, reported };
+  return { tc: testTrayContext(ctx), seen, reported };
 }
 
 /** An EditHeldPrompt refusal carrying ARM and its payload. */
@@ -2428,7 +2430,7 @@ function foldContext(
     failures: SINK,
     composerEnabled: false,
   });
-  return { tc: { ctx, onDispose: () => undefined }, seen };
+  return { tc: testTrayContext(ctx), seen };
 }
 
 const foldSuccess = () =>
@@ -2626,5 +2628,78 @@ describe("the fold above control", () => {
     expect(
       card.querySelector(".queued-refusal")?.getAttribute("data-arm"),
     ).toBe("error");
+  });
+});
+
+describe("the update classifier control", () => {
+  /** A card held under the classification arm ARM. */
+  const classifiedAs = (arm: string): HeldPrompt =>
+    heldPrompt({ classification: { case: arm, value: {} } as never });
+
+  it.each(["interject", "afterToolCall", "holdForTurnEnd"])(
+    "is drawn, labelled Update classifier, on a %s card",
+    (arm) => {
+      // Arrange
+      const { tc } = trayContext();
+      // Act
+      const card = drawHeldPrompt(classifiedAs(arm), tc);
+      // Assert
+      expect(card.querySelector('[data-held-action="update-classifier"]')?.textContent).toBe(
+        UPDATE_CLASSIFIER_LABEL,
+      );
+    },
+  );
+
+  it.each(["classifying", "classificationError"])("is not drawn on a %s card, which no classifier decided", (arm) => {
+    // Arrange
+    const { tc } = trayContext();
+    // Act
+    const card = drawHeldPrompt(classifiedAs(arm), tc);
+    // Assert
+    expect(card.querySelector('[data-held-action="update-classifier"]')).toBeNull();
+  });
+
+  it("is not drawn on a held session act, which is never classified", () => {
+    // Arrange
+    const { tc } = trayContext();
+    const u = classifiedAs("holdForTurnEnd");
+    u.act = create(HeldSessionActSchema, { act: { case: "model", value: { model: "opus" } } });
+    // Act
+    const card = drawHeldPrompt(u, tc);
+    // Assert
+    expect(card.querySelector('[data-held-action="update-classifier"]')).toBeNull();
+  });
+
+  it("draws the turn's form, hidden, in the card's expand-only region", () => {
+    // Arrange
+    const { tc } = trayContext();
+    // Act
+    const card = drawHeldPrompt(classifiedAs("holdForTurnEnd"), tc);
+    // Assert
+    const form = card.querySelector<HTMLElement>(".classifier-update");
+    expect([form?.hidden, form?.classList.contains(BUBBLE_EXPAND_ONLY_CLASS)]).toEqual([true, true]);
+  });
+
+  it("reveals the form when clicked", () => {
+    // Arrange
+    const { tc } = trayContext();
+    const card = drawHeldPrompt(classifiedAs("holdForTurnEnd"), tc);
+    // Act
+    card.querySelector<Control>('[data-held-action="update-classifier"]')!.click();
+    // Assert
+    expect(card.querySelector<HTMLElement>(".classifier-update")?.hidden).toBe(false);
+  });
+
+  it("keeps the form and what was typed in it across a redraw", () => {
+    // Arrange
+    const { tc } = trayContext();
+    const first = drawHeldPrompt(classifiedAs("holdForTurnEnd"), tc);
+    const form = first.querySelector<HTMLElement>(".classifier-update")!;
+    form.querySelector("textarea")!.value = "interrupt for 'after'";
+    // Act
+    const second = drawHeldPrompt(classifiedAs("holdForTurnEnd"), tc, first);
+    // Assert
+    const kept = second.querySelector<HTMLElement>(".classifier-update");
+    expect([kept === form, kept?.querySelector("textarea")?.value]).toEqual([true, "interrupt for 'after'"]);
   });
 });

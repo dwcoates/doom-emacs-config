@@ -983,6 +983,14 @@ func (g *fakeGit) PruneWorktrees(context.Context, string) error {
 	return errors.New("merge fake git: PruneWorktrees is not a merge operation")
 }
 
+func (g *fakeGit) PathClean(context.Context, string, string) (bool, error) {
+	return false, errors.New("merge fake git: PathClean is not a merge operation")
+}
+
+func (g *fakeGit) CommitPath(context.Context, string, string, string) (string, error) {
+	return "", errors.New("merge fake git: CommitPath is not a merge operation")
+}
+
 func (g *fakeGit) RemoveCleanWorktree(context.Context, string, string) error {
 	return errors.New("merge fake git: RemoveCleanWorktree is not a merge operation")
 }

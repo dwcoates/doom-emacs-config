@@ -60,7 +60,7 @@
  * listens in production (the composer is host-native) and the event is
  * harmless there — it is the seam, not a promise about who is on the far end.
  */
-import { createControl, CONTROL_SELECTOR, type Control } from "../control.js";
+import { labelledControl, CONTROL_SELECTOR, type Control } from "../control.js";
 import { getOption } from "@bufbuild/protobuf";
 import type {
   HeldPrompt,
@@ -134,6 +134,11 @@ import {
   unreachableArm,
 } from "../rpc/strict.js";
 import type { TrayContext } from "./context.js";
+import {
+  UPDATE_CLASSIFIER_LABEL,
+  classifierRouteOf,
+  type ClassifierUpdateForm,
+} from "./classifier-update.js";
 
 /** The event a dropped prompt hands its text back on. */
 export const DROPPED_EVENT = "held-prompt-dropped";
@@ -239,10 +244,16 @@ export function drawHeldPrompt(
   );
   for (const detail of drawn.details) details.appendChild(detail);
   if (verdict.detail !== null) details.appendChild(verdict.detail);
+  // A CLASSIFIED PROMPT OFFERS "Update classifier": its form is this turn's
+  // one element, kept across pushes (classifier-update.ts).
+  const route = u.act === undefined ? classifierRouteOf(classification.case) : null;
+  const classifierForm =
+    route === null ? null : tc.classifierForms.formFor(turn.value, { text: spokenText(said), route });
   details.appendChild(
     drawHeldPromptActions({
       tc,
       turn,
+      classifierForm,
       text: spokenText(said),
       classification: classification.case,
       hold: hold === null ? null : hold.case,
@@ -264,7 +275,7 @@ export function drawHeldPrompt(
       working: false,
       strip: [head],
       content,
-      expandOnly: [details],
+      expandOnly: classifierForm === null ? [details] : [details, classifierForm.element],
       capLines: ELLIPSIS_CAP_LINES,
       more: BUBBLE_MORE_ELLIPSIS,
     },
@@ -679,6 +690,8 @@ interface ActionSpec {
   accept: boolean;
   /** The entry the "fold above" control folds into, or null when the daemon offers no fold. */
   foldAbove: TurnId | null;
+  /** The "Update classifier" form, or null on a card no classifier decided. */
+  classifierForm: ClassifierUpdateForm | null;
 }
 
 /** The three answers an entry takes, exactly as the request's arms name them. */
@@ -706,6 +719,7 @@ export function drawHeldPromptActions(spec: ActionSpec): HTMLElement {
       release: noReleaseTitle === undefined,
       accept: spec.accept,
       fold_above: spec.foldAbove?.value ?? null,
+      update_classifier: spec.classifierForm !== null,
     },
   });
 
@@ -737,6 +751,8 @@ export function drawHeldPromptActions(spec: ActionSpec): HTMLElement {
   // `fold_above` (FoldHeldPrompt).
   if (spec.foldAbove !== null)
     actions.appendChild(foldAboveButton(spec, spec.foldAbove));
+  if (spec.classifierForm !== null)
+    actions.appendChild(updateClassifierButton(spec.classifierForm));
   return actions;
 }
 
@@ -746,19 +762,18 @@ function actionButton(
   label: string,
   spec: ActionSpec,
 ): Control {
-  const button = createControl();
-  button.className = `queued-action queued-action-${action}`;
-  button.setAttribute("data-held-action", action);
-  button.textContent = label;
-  button.addEventListener("click", (event: MouseEvent) => {
-    event.preventDefault();
-    void guardMalformed(
-      spec.tc.ctx,
-      "tray.held-prompt.action",
-      run(action, spec, button),
-    );
+  return labelledControl({
+    className: `queued-action queued-action-${action}`,
+    hook: ["data-held-action", action],
+    label,
+    onClick: (button) => {
+      void guardMalformed(
+        spec.tc.ctx,
+        "tray.held-prompt.action",
+        run(action, spec, button),
+      );
+    },
   });
-  return button;
 }
 
 /** Issue the action; a refusal is said at the row that made the call. */
@@ -863,6 +878,19 @@ async function rowCall(
   }
 }
 
+/**
+ * The "Update classifier" control: it reveals (or hides) this turn's form,
+ * which says the change and sends it (classifier-update.ts).
+ */
+function updateClassifierButton(form: ClassifierUpdateForm): Control {
+  return labelledControl({
+    className: "queued-action queued-action-update-classifier",
+    hook: ["data-held-action", "update-classifier"],
+    label: UPDATE_CLASSIFIER_LABEL,
+    onClick: () => form.toggle(),
+  });
+}
+
 /** The fold control's label: what the reader sees it do. */
 export const FOLD_ABOVE_LABEL = "fold above";
 
@@ -873,19 +901,18 @@ export const FOLD_ABOVE_LABEL = "fold above";
  * the daemon folds into the entry the reader saw above this one or refuses.
  */
 function foldAboveButton(spec: ActionSpec, above: TurnId): Control {
-  const button = createControl();
-  button.className = "queued-action queued-action-fold";
-  button.setAttribute("data-held-action", "fold");
-  button.textContent = FOLD_ABOVE_LABEL;
-  button.addEventListener("click", (event: MouseEvent) => {
-    event.preventDefault();
-    void guardMalformed(
-      spec.tc.ctx,
-      "tray.held-prompt.fold",
-      fold(spec, above, button),
-    );
+  return labelledControl({
+    className: "queued-action queued-action-fold",
+    hook: ["data-held-action", "fold"],
+    label: FOLD_ABOVE_LABEL,
+    onClick: (button) => {
+      void guardMalformed(
+        spec.tc.ctx,
+        "tray.held-prompt.fold",
+        fold(spec, above, button),
+      );
+    },
   });
-  return button;
 }
 
 /** Fold this prompt into ABOVE; a refusal is said at the row, as every row action's is. */
@@ -983,19 +1010,18 @@ export const EDIT_REFUSALS: SentenceTable = {
 
 /** The Edit control: it begins a daemon-owned edit of this prompt. */
 function editButton(spec: ActionSpec): Control {
-  const button = createControl();
-  button.className = "queued-action queued-action-edit";
-  button.setAttribute("data-held-action", "edit");
-  button.textContent = "Edit";
-  button.addEventListener("click", (event: MouseEvent) => {
-    event.preventDefault();
-    void guardMalformed(
-      spec.tc.ctx,
-      "tray.held-prompt.edit",
-      beginEdit(spec, button),
-    );
+  return labelledControl({
+    className: "queued-action queued-action-edit",
+    hook: ["data-held-action", "edit"],
+    label: "Edit",
+    onClick: (button) => {
+      void guardMalformed(
+        spec.tc.ctx,
+        "tray.held-prompt.edit",
+        beginEdit(spec, button),
+      );
+    },
   });
-  return button;
 }
 
 /**

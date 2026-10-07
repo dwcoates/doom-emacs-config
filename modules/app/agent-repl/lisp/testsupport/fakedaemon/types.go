@@ -38,6 +38,7 @@ var unaryResponseTypes = map[string]func() proto.Message{
 	"UpdateHeldPrompt":         func() proto.Message { return &v1.UpdateHeldPromptResponse{} },
 	"EditHeldPrompt":           func() proto.Message { return &v1.EditHeldPromptResponse{} },
 	"FoldHeldPrompt":           func() proto.Message { return &v1.FoldHeldPromptResponse{} },
+	"UpdateClassifierPrompt":   func() proto.Message { return &v1.UpdateClassifierPromptResponse{} },
 	"AnswerHeldOffer":          func() proto.Message { return &v1.AnswerHeldOfferResponse{} },
 	"UpdateShutdownSchedule":   func() proto.Message { return &v1.UpdateShutdownScheduleResponse{} },
 	"BindWorkspaceSession":     func() proto.Message { return &v1.BindWorkspaceSessionResponse{} },

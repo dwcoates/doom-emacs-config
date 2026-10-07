@@ -307,6 +307,22 @@ func (g *gatedGit) CurrentBranch(ctx context.Context, dir string) (string, error
 	return g.inner.CurrentBranch(ctx, dir)
 }
 
+func (g *gatedGit) PathClean(ctx context.Context, dir, path string) (bool, error) {
+	if err := g.enter("PathClean"); err != nil {
+		return false, err
+	}
+	defer g.leave()
+	return g.inner.PathClean(ctx, dir, path)
+}
+
+func (g *gatedGit) CommitPath(ctx context.Context, dir, path, message string) (string, error) {
+	if err := g.enter("CommitPath"); err != nil {
+		return "", err
+	}
+	defer g.leave()
+	return g.inner.CommitPath(ctx, dir, path, message)
+}
+
 func (g *gatedGit) ListWorktrees(ctx context.Context, repoDir string) ([]gitclient.Worktree, error) {
 	if err := g.enter("ListWorktrees"); err != nil {
 		return nil, err

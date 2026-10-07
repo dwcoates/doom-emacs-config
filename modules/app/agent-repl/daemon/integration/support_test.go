@@ -8,6 +8,7 @@ package integration
 import (
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -770,4 +771,49 @@ func shellCallFrame(work, command string) *conversationv1.AgentFrame {
 func pushDetachedShell(shim *harness.ShimControl, work, command string) {
 	shim.PushAgentFrame(mainAgent, shellCallFrame(work, command))
 	shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, detachedShell(work, command)))
+}
+
+// scriptedClaudeEnv writes SCRIPT as a fake `claude` and answers the binding
+// that points the daemon's headless calls at it.
+func scriptedClaudeEnv(t *testing.T, script string) string {
+	t.Helper()
+	claude := filepath.Join(t.TempDir(), "claude")
+	if err := os.WriteFile(claude, []byte(script), 0o755); err != nil {
+		t.Fatalf("write the fake claude: %v", err)
+	}
+	return "AGENT_REPL_CLAUDE_BIN=" + claude
+}
+
+func TestScriptedClaudeEnvPointsAtAnExecutableScript(t *testing.T) {
+	// Act.
+	binding := scriptedClaudeEnv(t, "#!/bin/sh\necho hi\n")
+
+	// Assert.
+	path, ok := strings.CutPrefix(binding, "AGENT_REPL_CLAUDE_BIN=")
+	info, err := os.Stat(path)
+	if !ok || err != nil || info.Mode().Perm()&0o100 == 0 {
+		t.Fatalf("binding %q: stat %v, want an executable script", binding, err)
+	}
+	if body, _ := os.ReadFile(path); string(body) != "#!/bin/sh\necho hi\n" {
+		t.Fatalf("script = %q, want the one given", body)
+	}
+}
+
+// TestEveryScriptedClaudeIsWrittenByOneHelper holds the suites that script
+// the vendor to scriptedClaudeEnv: a hand-written fake claude fails here.
+func TestEveryScriptedClaudeIsWrittenByOneHelper(t *testing.T) {
+	for _, file := range []string{"news_digest_test.go", "update_classifier_prompt_test.go"} {
+		t.Run(file, func(t *testing.T) {
+			// Act.
+			src, err := os.ReadFile(file)
+			if err != nil {
+				t.Fatalf("read %s: %v", file, err)
+			}
+
+			// Assert.
+			if strings.Contains(string(src), `"claude")`) || !strings.Contains(string(src), "scriptedClaudeEnv(") {
+				t.Fatalf("%s writes its fake claude by hand", file)
+			}
+		})
+	}
 }

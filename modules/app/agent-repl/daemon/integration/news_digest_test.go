@@ -42,15 +42,11 @@ func newsDigestEnv(t *testing.T) []string {
 	sources := filepath.Join(dir, "sources.json")
 	writeTestFile(t, sources, fmt.Sprintf(
 		`[{"key":"sdk","name":"Agent SDK releases","url":%q,"home":"https://fixture.test/releases","format":"atom"}]`, srv.URL))
-	claude := filepath.Join(dir, "claude")
 	script := "#!/bin/sh\ncat > /dev/null\nprintf '%s' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"" + newsDigestAnswer + "\"}'\n"
-	if err := os.WriteFile(claude, []byte(script), 0o755); err != nil {
-		t.Fatalf("write the fake claude: %v", err)
-	}
 	return []string{
 		"AGENT_REPL_NEWS_DIGEST_SOURCES=" + sources,
 		"AGENT_REPL_NEWS_DIGEST_START_DELAY=24h",
-		"AGENT_REPL_CLAUDE_BIN=" + claude,
+		scriptedClaudeEnv(t, script),
 	}
 }
 

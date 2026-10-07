@@ -18,6 +18,7 @@ import { type AppContext } from "../../src/rpc/context.js";
 import { testAppContext } from "../rpc/app-context.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import type { TrayContext } from "../../src/tray/context.js";
+import { testTrayContext } from "./tray-context.js";
 import {
   HELD_ENTRY_SELECTOR,
   drawDaemonHoldItem,
@@ -77,7 +78,7 @@ function trayContext(ticker: Ticker = fakeTicker()): TrayContext {
     failures: SINK,
     composerEnabled: false,
   });
-  return { ctx, onDispose: () => undefined };
+  return testTrayContext(ctx);
 }
 
 const promptItem = (turn: string): DaemonHoldItem =>

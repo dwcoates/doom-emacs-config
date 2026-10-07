@@ -101,6 +101,7 @@ import { SelectAccountResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/
 import { UpdateHeldPromptResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_held_prompt_pb";
 import { EditHeldPromptResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_edit_held_prompt_pb";
 import { FoldHeldPromptResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_fold_held_prompt_pb";
+import { UpdateClassifierPromptResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_classifier_prompt_pb";
 import { FoldRepositoryResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_fold_repository_pb";
 import { UpdateSidebarViewResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_sidebar_view_pb";
 import { AnswerHeldOfferResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_answer_held_offer_pb";
@@ -1409,6 +1410,12 @@ export function createFakeDaemon(): FakeDaemon {
         record("foldHeldPrompt", request);
         return answerFor("foldHeldPrompt", FoldHeldPromptResponseSchema, {
           result: { case: "success", value: {} },
+        });
+      },
+      updateClassifierPrompt(request) {
+        record("updateClassifierPrompt", request);
+        return answerFor("updateClassifierPrompt", UpdateClassifierPromptResponseSchema, {
+          result: { case: "success", value: { commit: "0123456789abcdef", path: "/prompts/queue-routing-classifier.md" } },
         });
       },
       answerHeldOffer(request) {

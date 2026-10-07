@@ -19,6 +19,7 @@ import (
 	"claude-repld/internal/buildid"
 	"claude-repld/internal/checkout"
 	"claude-repld/internal/classifier"
+	"claude-repld/internal/classifierupdate"
 	"claude-repld/internal/clock"
 	"claude-repld/internal/commandfile"
 	"claude-repld/internal/desktopnotify"
@@ -1027,6 +1028,14 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		return nil, err
 	}
 
+	// THE ROUTING BRIEF'S UPDATER rewrites the brief the classifier reads
+	// and commits it in the checkout that holds it, one update at a time.
+	classifierPrompt, err := classifierupdate.New(headlessClient, git, classifierupdate.OnDisk{},
+		paths.PromptsDir, log)
+	if err != nil {
+		return nil, fmt.Errorf("claude-repld: build the classifier prompt updater: %w", err)
+	}
+
 	// A FULL EMACS RESTART is told apart from a reconnect by the Emacs
 	// process identity every Emacs WatchDaemon carries, judged only by the
 	// daemon that serves (a joining successor's state client is read-only).
@@ -1077,6 +1086,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			Focus:            focus,
 			PersistentWifi:   wifi,
 			NewsDigest:       digest,
+			ClassifierPrompt: classifierPrompt,
 			EditorInstances:  editors,
 			Startup:          startupRuns,
 			WebappDist:       paths.WebappDist,

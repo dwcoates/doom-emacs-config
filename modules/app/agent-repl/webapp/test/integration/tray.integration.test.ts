@@ -26,6 +26,7 @@ import {
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_held_prompt_pb";
 import { AnswerHeldOfferRequestSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_answer_held_offer_pb";
 import { FoldHeldPromptResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_fold_held_prompt_pb";
+import { ClassifierRoute } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_classifier_prompt_pb";
 import { create } from "@bufbuild/protobuf";
 
 import { bootColdOnce, startHarness, type Harness } from "./harness";
@@ -333,6 +334,47 @@ describe("the fold above button", () => {
     await harness.click('[data-held-turn="turn-behind"] [data-held-action="fold"]');
     // Assert
     expect(harness.$('[data-held-turn="turn-behind"] .refusal')?.getAttribute("data-arm")).toBe("aboveMoved");
+  });
+});
+
+describe("the update classifier button", () => {
+  const classified = (): Parameters<typeof holdTray>[0] => ({
+    items: [heldPromptItem({ turn: "turn-held", text: "after the tests pass, bump the version", classification: "holdForTurnEnd" })],
+  });
+
+  it("reveals the form and sends the typed change with the card's example", async () => {
+    // Arrange
+    await withTray(classified());
+    await harness.click('[data-held-turn="turn-held"] [data-held-action="update-classifier"]');
+    const input = harness.$('[data-held-turn="turn-held"] .classifier-update textarea') as HTMLTextAreaElement;
+    input.value = "interrupt whenever something must happen after something else";
+    input.dispatchEvent(new Event("input"));
+    // Act
+    await harness.click('[data-held-turn="turn-held"] [data-classifier-action="apply"]');
+    // Assert
+    const [request] = harness.fake.calls<{ instruction: string; example?: { text: string; route: number } }>(
+      "updateClassifierPrompt",
+    );
+    expect([request.instruction, request.example?.text, request.example?.route]).toEqual([
+      "interrupt whenever something must happen after something else",
+      "after the tests pass, bump the version",
+      ClassifierRoute.HOLD_FOR_TURN_END,
+    ]);
+  });
+
+  it("says the daemon's commit at the form", async () => {
+    // Arrange
+    await withTray(classified());
+    await harness.click('[data-held-turn="turn-held"] [data-held-action="update-classifier"]');
+    const input = harness.$('[data-held-turn="turn-held"] .classifier-update textarea') as HTMLTextAreaElement;
+    input.value = "interrupt for 'after'";
+    input.dispatchEvent(new Event("input"));
+    // Act
+    await harness.click('[data-held-turn="turn-held"] [data-classifier-action="apply"]');
+    // Assert
+    expect(harness.text('[data-held-turn="turn-held"] .classifier-update-status')).toBe(
+      "classifier updated (commit 012345678)",
+    );
   });
 });
 
