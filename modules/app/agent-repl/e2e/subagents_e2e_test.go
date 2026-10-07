@@ -792,3 +792,57 @@ func TestSubagentInterleavedResponsesStayOnTheirOwnFeeds(t *testing.T) {
 	awaitResponseText(t, w, subPage, subStream, started)
 	awaitResponseText(t, w, subPage, subStream, finished)
 }
+
+// ---------------------------------------------------------------------------
+// Liveness is the vendor process's level (conversation.v1 SessionLiveWork).
+// ---------------------------------------------------------------------------
+
+// TestADetachedSubagentWhoseProcessDiedIsNotLiveAfterAColdBoot is the
+// 2026-10-07 regression end to end: a detached subagent the record shows
+// running, whose vendor process is gone, must not come back as live work when
+// a successor daemon replays the conversation. The subagent of
+// `!subagent-detached-utterance` never completes; the daemon is crashed and
+// its shim killed, so the successor's bring-up resumes the conversation in a
+// NEW vendor process that runs no such agent.
+func TestADetachedSubagentWhoseProcessDiedIsNotLiveAfterAColdBoot(t *testing.T) {
+	t.Parallel()
+	// Arrange.
+	first := NewWorld(t, WorldOpts{})
+	first.ExpectWarnings("daemon.rollout.reconcile")
+	repo := harness.NewRepo(t)
+	ws := harness.Register(t, first.Daemon, repo.Dir)
+	driveScenarioToCompletion(t, first, ws, first.DefaultConfigDir, "subagent-detached-utterance")
+
+	// Act: the daemon crashes and its shim -- the process running the agent
+	// -- is killed; a successor boots on the same state and account root.
+	first.Kill()
+	coldGateKillShims(t, first.Daemon)
+	opts := first.SuccessorOpts(t)
+	opts.ExtraArgs = []string{"--default-config-dir", first.DefaultConfigDir}
+	opts.Timeout = AdoptionChainTimeout
+	successor := harness.StartDaemon(t, opts)
+	successor.ExpectWarnings("daemon.rollout.reconcile")
+
+	// Assert: the replayed bubble is drawn, and not as running...
+	bubble := adAwaitReplayedFeedRow(t, successor, ws,
+		"the agent's bubble replayed as no longer running",
+		func(row *frontendv1.FeedRow) bool {
+			sub := subagentBubble(row)
+			return sub != nil && sub.GetLive() == nil
+		})
+	if subagentBubble(bubble).GetLive() != nil {
+		t.Fatalf("bubble = %v, want it drawn stopped", bubble)
+	}
+	// ...and the footer counts no live agent for it.
+	host := successor.WatchHost(ws)
+	defer host.Close()
+	web := successor.WatchWeb(ws)
+	defer web.Close()
+	footer := successor.WatchFooter(ws)
+	defer footer.Close()
+	ctx, cancel := context.WithTimeout(successor.Ctx(), DefaultTimeout)
+	defer cancel()
+	harness.AwaitView(t, ctx, footer, "the footer counting no live agent", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetLiveWork().GetAgents().GetCount() == 0
+	})
+}
