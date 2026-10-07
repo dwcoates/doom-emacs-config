@@ -356,6 +356,20 @@ export class LiveWorkTable {
     );
   }
 
+  /**
+   * THE VENDOR PROCESS ENDED: nothing it ran survives it, so the whole set --
+   * live and held foreground work alike -- is let go at once (owner ruling,
+   * 2026-10-07; conversation.v1 SessionLiveWork). The vendor's level is
+   * per-process, and the next process states its own from empty.
+   */
+  clear(why: string): void {
+    const live = this.entries.size;
+    for (const entry of this.entries.values()) this.retire(entry);
+    this.entries.clear();
+    this.foreground.clear();
+    LOGGER.info({ live_cleared: live, why }, "the vendor process ended; every live detached-work item left the set with it");
+  }
+
   /** One item by its work id. */
   get(taskId: string): LiveWorkEntry | undefined {
     return this.entries.get(taskId);
