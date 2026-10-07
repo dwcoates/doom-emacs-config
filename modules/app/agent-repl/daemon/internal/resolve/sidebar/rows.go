@@ -19,6 +19,8 @@ type rowContext struct {
 	selected *ids.WorkspaceID
 	// tree is the section's nesting, empty for a flat section.
 	tree forest
+	// cause is the operation whose fact is being rendered.
+	cause string
 }
 
 // row composes one workspace's row, and its family below it.
@@ -39,7 +41,10 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 	// status, so the row's display mode cannot lag its status by a push and a
 	// read result is never drawn as unread (`wsState.viewedOn`).
 	wasViewed := s.lastArmSeen && s.viewedOn(s.lastArm)
-	armChanged := s.noteArm(armName)
+	previousArm, armChanged := s.noteArm(armName)
+	if armChanged {
+		r.logArmChange(rec.ID, armName, previousArm, rc.cause)
+	}
 	viewed := s.viewedOn(armName)
 	current := rc.selected != nil && *rc.selected == rec.ID
 	closed := recedes(rec, session)
@@ -252,4 +257,15 @@ func (r *resolver) noteResult(ws ids.WorkspaceID, s *wsState, log dlog.Logger) {
 		"result": s.result.String(), "end": s.turnEndArm(),
 	})
 	r.pendingResults = append(r.pendingResults, resultChange{ws: ws, result: snapshot})
+}
+
+// logArmChange records a row's PUBLISHED status arm whenever it changes, and
+// only then, on that workspace's own log sink. It is the roster's half of the
+// footer's `daemon.footer.status_arm_changed`: with both, a disagreement
+// between the strip and the sidebar or tab bar is diagnosable from the log
+// alone, and a row that never leaves a fault shows which fact last moved it.
+// The caller holds r.mu (logFor reads the registry).
+func (r *resolver) logArmChange(ws ids.WorkspaceID, arm, previous, cause string) {
+	r.logFor(ws).Info("daemon.sidebar.status_arm_changed", "the roster published a new status arm for the row",
+		dlog.Context{"arm": arm, "previous_arm": previous, "cause": cause})
 }

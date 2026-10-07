@@ -864,7 +864,7 @@ func (r *resolver) sessionArm(ws ids.WorkspaceID, update *conversationv1.Session
 	case *conversationv1.SessionUpdate_Diagnostics:
 		return "diagnostics", func(s *wsState) {
 			r.logSessionArm(ws, s, "diagnostics")
-			s.degraded = anyWindowOpen(u.Diagnostics)
+			s.degraded = ladder.DegradedWindowOpen(u.Diagnostics)
 		}
 	case *conversationv1.SessionUpdate_ModelChanged,
 		*conversationv1.SessionUpdate_PermissionModeChanged,
@@ -921,17 +921,6 @@ func sessionChangeArm(update *conversationv1.SessionUpdate) string {
 func (r *resolver) logSessionArm(ws ids.WorkspaceID, s *wsState, arm string) {
 	r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected a footer session-update arm",
 		dlog.Context{"arm": arm})
-}
-
-// anyWindowOpen reports whether the diagnostics carry an open degraded window,
-// which is what makes a serving link read as degraded.
-func anyWindowOpen(d *conversationv1.SessionDiagnostics) bool {
-	for _, w := range d.GetDegradedWindows() {
-		if _, open := w.GetExtent().(*conversationv1.SessionDegradedWindow_Open); open {
-			return true
-		}
-	}
-	return false
 }
 
 // observeAccountUsage takes one usage sample and files it BY BILLING MODE
@@ -1259,7 +1248,7 @@ func (rs *retryState) line() *frontendv1.FooterStatusActivityRetrying {
 // one that carries an API response's usage, is the vendor answering. Another
 // agent's frame says nothing about this call.
 func (r *resolver) clearRetry(ws ids.WorkspaceID, s *wsState, agent string, act *conversationv1.AgentActivity) {
-	if s.retrying == nil || s.retrying.agent != agent || !ladder.RetryAnswered(act) {
+	if s.retrying == nil || !ladder.RetryAnsweredBy(s.retrying.agent, agent, act) {
 		return
 	}
 	r.logOf(ws, s).Debug("daemon.footer.retry_cleared", "the retried call's response landed; the retrying line ended",

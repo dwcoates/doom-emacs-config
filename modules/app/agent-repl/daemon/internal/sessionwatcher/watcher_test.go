@@ -1281,8 +1281,9 @@ func TestSinkCallsAreSerializedPerWorkspace(t *testing.T) {
 	wg.Wait()
 
 	// Assert: per agent, the feed saw its activities in the order they were
-	// sent, with nothing interleaved inside one frame's routing.
-	got := h.collect(t, 2*frames*3)
+	// sent, with nothing interleaved inside one frame's routing. Each frame
+	// reaches four sinks: the feed, the footer, the roster and the topbar.
+	got := h.collect(t, 2*frames*4)
 	assertPerAgentOrder(t, got, "main-1", frames)
 	assertPerAgentOrder(t, got, "sub-1", frames)
 }
