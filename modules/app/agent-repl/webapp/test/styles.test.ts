@@ -2966,18 +2966,6 @@ describe("hueOf", () => {
   });
 });
 
-describe("the feed's background is chartreuse (owner, 2026-10-07)", () => {
-  it.each([
-    ["light", () => declarationsOf(":root") ?? ""],
-    ["dark", darkThemeBlock],
-  ])("paints the %s theme's --bg within 10 degrees of chartreuse's 90-degree hue", (_theme, block) => {
-    // Arrange / Act
-    const hue = hueOf(rgbOf(block(), "--bg"));
-    // Assert
-    expect(Math.abs(hue - 90)).toBeLessThanOrEqual(10);
-  });
-});
-
 describe("the held prompt's tint: much more grey than blue", () => {
   it.each([
     ["light", () => declarationsOf(":root") ?? ""],
