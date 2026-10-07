@@ -931,6 +931,16 @@ A roster with no `current' decides nothing and says so at DEBUG."
       (agent-repl--info scope "elisp.roster.current: relink-pending id=%s dir=%s"
                         id agent-repl-host-reselect-pending)
       nil)
+     ;; A VIEW WHOSE STREAM HAS ENDED DECIDES NOTHING.  The roster is the
+     ;; selection's one source only while the stream that served the view
+     ;; stands; once it has closed (`agent-repl-roster-on-close'), the view's
+     ;; `current' is a daemon's that is gone, and following it moved the frame
+     ;; off the user's own choice (2026-10-07).  The next daemon's roster
+     ;; states the selection afresh after the link-up re-asserts it.
+     ((null agent-repl-roster--stream)
+      (agent-repl--info scope "elisp.roster.current: stream-ended id=%s; a view from a daemon that is gone is not followed"
+                        id)
+      nil)
      ((and pending (not (equal id pending-id)))
       (agent-repl--info scope "elisp.roster.current: deferred id=%s ws=%s requested=%s"
                         id (or name "none") pending)
