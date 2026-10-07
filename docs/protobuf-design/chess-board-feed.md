@@ -237,3 +237,11 @@ then `frontend.v1`, then the square-click endpoint, then the skill text.
 - **Why:** the shim reads a unit's settledness off a `result` oneof
   (`engine/session.ts`, where foreground work is noted); under any other name
   the board's start arm read as settled.
+
+### 3. A square click on a gone session is its own error arm
+
+- **What landed:** `agentrepl.v1.InspectChessBoardSquareError.session_gone`
+  (`InspectChessBoardSquareSessionGone`, carrying CEE's account).
+- **Why:** cee-webapp refuses a request against a swept session, or a session
+  whose game was replaced, with Connect `failed_precondition`; reporting that
+  as `backend_unreachable` would name the wrong cause.

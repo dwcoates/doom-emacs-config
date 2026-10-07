@@ -55,11 +55,21 @@ message InspectChessBoardSquareError {
   oneof cause {
     // cee-webapp could not be started or reached, or did not answer the call.
     InspectChessBoardSquareBackendUnreachable backend_unreachable = 1;
+    // The board's CEE session no longer holds its game: the session was swept
+    // or another game was loaded into it. The board itself becomes
+    // unavailable on its next resolution.
+    InspectChessBoardSquareSessionGone session_gone = 2;
   }
 }
 
 // The board's backend gave no answer.
 message InspectChessBoardSquareBackendUnreachable {
   // The failure's own account, as the daemon logged it.
+  string detail = 1;
+}
+
+// The board's session no longer holds the game the board was drawn from.
+message InspectChessBoardSquareSessionGone {
+  // CEE's own account of the refusal.
   string detail = 1;
 }
