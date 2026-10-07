@@ -33,7 +33,7 @@ import {
   type UpdateClassifierPromptUnchanged,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_classifier_prompt_pb";
 import type { HeldPrompt } from "../../../proto/gen/ts/frontend/v1/daemon_hold_pb";
-import { createControl, type Control } from "../control.js";
+import { labelledControl, type Control } from "../control.js";
 import { controlPlaneFailed } from "../failure/sink.js";
 import { log } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
@@ -172,8 +172,19 @@ function createForm(ctx: AppContext, turn: string, example: ClassifierExample): 
 
   const row = document.createElement("div");
   row.className = "classifier-update-actions";
-  const apply = button("apply", "Apply");
-  const dismiss = button("dismiss", "Dismiss");
+  const apply = button("apply", "Apply", () => {
+    void guardMalformed(
+      ctx,
+      "tray.classifier-update.apply",
+      submit(ctx, turn, state.example, { element, input, status, dismiss, syncApply }),
+    );
+  });
+  const dismiss = button("dismiss", "Dismiss", () => {
+    element.hidden = true;
+    input.value = "";
+    say(status, null, "");
+    syncApply();
+  });
   row.append(apply, dismiss);
 
   const status = document.createElement("div");
@@ -203,21 +214,6 @@ function createForm(ctx: AppContext, turn: string, example: ClassifierExample): 
   input.addEventListener("input", syncApply);
   syncApply();
 
-  dismiss.addEventListener("click", (event: MouseEvent) => {
-    event.preventDefault();
-    element.hidden = true;
-    input.value = "";
-    say(status, null, "");
-    syncApply();
-  });
-  apply.addEventListener("click", (event: MouseEvent) => {
-    event.preventDefault();
-    void guardMalformed(
-      ctx,
-      "tray.classifier-update.apply",
-      submit(ctx, turn, state.example, { element, input, status, dismiss, syncApply }),
-    );
-  });
   return state;
 }
 
@@ -313,10 +309,11 @@ function say(status: HTMLElement, arm: string | null, text: string): void {
 }
 
 /** One form control. */
-function button(action: string, label: string): Control {
-  const control = createControl();
-  control.className = `classifier-update-action classifier-update-${action}`;
-  control.setAttribute("data-classifier-action", action);
-  control.textContent = label;
-  return control;
+function button(action: string, label: string, onClick: () => void): Control {
+  return labelledControl({
+    className: `classifier-update-action classifier-update-${action}`,
+    hook: ["data-classifier-action", action],
+    label,
+    onClick,
+  });
 }

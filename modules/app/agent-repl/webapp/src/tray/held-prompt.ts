@@ -60,7 +60,7 @@
  * listens in production (the composer is host-native) and the event is
  * harmless there — it is the seam, not a promise about who is on the far end.
  */
-import { createControl, CONTROL_SELECTOR, type Control } from "../control.js";
+import { labelledControl, CONTROL_SELECTOR, type Control } from "../control.js";
 import { getOption } from "@bufbuild/protobuf";
 import type {
   HeldPrompt,
@@ -762,19 +762,18 @@ function actionButton(
   label: string,
   spec: ActionSpec,
 ): Control {
-  const button = createControl();
-  button.className = `queued-action queued-action-${action}`;
-  button.setAttribute("data-held-action", action);
-  button.textContent = label;
-  button.addEventListener("click", (event: MouseEvent) => {
-    event.preventDefault();
-    void guardMalformed(
-      spec.tc.ctx,
-      "tray.held-prompt.action",
-      run(action, spec, button),
-    );
+  return labelledControl({
+    className: `queued-action queued-action-${action}`,
+    hook: ["data-held-action", action],
+    label,
+    onClick: (button) => {
+      void guardMalformed(
+        spec.tc.ctx,
+        "tray.held-prompt.action",
+        run(action, spec, button),
+      );
+    },
   });
-  return button;
 }
 
 /** Issue the action; a refusal is said at the row that made the call. */
@@ -884,15 +883,12 @@ async function rowCall(
  * which says the change and sends it (classifier-update.ts).
  */
 function updateClassifierButton(form: ClassifierUpdateForm): Control {
-  const button = createControl();
-  button.className = "queued-action queued-action-update-classifier";
-  button.setAttribute("data-held-action", "update-classifier");
-  button.textContent = UPDATE_CLASSIFIER_LABEL;
-  button.addEventListener("click", (event: MouseEvent) => {
-    event.preventDefault();
-    form.toggle();
+  return labelledControl({
+    className: "queued-action queued-action-update-classifier",
+    hook: ["data-held-action", "update-classifier"],
+    label: UPDATE_CLASSIFIER_LABEL,
+    onClick: () => form.toggle(),
   });
-  return button;
 }
 
 /** The fold control's label: what the reader sees it do. */
@@ -905,19 +901,18 @@ export const FOLD_ABOVE_LABEL = "fold above";
  * the daemon folds into the entry the reader saw above this one or refuses.
  */
 function foldAboveButton(spec: ActionSpec, above: TurnId): Control {
-  const button = createControl();
-  button.className = "queued-action queued-action-fold";
-  button.setAttribute("data-held-action", "fold");
-  button.textContent = FOLD_ABOVE_LABEL;
-  button.addEventListener("click", (event: MouseEvent) => {
-    event.preventDefault();
-    void guardMalformed(
-      spec.tc.ctx,
-      "tray.held-prompt.fold",
-      fold(spec, above, button),
-    );
+  return labelledControl({
+    className: "queued-action queued-action-fold",
+    hook: ["data-held-action", "fold"],
+    label: FOLD_ABOVE_LABEL,
+    onClick: (button) => {
+      void guardMalformed(
+        spec.tc.ctx,
+        "tray.held-prompt.fold",
+        fold(spec, above, button),
+      );
+    },
   });
-  return button;
 }
 
 /** Fold this prompt into ABOVE; a refusal is said at the row, as every row action's is. */
@@ -1015,19 +1010,18 @@ export const EDIT_REFUSALS: SentenceTable = {
 
 /** The Edit control: it begins a daemon-owned edit of this prompt. */
 function editButton(spec: ActionSpec): Control {
-  const button = createControl();
-  button.className = "queued-action queued-action-edit";
-  button.setAttribute("data-held-action", "edit");
-  button.textContent = "Edit";
-  button.addEventListener("click", (event: MouseEvent) => {
-    event.preventDefault();
-    void guardMalformed(
-      spec.tc.ctx,
-      "tray.held-prompt.edit",
-      beginEdit(spec, button),
-    );
+  return labelledControl({
+    className: "queued-action queued-action-edit",
+    hook: ["data-held-action", "edit"],
+    label: "Edit",
+    onClick: (button) => {
+      void guardMalformed(
+        spec.tc.ctx,
+        "tray.held-prompt.edit",
+        beginEdit(spec, button),
+      );
+    },
   });
-  return button;
 }
 
 /**

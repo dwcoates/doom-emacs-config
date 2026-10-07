@@ -4,7 +4,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { CONTROL_SELECTOR, armButtonRole, createControl, isControl } from "../src/control.js";
+import { CONTROL_SELECTOR, armButtonRole, createControl, isControl, labelledControl } from "../src/control.js";
 import { captureLogRecords, forwardedRecord } from "./log-capture.js";
 import { codeOf, withoutBlockComments } from "./source-text.js";
 
@@ -320,4 +320,52 @@ describe("the one control", () => {
     // Act / Assert
     expect(css.includes(":disabled")).toBe(false);
   });
+});
+
+describe("labelledControl", () => {
+  it("is a control wearing the class, hook and label it was given", () => {
+    // Act
+    const control = labelledControl({ className: "a b", hook: ["data-x", "y"], label: "Go", onClick: () => undefined });
+    // Assert
+    expect([isControl(control), control.className, control.getAttribute("data-x"), control.textContent]).toEqual([
+      true,
+      "a b",
+      "y",
+      "Go",
+    ]);
+  });
+
+  it("runs its click with itself, its default prevented", () => {
+    // Arrange
+    const seen: HTMLElement[] = [];
+    const control = labelledControl({ className: "a", hook: ["data-x", "y"], label: "Go", onClick: (c) => seen.push(c) });
+    document.body.append(control);
+    const event = new MouseEvent("click", { bubbles: true, cancelable: true });
+    // Act
+    control.dispatchEvent(event);
+    // Assert
+    expect([seen, event.defaultPrevented]).toEqual([[control], true]);
+  });
+
+  it("runs no click while disabled", () => {
+    // Arrange
+    let clicks = 0;
+    const control = labelledControl({ className: "a", hook: ["data-x", "y"], label: "Go", onClick: () => clicks++ });
+    document.body.append(control);
+    control.disabled = true;
+    // Act
+    control.click();
+    // Assert
+    expect(clicks).toBe(0);
+  });
+
+  it.each(["tray/held-prompt.ts", "tray/held-offer.ts", "tray/classifier-update.ts"])(
+    "is how %s builds every row control",
+    (file) => {
+      // Arrange
+      const code = codeOf(readFileSync(path.join(SRC, file), "utf8"));
+      // Act / Assert: a hand-rolled control would call createControl itself.
+      expect(code).not.toMatch(/\bcreateControl\(/);
+    },
+  );
 });
