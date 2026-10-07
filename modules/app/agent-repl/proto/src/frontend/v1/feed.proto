@@ -53,6 +53,7 @@ import "conversation/v1/api.proto";
 import "conversation/v1/session.proto";
 import "conversation/v1/turn.proto";
 import "conversation/v1/user.proto";
+import "frontend/v1/chess_board.proto";
 import "frontend/v1/failure.proto";
 import "frontend/v1/status_panel.proto";
 import "frontend/v1/todos_panel.proto";
@@ -531,6 +532,9 @@ message FeedTurnActivity {
     // (inside its card), never as an ordinary tool card; the parent's feed
     // carries only the FeedRow.subagent_handback badge.
     FeedSubagentResult subagent_result = 11;
+    // A CHESS BOARD the agent showed the reader: a CEE CLI session's game,
+    // drawn as the CEE CLI webapp's own widget. See chess_board.proto.
+    FeedChessBoard chess_board = 12;
   }
 }
 

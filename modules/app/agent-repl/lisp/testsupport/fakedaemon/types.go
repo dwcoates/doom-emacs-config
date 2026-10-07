@@ -61,6 +61,7 @@ var unaryResponseTypes = map[string]func() proto.Message{
 	"AdoptWebWorkspace":        func() proto.Message { return &v1.AdoptWebWorkspaceResponse{} },
 	"DismissNewsDigest":        func() proto.Message { return &v1.DismissNewsDigestResponse{} },
 	"RefreshNewsDigest":        func() proto.Message { return &v1.RefreshNewsDigestResponse{} },
+	"InspectChessBoardSquare":  func() proto.Message { return &v1.InspectChessBoardSquareResponse{} },
 }
 
 // streamResponseTypes is the closed set of stream names the control plane

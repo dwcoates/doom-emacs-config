@@ -3,11 +3,11 @@ package health
 import (
 	"fmt"
 	"strconv"
-	"strings"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
+	"claude-repld/internal/outputtext"
 	"claude-repld/internal/wsm"
 )
 
@@ -358,7 +358,7 @@ func evidenceInt64(f wsm.Fault, key string) int64 {
 // line to draw, so its last non-empty line is what stands for it. Where there
 // is no evidence at all, the fault's own detail is the line.
 func StartFailedDetail(f wsm.Fault) string {
-	tail := lastLine(f.Evidence["stderr_tail"])
+	tail := outputtext.LastLine(f.Evidence["stderr_tail"])
 	code, coded := f.Evidence["exit_code"]
 	switch {
 	case coded && tail != "":
@@ -370,17 +370,6 @@ func StartFailedDetail(f wsm.Fault) string {
 	default:
 		return f.Detail
 	}
-}
-
-// lastLine is the last non-empty line of a multi-line tail, trimmed.
-func lastLine(text string) string {
-	lines := strings.Split(text, "\n")
-	for i := len(lines) - 1; i >= 0; i-- {
-		if line := strings.TrimSpace(lines[i]); line != "" {
-			return line
-		}
-	}
-	return ""
 }
 
 // EvidenceExitCode is exitCode, exported for the HOST stream's HostFault,

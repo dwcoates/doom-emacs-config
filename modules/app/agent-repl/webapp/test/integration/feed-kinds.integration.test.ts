@@ -7,7 +7,8 @@
  * server-driven renderer: the DOM hooks carry the generated CASE NAMES, and
  * the text on screen is the daemon's own, verbatim.
  */
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { chessWidgetLoader } from "../../src/feed/cards/chess-widget-loader";
 
 import {
   FeedRowSchema,
@@ -88,6 +89,7 @@ import {
   detachedSubagentRow,
   feedId,
   findingsUnit,
+  chessBoardUnit,
   hookUnit,
   mergeUnit,
   responseRow,
@@ -172,6 +174,7 @@ describe("arm coverage", () => {
       "artifact",
       "plan",
       "findings",
+      "chessBoard",
       "subagentResult",
     ]);
   });
@@ -762,6 +765,46 @@ describe("findings", () => {
     const row = await drawRow(activityRow(findingsUnit()));
     // Assert
     expect(row.querySelector('[data-outcome="noChange"]')).not.toBeNull();
+  });
+});
+
+describe("chess board", () => {
+  it("draws a preparing board's step", async () => {
+    // Arrange / Act
+    const row = await drawRow(activityRow(chessBoardUnit({ case: "preparing", step: "Building the chess widget…" })));
+    // Assert
+    expect(row.querySelector(".chess-board-step")?.textContent).toBe("Building the chess widget…");
+  });
+
+  it("draws an unavailable board's reason", async () => {
+    // Arrange / Act
+    const row = await drawRow(
+      activityRow(chessBoardUnit({ case: "unavailable", reason: "CEE session agent-a no longer holds game g-1." })),
+    );
+    // Assert
+    expect(row.querySelector(".chess-board-unavailable")?.textContent).toBe(
+      "CEE session agent-a no longer holds game g-1.",
+    );
+  });
+
+  it("mounts a ready board's widget from its bytes", async () => {
+    // Arrange
+    const mounted: Uint8Array[] = [];
+    const spy = vi.spyOn(chessWidgetLoader, "load").mockResolvedValue({
+      mountCeeWebWidget: (_host, options) => {
+        mounted.push(options.widgetBytes);
+        return { showSquareEvents: () => {}, unmount: () => {} };
+      },
+    });
+    try {
+      // Act
+      await drawRow(activityRow(chessBoardUnit({ case: "ready", bytes: new Uint8Array([4, 2]) })));
+      await harness.settle();
+      // Assert
+      expect(mounted.map((bytes) => [...bytes])).toEqual([[4, 2]]);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
 

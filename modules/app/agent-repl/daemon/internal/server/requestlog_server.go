@@ -1079,6 +1079,23 @@ func (s *requestLoggingServer) OpenExternal(
 	return s.server.OpenExternal(ctx, req)
 }
 
+func (s *requestLoggingServer) InspectChessBoardSquare(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.InspectChessBoardSquareRequest],
+) (resp *connect.Response[agentreplv1.InspectChessBoardSquareResponse], err error) {
+	boundary, err := s.server.beginRequest(ctx, "InspectChessBoardSquare", req.Header().Get(requestIDHeader), requestMessage(req))
+	if err != nil {
+		return nil, boundaryFailure(err)
+	}
+	boundary.log.Debug("daemon.server.inspect_chess_board_square", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
+	defer func() {
+		boundary.log.Debug("daemon.server.inspect_chess_board_square", "completed the rpc handler", boundary.completionContext(err))
+	}()
+	return s.server.InspectChessBoardSquare(ctx, req)
+}
+
 func (s *requestLoggingServer) OpenInEditor(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.OpenInEditorRequest],

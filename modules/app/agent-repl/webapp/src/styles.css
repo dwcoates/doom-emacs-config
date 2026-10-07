@@ -5921,6 +5921,21 @@ ar-button.outcome-marker-pill {
 
 /* The list takes the ONE shared row delimiter, like every other list on this
    page. */
+/* The chess board bubble (feed/cards/chess-board.ts): the CEE CLI webapp's
+   widget lays itself out; the host only gives it room, and draws the
+   daemon's progress, unavailable and click-status lines as quiet text. */
+.chess-board-widget {
+  min-height: 24rem;
+}
+.chess-board-step,
+.chess-board-unavailable,
+.chess-board-status {
+  color: var(--muted);
+}
+.chess-board-status {
+  margin-top: 0.4rem;
+}
+
 .findings-rows {
   margin-top: 0.35rem;
 }

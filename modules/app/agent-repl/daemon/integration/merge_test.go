@@ -717,13 +717,21 @@ func TestAOneShotMergeOnANonSelfRepoNeverTriggersTheDeploy(t *testing.T) {
 
 func TestPrePromptTabRunsUnderTheLeaseAndParentsItsRowsToItsTabNotTheRoot(t *testing.T) {
 	t.Parallel()
-	// Arrange: a configured before-merge prompt.
+	// Arrange: a configured before-merge prompt. THE MERGE RUNS TO ITS END
+	// INSIDE THE TEST: after the pre-prompt the merge goes on to its test gate,
+	// so the gate is a scripted pass and the test awaits the landing below.
+	// Ending at the pre-prompt left that work racing the test's teardown, and a
+	// gate with no script to run logged its refusal whenever it won the race.
 	repo := harness.NewRepo(t)
-	d := harness.StartDaemon(t, harness.Opts{SelfRepo: repo.Dir})
+	script := harness.NewTestAllScript(t, repo.Dir)
+	script.SetExitCode(0)
+	script.SetStdout("daemon: passed in 1s\n")
+	d := harness.StartDaemon(t, harness.Opts{SelfRepo: repo.Dir, Timeout: harness.MergeChainTimeout, ExtraEnv: []string{"AGENT_REPL_TEST_ALL_SCRIPT=" + script.Path}})
 	repoRef := mergeRepositoryRef(t, d, repo)
 	f := mergeCreateChild(t, d, repoRef, "prepromptrepo", "do the feature", &agentreplv1.CreateWorkspaceMergeActions{
 		BeforeWsMerge: said("run the setup script"),
 	})
+	root := f.watchRootFeed()
 
 	// Act: enqueue and answer the pre-prompt's own turn.
 	harness.CommitWork(t, f.ws.GetDir())
@@ -776,6 +784,12 @@ func TestPrePromptTabRunsUnderTheLeaseAndParentsItsRowsToItsTabNotTheRoot(t *tes
 	if settled.GetMergeTab().GetPrePrompt().GetSettled().GetSucceeded() == nil {
 		t.Fatalf("pre_prompt tab settled = %v, want succeeded", settled.GetMergeTab().GetPrePrompt())
 	}
+
+	// Assert: the merge lands, so none of its work outlives the test.
+	awaitRow(t, f, root, "the merge's terminal push", func(row *frontendv1.FeedRow) bool {
+		return row.GetActivity().GetMerge().GetSuccess() != nil || row.GetActivity().GetMerge().GetError() != nil
+	})
+	d.AwaitLandingDeployed()
 }
 
 func TestAFailingPostPromptNeverFailsTheRunAndRidesTheTerminalSuccess(t *testing.T) {

@@ -154,6 +154,17 @@ function escapeRegExp(text) {
 }
 
 /**
+ * The character that brackets a held replacement's index. NUL never occurs in
+ * the text a capture scrubs, so a bracketed index cannot collide with content.
+ * Built from its code point because a control character in a regex literal is
+ * indistinguishable from a typo.
+ */
+const HOLD_MARK = String.fromCharCode(0);
+
+/** A held replacement: its index between two hold marks. */
+const HELD_REPLACEMENT = new RegExp(`${HOLD_MARK}(\\d+)${HOLD_MARK}`, "g");
+
+/**
  * Replace every personal value inside a string.
  *
  * Order matters and is fixed: emails first (they contain names), then the home
@@ -168,7 +179,7 @@ export function scrubPersonal(text, personal = NO_PERSONAL_VALUES) {
   const held = [];
   const hold = (replacement) => {
     held.push(replacement);
-    return `\u0000${held.length - 1}\u0000`;
+    return `${HOLD_MARK}${held.length - 1}${HOLD_MARK}`;
   };
   let out = text;
   personal.emails.forEach((email, i) => {
@@ -183,7 +194,7 @@ export function scrubPersonal(text, personal = NO_PERSONAL_VALUES) {
     const word = new RegExp(`(?<![A-Za-z])${escapeRegExp(name)}(?![A-Za-z])`, "gi");
     out = out.replace(word, (match) => (match[0] === match[0].toUpperCase() ? "Someone" : "someone"));
   }
-  return out.replace(/\u0000(\d+)\u0000/g, (_, i) => held[Number(i)]);
+  return out.replace(HELD_REPLACEMENT, (_, i) => held[Number(i)]);
 }
 
 /** Normalize a key for the secret/blob key rules (case and separators). */

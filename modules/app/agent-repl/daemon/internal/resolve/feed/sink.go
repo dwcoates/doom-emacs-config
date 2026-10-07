@@ -159,6 +159,9 @@ func (r *resolver) drawActivity(s *wsState, agent *conversationv1.AgentId, act *
 	case *conversationv1.AgentActivity_ReportFindings:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_ReportFindings"})
 		row, err = r.drawFindings(s, at, act, item.ReportFindings)
+	case *conversationv1.AgentActivity_ChessBoard:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_ChessBoard"})
+		row, err = r.drawChessBoard(s, at, act, item.ChessBoard)
 	case *conversationv1.AgentActivity_Worktree:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_Worktree"})
 		row, err = r.drawWorktree(s, at, act, item.Worktree)

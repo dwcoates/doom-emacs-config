@@ -1,0 +1,22 @@
+{
+  "_comment": [
+    "THE cross-language names of agent-repl's OWN MCP tools: the tools the",
+    "shim's in-process MCP server offers every session, which agent-repl draws",
+    "itself rather than as generic MCP tool cards.",
+    "",
+    "The shim (TypeScript) serves the tools and converts their calls off the",
+    "stream; the sidecar (Go) converts the same calls off the transcript files.",
+    "Two languages cannot compile one constant, so each holds its own and each",
+    "asserts it against this file: a renamed tool fails both suites instead of",
+    "leaving one plane converting a name the other no longer emits.",
+    "",
+    "`qualified` is the vendor's name for the tool, `mcp__<server>__<tool>`."
+  ],
+  "server": "agent-repl",
+  "tools": [
+    {
+      "tool": "show_chess_board",
+      "qualified": "mcp__agent-repl__show_chess_board"
+    }
+  ]
+}

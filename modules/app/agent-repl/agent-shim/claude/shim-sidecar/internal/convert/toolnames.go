@@ -38,6 +38,7 @@ const (
 	kindWorktree
 	kindCron
 	kindPushNotification
+	kindChessBoard
 )
 
 // builtinTools maps the vendor's tool names onto the unit kind each becomes.
@@ -71,9 +72,25 @@ var builtinTools = map[string]toolKind{
 	"PushNotification": kindPushNotification,
 }
 
+// showChessBoardToolName is agent-repl's OWN board tool, served by the shim's
+// in-process MCP server (`agent-repl`). Pinned across languages by
+// proto/vocab/agent-repl-tools.json.
+const showChessBoardToolName = "mcp__agent-repl__show_chess_board"
+
+// agentReplTools maps agent-repl's OWN MCP tools onto the unit kind each
+// becomes. They are MCP tools by the vendor's naming, but agent-repl draws them
+// itself, so each is modelled as its own arm rather than as AgentMcpToolCall:
+// an exact name here wins over the MCP prefix.
+var agentReplTools = map[string]toolKind{
+	showChessBoardToolName: kindChessBoard,
+}
+
 // classifyTool resolves a tool name to its conversion, and whether the name is a
-// recognized built-in at all.
+// recognized built-in or one of agent-repl's own tools at all.
 func classifyTool(name string) (toolKind, bool) {
-	kind, ok := builtinTools[name]
+	if kind, ok := builtinTools[name]; ok {
+		return kind, true
+	}
+	kind, ok := agentReplTools[name]
 	return kind, ok
 }

@@ -1,6 +1,6 @@
 /**
  * fake/scenarios/automation.ts — plan mode, findings, worktrees, cron,
- * notifications, monitors, wakeups and artifacts.
+ * notifications, monitors, wakeups, artifacts, and agent-repl's own chess board.
  *
  * These nine tool kinds share nothing but their shape of evidence: each has a
  * declared Output in `sdk-tools.d.ts` and (except `ExitPlanMode`, `Monitor` and
@@ -14,6 +14,7 @@
  * distinct reasons, and a mock that only ever sent one would leave two of them
  * unreachable.
  */
+import { SHOW_CHESS_BOARD_TOOL_NAME } from "../../sdk/agent-repl-mcp.js";
 import { conclude, scenario } from "./support.js";
 
 const PLAN_MODE = scenario({
@@ -79,6 +80,26 @@ const REPORT_FINDINGS = scenario({
     const call = ctx.toolUse("ReportFindings", { findings, level: "high" });
     ctx.toolResult(call, "Reported 3 findings.", { count: 3, level: "high", findings });
     conclude(ctx, "Reported three findings.");
+  },
+});
+
+const CHESS_BOARD = scenario({
+  name: "chess-board",
+  prompt: "!chess-board",
+  emits:
+    "a call of agent-repl's own `show_chess_board` tool naming a CEE session and its game, answered the way " +
+    "the shim's in-process handler answers it",
+  writes: "the tool_use line, the tool_result line, the closing text line",
+  arms: "AgentChessBoard.start + Success with the session restated",
+  run(ctx) {
+    ctx.log.debug({ turn: ctx.turn, branch: "chess-board" }, "fake chess-board turn");
+    const call = ctx.toolUse(SHOW_CHESS_BOARD_TOOL_NAME, { session_id: "fake-cee-session", game_id: "fake-game" });
+    ctx.toolResult(
+      call,
+      "The chess board for CEE session fake-cee-session (game fake-game) is shown to the reader in the feed.",
+      undefined,
+    );
+    conclude(ctx, "The board is in the feed.");
   },
 });
 
@@ -398,6 +419,7 @@ const UNMODELED = scenario({
 export const AUTOMATION_SCENARIOS = [
   PLAN_MODE,
   REPORT_FINDINGS,
+  CHESS_BOARD,
   WORKTREE_KEEP,
   WORKTREE_REMOVE,
   CRON,

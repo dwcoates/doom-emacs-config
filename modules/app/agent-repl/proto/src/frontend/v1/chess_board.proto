@@ -1,0 +1,140 @@
+// chess_board.proto — THE CHESS BOARD: a CEE CLI session's game, drawn in
+// the feed as the CEE CLI webapp's own interactive widget
+// (`@chesscom/cee-web-widget`), at the place in the turn where the agent asked
+// for it (conversation.v1.AgentChessBoard).
+//
+// agent-repl ONLY RENDERS THE WIDGET. It reads no chess data: the daemon asks
+// the CEE CLI's webapp backend (cee-webapp) for the widget's data, the webapp
+// mounts the widget from it verbatim, and a square the reader clicks is
+// answered by the daemon asking cee-webapp again and handing the answer back
+// whole. Everything chess-shaped — the board, the move list, the engine's
+// lines, a bad position — is the widget's to draw.
+//
+// LAYOUT. One bubble: a heading line, then exactly one of a progress line, an
+// unavailable line, or the mounted widget.
+//
+//   +-FeedChessBoard--------------------------------------+
+//   | [FeedChessBoardHeading: "Chess board · session x"]  |
+//   | one of:                                             |
+//   |   [FeedChessBoardPreparing: "Building the widget…"] |
+//   |   [FeedChessBoardUnavailable: reason line]          |
+//   |   +-FeedChessBoardReady----------------------------+|
+//   |   | the mounted widget (board, move list, panels)  ||
+//   |   +------------------------------------------------+|
+//   +-----------------------------------------------------+
+
+syntax = "proto3";
+
+package frontend.v1;
+
+option go_package = "agentrepl/proto/frontend/v1;frontendv1";
+
+// The chess board bubble. The daemon re-publishes it, under the same row id,
+// each time the board's state changes, so a board drawn while its widget was
+// still being built becomes the mounted widget in place.
+message FeedChessBoard {
+  // The heading line, always drawn.
+  FeedChessBoardHeading heading = 1;
+  // What the bubble's body draws. The set arm IS the board's state; exactly
+  // one is always set.
+  oneof state {
+    // The daemon is still getting the board ready: building the widget or
+    // its backend, starting the backend, or fetching the game.
+    FeedChessBoardPreparing preparing = 2;
+    // The board cannot be drawn, and the line says why.
+    FeedChessBoardUnavailable unavailable = 3;
+    // The widget's data is here: mount the widget.
+    FeedChessBoardReady ready = 4;
+  }
+}
+
+// The heading element.
+message FeedChessBoardHeading {
+  // The composed line ("Chess board · CEE session agent-a"), drawn verbatim.
+  string text = 1;
+}
+
+// The progress element, drawn while the board is being readied.
+message FeedChessBoardPreparing {
+  // The step under way, composed by the daemon ("Building the chess widget…"),
+  // drawn verbatim. A later publication replaces it with the next step or a
+  // final state.
+  FeedChessBoardPreparingStep step = 1;
+}
+
+// The step line of a board being readied.
+message FeedChessBoardPreparingStep {
+  // The composed line, drawn verbatim.
+  string text = 1;
+}
+
+// The unavailable element: the board will not be drawn.
+message FeedChessBoardUnavailable {
+  // Why, as one daemon-composed line: the agent's call failed, the
+  // explanation-engine checkout is missing, a build failed (with its own
+  // output's last line), cee-webapp could not be started or reached, or the
+  // CEE session or its game no longer exists. The daemon logs the full
+  // account; this line is what the reader needs.
+  FeedChessBoardUnavailableReason reason = 1;
+}
+
+// The reason line of an unavailable board.
+message FeedChessBoardUnavailableReason {
+  // The composed line, drawn verbatim.
+  string text = 1;
+}
+
+// A board ready to mount: everything the widget's host contract needs.
+message FeedChessBoardReady {
+  // The widget's data.
+  FeedChessBoardWidget widget = 1;
+  // Where the widget's script and stylesheet are served.
+  FeedChessBoardBundle bundle = 2;
+  // What a square click hands back to the daemon.
+  FeedChessBoardSquareToken square_token = 3;
+  // The position the widget shows when it is mounted.
+  FeedChessBoardStartPosition start_position = 4;
+}
+
+// THE POSITION A FRESHLY MOUNTED WIDGET SHOWS: the root of the session's
+// game. The widget reports a position only when the reader navigates
+// (`onPositionChange`), so until it has, a square click is read at this one;
+// after, at the last position it reported.
+message FeedChessBoardStartPosition {
+  // The root's CEE gamepoint handle, as the session's poll reports it, relayed
+  // verbatim.
+  int64 game_point = 1;
+}
+
+// The widget's data: what `mountCeeWebWidget` takes as `widgetBytes`.
+message FeedChessBoardWidget {
+  // A `chesscom.cee_webapp.v1.CeeWebWidget` in binary protobuf form, exactly
+  // as cee-webapp's `GetCeeWebWidget` answered it.
+  //
+  // UNTYPED BY NECESSITY: the schema is the CEE CLI's, in another repository,
+  // and agent-repl relays the message without reading it; the widget's own
+  // host contract takes these bytes. A client hands them to the widget
+  // unchanged and never decodes them.
+  bytes cee_web_widget = 1;
+}
+
+// The widget bundle's two files, served by the agent-repl daemon from the
+// widget build it made. Both URLs are paths on the daemon's own origin and
+// carry the build's stamp, so a rebuilt widget is a new URL and a page never
+// keeps running a stale module.
+message FeedChessBoardBundle {
+  // The ES module exporting `mountCeeWebWidget`, imported as-is.
+  string script_url = 1;
+  // The widget's stylesheet, loaded into the page once per URL. Without it
+  // the board's squares and pieces have no size and draw nothing.
+  string stylesheet_url = 2;
+}
+
+// THE BOARD'S ECHO TOKEN: minted by the daemon from the board's CEE session,
+// carried on the ready board, and handed back unchanged on every square click
+// (agentrepl.v1.InspectChessBoardSquareRequest.board). Opaque: a client
+// never parses or constructs one.
+message FeedChessBoardSquareToken {
+  // The token's value.
+  string value = 1;
+}
