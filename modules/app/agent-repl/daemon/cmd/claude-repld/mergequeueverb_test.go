@@ -347,6 +347,86 @@ func TestTheMergeQueueVerbPicksTheDeepestWorkspaceHoldingTheCaller(t *testing.T)
 	}
 }
 
+// nestedUnder is a workspace row for dir with id, nested as a child under parent.
+func nestedUnder(parent *frontendv1.RosterRow, dir, id, status string) *frontendv1.RosterRow {
+	child := rosterRow(dir, status, 0)
+	child.Workspace.Workspace.Id = id
+	parent.Children = append(parent.Children, child)
+	return child
+}
+
+func TestTheMergeQueueVerbAsksFromANestedWorkspace(t *testing.T) {
+	tests := []struct {
+		name   string
+		roster func(f *mergeFixture) *frontendv1.WorkspaceRoster
+	}{
+		{name: "a child under its parent", roster: func(f *mergeFixture) *frontendv1.WorkspaceRoster {
+			parent := rosterRow(f.other, "done", 0)
+			parent.Workspace.Workspace.Id = "ws-parent"
+			nestedUnder(parent, f.worktree, "ws-nested", "thinking")
+			return roster(parent)
+		}},
+		{name: "a grandchild under its parent's parent", roster: func(f *mergeFixture) *frontendv1.WorkspaceRoster {
+			grand := rosterRow(filepath.Join(t.TempDir(), "grand"), "done", 0)
+			grand.Workspace.Workspace.Id = "ws-grand"
+			parent := nestedUnder(grand, f.other, "ws-parent", "done")
+			nestedUnder(parent, f.worktree, "ws-nested", "thinking")
+			return roster(grand)
+		}},
+		{name: "a child in a task section", roster: func(f *mergeFixture) *frontendv1.WorkspaceRoster {
+			parent := rosterRow(f.other, "done", 0)
+			parent.Workspace.Workspace.Id = "ws-parent"
+			nestedUnder(parent, f.worktree, "ws-nested", "thinking")
+			return &frontendv1.WorkspaceRoster{Task: &frontendv1.RosterTaskView{
+				Sections: []*frontendv1.RosterTaskSection{{Rows: &frontendv1.RosterRows{Rows: []*frontendv1.RosterRow{parent}}}},
+			}}
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the caller's row is nested, never a top-level row.
+			f := newMergeFixture(t)
+			r := tt.roster(f)
+			f.daemons = []*fakeMergeDaemon{{script: []scriptStep{{roster: r}, {roster: r}, {act: f.retireTheCommand(t, "applied")}, {roster: r}}}}
+
+			// Act.
+			code := f.run(t, "-own")
+
+			// Assert: the merge is asked by the nested workspace itself.
+			entry := f.writtenEntry(t)
+			if code != exitSuccess || entry.Workspace != "ws-nested" || entry.ProjectDir != f.worktree {
+				t.Fatalf("exit %d, stderr %q, entry %+v; want a merge asked by the nested workspace ws-nested", code, f.errOut.String(), entry)
+			}
+		})
+	}
+}
+
+func TestTheMergeQueueVerbReportsANestedWorkspacesLanding(t *testing.T) {
+	// Arrange: the caller is a child whose own row moves to merged under its
+	// parent, as its merge lands in that parent.
+	f := newMergeFixture(t)
+	at := func(status string, mergedAt int64) *frontendv1.WorkspaceRoster {
+		parent := rosterRow(f.other, "done", 0)
+		parent.Workspace.Workspace.Id = "ws-parent"
+		child := nestedUnder(parent, f.worktree, "ws-nested", status)
+		if status == statusMergedDone {
+			child.When = rosterRow(f.worktree, statusMergedDone, mergedAt).When
+		}
+		return roster(parent)
+	}
+	f.daemons = []*fakeMergeDaemon{{script: frames(
+		at("done", 0), at(statusQueued, 0), at(statusMerging, 0), at(statusMergedDone, 7),
+	)}}
+
+	// Act.
+	code := f.run(t, "-own", "-wait")
+
+	// Assert.
+	if code != exitSuccess || !strings.Contains(f.out.String(), "LANDED") {
+		t.Fatalf("exit %d, stdout %q, stderr %q; want the nested workspace's landing", code, f.out.String(), f.errOut.String())
+	}
+}
+
 // --- without -wait --------------------------------------------------------
 
 func TestTheMergeQueueVerbReturnsOnceTheCommandIsApplied(t *testing.T) {
@@ -626,6 +706,21 @@ func TestFindRosterRowLooksInTheRecentlyMergedSection(t *testing.T) {
 	// Assert.
 	if rowStatus(row) != statusMergedDone {
 		t.Fatalf("found %v, want the recently merged row", row)
+	}
+}
+
+func TestFindRosterRowLooksInNestedRows(t *testing.T) {
+	// Arrange: a child workspace nested under its parent's row.
+	dir := t.TempDir()
+	parent := rosterRow(filepath.Join(t.TempDir(), "parent"), "done", 0)
+	nestedUnder(parent, dir, "ws-nested", statusMerging)
+
+	// Act.
+	row := findRosterRow(roster(parent), canonicalDir(dir))
+
+	// Assert.
+	if row.GetWorkspace().GetWorkspace().GetId() != "ws-nested" {
+		t.Fatalf("found %v, want the nested row", row)
 	}
 }
 

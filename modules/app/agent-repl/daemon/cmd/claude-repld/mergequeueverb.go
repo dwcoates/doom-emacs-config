@@ -23,6 +23,7 @@ import (
 
 	"claude-repld/internal/commandfile"
 	"claude-repld/internal/envc"
+	"claude-repld/internal/resolve/sidebar"
 	"claude-repld/internal/stateroot"
 )
 
@@ -737,7 +738,9 @@ func callingRow(roster *frontendv1.WorkspaceRoster, cwd string) *frontendv1.Rost
 	return best
 }
 
-// rosterRows lists every row, in every grouping the roster carries.
+// rosterRows lists every row, in every grouping the roster carries, each
+// nested (child) workspace's row included: a child is a workspace in its own
+// right, so it can ask for its own merge, which lands in its parent.
 func rosterRows(roster *frontendv1.WorkspaceRoster) []*frontendv1.RosterRow {
 	var groups []*frontendv1.RosterRows
 	for _, section := range roster.GetRepository().GetSections() {
@@ -749,27 +752,17 @@ func rosterRows(roster *frontendv1.WorkspaceRoster) []*frontendv1.RosterRow {
 	groups = append(groups, roster.GetRecentlyMerged().GetRows())
 	var out []*frontendv1.RosterRow
 	for _, group := range groups {
-		out = append(out, group.GetRows()...)
+		out = append(out, sidebar.FlattenRows(group.GetRows())...)
 	}
 	return out
 }
 
 // findRosterRow finds a workspace's row by its canonical directory, in every
-// grouping the roster carries.
+// grouping the roster carries, nested rows included.
 func findRosterRow(roster *frontendv1.WorkspaceRoster, dir string) *frontendv1.RosterRow {
-	var groups []*frontendv1.RosterRows
-	for _, section := range roster.GetRepository().GetSections() {
-		groups = append(groups, section.GetRows())
-	}
-	for _, section := range roster.GetTask().GetSections() {
-		groups = append(groups, section.GetRows())
-	}
-	groups = append(groups, roster.GetRecentlyMerged().GetRows())
-	for _, group := range groups {
-		for _, row := range group.GetRows() {
-			if canonicalDir(row.GetWorkspace().GetWorkspace().GetDir()) == dir {
-				return row
-			}
+	for _, row := range rosterRows(roster) {
+		if canonicalDir(row.GetWorkspace().GetWorkspace().GetDir()) == dir {
+			return row
 		}
 	}
 	return nil
