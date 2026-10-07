@@ -14,6 +14,7 @@ import (
 	"sync"
 
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/outputtext"
 )
 
 // The operations this package's records carry.
@@ -115,9 +116,9 @@ func (b *backend) runStep(ctx context.Context, stage, prefix, dir string, argv [
 		return b.fail(stage, prefix+": "+err.Error()+".", err, dlog.Context{"dir": dir, "argv": strings.Join(argv, " ")})
 	}
 	if code != 0 {
-		last := lastLine(output)
+		last := failureLine(output)
 		return b.fail(stage, prefix+": "+last, fmt.Errorf("%w: %s exited %d", errBuildFailed, strings.Join(argv, " "), code),
-			dlog.Context{"dir": dir, "argv": strings.Join(argv, " "), "exit_code": code, "output_tail": tail(output, 2000)})
+			dlog.Context{"dir": dir, "argv": strings.Join(argv, " "), "exit_code": code, "output_tail": outputtext.TailLines(output, 40)})
 	}
 	return nil
 }
@@ -223,7 +224,7 @@ func (b *backend) ensureWebappBinary(ctx context.Context, cli string) *failure {
 	if err != nil || (code != 0 && code != 1) {
 		cause := err
 		if cause == nil {
-			cause = fmt.Errorf("%w: pkill exited %d: %s", errBuildFailed, code, lastLine(output))
+			cause = fmt.Errorf("%w: pkill exited %d: %s", errBuildFailed, code, failureLine(output))
 		}
 		return b.fail("webapp_install", "The running chess widget backend could not be stopped for its rebuild.", cause, dlog.Context{"installed": installed})
 	}
@@ -279,8 +280,8 @@ func (b *backend) startWebapp(ctx context.Context, checkout string) (string, *fa
 		if cause == nil {
 			cause = fmt.Errorf("%w: gns cee debug webapp exited %d", errBuildFailed, code)
 		}
-		return "", b.fail("webapp_start", "The chess widget's backend could not be started: "+lastLine(output), cause,
-			dlog.Context{"checkout": checkout, "output_tail": tail(output, 2000)})
+		return "", b.fail("webapp_start", "The chess widget's backend could not be started: "+failureLine(output), cause,
+			dlog.Context{"checkout": checkout, "output_tail": outputtext.TailLines(output, 40)})
 	}
 	var answer struct {
 		URL string `json:"url"`
@@ -291,7 +292,7 @@ func (b *backend) startWebapp(ctx context.Context, checkout string) (string, *fa
 			cause = errors.New("the answer names no url")
 		}
 		return "", b.fail("webapp_start", "The chess widget's backend started, but did not say where it listens.", cause,
-			dlog.Context{"checkout": checkout, "output_tail": tail(output, 2000)})
+			dlog.Context{"checkout": checkout, "output_tail": outputtext.TailLines(output, 40)})
 	}
 	b.log.Debug(opServe, "the cee-webapp singleton serves", dlog.Context{"url": answer.URL})
 	return strings.TrimRight(answer.URL, "/"), nil
@@ -316,24 +317,13 @@ func (b *backend) builtWidget() (serving, bool) {
 	return b.built, b.built.widgetStamp != ""
 }
 
-// lastLine answers output's last non-blank line, the one a failed command
-// most often explains itself in.
-func lastLine(output string) string {
-	lines := strings.Split(strings.TrimSpace(output), "\n")
-	for i := len(lines) - 1; i >= 0; i-- {
-		if line := strings.TrimSpace(lines[i]); line != "" {
-			return line
-		}
+// failureLine answers output's last non-blank line, the one a failed command
+// most often explains itself in, or says the command printed nothing.
+func failureLine(output string) string {
+	if line := outputtext.LastLine(output); line != "" {
+		return line
 	}
 	return "it printed nothing."
-}
-
-// tail answers output's last n bytes, for a log record.
-func tail(output string, n int) string {
-	if len(output) <= n {
-		return output
-	}
-	return output[len(output)-n:]
 }
 
 // sessionPoll is what `gns cee session poll` answers about a session.
@@ -364,13 +354,13 @@ func (b *backend) pollSession(ctx context.Context, checkout string, s Session) (
 		if cause == nil {
 			cause = fmt.Errorf("%w: gns cee session poll exited %d", errBuildFailed, code)
 		}
-		return polled{}, b.fail("session_poll", "The CEE session could not be read: "+lastLine(output), cause,
-			dlog.Context{"cee_session_id": s.ID, "output_tail": tail(output, 2000)})
+		return polled{}, b.fail("session_poll", "The CEE session could not be read: "+failureLine(output), cause,
+			dlog.Context{"cee_session_id": s.ID, "output_tail": outputtext.TailLines(output, 40)})
 	}
 	var poll sessionPoll
 	if err := json.Unmarshal([]byte(strings.TrimSpace(output)), &poll); err != nil {
 		return polled{}, b.fail("session_poll", "The CEE session's poll answer could not be read.", err,
-			dlog.Context{"cee_session_id": s.ID, "output_tail": tail(output, 2000)})
+			dlog.Context{"cee_session_id": s.ID, "output_tail": outputtext.TailLines(output, 40)})
 	}
 	return polled{
 		live:    poll.Active && poll.HasGame && poll.GameID == s.GameID,
