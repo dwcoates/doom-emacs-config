@@ -243,6 +243,28 @@ func (c *Converter) settledItem(kind toolKind, call openCall, result, block map[
 		return item(&conversationv1.AgentActivity_ReportFindings{ReportFindings: &conversationv1.AgentReportFindings{
 			State: &conversationv1.AgentReportFindings_Success{Success: findingsSuccess(call, result, ts)},
 		}})
+	case kindChessBoard:
+		session := chessBoardSession(call.input)
+		if failed {
+			return item(&conversationv1.AgentActivity_ChessBoard{ChessBoard: &conversationv1.AgentChessBoard{
+				Result: &conversationv1.AgentChessBoard_Failure{Failure: &conversationv1.AgentChessBoardFailure{
+					Error:   failure,
+					Session: session,
+				}},
+			}})
+		}
+		if session == nil {
+			// The SDK validates the input before the handler runs, so a returned
+			// call always named its session; one that did not is stored as
+			// residue by the caller.
+			return nil
+		}
+		return item(&conversationv1.AgentActivity_ChessBoard{ChessBoard: &conversationv1.AgentChessBoard{
+			Result: &conversationv1.AgentChessBoard_Success{Success: &conversationv1.AgentChessBoardSuccess{
+				Session:   session,
+				SettledAt: settledAt(ts, call.startedAt),
+			}},
+		}})
 	case kindWorktree:
 		if failed {
 			return item(&conversationv1.AgentActivity_Worktree{Worktree: &conversationv1.AgentWorktree{
