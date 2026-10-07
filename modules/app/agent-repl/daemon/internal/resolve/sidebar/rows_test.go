@@ -7,6 +7,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/resolve/footer"
 	"claude-repld/internal/resolve/sidebar"
@@ -1098,5 +1099,75 @@ func TestAvailabilityLeavesPendingWhenTheBringUpEnds(t *testing.T) {
 	// Assert.
 	if got := availabilityName(onlyRow(t, r)); got != "available" {
 		t.Fatalf("availability = %q, want available", got)
+	}
+}
+
+// armChanges answers every roster status-arm change the resolver recorded.
+func armChanges(surfaces *dlog.TestSurfaces) []dlog.Record {
+	var out []dlog.Record
+	for _, rec := range surfaces.Records() {
+		if rec.Operation == "daemon.sidebar.status_arm_changed" {
+			out = append(out, rec)
+		}
+	}
+	return out
+}
+
+func TestTheRosterRecordsEachPublishedStatusArmChange(t *testing.T) {
+	cases := []struct {
+		name string
+		act  func(r sidebarResolver)
+		want []dlog.Context
+	}{
+		{
+			name: "the first arm a row publishes replaces nothing and is not a change",
+			act:  func(sidebarResolver) {},
+			want: nil,
+		},
+		{
+			name: "an arm change is recorded with the arm, the arm it replaced, and the fact that moved it",
+			act: func(r sidebarResolver) {
+				r.OnLink(theWS, shimclient.LinkConnected)
+			},
+			want: []dlog.Context{
+				{"arm": "ready", "previous_arm": "none", "cause": "daemon.sidebar.on_link", "workspace_id": string(theWS)},
+			},
+		},
+		{
+			name: "a fact that leaves the arm where it stands records nothing",
+			act: func(r sidebarResolver) {
+				r.OnLink(theWS, shimclient.LinkConnected)
+				r.OnSessionStarted(theWS, &conversationv1.SessionStarted{VendorSessionId: "vendor-1"})
+				r.OnSessionStarted(theWS, &conversationv1.SessionStarted{VendorSessionId: "vendor-1"})
+			},
+			want: []dlog.Context{
+				{"arm": "ready", "previous_arm": "none", "cause": "daemon.sidebar.on_link", "workspace_id": string(theWS)},
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			r := arrange(t)
+
+			// Act.
+			tc.act(r)
+
+			// Assert.
+			got := armChanges(r.surfaces)
+			if len(got) != len(tc.want) {
+				t.Fatalf("arm changes = %+v, want %d", got, len(tc.want))
+			}
+			for i, want := range tc.want {
+				if got[i].Level != "info" {
+					t.Fatalf("change %d level = %q, want info", i, got[i].Level)
+				}
+				for key, value := range want {
+					if got[i].Context[key] != value {
+						t.Fatalf("change %d %s = %v, want %v (record %+v)", i, key, got[i].Context[key], value, got[i].Context)
+					}
+				}
+			}
+		})
 	}
 }
