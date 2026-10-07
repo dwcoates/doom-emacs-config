@@ -303,14 +303,21 @@
     "wrong and nothing wants a look. lost is 'turquoise' (filled): we stopped",
     "being able to see the run, which is unexpected and wants the user's",
     "attention, but it is not a proven failure, so it does not take failed's",
-    "red. A shell has no 'failed' arm: a nonzero exit is still 'completed'."
+    "red. A shell has no 'failed' arm: a nonzero exit is still 'completed'.",
+    "",
+    "settling is 'none' (hollow): the run stopped and its outcome is on its",
+    "way, so nothing wants a look yet. restarted is 'blue', with lost: the",
+    "vendor process restarted under the run, which neither the user nor the",
+    "run did (2026-10-07)."
   ],
   "feed_subagent_dot": {
     "live": "green",
+    "settling": "none",
     "succeeded": "none",
     "failed": "red",
     "cancelled": "none",
-    "lost": "blue"
+    "lost": "blue",
+    "restarted": "blue"
   },
   "_feed_outcome_marker_comment": [
     "THE OUTCOME MARKER (frontend.v1.FeedOutcomeMarker, owner ruling",
