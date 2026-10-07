@@ -4,6 +4,22 @@ How to operate agent-repl from the keyboard. Every new or changed control
 lands with an update here (see `AGENTS.md`, "User controls land with the
 user guide"). Controls that predate this guide are not all listed yet.
 
+## Setup
+
+agent-repl names no person and holds no person's values as defaults. The
+values below are yours to set. A value that is missing or does not match
+fails loudly, and the error points back to this section.
+
+Environment variables go in your shell profile. Then run `doom env` so Emacs,
+and the daemon Emacs starts, see them.
+
+| Value | Where it is set | What reads it | When it is missing |
+| --- | --- | --- | --- |
+| Your work account | Sign in to Claude with `~/.claude-chesscom` as the config dir. Its email is read from `~/.claude-chesscom/.claude.json`. | Workspaces under `$MULTI_REPO_ROOT`, and the GNS login rule in `metaprompt.md`. | Those workspaces run logged out. An agent that needs to renew a GNS token stops and says so. |
+| A Chrome profile per account | Sign each account's email in to its own Chrome profile. | Links clicked in a workspace open in the profile signed in as that workspace's account. A logged-out workspace opens links with no profile chosen. | The click fails with `launch_failed`, naming the email that no profile is signed in as. |
+| `AGENT_REPL_PERSISTENT_WIFI_HOTSPOT` | Your phone hotspot's name, in your shell profile. Either apostrophe spelling joins. | Persistent-wifi mode, which joins the hotspot when it turns on and leaves it when it turns off. | Turning the mode on or off still changes the power settings. The hotspot step fails, naming the variable. |
+| `CLAUDE_WORKSPACE_PREFIX` | Optional. A prefix for new workspace branches, such as your initials, in your shell profile. | Workspace creation, which names a branch `<prefix>/<name>`. | Branches get no prefix. |
+
 ## Selecting a bubble
 
 One bubble at a time can be selected in the feed. A selected bubble has the
