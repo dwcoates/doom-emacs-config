@@ -1620,19 +1620,15 @@ describe("createFeedController: following the tail", () => {
 });
 
 /**
- * A THINKING BUBBLE ABOVE THE READER COLLAPSES WITHOUT MOVING THEM (owner rule,
- * 2026-09-23). The daemon re-pushes a thinking row settled once its own final
- * text has arrived; its redraw drops it to one line. No later row is involved. jsdom lays nothing out, so
- * the row's bottom edge is stubbed from the cap its body was drawn at, and the
- * tail owner is the REAL `TailFollow` over a fake box.
+ * A THINKING BUBBLE KEEPS ITS FIXED HEIGHT WHEN IT LANDS (owner request,
+ * 2026-10-07). The daemon re-pushes a thinking row settled once its own final
+ * text has arrived; its redraw keeps the same feed cap, so nothing above the
+ * reader changes height and nothing moves. The tail owner is the REAL
+ * `TailFollow` over a fake box.
  */
-describe("createFeedController: a landed thinking row collapsing", () => {
+describe("createFeedController: a landed thinking row", () => {
   /** A thinking response row, landed (settled) or still arriving. */
-  function thinkingRow(
-    id: string,
-    landed: boolean,
-    markdown = "weighing",
-  ): FeedRow {
+  function thinkingRow(id: string, landed: boolean): FeedRow {
     return create(FeedRowSchema, {
       id: feedId(id),
       order: orderFor(id),
@@ -1645,7 +1641,7 @@ describe("createFeedController: a landed thinking row collapsing", () => {
               thinking: true,
               result: {
                 case: landed ? "success" : "update",
-                value: { prose: { markdown } },
+                value: { prose: { markdown: "weighing" } },
               },
             },
           },
@@ -1658,22 +1654,14 @@ describe("createFeedController: a landed thinking row collapsing", () => {
   function cappedResponse(u: FeedResponse): HTMLElement {
     const el = document.createElement("div");
     el.setAttribute("data-cap-lines", String(responseCapLines(u)));
-    el.textContent =
-      u.result.case === undefined ? "" : (u.result.value.prose?.markdown ?? "");
     return el;
   }
 
   /**
-   * A feed over a 300px viewport whose top edge sits at 100, scrolled to 500
-   * by the READER (so no follow stands) unless FOLLOWING, holding thinking row
-   * t1 whose bottom edge is BEFORE while at the response cap and AFTER once
-   * collapsed to one line.
+   * A feed over a 300px viewport, scrolled to 500 by the READER (so no follow
+   * stands), holding the arriving thinking row t1.
    */
-  function collapsing(opts: {
-    following: boolean;
-    before: number;
-    after: number;
-  }) {
+  function arriving() {
     const h = harness();
     const host = document.createElement("div");
     document.body.replaceChildren(host);
@@ -1701,169 +1689,36 @@ describe("createFeedController: a landed thinking row collapsing", () => {
       scroll: { box, tail },
     });
     controller.applyPage(page([thinkingRow("t1", false)]), "replace");
-    const row = host.querySelector<HTMLElement>('[data-feed-row="t1"]');
-    if (row === null) throw new Error("t1 is not drawn");
-    row.getBoundingClientRect = () => {
-      const cap = row
-        .querySelector("[data-cap-lines]")
-        ?.getAttribute("data-cap-lines");
-      return { bottom: cap === "1" ? opts.after : opts.before } as DOMRect;
-    };
-    if (!opts.following) {
-      tail.onInput();
-      box.scrollTop = 500;
-      tail.onScroll();
-    }
-    return { controller, box, tail, host };
+    tail.onInput();
+    box.scrollTop = 500;
+    tail.onScroll();
+    return { controller, box, host };
   }
 
-  it.each([
-    {
-      name: "a collapse wholly above the viewport shifts the view by the height it lost",
-      following: false,
-      before: 90,
-      after: 40,
-      want: 450,
-    },
-    {
-      name: "a collapse the reader can see moves nothing",
-      following: false,
-      before: 250,
-      after: 200,
-      want: 500,
-    },
-    {
-      name: "a landed row whose height did not change (the reader expanded it) moves nothing",
-      following: false,
-      before: 90,
-      after: 90,
-      want: 500,
-    },
-    {
-      name: "a following feed stays at its tail",
-      following: true,
-      before: 90,
-      after: 40,
-      want: 2000,
-    },
-  ])("$name", ({ following, before, after, want }) => {
+  /** The cap t1's body is drawn at. */
+  function capOf(host: HTMLElement): string | null | undefined {
+    return host
+      .querySelector('[data-feed-row="t1"] [data-cap-lines]')
+      ?.getAttribute("data-cap-lines");
+  }
+
+  it("keeps the feed cap it arrived at", () => {
     // Arrange
-    const { controller, box } = collapsing({ following, before, after });
-    // Act — the daemon re-pushes t1 settled; no later row is drawn.
+    const { controller, host } = arriving();
+    const before = capOf(host);
+    // Act — the daemon re-pushes t1 settled.
     controller.upsert(thinkingRow("t1", true));
     // Assert
-    expect(box.scrollTop).toBe(want);
+    expect([before, capOf(host)]).toEqual(["feed", "feed"]);
   });
 
-  it("keeps a following feed following", () => {
+  it("moves nothing under a reader below it", () => {
     // Arrange
-    const { controller, tail } = collapsing({
-      following: true,
-      before: 90,
-      after: 40,
-    });
+    const { controller, box } = arriving();
     // Act
     controller.upsert(thinkingRow("t1", true));
-    // Assert
-    expect(tail.isFollowing()).toBe(true);
-  });
-
-  it("moves nothing for a re-push above the viewport that is not the landing edge", () => {
-    // Arrange — a re-push that changes the text, not the flag.
-    const { controller, box, host } = collapsing({
-      following: false,
-      before: 90,
-      after: 40,
-    });
-    const row = host.querySelector<HTMLElement>(
-      '[data-feed-row="t1"]',
-    ) as HTMLElement;
-    row.getBoundingClientRect = () =>
-      ({ bottom: row.textContent?.includes("longer") ? 140 : 90 }) as DOMRect;
-    // Act
-    controller.upsert(thinkingRow("t1", false, "weighing, longer"));
     // Assert
     expect(box.scrollTop).toBe(500);
-  });
-
-  it("measures no collapse when an already landed row is re-pushed", async () => {
-    // Arrange — t1 lands once; only the records after that are read.
-    const capture = captureLogRecords("debug");
-    const { controller } = collapsing({
-      following: false,
-      before: 90,
-      after: 40,
-    });
-    controller.upsert(thinkingRow("t1", true));
-    capture.logger.flush();
-    await Promise.resolve();
-    capture.sent.length = 0;
-    // Act — the daemon re-pushes the settled row again.
-    controller.upsert(thinkingRow("t1", true, "weighing, restated"));
-    // Assert
-    await expect(
-      forwardedRecord(capture, "feed.collapse-kept-place"),
-    ).rejects.toThrow();
-  });
-
-  it("collapses on its own landing without waiting for a later response", () => {
-    // Arrange
-    const { controller, host } = collapsing({
-      following: false,
-      before: 90,
-      after: 40,
-    });
-    // Act
-    controller.upsert(thinkingRow("t1", true));
-    // Assert — t1 is the only row, and it wears the thinking cap.
-    expect([
-      host.querySelectorAll("[data-feed-row]").length,
-      host
-        .querySelector('[data-feed-row="t1"] [data-cap-lines]')
-        ?.getAttribute("data-cap-lines"),
-    ]).toEqual([1, "1"]);
-  });
-
-  it("records the collapse it measured at DEBUG", async () => {
-    // Arrange
-    const capture = captureLogRecords("debug");
-    const { controller } = collapsing({
-      following: false,
-      before: 90,
-      after: 40,
-    });
-    // Act
-    controller.upsert(thinkingRow("t1", true));
-    // Assert
-    const record = await forwardedRecord(capture, "feed.collapse-kept-place");
-    expect(record.context).toMatchObject({
-      feed: "root",
-      row: "t1",
-      box_top: 100,
-      before: 90,
-      after: 40,
-    });
-  });
-
-  it("records a collapsing row its redraw detached as an ERROR and moves nothing", async () => {
-    // Arrange — a listener that detaches the row during the redraw.
-    const capture = captureLogRecords("debug");
-    const { controller, box, host } = collapsing({
-      following: false,
-      before: 90,
-      after: 40,
-    });
-    controller.onChange(() =>
-      host.querySelector('[data-feed-row="t1"]')?.remove(),
-    );
-    // Act
-    controller.upsert(thinkingRow("t1", true));
-    // Assert
-    const record = await forwardedRecord(
-      capture,
-      "feed.collapse-anchor-detached",
-    );
-    expect([record.level.case, box.scrollTop]).toEqual(["error", 500]);
   });
 });
 

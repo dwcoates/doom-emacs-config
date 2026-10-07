@@ -1634,13 +1634,13 @@ describe("the thinking bubble", () => {
     expect(stylesheet).not.toMatch(/--thinking-border\s*:/);
   });
 
-  it("caps a thinking bubble at one line and sets nothing else", () => {
+  it("caps a thinking bubble at the fixed feed cap and sets nothing else", () => {
     // Arrange / Act — the thinking bubble's cap value (its spec, response.ts).
     const rule = declarationsOf(`.bubble[data-cap-lines="${THINKING_CAP_LINES}"]`);
 
     // Assert — only the line budget changes; the clip, fade, chevron and
     // expand rules stay every bubble's own.
-    expect(rule?.trim()).toMatch(/^--bubble-cap-lines:\s*1\s*;?$/);
+    expect(rule?.trim()).toMatch(/^--bubble-cap-lines:\s*var\(--feed-cap-lines\)\s*;?$/);
   });
 
   it("caps the held prompt at one line", () => {

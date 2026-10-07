@@ -364,11 +364,11 @@ hand any more:
   is 5% of the `--held-prompt-bg` tint over the feed's `--bg`; each status badge's color comes from ONE table,
   `HELD_STATUS_BADGES`, and its words are the ones the card already said for
   that arm (the proto carries no status text), a hold's standing sentence
-  included. A LANDED THINKING bubble (owner ruling, 2026-09-27) keeps its
-  one-line cap (`THINKING_CAP_LINES`) and says "more" with the same ellipsis,
-  never a fade (`responseCap`, src/feed/cards/response.ts); a thinking bubble
-  still arriving is under the feed cap, which the ellipsis cannot state, so it
-  keeps the fade until it lands. The earlier half-line thinking fade is gone.
+  included. A THINKING bubble is a FIXED height (owner request, 2026-10-07):
+  arriving or landed it is under the feed cap (`THINKING_CAP_LINES`,
+  `responseCap`, src/feed/cards/response.ts) and says "more" with the fade, so
+  its own text landing never collapses it. The earlier half-line thinking fade
+  and the one-line landed collapse are gone.
   A RESPONSE IS NEVER ABBREVIATED (owner request, 2026-09-27): every
   non-thinking response (arriving, interim pear, final green) and the
   ended-turn bubble is drawn `BUBBLE_UNCAPPED` (`data-cap-lines="none"`), the
@@ -491,9 +491,7 @@ hand any more:
   `replaceRestore`, `workspaceSelected` (the roster's `current` moved to this
   page's workspace, by any switch path: `src/sidebar/selection-edge.ts` parks
   the feed at its tail and follows; returning to Emacs from another
-  application is not a switch), `prependCompensation`, `collapseCompensation` (a thinking
-  bubble wholly above the reader collapsing when its own final text lands,
-  i.e. the daemon re-pushes it settled; the view shifts by exactly the height it lost), `latestVisible`
+  application is not a switch), `prependCompensation`, `latestVisible`
   — each a named `TailFollow` cause, each move recorded at DEBUG as
   `scroll.feed-moved` with its cause. A follow starts from a parking cause, or
   (`latestVisible`, owner rule 2026-09-23) whenever the reader can SEE the feed

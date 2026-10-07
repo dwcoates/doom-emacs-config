@@ -103,11 +103,6 @@ export interface ScrollPosition {
  *   SCROLL ANCHORING"): any row above the anchor changing height — its first
  *   layout under `content-visibility: auto`, a late render, older rows landing
  *   above, a bubble whose sub-feed lies wholly above the viewport collapsing.
- * - `collapseCompensation`: a thinking bubble wholly ABOVE the reader collapsed
- *   because its own final text landed (the daemon re-pushed it settled); the
- *   view shifts by exactly the height it lost, so the content under
- *   the reader stays put. Same semantics as `prependCompensation`, and the
- *   same anchoring carries it out; the cause names the case.
  * - `latestVisible`: the reader can SEE the feed's latest entry
  *   (`latestEntryVisible`), so the follow latches where the view already is.
  *   Latching moves nothing; later content then keeps the tail in view, and
@@ -126,7 +121,6 @@ export const SCROLL_CAUSES = [
   "replaceRestore",
   "workspaceSelected",
   "prependCompensation",
-  "collapseCompensation",
   "latestVisible",
 ] as const;
 
@@ -326,7 +320,7 @@ function rowName(row: Element): string {
  *   and, when it moved, shifts `scrollTop` by exactly that before the frame is
  *   painted (`prependCompensation`), then takes the anchor afresh;
  * - the callers that already measure a change of their own (older rows landing
- *   above, a bubble or thinking row wholly above collapsing) go through the
+ *   above, a bubble wholly above collapsing) go through the
  *   same pass (`compensate`), so a change is never counted twice;
  * - a reader following the tail holds no anchor: the follow keeps the tail.
  *
@@ -490,21 +484,6 @@ export class TailFollow {
   prependCompensation(grown: number): void {
     if (this.isFollowing()) return;
     this.compensate("prependCompensation", grown);
-  }
-
-  /**
-   * A thinking bubble collapsed when its own final text landed: when it
-   * lies wholly ABOVE the viewport, shift by exactly the height it lost, so the
-   * content under the reader stays put (`collapseDelta`). A following reader is
-   * already kept at the tail by the follow, so nothing is added on top of it; a
-   * bubble the reader can see, or one whose height did not change (the reader
-   * had expanded it), moves nothing and records nothing.
-   */
-  collapseCompensation(geometry: CollapseGeometry): void {
-    if (this.isFollowing()) return;
-    const delta = collapseDelta(geometry);
-    if (delta === 0) return;
-    this.compensate("collapseCompensation", delta);
   }
 
   /**
@@ -985,35 +964,6 @@ export function revealGeometry(box: Element, node: Element): RevealGeometry {
   const b = box.getBoundingClientRect();
   const n = node.getBoundingClientRect();
   return { boxTop: b.top, boxHeight: b.height, nodeTop: n.top, nodeHeight: n.height };
-}
-
-/**
- * What a collapse compensation reads: the scroll box's top edge and the
- * collapsing row's bottom edge before and after its redraw, all in viewport
- * coordinates (`getBoundingClientRect`), so their differences are scroll deltas.
- */
-export interface CollapseGeometry {
-  /** The scroll box's own top edge. */
-  boxTop: number;
-  /** The row's bottom edge before the redraw that collapsed it. */
-  rowBottomBefore: number;
-  /** The row's bottom edge after it. */
-  rowBottomAfter: number;
-}
-
-/**
- * How far the box must move for a collapse to leave the content under the
- * reader where it was.
- *
- * Only a row that ended at or above the viewport's top edge is compensated:
- * everything the reader sees sits below it, so it all moved by exactly the
- * row's change in height, which is the change in its bottom edge (its top did
- * not move). A row the reader can see any part of is not: the reader is
- * watching it collapse. Negative is upward, matching `scrollTop`.
- */
-export function collapseDelta(g: CollapseGeometry): number {
-  if (g.rowBottomBefore > g.boxTop) return 0;
-  return g.rowBottomAfter - g.rowBottomBefore;
 }
 
 /**
