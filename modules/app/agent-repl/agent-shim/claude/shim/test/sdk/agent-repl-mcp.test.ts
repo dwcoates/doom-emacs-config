@@ -3,6 +3,7 @@
  * server is built from injected SDK factories, so the suite asserts exactly
  * what reaches the SDK without the live vendor.
  */
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { logRecordsSince, logSinkMark } from "../log-records.js";
@@ -44,6 +45,22 @@ describe("SHOW_CHESS_BOARD_TOOL_NAME", () => {
   it("is the qualified name the vendor gives the server's board tool", () => {
     // Arrange, Act, Assert.
     expect(SHOW_CHESS_BOARD_TOOL_NAME).toBe(`mcp__${AGENT_REPL_MCP_SERVER}__${SHOW_CHESS_BOARD_TOOL}`);
+  });
+});
+
+describe("the cross-language vocabulary", () => {
+  const vocab = JSON.parse(
+    readFileSync(new URL("../../../../../proto/vocab/agent-repl-tools.json", import.meta.url), "utf8"),
+  ) as { server: string; tools: { tool: string; qualified: string }[] };
+
+  it("names the server as the vocabulary does", () => {
+    // Arrange, Act, Assert.
+    expect(AGENT_REPL_MCP_SERVER).toBe(vocab.server);
+  });
+
+  it("names exactly the vocabulary's tools", () => {
+    // Arrange, Act, Assert.
+    expect(vocab.tools).toEqual([{ tool: SHOW_CHESS_BOARD_TOOL, qualified: SHOW_CHESS_BOARD_TOOL_NAME }]);
   });
 });
 
