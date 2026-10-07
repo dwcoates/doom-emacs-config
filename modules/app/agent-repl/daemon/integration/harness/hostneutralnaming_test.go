@@ -22,9 +22,9 @@ func TestHostNeutralNamingEnvClearsTheLegacyPrefix(t *testing.T) {
 }
 
 func TestHostNeutralNamingEnvLeavesWorkspacePrefixUnsetUnderAnInheritedOne(t *testing.T) {
-	// Arrange: the developer's shell carries a prefix, as CLAUDE_WORKSPACE_PREFIX=JB did.
-	t.Setenv(workspace.PrefixEnv, "JB")
-	t.Setenv(workspace.LegacyPrefixEnv, "JB")
+	// Arrange: the developer's shell carries a prefix, e.g. CLAUDE_WORKSPACE_PREFIX=ABC.
+	t.Setenv(workspace.PrefixEnv, "ABC")
+	t.Setenv(workspace.LegacyPrefixEnv, "ABC")
 
 	// Act: apply the env the way os/exec does, the last value of a key winning.
 	for _, kv := range HostNeutralNamingEnv() {
