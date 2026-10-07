@@ -13,7 +13,7 @@ const (
 	subagentMetaBody = `{"agentType":"opus-medium","description":"Tool converters batch B",` +
 		`"toolUseId":"toolu_01LaW8HwuB3zUaU8bUmqVSGT","parentAgentId":"a699887424d695c83","spawnDepth":3}`
 	workflowMetaBody = `{"agentType":"workflow-subagent",` +
-		`"worktreePath":"/Users/dodgecoates/.config/doom/.claude/worktrees/wf_0297f159-ca1-1",` +
+		`"worktreePath":"/work/.config/doom/.claude/worktrees/wf_0297f159-ca1-1",` +
 		`"spawnedWithWorktree":true,"spawnDepth":1,"model":"opus"}`
 	workflowMetaWithoutWorktreeBody = `{"agentType":"workflow-subagent","spawnDepth":1,"model":"opus"}`
 	namelessMetaBody                = `{"description":"names nothing","spawnDepth":1}`
@@ -49,7 +49,7 @@ func TestReadMetaShapes(t *testing.T) {
 			want: Meta{
 				Shape: ShapeWorkflow, AgentType: "workflow-subagent", SpawnDepth: 1,
 				Model:        "opus",
-				WorktreePath: "/Users/dodgecoates/.config/doom/.claude/worktrees/wf_0297f159-ca1-1",
+				WorktreePath: "/work/.config/doom/.claude/worktrees/wf_0297f159-ca1-1",
 
 				SpawnedWithWorktree: true,
 			},

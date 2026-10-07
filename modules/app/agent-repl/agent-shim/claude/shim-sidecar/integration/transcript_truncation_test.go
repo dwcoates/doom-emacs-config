@@ -34,7 +34,7 @@ func TestATruncatedTranscriptIsReReadFromItsNewStart(t *testing.T) {
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
 	session := "7c7c7c7c-7c7c-47c7-87c7-7c7c7c7c7c7c"
-	slug := cwdSlug("/Users/dodgecoates/transcript-truncation-probe")
+	slug := cwdSlug("/work/transcript-truncation-probe")
 	path := tree.sessionPath(slug, session)
 	after := truncatedTranscriptRecord + "\n"
 
@@ -43,7 +43,7 @@ func TestATruncatedTranscriptIsReReadFromItsNewStart(t *testing.T) {
 	g := newGrowingFile(t, path)
 	for _, i := range []int{8, 9, 10} {
 		g.AppendLine(encodeRecord(t, retargetSession(t, decodeRecord(t, captured.Lines[i]),
-			session, "/Users/dodgecoates/transcript-truncation-probe")))
+			session, "/work/transcript-truncation-probe")))
 	}
 	awaitCursorInBatches(ctx, t, fake, path, g.Offset())
 

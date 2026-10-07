@@ -36,7 +36,7 @@ func TestARealSpawnOnlyResponseConvertsAndNamesTheDeferredAnnounce(t *testing.T)
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
-	cwd := "/Users/dodgecoates/spawn-only-probe"
+	cwd := "/work/spawn-only-probe"
 	slug := cwdSlug(cwd)
 	session := "9b9b9b9b-9b9b-49b9-89b9-9b9b9b9b9b9b"
 	opts := defaultSidecarOptions(t, fake.Socket, tree)

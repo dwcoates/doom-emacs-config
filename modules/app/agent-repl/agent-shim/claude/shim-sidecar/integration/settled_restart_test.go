@@ -34,7 +34,7 @@ func TestARestartedSidecarNeverTracksOrLosesARunThatSettledBeforeIt(t *testing.T
 	defer cancel()
 	store := startRealStore(t)
 	tree := newVendorTree(t)
-	fx := seedDetachedShell(t, tree, "/Users/dodgecoates/settled-restart-probe", "e7e7e7e7-e7e7-4e7e-8e7e-e7e7e7e7e7e7")
+	fx := seedDetachedShell(t, tree, "/work/settled-restart-probe", "e7e7e7e7-e7e7-4e7e-8e7e-e7e7e7e7e7e7")
 	opts := lostOptions(t, store.Socket, tree)
 	opts.StaleShellSilence = shortSilence
 	first := startSidecar(t, opts)

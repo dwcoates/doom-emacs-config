@@ -1410,15 +1410,15 @@ func TestTopbarConnectivityToneAndGlyphComeFromTheSharedVocabulary(t *testing.T)
 func TestTopbarAccountReflectsTheWorkspacesConfigRootEmail(t *testing.T) {
 	t.Parallel()
 	// Arrange / Act
-	f := newOpened(t, harness.Opts{DefaultAccountEmail: "dodge@example.invalid"})
+	f := newOpened(t, harness.Opts{DefaultAccountEmail: "someone@example.invalid"})
 	topbar := f.d.WatchTopbar(f.ws)
 
 	// Assert
 	got := awaitTopbar(t, f, topbar, "the account email", func(v *frontendv1.TopbarView) bool {
 		return v.GetAccount().GetLoggedIn().GetEmail() != ""
 	})
-	if got.GetAccount().GetLoggedIn().GetEmail() != "dodge@example.invalid" {
-		t.Fatalf("topbar account email = %q, want the config root's dodge@example.invalid", got.GetAccount().GetLoggedIn().GetEmail())
+	if got.GetAccount().GetLoggedIn().GetEmail() != "someone@example.invalid" {
+		t.Fatalf("topbar account email = %q, want the config root's someone@example.invalid", got.GetAccount().GetLoggedIn().GetEmail())
 	}
 }
 

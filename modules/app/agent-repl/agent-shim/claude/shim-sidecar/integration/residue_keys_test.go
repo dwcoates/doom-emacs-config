@@ -39,7 +39,7 @@ func TestAWithheldRecordIsClassifiedByItsVendorKind(t *testing.T) {
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
-	cwd := "/Users/dodgecoates/residue-uuid-probe"
+	cwd := "/work/residue-uuid-probe"
 	slug := cwdSlug(cwd)
 	session := "8a8a8a8a-8a8a-48a8-88a8-8a8a8a8a8a8a"
 	rec := retargetSession(t,
@@ -85,7 +85,7 @@ func TestAnUnparsableLineIsClassifiedAgainstItsFile(t *testing.T) {
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
-	cwd := "/Users/dodgecoates/residue-file-probe"
+	cwd := "/work/residue-file-probe"
 	slug := cwdSlug(cwd)
 	session := "8b8b8b8b-8b8b-48b8-88b8-8b8b8b8b8b8b"
 	opts := debugLogging(defaultSidecarOptions(t, fake.Socket, tree))
@@ -123,7 +123,7 @@ func TestTheTwoResiduePopulationsStayDistinct(t *testing.T) {
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
-	cwd := "/Users/dodgecoates/residue-spaces-probe"
+	cwd := "/work/residue-spaces-probe"
 	slug := cwdSlug(cwd)
 	session := "8c8c8c8c-8c8c-48c8-88c8-8c8c8c8c8c8c"
 	withheld := retargetSession(t,
@@ -158,7 +158,7 @@ func TestWithheldResidueAnnouncesNoRow(t *testing.T) {
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
-	cwd := "/Users/dodgecoates/residue-toplevel-probe"
+	cwd := "/work/residue-toplevel-probe"
 	slug := cwdSlug(cwd)
 	session := "70707070-7070-4070-8070-70707070aaaa"
 	opts := debugLogging(defaultSidecarOptions(t, fake.Socket, tree))

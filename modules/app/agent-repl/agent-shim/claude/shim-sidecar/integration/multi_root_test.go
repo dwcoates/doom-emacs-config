@@ -23,8 +23,8 @@ func TestBothConfigRootsAreDiscovered(t *testing.T) {
 	secondary := newVendorTreeSharingSpool(t, primary.SpoolRoot)
 	captured := loadCapturedSession(t)
 
-	cwdA := "/Users/dodgecoates/root-a-probe"
-	cwdB := "/Users/dodgecoates/root-b-probe"
+	cwdA := "/work/root-a-probe"
+	cwdB := "/work/root-b-probe"
 	sessionA := "f0f0f0f0-f0f0-40f0-80f0-f0f0f0f0f0f0"
 	sessionB := "f1f1f1f1-f1f1-41f1-81f1-f1f1f1f1f1f1"
 
@@ -60,7 +60,7 @@ func TestAFileOutsideEveryRootIsIgnored(t *testing.T) {
 	captured := loadCapturedSession(t)
 	outside := unownedDir(t)
 
-	cwd := "/Users/dodgecoates/outside-root-probe"
+	cwd := "/work/outside-root-probe"
 	insideSession := "f2f2f2f2-f2f2-42f2-82f2-f2f2f2f2f2f2"
 	outsideSession := "f3f3f3f3-f3f3-43f3-83f3-f3f3f3f3f3f3"
 

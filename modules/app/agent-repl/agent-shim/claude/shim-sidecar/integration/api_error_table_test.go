@@ -75,7 +75,7 @@ func TestApiErrorTaxonomyTable(t *testing.T) {
 			defer cancel()
 			fake := startFakeStore(t)
 			tree := newVendorTree(t)
-			cwd := "/Users/dodgecoates/api-error-table-probe"
+			cwd := "/work/api-error-table-probe"
 			session := sessions[i]
 			g, uuid := seedApiErrorFixture(t, tree, cwd, session, tc.fixture)
 

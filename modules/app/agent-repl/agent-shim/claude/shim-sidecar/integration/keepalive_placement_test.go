@@ -24,7 +24,7 @@ func TestAKeepAliveMarkerOpeningThePromptWithholdsTheWholeTurn(t *testing.T) {
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
-	cwd := "/Users/dodgecoates/keepalive-prefix-probe"
+	cwd := "/work/keepalive-prefix-probe"
 	slug := cwdSlug(cwd)
 	session := "7a7a7a7a-7a7a-47a7-87a7-7a7a7a7a7a7a"
 
@@ -55,7 +55,7 @@ func TestAKeepAliveMarkerQuotedMidPromptIsServedNormally(t *testing.T) {
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
-	cwd := "/Users/dodgecoates/keepalive-quoted-probe"
+	cwd := "/work/keepalive-quoted-probe"
 	slug := cwdSlug(cwd)
 	session := "7b7b7b7b-7b7b-47b7-87b7-7b7b7b7b7b7b"
 

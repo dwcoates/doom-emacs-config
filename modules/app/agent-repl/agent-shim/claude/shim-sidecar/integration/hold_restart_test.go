@@ -49,7 +49,7 @@ func TestAHeldBoundaryIsConvertedOnceAfterARestart(t *testing.T) {
 	// needs, at production's own interval.
 	proxy := startProxyStore(t, store.Socket)
 	tree := newVendorTree(t)
-	fx := seedCompactionBoundary(t, tree, "/Users/dodgecoates/hold-restart-probe",
+	fx := seedCompactionBoundary(t, tree, "/work/hold-restart-probe",
 		"f1f1f1f1-f1f1-4f1f-8f1f-f1f1f1f1f1f1")
 	opts := defaultSidecarOptions(t, proxy.Socket, tree)
 	summaryText := "Previously: the reader was stopped with a boundary in hand."
@@ -113,7 +113,7 @@ func TestACompactionBesideAKeepAliveIsServed(t *testing.T) {
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
-	cwd := "/Users/dodgecoates/keepalive-compaction-probe"
+	cwd := "/work/keepalive-compaction-probe"
 	slug := cwdSlug(cwd)
 	session := "f2f2f2f2-f2f2-4f2f-8f2f-f2f2f2f2f2f2"
 
@@ -156,7 +156,7 @@ func TestAKeepAlivesWorkAfterACompactionStaysUnstored(t *testing.T) {
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
-	cwd := "/Users/dodgecoates/keepalive-after-compaction-probe"
+	cwd := "/work/keepalive-after-compaction-probe"
 	slug := cwdSlug(cwd)
 	session := "f3f3f3f3-f3f3-4f3f-8f3f-f3f3f3f3f3f3"
 

@@ -34,7 +34,7 @@ func TestABackgroundedAgentSeenAsSpoolAndSidechainIsOneBookWithOneTopLevel(t *te
 	proxy := startProxyStore(t, store.Socket)
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
-	cwd := "/Users/dodgecoates/backgrounded-two-planes-probe"
+	cwd := "/work/backgrounded-two-planes-probe"
 	slug := cwdSlug(cwd)
 	session := "b7b7b7b7-b7b7-4b7b-8b7b-b7b7b7b7b7b7"
 	spoolPath := tree.spoolPath(slug, session, corpusAsyncAgentTask)

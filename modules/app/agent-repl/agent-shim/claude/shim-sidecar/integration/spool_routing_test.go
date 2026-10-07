@@ -50,7 +50,7 @@ func TestAnAgentSpoolConvertsAsATranscriptIntoItsSpawningCallsBook(t *testing.T)
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
 	session := "a1a1a1a1-a1a1-4a1a-8a1a-a1a1a1a1a1a1"
-	_, spoolPath, parent := seedBackgroundedAgent(t, tree, "/Users/dodgecoates/agent-spool-probe", session)
+	_, spoolPath, parent := seedBackgroundedAgent(t, tree, "/work/agent-spool-probe", session)
 
 	// Act: the spawn is observed first, then the agent's transcript arrives
 	// through its task spool.
@@ -89,7 +89,7 @@ func TestAnAgentSpoolIsNotIngestedAsRawResidue(t *testing.T) {
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
 	session := "a2a2a2a2-a2a2-4a2a-8a2a-a2a2a2a2a2a2"
-	_, spoolPath, parent := seedBackgroundedAgent(t, tree, "/Users/dodgecoates/agent-spool-residue-probe", session)
+	_, spoolPath, parent := seedBackgroundedAgent(t, tree, "/work/agent-spool-residue-probe", session)
 	opts := debugLogging(defaultSidecarOptions(t, fake.Socket, tree))
 
 	// Act.
@@ -125,7 +125,7 @@ func TestAnUnclaimedWorkflowSpoolIsNeverRead(t *testing.T) {
 	defer cancel()
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
-	cwd := "/Users/dodgecoates/workflow-spool-probe"
+	cwd := "/work/workflow-spool-probe"
 	slug := cwdSlug(cwd)
 	session := "a3a3a3a3-a3a3-4a3a-8a3a-a3a3a3a3a3a3"
 	spoolPath := tree.spoolPath(slug, session, "ww0dfgg1i")

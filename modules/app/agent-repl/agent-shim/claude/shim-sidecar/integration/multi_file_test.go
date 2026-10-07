@@ -54,8 +54,8 @@ func TestTwoTranscriptsTailedAtOnceKeepTheirRowsApart(t *testing.T) {
 	defer cancel()
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
-	a, aLines := seedInterleavedTranscript(t, tree, "/Users/dodgecoates/interleave-a", "2a2a2a2a-2a2a-42a2-82a2-2a2a2a2a2a2a", "a")
-	b, bLines := seedInterleavedTranscript(t, tree, "/Users/dodgecoates/interleave-b", "2b2b2b2b-2b2b-42b2-82b2-2b2b2b2b2b2b", "b")
+	a, aLines := seedInterleavedTranscript(t, tree, "/work/interleave-a", "2a2a2a2a-2a2a-42a2-82a2-2a2a2a2a2a2a", "a")
+	b, bLines := seedInterleavedTranscript(t, tree, "/work/interleave-b", "2b2b2b2b-2b2b-42b2-82b2-2b2b2b2b2b2b", "b")
 
 	// Act: strictly interleaved, so neither file is ever read to its end alone.
 	startSidecar(t, defaultSidecarOptions(t, fake.Socket, tree))
@@ -102,8 +102,8 @@ func TestTwoTranscriptsAdvanceTheirOwnCursorsByFileId(t *testing.T) {
 	defer cancel()
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
-	a, aLines := seedInterleavedTranscript(t, tree, "/Users/dodgecoates/interleave-cursor-a", "2c2c2c2c-2c2c-42c2-82c2-2c2c2c2c2c2c", "ca")
-	b, bLines := seedInterleavedTranscript(t, tree, "/Users/dodgecoates/interleave-cursor-b", "2d2d2d2d-2d2d-42d2-82d2-2d2d2d2d2d2d", "cb")
+	a, aLines := seedInterleavedTranscript(t, tree, "/work/interleave-cursor-a", "2c2c2c2c-2c2c-42c2-82c2-2c2c2c2c2c2c", "ca")
+	b, bLines := seedInterleavedTranscript(t, tree, "/work/interleave-cursor-b", "2d2d2d2d-2d2d-42d2-82d2-2d2d2d2d2d2d", "cb")
 
 	// Act.
 	startSidecar(t, defaultSidecarOptions(t, fake.Socket, tree))

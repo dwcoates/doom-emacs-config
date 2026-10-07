@@ -150,7 +150,7 @@ func TestSpoolBytesBecomeBashUpdatesUnderTheSpawningCallsIdentity(t *testing.T) 
 	defer cancel()
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
-	fx := seedDetachedShell(t, tree, "/Users/dodgecoates/detached-run-probe",
+	fx := seedDetachedShell(t, tree, "/work/detached-run-probe",
 		"88888888-8888-4888-8888-888888888888")
 
 	// Act.
@@ -182,7 +182,7 @@ func TestTheRunsTailIsItsWholeOutputInsideTheCap(t *testing.T) {
 	defer cancel()
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
-	fx := seedDetachedShell(t, tree, "/Users/dodgecoates/detached-offset-probe",
+	fx := seedDetachedShell(t, tree, "/work/detached-offset-probe",
 		"99999999-9999-4999-8999-999999999999")
 	chunks := [][]byte{
 		[]byte("chunk one\n"),
@@ -222,7 +222,7 @@ func TestEveryGrowthSupersedesTheRunsOneTailRow(t *testing.T) {
 	defer cancel()
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
-	fx := seedDetachedShell(t, tree, "/Users/dodgecoates/detached-rows-probe",
+	fx := seedDetachedShell(t, tree, "/work/detached-rows-probe",
 		"a5a5a5a5-a5a5-4a5a-8a5a-a5a5a5a5a5a5")
 	chunks := []string{"one\n", "two\n", "three\n"}
 
@@ -283,7 +283,7 @@ func TestTheExitMarkerSettlesTheRunAsCompleted(t *testing.T) {
 	defer cancel()
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
-	fx := seedDetachedShell(t, tree, "/Users/dodgecoates/detached-exit-probe",
+	fx := seedDetachedShell(t, tree, "/work/detached-exit-probe",
 		"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
 	// The corpus's CLEAN spool ends with the terminal marker; its last line is
 	// EXIT=1, so the code the shell reported is 1.
@@ -328,7 +328,7 @@ func TestASplitSpoolLineConvertsOnceAndWhole(t *testing.T) {
 	defer cancel()
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
-	fx := seedDetachedShell(t, tree, "/Users/dodgecoates/detached-carry-probe",
+	fx := seedDetachedShell(t, tree, "/work/detached-carry-probe",
 		"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
 	head := "a line that will be cut in "
 	tail := "half\nEXIT=0\n"
@@ -361,7 +361,7 @@ func TestDetachedRunFramesAreNeverPageLines(t *testing.T) {
 	defer cancel()
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
-	fx := seedDetachedShell(t, tree, "/Users/dodgecoates/detached-page-probe",
+	fx := seedDetachedShell(t, tree, "/work/detached-page-probe",
 		"cccccccc-cccc-4ccc-8ccc-cccccccccccc")
 
 	// Act.
@@ -396,18 +396,18 @@ func TestTaskStopResultCancelsTheOwningTask(t *testing.T) {
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
-	fx := seedDetachedShell(t, tree, "/Users/dodgecoates/detached-stop-probe",
+	fx := seedDetachedShell(t, tree, "/work/detached-stop-probe",
 		"dddddddd-dddd-4ddd-8ddd-dddddddddddd")
 
 	stop := decodeRecord(t, corpusLine(t, "tool-results/task_stop.jsonl", 0))
-	stop = retargetSession(t, stop, fx.Session, "/Users/dodgecoates/detached-stop-probe")
+	stop = retargetSession(t, stop, fx.Session, "/work/detached-stop-probe")
 	stop = retargetTaskStop(t, stop, fx.TaskID, "local_bash")
 	// THE CALL COMES FIRST, as the vendor writes it. An exempt tool's call is
 	// DROPPED but still remembered, because this one result has to find the call
 	// it belongs to; a fixture that supplies only the result is a transcript no
 	// vendor ever wrote, and it exercises the orphan path instead of the
 	// carve-out.
-	stopCall := retargetSession(t, decodeRecord(t, captured.Lines[8]), fx.Session, "/Users/dodgecoates/detached-stop-probe")
+	stopCall := retargetSession(t, decodeRecord(t, captured.Lines[8]), fx.Session, "/work/detached-stop-probe")
 	stopCall = renameToolUse(t, stopCall, "TaskStop")
 	stopCall = setToolUseID(t, stopCall, toolUseIDOfResult(t, stop))
 
@@ -451,7 +451,7 @@ func TestTaskStopCallItselfIsDropped(t *testing.T) {
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
-	cwd := "/Users/dodgecoates/taskstop-call-probe"
+	cwd := "/work/taskstop-call-probe"
 	slug := cwdSlug(cwd)
 	session := "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
 	callID := "toolu_taskstop_call_0001"

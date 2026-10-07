@@ -45,7 +45,7 @@ func TestDiagnosticsJoinTheChangeUnitAcrossAPollBoundary(t *testing.T) {
 	defer cancel()
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
-	cwd := "/Users/dodgecoates/diagnostics-adjacency-probe"
+	cwd := "/work/diagnostics-adjacency-probe"
 	session := "7a7a7a7a-7a7a-47a7-87a7-7a7a7a7a7a7a"
 
 	// Act: the change lands and is fully committed FIRST; the report follows on
@@ -92,7 +92,7 @@ func TestDiagnosticsWithNoObservedChangeAreKeptWholeRatherThanGuessed(t *testing
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
-	cwd := "/Users/dodgecoates/diagnostics-orphan-probe"
+	cwd := "/work/diagnostics-orphan-probe"
 	slug := cwdSlug(cwd)
 	session := "7b7b7b7b-7b7b-47b7-87b7-7b7b7b7b7b7b"
 	// The orphaned-diagnostics record is BENIGN on a re-scan and emitted at
@@ -136,7 +136,7 @@ func TestInjectedSkillsReachTheAgentsBook(t *testing.T) {
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
-	cwd := "/Users/dodgecoates/injected-skills-probe"
+	cwd := "/work/injected-skills-probe"
 	slug := cwdSlug(cwd)
 	session := "7c7c7c7c-7c7c-47c7-87c7-7c7c7c7c7c7c"
 	skills := retargetSession(t,

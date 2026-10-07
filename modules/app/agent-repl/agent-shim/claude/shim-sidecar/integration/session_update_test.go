@@ -23,7 +23,7 @@ func TestNoFilePlaneRecordEverProducesASessionUpdate(t *testing.T) {
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
-	cwd := "/Users/dodgecoates/session-update-probe"
+	cwd := "/work/session-update-probe"
 	slug := cwdSlug(cwd)
 	session := "5a5a5a5a-5a5a-45a5-85a5-5a5a5a5a5a5a"
 	apiError := retargetSession(t,

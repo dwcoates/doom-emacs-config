@@ -117,7 +117,7 @@ func TestAStoreOutageSuspendsProductionOfEveryFile(t *testing.T) {
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
-	cwd := "/Users/dodgecoates/outage-second-file-probe"
+	cwd := "/work/outage-second-file-probe"
 	slug := cwdSlug(cwd)
 	other := "60606060-6060-4060-8060-606060606060"
 	fake.FailWrites(100, "the store is refusing everything")

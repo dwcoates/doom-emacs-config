@@ -37,7 +37,7 @@ func TestAHookOnTheFilePlaneServesNoActivityRow(t *testing.T) {
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
-	cwd := "/Users/dodgecoates/hook-plane-ownership-probe"
+	cwd := "/work/hook-plane-ownership-probe"
 	slug := cwdSlug(cwd)
 	session := "8d8d8d8d-8d8d-48d8-88d8-8d8d8d8d8d8d"
 	// The capture's own hook attachment, not a hand-authored one.

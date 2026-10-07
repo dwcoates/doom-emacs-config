@@ -58,7 +58,7 @@ func TestAnInvalidRequestFromTheRealStoreParksTheFileAndStatesTheDefect(t *testi
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
-	fx := seedContestedUpsertKey(ctx, t, "/Users/dodgecoates/park-defect-probe",
+	fx := seedContestedUpsertKey(ctx, t, "/work/park-defect-probe",
 		"e1e1e1e1-e1e1-4e1e-8e1e-e1e1e1e1e1e1")
 
 	// Act.
@@ -90,7 +90,7 @@ func TestAParkedFileIsStatedOnceAndReadNoFurther(t *testing.T) {
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
-	fx := seedContestedUpsertKey(ctx, t, "/Users/dodgecoates/park-once-probe",
+	fx := seedContestedUpsertKey(ctx, t, "/work/park-once-probe",
 		"e2e2e2e2-e2e2-4e2e-8e2e-e2e2e2e2e2e2")
 	captured := loadCapturedSession(t)
 
@@ -103,7 +103,7 @@ func TestAParkedFileIsStatedOnceAndReadNoFurther(t *testing.T) {
 	})
 	fx.File.AppendLine(encodeRecord(t, retargetSession(t, decodeRecord(t, captured.Lines[8]), fx.Session, fx.Cwd)))
 
-	otherCwd := "/Users/dodgecoates/park-once-other-probe"
+	otherCwd := "/work/park-once-other-probe"
 	otherSession := "e3e3e3e3-e3e3-4e3e-8e3e-e3e3e3e3e3e3"
 	// Its line is the SECOND response's, not the first's: the first's unit is the
 	// key the decoy row claims, so seeding it here would park this file too and
@@ -137,10 +137,10 @@ func TestAnInvalidRequestDoesNotSuspendTheOtherFiles(t *testing.T) {
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
-	fx := seedContestedUpsertKey(ctx, t, "/Users/dodgecoates/park-other-file-probe",
+	fx := seedContestedUpsertKey(ctx, t, "/work/park-other-file-probe",
 		"e4e4e4e4-e4e4-4e4e-8e4e-e4e4e4e4e4e4")
 	captured := loadCapturedSession(t)
-	otherCwd := "/Users/dodgecoates/park-other-file-second-probe"
+	otherCwd := "/work/park-other-file-second-probe"
 	otherSession := "e5e5e5e5-e5e5-4e5e-8e5e-e5e5e5e5e5e5"
 
 	// Act: the second file appears only AFTER the refusal.

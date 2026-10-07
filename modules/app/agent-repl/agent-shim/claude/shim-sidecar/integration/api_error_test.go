@@ -39,7 +39,7 @@ func TestAnApiErrorLandsAsAPageLineUnderItsOwnKey(t *testing.T) {
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
 	session := "c0c0c0c0-c0c0-40c0-80c0-c0c0c0c0c0c0"
-	g, uuid := seedApiError(t, tree, "/Users/dodgecoates/api-error-probe", session)
+	g, uuid := seedApiError(t, tree, "/work/api-error-probe", session)
 
 	// Act.
 	startSidecar(t, defaultSidecarOptions(t, fake.Socket, tree))
@@ -73,7 +73,7 @@ func TestAnApiErrorIsNeverATerminal(t *testing.T) {
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
 	session := "d0d0d0d0-d0d0-40d0-80d0-d0d0d0d0d0d0"
-	g, uuid := seedApiError(t, tree, "/Users/dodgecoates/api-error-live-probe", session)
+	g, uuid := seedApiError(t, tree, "/work/api-error-live-probe", session)
 
 	// Act.
 	startSidecar(t, defaultSidecarOptions(t, fake.Socket, tree))
@@ -108,7 +108,7 @@ func TestAnApiErrorCarriesTheVendorsOwnKind(t *testing.T) {
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
 	session := "e0e0e0e0-e0e0-40e0-80e0-e0e0e0e0e0e0"
-	g, uuid := seedApiError(t, tree, "/Users/dodgecoates/api-error-kind-probe", session)
+	g, uuid := seedApiError(t, tree, "/work/api-error-kind-probe", session)
 
 	// Act.
 	startSidecar(t, defaultSidecarOptions(t, fake.Socket, tree))
