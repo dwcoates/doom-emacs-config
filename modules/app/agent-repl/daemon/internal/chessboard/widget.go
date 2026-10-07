@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"claude-repld/internal/dlog"
@@ -108,7 +109,7 @@ func widgetStamp(cli string) (string, error) {
 	sort.Strings(files)
 	h := sha256.New()
 	for _, rel := range files {
-		fmt.Fprintf(h, "%s\x00", rel)
+		h.Write([]byte(rel + "\x00"))
 		if strings.HasSuffix(rel, "\x00absent") {
 			continue
 		}
@@ -116,7 +117,7 @@ func widgetStamp(cli string) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("read %s: %w", rel, err)
 		}
-		fmt.Fprintf(h, "%d\x00", len(body))
+		h.Write([]byte(strconv.Itoa(len(body)) + "\x00"))
 		h.Write(body)
 	}
 	return hex.EncodeToString(h.Sum(nil))[:16], nil
