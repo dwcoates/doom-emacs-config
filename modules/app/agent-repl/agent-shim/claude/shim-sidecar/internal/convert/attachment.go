@@ -37,6 +37,18 @@ func (c *Converter) attachmentLine(record map[string]any, at Attribution) []*sto
 		return []*storev1.StoreEntry{c.injectedMemory(attachment, at, env, agent)}
 	case "dynamic_skill", "invoked_skills", "skill_listing":
 		return []*storev1.StoreEntry{c.injectedSkills(kind, attachment, at, env, agent)}
+	case "queued_command":
+		// A NOTIFICATION THAT ARRIVED MID-TURN is written as a queued command,
+		// its `<task-notification>` in `prompt`: the same conclusion a
+		// user-role notification states, so it is read by the same
+		// conversion. Missing it left every run that ended while the agent was
+		// busy standing open in the record (2026-10-07).
+		if prompt := str(attachment["prompt"]); str(attachment["commandMode"]) == originTaskNotification || isTaskNotification(prompt) {
+			return c.taskNotification(record, prompt, at, env, agent)
+		}
+		c.log.With(at.ctxFor("withhold")).
+			LogVerbose("attachment/queued_command carrying no task notification withheld as vendor_specific")
+		return []*storev1.StoreEntry{VendorSpecificEntry(at, "attachment/queued_command", record)}
 	default:
 		// Context-cut exclusions and CLI machinery: understood, and deliberately
 		// not carried into a vendor-agnostic feed. A `context_budget_warning`
