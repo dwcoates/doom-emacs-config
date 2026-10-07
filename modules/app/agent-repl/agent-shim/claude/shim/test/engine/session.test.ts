@@ -489,23 +489,37 @@ async function hibernatable(): Promise<Harness & { vendorSessionId: string }> {
 }
 
 /** Bring a fresh session up: start it, and answer the vendor's init. */
+/** The vendor's `task_started` for one task: FIELDS over a shell run's defaults. */
+function taskStartedMessage(fields: Record<string, unknown> = {}): SdkMessage {
+  return {
+    type: "system",
+    subtype: "task_started",
+    task_id: "t01",
+    tool_use_id: "toolu_run",
+    task_type: "local_bash",
+    description: "sleep 600",
+    uuid: "00000000-0000-4000-8000-0000000000d0",
+    session_id: "s",
+    ...fields,
+  } as never;
+}
+
 /**
  * THE VENDOR PROCESS RUNS `toolUseId`'s TASK: a background `task_started`, so
  * the live table -- the one source of the live-work level and of a
  * re-announcement's membership (conversation.v1 SessionLiveWork) -- holds it.
  */
 async function vendorRunsLive(h: Harness, toolUseId: string, taskType: string): Promise<void> {
-  await h.engine.onSdkMessage({
-    type: "system",
-    subtype: "task_started",
-    task_id: `task-${toolUseId}`,
-    tool_use_id: toolUseId,
-    task_type: taskType,
-    description: "live work",
-    is_backgrounded: true,
-    uuid: "00000000-0000-4000-8000-0000000000e0",
-    session_id: "s",
-  } as never);
+  await h.engine.onSdkMessage(
+    taskStartedMessage({
+      task_id: `task-${toolUseId}`,
+      tool_use_id: toolUseId,
+      task_type: taskType,
+      description: "live work",
+      is_backgrounded: true,
+      uuid: "00000000-0000-4000-8000-0000000000e0",
+    }),
+  );
 }
 
 async function started(h: Harness): Promise<shimv1.StartSessionResponse> {
@@ -8204,18 +8218,7 @@ describe("what the engine remembers from the fold's own frames", () => {
 
 describe("the live detached table, driven by the vendor's own messages", () => {
   /** `task_started` for one shell run. */
-  const taskStarted = (overrides: Record<string, unknown> = {}): SdkMessage =>
-    ({
-      type: "system",
-      subtype: "task_started",
-      task_id: "t01",
-      tool_use_id: "toolu_run",
-      task_type: "local_bash",
-      description: "sleep 600",
-      uuid: "00000000-0000-4000-8000-0000000000d0",
-      session_id: "s",
-      ...overrides,
-    }) as never;
+  const taskStarted = (overrides: Record<string, unknown> = {}): SdkMessage => taskStartedMessage(overrides);
 
   /** The command lines of every interrupted shell terminal this session wrote. */
   function interruptedCommands(h: Harness): string[] {
