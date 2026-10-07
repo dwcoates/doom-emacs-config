@@ -74,7 +74,6 @@ import {
   type FeedId,
   type FeedPage,
   type FeedPageError,
-  type FeedResponse,
   type FeedSelection,
   type FeedTurnActivity,
   type FeedRow,
@@ -96,7 +95,6 @@ import type {
 import { replaceTicking, stopClocks, stopTicking } from "./ticking.js";
 import { keepScrolled } from "./keep-scroll.js";
 import type { Overscan } from "./overscan.js";
-import { thinkingLanded } from "./cards/response.js";
 import { drawFeedUserPrompt } from "./rows/user-prompt.js";
 import { drawFeedAgentPrompt } from "./rows/agent-prompt.js";
 import { drawFeedPeerMessage } from "./rows/peer-message.js";
@@ -109,41 +107,6 @@ import {
 import { drawFeedMergeTabRow } from "./merge/tab-row.js";
 import { isOwnTurn } from "../composer/own-turns.js";
 import { setPromptWave } from "../breathing.js";
-
-/** A collapsing row's place, sampled before the redraw that collapses it. */
-interface CollapseSample {
-  id: string;
-  element: HTMLElement;
-  /** The scroll box's top edge. */
-  boxTop: number;
-  /** The row's bottom edge before the redraw. */
-  bottom: number;
-}
-
-/**
- * Whether NEXT is the daemon's re-push of a thinking row whose own final text
- * has just LANDED (`thinkingLanded`, cards/response.ts): the row was drawn still
- * arriving and now arrives in a terminal arm, so its redraw collapses it to the
- * thinking cap. Read off the two pushed rows of the SAME row; no other row is
- * consulted.
- */
-function isLandingEdge(drawn: FeedRow, next: FeedRow): boolean {
-  const before = responseOf(drawn);
-  const after = responseOf(next);
-  return (
-    before !== null &&
-    after !== null &&
-    !thinkingLanded(before) &&
-    thinkingLanded(after)
-  );
-}
-
-/** The response bubble a row carries, or null. */
-function responseOf(row: FeedRow): FeedResponse | null {
-  if (row.row.case !== "activity" || row.row.value.unit.case !== "response")
-    return null;
-  return row.row.value.unit.value;
-}
 
 /** The row a new row is inserted above, sampled before the insert. */
 interface InsertSample {
@@ -626,13 +589,9 @@ export function createFeedController(
       context: { feed: feedName(), row: id, kind: row.row.case ?? "unset" },
     });
     keepKey(held, id, key);
-    const collapsing = isLandingEdge(held.row, row)
-      ? sampleCollapse(id, held)
-      : null;
     updateHeld(held, row);
     truncateAtSeparation(row, id);
     announce();
-    keepPlaceAboveCollapse(collapsing);
   }
 
   /**
@@ -844,64 +803,6 @@ export function createFeedController(
       },
     );
     opts.scroll.tail.prependCompensation(grown);
-  }
-
-  /**
-   * Sample where a thinking row that just landed ends, BEFORE its
-   * redraw collapses it, with the scroll box's top edge. Null when the feed has
-   * no scroll box (a sub-feed; the same standing a prepend has there).
-   */
-  function sampleCollapse(id: string, held: RowState): CollapseSample | null {
-    if (opts.scroll === undefined) return null;
-    return {
-      id,
-      element: held.element,
-      boxTop: opts.scroll.box.getBoundingClientRect().top,
-      bottom: held.element.getBoundingClientRect().bottom,
-    };
-  }
-
-  /**
-   * KEEP THE READER'S CONTENT IN PLACE WHEN A THINKING BUBBLE ABOVE THEM
-   * COLLAPSES (owner rule, 2026-09-23). The daemon re-pushes a thinking row in
-   * a terminal arm once its own final text has arrived, and its redraw drops it
-   * from the response cap to the one-line thinking cap. When it lay wholly above the viewport, everything
-   * the reader sees moved up by exactly the height it lost, so the view shifts
-   * by that, through the tail owner (`collapseCompensation`); a following reader
-   * was already kept at the tail by `announce`. The row the redraw DETACHED is an
-   * invariant violation (an upsert redraws a row in place), recorded as one.
-   */
-  function keepPlaceAboveCollapse(sample: CollapseSample | null): void {
-    if (opts.scroll === undefined || sample === null) return;
-    if (!sample.element.isConnected) {
-      log.error(
-        "a landed thinking row's redraw detached the row its collapse was measured from",
-        {
-          operation: "feed.collapse-anchor-detached",
-          context: { feed: feedName(), row: sample.id },
-        },
-      );
-      return;
-    }
-    const after = sample.element.getBoundingClientRect().bottom;
-    log.debug(
-      `a landed thinking row above ${sample.boxTop}px changed by ${after - sample.bottom}px`,
-      {
-        operation: "feed.collapse-kept-place",
-        context: {
-          feed: feedName(),
-          row: sample.id,
-          box_top: sample.boxTop,
-          before: sample.bottom,
-          after,
-        },
-      },
-    );
-    opts.scroll.tail.collapseCompensation({
-      boxTop: sample.boxTop,
-      rowBottomBefore: sample.bottom,
-      rowBottomAfter: after,
-    });
   }
 
   /**

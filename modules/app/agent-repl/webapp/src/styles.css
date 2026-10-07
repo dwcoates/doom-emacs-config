@@ -2408,7 +2408,7 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
    entry and needs none: its box wears no `.bubble-scroll`, so no cap rule can
    reach it. The shared feed cap for most capped bubbles, five lines for a user
    or subagent prompt (`PROMPT_CAP_LINES`), one line for a held
-   prompt and a landed thinking bubble, and NONE past the header strip for a
+   prompt, and NONE past the header strip for a
    peer message, whose label is the whole of its collapsed face. The cap rides
    the SCROLL BOX, so the strip above it never scrolls away from the text it
    labels, and it is counted in the one bubble leading. */
@@ -2621,8 +2621,8 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
    on every bubble and every title fold: nothing draws a glyph from `has-more`,
    and no `::before` keys on it. styles.test.ts fails any rule that does. */
 /* THE ELLIPSIS INSTEAD OF THE FADE (owner rulings, 2026-09-27). A bubble whose
-   spec chooses it (`data-more="ellipsis"`, src/bubble/draw.ts: a held prompt,
-   a landed thinking bubble) shows its ONE collapsed line and, when there is
+   spec chooses it (`data-more="ellipsis"`, src/bubble/draw.ts: a held prompt)
+   shows its ONE collapsed line and, when there is
    more, ends that line in `…`; no fade. The collapsed BODY is clamped to the
    cap's lines, so the engine itself writes the `…` at the end of the last line
    it keeps exactly when anything follows that line: an over-long line (it
