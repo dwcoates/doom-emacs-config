@@ -82,6 +82,7 @@ var Suites = []Suite{
 	{Name: "test-split-harness", Kind: Script, Path: "bin/test-lib-test-split.sh", Harness: true},
 	{Name: "logs-harness", Kind: Script, Path: "bin/test-logs.sh", Harness: true},
 	{Name: "go-deps-harness", Kind: Script, Path: "bin/test-check-go-deps.sh", Harness: true},
+	{Name: "personal-values-harness", Kind: Script, Path: "bin/test-check-personal-values.sh", Harness: true},
 	{Name: "realtest-harness", Kind: Script, Path: "bin/test-realtest.sh", Harness: true},
 	{Name: "e2e-coverage-harness", Kind: Script, Path: "bin/test-e2e-coverage.sh", Harness: true},
 	{Name: "e2e-repeat-harness", Kind: Script, Path: "bin/test-e2e-repeat.sh", Harness: true},
