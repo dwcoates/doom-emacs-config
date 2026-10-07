@@ -3,6 +3,7 @@ package prompts
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -327,5 +328,60 @@ func TestTheFixingAttemptBriefKeepsItsPlaceholderSet(t *testing.T) {
 	}
 	if err := sameSet("placeholders", want, got.Placeholders); err != nil {
 		t.Fatalf("merge-test-failure-resolve: %v", err)
+	}
+}
+
+func TestPathNamesTheBriefsFile(t *testing.T) {
+	// Act.
+	got := Path("/p", "b")
+
+	// Assert.
+	if got != filepath.Join("/p", "b"+Suffix) {
+		t.Fatalf("Path = %q, want /p/b%s", got, Suffix)
+	}
+}
+
+func TestParseReadsContentNotOnDisk(t *testing.T) {
+	// Arrange.
+	content := "<!-- used by: x; placeholders: {{a}} -->\nhello {{a}}\n"
+
+	// Act.
+	got, err := Parse("b", "a rewrite", content)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if got.Body != "hello {{a}}" || len(got.Placeholders) != 1 {
+		t.Fatalf("Parse = %+v, want the body and its one placeholder", got)
+	}
+}
+
+func TestParseNamesWhereInItsErrors(t *testing.T) {
+	// Arrange: the body drops a declared placeholder.
+	content := "<!-- used by: x; placeholders: {{a}} -->\nhello\n"
+
+	// Act.
+	_, err := Parse("b", "the rewrite", content)
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "the rewrite") {
+		t.Fatalf("Parse error = %v, want one naming the rewrite", err)
+	}
+}
+
+func TestLoadSharesParsesVerdict(t *testing.T) {
+	// Arrange: Load is Parse over the file's bytes, so the two agree on any
+	// content, malformed included.
+	content := "<!-- used by: x; placeholders: {{a}} -->\nhello {{b}}\n"
+	dir := write(t, "b", content)
+
+	// Act.
+	_, loadErr := Load(dir, "b")
+	_, parseErr := Parse("b", Path(dir, "b"), content)
+
+	// Assert.
+	if loadErr == nil || parseErr == nil || loadErr.Error() != parseErr.Error() {
+		t.Fatalf("Load error %v and Parse error %v, want the same refusal", loadErr, parseErr)
 	}
 }
