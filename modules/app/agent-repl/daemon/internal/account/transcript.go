@@ -15,6 +15,7 @@ import (
 
 	sharedlogging "agentrepl/logging"
 
+	"claude-repld/internal/atomicfile"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/remint"
 )
@@ -603,30 +604,9 @@ func writeFileAtomic(dest string, data []byte, mode fs.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(dest), 0o700); err != nil {
 		return fmt.Errorf("account: creating %s: %w", filepath.Dir(dest), err)
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(dest), ".port-"+filepath.Base(dest)+"-*")
-	if err != nil {
-		return fmt.Errorf("account: creating a temporary beside %s: %w", dest, err)
-	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName) //nolint:errcheck // best-effort cleanup of a named temporary
-
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("account: writing %s: %w", tmpName, err)
-	}
-	if err := tmp.Chmod(mode); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("account: setting the mode of %s: %w", tmpName, err)
-	}
-	if err := tmp.Sync(); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("account: fsyncing %s: %w", tmpName, err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("account: closing %s: %w", tmpName, err)
-	}
-	if err := os.Rename(tmpName, dest); err != nil {
-		return fmt.Errorf("account: renaming %s to %s: %w", tmpName, dest, err)
+	opts := atomicfile.Options{Pattern: ".port-" + filepath.Base(dest) + "-*", Mode: mode, Sync: true}
+	if err := atomicfile.Replace(dest, data, opts); err != nil {
+		return fmt.Errorf("account: %w", err)
 	}
 	return nil
 }
