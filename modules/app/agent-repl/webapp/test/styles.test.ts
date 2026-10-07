@@ -2930,15 +2930,24 @@ function rgbOf(block: string, token: string): [number, number, number] {
 /** The spread between an RGB triple's strongest and weakest channel. */
 const chroma = ([r, g, b]: [number, number, number]): number => Math.max(r, g, b) - Math.min(r, g, b);
 
-describe("the feed's background is green (owner, 2026-10-07)", () => {
+/** An RGB triple's hue in degrees, 0 to 360. */
+const hueOf = ([r, g, b]: [number, number, number]): number => {
+  const [max, min] = [Math.max(r, g, b), Math.min(r, g, b)];
+  if (max === min) throw new Error("an achromatic color has no hue");
+  const raw =
+    max === r ? (g - b) / (max - min) : max === g ? (b - r) / (max - min) + 2 : (r - g) / (max - min) + 4;
+  return (raw * 60 + 360) % 360;
+};
+
+describe("the feed's background is chartreuse (owner, 2026-10-07)", () => {
   it.each([
     ["light", () => declarationsOf(":root") ?? ""],
     ["dark", darkThemeBlock],
-  ])("paints the %s theme's --bg with green as its strongest channel", (_theme, block) => {
+  ])("paints the %s theme's --bg within 10 degrees of chartreuse's 90-degree hue", (_theme, block) => {
     // Arrange / Act
-    const [r, g, b] = rgbOf(block(), "--bg");
+    const hue = hueOf(rgbOf(block(), "--bg"));
     // Assert
-    expect(g).toBeGreaterThan(Math.max(r, b));
+    expect(Math.abs(hue - 90)).toBeLessThanOrEqual(10);
   });
 });
 
