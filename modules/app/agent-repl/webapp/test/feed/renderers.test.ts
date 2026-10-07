@@ -615,6 +615,7 @@ const REGISTRY_KEYS: readonly (keyof RowRenderers)[] = [
   "artifact",
   "plan",
   "findings",
+  "chessBoard",
   "subagentResult",
   "shell",
   "shellHead",
