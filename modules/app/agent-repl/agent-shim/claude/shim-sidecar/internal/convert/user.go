@@ -9,16 +9,18 @@ package convert
 // bubble live and the shim's stream-plane AgentPrompt is the one served form —
 // so the file-plane copy is classified as vendor_specific: durable and
 // investigable without regrowing the bubble a second time. Such a prompt is
-// recognized by `entrypoint == "sdk-cli"`.
+// recognized by an SDK entrypoint (`sdk-cli`, `sdk-ts`, …): see isSDKEntrypoint.
 //
 // AN ADOPTED EXTERNAL PROMPT IS EMITTED (owner-approved R15 crossing). A prompt
-// typed in interactive Claude Code (any non-sdk-cli entrypoint, e.g. "cli") was
+// typed in interactive Claude Code (any non-SDK entrypoint, e.g. "cli") was
 // never submitted through agent-repl, so the daemon never minted or drew it;
 // withholding it left an adopted conversation showing answers with no prompts.
 // It is emitted here as a real prompt page line on a STABLE identity derived
 // from the record's own uuid, so replay is idempotent. See humanPrompt.
 
 import (
+	"strings"
+
 	conversationv1 "agentrepl/proto/conversation/v1"
 	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-claude-sidecar/internal/logging"
@@ -94,10 +96,23 @@ func (c *Converter) userLine(record map[string]any, at Attribution) []*storev1.S
 	}
 }
 
-// sdkEntrypoint is the `entrypoint` agent-repl's OWN SDK sessions stamp on every
-// prompt they submit. Interactive Claude Code stamps `"cli"`; the discriminator
-// is the same field that tells an SDK transcript from an interactive one.
-const sdkEntrypoint = "sdk-cli"
+// sdkEntrypointPrefix begins every `entrypoint` an SDK-hosted session stamps on
+// the prompts it submits, and agent-repl's OWN sessions are SDK-hosted.
+// Interactive Claude Code stamps `"cli"`; the discriminator is the same field
+// that tells an SDK transcript from an interactive one.
+//
+// IT IS A PREFIX, NOT ONE VALUE, because the suffix names the SDK's host and
+// changes with it: the CLI-hosted SDK stamped `sdk-cli`, the TypeScript Agent SDK
+// stamps `sdk-ts`. Matching only `sdk-cli` let every `sdk-ts` prompt through as
+// an adopted external one, and the daemon drew each of agent-repl's own prompts
+// twice: once live under its TurnId, once again under the record's uuid.
+const sdkEntrypointPrefix = "sdk-"
+
+// isSDKEntrypoint reports whether a record's `entrypoint` was stamped by an
+// SDK-hosted session, i.e. agent-repl's own.
+func isSDKEntrypoint(entrypoint string) bool {
+	return strings.HasPrefix(entrypoint, sdkEntrypointPrefix)
+}
 
 // humanPrompt decides what becomes of a genuine human file-plane prompt.
 //
@@ -105,18 +120,18 @@ const sdkEntrypoint = "sdk-cli"
 // prompt is withheld." R15 withholds because the daemon already draws the
 // prompt, and it draws two kinds:
 //
-//   - AGENT-REPL'S OWN PROMPTS carry `entrypoint == "sdk-cli"`: the daemon
+//   - AGENT-REPL'S OWN PROMPTS carry an SDK entrypoint (isSDKEntrypoint): the daemon
 //     minted the TurnId and PromptOrigin and drew the bubble live, and the shim's
 //     stream-plane AgentPrompt is the served form. Withheld to avoid a
 //     double-render, whatever plane it is read on. New prompts typed after
-//     adoption are agent-repl's own and stay sdk-cli, so they remain withheld.
+//     adoption are agent-repl's own and carry an SDK entrypoint, so they remain withheld.
 //   - A SUBAGENT COMMISSION is the opening user message of a sidechain
 //     transcript — an agent-addressed prompt the daemon draws at BOTH ends
 //     (sender's feed and recipient's). It carries `entrypoint == "cli"` like an
 //     interactive prompt, so `isSidechain` is what tells the two apart. Withheld
 //     for the same double-render reason.
 //
-// A TOP-LEVEL prompt with any non-sdk entrypoint (`"cli"`, or a future non-sdk
+// A TOP-LEVEL prompt with any non-SDK entrypoint (`"cli"`, or a future non-sdk
 // value) was typed in an EXTERNAL interactive session and adopted into a
 // workspace — never submitted through agent-repl, so the daemon never minted or
 // drew it. Withholding it is why an adopted conversation showed the assistant's
@@ -124,9 +139,9 @@ const sdkEntrypoint = "sdk-cli"
 // line on a STABLE identity derived from the record's own uuid (externalPrompt),
 // so a re-ingest supersedes its own row rather than growing a second bubble.
 func (c *Converter) humanPrompt(record, message map[string]any, at Attribution, env envelope, agent string) *storev1.StoreEntry {
-	if str(record["entrypoint"]) == sdkEntrypoint {
+	if entrypoint := str(record["entrypoint"]); isSDKEntrypoint(entrypoint) {
 		c.log.With(at.ctxFor("user-prompt")).
-			LogVerbose("file-plane user prompt withheld as vendor_specific (R15: agent-repl's own sdk-cli prompt is daemon-minted and drawn live)")
+			LogVerbose("file-plane user prompt withheld as vendor_specific (R15: agent-repl's own SDK prompt (entrypoint=%q) is daemon-minted and drawn live)", entrypoint)
 		return VendorSpecificEntry(at, "user_prompt", record)
 	}
 	if boolean(record["isSidechain"]) {
@@ -177,7 +192,7 @@ func (c *Converter) externalPrompt(record, message map[string]any, at Attributio
 			Log("an edited or re-sent prompt shares an unanswered version's parent; it supersedes that version's row instead of drawing a second one")
 	} else {
 		c.log.With(at.ctxFor("user-prompt")).With(logging.Context{UpsertKey: PromptKey(turn)}).
-			LogVerbose("adopted external prompt emitted as a page line on a uuid-derived identity (entrypoint=%q, not agent-repl's own sdk-cli)", str(record["entrypoint"]))
+			LogVerbose("adopted external prompt emitted as a page line on a uuid-derived identity (entrypoint=%q, not agent-repl's own SDK entrypoint)", str(record["entrypoint"]))
 	}
 	return c.landPrompt(at, agent, PromptKey(turn), "agent_prompt", prompt)
 }

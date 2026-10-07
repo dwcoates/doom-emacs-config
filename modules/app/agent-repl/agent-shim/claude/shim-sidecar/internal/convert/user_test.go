@@ -1,6 +1,6 @@
 package convert
 
-// user_test.go — R15 holds for agent-repl's own prompts (sdk-cli, withheld) and
+// user_test.go — R15 holds for agent-repl's own prompts (any sdk-* entrypoint, withheld) and
 // is crossed for adopted external prompts (any other entrypoint, emitted).
 
 import "testing"
@@ -24,6 +24,55 @@ func TestAgentReplsOwnSdkCliPromptIsStillWithheld(t *testing.T) {
 	}
 	if got := vendorKindOf(entries[0]); got != "user_prompt" {
 		t.Fatalf("kind = %q, want user_prompt", got)
+	}
+}
+
+func TestAgentReplsOwnSdkTsPromptIsWithheld(t *testing.T) {
+	// Arrange. Regression lock: the TypeScript Agent SDK stamps entrypoint
+	// "sdk-ts", not "sdk-cli". Matching only "sdk-cli" emitted every such prompt
+	// as an adopted external one, and the daemon drew each prompt twice.
+	c := newTestConverter(t)
+
+	// Act.
+	entries := convertLines(t, c, externalPromptLine("u1", "sdk-ts", "what does this do?"))
+
+	// Assert.
+	if len(entries) != 1 {
+		t.Fatalf("entries = %d, want 1", len(entries))
+	}
+	if pageLine(entries[0]) != nil {
+		t.Fatal("agent-repl's own sdk-ts prompt must never be a page line")
+	}
+	if got := vendorKindOf(entries[0]); got != "user_prompt" {
+		t.Fatalf("kind = %q, want user_prompt", got)
+	}
+}
+
+func TestIsSDKEntrypointAcceptsEverySdkHost(t *testing.T) {
+	for _, entrypoint := range []string{"sdk-cli", "sdk-ts", "sdk-py"} {
+		t.Run(entrypoint, func(t *testing.T) {
+			if !isSDKEntrypoint(entrypoint) {
+				t.Fatalf("isSDKEntrypoint(%q) = false, want true", entrypoint)
+			}
+		})
+	}
+}
+
+func TestIsSDKEntrypointRejectsInteractiveCli(t *testing.T) {
+	if isSDKEntrypoint("cli") {
+		t.Fatal(`isSDKEntrypoint("cli") = true, want false`)
+	}
+}
+
+func TestIsSDKEntrypointRejectsAMissingEntrypoint(t *testing.T) {
+	if isSDKEntrypoint("") {
+		t.Fatal(`isSDKEntrypoint("") = true, want false`)
+	}
+}
+
+func TestIsSDKEntrypointRejectsTheBarePrefixWord(t *testing.T) {
+	if isSDKEntrypoint("sdk") {
+		t.Fatal(`isSDKEntrypoint("sdk") = true, want false`)
 	}
 }
 

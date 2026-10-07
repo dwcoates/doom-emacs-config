@@ -26,6 +26,7 @@ import (
 	"claude-repld/internal/daemonaddr"
 	"claude-repld/internal/stateroot"
 	"claude-repld/internal/tempdirs"
+	"claude-repld/internal/workspace"
 	"claude-repld/internal/wsm"
 
 	"connectrpc.com/connect"
@@ -193,6 +194,20 @@ func BuildIdentityEnv(checkout string) []string {
 		"SHIM_BUILD_SHA=" + FakeShimDefaultBuildSHA,
 		"AGENT_REPL_DEPLOY_STAMP=" + FakeShimDefaultBuildSHA,
 	}
+}
+
+// HostNeutralNamingEnv clears the host's workspace-name prefix for a test
+// daemon. The prefix is read from the daemon's own environment
+// (workspace.PrefixEnv, else workspace.LegacyPrefixEnv) and makes every
+// branch "<prefix>/<slug>"; inherited from a developer's shell (e.g.
+// CLAUDE_WORKSPACE_PREFIX=JB) it renames every test branch, so a scenario
+// keyed on the bare branch (a scripted rebase conflict) never fires. Both
+// spellings are stated EMPTY, which workspace.Prefix reads as unset, and
+// os/exec keeps the last value of a repeated key, so this wins over the
+// inherited one. A test that wants a prefix sets it through ExtraEnv, which
+// StartDaemon appends after this.
+func HostNeutralNamingEnv() []string {
+	return []string{workspace.PrefixEnv + "=", workspace.LegacyPrefixEnv + "="}
 }
 
 // ServiceBinaries are the real launchd services a world runs beside its
@@ -686,6 +701,7 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 		"PATH="+fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"),
 	)
 	env = append(env, BuildIdentityEnv(PinnedCheckout(t))...)
+	env = append(env, HostNeutralNamingEnv()...)
 	env = append(env, TemporaryRegistrationEnv(t)...)
 	// The daemon's OWN checkout identity is always overridden, whether or not
 	// a test cares which repository it is. The merge orchestrator's two
