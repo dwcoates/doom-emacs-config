@@ -31,7 +31,7 @@ func TestASkillDocumentSettlesItsOwnCallNotTheNextSkillCall(t *testing.T) {
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
-	cwd := "/Users/dodgecoates/skill-join-probe"
+	cwd := "/work/skill-join-probe"
 	slug := cwdSlug(cwd)
 	session := "8a8a8a8a-8a8a-48a8-88a8-8a8a8a8a8a8a"
 	firstCall, secondCall := capturedBashCall1, capturedBashCall2
@@ -117,7 +117,7 @@ func skillAck(t *testing.T, session, cwd, callID, skill string) map[string]any {
 // this record — so the join this subject drives is grounded. The surrounding
 // envelope (parentUuid, userType, entrypoint, version) is a plausible
 // reconstruction copied from the corpus's other user records, not evidence:
-// grep testdata/corpus/ and projects/ and there is no `sourceToolUseID` in
+// grep testdata/corpus/ and testdata/projects/ and there is no `sourceToolUseID` in
 // either tree. It is carried as a stated CONCERN rather than dressed up as a
 // capture; the fix is a real capture of a skill invocation and its document.
 func skillDocumentLine(t *testing.T, session, cwd, callID, body string) string {
