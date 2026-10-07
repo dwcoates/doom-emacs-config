@@ -1654,6 +1654,29 @@ describe("resuming a session captured on an earlier run", () => {
     expect(readCapturedSession(corpus, "old").cwd).toBe(cwd);
   });
 
+  it("replays a scrubbed capture under the given home, cwd, slug and transcript alike", () => {
+    // Arrange: a committed capture recorded under the home token.
+    const corpus = realpathSync(mkdtempSync(path.join(tmpdir(), "capture-corpus-")));
+    const slugDir = path.join(corpus, "old", "files", "projects", "--HOME--proj");
+    mkdirSync(slugDir, { recursive: true });
+    writeFileSync(
+      path.join(slugDir, "11111111-2222-3333-4444-555555555555.jsonl"),
+      JSON.stringify({ type: "attachment", cwd: "${HOME}/proj" }),
+      "utf8",
+    );
+    const home = realpathSync(mkdtempSync(path.join(tmpdir(), "capture-home-")));
+    const accountRoot = realpathSync(mkdtempSync(path.join(tmpdir(), "capture-root-")));
+
+    // Act.
+    const seed = readCapturedSession(corpus, "old", home);
+    const { target } = seedResumableSession(SCRATCH_AUTH, accountRoot, seed);
+
+    // Assert.
+    expect(seed.cwd).toBe(path.join(home, "proj"));
+    expect(seed.slug).toBe(cwdSlug(path.join(home, "proj")));
+    expect(JSON.parse(readFileSync(target, "utf8")).cwd).toBe(path.join(home, "proj"));
+  });
+
   it("refuses a capture whose transcript records no cwd", () => {
     const { corpus } = corpusWith(() => [{ type: "queue-operation" }]);
     expect(() => readCapturedSession(corpus, "old")).toThrow(/records no cwd/);
@@ -1787,13 +1810,13 @@ describe("the capture writes scrub personal values", () => {
       "utf8",
     );
     copyTreeAnonymized(path.join(base, "from"), path.join(base, "to"), { unparsed: [] }, personal);
-    const written = readFileSync(path.join(base, "to", "--proj", "s.jsonl"), "utf8");
-    expect(JSON.parse(written)).toEqual({ cwd: "~/proj", email: "person1@example.com", who: "Someone" });
+    const written = readFileSync(path.join(base, "to", "--HOME--proj", "s.jsonl"), "utf8");
+    expect(JSON.parse(written)).toEqual({ cwd: "${HOME}/proj", email: "person1@example.com", who: "Someone" });
   });
 
   it("anonymizeMeta scrubs keys and strings and nothing else", () => {
     expect(anonymizeMeta({ "/Users/ann/x": 1, note: "Ann ran it", n: 2 }, personal)).toEqual({
-      "~/x": 1,
+      "${HOME}/x": 1,
       note: "Someone ran it",
       n: 2,
     });

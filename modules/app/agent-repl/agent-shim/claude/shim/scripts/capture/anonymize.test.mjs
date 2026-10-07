@@ -20,8 +20,8 @@ import {
   redactSecretRuns,
   truncateBlob,
   truncateLong,
-  HOME_TOKEN,
   NO_PERSONAL_VALUES,
+  expandHome,
   pathSlug,
   scrubPersonal,
   scrubbedEmail,
@@ -256,8 +256,8 @@ describe("scrubPersonal", () => {
     names: ["ann", "annexample", "Example"],
   };
   const cases = [
-    { name: "the home directory becomes ~", text: "/Users/annexample/.config/x", want: "~/.config/x" },
-    { name: "the home's slug becomes the slug of ~", text: "-Users-annexample--config-x", want: "---config-x" },
+    { name: "the home directory becomes the home token", text: "/Users/annexample/.config/x", want: "${HOME}/.config/x" },
+    { name: "the home's slug becomes the token's slug", text: "-Users-annexample--config-x", want: "--HOME---config-x" },
     { name: "an email becomes a numbered example address", text: "to ann@work.test.", want: `to ${scrubbedEmail(1)}.` },
     { name: "an email matches case-insensitively", text: "ann.example@MAIL.test", want: scrubbedEmail(0) },
     { name: "a capitalized name keeps its capital", text: "Ann's notes", want: "Someone's notes" },
@@ -278,7 +278,25 @@ describe("scrubPersonal", () => {
   it("keeps a recorded path and its project directory in agreement", () => {
     const cwd = "/Users/annexample/proj";
     expect(pathSlug(scrubPersonal(cwd, personal))).toBe(scrubPersonal(pathSlug(cwd), personal));
-    expect(pathSlug(HOME_TOKEN)).toBe("-");
+  });
+});
+
+describe("expandHome", () => {
+  const cases = [
+    { name: "the token becomes the home", text: '{"cwd":"${HOME}/p"}', want: '{"cwd":"/Users/bo/p"}' },
+    { name: "the token's slug becomes the home's slug", text: "projects/--HOME---p/s.jsonl", want: "projects/-Users-bo--p/s.jsonl" },
+    { name: "text with no token is unchanged", text: "/private/tmp/x", want: "/private/tmp/x" },
+  ];
+  for (const tc of cases) {
+    it(tc.name, () => {
+      expect(expandHome(tc.text, "/Users/bo")).toBe(tc.want);
+    });
+  }
+
+  it("undoes the home rule of scrubPersonal", () => {
+    const personal = { home: "/Users/bo", emails: [], names: [] };
+    const text = '{"cwd":"/Users/bo/p","dir":"-Users-bo-p"}';
+    expect(expandHome(scrubPersonal(text, personal), "/Users/bo")).toBe(text);
   });
 });
 
@@ -287,20 +305,20 @@ describe("the anonymizer applies scrubPersonal", () => {
 
   it("to string values and to object keys", () => {
     expect(anonymize({ "/Users/ann/p": { who: "Ann" } }, undefined, personal)).toEqual({
-      "~/p": { who: "Someone" },
+      "${HOME}/p": { who: "Someone" },
     });
   });
 
   it("to every JSONL line", () => {
-    expect(anonymizeJsonl('{"cwd":"/Users/ann"}\n', () => {}, personal)).toBe('{"cwd":"~"}\n');
+    expect(anonymizeJsonl('{"cwd":"/Users/ann"}\n', () => {}, personal)).toBe('{"cwd":"${HOME}"}\n');
   });
 
   it("to plain text", () => {
-    expect(anonymizePlainText("cd /Users/ann && echo Ann", personal)).toBe("cd ~ && echo Someone");
+    expect(anonymizePlainText("cd /Users/ann && echo Ann", personal)).toBe("cd ${HOME} && echo Someone");
   });
 
   it("before truncation, so the truncated prefix names nobody", () => {
     const text = `/Users/ann/${"x".repeat(MAX_STRING_CHARS)}`;
-    expect(anonymizeString(text, "content", personal).startsWith("~/x")).toBe(true);
+    expect(anonymizeString(text, "content", personal).startsWith("${HOME}/x")).toBe(true);
   });
 });
