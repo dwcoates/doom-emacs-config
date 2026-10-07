@@ -295,6 +295,9 @@ type Emacs struct {
 	// Notifier is the recorder the daemon Emacs spawns posts desktop banners
 	// through (AGENT_REPL_NOTIFIER_CMD).
 	Notifier *harness.Recorder
+	// Chime is the recorder the daemon rings each turn end's sound through
+	// (AGENT_REPL_CHIME_CMD).
+	Chime *harness.Recorder
 	// Browser is the recorder the daemon opens external links through
 	// (AGENT_REPL_BROWSER_CMD).
 	Browser *harness.Recorder
@@ -527,6 +530,9 @@ func StartEmacs(t *testing.T, box sandbox, opts EmacsOpts) *Emacs {
 	// no scenario may raise a real banner, and the container carries no
 	// banner program, which a daemon records at ERROR on its boot.
 	fakeNotifier := harness.NewFakeNotifier(t, filepath.Join(root, "fakebin"))
+	// THE TURN-END CHIME is a recorder for the same reason: no scenario may
+	// play a real sound, and the container carries no sound player.
+	fakeChime := harness.NewFakeChime(t, filepath.Join(root, "fakebin"))
 	// THE EXTERNAL BROWSER is a recorder as well: no scenario may open a real
 	// one, and a daemon with no launcher configured says so at WARN on every
 	// boot, which a healthy world must not.
@@ -535,6 +541,7 @@ func StartEmacs(t *testing.T, box sandbox, opts EmacsOpts) *Emacs {
 	// has no pmset or networksetup, and no scenario may touch a real one.
 	hostTools := harness.NewFakeHostTools(t, filepath.Join(root, "host-tools"))
 	e.Notifier = fakeNotifier
+	e.Chime = fakeChime
 	e.Browser = fakeBrowser
 	prewarmTrampolines(t, box)
 	staged := time.Now()
@@ -583,6 +590,7 @@ func StartEmacs(t *testing.T, box sandbox, opts EmacsOpts) *Emacs {
 		"AGENT_REPL_TEST_SQLITE_UNSYNCED=1",
 		"AGENT_REPL_CLAUDE_BIN=" + fakeClaude,
 		"AGENT_REPL_NOTIFIER_CMD=" + fakeNotifier.Path,
+		"AGENT_REPL_CHIME_CMD=" + fakeChime.Path,
 		"AGENT_REPL_BROWSER_CMD=" + fakeBrowser.Path,
 		"AGENT_REPL_PERSISTENT_WIFI_TOOLS_DIR=" + hostTools,
 		"AGENT_REPL_PERSISTENT_WIFI_HOTSPOT=" + harness.FakeHotspot,

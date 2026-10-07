@@ -50,6 +50,37 @@ type fakeClicks struct {
 	got []ids.WorkspaceID
 }
 
+// fakeChime records each play and answers a scripted error.
+type fakeChime struct {
+	mu    sync.Mutex
+	plays int
+	err   error
+	// block, when set, holds Play until closed or ctx ends.
+	block chan struct{}
+}
+
+func (c *fakeChime) Program() string { return "fake-chime" }
+
+func (c *fakeChime) Play(ctx context.Context) error {
+	c.mu.Lock()
+	c.plays++
+	c.mu.Unlock()
+	if c.block != nil {
+		select {
+		case <-c.block:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return c.err
+}
+
+func (c *fakeChime) played() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.plays
+}
+
 func (c *fakeClicks) NotificationClicked(ws ids.WorkspaceID) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -76,6 +107,7 @@ type notifierFixture struct {
 	notifier *Notifier
 	focus    *Focus
 	backend  *fakeBackend
+	chime    *fakeChime
 	clicks   *fakeClicks
 	log      *dlog.TestLogger
 }
@@ -83,8 +115,8 @@ type notifierFixture struct {
 func newNotifierFixture(t *testing.T, names Names) notifierFixture {
 	t.Helper()
 	log := dlog.NewTestLogger()
-	f := notifierFixture{focus: NewFocus(log), backend: &fakeBackend{}, clicks: &fakeClicks{}, log: log}
-	f.notifier = New(Deps{Focus: f.focus, Backend: f.backend, Clicks: f.clicks, Names: names, Log: log})
+	f := notifierFixture{focus: NewFocus(log), backend: &fakeBackend{}, chime: &fakeChime{}, clicks: &fakeClicks{}, log: log}
+	f.notifier = New(Deps{Focus: f.focus, Backend: f.backend, Chime: f.chime, Clicks: f.clicks, Names: names, Log: log})
 	return f
 }
 
@@ -293,7 +325,7 @@ func TestNotifierRecordsAMissingProgram(t *testing.T) {
 	// Arrange
 	log := dlog.NewTestLogger()
 	n := New(Deps{
-		Focus: NewFocus(log), BackendErr: errors.New("alerter is not installed"),
+		Focus: NewFocus(log), BackendErr: errors.New("alerter is not installed"), Chime: &fakeChime{},
 		Clicks: &fakeClicks{}, Names: fakeNames{name: "ws-name"}, Log: log,
 	})
 
@@ -344,14 +376,124 @@ func TestNotifierPostsNothingAfterClose(t *testing.T) {
 	}
 }
 
+func TestNotifierRingsWhenEmacsIsFocused(t *testing.T) {
+	// Arrange
+	f := newNotifierFixture(t, fakeNames{name: "ws-name"})
+	f.focus.Attach(true)
+
+	// Act
+	f.notifier.Ring("ws1", KindTurnEnded)
+	f.notifier.wg.Wait()
+
+	// Assert
+	if got := f.chime.played(); got != 1 {
+		t.Fatalf("played %d chimes while Emacs was focused, want 1", got)
+	}
+	r, ok := hasRecord(f.log, "info", "playing the chime")
+	if !ok || r.Context["workspace"] != "ws1" || r.Context["kind"] != KindTurnEnded || r.Context["program"] != "fake-chime" {
+		t.Fatalf("record = %+v (found %v), want the workspace, kind and program", r, ok)
+	}
+	if _, ok := hasRecord(f.log, "debug", "the chime played"); !ok {
+		t.Fatal("a played chime left no record of its end")
+	}
+}
+
+func TestNotifierRingsWhenEmacsIsUnfocused(t *testing.T) {
+	// Arrange
+	f := newNotifierFixture(t, fakeNames{name: "ws-name"})
+	f.focus.Attach(false)
+
+	// Act
+	f.notifier.Ring("ws1", KindTurnEnded)
+	f.notifier.wg.Wait()
+
+	// Assert
+	if got := f.chime.played(); got != 1 {
+		t.Fatalf("played %d chimes, want 1", got)
+	}
+}
+
+func TestNotifierRecordsAFailedChime(t *testing.T) {
+	// Arrange
+	f := newNotifierFixture(t, fakeNames{name: "ws-name"})
+	f.chime.err = errors.New("exit status 1")
+
+	// Act
+	f.notifier.Ring("ws1", KindTurnEnded)
+	f.notifier.wg.Wait()
+
+	// Assert
+	r, ok := hasRecord(f.log, "error", "the chime program failed")
+	if !ok || r.Context["cause"] != "exit status 1" || r.Context["workspace"] != "ws1" || r.Context["program"] != "fake-chime" {
+		t.Fatalf("record = %+v (found %v), want the cause, workspace and program", r, ok)
+	}
+}
+
+func TestNotifierRecordsAMissingChime(t *testing.T) {
+	// Arrange
+	log := dlog.NewTestLogger()
+	n := New(Deps{
+		Focus: NewFocus(log), Backend: &fakeBackend{}, ChimeErr: errors.New("afplay is not installed"),
+		Clicks: &fakeClicks{}, Names: fakeNames{name: "ws-name"}, Log: log,
+	})
+
+	// Act
+	n.Ring("ws1", KindTurnEnded)
+	n.wg.Wait()
+
+	// Assert
+	r, ok := hasRecord(log, "error", "no chime program; the chime was not played")
+	if !ok || r.Context["cause"] != "afplay is not installed" || r.Context["workspace"] != "ws1" {
+		t.Fatalf("record = %+v (found %v), want the missing program's cause", r, ok)
+	}
+}
+
+func TestNotifierCloseEndsAPlayingChime(t *testing.T) {
+	// Arrange
+	f := newNotifierFixture(t, fakeNames{name: "ws-name"})
+	f.chime.block = make(chan struct{})
+	f.notifier.Ring("ws1", KindTurnEnded)
+
+	// Act
+	f.notifier.Close()
+
+	// Assert
+	if _, ok := hasRecord(f.log, "info", "the daemon stood down while the chime played"); !ok {
+		t.Fatal("a chime cut short by Close left no record")
+	}
+	if _, ok := hasRecord(f.log, "error", "the chime program failed"); ok {
+		t.Fatal("a chime cut short by Close was recorded as a program failure")
+	}
+}
+
+func TestNotifierRingsNothingAfterClose(t *testing.T) {
+	// Arrange
+	f := newNotifierFixture(t, fakeNames{name: "ws-name"})
+	f.notifier.Close()
+
+	// Act
+	f.notifier.Ring("ws1", KindTurnEnded)
+	f.notifier.wg.Wait()
+
+	// Assert
+	if got := f.chime.played(); got != 0 {
+		t.Fatalf("played %d chimes after Close, want none", got)
+	}
+	if _, ok := hasRecord(f.log, "info", "the daemon is standing down; no chime"); !ok {
+		t.Fatal("a chime refused after Close left no record")
+	}
+}
+
 func TestNewRefusesAHalfWiredNotifier(t *testing.T) {
 	cases := []struct {
 		name string
 		deps Deps
 	}{
-		{name: "no focus", deps: Deps{Backend: &fakeBackend{}, Clicks: &fakeClicks{}, Names: fakeNames{}, Log: dlog.NewTestLogger()}},
-		{name: "both backend and error", deps: Deps{Focus: NewFocus(dlog.NewTestLogger()), Backend: &fakeBackend{}, BackendErr: errors.New("x"), Clicks: &fakeClicks{}, Names: fakeNames{}, Log: dlog.NewTestLogger()}},
-		{name: "neither backend nor error", deps: Deps{Focus: NewFocus(dlog.NewTestLogger()), Clicks: &fakeClicks{}, Names: fakeNames{}, Log: dlog.NewTestLogger()}},
+		{name: "no focus", deps: Deps{Backend: &fakeBackend{}, Chime: &fakeChime{}, Clicks: &fakeClicks{}, Names: fakeNames{}, Log: dlog.NewTestLogger()}},
+		{name: "both backend and error", deps: Deps{Focus: NewFocus(dlog.NewTestLogger()), Backend: &fakeBackend{}, BackendErr: errors.New("x"), Chime: &fakeChime{}, Clicks: &fakeClicks{}, Names: fakeNames{}, Log: dlog.NewTestLogger()}},
+		{name: "neither backend nor error", deps: Deps{Focus: NewFocus(dlog.NewTestLogger()), Chime: &fakeChime{}, Clicks: &fakeClicks{}, Names: fakeNames{}, Log: dlog.NewTestLogger()}},
+		{name: "both chime and error", deps: Deps{Focus: NewFocus(dlog.NewTestLogger()), Backend: &fakeBackend{}, Chime: &fakeChime{}, ChimeErr: errors.New("x"), Clicks: &fakeClicks{}, Names: fakeNames{}, Log: dlog.NewTestLogger()}},
+		{name: "neither chime nor error", deps: Deps{Focus: NewFocus(dlog.NewTestLogger()), Backend: &fakeBackend{}, Clicks: &fakeClicks{}, Names: fakeNames{}, Log: dlog.NewTestLogger()}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -18,25 +18,47 @@ import (
 const opDesktopNotify = "daemon.cmd.desktop_notify"
 
 // resolveBannerBackend resolves the platform's banner program once, at boot.
-// A platform with none, or a program that is not installed, is recorded at
-// ERROR and answered as the reason every banner will record: the daemon still
-// serves, and each banner that cannot be posted says why.
 func resolveBannerBackend(log dlog.Logger) (desktopnotify.Backend, error) {
-	platform, err := desktopnotify.PlatformFor(runtime.GOOS)
-	if err == nil {
-		var backend desktopnotify.Backend
-		backend, err = desktopnotify.NewBackend(platform, os.Getenv(desktopnotify.EnvNotifierCmd), exec.LookPath, desktopnotify.ExecRunner{})
-		if err == nil {
-			log.Info(opDesktopNotify, "resolved the desktop banner program", dlog.Context{
-				"program": backend.Program(), "goos": runtime.GOOS,
-			})
-			return backend, nil
-		}
+	return resolveNotifyProgram(log, "banner", desktopnotify.EnvNotifierCmd,
+		func(goos, override string) (desktopnotify.Backend, error) {
+			platform, err := desktopnotify.PlatformFor(goos)
+			if err != nil {
+				return nil, err
+			}
+			return desktopnotify.NewBackend(platform, override, exec.LookPath, desktopnotify.ExecRunner{})
+		})
+}
+
+// resolveChime resolves the platform's turn-end chime player once, at boot.
+func resolveChime(log dlog.Logger) (desktopnotify.Chime, error) {
+	return resolveNotifyProgram(log, "chime", desktopnotify.EnvChimeCmd,
+		func(goos, override string) (desktopnotify.Chime, error) {
+			platform, err := desktopnotify.ChimePlatformFor(goos)
+			if err != nil {
+				return nil, err
+			}
+			return desktopnotify.NewChime(platform, override, exec.LookPath, desktopnotify.ExecRunner{})
+		})
+}
+
+// resolveNotifyProgram builds one of the notifier's programs for this GOOS,
+// overridden by $env when set. A platform with none, or a program that is not
+// installed, is recorded at ERROR and answered as the reason every use will
+// record: the daemon still serves, and each banner or chime that cannot run
+// says why.
+func resolveNotifyProgram[T interface{ Program() string }](log dlog.Logger, role, env string, build func(goos, override string) (T, error)) (T, error) {
+	program, err := build(runtime.GOOS, os.Getenv(env))
+	if err != nil {
+		log.Error(opDesktopNotify, "no desktop "+role+" program; it will not run", dlog.Context{
+			"role": role, "goos": runtime.GOOS, "cause": err.Error(), "override_env": env,
+		})
+		var none T
+		return none, err
 	}
-	log.Error(opDesktopNotify, "no desktop banner program; banners will not be posted", dlog.Context{
-		"goos": runtime.GOOS, "cause": err.Error(), "override_env": desktopnotify.EnvNotifierCmd,
+	log.Info(opDesktopNotify, "resolved the desktop "+role+" program", dlog.Context{
+		"role": role, "program": program.Program(), "goos": runtime.GOOS,
 	})
-	return nil, err
+	return program, nil
 }
 
 // workspaceNames titles a banner by the roster row's name: the workspace's
