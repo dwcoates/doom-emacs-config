@@ -1091,6 +1091,31 @@ That covers what the control does, its confirmation if any, and its limits.
 The guide is how the owner learns a control exists, and a control missing
 from it goes unused. Controls that predate the guide are not backfilled.
 
+## agent-repl names no person: per-user values are configuration
+
+agent-repl is run by more than one person, so no file in it names the person
+who wrote it, and no person's value is a default.
+
+- Organization-level values stay literal.
+  - These are the `@chess.com` domain, GNS, the browser login flow, the `ChessCom` GitHub org, and the `~/.claude-chesscom` work config root.
+- Person-level values are configuration, documented in the Setup section of `docs/USER-GUIDE.md`.
+  - These include account emails, Chrome profiles, the phone hotspot and branch prefixes.
+  - A new per-user value lands with its row in that table, in the same change.
+  - A missing or unmatched value fails loudly and points at that section. In the daemon, build the error with `usersetup.Errorf`.
+- Home paths are never written into code or tests.
+  - Code finds the home at run time.
+  - A synthetic path in a test is a neutral absolute path such as `/work/<probe>`.
+- Recordings are scrubbed when they are written.
+  - `capture.mjs` replaces the operator's home with `${HOME}`, their account emails with `personN@example.com`, and their names with `Someone`.
+  - `scrub-recordings.mjs` does the same to recordings already in the tree.
+  - A reader that replays a recording through code that needs absolute paths expands `${HOME}` first: `expandHome` in `anonymize.mjs`, or `internal/recorded` in the sidecar.
+- `bin/check-personal-values.mjs` fails on any home path, home slug or account email of whoever runs it, anywhere in the module.
+  - Names are checked only when `$CAPTURE_PERSONAL_NAMES` lists them, because a login can be an ordinary word.
+  - `bin/test-check-personal-values.sh` (the `personal-values-harness` suite) covers the check and runs it against the real tree.
+- Two kinds of file are exempt.
+  - Dated reports under `docs/` are a historical record and are not rewritten.
+  - A skill's `lineage_root:` line is the GNS address it was first published under, and stays as published.
+
 ## The editor popup is the one place a file opens
 
 Emacs has ONE path that shows a file or directory the system points at, named

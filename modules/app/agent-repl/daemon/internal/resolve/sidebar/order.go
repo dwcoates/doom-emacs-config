@@ -67,7 +67,7 @@ func priorityBadge(p *wsm.Priority) *frontendv1.RosterRowPriorityBadge {
 // last_selected_at, the registry re-pushes, and the row the user had just
 // landed on hopped to the front of its priority band. Cycling right and then
 // left therefore did not return the user where they started — realtest 4 went
-// explanation-engine → DWC/chess960-review-failures-enm → rt4-bootstrap-1.
+// explanation-engine → ABC/chess960-review-failures-enm → rt4-bootstrap-1.
 // Every individual switch was correct for the order it saw; the order was
 // what moved. Selection changes what is UNDERLINED and nothing about what is
 // where, so no field stamped at selection time may order the bar. The

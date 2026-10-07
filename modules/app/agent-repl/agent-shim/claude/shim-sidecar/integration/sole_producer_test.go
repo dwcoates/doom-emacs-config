@@ -31,7 +31,7 @@ func TestInjectedContextReachesTheAgentsBook(t *testing.T) {
 	store := startRealStore(t)
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
-	cwd := "/Users/dodgecoates/injected-context-probe"
+	cwd := "/work/injected-context-probe"
 	slug := cwdSlug(cwd)
 	session := "c1b1c1b1-c1b1-4c1b-8c1b-c1b1c1b1c1b1"
 	memory := retargetSession(t,
@@ -68,7 +68,7 @@ func TestTheSidecarNeverAnnouncesDetachedWork(t *testing.T) {
 	defer cancel()
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
-	fx := seedDetachedShell(t, tree, "/Users/dodgecoates/no-announcement-probe",
+	fx := seedDetachedShell(t, tree, "/work/no-announcement-probe",
 		"c2b2c2b2-c2b2-4c2b-8c2b-c2b2c2b2c2b2")
 
 	// Act: the whole detached lifecycle, which is where an announcement would
@@ -101,7 +101,7 @@ func TestABashRunsHandleIsItsSpawningCall(t *testing.T) {
 	defer cancel()
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
-	fx := seedDetachedShell(t, tree, "/Users/dodgecoates/handle-identity-probe",
+	fx := seedDetachedShell(t, tree, "/work/handle-identity-probe",
 		"c3b3c3b3-c3b3-4c3b-8c3b-c3b3c3b3c3b3")
 
 	// Act.

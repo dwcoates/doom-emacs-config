@@ -13,8 +13,8 @@ import (
 const twoProfiles = `{
   "profile": {
     "info_cache": {
-      "Default":   {"user_name": "dodge.w.coates@gmail.com", "gaia_name": "Dodge Personal"},
-      "Profile 6": {"user_name": "dodge@chess.com",          "gaia_name": "Dodge Work"}
+      "Default":   {"user_name": "personal@example.com", "gaia_name": "Personal"},
+      "Profile 1": {"user_name": "work@example.com",     "gaia_name": "Work"}
     }
   }
 }`
@@ -30,22 +30,22 @@ func TestProfileForEmail(t *testing.T) {
 		{
 			name:        "personal email routes to its profile",
 			data:        twoProfiles,
-			email:       "dodge.w.coates@gmail.com",
+			email:       "personal@example.com",
 			wantProfile: "Default",
 			wantMatched: true,
 		},
 		{
 			name:        "work email routes to a different profile",
 			data:        twoProfiles,
-			email:       "dodge@chess.com",
-			wantProfile: "Profile 6",
+			email:       "work@example.com",
+			wantProfile: "Profile 1",
 			wantMatched: true,
 		},
 		{
 			name:        "the match is case-insensitive",
 			data:        twoProfiles,
-			email:       "DODGE@CHESS.COM",
-			wantProfile: "Profile 6",
+			email:       "WORK@EXAMPLE.COM",
+			wantProfile: "Profile 1",
 			wantMatched: true,
 		},
 		{
@@ -57,8 +57,8 @@ func TestProfileForEmail(t *testing.T) {
 		},
 		{
 			name:        "gaia_name is a display name and is not matched on",
-			data:        `{"profile":{"info_cache":{"Profile 3":{"gaia_name":"dodge@chess.com"}}}}`,
-			email:       "dodge@chess.com",
+			data:        `{"profile":{"info_cache":{"Profile 3":{"gaia_name":"work@example.com"}}}}`,
+			email:       "work@example.com",
 			wantMatched: false,
 		},
 		{
@@ -76,7 +76,7 @@ func TestProfileForEmail(t *testing.T) {
 		{
 			name:        "a malformed document matches nothing",
 			data:        `{not json`,
-			email:       "dodge@chess.com",
+			email:       "work@example.com",
 			wantMatched: false,
 		},
 	}

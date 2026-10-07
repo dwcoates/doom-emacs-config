@@ -60,7 +60,7 @@ func TestASidechainWithoutItsMetaIsHeldRatherThanIngested(t *testing.T) {
 	defer cancel()
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
-	cwd := "/Users/dodgecoates/subagent-hold-probe"
+	cwd := "/work/subagent-hold-probe"
 	slug := cwdSlug(cwd)
 	session := "33333333-3333-4333-8333-333333333333"
 	opts := defaultSidecarOptions(t, fake.Socket, tree)
@@ -96,7 +96,7 @@ func TestASidechainIsIngestedOnceItsMetaAppears(t *testing.T) {
 	defer cancel()
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
-	cwd := "/Users/dodgecoates/subagent-meta-probe"
+	cwd := "/work/subagent-meta-probe"
 	slug := cwdSlug(cwd)
 	session := "44444444-4444-4444-8444-444444444444"
 
@@ -122,7 +122,7 @@ func TestASubagentsFramesFormItsOwnBook(t *testing.T) {
 	defer cancel()
 	store := startRealStore(t)
 	tree := newVendorTree(t)
-	cwd := "/Users/dodgecoates/subagent-book-probe"
+	cwd := "/work/subagent-book-probe"
 	slug := cwdSlug(cwd)
 	session := "55555555-5555-4555-8555-555555555555"
 
@@ -150,7 +150,7 @@ func TestASubagentsBookIsNotItsFileName(t *testing.T) {
 	defer cancel()
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
-	cwd := "/Users/dodgecoates/subagent-locator-probe"
+	cwd := "/work/subagent-locator-probe"
 	slug := cwdSlug(cwd)
 	session := "5b5b5b5b-5b5b-45b5-85b5-5b5b5b5b5b5b"
 
@@ -181,7 +181,7 @@ func TestASubagentsFramesNameTheSessionsMainAgentAsTopLevel(t *testing.T) {
 	defer cancel()
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
-	cwd := "/Users/dodgecoates/subagent-toplevel-probe"
+	cwd := "/work/subagent-toplevel-probe"
 	slug := cwdSlug(cwd)
 	session := "66666666-6666-4666-8666-666666666666"
 
@@ -223,7 +223,7 @@ func TestASubagentsFirstUserMessageIsWithheld(t *testing.T) {
 	defer cancel()
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
-	cwd := "/Users/dodgecoates/subagent-prompt-probe"
+	cwd := "/work/subagent-prompt-probe"
 	slug := cwdSlug(cwd)
 	session := "77777777-7777-4777-8777-777777777777"
 	// The withheld-record accounts are verbose, so the subject asks for them.

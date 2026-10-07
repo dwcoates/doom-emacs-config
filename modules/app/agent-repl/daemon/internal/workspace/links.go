@@ -16,9 +16,9 @@ import (
 	"claude-repld/internal/wsm"
 )
 
-// OpenExternal opens a clicked link in the PINNED external browser profile. A
-// clicked link never navigates the webview, and it never lands in whatever
-// window happened to be frontmost.
+// OpenExternal opens a clicked link in the Chrome profile the session's
+// account signs in as. A clicked link never navigates the webview, and it never
+// lands in whatever window happened to be frontmost.
 func (v *verbs) OpenExternal(ctx context.Context, ws ids.WorkspaceID, link string) error {
 	record, log, err := v.owned(ctx, "OpenExternal", ws)
 	if err != nil {
@@ -36,18 +36,19 @@ func (v *verbs) OpenExternal(ctx context.Context, ws ids.WorkspaceID, link strin
 	// ROUTE THE CHROME PROFILE BY THE SESSION'S ACCOUNT. The account in force
 	// is the reader's choice first, then the routing the path decides
 	// (accountRoot), so a link opens in the SAME Chrome window — personal or
-	// work — the session spends from. A failure to determine the account is
-	// not a reason to leave the click unanswered: it routes to the pinned
-	// default profile and says so loudly, because the browser resolves the
-	// profile-to-window mapping and a missing account only costs the routing.
-	profile := v.openExternalProfile(ctx, log, record)
-	if err := v.deps.Browser.Open(ctx, link, profile); err != nil {
-		// A launcher that would not run is a LANDED arm, not an internal
-		// error: OpenExternalError.launch_failed carries the launcher's own
-		// account of the failure in `detail`, so the click is answered rather
-		// than collapsed into CodeInternal.
-		log.Warn(opOpenExternal, "the external browser did not open the link", dlog.Context{
-			"url": link, "cause": err.Error(),
+	// work — the session spends from. An account that cannot be determined
+	// fails the click: there is no default profile to send it to instead.
+	email, err := v.openExternalAccount(ctx, record)
+	if err == nil {
+		err = v.deps.Browser.Open(ctx, link, email)
+	}
+	if err != nil {
+		// A launch that could not happen is a LANDED arm, not an internal
+		// error: OpenExternalError.launch_failed carries the cause in
+		// `detail`, so the click is answered rather than collapsed into
+		// CodeInternal.
+		log.Error(opOpenExternal, "the external browser did not open the link", dlog.Context{
+			"workspace": string(record.ID), "url": link, "email": email, "cause": err.Error(),
 		})
 		return refuseWith(log, "OpenExternal", ArmLaunchFailed,
 			fmt.Sprintf("the external browser did not open %q: %v", link, err), false,
@@ -57,32 +58,20 @@ func (v *verbs) OpenExternal(ctx context.Context, ws ids.WorkspaceID, link strin
 	return nil
 }
 
-// openExternalProfile resolves the Chrome profile a clicked link opens in for
-// the workspace's session.
-//
-// The account in force is accountRoot's — the reader's SelectAccount choice
-// first, then the path routing — so the profile follows the account the
-// session actually spends from, not merely the path it lives on. Every step
-// that cannot answer (a session or account root that will not read) falls back
-// to an empty account, which the opener routes to its pinned default profile
-// and logs. Nothing here fails the click: the profile only decides WHICH
-// browser window a link lands in.
-func (v *verbs) openExternalProfile(ctx context.Context, log dlog.Logger, record wsm.Workspace) string {
+// openExternalAccount answers the email of the account the workspace's session
+// spends from: the account root accountRoot resolves, read for its signed-in
+// address. A logged-out root answers an empty email, which is a state and not
+// a failure. A root or account that will not read is an error.
+func (v *verbs) openExternalAccount(ctx context.Context, record wsm.Workspace) (string, error) {
 	configDir, err := v.accountRoot(ctx, record)
 	if err != nil {
-		log.Warn(opOpenExternal, "could not resolve the session's account root; routing the link to the default browser profile", dlog.Context{
-			"workspace": string(record.ID), "cause": err.Error(),
-		})
-		return v.deps.Browser.ProfileForAccount("")
+		return "", fmt.Errorf("resolving the session's account root: %w", err)
 	}
 	acct, err := v.deps.Accounts.Read(ctx, configDir)
 	if err != nil {
-		log.Warn(opOpenExternal, "could not read the session's account; routing the link to the default browser profile", dlog.Context{
-			"workspace": string(record.ID), "config_dir": configDir, "cause": err.Error(),
-		})
-		return v.deps.Browser.ProfileForAccount("")
+		return "", fmt.Errorf("reading the session's account in %s: %w", configDir, err)
 	}
-	return v.deps.Browser.ProfileForAccount(acct.Email)
+	return acct.Email, nil
 }
 
 // OpenInEditor RELAYS a web link click onto the workspace's host stream

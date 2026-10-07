@@ -7,7 +7,7 @@
 // crossed the wire (store.v1 envelopes around conversation.v1 facts, read back
 // from the store's own read verbs) or on the sidecar's structured log. The
 // vendor's files are BUILT here — copied from testdata/corpus and the captured
-// transcript under modules/app/agent-repl/projects/ into vendor-shaped trees —
+// transcript under modules/app/agent-repl/testdata/projects/ into vendor-shaped trees —
 // and GROWN line by line with an fsync after each append, so the sidecar sees
 // exactly what a writing vendor produces.
 //
@@ -49,6 +49,7 @@ import (
 	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/proto/store/v1/storev1connect"
 	"agentrepl/shim-claude-sidecar/internal/convert"
+	"agentrepl/shim-claude-sidecar/internal/recorded"
 	"agentrepl/shim-claude-sidecar/internal/testclose"
 	"agentrepl/testrun/testenv"
 )
@@ -115,7 +116,7 @@ type layout struct {
 	lockDir        string // .../agent-shim/shim-lock
 	moduleRoot     string // .../modules/app/agent-repl
 	corpusDir      string // .../modules/app/agent-repl/testdata/corpus
-	projectsDir    string // .../modules/app/agent-repl/projects
+	projectsDir    string // .../modules/app/agent-repl/testdata/projects
 }
 
 func resolveLayout() (layout, error) {
@@ -130,7 +131,7 @@ func resolveLayout() (layout, error) {
 	l.lockDir = filepath.Join(l.agentShimDir, "shim-lock")
 	l.moduleRoot = filepath.Dir(l.agentShimDir)
 	l.corpusDir = filepath.Join(l.moduleRoot, "testdata", "corpus")
-	l.projectsDir = filepath.Join(l.moduleRoot, "projects")
+	l.projectsDir = filepath.Join(l.moduleRoot, "testdata", "projects")
 	for name, dir := range map[string]string{
 		"sidecar module":         l.sidecarDir,
 		"store module":           l.storeDir,
@@ -543,10 +544,33 @@ func fileID(t *testing.T, path string) string {
 // Fixtures: the golden corpus and the captured session transcript.
 // ---------------------------------------------------------------------------
 
-// corpusLines returns every non-empty line of a corpus fixture, verbatim.
+// corpusLines returns every non-empty line of a corpus fixture, replayed as
+// this machine would have recorded it (see recordedLines).
 func corpusLines(t *testing.T, rel string) []string {
 	t.Helper()
-	return readLines(t, filepath.Join(repo.corpusDir, rel))
+	return recordedLines(t, filepath.Join(repo.corpusDir, rel))
+}
+
+// recordingHome is the home a recording is replayed under: this machine's.
+func recordingHome(t *testing.T) string {
+	t.Helper()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("resolve the home directory to replay recordings under: %v", err)
+	}
+	return home
+}
+
+// recordedLines is readLines over a committed recording, with its home token
+// expanded (internal/recorded), so every recorded path is absolute again.
+func recordedLines(t *testing.T, path string) []string {
+	t.Helper()
+	home := recordingHome(t)
+	lines := readLines(t, path)
+	for i, line := range lines {
+		lines[i] = recorded.Expand(line, home)
+	}
+	return lines
 }
 
 // corpusLine returns one line of a corpus fixture, verbatim.
@@ -572,7 +596,7 @@ func corpusBytes(t *testing.T, rel string) []byte {
 	if err != nil {
 		t.Fatalf("read corpus fixture %s: %v", rel, err)
 	}
-	return b
+	return []byte(recorded.Expand(string(b), recordingHome(t)))
 }
 
 // capturedSession names the one real transcript checked into the repository:
@@ -602,9 +626,9 @@ func loadCapturedSession(t *testing.T) capturedSession {
 				continue
 			}
 			return capturedSession{
-				Slug:    e.Name(),
+				Slug:    recorded.Expand(e.Name(), recordingHome(t)),
 				Session: strings.TrimSuffix(f.Name(), ".jsonl"),
-				Lines:   readLines(t, filepath.Join(repo.projectsDir, e.Name(), f.Name())),
+				Lines:   recordedLines(t, filepath.Join(repo.projectsDir, e.Name(), f.Name())),
 			}
 		}
 	}
@@ -2828,7 +2852,7 @@ func backgroundLaunchText(taskID, spoolPath string) string {
 //
 // Every other fixture in this suite is a real vendor record re-pointed at the
 // test's session; this one is INVENTED, because no capture in
-// testdata/corpus/ or under projects/ contains an `isCompactSummary` record at
+// testdata/corpus/ or under testdata/projects/ contains an `isCompactSummary` record at
 // all (grep the trees: there is not one). The production converter's
 // compactSummaryText reads `type == "user"` and `isCompactSummary == true` and
 // takes the summary out of `message.content`, so that much is pinned by the
@@ -3011,7 +3035,7 @@ func TestCwdSlugMatchesTheCapturedProjectDirectory(t *testing.T) {
 	t.Parallel()
 	// Arrange.
 	captured := loadCapturedSession(t)
-	cwd := "/Users/dodgecoates/.config/doom-worktrees/bounce-continuity-probe-hhj"
+	cwd := filepath.Join(recordingHome(t), ".config", "doom-worktrees", "bounce-continuity-probe-hhj")
 
 	// Act.
 	got := cwdSlug(cwd)
@@ -3044,13 +3068,13 @@ func TestCwdSlugReplacesEveryNonAlphanumericByte(t *testing.T) {
 func TestCwdSlugPreservesCase(t *testing.T) {
 	t.Parallel()
 	// Arrange.
-	cwd := "/Users/DodgeCoates/Repo9"
+	cwd := "/Work/MixedCase/Repo9"
 
 	// Act.
 	got := cwdSlug(cwd)
 
 	// Assert.
-	if want := "-Users-DodgeCoates-Repo9"; got != want {
+	if want := "-Work-MixedCase-Repo9"; got != want {
 		t.Fatalf("cwdSlug(%q) = %q, wanted %q", cwd, got, want)
 	}
 }
@@ -3135,7 +3159,7 @@ func TestVendorTreeMatchesTheDiscoveredPathShapes(t *testing.T) {
 	t.Parallel()
 	// Arrange.
 	tree := newVendorTree(t)
-	slug := cwdSlug("/Users/dodgecoates/layout-probe")
+	slug := cwdSlug("/work/layout-probe")
 	session := "0e0e0e0e-0e0e-40e0-80e0-0e0e0e0e0e0e"
 	agent := "aef975b7bc3422d4b"
 	task := "b17"
@@ -3182,7 +3206,7 @@ func TestTheSpoolRootIsTheParentOfTheUidSegment(t *testing.T) {
 	t.Parallel()
 	// Arrange.
 	tree := newVendorTree(t)
-	slug := cwdSlug("/Users/dodgecoates/spool-root-probe")
+	slug := cwdSlug("/work/spool-root-probe")
 	session := "0f0f0f0f-0f0f-40f0-80f0-0f0f0f0f0f0f"
 
 	// Act.

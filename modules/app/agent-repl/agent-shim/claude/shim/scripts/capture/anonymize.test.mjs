@@ -4,6 +4,7 @@
  * The rules under test are `testdata/corpus/MANIFEST.md`'s, one test per rule
  * and one test per edge case, so a failure names the rule that broke.
  */
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -20,6 +21,11 @@ import {
   redactSecretRuns,
   truncateBlob,
   truncateLong,
+  NO_PERSONAL_VALUES,
+  expandHome,
+  pathSlug,
+  scrubPersonal,
+  scrubbedEmail,
 } from "./anonymize.mjs";
 
 describe("isSecretKey", () => {
@@ -241,5 +247,77 @@ describe("anonymizePlainText", () => {
   it("does NOT truncate a long spool", () => {
     const spool = `${"tick\n".repeat(5000)}EXIT=0\n`;
     expect(anonymizePlainText(spool)).toBe(spool);
+  });
+});
+
+describe("scrubPersonal", () => {
+  const personal = {
+    home: "/Users/annexample",
+    emails: ["Ann.Example@mail.test", "ann@work.test"],
+    names: ["ann", "annexample", "Example"],
+  };
+  const cases = [
+    { name: "the home directory becomes the home token", text: "/Users/annexample/.config/x", want: "${HOME}/.config/x" },
+    { name: "the home's slug becomes the token's slug", text: "-Users-annexample--config-x", want: "--HOME---config-x" },
+    { name: "an email becomes a numbered example address", text: "to ann@work.test.", want: `to ${scrubbedEmail(1)}.` },
+    { name: "an email matches case-insensitively", text: "ann.example@MAIL.test", want: scrubbedEmail(0) },
+    { name: "a capitalized name keeps its capital", text: "Ann's notes", want: "Someone's notes" },
+    { name: "a lowercase name stays lowercase", text: "github.com/annexample", want: "github.com/someone" },
+    { name: "a name inside a longer word is left alone", text: "annual", want: "annual" },
+    { name: "text with no personal value is unchanged", text: "plain text", want: "plain text" },
+  ];
+  for (const tc of cases) {
+    it(tc.name, () => {
+      expect(scrubPersonal(tc.text, personal)).toBe(tc.want);
+    });
+  }
+
+  it("scrubs nothing with no personal values", () => {
+    expect(scrubPersonal("/Users/annexample Ann", NO_PERSONAL_VALUES)).toBe("/Users/annexample Ann");
+  });
+
+  it("keeps a recorded path and its project directory in agreement", () => {
+    const cwd = "/Users/annexample/proj";
+    expect(pathSlug(scrubPersonal(cwd, personal))).toBe(scrubPersonal(pathSlug(cwd), personal));
+  });
+});
+
+describe("expandHome", () => {
+  // The vectors are shared with the sidecar's recorded.Expand, so the two
+  // expansions cannot drift apart.
+  const shared = JSON.parse(readFileSync(new URL("./home-token-vectors.json", import.meta.url), "utf8"));
+  for (const tc of shared.vectors) {
+    it(tc.name, () => {
+      expect(expandHome(tc.text, shared.home)).toBe(tc.want);
+    });
+  }
+
+  it("undoes the home rule of scrubPersonal", () => {
+    const personal = { home: "/Users/bo", emails: [], names: [] };
+    const text = '{"cwd":"/Users/bo/p","dir":"-Users-bo-p"}';
+    expect(expandHome(scrubPersonal(text, personal), "/Users/bo")).toBe(text);
+  });
+});
+
+describe("the anonymizer applies scrubPersonal", () => {
+  const personal = { home: "/Users/ann", emails: [], names: ["ann"] };
+
+  it("to string values and to object keys", () => {
+    expect(anonymize({ "/Users/ann/p": { who: "Ann" } }, undefined, personal)).toEqual({
+      "${HOME}/p": { who: "Someone" },
+    });
+  });
+
+  it("to every JSONL line", () => {
+    expect(anonymizeJsonl('{"cwd":"/Users/ann"}\n', () => {}, personal)).toBe('{"cwd":"${HOME}"}\n');
+  });
+
+  it("to plain text", () => {
+    expect(anonymizePlainText("cd /Users/ann && echo Ann", personal)).toBe("cd ${HOME} && echo Someone");
+  });
+
+  it("before truncation, so the truncated prefix names nobody", () => {
+    const text = `/Users/ann/${"x".repeat(MAX_STRING_CHARS)}`;
+    expect(anonymizeString(text, "content", personal).startsWith("${HOME}/x")).toBe(true);
   });
 });

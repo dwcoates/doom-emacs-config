@@ -33,7 +33,7 @@ func TestAWorkflowPerAgentTranscriptIsClassifiedAsDeclaredWorkflowResidue(t *tes
 	defer cancel()
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
-	cwd := "/Users/dodgecoates/workflow-agent-transcript-probe"
+	cwd := "/work/workflow-agent-transcript-probe"
 	slug := cwdSlug(cwd)
 	session := "a8a8a8a8-a8a8-4a8a-8a8a-a8a8a8a8a8a8"
 	runDir := filepath.Join(tree.projectDir(slug), session, "subagents", "workflows", "wf_0002")

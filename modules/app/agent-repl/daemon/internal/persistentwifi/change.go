@@ -6,6 +6,9 @@ import (
 	"strings"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
+
+	"claude-repld/internal/dlog"
+	"claude-repld/internal/usersetup"
 )
 
 // Brightness levels the display step sets: dimmed to the second gradation
@@ -19,6 +22,17 @@ const (
 // sleep disabled outright, the network kept up over sleep, and wake on network
 // access. The sudoers grant names each of these exact invocations.
 var powerSettings = []string{"disablesleep", "networkoversleep", "womp"}
+
+// noHotspotConfigured is the hotspot step of a host that named no hotspot. It
+// is a configuration fault, recorded at ERROR and answered as a failed hotspot
+// step whose detail names the variable and the user guide; the power step runs
+// regardless, exactly as it does after any other failed hotspot step.
+func (c *Controller) noHotspotConfigured(on bool) *agentreplv1.UpdatePersistentWifiModeHotspot {
+	err := usersetup.Errorf("persistentwifi: no hotspot is configured; set %s to the phone hotspot's name", EnvHotspot)
+	c.log.Error(opUpdate, "no hotspot is configured; the hotspot step was skipped and the power step runs regardless",
+		dlog.Context{"on": on, "env": EnvHotspot, "cause": err.Error()})
+	return &agentreplv1.UpdatePersistentWifiModeHotspot{Outcome: hotspotFailed("", err.Error())}
+}
 
 // joinHotspot is the ON half of the hotspot step. A failure to join is an
 // outcome, never an error: staying awake on whatever network is present is
