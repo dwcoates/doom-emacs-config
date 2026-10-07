@@ -188,6 +188,59 @@ func TestAFocusedEmacsGetsNoBanner(t *testing.T) {
 	}
 }
 
+// awaitChimePlayed waits for the daemon's record that a chime finished, and
+// answers every chime argv played so far.
+func awaitChimePlayed(t *testing.T, f *fixture, what string) [][]string {
+	t.Helper()
+	f.d.AwaitLogRecord(f.d.RunLogPath(), what, func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.desktopnotify.chime" && r.Message == "the chime played"
+	})
+	var argvs [][]string
+	for _, inv := range f.d.Chime.Invocations() {
+		argvs = append(argvs, inv.Argv)
+	}
+	return argvs
+}
+
+// TestATurnEndRingsTheChimeInAFocusedEmacs pins that the turn-end chime is not
+// decided on focus: a focused Emacs gets no banner but still hears the turn end.
+func TestATurnEndRingsTheChimeInAFocusedEmacs(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	f.d.WatchEmacsDaemonStream(harness.FocusedEditor())
+	f.submit("go", "k-chime-focused", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+
+	// Act
+	pushConcludedTurn(f.shim, mainAgent, "answer-1")
+
+	// Assert
+	if argvs := awaitChimePlayed(t, f, "the focused turn's chime"); len(argvs) != 1 {
+		t.Fatalf("chimes %q, want exactly one", argvs)
+	}
+}
+
+// TestATurnEndBannerIsSilentBesideItsChime pins that an unfocused Emacs hears a
+// turn end once: the chime rings and the banner carries no sound of its own.
+func TestATurnEndBannerIsSilentBesideItsChime(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	f.submit("go", "k-chime-unfocused", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+
+	// Act
+	pushConcludedTurn(f.shim, mainAgent, "answer-1")
+
+	// Assert
+	if argvs := awaitChimePlayed(t, f, "the unfocused turn's chime"); len(argvs) != 1 {
+		t.Fatalf("chimes %q, want exactly one", argvs)
+	}
+	argvs := awaitBannerSettled(t, f, "the silent turn banner")
+	if !bannerCarrying(argvs, "turn completed") || bannerCarrying(argvs, "--sound") {
+		t.Fatalf("banners %q, want the turn's banner with no sound flag", argvs)
+	}
+}
+
 // TestReportEditorFocusMovesTheBannerDecision pins that a report moves the
 // focus the next banner is decided on.
 func TestReportEditorFocusMovesTheBannerDecision(t *testing.T) {
