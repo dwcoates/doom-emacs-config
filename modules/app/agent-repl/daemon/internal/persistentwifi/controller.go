@@ -80,8 +80,6 @@ func New(d Deps) (*Controller, error) {
 		return nil, fmt.Errorf("persistentwifi: a logger is required")
 	case d.Every < 0:
 		return nil, fmt.Errorf("persistentwifi: the re-read cadence must not be negative, got %s", d.Every)
-	case d.Config.Hotspot == "":
-		return nil, fmt.Errorf("persistentwifi: a hotspot name is required")
 	}
 	every := d.Every
 	if every == 0 {
@@ -207,12 +205,16 @@ func (c *Controller) Update(ctx context.Context, req *agentreplv1.UpdatePersiste
 		panic(fmt.Sprintf("persistentwifi: Update was handed an unvalidated action %T", req.GetAction()))
 	}
 
-	hotspot := c.leaveHotspot
-	if on {
-		hotspot = c.joinHotspot
+	var hotspotOutcome *agentreplv1.UpdatePersistentWifiModeHotspot
+	switch {
+	case c.cfg.Hotspot == "":
+		hotspotOutcome = c.noHotspotConfigured(on)
+	case on:
+		hotspotOutcome = c.joinHotspot(ctx, before)
+	default:
+		hotspotOutcome = c.leaveHotspot(ctx, before)
 	}
-	hotspotOutcome := hotspot(ctx, before)
-	if failed := hotspotOutcome.GetFailed(); failed != nil {
+	if failed := hotspotOutcome.GetFailed(); failed != nil && c.cfg.Hotspot != "" {
 		c.log.Warn(opUpdate, "the hotspot step did not take; the power step runs regardless",
 			dlog.Context{"on": on, "hotspot": failed.GetNetworkName(), "cause": failed.GetDetail()})
 	}
