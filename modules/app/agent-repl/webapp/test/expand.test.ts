@@ -630,6 +630,17 @@ describe("installClickExpand", () => {
     expect(box.classList.contains(EXPANDED_CLASS)).toBe(false);
   });
 
+  it.each(["textarea", "input", "select"])("leaves a click on a %s inside the section to the field", (tag) => {
+    // Arrange — a text field places its caret on a click; folding the
+    // section shut under it would take the field away mid-edit.
+    const { feed: el, box } = mountFeed(`<${tag} id="f"></${tag}>`);
+    installClickExpand(el, () => "");
+    // Act
+    (el.querySelector("#f") as HTMLElement).dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    // Assert
+    expect(box.classList.contains(EXPANDED_CLASS)).toBe(false);
+  });
+
   it("leaves a click that ends a text selection alone", () => {
     // Arrange — the selection probe reports live selected text.
     const { feed: el, box } = mountFeed("body text");

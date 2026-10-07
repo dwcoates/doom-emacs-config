@@ -5075,6 +5075,35 @@ ar-button.outcome-marker-pill {
   margin-top: 0.35rem;
   font-size: 0.75rem;
 }
+/* A classified held card's "Update classifier" form (tray/classifier-update.ts):
+   the reader's instruction, its two controls drawn as the card's own, and the
+   outcome under them. */
+.classifier-update { margin-top: 0.5rem; }
+.classifier-update[hidden], .classifier-update-status[hidden] { display: none; }
+.classifier-update-input {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  font: inherit;
+  cursor: text;
+  padding: 0.3rem 0.45rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+}
+.classifier-update-actions { display: flex; gap: 0.5rem; margin-top: 0.35rem; }
+.classifier-update-actions ar-button {
+  cursor: pointer;
+  font: inherit;
+  padding: 0.15rem 0.6rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+}
+.classifier-update-actions ar-button[aria-disabled="true"] { cursor: not-allowed; opacity: 0.5; }
+.classifier-update-status { margin-top: 0.35rem; font-size: 0.75rem; }
 
 /* The parked question, sharing the merge-dequeue card's alarm frame. It is
    the same statement — a button here destroys work — so it is the same look,

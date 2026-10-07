@@ -4,10 +4,11 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"claude-repld/internal/atomicfile"
 )
 
 // Write drops one command file into the ingress directory dir, as every
@@ -36,26 +37,8 @@ func Write(dir string, entries []Entry) (string, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", fmt.Errorf("commandfile: create %q: %w", dir, err)
 	}
-	tmp, err := os.CreateTemp(dir, ".workspace_commands_*.json")
-	if err != nil {
-		return "", fmt.Errorf("commandfile: create a temp file in %q: %w", dir, err)
-	}
-	tmpPath := tmp.Name()
-	_, writeErr := tmp.Write(data)
-	if err := errors.Join(writeErr, tmp.Close()); err != nil {
-		return "", discard(tmpPath, fmt.Errorf("commandfile: write %q: %w", tmpPath, err))
-	}
-	if err := os.Rename(tmpPath, filepath.Join(dir, name)); err != nil {
-		return "", discard(tmpPath, fmt.Errorf("commandfile: publish %q: %w", name, err))
+	if err := atomicfile.Replace(filepath.Join(dir, name), data, atomicfile.Options{Pattern: ".workspace_commands_*.json"}); err != nil {
+		return "", fmt.Errorf("commandfile: publish %q: %w", name, err)
 	}
 	return name, nil
-}
-
-// discard removes the temp file a failed write left behind and answers the
-// failure, with a failed removal joined to it rather than dropped.
-func discard(path string, cause error) error {
-	if err := os.Remove(path); err != nil {
-		return errors.Join(cause, fmt.Errorf("commandfile: remove %q: %w", path, err))
-	}
-	return cause
 }

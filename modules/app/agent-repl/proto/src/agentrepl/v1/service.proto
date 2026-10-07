@@ -58,6 +58,7 @@ import "agentrepl/v1/endpoint_watch_daemon_holds.proto";
 import "agentrepl/v1/endpoint_update_held_prompt.proto";
 import "agentrepl/v1/endpoint_edit_held_prompt.proto";
 import "agentrepl/v1/endpoint_fold_held_prompt.proto";
+import "agentrepl/v1/endpoint_update_classifier_prompt.proto";
 import "agentrepl/v1/endpoint_answer_held_offer.proto";
 import "agentrepl/v1/endpoint_deploy.proto";
 import "agentrepl/v1/endpoint_dismiss_news_digest.proto";
@@ -247,6 +248,12 @@ service AgentRepl {
   // is appended to that entry and it leaves the queue, in one transaction. See
   // endpoint_fold_held_prompt.proto.
   rpc FoldHeldPrompt(FoldHeldPromptRequest) returns (FoldHeldPromptResponse);
+
+  // A classified held card's "update classifier" control: a headless model
+  // rewrites the routing classifier's brief to carry the user's change, and
+  // the daemon commits that one file. See
+  // endpoint_update_classifier_prompt.proto.
+  rpc UpdateClassifierPrompt(UpdateClassifierPromptRequest) returns (UpdateClassifierPromptResponse);
 
   // Answer a question the daemon parked in the tray. See
   // endpoint_answer_held_offer.proto.

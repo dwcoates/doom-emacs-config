@@ -18,6 +18,7 @@ import { createAgentReplClient } from "../../src/rpc/client.js";
 import { testAppContext } from "../rpc/app-context.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import type { TrayContext } from "../../src/tray/context.js";
+import { testTrayContext } from "./tray-context.js";
 import { answerHeldOfferRefusal, drawHeldOffer } from "../../src/tray/held-offer.js";
 
 const WORKSPACE = create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" });
@@ -57,7 +58,7 @@ function trayContext(
     failures: SINK,
     composerEnabled: false,
   });
-  return { tc: { ctx, onDispose: () => undefined }, seen };
+  return { tc: testTrayContext(ctx), seen };
 }
 
 const offer = (): HeldOffer =>

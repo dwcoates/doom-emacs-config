@@ -1,0 +1,126 @@
+// endpoint_update_classifier_prompt.proto — UpdateClassifierPrompt: a held
+// card's "update classifier" control. HELD TRAY section.
+//
+// A prompt the routing classifier held (interject, after this tool call, or
+// wait for the turn's end) offers the reader a way to change HOW the
+// classifier decides: they say the change in their own words, and the DAEMON
+// has a headless model rewrite the routing brief
+// (`prompts/queue-routing-classifier.md`) to carry it, then COMMITS that one
+// file. The next classification reads the rewritten brief, since every brief
+// is read at use time.
+//
+// DAEMON-GLOBAL, NOT PER-WORKSPACE. There is one routing brief per daemon, so
+// the request names no workspace: the card it was asked from contributes only
+// the worked example the rewrite is shown.
+//
+// ONLY THAT CHANGE, ONLY THAT FILE. The daemon refuses to rewrite a brief
+// that already carries uncommitted edits, and it commits the brief's path
+// alone, so the commit holds exactly the rewrite and nothing else staged in
+// the checkout. A rewrite that would break the brief (a placeholder lost or
+// invented, an empty body) is refused before anything is written, and a
+// commit that fails puts the file back the way it was.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message UpdateClassifierPromptRequest {
+  // The change the user wants, in their own words ("always interrupt when a
+  // prompt says something must happen after something else"). REQUIRED and
+  // never blank once trimmed: a blank one is Connect InvalidArgument.
+  string instruction = 1;
+  // The held prompt the change was asked from, as its card showed it.
+  // REQUIRED: the control is drawn only on a classified card, so there is
+  // always one.
+  ClassifiedPromptExample example = 2;
+}
+
+// A prompt the classifier judged, shown to the rewrite as the case the
+// user's instruction is about.
+message ClassifiedPromptExample {
+  // What the user said, the text blocks joined as typed. May be empty: a
+  // prompt that was only an image still had a verdict.
+  string text = 1;
+  // The verdict the classifier gave it. Never UNSPECIFIED (InvalidArgument).
+  ClassifierRoute route = 2;
+}
+
+// The classifier's three verdicts, as the held card's classification arms
+// name them.
+enum ClassifierRoute {
+  CLASSIFIER_ROUTE_UNSPECIFIED = 0;
+  // HeldPrompt.interject: the running turn is interrupted for it.
+  CLASSIFIER_ROUTE_INTERRUPT = 1;
+  // HeldPrompt.after_tool_call: it joins the running turn after the current
+  // tool call.
+  CLASSIFIER_ROUTE_AFTER_TOOL_CALL = 2;
+  // HeldPrompt.hold_for_turn_end: it waits for the running turn to end.
+  CLASSIFIER_ROUTE_HOLD_FOR_TURN_END = 3;
+}
+
+// THE ARM IS THE OUTCOME.
+message UpdateClassifierPromptResponse {
+  oneof result {
+    UpdateClassifierPromptSuccess success = 1;
+    UpdateClassifierPromptError error = 2;
+  }
+}
+
+// The brief was rewritten and the rewrite committed.
+message UpdateClassifierPromptSuccess {
+  // The commit that recorded the rewrite: its full sha.
+  string commit = 1;
+  // The brief that changed: its absolute path.
+  string path = 2;
+}
+
+// Every arm means the brief on disk is exactly what it was before the
+// request. Validation failures (a blank instruction, no example, an
+// UNSPECIFIED route) are Connect InvalidArgument, never an arm.
+message UpdateClassifierPromptError {
+  oneof cause {
+    // Another update is already running. Updates run one at a time, so two
+    // rewrites can never be made from the same starting brief.
+    UpdateClassifierPromptInProgress in_progress = 1;
+    // The brief carries edits nobody has committed. A rewrite committed over
+    // them would commit them too, so nothing is rewritten.
+    UpdateClassifierPromptUncommittedChanges uncommitted_changes = 2;
+    // The headless rewrite did not answer: refused by the vendor guard, out
+    // of time, or failed.
+    UpdateClassifierPromptRewriteFailed rewrite_failed = 3;
+    // The rewrite answered with something that is not a usable brief: a
+    // placeholder lost, invented or misspelled, a fenced or empty answer.
+    UpdateClassifierPromptRewriteRejected rewrite_rejected = 4;
+    // The rewrite answered with the brief unchanged, so there is nothing to
+    // commit.
+    UpdateClassifierPromptUnchanged unchanged = 5;
+    // The brief changed on disk while the rewrite ran, so the rewrite was
+    // made from a brief that no longer stands; nothing is written.
+    UpdateClassifierPromptChangedDuringRewrite changed_during_rewrite = 6;
+    // git refused the commit. The rewritten brief was put back the way it
+    // was.
+    UpdateClassifierPromptCommitFailed commit_failed = 7;
+  }
+}
+message UpdateClassifierPromptInProgress {}
+message UpdateClassifierPromptUncommittedChanges {
+  // The brief's absolute path, so the reader knows which file to commit or
+  // revert.
+  string path = 1;
+}
+message UpdateClassifierPromptRewriteFailed {
+  // What failed, for display; never parsed.
+  string detail = 1;
+}
+message UpdateClassifierPromptRewriteRejected {
+  // Why the answer is not a usable brief, for display; never parsed.
+  string detail = 1;
+}
+message UpdateClassifierPromptUnchanged {}
+message UpdateClassifierPromptChangedDuringRewrite {}
+message UpdateClassifierPromptCommitFailed {
+  // git's own account of the refusal, for display; never parsed.
+  string detail = 1;
+}

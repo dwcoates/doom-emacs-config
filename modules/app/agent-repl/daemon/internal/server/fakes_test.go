@@ -23,6 +23,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
+	"claude-repld/internal/classifierupdate"
 	"claude-repld/internal/deploy"
 	"claude-repld/internal/desktopnotify"
 	"claude-repld/internal/dlog"
@@ -1147,11 +1148,13 @@ type harness struct {
 	// PersistentWifi is the persistent-wifi controller the rpc delegates to.
 	PersistentWifi *fakePersistentWifi
 	// NewsDigest is the news digest the two rpcs delegate to.
-	NewsDigest      *fakeNewsDigest
-	EditorInstances *fakeEditorInstances
-	Startup         *fakeStartup
-	Surfaces        *fakeSurfaces
-	WebappDist      string
+	NewsDigest *fakeNewsDigest
+	// ClassifierPrompt is the routing brief's updater the rpc delegates to.
+	ClassifierPrompt *fakeClassifierPrompt
+	EditorInstances  *fakeEditorInstances
+	Startup          *fakeStartup
+	Surfaces         *fakeSurfaces
+	WebappDist       string
 }
 
 // option customizes a harness before it is built.
@@ -1194,10 +1197,11 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		Focus:      desktopnotify.NewFocus(dlog.NewTestLogger()),
 		WebappDist: dist,
 
-		PersistentWifi:  &fakePersistentWifi{},
-		NewsDigest:      &fakeNewsDigest{},
-		EditorInstances: &fakeEditorInstances{},
-		Startup:         &fakeStartup{},
+		PersistentWifi:   &fakePersistentWifi{},
+		NewsDigest:       &fakeNewsDigest{},
+		ClassifierPrompt: &fakeClassifierPrompt{},
+		EditorInstances:  &fakeEditorInstances{},
+		Startup:          &fakeStartup{},
 	}
 
 	deps := Deps{
@@ -1223,6 +1227,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		Focus:            h.Focus,
 		PersistentWifi:   h.PersistentWifi,
 		NewsDigest:       h.NewsDigest,
+		ClassifierPrompt: h.ClassifierPrompt,
 		EditorInstances:  h.EditorInstances,
 		Startup:          h.Startup,
 		WebappDist:       dist,
@@ -1435,6 +1440,22 @@ func (f *fakeNewsDigest) Redisplay(context.Context) error {
 	defer f.mu.Unlock()
 	f.redisplays++
 	return f.redisplayErr
+}
+
+// fakeClassifierPrompt records every update and answers a scripted result or
+// failure.
+type fakeClassifierPrompt struct {
+	mu      sync.Mutex
+	updates []classifierupdate.Request
+	result  classifierupdate.Result
+	err     error
+}
+
+func (f *fakeClassifierPrompt) Update(_ context.Context, req classifierupdate.Request) (classifierupdate.Result, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.updates = append(f.updates, req)
+	return f.result, f.err
 }
 
 // fakeStartup emits its scripted events, in order, to every run, and counts

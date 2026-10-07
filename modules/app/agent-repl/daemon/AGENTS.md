@@ -2036,6 +2036,16 @@ Owner rulings, 2026-09-30 (`internal/promptqueue/acts.go`, `ahead.go`,
   `after_tool_call` (the common case, and the answer when unsure) joins it;
   `interrupt` (the prompt makes the running work wrong or wasted) interrupts
   it. The explicit-interrupt first word is `interrupt` without asking.
+- **THE USER CAN REWRITE THE CLASSIFIER'S BRIEF FROM A HELD CARD**
+  (`UpdateClassifierPrompt`, `internal/classifierupdate`): a headless Sonnet
+  run (guard site `classifier_update`, brief
+  `prompts/queue-routing-classifier-update.md`) rewrites the routing brief to
+  carry the user's instruction, shown the brief with its placeholders as
+  `⟦name⟧` slots. The daemon puts the brief's own header back, refuses an
+  answer `prompts.Parse` rejects, writes the file, and commits that path
+  alone (`gitclient.CommitPath`, `--only`) in the checkout holding it. A
+  brief with uncommitted edits is refused before the model runs, updates run
+  one at a time, and a refused commit puts the file back.
 - **AGAINST A QUEUED PROMPT, EITHER NON-QUEUE ROUTE COALESCES** (`coalesce`,
   under the delivery lock, then the verdict lock): nothing ahead has started,
   so the new prompt's content is folded into the queued one, which keeps its
