@@ -28,15 +28,11 @@ import (
 const EnvToolsDir = "AGENT_REPL_PERSISTENT_WIFI_TOOLS_DIR"
 
 // EnvHotspot names the phone hotspot turning the mode on joins and turning it
-// off leaves. Unset is DefaultHotspot.
+// off leaves. It is per-user and has no default: unset leaves the hotspot step
+// unconfigured, which every mode change answers as a failed hotspot step
+// pointing at the user guide. Either apostrophe spelling joins, because the
+// join resolves the name against the saved networks (savedHotspot).
 const EnvHotspot = "AGENT_REPL_PERSISTENT_WIFI_HOTSPOT"
-
-// DefaultHotspot is the hotspot the owner's script was written for, spelled
-// as the iPhone names itself: with a RIGHT SINGLE QUOTATION MARK (U+2019),
-// not an ASCII apostrophe. The ASCII spelling made every join fail with
-// "Could not find network" (2026-10-02); the join now resolves the name
-// against the saved networks either way (savedHotspot).
-const DefaultHotspot = "Dodge\u2019s iPhone"
 
 // Tools are the absolute paths of every host tool the package runs.
 type Tools struct {
@@ -98,7 +94,7 @@ type Config struct {
 // not absolute is REFUSED: a relative dir resolves against whatever the
 // daemon's working directory happens to be, which is never what was meant.
 func ConfigFromEnv(getenv func(string) string) (Config, error) {
-	cfg := Config{Tools: DefaultTools(), Hotspot: DefaultHotspot}
+	cfg := Config{Tools: DefaultTools()}
 	if dir := getenv(EnvToolsDir); dir != "" {
 		if !filepath.IsAbs(dir) {
 			return Config{}, fmt.Errorf("persistentwifi: %s=%q is not an absolute path", EnvToolsDir, dir)
