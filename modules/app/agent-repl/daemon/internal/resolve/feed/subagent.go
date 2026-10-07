@@ -29,7 +29,7 @@ func (r *resolver) drawSubagent(s *wsState, at placement, act *conversationv1.Ag
 	state, ok := s.subagents[unitID]
 	if !ok {
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "!ok"})
-		state = &subagentState{}
+		state = &subagentState{fromHistory: s.replaying}
 		s.subagents[unitID] = state
 		// AN ANNOUNCEMENT ALREADY NAMED THIS UNIT'S AGENT: the bubble is born
 		// addressing its sub-feed rather than held for a start that, for a
@@ -250,13 +250,20 @@ func (r *resolver) foldSubagentFrame(s *wsState, unitID string, state *subagentS
 		// the instant above is guarded against also replays the start of work
 		// that has ALREADY SETTLED, and taking it as live would un-settle a
 		// finished bubble that nothing will ever settle again.
-		if _, settled := bubble.GetState().(*frontendv1.FeedSubagent_Settled); !settled {
-			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "_, settled := bubble.GetState().(*frontendv1.FeedSubagent_Settled); !settled"})
+		if !headEnded(bubble) {
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "!headEnded(bubble)"})
 			bubble.State = &frontendv1.FeedSubagent_Live{Live: &frontendv1.FeedSubagentLive{}}
 		}
 	case *conversationv1.AgentSubagent_Update:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "foldSubagentFrame", "branch": "case *conversationv1.AgentSubagent_Update"})
 		applyPrompt(bubble, frame.Update.GetPrompt())
+		// A LATE BEAT NEVER REVIVES A HEAD THAT ENDED: the agent's own stream
+		// shares no ordering with the session's level, so progress frames can
+		// trail the level's statement that the run stopped.
+		if headEnded(bubble) {
+			r.logger(s.id).Debug("daemon.feed.subagent_late_progress", "a progress frame arrived for a head that already stopped; it stays stopped", dlog.Context{"unit": unitID})
+			break
+		}
 		bubble.State = &frontendv1.FeedSubagent_Live{Live: &frontendv1.FeedSubagentLive{
 			LastProgress: &frontendv1.FeedSubagentLastProgress{AtMs: r.deps.Now().UnixMilli()},
 		}}
@@ -546,6 +553,13 @@ func subagentFailureOutcome(log dlog.Logger, unitID string, failure *conversatio
 			settled.Outcome = &frontendv1.FeedSubagentSettled_Cancelled{Cancelled: &frontendv1.FeedSubagentCancelled{}}
 		}
 	}
+	// A RESTART IS NOT A FAILURE AND NOT A STOP: the vendor process restarted
+	// under the run (its `worker_restart`), and the bubble says exactly that.
+	if _, restarted := failure.GetCause().(*conversationv1.AgentSubagentFailure_WorkerRestarted); restarted {
+		return func(settled *frontendv1.FeedSubagentSettled) {
+			settled.Outcome = &frontendv1.FeedSubagentSettled_Restarted{Restarted: &frontendv1.FeedSubagentRestarted{}}
+		}
+	}
 	return func(settled *frontendv1.FeedSubagentSettled) {
 		settled.Outcome = &frontendv1.FeedSubagentSettled_Failed{Failed: &frontendv1.FeedSubagentFailed{}}
 	}
@@ -680,8 +694,9 @@ func (r *resolver) nameAnnouncedAgent(s *wsState, unitID string, agent *conversa
 // lands first has no feed to go to.
 func (r *resolver) drawAnnouncedBubble(s *wsState, unitID string, agent *conversationv1.AgentId, u *unitState) {
 	state := &subagentState{
-		created: agent,
-		carrier: u.carrier,
+		fromHistory: s.replaying,
+		created:     agent,
+		carrier:     u.carrier,
 		bubble: &frontendv1.FeedSubagent{State: &frontendv1.FeedSubagent_Live{
 			Live: &frontendv1.FeedSubagentLive{},
 		}},
@@ -1124,7 +1139,7 @@ func (r *resolver) settleShellsLeftLive(s *wsState, live sessionwatcher.LiveWork
 		}
 		r.publishShell(s, workID, sh, &frontendv1.FeedShellSettled{
 			EndedAtMs: r.deps.Now().UnixMilli(),
-			Outcome:   &frontendv1.FeedShellSettled_Lost{Lost: &frontendv1.FeedShellLost{}},
+			Outcome:   &frontendv1.FeedShellSettled_Lost{Lost: shellLostOnLeaving(s, live)},
 		})
 		r.logger(s.id).Info("daemon.feed.detached_shell_left_live",
 			"a detached shell left the live set with no terminal; its head is settled lost",
@@ -1157,9 +1172,15 @@ func (r *resolver) settleShellsLeftLive(s *wsState, live sessionwatcher.LiveWork
 // ONLY A SUBAGENT THE SET HELD. A bubble the feed drew but the watcher never
 // listed has not left anything.
 func (r *resolver) settleSubagentsLeftLive(s *wsState, live sessionwatcher.LiveWorkSet) {
-	now := make(map[string]struct{}, len(live.Agents))
+	now := make(map[string]struct{}, len(live.Agents)+len(live.Pending))
 	for _, agent := range live.Agents {
 		now[agent.GetValue()] = struct{}{}
+	}
+	// A PENDING HANDLE IS LIVE: the level named it before its announcement
+	// described it, and the head that announcement draws must not be judged
+	// stopped for want of a description.
+	for _, handle := range live.Pending {
+		now[handle.GetValue()] = struct{}{}
 	}
 	for id := range s.liveAgents {
 		if _, still := now[id]; still {
@@ -1175,18 +1196,128 @@ func (r *resolver) settleSubagentsLeftLive(s *wsState, live sessionwatcher.LiveW
 			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "settleSubagentsLeftLive", "condition": "bubble not live"})
 			continue
 		}
-		state.bubble.State = &frontendv1.FeedSubagent_Settled{Settled: &frontendv1.FeedSubagentSettled{
-			EndedAtMs: r.deps.Now().UnixMilli(),
-			Outcome:   &frontendv1.FeedSubagentSettled_Lost{Lost: &frontendv1.FeedSubagentLost{}},
-		}}
-		r.republishSubagent(s, unitID, state)
-		r.logger(s.id).Info("daemon.feed.detached_subagent_left_live",
-			"a detached subagent left the live set with its bubble live and no terminal; its bubble is settled lost",
-			dlog.Context{"listed_as": id, "unit": unitID, "row": state.row.GetValue()})
+		r.stopSubagentHead(s, unitID, state, live.ProcessEnded, id)
 	}
 	for id := range now {
 		s.liveAgents[id] = struct{}{}
+		s.everLive[id] = struct{}{}
 	}
+	if !s.levelMode {
+		return
+	}
+	// THE PROCESS ENDING SETTLES EVERY STOPPED HEAD: nothing will state the
+	// outcome of work whose process is gone, so a settling head is lost.
+	if live.ProcessEnded {
+		for unitID, state := range s.subagents {
+			if state.row == nil || state.bubble.GetSettling() == nil {
+				continue
+			}
+			r.loseSubagentHead(s, unitID, state, "daemon.feed.detached_subagent_lost",
+				"a settling subagent's process ended before its outcome was stated; its head is settled lost",
+				dlog.Context{"why": "process_ended_while_settling"})
+		}
+	}
+	s.levelKnown = true
+	r.judgeHistoryBubbles(s)
+}
+
+// stopSubagentHead draws a live head whose subagent left the live set with no
+// terminal of its own. Under the live-work level that is SETTLING -- the
+// vendor states the outcome on its own edge, which may follow -- or LOST when
+// the process ending is what emptied the set. Before the level contract the
+// set is the announcements' account, and the head is settled lost as it
+// always was.
+func (r *resolver) stopSubagentHead(s *wsState, unitID string, state *subagentState, processEnded bool, listedAs string) {
+	if !s.levelMode || processEnded {
+		r.loseSubagentHead(s, unitID, state, "daemon.feed.detached_subagent_left_live",
+			"a detached subagent left the live set with its bubble live and no terminal; its bubble is settled lost",
+			dlog.Context{"listed_as": listedAs, "process_ended": processEnded})
+		return
+	}
+	state.bubble.State = &frontendv1.FeedSubagent_Settling{Settling: &frontendv1.FeedSubagentSettling{
+		StoppedAtMs: r.deps.Now().UnixMilli(),
+	}}
+	r.republishSubagent(s, unitID, state)
+	r.logger(s.id).Info("daemon.feed.detached_subagent_settling",
+		"a detached subagent left the live-work level with no terminal yet; its head settles while its outcome is on its way",
+		dlog.Context{"listed_as": listedAs, "unit": unitID, "row": state.row.GetValue()})
+}
+
+// loseSubagentHead settles a head lost: its run stopped and no outcome will
+// be stated for it. Under the live-work level the cause is the process
+// ending; before it the set's account is all there is, and no cause is named.
+func (r *resolver) loseSubagentHead(s *wsState, unitID string, state *subagentState, operation, message string, context dlog.Context) {
+	lost := &frontendv1.FeedSubagentLost{}
+	if s.levelMode {
+		lost.How = &frontendv1.FeedSubagentLost_ProcessEnded{ProcessEnded: &frontendv1.FeedSubagentLostProcessEnded{}}
+	}
+	state.bubble.State = &frontendv1.FeedSubagent_Settled{Settled: &frontendv1.FeedSubagentSettled{
+		EndedAtMs: r.deps.Now().UnixMilli(),
+		Outcome:   &frontendv1.FeedSubagentSettled_Lost{Lost: lost},
+	}}
+	r.republishSubagent(s, unitID, state)
+	context["unit"] = unitID
+	context["row"] = state.row.GetValue()
+	context["level_mode"] = s.levelMode
+	r.logger(s.id).Info(operation, message, context)
+}
+
+// judgeHistoryBubbles settles every head a HISTORY PAGE drew live that no live
+// set has named: under the live-work level the vendor process states every
+// item it runs, so work the record shows running and no level names ran in an
+// earlier process, which is gone. Judged only once a set is known for the
+// session's facts, and never for a head drawn from the live tail, whose
+// level push may still follow it.
+func (r *resolver) judgeHistoryBubbles(s *wsState) {
+	if !s.levelMode || !s.levelKnown || s.replaying {
+		return
+	}
+	for unitID, state := range s.subagents {
+		if !state.fromHistory || state.row == nil || state.bubble.GetLive() == nil {
+			continue
+		}
+		if s.namedLive(unitID, state) {
+			continue
+		}
+		r.loseSubagentHead(s, unitID, state, "daemon.feed.detached_subagent_lost",
+			"the record drew a subagent running that no live-work level names; it ran in an earlier vendor process and its head is settled lost",
+			dlog.Context{"why": "history_not_in_level"})
+	}
+}
+
+// namedLive reports whether the current live set names the bubble, by any of
+// the three ids the contract makes one value (unit, handle, created agent).
+func (s *wsState) namedLive(unitID string, state *subagentState) bool {
+	for _, id := range []string{unitID, state.work, state.created.GetValue()} {
+		if id == "" {
+			continue
+		}
+		if _, ok := s.liveAgents[id]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+// headEnded reports whether a head has stopped -- settled, or settling -- so
+// no frame that trails the stop draws it running again.
+func headEnded(bubble *frontendv1.FeedSubagent) bool {
+	switch bubble.GetState().(type) {
+	case *frontendv1.FeedSubagent_Settled, *frontendv1.FeedSubagent_Settling:
+		return true
+	}
+	return false
+}
+
+// shellLostOnLeaving is the lost row a shell that left the live set with no
+// terminal draws: under the live-work level, when the vendor process ending
+// emptied the set, it names that cause; otherwise the set's account is all
+// there is and no cause is named.
+func shellLostOnLeaving(s *wsState, live sessionwatcher.LiveWorkSet) *frontendv1.FeedShellLost {
+	if s.levelMode && live.ProcessEnded {
+		return &frontendv1.FeedShellLost{How: &frontendv1.FeedShellLost_ProcessEnded{ProcessEnded: &frontendv1.FeedShellLostProcessEnded{}}}
+	}
+	return &frontendv1.FeedShellLost{}
 }
 
 // subagentListedAs answers the bubble the live set's id names. The set lists a

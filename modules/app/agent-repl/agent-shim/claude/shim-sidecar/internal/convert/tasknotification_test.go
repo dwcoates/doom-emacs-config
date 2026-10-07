@@ -5,6 +5,7 @@ package convert
 // does, and is never a prompt.
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -312,5 +313,103 @@ func TestASettlingNotificationReportsTheRunConcluded(t *testing.T) {
 				t.Fatalf("conclusions reported = %v, want %v", concluded, tt.want)
 			}
 		})
+	}
+}
+
+// asQueuedCommand rewrites a user-role notification line into the form the
+// vendor writes for a notification that arrived MID-TURN: an `attachment`
+// record of type `queued_command` carrying the notification in `prompt`.
+func asQueuedCommand(t *testing.T, userLine string) string {
+	t.Helper()
+	var record map[string]any
+	if err := json.Unmarshal([]byte(userLine), &record); err != nil {
+		t.Fatalf("decode the notification line: %v", err)
+	}
+	message, _ := record["message"].(map[string]any)
+	prompt, _ := message["content"].(string)
+	delete(record, "message")
+	delete(record, "origin")
+	record["type"] = "attachment"
+	record["attachment"] = map[string]any{
+		"type":        "queued_command",
+		"commandMode": "task-notification",
+		"prompt":      prompt,
+	}
+	out, err := json.Marshal(record)
+	if err != nil {
+		t.Fatalf("encode the queued command: %v", err)
+	}
+	return string(out)
+}
+
+// withoutToolUseID drops the notification's `<tool-use-id>` element, as the
+// vendor writes a stop for a run the previous process left behind.
+func withoutToolUseID(line string) string {
+	return strings.Replace(line, `<tool-use-id>`+notifiedCall+`</tool-use-id>\n`, "", 1)
+}
+
+func TestAMidTurnNotificationSettlesTheSpawn(t *testing.T) {
+	// Arrange: the 2026-10-07 regression's encoding.
+	line := asQueuedCommand(t, corpusLine(t, notificationFile))
+
+	// Act.
+	entries := settleOf(t, line)
+
+	// Assert.
+	if activityOf(entryByKey(t, entries, ActivityKey(notifiedCall))).GetSubagent().GetSuccess() == nil {
+		t.Fatal("a queued_command notification must settle the spawn's success arm")
+	}
+}
+
+func TestAQueuedCommandCarryingNoNotificationIsWithheld(t *testing.T) {
+	// Arrange: a command the user queued mid-turn, which is not a notification.
+	var record map[string]any
+	if err := json.Unmarshal([]byte(asQueuedCommand(t, corpusLine(t, notificationFile))), &record); err != nil {
+		t.Fatalf("decode the queued command: %v", err)
+	}
+	record["attachment"] = map[string]any{"type": "queued_command", "commandMode": "prompt", "prompt": "also check the logs"}
+	raw, err := json.Marshal(record)
+	if err != nil {
+		t.Fatalf("encode the queued command: %v", err)
+	}
+	line := string(raw)
+
+	// Act.
+	entries := settleOf(t, line)
+
+	// Assert.
+	for _, entry := range entries {
+		if entry.GetUpsertKey() == ActivityKey(notifiedCall) {
+			t.Fatalf("a queued command with no notification settled the spawn: %+v", entry)
+		}
+	}
+}
+
+func TestAStopNamingNoCallSettlesTheRunItsTaskNamesAsRestarted(t *testing.T) {
+	// Arrange: the resumed process's account of a run it found orphaned.
+	line := withoutToolUseID(notificationWithStatus(t, "stopped"))
+
+	// Act.
+	entries := settleOf(t, line)
+
+	// Assert.
+	failure := activityOf(entryByKey(t, entries, ActivityKey(notifiedCall))).GetSubagent().GetFailure()
+	if failure.GetWorkerRestarted() == nil {
+		t.Fatalf("failure = %+v, want the run settled worker_restarted", failure)
+	}
+}
+
+func TestAStopNamingNoCallAndNoLaunchedTaskIsWithheld(t *testing.T) {
+	// Arrange: a stop for a task this stream never launched.
+	line := strings.Replace(withoutToolUseID(notificationWithStatus(t, "stopped")), notifiedTask, "a-task-never-launched", 1)
+
+	// Act.
+	entries := settleOf(t, line)
+
+	// Assert.
+	for _, entry := range entries {
+		if entry.GetUpsertKey() == ActivityKey(notifiedCall) {
+			t.Fatalf("a stop naming an unknown task settled a spawn: %+v", entry)
+		}
 	}
 }

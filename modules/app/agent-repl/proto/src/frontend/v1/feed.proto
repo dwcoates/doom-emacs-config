@@ -1740,6 +1740,10 @@ message FeedSubagent {
   oneof state {
     FeedSubagentLive live = 5;
     FeedSubagentSettled settled = 6;
+    // No longer running (it left the vendor's live set), with its outcome
+    // not yet stated: the vendor states it on its own edge, which may follow.
+    // See conversation.v1.SessionLiveWork.
+    FeedSubagentSettling settling = 8;
   }
   // THE DETACHED-WORK ID, drawn verbatim in the head so any async work can be
   // referred to stably (owner ruling, 2026-09-23). SET IFF THE BUBBLE IS
@@ -1787,6 +1791,12 @@ message FeedSubagentLastProgress {
   // Epoch ms; the client ticks "quiet for N s" locally.
   int64 at_ms = 1;
 }
+// Settling: the run stopped, and how it ended is not stated yet. The clock
+// stops at `stopped_at_ms`; the head turns settled when the outcome lands.
+message FeedSubagentSettling {
+  // When the run left the vendor's live set, epoch ms.
+  int64 stopped_at_ms = 1;
+}
 // Settled: when, and how.
 message FeedSubagentSettled {
   // When the run ended, epoch ms — the clock stops here.
@@ -1802,8 +1812,12 @@ message FeedSubagentSettled {
     // We STOPPED BEING ABLE TO SEE IT — not known to have failed; the word
     // carries the distinction, so it never draws as a plain failure.
     FeedSubagentLost lost = 5;
+    // The vendor process restarted under the run (not a failure of its own,
+    // and not a person stopping it).
+    FeedSubagentRestarted restarted = 6;
   }
 }
+message FeedSubagentRestarted {}
 message FeedSubagentSucceeded {}
 message FeedSubagentFailed {}
 message FeedSubagentCancelled {}
@@ -1817,8 +1831,11 @@ message FeedSubagentLost {
     FeedSubagentLostWentSilent went_silent = 2;
     // A boot sweep found the run open with no living producer.
     FeedSubagentLostSweptUp swept_up = 3;
+    // The vendor process that ran it ended with no outcome ever stated.
+    FeedSubagentLostProcessEnded process_ended = 4;
   }
 }
+message FeedSubagentLostProcessEnded {}
 message FeedSubagentLostFileVanished {}
 message FeedSubagentLostWentSilent {}
 message FeedSubagentLostSweptUp {}
@@ -1937,11 +1954,14 @@ message FeedShellLost {
     FeedShellLostWentSilent went_silent = 2;
     // A boot sweep found the run open with no living producer.
     FeedShellLostSweptUp swept_up = 3;
+    // The vendor process that ran it ended with no outcome ever stated.
+    FeedShellLostProcessEnded process_ended = 4;
   }
 }
 message FeedShellLostFileVanished {}
 message FeedShellLostWentSilent {}
 message FeedShellLostSweptUp {}
+message FeedShellLostProcessEnded {}
 
 // ==========================================================================
 // BLOCKING THE TURN ON THE USER — consent, and a choice. Bodies re-derived

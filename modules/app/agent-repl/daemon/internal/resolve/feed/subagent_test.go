@@ -3765,3 +3765,249 @@ func TestShellJudgmentJudgesHowTheProcessTerminated(t *testing.T) {
 		})
 	}
 }
+
+// ---- the live-work level (conversation.v1 SessionLiveWork) ----
+
+// levelMode puts the harness's session under the live-work level contract.
+func (h *harness) levelMode() {
+	h.t.Helper()
+	h.resolver.OnSessionStarted(testWorkspace, &conversationv1.SessionStarted{
+		Contract: conversationv1.SessionContract_SESSION_CONTRACT_LIVE_WORK_LEVEL,
+	})
+}
+
+// processEnded is the empty set the watcher publishes when the vendor process
+// ends.
+func processEnded() sessionwatcher.LiveWorkSet {
+	return sessionwatcher.LiveWorkSet{ProcessEnded: true}
+}
+
+// replayedRunningSubagent replays a detached subagent the record shows
+// running -- the 2026-10-07 regression's shape -- and answers its bubble.
+func (h *harness) replayedRunningSubagent() *frontendv1.FeedSubagent {
+	h.t.Helper()
+	h.replay(historyPage(&conversationv1.HistoryFloor{},
+		frameEntry(mainAgent(), &conversationv1.AgentDetachedWork{
+			Work:  &conversationv1.DetachedWorkId{Value: "work-1"},
+			Owner: mainAgent(),
+			Origin: &conversationv1.AgentDetachedWork_Created{Created: &conversationv1.DetachedWorkCreated{
+				WorkCreated: &conversationv1.DetachableWork{
+					Work: &conversationv1.DetachableWork_Subagent{Subagent: &conversationv1.AgentSubagent{
+						Result: &conversationv1.AgentSubagent_Start{Start: &conversationv1.AgentSubagentStart{
+							CreatedAgentId: &conversationv1.AgentId{Value: "agent-remote"},
+							Prompt:         &conversationv1.AgentSubagentPrompt{Text: "go"},
+							StartedAt:      &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+						}},
+					}},
+				},
+			}},
+		}),
+	))
+	return h.replayedBubble()
+}
+
+// replayedBubble answers the replayed detached bubble's head.
+func (h *harness) replayedBubble() *frontendv1.FeedSubagent {
+	h.t.Helper()
+	rows := h.rows(rootFeed())
+	if len(rows) != 1 || rows[0].GetDetachedSubagent() == nil {
+		h.t.Fatalf("rows = %+v, want one detached bubble", rows)
+	}
+	return rows[0].GetDetachedSubagent().GetSubagent()
+}
+
+func TestUnderTheLevelASubagentThatLeftTheSetIsSettling(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.levelMode()
+	created := runningDetachedSubagent(h)
+	h.resolver.OnLiveWorkChanged(testWorkspace, liveAgents("agent-explore"))
+
+	// Act: the vendor's level drops it; no terminal has come.
+	h.resolver.OnLiveWorkChanged(testWorkspace, liveAgents())
+
+	// Assert.
+	settling := bubbleOf(h.bubbleRow("spawn-1", created)).GetSettling()
+	if settling == nil || settling.GetStoppedAtMs() != h.nowMs {
+		t.Fatalf("state = %+v, want settling stopped at the daemon's clock %d", bubbleOf(h.bubbleRow("spawn-1", created)).GetState(), h.nowMs)
+	}
+}
+
+func TestUnderTheLevelASettlingSubagentIsLostWhenItsProcessEnds(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.levelMode()
+	created := runningDetachedSubagent(h)
+	h.resolver.OnLiveWorkChanged(testWorkspace, liveAgents("agent-explore"))
+	h.resolver.OnLiveWorkChanged(testWorkspace, liveAgents())
+
+	// Act.
+	h.resolver.OnLiveWorkChanged(testWorkspace, processEnded())
+
+	// Assert.
+	if bubbleOf(h.bubbleRow("spawn-1", created)).GetSettled().GetLost().GetProcessEnded() == nil {
+		t.Fatalf("state = %+v, want lost: process ended", bubbleOf(h.bubbleRow("spawn-1", created)).GetState())
+	}
+}
+
+func TestUnderTheLevelASubagentWhoseProcessEndedIsLostAtOnce(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.levelMode()
+	created := runningDetachedSubagent(h)
+	h.resolver.OnLiveWorkChanged(testWorkspace, liveAgents("agent-explore"))
+
+	// Act.
+	h.resolver.OnLiveWorkChanged(testWorkspace, processEnded())
+
+	// Assert.
+	if bubbleOf(h.bubbleRow("spawn-1", created)).GetSettled().GetLost().GetProcessEnded() == nil {
+		t.Fatalf("state = %+v, want lost: process ended", bubbleOf(h.bubbleRow("spawn-1", created)).GetState())
+	}
+}
+
+func TestUnderTheLevelARunningSubagentTheRecordReplaysIsLostWhenNoLevelNamesIt(t *testing.T) {
+	// Arrange: the level is known and names nothing.
+	h := newHarness(t)
+	h.levelMode()
+	h.resolver.OnLiveWorkChanged(testWorkspace, liveAgents())
+
+	// Act.
+	bubble := h.replayedRunningSubagent()
+
+	// Assert.
+	if bubble.GetSettled().GetLost().GetProcessEnded() == nil {
+		t.Fatalf("state = %+v, want lost: process ended", bubble.GetState())
+	}
+}
+
+func TestUnderTheLevelARunningSubagentTheRecordReplaysStaysLiveWhileTheLevelNamesIt(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.levelMode()
+	h.resolver.OnLiveWorkChanged(testWorkspace, liveAgents("agent-remote"))
+
+	// Act.
+	bubble := h.replayedRunningSubagent()
+
+	// Assert.
+	if bubble.GetLive() == nil {
+		t.Fatalf("state = %+v, want live", bubble.GetState())
+	}
+}
+
+func TestUnderTheLevelAReplayDrawnBeforeAnySetIsJudgedWhenTheSetArrives(t *testing.T) {
+	// Arrange: the page lands before the first set.
+	h := newHarness(t)
+	h.levelMode()
+	h.replayedRunningSubagent()
+
+	// Act.
+	h.resolver.OnLiveWorkChanged(testWorkspace, liveAgents())
+
+	// Assert.
+	if h.replayedBubble().GetSettled().GetLost().GetProcessEnded() == nil {
+		t.Fatalf("state = %+v, want lost: process ended", h.replayedBubble().GetState())
+	}
+}
+
+func TestUnderTheLevelALiveTailSubagentNoSetNamesYetIsNotJudged(t *testing.T) {
+	// Arrange: the level is known; the announcement's level push may follow.
+	h := newHarness(t)
+	h.levelMode()
+	h.resolver.OnLiveWorkChanged(testWorkspace, liveAgents())
+
+	// Act.
+	created := runningDetachedSubagent(h)
+	h.resolver.OnLiveWorkChanged(testWorkspace, liveAgents())
+
+	// Assert.
+	if bubbleOf(h.bubbleRow("spawn-1", created)).GetLive() == nil {
+		t.Fatalf("state = %+v, want live", bubbleOf(h.bubbleRow("spawn-1", created)).GetState())
+	}
+}
+
+func TestALateProgressFrameDoesNotReviveASettlingHead(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.levelMode()
+	created := runningDetachedSubagent(h)
+	h.resolver.OnLiveWorkChanged(testWorkspace, liveAgents("agent-explore"))
+	h.resolver.OnLiveWorkChanged(testWorkspace, liveAgents())
+
+	// Act: a progress beat that trailed the level lands.
+	h.send(&conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: "spawn-1"},
+		Item: &conversationv1.AgentActivity_Subagent{Subagent: &conversationv1.AgentSubagent{
+			Result: &conversationv1.AgentSubagent_Update{Update: &conversationv1.AgentSubagentUpdate{}},
+		}},
+	})
+
+	// Assert.
+	if bubbleOf(h.bubbleRow("spawn-1", created)).GetSettling() == nil {
+		t.Fatalf("state = %+v, want still settling", bubbleOf(h.bubbleRow("spawn-1", created)).GetState())
+	}
+}
+
+func TestATerminalAfterSettlingSettlesTheHead(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.levelMode()
+	created := runningDetachedSubagent(h)
+	h.resolver.OnLiveWorkChanged(testWorkspace, liveAgents("agent-explore"))
+	h.resolver.OnLiveWorkChanged(testWorkspace, liveAgents())
+
+	// Act.
+	h.send(&conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: "spawn-1"},
+		Item: &conversationv1.AgentActivity_Subagent{Subagent: &conversationv1.AgentSubagent{
+			Result: &conversationv1.AgentSubagent_Success{Success: &conversationv1.AgentSubagentSuccess{
+				SettledAt: &conversationv1.AgentActivitySettledAt{AtMs: 9_000},
+			}},
+		}},
+	})
+
+	// Assert.
+	if bubbleOf(h.bubbleRow("spawn-1", created)).GetSettled().GetSucceeded() == nil {
+		t.Fatalf("state = %+v, want settled succeeded", bubbleOf(h.bubbleRow("spawn-1", created)).GetState())
+	}
+}
+
+func TestAWorkerRestartSettlesAsRestarted(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	created := runningDetachedSubagent(h)
+
+	// Act.
+	h.send(&conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: "spawn-1"},
+		Item: &conversationv1.AgentActivity_Subagent{Subagent: &conversationv1.AgentSubagent{
+			Result: &conversationv1.AgentSubagent_Failure{Failure: &conversationv1.AgentSubagentFailure{
+				Cause: &conversationv1.AgentSubagentFailure_WorkerRestarted{WorkerRestarted: &conversationv1.AgentSubagentWorkerRestarted{}},
+			}},
+		}},
+	})
+
+	// Assert.
+	if bubbleOf(h.bubbleRow("spawn-1", created)).GetSettled().GetRestarted() == nil {
+		t.Fatalf("state = %+v, want settled restarted", bubbleOf(h.bubbleRow("spawn-1", created)).GetState())
+	}
+}
+
+func TestAJudgedReplayIsRecordedWithItsCause(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.levelMode()
+	h.resolver.OnLiveWorkChanged(testWorkspace, liveAgents())
+
+	// Act.
+	h.replayedRunningSubagent()
+
+	// Assert.
+	for _, r := range h.records() {
+		if r.Level == "info" && r.Operation == "daemon.feed.detached_subagent_lost" && r.Context["why"] == "history_not_in_level" {
+			return
+		}
+	}
+	t.Fatalf("records = %+v, want the judged replay recorded at info with its cause", h.records())
+}

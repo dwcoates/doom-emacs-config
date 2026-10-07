@@ -95,6 +95,7 @@ const LOST_CAUSE_WORDS = {
   fileVanished: "file vanished",
   wentSilent: "went silent",
   sweptUp: "swept up at boot",
+  processEnded: "process ended",
 } as const satisfies Record<string, string>;
 
 /** Every lost cause this build words, for the suite to hold to the schema. */

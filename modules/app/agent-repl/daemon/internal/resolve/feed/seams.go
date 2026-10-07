@@ -100,6 +100,9 @@ const (
 	lostWentSilent
 	// lostSweptUp: a boot sweep found the run open with no living producer.
 	lostSweptUp
+	// lostProcessEnded: the vendor process that ran the work ended with no
+	// outcome ever stated (conversation.v1 SessionLiveWork).
+	lostProcessEnded
 )
 
 // String names the cause for logs and for the composed sentence.
@@ -111,6 +114,8 @@ func (c detachedLostCause) String() string {
 		return "went_silent"
 	case lostSweptUp:
 		return "swept_up"
+	case lostProcessEnded:
+		return "process_ended"
 	}
 	return "none"
 }
@@ -124,6 +129,8 @@ func lostCauseOf(lost *conversationv1.DetachedLost) detachedLostCause {
 		return lostWentSilent
 	case *conversationv1.DetachedLost_SweptUp:
 		return lostSweptUp
+	case *conversationv1.DetachedLost_ProcessEnded:
+		return lostProcessEnded
 	}
 	return lostNone
 }
@@ -160,6 +167,8 @@ func applySubagentLostHow(lost *frontendv1.FeedSubagentLost, cause detachedLostC
 		lost.How = &frontendv1.FeedSubagentLost_WentSilent{WentSilent: &frontendv1.FeedSubagentLostWentSilent{}}
 	case lostSweptUp:
 		lost.How = &frontendv1.FeedSubagentLost_SweptUp{SweptUp: &frontendv1.FeedSubagentLostSweptUp{}}
+	case lostProcessEnded:
+		lost.How = &frontendv1.FeedSubagentLost_ProcessEnded{ProcessEnded: &frontendv1.FeedSubagentLostProcessEnded{}}
 	default:
 		return false
 	}
@@ -176,6 +185,8 @@ func applyShellLostHow(lost *frontendv1.FeedShellLost, cause detachedLostCause) 
 		lost.How = &frontendv1.FeedShellLost_WentSilent{WentSilent: &frontendv1.FeedShellLostWentSilent{}}
 	case lostSweptUp:
 		lost.How = &frontendv1.FeedShellLost_SweptUp{SweptUp: &frontendv1.FeedShellLostSweptUp{}}
+	case lostProcessEnded:
+		lost.How = &frontendv1.FeedShellLost_ProcessEnded{ProcessEnded: &frontendv1.FeedShellLostProcessEnded{}}
 	default:
 		return false
 	}

@@ -2022,6 +2022,7 @@ func assertLiveWork(t *testing.T, got, want LiveWorkSet) {
 	assertIDs(t, "agents", agentValues(got.Agents), agentValues(want.Agents))
 	assertIDs(t, "shells", workValues(got.Shells), workValues(want.Shells))
 	assertIDs(t, "monitors", workValues(got.Monitors), workValues(want.Monitors))
+	assertIDs(t, "pending", workValues(got.Pending), workValues(want.Pending))
 }
 
 func assertIDs(t *testing.T, what string, got, want []string) {
