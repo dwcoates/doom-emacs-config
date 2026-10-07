@@ -7,7 +7,7 @@
 // crossed the wire (store.v1 envelopes around conversation.v1 facts, read back
 // from the store's own read verbs) or on the sidecar's structured log. The
 // vendor's files are BUILT here — copied from testdata/corpus and the captured
-// transcript under modules/app/agent-repl/projects/ into vendor-shaped trees —
+// transcript under modules/app/agent-repl/testdata/projects/ into vendor-shaped trees —
 // and GROWN line by line with an fsync after each append, so the sidecar sees
 // exactly what a writing vendor produces.
 //

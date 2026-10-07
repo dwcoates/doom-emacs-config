@@ -9,7 +9,7 @@ import (
 
 // SUBJECT 1 — a real vendor transcript, ingested end to end into Agent* frames.
 //
-// The transcript is the one captured under modules/app/agent-repl/projects/. It
+// The transcript is the one captured under modules/app/agent-repl/testdata/projects/. It
 // is COPIED into a vendor-shaped tree and grown line by line, so the sidecar
 // reads a file that is being written rather than one that already exists whole.
 
