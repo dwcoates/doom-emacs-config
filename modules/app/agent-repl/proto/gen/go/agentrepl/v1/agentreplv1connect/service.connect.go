@@ -486,7 +486,8 @@ type AgentReplClient interface {
 	// End the login session; closing an absent one is success. See
 	// endpoint_close_login.proto.
 	CloseLogin(context.Context, *connect.Request[v1.CloseLoginRequest]) (*connect.Response[v1.CloseLoginResponse], error)
-	// Open a clicked link in the pinned external browser profile. See
+	// Open a clicked link in the browser profile the session's account signs
+	// in as. See
 	// endpoint_open_external.proto.
 	OpenExternal(context.Context, *connect.Request[v1.OpenExternalRequest]) (*connect.Response[v1.OpenExternalResponse], error)
 	// A host-raised click: open a path (at a line) in the editor — relayed to
@@ -1555,7 +1556,8 @@ type AgentReplHandler interface {
 	// End the login session; closing an absent one is success. See
 	// endpoint_close_login.proto.
 	CloseLogin(context.Context, *connect.Request[v1.CloseLoginRequest]) (*connect.Response[v1.CloseLoginResponse], error)
-	// Open a clicked link in the pinned external browser profile. See
+	// Open a clicked link in the browser profile the session's account signs
+	// in as. See
 	// endpoint_open_external.proto.
 	OpenExternal(context.Context, *connect.Request[v1.OpenExternalRequest]) (*connect.Response[v1.OpenExternalResponse], error)
 	// A host-raised click: open a path (at a line) in the editor — relayed to

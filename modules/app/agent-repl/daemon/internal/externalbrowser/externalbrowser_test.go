@@ -15,6 +15,7 @@ import (
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/externalbrowser"
+	"claude-repld/internal/usersetup"
 )
 
 func TestValidate(t *testing.T) {
@@ -45,14 +46,25 @@ func TestValidate(t *testing.T) {
 	}
 }
 
-func TestLaunchArgvCarriesTheProfileAndTheURL(t *testing.T) {
-	// Arrange, Act.
-	got := externalbrowser.LaunchArgv("Profile 9", "https://example.com")
+func TestLaunchArgv(t *testing.T) {
+	tests := []struct {
+		name    string
+		profile string
+		want    []string
+	}{
+		{name: "a profile rides as the profile flag", profile: "Profile 9", want: []string{"--profile-directory=Profile 9", "https://example.com"}},
+		{name: "no profile passes no profile flag", profile: "", want: []string{"https://example.com"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act.
+			got := externalbrowser.LaunchArgv(tc.profile, "https://example.com")
 
-	// Assert.
-	want := []string{"--profile-directory=Profile 9", "https://example.com"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("LaunchArgv() = %v, want %v", got, want)
+			// Assert.
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("LaunchArgv() = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 
@@ -218,124 +230,143 @@ func writeLocalState(t *testing.T, dir, body string) string {
 	return path
 }
 
-// warnedAbout reports whether any WARN record's context names email.
-func warnedAbout(records []dlog.Record, email string) bool {
-	for _, r := range records {
-		if r.Level == dlog.LevelWarn && r.Context["email"] == email {
-			return true
-		}
-	}
-	return false
+// recordingLauncher plants a raise that succeeds and a launcher that records
+// its argv, and answers the opener config driving them plus the argv file.
+func recordingLauncher(t *testing.T, localState string) (externalbrowser.Config, string) {
+	t.Helper()
+	dir := t.TempDir()
+	record := filepath.Join(dir, "argv")
+	activate := writeScript(t, dir, "activate", "exit 0")
+	launch := writeScript(t, dir, "launch", `printf '%s\n' "$@" > `+shellQuote(record))
+	return externalbrowser.Config{ActivateBin: activate, DefaultLauncherBin: launch, LocalStatePath: localState}, record
 }
 
-func TestProfileForAccountRoutesTheAccountToItsChromeProfile(t *testing.T) {
+// TestOpenDefaultRoutesTheAccountToItsChromeProfile pins that the account's
+// own profile, read from Chrome's Local State, is the one in Chrome's argv.
+func TestOpenDefaultRoutesTheAccountToItsChromeProfile(t *testing.T) {
 	tests := []struct {
 		name        string
 		email       string
 		wantProfile string
 	}{
-		{name: "personal account", email: "dodge.w.coates@gmail.com", wantProfile: "Default"},
-		{name: "work account", email: "dodge@chess.com", wantProfile: "Profile 6"},
+		{name: "personal account", email: "personal@example.com", wantProfile: "Default"},
+		{name: "work account", email: "work@example.com", wantProfile: "Profile 1"},
+		{name: "email case is ignored", email: "Work@Example.com", wantProfile: "Profile 1"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange.
-			localState := writeLocalState(t, t.TempDir(), twoProfiles)
-			o := newOpener(t, externalbrowser.Config{Profile: "Fallback", LocalStatePath: localState})
+			cfg, record := recordingLauncher(t, writeLocalState(t, t.TempDir(), twoProfiles))
+			o := newOpener(t, cfg)
 
 			// Act.
-			got := o.ProfileForAccount(tc.email)
+			if err := o.Open(context.Background(), "https://example.com/page", tc.email); err != nil {
+				t.Fatalf("Open() = %v, want nil", err)
+			}
 
 			// Assert.
-			if got != tc.wantProfile {
-				t.Fatalf("ProfileForAccount(%q) = %q, want %q", tc.email, got, tc.wantProfile)
+			want := "--profile-directory=" + tc.wantProfile + "\nhttps://example.com/page\n"
+			if got := readFile(t, record); got != want {
+				t.Fatalf("launch argv = %q, want %q", got, want)
 			}
 		})
 	}
 }
 
-// TestProfileForAccountFallsBackWhenLocalStateIsUnreadable pins the fallback:
-// no file, the pinned default, and a WARN naming the email that could not be
-// routed — never silence.
-func TestProfileForAccountFallsBackWhenLocalStateIsUnreadable(t *testing.T) {
+// TestOpenDefaultWithNoAccountPassesNoProfileFlag pins the logged-out state: an
+// answer, not a fault, so the url goes to the browser with no profile flag and
+// nothing is logged above DEBUG.
+func TestOpenDefaultWithNoAccountPassesNoProfileFlag(t *testing.T) {
 	// Arrange.
-	missing := filepath.Join(t.TempDir(), "no-such-Local-State")
-	o, logger := newOpenerLogged(t, externalbrowser.Config{Profile: "Profile 6", LocalStatePath: missing})
+	cfg, record := recordingLauncher(t, writeLocalState(t, t.TempDir(), twoProfiles))
+	o, logger := newOpenerLogged(t, cfg)
 
 	// Act.
-	got := o.ProfileForAccount("dodge@chess.com")
-
-	// Assert.
-	if got != "Profile 6" {
-		t.Fatalf("ProfileForAccount() = %q, want the pinned default", got)
-	}
-	if !warnedAbout(logger.Records(), "dodge@chess.com") {
-		t.Fatalf("records = %+v, want a WARN naming the unrouted email", logger.Records())
-	}
-}
-
-// TestProfileForAccountFallsBackWhenNoProfileMatches pins the other miss: a
-// readable Local State that names no such account still falls back loudly.
-func TestProfileForAccountFallsBackWhenNoProfileMatches(t *testing.T) {
-	// Arrange.
-	localState := writeLocalState(t, t.TempDir(), twoProfiles)
-	o, logger := newOpenerLogged(t, externalbrowser.Config{Profile: "Profile 6", LocalStatePath: localState})
-
-	// Act.
-	got := o.ProfileForAccount("stranger@example.com")
-
-	// Assert.
-	if got != "Profile 6" {
-		t.Fatalf("ProfileForAccount() = %q, want the pinned default", got)
-	}
-	if !warnedAbout(logger.Records(), "stranger@example.com") {
-		t.Fatalf("records = %+v, want a WARN naming the unmatched email", logger.Records())
-	}
-}
-
-// TestProfileForAccountRoutesLoggedOutToTheDefaultWithoutWarning pins that a
-// blank email is a STATE, not a failure: the pinned default, and no WARN.
-func TestProfileForAccountRoutesLoggedOutToTheDefaultWithoutWarning(t *testing.T) {
-	// Arrange.
-	localState := writeLocalState(t, t.TempDir(), twoProfiles)
-	o, logger := newOpenerLogged(t, externalbrowser.Config{Profile: "Profile 6", LocalStatePath: localState})
-
-	// Act.
-	got := o.ProfileForAccount("")
-
-	// Assert.
-	if got != "Profile 6" {
-		t.Fatalf("ProfileForAccount(\"\") = %q, want the pinned default", got)
-	}
-	for _, r := range logger.Records() {
-		if r.Level == dlog.LevelWarn {
-			t.Fatalf("logged-out routing left a WARN: %+v", r)
-		}
-	}
-}
-
-// TestOpenDefaultHandsTheRoutedProfileArgv pins that the profile Open is given
-// — not the pinned default — is the one that reaches Chrome's argv.
-func TestOpenDefaultHandsTheRoutedProfileArgv(t *testing.T) {
-	// Arrange.
-	dir := t.TempDir()
-	record := filepath.Join(dir, "argv")
-	activate := writeScript(t, dir, "activate", "exit 0")
-	launch := writeScript(t, dir, "launch", `printf '%s\n' "$@" > `+shellQuote(record))
-	o := newOpener(t, externalbrowser.Config{
-		ActivateBin: activate, DefaultLauncherBin: launch, Profile: "Profile 6",
-	})
-
-	// Act.
-	if err := o.Open(context.Background(), "https://example.com/page", "Profile 9"); err != nil {
+	if err := o.Open(context.Background(), "https://example.com/page", ""); err != nil {
 		t.Fatalf("Open() = %v, want nil", err)
 	}
 
 	// Assert.
-	want := "--profile-directory=Profile 9\nhttps://example.com/page\n"
-	if got := readFile(t, record); got != want {
-		t.Fatalf("launch argv = %q, want the routed profile %q", got, want)
+	if got := readFile(t, record); got != "https://example.com/page\n" {
+		t.Fatalf("launch argv = %q, want the url alone", got)
 	}
+	for _, r := range logger.Records() {
+		if r.Level != dlog.LevelDebug {
+			t.Fatalf("logged-out open left a %s record: %+v", r.Level, r)
+		}
+	}
+}
+
+// TestOpenDefaultFailsAnAccountItCannotRoute pins that there is NO PINNED
+// DEFAULT: an account whose Chrome profile cannot be found fails the open,
+// launches nothing, points at the user guide, and records the email at ERROR.
+func TestOpenDefaultFailsAnAccountItCannotRoute(t *testing.T) {
+	tests := []struct {
+		name       string
+		localState func(t *testing.T) string
+		wantBranch string
+	}{
+		{
+			name:       "Local State is unreadable",
+			localState: func(t *testing.T) string { return filepath.Join(t.TempDir(), "no-such-Local-State") },
+			wantBranch: "local-state-unreadable",
+		},
+		{
+			name:       "no profile is signed in as the account",
+			localState: func(t *testing.T) string { return writeLocalState(t, t.TempDir(), twoProfiles) },
+			wantBranch: "no-profile-match",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			cfg, record := recordingLauncher(t, tc.localState(t))
+			o, logger := newOpenerLogged(t, cfg)
+
+			// Act.
+			err := o.Open(context.Background(), "https://example.com/page", "stranger@example.com")
+
+			// Assert.
+			if err == nil || !strings.Contains(err.Error(), usersetup.Doc) {
+				t.Fatalf("Open() = %v, want an error pointing at %s", err, usersetup.Doc)
+			}
+			if _, statErr := os.Stat(record); statErr == nil {
+				t.Fatal("the browser was launched for an account with no profile")
+			}
+			if !loggedError(logger.Records(), "daemon.externalbrowser.profile_for_account", tc.wantBranch, "stranger@example.com") {
+				t.Fatalf("records = %+v, want an ERROR on branch %q naming the email", logger.Records(), tc.wantBranch)
+			}
+		})
+	}
+}
+
+// TestOpenOverriddenSkipsTheProfileRouting pins that a launcher override names
+// the whole launch: an account no profile matches is never looked up.
+func TestOpenOverriddenSkipsTheProfileRouting(t *testing.T) {
+	// Arrange.
+	dir := t.TempDir()
+	o := newOpener(t, externalbrowser.Config{
+		LauncherCmd:    writeScript(t, dir, "launcher", "exit 0"),
+		LocalStatePath: filepath.Join(dir, "no-such-Local-State"),
+	})
+
+	// Act.
+	err := o.Open(context.Background(), "https://example.com/page", "stranger@example.com")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Open() = %v, want nil", err)
+	}
+}
+
+// loggedError reports whether an ERROR record under op on branch names email.
+func loggedError(records []dlog.Record, op, branch, email string) bool {
+	for _, r := range records {
+		if r.Level == dlog.LevelError && r.Operation == op && r.Context["branch"] == branch && r.Context["email"] == email {
+			return true
+		}
+	}
+	return false
 }
 
 // writeScript plants an executable shell script and answers its path.
@@ -410,31 +441,6 @@ func TestOpenDefaultRaisesTheBrowserBeforeHandingOverTheURL(t *testing.T) {
 	}
 }
 
-// TestOpenDefaultHandsThePinnedProfileArgv pins the invocation the default
-// path exists for: the url goes to the browser executable directly, together
-// with the profile it must land in.
-func TestOpenDefaultHandsThePinnedProfileArgv(t *testing.T) {
-	// Arrange.
-	dir := t.TempDir()
-	record := filepath.Join(dir, "argv")
-	activate := writeScript(t, dir, "activate", "exit 0")
-	launch := writeScript(t, dir, "launch", `printf '%s\n' "$@" > `+shellQuote(record))
-	o := newOpener(t, externalbrowser.Config{
-		ActivateBin: activate, DefaultLauncherBin: launch, Profile: "Profile 9",
-	})
-
-	// Act.
-	if err := o.Open(context.Background(), "https://example.com/page", ""); err != nil {
-		t.Fatalf("Open() = %v, want nil", err)
-	}
-
-	// Assert.
-	want := "--profile-directory=Profile 9\nhttps://example.com/page\n"
-	if got := readFile(t, record); got != want {
-		t.Fatalf("launch argv = %q, want %q", got, want)
-	}
-}
-
 // TestOpenDefaultSurfacesAFailedRaise pins that a raise that failed is its own
 // loud error, distinct from a failed hand-off.
 func TestOpenDefaultSurfacesAFailedRaise(t *testing.T) {
@@ -485,17 +491,18 @@ func TestOpenDefaultSurfacesAFailedHandOff(t *testing.T) {
 	activate := writeScript(t, dir, "activate", "exit 0")
 	launch := writeScript(t, dir, "launch", "exit 4")
 	o := newOpener(t, externalbrowser.Config{
-		ActivateBin: activate, DefaultLauncherBin: launch, Profile: "Profile 9",
+		ActivateBin: activate, DefaultLauncherBin: launch,
+		LocalStatePath: writeLocalState(t, dir, twoProfiles),
 	})
 
 	// Act.
-	err := o.Open(context.Background(), "https://example.com", "")
+	err := o.Open(context.Background(), "https://example.com", "work@example.com")
 
 	// Assert.
 	if err == nil {
 		t.Fatal("Open() = nil error, want the failed hand-off surfaced")
 	}
-	if !strings.Contains(err.Error(), "Profile 9") {
+	if !strings.Contains(err.Error(), "Profile 1") {
 		t.Fatalf("err = %v, want it to name the profile the url was meant for", err)
 	}
 }

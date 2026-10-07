@@ -14,10 +14,9 @@ import (
 // rather than hardcoding a mapping that drifts the moment the operator adds or
 // reorders a profile.
 //
-// An empty answer (no discoverable home) is not a failure here: the caller
-// treats an unreadable Local State as the FALLBACK case, loudly, so a host
-// where the path cannot even be formed routes to the pinned default exactly as
-// a host whose file is missing does.
+// An empty answer (no discoverable home) is not a failure here: the opener
+// fails a link whose account cannot be routed, so a host where the path cannot
+// even be formed fails exactly as a host whose file is missing does.
 func DefaultLocalStatePath() string {
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
@@ -40,14 +39,14 @@ type localState struct {
 }
 
 // ProfileForEmail resolves the Chrome on-disk profile directory (e.g.
-// "Profile 6", "Default") whose account matches email, reading Chrome's own
+// "Profile 1", "Default") whose account matches email, reading Chrome's own
 // info_cache from a Local State document. The match is case-insensitive and
 // compares email against each profile's user_name and email fields — the two
 // that hold an address; gaia_name is a display name and is not matched on.
 //
 // A blank email, an unparseable document, or no matching profile all answer
-// ("", false): the caller decides what a miss means (it falls back to the
-// pinned default and says so). Profile keys are matched in sorted order so a
+// ("", false): the caller decides what a miss means (the opener fails the
+// link and says so). Profile keys are matched in sorted order so a
 // document with two profiles on the same account resolves deterministically.
 func ProfileForEmail(data []byte, email string) (string, bool) {
 	want := strings.TrimSpace(strings.ToLower(email))
