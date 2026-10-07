@@ -811,7 +811,16 @@ func TestADetachedSubagentWhoseProcessDiedIsNotLiveAfterAColdBoot(t *testing.T) 
 	first.ExpectWarnings("daemon.rollout.reconcile")
 	repo := harness.NewRepo(t)
 	ws := harness.Register(t, first.Daemon, repo.Dir)
-	driveScenarioToCompletion(t, first, ws, first.DefaultConfigDir, "subagent-detached-utterance")
+	turn := driveScenarioToCompletion(t, first, ws, first.DefaultConfigDir, "subagent-detached-utterance")
+	// THE CRASH WAITS FOR THE TURN'S DURABLE CLOSE, as raiseColdGate's does
+	// (coldgate_e2e_test.go): a kill between the feed's turn end and the
+	// queue's close leaves the turn open on disk for the successor to close
+	// as an orphan, which is not this test's subject.
+	first.Daemon.AwaitWorkspaceLogRecord(ws.GetDir(), "the first daemon's durable close of the turn", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.promptqueue.turn_ended" &&
+			r.Message == "the turn ended; nothing is waiting to be delivered" &&
+			r.Context["turn"] == turn.GetValue()
+	})
 
 	// Act: the daemon crashes and its shim -- the process running the agent
 	// -- is killed; a successor boots on the same state and account root.
