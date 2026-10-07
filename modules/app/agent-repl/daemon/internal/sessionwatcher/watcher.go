@@ -292,6 +292,26 @@ type watcher struct {
 	// it (see reconcileLiveWorkLocked).
 	liveSeq uint64
 
+	// contract is the session contract the shim stated on its SessionStarted.
+	// At SESSION_CONTRACT_LIVE_WORK_LEVEL or later the ledger follows the
+	// shim's live-work LEVEL alone (level.go); before it, the ledger is read
+	// from announcements and terminals as the expected old data it is.
+	contract conversationv1.SessionContract
+	// level is the latest live-work level the shim stated, by handle. NIL
+	// until the first level (or SessionStarted.live_work) lands.
+	level map[string]struct{}
+	// described is every announcement this watcher has routed, by handle:
+	// what an item IS, which the level (ids only) does not say. Unbounded by
+	// design, as retiredWork is: one entry per detached run.
+	described map[string]*conversationv1.AgentDetachedWork
+	// pending is every handle the level names whose announcement has not
+	// arrived yet. Live, and counted toward freeness, by its handle alone.
+	pending map[string]*conversationv1.DetachedWorkId
+	// processEnded marks the one publication that follows the vendor process
+	// ending (a departure, or the query dying), so the feed can tell work
+	// that LOST its process from work that simply stopped.
+	processEnded bool
+
 	// known is the newest pointer the daemon holds of each watched agent,
 	// keyed by AgentId.value with mainWatchKey for the main agent's: the newest
 	// entry a watch served, or the newest entry of a newest page a reader's
@@ -413,6 +433,9 @@ func start(ctx context.Context, ws ids.WorkspaceID, client shimclient.Client, se
 		shells: map[string]*shellWatch{},
 		live:   map[string]*liveItem{},
 		known:  map[string]*conversationv1.HistoryPointer{},
+
+		described: map[string]*conversationv1.AgentDetachedWork{},
+		pending:   map[string]*conversationv1.DetachedWorkId{},
 		served: map[string]map[string]struct{}{},
 
 		turnWaiters: map[ids.TurnID][]chan turnEnd{},
@@ -1126,6 +1149,11 @@ func (w *watcher) liveWorkLocked() LiveWorkSet {
 	sort.Slice(live.Agents, func(i, j int) bool { return live.Agents[i].GetValue() < live.Agents[j].GetValue() })
 	sort.Slice(live.Shells, func(i, j int) bool { return live.Shells[i].GetValue() < live.Shells[j].GetValue() })
 	sort.Slice(live.Monitors, func(i, j int) bool { return live.Monitors[i].GetValue() < live.Monitors[j].GetValue() })
+	for _, handle := range w.pending {
+		live.Pending = append(live.Pending, handle)
+	}
+	sort.Slice(live.Pending, func(i, j int) bool { return live.Pending[i].GetValue() < live.Pending[j].GetValue() })
+	live.ProcessEnded = w.processEnded
 	return live
 }
 
@@ -1135,6 +1163,7 @@ func (w *watcher) publishLiveWorkLocked() {
 	live := w.liveWorkLocked()
 	w.log.Debug("daemon.sessionwatcher.live_work", "live-work set changed", dlog.Context{
 		"agents": len(live.Agents), "shells": len(live.Shells), "monitors": len(live.Monitors),
+		"pending": len(live.Pending), "process_ended": live.ProcessEnded,
 	})
 	w.sinks.Lifecycle.OnLiveWorkChanged(w.ws, live)
 	// The roster hears the same set: its `idle_async` arm retires on an empty
@@ -1898,6 +1927,18 @@ func (w *watcher) reannouncedLocked(started *conversationv1.SessionStarted, open
 		w.log.Debug("daemon.sessionwatcher.watch_session",
 			"ignored a re-announced SessionStarted's facts; they are already held, and only its live membership is reconciled",
 			dlog.Context{"vendor_session_id": started.GetVendorSessionId()})
+		if w.levelModeLocked() {
+			// THE RE-ANNOUNCEMENT IS A LEVEL: its descriptions first, so the
+			// items it names are admitted whole rather than pending.
+			w.takeContractLocked(started)
+			for _, item := range started.GetLiveWork() {
+				w.describeOnlyLocked(item)
+			}
+			if w.applyLevelLocked(startedLevel(started), "reannounced") {
+				w.publishLiveWorkLocked()
+			}
+			return
+		}
 		if w.reconcileLiveWorkLocked(started, openedAt) {
 			w.publishLiveWorkLocked()
 		}
@@ -1922,7 +1963,9 @@ func (w *watcher) reannouncedLocked(started *conversationv1.SessionStarted, open
 	if w.main == nil || w.main.stream == nil {
 		w.openMainLocked()
 	}
-	w.reconcileLiveWorkLocked(started, openedAt)
+	if !w.levelModeLocked() {
+		w.reconcileLiveWorkLocked(started, openedAt)
+	}
 	w.adoptLiveWorkLocked(started)
 	w.publishLiveWorkLocked()
 	// THE FACTS ARE THE FIRST FREENESS JUDGEMENT a pure attach can make:
@@ -1935,7 +1978,14 @@ func (w *watcher) reannouncedLocked(started *conversationv1.SessionStarted, open
 // re-announcement on an adopted watch.
 func (w *watcher) applySessionStartedLocked(started *conversationv1.SessionStarted) {
 	first := !w.started
+	w.takeContractLocked(started)
 	w.started = true
+	// THE OPENING STATES THE LEVEL TOO, for a shim that speaks it: its live
+	// membership is the level at this instant. The items it names are pending
+	// until adoptLiveWorkLocked routes their descriptions, which admits them.
+	if w.levelModeLocked() {
+		w.applyLevelLocked(startedLevel(started), "session_started")
+	}
 	// THE EDGE IS SIGNALLED AFTER THE FACTS ARE TAKEN UP, under the same lock
 	// (the deferred close runs before this function's caller releases it), so
 	// a waiter released by it reads the turn in flight and the reconciled

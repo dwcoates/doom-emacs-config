@@ -106,8 +106,10 @@ first one arrives).")
 
 (defvar agent-repl-host-last-selected-id nil
   "The `WorkspaceRef' id of the last workspace Emacs itself selected.
-roster.el compares a daemon-originated `current' change against this so
-Emacs's own tab switch is not mistaken for a switch REQUEST (ruling R8).")
+Recorded when the daemon acknowledged it, when a leaving daemon answered
+`standing_down', and when nobody answered at all: in every case it is the
+selection the next link-up re-asserts (`agent-repl-host--selected-dir').
+A refusal records nothing, because the daemon said it stamped nothing.")
 
 (defvar agent-repl-host-reselect-pending nil
   "The project dir Emacs is re-asserting as the user's selection, or nil.
@@ -488,6 +490,7 @@ has already moved past is never sent, because the daemon would stamp it
 settled `:superseded' so its caller is not left waiting.")
 
 (declare-function agent-repl-roster-apply-current "roster" ())
+(declare-function agent-repl-link-up-p "daemon-link" ())
 
 (defun agent-repl-host-pending-selection ()
   "Return the workspace most recently REQUESTED and not yet answered, or nil.
@@ -552,9 +555,7 @@ ON-SETTLED is as `agent-repl-host-select' documents."
            :on-failure
            (lambda (detail)
              (agent-repl-host--select-settled
-              ws (lambda ()
-                   (agent-repl--error ws "elisp.host.select-failed ws=%s detail=%S" ws detail)
-                   (when on-settled (funcall on-settled :failure))))))
+              ws (lambda () (agent-repl-host--select-failed ws ref detail on-settled)))))
         (error
          ;; The call never went out, so nothing will ever answer it: the
          ;; slot is released here or no later selection is ever sent.
@@ -583,6 +584,32 @@ and this is the moment it is judged -- the last push wins."
           (setq agent-repl-host--select-queued nil)
           (agent-repl-host-select (car next) (cdr next)))
       (agent-repl-roster-apply-current))))
+
+(defun agent-repl-host--select-failed (ws ref detail on-settled)
+  "Act on WS\='s selection of REF failing with DETAIL before any answer.
+ON-SETTLED is as `agent-repl-host-select' documents.
+
+A SELECTION NOBODY ANSWERED IS STILL THE USER\='S, so it is ALWAYS recorded
+as the selection the next link-up re-asserts
+\(`agent-repl-host--selected-dir'), whatever the link\='s state when the
+failure lands.  A daemon stopping under the call answers it with no
+response, or with the HTTP layer\='s 503, before any handler can say
+`standing_down', and that failure can land before OR after the link-down
+edge -- deciding by the link\='s state left the user\='s choice to that
+order, and the dead daemon\='s last `current' won whenever the failure came
+first (2026-10-07, e2e TestEmacsRestartKeepsTheSelectedWorkspace).  The
+link\='s state decides only how the failure is told: with the link down the
+daemon is gone and the loss is expected (INFO, settled `:standing-down'),
+with it up the failure is the error it is (ERROR, settled `:failure')."
+  (setq agent-repl-host-last-selected-id (plist-get ref :id))
+  (if (agent-repl-link-up-p)
+      (progn
+        (agent-repl--error ws "elisp.host.select-failed ws=%s id=%S reassert=next-link-up detail=%S"
+                           ws (plist-get ref :id) detail)
+        (when on-settled (funcall on-settled :failure)))
+    (agent-repl--info ws "elisp.host.select-daemon-gone ws=%s id=%S reassert=next-daemon detail=%S"
+                      ws (plist-get ref :id) detail)
+    (when on-settled (funcall on-settled :standing-down))))
 
 (defun agent-repl-host--select-answered (ws ref response on-settled)
   "Act on the daemon\='s RESPONSE to WS\='s selection of REF.

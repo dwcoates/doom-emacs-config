@@ -56,6 +56,15 @@ func (r *resolver) replayPage(ws ids.WorkspaceID, agent *conversationv1.AgentId,
 	// page's newest cut is established before any row is served, so no reader
 	// is ever handed a row that cut goes on to withhold (holdPushes).
 	defer r.holdPushes(s)()
+	// A BUBBLE THE RECORD DRAWS IS JUDGED AGAINST THE LEVEL once the page is
+	// placed, and before its pushes are released (deferred after holdPushes,
+	// so it runs first): work the record shows running that no live set names
+	// ran in an earlier vendor process (judgeHistoryBubbles).
+	s.replaying = true
+	defer func() {
+		s.replaying = false
+		r.judgeHistoryBubbles(s)
+	}()
 
 	// A FORK'S PORTED CONVERSATION IS PART OF WHAT ITS FIRST LOAD DRAWS: it
 	// stands above the page's own rows, so the page's bound reaches it.

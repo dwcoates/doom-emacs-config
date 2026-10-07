@@ -103,9 +103,16 @@ HOLDER=$!
 printf '%s\n' "$HOLDER" > "$d/slots/slot-1/pid"
 printf '%s\n' "a suite that is already running" > "$d/slots/slot-1/cmd"
 set +e
+# THE WAITER RUNS AS ITS OWN PROCESS GROUP (job control on for this one
+# launch), so ending it ends the gate's polling `sleep 2` with it. Killing the
+# bash alone orphaned that sleep, which kept this harness's stderr file open
+# on the run's RAM disk until the run's end and failed its release
+# (2026-10-07, `held by: sleep[...]`).
+set -m
 AGENT_REPL_SUITE_SLOT_DIR="$d/slots" bash "$SCRIPT_UNDER_TEST" \
     bash -c 'echo ran > "$0"' "$d/marker" 2>"$d/err" &
 WAITER=$!
+set +m
 # The waiter announces before its first sleep, so the announcement is the
 # signal that it is gating rather than running. Poll for it under a bound
 # rather than sleeping a guessed interval.
@@ -117,8 +124,9 @@ while ! grep -q "WAITING" "$d/err" 2>/dev/null; do
 done
 GATED=0
 if grep -q "WAITING" "$d/err" 2>/dev/null && [ ! -f "$d/marker" ]; then GATED=1; fi
-kill "$WAITER" 2>/dev/null
+kill -TERM -- "-$WAITER" 2>/dev/null
 wait "$WAITER" 2>/dev/null
+WAITER_LEFT=$(pgrep -g "$WAITER" 2>/dev/null | tr '\n' ' ')
 kill "$HOLDER" 2>/dev/null
 wait "$HOLDER" 2>/dev/null
 set -e
@@ -126,6 +134,11 @@ if [ "$GATED" -eq 1 ]; then
     pass "a second suite waits while another holds the only slot"
 else
     fail "a second suite waits while another holds the only slot" "err: $(cat "$d/err")"
+fi
+if [ -z "$WAITER_LEFT" ]; then
+    pass "a stopped waiter leaves nothing of its group running"
+else
+    fail "a stopped waiter leaves nothing of its group running" "still running: $WAITER_LEFT"
 fi
 
 # --- 5. a NESTED invocation runs through instead of deadlocking -------------

@@ -81,6 +81,10 @@ const (
 	// concludedDeparted is the watched shim's PROCESS being gone: a kill, a
 	// forced bounce, a stand-down or a death. Everything it ran ended with it.
 	concludedDeparted conclusion = "departed"
+	// concludedLeftLevel is the shim's live-work level no longer naming the
+	// item (level.go): the vendor process stopped running it. Its outcome is
+	// stated on its own edge, which may follow.
+	concludedLeftLevel conclusion = "left_level"
 )
 
 // admitLocked puts one announced item in the ledger, reporting whether it was
@@ -112,6 +116,17 @@ func (w *watcher) liveHandleLocked(handle string) (*liveItem, bool) {
 // retirement; it reports whether the item was live, and the caller republishes
 // the set when it was.
 func (w *watcher) concludeLocked(handle string, why conclusion) bool {
+	// A PENDING ITEM CONCLUDES LIKE ANY OTHER: the level named it before its
+	// announcement arrived, and its terminal can arrive first too. It retires
+	// for good, so a level still naming it a moment longer cannot re-admit it.
+	if _, waiting := w.pending[handle]; waiting && handle != "" {
+		delete(w.pending, handle)
+		w.retiredWork[handle] = struct{}{}
+		w.log.Info("daemon.sessionwatcher.live_work_retired", "a pending detached item concluded before its announcement described it", dlog.Context{
+			"work_id": handle, "kind": "pending", "conclusion": string(why), "pending_after": len(w.pending),
+		})
+		return true
+	}
 	item, ok := w.liveHandleLocked(handle)
 	if !ok {
 		return false
@@ -208,7 +223,13 @@ func (w *watcher) retireAgentLocked(key string, why conclusion) bool {
 // them: the session's query is gone, and nothing it ran survives it. It
 // reports whether anything was live.
 func (w *watcher) concludeAllLocked(why conclusion) bool {
-	changed := false
+	changed := len(w.pending) > 0
+	// THE LEVEL ENDS WITH THE PROCESS: nothing it named survives, and the next
+	// process states its own.
+	w.pending = map[string]*conversationv1.DetachedWorkId{}
+	if w.level != nil {
+		w.level = map[string]struct{}{}
+	}
 	for handle := range w.live {
 		if w.concludeLocked(handle, why) {
 			changed = true
@@ -255,7 +276,7 @@ func (w *watcher) settleDepartedWorkLocked() {
 	w.log.Info("daemon.sessionwatcher.departed_work_settled", "the departed shim's live work was concluded and the empty set republished to every view", dlog.Context{
 		"concluded": live, "published": true,
 	})
-	w.publishLiveWorkLocked()
+	w.publishProcessEndedLocked()
 }
 
 // reconcileLiveWorkLocked holds the ledger to a re-announcement's live

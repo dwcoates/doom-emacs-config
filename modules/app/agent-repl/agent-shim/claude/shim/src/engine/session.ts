@@ -40,7 +40,7 @@ import {
 import type { LockRelease } from "../locks.js";
 import { workspaceLockKey } from "../locks.js";
 import { recordAgentBinaryVersion, requireSessionRuntime } from "../build-identity.js";
-import { isAgentTaskType } from "../convert/detached.js";
+import { isAgentTaskType, taskKindOf } from "../convert/detached.js";
 import { appliedEffortOf, effortLevelOf, vendorEffortLevel } from "../convert/effort.js";
 import { boundaryChange } from "./boundary-change.js";
 import { mainAgentId, promptVendorUuid, subagentId, toolCallActivityId } from "../convert/ids.js";
@@ -2834,6 +2834,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       // `backgroundTaskId` says its foreground task left the turn, which is
       // one of the three statements the shared rule reads.
       live.onToolResult(message.tool_use_result);
+      pushLiveWorkLevel("tool_result");
       return;
     }
     if (message.type !== "system") return;
@@ -2855,6 +2856,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       default:
         break;
     }
+    pushLiveWorkLevel(message.subtype);
   }
 
   /**
@@ -3190,6 +3192,48 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     }
   }
 
+  /** The last live-work level pushed, as its sorted handles joined; undefined before the first. */
+  let lastLevelKey: string | undefined;
+
+  /**
+   * PUSH THE LIVE-WORK LEVEL when its membership changed (conversation.v1
+   * SessionLiveWork): the whole set of announceable work the vendor process
+   * holds running, by handle. Called after every fold that can change the
+   * table and at every vendor-process end, so the daemon's ledger is exactly
+   * the process's own statement and nothing read out of a record.
+   */
+  function pushLiveWorkLevel(why: string): void {
+    const ids = live.workIds(levelEntries());
+    const key = ids
+      .map((id) => id.value)
+      .sort()
+      .join("\u0000");
+    if (key === lastLevelKey) return;
+    lastLevelKey = key;
+    LOGGER.info({ named: ids.length, why }, "the live-work level changed and was pushed");
+    pushes.push(
+      create(conversationv1.SessionUpdateSchema, {
+        update: { case: "liveWork", value: create(conversationv1.SessionLiveWorkSchema, { liveWork: ids }) },
+      }),
+    );
+  }
+
+  /**
+   * THE WORK THE LEVEL NAMES: every announceable live item but a SHELL, whose
+   * end has one writer (the sidecar's terminal, once the spool is read to its
+   * end) and whose liveness is read from the record (conversation.v1
+   * SessionLiveWork).
+   */
+  function levelEntries(): readonly LiveWorkEntry[] {
+    return live.announceable().filter((entry) => taskKindOf(entry.taskType) !== "bash");
+  }
+
+  /** The vendor process ended or was replaced: its work ends with it, and the level says so. */
+  function endVendorProcessWork(why: string): void {
+    live.clear(why);
+    pushLiveWorkLevel(why);
+  }
+
   /** State the level in effect on WatchSession; the fan-out drops an unchanged one. */
   function pushEffortChanged(level: conversationv1.AgentEffortLevel): void {
     pushes.push(
@@ -3316,6 +3360,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // NOTHING THE DEAD QUERY ANNOUNCED CAN SETTLE, so the fold lets go of it.
     deps.fold.endQuery(`the vendor query died: ${detail}`);
     query = undefined;
+    endVendorProcessWork(`the vendor query died: ${detail}`);
     // THE STREAM OWNER GETS ITS OWN TERMINAL. `query_died` is a SESSION fact,
     // and a consumer watching the agent -- which is the consumer actually
     // waiting on the turn -- would otherwise see the stream simply stop
@@ -4089,6 +4134,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     const previousPrompts = prompts;
     query = undefined;
     prompts = undefined;
+    // THE PREVIOUS VENDOR PROCESS ENDS HERE, and nothing it ran outlives it:
+    // the next process states its own level from empty.
+    if (previous !== undefined) endVendorProcessWork("the vendor query was replaced by a new one");
     abort?.abort();
     previousPrompts?.close();
     previous?.close();
@@ -4606,6 +4654,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       const orphan = query;
       if (orphan !== undefined) {
         query = undefined;
+        endVendorProcessWork("a failed start closed the vendor query it had opened");
         prompts?.close();
         prompts = undefined;
         abort?.abort();
@@ -4721,6 +4770,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       permissionMode,
       modelCatalog,
       liveWork,
+      contract: conversationv1.SessionContract.LIVE_WORK_LEVEL,
     });
     // KEPT SO A LATER WATCH CAN BE TOLD. A daemon that adopts an already-started
     // shim (crash boot, handover) was not there for this announcement, and the
@@ -6006,6 +6056,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       ...servedTurnInFlight(),
       turnsWaiting: servedTurnsWaiting(),
       liveWork: await announceLiveWorkNow(),
+      contract: conversationv1.SessionContract.LIVE_WORK_LEVEL,
     });
   }
 
@@ -6026,12 +6077,24 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     try {
       // SCOPED, like every live-work read: this session's lineage only.
       const agentId = requireIdentity().agentId;
-      const handles = (await deps.persistence.liveWork(agentId)).liveDetached;
+      // THE LEVEL, NOT THE RECORD, says which subagent or monitor is live:
+      // the record's open obligations were settled against the vendor
+      // process when the session started (reconcile), and reading membership
+      // back out of them is what let finished work re-announce itself as live
+      // after a handover (2026-10-07).
+      const open = await deps.persistence.liveWork(agentId);
       // THE READ ANSWERING IS THE RECOVERY, whatever it answered. An empty set
       // is as much proof the store is reading again as a full one, and
       // resolving only on the non-empty path is why the owner's fault outlived
       // a store that had been healthy for hours.
       pushes.resolveComponent(LIVE_WORK_COMPONENT, 0);
+      // THE MEMBERSHIP: the level's items, and the SHELLS the record holds
+      // open -- a shell's liveness is the record's until the sidecar writes
+      // its end. A record candidate that turns out not to be a shell is no
+      // claim about liveness, so it is described and dropped.
+      const levelIds = live.workIds(levelEntries());
+      const inLevel = new Set(levelIds.map((id) => id.value));
+      const handles = [...levelIds, ...open.liveDetached.filter((id) => !inLevel.has(id.value))];
       if (handles.length === 0) return [];
       // READ, NOT WATCH: the one-shot verb, so no watch token is minted for a
       // tail this description never stands.
@@ -6040,14 +6103,20 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         handles.map((handle) => handle.value),
       );
       const undescribed: conversationv1.DetachedWorkId[] = [];
-      const announcements = announceLiveWork(
+      const described = announceLiveWork(
         book,
         handles,
         agentId,
         (handle) => {
-          undescribed.push(handle);
+          // ONLY A LEVEL ITEM IS OWED A DESCRIPTION: a record candidate the
+          // book cannot describe is not known to be a shell, so it is not live.
+          if (inLevel.has(handle.value)) undescribed.push(handle);
+          else LOGGER.debug({ work: handle.value }, "a record candidate the book cannot describe is not a live shell; it is not re-announced");
         },
         await bashStartsFor(bashUnitsWithoutCommand(book, handles)),
+      );
+      const announcements = described.filter(
+        (work) => inLevel.has(work.work?.value ?? "") || work.kind?.kind.case === "bash",
       );
       // A SUBAGENT RESUMED BY A SEND is described from its spawn, named by the
       // store; only a handle that is not a send takes the undescribed path.
@@ -6365,6 +6434,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     abort?.abort();
     active?.close();
     query = undefined;
+    endVendorProcessWork(`the session is being torn down: ${reason}`);
     // BOUNDED, BECAUSE A CLOSED QUERY IS NOT A PROMISE THAT SETTLES. `close()`
     // is the vendor's own end-of-stream signal, but nothing in the SDK's
     // declared surface guarantees the iterator this loop is parked in ever

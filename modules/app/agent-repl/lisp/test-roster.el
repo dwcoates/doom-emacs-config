@@ -130,7 +130,10 @@ whose calls are the observation."
            (agent-repl-roster--judged-current nil)
            (agent-repl-roster--pushed-at nil)
            (agent-repl-test-roster--landed nil)
-           (agent-repl-test-roster--following-at-switch :unset))
+           (agent-repl-test-roster--following-at-switch :unset)
+           ;; A STANDING ROSTER STREAM, the ordinary state: a view is only
+           ;; followed while the stream that served it stands.
+           (agent-repl-roster--stream 'agent-repl-test-roster--standing-stream))
        (cl-letf (((symbol-function 'agent-repl--ws-create)
                   (lambda (ws &optional dir)
                     (push ws agent-repl-test-roster--created)
@@ -1055,6 +1058,43 @@ that follows must not care which of the two got there first."
       :current "b"))
     ;; Assert
     (should (equal agent-repl-test-roster--switched '("two")))))
+
+(ert-deftest agent-repl-test-roster-a-current-whose-stream-ended-is-not-followed ()
+  "A dead daemon's last `current' must not move the frame off the user's
+own choice (2026-10-07): the view decides nothing once its stream ended."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (setq agent-repl-test-roster--current-name "one")
+    (setq agent-repl-roster--stream nil)
+    ;; Act
+    (agent-repl-roster-apply
+     (agent-repl-test-roster--roster
+      :sections (list (agent-repl-test-roster--section
+                       "repo" (list (agent-repl-test-roster--row "a" "one" :ready)
+                                    (agent-repl-test-roster--row "b" "two" :ready))))
+      :current "b"))
+    ;; Assert
+    (should (null agent-repl-test-roster--switched))))
+
+(ert-deftest agent-repl-test-roster-a-current-whose-stream-ended-is-recorded-at-info ()
+  "The ignored `current' is said, so the frame staying put is visible."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (setq agent-repl-test-roster--current-name "one")
+    (setq agent-repl-roster--stream nil)
+    (let ((logged nil))
+      (cl-letf (((symbol-function 'agent-repl--info)
+                 (lambda (_scope fmt &rest args) (push (apply #'format fmt args) logged))))
+        ;; Act
+        (agent-repl-roster-apply
+         (agent-repl-test-roster--roster
+          :sections (list (agent-repl-test-roster--section
+                           "repo" (list (agent-repl-test-roster--row "a" "one" :ready)
+                                        (agent-repl-test-roster--row "b" "two" :ready))))
+          :current "b")))
+      ;; Assert
+      (should (cl-find-if (lambda (line) (string-prefix-p "elisp.roster.current: stream-ended id=b" line))
+                          logged)))))
 
 (defun agent-repl-test-roster--two-tabs (current)
   "Return a roster with tabs one (a) and two (b) and CURRENT selected."
