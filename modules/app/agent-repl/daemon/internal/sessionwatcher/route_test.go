@@ -14,11 +14,12 @@ import (
 	"claude-repld/internal/wsm"
 )
 
-// TestRouteActivityGoesToTheThreeSinksThatDrawFromIt covers the ordinary
-// activity: the feed draws the row, the footer advances its status tree, and
-// the topbar accumulates the session's token spend from the usage the frame
-// carries.
-func TestRouteActivityGoesToTheThreeSinksThatDrawFromIt(t *testing.T) {
+// TestRouteActivityGoesToTheFourSinksThatDrawFromIt covers the ordinary
+// activity: the feed draws the row, the footer advances its status tree, the
+// roster takes the same fact (the vendor answering a retried call ends its
+// `api_retrying` as it ends the footer's), and the topbar accumulates the
+// session's token spend from the usage the frame carries.
+func TestRouteActivityGoesToTheFourSinksThatDrawFromIt(t *testing.T) {
 	// Arrange.
 	h := newHarness(t, Session{Started: sessionStarted("")})
 	h.quiet()
@@ -27,7 +28,7 @@ func TestRouteActivityGoesToTheThreeSinksThatDrawFromIt(t *testing.T) {
 	got := h.route(h.main, entryFrame(frameUpdate("main-1", activityUpdate(readActivity("act-1")))))
 
 	// Assert.
-	assertNames(t, got, []string{"feed.OnActivity", "footer.OnActivity", "topbar.OnActivity"})
+	assertNames(t, got, []string{"feed.OnActivity", "footer.OnActivity", "sidebar.OnActivity", "topbar.OnActivity"})
 }
 
 // TestRouteUnmodeledActivityAlsoWarnsTheTopbar covers the extra thing an
@@ -42,7 +43,7 @@ func TestRouteUnmodeledActivityAlsoWarnsTheTopbar(t *testing.T) {
 	got := h.route(h.main, entryFrame(frameUpdate("main-1", activityUpdate(unmodeledActivity("act-1", "StructuredOutput")))))
 
 	// Assert.
-	assertNames(t, got, []string{"feed.OnActivity", "footer.OnActivity", "topbar.OnActivity"})
+	assertNames(t, got, []string{"feed.OnActivity", "footer.OnActivity", "sidebar.OnActivity", "topbar.OnActivity"})
 	if !h.hasRecord("warn", "daemon.sessionwatcher.unmodeled_activity") {
 		t.Fatal("an unmodeled activity was not warned about")
 	}
@@ -59,7 +60,7 @@ func TestRouteMcpToolCallRoutesAsAnOrdinaryActivity(t *testing.T) {
 	got := h.route(h.main, entryFrame(frameUpdate("main-1", activityUpdate(mcpActivity("act-1", "mcp__claude-in-chrome__navigate")))))
 
 	// Assert.
-	assertNames(t, got, []string{"feed.OnActivity", "footer.OnActivity", "topbar.OnActivity"})
+	assertNames(t, got, []string{"feed.OnActivity", "footer.OnActivity", "sidebar.OnActivity", "topbar.OnActivity"})
 }
 
 // TestRouteMcpToolCallIsNeverWarnedAboutAsUnmodeled covers the WARN that used
@@ -105,7 +106,7 @@ func TestRouteSubagentHandbackRoutesAsAnOrdinaryActivity(t *testing.T) {
 	got := h.route(h.main, entryFrame(frameUpdate("main-1", activityUpdate(handbackActivity("act-1")))))
 
 	// Assert.
-	assertNames(t, got, []string{"feed.OnActivity", "footer.OnActivity", "topbar.OnActivity"})
+	assertNames(t, got, []string{"feed.OnActivity", "footer.OnActivity", "sidebar.OnActivity", "topbar.OnActivity"})
 }
 
 // TestRouteContextInjectedActivity covers a FILE-PLANE-ONLY fact: injected
@@ -121,7 +122,7 @@ func TestRouteContextInjectedActivity(t *testing.T) {
 	got := h.route(h.main, entryFrame(frameUpdate("main-1", activityUpdate(contextInjectedActivity("act-1")))))
 
 	// Assert.
-	assertNames(t, got, []string{"feed.OnActivity", "footer.OnActivity", "topbar.OnActivity"})
+	assertNames(t, got, []string{"feed.OnActivity", "footer.OnActivity", "sidebar.OnActivity", "topbar.OnActivity"})
 }
 
 // TestRouteQuestion covers a blocked question: the feed draws it, the footer
@@ -804,7 +805,7 @@ func TestRouteDetachedSubagentFrame(t *testing.T) {
 	// Assert: the frame is this run's TERMINAL, so the live set loses it in the
 	// same breath the chip retires.
 	assertNames(t, got, []string{
-		"feed.OnActivity", "footer.OnActivity", "topbar.OnActivity", "footer.OnSubagent",
+		"feed.OnActivity", "footer.OnActivity", "sidebar.OnActivity", "topbar.OnActivity", "footer.OnSubagent",
 		"lifecycle.OnLiveWorkChanged", "sidebar.OnLiveWorkChanged", "footer.OnLiveWorkChanged", "feed.OnLiveWorkChanged",
 	})
 }

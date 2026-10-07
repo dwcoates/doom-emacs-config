@@ -436,7 +436,7 @@ func start(ctx context.Context, ws ids.WorkspaceID, client shimclient.Client, se
 
 		described: map[string]*conversationv1.AgentDetachedWork{},
 		pending:   map[string]*conversationv1.DetachedWorkId{},
-		served: map[string]map[string]struct{}{},
+		served:    map[string]map[string]struct{}{},
 
 		turnWaiters: map[ids.TurnID][]chan turnEnd{},
 		closedTurns: map[ids.TurnID]TurnClose{},

@@ -311,12 +311,13 @@ func (s *wsState) turnEndArm() string {
 }
 
 // noteArm records the arm being published for this workspace and reports
-// whether it CHANGED.
-func (s *wsState) noteArm(arm string) bool {
-	changed := s.lastArmSeen && s.lastArm != arm
+// the arm it replaced and whether it CHANGED.
+func (s *wsState) noteArm(arm string) (string, bool) {
+	previous := s.lastArm
+	changed := s.lastArmSeen && previous != arm
 	s.lastArm = arm
 	s.lastArmSeen = true
-	return changed
+	return previous, changed
 }
 
 // viewedOn reports whether a row on arm draws the viewed (PARTIAL) marker. It
