@@ -46,6 +46,11 @@ the row below) by lengthening the shared world's own prompt list until
 `compaction-directed` row is now a real `compact_boundary` capture, not a
 `Not enough messages` non-event.
 
+The `chessBoard` arm (agent-repl's OWN `show_chess_board` tool, `!chess-board`)
+has no capture either: the tool is served by the shim's in-process MCP server,
+which no capture session registered, so the mock's call follows the tool's own
+schema and handler in `src/sdk/agent-repl-mcp.ts`.
+
 NO CAPTURE CAN GROUND THE `diagnostics` ATTACHMENT, on this or any host. The
 record only exists when an editor integration is connected to the scratch cwd,
 which is why `ide-diagnostics-after-edit` — the capture named for it — holds no

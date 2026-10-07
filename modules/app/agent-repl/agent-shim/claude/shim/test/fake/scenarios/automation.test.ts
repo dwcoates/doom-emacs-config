@@ -47,6 +47,18 @@ describe("plan mode", () => {
   });
 });
 
+describe("chess board", () => {
+  it("calls agent-repl's own board tool with a CEE session and its game", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!chess-board"]);
+
+    // Assert
+    expect(toolUses(driven).map((t) => [t.name, t.input])).toEqual([
+      ["mcp__agent-repl__show_chess_board", { session_id: "fake-cee-session", game_id: "fake-game" }],
+    ]);
+  });
+});
+
 describe("report findings", () => {
   it("carries both verdicts in one call, so neither arm is unreachable", async () => {
     // Arrange + Act
