@@ -22,14 +22,14 @@ describe("scrubTree", () => {
   it("rewrites contents as text, touching only the personal values", () => {
     const root = tree({ "s.jsonl": '{"cwd":"/Users/ann/p",  "n":1}\n' });
     scrubTree(root, personal);
-    expect(readFileSync(path.join(root, "s.jsonl"), "utf8")).toBe('{"cwd":"~/p",  "n":1}\n');
+    expect(readFileSync(path.join(root, "s.jsonl"), "utf8")).toBe('{"cwd":"${HOME}/p",  "n":1}\n');
   });
 
   it("renames a directory named after the home, after scrubbing what it holds", () => {
     const root = tree({ "projects/-Users-ann-p/s.jsonl": '{"who":"Ann"}\n' });
     scrubTree(root, personal);
-    expect(readdirSync(path.join(root, "projects"))).toEqual(["--p"]);
-    expect(readFileSync(path.join(root, "projects", "--p", "s.jsonl"), "utf8")).toBe('{"who":"Someone"}\n');
+    expect(readdirSync(path.join(root, "projects"))).toEqual(["--HOME--p"]);
+    expect(readFileSync(path.join(root, "projects", "--HOME--p", "s.jsonl"), "utf8")).toBe('{"who":"Someone"}\n');
   });
 
   it("answers every changed path and leaves a clean file untouched", () => {

@@ -115,17 +115,32 @@ export const BLOB_KEYS = ["signature", "data", "base64", "thumbnail"];
  */
 export const NO_PERSONAL_VALUES = Object.freeze({ home: "", emails: [], names: [] });
 
-/** What a home directory becomes in a recording: the generic `~`. */
-export const HOME_TOKEN = "~";
+/**
+ * What a home directory becomes in a recording: a token naming no one, which
+ * a reader replaying the recording expands back to its own home with
+ * {@link expandHome}. It is not `~`, because a recorded path must be absolute
+ * once replayed and `~`'s project-directory slug (`-`) could not be told apart
+ * from any other dash.
+ */
+export const HOME_TOKEN = "${HOME}";
 
 /**
  * The vendor's project-directory spelling of an absolute path: every byte that
- * is not [A-Za-z0-9] becomes `-`. The home's slug becomes `-`, which is
- * exactly the slug of {@link HOME_TOKEN}, so a recorded path and the project
- * directory named after it stay in agreement after the scrub.
+ * is not [A-Za-z0-9] becomes `-`. The home's slug becomes the slug of
+ * {@link HOME_TOKEN} (`--HOME-`), so a recorded path and the project directory
+ * named after it stay in agreement after the scrub.
  */
 export function pathSlug(p) {
   return p.replace(/[^A-Za-z0-9]/g, "-");
+}
+
+/**
+ * A recording's text as this machine would have recorded it: the home token
+ * and its slug become `home` and `home`'s slug. The inverse of the home rule
+ * in {@link scrubPersonal}.
+ */
+export function expandHome(text, home) {
+  return text.split(HOME_TOKEN).join(home).split(pathSlug(HOME_TOKEN)).join(pathSlug(home));
 }
 
 /** The address the i-th (0-based) personal email becomes. */

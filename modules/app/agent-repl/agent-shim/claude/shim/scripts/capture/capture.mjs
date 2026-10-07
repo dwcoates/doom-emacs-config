@@ -58,6 +58,7 @@ import {
   anonymize,
   anonymizeJsonl,
   anonymizePlainText,
+  expandHome,
   scrubPersonal,
 } from "./anonymize.mjs";
 import { apiKeySource, classifyCapture, verdictLine } from "./outcome.mjs";
@@ -936,7 +937,7 @@ export const CORPUS_DIR = path.join(HERE, "..", "..", "testdata", "captures");
  * verbatim on its own lines, and cross-checked against the slug the committed
  * directory is named for.
  */
-export function readCapturedSession(corpusDir, captureName) {
+export function readCapturedSession(corpusDir, captureName, home = homedir()) {
   const projectsDir = path.join(corpusDir, captureName, "files", "projects");
   if (!existsSync(projectsDir)) {
     throw new Error(
@@ -970,7 +971,8 @@ export function readCapturedSession(corpusDir, captureName) {
       continue;
     }
     if (typeof parsed?.cwd === "string" && parsed.cwd !== "") {
-      cwd = parsed.cwd;
+      // The recording names no one; it is replayed under this machine's home.
+      cwd = expandHome(parsed.cwd, home);
       break;
     }
   }
@@ -980,13 +982,14 @@ export function readCapturedSession(corpusDir, captureName) {
         "cannot be resumed into the directory the vendor slugged it under",
     );
   }
-  if (cwdSlug(cwd) !== slugs[0]) {
+  const slug = expandHome(slugs[0], home);
+  if (cwdSlug(cwd) !== slug) {
     throw new Error(
       `capture: resume_capture ${captureName}'s recorded cwd ${cwd} slugs to ` +
-        `${cwdSlug(cwd)}, not the committed ${slugs[0]}`,
+        `${cwdSlug(cwd)}, not the committed ${slug}`,
     );
   }
-  return { sessionId, slug: slugs[0], cwd, transcriptPath };
+  return { sessionId, slug, cwd, transcriptPath, home };
 }
 
 /**
@@ -1017,7 +1020,7 @@ export function seedResumableSession(auth, accountRoot, seed) {
     throw new Error(`capture: ${target} already exists; refusing to overwrite it`);
   }
   mkdirSync(projectDir, { recursive: true });
-  writeFileSync(target, readFileSync(seed.transcriptPath, "utf8"), "utf8");
+  writeFileSync(target, expandHome(readFileSync(seed.transcriptPath, "utf8"), seed.home), "utf8");
   return { projectDir, target };
 }
 
