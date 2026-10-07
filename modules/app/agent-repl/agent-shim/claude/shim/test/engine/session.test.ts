@@ -489,6 +489,25 @@ async function hibernatable(): Promise<Harness & { vendorSessionId: string }> {
 }
 
 /** Bring a fresh session up: start it, and answer the vendor's init. */
+/**
+ * THE VENDOR PROCESS RUNS `toolUseId`'s TASK: a background `task_started`, so
+ * the live table -- the one source of the live-work level and of a
+ * re-announcement's membership (conversation.v1 SessionLiveWork) -- holds it.
+ */
+async function vendorRunsLive(h: Harness, toolUseId: string, taskType: string): Promise<void> {
+  await h.engine.onSdkMessage({
+    type: "system",
+    subtype: "task_started",
+    task_id: `task-${toolUseId}`,
+    tool_use_id: toolUseId,
+    task_type: taskType,
+    description: "live work",
+    is_backgrounded: true,
+    uuid: "00000000-0000-4000-8000-0000000000e0",
+    session_id: "s",
+  } as never);
+}
+
 async function started(h: Harness): Promise<shimv1.StartSessionResponse> {
   const pending = h.engine.startSession(freshRequest());
   const first = await untilQuery(h, 0);
@@ -5690,6 +5709,7 @@ describe("GetLiveWork reconciliation", () => {
       boundary: { case: "floor", value: create(conversationv1.HistoryFloorSchema, {}) },
     });
     await started(h);
+    await vendorRunsLive(h, "b01", "local_bash");
 
     const iterator = h.engine.watchSession(create(shimv1.WatchSessionRequestSchema, {}))[
       Symbol.asyncIterator
@@ -5719,6 +5739,7 @@ describe("GetLiveWork reconciliation", () => {
       boundary: { case: "floor", value: create(conversationv1.HistoryFloorSchema, {}) },
     });
     await started(h);
+    await vendorRunsLive(h, "b01", "local_bash");
     h.persistence.openError = new PersistenceError(
       "store_unavailable",
       "the store is down",
@@ -10710,6 +10731,7 @@ describe("a vendor failure that is not an Error", () => {
     });
     const details = await faultDetailsWhile(h, async () => {
       await started(h);
+      await vendorRunsLive(h, "b01", "local_bash");
       h.persistence.readFirstPage = () => Promise.reject("the store socket went away");
       const watching = h.engine
         .watchSession(create(shimv1.WatchSessionRequestSchema, {}))[Symbol.asyncIterator]();
@@ -12174,6 +12196,7 @@ describe("re-announcing live work the record cannot describe", () => {
     h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
       liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "toolu_foreign" })],
     });
+    await vendorRunsLive(h, "toolu_foreign", "local_agent");
     return h;
   }
 
@@ -12264,9 +12287,14 @@ describe("re-announcing live background work whose row moved past its start", ()
   }
 
   /** A started session whose store holds `id` live and whose book holds `row`. */
-  async function adoptedWith(id: string, row: conversationv1.HistoryEntryAt): Promise<Harness> {
+  async function adoptedWith(
+    id: string,
+    row: conversationv1.HistoryEntryAt,
+    taskType = "local_bash",
+  ): Promise<Harness> {
     const h = harness();
     await started(h);
+    await vendorRunsLive(h, id, taskType);
     h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
       liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: id })],
     });
@@ -12318,7 +12346,7 @@ describe("re-announcing live background work whose row moved past its start", ()
 
   it("re-announces a live background agent whose row carries its launch-time beat", async () => {
     // Arrange.
-    const h = await adoptedWith("toolu_01G8D89ityjVCxRTfqUFCzPR", BACKGROUND_AGENT);
+    const h = await adoptedWith("toolu_01G8D89ityjVCxRTfqUFCzPR", BACKGROUND_AGENT, "local_agent");
 
     // Act.
     const live = await reannounced(h);
@@ -12391,7 +12419,7 @@ describe("re-announcing live background work whose row moved past its start", ()
 
   it("never asks the vendor while re-announcing", async () => {
     // Arrange.
-    const h = await adoptedWith("toolu_01G8D89ityjVCxRTfqUFCzPR", BACKGROUND_AGENT);
+    const h = await adoptedWith("toolu_01G8D89ityjVCxRTfqUFCzPR", BACKGROUND_AGENT, "local_agent");
 
     // Act.
     await reannounced(h);
@@ -12425,6 +12453,7 @@ describe("re-announcing when the store holds no rows for this agent yet", () => 
       liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "b01" })],
     });
     await started(h);
+    await vendorRunsLive(h, "b01", "local_bash");
     h.persistence.openError = error;
     return h;
   }
@@ -13587,7 +13616,11 @@ describe("a subagent resumed by a send whose spawn this process never saw", () =
     expect(response.result.case === "success" ? response.result.value.session?.liveWork : undefined).toEqual([]);
   });
 
-  it("re-announces a resumed agent to a new watch", async () => {
+  it("does not re-announce a send-resumed run the replaced CLI process ran", async () => {
+    // THE REGRESSION (2026-10-07): StartSession closed this run lost because
+    // it ran in the replaced process, and a later watch's re-announcement then
+    // named it live again, read back out of the store's record. Liveness is
+    // the vendor process's own level, and this process runs no such task.
     // Arrange.
     const h = restoredHarness();
     h.persistence.vendorTasks.set(LOCATOR, { kind: "found", agent: SPAWN, commission: undefined });
@@ -13600,8 +13633,8 @@ describe("a subagent resumed by a send whose spawn this process never saw", () =
     await watch.return?.();
 
     // Assert.
-    const live = second.frame.case === "sessionStarted" ? second.frame.value.liveWork : [];
-    expect(live.map((work) => work.work?.value)).toEqual(["toolu_send"]);
+    const live = second.frame.case === "sessionStarted" ? second.frame.value.liveWork : undefined;
+    expect(live?.map((work) => work.work?.value)).toEqual([]);
   });
 
   it("closes a send-resumed run the store names no agent for under the send's own id, at ERROR", async () => {
@@ -14801,5 +14834,86 @@ describe("a task message whose kind the fold does not hold", () => {
 
     // Assert.
     expect(h.persistence.detachedWorkLookups).toEqual([]);
+  });
+});
+
+/**
+ * THE LIVE-WORK LEVEL (SessionUpdate.live_work; owner ruling 2026-10-07): the
+ * set of work the vendor process holds running, pushed whenever it changes and
+ * emptied when the process ends -- shells excepted, whose liveness is the
+ * record's.
+ */
+describe("the live-work level the shim pushes", () => {
+  /** Every level pushed while ACT ran, each as its sorted handles. */
+  function levelsWhile(h: Harness, act: () => Promise<void>): Promise<string[][]> {
+    return pushedUpdates(
+      h,
+      (update) => (update.case === "liveWork" ? update.value.liveWork.map((id) => id.value).sort() : undefined),
+      act,
+    );
+  }
+
+  it("names a background subagent the vendor started", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+
+    // Act
+    const levels = await levelsWhile(h, () => vendorRunsLive(h, "toolu_agent", "local_agent"));
+
+    // Assert
+    expect(levels).toContainEqual(["toolu_agent"]);
+  });
+
+  it("never names a shell", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+
+    // Act
+    const levels = await levelsWhile(h, () => vendorRunsLive(h, "toolu_shell", "local_bash"));
+
+    // Assert
+    expect(levels.flat()).not.toContain("toolu_shell");
+  });
+
+  it("pushes an unchanged level once", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+
+    // Act
+    const levels = await levelsWhile(h, async () => {
+      await vendorRunsLive(h, "toolu_agent", "local_agent");
+      await vendorRunsLive(h, "toolu_agent", "local_agent");
+    });
+
+    // Assert
+    expect(levels.filter((level) => level.includes("toolu_agent"))).toHaveLength(1);
+  });
+
+  it("empties the level when the vendor process ends", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+
+    // Act: the work runs, then the session stands down (pushedUpdates).
+    const levels = await levelsWhile(h, () => vendorRunsLive(h, "toolu_agent", "local_agent"));
+
+    // Assert
+    expect(levels.at(-1)).toEqual([]);
+  });
+
+  it("stamps the live-work level contract on its opening", async () => {
+    // Arrange
+    const h = harness();
+
+    // Act
+    const response = await started(h);
+
+    // Assert
+    expect(response.result.case === "success" ? response.result.value.session?.contract : undefined).toBe(
+      conversationv1.SessionContract.LIVE_WORK_LEVEL,
+    );
   });
 });
