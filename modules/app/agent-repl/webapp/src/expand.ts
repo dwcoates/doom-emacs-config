@@ -93,8 +93,12 @@ export const EXPANDED_CLASS = "expanded";
  */
 export const PANEL_CLASS = "agent-panel";
 
-/** Controls that own their own click, so a click on one never toggles. */
-export const CLICK_THROUGH_SELECTOR = `a, ${CONTROL_SELECTOR}, summary`;
+/**
+ * Controls that own their own click, so a click on one never toggles. A text
+ * field is one: a click places the caret, and folding the bubble shut under
+ * it would take the field away mid-edit (a held card's classifier form).
+ */
+export const CLICK_THROUGH_SELECTOR = `a, ${CONTROL_SELECTOR}, summary, input, select, textarea`;
 
 /** The class membership test a section is recognized by. */
 export interface ClassTest {
