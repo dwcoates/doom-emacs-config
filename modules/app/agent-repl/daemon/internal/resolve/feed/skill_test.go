@@ -51,8 +51,8 @@ func TestTheInvocationLineIsTheLineAUserWouldHaveTyped(t *testing.T) {
 		{name: "a bare invocation", skill: "graphify", want: "/graphify"},
 		{
 			name:  "an invocation with arguments",
-			skill: "workspace", args: "merge DWC/fix-flaky", hasArgs: true,
-			want: "/workspace merge DWC/fix-flaky",
+			skill: "workspace", args: "merge ABC/fix-flaky", hasArgs: true,
+			want: "/workspace merge ABC/fix-flaky",
 		},
 		{
 			name:  "a name the vendor already spelled with a slash is not doubled",

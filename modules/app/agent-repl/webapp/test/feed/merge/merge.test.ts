@@ -27,8 +27,8 @@ function draw(msg: ReturnType<typeof mergeHead>): HTMLElement {
 
 describe("drawFeedMerge: the head's constant props", () => {
   it("draws the branch line the daemon resolved, verbatim", () => {
-    const el = draw(mergeHead({ case: "update" }, { label: "DWC/fix → master" }));
-    expect(el.querySelector(".merge-label")?.textContent).toBe("DWC/fix → master");
+    const el = draw(mergeHead({ case: "update" }, { label: "ABC/fix → master" }));
+    expect(el.querySelector(".merge-label")?.textContent).toBe("ABC/fix → master");
   });
 
   it("draws the ⇄ glyph for the vocabulary's merge icon", () => {

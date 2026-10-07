@@ -18,14 +18,14 @@ Do NOT attempt to close the workspace yourself in any way. Under NO circumstance
 
 ## Steps
 
-1. **Interpret** the user's request to identify which workspaces to close (by name, e.g. `DWC/feature-one`).
+1. **Interpret** the user's request to identify which workspaces to close (by name, e.g. `ABC/feature-one`).
 
 2. **Write the commands** by piping JSON to `run.sh` using the Bash tool:
    ```bash
    bash /home/claude/.claude/skills/workspace-close/run.sh << 'EOF'
    [
-     {"type": "close", "workspace": "DWC/feature-one"},
-     {"type": "close", "workspace": "DWC/feature-two"}
+     {"type": "close", "workspace": "ABC/feature-one"},
+     {"type": "close", "workspace": "ABC/feature-two"}
    ]
    EOF
    ```

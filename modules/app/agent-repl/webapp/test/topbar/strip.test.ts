@@ -59,7 +59,7 @@ describe("bindTitleSessionReveal", () => {
   it("opens the same session line the chip does, the title being the session's own door", () => {
     // ARRANGE
     const { host, tc } = topbarContext();
-    const title = drawTopbarTitle(create(TopbarTitleSchema, { text: "DWC/fix" }));
+    const title = drawTopbarTitle(create(TopbarTitleSchema, { text: "ABC/fix" }));
     host.append(title);
     bindTitleSessionReveal(title, create(TopbarSessionLineSchema, { text: "session abc" }), tc);
     // ACT
@@ -70,7 +70,7 @@ describe("bindTitleSessionReveal", () => {
 
   it("marks the title as the reveal's anchor, so an outside click spares it", () => {
     const { host, tc } = topbarContext();
-    const title = drawTopbarTitle(create(TopbarTitleSchema, { text: "DWC/fix" }));
+    const title = drawTopbarTitle(create(TopbarTitleSchema, { text: "ABC/fix" }));
     host.append(title);
     bindTitleSessionReveal(title, create(TopbarSessionLineSchema, { text: "session abc" }), tc);
     expect(title.getAttribute("data-reveal-anchor")).toBe("session");
@@ -79,7 +79,7 @@ describe("bindTitleSessionReveal", () => {
   it("closes the open reveal on a second click of the title", () => {
     // ARRANGE
     const { host, tc } = topbarContext();
-    const title = drawTopbarTitle(create(TopbarTitleSchema, { text: "DWC/fix" }));
+    const title = drawTopbarTitle(create(TopbarTitleSchema, { text: "ABC/fix" }));
     host.append(title);
     bindTitleSessionReveal(title, create(TopbarSessionLineSchema, { text: "session abc" }), tc);
     title.dispatchEvent(new MouseEvent("click", { bubbles: true }));
@@ -93,7 +93,7 @@ describe("bindTitleSessionReveal", () => {
     // ARRANGE: the reveal is opened off the first push, then a second push
     // registers a newer line and the layer is refreshed.
     const { host, tc } = topbarContext();
-    const title = drawTopbarTitle(create(TopbarTitleSchema, { text: "DWC/fix" }));
+    const title = drawTopbarTitle(create(TopbarTitleSchema, { text: "ABC/fix" }));
     host.append(title);
     bindTitleSessionReveal(title, create(TopbarSessionLineSchema, { text: "session one" }), tc);
     title.dispatchEvent(new MouseEvent("click", { bubbles: true }));
@@ -106,7 +106,7 @@ describe("bindTitleSessionReveal", () => {
 
   it("binds nothing when the view carries no session line", () => {
     const { host, tc } = topbarContext();
-    const title = drawTopbarTitle(create(TopbarTitleSchema, { text: "DWC/fix" }));
+    const title = drawTopbarTitle(create(TopbarTitleSchema, { text: "ABC/fix" }));
     host.append(title);
     bindTitleSessionReveal(title, undefined, tc);
     title.dispatchEvent(new MouseEvent("click", { bubbles: true }));
@@ -115,7 +115,7 @@ describe("bindTitleSessionReveal", () => {
 
   it("leaves an unbound title without an anchor mark", () => {
     const { host, tc } = topbarContext();
-    const title = drawTopbarTitle(create(TopbarTitleSchema, { text: "DWC/fix" }));
+    const title = drawTopbarTitle(create(TopbarTitleSchema, { text: "ABC/fix" }));
     host.append(title);
     bindTitleSessionReveal(title, undefined, tc);
     expect(title.getAttribute("data-reveal-anchor")).toBeNull();
@@ -181,12 +181,12 @@ describe("drawTopbarConnectivity", () => {
 
 describe("drawTopbarTitle", () => {
   it("draws the pre-composed title verbatim", () => {
-    expect(drawTopbarTitle(create(TopbarTitleSchema, { text: "DWC/fix" })).textContent).toBe(
-      "DWC/fix",
+    expect(drawTopbarTitle(create(TopbarTitleSchema, { text: "ABC/fix" })).textContent).toBe(
+      "ABC/fix",
     );
   });
 
   it("keeps the whole title in the tooltip, since the strip ellipsis-clips it", () => {
-    expect(drawTopbarTitle(create(TopbarTitleSchema, { text: "DWC/fix" })).title).toBe("DWC/fix");
+    expect(drawTopbarTitle(create(TopbarTitleSchema, { text: "ABC/fix" })).title).toBe("ABC/fix");
   });
 });
