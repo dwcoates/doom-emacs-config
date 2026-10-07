@@ -96,6 +96,7 @@ Two further limits, stated rather than hidden:
 | `!bash-spill` | grounded | detachedbash_e2e_test.go | — | — | Go: TestBashPartialOutputWithSpill asserts Succeeded verdict, exact truncation-phrase text. | covered |
 | `!bash-timeout` | grounded | interrupt_e2e_test.go | — | — | Go: TestBashInterruptedByTimeout asserts terminal is Concluded (not Interrupted), detached shell stays Live, non-empty spool text. | covered |
 | `!cancel-all` | grounded | mergequeue_e2e_test.go | — | — | Go: TestFanWideCancel asserts InterruptedDetached.Count==3 and a second call returns NothingRunning. | covered |
+| `!chess-board` | ungrounded | remainder_e2e_test.go | — | — | Go: TestChessBoard asserts the board row's exact heading and its unavailable arm's reason (no explanation-engine checkout in a test daemon). | covered |
 | `!cold-seed` | ungrounded | coldgate_e2e_test.go | — | — | Go: TestColdGate subtests assert exact ContextTokens value, non-empty model name/compact menu, and resolved arm matches the chosen button. | covered |
 | `!compact` | grounded | compaction_e2e_test.go | feed-families.layer.test.ts | — | Go: TestCompactionDirected(+summary override) asserts exact FeedContextCutCompacted.Summary text, non-nil separation tokens. Web: feed-families.layer asserts .sep-compacted. | covered |
 | `!compact-auto` | ungrounded | compaction_e2e_test.go | — | — | Go: TestCompactionAuto asserts exact summary string + non-nil tokens. | covered |
@@ -234,13 +235,13 @@ a disagreement, so these are not hand tallies (they were, and they were
 wrong: the by-layer lines once read 33 and 5 where the table's columns held
 32 and 3).
 
-- Covered (at least one STRONG, specific-shape assertion in a counted layer): **153**
+- Covered (at least one STRONG, specific-shape assertion in a counted layer): **154**
 - Weak (a counted layer drives the scenario but only asserts turn-completion or a non-specific field, never a named arm/shape): **0**
 - Uncovered (no counted layer drives the scenario at all): **7**
-- Total canonical scenarios: 160
+- Total canonical scenarios: 161
 
 By layer, scenarios with at least one hit:
-- Go e2e (non-emacs): 152 scenarios referenced across 28 files
+- Go e2e (non-emacs): 153 scenarios referenced across 28 files
 - Webapp layer: 36 scenarios referenced across 8 files
 - Emacs e2e: 3 scenarios referenced across 3 files
 
