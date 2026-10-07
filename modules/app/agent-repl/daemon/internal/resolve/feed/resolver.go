@@ -94,6 +94,10 @@ type wsState struct {
 	// agentFeeds maps a created subagent's id to its sub-feed key.
 	agentFeeds map[string]string
 
+	// chessBoards is every drawn chess board, by its unit, so a change to its
+	// session's board re-publishes it (chessboard.go).
+	chessBoards map[string]chessBoardRow
+
 	// synthSeq is the per-workspace monotonically increasing synthesized
 	// sequence non-durable rows mint their identity from.
 	synthSeq uint64
@@ -670,6 +674,7 @@ func newWSState(ws ids.WorkspaceID) *wsState {
 		readers:              map[ReaderID]*walk{},
 		units:                map[string]*unitState{},
 		responses:            map[string]*proseState{},
+		chessBoards:          map[string]chessBoardRow{},
 		thinking:             map[string]*proseState{},
 		plans:                map[string]*planState{},
 		planUnits:            map[string]*planState{},

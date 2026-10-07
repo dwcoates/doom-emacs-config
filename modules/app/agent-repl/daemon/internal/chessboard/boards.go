@@ -128,6 +128,19 @@ func (b *Boards) Board(s Session) *frontendv1.FeedChessBoard {
 	return bubble(headingFor(s), e.body)
 }
 
+// View answers a session's bubble as it stands without starting a resolution:
+// what a re-publication after a change draws. A session never drawn is an
+// invariant violation (only drawn boards change), and panics.
+func (b *Boards) View(s Session) *frontendv1.FeedChessBoard {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	e, ok := b.boards[s]
+	if !ok {
+		panic(fmt.Sprintf("chessboard: View of session %v, which was never drawn", s))
+	}
+	return bubble(headingFor(s), e.body)
+}
+
 // FailedRequest answers the bubble for an agent's board call that failed:
 // unavailable, saying what the call said. named may name no session.
 func FailedRequest(named *conversationv1.AgentChessBoardSession, said string) *frontendv1.FeedChessBoard {
