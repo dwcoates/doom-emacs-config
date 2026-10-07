@@ -890,6 +890,11 @@ func (w *watcher) routeActivityLocked(agent *conversationv1.AgentId, act *conver
 
 	w.sinks.Feed.OnActivity(w.ws, agent, act, turn, place)
 	w.sinks.Footer.OnActivity(w.ws, agent, act)
+	// THE ROSTER SEES EVERY ACTIVITY THE FOOTER SEES. The vendor answering a
+	// retried call (ladder.RetryAnswered) is what ends both surfaces'
+	// `api_retrying`; a roster never handed the answer stood teal after the
+	// vendor reconnected, beside a footer that had already recovered.
+	w.sinks.Sidebar.OnActivity(w.ws, agent, act)
 	// THE TOPBAR SEES EVERY ACTIVITY. It shows an unmodeled tool as a warning,
 	// but it also accumulates the SESSION's token spend from the usage every
 	// activity carries (internal/resolve/topbar's observeUsage), and a sink
