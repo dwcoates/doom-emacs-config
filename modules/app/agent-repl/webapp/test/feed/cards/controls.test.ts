@@ -195,6 +195,22 @@ describe("release", () => {
 });
 
 describe("agenticBubble", () => {
+  it("caps its content at the feed's lines by default", () => {
+    // Arrange, Act.
+    const bubble = agenticBubble({ state: "published", content: [] });
+
+    // Assert.
+    expect(bubble.getAttribute("data-cap-lines")).not.toBe("none");
+  });
+
+  it("draws its whole content when asked to be uncapped", () => {
+    // Arrange, Act.
+    const bubble = agenticBubble({ state: "ready", content: [], uncapped: true });
+
+    // Assert.
+    expect(bubble.getAttribute("data-cap-lines")).toBe("none");
+  });
+
   it("is the response bubble plus the one purple accent", () => {
     expect(agenticBubble({ state: "published", content: [] }).className).toBe(
       "bubble md assistant agentic",
