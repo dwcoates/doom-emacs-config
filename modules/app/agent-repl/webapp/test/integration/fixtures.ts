@@ -601,10 +601,10 @@ export const findingsUnit = (): ActivityUnit => ({
 
 // ---- FeedSubagent / FeedShell ---------------------------------------------
 
-export const SUBAGENT_OUTCOMES = ["succeeded", "failed", "cancelled", "lost"] as const;
+export const SUBAGENT_OUTCOMES = ["succeeded", "failed", "cancelled", "lost", "restarted"] as const;
 export type SubagentOutcome = (typeof SUBAGENT_OUTCOMES)[number];
 
-export const subagentUnit = (state: "live" | SubagentOutcome): ActivityUnit => ({
+export const subagentUnit = (state: "live" | "settling" | SubagentOutcome): ActivityUnit => ({
   case: "subagent",
   value: {
     label: { text: "reviewer" },
@@ -614,7 +614,9 @@ export const subagentUnit = (state: "live" | SubagentOutcome): ActivityUnit => (
     state:
       state === "live"
         ? { case: "live", value: { lastProgress: { atMs: 2_000n } } }
-        : { case: "settled", value: { endedAtMs: 9_000n, outcome: { case: state, value: {} } } },
+        : state === "settling"
+          ? { case: "settling", value: { stoppedAtMs: 7_000n } }
+          : { case: "settled", value: { endedAtMs: 9_000n, outcome: { case: state, value: {} } } },
   },
 });
 
