@@ -5,6 +5,7 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
+	"claude-repld/internal/outputtext"
 	"claude-repld/internal/wsm"
 )
 
@@ -167,7 +168,7 @@ func DeployFailedDetail(f wsm.Fault) string {
 	case RollbackIncomplete:
 		head += ", rollback failed"
 	}
-	tail := lastLine(d.Detail)
+	tail := outputtext.LastLine(d.Detail)
 	if tail == "" {
 		return head
 	}

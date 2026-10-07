@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/outputtext"
 )
 
 const opBuild = "daemon.deploy.build"
@@ -84,7 +85,7 @@ func (b *ScriptBuilder) Build(ctx context.Context, staging string) error {
 			b.Log.Debug(opBuild, "the step built", fields)
 			continue
 		}
-		detail := tail(out, 20)
+		detail := outputtext.TailLines(out, 20)
 		if err != nil {
 			detail = err.Error()
 		} else {
@@ -121,15 +122,6 @@ func (b *ScriptBuilder) archive(path, output string) {
 	if err := os.WriteFile(path, []byte(output), 0o644); err != nil {
 		b.Log.Error(opBuild, "could not archive the build output", dlog.Context{"log": path, "cause": err.Error()})
 	}
-}
-
-// tail answers the last n lines of out.
-func tail(out string, n int) string {
-	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
-	if len(lines) > n {
-		lines = lines[len(lines)-n:]
-	}
-	return strings.Join(lines, "\n")
 }
 
 // Staged names the artifacts inside one staging directory, in the layout
