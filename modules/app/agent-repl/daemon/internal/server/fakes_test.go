@@ -1148,13 +1148,13 @@ type harness struct {
 	// PersistentWifi is the persistent-wifi controller the rpc delegates to.
 	PersistentWifi *fakePersistentWifi
 	// NewsDigest is the news digest the two rpcs delegate to.
-	NewsDigest      *fakeNewsDigest
+	NewsDigest *fakeNewsDigest
 	// ClassifierPrompt is the routing brief's updater the rpc delegates to.
 	ClassifierPrompt *fakeClassifierPrompt
 	EditorInstances  *fakeEditorInstances
-	Startup         *fakeStartup
-	Surfaces        *fakeSurfaces
-	WebappDist      string
+	Startup          *fakeStartup
+	Surfaces         *fakeSurfaces
+	WebappDist       string
 }
 
 // option customizes a harness before it is built.
@@ -1197,11 +1197,11 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		Focus:      desktopnotify.NewFocus(dlog.NewTestLogger()),
 		WebappDist: dist,
 
-		PersistentWifi:  &fakePersistentWifi{},
+		PersistentWifi:   &fakePersistentWifi{},
 		NewsDigest:       &fakeNewsDigest{},
 		ClassifierPrompt: &fakeClassifierPrompt{},
 		EditorInstances:  &fakeEditorInstances{},
-		Startup:         &fakeStartup{},
+		Startup:          &fakeStartup{},
 	}
 
 	deps := Deps{
