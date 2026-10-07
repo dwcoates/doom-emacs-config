@@ -21,7 +21,7 @@ func activityOf(t *testing.T, w *world, repo, dir string, record *wsm.Workspace)
 			wt = candidate
 		}
 	}
-	return lastActivity(context.Background(), w.git, repo, wt, record)
+	return lastActivity(context.Background(), w.git, repo, w.git.admin[dir], wt, record)
 }
 
 func TestTheNewestSignalIsTheLastActivity(t *testing.T) {
@@ -155,5 +155,67 @@ func TestACommitterTimeFailureIsAnError(t *testing.T) {
 	// Assert.
 	if err == nil {
 		t.Fatal("lastActivity = nil error, want the committer-time failure")
+	}
+}
+
+func TestWorkspaceStamps(t *testing.T) {
+	created, activity, selected, merged := hoursAgo(4), hoursAgo(3), hoursAgo(2), hoursAgo(1)
+	cases := []struct {
+		name string
+		ws   wsm.Workspace
+		want []string
+	}{
+		{name: "a bare record is only its creation", ws: wsm.Workspace{CreatedAt: created}, want: []string{"workspace_created"}},
+		{
+			name: "every set stamp is a signal",
+			ws:   wsm.Workspace{CreatedAt: created, LastActivityAt: &activity, LastSelectedAt: &selected, MergedAt: &merged},
+			want: []string{"workspace_created", "workspace_activity", "workspace_selected", "workspace_merged"},
+		},
+		{name: "an unset stamp is no signal", ws: wsm.Workspace{CreatedAt: created, MergedAt: &merged}, want: []string{"workspace_created", "workspace_merged"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act.
+			got := workspaceStamps(tc.ws)
+
+			// Assert.
+			if len(got) != len(tc.want) {
+				t.Fatalf("workspaceStamps = %+v, want signals %v", got, tc.want)
+			}
+			for i, signal := range tc.want {
+				if got[i].Signal != signal {
+					t.Fatalf("stamp %d = %+v, want %s", i, got[i], signal)
+				}
+			}
+		})
+	}
+}
+
+func TestBothActivityReadersTakeTheSameWorkspaceStamps(t *testing.T) {
+	// Arrange: the worktree's last activity and the repository's history
+	// both read a record through workspaceStamps, so a stamp added there
+	// reaches both.
+	w := newWorld(t)
+	repo := w.addRepo("repo")
+	dir := w.addTree(repo, tree{name: "wt"})
+	selected := hoursAgo(1)
+	record := wsm.Workspace{Repo: "repo-repo", CreatedAt: hoursAgo(5), LastSelectedAt: &selected}
+
+	// Act.
+	last, lastErr := activityOf(t, w, repo, dir, &record)
+	history, historyErr := repoActivity(t.TempDir(), "repo-repo", []wsm.Workspace{record})
+
+	// Assert.
+	stamps := workspaceStamps(record)
+	if lastErr != nil || last.Signal != "workspace_selected" || !last.At.Equal(selected) {
+		t.Fatalf("lastActivity = (%+v, %v), want the newest workspace stamp", last, lastErr)
+	}
+	if historyErr != nil || len(history) != len(stamps) {
+		t.Fatalf("repoActivity = (%v, %v), want exactly the workspace stamps %+v", history, historyErr, stamps)
+	}
+	for i := range stamps {
+		if !history[i].Equal(stamps[i].At) {
+			t.Fatalf("repoActivity[%d] = %v, want %v", i, history[i], stamps[i].At)
+		}
 	}
 }

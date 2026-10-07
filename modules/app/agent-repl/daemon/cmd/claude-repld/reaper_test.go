@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -38,6 +39,7 @@ func TestTheReaperWindowsDefaultToTheProductionOnes(t *testing.T) {
 		want    time.Duration
 	}{
 		{"idle threshold", resolveWorktreeReapIdle, worktreereap.DefaultIdleAfter},
+		{"expiry", resolveWorktreeReapExpire, worktreereap.DefaultExpireAfter},
 		{"start delay", resolveWorktreeReapStartDelay, worktreereap.DefaultStartDelay},
 		{"cadence", resolveWorktreeReapEvery, worktreereap.DefaultEvery},
 	}
@@ -64,9 +66,42 @@ func TestTheReaperIdleThresholdComesFromTheEnvironment(t *testing.T) {
 	}
 }
 
+func TestTheReaperExpiryComesFromTheEnvironment(t *testing.T) {
+	// Arrange, Act.
+	got, err := resolveWorktreeReapExpire("240h")
+
+	// Assert.
+	if err != nil || got != 240*time.Hour {
+		t.Fatalf("resolveWorktreeReapExpire(240h) = (%v, %v), want 240h", got, err)
+	}
+}
+
+func TestAMalformedReaperExpiryIsABootFatalRecordedAtError(t *testing.T) {
+	// Arrange.
+	t.Setenv(envWorktreeReapIdle, "")
+	t.Setenv(envWorktreeReapExpire, "fortnight")
+	t.Setenv(envWorktreeReapStartDelay, "")
+	t.Setenv(envWorktreeReapEvery, "")
+
+	// Act.
+	_, log, err := buildTestReaper(t)
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), envWorktreeReapExpire) {
+		t.Fatalf("buildWorktreeReaper = %v, want the expiry refused by name", err)
+	}
+	for _, r := range log.Records() {
+		if r.Level == "error" && r.Operation == graphOperation && strings.Contains(r.Context["cause"].(string), envWorktreeReapExpire) {
+			return
+		}
+	}
+	t.Fatalf("records = %v, want the refusal at ERROR", log.Records())
+}
+
 func TestTheReaperBuildsFromUnsetKnobs(t *testing.T) {
 	// Arrange.
 	t.Setenv(envWorktreeReapIdle, "")
+	t.Setenv(envWorktreeReapExpire, "")
 	t.Setenv(envWorktreeReapStartDelay, "")
 	t.Setenv(envWorktreeReapEvery, "")
 

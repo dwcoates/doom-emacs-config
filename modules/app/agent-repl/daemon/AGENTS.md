@@ -442,6 +442,7 @@ ending row, live and on replay.
 | `AGENT_REPL_HOLDOUT_WARN_EVERY` | test only | compresses the rollout's never-free holdout warning cadence (a Go duration; the default is ten minutes). A malformed or non-positive value is a BOOT REFUSAL, never a fall-through to the default |
 | `AGENT_REPL_HANDOVER_FACTS_BOUND` | test only | bounds a successor's wait, on a mid-work adoption, for the adopted shim to re-announce its session facts (a Go duration; the default is 10s). A malformed or non-positive value is a BOOT REFUSAL |
 | `AGENT_REPL_WORKTREE_REAP_IDLE` | operator | the landed-worktree reaper's idle threshold (a Go duration; default `24h`): a worktree with any sign of activity newer than this is never judged. A malformed or non-positive value is a BOOT REFUSAL. See "The landed-worktree reaper" |
+| `AGENT_REPL_WORKTREE_REAP_EXPIRE` | operator | the reaper's expiry (a Go duration; default `336h`, 14 days): how long a worktree that never lands may exist over unbroken repository activity before it is preserved and removed. A malformed or non-positive value is a BOOT REFUSAL. See "The landed-worktree reaper" |
 | `AGENT_REPL_WORKTREE_REAP_START_DELAY` / `AGENT_REPL_WORKTREE_REAP_EVERY` | test only | compress the reaper's schedule (defaults `5m` after start, then `24h`). Same refusal rule |
 | `AGENT_REPL_NEWS_DIGEST_SOURCES` | test only | a JSON file of sources (`[{key, name, url, home, format}]`, format one of `atom`, `rss`, `npm`, `changelog`, `page`) that REPLACES the news digest's real sources; they are fetched unguarded, the real ones only when `AGENT_REPL_FORBID_VENDOR_CALLS` is unset. A missing or malformed file is a BOOT REFUSAL. See "The news digest" |
 | `AGENT_REPL_NEWS_DIGEST_START_DELAY` / `AGENT_REPL_NEWS_DIGEST_EVERY` / `AGENT_REPL_NEWS_DIGEST_RECHECK` | test only | compress the news digest's schedule (defaults `2m` after start, `24h` from the previous run's end, a `15m` longest wait). A malformed or non-positive value is a BOOT REFUSAL |
@@ -2318,7 +2319,23 @@ needs git >= 2.38.
    sweep runs can look like work;
 6. dirty (`git status --porcelain` non-empty: modified OR untracked; ignored
    files do not count);
-7. the landed rule (`merge_conflicts`, `unlanded`).
+7. the landed rule (`merge_conflicts`, `unlanded`);
+8. **the expiry rule** (`expiry.go`): a tree kept by 6 or 7 is EXPIRED once it
+   has existed for `AGENT_REPL_WORKTREE_REAP_EXPIRE` (default 14 days) of
+   UNBROKEN REPOSITORY ACTIVITY. Its clock starts at the later of its birth
+   (the mtime of `<git dir>/worktrees/<name>/commondir`, which `worktree add`
+   writes once) and the end of the repository's most recent full idle day
+   (`RepoIdleGap`, 24h with no activity anywhere in the repository): a
+   weekend or a holiday nobody worked restarts every clock, and a repository
+   idle for a day RIGHT NOW expires nothing. The repository's activity is
+   every reflog entry under its common dir (`logs/**` and every
+   `worktrees/*/logs/HEAD`) plus its registered workspaces' `created_at`,
+   `last_activity_at`, `last_selected_at` and `merged_at`, read once per
+   repository BEFORE the prune and every probe. A malformed reflog line, or
+   a reftable repository (whose logs this reader does not parse), is an
+   ERROR and the repository is not swept. The gates 1-5 run first, so an
+   open workspace's checkout, a live session's, a locked tree and a tree
+   touched in the last day never expire.
 
 **Removal.** `gitclient.RemoveCleanWorktree` -- the same door
 `RemoveWorktree` is (the log sinks are detached first, the prune runs, the
@@ -2331,14 +2348,29 @@ moved after it was judged survives with the commit nobody judged. A registered
 workspace's row is left as it is (closed), exactly as the merge queue leaves
 the workspaces it merges.
 
-**Records.** INFO `daemon.worktreereap.remove` per removal (worktree, branch,
+**Expiry.** NOTHING IS LOST: the tree is first preserved by
+`gitclient.PreserveWorktree` -- HEAD, staged and unstaged changes and
+untracked files (ignored files excepted) staged through a PRIVATE index into
+one commit on top of HEAD -- at the create-only ref
+`refs/agent-repl/reaped/<worktree id>/<UTC instant>`. Only then is the tree
+removed: a tree judged clean through `RemoveCleanWorktree` (so one dirtied
+since is refused and kept), a tree judged dirty through `RemoveWorktree`
+(`--force`; its changes are in the preservation). Its BRANCH IS KEPT, since
+what it holds never landed. A failed preservation keeps the tree
+(`preserve_failed`); a failed removal keeps the tree and its preservation
+(`remove_failed`). Recover a reaped tree with `git worktree add <dir>
+<preserved ref>` (the snapshot commit) or by checking out its kept branch.
+
+**Records.** INFO `daemon.worktreereap.expire` per expiry (worktree, branch,
+head, `unlanded_reason`, `born`, `repo_active_since`, `expiry_age`,
+`expire_after`, `preserved_ref`, `preserved_sha`); INFO `daemon.worktreereap.remove` per removal (worktree, branch,
 head, default branch and commit, `why`, `last_activity`,
 `last_activity_signal`, `idle_for`) and INFO `daemon.worktreereap.branch` per
 deleted branch; ERROR for any step that fails (`daemon.worktreereap.repo`,
-`.judge`, `.remove`, `.branch`, `.prune`), after which the sweep goes on with
+`.judge`, `.remove`, `.branch`, `.prune`, `.expire`), after which the sweep goes on with
 the next worktree or repository; INFO `daemon.worktreereap.sweep` for the
 start and the summary (repositories, worktrees judged, removed and their dirs,
-branches deleted, pruned, kept by reason, failures). A git the daemon's own
+expired and their dirs, branches deleted, pruned, kept by reason, failures). A git the daemon's own
 exit cancelled is INFO, never a failure. A registered repository whose main
 worktree is gone is INFO and skipped.
 

@@ -987,3 +987,56 @@ func (c *client) DeleteBranchAt(ctx context.Context, repoDir, branch, head strin
 		"update-ref", "-d", "refs/heads/"+branch, head)
 	return err
 }
+
+// PreserveWorktree records everything a worktree holds that git would lose
+// with it -- the HEAD commit, the staged and unstaged changes, and the
+// untracked files (ignored files excepted) -- as ONE commit whose parent is
+// HEAD, and creates ref pointing at it. It answers the commit's full sha.
+//
+// THE WORKTREE IS NOT TOUCHED: the snapshot is staged into a PRIVATE index
+// (GIT_INDEX_FILE, a temp file seeded from HEAD), so the tree's own index,
+// files and HEAD are exactly as they were whether or not this succeeds.
+//
+// THE REF IS CREATE-ONLY: `update-ref <ref> <sha> ""` refuses a ref that
+// already exists, so a preservation can never overwrite an earlier one.
+func (c *client) PreserveWorktree(ctx context.Context, repoDir, worktreeDir, ref, message string) (string, error) {
+	const operation = "daemon.gitclient.preserve_worktree"
+
+	scratch, err := os.MkdirTemp("", "agent-repl-preserve-")
+	if err != nil {
+		c.log.Global().Error(operation, "the private index's directory could not be made; nothing is preserved", dlog.Context{
+			"dir": repoDir, "worktree_dir": worktreeDir, "ref": ref, "cause": err.Error(),
+		})
+		return "", fmt.Errorf("gitclient: a private index for %s: %w", worktreeDir, err)
+	}
+	defer func() {
+		if err := os.RemoveAll(scratch); err != nil {
+			c.log.Global().Error(operation, "the private index's directory could not be removed", dlog.Context{
+				"dir": repoDir, "worktree_dir": worktreeDir, "scratch": scratch, "cause": err.Error(),
+			})
+		}
+	}()
+	privateIndex := []string{"GIT_INDEX_FILE=" + filepath.Join(scratch, "index")}
+
+	if _, err := c.runWithEnv(ctx, operation, worktreeDir, privateIndex, "read-tree", "HEAD"); err != nil {
+		return "", err
+	}
+	if _, err := c.runWithEnv(ctx, operation, worktreeDir, privateIndex, "add", "--all"); err != nil {
+		return "", err
+	}
+	tree, err := c.runWithEnv(ctx, operation, worktreeDir, privateIndex, "write-tree")
+	if err != nil {
+		return "", err
+	}
+	sha, err := c.run(ctx, operation, worktreeDir, "commit-tree", tree, "-p", "HEAD", "-m", message)
+	if err != nil {
+		return "", err
+	}
+	if _, err := c.run(ctx, operation, repoDir, "update-ref", "-m", message, ref, sha, ""); err != nil {
+		return "", err
+	}
+	c.log.Global().Debug(operation, "the worktree's content was preserved as a commit", dlog.Context{
+		"dir": repoDir, "worktree_dir": worktreeDir, "ref": ref, "sha": sha, "tree": tree,
+	})
+	return sha, nil
+}

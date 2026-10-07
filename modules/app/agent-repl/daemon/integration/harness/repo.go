@@ -1,8 +1,10 @@
 package harness
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -417,11 +419,76 @@ func (r *Repo) IdleWorktree(dir string, at time.Time) {
 	if !ok {
 		r.t.Fatalf("harness: %s is not a fake worktree", dir)
 	}
+	// Every file is a valid one-entry reflog at that instant, because the
+	// reaper reads the HEAD reflog as the repository's history.
 	for _, name := range []string{"HEAD", "index", filepath.Join("logs", "HEAD")} {
-		path := filepath.Join(admin, name)
-		writeFile(r.t, path, "fake admin file\n")
-		if err := os.Chtimes(path, at, at); err != nil {
-			r.t.Fatalf("harness: chtimes %s: %v", path, err)
-		}
+		r.writeAged(filepath.Join(admin, name), reflogEntries(at), at)
 	}
+}
+
+// BornWorktree makes a linked worktree look created at at, as the reaper's
+// expiry rule reads it: the `commondir` file `worktree add` writes once into
+// the worktree's admin directory carries that mtime.
+func (r *Repo) BornWorktree(dir string, at time.Time) {
+	r.t.Helper()
+	admin, ok := r.w.read().GitDirOf(dir)
+	if !ok {
+		r.t.Fatalf("harness: %s is not a fake worktree", dir)
+	}
+	r.writeAged(filepath.Join(admin, "commondir"), "../..\n", at)
+}
+
+// ActiveEvery writes the main worktree's HEAD reflog with one entry every step
+// from `from` up to and including `to`: a repository somebody worked in
+// steadily over that span, as the reaper's expiry rule reads it.
+func (r *Repo) ActiveEvery(from, to time.Time, step time.Duration) {
+	r.t.Helper()
+	var instants []time.Time
+	for at := from; !at.After(to); at = at.Add(step) {
+		instants = append(instants, at)
+	}
+	common := r.state(r.w.read()).CommonDir
+	r.writeAged(filepath.Join(common, "logs", "HEAD"), reflogEntries(instants...), to)
+}
+
+// Ref answers the commit a full ref other than a branch points at, and
+// whether it exists.
+func (r *Repo) Ref(name string) (string, bool) {
+	r.t.Helper()
+	sha, ok := r.state(r.w.read()).Refs[name]
+	return sha, ok
+}
+
+// ParentOf answers a commit's first parent, empty for a root or unknown one.
+func (r *Repo) ParentOf(sha string) string {
+	r.t.Helper()
+	c := r.w.read().Commits[sha]
+	if c == nil || len(c.Parents) == 0 {
+		return ""
+	}
+	return c.Parents[0]
+}
+
+// Refs answers every full ref other than a branch the fake created.
+func (r *Repo) Refs() map[string]string {
+	r.t.Helper()
+	return r.state(r.w.read()).Refs
+}
+
+// writeAged writes a file with that body and mtime.
+func (r *Repo) writeAged(path, body string, at time.Time) {
+	r.t.Helper()
+	writeFile(r.t, path, body)
+	if err := os.Chtimes(path, at, at); err != nil {
+		r.t.Fatalf("harness: chtimes %s: %v", path, err)
+	}
+}
+
+// reflogEntries is a reflog with one entry at each instant.
+func reflogEntries(instants ...time.Time) string {
+	var body strings.Builder
+	for _, at := range instants {
+		fmt.Fprintf(&body, "%040d %040d Integration Harness <harness@example.com> %d +0000\tcommit: work\n", 0, 1, at.Unix())
+	}
+	return body.String()
 }
