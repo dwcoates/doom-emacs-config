@@ -130,6 +130,10 @@ type Git interface {
 	// DeleteBranchAt deletes a local branch only while it still points at
 	// head.
 	DeleteBranchAt(ctx context.Context, repoDir, branch, head string) error
+	// PreserveWorktree records a worktree's HEAD, changes and untracked files
+	// as one commit on top of HEAD, creates ref (which must not exist) at it,
+	// and answers its sha. The worktree itself is not touched.
+	PreserveWorktree(ctx context.Context, repoDir, worktreeDir, ref, message string) (string, error)
 
 	// CommitsBetween lists the commits reachable from tip and not from base,
 	// oldest first, merges excluded: what a rebase of tip onto base replays.
