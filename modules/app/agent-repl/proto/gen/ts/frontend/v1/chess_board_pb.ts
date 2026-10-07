@@ -35,7 +35,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file frontend/v1/chess_board.proto.
  */
 export const file_frontend_v1_chess_board: GenFile = /*@__PURE__*/
-  fileDesc("Ch1mcm9udGVuZC92MS9jaGVzc19ib2FyZC5wcm90bxILZnJvbnRlbmQudjEi+wEKDkZlZWRDaGVzc0JvYXJkEjMKB2hlYWRpbmcYASABKAsyIi5mcm9udGVuZC52MS5GZWVkQ2hlc3NCb2FyZEhlYWRpbmcSOQoJcHJlcGFyaW5nGAIgASgLMiQuZnJvbnRlbmQudjEuRmVlZENoZXNzQm9hcmRQcmVwYXJpbmdIABI9Cgt1bmF2YWlsYWJsZRgDIAEoCzImLmZyb250ZW5kLnYxLkZlZWRDaGVzc0JvYXJkVW5hdmFpbGFibGVIABIxCgVyZWFkeRgEIAEoCzIgLmZyb250ZW5kLnYxLkZlZWRDaGVzc0JvYXJkUmVhZHlIAEIHCgVzdGF0ZSIlChVGZWVkQ2hlc3NCb2FyZEhlYWRpbmcSDAoEdGV4dBgBIAEoCSJRChdGZWVkQ2hlc3NCb2FyZFByZXBhcmluZxI2CgRzdGVwGAEgASgLMiguZnJvbnRlbmQudjEuRmVlZENoZXNzQm9hcmRQcmVwYXJpbmdTdGVwIisKG0ZlZWRDaGVzc0JvYXJkUHJlcGFyaW5nU3RlcBIMCgR0ZXh0GAEgASgJIlkKGUZlZWRDaGVzc0JvYXJkVW5hdmFpbGFibGUSPAoGcmVhc29uGAEgASgLMiwuZnJvbnRlbmQudjEuRmVlZENoZXNzQm9hcmRVbmF2YWlsYWJsZVJlYXNvbiIvCh9GZWVkQ2hlc3NCb2FyZFVuYXZhaWxhYmxlUmVhc29uEgwKBHRleHQYASABKAkiuQEKE0ZlZWRDaGVzc0JvYXJkUmVhZHkSMQoGd2lkZ2V0GAEgASgLMiEuZnJvbnRlbmQudjEuRmVlZENoZXNzQm9hcmRXaWRnZXQSMQoGYnVuZGxlGAIgASgLMiEuZnJvbnRlbmQudjEuRmVlZENoZXNzQm9hcmRCdW5kbGUSPAoMc3F1YXJlX3Rva2VuGAMgASgLMiYuZnJvbnRlbmQudjEuRmVlZENoZXNzQm9hcmRTcXVhcmVUb2tlbiIuChRGZWVkQ2hlc3NCb2FyZFdpZGdldBIWCg5jZWVfd2ViX3dpZGdldBgBIAEoDCJCChRGZWVkQ2hlc3NCb2FyZEJ1bmRsZRISCgpzY3JpcHRfdXJsGAEgASgJEhYKDnN0eWxlc2hlZXRfdXJsGAIgASgJIioKGUZlZWRDaGVzc0JvYXJkU3F1YXJlVG9rZW4SDQoFdmFsdWUYASABKAlCKFomYWdlbnRyZXBsL3Byb3RvL2Zyb250ZW5kL3YxO2Zyb250ZW5kdjFiBnByb3RvMw");
+  fileDesc("Ch1mcm9udGVuZC92MS9jaGVzc19ib2FyZC5wcm90bxILZnJvbnRlbmQudjEi+wEKDkZlZWRDaGVzc0JvYXJkEjMKB2hlYWRpbmcYASABKAsyIi5mcm9udGVuZC52MS5GZWVkQ2hlc3NCb2FyZEhlYWRpbmcSOQoJcHJlcGFyaW5nGAIgASgLMiQuZnJvbnRlbmQudjEuRmVlZENoZXNzQm9hcmRQcmVwYXJpbmdIABI9Cgt1bmF2YWlsYWJsZRgDIAEoCzImLmZyb250ZW5kLnYxLkZlZWRDaGVzc0JvYXJkVW5hdmFpbGFibGVIABIxCgVyZWFkeRgEIAEoCzIgLmZyb250ZW5kLnYxLkZlZWRDaGVzc0JvYXJkUmVhZHlIAEIHCgVzdGF0ZSIlChVGZWVkQ2hlc3NCb2FyZEhlYWRpbmcSDAoEdGV4dBgBIAEoCSJRChdGZWVkQ2hlc3NCb2FyZFByZXBhcmluZxI2CgRzdGVwGAEgASgLMiguZnJvbnRlbmQudjEuRmVlZENoZXNzQm9hcmRQcmVwYXJpbmdTdGVwIisKG0ZlZWRDaGVzc0JvYXJkUHJlcGFyaW5nU3RlcBIMCgR0ZXh0GAEgASgJIlkKGUZlZWRDaGVzc0JvYXJkVW5hdmFpbGFibGUSPAoGcmVhc29uGAEgASgLMiwuZnJvbnRlbmQudjEuRmVlZENoZXNzQm9hcmRVbmF2YWlsYWJsZVJlYXNvbiIvCh9GZWVkQ2hlc3NCb2FyZFVuYXZhaWxhYmxlUmVhc29uEgwKBHRleHQYASABKAki+wEKE0ZlZWRDaGVzc0JvYXJkUmVhZHkSMQoGd2lkZ2V0GAEgASgLMiEuZnJvbnRlbmQudjEuRmVlZENoZXNzQm9hcmRXaWRnZXQSMQoGYnVuZGxlGAIgASgLMiEuZnJvbnRlbmQudjEuRmVlZENoZXNzQm9hcmRCdW5kbGUSPAoMc3F1YXJlX3Rva2VuGAMgASgLMiYuZnJvbnRlbmQudjEuRmVlZENoZXNzQm9hcmRTcXVhcmVUb2tlbhJACg5zdGFydF9wb3NpdGlvbhgEIAEoCzIoLmZyb250ZW5kLnYxLkZlZWRDaGVzc0JvYXJkU3RhcnRQb3NpdGlvbiIxChtGZWVkQ2hlc3NCb2FyZFN0YXJ0UG9zaXRpb24SEgoKZ2FtZV9wb2ludBgBIAEoAyIuChRGZWVkQ2hlc3NCb2FyZFdpZGdldBIWCg5jZWVfd2ViX3dpZGdldBgBIAEoDCJCChRGZWVkQ2hlc3NCb2FyZEJ1bmRsZRISCgpzY3JpcHRfdXJsGAEgASgJEhYKDnN0eWxlc2hlZXRfdXJsGAIgASgJIioKGUZlZWRDaGVzc0JvYXJkU3F1YXJlVG9rZW4SDQoFdmFsdWUYASABKAlCKFomYWdlbnRyZXBsL3Byb3RvL2Zyb250ZW5kL3YxO2Zyb250ZW5kdjFiBnByb3RvMw");
 
 /**
  * The chess board bubble. The daemon re-publishes it, under the same row id,
@@ -230,6 +230,13 @@ export type FeedChessBoardReady = Message<"frontend.v1.FeedChessBoardReady"> & {
    * @generated from field: frontend.v1.FeedChessBoardSquareToken square_token = 3;
    */
   squareToken?: FeedChessBoardSquareToken | undefined;
+
+  /**
+   * The position the widget shows when it is mounted.
+   *
+   * @generated from field: frontend.v1.FeedChessBoardStartPosition start_position = 4;
+   */
+  startPosition?: FeedChessBoardStartPosition | undefined;
 };
 
 /**
@@ -238,6 +245,31 @@ export type FeedChessBoardReady = Message<"frontend.v1.FeedChessBoardReady"> & {
  */
 export const FeedChessBoardReadySchema: GenMessage<FeedChessBoardReady> = /*@__PURE__*/
   messageDesc(file_frontend_v1_chess_board, 6);
+
+/**
+ * THE POSITION A FRESHLY MOUNTED WIDGET SHOWS: the root of the session's
+ * game. The widget reports a position only when the reader navigates
+ * (`onPositionChange`), so until it has, a square click is read at this one;
+ * after, at the last position it reported.
+ *
+ * @generated from message frontend.v1.FeedChessBoardStartPosition
+ */
+export type FeedChessBoardStartPosition = Message<"frontend.v1.FeedChessBoardStartPosition"> & {
+  /**
+   * The root's CEE gamepoint handle, as the session's poll reports it, relayed
+   * verbatim.
+   *
+   * @generated from field: int64 game_point = 1;
+   */
+  gamePoint: bigint;
+};
+
+/**
+ * Describes the message frontend.v1.FeedChessBoardStartPosition.
+ * Use `create(FeedChessBoardStartPositionSchema)` to create a new message.
+ */
+export const FeedChessBoardStartPositionSchema: GenMessage<FeedChessBoardStartPosition> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_chess_board, 7);
 
 /**
  * The widget's data: what `mountCeeWebWidget` takes as `widgetBytes`.
@@ -264,7 +296,7 @@ export type FeedChessBoardWidget = Message<"frontend.v1.FeedChessBoardWidget"> &
  * Use `create(FeedChessBoardWidgetSchema)` to create a new message.
  */
 export const FeedChessBoardWidgetSchema: GenMessage<FeedChessBoardWidget> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_chess_board, 7);
+  messageDesc(file_frontend_v1_chess_board, 8);
 
 /**
  * The widget bundle's two files, served by the agent-repl daemon from the
@@ -296,7 +328,7 @@ export type FeedChessBoardBundle = Message<"frontend.v1.FeedChessBoardBundle"> &
  * Use `create(FeedChessBoardBundleSchema)` to create a new message.
  */
 export const FeedChessBoardBundleSchema: GenMessage<FeedChessBoardBundle> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_chess_board, 8);
+  messageDesc(file_frontend_v1_chess_board, 9);
 
 /**
  * THE BOARD'S ECHO TOKEN: minted by the daemon from the board's CEE session,
@@ -320,5 +352,5 @@ export type FeedChessBoardSquareToken = Message<"frontend.v1.FeedChessBoardSquar
  * Use `create(FeedChessBoardSquareTokenSchema)` to create a new message.
  */
 export const FeedChessBoardSquareTokenSchema: GenMessage<FeedChessBoardSquareToken> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_chess_board, 9);
+  messageDesc(file_frontend_v1_chess_board, 10);
 

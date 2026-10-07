@@ -37,8 +37,9 @@ export type InspectChessBoardSquareRequest = Message<"agentrepl.v1.InspectChessB
 
   /**
    * The position the square is read at: the gamepoint the widget displays,
-   * as its `onPositionChange` last reported it, or the widget data's root
-   * when it has reported none. A CEE gamepoint handle, relayed verbatim.
+   * as its `onPositionChange` last reported it, or the board's
+   * `FeedChessBoardReady.start_position` when it has reported none. A CEE
+   * gamepoint handle, relayed verbatim.
    *
    * @generated from field: int64 game_point = 2;
    */

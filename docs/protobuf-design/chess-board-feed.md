@@ -245,3 +245,19 @@ then `frontend.v1`, then the square-click endpoint, then the skill text.
 - **Why:** cee-webapp refuses a request against a swept session, or a session
   whose game was replaced, with Connect `failed_precondition`; reporting that
   as `backend_unreachable` would name the wrong cause.
+
+### 4. A ready board names the position its widget starts on
+
+- **What landed:** `frontend.v1.FeedChessBoardReady.start_position`
+  (`FeedChessBoardStartPosition`, the root's gamepoint handle).
+- **Why:** the widget starts on its game's root and reports a position only
+  when the reader navigates, so the webapp could not name the displayed
+  position for a square clicked before any navigation. The CEE webapp's own
+  page has the same need and reads the root from `CeeSession.root_game_point`.
+- **Evidence (code tier):** `sdks/cli/web/packages/cee-web-widget/src/mount.ts`
+  starts at `correlation.rootGamePoint` and calls `onPositionChange` only from
+  `navigate`. `gns cee session poll <id>` answers `root_gamepoint`, the value
+  cee-webapp's `GetCeeWebWidget` resolves the widget from
+  (`internal/webapp/services/ceewebwidget/ceewebwidget.go`).
+- **Consequence:** the daemon polls the session before fetching the widget,
+  which also finds a swept session or a replaced game before the fetch.

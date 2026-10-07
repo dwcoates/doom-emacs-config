@@ -37,8 +37,9 @@ type InspectChessBoardSquareRequest struct {
 	// The board, by the token its ready state carries, echoed unchanged.
 	Board *v1.FeedChessBoardSquareToken `protobuf:"bytes,1,opt,name=board,proto3" json:"board,omitempty"`
 	// The position the square is read at: the gamepoint the widget displays,
-	// as its `onPositionChange` last reported it, or the widget data's root
-	// when it has reported none. A CEE gamepoint handle, relayed verbatim.
+	// as its `onPositionChange` last reported it, or the board's
+	// `FeedChessBoardReady.start_position` when it has reported none. A CEE
+	// gamepoint handle, relayed verbatim.
 	GamePoint int64 `protobuf:"varint,2,opt,name=game_point,json=gamePoint,proto3" json:"game_point,omitempty"`
 	// The clicked square as the widget reported it: the numeric value of CEE's
 	// `chesscom.chess.v1.Square` enum, relayed verbatim. agent-repl holds no

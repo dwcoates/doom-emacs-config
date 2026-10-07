@@ -92,6 +92,18 @@ message FeedChessBoardReady {
   FeedChessBoardBundle bundle = 2;
   // What a square click hands back to the daemon.
   FeedChessBoardSquareToken square_token = 3;
+  // The position the widget shows when it is mounted.
+  FeedChessBoardStartPosition start_position = 4;
+}
+
+// THE POSITION A FRESHLY MOUNTED WIDGET SHOWS: the root of the session's
+// game. The widget reports a position only when the reader navigates
+// (`onPositionChange`), so until it has, a square click is read at this one;
+// after, at the last position it reported.
+message FeedChessBoardStartPosition {
+  // The root's CEE gamepoint handle, as the session's poll reports it, relayed
+  // verbatim.
+  int64 game_point = 1;
 }
 
 // The widget's data: what `mountCeeWebWidget` takes as `widgetBytes`.
