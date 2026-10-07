@@ -21,6 +21,7 @@ import type { AppContext } from "../rpc/context.js";
 import { drawFeedCommandPanel } from "../panels/panels.js";
 import { drawFeedCommandRefused } from "../panels/refused.js";
 import { drawFeedArtifact } from "./cards/artifact.js";
+import { drawFeedChessBoard } from "./cards/chess-board.js";
 import { drawFeedFindings } from "./cards/findings.js";
 import { drawFeedHook } from "./cards/hook.js";
 import { drawFeedPlan } from "./cards/plan.js";
@@ -65,6 +66,7 @@ import type {
   FeedSkill,
   FeedSubagentResult,
 } from "../../../proto/gen/ts/frontend/v1/feed_pb";
+import type { FeedChessBoard } from "../../../proto/gen/ts/frontend/v1/chess_board_pb";
 
 export type { Handle };
 
@@ -112,6 +114,8 @@ export interface RowRenderers {
   artifact(unit: FeedArtifact, rc: RowContext): HTMLElement;
   plan(unit: FeedPlan, rc: RowContext): HTMLElement;
   findings(unit: FeedFindings, rc: RowContext): HTMLElement;
+  /** A CEE CLI session's game, drawn as the CEE CLI webapp's own widget. */
+  chessBoard(unit: FeedChessBoard, rc: RowContext): HTMLElement;
   /** A subagent's returned result, drawn inside its own card (its feed). */
   subagentResult(unit: FeedSubagentResult, rc: RowContext): HTMLElement;
   /** The detached shell bubble's spool BODY (on its sub-feed); the head is `shellHead`. */
@@ -190,6 +194,7 @@ export function createRowRenderers(_ctx: AppContext): RowRenderers {
     artifact: drawFeedArtifact,
     plan: drawFeedPlan,
     findings: drawFeedFindings,
+    chessBoard: drawFeedChessBoard,
     subagentResult: drawFeedSubagentResult,
     shell: drawFeedShellBody,
     shellHead: drawFeedShellHead,

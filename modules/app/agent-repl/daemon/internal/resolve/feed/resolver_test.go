@@ -148,6 +148,8 @@ type harness struct {
 	warnings *fakeWarnings
 	// placed are the entry placements Deps.EntryPlaced was told, in order.
 	placed []placedEntry
+	// boards is the fake chess board state every board row is drawn from.
+	boards *fakeChessBoards
 }
 
 // fakeWarnings records every warning the resolver raised on the topbar.
@@ -197,6 +199,7 @@ func newStoredHarness(t *testing.T, rolledBack RolledBackTurnStore) *harness {
 	h := &harness{
 		t: t, log: log, painter: painter, nowMs: 1_700_000_000_000,
 		faults: &fakeFaults{}, clock: &fakeStallClock{}, warnings: &fakeWarnings{},
+		boards: newFakeChessBoards(),
 	}
 
 	resolver, err := newResolver(Deps{
@@ -243,11 +246,12 @@ func newStoredHarness(t *testing.T, rolledBack RolledBackTurnStore) *harness {
 			}
 			return out, nil
 		},
-		Now:        func() time.Time { return time.UnixMilli(h.nowMs) },
-		AfterFunc:  h.clock.AfterFunc,
-		Faults:     h.faults,
-		Warnings:   h.warnings,
-		RolledBack: rolledBack,
+		Now:         func() time.Time { return time.UnixMilli(h.nowMs) },
+		AfterFunc:   h.clock.AfterFunc,
+		Faults:      h.faults,
+		Warnings:    h.warnings,
+		RolledBack:  rolledBack,
+		ChessBoards: h.boards,
 		EntryPlaced: func(_ ids.WorkspaceID, unit string, row *frontendv1.FeedId) {
 			h.placed = append(h.placed, placedEntry{unit: unit, row: row.GetValue()})
 		},

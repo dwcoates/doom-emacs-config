@@ -19,6 +19,9 @@ import {
 } from "../../src/sdk/real-query.js";
 import { METAPROMPT_REL_PATH, DOOM_CHECKOUT_REL_PATH } from "../../src/metaprompt.js";
 
+/** The servers argument of a test that is not about agent-repl's own MCP server. */
+const NO_SERVERS = {};
+
 function homeWithMetaprompt(text: string): string {
   const home = mkdtempSync(path.join(os.tmpdir(), "shim-real-query-"));
   const file = path.join(home, DOOM_CHECKOUT_REL_PATH, METAPROMPT_REL_PATH);
@@ -41,9 +44,28 @@ function spec(overrides: Partial<RealQuerySpec> = {}): RealQuerySpec {
 }
 
 describe("realQueryOptions", () => {
+  it("hands the session agent-repl's own MCP servers", () => {
+    // Arrange.
+    const servers = { "agent-repl": { type: "sdk", name: "agent-repl" } } as never;
+
+    // Act.
+    const options = realQueryOptions(spec(), servers);
+
+    // Assert.
+    expect(options.mcpServers).toBe(servers);
+  });
+
+  it("pre-allows agent-repl's own board tool so it never raises a permission prompt", () => {
+    // Arrange, Act.
+    const options = realQueryOptions(spec(), NO_SERVERS);
+
+    // Assert.
+    expect(options.allowedTools).toEqual(["mcp__agent-repl__show_chess_board"]);
+  });
+
   it("keeps the claude_code preset so the model can resolve ~", () => {
     // Arrange, Act.
-    const options = realQueryOptions(spec());
+    const options = realQueryOptions(spec(), NO_SERVERS);
 
     // Assert.
     expect(options.systemPrompt).toEqual({ type: "preset", preset: "claude_code" });
@@ -54,7 +76,7 @@ describe("realQueryOptions", () => {
     const home = homeWithMetaprompt("BE EXCELLENT");
 
     // Act.
-    const options = realQueryOptions(spec({ home }));
+    const options = realQueryOptions(spec({ home }), NO_SERVERS);
 
     // Assert.
     expect(options.systemPrompt).toEqual({
@@ -66,7 +88,7 @@ describe("realQueryOptions", () => {
 
   it("loads user, project and local settings so denied.by_policy exists", () => {
     // Arrange, Act.
-    const options = realQueryOptions(spec());
+    const options = realQueryOptions(spec(), NO_SERVERS);
 
     // Assert.
     expect(options.settingSources).toEqual(["user", "project", "local"]);
@@ -74,7 +96,7 @@ describe("realQueryOptions", () => {
 
   it("asks for partial messages so the fold has stream events", () => {
     // Arrange, Act.
-    const options = realQueryOptions(spec());
+    const options = realQueryOptions(spec(), NO_SERVERS);
 
     // Assert.
     expect(options.includePartialMessages).toBe(true);
@@ -82,7 +104,7 @@ describe("realQueryOptions", () => {
 
   it("asks for subagent text so a spawned agent is not a black box", () => {
     // Arrange, Act.
-    const options = realQueryOptions(spec());
+    const options = realQueryOptions(spec(), NO_SERVERS);
 
     // Assert.
     expect(options.forwardSubagentText).toBe(true);
@@ -90,7 +112,7 @@ describe("realQueryOptions", () => {
 
   it("asks for summarized adaptive thinking so thinking bubbles render", () => {
     // Arrange, Act.
-    const options = realQueryOptions(spec());
+    const options = realQueryOptions(spec(), NO_SERVERS);
 
     // Assert.
     expect(options.thinking).toEqual({ type: "adaptive", display: "summarized" });
@@ -98,7 +120,7 @@ describe("realQueryOptions", () => {
 
   it("PRE-MINTS the vendor session id on a fresh start", () => {
     // Arrange, Act.
-    const options = realQueryOptions(spec({ binding: { kind: "fresh", sessionId: "vendor-42" } }));
+    const options = realQueryOptions(spec({ binding: { kind: "fresh", sessionId: "vendor-42" } }), NO_SERVERS);
 
     // Assert.
     expect(options).toMatchObject({ sessionId: "vendor-42" });
@@ -106,7 +128,7 @@ describe("realQueryOptions", () => {
 
   it("never carries a resume handle on a fresh start", () => {
     // Arrange, Act.
-    const options = realQueryOptions(spec({ binding: { kind: "fresh", sessionId: "vendor-42" } }));
+    const options = realQueryOptions(spec({ binding: { kind: "fresh", sessionId: "vendor-42" } }), NO_SERVERS);
 
     // Assert.
     expect(options.resume).toBeUndefined();
@@ -116,6 +138,7 @@ describe("realQueryOptions", () => {
     // Arrange, Act.
     const options = realQueryOptions(
       spec({ binding: { kind: "resume", resumeSessionId: "vendor-old" } }),
+      NO_SERVERS,
     );
 
     // Assert.
@@ -127,7 +150,7 @@ describe("realQueryOptions", () => {
 
   it("makes the spawned account root authoritative in the child environment", () => {
     // Arrange, Act.
-    const options = realQueryOptions(spec({ claudeConfigDir: "/accounts/secondary" }));
+    const options = realQueryOptions(spec({ claudeConfigDir: "/accounts/secondary" }), NO_SERVERS);
 
     // Assert.
     expect(options.env?.CLAUDE_CONFIG_DIR).toBe("/accounts/secondary");
@@ -138,7 +161,7 @@ describe("realQueryOptions", () => {
     process.env.AGENT_REPL_REAL_QUERY_PROBE = "kept";
 
     // Act.
-    const options = realQueryOptions(spec());
+    const options = realQueryOptions(spec(), NO_SERVERS);
 
     // Assert.
     expect(options.env?.AGENT_REPL_REAL_QUERY_PROBE).toBe("kept");
@@ -147,7 +170,7 @@ describe("realQueryOptions", () => {
 
   it("NEVER overrides the agent binary the SDK bundles (R12)", () => {
     // Arrange, Act.
-    const options = realQueryOptions(spec());
+    const options = realQueryOptions(spec(), NO_SERVERS);
 
     // Assert.
     expect(options.pathToClaudeCodeExecutable).toBeUndefined();
@@ -155,7 +178,7 @@ describe("realQueryOptions", () => {
 
   it("omits the model entirely when none was requested", () => {
     // Arrange, Act.
-    const options = realQueryOptions(spec());
+    const options = realQueryOptions(spec(), NO_SERVERS);
 
     // Assert.
     expect("model" in options).toBe(false);
@@ -163,7 +186,7 @@ describe("realQueryOptions", () => {
 
   it("states the requested model when one was", () => {
     // Arrange, Act.
-    const options = realQueryOptions(spec({ model: "claude-opus-5" }));
+    const options = realQueryOptions(spec({ model: "claude-opus-5" }), NO_SERVERS);
 
     // Assert.
     expect(options.model).toBe("claude-opus-5");
@@ -180,6 +203,7 @@ describe("realQueryOptions", () => {
     // Act.
     const options = realQueryOptions(
       spec({ cwd: "/ws/feature", permissionMode: "plan", canUseTool, abortController }),
+      NO_SERVERS,
     );
 
     // Assert.
@@ -206,6 +230,7 @@ describe("realQueryOptions on a resume", () => {
         binding: { kind: "resume", resumeSessionId: "vendor-old" },
         resumeSessionAt: "msg-uuid-7",
       }),
+      NO_SERVERS,
     );
 
     // Assert.
@@ -223,6 +248,7 @@ describe("realQueryOptions on a resume", () => {
         resumeSessionAt: "msg-uuid-7",
         resumeDropsTurn: "prompt-uuid-8",
       }),
+      NO_SERVERS,
     );
 
     // Assert.
@@ -233,6 +259,7 @@ describe("realQueryOptions on a resume", () => {
     // Arrange, Act.
     const options = realQueryOptions(
       spec({ binding: { kind: "resume", resumeSessionId: "vendor-old" }, resumeSessionAt: "msg-uuid-7" }),
+      NO_SERVERS,
     );
 
     // Assert.
@@ -243,6 +270,7 @@ describe("realQueryOptions on a resume", () => {
     // Arrange, Act.
     const options = realQueryOptions(
       spec({ binding: { kind: "resume", resumeSessionId: "vendor-old" } }),
+      NO_SERVERS,
     );
 
     // Assert.
@@ -266,7 +294,7 @@ describe("realQueryOptions declares the per-task stop", () => {
     },
   ] satisfies { name: string; overrides: Partial<RealQuerySpec> }[])("on $name", ({ overrides }) => {
     // Arrange, Act.
-    const options = realQueryOptions(spec(overrides));
+    const options = realQueryOptions(spec(overrides), NO_SERVERS);
 
     // Assert.
     expect(options.perTaskStopAffordance).toBe(true);
@@ -288,7 +316,7 @@ describe("realQueryOptions turns file checkpointing on", () => {
     },
   ] satisfies { name: string; overrides: Partial<RealQuerySpec> }[])("on $name", ({ overrides }) => {
     // Arrange, Act.
-    const options = realQueryOptions(spec(overrides));
+    const options = realQueryOptions(spec(overrides), NO_SERVERS);
 
     // Assert.
     expect(options.enableFileCheckpointing).toBe(true);
@@ -330,6 +358,8 @@ describe("createRealQuery", () => {
             calls.push(args);
             return query;
           },
+          createSdkMcpServer: (options: { name: string }) => ({ type: "sdk", name: options.name }),
+          tool: (name: string) => ({ name }),
         });
       },
     }));
@@ -380,6 +410,17 @@ describe("createRealQuery", () => {
     const records = logRecordsSince(0)
       .filter((record) => record.message === "constructing the real vendor query");
     expect(records.map((record) => record.context.vendor_session_id)).toEqual(["vendor-resumed-7"]);
+  });
+
+  it("hands the live query agent-repl's own MCP server, built from the live SDK", async () => {
+    // Arrange.
+    const { createRealQuery, calls } = await withMockedSdk();
+
+    // Act.
+    await createRealQuery(spec(), (async function* () {})());
+
+    // Assert.
+    expect(calls[0]?.options.mcpServers).toEqual({ "agent-repl": { type: "sdk", name: "agent-repl" } });
   });
 
   it("returns the SDK's own query object rather than a wrapper", async () => {
@@ -579,7 +620,7 @@ describe("the vendor spawner", () => {
 describe("the options' choice between the stderr callback and the spawner", () => {
   it("installs the spawner when the caller wants the child's exit", () => {
     // Arrange, Act.
-    const options = realQueryOptions(spec({ onChildExit: () => undefined }));
+    const options = realQueryOptions(spec({ onChildExit: () => undefined }), NO_SERVERS);
 
     // Assert.
     expect(typeof options.spawnClaudeCodeProcess).toBe("function");
@@ -587,7 +628,7 @@ describe("the options' choice between the stderr callback and the spawner", () =
 
   it("leaves the SDK's own spawn alone when the caller does not", () => {
     // Arrange, Act.
-    const options = realQueryOptions(spec({ onStderr: () => undefined }));
+    const options = realQueryOptions(spec({ onStderr: () => undefined }), NO_SERVERS);
 
     // Assert.
     expect(options.spawnClaudeCodeProcess).toBeUndefined();
@@ -599,6 +640,7 @@ describe("the options' choice between the stderr callback and the spawner", () =
     // Arrange, Act.
     const options = realQueryOptions(
       spec({ onStderr: () => undefined, onChildExit: () => undefined }),
+      NO_SERVERS,
     );
 
     // Assert.
@@ -610,7 +652,7 @@ describe("the options' choice between the stderr callback and the spawner", () =
     const said: string[] = [];
 
     // Act.
-    const options = realQueryOptions(spec({ onStderr: (chunk) => said.push(chunk) }));
+    const options = realQueryOptions(spec({ onStderr: (chunk) => said.push(chunk) }), NO_SERVERS);
     options.stderr?.("boom");
 
     // Assert.

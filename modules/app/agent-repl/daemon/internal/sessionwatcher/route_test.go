@@ -1,6 +1,8 @@
 package sessionwatcher
 
 import (
+	"encoding/json"
+	"os"
 	"slices"
 	"testing"
 
@@ -1124,6 +1126,14 @@ func TestActivityToolName(t *testing.T) {
 			name: "a subagent hand-back is named by its vendor tool",
 			act:  handbackActivity("act-1"),
 			want: "SubagentHandback",
+		},
+		{
+			name: "agent-repl's board call is named by its qualified tool",
+			act: &conversationv1.AgentActivity{
+				ActivityId: &conversationv1.AgentActivityId{Value: "act-1"},
+				Item:       &conversationv1.AgentActivity_ChessBoard{ChessBoard: &conversationv1.AgentChessBoard{}},
+			},
+			want: "mcp__agent-repl__show_chess_board",
 		},
 		{
 			name: "prose is not a tool call and has no name",
@@ -3076,5 +3086,35 @@ func TestAReannouncedStartTellsTheLifecycleSinkItsResumeHandle(t *testing.T) {
 	// Assert.
 	if told := vendorSessionIDsTold(got); len(told) != 1 || told[0] != "vendor-rotated-while-unwatched" {
 		t.Fatalf("told %v, want the re-announced id once", told)
+	}
+}
+
+func TestShowChessBoardToolNameMatchesTheVocabulary(t *testing.T) {
+	// Arrange.
+	raw, err := os.ReadFile("../../../proto/vocab/agent-repl-tools.json")
+	if err != nil {
+		t.Fatalf("read the agent-repl tools vocabulary: %v", err)
+	}
+	var vocab struct {
+		Tools []struct {
+			Tool      string `json:"tool"`
+			Qualified string `json:"qualified"`
+		} `json:"tools"`
+	}
+	if err := json.Unmarshal(raw, &vocab); err != nil {
+		t.Fatalf("decode the vocabulary: %v", err)
+	}
+
+	// Act.
+	var qualified string
+	for _, tool := range vocab.Tools {
+		if tool.Tool == "show_chess_board" {
+			qualified = tool.Qualified
+		}
+	}
+
+	// Assert.
+	if qualified != ShowChessBoardToolName {
+		t.Fatalf("vocabulary names %q, the daemon %q", qualified, ShowChessBoardToolName)
 	}
 }

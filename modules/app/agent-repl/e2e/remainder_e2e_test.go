@@ -801,6 +801,32 @@ func TestReportFindings(t *testing.T) {
 }
 
 // ===========================================================================
+// ChessBoard — "chess-board" (automation.ts CHESS_BOARD): the agent calls
+// agent-repl's own show_chess_board tool, and the daemon draws the board.
+// A test daemon has no explanation-engine checkout (the harness states the
+// host's empty), so the board settles as unavailable for exactly that reason.
+// ===========================================================================
+
+func TestChessBoard(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	w, ws := rmNewWorkspace(t)
+
+	// Act
+	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "chess-board")
+
+	// Assert
+	row := rmAwaitFeedRow(t, w, ws, "the chess board, unavailable for want of a checkout", func(r *frontendv1.FeedRow) bool {
+		board := r.GetActivity().GetChessBoard()
+		return r.GetTurn().GetValue() == turn.GetValue() &&
+			strings.HasPrefix(board.GetUnavailable().GetReason().GetText(), "The explanation-engine checkout was not found")
+	})
+	if got := row.GetActivity().GetChessBoard().GetHeading().GetText(); got != "Chess board · CEE session fake-cee-session" {
+		t.Fatalf("heading = %q, want the scenario's session", got)
+	}
+}
+
+// ===========================================================================
 // #94 ScheduleWakeupScheduleAndStop — golden
 // "schedule-wakeup-schedule-and-stop", registered as TWO scenario names
 // (automation.ts WAKEUP_SCHEDULE "wakeup-schedule", WAKEUP_STOP

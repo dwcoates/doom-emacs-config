@@ -1397,6 +1397,8 @@ export function createFeedController(
         return opts.renderers.plan(unit.value, rc);
       case "findings":
         return opts.renderers.findings(unit.value, rc);
+      case "chessBoard":
+        return opts.renderers.chessBoard(unit.value, rc);
       case "subagentResult":
         return opts.renderers.subagentResult(unit.value, rc);
       case "merge":

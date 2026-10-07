@@ -20,7 +20,7 @@
  */
 import { createControl, type Control } from "../../control.js";
 import { log } from "../../log.js";
-import { drawBubble } from "../../bubble/draw.js";
+import { BUBBLE_UNCAPPED, drawBubble } from "../../bubble/draw.js";
 import type { RowContext } from "../renderers.js";
 
 /** The attribute a fold's toggle carries its state on. */
@@ -150,6 +150,11 @@ export function agenticBubble(opts: {
   content: readonly ChildNode[];
   /** The row's previous draw, updated in place (drawBubble). */
   previous?: HTMLElement;
+  /**
+   * Draw the whole content with no line cap: for a bubble whose content is
+   * one interactive element (a chess board) that a cap would cut through.
+   */
+  uncapped?: boolean;
 }): HTMLElement {
   const content: ChildNode[] = [];
   if (opts.heading !== undefined) {
@@ -166,7 +171,7 @@ export function agenticBubble(opts: {
       state: opts.state,
       hooks: ["assistant", AGENTIC_CLASS],
       content,
-      capLines: "feed",
+      capLines: opts.uncapped === true ? BUBBLE_UNCAPPED : "feed",
     },
     opts.previous,
   ).bubble;

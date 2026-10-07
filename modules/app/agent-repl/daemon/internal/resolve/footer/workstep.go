@@ -75,6 +75,7 @@ var feedKinds = map[protoreflect.Name]feedKind{
 	"artifact":          {step: stepExecuting},
 	"plan_mode":         {step: stepExecuting},
 	"report_findings":   {step: stepExecuting},
+	"chess_board":       {step: stepExecuting},
 	"worktree":          {step: stepExecuting},
 	"cron":              {step: stepExecuting},
 	"push_notification": {step: stepExecuting},
