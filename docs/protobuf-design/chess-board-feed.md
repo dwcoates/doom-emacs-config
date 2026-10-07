@@ -10,7 +10,31 @@ reference.
 
 ## Context
 
-Pending scoping (step 1).
+Scoping (step 1) in progress.
+
+### The widget is the one the CEE CLI webapp uses
+
+- **What:** the board is `@chesscom/cee-web-widget`
+  (`explanation-engine/sdks/cli/web/packages/cee-web-widget`), mounted with
+  `mountCeeWebWidget(element, { widgetBytes, onPositionChange, onSquareSelect })`.
+  Its input is a `chesscom.cee_webapp.v1.CeeWebWidget` in binary form, which
+  the hosting page obtains from
+  `chesscom.cee_webapp.v1.CeeWebWidgetService.GetCeeWebWidget` for a
+  `chesscom.cee_webapp.v1.CeeSessionMetadata` (session id plus game id); a
+  square click is answered by the host calling `GetSquareEvents` and handing
+  the response bytes back through `showSquareEvents`.
+- **Why:** the user wants the same widget the CEE CLI debug webapp
+  (`gns cee debug webapp`) renders, which is also the one that fits the
+  sessions-only principle.
+- **Rejected:** `explanation-engine/apps/cee-web-widget/dist`, an older bundle
+  with a PGN / FEN / session-id mount interface. It is not what the CEE CLI
+  webapp uses.
+- **Evidence (code tier):** `sdks/cli/web/packages/analyze-position-app/src/components/WidgetHost.vue`
+  is the CEE webapp's only widget host; `sdks/cli/web/packages/cee-web-widget/src/types.ts`
+  is the host contract; `sdks/cli/internal/webapp/services/ceewebwidget/ceewebwidget.go`
+  resolves the widget shape and lives under `internal/`, so agent-repl cannot
+  import it. The widget's `dist/` is not built in the checkout inspected on
+  2026-10-07.
 
 ## Core design principles
 
