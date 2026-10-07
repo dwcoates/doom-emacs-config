@@ -88,6 +88,7 @@ make_tree() {
              "$root/agent-shim/shim-lock" \
              "$root/agent-shim/logging/go" \
              "$root/proto/gen/go" \
+             "$root/proto/helpers/go" \
              "$root/webapp/src" "$root/webapp/dist" \
              "$root/daemon/cmd/claude-repld" "$root/daemon/bin"
     cp "$SCRIPT_UNDER_TEST" "$root/bin/build-frontend.sh"
@@ -111,6 +112,7 @@ make_tree() {
     echo "module lock" > "$root/agent-shim/shim-lock/go.mod"
     echo "module logging" > "$root/agent-shim/logging/go/go.mod"
     echo "module proto" > "$root/proto/gen/go/go.mod"
+    echo "module protohelpers" > "$root/proto/helpers/go/go.mod"
 
     # Sources the old mtime-scanned set never looked at, and which the twelve
     # merges of 2026-09-09 landed in: the shim's tests, and the shared logging

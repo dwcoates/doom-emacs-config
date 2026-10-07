@@ -5,6 +5,7 @@ import (
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
+	"agentrepl/protohelpers/rosterwalk"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
@@ -203,7 +204,7 @@ func setMergedFold(section *frontendv1.RosterMergedSection, folded bool) {
 func sectionHeader(label string, rows *frontendv1.RosterRows) *frontendv1.RosterSectionHeader {
 	return &frontendv1.RosterSectionHeader{
 		Label: &frontendv1.RosterLabel{Text: label},
-		Count: &frontendv1.RosterSectionCount{Workspaces: uint32(len(FlattenRows(rows.GetRows())))},
+		Count: &frontendv1.RosterSectionCount{Workspaces: uint32(len(rosterwalk.FlattenRows(rows.GetRows())))},
 	}
 }
 

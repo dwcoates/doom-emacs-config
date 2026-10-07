@@ -690,7 +690,8 @@ is worth starting at all.")
                           (at "webapp/vite.config.ts")))
        (list "daemon"
              :artifact (at "daemon/bin/claude-repld")
-             :sources (list (at "daemon"))
+             :sources (list (at "daemon") (at "agent-shim/logging/go")
+                            (at "proto/gen/go") (at "proto/helpers/go"))
              :match agent-repl-daemon--go-source-regexp)
        (list "store"
              :artifact (expand-file-name "shim-store" cache-bin)
@@ -700,7 +701,8 @@ is worth starting at all.")
        (list "sidecar"
              :artifact (expand-file-name "shim-claude-sidecar" cache-bin)
              :sources (list (at "agent-shim/claude/shim-sidecar") (at "agent-shim/wire")
-                            (at "agent-shim/logging/go") (at "proto/gen/go"))
+                            (at "agent-shim/logging/go") (at "proto/gen/go")
+                            (at "proto/helpers/go"))
              :match agent-repl-daemon--go-source-regexp)
        ;; The shim spawns this for every kernel claim and refuses to start a
        ;; session without it, which is why it is in the DEFAULT target set

@@ -759,7 +759,7 @@ park, failure or refusal it reports and stops, and never merges by hand.
   for a workspace made off the main checkout, its PARENT's checkout for a child
   workspace (one created explicitly as a child of another). A child reaches
   master only when its parent lands. The verb finds a child's own row wherever
-  the roster nests it (`sidebar.FlattenRows`).
+  the roster nests it (`proto/helpers/go/rosterwalk`).
 - `.githooks/reference-transaction` refuses any move of master the queue did
   not make (its fast-forward runs git with `AGENT_REPL_MERGE_QUEUE=1`), and names
   the skill in its refusal. `AGENT_REPL_OWNER_OVERRIDE=1` is the owner's escape

@@ -29,7 +29,7 @@ trap 'rm -rf "$REPORT_ROOT"' EXIT
 # this script with no arguments rather than restating it. `proto` runs first:
 # it validates the contract every other component compiles against, so a stale
 # stub fails the sweep before the long suites start.
-ALL_COMPONENTS=(proto daemon sidecar store lock logging webapp shim)
+ALL_COMPONENTS=(proto daemon sidecar store lock logging protohelpers webapp shim)
 # OPT-IN ONLY. The cross-system e2e suite spawns four real systems per test
 # and is budgeted in tens of minutes, so it runs when it is NAMED and never as
 # part of the default sweep.
@@ -160,6 +160,7 @@ for component in "${COMPONENTS[@]}"; do
         store)   report_go store agent-shim/shim-store ;;
         lock)    report_go lock agent-shim/shim-lock ;;
         logging) report_go logging agent-shim/logging/go ;;
+        protohelpers) report_go protohelpers proto/helpers/go ;;
         webapp)  report_typescript webapp webapp ;;
         shim)    report_typescript shim agent-shim/claude/shim ;;
         proto)   report_proto ;;

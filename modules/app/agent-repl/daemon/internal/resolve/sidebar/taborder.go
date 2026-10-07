@@ -3,6 +3,7 @@ package sidebar
 import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
+	"agentrepl/protohelpers/rosterwalk"
 )
 
 // TabEntry is one open workspace in the editor's TAB ORDER.
@@ -24,7 +25,7 @@ type TabEntry struct {
 func TabOrder(roster *frontendv1.WorkspaceRoster) []TabEntry {
 	var out []TabEntry
 	walk := func(rows []*frontendv1.RosterRow) {
-		for _, row := range FlattenRows(rows) {
+		for _, row := range rosterwalk.FlattenRows(rows) {
 			if !row.GetClosed().GetClosed() {
 				out = append(out, TabEntry{Ref: row.GetWorkspace().GetWorkspace(), Name: row.GetName().GetText()})
 			}

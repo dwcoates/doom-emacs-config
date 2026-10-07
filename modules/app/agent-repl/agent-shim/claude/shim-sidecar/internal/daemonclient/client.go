@@ -23,6 +23,7 @@ import (
 	"agentrepl/proto/agentrepl/v1/agentreplv1connect"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
+	"agentrepl/protohelpers/rosterwalk"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -439,30 +440,10 @@ func workspaceRefInRoster(roster *frontendv1.WorkspaceRoster, wantedDir string) 
 		found = ref
 		return nil
 	}
-	var walk func([]*frontendv1.RosterRow) error
-	walk = func(rows []*frontendv1.RosterRow) error {
-		for _, row := range rows {
-			if err := visit(row.GetWorkspace().GetWorkspace()); err != nil {
-				return err
-			}
-			if err := walk(row.GetChildren()); err != nil {
-				return err
-			}
-		}
-		return nil
-	}
-	for _, section := range roster.GetRepository().GetSections() {
-		if err := walk(section.GetRows().GetRows()); err != nil {
+	for _, row := range rosterwalk.AllRows(roster) {
+		if err := visit(row.GetWorkspace().GetWorkspace()); err != nil {
 			return nil, err
 		}
-	}
-	for _, section := range roster.GetTask().GetSections() {
-		if err := walk(section.GetRows().GetRows()); err != nil {
-			return nil, err
-		}
-	}
-	if err := walk(roster.GetRecentlyMerged().GetRows().GetRows()); err != nil {
-		return nil, err
 	}
 	return found, nil
 }

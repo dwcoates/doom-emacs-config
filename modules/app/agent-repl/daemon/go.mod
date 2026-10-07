@@ -5,6 +5,7 @@ go 1.24.0
 require (
 	agentrepl/logging v0.0.0-00010101000000-000000000000
 	agentrepl/proto v0.0.0
+	agentrepl/protohelpers v0.0.0
 	agentrepl/testrun v0.0.0
 	connectrpc.com/connect v1.17.0
 	github.com/creack/pty v1.1.24
@@ -28,6 +29,8 @@ require (
 )
 
 replace agentrepl/proto => ../proto/gen/go
+
+replace agentrepl/protohelpers => ../proto/helpers/go
 
 replace agentrepl/logging => ../agent-shim/logging/go
 

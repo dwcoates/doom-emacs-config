@@ -1972,6 +1972,22 @@ free, and the stale address it left behind is what the boot overwrites."
     ;; Act / Assert
     (should (equal (agent-repl-daemon--stale-targets nil) '("webapp")))))
 
+;; The proto helper module is compiled into both Go readers of the roster, so
+;; a change there must make both stale, not only whichever named it.
+(ert-deftest agent-repl-test-daemon-newer-proto-helper-source-stales-its-readers ()
+  "A newer source under proto/helpers/go makes the daemon and the sidecar stale."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (agent-repl-test-daemon--mark-fresh "shim" "webapp" "daemon" "lock" "sidecar")
+    (let ((helpers (expand-file-name "proto/helpers/go" agent-repl--frontend-root)))
+      (push (cons helpers '("/proto/helpers/go/rosterwalk/rosterwalk.go"))
+            agent-repl-test-daemon--source-files)
+      (push (cons "/proto/helpers/go/rosterwalk/rosterwalk.go" 200.0)
+            agent-repl-test-daemon--mtimes))
+    ;; Act / Assert
+    (should (equal (agent-repl-daemon--stale-targets '("daemon" "sidecar"))
+                   '("daemon" "sidecar")))))
+
 (ert-deftest agent-repl-test-daemon-stale-tree-spawns-exactly-one-build ()
   "A stale tree spawns the script ONCE, whatever the stale count."
   (agent-repl-test-daemon--with-harness

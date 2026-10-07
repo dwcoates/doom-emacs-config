@@ -162,6 +162,7 @@ SIDECAR_DIR="$ROOT/agent-shim/claude/shim-sidecar"
 LOCK_DIR="$ROOT/agent-shim/shim-lock"
 SHARED_LOGGING_DIR="$ROOT/agent-shim/logging/go"
 PROTO_GO_DIR="$ROOT/proto/gen/go"
+PROTO_HELPERS_DIR="$ROOT/proto/helpers/go"
 
 # Where ROOT sits inside its checkout, so the same relative paths can be
 # applied to OTHER worktrees when building the gc protection set. Derived
@@ -646,14 +647,14 @@ build_daemon() {
 # require_go_source_dirs MODULE_DIR — abort unless every directory a Go artifact
 # here compiles against is actually present.
 #
-# The generated proto module and the shared logging module live OUTSIDE the
-# module being built, and a checkout missing either produces a build failure
+# The generated proto module, its hand-written helper module and the shared
+# logging module live OUTSIDE the module being built, and a checkout missing either produces a build failure
 # that reads as a compiler problem. Failing here names the missing directory
 # instead. It is a pre-flight assertion, not the staleness rule: staleness is
 # the source-tree id, which covers these same trees through the shared pathspec.
 require_go_source_dirs() {
     local dir="$1" source_dir
-    for source_dir in "$dir" "$SHARED_LOGGING_DIR" "$PROTO_GO_DIR"; do
+    for source_dir in "$dir" "$SHARED_LOGGING_DIR" "$PROTO_GO_DIR" "$PROTO_HELPERS_DIR"; do
         if [ ! -d "$source_dir" ]; then
             echo "build-frontend.sh: required Go source directory missing: $source_dir" >&2
             exit 1

@@ -110,6 +110,7 @@ var Suites = []Suite{
 	{Name: "store", Kind: GoModule, Path: "agent-shim/shim-store"},
 	{Name: "lock", Kind: GoModule, Path: "agent-shim/shim-lock"},
 	{Name: "logging", Kind: GoModule, Path: "agent-shim/logging/go"},
+	{Name: "protohelpers", Kind: GoModule, Path: "proto/helpers/go"},
 	{Name: "webapp", Kind: Vitest, Path: "webapp", IntegrationConfig: "vitest.integration.config.ts"},
 	// The shim's integration files spawn its bundle and its lock helper
 	// (dist/main.js, dist/shim-lock): `pretest:integration` builds both, as
