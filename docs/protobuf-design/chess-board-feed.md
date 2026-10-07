@@ -206,3 +206,26 @@ then `frontend.v1`, then the square-click endpoint, then the skill text.
   CEE resolver), which is still open.
 
 ## Landed changes
+
+### 1. The board contract
+
+- **What landed:** `conversation.v1.AgentActivity.chess_board` (36) with
+  `AgentChessBoard` (start / success / failure) and `AgentChessBoardSession`;
+  `frontend.v1.FeedTurnActivity.chess_board` (12) with the new
+  `frontend/v1/chess_board.proto` component (`FeedChessBoard`: heading, then
+  preparing / unavailable / ready); and `agentrepl.v1.InspectChessBoardSquare`
+  with its endpoint file.
+- **Why:** the decisions under Context, made on the owner's behalf.
+- **Consequences:**
+  - The shim and the sidecar each need a converter for
+    `mcp__agent-repl__show_chess_board`, and the shim needs the MCP server
+    that offers the tool.
+  - The daemon's feed resolver draws the new arm and re-publishes the row as
+    the board's backend state changes; the daemon gains the CEE backend
+    (checkout, builds, singleton, Connect calls), a route serving the widget
+    bundle, and the new rpc.
+  - The webapp mounts the widget, tracks each board's displayed gamepoint,
+    and relays square clicks.
+  - `AgentChessBoardFailure.session` is optional, because a call whose input
+    named no session is one of the ways the call fails.
+- **Sweep:** nothing obviated; the change only adds.

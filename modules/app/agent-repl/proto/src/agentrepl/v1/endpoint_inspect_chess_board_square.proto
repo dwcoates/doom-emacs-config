@@ -1,0 +1,65 @@
+// endpoint_inspect_chess_board_square.proto — InspectChessBoardSquare: a
+// reader clicked a piece on a feed chess board, and the widget wants what the
+// engine says about that square. FEED section.
+//
+// The widget reports the click and holds nothing else about it; its host — the
+// webapp — asks the daemon here, and the daemon asks the board's cee-webapp
+// backend and hands the answer back whole for the widget's
+// `showSquareEvents`. Dropping an answer that a later click has superseded is
+// the webapp's job, by its own request order; the daemon answers every call.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "frontend/v1/chess_board.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message InspectChessBoardSquareRequest {
+  // The board, by the token its ready state carries, echoed unchanged.
+  frontend.v1.FeedChessBoardSquareToken board = 1;
+  // The position the square is read at: the gamepoint the widget displays,
+  // as its `onPositionChange` last reported it, or the widget data's root
+  // when it has reported none. A CEE gamepoint handle, relayed verbatim.
+  int64 game_point = 2;
+  // The clicked square as the widget reported it: the numeric value of CEE's
+  // `chesscom.chess.v1.Square` enum, relayed verbatim. agent-repl holds no
+  // copy of that enum and never interprets the number.
+  uint32 square = 3;
+}
+
+// THE ARM IS THE OUTCOME.
+message InspectChessBoardSquareResponse {
+  oneof result {
+    InspectChessBoardSquareSuccess success = 1;
+    InspectChessBoardSquareError error = 2;
+  }
+}
+
+// cee-webapp answered. Its answer may itself be an engine refusal; that is
+// still an answer, which the widget draws as a line in its own tab.
+message InspectChessBoardSquareSuccess {
+  // A `chesscom.cee_webapp.v1.GetSquareEventsResponse` in binary protobuf
+  // form, exactly as cee-webapp answered it — both of its arms — for the
+  // widget's `showSquareEvents`.
+  //
+  // UNTYPED BY NECESSITY: the schema is the CEE CLI's, in another
+  // repository; agent-repl relays the answer without reading it.
+  bytes get_square_events_response = 1;
+}
+
+// No answer could be had. A malformed token is Connect InvalidArgument, never
+// an arm.
+message InspectChessBoardSquareError {
+  oneof cause {
+    // cee-webapp could not be started or reached, or did not answer the call.
+    InspectChessBoardSquareBackendUnreachable backend_unreachable = 1;
+  }
+}
+
+// The board's backend gave no answer.
+message InspectChessBoardSquareBackendUnreachable {
+  // The failure's own account, as the daemon logged it.
+  string detail = 1;
+}
