@@ -30,3 +30,30 @@ func TestRetryAnswered(t *testing.T) {
 		})
 	}
 }
+
+func TestRetryAnsweredBy(t *testing.T) {
+	prose := &conversationv1.AgentActivity{Item: &conversationv1.AgentActivity_Response{Response: &conversationv1.AgentResponse{}}}
+	tool := &conversationv1.AgentActivity{Item: &conversationv1.AgentActivity_Read{}}
+	cases := []struct {
+		name    string
+		retried string
+		agent   string
+		act     *conversationv1.AgentActivity
+		want    bool
+	}{
+		{name: "the retried agent's answer ends its retry", retried: "main", agent: "main", act: prose, want: true},
+		{name: "another agent's answer does not end the retry", retried: "main", agent: "sub-1", act: prose, want: false},
+		{name: "the retried agent's frame that does not answer does not end the retry", retried: "main", agent: "main", act: tool, want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := RetryAnsweredBy(tc.retried, tc.agent, tc.act)
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("RetryAnsweredBy(%q, %q) = %v, want %v", tc.retried, tc.agent, got, tc.want)
+			}
+		})
+	}
+}

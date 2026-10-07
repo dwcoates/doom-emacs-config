@@ -920,8 +920,8 @@ func (s *sidebarSink) OnAgentTerminal(_ ids.WorkspaceID, agent *conversationv1.A
 	s.rec.emit(event{sink: "sidebar", method: "OnAgentTerminal", agent: agent.GetValue(), turn: turn})
 }
 
-func (s *sidebarSink) OnActivity(_ ids.WorkspaceID, agent *conversationv1.AgentId, _ *conversationv1.AgentActivity) {
-	s.rec.emit(event{sink: "sidebar", method: "OnActivity", agent: agent.GetValue()})
+func (s *sidebarSink) OnActivity(_ ids.WorkspaceID, agent *conversationv1.AgentId, act *conversationv1.AgentActivity) {
+	s.rec.emit(event{sink: "sidebar", method: "OnActivity", agent: agent.GetValue(), detail: act.GetActivityId().GetValue()})
 }
 
 func (s *sidebarSink) OnDetachedWork(_ ids.WorkspaceID, agent *conversationv1.AgentId, work *conversationv1.AgentDetachedWork) {
@@ -2071,8 +2071,11 @@ func assertPerAgentOrder(t *testing.T, got []event, agent string, frames int) {
 		if i+1 >= len(got) || got[i+1].name() != "footer.OnActivity" || got[i+1].detail != want {
 			t.Fatalf("%s activity %q was interrupted between the feed and the footer", agent, want)
 		}
-		if i+2 >= len(got) || got[i+2].name() != "topbar.OnActivity" || got[i+2].detail != want {
-			t.Fatalf("%s activity %q was interrupted between the footer and the topbar", agent, want)
+		if i+2 >= len(got) || got[i+2].name() != "sidebar.OnActivity" || got[i+2].detail != want {
+			t.Fatalf("%s activity %q was interrupted between the footer and the roster", agent, want)
+		}
+		if i+3 >= len(got) || got[i+3].name() != "topbar.OnActivity" || got[i+3].detail != want {
+			t.Fatalf("%s activity %q was interrupted between the roster and the topbar", agent, want)
 		}
 		seen++
 	}

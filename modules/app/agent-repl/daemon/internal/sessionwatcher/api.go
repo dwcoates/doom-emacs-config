@@ -323,7 +323,7 @@ type SidebarSink interface {
 	OnPermission(ws ids.WorkspaceID, agent *conversationv1.AgentId, p *conversationv1.AgentPermission)
 	// OnApiError is the same mid-turn retry evidence FooterSink.OnApiError
 	// takes: the row draws `api_retrying` while it stands, so the roster and
-	// the footer are blue together.
+	// the footer are turquoise together, and OnActivity's answer ends both.
 	OnApiError(ws ids.WorkspaceID, agent *conversationv1.AgentId, failed *conversationv1.ApiRequestFailed)
 	// OnSessionUpdate carries the terminals and faults the row reflects.
 	OnSessionUpdate(ws ids.WorkspaceID, update *conversationv1.SessionUpdate)
