@@ -4,6 +4,7 @@
  * The rules under test are `testdata/corpus/MANIFEST.md`'s, one test per rule
  * and one test per edge case, so a failure names the rule that broke.
  */
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -282,14 +283,12 @@ describe("scrubPersonal", () => {
 });
 
 describe("expandHome", () => {
-  const cases = [
-    { name: "the token becomes the home", text: '{"cwd":"${HOME}/p"}', want: '{"cwd":"/Users/bo/p"}' },
-    { name: "the token's slug becomes the home's slug", text: "projects/--HOME---p/s.jsonl", want: "projects/-Users-bo--p/s.jsonl" },
-    { name: "text with no token is unchanged", text: "/private/tmp/x", want: "/private/tmp/x" },
-  ];
-  for (const tc of cases) {
+  // The vectors are shared with the sidecar's recorded.Expand, so the two
+  // expansions cannot drift apart.
+  const shared = JSON.parse(readFileSync(new URL("./home-token-vectors.json", import.meta.url), "utf8"));
+  for (const tc of shared.vectors) {
     it(tc.name, () => {
-      expect(expandHome(tc.text, "/Users/bo")).toBe(tc.want);
+      expect(expandHome(tc.text, shared.home)).toBe(tc.want);
     });
   }
 

@@ -1,0 +1,10 @@
+{
+  "comment": "The home-token expansion every reader of a recording applies: expandHome in anonymize.mjs and recorded.Expand in the sidecar both pass every vector, so the two cannot drift.",
+  "home": "/Users/bo",
+  "vectors": [
+    { "name": "the token becomes the home", "text": "{\"cwd\":\"${HOME}/p\"}", "want": "{\"cwd\":\"/Users/bo/p\"}" },
+    { "name": "the token's slug becomes the home's slug", "text": "projects/--HOME---p/s.jsonl", "want": "projects/-Users-bo--p/s.jsonl" },
+    { "name": "both forms in one text", "text": "${HOME}/.claude/projects/--HOME---p", "want": "/Users/bo/.claude/projects/-Users-bo--p" },
+    { "name": "text with no token is unchanged", "text": "/private/tmp/x", "want": "/private/tmp/x" }
+  ]
+}
