@@ -63,6 +63,32 @@ Scoping (step 1) in progress.
 - **Decision:** when a board must be resolved and no cee-webapp is running,
   agent-repl starts it, rather than requiring the user to have started it.
 
+### The daemon builds the widget backend itself; the skill builds nothing
+
+- **Decision:** the agent-repl daemon builds the `cee-webapp` binary and the
+  widget's `dist/` from the explanation-engine checkout when they are missing
+  or older than their sources, then starts cee-webapp. Building, starting and
+  calling cee-webapp have one owner.
+- **Why:** the user judged the skill unnecessary for building once the daemon
+  can do it; one owner also means no second party ever starts cee-webapp.
+- **Evidence (code tier):** cee-webapp serves the widget from the checkout's
+  `sdks/cli/web/packages/cee-web-widget/dist` (`internal/webapp/static/static.go`
+  `DefaultDirs`, which resolves the checkout through `repopath.EngineDir()`),
+  not from the plugin install, so "built" covers both the binary and that
+  `dist/`. The widget package needs Node and its `sdks/cli/web` dependencies;
+  cee-webapp needs Go and links no libcee (`sdks/cli/justfile`).
+- **Consequences:** the board row carries the backend's state (building,
+  build failed with its reason, session expired, ready), since nothing checks
+  readiness before the board is asked for. The daemon must locate the
+  explanation-engine checkout. The first board after a source change waits for
+  a build.
+- **Retracted:** a readiness request from the skill to the daemon, agreed one
+  exchange earlier, under which the skill would build whatever the daemon
+  reported missing. It became unnecessary once the daemon builds; the board
+  row's own state replaces it.
+- **The skill's remaining job:** finding CEE CLI sessions and asking for a
+  board with one (session id and game id), per the sessions-only principle.
+
 ### A board whose session is gone shows as unavailable
 
 - **Decision:** once the CEE session behind a board no longer exists (the CEE
