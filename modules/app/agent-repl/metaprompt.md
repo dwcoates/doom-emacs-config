@@ -214,18 +214,22 @@
 
 ## GNS authentication
 
-### Renew an expired GNS token yourself, only in the dodge@chess.com Chrome profile
+### Renew an expired GNS token yourself, only in the work account's Chrome profile
 
 - Whenever a GNS token has expired or is missing, run `gns auth login` (any `--env`, e.g. `production`) and any other needed `gns auth` step yourself.
   - Do not stop to ask first; an expired token (e.g. an LLM gateway `HTTP 401: Invalid or expired JWT`) is renewed and the work continues.
-- Auth pages open ONLY in the dodge@chess.com Chrome profile (`--profile-directory="Profile 6"`).
-  - NEVER the dodge.w.coates@gmail.com profile, and never any other profile or browser.
+- The work account is the `@chess.com` account signed in under `~/.claude-chesscom`.
+  - Its email is `oauthAccount.emailAddress` in `~/.claude-chesscom/.claude.json`.
+  - Its Chrome profile is the `profile.info_cache` key whose `user_name` is that email, in `~/Library/Application Support/Google/Chrome/Local State`.
+  - When either lookup finds nothing, stop and surface it, pointing at the Setup section of `modules/app/agent-repl/docs/USER-GUIDE.md`.
+- Auth pages open ONLY in the work account's Chrome profile.
+  - NEVER any other profile, and never any other browser.
   - The default `gns auth login` opens the system default browser and profile, so it is not used.
 - Use the device-code flow, which hands over the URL instead of opening a browser.
   - `gns auth login --env <env> --device` prints the sign-in URL and code.
-  - Open that URL with `open -na "Google Chrome" --args --profile-directory="Profile 6" "<url>"`.
+  - Open that URL with `open -na "Google Chrome" --args --profile-directory="<work profile>" "<url>"`.
   - Poll `gns auth login --env <env> --device-poll` until it exits 0 (exit 1 is pending, exit 2 is an error to surface).
-  - Confirm with `gns auth status` that the environment reads authenticated as dodge@chess.com.
+  - Confirm with `gns auth status` that the environment reads authenticated as the work account's email.
 
 ## Response behavior
 
