@@ -90,9 +90,9 @@ function topbarContext(): TopbarContext {
 /** The strip's view: one of every right-hand cell, warnings included. */
 function stripView(session: boolean) {
   return create(TopbarViewSchema, {
-    title: { text: "DWC/fix" },
+    title: { text: "ABC/fix" },
     sessionLine: { text: "session abc" },
-    account: { state: { case: "loggedIn", value: { email: "dodge.w.coates@gmail.com" } } },
+    account: { state: { case: "loggedIn", value: { email: "someone@example.com" } } },
     connectivity: { tone: "green", glyph: "●", title: "connected" },
     ...(session
       ? {

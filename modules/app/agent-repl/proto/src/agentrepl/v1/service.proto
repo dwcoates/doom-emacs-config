@@ -338,7 +338,8 @@ service AgentRepl {
   // End the login session; closing an absent one is success. See
   // endpoint_close_login.proto.
   rpc CloseLogin(CloseLoginRequest) returns (CloseLoginResponse);
-  // Open a clicked link in the pinned external browser profile. See
+  // Open a clicked link in the browser profile the session's account signs
+  // in as. See
   // endpoint_open_external.proto.
   rpc OpenExternal(OpenExternalRequest) returns (OpenExternalResponse);
   // A host-raised click: open a path (at a line) in the editor — relayed to

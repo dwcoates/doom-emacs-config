@@ -140,7 +140,7 @@ A side window is one created via `display-buffer-in-side-window' (or
 equivalent), distinguished by a non-nil `window-side' window
 parameter.  Treat these as exempt from generic layout-clearing
 operations so commands that reset the main window tree (e.g.
-`delete-other-windows', `+dwc/magit-status-workspace') don't trample
+`delete-other-windows', `agent-repl-magit-status-workspace') don't trample
 frame-level side-window UI elements."
   (let* ((resolved-ws (or ws (agent-repl--ws-current-name)))
          (live (window-live-p win))

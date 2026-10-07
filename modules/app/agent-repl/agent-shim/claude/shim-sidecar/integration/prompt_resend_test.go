@@ -29,7 +29,7 @@ func TestALiveReSendReplacesThePendingPromptRowInPlace(t *testing.T) {
 	defer cancel()
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
-	cwd := "/Users/dodgecoates/prompt-resend-probe"
+	cwd := "/work/prompt-resend-probe"
 	slug := cwdSlug(cwd)
 	session := "7c7c7c7c-7c7c-47c7-87c7-7c7c7c7c7c7c"
 	var records []map[string]any

@@ -46,7 +46,7 @@ describe("cwdSlug", () => {
 
   it("preserves case and leaves existing dashes alone", () => {
     // Arrange + Act + Assert
-    expect(cwdSlug("/Users/DWC/doom-worktrees/Feature")).toBe("-Users-DWC-doom-worktrees-Feature");
+    expect(cwdSlug("/Users/ABC/doom-worktrees/Feature")).toBe("-Users-ABC-doom-worktrees-Feature");
   });
 });
 

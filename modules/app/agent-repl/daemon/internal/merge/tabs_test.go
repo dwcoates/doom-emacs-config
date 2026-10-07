@@ -267,10 +267,10 @@ func TestDequeueOfferNamesTheWorkspace(t *testing.T) {
 // TestBranchLabelReadsAsTheMerge covers the head's branch line.
 func TestBranchLabelReadsAsTheMerge(t *testing.T) {
 	// Arrange: a source and a target.
-	got := branchLabel("DWC/fix-flaky", "master")
+	got := branchLabel("ABC/fix-flaky", "master")
 
 	// Act, Assert.
-	if got != "DWC/fix-flaky → master" {
+	if got != "ABC/fix-flaky → master" {
 		t.Fatalf("the label is %q, want the source, an arrow and the target", got)
 	}
 }

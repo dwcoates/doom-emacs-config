@@ -175,7 +175,7 @@ func TestASessionRunOutsideAgentReplIsNotRead(t *testing.T) {
 	awaitLog(ctx, t, options.LogPath, "the external session gated out", func(r logRecord) bool {
 		return r.Operation == "watch-dormant" && r.Context["vendor_session_id"] == captured.Session
 	})
-	cwd := "/Users/dodgecoates/live-beside-external-probe"
+	cwd := "/work/live-beside-external-probe"
 	live := newGrowingFile(t, tree.sessionPath(cwdSlug(cwd), rotationOriginalID))
 	live.AppendLine(encodeRecord(t, retargetSession(t, decodeRecord(t, captured.Lines[7]), rotationOriginalID, cwd)))
 	awaitCursorInBatches(ctx, t, fake, live.Path(), live.Offset())

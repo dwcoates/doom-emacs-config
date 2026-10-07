@@ -1682,34 +1682,20 @@ func (s *fakeShim) KillSession(_ context.Context, force bool) error {
 
 // fakeBrowser is an externalbrowser.Opener.
 type fakeBrowser struct {
-	opened         []string
-	openedProfiles []string
-	err            error
-	// profileByEmail is the routing ProfileForAccount answers with; an email
-	// it does not hold takes defaultProfile, exactly as an unmatched account
-	// falls back to the pinned default.
-	profileByEmail map[string]string
-	defaultProfile string
-	// askedEmails records every email ProfileForAccount was asked to route, in
-	// order, so a test can assert the verb routes by the session's account.
-	askedEmails []string
+	opened []string
+	// openedEmails records the account email every Open was handed, in order,
+	// so a test can assert the verb routes by the session's account.
+	openedEmails []string
+	err          error
 }
 
-func (b *fakeBrowser) Open(_ context.Context, url, profile string) error {
+func (b *fakeBrowser) Open(_ context.Context, url, accountEmail string) error {
 	if b.err != nil {
 		return b.err
 	}
 	b.opened = append(b.opened, url)
-	b.openedProfiles = append(b.openedProfiles, profile)
+	b.openedEmails = append(b.openedEmails, accountEmail)
 	return nil
-}
-
-func (b *fakeBrowser) ProfileForAccount(email string) string {
-	b.askedEmails = append(b.askedEmails, email)
-	if p, ok := b.profileByEmail[email]; ok {
-		return p
-	}
-	return b.defaultProfile
 }
 
 // fakeOwnership answers one standing for every workspace.
@@ -2145,7 +2131,7 @@ func (f *fixture) workspace(id ids.WorkspaceID, dir string) wsm.Workspace {
 		panic(err)
 	}
 	dir = normalized
-	ws := wsm.Workspace{ID: id, Dir: dir, Repo: "repo-1", Name: "sample", Branch: "DWC/sample"}
+	ws := wsm.Workspace{ID: id, Dir: dir, Repo: "repo-1", Name: "sample", Branch: "ABC/sample"}
 	f.db.with(ws)
 	// A REAL DIRECTORY, because the roster no longer publishes a repository
 	// whose main worktree is gone (`withoutGoneRepositories'). The workspace's

@@ -6656,7 +6656,7 @@ func (*FeedDiffLineContext) Descriptor() ([]byte, []int) {
 type FeedSkill struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The invocation as one composed line — "/graphify" or "/workspace merge
-	// DWC/fix-flaky" — the line a user would have typed. Daemon-composed.
+	// ABC/fix-flaky" — the line a user would have typed. Daemon-composed.
 	Invocation *FeedSkillInvocation `protobuf:"bytes,1,opt,name=invocation,proto3" json:"invocation,omitempty"`
 	// The card's state.
 	//
@@ -16906,7 +16906,7 @@ func (x *FeedWorktreeBranch) GetText() string {
 // transfers nothing but this head, and a settled merge pages like any
 // settled bubble.
 //
-//	│ ⇄ merge  DWC/fix-flaky → master           6:31  ● merging  ▾      │
+//	│ ⇄ merge  ABC/fix-flaky → master           6:31  ● merging  ▾      │
 //	│ ┌───────────────────────────────────────────────────────────────┐ │
 //	│ │ queue ✓ │ rebasing ✓ │ tests ✗ │ fixing ✓ │ tests (2) ● 8/12  │ │
 //	│ ├───────────────────────────────────────────────────────────────┤ │
@@ -17140,7 +17140,7 @@ func (x *FeedMergeGlyph) GetIcon() string {
 	return ""
 }
 
-// The branch line, resolved ("DWC/fix-flaky-test → master").
+// The branch line, resolved ("ABC/fix-flaky-test → master").
 type FeedMergeLabel struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Text          string                 `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`

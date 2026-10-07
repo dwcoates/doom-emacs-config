@@ -50,7 +50,7 @@ import {
   renameSync,
   rmSync,
 } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { homedir, tmpdir, userInfo } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -58,6 +58,8 @@ import {
   anonymize,
   anonymizeJsonl,
   anonymizePlainText,
+  expandHome,
+  scrubPersonal,
 } from "./anonymize.mjs";
 import { apiKeySource, classifyCapture, verdictLine } from "./outcome.mjs";
 import { isPromptDriven, planWorlds, promptTurnsOf, resumeCaptureOf, worldOf } from "./worlds.mjs";
@@ -605,39 +607,129 @@ export function runCwdInit(cwd, command) {
 }
 
 /**
+ * A meta document with every personal value scrubbed, keys and strings alike,
+ * and nothing else touched: the meta is the harness's own record, so the
+ * corpus's truncation and redaction rules do not apply to it.
+ */
+export function anonymizeMeta(meta, personal) {
+  requirePersonal(personal, "anonymizeMeta");
+  return JSON.parse(scrubPersonal(JSON.stringify(meta), personal));
+}
+
+/** Split a comma-separated environment list, dropping blanks. */
+export function envList(value) {
+  return (value ?? "").split(",").map((item) => item.trim()).filter((item) => item !== "");
+}
+
+/**
+ * The signed-in email a vendor identity file names, or `null` when the file is
+ * absent or names none. A file that exists but does not parse is an error:
+ * an account whose email cannot be read is an email the scrub would miss.
+ */
+export function accountEmailIn(file) {
+  let raw;
+  try {
+    raw = readFileSync(file, "utf8");
+  } catch (err) {
+    if (err.code === "ENOENT") return null;
+    throw err;
+  }
+  const email = JSON.parse(raw)?.oauthAccount?.emailAddress;
+  return typeof email === "string" && email !== "" ? email : null;
+}
+
+/**
+ * The personal values of whoever is running the capture, for the anonymizer's
+ * scrub: the home directory; every account email signed in under the usual
+ * account roots (and `configRoot`, when the run names one), plus
+ * $CAPTURE_PERSONAL_EMAILS; and the login name, the home's last segment, every
+ * word of the global git user name, plus $CAPTURE_PERSONAL_NAMES. Name words
+ * under three letters are left out: they match too much ordinary text.
+ */
+export function personalValuesFromHost(
+  env,
+  {
+    home = homedir(),
+    username = userInfo().username,
+    gitUserName = () =>
+      spawnSync("git", ["config", "--global", "user.name"], { encoding: "utf8" }).stdout ?? "",
+    configRoot = null,
+  } = {},
+) {
+  const identityFiles = [
+    path.join(home, ".claude.json"),
+    path.join(home, ".claude", ".claude.json"),
+    path.join(home, ".claude-chesscom", ".claude.json"),
+  ];
+  if (configRoot !== null) identityFiles.push(path.join(configRoot, ".claude.json"));
+  const emails = new Set();
+  for (const file of identityFiles) {
+    const email = accountEmailIn(file);
+    if (email !== null) emails.add(email);
+  }
+  for (const email of envList(env.CAPTURE_PERSONAL_EMAILS)) emails.add(email);
+  const names = new Set([username, path.basename(home)]);
+  for (const word of gitUserName().split(/\s+/)) names.add(word);
+  for (const name of envList(env.CAPTURE_PERSONAL_NAMES)) names.add(name);
+  return {
+    home,
+    emails: [...emails],
+    names: [...names].filter((name) => name.length >= 3),
+  };
+}
+
+/**
+ * Fail at once when a capture write was handed no personal values. Every write
+ * into a capture goes through the scrub, so a call site that forgot to thread
+ * them is a defect, not a capture without personal values.
+ */
+function requirePersonal(personal, site) {
+  if (personal === undefined || personal === null) {
+    throw new Error(`capture: ${site} was called without the personal values to scrub`);
+  }
+  return personal;
+}
+
+/**
  * Copy a tree into the capture, anonymizing every file on the way.
  *
  * `.jsonl` and `.json` files go through the JSON walker; everything else
  * (spools, hook stderr, plan files) through the plain-text credential pass.
  * Nothing is copied verbatim: a capture directory must be safe to commit.
  */
-export function copyTreeAnonymized(sourceDir, destDir, report) {
+export function copyTreeAnonymized(sourceDir, destDir, report, personal) {
+  requirePersonal(personal, "copyTreeAnonymized");
   if (!existsSync(sourceDir)) return;
   mkdirSync(destDir, { recursive: true });
   for (const name of readdirSync(sourceDir)) {
     const from = path.join(sourceDir, name);
-    const to = path.join(destDir, name);
+    const to = path.join(destDir, scrubPersonal(name, personal));
     const info = statSync(from);
     if (info.isDirectory()) {
-      copyTreeAnonymized(from, to, report);
+      copyTreeAnonymized(from, to, report, personal);
       continue;
     }
     if (!info.isFile()) continue;
-    const raw = readFileSync(from, "utf8");
-    if (name.endsWith(".jsonl")) {
-      writeFileSync(
-        to,
-        anonymizeJsonl(raw, (lineNo, err) =>
-          report.unparsed.push({ file: from, line: lineNo, error: String(err) }),
-        ),
-        "utf8",
-      );
-    } else if (name.endsWith(".json")) {
-      writeFileSync(to, `${JSON.stringify(anonymize(JSON.parse(raw)), null, 2)}\n`, "utf8");
-    } else {
-      writeFileSync(to, anonymizePlainText(raw), "utf8");
-    }
+    writeFileSync(to, anonymizeFile(name, from, readFileSync(from, "utf8"), report, personal), "utf8");
   }
+}
+
+/**
+ * One file's anonymized text, by kind: `.jsonl` and `.json` through the JSON
+ * walker, everything else through the plain-text pass.
+ */
+function anonymizeFile(name, from, raw, report, personal) {
+  if (name.endsWith(".jsonl")) {
+    return anonymizeJsonl(
+      raw,
+      (lineNo, err) => report.unparsed.push({ file: from, line: lineNo, error: String(err) }),
+      personal,
+    );
+  }
+  if (name.endsWith(".json")) {
+    return `${JSON.stringify(anonymize(JSON.parse(raw), undefined, personal), null, 2)}\n`;
+  }
+  return anonymizePlainText(raw, personal);
 }
 
 /**
@@ -649,29 +741,20 @@ export function copyTreeAnonymized(sourceDir, destDir, report) {
  * written, and a truncated re-write landing on top of the full capture would
  * silently destroy the golden.
  */
-export function mergeTreeAnonymized(sourceDir, destDir, report, moved = []) {
+export function mergeTreeAnonymized(sourceDir, destDir, report, personal, moved = []) {
+  requirePersonal(personal, "mergeTreeAnonymized");
   if (!existsSync(sourceDir)) return moved;
   mkdirSync(destDir, { recursive: true });
   for (const name of readdirSync(sourceDir)) {
     const from = path.join(sourceDir, name);
-    const to = path.join(destDir, name);
+    const to = path.join(destDir, scrubPersonal(name, personal));
     const info = statSync(from);
     if (info.isDirectory()) {
-      mergeTreeAnonymized(from, to, report, moved);
+      mergeTreeAnonymized(from, to, report, personal, moved);
       continue;
     }
     if (!info.isFile()) continue;
-    const raw = readFileSync(from, "utf8");
-    let text;
-    if (name.endsWith(".jsonl")) {
-      text = anonymizeJsonl(raw, (lineNo, err) =>
-        report.unparsed.push({ file: from, line: lineNo, error: String(err) }),
-      );
-    } else if (name.endsWith(".json")) {
-      text = `${JSON.stringify(anonymize(JSON.parse(raw)), null, 2)}\n`;
-    } else {
-      text = anonymizePlainText(raw);
-    }
+    const text = anonymizeFile(name, from, readFileSync(from, "utf8"), report, personal);
     if (existsSync(to) && statSync(to).size >= Buffer.byteLength(text, "utf8")) continue;
     writeFileSync(to, text, "utf8");
     moved.push(to);
@@ -689,13 +772,15 @@ export function mergeTreeAnonymized(sourceDir, destDir, report, moved = []) {
  * operator's root, so the account really is left as found. ONLY the slugs this
  * run created are ever looked at; no other project directory is read or removed.
  */
-export function lateReclaimSlug({ accountRoot, slug, captureDir, report, log }) {
+export function lateReclaimSlug({ accountRoot, slug, captureDir, report, personal, log }) {
+  requirePersonal(personal, "lateReclaimSlug");
   const projectDir = path.join(accountRoot, "projects", slug);
   if (!existsSync(projectDir)) return { slug, moved: [] };
   const moved = mergeTreeAnonymized(
     projectDir,
-    path.join(captureDir, "files", "projects", slug),
+    path.join(captureDir, "files", "projects", scrubPersonal(slug, personal)),
     report,
+    personal,
   );
   rmSync(projectDir, { recursive: true, force: true });
   log?.(
@@ -852,7 +937,7 @@ export const CORPUS_DIR = path.join(HERE, "..", "..", "testdata", "captures");
  * verbatim on its own lines, and cross-checked against the slug the committed
  * directory is named for.
  */
-export function readCapturedSession(corpusDir, captureName) {
+export function readCapturedSession(corpusDir, captureName, home = homedir()) {
   const projectsDir = path.join(corpusDir, captureName, "files", "projects");
   if (!existsSync(projectsDir)) {
     throw new Error(
@@ -886,7 +971,8 @@ export function readCapturedSession(corpusDir, captureName) {
       continue;
     }
     if (typeof parsed?.cwd === "string" && parsed.cwd !== "") {
-      cwd = parsed.cwd;
+      // The recording names no one; it is replayed under this machine's home.
+      cwd = expandHome(parsed.cwd, home);
       break;
     }
   }
@@ -896,13 +982,14 @@ export function readCapturedSession(corpusDir, captureName) {
         "cannot be resumed into the directory the vendor slugged it under",
     );
   }
-  if (cwdSlug(cwd) !== slugs[0]) {
+  const slug = expandHome(slugs[0], home);
+  if (cwdSlug(cwd) !== slug) {
     throw new Error(
       `capture: resume_capture ${captureName}'s recorded cwd ${cwd} slugs to ` +
-        `${cwdSlug(cwd)}, not the committed ${slugs[0]}`,
+        `${cwdSlug(cwd)}, not the committed ${slug}`,
     );
   }
-  return { sessionId, slug: slugs[0], cwd, transcriptPath };
+  return { sessionId, slug, cwd, transcriptPath, home };
 }
 
 /**
@@ -933,7 +1020,7 @@ export function seedResumableSession(auth, accountRoot, seed) {
     throw new Error(`capture: ${target} already exists; refusing to overwrite it`);
   }
   mkdirSync(projectDir, { recursive: true });
-  writeFileSync(target, readFileSync(seed.transcriptPath, "utf8"), "utf8");
+  writeFileSync(target, expandHome(readFileSync(seed.transcriptPath, "utf8"), seed.home), "utf8");
   return { projectDir, target };
 }
 
@@ -1081,7 +1168,7 @@ async function runScenario(sdk, scenario, opts, auth, world) {
 
   const t0 = Date.now();
   const record = (dir, msg) => {
-    const entry = { t_ms: Date.now() - t0, dir, msg: anonymize(msg) };
+    const entry = { t_ms: Date.now() - t0, dir, msg: anonymize(msg, undefined, opts.personal) };
     entries.push(entry);
     appendFileSync(streamPath, `${JSON.stringify(entry)}\n`, "utf8");
   };
@@ -1299,16 +1386,22 @@ async function runScenario(sdk, scenario, opts, auth, world) {
     if (scratchProject !== null) {
       copyTreeAnonymized(
         scratchProject,
-        path.join(filesDir, "projects", cwdSlug(cwd)),
+        path.join(filesDir, "projects", scrubPersonal(cwdSlug(cwd), opts.personal)),
         report,
+        opts.personal,
       );
     }
   } else {
-    copyTreeAnonymized(path.join(configDir, "projects"), path.join(filesDir, "projects"), report);
+    copyTreeAnonymized(
+      path.join(configDir, "projects"),
+      path.join(filesDir, "projects"),
+      report,
+      opts.personal,
+    );
   }
-  copyTreeAnonymized(spoolRoot, path.join(filesDir, "spool"), report);
+  copyTreeAnonymized(spoolRoot, path.join(filesDir, "spool"), report, opts.personal);
   const defaultSpool = path.join("/tmp", `claude-${process.getuid?.() ?? 0}`, cwdSlug(cwd));
-  copyTreeAnonymized(defaultSpool, path.join(filesDir, "spool-default"), report);
+  copyTreeAnonymized(defaultSpool, path.join(filesDir, "spool-default"), report, opts.personal);
 
   // LEAVE THE ACCOUNT AS FOUND. The harvest above already has the transcripts;
   // what the vendor wrote into the operator's real root is now removed.
@@ -1323,8 +1416,10 @@ async function runScenario(sdk, scenario, opts, auth, world) {
 
   writeFileSync(
     path.join(outDir, "meta.json"),
+    // The meta records paths and the operator's own report (an unparsed
+    // line's file, a cwd_init's output), so it is scrubbed as one document.
     `${JSON.stringify(
-      {
+      anonymizeMeta({
         scenario: scenario.name,
         ok: outcome.ok,
         failure_reasons: outcome.reasons,
@@ -1342,7 +1437,7 @@ async function runScenario(sdk, scenario, opts, auth, world) {
         controls: report.controls,
         unparsed_lines: report.unparsed,
         errors: report.errors,
-      },
+      }, opts.personal),
       null,
       2,
     )}\n`,
@@ -1400,6 +1495,8 @@ async function main(argv, env) {
   }
 
   assertCaptureAuthorized(env, argv);
+  // Every write into a capture scrubs these; see anonymize.mjs.
+  opts.personal = personalValuesFromHost(env, { configRoot: opts.configRoot });
 
   // BEFORE THE FIRST SCENARIO, ALWAYS. Discovering a credential problem after
   // a long run is how the first attempt was wasted.
@@ -1456,6 +1553,7 @@ async function main(argv, env) {
         slug: run.slug,
         captureDir: run.dir,
         report: run.report,
+        personal: opts.personal,
       });
       if (!run.outcome.ok) poisoned.push({ scenario: scenario.name, reasons: run.outcome.reasons });
     }

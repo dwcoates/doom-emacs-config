@@ -160,8 +160,8 @@
   "The workspace reader resolves through the workspace's own directory."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :project-dir "/tmp/wt")
-    (cl-letf (((symbol-function 'agent-repl--git-string) (lambda (&rest _) "DWC/fix-login")))
-      (should (equal (agent-repl--workspace-branch "ws1") "DWC/fix-login")))))
+    (cl-letf (((symbol-function 'agent-repl--git-string) (lambda (&rest _) "ABC/fix-login")))
+      (should (equal (agent-repl--workspace-branch "ws1") "ABC/fix-login")))))
 
 (ert-deftest agent-repl-test-worktree-workspace-branch-answers-the-sha-when-detached ()
   "A detached HEAD answers the SHA: `HEAD' would not answer the question."

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"claude-repld/internal/dlog"
 	"claude-repld/internal/prompts"
 )
 
@@ -29,28 +30,67 @@ func TestOpenExternalOpensAnAbsoluteUrl(t *testing.T) {
 	}
 }
 
-// TestOpenExternalRoutesTheChromeProfileByTheSessionAccount pins that a link
-// opens in the SAME Chrome window — personal or work — the session's account
-// signs in as: the verb reads the account in force and hands the browser the
-// profile it routes to.
-func TestOpenExternalRoutesTheChromeProfileByTheSessionAccount(t *testing.T) {
+// TestOpenExternalRoutesByTheSessionAccount pins that a link opens in the SAME
+// Chrome window — personal or work — the session's account signs in as: the
+// verb reads the account in force and hands the browser its email.
+func TestOpenExternalRoutesByTheSessionAccount(t *testing.T) {
+	tests := []struct {
+		name      string
+		email     string
+		wantEmail string
+	}{
+		{name: "a signed-in account routes by its email", email: "work@example.com", wantEmail: "work@example.com"},
+		{name: "a logged-out account routes by no email", email: "", wantEmail: ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.workspace("w1", t.TempDir())
+			f.account.email = tc.email
+
+			// Act.
+			if err := f.verbs.OpenExternal(context.Background(), "w1", "https://example.invalid/x"); err != nil {
+				t.Fatalf("OpenExternal: %v", err)
+			}
+
+			// Assert.
+			if len(f.browser.openedEmails) != 1 || f.browser.openedEmails[0] != tc.wantEmail {
+				t.Fatalf("opened emails = %v, want [%q]", f.browser.openedEmails, tc.wantEmail)
+			}
+		})
+	}
+}
+
+// TestOpenExternalFailsWhenTheAccountWillNotRead pins that an account that
+// cannot be determined fails the click as launch_failed, opens nothing, and is
+// recorded at ERROR: there is no default profile to send the link to instead.
+func TestOpenExternalFailsWhenTheAccountWillNotRead(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
-	f.account.email = "dodge@chess.com"
-	f.browser.profileByEmail = map[string]string{"dodge@chess.com": "Profile 6"}
+	f.account.readErr = errors.New("malformed .claude.json")
 
 	// Act.
-	if err := f.verbs.OpenExternal(context.Background(), "w1", "https://example.invalid/x"); err != nil {
-		t.Fatalf("OpenExternal: %v", err)
-	}
+	err := f.verbs.OpenExternal(context.Background(), "w1", "https://example.invalid/x")
 
 	// Assert.
-	if len(f.browser.askedEmails) != 1 || f.browser.askedEmails[0] != "dodge@chess.com" {
-		t.Fatalf("asked emails = %v, want the session's account", f.browser.askedEmails)
+	r := asRefusal(t, err, ArmLaunchFailed)
+	if got, _ := r.Fields["detail"].(string); !strings.Contains(got, "malformed .claude.json") {
+		t.Fatalf("launch_failed.detail = %q, want the account read's cause", got)
 	}
-	if len(f.browser.openedProfiles) != 1 || f.browser.openedProfiles[0] != "Profile 6" {
-		t.Fatalf("opened profiles = %v, want the work profile", f.browser.openedProfiles)
+	if len(f.browser.opened) != 0 {
+		t.Fatalf("opened = %v, want nothing opened", f.browser.opened)
+	}
+	found := false
+	for _, rec := range f.log.logger.Records() {
+		cause, _ := rec.Context["cause"].(string)
+		if rec.Level == dlog.LevelError && rec.Operation == opOpenExternal && strings.Contains(cause, "malformed .claude.json") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("records = %+v, want an ERROR under %s naming the cause", f.log.logger.Records(), opOpenExternal)
 	}
 }
 

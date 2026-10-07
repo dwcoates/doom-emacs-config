@@ -9,7 +9,7 @@ import (
 
 // SUBJECT 1 — a real vendor transcript, ingested end to end into Agent* frames.
 //
-// The transcript is the one captured under modules/app/agent-repl/projects/. It
+// The transcript is the one captured under modules/app/agent-repl/testdata/projects/. It
 // is COPIED into a vendor-shaped tree and grown line by line, so the sidecar
 // reads a file that is being written rather than one that already exists whole.
 
@@ -391,7 +391,7 @@ func TestKeepAliveTurnsStoreNothing(t *testing.T) {
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
-	cwd := "/Users/dodgecoates/keepalive-probe"
+	cwd := "/work/keepalive-probe"
 	slug := cwdSlug(cwd)
 	session := "11111111-1111-4111-8111-111111111111"
 
@@ -427,7 +427,7 @@ func TestAnOrdinaryPromptAfterAKeepAliveIsServed(t *testing.T) {
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
-	cwd := "/Users/dodgecoates/keepalive-end-probe"
+	cwd := "/work/keepalive-end-probe"
 	slug := cwdSlug(cwd)
 	session := "22222222-2222-4222-8222-222222222222"
 
@@ -610,7 +610,7 @@ func TestBlockOrdinalsCountAcrossTheLinesOfOneMessage(t *testing.T) {
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
-	cwd := "/Users/dodgecoates/block-ordinal-probe"
+	cwd := "/work/block-ordinal-probe"
 	slug := cwdSlug(cwd)
 	session := "0a0a0a0a-0a0a-40a0-80a0-0a0a0a0a0a0a"
 	message := capturedResponse1
@@ -656,7 +656,7 @@ func TestUsageRidesOrdinalZeroOfAMultiLineMessage(t *testing.T) {
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
-	cwd := "/Users/dodgecoates/ordinal-usage-probe"
+	cwd := "/work/ordinal-usage-probe"
 	slug := cwdSlug(cwd)
 	session := "0b0b0b0b-0b0b-40b0-80b0-0b0b0b0b0b0b"
 	message := capturedResponse1
@@ -701,7 +701,7 @@ func TestNoTwoUnitsOfOneMessageShareAnActivityId(t *testing.T) {
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
-	cwd := "/Users/dodgecoates/ordinal-distinct-probe"
+	cwd := "/work/ordinal-distinct-probe"
 	slug := cwdSlug(cwd)
 	session := "0c0c0c0c-0c0c-40c0-80c0-0c0c0c0c0c0c"
 	message := capturedResponse1
@@ -752,7 +752,7 @@ func TestOrdinalsResetWhenTheMessageIdChanges(t *testing.T) {
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
-	cwd := "/Users/dodgecoates/ordinal-reset-probe"
+	cwd := "/work/ordinal-reset-probe"
 	slug := cwdSlug(cwd)
 	session := "0d0d0d0d-0d0d-40d0-80d0-0d0d0d0d0d0d"
 

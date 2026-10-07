@@ -23,7 +23,7 @@ func TestATranscriptRecordReachesTheStorePlacedAtItsOwnTimestamp(t *testing.T) {
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
 	session := "e0e0e0e0-e0e0-40e0-80e0-e0e0e0e0e0e0"
-	g, uuid := seedApiError(t, tree, "/Users/dodgecoates/place-probe", session)
+	g, uuid := seedApiError(t, tree, "/work/place-probe", session)
 	rec := decodeRecord(t, corpusLine(t, "transcript-lines/system-api_error.jsonl", 0))
 	stamp, _ := rec["timestamp"].(string)
 	recorded, err := time.Parse(time.RFC3339Nano, stamp)

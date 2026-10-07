@@ -134,7 +134,7 @@ func probeBusy(t *testing.T, lockPath string) bool {
 
 func TestHolderTakesAFreeLockAndTheGoProbeSeesItBusy(t *testing.T) {
 	// Arrange
-	lockPath := filepath.Join(t.TempDir(), "run", "workspace-0b96ccc5.lock")
+	lockPath := filepath.Join(t.TempDir(), "run", "workspace-5c78c72d.lock")
 
 	// Act
 	h := startHolder(t, lockPath)

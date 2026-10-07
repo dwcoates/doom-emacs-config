@@ -79,7 +79,7 @@ func TestAParkedFileStaysParkedAcrossAStoreBounce(t *testing.T) {
 	store := startRealStoreAt(t, socket, dbPath)
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
-	cwd := "/Users/dodgecoates/park-bounce-probe"
+	cwd := "/work/park-bounce-probe"
 	session := "e6e6e6e6-e6e6-4e6e-8e6e-e6e6e6e6e6e6"
 	opts := defaultSidecarOptions(t, socket, tree)
 
@@ -97,7 +97,7 @@ func TestAParkedFileStaysParkedAcrossAStoreBounce(t *testing.T) {
 	store.Stop()
 	recovered := startRealStoreAt(t, socket, dbPath)
 
-	otherCwd := "/Users/dodgecoates/park-bounce-other-probe"
+	otherCwd := "/work/park-bounce-other-probe"
 	otherSession := "e7e7e7e7-e7e7-4e7e-8e7e-e7e7e7e7e7e7"
 	other := newGrowingFile(t, tree.sessionPath(cwdSlug(otherCwd), otherSession))
 	other.AppendLine(encodeRecord(t, retargetSession(t, decodeRecord(t, captured.Lines[12]), otherSession, otherCwd)))
@@ -136,7 +136,7 @@ func TestTwoLaunchesClaimingOneSpoolAttributeNothingAndSayWhy(t *testing.T) {
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
-	cwd := "/Users/dodgecoates/spool-conflict-probe"
+	cwd := "/work/spool-conflict-probe"
 	slug := cwdSlug(cwd)
 	session := "21212121-2121-4121-8121-212121212121"
 	spoolPath := tree.spoolPath(slug, session, capturedSpoolTask1)
@@ -210,7 +210,7 @@ func TestAStopArrivingBeforeTheSpoolIsClaimedCancelsItOnClaim(t *testing.T) {
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
-	cwd := "/Users/dodgecoates/stop-before-claim-probe"
+	cwd := "/work/stop-before-claim-probe"
 	slug := cwdSlug(cwd)
 	session := "22222222-2222-4222-8222-222222222222"
 	spoolPath := tree.spoolPath(slug, session, capturedSpoolTask1)

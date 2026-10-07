@@ -1,7 +1,5 @@
 ;;; config.el --- claude repl for doom emacs -*- lexical-binding: t; -*-
 
-;; Author: Dodge Coates
-;; URL: https://github.com/dodgecoates
 ;; Version: 0.1.0
 
 ;;; Commentary:

@@ -85,7 +85,7 @@ First %s is the repo name, second %s is the commit SHA."
 When nil (the default), `tag: ...' entries are stripped from the refs
 string fed to `magit-format-ref-labels' so the recent-commits, unpushed,
 and other status log sections show only branches and HEAD pointers.
-Toggle interactively with `+dwc/magit-toggle-tags-in-log' (bound to
+Toggle interactively with `agent-repl-magit-toggle-tags-in-log' (bound to
 `g T' in `magit-status-mode-map')."
   :type 'boolean
   :group 'agent-repl)
@@ -137,7 +137,7 @@ having to thread args through each call site."
          ws original s)
         (cons s (cdr args))))))
 
-(defun +dwc/magit-toggle-tags-in-log ()
+(defun agent-repl-magit-toggle-tags-in-log ()
   "Toggle whether magit commit listings include tag refs.
 Flips `agent-repl-magit-show-tags-in-log' and refreshes the current
 magit buffer (status, log, etc.) when invoked from a `magit-mode'
@@ -268,7 +268,7 @@ runs `magit-show-commit'.  Inserts nothing when
 
 ;;;; --- GitHub URL helpers for magit commits -------------------------------
 
-(defun +dwc/magit-open-commit-in-github ()
+(defun agent-repl-magit-open-commit-in-github ()
   "Open the current commit in GitHub browser.
 Routes git reads through `agent-repl--git-string' so the function
 is mockable per AGENTS.md."
@@ -292,7 +292,7 @@ is mockable per AGENTS.md."
     (browse-url github-url)
     (agent-repl--log ws "magit-open-commit: ws=%s branch=opened url=%s" ws github-url)))
 
-(defun +dwc/magit-copy-commit-link ()
+(defun agent-repl-magit-copy-commit-link ()
   "Copy GitHub link for commit at point in magit buffer.
 Routes git reads through `agent-repl--git-string' so the function
 is mockable per AGENTS.md."
@@ -335,7 +335,7 @@ Processes or External State in Tests\")."
                       ws project-dir branch output (if url-p "url" "no-url"))
     (and url-p output)))
 
-(defun +dwc/open-workspace-pr-in-browser ()
+(defun agent-repl-open-workspace-pr-in-browser ()
   "Open the GitHub PR for the current workspace's branch in the browser.
 Resolves the PR URL via `gh' against the workspace's project directory
 \(see `agent-repl--ws-dir'), not the buffer's `magit-toplevel' — so this
@@ -363,7 +363,7 @@ associated with the current branch.  Routes git reads through
 (defun agent-repl--magit-display-buffer-same-window (buffer)
   "Display BUFFER in the selected window.
 Used as a let-bound override for `magit-display-buffer-function' so
-the top-level `magit-status' call from `+dwc/magit-status-workspace'
+the top-level `magit-status' call from `agent-repl-magit-status-workspace'
 replaces the current buffer rather than splitting or popping up a
 new window.  Returns the window magit should select."
   (let ((ws (agent-repl--ws-current-name)))
@@ -440,7 +440,7 @@ wants anyway."
       (agent-repl--log ws "magit-status-same-window: ws=%s branch=opened dir=%s selected-window=%S"
                         ws dir (selected-window)))))
 
-(defun +dwc/magit-status-workspace ()
+(defun agent-repl-magit-status-workspace ()
   "Open magit-status for the workspace in the SELECTED window.
 Always replaces the current buffer with the workspace's magit-status
 — no splits, no window reuse — regardless of the prior layout or
@@ -553,18 +553,18 @@ transitions `:repl-state' to :inactive)."
 ;;;; --- Keybindings --------------------------------------------------------
 
 (map! :leader
-      :desc "Magit status for workspace" "g g" #'+dwc/magit-status-workspace
+      :desc "Magit status for workspace" "g g" #'agent-repl-magit-status-workspace
       :desc "Magit status"               "g G" #'magit-status
-      :desc "Open commit in GitHub"      "g O" #'+dwc/magit-open-commit-in-github)
+      :desc "Open commit in GitHub"      "g O" #'agent-repl-magit-open-commit-in-github)
 
 (map! :leader
       (:prefix "j"
-       :desc "Open workspace PR in browser" "P" #'+dwc/open-workspace-pr-in-browser))
+       :desc "Open workspace PR in browser" "P" #'agent-repl-open-workspace-pr-in-browser))
 
 (map! :map magit-status-mode-map
-      "g c" #'+dwc/magit-copy-commit-link
-      "g C" #'+dwc/magit-open-commit-in-github
-      "g T" #'+dwc/magit-toggle-tags-in-log)
+      "g c" #'agent-repl-magit-copy-commit-link
+      "g C" #'agent-repl-magit-open-commit-in-github
+      "g T" #'agent-repl-magit-toggle-tags-in-log)
 
 (map! :map (magit-status-mode-map magit-diff-section-base-map magit-diff-section-map)
       "C-<return>" #'magit-diff-visit-file-other-window)
