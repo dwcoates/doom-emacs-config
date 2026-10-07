@@ -330,3 +330,61 @@ func TestAFailedHandbackCarriesTheRefusalContent(t *testing.T) {
 		t.Fatalf("error content = %q, want the vendor's refusal", text)
 	}
 }
+
+func TestABoardSuccessRestatesItsSession(t *testing.T) {
+	// Arrange.
+	c := newTestConverter(t)
+	call := openCall{input: map[string]any{"session_id": "agent-a", "game_id": "g-1"}, startedAt: 1000}
+
+	// Act.
+	got := c.settledItem(kindChessBoard, call, nil, map[string]any{"content": "shown"}, false, 4000, Attribution{})
+
+	// Assert.
+	session := got.GetChessBoard().GetSuccess().GetSession()
+	if session.GetSessionId() != "agent-a" || session.GetGameId() != "g-1" {
+		t.Fatalf("restated session = %v, want agent-a / g-1", session)
+	}
+}
+
+func TestAFailedBoardCallRestatesTheSessionItNamed(t *testing.T) {
+	// Arrange.
+	c := newTestConverter(t)
+	call := openCall{input: map[string]any{"session_id": "agent-a", "game_id": "g-1"}}
+
+	// Act.
+	got := c.settledItem(kindChessBoard, call, nil, map[string]any{"content": "Error: refused"}, true, 4000, Attribution{})
+
+	// Assert.
+	if id := got.GetChessBoard().GetFailure().GetSession().GetSessionId(); id != "agent-a" {
+		t.Fatalf("restated session id = %q, want agent-a", id)
+	}
+}
+
+func TestAFailedBoardCallNamingNoSessionLeavesItUnset(t *testing.T) {
+	// Arrange.
+	c := newTestConverter(t)
+	call := openCall{input: map[string]any{}}
+
+	// Act.
+	got := c.settledItem(kindChessBoard, call, nil, map[string]any{"content": "Error: invalid input"}, true, 4000, Attribution{})
+
+	// Assert.
+	failure := got.GetChessBoard().GetFailure()
+	if failure == nil || failure.GetSession() != nil {
+		t.Fatalf("failure = %v, want the failure arm with no session", failure)
+	}
+}
+
+func TestAReturnedBoardCallNamingNoSessionSettlesNothing(t *testing.T) {
+	// Arrange.
+	c := newTestConverter(t)
+	call := openCall{input: map[string]any{}}
+
+	// Act.
+	got := c.settledItem(kindChessBoard, call, nil, map[string]any{"content": "shown"}, false, 4000, Attribution{})
+
+	// Assert.
+	if got != nil {
+		t.Fatalf("settled = %v, want nil so the caller stores the result as residue", got)
+	}
+}

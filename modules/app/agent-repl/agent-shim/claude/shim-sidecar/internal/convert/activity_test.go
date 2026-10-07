@@ -40,6 +40,7 @@ func TestRecognizedBuiltinsReachTheirOwnArm(t *testing.T) {
 		{tool: "CronList", input: `{}`, arm: func(a *conversationv1.AgentActivity) bool { return a.GetCron() != nil }},
 		{tool: "PushNotification", input: `{"message":"m"}`, arm: func(a *conversationv1.AgentActivity) bool { return a.GetPushNotification() != nil }},
 		{tool: "SubagentHandback", input: `{"message":"m"}`, arm: func(a *conversationv1.AgentActivity) bool { return a.GetSubagentHandback() != nil }},
+		{tool: showChessBoardToolName, input: `{"session_id":"agent-a","game_id":"g-1"}`, arm: func(a *conversationv1.AgentActivity) bool { return a.GetChessBoard() != nil }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.tool, func(t *testing.T) {
@@ -293,5 +294,36 @@ func TestAHandbackStartCarriesTheCorpusReportVerbatim(t *testing.T) {
 	start := activityOf(entryByKey(t, entries, ActivityKey("toolu_01XimbQmvHTszbgRxyRy5VEf"))).GetSubagentHandback().GetStart()
 	if start.GetReport().GetText() != want {
 		t.Fatalf("report = %q, want the corpus message verbatim", start.GetReport().GetText())
+	}
+}
+
+func TestABoardCallAnnouncesTheSessionItNamed(t *testing.T) {
+	// Arrange.
+	c := newTestConverter(t)
+
+	// Act.
+	entries := convertLines(t, c, assistantWith("a1", "msg_1", ts1,
+		toolCall("toolu_board", showChessBoardToolName, `{"session_id":"agent-a","game_id":"g-1"}`)))
+
+	// Assert.
+	session := activityOf(entryByKey(t, entries, ActivityKey("toolu_board"))).GetChessBoard().GetStart().GetSession()
+	if session.GetSessionId() != "agent-a" || session.GetGameId() != "g-1" {
+		t.Fatalf("announced session = %v, want agent-a / g-1", session)
+	}
+}
+
+func TestABoardCallNamingNoSessionAnnouncesNothing(t *testing.T) {
+	// Arrange.
+	c := newTestConverter(t)
+
+	// Act.
+	entries := convertLines(t, c, assistantWith("a1", "msg_1", ts1,
+		toolCall("toolu_board", showChessBoardToolName, `{"game_id":"g-1"}`)))
+
+	// Assert.
+	for _, entry := range entries {
+		if activityOf(entry).GetChessBoard() != nil {
+			t.Fatal("a board call naming no session must announce nothing")
+		}
 	}
 }
