@@ -203,7 +203,7 @@ external-boundary wrapper -- tests mock it via `cl-letf' (see
 ;;;; ---- Branch readers ----------------------------------------------------
 ;;
 ;; READ-ONLY, and never an identity.  A workspace's name is not its branch
-;; name (persp "fix-login" may sit on branch "DWC/fix-login"), and the
+;; name (persp "fix-login" may sit on branch "ABC/fix-login"), and the
 ;; roster row's detail lines are the daemon's own account of the branch --
 ;; these exist for local display and for the print-branch commands.
 

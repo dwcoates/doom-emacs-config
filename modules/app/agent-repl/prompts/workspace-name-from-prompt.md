@@ -20,7 +20,7 @@ The name must be:
 
 Name the SUBJECT of the work, never its provenance. So: never a chat-channel
 or thread name, never a person's name, never a date, a timestamp, a ticket id
-or a hash. "flaky-login-test" is a good name; "dodge-slack-thread" is not.
+or a hash. "flaky-login-test" is a good name; "jane-slack-thread" is not.
 
 Do not add any prefix of your own. The system prefixes the name itself.
 
