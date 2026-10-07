@@ -14,6 +14,8 @@
  * every selector, fold glyphs and disclosure markers included. The allowlist
  * that once admitted those is gone.
  */
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import stylesheet from "../src/styles.css?raw";
 import { REVIVE_SHIMMER_PERIOD_MS } from "../src/sidebar/reviving.js";
@@ -2582,13 +2584,9 @@ describe("the response border ladder", () => {
   /** The hue, in degrees, of every `NAME: #rrggbb` declaration, in sheet order (light, then dark). */
   function huesOf(name: string): number[] {
     const re = new RegExp(`--${name}:\\s*#([0-9a-fA-F]{6})`, "g");
-    return [...stylesheet.matchAll(re)].map((m) => {
-      const [r, g, b] = [0, 2, 4].map((i) => parseInt(m[1].slice(i, i + 2), 16) / 255);
-      const max = Math.max(r, g, b);
-      const d = max - Math.min(r, g, b);
-      const h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
-      return (h * 60 + 360) % 360;
-    });
+    return [...stylesheet.matchAll(re)].map((m) =>
+      hueOf([0, 2, 4].map((i) => parseInt(m[1].slice(i, i + 2), 16)) as [number, number, number]),
+    );
   }
 
   it("runs monotonically toward green in both themes: interim, then the answer", () => {
@@ -2930,15 +2928,53 @@ function rgbOf(block: string, token: string): [number, number, number] {
 /** The spread between an RGB triple's strongest and weakest channel. */
 const chroma = ([r, g, b]: [number, number, number]): number => Math.max(r, g, b) - Math.min(r, g, b);
 
-describe("the feed's background is green (owner, 2026-10-07)", () => {
+/** An RGB triple's hue in degrees, 0 to 360. */
+const hueOf = ([r, g, b]: [number, number, number]): number => {
+  const [max, min] = [Math.max(r, g, b), Math.min(r, g, b)];
+  if (max === min) throw new Error("an achromatic color has no hue");
+  const raw =
+    max === r ? (g - b) / (max - min) : max === g ? (b - r) / (max - min) + 2 : (r - g) / (max - min) + 4;
+  return (raw * 60 + 360) % 360;
+};
+
+describe("hueOf", () => {
+  it.each([
+    ["red", [255, 0, 0], 0],
+    ["chartreuse", [127, 255, 0], 90],
+    ["green", [0, 255, 0], 120],
+    ["blue", [0, 0, 255], 240],
+    ["a red leaning blue", [255, 0, 51], 348],
+  ] as const)("puts %s at its hue", (_name, rgb, expected) => {
+    // Arrange / Act
+    const hue = hueOf([...rgb]);
+    // Assert
+    expect(hue).toBeCloseTo(expected, 0);
+  });
+
+  it("throws on an achromatic grey", () => {
+    // Arrange / Act / Assert
+    expect(() => hueOf([128, 128, 128])).toThrow("an achromatic color has no hue");
+  });
+
+  it("is the one hue computation in the suite", () => {
+    // Arrange
+    const source = readFileSync(fileURLToPath(import.meta.url), "utf8");
+    // Act — every hand-rolled green-sextant branch of a hue formula.
+    const sextants = source.match(/max === g \? \(b - r\)/g) ?? [];
+    // Assert
+    expect(sextants).toHaveLength(1);
+  });
+});
+
+describe("the feed's background is chartreuse (owner, 2026-10-07)", () => {
   it.each([
     ["light", () => declarationsOf(":root") ?? ""],
     ["dark", darkThemeBlock],
-  ])("paints the %s theme's --bg with green as its strongest channel", (_theme, block) => {
+  ])("paints the %s theme's --bg within 10 degrees of chartreuse's 90-degree hue", (_theme, block) => {
     // Arrange / Act
-    const [r, g, b] = rgbOf(block(), "--bg");
+    const hue = hueOf(rgbOf(block(), "--bg"));
     // Assert
-    expect(g).toBeGreaterThan(Math.max(r, b));
+    expect(Math.abs(hue - 90)).toBeLessThanOrEqual(10);
   });
 });
 
