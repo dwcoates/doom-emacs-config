@@ -10,7 +10,12 @@ reference.
 
 ## Context
 
-Scoping (step 1) in progress.
+Scoping closed on 2026-10-07. The owner then delegated every remaining design
+decision ("just take it home, i dont want anymore input"), so the decisions
+below from "The agent asks through an agent-repl MCP tool" onward were made by
+the orchestrator without further review, and the iteration sequence was walked
+without per-increment agreement: the agent's request, then `conversation.v1`,
+then `frontend.v1`, then the square-click endpoint, then the skill text.
 
 ### The widget is the one the CEE CLI webapp uses
 
@@ -46,9 +51,14 @@ Scoping (step 1) in progress.
   an address file (`internal/webapp/lifecycle`). The gns cee plugin installs
   it at `~/.gns/plugins/cee/cee-webapp` (`sdks/cli/justfile`), beside
   `cee-cli-daemon`.
-- **Consequence:** agent-repl neither builds nor serves widget assets; the
-  bundle comes from cee-webapp. The widget itself knows no backend: it renders
-  the bytes and reports clicks, and its host does all calling.
+- **Consequence:** the widget itself knows no backend: it renders the bytes
+  and reports clicks, and its host does all calling.
+- **Retracted:** this entry first concluded that agent-repl neither builds nor
+  serves widget assets. Both turned out wrong: cee-webapp serves the bundle
+  from the checkout's unbuilt `dist/` (so the daemon builds it, below), and
+  its route is cross-origin to the webview (so the daemon serves the bundle
+  itself, below). Root cause: the conclusion was drawn from the route's
+  existence before reading where the route reads its files from.
 
 ### The agent-repl daemon is the widget's host-side caller
 
@@ -97,6 +107,77 @@ Scoping (step 1) in progress.
 - **Why lost:** saving the widget data at response time would keep the board
   browsable, but square clicks would still fail against a missing session, so
   the board would work only partly.
+
+### The agent asks through an agent-repl MCP tool, so a board is a conversation entry
+
+- **Decision:** the shim hosts an in-process MCP server named `agent-repl`
+  with one tool, `show_chess_board`, taking a CEE session id and game id. The
+  call is converted like every modelled tool, into its own `AgentActivity`
+  arm, so the board is part of the conversation record: it is durable, ordered
+  where the agent asked for it, replayed on every page, and survives a daemon
+  restart with no daemon-side storage.
+- **Why the alternatives lost:** a daemon rpc the skill calls through
+  `claude-repld call` would have needed a synthesized feed row (non-durable,
+  like `FeedCommandPanel`) or a new durable-row store and an ordering rule for
+  rows nobody's conversation contains. A marker line in the response text
+  would carry an untyped payload inside prose.
+- **Consequences:** the shim gains an SDK MCP server (`createSdkMcpServer`) and
+  pre-allows its tool so the call never raises a permission prompt; the shim
+  and the sidecar each gain a converter for the tool name
+  `mcp__agent-repl__show_chess_board`; the mocked SDK must offer the tool.
+
+### The board's widget data is carried as bytes
+
+- **Decision:** `frontend.v1.FeedChessBoardWidget` carries the
+  `chesscom.cee_webapp.v1.CeeWebWidget` as its binary encoding, and the
+  square-click answer carries a `chesscom.cee_webapp.v1.GetSquareEventsResponse`
+  the same way.
+- **Why (the untyped-field exception):** the schema belongs to the CEE CLI in
+  another repository, agent-repl relays the message without reading it (the
+  only-renders principle), and the widget's own host contract takes exactly
+  these bytes. Importing CEE's protos would make agent-repl's build depend on
+  that repository's checkout and its `chesscom.*` dependency tree.
+- **Accepted cost:** no compiler checks the relayed bytes; a CEE schema change
+  reaches agent-repl only as whatever the widget does with them.
+
+### The daemon speaks to cee-webapp over Connect's binary codec, by hand
+
+- **Decision:** the daemon encodes the two tiny CEE requests
+  (`GetCeeWebWidgetRequest`, `GetSquareEventsRequest`) with `protowire`, posts
+  them as `application/proto`, keeps `GetSquareEventsResponse` whole, and
+  takes field 1 of `GetCeeWebWidgetResponse` as the widget bytes.
+- **Accepted cost:** the field numbers are a second spelling of CEE's
+  schema; the vetting register records how to check them.
+
+### The square click carries a typed echo token
+
+- **Decision:** a ready board carries `FeedChessBoardSquareToken`, minted by
+  the daemon from the board's session, and `InspectChessBoardSquare` takes it
+  back with the displayed gamepoint and the clicked square. The daemon decodes
+  the token; it keeps no table of boards.
+- **Consequence:** the webapp tracks which gamepoint each board displays,
+  from the widget's `onPositionChange`; that is the widget host contract's own
+  requirement, not a derivation.
+
+### The widget bundle is served by the agent-repl daemon from the built dist
+
+- **Decision:** the daemon serves `cee-web-widget.js` and
+  `cee-web-widget.css` from the checkout's widget `dist/` under its own HTTP
+  listener, at a path stamped with the build's content stamp, and puts both
+  URLs on the ready board.
+- **Why:** the webview's page is the daemon's origin, so the module import is
+  same-origin; cee-webapp's own `/v1/widget/` route would be a cross-origin
+  module import it sends no CORS headers for. The stamp makes a rebuilt
+  bundle a new URL, so a page never keeps a stale module.
+
+### cee-webapp is reached through `gns cee debug webapp`
+
+- **Decision:** the daemon ensures the cee-webapp singleton by running
+  `gns cee debug webapp`, which spawns it when none is live and prints its
+  base URL, with `CEE_AGENT_EXPLANATION_ENGINE_DIR` stated explicitly so the
+  daemon and cee-webapp resolve the same checkout.
+- **Why:** CEE's own lifecycle package owns the singleton (pid and address
+  files, stale-state cleanup); the daemon adds no second discovery rule.
 
 ## Core design principles
 
