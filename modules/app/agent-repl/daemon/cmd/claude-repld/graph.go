@@ -978,6 +978,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Browser:      browser,
 		PromptsDir:   paths.PromptsDir,
 		CheckoutRoot: paths.Checkout,
+		HomeDir:      paths.Home,
 		Log:          p.Surfaces,
 		Shim:         fleet.Shim,
 		Freeness:     fleet.Running,

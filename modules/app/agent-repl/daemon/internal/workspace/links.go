@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"claude-repld/internal/dirpath"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/resolve/footer"
@@ -183,14 +184,19 @@ var lineSuffix = regexp.MustCompile(`^(.+):([1-9][0-9]*)$`)
 // resolveFeedLink resolves a feed link's href against a worktree, in the
 // contract's order (OpenInEditorFeedLink), first existing file winning:
 //
-//  1. an absolute path, as given;
-//  2. a path with a directory part, relative to the worktree root;
-//  3. a BARE name, under <worktree>/modules/app/agent-repl, then under the git
+//  1. a HOME-RELATIVE path (`~/rest`), beneath home (dirpath.Absolute);
+//  2. an absolute path, as given;
+//  3. a path with a directory part, relative to the worktree root;
+//  4. a BARE name, under <worktree>/modules/app/agent-repl, then under the git
 //     project root of the worktree.
 //
 // An optional `:<line>` suffix is split off first. Containment is NOT judged
 // here: the caller refuses a resolved path outside the worktree.
-func resolveFeedLink(worktree, href string) feedLink {
+//
+// A `~`-prefixed path dirpath.Absolute refuses (`~user/...`, another user's
+// home) is looked for nowhere: its one candidate is the href as written, and
+// the link is unresolved.
+func resolveFeedLink(worktree, home, href string) feedLink {
 	var out feedLink
 	name := href
 	if m := lineSuffix.FindStringSubmatch(href); m != nil {
@@ -201,6 +207,13 @@ func resolveFeedLink(worktree, href string) feedLink {
 		}
 	}
 	switch {
+	case strings.HasPrefix(name, "~"):
+		expanded, err := dirpath.Absolute(name, home)
+		if err != nil {
+			out.candidates = []string{name}
+			return out
+		}
+		out.candidates = []string{expanded}
 	case filepath.IsAbs(name):
 		out.candidates = []string{filepath.Clean(name)}
 	case strings.ContainsRune(name, '/'):
@@ -255,7 +268,7 @@ func (v *verbs) OpenFeedLink(ctx context.Context, ws ids.WorkspaceID, href strin
 	if strings.TrimSpace(href) == "" {
 		return nil, refuse(log, "OpenInEditor", ArmPathEscapesWorkspace, "no link was named", false)
 	}
-	link := resolveFeedLink(record.Dir, href)
+	link := resolveFeedLink(record.Dir, v.deps.HomeDir, href)
 	if link.path == "" {
 		if !report {
 			return nil, v.silentlyUnresolved(log, href, link)
