@@ -1,12 +1,12 @@
 module agentrepl/shim-store
 
-go 1.24.0
+go 1.25.0
 
 require (
 	agentrepl/logging v0.0.0
 	agentrepl/proto v0.0.0
 	connectrpc.com/connect v1.17.0
-	golang.org/x/net v0.43.0
+	golang.org/x/net v0.55.0
 	google.golang.org/protobuf v1.36.11
 	modernc.org/sqlite v1.46.1
 )
@@ -18,8 +18,8 @@ require (
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	golang.org/x/exp v0.0.0-20251023183803-a4bb9ffd2546 // indirect
-	golang.org/x/sys v0.37.0 // indirect
-	golang.org/x/text v0.28.0 // indirect
+	golang.org/x/sys v0.45.0 // indirect
+	golang.org/x/text v0.37.0 // indirect
 	modernc.org/libc v1.67.6 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
