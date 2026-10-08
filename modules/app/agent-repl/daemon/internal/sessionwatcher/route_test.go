@@ -862,9 +862,9 @@ func TestRouteSessionUpdateArms(t *testing.T) {
 			// row's `degraded` arm is made of, and the dot and the topbar must
 			// not disagree about one push. The HEALTH REPORTER IS FIRST; see
 			// TestRouteDiagnosticsRecordsTheHealthFactBeforePublishingTheView.
-			name:   "diagnostics is the health reporter's, the topbar's and the roster's",
+			name:   "diagnostics is the health reporter's, the topbar's, the roster's and the footer's",
 			update: diagnosticsUpdate(),
-			want:   []string{"lifecycle.OnSessionDiagnostics", "topbar.OnSessionUpdate", "sidebar.OnSessionUpdate"},
+			want:   []string{"lifecycle.OnSessionDiagnostics", "topbar.OnSessionUpdate", "sidebar.OnSessionUpdate", "footer.OnSessionUpdate"},
 		},
 		{
 			// The footer's tokens cell is the turn's growth of this same

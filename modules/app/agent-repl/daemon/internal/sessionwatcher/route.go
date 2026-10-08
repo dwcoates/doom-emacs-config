@@ -46,7 +46,7 @@ func (w *watcher) routeSessionUpdateLocked(update *conversationv1.SessionUpdate)
 			w.publishLiveWorkLocked()
 		}
 	case *conversationv1.SessionUpdate_Diagnostics:
-		w.log.Debug("daemon.sessionwatcher.session_update", "session fact routed to the health reporter, the topbar and the roster", dlog.Context{
+		w.log.Debug("daemon.sessionwatcher.session_update", "session fact routed to the health reporter, the topbar, the footer and the roster", dlog.Context{
 			"arm": sessionArm(update),
 		})
 		// THE RECORD IS WRITTEN BEFORE THE VIEW IS DRAWN, and that order is
@@ -69,6 +69,10 @@ func (w *watcher) routeSessionUpdateLocked(update *conversationv1.SessionUpdate)
 		// topbar is drawing as degraded, and the two surfaces would disagree
 		// about one fact.
 		w.sinks.Sidebar.OnSessionUpdate(w.ws, update)
+		// THE FOOTER READS IT TOO: an open window is its `degraded ·
+		// observation` step, and the roster's dot projects the footer's
+		// status, so a window the footer never saw would draw on no surface.
+		w.sinks.Footer.OnSessionUpdate(w.ws, update)
 
 	case *conversationv1.SessionUpdate_ContextUsage:
 		// ONE READING, TWO DRAWINGS. The topbar's context chip states the
