@@ -136,9 +136,9 @@ type SidebarView struct {
 }
 
 // DefaultSidebarView is the view nobody has changed: the recently-merged band
-// COLLAPSED, because settled history should not spend rail height until it is
-// asked for, and the repository grouping shown.
-var DefaultSidebarView = SidebarView{MergedFolded: true, Grouping: GroupingRepository}
+// EXPANDED, so a just-merged workspace is in sight until the user folds the
+// band away (owner ruling 2026-10-08), and the repository grouping shown.
+var DefaultSidebarView = SidebarView{MergedFolded: false, Grouping: GroupingRepository}
 
 // SetTaskFolded records whether a task's roster section is collapsed. An
 // unknown task is refused (ErrNotFound), never a write that touched nothing.
