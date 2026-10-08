@@ -82,6 +82,9 @@ func (r *resolver) restoreDurable(s *wsState) {
 			continue
 		}
 		rank := rowRank{plane: rowPlane(stored.Plane), key: stored.OrderKey}
+		// A restored merge head is repainted with the daemon's default unless
+		// the reader folded it (mergefold.go).
+		r.resettleRestoredMergeFold(s, row)
 		r.upsert(s, placement{feed: ref.Feed, inherit: &rank}, row, true)
 		drawn++
 	}
