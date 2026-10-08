@@ -307,12 +307,9 @@ func TestTrayBadgesThePromptBeingEdited(t *testing.T) {
 	r.SetEditing(testWS, "t1")
 
 	// Assert.
-	var labels []string
-	for _, b := range latest(t, r).GetItems()[0].GetPrompt().GetBadges() {
-		labels = append(labels, b.GetLabel())
-	}
-	if len(labels) != 2 || labels[0] != "classifying" || labels[1] != "editing" {
-		t.Fatalf("badge labels = %v, want [classifying editing]", labels)
+	p := latest(t, r).GetItems()[0].GetPrompt()
+	if p.GetBadge().GetLabel() != "editing" || len(p.GetNotes()) != 1 || p.GetNotes()[0].GetSentence() != "queued — classifying" {
+		t.Fatalf("badge = %v, notes = %v, want the editing badge over the classifying note", p.GetBadge(), p.GetNotes())
 	}
 }
 
