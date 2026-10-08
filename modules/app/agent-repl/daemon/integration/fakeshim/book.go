@@ -26,6 +26,10 @@ type book struct {
 	mu      sync.Mutex
 	entries map[string][]*conversationv1.HistoryEntryAt
 	minted  map[string]int
+	// asks is every ask a published frame opened and no later frame closed,
+	// in the order they opened: what the real shim's permission gate holds
+	// pending, and so what a re-announcement states as open_asks.
+	asks []*conversationv1.SessionOpenAsk
 }
 
 func newBook() *book {
@@ -96,7 +100,62 @@ func (b *book) record(f agentFrame) agentFrame {
 		Entry: f.entry(),
 		Turn:  f.stamp(),
 	}))
+	b.noteAskLocked(f.frame)
 	return f
+}
+
+// noteAskLocked opens the ask a frame starts and closes the one any other
+// result of it settles, as the real shim's gate holds an ask from its start
+// until its answer.
+func (b *book) noteAskLocked(frame *conversationv1.AgentFrame) {
+	update := frame.GetUpdate()
+	var open *conversationv1.SessionOpenAsk
+	var id string
+	switch {
+	case update.GetPermission() != nil:
+		id = "permission:" + update.GetPermission().GetId().GetValue()
+		if _, start := update.GetPermission().GetResult().(*conversationv1.AgentPermission_Start); start {
+			open = &conversationv1.SessionOpenAsk{Agent: frame.GetAgentId(), Ask: &conversationv1.SessionOpenAsk_Permission{
+				Permission: proto.Clone(update.GetPermission()).(*conversationv1.AgentPermission)}}
+		}
+	case update.GetQuestion() != nil:
+		id = "question:" + update.GetQuestion().GetId().GetValue()
+		if _, start := update.GetQuestion().GetResult().(*conversationv1.AgentQuestion_Start); start {
+			open = &conversationv1.SessionOpenAsk{Agent: frame.GetAgentId(), Ask: &conversationv1.SessionOpenAsk_Question{
+				Question: proto.Clone(update.GetQuestion()).(*conversationv1.AgentQuestion)}}
+		}
+	default:
+		return
+	}
+	kept := b.asks[:0]
+	for _, ask := range b.asks {
+		if askKey(ask) != id {
+			kept = append(kept, ask)
+		}
+	}
+	b.asks = kept
+	if open != nil {
+		b.asks = append(b.asks, open)
+	}
+}
+
+// askKey is an open ask's identity across its two kinds.
+func askKey(ask *conversationv1.SessionOpenAsk) string {
+	if ask.GetPermission() != nil {
+		return "permission:" + ask.GetPermission().GetId().GetValue()
+	}
+	return "question:" + ask.GetQuestion().GetId().GetValue()
+}
+
+// openAsks answers every ask open now, in the order they opened.
+func (b *book) openAsks() []*conversationv1.SessionOpenAsk {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := make([]*conversationv1.SessionOpenAsk, 0, len(b.asks))
+	for _, ask := range b.asks {
+		out = append(out, proto.Clone(ask).(*conversationv1.SessionOpenAsk))
+	}
+	return out
 }
 
 // page answers one ReadHistory page of AGENT's book: the newest page with no

@@ -543,6 +543,7 @@ func (s *server) startedSession() *conversationv1.SessionStarted {
 		return nil
 	}
 	started := proto.Clone(s.started).(*conversationv1.SessionStarted)
+	started.OpenAsks = s.book.openAsks()
 	started.TurnInFlight = s.turnInFlight
 	started.TurnsWaiting = nil
 	if s.adoptedTurn != nil {
