@@ -4318,7 +4318,22 @@ type FeedResponse struct {
 	// set when the later response is first placed. The client draws the
 	// collapsed limit from THIS flag alone; a bubble the reader expanded stays
 	// expanded. Never set on a non-thinking row.
-	Superseded    bool `protobuf:"varint,8,opt,name=superseded,proto3" json:"superseded,omitempty"`
+	Superseded bool `protobuf:"varint,8,opt,name=superseded,proto3" json:"superseded,omitempty"`
+	// SET on a non-thinking response once it is PROVEN INTERIM: a later row of
+	// the SAME TURN has been placed after it in the same feed (a tool call,
+	// another response, any activity), so it cannot be the prose the turn ends
+	// on. UNSET while it is the turn's latest row — which is exactly when it may
+	// still become the final answer — so a final answer is never drawn as an
+	// interim, not even while it streams. The turn's own ending row does not
+	// count as a later row.
+	//
+	// Owner rule, 2026-10-08: an interim response collapses to one line ending
+	// in an ellipsis and takes the page's background; a final answer (and an
+	// answer still arriving) is drawn in full. The DAEMON decides it from the
+	// feed's own order, stamps it on every draw and page, and re-pushes the
+	// earlier response when the later row is first placed; the client draws the
+	// interim treatment from THIS flag alone. `final_answer` outranks it.
+	Interim       bool `protobuf:"varint,9,opt,name=interim,proto3" json:"interim,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4418,6 +4433,13 @@ func (x *FeedResponse) GetFinalAnswer() bool {
 func (x *FeedResponse) GetSuperseded() bool {
 	if x != nil {
 		return x.Superseded
+	}
+	return false
+}
+
+func (x *FeedResponse) GetInterim() bool {
+	if x != nil {
+		return x.Interim
 	}
 	return false
 }
@@ -20460,7 +20482,7 @@ const file_frontend_v1_feed_proto_rawDesc = "" +
 	"\x0fFeedArtifactUrl\x12\x10\n" +
 	"\x03url\x18\x01 \x01(\tR\x03url\"(\n" +
 	"\x12FeedArtifactFailed\x12\x12\n" +
-	"\x04text\x18\x01 \x01(\tR\x04text\"\xbb\x03\n" +
+	"\x04text\x18\x01 \x01(\tR\x04text\"\xd5\x03\n" +
 	"\fFeedResponse\x12>\n" +
 	"\x05usage\x18\x01 \x01(\v2#.frontend.v1.FeedResponseUsageStampH\x01R\x05usage\x88\x01\x01\x129\n" +
 	"\x06update\x18\x02 \x01(\v2\x1f.frontend.v1.FeedResponseUpdateH\x00R\x06update\x12<\n" +
@@ -20471,7 +20493,8 @@ const file_frontend_v1_feed_proto_rawDesc = "" +
 	"\ffinal_answer\x18\a \x01(\bR\vfinalAnswer\x12\x1e\n" +
 	"\n" +
 	"superseded\x18\b \x01(\bR\n" +
-	"supersededB\b\n" +
+	"superseded\x12\x18\n" +
+	"\ainterim\x18\t \x01(\bR\ainterimB\b\n" +
 	"\x06resultB\b\n" +
 	"\x06_usageB\t\n" +
 	"\a_notice\".\n" +
