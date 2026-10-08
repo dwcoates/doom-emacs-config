@@ -40,6 +40,7 @@
 (declare-function agent-repl-wire--encode-empty "wire-common")
 (declare-function agent-repl-wire--encoded "wire-common")
 (declare-function agent-repl-wire--object "wire-common")
+(declare-function agent-repl-wire-decode-maturity-stage "wire-common")
 (declare-function agent-repl-wire-decode-repository-ref "wire-common")
 (declare-function agent-repl-wire-decode-workspace-ref "wire-common")
 
