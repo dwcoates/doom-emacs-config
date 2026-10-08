@@ -6,12 +6,15 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/protobuf/proto"
+
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"claude-repld/internal/health"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/promptqueue"
+	"claude-repld/internal/replyquote"
 	"claude-repld/internal/wsm"
 )
 
@@ -1086,6 +1089,20 @@ func TestTheHostViewCarriesTheStandingEdit(t *testing.T) {
 	edit := view.GetHeldPromptEdit()
 	if edit.GetTurn().GetValue() != "turn-1" || edit.GetEdit() != 7 || edit.GetSaid() == nil {
 		t.Fatalf("held_prompt_edit = %v, want turn-1's edit 7 with its content", edit)
+	}
+}
+
+func TestTheHostViewHandsTheEditorTheWordsOfAQuotedPrompt(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Queue.edit = &promptqueue.Edit{Turn: "turn-1", Said: replyquote.Quote(said("my words"), "Paris.", false), ID: 7}
+
+	// Act.
+	view := composeHost(t, h)
+
+	// Assert.
+	if got := view.GetHeldPromptEdit().GetSaid(); !proto.Equal(got, said("my words")) {
+		t.Fatalf("held_prompt_edit.said = %v, want the person's words without the quote", got)
 	}
 }
 

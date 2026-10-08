@@ -22,6 +22,7 @@ import { armName } from "../renderers.js";
 import { unreachableArm } from "../../rpc/strict.js";
 import type {
   FeedMergeTabTests,
+  FeedMergeTestCounts,
   FeedMergeTestLog,
   FeedMergeTestSpan,
   FeedMergeTestSuite,
@@ -85,10 +86,16 @@ export function drawFeedMergeTestSuite(suite: FeedMergeTestSuite): HTMLElement {
   glyph.className = "merge-suite-glyph";
   glyph.setAttribute("aria-hidden", "true");
   switch (state.case) {
-    case "running":
-      glyph.classList.add("is-live");
+    case "running": {
+      // THE DOT SAYS WHAT THE TESTS HAVE SAID SO FAR (owner ruling,
+      // 2026-10-08), never purple: grey before any verdict, green while every
+      // verdict is a pass, red once one failed. The daemon resolved the arm.
+      const soFar = requireCase(state.value.soFar, `${PATH}.state.running.so_far`);
+      glyph.classList.add("is-live", `is-${soFar.case}`);
       glyph.textContent = SUITE_GLYPHS.running;
+      el.setAttribute("data-so-far", soFar.case);
       break;
+    }
     case "passed":
       glyph.classList.add("is-succeeded");
       glyph.textContent = SUITE_GLYPHS.passed;
@@ -106,6 +113,7 @@ export function drawFeedMergeTestSuite(suite: FeedMergeTestSuite): HTMLElement {
   name.className = "merge-suite-name";
   name.textContent = suite.name;
   head.append(name);
+  if (suite.counts !== undefined) head.append(drawFeedMergeTestCounts(suite.counts));
 
   if (suite.output.length > 0) {
     const pre = document.createElement("pre");
@@ -113,6 +121,24 @@ export function drawFeedMergeTestSuite(suite: FeedMergeTestSuite): HTMLElement {
     for (const span of suite.output) pre.append(drawFeedMergeTestSpan(span));
     el.append(pre);
   }
+  return el;
+}
+
+/**
+ * The suite's counts on the right of its head line, "3/1/12": passed in green,
+ * failed in red, the total in the row's own color. Drawn only when the daemon
+ * knows them; the figures are the daemon's, never counted here.
+ */
+export function drawFeedMergeTestCounts(counts: FeedMergeTestCounts): HTMLElement {
+  const el = document.createElement("span");
+  el.className = "merge-suite-counts";
+  const passed = document.createElement("span");
+  passed.className = "is-passed";
+  passed.textContent = String(counts.passed);
+  const failed = document.createElement("span");
+  failed.className = "is-failed";
+  failed.textContent = String(counts.failed);
+  el.append(passed, "/", failed, `/${String(counts.total)}`);
   return el;
 }
 

@@ -17,6 +17,8 @@ import {
   BUBBLE_ROLE_ATTRIBUTE,
   BUBBLE_VARIANT_ATTRIBUTE,
 } from "../../../src/bubble/draw.js";
+import { BUBBLE_QUOTE_CLASS } from "../../../src/bubble/quote.js";
+import { cascadedValue, installStylesheet } from "../../stylesheet.js";
 import { FITTING_TREE, WIDE_TREE, stagedCols, treeLineWidths, useTreeLayout } from "../../tree-layout.js";
 
 /** A prompt with the given blocks. */
@@ -204,5 +206,56 @@ describe("drawFeedUserPrompt: a re-push", () => {
     const again = drawFeedUserPrompt(prompt([{ block: { case: "text", value: { text: "hi" } } }]), first);
     // Assert
     expect([again, again.querySelector(".bubble-scroll")]).toEqual([first, box]);
+  });
+});
+
+describe("drawFeedUserPrompt: a reply's quote", () => {
+  /** A reply: the quote block, then the person's words. */
+  const reply = () =>
+    prompt([
+      { block: { case: "quote", value: { text: "⟢ Replying:\n\n```\nParis.\n```\n\n⟢ My message:\n" } } },
+      { block: { case: "text", value: { text: "and its population?" } } },
+    ]);
+
+  it("draws the quote in the body, ahead of the words", () => {
+    // Act
+    const el = drawFeedUserPrompt(reply());
+    // Assert
+    const body = el.querySelector(".bubble-body");
+    expect([...(body?.children ?? [])].map((child) => child.classList.contains(BUBBLE_QUOTE_CLASS))).toEqual([true, false]);
+  });
+
+  it("hides the quote while the bubble is collapsed, leaving the words", () => {
+    // Arrange
+    const restore = installStylesheet();
+    const el = drawFeedUserPrompt(reply());
+    document.body.append(el);
+    try {
+      // Act
+      const quote = el.querySelector(`.${BUBBLE_QUOTE_CLASS}`) as Element;
+      const words = el.querySelector(".prompt-block-text") as Element;
+      // Assert
+      expect(cascadedValue(quote, "display")).toBe("none");
+      expect(cascadedValue(words, "display")).not.toBe("none");
+    } finally {
+      el.remove();
+      restore();
+    }
+  });
+
+  it("shows the quote once the bubble is expanded", () => {
+    // Arrange
+    const restore = installStylesheet();
+    const el = drawFeedUserPrompt(reply());
+    document.body.append(el);
+    try {
+      // Act
+      el.querySelector(`.${BUBBLE_SCROLL_CLASS}`)?.classList.add(EXPANDED_CLASS);
+      // Assert
+      expect(cascadedValue(el.querySelector(`.${BUBBLE_QUOTE_CLASS}`) as Element, "display")).not.toBe("none");
+    } finally {
+      el.remove();
+      restore();
+    }
   });
 });

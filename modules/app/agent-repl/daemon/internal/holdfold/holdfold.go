@@ -21,7 +21,8 @@ import (
 )
 
 // SaidText renders a submission's text: the text blocks, joined by a newline.
-// Images carry no text and contribute none. It is what the classifier judges,
+// Images carry no text and contribute none, and neither does a reply's quote
+// block: it is not the person's words. It is what the classifier judges,
 // what the durable turn record keeps, and what a context cut is recognized in.
 func SaidText(said *conversationv1.UserSaid) string {
 	out := ""

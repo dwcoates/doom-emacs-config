@@ -24,6 +24,7 @@ import { oneofArms } from "../arms.js";
 import type { FailureKind } from "../../../proto/gen/ts/frontend/v1/failure_pb";
 import {
   HeldPromptBadgeSchema,
+  HeldPromptStatusNoteSchema,
   HeldPromptEditingSchema,
   HeldPromptCoalescedSchema,
   HeldPromptFoldAboveSchema,
@@ -45,10 +46,10 @@ import {
   EDIT_REQUEST,
   FOLD_ABOVE_LABEL,
   NO_RELEASE_TITLES,
-  BADGELESS_CLASSIFICATION_ARMS,
   SEND_NOW_LABEL,
   HELD_BADGE_DETAIL_CLASS,
   HELD_STATUS_BADGES,
+  HELD_NOTE_CLASS,
   drawHeldPrompt,
   drawUnsupportedBlock,
   heldBadgeClasses,
@@ -56,6 +57,7 @@ import {
   type HeldPromptDroppedDetail,
   type HeldStatus,
 } from "../../src/tray/held-prompt.js";
+import { BUBBLE_QUOTE_CLASS } from "../../src/bubble/quote.js";
 import * as heldPromptModule from "../../src/tray/held-prompt.js";
 import type { TrayContext } from "../../src/tray/context.js";
 import { testTrayContext } from "./tray-context.js";
@@ -174,42 +176,26 @@ function heldPrompt(overrides: Partial<HeldPromptInit> = {}): HeldPrompt {
       value: {},
     },
     ...(overrides.hold !== undefined ? { hold: overrides.hold } : {}),
-    ...(overrides.badges !== undefined ? { badges: overrides.badges } : {}),
+    ...(overrides.badge !== undefined ? { badge: overrides.badge } : {}),
+    ...(overrides.notes !== undefined ? { notes: overrides.notes } : {}),
   });
-  // THE DAEMON'S BADGES, one per standing fact, in the proto's order. Their
-  // words are deliberately ones no card would compose (`wire <status>`), so an
-  // assertion on them proves the card drew the wire verbatim.
-  if (overrides.badges === undefined) {
-    prompt.badges = standingStatuses(prompt).map((status) =>
-      create(HeldPromptBadgeSchema, {
-        label: wireLabel(status),
-        detail: wireDetail(status),
-      }),
-    );
-  }
+  // THE DAEMON'S ONE BADGE and its notes, ranked as daemon_hold.proto fixes.
+  // Their words are deliberately ones no card would compose (`wire <status>`),
+  // so an assertion on them proves the card drew the wire verbatim.
+  if (overrides.badge === undefined) serveStatus(prompt);
   return prompt;
 }
 
-/** Mark U as being edited, and serve the badges the daemon then sends. */
+/** Mark U as being edited, and serve the status the daemon then sends. */
 function markEditing(u: HeldPrompt): void {
   u.editing = create(HeldPromptEditingSchema, {});
-  u.badges = standingStatuses(u).map((status) =>
-    create(HeldPromptBadgeSchema, {
-      label: wireLabel(status),
-      detail: wireDetail(status),
-    }),
-  );
+  serveStatus(u);
 }
 
-/** Mark U as coalesced, and serve the badges the daemon then sends. */
+/** Mark U as coalesced, and serve the status the daemon then sends. */
 function markCoalesced(u: HeldPrompt): void {
   u.coalesced = create(HeldPromptCoalescedSchema, {});
-  u.badges = standingStatuses(u).map((status) =>
-    create(HeldPromptBadgeSchema, {
-      label: wireLabel(status),
-      detail: wireDetail(status),
-    }),
-  );
+  serveStatus(u);
 }
 
 /** The label the test daemon sends for STATUS. */
@@ -217,26 +203,37 @@ const wireLabel = (status: HeldStatus): string => `wire ${status}`;
 /** The detail the test daemon sends for STATUS. */
 const wireDetail = (status: HeldStatus): string =>
   `the daemon's whole sentence for ${status}`;
+/** The note the test daemon sends for the verdict's confirmation. */
+const CONFIRMED_NOTE = "wire note confirmed";
+/** The note the test daemon sends for a coalescence. */
+const COALESCED_NOTE = "wire note coalesced";
 
-/** The facts a prompt's badges stand for, in daemon_hold.proto's order. */
-function standingStatuses(prompt: HeldPrompt): HeldStatus[] {
-  const statuses: HeldStatus[] = [];
+/** The standing facts that can claim the badge, strongest first. */
+function rankedStatuses(prompt: HeldPrompt): HeldStatus[] {
+  const ranked: HeldStatus[] = [];
+  if (prompt.editing !== undefined) ranked.push("editing");
+  if (prompt.hold.case !== undefined) ranked.push(prompt.hold.case);
+  const arm = prompt.classification.case;
+  // daemon_held claims nothing: the hold arm beside it is what holds it.
+  if (arm !== undefined && arm !== "daemonHeld") ranked.push(arm);
+  return ranked;
+}
+
+/** Serve PROMPT the badge and notes the daemon composes for it. */
+function serveStatus(prompt: HeldPrompt): void {
+  const [top, ...rest] = rankedStatuses(prompt);
+  if (top === undefined) throw new Error("a test prompt with no fact to badge");
+  prompt.badge = create(HeldPromptBadgeSchema, {
+    label: wireLabel(top),
+    detail: wireDetail(top),
+    standsFor: { case: top, value: {} } as never,
+  });
+  const notes = rest.map((status) => wireDetail(status));
   const classification = prompt.classification;
-  if (classification.case !== undefined) {
-    // daemon_held draws no badge of its own: the hold arm's is the one.
-    if (classification.case !== "daemonHeld")
-      statuses.push(classification.case);
-    if (prompt.editing !== undefined) statuses.push("editing");
-    if (prompt.coalesced !== undefined) statuses.push("coalesced");
-    if (
-      classification.case === "holdForTurnEnd" &&
-      classification.value.accepted?.accepted === true
-    ) {
-      statuses.push("accepted");
-    }
-  }
-  if (prompt.hold.case !== undefined) statuses.push(prompt.hold.case);
-  return statuses;
+  if (classification.case === "holdForTurnEnd" && classification.value.accepted?.accepted === true)
+    notes.push(CONFIRMED_NOTE);
+  if (prompt.coalesced !== undefined) notes.push(COALESCED_NOTE);
+  prompt.notes = notes.map((sentence) => create(HeldPromptStatusNoteSchema, { sentence }));
 }
 
 /** Let the click's promise chain settle. */
@@ -490,8 +487,8 @@ describe("drawHeldPrompt accept", () => {
       tc,
     );
     expect(card.querySelector('[data-held-action="accept"]')).toBeNull();
-    expect(card.querySelector("[data-accepted]")?.textContent).toBe(
-      "wire accepted",
+    expect(card.querySelector(`.${HELD_NOTE_CLASS}`)?.textContent).toBe(
+      CONFIRMED_NOTE,
     );
   });
 
@@ -608,7 +605,7 @@ describe("drawHeldPrompt hold arms", () => {
     const { tc } = trayContext();
     const prompt = heldPrompt({
       classification: { case: "daemonHeld", value: {} },
-      badges: [],
+      badge: { label: "after the merge", standsFor: { case: "merge", value: {} } },
     });
     // Act / Assert
     expect(() => drawHeldPrompt(prompt, tc)).toThrow(MalformedView);
@@ -899,6 +896,41 @@ describe("the queued-at age", () => {
 });
 
 describe("the said body", () => {
+  /** A held reply: the quote of an earlier bubble, then the person's words. */
+  function heldReply(): HTMLElement {
+    const { tc } = trayContext();
+    return drawHeldPrompt(
+      heldPrompt({
+        said: {
+          content: {
+            blocks: [
+              { block: { case: "quote", value: { text: "⟢ Replying:\n\n```\nParis.\n```\n\n⟢ My message:\n" } } },
+              { block: { case: "text", value: { text: "and its population?" } } },
+            ],
+          },
+        },
+      }),
+      tc,
+    );
+  }
+
+  it("draws a reply's quote ahead of the words, as the quote block the collapsed card hides", () => {
+    // Act
+    const body = heldReply().querySelector(".bubble-body");
+    // Assert
+    expect([...(body?.children ?? [])].map((child) => child.className)).toEqual([
+      `queued-quote ${BUBBLE_QUOTE_CLASS}`,
+      "queued-text",
+    ]);
+  });
+
+  it("draws the quote's fenced text as a code block", () => {
+    // Act
+    const quote = heldReply().querySelector(`.${BUBBLE_QUOTE_CLASS}`);
+    // Assert
+    expect(quote?.querySelector("pre code")?.textContent).toBe("Paris.");
+  });
+
   it("renders text blocks as markdown", () => {
     const { tc } = trayContext();
     const card = drawHeldPrompt(
@@ -1295,13 +1327,11 @@ const EXPECTED_BADGES: Readonly<Record<HeldStatus, string>> = {
   holdForTurnEnd: "err",
   uninterruptibleTurn: "err",
   classificationError: "err",
-  accepted: "muted",
   shutdown: "amber",
   buildRefresh: "amber",
   merge: "amber",
   reconnect: "teal",
   editing: "run",
-  coalesced: "muted",
 };
 
 describe("the daemon's badge words", () => {
@@ -1352,16 +1382,6 @@ describe("the daemon's badge words", () => {
         }),
     ],
     [
-      "accepted",
-      () =>
-        heldPrompt({
-          classification: {
-            case: "holdForTurnEnd",
-            value: { accepted: { accepted: true } },
-          },
-        }),
-    ],
-    [
       "shutdown",
       () =>
         heldPrompt({ hold: { case: "shutdown", value: { scheduleId: "s" } } }),
@@ -1387,14 +1407,6 @@ describe("the daemon's badge words", () => {
       () => {
         const u = heldPrompt();
         markEditing(u);
-        return u;
-      },
-    ],
-    [
-      "coalesced",
-      () => {
-        const u = heldPrompt();
-        markCoalesced(u);
         return u;
       },
     ],
@@ -1439,7 +1451,7 @@ describe("the daemon's badge words", () => {
     // Arrange
     const { tc } = trayContext();
     const prompt = heldPrompt({
-      badges: [{ label: "after this turn" }],
+      badge: { label: "after this turn", standsFor: { case: "holdForTurnEnd", value: {} } },
       classification: { case: "holdForTurnEnd", value: {} },
     });
     // Act
@@ -1451,7 +1463,9 @@ describe("the daemon's badge words", () => {
   it("refuses a badge with an empty label", () => {
     // Arrange
     const { tc } = trayContext();
-    const prompt = heldPrompt({ badges: [{ label: "" }] });
+    const prompt = heldPrompt({
+      badge: { label: "", standsFor: { case: "classifying", value: {} } },
+    });
     // Act / Assert
     expect(() => drawHeldPrompt(prompt, tc)).toThrow(MalformedView);
   });
@@ -1462,7 +1476,10 @@ describe("the daemon's badge words", () => {
     const { tc } = trayContext();
     // Act
     expect(() =>
-      drawHeldPrompt(heldPrompt({ badges: [{ label: "" }] }), tc),
+      drawHeldPrompt(
+        heldPrompt({ badge: { label: "", standsFor: { case: "classifying", value: {} } } }),
+        tc,
+      ),
     ).toThrow(MalformedView);
     // Assert
     const record = await forwardedRecord(
@@ -1472,41 +1489,88 @@ describe("the daemon's badge words", () => {
     expect(record.level.case).toBe("error");
   });
 
-  it("refuses fewer badges than the standing facts", () => {
-    // Arrange
+  it("draws one badge for a prompt a hold and a verdict both stand on", () => {
+    // Arrange: the reported card — waiting for the turn, and held by a merge.
     const { tc } = trayContext();
     const prompt = heldPrompt({
-      badges: [{ label: "after this turn" }],
       classification: { case: "holdForTurnEnd", value: {} },
-      hold: { case: "buildRefresh", value: {} },
+      hold: { case: "merge", value: {} },
     });
-    // Act / Assert
-    expect(() => drawHeldPrompt(prompt, tc)).toThrow(MalformedView);
+    // Act
+    const card = drawHeldPrompt(prompt, tc);
+    // Assert
+    expect(
+      [...card.querySelectorAll(".queued-head > .held-badge")].map((pill) =>
+        pill.getAttribute("data-held-status"),
+      ),
+    ).toEqual(["merge"]);
   });
 
-  it("refuses more badges than the standing facts", () => {
+  it("draws the facts the badge does not show as notes, in the daemon's order", () => {
     // Arrange
     const { tc } = trayContext();
     const prompt = heldPrompt({
-      badges: [{ label: "classifying" }, { label: "restart hold" }],
+      classification: { case: "holdForTurnEnd", value: { accepted: { accepted: true } } },
+      hold: { case: "merge", value: {} },
     });
+    // Act
+    const card = drawHeldPrompt(prompt, tc);
+    // Assert
+    expect(
+      [...card.querySelectorAll(`.queued-details > .${HELD_NOTE_CLASS}`)].map((n) => n.textContent),
+    ).toEqual([wireDetail("holdForTurnEnd"), CONFIRMED_NOTE]);
+  });
+
+  it("draws a coalescence as a note, never a badge", () => {
+    // Arrange
+    const { tc } = trayContext();
+    const u = heldPrompt();
+    markCoalesced(u);
+    // Act
+    const card = drawHeldPrompt(u, tc);
+    // Assert
+    expect([
+      card.querySelectorAll(".queued-head > .held-badge").length,
+      card.querySelector(`.${HELD_NOTE_CLASS}`)?.textContent,
+    ]).toEqual([1, COALESCED_NOTE]);
+  });
+
+  it("refuses an entry with no badge", () => {
+    // Arrange
+    const { tc } = trayContext();
+    const prompt = heldPrompt();
+    delete (prompt as { badge?: unknown }).badge;
     // Act / Assert
     expect(() => drawHeldPrompt(prompt, tc)).toThrow(MalformedView);
   });
 
-  it("logs a badge count mismatch as an error through the canonical logger", async () => {
+  it("refuses a badge that names no fact", () => {
+    // Arrange
+    const { tc } = trayContext();
+    const prompt = heldPrompt({ badge: { label: "after this turn" } });
+    // Act / Assert
+    expect(() => drawHeldPrompt(prompt, tc)).toThrow(MalformedView);
+  });
+
+  it("refuses an empty note", () => {
+    // Arrange
+    const { tc } = trayContext();
+    const prompt = heldPrompt();
+    prompt.notes = [create(HeldPromptStatusNoteSchema, { sentence: "" })];
+    // Act / Assert
+    expect(() => drawHeldPrompt(prompt, tc)).toThrow(MalformedView);
+  });
+
+  it("logs an empty note as an error through the canonical logger", async () => {
     // Arrange
     const capture = captureLogRecords();
     const { tc } = trayContext();
+    const prompt = heldPrompt();
+    prompt.notes = [create(HeldPromptStatusNoteSchema, { sentence: "" })];
     // Act
-    expect(() => drawHeldPrompt(heldPrompt({ badges: [] }), tc)).toThrow(
-      MalformedView,
-    );
+    expect(() => drawHeldPrompt(prompt, tc)).toThrow(MalformedView);
     // Assert
-    const record = await forwardedRecord(
-      capture,
-      "tray.held-prompt.badges-mismatch",
-    );
+    const record = await forwardedRecord(capture, "tray.held-prompt.note-empty");
     expect(record.level.case).toBe("error");
   });
 
@@ -1555,35 +1619,11 @@ describe("the held status badge table", () => {
     expect(named).toEqual(Object.keys(EXPECTED_BADGES).sort());
   });
 
-  it("names every classification arm the schema can send, but the badgeless ones", () => {
+  it("names every fact the schema's badge can stand for", () => {
     // Arrange / Act
-    const arms = oneofArms(HeldPromptSchema, "classification");
-    const badgeless: readonly string[] = BADGELESS_CLASSIFICATION_ARMS;
+    const arms = [...oneofArms(HeldPromptBadgeSchema, "stands_for")].sort();
     // Assert
-    expect(
-      arms.filter(
-        (arm) =>
-          !Object.hasOwn(HELD_STATUS_BADGES, arm) && !badgeless.includes(arm),
-      ),
-    ).toEqual([]);
-  });
-
-  it("gives no badgeless arm a badge tone", () => {
-    // Arrange / Act
-    const toned = BADGELESS_CLASSIFICATION_ARMS.filter((arm) =>
-      Object.hasOwn(HELD_STATUS_BADGES, arm),
-    );
-    // Assert
-    expect(toned).toEqual([]);
-  });
-
-  it("names every hold arm the schema can send", () => {
-    // Arrange / Act
-    const arms = oneofArms(HeldPromptSchema, "hold");
-    // Assert
-    expect(
-      arms.filter((arm) => !Object.hasOwn(HELD_STATUS_BADGES, arm)),
-    ).toEqual([]);
+    expect(Object.keys(HELD_STATUS_BADGES).sort()).toEqual(arms);
   });
 
   it("refuses a status the table does not name", () => {
@@ -1660,16 +1700,6 @@ describe("every status a held card shows is a badge in the table's tone", () => 
           classification: {
             case: "classificationError",
             value: { detail: "d" },
-          },
-        }),
-    ],
-    [
-      "accepted",
-      () =>
-        heldPrompt({
-          classification: {
-            case: "holdForTurnEnd",
-            value: { rationale: "r", accepted: { accepted: true } },
           },
         }),
     ],
@@ -1777,7 +1807,7 @@ describe("a held prompt collapsed and expanded", () => {
       [...(head?.children ?? [])].map((child) =>
         child.classList.contains("held-badge"),
       ),
-    ).toEqual([true, true]);
+    ).toEqual([true]);
   });
 
   it("keeps its badges visible while collapsed", () => {
@@ -1786,7 +1816,7 @@ describe("a held prompt collapsed and expanded", () => {
     // Assert
     expect(
       badges.map((badge) => badge.closest(HIDDEN_WHILE_COLLAPSED)),
-    ).toEqual([null, null]);
+    ).toEqual([null]);
   });
 
   it("puts the details in the bubble's one expand-only region", () => {

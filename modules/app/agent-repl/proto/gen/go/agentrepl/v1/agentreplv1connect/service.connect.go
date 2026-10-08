@@ -46,6 +46,9 @@ const (
 	AgentReplSubmitPromptProcedure = "/agentrepl.v1.AgentRepl/SubmitPrompt"
 	// AgentReplSelectFeedRowProcedure is the fully-qualified name of the AgentRepl's SelectFeedRow RPC.
 	AgentReplSelectFeedRowProcedure = "/agentrepl.v1.AgentRepl/SelectFeedRow"
+	// AgentReplFoldMergeBubbleProcedure is the fully-qualified name of the AgentRepl's FoldMergeBubble
+	// RPC.
+	AgentReplFoldMergeBubbleProcedure = "/agentrepl.v1.AgentRepl/FoldMergeBubble"
 	// AgentReplAdjustFeedTextScaleProcedure is the fully-qualified name of the AgentRepl's
 	// AdjustFeedTextScale RPC.
 	AgentReplAdjustFeedTextScaleProcedure = "/agentrepl.v1.AgentRepl/AdjustFeedTextScale"
@@ -236,6 +239,7 @@ var (
 	agentReplServiceDescriptor                        = v1.File_agentrepl_v1_service_proto.Services().ByName("AgentRepl")
 	agentReplSubmitPromptMethodDescriptor             = agentReplServiceDescriptor.Methods().ByName("SubmitPrompt")
 	agentReplSelectFeedRowMethodDescriptor            = agentReplServiceDescriptor.Methods().ByName("SelectFeedRow")
+	agentReplFoldMergeBubbleMethodDescriptor          = agentReplServiceDescriptor.Methods().ByName("FoldMergeBubble")
 	agentReplAdjustFeedTextScaleMethodDescriptor      = agentReplServiceDescriptor.Methods().ByName("AdjustFeedTextScale")
 	agentReplRequestCommandSupportMethodDescriptor    = agentReplServiceDescriptor.Methods().ByName("RequestCommandSupport")
 	agentReplOpenFeedMethodDescriptor                 = agentReplServiceDescriptor.Methods().ByName("OpenFeed")
@@ -318,6 +322,10 @@ type AgentReplClient interface {
 	// its ordered rows, pushes it to the webapp and Emacs, and acks it here.
 	// See endpoint_select_feed_row.proto.
 	SelectFeedRow(context.Context, *connect.Request[v1.SelectFeedRowRequest]) (*connect.Response[v1.SelectFeedRowResponse], error)
+	// The reader opened or closed a merge bubble: the daemon records the fold
+	// on the bubble's durable head row, so it survives pushes, reloads and
+	// restarts. See endpoint_fold_merge_bubble.proto.
+	FoldMergeBubble(context.Context, *connect.Request[v1.FoldMergeBubbleRequest]) (*connect.Response[v1.FoldMergeBubbleResponse], error)
 	// Nudge the feed text zoom one small step up or down. Daemon-global,
 	// persisted, pushed to every open feed's watch as a FeedTextScale frame. See
 	// endpoint_adjust_feed_text_scale.proto.
@@ -550,6 +558,12 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			httpClient,
 			baseURL+AgentReplSelectFeedRowProcedure,
 			connect.WithSchema(agentReplSelectFeedRowMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		foldMergeBubble: connect.NewClient[v1.FoldMergeBubbleRequest, v1.FoldMergeBubbleResponse](
+			httpClient,
+			baseURL+AgentReplFoldMergeBubbleProcedure,
+			connect.WithSchema(agentReplFoldMergeBubbleMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
 		adjustFeedTextScale: connect.NewClient[v1.AdjustFeedTextScaleRequest, v1.AdjustFeedTextScaleResponse](
@@ -979,6 +993,7 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 type agentReplClient struct {
 	submitPrompt             *connect.Client[v1.SubmitPromptRequest, v1.SubmitPromptResponse]
 	selectFeedRow            *connect.Client[v1.SelectFeedRowRequest, v1.SelectFeedRowResponse]
+	foldMergeBubble          *connect.Client[v1.FoldMergeBubbleRequest, v1.FoldMergeBubbleResponse]
 	adjustFeedTextScale      *connect.Client[v1.AdjustFeedTextScaleRequest, v1.AdjustFeedTextScaleResponse]
 	requestCommandSupport    *connect.Client[v1.RequestCommandSupportRequest, v1.RequestCommandSupportResponse]
 	openFeed                 *connect.Client[v1.OpenFeedRequest, v1.OpenFeedResponse]
@@ -1059,6 +1074,11 @@ func (c *agentReplClient) SubmitPrompt(ctx context.Context, req *connect.Request
 // SelectFeedRow calls agentrepl.v1.AgentRepl.SelectFeedRow.
 func (c *agentReplClient) SelectFeedRow(ctx context.Context, req *connect.Request[v1.SelectFeedRowRequest]) (*connect.Response[v1.SelectFeedRowResponse], error) {
 	return c.selectFeedRow.CallUnary(ctx, req)
+}
+
+// FoldMergeBubble calls agentrepl.v1.AgentRepl.FoldMergeBubble.
+func (c *agentReplClient) FoldMergeBubble(ctx context.Context, req *connect.Request[v1.FoldMergeBubbleRequest]) (*connect.Response[v1.FoldMergeBubbleResponse], error) {
+	return c.foldMergeBubble.CallUnary(ctx, req)
 }
 
 // AdjustFeedTextScale calls agentrepl.v1.AgentRepl.AdjustFeedTextScale.
@@ -1421,6 +1441,10 @@ type AgentReplHandler interface {
 	// its ordered rows, pushes it to the webapp and Emacs, and acks it here.
 	// See endpoint_select_feed_row.proto.
 	SelectFeedRow(context.Context, *connect.Request[v1.SelectFeedRowRequest]) (*connect.Response[v1.SelectFeedRowResponse], error)
+	// The reader opened or closed a merge bubble: the daemon records the fold
+	// on the bubble's durable head row, so it survives pushes, reloads and
+	// restarts. See endpoint_fold_merge_bubble.proto.
+	FoldMergeBubble(context.Context, *connect.Request[v1.FoldMergeBubbleRequest]) (*connect.Response[v1.FoldMergeBubbleResponse], error)
 	// Nudge the feed text zoom one small step up or down. Daemon-global,
 	// persisted, pushed to every open feed's watch as a FeedTextScale frame. See
 	// endpoint_adjust_feed_text_scale.proto.
@@ -1649,6 +1673,12 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		AgentReplSelectFeedRowProcedure,
 		svc.SelectFeedRow,
 		connect.WithSchema(agentReplSelectFeedRowMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplFoldMergeBubbleHandler := connect.NewUnaryHandler(
+		AgentReplFoldMergeBubbleProcedure,
+		svc.FoldMergeBubble,
+		connect.WithSchema(agentReplFoldMergeBubbleMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
 	agentReplAdjustFeedTextScaleHandler := connect.NewUnaryHandler(
@@ -2077,6 +2107,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplSubmitPromptHandler.ServeHTTP(w, r)
 		case AgentReplSelectFeedRowProcedure:
 			agentReplSelectFeedRowHandler.ServeHTTP(w, r)
+		case AgentReplFoldMergeBubbleProcedure:
+			agentReplFoldMergeBubbleHandler.ServeHTTP(w, r)
 		case AgentReplAdjustFeedTextScaleProcedure:
 			agentReplAdjustFeedTextScaleHandler.ServeHTTP(w, r)
 		case AgentReplRequestCommandSupportProcedure:
@@ -2232,6 +2264,10 @@ func (UnimplementedAgentReplHandler) SubmitPrompt(context.Context, *connect.Requ
 
 func (UnimplementedAgentReplHandler) SelectFeedRow(context.Context, *connect.Request[v1.SelectFeedRowRequest]) (*connect.Response[v1.SelectFeedRowResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.SelectFeedRow is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) FoldMergeBubble(context.Context, *connect.Request[v1.FoldMergeBubbleRequest]) (*connect.Response[v1.FoldMergeBubbleResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.FoldMergeBubble is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) AdjustFeedTextScale(context.Context, *connect.Request[v1.AdjustFeedTextScaleRequest]) (*connect.Response[v1.AdjustFeedTextScaleResponse], error) {

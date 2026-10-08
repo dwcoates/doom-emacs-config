@@ -196,7 +196,7 @@ func newOrchestrator(deps Deps) (*orchestrator, error) {
 		}
 		deps.Home = home
 	}
-	return &orchestrator{
+	o := &orchestrator{
 		deps:            deps,
 		lockDir:         filepath.Join(deps.StateDir, "merge-locks"),
 		facts:           map[ids.WorkspaceID]MergeFacts{},
@@ -211,7 +211,21 @@ func newOrchestrator(deps Deps) (*orchestrator, error) {
 		offers:          map[ids.WorkspaceID]bool{},
 		repoOf:          map[ids.WorkspaceID]wsm.RepoKey{},
 		pumping:         map[wsm.RepoKey]bool{},
-	}, nil
+	}
+	deps.Asks.bind(o.askChanged)
+	return o, nil
+}
+
+// askChanged hands a workspace's change of open asks to its run in flight, if
+// any: a conflict-resolution or fixing tab standing live is redrawn waiting on
+// the user, or live again. A workspace with no run in flight has no tab to
+// draw it on; the ask set keeps the fact for a run that reaches such a tab.
+func (o *orchestrator) askChanged(ws ids.WorkspaceID, waiting bool) {
+	r, ok := o.runFor(ws)
+	if !ok {
+		return
+	}
+	r.setWaitingOnUser(waiting)
 }
 
 // validate refuses a dependency set the orchestrator cannot run with. Missing
@@ -231,6 +245,7 @@ func (d Deps) validate() error {
 	check(d.Footer != nil, "Footer")
 	check(d.Sidebar != nil, "Sidebar")
 	check(d.Holds != nil, "Holds")
+	check(d.Asks != nil, "Asks")
 	check(d.Briefs != nil, "Briefs")
 	check(d.Painter != nil, "Painter")
 	check(d.TestRunner != nil, "TestRunner")

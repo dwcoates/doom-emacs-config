@@ -44,7 +44,7 @@ func (r *resolver) repositoryView(live []wsm.Workspace, rc rowContext, log dlog.
 		section := &frontendv1.RosterRepoSection{
 			Key: &frontendv1.RosterRepoKey{
 				Repository: &workspacev1.RepositoryRef{Id: string(repo.ID), Dir: repo.Dir}},
-			Header: sectionHeader(repo.Name, rows),
+			Header: sectionHeader(repo.Name, drawnLiveRowCount(rows)),
 			Rows:   rows,
 		}
 		setRepoFold(section, repo.Folded)
@@ -160,7 +160,7 @@ func (r *resolver) mergedSection(merged []wsm.Workspace, rc rowContext, log dlog
 		rows.Rows = append(rows.Rows, r.row(ws, rc, log))
 	}
 	section := &frontendv1.RosterMergedSection{
-		Header: sectionHeader(MergedSectionLabel, rows),
+		Header: sectionHeader(MergedSectionLabel, len(rows.GetRows())),
 		Rows:   rows,
 	}
 	setMergedFold(section, r.state.reg.View.MergedFolded)
@@ -198,14 +198,33 @@ func setMergedFold(section *frontendv1.RosterMergedSection, folded bool) {
 }
 
 // sectionHeader composes a repository or Recently Merged header: its label and
-// the count a FOLDED section draws beside it. The count is read off the very
-// rows the section carries, so it can never disagree with them, and no client
-// counts rows for itself.
-func sectionHeader(label string, rows *frontendv1.RosterRows) *frontendv1.RosterSectionHeader {
+// the count a FOLDED section draws beside it, which its caller reads off the
+// very rows the section carries (drawnLiveRowCount, or the merged band's own
+// rows), so it can never disagree with them, and no client counts rows for
+// itself.
+func sectionHeader(label string, count int) *frontendv1.RosterSectionHeader {
 	return &frontendv1.RosterSectionHeader{
 		Label: &frontendv1.RosterLabel{Text: label},
-		Count: &frontendv1.RosterSectionCount{Workspaces: uint32(len(rosterwalk.FlattenRows(rows.GetRows())))},
+		Count: &frontendv1.RosterSectionCount{Workspaces: uint32(count)},
 	}
+}
+
+// drawnLiveRowCount is how many rows a live section shows UNFOLDED: every row
+// of its tree, nested family rows included, that is not CLOSED (owner request,
+// 2026-10-08: a folded section's count equals the rows it shows unfolded).
+// A closed, killed or nuked workspace still rides the wire (Emacs reconciles
+// its tabs from the flag) but no client draws it, and its live descendants
+// are drawn in its place (the webapp's expandVisibleRows), so the count is
+// exactly the not-closed rows of the flattened tree, read off the same
+// RosterRowClosed fact the client drops a row by.
+func drawnLiveRowCount(rows *frontendv1.RosterRows) int {
+	n := 0
+	for _, row := range rosterwalk.FlattenRows(rows.GetRows()) {
+		if !row.GetClosed().GetClosed() {
+			n++
+		}
+	}
+	return n
 }
 
 // sectionRows nests one section's workspaces and composes their rows. Nesting

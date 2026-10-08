@@ -1,0 +1,88 @@
+// endpoint_fold_merge_bubble.proto — FoldMergeBubble: the reader opened or
+// closed a merge bubble. FEED section.
+//
+// THE READER'S FOLD IS DAEMON-HELD. A merge bubble never collapses on its own
+// (owner ruling, 2026-10-08): not on a push, not on a return to the feed's
+// tail, not on a page reload, not across a daemon restart. The webapp tells
+// the daemon each fold the reader makes, the daemon records it on the bubble's
+// durable head row (frontend.v1.FeedMergeHead.fold), and every later draw of
+// the row — a push, a page, a reload — carries it. The daemon itself only
+// ever OPENS a bubble (a failed merge); it never folds one.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+import "frontend/v1/feed.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message FoldMergeBubbleRequest {
+  // The workspace whose feed holds the bubble — the daemon-minted ref,
+  // echoed verbatim like every per-workspace request.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // The merge bubble's head row, echoed from the FeedRow that drew it.
+  frontend.v1.FeedId row = 2;
+  // THE ARM IS THE FOLD THE READER MADE. Unset is a malformed request.
+  oneof fold {
+    // The reader opened the bubble.
+    FoldMergeBubbleOpen open = 3;
+    // The reader closed the bubble.
+    FoldMergeBubbleClose close = 4;
+  }
+}
+
+// The reader opened the bubble.
+message FoldMergeBubbleOpen {}
+
+// The reader closed the bubble.
+message FoldMergeBubbleClose {}
+
+// THE ARM IS THE OUTCOME.
+message FoldMergeBubbleResponse {
+  oneof result {
+    FoldMergeBubbleSuccess success = 1;
+    FoldMergeBubbleError error = 2;
+  }
+}
+
+// Recorded; the row's next draw carries the fold.
+message FoldMergeBubbleSuccess {}
+
+// Validation failures (an unset field or arm) are Connect InvalidArgument,
+// never an arm.
+message FoldMergeBubbleError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    FoldMergeBubbleUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    FoldMergeBubbleWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    FoldMergeBubbleTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    FoldMergeBubbleNotYetAdopted not_yet_adopted = 4;
+    // The row is not a merge bubble's head this daemon holds.
+    FoldMergeBubbleNotAMergeBubble not_a_merge_bubble = 5;
+  }
+}
+
+// The named row is not a merge bubble's head this daemon holds.
+message FoldMergeBubbleNotAMergeBubble {
+  // The row the request named, echoed so the caller can say which.
+  frontend.v1.FeedId row = 1;
+}
+// The workspace id is not in the daemon's registry.
+message FoldMergeBubbleUnknownWorkspace {}
+// The echoed dir disagrees with the registry's dir for this id.
+message FoldMergeBubbleWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+// This daemon released the workspace to a successor.
+message FoldMergeBubbleTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+// A joining daemon has not finished adopting this workspace yet.
+message FoldMergeBubbleNotYetAdopted {}

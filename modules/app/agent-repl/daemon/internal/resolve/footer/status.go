@@ -20,7 +20,7 @@ import (
 // table, because the arm stays in the contract for an older frame to decode.
 var statusArms = []string{
 	"agent_repl_fault", "network_fault", "closing", "interrupted", "loading", "vendor_fault", "merging",
-	"merge_failed", "merged", "degraded", "waiting",
+	"merge_failed", "merged", "degraded", "waiting", "permission", "question",
 	"working", "background", "turn_failed", "idle",
 }
 
@@ -41,7 +41,9 @@ var statusArms = []string{
 //     answers is not lifted until the re-open lands, and drawing the question
 //     over the answer is what made a minute-long compaction look like a dead
 //     button — owner's report, 2026-09-14), then the turn itself;
-//   - waiting: interrupting, then permission, then question, then cold gate;
+//   - waiting on the user: interrupting (`waiting`), then a permission gate
+//     (`permission`), then a question gate (`question`), then a cold gate
+//     (`waiting`);
 //   - idle: the momentary `interrupted`, then background, then the wakeup
 //     fallback the contract admits ONLY where the footer would otherwise read
 //     idle, then idle itself.
@@ -437,6 +439,10 @@ func (r *resolver) vendorFault(s *wsState, log dlog.Logger) *frontendv1.FooterSt
 // in flight whose facts name no step it knows is an orchestrator defect,
 // recorded at ERROR and drawn with no substatus rather than a made-up one.
 func (r *resolver) merging(s *wsState, log dlog.Logger) *frontendv1.FooterStatus {
+	if held := mergeWaitingOnUser(s); held != nil {
+		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "merging waiting on user", "step": string(s.merge.Step)})
+		return &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Merging{Merging: held}}
+	}
 	arm := &frontendv1.FooterStatusMerging{Activity: r.mergingActivity(s)}
 	m := s.merge
 	switch m.Step {
@@ -474,6 +480,40 @@ func (r *resolver) merging(s *wsState, log dlog.Logger) *frontendv1.FooterStatus
 	return &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Merging{Merging: arm}}
 }
 
+// mergeWaitingOnUser draws a merge held on the user, or nil when it is not.
+//
+// ONLY CONFLICT RESOLUTION AND FIXING CAN BE HELD: they are the steps that
+// hand this workspace's session a turn of the merge's own, so an ask the
+// session opens while one stands is the merge's agent asking. The substatus
+// and the line that names the ask are one decision, so neither stands alone:
+// a consent ask outranks a question batch, as it does under `waiting`, and the
+// earliest open one of the kind is named. The step's substatus comes back the
+// moment the last ask is answered or withdrawn.
+func mergeWaitingOnUser(s *wsState) *frontendv1.FooterStatusMerging {
+	if s.merge.Step != StepConflictResolution && s.merge.Step != StepFixing {
+		return nil
+	}
+	salient := &frontendv1.FooterStatusMergingSalient{}
+	switch {
+	case len(s.permissionOrder) > 0:
+		ask := s.permissions[s.permissionOrder[0]]
+		salient.At = stamp(ask.at)
+		salient.Kind = &frontendv1.FooterStatusMergingSalient_GatedCall{
+			GatedCall: &frontendv1.FooterStatusActivityGatedCall{Text: ask.text}}
+	case len(s.questionOrder) > 0:
+		batch := s.questions[s.questionOrder[0]]
+		salient.At = stamp(batch.at)
+		salient.Kind = &frontendv1.FooterStatusMergingSalient_QuestionLead{
+			QuestionLead: &frontendv1.FooterStatusActivityQuestionLead{Text: batch.text}}
+	default:
+		return nil
+	}
+	return &frontendv1.FooterStatusMerging{
+		Substatus: &frontendv1.FooterStatusMerging_WaitingOnUser{WaitingOnUser: &frontendv1.FooterSubStatusMergingWaitingOnUser{}},
+		Activity:  &frontendv1.FooterStatusMergingActivity{Tier: &frontendv1.FooterStatusMergingActivity_Salient{Salient: salient}},
+	}
+}
+
 // mergeFailed draws a failed merge, its substatus the AREA it failed in. A
 // failed merge naming no area is an orchestrator defect, recorded at ERROR and
 // drawn with no substatus rather than a made-up one.
@@ -505,9 +545,14 @@ func (r *resolver) merged(s *wsState, log dlog.Logger) *frontendv1.FooterStatus 
 		Merged: &frontendv1.FooterStatusMerged{Activity: r.mergingActivity(s)}}}
 }
 
-// waiting resolves the parked states other than the wakeup fallback. Its
-// activity is REQUIRED: every waiting state has a composable line by
+// waiting resolves the rung on which the session waits on the user: an
+// interrupt landing, a permission gate, a question gate, or a cold gate. Its
+// activity is REQUIRED: every one of them has a composable line by
 // construction.
+//
+// A GATE IS NAMED BY ITS OWN STATUS (owner ruling, 2026-10-08): a permission
+// gate draws `permission` and a question gate `question`, both green, never
+// `waiting`. The interrupt and the cold gate keep `waiting`.
 func (r *resolver) waiting(s *wsState, log dlog.Logger) *frontendv1.FooterStatus {
 	arm := &frontendv1.FooterStatusWaiting{}
 	// EACH STEP AND THE SALIENT LINE THAT EXPLAINS IT ARE ONE DECISION, so a
@@ -523,22 +568,24 @@ func (r *resolver) waiting(s *wsState, log dlog.Logger) *frontendv1.FooterStatus
 		})
 	case len(s.permissionOrder) > 0:
 		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case len(s.permissionOrder) > 0"})
-		arm.Substatus = &frontendv1.FooterStatusWaiting_Permission{
-			Permission: &frontendv1.FooterSubStatusWaitingPermission{}}
 		ask := s.permissions[s.permissionOrder[0]]
-		arm.Activity = waitingSalient(ask.at, func(w *frontendv1.FooterStatusWaitingSalient) {
-			w.Kind = &frontendv1.FooterStatusWaitingSalient_GatedCall{
-				GatedCall: &frontendv1.FooterStatusActivityGatedCall{Text: ask.text}}
-		})
+		return &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Permission{Permission: &frontendv1.FooterStatusPermission{
+			Activity: &frontendv1.FooterStatusPermissionActivity{Salient: &frontendv1.FooterStatusPermissionSalient{
+				At: stamp(ask.at),
+				Kind: &frontendv1.FooterStatusPermissionSalient_GatedCall{
+					GatedCall: &frontendv1.FooterStatusActivityGatedCall{Text: ask.text}},
+			}},
+		}}}
 	case len(s.questionOrder) > 0:
 		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case len(s.questionOrder) > 0"})
-		arm.Substatus = &frontendv1.FooterStatusWaiting_Question{
-			Question: &frontendv1.FooterSubStatusWaitingQuestion{}}
 		batch := s.questions[s.questionOrder[0]]
-		arm.Activity = waitingSalient(batch.at, func(w *frontendv1.FooterStatusWaitingSalient) {
-			w.Kind = &frontendv1.FooterStatusWaitingSalient_QuestionLead{
-				QuestionLead: &frontendv1.FooterStatusActivityQuestionLead{Text: batch.text}}
-		})
+		return &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Question{Question: &frontendv1.FooterStatusQuestion{
+			Activity: &frontendv1.FooterStatusQuestionActivity{Salient: &frontendv1.FooterStatusQuestionSalient{
+				At: stamp(batch.at),
+				Kind: &frontendv1.FooterStatusQuestionSalient_QuestionLead{
+					QuestionLead: &frontendv1.FooterStatusActivityQuestionLead{Text: batch.text}},
+			}},
+		}}}
 	case s.coldGate.Standing:
 		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case s.coldGate.Standing"})
 		arm.Substatus = &frontendv1.FooterStatusWaiting_ColdGate{
@@ -715,6 +762,10 @@ func statusName(status *frontendv1.FooterStatus) string {
 		return "working"
 	case *frontendv1.FooterStatus_Waiting:
 		return "waiting"
+	case *frontendv1.FooterStatus_Permission:
+		return "permission"
+	case *frontendv1.FooterStatus_Question:
+		return "question"
 	case *frontendv1.FooterStatus_Interrupted:
 		return "interrupted"
 	case *frontendv1.FooterStatus_Merging:

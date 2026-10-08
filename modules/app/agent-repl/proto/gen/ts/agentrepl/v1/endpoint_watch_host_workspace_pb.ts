@@ -351,7 +351,10 @@ export type HostHeldPromptEdit = Message<"agentrepl.v1.HostHeldPromptEdit"> & {
   turn?: TurnId | undefined;
 
   /**
-   * The prompt's content as the edit began, WHOLE.
+   * The person's words as the edit began: every block they composed, WHOLE.
+   * A quote the prompt replies with (conversation.v1.UserQuoteBlock) is left
+   * out: the daemon keeps it through the edit and puts it back ahead of the
+   * committed words, so an editor never holds one.
    *
    * @generated from field: conversation.v1.UserSaid said = 2;
    */

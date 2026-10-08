@@ -8,6 +8,7 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/integration/harness"
 	"claude-repld/internal/ids"
@@ -125,6 +126,83 @@ func TestTheBootAdoptionOfASurvivorReconcilesItsOpenTurn(t *testing.T) {
 
 			// Assert
 			awaitAdoptedTurnOutcome(t, successor, f, turn, tc)
+			expectNoWorkspaceWarnings(t, f)
+		})
+	}
+}
+
+// A GATE OPEN ACROSS AN ADOPTION STANDS ON THE SUCCESSOR. The daemon died
+// while the survivor's turn waited on the user; the successor's watches open
+// at the tail and never see the ask's start, so only the survivor's
+// re-announcement (SessionStarted.open_asks) can tell it. Told only the turn
+// in flight, it drew the footer working and the row thinking, red, until the
+// answer (owner report, 2026-10-08).
+func TestTheBootAdoptionStandsTheGateTheSurvivorHoldsOpen(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		update *conversationv1.AgentUpdate
+		footer func(*frontendv1.FooterStatus) bool
+		roster func(*frontendv1.RosterRow) bool
+	}{
+		{
+			name:   "a permission gate",
+			update: &conversationv1.AgentUpdate{Update: &conversationv1.AgentUpdate_Permission{Permission: openPermission("perm-1", "gated-1")}},
+			footer: func(s *frontendv1.FooterStatus) bool { return s.GetPermission() != nil },
+			roster: func(r *frontendv1.RosterRow) bool { return r.GetPermission() != nil },
+		},
+		{
+			name: "a question gate",
+			update: &conversationv1.AgentUpdate{Update: &conversationv1.AgentUpdate_Question{Question: &conversationv1.AgentQuestion{
+				Id: &conversationv1.AgentQuestionId{Value: "q-1"},
+				Result: &conversationv1.AgentQuestion_Start{Start: &conversationv1.AgentQuestionStart{
+					Batch: &conversationv1.AgentQuestionBatch{Questions: []*conversationv1.AgentQuestionAsked{{
+						Question: &conversationv1.AgentQuestionText{Text: "Which approach?"},
+					}}},
+					StartedAt: startedAt(1),
+				}},
+			}}},
+			footer: func(s *frontendv1.FooterStatus) bool { return s.GetQuestion() != nil },
+			roster: func(r *frontendv1.RosterRow) bool { return r.GetQuestion() != nil },
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			// Arrange: a turn in flight waits on the user, then the daemon
+			// dies and the shim survives it.
+			f := newOpened(t, harness.Opts{})
+			f.shim.ExpectStartSession()
+			openTurnOn(t, f, "k-gate-adopt")
+			footer := f.d.WatchFooter(f.ws)
+			f.shim.PushAgentFrame(mainAgent, updateFrame(mainAgent, tt.update))
+			awaitFooter(t, f, footer, "the gate on the incumbent's strip", func(v *frontendv1.FooterView) bool {
+				return tt.footer(v.GetStrip().GetStatus())
+			})
+			info := f.shim.Info()
+			f.d.Kill()
+			writeIntentManifest(t, f.d, rollout.ManifestSession{
+				Workspace: ids.WorkspaceID(f.ws.GetId()), Dir: f.repo.Dir, ShimPID: info.PID,
+				VendorSessionID: info.VendorSessionID, Intent: rollout.IntentPreserve,
+			})
+
+			// Act: the successor boots and adopts the survivor.
+			successor := harness.StartDaemon(t, harness.Opts{
+				StateDir: f.d.StateDir, ProfileDir: f.d.ProfileDir,
+				ExtraArgs: []string{"--default-config-dir", f.d.DefaultConfigDir},
+				ExtraEnv:  []string{"AGENT_REPL_LOCK_DIR=" + f.d.LockDir},
+			})
+
+			// Assert: the successor's strip and row name the gate.
+			ctx, cancel := successor.WaitCtx()
+			defer cancel()
+			harness.AwaitView(t, ctx, successor.WatchFooter(f.ws), "the gate on the successor's strip", func(v *frontendv1.FooterView) bool {
+				return tt.footer(v.GetStrip().GetStatus())
+			})
+			awaitRoster(t, successor, successor.WatchRoster(), "the gate on the successor's row", func(r *frontendv1.WorkspaceRoster) bool {
+				row := rosterRow(r, f.ws.GetId())
+				return row != nil && tt.roster(row)
+			})
 			expectNoWorkspaceWarnings(t, f)
 		})
 	}

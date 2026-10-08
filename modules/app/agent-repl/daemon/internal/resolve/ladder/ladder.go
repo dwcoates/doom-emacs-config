@@ -49,8 +49,10 @@
 //     compromised: a shim component dropping or delaying observations, or a
 //     taken-back shim that never re-reported its session state. USABLE, so
 //     every unusable claim outranks it; SKIPPED while PARKED, as the link is.
-//  9. waiting           the session waits on the user: a permission ask, and
-//     on the footer also an interrupt landing, a question or a cold gate.
+//  9. waiting           the session waits on the user: a permission gate
+//     (footer and roster `permission`), a question gate (`question`), an
+//     interrupt landing or a cold gate (`waiting`). GREEN, the same green as
+//     idle (owner ruling, 2026-10-08): a gate is never drawn as working.
 //  10. thinking         a turn is in flight, a context cut included.
 //  11. idle             the foreground is free: a turn end (read or not, a
 //     failed one included), detached work running, a wakeup pending, or

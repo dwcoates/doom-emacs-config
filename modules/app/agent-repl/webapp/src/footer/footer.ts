@@ -455,12 +455,30 @@ export function drawFooterDivider(): HTMLElement {
  * stored value that is not a panel name (an older bundle's spelling, a hand-
  * edited entry) is discarded rather than trusted into the panel switch.
  */
+/**
+ * Panel names an older build stored and this one no longer draws: the merge
+ * tests panel (`mergeTests`), retired when a merge stopped drawing anything in
+ * the expanded footer.
+ */
+export const RETIRED_FOOTER_PANELS: readonly string[] = ["mergeTests"];
+
 export function readSelection(ctx: AppContext): FooterPanel | null {
   try {
     const stored = window.localStorage.getItem(
       panelStorageKey(ctx.workspace.id),
     );
     if (stored === null) return null;
+    if (RETIRED_FOOTER_PANELS.includes(stored)) {
+      // A PANEL THIS BUILD RETIRED is a preference an older build wrote, not
+      // a corrupt one: it is forgotten quietly, so a page that last showed it
+      // raises no warning after the deploy that removed it.
+      log.debug(`forgetting the retired footer panel ${stored}`, {
+        operation: "footer.selection-retired",
+        context: { stored },
+      });
+      window.localStorage.removeItem(panelStorageKey(ctx.workspace.id));
+      return null;
+    }
     if (!FOOTER_PANELS.includes(stored as FooterPanel)) {
       log.warn(`discarding an unrecognized stored footer panel: ${stored}`, {
         operation: "footer.selection-unrecognized",

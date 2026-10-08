@@ -166,7 +166,7 @@ func TestASessionCompactingArmStartsCompacting(t *testing.T) {
 	}
 }
 
-func TestWaitingOnPermissionCarriesTheGatedCallLine(t *testing.T) {
+func TestAPermissionGateCarriesTheGatedCallLine(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	connected(h)
@@ -175,16 +175,68 @@ func TestWaitingOnPermissionCarriesTheGatedCallLine(t *testing.T) {
 	h.r.OnPermission(testWS, mainAgent, permissionStart("ask-1", "Claude wants to run rm -rf build"))
 
 	// Assert
-	waiting := h.view(t).GetStrip().GetStatus().GetWaiting()
-	if waiting.GetPermission() == nil {
-		t.Fatalf("substatus = %+v, want permission", waiting.GetSubstatus())
+	permission := h.view(t).GetStrip().GetStatus().GetPermission()
+	if permission == nil {
+		t.Fatalf("status = %q, want permission", h.status(t))
 	}
-	if got := waiting.GetActivity().GetSalient().GetGatedCall().GetText(); got == "" {
-		t.Fatalf("the required waiting activity carries no gated-call line")
+	if got := permission.GetActivity().GetSalient().GetGatedCall().GetText(); got == "" {
+		t.Fatalf("the required permission activity carries no gated-call line")
 	}
 }
 
-func TestADecidedPermissionLeavesWaiting(t *testing.T) {
+// mustColor is the color the REAL render-colors vocabulary paints a footer
+// status arm, for the assertions that hold a status to the owner's color.
+func mustColor(t *testing.T, arm string) string {
+	t.Helper()
+	colors, err := vocab.LoadRenderColors("../../../../proto/vocab")
+	if err != nil {
+		t.Fatalf("LoadRenderColors: %v", err)
+	}
+	color, err := colors.FooterStatusColor(arm)
+	if err != nil {
+		t.Fatalf("FooterStatusColor(%q): %v", arm, err)
+	}
+	return color
+}
+
+// TestAGateDuringARunningTurnIsNamedForTheGate pins the owner's ruling of
+// 2026-10-08: a turn blocked on a permission or a question gate reads the
+// gate's own status, green, never `working`, for as long as the gate stands.
+func TestAGateDuringARunningTurnIsNamedForTheGate(t *testing.T) {
+	tests := []struct {
+		name string
+		open func(h *harness)
+		want string
+	}{
+		{name: "a permission gate", open: func(h *harness) {
+			h.r.OnPermission(testWS, mainAgent, permissionStart("ask-1", "Claude wants to run make"))
+		}, want: "permission"},
+		{name: "a question gate", open: func(h *harness) {
+			h.r.OnQuestion(testWS, mainAgent, questionStart("q-1", "Which approach?"))
+		}, want: "question"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+			h.r.SetTurn(testWS, &TurnStarted{At: instant})
+
+			// Act
+			tt.open(h)
+
+			// Assert
+			if got := h.status(t); got != tt.want {
+				t.Fatalf("status = %q, want %q while the gate stands in a running turn", got, tt.want)
+			}
+			if got := mustColor(t, h.status(t)); got != "green" {
+				t.Fatalf("the %s status paints %q, want green", tt.want, got)
+			}
+		})
+	}
+}
+
+func TestADecidedPermissionLeavesThePermissionGate(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	connected(h)
@@ -204,7 +256,7 @@ func TestADecidedPermissionLeavesWaiting(t *testing.T) {
 	}
 }
 
-func TestWaitingOnQuestionComposesTheBatchLead(t *testing.T) {
+func TestAQuestionGateComposesTheBatchLead(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	connected(h)
@@ -213,8 +265,8 @@ func TestWaitingOnQuestionComposesTheBatchLead(t *testing.T) {
 	h.r.OnQuestion(testWS, mainAgent, questionStart("q-1", "Which approach?", "Ship it?"))
 
 	// Assert
-	waiting := h.view(t).GetStrip().GetStatus().GetWaiting()
-	got := waiting.GetActivity().GetSalient().GetQuestionLead().GetText()
+	question := h.view(t).GetStrip().GetStatus().GetQuestion()
+	got := question.GetActivity().GetSalient().GetQuestionLead().GetText()
 	if got != "2 questions · Which approach?" {
 		t.Fatalf("lead = %q, want the count and the first question", got)
 	}
@@ -230,8 +282,8 @@ func TestPermissionOutranksQuestion(t *testing.T) {
 	h.r.OnPermission(testWS, mainAgent, permissionStart("ask-1", "Claude wants to run make"))
 
 	// Assert
-	if h.view(t).GetStrip().GetStatus().GetWaiting().GetPermission() == nil {
-		t.Fatalf("want permission to outrank an open question batch")
+	if got := h.status(t); got != "permission" {
+		t.Fatalf("status = %q, want permission to outrank an open question batch", got)
 	}
 }
 
@@ -1333,13 +1385,20 @@ func TestAnUnreportedStateOutranksAnObservationWindow(t *testing.T) {
 // TestEveryWaitingLineStandsFromWhenItsConditionOpened: the salient line's
 // instant is the condition's, so a later render does not re-stamp it.
 func TestEveryWaitingLineStandsFromWhenItsConditionOpened(t *testing.T) {
+	waitingAt := func(status *frontendv1.FooterStatus) *frontendv1.FooterStatusActivityAt {
+		return status.GetWaiting().GetActivity().GetSalient().GetAt()
+	}
 	tests := []struct {
 		name string
 		open func(h *harness)
+		at   func(status *frontendv1.FooterStatus) *frontendv1.FooterStatusActivityAt
 	}{
-		{name: "a question batch", open: func(h *harness) { h.r.OnQuestion(testWS, mainAgent, questionStart("q-1", "Which?")) }},
-		{name: "a cold gate", open: func(h *harness) { h.r.SetColdGate(testWS, ColdGate{Standing: true, Cost: ColdGateCost{Lead: "cold"}}) }},
-		{name: "an interrupt", open: func(h *harness) { h.r.SetInterrupting(testWS, true) }},
+		{name: "a question batch", open: func(h *harness) { h.r.OnQuestion(testWS, mainAgent, questionStart("q-1", "Which?")) },
+			at: func(status *frontendv1.FooterStatus) *frontendv1.FooterStatusActivityAt {
+				return status.GetQuestion().GetActivity().GetSalient().GetAt()
+			}},
+		{name: "a cold gate", open: func(h *harness) { h.r.SetColdGate(testWS, ColdGate{Standing: true, Cost: ColdGateCost{Lead: "cold"}}) }, at: waitingAt},
+		{name: "an interrupt", open: func(h *harness) { h.r.SetInterrupting(testWS, true) }, at: waitingAt},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1353,7 +1412,7 @@ func TestEveryWaitingLineStandsFromWhenItsConditionOpened(t *testing.T) {
 			h.r.SetParked(testWS, false)
 
 			// Assert
-			at := h.view(t).GetStrip().GetStatus().GetWaiting().GetActivity().GetSalient().GetAt()
+			at := tt.at(h.view(t).GetStrip().GetStatus())
 			if at.GetAtMs() != instant.UnixMilli() {
 				t.Fatalf("at = %d, want the instant the condition opened", at.GetAtMs())
 			}
@@ -1513,6 +1572,109 @@ func TestEachMergeStepDrawsItsOwnSubstatus(t *testing.T) {
 				t.Fatalf("merging = %+v, want the %s substatus", merging, tt.name)
 			}
 		})
+	}
+}
+
+// TestAMergeHeldOnTheUserIsWaitingOnUser covers the merging substatus raised
+// when the merge's own agent asks the user: only conflict resolution and
+// fixing hand the session a turn that can ask.
+func TestAMergeHeldOnTheUserIsWaitingOnUser(t *testing.T) {
+	tests := []struct {
+		name string
+		step MergeStep
+		ask  func(h *harness)
+		want bool
+	}{
+		{"a permission during conflict resolution", StepConflictResolution,
+			func(h *harness) { h.r.OnPermission(testWS, mainAgent, permissionStart("p-1", "rm -rf build")) }, true},
+		{"a question during fixing", StepFixing,
+			func(h *harness) { h.r.OnQuestion(testWS, mainAgent, questionStart("q-1", "Which approach?")) }, true},
+		{"a permission during testing", StepTesting,
+			func(h *harness) { h.r.OnPermission(testWS, mainAgent, permissionStart("p-1", "rm -rf build")) }, false},
+		{"no ask during fixing", StepFixing, func(*harness) {}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+			h.r.SetMerge(testWS, MergeFacts{State: "merging", Step: tt.step, Attempt: 1, MaxAttempts: 3})
+
+			// Act
+			tt.ask(h)
+
+			// Assert
+			got := h.view(t).GetStrip().GetStatus().GetMerging().GetWaitingOnUser() != nil
+			if got != tt.want {
+				t.Fatalf("waiting on user = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAMergeWaitingOnAPermissionDrawsTheGatedCall(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.SetMerge(testWS, MergeFacts{State: "merging", Step: StepConflictResolution})
+
+	// Act
+	h.r.OnPermission(testWS, mainAgent, permissionStart("p-1", "rm -rf build"))
+
+	// Assert
+	line := h.view(t).GetStrip().GetStatus().GetMerging().GetActivity().GetSalient().GetGatedCall().GetText()
+	if line != "Bash: rm -rf build" {
+		t.Fatalf("activity = %q, want the gated call", line)
+	}
+}
+
+func TestAMergeWaitingOnAQuestionDrawsItsLead(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.SetMerge(testWS, MergeFacts{State: "merging", Step: StepFixing, Attempt: 1, MaxAttempts: 3})
+
+	// Act
+	h.r.OnQuestion(testWS, mainAgent, questionStart("q-1", "Which approach?"))
+
+	// Assert
+	line := h.view(t).GetStrip().GetStatus().GetMerging().GetActivity().GetSalient().GetQuestionLead().GetText()
+	if line != "1 question · Which approach?" {
+		t.Fatalf("activity = %q, want the batch's lead", line)
+	}
+}
+
+func TestAnAnsweredAskReturnsTheMergeToItsStep(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.SetMerge(testWS, MergeFacts{State: "merging", Step: StepFixing, Attempt: 2, MaxAttempts: 3})
+	h.r.OnPermission(testWS, mainAgent, permissionStart("p-1", "rm -rf build"))
+
+	// Act
+	h.r.OnPermission(testWS, mainAgent, &conversationv1.AgentPermission{
+		Id:     &conversationv1.AgentPermissionId{Value: "p-1"},
+		Result: &conversationv1.AgentPermission_Success{Success: &conversationv1.AgentPermissionSuccess{}},
+	})
+
+	// Assert
+	if got := h.view(t).GetStrip().GetStatus().GetMerging().GetFixing().GetAttempt(); got != 2 {
+		t.Fatalf("fixing attempt = %d, want the fixing substatus back at attempt 2", got)
+	}
+}
+
+func TestAMergeWaitingOnUserKeepsTheMergingClaim(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.SetMerge(testWS, MergeFacts{State: "merging", Step: StepConflictResolution})
+
+	// Act
+	h.r.OnPermission(testWS, mainAgent, permissionStart("p-1", "rm -rf build"))
+
+	// Assert
+	if got := h.status(t); got != "merging" {
+		t.Fatalf("status = %q, want merging: the ask is a substatus of the merge", got)
 	}
 }
 

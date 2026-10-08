@@ -145,28 +145,37 @@ message HeldPrompt {
   // behind one and never learns that one ran.
   reserved 10;
   reserved "keep_alive";
+  // Tag 14 and the name `badges` are RETIRED: a card shows one badge
+  // (`badge`), never a list.
+  reserved 14;
+  reserved "badges";
   // PRESENT WHILE THIS PROMPT IS BEING EDITED (EditHeldPrompt.begin), absent
   // otherwise. Daemon-stated: the card draws its editing badge off this
   // field alone. While it stands, this prompt and every prompt queued after
   // it stay held.
   HeldPromptEditing editing = 13;
-  // THE CARD'S STATUS BADGES, DAEMON-COMPOSED: one per standing fact, in this
-  // order, and no others —
+  // THE CARD'S ONE STATUS BADGE, DAEMON-COMPOSED. A held card shows exactly
+  // one badge, whatever stands: the strongest standing fact claims it, in
+  // this order —
   //
-  //   1. the classification arm's badge, unless the arm is daemon_held
-  //      (the hold arm's badge in 5 is what holds it, and the only words);
-  //   2. the editing badge, iff `editing` is present;
-  //   3. the coalesced badge, iff `coalesced` is present;
-  //   4. the confirmation's badge, iff the arm is hold_for_turn_end and its
-  //      acceptance is true;
-  //   5. the hold arm's badge, iff a hold arm is set.
+  //   1. the edit, while `editing` is present (the user is acting on the
+  //      prompt now);
+  //   2. the hold arm, while one is set (it decides whether the prompt can
+  //      move at all);
+  //   3. the classification arm (when the prompt runs relative to the turn in
+  //      front of it). `daemon_held` never claims it: that arm is set only
+  //      beside a hold arm, which outranks it.
   //
-  // A frontend draws each label verbatim and keys the badge's COLOR by the fact
-  // it stands for (the arm, the confirmation, the edit), never by its words; the words
-  // are the daemon's, decided in the one place held-status wording is decided.
-  // A list whose length disagrees with the facts above is a malformed frame and
-  // is rejected loudly rather than drawn with a missing or surplus badge.
-  repeated HeldPromptBadge badges = 14;
+  // Every other standing fact — a fact that lost the badge, the verdict's
+  // confirmation, a coalescence — is said in `notes` instead. ALWAYS SET: an
+  // entry with no badge is a malformed frame and is rejected loudly.
+  HeldPromptBadge badge = 21;
+  // THE STANDING FACTS THE BADGE DOES NOT SHOW, each one sentence, drawn
+  // verbatim in the card's expand-only details in this order: the facts
+  // ranked below the badge's, strongest first, then the verdict's
+  // confirmation, then the coalescence. Empty when the badge is the only
+  // standing fact.
+  repeated HeldPromptStatusNote notes = 22;
   // PRESENT WHEN LATER PROMPTS WERE FOLDED INTO THIS ONE while it was still
   // queued: a prompt the classifier ruled should interrupt a prompt that had
   // not started yet is merged into it rather than queued behind it, and a
@@ -231,7 +240,7 @@ message HeldSessionActPermissionMode {
   string mode = 1;
 }
 
-// One status badge on a held prompt's card, composed daemon-side.
+// The one status badge on a held prompt's card, composed daemon-side.
 message HeldPromptBadge {
   // The badge's words: a short label of one to three words ("after this
   // turn", "restart hold"), drawn verbatim. REQUIRED AND NEVER EMPTY: an empty
@@ -241,8 +250,63 @@ message HeldPromptBadge {
   // verbatim in the card's expand-only details. Absent when the full sentence
   // would only repeat the label.
   optional string detail = 2;
+  // WHICH STANDING FACT THE BADGE SHOWS. A frontend keys the badge's color by
+  // this arm and never by the words, and never re-ranks the entry's facts to
+  // find it: the ranking is the daemon's, stated once on HeldPrompt.badge.
+  // ALWAYS SET; an unset arm is a malformed frame.
+  oneof stands_for {
+    // The classifier is still deciding.
+    HeldPromptBadgeClassifying classifying = 3;
+    // The verdict: the prompt interrupts the running turn.
+    HeldPromptBadgeInterject interject = 4;
+    // The verdict: the prompt joins the running turn after its tool call.
+    HeldPromptBadgeAfterToolCall after_tool_call = 5;
+    // The verdict: the prompt waits for the running turn to end.
+    HeldPromptBadgeHoldForTurnEnd hold_for_turn_end = 6;
+    // The prompt waits behind a context cut, which is never interrupted.
+    HeldPromptBadgeUninterruptibleTurn uninterruptible_turn = 7;
+    // The classifier failed and no verdict exists.
+    HeldPromptBadgeClassificationError classification_error = 8;
+    // The prompt is being edited in the editor's input.
+    HeldPromptBadgeEditing editing = 9;
+    // Held for the daemon's scheduled shutdown.
+    HeldPromptBadgeShutdown shutdown = 10;
+    // Held while the session's build is refreshed.
+    HeldPromptBadgeBuildRefresh build_refresh = 11;
+    // Held until the session reconnects or the vendor serves again.
+    HeldPromptBadgeReconnect reconnect = 12;
+    // Held while a merge of the workspace drives its session.
+    HeldPromptBadgeMerge merge = 13;
+  }
 }
-
+// The badge shows the classifier still deciding.
+message HeldPromptBadgeClassifying {}
+// The badge shows the interject verdict.
+message HeldPromptBadgeInterject {}
+// The badge shows the after-tool-call verdict.
+message HeldPromptBadgeAfterToolCall {}
+// The badge shows the hold-for-turn-end verdict.
+message HeldPromptBadgeHoldForTurnEnd {}
+// The badge shows the wait behind a context cut.
+message HeldPromptBadgeUninterruptibleTurn {}
+// The badge shows the classifier's failure.
+message HeldPromptBadgeClassificationError {}
+// The badge shows the edit in progress.
+message HeldPromptBadgeEditing {}
+// The badge shows the shutdown hold.
+message HeldPromptBadgeShutdown {}
+// The badge shows the build-refresh hold.
+message HeldPromptBadgeBuildRefresh {}
+// The badge shows the reconnect hold.
+message HeldPromptBadgeReconnect {}
+// The badge shows the merge hold.
+message HeldPromptBadgeMerge {}
+// One standing fact the card's badge does not show, said in full.
+message HeldPromptStatusNote {
+  // The fact as one sentence ("held until the merge ends"), drawn verbatim
+  // in the card's expand-only details. REQUIRED AND NEVER EMPTY.
+  string sentence = 1;
+}
 // The prompt is being edited in the editor's input. DELIBERATELY EMPTY: the
 // field's presence is the whole fact.
 message HeldPromptEditing {}

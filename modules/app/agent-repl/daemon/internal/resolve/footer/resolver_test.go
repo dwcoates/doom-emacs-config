@@ -216,8 +216,9 @@ func TestAnIdenticalRepublishIsDeduplicated(t *testing.T) {
 }
 
 func TestTheClockCarriesTheTurnStartInstant(t *testing.T) {
-	// Arrange
+	// Arrange: the route is up; a turn on a route never seen has no clock.
 	h := newHarness(t)
+	connected(h)
 
 	// Act
 	h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActPrompt})
@@ -701,8 +702,9 @@ func TestTheTurnOpenEdgeRaisesSubmittingBeforeAnyFrame(t *testing.T) {
 }
 
 func TestTheTurnOpenEdgeStartsTheStripsClock(t *testing.T) {
-	// Arrange
+	// Arrange: the route is up; a turn on a route never seen has no clock.
 	h := newHarness(t)
+	connected(h)
 
 	// Act
 	h.r.OnTurnOpened(testWS, "turn-1")

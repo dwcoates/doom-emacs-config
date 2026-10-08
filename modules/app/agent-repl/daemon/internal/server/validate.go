@@ -200,6 +200,20 @@ func validateSelectFeedRowRequest(req *agentreplv1.SelectFeedRowRequest) *connec
 	return invalid("move", "a selection move is required")
 }
 
+// validateFoldMergeBubbleRequest requires the workspace, the row and the fold.
+func validateFoldMergeBubbleRequest(req *agentreplv1.FoldMergeBubbleRequest) *connect.Error {
+	if err := validateWorkspaceRef("workspace", req.GetWorkspace()); err != nil {
+		return err
+	}
+	if err := validateFeedID("row", req.GetRow()); err != nil {
+		return err
+	}
+	if req.GetFold() == nil {
+		return invalid("fold", "a fold is required")
+	}
+	return nil
+}
+
 // validateSelectFeedRowStep requires a step's direction.
 func validateSelectFeedRowStep(field string, step *agentreplv1.SelectFeedRowStep) *connect.Error {
 	if step.GetDirection() == agentreplv1.SelectFeedRowDirection_SELECT_FEED_ROW_DIRECTION_UNSPECIFIED {

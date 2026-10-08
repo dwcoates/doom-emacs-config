@@ -34,7 +34,9 @@ message RollBackResponse {
 // The conversation now ends just before the prompt.
 message RollBackSuccess {
   // The prompt rolled back, as the user said it: its text and attachments,
-  // for the composer to hold again.
+  // for the composer to hold again. A quote the prompt replied with
+  // (conversation.v1.UserQuoteBlock) is left out: a resend replies to
+  // whatever is selected when it is sent.
   conversation.v1.UserSaid prompt = 1;
   // How many files were restored. Present exactly when the plan restored
   // files.

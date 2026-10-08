@@ -779,14 +779,26 @@ func TestAWalkIntoTheLiveGapReadsItsStorePages(t *testing.T) {
 // awaitPushed fails the test unless the tail pushes WANT, in order.
 func awaitPushed(t *testing.T, rows <-chan *frontendv1.FeedRow, want ...string) {
 	t.Helper()
+	// A RESTATEMENT IS NOT AN ARRIVAL: a row already pushed is re-pushed when a
+	// later row changes a flag it carries (an answer proved interim, a thinking
+	// row superseded), and that re-push says nothing about arrival order.
+	seen := map[string]bool{}
 	for _, id := range want {
-		select {
-		case row := <-rows:
-			if row.GetId().GetValue() != id {
-				t.Fatalf("pushed %q, want %q", row.GetId().GetValue(), id)
+		for {
+			select {
+			case row := <-rows:
+				got := row.GetId().GetValue()
+				if seen[got] && got != id {
+					continue
+				}
+				if got != id {
+					t.Fatalf("pushed %q, want %q", got, id)
+				}
+				seen[got] = true
+			case <-time.After(tailWait):
+				t.Fatalf("%q never reached the waiting reader's tail", id)
 			}
-		case <-time.After(tailWait):
-			t.Fatalf("%q never reached the waiting reader's tail", id)
+			break
 		}
 	}
 }

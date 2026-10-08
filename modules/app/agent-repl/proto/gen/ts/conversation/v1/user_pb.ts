@@ -14,7 +14,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file conversation/v1/user.proto.
  */
 export const file_conversation_v1_user: GenFile = /*@__PURE__*/
-  fileDesc("Chpjb252ZXJzYXRpb24vdjEvdXNlci5wcm90bxIPY29udmVyc2F0aW9uLnYxIjkKCFVzZXJTYWlkEi0KB2NvbnRlbnQYASABKAsyHC5jb252ZXJzYXRpb24udjEuVXNlckNvbnRlbnQiQAoLVXNlckNvbnRlbnQSMQoGYmxvY2tzGAEgAygLMiEuY29udmVyc2F0aW9uLnYxLlVzZXJDb250ZW50QmxvY2sirwEKEFVzZXJDb250ZW50QmxvY2sSKgoEdGV4dBgBIAEoCzIaLmNvbnZlcnNhdGlvbi52MS5UZXh0QmxvY2tIABIsCgVpbWFnZRgCIAEoCzIbLmNvbnZlcnNhdGlvbi52MS5JbWFnZUJsb2NrSAASOAoLdW5zdXBwb3J0ZWQYAyABKAsyIS5jb252ZXJzYXRpb24udjEuVW5zdXBwb3J0ZWRCbG9ja0gAQgcKBWJsb2NrQjBaLmFnZW50cmVwbC9wcm90by9jb252ZXJzYXRpb24vdjE7Y29udmVyc2F0aW9udjFiBnByb3RvMw", [file_conversation_v1_content_blocks]);
+  fileDesc("Chpjb252ZXJzYXRpb24vdjEvdXNlci5wcm90bxIPY29udmVyc2F0aW9uLnYxIjkKCFVzZXJTYWlkEi0KB2NvbnRlbnQYASABKAsyHC5jb252ZXJzYXRpb24udjEuVXNlckNvbnRlbnQiQAoLVXNlckNvbnRlbnQSMQoGYmxvY2tzGAEgAygLMiEuY29udmVyc2F0aW9uLnYxLlVzZXJDb250ZW50QmxvY2si4QEKEFVzZXJDb250ZW50QmxvY2sSKgoEdGV4dBgBIAEoCzIaLmNvbnZlcnNhdGlvbi52MS5UZXh0QmxvY2tIABIsCgVpbWFnZRgCIAEoCzIbLmNvbnZlcnNhdGlvbi52MS5JbWFnZUJsb2NrSAASOAoLdW5zdXBwb3J0ZWQYAyABKAsyIS5jb252ZXJzYXRpb24udjEuVW5zdXBwb3J0ZWRCbG9ja0gAEjAKBXF1b3RlGAUgASgLMh8uY29udmVyc2F0aW9uLnYxLlVzZXJRdW90ZUJsb2NrSABCBwoFYmxvY2siHgoOVXNlclF1b3RlQmxvY2sSDAoEdGV4dBgBIAEoCUIwWi5hZ2VudHJlcGwvcHJvdG8vY29udmVyc2F0aW9uL3YxO2NvbnZlcnNhdGlvbnYxYgZwcm90bzM", [file_conversation_v1_content_blocks]);
 
 /**
  * Something a person typed — the opening of a turn — or, when nested inside
@@ -100,12 +100,20 @@ export type UserContentBlock = Message<"conversation.v1.UserContentBlock"> & {
      * A block whose kind we do not model. It renders as nothing and is kept so
      * the decision is reversible.
      *
-     * Tag 4 is RETIRED: the attached-file block is deferred.
-     *
      * @generated from field: conversation.v1.UnsupportedBlock unsupported = 3;
      */
     value: UnsupportedBlock;
     case: "unsupported";
+  } | {
+    /**
+     * Tag 4 is RETIRED: the attached-file block is deferred.
+     * An earlier bubble of the conversation the person was replying to when
+     * they sent this, quoted ahead of their own words.
+     *
+     * @generated from field: conversation.v1.UserQuoteBlock quote = 5;
+     */
+    value: UserQuoteBlock;
+    case: "quote";
   } | { case: undefined; value?: undefined };
 };
 
@@ -115,4 +123,38 @@ export type UserContentBlock = Message<"conversation.v1.UserContentBlock"> & {
  */
 export const UserContentBlockSchema: GenMessage<UserContentBlock> = /*@__PURE__*/
   messageDesc(file_conversation_v1_user, 2);
+
+/**
+ * AN EARLIER BUBBLE THE PERSON REPLIED TO, quoted into what they said. When a
+ * prompt is sent with a feed bubble selected, the daemon quotes that bubble
+ * into the prompt as one of these, ahead of the blocks the person typed, so
+ * the person's own words and the quoted reference stay separate in the record
+ * rather than being flattened into one text.
+ *
+ * THE TEXT IS THE QUOTE AS DELIVERED, composed once by the daemon: the reply
+ * preamble naming what is quoted, the quoted bubble's markdown inside a code
+ * fence longer than any backtick run in it, and the closing marker that
+ * introduces the person's own message. The agent receives it verbatim, as text
+ * in its place among the blocks. A client draws it verbatim and never parses
+ * it, and a bubble shows it only when expanded, while the collapsed bubble
+ * shows only the person's own words.
+ *
+ * @generated from message conversation.v1.UserQuoteBlock
+ */
+export type UserQuoteBlock = Message<"conversation.v1.UserQuoteBlock"> & {
+  /**
+   * The composed quote, markdown: preamble, fenced quoted text, closing
+   * marker. Never empty.
+   *
+   * @generated from field: string text = 1;
+   */
+  text: string;
+};
+
+/**
+ * Describes the message conversation.v1.UserQuoteBlock.
+ * Use `create(UserQuoteBlockSchema)` to create a new message.
+ */
+export const UserQuoteBlockSchema: GenMessage<UserQuoteBlock> = /*@__PURE__*/
+  messageDesc(file_conversation_v1_user, 3);
 

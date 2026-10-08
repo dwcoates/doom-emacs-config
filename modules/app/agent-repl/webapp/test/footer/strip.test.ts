@@ -302,6 +302,19 @@ describe("drawFooterSubStatus: the word is the arm, lowercase, with spaces", () 
     expect([cell?.textContent, cell?.classList.contains("tone-green")]).toEqual(["merged", true]);
   });
 
+  // A GATE NAMES ITSELF (owner ruling, 2026-10-08): the status word is the
+  // gate's kind, in the same green as done, never "waiting" and never red.
+  it.each(["permission", "question"])("words a %s gate as its own kind in tone-green", (arm) => {
+    const { row } = drawStrip({ status: status(arm, {}) });
+    const cell = row.querySelector(".footer-status");
+    expect([cell?.textContent, cell?.classList.contains("tone-green")]).toEqual([arm, true]);
+  });
+
+  it.each(["permission", "question"])("MERGES the cell for a %s gate, which declares no substatus oneof", (arm) => {
+    const { row } = drawStrip({ status: status(arm, {}) });
+    expect(row.querySelector(".footer-substatus")).toBeNull();
+  });
+
   it("MERGES the cell for an arm with no substatus oneof at all", () => {
     const { row } = drawStrip({ status: status("background", {}) });
     expect(row.querySelector(".footer-substatus")).toBeNull();
@@ -526,27 +539,6 @@ describe("drawFooterLiveWorkChips", () => {
   ])("gives the %s chip a glyph rather than a bare number", (chip, liveWork) => {
     const { row } = drawStrip({ liveWork });
     expect(row.querySelector(`[data-chip="${chip}"] [data-glyph]`)?.textContent).not.toBe("");
-  });
-
-  it("draws the merge tests chip as the gate's progress fraction", () => {
-    const { row } = drawStrip({ liveWork: { mergeTests: { finished: 8, total: 12 } } });
-    expect(row.querySelector('[data-chip="mergeTests"]')?.textContent).toBe("🧪 8/12");
-  });
-
-  it("gives the merge tests chip its test-tube glyph", () => {
-    const { row } = drawStrip({ liveWork: { mergeTests: { finished: 0, total: 3 } } });
-    expect(row.querySelector('[data-chip="mergeTests"] [data-glyph="mergeTests"]')?.textContent).toBe("🧪");
-  });
-
-  it("selects the merge tests panel when its chip is clicked", () => {
-    const { row, selected } = drawStrip({ liveWork: { mergeTests: { finished: 1, total: 2 } } });
-    row.querySelector<HTMLElement>('[data-chip="mergeTests"]')?.dispatchEvent(new MouseEvent("click"));
-    expect(selected).toEqual(["mergeTests"]);
-  });
-
-  it("highlights the merge tests chip while its panel is open", () => {
-    const { row } = drawStrip({ liveWork: { mergeTests: { finished: 1, total: 2 } } }, "mergeTests");
-    expect(row.querySelector('[data-chip="mergeTests"]')?.getAttribute("data-selected")).toBe("true");
   });
 
   it("draws no merge tests chip while the merge is not testing", () => {

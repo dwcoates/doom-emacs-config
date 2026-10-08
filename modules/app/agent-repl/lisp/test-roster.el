@@ -1430,6 +1430,23 @@ user's next sidebar click."
       ;; Assert
       (should (equal fired nil)))))
 
+(ert-deftest agent-repl-test-roster-question-to-thinking-is-no-finish-edge ()
+  "A question gate returning to thinking is a move WITHIN the running set."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (agent-repl-test-roster--recording-finishes fired
+      (agent-repl-roster-apply
+       (agent-repl-test-roster--roster
+        :sections (list (agent-repl-test-roster--section
+                         "repo" (list (agent-repl-test-roster--row "a" "one" :question))))))
+      ;; Act
+      (agent-repl-roster-apply
+       (agent-repl-test-roster--roster
+        :sections (list (agent-repl-test-roster--section
+                         "repo" (list (agent-repl-test-roster--row "a" "one" :thinking))))))
+      ;; Assert
+      (should (equal fired nil)))))
+
 (ert-deftest agent-repl-test-roster-a-first-sighting-is-no-finish-edge ()
   "A row seen for the first time already settled has crossed nothing."
   ;; Arrange

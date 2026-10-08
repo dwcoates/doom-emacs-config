@@ -614,6 +614,11 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		return nil, fmt.Errorf("claude-repld: build the editor startup: %w", err)
 	}
 
+	// THE SESSIONS' OPEN ASKS, as the merge queue reads them. Built before the
+	// fleet, whose watchers report every ask edge into it, and handed to the
+	// merge orchestrator built below.
+	mergeAsks := merge.NewAsks()
+
 	fleet, err = workspace.NewFleet(workspace.FleetDeps{
 		PublishHost: relay.PublishHostWorkspace,
 		DB:          p.DB,
@@ -628,6 +633,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			Holds:     holdsResolver,
 			Lifecycle: lifecycle,
 			Title:     titleSynth,
+			Merge:     mergeAsks,
 			Stalls:    stalls,
 		},
 		Feed:         feedResolver,
@@ -895,6 +901,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			}
 			return verbs.PublishRegistry(ctx)
 		},
+		Asks:         mergeAsks,
 		DB:           p.DB,
 		Git:          git,
 		Queue:        queue,

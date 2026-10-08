@@ -798,3 +798,90 @@ func TestTheJoinedTurnsTerminalSettlesTheFoldedPrompt(t *testing.T) {
 		t.Fatal("the joined turn's terminal must settle the folded prompt")
 	}
 }
+
+// quoteBlock is the quote of an earlier bubble, as replyquote composes one.
+func quoteBlock(text string) *conversationv1.UserContentBlock {
+	return &conversationv1.UserContentBlock{
+		Block: &conversationv1.UserContentBlock_Quote{Quote: &conversationv1.UserQuoteBlock{Text: text}},
+	}
+}
+
+// TestAQuotedPromptDrawsItsQuoteAsItsOwnBlock pins that a reply's quote is
+// resolved into the row's own quote arm, ahead of the person's words, so the
+// client can draw it in the expanded bubble alone without parsing text.
+func TestAQuotedPromptDrawsItsQuoteAsItsOwnBlock(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	h.promptWith("turn-1", conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT,
+		quoteBlock("⟢ quoted\n```\nParis.\n```"), textBlock("And its population?"))
+
+	// Assert.
+	blocks := h.only(rootFeed()).GetUserPrompt().GetSuccess().GetBody().GetBlocks()
+	if len(blocks) != 2 {
+		t.Fatalf("drawn blocks = %v, want the quote then the words", blocks)
+	}
+	if got := blocks[0].GetQuote().GetText(); got != "⟢ quoted\n```\nParis.\n```" {
+		t.Errorf("first block's quote = %q, want the quote verbatim", got)
+	}
+	if got := blocks[1].GetText().GetText(); got != "And its population?" {
+		t.Errorf("second block's text = %q, want the person's words", got)
+	}
+}
+
+// TestAQuoteIsDrawnUnstripped pins that the host's sentinel strip reaches
+// only the person's words: the quote is the daemon's composition, drawn as
+// composed.
+func TestAQuoteIsDrawnUnstripped(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.resolver.deps.StripSentinels = func(string) string { return "stripped" }
+
+	// Act.
+	h.promptWith("turn-1", conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT,
+		quoteBlock("the quote"), textBlock("words"))
+
+	// Assert.
+	blocks := h.only(rootFeed()).GetUserPrompt().GetSuccess().GetBody().GetBlocks()
+	if got := blocks[0].GetQuote().GetText(); got != "the quote" {
+		t.Fatalf("quote = %q, want it unstripped", got)
+	}
+}
+
+// TestAReplayedQuotedPromptStillDrawsItsQuoteApart pins the restart path: a
+// prompt read back from history (the store's record of what the shim was
+// handed) draws its quote as its own block exactly as the live one did.
+func TestAReplayedQuotedPromptStillDrawsItsQuoteApart(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	entry := promptEntry("turn-1", "And its population?")
+	said := entry.GetUserPrompt().GetSaid()
+	said.Content.Blocks = append([]*conversationv1.UserContentBlock{quoteBlock("the quote")}, said.Content.Blocks...)
+
+	// Act.
+	h.replay(historyPage(&conversationv1.HistoryFloor{}, entry))
+
+	// Assert.
+	blocks := h.only(rootFeed()).GetUserPrompt().GetSuccess().GetBody().GetBlocks()
+	if len(blocks) != 2 || blocks[0].GetQuote().GetText() != "the quote" || blocks[1].GetText().GetText() != "And its population?" {
+		t.Fatalf("replayed blocks = %v, want the quote then the words", blocks)
+	}
+}
+
+// TestAgentBlocksCarryAQuote pins that re-wrapping drawn blocks for an
+// agent-addressed prompt keeps a quote as the agent row's own quote arm
+// rather than dropping it.
+func TestAgentBlocksCarryAQuote(t *testing.T) {
+	// Arrange.
+	quote := &frontendv1.FeedQuoteBlock{Text: "the quote"}
+	blocks := []*frontendv1.FeedUserPromptBlock{{Block: &frontendv1.FeedUserPromptBlock_Quote{Quote: quote}}}
+
+	// Act.
+	got := agentBlocks(blocks)
+
+	// Assert.
+	if len(got) != 1 || got[0].GetQuote() != quote {
+		t.Fatalf("agent blocks = %v, want the quote carried", got)
+	}
+}

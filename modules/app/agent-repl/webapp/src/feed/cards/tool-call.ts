@@ -255,7 +255,7 @@ function drawInputForm(form: FeedToolCallInput["form"], path: string): InputForm
  * No form stated: the line as plain monospace text.
  *
  * NOT the shell treatment. A line the daemon gave no form for is not a command,
- * and drawing it with the "$" chrome and the accent colour would be this module
+ * and drawing it with the "$" chrome and the command grey would be this module
  * asserting a shape nobody stated.
  */
 function drawPlainInput(path: string): InputForm {
@@ -268,7 +268,7 @@ function drawPlainInput(path: string): InputForm {
   return { element: line, prefix: "" };
 }
 
-/** The shell-command form: the accent monospace line, with the client's "$". */
+/** The shell-command form: the grey (`--tool-command`) monospace line, with the client's "$". */
 export function drawFeedToolCallInputCommand(
   _u: FeedToolCallInputCommand,
   path: string,
@@ -294,9 +294,9 @@ export function drawFeedToolCallInputPath(_u: FeedToolCallInputPath, path: strin
 }
 
 /**
- * The query form: the accent monospace line WITHOUT the shell chrome.
+ * The query form: the grey monospace line WITHOUT the shell chrome.
  *
- * A search pattern is not a command line — it gets the same monospace accent a
+ * A search pattern is not a command line — it gets the same grey monospace a
  * grep line has always had, and no "$".
  */
 export function drawFeedToolCallInputQuery(_u: FeedToolCallInputQuery, path: string): InputForm {

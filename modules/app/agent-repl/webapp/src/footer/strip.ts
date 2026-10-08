@@ -35,7 +35,6 @@ import { armButtonRole } from "../control.js";
 import type {
   FooterChipAgents,
   FooterChipCrons,
-  FooterChipMergeTests,
   FooterChipMonitors,
   FooterChipShells,
   FooterChipTasks,
@@ -394,6 +393,17 @@ function statusParts(
         substatusRequired: false,
       };
     }
+    case "permission":
+    case "question":
+      // A GATE NAMES ITSELF (owner ruling, 2026-10-08): the status word is the
+      // gate's kind and the activity line names the ask, so the arm declares
+      // no substatus oneof and the cell merges the same way.
+      return {
+        substatus: undefined,
+        activity: status.value.activity,
+        substatusless: true,
+        substatusRequired: false,
+      };
     case "turnFailed": {
       // A failed turn declares no substatus oneof: the feed's turn-end row
       // carries the account, so the cell merges the same way.
@@ -585,7 +595,6 @@ export function drawFooterLiveWorkChips(u: FooterLiveWorkChips, deps: StripDeps)
   if (u.shells !== undefined) cell.appendChild(drawFooterChipShells(u.shells, deps));
   if (u.monitors !== undefined) cell.appendChild(drawFooterChipMonitors(u.monitors, deps));
   if (u.crons !== undefined) cell.appendChild(drawFooterChipCrons(u.crons, deps));
-  if (u.mergeTests !== undefined) cell.appendChild(drawFooterChipMergeTests(u.mergeTests, deps));
   return cell;
 }
 
@@ -640,14 +649,6 @@ export function drawFooterChipMonitors(u: FooterChipMonitors, deps: StripDeps): 
  */
 export function drawFooterChipCrons(u: FooterChipCrons, deps: StripDeps): HTMLElement {
   return chip("crons", "◷", String(u.count), deps);
-}
-
-/**
- * 🧪 finished/total — the merge's test gate, while it runs. Both figures are
- * the daemon's; the panel's rows are never counted for them.
- */
-export function drawFooterChipMergeTests(u: FooterChipMergeTests, deps: StripDeps): HTMLElement {
-  return chip("mergeTests", "🧪", `${u.finished}/${u.total}`, deps);
 }
 
 /** One chip: glyph, count, and the click that opens its panel. */

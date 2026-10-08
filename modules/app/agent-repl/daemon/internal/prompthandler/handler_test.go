@@ -13,6 +13,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/promptqueue"
+	"claude-repld/internal/replyquote"
 	"claude-repld/internal/wsm"
 )
 
@@ -297,6 +298,25 @@ func TestSubmitAnswersAPanelCommandInline(t *testing.T) {
 	}
 	if len(h.queue.forwarded()) != 0 {
 		t.Fatal("a recognized panel is never forwarded")
+	}
+}
+
+// A COMMAND IS READ FROM THE PERSON'S WORDS. A reply's quote is its own
+// block, never text, so a command typed while a bubble was selected is still
+// the command the person typed.
+func TestSubmitRecognizesACommandTypedAsAReply(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	said := replyquote.Quote(userSaid("/status"), "an earlier answer", false)
+	// Act
+	got, err := h.h.Submit(context.Background(), theWorkspace, said, "key-1",
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, wsm.DeliveryOrdinary, nil)
+	// Assert
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if got.Recognition != RecognizedPanel {
+		t.Fatalf("outcome = %+v, want the status panel recognized", got)
 	}
 }
 

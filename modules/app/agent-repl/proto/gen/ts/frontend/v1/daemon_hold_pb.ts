@@ -39,7 +39,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file frontend/v1/daemon_hold.proto.
  */
 export const file_frontend_v1_daemon_hold: GenFile = /*@__PURE__*/
-  fileDesc("Ch1mcm9udGVuZC92MS9kYWVtb25faG9sZC5wcm90bxILZnJvbnRlbmQudjEiPAoORGFlbW9uSG9sZFRyYXkSKgoFaXRlbXMYAiADKAsyGy5mcm9udGVuZC52MS5EYWVtb25Ib2xkSXRlbSJsCg5EYWVtb25Ib2xkSXRlbRIpCgZwcm9tcHQYASABKAsyFy5mcm9udGVuZC52MS5IZWxkUHJvbXB0SAASJwoFb2ZmZXIYAiABKAsyFi5mcm9udGVuZC52MS5IZWxkT2ZmZXJIAEIGCgRpdGVtIvYICgpIZWxkUHJvbXB0EiUKBHR1cm4YASABKAsyFy5jb252ZXJzYXRpb24udjEuVHVybklkEicKBHNhaWQYAiABKAsyGS5jb252ZXJzYXRpb24udjEuVXNlclNhaWQSMgoJcXVldWVkX2F0GAMgASgLMh8uZnJvbnRlbmQudjEuSGVsZFByb21wdFF1ZXVlZEF0EjkKC2NsYXNzaWZ5aW5nGAQgASgLMiIuZnJvbnRlbmQudjEuSGVsZFByb21wdENsYXNzaWZ5aW5nSAASNQoJaW50ZXJqZWN0GAUgASgLMiAuZnJvbnRlbmQudjEuSGVsZFByb21wdEludGVyamVjdEgAEkIKEWhvbGRfZm9yX3R1cm5fZW5kGAYgASgLMiUuZnJvbnRlbmQudjEuSGVsZFByb21wdEhvbGRGb3JUdXJuRW5kSAASPwoPYWZ0ZXJfdG9vbF9jYWxsGBEgASgLMiQuZnJvbnRlbmQudjEuSGVsZFByb21wdEFmdGVyVG9vbENhbGxIABJKChR1bmludGVycnVwdGlibGVfdHVybhgHIAEoCzIqLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRVbmludGVycnVwdGlibGVUdXJuSAASSgoUY2xhc3NpZmljYXRpb25fZXJyb3IYCCABKAsyKi5mcm9udGVuZC52MS5IZWxkUHJvbXB0Q2xhc3NpZmljYXRpb25FcnJvckgAEjgKC2RhZW1vbl9oZWxkGBMgASgLMiEuZnJvbnRlbmQudjEuSGVsZFByb21wdERhZW1vbkhlbGRIABI3CghzaHV0ZG93bhgJIAEoCzIjLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRTaHV0ZG93bkhvbGRIARI5CglyZWNvbm5lY3QYCyABKAsyJC5mcm9udGVuZC52MS5IZWxkUHJvbXB0UmVjb25uZWN0SG9sZEgBEkAKDWJ1aWxkX3JlZnJlc2gYDCABKAsyJy5mcm9udGVuZC52MS5IZWxkUHJvbXB0QnVpbGRSZWZyZXNoSG9sZEgBEjEKBW1lcmdlGBQgASgLMiAuZnJvbnRlbmQudjEuSGVsZFByb21wdE1lcmdlSG9sZEgBEi8KB2VkaXRpbmcYDSABKAsyHi5mcm9udGVuZC52MS5IZWxkUHJvbXB0RWRpdGluZxIsCgZiYWRnZXMYDiADKAsyHC5mcm9udGVuZC52MS5IZWxkUHJvbXB0QmFkZ2USMwoJY29hbGVzY2VkGA8gASgLMiAuZnJvbnRlbmQudjEuSGVsZFByb21wdENvYWxlc2NlZBIoCgNhY3QYECABKAsyGy5mcm9udGVuZC52MS5IZWxkU2Vzc2lvbkFjdBI5Cgpmb2xkX2Fib3ZlGBIgASgLMiAuZnJvbnRlbmQudjEuSGVsZFByb21wdEZvbGRBYm92ZUgCiAEBQhAKDmNsYXNzaWZpY2F0aW9uQgYKBGhvbGRCDQoLX2ZvbGRfYWJvdmVKBAgKEAtSCmtlZXBfYWxpdmUiPQoTSGVsZFByb21wdEZvbGRBYm92ZRImCgVhYm92ZRgBIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWQiFQoTSGVsZFByb21wdENvYWxlc2NlZCKQAQoOSGVsZFNlc3Npb25BY3QSMQoFbW9kZWwYASABKAsyIC5mcm9udGVuZC52MS5IZWxkU2Vzc2lvbkFjdE1vZGVsSAASRAoPcGVybWlzc2lvbl9tb2RlGAIgASgLMikuZnJvbnRlbmQudjEuSGVsZFNlc3Npb25BY3RQZXJtaXNzaW9uTW9kZUgAQgUKA2FjdCIkChNIZWxkU2Vzc2lvbkFjdE1vZGVsEg0KBW1vZGVsGAEgASgJIiwKHEhlbGRTZXNzaW9uQWN0UGVybWlzc2lvbk1vZGUSDAoEbW9kZRgBIAEoCSJACg9IZWxkUHJvbXB0QmFkZ2USDQoFbGFiZWwYASABKAkSEwoGZGV0YWlsGAIgASgJSACIAQFCCQoHX2RldGFpbCITChFIZWxkUHJvbXB0RWRpdGluZyIjChJIZWxkUHJvbXB0UXVldWVkQXQSDQoFYXRfbXMYASABKAMiFwoVSGVsZFByb21wdENsYXNzaWZ5aW5nIigKE0hlbGRQcm9tcHRJbnRlcmplY3QSEQoJcmF0aW9uYWxlGAEgASgJIiwKF0hlbGRQcm9tcHRBZnRlclRvb2xDYWxsEhEKCXJhdGlvbmFsZRgBIAEoCSJgChhIZWxkUHJvbXB0SG9sZEZvclR1cm5FbmQSEQoJcmF0aW9uYWxlGAEgASgJEjEKCGFjY2VwdGVkGAIgASgLMh8uZnJvbnRlbmQudjEuSGVsZFByb21wdEFjY2VwdGVkIiYKEkhlbGRQcm9tcHRBY2NlcHRlZBIQCghhY2NlcHRlZBgBIAEoCCJRCh1IZWxkUHJvbXB0VW5pbnRlcnJ1cHRpYmxlVHVybhIwCgdjb21tYW5kGAEgASgOMh8uY29udmVyc2F0aW9uLnYxLlNlc3Npb25Db21tYW5kIi8KHUhlbGRQcm9tcHRDbGFzc2lmaWNhdGlvbkVycm9yEg4KBmRldGFpbBgBIAEoCSItChZIZWxkUHJvbXB0U2h1dGRvd25Ib2xkEhMKC3NjaGVkdWxlX2lkGAEgASgJIhkKF0hlbGRQcm9tcHRSZWNvbm5lY3RIb2xkIhUKE0hlbGRQcm9tcHRNZXJnZUhvbGQiFgoUSGVsZFByb21wdERhZW1vbkhlbGQiHAoaSGVsZFByb21wdEJ1aWxkUmVmcmVzaEhvbGQiUQoJSGVsZE9mZmVyEjsKDW1lcmdlX2RlcXVldWUYASABKAsyIi5mcm9udGVuZC52MS5IZWxkT2ZmZXJNZXJnZURlcXVldWVIAEIHCgVvZmZlciJJChVIZWxkT2ZmZXJNZXJnZURlcXVldWUSMAoIaGVhZGxpbmUYASABKAsyHi5mcm9udGVuZC52MS5IZWxkT2ZmZXJIZWFkbGluZSIhChFIZWxkT2ZmZXJIZWFkbGluZRIMCgR0ZXh0GAEgASgJQihaJmFnZW50cmVwbC9wcm90by9mcm9udGVuZC92MTtmcm9udGVuZHYxYgZwcm90bzM", [file_conversation_v1_slash_command, file_conversation_v1_turn, file_conversation_v1_user]);
+  fileDesc("Ch1mcm9udGVuZC92MS9kYWVtb25faG9sZC5wcm90bxILZnJvbnRlbmQudjEiPAoORGFlbW9uSG9sZFRyYXkSKgoFaXRlbXMYAiADKAsyGy5mcm9udGVuZC52MS5EYWVtb25Ib2xkSXRlbSJsCg5EYWVtb25Ib2xkSXRlbRIpCgZwcm9tcHQYASABKAsyFy5mcm9udGVuZC52MS5IZWxkUHJvbXB0SAASJwoFb2ZmZXIYAiABKAsyFi5mcm9udGVuZC52MS5IZWxkT2ZmZXJIAEIGCgRpdGVtIrUJCgpIZWxkUHJvbXB0EiUKBHR1cm4YASABKAsyFy5jb252ZXJzYXRpb24udjEuVHVybklkEicKBHNhaWQYAiABKAsyGS5jb252ZXJzYXRpb24udjEuVXNlclNhaWQSMgoJcXVldWVkX2F0GAMgASgLMh8uZnJvbnRlbmQudjEuSGVsZFByb21wdFF1ZXVlZEF0EjkKC2NsYXNzaWZ5aW5nGAQgASgLMiIuZnJvbnRlbmQudjEuSGVsZFByb21wdENsYXNzaWZ5aW5nSAASNQoJaW50ZXJqZWN0GAUgASgLMiAuZnJvbnRlbmQudjEuSGVsZFByb21wdEludGVyamVjdEgAEkIKEWhvbGRfZm9yX3R1cm5fZW5kGAYgASgLMiUuZnJvbnRlbmQudjEuSGVsZFByb21wdEhvbGRGb3JUdXJuRW5kSAASPwoPYWZ0ZXJfdG9vbF9jYWxsGBEgASgLMiQuZnJvbnRlbmQudjEuSGVsZFByb21wdEFmdGVyVG9vbENhbGxIABJKChR1bmludGVycnVwdGlibGVfdHVybhgHIAEoCzIqLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRVbmludGVycnVwdGlibGVUdXJuSAASSgoUY2xhc3NpZmljYXRpb25fZXJyb3IYCCABKAsyKi5mcm9udGVuZC52MS5IZWxkUHJvbXB0Q2xhc3NpZmljYXRpb25FcnJvckgAEjgKC2RhZW1vbl9oZWxkGBMgASgLMiEuZnJvbnRlbmQudjEuSGVsZFByb21wdERhZW1vbkhlbGRIABI3CghzaHV0ZG93bhgJIAEoCzIjLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRTaHV0ZG93bkhvbGRIARI5CglyZWNvbm5lY3QYCyABKAsyJC5mcm9udGVuZC52MS5IZWxkUHJvbXB0UmVjb25uZWN0SG9sZEgBEkAKDWJ1aWxkX3JlZnJlc2gYDCABKAsyJy5mcm9udGVuZC52MS5IZWxkUHJvbXB0QnVpbGRSZWZyZXNoSG9sZEgBEjEKBW1lcmdlGBQgASgLMiAuZnJvbnRlbmQudjEuSGVsZFByb21wdE1lcmdlSG9sZEgBEi8KB2VkaXRpbmcYDSABKAsyHi5mcm9udGVuZC52MS5IZWxkUHJvbXB0RWRpdGluZxIrCgViYWRnZRgVIAEoCzIcLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRCYWRnZRIwCgVub3RlcxgWIAMoCzIhLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRTdGF0dXNOb3RlEjMKCWNvYWxlc2NlZBgPIAEoCzIgLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRDb2FsZXNjZWQSKAoDYWN0GBAgASgLMhsuZnJvbnRlbmQudjEuSGVsZFNlc3Npb25BY3QSOQoKZm9sZF9hYm92ZRgSIAEoCzIgLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRGb2xkQWJvdmVIAogBAUIQCg5jbGFzc2lmaWNhdGlvbkIGCgRob2xkQg0KC19mb2xkX2Fib3ZlSgQIChALSgQIDhAPUgprZWVwX2FsaXZlUgZiYWRnZXMiPQoTSGVsZFByb21wdEZvbGRBYm92ZRImCgVhYm92ZRgBIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWQiFQoTSGVsZFByb21wdENvYWxlc2NlZCKQAQoOSGVsZFNlc3Npb25BY3QSMQoFbW9kZWwYASABKAsyIC5mcm9udGVuZC52MS5IZWxkU2Vzc2lvbkFjdE1vZGVsSAASRAoPcGVybWlzc2lvbl9tb2RlGAIgASgLMikuZnJvbnRlbmQudjEuSGVsZFNlc3Npb25BY3RQZXJtaXNzaW9uTW9kZUgAQgUKA2FjdCIkChNIZWxkU2Vzc2lvbkFjdE1vZGVsEg0KBW1vZGVsGAEgASgJIiwKHEhlbGRTZXNzaW9uQWN0UGVybWlzc2lvbk1vZGUSDAoEbW9kZRgBIAEoCSKgBgoPSGVsZFByb21wdEJhZGdlEg0KBWxhYmVsGAEgASgJEhMKBmRldGFpbBgCIAEoCUgBiAEBEj4KC2NsYXNzaWZ5aW5nGAMgASgLMicuZnJvbnRlbmQudjEuSGVsZFByb21wdEJhZGdlQ2xhc3NpZnlpbmdIABI6CglpbnRlcmplY3QYBCABKAsyJS5mcm9udGVuZC52MS5IZWxkUHJvbXB0QmFkZ2VJbnRlcmplY3RIABJECg9hZnRlcl90b29sX2NhbGwYBSABKAsyKS5mcm9udGVuZC52MS5IZWxkUHJvbXB0QmFkZ2VBZnRlclRvb2xDYWxsSAASRwoRaG9sZF9mb3JfdHVybl9lbmQYBiABKAsyKi5mcm9udGVuZC52MS5IZWxkUHJvbXB0QmFkZ2VIb2xkRm9yVHVybkVuZEgAEk8KFHVuaW50ZXJydXB0aWJsZV90dXJuGAcgASgLMi8uZnJvbnRlbmQudjEuSGVsZFByb21wdEJhZGdlVW5pbnRlcnJ1cHRpYmxlVHVybkgAEk8KFGNsYXNzaWZpY2F0aW9uX2Vycm9yGAggASgLMi8uZnJvbnRlbmQudjEuSGVsZFByb21wdEJhZGdlQ2xhc3NpZmljYXRpb25FcnJvckgAEjYKB2VkaXRpbmcYCSABKAsyIy5mcm9udGVuZC52MS5IZWxkUHJvbXB0QmFkZ2VFZGl0aW5nSAASOAoIc2h1dGRvd24YCiABKAsyJC5mcm9udGVuZC52MS5IZWxkUHJvbXB0QmFkZ2VTaHV0ZG93bkgAEkEKDWJ1aWxkX3JlZnJlc2gYCyABKAsyKC5mcm9udGVuZC52MS5IZWxkUHJvbXB0QmFkZ2VCdWlsZFJlZnJlc2hIABI6CglyZWNvbm5lY3QYDCABKAsyJS5mcm9udGVuZC52MS5IZWxkUHJvbXB0QmFkZ2VSZWNvbm5lY3RIABIyCgVtZXJnZRgNIAEoCzIhLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRCYWRnZU1lcmdlSABCDAoKc3RhbmRzX2ZvckIJCgdfZGV0YWlsIhwKGkhlbGRQcm9tcHRCYWRnZUNsYXNzaWZ5aW5nIhoKGEhlbGRQcm9tcHRCYWRnZUludGVyamVjdCIeChxIZWxkUHJvbXB0QmFkZ2VBZnRlclRvb2xDYWxsIh8KHUhlbGRQcm9tcHRCYWRnZUhvbGRGb3JUdXJuRW5kIiQKIkhlbGRQcm9tcHRCYWRnZVVuaW50ZXJydXB0aWJsZVR1cm4iJAoiSGVsZFByb21wdEJhZGdlQ2xhc3NpZmljYXRpb25FcnJvciIYChZIZWxkUHJvbXB0QmFkZ2VFZGl0aW5nIhkKF0hlbGRQcm9tcHRCYWRnZVNodXRkb3duIh0KG0hlbGRQcm9tcHRCYWRnZUJ1aWxkUmVmcmVzaCIaChhIZWxkUHJvbXB0QmFkZ2VSZWNvbm5lY3QiFgoUSGVsZFByb21wdEJhZGdlTWVyZ2UiKAoUSGVsZFByb21wdFN0YXR1c05vdGUSEAoIc2VudGVuY2UYASABKAkiEwoRSGVsZFByb21wdEVkaXRpbmciIwoSSGVsZFByb21wdFF1ZXVlZEF0Eg0KBWF0X21zGAEgASgDIhcKFUhlbGRQcm9tcHRDbGFzc2lmeWluZyIoChNIZWxkUHJvbXB0SW50ZXJqZWN0EhEKCXJhdGlvbmFsZRgBIAEoCSIsChdIZWxkUHJvbXB0QWZ0ZXJUb29sQ2FsbBIRCglyYXRpb25hbGUYASABKAkiYAoYSGVsZFByb21wdEhvbGRGb3JUdXJuRW5kEhEKCXJhdGlvbmFsZRgBIAEoCRIxCghhY2NlcHRlZBgCIAEoCzIfLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRBY2NlcHRlZCImChJIZWxkUHJvbXB0QWNjZXB0ZWQSEAoIYWNjZXB0ZWQYASABKAgiUQodSGVsZFByb21wdFVuaW50ZXJydXB0aWJsZVR1cm4SMAoHY29tbWFuZBgBIAEoDjIfLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uQ29tbWFuZCIvCh1IZWxkUHJvbXB0Q2xhc3NpZmljYXRpb25FcnJvchIOCgZkZXRhaWwYASABKAkiLQoWSGVsZFByb21wdFNodXRkb3duSG9sZBITCgtzY2hlZHVsZV9pZBgBIAEoCSIZChdIZWxkUHJvbXB0UmVjb25uZWN0SG9sZCIVChNIZWxkUHJvbXB0TWVyZ2VIb2xkIhYKFEhlbGRQcm9tcHREYWVtb25IZWxkIhwKGkhlbGRQcm9tcHRCdWlsZFJlZnJlc2hIb2xkIlEKCUhlbGRPZmZlchI7Cg1tZXJnZV9kZXF1ZXVlGAEgASgLMiIuZnJvbnRlbmQudjEuSGVsZE9mZmVyTWVyZ2VEZXF1ZXVlSABCBwoFb2ZmZXIiSQoVSGVsZE9mZmVyTWVyZ2VEZXF1ZXVlEjAKCGhlYWRsaW5lGAEgASgLMh4uZnJvbnRlbmQudjEuSGVsZE9mZmVySGVhZGxpbmUiIQoRSGVsZE9mZmVySGVhZGxpbmUSDAoEdGV4dBgBIAEoCUIoWiZhZ2VudHJlcGwvcHJvdG8vZnJvbnRlbmQvdjE7ZnJvbnRlbmR2MWIGcHJvdG8z", [file_conversation_v1_slash_command, file_conversation_v1_turn, file_conversation_v1_user]);
 
 /**
  * The tray, resolved by the daemon and pushed on EVERY change. An empty
@@ -294,26 +294,36 @@ export type HeldPrompt = Message<"frontend.v1.HeldPrompt"> & {
   editing?: HeldPromptEditing | undefined;
 
   /**
-   * THE CARD'S STATUS BADGES, DAEMON-COMPOSED: one per standing fact, in this
-   * order, and no others —
+   * THE CARD'S ONE STATUS BADGE, DAEMON-COMPOSED. A held card shows exactly
+   * one badge, whatever stands: the strongest standing fact claims it, in
+   * this order —
    *
-   *   1. the classification arm's badge, unless the arm is daemon_held
-   *      (the hold arm's badge in 5 is what holds it, and the only words);
-   *   2. the editing badge, iff `editing` is present;
-   *   3. the coalesced badge, iff `coalesced` is present;
-   *   4. the confirmation's badge, iff the arm is hold_for_turn_end and its
-   *      acceptance is true;
-   *   5. the hold arm's badge, iff a hold arm is set.
+   *   1. the edit, while `editing` is present (the user is acting on the
+   *      prompt now);
+   *   2. the hold arm, while one is set (it decides whether the prompt can
+   *      move at all);
+   *   3. the classification arm (when the prompt runs relative to the turn in
+   *      front of it). `daemon_held` never claims it: that arm is set only
+   *      beside a hold arm, which outranks it.
    *
-   * A frontend draws each label verbatim and keys the badge's COLOR by the fact
-   * it stands for (the arm, the confirmation, the edit), never by its words; the words
-   * are the daemon's, decided in the one place held-status wording is decided.
-   * A list whose length disagrees with the facts above is a malformed frame and
-   * is rejected loudly rather than drawn with a missing or surplus badge.
+   * Every other standing fact — a fact that lost the badge, the verdict's
+   * confirmation, a coalescence — is said in `notes` instead. ALWAYS SET: an
+   * entry with no badge is a malformed frame and is rejected loudly.
    *
-   * @generated from field: repeated frontend.v1.HeldPromptBadge badges = 14;
+   * @generated from field: frontend.v1.HeldPromptBadge badge = 21;
    */
-  badges: HeldPromptBadge[];
+  badge?: HeldPromptBadge | undefined;
+
+  /**
+   * THE STANDING FACTS THE BADGE DOES NOT SHOW, each one sentence, drawn
+   * verbatim in the card's expand-only details in this order: the facts
+   * ranked below the badge's, strongest first, then the verdict's
+   * confirmation, then the coalescence. Empty when the badge is the only
+   * standing fact.
+   *
+   * @generated from field: repeated frontend.v1.HeldPromptStatusNote notes = 22;
+   */
+  notes: HeldPromptStatusNote[];
 
   /**
    * PRESENT WHEN LATER PROMPTS WERE FOLDED INTO THIS ONE while it was still
@@ -483,7 +493,7 @@ export const HeldSessionActPermissionModeSchema: GenMessage<HeldSessionActPermis
   messageDesc(file_frontend_v1_daemon_hold, 7);
 
 /**
- * One status badge on a held prompt's card, composed daemon-side.
+ * The one status badge on a held prompt's card, composed daemon-side.
  *
  * @generated from message frontend.v1.HeldPromptBadge
  */
@@ -505,6 +515,104 @@ export type HeldPromptBadge = Message<"frontend.v1.HeldPromptBadge"> & {
    * @generated from field: optional string detail = 2;
    */
   detail?: string | undefined;
+
+  /**
+   * WHICH STANDING FACT THE BADGE SHOWS. A frontend keys the badge's color by
+   * this arm and never by the words, and never re-ranks the entry's facts to
+   * find it: the ranking is the daemon's, stated once on HeldPrompt.badge.
+   * ALWAYS SET; an unset arm is a malformed frame.
+   *
+   * @generated from oneof frontend.v1.HeldPromptBadge.stands_for
+   */
+  standsFor: {
+    /**
+     * The classifier is still deciding.
+     *
+     * @generated from field: frontend.v1.HeldPromptBadgeClassifying classifying = 3;
+     */
+    value: HeldPromptBadgeClassifying;
+    case: "classifying";
+  } | {
+    /**
+     * The verdict: the prompt interrupts the running turn.
+     *
+     * @generated from field: frontend.v1.HeldPromptBadgeInterject interject = 4;
+     */
+    value: HeldPromptBadgeInterject;
+    case: "interject";
+  } | {
+    /**
+     * The verdict: the prompt joins the running turn after its tool call.
+     *
+     * @generated from field: frontend.v1.HeldPromptBadgeAfterToolCall after_tool_call = 5;
+     */
+    value: HeldPromptBadgeAfterToolCall;
+    case: "afterToolCall";
+  } | {
+    /**
+     * The verdict: the prompt waits for the running turn to end.
+     *
+     * @generated from field: frontend.v1.HeldPromptBadgeHoldForTurnEnd hold_for_turn_end = 6;
+     */
+    value: HeldPromptBadgeHoldForTurnEnd;
+    case: "holdForTurnEnd";
+  } | {
+    /**
+     * The prompt waits behind a context cut, which is never interrupted.
+     *
+     * @generated from field: frontend.v1.HeldPromptBadgeUninterruptibleTurn uninterruptible_turn = 7;
+     */
+    value: HeldPromptBadgeUninterruptibleTurn;
+    case: "uninterruptibleTurn";
+  } | {
+    /**
+     * The classifier failed and no verdict exists.
+     *
+     * @generated from field: frontend.v1.HeldPromptBadgeClassificationError classification_error = 8;
+     */
+    value: HeldPromptBadgeClassificationError;
+    case: "classificationError";
+  } | {
+    /**
+     * The prompt is being edited in the editor's input.
+     *
+     * @generated from field: frontend.v1.HeldPromptBadgeEditing editing = 9;
+     */
+    value: HeldPromptBadgeEditing;
+    case: "editing";
+  } | {
+    /**
+     * Held for the daemon's scheduled shutdown.
+     *
+     * @generated from field: frontend.v1.HeldPromptBadgeShutdown shutdown = 10;
+     */
+    value: HeldPromptBadgeShutdown;
+    case: "shutdown";
+  } | {
+    /**
+     * Held while the session's build is refreshed.
+     *
+     * @generated from field: frontend.v1.HeldPromptBadgeBuildRefresh build_refresh = 11;
+     */
+    value: HeldPromptBadgeBuildRefresh;
+    case: "buildRefresh";
+  } | {
+    /**
+     * Held until the session reconnects or the vendor serves again.
+     *
+     * @generated from field: frontend.v1.HeldPromptBadgeReconnect reconnect = 12;
+     */
+    value: HeldPromptBadgeReconnect;
+    case: "reconnect";
+  } | {
+    /**
+     * Held while a merge of the workspace drives its session.
+     *
+     * @generated from field: frontend.v1.HeldPromptBadgeMerge merge = 13;
+     */
+    value: HeldPromptBadgeMerge;
+    case: "merge";
+  } | { case: undefined; value?: undefined };
 };
 
 /**
@@ -513,6 +621,193 @@ export type HeldPromptBadge = Message<"frontend.v1.HeldPromptBadge"> & {
  */
 export const HeldPromptBadgeSchema: GenMessage<HeldPromptBadge> = /*@__PURE__*/
   messageDesc(file_frontend_v1_daemon_hold, 8);
+
+/**
+ * The badge shows the classifier still deciding.
+ *
+ * @generated from message frontend.v1.HeldPromptBadgeClassifying
+ */
+export type HeldPromptBadgeClassifying = Message<"frontend.v1.HeldPromptBadgeClassifying"> & {
+};
+
+/**
+ * Describes the message frontend.v1.HeldPromptBadgeClassifying.
+ * Use `create(HeldPromptBadgeClassifyingSchema)` to create a new message.
+ */
+export const HeldPromptBadgeClassifyingSchema: GenMessage<HeldPromptBadgeClassifying> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_daemon_hold, 9);
+
+/**
+ * The badge shows the interject verdict.
+ *
+ * @generated from message frontend.v1.HeldPromptBadgeInterject
+ */
+export type HeldPromptBadgeInterject = Message<"frontend.v1.HeldPromptBadgeInterject"> & {
+};
+
+/**
+ * Describes the message frontend.v1.HeldPromptBadgeInterject.
+ * Use `create(HeldPromptBadgeInterjectSchema)` to create a new message.
+ */
+export const HeldPromptBadgeInterjectSchema: GenMessage<HeldPromptBadgeInterject> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_daemon_hold, 10);
+
+/**
+ * The badge shows the after-tool-call verdict.
+ *
+ * @generated from message frontend.v1.HeldPromptBadgeAfterToolCall
+ */
+export type HeldPromptBadgeAfterToolCall = Message<"frontend.v1.HeldPromptBadgeAfterToolCall"> & {
+};
+
+/**
+ * Describes the message frontend.v1.HeldPromptBadgeAfterToolCall.
+ * Use `create(HeldPromptBadgeAfterToolCallSchema)` to create a new message.
+ */
+export const HeldPromptBadgeAfterToolCallSchema: GenMessage<HeldPromptBadgeAfterToolCall> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_daemon_hold, 11);
+
+/**
+ * The badge shows the hold-for-turn-end verdict.
+ *
+ * @generated from message frontend.v1.HeldPromptBadgeHoldForTurnEnd
+ */
+export type HeldPromptBadgeHoldForTurnEnd = Message<"frontend.v1.HeldPromptBadgeHoldForTurnEnd"> & {
+};
+
+/**
+ * Describes the message frontend.v1.HeldPromptBadgeHoldForTurnEnd.
+ * Use `create(HeldPromptBadgeHoldForTurnEndSchema)` to create a new message.
+ */
+export const HeldPromptBadgeHoldForTurnEndSchema: GenMessage<HeldPromptBadgeHoldForTurnEnd> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_daemon_hold, 12);
+
+/**
+ * The badge shows the wait behind a context cut.
+ *
+ * @generated from message frontend.v1.HeldPromptBadgeUninterruptibleTurn
+ */
+export type HeldPromptBadgeUninterruptibleTurn = Message<"frontend.v1.HeldPromptBadgeUninterruptibleTurn"> & {
+};
+
+/**
+ * Describes the message frontend.v1.HeldPromptBadgeUninterruptibleTurn.
+ * Use `create(HeldPromptBadgeUninterruptibleTurnSchema)` to create a new message.
+ */
+export const HeldPromptBadgeUninterruptibleTurnSchema: GenMessage<HeldPromptBadgeUninterruptibleTurn> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_daemon_hold, 13);
+
+/**
+ * The badge shows the classifier's failure.
+ *
+ * @generated from message frontend.v1.HeldPromptBadgeClassificationError
+ */
+export type HeldPromptBadgeClassificationError = Message<"frontend.v1.HeldPromptBadgeClassificationError"> & {
+};
+
+/**
+ * Describes the message frontend.v1.HeldPromptBadgeClassificationError.
+ * Use `create(HeldPromptBadgeClassificationErrorSchema)` to create a new message.
+ */
+export const HeldPromptBadgeClassificationErrorSchema: GenMessage<HeldPromptBadgeClassificationError> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_daemon_hold, 14);
+
+/**
+ * The badge shows the edit in progress.
+ *
+ * @generated from message frontend.v1.HeldPromptBadgeEditing
+ */
+export type HeldPromptBadgeEditing = Message<"frontend.v1.HeldPromptBadgeEditing"> & {
+};
+
+/**
+ * Describes the message frontend.v1.HeldPromptBadgeEditing.
+ * Use `create(HeldPromptBadgeEditingSchema)` to create a new message.
+ */
+export const HeldPromptBadgeEditingSchema: GenMessage<HeldPromptBadgeEditing> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_daemon_hold, 15);
+
+/**
+ * The badge shows the shutdown hold.
+ *
+ * @generated from message frontend.v1.HeldPromptBadgeShutdown
+ */
+export type HeldPromptBadgeShutdown = Message<"frontend.v1.HeldPromptBadgeShutdown"> & {
+};
+
+/**
+ * Describes the message frontend.v1.HeldPromptBadgeShutdown.
+ * Use `create(HeldPromptBadgeShutdownSchema)` to create a new message.
+ */
+export const HeldPromptBadgeShutdownSchema: GenMessage<HeldPromptBadgeShutdown> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_daemon_hold, 16);
+
+/**
+ * The badge shows the build-refresh hold.
+ *
+ * @generated from message frontend.v1.HeldPromptBadgeBuildRefresh
+ */
+export type HeldPromptBadgeBuildRefresh = Message<"frontend.v1.HeldPromptBadgeBuildRefresh"> & {
+};
+
+/**
+ * Describes the message frontend.v1.HeldPromptBadgeBuildRefresh.
+ * Use `create(HeldPromptBadgeBuildRefreshSchema)` to create a new message.
+ */
+export const HeldPromptBadgeBuildRefreshSchema: GenMessage<HeldPromptBadgeBuildRefresh> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_daemon_hold, 17);
+
+/**
+ * The badge shows the reconnect hold.
+ *
+ * @generated from message frontend.v1.HeldPromptBadgeReconnect
+ */
+export type HeldPromptBadgeReconnect = Message<"frontend.v1.HeldPromptBadgeReconnect"> & {
+};
+
+/**
+ * Describes the message frontend.v1.HeldPromptBadgeReconnect.
+ * Use `create(HeldPromptBadgeReconnectSchema)` to create a new message.
+ */
+export const HeldPromptBadgeReconnectSchema: GenMessage<HeldPromptBadgeReconnect> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_daemon_hold, 18);
+
+/**
+ * The badge shows the merge hold.
+ *
+ * @generated from message frontend.v1.HeldPromptBadgeMerge
+ */
+export type HeldPromptBadgeMerge = Message<"frontend.v1.HeldPromptBadgeMerge"> & {
+};
+
+/**
+ * Describes the message frontend.v1.HeldPromptBadgeMerge.
+ * Use `create(HeldPromptBadgeMergeSchema)` to create a new message.
+ */
+export const HeldPromptBadgeMergeSchema: GenMessage<HeldPromptBadgeMerge> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_daemon_hold, 19);
+
+/**
+ * One standing fact the card's badge does not show, said in full.
+ *
+ * @generated from message frontend.v1.HeldPromptStatusNote
+ */
+export type HeldPromptStatusNote = Message<"frontend.v1.HeldPromptStatusNote"> & {
+  /**
+   * The fact as one sentence ("held until the merge ends"), drawn verbatim
+   * in the card's expand-only details. REQUIRED AND NEVER EMPTY.
+   *
+   * @generated from field: string sentence = 1;
+   */
+  sentence: string;
+};
+
+/**
+ * Describes the message frontend.v1.HeldPromptStatusNote.
+ * Use `create(HeldPromptStatusNoteSchema)` to create a new message.
+ */
+export const HeldPromptStatusNoteSchema: GenMessage<HeldPromptStatusNote> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_daemon_hold, 20);
 
 /**
  * The prompt is being edited in the editor's input. DELIBERATELY EMPTY: the
@@ -528,7 +823,7 @@ export type HeldPromptEditing = Message<"frontend.v1.HeldPromptEditing"> & {
  * Use `create(HeldPromptEditingSchema)` to create a new message.
  */
 export const HeldPromptEditingSchema: GenMessage<HeldPromptEditing> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_daemon_hold, 9);
+  messageDesc(file_frontend_v1_daemon_hold, 21);
 
 /**
  * When a held prompt was queued.
@@ -549,7 +844,7 @@ export type HeldPromptQueuedAt = Message<"frontend.v1.HeldPromptQueuedAt"> & {
  * Use `create(HeldPromptQueuedAtSchema)` to create a new message.
  */
 export const HeldPromptQueuedAtSchema: GenMessage<HeldPromptQueuedAt> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_daemon_hold, 10);
+  messageDesc(file_frontend_v1_daemon_hold, 22);
 
 /**
  * The classifier is still running: the entry is queued and undecided.
@@ -564,7 +859,7 @@ export type HeldPromptClassifying = Message<"frontend.v1.HeldPromptClassifying">
  * Use `create(HeldPromptClassifyingSchema)` to create a new message.
  */
 export const HeldPromptClassifyingSchema: GenMessage<HeldPromptClassifying> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_daemon_hold, 11);
+  messageDesc(file_frontend_v1_daemon_hold, 23);
 
 /**
  * Deliver NOW: interrupt the running turn and submit once it has ended.
@@ -585,7 +880,7 @@ export type HeldPromptInterject = Message<"frontend.v1.HeldPromptInterject"> & {
  * Use `create(HeldPromptInterjectSchema)` to create a new message.
  */
 export const HeldPromptInterjectSchema: GenMessage<HeldPromptInterject> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_daemon_hold, 12);
+  messageDesc(file_frontend_v1_daemon_hold, 24);
 
 /**
  * Deliver NOW into the running turn, which takes it after its current tool
@@ -607,7 +902,7 @@ export type HeldPromptAfterToolCall = Message<"frontend.v1.HeldPromptAfterToolCa
  * Use `create(HeldPromptAfterToolCallSchema)` to create a new message.
  */
 export const HeldPromptAfterToolCallSchema: GenMessage<HeldPromptAfterToolCall> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_daemon_hold, 13);
+  messageDesc(file_frontend_v1_daemon_hold, 25);
 
 /**
  * Deliver when the turn ends on its own; do not interrupt for it.
@@ -638,7 +933,7 @@ export type HeldPromptHoldForTurnEnd = Message<"frontend.v1.HeldPromptHoldForTur
  * Use `create(HeldPromptHoldForTurnEndSchema)` to create a new message.
  */
 export const HeldPromptHoldForTurnEndSchema: GenMessage<HeldPromptHoldForTurnEnd> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_daemon_hold, 14);
+  messageDesc(file_frontend_v1_daemon_hold, 26);
 
 /**
  * The user's confirmation of a hold.
@@ -661,7 +956,7 @@ export type HeldPromptAccepted = Message<"frontend.v1.HeldPromptAccepted"> & {
  * Use `create(HeldPromptAcceptedSchema)` to create a new message.
  */
 export const HeldPromptAcceptedSchema: GenMessage<HeldPromptAccepted> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_daemon_hold, 15);
+  messageDesc(file_frontend_v1_daemon_hold, 27);
 
 /**
  * NOTHING CLASSIFIED THIS ENTRY, because the turn in front of it is a CONTEXT
@@ -699,7 +994,7 @@ export type HeldPromptUninterruptibleTurn = Message<"frontend.v1.HeldPromptUnint
  * Use `create(HeldPromptUninterruptibleTurnSchema)` to create a new message.
  */
 export const HeldPromptUninterruptibleTurnSchema: GenMessage<HeldPromptUninterruptibleTurn> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_daemon_hold, 16);
+  messageDesc(file_frontend_v1_daemon_hold, 28);
 
 /**
  * The classifier could not be believed (it answered with neither token, or
@@ -724,7 +1019,7 @@ export type HeldPromptClassificationError = Message<"frontend.v1.HeldPromptClass
  * Use `create(HeldPromptClassificationErrorSchema)` to create a new message.
  */
 export const HeldPromptClassificationErrorSchema: GenMessage<HeldPromptClassificationError> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_daemon_hold, 17);
+  messageDesc(file_frontend_v1_daemon_hold, 29);
 
 /**
  * Held by a scheduled shutdown's drain lease. The classifier NEVER runs on
@@ -750,7 +1045,7 @@ export type HeldPromptShutdownHold = Message<"frontend.v1.HeldPromptShutdownHold
  * Use `create(HeldPromptShutdownHoldSchema)` to create a new message.
  */
 export const HeldPromptShutdownHoldSchema: GenMessage<HeldPromptShutdownHold> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_daemon_hold, 18);
+  messageDesc(file_frontend_v1_daemon_hold, 30);
 
 /**
  * Held because the workspace's session is NOT UP and the prompt waits for it to
@@ -790,7 +1085,7 @@ export type HeldPromptReconnectHold = Message<"frontend.v1.HeldPromptReconnectHo
  * Use `create(HeldPromptReconnectHoldSchema)` to create a new message.
  */
 export const HeldPromptReconnectHoldSchema: GenMessage<HeldPromptReconnectHold> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_daemon_hold, 19);
+  messageDesc(file_frontend_v1_daemon_hold, 31);
 
 /**
  * Held because a merge of this workspace is in flight: the merge drives the
@@ -812,7 +1107,7 @@ export type HeldPromptMergeHold = Message<"frontend.v1.HeldPromptMergeHold"> & {
  * Use `create(HeldPromptMergeHoldSchema)` to create a new message.
  */
 export const HeldPromptMergeHoldSchema: GenMessage<HeldPromptMergeHold> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_daemon_hold, 20);
+  messageDesc(file_frontend_v1_daemon_hold, 32);
 
 /**
  * No classifier ran and none will: a daemon condition holds the entry (the
@@ -828,7 +1123,7 @@ export type HeldPromptDaemonHeld = Message<"frontend.v1.HeldPromptDaemonHeld"> &
  * Use `create(HeldPromptDaemonHeldSchema)` to create a new message.
  */
 export const HeldPromptDaemonHeldSchema: GenMessage<HeldPromptDaemonHeld> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_daemon_hold, 21);
+  messageDesc(file_frontend_v1_daemon_hold, 33);
 
 /**
  * Held because the session's shim is being restarted onto the current build
@@ -846,7 +1141,7 @@ export type HeldPromptBuildRefreshHold = Message<"frontend.v1.HeldPromptBuildRef
  * Use `create(HeldPromptBuildRefreshHoldSchema)` to create a new message.
  */
 export const HeldPromptBuildRefreshHoldSchema: GenMessage<HeldPromptBuildRefreshHold> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_daemon_hold, 22);
+  messageDesc(file_frontend_v1_daemon_hold, 34);
 
 /**
  * A question the daemon holds for the user's answer. THE ARM IS THE QUESTION.
@@ -880,7 +1175,7 @@ export type HeldOffer = Message<"frontend.v1.HeldOffer"> & {
  * Use `create(HeldOfferSchema)` to create a new message.
  */
 export const HeldOfferSchema: GenMessage<HeldOffer> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_daemon_hold, 23);
+  messageDesc(file_frontend_v1_daemon_hold, 35);
 
 /**
  * The merge-dequeue question, resolved for drawing: the daemon composes the
@@ -906,7 +1201,7 @@ export type HeldOfferMergeDequeue = Message<"frontend.v1.HeldOfferMergeDequeue">
  * Use `create(HeldOfferMergeDequeueSchema)` to create a new message.
  */
 export const HeldOfferMergeDequeueSchema: GenMessage<HeldOfferMergeDequeue> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_daemon_hold, 24);
+  messageDesc(file_frontend_v1_daemon_hold, 36);
 
 /**
  * The sentence an offer card leads with, composed daemon-side.
@@ -928,5 +1223,5 @@ export type HeldOfferHeadline = Message<"frontend.v1.HeldOfferHeadline"> & {
  * Use `create(HeldOfferHeadlineSchema)` to create a new message.
  */
 export const HeldOfferHeadlineSchema: GenMessage<HeldOfferHeadline> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_daemon_hold, 25);
+  messageDesc(file_frontend_v1_daemon_hold, 37);
 

@@ -123,8 +123,11 @@ export const EditHeldPromptBeginSchema: GenMessage<EditHeldPromptBegin> = /*@__P
  */
 export type EditHeldPromptCommit = Message<"agentrepl.v1.EditHeldPromptCommit"> & {
   /**
-   * The prompt's NEW content, WHOLE — composed exactly as a submission's
-   * `said` is, and it replaces the held one outright.
+   * The person's NEW words, WHOLE — composed exactly as a submission's
+   * `said` is, and they replace the held prompt's words outright. A quote the
+   * held prompt replies with (conversation.v1.UserQuoteBlock) is not part of
+   * the edit: the daemon keeps it ahead of the new words. A commit carrying a
+   * quote block is refused, because the editor is never handed one.
    *
    * @generated from field: conversation.v1.UserSaid said = 1;
    */

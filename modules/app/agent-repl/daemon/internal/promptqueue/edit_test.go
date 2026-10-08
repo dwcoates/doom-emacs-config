@@ -5,8 +5,13 @@ import (
 	"errors"
 	"testing"
 
+	"google.golang.org/protobuf/proto"
+
+	conversationv1 "agentrepl/proto/conversation/v1"
+
 	"claude-repld/internal/classifier"
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/replyquote"
 	"claude-repld/internal/wsm"
 )
 
@@ -371,6 +376,62 @@ func TestCommitEditWithNoContentIsRefused(t *testing.T) {
 		t.Fatal("CommitEdit(nil) succeeded, want a refusal")
 	}
 	if !logged(h.log.Records(), "error", opEditCommit, "the commit carried no content; the edit stands") {
+		t.Fatalf("records = %+v, want the refusal at error", h.log.Records())
+	}
+}
+
+// quotedHeldPrompt holds TURN as a reply: a quote of an earlier bubble ahead
+// of WORDS.
+func quotedHeldPrompt(t *testing.T, h *harness, turn, words string) *conversationv1.UserSaid {
+	t.Helper()
+	running(t, h, "running-turn", "the running work")
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"}
+	said := replyquote.Quote(userSaid(words), "Paris.", false)
+	sub := submission(idsTurn(turn), words)
+	sub.Said = said
+	if _, err := h.q.Submit(context.Background(), sub); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	h.q.waitForClassifications()
+	return said
+}
+
+func TestCommitEditKeepsTheQuoteTheHeldPromptRepliedWith(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	original := quotedHeldPrompt(t, h, "t1", "the original words")
+	beginEdit(t, h, "t1")
+	// Act
+	if err := h.q.CommitEdit(context.Background(), theWorkspace, "t1", userSaid("the edited words")); err != nil {
+		t.Fatalf("CommitEdit: %v", err)
+	}
+	h.q.waitForClassifications()
+	// Assert
+	blocks := h.db.hold("t1").Said.GetContent().GetBlocks()
+	if len(blocks) != 2 || !proto.Equal(blocks[0], original.GetContent().GetBlocks()[0]) || blocks[1].GetText().GetText() != "the edited words" {
+		t.Fatalf("said = %v, want the original quote ahead of the edited words", blocks)
+	}
+}
+
+func TestCommitEditCarryingAQuoteIsRefusedAndTheEditStands(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	original := quotedHeldPrompt(t, h, "t1", "the original words")
+	beginEdit(t, h, "t1")
+	// Act
+	err := h.q.CommitEdit(context.Background(), theWorkspace, "t1",
+		replyquote.Quote(userSaid("the edited words"), "forged", false))
+	// Assert
+	if !errors.Is(err, replyquote.ErrEditedQuote) {
+		t.Fatalf("CommitEdit = %v, want ErrEditedQuote", err)
+	}
+	if _, ok := h.q.Editing(theWorkspace); !ok {
+		t.Fatal("the claim was retired although the commit was refused")
+	}
+	if !proto.Equal(h.db.hold("t1").Said, original) {
+		t.Fatalf("said = %v, want the original content untouched", h.db.hold("t1").Said)
+	}
+	if !logged(h.log.Records(), "error", opEditCommit, "the commit carried a quote block, which an editor never composes; the edit stands") {
 		t.Fatalf("records = %+v, want the refusal at error", h.log.Records())
 	}
 }

@@ -390,6 +390,16 @@ func DrawUserBlocks(
 					Unsupported: &frontendv1.FeedUnsupportedBlock{Kind: b.Unsupported.GetKind()},
 				},
 			})
+		case *conversationv1.UserContentBlock_Quote:
+			// A QUOTED BUBBLE IS ITS OWN DRAWN BLOCK, verbatim and unstripped:
+			// the daemon composed it (replyquote), so it holds no host
+			// sentinel span, and the client draws it only in the expanded
+			// bubble.
+			blocks = append(blocks, &frontendv1.FeedUserPromptBlock{
+				Block: &frontendv1.FeedUserPromptBlock_Quote{
+					Quote: &frontendv1.FeedQuoteBlock{Text: b.Quote.GetText()},
+				},
+			})
 		}
 	}
 	return blocks
@@ -432,6 +442,10 @@ func agentBlocks(blocks []*frontendv1.FeedUserPromptBlock) []*frontendv1.FeedAge
 		case *frontendv1.FeedUserPromptBlock_Unsupported:
 			out = append(out, &frontendv1.FeedAgentPromptBlock{
 				Block: &frontendv1.FeedAgentPromptBlock_Unsupported{Unsupported: b.Unsupported},
+			})
+		case *frontendv1.FeedUserPromptBlock_Quote:
+			out = append(out, &frontendv1.FeedAgentPromptBlock{
+				Block: &frontendv1.FeedAgentPromptBlock_Quote{Quote: b.Quote},
 			})
 		}
 	}
