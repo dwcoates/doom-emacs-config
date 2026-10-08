@@ -814,6 +814,17 @@ describe("createFeedController: the walk", () => {
     );
   });
 
+  it("labels the load-more control \"load previous page\"", () => {
+    // Arrange
+    const { controller, host } = fixture();
+
+    // Act
+    controller.applyPage(page([responseRow("a")], { hasMore: true }), "replace");
+
+    // Assert
+    expect(host.querySelector("[data-load-more]")?.textContent).toBe("load previous page");
+  });
+
   it("takes it away once the walk reaches the start", () => {
     const { controller, host } = fixture();
     controller.applyPage(page([responseRow("a")]), "replace");
