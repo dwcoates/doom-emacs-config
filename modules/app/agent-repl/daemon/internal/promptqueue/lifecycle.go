@@ -189,9 +189,9 @@ func (q *queue) OnTurnAdopted(ws ids.WorkspaceID, turn ids.TurnID) {
 			"cause": err.Error(),
 		})
 	}
-	// THE ROSTER'S TURN FACT IS THE DAEMON'S OWN. Taken and acknowledged in one
-	// step: the vendor is already answering, so there is no submitting window.
-	q.deps.Sidebar.SetTurn(ws, &footer.TurnStarted{At: at, Act: footer.ActPrompt})
+	// THE TURN FACT IS THE DAEMON'S OWN. Taken and acknowledged in one step:
+	// the vendor is already answering, so there is no submitting window.
+	q.setTurn(ws, &footer.TurnStarted{At: at, Act: footer.ActPrompt})
 	q.ackTurn(ws)
 	log.Info(opTurnAdopted, "recorded a turn the vendor started on its own; what is held waits behind it", nil)
 }
