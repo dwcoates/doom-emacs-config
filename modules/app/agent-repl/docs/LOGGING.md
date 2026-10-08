@@ -35,7 +35,9 @@ audit found, which are the work.
    `warn` only for a defect or a named decision; `info` for every lifecycle
    edge; `debug` for request boundaries, state transitions and decisions.
    One switch, `AGENT_REPL_LOG_LEVEL` (`debug|info|warn|error`, default
-   `info`), honored by every system without a rebuild.
+   `info`), honored by every system without a rebuild; a level other than
+   `info` is a window of at most five minutes named by
+   `AGENT_REPL_LOG_LEVEL_UNTIL` (`../logging-contract.md`).
 4. Retrieval: ONE reader, `bin/logs.sh`, that answers a workspace (by id, dir
    or name), the central records, or everything, merged by timestamp,
   filtered by level and runtime, and `--harvest <from> <to>` for every

@@ -584,7 +584,11 @@ at build time and is not a vendor import site.
   it is simply not the fleet's workspace identity.
 - `AGENT_REPL_LOG_LEVEL` is the process-startup threshold for both durable
   persistence and stderr mirroring. It accepts exactly `debug`, `info`, `warn`,
-  or `error` and defaults to `info`. An invalid value aborts logger setup.
+  or `error` and defaults to `info`. An invalid value aborts logger setup. A
+  level other than `info` is a window: it holds only with an unexpired
+  `AGENT_REPL_LOG_LEVEL_UNTIL` at most five minutes away and reverts to `info`
+  by itself (`agent-shim/logging/ts/level-window.ts`,
+  `shim.logging.level-window`).
   `AGENT_REPL_LOG_VERBOSE=1` only permits verbose-class records to mirror to
   stderr after the level threshold admits them. It never changes persistence.
 - **Every logical branch logs.** Request boundaries, store round-trips, and
