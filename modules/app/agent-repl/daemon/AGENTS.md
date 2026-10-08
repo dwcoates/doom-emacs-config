@@ -1052,6 +1052,20 @@ Owner rulings, 2026-09-30 (`internal/merge`; the contract is
   (`wsm.QueueMerge`) only when the requester's turn in flight ends
   (`request.go`); a boot re-arms recorded requests. Evict or close withdraws a
   request that is not yet in line.
+- **A MERGE'S BUBBLE IS PLACED WHEN IT STARTS, NEVER BEFORE** (owner ruling,
+  2026-10-08: "while merging, the merge bubble is necessarily the last thing
+  in the feed"). Admission takes the lease (prompts held from here), records
+  the queue step, and publishes `merging · awaiting_free` (roster
+  `merge_waiting`, purple) while the merge waits for the workspace -- and a
+  workspace whose worktree it rebases in -- to fall free; the footer reads
+  what it waits on from its own state of the awaited workspace
+  (`footer.awaitingFree`). Only `run.place`, once free, draws the head and its
+  queue tab: a feed row's order is minted at its first draw, so a bubble drawn
+  earlier was overtaken by every row a woken turn wrote (2026-10-08, workspace
+  `doom`). A merge in line draws no bubble either; its ledger identity is
+  still minted at enqueue and the bubble it starts in carries it. A resume or
+  an adoption of a merge recorded at the queue step draws no bubble until it
+  starts. `integration/merge_placement_test.go` pins the invariant.
 - **THE PROCESS, IN ORDER** (`process.go`): preprocessing; rebasing k/n, one
   commit per step (`gitclient.StartRebase` / `ContinueRebase`); a conflict is
   resolved by the requester's own session, and a give-up FAILS the merge in
