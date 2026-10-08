@@ -16,6 +16,7 @@ import (
 	"claude-repld/internal/ids"
 	"claude-repld/internal/shimclient"
 	"claude-repld/internal/vocab"
+	"claude-repld/internal/wsm"
 )
 
 // instant is the fixed clock every test starts from, so no assertion depends
@@ -1160,5 +1161,197 @@ func TestConcurrentChangesLeaveTheNewestViewPublished(t *testing.T) {
 	// Assert
 	if got := h.view(t).GetStrip().GetStatus().GetAgentReplFault(); got != nil {
 		t.Fatalf("published status = disconnected %+v, want none: a stale view (a fault still standing) was published after a newer one", got)
+	}
+}
+
+func TestEndTurnLeavesNoTurnInFlight(t *testing.T) {
+	cases := []struct {
+		name string
+		turn *TurnStarted
+	}{
+		{name: "a turn in flight ends", turn: &TurnStarted{At: instant, Act: ActPrompt}},
+		{name: "no turn in flight stays so", turn: nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			s := newWSState()
+			s.turn = tc.turn
+
+			// Act
+			s.endTurn(instant.Add(time.Minute))
+
+			// Assert
+			if s.turn != nil {
+				t.Fatalf("turn = %+v after endTurn, want none in flight", s.turn)
+			}
+		})
+	}
+}
+
+func TestEndTurnRecordsTheTurnsSpan(t *testing.T) {
+	end := instant.Add(42 * time.Second)
+	earlier := &turnSpan{startedAt: instant.Add(-time.Hour), endedAt: instant.Add(-time.Minute)}
+	cases := []struct {
+		name string
+		turn *TurnStarted
+		last *turnSpan
+		want *turnSpan
+	}{
+		{
+			name: "a turn in flight records its acceptance to the end",
+			turn: &TurnStarted{At: instant, Act: ActPrompt},
+			want: &turnSpan{startedAt: instant, endedAt: end},
+		},
+		{
+			name: "a later edge with no turn in flight keeps the first end",
+			last: earlier,
+			want: earlier,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			s := newWSState()
+			s.turn = tc.turn
+			s.lastTurn = tc.last
+
+			// Act
+			s.endTurn(end)
+
+			// Assert
+			if s.lastTurn == nil || *s.lastTurn != *tc.want {
+				t.Fatalf("lastTurn = %+v, want %+v", s.lastTurn, tc.want)
+			}
+		})
+	}
+}
+
+// clockSpan reads the strip clock's two instants, nil where unset.
+func clockSpan(t *testing.T, h *harness) (started, ended *int64) {
+	t.Helper()
+	clock := h.view(t).GetStrip().GetClock()
+	return clock.TurnStartedAtMs, clock.TurnEndedAtMs
+}
+
+// TestTheClockFreezesAtTheTurnsEnd: the clock is the duration of the prompt,
+// so whichever edge ends the turn freezes it at that instant, and it stands.
+func TestTheClockFreezesAtTheTurnsEnd(t *testing.T) {
+	turn := testTurnID
+	tests := []struct {
+		name string
+		end  func(h *harness)
+	}{
+		{name: "the main agent's terminal", end: func(h *harness) {
+			h.r.OnAgentTerminal(testWS, mainAgent, &turn, completed(), nil)
+		}},
+		{name: "the prompt queue's close", end: func(h *harness) {
+			h.r.SetTurnEnded(testWS, wsm.CloseCompleted)
+		}},
+		{name: "a dead shim", end: func(h *harness) {
+			h.r.OnLink(testWS, shimclient.LinkDead)
+		}},
+		{name: "a dead query", end: func(h *harness) {
+			h.r.OnSessionUpdate(testWS, queryDiedUpdate())
+		}},
+		{name: "a compaction's cut", end: func(h *harness) {
+			h.r.OnContextCut(testWS, mainAgent, compactedCut())
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+			h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActPrompt})
+			h.clock.Advance(42 * time.Second)
+
+			// Act
+			tt.end(h)
+
+			// Assert
+			started, ended := clockSpan(t, h)
+			if started == nil || *started != instant.UnixMilli() {
+				t.Fatalf("started = %v, want the turn's acceptance %d", started, instant.UnixMilli())
+			}
+			if want := instant.Add(42 * time.Second).UnixMilli(); ended == nil || *ended != want {
+				t.Fatalf("ended = %v, want the turn's end %d", ended, want)
+			}
+		})
+	}
+}
+
+func TestALaterEndEdgeDoesNotMoveTheFrozenClock(t *testing.T) {
+	// Arrange: the terminal froze the clock 42s in.
+	turn := testTurnID
+	h := newHarness(t)
+	connected(h)
+	h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActPrompt})
+	h.clock.Advance(42 * time.Second)
+	h.r.OnAgentTerminal(testWS, mainAgent, &turn, completed(), nil)
+	h.clock.Advance(5 * time.Second)
+
+	// Act
+	h.r.SetTurnEnded(testWS, wsm.CloseCompleted)
+
+	// Assert
+	if _, ended := clockSpan(t, h); ended == nil || *ended != instant.Add(42*time.Second).UnixMilli() {
+		t.Fatalf("ended = %v, want the terminal's instant", ended)
+	}
+}
+
+func TestAHeldPromptLeavesTheFrozenClockStanding(t *testing.T) {
+	// Arrange
+	turn := testTurnID
+	h := newHarness(t)
+	connected(h)
+	h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActPrompt})
+	h.clock.Advance(42 * time.Second)
+	h.r.OnAgentTerminal(testWS, mainAgent, &turn, completed(), nil)
+
+	// Act: a prompt held in the queue submits nothing.
+	h.r.OnSubmission(testWS, Submission{Stage: StageHeld, Position: 1, Queued: 1})
+
+	// Assert
+	if _, ended := clockSpan(t, h); ended == nil {
+		t.Fatal("a held prompt cleared the frozen clock")
+	}
+}
+
+func TestTheNextSubmissionClearsTheFrozenClock(t *testing.T) {
+	// Arrange
+	turn := testTurnID
+	h := newHarness(t)
+	connected(h)
+	h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActPrompt})
+	h.clock.Advance(42 * time.Second)
+	h.r.OnAgentTerminal(testWS, mainAgent, &turn, completed(), nil)
+	next := instant.Add(time.Minute)
+
+	// Act
+	h.r.SetTurn(testWS, &TurnStarted{At: next, Act: ActPrompt})
+
+	// Assert
+	started, ended := clockSpan(t, h)
+	if started == nil || *started != next.UnixMilli() || ended != nil {
+		t.Fatalf("clock = (%v, %v), want the new turn running from %d", started, ended, next.UnixMilli())
+	}
+}
+
+func TestARefusedSubmissionLeavesNoClock(t *testing.T) {
+	// Arrange: a turn ended, then the next submission was accepted.
+	turn := testTurnID
+	h := newHarness(t)
+	connected(h)
+	h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActPrompt})
+	h.r.OnAgentTerminal(testWS, mainAgent, &turn, completed(), nil)
+	h.r.SetTurn(testWS, &TurnStarted{At: instant.Add(time.Minute), Act: ActPrompt})
+
+	// Act: the shim refused it.
+	h.r.SetTurn(testWS, nil)
+
+	// Assert
+	if started, ended := clockSpan(t, h); started != nil || ended != nil {
+		t.Fatalf("clock = (%v, %v), want none: a refused submission ran nothing", started, ended)
 	}
 }

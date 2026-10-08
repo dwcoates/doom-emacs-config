@@ -87,10 +87,10 @@ func TestSidebarViewDefaultsWhenUnset(t *testing.T) {
 	}
 }
 
-func TestTheDefaultViewCollapsesTheBandAndShowsTheRepositoryGrouping(t *testing.T) {
+func TestTheDefaultViewExpandsTheBandAndShowsTheRepositoryGrouping(t *testing.T) {
 	// Arrange, Act, Assert
-	if !DefaultSidebarView.MergedFolded || DefaultSidebarView.Grouping != GroupingRepository {
-		t.Fatalf("DefaultSidebarView = %+v, want the band collapsed and the repository grouping", DefaultSidebarView)
+	if DefaultSidebarView.MergedFolded || DefaultSidebarView.Grouping != GroupingRepository {
+		t.Fatalf("DefaultSidebarView = %+v, want the band expanded and the repository grouping", DefaultSidebarView)
 	}
 }
 
@@ -101,14 +101,14 @@ func TestSidebarViewWritesAreReadBack(t *testing.T) {
 		want  SidebarView
 	}{
 		{
-			name:  "unfolding the band keeps the default grouping",
-			write: func(s *store) error { return s.SetMergedSectionFolded(context.Background(), false) },
-			want:  SidebarView{MergedFolded: false, Grouping: GroupingRepository},
+			name:  "folding the band keeps the default grouping",
+			write: func(s *store) error { return s.SetMergedSectionFolded(context.Background(), true) },
+			want:  SidebarView{MergedFolded: true, Grouping: GroupingRepository},
 		},
 		{
 			name:  "showing the task grouping keeps the default band fold",
 			write: func(s *store) error { return s.SetGrouping(context.Background(), GroupingTask) },
-			want:  SidebarView{MergedFolded: true, Grouping: GroupingTask},
+			want:  SidebarView{MergedFolded: false, Grouping: GroupingTask},
 		},
 		{
 			name: "a second write keeps the first",
@@ -116,19 +116,19 @@ func TestSidebarViewWritesAreReadBack(t *testing.T) {
 				if err := s.SetGrouping(context.Background(), GroupingTask); err != nil {
 					return err
 				}
-				return s.SetMergedSectionFolded(context.Background(), false)
-			},
-			want: SidebarView{MergedFolded: false, Grouping: GroupingTask},
-		},
-		{
-			name: "folding the band again replaces the unfold",
-			write: func(s *store) error {
-				if err := s.SetMergedSectionFolded(context.Background(), false); err != nil {
-					return err
-				}
 				return s.SetMergedSectionFolded(context.Background(), true)
 			},
-			want: SidebarView{MergedFolded: true, Grouping: GroupingRepository},
+			want: SidebarView{MergedFolded: true, Grouping: GroupingTask},
+		},
+		{
+			name: "unfolding the band again replaces the fold",
+			write: func(s *store) error {
+				if err := s.SetMergedSectionFolded(context.Background(), true); err != nil {
+					return err
+				}
+				return s.SetMergedSectionFolded(context.Background(), false)
+			},
+			want: SidebarView{MergedFolded: false, Grouping: GroupingRepository},
 		},
 	}
 	for _, tt := range tests {
@@ -288,7 +288,7 @@ func TestSetMaturityFoldedIsReadBackOnItsStageOnly(t *testing.T) {
 				t.Fatalf("SetMaturityFolded: %v", err)
 			}
 			got, err := s.SidebarView(context.Background())
-			want := SidebarView{MergedFolded: true, MaturityFolded: tt.want, Grouping: GroupingRepository}
+			want := SidebarView{MergedFolded: false, MaturityFolded: tt.want, Grouping: GroupingRepository}
 			if err != nil || got != want {
 				t.Fatalf("SidebarView = %+v, %v; want %+v", got, err, want)
 			}

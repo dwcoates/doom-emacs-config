@@ -618,7 +618,7 @@ export function drawFeedResponseUsageStamp(
 
 /**
  * The daemon's reveal window in milliseconds, or undefined when it sent none
- * (no full record of the model's fragment cadence yet, a subagent, a replay),
+ * (no full record of the model's burst cadence yet, a subagent, a replay),
  * which leaves the pacing to `SmoothReveal`. A window of zero breaks the
  * contract (`expected_gap_ms` is always > 0) and is refused as malformed.
  */

@@ -20,7 +20,8 @@
 //                  the small facts a step has (queue position, commit counts).
 //   StatusActivity the finest, DYNAMIC line: typed KINDS whose payload is
 //                  mostly text the daemon composed.
-//   Clock          how long the current turn has been running.
+//   Clock          how long the current turn has been running, or how long
+//                  the most recent turn ran, until the next submission.
 //   Tokens cell    how much the in-flight turn has added to the MAIN agent's
 //                  context window (`--` with no turn in flight), with two
 //                  glyphs; a click target opening the token panel.
@@ -150,7 +151,8 @@ type FooterStrip struct {
 	// Tags 2-3 are RETIRED: the sub-status and activity cells are no longer
 	// siblings of the status — each lives INSIDE the status arm that makes it
 	// legal, so an illegal pairing is unrepresentable.
-	// The turn clock. The client ticks from the carried instant.
+	// The turn clock. The client ticks from the carried instant while the turn
+	// runs, and draws the most recent turn's frozen duration after it ends.
 	Clock *FooterClock `protobuf:"bytes,4,opt,name=clock,proto3" json:"clock,omitempty"`
 	// The tokens CELL: the in-flight turn's FRESH INPUT for the MAIN agent,
 	// colored by its size, plus two glyphs, and the click target that opens
@@ -12459,12 +12461,38 @@ func (*FooterAllowanceRejected) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{179}
 }
 
-// The turn clock. UNSET = no turn in flight; the cell renders idle.
+// The turn clock: the duration of the prompt, from the turn's start to its
+// end. It follows the tokens cell's lifetime exactly (FooterTokensCell).
+//
+// WHILE A TURN RUNS: `turn_started_at_ms` is set and `turn_ended_at_ms` is
+// unset; the client ticks the elapsed time from the start instant, and the
+// strip offers the turn's stop.
+//
+// WITH NO TURN IN FLIGHT the clock is the MOST RECENT TURN'S, frozen: both
+// instants are set and the client draws `turn_ended_at_ms -
+// turn_started_at_ms` once, never ticking and offering no stop. The end is the
+// first edge that ended the turn, however it ended (completed, failed,
+// interrupted, its query or shim dead, a compaction's cut). It clears the
+// moment the next prompt is SUBMITTED — the same edge that clears the tokens
+// figure; a prompt held in the queue submits nothing and leaves it standing. A
+// daemon relaunch or handover is not a submission: the relaunched daemon
+// restates the clock from the main agent's opening history page — the places
+// of the newest turn's prompt and of its main-agent terminal — when the page
+// holds both.
+//
+// BOTH UNSET = no turn's clock stands (no turn has run, a submission the shim
+// refused, a restated turn whose page lacked its prompt or terminal); the cell
+// renders idle. `turn_ended_at_ms` set without `turn_started_at_ms` is
+// malformed.
 type FooterClock struct {
-	state           protoimpl.MessageState `protogen:"open.v1"`
-	TurnStartedAtMs *int64                 `protobuf:"varint,1,opt,name=turn_started_at_ms,json=turnStartedAtMs,proto3,oneof" json:"turn_started_at_ms,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// When the turn was accepted, epoch ms on the daemon's clock.
+	TurnStartedAtMs *int64 `protobuf:"varint,1,opt,name=turn_started_at_ms,json=turnStartedAtMs,proto3,oneof" json:"turn_started_at_ms,omitempty"`
+	// When the turn ended, epoch ms on the daemon's clock. Set only with no
+	// turn in flight, on the most recent turn's frozen clock.
+	TurnEndedAtMs *int64 `protobuf:"varint,2,opt,name=turn_ended_at_ms,json=turnEndedAtMs,proto3,oneof" json:"turn_ended_at_ms,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *FooterClock) Reset() {
@@ -12500,6 +12528,13 @@ func (*FooterClock) Descriptor() ([]byte, []int) {
 func (x *FooterClock) GetTurnStartedAtMs() int64 {
 	if x != nil && x.TurnStartedAtMs != nil {
 		return *x.TurnStartedAtMs
+	}
+	return 0
+}
+
+func (x *FooterClock) GetTurnEndedAtMs() int64 {
+	if x != nil && x.TurnEndedAtMs != nil {
+		return *x.TurnEndedAtMs
 	}
 	return 0
 }
@@ -12721,7 +12756,10 @@ func (*FooterTokensCellAlarm) Descriptor() ([]byte, []int) {
 }
 
 // The accounting badge. The set arm picks the glyph treatment; the evidence
-// behind it is the panel's verdict line, never this badge.
+// behind it is the panel's verdict line, never this badge. ONLY `complete`
+// draws a glyph in the cell (owner ruling, 2026-10-08: no red ✗ in the tokens
+// cell); a failing arm draws nothing there, and its evidence is the panel's
+// verdict line alone.
 type FooterTokensCellVerdict struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Which verdict the settled turn's reconciliation reached. Exactly one arm
@@ -12811,12 +12849,14 @@ type FooterTokensCellVerdict_Complete struct {
 }
 
 type FooterTokensCellVerdict_Incomplete struct {
-	// Some responses carried no usage, so the figures are a floor (✗).
+	// Some responses carried no usage, so the figures are a floor (no glyph
+	// in the cell).
 	Incomplete *FooterTokensCellVerdictIncomplete `protobuf:"bytes,2,opt,name=incomplete,proto3,oneof"`
 }
 
 type FooterTokensCellVerdict_Invalid struct {
-	// The observed usage contradicts itself (✗) — a producer defect.
+	// The observed usage contradicts itself — a producer defect (no glyph in
+	// the cell).
 	Invalid *FooterTokensCellVerdictInvalid `protobuf:"bytes,3,opt,name=invalid,proto3,oneof"`
 }
 
@@ -12940,7 +12980,8 @@ func (*FooterTokensCellVerdictInvalid) Descriptor() ([]byte, []int) {
 }
 
 // The live-work chips. An UNSET chip is NOT DRAWN — nothing of that kind
-// exists right now — so a quiet workspace shows no chips at all. A set chip
+// exists right now — so a quiet workspace shows no chips at all, and with
+// every chip unset the strip draws no chips cell either (no empty box). A set chip
 // carries its count, daemon-resolved: the client never counts panel rows to
 // label a chip, even though the rows arrive in the same push (duplicate,
 // don't share). Detached UNMODELED work has no chip: its surfacing home is
@@ -17568,10 +17609,12 @@ const file_frontend_v1_footer_proto_rawDesc = "" +
 	"\x06status\"\x18\n" +
 	"\x16FooterAllowanceAllowed\"\x1f\n" +
 	"\x1dFooterAllowanceAllowedWarning\"\x19\n" +
-	"\x17FooterAllowanceRejected\"V\n" +
+	"\x17FooterAllowanceRejected\"\x99\x01\n" +
 	"\vFooterClock\x120\n" +
-	"\x12turn_started_at_ms\x18\x01 \x01(\x03H\x00R\x0fturnStartedAtMs\x88\x01\x01B\x15\n" +
-	"\x13_turn_started_at_ms\"\xe6\x01\n" +
+	"\x12turn_started_at_ms\x18\x01 \x01(\x03H\x00R\x0fturnStartedAtMs\x88\x01\x01\x12,\n" +
+	"\x10turn_ended_at_ms\x18\x02 \x01(\x03H\x01R\rturnEndedAtMs\x88\x01\x01B\x15\n" +
+	"\x13_turn_started_at_msB\x13\n" +
+	"\x11_turn_ended_at_ms\"\xe6\x01\n" +
 	"\x10FooterTokensCell\x128\n" +
 	"\x05input\x18\x01 \x01(\v2\".frontend.v1.FooterTokensCellInputR\x05input\x12=\n" +
 	"\x05alarm\x18\x02 \x01(\v2\".frontend.v1.FooterTokensCellAlarmH\x00R\x05alarm\x88\x01\x01\x12C\n" +

@@ -500,8 +500,9 @@ func (r *resolver) render(ws ids.WorkspaceID, s *wsState) *frontendv1.FooterView
 	}
 }
 
-// clockCell renders the turn clock. UNSET is no turn in flight, which is what
-// makes the cell render idle rather than a frozen duration.
+// clockCell renders the turn clock: the turn in flight's start, or, with none
+// in flight, the most recent turn's frozen span (both instants), or nothing
+// when no turn's clock stands, which renders the cell idle.
 //
 // A TURN ACCEPTED ON A ROUTE NEVER SEEN HAS NO CLOCK YET. A cold submit is
 // held while the session comes up, and the clock is what draws the strip's
@@ -511,9 +512,16 @@ func (r *resolver) render(ws ids.WorkspaceID, s *wsState) *frontendv1.FooterView
 // route has been seen.
 func (r *resolver) clockCell(s *wsState) *frontendv1.FooterClock {
 	out := &frontendv1.FooterClock{}
-	if s.turn != nil && s.linkSeen {
-		at := epochMs(s.turn.At)
-		out.TurnStartedAtMs = &at
+	switch {
+	case s.turn != nil:
+		if s.linkSeen {
+			at := epochMs(s.turn.At)
+			out.TurnStartedAtMs = &at
+		}
+	case s.lastTurn != nil:
+		started, ended := epochMs(s.lastTurn.startedAt), epochMs(s.lastTurn.endedAt)
+		out.TurnStartedAtMs = &started
+		out.TurnEndedAtMs = &ended
 	}
 	return out
 }
@@ -622,12 +630,32 @@ func (r *resolver) OnTurnRunningAtAttach(ws ids.WorkspaceID, turn ids.TurnID, st
 		})
 }
 
+// endTurn ends the turn in flight at AT. It is the ONE end of a turn the
+// footer watched — the main agent's terminal, the prompt queue's close, a dead
+// shim, a dead query, a compaction's cut — so whatever a turn's end settles is
+// settled in one place, whichever edge arrives first. A refused submission is
+// not a turn that ran, and clears through SetTurn(nil) instead.
+//
+// THE CLOCK FREEZES HERE (owner ruling, 2026-10-08): the turn's span, from
+// its acceptance to AT, stands as the strip's clock until the next submission,
+// as the tokens figure does. Only the FIRST end edge records it: a later edge
+// for the same turn (the close after the terminal) finds no turn in flight.
+func (s *wsState) endTurn(at time.Time) {
+	if s.turn != nil {
+		s.lastTurn = &turnSpan{startedAt: s.turn.At, endedAt: at}
+	}
+	s.turn = nil
+}
+
 func (r *resolver) applyTurnStarted(s *wsState, turn *TurnStarted) {
 	s.turn = turn
 	if turn == nil {
 		return
 	}
 	s.turnEverRan = true
+	// A NEW TURN ENDS THE LAST ONE'S CLOCK, as its reset ends the last one's
+	// tokens figure.
+	s.lastTurn = nil
 	// A NEW TURN ENDS THE LAST ONE'S FAULT (owner ruling, 2026-10-06).
 	s.turnFault = nil
 	s.pendingEnding = nil
@@ -856,7 +884,7 @@ func (r *resolver) OnLink(ws ids.WorkspaceID, link sessionwatcher.LinkState) {
 			// with it and no terminal will ever arrive for it. Kept, it drew
 			// `thinking` over the session brought back in its place.
 			if link == shimclient.LinkDead && s.turn != nil {
-				s.turn = nil
+				s.endTurn(r.opts.clock.Now())
 			}
 		})
 }
@@ -914,7 +942,7 @@ func (r *resolver) sessionArm(ws ids.WorkspaceID, update *conversationv1.Session
 			if s.turn != nil {
 				s.recordQueryDeath(u.QueryDied)
 			}
-			s.turn = nil
+			s.endTurn(r.opts.clock.Now())
 			// NO RETRY SURVIVES THE QUERY EITHER.
 			s.retrying = nil
 			// NO COMPACTION SURVIVES THE QUERY IT RAN IN.
@@ -1436,7 +1464,7 @@ func (r *resolver) OnContextCut(ws ids.WorkspaceID, agent *conversationv1.AgentI
 	// states.
 	r.mutate(ws, "daemon.footer.on_context_cut", "the footer took a context cut",
 		dlog.Context{"arm": arm}, func(s *wsState) {
-			s.turn = nil
+			s.endTurn(r.opts.clock.Now())
 			s.turnEverRan = true
 			s.compacting = false
 			concludeCompactionID(s, cutCompactionID(cut))

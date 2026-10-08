@@ -2265,7 +2265,7 @@ export type FeedResponseUpdate = Message<"frontend.v1.FeedResponseUpdate"> & {
 
   /**
    * How long the client should take to reveal what it has not yet shown. SET
-   * once the daemon holds a full window of fragment timings for this bubble's
+   * once the daemon holds a full window of burst timings for this bubble's
    * model and kind; UNSET otherwise (a model never seen streaming, a subagent
    * whose model the daemon does not know, a replayed draw), and the client
    * then paces with its own default type-out.
@@ -2315,14 +2315,19 @@ export const FeedResponseSuccessSchema: GenMessage<FeedResponseSuccess> = /*@__P
   messageDesc(file_frontend_v1_feed, 65);
 
 /**
- * The reveal pacing element: the time the daemon expects to pass before the
- * bubble's next fragment arrives.
+ * The reveal pacing element: the time the daemon expects to pass, from this
+ * push, before the bubble's next BURST of fragments arrives.
  *
- * THE DAEMON MEASURES, THE CLIENT ONLY SPREADS. The daemon records the gap
- * between consecutive live fragments of one block, per model and per kind
- * (prose and thinking are kept apart), in a rolling window of the most recent
- * gaps that survives a restart, and states their recency-weighted average
- * here. The client spreads EVERYTHING it has not yet shown (this push's new
+ * THE DAEMON MEASURES, THE CLIENT ONLY SPREADS. The vendor's fragments arrive
+ * in clumps (a burst: each within a few ms of the previous), so the daemon
+ * records the gap from one burst's start to the next's within one live block,
+ * per model and per kind (prose and thinking are kept apart), in a rolling
+ * window of the most recent gaps that survives a restart, and averages them
+ * (recency- and length-weighted). Each push states what is LEFT of that
+ * expected gap, measured from the start of the burst the push belongs to, so
+ * every push of one burst names the same deadline; a push that is not inside
+ * a burst (a settled whole landing after a pause) states the whole expected
+ * gap. The client spreads EVERYTHING it has not yet shown (this push's new
  * text plus anything still unrevealed from the previous one) across the
  * window, starting at the moment the push is drawn and finishing as it ends.
  * Only the client knows
@@ -2333,7 +2338,8 @@ export const FeedResponseSuccessSchema: GenMessage<FeedResponseSuccess> = /*@__P
  */
 export type FeedResponseRevealWindow = Message<"frontend.v1.FeedResponseRevealWindow"> & {
   /**
-   * The expected gap until the next fragment, in milliseconds. Always > 0.
+   * The expected time from this push until the next burst, in
+   * milliseconds. Always > 0.
    *
    * @generated from field: uint32 expected_gap_ms = 1;
    */

@@ -4405,12 +4405,15 @@ Returns `:checked' with the assertion result consed on, or `:deferred'."
 
 (defconst agent-repl-feed-zoom-keys
   '(("C-+" . agent-repl-feed-text-scale-increase)
+    ("C-=" . agent-repl-feed-text-scale-increase)
     ("C--" . agent-repl-feed-text-scale-decrease))
-  "The feed text zoom chords and the commands they run.")
+  "The feed text zoom chords and the commands they run.
+`C-=' zooms in as `C-+' does: Doom pairs it with `C--' as its own
+text-scale increase, so the composer keeps that pairing for the feed.")
 
 (defun agent-repl-bind-feed-zoom-keys (map)
   "Bind the feed text zoom chords in MAP and in each of its Evil state maps.
-Doom binds `C-+' and `C--' in `evil-normal-state-map', and an Evil state
+Doom binds `C-+', `C-=' and `C--' in `evil-normal-state-map', and an Evil state
 map outranks any major or minor mode map, so a plain binding in MAP alone
 never fires (observed 2026-10-06: the composer resolved `C-+' to
 `doom/reset-font-size').  Planting the chords in MAP's own state maps

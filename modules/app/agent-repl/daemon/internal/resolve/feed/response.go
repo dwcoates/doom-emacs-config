@@ -2,7 +2,6 @@ package feed
 
 import (
 	"strings"
-	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -10,6 +9,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
 	"claude-repld/internal/resolve/turnfault"
+	"claude-repld/internal/revealpace"
 	"claude-repld/internal/wsm"
 )
 
@@ -76,7 +76,7 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 		fold.markdown = ""
 		fold.settled = false
 		fold.notice = false
-		fold.lastFragmentAt = time.Time{}
+		fold.burst = revealpace.Burst{}
 		bubble.Result = &frontendv1.FeedResponse_Update{Update: &frontendv1.FeedResponseUpdate{
 			Prose: &frontendv1.FeedResponseProse{Markdown: ""},
 		}}
@@ -133,7 +133,7 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 		}
 		bubble.Result = &frontendv1.FeedResponse_Update{Update: &frontendv1.FeedResponseUpdate{
 			Prose:        &frontendv1.FeedResponseProse{Markdown: fold.markdown},
-			RevealWindow: r.revealWindow(pace, paced),
+			RevealWindow: r.revealWindow(fold, pace, paced),
 		}}
 	case *conversationv1.AgentResponse_Success:
 		// THE TERMINAL RESTATES THE WHOLE. Whatever the fold accumulated is
@@ -173,7 +173,7 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 		r.settlePacing(s, fold, pace, paced)
 		bubble.Result = &frontendv1.FeedResponse_Success{Success: &frontendv1.FeedResponseSuccess{
 			Prose:        &frontendv1.FeedResponseProse{Markdown: fold.markdown},
-			RevealWindow: r.revealWindow(pace, paced),
+			RevealWindow: r.revealWindow(fold, pace, paced),
 		}}
 	case *conversationv1.AgentResponse_Failure:
 		// The prose that landed stays drawn, marked broken. WHY it died is the

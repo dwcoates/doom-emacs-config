@@ -69,13 +69,12 @@
      this is a quiet seam cue, not a lifted overlay. The dark theme deepens it,
      since a faint wash all but vanishes on a dark ground. */
   --bottom-shadow: linear-gradient(to top, color-mix(in srgb, #000000 7.5%, transparent), transparent);
-  --user: #e0ecff;
-  /* A HELD prompt's TINT (owner ruling, 2026-09-23): "much more grey than
-     blue" -- a neutral grey carrying only a subtle blue hue, so a prompt the
-     daemon is holding reads as the blue bubble it will become, not yet sent.
-     The held FILL is only 5% of this tint over the feed's --bg (owner ruling,
-     2026-09-27; see `.bubble[data-variant="held"]`). */
-  --held-prompt-bg: #e8ebf0;
+  /* A FEW PERCENT DARKER (owner ruling, 2026-10-08): both prompt kinds that
+     share this fill — the user's own and the agent-to-agent amber-bordered
+     one (`.bubble[data-role="prompt"]`) — read as slightly too bright; this
+     is one small step down in lightness, not a new color, applied once since
+     the two kinds already shared the one token. #e0ecff -> #ccdfff. */
+  --user: #ccdfff;
   /* Raw assistant text bubbles: purple counterpart to the user blue,
      from the same family as --tool-title. */
   --assistant: #ece4fa;
@@ -425,11 +424,13 @@
     --bottom-shadow: linear-gradient(to top, color-mix(in srgb, #000000 28.5%, transparent), transparent);
     /* The iMessage dark-mode blue (owner ruling, 2026-09-27), taken a notch
        darker the same day because #0a84ff read a tad bright. */
-    --user: #0978ea;
+    /* A further notch darker still (owner ruling, 2026-10-08, "a few percent
+       darker"): #0978ea -> #086ed6, the same small lightness step the light
+       theme's pair takes. */
+    --user: #086ed6;
     /* A dark navy, so a link stands out on the dark theme's prompt blue
        (owner ruling, 2026-09-27). */
     --prompt-link: #0a2a5e;
-    --held-prompt-bg: #25282e;
     /* An iMessage-style grey (owner ruling, 2026-09-27): the old --card grey
        lifted a notch, so a response sits lighter than the tool cards. */
     --assistant: #1b1e25;
@@ -1680,19 +1681,19 @@ pre {
   margin-left: calc((100% - var(--agent-bubble-cap)) / 2);
   margin-right: auto;
 }
-/* THE ONE BACKGROUND A VARIANT SETS (owner ruling, 2026-09-23): a HELD prompt
-   in the tray is "much more grey than blue", with only a subtle blue hue, so it
-   reads as the prompt it will become that has not been sent yet.
-   NEARLY TRANSPARENT (owner ruling, 2026-09-27): the fill is only very, very
-   subtly different from the feed, 5% of the held tint over 95% of the feed's
-   own background, mixed from the two tokens so both themes follow. It feeds
-   `--bubble-bg`, so anything painted from it matches. */
+/* THE ONE BACKGROUND A VARIANT SETS (owner ruling, 2026-10-08, superseding
+   2026-09-23's grey-blue tint and 2026-09-27's 5% mix of it): a HELD prompt's
+   fill is now the RESPONSE bubble's own token, `--assistant`, exactly — not a
+   copied value — so a prompt the daemon is holding reads in the same color as
+   the agent's settled answer. It feeds `--bubble-bg`, so anything painted
+   from it matches in both themes. The retired `--held-prompt-bg` tint token
+   is gone with it; nothing else read it. */
 /* A HELD prompt is also HALF the one bubble width (owner spec, 2026-09-23),
    derived from the same token rather than a copied number. The body measures
    a tree's column budget off this resolved `max-width` (src/bubble/body.ts), so
    a tree in a held prompt wraps at the halved cap. */
 .bubble[data-variant="held"] {
-  --bubble-bg: color-mix(in srgb, var(--held-prompt-bg) 5%, var(--bg));
+  --bubble-bg: var(--assistant);
   max-width: calc(var(--bubble-max-width) / 2);
 }
 /* THE SECOND BACKGROUND A KIND SETS (owner request, 2026-10-08): a THINKING
@@ -1702,10 +1703,19 @@ pre {
    pear border, once settled) reads. It feeds `--bubble-bg`, so anything
    painted from it matches. Their prose is `--interim-text`, the tool card's
    header grey (owner request, 2026-10-08); a link or a quote keeps its own
-   color. */
+   color.
+   NO BUBBLE AT ALL (owner ruling, 2026-10-08): the base `.bubble` rule's
+   `box-shadow` (a soft drop shadow plus an inset top-edge highlight, see
+   --bubble-shadow) is the one thing left that still painted a highlight
+   around these two kinds even with no fill — it is turned off here so
+   neither reads as a bubble, while the 0.3px transparent border the base
+   rule reserves (and the interim's own half-strength pear border, once
+   settled) are untouched: nothing here reflows, since box-shadow paints
+   outside the layout box. */
 .bubble[data-variant="thinking"],
 .bubble.interim-response {
   --bubble-bg: var(--bg);
+  box-shadow: none;
   color: var(--interim-text);
 }
 /* THE THINKING WAVE, AND ONLY WHILE THE TURN IS IN FLIGHT.
@@ -1766,10 +1776,16 @@ pre {
    retiring the light purple): only an agent-to-agent prompt is bordered. */
 /* An AGENT-TO-AGENT prompt — the agent-addressed prompt row (a send from the
    lead or any agent to another, on either end) and the peer message — is the
-   same blue prompt bubble in the one amber. */
+   same blue prompt bubble in the one amber.
+   HALF AS THICK (owner ruling, 2026-10-08): 0.5px, a real one-device-pixel
+   line on a Retina display rather than the two it rounded up to at 1px, so
+   it visibly reads thinner. Never reflows the feed beyond that half pixel:
+   the border-color overrides below (selected-entry's blue, the expanded
+   response's eggshell) recolor this same width and never restate it, so
+   there is no second width anywhere to drift out of step with this one. */
 .bubble[data-role="prompt"][data-variant="agent"],
 .bubble[data-role="prompt"][data-variant="peer"] {
-  border: 1px solid var(--agent-prompt-border);
+  border: 0.5px solid var(--agent-prompt-border);
 }
 /* REGRESSION WATCH (prompt glimmer, 2026-09-14): the wave above is a COMPOSITOR
    animation, and WebKit (the xwidget's WKWebView) SUSPENDS compositor
@@ -5655,12 +5671,11 @@ ar-button.outcome-marker-pill {
 
 /* The tokens cell's two glyphs. Presence IS the fact for both: the alarm's
    sentence and the verdict's evidence are the panel's lines, never repeated
-   here, so each is a single character with a hover. */
+   here, so each is a single character with a hover. Only a reconciled turn
+   draws a verdict glyph (owner ruling, 2026-10-08: no red ✗ in the cell). */
 .footer-tokens-alarm { color: var(--thinking); }
 .footer-tokens-verdict { font-size: 0.72rem; }
 .footer-tokens-verdict.arm-complete { color: var(--ok); }
-.footer-tokens-verdict.arm-incomplete,
-.footer-tokens-verdict.arm-invalid { color: var(--err); }
 
 /* THE PARTITION between the strip and the expanded section (owner ruling,
    2026-09-13). A rule element of its own rather than a border on either

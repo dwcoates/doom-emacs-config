@@ -2212,6 +2212,11 @@ xwidget event handler would once the answer arrives."
   (should (eq (lookup-key agent-repl-frontend-webview-mode-map (kbd "C--"))
               #'agent-repl-feed-text-scale-decrease)))
 
+(ert-deftest agent-repl-test-the-webview-zooms-the-feed-in-on-c-equal ()
+  "The webview buffer's map binds `C-=' to zoom in, as the composer's does."
+  (should (eq (lookup-key agent-repl-frontend-webview-mode-map (kbd "C-="))
+              #'agent-repl-feed-text-scale-increase)))
+
 (defmacro agent-repl-test--with-fitted-window (size &rest body)
   "Run BODY with a webview buffer in the selected window whose widget reports SIZE.
 Binds `resized' to the resize calls made, newest first."

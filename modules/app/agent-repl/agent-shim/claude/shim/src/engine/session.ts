@@ -162,6 +162,7 @@ import {
   toVendorPermissionMode,
 } from "./permission-gate.js";
 import { SessionPushes } from "./pushes.js";
+import { VendorCadence } from "./vendor-cadence.js";
 import { classifyAgentFailure, NetworkResume, type ReachabilityProbe, type ResumeDelivery } from "./network-resume.js";
 import { networkReach, type NetworkReach } from "./network-reach.js";
 import {
@@ -3273,15 +3274,24 @@ export function createEngine(deps: EngineDeps): SessionEngine {
 
   function runLoop(active: QueryLike): Promise<void> {
     return (async (): Promise<void> => {
+      // WHERE A CLUMP OF VENDOR MESSAGES FORMED: each wait on the vendor for
+      // the next message is timed, and a long one is recorded with how busy
+      // this shim was across it (vendor-cadence.ts).
+      const cadence = new VendorCadence(deps.nowMs);
       try {
         for await (const message of active) {
-          if (heldByRollbackBoot(active, message)) continue;
-          await onSdkMessage(message);
-          // THE BACKPRESSURE. The vendor stream is the one producer of rows
-          // with no bound of its own, so while the store writer's backlog is
-          // past its high-water mark the next message is not read. The writer
-          // never evicts a row; this wait is what keeps its buffer bounded.
-          await deps.persistence.whenWritable();
+          cadence.received();
+          try {
+            if (heldByRollbackBoot(active, message)) continue;
+            await onSdkMessage(message);
+            // THE BACKPRESSURE. The vendor stream is the one producer of rows
+            // with no bound of its own, so while the store writer's backlog is
+            // past its high-water mark the next message is not read. The writer
+            // never evicts a row; this wait is what keeps its buffer bounded.
+            await deps.persistence.whenWritable();
+          } finally {
+            cadence.waiting();
+          }
         }
         if (isStaleLoop(active)) return;
         if (endedRollbackBoot(active, "the restarted query's stream ended")) return;

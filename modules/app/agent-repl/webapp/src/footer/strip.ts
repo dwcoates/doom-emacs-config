@@ -69,8 +69,9 @@ import {
   statusWaveStyle,
   statusWordWaves,
 } from "../breathing.js";
-import { liveElapsedClock } from "../elapsed-clock.js";
+import { liveElapsedClock, settledElapsedClock } from "../elapsed-clock.js";
 import { log } from "../log.js";
+import { MalformedView } from "../rpc/malformed.js";
 import { tokenHeatColor } from "../token-heat.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { drawFooterStatusActivity, type ActivityDeps, type FooterActivity } from "./activity.js";
@@ -120,9 +121,8 @@ export function drawFooterStrip(u: FooterStrip, deps: StripDeps): HTMLElement {
   }
   row.appendChild(drawFooterClock(requireMessage(u.clock, `${path}.clock`), deps));
   row.appendChild(drawFooterTokensCell(requireMessage(u.tokens, `${path}.tokens`), deps));
-  row.appendChild(
-    drawFooterLiveWorkChips(requireMessage(u.liveWork, `${path}.live_work`), deps),
-  );
+  const chips = drawFooterLiveWorkChips(requireMessage(u.liveWork, `${path}.live_work`), deps);
+  if (chips !== null) row.appendChild(chips);
   return row;
 }
 
@@ -185,9 +185,11 @@ export function drawClientDisconnectedStrip(
     row.appendChild(
       drawFooterTokensCell(requireMessage(last.strip.tokens, `${path}.tokens`), last.deps),
     );
-    row.appendChild(
-      drawFooterLiveWorkChips(requireMessage(last.strip.liveWork, `${path}.live_work`), last.deps),
+    const chips = drawFooterLiveWorkChips(
+      requireMessage(last.strip.liveWork, `${path}.live_work`),
+      last.deps,
     );
+    if (chips !== null) row.appendChild(chips);
   }
   return row;
 }
@@ -513,14 +515,28 @@ function substatusFigure(datum: ActivityDatum, text: string): HTMLElement {
 /**
  * The turn clock, and the stop control that only exists while a turn does.
  *
- * The clock's instant IS the liveness fact this cell has: set means a turn is
- * running, so the stop is mounted; unset means the idle dash and no stop, since
- * a control that could only answer "nothing running" is chrome.
+ * The clock's instants ARE the liveness fact this cell has: a start alone means
+ * a turn is running, so the clock ticks and the stop is mounted; a start AND an
+ * end are the most recent turn's frozen duration, drawn once with no tick and
+ * no stop (owner ruling, 2026-10-08: the clock is the duration of the prompt,
+ * standing until the next submission, as the tokens figure does); neither means
+ * the idle dash and no stop, since a control that could only answer "nothing
+ * running" is chrome. An end without a start is malformed.
  */
 export function drawFooterClock(u: FooterClock, deps: StripDeps): HTMLElement {
   const cell = document.createElement("div");
   cell.className = "pfooter-cell pfooter-clock footer-clock";
 
+  if (u.turnEndedAtMs !== undefined) {
+    if (u.turnStartedAtMs === undefined) {
+      throw new MalformedView("FooterClock.turn_ended_at_ms", "a turn's end is set with no start");
+    }
+    const startedAtMs = msOf(u.turnStartedAtMs, "FooterClock.turn_started_at_ms");
+    const endedAtMs = msOf(u.turnEndedAtMs, "FooterClock.turn_ended_at_ms");
+    cell.setAttribute("data-live", "false");
+    cell.appendChild(settledElapsedClock("info-time", endedAtMs - startedAtMs));
+    return cell;
+  }
   if (u.turnStartedAtMs === undefined) {
     const label = document.createElement("span");
     label.className = "info-time";
@@ -562,7 +578,8 @@ export function drawFooterTokensCell(u: FooterTokensCell, deps: StripDeps): HTML
     cell.appendChild(alarm);
   }
   if (u.verdict !== undefined) {
-    cell.appendChild(drawFooterTokensCellVerdict(u.verdict, `${path}.verdict`));
+    const badge = drawFooterTokensCellVerdict(u.verdict, `${path}.verdict`);
+    if (badge !== null) cell.appendChild(badge);
   }
   cell.addEventListener("click", (event: MouseEvent) => {
     event.preventDefault();
@@ -585,28 +602,27 @@ export function drawFooterTokensCellInput(u: FooterTokensCellInput): HTMLElement
 }
 
 /**
- * The accounting badge. THE ARM PICKS THE GLYPH, and the two failing arms are
- * given DISTINCT titles: a floor and a contradiction are different problems and
- * one shared "✗" hover would collapse them.
+ * The accounting badge. THE ARM PICKS THE GLYPH, and only a reconciled turn has
+ * one: the cell draws ✓ for `complete` and NOTHING for `incomplete` or
+ * `invalid` (owner ruling, 2026-10-08: no red ✗ in the tokens cell). A failing
+ * verdict's evidence is the token panel's verdict line, reached by clicking the
+ * cell. Every arm is still read, so a malformed or unknown arm is refused here
+ * whether or not it would draw.
  */
-export function drawFooterTokensCellVerdict(u: FooterTokensCellVerdict, path: string): HTMLElement {
+export function drawFooterTokensCellVerdict(u: FooterTokensCellVerdict, path: string): HTMLElement | null {
   const verdict = requireCase(u.verdict, `${path}.verdict`);
-  const badge = document.createElement("span");
-  badge.className = `footer-tokens-verdict arm-${verdict.case}`;
-  badge.setAttribute("data-verdict", verdict.case);
   switch (verdict.case) {
-    case "complete":
+    case "complete": {
+      const badge = document.createElement("span");
+      badge.className = `footer-tokens-verdict arm-${verdict.case}`;
+      badge.setAttribute("data-verdict", verdict.case);
       badge.textContent = "✓";
       badge.title = "every response's usage reconciled";
       return badge;
+    }
     case "incomplete":
-      badge.textContent = "✗";
-      badge.title = "some responses carried no usage — these figures are a floor";
-      return badge;
     case "invalid":
-      badge.textContent = "✗";
-      badge.title = "the observed usage contradicts itself";
-      return badge;
+      return null;
     default: {
       const other: { case: string } = verdict;
       return unreachableArm(`${path}.verdict`, other.case);
@@ -621,8 +637,22 @@ export function drawFooterTokensCellVerdict(u: FooterTokensCellVerdict, path: st
  * workspace shows no chips at all, and the counts are the daemon's: this
  * client never counts panel rows to label a chip even though the rows arrive
  * in the same push.
+ *
+ * AND A CELL WITH NO CHIP IS NOT DRAWN EITHER (owner request, 2026-10-08): the
+ * empty cell drew as a blank bordered box at the strip's end, offering detached
+ * work there was none of. Null is the absent cell; the daemon's unset chips are
+ * the whole decision.
  */
-export function drawFooterLiveWorkChips(u: FooterLiveWorkChips, deps: StripDeps): HTMLElement {
+export function drawFooterLiveWorkChips(u: FooterLiveWorkChips, deps: StripDeps): HTMLElement | null {
+  if (
+    u.agents === undefined &&
+    u.tasks === undefined &&
+    u.shells === undefined &&
+    u.monitors === undefined &&
+    u.crons === undefined
+  ) {
+    return null;
+  }
   const cell = document.createElement("div");
   cell.className = "pfooter-cell pfooter-counters footer-chips";
   if (u.agents !== undefined) cell.appendChild(drawFooterChipAgents(u.agents, deps));
