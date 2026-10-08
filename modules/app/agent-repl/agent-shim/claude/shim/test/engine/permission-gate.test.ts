@@ -1421,3 +1421,78 @@ describe("rule replacement and removal, on behavior words this build does not kn
     });
   });
 });
+
+describe("the asks a re-announcement states", () => {
+  it("lists an open question as its start frame carried it", async () => {
+    // Arrange
+    const { gate } = gateWith();
+    void gate.canUseTool(ASK_USER_QUESTION_TOOL, QUESTION_INPUT, callOptions());
+    await Promise.resolve();
+
+    // Act
+    const asks = gate.openAsks();
+
+    // Assert
+    const ask = asks[0]?.ask;
+    expect({
+      count: asks.length,
+      agent: asks[0]?.agent?.value,
+      id: ask?.case === "question" ? ask.value.id?.value : undefined,
+      open: ask?.case === "question" ? ask.value.result.case : undefined,
+    }).toEqual({ count: 1, agent: "agent-1", id: "toolu_1", open: "start" });
+  });
+
+  it("lists an open permission as its start frame carried it", async () => {
+    // Arrange
+    const { gate } = gateWith();
+    void gate.canUseTool("Bash", {}, callOptions({ title: "Run a command", displayName: "Bash" }));
+    await Promise.resolve();
+
+    // Act
+    const ask = gate.openAsks()[0]?.ask;
+
+    // Assert
+    const start = ask?.case === "permission" && ask.value.result.case === "start" ? ask.value.result.value : undefined;
+    expect(start?.prompt?.title).toBe("Run a command");
+  });
+
+  it("lists the asks in the order they opened", async () => {
+    // Arrange
+    const { gate } = gateWith();
+    void gate.canUseTool("Bash", {}, callOptions({ toolUseID: "toolu_a" }));
+    void gate.canUseTool(ASK_USER_QUESTION_TOOL, QUESTION_INPUT, callOptions({ toolUseID: "toolu_b" }));
+    await Promise.resolve();
+
+    // Act
+    const order = gate.openAsks().map((open) => open.ask.case);
+
+    // Assert
+    expect(order).toEqual(["permission", "question"]);
+  });
+
+  it("leaves out an ask once it is answered", async () => {
+    // Arrange
+    const { gate } = gateWith();
+    void gate.canUseTool(ASK_USER_QUESTION_TOOL, QUESTION_INPUT, callOptions());
+    await Promise.resolve();
+
+    // Act
+    gate.answerQuestion(create(conversationv1.AgentQuestionIdSchema, { value: "toolu_1" }), answers(["Pepperoni"]));
+
+    // Assert
+    expect(gate.openAsks()).toEqual([]);
+  });
+
+  it("leaves out an ask a keep-alive raised", async () => {
+    // Arrange
+    const { gate } = gateWith(() => true);
+    void gate.canUseTool("Bash", {}, callOptions());
+    await Promise.resolve();
+
+    // Act
+    const asks = gate.openAsks();
+
+    // Assert
+    expect(asks).toEqual([]);
+  });
+});
