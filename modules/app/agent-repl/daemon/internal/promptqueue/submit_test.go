@@ -468,6 +468,49 @@ func TestAFailedRevivalClearsTheRostersTurn(t *testing.T) {
 	}
 }
 
+// TestARevivalPendingHoldRaisesTheFootersTurnAtAcceptance pins the footer's
+// half of the acceptance: the roster projects the footer's status, so a turn
+// told to the roster alone would never be drawn.
+func TestARevivalPendingHoldRaisesTheFootersTurnAtAcceptance(t *testing.T) {
+	// Arrange: a bring-up that has not finished while the test looks.
+	h := newHarness(t)
+	h.noSession = true
+	release := make(chan struct{})
+	h.reviveHook = func() { <-release }
+	t.Cleanup(func() { close(release); h.waitRevivals() })
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "wake up")); err != nil {
+		t.Fatalf("Submit during a bring-up = %v, want an answer", err)
+	}
+
+	// Assert
+	turns := h.footer.startedTurns()
+	if len(turns) != 1 || turns[0] == nil || turns[0].Act != footer.ActPrompt {
+		t.Fatalf("footer turns = %+v, want exactly one accepted prompt turn at acceptance", turns)
+	}
+}
+
+// TestAFailedRevivalClearsTheFootersTurn is the footer's half of the exit.
+func TestAFailedRevivalClearsTheFootersTurn(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.noSession = true
+	h.reviveErr = errors.New("the shim would not spawn")
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "wake up")); err != nil {
+		t.Fatalf("Submit = %v, want the submission held pending the revival", err)
+	}
+	h.waitRevivals()
+
+	// Assert: accepted, then cleared, in that order.
+	turns := h.footer.startedTurns()
+	if len(turns) != 2 || turns[0] == nil || turns[1] != nil {
+		t.Fatalf("footer turns = %+v, want the accepted turn followed by its clearing", turns)
+	}
+}
+
 // TestSubmitSurfacesAFailedRevival is the other edge: a workspace that will not
 // come back answers the submission with the revival-pending hold, off the
 // request path, and the failure is surfaced by the revival's own record.

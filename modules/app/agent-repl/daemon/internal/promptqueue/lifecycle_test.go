@@ -434,6 +434,20 @@ func TestOnTurnAdoptedRecordsTheTurnsDurableRow(t *testing.T) {
 	}
 }
 
+// TestOnTurnAdoptedGivesTheFooterTheTurn covers the footer, whose status the
+// roster projects: it takes the adopted turn beside the roster.
+func TestOnTurnAdoptedGivesTheFooterTheTurn(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	// Act
+	h.q.OnTurnAdopted(theWorkspace, "vendor-turn")
+	// Assert
+	turns := h.footer.startedTurns()
+	if len(turns) != 1 || turns[0] == nil || turns[0].Act != footer.ActPrompt {
+		t.Fatalf("footer turns = %v, want the adopted turn installed", turns)
+	}
+}
+
 // TestOnTurnAdoptedGivesTheRosterTheTurn covers the roster: the turn fact is the
 // daemon's own, so the roster takes it thinking.
 func TestOnTurnAdoptedGivesTheRosterTheTurn(t *testing.T) {
