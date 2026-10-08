@@ -288,3 +288,51 @@ func TestIdleStaysReadyAfterAnEmptyReplayedPage(t *testing.T) {
 		t.Fatalf("substatus = %+v, want ready", idle.GetSubstatus())
 	}
 }
+
+func TestNewestTurnNamesTheFirstEntryCarryingATurn(t *testing.T) {
+	tests := []struct {
+		name string
+		page *conversationv1.HistoryPage
+		want string
+	}{
+		{
+			name: "the first entry's turn is the newest",
+			page: usagePage(
+				pageEntry{turn: "turn-2", agent: mainAgent, unit: "u-2"},
+				pageEntry{turn: "turn-1", agent: mainAgent, unit: "u-1"},
+			),
+			want: "turn-2",
+		},
+		{
+			name: "an entry naming no turn is skipped",
+			page: usagePage(
+				pageEntry{agent: mainAgent, unit: "x-1"},
+				pageEntry{turn: "turn-1", agent: mainAgent, unit: "u-1"},
+			),
+			want: "turn-1",
+		},
+		{
+			name: "a page naming no turn names none",
+			page: usagePage(pageEntry{agent: mainAgent, unit: "x-1"}),
+			want: "",
+		},
+		{
+			name: "an empty page names none",
+			page: usagePage(),
+			want: "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the page above.
+
+			// Act
+			got := newestTurn(tt.page)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("newestTurn = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
