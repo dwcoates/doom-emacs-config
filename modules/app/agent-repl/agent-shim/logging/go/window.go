@@ -3,7 +3,6 @@ package logging
 import (
 	"fmt"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 )
@@ -60,8 +59,8 @@ func SelectLevel(level, until string, now time.Time) (Selection, error) {
 		return Selection{}, err
 	}
 	var end time.Time
-	if trimmed := strings.TrimSpace(until); trimmed != "" {
-		seconds, err := strconv.ParseInt(trimmed, 10, 64)
+	if until != "" {
+		seconds, err := strconv.ParseInt(until, 10, 64)
 		if err != nil {
 			return Selection{}, fmt.Errorf("%s must be a Unix second, got %q", UntilEnvironment, until)
 		}
@@ -81,12 +80,11 @@ func SelectLevel(level, until string, now time.Time) (Selection, error) {
 	return sel, nil
 }
 
-// Note is the info record a runtime writes about its startup selection, or
-// ok=false when nothing other than info was asked for.
+// Note is the info record a runtime writes when it started at info although
+// another level was asked for, or ok=false when it started where it was asked
+// to: the default, or an honored window (whose volume states it).
 func (s Selection) Note() (message string, ok bool) {
 	switch s.Outcome {
-	case OutcomeHonored:
-		return fmt.Sprintf("log level %s until %s", s.Level, s.Until.Format(time.RFC3339)), true
 	case OutcomeNoExpiry:
 		return fmt.Sprintf("log level %q ignored without %s; starting at info", s.Requested, UntilEnvironment), true
 	case OutcomeExpired:
@@ -103,7 +101,7 @@ func (s Selection) Context() map[string]any {
 	ctx := map[string]any{
 		"requested_level": s.Requested,
 		"requested_until": s.RequestedUntil,
-		"level":           s.Level.String(),
+		"effective_level": s.Level.String(),
 		"outcome":         string(s.Outcome),
 	}
 	if !s.Until.IsZero() {
@@ -145,10 +143,10 @@ func (e Expiry) Message() string {
 // Context is the structured evidence of the revert.
 func (e Expiry) Context() map[string]any {
 	return map[string]any{
-		"from_level": e.From.String(),
-		"until":      e.Until.Unix(),
-		"level":      LevelInfo.String(),
-		"outcome":    string(OutcomeWindowEnded),
+		"from_level":      e.From.String(),
+		"until":           e.Until.Unix(),
+		"effective_level": LevelInfo.String(),
+		"outcome":         string(OutcomeWindowEnded),
 	}
 }
 
