@@ -84,7 +84,7 @@ func (r *resolver) SetTurnEnded(ws ids.WorkspaceID, how wsm.TurnClose) {
 			// THE CLOSE ENDS THE TURN, as the roster's SetTurnEnded does: a
 			// close no terminal preceded (the agent process dying, an orphan)
 			// leaves no other edge that would.
-			s.turn = nil
+			s.endTurn()
 			s.retrying = nil
 			// A COMPACTION ENDS WITH ITS TURN, as the roster's does: the
 			// vendor's own `compacting` clear may never follow a turn the
