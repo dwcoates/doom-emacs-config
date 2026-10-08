@@ -1720,9 +1720,10 @@ func TestARefusedMainWatchIsReopenedWhenTheBookAppears(t *testing.T) {
 	}
 }
 
-// TestARefusedMainWatchStopsBeingRetriedAndRaisesItsOwnFault pins the bound: a
-// shim that refuses forever is reported, and still never severs the link.
-func TestARefusedMainWatchStopsBeingRetriedAndRaisesItsOwnFault(t *testing.T) {
+// TestARefusedMainWatchPastTheBoundRaisesItsOwnFault pins the bound: a shim
+// that refuses past the bring-up race is reported, and still never severs the
+// link.
+func TestARefusedMainWatchPastTheBoundRaisesItsOwnFault(t *testing.T) {
 	// Arrange: a shim that refuses every open.
 	h := newHarnessRefusingAgents(t, Session{Started: sessionStarted("")},
 		refusedOpenError("WatchAgent", connect.CodeNotFound, "no such agent"))
@@ -1741,6 +1742,73 @@ func TestARefusedMainWatchStopsBeingRetriedAndRaisesItsOwnFault(t *testing.T) {
 	}
 	if link := h.w.Link(); link != shimclient.LinkConnected {
 		t.Fatalf("the link after exhausted retries = %v, want LinkConnected", link)
+	}
+}
+
+// refuseMainPastTheBound drives a refusing shim's main watch past the bound,
+// to the reported fault.
+func refuseMainPastTheBound(t *testing.T) *harness {
+	t.Helper()
+	h := newHarnessRefusingAgents(t, Session{Started: sessionStarted("")},
+		refusedOpenError("WatchAgent", connect.CodeNotFound, "no such agent"))
+	for i := 0; i < openRefusalLimit; i++ {
+		h.sendSessionUpdate(t, compactingUpdate())
+		h.client.awaitRefusedOpen(t, "WatchAgent")
+	}
+	h.awaitRefusal(t)
+	return h
+}
+
+// TestAReportedMainWatchIsStillReopened pins that reporting never ends the
+// retries: the main agent's watch is the feed's, and a watch given up on
+// leaves the feed dead for the session's life.
+func TestAReportedMainWatchIsStillReopened(t *testing.T) {
+	// Arrange: the fault is reported, then the shim holds the book.
+	h := refuseMainPastTheBound(t)
+	h.client.setAgentErr(nil)
+
+	// Act.
+	h.sendSessionUpdate(t, compactingUpdate())
+
+	// Assert.
+	if open := h.client.nextAgentOpen(t); open.req.GetTarget() != nil {
+		t.Fatalf("the re-opened watch targeted %q, want the main agent's unset target", open.req.GetTarget().GetValue())
+	}
+}
+
+// TestAReportedWatchThatOpensTellsTheLifecycle pins the fault's end: the
+// watch the shim refused opening is the edge that closes the refusal.
+func TestAReportedWatchThatOpensTellsTheLifecycle(t *testing.T) {
+	// Arrange.
+	h := refuseMainPastTheBound(t)
+	h.client.setAgentErr(nil)
+
+	// Act.
+	h.sendSessionUpdate(t, compactingUpdate())
+
+	// Assert.
+	h.rec.until(t, "lifecycle.OnWatchOpened")
+}
+
+// TestARunOfRefusalsIsReportedOnce pins the report's level: the fault the
+// first report opened stands, so the refusals after it are recorded at DEBUG
+// and reported no more.
+func TestARunOfRefusalsIsReportedOnce(t *testing.T) {
+	// Arrange.
+	h := refuseMainPastTheBound(t)
+
+	// Act: two more refusals past the report.
+	for i := 0; i < 2; i++ {
+		h.sendSessionUpdate(t, compactingUpdate())
+		h.client.awaitRefusedOpen(t, "WatchAgent")
+	}
+	h.awaitMessages(t, "debug", "the shim still refuses the watch open; its fault stands and the watch will be re-opened", 2)
+
+	// Assert.
+	for _, e := range h.rec.drain() {
+		if e.name() == "lifecycle.OnWatchOpenRefused" {
+			t.Fatal("a refusal past the report was reported again")
+		}
 	}
 }
 

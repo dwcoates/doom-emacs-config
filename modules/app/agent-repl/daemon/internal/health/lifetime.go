@@ -54,6 +54,9 @@ const (
 	// EdgeShimDeathRecorded is a shim death recorded on the workspace: the
 	// severing recorded moments earlier is a CONSEQUENCE of the death.
 	EdgeShimDeathRecorded Edge = "shim_death_recorded"
+	// EdgeWatchOpened is a watch the shim had refused opening after all: the
+	// disagreement about what exists is over.
+	EdgeWatchOpened Edge = "watch_opened"
 	// EdgeShimDiagnostics is a diagnostics push from the shim: the push is the
 	// WHOLE verdict, so it replaces every shim-reported fault standing.
 	EdgeShimDiagnostics Edge = "shim_diagnostics"
@@ -120,7 +123,7 @@ var faultLifetimes = map[string]Lifetime{
 	KindShimStartFailed:  standing(EdgeHealthyAttach),
 	KindShimDied:         standing(EdgeHealthyAttach),
 	KindLinkSevered:      standing(EdgeHealthyAttach, EdgeShimDeathRecorded),
-	KindWatchOpenRefused: standing(EdgeHealthyAttach),
+	KindWatchOpenRefused: standing(EdgeHealthyAttach, EdgeWatchOpened),
 	// A refused session start ends at the next session the shim serves.
 	KindResumeFailed:         standing(EdgeSessionStarted),
 	KindRelaunchResumeFailed: standing(EdgeSessionStarted),

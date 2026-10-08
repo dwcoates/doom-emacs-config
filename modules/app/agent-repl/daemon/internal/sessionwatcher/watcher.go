@@ -71,9 +71,11 @@ type shellWatch struct {
 // severed.
 const shellReopenLimit = 3
 
-// openRefusalLimit is how many times one watch's REFUSED open is retried
-// before the refusal is reported as a fault. A refused open is not a transport
-// failure, so exhausting it never severs the link.
+// openRefusalLimit is how many of one watch's REFUSED opens are taken as the
+// bring-up race before the refusal is reported as a fault. Reporting never
+// stops the retries: the watch is re-opened on every occasion until it opens,
+// which is what closes the fault. A refused open is not a transport failure,
+// so it never severs the link.
 const openRefusalLimit = 3
 
 // stallLockName is how the stall watchdog names the watcher's mutex.
@@ -1712,6 +1714,7 @@ func (w *watcher) openAgent(t *openTicket, a *agentWatch, req *shimv1.WatchAgent
 		return
 	}
 	installed := &ticketedStream[*shimv1.WatchAgentResponse]{Stream: stream, cancel: t.cancel}
+	w.refusalsEndedLocked("watch_agent", watchKey(a.id), a.refusals)
 	a.refusals = 0
 	a.stream = installed
 	w.log.Debug("daemon.sessionwatcher.watch_agent", "agent watch opened", dlog.Context{
@@ -1770,6 +1773,7 @@ func (w *watcher) openShell(t *openTicket, s *shellWatch) {
 		return
 	}
 	installed := &ticketedStream[*conversationv1.AgentBash]{Stream: stream, cancel: t.cancel}
+	w.refusalsEndedLocked("watch_bash", key, s.refusals)
 	s.refusals = 0
 	s.stream = installed
 	w.log.Debug("daemon.sessionwatcher.watch_bash", "shell watch opened", dlog.Context{
@@ -1832,6 +1836,14 @@ func (w *watcher) openRefusedLocked(operation, handle string, expected bool, ref
 			"the shim refused a watch open for a handle it does not hold yet; it will be re-opened", ctx)
 		return
 	}
+	// REPORTED ONCE PER RUN OF REFUSALS: the fault the first report opened
+	// stands until the watch opens, so every later refusal of the same run is
+	// the same disagreement, re-opened and recorded at DEBUG.
+	if *refusals > openRefusalLimit+1 || (!expected && *refusals > 1) {
+		w.log.Debug("daemon.sessionwatcher."+operation,
+			"the shim still refuses the watch open; its fault stands and the watch will be re-opened", ctx)
+		return
+	}
 	w.log.Warn("daemon.sessionwatcher.watch_open_refused",
 		"the shim refused a watch open for a handle it will not serve", ctx)
 	w.sinks.Lifecycle.OnWatchOpenRefused(w.ws, WatchOpenRefusal{
@@ -1839,6 +1851,17 @@ func (w *watcher) openRefusedLocked(operation, handle string, expected bool, ref
 		Handle:    handle,
 		Detail:    shimclient.Detail(err),
 	})
+}
+
+// refusalsEndedLocked tells the lifecycle that a watch the shim had refused
+// opened after all, which closes the refusal's fault if one stands.
+func (w *watcher) refusalsEndedLocked(operation, handle string, refusals int) {
+	if refusals == 0 {
+		return
+	}
+	w.log.Info("daemon.sessionwatcher."+operation, "a refused watch opened; the refusal is over",
+		dlog.Context{"handle": handle, "refusals": refusals})
+	w.sinks.Lifecycle.OnWatchOpened(w.ws)
 }
 
 // retryRefusedMainLocked re-opens the MAIN agent's watch after a REFUSED open.
@@ -1849,10 +1872,11 @@ func (w *watcher) retryRefusedMainLocked() {
 	if w.main == nil || w.main.stream != nil || w.main.refusals == 0 || w.inFlightLocked(w.main.opening) {
 		return
 	}
+	record := w.log.Info
 	if w.main.refusals > openRefusalLimit {
-		return
+		record = w.log.Debug
 	}
-	w.log.Info("daemon.sessionwatcher.watch_agent",
+	record("daemon.sessionwatcher.watch_agent",
 		"a session frame re-opened the main agent's refused watch", dlog.Context{
 			"refusals": w.main.refusals,
 		})

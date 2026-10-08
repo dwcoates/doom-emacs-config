@@ -303,6 +303,36 @@ func TestARecordedShimDeathClosesOnlyTheSeveringItCaused(t *testing.T) {
 	}
 }
 
+// A REFUSED WATCH OPENING IS THE RECOVERY EDGE OF ITS REFUSAL, and of nothing
+// else (health/lifetime.go).
+func TestAnOpenedWatchClosesOnlyItsRefusal(t *testing.T) {
+	tests := []struct {
+		name   string
+		kind   string
+		closes bool
+	}{
+		{"a watch open the shim refused", health.KindWatchOpenRefused, true},
+		{"a severed link", health.KindLinkSevered, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			ws := wsm.WorkspaceID("ws-1")
+			reporter := &fakeReporter{standing: []wsm.Fault{{ID: "f-standing", Workspace: &ws, Kind: tt.kind}}}
+			sink := newDiagnosticsSink(t, reporter)
+
+			// Act
+			sink.OnWatchOpened("ws-1")
+
+			// Assert
+			closed := len(reporter.closed) == 1 && reporter.closed[0] == "f-standing"
+			if closed != tt.closes {
+				t.Fatalf("closed %v, want %s closed = %v", reporter.closed, tt.kind, tt.closes)
+			}
+		})
+	}
+}
+
 func TestADiagnosticsPushWithNoBoundReporterIsRecordedNotDropped(t *testing.T) {
 	// Arrange
 	builds := &rolloutForwarder{}
