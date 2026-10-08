@@ -474,6 +474,19 @@ func (r *resolver) OnSubmission(ws ids.WorkspaceID, sub Submission) {
 		})
 }
 
+// AckTurn records that the shim took the turn, which ends `working ·
+// submitting`: the step names the window before the shim answers StartTurn,
+// and a turn that then produces no activity would otherwise stand in it for
+// its whole life.
+func (r *resolver) AckTurn(ws ids.WorkspaceID) {
+	r.mutate(ws, "daemon.footer.ack_turn", "the footer took the turn's ack", nil,
+		func(s *wsState) {
+			if s.turn != nil {
+				s.sawActivity = true
+			}
+		})
+}
+
 // applyTurnStarted installs (or clears) the in-flight turn on an accumulation.
 // It is shared by the daemon-fact setter and the watcher's turn-open edge so
 // the two can never drift.

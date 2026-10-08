@@ -192,7 +192,7 @@ func (q *queue) OnTurnAdopted(ws ids.WorkspaceID, turn ids.TurnID) {
 	// THE ROSTER'S TURN FACT IS THE DAEMON'S OWN. Taken and acknowledged in one
 	// step: the vendor is already answering, so there is no submitting window.
 	q.deps.Sidebar.SetTurn(ws, &footer.TurnStarted{At: at, Act: footer.ActPrompt})
-	q.deps.Sidebar.AckTurn(ws)
+	q.ackTurn(ws)
 	log.Info(opTurnAdopted, "recorded a turn the vendor started on its own; what is held waits behind it", nil)
 }
 
