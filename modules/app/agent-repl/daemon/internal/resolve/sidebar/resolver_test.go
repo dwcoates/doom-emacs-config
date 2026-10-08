@@ -405,3 +405,87 @@ func TestAViewIsPublishedBeforeAnotherChangeCanPublishItsOwn(t *testing.T) {
 		t.Fatalf("latest status = %q, want thinking: the submitting view was published after the newer one", got)
 	}
 }
+
+// TestARegistryWithTheSelectionIsOnePush pins the select path's one push: the
+// registry and the selection installed together reach an open subscriber as
+// ONE roster. The sentinel registry published after it must be the very next
+// delivery, so no second roster can have come between.
+func TestARegistryWithTheSelectionIsOnePush(t *testing.T) {
+	// Arrange: an open subscription drains the opening registry.
+	r, _ := newResolver(t)
+	ch := subscribe(t, r)
+	r.SetRegistry(registry(workspace("w1", "one"), workspace("w2", "two")))
+	<-ch
+
+	// Act.
+	r.SetRegistrySelected(registry(workspace("w1", "one"), workspace("w2", "two")), ids.WorkspaceID("w2"))
+	r.SetRegistry(registry(workspace("w1", "one"), workspace("w2", "two"), workspace("w3", "three")))
+
+	// Assert.
+	first := <-ch
+	if !rowFor(repoRows(t, first), "w2").GetCurrent().GetCurrent() {
+		t.Fatal("the select's one push did not mark w2 current")
+	}
+	if rowFor(repoRows(t, <-ch), "w3") == nil {
+		t.Fatal("a second roster arrived between the select's push and the sentinel")
+	}
+}
+
+func TestARegistryWithTheSelectionMarksTheSelection(t *testing.T) {
+	cases := []struct {
+		name    string
+		durable *ids.WorkspaceID
+	}{
+		{name: "a registry carrying no durable current"},
+		{name: "a registry carrying another durable current", durable: func() *ids.WorkspaceID { w := ids.WorkspaceID("w1"); return &w }()},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			r, _ := newResolver(t)
+			reg := registry(workspace("w1", "one"), workspace("w2", "two"))
+			reg.Current = tc.durable
+
+			// Act.
+			r.SetRegistrySelected(reg, ids.WorkspaceID("w2"))
+
+			// Assert: the selection is installed after the registry, as the
+			// two separate calls did.
+			if got := latest(t, r).GetCurrent().GetWorkspace().GetId(); got != "w2" {
+				t.Fatalf("current = %q, want w2", got)
+			}
+		})
+	}
+}
+
+func TestARegistryWithASelectionItDoesNotCarryLeavesNoCurrent(t *testing.T) {
+	// Arrange.
+	r, _ := newResolver(t)
+
+	// Act.
+	r.SetRegistrySelected(registry(workspace("w1", "one")), ids.WorkspaceID("w2"))
+
+	// Assert.
+	if got := latest(t, r).GetCurrent(); got != nil {
+		t.Fatalf("current = %v, want none for a workspace the registry does not carry", got)
+	}
+}
+
+func TestARegistryWithTheSelectionRefusesAViewGroupingThatIsNeither(t *testing.T) {
+	// Arrange.
+	r, surfaces := newResolver(t)
+	reg := registry(workspace("w1", "one"))
+	reg.View.Grouping = ""
+
+	// Act.
+	defer func() {
+		// Assert: it failed hard, and said so at ERROR first.
+		if recover() == nil {
+			t.Fatal("SetRegistrySelected accepted a view with no grouping")
+		}
+		if !hasError(surfaces.Records(), "daemon.sidebar.set_registry") {
+			t.Fatal("the invariant violation was not recorded at ERROR")
+		}
+	}()
+	r.SetRegistrySelected(reg, ids.WorkspaceID("w1"))
+}

@@ -94,6 +94,18 @@ type fanned struct {
 // SetRegistry binds every registered workspace on the footer, as registration
 // does (SetWorkspaceDir), with its two client hops held.
 func (f *fanned) SetRegistry(reg sidebar.Registry) {
+	f.bindRegistry(reg)
+	f.Resolver.SetRegistry(reg)
+}
+
+// SetRegistrySelected binds the registry exactly as SetRegistry does.
+func (f *fanned) SetRegistrySelected(reg sidebar.Registry, ws ids.WorkspaceID) {
+	f.bindRegistry(reg)
+	f.Resolver.SetRegistrySelected(reg, ws)
+}
+
+// bindRegistry is the footer binding both registry installs share.
+func (f *fanned) bindRegistry(reg sidebar.Registry) {
 	f.mu.Lock()
 	for _, ws := range reg.Workspaces {
 		if f.bound[ws.ID] {
@@ -113,7 +125,6 @@ func (f *fanned) SetRegistry(reg sidebar.Registry) {
 			f.footer.SetParked(session.Workspace, true)
 		}
 	}
-	f.Resolver.SetRegistry(reg)
 }
 
 func (f *fanned) AckTurn(ws ids.WorkspaceID) {

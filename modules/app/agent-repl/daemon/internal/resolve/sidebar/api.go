@@ -78,6 +78,10 @@ type Resolver interface {
 	// SetSelected records the user's selection, which also clears that
 	// workspace's attention marker.
 	SetSelected(ws ids.WorkspaceID)
+	// SetRegistrySelected is SetRegistry and then SetSelected in ONE
+	// mutation and ONE push: a select's republished registry and the
+	// selection reach every client together.
+	SetRegistrySelected(reg Registry, ws ids.WorkspaceID)
 	// SetViewed records that the user has READ the last turn's result — the
 	// editor's report that the user has now SEEN this workspace. It takes
 	// only on a turn-end row (done, interrupted or turn_failed); a report on
