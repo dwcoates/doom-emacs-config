@@ -1673,6 +1673,16 @@ pre {
   --bubble-bg: color-mix(in srgb, var(--held-prompt-bg) 5%, var(--bg));
   max-width: calc(var(--bubble-max-width) / 2);
 }
+/* THE SECOND BACKGROUND A KIND SETS (owner request, 2026-10-08): a THINKING
+   bubble and an INTERIM response (`.interim-response`, response.ts
+   `isInterimResponse`) are filled with the page's own `--bg`, so in either
+   theme the fill is not there at all and only the prose (and the interim's
+   pear border, once settled) reads. It feeds `--bubble-bg`, so anything
+   painted from it matches. */
+.bubble[data-variant="thinking"],
+.bubble.interim-response {
+  --bubble-bg: var(--bg);
+}
 /* THE THINKING WAVE, AND ONLY WHILE THE TURN IS IN FLIGHT.
 
    A WORKING prompt bubble carries a soft shadow band that crosses its own

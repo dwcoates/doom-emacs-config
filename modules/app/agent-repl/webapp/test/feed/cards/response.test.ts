@@ -24,6 +24,7 @@ import {
   USAGE_AGE_RESERVE_LABELS,
   USAGE_RESERVE_LABELS_PROPERTY,
   USAGE_REVEALED_CLASS,
+  INTERIM_RESPONSE_CLASS,
   drawFeedResponse,
   isInterimResponse,
   responseCap,
@@ -2858,5 +2859,36 @@ describe("a re-push updates the bubble in place", () => {
     const after = drawFeedResponse(settledAs("hi"), rowContext(previous));
     // Assert
     expect(after).not.toBe(previous);
+  });
+});
+
+describe("the interim response's hook class", () => {
+  it.each([
+    { name: "an arriving response", final: false, state: "update", want: true },
+    { name: "a settled response", final: false, state: "success", want: true },
+    { name: "the turn's answer", final: true, state: "success", want: false },
+    { name: "a response cut short", final: false, state: "error", want: false },
+  ] as const)("marks $name interim: $want", ({ final, state, want }) => {
+    // Arrange
+    const u = response({ finalAnswer: final, result: { case: state, value: { prose: { markdown: "x" } } } });
+    // Act
+    const el = drawFeedResponse(u, rowContext());
+    // Assert
+    expect(el.classList.contains(INTERIM_RESPONSE_CLASS)).toBe(want);
+  });
+
+  it("takes the class back when the terminal names the interim the answer", () => {
+    // Arrange
+    const before = drawFeedResponse(
+      response({ result: { case: "success", value: { prose: { markdown: "x" } } } }),
+      rowContext(),
+    );
+    // Act
+    const after = drawFeedResponse(
+      response({ finalAnswer: true, result: { case: "success", value: { prose: { markdown: "x" } } } }),
+      rowContext(before),
+    );
+    // Assert
+    expect(after.classList.contains(INTERIM_RESPONSE_CLASS)).toBe(false);
   });
 });

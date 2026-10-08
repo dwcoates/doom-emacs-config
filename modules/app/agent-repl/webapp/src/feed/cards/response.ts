@@ -132,6 +132,13 @@ export const THINKING_CAP_LINES = ELLIPSIS_CAP_LINES satisfies BubbleCapLines;
 export const INTERIM_CAP_LINES = ELLIPSIS_CAP_LINES satisfies BubbleCapLines;
 
 /**
+ * The hook class an INTERIM response bubble wears, which the stylesheet keys
+ * its page-colored fill on (owner request, 2026-10-08), so the fill and the
+ * one-line cap are decided by the one predicate, `isInterimResponse`.
+ */
+export const INTERIM_RESPONSE_CLASS = "interim-response";
+
+/**
  * How many prose blocks one response row draws.
  *
  * The daemon folds every fragment of a response into ONE bubble row and
@@ -168,6 +175,7 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
   // border still wins over the green: the controller toggles the one
   // selected-entry class (`.entry-selected`, selected-entry.ts) on this bubble.
   if (u.finalAnswer && !u.thinking) hooks.push(FINAL_RESPONSE_CLASS);
+  if (isInterimResponse(u)) hooks.push(INTERIM_RESPONSE_CLASS);
 
   // The heading is the header strip, outside the body: the body is rewritten
   // by the prose painters (and by every frame of the type-out), so a heading
