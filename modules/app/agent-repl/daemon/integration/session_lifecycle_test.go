@@ -1105,7 +1105,11 @@ func TestRestartWorkspaceForcedInterruptsFirst(t *testing.T) {
 	// wait for in-flight work, and whatever is still live (monitors, background
 	// shells, background subagents) runs inside the shim's vendor child and
 	// ends with it (endpoint_deploy.proto, DeployRequest.force).
-	killedTurn := f.shim.ExpectKillTurn()
+	// THE KILL IS READ FROM THE OLD SHIM'S DURABLE LOG: the restart answers
+	// once it HAPPENED (owner ruling, 2026-10-08), by when the old shim has
+	// exited and its control socket is closed.
+	killedTurn := &shimv1.KillTurnRequest{}
+	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCKillTurn, killedTurn)
 	if !killedTurn.GetForce() {
 		t.Fatalf("KillTurn.force = false on a forced restart, want true: the running turn is interrupted rather than waited out")
 	}
@@ -1437,7 +1441,11 @@ func TestRestartWorkspaceForcedDoesNotRedriveTheInterruptedTurn(t *testing.T) {
 	if resp.Msg.GetSuccess() == nil {
 		t.Fatalf("RestartWorkspace = %v, want a success", resp.Msg)
 	}
-	killedTurn := f.shim.ExpectKillTurn()
+	// THE KILL IS READ FROM THE OLD SHIM'S DURABLE LOG: the restart answers
+	// once it HAPPENED (owner ruling, 2026-10-08), by when the old shim has
+	// exited and its control socket is closed.
+	killedTurn := &shimv1.KillTurnRequest{}
+	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCKillTurn, killedTurn)
 	if !killedTurn.GetForce() {
 		t.Fatalf("KillTurn.force = false on a forced restart, want true: the running turn is interrupted rather than waited out")
 	}
