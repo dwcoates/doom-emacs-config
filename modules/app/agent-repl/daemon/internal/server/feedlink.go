@@ -11,6 +11,7 @@ import (
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/replyquote"
 	"claude-repld/internal/workspace"
 	"claude-repld/internal/wsm"
 )
@@ -28,7 +29,7 @@ func (s *server) askAboutUnresolvedLink(ctx context.Context, log dlog.Logger, ws
 		Block: &conversationv1.UserContentBlock_Text{Text: &conversationv1.TextBlock{Text: link.Question}},
 	}}}}
 	if quoted, ok := s.deps.Feed.SelectableText(ws, source); ok {
-		said = prependReferencedResponse(said, quoted)
+		said = replyquote.Quote(said, quoted.Markdown, quoted.Prompt)
 	} else {
 		log.Info("daemon.server.open_in_editor", "the unresolved link's source row is not a selectable root bubble; its question is sent unquoted", dlog.Context{
 			"href": link.Href, "source_row": source.GetValue(),
