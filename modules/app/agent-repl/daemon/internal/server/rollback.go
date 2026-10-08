@@ -18,6 +18,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/promptqueue"
+	"claude-repld/internal/replyquote"
 	"claude-repld/internal/workspace"
 	"claude-repld/internal/wsm"
 )
@@ -146,7 +147,10 @@ func (s *server) RollBack(
 	if planned.selected {
 		s.endSelection(subject.Log, ws, planned.row, returnToTail(), "rolled_back")
 	}
-	success := &agentreplv1.RollBackSuccess{Prompt: planned.said}
+	// THE COMPOSER HOLDS THE PERSON'S WORDS AGAIN, never a reply's quote: a
+	// quote is the daemon's, made from a selection, and a resend replies to
+	// whatever is selected when it is sent.
+	success := &agentreplv1.RollBackSuccess{Prompt: replyquote.Words(planned.said)}
 	if planned.restore {
 		success.FilesRestored = &agentreplv1.RollBackFilesRestored{Files: uint32(result.FilesRestored)}
 	}
