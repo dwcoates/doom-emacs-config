@@ -417,17 +417,67 @@ kill-switch at runtime."
   :type 'boolean
   :group 'agent-repl)
 
+(defconst agent-repl--log-level-window-seconds 300
+  "The longest a durable log level other than `info' may last, in seconds.
+A level other than `info' is a WINDOW, never a standing setting: it holds
+until its end and then reverts to `info' by itself.  The same rule binds
+every runtime (proto/vocab/log-level-window.json).")
+
+(defvar agent-repl--log-level-clock #'float-time
+  "Function answering the current time in seconds, for level windows.
+Tests bind it to move time instead of waiting for it.")
+
+(defvar agent-repl--log-level-expires-at nil
+  "When the current non-`info' `agent-repl-log-file-level' ends, or nil.
+Seconds since the epoch.  nil is a level that never ends, which is what
+`info' always is and what a direct `setq' of the level gives.")
+
+(defun agent-repl--log-level-window (level until now)
+  "Decide the durable log level from LEVEL and UNTIL at NOW.
+LEVEL and UNTIL are the raw values of `AGENT_REPL_LOG_LEVEL' and
+`AGENT_REPL_LOG_LEVEL_UNTIL' (nil when unset); UNTIL and NOW are Unix
+seconds.  Return a plist: `:level' the symbol to start at, `:until' when it
+ends (nil when it never does), `:outcome' one of `default', `honored',
+`no_expiry', `expired' or `beyond_window', and `:requested' /
+`:requested-until' as read.
+
+A level other than `info' holds only inside an unexpired window no longer
+than `agent-repl--log-level-window-seconds'; otherwise the answer is `info'.
+An unknown LEVEL or an UNTIL that is not a decimal integer signals: a
+setting nobody can read is refused, never reinterpreted."
+  (let ((parsed (cond
+                 ((null level) 'info)
+                 ((member level '("debug" "info" "warn" "error")) (intern level))
+                 (t (error "agent-repl: AGENT_REPL_LOG_LEVEL must be debug, info, warn, or error; got %S"
+                           level))))
+        (end (cond
+              ((or (null until) (string-empty-p until)) nil)
+              ((string-match-p "\\`[+-]?[0-9]+\\'" until) (string-to-number until))
+              (t (error "agent-repl: AGENT_REPL_LOG_LEVEL_UNTIL must be a Unix second; got %S"
+                        until)))))
+    (append
+     (list :requested level :requested-until until)
+     (cond
+      ((eq parsed 'info) (list :level 'info :until nil :outcome 'default))
+      ((null end) (list :level 'info :until nil :outcome 'no_expiry))
+      ((>= now end) (list :level 'info :until nil :outcome 'expired))
+      ((> (- end now) agent-repl--log-level-window-seconds)
+       (list :level 'info :until nil :outcome 'beyond_window))
+      (t (list :level parsed :until end :outcome 'honored))))))
+
+(defun agent-repl--log-level-selection-from-environment ()
+  "Return `agent-repl--log-level-window' for this process's environment now."
+  (agent-repl--log-level-window (getenv "AGENT_REPL_LOG_LEVEL")
+                                (getenv "AGENT_REPL_LOG_LEVEL_UNTIL")
+                                (funcall agent-repl--log-level-clock)))
+
 (defun agent-repl--log-level-from-environment ()
   "Return the durable log level selected by `AGENT_REPL_LOG_LEVEL'.
-An unset variable selects `info'.  Any set value outside the shared
-`debug|info|warn|error' vocabulary aborts the module load."
-  (let ((value (getenv "AGENT_REPL_LOG_LEVEL")))
-    (cond
-     ((null value) 'info)
-     ((member value '("debug" "info" "warn" "error")) (intern value))
-     (t
-      (error "agent-repl: AGENT_REPL_LOG_LEVEL must be debug, info, warn, or error; got %S"
-             value)))))
+An unset variable selects `info', and so does a level other than `info'
+outside the window `AGENT_REPL_LOG_LEVEL_UNTIL' names.  Any set value
+outside the shared `debug|info|warn|error' vocabulary, or a malformed
+window, aborts the module load."
+  (plist-get (agent-repl--log-level-selection-from-environment) :level))
 
 (defcustom agent-repl-log-file-level (agent-repl--log-level-from-environment)
   "Least severe rung the LOG FILE records.  See the ladder in core.el.
@@ -442,7 +492,10 @@ written when its level is at or above this one.  Verbose records carry level
 not durability.
 
 The initial value comes from `AGENT_REPL_LOG_LEVEL' at module load and is
-`info' when that variable is absent.  The Elisp variable remains the runtime
+`info' when that variable is absent.  A level other than `info' is a window
+of at most `agent-repl--log-level-window-seconds': it is honored only with
+an unexpired `AGENT_REPL_LOG_LEVEL_UNTIL' (Unix seconds) and reverts to
+`info' by itself when the window ends.  The Elisp variable remains the runtime
 knob: \\[agent-repl-set-log-file-level] changes subsequent records immediately.
 
 This does NOT control the per-workspace log BUFFERS; see
@@ -455,8 +508,15 @@ This does NOT control the per-workspace log BUFFERS; see
 
 ;; `defcustom' preserves an already-bound value across a Doom reload.  The
 ;; process environment is the shared startup switch, so every module load
-;; re-reads it and resets the Elisp knob to the process-level selection.
-(setq agent-repl-log-file-level (agent-repl--log-level-from-environment))
+;; re-reads it and resets the Elisp knob to the process-level selection --
+;; including its window's end, so a leftover debug level never outlives it.
+(defvar agent-repl--log-level-startup-selection nil
+  "The level decision this module load made, noted once logging exists.")
+
+(let ((selection (agent-repl--log-level-selection-from-environment)))
+  (setq agent-repl-log-file-level (plist-get selection :level)
+        agent-repl--log-level-expires-at (plist-get selection :until)
+        agent-repl--log-level-startup-selection selection))
 
 (defcustom agent-repl-log-buffer-level 'warn
   "Least severe rung the per-workspace log BUFFERS display.
@@ -2312,11 +2372,50 @@ The durable sink deliberately ranks only by LEVEL; see
       (agent-repl--log-record-rank (symbol-name threshold) nil)))
 
 (defun agent-repl--log-record-persists-p (level verbosity)
-  "Whether a LEVEL / VERBOSITY record clears `agent-repl-log-file-level'."
+  "Whether a LEVEL / VERBOSITY record clears `agent-repl-log-file-level'.
+A level window that is over is ended here first
+\(`agent-repl--log-level-tick')."
   (ignore verbosity)
+  (agent-repl--log-level-tick)
   (>= (agent-repl--log-record-rank level "normal")
       (agent-repl--log-record-rank (symbol-name agent-repl-log-file-level)
                                    "normal")))
+
+(defconst agent-repl--log-level-window-scope
+  '(:agent-repl-central "process-wide logging and utility state")
+  "The scope of every level window record.")
+
+(defun agent-repl--log-level-tick ()
+  "End the durable log level's window when it is over.
+The level reverts to `info' and the revert is recorded at info.  The window
+is cleared before the record is written, so that record cannot end it again."
+  (when (and agent-repl--log-level-expires-at
+             (>= (funcall agent-repl--log-level-clock) agent-repl--log-level-expires-at))
+    (let ((from agent-repl-log-file-level)
+          (until agent-repl--log-level-expires-at))
+      (setq agent-repl-log-file-level 'info
+            agent-repl--log-level-expires-at nil)
+      (agent-repl--info agent-repl--log-level-window-scope
+                        "elisp.core.log-level-window: log level %s window ended at %s; reverted to info outcome=window_ended"
+                        from (format-time-string "%FT%T%z" (seconds-to-time until))))))
+
+(defun agent-repl--note-log-level-selection (selection)
+  "Record at info that SELECTION started at `info' though another level was asked.
+Silent for the default and for an honored window."
+  (pcase (plist-get selection :outcome)
+    ((and outcome (or 'no_expiry 'expired 'beyond_window))
+     (agent-repl--info agent-repl--log-level-window-scope
+                       "elisp.core.log-level-window: log level %S ignored; starting at info outcome=%s requested-until=%S"
+                       (plist-get selection :requested) outcome
+                       (plist-get selection :requested-until)))))
+
+(defun agent-repl--set-log-level-window (level)
+  "Make LEVEL the durable level: a window of the longest length unless `info'.
+Return when the window ends, nil for `info'."
+  (setq agent-repl-log-file-level level
+        agent-repl--log-level-expires-at
+        (unless (eq level 'info)
+          (+ (funcall agent-repl--log-level-clock) agent-repl--log-level-window-seconds))))
 
 (defun agent-repl--log-record-displays-p (level verbosity)
   "Whether a LEVEL / VERBOSITY record clears `agent-repl-log-buffer-level'."
@@ -2715,11 +2814,13 @@ off will not shrink one — that is `agent-repl-set-log-file-level'."
       (agent-repl--log '(:agent-repl-central "process-wide logging and utility state") "elisp.core.toggle-debug: visibility=%s" label))))
 
 (defun agent-repl-set-log-file-level (level)
-  "Set `agent-repl-log-file-level' to LEVEL for the rest of this session.
+  "Set `agent-repl-log-file-level' to LEVEL.
 This is the control for LOG FILE volume, which `agent-repl-debug' has
-never governed.  It takes effect on the very next record — no restart and
-no reload — so a log can be turned down while it is actively being flooded
-and back up before a reproduction is captured."
+never governed.  A level other than `info' is a window: it reverts to
+`info' by itself after `agent-repl--log-level-window-seconds', and the
+revert is recorded at info.  It takes effect on the very next record — no
+restart and no reload — so a log can be turned down while it is actively
+being flooded and back up before a reproduction is captured."
   (interactive
    (list (intern
           (completing-read
@@ -2732,7 +2833,9 @@ and back up before a reproduction is captured."
      "elisp.core.set-log-file-level: rejected level=%S reason=not-a-log-level" level)
     (error "agent-repl: %S is not a log level; expected one of debug info warn error"
            level))
-  (setq agent-repl-log-file-level level)
+  ;; A level other than info is a window: it reverts to info by itself
+  ;; (`agent-repl--log-level-tick').
+  (agent-repl--set-log-level-window level)
   ;; Announced through the durable sink as well as the echo area: the record
   ;; saying the threshold moved is itself the boundary a later reader needs to
   ;; explain why the surrounding volume changed.
@@ -2743,13 +2846,14 @@ and back up before a reproduction is captured."
 (defun agent-repl-toggle-verbose-to-disk ()
   "Toggle whether the verbose rung is written to the LOG FILE.
 Verbose records carry debug level, so this flips `agent-repl-log-file-level'
-between `debug' and `info'.
+between `debug' and `info'.  Debug is a window: it reverts to `info' by
+itself after `agent-repl--log-level-window-seconds'.
 
 Affects the FILE only.  The per-workspace log buffers follow
 `agent-repl-log-buffer-level' and *Messages* follows `agent-repl-debug'."
   (interactive)
-  (setq agent-repl-log-file-level
-        (if (eq agent-repl-log-file-level 'debug) 'info 'debug))
+  (agent-repl--set-log-level-window
+   (if (eq agent-repl-log-file-level 'debug) 'info 'debug))
   (let ((on (eq agent-repl-log-file-level 'debug)))
     (agent-repl--info '(:agent-repl-central "process-wide logging and utility state") "elisp.core.toggle-verbose-to-disk: verbose-to-file=%s"
                       (if on "ON" "OFF"))
@@ -2757,6 +2861,11 @@ Affects the FILE only.  The per-workspace log buffers follow
              (if on "ON" "OFF")
              (if on "" " (warnings and errors still recorded)"))
     agent-repl-log-file-level))
+
+;; The level this load started at, stated now that logging exists: a level
+;; asked for and not honored (no window, an ended one, one too long) is said
+;; at info, once per load.
+(agent-repl--note-log-level-selection agent-repl--log-level-startup-selection)
 
 ;;;; ---- Quit deferral around asynchronous critical sections ----------------
 ;;

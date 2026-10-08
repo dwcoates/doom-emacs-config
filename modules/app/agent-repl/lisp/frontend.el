@@ -43,6 +43,8 @@
 (declare-function agent-repl-window-tell-gate-dock "window" (ws))
 (declare-function agent-repl-window-tell-input-background "window" (ws))
 (declare-function agent-repl--fatal "core")
+(declare-function agent-repl--log-level-window "core" (level until now))
+(defvar agent-repl--log-level-clock)
 (declare-function agent-repl--info "core")
 (declare-function agent-repl--error "core")
 (declare-function agent-repl--kill-cause-str "core")
@@ -137,19 +139,22 @@ tests bind `process-environment' so they never depend on ambient host state."
   (getenv name))
 
 (defun agent-repl--frontend-log-level (ws)
-  "Return the validated `AGENT_REPL_LOG_LEVEL' for WS's webview URL.
-An unset variable means `info', the logging contract's declared default.  Any
-present value outside the four-level vocabulary is an invariant violation and
-aborts before a webview is created."
-  (let ((value (agent-repl--frontend-getenv "AGENT_REPL_LOG_LEVEL")))
-    (cond
-     ((null value) "info")
-     ((member value '("debug" "info" "warn" "error")) value)
-     (t
-      (agent-repl--fatal
-       ws
-       "elisp.frontend.log-level: invalid ws=%s variable=AGENT_REPL_LOG_LEVEL value=%S allowed=debug,info,warn,error"
-       ws value)))))
+  "Return the effective log level window for WS's webview URL.
+The answer is `agent-repl--log-level-window' over `AGENT_REPL_LOG_LEVEL' and
+`AGENT_REPL_LOG_LEVEL_UNTIL': an unset level means `info', the logging
+contract's declared default, and a level other than `info' rides the URL
+only with the end of its window.  A present value outside the four-level
+vocabulary, or a malformed window, is an invariant violation and aborts
+before a webview is created."
+  (let ((value (agent-repl--frontend-getenv "AGENT_REPL_LOG_LEVEL"))
+        (until (agent-repl--frontend-getenv "AGENT_REPL_LOG_LEVEL_UNTIL")))
+    (condition-case err
+        (agent-repl--log-level-window value until (funcall agent-repl--log-level-clock))
+      (error
+       (agent-repl--fatal
+        ws
+        "elisp.frontend.log-level: invalid ws=%s variable=AGENT_REPL_LOG_LEVEL value=%S until=%S allowed=debug,info,warn,error reason=%s"
+        ws value until (error-message-string err))))))
 
 ;;;; ---- Capability -----------------------------------------------------------
 
@@ -1166,7 +1171,9 @@ THE LOG LEVEL IS THE ONE PIECE OF DAEMON CONFIGURATION THAT RIDES THE URL.
 JavaScript cannot read the daemon process's environment, so the host carries
 the effective `AGENT_REPL_LOG_LEVEL' into the page's boot address.  An unset
 variable becomes the logging contract's explicit `info' default; an invalid
-present value fails before the webview is created.
+present value fails before the webview is created.  A level other than
+`info' is a window, so it rides with `&log_level_until=<unix seconds>', its
+end: a page reloaded from that address after the window ends boots at info.
 
 Nothing else rides the URL.  There is no composer flag (the webapp runs
 composer-less unless `&composer=1', which only dev mode and the webapp's
@@ -1188,11 +1195,15 @@ than no webview."
       (agent-repl--fatal ws "elisp.frontend.webview-url: no ref for ws=%s" ws))
     (unless conn
       (agent-repl--fatal ws "elisp.frontend.webview-url: no connection for ws=%s" ws))
-    (let ((url (format "%s/?workspace=%s&dir=%s&log_level=%s"
-                       (agent-repl--frontend-page-origin ws conn)
-                       (url-hexify-string (plist-get ref :id))
-                       (url-hexify-string (plist-get ref :dir))
-                       (url-hexify-string (agent-repl--frontend-log-level ws)))))
+    (let* ((level (agent-repl--frontend-log-level ws))
+           (url (format "%s/?workspace=%s&dir=%s&log_level=%s%s"
+                        (agent-repl--frontend-page-origin ws conn)
+                        (url-hexify-string (plist-get ref :id))
+                        (url-hexify-string (plist-get ref :dir))
+                        (url-hexify-string (symbol-name (plist-get level :level)))
+                        (if-let ((until (plist-get level :until)))
+                            (format "&log_level_until=%d" until)
+                          ""))))
       (agent-repl--log ws "elisp.frontend.webview-url: ws=%s url=%s" ws url)
       url)))
 
