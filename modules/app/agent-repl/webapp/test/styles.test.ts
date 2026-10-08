@@ -3044,13 +3044,14 @@ describe("the held prompt's fill: 5% of the tint over the feed", () => {
   it.each([
     ["light", () => declarationsOf(":root") ?? ""],
     ["dark", () => darkThemeBlock()],
-  ])("sits within two steps of the feed background on every channel in the %s theme", (_theme, block) => {
-    // Arrange
+  ])("sits within 5% of the full range of the feed background on every channel in the %s theme", (_theme, block) => {
+    // Arrange — 5% of the tint moves a channel by at most 5% of 255, whatever
+    // the feed's own color (the ground went chess.com green, 2026-10-08).
     const feed = rgbOf(block(), "--bg");
     // Act
     const fill = fillOver(block());
     // Assert
-    expect(fill.map((channel, i) => Math.abs(channel - feed[i]) <= 2)).toEqual([true, true, true]);
+    expect(fill.map((channel, i) => Math.abs(channel - feed[i]) <= 0.05 * 255)).toEqual([true, true, true]);
   });
 
   it.each([
@@ -3763,5 +3764,40 @@ describe("the classic diff", () => {
 
     // Assert
     expect(got).toBeDefined();
+  });
+});
+
+describe("the feed's chess.com green ground (owner, 2026-10-08)", () => {
+  it.each([
+    ["light", "#81b64c"],
+    ["dark", "#11180a"],
+  ] as const)("paints the %s theme's --bg %s", (theme, want) => {
+    // Arrange
+    const block = theme === "light" ? (declarationsOf(":root") ?? "") : darkThemeBlock();
+
+    // Act
+    const got = /--bg:\s*(#[0-9a-fA-F]{6})/.exec(block)?.[1];
+
+    // Assert
+    expect(got).toBe(want);
+  });
+
+  it("keeps the dark theme's --bg the brand green's hue", () => {
+    // Arrange
+    const [light, dark] = [rgbOf(declarationsOf(":root") ?? "", "--bg"), rgbOf(darkThemeBlock(), "--bg")];
+
+    // Act
+    const ratios = dark.map((channel, i) => channel / (light[i] ?? 1));
+
+    // Assert
+    expect(ratios.every((ratio) => Math.abs(ratio - 0.13) < 0.01)).toBe(true);
+  });
+
+  it("paints the body with --bg", () => {
+    // Arrange / Act
+    const got = /(?:^|;)\s*background:\s*([^;]+)/.exec(declarationsOf("body") ?? "")?.[1]?.trim();
+
+    // Assert
+    expect(got).toBe("var(--bg)");
   });
 });
