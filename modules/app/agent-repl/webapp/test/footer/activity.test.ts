@@ -58,9 +58,15 @@ afterEach(() => {
 
 // ---- fixtures ---------------------------------------------------------------
 
-/** Every status arm whose cell has an unpinned branch (all but waiting). */
+/**
+ * The status arms whose cell has NO unpinned branch: a session parked on the
+ * user always stands on a salient line.
+ */
+const SALIENT_ONLY_ARMS: readonly string[] = ["waiting", "permission", "question"];
+
+/** Every status arm whose cell has an unpinned branch. */
 const UNPINNED_ARMS: readonly string[] = FOOTER_STATUS_CASES.filter(
-  (arm) => arm !== "waiting",
+  (arm) => !SALIENT_ONLY_ARMS.includes(arm),
 );
 
 /**
@@ -86,7 +92,7 @@ function salientInit(
   atMs: bigint = BigInt(NOW),
 ): Record<string, unknown> {
   const salient = { at: { atMs }, kind: { case: kindCase, value } };
-  return statusCase === "waiting"
+  return SALIENT_ONLY_ARMS.includes(statusCase)
     ? { salient }
     : { tier: { case: "salient", value: salient } };
 }
@@ -218,12 +224,12 @@ describe("drawFooterStatusActivity: the tier the daemon resolved", () => {
     expect(cell.getAttribute("data-arm")).toBe("queryDied");
   });
 
-  it("reads the waiting cell, which has no tier oneof, as salient", () => {
-    const cell = salientCell(
-      "gatedCall",
-      { text: "Bash: rm -rf …" },
-      "waiting",
-    );
+  it.each([
+    ["waiting", "interrupting", { text: "stopping the turn…" }],
+    ["permission", "gatedCall", { text: "Bash: rm -rf …" }],
+    ["question", "questionLead", { text: "2 questions · which?" }],
+  ])("reads the %s cell, which has no tier oneof, as salient", (statusCase, kind, value) => {
+    const cell = salientCell(kind, value, statusCase);
     expect(cell.getAttribute("data-tier")).toBe("salient");
   });
 
@@ -465,9 +471,9 @@ describe("the unpinned tiers under working and background", () => {
 
 describe("the salient kinds", () => {
   it.each([
-    ["waiting", "gatedCall", { text: "Bash: rm -rf …" }, "Bash: rm -rf …"],
+    ["permission", "gatedCall", { text: "Bash: rm -rf …" }, "Bash: rm -rf …"],
     [
-      "waiting",
+      "question",
       "questionLead",
       { text: "2 questions · which?" },
       "2 questions · which?",

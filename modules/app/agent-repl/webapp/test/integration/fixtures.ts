@@ -44,7 +44,6 @@ import {
   FooterViewSchema,
   FooterStatusSchema,
   FooterExpandedSchema,
-  FooterMergeTestRowSchema,
   FooterAllowanceSchema,
   type FooterView,
 } from "../../../proto/gen/ts/frontend/v1/footer_pb";
@@ -1269,7 +1268,9 @@ export type MergeTabKind = (typeof MERGE_TAB_KINDS)[number];
 
 /** The state arms every tab kind carries: nothing parks, so live or settled. */
 export const MERGE_TAB_STATES = ["live", "settled"] as const;
-export type MergeTabState = (typeof MERGE_TAB_STATES)[number];
+/** The agentic kinds whose tab can also wait on the user. */
+export const MERGE_TAB_WAITING_KINDS = ["conflicts", "fixes"] as const;
+export type MergeTabState = (typeof MERGE_TAB_STATES)[number] | "waitingOnUser";
 
 /** When every fixture tab's work began, and each queue entry its stage. */
 const MERGE_TAB_STARTED_AT_MS = 1_000n;
@@ -1283,8 +1284,17 @@ const settledState = () => ({
   },
 });
 
-/** The state arm a tab carries. */
-const plainState = (state: MergeTabState) => (state === "settled" ? settledState() : liveState());
+/** The state arm a tab carries. Only conflicts and fixes wait on the user. */
+const plainState = (state: MergeTabState) => {
+  if (state === "waitingOnUser") throw new Error("only the conflicts and fixes tabs wait on the user");
+  return state === "settled" ? settledState() : liveState();
+};
+
+/** The state arm a conflicts or fixes tab carries: also waiting on the user. */
+const agenticState = (state: MergeTabState) =>
+  state === "waitingOnUser"
+    ? { case: "waitingOnUser" as const, value: { startedAtMs: MERGE_TAB_STARTED_AT_MS } }
+    : plainState(state);
 
 /** The token and label the tests tab's log link is served with. */
 export const MERGE_TEST_LOG = { token: "merge-log-7f3a", label: "~/.claude-emacs/merge-logs/ws-1-tests-2.log" };
@@ -1374,7 +1384,8 @@ const mergeTabKindValue = (
             },
             {
               name: "go",
-              state: { case: "running", value: {} },
+              state: { case: "running", value: { soFar: { case: "passing", value: {} } } },
+              counts: { passed: 3, failed: 0, total: 5 },
               output: [{ text: "running", paintClass: "ansi-dim" }],
             },
           ],
@@ -1382,11 +1393,11 @@ const mergeTabKindValue = (
         },
       };
     case "conflicts":
-      return { case: "conflicts", value: { state: plainState(state) } };
+      return { case: "conflicts", value: { state: agenticState(state) } };
     case "fixes":
       return {
         case: "fixes",
-        value: { state: plainState(state), attempt: { attempt: 2, maxAttempts: 3 } },
+        value: { state: agenticState(state), attempt: { attempt: 2, maxAttempts: 3 } },
       };
     case "prePrompt":
       return { case: "prePrompt", value: { state: plainState(state) } };
@@ -1511,7 +1522,11 @@ export const FOOTER_STATUS_SUBSTATUSES: Record<string, readonly string[]> = {
     "fetching",
     "delegating",
   ],
-  waiting: ["wakeup", "permission", "question", "coldGate", "interrupting"],
+  waiting: ["wakeup", "coldGate", "interrupting"],
+  // A GATE NAMES ITSELF (owner ruling, 2026-10-08): a permission or a question
+  // gate is its own status arm, with no substatus of its own.
+  permission: [],
+  question: [],
   interrupted: ["byUser", "hostShutdown"],
   merging: [
     "enqueued",
@@ -1523,6 +1538,7 @@ export const FOOTER_STATUS_SUBSTATUSES: Record<string, readonly string[]> = {
     "committing",
     "updatingMain",
     "postprocessing",
+    "waitingOnUser",
   ],
   background: [],
   vendorFault: [
@@ -1578,6 +1594,7 @@ export const MERGE_SUBSTATUS_WORDS: Record<string, Record<string, string>> = {
     committing: "committing",
     updatingMain: "updating main",
     postprocessing: "postprocessing",
+    waitingOnUser: "waiting on user",
   },
   mergeFailed: { conflicts: "conflicts", tests: "tests", other: "merge" },
 };
@@ -1684,18 +1701,18 @@ export const FOOTER_STATUS_SALIENTS: Record<string, readonly string[]> = {
   working: ["compaction", "retrying", "update", ...SHARED_SALIENTS],
   waiting: [
     "wakeup",
-    "gatedCall",
-    "questionLead",
     "blockedOnUser",
     "coldGateCost",
     "interrupting",
     "update",
     ...SHARED_SALIENTS,
   ],
+  permission: ["gatedCall", "update", ...SHARED_SALIENTS],
+  question: ["questionLead", "update", ...SHARED_SALIENTS],
   interrupted: ["update", ...SHARED_SALIENTS],
-  merging: ["mergeStep", "update", ...SHARED_SALIENTS],
-  mergeFailed: ["mergeStep", "update", ...SHARED_SALIENTS],
-  merged: ["mergeStep", "update", ...SHARED_SALIENTS],
+  merging: ["mergeStep", "gatedCall", "questionLead", "update", ...SHARED_SALIENTS],
+  mergeFailed: ["mergeStep", "gatedCall", "questionLead", "update", ...SHARED_SALIENTS],
+  merged: ["mergeStep", "gatedCall", "questionLead", "update", ...SHARED_SALIENTS],
   background: ["update", ...SHARED_SALIENTS],
   vendorFault: ["authenticating", "fault", "update", "retrying", "vendorStart", "turnEnded", ...SHARED_SALIENTS],
   agentReplFault: ["startFailed", "fault", "update", "turnEnded", ...SHARED_SALIENTS],
@@ -1703,6 +1720,12 @@ export const FOOTER_STATUS_SALIENTS: Record<string, readonly string[]> = {
   closing: ["closeBlocked", "update", ...SHARED_SALIENTS],
   loading: ["update", ...SHARED_SALIENTS],
 };
+
+/**
+ * The status arms whose activity cell has NO unpinned branch: a session parked
+ * on the user always stands on a salient line.
+ */
+export const FOOTER_SALIENT_ONLY_ARMS: readonly string[] = ["waiting", "permission", "question"];
 
 /** Every TRANSIENT kind arm, with a complete payload for each. */
 export const FOOTER_TRANSIENT_KINDS: Record<string, object> = {
@@ -1735,8 +1758,8 @@ export const FOOTER_ENDURING = "enduring";
  * KIND picks the tier the way the daemon's resolution lands it: a kind legal
  * as the arm's SALIENT line is drawn salient; any other kind is a TRANSIENT
  * over the enduring line; `enduring` (or no kind) is the enduring line alone.
- * A waiting arm with no kind carries its first salient kind, because its cell
- * has no unpinned branch.
+ * An arm whose cell has no unpinned branch (waiting, permission, question)
+ * carries its first salient kind when no kind is named.
  */
 function footerActivity(
   status: string,
@@ -1750,13 +1773,14 @@ function footerActivity(
 ): object {
   const salients = FOOTER_STATUS_SALIENTS[status];
   const at = { atMs: init?.activityAtMs ?? 3_000n };
-  const kind = init?.activity ?? (status === "waiting" ? salients[0] : FOOTER_ENDURING);
+  const salientOnly = FOOTER_SALIENT_ONLY_ARMS.includes(status);
+  const kind = init?.activity ?? (salientOnly ? salients[0] : FOOTER_ENDURING);
   if (salients.includes(kind)) {
     const salient = {
       at,
       kind: { case: kind, value: init?.activityOverride ?? FOOTER_SALIENT_KINDS[kind] },
     };
-    return status === "waiting" ? { salient } : { tier: { case: "salient", value: salient } };
+    return salientOnly ? { salient } : { tier: { case: "salient", value: salient } };
   }
   if (kind === FOOTER_ENDURING) {
     return { tier: { case: "unpinned", value: { enduring: enduringLine(init?.activityOverride ?? {}) } } };
@@ -1813,7 +1837,7 @@ export function footerStatus(
   return { case: status, value } as StatusArm;
 }
 
-export const FOOTER_CHIPS = ["agents", "tasks", "shells", "monitors", "crons", "mergeTests"] as const;
+export const FOOTER_CHIPS = ["agents", "tasks", "shells", "monitors", "crons"] as const;
 export type FooterChip = (typeof FOOTER_CHIPS)[number];
 
 export const FOOTER_PANELS = ["tokens", ...FOOTER_CHIPS] as const;
@@ -1846,18 +1870,7 @@ type FooterInit = {
 };
 
 /** The panels the daemon's focus can name. */
-export const FOOTER_FOCUS_PANELS = ["agents", "shells", "monitors", "mergeTests"] as const;
-
-/** The merge tests panel's rows: one suite in each state, in the gate's order. */
-export const MERGE_TEST_ROWS: readonly MessageInitShape<typeof FooterMergeTestRowSchema>[] = [
-  { name: { text: "daemon unit" }, state: { state: { case: "passed", value: { durationMs: 95_000n } } } },
-  { name: { text: "elisp" }, state: { state: { case: "failed", value: { durationMs: 7_000n } } } },
-  { name: { text: "webapp" }, state: { state: { case: "running", value: { startedAtMs: 1_000n } } } },
-  { name: { text: "webkit" }, state: { state: { case: "waiting", value: {} } } },
-];
-
-/** The state arms the merge tests panel's rows carry, as MERGE_TEST_ROWS orders them. */
-export const MERGE_TEST_ROW_STATES = ["passed", "failed", "running", "waiting"] as const;
+export const FOOTER_FOCUS_PANELS = ["agents", "shells", "monitors"] as const;
 
 export function footerView(init?: FooterInit): FooterView {
   const chips = init?.chips ?? {
@@ -1866,7 +1879,6 @@ export function footerView(init?: FooterInit): FooterView {
     shells: true,
     monitors: true,
     crons: true,
-    mergeTests: true,
   };
   return create(FooterViewSchema, {
     strip: {
@@ -1894,10 +1906,9 @@ export function footerView(init?: FooterInit): FooterView {
         shells: chips.shells ? { count: 1 } : undefined,
         monitors: chips.monitors ? { count: 4 } : undefined,
         crons: chips.crons ? { count: 2 } : undefined,
-        mergeTests: chips.mergeTests ? { finished: 8, total: 12 } : undefined,
       },
     },
-    expanded: init?.expanded === false ? undefined : footerExpandedInit(chips.mergeTests === true),
+    expanded: init?.expanded === false ? undefined : footerExpandedInit(),
     focus:
       init?.focus === undefined
         ? undefined
@@ -1906,11 +1917,8 @@ export function footerView(init?: FooterInit): FooterView {
 }
 
 /** Every expanded panel, fully resolved, exactly as the daemon ships them. */
-function footerExpandedInit(testing: boolean): MessageInitShape<typeof FooterExpandedSchema> {
+function footerExpandedInit(): MessageInitShape<typeof FooterExpandedSchema> {
   return {
-    // The merge's suites while it is testing; empty (and the chip unset)
-    // otherwise, exactly as the daemon ships the panel.
-    mergeTests: { rows: testing ? [...MERGE_TEST_ROWS] : [] },
     tokens: {
       contextGrowth: { value: "18.2k" },
       input: { value: "42.1k" },
@@ -2307,6 +2315,7 @@ export const ROSTER_STATUS_ARMS = [
   "clearing",
   "compacting",
   "permission",
+  "question",
   "done",
   "interrupted",
   "turnFailed",
@@ -2531,7 +2540,6 @@ export const HOLD_BADGES: Readonly<Record<string, { label: string; detail?: stri
   holdForTurnEnd: { label: "after this turn" },
   uninterruptibleTurn: { label: "after /compact", detail: "waits for /compact to finish" },
   classificationError: { label: "unclassified" },
-  accepted: { label: "confirmed" },
   shutdown: { label: "restart hold", detail: "held for the scheduled restart (sched-1)" },
   reconnect: { label: "after reconnect", detail: "held until the session reconnects" },
   buildRefresh: { label: "build refresh", detail: "held for the build refresh" },
@@ -2549,17 +2557,23 @@ export function heldPrompt(init?: {
 }): HeldPrompt {
   const classification = init?.classification ?? "interject";
   const hold = init?.hold ?? "reconnect";
-  // `daemon_held` draws no badge of its own: the hold arm's badge says what holds it.
-  const statuses: string[] = classification === "daemonHeld" ? [] : [classification];
-  if (classification === "holdForTurnEnd" && init?.accepted === true) statuses.push("accepted");
-  statuses.push(hold);
+  // THE ONE BADGE IS THE HOLD'S: a hold outranks the verdict, which, unless it
+  // is `daemon_held`, is a note, followed by the verdict's confirmation.
+  const holdBadge = HOLD_BADGES[hold] ?? { label: hold };
+  const notes: string[] = [];
+  if (classification !== "daemonHeld") {
+    const verdict = HOLD_BADGES[classification] ?? { label: classification };
+    notes.push(verdict.detail ?? verdict.label);
+  }
+  if (classification === "holdForTurnEnd" && init?.accepted === true) notes.push("confirmed");
   return create(HeldPromptSchema, {
     turn: turnId(init?.turn ?? HELD_TURN_ID),
     said: userSaid(init?.text ?? "also fix the footer"),
     queuedAt: { atMs: 3_000n },
     classification: classificationValue(classification, init?.accepted),
     hold: holdValue(hold),
-    badges: statuses.map((status) => HOLD_BADGES[status] ?? { label: status }),
+    badge: { ...holdBadge, standsFor: { case: hold, value: {} } },
+    notes: notes.map((sentence) => ({ sentence })),
     foldAbove: init?.foldAbove === undefined ? undefined : { above: turnId(init.foldAbove) },
   });
 }

@@ -135,6 +135,7 @@ type UserContentBlock struct {
 	//	*UserContentBlock_Text
 	//	*UserContentBlock_Image
 	//	*UserContentBlock_Unsupported
+	//	*UserContentBlock_Quote
 	Block         isUserContentBlock_Block `protobuf_oneof:"block"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -204,6 +205,15 @@ func (x *UserContentBlock) GetUnsupported() *UnsupportedBlock {
 	return nil
 }
 
+func (x *UserContentBlock) GetQuote() *UserQuoteBlock {
+	if x != nil {
+		if x, ok := x.Block.(*UserContentBlock_Quote); ok {
+			return x.Quote
+		}
+	}
+	return nil
+}
+
 type isUserContentBlock_Block interface {
 	isUserContentBlock_Block()
 }
@@ -221,7 +231,14 @@ type UserContentBlock_Image struct {
 type UserContentBlock_Unsupported struct {
 	// A block whose kind we do not model. It renders as nothing and is kept so
 	// the decision is reversible.
-	Unsupported *UnsupportedBlock `protobuf:"bytes,3,opt,name=unsupported,proto3,oneof"` // Tag 4 is RETIRED: the attached-file block is deferred.
+	Unsupported *UnsupportedBlock `protobuf:"bytes,3,opt,name=unsupported,proto3,oneof"`
+}
+
+type UserContentBlock_Quote struct {
+	// Tag 4 is RETIRED: the attached-file block is deferred.
+	// An earlier bubble of the conversation the person was replying to when
+	// they sent this, quoted ahead of their own words.
+	Quote *UserQuoteBlock `protobuf:"bytes,5,opt,name=quote,proto3,oneof"`
 }
 
 func (*UserContentBlock_Text) isUserContentBlock_Block() {}
@@ -229,6 +246,67 @@ func (*UserContentBlock_Text) isUserContentBlock_Block() {}
 func (*UserContentBlock_Image) isUserContentBlock_Block() {}
 
 func (*UserContentBlock_Unsupported) isUserContentBlock_Block() {}
+
+func (*UserContentBlock_Quote) isUserContentBlock_Block() {}
+
+// AN EARLIER BUBBLE THE PERSON REPLIED TO, quoted into what they said. When a
+// prompt is sent with a feed bubble selected, the daemon quotes that bubble
+// into the prompt as one of these, ahead of the blocks the person typed, so
+// the person's own words and the quoted reference stay separate in the record
+// rather than being flattened into one text.
+//
+// THE TEXT IS THE QUOTE AS DELIVERED, composed once by the daemon: the reply
+// preamble naming what is quoted, the quoted bubble's markdown inside a code
+// fence longer than any backtick run in it, and the closing marker that
+// introduces the person's own message. The agent receives it verbatim, as text
+// in its place among the blocks. A client draws it verbatim and never parses
+// it, and a bubble shows it only when expanded, while the collapsed bubble
+// shows only the person's own words.
+type UserQuoteBlock struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The composed quote, markdown: preamble, fenced quoted text, closing
+	// marker. Never empty.
+	Text          string `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UserQuoteBlock) Reset() {
+	*x = UserQuoteBlock{}
+	mi := &file_conversation_v1_user_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UserQuoteBlock) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UserQuoteBlock) ProtoMessage() {}
+
+func (x *UserQuoteBlock) ProtoReflect() protoreflect.Message {
+	mi := &file_conversation_v1_user_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UserQuoteBlock.ProtoReflect.Descriptor instead.
+func (*UserQuoteBlock) Descriptor() ([]byte, []int) {
+	return file_conversation_v1_user_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *UserQuoteBlock) GetText() string {
+	if x != nil {
+		return x.Text
+	}
+	return ""
+}
 
 var File_conversation_v1_user_proto protoreflect.FileDescriptor
 
@@ -238,12 +316,15 @@ const file_conversation_v1_user_proto_rawDesc = "" +
 	"\bUserSaid\x126\n" +
 	"\acontent\x18\x01 \x01(\v2\x1c.conversation.v1.UserContentR\acontent\"H\n" +
 	"\vUserContent\x129\n" +
-	"\x06blocks\x18\x01 \x03(\v2!.conversation.v1.UserContentBlockR\x06blocks\"\xc9\x01\n" +
+	"\x06blocks\x18\x01 \x03(\v2!.conversation.v1.UserContentBlockR\x06blocks\"\x82\x02\n" +
 	"\x10UserContentBlock\x120\n" +
 	"\x04text\x18\x01 \x01(\v2\x1a.conversation.v1.TextBlockH\x00R\x04text\x123\n" +
 	"\x05image\x18\x02 \x01(\v2\x1b.conversation.v1.ImageBlockH\x00R\x05image\x12E\n" +
-	"\vunsupported\x18\x03 \x01(\v2!.conversation.v1.UnsupportedBlockH\x00R\vunsupportedB\a\n" +
-	"\x05blockB0Z.agentrepl/proto/conversation/v1;conversationv1b\x06proto3"
+	"\vunsupported\x18\x03 \x01(\v2!.conversation.v1.UnsupportedBlockH\x00R\vunsupported\x127\n" +
+	"\x05quote\x18\x05 \x01(\v2\x1f.conversation.v1.UserQuoteBlockH\x00R\x05quoteB\a\n" +
+	"\x05block\"$\n" +
+	"\x0eUserQuoteBlock\x12\x12\n" +
+	"\x04text\x18\x01 \x01(\tR\x04textB0Z.agentrepl/proto/conversation/v1;conversationv1b\x06proto3"
 
 var (
 	file_conversation_v1_user_proto_rawDescOnce sync.Once
@@ -257,26 +338,28 @@ func file_conversation_v1_user_proto_rawDescGZIP() []byte {
 	return file_conversation_v1_user_proto_rawDescData
 }
 
-var file_conversation_v1_user_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
+var file_conversation_v1_user_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
 var file_conversation_v1_user_proto_goTypes = []any{
 	(*UserSaid)(nil),         // 0: conversation.v1.UserSaid
 	(*UserContent)(nil),      // 1: conversation.v1.UserContent
 	(*UserContentBlock)(nil), // 2: conversation.v1.UserContentBlock
-	(*TextBlock)(nil),        // 3: conversation.v1.TextBlock
-	(*ImageBlock)(nil),       // 4: conversation.v1.ImageBlock
-	(*UnsupportedBlock)(nil), // 5: conversation.v1.UnsupportedBlock
+	(*UserQuoteBlock)(nil),   // 3: conversation.v1.UserQuoteBlock
+	(*TextBlock)(nil),        // 4: conversation.v1.TextBlock
+	(*ImageBlock)(nil),       // 5: conversation.v1.ImageBlock
+	(*UnsupportedBlock)(nil), // 6: conversation.v1.UnsupportedBlock
 }
 var file_conversation_v1_user_proto_depIdxs = []int32{
 	1, // 0: conversation.v1.UserSaid.content:type_name -> conversation.v1.UserContent
 	2, // 1: conversation.v1.UserContent.blocks:type_name -> conversation.v1.UserContentBlock
-	3, // 2: conversation.v1.UserContentBlock.text:type_name -> conversation.v1.TextBlock
-	4, // 3: conversation.v1.UserContentBlock.image:type_name -> conversation.v1.ImageBlock
-	5, // 4: conversation.v1.UserContentBlock.unsupported:type_name -> conversation.v1.UnsupportedBlock
-	5, // [5:5] is the sub-list for method output_type
-	5, // [5:5] is the sub-list for method input_type
-	5, // [5:5] is the sub-list for extension type_name
-	5, // [5:5] is the sub-list for extension extendee
-	0, // [0:5] is the sub-list for field type_name
+	4, // 2: conversation.v1.UserContentBlock.text:type_name -> conversation.v1.TextBlock
+	5, // 3: conversation.v1.UserContentBlock.image:type_name -> conversation.v1.ImageBlock
+	6, // 4: conversation.v1.UserContentBlock.unsupported:type_name -> conversation.v1.UnsupportedBlock
+	3, // 5: conversation.v1.UserContentBlock.quote:type_name -> conversation.v1.UserQuoteBlock
+	6, // [6:6] is the sub-list for method output_type
+	6, // [6:6] is the sub-list for method input_type
+	6, // [6:6] is the sub-list for extension type_name
+	6, // [6:6] is the sub-list for extension extendee
+	0, // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_conversation_v1_user_proto_init() }
@@ -289,6 +372,7 @@ func file_conversation_v1_user_proto_init() {
 		(*UserContentBlock_Text)(nil),
 		(*UserContentBlock_Image)(nil),
 		(*UserContentBlock_Unsupported)(nil),
+		(*UserContentBlock_Quote)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -296,7 +380,7 @@ func file_conversation_v1_user_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_conversation_v1_user_proto_rawDesc), len(file_conversation_v1_user_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   3,
+			NumMessages:   4,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

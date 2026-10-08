@@ -101,12 +101,13 @@ and are contract on the same terms:
 | `.topbar-account-cell` class | the strip's first cell, wrapping the connectivity glyph and the account chip in that order | — (the pair is one element, and it is the session-line reveal's anchor) | owner ruling 3, 2026-09-13 |
 | `data-reveal="agent-repl-session"` + `data-began` / `.topbar-session-duration` | the connectivity glyph's dropdown (src/topbar/session.ts), anchored on the `.topbar-connectivity` glyph itself (`data-reveal-anchor="agent-repl-session"`), whose click stops at the glyph so the account cell's options do not also open; its rows are `.topbar-session-row`s (`.topbar-session-label`, `.topbar-session-value`) sharing the token breakdown's row rules | `data-began`: `login` \| `editorStart`; the duration row's value is `formatTickedAge` of the reader's now against `started_at_ms`, ticked by the shared ticker; it is the dropdown's only row (the vendor traffic row was removed, owner ruling 2026-10-06). A connectivity indicator carrying NO session binds nothing: the glyph is unmarked and its click opens the account options, as before | session-traffic, owner ruling 2026-10-06 |
 | `data-reviving` + `.reviving` class | the sidebar `.ws` row (`data-reviving`) and its `.name` (`.reviving`), while the row carries `RosterRowReviving` | `true` — absent once the daemon drops the marker (the revival ended, success or failure). The name wears the subtle `ws-revive-shimmer` ripple, phase-continued across redraws by `REVIVE_SHIMMER_PERIOD_MS` (src/sidebar/reviving.ts), and stopped under reduced motion | owner ruling, 2026-09-19 |
-| `data-role` / `data-variant` / `data-cap-lines` | every blue and purple `.bubble` (src/bubble/draw.ts) | role `prompt` \| `response`; variant `response` \| `thinking` \| `agentic` \| `compaction` \| `user` \| `agent` \| `peer` \| `held` (`turn-ended` retired 2026-10-06: a turn's ending is its outcome marker); cap `feed` \| `1` \| `0` \| `none` (`none` is `BUBBLE_UNCAPPED`: every non-thinking `response`, at full height, whose box wears `.bubble-box` alone; `2` retired 2026-09-27) | one-bubble, 2026-09-23; `none` 2026-09-27 |
+| `data-role` / `data-variant` / `data-cap-lines` | every blue and purple `.bubble` (src/bubble/draw.ts) | role `prompt` \| `response`; variant `response` \| `thinking` \| `agentic` \| `compaction` \| `user` \| `agent` \| `peer` \| `held` (`turn-ended` retired 2026-10-06: a turn's ending is its outcome marker); cap `feed` \| `1` \| `0` \| `none` (`none` is `BUBBLE_UNCAPPED`: the turn's answer and a cut-short `response`, at full height, whose box wears `.bubble-box` alone; `1` with `data-more="ellipsis"` is a held prompt, a thinking bubble and an interim response; `2` retired 2026-09-27) | one-bubble, 2026-09-23; `none` 2026-09-27 |
 | `data-more` | every CAPPED `.bubble` (src/bubble/draw.ts; absent on an uncapped one) | `fade` (the shared has-more bottom fade) \| `ellipsis` (a one-line cap only: the collapsed body is clamped to its line, which the engine ends in `…` exactly when anything follows it, and the fade is hidden) | held-prompt-quiet-one-line, 2026-09-27 |
 | `.bubble-strip` class | every header-strip element of a bubble (a click on it toggles the bubble's scroll box) | — | one-bubble, 2026-09-23 |
 | `.async-work-id` class + `data-work-id` | the last element of a detached subagent head (`.subagent-head`) and of every shell head (`.shell-head`), drawn by `src/feed/work-id.ts` | the daemon's detached-work id, verbatim (absent on a synchronous spawn) | footer-rows-and-work-ids, 2026-09-23 |
 | `data-work-id` / `data-jump` / `data-jump-unresolved` | every footer detached-work row (`.footer-row-jump`: agents, shells, monitors) | `data-work-id` is `FooterWorkId.value`; exactly one of `data-jump` (the entry's FeedId: a subagent's bubble, a shell's head, a monitor's Monitor tool-call card) and `data-jump-unresolved` (`notDrawn`; `noFeedEntry` is retired, owner ruling 2026-09-23) | footer-rows-and-work-ids, 2026-09-23 |
 | `.bubble-expand-only` class | every element of a bubble's expand-only region (`expandOnly` in src/bubble/draw.ts), after the scroll box | — (hidden while the sibling `.bubble-scroll` is not `.expanded`; a held prompt's one `.queued-details` element — queued age, rationale or failure detail, actions — wears it) | held-prompt-compact-badges, 2026-09-23 |
+| `.bubble-quote` class | a reply's quote block in a prompt bubble's body: a feed prompt's `.prompt-block-quote` (`FeedQuoteBlock`) and a held prompt's `.queued-quote` (`conversation.v1.UserQuoteBlock`), drawn by `quoteSlot` (src/bubble/quote.ts) | — (hidden while the bubble's `.bubble-scroll` is not `.expanded`, so a collapsed prompt shows only the person's words; a body holding one always wears `has-more` while collapsed) | reply-quote rendering, 2026-10-08 |
 | `data-held-status` + `.held-badge` class | every status badge in a held prompt's header strip (a `.badge`) | the status: a `classification` arm, a `hold` arm, or `accepted`; its tone class comes from `HELD_STATUS_BADGES` (src/tray/held-prompt.ts), the one table | held-prompt-compact-badges, 2026-09-23 |
 | `data-held-action="release"` | the held card's release control | `release` — the wire verb and the hook; the control is LABELLED "Send now" (`SEND_NOW_LABEL`, src/tray/held-prompt.ts), which is also its accessible name, and its forbidding-arm tooltips (`NO_RELEASE_TITLES`) say "send", never "release" | send-now-label, 2026-09-23 |
 | `data-held-action="edit"` / `data-editing` / `data-held-status="editing"` | the held card's Edit control (between Send now and Cancel), the card while its entry carries `HeldPrompt.editing`, and that entry's `editing` status badge in the header strip | `edit`; `true` — absent when the daemon states no edit; the badge's tone is `HELD_STATUS_BADGES.editing` | edit-held-prompt, 2026-09-23 |
@@ -125,13 +126,14 @@ and are contract on the same terms:
 | `data-datum` on the failed-deploy overlay | each line of a `deployFailed` warning's detail overlay (src/topbar/warnings.ts) | `step` \| `component` \| `rollback` \| `detail` \| `log` (absent when the build archived no log); the `detail` line also wears `.topbar-warning-whole`, which keeps its line breaks. The first push carrying a failed deploy is logged at ERROR as `topbar.deploy-failed` | deploy-failure-every-client, 2026-09-28 |
 | `data-local-arms` / `data-local` | the topbar's `.topbar-warnings` chip (`data-local-arms`), and each client-local row in its list (`data-local`, with `data-arm`) | the standing client-local `FailureKind` arm names, space-separated, first-filed first — absent when none stands; the `#failure-overlay` and its `[data-arm]` cards are GONE | owner ruling, 2026-09-23 |
 | `data-merge-test-log` + `.merge-test-log-link` | the merge bubble tests tab's log link (`renderMergeTestLogLink`, src/link.ts), inside `.merge-test-log` | — (drawn in the response bubble's link blue, `var(--accent)`; its text is `FeedMergeTestLogLabel.text`; a click sends `OpenInEditor` with `target.merge_test_log` = the served token, which never appears in the markup) | merge queue rework, 2026-09-30 |
-| `data-chip="mergeTests"` / `data-panel="mergeTests"` | the 🧪 chip ("🧪 8/12") and the expanded merge tests panel | — (the panel folds away, like the agents panel, when the daemon empties it at the end of testing; a new `FooterExpandedFocus.merge_tests` generation opens and selects it) | merge queue rework, 2026-09-30 |
-| `data-suite-state` / `data-duration` | every merge tests panel row (`data-suite-state`), and a finished row's run-time clock (`data-duration`) | `waiting` \| `running` \| `passed` \| `failed`; a running row's `.footer-row-clock` ticks, a finished one's does not, a waiting one has none | merge queue rework, 2026-09-30 |
 | `.footer-columns` / `.footer-row-main` / `.footer-column-header` + `data-column` | the agents panel's header and rows (`.footer-columns`, each exactly four cells sharing the section's grid through `subgrid`), a row's first cell (`.footer-row-main`: glyph, label, description, any wait, any "not on screen"), and the header's column headers | `data-column`: `tokens` \| `duration`; the header's first cell is the "stop all" control (the "live agents" title is gone), and the row's tokens figure carries no "tok" (the daemon dropped it); widths are measured in test/webkit/footer-columns.webkit.test.ts | footer columns, 2026-10-01 |
+| `data-suite-state` / `data-so-far` / `.merge-suite-counts` | every suite row of the merge bubble's tests tab (src/feed/merge/tests-tab.ts), a running suite's so-far arm, and the counts column on the right of its head line | `data-suite-state`: `running` \| `passed` \| `failed`; `data-so-far` (running only): `unreported` (grey dot) \| `passing` (green) \| `failing` (red), never purple; the counts read "passed/failed/total" with `.is-passed` in `--ok` and `.is-failed` in `--err`, and are absent while the daemon knows none | merge bubble suite counts, 2026-10-08 |
 | `data-step` + `.footer-activity-merge-step` | the salient `merge_step` line under `merging` and `merge failed` (src/footer/merge-step.ts) | the step's case name: `enqueued` \| `preprocessing` \| `rebasing` \| `conflictResolution` \| `testing` \| `fixing` \| `committing` \| `updatingMain` \| `postprocessing`; a testing line also wears `data-edge` (`started` \| `passed` in `tone-green` \| `failed` in `tone-red`), a rebasing line `data-line` (`running` \| `failed`), an updating-main line `data-update-step` (`fetching` \| `fastForwarding`) | merge queue rework, 2026-09-30 |
 | `data-merge-progress` / `data-merge-attempt` / `data-update-step` | the merge bubble's rebasing tab progress ("3/7"), a fixes tab's attempt ("attempt 2/3"), and the updating main tab's step (src/feed/merge/step-tabs.ts) | `data-update-step`: `fetching` \| `fastForwarding`; the other two carry no value | merge queue rework, 2026-09-30 |
 | `.merge-queue-header` / `.merge-queue-stage` / `.merge-queue-duration` + `data-queue-place="current"` | the merge bubble's queue tab, a COLUMN TABLE sharing the agents panel's `.footer-columns` subgrid, `.footer-column-header` and duration column (src/columns.ts, src/feed/merge/queue.ts) | the header's `data-column`: `workspace` \| `stage` \| `duration`; each row is exactly three cells (`.merge-queue-label`, `.merge-queue-stage`: the front's active tab label or "waiting", `.merge-queue-duration`: a `.footer-row-clock` ticking from the entry's `stage_entered_at_ms`); "you are here" is gone and this workspace's own row (`data-queue-place="current"`) is subtly highlighted; widths and row heights are measured in test/webkit/merge-queue-columns.webkit.test.ts | merge bubble durations, 2026-10-01 |
+| `data-tab-state` + `.merge-tab-glyph` | every merge tab badge (src/feed/merge/tab-strip.ts) | `live` (●) \| `settled` (✓ or ✗ by `data-tab-outcome`) \| `waitingOnUser` (❓, conflicts and fixes tabs only, while the merge's agent has a permission ask or question open: the footer reads "merging · waiting on user" for exactly as long) | merge waiting on user, 2026-10-08 |
 | `.merge-tab-duration` | every merge tab badge, between `.merge-tab-label` and `.merge-tab-glyph` (src/feed/merge/tab-strip.ts) | — (a live tab ticks from its state's `started_at_ms`, a settled one shows `ended_at_ms - started_at_ms`; muted, never wrapping, measured in test/webkit/merge-tab-duration.webkit.test.ts) | merge bubble durations, 2026-10-01 |
+| `data-merged-shown` + `.merged-row-probe` | the Recently Merged band's `.repo.merged-section` (`data-merged-shown`), and the invisible one-row-tall box inside it the fit measures its row unit by | the number of merges the band shows, which is also the `(N)` its folded count says: as many, most recent first, as fit in the rail without scrolling (`fitMergedSection`, src/sidebar/merged-fit.ts, re-fitted after every push and on every resize of `.sb-scroll` or a `.sb-pane`); absent while the band is not laid out, when every row shows under the daemon's count | sidebar section counts, 2026-10-08 |
 | `data-component="news-digest"` + `data-news-digest-close` / `data-kind` / `data-effective` / `data-outcome` | the news digest overlay's host (fixed on `#feed-scroll`'s rectangle, src/news-digest/news-digest.ts), its close control, each `.news-digest-section`, an item's effective-date pill, and each `.news-digest-source` row | `data-kind`: the `NewsDigestSectionKind` arm (`backend` \| `deprecation` \| `policy` \| `feature` \| `release` \| `incident`; `backend` is drawn in the warning red); `data-outcome`: `read` \| `failed`; `data-week` (`risks` \| `quiet`) is the "Since last week" section, drawn FIRST, its risk items each carrying a `data-risk-reason` element under the summary and its quiet sentence a `data-week-quiet` element; `data-sdk-version` (`known` \| `unknown`) is the header's middle "SDK Version: …" element; the close control and Escape send `DismissNewsDigest` with the served id, which never appears in the markup, and only the daemon's `none` push takes the overlay down | news digest, 2026-10-02 |
 
 ## Commands
@@ -345,8 +347,12 @@ hand any more:
   the bubble to be laid out, and an unmeasurable width still fails loudly. A
   redraw given the row's previous draw updates it IN PLACE. The stylesheet has
   ONE rule set on `.bubble`: one size and leading, `[data-role]` sets only the
-  side and `--bubble-bg`, a variant or state only the border, `[data-cap-lines]`
-  the collapsed limit; one scroll box, one has-more measurer (bubble-more.ts)
+  side and `--bubble-bg`, a variant or state only the border (the owner-named
+  fills apart: a held prompt's, below, and a thinking bubble's and an interim
+  response's (`.interim-response`), which is the page's own `--bg`, owner
+  request 2026-10-08, and whose prose is the dimmed `--interim-text`),
+  `[data-cap-lines]` the collapsed limit; one scroll box,
+  one has-more measurer (bubble-more.ts)
   and one toggle (expand.ts, which also opens a bubble from its header strip).
   A kind's chrome the reader should see only once the bubble is open goes in
   the spec's `expandOnly`, which the same toggle reveals; there is no second
@@ -364,23 +370,26 @@ hand any more:
   is 5% of the `--held-prompt-bg` tint over the feed's `--bg`; each status badge's color comes from ONE table,
   `HELD_STATUS_BADGES`, and its words are the ones the card already said for
   that arm (the proto carries no status text), a hold's standing sentence
-  included. A THINKING bubble is a FIXED height (owner request, 2026-10-07):
-  arriving or landed it is under the feed cap (`THINKING_CAP_LINES`,
-  `responseCap`, src/feed/cards/response.ts) and says "more" with the fade, so
-  its own text landing never collapses it. The earlier half-line thinking fade
-  and the one-line landed collapse are gone.
-  A RESPONSE IS NEVER ABBREVIATED (owner request, 2026-09-27): every
-  non-thinking response (arriving, interim pear, final green) and the
-  ended-turn bubble is drawn `BUBBLE_UNCAPPED` (`data-cap-lines="none"`), the
-  one bubble's first-class uncapped mode. Its box wears `.bubble-box` (the
+  included. A THINKING bubble is a FIXED height (owner requests, 2026-10-07
+  and 2026-10-08): arriving or landed it is ONE line under the ellipsis
+  (`THINKING_CAP_LINES`, `responseCap`, src/feed/cards/response.ts), the held
+  prompt's mechanism, so its own text landing never changes its height. An
+  INTERIM response (owner request, 2026-10-08: `isInterimResponse`, any
+  non-thinking response the daemon has not named the turn's answer and the
+  turn's death did not cut short, arriving or settled into the pear) is ONE
+  line under the ellipsis too (`INTERIM_CAP_LINES`); the turn's terminal
+  naming it the answer redraws it as a fresh uncapped bubble.
+  THE TURN'S ANSWER IS NEVER ABBREVIATED (owner request, 2026-09-27): the
+  final green response and a response cut short are drawn `BUBBLE_UNCAPPED`
+  (`data-cap-lines="none"`), the one bubble's first-class uncapped mode. Its box wears `.bubble-box` (the
   structural rules every box shares) but never `.bubble-scroll`, which every
   cap, clip, gutter, zoom cursor, fade, click toggle, carried fold and
   auto-collapse keys on, so it cannot be abbreviated or opened by construction;
   the spec types forbid `expandOnly` on it, a box never switches mode in place
   (`drawBubble` builds a fresh bubble), and `toggleSection` refuses at ERROR
   (`expand.toggle-uncapped`) anything that is not a capped section. Thinking
-  bubbles, prompts, held prompts, peers, agentic cards and compaction
-  summaries stay capped.
+  bubbles, interim responses, prompts, held prompts, peers, agentic cards and
+  compaction summaries stay capped.
 - **ONLY A JUMP'S EXPANSION CLOSES ON LEAVING THE VIEW; THE READER'S CLOSE AT
   THE TAIL** (owner rulings, 2026-10-01, replacing the wheel-armed close of
   2026-09-30). EVERY JUMP to a feed entry (a footer detached-work row, a
@@ -395,12 +404,25 @@ hand any more:
   (`TailFollow.onTailReached`, the one re-latch in `latchIfLatestVisible`,
   fired only for the reader's own scroll after the latest entry was out of
   view), which closes EVERY expanded entry once (INFO
-  `feed.tail-reached-collapse`) and drops the jump watches. "Left the view" is
+  `feed.tail-reached-collapse`) and drops the jump watches. A MERGE BUBBLE
+  (`data-merge-bubble`) NEVER COLLAPSES ON ITS OWN (owner ruling, 2026-10-08):
+  only the reader's head click folds it. The return to the tail skips it, a
+  jump that opened one never watches it (DEBUG `feed.jump-merge-unwatched`),
+  and a push stating an open one folded leaves it open (INFO
+  `feed.merge-bubble-fold-kept-open`). Each fold the READER makes, and only
+  that, is recorded through `FoldMergeBubble` (`src/feed/fold-merge-bubble.ts`,
+  the bubble's `readerFold`) on the daemon's durable head, so a push, a page,
+  a reload and a daemon restart all draw it the way the reader left it; a
+  refused or failed record is a `controlPlaneFailed` on the chip and the
+  bubble keeps the toggle. "Left the view" is
   ONE detector, `createLeftViewWatch` (`src/feed/left-view.ts`: seen first,
   then wholly out, once; a detached row is no departure), shared by the jump
   watch and the selection's `left_view` (selection-visibility.ts). Every
-  expansion is client-owned: `FeedMergeFold` is the merge bubble's INITIAL
-  fold only, and there is no daemon fold verb. A bubble the daemon will not
+  expansion is client-owned but one: `FeedMergeFold` is the merge bubble's
+  fold at its first draw and again whenever a push CHANGES it to open
+  (folded until the merge fails, open once it has; owner ruling, 2026-10-08),
+  and it carries the reader's own last fold once `FoldMergeBubble` recorded
+  one. A bubble the daemon will not
   open for a jump is ERROR `feed.jump-expand-failed` and a
   `controlPlaneFailed` on the chip.
 - **ONE HEAT RULE FOR EVERY TOKEN FIGURE AND PERCENTAGE** (owner rulings,
@@ -542,7 +564,14 @@ hand any more:
   (`compensate`), and a tail-following reader holds no anchor. Each correction
   is DEBUG `scroll.anchor-corrected` (cause, trigger, delta, anchor). A height
   change off the tail with no row to anchor on is ERROR `scroll.anchor-missing`.
-  `npm run test:webkit` is its regression test. The expanded footer's section is capped at
+  `npm run test:webkit` is its regression test. The anchor's rows are the
+  ROOT BODY'S ROW LIST (`.feed-body > .feed-rows`, `rootRows` in
+  src/feed/feed.ts), never the feed host's own children, which are one box
+  for the whole feed. A MERGE BUBBLE'S UPDATES MOVE NOTHING (owner ruling,
+  2026-10-08): its row is exempt (`AnchorRows.exempt`), so a follow does not
+  chase a size change the merge bubble alone made (DEBUG
+  `scroll.exempt-change-held`), and its tab body is drawn before the old one
+  comes down, so its own scroll box is never clamped mid-redraw. The expanded footer's section is capped at
   `EXPANDED_FOOTER_MAX_ROWS` (4) and scrolls on its own; its scroll is the
   reader's, and a push redraws the rows INSIDE the kept section so it is never
   detached or reset.

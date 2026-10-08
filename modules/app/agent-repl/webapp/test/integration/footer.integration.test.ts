@@ -21,7 +21,6 @@ import {
   FooterAllowanceSchema,
   FooterExpandedFocusSchema,
   FooterMergeStepSuiteSchema,
-  FooterMergeTestRowStateSchema,
   FooterStatusActivityMergeStepSchema,
   FooterStatusSchema,
   FooterTokensCellVerdictSchema,
@@ -41,6 +40,7 @@ import {
   FOOTER_CHIPS,
   FOOTER_PANELS,
   FOOTER_STATUS_SALIENTS,
+  FOOTER_SALIENT_ONLY_ARMS,
   FOOTER_TRANSIENT_KINDS,
   FOOTER_STATUS_ARMS,
   FOOTER_STATUS_SUBSTATUSES,
@@ -53,8 +53,6 @@ import {
   MERGE_STEP_LINES,
   MERGE_SUBSTATUS_WORDS,
   MERGE_SUITE_EDGES,
-  MERGE_TEST_ROWS,
-  MERGE_TEST_ROW_STATES,
   WORKSPACE_ID,
   activityRow,
   detachedShellRow,
@@ -283,120 +281,16 @@ describe("the merge step line", () => {
   });
 });
 
-describe("the merge tests chip and panel", () => {
-  it("covers every suite state the panel draws", () => {
-    assertCoversOneof(FooterMergeTestRowStateSchema, "state", [...MERGE_TEST_ROW_STATES]);
-  });
-
+describe("the daemon's focus", () => {
   it("covers every panel the daemon's focus can name", () => {
     assertCoversOneof(FooterExpandedFocusSchema, "panel", [...FOOTER_FOCUS_PANELS]);
   });
+});
 
-  it("draws the 🧪 chip as the gate's served fraction", async () => {
+describe("a merge in the footer", () => {
+  it("opens no expanded footer while the merge is testing", async () => {
     // Arrange / Act
     await withFooter({ status: "merging", substatus: "testing" });
-    // Assert
-    expect(harness.text('.footer-chip[data-chip="mergeTests"]')).toBe("🧪 8/12");
-  });
-
-  it("draws one panel row per suite, in the gate's order", async () => {
-    // Arrange
-    await withFooter({ status: "merging", substatus: "testing" });
-    // Act
-    await harness.click('.footer-chip[data-chip="mergeTests"]');
-    // Assert
-    expect(
-      harness.$$('.footer-expanded[data-panel="mergeTests"] .footer-row-label').map((el) => el.textContent),
-    ).toEqual(MERGE_TEST_ROWS.map((row) => row.name?.text));
-  });
-
-  it("stamps each row with its suite's state", async () => {
-    // Arrange
-    await withFooter({ status: "merging", substatus: "testing" });
-    // Act
-    await harness.click('.footer-chip[data-chip="mergeTests"]');
-    // Assert
-    expect(
-      harness.$$('.footer-expanded[data-panel="mergeTests"] [data-suite-state]').map((el) => el.dataset.suiteState),
-    ).toEqual([...MERGE_TEST_ROW_STATES]);
-  });
-
-  it("shows a finished suite's run time", async () => {
-    // Arrange
-    await withFooter({ status: "merging", substatus: "testing" });
-    // Act
-    await harness.click('.footer-chip[data-chip="mergeTests"]');
-    // Assert
-    expect(harness.text('.footer-expanded[data-panel="mergeTests"] [data-suite-state="passed"] [data-duration]')).toBe(
-      "1m 35s",
-    );
-  });
-
-  it("ticks a running suite's clock", async () => {
-    // Arrange
-    await withFooter({ status: "merging", substatus: "testing" });
-    // Act
-    await harness.click('.footer-chip[data-chip="mergeTests"]');
-    // Assert
-    expect(harness.$('.footer-expanded[data-panel="mergeTests"] [data-suite-state="running"] .footer-row-clock')).not.toBeNull();
-  });
-
-  it("opens and selects the merge tests panel when the daemon focuses it", async () => {
-    // Arrange / Act
-    await withFooter({ status: "merging", substatus: "testing", focus: { panel: "mergeTests", generation: 1n } });
-    // Assert
-    expect(harness.$$(".footer-expanded[data-panel]").map((el) => el.dataset.panel)).toEqual(["mergeTests"]);
-  });
-
-  it("marks the 🧪 chip selected when the focus opens its panel", async () => {
-    // Arrange / Act
-    await withFooter({ status: "merging", substatus: "testing", focus: { panel: "mergeTests", generation: 1n } });
-    // Assert
-    expect(harness.$('.footer-chip[data-chip="mergeTests"]')?.dataset.selected).toBe("true");
-  });
-
-  it("moves the reader's open panel onto the merge tests when testing begins", async () => {
-    // Arrange: the reader has the agents panel open.
-    await withFooter({ status: "working" });
-    await harness.click('.footer-chip[data-chip="agents"]');
-    // Act: the merge begins testing and the daemon mints a focus.
-    harness.fake.setFooter(
-      WORKSPACE_ID,
-      footerView({ status: "merging", substatus: "testing", focus: { panel: "mergeTests", generation: 1n } }),
-    );
-    await harness.settle();
-    // Assert
-    expect(harness.$$(".footer-expanded[data-panel]").map((el) => el.dataset.panel)).toEqual(["mergeTests"]);
-  });
-
-  it("closes the section when testing ends and the panel empties", async () => {
-    // Arrange
-    await withFooter({ status: "merging", substatus: "testing", focus: { panel: "mergeTests", generation: 1n } });
-    // Act: testing ended — the chip is unset and the panel empty.
-    harness.fake.setFooter(
-      WORKSPACE_ID,
-      footerView({
-        status: "merging",
-        substatus: "committing",
-        focus: { panel: "mergeTests", generation: 1n },
-        chips: { agents: true, tasks: true, shells: true, monitors: true, crons: true, mergeTests: false },
-      }),
-    );
-    await harness.settle();
-    // Assert
-    expect(harness.$(".footer-expanded")).toBeNull();
-  });
-
-  it("does not reopen the panel on a push repeating an applied focus", async () => {
-    // Arrange: focused, then the reader closes the section with the chip.
-    await withFooter({ status: "merging", substatus: "testing", focus: { panel: "mergeTests", generation: 1n } });
-    await harness.click('.footer-chip[data-chip="mergeTests"]');
-    // Act
-    harness.fake.setFooter(
-      WORKSPACE_ID,
-      footerView({ status: "merging", substatus: "testing", focus: { panel: "mergeTests", generation: 1n } }),
-    );
-    await harness.settle();
     // Assert
     expect(harness.$(".footer-expanded")).toBeNull();
   });
@@ -424,7 +318,7 @@ describe("the activity cell", () => {
     },
   );
 
-  it.each(FOOTER_STATUS_ARMS.filter((status) => status !== "waiting"))(
+  it.each(FOOTER_STATUS_ARMS.filter((status) => !FOOTER_SALIENT_ONLY_ARMS.includes(status)))(
     "draws the enduring line under %s when nothing else stands",
     async (status) => {
       // Arrange / Act
@@ -873,8 +767,8 @@ describe("the expanded panels", () => {
   });
 
   it("names every panel the strip can open", () => {
-    // Assert: tokens plus the six chips.
-    expect(FOOTER_PANELS).toHaveLength(7);
+    // Assert: tokens plus the five chips.
+    expect(FOOTER_PANELS).toHaveLength(6);
   });
 
   it("draws every tokens line verbatim", async () => {

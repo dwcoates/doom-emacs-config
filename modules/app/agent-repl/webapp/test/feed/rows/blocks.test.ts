@@ -4,17 +4,20 @@ import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import {
   FeedImageBlockSchema,
+  FeedQuoteBlockSchema,
   FeedTextBlockSchema,
   FeedUnsupportedBlockSchema,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { MalformedView } from "../../../src/rpc/malformed.js";
 import {
   drawFeedImageBlock,
+  drawFeedQuoteBlock,
   drawFeedTextBlock,
   drawFeedUnsupportedBlock,
   drawPromptBlockArm,
 } from "../../../src/feed/rows/blocks.js";
 import { captureLogRecords, forwardedRecord } from "../../log-capture.js";
+import { BUBBLE_QUOTE_CLASS } from "../../../src/bubble/quote.js";
 import { MARKDOWN_SLOT_ATTRIBUTE, createBubbleBody, paintBody } from "../../../src/bubble/body.js";
 
 /** Paint BLOCK through the one bubble body, as a prompt bubble does. */
@@ -36,6 +39,18 @@ describe("drawFeedTextBlock", () => {
 
   it("draws an empty block as an empty body rather than refusing", () => {
     expect(painted(drawFeedTextBlock(create(FeedTextBlockSchema, { text: "" }))).textContent).toBe("");
+  });
+});
+
+describe("drawFeedQuoteBlock", () => {
+  it("is a quote slot, the block the collapsed bubble hides", () => {
+    const el = drawFeedQuoteBlock(create(FeedQuoteBlockSchema, { text: "the quote" }));
+    expect(el.classList.contains(BUBBLE_QUOTE_CLASS)).toBe(true);
+  });
+
+  it("renders the quote's fenced text as a code block, verbatim", () => {
+    const el = painted(drawFeedQuoteBlock(create(FeedQuoteBlockSchema, { text: "⟢ Replying:\n\n```\nParis.\n```" })));
+    expect(el.querySelector("pre code")?.textContent).toBe("Paris.");
   });
 });
 
@@ -101,6 +116,14 @@ describe("drawPromptBlockArm", () => {
       "p",
     );
     expect(el.className).toContain("prompt-block-unsupported");
+  });
+
+  it("draws the quote arm", () => {
+    const el = drawPromptBlockArm(
+      { case: "quote", value: create(FeedQuoteBlockSchema, { text: "q" }) },
+      "p",
+    );
+    expect(el.className).toContain("prompt-block-quote");
   });
 
   it("refuses an unset arm rather than drawing an empty block", () => {

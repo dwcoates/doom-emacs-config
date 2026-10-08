@@ -8,6 +8,7 @@
  * the text on screen is the daemon's own, verbatim.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { create } from "@bufbuild/protobuf";
 import { chessWidgetLoader } from "../../src/feed/cards/chess-widget-loader";
 
 import {
@@ -35,7 +36,8 @@ import {
   FeedDiffLineSchema,
 } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 
-import { HARNESS_EPOCH_MS, bootColdOnce, startHarness, type Harness } from "./harness";
+import { HARNESS_EPOCH_MS, bootColdOnce, chipFailureArms, startHarness, type Harness } from "./harness";
+import { FoldMergeBubbleResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_fold_merge_bubble_pb";
 import { ROOT_FEED } from "./fake-daemon";
 import {
   OpenInEditorRequestSchema,
@@ -55,6 +57,7 @@ import {
   HOOK_OUTCOMES,
   MERGE_TAB_KINDS,
   MERGE_TAB_STATES,
+  MERGE_TAB_WAITING_KINDS,
   MERGE_TEST_LOG,
   PERMISSION_ANSWERS,
   PLAN_STATES,
@@ -258,7 +261,8 @@ describe("arm coverage", () => {
   it.each(MERGE_TAB_KINDS)("covers every state arm of the %s merge tab", (kind) => {
     const field = FeedMergeTabSchema.fields.find((f) => f.localName === kind);
     if (field?.message === undefined) throw new Error(`no message under the ${kind} tab`);
-    assertCoversOneof(field.message, "state", [...MERGE_TAB_STATES]);
+    const waits = (MERGE_TAB_WAITING_KINDS as readonly string[]).includes(kind);
+    assertCoversOneof(field.message, "state", waits ? [...MERGE_TAB_STATES, "waitingOnUser"] : [...MERGE_TAB_STATES]);
   });
 
   it("covers every updating main step", () => {
@@ -1487,6 +1491,13 @@ describe("merge tabs", () => {
     expect(row.querySelector(`[data-merge-tab="${kind}"]`)?.getAttribute("data-tab-state")).toBe(state);
   });
 
+  it.each(MERGE_TAB_WAITING_KINDS)("draws the %s tab waiting on the user with a ❓", async (kind) => {
+    // Arrange / Act
+    const row = await drawRow(mergeTabRow(kind, "waitingOnUser"));
+    // Assert
+    expect(row.querySelector(`[data-merge-tab="${kind}"] .merge-tab-glyph`)?.textContent).toBe("❓");
+  });
+
   it("draws the label with its round", async () => {
     // Arrange / Act
     const row = await drawRow(mergeTabRow("tests"));
@@ -1537,6 +1548,20 @@ describe("merge tabs", () => {
     const row = await drawRow(mergeTabRow("fixes"));
     // Assert
     expect(row.querySelector("[data-merge-attempt]")?.textContent).toBe("attempt 2/3");
+  });
+
+  it("draws a suite's counts on the right of its row", async () => {
+    // Arrange / Act
+    const row = await drawRow(mergeTabRow("tests"));
+    // Assert
+    expect(row.querySelector('[data-suite-state="running"] .merge-suite-counts')?.textContent).toBe("3/0/5");
+  });
+
+  it("breathes a running suite's dot green while every test so far passed", async () => {
+    // Arrange / Act
+    const row = await drawRow(mergeTabRow("tests"));
+    // Assert
+    expect(row.querySelector('[data-suite-state="running"] .merge-suite-glyph')?.classList.contains("is-passing")).toBe(true);
   });
 
   it("draws the tests tab's log link with the daemon's label", async () => {
@@ -1845,6 +1870,58 @@ describe("a merge bubble's fold", () => {
     await harness.settle();
     // Assert
     expect(harness.row("merge-1")?.dataset.expanded).toBe("true");
+  });
+
+  it("records the reader's open with FoldMergeBubble on the head row", async () => {
+    // Arrange
+    await drawMerge();
+    // Act
+    await harness.click('[data-feed-row="merge-1"] [data-expand]');
+    // Assert
+    const [request] = harness.fake.calls<{ row?: { value: string }; fold: { case?: string } }>("foldMergeBubble");
+    expect([request?.row?.value, request?.fold.case]).toEqual(["merge-1", "open"]);
+  });
+
+  it("records the reader's close with FoldMergeBubble on the head row", async () => {
+    // Arrange
+    await drawMerge();
+    await harness.click('[data-feed-row="merge-1"] [data-expand]');
+    // Act
+    await harness.click('[data-feed-row="merge-1"] [data-expand]');
+    // Assert
+    const requests = harness.fake.calls<{ fold: { case?: string } }>("foldMergeBubble");
+    expect(requests.map((r) => r.fold.case)).toEqual(["open", "close"]);
+  });
+
+  it("keeps the reader's open bubble open when the daemon refuses to record the fold", async () => {
+    // Arrange
+    await drawMerge();
+    harness.fake.answer(
+      "foldMergeBubble",
+      create(FoldMergeBubbleResponseSchema, {
+        result: { case: "error", value: { cause: { case: "notAMergeBubble", value: { row: { value: "merge-1" } } } } },
+      }),
+    );
+    // Act
+    await harness.click('[data-feed-row="merge-1"] [data-expand]');
+    // Assert
+    expect(harness.row("merge-1")?.dataset.expanded).toBe("true");
+  });
+
+  it("files a refused fold on the warning chip", async () => {
+    // Arrange
+    await drawMerge();
+    harness.fake.answer(
+      "foldMergeBubble",
+      create(FoldMergeBubbleResponseSchema, {
+        result: { case: "error", value: { cause: { case: "notAMergeBubble", value: { row: { value: "merge-1" } } } } },
+      }),
+    );
+    // Act
+    await harness.click('[data-feed-row="merge-1"] [data-expand]');
+    await harness.settle();
+    // Assert
+    expect(chipFailureArms()).toContain("controlPlaneFailed");
   });
 });
 

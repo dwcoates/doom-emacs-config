@@ -107,11 +107,9 @@ func (r *run) failedTerminal(ctx context.Context, summary string, area footer.Me
 		"workspace": string(r.ws), "lease": string(r.lease.ID), "summary": summary, "area": string(area)})
 }
 
-// concluded publishes a concluded merge's facts, keeping the testing round's
-// count so a later merge's first test round is a new focus.
+// concluded publishes a concluded merge's facts.
 func (r *run) concluded(facts MergeFacts) {
 	r.mu.Lock()
-	facts.TestsRound = r.facts.TestsRound
 	r.facts = facts
 	r.mu.Unlock()
 	r.o.publish(r.ws, facts)

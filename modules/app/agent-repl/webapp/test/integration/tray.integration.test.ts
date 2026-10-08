@@ -132,13 +132,14 @@ describe("classification detail", () => {
     );
   });
 
-  it("draws the uninterruptible turn's daemon-named badge verbatim", async () => {
-    // Arrange / Act
+  it("draws the uninterruptible turn's daemon-named note verbatim under the hold's badge", async () => {
+    // Arrange / Act: the fixture's entry is held, so the hold claims the one
+    // badge and the verdict is a note.
     await withTray({ items: [heldPromptItem({ classification: "uninterruptibleTurn" })] });
     // Assert
     expect(
-      harness.$(`[data-held-turn="${HELD_TURN_ID}"] [data-held-status="uninterruptibleTurn"]`)?.textContent,
-    ).toBe(HOLD_BADGES.uninterruptibleTurn?.label);
+      harness.$(`[data-held-turn="${HELD_TURN_ID}"] .queued-status-note`)?.textContent,
+    ).toBe(HOLD_BADGES.uninterruptibleTurn?.detail);
   });
 
   // This set assertion boots one real-socket harness per classification.

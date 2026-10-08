@@ -384,9 +384,9 @@ about a session that was still working.")
   "GREEN: ready.
 The session is wired, the route is proven usable WITHOUT requiring a
 first message, and the backfill has settled.
-Covers `:ready', `:idle', `:done', and `:permission' alike — a pending
-permission means the agent is ready for the user to view the response
-and answer it.")
+Covers `:ready', `:idle', `:done', `:permission' and `:question' alike —
+a pending permission or question means the agent is ready for the user
+to view the response and answer it.")
 
 (defconst agent-repl--color-idle-async-yellow "#f59e0b"
   "YELLOW: no foreground turn, but live detached work.
@@ -658,6 +658,7 @@ sits flush on the bar with no ground of its own.  See
     (:done            . "green")
     (:interrupted     . "green")
     (:permission      . "green")
+    (:question        . "green")
     (:waiting         . "green")
 
     (:merging         . "purple")
@@ -696,9 +697,10 @@ and `:api-retrying\='); BLUE, the workspace is unusable right now (an
 agent-repl fault -- `:init\=', `:severed\=', `:dead\=', `:start-failed\=',
 `:turn-died\=' (the last turn died with agent-repl\='s machinery),
 `:daemon-impaired\=' (the daemon itself cannot serve) -- a refused close
-`:closing\=', or the NETWORK FAULT `:network-fault\=').  `:waiting\=' (a
-wait on the user other than a tool permission) is green, as
-`:permission\=' is.  Owner ruling 2026-10-02:
+`:closing\=', or the NETWORK FAULT `:network-fault\=').  A gate on the
+user -- `:permission\=' and `:question\=' -- is green, the same green as
+`:done\=' (owner ruling 2026-10-08), and so is `:waiting\=' (a cold gate
+or an interrupt landing).  Owner ruling 2026-10-02:
 agent_repl_fault > network_fault > vendor_fault.
 
 EVERY MERGE ARM IS COLORED AS WELL AS GLYPHED (owner rulings,
@@ -909,9 +911,15 @@ in `agent-repl--color-default-bracket'."
                      'agent-repl-tab-permission
                      agent-repl--color-done-green
                      agent-repl--color-dark))
+    ;; QUESTION is a permission's green (owner ruling, 2026-10-08): a gate
+    ;; on the user is ready for the user, the same green as done.
+    (:question . ,(agent-repl--tab-palette-row
+                   'agent-repl-tab-permission
+                   agent-repl--color-done-green
+                   agent-repl--color-dark))
     ;; WAITING is a permission's green: the session waits on the user for
-    ;; something other than a tool permission -- a question, a cold gate, or
-    ;; an interrupt still landing.
+    ;; something other than a gate's card -- a cold gate, or an interrupt
+    ;; still landing.
     (:waiting . ,(agent-repl--tab-palette-row
                   'agent-repl-tab-permission
                   agent-repl--color-done-green

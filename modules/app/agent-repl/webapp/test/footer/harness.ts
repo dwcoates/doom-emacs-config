@@ -24,7 +24,6 @@ import { FeedIdSchema, type FeedId } from "../../../proto/gen/ts/frontend/v1/fee
 import {
   FooterAgentRowSchema,
   FooterCronRowSchema,
-  FooterMergeTestRowSchema,
   FooterExpandedSchema,
   FooterExpandedTokensSchema,
   FooterLiveWorkChipsSchema,
@@ -201,11 +200,19 @@ export function feedId(value: string): FeedId {
 
 /**
  * The quietest legal activity cell for STATUSCASE: the empty enduring line,
- * or — for waiting, which has no unpinned branch — a gated-call salient line.
+ * or — for the cells with no unpinned branch — the salient line that explains
+ * them: an interrupt landing while waiting, the gated call under a permission
+ * gate, the batch's lead under a question gate.
  */
 export function quietActivity(statusCase: string): Record<string, unknown> {
   if (statusCase === "waiting") {
+    return { salient: { at: { atMs: 0n }, kind: { case: "interrupting", value: { text: "stopping the current turn…" } } } };
+  }
+  if (statusCase === "permission") {
     return { salient: { at: { atMs: 0n }, kind: { case: "gatedCall", value: { text: "Bash: ls" } } } };
+  }
+  if (statusCase === "question") {
+    return { salient: { at: { atMs: 0n }, kind: { case: "questionLead", value: { text: "1 question · Which?" } } } };
   }
   return { tier: { case: "unpinned", value: { enduring: enduringLine() } } };
 }
@@ -251,7 +258,6 @@ export interface ExpandedInit {
   shells?: readonly MessageInitShape<typeof FooterShellRowSchema>[];
   monitors?: readonly MessageInitShape<typeof FooterMonitorRowSchema>[];
   crons?: readonly MessageInitShape<typeof FooterCronRowSchema>[];
-  mergeTests?: readonly MessageInitShape<typeof FooterMergeTestRowSchema>[];
 }
 
 /**
@@ -275,7 +281,6 @@ export function expanded(init: ExpandedInit = {}): FooterExpanded {
     shells: { rows: [...(init.shells ?? [])] },
     monitors: { rows: [...(init.monitors ?? [])] },
     crons: { rows: [...(init.crons ?? [])] },
-    mergeTests: { rows: [...(init.mergeTests ?? [])] },
   });
 }
 

@@ -15,13 +15,14 @@ import {
 import { ConnectError, Code } from "@connectrpc/connect";
 import { withOrder } from "../feed-order.js";
 import { OpenFeedResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_feed_pb";
+import { FoldMergeBubbleResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_fold_merge_bubble_pb";
 import type { WatchFeedResponse } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_feed_pb";
 import {
   clearClientFailures,
   onClientVerdict,
   standingClientFailure,
 } from "../../src/rpc/link.js";
-import { latestEntry, mountFeed } from "../../src/feed/feed.js";
+import { latestEntry, mountFeed, rootRows } from "../../src/feed/feed.js";
 import {
   SELECTED_ENTRY_CLASS,
   SELECTED_ROW_ATTRIBUTE,
@@ -393,6 +394,23 @@ describe("mountFeed: the bubble kinds", () => {
     expect(host.querySelector(".stub-mergeBody")).not.toBeNull();
   });
 
+  it("opens a folded merge bubble when a push ships its fold open (the merge failed)", async () => {
+    // Arrange
+    const channels = new Map<string, Channel<WatchFeedResponse>>();
+    const channel = new Channel<WatchFeedResponse>();
+    channels.set("tok:root", channel);
+    const h = harness({ channels });
+    mount(h);
+    await settle();
+    channel.push(push(mergeRow("m1", true)));
+    await settle();
+    // Act
+    channel.push(push(mergeRow("m1", false)));
+    await settle();
+    // Assert
+    expect(h.calls.openFeed.map((req) => req.feed?.value)).toContain("m1");
+  });
+
   it("opens an unfolded merge bubble's sub-feed by its own id", async () => {
     const h = rootOnly([mergeRow("m1", false)]);
     mount(h);
@@ -401,6 +419,142 @@ describe("mountFeed: the bubble kinds", () => {
       undefined,
       "m1",
     ]);
+  });
+});
+
+/**
+ * A MERGE BUBBLE'S UPDATES NEVER MOVE THE FEED (owner ruling, 2026-10-08). The
+ * fixture lays the root rows out from a height table in a 300px viewport, so
+ * the tail owner reads real-looking edges for the rows the feed drew.
+ */
+describe("mountFeed: a merge bubble's update", () => {
+  /** A mounted root feed whose rows are laid out from HEIGHTS by row id. */
+  async function laidOut(rows: FeedRow[], heights: Record<string, number>) {
+    const channels = new Map<string, Channel<WatchFeedResponse>>();
+    const channel = new Channel<WatchFeedResponse>();
+    channels.set("tok:root", channel);
+    const h = harness({
+      channels,
+      openFeed: (req) => openSuccess(page(req.feed === undefined ? rows : []), tokenFor(req)),
+    });
+    const scroll = document.createElement("div");
+    const host = document.createElement("div");
+    scroll.append(host);
+    document.body.replaceChildren(scroll);
+    let top = 0;
+    const total = (): number => Object.values(heights).reduce((sum, x) => sum + x, 0);
+    Object.defineProperties(scroll, {
+      scrollHeight: { configurable: true, get: total },
+      clientHeight: { configurable: true, get: () => 300 },
+      scrollTop: {
+        configurable: true,
+        get: () => top,
+        set: (next: number) => (top = Math.min(Math.max(next, 0), Math.max(0, total() - 300))),
+      },
+    });
+    scroll.getBoundingClientRect = domRect(0, 300);
+    const feed = mountFeed(host, h.ctx, { renderers: stubRenderers(), scrollBox: scroll });
+    await settle();
+    const layOut = (): void => {
+      let at = 0;
+      for (const el of host.querySelectorAll<HTMLElement>(":scope > .feed-body > .feed-rows > [data-feed-row]")) {
+        const id = el.getAttribute("data-feed-row") ?? "";
+        const height = heights[id] ?? 0;
+        const rowTop = at;
+        el.getClientRects = () => [{}] as unknown as DOMRectList;
+        el.getBoundingClientRect = () => domRect(rowTop - top, height)();
+        at += height;
+      }
+    };
+    layOut();
+    // The first layout is a size change the tail owner hears about.
+    fireResize(host);
+    await settle();
+    return {
+      feed,
+      scroll,
+      channel,
+      heights,
+      top: (): number => top,
+      /** The reader wheels to Y. */
+      readerAt: (y: number): void => {
+        scroll.dispatchEvent(new Event("wheel"));
+        top = y;
+        layOut();
+        scroll.dispatchEvent(new Event("scroll"));
+      },
+      /** A row's height changes, and the next push of ROW lands. */
+      grow: async (id: string, height: number, row: FeedRow): Promise<void> => {
+        heights[id] = height;
+        layOut();
+        channel.push(push(row));
+        await settle();
+        layOut();
+        fireResize(host);
+        await settle();
+      },
+    };
+  }
+
+  it("leaves a following reader where they are when the merge bubble grows", async () => {
+    // Arrange — the merge bubble is the last row, partly in view at the tail.
+    const f = await laidOut([responseRow("r1"), mergeRow("m1")], { r1: 1000, m1: 400 });
+    f.readerAt(1100);
+    const before = f.top();
+    // Act
+    await f.grow("m1", 600, mergeRow("m1", true, "branch → trunk"));
+    // Assert
+    expect(f.top()).toBe(before);
+    f.feed.dispose();
+  });
+
+  it("keeps the rows under a scrolled-away reader still when any row above them grows", async () => {
+    // Arrange — THE ANCHOR IS A ROOT ROW: the reader stands inside r2.
+    const f = await laidOut([responseRow("r1"), responseRow("r2"), responseRow("r3")], { r1: 400, r2: 1000, r3: 1000 });
+    f.readerAt(700);
+    // Act
+    await f.grow("r1", 600, responseRow("r1", "grown"));
+    // Assert
+    expect(f.top()).toBe(900);
+    f.feed.dispose();
+  });
+
+  it("keeps the rows under a scrolled-away reader still when the merge bubble above them grows", async () => {
+    // Arrange — the reader stands inside r2, below the merge bubble.
+    const f = await laidOut([mergeRow("m1"), responseRow("r2"), responseRow("r3")], { m1: 400, r2: 1000, r3: 1000 });
+    f.readerAt(700);
+    // Act
+    await f.grow("m1", 600, mergeRow("m1", true, "branch → trunk"));
+    // Assert
+    expect(f.top()).toBe(900);
+    f.feed.dispose();
+  });
+});
+
+describe("rootRows", () => {
+  it("answers the root body's row list", () => {
+    // Arrange
+    const host = document.createElement("div");
+    const body = document.createElement("div");
+    body.className = "feed-body";
+    const rows = document.createElement("div");
+    rows.className = "feed-rows";
+    body.append(rows);
+    host.append(body);
+    // Act
+    const found = rootRows(host);
+    // Assert
+    expect(found).toBe(rows);
+  });
+
+  it("reports a host with no row list at ERROR", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    // Act
+    rootRows(document.createElement("div"));
+    // Assert
+    const record = await forwardedRecord(capture, "feed.root-rows-missing");
+    expect(record.level.case).toBe("error");
   });
 });
 
@@ -969,12 +1123,13 @@ describe("mountFeed: a jump expands its entry and closes it once wholly out of v
   async function jumping(
     bubble: () => ReturnType<typeof openSuccess> = () =>
       openSuccess(page([]), "tok:b1"),
+    bubbleRow: FeedRow = subagentRow("b1"),
   ) {
     const rows = [
       toolCallRow("t1", "returned"),
       responseRow("r0"),
       toolCallRow("t2", "returned"),
-      subagentRow("b1"),
+      bubbleRow,
       responseRow("r1"),
     ];
     const h = harness({
@@ -1128,6 +1283,29 @@ describe("mountFeed: a jump expands its entry and closes it once wholly out of v
     j.seenThenLeft("b1");
     // Assert
     expect(j.bubbleOpen()).toBe(false);
+    j.feed.dispose();
+  });
+
+  it("keeps a merge bubble a jump opened open once it was seen and then left the view wholly", async () => {
+    // Arrange
+    const j = await jumping(undefined, mergeRow("b1"));
+    await j.feed.selectDetachedWork(feedId("b1"));
+    await settle();
+    // Act
+    j.seenThenLeft("b1");
+    // Assert
+    expect(j.bubbleOpen()).toBe(true);
+    j.feed.dispose();
+  });
+
+  it("records no reader fold for a merge bubble a jump opened", async () => {
+    // Arrange
+    const j = await jumping(undefined, mergeRow("b1"));
+    // Act
+    await j.feed.selectDetachedWork(feedId("b1"));
+    await settle();
+    // Assert
+    expect(j.h.calls.foldMergeBubble).toEqual([]);
     j.feed.dispose();
   });
 
@@ -1291,12 +1469,13 @@ describe("mountFeed: returning to the tail closes every expanded entry", () => {
    * r1) in a 300px viewport over 2000px, the reader wheeled up to 100 with the
    * last row out of view.
    */
-  async function awayFromTail() {
-    const rows = [
+  async function awayFromTail(
+    rows: FeedRow[] = [
       toolCallRow("t1", "returned"),
       subagentRow("b1"),
       responseRow("r1"),
-    ];
+    ],
+  ) {
     const h = harness({
       openFeed: (req) =>
         req.feed === undefined
@@ -1369,6 +1548,41 @@ describe("mountFeed: returning to the tail closes every expanded entry", () => {
     t.backToTail();
     // Assert
     expect(t.row("b1").getAttribute("data-expanded")).toBe("false");
+    t.feed.dispose();
+  });
+
+  it("keeps a merge bubble the reader opened open when they return to the tail", async () => {
+    // Arrange
+    const t = await awayFromTail([
+      toolCallRow("t1", "returned"),
+      mergeRow("m1"),
+      responseRow("r1"),
+    ]);
+    t.row("m1").querySelector<HTMLElement>(".bubble-head")?.click();
+    await settle();
+    // Act
+    t.backToTail();
+    // Assert
+    expect(t.row("m1").getAttribute("data-expanded")).toBe("true");
+    t.feed.dispose();
+  });
+
+  it("counts no merge bubble among the entries the return to the tail closed", async () => {
+    // Arrange
+    const t = await awayFromTail([
+      toolCallRow("t1", "returned"),
+      mergeRow("m1"),
+      responseRow("r1"),
+    ]);
+    t.row("m1").querySelector<HTMLElement>(".bubble-head")?.click();
+    await settle();
+    t.card().click();
+    const capture = captureLogRecords();
+    // Act
+    t.backToTail();
+    // Assert
+    const record = await forwardedRecord(capture, "feed.tail-reached-collapse");
+    expect(record.context).toEqual(expect.objectContaining({ sections: 1, bubbles: 0 }));
     t.feed.dispose();
   });
 
@@ -2546,5 +2760,139 @@ describe("mountFeed: the selected row leaving the viewport ends the selection", 
       m.row("r1").hasAttribute(SELECTED_ROW_ATTRIBUTE),
     ]).toEqual([37, false]);
     m.feed.dispose();
+  });
+});
+
+/**
+ * THE READER'S MERGE BUBBLE FOLD IS THE DAEMON'S TO KEEP (owner ruling,
+ * 2026-10-08). The scripted daemon records each `FoldMergeBubble` on the
+ * merge row's head and serves that head on every later `OpenFeed`, as the
+ * real daemon's durable row does, so a fresh mount is a full page reload.
+ */
+describe("mountFeed: the reader's merge bubble fold", () => {
+  /** A daemon holding one merge bubble (m1) whose recorded fold starts FOLDED. */
+  function recordingDaemon(folded = true): { h: Harness; folded: () => boolean } {
+    let stored = folded;
+    const h = harness({
+      openFeed: (req) =>
+        req.feed === undefined
+          ? openSuccess(page([responseRow("r0"), mergeRow("m1", stored)]), tokenFor(req))
+          : openSuccess(page([]), tokenFor(req)),
+      foldMergeBubble: (req) => {
+        stored = req.fold.case === "close";
+        return create(FoldMergeBubbleResponseSchema, { result: { case: "success", value: {} } });
+      },
+    });
+    return { h, folded: () => stored };
+  }
+
+  /** The merge row's element in HOST. */
+  function mergeRowIn(host: HTMLElement): HTMLElement {
+    const el = host.querySelector<HTMLElement>('[data-feed-row="m1"]');
+    if (el === null) throw new Error("the merge row is not drawn");
+    return el;
+  }
+
+  /** Click the merge bubble's head in HOST, as the reader does. */
+  async function clickHead(host: HTMLElement): Promise<void> {
+    mergeRowIn(host).querySelector<HTMLElement>(".bubble-head")?.click();
+    await settle();
+  }
+
+  it("records the reader's open on the merge bubble's head row", async () => {
+    // Arrange
+    const d = recordingDaemon();
+    const { feed, host } = mount(d.h);
+    await settle();
+    // Act
+    await clickHead(host);
+    // Assert
+    const sent = d.h.calls.foldMergeBubble[0];
+    expect([sent?.row?.value, sent?.fold.case]).toEqual(["m1", "open"]);
+    feed.dispose();
+  });
+
+  it("records the reader's close on the merge bubble's head row", async () => {
+    // Arrange
+    const d = recordingDaemon(false);
+    const { feed, host } = mount(d.h);
+    await settle();
+    // Act
+    await clickHead(host);
+    // Assert
+    const sent = d.h.calls.foldMergeBubble[0];
+    expect([sent?.row?.value, sent?.fold.case]).toEqual(["m1", "close"]);
+    feed.dispose();
+  });
+
+  it("records nothing for a merge bubble the daemon's fold opened", async () => {
+    // Arrange
+    const d = recordingDaemon(false);
+    // Act
+    const { feed } = mount(d.h);
+    await settle();
+    // Assert
+    expect(d.h.calls.foldMergeBubble).toEqual([]);
+    feed.dispose();
+  });
+
+  it("draws a merge bubble the reader opened open after a full reload", async () => {
+    // Arrange
+    const d = recordingDaemon();
+    const first = mount(d.h);
+    await settle();
+    await clickHead(first.host);
+    first.feed.dispose();
+    // Act
+    const reloaded = mount(d.h);
+    await settle();
+    // Assert
+    expect(mergeRowIn(reloaded.host).getAttribute("data-expanded")).toBe("true");
+    reloaded.feed.dispose();
+  });
+
+  it("draws a merge bubble the reader closed closed after a full reload", async () => {
+    // Arrange
+    const d = recordingDaemon(false);
+    const first = mount(d.h);
+    await settle();
+    await clickHead(first.host);
+    first.feed.dispose();
+    // Act
+    const reloaded = mount(d.h);
+    await settle();
+    // Assert
+    expect(mergeRowIn(reloaded.host).getAttribute("data-expanded")).toBe("false");
+    reloaded.feed.dispose();
+  });
+
+  it("keeps a merge bubble the reader opened open when the window blurs", async () => {
+    // Arrange
+    const d = recordingDaemon();
+    const { feed, host } = mount(d.h);
+    await settle();
+    await clickHead(host);
+    // Act
+    window.dispatchEvent(new FocusEvent("blur"));
+    await settle();
+    // Assert
+    expect(mergeRowIn(host).getAttribute("data-expanded")).toBe("true");
+    feed.dispose();
+  });
+
+  it("keeps a merge bubble the reader opened open when the page goes hidden", async () => {
+    // Arrange
+    const d = recordingDaemon();
+    const { feed, host } = mount(d.h);
+    await settle();
+    await clickHead(host);
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    // Act
+    document.dispatchEvent(new Event("visibilitychange"));
+    await settle();
+    // Assert
+    visibility.mockRestore();
+    expect(mergeRowIn(host).getAttribute("data-expanded")).toBe("true");
+    feed.dispose();
   });
 });

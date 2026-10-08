@@ -10,6 +10,7 @@ import (
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/replyquote"
 	"claude-repld/internal/wsm"
 )
 
@@ -151,6 +152,17 @@ func (q *queue) CommitEdit(ctx context.Context, ws ids.WorkspaceID, turn ids.Tur
 		log.Error(opEditCommit, "the commit carried no content; the edit stands", dlog.Context{"edit": claim.ID})
 		return fmt.Errorf("commit the edit of %q on %q: the new content is required", turn, ws)
 	}
+	// AN EDIT CHANGES THE PERSON'S WORDS, NEVER WHAT THEY REPLIED TO. The
+	// editor was handed the words alone (replyquote.Words), so the quotes the
+	// held prompt carried are put back ahead of the edited words; a quote in
+	// the commit itself is the editor's defect and is refused.
+	requoted, err := replyquote.Requote(held.Said, said)
+	if err != nil {
+		log.Error(opEditCommit, "the commit carried a quote block, which an editor never composes; the edit stands",
+			dlog.Context{"edit": claim.ID, "cause": err.Error()})
+		return fmt.Errorf("commit the edit of %q on %q: %w", turn, ws, err)
+	}
+	said = requoted
 	// THE CONTENT IS REPLACED BEFORE THE CLAIM IS RETIRED. A replacement the
 	// store refuses leaves the edit standing, so the user's words are never
 	// released into the queue as the OLD content.

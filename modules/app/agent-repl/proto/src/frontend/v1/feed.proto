@@ -814,6 +814,22 @@ message FeedResponse {
   // collapsed limit from THIS flag alone; a bubble the reader expanded stays
   // expanded. Never set on a non-thinking row.
   bool superseded = 8;
+
+  // SET on a non-thinking response once it is PROVEN INTERIM: a later row of
+  // the SAME TURN has been placed after it in the same feed (a tool call,
+  // another response, any activity), so it cannot be the prose the turn ends
+  // on. UNSET while it is the turn's latest row — which is exactly when it may
+  // still become the final answer — so a final answer is never drawn as an
+  // interim, not even while it streams. The turn's own ending row does not
+  // count as a later row.
+  //
+  // Owner rule, 2026-10-08: an interim response collapses to one line ending
+  // in an ellipsis and takes the page's background; a final answer (and an
+  // answer still arriving) is drawn in full. The DAEMON decides it from the
+  // feed's own order, stamps it on every draw and page, and re-pushes the
+  // earlier response when the later row is first placed; the client draws the
+  // interim treatment from THIS flag alone. `final_answer` outranks it.
+  bool interim = 9;
 }
 
 // The notice register's heading, daemon-composed.
@@ -2225,6 +2241,9 @@ message FeedUserPromptBlock {
     FeedTextBlock text = 1;
     FeedImageBlock image = 2;
     FeedUnsupportedBlock unsupported = 3;
+    // An earlier bubble the person replied to. Drawn ONLY while the bubble is
+    // expanded; the collapsed bubble shows the other blocks alone.
+    FeedQuoteBlock quote = 4;
   }
 }
 
@@ -2249,6 +2268,18 @@ message FeedImageBlock {
 // The raw stays in the record; the row never carries it.
 message FeedUnsupportedBlock {
   string kind = 1;
+}
+
+// AN EARLIER BUBBLE THE PROMPT REPLIED TO (conversation.v1.UserQuoteBlock),
+// resolved for drawing. It belongs to the bubble's EXPANDED view only: a
+// collapsed prompt bubble shows the person's own words and hides every quote
+// block, and expanding the bubble shows each quote in its place among the
+// blocks, ahead of the words it introduces.
+message FeedQuoteBlock {
+  // The quote as the agent received it — the reply preamble, the quoted text
+  // inside a code fence, and the marker introducing the person's message —
+  // drawn as markdown, verbatim. Never parsed.
+  string text = 1;
 }
 
 // ①b A prompt one agent addressed to another — the user kind's sibling,
@@ -2329,6 +2360,9 @@ message FeedAgentPromptBlock {
     FeedTextBlock text = 1;
     FeedImageBlock image = 2;
     FeedUnsupportedBlock unsupported = 3;
+    // A quoted earlier bubble, drawn exactly as on a user row: only while the
+    // bubble is expanded.
+    FeedQuoteBlock quote = 4;
   }
 }
 
@@ -2663,8 +2697,19 @@ message FeedContextCutCompactionFailed {
   FeedOutcomeMarker marker = 2;
 }
 
-// The ▸/▾ state. UI preference the daemon holds; see the roster's fold.
+// The bubble's ▸/▾ state as the daemon states it. A bubble STARTS folded and
+// stays folded while the merge is queued or running, when it lands and when
+// it is abandoned; it OPENS once the merge has failed, so the failure is in
+// front of the reader. The READER's own fold (agentrepl.v1.FoldMergeBubble) is
+// recorded on this durable row and wins from then on, so it is what every
+// later push, page, reload and restart carries.
+//
+// A MERGE BUBBLE NEVER COLLAPSES ON ITS OWN (owner ruling, 2026-10-08): the
+// daemon may open a folded bubble (a failure), but no push it makes ever folds
+// an open one; only the reader's fold does. A client applies this field at the
+// bubble's first draw and again whenever a push CHANGES it.
 message FeedMergeFold {
+  // True for a folded bubble, false for an open one.
   bool folded = 1;
 }
 
@@ -2743,6 +2788,16 @@ message FeedMergeTabSettled {
   }
 }
 message FeedMergeTabSucceeded {}
+// An agentic tab's work is running and held on the user: its agent has a
+// permission ask or a question batch open. Drawn with the ❓ emoji in place of
+// the live glyph, for exactly as long as the footer's merging substatus reads
+// "waiting on user"; the tab is live again once every ask is answered or
+// withdrawn.
+message FeedMergeTabWaitingOnUser {
+  // When the tab's work began, epoch ms. The tab keeps ticking its elapsed
+  // time from it, as a live tab does.
+  int64 started_at_ms = 1;
+}
 message FeedMergeTabFailed {
   // The daemon-composed one-line account; the tab's own content carries
   // the detail.
@@ -2806,6 +2861,9 @@ message FeedMergeTabConflicts {
   oneof state {
     FeedMergeTabLive live = 1;
     FeedMergeTabSettled settled = 3;
+    // The resolution is held on the user: the session has a permission ask
+    // or a question batch open.
+    FeedMergeTabWaitingOnUser waiting_on_user = 4;
   }
   // Tag 2 (`parked`) is RETIRED: nothing parks.
   reserved 2;
@@ -2857,8 +2915,43 @@ message FeedMergeTestSuite {
   // the client paints classes and never parses escapes (the code-span
   // precedent, this component's own wrapper).
   repeated FeedMergeTestSpan output = 5;
+  // How many of the suite's tests have passed and failed so far, out of how
+  // many it runs, drawn in a column on the right of the suite's row. UNSET
+  // while the run has not said how many the suite runs; nothing is drawn
+  // then.
+  FeedMergeTestCounts counts = 6;
 }
-message FeedMergeTestSuiteRunning {}
+// A suite's test counts, drawn "3/1/12": the passed figure green, the failed
+// figure red, the total in the row's own color. Each test is one of the
+// units the test runner schedules for the suite (a Go package, a chunk of
+// test files, a harness script), the finest grain it reports a verdict for.
+message FeedMergeTestCounts {
+  // How many have passed.
+  uint32 passed = 1;
+  // How many have failed, a test the runner cancelled because one it
+  // depends on failed included.
+  uint32 failed = 2;
+  // How many the suite runs. At least passed plus failed.
+  uint32 total = 3;
+}
+// The suite is running. THE ARM IS WHAT ITS TESTS HAVE SAID SO FAR, which
+// the suite's status dot is drawn from.
+message FeedMergeTestSuiteRunning {
+  oneof so_far {
+    // No test has reported a verdict yet, drawn grey.
+    FeedMergeTestSuiteRunningUnreported unreported = 1;
+    // Every test that has reported passed, drawn green.
+    FeedMergeTestSuiteRunningPassing passing = 2;
+    // At least one test has failed, drawn red.
+    FeedMergeTestSuiteRunningFailing failing = 3;
+  }
+}
+// No verdict reported yet.
+message FeedMergeTestSuiteRunningUnreported {}
+// Every verdict so far is a pass.
+message FeedMergeTestSuiteRunningPassing {}
+// At least one verdict is a failure.
+message FeedMergeTestSuiteRunningFailing {}
 message FeedMergeTestSuitePassed {}
 message FeedMergeTestSuiteFailed {}
 message FeedMergeTestSpan {
@@ -2876,6 +2969,9 @@ message FeedMergeTabFixes {
   oneof state {
     FeedMergeTabLive live = 1;
     FeedMergeTabSettled settled = 3;
+    // The fixing attempt is held on the user: the session has a permission
+    // ask or a question batch open.
+    FeedMergeTabWaitingOnUser waiting_on_user = 5;
   }
   // Tag 2 (`parked`) is RETIRED: nothing parks.
   reserved 2;

@@ -1555,6 +1555,57 @@ writes an `ai-title` line into the session transcript; the shim reads it
 `TopbarTitle.text` from it in preference to the workspace name. The branch
 suffix is a different fact and its rule is unchanged.
 
+## A merge bubble never collapses on its own
+
+Owner ruling, 2026-10-08. Only the READER folds a merge bubble.
+
+- **Nothing closes an open merge bubble but the reader's click on its head.**
+  Not a push, not the return to the feed's tail, not a jump's left-view
+  watch, not a window blur or a hidden page, not a page replace, not a full
+  page reload, not a daemon restart.
+- **The daemon may OPEN a bubble, never fold one.** It ships
+  `FeedMergeFold` folded while the merge is queued, running, landed or
+  abandoned, and opens it once the merge has failed. No push it makes ever
+  turns an open bubble folded (`keepMergeOpen`,
+  `daemon/internal/resolve/feed/mergefold.go`).
+- **The reader's fold is daemon-held.** Each fold the reader makes is sent as
+  `agentrepl.v1.FoldMergeBubble` (`webapp/src/feed/fold-merge-bubble.ts`),
+  and the daemon records it on the bubble's durable head row. Every later
+  push, page, reload and daemon restart carries it, so a bubble the reader
+  left open draws open.
+- **Only the reader's toggle is sent.** A fold the daemon applied, a jump's
+  expansion and a replace's reopening are never recorded. A refused or failed
+  record is filed on the warning chip (`control_plane_failed`) and logged;
+  the bubble keeps the reader's toggle.
+- **The webapp enforces it too.** A push stating an open merge bubble folded
+  leaves it open (INFO `feed.merge-bubble-fold-kept-open`), and a merge bubble
+  a jump opened is never watched (DEBUG `feed.jump-merge-unwatched`).
+
+## Feed vocabulary: interim, final and thinking responses
+
+Owner ruling, 2026-10-08. A turn draws several agent response bubbles, and
+three words name them. They name DIFFERENT BUBBLES, never stages of one.
+
+- **Final response (final answer):** the ONE bubble the turn ends on, the last
+  agent prose it settled on (`FeedResponse.final_answer`). It is final from
+  its first fragment to the end: while it streams it is the final response
+  still arriving, never an interim one. It is drawn in full and uncapped.
+- **Interim response:** each of the OTHER prose bubbles the agent writes
+  BEFORE the final response, between its tool calls. There are usually
+  several per turn. The daemon calls a response interim once a later row of
+  the same turn lands after it (`FeedResponse.interim`,
+  `daemon/internal/resolve/feed/interim.go`), because only then is it proven
+  not to be the one the turn ends on. Drawn collapsed to one line ending in
+  an ellipsis, on the page's own background, its text slightly dimmed.
+- **Thinking response:** the agent's reasoning bubbles
+  (`FeedResponse.thinking`). Never interim and never final; drawn like an
+  interim response.
+
+Never use "interim" for a final response's partial state. A prose bubble that
+is still its turn's latest row is not yet known to be either, so it is drawn
+in full, like the final response it may become, until a later row proves it
+interim.
+
 ## Tab-bar vocabulary: full, partial, and the extent rule
 
 A workspace's tab is `[N] <workspace-name>`, and the status color reaches it
@@ -1715,7 +1766,7 @@ refines the idle rung's detail (an unread turn end).
 |---|---|---|---|
 | Red | The agent is working. | Yes: a prompt is held or interjected. | submitting, thinking, clearing, compacting; footer `working`, `loading` |
 | Yellow | The main thread is idle while detached work (background subagents, shells) runs. | Yes | `idle_async`; footer `background` |
-| Green | Ready for you: idle, or waiting on your input. | Yes | ready, done, interrupted, permission, waiting (any other wait on you: a question, a cold gate, an interrupt landing); a merge that landed (`merged`); footer `idle`, `waiting`, `interrupted`; a Stop hook's deliberate stop and a deferred tool read as done |
+| Green | Ready for you: idle, or waiting on your input. | Yes | ready, done, interrupted; a permission gate (roster and footer `permission`) and a question gate (roster and footer `question`), the same green as done; waiting (a cold gate, an interrupt landing); a merge that landed (`merged`); footer `idle`, `waiting`, `interrupted`; a Stop hook's deliberate stop and a deferred tool read as done |
 | Purple | A merge is in progress; the daemon holds the workspace. | No: the composer is closed. | `merge_queued`, `merging` |
 | Turquoise | Something unexpected went wrong and wants your attention, but the workspace is usable. | Yes | roster `turn_failed` (a failed turn restored from the durable record only; live, a failed turn stands as its fault, below); `merge_failed`; `degraded`; every VENDOR FAULT: roster `vendor_fault` / footer `vendor_fault · vendor_retry`, `vendor_rejection`, `vendor_failed` (the vendor will not start), roster `vendor_blocked` / footer `vendor_fault · auth`, `usage_limit`, `billing`, `vendor_error` (a vendor or account block, and every turn the vendor ended or refused, until the next turn starts), roster and footer `api_retrying` (the vendor is retrying the turn's failed API call) |
 | Blue | The workspace is unusable right now. | No: the composer is closed (except under `turn_died`, declared in `composer_open_substatuses`). | every AGENT-REPL FAULT: roster `init`, `severed`, `dead`, `start_failed`, `turn_died`, `daemon_impaired` / footer `agent_repl_fault · starting`, `degraded`, `severed`, `dead`, `start_failed`, `daemon_impaired`, `turn_died` (the last turn's vendor query or agent process died, until the next turn starts); every NETWORK FAULT: roster `network_fault` / footer `network_fault · offline`; a refused close: roster and footer `closing` |
@@ -1786,6 +1837,17 @@ The rules that keep this true:
   turquoise, never blue; a vendor fault is always turquoise. An expected state that awaits you (a
   permission ask) is green, never blue. A merge never parks: one that gives up
   is `merge_failed`, turquoise, and the workspace is back with you.
+- **A gate is green and names itself** (owner ruling, 2026-10-08). While a
+  permission or a question gate stands, the footer's status is `permission`
+  or `question` (never `waiting`), the roster arm is the same name, and every
+  surface draws the green of a finished turn, never the red of a working one,
+  for as long as the gate is open. The gates stand on the ladder's waiting
+  rung, above a running turn. A daemon that attaches while a gate stands (a
+  handover, a restart) learns it from the shim's session facts
+  (`SessionStarted.open_asks`), because no watch replays the ask's start; told
+  only the turn in flight, it drew the turn as working. `waiting` keeps the
+  cold gate and an interrupt landing. The record is
+  `docs/protobuf-design/gate-status.md`.
 - **One classifier decides a failure's color.** `ladder.ClassifyFailure` sorts
   every turn-ending agent failure into a vendor or account block, a failure the
   vendor ended or refused, the query dying, or an expected stop, and

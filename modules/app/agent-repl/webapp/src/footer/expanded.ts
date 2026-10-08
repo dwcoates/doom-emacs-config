@@ -46,13 +46,11 @@ import type {
   FooterExpanded,
   FooterExpandedAgents,
   FooterExpandedCrons,
-  FooterExpandedMergeTests,
   FooterExpandedMonitors,
   FooterExpandedShells,
   FooterExpandedTasks,
   FooterExpandedTokens,
   FooterJump,
-  FooterMergeTestRow,
   FooterTokensAgent,
   FooterTokensLineContextGrowth,
   FooterMonitorRow,
@@ -70,14 +68,13 @@ import type {
 import type { FeedId } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { placeChildren } from "../dom.js";
 import { columnHeader, COLUMNS_ROW_CLASS } from "../columns.js";
-import { liveElapsedClock, settledElapsedClock } from "../elapsed-clock.js";
+import { liveElapsedClock } from "../elapsed-clock.js";
 import { frameUndecodable } from "../failure/sink.js";
 import { stopTicking } from "../feed/ticking.js";
 import { log } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
 import { isMalformedView } from "../rpc/malformed.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
-import { toneClass } from "../vocab.js";
 import { footerClockSpan } from "./clock-span.js";
 import { stopControlHasAnswer, type StopControls } from "./stop.js";
 import {
@@ -96,8 +93,7 @@ export type FooterPanel =
   | "tasks"
   | "shells"
   | "monitors"
-  | "crons"
-  | "mergeTests";
+  | "crons";
 
 /** Every panel name, for the suite and for the persisted-selection check. */
 export const FOOTER_PANELS: readonly FooterPanel[] = [
@@ -107,7 +103,6 @@ export const FOOTER_PANELS: readonly FooterPanel[] = [
   "shells",
   "monitors",
   "crons",
-  "mergeTests",
 ];
 
 /**
@@ -260,15 +255,6 @@ export function drawFooterExpanded(
         selection,
         drawFooterExpandedCrons(requireMessage(u.crons, `${path}.crons`), deps, `${path}.crons`),
       );
-    case "mergeTests": {
-      // THE MERGE TESTS PANEL FOLDS AWAY WHEN IT EMPTIES, as the agents panel
-      // does: the daemon empties it the moment the merge stops testing (and
-      // unsets the 🧪 chip in the same view), so the section closes and the
-      // strip stands alone again rather than drawing a panel about nothing.
-      const tests = requireMessage(u.mergeTests, `${path}.merge_tests`);
-      if (tests.rows.length === 0) return null;
-      return panel(selection, drawFooterExpandedMergeTests(tests, deps, `${path}.merge_tests`));
-    }
     default:
       return unreachableArm(`${path}.selection`, selection);
   }
@@ -899,87 +885,6 @@ export function drawFooterCronRowNextFire(
   return footerClockSpan(deps.ctx.ticker, "countdown", "footer-row-clock", (span, nowMs) => {
     span.textContent = remainingLabel(fireAtMs - nowMs);
   });
-}
-
-// ---- the merge tests panel ------------------------------------------------
-
-/** The glyph each suite state is drawn with. Glyphs, never emojis. */
-export const MERGE_TEST_STATE_GLYPHS = {
-  waiting: "○",
-  running: "●",
-  passed: "✓",
-  failed: "✗",
-} as const satisfies Record<string, string>;
-
-/**
- * The merge's test round: one row per suite, in the gate's order. NOT jump
- * targets: a suite has no feed entry of its own (its output is the merge
- * bubble's tests tab).
- */
-export function drawFooterExpandedMergeTests(
-  u: FooterExpandedMergeTests,
-  deps: ExpandedDeps,
-  path: string,
-): HTMLElement[] {
-  return u.rows.map((row, index) => drawFooterMergeTestRow(row, deps, `${path}.rows[${index}]`));
-}
-
-/**
- * One suite: state glyph · name · clock. A running suite's clock ticks up
- * from its start; a finished one shows how long it took and stops; a suite
- * not started yet has no clock at all.
- */
-export function drawFooterMergeTestRow(
-  u: FooterMergeTestRow,
-  deps: ExpandedDeps,
-  path: string,
-): HTMLElement {
-  const name = requireMessage(u.name, `${path}.name`);
-  const state = requireCase(requireMessage(u.state, `${path}.state`).state, `${path}.state.state`);
-  const row = plainRow("mergeTests");
-  row.setAttribute("data-suite-state", state.case);
-  const figures = document.createElement("span");
-  figures.className = "footer-row-figures";
-  switch (state.case) {
-    case "waiting":
-      row.appendChild(glyph("waiting", MERGE_TEST_STATE_GLYPHS.waiting));
-      break;
-    case "running":
-      row.appendChild(glyph("running", MERGE_TEST_STATE_GLYPHS.running));
-      figures.appendChild(runtimeClock(state.value.startedAtMs, deps, `${path}.state.running.started_at_ms`));
-      break;
-    case "passed": {
-      const mark = glyph("passed", MERGE_TEST_STATE_GLYPHS.passed);
-      mark.classList.add(toneClass("green"));
-      row.appendChild(mark);
-      figures.appendChild(finishedClock(state.value.durationMs, `${path}.state.passed.duration_ms`));
-      break;
-    }
-    case "failed": {
-      const mark = glyph("failed", MERGE_TEST_STATE_GLYPHS.failed);
-      mark.classList.add(toneClass("red"));
-      row.appendChild(mark);
-      figures.appendChild(finishedClock(state.value.durationMs, `${path}.state.failed.duration_ms`));
-      break;
-    }
-    default: {
-      const other: { case: string } = state;
-      return unreachableArm(`${path}.state.state`, other.case);
-    }
-  }
-  const label = document.createElement("span");
-  label.className = "footer-row-label";
-  label.textContent = name.text;
-  row.appendChild(label);
-  row.appendChild(figures);
-  return row;
-}
-
-/** A finished suite's run time, drawn once and never ticked. */
-function finishedClock(durationMs: bigint, path: string): HTMLElement {
-  const clock = settledElapsedClock("footer-row-clock", msOf(durationMs, path));
-  clock.setAttribute("data-duration", "");
-  return clock;
 }
 
 // ---- shared row parts -----------------------------------------------------

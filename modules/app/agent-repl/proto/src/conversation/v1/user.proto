@@ -46,5 +46,27 @@ message UserContentBlock {
     // the decision is reversible.
     UnsupportedBlock unsupported = 3;
     // Tag 4 is RETIRED: the attached-file block is deferred.
+    // An earlier bubble of the conversation the person was replying to when
+    // they sent this, quoted ahead of their own words.
+    UserQuoteBlock quote = 5;
   }
+}
+
+// AN EARLIER BUBBLE THE PERSON REPLIED TO, quoted into what they said. When a
+// prompt is sent with a feed bubble selected, the daemon quotes that bubble
+// into the prompt as one of these, ahead of the blocks the person typed, so
+// the person's own words and the quoted reference stay separate in the record
+// rather than being flattened into one text.
+//
+// THE TEXT IS THE QUOTE AS DELIVERED, composed once by the daemon: the reply
+// preamble naming what is quoted, the quoted bubble's markdown inside a code
+// fence longer than any backtick run in it, and the closing marker that
+// introduces the person's own message. The agent receives it verbatim, as text
+// in its place among the blocks. A client draws it verbatim and never parses
+// it, and a bubble shows it only when expanded, while the collapsed bubble
+// shows only the person's own words.
+message UserQuoteBlock {
+  // The composed quote, markdown: preamble, fenced quoted text, closing
+  // marker. Never empty.
+  string text = 1;
 }

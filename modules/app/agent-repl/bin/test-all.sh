@@ -18,10 +18,12 @@
 # timings (~/.cache/agent-repl/test-history.json). ../AGENTS.md has the whole
 # model.
 #
-# The output contract is unchanged: one "<suite>: starting" line, one
-# "<suite>: passed in Ns" / "<suite> failed after Ns with exit code N" /
-# "<suite>: DECLINED after ..." line per suite, then the summaries. The merge
-# gate (daemon/internal/merge/testgate.go) parses those lines.
+# The output contract: one "<suite>: starting" line followed by its
+# "<suite>: N units planned" line, one "unit <id> [<suite>] ok|FAILED|..." line
+# per unit, one "<suite>: passed in Ns" / "<suite> failed after Ns with exit
+# code N" / "<suite>: DECLINED after ..." line per suite, then the summaries.
+# The merge gate (daemon/internal/merge/testgate.go) parses those lines, and
+# counts each suite's unit verdicts against its planned total.
 #
 # The roster is testrun/roster/roster.go — the one list --suites is validated
 # against and the merge gate selects from. --suites narrows the run; WITHOUT IT

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 
 	"connectrpc.com/connect"
 
@@ -15,7 +14,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
 	"claude-repld/internal/prompthandler"
-	"claude-repld/internal/resolve/feed"
+	"claude-repld/internal/replyquote"
 	"claude-repld/internal/workspace"
 	"claude-repld/internal/wsm"
 )
@@ -65,8 +64,9 @@ func (s *server) SubmitPrompt(
 
 	// REPLY-TO: when the feed has a bubble SELECTED as this prompt is accepted
 	// — a final response, a prompt, or any other selected bubble — the DAEMON
-	// prepends a copy of its text plus a note BEFORE the prompt reaches the
-	// shim, so the agent knows the new message refers to it. The daemon is the
+	// quotes it into the prompt as its own leading block BEFORE the prompt
+	// reaches the shim, so the agent knows the new message refers to it and
+	// the record keeps the quote apart from the person's words (replyquote). The daemon is the
 	// selection's only holder, so the reply is always the one the webapp was
 	// drawing. The selection is read ONCE, and only that selection is ended
 	// after the send: a row selected in the meantime stays selected. A selected
@@ -85,7 +85,7 @@ func (s *server) SubmitPrompt(
 				NotFound: true,
 			}))))
 		}
-		said = prependReferencedResponse(said, quoted)
+		said = replyquote.Quote(said, quoted.Markdown, quoted.Prompt)
 	}
 
 	// VALIDATED ABOVE through the same mapping, so a failure here is a
@@ -112,49 +112,6 @@ func (s *server) SubmitPrompt(
 	}
 	return answer(resp, cerr)
 }
-
-// prependReferencedResponse builds the outgoing prompt for a
-// reply-to-a-past-response submission: a single leading text block carrying the
-// exact reply preamble — the referenced response's markdown between the two
-// ⟢ markers, then the user's own words — followed by every non-text block the
-// user attached, preserved in order. The user's text blocks are flattened into
-// the preamble, so the shim receives one prompt reading exactly as specified.
-func prependReferencedResponse(said *conversationv1.UserSaid, quoted feed.SelectableText) *conversationv1.UserSaid {
-	var userText []string
-	var attachments []*conversationv1.UserContentBlock
-	for _, block := range said.GetContent().GetBlocks() {
-		if text := block.GetText(); text != nil {
-			userText = append(userText, text.GetText())
-			continue
-		}
-		attachments = append(attachments, block)
-	}
-
-	opening := replyPrefixOpening
-	if quoted.Prompt {
-		opening = replyPrefixPromptOpening
-	}
-	combined := opening + quoted.Markdown + replyPrefixMessage + strings.Join(userText, "\n")
-
-	blocks := make([]*conversationv1.UserContentBlock, 0, len(attachments)+1)
-	blocks = append(blocks, &conversationv1.UserContentBlock{
-		Block: &conversationv1.UserContentBlock_Text{
-			Text: &conversationv1.TextBlock{Text: combined},
-		},
-	})
-	blocks = append(blocks, attachments...)
-	return &conversationv1.UserSaid{Content: &conversationv1.UserContent{Blocks: blocks}}
-}
-
-// The reply preamble, split at the two ⟢ markers. Kept verbatim: the exact
-// wording is the contract with the agent (and asserted character-for-character
-// by the tests), so a change here is a change to what the model is told.
-const (
-	replyPrefixOpening = "⟢ Replying to an earlier response of yours:\n\n"
-	// A selected PROMPT is quoted as a prompt: it was not the agent's response.
-	replyPrefixPromptOpening = "⟢ Replying to an earlier prompt in this conversation:\n\n"
-	replyPrefixMessage       = "\n\n⟢ My message:\n\n"
-)
 
 // encodeSubmitOutcome renders the handler's outcome as SubmitPromptSuccess.
 //

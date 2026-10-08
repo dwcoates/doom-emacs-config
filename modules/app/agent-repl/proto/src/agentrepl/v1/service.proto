@@ -13,6 +13,7 @@ package agentrepl.v1;
 
 import "agentrepl/v1/endpoint_submit_prompt.proto";
 import "agentrepl/v1/endpoint_select_feed_row.proto";
+import "agentrepl/v1/endpoint_fold_merge_bubble.proto";
 import "agentrepl/v1/endpoint_plan_rollback.proto";
 import "agentrepl/v1/endpoint_roll_back.proto";
 import "agentrepl/v1/endpoint_adjust_feed_text_scale.proto";
@@ -96,6 +97,11 @@ service AgentRepl {
   // its ordered rows, pushes it to the webapp and Emacs, and acks it here.
   // See endpoint_select_feed_row.proto.
   rpc SelectFeedRow(SelectFeedRowRequest) returns (SelectFeedRowResponse);
+
+  // The reader opened or closed a merge bubble: the daemon records the fold
+  // on the bubble's durable head row, so it survives pushes, reloads and
+  // restarts. See endpoint_fold_merge_bubble.proto.
+  rpc FoldMergeBubble(FoldMergeBubbleRequest) returns (FoldMergeBubbleResponse);
 
   // Nudge the feed text zoom one small step up or down. Daemon-global,
   // persisted, pushed to every open feed's watch as a FeedTextScale frame. See

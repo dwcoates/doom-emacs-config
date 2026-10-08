@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"google.golang.org/protobuf/proto"
+
 	frontendv1 "agentrepl/proto/frontend/v1"
 )
 
@@ -269,5 +271,191 @@ func TestClampTailKeepsShortOutputWhole(t *testing.T) {
 	// Assert.
 	if tail != output {
 		t.Fatalf("the tail is %q, want the whole output", tail)
+	}
+}
+
+// countsOutput is a run of webapp's three units: one passed, one failed, one
+// still to report.
+const countsOutput = "[agent-repl-tests] webapp: starting\n" +
+	"[agent-repl-tests] webapp: 3 units planned\n" +
+	"[agent-repl-tests] unit webapp#00 [webapp] ok, 3.000s wall, 2.000s cpu\n" +
+	"[agent-repl-tests] ERROR: unit webapp#01 [webapp] FAILED with exit code 1 after 2.000s\n"
+
+// TestSuiteCountsReadTheRunnersUnitVerdicts covers the counts each suite row
+// carries: the planned total and the unit verdicts the runner printed.
+func TestSuiteCountsReadTheRunnersUnitVerdicts(t *testing.T) {
+	tests := []struct {
+		name   string
+		output string
+		want   *frontendv1.FeedMergeTestCounts
+	}{
+		{
+			name:   "no planned line leaves the counts unknown",
+			output: "[agent-repl-tests] webapp: starting\n",
+			want:   nil,
+		},
+		{
+			name:   "the planned line alone counts nothing yet",
+			output: "[agent-repl-tests] webapp: starting\n[agent-repl-tests] webapp: 3 units planned\n",
+			want:   &frontendv1.FeedMergeTestCounts{Total: 3},
+		},
+		{
+			name:   "an ok and a FAILED unit count one each",
+			output: countsOutput,
+			want:   &frontendv1.FeedMergeTestCounts{Passed: 1, Failed: 1, Total: 3},
+		},
+		{
+			name:   "a unit the runner did not run counts as failed",
+			output: "[agent-repl-tests] webapp: 1 units planned\n[agent-repl-tests] ERROR: unit webapp#00 [webapp] NOT RUN: its dependency x did not pass\n",
+			want:   &frontendv1.FeedMergeTestCounts{Failed: 1, Total: 1},
+		},
+		{
+			name:   "a declined unit counts as neither",
+			output: "[agent-repl-tests] webapp: 1 units planned\n[agent-repl-tests] unit webapp#00 [webapp] declined (exit 77) after 0.100s\n",
+			want:   &frontendv1.FeedMergeTestCounts{Total: 1},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+
+			// Act
+			rows, err := h.o.paintSuites([]string{"webapp"}, tc.output)
+
+			// Assert
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := rows[0].GetCounts(); !proto.Equal(got, tc.want) {
+				t.Fatalf("counts = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestARunningSuiteSaysWhatItsTestsHaveSaidSoFar covers the running arm the
+// suite's dot is drawn from.
+func TestARunningSuiteSaysWhatItsTestsHaveSaidSoFar(t *testing.T) {
+	tests := []struct {
+		name   string
+		output string
+		want   string
+	}{
+		{name: "nothing reported", output: "[agent-repl-tests] webapp: starting\n", want: "unreported"},
+		{name: "planned, nothing reported", output: "[agent-repl-tests] webapp: 3 units planned\n", want: "unreported"},
+		{name: "every verdict a pass", output: "[agent-repl-tests] webapp: 3 units planned\n[agent-repl-tests] unit webapp#00 [webapp] ok, 1.000s wall, 1.000s cpu\n", want: "passing"},
+		{name: "a failure among them", output: countsOutput, want: "failing"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+
+			// Act
+			rows, err := h.o.paintSuites([]string{"webapp"}, tc.output)
+
+			// Assert
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := runningArm(rows[0].GetRunning()); got != tc.want {
+				t.Fatalf("running arm = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestTheTestsTabCountsEachUnitAsItsVerdictLands covers the live stream: each
+// unit verdict line moves the tab row's counts as the script writes it.
+func TestTheTestsTabCountsEachUnitAsItsVerdictLands(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	landing(h, 1)
+	h.runner.runs = []scriptedRun{{Output: "[agent-repl-tests] daemon: starting\n" +
+		"[agent-repl-tests] daemon: 2 units planned\n" +
+		"[agent-repl-tests] unit d1 [daemon] ok, 1.000s wall, 1.000s cpu\n" +
+		"[agent-repl-tests] unit d2 [daemon] ok, 1.000s wall, 1.000s cpu\n" +
+		"[agent-repl-tests] daemon: passed in 2s\n", Code: 0}}
+
+	// Act
+	admitted(t, h)
+
+	// Assert
+	var passed []uint32
+	h.feed.mu.Lock()
+	for _, row := range h.feed.rows {
+		for _, suite := range row.Row.GetMergeTab().GetTests().GetSuites() {
+			if c := suite.GetCounts(); c != nil && (len(passed) == 0 || passed[len(passed)-1] != c.GetPassed()) {
+				passed = append(passed, c.GetPassed())
+			}
+		}
+	}
+	h.feed.mu.Unlock()
+	if want := []uint32{0, 1, 2}; !equalCounts(passed, want) {
+		t.Fatalf("passed counts = %v, want %v", passed, want)
+	}
+}
+
+// runningArm names a running suite's so-far arm.
+func runningArm(r *frontendv1.FeedMergeTestSuiteRunning) string {
+	switch r.GetSoFar().(type) {
+	case *frontendv1.FeedMergeTestSuiteRunning_Unreported:
+		return "unreported"
+	case *frontendv1.FeedMergeTestSuiteRunning_Passing:
+		return "passing"
+	case *frontendv1.FeedMergeTestSuiteRunning_Failing:
+		return "failing"
+	default:
+		return "unset"
+	}
+}
+
+// equalCounts reports whether two count sequences match.
+func equalCounts(a, b []uint32) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// unreadableTotal is a planned line whose total overflows an int.
+const unreadableTotal = "[agent-repl-tests] webapp: 99999999999999999999999 units planned\n"
+
+func TestAPlannedTotalThatDoesNotReadFailsThePaint(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	_, err := h.o.paintSuites([]string{"webapp"}, unreadableTotal)
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "planned unit total") {
+		t.Fatalf("err = %v, want the unreadable total named", err)
+	}
+}
+
+func TestALiveLineThatDoesNotCountIsRecordedAtWarn(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	g := &gateRun{r: &run{o: h.o, ws: theWorkspace}, states: map[string]suiteState{}, counts: newSuiteCounts()}
+
+	// Act
+	g.edge(strings.TrimSuffix(unreadableTotal, "\n"))
+
+	// Assert
+	warned := false
+	for _, rec := range h.logs.Records() {
+		if rec.Operation == "daemon.merge.tests" && rec.Level == "warn" {
+			warned = true
+		}
+	}
+	if !warned {
+		t.Fatal("no daemon.merge.tests WARN records the line that could not be counted")
 	}
 }

@@ -286,6 +286,38 @@ func TestQuestionSingleSelect(t *testing.T) {
 	AwaitTurnEnded(t, w, ws, turn)
 }
 
+// TestAnOpenQuestionIsNamedAndGreenOnTheStripAndTheRail pins the owner's
+// ruling of 2026-10-08: while a question gate stands in a running turn, the
+// footer's status is `question` and the roster row's arm is `question` (both
+// green in render-colors.json), never `working` / `thinking`.
+func TestAnOpenQuestionIsNamedAndGreenOnTheStripAndTheRail(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	w, ws := newQuestionWorkspace(t)
+	const question = "How do you want the new branch set up?"
+	footer := w.WatchFooter(ws)
+	defer footer.Close()
+	roster := w.WatchRoster()
+	defer roster.Close()
+
+	// Act
+	turn := SubmitPrompt(t, w, ws, "!ask-single")
+	open := awaitOpenQuestion(t, w, ws, question)
+
+	// Assert
+	harness.AwaitView(t, w.Ctx(), footer.Stream, "the strip to name the question gate", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetStatus().GetQuestion() != nil
+	})
+	harness.AwaitView(t, w.Ctx(), roster, "the row to name the question gate", func(r *frontendv1.WorkspaceRoster) bool {
+		return raArm(r, ws.GetId()) == "question"
+	})
+	answerQuestion(t, w, ws, open.GetId(), &agentreplv1.AnswerQuestionAnswer{
+		QuestionText: question,
+		Chosen:       []string{"New worktree off master"},
+	})
+	AwaitTurnEnded(t, w, ws, turn)
+}
+
 // ---------------------------------------------------------------------------
 // #90 QuestionMultiSelect and #91 QuestionMultipleInOneBatch both drive
 // `!ask-multi` (questions.ts ASK_MULTI) — see this file's header comment for
