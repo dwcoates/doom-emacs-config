@@ -763,3 +763,47 @@ func TestRefReplacedIsGlobalSoItIsNeverQueuedForForwarding(t *testing.T) {
 		t.Fatalf("the replacement record is file-scoped and would be forwarded: %s", raw)
 	}
 }
+
+func TestOpenLoggerStartsALeftoverDebugLevelAtInfo(t *testing.T) {
+	// Arrange. A debug level with no window is a leftover, never a setting.
+	t.Setenv("AGENT_REPL_LOG_LEVEL", "debug")
+	t.Setenv("AGENT_REPL_LOG_LEVEL_UNTIL", "")
+	base := t.TempDir()
+	logPath := filepath.Join(base, "sidecar.log")
+	logf, closeLog, err := openLoggerTo(&bytes.Buffer{}, filepath.Join(base, "store.sock"), base, logPath)
+	if err != nil {
+		t.Fatalf("openLoggerTo: %v", err)
+	}
+
+	// Act.
+	logf.With(logging.Context{Operation: "tail"}).LogVerbose("dropped")
+	closeLog()
+
+	// Assert.
+	raw, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read the log: %v", err)
+	}
+	if strings.Contains(string(raw), `"operation":"tail"`) {
+		t.Fatalf("log = %q, want the debug record dropped", raw)
+	}
+	if !strings.Contains(string(raw), `"outcome":"no_expiry"`) {
+		t.Fatalf("log = %q, want the ignored level noted", raw)
+	}
+}
+
+func TestOpenLoggerRejectsAMalformedLevelWindow(t *testing.T) {
+	// Arrange.
+	t.Setenv("AGENT_REPL_LOG_LEVEL", "debug")
+	t.Setenv("AGENT_REPL_LOG_LEVEL_UNTIL", "soon")
+	base := t.TempDir()
+
+	// Act.
+	_, _, err := openLoggerTo(&bytes.Buffer{}, filepath.Join(base, "store.sock"), base, filepath.Join(base, "sidecar.log"))
+
+	// Assert.
+	var bootstrap bootstrapError
+	if !errors.As(err, &bootstrap) {
+		t.Fatalf("error %T = %v, want a bootstrap error", err, err)
+	}
+}

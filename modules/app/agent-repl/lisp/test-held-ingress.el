@@ -124,6 +124,24 @@ Answers the symbol `absent' when the body carries no such member."
     (should (equal (agent-repl-test-hi--body-delivery :deferred)
                    "SUBMIT_PROMPT_DELIVERY_DEFERRED"))))
 
+(ert-deftest agent-repl-held-ingress-body-records-one-encode-per-encoded-field ()
+  "Each encoded field of the entry is one top-level encode, recorded once."
+  (agent-repl-test-hi--with
+    ;; Arrange
+    (let (messages)
+      (cl-letf (((symbol-function 'agent-repl--log)
+                 (lambda (_ws fmt &rest args)
+                   (when (string-prefix-p "elisp.wire.encoded" fmt)
+                     (push (symbol-name (nth 2 args)) messages)))))
+        ;; Act
+        (agent-repl-held-ingress--body "ws-one" (agent-repl-test-hi--said "hi")
+                                       :deferred-prompt "k-1" :deferred))
+      ;; Assert
+      (should (equal (sort messages #'string<)
+                     '("agent-repl-wire-encode-prompt-origin"
+                       "agent-repl-wire-encode-submit-prompt-delivery"
+                       "agent-repl-wire-encode-user-said"))))))
+
 (ert-deftest agent-repl-held-ingress-write-keeps-non-ascii-words-intact ()
   "The file is UTF-8, so words outside ASCII reach the daemon unchanged."
   (agent-repl-test-hi--with

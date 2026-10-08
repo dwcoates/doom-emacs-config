@@ -1,56 +1,32 @@
 package dlog
 
-import "fmt"
+import "agentrepl/logging"
 
 // LevelEnvironment is the one process switch governing which daemon records
-// reach both durable storage and the terminal mirror.
+// reach both durable storage and the terminal mirror. A level other than info
+// holds only inside the window logging.UntilEnvironment names
+// (proto/vocab/log-level-window.json).
 const LevelEnvironment = "AGENT_REPL_LOG_LEVEL"
 
-// levelThreshold is the minimum severity admitted by a surfaces instance.
-type levelThreshold int
+// levelWindowOperation is the operation of every level window record: the
+// startup decision and a window that ended.
+const levelWindowOperation = "daemon.dlog.level_window"
 
-const (
-	thresholdDebug levelThreshold = iota
-	thresholdInfo
-	thresholdWarn
-	thresholdError
-)
-
-// parseLevel resolves the process setting. Empty is the contract's info
+// parseLevel resolves a fixed threshold. Empty is the contract's info
 // default; every other unrecognized value is a boot refusal.
-func parseLevel(raw string) (levelThreshold, error) {
-	switch raw {
-	case "":
-		return thresholdInfo, nil
-	case LevelDebug:
-		return thresholdDebug, nil
-	case LevelInfo:
-		return thresholdInfo, nil
-	case LevelWarn:
-		return thresholdWarn, nil
-	case LevelError:
-		return thresholdError, nil
-	default:
-		return 0, fmt.Errorf("%s=%q is not one of debug, info, warn, error", LevelEnvironment, raw)
-	}
+func parseLevel(raw string) (logging.Level, error) {
+	return logging.ParseLevel(raw)
 }
 
-// enabled reports whether a record at severity is admitted by the threshold.
-// Callers validate foreign levels before asking; daemon levels are closed
-// constants, so an unknown value is a programming error and panics loudly.
-func (t levelThreshold) enabled(severity string) bool {
-	var record levelThreshold
-	switch severity {
-	case LevelDebug:
-		record = thresholdDebug
-	case LevelInfo:
-		record = thresholdInfo
-	case LevelWarn:
-		record = thresholdWarn
-	case LevelError:
-		record = thresholdError
-	default:
-		panic("dlog: unknown record level " + severity)
+// admits reports whether a record at severity passes the live threshold. The
+// first call to find a level window ended records the revert at info; the
+// window is info by then, so that record cannot end it again. Daemon levels
+// are closed constants and foreign levels are validated before asking, so an
+// unknown severity is a programming error and panics loudly.
+func (s *surfaces) admits(severity string) bool {
+	allowed, ended := s.window.Allows(severity)
+	if ended != nil {
+		s.Global().Info(levelWindowOperation, ended.Message(), Context(ended.Context()))
 	}
-	return record >= t
+	return allowed
 }

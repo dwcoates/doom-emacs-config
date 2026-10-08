@@ -1241,7 +1241,8 @@ accessor would not reach the code under test."
   (declare (indent 2))
   `(let ((conn (agent-repl-connect-connection-create :address ,address))
          (process-environment
-          (cons "AGENT_REPL_LOG_LEVEL" process-environment)))
+          (append '("AGENT_REPL_LOG_LEVEL" "AGENT_REPL_LOG_LEVEL_UNTIL")
+                  process-environment)))
      (cl-letf (((symbol-function 'agent-repl-host-ref) (lambda (_ws) ,ref))
                ((symbol-function 'agent-repl-host-conn) (lambda (_ws) conn)))
        ,@body)))
@@ -1290,10 +1291,34 @@ accessor would not reach the code under test."
       ;; Re-introduce the test's configured value after the helper removes
       ;; ambient host configuration for every ordinary URL case.
       (let ((process-environment
+             (append '("AGENT_REPL_LOG_LEVEL=debug" "AGENT_REPL_LOG_LEVEL_UNTIL=1000300")
+                     process-environment))
+            (agent-repl--log-level-clock (lambda () 1000000)))
+        ;; Act / Assert
+        (should (string-match-p "log_level=debug&log_level_until=1000300\\'"
+                                (agent-repl-frontend-webview-url "alpha")))))))
+
+(ert-deftest agent-repl-test-frontend-url-carries-info-for-a-level-without-a-window ()
+  "A debug level with no window is a leftover: the page boots at info."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-frontend--with-ref '(:id "ws-1" :dir "/w") "127.0.0.1:1"
+      (let ((process-environment
              (cons "AGENT_REPL_LOG_LEVEL=debug" process-environment)))
         ;; Act / Assert
-        (should (string-match-p "log_level=debug"
+        (should (string-match-p "log_level=info\\'"
                                 (agent-repl-frontend-webview-url "alpha")))))))
+
+(ert-deftest agent-repl-test-frontend-url-refuses-a-malformed-log-level-window ()
+  "A window nobody can read aborts before a webview can hide the defect."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-frontend--with-ref '(:id "ws-1" :dir "/w") "127.0.0.1:1"
+      (let ((process-environment
+             (append '("AGENT_REPL_LOG_LEVEL=debug" "AGENT_REPL_LOG_LEVEL_UNTIL=soon")
+                     process-environment)))
+        ;; Act / Assert
+        (should-error (agent-repl-frontend-webview-url "alpha"))))))
 
 (ert-deftest agent-repl-test-frontend-url-refuses-an-invalid-log-level ()
   "A misspelled threshold aborts before a webview can hide the defect."

@@ -95,6 +95,13 @@ type Fields struct {
 	ActivityID string
 	TurnID     string
 
+	// ---- Log level window ----
+
+	// LevelWindow is the evidence of a log level window decision: a startup
+	// selection or a window that ended (agentrepl/logging Selection.Context
+	// and Expiry.Context). Its keys land in the record's context as given.
+	LevelWindow map[string]any
+
 	// ---- Fan-out accounting ----
 	Subscriber     string
 	Delivered      uint64
@@ -187,7 +194,9 @@ type Logger struct {
 	// owns nor can roll, so mirroring every record there is a second,
 	// unbounded copy of a log that is already durable and rotated.
 	terminalEmergencyOnly bool
-	minimumLevel          sharedlogging.Level
+	// threshold is the process's live level, shared by every With copy so a
+	// level window that ends ends for all of them.
+	threshold *sharedlogging.Window
 	fields                Fields
 	state                 *sinkState
 	clock                 func() time.Time
@@ -210,18 +219,26 @@ func New(file, stderr io.Writer, verboseEnabled bool) *Logger {
 	return NewAtLevel(file, stderr, level)
 }
 
-// NewAtLevel creates the shim-store logger at one explicit severity threshold.
+// NewAtLevel creates the shim-store logger at one explicit severity threshold
+// that never ends.
 func NewAtLevel(file, stderr io.Writer, minimumLevel sharedlogging.Level) *Logger {
+	return newLogger(file, stderr, sharedlogging.FixedWindow(minimumLevel))
+}
+
+func newLogger(file, stderr io.Writer, threshold *sharedlogging.Window) *Logger {
 	if file == nil || stderr == nil {
 		panic("shim-store logging: nil output sink")
 	}
+	if threshold == nil {
+		panic("shim-store logging: nil level threshold")
+	}
 	return &Logger{
-		file:         file,
-		stderr:       stderr,
-		minimumLevel: minimumLevel,
-		state:        &sinkState{},
-		clock:        time.Now,
-		pid:          os.Getpid,
+		file:      file,
+		stderr:    stderr,
+		threshold: threshold,
+		state:     &sinkState{},
+		clock:     time.Now,
+		pid:       os.Getpid,
 	}
 }
 
@@ -242,9 +259,27 @@ func NewDurableOnly(file, terminal io.Writer, verboseEnabled bool) *Logger {
 // NewDurableOnlyAtLevel creates the production logger at one explicit
 // severity threshold.
 func NewDurableOnlyAtLevel(file, terminal io.Writer, minimumLevel sharedlogging.Level) *Logger {
-	l := NewAtLevel(file, terminal, minimumLevel)
+	return NewDurableOnlyWindow(file, terminal, sharedlogging.FixedWindow(minimumLevel))
+}
+
+// NewDurableOnlyWindow creates the production logger on the process's live
+// level window: a level other than info reverts to info when its window ends,
+// and the revert is recorded at info (operation store.logging.level-window).
+func NewDurableOnlyWindow(file, terminal io.Writer, threshold *sharedlogging.Window) *Logger {
+	l := newLogger(file, terminal, threshold)
 	l.terminalEmergencyOnly = true
 	return l
+}
+
+// levelWindowOperation is the operation of every level window record.
+const levelWindowOperation = "store.logging.level-window"
+
+// NoteLevelSelection records the process's startup level decision at info,
+// when anything other than info was asked for.
+func (l *Logger) NoteLevelSelection(sel sharedlogging.Selection) {
+	if message, ok := sel.Note(); ok {
+		l.Log(Fields{Operation: levelWindowOperation, Level: "info", LevelWindow: sel.Context()}, "%s", message)
+	}
 }
 
 // With returns a logger that adds fields to every record. Explicit fields on
@@ -285,7 +320,12 @@ func (l *Logger) write(verbosity string, fields Fields, format string, args []an
 			level = "info"
 		}
 	}
-	if !l.minimumLevel.Allows(level) {
+	allowed, ended := l.threshold.Allows(level)
+	if ended != nil {
+		// The window is info now, so this record cannot end it again.
+		l.Log(Fields{Operation: levelWindowOperation, Level: "info", LevelWindow: ended.Context()}, "%s", ended.Message())
+	}
+	if !allowed {
 		return
 	}
 	context := map[string]any{}
@@ -320,6 +360,9 @@ func (l *Logger) write(verbosity string, fields Fields, format string, args []an
 		if value != "" {
 			context[key] = value
 		}
+	}
+	for key, value := range merged.LevelWindow {
+		context[key] = value
 	}
 	if len(merged.AgentIDs) != 0 {
 		context["agent_ids"] = merged.AgentIDs
@@ -471,6 +514,9 @@ func merge(base, extra Fields) Fields {
 		if *pair.src != "" {
 			*pair.dst = *pair.src
 		}
+	}
+	if extra.LevelWindow != nil {
+		base.LevelWindow = extra.LevelWindow
 	}
 	if extra.WriteSeq != 0 {
 		base.WriteSeq = extra.WriteSeq

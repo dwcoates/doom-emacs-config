@@ -904,7 +904,8 @@ func startSidecar(t *testing.T, opts sidecarOptions) *sidecarProc {
 	cmd := exec.Command(sidecarBin, args...)
 	cmd.Env = make([]string, 0, len(os.Environ())+len(opts.ExtraEnv)+3)
 	for _, value := range os.Environ() {
-		if !strings.HasPrefix(value, "AGENT_REPL_LOG_LEVEL=") {
+		if !strings.HasPrefix(value, "AGENT_REPL_LOG_LEVEL=") &&
+			!strings.HasPrefix(value, "AGENT_REPL_LOG_LEVEL_UNTIL=") {
 			cmd.Env = append(cmd.Env, value)
 		}
 	}
@@ -919,14 +920,23 @@ func startSidecar(t *testing.T, opts sidecarOptions) *sidecarProc {
 		// sidecar reads.
 		"AGENT_REPL_LOCK_DIR="+liveLockDir(opts.StateDir),
 	)
-	hasLogLevel := false
+	hasLogLevel, hasUntil := false, false
 	for _, value := range opts.ExtraEnv {
 		if strings.HasPrefix(value, "AGENT_REPL_LOG_LEVEL=") {
 			hasLogLevel = true
 		}
+		if strings.HasPrefix(value, "AGENT_REPL_LOG_LEVEL_UNTIL=") {
+			hasUntil = true
+		}
 	}
 	if !hasLogLevel {
 		cmd.Env = append(cmd.Env, "AGENT_REPL_LOG_LEVEL=info")
+	}
+	if hasLogLevel && !hasUntil {
+		// A level other than info is a window, never a standing setting
+		// (proto/vocab/log-level-window.json): the harness grants the level a
+		// test asks for the longest window there is.
+		cmd.Env = append(cmd.Env, fmt.Sprintf("AGENT_REPL_LOG_LEVEL_UNTIL=%d", time.Now().Add(5*time.Minute).Unix()))
 	}
 	cmd.Env = append(cmd.Env, opts.ExtraEnv...)
 	captured := captureChild(t, "the sidecar (log: "+opts.LogPath+")")

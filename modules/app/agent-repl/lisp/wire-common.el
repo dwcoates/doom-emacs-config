@@ -72,15 +72,62 @@ logging rung that never signals, so nothing here can swallow anything."
                      message-name field reason)
   (signal 'agent-repl-wire-error (list message-name field reason)))
 
-(defun agent-repl-wire--decoded (message-name value)
-  "Log a successful decode of MESSAGE-NAME at debug and return VALUE."
-  (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.decoded message=%s" message-name)
+;;;; ---- One record per top-level codec call ----
+;;
+;; A decode is a TREE of messages: one roster push is ~680 of them.  Each
+;; used to log its own debug line, and those lines -- built, routed and
+;; dropped one by one at the info level -- were ~120 ms of a ~134 ms decode
+;; plus the garbage behind ~50 ms collector pauses, twice per workspace
+;; switch (measured 2026-10-08).  So the messages are COUNTED, and the
+;; top-level call that started the tree (`agent-repl-wire-call') writes the
+;; one debug record.  A contract breach is untouched: `agent-repl-wire--fail'
+;; still records its ERROR and signals, message by message.
+
+(defvar agent-repl-wire--codec-tally nil
+  "The top-level codec call in progress, or nil outside one.
+A cons (MESSAGE-NAME . COUNT): the last message the tree finished, which
+is the outermost one once the call returns, and how many it finished.")
+
+(defun agent-repl-wire--noted (value message-name)
+  "Count MESSAGE-NAME into the codec call in progress and return VALUE."
+  (when agent-repl-wire--codec-tally
+    (setcar agent-repl-wire--codec-tally message-name)
+    (setcdr agent-repl-wire--codec-tally (1+ (cdr agent-repl-wire--codec-tally))))
   value)
 
+(defun agent-repl-wire--decoded (message-name value)
+  "Count a successful decode of MESSAGE-NAME and return VALUE.
+The record is written once for the whole tree, by `agent-repl-wire-call'."
+  (agent-repl-wire--noted value message-name))
+
 (defun agent-repl-wire--encoded (message-name value)
-  "Log a successful encode of MESSAGE-NAME at debug and return VALUE."
-  (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.encoded message=%s" message-name)
-  value)
+  "Count a successful encode of MESSAGE-NAME and return VALUE.
+The record is written once for the whole tree, by `agent-repl-wire-call'."
+  (agent-repl-wire--noted value message-name))
+
+(defun agent-repl-wire-call (direction codec value)
+  "Run CODEC on VALUE as one top-level codec call and return its result.
+DIRECTION is `decode' or `encode'.  The call writes ONE debug record,
+`elisp.wire.decoded' or `elisp.wire.encoded', naming the outermost message
+and how many messages the tree held.  A call nested in another call is
+counted into the outer one.  A CODEC that signals writes no success record;
+its breach was recorded by `agent-repl-wire--fail'."
+  (unless (memq direction '(decode encode))
+    (error "agent-repl-wire-call: direction must be decode or encode, got %S"
+           direction))
+  (if agent-repl-wire--codec-tally
+      (funcall codec value)
+    (let* ((tally (cons nil 0))
+           (result (let ((agent-repl-wire--codec-tally tally))
+                     (funcall codec value))))
+      (if (eq direction 'decode)
+          (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace")
+                           "elisp.wire.decoded message=%s messages=%d codec=%s"
+                           (car tally) (cdr tally) codec)
+        (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace")
+                         "elisp.wire.encoded message=%s messages=%d codec=%s"
+                         (car tally) (cdr tally) codec))
+      result)))
 
 ;;;; ---- Shared decode primitives ----
 

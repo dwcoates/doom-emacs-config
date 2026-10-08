@@ -446,12 +446,23 @@ describe("the boot", { timeout: BOOT_TIMEOUT_MS }, () => {
   });
 
   test("configures the logger from the page-delivered log level", async () => {
-    addressPage("?workspace=ws-1&dir=/tmp/ws-1&log_level=error");
+    // A level other than info holds only inside its window (proto/vocab/log-level-window.json).
+    addressPage(`?workspace=ws-1&dir=/tmp/ws-1&log_level=error&log_level_until=${String(Math.floor(Date.now() / 1000) + 60)}`);
 
     await bootMain();
 
     expect(page.clientLogs.map((call) => call.record.message)).not.toContain("the webapp booted");
     expect(page.clientLogs.map((call) => call.record.message)).toContain("the sidebar mounted");
+  });
+
+  test("boots at info, and says so, from an address whose level window has ended", async () => {
+    addressPage("?workspace=ws-1&dir=/tmp/ws-1&log_level=debug&log_level_until=1000");
+
+    await bootMain();
+
+    const records = page.clientLogs.map((call) => call.record);
+    expect(records.map((record) => record.message)).toContain("the webapp booted");
+    expect(records.find((record) => record.message.includes("its window ended"))?.context).toMatchObject({ outcome: "expired" });
   });
 
   test("adopts the workspace before it starts the lifecycle", async () => {
