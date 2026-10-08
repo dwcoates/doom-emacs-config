@@ -349,7 +349,8 @@ hand any more:
   side and `--bubble-bg`, a variant or state only the border (the owner-named
   fills apart: a held prompt's, below, and a thinking bubble's and an interim
   response's (`.interim-response`), which is the page's own `--bg`, owner
-  request 2026-10-08), `[data-cap-lines]` the collapsed limit; one scroll box,
+  request 2026-10-08, and whose prose is the dimmed `--interim-text`),
+  `[data-cap-lines]` the collapsed limit; one scroll box,
   one has-more measurer (bubble-more.ts)
   and one toggle (expand.ts, which also opens a bubble from its header strip).
   A kind's chrome the reader should see only once the bubble is open goes in
