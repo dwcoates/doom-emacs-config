@@ -30,7 +30,7 @@ import { AttentionRegistry, type BlinkTimers } from "./attention.js";
 import { createDropdowns } from "./dropdowns.js";
 import { changeView } from "./view-change.js";
 import { createSidebarView, GROUPING_VIEW_KEY } from "./view.js";
-import type { Grouping, SidebarContext } from "./context.js";
+import { GROUPINGS, type Grouping, type SidebarContext } from "./context.js";
 import { drawRosterShown, drawWorkspaceRoster } from "./roster.js";
 import { placeOpenRowDetails } from "./row.js";
 import { installMergedFit } from "./merged-fit.js";
@@ -225,6 +225,13 @@ export function mountSidebar(host: HTMLElement, ctx: AppContext, deps: SidebarDe
   };
 }
 
+/** What each grouping's picker button reads. */
+export const GROUPING_PICK_LABELS: Readonly<Record<Grouping, string>> = Object.freeze({
+  repository: "Repo",
+  task: "Task",
+  maturity: "Stage",
+});
+
 /** The rail's header, and how to paint its picker. */
 export interface RailHead {
   element: HTMLElement;
@@ -235,8 +242,8 @@ export interface RailHead {
 /**
  * The rail's header: its title and the grouping picker.
  *
- * The picker SELECTS between two resolved views — it hides one pane and shows
- * the other — so switching costs no round trip to draw and derives nothing.
+ * The picker SELECTS between resolved views — it shows one pane and hides
+ * the others — so switching costs no round trip to draw and derives nothing.
  * Which one is shown is the daemon's view state: the click paints at once and
  * asks (`view-change.ts`), and the push lights every page's picker alike. It
  * is drawn once at mount, outside what a push replaces, so each push paints
@@ -254,11 +261,11 @@ export function drawRailHead(sc: SidebarContext): RailHead {
   const views = document.createElement("div");
   views.className = "sb-views";
   const buttons = new Map<Grouping, Control>();
-  for (const grouping of ["repository", "task"] as const) {
+  for (const grouping of GROUPINGS) {
     const button = createControl();
     button.className = "sb-view-btn";
     button.setAttribute("data-grouping-pick", grouping);
-    button.textContent = grouping === "repository" ? "Repo" : "Task";
+    button.textContent = GROUPING_PICK_LABELS[grouping];
     button.addEventListener("click", (event) => {
       event.preventDefault();
       selectGrouping(grouping, sc, button);
@@ -288,9 +295,7 @@ function selectGrouping(grouping: Grouping, sc: SidebarContext, button: Control)
     outlivesPush: true,
     change: {
       case: "showGrouping",
-      value: {
-        grouping: grouping === "task" ? { case: "task", value: {} } : { case: "repository", value: {} },
-      },
+      value: { grouping: { case: grouping, value: {} } },
     },
   });
 }

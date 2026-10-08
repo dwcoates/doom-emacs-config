@@ -14,10 +14,12 @@ import {
   RosterRowSchema,
   RosterRowDetailSchema,
   RosterRowWhenSchema,
+  RosterMaturitySectionSchema,
   RosterMergedSectionSchema,
   RosterRepoSectionSchema,
   RosterTaskSectionSchema,
   WorkspaceRosterSchema,
+  type RosterMaturitySection,
   type RosterMergedSection,
   type RosterRepoSection,
   type RosterRow,
@@ -32,7 +34,7 @@ import { createAgentReplClient } from "../../src/rpc/client.js";
 import { type AppContext } from "../../src/rpc/context.js";
 import { testAppContext } from "../rpc/app-context.js";
 import { AttentionRegistry, type BlinkTimers } from "../../src/sidebar/attention.js";
-import type { Grouping, SidebarContext } from "../../src/sidebar/context.js";
+import type { Grouping, MaturityStageName, SidebarContext } from "../../src/sidebar/context.js";
 import { createSidebarView, type SidebarView } from "../../src/sidebar/view.js";
 import { createDropdowns } from "../../src/sidebar/dropdowns.js";
 
@@ -219,6 +221,24 @@ export function taskSection(init: {
   });
 }
 
+/** One maturity stage's section. */
+export function maturitySection(init: {
+  stage: MaturityStageName;
+  label?: string;
+  rows?: RosterRow[];
+  /** The daemon-held fold; expanded unless said, as a stage never folded is. */
+  collapsed?: boolean;
+  /** The daemon-resolved folded count; the row count unless said. */
+  count?: number;
+}): RosterMaturitySection {
+  return create(RosterMaturitySectionSchema, {
+    key: { stage: { stage: { case: init.stage, value: {} } } },
+    header: { label: { text: init.label ?? init.stage }, count: { workspaces: init.count ?? init.rows?.length ?? 0 } },
+    rows: { rows: init.rows ?? [] },
+    fold: init.collapsed === true ? { case: "collapsed", value: {} } : { case: "expanded", value: {} },
+  });
+}
+
 /**
  * The recently-merged band. Its daemon-held fold is COLLAPSED unless said, as
  * the daemon draws a band nobody has unfolded.
@@ -235,10 +255,18 @@ export function mergedSection(
   });
 }
 
+/** The `WorkspaceRoster.shown` arm each grouping is spelled with. */
+const SHOWN_ARMS = {
+  repository: { case: "shownRepository", value: {} },
+  task: { case: "shownTask", value: {} },
+  maturity: { case: "shownMaturity", value: {} },
+} as const satisfies Record<Grouping, MessageInitShape<typeof WorkspaceRosterSchema>["shown"]>;
+
 /** A whole roster, with every required box present. */
 export function roster(init: {
   repos?: RosterRepoSection[];
   tasks?: RosterTaskSection[];
+  maturity?: RosterMaturitySection[];
   merged?: RosterMergedSection;
   current?: string;
   /** The daemon-held grouping every page shows; the repository's unless said. */
@@ -247,11 +275,9 @@ export function roster(init: {
   return create(WorkspaceRosterSchema, {
     repository: { sections: init.repos ?? [] },
     task: { sections: init.tasks ?? [] },
+    maturity: { sections: init.maturity ?? [] },
     recentlyMerged: init.merged ?? mergedSection(),
-    shown:
-      init.shown === "task"
-        ? { case: "shownTask", value: {} }
-        : { case: "shownRepository", value: {} },
+    shown: SHOWN_ARMS[init.shown ?? "repository"],
     ...(init.current === undefined
       ? {}
       : { current: { workspace: { id: init.current, dir: `/w/${init.current}` } } }),
