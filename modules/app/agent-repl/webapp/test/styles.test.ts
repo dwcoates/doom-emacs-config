@@ -47,6 +47,11 @@ function selectorsSuppressingSelection(css: string): string[] {
   return suppressing;
 }
 
+
+/** The settled mid-turn response's border: the pear hue at its drawn strength. */
+const INTERIM_BORDER =
+  "border-color: color-mix(in srgb, var(--interim-response-border) var(--interim-response-border-strength), transparent)";
+
 describe("the stylesheet's selectability contract", () => {
   it("suppresses selection nowhere", () => {
     // Arrange / Act
@@ -1605,7 +1610,7 @@ describe("the thinking bubble", () => {
     const borders = bordersOn(responseBubble("response", "success"), ["assistant"]);
 
     // Assert
-    expect(borders).toEqual(["border-color: var(--interim-response-border)"]);
+    expect(borders).toEqual([INTERIM_BORDER]);
   });
 
   it("keeps the green on the turn's answer", () => {
@@ -2609,7 +2614,14 @@ describe("the response border ladder", () => {
     // Arrange / Act
     const rule = declarationsOf('.bubble[data-variant="response"][data-state="success"]:not(.final-response)');
     // Assert
-    expect(rule).toMatch(/border-color:\s*var\(--interim-response-border\)/);
+    expect(rule).toContain(INTERIM_BORDER);
+  });
+
+  it("draws the pear edge at half strength, so it reads thinner than every other bubble border", () => {
+    // Arrange / Act
+    const strengths = [...stylesheet.matchAll(/--interim-response-border-strength:\s*([0-9.]+)%/g)].map((m) => Number(m[1]));
+    // Assert — one value, shared by both themes, at half the hue's strength.
+    expect(strengths).toEqual([50]);
   });
 
   it("defines the pear border in both themes", () => {
@@ -3579,7 +3591,7 @@ describe("the page-colored fill", () => {
     const borders = bordersOn({ "data-role": "response", "data-variant": "response", "data-state": "success" }, ["assistant", "interim-response"]);
 
     // Assert
-    expect(borders).toEqual(["border-color: var(--interim-response-border)"]);
+    expect(borders).toEqual([INTERIM_BORDER]);
   });
 
   it("paints the page itself with the same background token", () => {
