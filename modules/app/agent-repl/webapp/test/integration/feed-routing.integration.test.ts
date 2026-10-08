@@ -493,8 +493,10 @@ describe("the merge bubble's parity with a subagent bubble", () => {
     // Arrange / Act
     const subagentSequence = await sequenceFor(() => subagentUnit("live"));
     const mergeSequence = await sequenceFor(() => mergeUnit("update"));
-    // Assert: a merge-specific nested-content loader would show up here.
-    expect(mergeSequence).toEqual(subagentSequence);
+    // Assert: a merge-specific nested-content loader would show up here. The
+    // one merge-only call is the reader's fold being RECORDED
+    // (`FoldMergeBubble`, owner ruling 2026-10-08), which loads nothing.
+    expect(mergeSequence.filter((rpc) => rpc !== "foldMergeBubble")).toEqual(subagentSequence);
     harness = await startHarness();
   });
 
@@ -506,7 +508,9 @@ describe("the merge bubble's parity with a subagent bubble", () => {
     // cleared after boot, so a second connection for this tail would appear.
     // `watchFeed` still follows because the subscription IS that watch: the
     // fake serves it from the very source the dedicated rpc serves.
-    expect(sequence).toEqual(["openFeed", "subscribePage", "watchFeed"]);
+    // The reader's click is recorded too (`FoldMergeBubble`), once the
+    // bubble has opened; it loads nothing.
+    expect(sequence).toEqual(["openFeed", "subscribePage", "watchFeed", "foldMergeBubble"]);
     harness = await startHarness();
   });
 });
