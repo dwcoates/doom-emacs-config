@@ -31,6 +31,7 @@ const GLYPHS: readonly Mark[] = [
   { arm: "mergeFailed", glyph: "failed", char: "✕" },
 ];
 const NONE: Mark = { arm: "none", glyph: "none", char: "" };
+const MERGED: Mark = { arm: "merged", glyph: "check", char: "" };
 
 /** One rail row, as `drawStatusMark` and the row draw shape it. */
 function row(m: Mark): string {
@@ -88,7 +89,7 @@ describe("the rail's status marks in WebKit", () => {
     expect(Math.abs((mark?.center ?? NaN) - (dot?.center ?? NaN))).toBeLessThanOrEqual(0.5);
   });
 
-  it.each([...GLYPHS, NONE])("starts the name beside a $glyph mark where it starts beside a dot", async (glyph) => {
+  it.each([...GLYPHS, NONE, MERGED])("starts the name beside a $glyph mark where it starts beside a dot", async (glyph) => {
     // Arrange / Act
     const [dot, mark] = await measure(page, [DOT, glyph]);
     // Assert
