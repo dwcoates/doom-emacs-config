@@ -749,6 +749,14 @@ and retired. Only items admitted before that session watch's open was DECIDED
 (`openTicket.liveSeq`) are judged, because an announcement on an agent stream
 may postdate the membership the shim read. Nothing is admitted by it.
 
+WORK FIRST ANNOUNCED AT ITS END IS NEVER LIVE (owner ruling, 2026-10-08).
+An announcement stating `conversation.v1.AgentDetachedWork.concluded` (the
+shim's task-notification upsert) for work the ledger does not hold live or
+pending retires the handle at once (`concludedFirstLocked`, INFO
+`daemon.sessionwatcher.detached_work_concluded`) and publishes nothing; a
+shell's record is still read through a watch that is not live work, reaped at
+its terminal. Live work restated as concluded still ends at its own terminal.
+
 KNOWN GAP (wire). A shell's conclusion reaches the daemon only as its run's
 terminal on WatchBash, and that is store-backed: a run with no store row
 (hand-backgrounded, 2026-09-27) never delivers one, and the re-announcement is
