@@ -1529,8 +1529,8 @@ describe("the prompt borders", () => {
     // Arrange / Act
     const borders = bordersOn(prompt(variant, working), hooks);
 
-    // Assert
-    expect(borders).toEqual(["border: 1px solid var(--agent-prompt-border)"]);
+    // Assert — half as thick as before (owner ruling, 2026-10-08).
+    expect(borders).toEqual(["border: 0.5px solid var(--agent-prompt-border)"]);
   });
 
   it.each([
