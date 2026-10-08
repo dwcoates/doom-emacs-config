@@ -1701,10 +1701,19 @@ pre {
    pear border, once settled) reads. It feeds `--bubble-bg`, so anything
    painted from it matches. Their prose is `--interim-text`, the tool card's
    header grey (owner request, 2026-10-08); a link or a quote keeps its own
-   color. */
+   color.
+   NO BUBBLE AT ALL (owner ruling, 2026-10-08): the base `.bubble` rule's
+   `box-shadow` (a soft drop shadow plus an inset top-edge highlight, see
+   --bubble-shadow) is the one thing left that still painted a highlight
+   around these two kinds even with no fill — it is turned off here so
+   neither reads as a bubble, while the 0.3px transparent border the base
+   rule reserves (and the interim's own half-strength pear border, once
+   settled) are untouched: nothing here reflows, since box-shadow paints
+   outside the layout box. */
 .bubble[data-variant="thinking"],
 .bubble.interim-response {
   --bubble-bg: var(--bg);
+  box-shadow: none;
   color: var(--interim-text);
 }
 /* THE THINKING WAVE, AND ONLY WHILE THE TURN IS IN FLIGHT.
