@@ -15,7 +15,7 @@ import {
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import { repoFoldKey } from "../../src/sidebar/context.js";
-import { drawRosterSectionFold, drawWorkspaceRoster } from "../../src/sidebar/roster.js";
+import { drawHeadedSection, drawRosterSectionFold, drawWorkspaceRoster } from "../../src/sidebar/roster.js";
 import { cascadedValue, installStylesheet } from "../stylesheet.js";
 import {
   appContext,
@@ -452,6 +452,92 @@ describe("closed workspaces never appear in a live grouping", () => {
     );
     expect(pane(drawn, "repository").querySelector("[data-roster-row='ws-killed']")).toBeNull();
     expect(pane(drawn, "repository").querySelector("[data-roster-row='ws-child']")).not.toBeNull();
+  });
+});
+
+describe("drawHeadedSection", () => {
+  /** A headed section's wire: a header, rows and a fold. */
+  function wire(init: { collapsed?: boolean; rows?: ReturnType<typeof row>[] } = {}) {
+    return maturitySection({ stage: "backlog", label: "Head", rows: init.rows, collapsed: init.collapsed });
+  }
+  const SHAPE = { foldKey: "k:1", className: "kind-section", target: { case: "recentlyMerged", value: {} } } as const;
+
+  it("draws the box with its kind's class and fold key", () => {
+    const section = drawHeadedSection(wire(), sidebarContext(), "p", SHAPE);
+    expect([section.classList.contains("repo"), section.classList.contains("kind-section"), section.getAttribute("data-section")]).toEqual([
+      true,
+      true,
+      "k:1",
+    ]);
+  });
+
+  it.each([
+    [false, false],
+    [true, true],
+  ])("folds the box collapsed=%s folded=%s, as the wire says", (collapsed, folded) => {
+    const section = drawHeadedSection(wire({ collapsed }), sidebarContext(), "p", SHAPE);
+    expect(section.classList.contains("folded")).toBe(folded);
+  });
+
+  it("draws the header's label and folded count", () => {
+    const section = drawHeadedSection(wire({ rows: [row({ id: "ws-1" })] }), sidebarContext(), "p", SHAPE);
+    expect([section.querySelector(".sb-label")?.textContent, section.querySelector(".sb-count")?.textContent]).toEqual(["Head", "(1)"]);
+  });
+
+  it("drops a closed row from its rows", () => {
+    const section = drawHeadedSection(wire({ rows: [row({ id: "ws-closed", closed: true })] }), sidebarContext(), "p", SHAPE);
+    expect(section.querySelector("[data-roster-row='ws-closed']")).toBeNull();
+  });
+
+  it("hands the header and the box to the decoration, after the count", () => {
+    let handed: [HTMLElement, HTMLElement] | undefined;
+    const section = drawHeadedSection(wire(), sidebarContext(), "p", {
+      ...SHAPE,
+      decorateHeader: (header, box) => {
+        handed = [header, box];
+        header.appendChild(document.createElement("i"));
+      },
+    });
+    expect([handed?.[0] === section.querySelector(".repo-head"), handed?.[1] === section, section.querySelector(".repo-head")?.lastElementChild?.tagName]).toEqual([
+      true,
+      true,
+      "I",
+    ]);
+  });
+
+  it("asks the daemon for the other fold of its target", async () => {
+    const { asked, sc } = viewDaemon();
+    const section = drawHeadedSection(wire(), sc, "p", SHAPE);
+    await click(section.querySelector("[data-section-fold]") as Element);
+    expect(asked.map(foldAsked)).toEqual([{ section: "recentlyMerged", id: "", fold: "collapse" }]);
+  });
+
+  it("refuses a section with no header as a malformed view", () => {
+    const bare = wire();
+    bare.header = undefined;
+    expect(() => drawHeadedSection(bare, sidebarContext(), "p", SHAPE)).toThrow(MalformedView);
+  });
+
+  it("refuses a section with no rows as a malformed view", () => {
+    const bare = wire();
+    bare.rows = undefined;
+    expect(() => drawHeadedSection(bare, sidebarContext(), "p", SHAPE)).toThrow(MalformedView);
+  });
+
+  it("is the one shape the repository and maturity sections share", () => {
+    /** A section's element tree, by tag and class, without the repository's create control. */
+    const outline = (section: Element | null): string[] =>
+      [...(section?.querySelectorAll(":scope > *, :scope > .repo-head > *") ?? [])]
+        .filter((el) => !el.classList.contains("sb-add"))
+        .map((el) => `${el.tagName}.${[...el.classList].join(".")}`);
+    const drawn = drawWorkspaceRoster(
+      roster({
+        repos: [repoSection({ id: "repo-1", label: "x" })],
+        maturity: [maturitySection({ stage: "backlog", label: "x" })],
+      }),
+      sidebarContext(),
+    );
+    expect(outline(drawn.querySelector(".maturity-section"))).toEqual(outline(drawn.querySelector(".repo-section")));
   });
 });
 
