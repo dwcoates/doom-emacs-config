@@ -2244,3 +2244,53 @@ func TestADeferredHoldSurvivesADaemonRestartStillDeferred(t *testing.T) {
 		t.Fatalf("standing deferred held_prompts rows after the restart = %d, want 1", deferredRows)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// A reply to a selected bubble
+// ---------------------------------------------------------------------------
+
+// TestAReplyToASelectedPromptCarriesItsQuoteAsItsOwnBlock covers the reply
+// path end to end: with a prompt selected, the next prompt reaches the shim as
+// the quote block (the selected prompt's words, fenced) ahead of the person's
+// own words, and its feed row draws the quote as its own arm.
+func TestAReplyToASelectedPromptCarriesItsQuoteAsItsOwnBlock(t *testing.T) {
+	t.Parallel()
+	// Arrange: a first prompt, its turn ended, then selected.
+	f := newOpened(t, harness.Opts{})
+	feed := f.watchRootFeed()
+	f.submit("the first prompt", "k-first", origin)
+	f.shim.ExpectStartTurn()
+	first := awaitRow(t, f, feed, "the first prompt's selectable row", func(r *frontendv1.FeedRow) bool {
+		return promptText(r) == "the first prompt" && r.GetSelectable() != nil
+	})
+	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
+	if _, err := f.d.Client().SelectFeedRow(f.d.Ctx(), connect.NewRequest(&agentreplv1.SelectFeedRowRequest{
+		Workspace: f.ws,
+		Move:      &agentreplv1.SelectFeedRowRequest_Bubble{Bubble: &agentreplv1.SelectFeedRowBubble{Row: first.GetId()}},
+	})); err != nil {
+		t.Fatalf("SelectFeedRow = %v, want the first prompt selected", err)
+	}
+
+	// Act
+	f.submit("the reply", "k-reply", origin)
+
+	// Assert: the shim is handed the quote, then the words.
+	blocks := f.shim.ExpectStartTurn().GetSaid().GetContent().GetBlocks()
+	if len(blocks) != 2 {
+		t.Fatalf("StartTurn.said blocks = %v, want the quote then the words", blocks)
+	}
+	if quote := blocks[0].GetQuote().GetText(); !strings.Contains(quote, "```\nthe first prompt\n```") {
+		t.Fatalf("StartTurn.said quote = %q, want the selected prompt fenced", quote)
+	}
+	if words := blocks[1].GetText().GetText(); words != "the reply" {
+		t.Fatalf("StartTurn.said words = %q, want the person's own", words)
+	}
+	// Assert: the row draws the quote as its own arm, ahead of the words.
+	row := awaitRow(t, f, feed, "the reply's row", func(r *frontendv1.FeedRow) bool {
+		return promptText(r) == "the reply"
+	})
+	drawn := row.GetUserPrompt().GetSuccess().GetBody().GetBlocks()
+	if len(drawn) != 2 || drawn[0].GetQuote().GetText() != blocks[0].GetQuote().GetText() {
+		t.Fatalf("drawn blocks = %v, want the quote arm then the words", drawn)
+	}
+}
