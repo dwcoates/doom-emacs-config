@@ -9,6 +9,7 @@ import (
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/wsm"
 )
 
 // progress is one compaction phase frame.
@@ -783,5 +784,20 @@ func TestAStaleStartSignalLeavesNoViolationAtTheTerminal(t *testing.T) {
 	// Assert
 	if errs := recordsOf(h.log.Records(), outlivedTurn); len(errs) != 0 {
 		t.Fatalf("records = %+v, want no violation: the compaction had ended", errs)
+	}
+}
+
+func TestACompactionTurnsCloseEndsTheCompactingStep(t *testing.T) {
+	// Arrange: a /compact turn, whose act alone holds the step.
+	h := newHarness(t)
+	connected(h)
+	h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActCompact})
+
+	// Act: the prompt queue's door closes the turn, with no vendor clear after.
+	h.r.SetTurnEnded(testWS, wsm.CloseCompleted)
+
+	// Assert.
+	if got := h.status(t); got != "idle" {
+		t.Fatalf("status = %q, want idle: the compaction ended with its turn", got)
 	}
 }
