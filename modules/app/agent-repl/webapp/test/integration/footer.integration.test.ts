@@ -671,12 +671,24 @@ describe("the tokens cell", () => {
     expect(harness.$(".footer-tokens [data-alarm]")).toBeNull();
   });
 
-  it.each(FOOTER_TOKENS_VERDICTS)("draws the %s verdict badge", async (verdict) => {
+  it("draws the complete verdict badge", async () => {
     // Arrange / Act
-    await withFooter({ status: "idle", verdict });
+    await withFooter({ status: "idle", verdict: "complete" });
     // Assert
-    expect(harness.$(`.footer-tokens [data-verdict="${verdict}"]`)).not.toBeNull();
+    expect(harness.$('.footer-tokens [data-verdict="complete"]')).not.toBeNull();
   });
+
+  // OWNER RULING, 2026-10-08: no red ✗ in the tokens cell; a failing verdict's
+  // evidence is the token panel's line alone.
+  it.each(FOOTER_TOKENS_VERDICTS.filter((v) => v !== "complete"))(
+    "draws no badge for the %s verdict",
+    async (verdict) => {
+      // Arrange / Act
+      await withFooter({ status: "idle", verdict });
+      // Assert
+      expect(harness.$(".footer-tokens [data-verdict]")).toBeNull();
+    },
+  );
 
   it("draws no verdict badge when none is served", async () => {
     // Arrange / Act

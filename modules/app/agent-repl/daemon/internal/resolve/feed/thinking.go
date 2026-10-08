@@ -1,13 +1,12 @@
 package feed
 
 import (
-	"time"
-
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
+	"claude-repld/internal/revealpace"
 	"claude-repld/internal/wsm"
 )
 
@@ -62,7 +61,7 @@ func (r *resolver) drawThinking(s *wsState, at placement, agent *conversationv1.
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawThinking", "branch": "case *conversationv1.AgentThinking_Start"})
 		fold.markdown = ""
 		fold.settled = false
-		fold.lastFragmentAt = time.Time{}
+		fold.burst = revealpace.Burst{}
 		log.Debug("daemon.feed.thinking_deferred",
 			"a reasoning block opened; its bubble is deferred until it carries content",
 			dlog.Context{"unit": unit})
@@ -105,7 +104,7 @@ func (r *resolver) drawThinking(s *wsState, at placement, agent *conversationv1.
 		}
 		bubble.Result = &frontendv1.FeedResponse_Update{Update: &frontendv1.FeedResponseUpdate{
 			Prose:        &frontendv1.FeedResponseProse{Markdown: fold.markdown},
-			RevealWindow: r.revealWindow(pace, paced),
+			RevealWindow: r.revealWindow(fold, pace, paced),
 		}}
 	case *conversationv1.AgentThinking_Success:
 		text, ok := state.Success.GetReasoning().(*conversationv1.AgentThinkingSuccess_Text)
@@ -135,7 +134,7 @@ func (r *resolver) drawThinking(s *wsState, at placement, agent *conversationv1.
 		}
 		bubble.Result = &frontendv1.FeedResponse_Success{Success: &frontendv1.FeedResponseSuccess{
 			Prose:        &frontendv1.FeedResponseProse{Markdown: fold.markdown},
-			RevealWindow: r.revealWindow(pace, paced),
+			RevealWindow: r.revealWindow(fold, pace, paced),
 		}}
 	case *conversationv1.AgentThinking_Failure:
 		// The reasoning that landed stays drawn, marked broken — the mirror of

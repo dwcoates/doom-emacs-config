@@ -732,6 +732,14 @@ export function drawFooterActivityEnduring(
 /** The enduring line before anything is known of the account's usage. */
 export const ENDURING_UNOBSERVED_TEXT = "usage not yet seen for this account";
 
+/**
+ * The space between a seat's spent figure and "of": a NO-BREAK space, because
+ * the enduring line is an inline flex box and an ordinary space leading the
+ * text item after the figure is collapsed away (the same reason
+ * `FOOTER_RATE_SEPARATOR_GAP` is one).
+ */
+export const SEAT_SPEND_GAP = "\u00a0";
+
 /** What a seat's spend reads before the vendor has reported one. */
 export const SEAT_SPEND_UNSEEN_TEXT = "spend not yet seen";
 
@@ -749,7 +757,10 @@ export function drawFooterActivityEnduringSeatSpend(
   path: string,
 ): (HTMLElement | string)[] {
   const allotment = formatMoney(requireMessage(u.allotment, `${path}.allotment`), `${path}.allotment`);
-  const tail = ` of ${allotment} this month`;
+  // REGRESSION (2026-10-08): the line read "$223.88of $12,000". The enduring
+  // line is an inline flex box, where this tail is an anonymous flex item and
+  // its leading ordinary space is collapsed away; the no-break space survives.
+  const tail = `${SEAT_SPEND_GAP}of ${allotment} this month`;
   if (u.spent === undefined) {
     if (u.utilization !== undefined) {
       throw new MalformedView(`${path}.utilization`, "a utilization is set with no spend");

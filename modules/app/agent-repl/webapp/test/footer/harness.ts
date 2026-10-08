@@ -236,6 +236,8 @@ export interface StripInit {
   status?: FooterStatus["status"];
   /** Set to make the clock live; unset draws the idle dash and no stop. */
   turnStartedAtMs?: bigint;
+  /** Set (with the start) to make the clock the most recent turn's, frozen. */
+  turnEndedAtMs?: bigint;
   tokens?: MessageInitShape<typeof FooterTokensCellSchema>;
   liveWork?: MessageInitShape<typeof FooterLiveWorkChipsSchema>;
 }
@@ -244,7 +246,7 @@ export interface StripInit {
 export function strip(init: StripInit = {}): FooterStrip {
   return create(FooterStripSchema, {
     status: { status: init.status ?? idleStatus() },
-    clock: init.turnStartedAtMs === undefined ? {} : { turnStartedAtMs: init.turnStartedAtMs },
+    clock: { turnStartedAtMs: init.turnStartedAtMs, turnEndedAtMs: init.turnEndedAtMs },
     tokens: init.tokens ?? { input: { text: "0 in" } },
     liveWork: init.liveWork ?? {},
   });

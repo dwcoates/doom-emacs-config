@@ -447,6 +447,15 @@ returning the SHA string (or the sentinel \"unknown\" when undetermined)."
   (agent-repl--boot-info "cold-start: daemon ensure NOT registered auto-start=%s batch=%s"
                          agent-repl-frontend-auto-start noninteractive))
 
+;; UNSENT INPUT SURVIVES A RESTART.  Every workspace's non-empty composer is
+;; saved to its history at shutdown, the same way `agent-repl-discard-input'
+;; saves it, and put back when the composer is born again.  Depth -50 runs it
+;; ahead of hooks that may tear buffers down.  Batch runs arm nothing.
+(if noninteractive
+    (agent-repl--boot-info "shutdown: composer save NOT registered batch=%s" noninteractive)
+  (add-hook 'kill-emacs-hook #'agent-repl-input-save-all-on-shutdown -50)
+  (agent-repl--boot-info "shutdown: registered composer save on kill-emacs-hook"))
+
 ;; ORPHANED LOG TARGETS.  Every Emacs instance before 2026-09-11 minted its
 ;; own temporary-root log target, and 22,112 of them had accumulated by the
 ;; time the standing-target rule landed.  The sweep that removes the

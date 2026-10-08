@@ -467,7 +467,7 @@ func (r *resolver) OnAgentTerminal(ws ids.WorkspaceID, agent *conversationv1.Age
 			if turn == nil {
 				return
 			}
-			s.turn = nil
+			s.endTurn(r.opts.clock.Now())
 			// THE TURN'S END IS THE RETRY'S END: nothing is left to retry for.
 			s.retrying = nil
 			r.endTurnMotion(s)
