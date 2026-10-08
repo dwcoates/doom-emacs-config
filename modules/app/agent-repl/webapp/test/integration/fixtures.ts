@@ -1522,7 +1522,11 @@ export const FOOTER_STATUS_SUBSTATUSES: Record<string, readonly string[]> = {
     "fetching",
     "delegating",
   ],
-  waiting: ["wakeup", "permission", "question", "coldGate", "interrupting"],
+  waiting: ["wakeup", "coldGate", "interrupting"],
+  // A GATE NAMES ITSELF (owner ruling, 2026-10-08): a permission or a question
+  // gate is its own status arm, with no substatus of its own.
+  permission: [],
+  question: [],
   interrupted: ["byUser", "hostShutdown"],
   merging: [
     "enqueued",
@@ -1697,14 +1701,14 @@ export const FOOTER_STATUS_SALIENTS: Record<string, readonly string[]> = {
   working: ["compaction", "retrying", "update", ...SHARED_SALIENTS],
   waiting: [
     "wakeup",
-    "gatedCall",
-    "questionLead",
     "blockedOnUser",
     "coldGateCost",
     "interrupting",
     "update",
     ...SHARED_SALIENTS,
   ],
+  permission: ["gatedCall", "update", ...SHARED_SALIENTS],
+  question: ["questionLead", "update", ...SHARED_SALIENTS],
   interrupted: ["update", ...SHARED_SALIENTS],
   merging: ["mergeStep", "gatedCall", "questionLead", "update", ...SHARED_SALIENTS],
   mergeFailed: ["mergeStep", "gatedCall", "questionLead", "update", ...SHARED_SALIENTS],
@@ -1716,6 +1720,12 @@ export const FOOTER_STATUS_SALIENTS: Record<string, readonly string[]> = {
   closing: ["closeBlocked", "update", ...SHARED_SALIENTS],
   loading: ["update", ...SHARED_SALIENTS],
 };
+
+/**
+ * The status arms whose activity cell has NO unpinned branch: a session parked
+ * on the user always stands on a salient line.
+ */
+export const FOOTER_SALIENT_ONLY_ARMS: readonly string[] = ["waiting", "permission", "question"];
 
 /** Every TRANSIENT kind arm, with a complete payload for each. */
 export const FOOTER_TRANSIENT_KINDS: Record<string, object> = {
@@ -1748,8 +1758,8 @@ export const FOOTER_ENDURING = "enduring";
  * KIND picks the tier the way the daemon's resolution lands it: a kind legal
  * as the arm's SALIENT line is drawn salient; any other kind is a TRANSIENT
  * over the enduring line; `enduring` (or no kind) is the enduring line alone.
- * A waiting arm with no kind carries its first salient kind, because its cell
- * has no unpinned branch.
+ * An arm whose cell has no unpinned branch (waiting, permission, question)
+ * carries its first salient kind when no kind is named.
  */
 function footerActivity(
   status: string,
@@ -1763,13 +1773,14 @@ function footerActivity(
 ): object {
   const salients = FOOTER_STATUS_SALIENTS[status];
   const at = { atMs: init?.activityAtMs ?? 3_000n };
-  const kind = init?.activity ?? (status === "waiting" ? salients[0] : FOOTER_ENDURING);
+  const salientOnly = FOOTER_SALIENT_ONLY_ARMS.includes(status);
+  const kind = init?.activity ?? (salientOnly ? salients[0] : FOOTER_ENDURING);
   if (salients.includes(kind)) {
     const salient = {
       at,
       kind: { case: kind, value: init?.activityOverride ?? FOOTER_SALIENT_KINDS[kind] },
     };
-    return status === "waiting" ? { salient } : { tier: { case: "salient", value: salient } };
+    return salientOnly ? { salient } : { tier: { case: "salient", value: salient } };
   }
   if (kind === FOOTER_ENDURING) {
     return { tier: { case: "unpinned", value: { enduring: enduringLine(init?.activityOverride ?? {}) } } };
@@ -2304,6 +2315,7 @@ export const ROSTER_STATUS_ARMS = [
   "clearing",
   "compacting",
   "permission",
+  "question",
   "done",
   "interrupted",
   "turnFailed",
