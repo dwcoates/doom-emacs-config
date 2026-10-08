@@ -2328,6 +2328,9 @@ export const ROSTER_STATUS_ARMS = [
   "merged",
   "none",
   "inactive",
+  "closing",
+  "daemonImpaired",
+  "waiting",
 ] as const;
 export type RosterStatusArm = (typeof ROSTER_STATUS_ARMS)[number];
 
