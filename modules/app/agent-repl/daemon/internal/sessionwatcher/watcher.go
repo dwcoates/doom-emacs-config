@@ -13,6 +13,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
 
+	"claude-repld/internal/clock"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/lockwatch"
@@ -48,6 +49,9 @@ type agentWatch struct {
 	// completion is judged against: a completion whose ticket is no longer
 	// this field is superseded and discarded.
 	opening *openTicket
+	// reopenArmed marks a refused open's re-open armed on the clock
+	// (reopen.go), so a second refusal never arms a second timer.
+	reopenArmed bool
 }
 
 // shellWatch is one open WatchBash stream for one detached shell.
@@ -64,6 +68,8 @@ type shellWatch struct {
 	refusals int
 	// opening is the open in flight, as on agentWatch.
 	opening *openTicket
+	// reopenArmed marks a refused open's re-open armed, as on agentWatch.
+	reopenArmed bool
 }
 
 // shellReopenLimit is how many times one detached shell's watch is re-opened
@@ -105,6 +111,8 @@ type watcher struct {
 	client shimclient.Client
 	sinks  Sinks
 	log    dlog.Logger
+	// clock is what a refused watch's re-open waits on (reopen.go).
+	clock clock.Clock
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -222,6 +230,10 @@ type watcher struct {
 	// mu on a fleet that is not closed, and Close marks the fleet closed under
 	// mu before it waits, so no open is counted after the wait begins.
 	opens sync.WaitGroup
+	// retries tracks every armed re-open's goroutine (reopen.go), which Close
+	// joins after cancelling them. One is only ever armed under mu on a fleet
+	// that is not closed, exactly as an open is.
+	retries sync.WaitGroup
 	// closedTurns remembers how the last few turns ended, so a wait that
 	// arrives after the terminal is still answered; closedTurnOrder is its
 	// eviction order.
@@ -415,6 +427,9 @@ func start(ctx context.Context, ws ids.WorkspaceID, client shimclient.Client, se
 	if sinks.Feed == nil || sinks.Footer == nil || sinks.Topbar == nil || sinks.Sidebar == nil || sinks.Lifecycle == nil {
 		return nil, errors.New("sessionwatcher: every sink but Holds is required")
 	}
+	if sinks.Clock == nil {
+		return nil, errors.New("sessionwatcher: a clock is required: a refused watch's re-open waits on it")
+	}
 	if err := session.Opening.validate(); err != nil {
 		log.Error("daemon.sessionwatcher.start_refused", "a watcher was started without deciding whether it replays or resumes", dlog.Context{
 			"workspace_id": string(ws),
@@ -427,6 +442,7 @@ func start(ctx context.Context, ws ids.WorkspaceID, client shimclient.Client, se
 		ws:     ws,
 		client: client,
 		sinks:  sinks,
+		clock:  sinks.Clock,
 		log:    log.With(dlog.Context{"workspace_id": string(ws)}),
 		ctx:    runCtx,
 		cancel: cancel,
@@ -1008,6 +1024,9 @@ func (w *watcher) Close() error {
 	// what it got. Nothing this watcher started touches the client after
 	// Close returns.
 	w.opens.Wait()
+	// EVERY ARMED RE-OPEN IS JOINED TOO: its goroutine leaves on the cancel
+	// above without touching the client.
+	w.retries.Wait()
 	// WORK RECORDED BUT NOT YET HANDED OFF IS HANDED OFF HERE. A route records
 	// under the mutex and dispatches after releasing it; a Close that took the
 	// mutex between the two found nothing in flight to join, returned, and the
@@ -1704,7 +1723,11 @@ func (w *watcher) openAgent(t *openTicket, a *agentWatch, req *shimv1.WatchAgent
 		case w.openEndedByTeardownLocked("agent", watchKey(a.id), err):
 		case w.openEndedByDeathLocked("watch_agent", "WatchAgent could not be opened because the shim died", err):
 		case refusedOpen(err):
-			w.openRefusedLocked("watch_agent", watchKey(a.id), w.agentExpectedLocked(a), &a.refusals, err)
+			expected := w.agentExpectedLocked(a)
+			w.openRefusedLocked("watch_agent", watchKey(a.id), expected, &a.refusals, err)
+			if expected {
+				w.scheduleReopenLocked("watch_agent", watchKey(a.id), a.refusals, &a.reopenArmed, func() { w.reopenRefusedAgentLocked(a) })
+			}
 		default:
 			w.severedLocked("watch_agent", "WatchAgent could not be opened", err)
 		}
@@ -1763,7 +1786,11 @@ func (w *watcher) openShell(t *openTicket, s *shellWatch) {
 		case w.openEndedByTeardownLocked("shell", key, err):
 		case w.openEndedByDeathLocked("watch_bash", "WatchBash could not be opened because the shim died", err):
 		case refusedOpen(err):
-			w.openRefusedLocked("watch_bash", key, w.shells[key] == s, &s.refusals, err)
+			expected := w.shells[key] == s
+			w.openRefusedLocked("watch_bash", key, expected, &s.refusals, err)
+			if expected {
+				w.scheduleReopenLocked("watch_bash", key, s.refusals, &s.reopenArmed, func() { w.reopenRefusedShellLocked(s) })
+			}
 		default:
 			w.severedLocked("watch_bash", "WatchBash could not be opened", err)
 		}

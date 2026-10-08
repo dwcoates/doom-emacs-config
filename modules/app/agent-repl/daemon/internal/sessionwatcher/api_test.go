@@ -73,6 +73,7 @@ func TestStartAcceptsAnUnsetSessionStartedAsAPureAttach(t *testing.T) {
 		Topbar:    &topbarSink{rec: rec},
 		Sidebar:   &sidebarSink{rec: rec},
 		Lifecycle: &lifecycleSink{rec: rec},
+		Clock:     newManualClock(),
 	}
 
 	// Act.
@@ -101,6 +102,11 @@ func TestStartRefusesAnIncompleteFleet(t *testing.T) {
 			mutate:  func(_ *Session, sinks *Sinks) { sinks.Lifecycle = nil },
 			wantErr: "every sink but Holds is required",
 		},
+		{
+			name:    "a missing clock is refused",
+			mutate:  func(_ *Session, sinks *Sinks) { sinks.Clock = nil },
+			wantErr: "a clock is required",
+		},
 	}
 
 	for _, tt := range tests {
@@ -114,6 +120,7 @@ func TestStartRefusesAnIncompleteFleet(t *testing.T) {
 				Topbar:    &topbarSink{rec: rec},
 				Sidebar:   &sidebarSink{rec: rec},
 				Lifecycle: &lifecycleSink{rec: rec},
+				Clock:     newManualClock(),
 			}
 			tt.mutate(&session, &sinks)
 

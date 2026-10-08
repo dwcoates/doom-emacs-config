@@ -10,6 +10,7 @@
 package sessionwatcher
 
 import (
+	"claude-repld/internal/clock"
 	"context"
 	"time"
 
@@ -507,6 +508,10 @@ type Sinks struct {
 	// flight under, and it is the lock that held a workspace for eighteen
 	// minutes on 2026-09-27 without a record.
 	Stalls lockwatch.Registry
+	// Clock is NOT A SINK but rides the same wiring: the one view of time the
+	// watcher waits on, for a refused watch's re-open (reopen.go). REQUIRED:
+	// production wires clock.System, and a test a clock it fires by hand.
+	Clock clock.Clock
 }
 
 // MergeSink is the merge queue, seen from the watcher: every permission and
