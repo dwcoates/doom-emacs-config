@@ -1286,6 +1286,29 @@ describe("mountFeed: a jump expands its entry and closes it once wholly out of v
     j.feed.dispose();
   });
 
+  it("keeps a merge bubble a jump opened open once it was seen and then left the view wholly", async () => {
+    // Arrange
+    const j = await jumping(undefined, mergeRow("b1"));
+    await j.feed.selectDetachedWork(feedId("b1"));
+    await settle();
+    // Act
+    j.seenThenLeft("b1");
+    // Assert
+    expect(j.bubbleOpen()).toBe(true);
+    j.feed.dispose();
+  });
+
+  it("records no reader fold for a merge bubble a jump opened", async () => {
+    // Arrange
+    const j = await jumping(undefined, mergeRow("b1"));
+    // Act
+    await j.feed.selectDetachedWork(feedId("b1"));
+    await settle();
+    // Assert
+    expect(j.h.calls.foldMergeBubble).toEqual([]);
+    j.feed.dispose();
+  });
+
   it("closes the card a card's jump expanded once it left the view wholly", async () => {
     // Arrange
     const j = await jumping();
