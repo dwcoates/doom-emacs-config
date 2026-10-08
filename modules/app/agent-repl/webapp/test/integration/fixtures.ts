@@ -44,7 +44,6 @@ import {
   FooterViewSchema,
   FooterStatusSchema,
   FooterExpandedSchema,
-  FooterMergeTestRowSchema,
   FooterAllowanceSchema,
   type FooterView,
 } from "../../../proto/gen/ts/frontend/v1/footer_pb";
@@ -1269,7 +1268,9 @@ export type MergeTabKind = (typeof MERGE_TAB_KINDS)[number];
 
 /** The state arms every tab kind carries: nothing parks, so live or settled. */
 export const MERGE_TAB_STATES = ["live", "settled"] as const;
-export type MergeTabState = (typeof MERGE_TAB_STATES)[number];
+/** The agentic kinds whose tab can also wait on the user. */
+export const MERGE_TAB_WAITING_KINDS = ["conflicts", "fixes"] as const;
+export type MergeTabState = (typeof MERGE_TAB_STATES)[number] | "waitingOnUser";
 
 /** When every fixture tab's work began, and each queue entry its stage. */
 const MERGE_TAB_STARTED_AT_MS = 1_000n;
@@ -1283,8 +1284,17 @@ const settledState = () => ({
   },
 });
 
-/** The state arm a tab carries. */
-const plainState = (state: MergeTabState) => (state === "settled" ? settledState() : liveState());
+/** The state arm a tab carries. Only conflicts and fixes wait on the user. */
+const plainState = (state: MergeTabState) => {
+  if (state === "waitingOnUser") throw new Error("only the conflicts and fixes tabs wait on the user");
+  return state === "settled" ? settledState() : liveState();
+};
+
+/** The state arm a conflicts or fixes tab carries: also waiting on the user. */
+const agenticState = (state: MergeTabState) =>
+  state === "waitingOnUser"
+    ? { case: "waitingOnUser" as const, value: { startedAtMs: MERGE_TAB_STARTED_AT_MS } }
+    : plainState(state);
 
 /** The token and label the tests tab's log link is served with. */
 export const MERGE_TEST_LOG = { token: "merge-log-7f3a", label: "~/.claude-emacs/merge-logs/ws-1-tests-2.log" };
@@ -1374,7 +1384,8 @@ const mergeTabKindValue = (
             },
             {
               name: "go",
-              state: { case: "running", value: {} },
+              state: { case: "running", value: { soFar: { case: "passing", value: {} } } },
+              counts: { passed: 3, failed: 0, total: 5 },
               output: [{ text: "running", paintClass: "ansi-dim" }],
             },
           ],
@@ -1382,11 +1393,11 @@ const mergeTabKindValue = (
         },
       };
     case "conflicts":
-      return { case: "conflicts", value: { state: plainState(state) } };
+      return { case: "conflicts", value: { state: agenticState(state) } };
     case "fixes":
       return {
         case: "fixes",
-        value: { state: plainState(state), attempt: { attempt: 2, maxAttempts: 3 } },
+        value: { state: agenticState(state), attempt: { attempt: 2, maxAttempts: 3 } },
       };
     case "prePrompt":
       return { case: "prePrompt", value: { state: plainState(state) } };
@@ -1523,6 +1534,7 @@ export const FOOTER_STATUS_SUBSTATUSES: Record<string, readonly string[]> = {
     "committing",
     "updatingMain",
     "postprocessing",
+    "waitingOnUser",
   ],
   background: [],
   vendorFault: [
@@ -1578,6 +1590,7 @@ export const MERGE_SUBSTATUS_WORDS: Record<string, Record<string, string>> = {
     committing: "committing",
     updatingMain: "updating main",
     postprocessing: "postprocessing",
+    waitingOnUser: "waiting on user",
   },
   mergeFailed: { conflicts: "conflicts", tests: "tests", other: "merge" },
 };
@@ -1693,9 +1706,9 @@ export const FOOTER_STATUS_SALIENTS: Record<string, readonly string[]> = {
     ...SHARED_SALIENTS,
   ],
   interrupted: ["update", ...SHARED_SALIENTS],
-  merging: ["mergeStep", "update", ...SHARED_SALIENTS],
-  mergeFailed: ["mergeStep", "update", ...SHARED_SALIENTS],
-  merged: ["mergeStep", "update", ...SHARED_SALIENTS],
+  merging: ["mergeStep", "gatedCall", "questionLead", "update", ...SHARED_SALIENTS],
+  mergeFailed: ["mergeStep", "gatedCall", "questionLead", "update", ...SHARED_SALIENTS],
+  merged: ["mergeStep", "gatedCall", "questionLead", "update", ...SHARED_SALIENTS],
   background: ["update", ...SHARED_SALIENTS],
   vendorFault: ["authenticating", "fault", "update", "retrying", "vendorStart", "turnEnded", ...SHARED_SALIENTS],
   agentReplFault: ["startFailed", "fault", "update", "turnEnded", ...SHARED_SALIENTS],
@@ -1813,7 +1826,7 @@ export function footerStatus(
   return { case: status, value } as StatusArm;
 }
 
-export const FOOTER_CHIPS = ["agents", "tasks", "shells", "monitors", "crons", "mergeTests"] as const;
+export const FOOTER_CHIPS = ["agents", "tasks", "shells", "monitors", "crons"] as const;
 export type FooterChip = (typeof FOOTER_CHIPS)[number];
 
 export const FOOTER_PANELS = ["tokens", ...FOOTER_CHIPS] as const;
@@ -1846,18 +1859,7 @@ type FooterInit = {
 };
 
 /** The panels the daemon's focus can name. */
-export const FOOTER_FOCUS_PANELS = ["agents", "shells", "monitors", "mergeTests"] as const;
-
-/** The merge tests panel's rows: one suite in each state, in the gate's order. */
-export const MERGE_TEST_ROWS: readonly MessageInitShape<typeof FooterMergeTestRowSchema>[] = [
-  { name: { text: "daemon unit" }, state: { state: { case: "passed", value: { durationMs: 95_000n } } } },
-  { name: { text: "elisp" }, state: { state: { case: "failed", value: { durationMs: 7_000n } } } },
-  { name: { text: "webapp" }, state: { state: { case: "running", value: { startedAtMs: 1_000n } } } },
-  { name: { text: "webkit" }, state: { state: { case: "waiting", value: {} } } },
-];
-
-/** The state arms the merge tests panel's rows carry, as MERGE_TEST_ROWS orders them. */
-export const MERGE_TEST_ROW_STATES = ["passed", "failed", "running", "waiting"] as const;
+export const FOOTER_FOCUS_PANELS = ["agents", "shells", "monitors"] as const;
 
 export function footerView(init?: FooterInit): FooterView {
   const chips = init?.chips ?? {
@@ -1866,7 +1868,6 @@ export function footerView(init?: FooterInit): FooterView {
     shells: true,
     monitors: true,
     crons: true,
-    mergeTests: true,
   };
   return create(FooterViewSchema, {
     strip: {
@@ -1894,10 +1895,9 @@ export function footerView(init?: FooterInit): FooterView {
         shells: chips.shells ? { count: 1 } : undefined,
         monitors: chips.monitors ? { count: 4 } : undefined,
         crons: chips.crons ? { count: 2 } : undefined,
-        mergeTests: chips.mergeTests ? { finished: 8, total: 12 } : undefined,
       },
     },
-    expanded: init?.expanded === false ? undefined : footerExpandedInit(chips.mergeTests === true),
+    expanded: init?.expanded === false ? undefined : footerExpandedInit(),
     focus:
       init?.focus === undefined
         ? undefined
@@ -1906,11 +1906,8 @@ export function footerView(init?: FooterInit): FooterView {
 }
 
 /** Every expanded panel, fully resolved, exactly as the daemon ships them. */
-function footerExpandedInit(testing: boolean): MessageInitShape<typeof FooterExpandedSchema> {
+function footerExpandedInit(): MessageInitShape<typeof FooterExpandedSchema> {
   return {
-    // The merge's suites while it is testing; empty (and the chip unset)
-    // otherwise, exactly as the daemon ships the panel.
-    mergeTests: { rows: testing ? [...MERGE_TEST_ROWS] : [] },
     tokens: {
       contextGrowth: { value: "18.2k" },
       input: { value: "42.1k" },

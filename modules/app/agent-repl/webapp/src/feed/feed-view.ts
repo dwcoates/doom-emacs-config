@@ -93,6 +93,7 @@ import type {
   SubfeedView,
 } from "./renderers.js";
 import { replaceTicking, stopClocks, stopTicking } from "./ticking.js";
+import { isMergeBubble } from "./merge-bubble.js";
 import { keepScrolled } from "./keep-scroll.js";
 import type { Overscan } from "./overscan.js";
 import { drawFeedUserPrompt } from "./rows/user-prompt.js";
@@ -452,6 +453,7 @@ export function createFeedController(
    */
   function applyPage(page: FeedPage, placement: "replace" | "prepend"): void {
     const result = requireCase(page.result, "FeedPage.result");
+    let keptOpen: readonly string[] = [];
     log.debug(`applying a ${placement} page as ${result.case}`, {
       operation: "feed.apply-page",
       context: { feed: feedName(), placement, arm: result.case },
@@ -487,10 +489,12 @@ export function createFeedController(
                 : [[id, state.body] as [string, HTMLElement]],
             ),
           );
+          keptOpen = openMergeBubbles();
           clearRows();
         }
         for (let i = 0; i < incoming.length; i += 1)
           adoptPageRow(incoming[i], keys[i]);
+        if (placement === "replace") reopenMergeBubbles(keptOpen);
         logPagePlaced(placement, keys);
         // A ROW THE REPLACE DID NOT SERVE AGAIN IS GONE: its keys drop rather
         // than linger for a row that will never be drawn.
@@ -507,6 +511,35 @@ export function createFeedController(
         return;
       default:
         unreachableArm("FeedPage.result", armName(result));
+    }
+  }
+
+  /** The rows whose MERGE bubble the reader has open, by row id. */
+  function openMergeBubbles(): string[] {
+    return [...states].flatMap(([id, state]) =>
+      state.bubble !== null &&
+      state.bubble.isExpanded() &&
+      isMergeBubble(state.bubble.element)
+        ? [id]
+        : [],
+    );
+  }
+
+  /**
+   * A REPLACE KEEPS THE READER'S OPEN MERGE BUBBLE OPEN (owner ruling,
+   * 2026-10-08: a merge bubble the reader opened stays open until they close
+   * it). The replace rebuilt every bubble at the daemon's fold, so each merge
+   * bubble that was open and is served again is opened once more.
+   */
+  function reopenMergeBubbles(ids: readonly string[]): void {
+    for (const id of ids) {
+      const bubble = states.get(id)?.bubble ?? null;
+      if (bubble === null || bubble.isExpanded()) continue;
+      log.info(`a page replace rebuilt the open merge bubble ${id}; it is opened again`, {
+        operation: "feed.merge-bubble-kept-open",
+        context: { feed: feedName(), row: id },
+      });
+      void bubble.expand();
     }
   }
 

@@ -65,13 +65,6 @@ type MergeFacts struct {
 	Line *frontendv1.FooterStatusActivityMergeStep
 	// LineAt is when Line began standing.
 	LineAt time.Time
-	// Tests are the merge tests panel's rows, in the gate's order. EMPTY
-	// whenever the merge is not testing, which unsets the 🧪 chip.
-	Tests []*frontendv1.FooterMergeTestRow
-	// TestsRound counts the merge's testing rounds. Each new round publishes
-	// the merge tests panel as the expanded footer's focus, under a new
-	// generation.
-	TestsRound int
 	// Detail is the evidence a failed or landed merge carries.
 	Detail string
 }
