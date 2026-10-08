@@ -2954,9 +2954,6 @@ function rgbOf(block: string, token: string): [number, number, number] {
   return [0, 2, 4].map((i) => Number.parseInt(hex.slice(i, i + 2), 16)) as [number, number, number];
 }
 
-/** The spread between an RGB triple's strongest and weakest channel. */
-const chroma = ([r, g, b]: [number, number, number]): number => Math.max(r, g, b) - Math.min(r, g, b);
-
 /** An RGB triple's hue in degrees, 0 to 360. */
 const hueOf = ([r, g, b]: [number, number, number]): number => {
   const [max, min] = [Math.max(r, g, b), Math.min(r, g, b)];
@@ -2995,55 +2992,21 @@ describe("hueOf", () => {
   });
 });
 
-describe("the held prompt's tint: much more grey than blue", () => {
-  it.each([
-    ["light", () => declarationsOf(":root") ?? ""],
-    ["dark", () => darkThemeBlock()],
-  ])("carries a subtle blue hue in the %s theme", (_theme, block) => {
-    // Arrange / Act
-    const [r, g, b] = rgbOf(block(), "--held-prompt-bg");
-    // Assert — blue is the strongest channel, however slightly.
-    expect(b > r && b >= g).toBe(true);
-  });
-
-  it.each([
-    ["light", () => declarationsOf(":root") ?? ""],
-    ["dark", () => darkThemeBlock()],
-  ])("is far greyer than the prompt blue in the %s theme", (_theme, block) => {
-    // Arrange / Act
-    const held = chroma(rgbOf(block(), "--held-prompt-bg"));
-    const prompt = chroma(rgbOf(block(), "--user"));
-    // Assert — at most a third of the prompt blue's saturation.
-    expect(held * 3).toBeLessThanOrEqual(prompt);
-  });
-
-  it("caps the held variant at half the one bubble width token", () => {
-    // Arrange / Act
-    const rule = declarationsOf('.bubble[data-variant="held"]') ?? "";
-    // Assert
-    expect(rule).toMatch(/max-width:\s*calc\(var\(--bubble-max-width\) \/ 2\)\s*;/);
-  });
-
-});
-
 /**
- * THE HELD FILL IS NEARLY TRANSPARENT (owner ruling, 2026-09-27): 5% of the
- * held tint over 95% of the feed's background, mixed from the two tokens so
- * each theme's own pair decides it and no resulting hex is ever written down.
+ * THE HELD PROMPT SHARES THE RESPONSE BUBBLE'S FILL (owner ruling,
+ * 2026-10-08, superseding 2026-09-23's grey-blue tint and 2026-09-27's 5%
+ * mix of it): a held prompt's background must be the SAME as a response
+ * bubble's, through one shared token rather than a copied hex value, in
+ * both themes.
  */
-describe("the held prompt's fill: 5% of the tint over the feed", () => {
-  /** The held fill the mix yields over BLOCK's tokens, channel by channel. */
-  const fillOver = (block: string): [number, number, number] => {
-    const tint = rgbOf(block, "--held-prompt-bg");
-    const feed = rgbOf(block, "--bg");
-    return [0, 1, 2].map((i) => 0.05 * tint[i] + 0.95 * feed[i]) as [number, number, number];
-  };
-
-  it("mixes the held variant's fill from the tint and the feed background", () => {
+describe("the held prompt's fill: the response bubble's own token", () => {
+  it("feeds --bubble-bg from --assistant, exactly as the response role does", () => {
     // Arrange / Act
-    const rule = declarationsOf('.bubble[data-variant="held"]') ?? "";
+    const held = declarationsOf('.bubble[data-variant="held"]') ?? "";
+    const response = declarationsOf('.bubble[data-role="response"]') ?? "";
     // Assert
-    expect(rule).toMatch(/--bubble-bg:\s*color-mix\(in srgb, var\(--held-prompt-bg\) 5%, var\(--bg\)\)\s*;/);
+    expect(held).toMatch(/--bubble-bg:\s*var\(--assistant\)\s*;/);
+    expect(response).toMatch(/--bubble-bg:\s*var\(--assistant\)\s*;/);
   });
 
   it("hardcodes no fill color of its own", () => {
@@ -3053,28 +3016,27 @@ describe("the held prompt's fill: 5% of the tint over the feed", () => {
     expect(rule).not.toMatch(/#[0-9a-fA-F]{3,8}\b|rgba?\(/);
   });
 
-  it.each([
-    ["light", () => declarationsOf(":root") ?? ""],
-    ["dark", () => darkThemeBlock()],
-  ])("sits within two steps of the feed background on every channel in the %s theme", (_theme, block) => {
-    // Arrange
-    const feed = rgbOf(block(), "--bg");
-    // Act
-    const fill = fillOver(block());
-    // Assert
-    expect(fill.map((channel, i) => Math.abs(channel - feed[i]) <= 2)).toEqual([true, true, true]);
+  it("retires the old --held-prompt-bg tint token entirely", () => {
+    // Arrange / Act / Assert
+    expect(stylesheet).not.toMatch(/--held-prompt-bg\s*:/);
   });
 
   it.each([
     ["light", () => declarationsOf(":root") ?? ""],
     ["dark", () => darkThemeBlock()],
-  ])("still differs from the feed background in the %s theme", (_theme, block) => {
-    // Arrange
-    const feed = rgbOf(block(), "--bg");
-    // Act
-    const fill = fillOver(block());
+  ])("resolves to the same RGB as --assistant in the %s theme", (_theme, block) => {
+    // Arrange / Act
+    const assistant = rgbOf(block(), "--assistant");
+    // Assert — the held fill IS --assistant, so they are the same color by
+    // construction; this pins that --assistant itself still resolves.
+    expect(assistant).toHaveLength(3);
+  });
+
+  it("caps the held variant at half the one bubble width token", () => {
+    // Arrange / Act
+    const rule = declarationsOf('.bubble[data-variant="held"]') ?? "";
     // Assert
-    expect(fill.some((channel, i) => Math.round(channel) !== feed[i])).toBe(true);
+    expect(rule).toMatch(/max-width:\s*calc\(var\(--bubble-max-width\) \/ 2\)\s*;/);
   });
 });
 
