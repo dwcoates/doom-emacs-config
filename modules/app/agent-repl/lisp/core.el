@@ -920,19 +920,37 @@ record of that workspace then tried to re-make its `.claude/emacs' link
 under the vanished directory and signalled out of whatever handler logged
 -- a roster push, a successor's link-up -- instead of landing centrally.")
 
+(defvar agent-repl--log-dir-confirmed nil
+  "Directories confirmed to exist while the record in progress is emitted.
+nil outside `agent-repl--emit-log-record'.  Inside it, a list headed by
+`:confirmed' whose tail is (DIR . CANONICAL) pairs.  One record asks
+whether its workspace's directory exists twice -- once to route, once to
+stamp or check its identity -- microseconds apart, and the second `stat'
+was a quarter of a dropped workspace record's cost.  The confirmation lasts
+for that one record only; the record's central-fallback re-check binds this
+back to nil, so a directory that goes between routing and writing is still
+found gone.")
+
 (defun agent-repl--log-dir-truename (dir)
   "Return DIR's canonical spelling when it is an existing directory, else nil.
 The spelling is resolved once per DIR (`agent-repl--log-dir-truenames');
 its existence is confirmed on every call, and a directory that has gone
-is forgotten."
-  (let ((remembered (gethash dir agent-repl--log-dir-truenames)))
-    (if (and remembered (file-directory-p remembered))
-        remembered
-      (when remembered
-        (remhash dir agent-repl--log-dir-truenames))
-      (and (file-directory-p dir)
-           (puthash dir (directory-file-name (file-truename dir))
-                    agent-repl--log-dir-truenames)))))
+is forgotten.  Within one record, a confirmation is reused
+\=(`agent-repl--log-dir-confirmed')."
+  (or (cdr (assoc dir (cdr agent-repl--log-dir-confirmed)))
+      (let* ((remembered (gethash dir agent-repl--log-dir-truenames))
+             (canonical
+              (if (and remembered (file-directory-p remembered))
+                  remembered
+                (when remembered
+                  (remhash dir agent-repl--log-dir-truenames))
+                (and (file-directory-p dir)
+                     (puthash dir (directory-file-name (file-truename dir))
+                              agent-repl--log-dir-truenames)))))
+        (when (and canonical agent-repl--log-dir-confirmed)
+          (setcdr agent-repl--log-dir-confirmed
+                  (cons (cons dir canonical) (cdr agent-repl--log-dir-confirmed))))
+        canonical)))
 
 (defun agent-repl--ws-log-routable-p (ws)
   "Return non-nil when WS can be resolved to a durable workspace log sink.
@@ -1465,29 +1483,40 @@ an invariant violation and signals; it is never rewritten to the central sink."
    (t
     (error "agent-repl log routing invariant violated: workspace %S has no durable sink" ws))))
 
+(defun agent-repl--log-scope-candidate (ws fmt)
+  "Return the scope WS names for FMT before any sink is resolved.
+The answer is `agent-repl--global-log-scope' for a central record, a
+workspace name, or nil when nothing attributes the record at all.  Explicit
+scope wins, followed by the dynamically bound request edge, the current
+buffer's owner, the current workspace, and finally an explicit reasoned
+context marker or the legacy reasoned central registry.
+
+This is the ONE ordering both `agent-repl--resolve-log-workspace' and the
+dropped-record fast path of `agent-repl--emit-log-record' read, so the fast
+path can never call a record central that routing would have attributed."
+  (let ((context-central-reason (agent-repl--context-log-scope-reason ws)))
+    (cond
+     ((agent-repl--central-log-scope-reason ws) agent-repl--global-log-scope)
+     ((eq ws agent-repl--global-log-scope) agent-repl--global-log-scope)
+     ((and ws (not context-central-reason)) ws)
+     (agent-repl--log-context-workspace agent-repl--log-context-workspace)
+     ((agent-repl--buffer-owner (current-buffer)))
+     ((and (fboundp 'agent-repl--ws-current-log-name)
+           (agent-repl--ws-current-log-name)))
+     (context-central-reason agent-repl--global-log-scope)
+     ((agent-repl--central-log-reason fmt) agent-repl--global-log-scope)
+     (t nil))))
+
 (defun agent-repl--resolve-log-workspace (ws fmt)
   "Resolve WS for FMT to a sink workspace, central nil, or a routing error.
 The return value is `(:workspace NAME)', `(:central REASON)', or a plist with
-`:routing-error', `:offender', and `:reason'.  Explicit scope wins, followed by
-the dynamically bound request edge, the current buffer's owner, the current
-workspace, and finally an explicit reasoned context marker or the legacy
-reasoned central registry."
+`:routing-error', `:offender', and `:reason'.  The scope is chosen by
+`agent-repl--log-scope-candidate'."
   (let* ((explicit-central-reason
           (agent-repl--central-log-scope-reason ws))
          (context-central-reason
           (agent-repl--context-log-scope-reason ws))
-         (candidate
-         (cond
-          (explicit-central-reason agent-repl--global-log-scope)
-          ((eq ws agent-repl--global-log-scope) agent-repl--global-log-scope)
-          ((and ws (not context-central-reason)) ws)
-          (agent-repl--log-context-workspace agent-repl--log-context-workspace)
-          ((agent-repl--buffer-owner (current-buffer)))
-          ((and (fboundp 'agent-repl--ws-current-log-name)
-                (agent-repl--ws-current-log-name)))
-          (context-central-reason agent-repl--global-log-scope)
-          ((agent-repl--central-log-reason fmt) agent-repl--global-log-scope)
-          (t nil))))
+         (candidate (agent-repl--log-scope-candidate ws fmt)))
     (cond
      ((eq candidate agent-repl--global-log-scope)
       (list :central (or explicit-central-reason
@@ -1538,11 +1567,51 @@ through `agent-repl--ws-log-routable-p' first and pass nil when it does not."
                                   (error "agent-repl log routing invariant violated: workspace %S has no workspace directory hash" ws))
           :workspace-id (agent-repl--ws-daemon-log-id ws))))
 
-(defun agent-repl--log-add-workspace-identity (record ws)
-  "Add WS identity and its known session identifiers to JSON RECORD.
-A nil WS adds nothing.
+(defun agent-repl--workspace-log-session-ids (ws)
+  "Return WS's known session identifiers as a validated alist.
+Each entry is (FIELD . VALUE) for a nonempty string VALUE; an unknown
+identifier is omitted and any other value signals the identity invariant.
 `agent_repl_session_id' is the daemon session echo token and
 `claude_session_id' is the vendor conversation uuid."
+  (let (fields)
+    (dolist (field-value
+             `(("agent_repl_session_id" . ,(agent-repl--ws-observed-agent-repl-session-id ws))
+               ("claude_session_id" . ,(agent-repl--ws-observed-claude-session-id ws))))
+      (let ((field (car field-value))
+            (value (cdr field-value)))
+        (cond
+         ((null value))
+         ((and (stringp value) (not (string-empty-p value)))
+          (push (cons field value) fields))
+         (t
+          (error "agent-repl log routing invariant violated: workspace %S has invalid %s: %S"
+                 ws field value)))))
+    (nreverse fields)))
+
+(defun agent-repl--log-context-request-id-checked ()
+  "Return the bound request id, nil when none, signalling on an invalid one."
+  (when agent-repl--log-context-request-id
+    (unless (and (stringp agent-repl--log-context-request-id)
+                 (not (string-empty-p agent-repl--log-context-request-id)))
+      (error "agent-repl log identity invariant violated: invalid request_id=%S"
+             agent-repl--log-context-request-id))
+    agent-repl--log-context-request-id))
+
+(defun agent-repl--log-check-identity (ws)
+  "Signal exactly as `agent-repl--log-record' would for WS, building nothing.
+A record that will be neither persisted nor shown is not built, but the
+identity invariants its builder enforces still hold for it: a workspace
+without a registered directory or directory hash, an invalid session id and
+an invalid bound request id signal here just as they do while building."
+  (when ws
+    (agent-repl--workspace-log-identity ws)
+    (agent-repl--workspace-log-session-ids ws))
+  (agent-repl--log-context-request-id-checked))
+
+(defun agent-repl--log-add-workspace-identity (record ws)
+  "Add WS identity and its known session identifiers to JSON RECORD.
+A nil WS adds nothing.  The session identifiers come from
+`agent-repl--workspace-log-session-ids'."
   (when ws
     (let ((identity (agent-repl--workspace-log-identity ws))
           (context (gethash "context" record)))
@@ -1558,18 +1627,8 @@ A nil WS adds nothing.
       (when (hash-table-p context)
         (puthash "workspace_dir_hash" (plist-get identity :workspace-dir-hash)
                  context))
-      (dolist (field-value
-               `(("agent_repl_session_id" . ,(agent-repl--ws-observed-agent-repl-session-id ws))
-                 ("claude_session_id" . ,(agent-repl--ws-observed-claude-session-id ws))))
-        (let ((field (car field-value))
-              (value (cdr field-value)))
-          (cond
-           ((null value))
-           ((and (stringp value) (not (string-empty-p value)))
-           (puthash field value record))
-           (t
-            (error "agent-repl log routing invariant violated: workspace %S has invalid %s: %S"
-                   ws field value)))))))
+      (pcase-dolist (`(,field . ,value) (agent-repl--workspace-log-session-ids ws))
+        (puthash field value record))))
   record)
 
 (defun agent-repl--log-record (ws level verbosity fmt args
@@ -1615,12 +1674,8 @@ to be stable, so the BARE format string travels here separately."
                   (cons "message" message)
                   (cons "context" context))))
     (agent-repl--log-add-workspace-identity record ws)
-    (when agent-repl--log-context-request-id
-      (unless (and (stringp agent-repl--log-context-request-id)
-                   (not (string-empty-p agent-repl--log-context-request-id)))
-        (error "agent-repl log identity invariant violated: invalid request_id=%S"
-               agent-repl--log-context-request-id))
-      (puthash "request_id" agent-repl--log-context-request-id record))
+    (when-let ((request-id (agent-repl--log-context-request-id-checked)))
+      (puthash "request_id" request-id record))
     (when pseudo-ws
       (puthash "pseudo_workspace" pseudo-ws record))
     (when unroutable-ws
@@ -2300,7 +2355,30 @@ differently:
 
   - NO WORKSPACE AT ALL is missing attribution at the call site, which no
     directory can supply.  It keeps its `log-routing-error' line at ERROR
-    beside the rerouted original."
+    beside the rerouted original.
+
+A RECORD NOBODY WILL SEE COSTS NEARLY NOTHING.  A record that will not be
+persisted (`agent-repl-log-file-level' or `agent-repl-log-to-file' drops
+it), echoes no message, is not FATAL and whose scope is certainly central
+\(`agent-repl--log-scope-candidate' answers `agent-repl--global-log-scope',
+so routing cannot fail or name a workspace) returns nil before anything is
+routed or built.  Measured 2026-10-08: the wire codec's dropped debug lines
+cost ~0.1-0.18 ms each and dominated a workspace switch.
+
+A dropped record that names a WORKSPACE, or names nothing at all, is still
+routed in full, because routing it is error-handling coverage: a missing
+attribution still records its `log-routing-error' and a sinkless workspace
+still announces its central fallback.  Its identity invariants are still
+checked (`agent-repl--log-check-identity'); only the JSON record, the
+formatted message and the display text are not built."
+  (when (and (not fatal)
+             (not message-mode)
+             (stringp fmt)
+             (not (and agent-repl-log-to-file
+                       (agent-repl--log-record-persists-p level verbosity)))
+             (eq (agent-repl--log-scope-candidate ws (or operation-fmt fmt))
+                 agent-repl--global-log-scope))
+    (cl-return-from agent-repl--emit-log-record nil))
   (cl-flet
       ;; Record, once per workspace, that its records go to the central sink.
       ;; The level follows the class: a stale registry row is WARN, every
@@ -2319,7 +2397,8 @@ differently:
                                       (list unroutable class reason)
                                       nil nil unroutable)
               nil)))))
-    (let* ((routing (agent-repl--resolve-log-workspace ws (or operation-fmt fmt)))
+    (let* ((agent-repl--log-dir-confirmed (list :confirmed))
+           (routing (agent-repl--resolve-log-workspace ws (or operation-fmt fmt)))
            (routing-error (plist-get routing :routing-error))
            (sink-ws (plist-get routing :workspace))
            (pseudo-ws (plist-get routing :pseudo))
@@ -2362,6 +2441,11 @@ differently:
             original)
 	(let* ((to-file (and agent-repl-log-to-file
                              (agent-repl--log-record-persists-p level verbosity)))
+               (to-buffer (and agent-repl--workspace-log-buffer-enabled sink-ws
+				(agent-repl--log-record-displays-p level verbosity)))
+               ;; A record nobody will read is routed and its identity checked,
+               ;; but never built: see the docstring.
+               (build (or to-file to-buffer message-mode fatal))
                (record nil))
           ;; THE DIRECTORY CAN GO BETWEEN ROUTING AND WRITING.  A worktree a
           ;; merge or a plain `rm' removes is removed by another process, so a
@@ -2372,23 +2456,28 @@ differently:
           ;; A failure while the workspace is STILL routable is not that fact
           ;; and is signalled unchanged.
           (condition-case err
-              (progn
+              (if (not build)
+                  (agent-repl--log-check-identity sink-ws)
 		(setq record (agent-repl--log-record sink-ws level verbosity fmt args
                                                      pseudo-ws operation-fmt unroutable-ws))
 		(when to-file
                   (agent-repl--do-log-to-file record sink-ws)))
             (error
-             (unless (and sink-ws (not (agent-repl--ws-log-routable-p sink-ws)))
+             (unless (and sink-ws
+                          (not (let ((agent-repl--log-dir-confirmed nil))
+                                 (agent-repl--ws-log-routable-p sink-ws))))
                (signal (car err) (cdr err)))
              (announce-central-fallback sink-ws (error-message-string err))
-             (setq record (agent-repl--log-record nil level verbosity fmt args
-                                                  nil operation-fmt sink-ws))
-             (when to-file
-               (agent-repl--do-log-to-file record nil))
-             (setq sink-ws nil)))
-          (let ((text (agent-repl--build-log-text sink-ws fmt args))
-		(to-buffer (and agent-repl--workspace-log-buffer-enabled sink-ws
-				(agent-repl--log-record-displays-p level verbosity))))
+             (if (not build)
+                 (agent-repl--log-check-identity nil)
+               (setq record (agent-repl--log-record nil level verbosity fmt args
+                                                    nil operation-fmt sink-ws))
+               (when to-file
+                 (agent-repl--do-log-to-file record nil)))
+             (setq sink-ws nil
+                   to-buffer nil)))
+          (let ((text (and (or message-mode fatal)
+                           (agent-repl--build-log-text sink-ws fmt args))))
             (when to-buffer
               (agent-repl--append-workspace-log sink-ws record))
             (unless fatal

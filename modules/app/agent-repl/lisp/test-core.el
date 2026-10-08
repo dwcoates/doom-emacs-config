@@ -6321,3 +6321,167 @@ A stale entry guards nothing and hides that the wrapper it named is gone."
                              agent-repl--external-boundary-functions)))
       ;; Assert
       (should (equal stale nil)))))
+
+;;;; ---- Tests: a record nobody will read costs nearly nothing ----
+;;
+;; A dropped debug record (below `agent-repl-log-file-level', no message) is
+;; returned from before routing or building when its scope is certainly
+;; central; one naming a workspace is still routed and its identity checked.
+
+(defmacro agent-repl-test--with-dropped-debug (&rest body)
+  "Run BODY with the durable sink on at `info', so a debug record is dropped."
+  (declare (indent 0))
+  `(agent-repl-test--with-clean-state
+     (agent-repl-test--with-temp-logfile path
+       (let ((agent-repl-log-file-level 'info)
+             (agent-repl-debug nil)
+             (agent-repl--log-context-workspace nil)
+             (agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal)))
+         (ignore path)
+         ,@body))))
+
+(defun agent-repl-test--refuse (name)
+  "Return a function that fails the test when NAME is called."
+  (lambda (&rest _) (error "%s must not be called for a dropped central record" name)))
+
+(ert-deftest agent-repl-test-dropped-central-record-is-neither-routed-nor-built ()
+  "A dropped debug record with a certainly central scope routes and builds nothing."
+  (dolist (scope (list '(:agent-repl-central "central by declaration")
+                       agent-repl--global-log-scope
+                       '(:agent-repl-context "no context supplies a workspace")))
+    (agent-repl-test--with-dropped-debug
+      ;; Arrange
+      (cl-letf (((symbol-function 'agent-repl--buffer-owner) (lambda (_buffer) nil))
+                ((symbol-function 'agent-repl--ws-current-log-name) (lambda () nil))
+                ((symbol-function 'agent-repl--resolve-log-workspace)
+                 (agent-repl-test--refuse "routing"))
+                ((symbol-function 'agent-repl--log-record)
+                 (agent-repl-test--refuse "the record builder"))
+                ((symbol-function 'agent-repl--build-log-text)
+                 (agent-repl-test--refuse "the display text")))
+        ;; Act / Assert
+        (should-not (agent-repl--log scope "elisp.test.dropped-central x=%s" 1))))))
+
+(ert-deftest agent-repl-test-dropped-context-record-in-a-workspace-is-routed ()
+  "A context marker that resolves to a workspace is routed, not short-circuited."
+  (agent-repl-test--with-dropped-debug
+    ;; Arrange
+    (let ((routed nil)
+          (real-resolve (symbol-function 'agent-repl--resolve-log-workspace)))
+      (cl-letf (((symbol-function 'agent-repl--buffer-owner) (lambda (_buffer) "ctx-ws"))
+                ((symbol-function 'agent-repl--resolve-log-workspace)
+                 (lambda (ws fmt) (setq routed t) (funcall real-resolve ws fmt)))
+                ((symbol-function 'display-warning) #'ignore))
+        ;; Act
+        (agent-repl--log '(:agent-repl-context "fallback reason") "elisp.test.ctx")
+        ;; Assert
+        (should routed)))))
+
+(ert-deftest agent-repl-test-dropped-unattributed-record-still-records-the-routing-error ()
+  "A dropped record naming NO workspace keeps its ERROR routing record."
+  (agent-repl-test--with-dropped-debug
+    ;; Arrange
+    (cl-letf (((symbol-function 'agent-repl--buffer-owner) (lambda (_buffer) nil))
+              ((symbol-function 'agent-repl--ws-current-log-name) (lambda () nil))
+              ((symbol-function 'display-warning) #'ignore))
+      ;; Act
+      (agent-repl--log nil "elisp.test.dropped-unattributed")
+      ;; Assert
+      (let ((record (agent-repl-test--log-record-for path "log-routing-error")))
+        (should (equal (alist-get 'level record) "error"))))))
+
+(ert-deftest agent-repl-test-dropped-record-of-a-sinkless-workspace-announces-the-fallback ()
+  "A dropped record naming a workspace with no sink still announces the fallback."
+  (agent-repl-test--with-dropped-debug
+    ;; Arrange
+    (cl-letf (((symbol-function 'display-warning) #'ignore))
+      ;; Act
+      (agent-repl--log "missing-ws" "elisp.test.dropped-sinkless")
+      ;; Assert
+      (should (agent-repl-test--log-record-for path "log-central-fallback")))))
+
+(ert-deftest agent-repl-test-dropped-workspace-record-is-not-built ()
+  "A dropped record of a routable workspace is routed but never serialized."
+  (agent-repl-test--with-dropped-debug
+    ;; Arrange
+    (let ((project (make-temp-file "agent-repl-dropped-ws-" t)))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "dropped-ws" :project-dir project)
+            (cl-letf (((symbol-function 'agent-repl--log-record)
+                       (agent-repl-test--refuse "the record builder")))
+              ;; Act / Assert
+              (should-not (agent-repl--log "dropped-ws" "elisp.test.dropped-ws"))))
+        (delete-directory project t)))))
+
+(ert-deftest agent-repl-test-dropped-workspace-record-still-checks-its-session-identity ()
+  "An invalid session id signals for a dropped record exactly as when built."
+  (agent-repl-test--with-dropped-debug
+    ;; Arrange
+    (let ((project (make-temp-file "agent-repl-dropped-identity-" t)))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "dropped-identity" :project-dir project)
+            (cl-letf (((symbol-function 'agent-repl--ws-observed-claude-session-id)
+                       (lambda (_ws) 42)))
+              ;; Act / Assert
+              (should-error (agent-repl--log "dropped-identity" "elisp.test.bad-session"))))
+        (delete-directory project t)))))
+
+(ert-deftest agent-repl-test-dropped-record-still-checks-the-request-id ()
+  "An invalid bound request id signals for a dropped workspace record."
+  (agent-repl-test--with-dropped-debug
+    ;; Arrange
+    (let ((project (make-temp-file "agent-repl-dropped-request-" t))
+          (agent-repl--log-context-request-id ""))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "dropped-request" :project-dir project)
+            ;; Act / Assert
+            (should-error (agent-repl--log "dropped-request" "elisp.test.bad-request")))
+        (delete-directory project t)))))
+
+(ert-deftest agent-repl-test-log-dir-confirmed-within-a-record-is-reused ()
+  "A directory confirmed once while a record is emitted is not asked again."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let* ((project (make-temp-file "agent-repl-confirmed-" t))
+           (agent-repl--log-dir-confirmed (list :confirmed))
+           (first (agent-repl--log-dir-truename project)))
+      (delete-directory project t)
+      ;; Act / Assert
+      (should (equal (agent-repl--log-dir-truename project) first)))))
+
+(ert-deftest agent-repl-test-log-dir-outside-a-record-is-asked-every-time ()
+  "Outside a record the directory's existence is confirmed on every call."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((project (make-temp-file "agent-repl-unconfirmed-" t))
+          (agent-repl--log-dir-confirmed nil))
+      (agent-repl--log-dir-truename project)
+      (delete-directory project t)
+      ;; Act / Assert
+      (should-not (agent-repl--log-dir-truename project)))))
+
+(ert-deftest agent-repl-test-shown-central-debug-record-is-still-built ()
+  "Debug visibility shows the record, so the fast path is not taken."
+  (agent-repl-test--with-dropped-debug
+    ;; Arrange
+    (let ((shown nil)
+          (agent-repl-debug t))
+      (cl-letf (((symbol-function 'message)
+                 (lambda (_fmt text) (setq shown text))))
+        ;; Act
+        (agent-repl--log '(:agent-repl-central "shown") "elisp.test.shown x=%s" 7)
+        ;; Assert
+        (should (string-match-p "elisp.test.shown x=7" shown))))))
+
+(ert-deftest agent-repl-test-persisted-central-debug-record-is-still-written ()
+  "A central debug record the threshold admits is written as before."
+  (agent-repl-test--with-dropped-debug
+    ;; Arrange
+    (let ((agent-repl-log-file-level 'debug))
+      ;; Act
+      (agent-repl--log '(:agent-repl-central "persisted") "elisp.test.persisted-central")
+      ;; Assert
+      (should (agent-repl-test--log-record-for path "persisted-central")))))
