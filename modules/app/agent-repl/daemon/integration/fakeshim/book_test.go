@@ -109,3 +109,65 @@ func TestBookSeedStampsEachEntrysTurn(t *testing.T) {
 		t.Fatalf("turns = %q, want the newest stamped turn-1 and the oldest unstamped", got)
 	}
 }
+
+// askFrame is an ask's frame on the main agent: a question batch when QUESTION,
+// a consent ask otherwise, open when OPEN and settled otherwise.
+func askFrame(id string, question, open bool) agentFrame {
+	update := &conversationv1.AgentUpdate{}
+	switch {
+	case question && open:
+		update.Update = &conversationv1.AgentUpdate_Question{Question: &conversationv1.AgentQuestion{
+			Id: &conversationv1.AgentQuestionId{Value: id}, Result: &conversationv1.AgentQuestion_Start{Start: &conversationv1.AgentQuestionStart{}}}}
+	case question:
+		update.Update = &conversationv1.AgentUpdate_Question{Question: &conversationv1.AgentQuestion{
+			Id: &conversationv1.AgentQuestionId{Value: id}, Result: &conversationv1.AgentQuestion_Success{Success: &conversationv1.AgentQuestionSuccess{}}}}
+	case open:
+		update.Update = &conversationv1.AgentUpdate_Permission{Permission: &conversationv1.AgentPermission{
+			Id: &conversationv1.AgentPermissionId{Value: id}, Result: &conversationv1.AgentPermission_Start{Start: &conversationv1.AgentPermissionStart{}}}}
+	default:
+		update.Update = &conversationv1.AgentUpdate_Permission{Permission: &conversationv1.AgentPermission{
+			Id: &conversationv1.AgentPermissionId{Value: id}, Result: &conversationv1.AgentPermission_Success{Success: &conversationv1.AgentPermissionSuccess{}}}}
+	}
+	return agentFrame{agent: MainAgentID, frame: &conversationv1.AgentFrame{
+		AgentId: &conversationv1.AgentId{Value: MainAgentID},
+		Result:  &conversationv1.AgentFrame_Update{Update: update},
+	}}
+}
+
+func TestTheBookHoldsEveryAskOpenInTheOrderItOpened(t *testing.T) {
+	tests := []struct {
+		name   string
+		frames []agentFrame
+		want   []string
+	}{
+		{name: "two open asks", frames: []agentFrame{askFrame("p-1", false, true), askFrame("q-1", true, true)}, want: []string{"permission:p-1", "question:q-1"}},
+		{name: "a settled permission", frames: []agentFrame{askFrame("p-1", false, true), askFrame("p-1", false, false)}, want: []string{}},
+		{name: "a settled question", frames: []agentFrame{askFrame("q-1", true, true), askFrame("q-1", true, false)}, want: []string{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			b := newBook()
+			for _, f := range tt.frames {
+				b.record(f)
+			}
+
+			// Act.
+			asks := b.openAsks()
+
+			// Assert.
+			got := []string{}
+			for _, ask := range asks {
+				got = append(got, askKey(ask))
+			}
+			if len(got) != len(tt.want) {
+				t.Fatalf("open asks = %v, want %v", got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Fatalf("open asks = %v, want %v", got, tt.want)
+				}
+			}
+		})
+	}
+}

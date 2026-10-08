@@ -3615,14 +3615,25 @@ there is no enqueuing arm (merge-landing.md, Landed change 1)."
   (should (equal (agent-repl-test-status--arms-taking "yellow") '(:idle-async))))
 
 (ert-deftest agent-repl-test-status-green-is-ready-or-landed ()
-  "Green covers ready, done, interrupted, permission, any other wait on the
-user and a landed merge: the workspace is ready for the user.  A merge
-never parks on a conflict, so no merge arm but `:merged' is green
-\(merge-landing.md, Landed change 1)."
+  "Green covers ready, done, interrupted, a permission or question gate, any
+other wait on the user and a landed merge: the workspace is ready for the
+user.  A merge never parks on a conflict, so no merge arm but `:merged' is
+green \(merge-landing.md, Landed change 1)."
   ;; Act / Assert
   (should (equal (sort (agent-repl-test-status--arms-taking "green") #'string<)
-                 (sort (list :ready :done :interrupted :permission :waiting :merged)
+                 (sort (list :ready :done :interrupted :permission :question
+                             :waiting :merged)
                        #'string<))))
+
+(ert-deftest agent-repl-test-status-a-question-gate-paints-the-tab-done-green ()
+  "A question gate paints the tab the green a finished turn does (owner
+ruling, 2026-10-08), never the red of a working turn."
+  ;; Arrange
+  (let ((question (alist-get :question agent-repl--tab-palette))
+        (done (alist-get :done agent-repl--tab-palette)))
+    ;; Act / Assert
+    (should (equal (plist-get (plist-get question :unselected) :bg)
+                   (plist-get (plist-get done :unselected) :bg)))))
 
 (ert-deftest agent-repl-test-status-none-is-a-real-answer ()
   "Only the two sessionless arms take no colour."

@@ -990,6 +990,7 @@ Returns:
     (:turn-failed    . "⚠")
     (:idle-async     . "🌙")
     (:permission     . "❓")
+    (:question       . "❓")
     (:waiting        . "❓")
     (:closing        . "🚪")
     (:daemon-impaired . "🔧")

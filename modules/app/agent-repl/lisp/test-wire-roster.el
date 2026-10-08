@@ -165,9 +165,9 @@ arriving as an unknown field on some later push."
                        #'string<)))
     (should (equal spelled declared))))
 
-(ert-deftest agent-repl-test-wire-roster-row-status-count-is-twenty-nine ()
-  "The status vocabulary is the 29 arms the contract declares."
-  (should (equal (length agent-repl-wire-roster-row-status-keywords) 29)))
+(ert-deftest agent-repl-test-wire-roster-row-status-count-is-thirty ()
+  "The status vocabulary is the 30 arms the contract declares."
+  (should (equal (length agent-repl-wire-roster-row-status-keywords) 30)))
 
 (ert-deftest agent-repl-test-wire-roster-decodes-the-closing-arm ()
   "The closing arm decodes to its keyword: a refused close."
@@ -178,8 +178,14 @@ arriving as an unknown field on some later push."
   (should (memq :daemon-impaired agent-repl-wire-roster-row-status-keywords)))
 
 (ert-deftest agent-repl-test-wire-roster-decodes-the-waiting-arm ()
-  "The waiting arm decodes to its keyword: a wait other than a permission."
+  "The waiting arm decodes to its keyword: a cold gate or an interrupt landing."
   (should (memq :waiting agent-repl-wire-roster-row-status-keywords)))
+
+(ert-deftest agent-repl-test-wire-roster-decodes-the-question-arm ()
+  "The question arm decodes to its keyword: a question gate (owner ruling,
+2026-10-08)."
+  (should (assq 'question agent-repl-wire-roster-row-status-arms))
+  (should (memq :question agent-repl-wire-roster-row-status-keywords)))
 
 (ert-deftest agent-repl-test-wire-roster-decodes-the-turn-died-arm ()
   "The turn-died arm decodes to its keyword (owner ruling, 2026-10-06)."

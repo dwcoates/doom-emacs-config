@@ -25,6 +25,7 @@ func TestNewRefusesEveryMissingCollaborator(t *testing.T) {
 		{name: "no git client", strip: func(d *Deps) { d.Git = nil }},
 		{name: "no account resolver", strip: func(d *Deps) { d.Accounts = nil }},
 		{name: "no prompt queue", strip: func(d *Deps) { d.Queue = nil }},
+		{name: "no revival-turn withdrawer", strip: func(d *Deps) { d.RevivalTurns = nil }},
 		{name: "no merge orchestrator", strip: func(d *Deps) { d.Merge = nil }},
 		{name: "no rollout controller", strip: func(d *Deps) { d.Rollout = nil }},
 		{name: "no feed resolver", strip: func(d *Deps) { d.Feed = nil }},
