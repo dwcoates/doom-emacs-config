@@ -65,7 +65,7 @@ func (v *verbs) Interrupt(ctx context.Context, ws ids.WorkspaceID, target Interr
 	// FIRST, before the session is read: the queue answers false once the turn
 	// is the session's, and by then the session already has it in flight.
 	if target.Turn {
-		withdrawn, err := v.deps.Queue.WithdrawRevivalTurn(ctx, ws)
+		withdrawn, err := v.deps.RevivalTurns.WithdrawRevivalTurn(ctx, ws)
 		if err != nil {
 			return InterruptOutcome{}, fmt.Errorf("interrupt %q: %w", ws, err)
 		}
