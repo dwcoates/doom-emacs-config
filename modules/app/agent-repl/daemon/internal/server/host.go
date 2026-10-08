@@ -11,6 +11,7 @@ import (
 	"claude-repld/internal/health"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/publish"
+	"claude-repld/internal/replyquote"
 	"claude-repld/internal/wsm"
 )
 
@@ -188,10 +189,14 @@ func (s *server) composeHostWorkspace(
 	// THE STANDING HELD-PROMPT EDIT is state, so it rides every composition:
 	// a subscriber always reads the edit that stands now, and its absence is
 	// what tells the editor the edit ended.
+	//
+	// THE EDITOR IS HANDED THE PERSON'S WORDS ALONE: a quote the prompt
+	// replies with is the daemon's, kept through the edit (CommitEdit puts it
+	// back), so the composer never has to hold one.
 	if edit, editing := s.deps.Queue.Editing(ws); editing {
 		view.HeldPromptEdit = &agentreplv1.HostHeldPromptEdit{
 			Turn: &conversationv1.TurnId{Value: string(edit.Turn)},
-			Said: edit.Said,
+			Said: replyquote.Words(edit.Said),
 			Edit: edit.ID,
 		}
 		log.Debug(op, "the host view carries the standing held-prompt edit",
