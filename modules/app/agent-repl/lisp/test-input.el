@@ -1792,7 +1792,7 @@ used to interrupt before the overhaul."
       ;; Act
       (agent-repl-bind-feed-zoom-keys map))
     ;; Assert
-    (should (= (length planted) (* 5 2)))
+    (should (= (length planted) (* 5 3)))
     (should (member '(normal "C-+" agent-repl-feed-text-scale-increase) planted))
     (should (member '(insert "C--" agent-repl-feed-text-scale-decrease) planted))))
 
@@ -1806,6 +1806,32 @@ used to interrupt before the overhaul."
     ;; Assert
     (should (eq (lookup-key map (kbd "C-+")) #'agent-repl-feed-text-scale-increase))
     (should (eq (lookup-key map (kbd "C--")) #'agent-repl-feed-text-scale-decrease))))
+
+(ert-deftest agent-repl-test-input-zoom-keys-plant-c-equal-as-increase ()
+  "`C-=' goes into each Evil state map as the zoom-in command."
+  ;; Arrange
+  (let ((planted nil)
+        (map (make-sparse-keymap)))
+    (cl-letf (((symbol-function 'evil-define-key*)
+               (lambda (state _map key def)
+                 (push (list state (key-description key) def) planted))))
+      ;; Act
+      (agent-repl-bind-feed-zoom-keys map))
+    ;; Assert
+    (should (seq-every-p
+             (lambda (state)
+               (member (list state "C-=" #'agent-repl-feed-text-scale-increase) planted))
+             '(normal motion visual insert emacs)))))
+
+(ert-deftest agent-repl-test-input-zoom-keys-bind-c-equal-in-the-map-itself ()
+  "`C-=' binds the zoom-in command in the map itself, observable under -Q."
+  ;; Arrange
+  (let ((map (make-sparse-keymap)))
+    (cl-letf (((symbol-function 'evil-define-key*) #'ignore))
+      ;; Act
+      (agent-repl-bind-feed-zoom-keys map))
+    ;; Assert
+    (should (eq (lookup-key map (kbd "C-=")) #'agent-repl-feed-text-scale-increase))))
 
 (ert-deftest agent-repl-test-input-feed-text-scale-increase-is-a-command ()
   "The zoom-in target is a real interactive command (so auto-repeat works)."
@@ -1826,6 +1852,11 @@ override of Doom's global text-scale binding is observable here."
   "`C--' in the composer is bound to the feed zoom-out command."
   (should (eq (lookup-key agent-repl-input-mode-map (kbd "C--"))
               #'agent-repl-feed-text-scale-decrease)))
+
+(ert-deftest agent-repl-test-input-c-equal-zooms-feed-in ()
+  "`C-=' in the composer is bound to the feed zoom-in command, as `C-+' is."
+  (should (eq (lookup-key agent-repl-input-mode-map (kbd "C-="))
+              #'agent-repl-feed-text-scale-increase)))
 
 (ert-deftest agent-repl-test-input-feed-text-scale-increase-sends-increase ()
   "Zoom-in asks the daemon for one INCREASE step."
