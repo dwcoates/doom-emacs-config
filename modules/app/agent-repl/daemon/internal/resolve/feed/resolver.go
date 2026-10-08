@@ -492,6 +492,10 @@ type feedState struct {
 	// superseded (superseded.go): the record `upsert` stamps
 	// FeedResponse.superseded from on every draw.
 	superseded map[string]bool
+	// interim marks the prose rows a later row of their turn has proved
+	// interim (interim.go): the record `upsert` stamps FeedResponse.interim
+	// from on every draw.
+	interim map[string]bool
 	// entryRows is, per entry base, how many rows that entry has first drawn
 	// in this feed: the next row's sub-index (order.go).
 	entryRows map[string]uint32
@@ -739,6 +743,7 @@ func (r *resolver) feed(s *wsState, addr feedid.Feed) *feedState {
 		rank:       map[string]rowRank{},
 		nonDurable: map[string]bool{},
 		superseded: map[string]bool{},
+		interim:    map[string]bool{},
 		entryRows:  map[string]uint32{},
 		followers:  map[string]uint32{},
 		retention:  r.deps.TailRetention,
@@ -949,6 +954,8 @@ func (r *resolver) upsert(s *wsState, at placement, row *frontendv1.FeedRow, dur
 	// A THINKING ROW'S `superseded` IS STATED HERE TOO, from the feed's own
 	// record, so every draw of the fold restates it (superseded.go).
 	stampSuperseded(f, id, snapshot)
+	// A PROSE ROW'S `interim` IS STATED HERE TOO (interim.go).
+	stampInterim(f, id, snapshot)
 	// A ROW'S `selectable` IS STATED HERE, on every publication, so a response
 	// gains it on the publication that settles it and no producer can publish
 	// a row whose selectability disagrees with the one rule (selection.go).
@@ -1017,6 +1024,11 @@ func (r *resolver) upsert(s *wsState, at placement, row *frontendv1.FeedRow, dur
 			if earlier := r.supersedeOnPlace(s, f, id, snapshot); earlier != "" {
 				defer r.republishSuperseded(s, at.feed, earlier)
 			}
+		}
+		// ANY LATER ROW OF THE TURN PROVES THE RESPONSE BEFORE IT INTERIM, re-pushed
+		// after this row's own publication (interim.go).
+		if earlier := r.interimOnPlace(s, f, id, snapshot); earlier != "" {
+			defer r.republishInterim(s, at.feed, earlier)
 		}
 	}
 	f.rows[id] = snapshot
@@ -1167,11 +1179,14 @@ func (r *resolver) retire(s *wsState, addr feedid.Feed, id string) bool {
 		return false
 	}
 	wasResponse := isResponseRow(f.rows[id])
+	retiredTurn := f.rows[id].GetTurn().GetValue()
+	retiredCounted := countsAfter(f.rows[id], retiredTurn)
 	key := f.rank[id].key
 	delete(f.rows, id)
 	delete(f.nonDurable, id)
 	delete(f.rank, id)
 	delete(f.superseded, id)
+	delete(f.interim, id)
 	at := -1
 	for i, existing := range f.order {
 		if existing == id {
@@ -1187,6 +1202,13 @@ func (r *resolver) retire(s *wsState, addr feedid.Feed, id string) bool {
 	if wasResponse && at >= 0 {
 		if earlier := r.unsupersedeOnRetire(s, f, id, at); earlier != "" {
 			defer r.republishSuperseded(s, addr, earlier)
+		}
+	}
+	// A RETIRED ROW MAY HAVE BEEN THE ONLY ONE OF ITS TURN AFTER A RESPONSE,
+	// which may then be the answer again (interim.go).
+	if retiredCounted && at >= 0 {
+		if earlier := r.interimOnRetire(s, f, id, retiredTurn, at); earlier != "" {
+			defer r.republishInterim(s, addr, earlier)
 		}
 	}
 	// PUBLISH THE REMOVAL, exactly as upsert publishes a change: mint a
