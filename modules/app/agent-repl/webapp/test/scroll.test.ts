@@ -2449,7 +2449,11 @@ describe("installIntentScroll: an open section keeps its whole wheel", () => {
  * draw no box. The box does not clamp, and ROUND makes it round `scrollTop`
  * the way a real box does.
  */
-function anchoredFeed(heights: number[], scrollTop: number, opts: { round?: boolean } = {}) {
+function anchoredFeed(
+  heights: number[],
+  scrollTop: number,
+  opts: { round?: boolean; clamp?: boolean; exempt?: number[] } = {},
+) {
   const host = document.createElement("div");
   const h = [...heights];
   const hidden = new Set<Element>();
@@ -2465,7 +2469,11 @@ function anchoredFeed(heights: number[], scrollTop: number, opts: { round?: bool
       return top;
     },
     set scrollTop(next: number) {
-      top = opts.round === true ? Math.round(next) : next;
+      const wanted = opts.round === true ? Math.round(next) : next;
+      top =
+        opts.clamp === true
+          ? Math.min(Math.max(wanted, 0), Math.max(0, h.reduce((sum, x) => sum + x, 0) - 300))
+          : wanted;
     },
     clientHeight: 300,
     get scrollHeight() {
@@ -2482,6 +2490,10 @@ function anchoredFeed(heights: number[], scrollTop: number, opts: { round?: bool
       const at = h.slice(0, i).reduce((sum, x) => sum + x, 0) - box.scrollTop;
       return { top: at, bottom: at + (h[i] ?? 0) };
     },
+    exempt: () => (opts.exempt ?? []).flatMap((i) => {
+      const el = host.children[i];
+      return el === undefined ? [] : [el];
+    }),
   };
   let onScroll = (): void => {};
   let onResize = (): void => {};
@@ -2722,7 +2734,108 @@ describe("TailFollow's scroll anchoring", () => {
   });
 });
 
+// A MERGE BUBBLE'S UPDATES NEVER MOVE THE FEED (owner ruling, 2026-10-08): the
+// rows AnchorRows.exempt names grow and shrink without the follow chasing them.
+describe("TailFollow's exempt rows", () => {
+  // Rows at content tops 0, 400, 800, 1200 in a 300px viewport; following at
+  // the tail stands at 1300, with r3 partly in view.
+  const rows = [400, 400, 400, 400];
+
+  it("holds a following reader still when an exempt row in view grows", () => {
+    // Arrange
+    const f = anchoredFeed(rows, 0, { clamp: true, exempt: [3] });
+    f.tail.initialPlacement();
+    f.resize();
+    // Act
+    f.h[3] = 600;
+    f.resize();
+    // Assert
+    expect(f.box.scrollTop).toBe(1300);
+  });
+
+  it("keeps the content still when an exempt row wholly above a following reader grows", () => {
+    // Arrange
+    const f = anchoredFeed(rows, 0, { clamp: true, exempt: [0] });
+    f.tail.initialPlacement();
+    f.resize();
+    // Act
+    f.h[0] = 600;
+    f.resize();
+    // Assert
+    expect(f.box.scrollTop).toBe(1500);
+  });
+
+  it("still follows the tail when a row that is not exempt grows", () => {
+    // Arrange
+    const f = anchoredFeed(rows, 0, { clamp: true, exempt: [3] });
+    f.tail.initialPlacement();
+    f.resize();
+    // Act
+    f.h[2] = 600;
+    f.resize();
+    // Assert
+    expect(f.box.scrollTop).toBe(1500);
+  });
+
+  it("moves nothing on a later follow that finds no size changed", () => {
+    // Arrange
+    const f = anchoredFeed(rows, 0, { clamp: true, exempt: [3] });
+    f.tail.initialPlacement();
+    f.resize();
+    f.h[3] = 600;
+    f.resize();
+    // Act
+    f.tail.follow();
+    // Assert
+    expect(f.box.scrollTop).toBe(1300);
+  });
+
+  it("follows the tail when an exempt row and another row both grow", () => {
+    // Arrange
+    const f = anchoredFeed(rows, 0, { clamp: true, exempt: [3] });
+    f.tail.initialPlacement();
+    f.resize();
+    // Act
+    f.h[3] = 600;
+    f.h[2] = 500;
+    f.resize();
+    // Assert
+    expect(f.box.scrollTop).toBe(1600);
+  });
+
+  it("records a held growth at DEBUG with the exempt rows' delta", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    const f = anchoredFeed(rows, 0, { clamp: true, exempt: [3] });
+    f.tail.initialPlacement();
+    f.resize();
+    // Act
+    f.h[3] = 600;
+    f.resize();
+    // Assert
+    const record = await forwardedRecord(capture, "scroll.exempt-change-held");
+    expect([record.level.case, record.context]).toMatchObject(["debug", { delta: 200, above: 0 }]);
+  });
+});
+
 describe("feedAnchorRows", () => {
+  it("names as exempt the rows holding an element the selector matches", () => {
+    // Arrange
+    const box = document.createElement("div");
+    const host = document.createElement("div");
+    const plain = document.createElement("div");
+    const marked = document.createElement("div");
+    const inner = document.createElement("div");
+    inner.setAttribute("data-merge-bubble", "");
+    marked.append(inner);
+    host.append(plain, marked);
+    // Act
+    const exempt = feedAnchorRows(box, host, "[data-merge-bubble]").exempt?.();
+    // Assert
+    expect(exempt).toEqual([marked]);
+  });
+
+
   it("reads a row that draws no box as null", () => {
     // Arrange — jsdom draws no box for anything.
     const box = document.createElement("div");

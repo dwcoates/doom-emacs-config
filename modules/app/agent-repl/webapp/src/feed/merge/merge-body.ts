@@ -193,38 +193,44 @@ export function drawTabBody(
   rc: RowContext,
 ): void {
   // The tab body is redrawn whole on every change; whatever the previous tab
-  // drew is DISCARDED here, so it is unsubscribed here too.
-  replaceTicking(host);
-  if (tab === undefined) return;
+  // drew is DISCARDED, so it is unsubscribed as it is dropped.
+  //
+  // EVERYTHING IS DRAWN BEFORE THE OLD CONTENT COMES DOWN, and the swap is one
+  // DOM operation (owner ruling, 2026-10-08: a merge bubble's update never
+  // moves a scroll). The expanded bubble's sub-feed is a scroll box, and a row
+  // drawn while the panel stood empty could read layout there, clamping that
+  // box's scroll to the emptied height and throwing the reader back up.
+  if (tab === undefined) {
+    replaceTicking(host);
+    return;
+  }
+  const content = drawTabContent(tab, view, rc);
   host.setAttribute("data-merge-tab-body", tab.kind);
+  replaceTicking(host, content);
+}
 
+/** The selected tab's content, drawn off the document. */
+function drawTabContent(tab: MergeTab, view: SubfeedView, rc: RowContext): HTMLElement[] {
   const path = "FeedMergeTab.kind";
   const kind = requireCase(tab.tab.kind, path);
   switch (kind.case) {
     case "queue":
-      host.append(drawFeedMergeQueue(requireMessage(kind.value.queue, "FeedMergeTabQueue.queue"), rc));
-      return;
+      return [drawFeedMergeQueue(requireMessage(kind.value.queue, "FeedMergeTabQueue.queue"), rc)];
     case "rebasing":
-      host.append(drawFeedMergeTabRebasing(kind.value, `${path}.rebasing`));
-      return;
+      return [drawFeedMergeTabRebasing(kind.value, `${path}.rebasing`)];
     case "tests":
-      host.append(...drawFeedMergeTabTests(kind.value, rc.ctx, `${path}.tests`));
-      return;
+      return drawFeedMergeTabTests(kind.value, rc.ctx, `${path}.tests`);
     case "committing":
-      host.append(drawFeedMergeTabCommitting(kind.value, `${path}.committing`));
-      return;
+      return [drawFeedMergeTabCommitting(kind.value, `${path}.committing`)];
     case "updatingMain":
-      host.append(drawFeedMergeTabUpdatingMain(kind.value, `${path}.updating_main`));
-      return;
+      return [drawFeedMergeTabUpdatingMain(kind.value, `${path}.updating_main`)];
     case "fixes":
       // AGENTIC, and it names which attempt it is above the rows it holds.
-      host.append(drawFeedMergeTabFixesAttempt(kind.value, `${path}.fixes`), drawAgenticRows(tab, view));
-      return;
+      return [drawFeedMergeTabFixesAttempt(kind.value, `${path}.fixes`), drawAgenticRows(tab, view)];
     case "prePrompt":
     case "conflicts":
     case "postPrompt":
-      host.append(drawAgenticRows(tab, view));
-      return;
+      return [drawAgenticRows(tab, view)];
     default: {
       const other: { case: string } = kind;
       return unreachableArm(path, other.case);
@@ -240,14 +246,18 @@ export function drawTabBody(
  * the daemon stamped on each row.
  */
 export function drawAgenticRows(tab: MergeTab, view: SubfeedView): HTMLElement {
-  const el = document.createElement("div");
-  el.className = "merge-tab-rows";
-  el.setAttribute(NEST_ATTRIBUTE, "");
+  // Every row is drawn first and only then moved into the new container, so
+  // no row leaves the document while another is still being drawn.
+  const rows: HTMLElement[] = [];
   for (const row of view.rows()) {
     if (row.row.case === "mergeTab") continue;
     if (parentOf(row) !== tab.id) continue;
-    el.append(view.drawRow(row));
+    rows.push(view.drawRow(row));
   }
+  const el = document.createElement("div");
+  el.className = "merge-tab-rows";
+  el.setAttribute(NEST_ATTRIBUTE, "");
+  el.append(...rows);
   return el;
 }
 
