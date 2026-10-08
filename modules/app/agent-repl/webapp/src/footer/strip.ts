@@ -458,9 +458,44 @@ export function drawFooterSubStatus(
       cell.appendChild(document.createTextNode(" attempt "));
       cell.appendChild(substatusFigure("attempt", `${sub.value.attempt}/${sub.value.maxAttempts}`));
       return cell;
+    case "awaitingFree":
+      // What the merge, which has not started, waits on: the awaited
+      // workspace's turn and detached work, as the daemon counted them.
+      cell.appendChild(document.createTextNode(" "));
+      cell.appendChild(substatusFigure("count", awaitingFreeText(sub.value)));
+      return cell;
     default:
       return cell;
   }
+}
+
+/**
+ * What a merge that has not started waits on, in words: "the turn, 2
+ * subagents, 1 shell", and "in <workspace>" when the awaited workspace is not
+ * this one. Every count reads zero only while the awaited session's facts are
+ * not in yet, which is drawn as such.
+ */
+export function awaitingFreeText(v: {
+  turnInFlight: boolean;
+  subagents: number;
+  shells: number;
+  monitors: number;
+  pending: number;
+  otherWorkspace: string;
+}): string {
+  const parts: string[] = [];
+  if (v.turnInFlight) parts.push("the turn");
+  const counted: Array<[number, string]> = [
+    [v.subagents, "subagent"],
+    [v.shells, "shell"],
+    [v.monitors, "monitor"],
+    [v.pending, "starting task"],
+  ];
+  for (const [n, noun] of counted) {
+    if (n > 0) parts.push(`${n} ${noun}${n === 1 ? "" : "s"}`);
+  }
+  const what = parts.length > 0 ? parts.join(", ") : "the session to come up";
+  return v.otherWorkspace !== "" ? `${what} in ${v.otherWorkspace}` : what;
 }
 
 /** A substatus figure, coloured as the typed datum it is. */
@@ -699,6 +734,7 @@ export function chipGlyph(name: string, character: string): HTMLElement {
  */
 export function subStatusWords(statusCase: string, subCase: string): string {
   if (statusCase === "closing" && subCase === "blocked") return "close blocked";
+  if (statusCase === "merging" && subCase === "awaitingFree") return "waiting for";
   if (statusCase === "mergeFailed" && subCase === "other") return "merge";
   return statusWords(subCase);
 }
