@@ -2,6 +2,16 @@
 import { createHash } from "node:crypto";
 import { writeSync } from "node:fs";
 import { logTimestamp } from "../../../logging/ts/timestamp.js";
+import {
+  expiryContext,
+  expiryMessage,
+  LevelWindow,
+  selectionContext,
+  selectionNote,
+  selectLevel,
+  UNTIL_ENV,
+  type LevelSelection,
+} from "../../../logging/ts/level-window.js";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
 export type LogFields = Record<string, unknown>;
@@ -34,6 +44,8 @@ export interface ShimLogConfiguration {
    */
   workspaceId: string;
   agentReplSessionId: string;
+  /** The clock a level window's end is checked against; tests inject one. */
+  now?: () => number;
 }
 
 interface RuntimeContext {
@@ -49,7 +61,8 @@ interface RuntimeContext {
    */
   shim_workspace_hash: string;
   agent_repl_session_id: string;
-  minimum_level: LogLevel;
+  /** The live threshold: a level other than info reverts to info when its window ends. */
+  window: LevelWindow;
   claude_session_id?: string;
   request_id?: string;
   write: (fd: number, bytes: Buffer, offset: number, length: number) => number;
@@ -101,13 +114,8 @@ const RESERVED_FIELDS = new Set([
   "shim_workspace_hash",
 ]);
 const LOG_LEVEL_ENV = "AGENT_REPL_LOG_LEVEL";
-const LOG_LEVELS: readonly LogLevel[] = ["debug", "info", "warn", "error"];
-const LOG_LEVEL_RANK: Readonly<Record<LogLevel, number>> = {
-  debug: 0,
-  info: 1,
-  warn: 2,
-  error: 3,
-};
+/** The operation of every level window record: the startup decision and a window that ended. */
+const LEVEL_WINDOW_OPERATION = "shim.logging.level-window";
 
 function requireString(fields: LogFields, field: string): string {
   const value = fields[field];
@@ -120,12 +128,14 @@ function requireContext(): RuntimeContext {
   return runtimeContext;
 }
 
-/** Resolve the process-startup persistence and mirror threshold. */
-function configuredLogLevel(): LogLevel {
-  const value = process.env[LOG_LEVEL_ENV];
-  if (value === undefined) return "info";
-  if (LOG_LEVELS.includes(value as LogLevel)) return value as LogLevel;
-  throw new Error(`${LOG_LEVEL_ENV} must be one of ${LOG_LEVELS.join("|")}; got ${describe(value)}`);
+/**
+ * Resolve the process-startup persistence and mirror threshold. A level other
+ * than info holds only inside the window `AGENT_REPL_LOG_LEVEL_UNTIL` names
+ * (proto/vocab/log-level-window.json); an unknown level or a malformed window
+ * is a refusal.
+ */
+function configuredLogLevel(nowMs: number): LevelSelection {
+  return selectLevel(process.env[LOG_LEVEL_ENV], process.env[UNTIL_ENV], nowMs, LOG_LEVEL_ENV);
 }
 
 /** Configure the durable inherited sink exactly once for one shim process. */
@@ -142,7 +152,8 @@ export function configureLog(config: ShimLogConfiguration): void {
     throw new Error("shim workspace id is required");
   }
   if (runtimeContext !== undefined) throw new Error("shim logger has already been configured");
-  const minimumLevel = configuredLogLevel();
+  const now = config.now ?? Date.now;
+  const selection = configuredLogLevel(now());
   // Do not realpath this value: the daemon supplied the canonical cwd and owns symlink resolution.
   runtimeContext = {
     fd: config.fd,
@@ -150,7 +161,7 @@ export function configureLog(config: ShimLogConfiguration): void {
     workspace_id: config.workspaceId,
     shim_workspace_hash: createHash("md5").update(config.cwd).digest("hex").slice(0, 8),
     agent_repl_session_id: config.agentReplSessionId,
-    minimum_level: minimumLevel,
+    window: new LevelWindow(selection, now),
     write: (fd, bytes, offset, length) => writeSync(fd, bytes, offset, length),
   };
   stderrMirror = "live";
@@ -158,6 +169,19 @@ export function configureLog(config: ShimLogConfiguration): void {
   // as an 'error' event, not as a throw from write(). Without this listener it
   // is an uncaught exception and the shim dies mid-turn.
   process.stderr.on("error", (err: Error) => retireStderrMirror(err));
+  const note = selectionNote(selection);
+  if (note !== null) emit("info", "normal", { operation: LEVEL_WINDOW_OPERATION, ...selectionContext(selection) }, note);
+}
+
+/**
+ * Whether RUNTIME's live threshold admits LEVEL now. The first call to find a
+ * level window ended records the revert at info; the window is info by then,
+ * so that record cannot end it again.
+ */
+function levelEnabled(runtime: RuntimeContext, level: LogLevel): boolean {
+  const { allowed, ended } = runtime.window.allows(level);
+  if (ended !== null) emit("info", "normal", { operation: LEVEL_WINDOW_OPERATION, ...expiryContext(ended) }, expiryMessage(ended));
+  return allowed;
 }
 
 /**
@@ -186,7 +210,7 @@ function retireStderrMirror(cause: Error): void {
   stderrMirror = "retired";
   const runtime = runtimeContext;
   if (runtime === undefined || runtime.poisoned !== undefined) return;
-  if (!levelEnabled(runtime.minimum_level, "info")) return;
+  if (!levelEnabled(runtime, "info")) return;
   const record = buildRecord("info", "normal", {
     operation: "shim.logging.stderr-mirror",
     cause: cause.message,
@@ -368,15 +392,11 @@ function poisonSink(runtime: RuntimeContext, failure: Error): void {
   for (const listener of poisonListeners) listener(failure);
 }
 
-function levelEnabled(minimum: LogLevel, level: LogLevel): boolean {
-  return LOG_LEVEL_RANK[level] >= LOG_LEVEL_RANK[minimum];
-}
-
 function emit(level: LogLevel, verbosity: ShimLogRecord["verbosity"], fields: LogFields, message: string): void {
   // Construct and serialize completely before either sink is touched: invalid records emit nowhere.
   const record = buildRecord(level, verbosity, fields, message);
   const runtime = requireContext();
-  if (!levelEnabled(runtime.minimum_level, level)) return;
+  if (!levelEnabled(runtime, level)) return;
   const bytes = Buffer.from(`${JSON.stringify(record)}\n`, "utf8");
   // A POISONED SINK LOSES RECORDS; IT DOES NOT END THE PROCESS. The loss was
   // announced once, and is standing as a degraded window on WatchSession, so

@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { logRecordsSince } from "./log-records.js";
+import { logRecordsSince, logSinkMark } from "./log-records.js";
 import { containing } from "./expect-shapes.js";
 import { writeSync } from "node:fs";
 
 const priorVerbose = process.env.AGENT_REPL_LOG_VERBOSE;
 const priorLevel = process.env.AGENT_REPL_LOG_LEVEL;
+const priorUntil = process.env.AGENT_REPL_LOG_LEVEL_UNTIL;
 const mockedWriteSync = vi.mocked(writeSync);
 
 async function freshLog() {
@@ -20,6 +21,8 @@ function record(line: string): { message?: string } {
 describe("shim runtime logging", () => {
   beforeEach(() => {
     process.env.AGENT_REPL_LOG_LEVEL = "debug";
+    // A level other than info is a window (proto/vocab/log-level-window.json).
+    process.env.AGENT_REPL_LOG_LEVEL_UNTIL = String(Math.floor(Date.now() / 1000) + 300);
     mockedWriteSync.mockReset();
     mockedWriteSync.mockImplementation(((...args: unknown[]) => args[3] as number));
   });
@@ -29,6 +32,8 @@ describe("shim runtime logging", () => {
     else process.env.AGENT_REPL_LOG_VERBOSE = priorVerbose;
     if (priorLevel === undefined) delete process.env.AGENT_REPL_LOG_LEVEL;
     else process.env.AGENT_REPL_LOG_LEVEL = priorLevel;
+    if (priorUntil === undefined) delete process.env.AGENT_REPL_LOG_LEVEL_UNTIL;
+    else process.env.AGENT_REPL_LOG_LEVEL_UNTIL = priorUntil;
   });
 
   async function configured() {
@@ -91,6 +96,76 @@ describe("shim runtime logging", () => {
     // Assert.
     expect(logRecordsSince(0).map((record) => record.level)).toEqual(["info"]);
     expect(terminal).toHaveLength(1);
+  });
+
+  describe("the level window", () => {
+    const configureAt = async (clock: { at: number }) => {
+      const log = await freshLog();
+      log.configureLog({
+        fd: 3, cwd: "/canonical/workspace", workspaceId: "00000000000000dd", agentReplSessionId: "agent-session-1",
+        now: () => clock.at,
+      });
+      return log;
+    };
+
+    it("starts a debug level with no window at info and says so at info", async () => {
+      // Arrange.
+      delete process.env.AGENT_REPL_LOG_LEVEL_UNTIL;
+      const clock = { at: 1_000_000_000 };
+
+      // Act.
+      const log = await configureAt(clock);
+      log.bindLog({ operation: "shim.test.leftover" }).debug({}, "dropped");
+
+      // Assert.
+      const records = logRecordsSince(0);
+      expect(records.map((r) => r.operation)).toEqual(["shim.logging.level-window"]);
+      expect(records[0]).toMatchObject({ level: "info", context: { outcome: "no_expiry" } });
+    });
+
+    it("admits debug records before the window ends", async () => {
+      // Arrange.
+      const clock = { at: 1_000_000_000 };
+      process.env.AGENT_REPL_LOG_LEVEL_UNTIL = String(1_000_000 + 300);
+      const log = await configureAt(clock);
+      const mark = logSinkMark();
+      clock.at = 1_000_299_000;
+
+      // Act.
+      log.bindLog({ operation: "shim.test.inside" }).debug({}, "inside");
+
+      // Assert.
+      expect(logRecordsSince(mark).map((r) => r.level)).toEqual(["debug"]);
+    });
+
+    it("reverts to info when the window ends and records the revert at info", async () => {
+      // Arrange.
+      const clock = { at: 1_000_000_000 };
+      process.env.AGENT_REPL_LOG_LEVEL_UNTIL = String(1_000_000 + 300);
+      const log = await configureAt(clock);
+      const mark = logSinkMark();
+      clock.at = 1_000_300_000;
+
+      // Act.
+      log.bindLog({ operation: "shim.test.after" }).debug({}, "after");
+
+      // Assert.
+      const records = logRecordsSince(mark);
+      expect(records.map((r) => r.operation)).toEqual(["shim.logging.level-window"]);
+      expect(records[0]).toMatchObject({ level: "info", context: { outcome: "window_ended", from_level: "debug" } });
+    });
+
+    it("refuses a malformed window without configuring the sink", async () => {
+      // Arrange.
+      process.env.AGENT_REPL_LOG_LEVEL_UNTIL = "soon";
+      const log = await freshLog();
+
+      // Act + Assert.
+      expect(() => log.configureLog({ fd: 3, cwd: "/canonical/workspace", workspaceId: "00000000000000dd", agentReplSessionId: "agent-session-1" })).toThrow(
+        /AGENT_REPL_LOG_LEVEL_UNTIL must be a Unix second/,
+      );
+      expect(mockedWriteSync).not.toHaveBeenCalled();
+    });
   });
 
   it.each(["", "trace", "INFO"])("rejects invalid AGENT_REPL_LOG_LEVEL value %j without configuring the sink", async (value) => {
