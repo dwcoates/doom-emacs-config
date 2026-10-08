@@ -2140,6 +2140,7 @@ describe("the one-line cap", () => {
   function of(kind: (typeof KINDS)[number]): FeedResponse {
     return response({
       thinking: kind.thinking,
+      interim: !kind.thinking,
       result: { case: kind.state, value: { prose: { markdown: "weighing" } } },
     });
   }
@@ -2263,7 +2264,7 @@ describe("the one-line bubble's more signal", () => {
     const host = document.createElement("div");
     installClickExpand(host, () => "", (section) => refreshHasMore(section));
     const bubble = drawFeedResponse(
-      response({ thinking, result: { case: arm, value: { prose: { markdown: "weighing" } } } }),
+      response({ thinking, interim: !thinking, result: { case: arm, value: { prose: { markdown: "weighing" } } } }),
       rowContext(),
     );
     host.append(bubble);
@@ -2317,8 +2318,8 @@ describe("the one-line bubble's more signal", () => {
  */
 describe("the response bubble at its full height", () => {
   /** A response in ARM carrying MARKDOWN, the turn's answer when FINAL. */
-  function said(arm: "update" | "success" | "error", final = false, markdown = "an answer"): FeedResponse {
-    return response({ finalAnswer: final, result: { case: arm, value: { prose: { markdown } } } as never });
+  function said(arm: "update" | "success" | "error", final = false, markdown = "an answer", interim = false): FeedResponse {
+    return response({ finalAnswer: final, interim, result: { case: arm, value: { prose: { markdown } } } as never });
   }
 
   /** A drawn bubble in a feed host armed with click-to-expand, as feed.ts arms it. */
@@ -2393,9 +2394,9 @@ describe("the response bubble at its full height", () => {
 
   it("opens to its full height when the turn's terminal names an interim response the answer", () => {
     // Arrange — the settled interim, one line.
-    const { bubble } = mounted(said("success"));
+    const { bubble } = mounted(said("success", false, "an answer", true));
     // Act — the daemon re-stamps the row final at the turn's terminal.
-    const redrawn = drawFeedResponse(said("success", true), rowContext(bubble));
+    const redrawn = drawFeedResponse(said("success", true, "an answer", true), rowContext(bubble));
     // Assert — a fresh, uncapped bubble: a box never switches mode in place.
     expect([redrawn === bubble, ...uncapped(redrawn)]).toEqual([false, BUBBLE_UNCAPPED, true]);
   });
@@ -2403,15 +2404,17 @@ describe("the response bubble at its full height", () => {
 
 describe("isInterimResponse", () => {
   it.each([
-    { name: "an arriving response", thinking: false, final: false, state: "update", want: true },
-    { name: "a settled response", thinking: false, final: false, state: "success", want: true },
-    { name: "a response cut short", thinking: false, final: false, state: "error", want: false },
-    { name: "the turn's answer", thinking: false, final: true, state: "success", want: false },
-    { name: "an arriving turn's answer", thinking: false, final: true, state: "update", want: false },
-    { name: "a thinking bubble", thinking: true, final: false, state: "success", want: false },
-  ] as const)("calls $name interim: $want", ({ thinking, final, state, want }) => {
+    { name: "an arriving response proven interim", thinking: false, interim: true, final: false, state: "update", want: true },
+    { name: "a settled response proven interim", thinking: false, interim: true, final: false, state: "success", want: true },
+    { name: "an arriving response not proven interim", thinking: false, interim: false, final: false, state: "update", want: false },
+    { name: "a settled response not proven interim", thinking: false, interim: false, final: false, state: "success", want: false },
+    { name: "a response cut short", thinking: false, interim: true, final: false, state: "error", want: false },
+    { name: "the turn's answer", thinking: false, interim: true, final: true, state: "success", want: false },
+    { name: "an arriving turn's answer", thinking: false, interim: false, final: true, state: "update", want: false },
+    { name: "a thinking bubble", thinking: true, interim: false, final: false, state: "success", want: false },
+  ] as const)("calls $name interim: $want", ({ thinking, interim, final, state, want }) => {
     // Arrange
-    const u = response({ thinking, finalAnswer: final, result: { case: state, value: { prose: { markdown: "x" } } } });
+    const u = response({ thinking, interim, finalAnswer: final, result: { case: state, value: { prose: { markdown: "x" } } } });
     // Act
     const got = isInterimResponse(u);
     // Assert
@@ -2423,6 +2426,14 @@ describe("responseCapLines", () => {
   it.each([
     { name: "a settled interim response", thinking: false, final: false, superseded: false, state: "success", want: 1 },
     { name: "an arriving interim response", thinking: false, final: false, superseded: false, state: "update", want: 1 },
+    {
+      name: "an arriving response not proven interim, which may be the answer",
+      thinking: false,
+      final: false,
+      superseded: false,
+      state: "update",
+      want: BUBBLE_UNCAPPED,
+    },
     { name: "an ordinary response cut short", thinking: false, final: false, superseded: false, state: "error", want: BUBBLE_UNCAPPED },
     { name: "the turn's answer", thinking: false, final: true, superseded: false, state: "success", want: BUBBLE_UNCAPPED },
     { name: "an arriving thinking bubble", thinking: true, final: false, superseded: false, state: "update", want: 1 },
@@ -2436,10 +2447,11 @@ describe("responseCapLines", () => {
       state: "update",
       want: 1,
     },
-  ] as const)("draws $name at cap $want", ({ thinking, final, superseded, state, want }) => {
+  ] as const)("draws $name at cap $want", ({ name, thinking, final, superseded, state, want }) => {
     // Arrange
     const u = response({
       thinking,
+      interim: !thinking && !name.includes("not proven"),
       finalAnswer: final,
       superseded,
       result: { case: state, value: { prose: { markdown: "x" } } },
@@ -2460,7 +2472,7 @@ describe("responseCap", () => {
     { name: "a thinking bubble cut short", thinking: true, final: false, state: "error", want: BUBBLE_MORE_ELLIPSIS },
   ] as const)("gives $name the more signal $want", ({ thinking, final, state, want }) => {
     // Arrange
-    const u = response({ thinking, finalAnswer: final, result: { case: state, value: { prose: { markdown: "x" } } } });
+    const u = response({ thinking, interim: !thinking, finalAnswer: final, result: { case: state, value: { prose: { markdown: "x" } } } });
     // Act
     const got = responseCap(u).more;
     // Assert
@@ -2474,7 +2486,7 @@ describe("responseCap", () => {
     { name: "the turn's answer", thinking: false, final: true, state: "success", want: null },
   ] as const)("stamps $name's bubble data-more $want", ({ thinking, final, state, want }) => {
     // Arrange
-    const u = response({ thinking, finalAnswer: final, result: { case: state, value: { prose: { markdown: "x" } } } });
+    const u = response({ thinking, interim: !thinking, finalAnswer: final, result: { case: state, value: { prose: { markdown: "x" } } } });
     // Act
     const got = drawFeedResponse(u, rowContext()).getAttribute(BUBBLE_MORE_ATTRIBUTE);
     // Assert
@@ -2493,6 +2505,7 @@ describe("the one-line bubble's fixed height", () => {
   function said(state: "update" | "success" | "error", thinking = true): FeedResponse {
     return response({
       thinking,
+      interim: !thinking,
       result: { case: state, value: { prose: { markdown: "weighing" } } },
     });
   }
@@ -2864,13 +2877,14 @@ describe("a re-push updates the bubble in place", () => {
 
 describe("the interim response's hook class", () => {
   it.each([
-    { name: "an arriving response", final: false, state: "update", want: true },
-    { name: "a settled response", final: false, state: "success", want: true },
-    { name: "the turn's answer", final: true, state: "success", want: false },
-    { name: "a response cut short", final: false, state: "error", want: false },
-  ] as const)("marks $name interim: $want", ({ final, state, want }) => {
+    { name: "an arriving response proven interim", interim: true, final: false, state: "update", want: true },
+    { name: "a settled response proven interim", interim: true, final: false, state: "success", want: true },
+    { name: "an arriving response not proven interim", interim: false, final: false, state: "update", want: false },
+    { name: "the turn's answer", interim: true, final: true, state: "success", want: false },
+    { name: "a response cut short", interim: true, final: false, state: "error", want: false },
+  ] as const)("marks $name interim: $want", ({ interim, final, state, want }) => {
     // Arrange
-    const u = response({ finalAnswer: final, result: { case: state, value: { prose: { markdown: "x" } } } });
+    const u = response({ interim, finalAnswer: final, result: { case: state, value: { prose: { markdown: "x" } } } });
     // Act
     const el = drawFeedResponse(u, rowContext());
     // Assert
@@ -2880,7 +2894,7 @@ describe("the interim response's hook class", () => {
   it("takes the class back when the terminal names the interim the answer", () => {
     // Arrange
     const before = drawFeedResponse(
-      response({ result: { case: "success", value: { prose: { markdown: "x" } } } }),
+      response({ interim: true, result: { case: "success", value: { prose: { markdown: "x" } } } }),
       rowContext(),
     );
     // Act

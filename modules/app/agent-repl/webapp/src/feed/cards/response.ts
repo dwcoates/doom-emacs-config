@@ -307,11 +307,11 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
  *
  * AN INTERIM RESPONSE IS ONE LINE (owner request, 2026-10-08,
  * `INTERIM_CAP_LINES`): it collapses to its first line, ending in the ellipsis
- * when more follows, and expands to all of it. It is one line from its first
- * fragment (`isInterimResponse`), so settling into the pear changes nothing
- * about its box and reflows nothing; only the turn's terminal naming it the
- * answer changes its mode, and a box never switches mode in place, so that
- * draw is a fresh, uncapped bubble (src/bubble/draw.ts).
+ * when more follows, and expands to all of it. It is one line once the daemon
+ * proves it interim (`isInterimResponse`); until then it is drawn in full,
+ * like the answer it may still become. A box never switches mode in place, so
+ * the draw that first carries the proof is a fresh, capped bubble
+ * (src/bubble/draw.ts).
  *
  * A THINKING BUBBLE IS A FIXED HEIGHT FROM ITS FIRST FRAGMENT TO LONG AFTER
  * IT LANDS (`THINKING_CAP_LINES`, one line): its arm never changes its cap, so
@@ -336,16 +336,16 @@ export function responseCap(u: FeedResponse): BubbleCapSpec {
 }
 
 /**
- * Whether U is an INTERIM response (owner request, 2026-10-08): prose that is
- * not thinking, that the daemon has not stamped as the turn's answer
- * (`final_answer`), and that the turn's death did not cut short. Arriving
- * (`update`) or settled into the pear (`success`) alike: which response
- * answers the turn is the daemon's to say, and it says so only at the turn's
- * terminal, so until then every response is drawn as the interim it most
- * often is. Every fact here is the row's own.
+ * Whether U is an INTERIM response (owner request, 2026-10-08): prose the
+ * daemon has PROVEN interim (`interim`: a later row of its turn landed after
+ * it), that is not the turn's answer (`final_answer`), and that the turn's
+ * death did not cut short. A response that is still its turn's latest row is
+ * NOT interim, so a final answer is drawn in full from its first fragment and
+ * never collapses, not even while it streams. Every fact here is the row's
+ * own; which response is interim is the daemon's to say.
  */
 export function isInterimResponse(u: FeedResponse): boolean {
-  return !u.thinking && !u.finalAnswer && u.result.case !== "error";
+  return !u.thinking && u.interim && !u.finalAnswer && u.result.case !== "error";
 }
 
 /**
