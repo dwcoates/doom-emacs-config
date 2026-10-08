@@ -92,8 +92,16 @@ func (r *run) resumeRun(ctx context.Context) error {
 		return err
 	}
 	// THE BUBBLE IS THE ONE THE MERGE ALREADY HAD, drawn live again, and the
-	// footer shows the step the merge stands on before that step speaks.
-	r.head(nil)
+	// footer shows the step the merge stands on before that step speaks. A
+	// merge that had not left its queue had not started, so it has no bubble
+	// yet: it is placed once the workspace is free, as a fresh admission's is.
+	started := r.resume.Step != TabQueue
+	if started {
+		r.mu.Lock()
+		r.placed = true
+		r.mu.Unlock()
+		r.head(nil)
+	}
 	o.publish(ws, r.factsNow())
 	if err := o.republishQueue(ctx, r.repo); err != nil {
 		r.end(ctx, fmt.Errorf("could not publish the queue: %w", err))
@@ -106,6 +114,10 @@ func (r *run) resumeRun(ctx context.Context) error {
 		// THE MERGE HAD NOT LEFT THE QUEUE: it waits for its workspaces to
 		// fall free exactly as a fresh admission does.
 		if err := r.awaitWorkspacesFree(ctx); err != nil {
+			r.end(ctx, err)
+			return err
+		}
+		if err := r.place(ctx); err != nil {
 			r.end(ctx, err)
 			return err
 		}

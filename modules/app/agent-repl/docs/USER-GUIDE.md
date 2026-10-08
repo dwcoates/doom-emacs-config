@@ -71,7 +71,11 @@ These clicks jump to an entry in the feed:
 
 ## The merge bubble
 
-- **A merge bubble is open while the merge is queued, runs, waits on you, hits conflicts, fails or is abandoned.**
+- **A merge's bubble appears only when the merge starts, so while it runs it is always the last thing in the feed.**
+  - A merge waiting in line behind another, or waiting for your workspace to finish its turn and its background work, has no bubble yet.
+  - While it waits for your workspace, the footer reads `merging · waiting for` what is still running (the turn, subagents, shells), and the sidebar dot and the Emacs tab are purple with the waiting glyph.
+  - Prompts you send meanwhile are held, as during the merge, and anything a background agent's turn writes lands above where the bubble will be.
+- **A merge bubble is open while the merge runs, waits on you, hits conflicts, fails or is abandoned.**
   - Click its head to close it; it stays closed until you click the head again.
 - **A merge bubble never closes on its own, with one exception: a merge that succeeds closes its bubble.**
   - Scrolling back to the bottom of the feed, scrolling it out of view after a jump opened it, switching windows and new merge progress all leave it open.
@@ -211,6 +215,11 @@ The footer's `disconnected` status has three vendor substatuses for a Claude SDK
 - **It is immediate and takes no prefix argument.**
   - There is no graceful mode: the running turn and all detached work are hard-stopped, because a workspace needs this when something is stuck.
   - Prompts sent meanwhile are held "after reconnect" and delivered once the session is back.
+- **It shows nothing when it works.**
+  - The restart simply happens: the fresh session and the reloaded page are the whole account of it.
+  - If the relaunch fails, Emacs says "the restart failed:" with the reason, and the sidebar's Restart entry shows it too.
+- **A merge waiting for the workspace does not block it.**
+  - The merge waits through the restart and starts once the fresh session is free.
 - **When to use it:**
   - A turn never ends.
   - The footer reads `vendor rejection` or `vendor failed`, or the Claude SDK is not responding.

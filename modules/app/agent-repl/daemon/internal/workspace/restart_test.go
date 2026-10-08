@@ -101,10 +101,8 @@ func TestRestartPushesTheWebappReloadAfterTheRelaunch(t *testing.T) {
 	}
 }
 
-// TestRestartRecordsARelaunchFailure covers where a relaunch failure now goes.
-// The verb ACCEPTS and the engine runs behind it -- it waits for freeness,
-// forever if need be -- so nobody is waiting on the failure to be returned;
-// it is recorded at ERROR instead, and the relaunch's own fault carries it.
+// TestRestartRecordsARelaunchFailure covers the record a relaunch failure
+// leaves: ERROR, and no reload.
 func TestRestartRecordsARelaunchFailure(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
@@ -112,9 +110,7 @@ func TestRestartRecordsARelaunchFailure(t *testing.T) {
 	f.rollout.relaunchErr = errors.New("the shim would not stand down")
 
 	// Act.
-	if err := f.verbs.Restart(context.Background(), "w1"); err != nil {
-		t.Fatalf("Restart: %v", err)
-	}
+	_ = f.verbs.Restart(context.Background(), "w1")
 
 	// Assert.
 	//
@@ -347,9 +343,7 @@ func TestADeferralToldToTheRestartIsRecordedAsAContractBreach(t *testing.T) {
 	f.rollout.relaunchErr = bounce.ErrDeferred
 
 	// Act.
-	if err := f.verbs.Restart(context.Background(), "w1"); err != nil {
-		t.Fatalf("Restart: %v", err)
-	}
+	_ = f.verbs.Restart(context.Background(), "w1")
 
 	// Assert: the fake signals only once the completion has run.
 	f.rollout.awaitRelaunch(t)
@@ -365,5 +359,175 @@ func TestADeferralToldToTheRestartIsRecordedAsAContractBreach(t *testing.T) {
 	}
 	if got := f.rollout.reloadCalls(); len(got) != 0 {
 		t.Fatalf("webapp reloads = %v, want none for a restart that did not finish", got)
+	}
+}
+
+// TestARestartAnswersAFailedRelaunchAsRelaunchFailed pins the answer: the
+// restart's caller is told the relaunch failed, with its cause (owner ruling,
+// 2026-10-08), never a success for a restart that did not happen.
+func TestARestartAnswersAFailedRelaunchAsRelaunchFailed(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.rollout.relaunchErr = errors.New("could not take the restart-pending hold")
+
+	// Act.
+	err := f.verbs.Restart(context.Background(), "w1")
+
+	// Assert.
+	refusal, ok := AsRefusal(err)
+	if !ok || refusal.Arm != "relaunch_failed" || refusal.Fields["detail"] != "could not take the restart-pending hold" {
+		t.Fatalf("Restart = %v, want the relaunch_failed refusal carrying the cause", err)
+	}
+}
+
+// TestARestartAnswersADeferralAsRelaunchFailed covers the contract breach: a
+// deferral is no restart that happened.
+func TestARestartAnswersADeferralAsRelaunchFailed(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.rollout.relaunchErr = bounce.ErrDeferred
+
+	// Act.
+	err := f.verbs.Restart(context.Background(), "w1")
+
+	// Assert.
+	if refusal, ok := AsRefusal(err); !ok || refusal.Arm != "relaunch_failed" {
+		t.Fatalf("Restart = %v, want the relaunch_failed refusal", err)
+	}
+}
+
+// TestARestartAnswersOnlyOnceItHappened pins the order: the reload a finished
+// restart pushes has been pushed by the time the restart answers.
+func TestARestartAnswersOnlyOnceItHappened(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+
+	// Act.
+	err := f.verbs.Restart(context.Background(), "w1")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Restart = %v, want nil", err)
+	}
+	if got := f.rollout.reloadCalls(); len(got) != 1 {
+		t.Fatalf("webapp reloads when the restart answered = %v, want the one a finished restart pushes", got)
+	}
+}
+
+// TestARestartWhoseCallerLeavesAnswersTheCallersEnd covers a caller that
+// stops waiting: the answer is the context's end, recorded at ERROR.
+func TestARestartWhoseCallerLeavesAnswersTheCallersEnd(t *testing.T) {
+	// Arrange: a bounce that never finishes.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.rollout.hold = make(chan struct{})
+	t.Cleanup(func() { close(f.rollout.hold) })
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act.
+	err := f.verbs.Restart(ctx, "w1")
+
+	// Assert.
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Restart = %v, want the caller's end", err)
+	}
+	awaitRecord(t, f, "error", opRestart)
+}
+
+// TestAnUnregisteredRestartAnswersSuccess covers nothing left to replace: the
+// restart's purpose already holds.
+func TestAnUnregisteredRestartAnswersSuccess(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.rollout.relaunchErr = bounce.ErrUnregistered
+
+	// Act.
+	err := f.verbs.Restart(context.Background(), "w1")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Restart = %v, want nil", err)
+	}
+}
+
+// TestARestartSuspendsTheWorkspacesMergeBeforeTheBounceAndResumesItAfter pins
+// the order (owner ruling, 2026-10-08): the merge lets go before the shim is
+// replaced and is taken back once the restart finished.
+func TestARestartSuspendsTheWorkspacesMergeBeforeTheBounceAndResumesItAfter(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+
+	// Act.
+	err := f.verbs.Restart(context.Background(), "w1")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Restart = %v, want nil", err)
+	}
+	if got := f.merge.steps; len(got) != 2 || got[0] != "suspend:w1" || got[1] != "resume:w1" {
+		t.Fatalf("merge steps = %v, want the suspension then the take-back", got)
+	}
+}
+
+// TestARestartTakesTheMergeBackAfterAFailedRelaunch pins the take-back on
+// every outcome: a failed relaunch leaves no merge suspended for good.
+func TestARestartTakesTheMergeBackAfterAFailedRelaunch(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.rollout.relaunchErr = errors.New("the prelaunch failed")
+
+	// Act.
+	_ = f.verbs.Restart(context.Background(), "w1")
+
+	// Assert.
+	if got := f.merge.steps; len(got) != 2 || got[1] != "resume:w1" {
+		t.Fatalf("merge steps = %v, want the merge taken back", got)
+	}
+}
+
+// TestARestartWhoseMergeWillNotLetGoIsRefused covers the merge that does not
+// reach a stopping point: the restart bounces nothing, says why, and takes the
+// merge back.
+func TestARestartWhoseMergeWillNotLetGoIsRefused(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.merge.suspendErr = errors.New("the merge did not let go within 7s")
+
+	// Act.
+	err := f.verbs.Restart(context.Background(), "w1")
+
+	// Assert.
+	refusal, ok := AsRefusal(err)
+	if !ok || refusal.Arm != "relaunch_failed" {
+		t.Fatalf("Restart = %v, want the relaunch_failed refusal", err)
+	}
+	if got := f.rollout.relaunchCalls(); len(got) != 0 {
+		t.Fatalf("relaunches = %+v, want none when the merge would not let go", got)
+	}
+	if got := f.merge.steps; len(got) != 2 || got[1] != "resume:w1" {
+		t.Fatalf("merge steps = %v, want the merge taken back", got)
+	}
+	awaitRecord(t, f, "error", opRestart)
+}
+
+// TestRelaunchFailedCarriesItsDetail pins the one refusal's shape every
+// relaunch_failed site shares.
+func TestRelaunchFailedCarriesItsDetail(t *testing.T) {
+	// Arrange: nothing beyond the inputs.
+
+	// Act.
+	refusal := relaunchFailed("w1", "the shim died")
+
+	// Assert.
+	if refusal.Rpc != "RestartWorkspace" || refusal.Arm != "relaunch_failed" || refusal.Fields["detail"] != "the shim died" {
+		t.Fatalf("refusal = %+v, want RestartWorkspace's relaunch_failed carrying the detail", refusal)
 	}
 }

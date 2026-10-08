@@ -1427,12 +1427,74 @@ func (w *watcher) routeDetachedWorkLocked(announcer *conversationv1.AgentId, wor
 		return
 	}
 
+	if work.GetConcluded() != nil && w.concludedFirstLocked(work, kind) {
+		return
+	}
+
 	if !w.describeLocked(work) {
 		return
 	}
 	if w.admitDescribedLocked(work) {
 		w.publishLiveWorkLocked()
 	}
+}
+
+// concludedFirstLocked takes an announcement the shim made at the work's
+// CONCLUSION (AgentDetachedWork.concluded), and reports whether it was the
+// first the watcher heard of the work -- in which case the work is recorded
+// concluded and never admitted, and the caller is done.
+//
+// WORK FIRST LEARNED AT ITS END IS NOT LIVE (owner ruling, 2026-10-08). A shell
+// a backgrounded subagent launched never reached the main plane's fold until
+// the vendor reported it ended; admitted then, it stood live waiting on a
+// WatchBash terminal the store could not yet serve, and a merge waiting for
+// the workspace to fall free waited forever. So the handle is retired at once
+// (retiredWork: no later announcement or level re-admits it), and nothing is
+// published, because the live set did not change.
+//
+// A SHELL'S RECORD IS STILL READ TO ITS END. Its run's rows -- the sidecar's
+// output and terminal, the exit status the feed draws -- are opened as a
+// watch that is NOT live work: a refusal re-opens on the clock like any other
+// (reopen.go), and the terminal reaps it (routeBashLocked). Nothing about that
+// watch counts toward freeness.
+//
+// Work the watcher already holds live (or pending) is not judged here: its
+// own terminal concludes it, and a running shell's stream is never ended
+// early on a restatement.
+func (w *watcher) concludedFirstLocked(work *conversationv1.AgentDetachedWork, kind detachedKind) bool {
+	handle := work.GetWork().GetValue()
+	if handle == "" {
+		return false
+	}
+	if _, live := w.live[handle]; live {
+		w.log.Debug("daemon.sessionwatcher.detached_work_concluded", "an announcement restated live work's end; its own terminal concludes it", dlog.Context{
+			"work_id": handle, "kind": kind.String(),
+		})
+		return false
+	}
+	if _, waiting := w.pending[handle]; waiting {
+		w.log.Debug("daemon.sessionwatcher.detached_work_concluded", "an announcement restated pending work's end; its own terminal concludes it", dlog.Context{
+			"work_id": handle, "kind": kind.String(),
+		})
+		return false
+	}
+	w.retiredWork[handle] = struct{}{}
+	w.describeOnlyLocked(work)
+	read := "none"
+	if kind == kindBash {
+		if _, watched := w.shells[handle]; !watched {
+			entry := &shellWatch{work: work.GetWork()}
+			w.shells[handle] = entry
+			w.openShellStreamLocked(entry)
+			read = "opened"
+		} else {
+			read = "already_open"
+		}
+	}
+	w.log.Info("daemon.sessionwatcher.detached_work_concluded", "work first announced at its conclusion is recorded concluded and never enters the live set", dlog.Context{
+		"work_id": handle, "kind": kind.String(), "record_read": read, "live": len(w.live),
+	})
+	return true
 }
 
 // admitDescribedLocked admits one described item to the ledger and opens its
@@ -1717,6 +1779,15 @@ func (w *watcher) routeBashLocked(s *shellWatch, bash *conversationv1.AgentBash)
 	})
 	if w.concludeLocked(s.work.GetValue(), concludedBashTerminal) {
 		w.publishLiveWorkLocked()
+		return
+	}
+	// A RECORD READ OF WORK THAT WAS NEVER LIVE (concludedFirstLocked) ends at
+	// its terminal: the watch alone goes.
+	if w.shells[s.work.GetValue()] == s {
+		watch := w.dropShellWatchLocked(s.work.GetValue(), s)
+		w.log.Info("daemon.sessionwatcher.bash_terminal", "a concluded shell's record was read to its terminal; its watch is reaped", dlog.Context{
+			"work_id": s.work.GetValue(), "watch": watch,
+		})
 	}
 }
 

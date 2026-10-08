@@ -2335,6 +2335,7 @@ export const ROSTER_STATUS_ARMS = [
   "turnDied",
   "merging",
   "mergeQueued",
+  "mergeWaiting",
   "mergeFailed",
   "merged",
   "none",
@@ -2361,6 +2362,7 @@ function repositoryFold(collapsed: boolean): MessageInitShape<typeof RosterRepoS
 export const ROSTER_MERGE_ARMS = [
   "merging",
   "mergeQueued",
+  "mergeWaiting",
   "mergeFailed",
   "merged",
 ] as const;

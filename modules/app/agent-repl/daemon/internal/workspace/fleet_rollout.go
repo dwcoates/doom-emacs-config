@@ -72,14 +72,82 @@ func (f *Fleet) Free(ws ids.WorkspaceID) bool {
 // AwaitFree blocks until the workspace is free, or until ctx ends. It waits on
 // the watcher's stream edges; there is no poll and no timer anywhere beneath
 // it.
+//
+// THE WAIT FOLLOWS THE WORKSPACE, NOT ONE WATCHER (owner ruling, 2026-10-08).
+// A watcher closed under the wait -- a re-open, an adoption, a relaunch
+// replacing the shim -- is not the workspace falling free and not a failure:
+// the wait is registered again on the workspace's CURRENT watcher. A session
+// whose shim is installed but whose watcher is not up yet is coming up, and
+// is waited through rather than read as free. Measured 2026-10-08T19:02:40,
+// workspace `doom`: a resumed merge's wait answered "the watcher closed while
+// a wait was standing" and the merge failed. Only a workspace with no session
+// at all answers free at once, as before.
 func (f *Fleet) AwaitFree(ctx context.Context, ws ids.WorkspaceID) error {
-	f.mu.RLock()
-	session, ok := f.sessions[ws]
-	f.mu.RUnlock()
-	if !ok || session.watcher == nil {
-		return nil
+	for {
+		f.mu.RLock()
+		session, ok := f.sessions[ws]
+		var watcher sessionwatcher.Watcher
+		var client shimclient.Client
+		if ok {
+			watcher, client = session.watcher, session.client
+		}
+		moved := f.sessionsMoved
+		f.mu.RUnlock()
+		if !ok || (watcher == nil && client == nil) {
+			return nil
+		}
+		log := f.logFor(ctx, ws)
+		if watcher == nil {
+			log.Info("daemon.workspace.await_free", "the workspace's session is coming up; the freeness wait waits for its watcher", nil)
+			if err := waitMoved(ctx, moved); err != nil {
+				return err
+			}
+			continue
+		}
+		err := watcher.AwaitFree(ctx)
+		if !errors.Is(err, sessionwatcher.ErrWatcherClosed) {
+			return err
+		}
+		log.Info("daemon.workspace.await_free", "the watcher a freeness wait stood on closed; the wait moves to the workspace's next watcher", nil)
+		f.mu.RLock()
+		current, still := f.sessions[ws]
+		unchanged := still && current == session && current.watcher == watcher
+		moved = f.sessionsMoved
+		f.mu.RUnlock()
+		if unchanged {
+			if err := waitMoved(ctx, moved); err != nil {
+				return err
+			}
+		}
 	}
-	return session.watcher.AwaitFree(ctx)
+}
+
+// logFor resolves a workspace's own log, or the central one when its record
+// cannot be read.
+func (f *Fleet) logFor(ctx context.Context, ws ids.WorkspaceID) dlog.Logger {
+	record, err := f.deps.DB.Workspace(ctx, ws)
+	if err != nil {
+		return f.deps.Log.Global().With(dlog.Context{"workspace": string(ws)})
+	}
+	return f.deps.Log.WorkspaceOrCentral(record.Dir)
+}
+
+// waitMoved waits for the fleet's next session change, or ctx's end.
+func waitMoved(ctx context.Context, moved <-chan struct{}) error {
+	select {
+	case <-moved:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// movedLocked announces a change to a workspace's session entry or watcher to
+// every freeness wait standing on the old one. Called with f.mu held for
+// writing.
+func (f *Fleet) movedLocked() {
+	close(f.sessionsMoved)
+	f.sessionsMoved = make(chan struct{})
 }
 
 // AwaitTurnEnd blocks until one submitted turn ends and reports how. A
@@ -378,6 +446,7 @@ func (f *Fleet) Install(ctx context.Context, ws ids.WorkspaceID, c shimclient.Cl
 	// itself. So the flag is not carried from the retired entry the way the
 	// host identity is -- it is false here, and the adopting callers set it.
 	f.sessions[ws] = &live{client: c, hostSessionID: carried}
+	f.movedLocked()
 	_, gateStood := f.coldGates[ws]
 	delete(f.coldGates, ws)
 	f.mu.Unlock()
@@ -567,6 +636,7 @@ func (f *Fleet) watchInstalled(ctx context.Context, ws ids.WorkspaceID, c shimcl
 		attached = current.watcher != nil
 		displaced = current.watcher
 		current.watcher = watcher
+		f.movedLocked()
 	}
 	f.mu.Unlock()
 	// THE WATCHER THIS ONE REPLACES IS CLOSED, for the reason `remember`
@@ -826,14 +896,7 @@ func (f *Fleet) logKillDidNotAnswer(ctx context.Context, ws ids.WorkspaceID, for
 // ordinary shape -- a cold-gated workspace and a relaunch's prelaunched shim
 // both reach it -- and the stop it precedes is recorded on its own.
 func (f *Fleet) logNoSessionToKill(ctx context.Context, ws ids.WorkspaceID, force bool) {
-	record, err := f.deps.DB.Workspace(ctx, ws)
-	if err != nil {
-		f.deps.Log.Global().Debug(opBringUp, "no session was started on this shim; stopping the process",
-			dlog.Context{"workspace": string(ws), "force": force})
-		return
-	}
-	f.deps.Log.WorkspaceOrCentral(record.Dir).Debug(opBringUp,
-		"no session was started on this shim; stopping the process",
+	f.logFor(ctx, ws).Debug(opBringUp, "no session was started on this shim; stopping the process",
 		dlog.Context{"workspace": string(ws), "force": force})
 }
 
@@ -865,6 +928,7 @@ func (f *Fleet) HandOver(ws ids.WorkspaceID) (bool, error) {
 	if ok {
 		watcher = session.watcher
 		session.watcher = nil
+		f.movedLocked()
 	}
 	f.mu.Unlock()
 	if !ok {
@@ -888,6 +952,7 @@ func (f *Fleet) HandOver(ws ids.WorkspaceID) (bool, error) {
 		delete(f.sessions, ws)
 		delete(f.coldGates, ws)
 		delete(f.lastCold, ws)
+		f.movedLocked()
 	}
 	f.mu.Unlock()
 	f.logTransition(ws, "session_live", true, false,

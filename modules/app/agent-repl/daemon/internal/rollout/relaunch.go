@@ -120,6 +120,9 @@ func (c *controller) shimBounce(reason RelaunchReason, force bool) bounce.Func {
 
 		old, hasOld := c.deps.Shims.Client(ws)
 		var lease *wsm.Lease
+		// mergeHeld records that the workspace's MERGE lease already holds its
+		// prompts for this restart (relaunchOnce), so no pass asks again.
+		mergeHeld := false
 		// THE HOLD'S LIFETIME IS THIS BOUNCE'S SCOPE: it is released on every
 		// way out of here, success and each failure alike, and on a context the
 		// caller's cancellation cannot reach -- a stand-down that ended with its
@@ -131,7 +134,7 @@ func (c *controller) shimBounce(reason RelaunchReason, force bool) bounce.Func {
 			}
 		}()
 		for {
-			fresh, resumed, err := c.relaunchOnce(ctx, ws, reason, force, old, hasOld, &lease, fields)
+			fresh, resumed, err := c.relaunchOnce(ctx, ws, reason, force, old, hasOld, &lease, &mergeHeld, fields)
 			if errors.Is(err, ErrResumeRestarted) {
 				// A RESTART ENDED THE RESUME'S VENDOR-START RUN. The restart
 				// wants this workspace relaunched at once, so the shim this
@@ -155,7 +158,7 @@ func (c *controller) shimBounce(reason RelaunchReason, force bool) bounce.Func {
 // restart-pending hold (taken once per bounce, into *lease), the stand-down
 // and reap of `old`, the install and the resume. It answers the installed
 // shim and the resume's outcome.
-func (c *controller) relaunchOnce(ctx context.Context, ws ids.WorkspaceID, reason RelaunchReason, force bool, old shimclient.Client, hasOld bool, lease **wsm.Lease, fields dlog.Context) (shimclient.Client, Resumed, error) {
+func (c *controller) relaunchOnce(ctx context.Context, ws ids.WorkspaceID, reason RelaunchReason, force bool, old shimclient.Client, hasOld bool, lease **wsm.Lease, mergeHeld *bool, fields dlog.Context) (shimclient.Client, Resumed, error) {
 	// THE PRELAUNCH COEXISTS WITH THE LIVE SHIM. An inert shim holds NEITHER
 	// kernel lock -- by ruling the shim takes both inside StartSession, not
 	// at startup -- so a second process for one workspace comes up beside
@@ -167,18 +170,31 @@ func (c *controller) relaunchOnce(ctx context.Context, ws ids.WorkspaceID, reaso
 	}
 	c.log.Debug(opRelaunch, "prelaunched an inert shim beside the running one", fields)
 
-	if *lease == nil {
+	if *lease == nil && !*mergeHeld {
 		taken, err := c.deps.DB.AcquireLease(ctx, ws, wsm.HolderRestart, wsm.PolicyHold)
-		if err != nil {
+		if mergeHoldsTheWorkspace(reason, err) {
+			// A RESTART OVER A MERGE'S LEASE (owner ruling, 2026-10-08). The
+			// restart verb suspended the merge before asking for this bounce
+			// (merge.SuspendForRestart), so the merge drives nothing while the
+			// shim is replaced, and its lease -- a HOLD policy, like the
+			// restart's own -- already holds every prompt the user sends. The
+			// restart takes no second hold; the merge resumes after it. Before
+			// this the relaunch failed here (2026-10-08 18:55:03, workspace
+			// `doom`) and the restart did nothing.
+			*mergeHeld = true
+			fields["held_by"] = "merge"
+			c.log.Info(opRelaunch, "the workspace's suspended merge already holds its prompts; the restart takes no hold of its own", withCause(fields, err))
+		} else if err != nil {
 			c.log.Error(opRelaunch, "could not take the restart-pending hold", withCause(fields, err))
 			c.retirePrelaunch(ctx, fresh, reason, fields)
 			return nil, Resumed{}, fmt.Errorf("rollout: relaunch %q: take the restart hold: %w", ws, err)
+		} else {
+			*lease = &taken
+			fields["lease"] = string(taken.ID)
+			c.deps.LeaseChanged(ws)
+			c.publishHost(ws)
+			c.log.Debug(opRelaunch, "took the restart-pending hold; the tray draws it now", fields)
 		}
-		*lease = &taken
-		fields["lease"] = string(taken.ID)
-		c.deps.LeaseChanged(ws)
-		c.publishHost(ws)
-		c.log.Debug(opRelaunch, "took the restart-pending hold; the tray draws it now", fields)
 	}
 
 	if hasOld {
@@ -471,6 +487,15 @@ func killRefusal(failure *shimv1.KillSessionFailure) string {
 	default:
 		return "unspecified"
 	}
+}
+
+// mergeHoldsTheWorkspace reports whether a restart-pending hold was refused
+// because the workspace's MERGE holds its lease, which only a RestartWorkspace
+// may take as standing in for its own hold: the verb suspended the merge
+// first. Any other bounce over a merge's lease still fails on it.
+func mergeHoldsTheWorkspace(reason RelaunchReason, err error) bool {
+	var held *wsm.LeaseHeldError
+	return reason == ReasonRestartVerb && errors.As(err, &held) && held.Holder == wsm.HolderMerge
 }
 
 // release drops the restart-pending hold and TELLS THE QUEUE, which is what
