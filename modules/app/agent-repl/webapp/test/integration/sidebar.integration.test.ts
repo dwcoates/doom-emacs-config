@@ -85,13 +85,43 @@ describe("arm coverage", () => {
 });
 
 describe("the groupings", () => {
-  it("carries both groupings from one push", async () => {
-    // Arrange / Act: both arrive resolved as siblings on the same view.
+  it("carries every grouping from one push", async () => {
+    // Arrange / Act: every one arrives resolved as siblings on the same view.
     await withRoster({});
     // Assert
     expect(harness.$$("[data-grouping]").map((el) => el.dataset.grouping).sort()).toEqual([
+      "maturity",
       "repository",
       "task",
+    ]);
+  });
+
+  it("shows the maturity grouping when the daemon says every page shows it", async () => {
+    // Arrange / Act
+    await withRoster({ shown: "maturity" });
+    // Assert
+    expect(harness.$('[data-grouping="maturity"]')?.hidden).toBe(false);
+  });
+
+  it("asks the daemon to show the maturity grouping on its pick", async () => {
+    // Arrange
+    await withRoster({});
+    harness.fake.clearCalls();
+    // Act
+    await harness.click('[data-grouping-pick="maturity"]');
+    // Assert
+    const [request] = harness.fake.calls<UpdateSidebarViewRequest>("updateSidebarView");
+    expect(request?.change.case === "showGrouping" ? request.change.value.grouping.case : "none").toBe("maturity");
+  });
+
+  it("draws the maturity stages' headers verbatim, in the daemon's order", async () => {
+    // Arrange / Act
+    await withRoster({ shown: "maturity" });
+    // Assert
+    expect(harness.$$('[data-grouping="maturity"] .maturity-section .sb-label').map((el) => el.textContent)).toEqual([
+      "Backlog",
+      "In Progress",
+      "Merging",
     ]);
   });
 
@@ -165,6 +195,37 @@ function askedFold(): { section: string | undefined; fold: string | undefined } 
   if (request?.change.case !== "foldSection") return { section: undefined, fold: undefined };
   return { section: request.change.value.section.case, fold: request.change.value.fold.case };
 }
+
+/** The in-progress stage's fold triangle. */
+const IN_PROGRESS_FOLD = '[data-grouping="maturity"] [data-maturity-stage="inProgress"] [data-section-fold]';
+
+describe("maturity stage folds", () => {
+  it("asks the daemon to collapse a stage, naming the stage", async () => {
+    // Arrange
+    await withRoster({ shown: "maturity" });
+    harness.fake.clearCalls();
+    // Act
+    await harness.click(IN_PROGRESS_FOLD);
+    // Assert
+    const [request] = harness.fake.calls<UpdateSidebarViewRequest>("updateSidebarView");
+    const section = request?.change.case === "foldSection" ? request.change.value.section : undefined;
+    expect([section?.case, section?.case === "maturity" ? section.value.stage.case : undefined, askedFold().fold]).toEqual([
+      "maturity",
+      "inProgress",
+      "collapse",
+    ]);
+  });
+
+  it("draws the fold the daemon pushes", async () => {
+    // Arrange
+    await withRoster({ shown: "maturity" });
+    // Act
+    harness.fake.setRoster(roster({ shown: "maturity", inProgressCollapsed: true }));
+    await harness.settle();
+    // Assert
+    expect(harness.$(IN_PROGRESS_FOLD)?.dataset.folded).toBe("true");
+  });
+});
 
 describe("task folds", () => {
   it("folds a task section at once on click", async () => {

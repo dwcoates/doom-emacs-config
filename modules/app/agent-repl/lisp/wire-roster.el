@@ -771,6 +771,66 @@ THE ARM IS THE FOLD, the daemon's view state; it is never unset."
                   #'agent-repl-wire-decode-roster-task-section-rows)
            :fold (agent-repl-wire-decode-roster-task-section-fold object)))))
 
+(defun agent-repl-wire-decode-roster-maturity-key-stage (value)
+  "Decode `RosterMaturityKey''s `stage' field VALUE as a MaturityStage."
+  (agent-repl-wire-decode-maturity-stage value))
+
+(defun agent-repl-wire-decode-roster-maturity-key (value)
+  "Decode VALUE as `RosterMaturityKey', a plist `(:stage STAGE)'."
+  (let ((object (agent-repl-wire--object "RosterMaturityKey" value)))
+    (agent-repl-wire--check-keys "RosterMaturityKey" object '(stage))
+    (agent-repl-wire--decoded
+     "RosterMaturityKey"
+     (list :stage (agent-repl-wire--decode-message
+                   "RosterMaturityKey" 'stage object
+                   #'agent-repl-wire-decode-roster-maturity-key-stage)))))
+
+(defun agent-repl-wire-decode-roster-maturity-section-key (value)
+  "Decode `RosterMaturitySection''s `key' field VALUE as a RosterMaturityKey."
+  (agent-repl-wire-decode-roster-maturity-key value))
+
+(defun agent-repl-wire-decode-roster-maturity-section-header (value)
+  "Decode `RosterMaturitySection''s `header' field VALUE."
+  (agent-repl-wire-decode-roster-section-header value))
+
+(defun agent-repl-wire-decode-roster-maturity-section-rows (value)
+  "Decode `RosterMaturitySection''s `rows' field VALUE as RosterRows."
+  (agent-repl-wire-decode-roster-rows value))
+
+(defun agent-repl-wire-decode-roster-maturity-section-expanded (value)
+  "Decode VALUE as the empty message `RosterMaturitySectionExpanded'."
+  (agent-repl-wire--decode-empty "RosterMaturitySectionExpanded" value))
+
+(defun agent-repl-wire-decode-roster-maturity-section-collapsed (value)
+  "Decode VALUE as the empty message `RosterMaturitySectionCollapsed'."
+  (agent-repl-wire--decode-empty "RosterMaturitySectionCollapsed" value))
+
+(defun agent-repl-wire-decode-roster-maturity-section-fold (object)
+  "Decode `RosterMaturitySection''s `fold' oneof from OBJECT.
+THE ARM IS THE FOLD, the daemon's view state; it is never unset."
+  (agent-repl-wire--decode-oneof
+   "RosterMaturitySection" 'fold object
+   '((expanded :expanded agent-repl-wire-decode-roster-maturity-section-expanded)
+     (collapsed :collapsed agent-repl-wire-decode-roster-maturity-section-collapsed))))
+
+(defun agent-repl-wire-decode-roster-maturity-section (value)
+  "Decode VALUE as `RosterMaturitySection', a plist `(:key :header :rows :fold)'."
+  (let ((object (agent-repl-wire--object "RosterMaturitySection" value)))
+    (agent-repl-wire--check-keys "RosterMaturitySection" object
+                                 '(key header rows expanded collapsed))
+    (agent-repl-wire--decoded
+     "RosterMaturitySection"
+     (list :key (agent-repl-wire--decode-message
+                 "RosterMaturitySection" 'key object
+                 #'agent-repl-wire-decode-roster-maturity-section-key)
+           :header (agent-repl-wire--decode-message
+                    "RosterMaturitySection" 'header object
+                    #'agent-repl-wire-decode-roster-maturity-section-header)
+           :rows (agent-repl-wire--decode-message
+                  "RosterMaturitySection" 'rows object
+                  #'agent-repl-wire-decode-roster-maturity-section-rows)
+           :fold (agent-repl-wire-decode-roster-maturity-section-fold object)))))
+
 (defun agent-repl-wire-decode-roster-merged-section-header (value)
   "Decode `RosterMergedSection''s `header' field VALUE."
   (agent-repl-wire-decode-roster-section-header value))
@@ -811,7 +871,7 @@ It has no key of its own — the roster carries exactly one."
                   #'agent-repl-wire-decode-roster-merged-section-rows)
            :fold (agent-repl-wire-decode-roster-merged-section-fold object)))))
 
-;;;; ---- The two views and the roster ----
+;;;; ---- The views and the roster ----
 
 (defun agent-repl-wire-decode-roster-repository-view-sections (value)
   "Decode one element of `RosterRepositoryView''s repeated `sections'."
@@ -842,6 +902,21 @@ Order is the resolver's; clients do not re-sort."
                       "RosterTaskView" 'sections object
                       #'agent-repl-wire-decode-roster-task-view-sections)))))
 
+(defun agent-repl-wire-decode-roster-maturity-view-sections (value)
+  "Decode one element of `RosterMaturityView''s repeated `sections'."
+  (agent-repl-wire-decode-roster-maturity-section value))
+
+(defun agent-repl-wire-decode-roster-maturity-view (value)
+  "Decode VALUE as `RosterMaturityView', a plist `(:sections LIST)'.
+Every stage, in the order work moves through them; clients do not re-sort."
+  (let ((object (agent-repl-wire--object "RosterMaturityView" value)))
+    (agent-repl-wire--check-keys "RosterMaturityView" object '(sections))
+    (agent-repl-wire--decoded
+     "RosterMaturityView"
+     (list :sections (agent-repl-wire--decode-repeated
+                      "RosterMaturityView" 'sections object
+                      #'agent-repl-wire-decode-roster-maturity-view-sections)))))
+
 (defun agent-repl-wire-decode-roster-current-workspace-workspace (value)
   "Decode `RosterCurrentWorkspace''s `workspace' field VALUE."
   (agent-repl-wire-decode-workspace-ref value))
@@ -866,6 +941,10 @@ name, which is not unique."
   "Decode `WorkspaceRoster''s `task' field VALUE."
   (agent-repl-wire-decode-roster-task-view value))
 
+(defun agent-repl-wire-decode-workspace-roster-maturity (value)
+  "Decode `WorkspaceRoster''s `maturity' field VALUE."
+  (agent-repl-wire-decode-roster-maturity-view value))
+
 (defun agent-repl-wire-decode-workspace-roster-recently-merged (value)
   "Decode `WorkspaceRoster''s `recently_merged' field VALUE."
   (agent-repl-wire-decode-roster-merged-section value))
@@ -882,24 +961,30 @@ name, which is not unique."
   "Decode VALUE as the empty message `RosterShownTask'."
   (agent-repl-wire--decode-empty "RosterShownTask" value))
 
+(defun agent-repl-wire-decode-roster-shown-maturity (value)
+  "Decode VALUE as the empty message `RosterShownMaturity'."
+  (agent-repl-wire--decode-empty "RosterShownMaturity" value))
+
 (defun agent-repl-wire-decode-workspace-roster-shown (object)
   "Decode `WorkspaceRoster''s `shown' oneof from OBJECT.
 THE ARM IS THE GROUPING every page shows; it is never unset."
   (agent-repl-wire--decode-oneof
    "WorkspaceRoster" 'shown object
    '((shownRepository :shown-repository agent-repl-wire-decode-roster-shown-repository)
-     (shownTask :shown-task agent-repl-wire-decode-roster-shown-task))))
+     (shownTask :shown-task agent-repl-wire-decode-roster-shown-task)
+     (shownMaturity :shown-maturity agent-repl-wire-decode-roster-shown-maturity))))
 
 (defun agent-repl-wire-decode-workspace-roster (value)
   "Decode VALUE as `WorkspaceRoster'.
-Returns `(:repository V :task V :recently-merged S :current C-or-nil
-:shown ARM)'.  BOTH groupings arrive fully resolved: which one is drawn
-is the daemon's view state (`shown'), a selection between two resolved
-views, never a derivation."
+Returns `(:repository V :task V :maturity V :recently-merged S
+:current C-or-nil :shown ARM)'.  EVERY grouping arrives fully resolved:
+which one is drawn is the daemon's view state (`shown'), a selection
+between resolved views, never a derivation."
   (let ((object (agent-repl-wire--object "WorkspaceRoster" value)))
     (agent-repl-wire--check-keys
      "WorkspaceRoster" object
-     '(repository task recentlyMerged current shownRepository shownTask))
+     '(repository task maturity recentlyMerged current
+                  shownRepository shownTask shownMaturity))
     (agent-repl-wire--decoded
      "WorkspaceRoster"
      (list :repository (agent-repl-wire--decode-message
@@ -908,6 +993,9 @@ views, never a derivation."
            :task (agent-repl-wire--decode-message
                   "WorkspaceRoster" 'task object
                   #'agent-repl-wire-decode-workspace-roster-task)
+           :maturity (agent-repl-wire--decode-message
+                      "WorkspaceRoster" 'maturity object
+                      #'agent-repl-wire-decode-workspace-roster-maturity)
            :recently-merged (agent-repl-wire--decode-message
                              "WorkspaceRoster" 'recentlyMerged object
                              #'agent-repl-wire-decode-workspace-roster-recently-merged)

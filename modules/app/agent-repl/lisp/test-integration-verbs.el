@@ -1681,6 +1681,7 @@ rest of this suite already asserts against."
              (rows . ((rows . ,(vconcat rows))))
              (expanded . ()))])))
     (task . ((sections . [])))
+    (maturity . ((sections . [])))
     (recentlyMerged . ((header . ((label . ((text . "recently merged"))) (count . ((workspaces . 1)))))
                         (rows . ((rows . [])))
                         (collapsed . ())))

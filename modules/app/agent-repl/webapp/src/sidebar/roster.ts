@@ -1,16 +1,18 @@
 /**
- * roster — the rail's two groupings, their sections, and the recently-merged
- * band that sits under both.
+ * roster — the rail's groupings, their sections, and the recently-merged band
+ * that sits under every one.
  *
- * BOTH GROUPINGS ARE DRAWN, ONE IS SHOWN. The daemon resolves the repository
- * view and the task view as siblings, so choosing between them is a SELECTION
- * — exactly as folding hides rows — and never a derivation: this file draws
- * both panes and hides one. Nothing is re-grouped, re-sorted or counted here.
+ * EVERY GROUPING IS DRAWN, ONE IS SHOWN. The daemon resolves the repository,
+ * task and maturity views as siblings, so choosing between them is a
+ * SELECTION — exactly as folding hides rows — and never a derivation: this
+ * file draws every pane and hides all but one. Nothing is re-grouped,
+ * re-sorted or counted here: which stage a workspace is at is the daemon's
+ * resolution, never this file's.
  *
- * RECENTLY MERGED APPEARS UNDER BOTH, because the interesting fact about those
- * workspaces is that they are done, which is true in either grouping. It has no
- * key of its own (the roster carries exactly one), so its fold identity is
- * fixed.
+ * RECENTLY MERGED APPEARS UNDER EVERY GROUPING, because the interesting fact
+ * about those workspaces is that they are done, which is true in any grouping
+ * (under the maturity grouping it IS the done stage). It has no key of its own
+ * (the roster carries exactly one), so its fold identity is fixed.
  *
  * THE VIEW IS THE DAEMON'S. Every section's fold and which grouping is shown
  * are drawn from the push, painted at once on a gesture and asked of the
@@ -26,6 +28,9 @@ import { createControl, type Control } from "../control.js";
 import type {
   RosterCurrentWorkspace,
   RosterLabel,
+  RosterMaturityKey,
+  RosterMaturitySection,
+  RosterMaturityView,
   RosterMergedSection,
   RosterRepoKey,
   RosterRepoSection,
@@ -40,7 +45,11 @@ import type {
   RosterTaskView,
   WorkspaceRoster,
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
-import type { RepositoryRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
+import {
+  MaturityStageSchema,
+  type MaturityStage,
+  type RepositoryRef,
+} from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { UpdateTaskResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_task_pb";
 import { TaskRefSchema } from "../../../proto/gen/ts/agentrepl/v1/task_pb";
 import { create, type MessageInitShape } from "@bufbuild/protobuf";
@@ -49,9 +58,11 @@ import { log } from "../log.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import {
   MERGED_FOLD_KEY,
+  maturityFoldKey,
   repoFoldKey,
   taskFoldKey,
   type Grouping,
+  type MaturityStageName,
   type SidebarContext,
 } from "./context.js";
 import { drawCreateWorkspaceControl } from "./create.js";
@@ -78,6 +89,7 @@ export function drawWorkspaceRoster(u: WorkspaceRoster, sc: SidebarContext): HTM
   const path = "WorkspaceRoster";
   const repository = requireMessage(u.repository, `${path}.repository`);
   const task = requireMessage(u.task, `${path}.task`);
+  const maturity = requireMessage(u.maturity, `${path}.maturity`);
   const merged = requireMessage(u.recentlyMerged, `${path}.recently_merged`);
   const current =
     u.current === undefined
@@ -88,6 +100,7 @@ export function drawWorkspaceRoster(u: WorkspaceRoster, sc: SidebarContext): HTM
     context: {
       repo_sections: repository.sections.length,
       task_sections: task.sections.length,
+      maturity_sections: maturity.sections.length,
       merged_rows: merged.rows?.rows.length ?? 0,
       current,
       grouping: drawRosterShown(u.shown, `${path}.shown`),
@@ -116,6 +129,9 @@ export function drawWorkspaceRoster(u: WorkspaceRoster, sc: SidebarContext): HTM
   roster.appendChild(
     pane("task", drawRosterTaskView(task, sc, `${path}.task`), sc, merged, `${path}.recently_merged`),
   );
+  roster.appendChild(
+    pane("maturity", drawRosterMaturityView(maturity, sc, `${path}.maturity`), sc, merged, `${path}.recently_merged`),
+  );
   const shown = sc.view.track(GROUPING_VIEW_KEY, drawRosterShown(u.shown, `${path}.shown`), (grouping) =>
     showPane(roster, grouping),
   );
@@ -131,6 +147,8 @@ export function drawRosterShown(shown: WorkspaceRoster["shown"], path: string): 
       return "repository";
     case "shownTask":
       return "task";
+    case "shownMaturity":
+      return "maturity";
     default: {
       const other: { case: string } = arm;
       return unreachableArm(path, other.case);
@@ -138,7 +156,7 @@ export function drawRosterShown(shown: WorkspaceRoster["shown"], path: string): 
   }
 }
 
-/** Show GROUPING's pane under ROSTER and hide the other. */
+/** Show GROUPING's pane under ROSTER and hide the others. */
 export function showPane(roster: ParentNode, grouping: string): void {
   for (const pane of roster.querySelectorAll<HTMLElement>(":scope > [data-grouping]")) {
     pane.hidden = pane.getAttribute("data-grouping") !== grouping;
@@ -200,6 +218,56 @@ export function drawRosterTaskView(
   return view;
 }
 
+/** The maturity grouping: one section per stage, in the order work moves through them. */
+export function drawRosterMaturityView(
+  u: RosterMaturityView,
+  sc: SidebarContext,
+  path: string,
+): HTMLElement {
+  const view = document.createElement("div");
+  view.className = "sb-sections";
+  for (const [index, section] of u.sections.entries()) {
+    view.appendChild(drawRosterMaturitySection(section, sc, `${path}.sections[${index}]`));
+  }
+  return view;
+}
+
+/** One maturity stage's section: its key, its header, its rows. */
+export function drawRosterMaturitySection(
+  u: RosterMaturitySection,
+  sc: SidebarContext,
+  path: string,
+): HTMLElement {
+  const stage = drawRosterMaturityKey(requireMessage(u.key, `${path}.key`), `${path}.key`);
+  const section = drawHeadedSection(u, sc, path, {
+    foldKey: maturityFoldKey(stage),
+    className: "maturity-section",
+    target: { case: "maturity", value: maturityStageRef(stage) },
+  });
+  section.setAttribute("data-maturity-stage", stage);
+  return section;
+}
+
+/** A stage's stable identity: the stage arm. EVERY arm is named; unset is malformed. */
+export function drawRosterMaturityKey(u: RosterMaturityKey, path: string): MaturityStageName {
+  const arm = requireCase(requireMessage(u.stage, `${path}.stage`).stage, `${path}.stage.stage`);
+  switch (arm.case) {
+    case "backlog":
+    case "inProgress":
+    case "merging":
+      return arm.case;
+    default: {
+      const other: { case: string } = arm;
+      return unreachableArm(`${path}.stage.stage`, other.case);
+    }
+  }
+}
+
+/** The stage's wire identity, echoed back on a fold. */
+function maturityStageRef(stage: MaturityStageName): MaturityStage {
+  return create(MaturityStageSchema, { stage: { case: stage, value: {} } });
+}
+
 /** One repository's section: its key, its header, its rows. */
 export function drawRosterRepoSection(
   u: RosterRepoSection,
@@ -210,16 +278,56 @@ export function drawRosterRepoSection(
   // THE FOLD IS THE DAEMON'S: the Emacs tab bar hides a collapsed
   // repository's workspaces off the same pushed arm, so the two can never
   // disagree.
-  const foldKey = repoFoldKey(key.id);
-  const section = daemonFoldedBox(foldKey, drawRosterSectionFold(u.fold, `${path}.fold`), sc);
-  section.classList.add("repo-section");
+  return drawHeadedSection(u, sc, path, {
+    foldKey: repoFoldKey(key.id),
+    className: "repo-section",
+    target: { case: "repository", value: key },
+    decorateHeader: (header, section) => header.appendChild(drawCreateWorkspaceControl(key, section, sc)),
+  });
+}
+
+/** What a live grouping's section shares with the others: header, rows, fold. */
+export interface HeadedSectionWire {
+  header?: RosterSectionHeader;
+  rows?: RosterRows;
+  fold: RosterSectionFold;
+}
+
+/** How one kind of headed section is identified and decorated. */
+export interface HeadedSectionShape {
+  /** The page key its fold is held under (`view.ts`). */
+  foldKey: string;
+  /** The class naming the section's kind. */
+  className: string;
+  /** The section UpdateSidebarView folds. */
+  target: MessageInitShape<typeof SidebarViewFoldSectionSchema>["section"];
+  /** Anything the kind adds to its header, after the folded count. */
+  decorateHeader?: (header: HTMLElement, section: HTMLElement) => void;
+}
+
+/**
+ * A live grouping's section under the shared `RosterSectionHeader`: the box
+ * folded as the daemon says, the label-and-count header whose gesture asks
+ * for the other fold, and the rows with closed workspaces dropped.
+ *
+ * THE ONE SHAPE the repository and maturity sections draw, so the two can
+ * never disagree on how a header folds or which rows a live section hides.
+ */
+export function drawHeadedSection(
+  u: HeadedSectionWire,
+  sc: SidebarContext,
+  path: string,
+  shape: HeadedSectionShape,
+): HTMLElement {
+  const section = daemonFoldedBox(shape.foldKey, drawRosterSectionFold(u.fold, `${path}.fold`), sc);
+  section.classList.add(shape.className);
   const header = drawRosterSectionHeader(
     requireMessage(u.header, `${path}.header`),
     section,
-    sectionFold(sc, foldKey, { case: "repository", value: key }),
+    sectionFold(sc, shape.foldKey, shape.target),
     `${path}.header`,
   );
-  header.appendChild(drawCreateWorkspaceControl(key, section, sc));
+  shape.decorateHeader?.(header, section);
   section.appendChild(header);
   section.appendChild(drawRosterRows(requireMessage(u.rows, `${path}.rows`), sc, `${path}.rows`, true));
   return section;
