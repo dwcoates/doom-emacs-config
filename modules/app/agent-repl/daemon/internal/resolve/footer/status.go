@@ -187,12 +187,18 @@ func (r *resolver) agentReplFault(s *wsState, log dlog.Logger) *frontendv1.Foote
 		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case s.link == shimclient.LinkDead"})
 		arm.Substatus = &frontendv1.FooterStatusAgentReplFault_StartFailed{
 			StartFailed: &frontendv1.FooterSubStatusAgentReplFaultStartFailed{}}
-	case !s.hostStream || !s.webStream:
-		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case !s.hostStream || !s.webStream"})
+	case s.hostStream != s.webStream:
+		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "case s.hostStream != s.webStream"})
 		// A HOP IS DOWN. The daemon-to-shim link serves, but one of the two
-		// client streams does not, so the workspace is not connected
-		// (daemon.md invariant 11) and the footer says so rather than drawing
-		// a status nobody is receiving.
+		// client streams does not while the other does, so the workspace is
+		// not connected (daemon.md invariant 11) and the footer says so
+		// rather than drawing a status nobody is receiving.
+		//
+		// NO CLIENT ATTACHED IS NOT A HOP DOWN. With both streams released
+		// (the editor closed the workspace's view) no reader is attached to
+		// be cut off, and this status is also the roster row's, which a
+		// closed or merged workspace keeps: drawing it severed would paint
+		// every workspace nobody is viewing blue.
 		arm.Substatus = &frontendv1.FooterStatusAgentReplFault_Severed{
 			Severed: &frontendv1.FooterSubStatusAgentReplFaultSevered{}}
 	default:
