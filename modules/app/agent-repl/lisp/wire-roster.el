@@ -392,6 +392,21 @@ This machine cannot reach the network: a network fault."
   "Decode VALUE as the empty `RosterRowStatusApiRetrying'."
   (agent-repl-wire--decode-empty "RosterRowStatusApiRetrying" value))
 
+(defun agent-repl-wire-decode-roster-row-status-closing (value)
+  "Decode VALUE as the empty `RosterRowStatusClosing'.
+A close of the workspace was refused: the footer's `closing' status."
+  (agent-repl-wire--decode-empty "RosterRowStatusClosing" value))
+
+(defun agent-repl-wire-decode-roster-row-status-daemon-impaired (value)
+  "Decode VALUE as the empty `RosterRowStatusDaemonImpaired'.
+The daemon itself cannot serve the workspace: an agent-repl fault."
+  (agent-repl-wire--decode-empty "RosterRowStatusDaemonImpaired" value))
+
+(defun agent-repl-wire-decode-roster-row-status-waiting (value)
+  "Decode VALUE as the empty `RosterRowStatusWaiting'.
+The session waits on something other than a tool permission."
+  (agent-repl-wire--decode-empty "RosterRowStatusWaiting" value))
+
 (defun agent-repl-wire-decode-roster-row-status-init (value)
   "Decode VALUE as the empty `RosterRowStatusInit'."
   (agent-repl-wire--decode-empty "RosterRowStatusInit" value))
@@ -457,6 +472,10 @@ an assertion, where an unset oneof is the absence of one."
                   agent-repl-wire-decode-roster-row-status-network-fault)
     (apiRetrying :api-retrying
                  agent-repl-wire-decode-roster-row-status-api-retrying)
+    (closing :closing agent-repl-wire-decode-roster-row-status-closing)
+    (daemonImpaired :daemon-impaired
+                    agent-repl-wire-decode-roster-row-status-daemon-impaired)
+    (waiting :waiting agent-repl-wire-decode-roster-row-status-waiting)
     (init :init agent-repl-wire-decode-roster-row-status-init)
     (severed :severed agent-repl-wire-decode-roster-row-status-severed)
     (startFailed :start-failed agent-repl-wire-decode-roster-row-status-start-failed)
