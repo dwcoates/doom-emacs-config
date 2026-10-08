@@ -1358,6 +1358,17 @@ sinks can be read.
 | central store | `~/.cache/agent-repl/log/shim-store.log` and `.1` through `.5`; `$XDG_CACHE_HOME/agent-repl/log/` replaces the default root | `shim-store` | contract JSONL | the central recipe above with `--runtime store` | `pid`, `request_id`, `agent_id`, and book keys when known | `AGENT_REPL_LOG_LEVEL` |
 | central sidecar | `~/.cache/agent-repl/log/shim-claude-sidecar.log` and `.1` through `.5`; `$XDG_CACHE_HOME/agent-repl/log/` replaces the default root | `shim-claude-sidecar` | contract JSONL | the central recipe above with `--runtime sidecar` | genuine global records have no workspace; `pid`, agent, and file keys remain when known | `AGENT_REPL_LOG_LEVEL` |
 
+The level switch is a five-minute WINDOW for anything but `info`: a level
+other than `info` holds only with `AGENT_REPL_LOG_LEVEL_UNTIL`, the Unix second
+it ends at, no more than five minutes ahead; every runtime then reverts to
+`info` by itself and records the revert at info, and a runtime started with a
+leftover level and no live window comes up at `info` (`logging-contract.md`,
+`proto/vocab/log-level-window.json`). Turn debug on everywhere with
+`launchctl setenv AGENT_REPL_LOG_LEVEL debug` plus
+`launchctl setenv AGENT_REPL_LOG_LEVEL_UNTIL "$(( $(date +%s) + 300 ))"`, then
+bounce what should pick it up; Emacs alone also takes
+`agent-repl-set-log-file-level` at runtime, under the same window.
+
 Read `*Messages*` from the GUI Emacs through its application binary and the
 server socket under `$TMPDIR/emacs501/`:
 

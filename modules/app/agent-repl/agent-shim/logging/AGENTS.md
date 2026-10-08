@@ -24,7 +24,13 @@ Emacs is the sixth runtime and cannot import either. Its copy is the single
 ## The cross-language seam
 
 Three languages cannot compile one source, so `proto/vocab/log-timestamp.json`
-is where the three are held to the same answer. Go asserts against it from
+is where the three are held to the same answer. `proto/vocab/log-level-window.json`
+does the same for the log level window (`go/window.go`, `ts/level-window.ts`
+and `agent-repl--log-level-window` in `core.el`): a level other than info holds
+only inside an unexpired window of at most five minutes, so a leftover setting
+never outlives it. Go asserts from `go/window_test.go`, TypeScript from
+`agent-shim/claude/shim/test/log-level-window.test.ts`, and elisp from
+`test-core.el`. Go asserts against it from
 `go/timestamp_test.go`, TypeScript from
 `agent-shim/claude/shim/test/log-timestamp.test.ts`, and elisp from
 `test-log-timestamp.el`. This mirrors `proto/vocab/render-colors.json`, which

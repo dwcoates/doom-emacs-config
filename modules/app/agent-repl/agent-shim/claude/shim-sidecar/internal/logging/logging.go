@@ -92,6 +92,10 @@ type Context struct {
 	// deliberately not an alternate logging API: callers still use Log or
 	// LogVerbose, but this record must not re-enter the failed durable sink.
 	SinkEmergency bool
+	// LevelWindow is the evidence of a log level window decision: a startup
+	// selection or a window that ended (agentrepl/logging Selection.Context
+	// and Expiry.Context). Its keys land in the record's context as given.
+	LevelWindow map[string]any
 	// WorkspaceDir and WorkspaceID identify the workspace whose file produced
 	// this record. They are promoted top-level fields, never buried in context.
 	WorkspaceDir string
@@ -258,8 +262,10 @@ type Logger struct {
 	mu                    sync.Mutex
 	now                   func() time.Time
 	pid                   func() int
-	minimumLevel          sharedlogging.Level
-	poisoned              error
+	// threshold is the process's live level: a level other than info is a
+	// window that reverts to info by itself (see NewForwardingDurableOnlyWindow).
+	threshold *sharedlogging.Window
+	poisoned  error
 	files                 map[string]Context
 	// The startup catch-up window. A restarted sidecar re-derives the owner's
 	// whole historical corpus from files, and the per-item records of that walk
@@ -325,16 +331,23 @@ func New(stderr, file io.Writer) *Logger {
 
 // NewAtLevel constructs the canonical logger at one explicit threshold.
 func NewAtLevel(stderr, file io.Writer, minimumLevel sharedlogging.Level) *Logger {
+	return newLogger(stderr, file, sharedlogging.FixedWindow(minimumLevel))
+}
+
+func newLogger(stderr, file io.Writer, threshold *sharedlogging.Window) *Logger {
 	if stderr == nil || file == nil {
 		panic("sidecar logging requires stderr and persistent file sinks")
 	}
+	if threshold == nil {
+		panic("sidecar logging requires a level threshold")
+	}
 	return &Logger{
-		stderr:       stderr,
-		file:         file,
-		now:          time.Now,
-		pid:          os.Getpid,
-		minimumLevel: minimumLevel,
-		files:        map[string]Context{},
+		stderr:    stderr,
+		file:      file,
+		now:       time.Now,
+		pid:       os.Getpid,
+		threshold: threshold,
+		files:     map[string]Context{},
 	}
 }
 
@@ -353,7 +366,11 @@ func NewDurableOnly(terminal, file io.Writer) *Logger {
 // NewDurableOnlyAtLevel constructs the production logger at one explicit
 // severity threshold.
 func NewDurableOnlyAtLevel(terminal, file io.Writer, minimumLevel sharedlogging.Level) *Logger {
-	l := NewAtLevel(terminal, file, minimumLevel)
+	return newDurableOnly(terminal, file, sharedlogging.FixedWindow(minimumLevel))
+}
+
+func newDurableOnly(terminal, file io.Writer, threshold *sharedlogging.Window) *Logger {
+	l := newLogger(terminal, file, threshold)
 	l.terminalEmergencyOnly = true
 	return l
 }
@@ -363,10 +380,20 @@ func NewDurableOnlyAtLevel(terminal, file io.Writer, minimumLevel sharedlogging.
 // queue for the daemon-owned workspace sink. A nil forwarder is an invariant
 // violation, never permission to put a workspace record in the global sink.
 func NewForwardingDurableOnlyAtLevel(terminal, file io.Writer, minimumLevel sharedlogging.Level, forwarder Forwarder) *Logger {
+	return NewForwardingDurableOnlyWindow(terminal, file, sharedlogging.FixedWindow(minimumLevel), forwarder)
+}
+
+// levelWindowOperation is the operation of every level window record.
+const levelWindowOperation = "sidecar.logging.level-window"
+
+// NewForwardingDurableOnlyWindow is NewForwardingDurableOnlyAtLevel on the
+// process's live level window: a level other than info reverts to info when
+// its window ends, and the revert is recorded at info.
+func NewForwardingDurableOnlyWindow(terminal, file io.Writer, threshold *sharedlogging.Window, forwarder Forwarder) *Logger {
 	if forwarder == nil {
 		panic("sidecar logging: forwarding logger requires a daemon forwarder")
 	}
-	l := NewDurableOnlyAtLevel(terminal, file, minimumLevel)
+	l := newDurableOnly(terminal, file, threshold)
 	l.forwarder = forwarder
 	l.forwardReady = sync.NewCond(&l.forwardMu)
 	l.forwardDone = make(chan struct{})
@@ -384,6 +411,14 @@ func (l *Logger) With(ctx Context) *Bound {
 		panic("sidecar logging: With called on nil Logger")
 	}
 	return &Bound{logger: l, context: ctx}
+}
+
+// NoteLevelSelection records the process's startup level decision at info,
+// when anything other than info was asked for.
+func (b *Bound) NoteLevelSelection(sel sharedlogging.Selection) {
+	if message, ok := sel.Note(); ok {
+		b.logger.write(false, mergeContext(b.context, Context{Operation: levelWindowOperation, Level: "info", LevelWindow: sel.Context()}), "%s", message)
+	}
 }
 
 // With extends the bound attribution. Set fields replace earlier values.
@@ -655,6 +690,9 @@ func contextMap(ctx Context) map[string]any {
 	if len(ctx.WriteIDs) > 0 {
 		out["write_ids"] = append([]string(nil), ctx.WriteIDs...)
 	}
+	for key, value := range ctx.LevelWindow {
+		out[key] = value
+	}
 	return out
 }
 
@@ -689,7 +727,12 @@ func (l *Logger) write(verbose bool, ctx Context, format string, args ...any) {
 		level = "debug"
 		verbose = true
 	}
-	if !l.minimumLevel.Allows(level) {
+	allowed, ended := l.threshold.Allows(level)
+	if ended != nil {
+		// The window is info now, so this record cannot end it again.
+		l.write(false, Context{Operation: levelWindowOperation, Level: "info", LevelWindow: ended.Context()}, "%s", ended.Message())
+	}
+	if !allowed {
 		return
 	}
 	verbosity := "normal"
@@ -1003,7 +1046,11 @@ func (l *Logger) reportForwardFailure(now time.Time, address string, attempts in
 // stay silent through either window while the undelivered record itself is
 // still persisted.
 func (l *Logger) reportForwardTransient(now time.Time, address string, attempts int, target record, cause error, message string) {
-	if !l.minimumLevel.Allows("debug") {
+	allowed, ended := l.threshold.Allows("debug")
+	if ended != nil {
+		l.write(false, Context{Operation: levelWindowOperation, Level: "info", LevelWindow: ended.Context()}, "%s", ended.Message())
+	}
+	if !allowed {
 		return
 	}
 	address = addrOrUnresolved(address)
@@ -1148,6 +1195,9 @@ func mergeContext(base, add Context) Context {
 	}
 	if add.SinkEmergency {
 		base.SinkEmergency = true
+	}
+	if add.LevelWindow != nil {
+		base.LevelWindow = add.LevelWindow
 	}
 	return base
 }

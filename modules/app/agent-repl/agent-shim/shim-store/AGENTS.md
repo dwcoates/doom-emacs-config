@@ -1090,9 +1090,12 @@ arms are derived from, and each one is logged once with `refusal_site`.
   `internal/logging/logging.go:writeFull`.
 - `AGENT_REPL_LOG_LEVEL` is the ONE process-wide threshold:
   `debug|info|warn|error`, default `info`. An invalid value is a bootstrap
-  failure before the log directory or file is created. Production passes the
-  parsed `agentrepl/logging.Level` to `logging.NewDurableOnlyAtLevel`; tests
-  and foreground harnesses may use `logging.NewAtLevel`.
+  failure before the log directory or file is created. A level other than
+  `info` is a window: it holds only with an unexpired
+  `AGENT_REPL_LOG_LEVEL_UNTIL` at most five minutes away and reverts to `info`
+  by itself (`store.logging.level-window`). Production passes the
+  `agentrepl/logging.Window` to `logging.NewDurableOnlyWindow`; tests and
+  foreground harnesses may use `logging.NewAtLevel`.
 - The canonical store sink is
   `$XDG_CACHE_HOME/agent-repl/log/shim-store.log` (or
   `~/.cache/agent-repl/log/shim-store.log` when `XDG_CACHE_HOME` is unset),

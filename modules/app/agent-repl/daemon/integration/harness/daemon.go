@@ -705,8 +705,11 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 	env := append(os.Environ(),
 		"AGENT_REPL_STATE_DIR="+d.StateDir,
 		// The integration suite asserts debug request and transition records.
-		// Production's empty setting is info; the suite states debug explicitly.
+		// Production's empty setting is info; the suite states debug explicitly,
+		// and, debug being a window rather than a standing level
+		// (proto/vocab/log-level-window.json), for the longest window there is.
 		"AGENT_REPL_LOG_LEVEL=debug",
+		fmt.Sprintf("AGENT_REPL_LOG_LEVEL_UNTIL=%d", time.Now().Add(5*time.Minute).Unix()),
 		"AGENT_REPL_FORBID_VENDOR_CALLS=1",
 		// The state database is thrown away with the test: no forced flushes.
 		wsm.EnvTestUnsyncedWrites+"=1",

@@ -664,3 +664,127 @@ func TestWithKeepsABoundWALStateWhenARecordAddsNone(t *testing.T) {
 		t.Fatalf("wal_frames = %#v, want the bound 7", got.Context["wal_frames"])
 	}
 }
+
+// windowClock is a settable clock: a level window's end is reached by moving
+// it, never by sleeping.
+type windowClock struct{ at time.Time }
+
+func (c *windowClock) now() time.Time { return c.at }
+
+func debugWindowLogger(t *testing.T, clock *windowClock, file *bytes.Buffer) *Logger {
+	t.Helper()
+	sel, err := sharedlogging.SelectLevel("debug", "1000300", clock.at)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return NewDurableOnlyWindow(file, io.Discard, sharedlogging.NewWindow(sel, clock.now))
+}
+
+func decodeRecords(t *testing.T, body string) []record {
+	t.Helper()
+	var out []record
+	for _, line := range strings.Split(strings.TrimSpace(body), "\n") {
+		if line == "" {
+			continue
+		}
+		var r record
+		if err := json.Unmarshal([]byte(line), &r); err != nil {
+			t.Fatalf("decode %q: %v", line, err)
+		}
+		out = append(out, r)
+	}
+	return out
+}
+
+func TestLevelWindowAdmitsDebugBeforeItEnds(t *testing.T) {
+	// Arrange.
+	clock := &windowClock{at: time.Unix(1000000, 0)}
+	var file bytes.Buffer
+	log := debugWindowLogger(t, clock, &file)
+
+	// Act.
+	log.LogVerbose(Fields{Operation: "tail"}, "inside")
+
+	// Assert.
+	records := decodeRecords(t, file.String())
+	if len(records) != 1 || records[0].Level != "debug" {
+		t.Fatalf("records = %#v, want the one debug record", records)
+	}
+}
+
+func TestLevelWindowRecordsItsEndAtInfo(t *testing.T) {
+	// Arrange.
+	clock := &windowClock{at: time.Unix(1000000, 0)}
+	var file bytes.Buffer
+	log := debugWindowLogger(t, clock, &file)
+	clock.at = time.Unix(1000300, 0)
+
+	// Act.
+	log.LogVerbose(Fields{Operation: "tail"}, "after")
+
+	// Assert.
+	records := decodeRecords(t, file.String())
+	if len(records) != 1 {
+		t.Fatalf("records = %#v, want only the revert", records)
+	}
+	got := records[0]
+	if got.Level != "info" || got.Operation != "store.logging.level-window" || got.Context["outcome"] != "window_ended" {
+		t.Fatalf("revert record = %#v", got)
+	}
+}
+
+func TestLevelWindowEndIsSharedByEveryLoggerCopy(t *testing.T) {
+	// Arrange.
+	clock := &windowClock{at: time.Unix(1000000, 0)}
+	var file bytes.Buffer
+	log := debugWindowLogger(t, clock, &file)
+	child := log.With(Fields{Component: "db"})
+	clock.at = time.Unix(1000300, 0)
+	log.Log(Fields{Operation: "serve"}, "ends the window")
+	file.Reset()
+
+	// Act.
+	child.LogVerbose(Fields{Operation: "tail"}, "after")
+
+	// Assert.
+	if file.Len() != 0 {
+		t.Fatalf("a copy still logged debug after the window ended: %q", file.String())
+	}
+}
+
+func TestNoteLevelSelectionRecordsAnIgnoredLeftoverAtInfo(t *testing.T) {
+	// Arrange.
+	var file bytes.Buffer
+	log := NewDurableOnlyAtLevel(&file, io.Discard, sharedlogging.LevelInfo)
+	sel, err := sharedlogging.SelectLevel("debug", "", time.Unix(1000000, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Act.
+	log.NoteLevelSelection(sel)
+
+	// Assert.
+	records := decodeRecords(t, file.String())
+	if len(records) != 1 || records[0].Level != "info" || records[0].Context["outcome"] != "no_expiry" {
+		t.Fatalf("records = %#v, want one info no_expiry note", records)
+	}
+}
+
+func TestNoteLevelSelectionIsSilentForTheDefault(t *testing.T) {
+	// Arrange.
+	var file bytes.Buffer
+	log := NewDurableOnlyAtLevel(&file, io.Discard, sharedlogging.LevelInfo)
+	sel, err := sharedlogging.SelectLevel("", "", time.Unix(1000000, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Act.
+	log.NoteLevelSelection(sel)
+
+	// Assert.
+	if file.Len() != 0 {
+		t.Fatalf("default selection wrote %q", file.String())
+	}
+}

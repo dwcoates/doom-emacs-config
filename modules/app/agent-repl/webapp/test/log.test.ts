@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ClientLogRecord } from "../../proto/gen/ts/agentrepl/v1/endpoint_client_log_pb";
+import { LevelWindow, selectLevel } from "../../agent-shim/logging/ts/level-window.js";
 import {
   ForwardingLogger,
   bindLogContext,
@@ -26,7 +27,7 @@ interface Harness {
 /** A logger whose sink resolves and whose console is captured. */
 function install(
   sink?: ClientLogSink,
-  minimumLevel: ClientLogLevel = "debug",
+  minimumLevel: ClientLogLevel | LevelWindow = "debug",
 ): Harness {
   const sent: ClientLogRecord[] = [];
   const consoleLines: Array<[ClientLogLevel, string]> = [];
@@ -283,6 +284,38 @@ describe("AGENT_REPL_LOG_LEVEL", () => {
 
   it("refuses an unknown delivered value", () => {
     expect(() => parseClientLogLevel("trace")).toThrow(/invalid log_level/);
+  });
+});
+
+describe("the page's level window", () => {
+  /** A logger at debug until Unix second 1000300, on a clock the test moves. */
+  function installDebugWindow(clock: { at: number }): Harness {
+    return install(undefined, new LevelWindow(selectLevel("debug", "1000300", clock.at), () => clock.at));
+  }
+
+  it("admits debug records before the window ends", async () => {
+    // ARRANGE
+    const clock = { at: 1_000_000_000 };
+    const h = installDebugWindow(clock);
+    clock.at = 1_000_299_000;
+    // ACT
+    log.debug("inside", { operation: "test.inside" });
+    await flushAndSettle(h);
+    // ASSERT
+    expect(h.sent.map((r) => r.operation)).toEqual(["test.inside"]);
+  });
+
+  it("reverts to info when the window ends and records the revert at info", async () => {
+    // ARRANGE
+    const clock = { at: 1_000_000_000 };
+    const h = installDebugWindow(clock);
+    clock.at = 1_000_300_000;
+    // ACT
+    log.debug("after", { operation: "test.after" });
+    await flushAndSettle(h);
+    // ASSERT
+    expect(h.sent.map((r) => [r.operation, r.level.case])).toEqual([["webapp.log.level-window", "info"]]);
+    expect(h.sent[0].context).toMatchObject({ outcome: "window_ended", from_level: "debug" });
   });
 });
 

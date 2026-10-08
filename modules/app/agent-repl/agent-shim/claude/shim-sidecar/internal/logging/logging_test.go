@@ -1228,3 +1228,107 @@ func TestCloseWithinDrainsAHealthyQueueSilently(t *testing.T) {
 		t.Fatalf("a healthy drain stated %q, want silence", global.String())
 	}
 }
+
+// windowClock is a settable clock: a level window's end is reached by moving
+// it, never by sleeping.
+type windowClock struct{ at time.Time }
+
+func (c *windowClock) now() time.Time { return c.at }
+
+func debugWindowLogger(t *testing.T, clock *windowClock) (*Logger, *bytes.Buffer) {
+	t.Helper()
+	sel, err := sharedlogging.SelectLevel("debug", "1000300", clock.at)
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := &bytes.Buffer{}
+	return newDurableOnly(io.Discard, file, sharedlogging.NewWindow(sel, clock.now)), file
+}
+
+func windowRecords(t *testing.T, body string) []record {
+	t.Helper()
+	var out []record
+	for _, line := range strings.Split(strings.TrimSpace(body), "\n") {
+		if line == "" {
+			continue
+		}
+		var r record
+		if err := json.Unmarshal([]byte(line), &r); err != nil {
+			t.Fatalf("decode %q: %v", line, err)
+		}
+		out = append(out, r)
+	}
+	return out
+}
+
+func TestLevelWindowAdmitsDebugBeforeItEnds(t *testing.T) {
+	// Arrange.
+	clock := &windowClock{at: time.Unix(1000000, 0)}
+	l, file := debugWindowLogger(t, clock)
+
+	// Act.
+	l.With(Context{Operation: "tail"}).LogVerbose("inside")
+
+	// Assert.
+	records := windowRecords(t, file.String())
+	if len(records) != 1 || records[0].Level != "debug" {
+		t.Fatalf("records = %#v, want the one debug record", records)
+	}
+}
+
+func TestLevelWindowRecordsItsEndAtInfo(t *testing.T) {
+	// Arrange.
+	clock := &windowClock{at: time.Unix(1000000, 0)}
+	l, file := debugWindowLogger(t, clock)
+	clock.at = time.Unix(1000300, 0)
+
+	// Act.
+	l.With(Context{Operation: "tail"}).LogVerbose("after")
+
+	// Assert.
+	records := windowRecords(t, file.String())
+	if len(records) != 1 {
+		t.Fatalf("records = %#v, want only the revert", records)
+	}
+	got := records[0]
+	if got.Level != "info" || got.Operation != "sidecar.logging.level-window" || got.Context["outcome"] != "window_ended" {
+		t.Fatalf("revert record = %#v", got)
+	}
+}
+
+func TestNoteLevelSelectionRecordsAnExpiredLeftoverAtInfo(t *testing.T) {
+	// Arrange.
+	file := &bytes.Buffer{}
+	bound := NewDurableOnly(io.Discard, file).With(Context{Component: "sidecar"})
+	sel, err := sharedlogging.SelectLevel("debug", "999999", time.Unix(1000000, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Act.
+	bound.NoteLevelSelection(sel)
+
+	// Assert.
+	records := windowRecords(t, file.String())
+	if len(records) != 1 || records[0].Level != "info" || records[0].Context["outcome"] != "expired" {
+		t.Fatalf("records = %#v, want one info expired note", records)
+	}
+}
+
+func TestNoteLevelSelectionIsSilentForTheDefault(t *testing.T) {
+	// Arrange.
+	file := &bytes.Buffer{}
+	bound := NewDurableOnly(io.Discard, file).With(Context{Component: "sidecar"})
+	sel, err := sharedlogging.SelectLevel("info", "", time.Unix(1000000, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Act.
+	bound.NoteLevelSelection(sel)
+
+	// Assert.
+	if file.Len() != 0 {
+		t.Fatalf("default selection wrote %q", file.String())
+	}
+}

@@ -241,6 +241,9 @@ export async function spawnShim(options: SpawnShimOptions = {}): Promise<ShimHan
     // Integration assertions consume the production remediation trace. The
     // runtime default remains info and is pinned independently in log.test.ts.
     AGENT_REPL_LOG_LEVEL: "debug",
+    // Debug is a window, never a standing level (proto/vocab/log-level-window.json):
+    // the suite asks for the longest one there is.
+    AGENT_REPL_LOG_LEVEL_UNTIL: String(Math.floor(Date.now() / 1000) + 300),
     // THE TWO PRODUCTION WINDOWS, SCALED — not weakened. Both are `--fake`-only
     // overrides the shim refuses for a real session (`src/main.ts`), so the
     // production defaults are untouched; what changes is only how long a test

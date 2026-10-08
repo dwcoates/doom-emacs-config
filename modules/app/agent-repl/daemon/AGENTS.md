@@ -1452,7 +1452,12 @@ ruling.
 `operation = daemon.<package>.<verb>` plus structured context, per
 `../logging-contract.md`. `AGENT_REPL_LOG_LEVEL` selects the minimum persisted
 and terminal-mirrored level (`debug`, `info`, `warn`, or `error`) and defaults
-to `info`; any other value is a boot error.
+to `info`; any other value is a boot error. A level other than `info` is a
+window that holds only with an unexpired `AGENT_REPL_LOG_LEVEL_UNTIL` at most
+five minutes away and reverts to `info` by itself
+(`agentrepl/logging.Window`, `daemon.dlog.level_window`). The daemon's level
+also gates the webapp and sidecar records it persists. The integration
+harness grants its debug level the full window.
 
 Global records land in `<state>/logs/daemon.run.log`. The run log appends
 across process restarts and rotates at 64 MiB through

@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"agentrepl/logging"
 	"claude-repld/internal/dirpath"
 )
 
@@ -28,9 +29,11 @@ type surfaces struct {
 	// where every workspace sink's daemon-owned target is minted.
 	logsDir string
 	mirror  *mirror
-	level   levelThreshold
-	pid     int
-	now     func() time.Time
+	// window is the process's live level: a level other than info reverts to
+	// info by itself when its window ends (see admits).
+	window *logging.Window
+	pid    int
+	now    func() time.Time
 
 	mu sync.Mutex
 	// lookup resolves a workspace directory to its daemon-minted
@@ -112,21 +115,43 @@ type workspaceSinks struct {
 
 // OpenSurfaces opens the daemon's log surfaces under the state root's logs
 // directory. AGENT_REPL_LOG_LEVEL governs both persistence and the terminal
-// mirror; an invalid setting is a boot failure.
+// mirror; a level other than info holds only inside the window
+// AGENT_REPL_LOG_LEVEL_UNTIL names, and an invalid setting is a boot failure.
+// A level that was asked for and not honored, or honored until a window's
+// end, is stated at info in the run log.
 //
 // The run log's open failure is returned here and is a BOOT FATAL for the
 // caller: a daemon that cannot write its own narrative cannot report what it
 // then does wrong.
 func OpenSurfaces(runLog string) (Surfaces, error) {
-	return openSurfaces(runLog, os.Getenv(LevelEnvironment), os.Stderr)
+	sel, err := logging.SelectLevel(os.Getenv(LevelEnvironment), os.Getenv(logging.UntilEnvironment), time.Now())
+	if err != nil {
+		return nil, err
+	}
+	s, err := openSurfacesWindow(runLog, logging.NewWindow(sel, time.Now), os.Stderr)
+	if err != nil {
+		return nil, err
+	}
+	if message, ok := sel.Note(); ok {
+		s.Global().Info(levelWindowOperation, message, Context(sel.Context()))
+	}
+	return s, nil
 }
 
-// openSurfaces is OpenSurfaces with the terminal injected, which is how the
-// mirror's decoupling is tested.
+// openSurfaces is OpenSurfaces at one fixed level with the terminal injected,
+// which is how the level filter and the mirror's decoupling are tested.
 func openSurfaces(runLogPath, configuredLevel string, terminal interface{ Write([]byte) (int, error) }) (*surfaces, error) {
 	level, err := parseLevel(configuredLevel)
 	if err != nil {
 		return nil, err
+	}
+	return openSurfacesWindow(runLogPath, logging.FixedWindow(level), terminal)
+}
+
+// openSurfacesWindow opens the surfaces on a live level window.
+func openSurfacesWindow(runLogPath string, window *logging.Window, terminal interface{ Write([]byte) (int, error) }) (*surfaces, error) {
+	if window == nil {
+		panic("dlog: nil level window")
 	}
 	rl, err := openRunLog(runLogPath, RunLogBackups)
 	if err != nil {
@@ -136,7 +161,7 @@ func openSurfaces(runLogPath, configuredLevel string, terminal interface{ Write(
 		runLog:     rl,
 		logsDir:    filepath.Dir(runLogPath),
 		mirror:     newMirror(terminal, mirrorDepth),
-		level:      level,
+		window:     window,
 		pid:        os.Getpid(),
 		now:        time.Now,
 		workspaces: make(map[string]*workspaceSinks),
@@ -383,7 +408,7 @@ func (s *surfaces) ClientLog(dir string, rec ClientRecord) error {
 	if rec.Operation == "" {
 		return fmt.Errorf("client record operation is empty")
 	}
-	if !s.level.enabled(rec.Level) {
+	if !s.admits(rec.Level) {
 		return nil
 	}
 	at, stamped, err := clientInstant(rec.Timestamp, s.now)

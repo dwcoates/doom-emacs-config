@@ -138,6 +138,14 @@ All take effect on the very next record — no restart, no reload.
 | `agent-repl-debug/toggle-logging` | `D` | Flips `agent-repl-debug` (`*Messages*` visibility). Will NOT shrink a log file. |
 | `agent-repl-debug/toggle-log-to-file` | — | Flips the all-or-nothing file kill-switch. |
 
+A durable level other than `info` is a FIVE-MINUTE WINDOW, never a standing
+setting: set by `set-log-file-level` / `toggle-verbose-to-disk`, or for every
+runtime by `AGENT_REPL_LOG_LEVEL` together with `AGENT_REPL_LOG_LEVEL_UNTIL`
+(a Unix second at most 300 s ahead), it reverts to `info` by itself and records
+the revert at info (operation `*.level-window`, outcome `window_ended`). A
+leftover `AGENT_REPL_LOG_LEVEL` without a live UNTIL starts every runtime at
+`info` and says so at info.
+
 The per-workspace buffer threshold has no dedicated command; set
 `agent-repl-log-buffer-level` directly (`setq`, or via `/runtime-eval-code`)
 when a workspace buffer needs to show ordinary or verbose activity.
@@ -147,8 +155,9 @@ when a workspace buffer needs to show ordinary or verbose activity.
 1. Before provoking a reproduction that needs hot-path evidence, run
    `agent-repl-debug/toggle-verbose-to-disk` to turn verbose ON.
 2. Provoke it, then read the file.
-3. Turn verbose back OFF with the same command. A working day left on runs to
-   ~350k verbose records and well over a hundred megabytes.
+3. Turn verbose back OFF with the same command, or let its five-minute window
+   end: it reverts to `info` by itself. Reproduce within the window, or turn
+   it on again.
 
 ### Consequences for evidence
 
