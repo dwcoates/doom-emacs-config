@@ -1523,6 +1523,7 @@ export const FOOTER_STATUS_SUBSTATUSES: Record<string, readonly string[]> = {
     "committing",
     "updatingMain",
     "postprocessing",
+    "waitingOnUser",
   ],
   background: [],
   vendorFault: [
@@ -1578,6 +1579,7 @@ export const MERGE_SUBSTATUS_WORDS: Record<string, Record<string, string>> = {
     committing: "committing",
     updatingMain: "updating main",
     postprocessing: "postprocessing",
+    waitingOnUser: "waiting on user",
   },
   mergeFailed: { conflicts: "conflicts", tests: "tests", other: "merge" },
 };
@@ -1693,9 +1695,9 @@ export const FOOTER_STATUS_SALIENTS: Record<string, readonly string[]> = {
     ...SHARED_SALIENTS,
   ],
   interrupted: ["update", ...SHARED_SALIENTS],
-  merging: ["mergeStep", "update", ...SHARED_SALIENTS],
-  mergeFailed: ["mergeStep", "update", ...SHARED_SALIENTS],
-  merged: ["mergeStep", "update", ...SHARED_SALIENTS],
+  merging: ["mergeStep", "gatedCall", "questionLead", "update", ...SHARED_SALIENTS],
+  mergeFailed: ["mergeStep", "gatedCall", "questionLead", "update", ...SHARED_SALIENTS],
+  merged: ["mergeStep", "gatedCall", "questionLead", "update", ...SHARED_SALIENTS],
   background: ["update", ...SHARED_SALIENTS],
   vendorFault: ["authenticating", "fault", "update", "retrying", "vendorStart", "turnEnded", ...SHARED_SALIENTS],
   agentReplFault: ["startFailed", "fault", "update", "turnEnded", ...SHARED_SALIENTS],
