@@ -326,6 +326,12 @@ func (q *queue) pushTray(ctx context.Context, ws ids.WorkspaceID, log dlog.Logge
 	return nil
 }
 
+// standingReconnectHold reports whether a hold is standing (not retired) under
+// the reconnect hold: a prompt that waits for a session to come up.
+func standingReconnectHold(h wsm.HeldPrompt) bool {
+	return h.Tombstone == nil && h.Hold != nil && *h.Hold == wsm.HoldReconnect
+}
+
 // standingHold finds one workspace's standing hold by turn.
 func (q *queue) standingHold(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID) (wsm.HeldPrompt, error) {
 	standing, err := q.deps.DB.HeldPrompts(ctx, ws)
