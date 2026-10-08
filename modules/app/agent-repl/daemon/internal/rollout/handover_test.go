@@ -1526,3 +1526,91 @@ func TestATransferWhoseMergeWillNotSuspendIsTakenBack(t *testing.T) {
 		t.Fatalf("records = %+v, want the refused suspension at ERROR", h.log.Records())
 	}
 }
+
+// workspaceRecords narrows captured records to those written to one
+// workspace's own sink under one message.
+func workspaceRecords(log *dlog.TestSurfaces, dir, message string) []dlog.Record {
+	var out []dlog.Record
+	for _, rec := range records(log, opTransfer) {
+		if rec.Message == message && rec.Context[dlog.KeyWorkspaceDir] == dir {
+			out = append(out, rec)
+		}
+	}
+	return out
+}
+
+const (
+	handingOverMessage = "a deploy found this daemon's build older, so it is handing the workspace to its successor; both daemons write for the workspace until the transfer lands"
+	handedOverMessage  = "the workspace is the successor's now; any later record from this daemon about it is the predecessor winding down, not the workspace's status"
+)
+
+func TestATransferTellsTheWorkspacesOwnLogWhyItIsHandedOver(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	_, dir := h.workspace(t)
+
+	// Act
+	if err := runHandover(t, h, 1); err != nil {
+		t.Fatalf("Handover: %v", err)
+	}
+
+	// Assert: on the workspace's sink, naming the successor by address and pid.
+	got := workspaceRecords(h.log, dir, handingOverMessage)
+	if len(got) != 1 {
+		t.Fatalf("hand-over records on %s = %+v, want exactly one", dir, got)
+	}
+	if got[0].Context["successor"] != "127.0.0.1:7788" || got[0].Context["successor_pid"] != fakeSuccessorPID {
+		t.Fatalf("context = %+v, want the successor's address and pid", got[0].Context)
+	}
+}
+
+func TestATransferTellsTheWorkspacesOwnLogWhenTheSuccessorOwnsIt(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	_, dir := h.workspace(t)
+
+	// Act
+	if err := runHandover(t, h, 1); err != nil {
+		t.Fatalf("Handover: %v", err)
+	}
+
+	// Assert
+	if got := workspaceRecords(h.log, dir, handedOverMessage); len(got) != 1 {
+		t.Fatalf("handed-over records on %s = %+v, want exactly one", dir, got)
+	}
+}
+
+func TestAFailedTransferNeverTellsTheWorkspacesLogTheSuccessorOwnsIt(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, dir := h.workspace(t)
+	h.fleet.handOverErr[ws] = errors.New("the watches would not close")
+
+	// Act
+	if _, err := h.c.HandOver(context.Background(), false); err != nil {
+		t.Fatalf("HandOver: %v", err)
+	}
+	h.registry.wait()
+
+	// Assert: the hand-over began, but the workspace stayed here.
+	if got := workspaceRecords(h.log, dir, handingOverMessage); len(got) != 1 {
+		t.Fatalf("hand-over records = %+v, want the attempt recorded", got)
+	}
+	if got := workspaceRecords(h.log, dir, handedOverMessage); len(got) != 0 {
+		t.Fatalf("handed-over records = %+v, want none for a transfer that failed", got)
+	}
+}
+
+func TestARestartWritesNoHandOverRecordToTheWorkspacesLog(t *testing.T) {
+	// Arrange: a restart has no successor to hand the workspace to.
+	h := newHarness(t)
+	_, dir := h.workspace(t)
+
+	// Act
+	runRestart(t, h)
+
+	// Assert
+	if got := workspaceRecords(h.log, dir, handingOverMessage); len(got) != 0 {
+		t.Fatalf("hand-over records = %+v, want none for a restart", got)
+	}
+}
