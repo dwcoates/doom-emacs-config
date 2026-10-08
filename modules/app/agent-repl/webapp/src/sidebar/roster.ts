@@ -239,19 +239,12 @@ export function drawRosterMaturitySection(
   path: string,
 ): HTMLElement {
   const stage = drawRosterMaturityKey(requireMessage(u.key, `${path}.key`), `${path}.key`);
-  const foldKey = maturityFoldKey(stage);
-  const section = daemonFoldedBox(foldKey, drawRosterSectionFold(u.fold, `${path}.fold`), sc);
-  section.classList.add("maturity-section");
+  const section = drawHeadedSection(u, sc, path, {
+    foldKey: maturityFoldKey(stage),
+    className: "maturity-section",
+    target: { case: "maturity", value: maturityStageRef(stage) },
+  });
   section.setAttribute("data-maturity-stage", stage);
-  section.appendChild(
-    drawRosterSectionHeader(
-      requireMessage(u.header, `${path}.header`),
-      section,
-      sectionFold(sc, foldKey, { case: "maturity", value: maturityStageRef(stage) }),
-      `${path}.header`,
-    ),
-  );
-  section.appendChild(drawRosterRows(requireMessage(u.rows, `${path}.rows`), sc, `${path}.rows`, true));
   return section;
 }
 
@@ -285,16 +278,56 @@ export function drawRosterRepoSection(
   // THE FOLD IS THE DAEMON'S: the Emacs tab bar hides a collapsed
   // repository's workspaces off the same pushed arm, so the two can never
   // disagree.
-  const foldKey = repoFoldKey(key.id);
-  const section = daemonFoldedBox(foldKey, drawRosterSectionFold(u.fold, `${path}.fold`), sc);
-  section.classList.add("repo-section");
+  return drawHeadedSection(u, sc, path, {
+    foldKey: repoFoldKey(key.id),
+    className: "repo-section",
+    target: { case: "repository", value: key },
+    decorateHeader: (header, section) => header.appendChild(drawCreateWorkspaceControl(key, section, sc)),
+  });
+}
+
+/** What a live grouping's section shares with the others: header, rows, fold. */
+export interface HeadedSectionWire {
+  header?: RosterSectionHeader;
+  rows?: RosterRows;
+  fold: RosterSectionFold;
+}
+
+/** How one kind of headed section is identified and decorated. */
+export interface HeadedSectionShape {
+  /** The page key its fold is held under (`view.ts`). */
+  foldKey: string;
+  /** The class naming the section's kind. */
+  className: string;
+  /** The section UpdateSidebarView folds. */
+  target: MessageInitShape<typeof SidebarViewFoldSectionSchema>["section"];
+  /** Anything the kind adds to its header, after the folded count. */
+  decorateHeader?: (header: HTMLElement, section: HTMLElement) => void;
+}
+
+/**
+ * A live grouping's section under the shared `RosterSectionHeader`: the box
+ * folded as the daemon says, the label-and-count header whose gesture asks
+ * for the other fold, and the rows with closed workspaces dropped.
+ *
+ * THE ONE SHAPE the repository and maturity sections draw, so the two can
+ * never disagree on how a header folds or which rows a live section hides.
+ */
+export function drawHeadedSection(
+  u: HeadedSectionWire,
+  sc: SidebarContext,
+  path: string,
+  shape: HeadedSectionShape,
+): HTMLElement {
+  const section = daemonFoldedBox(shape.foldKey, drawRosterSectionFold(u.fold, `${path}.fold`), sc);
+  section.classList.add(shape.className);
   const header = drawRosterSectionHeader(
     requireMessage(u.header, `${path}.header`),
     section,
-    sectionFold(sc, foldKey, { case: "repository", value: key }),
+    sectionFold(sc, shape.foldKey, shape.target),
     `${path}.header`,
   );
-  header.appendChild(drawCreateWorkspaceControl(key, section, sc));
+  shape.decorateHeader?.(header, section);
   section.appendChild(header);
   section.appendChild(drawRosterRows(requireMessage(u.rows, `${path}.rows`), sc, `${path}.rows`, true));
   return section;
