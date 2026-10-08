@@ -140,10 +140,11 @@
      wears; the dark theme lifts it to its own --muted grey. */
   --tool-command: #4b5563;
   /* The prose of a thinking bubble or an interim response (owner request,
-     2026-10-08): a slight dimming of --fg, a little lighter than the body
-     text, still easily read. The dark theme dims its near-white the same
-     small step. */
-  --interim-text: #3f434a;
+     2026-10-08): EXACTLY the tool card's header grey, the one the Bash
+     command wears. It is that token, not a copy of its value, so the two
+     cannot drift; the dark theme redefines --tool-command alone, and this
+     follows it. */
+  --interim-text: var(--tool-command);
   /* Textless-thinking progress indicator: orange, distinct from every other
      status color in the palette. */
   --thinking: #ea580c;
@@ -420,7 +421,6 @@
     --assistant: #1b1e25;
     --thinking: #fb923c;
     --tool-command: #9ca3af;
-    --interim-text: #c3c7ce;
     --retry: #a78bfa;
     --info-ws: #4ade80;
     --info-model: #22d3ee;
@@ -1685,9 +1685,9 @@ pre {
    `isInterimResponse`) are filled with the page's own `--bg`, so in either
    theme the fill is not there at all and only the prose (and the interim's
    pear border, once settled) reads. It feeds `--bubble-bg`, so anything
-   painted from it matches. Their prose is the slightly dimmed
-   `--interim-text` (owner request, 2026-10-08); a link or a quote keeps its
-   own color. */
+   painted from it matches. Their prose is `--interim-text`, the tool card's
+   header grey (owner request, 2026-10-08); a link or a quote keeps its own
+   color. */
 .bubble[data-variant="thinking"],
 .bubble.interim-response {
   --bubble-bg: var(--bg);
