@@ -1322,6 +1322,8 @@ func (r *resolver) UpsertDurable(ws ids.WorkspaceID, feed feedid.Feed, row *fron
 	r.logger(ws).Debug("daemon.feed.durable",
 		"a durable daemon-synthesized row was upserted",
 		dlog.Context{"feed": r.feedKey(ws, feed), "row": row.GetId().GetValue()})
+	// A PUSH NEVER FOLDS AN OPEN MERGE BUBBLE (mergefold.go).
+	r.keepMergeOpen(s, feed, row)
 	r.upsert(s, placement{feed: feed}, row, true)
 	r.recordDurable(s, feed, row.GetId().GetValue())
 }
