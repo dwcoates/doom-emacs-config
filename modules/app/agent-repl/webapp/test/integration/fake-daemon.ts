@@ -77,6 +77,7 @@ import {
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_web_workspace_pb";
 import { OpenFeedResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_feed_pb";
 import { SelectFeedRowResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_feed_row_pb";
+import { FoldMergeBubbleResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_fold_merge_bubble_pb";
 import { GetFeedPageResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_get_feed_page_pb";
 import { SubmitPromptResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_submit_prompt_pb";
 import { InterruptResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_interrupt_pb";
@@ -1404,6 +1405,12 @@ export function createFakeDaemon(): FakeDaemon {
         record("selectFeedRow", request);
         return answerFor("selectFeedRow", SelectFeedRowResponseSchema, {
           result: { case: "success", value: { outcome: { case: "none", value: {} } } },
+        });
+      },
+      foldMergeBubble(request) {
+        record("foldMergeBubble", request);
+        return answerFor("foldMergeBubble", FoldMergeBubbleResponseSchema, {
+          result: { case: "success", value: {} },
         });
       },
       foldHeldPrompt(request) {
