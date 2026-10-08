@@ -8397,12 +8397,18 @@ export const FeedContextCutCompactionFailedSchema: GenMessage<FeedContextCutComp
   messageDesc(file_frontend_v1_feed, 283);
 
 /**
- * The ▸/▾ state. UI preference the daemon holds; see the roster's fold.
+ * The bubble's ▸/▾ state as the daemon states it. FOLDED while the merge is
+ * queued or running, when it lands and when it is abandoned; OPEN once it has
+ * failed, so the failure is in front of the reader. A client applies it at the
+ * bubble's first draw and again whenever a push CHANGES it; a push repeating
+ * it leaves the reader's own toggle standing.
  *
  * @generated from message frontend.v1.FeedMergeFold
  */
 export type FeedMergeFold = Message<"frontend.v1.FeedMergeFold"> & {
   /**
+   * True for a folded bubble, false for an open one.
+   *
    * @generated from field: bool folded = 1;
    */
   folded: boolean;

@@ -17585,10 +17585,15 @@ func (x *FeedContextCutCompactionFailed) GetMarker() *FeedOutcomeMarker {
 	return nil
 }
 
-// The ▸/▾ state. UI preference the daemon holds; see the roster's fold.
+// The bubble's ▸/▾ state as the daemon states it. FOLDED while the merge is
+// queued or running, when it lands and when it is abandoned; OPEN once it has
+// failed, so the failure is in front of the reader. A client applies it at the
+// bubble's first draw and again whenever a push CHANGES it; a push repeating
+// it leaves the reader's own toggle standing.
 type FeedMergeFold struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Folded        bool                   `protobuf:"varint,1,opt,name=folded,proto3" json:"folded,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// True for a folded bubble, false for an open one.
+	Folded        bool `protobuf:"varint,1,opt,name=folded,proto3" json:"folded,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }

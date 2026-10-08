@@ -58,6 +58,8 @@ function mount(
     head?: () => HTMLElement;
     /** The page's scroll box and tail owner. */
     scroll?: { box: Element; tail: TailFollow };
+    /** The daemon's fold, read off each push (a merge row ships one). */
+    foldOf?: (row: FeedRow) => boolean;
   } = {},
 ) {
   const heads: number[] = [];
@@ -85,6 +87,7 @@ function mount(
         ? undefined
         : (host) => opts.composerFactory!(host),
     initialFolded: opts.folded ?? true,
+    foldOf: opts.foldOf,
     scroll: opts.scroll,
   });
   document.body.replaceChildren(bubble.element);
@@ -160,6 +163,54 @@ describe("mountBubble: the initial fold (R2)", () => {
     await settle();
     bubble.update(mergeRow("m1", true));
     expect(bubble.isExpanded()).toBe(true);
+  });
+});
+
+describe("mountBubble: a change of the daemon's fold", () => {
+  /** The merge row's own fold, as the feed reads it. */
+  const mergeFold = (row: FeedRow): boolean =>
+    row.row.case === "activity" && row.row.value.unit.case === "merge"
+      ? (row.row.value.unit.value.head?.fold?.folded ?? true)
+      : true;
+
+  it("opens a folded merge bubble when the daemon's fold turns open", async () => {
+    // Arrange
+    const { bubble } = mount(mergeRow("m1", true), harness(), { folded: true, foldOf: mergeFold });
+    await settle();
+    // Act
+    bubble.update(mergeRow("m1", false));
+    await settle();
+    // Assert
+    expect(bubble.isExpanded()).toBe(true);
+  });
+
+  it("applies a changed fold once, so the reader's close after it stands", async () => {
+    // Arrange
+    const { bubble } = mount(mergeRow("m1", true), harness(), { folded: true, foldOf: mergeFold });
+    await settle();
+    bubble.update(mergeRow("m1", false));
+    await settle();
+    bubble.element.querySelector<HTMLElement>("[data-expand]")?.click();
+    await settle();
+    // Act
+    bubble.update(mergeRow("m1", false));
+    await settle();
+    // Assert
+    expect(bubble.isExpanded()).toBe(false);
+  });
+
+  it("records the daemon's fold it applied", async () => {
+    // Arrange
+    const { bubble } = mount(mergeRow("m1", true), harness(), { folded: true, foldOf: mergeFold });
+    await settle();
+    const capture = captureLogRecords();
+    // Act
+    bubble.update(mergeRow("m1", false));
+    await settle();
+    // Assert
+    capture.logger.flush();
+    await Promise.resolve();
+    expect(capture.sent.filter((r) => r.operation === "feed.bubble-fold-applied")).toHaveLength(1);
   });
 });
 

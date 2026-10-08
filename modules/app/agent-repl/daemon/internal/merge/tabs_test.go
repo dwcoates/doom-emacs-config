@@ -75,16 +75,20 @@ func TestHeadLivesOnTheRootFeed(t *testing.T) {
 	}
 }
 
-// TestHeadOpensFolded covers the bubble's first draw: the footer already
-// carries the merge's live state, so every result arm ships the bubble folded.
-func TestHeadOpensFolded(t *testing.T) {
+// TestHeadFoldFollowsTheMergesOutcome covers the bubble's fold: it stays
+// folded while the merge runs, when it lands and when it is abandoned, and
+// ships OPEN only once the merge has failed, so the failure is in front of
+// the reader.
+func TestHeadFoldFollowsTheMergesOutcome(t *testing.T) {
 	tests := []struct {
 		name   string
 		result any
+		folded bool
 	}{
-		{"update", nil},
-		{"success", &frontendv1.FeedMergeSuccess{}},
-		{"error", &frontendv1.FeedMergeError{}},
+		{"update", nil, true},
+		{"success", &frontendv1.FeedMergeSuccess{}, true},
+		{"failed", &frontendv1.FeedMergeError{Reason: &frontendv1.FeedMergeError_Failed{Failed: &frontendv1.FeedMergeFailed{}}}, false},
+		{"abandoned", &frontendv1.FeedMergeError{Reason: &frontendv1.FeedMergeError_Abandoned{Abandoned: &frontendv1.FeedMergeAbandoned{}}}, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -93,8 +97,8 @@ func TestHeadOpensFolded(t *testing.T) {
 
 			// Assert.
 			fold := row.GetActivity().GetMerge().GetHead().GetFold()
-			if fold == nil || !fold.GetFolded() {
-				t.Fatalf("the head ships fold %+v, want folded", fold)
+			if fold == nil || fold.GetFolded() != tt.folded {
+				t.Fatalf("the head ships fold %+v, want folded=%v", fold, tt.folded)
 			}
 		})
 	}
