@@ -3715,3 +3715,53 @@ describe("the load-more control's outline", () => {
     expect(rule).toMatch(/(?:^|;)\s*border:\s*1px solid var\(--muted\)/);
   });
 });
+
+/**
+ * THE CLASSIC DIFF (owner request, 2026-10-08): an added line on a green
+ * background and a removed one on a red, each a block of its own, in theme
+ * tokens both themes define.
+ */
+describe("the classic diff", () => {
+  it.each([
+    [".diff-classic .add", "var(--diff-add-bg)"],
+    [".diff-classic .del", "var(--diff-del-bg)"],
+  ])("paints %s with the %s background", (selector, want) => {
+    // Arrange / Act
+    const rule = declarationsOf(selector) ?? "";
+
+    // Assert
+    expect(rule).toContain(`background: ${want}`);
+  });
+
+  it.each([".diff-classic .add", ".diff-classic .del"])("leaves the text of %s in the card's own color", (selector) => {
+    // Arrange / Act
+    const rule = declarationsOf(selector) ?? "";
+
+    // Assert
+    expect(rule).toMatch(/(?:^|;)\s*color:\s*inherit/);
+  });
+
+  it("lays each line out as its own block", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".diff-classic .diff-line") ?? "";
+
+    // Assert
+    expect(rule).toMatch(/display:\s*block/);
+  });
+
+  it.each([
+    ["light", "--diff-add-bg"],
+    ["light", "--diff-del-bg"],
+    ["dark", "--diff-add-bg"],
+    ["dark", "--diff-del-bg"],
+  ] as const)("defines the %s theme's %s", (theme, token) => {
+    // Arrange
+    const block = theme === "light" ? (declarationsOf(":root") ?? "") : darkThemeBlock();
+
+    // Act
+    const got = new RegExp(`${token}:\\s*(#[0-9a-fA-F]{6})`).exec(block)?.[1];
+
+    // Assert
+    expect(got).toBeDefined();
+  });
+});

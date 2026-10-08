@@ -522,6 +522,60 @@ describe("the no-output form", () => {
   });
 });
 
+/**
+ * WHICH DRAWING A TEXT OUTPUT TAKES (owner request, 2026-10-08): a unified
+ * diff is drawn as the classic diff, markdown from a call that is not a shell
+ * is drawn formatted, and everything else, a failed call's text included,
+ * verbatim.
+ */
+describe("the text output form's drawing", () => {
+  const DIFF = "--- a/x\n+++ b/x\n@@ -1 +1 @@\n-old\n+new\n";
+  const MARKDOWN = "# Title\n\nbody";
+
+  /** A returned text card: TEXT, from a shell when SHELL, failed when FAILED. */
+  function textCard(text: string, shell: boolean, failed = false): HTMLElement {
+    return drawFeedSimpleToolCall(
+      card({
+        input: shell
+          ? { text: "git diff", form: { case: "command", value: {} } }
+          : { text: "https://example.com" },
+        outcome: {
+          case: "returned",
+          value: {
+            verdict: failed ? { case: "failed", value: {} } : { case: "succeeded", value: {} },
+            form: { case: "text", value: { text } },
+          },
+        },
+      }),
+      rowContext(),
+    );
+  }
+
+  it.each([
+    { name: "a shell's unified diff", text: DIFF, shell: true, failed: false, want: ".diff-classic" },
+    { name: "a unified diff from a call that is not a shell", text: DIFF, shell: false, failed: false, want: ".diff-classic" },
+    { name: "a failed call's unified diff", text: DIFF, shell: true, failed: true, want: ".bash-output.stderr" },
+    { name: "markdown from a call that is not a shell", text: MARKDOWN, shell: false, failed: false, want: ".tool-output-md" },
+    { name: "markdown a shell printed", text: MARKDOWN, shell: true, failed: false, want: "pre.bash-output" },
+    { name: "plain text", text: "done", shell: false, failed: false, want: "pre.bash-output" },
+  ])("draws $name as $want", ({ text, shell, failed, want }) => {
+    // Arrange / Act
+    const el = textCard(text, shell, failed);
+
+    // Assert
+    expect(el.querySelector("[data-output-body]")?.matches(want)).toBe(true);
+  });
+
+  it("draws a shell's unified diff with no +/- marker on its changed lines", () => {
+    // Arrange / Act
+    const el = textCard(DIFF, true);
+
+    // Assert
+    const changed = [...el.querySelectorAll('[data-diff-line="removed"], [data-diff-line="added"]')];
+    expect(changed.map((line) => line.textContent)).toEqual(["old", "new"]);
+  });
+});
+
 describe("the text output form", () => {
   it("draws the text verbatim in the capped box", () => {
     const el = drawFeedSimpleToolCall(
@@ -629,11 +683,13 @@ describe("the code output form", () => {
 });
 
 describe("the diff output form", () => {
+  // THE CLASSIC DIFF (owner request, 2026-10-08): the kind is the line's
+  // treatment, and the text is drawn with no +/- or space marker.
   const CASES = [
-    ["header", "hunk", "@@ -3,7 +3,9 @@", " @@ -3,7 +3,9 @@"],
-    ["added", "add", "a line", "+a line"],
-    ["removed", "del", "a line", "-a line"],
-    ["context", "ctx", "a line", " a line"],
+    ["header", "hunk", "@@ -3,7 +3,9 @@", "@@ -3,7 +3,9 @@"],
+    ["added", "add", "a line", "a line"],
+    ["removed", "del", "a line", "a line"],
+    ["context", "ctx", "a line", "a line"],
   ] as const;
 
   it.each(CASES)("draws a %s line with the %s treatment", (kind, cls, text, drawn) => {
@@ -681,7 +737,11 @@ describe("the diff output form", () => {
       }),
       rowContext(),
     );
-    expect(el.querySelector(".diff-output")?.textContent).toBe("-old\n+new");
+    const lines = [...el.querySelectorAll(".diff-output [data-diff-line]")];
+    expect(lines.map((l) => [l.getAttribute("data-diff-line"), l.textContent])).toEqual([
+      ["removed", "old"],
+      ["added", "new"],
+    ]);
   });
 });
 

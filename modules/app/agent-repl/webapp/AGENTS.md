@@ -669,6 +669,15 @@ hand any more:
   (owner ruling, 2026-10-01), with its hold and the feed's paint tracking.
   `test/footer/activity.test.ts`, "the unpinned tiers under working and
   background".
+- **A TOOL CARD'S OUTPUT DRAWS A DIFF CLASSIC AND MARKDOWN FORMATTED** (owner
+  request, 2026-10-08). The daemon's `diff` form, and a `text` output that
+  `parseUnifiedDiff` reads as a unified diff, draw as the classic diff
+  (`src/feed/cards/diff-view.ts`: green and red line backgrounds, no +/-
+  markers). A `text` output is markdown only when the call is not a shell
+  (the input line's `command` form), did not fail, and carries a block
+  construct (`isMarkdownOutput`, `src/feed/cards/markdown-output.ts`), drawn
+  through `renderMarkdown` and its safety. Both detectors are conservative;
+  each module's header states the exact rule.
 - **CSS** is appended in a delimited section headed
   `/* ---- <component> (<file>) ---- */`. Existing classes are never renamed or
   restyled.

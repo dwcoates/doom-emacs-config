@@ -660,6 +660,47 @@ describe.each(DIFF_LINE_KINDS)("a %s diff line", (kind) => {
   });
 });
 
+/**
+ * A TEXT OUTPUT'S DRAWING (owner request, 2026-10-08): a shell's unified diff
+ * draws as the classic diff, a markdown answer from a call that is not a shell
+ * draws formatted, and the same markdown a shell printed stays verbatim.
+ */
+describe("a text output's drawing", () => {
+  const textUnit = (text: string, shell: boolean) =>
+    activityRow({
+      case: "simpleToolCall",
+      value: {
+        name: { text: shell ? "Bash" : "WebFetch" },
+        input: shell ? { text: "git diff", form: { case: "command", value: {} } } : { text: "https://example.com" },
+        outcome: {
+          case: "returned",
+          value: { verdict: { case: "succeeded", value: {} }, form: { case: "text", value: { text } } },
+        },
+      },
+    });
+
+  it("draws a shell's unified diff as the classic diff, with no marker on a changed line", async () => {
+    // Arrange / Act
+    const row = await drawRow(textUnit("--- a/x\n+++ b/x\n@@ -1 +1 @@\n-old\n+new\n", true));
+    // Assert
+    expect(row.querySelector('.diff-classic [data-diff-line="added"]')?.textContent).toBe("new");
+  });
+
+  it("draws a markdown answer from a call that is not a shell formatted", async () => {
+    // Arrange / Act
+    const row = await drawRow(textUnit("# Title\n\nbody", false));
+    // Assert
+    expect(row.querySelector(".tool-output-md h1")?.textContent).toBe("Title");
+  });
+
+  it("draws the same markdown a shell printed verbatim", async () => {
+    // Arrange / Act
+    const row = await drawRow(textUnit("# Title\n\nbody", true));
+    // Assert
+    expect(row.querySelector("pre.bash-output")?.textContent).toBe("# Title\n\nbody");
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Skills, hooks, artifacts, plans, findings
 // ---------------------------------------------------------------------------
