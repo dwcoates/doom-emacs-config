@@ -86,6 +86,10 @@ func (r *resolver) SetTurnEnded(ws ids.WorkspaceID, how wsm.TurnClose) {
 			// leaves no other edge that would.
 			s.turn = nil
 			s.retrying = nil
+			// A COMPACTION ENDS WITH ITS TURN, as the roster's does: the
+			// vendor's own `compacting` clear may never follow a turn the
+			// prompt queue closed.
+			s.compacting = false
 			class := ladder.NoFailure
 			if ending != nil {
 				class = ending.class
