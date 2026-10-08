@@ -4,171 +4,159 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/dlog"
-	"claude-repld/internal/resolve/footer"
 	"claude-repld/internal/resolve/ladder"
-	"claude-repld/internal/shimclient"
 	"claude-repld/internal/wsm"
 )
 
-// statusArm resolves the row's status arm.
+// statusArm resolves the row's status arm by PROJECTING THE FOOTER'S STATUS.
 //
-// THE PRECEDENCE IS NOT STATED HERE. It is resolve/ladder's, the one ladder
-// the footer strip is projected from too, so the rail, the tab bar and the
-// strip cannot make different coarse claims about one workspace (owner
-// ruling, 2026-09-28). This resolver only draws each rung it can claim
-// (`rosterRung`) and the idle family at the bottom (`idleArm`), and asserts
-// that what it drew projects back onto the claim the ladder chose.
+// THE ROSTER RESOLVES NO STATUS OF ITS OWN. The footer resolver is the one
+// walker of resolve/ladder, over every fact the daemon holds about the
+// workspace, and the row takes the claim the footer resolved and draws its own
+// arm within it (owner ruling, 2026-10-08: the footer and the sidebar/tab-bar
+// status are the same structurally, never by coincidence). A fact that reaches
+// only one resolver therefore cannot split the surfaces: the roster has no
+// claim to make that the footer did not make first.
 //
-// ONE ARM SITS ABOVE THE LADDER: `inactive`, a registered workspace with no
-// open perspective and nothing live behind it. It dominates every session
+// ONE ARM SITS ABOVE THE PROJECTION: `inactive`, a registered workspace with
+// no open perspective and nothing live behind it. It dominates every session
 // state, and no footer is ever drawn for it.
 //
-// WITHIN a rung the order is this surface's detail:
-//   - merging: enqueuing, queued and merging are the one rung;
-//   - agent_repl_fault: start_failed, dead, severed, init (linkArm);
-//   - vendor_fault: a vendor that will not start, then a vendor or account
-//     block, then a call the vendor is retrying;
-//   - degraded: a taken-back shim's unreported state, or an open observation
-//     window — both drawn `degraded`;
-//   - thinking: clearing, then compacting, then submitting, then thinking;
-//   - idle: none (no session was ever created), then the last turn's end
-//     while its result is UNREAD (done, interrupted or turn_failed — it
-//     outranks idle_async: a result is waiting, and detached work running
-//     must not hide that, until the editor reports the row viewed or a new
-//     prompt starts a turn), then idle_async (detached work running NOW
-//     outranks how an already-read turn ended), then the read turn end (drawn
-//     PARTIAL), then ready.
-func statusArm(s *wsState, rec wsm.Workspace, session *wsm.Session, log dlog.Logger) string {
+// WITHIN A CLAIM the roster draws the footer's step as its own arm
+// (`projectArm`), except on the idle rung, whose detail is the roster's own
+// ruling (`idleArm`): an unread turn end holds the row over detached work, and
+// a read one is drawn partial.
+func statusArm(s *wsState, rec wsm.Workspace, session *wsm.Session, status *frontendv1.FooterStatus, log dlog.Logger) string {
 	if !s.live(session) && rec.Closed {
 		return "inactive"
 	}
-	// A PARKED SESSION IS IDLE, NOT BROKEN. The idle sweep stands the shim
-	// down deliberately and a prompt brings it straight back, so the ladder
-	// skips the link rung: nothing about a hibernation is visible to the user
-	// beyond the wait for the revival, and drawing `severed` or `dead` would
-	// report a fault where there is none.
-	isParked := parked(session)
-	if isParked {
-		log.Debug("daemon.sidebar.status", "the session is parked by the idle sweep", nil)
+	claim, ok := ladder.FooterClaim(status)
+	if !ok {
+		log.Error("daemon.sidebar.footer_status_unset",
+			"the footer answered a status with no arm set, so the roster has no claim to project",
+			dlog.Context{
+				"invariant_violation": "the footer's status always resolves, bottoming out at idle",
+				"remediation":         "find the footer path that published an unset status",
+			})
+		return "none"
 	}
-	claim, arm := ladder.Resolve(s.merge.State, isParked,
-		func(claim ladder.Claim) (string, bool) {
-			drawn := rosterRung(claim, s, session, log)
-			return drawn, drawn != ""
-		},
-		func() string { return idleArm(s, session, log) })
+	arm := idleArm(s, session, log)
+	if claim != ladder.Idle {
+		arm = projectArm(status, log)
+	}
 	if drawn, ok := ladder.RosterArmClaim(arm); !ok || drawn != claim {
 		log.Error("daemon.sidebar.status_claim",
-			"the roster drew a status arm that does not project onto the ladder claim it resolved",
+			"the roster drew a status arm that does not project onto the claim the footer resolved",
 			dlog.Context{
 				"claim":               string(claim),
 				"drawn":               string(drawn),
 				"arm":                 arm,
+				"footer_arm":          footerArmName(status),
 				"invariant_violation": "the roster and the footer must make the same coarse claim",
-				"remediation":         "draw the rung's own arm, or place the arm in ladder.RosterArmClaim",
+				"remediation":         "project the footer's step in projectArm, or place the arm in ladder.RosterArmClaim",
 			})
 	}
+	log.Debug("daemon.sidebar.status_decision", "the roster projected the footer's status",
+		dlog.Context{"claim": string(claim), "footer_arm": footerArmName(status), "arm": arm})
 	return arm
 }
 
-// rosterRung draws one ladder rung, empty when this workspace's facts make no
-// claim there.
-func rosterRung(claim ladder.Claim, s *wsState, session *wsm.Session, log dlog.Logger) string {
-	switch claim {
-	case ladder.Merging:
-		return mergeArm(s.merge)
-	case ladder.MergeFailed:
+// projectArm names the roster arm that draws the footer's status on every rung
+// above idle. Each footer step maps onto exactly one roster arm making the same
+// claim; a step this function does not name answers empty, which statusArm
+// reports as a broken projection.
+func projectArm(status *frontendv1.FooterStatus, log dlog.Logger) string {
+	switch arm := status.GetStatus().(type) {
+	case *frontendv1.FooterStatus_Merging:
+		if arm.Merging.GetEnqueued() != nil {
+			return "merge_queued"
+		}
+		return "merging"
+	case *frontendv1.FooterStatus_MergeFailed:
 		return "merge_failed"
-	case ladder.Merged:
+	case *frontendv1.FooterStatus_Merged:
 		return "merged"
-	case ladder.AgentReplFault:
-		if ladder.AwaitingBringUp(s.linkSeen, s.turn != nil, s.started) {
-			log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "an accepted turn awaits the bring-up"})
-			return "init"
-		}
-		if noSessionArm(s, session) != "" {
-			// No session was ever created, so there is no route to be down.
-			return ""
-		}
-		if arm := linkArm(s, session); arm != "" {
-			return arm
-		}
-		// THE ROUTE SERVES: the last turn dying with agent-repl's own
-		// machinery is the one claim left on the rung (owner ruling,
-		// 2026-10-06), as the footer's `agent_repl_fault · turn_died` is
-		// where the link serves and no vendor start stands.
-		if s.turnFault == ladder.AgentReplTurnFault && s.linkSeen && s.vendorStart == VendorStartNone {
-			log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "an agent-repl turn fault stands"})
-			return "turn_died"
-		}
-		return ""
-	case ladder.Closing:
-		// The roster observes no close refusal; only the footer claims it.
-		return ""
-	case ladder.Degraded:
-		if !s.linkSeen || noSessionArm(s, session) != "" {
-			return ""
-		}
-		if s.stateUnreported || s.degraded {
-			log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case s.stateUnreported || s.degraded"})
-			return "degraded"
-		}
-		return ""
-	case ladder.NetworkFault:
-		if len(s.networkFaults) > 0 {
-			log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "a network fault stands"})
-			return "network_fault"
-		}
-		return ""
-	case ladder.VendorFault:
-		if s.vendorStart != VendorStartNone {
-			log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "the vendor will not start", "vendor_start": s.vendorStart.String()})
-			return "vendor_fault"
-		}
-		if s.vendorBlocked {
-			log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case s.vendorBlocked"})
-			return "vendor_blocked"
-		}
-		if s.turnFault == ladder.VendorTurnFault {
-			// THE VENDOR ENDED OR REFUSED THE LAST TURN (owner ruling,
-			// 2026-10-06), the footer's `vendor_fault · vendor_error`.
-			log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "a vendor turn fault stands"})
-			return "vendor_blocked"
-		}
-		if s.retryBlocks() {
-			log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case s.retryBlocks()"})
-			return "api_retrying"
-		}
-		return ""
-	case ladder.Waiting:
-		if len(s.permissions) > 0 {
-			log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case len(s.permissions) > 0"})
+	case *frontendv1.FooterStatus_AgentReplFault:
+		return agentReplFaultArm(arm.AgentReplFault)
+	case *frontendv1.FooterStatus_NetworkFault:
+		return "network_fault"
+	case *frontendv1.FooterStatus_Closing:
+		return "closing"
+	case *frontendv1.FooterStatus_VendorFault:
+		return vendorFaultArm(arm.VendorFault)
+	case *frontendv1.FooterStatus_Degraded:
+		return "degraded"
+	case *frontendv1.FooterStatus_Waiting:
+		if arm.Waiting.GetPermission() != nil {
 			return "permission"
 		}
-		return ""
-	case ladder.Thinking:
-		return thinkingArm(s, log)
+		return "waiting"
+	case *frontendv1.FooterStatus_Working:
+		switch {
+		case arm.Working.GetSubmitting() != nil:
+			return "submitting"
+		case arm.Working.GetClearing() != nil:
+			return "clearing"
+		case arm.Working.GetCompacting() != nil:
+			return "compacting"
+		default:
+			return "thinking"
+		}
+	case *frontendv1.FooterStatus_Loading:
+		return "thinking"
 	default:
-		log.Error("daemon.sidebar.status_rung", "the ladder asked the roster for a rung it has no drawing for",
+		log.Error("daemon.sidebar.project_arm", "the footer drew a status the roster has no projection for",
 			dlog.Context{
-				"claim":               string(claim),
-				"invariant_violation": "every ladder rung above idle has a roster drawing",
-				"remediation":         "add the rung to rosterRung",
+				"footer_arm":          footerArmName(status),
+				"invariant_violation": "every footer status above idle has a roster arm",
+				"remediation":         "add the footer arm to projectArm",
 			})
 		return ""
 	}
 }
 
-// mergeArm names a merge IN FLIGHT's arm. The ladder calls it only when the
-// merge state stands on the merging rung; a merge state this build does not
-// name is one the orchestrator reports, so it draws `merging` (ladder.MergeClaim).
-func mergeArm(facts footer.MergeFacts) string {
-	switch facts.State {
-	case "queued":
-		return "merge_queued"
+// agentReplFaultArm projects the footer's agent-repl fault step.
+func agentReplFaultArm(fault *frontendv1.FooterStatusAgentReplFault) string {
+	switch fault.GetSubstatus().(type) {
+	case *frontendv1.FooterStatusAgentReplFault_Starting:
+		return "init"
+	case *frontendv1.FooterStatusAgentReplFault_Severed:
+		return "severed"
+	case *frontendv1.FooterStatusAgentReplFault_Dead:
+		return "dead"
+	case *frontendv1.FooterStatusAgentReplFault_StartFailed:
+		return "start_failed"
+	case *frontendv1.FooterStatusAgentReplFault_TurnDied:
+		return "turn_died"
+	case *frontendv1.FooterStatusAgentReplFault_DaemonImpaired:
+		return "daemon_impaired"
 	default:
-		return "merging"
+		return ""
 	}
+}
+
+// vendorFaultArm projects the footer's vendor fault step: a vendor that will
+// not START is `vendor_fault`, a call the vendor is retrying is
+// `api_retrying`, and every vendor or account block is `vendor_blocked`.
+func vendorFaultArm(fault *frontendv1.FooterStatusVendorFault) string {
+	switch fault.GetSubstatus().(type) {
+	case *frontendv1.FooterStatusVendorFault_VendorRetry,
+		*frontendv1.FooterStatusVendorFault_VendorRejection,
+		*frontendv1.FooterStatusVendorFault_VendorFailed:
+		return "vendor_fault"
+	case *frontendv1.FooterStatusVendorFault_ApiRetrying:
+		return "api_retrying"
+	default:
+		return "vendor_blocked"
+	}
+}
+
+// footerArmName names the footer status's arm for a record, "unset" for none.
+func footerArmName(status *frontendv1.FooterStatus) string {
+	if status.GetStatus() == nil {
+		return "unset"
+	}
+	return string(status.ProtoReflect().WhichOneof(status.ProtoReflect().Descriptor().Oneofs().ByName("status")).Name())
 }
 
 // noSessionArm names `none` — registered, but no session was ever created —
@@ -191,97 +179,6 @@ const terminalHibernated = "hibernated"
 // parked reports whether a session record carries the idle sweep's park.
 func parked(session *wsm.Session) bool {
 	return session != nil && session.Terminal != nil && session.Terminal.Kind == terminalHibernated
-}
-
-// linkArm names the route's arm, empty when the route serves undegraded. It
-// mirrors the footer's disconnected step, fact for fact, so the dot and the
-// strip cannot disagree about the same link.
-//
-// A ROUTE NOBODY HAS SEEN IS NOT A ROUTE THAT SERVES. A workspace whose
-// session record exists while no link state has yet been observed has proven
-// nothing: the shim is being spawned and dialed, and that window is `init`.
-// Reporting `ready` there published the leading `ready` the editor saw —
-// none -> ready -> init -> ... — `ready` before the `init` it is supposed to
-// follow, and `ready` for a workspace whose prompt the daemon had already
-// accepted. `init` is what that pre-link state actually is, and saying so
-// keeps the cold-start walk monotone with the workspace's own lifecycle.
-//
-// A CONNECTED route, on the other hand, is proven and is NOT a link fault, so
-// once the link connects the row leaves the `init`/link band even before a
-// SessionStarted lands — see the default arm in the switch. Blue is reserved
-// for a compromised route, and a connected route is not one.
-//
-// A session that ENDED is the one case that still falls through: its route is
-// not coming up, there is nothing to wait on, and the lifecycle arms below are
-// what report how it ended.
-func linkArm(s *wsState, session *wsm.Session) string {
-	// A VENDOR THAT DID NOT START IS THE VENDOR'S FAULT, NOT THE LINK'S
-	// (owner ruling, 2026-10-02): the vendor rung draws it `vendor_fault`, and
-	// the dead route a stopped start leaves behind is this daemon's own doing.
-	// Only a route being dialed or redialed says something newer. The footer
-	// draws the same (resolve/footer agentReplFault).
-	if s.vendorStart != VendorStartNone && s.link != shimclient.LinkDialing && s.link != shimclient.LinkRedialing {
-		return ""
-	}
-	if !s.linkSeen {
-		if session != nil && session.Terminal != nil {
-			return ""
-		}
-		return "init"
-	}
-	switch {
-	case s.link == shimclient.LinkDialing:
-		return "init"
-	case s.link == shimclient.LinkRedialing:
-		return "severed"
-	case s.link == shimclient.LinkDead && s.everConnected:
-		return "dead"
-	case s.link == shimclient.LinkDead:
-		return "start_failed"
-	default:
-		// A CONNECTED route is proven, so the row is NOT a link fault. `init`
-		// belongs to a route still being established — dialing, or a session
-		// record with no link seen yet — and once the link connects the
-		// route is up whether or not a SessionStarted has landed on this
-		// resolver's view.
-		//
-		// The `init` window used to extend past the connect, held open by
-		// `!s.started`, on the theory that the route is not "proven usable"
-		// until the shim announces its session. That reported `init` — a
-		// BLUE, link-fault color — for a workspace whose route was up and
-		// whose webapp was idle, and it never cleared on a RESUME: a daemon
-		// reconnect replays the link (OnLink -> Connected) but not the
-		// one-shot SessionStarted, so `s.started` stayed false forever and
-		// the tab stayed blue on a healthy, idle session.
-		//
-		// Blue means the route is compromised, and a connected route is not.
-		// A connected-but-not-yet-announced session falls through to
-		// `sessionArm`, which reports the lifecycle it actually has
-		// (`ready` for an idle one). The published cold-start walk stays
-		// monotone because `init` is still what the pre-connect dialing
-		// phase reports.
-		return ""
-	}
-}
-
-// thinkingArm names a turn in flight's arm, empty when none is.
-func thinkingArm(s *wsState, log dlog.Logger) string {
-	switch {
-	case s.turn != nil && s.turn.Act == footer.ActClear:
-		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case s.turn != nil && s.turn.Act == footer.ActClear"})
-		return "clearing"
-	case s.compacting:
-		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case s.compacting"})
-		return "compacting"
-	case s.turn != nil && !s.sawActivity:
-		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case s.turn != nil && !s.sawActivity"})
-		return "submitting"
-	case s.turn != nil:
-		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case s.turn != nil"})
-		return "thinking"
-	default:
-		return ""
-	}
 }
 
 // idleArm names the bottom rung's arm. It always answers: every path ends at

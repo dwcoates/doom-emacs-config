@@ -50,7 +50,7 @@ func (r *resolver) OnWorkspaceRecord(rec dlog.WorkspaceRecord) {
 			dlog.Context{"workspace_id": rec.WorkspaceID, "level": rec.Level, "operation": rec.Operation})
 		return
 	}
-	r.mutate(ws, "daemon.footer.daemon_record", "the footer took a daemon warning or error about the workspace",
+	r.mutateLine(ws, "daemon.footer.daemon_record", "the footer took a daemon warning or error about the workspace",
 		dlog.Context{"level": rec.Level, "operation": rec.Operation}, func(s *wsState) {
 			t := &frontendv1.FooterActivityTransient{}
 			if rec.Level == dlog.LevelError {

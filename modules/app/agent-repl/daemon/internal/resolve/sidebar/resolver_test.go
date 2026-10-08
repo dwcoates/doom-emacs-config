@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
@@ -16,7 +17,7 @@ import (
 
 func TestNewRefusesWithoutLogSurfaces(t *testing.T) {
 	// Arrange, Act.
-	_, err := sidebar.New(testColors(), nil)
+	_, err := sidebar.New(testColors(), nil, idleFooter{})
 
 	// Assert.
 	if err == nil {
@@ -24,9 +25,27 @@ func TestNewRefusesWithoutLogSurfaces(t *testing.T) {
 	}
 }
 
+// idleFooter answers the idle status for every workspace: a status source for
+// the construction tests, which publish no row.
+type idleFooter struct{}
+
+func (idleFooter) Status(ids.WorkspaceID) *frontendv1.FooterStatus {
+	return &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Idle{Idle: &frontendv1.FooterStatusIdle{}}}
+}
+
+func TestNewRefusesWithoutAFooterStatus(t *testing.T) {
+	// Arrange, Act.
+	_, err := sidebar.New(testColors(), dlog.NewTestSurfaces(), nil)
+
+	// Assert: a roster with no footer has no status to project.
+	if err == nil {
+		t.Fatal("sidebar.New accepted no footer status")
+	}
+}
+
 func TestNewRefusesAnEmptyRosterStatusTable(t *testing.T) {
 	// Arrange, Act.
-	_, err := sidebar.New(vocab.RenderColors{}, dlog.NewTestSurfaces())
+	_, err := sidebar.New(vocab.RenderColors{}, dlog.NewTestSurfaces(), idleFooter{})
 
 	// Assert.
 	if err == nil {
@@ -40,7 +59,7 @@ func TestNewRefusesARosterStatusTableMissingAnArm(t *testing.T) {
 	delete(colors.RosterStatus, "vendor_blocked")
 
 	// Act.
-	_, err := sidebar.New(colors, dlog.NewTestSurfaces())
+	_, err := sidebar.New(colors, dlog.NewTestSurfaces(), idleFooter{})
 
 	// Assert: an unpainted dot fails here, never on the wire.
 	if err == nil {
@@ -54,7 +73,7 @@ func TestNewRefusesARosterStatusTableWithASurplusRow(t *testing.T) {
 	colors.RosterStatus["invented"] = "grey"
 
 	// Act.
-	_, err := sidebar.New(colors, dlog.NewTestSurfaces())
+	_, err := sidebar.New(colors, dlog.NewTestSurfaces(), idleFooter{})
 
 	// Assert: a colored state nothing can reach means the table has drifted.
 	if err == nil {
@@ -68,7 +87,7 @@ func TestNewRefusesAMergeGlyphsTableMissingAnArm(t *testing.T) {
 	delete(colors.MergeGlyphs, "merging")
 
 	// Act.
-	_, err := sidebar.New(colors, dlog.NewTestSurfaces())
+	_, err := sidebar.New(colors, dlog.NewTestSurfaces(), idleFooter{})
 
 	// Assert.
 	if err == nil {
@@ -341,7 +360,7 @@ func TestNewRefusesASurplusMergeGlyphRow(t *testing.T) {
 	colors.MergeGlyphs["merge_teleported"] = "recycle"
 
 	// Act.
-	_, err := sidebar.New(colors, dlog.NewTestSurfaces())
+	_, err := sidebar.New(colors, dlog.NewTestSurfaces(), idleFooter{})
 
 	// Assert.
 	if err == nil {
@@ -360,7 +379,7 @@ func TestAViewIsPublishedBeforeAnotherChangeCanPublishItsOwn(t *testing.T) {
 	// Arrange: a restored result, which the next turn's start reports gone.
 	var r sidebar.Resolver
 	inSink := false
-	r, err := sidebar.New(testColors(), dlog.NewTestSurfaces(), sidebar.WithResultSink(
+	r, _ = newResolver(t, sidebar.WithResultSink(
 		func(ids.WorkspaceID, *wsm.TurnResult) {
 			if inSink {
 				return
@@ -369,9 +388,6 @@ func TestAViewIsPublishedBeforeAnotherChangeCanPublishItsOwn(t *testing.T) {
 			r.AckTurn(theWS)
 			r.OnActivity(theWS, &conversationv1.AgentId{Value: "main"}, &conversationv1.AgentActivity{})
 		}))
-	if err != nil {
-		t.Fatalf("sidebar.New: %v", err)
-	}
 	rec := workspace(string(theWS), "one")
 	rec.Result = &wsm.TurnResult{End: wsm.TurnResultDone, Read: true}
 	r.SetRegistry(registry(rec))

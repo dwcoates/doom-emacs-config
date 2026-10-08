@@ -53,18 +53,20 @@ func newSurfaces(t *testing.T, session *wsm.Session) *surfaces {
 	footerLogs, rosterLogs := dlog.NewTestSurfaces(), dlog.NewTestSurfaces()
 	// The dwell never elapses inside a subtest, so a momentary status stands
 	// for the whole assertion rather than racing a timer.
-	f, err := footer.New(colors, footerLogs, footer.WithMomentaryDwell(time.Hour))
+	var r sidebar.Resolver
+	f, err := footer.New(colors, footerLogs, footer.WithMomentaryDwell(time.Hour),
+		footer.WithStatusChanged(func(ws ids.WorkspaceID) { r.FooterStatusChanged(ws) }))
 	if err != nil {
 		t.Fatalf("footer.New: %v", err)
+	}
+	r, err = sidebar.New(colors, rosterLogs, f)
+	if err != nil {
+		t.Fatalf("sidebar.New: %v", err)
 	}
 	if err := f.SetWorkspaceDir(theWS, t.TempDir()); err != nil {
 		t.Fatalf("SetWorkspaceDir: %v", err)
 	}
 	f.SetParticipants(theWS, true, true)
-	r, err := sidebar.New(colors, rosterLogs)
-	if err != nil {
-		t.Fatalf("sidebar.New: %v", err)
-	}
 	reg := registry(workspace(string(theWS), "one"))
 	if session != nil {
 		reg.Sessions = []wsm.Session{*session}
@@ -110,11 +112,15 @@ type linkCase struct {
 
 var linkCases = []linkCase{
 	// A workspace with no session record and no link seen: the roster's
-	// `none`, and a footer with nothing to report. A session record with no
-	// link seen yet is left out ON PURPOSE: the roster reads that window as
-	// `init` from the durable record, which the footer is not fed — one of
-	// the one-sided facts resolve/ladder's package comment lists.
+	// `none`, and a footer with nothing to report.
 	{name: "no session", session: false, apply: func(*surfaces) {}},
+	// A session record with no link seen, and the bring-up that makes it the
+	// window a route is being established in.
+	{name: "session record", session: true, apply: func(*surfaces) {}},
+	{name: "bringing up", session: true, apply: func(s *surfaces) {
+		s.footer.SetBringingUp(theWS, true)
+		s.roster.SetBringingUp(theWS, true)
+	}},
 	{name: "dialing", session: true, apply: func(s *surfaces) { s.link(shimclient.LinkDialing) }},
 	{name: "connected", session: true, apply: func(s *surfaces) { s.link(shimclient.LinkConnected) }},
 	{name: "redialing", session: true, apply: func(s *surfaces) {

@@ -132,14 +132,25 @@ type Resolver interface {
 	// prompt, first line only. Empty omits the line rather than drawing it
 	// blank.
 	SetSummary(ws ids.WorkspaceID, text string)
+	// FooterStatusChanged redraws the roster because the footer's status for
+	// the workspace moved: the row's status is a projection of it.
+	FooterStatusChanged(ws ids.WorkspaceID)
 	// Topic is the one editor-global roster publication.
 	Topic() *publish.Topic[*frontendv1.WorkspaceRoster]
 }
 
+// FooterStatus is the footer resolver's answer to what a workspace's strip
+// shows (footer.Resolver.Status): the status every roster row projects.
+type FooterStatus interface {
+	Status(ws ids.WorkspaceID) *frontendv1.FooterStatus
+}
+
 // New builds the roster resolver. colors supplies the roster_status and
-// merge_glyphs tables, which the resolver asserts its arms against.
-func New(colors vocab.RenderColors, log dlog.Surfaces, opts ...Option) (Resolver, error) {
-	r, err := newResolver(colors, log)
+// merge_glyphs tables, which the resolver asserts its arms against; footer is
+// the status every row projects, and the footer's WithStatusChanged sink is
+// the resolver's FooterStatusChanged.
+func New(colors vocab.RenderColors, log dlog.Surfaces, footer FooterStatus, opts ...Option) (Resolver, error) {
+	r, err := newResolver(colors, log, footer)
 	if err != nil {
 		return nil, err
 	}

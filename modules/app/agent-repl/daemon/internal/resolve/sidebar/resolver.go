@@ -27,6 +27,9 @@ import (
 type resolver struct {
 	colors vocab.RenderColors
 	log    dlog.Surfaces
+	// footer is the one resolver of a workspace's status, which every row
+	// projects (statusArm).
+	footer FooterStatus
 
 	mu    sync.Mutex
 	state *rosterState
@@ -50,14 +53,17 @@ type resultChange struct {
 // the arms this resolver emits. An arm with no color fails HERE rather than
 // drawing an unpainted dot, and a table row no arm claims fails too: a colored
 // state nothing can reach means the table and the oneof have drifted.
-func newResolver(colors vocab.RenderColors, log dlog.Surfaces) (*resolver, error) {
+func newResolver(colors vocab.RenderColors, log dlog.Surfaces, footer FooterStatus) (*resolver, error) {
 	if log == nil {
 		return nil, fmt.Errorf("sidebar resolver needs log surfaces")
+	}
+	if footer == nil {
+		return nil, fmt.Errorf("sidebar resolver needs the footer's status to project")
 	}
 	if err := assertTables(colors); err != nil {
 		return nil, fmt.Errorf("sidebar resolver refuses to serve an unpainted state: %w", err)
 	}
-	return &resolver{colors: colors, log: log, state: newRosterState()}, nil
+	return &resolver{colors: colors, log: log, footer: footer, state: newRosterState()}, nil
 }
 
 // assertTables checks the roster_status table row for row against statusArms,
@@ -70,6 +76,19 @@ func assertTables(colors vocab.RenderColors) error {
 		return err
 	}
 	return colors.AssertMergeGlyphArms(mergeArms)
+}
+
+// FooterStatusChanged redraws the roster on the footer's status edge, in line,
+// so the row shows the footer's new status before the edge returns.
+//
+// THE LOCK ORDER IS ROSTER, THEN FOOTER. A render holds the roster's lock and
+// reads the footer's status under the footer's; the footer tells this edge
+// only after releasing its own lock, and never from the one path that reaches
+// it while the roster's lock is held — a roster warning teed onto the strip,
+// which moves the activity line alone (footer.mutateLine).
+func (r *resolver) FooterStatusChanged(ws ids.WorkspaceID) {
+	r.mutate("daemon.sidebar.footer_status_changed", "the roster re-projected the footer's status",
+		dlog.Context{"workspace_id": string(ws)}, r.log.Global(), func() {})
 }
 
 // Topic is the one editor-global roster publication.

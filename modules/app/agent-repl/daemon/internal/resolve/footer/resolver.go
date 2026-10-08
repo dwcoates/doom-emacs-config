@@ -198,6 +198,24 @@ func (r *resolver) logOf(ws ids.WorkspaceID, s *wsState) dlog.Logger {
 // view. Every sink method and every setter goes through it, so there is
 // exactly one publication site.
 func (r *resolver) mutate(ws ids.WorkspaceID, operation, message string, ctx dlog.Context, apply func(*wsState)) {
+	r.mutateTelling(ws, operation, message, ctx, apply, true)
+}
+
+// mutateLine is mutate for a change that moves the activity line ALONE — a
+// daemon warning or error teed onto the strip. It tells no status edge, and
+// records the status moving as the invariant violation it is.
+//
+// THIS IS WHAT LETS THE ROSTER REDRAW IN LINE. The tee runs on whatever
+// goroutine logged the record, which may hold the roster's lock (a roster
+// record), and the status edge redraws the roster under that lock: telling
+// it from here would take the roster's lock twice. A line moves no status, so
+// nothing is withheld by not telling it.
+func (r *resolver) mutateLine(ws ids.WorkspaceID, operation, message string, ctx dlog.Context, apply func(*wsState)) {
+	r.mutateTelling(ws, operation, message, ctx, apply, false)
+}
+
+// mutateTelling is mutate, telling the status edge only when tell is set.
+func (r *resolver) mutateTelling(ws ids.WorkspaceID, operation, message string, ctx dlog.Context, apply func(*wsState), tell bool) {
 	r.mu.Lock()
 	s := r.stateLocked(ws)
 	s.seen = true
@@ -254,11 +272,27 @@ func (r *resolver) mutate(ws ids.WorkspaceID, operation, message string, ctx dlo
 	if servedNow {
 		r.tellVendorServes(operation, []vendorServed{served})
 	}
+	pubs := append([]publication{own}, peers...)
+	if tell {
+		r.tellStatusChanged(pubs)
+		return
+	}
+	for _, p := range pubs {
+		if p.statusMoved() {
+			p.logger.Error("daemon.footer.line_moved_status",
+				"a change to the activity line alone moved the status, and the roster was not told", dlog.Context{
+					"cause": operation, "arm": p.arm, "previous_arm": p.previousArm, "substatus": p.sub,
+					"invariant_violation": "only a fact moves the status; a line never does",
+					"remediation":         "route the change through mutate, or keep it off the status tree",
+				})
+		}
+	}
 }
 
 // publication is one workspace's view as published under the lock, with what
 // its records need once the lock is released.
 type publication struct {
+	ws           ids.WorkspaceID
 	logger       dlog.Logger
 	arm          string
 	armChanged   bool
@@ -276,12 +310,48 @@ type publication struct {
 // it. The caller holds the lock.
 func (r *resolver) publishLocked(ws ids.WorkspaceID, s *wsState) publication {
 	view := r.render(ws, s)
-	p := publication{logger: r.logOf(ws, s), jumps: s.drainJumpNotes()}
+	p := publication{ws: ws, logger: r.logOf(ws, s), jumps: s.drainJumpNotes()}
 	p.arm, p.armChanged, p.previousArm = s.observeArm(view)
 	p.sub, p.subChanged, p.previousSub = s.observeSubstatus(view)
 	p.line, p.lineChanged, p.previousLine = s.observeLine(view)
+	s.published = view.GetStrip().GetStatus()
 	r.topicLocked(ws).Publish(view)
 	return p
+}
+
+// statusMoved reports a publication whose status arm or step changed: the
+// edge the roster re-projects on. An activity line alone moves no claim.
+func (p publication) statusMoved() bool { return p.armChanged || p.subChanged }
+
+// tellStatusChanged tells the status sink every workspace whose status moved,
+// after the lock is released.
+func (r *resolver) tellStatusChanged(pubs []publication) {
+	if r.opts.statusChanged == nil {
+		return
+	}
+	for _, p := range pubs {
+		if p.statusMoved() {
+			r.opts.statusChanged(p.ws)
+		}
+	}
+}
+
+// Status answers the status the workspace's strip shows: the one the last
+// published view carried. A workspace the footer has published nothing for
+// yet is resolved from what the footer holds for it (the daemon-scoped faults
+// at least), so the answer is always the status the strip would draw.
+func (r *resolver) Status(ws ids.WorkspaceID) *frontendv1.FooterStatus {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s, ok := r.states[ws]
+	if ok && s.published != nil {
+		return s.published
+	}
+	if !ok {
+		s = newWSState()
+		s.id = ws
+	}
+	return r.status(s, r.logOf(ws, s))
 }
 
 // log writes the publication's records, after the lock is released.
@@ -380,6 +450,7 @@ func (r *resolver) mutateAll(operation, message string, ctx dlog.Context, apply 
 		p.log(operation, message, ctx)
 	}
 	r.tellVendorServes(operation, served)
+	r.tellStatusChanged(out)
 }
 
 // render builds the whole view from the accumulation. Nothing partial is ever
@@ -577,6 +648,13 @@ func (r *resolver) SetMerge(ws ids.WorkspaceID, facts MergeFacts) {
 			"the merge began testing; the merge tests panel is the expanded footer's focus",
 			dlog.Context{"panel": minted.panel.String(), "generation": minted.generation, "trigger": minted.trigger})
 	}
+}
+
+// SetBringingUp raises, or lowers, the fact that a bring-up of the session is
+// under way.
+func (r *resolver) SetBringingUp(ws ids.WorkspaceID, bringingUp bool) {
+	r.mutate(ws, "daemon.footer.set_bringing_up", "the footer took whether a bring-up of the session is under way",
+		dlog.Context{"bringing_up": bringingUp}, func(s *wsState) { s.bringingUp = bringingUp })
 }
 
 // SetParked installs, or lifts, the idle sweep's park.

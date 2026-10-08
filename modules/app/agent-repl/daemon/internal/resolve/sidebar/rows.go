@@ -35,7 +35,7 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 				"end": s.restoredEnd, "result": s.result.String(),
 			})
 	}
-	armName := statusArm(s, rec, session, rowLog)
+	armName := statusArm(s, rec, session, r.footer.Status(rec.ID), rowLog)
 	r.noteResult(rec.ID, s, rowLog)
 	// THE MARKER IS DERIVED FROM THE READ FACT, in the same breath as the
 	// status, so the row's display mode cannot lag its status by a push and a

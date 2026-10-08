@@ -266,7 +266,7 @@ func newViewFixture(t *testing.T, ws ids.WorkspaceID) *viewFixture {
 	if err != nil {
 		t.Fatalf("holds.New: %v", err)
 	}
-	roster, err := sidebar.New(testColors(t), log)
+	roster, err := sidebar.New(testColors(t), log, foot)
 	if err != nil {
 		t.Fatalf("sidebar.New: %v", err)
 	}
@@ -381,7 +381,7 @@ func TestPublishViewsSkipsAViewNothingHasPublished(t *testing.T) {
 	if err != nil {
 		t.Fatalf("holds.New: %v", err)
 	}
-	roster, err := sidebar.New(testColors(t), surfaces)
+	roster, err := sidebar.New(testColors(t), surfaces, foot)
 	if err != nil {
 		t.Fatalf("sidebar.New: %v", err)
 	}

@@ -1659,14 +1659,23 @@ strip: what state is this workspace in, and can I use it? `proto/vocab/render-co
 is where the assignment is executable (Go, TypeScript and elisp each assert
 against it), and this table is what it means.
 
+ONE RESOLVER DECIDES THE STATUS (owner ruling, 2026-10-08). The footer
+resolver alone walks the status ladder (`daemon/internal/resolve/ladder`),
+over every fact the daemon holds about a workspace; the roster row, and so the
+tab bar, is a projection of the footer's resolved status
+(`resolve/sidebar/status.go`, `statusArm`). A fact told to only one resolver
+therefore cannot split the surfaces. A new fact that should move a
+workspace's status is fed to the footer; the roster needs it only when it
+refines the idle rung's detail (an unread turn end).
+
 | Color | Meaning | Usable? | Statuses |
 |---|---|---|---|
 | Red | The agent is working. | Yes: a prompt is held or interjected. | submitting, thinking, clearing, compacting; footer `working`, `loading` |
 | Yellow | The main thread is idle while detached work (background subagents, shells) runs. | Yes | `idle_async`; footer `background` |
-| Green | Ready for you: idle, or waiting on your input. | Yes | ready, done, interrupted, permission; a merge that landed (`merged`); footer `idle`, `waiting`, `interrupted`; a Stop hook's deliberate stop and a deferred tool read as done |
+| Green | Ready for you: idle, or waiting on your input. | Yes | ready, done, interrupted, permission, waiting (any other wait on you: a question, a cold gate, an interrupt landing); a merge that landed (`merged`); footer `idle`, `waiting`, `interrupted`; a Stop hook's deliberate stop and a deferred tool read as done |
 | Purple | A merge is in progress; the daemon holds the workspace. | No: the composer is closed. | `merge_queued`, `merging` |
 | Turquoise | Something unexpected went wrong and wants your attention, but the workspace is usable. | Yes | roster `turn_failed` (a failed turn restored from the durable record only; live, a failed turn stands as its fault, below); `merge_failed`; `degraded`; every VENDOR FAULT: roster `vendor_fault` / footer `vendor_fault · vendor_retry`, `vendor_rejection`, `vendor_failed` (the vendor will not start), roster `vendor_blocked` / footer `vendor_fault · auth`, `usage_limit`, `billing`, `vendor_error` (a vendor or account block, and every turn the vendor ended or refused, until the next turn starts), roster and footer `api_retrying` (the vendor is retrying the turn's failed API call) |
-| Blue | The workspace is unusable right now. | No: the composer is closed (except under `turn_died`, declared in `composer_open_substatuses`). | every AGENT-REPL FAULT: roster `init`, `severed`, `dead`, `start_failed`, `turn_died` / footer `agent_repl_fault · starting`, `degraded`, `severed`, `dead`, `start_failed`, `daemon_impaired`, `turn_died` (the last turn's vendor query or agent process died, until the next turn starts); every NETWORK FAULT: roster `network_fault` / footer `network_fault · offline`; footer `closing` |
+| Blue | The workspace is unusable right now. | No: the composer is closed (except under `turn_died`, declared in `composer_open_substatuses`). | every AGENT-REPL FAULT: roster `init`, `severed`, `dead`, `start_failed`, `turn_died`, `daemon_impaired` / footer `agent_repl_fault · starting`, `degraded`, `severed`, `dead`, `start_failed`, `daemon_impaired`, `turn_died` (the last turn's vendor query or agent process died, until the next turn starts); every NETWORK FAULT: roster `network_fault` / footer `network_fault · offline`; a refused close: roster and footer `closing` |
 | Uncolored | There is no lifecycle to report. | — | `none` (never had a session), `inactive` (no open perspective, drawn `?`) |
 
 ### The three fault domains
@@ -1676,7 +1685,7 @@ exactly ONE of three domains, named for whose services are failing.
 
 | Domain | Whose services fail | Color | Composer | Roster arms | Footer status |
 |---|---|---|---|---|---|
-| `agent_repl_fault` | agent-repl's own: the daemon, the shim, the store, the sidecar, the link between them | Blue | Closed | `init`, `severed`, `dead`, `start_failed` | `agent_repl_fault` |
+| `agent_repl_fault` | agent-repl's own: the daemon, the shim, the store, the sidecar, the link between them | Blue | Closed | `init`, `severed`, `dead`, `start_failed`, `turn_died`, `daemon_impaired` | `agent_repl_fault` |
 | `network_fault` | this machine's network: the vendor cannot be reached at all | Blue | Closed | `network_fault` | `network_fault · offline` |
 | `vendor_fault` | the vendor's or the account's: it will not start, refuses, blocks or retries | Turquoise | Open | `vendor_fault`, `vendor_blocked`, `api_retrying` | `vendor_fault` |
 

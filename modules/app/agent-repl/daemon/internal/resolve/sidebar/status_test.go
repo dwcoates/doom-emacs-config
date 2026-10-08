@@ -893,11 +893,35 @@ func TestAParkedSessionKeepsAnIdleArm(t *testing.T) {
 // precede the `init` it is supposed to follow.
 // ---------------------------------------------------------------------------
 
-// TestRowIsInitWhileTheSessionRecordExistsAndNoLinkHasBeenSeen is the
-// resolver-level shape of the leading `ready`: the durable session row lands
-// before any link state does, and that window is `init`, never `ready`.
-func TestRowIsInitWhileTheSessionRecordExistsAndNoLinkHasBeenSeen(t *testing.T) {
+// TestRowIsInitWhileABringUpRunsAndNoLinkHasBeenSeen is the resolver-level
+// shape of the leading `ready`: the daemon is bringing the session up before
+// any link state lands, and that window is `init`, never `ready`. The window
+// is the BRING-UP, a fact the footer takes too, so the footer's
+// `agent_repl_fault · starting` is what the row projects.
+func TestRowIsInitWhileABringUpRunsAndNoLinkHasBeenSeen(t *testing.T) {
 	// Arrange: a registry that already carries the session, with no OnLink yet.
+	r := arrange(t)
+	r.SetRegistry(sidebar.Registry{
+		View:         wsm.DefaultSidebarView,
+		Workspaces:   []wsm.Workspace{workspace(string(theWS), "one")},
+		Repositories: []wsm.Repository{repo},
+		Sessions:     []wsm.Session{{Workspace: theWS}},
+	})
+
+	// Act.
+	r.SetBringingUp(theWS, true)
+
+	// Assert.
+	if got := statusName(onlyRow(t, r)); got != "init" {
+		t.Fatalf("status = %q during a bring-up with no observed link, want init: nothing has proven the route usable yet", got)
+	}
+}
+
+// TestASessionRecordNoBringUpServesIsNotInit pins the other side: a durable
+// session record alone says nothing is coming up, so the row is not drawn as
+// a route being established.
+func TestASessionRecordNoBringUpServesIsNotInit(t *testing.T) {
+	// Arrange.
 	r := arrange(t)
 
 	// Act.
@@ -909,8 +933,8 @@ func TestRowIsInitWhileTheSessionRecordExistsAndNoLinkHasBeenSeen(t *testing.T) 
 	})
 
 	// Assert.
-	if got := statusName(onlyRow(t, r)); got != "init" {
-		t.Fatalf("status = %q with a session record and no observed link, want init: nothing has proven the route usable yet", got)
+	if got := statusName(onlyRow(t, r)); got != "ready" {
+		t.Fatalf("status = %q with a session record and no bring-up, want ready", got)
 	}
 }
 
@@ -921,7 +945,9 @@ func TestTheRowNeverReadsReadyBeforeInit(t *testing.T) {
 	r := arrange(t)
 	watch := watchStatusWalk(t, r)
 
-	// Act: the cold start, in the order the daemon produces it.
+	// Act: the cold start, in the order the daemon produces it: the boot
+	// raises the bring-up before it serves.
+	r.SetBringingUp(theWS, true)
 	r.SetRegistry(sidebar.Registry{
 		View:         wsm.DefaultSidebarView,
 		Workspaces:   []wsm.Workspace{workspace(string(theWS), "one")},
@@ -931,6 +957,7 @@ func TestTheRowNeverReadsReadyBeforeInit(t *testing.T) {
 	r.OnLink(theWS, shimclient.LinkDialing)
 	r.OnLink(theWS, shimclient.LinkConnected)
 	r.OnSessionStarted(theWS, &conversationv1.SessionStarted{VendorSessionId: "vendor-1"})
+	r.SetBringingUp(theWS, false)
 
 	// Assert.
 	walk := watch.awaitArm(t, "ready")
