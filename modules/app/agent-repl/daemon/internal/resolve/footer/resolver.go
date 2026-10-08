@@ -201,6 +201,18 @@ func (r *resolver) mutate(ws ids.WorkspaceID, operation, message string, ctx dlo
 	r.mutateTelling(ws, operation, message, ctx, apply, true)
 }
 
+// awaitersLocked lists the workspaces whose merge waits for ws to fall free
+// from another workspace (MergeFacts.AwaitOther). Called under r.mu.
+func (r *resolver) awaitersLocked(ws ids.WorkspaceID) []ids.WorkspaceID {
+	var out []ids.WorkspaceID
+	for other, st := range r.states {
+		if other != ws && st.merge.Step == StepAwaitingFree && st.merge.AwaitOther == ws {
+			out = append(out, other)
+		}
+	}
+	return out
+}
+
 // mutateLine is mutate for a change that moves the activity line ALONE — a
 // daemon warning or error teed onto the strip. It tells no status edge, and
 // records the status moving as the invariant violation it is.
@@ -237,6 +249,12 @@ func (r *resolver) mutateTelling(ws ids.WorkspaceID, operation, message string, 
 		peers []publication
 		write *usageWrite
 	)
+	// A MERGE WAITING ON THIS WORKSPACE FROM ANOTHER draws what this one runs,
+	// so every change here redraws it.
+	var awaiters []publication
+	for _, awaiter := range r.awaitersLocked(ws) {
+		awaiters = append(awaiters, r.publishLocked(awaiter, r.states[awaiter]))
+	}
 	usageMoved := s.usage != usageBefore || s.usage.generation != generationBefore
 	if usageMoved {
 		for _, peer := range r.peersLocked(ws, s.account) {
@@ -256,6 +274,9 @@ func (r *resolver) mutateTelling(ws ids.WorkspaceID, operation, message string, 
 	for _, peer := range peers {
 		peer.log(operation, "the footer redrew the account's usage another workspace on the root learned", ctx)
 	}
+	for _, awaiter := range awaiters {
+		awaiter.log(operation, "the footer redrew a merge waiting for this workspace to fall free", ctx)
+	}
 	if usageMoved {
 		record := log.Debug
 		if armAfter != armBefore {
@@ -272,7 +293,7 @@ func (r *resolver) mutateTelling(ws ids.WorkspaceID, operation, message string, 
 	if servedNow {
 		r.tellVendorServes(operation, []vendorServed{served})
 	}
-	pubs := append([]publication{own}, peers...)
+	pubs := append(append([]publication{own}, peers...), awaiters...)
 	if tell {
 		r.tellStatusChanged(pubs)
 		return

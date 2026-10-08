@@ -92,6 +92,10 @@
     "",
     "EVERY MERGE ARM SPENDS A COLOR AS WELL AS A GLYPH (owner rulings,",
     "2026-09-28): a merge in progress (merge_queued, merging) is PURPLE, a",
+    "merge that holds the workspace and waits for it to fall free before it",
+    "starts (merge_waiting, owner ruling 2026-10-08) is PURPLE too: prompts",
+    "are held exactly as under merging, and only its glyph ('await') says it",
+    "has not started; a",
     "landed merge (merged) is GREEN and a failed merge (merge_failed) is",
     "TURQUOISE. All keep their glyphs. A merge never parks and no merge fact",
     "is shown before the requesting turn ends (merge-landing.md, Landed",
@@ -143,6 +147,7 @@
     "question": "green",
     "merging": "purple",
     "merge_queued": "purple",
+    "merge_waiting": "purple",
     "merge_failed": "turquoise",
     "merged": "green"
   },
@@ -154,6 +159,7 @@
   ],
   "colored_merge_arms": [
     "merge_queued",
+    "merge_waiting",
     "merging",
     "merge_failed",
     "merged"
@@ -171,6 +177,7 @@
   ],
   "merge_glyphs": {
     "merge_queued": "queue",
+    "merge_waiting": "await",
     "merging": "recycle",
     "merge_failed": "failed",
     "merged": "check"
