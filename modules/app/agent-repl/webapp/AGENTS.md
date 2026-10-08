@@ -544,7 +544,14 @@ hand any more:
   (`compensate`), and a tail-following reader holds no anchor. Each correction
   is DEBUG `scroll.anchor-corrected` (cause, trigger, delta, anchor). A height
   change off the tail with no row to anchor on is ERROR `scroll.anchor-missing`.
-  `npm run test:webkit` is its regression test. The expanded footer's section is capped at
+  `npm run test:webkit` is its regression test. The anchor's rows are the
+  ROOT BODY'S ROW LIST (`.feed-body > .feed-rows`, `rootRows` in
+  src/feed/feed.ts), never the feed host's own children, which are one box
+  for the whole feed. A MERGE BUBBLE'S UPDATES MOVE NOTHING (owner ruling,
+  2026-10-08): its row is exempt (`AnchorRows.exempt`), so a follow does not
+  chase a size change the merge bubble alone made (DEBUG
+  `scroll.exempt-change-held`), and its tab body is drawn before the old one
+  comes down, so its own scroll box is never clamped mid-redraw. The expanded footer's section is capped at
   `EXPANDED_FOOTER_MAX_ROWS` (4) and scrolls on its own; its scroll is the
   reader's, and a push redraws the rows INSIDE the kept section so it is never
   detached or reset.

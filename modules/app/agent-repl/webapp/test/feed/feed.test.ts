@@ -21,7 +21,7 @@ import {
   onClientVerdict,
   standingClientFailure,
 } from "../../src/rpc/link.js";
-import { latestEntry, mountFeed } from "../../src/feed/feed.js";
+import { latestEntry, mountFeed, rootRows } from "../../src/feed/feed.js";
 import {
   SELECTED_ENTRY_CLASS,
   SELECTED_ROW_ATTRIBUTE,
@@ -418,6 +418,142 @@ describe("mountFeed: the bubble kinds", () => {
       undefined,
       "m1",
     ]);
+  });
+});
+
+/**
+ * A MERGE BUBBLE'S UPDATES NEVER MOVE THE FEED (owner ruling, 2026-10-08). The
+ * fixture lays the root rows out from a height table in a 300px viewport, so
+ * the tail owner reads real-looking edges for the rows the feed drew.
+ */
+describe("mountFeed: a merge bubble's update", () => {
+  /** A mounted root feed whose rows are laid out from HEIGHTS by row id. */
+  async function laidOut(rows: FeedRow[], heights: Record<string, number>) {
+    const channels = new Map<string, Channel<WatchFeedResponse>>();
+    const channel = new Channel<WatchFeedResponse>();
+    channels.set("tok:root", channel);
+    const h = harness({
+      channels,
+      openFeed: (req) => openSuccess(page(req.feed === undefined ? rows : []), tokenFor(req)),
+    });
+    const scroll = document.createElement("div");
+    const host = document.createElement("div");
+    scroll.append(host);
+    document.body.replaceChildren(scroll);
+    let top = 0;
+    const total = (): number => Object.values(heights).reduce((sum, x) => sum + x, 0);
+    Object.defineProperties(scroll, {
+      scrollHeight: { configurable: true, get: total },
+      clientHeight: { configurable: true, get: () => 300 },
+      scrollTop: {
+        configurable: true,
+        get: () => top,
+        set: (next: number) => (top = Math.min(Math.max(next, 0), Math.max(0, total() - 300))),
+      },
+    });
+    scroll.getBoundingClientRect = domRect(0, 300);
+    const feed = mountFeed(host, h.ctx, { renderers: stubRenderers(), scrollBox: scroll });
+    await settle();
+    const layOut = (): void => {
+      let at = 0;
+      for (const el of host.querySelectorAll<HTMLElement>(":scope > .feed-body > .feed-rows > [data-feed-row]")) {
+        const id = el.getAttribute("data-feed-row") ?? "";
+        const height = heights[id] ?? 0;
+        const rowTop = at;
+        el.getClientRects = () => [{}] as unknown as DOMRectList;
+        el.getBoundingClientRect = () => domRect(rowTop - top, height)();
+        at += height;
+      }
+    };
+    layOut();
+    // The first layout is a size change the tail owner hears about.
+    fireResize(host);
+    await settle();
+    return {
+      feed,
+      scroll,
+      channel,
+      heights,
+      top: (): number => top,
+      /** The reader wheels to Y. */
+      readerAt: (y: number): void => {
+        scroll.dispatchEvent(new Event("wheel"));
+        top = y;
+        layOut();
+        scroll.dispatchEvent(new Event("scroll"));
+      },
+      /** A row's height changes, and the next push of ROW lands. */
+      grow: async (id: string, height: number, row: FeedRow): Promise<void> => {
+        heights[id] = height;
+        layOut();
+        channel.push(push(row));
+        await settle();
+        layOut();
+        fireResize(host);
+        await settle();
+      },
+    };
+  }
+
+  it("leaves a following reader where they are when the merge bubble grows", async () => {
+    // Arrange — the merge bubble is the last row, partly in view at the tail.
+    const f = await laidOut([responseRow("r1"), mergeRow("m1")], { r1: 1000, m1: 400 });
+    f.readerAt(1100);
+    const before = f.top();
+    // Act
+    await f.grow("m1", 600, mergeRow("m1", true, "branch → trunk"));
+    // Assert
+    expect(f.top()).toBe(before);
+    f.feed.dispose();
+  });
+
+  it("keeps the rows under a scrolled-away reader still when any row above them grows", async () => {
+    // Arrange — THE ANCHOR IS A ROOT ROW: the reader stands inside r2.
+    const f = await laidOut([responseRow("r1"), responseRow("r2"), responseRow("r3")], { r1: 400, r2: 1000, r3: 1000 });
+    f.readerAt(700);
+    // Act
+    await f.grow("r1", 600, responseRow("r1", "grown"));
+    // Assert
+    expect(f.top()).toBe(900);
+    f.feed.dispose();
+  });
+
+  it("keeps the rows under a scrolled-away reader still when the merge bubble above them grows", async () => {
+    // Arrange — the reader stands inside r2, below the merge bubble.
+    const f = await laidOut([mergeRow("m1"), responseRow("r2"), responseRow("r3")], { m1: 400, r2: 1000, r3: 1000 });
+    f.readerAt(700);
+    // Act
+    await f.grow("m1", 600, mergeRow("m1", true, "branch → trunk"));
+    // Assert
+    expect(f.top()).toBe(900);
+    f.feed.dispose();
+  });
+});
+
+describe("rootRows", () => {
+  it("answers the root body's row list", () => {
+    // Arrange
+    const host = document.createElement("div");
+    const body = document.createElement("div");
+    body.className = "feed-body";
+    const rows = document.createElement("div");
+    rows.className = "feed-rows";
+    body.append(rows);
+    host.append(body);
+    // Act
+    const found = rootRows(host);
+    // Assert
+    expect(found).toBe(rows);
+  });
+
+  it("reports a host with no row list at ERROR", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    // Act
+    rootRows(document.createElement("div"));
+    // Assert
+    const record = await forwardedRecord(capture, "feed.root-rows-missing");
+    expect(record.level.case).toBe("error");
   });
 });
 

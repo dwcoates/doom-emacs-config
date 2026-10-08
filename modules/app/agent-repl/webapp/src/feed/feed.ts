@@ -71,7 +71,7 @@ import type { AppContext } from "../rpc/context.js";
 import type { AgentReplClient } from "../rpc/client.js";
 import { buildOpenFeedRequest, buildWatchFeedRequest } from "./requests.js";
 import { mountBubble } from "./bubble.js";
-import { isMergeBubble } from "./merge-bubble.js";
+import { isMergeBubble, MERGE_BUBBLE_ATTRIBUTE } from "./merge-bubble.js";
 import {
   createFeedController,
   type BubbleLike,
@@ -156,7 +156,12 @@ export function mountFeed(
           // THE SCROLL ANCHOR'S ROWS: the root feed's own, in HOST. WebKit
           // has no native scroll anchoring, so the tail owner holds the
           // content under a reader who is off the tail (scroll.ts).
-          feedAnchorRows(scrollBox, host),
+          // THE ROWS ARE THE ROOT BODY'S ROW LIST, not the feed host's own
+          // children (the page-error slot and the body mount), which held one
+          // box for the whole feed and so never moved when a row above the
+          // reader changed height. A MERGE BUBBLE'S ROW IS EXEMPT: its updates
+          // never move the feed (owner ruling, 2026-10-08).
+          feedAnchorRows(scrollBox, () => rootRows(host), `[${MERGE_BUBBLE_ATTRIBUTE}]`),
         );
   // The tail owner's OTHER two inputs, which only a mount holding the real
   // element can give it: the box's scroll events and the box's size changes.
@@ -1008,6 +1013,31 @@ export function mountFeed(
     root.dispose();
   }
 }
+
+/** Where the root feed's body draws its rows: the row list in the body mount. */
+const ROOT_ROWS_SELECTOR = ":scope > .feed-body > .feed-rows";
+
+/**
+ * The root feed's row list inside HOST. The body mounts it when the root
+ * controller is built, before any layout is read; a host without one is a
+ * drawing fault, reported once per host at ERROR, and the host stands in so
+ * the scroll owner reads a box rather than throwing inside a scroll event.
+ */
+export function rootRows(host: Element): Element {
+  const rows = host.querySelector(ROOT_ROWS_SELECTOR);
+  if (rows !== null) return rows;
+  if (!missingRootRows.has(host)) {
+    missingRootRows.add(host);
+    log.error("the root feed draws no row list; the scroll anchor reads the feed host", {
+      operation: "feed.root-rows-missing",
+      context: { selector: ROOT_ROWS_SELECTOR },
+    });
+  }
+  return host;
+}
+
+/** The hosts whose missing row list was already reported. */
+const missingRootRows = new WeakSet<Element>();
 
 /** Every feed row's element, at whatever depth of sub-feed it is drawn. */
 const FEED_ROW_SELECTOR = "[data-feed-row]";

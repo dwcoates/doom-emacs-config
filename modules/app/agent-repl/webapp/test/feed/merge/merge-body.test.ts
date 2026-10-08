@@ -451,3 +451,31 @@ describe("drawLooseRows: a row that belongs to no drawn tab", () => {
     dispose();
   });
 });
+
+// A MERGE BUBBLE'S UPDATE NEVER MOVES A SCROLL (owner ruling, 2026-10-08). The
+// expanded bubble's sub-feed is a scroll box; a redraw that emptied the tab's
+// panel and then read layout while drawing its rows would clamp that box's
+// scroll to the emptied height, throwing the reader back up. So a redraw draws
+// everything before it takes the previous content down.
+describe("a redraw of the tab's content", () => {
+  it("draws the rows while the tab's previous content still stands", () => {
+    // Arrange
+    const seen: number[] = [];
+    let host: HTMLElement | null = null;
+    class Watching extends FakeSubfeed {
+      override drawRow(row: Parameters<FakeSubfeed["drawRow"]>[0]): HTMLElement {
+        seen.push(host?.querySelector(".merge-tab-panel")?.childElementCount ?? -1);
+        return super.drawRow(row);
+      }
+    }
+    const view = new Watching([tabRow("t1", { kind: "conflicts", state: "live" }), childRow("r1", "t1")]);
+    host = mount(view).host;
+    seen.length = 0;
+    // Act
+    view.push([tabRow("t1", { kind: "conflicts", state: "live" }), childRow("r1", "t1"), childRow("r2", "t1")]);
+    // Assert
+    expect(seen).toEqual([1, 1]);
+  });
+
+});
+
