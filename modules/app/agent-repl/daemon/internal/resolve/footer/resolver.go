@@ -481,9 +481,16 @@ func (r *resolver) render(ws ids.WorkspaceID, s *wsState) *frontendv1.FooterView
 
 // clockCell renders the turn clock. UNSET is no turn in flight, which is what
 // makes the cell render idle rather than a frozen duration.
+//
+// A TURN ACCEPTED ON A ROUTE NEVER SEEN HAS NO CLOCK YET. A cold submit is
+// held while the session comes up, and the clock is what draws the strip's
+// stop control: drawn then, it offered to stop a turn no session holds, and
+// the stop answered nothing while the prompt went on to run. The status says
+// the route is coming up (ladder.AwaitingBringUp); the clock starts once the
+// route has been seen.
 func (r *resolver) clockCell(s *wsState) *frontendv1.FooterClock {
 	out := &frontendv1.FooterClock{}
-	if s.turn != nil {
+	if s.turn != nil && s.linkSeen {
 		at := epochMs(s.turn.At)
 		out.TurnStartedAtMs = &at
 	}
