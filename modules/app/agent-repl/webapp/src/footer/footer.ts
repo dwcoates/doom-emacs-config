@@ -46,7 +46,7 @@ import type { Handle } from "../failure/local.js";
 import { frameUndecodable } from "../failure/sink.js";
 import { placeChildren } from "../dom.js";
 import { stopTicking } from "../feed/ticking.js";
-import { createDrawnStatusLog } from "../drawn-status.js";
+import { createDrawnStatusLog, type DrawnStatus } from "../drawn-status.js";
 import { log } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
 import { onClientVerdict, standingClientFailure } from "../rpc/link.js";
@@ -234,7 +234,7 @@ export function mountFooter(
       host.replaceChildren(bare);
       dock = null;
       section = null;
-      drawnStatus.note(ctx.workspace.id, { arm: "disconnected", substatus: verdict.kind, source: "client_verdict" });
+      drawnStatus.note(ctx.workspace.id, verdictDrawnStatus(verdict));
       return;
     }
     const strip = requireMessage(view.strip, "FooterView.strip");
@@ -291,7 +291,7 @@ export function mountFooter(
     }
     dock = target;
     if (verdict !== null) {
-      drawnStatus.note(ctx.workspace.id, { arm: "disconnected", substatus: verdict.kind, source: "client_verdict" });
+      drawnStatus.note(ctx.workspace.id, verdictDrawnStatus(verdict));
     } else {
       const arm = requireCase(requireMessage(strip.status, "FooterStrip.status").status, "FooterStatus.status");
       drawnStatus.note(ctx.workspace.id, { arm: arm.case, substatus: substatusOf(arm.value), source: "daemon" });
@@ -496,6 +496,11 @@ export function writeSelection(
       context: { cause: err },
     });
   }
+}
+
+/** The status the strip draws while the client's own verdict stands. */
+function verdictDrawnStatus(verdict: { readonly kind: string }): DrawnStatus {
+  return { arm: "disconnected", substatus: verdict.kind, source: "client_verdict" };
 }
 
 /**
