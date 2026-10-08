@@ -88,6 +88,11 @@
      (owner request, 2026-10-03). */
   --cold-gate-compact-border: #128a3d;
   --err: #dc2626;
+  /* THE CLASSIC DIFF's line backgrounds (owner request, 2026-10-08;
+     src/feed/cards/diff-view.ts): an added line on a soft green, a removed
+     line on a soft red, the text staying the card's own color. */
+  --diff-add-bg: #dcfce7;
+  --diff-del-bg: #fee2e2;
   /* Token figures wear ONE colour wherever a token count is drawn, so a reader
      learns the hue means "tokens" once. Yellow for now, defined here so every
      `.token-count` site (the subagent head's figure is the first) shares it. A
@@ -140,10 +145,11 @@
      wears; the dark theme lifts it to its own --muted grey. */
   --tool-command: #4b5563;
   /* The prose of a thinking bubble or an interim response (owner request,
-     2026-10-08): a slight dimming of --fg, a little lighter than the body
-     text, still easily read. The dark theme dims its near-white the same
-     small step. */
-  --interim-text: #3f434a;
+     2026-10-08): EXACTLY the tool card's header grey, the one the Bash
+     command wears. It is that token, not a copy of its value, so the two
+     cannot drift; the dark theme redefines --tool-command alone, and this
+     follows it. */
+  --interim-text: var(--tool-command);
   /* Textless-thinking progress indicator: orange, distinct from every other
      status color in the palette. */
   --thinking: #ea580c;
@@ -374,6 +380,8 @@
   :root {
     --bg: #111318;
     --fg: #e5e7eb;
+    --diff-add-bg: #12351f;
+    --diff-del-bg: #3d1a1a;
     --muted: #9ca3af;
     --repo-head-expanded: #e5e7eb;
     --repo-head-collapsed: #6b7280;
@@ -420,7 +428,6 @@
     --assistant: #1b1e25;
     --thinking: #fb923c;
     --tool-command: #9ca3af;
-    --interim-text: #c3c7ce;
     --retry: #a78bfa;
     --info-ws: #4ade80;
     --info-model: #22d3ee;
@@ -1685,9 +1692,9 @@ pre {
    `isInterimResponse`) are filled with the page's own `--bg`, so in either
    theme the fill is not there at all and only the prose (and the interim's
    pear border, once settled) reads. It feeds `--bubble-bg`, so anything
-   painted from it matches. Their prose is the slightly dimmed
-   `--interim-text` (owner request, 2026-10-08); a link or a quote keeps its
-   own color. */
+   painted from it matches. Their prose is `--interim-text`, the tool card's
+   header grey (owner request, 2026-10-08); a link or a quote keeps its own
+   color. */
 .bubble[data-variant="thinking"],
 .bubble.interim-response {
   --bubble-bg: var(--bg);
@@ -2718,6 +2725,18 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
 .diff .add { color: var(--ok); }
 .diff .del { color: var(--err); }
 .diff .hunk { color: var(--accent); }
+/* THE CLASSIC DIFF (owner request, 2026-10-08; src/feed/cards/diff-view.ts):
+   one block per line, the kind drawn as the line's BACKGROUND, the text in the
+   card's own color, and no +/- marker in the text at all. A hunk header keeps
+   the accent hue and a file header line the muted one, both verbatim. An
+   empty line keeps its height. */
+.diff-classic .diff-line { display: block; min-height: 1.4em; }
+.diff-classic .add { background: var(--diff-add-bg); color: inherit; }
+.diff-classic .del { background: var(--diff-del-bg); color: inherit; }
+.diff-classic .meta { color: var(--muted); }
+/* A text output drawn as markdown (src/feed/cards/markdown-output.ts), minus
+   the phantom leading gap of its first block's own margin. */
+.tool-output-md > :first-child { margin-top: 0; }
 
 .permission {
   border: 1px solid var(--accent);
@@ -4805,13 +4824,15 @@ bubble-body.bubble-body { display: block; }
 
 /* THE LOAD-MORE CONTROL: the walk into the past, at the top of the feed it
    walks. Drawn in the same pill vocabulary as a fold's ticker (.async-ticker)
-   so it reads as feed chrome rather than as a card. */
+   so it reads as feed chrome rather than as a card. Its border is the same
+   token as its text (owner request, 2026-10-08), so the pill is outlined in
+   exactly the color its "load previous page" reads in, in either theme. */
 .feed-load-more {
   align-self: center;
   font-size: 0.75rem;
   padding: 0.1rem 0.8rem;
   border-radius: 99px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--muted);
   background: var(--card);
   color: var(--muted);
   cursor: pointer;

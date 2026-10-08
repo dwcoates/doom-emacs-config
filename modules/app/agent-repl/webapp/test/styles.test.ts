@@ -3529,7 +3529,7 @@ describe("the tool card's command grey", () => {
  * background is not there in either theme; every other response keeps the
  * purple, and the interim keeps its pear border.
  */
-/** The two bubble kinds whose prose is the dimmed `--interim-text`. */
+/** The two bubble kinds whose prose is the dimmed `--interim-text` (the command grey). */
 const DIMMED_TEXT_SELECTORS: readonly string[] = ['.bubble[data-variant="thinking"]', ".bubble.interim-response"];
 
 describe("the page-colored fill", () => {
@@ -3624,8 +3624,8 @@ describe("the rail's mark column", () => {
 
 /**
  * THE DIMMED PROSE (owner request, 2026-10-08): a thinking bubble's and an
- * interim response's text is a slight dimming of the body text in either
- * theme, through one token.
+ * interim response's text is EXACTLY the tool card's header grey (the Bash
+ * command's `--tool-command`) in either theme, by referencing that token.
  */
 describe("the dimmed prose of a thinking or interim bubble", () => {
   /** The `color` the cascade hands a response bubble with HOOKS and VARIANT. */
@@ -3670,17 +3670,98 @@ describe("the dimmed prose of a thinking or interim bubble", () => {
     expect(got).not.toBe("var(--interim-text)");
   });
 
+  it("defines the dimmed prose as the tool card's command grey token", () => {
+    // Arrange
+    const block = declarationsOf(":root") ?? "";
+
+    // Act
+    const got = /--interim-text:\s*([^;]+);/.exec(block)?.[1]?.trim();
+
+    // Assert
+    expect(got).toBe("var(--tool-command)");
+  });
+
+  it("declares the dimmed prose once, so no theme redefines it away from the command grey", () => {
+    // Arrange
+    const declaration = /--interim-text\s*:/g;
+
+    // Act
+    const count = stylesheet.match(declaration)?.length ?? 0;
+
+    // Assert
+    expect(count).toBe(1);
+  });
+});
+
+/**
+ * THE LOAD-MORE PILL'S OUTLINE (owner request, 2026-10-08): the "load previous
+ * page" control is outlined in exactly the token its text wears, in both
+ * themes, so the border and the words cannot drift apart.
+ */
+describe("the load-more control's outline", () => {
+  it("keeps the control's text in the muted token", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".feed-load-more") ?? "";
+
+    // Assert
+    expect(rule).toMatch(/(?:^|;)\s*color:\s*var\(--muted\)/);
+  });
+
+  it("borders the control in the same token as its text", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".feed-load-more") ?? "";
+
+    // Assert
+    expect(rule).toMatch(/(?:^|;)\s*border:\s*1px solid var\(--muted\)/);
+  });
+});
+
+/**
+ * THE CLASSIC DIFF (owner request, 2026-10-08): an added line on a green
+ * background and a removed one on a red, each a block of its own, in theme
+ * tokens both themes define.
+ */
+describe("the classic diff", () => {
   it.each([
-    ["light", "#3f434a"],
-    ["dark", "#c3c7ce"],
-  ] as const)("defines the %s theme's dimmed prose as %s", (theme, want) => {
+    [".diff-classic .add", "var(--diff-add-bg)"],
+    [".diff-classic .del", "var(--diff-del-bg)"],
+  ])("paints %s with the %s background", (selector, want) => {
+    // Arrange / Act
+    const rule = declarationsOf(selector) ?? "";
+
+    // Assert
+    expect(rule).toContain(`background: ${want}`);
+  });
+
+  it.each([".diff-classic .add", ".diff-classic .del"])("leaves the text of %s in the card's own color", (selector) => {
+    // Arrange / Act
+    const rule = declarationsOf(selector) ?? "";
+
+    // Assert
+    expect(rule).toMatch(/(?:^|;)\s*color:\s*inherit/);
+  });
+
+  it("lays each line out as its own block", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".diff-classic .diff-line") ?? "";
+
+    // Assert
+    expect(rule).toMatch(/display:\s*block/);
+  });
+
+  it.each([
+    ["light", "--diff-add-bg"],
+    ["light", "--diff-del-bg"],
+    ["dark", "--diff-add-bg"],
+    ["dark", "--diff-del-bg"],
+  ] as const)("defines the %s theme's %s", (theme, token) => {
     // Arrange
     const block = theme === "light" ? (declarationsOf(":root") ?? "") : darkThemeBlock();
 
     // Act
-    const got = /--interim-text:\s*(#[0-9a-fA-F]{3,6})/.exec(block)?.[1];
+    const got = new RegExp(`${token}:\\s*(#[0-9a-fA-F]{6})`).exec(block)?.[1];
 
     // Assert
-    expect(got).toBe(want);
+    expect(got).toBeDefined();
   });
 });

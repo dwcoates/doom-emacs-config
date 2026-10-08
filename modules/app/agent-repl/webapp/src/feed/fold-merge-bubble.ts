@@ -1,11 +1,12 @@
 /**
  * fold-merge-bubble — THE WEBAPP'S ONE CALL OF `FoldMergeBubble`.
  *
- * A MERGE BUBBLE NEVER COLLAPSES ON ITS OWN (owner ruling, 2026-10-08), and
- * the reader's fold outlives the page: the daemon records it on the bubble's
- * durable head row (endpoint_fold_merge_bubble.proto), so every later push,
- * page, reload and daemon restart draws the bubble the way the reader left
- * it. The webapp tells the daemon each fold the READER makes on a merge
+ * A MERGE BUBBLE IS OPEN BY DEFAULT AND NEVER COLLAPSES AUTOMATICALLY, save
+ * a merge that ended in success (owner ruling, 2026-10-08), and the reader's
+ * fold outlives the page and wins over that default: the daemon records it on
+ * the bubble's durable head row (endpoint_fold_merge_bubble.proto), so every
+ * later push, page, reload and daemon restart draws the bubble the way the
+ * reader left it. The webapp tells the daemon each fold the READER makes on a merge
  * bubble's head, and nothing else: never a fold the daemon applied, never a
  * jump's expansion, never a page replace's reopening.
  *

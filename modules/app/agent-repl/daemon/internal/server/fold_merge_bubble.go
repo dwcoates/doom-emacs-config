@@ -12,9 +12,9 @@ import (
 // FoldMergeBubble records the reader's fold on a merge bubble. See
 // endpoint_fold_merge_bubble.proto.
 //
-// THE READER'S FOLD IS DAEMON-HELD, on the bubble's durable head row, so a
-// merge bubble never collapses on its own: not on a push, a reload or a
-// restart (resolve/feed/mergefold.go).
+// THE READER'S FOLD IS DAEMON-HELD, on the bubble's durable head row, and it
+// wins over the daemon's default (open, save a success) on every push, reload
+// and restart (resolve/feed/mergefold.go).
 func (s *server) FoldMergeBubble(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.FoldMergeBubbleRequest],
