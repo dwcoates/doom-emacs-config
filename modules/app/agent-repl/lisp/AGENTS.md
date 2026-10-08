@@ -39,8 +39,18 @@ error, displays a warning, and aborts; it never reroutes the original record.
 
 `AGENT_REPL_LOG_LEVEL` is read at module load. Its exact vocabulary is
 `debug|info|warn|error`, with `info` when unset; an invalid value aborts load.
-`agent-repl-log-file-level` is the live Elisp knob and is reset from the
-environment on reload. Verbose records use `level=debug` and
+A level other than `info` is a window: it holds only with an unexpired
+`AGENT_REPL_LOG_LEVEL_UNTIL` no more than five minutes away, and otherwise the
+load starts at `info` and says so at info (`agent-repl--log-level-window`,
+`../logging-contract.md`). `agent-repl-log-file-level` is the live Elisp knob
+and is reset from the environment on reload; `agent-repl-set-log-file-level`
+and `agent-repl-toggle-verbose-to-disk` open the same five-minute window
+(`agent-repl--log-level-expires-at`), and `agent-repl--log-level-tick` ends it
+at info. A dropped record (below the level, no message) with a certainly
+central scope is neither routed nor built; a dropped workspace record is
+routed and its identity checked, never serialized. The wire codec logs one
+`elisp.wire.decoded`/`elisp.wire.encoded` record per top-level call
+(`agent-repl-wire-call`), never one per message. Verbose records use `level=debug` and
 `verbosity=verbose`, so the same threshold governs their persistence.
 
 Direct `message` calls are only for text the user must read. The source audit

@@ -1075,9 +1075,13 @@ are `main.go:reportFatal` and `internal/logging/logging.go:writeAll`.
 
 `AGENT_REPL_LOG_LEVEL` is the ONE process-wide threshold:
 `debug|info|warn|error`, default `info`. An invalid value is a bootstrap
-failure before the rotating sink is opened. Production passes the parsed
-`agentrepl/logging.Level` to `logging.NewDurableOnlyAtLevel`; focused tests and
-foreground harnesses may use `logging.NewAtLevel`.
+failure before the rotating sink is opened. A level other than `info` is a
+window: it holds only with an unexpired `AGENT_REPL_LOG_LEVEL_UNTIL` at most
+five minutes away and reverts to `info` by itself
+(`sidecar.logging.level-window`). Production passes the
+`agentrepl/logging.Window` to `logging.NewForwardingDurableOnlyWindow`; focused
+tests and foreground harnesses may use `logging.NewAtLevel`. The integration
+harness grants any level a test asks for the full window.
 
 - Every logical branch of production code logs: verbose for the ordinary path,
   `warn` for degraded-but-handled, `error` for failures. Every error is logged

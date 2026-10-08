@@ -641,7 +641,10 @@ hand any more:
   and carries its effective value in the page URL as `log_level`; the page
   validates `debug|info|warn|error` during boot. An absent parameter uses the
   contract's `info` default for ordinary browser development. An invalid
-  present value aborts boot. There is no `localStorage` logging toggle and no
+  present value aborts boot. A level other than `info` is a window: the host
+  carries its end as `log_level_until` (Unix seconds), the page boots at
+  `info` when that end has passed or is absent, and a window that ends while
+  the page runs reverts to `info` by itself (`webapp.log.level-window`). There is no `localStorage` logging toggle and no
   second verbose-console switch.
 
   The daemon persists forwarded records to the workspace's canonical

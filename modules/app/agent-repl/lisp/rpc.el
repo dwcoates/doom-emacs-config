@@ -35,6 +35,7 @@
 (require 'cl-lib)
 
 (declare-function agent-repl--log "core" (ws fmt &rest args))
+(declare-function agent-repl-wire-call "wire-common" (direction codec value))
 (declare-function agent-repl--info "core" (ws fmt &rest args))
 (declare-function agent-repl--warn "core" (ws fmt &rest args))
 (declare-function agent-repl--error "core" (ws fmt &rest args))
@@ -124,7 +125,7 @@ ENCODER is the codec's base encode function for the request message; it
 answers the alist that `json-serialize' turns into the wire body.  An
 incomplete request never leaves this function — the encoder refuses it
 first, which is the whole point of encoding before spawning anything."
-  (json-serialize (funcall encoder request)))
+  (json-serialize (agent-repl-wire-call 'encode encoder request)))
 
 (cl-defun agent-repl-rpc--unary (conn method encoder decoder request
                                       &key on-response on-failure timeout)
@@ -146,7 +147,7 @@ left waiting on a callback that will not come."
      :on-response
      (lambda (alist)
        (condition-case err
-           (let ((decoded (funcall decoder alist)))
+           (let ((decoded (agent-repl-wire-call 'decode decoder alist)))
              (agent-repl--log log-scope "elisp.rpc.answer method=%S arm=%S"
                               method (plist-get decoded :arm))
              (when on-response (funcall on-response decoded)))
@@ -172,7 +173,9 @@ failure in its own stack, not in a callback."
          (agent-repl--capture-log-scope
           '(:agent-repl-context "an unscoped RPC exchange is process-wide"))))
     (agent-repl--log log-scope "elisp.rpc.send-sync method=%S" method)
-    (let ((decoded (funcall decoder (agent-repl-connect-unary-sync conn method json timeout))))
+    (let ((decoded (agent-repl-wire-call
+                     'decode decoder
+                     (agent-repl-connect-unary-sync conn method json timeout))))
       (agent-repl--log log-scope "elisp.rpc.answer-sync method=%S arm=%S"
                        method (plist-get decoded :arm))
       decoded)))
@@ -197,7 +200,7 @@ and so needs no codec."
      conn method json
      (lambda (alist)
        (condition-case err
-           (funcall on-push (funcall decoder alist))
+           (funcall on-push (agent-repl-wire-call 'decode decoder alist))
          (error
           (agent-repl--error log-scope "elisp.rpc.push-invalid method=%S error=%S body=%S"
                              method err alist))))

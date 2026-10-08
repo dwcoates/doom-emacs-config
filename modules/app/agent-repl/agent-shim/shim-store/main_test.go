@@ -396,3 +396,46 @@ func TestJoinCloseKeepsTheRunsOwnFailureAlongsideAFailedClose(t *testing.T) {
 		t.Fatalf("err = %v, want both the run's failure and the close failure", err)
 	}
 }
+
+func TestOpenLoggerStartsALeftoverDebugLevelAtInfo(t *testing.T) {
+	// Arrange. A debug level with no window is a leftover, never a setting.
+	t.Setenv("AGENT_REPL_LOG_LEVEL", "debug")
+	t.Setenv("AGENT_REPL_LOG_LEVEL_UNTIL", "")
+	root := t.TempDir()
+	logPath := filepath.Join(root, "log", "shim-store.log")
+
+	// Act.
+	log, closeLog, err := openLogger(filepath.Join(root, "sock", "store.sock"), filepath.Join(root, "store", "events.db"), logPath)
+	if err != nil {
+		t.Fatalf("openLogger = %v, want nil", err)
+	}
+	defer closeLog()
+	log.LogVerbose(logging.Fields{Operation: "tail"}, "dropped")
+
+	// Assert.
+	body, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read the log: %v", err)
+	}
+	if strings.Contains(string(body), `"operation":"tail"`) {
+		t.Fatalf("log = %q, want the debug record dropped", body)
+	}
+	if !strings.Contains(string(body), `"outcome":"no_expiry"`) {
+		t.Fatalf("log = %q, want the ignored level noted", body)
+	}
+}
+
+func TestOpenLoggerRejectsAMalformedLevelWindow(t *testing.T) {
+	// Arrange.
+	t.Setenv("AGENT_REPL_LOG_LEVEL", "debug")
+	t.Setenv("AGENT_REPL_LOG_LEVEL_UNTIL", "soon")
+	root := t.TempDir()
+
+	// Act.
+	_, _, err := openLogger(filepath.Join(root, "store.sock"), filepath.Join(root, "events.db"), filepath.Join(root, "log", "shim-store.log"))
+
+	// Assert.
+	if !isBootstrapError(err) {
+		t.Fatalf("error %T = %v, want a bootstrap error", err, err)
+	}
+}

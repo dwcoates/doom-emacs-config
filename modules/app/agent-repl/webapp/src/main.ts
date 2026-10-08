@@ -52,7 +52,8 @@ import { mountHoldTray } from "./tray/tray.js";
 import { installProseLinkRouting } from "./link.js";
 import { bootFailed } from "./failure/sink.js";
 import { createLocalFailures, type LocalFailures } from "./failure/local.js";
-import { ForwardingLogger, bindLogContext, log, setLogger, type ClientLogSink } from "./log.js";
+import { ForwardingLogger, LEVEL_WINDOW_OPERATION, bindLogContext, log, setLogger, type ClientLogSink } from "./log.js";
+import { LevelWindow, selectionContext, selectionNote, selectLevel } from "../../agent-shim/logging/ts/level-window.js";
 import { installPagePresenceLog } from "./page-presence.js";
 import { createAgentReplClient, type AgentReplClient } from "./rpc/client.js";
 import { createAppContext, type AppContext } from "./rpc/context.js";
@@ -164,14 +165,19 @@ export async function boot(): Promise<void> {
       workspace_id: workspace.id,
       workspace_dir: workspace.dir,
     });
+    // A level other than info is a window (proto/vocab/log-level-window.json):
+    // a page reloaded from an address whose window has ended boots at info.
+    const levelSelection = selectLevel(address.logLevel, address.logLevelUntil, Date.now(), "log_level");
     setLogger(
       new ForwardingLogger(
         clientLogSink(() => client, workspace),
         undefined,
         {},
-        address.logLevel,
+        new LevelWindow(levelSelection),
       ),
     );
+    const levelNote = selectionNote(levelSelection);
+    if (levelNote !== null) log.info(levelNote, { operation: LEVEL_WINDOW_OPERATION, context: selectionContext(levelSelection) });
 
     // AND THE SHELL IS RESOLVED INSIDE THE TRY, not above it, because it
     // logs and therefore has to come after the sink. Its failure now goes

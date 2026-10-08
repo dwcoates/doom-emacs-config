@@ -285,6 +285,7 @@ func storeEnv(socket, lockDir string, verbose bool) []string {
 	env := make([]string, 0, len(os.Environ())+4)
 	for _, kv := range os.Environ() {
 		if strings.HasPrefix(kv, "AGENT_REPL_LOG_LEVEL=") ||
+			strings.HasPrefix(kv, "AGENT_REPL_LOG_LEVEL_UNTIL=") ||
 			strings.HasPrefix(kv, "AGENT_REPL_STORE_SOCKET=") ||
 			strings.HasPrefix(kv, "AGENT_REPL_FORBID_VENDOR_CALLS=") ||
 			strings.HasPrefix(kv, "AGENT_REPL_TEST_SQLITE_UNSYNCED=") ||
@@ -302,7 +303,10 @@ func storeEnv(socket, lockDir string, verbose bool) []string {
 		"AGENT_REPL_LOG_LEVEL=info",
 	)
 	if verbose {
+		// Debug is a window, never a standing level: it holds only with an
+		// UNTIL no more than five minutes ahead (proto/vocab/log-level-window.json).
 		env[len(env)-1] = "AGENT_REPL_LOG_LEVEL=debug"
+		env = append(env, fmt.Sprintf("AGENT_REPL_LOG_LEVEL_UNTIL=%d", time.Now().Add(5*time.Minute).Unix()))
 	}
 	return env
 }
