@@ -73,8 +73,8 @@ describe("the status mark", () => {
     expect(rosterArmMark("merging")).toEqual({ toneClass: "tone-purple", glyph: "recycle", char: "⟳" });
   });
 
-  it("draws a landed merge as a green check", () => {
-    expect(rosterArmMark("merged")).toEqual({ toneClass: "tone-green", glyph: "check", char: "✓" });
+  it("draws no character for a landed merge, under the vocabulary's check glyph", () => {
+    expect(rosterArmMark("merged")).toEqual({ toneClass: "tone-green", glyph: "check", char: "" });
   });
 
   it("draws a question mark for a perspective-less workspace", () => {
