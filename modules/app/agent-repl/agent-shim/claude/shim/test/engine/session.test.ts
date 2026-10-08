@@ -1608,6 +1608,27 @@ describe("the store writer's backpressure", () => {
   });
 });
 
+describe("the vendor stream's cadence", () => {
+  it("records a long wait on the vendor for the next message", async () => {
+    // Arrange. The init message has been folded; the loop is waiting.
+    const clock = { now: 1_000_000 };
+    const h = harness({ clock: () => clock.now });
+    await started(h);
+    const query = (await untilQuery(h, 0)).query;
+    await settledUntil(() => h.fold.seen.length >= 1);
+    clock.now += 450;
+    const before = logSinkMark();
+
+    // Act.
+    query.emit(hookResponse({ uuid: "00000000-0000-4000-8000-00000000000a" }));
+    await settledUntil(() => h.fold.seen.length >= 2);
+
+    // Assert.
+    const records = logRecordsSince(before).filter((record) => record.operation === "shim.engine.vendor_cadence");
+    expect(records.map((record) => record.context)).toEqual([expect.objectContaining({ waited_ms: 450 })]);
+  });
+});
+
 describe("the turn loop", () => {
   it("hands the fold every SDK message", async () => {
     const h = harness();
