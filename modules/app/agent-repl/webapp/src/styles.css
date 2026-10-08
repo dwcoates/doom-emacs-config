@@ -1774,10 +1774,16 @@ pre {
    retiring the light purple): only an agent-to-agent prompt is bordered. */
 /* An AGENT-TO-AGENT prompt — the agent-addressed prompt row (a send from the
    lead or any agent to another, on either end) and the peer message — is the
-   same blue prompt bubble in the one amber. */
+   same blue prompt bubble in the one amber.
+   HALF AS THICK (owner ruling, 2026-10-08): 0.5px, a real one-device-pixel
+   line on a Retina display rather than the two it rounded up to at 1px, so
+   it visibly reads thinner. Never reflows the feed beyond that half pixel:
+   the border-color overrides below (selected-entry's blue, the expanded
+   response's eggshell) recolor this same width and never restate it, so
+   there is no second width anywhere to drift out of step with this one. */
 .bubble[data-role="prompt"][data-variant="agent"],
 .bubble[data-role="prompt"][data-variant="peer"] {
-  border: 1px solid var(--agent-prompt-border);
+  border: 0.5px solid var(--agent-prompt-border);
 }
 /* REGRESSION WATCH (prompt glimmer, 2026-09-14): the wave above is a COMPOSITOR
    animation, and WebKit (the xwidget's WKWebView) SUSPENDS compositor
