@@ -1379,6 +1379,12 @@ Design record `docs/protobuf-design/vendor-start-resilience.md`.
   `no_session` or never answers a forced stand-down is killed at once. A
   resume a restart cancelled relaunches over the shim it installed
   (`rollout.ErrResumeRestarted`). The account switch keeps an unforced bounce.
+- **A RESTART ANSWERS ITS OUTCOME** (owner ruling, 2026-10-08). The verb waits
+  for the forced bounce it asked for and answers nil when it finished (or had
+  nothing left to replace, or was handed to the daemon the workspace moved to)
+  and the `relaunch_failed` refusal, carrying the cause, otherwise
+  (`restartAnswer`). A caller that leaves first is answered its context's end
+  at ERROR, and the bounce runs on and records its own outcome.
 
 ## A coalesced bounce runs every kind it was asked, never one in place of another
 

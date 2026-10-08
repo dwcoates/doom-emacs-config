@@ -53,20 +53,59 @@ func (v *verbs) Restart(ctx context.Context, ws ids.WorkspaceID) error {
 		log.Info(opRestart, "ended the vendor-start retry run in flight; the restart begins a fresh one", nil)
 	}
 	v.forceEndTurn(ctx, log, ws)
-	return v.bounceShim(ctx, log, ws, true)
+	outcome := make(chan error, 1)
+	if err := v.bounceShim(ctx, log, ws, true, func(err error) { outcome <- err }); err != nil {
+		return err
+	}
+	// THE ANSWER IS THE OUTCOME (owner ruling, 2026-10-08: "i expect it to
+	// just restart instantly (not 'work on it' when it 'gets around to it')").
+	// A forced bounce is taken at once, so the restart's answer waits for it
+	// to finish and says whether it happened; a relaunch that failed is the
+	// `relaunch_failed` arm, which the editor surfaces. Measured 2026-10-08
+	// 18:55:03, workspace `doom`: the answer said "under way", the relaunch
+	// then failed on a merge's lease, and nothing told the user.
+	select {
+	case err := <-outcome:
+		return restartAnswer(ws, err)
+	case <-ctx.Done():
+		log.Error(opRestart, "the restart's caller left before the restart finished; the bounce runs on and records its own outcome", dlog.Context{
+			"cause": ctx.Err().Error(),
+		})
+		return fmt.Errorf("restart %q: the caller left before the restart finished: %w", ws, ctx.Err())
+	}
+}
+
+// restartAnswer turns a finished bounce's outcome into the restart's answer:
+// nil when the restart happened, or there was nothing left to replace, or the
+// daemon the workspace moved to runs it; the `relaunch_failed` refusal, with
+// the cause, otherwise. finishRestart has already recorded each outcome.
+func restartAnswer(ws ids.WorkspaceID, err error) error {
+	switch bounce.OutcomeOf(err) {
+	case bounce.OutcomeFinished, bounce.OutcomeUnregistered, bounce.OutcomeHandedAcross:
+		return nil
+	}
+	return &Refusal{
+		Rpc:    "RestartWorkspace",
+		Arm:    "relaunch_failed",
+		Reason: fmt.Sprintf("the restart of %s failed: %v", ws, err),
+		Fields: map[string]any{"detail": err.Error()},
+	}
 }
 
 // bounceShim asks the bounce registry for the restart's shim replacement and
 // hangs the webapp reload off its completion. force is false only for the
 // account switch (SelectAccount), which bounces at the workspace's freeness
-// rather than over its work.
-func (v *verbs) bounceShim(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, force bool) error {
-	// THE VERB ACCEPTS; THE BOUNCE RUNS BEHIND IT. Its completion is what the
-	// reload and the record below hang off. The context is DETACHED from the
-	// request: the bounce outlives the rpc.
+// rather than over its work. finished, when set, is told the bounce's outcome
+// after the completion's own record and reload.
+func (v *verbs) bounceShim(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, force bool, finished func(error)) error {
+	// THE BOUNCE RUNS ON A CONTEXT DETACHED FROM THE REQUEST: it outlives the
+	// rpc. Its completion is what the reload and the record below hang off.
 	detached := context.WithoutCancel(ctx)
 	decision, err := v.deps.Rollout.BounceShim(detached, ws, rollout.ReasonRestartVerb, force, func(err error) {
 		v.finishRestart(detached, log, ws, force, err)
+		if finished != nil {
+			finished(err)
+		}
 	})
 	if errors.Is(err, bounce.ErrMovedAway) {
 		// THE WORKSPACE IS MOVING TO ANOTHER DAEMON and its move has sealed
@@ -80,15 +119,16 @@ func (v *verbs) bounceShim(ctx context.Context, log dlog.Logger, ws ids.Workspac
 		log.Error(opRestart, "the bounce registry refused the restart", dlog.Context{"force": force, "cause": err.Error()})
 		return fmt.Errorf("restart %q: %w", ws, err)
 	}
-	log.Info(opRestart, "accepted the restart; the bounce runs behind it", dlog.Context{
+	log.Info(opRestart, "accepted the restart; the bounce is running", dlog.Context{
 		"force": force, "now": decision.Now, "turn_in_flight": decision.TurnInFlight, "detached_work": decision.DetachedWork,
 	})
 	return nil
 }
 
 // finishRestart is the restart's completion: the webapp reload that follows a
-// bounce, or the bounce's failure. Nobody is waiting on it, so its failures
-// are RECORDED rather than returned.
+// bounce, or the bounce's failure, RECORDED here once. The restart verb also
+// answers the outcome to its caller (restartAnswer); the account switch's
+// bounce has no caller waiting on it.
 func (v *verbs) finishRestart(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, force bool, err error) {
 	switch bounce.OutcomeOf(err) {
 	case bounce.OutcomeUnregistered:
