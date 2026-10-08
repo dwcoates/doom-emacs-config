@@ -843,6 +843,10 @@ type fakeFeed struct {
 	// promptRows names selectable rows that are prompts but not rollback
 	// prompts (an agent prompt, a user prompt a rollback cannot reach).
 	promptRows map[string]bool
+	// mergeHeads names the merge bubble heads SetMergeFold accepts, and
+	// mergeFolds records each fold it was told, keyed by row.
+	mergeHeads map[string]bool
+	mergeFolds map[string]bool
 
 	// rollbackTarget and rollbackTargetOK are what RollbackTarget answers —
 	// one scripted answer suffices, since no rollback test asks it about more
@@ -923,6 +927,17 @@ func (f *fakeFeed) RollbackPrompts(ids.WorkspaceID) []*frontendv1.FeedId {
 // landed root-feed rows by construction), answering "text of <row>" for one
 // with no scripted text; unreadable breaks that guarantee for a row, so a test
 // can drive the defect path.
+func (f *fakeFeed) SetMergeFold(_ ids.WorkspaceID, id *frontendv1.FeedId, folded bool) bool {
+	if !f.mergeHeads[id.GetValue()] {
+		return false
+	}
+	if f.mergeFolds == nil {
+		f.mergeFolds = map[string]bool{}
+	}
+	f.mergeFolds[id.GetValue()] = folded
+	return true
+}
+
 func (f *fakeFeed) SelectableText(_ ids.WorkspaceID, id *frontendv1.FeedId) (feed.SelectableText, bool) {
 	prompt := indexOfFeedID(f.prompts, id) >= 0 || f.promptRows[id.GetValue()]
 	if f.unreadable[id.GetValue()] {
