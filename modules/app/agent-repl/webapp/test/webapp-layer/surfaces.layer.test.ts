@@ -68,11 +68,23 @@ it(
     await awaitDrawn(app, "the running turn's stop control", () => app.$(".footer-clock [data-interrupt]") !== null);
     const interrupt = app.$(".footer-clock [data-interrupt]");
     if (interrupt === null) throw new Error("the turn stop vanished between its wait and its click");
+    //
+    // THE STOP CAN LAND BEFORE THE TURN RUNS. The status takes the turn when
+    // the prompt is accepted, while the session is still coming up, so the
+    // stop may withdraw the accepted turn rather than end a running one. A
+    // withdrawn turn draws no turn end, and either way the turn stop leaves
+    // the strip once nothing is left to stop.
     const beforeTurns = rows(app, "turnEnded").length;
     await app.clickElement(interrupt);
     const confirm = app.$("[data-interrupt-confirm]");
     if (confirm) await app.clickElement(confirm);
-    await awaitDrawn(app, "the parked turn to end", () => rows(app, "turnEnded").length > beforeTurns);
+    await awaitDrawn(
+      app,
+      "the parked turn to end or be withdrawn",
+      () =>
+        rows(app, "turnEnded").length > beforeTurns ||
+        app.$(".footer-clock [data-interrupt]") === null,
+    );
   },
   TURN_TEST_MS,
 );
