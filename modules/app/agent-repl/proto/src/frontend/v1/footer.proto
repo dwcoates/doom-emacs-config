@@ -278,8 +278,9 @@ message FooterStatus {
     FooterStatusIdle idle = 1;
     // A turn is in flight. Its step names what the main agent is doing now.
     FooterStatusWorking working = 2;
-    // The session is parked on something — a self-scheduled wakeup, a
-    // consent card, or a question batch.
+    // The session is parked on something other than a gate's card — a cold
+    // gate's choice, an interrupt landing, or a self-scheduled wakeup. A
+    // permission or a question gate is its own arm below.
     FooterStatusWaiting waiting = 3;
     // MOMENTARY: the last turn was stopped; cleared by the next status push.
     FooterStatusInterrupted interrupted = 4;
@@ -341,6 +342,17 @@ message FooterStatus {
     // separates an unreachable network from an answer the vendor gave. BLUE:
     // the composer is CLOSED. Outranked only by `agent_repl_fault`.
     FooterStatusNetworkFault network_fault = 17;
+    // A PERMISSION GATE: a tool call the agent or one of its subagents made
+    // waits on the user's consent, and the turn cannot go on until it is
+    // decided. GREEN (owner ruling, 2026-10-08): the workspace is ready for the
+    // user, the same green as `idle`, never the red of a working turn. It is
+    // the same coarse claim as the roster's `permission` arm.
+    FooterStatusPermission permission = 18;
+    // A QUESTION GATE: a question batch the agent or one of its subagents
+    // posed waits on the user's answers. GREEN, as `permission` is (owner
+    // ruling, 2026-10-08). It is the same coarse claim as the roster's
+    // `question` arm.
+    FooterStatusQuestion question = 19;
   }
   // Tag 12 (`merge_conflict`) is retired; see the note in the oneof.
   reserved 12;
@@ -575,7 +587,73 @@ message FooterSubStatusWorkingFetching {}
 // A subagent the main agent waits on is running.
 message FooterSubStatusWorkingDelegating {}
 
-// Parked on a wakeup, a consent card, or a question batch.
+// A permission gate stands: a tool call waits on the user's consent. When
+// several consent asks are open, the earliest one is named.
+message FooterStatusPermission {
+  // The activity cell. ALWAYS SET, and ALWAYS SALIENT: the gated call is the
+  // line by construction.
+  FooterStatusPermissionActivity activity = 1;
+}
+// The activity cell while a permission gate stands. It has NO unpinned
+// branch: the gate blocks the turn, so its line always stands.
+message FooterStatusPermissionActivity {
+  // The standing salient line.
+  FooterStatusPermissionSalient salient = 1;
+}
+// The salient kinds legal under a permission gate: the gated call first, then
+// a deploy's progress, then the push notification.
+message FooterStatusPermissionSalient {
+  // When this line began standing; the client ticks the relative age.
+  FooterStatusActivityAt at = 1;
+  // The one salient line.
+  oneof kind {
+    // The gated call, composed ("Bash: rm -rf …"), standing until the ask is
+    // decided.
+    FooterStatusActivityGatedCall gated_call = 2;
+    // A DEPLOY'S PROGRESS. STATUS-INDEPENDENT: every status arm's salient
+    // oneof carries it. See FooterStatusActivityUpdate.
+    FooterStatusActivityUpdate update = 3;
+    // THE AGENT'S PUSH NOTIFICATION, standing until the next prompt is
+    // submitted. STATUS-INDEPENDENT: every status arm's salient oneof carries
+    // it.
+    FooterStatusActivityNotification notification = 4;
+  }
+}
+
+// A question gate stands: a question batch waits on the user's answers. When
+// several batches are open, the earliest one is named.
+message FooterStatusQuestion {
+  // The activity cell. ALWAYS SET, and ALWAYS SALIENT: the batch's lead is
+  // the line by construction.
+  FooterStatusQuestionActivity activity = 1;
+}
+// The activity cell while a question gate stands. It has NO unpinned branch:
+// the gate blocks the turn, so its line always stands.
+message FooterStatusQuestionActivity {
+  // The standing salient line.
+  FooterStatusQuestionSalient salient = 1;
+}
+// The salient kinds legal under a question gate: the batch's lead first, then
+// a deploy's progress, then the push notification.
+message FooterStatusQuestionSalient {
+  // When this line began standing; the client ticks the relative age.
+  FooterStatusActivityAt at = 1;
+  // The one salient line.
+  oneof kind {
+    // The open batch's lead, composed ("2 questions · Which approach?"),
+    // standing until the batch is answered.
+    FooterStatusActivityQuestionLead question_lead = 2;
+    // A DEPLOY'S PROGRESS. STATUS-INDEPENDENT: every status arm's salient
+    // oneof carries it. See FooterStatusActivityUpdate.
+    FooterStatusActivityUpdate update = 3;
+    // THE AGENT'S PUSH NOTIFICATION, standing until the next prompt is
+    // submitted. STATUS-INDEPENDENT: every status arm's salient oneof carries
+    // it.
+    FooterStatusActivityNotification notification = 4;
+  }
+}
+
+// Parked on a cold gate's choice, an interrupt landing, or a wakeup.
 message FooterStatusWaiting {
   // WHAT the session waits on. Exactly one; a waiting status with no step
   // is malformed.
@@ -583,10 +661,10 @@ message FooterStatusWaiting {
     // The self-scheduled wakeup fallback: shown only when the footer would
     // otherwise read idle/done — any real status wins, resolved daemon-side.
     FooterSubStatusWaitingWakeup wakeup = 1;
-    // A permission card is open; the agent is blocked on consent.
-    FooterSubStatusWaitingPermission permission = 2;
-    // A question batch is open; the agent is blocked on answers.
-    FooterSubStatusWaitingQuestion question = 3;
+    // Tags 2 (`permission`) and 3 (`question`) are RETIRED: a permission or
+    // a question gate is its own status arm, FooterStatus.permission and
+    // FooterStatus.question (owner ruling, 2026-10-08: the status names the
+    // gate).
     // The cold-context gate stands: the session is parked on the user's
     // remediation choice (pay / clear / compact). The feed's gate row is the
     // answering surface; the footer only says the session is parked on it.
@@ -602,13 +680,12 @@ message FooterStatusWaiting {
   // by construction — the countdown, the gated call, the question lead. A
   // producer that cannot compose it has a bug, not a missing fact.
   FooterStatusWaitingActivity activity = 4;
+  // Tags 2 and 3 are retired; see the note in the oneof.
+  reserved 2, 3;
+  reserved "permission", "question";
 }
 // The self-scheduled wakeup fallback state.
 message FooterSubStatusWaitingWakeup {}
-// A permission card is open; the agent is blocked on consent.
-message FooterSubStatusWaitingPermission {}
-// A question batch is open; the agent is blocked on answers.
-message FooterSubStatusWaitingQuestion {}
 // The cold-context gate stands; the session is parked on its answer.
 message FooterSubStatusWaitingColdGate {}
 // The turn is being stopped on the user's behalf.
@@ -621,9 +698,8 @@ message FooterStatusWaitingActivity {
   FooterStatusWaitingSalient salient = 1;
 }
 // The salient kinds legal while waiting. The kind that explains the standing
-// substatus ranks first (the interrupt, the gated call, the question lead,
-// the cold gate, the countdown), then a deploy's progress, then the push
-// notification, in that order.
+// substatus ranks first (the interrupt, the cold gate, the countdown), then a
+// deploy's progress, then the push notification, in that order.
 message FooterStatusWaitingSalient {
   // When this line began standing; the client ticks the relative age.
   FooterStatusActivityAt at = 1;
@@ -632,12 +708,10 @@ message FooterStatusWaitingSalient {
     // The wakeup countdown, standing until the wakeup fires or is stopped;
     // the client ticks from the deadline instant.
     FooterStatusActivityWakeup wakeup = 2;
-    // The gated call, composed ("Bash: rm -rf …"), standing until the
-    // permission is answered.
-    FooterStatusActivityGatedCall gated_call = 3;
-    // The open batch's lead, composed ("2 questions · Which approach?"),
-    // standing until the batch is answered.
-    FooterStatusActivityQuestionLead question_lead = 4;
+    // Tags 3 (`gated_call`) and 4 (`question_lead`) are RETIRED with the
+    // waiting status's permission and question steps: each is the line of
+    // its own gate status now (FooterStatusPermissionSalient,
+    // FooterStatusQuestionSalient).
     // The session reports it is parked on the user (requires_action) — a
     // vendor fact the daemon cannot decompose further.
     FooterStatusActivityBlockedOnUser blocked_on_user = 5;
@@ -664,6 +738,9 @@ message FooterStatusWaitingSalient {
   // the vendor's allowance figures (owner ruling, 2026-10-01).
   reserved 9;
   reserved "rate_limit";
+  // Tags 3 and 4 are retired; see the note in the oneof.
+  reserved 3, 4;
+  reserved "gated_call", "question_lead";
 }
 // The composed interrupting line.
 message FooterStatusActivityInterrupting {

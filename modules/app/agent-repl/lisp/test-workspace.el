@@ -2148,6 +2148,13 @@ in the same shape (still leftmost, nil-name still at head)."
 
 ;;;; ---- The two context cuts --------------------------------------------
 
+(ert-deftest agent-repl-test-ws-state-icon-question ()
+  ":question wears the gate's glyph in `agent-repl-ws-state-icons', as
+:permission does."
+  ;; Act / Assert
+  (should (equal (alist-get :question agent-repl-ws-state-icons)
+                 (alist-get :permission agent-repl-ws-state-icons))))
+
 (ert-deftest agent-repl-test-ws-state-icon-clearing ()
   ":clearing has a glyph of its own in `agent-repl-ws-state-icons'."
   ;; Act / Assert

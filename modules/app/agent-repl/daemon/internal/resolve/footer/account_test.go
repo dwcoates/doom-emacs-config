@@ -662,7 +662,13 @@ func TestTheActivityCellIsNeverEmptyUnderAnyStatus(t *testing.T) {
 			h.r.SetTurn(testWS, &TurnStarted{At: instant})
 			h.r.OnActivity(testWS, mainAgent, memoryInjection("CLAUDE.md"))
 		}, "loading"},
-		{"waiting", func(_ *testing.T, h *harness) { h.r.OnQuestion(testWS, mainAgent, questionStart("q-1", "which?")) }, "waiting"},
+		{"waiting", func(_ *testing.T, h *harness) {
+			h.r.SetColdGate(testWS, ColdGate{Standing: true, Cost: ColdGateCost{Lead: "cold"}})
+		}, "waiting"},
+		{"permission", func(_ *testing.T, h *harness) {
+			h.r.OnPermission(testWS, mainAgent, permissionStart("p-1", "Claude wants to run make"))
+		}, "permission"},
+		{"question", func(_ *testing.T, h *harness) { h.r.OnQuestion(testWS, mainAgent, questionStart("q-1", "which?")) }, "question"},
 		{"merging", func(_ *testing.T, h *harness) { h.r.SetMerge(testWS, MergeFacts{State: "merging", Step: StepTesting}) }, "merging"},
 		{"merge_failed", func(_ *testing.T, h *harness) {
 			h.r.SetMerge(testWS, MergeFacts{State: "failed", FailedArea: FailedConflicts})

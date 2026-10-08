@@ -13,7 +13,9 @@ package conversation.v1;
 
 import "conversation/v1/api.proto";
 import "conversation/v1/detached_work.proto";
+import "conversation/v1/agent_activity.proto";
 import "conversation/v1/permission.proto";
+import "conversation/v1/question.proto";
 import "conversation/v1/slash_command.proto";
 import "conversation/v1/turn.proto";
 
@@ -61,12 +63,36 @@ message SessionStarted {
   // Every detached item live now, each exactly as its spawning stream would
   // have announced it, so a consumer opens the matching stream for each.
   repeated AgentDetachedWork live_work = 6;
+  // Every ask blocking the vendor now — each consent ask and question batch
+  // the session holds open, the main agent's and its subagents' alike — in
+  // the order they opened. A daemon that attaches while the user is being
+  // asked was not there for the ask's start, and no watch replays it, so
+  // without this it draws the running turn as working while a card waits on
+  // the user. EMPTY when nothing is asked. An ask a keep-alive raised on the
+  // main agent is never listed, as its turn is never served.
+  repeated SessionOpenAsk open_asks = 11;
 
   // Tag 8 is RETIRED: the vendor handshake block is deferred.
 
   // The session contract this shim speaks. UNSPECIFIED means it predates the
   // stamp. See SessionContract.
   SessionContract contract = 10;
+}
+
+// One ask blocking the vendor: whose it is, and the ask as its stream
+// carried it when it opened.
+message SessionOpenAsk {
+  // The agent whose conversation the ask stands in: the main agent, or the
+  // subagent that raised it.
+  AgentId agent = 1;
+  // The ask. Exactly one arm is set, and its result is always `start`: an
+  // ask that was answered or withdrawn is no longer open.
+  oneof ask {
+    // A tool call waiting on the user's consent.
+    AgentPermission permission = 2;
+    // A question batch waiting on the user's answers.
+    AgentQuestion question = 3;
+  }
 }
 
 // The shim and the SDK it drives. Fixed for the process; stated once.

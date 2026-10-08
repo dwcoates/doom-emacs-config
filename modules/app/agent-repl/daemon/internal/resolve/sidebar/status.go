@@ -86,10 +86,11 @@ func projectArm(status *frontendv1.FooterStatus, log dlog.Logger) string {
 		return vendorFaultArm(arm.VendorFault)
 	case *frontendv1.FooterStatus_Degraded:
 		return "degraded"
+	case *frontendv1.FooterStatus_Permission:
+		return "permission"
+	case *frontendv1.FooterStatus_Question:
+		return "question"
 	case *frontendv1.FooterStatus_Waiting:
-		if arm.Waiting.GetPermission() != nil {
-			return "permission"
-		}
 		return "waiting"
 	case *frontendv1.FooterStatus_Working:
 		switch {
@@ -233,6 +234,9 @@ func setStatus(row *frontendv1.RosterRow, arm string, log dlog.Logger) {
 	case "permission":
 		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"permission\""})
 		row.Status = &frontendv1.RosterRow_Permission{Permission: &frontendv1.RosterRowStatusPermission{}}
+	case "question":
+		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"question\""})
+		row.Status = &frontendv1.RosterRow_Question{Question: &frontendv1.RosterRowStatusQuestion{}}
 	case "done":
 		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"done\""})
 		row.Status = &frontendv1.RosterRow_Done{Done: &frontendv1.RosterRowStatusDone{}}

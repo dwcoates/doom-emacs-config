@@ -3441,6 +3441,86 @@ func TestARunningTurnFoundAtAttachStandsOnTheViews(t *testing.T) {
 	}
 }
 
+// TestAnAskOpenAtAttachStandsOnTheGateViews pins that every ask the session's
+// facts name open reaches the footer, the roster and the merge queue as its
+// live start would have, while the feed and the host are not told again.
+// Without it a daemon that took a workspace over mid-question drew the running
+// turn `working`, red, until the answer (owner report, 2026-10-08).
+func TestAnAskOpenAtAttachStandsOnTheGateViews(t *testing.T) {
+	tests := []struct {
+		name string
+		ask  *conversationv1.SessionOpenAsk
+		want []string
+	}{
+		{
+			name: "an open consent ask",
+			ask: &conversationv1.SessionOpenAsk{Agent: agentID("main-1"), Ask: &conversationv1.SessionOpenAsk_Permission{
+				Permission: permissionUpdate("p-1", "act-1", "Claude wants to read foo.txt", "Read file").GetPermission()}},
+			want: []string{"footer.OnPermission", "sidebar.OnPermission", "merge.OnPermission"},
+		},
+		{
+			name: "an open question batch",
+			ask: &conversationv1.SessionOpenAsk{Agent: agentID("main-1"), Ask: &conversationv1.SessionOpenAsk_Question{
+				Question: questionUpdate("q-1", "Pick", "Which?").GetQuestion()}},
+			want: []string{"footer.OnQuestion", "merge.OnQuestion"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := startHarnessSinks(t, Session{}, nil, nil, &mergeSink{})
+			h.session = h.client.nextSessionOpen(t)
+			started := sessionStarted("turn-1")
+			started.OpenAsks = []*conversationv1.SessionOpenAsk{tt.ask}
+
+			// Act
+			h.sendSessionStarted(t, started)
+			h.sendSessionUpdate(t, compactingUpdate())
+			seen := h.rec.until(t, "footer.OnSessionUpdate")
+
+			// Assert
+			var asks []string
+			for _, ev := range seen {
+				switch ev.method {
+				case "OnPermission", "OnQuestion", "OnNotification":
+					asks = append(asks, ev.name())
+				}
+			}
+			if !slices.Equal(asks, tt.want) {
+				t.Fatalf("ask edges = %v, want %v", asks, tt.want)
+			}
+			if !h.hasRecord("info", "daemon.sessionwatcher.open_ask_at_attach") {
+				t.Fatalf("records = %v, want an info open_ask_at_attach", h.log.Records())
+			}
+		})
+	}
+}
+
+// TestAnAskTheFactsNameThatIsNotOpenIsRefusedLoudly pins that a settled ask
+// in SessionStarted.open_asks is a producer defect: nothing is stood for it and
+// it is recorded at ERROR.
+func TestAnAskTheFactsNameThatIsNotOpenIsRefusedLoudly(t *testing.T) {
+	// Arrange
+	h := startHarnessSinks(t, Session{}, nil, nil, &mergeSink{})
+	h.session = h.client.nextSessionOpen(t)
+	started := sessionStarted("turn-1")
+	started.OpenAsks = []*conversationv1.SessionOpenAsk{{Agent: agentID("main-1"), Ask: &conversationv1.SessionOpenAsk_Question{
+		Question: questionSettledUpdate("q-1").GetQuestion()}}}
+
+	// Act
+	h.sendSessionStarted(t, started)
+	h.sendSessionUpdate(t, compactingUpdate())
+	seen := h.rec.until(t, "footer.OnSessionUpdate")
+
+	// Assert
+	if hasEvent(seen, "footer.OnQuestion") || hasEvent(seen, "merge.OnQuestion") {
+		t.Fatalf("events = %v, want no ask stood for a settled one", names(seen))
+	}
+	if !h.hasRecord("error", "daemon.sessionwatcher.open_ask_malformed") {
+		t.Fatalf("records = %v, want an error open_ask_malformed", h.log.Records())
+	}
+}
+
 // TestATurnThisWatcherOpenedIsNotStoodAsFoundAtAttach pins that the facts
 // naming a turn this watcher's own delivery opened tell the views nothing new:
 // the queue already stood it.

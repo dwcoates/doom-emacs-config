@@ -303,7 +303,7 @@ the vendor (`AGENT_REPL_FORBID_VENDOR_CALLS=1` in every process).
   execution_error, structured_output_retry_exhausted, stop_hook_prevented)
   draw their own FeedTurnEndedErrored arms with composed headlines; the four
   FailureVendor* ones also resolve the roster PURPLE
-- permission start → `permission.open` row + footer `waiting.permission`
+- permission start → `permission.open` row + footer `permission`
   + host `notification{permission_requested}`; answered → `answered` re-push
 - question start → `question.open`; answers → `answered` with echoed labels
 - a subagent spawn draws a bubble head (label, description, runtime);

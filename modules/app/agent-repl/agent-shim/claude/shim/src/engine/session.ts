@@ -6056,6 +6056,10 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       ...servedTurnInFlight(),
       turnsWaiting: servedTurnsWaiting(),
       liveWork: await announceLiveWorkNow(),
+      // EVERY ASK BLOCKING THE VENDOR, so a daemon attaching while the user is
+      // being asked stands the gate it never saw open, rather than drawing the
+      // turn in flight as working while a card waits on the user.
+      openAsks: gate.openAsks(),
       contract: conversationv1.SessionContract.LIVE_WORK_LEVEL,
     });
   }

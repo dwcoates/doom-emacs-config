@@ -2034,6 +2034,24 @@ describe("a turn the vendor started on its own", () => {
     }).toEqual({ inFlight: inFlight(h), waiting });
   });
 
+  it("re-announces the ask blocking the vendor, so an attaching daemon stands the gate", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    const spec = h.queries[0]?.spec;
+    if (spec === undefined) throw new Error("no query");
+    void spec.canUseTool("Bash", {}, { signal: new AbortController().signal, toolUseID: "toolu_1", requestId: "r" });
+    await Promise.resolve();
+
+    // Act
+    const start = await reannounced(h);
+
+    // Assert
+    expect(start?.openAsks.map((open) => [open.ask.case, open.ask.value?.id?.value])).toEqual([
+      ["permission", "toolu_1"],
+    ]);
+  });
+
   it("charges a killed turn's stop result to the killed turn and adopts nothing", async () => {
     // Arrange
     const h = harness();
