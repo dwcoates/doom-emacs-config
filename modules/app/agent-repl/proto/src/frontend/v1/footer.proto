@@ -2241,16 +2241,21 @@ message FooterTokensCellInput {
 message FooterTokensCellAlarm {}
 
 // The accounting badge. The set arm picks the glyph treatment; the evidence
-// behind it is the panel's verdict line, never this badge.
+// behind it is the panel's verdict line, never this badge. ONLY `complete`
+// draws a glyph in the cell (owner ruling, 2026-10-08: no red ✗ in the tokens
+// cell); a failing arm draws nothing there, and its evidence is the panel's
+// verdict line alone.
 message FooterTokensCellVerdict {
   // Which verdict the settled turn's reconciliation reached. Exactly one arm
   // is set; the arms are mutually exclusive readings of one reconciliation.
   oneof verdict {
     // Every response's usage was observed and the sums reconcile (✓).
     FooterTokensCellVerdictComplete complete = 1;
-    // Some responses carried no usage, so the figures are a floor (✗).
+    // Some responses carried no usage, so the figures are a floor (no glyph
+    // in the cell).
     FooterTokensCellVerdictIncomplete incomplete = 2;
-    // The observed usage contradicts itself (✗) — a producer defect.
+    // The observed usage contradicts itself — a producer defect (no glyph in
+    // the cell).
     FooterTokensCellVerdictInvalid invalid = 3;
   }
 }

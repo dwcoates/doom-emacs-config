@@ -5670,12 +5670,11 @@ ar-button.outcome-marker-pill {
 
 /* The tokens cell's two glyphs. Presence IS the fact for both: the alarm's
    sentence and the verdict's evidence are the panel's lines, never repeated
-   here, so each is a single character with a hover. */
+   here, so each is a single character with a hover. Only a reconciled turn
+   draws a verdict glyph (owner ruling, 2026-10-08: no red ✗ in the cell). */
 .footer-tokens-alarm { color: var(--thinking); }
 .footer-tokens-verdict { font-size: 0.72rem; }
 .footer-tokens-verdict.arm-complete { color: var(--ok); }
-.footer-tokens-verdict.arm-incomplete,
-.footer-tokens-verdict.arm-invalid { color: var(--err); }
 
 /* THE PARTITION between the strip and the expanded section (owner ruling,
    2026-09-13). A rule element of its own rather than a border on either
