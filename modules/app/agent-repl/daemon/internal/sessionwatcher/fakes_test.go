@@ -1013,6 +1013,10 @@ func (s *lifecycleSink) OnWatchOpenRefused(_ ids.WorkspaceID, refusal WatchOpenR
 	s.rec.emit(event{sink: "lifecycle", method: "OnWatchOpenRefused", refusal: &held})
 }
 
+func (s *lifecycleSink) OnWatchOpened(_ ids.WorkspaceID) {
+	s.rec.emit(event{sink: "lifecycle", method: "OnWatchOpened"})
+}
+
 func (s *lifecycleSink) OnSessionDiagnostics(_ ids.WorkspaceID, _ *conversationv1.SessionDiagnostics) {
 	s.rec.emit(event{sink: "lifecycle", method: "OnSessionDiagnostics"})
 }
@@ -2006,6 +2010,29 @@ func (h *harness) awaitRecord(t *testing.T, level, operation string) {
 		select {
 		case <-deadline:
 			t.Fatalf("the record %s/%s was never logged", level, operation)
+		case <-time.After(time.Millisecond):
+		}
+	}
+}
+
+// awaitMessages waits for the watcher to log n records of one message, the
+// way awaitRecord waits for one record of an operation.
+func (h *harness) awaitMessages(t *testing.T, level, message string, n int) {
+	t.Helper()
+	deadline := time.After(waitDeadline)
+	for {
+		count := 0
+		for _, r := range h.log.Records() {
+			if r.Level == level && r.Message == message {
+				count++
+			}
+		}
+		if count >= n {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("%d records of %s/%q were logged, want %d", count, level, message, n)
 		case <-time.After(time.Millisecond):
 		}
 	}
