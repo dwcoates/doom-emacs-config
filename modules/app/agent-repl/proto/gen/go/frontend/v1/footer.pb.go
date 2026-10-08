@@ -12389,7 +12389,8 @@ func (x *FooterClock) GetTurnStartedAtMs() int64 {
 // and detached agents included, the cache figures, first-token latency, alarm
 // detail, verdict evidence) is FooterExpandedTokens' content, reached by
 // clicking this cell. The figure moves while the turn runs; a new turn starts
-// it again from zero.
+// it again from zero. A finished turn's figure STANDS until the next prompt
+// is submitted (below).
 //
 // FRESH INPUT is every input token that was NOT a cache hit: the vendor's
 // `input_tokens` plus `cache_creation_input_tokens`, i.e. the
@@ -12414,13 +12415,23 @@ func (x *FooterClock) GetTurnStartedAtMs() int64 {
 // cold cache can push it above, because re-written context counts as fresh
 // without growing the window.
 //
-// WITH NO TURN IN FLIGHT the figure is `--`, stated by the daemon, and the
-// cell stays a click target: the panel still opens, on the most recent
-// turn's breakdown. The glyphs keep their own lifetimes (below).
+// WITH NO TURN IN FLIGHT the figure is the MOST RECENT TURN'S, heat included,
+// however that turn ended (completed, failed, interrupted, its query or shim
+// dead, a compaction's cut). It clears the moment the next prompt is
+// SUBMITTED — the daemon accepting it for delivery, the same edge that raises
+// `working · submitting` — never at the shim's ack or the first response; a
+// prompt held in the queue submits nothing and leaves it standing. A daemon
+// relaunch or handover is not a submission: the relaunched daemon restates
+// the figure from the main agent's opening history page. The figure is `--`,
+// uncolored, when the most recent turn's main agent stated no usage (no turn
+// has run, a /clear, a submission the shim refused). Either way the daemon
+// states it, and the cell stays a click target: the panel opens on the most
+// recent turn's breakdown. The glyphs keep their own lifetimes (below).
 type FooterTokensCell struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The figure, daemon-formatted ("18.2k in") from the fresh input described
-	// above, or "--" with no turn in flight, with its heat. The client draws the
+	// above — the running turn's, or the most recent turn's while it stands — or
+	// "--" when no turn's figure stands, with its heat. The client draws the
 	// text verbatim — no arithmetic, no unit rounding, no idle inference of its
 	// own.
 	Input *FooterTokensCellInput `protobuf:"bytes,1,opt,name=input,proto3" json:"input,omitempty"`
@@ -12432,7 +12443,9 @@ type FooterTokensCell struct {
 	// re-bills the whole prefix without growing the context at all.
 	Alarm *FooterTokensCellAlarm `protobuf:"bytes,2,opt,name=alarm,proto3,oneof" json:"alarm,omitempty"`
 	// The accounting verdict badge. UNSET while the turn runs (no verdict
-	// yet); set once the settled turn is reconciled.
+	// yet), and on a turn a relaunched daemon restated (its reconciliation
+	// belonged to the process that watched it); set once the settled turn is
+	// reconciled.
 	Verdict       *FooterTokensCellVerdict `protobuf:"bytes,3,opt,name=verdict,proto3,oneof" json:"verdict,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -12493,11 +12506,11 @@ func (x *FooterTokensCell) GetVerdict() *FooterTokensCellVerdict {
 // a later prop (a tone, a tooltip) lands here without touching the cell.
 type FooterTokensCellInput struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The formatted figure, exactly as drawn ("18.2k in", or "--" with no turn
-	// in flight).
+	// The formatted figure, exactly as drawn ("18.2k in", or "--" when no
+	// turn's figure stands).
 	Text string `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`
-	// How hot the figure is, which colors it. UNSET with no turn in flight
-	// (the `--` figure is drawn uncolored).
+	// How hot the figure is, which colors it. UNSET exactly when the figure is
+	// `--` (drawn uncolored); a standing figure keeps its heat.
 	Heat          *TokenHeat `protobuf:"bytes,2,opt,name=heat,proto3,oneof" json:"heat,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -14164,9 +14177,12 @@ func (*FooterMonitorRowPersistent) Descriptor() ([]byte, []int) {
 //
 // WITH NO TURN IN FLIGHT the panel still arrives, holding the most recent
 // turn's breakdown plus the live usage of every detached agent still
-// running, so background spend stays visible here while the cell reads `--`.
-// A detached agent still running when a turn opens is carried into the new
-// turn's accounting; one that has ended leaves it.
+// running, so background spend stays visible here while the cell stands the
+// most recent turn's figure (or reads `--`). A detached agent still running
+// when a turn opens is carried into the new turn's accounting; one that has
+// ended leaves it. A turn a relaunched daemon restated from the main agent's
+// opening page holds the main agent's spend only, with no first-token
+// latency, context growth or verdict: those were the watching process's.
 type FooterExpandedTokens struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// "input (uncached)" — input_misses (written + unwritten) summed across
@@ -14187,8 +14203,8 @@ type FooterExpandedTokens struct {
 	// The alarm's detail line. PRESENT iff the alarm tripped (mirrors the
 	// cell's glyph); carries the composed sentence.
 	Alarm *FooterTokensLineAlarm `protobuf:"bytes,7,opt,name=alarm,proto3,oneof" json:"alarm,omitempty"`
-	// The verdict's detail line. UNSET while the turn runs (mirrors the
-	// cell's badge); set once reconciled.
+	// The verdict's detail line. UNSET while the turn runs and on a restated
+	// turn (mirrors the cell's badge); set once reconciled.
 	Verdict *FooterTokensLineVerdict `protobuf:"bytes,8,opt,name=verdict,proto3,oneof" json:"verdict,omitempty"`
 	// "context growth" — the main agent's context growth: the SAME resolved
 	// value the strip's cell shows while a turn runs, and the most recent
