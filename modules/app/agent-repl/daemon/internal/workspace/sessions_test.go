@@ -373,6 +373,19 @@ type fakeWatcher struct {
 	closeErr error
 	// factsErr is what AwaitSessionFacts answers.
 	factsErr error
+	// free answers AwaitFree: each call takes the next value sent on it. Nil
+	// leaves AwaitFree unanswerable, which no fixture that calls it does.
+	free chan error
+}
+
+// AwaitFree answers the next value the fixture sends on free.
+func (w *fakeWatcher) AwaitFree(ctx context.Context) error {
+	select {
+	case err := <-w.free:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // Pointers answers the pointers the fixture states; a fixture that states none
