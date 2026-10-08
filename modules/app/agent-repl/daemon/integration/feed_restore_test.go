@@ -394,3 +394,36 @@ func TestARestartWhoseNewestPageDrawsNoRowPushesTheConversation(t *testing.T) {
 		})
 	}
 }
+
+// TestARestartedWorkspacesQuotedPromptStillDrawsItsQuoteApart covers history
+// replay after a restart: the store's record of a reply carries its quote as
+// its own block, and the successor draws that block as the row's quote arm,
+// apart from the person's words, exactly as the live row was drawn.
+func TestARestartedWorkspacesQuotedPromptStillDrawsItsQuoteApart(t *testing.T) {
+	t.Parallel()
+	// Arrange.
+	const quote = "⟢ Replying to an earlier response of yours:\n\n```\nwe decided\n```\n\n⟢ My message:\n"
+	entry := relaunchPromptEntry()
+	prompt := entry.GetUserPrompt()
+	prompt.Said.Content.Blocks = append([]*conversationv1.UserContentBlock{{
+		Block: &conversationv1.UserContentBlock_Quote{Quote: &conversationv1.UserQuoteBlock{Text: quote}},
+	}}, prompt.Said.Content.Blocks...)
+	f := restarted(newOpened(t, harness.Opts{}), harness.ShimProfile{
+		ResumeHistory: harness.EncodeHistory(t, relaunchAnswerEntry(), entry),
+	})
+
+	// Act.
+	page, _ := f.openFeedOnceCarrying("the replayed prompt", func(p *frontendv1.FeedPage) bool {
+		return pagePrompt(p, relaunchTurnID)
+	})
+
+	// Assert.
+	at := rowIndex(page, func(r *frontendv1.FeedRow) bool { return promptText(r) == relaunchPrompt })
+	if at < 0 {
+		t.Fatalf("the restarted page = %v, want the replayed prompt", page)
+	}
+	drawn := page.GetSuccess().GetRows()[at].GetUserPrompt().GetSuccess().GetBody().GetBlocks()
+	if len(drawn) != 2 || drawn[0].GetQuote().GetText() != quote || drawn[1].GetText().GetText() != relaunchPrompt {
+		t.Fatalf("the replayed prompt's blocks = %v, want the quote arm then the words", drawn)
+	}
+}
