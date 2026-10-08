@@ -57,6 +57,12 @@ describe("the status mark", () => {
     expect(rosterArmMark("ready")).toEqual({ toneClass: "tone-green", glyph: "dot", char: "" });
   });
 
+  // A GATE IS READY FOR YOU (owner ruling, 2026-10-08): the same green dot as
+  // a finished turn, never a working red one.
+  it.each(["permission", "question"] as const)("draws a %s gate as the green dot a finished turn draws", (arm) => {
+    expect(rosterArmMark(arm)).toEqual(rosterArmMark("done"));
+  });
+
   it("draws a failed turn end as a turquoise dot", () => {
     expect(rosterArmMark("turnFailed")).toEqual({ toneClass: "tone-turquoise", glyph: "dot", char: "" });
   });
@@ -95,7 +101,7 @@ describe("the status mark", () => {
 });
 
 describe("the rail's two animations", () => {
-  it.each(["submitting", "thinking", "clearing", "compacting", "permission", "waiting", "idleAsync"] as const)(
+  it.each(["submitting", "thinking", "clearing", "compacting", "permission", "question", "waiting", "idleAsync"] as const)(
     "breathes on %s",
     (arm) => {
       expect(armBreathes(arm)).toBe(true);

@@ -393,6 +393,17 @@ function statusParts(
         substatusRequired: false,
       };
     }
+    case "permission":
+    case "question":
+      // A GATE NAMES ITSELF (owner ruling, 2026-10-08): the status word is the
+      // gate's kind and the activity line names the ask, so the arm declares
+      // no substatus oneof and the cell merges the same way.
+      return {
+        substatus: undefined,
+        activity: status.value.activity,
+        substatusless: true,
+        substatusRequired: false,
+      };
     case "turnFailed": {
       // A failed turn declares no substatus oneof: the feed's turn-end row
       // carries the account, so the cell merges the same way.
