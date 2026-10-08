@@ -814,6 +814,22 @@ message FeedResponse {
   // collapsed limit from THIS flag alone; a bubble the reader expanded stays
   // expanded. Never set on a non-thinking row.
   bool superseded = 8;
+
+  // SET on a non-thinking response once it is PROVEN INTERIM: a later row of
+  // the SAME TURN has been placed after it in the same feed (a tool call,
+  // another response, any activity), so it cannot be the prose the turn ends
+  // on. UNSET while it is the turn's latest row — which is exactly when it may
+  // still become the final answer — so a final answer is never drawn as an
+  // interim, not even while it streams. The turn's own ending row does not
+  // count as a later row.
+  //
+  // Owner rule, 2026-10-08: an interim response collapses to one line ending
+  // in an ellipsis and takes the page's background; a final answer (and an
+  // answer still arriving) is drawn in full. The DAEMON decides it from the
+  // feed's own order, stamps it on every draw and page, and re-pushes the
+  // earlier response when the later row is first placed; the client draws the
+  // interim treatment from THIS flag alone. `final_answer` outranks it.
+  bool interim = 9;
 }
 
 // The notice register's heading, daemon-composed.
