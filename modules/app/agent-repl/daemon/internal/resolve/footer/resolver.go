@@ -277,8 +277,10 @@ func (r *resolver) mutateTelling(ws ids.WorkspaceID, operation, message string, 
 		r.tellStatusChanged(pubs)
 		return
 	}
+	// A workspace's FIRST view is no move: the status it publishes is the one
+	// Status already resolved from the same state.
 	for _, p := range pubs {
-		if p.statusMoved() {
+		if p.statusMoved() && p.previousArm != "none" {
 			p.logger.Error("daemon.footer.line_moved_status",
 				"a change to the activity line alone moved the status, and the roster was not told", dlog.Context{
 					"cause": operation, "arm": p.arm, "previous_arm": p.previousArm, "substatus": p.sub,
