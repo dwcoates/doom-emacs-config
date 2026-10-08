@@ -8,6 +8,7 @@
  * the text on screen is the daemon's own, verbatim.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { create } from "@bufbuild/protobuf";
 import { chessWidgetLoader } from "../../src/feed/cards/chess-widget-loader";
 
 import {
@@ -35,7 +36,8 @@ import {
   FeedDiffLineSchema,
 } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 
-import { HARNESS_EPOCH_MS, bootColdOnce, startHarness, type Harness } from "./harness";
+import { HARNESS_EPOCH_MS, bootColdOnce, chipFailureArms, startHarness, type Harness } from "./harness";
+import { FoldMergeBubbleResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_fold_merge_bubble_pb";
 import { ROOT_FEED } from "./fake-daemon";
 import {
   OpenInEditorRequestSchema,
@@ -1868,6 +1870,58 @@ describe("a merge bubble's fold", () => {
     await harness.settle();
     // Assert
     expect(harness.row("merge-1")?.dataset.expanded).toBe("true");
+  });
+
+  it("records the reader's open with FoldMergeBubble on the head row", async () => {
+    // Arrange
+    await drawMerge();
+    // Act
+    await harness.click('[data-feed-row="merge-1"] [data-expand]');
+    // Assert
+    const [request] = harness.fake.calls<{ row?: { value: string }; fold: { case?: string } }>("foldMergeBubble");
+    expect([request?.row?.value, request?.fold.case]).toEqual(["merge-1", "open"]);
+  });
+
+  it("records the reader's close with FoldMergeBubble on the head row", async () => {
+    // Arrange
+    await drawMerge();
+    await harness.click('[data-feed-row="merge-1"] [data-expand]');
+    // Act
+    await harness.click('[data-feed-row="merge-1"] [data-expand]');
+    // Assert
+    const requests = harness.fake.calls<{ fold: { case?: string } }>("foldMergeBubble");
+    expect(requests.map((r) => r.fold.case)).toEqual(["open", "close"]);
+  });
+
+  it("keeps the reader's open bubble open when the daemon refuses to record the fold", async () => {
+    // Arrange
+    await drawMerge();
+    harness.fake.answer(
+      "foldMergeBubble",
+      create(FoldMergeBubbleResponseSchema, {
+        result: { case: "error", value: { cause: { case: "notAMergeBubble", value: { row: { value: "merge-1" } } } } },
+      }),
+    );
+    // Act
+    await harness.click('[data-feed-row="merge-1"] [data-expand]');
+    // Assert
+    expect(harness.row("merge-1")?.dataset.expanded).toBe("true");
+  });
+
+  it("files a refused fold on the warning chip", async () => {
+    // Arrange
+    await drawMerge();
+    harness.fake.answer(
+      "foldMergeBubble",
+      create(FoldMergeBubbleResponseSchema, {
+        result: { case: "error", value: { cause: { case: "notAMergeBubble", value: { row: { value: "merge-1" } } } } },
+      }),
+    );
+    // Act
+    await harness.click('[data-feed-row="merge-1"] [data-expand]');
+    await harness.settle();
+    // Assert
+    expect(chipFailureArms()).toContain("controlPlaneFailed");
   });
 });
 
