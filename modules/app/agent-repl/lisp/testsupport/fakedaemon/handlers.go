@@ -199,6 +199,10 @@ func (s *fakeServer) FoldHeldPrompt(ctx context.Context, req *connect.Request[v1
 	return handleUnary[v1.FoldHeldPromptRequest, v1.FoldHeldPromptResponse](ctx, s, "FoldHeldPrompt", req.Msg)
 }
 
+func (s *fakeServer) FoldMergeBubble(ctx context.Context, req *connect.Request[v1.FoldMergeBubbleRequest]) (*connect.Response[v1.FoldMergeBubbleResponse], error) {
+	return handleUnary[v1.FoldMergeBubbleRequest, v1.FoldMergeBubbleResponse](ctx, s, "FoldMergeBubble", req.Msg)
+}
+
 func (s *fakeServer) UpdateClassifierPrompt(ctx context.Context, req *connect.Request[v1.UpdateClassifierPromptRequest]) (*connect.Response[v1.UpdateClassifierPromptResponse], error) {
 	return handleUnary[v1.UpdateClassifierPromptRequest, v1.UpdateClassifierPromptResponse](ctx, s, "UpdateClassifierPrompt", req.Msg)
 }
