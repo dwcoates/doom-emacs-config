@@ -126,3 +126,30 @@ func TestADaemonRecordTellsNoStatusEdge(t *testing.T) {
 		t.Fatal("a teed record moved the status")
 	}
 }
+
+func TestStatusOfAnUnboundWorkspaceRecordsNoViolation(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	h.r.Status(ids.WorkspaceID("ws-never-bound"))
+
+	// Assert: a query is not a frame.
+	if hasLevel(h.log.Records(), "error", "daemon.footer.unbound_workspace") {
+		t.Fatal("a status query for an unbound workspace recorded the unbound-frame violation")
+	}
+}
+
+func TestADaemonRecordOnAWorkspaceNotYetPublishedRecordsNoViolation(t *testing.T) {
+	// Arrange: bound, but nothing published yet.
+	h, _ := newEdgeHarness(t)
+
+	// Act
+	h.r.OnWorkspaceRecord(dlog.WorkspaceRecord{
+		WorkspaceID: string(testWS), Level: dlog.LevelWarn, Operation: "daemon.x.y", Message: "m"})
+
+	// Assert: the first view is no move of the status.
+	if hasLevel(h.log.Records(), "error", "daemon.footer.line_moved_status") {
+		t.Fatal("a workspace's first view was recorded as a line moving the status")
+	}
+}
