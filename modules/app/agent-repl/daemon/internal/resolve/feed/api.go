@@ -255,6 +255,10 @@ type Resolver interface {
 	// all. A miss is a feedid the daemon does not deem selectable — the submit
 	// path and the selection refuse it rather than using an empty text.
 	SelectableText(ws ids.WorkspaceID, id *frontendv1.FeedId) (SelectableText, bool)
+	// SetMergeFold records the reader's fold on a merge bubble's head row and
+	// restates the row with it (mergefold.go). False is a row that is not a
+	// merge head this daemon holds.
+	SetMergeFold(ws ids.WorkspaceID, id *frontendv1.FeedId, folded bool) bool
 	// TakeTurnEnding answers what a turn's LIVE end said — the final answer's
 	// prose, the errored ending's line, the terminal's failure class — and
 	// forgets it. False is a turn whose ending was not drawn live here. The
