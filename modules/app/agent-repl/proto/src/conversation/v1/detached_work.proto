@@ -83,7 +83,29 @@ message AgentDetachedWork {
     // outright, or the agent announced it with no originating call at all.
     DetachedWorkCreated created = 3;
   }
+
+  // SET WHEN THE PRODUCER MAKES THIS ANNOUNCEMENT AT THE WORK'S CONCLUSION:
+  // the vendor already reported the work ended (its task notification) when
+  // the row was written. UNSET on every announcement made while the work runs.
+  //
+  // WORK FIRST LEARNED HERE IS NOT LIVE. A producer that never saw the work
+  // open -- a shell a backgrounded subagent launched, whose call never reached
+  // this producer's stream -- announces it for the first time at its end, and
+  // a consumer that admitted it as running held it live until a terminal that
+  // could arrive late or never (2026-10-08: a merge waited forever on one). A
+  // consumer records such work CONCLUDED and never counts it as running; it
+  // may still read the work's record to its end to draw its outcome.
+  //
+  // For work already announced running, this restates the end its own
+  // terminal concludes: a shell's end still has one writer, the sidecar's
+  // terminal, and a consumer does not end a running shell's stream early on
+  // this field.
+  optional DetachedWorkConcluded concluded = 7;
 }
+
+// The work had already ended when its announcement was made. Carries no
+// figure: how it ended is the work's own terminal, never restated here.
+message DetachedWorkConcluded {}
 
 // The file a detached unit's output is being written to.
 message DetachedWorkOutput {

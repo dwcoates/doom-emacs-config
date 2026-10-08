@@ -47,7 +47,48 @@ var errHandedOver = errors.New("merge: the workspace is handed over to the succe
 // transfer must not hand a session over to a successor while this daemon still
 // drives it -- and the caller takes the workspace back.
 func (o *orchestrator) SuspendForTransfer(ctx context.Context, ws ids.WorkspaceID) error {
-	const op = "daemon.merge.transfer"
+	return o.suspendFor(ctx, ws, suspendTransfer)
+}
+
+// SuspendForRestart is SuspendForTransfer's stopping point taken for a
+// RestartWorkspace (owner ruling, 2026-10-08): the restart bounces the shim the
+// merge drives, so the merge lets go first and ResumeAfterRestart takes it
+// back from the same durable rows a handover's successor reads. A merge only
+// WAITING for the workspace to fall free lets go of its wait; it never blocks
+// the restart, which is also the escape hatch for live work that went stale.
+func (o *orchestrator) SuspendForRestart(ctx context.Context, ws ids.WorkspaceID) error {
+	return o.suspendFor(ctx, ws, suspendRestart)
+}
+
+// ResumeAfterRestart takes the workspace's merges back after a restart's
+// bounce, exactly as a successor adopts them (AdoptWorkspace).
+func (o *orchestrator) ResumeAfterRestart(ctx context.Context, ws ids.WorkspaceID) error {
+	o.deps.Log.Global().Info("daemon.merge.restart", "the restart's bounce finished; the workspace's merges are taken back from their durable rows",
+		dlog.Context{"workspace": string(ws)})
+	return o.AdoptWorkspace(ctx, ws)
+}
+
+// suspension names why a merge is brought to a stopping point.
+type suspension struct {
+	op    string
+	cause error
+	// moved is said once a suspended run let go.
+	moved string
+}
+
+var (
+	suspendTransfer = suspension{op: "daemon.merge.transfer", cause: errHandedOver,
+		moved: "a merge is suspended at a stopping point for its workspace's transfer; the successor resumes it at the step it recorded"}
+	suspendRestart = suspension{op: "daemon.merge.restart", cause: errRestarting,
+		moved: "a merge is suspended at a stopping point for its workspace's restart; it resumes at the step it recorded once the restart finished"}
+)
+
+// errRestarting is the cause a restart cuts a suspended run's waits with.
+var errRestarting = errors.New("merge: the workspace is restarting; the merge is suspended until the restart finished")
+
+// suspendFor is the one stopping point a transfer and a restart share.
+func (o *orchestrator) suspendFor(ctx context.Context, ws ids.WorkspaceID, why suspension) error {
+	op := why.op
 	o.mu.Lock()
 	o.transferred[ws] = true
 	wait := o.requested[ws]
@@ -88,8 +129,8 @@ func (o *orchestrator) SuspendForTransfer(ctx context.Context, ws ids.WorkspaceI
 	}
 	o.awaitStoppingPoints(op, []*run{r})
 	fields["step"] = r.progressStep()
-	log.Info(op, "a merge is suspended at a stopping point for its workspace's transfer; the successor resumes it at the step it recorded", fields)
-	r.cancel(errHandedOver)
+	log.Info(op, why.moved, fields)
+	r.cancel(why.cause)
 	select {
 	case <-r.finished:
 	case <-time.After(bound):

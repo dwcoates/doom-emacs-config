@@ -635,6 +635,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			Title:     titleSynth,
 			Merge:     mergeAsks,
 			Stalls:    stalls,
+			Clock:     clock.System{},
 		},
 		Feed:         feedResolver,
 		Footer:       footerResolver,

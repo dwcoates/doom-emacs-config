@@ -938,6 +938,7 @@ body::after {
    ruling, 2026-09-28: a merge in progress is purple, a landed one green). */
 #ws-sidebar .st-merging,
 #ws-sidebar .st-merge-queued,
+#ws-sidebar .st-merge-waiting,
 #ws-sidebar .st-merge-failed {
   /* The recycle glyph's ink sits off-center in its line box, so ws-spin
      rotating it about the default box center (transform-origin 50% 50%) made it

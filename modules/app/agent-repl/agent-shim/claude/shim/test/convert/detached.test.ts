@@ -605,6 +605,18 @@ describe("convertDetached: task_updated", () => {
     expect(detachedOrigin(entries[0]).cause.case).toBe("vendorMoved");
   });
 
+  it("states nothing concluded on an announcement made while the work runs", () => {
+    const registry = createTaskKindRegistry();
+    registry.remember("t1", "local_agent");
+    const entries = convert(
+      { subtype: "task_updated", task_id: "t1", tool_use_id: "toolu_1", patch: { is_backgrounded: true } },
+      {},
+      registry,
+    );
+
+    expect(announcement(entries[0]).concluded).toBeUndefined();
+  });
+
   it("records a moved agent at INFO with the `vendor_moved` cause", () => {
     // Arrange
     const registry = createTaskKindRegistry();
@@ -908,6 +920,25 @@ describe("convertDetached: task_progress", () => {
 });
 
 describe("convertDetached: task_notification", () => {
+  it("states the work concluded on the announcement it upserts", () => {
+    const registry = createTaskKindRegistry();
+    registry.remember("t1", "local_bash");
+    const entries = convert(
+      {
+        subtype: "task_notification",
+        task_id: "t1",
+        tool_use_id: "toolu_1",
+        output_file: "/tmp/t1.output",
+        status: "completed",
+      },
+      {},
+      registry,
+    );
+
+    const announced = entries.map(announcement).find((work) => work?.work !== undefined);
+    expect(announced?.concluded).toBeDefined();
+  });
+
   it("upserts the announcement with the REMEMBERED cause, never a fresh requested", () => {
     const registry = createTaskKindRegistry();
     registry.remember("t1", "local_agent");
