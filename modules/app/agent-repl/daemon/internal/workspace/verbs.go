@@ -14,6 +14,7 @@ import (
 	"claude-repld/internal/feedid"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/promptqueue"
+	"claude-repld/internal/resolve/sidebar"
 	"claude-repld/internal/wsm"
 )
 
@@ -119,6 +120,18 @@ func (v *verbs) owned(ctx context.Context, rpc string, ws ids.WorkspaceID) (wsm.
 // durable registry fact calls it, which is what keeps the roster from needing
 // its own copy of the registry.
 func (v *verbs) republishRegistry(ctx context.Context, log dlog.Logger, operation string) {
+	reg, ok := v.readRegistry(ctx, log, operation)
+	if !ok {
+		return
+	}
+	v.deps.Sidebar.SetRegistry(reg)
+	logRepublished(log, operation, reg)
+}
+
+// readRegistry reads the roster's registry from WSM. A read that fails is
+// recorded here and answers false; a cancelled context is this daemon going
+// away and is recorded at info.
+func (v *verbs) readRegistry(ctx context.Context, log dlog.Logger, operation string) (sidebar.Registry, bool) {
 	workspaces, err := v.deps.DB.ListWorkspaces(ctx)
 	if err != nil {
 		// A CANCELLED CONTEXT IS THIS DAEMON GOING AWAY, not a read that
@@ -128,45 +141,49 @@ func (v *verbs) republishRegistry(ctx context.Context, log dlog.Logger, operatio
 		// own read, which has always answered a cancellation at info.
 		if canceled(err) {
 			log.Info(operation, "the roster read ended when its context was cancelled", dlog.Context{"cause": err.Error()})
-			return
+			return sidebar.Registry{}, false
 		}
 		log.Error(operation, "could not list the workspaces for the roster", dlog.Context{"cause": err.Error()})
-		return
+		return sidebar.Registry{}, false
 	}
 	repositories, err := v.deps.DB.ListRepositories(ctx)
 	if err != nil {
 		log.Error(operation, "could not list the repositories for the roster", dlog.Context{"cause": err.Error()})
-		return
+		return sidebar.Registry{}, false
 	}
 	tasks, err := v.deps.DB.Tasks(ctx)
 	if err != nil {
 		log.Error(operation, "could not list the tasks for the roster", dlog.Context{"cause": err.Error()})
-		return
+		return sidebar.Registry{}, false
 	}
 	current, err := v.deps.DB.Current(ctx)
 	if err != nil {
 		log.Error(operation, "could not read the current workspace for the roster", dlog.Context{"cause": err.Error()})
-		return
+		return sidebar.Registry{}, false
 	}
 	view, err := v.deps.DB.SidebarView(ctx)
 	if err != nil {
 		log.Error(operation, "could not read the sidebar's view state for the roster", dlog.Context{"cause": err.Error()})
-		return
+		return sidebar.Registry{}, false
 	}
 	sessions, err := sessionRecords(ctx, v.deps.DB, workspaces)
 	if err != nil {
 		log.Error(operation, "could not read the session records for the roster", dlog.Context{"cause": err.Error()})
-		return
+		return sidebar.Registry{}, false
 	}
-	v.deps.Sidebar.SetRegistry(sidebarRegistry(log, workspaces, repositories, tasks, sessions, current, view))
-	// THE ROSTER REPUBLISH STANDS AT INFO. Every verb that reaches here has
-	// just changed the roster clients read — a select above all, whose switch
-	// otherwise left no trace in an info-level log. It is one concise line per
-	// discrete roster mutation, never a per-frame push, so it informs without
-	// spamming.
+	return sidebarRegistry(log, workspaces, repositories, tasks, sessions, current, view), true
+}
+
+// logRepublished records a registry republish.
+//
+// THE ROSTER REPUBLISH STANDS AT INFO. Every verb that reaches here has just
+// changed the roster clients read — a select above all, whose switch otherwise
+// left no trace in an info-level log. It is one concise line per discrete
+// roster mutation, never a per-frame push, so it informs without spamming.
+func logRepublished(log dlog.Logger, operation string, reg sidebar.Registry) {
 	log.Info(operation, "republished the roster registry", dlog.Context{
-		"workspaces": len(workspaces), "repositories": len(repositories), "tasks": len(tasks),
-		"sessions": len(sessions),
+		"workspaces": len(reg.Workspaces), "repositories": len(reg.Repositories), "tasks": len(reg.Tasks),
+		"sessions": len(reg.Sessions),
 	})
 }
 
