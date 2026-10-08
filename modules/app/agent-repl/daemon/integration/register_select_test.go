@@ -154,6 +154,44 @@ func TestReselectingAWorkspaceProducesNoDuplicatePush(t *testing.T) {
 	harness.ExpectNoPush(t, roster, harness.ProbeWindow, "re-selecting the current workspace is a success that changes no view")
 }
 
+// TestSwitchingWorkspacesIsOneRosterPush pins that a switch reaches a roster
+// subscriber as ONE push carrying the new selection. The registry republish
+// and the selection used to be two pushes per switch, which Emacs and every
+// page decoded, applied and repainted twice (2026-10-08).
+func TestSwitchingWorkspacesIsOneRosterPush(t *testing.T) {
+	t.Parallel()
+	// Arrange: two opened workspaces, both ready, A selected.
+	d := newDaemon(t, harness.Opts{})
+	opened := func(repo *harness.Repo) *fixture {
+		f := &fixture{d: d, repo: repo, ws: harness.Register(t, d, repo.Dir), t: t}
+		f.open()
+		f.host = d.WatchHost(f.ws)
+		f.web = d.WatchWeb(f.ws)
+		return f
+	}
+	fa := opened(harness.NewRepo(t))
+	fb := opened(harness.NewRepo(t))
+	roster := d.WatchRoster()
+	fa.selectWorkspace()
+	awaitRoster(t, d, roster, "both ready with A current", func(r *frontendv1.WorkspaceRoster) bool {
+		rowA, rowB := rosterRow(r, fa.ws.GetId()), rosterRow(r, fb.ws.GetId())
+		return r.GetCurrent().GetWorkspace().GetId() == fa.ws.GetId() &&
+			rowA != nil && rowA.GetReady() != nil && rowB != nil && rowB.GetReady() != nil
+	})
+
+	// Act
+	fb.selectWorkspace()
+
+	// Assert
+	ctx, cancel := d.WaitCtx()
+	defer cancel()
+	got := harness.AwaitNext(t, ctx, roster, "the switch's push")
+	if got.GetCurrent().GetWorkspace().GetId() != fb.ws.GetId() {
+		t.Fatalf("the switch's push names current %v, want B %s", got.GetCurrent(), fb.ws.GetId())
+	}
+	harness.ExpectNoPush(t, roster, harness.ProbeWindow, "a switch is exactly one roster push")
+}
+
 // TestPerWorkspaceRpcRefusesAnUnknownWorkspace asserts the refusal IN BAND.
 // `CloseWorkspaceError.unknown_workspace` is a LANDED arm
 // (endpoint_close_workspace.proto), and a landed arm is never also a Connect

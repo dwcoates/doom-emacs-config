@@ -62,7 +62,7 @@ func (v *verbs) Select(ctx context.Context, ws ids.WorkspaceID) error {
 }
 
 // selectCurrent is Select's selection section: stamp the selection, clear the
-// attention marker, push the roster, and — on a SWITCH, never a re-selection —
+// attention marker, push the roster ONCE, and — on a SWITCH, never a re-selection —
 // return the workspace's feed to its tail (HostRelay.ReturnFeedToTail).
 //
 // A SWITCH RETURNS THE FEED TO ITS TAIL HERE, because every switch path —
@@ -107,12 +107,24 @@ func (v *verbs) selectCurrent(ctx context.Context, log dlog.Logger, ws ids.Works
 		return fmt.Errorf("select %q: clear attention: %w", ws, err)
 	}
 
-	// THE REGISTRY GOES FIRST. Both facts the selection changes — the current
-	// id and the selection instant — are WSM's, so a roster rendered before
-	// the refresh would carry the selection with an unstamped when-column, and
-	// the client would see the switch land twice.
-	v.republishRegistry(ctx, log, opSelect)
-	v.deps.Sidebar.SetSelected(ws)
+	// THE REGISTRY AND THE SELECTION REACH THE ROSTER AS ONE PUSH. Both facts
+	// the selection changes — the current id and the selection instant — are
+	// WSM's, so the registry is re-read after the stamp, and the roster takes
+	// it together with the selection in ONE mutation
+	// (Sidebar.SetRegistrySelected). Told apart, the registry and then the
+	// selection were two whole-roster pushes per switch, which Emacs and every
+	// page decoded, applied and repainted twice (2026-10-08, the laggy-switch
+	// report).
+	//
+	// A REGISTRY THAT COULD NOT BE READ still leaves the selection pushed: the
+	// read already recorded its failure, and the roster takes the selection
+	// alone, so every client's highlight agrees with the switch anyway.
+	if reg, ok := v.readRegistry(ctx, log, opSelect); ok {
+		v.deps.Sidebar.SetRegistrySelected(reg, ws)
+		logRepublished(log, opSelect, reg)
+	} else {
+		v.deps.Sidebar.SetSelected(ws)
+	}
 	if !reselected {
 		v.deps.Host.ReturnFeedToTail(ws)
 	}
