@@ -21,6 +21,9 @@ const (
 	// tombstoneCoalesced retires a prompt folded into the queued prompt ahead
 	// of it.
 	tombstoneCoalesced = "coalesced"
+	// tombstoneWithdrawn retires the accepted turn a stop withdrew while its
+	// session was still coming up (WithdrawRevivalTurn).
+	tombstoneWithdrawn = "withdrawn"
 )
 
 // Release delivers a held prompt NOW, overriding the hold and interrupting the
