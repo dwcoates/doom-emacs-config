@@ -146,6 +146,8 @@ func raArm(r *frontendv1.WorkspaceRoster, id string) string {
 			arm = "thinking"
 		case row.GetPermission() != nil:
 			arm = "permission"
+		case row.GetQuestion() != nil:
+			arm = "question"
 		case row.GetDone() != nil:
 			arm = "done"
 		case row.GetInterrupted() != nil:
