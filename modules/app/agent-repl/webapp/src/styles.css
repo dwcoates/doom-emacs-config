@@ -826,7 +826,11 @@ body::after {
    green = done, solid orange = done+viewed, breathing yellow = awaiting
    permission, hollow = idle, grey = dead; `none` holds the column's
    alignment invisibly. */
-#ws-sidebar .st { flex: 0 0 auto; width: 9px; height: 9px; border-radius: 50%; }
+/* THE MARK COLUMN'S ONE WIDTH (owner request, 2026-10-08): the dot's
+   diameter, which every mark's box takes, a glyph's included, so every mark is
+   centered on one line and every name starts at one edge. */
+#ws-sidebar { --ws-mark-width: 9px; }
+#ws-sidebar .st { flex: 0 0 auto; width: var(--ws-mark-width); height: 9px; border-radius: 50%; }
 #ws-sidebar .st-thinking { background: var(--err); animation: ws-pulse 1.3s ease-in-out infinite; }
 /* SUBMITTING breathes exactly as thinking does: a turn is in flight and a
    prompt cannot land, which is the same claim. Only the footer's phase word
@@ -5311,9 +5315,14 @@ ar-button.outcome-marker-pill {
    is what makes one fill rule serve every tone. */
 #ws-sidebar .st[data-glyph="dot"] { background: currentColor; }
 /* The glyph statuses are not discs: a box that centers a single character, so
-   the recycle mark turns on its own axis rather than orbiting. */
+   the recycle mark turns on its own axis rather than orbiting. The box is the
+   DOT'S width, not the character's (owner request, 2026-10-08: a 1em box,
+   left-aligned in the row like the 9px dot, put every glyph's center ~4px right
+   of the dots' and pushed its name right). The character is wider than the box
+   and overflows it equally on both sides (the flex default, unsafe centering),
+   so its center is the box's, which is the dots'. */
 #ws-sidebar .st-glyph {
-  width: 1em;
+  width: var(--ws-mark-width);
   height: 1em;
   display: inline-flex;
   align-items: center;
