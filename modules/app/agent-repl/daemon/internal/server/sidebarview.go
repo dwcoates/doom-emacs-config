@@ -7,6 +7,7 @@ import (
 	"connectrpc.com/connect"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
+	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"claude-repld/internal/ids"
 	"claude-repld/internal/wsm"
@@ -36,11 +37,7 @@ func (s *server) UpdateSidebarView(
 			return answer(resp, cerr)
 		}
 	case *agentreplv1.UpdateSidebarViewRequest_ShowGrouping:
-		grouping := wsm.GroupingRepository
-		if change.ShowGrouping.GetTask() != nil {
-			grouping = wsm.GroupingTask
-		}
-		err = s.deps.Verbs.ShowGrouping(ctx, grouping)
+		err = s.deps.Verbs.ShowGrouping(ctx, groupingOf(change.ShowGrouping))
 	default:
 		// validateUpdateSidebarViewRequest refuses an unset arm, and every arm
 		// the contract names is a case above: reaching here is a validator
@@ -76,7 +73,41 @@ func (s *server) foldSection(
 		return false, nil, s.deps.Verbs.FoldTaskSection(ctx, ids.TaskID(section.Task.GetId()), folded)
 	case *agentreplv1.SidebarViewFoldSection_RecentlyMerged:
 		return false, nil, s.deps.Verbs.FoldMergedSection(ctx, folded)
+	case *agentreplv1.SidebarViewFoldSection_Maturity:
+		return false, nil, s.deps.Verbs.FoldMaturitySection(ctx, maturityStageOf(section.Maturity), folded)
 	default:
 		panic(fmt.Sprintf("UpdateSidebarView: section arm %T passed validation that no case handles", section))
+	}
+}
+
+// groupingOf names the grouping a validated show-grouping change asks for.
+func groupingOf(show *agentreplv1.SidebarViewShowGrouping) wsm.Grouping {
+	switch arm := show.GetGrouping().(type) {
+	case *agentreplv1.SidebarViewShowGrouping_Repository:
+		return wsm.GroupingRepository
+	case *agentreplv1.SidebarViewShowGrouping_Task:
+		return wsm.GroupingTask
+	case *agentreplv1.SidebarViewShowGrouping_Maturity:
+		return wsm.GroupingMaturity
+	default:
+		// validateUpdateSidebarViewRequest refuses an unset arm, and every arm
+		// the contract names is a case above.
+		panic(fmt.Sprintf("UpdateSidebarView: grouping arm %T passed validation that no case handles", arm))
+	}
+}
+
+// maturityStageOf names the stage a validated maturity section ref echoes.
+func maturityStageOf(stage *workspacev1.MaturityStage) wsm.MaturityStage {
+	switch arm := stage.GetStage().(type) {
+	case *workspacev1.MaturityStage_Backlog:
+		return wsm.MaturityBacklog
+	case *workspacev1.MaturityStage_InProgress:
+		return wsm.MaturityInProgress
+	case *workspacev1.MaturityStage_Merging:
+		return wsm.MaturityMerging
+	default:
+		// validateSidebarViewFoldSection refuses an unset stage arm, and every
+		// arm the contract names is a case above.
+		panic(fmt.Sprintf("UpdateSidebarView: maturity stage arm %T passed validation that no case handles", arm))
 	}
 }

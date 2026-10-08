@@ -1,6 +1,7 @@
 package sidebar
 
 import (
+	"fmt"
 	"sort"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -149,9 +150,89 @@ func (r *resolver) taskView(live []wsm.Workspace, rc rowContext, log dlog.Logger
 	return out
 }
 
+// The maturity stages' headings, one author each.
+const (
+	BacklogSectionLabel    = "Backlog"
+	InProgressSectionLabel = "In Progress"
+	MergingSectionLabel    = "Merging"
+)
+
+// maturityView resolves the maturity grouping: ONE SECTION PER STAGE, every
+// stage drawn, in the order work moves through them. The last stage, done, is
+// the recently-merged band every grouping draws below its sections.
+//
+// A stage with no workspaces still draws its section, as a repository does,
+// so the grouping keeps its shape as work moves from stage to stage.
+func (r *resolver) maturityView(live []wsm.Workspace, rc rowContext, log dlog.Logger) *frontendv1.RosterMaturityView {
+	byStage := map[wsm.MaturityStage][]wsm.Workspace{}
+	for _, ws := range live {
+		stage := maturityStage(ws, r.footer.Status(ws.ID))
+		byStage[stage] = append(byStage[stage], ws)
+	}
+	out := &frontendv1.RosterMaturityView{}
+	for _, stage := range wsm.MaturityStages {
+		rows := r.sectionRows(byStage[stage], rc, log.With(dlog.Context{"maturity_stage": string(stage)}))
+		ref, label := maturityStageWire(stage)
+		section := &frontendv1.RosterMaturitySection{
+			Key:    &frontendv1.RosterMaturityKey{Stage: ref},
+			Header: sectionHeader(label, drawnLiveRowCount(rows)),
+			Rows:   rows,
+		}
+		setMaturityFold(section, r.state.reg.View.MaturityFolded.Folded(stage))
+		out.Sections = append(out.Sections, section)
+	}
+	return out
+}
+
+// maturityStage files a live workspace under its stage.
+//
+// THE MERGE FACT IS THE FOOTER'S, the same status the row's own arm projects
+// (statusArm), so a drawn row in the merging section draws a merge glyph. A
+// merge in hand outranks activity; otherwise a workspace that has never run a
+// turn (no last-activity instant, which wsm stamps at the turn edge) is
+// backlog, and one that has is in progress.
+func maturityStage(rec wsm.Workspace, status *frontendv1.FooterStatus) wsm.MaturityStage {
+	switch status.GetStatus().(type) {
+	case *frontendv1.FooterStatus_Merging, *frontendv1.FooterStatus_MergeFailed, *frontendv1.FooterStatus_Merged:
+		return wsm.MaturityMerging
+	}
+	if rec.LastActivityAt == nil {
+		return wsm.MaturityBacklog
+	}
+	return wsm.MaturityInProgress
+}
+
+// maturityStageWire is the stage's wire identity and its heading. A stage
+// that is none of the three is a defect: the stages are wsm's own constants.
+func maturityStageWire(stage wsm.MaturityStage) (*workspacev1.MaturityStage, string) {
+	switch stage {
+	case wsm.MaturityBacklog:
+		return &workspacev1.MaturityStage{Stage: &workspacev1.MaturityStage_Backlog{Backlog: &workspacev1.MaturityStageBacklog{}}},
+			BacklogSectionLabel
+	case wsm.MaturityInProgress:
+		return &workspacev1.MaturityStage{Stage: &workspacev1.MaturityStage_InProgress{InProgress: &workspacev1.MaturityStageInProgress{}}},
+			InProgressSectionLabel
+	case wsm.MaturityMerging:
+		return &workspacev1.MaturityStage{Stage: &workspacev1.MaturityStage_Merging{Merging: &workspacev1.MaturityStageMerging{}}},
+			MergingSectionLabel
+	default:
+		panic(fmt.Sprintf("sidebar: maturity stage %q is none of backlog, in_progress, merging", stage))
+	}
+}
+
+// setMaturityFold states a stage's fold on its section. The fold is the
+// daemon's so every page draws the same one (UpdateSidebarView).
+func setMaturityFold(section *frontendv1.RosterMaturitySection, folded bool) {
+	if folded {
+		section.Fold = &frontendv1.RosterMaturitySection_Collapsed{Collapsed: &frontendv1.RosterMaturitySectionCollapsed{}}
+		return
+	}
+	section.Fold = &frontendv1.RosterMaturitySection_Expanded{Expanded: &frontendv1.RosterMaturitySectionExpanded{}}
+}
+
 // mergedSection resolves the recently-merged section: the rows hoisted out of
-// BOTH groupings, most recently merged first. It is rendered under both
-// groupings because that these workspaces are done is the interesting fact,
+// every grouping, most recently merged first. It is rendered under every
+// grouping because that these workspaces are done is the interesting fact,
 // and it is FLAT — a settled merge has no family left to draw.
 func (r *resolver) mergedSection(merged []wsm.Workspace, rc rowContext, log dlog.Logger) *frontendv1.RosterMergedSection {
 	rc.tree = forest{}
@@ -168,13 +249,18 @@ func (r *resolver) mergedSection(merged []wsm.Workspace, rc rowContext, log dlog
 }
 
 // setShownGrouping states which grouping every page shows. The grouping is
-// one of the two: SetRegistry refuses a registry naming anything else.
+// one of the three: SetRegistry refuses a registry naming anything else.
 func setShownGrouping(roster *frontendv1.WorkspaceRoster, grouping wsm.Grouping) {
-	if grouping == wsm.GroupingTask {
+	switch grouping {
+	case wsm.GroupingTask:
 		roster.Shown = &frontendv1.WorkspaceRoster_ShownTask{ShownTask: &frontendv1.RosterShownTask{}}
-		return
+	case wsm.GroupingMaturity:
+		roster.Shown = &frontendv1.WorkspaceRoster_ShownMaturity{ShownMaturity: &frontendv1.RosterShownMaturity{}}
+	case wsm.GroupingRepository:
+		roster.Shown = &frontendv1.WorkspaceRoster_ShownRepository{ShownRepository: &frontendv1.RosterShownRepository{}}
+	default:
+		panic(fmt.Sprintf("sidebar: shown grouping %q is none of repository, task, maturity", grouping))
 	}
-	roster.Shown = &frontendv1.WorkspaceRoster_ShownRepository{ShownRepository: &frontendv1.RosterShownRepository{}}
 }
 
 // setTaskFold states a task's fold on its section. The fold is the daemon's

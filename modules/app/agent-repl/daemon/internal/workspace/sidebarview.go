@@ -12,9 +12,10 @@ import (
 
 // The operations UpdateSidebarView's records carry, one per change.
 const (
-	opFoldTaskSection   = "daemon.workspace.fold_task_section"
-	opFoldMergedSection = "daemon.workspace.fold_merged_section"
-	opShowGrouping      = "daemon.workspace.show_grouping"
+	opFoldTaskSection     = "daemon.workspace.fold_task_section"
+	opFoldMergedSection   = "daemon.workspace.fold_merged_section"
+	opFoldMaturitySection = "daemon.workspace.fold_maturity_section"
+	opShowGrouping        = "daemon.workspace.show_grouping"
 )
 
 // FoldTaskSection records whether a task's roster section is collapsed, then
@@ -47,6 +48,20 @@ func (v *verbs) FoldMergedSection(ctx context.Context, folded bool) error {
 	}
 	log.Info(opFoldMergedSection, "recorded the recently-merged band's fold", nil)
 	v.republishRegistry(ctx, log, opFoldMergedSection)
+	return nil
+}
+
+// FoldMaturitySection records whether one maturity stage's section is
+// collapsed, then republishes the roster to every page. There is nothing to
+// refuse: the stages are fixed, and the server decodes the stage arm.
+func (v *verbs) FoldMaturitySection(ctx context.Context, stage wsm.MaturityStage, folded bool) error {
+	log := v.deps.Log.Global().With(dlog.Context{"stage": string(stage), "folded": folded})
+	if err := v.deps.DB.SetMaturityFolded(ctx, stage, folded); err != nil {
+		log.Error(opFoldMaturitySection, "could not record the maturity stage's fold", dlog.Context{"cause": err.Error()})
+		return fmt.Errorf("fold the %s maturity section: %w", stage, err)
+	}
+	log.Info(opFoldMaturitySection, "recorded the maturity stage's fold", nil)
+	v.republishRegistry(ctx, log, opFoldMaturitySection)
 	return nil
 }
 
