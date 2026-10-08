@@ -85,12 +85,15 @@
 (declare-function agent-repl--history-prev "agent-repl-history" ())
 (declare-function agent-repl--history-next "agent-repl-history" ())
 (declare-function agent-repl-history-search "agent-repl-history" ())
+(declare-function agent-repl--history-unsent-head "agent-repl-history" ())
+(declare-function agent-repl--ws-registered-names "agent-repl-workspace" ())
 ;; The history ring's own buffer-local state, declared here because the
 ;; refusal restore puts it back to its pre-submit value (see
 ;; `agent-repl--input-restore').
 (defvar agent-repl--input-history)
 (defvar agent-repl--history-index)
 (defvar agent-repl--history-navigating)
+(defvar agent-repl--history-discard-entry)
 (declare-function agent-repl--on-close "agent-repl-panels" ())
 (declare-function agent-repl-host-ref "agent-repl-host" (ws))
 (declare-function agent-repl-host-conn "agent-repl-host" (ws))
@@ -358,6 +361,69 @@ edit's CANCEL: the held prompt keeps its content and the queue resumes
     (erase-buffer)
     (setq agent-repl-input-attachments nil)
     (when (fboundp 'evil-insert-state) (evil-insert-state))))
+
+;;;; ---- Unsent input across an Emacs restart ----------------------------
+
+;; WHAT A COMPOSER HELD WHEN EMACS QUIT IS THERE WHEN IT COMES BACK.  At
+;; shutdown every workspace's non-empty composer is saved to its history
+;; exactly as `agent-repl-discard-input' saves it
+;; (`agent-repl--input-save-to-history' with DISCARD), which leaves that text
+;; as the UNSENT head of the ring (history.el).  When the composer is born
+;; again its unsent head is put back in it.  Nothing is sent either way.
+
+(defun agent-repl--input-save-on-shutdown (ws)
+  "Save WS's composer contents as the discard does, when there are any.
+Returns `saved', `empty' or `no-composer'."
+  (let ((buf (agent-repl--input-buffer ws)))
+    (cond
+     ((null buf)
+      (agent-repl--log-verbose ws "elisp.input.shutdown-save ws=%s outcome=no-composer" ws)
+      'no-composer)
+     ((string-empty-p (string-trim (with-current-buffer buf (buffer-string))))
+      (agent-repl--log ws "elisp.input.shutdown-save ws=%s outcome=empty" ws)
+      'empty)
+     (t
+      (with-current-buffer buf
+        (agent-repl--input-save-to-history ws t))
+      (agent-repl--info ws "elisp.input.shutdown-save ws=%s outcome=saved input-len=%d"
+                        ws (buffer-size buf))
+      'saved))))
+
+(defun agent-repl-input-save-all-on-shutdown ()
+  "Save every workspace's non-empty composer to its history, for `kill-emacs-hook'.
+One workspace's failure is recorded at error and does not stop the others
+or the shutdown."
+  (dolist (ws (agent-repl--ws-registered-names))
+    (condition-case err
+        (agent-repl--input-save-on-shutdown ws)
+      (error
+       (agent-repl--error ws "elisp.input.shutdown-save-failed ws=%s err=%S" ws err)))))
+
+(defun agent-repl--input-restore-unsent (ws)
+  "Put WS's unsent history head into its composer, never over standing text.
+Run once the composer's history is restored.  Returns `restored',
+`occupied', `none' or `no-composer'."
+  (let ((buf (agent-repl--input-buffer ws)))
+    (if (null buf)
+        (progn
+          (agent-repl--warn ws "elisp.input.restore-unsent ws=%s outcome=no-composer" ws)
+          'no-composer)
+      (with-current-buffer buf
+        (let ((unsent (agent-repl--history-unsent-head)))
+          (cond
+           ((null unsent)
+            (agent-repl--log ws "elisp.input.restore-unsent ws=%s outcome=none" ws)
+            'none)
+           ((> (buffer-size) 0)
+            (agent-repl--info ws "elisp.input.restore-unsent ws=%s outcome=occupied standing-len=%d unsent-len=%d"
+                              ws (buffer-size) (length unsent))
+            'occupied)
+           (t
+            (let ((agent-repl--history-navigating t))
+              (insert unsent))
+            (agent-repl--info ws "elisp.input.restore-unsent ws=%s outcome=restored input-len=%d"
+                              ws (length unsent))
+            'restored)))))))
 
 ;;;; ---- The composer notice ---------------------------------------------
 
@@ -1311,7 +1377,8 @@ would re-send them on the next prompt.  The ring is persisted once here.
 
 RETURNS A SNAPSHOT of everything this erased -- the composer's text and
 point, its attachments, and the history ring and browse index as they
-stood BEFORE the push.  `agent-repl--input-restore' puts it all back when
+stood BEFORE the push, with the unsent-discard marker the push may clear.
+`agent-repl--input-restore' puts it all back when
 the daemon REFUSES the submission, so a refused prompt is never in
 history and never costs the user their words.  (Regression watch: the
 optimistic clear landed without a restore arm, and six composer
@@ -1325,7 +1392,8 @@ integration scenarios read an empty composer after a refusal.)"
                              :point (point)
                              :attachments agent-repl-input-attachments
                              :history agent-repl--input-history
-                             :history-index agent-repl--history-index))
+                             :history-index agent-repl--history-index
+                             :discard-entry agent-repl--history-discard-entry))
         (agent-repl--history-push raw)
         (agent-repl--history-reset)
         (erase-buffer)))
@@ -1363,7 +1431,8 @@ nothing to restore into."
           (goto-char (min (plist-get snapshot :point) (point-max))))
         (setq agent-repl-input-attachments (plist-get snapshot :attachments))
         (setq agent-repl--input-history (plist-get snapshot :history))
-        (setq agent-repl--history-index (plist-get snapshot :history-index)))
+        (setq agent-repl--history-index (plist-get snapshot :history-index))
+        (setq agent-repl--history-discard-entry (plist-get snapshot :discard-entry)))
       (agent-repl--history-save ws)
       (agent-repl--log ws "elisp.input.restored ws=%s text-len=%d attachments=%d"
                        ws (length (plist-get snapshot :text))
