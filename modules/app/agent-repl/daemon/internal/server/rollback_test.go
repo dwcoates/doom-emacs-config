@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/proto"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -14,6 +15,7 @@ import (
 
 	"claude-repld/internal/ids"
 	"claude-repld/internal/promptqueue"
+	"claude-repld/internal/replyquote"
 	"claude-repld/internal/resolve/feed"
 	"claude-repld/internal/workspace"
 	"claude-repld/internal/wsm"
@@ -533,6 +535,28 @@ func TestRollBackSuccessReturnsThePromptAndFilesRestoredOnlyWhenRestoring(t *tes
 // successful rollback of a SELECTED prompt ends that selection and pushes
 // return_to_tail, exactly as SelectFeedRow's own CLEAR does: the row rolled
 // back to is gone, so nothing can still be selected.
+// TestRollBackSuccessHandsBackAQuotedPromptsWordsAlone pins that a rolled-back
+// reply returns to the composer as the person's words, its quote left out.
+func TestRollBackSuccessHandsBackAQuotedPromptsWordsAlone(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Feed.prompts = feedIDs("p1")
+	h.Feed.rollbackTargetOK = true
+	h.Feed.rollbackTarget = feed.RollbackTarget{Turns: []ids.TurnID{"t1"}, Said: replyquote.Quote(said("roll me back"), "Paris.", false)}
+	token := planToken(t, h, keepFilesPlan())
+
+	// Act.
+	resp, err := h.Client.RollBack(context.Background(), connect.NewRequest(rollBackRequest(token)))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("RollBack: %v", err)
+	}
+	if got := resp.Msg.GetSuccess().GetPrompt(); !proto.Equal(got, said("roll me back")) {
+		t.Fatalf("prompt = %v, want the words without the quote", got)
+	}
+}
+
 func TestRollBackSuccessWithASelectedPromptEndsTheSelection(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
