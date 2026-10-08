@@ -300,7 +300,7 @@ func TestTheUpdateLineRidesEveryStatusArm(t *testing.T) {
 	}
 }
 
-func TestTheGatedCallOutranksTheUpdateLineWhileWaiting(t *testing.T) {
+func TestTheGatedCallOutranksTheUpdateLineUnderAPermissionGate(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	connected(h)
@@ -309,10 +309,10 @@ func TestTheGatedCallOutranksTheUpdateLineWhileWaiting(t *testing.T) {
 	// Act
 	h.r.SetDeployProgress(&deployprogress.Progress{Phase: deployprogress.Installing})
 
-	// Assert: the kind that explains the waiting step ranks first.
-	salient := h.view(t).GetStrip().GetStatus().GetWaiting().GetActivity().GetSalient()
+	// Assert: the kind that explains the gate ranks first.
+	salient := h.view(t).GetStrip().GetStatus().GetPermission().GetActivity().GetSalient()
 	if salient.GetGatedCall() == nil {
-		t.Fatalf("waiting salient = %+v, want the gated call over the update line", salient)
+		t.Fatalf("permission salient = %+v, want the gated call over the update line", salient)
 	}
 }
 
