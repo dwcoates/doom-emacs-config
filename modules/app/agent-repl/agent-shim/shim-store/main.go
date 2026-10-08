@@ -326,7 +326,8 @@ func logProcessExit(log *logging.Logger, err *error) {
 // those paths is created by the layer that owns it (db.OpenWithOptions,
 // server.Listen).
 func openLogger(socketPath, dbPath, logPath string) (*logging.Logger, func(), error) {
-	level, err := sharedlogging.ParseLevel(os.Getenv("AGENT_REPL_LOG_LEVEL"))
+	selection, err := sharedlogging.SelectLevel(os.Getenv("AGENT_REPL_LOG_LEVEL"),
+		os.Getenv(sharedlogging.UntilEnvironment), time.Now())
 	if err != nil {
 		return nil, nil, bootstrapError{err}
 	}
@@ -337,8 +338,9 @@ func openLogger(socketPath, dbPath, logPath string) (*logging.Logger, func(), er
 	if err != nil {
 		return nil, nil, bootstrapError{fmt.Errorf("opening log %q: %w", logPath, err)}
 	}
-	log := logging.NewDurableOnlyAtLevel(lf, os.Stderr, level)
+	log := logging.NewDurableOnlyWindow(lf, os.Stderr, sharedlogging.NewWindow(selection, time.Now))
 	log = log.With(logging.Fields{Component: "store", DatabasePath: dbPath, Socket: socketPath})
+	log.NoteLevelSelection(selection)
 	return log, func() { _ = lf.Close() }, nil
 }
 
