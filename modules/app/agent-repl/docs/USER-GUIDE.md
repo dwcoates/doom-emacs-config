@@ -147,6 +147,18 @@ you are replying to. Sending ends the selection.
   - If anything changed between planning the rollback and confirming it (a prompt was sent or queued, a turn started or ended), the rollback is refused and nothing happens. Press the key again.
   - If the vendor refuses to cut the conversation, nothing is rolled back and its reason is shown.
 
+## Unsent input across a restart
+
+When Emacs quits, each workspace's input window is saved to that workspace's prompt history, the same way `C-c C-c` saves it.
+
+- When Emacs starts again, each input window holds what it held at shutdown.
+  - Nothing is sent: the words are only put back in the input window.
+  - An input window that already holds text is left as it is.
+  - An empty input window at shutdown saves nothing.
+- Text you cleared with `C-c C-c` and never sent comes back the same way.
+  - It stops coming back once you send it, or once you send any other prompt after it.
+  - Only the most recent such text comes back.
+
 ## Changing the reasoning effort
 
 The top bar's effort selector sits between the model selector and the permission-mode picker.

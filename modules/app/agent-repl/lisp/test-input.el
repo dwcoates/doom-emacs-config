@@ -3391,3 +3391,227 @@ holds it until the condition clears."
     (should (eq (car agent-repl-test-input--held-deliveries) :deferred))))
 
 ;;; test-input.el ends here
+
+;;;; ---- Unsent input across an Emacs restart ---------------------------
+
+(defmacro agent-repl-test-input--with-composers (names &rest body)
+  "Run BODY with a real composer and history directory for each of NAMES.
+Inside BODY, `composers' is an alist (NAME . BUFFER).  The history
+functions are the real ones, writing under a fresh temp directory per
+workspace, so a save and a later restore meet on disk."
+  (declare (indent 1))
+  `(agent-repl-test--with-clean-state
+     (let ((composers nil)
+           (dirs nil))
+       (unwind-protect
+           (progn
+             (dolist (name ,names)
+               (let ((dir (make-temp-file "test-unsent-" t))
+                     (buf (generate-new-buffer (format " *test-unsent-%s*" name))))
+                 (push dir dirs)
+                 (with-current-buffer buf
+                   (agent-repl-input-mode)
+                   (setq-local agent-repl--owning-workspace name))
+                 (agent-repl--ws-put name :project-dir dir)
+                 (agent-repl--ws-put name :input-buffer buf)
+                 (push (cons name buf) composers)))
+             (setq composers (nreverse composers))
+             ,@body)
+         (dolist (pair composers)
+           (when (buffer-live-p (cdr pair)) (kill-buffer (cdr pair))))
+         (dolist (dir dirs) (delete-directory dir t))))))
+
+(defun agent-repl-test-input--reborn-composer (name)
+  "Replace NAME's composer with a fresh one whose history is read from disk.
+This is what an Emacs restart does to it.  Returns the new buffer."
+  (let ((old (agent-repl--ws-get name :input-buffer))
+        (buf (generate-new-buffer (format " *test-unsent-reborn-%s*" name))))
+    (kill-buffer old)
+    (with-current-buffer buf
+      (agent-repl-input-mode)
+      (setq-local agent-repl--owning-workspace name)
+      (agent-repl--ws-put name :input-buffer buf)
+      (agent-repl--history-restore name))
+    buf))
+
+(ert-deftest agent-repl-input-shutdown-saves-every-workspaces-composer ()
+  "The shutdown save records each workspace's composer as its unsent head."
+  (agent-repl-test-input--with-composers '("ws-a" "ws-b")
+    (agent-repl-test-input--capturing-rungs
+      ;; Arrange
+      (with-current-buffer (alist-get "ws-a" composers nil nil #'equal) (insert "draft a"))
+      (with-current-buffer (alist-get "ws-b" composers nil nil #'equal) (insert "draft b"))
+      ;; Act
+      (agent-repl-input-save-all-on-shutdown)
+      ;; Assert
+      (should (equal (with-current-buffer (alist-get "ws-a" composers nil nil #'equal)
+                       (agent-repl--history-unsent-head))
+                     "draft a"))
+      (should (equal (with-current-buffer (alist-get "ws-b" composers nil nil #'equal)
+                       (agent-repl--history-unsent-head))
+                     "draft b")))))
+
+(ert-deftest agent-repl-input-shutdown-save-goes-through-the-discard-save ()
+  "The shutdown save is the discard's own save, not a copy of it."
+  (agent-repl-test-input--with-composers '("ws-a")
+    (agent-repl-test-input--capturing-rungs
+      (let ((calls nil))
+        ;; Arrange
+        (with-current-buffer (cdar composers) (insert "draft"))
+        (cl-letf (((symbol-function 'agent-repl--input-save-to-history)
+                   (lambda (ws discard) (push (list ws discard) calls))))
+          ;; Act
+          (agent-repl-input-save-all-on-shutdown))
+        ;; Assert
+        (should (equal calls '(("ws-a" t))))))))
+
+(ert-deftest agent-repl-input-shutdown-save-skips-an-empty-composer ()
+  "An empty composer records nothing at shutdown."
+  (agent-repl-test-input--with-composers '("ws-a")
+    (agent-repl-test-input--capturing-rungs
+      ;; Act
+      (should (eq (agent-repl--input-save-on-shutdown "ws-a") 'empty))
+      ;; Assert
+      (should (null (buffer-local-value 'agent-repl--input-history (cdar composers))))
+      (should (agent-repl-test-input--rung-has-p
+               agent-repl-test-input--debug "elisp.input.shutdown-save ws=ws-a outcome=empty")))))
+
+(ert-deftest agent-repl-input-shutdown-save-skips-a-whitespace-only-composer ()
+  "A composer holding only whitespace counts as empty."
+  (agent-repl-test-input--with-composers '("ws-a")
+    (agent-repl-test-input--capturing-rungs
+      ;; Arrange
+      (with-current-buffer (cdar composers) (insert "  \n "))
+      ;; Act, Assert
+      (should (eq (agent-repl--input-save-on-shutdown "ws-a") 'empty)))))
+
+(ert-deftest agent-repl-input-shutdown-save-skips-a-workspace-with-no-composer ()
+  "A workspace whose composer is gone has nothing to save."
+  (agent-repl-test-input--with-composers '("ws-a")
+    (agent-repl-test-input--capturing-rungs
+      ;; Arrange
+      (kill-buffer (cdar composers))
+      ;; Act, Assert
+      (should (eq (agent-repl--input-save-on-shutdown "ws-a") 'no-composer)))))
+
+(ert-deftest agent-repl-input-shutdown-save-failure-is-logged-and-the-rest-saved ()
+  "One workspace failing to save is an error record; the next still saves."
+  (agent-repl-test-input--with-composers '("ws-a" "ws-b")
+    (agent-repl-test-input--capturing-rungs
+      ;; Arrange: ws-a has lost its project directory, so its save errors.
+      (with-current-buffer (alist-get "ws-a" composers nil nil #'equal) (insert "draft a"))
+      (with-current-buffer (alist-get "ws-b" composers nil nil #'equal) (insert "draft b"))
+      (agent-repl--ws-put "ws-a" :project-dir nil)
+      ;; Act
+      (agent-repl-input-save-all-on-shutdown)
+      ;; Assert
+      (should (agent-repl-test-input--rung-has-p
+               agent-repl-test-input--error "elisp.input.shutdown-save-failed ws=ws-a"))
+      (should (equal (with-current-buffer (alist-get "ws-b" composers nil nil #'equal)
+                       (agent-repl--history-unsent-head))
+                     "draft b")))))
+
+(ert-deftest agent-repl-input-restore-unsent-fills-the-reborn-composer ()
+  "What the composer held at shutdown is in it again after a restart."
+  (agent-repl-test-input--with-composers '("ws-a")
+    (agent-repl-test-input--capturing-rungs
+      ;; Arrange
+      (with-current-buffer (cdar composers) (insert "half a thought"))
+      (agent-repl-input-save-all-on-shutdown)
+      (let ((buf (agent-repl-test-input--reborn-composer "ws-a")))
+        ;; Act
+        (should (eq (agent-repl--input-restore-unsent "ws-a") 'restored))
+        ;; Assert
+        (should (equal (with-current-buffer buf (buffer-string)) "half a thought"))))))
+
+(ert-deftest agent-repl-input-restore-unsent-sends-nothing ()
+  "Putting the unsent words back never submits them."
+  (agent-repl-test-input--with-composers '("ws-a")
+    (agent-repl-test-input--capturing-rungs
+      (let ((submits nil))
+        ;; Arrange
+        (with-current-buffer (cdar composers) (insert "half a thought"))
+        (agent-repl-input-save-all-on-shutdown)
+        (agent-repl-test-input--reborn-composer "ws-a")
+        (cl-letf (((symbol-function 'agent-repl--input-submit)
+                   (lambda (&rest args) (push args submits))))
+          ;; Act
+          (agent-repl--input-restore-unsent "ws-a"))
+        ;; Assert
+        (should (null submits))))))
+
+(ert-deftest agent-repl-input-restore-unsent-leaves-standing-text-alone ()
+  "A composer that already holds text is not overwritten, and that is logged."
+  (agent-repl-test-input--with-composers '("ws-a")
+    (agent-repl-test-input--capturing-rungs
+      ;; Arrange
+      (with-current-buffer (cdar composers) (insert "the old draft"))
+      (agent-repl-input-save-all-on-shutdown)
+      (let ((buf (agent-repl-test-input--reborn-composer "ws-a")))
+        (with-current-buffer buf (insert "typed since"))
+        ;; Act
+        (should (eq (agent-repl--input-restore-unsent "ws-a") 'occupied))
+        ;; Assert
+        (should (equal (with-current-buffer buf (buffer-string)) "typed since"))
+        (should (agent-repl-test-input--rung-has-p
+                 agent-repl-test-input--info "elisp.input.restore-unsent ws=ws-a outcome=occupied"))))))
+
+(ert-deftest agent-repl-input-restore-unsent-never-restores-a-sent-prompt ()
+  "A discard later sent word for word is recorded, so it is never put back."
+  (agent-repl-test-input--with-composers '("ws-a")
+    (agent-repl-test-input--capturing-rungs
+      ;; Arrange: discard, then send the same words (the send's history push).
+      (with-current-buffer (cdar composers)
+        (insert "do the thing")
+        (agent-repl-discard-input)
+        (agent-repl--history-push "do the thing")
+        (agent-repl--history-save "ws-a"))
+      (let ((buf (agent-repl-test-input--reborn-composer "ws-a")))
+        ;; Act
+        (should (eq (agent-repl--input-restore-unsent "ws-a") 'none))
+        ;; Assert
+        (should (equal (with-current-buffer buf (buffer-string)) ""))))))
+
+(ert-deftest agent-repl-input-restore-unsent-skips-a-discard-buried-by-a-send ()
+  "A discard followed by a different sent prompt is no longer the unsent head."
+  (agent-repl-test-input--with-composers '("ws-a")
+    (agent-repl-test-input--capturing-rungs
+      ;; Arrange
+      (with-current-buffer (cdar composers)
+        (insert "abandoned")
+        (agent-repl-discard-input)
+        (agent-repl--history-push "something else")
+        (agent-repl--history-save "ws-a"))
+      (agent-repl-test-input--reborn-composer "ws-a")
+      ;; Act, Assert
+      (should (eq (agent-repl--input-restore-unsent "ws-a") 'none)))))
+
+(ert-deftest agent-repl-input-restore-unsent-with-no-composer-warns ()
+  "Asked to restore into a composer that is gone: a warning, nothing else."
+  (agent-repl-test-input--with-composers '("ws-a")
+    (agent-repl-test-input--capturing-rungs
+      ;; Arrange
+      (kill-buffer (cdar composers))
+      ;; Act
+      (should (eq (agent-repl--input-restore-unsent "ws-a") 'no-composer))
+      ;; Assert
+      (should (agent-repl-test-input--rung-has-p
+               agent-repl-test-input--warn "elisp.input.restore-unsent ws=ws-a outcome=no-composer")))))
+
+(ert-deftest agent-repl-input-refusal-restore-puts-the-unsent-marker-back ()
+  "A refused send of the unsent words leaves them unsent, as before the send."
+  (agent-repl-test-input--with-composers '("ws-a")
+    (agent-repl-test-input--capturing-rungs
+      (let ((buf (cdar composers)))
+        ;; Arrange
+        (cl-letf (((symbol-function 'agent-repl-input-clear-attachments) #'ignore))
+          (with-current-buffer buf
+            (insert "retry me")
+            (agent-repl-discard-input)
+            (insert "retry me"))
+          (let ((snapshot (agent-repl--input-optimistic-clear "ws-a" "retry me")))
+            ;; Act
+            (agent-repl--input-restore "ws-a" snapshot)))
+        ;; Assert
+        (should (equal (with-current-buffer buf (agent-repl--history-unsent-head))
+                       "retry me"))))))

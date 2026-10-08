@@ -2208,6 +2208,28 @@ answers.  BODY runs with the other window selected; `input-buf' is bound."
             (should (equal refreshed '("test-ws"))))
         (when (buffer-live-p buf) (kill-buffer buf))))))
 
+(ert-deftest agent-repl-test-initialize-input-buffer-restores-unsent-input-after-history ()
+  "A composer born after a restart gets its unsent input, once history is read."
+  (agent-repl-test--with-clean-state
+    (let ((buf (generate-new-buffer " *init-input-unsent*"))
+          (calls nil))
+      (unwind-protect
+          (cl-letf (((symbol-function 'agent-repl--create-buffer)
+                     (lambda (_ws &optional _s) buf))
+                    ((symbol-function 'agent-repl-input-mode) #'ignore)
+                    ((symbol-function 'agent-repl--history-restore)
+                     (lambda (ws) (push (list :history ws) calls)))
+                    ((symbol-function 'agent-repl--input-restore-unsent)
+                     (lambda (ws) (push (list :unsent ws) calls)))
+                    ((symbol-function 'agent-repl-held-ingress-refresh) #'ignore))
+            ;; Arrange
+            (agent-repl--ws-put "test-ws" :project-dir temporary-file-directory)
+            ;; Act
+            (agent-repl--initialize-input-buffer "test-ws")
+            ;; Assert
+            (should (equal (nreverse calls) '((:history "test-ws") (:unsent "test-ws")))))
+        (when (buffer-live-p buf) (kill-buffer buf))))))
+
 (ert-deftest agent-repl-test-initialize-input-buffer-carries-an-already-pushed-title ()
   "A title the daemon pushed BEFORE the composer existed still names it.
 `agent-repl-host--apply-naming' runs on a push, so a buffer born after
