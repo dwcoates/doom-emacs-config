@@ -1932,6 +1932,8 @@ func (h *fakeHealth) OpenFaults(_ context.Context, scope wsm.FaultScope) ([]wsm.
 // fixture is one arranged verb surface plus every fake behind it, so a test
 // arranges by mutating fields and asserts by reading them.
 type fixture struct {
+	// home is the home directory a feed link's leading `~` expands to.
+	home     string
 	verbs    Verbs
 	db       *fakeDB
 	git      *fakeGit
@@ -1986,6 +1988,7 @@ type fixture struct {
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
 	f := &fixture{
+		home:     t.TempDir(),
 		db:       newFakeDB(),
 		git:      &fakeGit{defaultBranch: "master", currentBranch: "feature", commonDir: "/repo", mainWorktree: "/repo"},
 		account:  &fakeAccounts{configDir: "/config"},
@@ -2023,7 +2026,7 @@ func newFixture(t *testing.T) *fixture {
 		Sidebar: f.sidebar, Holds: stubHolds{}, Host: f.host, Banners: f.banners, Sessions: f.fleet,
 		Headless:   f.headless,
 		Health:     f.health,
-		PromptsDir: "/prompts", CheckoutRoot: fixtureCheckoutRoot, Log: f.log,
+		PromptsDir: "/prompts", CheckoutRoot: fixtureCheckoutRoot, HomeDir: f.home, Log: f.log,
 		// The policy probe answers from the SAME brief table the loader
 		// answers from, so a fixture that registers a brief has it in the
 		// repository's policy and one that does not has neither.

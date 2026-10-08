@@ -40,6 +40,8 @@ func TestNewRefusesEveryMissingCollaborator(t *testing.T) {
 		{name: "no ownership probe", strip: func(d *Deps) { d.Ownership = nil }},
 		{name: "no served-card store", strip: func(d *Deps) { d.Cards = nil }},
 		{name: "no prompts directory", strip: func(d *Deps) { d.PromptsDir = "" }},
+		{name: "no home directory", strip: func(d *Deps) { d.HomeDir = "" }},
+		{name: "a relative home directory", strip: func(d *Deps) { d.HomeDir = "home/me" }},
 		{name: "no log surfaces", strip: func(d *Deps) { d.Log = nil }},
 	}
 	for _, tt := range tests {

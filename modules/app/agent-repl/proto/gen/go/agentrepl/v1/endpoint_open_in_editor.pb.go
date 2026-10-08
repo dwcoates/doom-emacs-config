@@ -739,9 +739,12 @@ func (*OpenInEditorUnknownMergeTestLog) Descriptor() ([]byte, []int) {
 // A non-web link clicked in a prompt or response bubble.
 //
 // RESOLUTION, in order, first existing file wins:
-//  1. An absolute path: as given.
-//  2. A path with a directory part: relative to the workspace's worktree root.
-//  3. A BARE file name: <worktree root>/modules/app/agent-repl/<name>, then
+//  1. A home-relative path (`~/rest`): beneath the daemon's home directory.
+//     `~user/rest` (another user's home) is not expanded and resolves to
+//     nothing.
+//  2. An absolute path: as given.
+//  3. A path with a directory part: relative to the workspace's worktree root.
+//  4. A BARE file name: <worktree root>/modules/app/agent-repl/<name>, then
 //     <git project root of the worktree>/<name>.
 //
 // A link that resolves outside the worktree is refused as for any workspace
