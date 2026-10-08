@@ -254,6 +254,27 @@ func TestPersistSurfacesAndLogsAStoreFailure(t *testing.T) {
 	}
 }
 
+func TestExpectedGapLeansTowardTheLongGaps(t *testing.T) {
+	// Arrange: lone fragments 50ms apart alternating with 450ms pauses, whose
+	// plain average is 250ms.
+	p, _ := load(t, &fakeStore{})
+	for i := range WindowSize {
+		gap := 50 * time.Millisecond
+		if i%2 == 0 {
+			gap = 450 * time.Millisecond
+		}
+		p.Observe(prose, gap)
+	}
+
+	// Act
+	got, _ := p.ExpectedGap(prose)
+
+	// Assert
+	if got <= 350 {
+		t.Fatalf("ExpectedGap() = %d, want above 350: a window that stops before the long pause ends stalls the type-out", got)
+	}
+}
+
 // at answers the instant ms milliseconds after an arbitrary origin.
 func at(ms int64) time.Time {
 	return time.Date(2026, 10, 8, 15, 31, 25, 0, time.UTC).Add(time.Duration(ms) * time.Millisecond)
