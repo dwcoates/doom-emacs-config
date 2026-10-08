@@ -70,7 +70,7 @@ import {
 import type { AppContext } from "../rpc/context.js";
 import type { AgentReplClient } from "../rpc/client.js";
 import { buildOpenFeedRequest, buildWatchFeedRequest } from "./requests.js";
-import { mountBubble } from "./bubble.js";
+import { MERGE_BUBBLE_ATTRIBUTE, mountBubble } from "./bubble.js";
 import {
   createFeedController,
   type BubbleLike,
@@ -535,6 +535,7 @@ export function mountFeed(
         body: deps.renderers.mergeBody,
         initialFolded: mergeFoldOf(row),
         foldOf: mergeFoldOf,
+        merge: true,
       });
     }
     // A subagent row ships no fold, so it starts collapsed and transfers
@@ -956,6 +957,9 @@ export function mountFeed(
    * would close is closed here; then every open capped section on the page
    * (the auto-collapse owner's `tailReached`), then every open root bubble,
    * whose collapse discards whatever was open inside it.
+   *
+   * A MERGE BUBBLE IS EXEMPT (owner ruling, 2026-10-08): a merge bubble the
+   * reader opened stays open until the reader closes it.
    */
   function collapseEveryExpandedEntry(): void {
     jumps?.clear();
@@ -966,6 +970,7 @@ export function mountFeed(
     let bubbles = 0;
     for (const bubble of root.bubbles()) {
       if (!bubble.isExpanded()) continue;
+      if (bubble.element.hasAttribute(MERGE_BUBBLE_ATTRIBUTE)) continue;
       bubble.collapse();
       bubbles += 1;
     }

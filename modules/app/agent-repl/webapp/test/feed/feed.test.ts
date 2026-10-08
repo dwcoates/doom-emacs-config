@@ -1308,12 +1308,13 @@ describe("mountFeed: returning to the tail closes every expanded entry", () => {
    * r1) in a 300px viewport over 2000px, the reader wheeled up to 100 with the
    * last row out of view.
    */
-  async function awayFromTail() {
-    const rows = [
+  async function awayFromTail(
+    rows: FeedRow[] = [
       toolCallRow("t1", "returned"),
       subagentRow("b1"),
       responseRow("r1"),
-    ];
+    ],
+  ) {
     const h = harness({
       openFeed: (req) =>
         req.feed === undefined
@@ -1386,6 +1387,41 @@ describe("mountFeed: returning to the tail closes every expanded entry", () => {
     t.backToTail();
     // Assert
     expect(t.row("b1").getAttribute("data-expanded")).toBe("false");
+    t.feed.dispose();
+  });
+
+  it("keeps a merge bubble the reader opened open when they return to the tail", async () => {
+    // Arrange
+    const t = await awayFromTail([
+      toolCallRow("t1", "returned"),
+      mergeRow("m1"),
+      responseRow("r1"),
+    ]);
+    t.row("m1").querySelector<HTMLElement>(".bubble-head")?.click();
+    await settle();
+    // Act
+    t.backToTail();
+    // Assert
+    expect(t.row("m1").getAttribute("data-expanded")).toBe("true");
+    t.feed.dispose();
+  });
+
+  it("counts no merge bubble among the entries the return to the tail closed", async () => {
+    // Arrange
+    const t = await awayFromTail([
+      toolCallRow("t1", "returned"),
+      mergeRow("m1"),
+      responseRow("r1"),
+    ]);
+    t.row("m1").querySelector<HTMLElement>(".bubble-head")?.click();
+    await settle();
+    t.card().click();
+    const capture = captureLogRecords();
+    // Act
+    t.backToTail();
+    // Assert
+    const record = await forwardedRecord(capture, "feed.tail-reached-collapse");
+    expect(record.context).toEqual(expect.objectContaining({ sections: 1, bubbles: 0 }));
     t.feed.dispose();
   });
 

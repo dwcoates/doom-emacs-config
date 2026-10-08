@@ -60,6 +60,7 @@ function mount(
     scroll?: { box: Element; tail: TailFollow };
     /** The daemon's fold, read off each push (a merge row ships one). */
     foldOf?: (row: FeedRow) => boolean;
+    merge?: boolean;
   } = {},
 ) {
   const heads: number[] = [];
@@ -88,6 +89,7 @@ function mount(
         : (host) => opts.composerFactory!(host),
     initialFolded: opts.folded ?? true,
     foldOf: opts.foldOf,
+    merge: opts.merge,
     scroll: opts.scroll,
   });
   document.body.replaceChildren(bubble.element);
@@ -129,6 +131,16 @@ describe("mountBubble: the collapsed head", () => {
     expect(head?.getAttribute("role")).toBe("button");
     expect(head?.tabIndex).toBe(0);
     expect(head?.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("marks a merge bubble's element as one", () => {
+    const { bubble } = mount(mergeRow("m1"), harness(), { merge: true });
+    expect(bubble.element.hasAttribute("data-merge-bubble")).toBe(true);
+  });
+
+  it("leaves a subagent bubble's element unmarked", () => {
+    const { bubble } = mount(subagentRow("b1"));
+    expect(bubble.element.hasAttribute("data-merge-bubble")).toBe(false);
   });
 
   it("hosts its sub-feed in the marked panel", () => {
