@@ -8,6 +8,7 @@
  * flight. A dropdown open mid-gesture (a row's menu or detail popover) is NOT
  * view state: it is transient to the page that opened it.
  */
+import type { DrawnStatusLog } from "../drawn-status.js";
 import type { AppContext } from "../rpc/context.js";
 import type { AttentionRegistry } from "./attention.js";
 import type { Dropdowns } from "./dropdowns.js";
@@ -36,6 +37,8 @@ export interface SidebarContext {
    * view state; it is kept here only so a redraw does not snap it shut.
    */
   openDetails: Set<string>;
+  /** What each row drew last, stated on every change (`drawn-status.ts`). */
+  drawnStatus: DrawnStatusLog;
   /** The one dismiss rule every dropdown in the rail shares. */
   dropdowns: Dropdowns;
   /** The blink registry the attention markers are driven from. */
