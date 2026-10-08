@@ -9,7 +9,8 @@ import { type AppContext } from "../../src/rpc/context.js";
 import { testAppContext } from "../rpc/app-context.js";
 import { UpdateSidebarViewResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_sidebar_view_pb";
 import type { ServiceImpl } from "@connectrpc/connect";
-import { PREFS_KEY, drawRailHead, mountSidebar, retireStoredPrefs } from "../../src/sidebar/sidebar.js";
+import { GROUPING_PICK_LABELS, PREFS_KEY, drawRailHead, mountSidebar, retireStoredPrefs } from "../../src/sidebar/sidebar.js";
+import { GROUPINGS } from "../../src/sidebar/context.js";
 import { GROUPING_VIEW_KEY } from "../../src/sidebar/view.js";
 import { captureLogRecords, type LogCapture } from "../log-capture.js";
 import { fireResize } from "../resize-observer.js";
@@ -148,12 +149,23 @@ describe("the preferences a page stored before the view was the daemon's", () =>
 });
 
 describe("the rail's header", () => {
-  it("offers both groupings as a picker", () => {
+  it("offers every grouping as a picker", () => {
     const head = drawRailHead(sidebarContext());
     const picks = [...head.element.querySelectorAll("[data-grouping-pick]")].map((el) =>
       el.getAttribute("data-grouping-pick"),
     );
-    expect(picks).toEqual(["repository", "task"]);
+    expect(picks).toEqual([...GROUPINGS]);
+  });
+
+  it("labels each grouping's button from the one label table", () => {
+    const head = drawRailHead(sidebarContext());
+    const labels = [...head.element.querySelectorAll("[data-grouping-pick]")].map((el) => el.textContent);
+    expect(labels).toEqual(GROUPINGS.map((grouping) => GROUPING_PICK_LABELS[grouping]));
+  });
+
+  it("names the maturity grouping's button Stage", () => {
+    const head = drawRailHead(sidebarContext());
+    expect(head.element.querySelector("[data-grouping-pick='maturity']")?.textContent).toBe("Stage");
   });
 
   it("lights the grouping it is painted with", () => {
@@ -176,6 +188,22 @@ describe("the rail's header", () => {
     sc.view.track(GROUPING_VIEW_KEY, "repository", head.paintGrouping);
     await click(head.element.querySelector("[data-grouping-pick='task']") as Element);
     expect(asked).toEqual(["task"]);
+  });
+
+  it("asks the daemon to show the maturity grouping through its own arm", async () => {
+    const asked: string[] = [];
+    const sc = sidebarContext(
+      appContext({
+        updateSidebarView: (request) => {
+          if (request.change.case === "showGrouping") asked.push(request.change.value.grouping.case ?? "unset");
+          return create(UpdateSidebarViewResponseSchema, { result: { case: "success", value: {} } });
+        },
+      }),
+    );
+    const head = drawRailHead(sc);
+    sc.view.track(GROUPING_VIEW_KEY, "repository", head.paintGrouping);
+    await click(head.element.querySelector("[data-grouping-pick='maturity']") as Element);
+    expect(asked).toEqual(["maturity"]);
   });
 
   it("lights the chosen grouping at once, before any push", async () => {
