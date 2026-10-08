@@ -146,16 +146,34 @@ func newest(gaps []int64) []int64 {
 	return append([]int64(nil), gaps[len(gaps)-WindowSize:]...)
 }
 
-// weightedAverage answers the Decay-weighted average of gaps (oldest first),
-// rounded to whole milliseconds and never below 1: a reveal window of zero
-// would mean "reveal in no time", which is a snap, not a pace.
+// weightedAverage answers the expected gap of a window (oldest first): the
+// Decay-weighted average of the gaps, each ALSO weighted by its own length,
+// rounded to whole milliseconds and never below 1. A reveal window of zero
+// would mean "reveal in no time", which is a snap, not a pace; a window of
+// gaps that are all zero has no length to weigh by and answers that floor.
+//
+// WHY LENGTH-WEIGHTED. The bursts do not come evenly: a big clump is followed
+// by a few lone fragments ~50ms apart and then a pause of several hundred ms.
+// No single window fits both, and the two ways of missing are not alike. A
+// window too long for the gap that follows only slows the type-out (the text
+// still unshown is spread again across the next window); a window too short
+// for it STOPS the type-out until the next burst, which is the stall this
+// package exists to remove. Weighting each gap by its length is the expected
+// gap as seen from a random instant (sum g² / sum g), which leans toward the
+// long pauses. Replayed against the 2026-10-08 probe's arrivals, the reveal sat
+// still for 22% of the streaming time with it against 42% with the plain
+// average (and 60% measuring per fragment).
 func weightedAverage(gaps []int64) uint32 {
 	var sum, weights float64
 	weight := 1.0
 	for i := len(gaps) - 1; i >= 0; i-- {
-		sum += weight * float64(gaps[i])
-		weights += weight
+		gap := float64(gaps[i])
+		sum += weight * gap * gap
+		weights += weight * gap
 		weight *= Decay
+	}
+	if weights == 0 {
+		return 1
 	}
 	return uint32(max(1, math.Round(sum/weights)))
 }
