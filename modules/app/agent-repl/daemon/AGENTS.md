@@ -726,7 +726,14 @@ through `concludeLocked`, at a conclusion the shim states:
 
 A watch open that FAILS, is REFUSED or HANGS, and a stream that ENDS, never
 retire an item: a shell stays live with a stream-less entry its next
-announcement or the fleet re-open retries. A subagent that names no agent is
+announcement or the fleet re-open retries. A REFUSED open of expected work
+(the main agent, an announced subagent or shell) also arms its own re-open on
+the watcher's clock (`sessionwatcher/reopen.go`, `Sinks.Clock`): 250ms
+doubling per consecutive refusal to 30s, re-armed past `openRefusalLimit`
+(whose WARN and fault are unchanged), cancelled by the work concluding. An
+announcement that may never repeat is never the only edge (owner ruling,
+2026-10-08: a shell refused while its store rows were missing stood live for
+good and a merge waited on it forever). A subagent that names no agent is
 still COUNTED (by its handle, unwatched; the announcement defect stays an
 ERROR). `concludeLocked` retires the handle, cancels an open in flight, closes
 an open stream off the lock, and records `daemon.sessionwatcher.live_work_retired`
@@ -741,6 +748,14 @@ invariant violation, recorded at ERROR (`daemon.sessionwatcher.live_work_stale`)
 and retired. Only items admitted before that session watch's open was DECIDED
 (`openTicket.liveSeq`) are judged, because an announcement on an agent stream
 may postdate the membership the shim read. Nothing is admitted by it.
+
+WORK FIRST ANNOUNCED AT ITS END IS NEVER LIVE (owner ruling, 2026-10-08).
+An announcement stating `conversation.v1.AgentDetachedWork.concluded` (the
+shim's task-notification upsert) for work the ledger does not hold live or
+pending retires the handle at once (`concludedFirstLocked`, INFO
+`daemon.sessionwatcher.detached_work_concluded`) and publishes nothing; a
+shell's record is still read through a watch that is not live work, reaped at
+its terminal. Live work restated as concluded still ends at its own terminal.
 
 KNOWN GAP (wire). A shell's conclusion reaches the daemon only as its run's
 terminal on WatchBash, and that is store-backed: a run with no store row
@@ -1037,6 +1052,20 @@ Owner rulings, 2026-09-30 (`internal/merge`; the contract is
   (`wsm.QueueMerge`) only when the requester's turn in flight ends
   (`request.go`); a boot re-arms recorded requests. Evict or close withdraws a
   request that is not yet in line.
+- **A MERGE'S BUBBLE IS PLACED WHEN IT STARTS, NEVER BEFORE** (owner ruling,
+  2026-10-08: "while merging, the merge bubble is necessarily the last thing
+  in the feed"). Admission takes the lease (prompts held from here), records
+  the queue step, and publishes `merging · awaiting_free` (roster
+  `merge_waiting`, purple) while the merge waits for the workspace -- and a
+  workspace whose worktree it rebases in -- to fall free; the footer reads
+  what it waits on from its own state of the awaited workspace
+  (`footer.awaitingFree`). Only `run.place`, once free, draws the head and its
+  queue tab: a feed row's order is minted at its first draw, so a bubble drawn
+  earlier was overtaken by every row a woken turn wrote (2026-10-08, workspace
+  `doom`). A merge in line draws no bubble either; its ledger identity is
+  still minted at enqueue and the bubble it starts in carries it. A resume or
+  an adoption of a merge recorded at the queue step draws no bubble until it
+  starts. `integration/merge_placement_test.go` pins the invariant.
 - **THE PROCESS, IN ORDER** (`process.go`): preprocessing; rebasing k/n, one
   commit per step (`gitclient.StartRebase` / `ContinueRebase`); a conflict is
   resolved by the requester's own session, and a give-up FAILS the merge in
@@ -1137,6 +1166,17 @@ Owner rulings, 2026-09-30 (`internal/merge`; the contract is
   and nothing of a workspace it handed away. Holding the handover until the
   merge ended was rejected: a handover never waits on work, and a merge's
   tests and repairs are unbounded.
+- **A RESTART SUSPENDS THE MERGE AND TAKES IT BACK** (owner ruling,
+  2026-10-08). `RestartWorkspace` brings the workspace's merge to the
+  handover's stopping point (`SuspendForRestart`), the relaunch proceeds
+  under the merge's lease instead of taking a restart hold of its own (only
+  for `ReasonRestartVerb`; every other bounce still fails on a merge's lease),
+  and `ResumeAfterRestart` takes the merge back from its durable rows on every
+  outcome. A merge only waiting for the workspace to fall free never blocks a
+  restart and waits again on the fresh session; a started merge resumes at its
+  step, and a merge turn the restart killed is read back closed. A merge that
+  will not reach a stopping point refuses the restart (`relaunch_failed`) and
+  is taken back.
 - The integration fake: a branch with no commits is already on its target, so
   a test that exercises a merge's steps commits work first
   (`harness.CommitWork`); a rebase conflict is scripted per commit
@@ -1350,6 +1390,12 @@ Design record `docs/protobuf-design/vendor-start-resilience.md`.
   `no_session` or never answers a forced stand-down is killed at once. A
   resume a restart cancelled relaunches over the shim it installed
   (`rollout.ErrResumeRestarted`). The account switch keeps an unforced bounce.
+- **A RESTART ANSWERS ITS OUTCOME** (owner ruling, 2026-10-08). The verb waits
+  for the forced bounce it asked for and answers nil when it finished (or had
+  nothing left to replace, or was handed to the daemon the workspace moved to)
+  and the `relaunch_failed` refusal, carrying the cause, otherwise
+  (`restartAnswer`). A caller that leaves first is answered its context's end
+  at ERROR, and the bounce runs on and records its own outcome.
 
 ## A coalesced bounce runs every kind it was asked, never one in place of another
 

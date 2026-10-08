@@ -67,6 +67,13 @@ type MergeFacts struct {
 	LineAt time.Time
 	// Detail is the evidence a failed or landed merge carries.
 	Detail string
+	// AwaitOther is the workspace a StepAwaitingFree merge waits on when it is
+	// NOT the requester (the one whose worktree it rebases in), empty when it
+	// waits on the requester itself; AwaitOtherName is its name, as drawn.
+	// What either one runs is read from the footer's own state of it, so the
+	// counts are always the watcher's live-work set and turn now.
+	AwaitOther     ids.WorkspaceID
+	AwaitOtherName string
 }
 
 // MergeStep is a merge's step, the merging substatus, spelled as the
@@ -75,6 +82,10 @@ type MergeStep string
 
 // The merge steps, in the order a merge goes through them.
 const (
+	// StepAwaitingFree is a merge that holds the workspace and waits for it
+	// to fall free before it starts (owner ruling, 2026-10-08): its bubble is
+	// not placed until it starts, so nothing lands in the feed after it.
+	StepAwaitingFree       MergeStep = "awaiting_free"
 	StepEnqueued           MergeStep = "enqueued"
 	StepPreprocessing      MergeStep = "preprocessing"
 	StepRebasing           MergeStep = "rebasing"
@@ -94,6 +105,8 @@ func (s MergeStep) Words() string {
 		return "conflict resolution"
 	case StepUpdatingMain:
 		return "updating main"
+	case StepAwaitingFree:
+		return "waiting for the workspace to be free"
 	}
 	return string(s)
 }

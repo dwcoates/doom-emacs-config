@@ -119,7 +119,7 @@ describe("the rail's two animations", () => {
     expect(armSpins(arm)).toBe(true);
   });
 
-  it.each(["mergeQueued", "mergeFailed", "merged"] as const)(
+  it.each(["mergeQueued", "mergeWaiting", "mergeFailed", "merged"] as const)(
     "does not spin on %s",
     (arm) => {
       expect(armSpins(arm)).toBe(false);

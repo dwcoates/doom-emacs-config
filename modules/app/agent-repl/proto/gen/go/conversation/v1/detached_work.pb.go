@@ -92,7 +92,24 @@ type AgentDetachedWork struct {
 	//
 	//	*AgentDetachedWork_Detached
 	//	*AgentDetachedWork_Created
-	Origin        isAgentDetachedWork_Origin `protobuf_oneof:"origin"`
+	Origin isAgentDetachedWork_Origin `protobuf_oneof:"origin"`
+	// SET WHEN THE PRODUCER MAKES THIS ANNOUNCEMENT AT THE WORK'S CONCLUSION:
+	// the vendor already reported the work ended (its task notification) when
+	// the row was written. UNSET on every announcement made while the work runs.
+	//
+	// WORK FIRST LEARNED HERE IS NOT LIVE. A producer that never saw the work
+	// open -- a shell a backgrounded subagent launched, whose call never reached
+	// this producer's stream -- announces it for the first time at its end, and
+	// a consumer that admitted it as running held it live until a terminal that
+	// could arrive late or never (2026-10-08: a merge waited forever on one). A
+	// consumer records such work CONCLUDED and never counts it as running; it
+	// may still read the work's record to its end to draw its outcome.
+	//
+	// For work already announced running, this restates the end its own
+	// terminal concludes: a shell's end still has one writer, the sidecar's
+	// terminal, and a consumer does not end a running shell's stream early on
+	// this field.
+	Concluded     *DetachedWorkConcluded `protobuf:"bytes,7,opt,name=concluded,proto3,oneof" json:"concluded,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -180,6 +197,13 @@ func (x *AgentDetachedWork) GetCreated() *DetachedWorkCreated {
 	return nil
 }
 
+func (x *AgentDetachedWork) GetConcluded() *DetachedWorkConcluded {
+	if x != nil {
+		return x.Concluded
+	}
+	return nil
+}
+
 type isAgentDetachedWork_Origin interface {
 	isAgentDetachedWork_Origin()
 }
@@ -198,6 +222,44 @@ type AgentDetachedWork_Created struct {
 func (*AgentDetachedWork_Detached) isAgentDetachedWork_Origin() {}
 
 func (*AgentDetachedWork_Created) isAgentDetachedWork_Origin() {}
+
+// The work had already ended when its announcement was made. Carries no
+// figure: how it ended is the work's own terminal, never restated here.
+type DetachedWorkConcluded struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DetachedWorkConcluded) Reset() {
+	*x = DetachedWorkConcluded{}
+	mi := &file_conversation_v1_detached_work_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DetachedWorkConcluded) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DetachedWorkConcluded) ProtoMessage() {}
+
+func (x *DetachedWorkConcluded) ProtoReflect() protoreflect.Message {
+	mi := &file_conversation_v1_detached_work_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DetachedWorkConcluded.ProtoReflect.Descriptor instead.
+func (*DetachedWorkConcluded) Descriptor() ([]byte, []int) {
+	return file_conversation_v1_detached_work_proto_rawDescGZIP(), []int{1}
+}
 
 // The file a detached unit's output is being written to.
 type DetachedWorkOutput struct {
@@ -220,7 +282,7 @@ type DetachedWorkOutput struct {
 
 func (x *DetachedWorkOutput) Reset() {
 	*x = DetachedWorkOutput{}
-	mi := &file_conversation_v1_detached_work_proto_msgTypes[1]
+	mi := &file_conversation_v1_detached_work_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -232,7 +294,7 @@ func (x *DetachedWorkOutput) String() string {
 func (*DetachedWorkOutput) ProtoMessage() {}
 
 func (x *DetachedWorkOutput) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_detached_work_proto_msgTypes[1]
+	mi := &file_conversation_v1_detached_work_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -245,7 +307,7 @@ func (x *DetachedWorkOutput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedWorkOutput.ProtoReflect.Descriptor instead.
 func (*DetachedWorkOutput) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_detached_work_proto_rawDescGZIP(), []int{1}
+	return file_conversation_v1_detached_work_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *DetachedWorkOutput) GetPath() string {
@@ -308,7 +370,7 @@ type DetachedWorkOutputReadable struct {
 
 func (x *DetachedWorkOutputReadable) Reset() {
 	*x = DetachedWorkOutputReadable{}
-	mi := &file_conversation_v1_detached_work_proto_msgTypes[2]
+	mi := &file_conversation_v1_detached_work_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -320,7 +382,7 @@ func (x *DetachedWorkOutputReadable) String() string {
 func (*DetachedWorkOutputReadable) ProtoMessage() {}
 
 func (x *DetachedWorkOutputReadable) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_detached_work_proto_msgTypes[2]
+	mi := &file_conversation_v1_detached_work_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -333,7 +395,7 @@ func (x *DetachedWorkOutputReadable) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedWorkOutputReadable.ProtoReflect.Descriptor instead.
 func (*DetachedWorkOutputReadable) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_detached_work_proto_rawDescGZIP(), []int{2}
+	return file_conversation_v1_detached_work_proto_rawDescGZIP(), []int{3}
 }
 
 // The output file may not be opened by this reader.
@@ -345,7 +407,7 @@ type DetachedWorkOutputUnreadable struct {
 
 func (x *DetachedWorkOutputUnreadable) Reset() {
 	*x = DetachedWorkOutputUnreadable{}
-	mi := &file_conversation_v1_detached_work_proto_msgTypes[3]
+	mi := &file_conversation_v1_detached_work_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -357,7 +419,7 @@ func (x *DetachedWorkOutputUnreadable) String() string {
 func (*DetachedWorkOutputUnreadable) ProtoMessage() {}
 
 func (x *DetachedWorkOutputUnreadable) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_detached_work_proto_msgTypes[3]
+	mi := &file_conversation_v1_detached_work_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -370,7 +432,7 @@ func (x *DetachedWorkOutputUnreadable) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedWorkOutputUnreadable.ProtoReflect.Descriptor instead.
 func (*DetachedWorkOutputUnreadable) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_detached_work_proto_rawDescGZIP(), []int{3}
+	return file_conversation_v1_detached_work_proto_rawDescGZIP(), []int{4}
 }
 
 // Work that was drawn as in-turn progress and has now left the turn. One
@@ -408,7 +470,7 @@ type DetachedWorkDetached struct {
 
 func (x *DetachedWorkDetached) Reset() {
 	*x = DetachedWorkDetached{}
-	mi := &file_conversation_v1_detached_work_proto_msgTypes[4]
+	mi := &file_conversation_v1_detached_work_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -420,7 +482,7 @@ func (x *DetachedWorkDetached) String() string {
 func (*DetachedWorkDetached) ProtoMessage() {}
 
 func (x *DetachedWorkDetached) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_detached_work_proto_msgTypes[4]
+	mi := &file_conversation_v1_detached_work_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -433,7 +495,7 @@ func (x *DetachedWorkDetached) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedWorkDetached.ProtoReflect.Descriptor instead.
 func (*DetachedWorkDetached) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_detached_work_proto_rawDescGZIP(), []int{4}
+	return file_conversation_v1_detached_work_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *DetachedWorkDetached) GetDetachedFromId() *AgentActivityId {
@@ -535,7 +597,7 @@ type DetachedCauseRequested struct {
 
 func (x *DetachedCauseRequested) Reset() {
 	*x = DetachedCauseRequested{}
-	mi := &file_conversation_v1_detached_work_proto_msgTypes[5]
+	mi := &file_conversation_v1_detached_work_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -547,7 +609,7 @@ func (x *DetachedCauseRequested) String() string {
 func (*DetachedCauseRequested) ProtoMessage() {}
 
 func (x *DetachedCauseRequested) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_detached_work_proto_msgTypes[5]
+	mi := &file_conversation_v1_detached_work_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -560,7 +622,7 @@ func (x *DetachedCauseRequested) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedCauseRequested.ProtoReflect.Descriptor instead.
 func (*DetachedCauseRequested) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_detached_work_proto_rawDescGZIP(), []int{5}
+	return file_conversation_v1_detached_work_proto_rawDescGZIP(), []int{6}
 }
 
 // A person backgrounded the running work by hand.
@@ -572,7 +634,7 @@ type DetachedCauseByUser struct {
 
 func (x *DetachedCauseByUser) Reset() {
 	*x = DetachedCauseByUser{}
-	mi := &file_conversation_v1_detached_work_proto_msgTypes[6]
+	mi := &file_conversation_v1_detached_work_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -584,7 +646,7 @@ func (x *DetachedCauseByUser) String() string {
 func (*DetachedCauseByUser) ProtoMessage() {}
 
 func (x *DetachedCauseByUser) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_detached_work_proto_msgTypes[6]
+	mi := &file_conversation_v1_detached_work_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -597,7 +659,7 @@ func (x *DetachedCauseByUser) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedCauseByUser.ProtoReflect.Descriptor instead.
 func (*DetachedCauseByUser) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_detached_work_proto_rawDescGZIP(), []int{6}
+	return file_conversation_v1_detached_work_proto_rawDescGZIP(), []int{7}
 }
 
 // The vendor moved the running work to the background without saying why.
@@ -609,7 +671,7 @@ type DetachedCauseVendorMoved struct {
 
 func (x *DetachedCauseVendorMoved) Reset() {
 	*x = DetachedCauseVendorMoved{}
-	mi := &file_conversation_v1_detached_work_proto_msgTypes[7]
+	mi := &file_conversation_v1_detached_work_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -621,7 +683,7 @@ func (x *DetachedCauseVendorMoved) String() string {
 func (*DetachedCauseVendorMoved) ProtoMessage() {}
 
 func (x *DetachedCauseVendorMoved) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_detached_work_proto_msgTypes[7]
+	mi := &file_conversation_v1_detached_work_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -634,7 +696,7 @@ func (x *DetachedCauseVendorMoved) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedCauseVendorMoved.ProtoReflect.Descriptor instead.
 func (*DetachedCauseVendorMoved) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_detached_work_proto_rawDescGZIP(), []int{7}
+	return file_conversation_v1_detached_work_proto_rawDescGZIP(), []int{8}
 }
 
 // The work exceeded its own timeout and was moved to the background instead of
@@ -653,7 +715,7 @@ type DetachedCauseTimedOut struct {
 
 func (x *DetachedCauseTimedOut) Reset() {
 	*x = DetachedCauseTimedOut{}
-	mi := &file_conversation_v1_detached_work_proto_msgTypes[8]
+	mi := &file_conversation_v1_detached_work_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -665,7 +727,7 @@ func (x *DetachedCauseTimedOut) String() string {
 func (*DetachedCauseTimedOut) ProtoMessage() {}
 
 func (x *DetachedCauseTimedOut) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_detached_work_proto_msgTypes[8]
+	mi := &file_conversation_v1_detached_work_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -678,7 +740,7 @@ func (x *DetachedCauseTimedOut) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedCauseTimedOut.ProtoReflect.Descriptor instead.
 func (*DetachedCauseTimedOut) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_detached_work_proto_rawDescGZIP(), []int{8}
+	return file_conversation_v1_detached_work_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *DetachedCauseTimedOut) GetTimeoutMs() uint64 {
@@ -700,7 +762,7 @@ type DetachedWorkCreated struct {
 
 func (x *DetachedWorkCreated) Reset() {
 	*x = DetachedWorkCreated{}
-	mi := &file_conversation_v1_detached_work_proto_msgTypes[9]
+	mi := &file_conversation_v1_detached_work_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -712,7 +774,7 @@ func (x *DetachedWorkCreated) String() string {
 func (*DetachedWorkCreated) ProtoMessage() {}
 
 func (x *DetachedWorkCreated) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_detached_work_proto_msgTypes[9]
+	mi := &file_conversation_v1_detached_work_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -725,7 +787,7 @@ func (x *DetachedWorkCreated) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedWorkCreated.ProtoReflect.Descriptor instead.
 func (*DetachedWorkCreated) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_detached_work_proto_rawDescGZIP(), []int{9}
+	return file_conversation_v1_detached_work_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *DetachedWorkCreated) GetWorkCreated() *DetachableWork {
@@ -762,7 +824,7 @@ type DetachableWork struct {
 
 func (x *DetachableWork) Reset() {
 	*x = DetachableWork{}
-	mi := &file_conversation_v1_detached_work_proto_msgTypes[10]
+	mi := &file_conversation_v1_detached_work_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -774,7 +836,7 @@ func (x *DetachableWork) String() string {
 func (*DetachableWork) ProtoMessage() {}
 
 func (x *DetachableWork) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_detached_work_proto_msgTypes[10]
+	mi := &file_conversation_v1_detached_work_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -787,7 +849,7 @@ func (x *DetachableWork) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachableWork.ProtoReflect.Descriptor instead.
 func (*DetachableWork) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_detached_work_proto_rawDescGZIP(), []int{10}
+	return file_conversation_v1_detached_work_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *DetachableWork) GetWork() isDetachableWork_Work {
@@ -891,7 +953,7 @@ type DetachedWorkKind struct {
 
 func (x *DetachedWorkKind) Reset() {
 	*x = DetachedWorkKind{}
-	mi := &file_conversation_v1_detached_work_proto_msgTypes[11]
+	mi := &file_conversation_v1_detached_work_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -903,7 +965,7 @@ func (x *DetachedWorkKind) String() string {
 func (*DetachedWorkKind) ProtoMessage() {}
 
 func (x *DetachedWorkKind) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_detached_work_proto_msgTypes[11]
+	mi := &file_conversation_v1_detached_work_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -916,7 +978,7 @@ func (x *DetachedWorkKind) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedWorkKind.ProtoReflect.Descriptor instead.
 func (*DetachedWorkKind) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_detached_work_proto_rawDescGZIP(), []int{11}
+	return file_conversation_v1_detached_work_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *DetachedWorkKind) GetKind() isDetachedWorkKind_Kind {
@@ -1040,7 +1102,7 @@ type DetachedWorkKindSubagent struct {
 
 func (x *DetachedWorkKindSubagent) Reset() {
 	*x = DetachedWorkKindSubagent{}
-	mi := &file_conversation_v1_detached_work_proto_msgTypes[12]
+	mi := &file_conversation_v1_detached_work_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1052,7 +1114,7 @@ func (x *DetachedWorkKindSubagent) String() string {
 func (*DetachedWorkKindSubagent) ProtoMessage() {}
 
 func (x *DetachedWorkKindSubagent) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_detached_work_proto_msgTypes[12]
+	mi := &file_conversation_v1_detached_work_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1065,7 +1127,7 @@ func (x *DetachedWorkKindSubagent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedWorkKindSubagent.ProtoReflect.Descriptor instead.
 func (*DetachedWorkKindSubagent) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_detached_work_proto_rawDescGZIP(), []int{12}
+	return file_conversation_v1_detached_work_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *DetachedWorkKindSubagent) GetAgentId() *AgentId {
@@ -1091,7 +1153,7 @@ type DetachedWorkKindBash struct {
 
 func (x *DetachedWorkKindBash) Reset() {
 	*x = DetachedWorkKindBash{}
-	mi := &file_conversation_v1_detached_work_proto_msgTypes[13]
+	mi := &file_conversation_v1_detached_work_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1103,7 +1165,7 @@ func (x *DetachedWorkKindBash) String() string {
 func (*DetachedWorkKindBash) ProtoMessage() {}
 
 func (x *DetachedWorkKindBash) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_detached_work_proto_msgTypes[13]
+	mi := &file_conversation_v1_detached_work_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1116,7 +1178,7 @@ func (x *DetachedWorkKindBash) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedWorkKindBash.ProtoReflect.Descriptor instead.
 func (*DetachedWorkKindBash) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_detached_work_proto_rawDescGZIP(), []int{13}
+	return file_conversation_v1_detached_work_proto_rawDescGZIP(), []int{14}
 }
 
 // The work is a workflow run.
@@ -1128,7 +1190,7 @@ type DetachedWorkKindWorkflow struct {
 
 func (x *DetachedWorkKindWorkflow) Reset() {
 	*x = DetachedWorkKindWorkflow{}
-	mi := &file_conversation_v1_detached_work_proto_msgTypes[14]
+	mi := &file_conversation_v1_detached_work_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1140,7 +1202,7 @@ func (x *DetachedWorkKindWorkflow) String() string {
 func (*DetachedWorkKindWorkflow) ProtoMessage() {}
 
 func (x *DetachedWorkKindWorkflow) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_detached_work_proto_msgTypes[14]
+	mi := &file_conversation_v1_detached_work_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1153,7 +1215,7 @@ func (x *DetachedWorkKindWorkflow) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedWorkKindWorkflow.ProtoReflect.Descriptor instead.
 func (*DetachedWorkKindWorkflow) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_detached_work_proto_rawDescGZIP(), []int{14}
+	return file_conversation_v1_detached_work_proto_rawDescGZIP(), []int{15}
 }
 
 // The work is a background watcher.
@@ -1165,7 +1227,7 @@ type DetachedWorkKindMonitor struct {
 
 func (x *DetachedWorkKindMonitor) Reset() {
 	*x = DetachedWorkKindMonitor{}
-	mi := &file_conversation_v1_detached_work_proto_msgTypes[15]
+	mi := &file_conversation_v1_detached_work_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1177,7 +1239,7 @@ func (x *DetachedWorkKindMonitor) String() string {
 func (*DetachedWorkKindMonitor) ProtoMessage() {}
 
 func (x *DetachedWorkKindMonitor) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_detached_work_proto_msgTypes[15]
+	mi := &file_conversation_v1_detached_work_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1190,7 +1252,7 @@ func (x *DetachedWorkKindMonitor) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedWorkKindMonitor.ProtoReflect.Descriptor instead.
 func (*DetachedWorkKindMonitor) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_detached_work_proto_rawDescGZIP(), []int{15}
+	return file_conversation_v1_detached_work_proto_rawDescGZIP(), []int{16}
 }
 
 // The identity of one unit of detached work, and the handle a stop is aimed at.
@@ -1214,7 +1276,7 @@ type DetachedWorkId struct {
 
 func (x *DetachedWorkId) Reset() {
 	*x = DetachedWorkId{}
-	mi := &file_conversation_v1_detached_work_proto_msgTypes[16]
+	mi := &file_conversation_v1_detached_work_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1226,7 +1288,7 @@ func (x *DetachedWorkId) String() string {
 func (*DetachedWorkId) ProtoMessage() {}
 
 func (x *DetachedWorkId) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_detached_work_proto_msgTypes[16]
+	mi := &file_conversation_v1_detached_work_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1239,7 +1301,7 @@ func (x *DetachedWorkId) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetachedWorkId.ProtoReflect.Descriptor instead.
 func (*DetachedWorkId) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_detached_work_proto_rawDescGZIP(), []int{16}
+	return file_conversation_v1_detached_work_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *DetachedWorkId) GetValue() string {
@@ -1253,16 +1315,20 @@ var File_conversation_v1_detached_work_proto protoreflect.FileDescriptor
 
 const file_conversation_v1_detached_work_proto_rawDesc = "" +
 	"\n" +
-	"#conversation/v1/detached_work.proto\x12\x0fconversation.v1\x1a$conversation/v1/agent_activity.proto\x1a\x1econversation/v1/workflow.proto\"\x8d\x03\n" +
+	"#conversation/v1/detached_work.proto\x12\x0fconversation.v1\x1a$conversation/v1/agent_activity.proto\x1a\x1econversation/v1/workflow.proto\"\xe6\x03\n" +
 	"\x11AgentDetachedWork\x123\n" +
 	"\x04work\x18\x01 \x01(\v2\x1f.conversation.v1.DetachedWorkIdR\x04work\x12@\n" +
 	"\x06output\x18\x04 \x01(\v2#.conversation.v1.DetachedWorkOutputH\x01R\x06output\x88\x01\x01\x12.\n" +
 	"\x05owner\x18\x05 \x01(\v2\x18.conversation.v1.AgentIdR\x05owner\x125\n" +
 	"\x04kind\x18\x06 \x01(\v2!.conversation.v1.DetachedWorkKindR\x04kind\x12C\n" +
 	"\bdetached\x18\x02 \x01(\v2%.conversation.v1.DetachedWorkDetachedH\x00R\bdetached\x12@\n" +
-	"\acreated\x18\x03 \x01(\v2$.conversation.v1.DetachedWorkCreatedH\x00R\acreatedB\b\n" +
+	"\acreated\x18\x03 \x01(\v2$.conversation.v1.DetachedWorkCreatedH\x00R\acreated\x12I\n" +
+	"\tconcluded\x18\a \x01(\v2&.conversation.v1.DetachedWorkConcludedH\x02R\tconcluded\x88\x01\x01B\b\n" +
 	"\x06originB\t\n" +
-	"\a_output\"\xd3\x01\n" +
+	"\a_outputB\f\n" +
+	"\n" +
+	"_concluded\"\x17\n" +
+	"\x15DetachedWorkConcluded\"\xd3\x01\n" +
 	"\x12DetachedWorkOutput\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12I\n" +
 	"\breadable\x18\x02 \x01(\v2+.conversation.v1.DetachedWorkOutputReadableH\x00R\breadable\x12O\n" +
@@ -1323,63 +1389,65 @@ func file_conversation_v1_detached_work_proto_rawDescGZIP() []byte {
 	return file_conversation_v1_detached_work_proto_rawDescData
 }
 
-var file_conversation_v1_detached_work_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
+var file_conversation_v1_detached_work_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
 var file_conversation_v1_detached_work_proto_goTypes = []any{
 	(*AgentDetachedWork)(nil),            // 0: conversation.v1.AgentDetachedWork
-	(*DetachedWorkOutput)(nil),           // 1: conversation.v1.DetachedWorkOutput
-	(*DetachedWorkOutputReadable)(nil),   // 2: conversation.v1.DetachedWorkOutputReadable
-	(*DetachedWorkOutputUnreadable)(nil), // 3: conversation.v1.DetachedWorkOutputUnreadable
-	(*DetachedWorkDetached)(nil),         // 4: conversation.v1.DetachedWorkDetached
-	(*DetachedCauseRequested)(nil),       // 5: conversation.v1.DetachedCauseRequested
-	(*DetachedCauseByUser)(nil),          // 6: conversation.v1.DetachedCauseByUser
-	(*DetachedCauseVendorMoved)(nil),     // 7: conversation.v1.DetachedCauseVendorMoved
-	(*DetachedCauseTimedOut)(nil),        // 8: conversation.v1.DetachedCauseTimedOut
-	(*DetachedWorkCreated)(nil),          // 9: conversation.v1.DetachedWorkCreated
-	(*DetachableWork)(nil),               // 10: conversation.v1.DetachableWork
-	(*DetachedWorkKind)(nil),             // 11: conversation.v1.DetachedWorkKind
-	(*DetachedWorkKindSubagent)(nil),     // 12: conversation.v1.DetachedWorkKindSubagent
-	(*DetachedWorkKindBash)(nil),         // 13: conversation.v1.DetachedWorkKindBash
-	(*DetachedWorkKindWorkflow)(nil),     // 14: conversation.v1.DetachedWorkKindWorkflow
-	(*DetachedWorkKindMonitor)(nil),      // 15: conversation.v1.DetachedWorkKindMonitor
-	(*DetachedWorkId)(nil),               // 16: conversation.v1.DetachedWorkId
-	(*AgentId)(nil),                      // 17: conversation.v1.AgentId
-	(*AgentActivityId)(nil),              // 18: conversation.v1.AgentActivityId
-	(*AgentSubagent)(nil),                // 19: conversation.v1.AgentSubagent
-	(*AgentBash)(nil),                    // 20: conversation.v1.AgentBash
-	(*AgentWorkflowStart)(nil),           // 21: conversation.v1.AgentWorkflowStart
-	(*AgentMonitor)(nil),                 // 22: conversation.v1.AgentMonitor
-	(*AgentSubagentPrompt)(nil),          // 23: conversation.v1.AgentSubagentPrompt
+	(*DetachedWorkConcluded)(nil),        // 1: conversation.v1.DetachedWorkConcluded
+	(*DetachedWorkOutput)(nil),           // 2: conversation.v1.DetachedWorkOutput
+	(*DetachedWorkOutputReadable)(nil),   // 3: conversation.v1.DetachedWorkOutputReadable
+	(*DetachedWorkOutputUnreadable)(nil), // 4: conversation.v1.DetachedWorkOutputUnreadable
+	(*DetachedWorkDetached)(nil),         // 5: conversation.v1.DetachedWorkDetached
+	(*DetachedCauseRequested)(nil),       // 6: conversation.v1.DetachedCauseRequested
+	(*DetachedCauseByUser)(nil),          // 7: conversation.v1.DetachedCauseByUser
+	(*DetachedCauseVendorMoved)(nil),     // 8: conversation.v1.DetachedCauseVendorMoved
+	(*DetachedCauseTimedOut)(nil),        // 9: conversation.v1.DetachedCauseTimedOut
+	(*DetachedWorkCreated)(nil),          // 10: conversation.v1.DetachedWorkCreated
+	(*DetachableWork)(nil),               // 11: conversation.v1.DetachableWork
+	(*DetachedWorkKind)(nil),             // 12: conversation.v1.DetachedWorkKind
+	(*DetachedWorkKindSubagent)(nil),     // 13: conversation.v1.DetachedWorkKindSubagent
+	(*DetachedWorkKindBash)(nil),         // 14: conversation.v1.DetachedWorkKindBash
+	(*DetachedWorkKindWorkflow)(nil),     // 15: conversation.v1.DetachedWorkKindWorkflow
+	(*DetachedWorkKindMonitor)(nil),      // 16: conversation.v1.DetachedWorkKindMonitor
+	(*DetachedWorkId)(nil),               // 17: conversation.v1.DetachedWorkId
+	(*AgentId)(nil),                      // 18: conversation.v1.AgentId
+	(*AgentActivityId)(nil),              // 19: conversation.v1.AgentActivityId
+	(*AgentSubagent)(nil),                // 20: conversation.v1.AgentSubagent
+	(*AgentBash)(nil),                    // 21: conversation.v1.AgentBash
+	(*AgentWorkflowStart)(nil),           // 22: conversation.v1.AgentWorkflowStart
+	(*AgentMonitor)(nil),                 // 23: conversation.v1.AgentMonitor
+	(*AgentSubagentPrompt)(nil),          // 24: conversation.v1.AgentSubagentPrompt
 }
 var file_conversation_v1_detached_work_proto_depIdxs = []int32{
-	16, // 0: conversation.v1.AgentDetachedWork.work:type_name -> conversation.v1.DetachedWorkId
-	1,  // 1: conversation.v1.AgentDetachedWork.output:type_name -> conversation.v1.DetachedWorkOutput
-	17, // 2: conversation.v1.AgentDetachedWork.owner:type_name -> conversation.v1.AgentId
-	11, // 3: conversation.v1.AgentDetachedWork.kind:type_name -> conversation.v1.DetachedWorkKind
-	4,  // 4: conversation.v1.AgentDetachedWork.detached:type_name -> conversation.v1.DetachedWorkDetached
-	9,  // 5: conversation.v1.AgentDetachedWork.created:type_name -> conversation.v1.DetachedWorkCreated
-	2,  // 6: conversation.v1.DetachedWorkOutput.readable:type_name -> conversation.v1.DetachedWorkOutputReadable
-	3,  // 7: conversation.v1.DetachedWorkOutput.unreadable:type_name -> conversation.v1.DetachedWorkOutputUnreadable
-	18, // 8: conversation.v1.DetachedWorkDetached.detached_from_id:type_name -> conversation.v1.AgentActivityId
-	5,  // 9: conversation.v1.DetachedWorkDetached.requested:type_name -> conversation.v1.DetachedCauseRequested
-	6,  // 10: conversation.v1.DetachedWorkDetached.by_user:type_name -> conversation.v1.DetachedCauseByUser
-	8,  // 11: conversation.v1.DetachedWorkDetached.timed_out:type_name -> conversation.v1.DetachedCauseTimedOut
-	7,  // 12: conversation.v1.DetachedWorkDetached.vendor_moved:type_name -> conversation.v1.DetachedCauseVendorMoved
-	10, // 13: conversation.v1.DetachedWorkCreated.work_created:type_name -> conversation.v1.DetachableWork
-	19, // 14: conversation.v1.DetachableWork.subagent:type_name -> conversation.v1.AgentSubagent
-	20, // 15: conversation.v1.DetachableWork.bash:type_name -> conversation.v1.AgentBash
-	21, // 16: conversation.v1.DetachableWork.workflow:type_name -> conversation.v1.AgentWorkflowStart
-	22, // 17: conversation.v1.DetachableWork.monitor:type_name -> conversation.v1.AgentMonitor
-	12, // 18: conversation.v1.DetachedWorkKind.subagent:type_name -> conversation.v1.DetachedWorkKindSubagent
-	13, // 19: conversation.v1.DetachedWorkKind.bash:type_name -> conversation.v1.DetachedWorkKindBash
-	14, // 20: conversation.v1.DetachedWorkKind.workflow:type_name -> conversation.v1.DetachedWorkKindWorkflow
-	15, // 21: conversation.v1.DetachedWorkKind.monitor:type_name -> conversation.v1.DetachedWorkKindMonitor
-	17, // 22: conversation.v1.DetachedWorkKindSubagent.agent_id:type_name -> conversation.v1.AgentId
-	23, // 23: conversation.v1.DetachedWorkKindSubagent.commission:type_name -> conversation.v1.AgentSubagentPrompt
-	24, // [24:24] is the sub-list for method output_type
-	24, // [24:24] is the sub-list for method input_type
-	24, // [24:24] is the sub-list for extension type_name
-	24, // [24:24] is the sub-list for extension extendee
-	0,  // [0:24] is the sub-list for field type_name
+	17, // 0: conversation.v1.AgentDetachedWork.work:type_name -> conversation.v1.DetachedWorkId
+	2,  // 1: conversation.v1.AgentDetachedWork.output:type_name -> conversation.v1.DetachedWorkOutput
+	18, // 2: conversation.v1.AgentDetachedWork.owner:type_name -> conversation.v1.AgentId
+	12, // 3: conversation.v1.AgentDetachedWork.kind:type_name -> conversation.v1.DetachedWorkKind
+	5,  // 4: conversation.v1.AgentDetachedWork.detached:type_name -> conversation.v1.DetachedWorkDetached
+	10, // 5: conversation.v1.AgentDetachedWork.created:type_name -> conversation.v1.DetachedWorkCreated
+	1,  // 6: conversation.v1.AgentDetachedWork.concluded:type_name -> conversation.v1.DetachedWorkConcluded
+	3,  // 7: conversation.v1.DetachedWorkOutput.readable:type_name -> conversation.v1.DetachedWorkOutputReadable
+	4,  // 8: conversation.v1.DetachedWorkOutput.unreadable:type_name -> conversation.v1.DetachedWorkOutputUnreadable
+	19, // 9: conversation.v1.DetachedWorkDetached.detached_from_id:type_name -> conversation.v1.AgentActivityId
+	6,  // 10: conversation.v1.DetachedWorkDetached.requested:type_name -> conversation.v1.DetachedCauseRequested
+	7,  // 11: conversation.v1.DetachedWorkDetached.by_user:type_name -> conversation.v1.DetachedCauseByUser
+	9,  // 12: conversation.v1.DetachedWorkDetached.timed_out:type_name -> conversation.v1.DetachedCauseTimedOut
+	8,  // 13: conversation.v1.DetachedWorkDetached.vendor_moved:type_name -> conversation.v1.DetachedCauseVendorMoved
+	11, // 14: conversation.v1.DetachedWorkCreated.work_created:type_name -> conversation.v1.DetachableWork
+	20, // 15: conversation.v1.DetachableWork.subagent:type_name -> conversation.v1.AgentSubagent
+	21, // 16: conversation.v1.DetachableWork.bash:type_name -> conversation.v1.AgentBash
+	22, // 17: conversation.v1.DetachableWork.workflow:type_name -> conversation.v1.AgentWorkflowStart
+	23, // 18: conversation.v1.DetachableWork.monitor:type_name -> conversation.v1.AgentMonitor
+	13, // 19: conversation.v1.DetachedWorkKind.subagent:type_name -> conversation.v1.DetachedWorkKindSubagent
+	14, // 20: conversation.v1.DetachedWorkKind.bash:type_name -> conversation.v1.DetachedWorkKindBash
+	15, // 21: conversation.v1.DetachedWorkKind.workflow:type_name -> conversation.v1.DetachedWorkKindWorkflow
+	16, // 22: conversation.v1.DetachedWorkKind.monitor:type_name -> conversation.v1.DetachedWorkKindMonitor
+	18, // 23: conversation.v1.DetachedWorkKindSubagent.agent_id:type_name -> conversation.v1.AgentId
+	24, // 24: conversation.v1.DetachedWorkKindSubagent.commission:type_name -> conversation.v1.AgentSubagentPrompt
+	25, // [25:25] is the sub-list for method output_type
+	25, // [25:25] is the sub-list for method input_type
+	25, // [25:25] is the sub-list for extension type_name
+	25, // [25:25] is the sub-list for extension extendee
+	0,  // [0:25] is the sub-list for field type_name
 }
 
 func init() { file_conversation_v1_detached_work_proto_init() }
@@ -1393,36 +1461,36 @@ func file_conversation_v1_detached_work_proto_init() {
 		(*AgentDetachedWork_Detached)(nil),
 		(*AgentDetachedWork_Created)(nil),
 	}
-	file_conversation_v1_detached_work_proto_msgTypes[1].OneofWrappers = []any{
+	file_conversation_v1_detached_work_proto_msgTypes[2].OneofWrappers = []any{
 		(*DetachedWorkOutput_Readable)(nil),
 		(*DetachedWorkOutput_Unreadable)(nil),
 	}
-	file_conversation_v1_detached_work_proto_msgTypes[4].OneofWrappers = []any{
+	file_conversation_v1_detached_work_proto_msgTypes[5].OneofWrappers = []any{
 		(*DetachedWorkDetached_Requested)(nil),
 		(*DetachedWorkDetached_ByUser)(nil),
 		(*DetachedWorkDetached_TimedOut)(nil),
 		(*DetachedWorkDetached_VendorMoved)(nil),
 	}
-	file_conversation_v1_detached_work_proto_msgTypes[10].OneofWrappers = []any{
+	file_conversation_v1_detached_work_proto_msgTypes[11].OneofWrappers = []any{
 		(*DetachableWork_Subagent)(nil),
 		(*DetachableWork_Bash)(nil),
 		(*DetachableWork_Workflow)(nil),
 		(*DetachableWork_Monitor)(nil),
 	}
-	file_conversation_v1_detached_work_proto_msgTypes[11].OneofWrappers = []any{
+	file_conversation_v1_detached_work_proto_msgTypes[12].OneofWrappers = []any{
 		(*DetachedWorkKind_Subagent)(nil),
 		(*DetachedWorkKind_Bash)(nil),
 		(*DetachedWorkKind_Workflow)(nil),
 		(*DetachedWorkKind_Monitor)(nil),
 	}
-	file_conversation_v1_detached_work_proto_msgTypes[12].OneofWrappers = []any{}
+	file_conversation_v1_detached_work_proto_msgTypes[13].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_conversation_v1_detached_work_proto_rawDesc), len(file_conversation_v1_detached_work_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   17,
+			NumMessages:   18,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

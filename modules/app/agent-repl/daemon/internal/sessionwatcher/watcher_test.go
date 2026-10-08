@@ -2131,6 +2131,7 @@ func TestStartRefusesAnUndecidedOpening(t *testing.T) {
 		Topbar:    &topbarSink{rec: rec},
 		Sidebar:   &sidebarSink{rec: rec},
 		Lifecycle: &lifecycleSink{rec: rec},
+		Clock:     newManualClock(),
 	}
 
 	// Act.

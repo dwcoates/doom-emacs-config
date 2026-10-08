@@ -452,11 +452,49 @@ retire the registration: the success does."
     ;; Assert
     (should (null agent-repl-test-verbs--restart-holds))))
 
-(ert-deftest agent-repl-verbs-restart-success-says-it-is-under-way ()
-  "An accepted restart is announced as under way, never as scheduled."
+(ert-deftest agent-repl-verbs-restart-success-says-nothing ()
+  "A restart answers once it HAPPENED, so its success shows no notice.
+Owner ruling 2026-10-08: \"i really expect no notification, i expect it to
+just restart instantly\" -- this replaces the earlier \"under way\" notice."
   (agent-repl-test-verbs--with nil
+    ;; Arrange / Act
     (agent-repl-verb-restart "ws-one")
-    (should (agent-repl-test-verbs--messaged-p "agent-repl: restart under way"))))
+    ;; Assert: the log's own records echo in batch; nothing else is said.
+    (should-not (cl-remove-if (lambda (m) (string-match-p "\\[agent-repl\\] elisp\\." m))
+                              agent-repl-test-verbs--messages))))
+
+(ert-deftest agent-repl-verbs-restart-relaunch-failed-is-said-as-a-failure ()
+  "A relaunch that failed is said in the echo area as the restart failing."
+  (agent-repl-test-verbs--with
+      '((:restart . (:response (:arm :error
+                                :value (:cause (:arm :relaunch-failed
+                                                :value (:detail "the prelaunched shim died")))))))
+    ;; Arrange / Act
+    (agent-repl-verb-restart "ws-one")
+    ;; Assert
+    (should (agent-repl-test-verbs--messaged-p "agent-repl: the restart failed: the prelaunched shim died"))))
+
+(ert-deftest agent-repl-verbs-restart-relaunch-failed-gives-the-composer-back ()
+  "A failed relaunch bounced nothing to completion, so it holds nothing shut."
+  (agent-repl-test-verbs--with
+      '((:restart . (:response (:arm :error
+                                :value (:cause (:arm :relaunch-failed
+                                                :value (:detail "the prelaunched shim died")))))))
+    ;; Arrange / Act
+    (agent-repl-verb-restart "ws-one")
+    ;; Assert
+    (should (null agent-repl-test-verbs--restart-holds))))
+
+(ert-deftest agent-repl-verbs-restart-relaunch-failed-is-not-reported-as-a-refusal ()
+  "The failure is claimed: no generic \"restart refused\" line beside it."
+  (agent-repl-test-verbs--with
+      '((:restart . (:response (:arm :error
+                                :value (:cause (:arm :relaunch-failed
+                                                :value (:detail "x")))))))
+    ;; Arrange / Act
+    (agent-repl-verb-restart "ws-one")
+    ;; Assert
+    (should-not (agent-repl-test-verbs--messaged-p "restart refused"))))
 
 ;;;; ---- Interrupt -------------------------------------------------------
 

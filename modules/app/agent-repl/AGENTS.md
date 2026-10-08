@@ -1787,7 +1787,7 @@ refines the idle rung's detail (an unread turn end).
 | Red | The agent is working. | Yes: a prompt is held or interjected. | submitting, thinking, clearing, compacting; footer `working`, `loading` |
 | Yellow | The main thread is idle while detached work (background subagents, shells) runs. | Yes | `idle_async`; footer `background` |
 | Green | Ready for you: idle, or waiting on your input. | Yes | ready, done, interrupted; a permission gate (roster and footer `permission`) and a question gate (roster and footer `question`), the same green as done; waiting (a cold gate, an interrupt landing); a merge that landed (`merged`); footer `idle`, `waiting`, `interrupted`; a Stop hook's deliberate stop and a deferred tool read as done |
-| Purple | A merge is in progress; the daemon holds the workspace. | No: the composer is closed. | `merge_queued`, `merging` |
+| Purple | A merge is in progress; the daemon holds the workspace. | No: the composer is closed. | `merge_queued`, `merge_waiting` (the merge holds the workspace and waits for it to fall free before it starts; footer `merging · awaiting_free`, owner ruling 2026-10-08), `merging` |
 | Turquoise | Something unexpected went wrong and wants your attention, but the workspace is usable. | Yes | roster `turn_failed` (a failed turn restored from the durable record only; live, a failed turn stands as its fault, below); `merge_failed`; `degraded`; every VENDOR FAULT: roster `vendor_fault` / footer `vendor_fault · vendor_retry`, `vendor_rejection`, `vendor_failed` (the vendor will not start), roster `vendor_blocked` / footer `vendor_fault · auth`, `usage_limit`, `billing`, `vendor_error` (a vendor or account block, and every turn the vendor ended or refused, until the next turn starts), roster and footer `api_retrying` (the vendor is retrying the turn's failed API call) |
 | Blue | The workspace is unusable right now. | No: the composer is closed (except under `turn_died`, declared in `composer_open_substatuses`). | every AGENT-REPL FAULT: roster `init`, `severed`, `dead`, `start_failed`, `turn_died`, `daemon_impaired` / footer `agent_repl_fault · starting`, `degraded`, `severed`, `dead`, `start_failed`, `daemon_impaired`, `turn_died` (the last turn's vendor query or agent process died, until the next turn starts); every NETWORK FAULT: roster `network_fault` / footer `network_fault · offline`; a refused close: roster and footer `closing` |
 | Uncolored | There is no lifecycle to report. | — | `none` (never had a session), `inactive` (no open perspective, drawn `?`) |
@@ -2050,7 +2050,11 @@ workspace's shim (rebuilt first when stale, session resumed, forced teardown
 hard-killing what did not stop), releases reconnect holds and reloads the
 workspace's webapp page. It never touches the daemon, the store or the sidecar.
 `RestartWorkspaceRequest.force` and the `no_session` error arm are retired; Emacs
-sends the workspace alone and the webapp menu has one "Restart" entry. It is
+sends the workspace alone and the webapp menu has one "Restart" entry. THE
+ANSWER IS THE OUTCOME (owner ruling, 2026-10-08): the daemon answers once the
+bounce finished, success shows the user nothing, and a relaunch that failed is
+the `relaunch_failed` arm, said in Emacs's echo area and the webapp row as the
+restart failing. It is
 for a stuck workspace (a turn that never ends, a vendor that failed to start, a
 stale shim, a page out of sync), not a routine action: a fresh shim or page may
 speak an API the older running daemon does not. The user-facing account is in

@@ -53,6 +53,7 @@ import {
   buildNukeWorkspaceRequest,
   buildOpenWorkspaceRequest,
   buildRestartWorkspaceRequest,
+  restartWorkspaceRefusal,
   buildSelectWorkspaceRequest,
   buildSetWorkspacePriorityRequest,
   drawKillConfirm,
@@ -258,6 +259,7 @@ const CAUSE_FILL: Readonly<Record<string, Record<string, unknown>>> = {
   transferringAway: { address: "127.0.0.1:7777" },
   transcriptMissing: { vendorSessionId: "vs-1", searchedPaths: ["/a", "/b"] },
   spawnFailed: { detail: "exec format error" },
+  relaunchFailed: { detail: "the prelaunched shim died" },
   vendorStartFailed: { detail: "the sdk threw before its first message" },
   worktreeUnrestorable: {
     dir: "/w/gone",
@@ -362,6 +364,7 @@ const VERBS: readonly VerbUnderTest[] = [
         rpc: "RestartWorkspace",
         call: (client) => client.restartWorkspace(buildRestartWorkspaceRequest(TARGET_WS)),
         schema: RestartWorkspaceResponseSchema,
+        refusalText: (cause) => restartWorkspaceRefusal(cause as never),
       }),
   },
   {
@@ -1073,5 +1076,13 @@ describe("the open control, refused", () => {
     expect(button.nextElementSibling?.textContent).toBe(
       "this workspace's session has been deleted",
     );
+  });
+});
+
+describe("restartWorkspaceRefusal", () => {
+  it("says a failed relaunch failed, with the daemon's detail", () => {
+    expect(
+      restartWorkspaceRefusal({ case: "relaunchFailed", value: { detail: "the prelaunched shim died" } } as never),
+    ).toBe("the restart failed: the prelaunched shim died");
   });
 });

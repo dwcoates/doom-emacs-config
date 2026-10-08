@@ -118,6 +118,10 @@ type run struct {
 	// queueRound is the ledger round of the QUEUE tab, opened at admission and
 	// closed when the run leaves the queue for its first step.
 	queueRound tabRound
+	// placed reports that the merge STARTED and its bubble is in the feed
+	// (place). Until then the run holds the workspace and waits for it to
+	// fall free, and nothing of the merge is drawn in the feed. Guarded by mu.
+	placed bool
 
 	mu sync.Mutex
 	// rounds counts each tab kind's opened rounds, which is what makes a second
@@ -468,10 +472,13 @@ func (r *run) admit(ctx context.Context) error {
 	}
 
 	// THE QUEUE IS A TAB. The merge is the one being worked on now, so it is
-	// no longer counted among the waiting; it stands "next" until its first
-	// step begins.
+	// no longer counted among the waiting. Its ledger interval opens here; its
+	// row is drawn when the merge starts (place).
 	r.queueRound = r.openTab(ctx, TabQueue)
-	r.setStep(ctx, footer.StepEnqueued, func(f *footer.MergeFacts) { f.QueuePlace, f.QueueWaiting = 1, 1 })
+	// THE MERGE HOLDS THE WORKSPACE BUT HAS NOT STARTED: purple
+	// `merge_waiting` until the workspace falls free (owner ruling,
+	// 2026-10-08). The lease above already holds every prompt.
+	r.setStep(ctx, footer.StepAwaitingFree, nil)
 	// THE FIRST RECORD IS WRITTEN BEFORE ANY STEP ACTS: from here on a
 	// restart resumes this merge rather than starting it again. It follows
 	// the step's facts, so a resume draws the footer on the step it names.
@@ -479,12 +486,11 @@ func (r *run) admit(ctx context.Context) error {
 		r.end(ctx, err)
 		return err
 	}
-	r.head(nil)
 	if err := o.republishQueue(ctx, r.repo); err != nil {
 		r.end(ctx, fmt.Errorf("could not publish the queue: %w", err))
 		return err
 	}
-	log.Info(op, "admitted a merge", dlog.Context{
+	log.Info(op, "admitted a merge; it holds the workspace and starts once the workspace is free", dlog.Context{
 		"workspace": string(ws), "repo": string(r.repo), "lease": string(r.lease.ID),
 		"source": r.source.Kind.String(), "branch": subject.branch, "worktree": subject.dir, "target": subject.targetDir,
 		"method": methodName(r.emacsRepo, r.source), "self_checkout": r.selfCheckout, "displaces": r.displaces,
@@ -493,7 +499,48 @@ func (r *run) admit(ctx context.Context) error {
 		r.end(ctx, err)
 		return err
 	}
+	if err := r.place(ctx); err != nil {
+		r.end(ctx, err)
+		return err
+	}
 	return r.execute(ctx)
+}
+
+// place STARTS the merge in the feed: its bubble's head is drawn now, at the
+// feed's tail, and its queue tab with it.
+//
+// THE BUBBLE IS PLACED ONLY ONCE THE WORKSPACE IS FREE (owner ruling,
+// 2026-10-08): "while merging, the merge bubble is necessarily the last thing
+// in the feed, because things only land outside of it after the merge has
+// finished". A feed row's order is minted once, at its first draw
+// (resolve/feed/order.go), so a bubble drawn while the workspace still ran a
+// turn or detached work was overtaken by every row those wrote -- measured
+// 2026-10-08, workspace `doom`: two subagents' completions woke the agent and
+// their turns drew below a bubble placed 3 minutes earlier. From here the
+// merge's own turns draw inside the bubble and the user's prompts are held,
+// so nothing can land after it until it ends.
+func (r *run) place(ctx context.Context) error {
+	if r.exiting() {
+		return nil
+	}
+	r.mu.Lock()
+	r.placed = true
+	r.mu.Unlock()
+	r.head(nil)
+	if err := r.o.republishQueue(ctx, r.repo); err != nil {
+		return fmt.Errorf("could not publish the queue: %w", err)
+	}
+	r.o.log(ctx, r.ws).Info("daemon.merge.start", "the workspace is free; the merge starts and its bubble is placed at the feed's tail", dlog.Context{
+		"workspace": string(r.ws), "lease": string(r.lease.ID),
+	})
+	return nil
+}
+
+// isPlaced reports whether the merge started and its bubble is in the feed.
+func (r *run) isPlaced() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.placed
 }
 
 // takeSession resolves where the requester's repository states its merge
@@ -551,6 +598,15 @@ func (r *run) awaitFree(ctx context.Context, ws ids.WorkspaceID) error {
 		log.Debug(op, "the workspace is free; the merge proceeds", fields)
 		return nil
 	}
+	// WHAT IT WAITS ON IS DRAWN: the footer reads the awaited workspace's turn
+	// and live work from its own state, so the step names the workspace and
+	// the footer keeps the rest current.
+	r.setStep(ctx, footer.StepAwaitingFree, func(f *footer.MergeFacts) {
+		if ws != r.ws {
+			f.AwaitOther = ws
+			f.AwaitOtherName = r.o.workspaceName(ctx, ws)
+		}
+	})
 	log.Info(op, "the merge waits for the workspace's turn and detached work to end; nothing is stopped to hurry it", fields)
 	if err := r.o.deps.Freeness.AwaitFree(ctx, ws); err != nil {
 		return fmt.Errorf("the workspace %s never fell free: %w", ws, err)
@@ -954,4 +1010,17 @@ func readEscalation(dir string) (string, bool) {
 		return "", false
 	}
 	return strings.TrimSpace(rest), true
+}
+
+// workspaceName is a workspace's name as drawn. A record that cannot be read
+// is recorded at ERROR and the id stands in: a name must not stop the merge's
+// waiting state from being drawn.
+func (o *orchestrator) workspaceName(ctx context.Context, ws ids.WorkspaceID) string {
+	record, err := o.deps.DB.Workspace(ctx, ws)
+	if err != nil {
+		o.deps.Log.Global().Error("daemon.merge.await_free", "could not read the awaited workspace's name; its id is drawn",
+			dlog.Context{"workspace": string(ws), "error": err.Error()})
+		return string(ws)
+	}
+	return record.Name
 }

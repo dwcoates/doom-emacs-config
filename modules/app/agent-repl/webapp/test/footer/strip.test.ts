@@ -253,6 +253,16 @@ describe("drawFooterSubStatus: the word is the arm, lowercase, with spaces", () 
     expect(row.querySelector(".footer-substatus")?.textContent).toBe(words);
   });
 
+  it.each([
+    ["the turn", { turnInFlight: true, subagents: 0, shells: 0, monitors: 0, pending: 0, otherWorkspace: "" }, "waiting for the turn"],
+    ["detached work", { turnInFlight: false, subagents: 2, shells: 1, monitors: 0, pending: 0, otherWorkspace: "" }, "waiting for 2 subagents, 1 shell"],
+    ["another workspace", { turnInFlight: true, subagents: 0, shells: 0, monitors: 1, pending: 0, otherWorkspace: "rebase-home" }, "waiting for the turn, 1 monitor in rebase-home"],
+    ["facts not in yet", { turnInFlight: false, subagents: 0, shells: 0, monitors: 0, pending: 0, otherWorkspace: "" }, "waiting for the session to come up"],
+  ])("draws a merge awaiting %s as what it waits on", (_name, value, words) => {
+    const { row } = drawStrip({ status: withSubStatus("merging", "awaitingFree", value) });
+    expect(row.querySelector(".footer-substatus")?.textContent).toBe(words);
+  });
+
   it("colours the enqueued place as a queue position", () => {
     const { row } = drawStrip({ status: withSubStatus("merging", "enqueued", { place: 2, waiting: 5 }) });
     expect(row.querySelector('.footer-substatus [data-datum="position"]')?.textContent).toBe("2/5");

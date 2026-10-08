@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"claude-repld/internal/clock"
 	"context"
 	"errors"
 	"fmt"
@@ -372,6 +373,19 @@ type fakeWatcher struct {
 	closeErr error
 	// factsErr is what AwaitSessionFacts answers.
 	factsErr error
+	// free answers AwaitFree: each call takes the next value sent on it. Nil
+	// leaves AwaitFree unanswerable, which no fixture that calls it does.
+	free chan error
+}
+
+// AwaitFree answers the next value the fixture sends on free.
+func (w *fakeWatcher) AwaitFree(ctx context.Context) error {
+	select {
+	case err := <-w.free:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // Pointers answers the pointers the fixture states; a fixture that states none
@@ -684,6 +698,7 @@ func newFleetFixtureBoundedAt(t *testing.T, adoptBound time.Duration) *fleetFixt
 			Footer:    footerLinkSink{rec: f.links},
 			Topbar:    topbarLinkSink{rec: f.links},
 			Sidebar:   sidebarLinkSink{rec: f.links},
+			Clock:     clock.System{},
 		},
 		SocketPath: func(ws ids.WorkspaceID) string {
 			if f.socketDir != "" {

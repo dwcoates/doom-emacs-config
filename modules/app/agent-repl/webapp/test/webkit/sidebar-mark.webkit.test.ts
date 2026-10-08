@@ -27,6 +27,7 @@ interface Mark {
 const DOT: Mark = { arm: "ready", glyph: "dot", char: "" };
 const GLYPHS: readonly Mark[] = [
   { arm: "mergeQueued", glyph: "queue", char: "≡" },
+  { arm: "mergeWaiting", glyph: "await", char: "⧗" },
   { arm: "merging", glyph: "recycle", char: "⟳" },
   { arm: "mergeFailed", glyph: "failed", char: "✕" },
 ];

@@ -904,6 +904,22 @@ type fakeMerge struct {
 	closed      []ids.WorkspaceID
 	enqueued    []ids.WorkspaceID
 	enqueueErr  error
+	// steps records the restart's suspension and take-back, in order, and
+	// the rollout's bounces are appended by the tests that need the order.
+	steps      []string
+	suspendErr error
+}
+
+// SuspendForRestart records the suspension and answers suspendErr.
+func (m *fakeMerge) SuspendForRestart(_ context.Context, ws ids.WorkspaceID) error {
+	m.steps = append(m.steps, "suspend:"+string(ws))
+	return m.suspendErr
+}
+
+// ResumeAfterRestart records the take-back.
+func (m *fakeMerge) ResumeAfterRestart(_ context.Context, ws ids.WorkspaceID) error {
+	m.steps = append(m.steps, "resume:"+string(ws))
+	return nil
 }
 
 func newFakeMerge() *fakeMerge {
@@ -949,6 +965,8 @@ type fakeRollout struct {
 	// runs the engine behind it, so a test synchronizes on this rather than
 	// on the verb's return.
 	done chan struct{}
+	// hold, when set, keeps every bounce from finishing until it is closed.
+	hold chan struct{}
 }
 
 type rolloutCall struct {
@@ -962,12 +980,15 @@ type rolloutCall struct {
 func (r *fakeRollout) BounceShim(ctx context.Context, ws ids.WorkspaceID, reason rollout.RelaunchReason, force bool, done func(error)) (bounce.Decision, error) {
 	r.mu.Lock()
 	r.relaunches = append(r.relaunches, rolloutCall{WS: ws, Reason: reason, Force: force})
-	err, refused := r.relaunchErr, r.refuseErr
+	err, refused, hold := r.relaunchErr, r.refuseErr, r.hold
 	r.mu.Unlock()
 	if refused != nil {
 		return bounce.Decision{}, refused
 	}
 	go func() {
+		if hold != nil {
+			<-hold
+		}
 		if done != nil {
 			done(err)
 		}

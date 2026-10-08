@@ -442,6 +442,10 @@ a permission or a question gate has its own arm."
   "Decode VALUE as the empty `RosterRowStatusMergeQueued'."
   (agent-repl-wire--decode-empty "RosterRowStatusMergeQueued" value))
 
+(defun agent-repl-wire-decode-roster-row-status-merge-waiting (value)
+  "Decode VALUE as the empty `RosterRowStatusMergeWaiting'."
+  (agent-repl-wire--decode-empty "RosterRowStatusMergeWaiting" value))
+
 (defun agent-repl-wire-decode-roster-row-status-merge-failed (value)
   "Decode VALUE as the empty `RosterRowStatusMergeFailed'."
   (agent-repl-wire--decode-empty "RosterRowStatusMergeFailed" value))
@@ -492,6 +496,7 @@ an assertion, where an unset oneof is the absence of one."
     (turnDied :turn-died agent-repl-wire-decode-roster-row-status-turn-died)
     (merging :merging agent-repl-wire-decode-roster-row-status-merging)
     (mergeQueued :merge-queued agent-repl-wire-decode-roster-row-status-merge-queued)
+    (mergeWaiting :merge-waiting agent-repl-wire-decode-roster-row-status-merge-waiting)
     (mergeFailed :merge-failed agent-repl-wire-decode-roster-row-status-merge-failed)
     (merged :merged agent-repl-wire-decode-roster-row-status-merged)
     (none :none agent-repl-wire-decode-roster-row-status-none)

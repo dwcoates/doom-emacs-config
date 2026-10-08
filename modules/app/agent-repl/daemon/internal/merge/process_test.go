@@ -962,8 +962,9 @@ func TestTheEmacsRepoMethodWalksItsStepsInOrder(t *testing.T) {
 	// Act.
 	admitted(t, h)
 
-	// Assert.
-	want := []string{"enqueued", "rebasing", "testing", "committing", StateMerged}
+	// Assert: the admitted merge holds its workspace (awaiting_free) before
+	// its first step (owner ruling, 2026-10-08).
+	want := []string{"enqueued", "awaiting_free", "rebasing", "testing", "committing", StateMerged}
 	if got := h.footer.steps(); !equal(got, want) {
 		t.Fatalf("steps = %v, want %v", got, want)
 	}

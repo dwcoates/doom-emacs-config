@@ -569,19 +569,46 @@ func lastQueueTabOf(t *testing.T, h *harness, ws wsm.WorkspaceID) *frontendv1.Fe
 // TestAWaitingEntryKeepsItsQueuedTimeAcrossRepublishes covers the duration of
 // an entry that does not move: a queue change elsewhere republishes the
 // snapshot, and the entry still counts from when it was queued.
+//
+// The snapshot is read off the FRONT's bubble: only a merge that started has
+// one (owner ruling, 2026-10-08).
 func TestAWaitingEntryKeepsItsQueuedTimeAcrossRepublishes(t *testing.T) {
-	// Arrange.
+	// Arrange: the front started and is held inside its gate.
 	h := newHarness(t)
+	h.emacsRepo()
+	h.landsCleanly("abc123def4567")
+	inGate, release := holdTheGate(h)
 	enqueue(t, h)
 	queueAnother(t, h, "ws-2", "two")
+	done := admitAsync(h, context.Background())
+	<-inGate
 
 	// Act.
 	queueAnother(t, h, "ws-3", "three")
+	got := lastQueueTabOf(t, h, theWorkspace).GetQueue().GetBehind()[0].GetWaiting().GetStageEnteredAtMs()
+	close(release)
+	<-done
 
 	// Assert.
-	got := lastQueueTabOf(t, h, theWorkspace).GetQueue().GetBehind()[0].GetWaiting().GetStageEnteredAtMs()
 	if want := queuedAtMS(t, h, "ws-2"); got != want {
 		t.Fatalf("ws-2 waits since %d after another merge queued, want its queued time %d", got, want)
+	}
+}
+
+// TestAMergeInLineDrawsNoBubble pins the placement rule: a merge waiting in
+// line has not started, so nothing of it is in the feed.
+func TestAMergeInLineDrawsNoBubble(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.db.paused[h.repoKey()] = true
+
+	// Act.
+	enqueue(t, h)
+	queueAnother(t, h, "ws-2", "two")
+
+	// Assert.
+	if heads := h.feed.headIDs(); len(heads) != 0 {
+		t.Fatalf("merges in line drew bubbles %v, want none", heads)
 	}
 }
 
@@ -599,8 +626,9 @@ func TestTheSnapshotsFrontFollowsItsActiveTab(t *testing.T) {
 	done := admitAsync(h, context.Background())
 	<-inGate
 
-	// Act.
-	front := lastQueueTabOf(t, h, "ws-2").GetQueue().GetAhead()[0].GetMerging()
+	// Act: the front's own bubble draws its standing; ws-2 has none until it
+	// starts.
+	front := lastQueueTabOf(t, h, theWorkspace).GetQueue().GetCurrent().GetStatus().(*frontendv1.FeedMergeQueueEntry_Merging).Merging
 	running, _ := h.o.runFor(theWorkspace)
 	tests := running.activeRound()
 	close(release)
@@ -608,7 +636,7 @@ func TestTheSnapshotsFrontFollowsItsActiveTab(t *testing.T) {
 
 	// Assert.
 	if front.GetActiveTab().GetText() != "tests" || front.GetStageEnteredAtMs() != tests.started.UnixMilli() {
-		t.Fatalf("ws-2 sees the front in %v since %d, want tests since %d", front.GetActiveTab(), front.GetStageEnteredAtMs(), tests.started.UnixMilli())
+		t.Fatalf("the front's bubble draws it in %v since %d, want tests since %d", front.GetActiveTab(), front.GetStageEnteredAtMs(), tests.started.UnixMilli())
 	}
 }
 
@@ -663,18 +691,27 @@ func lastHeadOf(t *testing.T, h *harness, ws wsm.WorkspaceID) *frontendv1.FeedMe
 	return found
 }
 
-func TestAQueuedMergesHeadClockRunsFromItsQueuedTimeAcrossQueueChanges(t *testing.T) {
+func TestAStartedMergesHeadClockRunsFromItsQueuedTimeAcrossQueueChanges(t *testing.T) {
 	// Arrange: the harness clock moves on every read, so a head re-stamped
-	// with the current time would show a later start.
+	// with the current time would show a later start. The merge started and
+	// is held inside its gate.
 	h := newHarness(t)
+	h.emacsRepo()
+	h.landsCleanly("abc123def4567")
+	inGate, release := holdTheGate(h)
 	enqueue(t, h)
+	want := queuedAtMS(t, h, theWorkspace)
+	done := admitAsync(h, context.Background())
+	<-inGate
 
 	// Act.
 	queueAnother(t, h, "ws-2", "two")
+	got := lastHeadOf(t, h, theWorkspace).GetRuntime().GetStartedAtMs()
+	close(release)
+	<-done
 
 	// Assert.
-	got := lastHeadOf(t, h, theWorkspace).GetRuntime().GetStartedAtMs()
-	if want := queuedAtMS(t, h, theWorkspace); got != want {
+	if got != want {
 		t.Fatalf("the head's clock starts at %d after another merge queued, want the queued time %d", got, want)
 	}
 }

@@ -60,7 +60,10 @@ func TestTheTestsRecordNamesItsTipAndTargetWhenNothingWasReplayed(t *testing.T) 
 	}
 }
 
-func TestTheQueueRecordCarriesTheEnqueuedStep(t *testing.T) {
+// TestTheQueueRecordCarriesTheAwaitingFreeStep pins what a resume draws for a
+// merge suspended while it waited for its workspace: the awaiting_free step
+// (owner ruling, 2026-10-08), never a step it has not started.
+func TestTheQueueRecordCarriesTheAwaitingFreeStep(t *testing.T) {
 	// Arrange: a merge held waiting for its workspace to fall free.
 	h := newHarness(t)
 	h.freeness.busy = true
@@ -76,7 +79,7 @@ func TestTheQueueRecordCarriesTheEnqueuedStep(t *testing.T) {
 	<-done
 
 	// Assert.
-	if doc := recordedDoc(t, h); doc.Step != TabQueue || doc.Facts.Step != "enqueued" {
+	if doc := recordedDoc(t, h); doc.Step != TabQueue || doc.Facts.Step != "awaiting_free" {
 		t.Fatalf("record = step %q facts %q, want the queue step with its footer step", doc.Step, doc.Facts.Step)
 	}
 }

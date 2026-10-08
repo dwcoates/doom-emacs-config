@@ -663,6 +663,7 @@ sits flush on the bar with no ground of its own.  See
 
     (:merging         . "purple")
     (:merge-queued    . "purple")
+    (:merge-waiting   . "purple")
     (:merge-failed    . "turquoise")
     (:merged          . "green"))
   "Which of the six colors each ROSTER STATUS ARM takes, BY NAME.
@@ -746,6 +747,7 @@ explicitly overrides.")
 
 (defconst agent-repl-status-merge-glyphs
   '((:merge-queued    . "⧖")
+    (:merge-waiting   . "⧗")
     (:merging         . "↻")
     (:merge-failed    . "✗")
     (:merged          . "✓"))
@@ -1016,6 +1018,13 @@ in `agent-repl--color-default-bracket'."
                        'agent-repl-tab-merging
                        agent-repl--color-merging-purple
                        agent-repl--color-light))
+    ;; A merge that holds the workspace and waits for it to fall free before
+    ;; it starts (owner ruling, 2026-10-08): the same purple, since the daemon
+    ;; holds the workspace exactly as it does for the other two.
+    (:merge-waiting . ,(agent-repl--tab-palette-row
+                        'agent-repl-tab-merging
+                        agent-repl--color-merging-purple
+                        agent-repl--color-light))
     (:merging . ,(agent-repl--tab-palette-row
                   'agent-repl-tab-merging
                   agent-repl--color-merging-purple

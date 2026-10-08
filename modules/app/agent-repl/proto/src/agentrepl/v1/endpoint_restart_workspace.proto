@@ -42,9 +42,12 @@ message RestartWorkspaceResponse {
   }
 }
 
-// The restart is under way: what stood in the way has been told to stop and
-// the bounce has begun. Every visible effect — the stopped work, the
-// relaunch, the reconnect, the page reload — arrives on the streams.
+// THE RESTART HAPPENED (owner ruling, 2026-10-08: "i expect it to just
+// restart instantly", never "work on it when it gets around to it"). The
+// answer is sent once the bounce has finished: the shim was relaunched and the
+// session resumed on it, or there was nothing left to replace. A client shows
+// nothing for it; the page reload and the fresh session arrive on the streams.
+// A relaunch that failed is the `relaunch_failed` error arm, never a success.
 message RestartWorkspaceSuccess {}
 
 // Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
@@ -59,6 +62,9 @@ message RestartWorkspaceError {
     RestartWorkspaceTransferringAway transferring_away = 3;
     // A joining daemon has not finished adopting this workspace yet.
     RestartWorkspaceNotYetAdopted not_yet_adopted = 4;
+    // The relaunch was attempted and FAILED: the workspace was not restarted.
+    // A client surfaces it to the user as a failure.
+    RestartWorkspaceRelaunchFailed relaunch_failed = 6;
   }
   // Tag 5 (`no_session`) is RETIRED: a workspace with no session is
   // restarted by bringing one up, never refused.
@@ -75,3 +81,7 @@ message RestartWorkspaceTransferringAway {
   string address = 1;
 }
 message RestartWorkspaceNotYetAdopted {}
+message RestartWorkspaceRelaunchFailed {
+  // Why the relaunch failed, in the daemon's words.
+  string detail = 1;
+}

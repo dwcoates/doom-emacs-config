@@ -690,6 +690,16 @@ queue onward is WS's own feed merge bubble, footer and roster row."
      :ws ws :op "merge"
      :on-success (lambda (_) (message "merge enqueued")))))
 
+(defcustom agent-repl-restart-timeout-seconds 75
+  "Seconds a restart's answer may take: it is sent once the restart HAPPENED.
+The daemon answers `RestartWorkspace' with its outcome (owner ruling,
+2026-10-08): the bounded force-end of the running turn (2s), the shim's
+relaunch, and the resumed session's `StartSession', which the daemon bounds
+at 60s (`workspace.DefaultStartSessionBound').  This sits above their sum,
+so a slow but healthy restart is never reported as a failure."
+  :type 'number
+  :group 'agent-repl)
+
 (defun agent-repl-verb-restart (ws)
   "Restart WS's backend and webapp page, immediately.
 There is ONE mode.  The DAEMON owns everything the restart entails: it
@@ -703,22 +713,37 @@ the `restarting' arm to come back over the host stream.  The send is async
 and the bounce is later still, so between the two the gate would otherwise
 read the dying generation's `:open' and take a prompt the daemon is about
 to refuse (`agent-repl-host-take-restart-hold').  A REFUSED restart
-bounces nothing, so its arm releases the hold again."
+bounces nothing, so its arm releases the hold again.
+
+THE ANSWER IS THE OUTCOME (owner ruling, 2026-10-08: \"i expect it to just
+restart instantly\").  The daemon answers once the restart happened, so a
+success says nothing -- the fresh session and the page reload are what the
+user sees -- and a relaunch that FAILED is its `relaunch_failed' arm,
+recorded at ERROR and said in the echo area as a failure, never as a
+refusal."
   (let ((ref (agent-repl-verbs--ref ws)))
     (agent-repl-host-take-restart-hold ws)
     (agent-repl-verbs--send
      #'agent-repl-rpc-restart-workspace (agent-repl-verbs--conn ws)
      (list :workspace ref)
      :ws ws :op "restart"
+     :timeout agent-repl-restart-timeout-seconds
      :on-success
-     (lambda (_) (message "agent-repl: restart under way"))
-     :on-error
      (lambda (_)
-       ;; The arm is NOT claimed (nil): the refusal still reports itself
-       ;; through the generic path.  All this arm does is give back a hold
-       ;; taken for a bounce that will never happen.
+       (agent-repl--info ws "elisp.verbs.restart-done ws=%s" ws))
+     :on-error
+     (lambda (value)
+       ;; Every error arm gives back the hold taken for a bounce that did
+       ;; not happen.  Only `relaunch_failed' is CLAIMED: it is a failure,
+       ;; not a refusal, so it is said as one; every other arm still reports
+       ;; itself through the generic refusal path.
        (agent-repl-host-release-restart-hold ws "restart-refused")
-       nil))))
+       (let ((arm (agent-repl-verbs--refusal-arm value)))
+         (when (eq (plist-get arm :arm) :relaunch-failed)
+           (let ((detail (plist-get (plist-get arm :value) :detail)))
+             (agent-repl--error ws "elisp.verbs.restart-failed ws=%s detail=%S" ws detail)
+             (message "agent-repl: the restart failed: %s" detail)
+             t)))))))
 
 (defun agent-repl-verb-interrupt (ws &optional confirm-agents)
   "Interrupt the running TURN of WS through the `Interrupt' verb.
