@@ -31,3 +31,30 @@ the work runs.
 
 Additive: an older shim never sets it, and the daemon reads its announcements
 exactly as before.
+
+## 2. `frontend.v1.FooterSubStatusMergingAwaitingFree` and `RosterRowStatusMergeWaiting`
+
+The owner's invariant: "while merging, the merge bubble is necessarily the last
+thing in the feed, because things only land outside of it after the merge has
+finished". A feed row's order key is minted at its first draw, so the bubble is
+now drawn only when the merge STARTS, once the workspace is free.
+
+- `FooterStatusMerging.awaiting_free` (tag 22): the merge holds the workspace
+  (its lease holds every prompt) and waits for it to fall free. Fields: whether
+  a turn is in flight, the subagents, shells, monitors and pending items
+  running, and the other workspace's name when the merge waits on the one whose
+  worktree it rebases in. The daemon's footer reads them from its own state of
+  the awaited workspace, so they follow every change.
+- `RosterRow.merge_waiting` (tag 57): the roster's projection of it.
+- `render-colors.json`: `merge_waiting` is PURPLE on the roster, a colored merge
+  arm, glyph `await`. Purple because the daemon holds the workspace exactly as
+  during `merging` and `merge_queued`; the glyph alone says it has not started.
+
+## 3. `agentrepl.v1.RestartWorkspaceError.relaunch_failed`
+
+A restart answers its OUTCOME: success once the bounce finished, or
+`relaunch_failed` (tag 6, `detail`) when it did not. The old success meant "the
+bounce has begun", and a relaunch that then failed told the user nothing
+(2026-10-08 18:55:03, workspace `doom`: the restart-pending hold collided with a
+merge's lease, the prelaunched shim was killed, and Emacs had already said
+"restart under way").
