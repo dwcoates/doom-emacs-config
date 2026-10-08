@@ -112,6 +112,14 @@ describe("the status mark", () => {
     expect(drawStatusMark("none", "R.status").textContent).toBe("");
   });
 
+  it("draws no check for a landed merge", () => {
+    expect(drawStatusMark("merged", "R.status").textContent).toBe("");
+  });
+
+  it("draws no disc for a landed merge either: its box is a glyph box", () => {
+    expect(drawStatusMark("merged", "R.status").classList.contains("st-glyph")).toBe(true);
+  });
+
   it("breathes while a turn is in flight", () => {
     expect(drawStatusMark("thinking", "R.status").classList.contains("breathes")).toBe(true);
   });

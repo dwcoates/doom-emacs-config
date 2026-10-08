@@ -24,7 +24,9 @@ import {
   USAGE_AGE_RESERVE_LABELS,
   USAGE_RESERVE_LABELS_PROPERTY,
   USAGE_REVEALED_CLASS,
+  INTERIM_RESPONSE_CLASS,
   drawFeedResponse,
+  isInterimResponse,
   responseCap,
   responseCapLines,
   REVEAL_SPEED_ATTRIBUTE,
@@ -48,7 +50,7 @@ import { HAS_MORE_CLASS, refreshHasMore } from "../../../src/feed/bubble-more.js
 import {
   BUBBLE_CAP_ATTRIBUTE,
   BUBBLE_MORE_ATTRIBUTE,
-  BUBBLE_MORE_FADE,
+  BUBBLE_MORE_ELLIPSIS,
   BUBBLE_UNCAPPED,
 } from "../../../src/bubble/draw.js";
 import { BUBBLE_BOX_CLASS, BUBBLE_SCROLL_CLASS } from "../../../src/feed/bubble-scroll.js";
@@ -1513,9 +1515,10 @@ describe("the wrapped tree a settled response carries", () => {
   });
 
   it("does not observe the fit-content body, whose width never follows the column", () => {
-    // Arrange
+    // Arrange — the turn's answer, drawn uncapped (an interim response is
+    // capped, and its has-more measurer observes the body).
     const el = drawFeedResponse(
-      response({ result: { case: "success", value: { prose: { markdown: SHOWCASE_TREE } } } }),
+      response({ finalAnswer: true, result: { case: "success", value: { prose: { markdown: SHOWCASE_TREE } } } }),
       rowContext(),
     );
     mount(el);
@@ -1881,9 +1884,10 @@ describe("the incremental reveal reconciles the prose without rebuilding it", ()
   });
 
   it("re-wraps the arriving tree to the whole render at a new width on resize", () => {
-    // Arrange — the tree types out in a 1000px column (93 columns).
+    // Arrange — the tree types out in a 1000px column (93 columns), in the
+    // turn's answer, which is uncapped (a replayed answer still arriving).
     const el = drawFeedResponse(
-      response({ result: { case: "update", value: { prose: { markdown: SHOWCASE_TREE } } } }),
+      response({ finalAnswer: true, result: { case: "update", value: { prose: { markdown: SHOWCASE_TREE } } } }),
       rowContext(),
     );
     const column = mount(el);
@@ -2070,25 +2074,23 @@ describe("the thinking bubble", () => {
 });
 
 /**
- * THE THINKING BUBBLE'S FIXED CAP (owner request, 2026-10-07). A thinking
- * bubble, arriving or landed, shows at most the shared feed cap's lines,
- * wearing the response bubble's own fade (`has-more`) when it runs past them,
- * and a click expands and collapses it exactly as it does any capped bubble.
+ * THE ONE-LINE CAP (owner request, 2026-10-08). A thinking bubble, arriving or
+ * landed, and an interim response, arriving or settled into the pear, show
+ * ONE line collapsed, wearing `has-more` when more follows it, and a click
+ * expands and collapses them exactly as it does any capped bubble.
  *
  * jsdom resolves the cascade but lays nothing out, so `layOut` stands in for
  * the layout engine: the box's body is LINES tall, and while the cascade
- * hands the box its collapsed cap it shows at most `--cap-lines` of them (the
- * token resolved through `:root`, as the browser would); once the cascade hands
- * it the expanded 50vh ceiling the window is taken to hold every line. Every
- * figure it reads comes from the real stylesheet, so the cap under test is the
- * one the file declares.
+ * hands the box its collapsed cap it shows at most `--bubble-cap-lines` of
+ * them (the token resolved through `:root`, as the browser would); once the
+ * cascade hands it the expanded 50vh ceiling the window is taken to hold every
+ * line. Every figure it reads comes from the real stylesheet, so the cap under
+ * test is the one the file declares.
  */
-describe("the thinking bubble's fixed cap", () => {
+describe("the one-line cap", () => {
   const LINE_PX = 20;
-  /** The feed cap's line count, as `:root` declares it. */
-  const FEED_LINES = 27.5;
-  /** A body that runs past the feed cap. */
-  const PAST = 30;
+  /** A body that runs past the one line. */
+  const PAST = 3;
 
   /** A `var(--token)` value resolved through `:root`, or the literal itself. */
   function resolvedNumber(value: string): number {
@@ -2126,34 +2128,41 @@ describe("the thinking bubble's fixed cap", () => {
     return scroll;
   }
 
-  // The LANDED thinking bubble: its cap is the arriving one's (see "the
-  // thinking bubble's fixed height" below).
-  function thinking(state: "success"): FeedResponse {
+  /** The two one-line kinds, each in one of its arms. */
+  const KINDS = [
+    { name: "a landed thinking bubble", thinking: true, state: "success" },
+    { name: "an arriving thinking bubble", thinking: true, state: "update" },
+    { name: "a settled interim response", thinking: false, state: "success" },
+    { name: "an arriving interim response", thinking: false, state: "update" },
+  ] as const;
+
+  /** A response of KIND carrying a word of prose. */
+  function of(kind: (typeof KINDS)[number]): FeedResponse {
     return response({
-      thinking: true,
-      result: { case: state, value: { prose: { markdown: "weighing" } } },
+      thinking: kind.thinking,
+      result: { case: kind.state, value: { prose: { markdown: "weighing" } } },
     });
   }
 
-  it("caps a landed thinking bubble's scroll box at the feed cap", () => {
+  it.each(KINDS)("caps $name's scroll box at one line", (kind) => {
     // Arrange
     const teardown = installStylesheet();
     try {
       // Act
-      const scroll = mounted(thinking("success"), PAST);
+      const scroll = mounted(of(kind), PAST);
       // Assert
-      expect(cascadedValue(scroll, "--bubble-cap-lines")).toBe("var(--feed-cap-lines)");
+      expect(cascadedValue(scroll, "--bubble-cap-lines")).toBe("1");
     } finally {
       teardown();
     }
   });
 
-  it("marks has-more when it runs past the feed cap", () => {
+  it.each(KINDS)("marks has-more when $name runs past its one line", (kind) => {
     // Arrange
     const teardown = installStylesheet();
     try {
       // Act
-      const scroll = mounted(thinking("success"), PAST);
+      const scroll = mounted(of(kind), PAST);
       // Assert
       expect(scroll.classList.contains(HAS_MORE_CLASS)).toBe(true);
     } finally {
@@ -2161,52 +2170,52 @@ describe("the thinking bubble's fixed cap", () => {
     }
   });
 
-  it("expands a capped thinking bubble on a click, dropping has-more", () => {
+  it.each(KINDS)("expands $name on a click, dropping has-more", (kind) => {
     // Arrange
     const teardown = installStylesheet();
     try {
-      const scroll = mounted(thinking("success"), PAST);
+      const scroll = mounted(of(kind), PAST);
       const collapsed = scroll.clientHeight;
       // Act
       scroll.click();
-      // Assert — grown from the feed cap to the full content, nothing left
+      // Assert — grown from the one line to the full content, nothing left
       // below the fold.
       expect([
         collapsed,
         scroll.classList.contains(EXPANDED_CLASS),
         scroll.clientHeight,
         scroll.classList.contains(HAS_MORE_CLASS),
-      ]).toEqual([FEED_LINES * LINE_PX, true, PAST * LINE_PX, false]);
+      ]).toEqual([LINE_PX, true, PAST * LINE_PX, false]);
     } finally {
       teardown();
     }
   });
 
-  it("collapses an expanded thinking bubble on a second click, restoring has-more", () => {
+  it("collapses an expanded one-line bubble on a second click, restoring has-more", () => {
     // Arrange
     const teardown = installStylesheet();
     try {
-      const scroll = mounted(thinking("success"), PAST);
+      const scroll = mounted(of(KINDS[0]), PAST);
       scroll.click();
       // Act
       scroll.click();
-      // Assert — back to the feed cap, with more below it.
+      // Assert — back to the one line, with more below it.
       expect([
         scroll.classList.contains(EXPANDED_CLASS),
         scroll.clientHeight,
         scroll.classList.contains(HAS_MORE_CLASS),
-      ]).toEqual([false, FEED_LINES * LINE_PX, true]);
+      ]).toEqual([false, LINE_PX, true]);
     } finally {
       teardown();
     }
   });
 
-  it("marks no has-more on a thinking bubble that fits under the feed cap", () => {
+  it("marks no has-more on a one-line bubble whose content is that line", () => {
     // Arrange
     const teardown = installStylesheet();
     try {
       // Act
-      const scroll = mounted(thinking("success"), 1);
+      const scroll = mounted(of(KINDS[0]), 1);
       // Assert
       expect(scroll.classList.contains(HAS_MORE_CLASS)).toBe(false);
     } finally {
@@ -2214,16 +2223,16 @@ describe("the thinking bubble's fixed cap", () => {
     }
   });
 
-  it("gives a fitting thinking bubble nothing to expand on a click", () => {
+  it("gives a fitting one-line bubble nothing to expand on a click", () => {
     // Arrange
     const teardown = installStylesheet();
     try {
-      const scroll = mounted(thinking("success"), 1);
+      const scroll = mounted(of(KINDS[0]), 1);
       const collapsed = scroll.clientHeight;
       // Act
       scroll.click();
       // Assert — the same height and still no more: the click reveals nothing,
-      // exactly as it does on a short response bubble.
+      // exactly as it does on a short held prompt.
       expect([scroll.clientHeight, scroll.classList.contains(HAS_MORE_CLASS)]).toEqual([
         collapsed,
         false,
@@ -2235,12 +2244,12 @@ describe("the thinking bubble's fixed cap", () => {
 });
 
 /**
- * A THINKING BUBBLE SAYS "MORE" WITH THE FADE, NEVER THE ELLIPSIS. Arriving or
- * landed, it is under the shared feed cap, which the ellipsis cannot state (no
- * whole line count), so the stylesheet never clamps its body. jsdom lays
- * nothing out, so each case states the geometry the engine would give it.
+ * A ONE-LINE BUBBLE SAYS "MORE" WITH THE ELLIPSIS, NEVER THE FADE (owner
+ * request, 2026-10-08): the held prompt's own mechanism (`data-more`
+ * `ellipsis`), the collapsed body clamped to its line. jsdom lays nothing
+ * out, so each case states the geometry the engine would give it.
  */
-describe("the thinking bubble's more signal", () => {
+describe("the one-line bubble's more signal", () => {
   const LINE_PX = 20;
 
   /** The ellipsis clamp on a collapsed body, as the stylesheet writes it. */
@@ -2249,19 +2258,19 @@ describe("the thinking bubble's more signal", () => {
   /** The box whose fade the ellipsis hides, as the stylesheet writes it (the pseudo dropped). */
   const FADE_HIDDEN_ON = selectorOf(/([^{}]*\.bubble-scroll)::after\s*\{\s*display:\s*none;\s*\}/, "hidden fade");
 
-  /** A drawn thinking bubble in ARM whose body renders LINES lines, measured under the cap of CAP lines. */
-  function mounted(arm: "success" | "update", lines: number, cap: number): { box: HTMLElement; body: HTMLElement } {
+  /** A drawn response (THINKING or not) in ARM whose body renders LINES lines under a one-line cap. */
+  function mounted(thinking: boolean, arm: "success" | "update", lines: number): { box: HTMLElement; body: HTMLElement } {
     const host = document.createElement("div");
     installClickExpand(host, () => "", (section) => refreshHasMore(section));
     const bubble = drawFeedResponse(
-      response({ thinking: true, result: { case: arm, value: { prose: { markdown: "weighing" } } } }),
+      response({ thinking, result: { case: arm, value: { prose: { markdown: "weighing" } } } }),
       rowContext(),
     );
     host.append(bubble);
     document.body.append(host);
     const box = bubble.querySelector(`:scope > .${BUBBLE_SCROLL_CLASS}`) as HTMLElement;
     const body = box.querySelector(":scope > .bubble-body") as HTMLElement;
-    const shown = Math.min(lines, cap) * LINE_PX;
+    const shown = Math.min(lines, 1) * LINE_PX;
     Object.defineProperty(box, "clientHeight", { configurable: true, value: shown });
     // A clamped body's own box ends at its cap; an unclamped one holds every line.
     const own = body.matches(CLAMPED_BODY) ? shown : lines * LINE_PX;
@@ -2280,28 +2289,31 @@ describe("the thinking bubble's more signal", () => {
     box.classList.contains(HAS_MORE_CLASS) && !box.matches(FADE_HIDDEN_ON);
 
   it.each([
-    { name: "an arriving", arm: "update" },
-    { name: "a landed", arm: "success" },
-  ] as const)("keeps the fade on $name thinking bubble past the feed cap", ({ arm }) => {
-    // Arrange / Act — the feed cap's whole-line part, far under the body.
-    const drawn = mounted(arm, 60, 27);
+    { name: "an arriving thinking bubble", thinking: true, arm: "update" },
+    { name: "a landed thinking bubble", thinking: true, arm: "success" },
+    { name: "an arriving interim response", thinking: false, arm: "update" },
+    { name: "a settled interim response", thinking: false, arm: "success" },
+  ] as const)("ends $name's one line in the ellipsis when more follows", ({ thinking, arm }) => {
+    // Arrange / Act
+    const drawn = mounted(thinking, arm, 4);
     // Assert
-    expect([ellipsized(drawn), faded(drawn)]).toEqual([false, true]);
+    expect([ellipsized(drawn), faded(drawn)]).toEqual([true, false]);
   });
 
-  it("draws neither the ellipsis nor the fade on a landed thinking bubble with no more", () => {
+  it("draws neither the ellipsis nor the fade on a one-line bubble with no more", () => {
     // Arrange / Act
-    const drawn = mounted("success", 1, 27);
+    const drawn = mounted(true, "success", 1);
     // Assert
     expect([ellipsized(drawn), faded(drawn)]).toEqual([false, false]);
   });
 });
 
 /**
- * A RESPONSE IS NEVER ABBREVIATED (owner request, 2026-09-27). Every
- * non-thinking response bubble — arriving, interim (pear) and the turn's answer
- * (green) — is drawn `BUBBLE_UNCAPPED`: its full height, no fade, no scroll box,
- * no click-to-expand. A thinking bubble keeps its cap (above).
+ * THE TURN'S ANSWER IS NEVER ABBREVIATED (owner request, 2026-09-27). The
+ * response the daemon named the turn's answer (green), arriving or settled,
+ * and a response the turn's death cut short are drawn `BUBBLE_UNCAPPED`: their
+ * full height, no fade, no scroll box, no click-to-expand. Thinking bubbles
+ * and interim responses are one line (above).
  */
 describe("the response bubble at its full height", () => {
   /** A response in ARM carrying MARKDOWN, the turn's answer when FINAL. */
@@ -2324,13 +2336,6 @@ describe("the response bubble at its full height", () => {
     return [bubble.getAttribute(BUBBLE_CAP_ATTRIBUTE), bubble.querySelector(`.${BUBBLE_SCROLL_CLASS}`) === null];
   }
 
-  it("draws an interim (pear) response uncapped", () => {
-    // Arrange / Act
-    const { bubble } = mounted(said("success"));
-    // Assert
-    expect(uncapped(bubble)).toEqual([BUBBLE_UNCAPPED, true]);
-  });
-
   it("draws the turn's answer (green) uncapped", () => {
     // Arrange / Act
     const { bubble } = mounted(said("success", true));
@@ -2338,9 +2343,9 @@ describe("the response bubble at its full height", () => {
     expect(uncapped(bubble)).toEqual([BUBBLE_UNCAPPED, true]);
   });
 
-  it("draws an arriving response uncapped", () => {
-    // Arrange / Act
-    const { bubble } = mounted(said("update"));
+  it("draws an arriving response the daemon already named the answer uncapped", () => {
+    // Arrange / Act — a replayed answer re-delivered while still arriving.
+    const { bubble } = mounted(said("update", true));
     // Assert
     expect(uncapped(bubble)).toEqual([BUBBLE_UNCAPPED, true]);
   });
@@ -2367,7 +2372,7 @@ describe("the response bubble at its full height", () => {
 
   it("never wears the fade, however far its text runs", () => {
     // Arrange — a body far taller than any cap.
-    const { box } = mounted(said("success", false, "a line\n\n".repeat(100)));
+    const { box } = mounted(said("success", true, "a line\n\n".repeat(100)));
     const body = box.querySelector<HTMLElement>(".bubble-body") as HTMLElement;
     Object.defineProperty(body, "offsetHeight", { configurable: true, value: 4000 });
     Object.defineProperty(box, "clientHeight", { configurable: true, value: 540 });
@@ -2385,26 +2390,60 @@ describe("the response bubble at its full height", () => {
     // Assert
     expect(box.classList.contains(EXPANDED_CLASS)).toBe(false);
   });
+
+  it("opens to its full height when the turn's terminal names an interim response the answer", () => {
+    // Arrange — the settled interim, one line.
+    const { bubble } = mounted(said("success"));
+    // Act — the daemon re-stamps the row final at the turn's terminal.
+    const redrawn = drawFeedResponse(said("success", true), rowContext(bubble));
+    // Assert — a fresh, uncapped bubble: a box never switches mode in place.
+    expect([redrawn === bubble, ...uncapped(redrawn)]).toEqual([false, BUBBLE_UNCAPPED, true]);
+  });
+});
+
+describe("isInterimResponse", () => {
+  it.each([
+    { name: "an arriving response", thinking: false, final: false, state: "update", want: true },
+    { name: "a settled response", thinking: false, final: false, state: "success", want: true },
+    { name: "a response cut short", thinking: false, final: false, state: "error", want: false },
+    { name: "the turn's answer", thinking: false, final: true, state: "success", want: false },
+    { name: "an arriving turn's answer", thinking: false, final: true, state: "update", want: false },
+    { name: "a thinking bubble", thinking: true, final: false, state: "success", want: false },
+  ] as const)("calls $name interim: $want", ({ thinking, final, state, want }) => {
+    // Arrange
+    const u = response({ thinking, finalAnswer: final, result: { case: state, value: { prose: { markdown: "x" } } } });
+    // Act
+    const got = isInterimResponse(u);
+    // Assert
+    expect(got).toBe(want);
+  });
 });
 
 describe("responseCapLines", () => {
   it.each([
-    { name: "a settled ordinary response", thinking: false, superseded: false, state: "success", want: BUBBLE_UNCAPPED },
-    { name: "an arriving ordinary response", thinking: false, superseded: false, state: "update", want: BUBBLE_UNCAPPED },
-    { name: "an ordinary response cut short", thinking: false, superseded: false, state: "error", want: BUBBLE_UNCAPPED },
-    { name: "an arriving thinking bubble", thinking: true, superseded: false, state: "update", want: "feed" },
-    { name: "a thinking bubble whose text landed", thinking: true, superseded: false, state: "success", want: "feed" },
-    { name: "a thinking bubble cut short", thinking: true, superseded: false, state: "error", want: "feed" },
+    { name: "a settled interim response", thinking: false, final: false, superseded: false, state: "success", want: 1 },
+    { name: "an arriving interim response", thinking: false, final: false, superseded: false, state: "update", want: 1 },
+    { name: "an ordinary response cut short", thinking: false, final: false, superseded: false, state: "error", want: BUBBLE_UNCAPPED },
+    { name: "the turn's answer", thinking: false, final: true, superseded: false, state: "success", want: BUBBLE_UNCAPPED },
+    { name: "an arriving thinking bubble", thinking: true, final: false, superseded: false, state: "update", want: 1 },
+    { name: "a thinking bubble whose text landed", thinking: true, final: false, superseded: false, state: "success", want: 1 },
+    { name: "a thinking bubble cut short", thinking: true, final: false, superseded: false, state: "error", want: 1 },
     {
       name: "an arriving thinking bubble a later response superseded",
       thinking: true,
+      final: false,
       superseded: true,
       state: "update",
-      want: "feed",
+      want: 1,
     },
-  ] as const)("draws $name at cap $want", ({ thinking, superseded, state, want }) => {
+  ] as const)("draws $name at cap $want", ({ thinking, final, superseded, state, want }) => {
     // Arrange
-    const u = response({ thinking, superseded, result: { case: state, value: { prose: { markdown: "x" } } } });
+    const u = response({
+      thinking,
+      finalAnswer: final,
+      superseded,
+      result: { case: state, value: { prose: { markdown: "x" } } },
+    });
     // Act
     const got = responseCapLines(u);
     // Assert
@@ -2414,13 +2453,14 @@ describe("responseCapLines", () => {
 
 describe("responseCap", () => {
   it.each([
-    { name: "a settled ordinary response", thinking: false, state: "success", want: undefined },
-    { name: "an arriving thinking bubble", thinking: true, state: "update", want: undefined },
-    { name: "a thinking bubble whose text landed", thinking: true, state: "success", want: undefined },
-    { name: "a thinking bubble cut short", thinking: true, state: "error", want: undefined },
-  ] as const)("gives $name the more signal $want", ({ thinking, state, want }) => {
+    { name: "a settled interim response", thinking: false, final: false, state: "success", want: BUBBLE_MORE_ELLIPSIS },
+    { name: "the turn's answer", thinking: false, final: true, state: "success", want: undefined },
+    { name: "an arriving thinking bubble", thinking: true, final: false, state: "update", want: BUBBLE_MORE_ELLIPSIS },
+    { name: "a thinking bubble whose text landed", thinking: true, final: false, state: "success", want: BUBBLE_MORE_ELLIPSIS },
+    { name: "a thinking bubble cut short", thinking: true, final: false, state: "error", want: BUBBLE_MORE_ELLIPSIS },
+  ] as const)("gives $name the more signal $want", ({ thinking, final, state, want }) => {
     // Arrange
-    const u = response({ thinking, result: { case: state, value: { prose: { markdown: "x" } } } });
+    const u = response({ thinking, finalAnswer: final, result: { case: state, value: { prose: { markdown: "x" } } } });
     // Act
     const got = responseCap(u).more;
     // Assert
@@ -2428,12 +2468,13 @@ describe("responseCap", () => {
   });
 
   it.each([
-    { name: "a landed thinking bubble", thinking: true, state: "success", want: BUBBLE_MORE_FADE },
-    { name: "an arriving thinking bubble", thinking: true, state: "update", want: BUBBLE_MORE_FADE },
-    { name: "an ordinary response", thinking: false, state: "success", want: null },
-  ] as const)("stamps $name's bubble data-more $want", ({ thinking, state, want }) => {
+    { name: "a landed thinking bubble", thinking: true, final: false, state: "success", want: BUBBLE_MORE_ELLIPSIS },
+    { name: "an arriving thinking bubble", thinking: true, final: false, state: "update", want: BUBBLE_MORE_ELLIPSIS },
+    { name: "an interim response", thinking: false, final: false, state: "success", want: BUBBLE_MORE_ELLIPSIS },
+    { name: "the turn's answer", thinking: false, final: true, state: "success", want: null },
+  ] as const)("stamps $name's bubble data-more $want", ({ thinking, final, state, want }) => {
     // Arrange
-    const u = response({ thinking, result: { case: state, value: { prose: { markdown: "x" } } } });
+    const u = response({ thinking, finalAnswer: final, result: { case: state, value: { prose: { markdown: "x" } } } });
     // Act
     const got = drawFeedResponse(u, rowContext()).getAttribute(BUBBLE_MORE_ATTRIBUTE);
     // Assert
@@ -2442,14 +2483,16 @@ describe("responseCap", () => {
 });
 
 /**
- * THE THINKING BUBBLE IS A FIXED HEIGHT. It wears the shared feed cap while its
- * own text is arriving, and the re-push that settles it keeps that same cap: it
- * never collapses when it lands. A reader's expansion survives the re-push.
+ * A ONE-LINE BUBBLE IS A FIXED HEIGHT. A thinking bubble or an interim
+ * response wears the one-line cap while its own text is arriving, and the
+ * re-push that settles it keeps that same cap: it never changes height when
+ * it lands. A reader's expansion survives the re-push.
  */
-describe("the thinking bubble's fixed height", () => {
-  function thinking(state: "update" | "success" | "error"): FeedResponse {
+describe("the one-line bubble's fixed height", () => {
+  /** A thinking bubble (or, THINKING false, an interim response) in STATE. */
+  function said(state: "update" | "success" | "error", thinking = true): FeedResponse {
     return response({
-      thinking: true,
+      thinking,
       result: { case: state, value: { prose: { markdown: "weighing" } } },
     });
   }
@@ -2469,14 +2512,14 @@ describe("the thinking bubble's fixed height", () => {
     return cascadedValue(bubble.querySelector(".bubble-scroll") as HTMLElement, "--bubble-cap-lines");
   }
 
-  it("wears the shared response cap while its text is arriving", () => {
+  it("wears the one-line cap while a thinking bubble's text is arriving", () => {
     // Arrange
     const teardown = installStylesheet();
     try {
       // Act
-      const { bubble } = mounted(thinking("update"));
+      const { bubble } = mounted(said("update"));
       // Assert
-      expect(capOf(bubble)).toBe("var(--feed-cap-lines)");
+      expect(capOf(bubble)).toBe("1");
     } finally {
       teardown();
     }
@@ -2485,15 +2528,29 @@ describe("the thinking bubble's fixed height", () => {
   it.each([
     { name: "its own settling re-push", state: "success" },
     { name: "the turn's death cutting it short", state: "error" },
-  ] as const)("keeps the shared response cap on $name", ({ state }) => {
+  ] as const)("keeps a thinking bubble's one-line cap on $name", ({ state }) => {
     // Arrange
     const teardown = installStylesheet();
     try {
-      const { bubble } = mounted(thinking("update"));
+      const { bubble } = mounted(said("update"));
       // Act — the daemon re-pushes the row in a terminal arm; it redraws in place.
-      const redrawn = drawFeedResponse(thinking(state), rowContext(bubble));
+      const redrawn = drawFeedResponse(said(state), rowContext(bubble));
       // Assert
-      expect([redrawn === bubble, capOf(redrawn)]).toEqual([true, "var(--feed-cap-lines)"]);
+      expect([redrawn === bubble, capOf(redrawn)]).toEqual([true, "1"]);
+    } finally {
+      teardown();
+    }
+  });
+
+  it("keeps an interim response's one-line cap, in place, when it settles", () => {
+    // Arrange
+    const teardown = installStylesheet();
+    try {
+      const { bubble } = mounted(said("update", false));
+      // Act — the daemon re-pushes the row settled, not the turn's answer.
+      const redrawn = drawFeedResponse(said("success", false), rowContext(bubble));
+      // Assert
+      expect([redrawn === bubble, capOf(redrawn)]).toEqual([true, "1"]);
     } finally {
       teardown();
     }
@@ -2503,27 +2560,27 @@ describe("the thinking bubble's fixed height", () => {
     // Arrange — an arriving draw that had typed out none of its text yet.
     const teardown = installStylesheet();
     try {
-      const { bubble } = mounted(thinking("update"));
+      const { bubble } = mounted(said("update"));
       // Act
-      const redrawn = drawFeedResponse(thinking("success"), rowContext(bubble));
+      const redrawn = drawFeedResponse(said("success"), rowContext(bubble));
       // Assert
       expect([redrawn.getAttribute(REVEALED_ATTRIBUTE), capOf(redrawn)]).toEqual([
         renderedLength(redrawn),
-        "var(--feed-cap-lines)",
+        "1",
       ]);
     } finally {
       teardown();
     }
   });
 
-  it("draws at the shared response cap when it first arrives already settled", () => {
+  it("draws at the one-line cap when it first arrives already settled", () => {
     // Arrange
     const teardown = installStylesheet();
     try {
       // Act — a replayed row: its first draw is its settled one.
-      const { bubble } = mounted(thinking("success"));
+      const { bubble } = mounted(said("success"));
       // Assert
-      expect(capOf(bubble)).toBe("var(--feed-cap-lines)");
+      expect(capOf(bubble)).toBe("1");
     } finally {
       teardown();
     }
@@ -2533,10 +2590,10 @@ describe("the thinking bubble's fixed height", () => {
     // Arrange — the reader clicked the arriving thinking bubble open.
     const teardown = installStylesheet();
     try {
-      const { bubble } = mounted(thinking("update"));
+      const { bubble } = mounted(said("update"));
       (bubble.querySelector(".bubble-scroll") as HTMLElement).click();
       // Act
-      const redrawn = drawFeedResponse(thinking("success"), rowContext(bubble));
+      const redrawn = drawFeedResponse(said("success"), rowContext(bubble));
       // Assert — only the default limit changed; the reader's toggle stands.
       const scroll = redrawn.querySelector(".bubble-scroll") as HTMLElement;
       expect([scroll.classList.contains(EXPANDED_CLASS), cascadedValue(scroll, "max-height")]).toEqual([
@@ -2802,5 +2859,36 @@ describe("a re-push updates the bubble in place", () => {
     const after = drawFeedResponse(settledAs("hi"), rowContext(previous));
     // Assert
     expect(after).not.toBe(previous);
+  });
+});
+
+describe("the interim response's hook class", () => {
+  it.each([
+    { name: "an arriving response", final: false, state: "update", want: true },
+    { name: "a settled response", final: false, state: "success", want: true },
+    { name: "the turn's answer", final: true, state: "success", want: false },
+    { name: "a response cut short", final: false, state: "error", want: false },
+  ] as const)("marks $name interim: $want", ({ final, state, want }) => {
+    // Arrange
+    const u = response({ finalAnswer: final, result: { case: state, value: { prose: { markdown: "x" } } } });
+    // Act
+    const el = drawFeedResponse(u, rowContext());
+    // Assert
+    expect(el.classList.contains(INTERIM_RESPONSE_CLASS)).toBe(want);
+  });
+
+  it("takes the class back when the terminal names the interim the answer", () => {
+    // Arrange
+    const before = drawFeedResponse(
+      response({ result: { case: "success", value: { prose: { markdown: "x" } } } }),
+      rowContext(),
+    );
+    // Act
+    const after = drawFeedResponse(
+      response({ finalAnswer: true, result: { case: "success", value: { prose: { markdown: "x" } } } }),
+      rowContext(before),
+    );
+    // Assert
+    expect(after.classList.contains(INTERIM_RESPONSE_CLASS)).toBe(false);
   });
 });

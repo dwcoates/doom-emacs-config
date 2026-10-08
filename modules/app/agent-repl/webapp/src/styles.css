@@ -133,6 +133,17 @@
      purple (X11 medium purple); mid-lightness, so one shade reads fine
      in both themes. */
   --tool-title: #9370db;
+  /* A tool card's input line, its header content (the Bash command, the Grep
+     pattern): a medium-dark grey, clearly readable but quieter than the card's
+     purple title (owner request, 2026-10-08; it was the --accent blue). One
+     step darker than --muted, the same grey the collapsed repository header
+     wears; the dark theme lifts it to its own --muted grey. */
+  --tool-command: #4b5563;
+  /* The prose of a thinking bubble or an interim response (owner request,
+     2026-10-08): a slight dimming of --fg, a little lighter than the body
+     text, still easily read. The dark theme dims its near-white the same
+     small step. */
+  --interim-text: #3f434a;
   /* Textless-thinking progress indicator: orange, distinct from every other
      status color in the palette. */
   --thinking: #ea580c;
@@ -408,6 +419,8 @@
        lifted a notch, so a response sits lighter than the tool cards. */
     --assistant: #1b1e25;
     --thinking: #fb923c;
+    --tool-command: #9ca3af;
+    --interim-text: #c3c7ce;
     --retry: #a78bfa;
     --info-ws: #4ade80;
     --info-model: #22d3ee;
@@ -819,7 +832,11 @@ body::after {
    green = done, solid orange = done+viewed, breathing yellow = awaiting
    permission, hollow = idle, grey = dead; `none` holds the column's
    alignment invisibly. */
-#ws-sidebar .st { flex: 0 0 auto; width: 9px; height: 9px; border-radius: 50%; }
+/* THE MARK COLUMN'S ONE WIDTH (owner request, 2026-10-08): the dot's
+   diameter, which every mark's box takes, a glyph's included, so every mark is
+   centered on one line and every name starts at one edge. */
+#ws-sidebar { --ws-mark-width: 9px; }
+#ws-sidebar .st { flex: 0 0 auto; width: var(--ws-mark-width); height: 9px; border-radius: 50%; }
 #ws-sidebar .st-thinking { background: var(--err); animation: ws-pulse 1.3s ease-in-out infinite; }
 /* SUBMITTING breathes exactly as thinking does: a turn is in flight and a
    prompt cannot land, which is the same claim. Only the footer's phase word
@@ -939,14 +956,11 @@ body::after {
   margin-top: 0.5rem;
   padding-top: 0.4rem;
   border-top: 1px solid color-mix(in srgb, var(--muted) 30%, transparent);
-  /* The section's height ceiling, in rows, matching the roster's own ten-row
-     cap (`agent-repl-sidebar-merged-max-rows', sidebar.el). Emacs sends at
-     most ten merges, so the section draws one row per merge and is exactly as
-     tall as the merges it holds; this ceiling is what that height can never
-     exceed if the two ever disagree. */
-  --merged-visible-rows: 10;
-  /* .row's own vertical padding, restated here so the cap is built out of the
-     same numbers the row is drawn from. */
+  /* NO FIXED CAP (owner request, 2026-10-08): every merge is drawn, and the
+     rail shows as many as fit without scrolling (src/sidebar/merged-fit.ts,
+     which measures a row through `.merged-row-probe` below).
+     .row's own vertical padding, restated here so the row unit is built out
+     of the same numbers the row is drawn from. */
   --merged-row-pad-y: 0.28rem;
   /* The row's line box, stated rather than left to the font: `normal`
      line-height varies with whatever font resolves, so the cap could not be
@@ -963,19 +977,19 @@ body::after {
    than the entries it holds — ten merges reached about twelve rows' worth of
    rail. Pinning the line box instead makes the row's natural height EQUAL
    --merged-row-h (the tallest flex item is the line box; the 9px disc is
-   smaller), so N entries are exactly N rows tall and the cap below is still
+   smaller), so N entries are exactly N rows tall and the fit's row unit is
    exact. */
 #ws-sidebar .repo.merged-section .row {
   line-height: var(--merged-row-line-h);
 }
-/* `max-height`, never `height`: the section is sized by its rows, so three
-   merges draw three rows and ten is the most it can ever reach. Emacs caps
-   the roster at the same ten, so this scroller is not expected to engage —
-   and it scrolls rather than clips if it ever does, because a row the rail
-   drew is a row the user must be able to reach. */
-#ws-sidebar .repo.merged-section > .rows {
-  max-height: calc(var(--merged-row-h) * var(--merged-visible-rows));
-  overflow-y: auto;
+/* THE ROW UNIT the fit counts in: one merged row's height, out of flow and
+   unseen, so it is measurable whether the band is folded or not and takes no
+   room either way. */
+#ws-sidebar .repo.merged-section > .merged-row-probe {
+  position: absolute;
+  visibility: hidden;
+  width: 0;
+  height: var(--merged-row-h);
 }
 
 #ws-sidebar .row .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1666,6 +1680,19 @@ pre {
   --bubble-bg: color-mix(in srgb, var(--held-prompt-bg) 5%, var(--bg));
   max-width: calc(var(--bubble-max-width) / 2);
 }
+/* THE SECOND BACKGROUND A KIND SETS (owner request, 2026-10-08): a THINKING
+   bubble and an INTERIM response (`.interim-response`, response.ts
+   `isInterimResponse`) are filled with the page's own `--bg`, so in either
+   theme the fill is not there at all and only the prose (and the interim's
+   pear border, once settled) reads. It feeds `--bubble-bg`, so anything
+   painted from it matches. Their prose is the slightly dimmed
+   `--interim-text` (owner request, 2026-10-08); a link or a quote keeps its
+   own color. */
+.bubble[data-variant="thinking"],
+.bubble.interim-response {
+  --bubble-bg: var(--bg);
+  color: var(--interim-text);
+}
 /* THE THINKING WAVE, AND ONLY WHILE THE TURN IS IN FLIGHT.
 
    A WORKING prompt bubble carries a soft shadow band that crosses its own
@@ -1912,8 +1939,8 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
 /* THE EXPANDED RESPONSE (owner ruling, 2026-09-27): while a response bubble's
    own scroll box is open, its border is eggshell, whatever variant or state it
    wears. Only a CAPPED response has a scroll box to open — a thinking bubble,
-   an agentic card, a compaction summary — since interim, final and ended-turn
-   responses are uncapped (`BUBBLE_UNCAPPED`) and never open. ONE rule keyed on
+   an interim response, an agentic card, a compaction summary — since final
+   and cut-short responses are uncapped (`BUBBLE_UNCAPPED`) and never open. ONE rule keyed on
    the role and the open box (`.expanded` lives on the box, the border on the
    bubble, so the bubble is keyed through `:has`), last on the ladder and the
    one `!important` border apart from the selection's, so it outranks every
@@ -2035,7 +2062,7 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
    tint it: done/running reads identically on a Bash card and an Agent
    card. The two-class selector outranks .badge's transparent default. */
 .tool-card .badge { background: var(--card); }
-.cmd { color: var(--accent); }
+.cmd { color: var(--tool-command); }
 .file-path { color: var(--muted); font-family: ui-monospace, monospace; }
 /* COLLAPSED = NO SCROLL, same model as the shared cap above (owner ruling,
    2026-09-15): the generic tool input/output previews clip while collapsed and
@@ -2622,7 +2649,8 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
    on every bubble: nothing draws a glyph from `has-more`,
    and no `::before` keys on it. styles.test.ts fails any rule that does. */
 /* THE ELLIPSIS INSTEAD OF THE FADE (owner rulings, 2026-09-27). A bubble whose
-   spec chooses it (`data-more="ellipsis"`, src/bubble/draw.ts: a held prompt)
+   spec chooses it (`data-more="ellipsis"`, src/bubble/draw.ts: a held prompt,
+   a thinking bubble, an interim response)
    shows its ONE collapsed line and, when there is
    more, ends that line in `…`; no fade. The collapsed BODY is clamped to the
    cap's lines, so the engine itself writes the `…` at the end of the last line
@@ -5300,9 +5328,14 @@ ar-button.outcome-marker-pill {
    is what makes one fill rule serve every tone. */
 #ws-sidebar .st[data-glyph="dot"] { background: currentColor; }
 /* The glyph statuses are not discs: a box that centers a single character, so
-   the recycle mark turns on its own axis rather than orbiting. */
+   the recycle mark turns on its own axis rather than orbiting. The box is the
+   DOT'S width, not the character's (owner request, 2026-10-08: a 1em box,
+   left-aligned in the row like the 9px dot, put every glyph's center ~4px right
+   of the dots' and pushed its name right). The character is wider than the box
+   and overflows it equally on both sides (the flex default, unsafe centering),
+   so its center is the box's, which is the dots'. */
 #ws-sidebar .st-glyph {
-  width: 1em;
+  width: var(--ws-mark-width);
   height: 1em;
   display: inline-flex;
   align-items: center;
@@ -6446,7 +6479,7 @@ ar-button.outcome-marker-pill {
    applies the treatment that shape of line has always worn: the shell command
    keeps `.cmd.bash-input`, a path keeps the muted `.file-path`, and an unstated
    form is the plain `.tool-input`. Those three rules already exist and are
-   reused untouched; only the query needs a treatment of its own — the accent
+   reused untouched; only the query needs a treatment of its own — the grey
    monospace line WITHOUT the shell chrome, held back a touch so a search
    pattern does not read as a command that ran. */
 .tool-query { opacity: 0.9; }
