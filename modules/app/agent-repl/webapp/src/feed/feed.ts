@@ -889,6 +889,16 @@ export function mountFeed(
         );
         return;
       }
+      if (isMergeBubble(bubble.element)) {
+        // A MERGE BUBBLE NEVER COLLAPSES ON ITS OWN (owner ruling,
+        // 2026-10-08): the one a jump opened stays open until the reader
+        // closes it, so no watch closes it on leaving the view.
+        log.debug("a jump opened a merge bubble; it is never watched, only the reader folds it", {
+          operation: "feed.jump-merge-unwatched",
+          context: { row: id.value },
+        });
+        return;
+      }
       trackJumpedBubble(bubble);
       return;
     }
