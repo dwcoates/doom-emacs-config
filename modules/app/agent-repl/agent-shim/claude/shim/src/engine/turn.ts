@@ -261,7 +261,8 @@ export interface SessionContext {
 /**
  * What the user said, as one prompt string.
  *
- * TEXT blocks are the text. An IMAGE block contributes its PATH or URL as its
+ * TEXT blocks are the text, and a QUOTE block (a reply's quote of an earlier
+ * bubble, composed by the daemon) is its text. An IMAGE block contributes its PATH or URL as its
  * own line: the vendor's own prompt convention resolves a bare absolute path or
  * url, and re-encoding the bytes here would make the shim a second image
  * pipeline. An `UnsupportedBlock` RAISES — the contract says it is "not a
@@ -286,6 +287,12 @@ export function saidText(said: conversationv1.UserSaid): string {
         );
         break;
       }
+      case "quote":
+        // A REPLY'S QUOTE IS DELIVERED AS COMPOSED. The daemon composed its
+        // preamble, fenced quote and closing marker for the agent to read, so
+        // it goes over verbatim, in its place among the blocks.
+        lines.push(block.block.value.text);
+        break;
       case "unsupported":
         throw new Error(
           `shim turn: a prompt carries an UnsupportedBlock (${block.block.value.kind}); ` +

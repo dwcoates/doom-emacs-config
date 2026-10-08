@@ -9,7 +9,8 @@
  * one — so the strip is a history of the run, read left to right.
  *
  * EACH KIND OWNS ITS STATE ONEOF, and since nothing parks every one of them is
- * live or settled; this module therefore reads the state generically (every
+ * live or settled, conflict resolution and fixing also waiting on the user
+ * (the leaf carries the same start); this module therefore reads the state generically (every
  * kind's oneof selects from the SAME leaf messages) while the kind stays the
  * arm it was served as. An unset kind or an unset state is a malformed view.
  *
@@ -54,9 +55,14 @@ export const AGENTIC_KINDS: readonly string[] = [
   "postPrompt",
 ];
 
-/** The glyph each tab state reports itself with. Glyphs, never emojis. */
+/**
+ * The glyph each tab state reports itself with. Glyphs, never emojis, with one
+ * exception the owner asked for by name (2026-10-08): a tab whose agent waits
+ * on the user wears the question mark emoji.
+ */
 const STATE_GLYPHS = {
   live: "●",
+  waitingOnUser: "❓",
   succeeded: "✓",
   failed: "✗",
 } as const satisfies Record<string, string>;
@@ -70,7 +76,7 @@ export interface MergeTab {
   tab: FeedMergeTab;
   /** The `kind` oneof arm ("queue", "prePrompt", …). */
   kind: string;
-  /** The `state` oneof arm within that kind ("live", "settled"). */
+  /** The `state` oneof arm within that kind ("live", "waitingOnUser", "settled"). */
   state: string;
   /** For a settled tab, the `outcome` arm ("succeeded" | "failed"). */
   outcome?: string;
@@ -187,6 +193,12 @@ export function drawTabStateGlyph(tab: MergeTab): HTMLElement {
       el.classList.add("is-live");
       el.textContent = STATE_GLYPHS.live;
       return el;
+    case "waitingOnUser":
+      // The merge's agent has a permission ask or a question open: the tab
+      // says so for exactly as long as the footer reads "waiting on user".
+      el.classList.add("is-waiting-on-user");
+      el.textContent = STATE_GLYPHS.waitingOnUser;
+      return el;
     case "settled":
       if (tab.outcome === "failed") {
         el.classList.add("is-failed");
@@ -217,7 +229,8 @@ export function drawTabStateGlyph(tab: MergeTab): HTMLElement {
 export function autoSelectedTab(tabs: readonly MergeTab[]): MergeTab | undefined {
   for (let i = tabs.length - 1; i >= 0; i -= 1) {
     const tab = tabs[i];
-    if (tab.state === "live") return tab;
+    // A tab waiting on the user is still running: the merge is there.
+    if (tab.state === "live" || tab.state === "waitingOnUser") return tab;
   }
   return tabs[tabs.length - 1];
 }

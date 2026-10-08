@@ -680,7 +680,10 @@ type HostHeldPromptEdit struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The held prompt being edited — the turn a commit or cancel names.
 	Turn *v11.TurnId `protobuf:"bytes,1,opt,name=turn,proto3" json:"turn,omitempty"`
-	// The prompt's content as the edit began, WHOLE.
+	// The person's words as the edit began: every block they composed, WHOLE.
+	// A quote the prompt replies with (conversation.v1.UserQuoteBlock) is left
+	// out: the daemon keeps it through the edit and puts it back ahead of the
+	// committed words, so an editor never holds one.
 	Said *v11.UserSaid `protobuf:"bytes,2,opt,name=said,proto3" json:"said,omitempty"`
 	// Which edit this is: daemon-minted, distinct for every begin, so a second
 	// edit of the same prompt with the same content is still a new edit.

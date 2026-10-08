@@ -33,6 +33,7 @@ import { createSidebarView, GROUPING_VIEW_KEY } from "./view.js";
 import type { Grouping, SidebarContext } from "./context.js";
 import { drawRosterShown, drawWorkspaceRoster } from "./roster.js";
 import { placeOpenRowDetails } from "./row.js";
+import { installMergedFit } from "./merged-fit.js";
 import { createSelectionEdge } from "./selection-edge.js";
 
 /** What every mount answers with. */
@@ -147,6 +148,9 @@ export function mountSidebar(host: HTMLElement, ctx: AppContext, deps: SidebarDe
   body.className = "sb-scroll";
   const head = drawRailHead(sc);
   host.replaceChildren(head.element, body);
+  // THE RECENTLY MERGED FIT (merged-fit.ts): re-fitted after every draw and on
+  // every resize of the rail or a pane.
+  const mergedFit = installMergedFit(body);
 
   // A FIXED PANEL DOES NOT TRAVEL WITH ITS ROW. It is anchored to the row's
   // rectangle at the moment it was placed, so anything that moves that
@@ -199,6 +203,8 @@ export function mountSidebar(host: HTMLElement, ctx: AppContext, deps: SidebarDe
       placeOpenRowDetails(body);
       // THE FIRST PUSH REVEALS THE RAIL, and nothing else ever does.
       host.hidden = false;
+      // Fitted once the rail is shown, so the band measures the rail it is in.
+      mergedFit.refit();
       selectionEdge?.observe(roster);
     },
   });
@@ -207,6 +213,7 @@ export function mountSidebar(host: HTMLElement, ctx: AppContext, deps: SidebarDe
     dispose(): void {
       log.debug("disposing the workspaces rail", { operation: "sidebar.dispose" });
       stream.cancel();
+      mergedFit.dispose();
       window.removeEventListener("resize", replace);
       window.removeEventListener("scroll", replace, true);
       host.removeEventListener("click", dismiss);

@@ -13,6 +13,7 @@ import (
 	"claude-repld/internal/classifier"
 	"claude-repld/internal/feedid"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/replyquote"
 	"claude-repld/internal/resolve/footer"
 	"claude-repld/internal/sessionwatcher"
 	"claude-repld/internal/wsm"
@@ -105,6 +106,35 @@ func TestDeliverMirrorsAnAttachedImageBesideTheWords(t *testing.T) {
 	}
 	if got := blocks[1].GetImage().GetSrc(); got != "src:/w/.claude/emacs/images/clip.png" {
 		t.Fatalf("the mirrored image src = %q, want the resolver's own answer", got)
+	}
+}
+
+// A REPLY'S QUOTE IS MIRRORED AS ITS OWN BLOCK: the live session's only draw
+// keeps the quote apart from the words, as the replayed row does, so the
+// collapsed bubble shows the words alone from the moment it lands.
+func TestDeliverMirrorsAReplysQuoteAsItsOwnBlock(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	said := replyquote.Quote(userSaid("and its population?"), "Paris.", false)
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), Submission{
+		WS: theWorkspace, Turn: "t1", Said: said,
+		Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT,
+	}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	// Assert
+	blocks := h.feed.mirrored()[0].GetUserPrompt().GetSuccess().GetBody().GetBlocks()
+	if len(blocks) != 2 {
+		t.Fatalf("the mirrored row carries %d blocks, want the quote and the words: %v", len(blocks), blocks)
+	}
+	if got, want := blocks[0].GetQuote().GetText(), said.GetContent().GetBlocks()[0].GetQuote().GetText(); got != want {
+		t.Fatalf("the mirrored quote = %q, want %q", got, want)
+	}
+	if got := blocks[1].GetText().GetText(); got != "and its population?" {
+		t.Fatalf("the mirrored words = %q, want the person's own", got)
 	}
 }
 

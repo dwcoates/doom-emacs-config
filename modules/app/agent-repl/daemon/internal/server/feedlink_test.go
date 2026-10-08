@@ -7,11 +7,13 @@ import (
 	"testing"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/proto"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	"claude-repld/internal/replyquote"
 	"claude-repld/internal/workspace"
 	"claude-repld/internal/wsm"
 )
@@ -128,11 +130,11 @@ func TestAnUnresolvedFeedLinksQuestionQuotesTheSourceBubble(t *testing.T) {
 	// Act.
 	openFeedLink(t, h, "nowhere.md", "row-1")
 
-	// Assert: quoted exactly as a reply to a selected response is.
-	got := saidTextOf(h.Prompts.lastSaid)
-	want := replyPrefixOpening + "see [AGENTS](nowhere.md)" + replyPrefixMessage + "which file is nowhere.md?"
-	if got != want {
-		t.Fatalf("question = %q, want %q", got, want)
+	// Assert: quoted exactly as a reply to a selected response is — the
+	// quote its own leading block, the question the block after it.
+	want := replyquote.Quote(said("which file is nowhere.md?"), "see [AGENTS](nowhere.md)", false)
+	if !proto.Equal(h.Prompts.lastSaid, want) {
+		t.Fatalf("question = %v, want %v", h.Prompts.lastSaid, want)
 	}
 }
 

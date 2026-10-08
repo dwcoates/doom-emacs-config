@@ -299,7 +299,9 @@ func feedPanel(panel *agentreplv1.SubmitPromptCommandPanel) *frontendv1.FeedComm
 }
 
 // saidText renders a submission's text: the text blocks, joined. Recognition
-// reads it and nothing else — an image carries no command.
+// reads it and nothing else — an image carries no command, and a reply's
+// quote block is not the person's words, so a command typed as a reply is
+// still recognized.
 func saidText(said *conversationv1.UserSaid) string {
 	out := ""
 	for _, block := range said.GetContent().GetBlocks() {

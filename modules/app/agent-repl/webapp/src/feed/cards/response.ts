@@ -74,7 +74,9 @@ import type {
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { log } from "../../log.js";
 import {
+  BUBBLE_MORE_ELLIPSIS,
   BUBBLE_UNCAPPED,
+  ELLIPSIS_CAP_LINES,
   SAYS_ATTRIBUTE,
   drawBubble,
   type BubbleCapLines,
@@ -116,12 +118,25 @@ export const REVEAL_SPEED_ATTRIBUTE = "data-reveal-speed";
 export const THINKING_BUBBLE_CLASS = "thinking-bubble";
 
 /**
- * A thinking bubble's line limit: the shared FIXED feed cap, in EVERY arm
- * (owner request, 2026-10-07). Arriving or landed, it is the same height, so
- * its own text landing changes nothing about its box and reflows nothing; it
- * never collapses further once it lands.
+ * A thinking bubble's line limit: ONE line under the ellipsis, in EVERY arm
+ * (owner request, 2026-10-08, replacing the fixed feed cap of 2026-10-07).
+ * Arriving or landed, it is the same height, so its own text landing changes
+ * nothing about its box and reflows nothing.
  */
-export const THINKING_CAP_LINES = "feed" satisfies BubbleCapLines;
+export const THINKING_CAP_LINES = ELLIPSIS_CAP_LINES satisfies BubbleCapLines;
+
+/**
+ * An INTERIM response's line limit: ONE line under the ellipsis (owner
+ * request, 2026-10-08). See `isInterimResponse` for which rows are interim.
+ */
+export const INTERIM_CAP_LINES = ELLIPSIS_CAP_LINES satisfies BubbleCapLines;
+
+/**
+ * The hook class an INTERIM response bubble wears, which the stylesheet keys
+ * its page-colored fill on (owner request, 2026-10-08), so the fill and the
+ * one-line cap are decided by the one predicate, `isInterimResponse`.
+ */
+export const INTERIM_RESPONSE_CLASS = "interim-response";
 
 /**
  * How many prose blocks one response row draws.
@@ -160,6 +175,7 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
   // border still wins over the green: the controller toggles the one
   // selected-entry class (`.entry-selected`, selected-entry.ts) on this bubble.
   if (u.finalAnswer && !u.thinking) hooks.push(FINAL_RESPONSE_CLASS);
+  if (isInterimResponse(u)) hooks.push(INTERIM_RESPONSE_CLASS);
 
   // The heading is the header strip, outside the body: the body is rewritten
   // by the prose painters (and by every frame of the type-out), so a heading
@@ -284,17 +300,24 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
 /**
  * The bubble's collapsed line limit, drawn verbatim from the row's own state.
  *
- * A RESPONSE IS NEVER ABBREVIATED (owner request, 2026-09-27): every
- * non-thinking response — arriving, interim (pear) or the turn's answer
- * (green) — is `BUBBLE_UNCAPPED`, shown at its full height with no fade, no
- * scroll and no fold. It is uncapped from its first fragment, so settling
- * changes nothing about its box and reflows nothing.
+ * THE TURN'S ANSWER IS NEVER ABBREVIATED (owner request, 2026-09-27): the
+ * green final answer and a response the turn's death cut short are
+ * `BUBBLE_UNCAPPED`, shown at their full height with no fade, no scroll and no
+ * fold.
+ *
+ * AN INTERIM RESPONSE IS ONE LINE (owner request, 2026-10-08,
+ * `INTERIM_CAP_LINES`): it collapses to its first line, ending in the ellipsis
+ * when more follows, and expands to all of it. It is one line once the daemon
+ * proves it interim (`isInterimResponse`); until then it is drawn in full,
+ * like the answer it may still become. A box never switches mode in place, so
+ * the draw that first carries the proof is a fresh, capped bubble
+ * (src/bubble/draw.ts).
  *
  * A THINKING BUBBLE IS A FIXED HEIGHT FROM ITS FIRST FRAGMENT TO LONG AFTER
- * IT LANDS (`THINKING_CAP_LINES`): its arm never changes its cap, so it never
- * collapses when its own text lands. Only the DEFAULT limit is fixed: a bubble
- * the reader expanded wears `.expanded` on its scroll box, which the in-place
- * redraw keeps (src/bubble/draw.ts), so it stays open.
+ * IT LANDS (`THINKING_CAP_LINES`, one line): its arm never changes its cap, so
+ * it never collapses when its own text lands. Only the DEFAULT limit is fixed:
+ * a bubble the reader expanded wears `.expanded` on its scroll box, which the
+ * in-place redraw keeps (src/bubble/draw.ts), so it stays open.
  */
 export function responseCapLines(u: FeedResponse): BubbleCapLines {
   return responseCap(u).capLines;
@@ -302,11 +325,27 @@ export function responseCapLines(u: FeedResponse): BubbleCapLines {
 
 /**
  * The bubble's cap: its collapsed line limit (`responseCapLines`) and its more
- * signal. A thinking bubble is under the shared feed cap, which the ellipsis
- * cannot state (no whole line count), so it says "more" with the default fade.
+ * signal. A thinking or interim bubble is one line, which says "more" with the
+ * one bubble's ellipsis (`BUBBLE_MORE_ELLIPSIS`), the held prompt's own
+ * mechanism; every other response is uncapped.
  */
 export function responseCap(u: FeedResponse): BubbleCapSpec {
-  return { capLines: u.thinking ? THINKING_CAP_LINES : BUBBLE_UNCAPPED };
+  if (u.thinking) return { capLines: THINKING_CAP_LINES, more: BUBBLE_MORE_ELLIPSIS };
+  if (isInterimResponse(u)) return { capLines: INTERIM_CAP_LINES, more: BUBBLE_MORE_ELLIPSIS };
+  return { capLines: BUBBLE_UNCAPPED };
+}
+
+/**
+ * Whether U is an INTERIM response (owner request, 2026-10-08): prose the
+ * daemon has PROVEN interim (`interim`: a later row of its turn landed after
+ * it), that is not the turn's answer (`final_answer`), and that the turn's
+ * death did not cut short. A response that is still its turn's latest row is
+ * NOT interim, so a final answer is drawn in full from its first fragment and
+ * never collapses, not even while it streams. Every fact here is the row's
+ * own; which response is interim is the daemon's to say.
+ */
+export function isInterimResponse(u: FeedResponse): boolean {
+  return !u.thinking && u.interim && !u.finalAnswer && u.result.case !== "error";
 }
 
 /**

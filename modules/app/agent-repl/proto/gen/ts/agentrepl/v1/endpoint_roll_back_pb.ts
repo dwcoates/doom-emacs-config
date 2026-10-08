@@ -95,7 +95,9 @@ export const RollBackResponseSchema: GenMessage<RollBackResponse> = /*@__PURE__*
 export type RollBackSuccess = Message<"agentrepl.v1.RollBackSuccess"> & {
   /**
    * The prompt rolled back, as the user said it: its text and attachments,
-   * for the composer to hold again.
+   * for the composer to hold again. A quote the prompt replied with
+   * (conversation.v1.UserQuoteBlock) is left out: a resend replies to
+   * whatever is selected when it is sent.
    *
    * @generated from field: conversation.v1.UserSaid prompt = 1;
    */

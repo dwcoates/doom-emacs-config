@@ -453,11 +453,15 @@ interface PermissionGateDeps {
 interface PendingBase {
   readonly toolUseId: string;
   readonly agentId: conversationv1.AgentId;
+  /** Whether a keep-alive raised it on the main agent: such an ask is never served. */
+  readonly keepalive: boolean;
   resolve(result: PermissionResultLike): void;
 }
 
 interface PendingQuestion extends PendingBase {
   readonly kind: "question";
+  /** The ask exactly as its start frame carried it. */
+  readonly ask: conversationv1.AgentQuestion;
   readonly batch: conversationv1.AgentQuestionBatch;
   readonly input: Record<string, unknown>;
   readonly startedAtMs: number;
@@ -465,6 +469,8 @@ interface PendingQuestion extends PendingBase {
 
 interface PendingPermission extends PendingBase {
   readonly kind: "permission";
+  /** The ask exactly as its start frame carried it. */
+  readonly ask: conversationv1.AgentPermission;
   readonly toolName: string;
   readonly offeredStanding?: conversationv1.AgentPermissionStanding;
   readonly startedAtMs: number;
@@ -648,6 +654,30 @@ export class PermissionGate {
     return this.pendingByToolUse.size;
   }
 
+  /**
+   * Every ask blocking the vendor right now, in the order they opened, each as
+   * its start frame carried it — what a re-announcement states, so a daemon
+   * that attaches while the user is being asked stands the gate it was not
+   * there to see open. An ask a keep-alive raised is left out, as the
+   * keep-alive's turn is.
+   */
+  openAsks(): conversationv1.SessionOpenAsk[] {
+    const asks: conversationv1.SessionOpenAsk[] = [];
+    for (const pending of this.pendingByToolUse.values()) {
+      if (pending.keepalive) continue;
+      asks.push(
+        create(conversationv1.SessionOpenAskSchema, {
+          agent: pending.agentId,
+          ask:
+            pending.kind === "question"
+              ? { case: "question", value: pending.ask }
+              : { case: "permission", value: pending.ask },
+        }),
+      );
+    }
+    return asks;
+  }
+
   // -- questions ------------------------------------------------------------
 
   private openQuestion(
@@ -670,11 +700,23 @@ export class PermissionGate {
     id: conversationv1.AgentQuestionId,
     startedAtMs: number,
   ): Promise<PermissionResultLike> {
+    const ask = create(conversationv1.AgentQuestionSchema, {
+      id,
+      result: {
+        case: "start",
+        value: create(conversationv1.AgentQuestionStartSchema, {
+          batch,
+          startedAt: create(conversationv1.AgentActivityStartedAtSchema, { atMs: BigInt(startedAtMs) }),
+        }),
+      },
+    });
     return new Promise<PermissionResultLike>((resolve) => {
       this.pendingByToolUse.set(options.toolUseID, {
         kind: "question",
         toolUseId: options.toolUseID,
         agentId,
+        keepalive: this.deps.keepalive(agentId),
+        ask,
         batch,
         input,
         startedAtMs,
@@ -683,16 +725,7 @@ export class PermissionGate {
       this.deps.persist([
         this.entry(agentId, questionUpsertKey(id), options.toolUseID, "agent_frame.update.question.start", {
           case: "question",
-          value: create(conversationv1.AgentQuestionSchema, {
-            id,
-            result: {
-              case: "start",
-              value: create(conversationv1.AgentQuestionStartSchema, {
-                batch,
-                startedAt: create(conversationv1.AgentActivityStartedAtSchema, { atMs: BigInt(startedAtMs) }),
-              }),
-            },
-          }),
+          value: ask,
         }),
       ]);
       LOGGER.debug(
@@ -799,11 +832,33 @@ export class PermissionGate {
         ? undefined
         : toStanding(options.suggestions);
     const trigger = permissionTrigger(options);
+    const ask = create(conversationv1.AgentPermissionSchema, {
+      id,
+      gatedCall: toolCallActivityId(options.toolUseID),
+      result: {
+        case: "start",
+        value: create(conversationv1.AgentPermissionStartSchema, {
+          // The VENDOR renders the prompt sentence; the shim never writes
+          // one of its own, because the vendor's wording is what the user
+          // would have seen in the terminal.
+          prompt: create(conversationv1.AgentPermissionPromptSchema, {
+            title: options.title ?? toolName,
+            displayName: options.displayName ?? toolName,
+            ...(options.description === undefined ? {} : { description: options.description }),
+          }),
+          startedAt: create(conversationv1.AgentActivityStartedAtSchema, { atMs: BigInt(startedAtMs) }),
+          ...(trigger === undefined ? {} : { trigger }),
+          ...(offeredStanding === undefined ? {} : { offeredStanding }),
+        }),
+      },
+    });
     return new Promise<PermissionResultLike>((resolve) => {
       this.pendingByToolUse.set(options.toolUseID, {
         kind: "permission",
         toolUseId: options.toolUseID,
         agentId,
+        keepalive: this.deps.keepalive(agentId),
+        ask,
         toolName,
         startedAtMs,
         resolve,
@@ -812,26 +867,7 @@ export class PermissionGate {
       this.deps.persist([
         this.entry(agentId, permissionUpsertKey(id), options.toolUseID, "agent_frame.update.permission.start", {
           case: "permission",
-          value: create(conversationv1.AgentPermissionSchema, {
-            id,
-            gatedCall: toolCallActivityId(options.toolUseID),
-            result: {
-              case: "start",
-              value: create(conversationv1.AgentPermissionStartSchema, {
-                // The VENDOR renders the prompt sentence; the shim never writes
-                // one of its own, because the vendor's wording is what the user
-                // would have seen in the terminal.
-                prompt: create(conversationv1.AgentPermissionPromptSchema, {
-                  title: options.title ?? toolName,
-                  displayName: options.displayName ?? toolName,
-                  ...(options.description === undefined ? {} : { description: options.description }),
-                }),
-                startedAt: create(conversationv1.AgentActivityStartedAtSchema, { atMs: BigInt(startedAtMs) }),
-                ...(trigger === undefined ? {} : { trigger }),
-                ...(offeredStanding === undefined ? {} : { offeredStanding }),
-              }),
-            },
-          }),
+          value: ask,
         }),
       ]);
       LOGGER.debug(

@@ -14,8 +14,8 @@
  *
  * GLYPHS, NOT EMOJIS. The merge arms spend no color (they are `none` in the
  * file) and report themselves with a glyph instead; `inactive` draws a plain
- * question mark, `none` draws nothing at all but still holds the column's
- * width so names stay aligned. Every character here is a plain text glyph —
+ * question mark, `none` and a landed merge's `check` draw nothing at all but
+ * still hold the column's width so names stay aligned. Every character here is a plain text glyph —
  * no emoji presentation, no variation selectors.
  */
 import { toneClass, rosterStatusColor, mergeGlyph } from "../vocab.js";
@@ -31,6 +31,7 @@ export const ROSTER_STATUS_CASES = [
   "clearing",
   "compacting",
   "permission",
+  "question",
   "done",
   "interrupted",
   "turnFailed",
@@ -85,7 +86,11 @@ export const GLYPH_CHARS: Readonly<Record<string, string>> = Object.freeze({
   queue: "≡",
   recycle: "⟳",
   failed: "✕",
-  check: "✓",
+  // A LANDED MERGE DRAWS NOTHING (owner request, 2026-10-08: no green check in
+  // the rail). The vocabulary still names its glyph `check`, which other
+  // surfaces may draw; here the name maps to no character, so the mark's box
+  // (a `.st-glyph`, no disc) is empty yet holds the column, as `none` does.
+  check: "",
   inactive: "?",
   dot: "",
   none: "",
@@ -138,8 +143,8 @@ export function glyphName(arm: RosterStatusCase): string {
  * is always the same: work is in flight and a prompt cannot land right now.
  *
  * The legacy rail already made exactly this claim for these arms and it is
- * kept unchanged: the four busy states and a pending permission or other
- * wait on you (ready AND waiting on you) breathe; detached work breathes in its own amber; a merge
+ * kept unchanged: the four busy states and a pending permission, question or
+ * other wait on you (ready AND waiting on you) breathe; detached work breathes in its own amber; a merge
  * in hand spins instead. Everything else is still, because nothing about it is
  * in progress.
  */
@@ -150,6 +155,7 @@ export function armBreathes(arm: RosterStatusCase): boolean {
     case "clearing":
     case "compacting":
     case "permission":
+    case "question":
     case "waiting":
     case "idleAsync":
       return true;

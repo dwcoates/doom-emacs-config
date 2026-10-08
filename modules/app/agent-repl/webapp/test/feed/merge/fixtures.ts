@@ -36,7 +36,8 @@ export interface TabSpec {
     | "committing"
     | "updatingMain"
     | "postPrompt";
-  state: "live" | "settled";
+  /** `waitingOnUser` only for the agentic kinds that carry it (conflicts, fixes). */
+  state: "live" | "settled" | "waitingOnUser";
   /** For `settled`. */
   outcome?: "succeeded" | "failed";
   /** For a settled failure. */
@@ -86,7 +87,9 @@ export function tabRow(rowId: string, spec: TabSpec): FeedRow {
   const state =
     spec.state === "live"
       ? { case: "live" as const, value: { startedAtMs } }
-      : {
+      : spec.state === "waitingOnUser"
+        ? { case: "waitingOnUser" as const, value: { startedAtMs } }
+        : {
           case: "settled" as const,
           value: {
             startedAtMs,

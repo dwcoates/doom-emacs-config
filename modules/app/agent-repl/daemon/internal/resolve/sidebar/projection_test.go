@@ -92,7 +92,7 @@ func TestAnImpairedDaemonDrawsTheRowDaemonImpaired(t *testing.T) {
 	}
 }
 
-func TestAnOpenQuestionDrawsTheRowWaiting(t *testing.T) {
+func TestAnOpenQuestionDrawsTheRowQuestion(t *testing.T) {
 	// Arrange
 	r := live(t, arrange(t))
 	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
@@ -109,8 +109,47 @@ func TestAnOpenQuestionDrawsTheRowWaiting(t *testing.T) {
 	})
 
 	// Assert
-	if got := statusName(onlyRow(t, r)); got != "waiting" {
-		t.Fatalf("status = %q, want waiting", got)
+	if got := statusName(onlyRow(t, r)); got != "question" {
+		t.Fatalf("status = %q, want question", got)
+	}
+}
+
+// TestAGateDrawsTheRowForTheGate pins the owner's ruling of 2026-10-08: a
+// workspace whose running turn waits on a permission or a question gate draws
+// the gate's own arm, green, never thinking; a cold gate stays `waiting`.
+func TestAGateDrawsTheRowForTheGate(t *testing.T) {
+	tests := []struct {
+		name string
+		open func(f footer.Resolver)
+		want string
+	}{
+		{name: "a permission gate", open: func(f footer.Resolver) {
+			f.OnPermission(theWS, agent("main"), &conversationv1.AgentPermission{
+				Id: &conversationv1.AgentPermissionId{Value: "p1"},
+				Result: &conversationv1.AgentPermission_Start{Start: &conversationv1.AgentPermissionStart{
+					Prompt: &conversationv1.AgentPermissionPrompt{Title: "Claude wants to run make"},
+				}},
+			})
+		}, want: "permission"},
+		{name: "a cold gate", open: func(f footer.Resolver) {
+			f.SetColdGate(theWS, footer.ColdGate{Standing: true, Cost: footer.ColdGateCost{Lead: "cold"}})
+		}, want: "waiting"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: a turn in flight.
+			r := live(t, arrange(t))
+			r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
+			r.AckTurn(theWS)
+
+			// Act
+			tt.open(footerOf(t, r))
+
+			// Assert
+			if got := statusName(onlyRow(t, r)); got != tt.want {
+				t.Fatalf("status = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 

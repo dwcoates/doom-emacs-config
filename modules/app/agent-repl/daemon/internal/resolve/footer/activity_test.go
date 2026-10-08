@@ -225,7 +225,7 @@ func TestEverySalientLineCarriesItsStandingInstant(t *testing.T) {
 	}
 }
 
-func TestTheWaitingLineStandsFromWhenItsConditionOpened(t *testing.T) {
+func TestThePermissionLineStandsFromWhenItsAskOpened(t *testing.T) {
 	// Arrange: the ask opens, then an unrelated fact re-renders later.
 	h := newHarness(t)
 	connected(h)
@@ -236,7 +236,7 @@ func TestTheWaitingLineStandsFromWhenItsConditionOpened(t *testing.T) {
 	h.r.SetParked(testWS, false)
 
 	// Assert
-	at := h.view(t).GetStrip().GetStatus().GetWaiting().GetActivity().GetSalient().GetAt()
+	at := h.view(t).GetStrip().GetStatus().GetPermission().GetActivity().GetSalient().GetAt()
 	if at.GetAtMs() != instant.UnixMilli() {
 		t.Fatalf("at = %d, want the instant the ask opened, not the render's", at.GetAtMs())
 	}

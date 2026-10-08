@@ -164,6 +164,7 @@ func (r *resolver) emptyFeed(f *feedState) int {
 	f.rows = map[string]*frontendv1.FeedRow{}
 	f.nonDurable = map[string]bool{}
 	f.superseded = map[string]bool{}
+	f.interim = map[string]bool{}
 	f.entryRows = map[string]uint32{}
 	f.followers = map[string]uint32{}
 	// THE LOADED HISTORY GOES TOO: its pages, its read position and its

@@ -338,15 +338,25 @@ message RosterMergedSectionCollapsed {}
 // never an element of the header.
 message RosterSectionHeader {
   RosterLabel label = 1;
-  // How many workspaces the section holds, drawn as "(N)" beside the label
-  // while the section is FOLDED (the client shows or hides this resolved value
-  // by the section's fold; it never counts rows itself). Always set.
+  // How many workspaces the section SHOWS UNFOLDED, drawn as "(N)" beside the
+  // label while the section is FOLDED (owner request, 2026-10-08: the folded
+  // count equals the rows the unfolded section shows). The client shows or
+  // hides this resolved value by the section's fold; it never counts a
+  // repository's rows itself. Always set.
+  //
+  // THE RECENTLY MERGED BAND'S is every merged row it carries; a client that
+  // shows only the merges that FIT its rail (the webapp: no fixed cap, as many
+  // as fit without scrolling) draws the number it shows instead, from the one
+  // fit that hides the rest, since only it knows its height.
   RosterSectionCount count = 2;
 }
 
-// A section's workspace count: every row the section's rows region carries,
-// nested family rows included. Drawn smaller than the label, in the label's
-// own color.
+// A section's workspace count. A repository section's is every row of its
+// rows region, nested family rows included, that is NOT closed
+// (RosterRowClosed): a closed row rides the wire for Emacs but is never
+// drawn, and its live descendants are drawn in its place. The merged band's
+// is its row count (each merged row is closed by design, and is exactly what
+// the band shows). Drawn smaller than the label, in the label's own color.
 message RosterSectionCount {
   uint32 workspaces = 1;
 }
@@ -456,8 +466,14 @@ message RosterRow {
     RosterRowStatusClearing clearing = 5;
     // The context is being compacted.
     RosterRowStatusCompacting compacting = 6;
-    // A tool-permission request is waiting on the user.
+    // A PERMISSION GATE: a tool call waits on the user's consent. GREEN, the
+    // workspace is ready for the user: the same coarse claim as the footer's
+    // `permission` status.
     RosterRowStatusPermission permission = 7;
+    // A QUESTION GATE: a question batch waits on the user's answers. GREEN,
+    // as `permission` is: the same coarse claim as the footer's `question`
+    // status.
+    RosterRowStatusQuestion question = 56;
     // The turn finished. While its result is UNREAD this arm outranks
     // `idle_async`; once read it is drawn with `viewed` (see RosterRowViewed).
     RosterRowStatusDone done = 8;
@@ -565,11 +581,11 @@ message RosterRow {
     // the same coarse claim as the footer's
     // `agent_repl_fault · daemon_impaired`.
     RosterRowStatusDaemonImpaired daemon_impaired = 54;
-    // The session waits on something other than a tool permission: an open
-    // question to the user, a cold gate standing between it and the next
-    // turn, or an interrupt the user sent that has not yet landed. GREEN, the
-    // same coarse claim as the footer's `waiting` status in those substatuses;
-    // a tool permission keeps its own `permission` arm.
+    // The session waits on something other than a gate's card: a cold gate
+    // standing between it and the next turn, or an interrupt the user sent
+    // that has not yet landed. GREEN, the same coarse claim as the footer's
+    // `waiting` status in those substatuses; a permission or a question gate
+    // has its own arm.
     RosterRowStatusWaiting waiting = 55;
   }
   // Tags 19 (`merge_enqueuing`) and 22 (`merge_conflict`) are RETIRED: no
@@ -718,7 +734,11 @@ message RosterRowStatusClearing {}
 
 message RosterRowStatusCompacting {}
 
+// The row's status while a tool call waits on the user's consent.
 message RosterRowStatusPermission {}
+
+// The row's status while a question batch waits on the user's answers.
+message RosterRowStatusQuestion {}
 
 message RosterRowStatusDone {}
 
@@ -742,8 +762,8 @@ message RosterRowStatusApiRetrying {}
 message RosterRowStatusClosing {}
 // The row's status while the daemon itself cannot serve the workspace.
 message RosterRowStatusDaemonImpaired {}
-// The row's status while the session waits on the user for something other
-// than a tool permission.
+// The row's status while the session waits on a cold gate's answer or on an
+// interrupt landing.
 message RosterRowStatusWaiting {}
 
 message RosterRowStatusInit {}
