@@ -637,6 +637,8 @@ sits flush on the bar with no ground of its own.  See
     (:start-failed    . "blue")
 
     (:network-fault   . "blue")
+    (:closing         . "blue")
+    (:daemon-impaired . "blue")
 
     (:vendor-blocked  . "turquoise")
     (:vendor-fault    . "turquoise")
@@ -656,6 +658,7 @@ sits flush on the bar with no ground of its own.  See
     (:done            . "green")
     (:interrupted     . "green")
     (:permission      . "green")
+    (:waiting         . "green")
 
     (:merging         . "purple")
     (:merge-queued    . "purple")
@@ -691,8 +694,11 @@ the workspace is usable (`:turn-failed\=', `:merge-failed\=',
 `:degraded\=', and the VENDOR FAULTS `:vendor-blocked\=', `:vendor-fault\='
 and `:api-retrying\='); BLUE, the workspace is unusable right now (an
 agent-repl fault -- `:init\=', `:severed\=', `:dead\=', `:start-failed\=',
-`:turn-died\=' (the last turn died with agent-repl\='s machinery) --
-or the NETWORK FAULT `:network-fault\=').  Owner ruling 2026-10-02:
+`:turn-died\=' (the last turn died with agent-repl\='s machinery),
+`:daemon-impaired\=' (the daemon itself cannot serve) -- a refused close
+`:closing\=', or the NETWORK FAULT `:network-fault\=').  `:waiting\=' (a
+wait on the user other than a tool permission) is green, as
+`:permission\=' is.  Owner ruling 2026-10-02:
 agent_repl_fault > network_fault > vendor_fault.
 
 EVERY MERGE ARM IS COLORED AS WELL AS GLYPHED (owner rulings,
@@ -903,6 +909,13 @@ in `agent-repl--color-default-bracket'."
                      'agent-repl-tab-permission
                      agent-repl--color-done-green
                      agent-repl--color-dark))
+    ;; WAITING is a permission's green: the session waits on the user for
+    ;; something other than a tool permission -- a question, a cold gate, or
+    ;; an interrupt still landing.
+    (:waiting . ,(agent-repl--tab-palette-row
+                  'agent-repl-tab-permission
+                  agent-repl--color-done-green
+                  agent-repl--color-dark))
     (:ready . ,(agent-repl--tab-palette-row
                 'agent-repl-tab-ready
                 agent-repl--color-done-green
@@ -933,6 +946,17 @@ in `agent-repl--color-default-bracket'."
                         'agent-repl-tab-init
                         agent-repl--color-init-blue
                         agent-repl--color-light))
+    ;; A REFUSED CLOSE and an IMPAIRED DAEMON are BLUE, as the footer's
+    ;; `closing' and `agent_repl_fault · daemon_impaired' are: the workspace
+    ;; cannot be used as asked right now.
+    (:closing . ,(agent-repl--tab-palette-row
+                  'agent-repl-tab-init
+                  agent-repl--color-init-blue
+                  agent-repl--color-light))
+    (:daemon-impaired . ,(agent-repl--tab-palette-row
+                          'agent-repl-tab-init
+                          agent-repl--color-init-blue
+                          agent-repl--color-light))
     ;; MERGE-FAILED is TURQUOISE and keeps its ✗ (owner ruling, 2026-09-28):
     ;; something went wrong, but the merge no longer holds the workspace, so
     ;; it is usable.

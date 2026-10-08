@@ -3571,11 +3571,13 @@ test can assert the re-assertion left an already-correct frame alone."
 
 (ert-deftest agent-repl-test-status-the-blue-band-is-the-unusable-workspace ()
   "Blue is every way the workspace is UNUSABLE right now (owner ruling,
-2026-10-02): an agent-repl fault and a network fault.  A turn that died
-with agent-repl's machinery is one (owner ruling, 2026-10-06)."
+2026-10-02): an agent-repl fault, a network fault and a refused close.  A
+turn that died with agent-repl's machinery is one (owner ruling,
+2026-10-06), and so is the daemon itself being impaired."
   ;; Act / Assert
   (should (equal (sort (agent-repl-test-status--arms-taking "blue") #'string<)
-                 (sort (list :init :severed :dead :start-failed :turn-died :network-fault)
+                 (sort (list :init :severed :dead :start-failed :turn-died :network-fault
+                             :closing :daemon-impaired)
                        #'string<))))
 
 (ert-deftest agent-repl-test-tab-spec-turn-died-is-blue ()
@@ -3613,12 +3615,13 @@ there is no enqueuing arm (merge-landing.md, Landed change 1)."
   (should (equal (agent-repl-test-status--arms-taking "yellow") '(:idle-async))))
 
 (ert-deftest agent-repl-test-status-green-is-ready-or-landed ()
-  "Green covers ready, done, interrupted, permission and a landed merge:
-the workspace is ready for the user.  A merge never parks on a conflict,
-so no merge arm but `:merged' is green (merge-landing.md, Landed change 1)."
+  "Green covers ready, done, interrupted, permission, any other wait on the
+user and a landed merge: the workspace is ready for the user.  A merge
+never parks on a conflict, so no merge arm but `:merged' is green
+\(merge-landing.md, Landed change 1)."
   ;; Act / Assert
   (should (equal (sort (agent-repl-test-status--arms-taking "green") #'string<)
-                 (sort (list :ready :done :interrupted :permission :merged)
+                 (sort (list :ready :done :interrupted :permission :waiting :merged)
                        #'string<))))
 
 (ert-deftest agent-repl-test-status-none-is-a-real-answer ()

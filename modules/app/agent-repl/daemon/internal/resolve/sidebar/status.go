@@ -396,6 +396,15 @@ func setStatus(row *frontendv1.RosterRow, arm string, log dlog.Logger) {
 	case "none":
 		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"none\""})
 		row.Status = &frontendv1.RosterRow_None{None: &frontendv1.RosterRowStatusNone{}}
+	case "closing":
+		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"closing\""})
+		row.Status = &frontendv1.RosterRow_Closing{Closing: &frontendv1.RosterRowStatusClosing{}}
+	case "daemon_impaired":
+		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"daemon_impaired\""})
+		row.Status = &frontendv1.RosterRow_DaemonImpaired{DaemonImpaired: &frontendv1.RosterRowStatusDaemonImpaired{}}
+	case "waiting":
+		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"waiting\""})
+		row.Status = &frontendv1.RosterRow_Waiting{Waiting: &frontendv1.RosterRowStatusWaiting{}}
 	case "inactive":
 		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"inactive\""})
 		row.Status = &frontendv1.RosterRow_Inactive{Inactive: &frontendv1.RosterRowStatusInactive{}}

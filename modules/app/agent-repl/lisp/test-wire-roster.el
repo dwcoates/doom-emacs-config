@@ -165,9 +165,21 @@ arriving as an unknown field on some later push."
                        #'string<)))
     (should (equal spelled declared))))
 
-(ert-deftest agent-repl-test-wire-roster-row-status-count-is-twenty-six ()
-  "The status vocabulary is the 26 arms the contract declares."
-  (should (equal (length agent-repl-wire-roster-row-status-keywords) 26)))
+(ert-deftest agent-repl-test-wire-roster-row-status-count-is-twenty-nine ()
+  "The status vocabulary is the 29 arms the contract declares."
+  (should (equal (length agent-repl-wire-roster-row-status-keywords) 29)))
+
+(ert-deftest agent-repl-test-wire-roster-decodes-the-closing-arm ()
+  "The closing arm decodes to its keyword: a refused close."
+  (should (memq :closing agent-repl-wire-roster-row-status-keywords)))
+
+(ert-deftest agent-repl-test-wire-roster-decodes-the-daemon-impaired-arm ()
+  "The daemon-impaired arm decodes to its keyword."
+  (should (memq :daemon-impaired agent-repl-wire-roster-row-status-keywords)))
+
+(ert-deftest agent-repl-test-wire-roster-decodes-the-waiting-arm ()
+  "The waiting arm decodes to its keyword: a wait other than a permission."
+  (should (memq :waiting agent-repl-wire-roster-row-status-keywords)))
 
 (ert-deftest agent-repl-test-wire-roster-decodes-the-turn-died-arm ()
   "The turn-died arm decodes to its keyword (owner ruling, 2026-10-06)."

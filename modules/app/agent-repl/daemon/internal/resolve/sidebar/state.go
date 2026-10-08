@@ -17,7 +17,7 @@ var statusArms = []string{
 	"interrupted", "turn_failed", "ready", "idle_async", "vendor_blocked", "vendor_fault", "network_fault", "api_retrying", "init", "severed",
 	"start_failed", "degraded", "dead", "turn_died", "merging",
 	"merge_queued", "merge_failed", "merged", "none",
-	"inactive",
+	"inactive", "closing", "daemon_impaired", "waiting",
 }
 
 // The merge arms of RosterRow.status — the ones that render a RECYCLE GLYPH

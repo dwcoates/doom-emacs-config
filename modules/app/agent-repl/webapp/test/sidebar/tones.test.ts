@@ -95,14 +95,14 @@ describe("the status mark", () => {
 });
 
 describe("the rail's two animations", () => {
-  it.each(["submitting", "thinking", "clearing", "compacting", "permission", "idleAsync"] as const)(
+  it.each(["submitting", "thinking", "clearing", "compacting", "permission", "waiting", "idleAsync"] as const)(
     "breathes on %s",
     (arm) => {
       expect(armBreathes(arm)).toBe(true);
     },
   );
 
-  it.each(["ready", "done", "interrupted", "turnFailed", "dead", "merged", "none", "inactive"] as const)(
+  it.each(["ready", "done", "interrupted", "turnFailed", "dead", "merged", "none", "inactive", "closing", "daemonImpaired"] as const)(
     "is still on %s",
     (arm) => {
       expect(armBreathes(arm)).toBe(false);
