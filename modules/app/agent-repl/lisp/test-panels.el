@@ -3714,6 +3714,146 @@ rather than booting a session as a side effect."
       ;; Assert.
       (should (eq captured agent-repl--global-log-scope)))))
 
+;;;; ---- Tests: the webview's window survives persp-mode's restore ----
+
+(defmacro agent-repl-test-panels--with-panel-frame (bindings &rest body)
+  "Run BODY on a fresh panel layout, restoring the frame afterwards.
+BINDINGS names (VIEW-WIN INPUT-WIN VIEW-BUF INPUT-BUF): the frame is the
+webview window above the composer, as `agent-repl--frontend-display-webview'
+lays it out, the composer selected, and VIEW-BUF in
+`agent-repl-frontend-webview-mode'."
+  (declare (indent 1))
+  (let ((view-win (nth 0 bindings)) (input-win (nth 1 bindings))
+        (view-buf (nth 2 bindings)) (input-buf (nth 3 bindings)))
+    `(let ((wconf (current-window-configuration))
+           (,view-buf (generate-new-buffer "*agent-frontend-keep-a*"))
+           (,input-buf (generate-new-buffer "*agent-panel-input-keep-a*")))
+       (unwind-protect
+           (progn
+             (with-current-buffer ,view-buf
+               (setq-local agent-repl-frontend-webview-mode t))
+             (delete-other-windows)
+             (let* ((,view-win (selected-window))
+                    (,input-win (split-window ,view-win nil 'below)))
+               (set-window-buffer ,view-win ,view-buf)
+               (set-window-buffer ,input-win ,input-buf)
+               (select-window ,input-win)
+               ,@body))
+         (set-window-configuration wconf)
+         (kill-buffer ,view-buf)
+         (kill-buffer ,input-buf)))))
+
+(defun agent-repl-test-panels--persp-restore (state)
+  "Restore STATE the way `persp-restore-window-conf' does, collapse first.
+The two steps of persp-mode's standard restore: `persp-delete-other-windows'
+keeps the selected window, then `window-state-put' fills the frame root."
+  (let ((ignore-window-parameters t))
+    (delete-other-windows (selected-window)))
+  (window-state-put state (frame-root-window) t))
+
+(ert-deftest agent-repl-test-panels-keep-webview-window-selects-it-over-the-composer ()
+  "Before the collapse, the webview's window is selected over the composer."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-panels--with-panel-frame (view-win _input-win _view-buf _input-buf)
+      ;; Act.
+      (agent-repl--keep-webview-window-through-restore)
+      ;; Assert.
+      (should (eq (selected-window) view-win)))))
+
+(ert-deftest agent-repl-test-panels-keep-webview-window-without-a-webview-changes-nothing ()
+  "A frame showing no webview keeps its selection."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-panels--with-panel-frame (_view-win input-win view-buf _input-buf)
+      ;; Arrange.
+      (with-current-buffer view-buf
+        (setq-local agent-repl-frontend-webview-mode nil))
+      ;; Act.
+      (agent-repl--keep-webview-window-through-restore)
+      ;; Assert.
+      (should (eq (selected-window) input-win)))))
+
+(ert-deftest agent-repl-test-panels-keep-webview-window-ignores-a-side-window ()
+  "A webview shown only in a side window is not what the collapse keeps."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-panels--with-panel-frame (view-win input-win _view-buf _input-buf)
+      (unwind-protect
+          (progn
+            ;; Arrange.
+            (set-window-parameter view-win 'window-side 'top)
+            ;; Act.
+            (agent-repl--keep-webview-window-through-restore)
+            ;; Assert.
+            (should (eq (selected-window) input-win)))
+        (set-window-parameter view-win 'window-side nil)))))
+
+(ert-deftest agent-repl-test-panels-switch-puts-the-next-webview-in-the-same-window ()
+  "A switch between panel layouts shows the next webview in the SAME window.
+The invariant that keeps an xwidget's view alive across switches: the
+window object that showed workspace A's webview shows workspace B's after
+persp-mode's restore, so B's page is re-shown rather than re-attached."
+  (agent-repl-test--with-clean-state
+    (let ((b-view (generate-new-buffer "*agent-frontend-keep-b*"))
+          (b-input (generate-new-buffer "*agent-panel-input-keep-b*")))
+      (unwind-protect
+          (agent-repl-test-panels--with-panel-frame (view-win _input-win view-buf input-buf)
+            ;; Arrange: B's saved configuration is the same panel layout.
+            (set-window-buffer view-win b-view)
+            (set-window-buffer (next-window view-win) b-input)
+            (let ((b-state (window-state-get (frame-root-window) t)))
+              (set-window-buffer view-win view-buf)
+              (set-window-buffer (next-window view-win) input-buf)
+              ;; Act.
+              (agent-repl--keep-webview-window-through-restore)
+              (agent-repl-test-panels--persp-restore b-state)
+              ;; Assert.
+              (should (eq (get-buffer-window b-view) view-win))))
+        (kill-buffer b-view)
+        (kill-buffer b-input)))))
+
+(ert-deftest agent-repl-test-panels-switch-to-a-gated-workspace-keeps-the-webview-window ()
+  "A switch to a workspace whose gate hides its composer keeps the window too.
+A standing gate leaves the webview alone on the frame, so the restored
+configuration is a single window, which the kept window becomes."
+  (agent-repl-test--with-clean-state
+    (let ((b-view (generate-new-buffer "*agent-frontend-keep-b*")))
+      (unwind-protect
+          (agent-repl-test-panels--with-panel-frame (view-win input-win view-buf _input-buf)
+            ;; Arrange: B's saved configuration is its webview alone.
+            (let ((b-state (save-window-excursion
+                             (delete-window input-win)
+                             (set-window-buffer view-win b-view)
+                             (window-state-get (frame-root-window) t))))
+              (set-window-buffer view-win view-buf)
+              ;; Act.
+              (agent-repl--keep-webview-window-through-restore)
+              (agent-repl-test-panels--persp-restore b-state)
+              ;; Assert.
+              (should (eq (get-buffer-window b-view) view-win))))
+        (kill-buffer b-view)))))
+
+(ert-deftest agent-repl-test-panels-switch-from-the-composer-moves-the-webview ()
+  "Without the hook, the restore puts the next webview in the composer's window.
+Pins the mechanism the hook exists for: persp-mode keeps the SELECTED
+window, so a switch made from the composer gave every webview a window
+that had never shown it."
+  (agent-repl-test--with-clean-state
+    (let ((b-view (generate-new-buffer "*agent-frontend-keep-b*"))
+          (b-input (generate-new-buffer "*agent-panel-input-keep-b*")))
+      (unwind-protect
+          (agent-repl-test-panels--with-panel-frame (view-win input-win view-buf input-buf)
+            ;; Arrange.
+            (set-window-buffer view-win b-view)
+            (set-window-buffer input-win b-input)
+            (let ((b-state (window-state-get (frame-root-window) t)))
+              (set-window-buffer view-win view-buf)
+              (set-window-buffer input-win input-buf)
+              ;; Act.
+              (agent-repl-test-panels--persp-restore b-state)
+              ;; Assert.
+              (should (eq (get-buffer-window b-view) input-win))))
+        (kill-buffer b-view)
+        (kill-buffer b-input)))))
+
 ;;;; ---- Tests: one departing-frame snapshot per switch ----
 
 (ert-deftest agent-repl-test-panels-before-persp-deactivate-takes-no-snapshot ()
