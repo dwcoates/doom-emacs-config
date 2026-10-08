@@ -1697,7 +1697,7 @@ refines the idle rung's detail (an unread turn end).
 |---|---|---|---|
 | Red | The agent is working. | Yes: a prompt is held or interjected. | submitting, thinking, clearing, compacting; footer `working`, `loading` |
 | Yellow | The main thread is idle while detached work (background subagents, shells) runs. | Yes | `idle_async`; footer `background` |
-| Green | Ready for you: idle, or waiting on your input. | Yes | ready, done, interrupted, permission, waiting (any other wait on you: a question, a cold gate, an interrupt landing); a merge that landed (`merged`); footer `idle`, `waiting`, `interrupted`; a Stop hook's deliberate stop and a deferred tool read as done |
+| Green | Ready for you: idle, or waiting on your input. | Yes | ready, done, interrupted; a permission gate (roster and footer `permission`) and a question gate (roster and footer `question`), the same green as done; waiting (a cold gate, an interrupt landing); a merge that landed (`merged`); footer `idle`, `waiting`, `interrupted`; a Stop hook's deliberate stop and a deferred tool read as done |
 | Purple | A merge is in progress; the daemon holds the workspace. | No: the composer is closed. | `merge_queued`, `merging` |
 | Turquoise | Something unexpected went wrong and wants your attention, but the workspace is usable. | Yes | roster `turn_failed` (a failed turn restored from the durable record only; live, a failed turn stands as its fault, below); `merge_failed`; `degraded`; every VENDOR FAULT: roster `vendor_fault` / footer `vendor_fault · vendor_retry`, `vendor_rejection`, `vendor_failed` (the vendor will not start), roster `vendor_blocked` / footer `vendor_fault · auth`, `usage_limit`, `billing`, `vendor_error` (a vendor or account block, and every turn the vendor ended or refused, until the next turn starts), roster and footer `api_retrying` (the vendor is retrying the turn's failed API call) |
 | Blue | The workspace is unusable right now. | No: the composer is closed (except under `turn_died`, declared in `composer_open_substatuses`). | every AGENT-REPL FAULT: roster `init`, `severed`, `dead`, `start_failed`, `turn_died`, `daemon_impaired` / footer `agent_repl_fault · starting`, `degraded`, `severed`, `dead`, `start_failed`, `daemon_impaired`, `turn_died` (the last turn's vendor query or agent process died, until the next turn starts); every NETWORK FAULT: roster `network_fault` / footer `network_fault · offline`; a refused close: roster and footer `closing` |
@@ -1768,6 +1768,17 @@ The rules that keep this true:
   turquoise, never blue; a vendor fault is always turquoise. An expected state that awaits you (a
   permission ask) is green, never blue. A merge never parks: one that gives up
   is `merge_failed`, turquoise, and the workspace is back with you.
+- **A gate is green and names itself** (owner ruling, 2026-10-08). While a
+  permission or a question gate stands, the footer's status is `permission`
+  or `question` (never `waiting`), the roster arm is the same name, and every
+  surface draws the green of a finished turn, never the red of a working one,
+  for as long as the gate is open. The gates stand on the ladder's waiting
+  rung, above a running turn. A daemon that attaches while a gate stands (a
+  handover, a restart) learns it from the shim's session facts
+  (`SessionStarted.open_asks`), because no watch replays the ask's start; told
+  only the turn in flight, it drew the turn as working. `waiting` keeps the
+  cold gate and an interrupt landing. The record is
+  `docs/protobuf-design/gate-status.md`.
 - **One classifier decides a failure's color.** `ladder.ClassifyFailure` sorts
   every turn-ending agent failure into a vendor or account block, a failure the
   vendor ended or refused, the query dying, or an expected stop, and
