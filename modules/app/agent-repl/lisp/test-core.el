@@ -1206,15 +1206,17 @@ one to its caller.  A caller that must abort signals for itself."
 ;;;; ---- Tests: runtime log-verbosity controls ----
 
 (ert-deftest agent-repl-test-log-level-environment-accepts-the-shared-vocabulary ()
-  "The process switch accepts every contract level and defaults to info."
+  "The process switch accepts every contract level inside a window, and defaults to info."
   (dolist (case '((nil . info)
                   ("debug" . debug)
                   ("info" . info)
                   ("warn" . warn)
                   ("error" . error)))
     ;; Arrange
-    (let ((process-environment (copy-sequence process-environment)))
+    (let ((process-environment (copy-sequence process-environment))
+          (agent-repl--log-level-clock (lambda () 1000000)))
       (setenv "AGENT_REPL_LOG_LEVEL" (car case))
+      (setenv "AGENT_REPL_LOG_LEVEL_UNTIL" "1000300")
       ;; Act / Assert
       (should (eq (agent-repl--log-level-from-environment) (cdr case))))))
 
@@ -6485,3 +6487,177 @@ A stale entry guards nothing and hides that the wrapper it named is gone."
       (agent-repl--log '(:agent-repl-central "persisted") "elisp.test.persisted-central")
       ;; Assert
       (should (agent-repl-test--log-record-for path "persisted-central")))))
+
+;;;; ---- Tests: a durable level other than info is a window ----
+
+(defvar agent-repl-test--level-window-fixture-path
+  (expand-file-name "../proto/vocab/log-level-window.json"
+                    (file-name-directory (or load-file-name buffer-file-name)))
+  "The level window fixture, resolved at load beside this file.")
+
+(defun agent-repl-test--read-level-window-fixture ()
+  "Return the level window fixture as a plist."
+  (with-temp-buffer
+    (insert-file-contents agent-repl-test--level-window-fixture-path)
+    (json-parse-buffer :object-type 'plist :array-type 'list :null-object nil)))
+
+(ert-deftest agent-repl-test-log-level-window-lasts-the-fixture-window ()
+  "The window's length is the cross-language contract's."
+  ;; Arrange / Act / Assert
+  (should (= agent-repl--log-level-window-seconds
+             (plist-get (agent-repl-test--read-level-window-fixture) :window_seconds))))
+
+(ert-deftest agent-repl-test-log-level-window-answers-every-fixture-case ()
+  "Each case of proto/vocab/log-level-window.json is answered as Go and TypeScript answer it."
+  (dolist (case (plist-get (agent-repl-test--read-level-window-fixture) :cases))
+    ;; Arrange
+    (let ((select (lambda ()
+                    (agent-repl--log-level-window (plist-get case :level)
+                                                  (plist-get case :until)
+                                                  (plist-get case :now)))))
+      ;; Act / Assert
+      (if (equal (plist-get case :outcome) "refused")
+          (should-error (funcall select))
+        (let ((selection (funcall select)))
+          (should (equal (list (plist-get case :name)
+                               (symbol-name (plist-get selection :outcome))
+                               (symbol-name (plist-get selection :level))
+                               (plist-get selection :until))
+                         (list (plist-get case :name)
+                               (plist-get case :outcome)
+                               (plist-get case :effective)
+                               (plist-get case :until_effective)))))))))
+
+(defmacro agent-repl-test--with-level-window (clock &rest body)
+  "Run BODY at debug until Unix second 1000300, on the settable CLOCK cell."
+  (declare (indent 1))
+  `(let* ((,clock (list 1000000))
+          (agent-repl--log-level-clock (lambda () (car ,clock)))
+          (agent-repl-log-file-level 'debug)
+          (agent-repl--log-level-expires-at 1000300))
+     ,@body))
+
+(ert-deftest agent-repl-test-log-level-window-admits-debug-before-it-ends ()
+  "Inside its window the debug level stands."
+  (agent-repl-test--with-level-window clock
+    ;; Arrange
+    (setcar clock 1000299)
+    ;; Act / Assert
+    (should (agent-repl--log-record-persists-p "debug" "normal"))))
+
+(ert-deftest agent-repl-test-log-level-window-reverts-to-info-at-its-end ()
+  "At its end the window reverts the level to info."
+  (agent-repl-test--with-level-window clock
+    (cl-letf (((symbol-function 'agent-repl--info) #'ignore))
+      ;; Arrange
+      (setcar clock 1000300)
+      ;; Act
+      (let ((persisted (agent-repl--log-record-persists-p "debug" "normal")))
+        ;; Assert
+        (should-not persisted)
+        (should (eq agent-repl-log-file-level 'info))
+        (should-not agent-repl--log-level-expires-at)))))
+
+(ert-deftest agent-repl-test-log-level-window-end-is-recorded-once-at-info ()
+  "The revert is one info record, whatever follows it."
+  (agent-repl-test--with-level-window clock
+    ;; Arrange
+    (let ((recorded nil))
+      (cl-letf (((symbol-function 'agent-repl--info)
+                 (lambda (_ws fmt &rest _) (push fmt recorded))))
+        (setcar clock 1000400)
+        ;; Act
+        (agent-repl--log-record-persists-p "debug" "normal")
+        (agent-repl--log-record-persists-p "info" "normal"))
+      ;; Assert
+      (should (= (length recorded) 1))
+      (should (string-match-p "elisp.core.log-level-window: .* reverted to info" (car recorded))))))
+
+(ert-deftest agent-repl-test-log-level-without-a-window-never-ends ()
+  "A level set without a window (a direct `setq') is not ended by the clock."
+  ;; Arrange
+  (let ((agent-repl-log-file-level 'debug)
+        (agent-repl--log-level-expires-at nil)
+        (agent-repl--log-level-clock (lambda () 9999999999)))
+    ;; Act / Assert
+    (should (agent-repl--log-record-persists-p "debug" "normal"))))
+
+(ert-deftest agent-repl-test-set-log-file-level-debug-opens-a-window ()
+  "Setting debug interactively opens the longest window from now."
+  (cl-letf (((symbol-function 'message) #'ignore)
+            ((symbol-function 'agent-repl--info) #'ignore))
+    ;; Arrange
+    (let ((agent-repl-log-file-level 'info)
+          (agent-repl--log-level-expires-at nil)
+          (agent-repl--log-level-clock (lambda () 1000000)))
+      ;; Act
+      (agent-repl-set-log-file-level 'debug)
+      ;; Assert
+      (should (= agent-repl--log-level-expires-at 1000300)))))
+
+(ert-deftest agent-repl-test-set-log-file-level-info-closes-the-window ()
+  "Setting info interactively leaves no window behind."
+  (cl-letf (((symbol-function 'message) #'ignore)
+            ((symbol-function 'agent-repl--info) #'ignore))
+    ;; Arrange
+    (let ((agent-repl-log-file-level 'debug)
+          (agent-repl--log-level-expires-at 1000300)
+          (agent-repl--log-level-clock (lambda () 1000000)))
+      ;; Act
+      (agent-repl-set-log-file-level 'info)
+      ;; Assert
+      (should-not agent-repl--log-level-expires-at))))
+
+(ert-deftest agent-repl-test-toggle-verbose-to-disk-on-opens-a-window ()
+  "Turning the verbose rung on is a debug window like any other."
+  (cl-letf (((symbol-function 'message) #'ignore)
+            ((symbol-function 'agent-repl--info) #'ignore))
+    ;; Arrange
+    (let ((agent-repl-log-file-level 'info)
+          (agent-repl--log-level-expires-at nil)
+          (agent-repl--log-level-clock (lambda () 1000000)))
+      ;; Act
+      (agent-repl-toggle-verbose-to-disk)
+      ;; Assert
+      (should (= agent-repl--log-level-expires-at 1000300)))))
+
+(ert-deftest agent-repl-test-log-level-ignored-leftover-is-noted-at-info ()
+  "A level asked for without a window is said at info, once."
+  ;; Arrange
+  (let ((noted nil))
+    (cl-letf (((symbol-function 'agent-repl--info)
+               (lambda (_ws fmt &rest args) (push (apply #'format fmt args) noted))))
+      ;; Act
+      (agent-repl--note-log-level-selection
+       (agent-repl--log-level-window "debug" nil 1000000)))
+    ;; Assert
+    (should (equal (length noted) 1))
+    (should (string-match-p "outcome=no_expiry" (car noted)))))
+
+(ert-deftest agent-repl-test-log-level-honored-window-is-not-noted ()
+  "A level started where it was asked to is not noted."
+  ;; Arrange
+  (let ((noted nil))
+    (cl-letf (((symbol-function 'agent-repl--info)
+               (lambda (&rest args) (push args noted))))
+      ;; Act
+      (agent-repl--note-log-level-selection
+       (agent-repl--log-level-window "debug" "1000300" 1000000)))
+    ;; Assert
+    (should-not noted)))
+
+(ert-deftest agent-repl-test-log-level-window-end-lands-in-the-durable-sink ()
+  "The revert is written through the one logging function, at info."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-temp-logfile path
+      (agent-repl-test--with-level-window clock
+        (cl-letf (((symbol-function 'message) #'ignore))
+          ;; Arrange
+          (setcar clock 1000300)
+          ;; Act
+          (agent-repl--log '(:agent-repl-central "test") "elisp.test.after-window")
+          ;; Assert
+          (let ((records (agent-repl-test--log-records path)))
+            (should (equal (mapcar (lambda (r) (alist-get 'level r)) records) '("info")))
+            (should (string-match-p "reverted to info"
+                                    (alist-get 'message (car records))))))))))
