@@ -344,6 +344,9 @@ type Resolver interface {
 	// what raises `thinking · submitting` the instant StartTurn is accepted
 	// and what starts the strip's clock.
 	SetTurn(ws ids.WorkspaceID, turn *TurnStarted)
+	// AckTurn records that the SHIM took the turn, beside the roster's own
+	// AckTurn: it ends `working · submitting`.
+	AckTurn(ws ids.WorkspaceID)
 	// OnSubmission is one move of a prompt's delivery before the session takes
 	// it: held, classifying, interjecting or coalesced.
 	OnSubmission(ws ids.WorkspaceID, sub Submission)

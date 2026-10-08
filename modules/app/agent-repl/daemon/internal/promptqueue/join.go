@@ -266,7 +266,7 @@ func (q *queue) onJoinedTurnStood(ws ids.WorkspaceID, joined joiningPrompt, log 
 	started := &footer.TurnStarted{At: q.deps.Now(), Act: footer.ActPrompt}
 	q.deps.Footer.SetTurn(ws, started)
 	q.deps.Sidebar.SetTurn(ws, started)
-	q.deps.Sidebar.AckTurn(ws)
+	q.ackTurn(ws)
 	log.Info(opJoin, "the turn the prompt was sent to join ended without folding it in; it runs as its own turn", dlog.Context{
 		"joining_turn": string(joined.turn), "joined_turn": string(joined.into),
 	})

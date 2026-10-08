@@ -115,7 +115,7 @@ func (q *queue) deliver(ctx context.Context, d *delivery, sub Submission, sender
 // handed to the watcher that will see it end.
 func (q *queue) acceptOpenedTurn(ctx context.Context, sub Submission, success *shimv1.StartTurnSuccess, watcher Watcher, log dlog.Logger) {
 	// The shim TOOK the turn: the `submitting` window is over.
-	q.deps.Sidebar.AckTurn(sub.WS)
+	q.ackTurn(sub.WS)
 	handOver(sub.WS, success, watcher)
 	q.touchEngagement(ctx, sub.WS, log)
 	log.Info(opDeliver, "delivered the prompt to the shim", dlog.Context{
@@ -321,4 +321,11 @@ func (q *queue) holdForReconnect(ctx context.Context, sub Submission, cause erro
 		return Disposition{}, err
 	}
 	return Disposition{Held: &kind}, nil
+}
+
+// ackTurn tells both status surfaces that the shim took the turn: one call, so
+// the footer and the roster leave `submitting` on the same edge.
+func (q *queue) ackTurn(ws ids.WorkspaceID) {
+	q.deps.Footer.AckTurn(ws)
+	q.deps.Sidebar.AckTurn(ws)
 }

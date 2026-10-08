@@ -35,6 +35,19 @@ func TestDeliverRecordsTheTurnBeforeItReachesTheShim(t *testing.T) {
 	}
 }
 
+func TestDeliverTellsTheFooterTheShimTookTheTurn(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "hello")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	// Assert: the strip leaves `submitting` on the same ack the roster does.
+	if got := h.footer.turnAcks(); got != 1 {
+		t.Fatalf("footer acks = %d, want 1", got)
+	}
+}
+
 func TestDeliverPersistsTheOriginOntoTheTurn(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
