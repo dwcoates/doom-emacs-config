@@ -1512,6 +1512,31 @@ writes an `ai-title` line into the session transcript; the shim reads it
 `TopbarTitle.text` from it in preference to the workspace name. The branch
 suffix is a different fact and its rule is unchanged.
 
+## Feed vocabulary: interim, final and thinking responses
+
+Owner ruling, 2026-10-08. A turn draws several agent response bubbles, and
+three words name them. They name DIFFERENT BUBBLES, never stages of one.
+
+- **Final response (final answer):** the ONE bubble the turn ends on, the last
+  agent prose it settled on (`FeedResponse.final_answer`). It is final from
+  its first fragment to the end: while it streams it is the final response
+  still arriving, never an interim one. It is drawn in full and uncapped.
+- **Interim response:** each of the OTHER prose bubbles the agent writes
+  BEFORE the final response, between its tool calls. There are usually
+  several per turn. The daemon calls a response interim once a later row of
+  the same turn lands after it (`FeedResponse.interim`,
+  `daemon/internal/resolve/feed/interim.go`), because only then is it proven
+  not to be the one the turn ends on. Drawn collapsed to one line ending in
+  an ellipsis, on the page's own background, its text slightly dimmed.
+- **Thinking response:** the agent's reasoning bubbles
+  (`FeedResponse.thinking`). Never interim and never final; drawn like an
+  interim response.
+
+Never use "interim" for a final response's partial state. A prose bubble that
+is still its turn's latest row is not yet known to be either, so it is drawn
+in full, like the final response it may become, until a later row proves it
+interim.
+
 ## Tab-bar vocabulary: full, partial, and the extent rule
 
 A workspace's tab is `[N] <workspace-name>`, and the status color reaches it
