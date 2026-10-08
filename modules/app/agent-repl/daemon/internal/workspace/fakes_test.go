@@ -1269,6 +1269,14 @@ func (s *fakeSidebar) SetRegistry(reg sidebar.Registry) {
 	s.calls = append(s.calls, "registry")
 }
 
+func (s *fakeSidebar) SetRegistrySelected(reg sidebar.Registry, ws ids.WorkspaceID) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.registries = append(s.registries, reg)
+	s.selected = append(s.selected, ws)
+	s.calls = append(s.calls, "registry+selected")
+}
+
 func (s *fakeSidebar) SetSelected(ws ids.WorkspaceID) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

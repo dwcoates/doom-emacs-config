@@ -2440,8 +2440,6 @@ startup pre-created but has not opened are not drawn."
       (should (null (agent-repl--assert-mergeable-teardown "alpha"))))))
 
 
-(provide 'test-workspace)
-;;; test-workspace.el ends here
 
 ;;;; ---- Tests: the one teardown order -- land first, then kill ----
 
@@ -3784,3 +3782,39 @@ A hand-rolled `log-ws'-or-global scope there would drift from it."
                    (expand-file-name "panels.el" agent-repl-test-ws--lisp-dir))
                   (buffer-string))))
     (should-not (string-match-p "(if log-ws log-ws agent-repl--global-log-scope)" source))))
+
+;;;; ---- Tests: persp-mode's restore-collapse boundary ----
+
+(ert-deftest agent-repl-test-ws-install-before-collapse-runs-fn-first ()
+  "An installed FN runs before persp-mode's collapse itself."
+  (agent-repl-test--with-clean-state
+    ;; Arrange.
+    (let* ((calls nil)
+           (fn (lambda (&rest _) (push 'fn calls))))
+      (cl-letf (((symbol-function 'persp-delete-other-windows)
+                 (lambda () (push 'collapse calls))))
+        (unwind-protect
+            (progn
+              (agent-repl--ws-install-before-collapse fn)
+              ;; Act.
+              (persp-delete-other-windows))
+          (advice-remove 'persp-delete-other-windows fn)))
+      ;; Assert.
+      (should (equal (nreverse calls) '(fn collapse))))))
+
+(ert-deftest agent-repl-test-ws-install-before-collapse-without-persp-records-error ()
+  "A persp-mode without the collapse function is recorded at ERROR, nothing installed."
+  (skip-unless (not (fboundp 'persp-delete-other-windows)))
+  (agent-repl-test--with-clean-state
+    ;; Arrange.
+    (let ((errors nil))
+      (cl-letf (((symbol-function 'agent-repl--error)
+                 (lambda (_ws fmt &rest _) (push fmt errors))))
+        ;; Act.
+        (agent-repl--ws-install-before-collapse #'ignore))
+      ;; Assert.
+      (should (string-prefix-p "elisp.workspace.before-collapse-unavailable" (car errors)))
+      (should-not (fboundp 'persp-delete-other-windows)))))
+
+(provide 'test-workspace)
+;;; test-workspace.el ends here
