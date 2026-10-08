@@ -1,8 +1,6 @@
 package footer
 
 import (
-	"fmt"
-
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 )
@@ -16,7 +14,6 @@ const (
 	focusAgents
 	focusShells
 	focusMonitors
-	focusMergeTests
 )
 
 // String is the panel's name in the log.
@@ -28,8 +25,6 @@ func (p focusPanel) String() string {
 		return "shells"
 	case focusMonitors:
 		return "monitors"
-	case focusMergeTests:
-		return "merge_tests"
 	default:
 		return "none"
 	}
@@ -142,19 +137,6 @@ func mintFocus(s *wsState, launched []string, live LiveWorkSet) *mintedFocus {
 	return &mintedFocus{panel: panel, generation: s.focus.generation, trigger: launched[0], launched: launched}
 }
 
-// mintMergeTestsFocus sets the merge tests panel as the focus, under the next
-// generation, when round is a testing round the footer has not seen yet; it
-// answers nil otherwise, leaving the standing focus alone.
-func mintMergeTestsFocus(s *wsState, round int) *mintedFocus {
-	if round <= s.merge.TestsRound {
-		return nil
-	}
-	s.focus.generation++
-	s.focus.panel = focusMergeTests
-	trigger := fmt.Sprintf("merge_tests:%d", round)
-	return &mintedFocus{panel: focusMergeTests, generation: s.focus.generation, trigger: trigger, launched: []string{trigger}}
-}
-
 // focusView renders the standing focus. UNSET until the first launch.
 func focusView(f focusState) *frontendv1.FooterExpandedFocus {
 	out := &frontendv1.FooterExpandedFocus{Generation: f.generation}
@@ -165,8 +147,6 @@ func focusView(f focusState) *frontendv1.FooterExpandedFocus {
 		out.Panel = &frontendv1.FooterExpandedFocus_Shells{Shells: &frontendv1.FooterFocusShells{}}
 	case focusMonitors:
 		out.Panel = &frontendv1.FooterExpandedFocus_Monitors{Monitors: &frontendv1.FooterFocusMonitors{}}
-	case focusMergeTests:
-		out.Panel = &frontendv1.FooterExpandedFocus_MergeTests{MergeTests: &frontendv1.FooterFocusMergeTests{}}
 	default:
 		return nil
 	}
