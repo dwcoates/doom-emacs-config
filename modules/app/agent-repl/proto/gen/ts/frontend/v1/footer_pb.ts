@@ -6200,7 +6200,8 @@ export const FooterTokensCellVerdictInvalidSchema: GenMessage<FooterTokensCellVe
 
 /**
  * The live-work chips. An UNSET chip is NOT DRAWN — nothing of that kind
- * exists right now — so a quiet workspace shows no chips at all. A set chip
+ * exists right now — so a quiet workspace shows no chips at all, and with
+ * every chip unset the strip draws no chips cell either (no empty box). A set chip
  * carries its count, daemon-resolved: the client never counts panel rows to
  * label a chip, even though the rows arrive in the same push (duplicate,
  * don't share). Detached UNMODELED work has no chip: its surfacing home is

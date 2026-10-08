@@ -120,9 +120,8 @@ export function drawFooterStrip(u: FooterStrip, deps: StripDeps): HTMLElement {
   }
   row.appendChild(drawFooterClock(requireMessage(u.clock, `${path}.clock`), deps));
   row.appendChild(drawFooterTokensCell(requireMessage(u.tokens, `${path}.tokens`), deps));
-  row.appendChild(
-    drawFooterLiveWorkChips(requireMessage(u.liveWork, `${path}.live_work`), deps),
-  );
+  const chips = drawFooterLiveWorkChips(requireMessage(u.liveWork, `${path}.live_work`), deps);
+  if (chips !== null) row.appendChild(chips);
   return row;
 }
 
@@ -185,9 +184,11 @@ export function drawClientDisconnectedStrip(
     row.appendChild(
       drawFooterTokensCell(requireMessage(last.strip.tokens, `${path}.tokens`), last.deps),
     );
-    row.appendChild(
-      drawFooterLiveWorkChips(requireMessage(last.strip.liveWork, `${path}.live_work`), last.deps),
+    const chips = drawFooterLiveWorkChips(
+      requireMessage(last.strip.liveWork, `${path}.live_work`),
+      last.deps,
     );
+    if (chips !== null) row.appendChild(chips);
   }
   return row;
 }
@@ -586,8 +587,22 @@ export function drawFooterTokensCellVerdict(u: FooterTokensCellVerdict, path: st
  * workspace shows no chips at all, and the counts are the daemon's: this
  * client never counts panel rows to label a chip even though the rows arrive
  * in the same push.
+ *
+ * AND A CELL WITH NO CHIP IS NOT DRAWN EITHER (owner request, 2026-10-08): the
+ * empty cell drew as a blank bordered box at the strip's end, offering detached
+ * work there was none of. Null is the absent cell; the daemon's unset chips are
+ * the whole decision.
  */
-export function drawFooterLiveWorkChips(u: FooterLiveWorkChips, deps: StripDeps): HTMLElement {
+export function drawFooterLiveWorkChips(u: FooterLiveWorkChips, deps: StripDeps): HTMLElement | null {
+  if (
+    u.agents === undefined &&
+    u.tasks === undefined &&
+    u.shells === undefined &&
+    u.monitors === undefined &&
+    u.crons === undefined
+  ) {
+    return null;
+  }
   const cell = document.createElement("div");
   cell.className = "pfooter-cell pfooter-counters footer-chips";
   if (u.agents !== undefined) cell.appendChild(drawFooterChipAgents(u.agents, deps));
