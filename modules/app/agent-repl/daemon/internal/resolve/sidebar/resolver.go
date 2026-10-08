@@ -197,7 +197,7 @@ func (r *resolver) mutateWorkspaceLogged(ws ids.WorkspaceID, operation, message 
 	r.mutate(operation, message, ctx, log, func() { apply(r.state.workspace(ws), log) })
 }
 
-// render builds the WHOLE roster: both groupings, the hoisted merged section
+// render builds the WHOLE roster: every grouping, the hoisted merged section
 // and the selection. CAUSE is the operation whose fact is being rendered, named
 // on every status arm change the render publishes.
 func (r *resolver) render(log dlog.Logger, cause string) *frontendv1.WorkspaceRoster {
@@ -215,6 +215,7 @@ func (r *resolver) render(log dlog.Logger, cause string) *frontendv1.WorkspaceRo
 	out := &frontendv1.WorkspaceRoster{
 		Repository:     r.repositoryView(live, rc, log),
 		Task:           r.taskView(live, rc, log),
+		Maturity:       r.maturityView(live, rc, log),
 		RecentlyMerged: r.mergedSection(merged, rc, log),
 	}
 	setShownGrouping(out, r.state.reg.View.Grouping)
@@ -245,7 +246,7 @@ func (r *resolver) currentWorkspace() *frontendv1.RosterCurrentWorkspace {
 
 // SetRegistry installs the durable half, whole.
 //
-// A VIEW WHOSE GROUPING IS NEITHER OF THE TWO IS A DEFECT, never a state to
+// A VIEW WHOSE GROUPING IS NONE OF THE THREE IS A DEFECT, never a state to
 // draw around: the store refuses one on write and on read, so a registry
 // carrying one was composed by a caller that skipped the store.
 func (r *resolver) SetRegistry(reg Registry) {
@@ -275,16 +276,16 @@ func (r *resolver) SetRegistrySelected(reg Registry, ws ids.WorkspaceID) {
 		})
 }
 
-// assertGrouping refuses a registry whose view names neither grouping.
+// assertGrouping refuses a registry whose view names no grouping.
 func (r *resolver) assertGrouping(reg Registry) {
-	if reg.View.Grouping != wsm.GroupingRepository && reg.View.Grouping != wsm.GroupingTask {
-		r.log.Global().Error("daemon.sidebar.set_registry", "the registry's view names a grouping that is neither repository nor task",
+	if !reg.View.Grouping.Valid() {
+		r.log.Global().Error("daemon.sidebar.set_registry", "the registry's view names a grouping that is none of repository, task, maturity",
 			dlog.Context{
 				"grouping":            string(reg.View.Grouping),
-				"invariant_violation": "Registry.View.Grouping is repository or task",
+				"invariant_violation": "Registry.View.Grouping is repository, task or maturity",
 				"remediation":         "compose the registry's view from wsm.SidebarView",
 			})
-		panic(fmt.Sprintf("sidebar: registry view grouping %q is neither repository nor task", reg.View.Grouping))
+		panic(fmt.Sprintf("sidebar: registry view grouping %q is none of repository, task, maturity", reg.View.Grouping))
 	}
 }
 

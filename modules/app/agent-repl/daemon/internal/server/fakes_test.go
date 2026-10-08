@@ -1383,11 +1383,12 @@ func (v *fakeVerbs) FoldRepository(_ context.Context, repo ids.RepoID, folded bo
 	return v.foldErr
 }
 
-// sectionFold is one FoldTaskSection (task set) or FoldMergedSection (task
-// empty) the verb received.
+// sectionFold is one FoldTaskSection (task set), FoldMergedSection (merged)
+// or FoldMaturitySection (stage set) the verb received.
 type sectionFold struct {
 	task   ids.TaskID
 	merged bool
+	stage  wsm.MaturityStage
 	folded bool
 }
 
@@ -1398,6 +1399,11 @@ func (v *fakeVerbs) FoldTaskSection(_ context.Context, task ids.TaskID, folded b
 
 func (v *fakeVerbs) FoldMergedSection(_ context.Context, folded bool) error {
 	v.sectionFolds = append(v.sectionFolds, sectionFold{merged: true, folded: folded})
+	return v.sectionFoldErr
+}
+
+func (v *fakeVerbs) FoldMaturitySection(_ context.Context, stage wsm.MaturityStage, folded bool) error {
+	v.sectionFolds = append(v.sectionFolds, sectionFold{stage: stage, folded: folded})
 	return v.sectionFoldErr
 }
 

@@ -300,6 +300,9 @@ type Verbs interface {
 	// FoldMergedSection records whether the recently-merged band is collapsed
 	// and republishes the roster.
 	FoldMergedSection(ctx context.Context, folded bool) error
+	// FoldMaturitySection records whether a maturity stage's section is
+	// collapsed and republishes the roster.
+	FoldMaturitySection(ctx context.Context, stage wsm.MaturityStage, folded bool) error
 	// ShowGrouping records which grouping every page shows and republishes
 	// the roster.
 	ShowGrouping(ctx context.Context, grouping wsm.Grouping) error

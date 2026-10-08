@@ -579,6 +579,10 @@ func validateSidebarViewFoldSection(fold *agentreplv1.SidebarViewFoldSection) *c
 		if err := validateTaskRef("fold_section.task", section.Task); err != nil {
 			return err
 		}
+	case *agentreplv1.SidebarViewFoldSection_Maturity:
+		if section.Maturity.GetStage() == nil {
+			return invalid("fold_section.maturity.stage", "a maturity stage arm is required")
+		}
 	}
 	if fold.GetFold() == nil {
 		return invalid("fold_section.fold", "a fold arm is required")

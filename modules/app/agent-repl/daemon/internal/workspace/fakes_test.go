@@ -69,12 +69,14 @@ type fakeDB struct {
 	// setTaskFoldedErr fails the task fold write, which the slice cannot.
 	setTaskFoldedErr error
 	// view is the sidebar's recorded view state, nil when nobody changed it
-	// (read back as wsm.DefaultSidebarView); setMergedFoldedErr and
-	// setGroupingErr fail its writes and viewErr its read.
-	view               *wsm.SidebarView
-	setMergedFoldedErr error
-	setGroupingErr     error
-	viewErr            error
+	// (read back as wsm.DefaultSidebarView); setMergedFoldedErr,
+	// setMaturityFoldedErr and setGroupingErr fail its writes and viewErr its
+	// read.
+	view                 *wsm.SidebarView
+	setMergedFoldedErr   error
+	setMaturityFoldedErr error
+	setGroupingErr       error
+	viewErr              error
 	// workspaceErr fails the one-workspace read, which the map cannot.
 	workspaceErr error
 	current      *ids.WorkspaceID
@@ -2384,6 +2386,17 @@ func (d *fakeDB) SetMergedSectionFolded(_ context.Context, folded bool) error {
 	}
 	view := d.currentView()
 	view.MergedFolded = folded
+	d.view = &view
+	return nil
+}
+
+// SetMaturityFolded records one maturity stage's fold.
+func (d *fakeDB) SetMaturityFolded(_ context.Context, stage wsm.MaturityStage, folded bool) error {
+	if d.setMaturityFoldedErr != nil {
+		return d.setMaturityFoldedErr
+	}
+	view := d.currentView()
+	view.MaturityFolded = view.MaturityFolded.With(stage, folded)
 	d.view = &view
 	return nil
 }
