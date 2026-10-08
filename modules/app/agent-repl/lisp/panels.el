@@ -22,6 +22,7 @@
 (declare-function agent-repl--frontend-dispatch-show "frontends")
 (declare-function agent-repl--frontend-webview-buffer-name "frontend")
 (declare-function agent-repl--history-restore "history")
+(declare-function agent-repl--input-restore-unsent "input" (ws))
 (declare-function agent-repl--info "core")
 (declare-function agent-repl--kill-cause-str "core")
 (declare-function agent-repl--log "core")
@@ -1411,6 +1412,9 @@ Errors if the buffer is already initialized (already in
         (agent-repl--log ws "initialize-input-buffer: ws=%s buffer=%s mode=enabled history=restore"
                           ws (buffer-name input-buf))
         (agent-repl--history-restore ws))
+      ;; WHAT THE COMPOSER HELD WHEN EMACS LAST QUIT comes back: the
+      ;; shutdown save left it as the history's unsent head.
+      (agent-repl--input-restore-unsent ws)
       ;; THE WAITING LINE IS READ FROM DISK when the composer is born, so a
       ;; prompt held durably before an Emacs restart is shown again at once.
       (agent-repl-held-ingress-refresh ws))))

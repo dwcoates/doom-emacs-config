@@ -482,6 +482,13 @@ nothing."
         (should (equal (length issues) 1))
         (should (string-match-p "refused the health question" (cdr (car issues))))))))
 
+;;;; ---- Tests: the composer shutdown save ----
+
+(ert-deftest agent-repl-config-test-batch-load-registers-no-composer-shutdown-save ()
+  "A batch load leaves `kill-emacs-hook' without the composer shutdown save.
+A batch run must never write a workspace's history as it exits."
+  (should-not (memq #'agent-repl-input-save-all-on-shutdown kill-emacs-hook)))
+
 (provide 'test-config)
 
 ;;; test-config.el ends here
