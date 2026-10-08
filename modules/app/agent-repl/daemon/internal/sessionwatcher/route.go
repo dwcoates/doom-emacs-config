@@ -809,6 +809,9 @@ func (w *watcher) routeUpdateLocked(agent *conversationv1.AgentId, update *conve
 		})
 		w.sinks.Feed.OnQuestion(w.ws, agent, question, turn, place)
 		w.sinks.Footer.OnQuestion(w.ws, agent, question)
+		if w.sinks.Merge != nil {
+			w.sinks.Merge.OnQuestion(w.ws, agent, question)
+		}
 		w.notifyQuestionLocked(question)
 
 	case update.GetPermission() != nil:
@@ -819,6 +822,9 @@ func (w *watcher) routeUpdateLocked(agent *conversationv1.AgentId, update *conve
 		w.sinks.Feed.OnPermission(w.ws, agent, permission, turn, place)
 		w.sinks.Footer.OnPermission(w.ws, agent, permission)
 		w.sinks.Sidebar.OnPermission(w.ws, agent, permission)
+		if w.sinks.Merge != nil {
+			w.sinks.Merge.OnPermission(w.ws, agent, permission)
+		}
 		w.notifyPermissionLocked(permission)
 
 	case update.GetContextCut() != nil:

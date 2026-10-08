@@ -93,6 +93,9 @@ type tabState struct {
 	settled   bool
 	endedMS   int64
 	failure   string
+	// waiting is a live agentic tab whose agent has an ask open: drawn
+	// waiting on the user. Only conflict resolution and fixing read it.
+	waiting bool
 }
 
 // badge resolves the state into the shared leaf messages every kind's state
@@ -108,6 +111,15 @@ func (s tabState) badge() (*frontendv1.FeedMergeTabLive, *frontendv1.FeedMergeTa
 		settled.Outcome = &frontendv1.FeedMergeTabSettled_Succeeded{Succeeded: &frontendv1.FeedMergeTabSucceeded{}}
 	}
 	return nil, settled
+}
+
+// waitingOnUser is the waiting badge of a live tab whose agent has an ask
+// open, nil otherwise.
+func (s tabState) waitingOnUser() *frontendv1.FeedMergeTabWaitingOnUser {
+	if s.settled || !s.waiting {
+		return nil
+	}
+	return &frontendv1.FeedMergeTabWaitingOnUser{StartedAtMs: s.startedMS}
 }
 
 // tabRow wraps one tab's kind arm into the feed row that carries it.
@@ -235,7 +247,9 @@ func rebasingTab(st tabState, replayed, total int, lines []string) *frontendv1.F
 // parented to it: the requester's own session resolving the conflict.
 func conflictsTab(st tabState) *frontendv1.FeedMergeTab {
 	inner := &frontendv1.FeedMergeTabConflicts{}
-	if live, settled := st.badge(); live != nil {
+	if waiting := st.waitingOnUser(); waiting != nil {
+		inner.State = &frontendv1.FeedMergeTabConflicts_WaitingOnUser{WaitingOnUser: waiting}
+	} else if live, settled := st.badge(); live != nil {
 		inner.State = &frontendv1.FeedMergeTabConflicts_Live{Live: live}
 	} else {
 		inner.State = &frontendv1.FeedMergeTabConflicts_Settled{Settled: settled}
@@ -260,7 +274,9 @@ func testsTab(st tabState, suites []*frontendv1.FeedMergeTestSuite, log *fronten
 // bound; its content is the sub-feed rows parented to it.
 func fixesTab(st tabState, attempt int) *frontendv1.FeedMergeTab {
 	inner := &frontendv1.FeedMergeTabFixes{Attempt: &frontendv1.FeedMergeFixAttempt{Attempt: uint32(attempt), MaxAttempts: MaxFixAttempts}}
-	if live, settled := st.badge(); live != nil {
+	if waiting := st.waitingOnUser(); waiting != nil {
+		inner.State = &frontendv1.FeedMergeTabFixes_WaitingOnUser{WaitingOnUser: waiting}
+	} else if live, settled := st.badge(); live != nil {
 		inner.State = &frontendv1.FeedMergeTabFixes_Live{Live: live}
 	} else {
 		inner.State = &frontendv1.FeedMergeTabFixes_Settled{Settled: settled}

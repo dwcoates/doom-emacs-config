@@ -24,7 +24,9 @@
  * a phase that is over.
  *
  * NOTHING PARKS. A merge that gives up fails and hands the workspace back, so
- * no tab waits on the user and no tab hosts a composer.
+ * no tab hosts a composer. A conflict-resolution or fixing tab whose agent has
+ * an ask open says so on its badge (❓, tab-strip.ts); the ask itself is
+ * answered where every ask is, never in the bubble.
  */
 import { log } from "../../log.js";
 import { requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
