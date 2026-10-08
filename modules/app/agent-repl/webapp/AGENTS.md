@@ -393,7 +393,9 @@ hand any more:
   (`TailFollow.onTailReached`, the one re-latch in `latchIfLatestVisible`,
   fired only for the reader's own scroll after the latest entry was out of
   view), which closes EVERY expanded entry once (INFO
-  `feed.tail-reached-collapse`) and drops the jump watches. "Left the view" is
+  `feed.tail-reached-collapse`) and drops the jump watches. A MERGE BUBBLE
+  (`data-merge-bubble`) is exempt (owner ruling, 2026-10-08): the reader's
+  open merge bubble stays open until the reader closes it. "Left the view" is
   ONE detector, `createLeftViewWatch` (`src/feed/left-view.ts`: seen first,
   then wholly out, once; a detached row is no departure), shared by the jump
   watch and the selection's `left_view` (selection-visibility.ts). Every

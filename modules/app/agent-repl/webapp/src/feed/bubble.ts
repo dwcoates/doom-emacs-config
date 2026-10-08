@@ -70,6 +70,9 @@ import { refreshTitleFolds } from "./title-fold.js";
 import type { Overscan } from "./overscan.js";
 import type { TailFollow } from "../scroll.js";
 
+/** The attribute a merge bubble's element wears (BubbleOptions.merge). */
+export const MERGE_BUBBLE_ATTRIBUTE = "data-merge-bubble";
+
 export interface BubbleOptions {
   ctx: AppContext;
   /** The bubble row, as the parent feed served it. */
@@ -97,6 +100,13 @@ export interface BubbleOptions {
    */
   foldOf?: (row: FeedRow) => boolean;
   /**
+   * Whether this is a MERGE bubble, marked `data-merge-bubble` on its element.
+   * The feed holds a merge bubble to its own rules (owner rulings,
+   * 2026-10-08): the return to the tail never closes it, and its updates never
+   * move the feed's scroll.
+   */
+  merge?: boolean;
+  /**
    * The overscan buffer rooted on the page's scroll box, threaded down so the
    * rows this bubble's sub-feed holds are pre-rendered by the same instance
    * that watches the root feed. Absent with the scroll box.
@@ -122,6 +132,7 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
   // stacking; the teal wash and the dashed fold separator are gone.
   const el = document.createElement("div");
   el.className = "tool-card bubble-fold";
+  if (opts.merge === true) el.setAttribute(MERGE_BUBBLE_ATTRIBUTE, "");
 
   // The collapsed head reads as a tool-call card's head row (`.tool-head`),
   // not the old async pill: the whole head IS the fold's toggle now (owner
