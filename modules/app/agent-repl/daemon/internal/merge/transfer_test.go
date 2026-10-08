@@ -223,7 +223,11 @@ func headsSince(h *harness, n int) []string {
 	return h.feed.headIDs()[n:]
 }
 
-func TestARestartRedrawsAQueuedMergeInTheBubbleItWaitedIn(t *testing.T) {
+// A queued merge has not started, so it has no bubble (owner ruling,
+// 2026-10-08); what a restart and a handover keep is the identity it was
+// queued under, which the bubble it starts in carries.
+
+func TestARestartKeepsAQueuedMergesIdentityAndDrawsNoBubble(t *testing.T) {
 	// Arrange: a merge waiting in a paused queue.
 	h := newHarness(t)
 	h.db.paused[h.repoKey()] = true
@@ -238,18 +242,15 @@ func TestARestartRedrawsAQueuedMergeInTheBubbleItWaitedIn(t *testing.T) {
 	}
 
 	// Assert.
-	heads := headsSince(h, before)
-	if len(heads) == 0 {
-		t.Fatal("the restart drew no bubble for the queued merge")
+	if heads := headsSince(h, before); len(heads) != 0 {
+		t.Fatalf("the restart drew %v for a merge that has not started, want none", heads)
 	}
-	for _, id := range heads {
-		if id != headIDOf(ledger) {
-			t.Fatalf("the restart drew %s, want the bubble the merge waited in, %s", id, headIDOf(ledger))
-		}
+	if got, ok := h.o.leaseOf(theWorkspace); !ok || got != ledger {
+		t.Fatalf("the recovered merge's identity = %q (%v), want %q", got, ok, ledger)
 	}
 }
 
-func TestAHandoverRedrawsAQueuedMergeInTheBubbleItWaitedIn(t *testing.T) {
+func TestAHandoverKeepsAQueuedMergesIdentityAndDrawsNoBubble(t *testing.T) {
 	// Arrange: a merge waiting in a paused queue, its workspace handed over.
 	h := newHarness(t)
 	h.db.paused[h.repoKey()] = true
@@ -267,9 +268,11 @@ func TestAHandoverRedrawsAQueuedMergeInTheBubbleItWaitedIn(t *testing.T) {
 	}
 
 	// Assert.
-	heads := headsSince(h, before)
-	if len(heads) == 0 || heads[len(heads)-1] != headIDOf(ledger) {
-		t.Fatalf("the successor drew %v, want the bubble the merge waited in, %s", heads, headIDOf(ledger))
+	if heads := headsSince(h, before); len(heads) != 0 {
+		t.Fatalf("the successor drew %v for a merge that has not started, want none", heads)
+	}
+	if got, ok := h.o.leaseOf(theWorkspace); !ok || got != ledger {
+		t.Fatalf("the adopted merge's identity = %q (%v), want %q", got, ok, ledger)
 	}
 }
 

@@ -345,8 +345,12 @@ func (o *orchestrator) recoverResumable(ctx context.Context, repo wsm.RepoKey, l
 	// THE SAME BUBBLE, AT ONCE: its head is redrawn live under the identity it
 	// always had, and the footer shows the step the merge stands on before the
 	// resumed run's first word.
-	label := branchLabel(doc.Subject.Branch, doc.Subject.subject().targetLabel())
-	o.deps.Feed.UpsertDurable(ws, feedid.Feed{Root: true}, headRow(ws, lease.ID, label, doc.QueuedMS, nil))
+	// A MERGE THAT HAD NOT LEFT ITS QUEUE HAD NOT STARTED and has no bubble:
+	// the resumed run places it once the workspace is free.
+	if doc.Step != TabQueue {
+		label := branchLabel(doc.Subject.Branch, doc.Subject.subject().targetLabel())
+		o.deps.Feed.UpsertDurable(ws, feedid.Feed{Root: true}, headRow(ws, lease.ID, label, doc.QueuedMS, nil))
+	}
 	o.publish(ws, doc.Facts.footerFacts(o.deps.Now()))
 	// THE RUN LOG CARRIES IT TOO: a merge resumed is a fact about the
 	// restart, and the durable run log is where a boot sequence is read.

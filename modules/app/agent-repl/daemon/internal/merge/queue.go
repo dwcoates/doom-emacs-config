@@ -356,11 +356,14 @@ func (o *orchestrator) republishQueue(ctx context.Context, repo wsm.RepoKey) err
 	}
 	place := 0
 	for _, entry := range entries {
-		// EVERY MERGE IN LINE HAS A BUBBLE. Its ledger identity is minted as
-		// it takes its place, so a merge that has not been admitted still has a
-		// head to hang its queue tab on -- the tab a waiting user reads their
-		// place from, and the first of the tab sequence.
-		if lease, ok := o.leaseOf(entry.Workspace); ok {
+		// ONLY A MERGE THAT STARTED HAS A BUBBLE (owner ruling, 2026-10-08;
+		// run.place). A merge waiting in line, or holding its workspace while
+		// it waits for it to fall free, is drawn by its footer and roster
+		// facts alone: a bubble placed before the merge starts is overtaken
+		// by every row the workspace writes meanwhile. Its ledger identity is
+		// still minted as it takes its place, so the bubble the merge starts
+		// in carries the identity it was queued under.
+		if lease, ok := o.leaseOf(entry.Workspace); ok && o.started(entry.Workspace) {
 			// THE HEAD'S CLOCK RUNS FROM WHEN THE MERGE WAS QUEUED
 			// (frontend.v1.FeedMergeRuntime), so a queue change never restarts
 			// it.
@@ -428,6 +431,13 @@ func (o *orchestrator) bubbleLabel(ctx context.Context, entry wsm.MergeQueueEntr
 		return string(entry.Workspace)
 	}
 	return label
+}
+
+// started reports whether a workspace's merge has started: its run placed
+// its bubble (run.place).
+func (o *orchestrator) started(ws ids.WorkspaceID) bool {
+	r, running := o.runFor(ws)
+	return running && r.isPlaced()
 }
 
 // leaseOf reports the LEDGER identity a workspace's merge bubble is keyed by.
