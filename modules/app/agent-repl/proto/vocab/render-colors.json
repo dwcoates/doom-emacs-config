@@ -23,7 +23,8 @@
     "             taking on context, clearing or compacting. Usable.",
     "  yellow     the main thread is idle while detached work runs. Usable.",
     "  green      ready for the user: idle, a turn done or interrupted, a",
-    "             question or permission waiting, a merge that landed.",
+    "             permission or question gate standing (owner ruling,",
+    "             2026-10-08: the same green as done), a merge that landed.",
     "             Usable.",
     "  purple     a merge is IN PROGRESS; the daemon holds the workspace, so",
     "             the composer is closed.",
@@ -107,10 +108,11 @@
     "network fault: the workspace cannot be used until the route or the",
     "network comes back. 'vendor_fault', 'vendor_blocked' and 'api_retrying'",
     "are TURQUOISE vendor faults: the workspace stays usable and a prompt is",
-    "held until the vendor serves (owner ruling, 2026-10-02). 'waiting' (the",
-    "session waits on something other than a tool permission) is GREEN, as",
-    "'permission' is. Every roster arm takes the color of the footer status",
-    "it projects."
+    "held until the vendor serves (owner ruling, 2026-10-02). 'permission'",
+    "and 'question' (a gate's card waits on the user) are GREEN, the same",
+    "green as 'done' (owner ruling, 2026-10-08), and so is 'waiting' (a cold",
+    "gate's choice or an interrupt landing). Every roster arm takes the color",
+    "of the footer status it projects."
   ],
   "roster_status": {
     "none": "none",
@@ -138,6 +140,7 @@
     "done": "green",
     "interrupted": "green",
     "permission": "green",
+    "question": "green",
     "merging": "purple",
     "merge_queued": "purple",
     "merge_failed": "turquoise",
@@ -193,12 +196,17 @@
     "2026-09-28): something went wrong, but the workspace is usable and the",
     "composer is open.",
     "",
-    "GREEN 'merged' is a merge that landed."
+    "GREEN 'merged' is a merge that landed.",
+    "",
+    "GREEN 'permission' and 'question' are a gate standing on the user (owner",
+    "ruling, 2026-10-08): the same green as 'idle', never a working red."
   ],
   "footer_status": {
     "idle": "green",
     "working": "red",
     "waiting": "green",
+    "permission": "green",
+    "question": "green",
     "interrupted": "green",
     "merging": "purple",
     "background": "yellow",
