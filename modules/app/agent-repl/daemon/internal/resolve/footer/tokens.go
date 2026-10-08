@@ -96,6 +96,17 @@ type tokenState struct {
 	alarmTripped bool
 	// alarmLine is the composed alarm sentence.
 	alarmLine string
+	// restored reports that this accounting is a prior turn's, read off a
+	// relaunched daemon's opening history page rather than watched (see
+	// restoreLastTurn). It carries no verdict: the reconciliation's
+	// denominator — the settles of the turn's response units — belonged to
+	// the process that watched the turn. The next turn's reset clears it.
+	restored bool
+	// pageRead reports that the main agent's first history page has been
+	// read for a prior turn. Only that page is: it is the NEWEST (a watch's
+	// opening page, or a reader's first load), and every later page holds
+	// older turns, which must never stand in for the most recent one.
+	pageRead bool
 }
 
 // tokenGroup is one panel entry's name and place.
@@ -436,9 +447,10 @@ const (
 )
 
 // reconcile decides the settled turn's verdict and the evidence behind it. A
-// running turn has no verdict at all, which is what UNSET means on the wire.
+// running turn has no verdict at all, which is what UNSET means on the wire,
+// and neither has a turn restored from a replayed page.
 func (t *tokenState) reconcile() (verdict, string) {
-	if !t.settled {
+	if !t.settled || t.restored {
 		return verdictNone, ""
 	}
 	if len(t.contradictions) > 0 {
