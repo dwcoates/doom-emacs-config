@@ -36,6 +36,11 @@ import {
   type SelectFeedRowResponse,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_feed_row_pb";
 import {
+  FoldMergeBubbleResponseSchema,
+  type FoldMergeBubbleRequest,
+  type FoldMergeBubbleResponse,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_fold_merge_bubble_pb";
+import {
   SubmitPromptResponseSchema,
   type SubmitPromptRequest,
   type SubmitPromptResponse,
@@ -186,6 +191,8 @@ export interface FeedScript {
   loadFeedThrough?: (req: LoadFeedThroughRequest) => AsyncIterable<LoadFeedThroughResponse>;
   /** Answers SelectFeedRow; a success selecting nothing when unscripted. */
   selectFeedRow?: (req: SelectFeedRowRequest) => SelectFeedRowResponse;
+  /** Answers FoldMergeBubble; a success when unscripted. */
+  foldMergeBubble?: (req: FoldMergeBubbleRequest) => FoldMergeBubbleResponse;
   /** Answers SubmitPrompt (an outcome marker's resend); a minted turn when unscripted. */
   submitPrompt?: (req: SubmitPromptRequest) => SubmitPromptResponse;
   /** The page's clock. Pass a `countingTicker` to assert on live subscriptions. */
@@ -200,6 +207,7 @@ export interface FeedCalls {
   interrupt: InterruptRequest[];
   loadFeedThrough: LoadFeedThroughRequest[];
   selectFeedRow: SelectFeedRowRequest[];
+  foldMergeBubble: FoldMergeBubbleRequest[];
   submitPrompt: SubmitPromptRequest[];
 }
 
@@ -212,7 +220,7 @@ export interface Harness {
 
 /** A context whose client speaks to the scripted daemon. */
 export function harness(script: FeedScript = {}): Harness {
-  const calls: FeedCalls = { openFeed: [], watchFeed: [], getFeedPage: [], interrupt: [], loadFeedThrough: [], selectFeedRow: [], submitPrompt: [] };
+  const calls: FeedCalls = { openFeed: [], watchFeed: [], getFeedPage: [], interrupt: [], loadFeedThrough: [], selectFeedRow: [], foldMergeBubble: [], submitPrompt: [] };
   const channels = script.channels ?? new Map<string, Channel<WatchFeedResponse>>();
   const sink = new RecordingSink();
   const transport = createRouterTransport(({ service }) => {
@@ -262,6 +270,13 @@ export function harness(script: FeedScript = {}): Harness {
           create(SubmitPromptResponseSchema, {
             result: { case: "success", value: { outcome: { case: "turn", value: { turn: { value: "resent-turn" } } } } },
           })
+        );
+      },
+      foldMergeBubble: (req) => {
+        calls.foldMergeBubble.push(req);
+        return (
+          script.foldMergeBubble?.(req) ??
+          create(FoldMergeBubbleResponseSchema, { result: { case: "success", value: {} } })
         );
       },
       selectFeedRow: (req) => {
