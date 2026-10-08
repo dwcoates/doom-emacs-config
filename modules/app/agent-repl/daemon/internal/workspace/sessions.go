@@ -265,10 +265,15 @@ type Fleet struct {
 	// starting waits for a predecessor's still-starting shim to announce
 	// itself, so a bring-up never spawns a second shim onto one session
 	// socket. See startingshim.
-	starting  startingshim.Waiter
-	mu        sync.RWMutex
-	sessions  map[ids.WorkspaceID]*live
-	coldGates map[ids.WorkspaceID]coldGate
+	starting startingshim.Waiter
+	mu       sync.RWMutex
+	sessions map[ids.WorkspaceID]*live
+	// sessionsMoved is closed, and replaced, every time a workspace's entry in
+	// sessions or its watcher changes (movedLocked). A freeness wait whose
+	// watcher closed, or whose session is still coming up, waits on it for the
+	// workspace's next watcher rather than failing or reading the gap as free.
+	sessionsMoved chan struct{}
+	coldGates     map[ids.WorkspaceID]coldGate
 	// handedOver names the workspaces a handover has taken from this daemon
 	// (HandOver), until a reclaim gives one back (Reclaimed). A start that
 	// spawns after its workspace was handed over must not serve it: see hold.
@@ -498,15 +503,16 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 			Clock: deps.Clock,
 		},
 
-		sessions:   map[ids.WorkspaceID]*live{},
-		coldGates:  map[ids.WorkspaceID]coldGate{},
-		handedOver: map[ids.WorkspaceID]bool{},
-		lastCold:   map[ids.WorkspaceID]*conversationv1.SessionCold{},
-		reapedAt:   map[ids.WorkspaceID]time.Time{},
-		generation: map[ids.WorkspaceID]int{},
-		startGates: map[ids.WorkspaceID]*sync.Mutex{},
-		watched:    map[ids.WorkspaceID]sessionwatcher.Watcher{},
-		selected:   map[ids.WorkspaceID]bool{},
+		sessions:      map[ids.WorkspaceID]*live{},
+		sessionsMoved: make(chan struct{}),
+		coldGates:     map[ids.WorkspaceID]coldGate{},
+		handedOver:    map[ids.WorkspaceID]bool{},
+		lastCold:      map[ids.WorkspaceID]*conversationv1.SessionCold{},
+		reapedAt:      map[ids.WorkspaceID]time.Time{},
+		generation:    map[ids.WorkspaceID]int{},
+		startGates:    map[ids.WorkspaceID]*sync.Mutex{},
+		watched:       map[ids.WorkspaceID]sessionwatcher.Watcher{},
+		selected:      map[ids.WorkspaceID]bool{},
 	}, nil
 }
 
@@ -2590,6 +2596,7 @@ func (f *Fleet) Stop(ctx context.Context, ws ids.WorkspaceID, force bool) error 
 	session, ok := f.sessions[ws]
 	_, gated := f.coldGates[ws]
 	delete(f.sessions, ws)
+	f.movedLocked()
 	delete(f.coldGates, ws)
 	delete(f.lastCold, ws)
 	f.mu.Unlock()
@@ -2744,6 +2751,7 @@ func (f *Fleet) retireReaped(ws ids.WorkspaceID) {
 		return
 	}
 	delete(f.sessions, ws)
+	f.movedLocked()
 	delete(f.coldGates, ws)
 	delete(f.lastCold, ws)
 	f.noteReapLocked(ws, session.client)
@@ -2837,6 +2845,7 @@ func (f *Fleet) remember(ws ids.WorkspaceID, session *live) {
 	f.mu.Lock()
 	previous, stood := f.sessions[ws]
 	f.sessions[ws] = session
+	f.movedLocked()
 	f.mu.Unlock()
 	if stood && previous != nil && previous.watcher != nil && previous.watcher != session.watcher {
 		f.closeDisplaced(ws, previous.watcher, "the workspace's session was replaced")
@@ -2858,6 +2867,7 @@ func (f *Fleet) restate(ws ids.WorkspaceID, session *live) error {
 		return fmt.Errorf("start session for %q: %w", ws, ErrShimTaken)
 	}
 	f.sessions[ws] = session
+	f.movedLocked()
 	f.mu.Unlock()
 	if previous.watcher != nil && previous.watcher != session.watcher {
 		f.closeDisplaced(ws, previous.watcher, "the workspace's session was replaced")
