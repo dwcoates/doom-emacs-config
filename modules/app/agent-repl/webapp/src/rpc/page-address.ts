@@ -14,6 +14,9 @@
  * `AGENT_REPL_LOG_LEVEL` into the browser, whose JavaScript cannot read process
  * environment directly. A missing value uses the contract's `info` level for
  * ordinary browser development; an invalid value is a boot failure.
+ * `&log_level_until=<unix seconds>` is the end of that level's window: a level
+ * other than info holds only inside it (proto/vocab/log-level-window.json), so
+ * a page reloaded from an address whose window has ended boots at info.
  *
  * `&composer=1` turns on the browser-local composer. Production runs
  * composer-less: the root composer is host-native (Emacs), and this flag
@@ -34,6 +37,8 @@ export interface PageAddress {
   composer: boolean;
   /** The effective `AGENT_REPL_LOG_LEVEL` delivered by the host. */
   logLevel: ClientLogLevel;
+  /** The end of that level's window, Unix seconds as delivered; undefined when absent. */
+  logLevelUntil: string | undefined;
 }
 
 /** Read the page address out of a `location.search` string. */
@@ -52,5 +57,6 @@ export function pageAddress(search: string): PageAddress {
     workspaceDir,
     composer: params.get("composer") === "1",
     logLevel: parseClientLogLevel(params.get("log_level")),
+    logLevelUntil: params.get("log_level_until") ?? undefined,
   };
 }
