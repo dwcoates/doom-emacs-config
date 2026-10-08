@@ -1484,6 +1484,7 @@ func TestRosterResolvesEveryMergeArmWithNothingParked(t *testing.T) {
 		want  string
 	}{
 		{name: "queued", facts: footer.MergeFacts{State: "queued", Step: footer.StepEnqueued, QueuePlace: 1, QueueWaiting: 2}, want: "merge_queued"},
+		{name: "waiting for the workspace to fall free", facts: footer.MergeFacts{State: "merging", Step: footer.StepAwaitingFree}, want: "merge_waiting"},
 		{name: "merging", facts: footer.MergeFacts{State: "merging", Step: footer.StepRebasing, Total: 1}, want: "merging"},
 		{name: "failed", facts: footer.MergeFacts{State: "failed", FailedArea: footer.FailedConflicts}, want: "merge_failed"},
 		{name: "merged", facts: footer.MergeFacts{State: "merged"}, want: "merged"},
