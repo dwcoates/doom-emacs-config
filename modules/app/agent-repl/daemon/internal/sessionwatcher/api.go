@@ -422,11 +422,14 @@ type LifecycleSink interface {
 	// retires the dead session it replaces.
 	OnDeparted(ws ids.WorkspaceID, departed Watcher, departure Departure)
 	// OnWatchOpenRefused reports a watch open the shim refused for a handle
-	// NOTHING announced. A refusal on a handle the daemon legitimately
-	// expects is retried and never reaches here: only an unexpected one is
-	// evidence, and it is evidence of a daemon/shim disagreement about what
-	// exists rather than of a broken link.
+	// NOTHING announced, or for an expected one whose refusals outlasted the
+	// bring-up race. It is evidence of a daemon/shim disagreement about what
+	// exists rather than of a broken link. It is told once per run of
+	// refusals; the watch is re-opened until it opens.
 	OnWatchOpenRefused(ws ids.WorkspaceID, refusal WatchOpenRefusal)
+	// OnWatchOpened reports a watch the shim had refused opening after all,
+	// which ends the disagreement OnWatchOpenRefused reported.
+	OnWatchOpened(ws ids.WorkspaceID)
 	// OnLinkChanged reports the shim link's attachment. The VIEWS take the
 	// link on their own sinks; this arm exists because the HOST view's
 	// `shim_attached` is composed by the server, which cannot see the edge.
