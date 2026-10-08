@@ -414,6 +414,10 @@ file the run made unremovable, which the person reading the run must see."
     ;; Keep debug-file assertions stable across aggregate-suite module reloads:
     ;; `core.el' intentionally re-reads this environment variable on every load.
     (setenv "AGENT_REPL_LOG_LEVEL" "debug")
+    ;; Debug is a window, never a standing level
+    ;; (proto/vocab/log-level-window.json); this process gets the longest.
+    (setenv "AGENT_REPL_LOG_LEVEL_UNTIL"
+            (number-to-string (+ (truncate (float-time)) 300)))
     ;; The global Emacs sink's default is baked from the state root when
     ;; `core.el' loads.  Pre-bind its defcustom to this process's state dir
     ;; so concurrent ERT processes cannot contend for one append-file lock.
@@ -504,7 +508,10 @@ file the run made unremovable, which the person reading the run must see."
 ;; locally and redirect `agent-repl-log-file-name' to a temp path.
 (when (and noninteractive (boundp 'agent-repl-log-to-file))
   (setq agent-repl-log-to-file nil
-        agent-repl-log-file-level 'debug))
+        agent-repl-log-file-level 'debug
+        ;; The harness's debug is a fixed setting: no test's level ends
+        ;; because the suite ran long.
+        agent-repl--log-level-expires-at nil))
 
 ;; Unit tests run without a live perspective unless a case constructs one.
 ;; Mark that harness-wide scope explicitly central so incidental diagnostics
