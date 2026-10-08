@@ -39,6 +39,7 @@ import {
 } from "./selection-visibility.js";
 import { guardMalformed } from "../rpc/guard.js";
 import { selectFeedRow } from "./select-feed-row.js";
+import { foldMergeBubble } from "./fold-merge-bubble.js";
 import { refreshHasMore } from "./bubble-more.js";
 import { refreshTitleFolds } from "./title-fold.js";
 import { applyFeedTextScale } from "./feed-text-scale.js";
@@ -542,6 +543,15 @@ export function mountFeed(
         initialFolded: mergeFoldOf(row),
         foldOf: mergeFoldOf,
         merge: true,
+        // THE READER'S FOLD OUTLIVES THE PAGE (owner ruling, 2026-10-08): it
+        // is recorded on the daemon's durable head, so a reload, a page and a
+        // daemon restart all draw the bubble the way the reader left it.
+        readerFold: (folded) =>
+          void guardMalformed(
+            ctx,
+            "feed.merge-fold",
+            foldMergeBubble(ctx, requireMessage(row.id, "FeedRow.id"), folded),
+          ),
       });
     }
     // A subagent row ships no fold, so it starts collapsed and transfers
