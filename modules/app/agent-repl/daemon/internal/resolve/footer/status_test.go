@@ -1086,6 +1086,20 @@ func TestAPeerHopDownDoesNotOutrankTheShimLinksOwnStep(t *testing.T) {
 	}
 }
 
+func TestNoClientAttachedToAServingLinkIsNotDisconnected(t *testing.T) {
+	// Arrange: the editor released both of the workspace's streams.
+	h := newHarness(t)
+	connected(h)
+
+	// Act
+	h.r.SetParticipants(testWS, false, false)
+
+	// Assert
+	if got := h.status(t); got == "agent_repl_fault" {
+		t.Fatal("status = agent_repl_fault with no client attached, want the session's own status")
+	}
+}
+
 func TestAPeerHopDownBeforeAnyLinkIsObservedIsNotDisconnected(t *testing.T) {
 	// Arrange: no session has been asked for, so there is no route to report.
 	h := newHarness(t)

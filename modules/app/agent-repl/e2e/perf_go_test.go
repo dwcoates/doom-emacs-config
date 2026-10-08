@@ -201,8 +201,9 @@ func TestPerfSelectWorkspaceAck(t *testing.T) {
 //
 // THE TRANSITION IS idle -> disconnected/severed, and it is named rather than
 // left as "the arm changed", because the resolver's own code settles which arm
-// a lost participant produces: `resolve/footer/status.go:95` resolves
-// `!s.hostStream || !s.webStream` to Disconnected/Severed, citing daemon.md
+// a lost participant produces: `resolve/footer/status.go` resolves one hop
+// down while the other is held (`s.hostStream != s.webStream`) to
+// agent_repl_fault · severed, citing daemon.md
 // invariant 11 — "the workspace is not connected, and the footer says so
 // rather than drawing a status nobody is receiving".
 //
