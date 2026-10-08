@@ -454,7 +454,8 @@ func openLogger(storeSocket, stateDir, logPath string) (*logging.Bound, func(), 
 // launchd is an append-only file nobody rolls, and "the durable sink is the only
 // copy" is a property worth a test rather than a comment.
 func openLoggerTo(terminal io.Writer, storeSocket, stateDir, logPath string) (*logging.Bound, func(), error) {
-	level, err := sharedlogging.ParseLevel(os.Getenv("AGENT_REPL_LOG_LEVEL"))
+	selection, err := sharedlogging.SelectLevel(os.Getenv("AGENT_REPL_LOG_LEVEL"),
+		os.Getenv(sharedlogging.UntilEnvironment), time.Now())
 	if err != nil {
 		return nil, nil, bootstrapError{err}
 	}
@@ -466,8 +467,9 @@ func openLoggerTo(terminal io.Writer, storeSocket, stateDir, logPath string) (*l
 		return nil, nil, bootstrapError{fmt.Errorf("opening log %q: %w", logPath, err)}
 	}
 	forwarder := daemonclient.New(stateDir)
-	logf := logging.NewForwardingDurableOnlyAtLevel(terminal, file, level, forwarder).
+	logf := logging.NewForwardingDurableOnlyWindow(terminal, file, sharedlogging.NewWindow(selection, time.Now), forwarder).
 		With(logging.Context{Component: "sidecar", StoreSocket: storeSocket})
+	logf.NoteLevelSelection(selection)
 	forwarder.SetRefReplacedObserver(refReplacedObserver(logf))
 	return logf, func() {
 		// BOUNDED, BECAUSE LAUNCHD IS WAITING. The drain dials the daemon once
