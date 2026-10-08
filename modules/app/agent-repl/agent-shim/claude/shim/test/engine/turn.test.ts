@@ -714,6 +714,24 @@ describe("what the user said", () => {
     expect(saidText(said)).toBe("/tmp/a.png");
   });
 
+  it("delivers a reply's quote verbatim ahead of the words, with a blank line between", () => {
+    const quote = "⟢ Replying to an earlier response of yours:\n\n```\nParis.\n```\n\n⟢ My message:\n";
+    const said = create(conversationv1.UserSaidSchema, {
+      content: create(conversationv1.UserContentSchema, {
+        blocks: [
+          create(conversationv1.UserContentBlockSchema, {
+            block: { case: "quote", value: create(conversationv1.UserQuoteBlockSchema, { text: quote }) },
+          }),
+          ...(textSaid("And its population?").content?.blocks ?? []),
+        ],
+      }),
+    });
+
+    expect(saidText(said)).toBe(
+      "⟢ Replying to an earlier response of yours:\n\n```\nParis.\n```\n\n⟢ My message:\n\nAnd its population?",
+    );
+  });
+
   it("RAISES on an UnsupportedBlock rather than silently dropping what the user sent", () => {
     const said = create(conversationv1.UserSaidSchema, {
       content: create(conversationv1.UserContentSchema, {
@@ -1061,6 +1079,58 @@ describe("the vendor note on a prompt", () => {
     const row = h.persistence.durable.find((entry) => entry.item.kind === "prompt");
     const said = row?.item.kind === "prompt" ? row.item.prompt.said : undefined;
     expect(saidText(said ?? textSaid(""))).toBe("do it the other way");
+  });
+});
+
+describe("a reply's quote", () => {
+  /** A prompt replying to an earlier bubble: the quote block, then the words. */
+  function quotedSaid(): conversationv1.UserSaid {
+    return create(conversationv1.UserSaidSchema, {
+      content: create(conversationv1.UserContentSchema, {
+        blocks: [
+          create(conversationv1.UserContentBlockSchema, {
+            block: { case: "quote", value: create(conversationv1.UserQuoteBlockSchema, { text: "the quote" }) },
+          }),
+          ...(textSaid("my words").content?.blocks ?? []),
+        ],
+      }),
+    });
+  }
+
+  it("keeps its own block on the prompt row, so a replay still tells it from the words", async () => {
+    // Arrange
+    const h = await harness();
+
+    // Act
+    await h.turns.startTurn(
+      create(shimv1.StartTurnRequestSchema, {
+        turn: TURN,
+        said: quotedSaid(),
+        origin: conversationv1.PromptOrigin.USER_SENT,
+      }),
+    );
+
+    // Assert
+    const row = h.persistence.durable.find((entry) => entry.item.kind === "prompt");
+    const blocks = row?.item.kind === "prompt" ? (row.item.prompt.said?.content?.blocks ?? []) : [];
+    expect(blocks.map((block) => block.block.case)).toEqual(["quote", "text"]);
+  });
+
+  it("reaches the vendor as text ahead of the words", async () => {
+    // Arrange
+    const h = await harness();
+
+    // Act
+    await h.turns.startTurn(
+      create(shimv1.StartTurnRequestSchema, {
+        turn: TURN,
+        said: quotedSaid(),
+        origin: conversationv1.PromptOrigin.USER_SENT,
+      }),
+    );
+
+    // Assert
+    expect(saidText(h.submitted[0]?.said ?? textSaid(""))).toBe("the quote\nmy words");
   });
 });
 
