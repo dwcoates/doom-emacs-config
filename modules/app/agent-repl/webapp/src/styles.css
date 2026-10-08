@@ -211,6 +211,13 @@
      runs monotonic toward done: pear (said, not concluded) -> green (the
      answer). A thinking bubble wears no border at all. */
   --interim-response-border: #b0b00c;
+  /* THE PEAR EDGE IS DRAWN AT HALF STRENGTH (owner ruling, 2026-10-08: the
+     interim border must read noticeably thinner than every other bubble's).
+     Every bubble border is already 0.3px, which a Retina WebKit rounds up to
+     one device pixel, the thinnest line it draws, so a narrower width changes
+     nothing on screen. A fainter line is what reads thinner: the same hue, at
+     this share of its strength, in both themes. */
+  --interim-response-border-strength: 50%;
   /* THE SELECTED ENTRY's color: the ring on a card a footer detached-work
      jump landed on, and the border of the row the feed's selection names — a
      final response the next prompt replies to, where it replaces the green a
@@ -1913,7 +1920,7 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
    step of the ladder. Keyed on the daemon's settled state, so a response still
    streaming keeps the base border until it settles. */
 .bubble[data-variant="response"][data-state="success"]:not(.final-response) {
-  border-color: var(--interim-response-border);
+  border-color: color-mix(in srgb, var(--interim-response-border) var(--interim-response-border-strength), transparent);
 }
 /* The answer the turn landed on, as against the commentary above it: green.
    `:not([data-variant="thinking"])` keeps it off reasoning — the structural
