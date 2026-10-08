@@ -22,7 +22,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file conversation/v1/detached_work.proto.
  */
 export const file_conversation_v1_detached_work: GenFile = /*@__PURE__*/
-  fileDesc("CiNjb252ZXJzYXRpb24vdjEvZGV0YWNoZWRfd29yay5wcm90bxIPY29udmVyc2F0aW9uLnYxIt8CChFBZ2VudERldGFjaGVkV29yaxItCgR3b3JrGAEgASgLMh8uY29udmVyc2F0aW9uLnYxLkRldGFjaGVkV29ya0lkEjgKBm91dHB1dBgEIAEoCzIjLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFdvcmtPdXRwdXRIAYgBARInCgVvd25lchgFIAEoCzIYLmNvbnZlcnNhdGlvbi52MS5BZ2VudElkEi8KBGtpbmQYBiABKAsyIS5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrS2luZBI5CghkZXRhY2hlZBgCIAEoCzIlLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFdvcmtEZXRhY2hlZEgAEjcKB2NyZWF0ZWQYAyABKAsyJC5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrQ3JlYXRlZEgAQggKBm9yaWdpbkIJCgdfb3V0cHV0IrcBChJEZXRhY2hlZFdvcmtPdXRwdXQSDAoEcGF0aBgBIAEoCRI/CghyZWFkYWJsZRgCIAEoCzIrLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFdvcmtPdXRwdXRSZWFkYWJsZUgAEkMKCnVucmVhZGFibGUYAyABKAsyLS5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrT3V0cHV0VW5yZWFkYWJsZUgAQg0KC3JlYWRhYmlsaXR5IhwKGkRldGFjaGVkV29ya091dHB1dFJlYWRhYmxlIh4KHERldGFjaGVkV29ya091dHB1dFVucmVhZGFibGUi0gIKFERldGFjaGVkV29ya0RldGFjaGVkEjoKEGRldGFjaGVkX2Zyb21faWQYASABKAsyIC5jb252ZXJzYXRpb24udjEuQWdlbnRBY3Rpdml0eUlkEjwKCXJlcXVlc3RlZBgCIAEoCzInLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZENhdXNlUmVxdWVzdGVkSAASNwoHYnlfdXNlchgDIAEoCzIkLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZENhdXNlQnlVc2VySAASOwoJdGltZWRfb3V0GAQgASgLMiYuY29udmVyc2F0aW9uLnYxLkRldGFjaGVkQ2F1c2VUaW1lZE91dEgAEkEKDHZlbmRvcl9tb3ZlZBgFIAEoCzIpLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZENhdXNlVmVuZG9yTW92ZWRIAEIHCgVjYXVzZSIYChZEZXRhY2hlZENhdXNlUmVxdWVzdGVkIhUKE0RldGFjaGVkQ2F1c2VCeVVzZXIiGgoYRGV0YWNoZWRDYXVzZVZlbmRvck1vdmVkIisKFURldGFjaGVkQ2F1c2VUaW1lZE91dBISCgp0aW1lb3V0X21zGAEgASgEIkwKE0RldGFjaGVkV29ya0NyZWF0ZWQSNQoMd29ya19jcmVhdGVkGAEgASgLMh8uY29udmVyc2F0aW9uLnYxLkRldGFjaGFibGVXb3JrIuMBCg5EZXRhY2hhYmxlV29yaxIyCghzdWJhZ2VudBgBIAEoCzIeLmNvbnZlcnNhdGlvbi52MS5BZ2VudFN1YmFnZW50SAASKgoEYmFzaBgCIAEoCzIaLmNvbnZlcnNhdGlvbi52MS5BZ2VudEJhc2hIABI3Cgh3b3JrZmxvdxgDIAEoCzIjLmNvbnZlcnNhdGlvbi52MS5BZ2VudFdvcmtmbG93U3RhcnRIABIwCgdtb25pdG9yGAQgASgLMh0uY29udmVyc2F0aW9uLnYxLkFnZW50TW9uaXRvckgAQgYKBHdvcmsijAIKEERldGFjaGVkV29ya0tpbmQSPQoIc3ViYWdlbnQYASABKAsyKS5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrS2luZFN1YmFnZW50SAASNQoEYmFzaBgCIAEoCzIlLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFdvcmtLaW5kQmFzaEgAEj0KCHdvcmtmbG93GAMgASgLMikuY29udmVyc2F0aW9uLnYxLkRldGFjaGVkV29ya0tpbmRXb3JrZmxvd0gAEjsKB21vbml0b3IYBCABKAsyKC5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrS2luZE1vbml0b3JIAEIGCgRraW5kIpQBChhEZXRhY2hlZFdvcmtLaW5kU3ViYWdlbnQSKgoIYWdlbnRfaWQYASABKAsyGC5jb252ZXJzYXRpb24udjEuQWdlbnRJZBI9Cgpjb21taXNzaW9uGAIgASgLMiQuY29udmVyc2F0aW9uLnYxLkFnZW50U3ViYWdlbnRQcm9tcHRIAIgBAUINCgtfY29tbWlzc2lvbiIWChREZXRhY2hlZFdvcmtLaW5kQmFzaCIaChhEZXRhY2hlZFdvcmtLaW5kV29ya2Zsb3ciGQoXRGV0YWNoZWRXb3JrS2luZE1vbml0b3IiHwoORGV0YWNoZWRXb3JrSWQSDQoFdmFsdWUYASABKAlCMFouYWdlbnRyZXBsL3Byb3RvL2NvbnZlcnNhdGlvbi92MTtjb252ZXJzYXRpb252MWIGcHJvdG8z", [file_conversation_v1_agent_activity, file_conversation_v1_workflow]);
+  fileDesc("CiNjb252ZXJzYXRpb24vdjEvZGV0YWNoZWRfd29yay5wcm90bxIPY29udmVyc2F0aW9uLnYxIq0DChFBZ2VudERldGFjaGVkV29yaxItCgR3b3JrGAEgASgLMh8uY29udmVyc2F0aW9uLnYxLkRldGFjaGVkV29ya0lkEjgKBm91dHB1dBgEIAEoCzIjLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFdvcmtPdXRwdXRIAYgBARInCgVvd25lchgFIAEoCzIYLmNvbnZlcnNhdGlvbi52MS5BZ2VudElkEi8KBGtpbmQYBiABKAsyIS5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrS2luZBI5CghkZXRhY2hlZBgCIAEoCzIlLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFdvcmtEZXRhY2hlZEgAEjcKB2NyZWF0ZWQYAyABKAsyJC5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrQ3JlYXRlZEgAEj4KCWNvbmNsdWRlZBgHIAEoCzImLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFdvcmtDb25jbHVkZWRIAogBAUIICgZvcmlnaW5CCQoHX291dHB1dEIMCgpfY29uY2x1ZGVkIhcKFURldGFjaGVkV29ya0NvbmNsdWRlZCK3AQoSRGV0YWNoZWRXb3JrT3V0cHV0EgwKBHBhdGgYASABKAkSPwoIcmVhZGFibGUYAiABKAsyKy5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrT3V0cHV0UmVhZGFibGVIABJDCgp1bnJlYWRhYmxlGAMgASgLMi0uY29udmVyc2F0aW9uLnYxLkRldGFjaGVkV29ya091dHB1dFVucmVhZGFibGVIAEINCgtyZWFkYWJpbGl0eSIcChpEZXRhY2hlZFdvcmtPdXRwdXRSZWFkYWJsZSIeChxEZXRhY2hlZFdvcmtPdXRwdXRVbnJlYWRhYmxlItICChREZXRhY2hlZFdvcmtEZXRhY2hlZBI6ChBkZXRhY2hlZF9mcm9tX2lkGAEgASgLMiAuY29udmVyc2F0aW9uLnYxLkFnZW50QWN0aXZpdHlJZBI8CglyZXF1ZXN0ZWQYAiABKAsyJy5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRDYXVzZVJlcXVlc3RlZEgAEjcKB2J5X3VzZXIYAyABKAsyJC5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRDYXVzZUJ5VXNlckgAEjsKCXRpbWVkX291dBgEIAEoCzImLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZENhdXNlVGltZWRPdXRIABJBCgx2ZW5kb3JfbW92ZWQYBSABKAsyKS5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRDYXVzZVZlbmRvck1vdmVkSABCBwoFY2F1c2UiGAoWRGV0YWNoZWRDYXVzZVJlcXVlc3RlZCIVChNEZXRhY2hlZENhdXNlQnlVc2VyIhoKGERldGFjaGVkQ2F1c2VWZW5kb3JNb3ZlZCIrChVEZXRhY2hlZENhdXNlVGltZWRPdXQSEgoKdGltZW91dF9tcxgBIAEoBCJMChNEZXRhY2hlZFdvcmtDcmVhdGVkEjUKDHdvcmtfY3JlYXRlZBgBIAEoCzIfLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hhYmxlV29yayLjAQoORGV0YWNoYWJsZVdvcmsSMgoIc3ViYWdlbnQYASABKAsyHi5jb252ZXJzYXRpb24udjEuQWdlbnRTdWJhZ2VudEgAEioKBGJhc2gYAiABKAsyGi5jb252ZXJzYXRpb24udjEuQWdlbnRCYXNoSAASNwoId29ya2Zsb3cYAyABKAsyIy5jb252ZXJzYXRpb24udjEuQWdlbnRXb3JrZmxvd1N0YXJ0SAASMAoHbW9uaXRvchgEIAEoCzIdLmNvbnZlcnNhdGlvbi52MS5BZ2VudE1vbml0b3JIAEIGCgR3b3JrIowCChBEZXRhY2hlZFdvcmtLaW5kEj0KCHN1YmFnZW50GAEgASgLMikuY29udmVyc2F0aW9uLnYxLkRldGFjaGVkV29ya0tpbmRTdWJhZ2VudEgAEjUKBGJhc2gYAiABKAsyJS5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrS2luZEJhc2hIABI9Cgh3b3JrZmxvdxgDIAEoCzIpLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFdvcmtLaW5kV29ya2Zsb3dIABI7Cgdtb25pdG9yGAQgASgLMiguY29udmVyc2F0aW9uLnYxLkRldGFjaGVkV29ya0tpbmRNb25pdG9ySABCBgoEa2luZCKUAQoYRGV0YWNoZWRXb3JrS2luZFN1YmFnZW50EioKCGFnZW50X2lkGAEgASgLMhguY29udmVyc2F0aW9uLnYxLkFnZW50SWQSPQoKY29tbWlzc2lvbhgCIAEoCzIkLmNvbnZlcnNhdGlvbi52MS5BZ2VudFN1YmFnZW50UHJvbXB0SACIAQFCDQoLX2NvbW1pc3Npb24iFgoURGV0YWNoZWRXb3JrS2luZEJhc2giGgoYRGV0YWNoZWRXb3JrS2luZFdvcmtmbG93IhkKF0RldGFjaGVkV29ya0tpbmRNb25pdG9yIh8KDkRldGFjaGVkV29ya0lkEg0KBXZhbHVlGAEgASgJQjBaLmFnZW50cmVwbC9wcm90by9jb252ZXJzYXRpb24vdjE7Y29udmVyc2F0aW9udjFiBnByb3RvMw", [file_conversation_v1_agent_activity, file_conversation_v1_workflow]);
 
 /**
  * Work that has left the turn. It is announced HERE and nowhere else after
@@ -127,6 +127,28 @@ export type AgentDetachedWork = Message<"conversation.v1.AgentDetachedWork"> & {
     value: DetachedWorkCreated;
     case: "created";
   } | { case: undefined; value?: undefined };
+
+  /**
+   * SET WHEN THE PRODUCER MAKES THIS ANNOUNCEMENT AT THE WORK'S CONCLUSION:
+   * the vendor already reported the work ended (its task notification) when
+   * the row was written. UNSET on every announcement made while the work runs.
+   *
+   * WORK FIRST LEARNED HERE IS NOT LIVE. A producer that never saw the work
+   * open -- a shell a backgrounded subagent launched, whose call never reached
+   * this producer's stream -- announces it for the first time at its end, and
+   * a consumer that admitted it as running held it live until a terminal that
+   * could arrive late or never (2026-10-08: a merge waited forever on one). A
+   * consumer records such work CONCLUDED and never counts it as running; it
+   * may still read the work's record to its end to draw its outcome.
+   *
+   * For work already announced running, this restates the end its own
+   * terminal concludes: a shell's end still has one writer, the sidecar's
+   * terminal, and a consumer does not end a running shell's stream early on
+   * this field.
+   *
+   * @generated from field: optional conversation.v1.DetachedWorkConcluded concluded = 7;
+   */
+  concluded?: DetachedWorkConcluded | undefined;
 };
 
 /**
@@ -135,6 +157,22 @@ export type AgentDetachedWork = Message<"conversation.v1.AgentDetachedWork"> & {
  */
 export const AgentDetachedWorkSchema: GenMessage<AgentDetachedWork> = /*@__PURE__*/
   messageDesc(file_conversation_v1_detached_work, 0);
+
+/**
+ * The work had already ended when its announcement was made. Carries no
+ * figure: how it ended is the work's own terminal, never restated here.
+ *
+ * @generated from message conversation.v1.DetachedWorkConcluded
+ */
+export type DetachedWorkConcluded = Message<"conversation.v1.DetachedWorkConcluded"> & {
+};
+
+/**
+ * Describes the message conversation.v1.DetachedWorkConcluded.
+ * Use `create(DetachedWorkConcludedSchema)` to create a new message.
+ */
+export const DetachedWorkConcludedSchema: GenMessage<DetachedWorkConcluded> = /*@__PURE__*/
+  messageDesc(file_conversation_v1_detached_work, 1);
 
 /**
  * The file a detached unit's output is being written to.
@@ -182,7 +220,7 @@ export type DetachedWorkOutput = Message<"conversation.v1.DetachedWorkOutput"> &
  * Use `create(DetachedWorkOutputSchema)` to create a new message.
  */
 export const DetachedWorkOutputSchema: GenMessage<DetachedWorkOutput> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_detached_work, 1);
+  messageDesc(file_conversation_v1_detached_work, 2);
 
 /**
  * The output file may be opened.
@@ -197,7 +235,7 @@ export type DetachedWorkOutputReadable = Message<"conversation.v1.DetachedWorkOu
  * Use `create(DetachedWorkOutputReadableSchema)` to create a new message.
  */
 export const DetachedWorkOutputReadableSchema: GenMessage<DetachedWorkOutputReadable> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_detached_work, 2);
+  messageDesc(file_conversation_v1_detached_work, 3);
 
 /**
  * The output file may not be opened by this reader.
@@ -212,7 +250,7 @@ export type DetachedWorkOutputUnreadable = Message<"conversation.v1.DetachedWork
  * Use `create(DetachedWorkOutputUnreadableSchema)` to create a new message.
  */
 export const DetachedWorkOutputUnreadableSchema: GenMessage<DetachedWorkOutputUnreadable> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_detached_work, 3);
+  messageDesc(file_conversation_v1_detached_work, 4);
 
 /**
  * Work that was drawn as in-turn progress and has now left the turn. One
@@ -295,7 +333,7 @@ export type DetachedWorkDetached = Message<"conversation.v1.DetachedWorkDetached
  * Use `create(DetachedWorkDetachedSchema)` to create a new message.
  */
 export const DetachedWorkDetachedSchema: GenMessage<DetachedWorkDetached> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_detached_work, 4);
+  messageDesc(file_conversation_v1_detached_work, 5);
 
 /**
  * The agent asked for the background when it made the call.
@@ -310,7 +348,7 @@ export type DetachedCauseRequested = Message<"conversation.v1.DetachedCauseReque
  * Use `create(DetachedCauseRequestedSchema)` to create a new message.
  */
 export const DetachedCauseRequestedSchema: GenMessage<DetachedCauseRequested> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_detached_work, 5);
+  messageDesc(file_conversation_v1_detached_work, 6);
 
 /**
  * A person backgrounded the running work by hand.
@@ -325,7 +363,7 @@ export type DetachedCauseByUser = Message<"conversation.v1.DetachedCauseByUser">
  * Use `create(DetachedCauseByUserSchema)` to create a new message.
  */
 export const DetachedCauseByUserSchema: GenMessage<DetachedCauseByUser> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_detached_work, 6);
+  messageDesc(file_conversation_v1_detached_work, 7);
 
 /**
  * The vendor moved the running work to the background without saying why.
@@ -340,7 +378,7 @@ export type DetachedCauseVendorMoved = Message<"conversation.v1.DetachedCauseVen
  * Use `create(DetachedCauseVendorMovedSchema)` to create a new message.
  */
 export const DetachedCauseVendorMovedSchema: GenMessage<DetachedCauseVendorMoved> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_detached_work, 7);
+  messageDesc(file_conversation_v1_detached_work, 8);
 
 /**
  * The work exceeded its own timeout and was moved to the background instead of
@@ -366,7 +404,7 @@ export type DetachedCauseTimedOut = Message<"conversation.v1.DetachedCauseTimedO
  * Use `create(DetachedCauseTimedOutSchema)` to create a new message.
  */
 export const DetachedCauseTimedOutSchema: GenMessage<DetachedCauseTimedOut> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_detached_work, 8);
+  messageDesc(file_conversation_v1_detached_work, 9);
 
 /**
  * Work that is detached from the moment the consumer hears of it, so nothing
@@ -388,7 +426,7 @@ export type DetachedWorkCreated = Message<"conversation.v1.DetachedWorkCreated">
  * Use `create(DetachedWorkCreatedSchema)` to create a new message.
  */
 export const DetachedWorkCreatedSchema: GenMessage<DetachedWorkCreated> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_detached_work, 9);
+  messageDesc(file_conversation_v1_detached_work, 10);
 
 /**
  * The kinds of work that can exist detached from a turn. Deliberately a SMALL
@@ -457,7 +495,7 @@ export type DetachableWork = Message<"conversation.v1.DetachableWork"> & {
  * Use `create(DetachableWorkSchema)` to create a new message.
  */
 export const DetachableWorkSchema: GenMessage<DetachableWork> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_detached_work, 10);
+  messageDesc(file_conversation_v1_detached_work, 11);
 
 /**
  * WHICH KIND of work an announcement is about. The arms mirror DetachableWork's
@@ -512,7 +550,7 @@ export type DetachedWorkKind = Message<"conversation.v1.DetachedWorkKind"> & {
  * Use `create(DetachedWorkKindSchema)` to create a new message.
  */
 export const DetachedWorkKindSchema: GenMessage<DetachedWorkKind> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_detached_work, 11);
+  messageDesc(file_conversation_v1_detached_work, 12);
 
 /**
  * The work is a subagent.
@@ -572,7 +610,7 @@ export type DetachedWorkKindSubagent = Message<"conversation.v1.DetachedWorkKind
  * Use `create(DetachedWorkKindSubagentSchema)` to create a new message.
  */
 export const DetachedWorkKindSubagentSchema: GenMessage<DetachedWorkKindSubagent> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_detached_work, 12);
+  messageDesc(file_conversation_v1_detached_work, 13);
 
 /**
  * The work is a shell command.
@@ -587,7 +625,7 @@ export type DetachedWorkKindBash = Message<"conversation.v1.DetachedWorkKindBash
  * Use `create(DetachedWorkKindBashSchema)` to create a new message.
  */
 export const DetachedWorkKindBashSchema: GenMessage<DetachedWorkKindBash> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_detached_work, 13);
+  messageDesc(file_conversation_v1_detached_work, 14);
 
 /**
  * The work is a workflow run.
@@ -602,7 +640,7 @@ export type DetachedWorkKindWorkflow = Message<"conversation.v1.DetachedWorkKind
  * Use `create(DetachedWorkKindWorkflowSchema)` to create a new message.
  */
 export const DetachedWorkKindWorkflowSchema: GenMessage<DetachedWorkKindWorkflow> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_detached_work, 14);
+  messageDesc(file_conversation_v1_detached_work, 15);
 
 /**
  * The work is a background watcher.
@@ -617,7 +655,7 @@ export type DetachedWorkKindMonitor = Message<"conversation.v1.DetachedWorkKindM
  * Use `create(DetachedWorkKindMonitorSchema)` to create a new message.
  */
 export const DetachedWorkKindMonitorSchema: GenMessage<DetachedWorkKindMonitor> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_detached_work, 15);
+  messageDesc(file_conversation_v1_detached_work, 16);
 
 /**
  * The identity of one unit of detached work, and the handle a stop is aimed at.
@@ -648,5 +686,5 @@ export type DetachedWorkId = Message<"conversation.v1.DetachedWorkId"> & {
  * Use `create(DetachedWorkIdSchema)` to create a new message.
  */
 export const DetachedWorkIdSchema: GenMessage<DetachedWorkId> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_detached_work, 16);
+  messageDesc(file_conversation_v1_detached_work, 17);
 

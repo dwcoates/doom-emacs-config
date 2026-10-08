@@ -426,6 +426,15 @@ interface DetachmentFacts {
    * owner unset rather than naming the agent whose book it happens to ride.
    */
   readonly owner?: conversationv1.AgentId;
+  /**
+   * WHETHER THE WORK HAD ALREADY ENDED when this announcement was made: the
+   * vendor's task notification. Stated on the wire
+   * (`AgentDetachedWork.concluded`) so a consumer that first learns of the work
+   * here records it concluded and never counts it running (2026-10-08: a shell
+   * a backgrounded subagent launched was first announced at its end, admitted
+   * live, and held a merge waiting forever).
+   */
+  readonly concluded?: boolean;
 }
 
 /**
@@ -458,6 +467,7 @@ function detachmentEntry(
         cause: detachCause(facts.cause, facts.timeoutMs),
       }),
     },
+    concluded: facts.concluded === true ? create(conversationv1.DetachedWorkConcludedSchema, {}) : undefined,
   });
   return {
     agentId,
@@ -1470,6 +1480,9 @@ export function convertDetached(
             outputPath: raw.output_file,
             outputReadable: true,
             owner,
+            // THE NOTIFICATION IS THE WORK'S END, so the announcement it upserts
+            // says the work concluded.
+            concluded: true,
           }),
         );
       }
