@@ -887,3 +887,96 @@ func TestInterruptDetachedRefusesAnActivityRowWithNoSubagent(t *testing.T) {
 		t.Fatalf("stopped agents = %v, want none", f.shim.stoppedAgents)
 	}
 }
+
+func TestInterruptTurnDuringABringUpWithdrawsTheAcceptedTurn(t *testing.T) {
+	// Arrange: the session is still coming up, and the queue holds the turn.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.hasSession = false
+	f.queue.withdrawn = true
+
+	// Act.
+	outcome, err := f.verbs.Interrupt(context.Background(), "w1", InterruptTarget{Turn: true}, false)
+
+	// Assert.
+	if err != nil || !outcome.Turn || outcome.NothingRunning {
+		t.Fatalf("Interrupt() = (%+v, %v), want the interrupted-turn arm", outcome, err)
+	}
+	if len(f.queue.withdraws) != 1 || f.queue.withdraws[0] != "w1" {
+		t.Fatalf("withdrawals = %v, want one for w1", f.queue.withdraws)
+	}
+}
+
+func TestInterruptTurnWithdrawnDuringABringUpKillsNothing(t *testing.T) {
+	// Arrange: a session is live, so a kill would reach it were it attempted.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	runningTurn(f, 0)
+	f.queue.withdrawn = true
+
+	// Act.
+	if _, err := f.verbs.Interrupt(context.Background(), "w1", InterruptTarget{Turn: true}, false); err != nil {
+		t.Fatalf("Interrupt: %v", err)
+	}
+
+	// Assert.
+	if len(f.shim.killedTurns) != 0 {
+		t.Fatalf("killed turns = %+v, want none: the withdrawn turn never reached the session", f.shim.killedTurns)
+	}
+}
+
+func TestInterruptTurnWithdrawnDuringABringUpRaisesTheMergeDequeueOffer(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.hasSession = false
+	f.queue.withdrawn = true
+
+	// Act.
+	if _, err := f.verbs.Interrupt(context.Background(), "w1", InterruptTarget{Turn: true}, false); err != nil {
+		t.Fatalf("Interrupt: %v", err)
+	}
+
+	// Assert.
+	if len(f.merge.interrupted) != 1 {
+		t.Fatalf("merge interrupts = %v, want exactly one", f.merge.interrupted)
+	}
+}
+
+func TestInterruptTurnSurfacesAFailedWithdrawal(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	runningTurn(f, 0)
+	cause := errors.New("the database is read-only")
+	f.queue.withdrawErr = cause
+
+	// Act.
+	_, err := f.verbs.Interrupt(context.Background(), "w1", InterruptTarget{Turn: true}, false)
+
+	// Assert: the failure is surfaced, and nothing is killed behind it.
+	if !errors.Is(err, cause) {
+		t.Fatalf("Interrupt() error = %v, want the withdrawal's failure", err)
+	}
+	if len(f.shim.killedTurns) != 0 {
+		t.Fatalf("killed turns = %+v, want none after a failed withdrawal", f.shim.killedTurns)
+	}
+}
+
+func TestInterruptAllAgentsNeverWithdrawsAnAcceptedTurn(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	runningTurn(f, 0)
+	f.queue.withdrawn = true
+
+	// Act.
+	if _, err := f.verbs.Interrupt(context.Background(), "w1", InterruptTarget{AllAgents: true}, false); err != nil {
+		t.Fatalf("Interrupt: %v", err)
+	}
+
+	// Assert.
+	if len(f.queue.withdraws) != 0 {
+		t.Fatalf("withdrawals = %v, want none: only a turn stop withdraws", f.queue.withdraws)
+	}
+}

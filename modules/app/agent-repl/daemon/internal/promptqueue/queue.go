@@ -27,6 +27,7 @@ const (
 	opInterject   = "daemon.promptqueue.interject"
 	opRelease     = "daemon.promptqueue.release"
 	opDrop        = "daemon.promptqueue.drop"
+	opWithdraw    = "daemon.promptqueue.withdraw_revival_turn"
 	opAccept      = "daemon.promptqueue.accept"
 	opAct         = "daemon.promptqueue.session_act"
 	opTurnEnded   = "daemon.promptqueue.turn_ended"
@@ -324,6 +325,12 @@ func (q *queue) pushTray(ctx context.Context, ws ids.WorkspaceID, log dlog.Logge
 	q.deps.Holds.SetHeldPrompts(ws, standing)
 	log.Debug(opTray, "republished the hold tray", dlog.Context{"holds": len(standing)})
 	return nil
+}
+
+// standingReconnectHold reports whether a hold is standing (not retired) under
+// the reconnect hold: a prompt that waits for a session to come up.
+func standingReconnectHold(h wsm.HeldPrompt) bool {
+	return h.Tombstone == nil && h.Hold != nil && *h.Hold == wsm.HoldReconnect
 }
 
 // standingHold finds one workspace's standing hold by turn.
