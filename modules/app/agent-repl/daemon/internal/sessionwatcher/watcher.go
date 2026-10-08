@@ -2042,6 +2042,72 @@ func (w *watcher) applySessionStartedLocked(started *conversationv1.SessionStart
 		})
 	}
 	w.reconcileOpenAtAttachLocked(started)
+	w.standOpenAsksLocked(started.GetOpenAsks())
+}
+
+// standOpenAsksLocked restates every ask the session's facts name open to the
+// views a gate stands on — the footer, the roster and the merge queue —
+// exactly as the ask's live start reached them.
+//
+// A DAEMON THAT ATTACHES MID-ASK WAS NOT THERE FOR THE START. Its watches open
+// at the stream's tail and replay nothing, so the start reached only the feed,
+// through a reader's page; the facts' turn in flight then drew the strip
+// `working` and the tab red while a card waited on the user (owner report,
+// 2026-10-08: a question opened at 15:02:36, a handover's successor took the
+// workspace at 15:02:44 and drew working until the answer at 15:06:08). The
+// shim states its open asks beside the turn in flight for exactly this.
+//
+// The feed and the host are not told again: the card was drawn and the host
+// notified when the ask opened. Restating an ask a view already stands is
+// harmless, because every view keys an ask by its identity.
+func (w *watcher) standOpenAsksLocked(asks []*conversationv1.SessionOpenAsk) {
+	for _, ask := range asks {
+		agent := ask.GetAgent()
+		ctx := dlog.Context{"agent_id": agent.GetValue(), "turn_in_flight": turnValue(w.turn)}
+		switch {
+		case isOpenPermission(ask.GetPermission()):
+			permission := ask.GetPermission()
+			ctx["permission_id"] = permission.GetId().GetValue()
+			w.log.Info("daemon.sessionwatcher.open_ask_at_attach",
+				"the session's facts name a consent ask open; the views stand it", ctx)
+			w.sinks.Footer.OnPermission(w.ws, agent, permission)
+			w.sinks.Sidebar.OnPermission(w.ws, agent, permission)
+			if w.sinks.Merge != nil {
+				w.sinks.Merge.OnPermission(w.ws, agent, permission)
+			}
+		case isOpenQuestion(ask.GetQuestion()):
+			question := ask.GetQuestion()
+			ctx["question_id"] = question.GetId().GetValue()
+			w.log.Info("daemon.sessionwatcher.open_ask_at_attach",
+				"the session's facts name a question batch open; the views stand it", ctx)
+			w.sinks.Footer.OnQuestion(w.ws, agent, question)
+			if w.sinks.Merge != nil {
+				w.sinks.Merge.OnQuestion(w.ws, agent, question)
+			}
+		default:
+			w.log.Error("daemon.sessionwatcher.open_ask_malformed",
+				"the session's facts name an open ask that is neither an open consent ask nor an open question batch; nothing is stood for it",
+				dlog.Context{
+					"agent_id":            agent.GetValue(),
+					"permission_set":      ask.GetPermission() != nil,
+					"question_set":        ask.GetQuestion() != nil,
+					"invariant_violation": "SessionStarted.open_asks lists only asks whose result is start",
+					"remediation":         "list only the asks the shim's permission gate holds pending",
+				})
+		}
+	}
+}
+
+// isOpenPermission reports whether P is a consent ask still open.
+func isOpenPermission(p *conversationv1.AgentPermission) bool {
+	_, open := p.GetResult().(*conversationv1.AgentPermission_Start)
+	return open
+}
+
+// isOpenQuestion reports whether Q is a question batch still open.
+func isOpenQuestion(q *conversationv1.AgentQuestion) bool {
+	_, open := q.GetResult().(*conversationv1.AgentQuestion_Start)
+	return open
 }
 
 // standRunningAtAttachLocked tells the views that TURN, which the adopted

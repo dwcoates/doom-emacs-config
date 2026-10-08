@@ -31,6 +31,7 @@ export const ROSTER_STATUS_CASES = [
   "clearing",
   "compacting",
   "permission",
+  "question",
   "done",
   "interrupted",
   "turnFailed",
@@ -142,8 +143,8 @@ export function glyphName(arm: RosterStatusCase): string {
  * is always the same: work is in flight and a prompt cannot land right now.
  *
  * The legacy rail already made exactly this claim for these arms and it is
- * kept unchanged: the four busy states and a pending permission or other
- * wait on you (ready AND waiting on you) breathe; detached work breathes in its own amber; a merge
+ * kept unchanged: the four busy states and a pending permission, question or
+ * other wait on you (ready AND waiting on you) breathe; detached work breathes in its own amber; a merge
  * in hand spins instead. Everything else is still, because nothing about it is
  * in progress.
  */
@@ -154,6 +155,7 @@ export function armBreathes(arm: RosterStatusCase): boolean {
     case "clearing":
     case "compacting":
     case "permission":
+    case "question":
     case "waiting":
     case "idleAsync":
       return true;

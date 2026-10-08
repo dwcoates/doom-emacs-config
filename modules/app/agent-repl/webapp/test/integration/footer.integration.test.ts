@@ -40,6 +40,7 @@ import {
   FOOTER_CHIPS,
   FOOTER_PANELS,
   FOOTER_STATUS_SALIENTS,
+  FOOTER_SALIENT_ONLY_ARMS,
   FOOTER_TRANSIENT_KINDS,
   FOOTER_STATUS_ARMS,
   FOOTER_STATUS_SUBSTATUSES,
@@ -317,7 +318,7 @@ describe("the activity cell", () => {
     },
   );
 
-  it.each(FOOTER_STATUS_ARMS.filter((status) => status !== "waiting"))(
+  it.each(FOOTER_STATUS_ARMS.filter((status) => !FOOTER_SALIENT_ONLY_ARMS.includes(status)))(
     "draws the enduring line under %s when nothing else stands",
     async (status) => {
       // Arrange / Act

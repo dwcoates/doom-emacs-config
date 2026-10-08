@@ -1027,3 +1027,157 @@ func TestASessionComingUpWithNoReconnectHoldDeliversNothing(t *testing.T) {
 		t.Fatalf("started turns = %v, want none", got)
 	}
 }
+
+// revivalPending arranges a workspace whose bring-up has not finished, with
+// one prompt per turn submitted and held for it.
+func revivalPending(t *testing.T, turns ...ids.TurnID) *harness {
+	t.Helper()
+	h := newHarness(t)
+	h.noSession = true
+	release := make(chan struct{})
+	h.reviveHook = func() { <-release }
+	t.Cleanup(func() { close(release); h.waitRevivals() })
+	for _, turn := range turns {
+		if _, err := h.q.Submit(context.Background(), submission(turn, "wake up")); err != nil {
+			t.Fatalf("Submit(%s) during a bring-up = %v, want an answer", turn, err)
+		}
+	}
+	return h
+}
+
+func TestWithdrawRevivalTurnRetiresTheAcceptedTurn(t *testing.T) {
+	// Arrange
+	h := revivalPending(t, "t1")
+	// Act
+	withdrawn, err := h.q.WithdrawRevivalTurn(context.Background(), theWorkspace)
+	// Assert
+	if err != nil || !withdrawn {
+		t.Fatalf("WithdrawRevivalTurn = %v, %v; want the accepted turn withdrawn", withdrawn, err)
+	}
+	if tomb := h.db.hold("t1").Tombstone; tomb == nil || tomb.Kind != tombstoneWithdrawn {
+		t.Fatalf("tombstone = %+v, want a withdrawn tombstone", tomb)
+	}
+	if !logged(h.log.Records(), "info", opWithdraw, "a stop withdrew the accepted turn before its session came up") {
+		t.Fatalf("records = %+v, want the withdrawal recorded at info", h.log.Records())
+	}
+}
+
+func TestWithdrawRevivalTurnClearsBothStatusSurfacesTurn(t *testing.T) {
+	// Arrange
+	h := revivalPending(t, "t1")
+	// Act
+	if _, err := h.q.WithdrawRevivalTurn(context.Background(), theWorkspace); err != nil {
+		t.Fatalf("WithdrawRevivalTurn: %v", err)
+	}
+	// Assert: accepted, then cleared, on the footer and the roster alike.
+	footerTurns, rosterTurns := h.footer.startedTurns(), h.sidebar.rosterTurns()
+	if len(footerTurns) != 2 || footerTurns[1] != nil {
+		t.Fatalf("footer turns = %+v, want the accepted turn followed by its clearing", footerTurns)
+	}
+	if len(rosterTurns) != 2 || rosterTurns[1] != nil {
+		t.Fatalf("roster turns = %+v, want the accepted turn followed by its clearing", rosterTurns)
+	}
+}
+
+func TestWithdrawRevivalTurnRepublishesTheTray(t *testing.T) {
+	// Arrange
+	h := revivalPending(t, "t1")
+	before := h.holds.pushCount()
+	// Act
+	if _, err := h.q.WithdrawRevivalTurn(context.Background(), theWorkspace); err != nil {
+		t.Fatalf("WithdrawRevivalTurn: %v", err)
+	}
+	// Assert
+	if h.holds.pushCount() <= before || len(h.holds.last()) != 0 {
+		t.Fatalf("tray = %v after %d pushes, want it republished without the withdrawn prompt", h.holds.last(), h.holds.pushCount()-before)
+	}
+}
+
+func TestWithdrawRevivalTurnLeavesThePromptsBehindItHeld(t *testing.T) {
+	// Arrange
+	h := revivalPending(t, "t1", "t2")
+	turnsBefore := len(h.footer.startedTurns())
+	// Act
+	if _, err := h.q.WithdrawRevivalTurn(context.Background(), theWorkspace); err != nil {
+		t.Fatalf("WithdrawRevivalTurn: %v", err)
+	}
+	// Assert: the first is retired, the second stands, and the status keeps
+	// showing the accepted turn the second now is.
+	if h.db.hold("t1").Tombstone == nil {
+		t.Fatal("the first waiting prompt was not withdrawn")
+	}
+	if tomb := h.db.hold("t2").Tombstone; tomb != nil {
+		t.Fatalf("the prompt behind it was retired: %+v", tomb)
+	}
+	if got := len(h.footer.startedTurns()); got != turnsBefore {
+		t.Fatalf("footer was told %d more turns, want none: a prompt still waits", got-turnsBefore)
+	}
+}
+
+func TestWithdrawRevivalTurnAnswersFalseWithNoRevivalInFlight(t *testing.T) {
+	// Arrange: a live session, so nothing waits on a bring-up.
+	h := newHarness(t)
+	// Act
+	withdrawn, err := h.q.WithdrawRevivalTurn(context.Background(), theWorkspace)
+	// Assert
+	if err != nil || withdrawn {
+		t.Fatalf("WithdrawRevivalTurn = %v, %v; want false with no error", withdrawn, err)
+	}
+	if !logged(h.log.Records(), "debug", opWithdraw, "no revival is in flight; no accepted turn waits on a bring-up") {
+		t.Fatalf("records = %+v, want the no-revival branch recorded", h.log.Records())
+	}
+}
+
+func TestWithdrawRevivalTurnAnswersFalseWhenNoPromptWaits(t *testing.T) {
+	// Arrange: the revival is still running, but its prompt was dropped.
+	h := revivalPending(t, "t1")
+	if err := h.q.Drop(context.Background(), theWorkspace, "t1"); err != nil {
+		t.Fatalf("Drop: %v", err)
+	}
+	// Act
+	withdrawn, err := h.q.WithdrawRevivalTurn(context.Background(), theWorkspace)
+	// Assert
+	if err != nil || withdrawn {
+		t.Fatalf("WithdrawRevivalTurn = %v, %v; want false with no error", withdrawn, err)
+	}
+	if tomb := h.db.hold("t1").Tombstone; tomb == nil || tomb.Kind != tombstoneDropped {
+		t.Fatalf("tombstone = %+v, want the drop's own left in place", tomb)
+	}
+}
+
+func TestWithdrawRevivalTurnFailsWhenTheHoldsCannotBeRead(t *testing.T) {
+	// Arrange
+	h := revivalPending(t, "t1")
+	h.db.heldErr = errors.New("the database is locked")
+	// Act
+	withdrawn, err := h.q.WithdrawRevivalTurn(context.Background(), theWorkspace)
+	// Assert
+	if err == nil || withdrawn {
+		t.Fatalf("WithdrawRevivalTurn = %v, %v; want the read failure surfaced", withdrawn, err)
+	}
+	if !logged(h.log.Records(), "error", opWithdraw, "could not read the holds waiting on the bring-up") {
+		t.Fatalf("records = %+v, want the read failure recorded at error", h.log.Records())
+	}
+	if h.db.hold("t1").Tombstone != nil {
+		t.Fatal("a failed read must retire nothing")
+	}
+}
+
+func TestWithdrawRevivalTurnFailsWhenTheDurableRetireFails(t *testing.T) {
+	// Arrange
+	h := revivalPending(t, "t1")
+	turnsBefore := len(h.footer.startedTurns())
+	h.db.tombstoneErr = errors.New("the database is read-only")
+	// Act
+	withdrawn, err := h.q.WithdrawRevivalTurn(context.Background(), theWorkspace)
+	// Assert: refused, recorded, and the status still shows the turn.
+	if err == nil || withdrawn {
+		t.Fatalf("WithdrawRevivalTurn = %v, %v; want the failed retire surfaced", withdrawn, err)
+	}
+	if !logged(h.log.Records(), "error", opWithdraw, "the drop was refused: the hold could not be retired") {
+		t.Fatalf("records = %+v, want the failed retire recorded at error", h.log.Records())
+	}
+	if got := len(h.footer.startedTurns()); got != turnsBefore {
+		t.Fatalf("footer was told %d more turns, want none after a failed withdrawal", got-turnsBefore)
+	}
+}

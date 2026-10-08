@@ -466,8 +466,14 @@ message RosterRow {
     RosterRowStatusClearing clearing = 5;
     // The context is being compacted.
     RosterRowStatusCompacting compacting = 6;
-    // A tool-permission request is waiting on the user.
+    // A PERMISSION GATE: a tool call waits on the user's consent. GREEN, the
+    // workspace is ready for the user: the same coarse claim as the footer's
+    // `permission` status.
     RosterRowStatusPermission permission = 7;
+    // A QUESTION GATE: a question batch waits on the user's answers. GREEN,
+    // as `permission` is: the same coarse claim as the footer's `question`
+    // status.
+    RosterRowStatusQuestion question = 56;
     // The turn finished. While its result is UNREAD this arm outranks
     // `idle_async`; once read it is drawn with `viewed` (see RosterRowViewed).
     RosterRowStatusDone done = 8;
@@ -575,11 +581,11 @@ message RosterRow {
     // the same coarse claim as the footer's
     // `agent_repl_fault · daemon_impaired`.
     RosterRowStatusDaemonImpaired daemon_impaired = 54;
-    // The session waits on something other than a tool permission: an open
-    // question to the user, a cold gate standing between it and the next
-    // turn, or an interrupt the user sent that has not yet landed. GREEN, the
-    // same coarse claim as the footer's `waiting` status in those substatuses;
-    // a tool permission keeps its own `permission` arm.
+    // The session waits on something other than a gate's card: a cold gate
+    // standing between it and the next turn, or an interrupt the user sent
+    // that has not yet landed. GREEN, the same coarse claim as the footer's
+    // `waiting` status in those substatuses; a permission or a question gate
+    // has its own arm.
     RosterRowStatusWaiting waiting = 55;
   }
   // Tags 19 (`merge_enqueuing`) and 22 (`merge_conflict`) are RETIRED: no
@@ -728,7 +734,11 @@ message RosterRowStatusClearing {}
 
 message RosterRowStatusCompacting {}
 
+// The row's status while a tool call waits on the user's consent.
 message RosterRowStatusPermission {}
+
+// The row's status while a question batch waits on the user's answers.
+message RosterRowStatusQuestion {}
 
 message RosterRowStatusDone {}
 
@@ -752,8 +762,8 @@ message RosterRowStatusApiRetrying {}
 message RosterRowStatusClosing {}
 // The row's status while the daemon itself cannot serve the workspace.
 message RosterRowStatusDaemonImpaired {}
-// The row's status while the session waits on the user for something other
-// than a tool permission.
+// The row's status while the session waits on a cold gate's answer or on an
+// interrupt landing.
 message RosterRowStatusWaiting {}
 
 message RosterRowStatusInit {}

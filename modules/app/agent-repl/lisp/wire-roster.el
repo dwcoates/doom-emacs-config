@@ -345,6 +345,11 @@ roster where an absent message field is not a breach."
   "Decode VALUE as the empty `RosterRowStatusPermission'."
   (agent-repl-wire--decode-empty "RosterRowStatusPermission" value))
 
+(defun agent-repl-wire-decode-roster-row-status-question (value)
+  "Decode VALUE as the empty `RosterRowStatusQuestion'.
+A question batch waits on the user's answers: a question gate."
+  (agent-repl-wire--decode-empty "RosterRowStatusQuestion" value))
+
 (defun agent-repl-wire-decode-roster-row-status-done (value)
   "Decode VALUE as the empty `RosterRowStatusDone'."
   (agent-repl-wire--decode-empty "RosterRowStatusDone" value))
@@ -404,7 +409,8 @@ The daemon itself cannot serve the workspace: an agent-repl fault."
 
 (defun agent-repl-wire-decode-roster-row-status-waiting (value)
   "Decode VALUE as the empty `RosterRowStatusWaiting'.
-The session waits on something other than a tool permission."
+The session waits on a cold gate's answer or on an interrupt landing;
+a permission or a question gate has its own arm."
   (agent-repl-wire--decode-empty "RosterRowStatusWaiting" value))
 
 (defun agent-repl-wire-decode-roster-row-status-init (value)
@@ -459,6 +465,7 @@ an assertion, where an unset oneof is the absence of one."
     (clearing :clearing agent-repl-wire-decode-roster-row-status-clearing)
     (compacting :compacting agent-repl-wire-decode-roster-row-status-compacting)
     (permission :permission agent-repl-wire-decode-roster-row-status-permission)
+    (question :question agent-repl-wire-decode-roster-row-status-question)
     (done :done agent-repl-wire-decode-roster-row-status-done)
     (interrupted :interrupted agent-repl-wire-decode-roster-row-status-interrupted)
     (turnFailed :turn-failed agent-repl-wire-decode-roster-row-status-turn-failed)

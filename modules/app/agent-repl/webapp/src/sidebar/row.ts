@@ -151,6 +151,7 @@ export function drawRosterRow(
   ws.className = `ws ${mark.toneClass}`;
   ws.setAttribute("data-roster-row", workspace.id);
   ws.setAttribute("data-arm", status.case);
+  sc.drawnStatus.note(workspace.id, { arm: status.case, source: "daemon" });
   if (current) ws.setAttribute("data-current", "true");
   if (closed) ws.setAttribute("data-closed", "true");
   if (current) ws.classList.add("current");

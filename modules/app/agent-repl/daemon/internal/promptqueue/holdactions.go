@@ -21,6 +21,9 @@ const (
 	// tombstoneCoalesced retires a prompt folded into the queued prompt ahead
 	// of it.
 	tombstoneCoalesced = "coalesced"
+	// tombstoneWithdrawn retires the accepted turn a stop withdrew while its
+	// session was still coming up (WithdrawRevivalTurn).
+	tombstoneWithdrawn = "withdrawn"
 )
 
 // Release delivers a held prompt NOW, overriding the hold and interrupting the
@@ -152,19 +155,29 @@ func (q *queue) Drop(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID) e
 		log.Warn(opDrop, "there is no such standing hold to drop", dlog.Context{"cause": err.Error()})
 		return err
 	}
-	if err := q.unclaimed(ws, held, log, opDrop); err != nil {
+	return q.dropLocked(ctx, d, held, tombstoneDropped, opDrop, log)
+}
+
+// dropLocked retires one standing hold under the delivery lock the caller holds
+// (d), DURABLY FIRST, with WHY as its tombstone kind and LOG carrying the
+// hold's turn: a hold a call in flight
+// claims is refused, the tombstone is written before anything else, and only
+// then is the head cleared, the tray re-pushed and an edit it withheld retired.
+func (q *queue) dropLocked(ctx context.Context, d *delivery, held wsm.HeldPrompt, why, op string, log dlog.Logger) error {
+	ws, turn := d.ws, held.Turn
+	if err := q.unclaimed(ws, held, log, op); err != nil {
 		return err
 	}
-	if err := q.deps.DB.TombstoneHeldPrompt(ctx, turn, wsm.Tombstone{Kind: tombstoneDropped, At: q.deps.Now()}); err != nil {
-		log.Error(opDrop, "the drop was refused: the hold could not be retired", dlog.Context{"cause": err.Error()})
+	if err := q.deps.DB.TombstoneHeldPrompt(ctx, turn, wsm.Tombstone{Kind: why, At: q.deps.Now()}); err != nil {
+		log.Error(op, "the drop was refused: the hold could not be retired", dlog.Context{"cause": err.Error()})
 		return fmt.Errorf("drop hold %q on %q: %w", turn, ws, err)
 	}
 	q.clearHeadIf(ws, turn)
-	log.Info(opDrop, "the held prompt was dropped", nil)
+	log.Info(op, "the held prompt was dropped", nil)
 	if err := q.pushTray(ctx, ws, log); err != nil {
 		return err
 	}
-	q.retireEditIf(ctx, d, turn, tombstoneDropped, log)
+	q.retireEditIf(ctx, d, turn, why, log)
 	return nil
 }
 

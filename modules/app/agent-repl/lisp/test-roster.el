@@ -1430,6 +1430,23 @@ user's next sidebar click."
       ;; Assert
       (should (equal fired nil)))))
 
+(ert-deftest agent-repl-test-roster-question-to-thinking-is-no-finish-edge ()
+  "A question gate returning to thinking is a move WITHIN the running set."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (agent-repl-test-roster--recording-finishes fired
+      (agent-repl-roster-apply
+       (agent-repl-test-roster--roster
+        :sections (list (agent-repl-test-roster--section
+                         "repo" (list (agent-repl-test-roster--row "a" "one" :question))))))
+      ;; Act
+      (agent-repl-roster-apply
+       (agent-repl-test-roster--roster
+        :sections (list (agent-repl-test-roster--section
+                         "repo" (list (agent-repl-test-roster--row "a" "one" :thinking))))))
+      ;; Assert
+      (should (equal fired nil)))))
+
 (ert-deftest agent-repl-test-roster-a-first-sighting-is-no-finish-edge ()
   "A row seen for the first time already settled has crossed nothing."
   ;; Arrange
@@ -2801,3 +2818,79 @@ pre-created rather than held untabbed."
     (agent-repl-roster-apply-current)
     ;; Assert
     (should (equal agent-repl-test-roster--switched '("one")))))
+
+;;; The tab's drawn status, on the record
+
+(defmacro agent-repl-test-roster--recording-drawn-statuses (var &rest body)
+  "Run BODY with VAR bound to the elisp.roster.drawn-status INFO records, oldest first.
+Each element is (WS LINE)."
+  (declare (indent 1))
+  `(let ((,var nil))
+     (cl-letf (((symbol-function 'agent-repl--info)
+                (lambda (ws fmt &rest args)
+                  (let ((line (apply #'format fmt args)))
+                    (when (string-prefix-p "elisp.roster.drawn-status:" line)
+                      (setq ,var (append ,var (list (list ws line)))))))))
+       ,@body)))
+
+(ert-deftest agent-repl-test-roster-a-first-sighting-records-the-drawn-status ()
+  "The first arm a row draws is on the record, as moving from nothing."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (agent-repl-test-roster--recording-drawn-statuses drawn
+      ;; Act
+      (agent-repl-roster-apply
+       (agent-repl-test-roster--roster
+        :sections (list (agent-repl-test-roster--section
+                         "repo" (list (agent-repl-test-roster--row "a" "one" :ready))))))
+      ;; Assert
+      (should (equal (mapcar #'cadr drawn)
+                     '("elisp.roster.drawn-status: id=a from=nil to=:ready"))))))
+
+(ert-deftest agent-repl-test-roster-a-changed-arm-records-the-drawn-status ()
+  "A row whose arm moved records the new arm beside the one it replaced."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (agent-repl-test-roster--recording-drawn-statuses drawn
+      (agent-repl-roster-apply
+       (agent-repl-test-roster--roster
+        :sections (list (agent-repl-test-roster--section
+                         "repo" (list (agent-repl-test-roster--row "a" "one" :ready))))))
+      ;; Act
+      (agent-repl-roster-apply
+       (agent-repl-test-roster--roster
+        :sections (list (agent-repl-test-roster--section
+                         "repo" (list (agent-repl-test-roster--row "a" "one" :thinking))))))
+      ;; Assert
+      (should (equal (cadr (car (last drawn)))
+                     "elisp.roster.drawn-status: id=a from=:ready to=:thinking")))))
+
+(ert-deftest agent-repl-test-roster-a-restated-arm-records-no-drawn-status ()
+  "A re-push restating the same arm draws nothing new and records nothing."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (agent-repl-test-roster--recording-drawn-statuses drawn
+      (agent-repl-roster-apply
+       (agent-repl-test-roster--roster
+        :sections (list (agent-repl-test-roster--section
+                         "repo" (list (agent-repl-test-roster--row "a" "one" :ready))))))
+      ;; Act
+      (agent-repl-roster-apply
+       (agent-repl-test-roster--roster
+        :sections (list (agent-repl-test-roster--section
+                         "repo" (list (agent-repl-test-roster--row "a" "one" :ready))))))
+      ;; Assert
+      (should (= (length drawn) 1)))))
+
+(ert-deftest agent-repl-test-roster-the-drawn-status-is-recorded-on-the-tabs-workspace ()
+  "The record goes to the tab's own workspace sink, not the central one."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (agent-repl-test-roster--recording-drawn-statuses drawn
+      ;; Act
+      (agent-repl-roster-apply
+       (agent-repl-test-roster--roster
+        :sections (list (agent-repl-test-roster--section
+                         "repo" (list (agent-repl-test-roster--row "a" "one" :ready))))))
+      ;; Assert
+      (should (equal (car (car drawn)) "one")))))

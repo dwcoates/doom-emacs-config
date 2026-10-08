@@ -190,6 +190,37 @@ func TestFooterClaimPlacesTheWakeupFallbackOnIdle(t *testing.T) {
 	}
 }
 
+// TestAGateClaimsTheWaitingRungOnBothSurfaces pins that a permission or a
+// question gate stands above a running turn on the footer and the roster
+// alike (owner ruling, 2026-10-08: a gate is never drawn as working).
+func TestAGateClaimsTheWaitingRungOnBothSurfaces(t *testing.T) {
+	tests := []struct {
+		name   string
+		footer *frontendv1.FooterStatus
+		roster string
+	}{
+		{name: "permission", footer: &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Permission{
+			Permission: &frontendv1.FooterStatusPermission{}}}, roster: "permission"},
+		{name: "question", footer: &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Question{
+			Question: &frontendv1.FooterStatusQuestion{}}}, roster: "question"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			footerClaim, _ := FooterClaim(tt.footer)
+			rosterClaim, _ := RosterArmClaim(tt.roster)
+
+			// Assert
+			if footerClaim != Waiting || rosterClaim != Waiting {
+				t.Fatalf("footer %s claims %q and roster %s claims %q, want both waiting", tt.name, footerClaim, tt.roster, rosterClaim)
+			}
+			if slices.Index(Order, Waiting) > slices.Index(Order, Thinking) {
+				t.Fatal("the waiting rung ranks below a running turn")
+			}
+		})
+	}
+}
+
 func TestFooterClaimRefusesAnUnsetStatus(t *testing.T) {
 	// Act
 	_, ok := FooterClaim(&frontendv1.FooterStatus{})

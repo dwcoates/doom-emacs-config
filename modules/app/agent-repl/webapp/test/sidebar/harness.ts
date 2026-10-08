@@ -26,6 +26,7 @@ import {
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import type { Ticker } from "../../src/clock.js";
+import { createDrawnStatusLog } from "../../src/drawn-status.js";
 import type { FailureSink } from "../../src/failure/sink.js";
 import { createAgentReplClient } from "../../src/rpc/client.js";
 import { type AppContext } from "../../src/rpc/context.js";
@@ -119,6 +120,7 @@ export function sidebarContext(
     ctx,
     view,
     openDetails,
+    drawnStatus: createDrawnStatusLog("sidebar row", "sidebar.drawn-status"),
     dropdowns: createDropdowns(),
     attention: new AttentionRegistry(timers),
     tasks: [],
