@@ -17,7 +17,7 @@ func (h *harness) streamingGate(suites ...string) {
 	h.runner.runs = append(h.runner.runs, scriptedRun{Output: out, Code: 0})
 }
 
-func TestTheMergeTestsPanelFollowsEachSuiteFromWaitingToPassed(t *testing.T) {
+func TestTheTestsTabFollowsEachSuiteFromRunningToPassed(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	landing(h, 1)
@@ -29,31 +29,24 @@ func TestTheMergeTestsPanelFollowsEachSuiteFromWaitingToPassed(t *testing.T) {
 
 	// Assert.
 	var states []string
-	for _, f := range h.footer.all() {
-		if f.Step != "testing" {
-			continue
-		}
-		var state *frontendv1.FooterMergeTestRowState
-		for _, row := range f.Tests {
-			if row.GetName().GetText() == "daemon" {
-				state = row.GetState()
+	h.feed.mu.Lock()
+	for _, row := range h.feed.rows {
+		for _, suite := range row.Row.GetMergeTab().GetTests().GetSuites() {
+			if suite.GetName() != "daemon" {
+				continue
+			}
+			name := "running"
+			if suite.GetPassed() != nil {
+				name = "passed"
+			}
+			if len(states) == 0 || states[len(states)-1] != name {
+				states = append(states, name)
 			}
 		}
-		name := ""
-		switch {
-		case state.GetWaiting() != nil:
-			name = "waiting"
-		case state.GetRunning() != nil:
-			name = "running"
-		case state.GetPassed() != nil:
-			name = "passed"
-		}
-		if len(states) == 0 || states[len(states)-1] != name {
-			states = append(states, name)
-		}
 	}
-	if want := []string{"waiting", "running", "passed"}; !equal(states, want) {
-		t.Fatalf("panel states = %v, want %v", states, want)
+	h.feed.mu.Unlock()
+	if want := []string{"running", "passed"}; !equal(states, want) {
+		t.Fatalf("tab suite states = %v, want %v", states, want)
 	}
 }
 
@@ -82,45 +75,6 @@ func TestTheTestingLineIsEachSuitesEdge(t *testing.T) {
 	}
 	if want := []string{"started", "passed"}; !equal(edges, want) {
 		t.Fatalf("testing lines = %v, want %v", edges, want)
-	}
-}
-
-func TestEachTestingRoundIsANewTestsRound(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-	landing(h, 1)
-	h.runner.runs = nil
-	h.gateFails("daemon")
-	h.gatePasses("daemon")
-
-	// Act.
-	admitted(t, h)
-
-	// Assert.
-	max := 0
-	for _, f := range h.footer.all() {
-		if f.TestsRound > max {
-			max = f.TestsRound
-		}
-	}
-	if max != 2 {
-		t.Fatalf("tests rounds reached %d, want 2", max)
-	}
-}
-
-func TestThePanelEmptiesWhenTestingEnds(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-	landing(h, 1)
-
-	// Act.
-	admitted(t, h)
-
-	// Assert.
-	for _, f := range h.footer.all() {
-		if f.Step != "testing" && len(f.Tests) != 0 {
-			t.Fatalf("facts on step %q carry %d test rows, want none outside testing", f.Step, len(f.Tests))
-		}
 	}
 }
 

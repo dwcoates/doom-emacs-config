@@ -406,7 +406,7 @@ describe("mountFooter: the panel selection", () => {
 /** VIEW carrying the daemon's focus on PANEL under GENERATION. */
 function focused(
   view: FooterView,
-  panel: "agents" | "shells" | "monitors" | "mergeTests",
+  panel: "agents" | "shells" | "monitors",
   generation: bigint,
 ): FooterView {
   view.focus = create(FooterExpandedFocusSchema, {
@@ -437,101 +437,6 @@ function openPanel(host: HTMLElement): string | null {
       ?.getAttribute("data-panel") ?? null
   );
 }
-
-/** A view whose merge is testing: the 🧪 chip set and one suite in the panel. */
-function withMergeTests(rows = 1): FooterView {
-  return footerView({
-    strip: strip({ liveWork: { mergeTests: { finished: 0, total: rows } } }),
-    expanded: expanded({
-      mergeTests: Array.from({ length: rows }, (_unused, i) => ({
-        name: { text: `suite-${i + 1}` },
-        state: { state: { case: "waiting" as const, value: {} } },
-      })),
-    }),
-  });
-}
-
-// THE MERGE TESTS PANEL (merge-landing.md, Landed change 1): the daemon focuses
-// it when the merge begins testing, and it folds away when testing ends.
-describe("mountFooter: the merge tests panel", () => {
-  it("opens the closed section on the merge tests panel for a new testing focus", async () => {
-    const { host, h } = mount();
-    await settle();
-    h.tail.push(pushView(focused(withMergeTests(), "mergeTests", 1n)));
-    await settle();
-    expect(openPanel(host)).toBe("mergeTests");
-  });
-
-  it("marks the 🧪 chip selected when the testing focus opens its panel", async () => {
-    const { host, h } = mount();
-    await settle();
-    h.tail.push(pushView(focused(withMergeTests(), "mergeTests", 1n)));
-    await settle();
-    expect(
-      host
-        .querySelector('[data-chip="mergeTests"]')
-        ?.getAttribute("data-selected"),
-    ).toBe("true");
-  });
-
-  it("moves an open panel onto the merge tests panel when testing begins", async () => {
-    const { host, h } = mount();
-    await settle();
-    const view = withLiveWork();
-    h.tail.push(pushView(view));
-    await settle();
-    host
-      .querySelector<HTMLElement>('[data-chip="agents"]')
-      ?.dispatchEvent(new MouseEvent("click"));
-    const testing = focused(withMergeTests(), "mergeTests", 1n);
-    h.tail.push(pushView(testing));
-    await settle();
-    expect(openPanel(host)).toBe("mergeTests");
-  });
-
-  it("closes the section when testing ends and the panel empties", async () => {
-    const { host, h } = mount();
-    await settle();
-    h.tail.push(pushView(focused(withMergeTests(), "mergeTests", 1n)));
-    await settle();
-    h.tail.push(pushView(footerView()));
-    await settle();
-    expect(host.querySelector(".footer-expanded")).toBeNull();
-  });
-
-  it("draws no divider once the emptied merge tests panel has folded", async () => {
-    const { host, h } = mount();
-    await settle();
-    h.tail.push(pushView(focused(withMergeTests(), "mergeTests", 1n)));
-    await settle();
-    h.tail.push(pushView(footerView()));
-    await settle();
-    expect(host.querySelector(".footer-divider")).toBeNull();
-  });
-
-  it("reopens the merge tests panel for the next round's focus", async () => {
-    const { host, h } = mount();
-    await settle();
-    h.tail.push(pushView(focused(withMergeTests(), "mergeTests", 1n)));
-    await settle();
-    host
-      .querySelector<HTMLElement>('[data-chip="mergeTests"]')
-      ?.dispatchEvent(new MouseEvent("click"));
-    h.tail.push(pushView(focused(withMergeTests(2), "mergeTests", 2n)));
-    await settle();
-    expect(openPanel(host)).toBe("mergeTests");
-  });
-
-  it("remembers the merge tests panel as a click's would be", async () => {
-    const { h } = mount();
-    await settle();
-    h.tail.push(pushView(focused(withMergeTests(), "mergeTests", 1n)));
-    await settle();
-    expect(window.localStorage.getItem(panelStorageKey(WORKSPACE.id))).toBe(
-      "mergeTests",
-    );
-  });
-});
 
 // THE DAEMON'S FOCUS (owner's requirement): when detached work starts, the
 // daemon names the panel to open, and the page applies each generation ONCE.
@@ -671,6 +576,19 @@ describe("the persisted selection, read and written behind try/catch", () => {
     const { ctx } = harness();
     writeSelection(ctx, "tasks");
     expect(readSelection(ctx)).toBe("tasks");
+  });
+
+  it("forgets the retired merge tests panel", () => {
+    // Arrange
+    const { ctx } = harness();
+    window.localStorage.setItem(panelStorageKey("ws-1"), "mergeTests");
+
+    // Act
+    const read = readSelection(ctx);
+
+    // Assert
+    expect(read).toBeNull();
+    expect(window.localStorage.getItem(panelStorageKey("ws-1"))).toBeNull();
   });
 
   it("discards a stored value that is not a panel name", () => {
