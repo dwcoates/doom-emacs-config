@@ -2,8 +2,6 @@ package promptqueue
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"reflect"
 	"regexp"
 	"strings"
@@ -15,6 +13,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/lockwatch"
+	"claude-repld/internal/sourcescan"
 	"claude-repld/internal/wsm"
 )
 
@@ -262,30 +261,19 @@ func TestStandingReconnectHold(t *testing.T) {
 // drifting from it silently.
 func TestNoSiteHandRollsTheStandingReconnectHoldTest(t *testing.T) {
 	// Arrange
-	files, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatalf("glob: %v", err)
-	}
 	handRolled := regexp.MustCompile(`Tombstone\s*[!=]=\s*nil\s*(&&|\|\|)\s*\w+\.Hold\s*[!=]=\s*nil\s*(&&|\|\|)\s*\*\w+\.Hold\s*[!=]=\s*wsm\.HoldReconnect`)
 	const definition = "return h.Tombstone == nil && h.Hold != nil && *h.Hold == wsm.HoldReconnect"
 	definitions := 0
-	for _, file := range files {
-		if strings.HasSuffix(file, "_test.go") {
-			continue
-		}
-		src, err := os.ReadFile(file)
-		if err != nil {
-			t.Fatalf("read %s: %v", file, err)
-		}
+	for _, file := range sourcescan.Production(t) {
 		// Act
-		for i, line := range strings.Split(string(src), "\n") {
+		for i, line := range strings.Split(string(file.Source), "\n") {
 			// Assert
 			if strings.TrimSpace(line) == definition {
 				definitions++
 				continue
 			}
 			if handRolled.MatchString(line) {
-				t.Errorf("%s:%d hand-rolls the standing reconnect hold test; call standingReconnectHold: %s", file, i+1, strings.TrimSpace(line))
+				t.Errorf("%s:%d hand-rolls the standing reconnect hold test; call standingReconnectHold: %s", file.Name, i+1, strings.TrimSpace(line))
 			}
 		}
 	}
