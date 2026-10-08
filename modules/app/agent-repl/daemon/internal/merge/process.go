@@ -438,7 +438,7 @@ func (r *run) conflict(ctx context.Context, p *replay, files []string, targetBra
 	r.o.log(ctx, r.ws).Info(op, "a replayed commit conflicted; the requester's session resolves it", dlog.Context{
 		"workspace": string(r.ws), "commit": commit.SHA, "files": strings.Join(files, ", "), "worktree": r.subject.dir})
 	round := r.openTab(ctx, TabConflicts)
-	r.drawLive(ctx, round, footer.StepConflictResolution, conflictLine(commit.Subject, len(files)), nil, conflictsTab(round.live()))
+	r.drawLive(ctx, round, footer.StepConflictResolution, conflictLine(commit.Subject, len(files)), nil, conflictsTab)
 	if err := r.noteMachinery(ctx, targetBranch); err != nil {
 		return nil, err
 	}
@@ -504,6 +504,7 @@ func (r *run) conflictSettled(ctx context.Context, p *replay, round tabRound, cl
 	}
 	if why != "" {
 		summary := fmt.Sprintf("conflict resolution gave up: %s; the rebase is left in progress in %s", why, r.subject.dir)
+		r.settleAgentic()
 		r.upsert(round, conflictsTab(round.settled(r.o.nowMS(), summary)))
 		r.closeTab(ctx, round, "failed")
 		r.o.log(ctx, r.ws).Info(op, "the conflict resolution gave up; the merge fails and the rebase is left in progress", dlog.Context{
@@ -511,6 +512,7 @@ func (r *run) conflictSettled(ctx context.Context, p *replay, round tabRound, cl
 		out := failedIn(footer.FailedConflicts, summary)
 		return &out, nil
 	}
+	r.settleAgentic()
 	r.upsert(round, conflictsTab(round.settled(r.o.nowMS(), "")))
 	r.closeTab(ctx, round, "succeeded")
 	// THE REBASE CONTINUES IN A NEW ROUND: tabs never reopen.
@@ -546,7 +548,7 @@ func (r *run) resumeConflict(ctx context.Context, p *replay, tip, targetBranch s
 	}
 	commit := p.commits[min(p.done, len(p.commits)-1)]
 	round := r.activeRound()
-	r.drawLive(ctx, round, footer.StepConflictResolution, conflictLine(commit.Subject, len(res.ConflictFiles)), nil, conflictsTab(round.live()))
+	r.drawLive(ctx, round, footer.StepConflictResolution, conflictLine(commit.Subject, len(res.ConflictFiles)), nil, conflictsTab)
 	text, err := r.conflictBrief(commit, res.ConflictFiles, targetBranch)
 	if err != nil {
 		return nil, err
@@ -646,7 +648,7 @@ func (r *run) fix(ctx context.Context, attempt int, failing GateResult, targetBr
 func (r *run) drawFixing(ctx context.Context, round tabRound, attempt int, suites []string) {
 	r.drawLive(ctx, round, footer.StepFixing, fixingLine(suites), func(f *footer.MergeFacts) {
 		f.Attempt, f.MaxAttempts = attempt, MaxFixAttempts
-	}, fixesTab(round.live(), attempt))
+	}, func(st tabState) *frontendv1.FeedMergeTab { return fixesTab(st, attempt) })
 }
 
 // fixBrief composes one fixing attempt's brief.
@@ -685,6 +687,7 @@ func (r *run) fixSettled(ctx context.Context, round tabRound, attempt int, targe
 		why = line
 	}
 	if why != "" {
+		r.settleAgentic()
 		r.upsert(round, fixesTab(round.settled(r.o.nowMS(), why), attempt))
 		r.closeTab(ctx, round, "failed")
 		r.o.log(ctx, r.ws).Info(op, "the fixing attempt gave up; the merge fails", dlog.Context{
@@ -692,6 +695,7 @@ func (r *run) fixSettled(ctx context.Context, round tabRound, attempt int, targe
 		out := failedIn(footer.FailedTests, why)
 		return &out, nil
 	}
+	r.settleAgentic()
 	r.upsert(round, fixesTab(round.settled(r.o.nowMS(), ""), attempt))
 	r.closeTab(ctx, round, "succeeded")
 	return nil, nil
