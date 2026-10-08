@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/proto"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -13,6 +14,7 @@ import (
 
 	"claude-repld/internal/prompthandler"
 	"claude-repld/internal/promptqueue"
+	"claude-repld/internal/replyquote"
 	"claude-repld/internal/workspace"
 	"claude-repld/internal/wsm"
 )
@@ -72,11 +74,12 @@ func join(parts []string) string {
 	return out
 }
 
-// TestSubmitPromptPrependsTheReferencedResponse pins the exact reply-preamble
-// wording: the markdown of the response SELECTED when the prompt is accepted,
-// between the two ⟢ markers, followed by the user's own words, delivered as
-// one prompt to the shim. The reply target is no longer named on the request:
-// the daemon reads its own held selection.
+// TestSubmitPromptPrependsTheReferencedResponse pins that the markdown of the
+// response SELECTED when the prompt is accepted is quoted into the prompt as
+// its own LEADING BLOCK, under the response preamble, with the user's own
+// words kept as the block after it (the wording is replyquote's, pinned
+// there). The reply target is not named on the request: the daemon reads its
+// own held selection.
 func TestSubmitPromptPrependsTheReferencedResponse(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
@@ -99,12 +102,11 @@ func TestSubmitPromptPrependsTheReferencedResponse(t *testing.T) {
 	}
 
 	// Assert.
-	want := "⟢ Replying to an earlier response of yours:\n\n" +
-		"The capital is Paris." +
-		"\n\n⟢ My message:\n\n" +
-		"And its population?"
-	if got := promptText(h.Prompts.lastSaid); got != want {
-		t.Fatalf("delivered prompt =\n%q\nwant\n%q", got, want)
+	want := said("And its population?")
+	want.Content.Blocks = append([]*conversationv1.UserContentBlock{replyquote.Block("The capital is Paris.", false)},
+		want.Content.Blocks...)
+	if !proto.Equal(h.Prompts.lastSaid, want) {
+		t.Fatalf("delivered prompt =\n%v\nwant\n%v", h.Prompts.lastSaid, want)
 	}
 }
 
@@ -209,10 +211,10 @@ func TestSubmitPromptWithASelectedPromptQuotesItAsAPromptAndEndsIt(t *testing.T)
 		t.Fatalf("SubmitPrompt: %v", err)
 	}
 
-	// Assert: quoted as a prompt.
-	want := "⟢ Replying to an earlier prompt in this conversation:\n\ntext of p2\n\n⟢ My message:\n\nunchanged message"
-	if got := promptText(h.Prompts.lastSaid); got != want {
-		t.Fatalf("delivered prompt = %q, want %q", got, want)
+	// Assert: quoted as a prompt, in its own leading block.
+	want := replyquote.Quote(said("unchanged message"), "text of p2", true)
+	if !proto.Equal(h.Prompts.lastSaid, want) {
+		t.Fatalf("delivered prompt = %v, want %v", h.Prompts.lastSaid, want)
 	}
 	// Assert: the prompt selection ended (NEWER restarts at the most recent
 	// rather than wrapping past it).
