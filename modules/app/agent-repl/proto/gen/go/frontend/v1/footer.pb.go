@@ -12600,7 +12600,10 @@ func (*FooterTokensCellAlarm) Descriptor() ([]byte, []int) {
 }
 
 // The accounting badge. The set arm picks the glyph treatment; the evidence
-// behind it is the panel's verdict line, never this badge.
+// behind it is the panel's verdict line, never this badge. ONLY `complete`
+// draws a glyph in the cell (owner ruling, 2026-10-08: no red ✗ in the tokens
+// cell); a failing arm draws nothing there, and its evidence is the panel's
+// verdict line alone.
 type FooterTokensCellVerdict struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Which verdict the settled turn's reconciliation reached. Exactly one arm
@@ -12690,12 +12693,14 @@ type FooterTokensCellVerdict_Complete struct {
 }
 
 type FooterTokensCellVerdict_Incomplete struct {
-	// Some responses carried no usage, so the figures are a floor (✗).
+	// Some responses carried no usage, so the figures are a floor (no glyph
+	// in the cell).
 	Incomplete *FooterTokensCellVerdictIncomplete `protobuf:"bytes,2,opt,name=incomplete,proto3,oneof"`
 }
 
 type FooterTokensCellVerdict_Invalid struct {
-	// The observed usage contradicts itself (✗) — a producer defect.
+	// The observed usage contradicts itself — a producer defect (no glyph in
+	// the cell).
 	Invalid *FooterTokensCellVerdictInvalid `protobuf:"bytes,3,opt,name=invalid,proto3,oneof"`
 }
 
