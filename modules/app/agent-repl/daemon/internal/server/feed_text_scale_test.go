@@ -233,3 +233,49 @@ func TestAdjustFeedTextScalePersistFailureAborts(t *testing.T) {
 		t.Fatalf("persisted = %v, want nothing after a failed write", h.DB.feedScalePut)
 	}
 }
+
+// TestSeedFeedTextScaleReachesAFeedOpenedAfterIt pins the restart half of the
+// persistence: the scale Prime seeds from the store at boot is handed to a feed
+// watch opened afterward, so every workspace's page draws the size last chosen.
+func TestSeedFeedTextScaleReachesAFeedOpenedAfterIt(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	const persisted = 1.26
+	h.Server.SeedFeedTextScale(persisted)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Act.
+	got := receiveScale(t, openRootWatch(t, h, ctx))
+
+	// Assert.
+	if got.GetScale() != persisted {
+		t.Fatalf("scale on a later feed = %v, want the seeded %v", got.GetScale(), persisted)
+	}
+}
+
+// TestAdjustFeedTextScaleStepsFromTheSeededScale pins that the first nudge
+// after a restart moves from the restored scale, not from the default, and
+// persists that result.
+func TestAdjustFeedTextScaleStepsFromTheSeededScale(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	const persisted = 1.26
+	h.Server.SeedFeedTextScale(persisted)
+	want := clampFeedTextScale(nextFeedTextScale(persisted, scaleDown))
+
+	// Act.
+	resp, err := h.Client.AdjustFeedTextScale(context.Background(),
+		connect.NewRequest(&agentreplv1.AdjustFeedTextScaleRequest{Direction: scaleDown}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("AdjustFeedTextScale: %v", err)
+	}
+	if got := resp.Msg.GetScale(); got != want {
+		t.Fatalf("scale = %v, want %v", got, want)
+	}
+	if len(h.DB.feedScalePut) != 1 || h.DB.feedScalePut[0] != want {
+		t.Fatalf("persisted = %v, want one write of %v", h.DB.feedScalePut, want)
+	}
+}
