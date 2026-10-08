@@ -51,6 +51,7 @@
 (declare-function agent-repl--input-waiting "agent-repl-input" (ws))
 (declare-function agent-repl-wire-encode-user-said "agent-repl-wire-common" (value))
 (declare-function agent-repl-wire-encode-prompt-origin "agent-repl-wire-common" (value))
+(declare-function agent-repl-wire-call "agent-repl-wire-common" (direction codec value))
 (declare-function agent-repl-wire-encode-submit-prompt-delivery "agent-repl-wire-verbs" (value))
 
 (defvar agent-repl-host-update-functions)
@@ -127,11 +128,11 @@ byte."
        (project_dir . ,(directory-file-name
                         (expand-file-name (agent-repl--ws-get ws :project-dir))))
        (idempotency_key . ,key)
-       (origin . ,(agent-repl-wire-encode-prompt-origin origin))
-       (said . ,(agent-repl-wire-encode-user-said said))
+       (origin . ,(agent-repl-wire-call 'encode #'agent-repl-wire-encode-prompt-origin origin))
+       (said . ,(agent-repl-wire-call 'encode #'agent-repl-wire-encode-user-said said))
        (queued_at . ,(format-time-string "%Y-%m-%dT%H:%M:%S.%NZ" nil t)))
      (when delivery
-       `((delivery . ,(agent-repl-wire-encode-submit-prompt-delivery delivery))))))
+       `((delivery . ,(agent-repl-wire-call 'encode #'agent-repl-wire-encode-submit-prompt-delivery delivery))))))
    'utf-8))
 
 (defun agent-repl-held-ingress-write (ws said origin key &optional delivery)
