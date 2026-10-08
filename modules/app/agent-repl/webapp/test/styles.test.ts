@@ -2846,7 +2846,12 @@ describe("the one bubble rule set", () => {
             // The dimmed prose of a thinking or interim bubble (owner request,
             // 2026-10-08) is the one text color a variant sets; its own suite
             // pins it.
-            !(prop === "color" && rule.selectors.every((sel) => DIMMED_TEXT_SELECTORS.includes(sel))),
+            !(prop === "color" && rule.selectors.every((sel) => DIMMED_TEXT_SELECTORS.includes(sel))) &&
+            // NO BUBBLE AT ALL (owner ruling, 2026-10-08): the same two
+            // selectors also turn off the base rule's box-shadow, the one
+            // remaining visible highlight once their fill is already the
+            // page's own --bg; its own suite below pins it.
+            !(prop === "box-shadow" && rule.selectors.every((sel) => DIMMED_TEXT_SELECTORS.includes(sel))),
         ),
     );
     // Assert — the working wave's own animation is the one other thing a
@@ -3561,6 +3566,80 @@ describe("the page-colored fill", () => {
 
     // Assert
     expect(body).toMatch(/background:\s*var\(--bg\)/);
+  });
+});
+
+/**
+ * NO BUBBLE AT ALL (owner ruling, 2026-10-08). A thinking bubble and an
+ * interim response already carry the page's own `--bg` as their fill (see
+ * "the page-colored fill" above); this is the one thing that still painted a
+ * visible bubble around them with no fill at all — the base rule's
+ * box-shadow, a soft drop shadow plus an inset top-edge highlight
+ * (--bubble-shadow). It is turned off for exactly these two kinds, and only
+ * these two: every other response and prompt kind keeps it.
+ */
+describe("the box-shadow neither a thinking nor an interim bubble may carry", () => {
+  /** Whether SELECTOR styles a bubble ITSELF (not its strip, box or content). */
+  const onBubble = (selector: string): boolean => /^\.bubble(?![-\w])[^\s>+~]*$/.test(selector);
+
+  /** The `box-shadow` the cascade resolves for a bubble with ATTRS and HOOKS. */
+  function shadowOf(attrs: Readonly<Record<string, string>>, hooks: readonly string[]): string {
+    const teardown = installStylesheet();
+    try {
+      const el = document.createElement("div");
+      el.className = ["bubble", "md", ...hooks].join(" ");
+      for (const [name, value] of Object.entries(attrs)) el.setAttribute(name, value);
+      document.body.append(el);
+      const got = cascadedValue(el, "box-shadow");
+      el.remove();
+      return got;
+    } finally {
+      teardown();
+    }
+  }
+
+  it("drops the bubble shadow and highlight on a thinking bubble", () => {
+    // Arrange / Act
+    const got = shadowOf({ "data-role": "response", "data-variant": "thinking", "data-state": "success" }, ["assistant", "thinking-bubble"]);
+
+    // Assert
+    expect(got).toBe("none");
+  });
+
+  it("drops the bubble shadow and highlight on an interim response", () => {
+    // Arrange / Act
+    const got = shadowOf({ "data-role": "response", "data-variant": "response", "data-state": "success" }, ["assistant", "interim-response"]);
+
+    // Assert
+    expect(got).toBe("none");
+  });
+
+  it("keeps the bubble shadow on the turn's final answer", () => {
+    // Arrange / Act — only the two dimmed kinds drop it; every other kind,
+    // final response included, still reads as a raised, top-lit card.
+    const got = shadowOf({ "data-role": "response", "data-variant": "response", "data-state": "success" }, ["assistant", "final-response"]);
+
+    // Assert
+    expect(got).toBe("var(--bubble-shadow)");
+  });
+
+  it("keeps the bubble shadow on a user prompt", () => {
+    // Arrange / Act
+    const got = shadowOf({ "data-role": "prompt", "data-variant": "user" }, ["user"]);
+
+    // Assert
+    expect(got).toBe("var(--bubble-shadow)");
+  });
+
+  it("sets box-shadow on no other selector than the base rule and these two kinds", () => {
+    // Arrange / Act — every rule in the sheet that sets box-shadow at all.
+    const shadowRules = rulesOf(stylesheet).filter((rule) => /(?:^|;)\s*box-shadow\s*:/.test(rule.declarations));
+    const onABubble = shadowRules.filter((rule) => rule.selectors.some(onBubble));
+
+    // Assert — the base rule (every bubble's default) plus the dimmed pair.
+    expect(onABubble.flatMap((rule) => rule.selectors).sort()).toEqual(
+      [".bubble", ...DIMMED_TEXT_SELECTORS].sort(),
+    );
   });
 });
 
