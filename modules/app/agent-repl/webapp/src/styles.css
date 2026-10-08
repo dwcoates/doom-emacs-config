@@ -69,13 +69,12 @@
      this is a quiet seam cue, not a lifted overlay. The dark theme deepens it,
      since a faint wash all but vanishes on a dark ground. */
   --bottom-shadow: linear-gradient(to top, color-mix(in srgb, #000000 7.5%, transparent), transparent);
-  --user: #e0ecff;
-  /* A HELD prompt's TINT (owner ruling, 2026-09-23): "much more grey than
-     blue" -- a neutral grey carrying only a subtle blue hue, so a prompt the
-     daemon is holding reads as the blue bubble it will become, not yet sent.
-     The held FILL is only 5% of this tint over the feed's --bg (owner ruling,
-     2026-09-27; see `.bubble[data-variant="held"]`). */
-  --held-prompt-bg: #e8ebf0;
+  /* A FEW PERCENT DARKER (owner ruling, 2026-10-08): both prompt kinds that
+     share this fill — the user's own and the agent-to-agent amber-bordered
+     one (`.bubble[data-role="prompt"]`) — read as slightly too bright; this
+     is one small step down in lightness, not a new color, applied once since
+     the two kinds already shared the one token. #e0ecff -> #ccdfff. */
+  --user: #ccdfff;
   /* Raw assistant text bubbles: purple counterpart to the user blue,
      from the same family as --tool-title. */
   --assistant: #ece4fa;
@@ -425,11 +424,13 @@
     --bottom-shadow: linear-gradient(to top, color-mix(in srgb, #000000 28.5%, transparent), transparent);
     /* The iMessage dark-mode blue (owner ruling, 2026-09-27), taken a notch
        darker the same day because #0a84ff read a tad bright. */
-    --user: #0978ea;
+    /* A further notch darker still (owner ruling, 2026-10-08, "a few percent
+       darker"): #0978ea -> #086ed6, the same small lightness step the light
+       theme's pair takes. */
+    --user: #086ed6;
     /* A dark navy, so a link stands out on the dark theme's prompt blue
        (owner ruling, 2026-09-27). */
     --prompt-link: #0a2a5e;
-    --held-prompt-bg: #25282e;
     /* An iMessage-style grey (owner ruling, 2026-09-27): the old --card grey
        lifted a notch, so a response sits lighter than the tool cards. */
     --assistant: #1b1e25;
