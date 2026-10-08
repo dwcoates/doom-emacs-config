@@ -193,6 +193,9 @@ func TestSidebarViewSurvivesAReopen(t *testing.T) {
 	if err := first.SetGrouping(context.Background(), GroupingTask); err != nil {
 		t.Fatalf("SetGrouping: %v", err)
 	}
+	if err := first.SetMaturityFolded(context.Background(), MaturityInProgress, true); err != nil {
+		t.Fatalf("SetMaturityFolded: %v", err)
+	}
 	if err := first.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
@@ -210,7 +213,7 @@ func TestSidebarViewSurvivesAReopen(t *testing.T) {
 	if tasksErr != nil || len(tasks) != 1 || !tasks[0].Folded {
 		t.Fatalf("tasks after reopen = %+v, %v; want the one task folded", tasks, tasksErr)
 	}
-	want := SidebarView{MergedFolded: false, Grouping: GroupingTask}
+	want := SidebarView{MergedFolded: false, MaturityFolded: MaturityFolds{InProgress: true}, Grouping: GroupingTask}
 	if viewErr != nil || view != want {
 		t.Fatalf("view after reopen = %+v, %v; want %+v", view, viewErr, want)
 	}
@@ -253,5 +256,175 @@ func TestTheMigrationAddsTheSidebarView(t *testing.T) {
 	}
 	if got := scalar[int](t, s, `SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'sidebar_view'`); got != 1 {
 		t.Fatalf("sidebar_view tables after the migration = %d, want 1", got)
+	}
+}
+
+func TestTheDefaultViewExpandsEveryMaturityStage(t *testing.T) {
+	// Arrange, Act, Assert
+	if DefaultSidebarView.MaturityFolded != (MaturityFolds{}) {
+		t.Fatalf("DefaultSidebarView.MaturityFolded = %+v, want every stage expanded", DefaultSidebarView.MaturityFolded)
+	}
+}
+
+func TestSetMaturityFoldedIsReadBackOnItsStageOnly(t *testing.T) {
+	tests := []struct {
+		stage MaturityStage
+		want  MaturityFolds
+	}{
+		{MaturityBacklog, MaturityFolds{Backlog: true}},
+		{MaturityInProgress, MaturityFolds{InProgress: true}},
+		{MaturityMerging, MaturityFolds{Merging: true}},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.stage), func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+
+			// Act
+			err := s.SetMaturityFolded(context.Background(), tt.stage, true)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("SetMaturityFolded: %v", err)
+			}
+			got, err := s.SidebarView(context.Background())
+			want := SidebarView{MergedFolded: true, MaturityFolded: tt.want, Grouping: GroupingRepository}
+			if err != nil || got != want {
+				t.Fatalf("SidebarView = %+v, %v; want %+v", got, err, want)
+			}
+		})
+	}
+}
+
+func TestUnfoldingAMaturityStageReplacesItsFold(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	if err := s.SetMaturityFolded(context.Background(), MaturityMerging, true); err != nil {
+		t.Fatalf("seed SetMaturityFolded: %v", err)
+	}
+
+	// Act
+	err := s.SetMaturityFolded(context.Background(), MaturityMerging, false)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("SetMaturityFolded: %v", err)
+	}
+	got, _ := s.SidebarView(context.Background())
+	if got.MaturityFolded != (MaturityFolds{}) {
+		t.Fatalf("maturity folds = %+v, want every stage expanded", got.MaturityFolded)
+	}
+}
+
+func TestShowingTheMaturityGroupingIsReadBack(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+
+	// Act
+	err := s.SetGrouping(context.Background(), GroupingMaturity)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("SetGrouping: %v", err)
+	}
+	got, err := s.SidebarView(context.Background())
+	if err != nil || got.Grouping != GroupingMaturity {
+		t.Fatalf("SidebarView = %+v, %v; want the maturity grouping", got, err)
+	}
+}
+
+func TestSetMaturityFoldedRefusesAStageThatIsNoneOfThem(t *testing.T) {
+	// Arrange
+	s, log := testStore(t)
+
+	// Act
+	err := s.SetMaturityFolded(context.Background(), MaturityStage("shipped"), true)
+
+	// Assert
+	if err == nil {
+		t.Fatal("SetMaturityFolded(shipped) = nil, want a refusal")
+	}
+	if !loggedOperation(log, "daemon.wsm.set_maturity_folded", "error") {
+		t.Fatalf("the refusal was not recorded at ERROR: %v", log.Records())
+	}
+	if rows := scalar[int](t, s, `SELECT count(*) FROM sidebar_view`); rows != 0 {
+		t.Fatalf("sidebar_view rows = %d, want nothing written", rows)
+	}
+}
+
+func TestMaturityFoldsWithSetsOnlyItsStage(t *testing.T) {
+	tests := []struct {
+		stage MaturityStage
+		want  MaturityFolds
+	}{
+		{MaturityBacklog, MaturityFolds{Backlog: true}},
+		{MaturityInProgress, MaturityFolds{InProgress: true}},
+		{MaturityMerging, MaturityFolds{Merging: true}},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.stage), func(t *testing.T) {
+			// Arrange
+			var folds MaturityFolds
+
+			// Act
+			got := folds.With(tt.stage, true)
+
+			// Assert
+			if got != tt.want || !got.Folded(tt.stage) {
+				t.Fatalf("With(%s) = %+v, want %+v", tt.stage, got, tt.want)
+			}
+			if folds != (MaturityFolds{}) {
+				t.Fatalf("With mutated its receiver: %+v", folds)
+			}
+		})
+	}
+}
+
+func TestMaturityFoldsPanicsOnAStageThatIsNoneOfThem(t *testing.T) {
+	// Arrange
+	defer func() {
+		// Assert
+		if recover() == nil {
+			t.Fatal("Folded(shipped) answered, want a panic")
+		}
+	}()
+
+	// Act
+	MaturityFolds{}.Folded(MaturityStage("shipped"))
+}
+
+func TestMaturityStagesAreEveryStageInWorkOrder(t *testing.T) {
+	// Arrange
+	want := []MaturityStage{MaturityBacklog, MaturityInProgress, MaturityMerging}
+
+	// Act, Assert
+	if len(MaturityStages) != len(want) {
+		t.Fatalf("MaturityStages = %v, want %v", MaturityStages, want)
+	}
+	for i := range want {
+		if MaturityStages[i] != want[i] {
+			t.Fatalf("MaturityStages = %v, want %v", MaturityStages, want)
+		}
+	}
+}
+
+// TestTheMigrationAddsTheMaturityFolds pins the layout-29 step.
+func TestTheMigrationAddsTheMaturityFolds(t *testing.T) {
+	// Arrange
+	path := fixtureAt(t, 28)
+
+	// Act
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
+	if err != nil {
+		t.Fatalf("Open on a layout-28 database: %v", err)
+	}
+	defer handle.Close()
+
+	// Assert
+	s := handle.(*store)
+	for _, column := range []string{"backlog_folded", "in_progress_folded", "merging_folded"} {
+		if got := scalar[int](t, s, `SELECT count(*) FROM pragma_table_info('sidebar_view') WHERE name = ?`, column); got != 1 {
+			t.Fatalf("sidebar_view.%s columns after the migration = %d, want 1", column, got)
+		}
 	}
 }
