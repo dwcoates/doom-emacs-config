@@ -57,6 +57,7 @@ import {
   type HeldPromptDroppedDetail,
   type HeldStatus,
 } from "../../src/tray/held-prompt.js";
+import { BUBBLE_QUOTE_CLASS } from "../../src/bubble/quote.js";
 import * as heldPromptModule from "../../src/tray/held-prompt.js";
 import type { TrayContext } from "../../src/tray/context.js";
 import { testTrayContext } from "./tray-context.js";
@@ -895,6 +896,41 @@ describe("the queued-at age", () => {
 });
 
 describe("the said body", () => {
+  /** A held reply: the quote of an earlier bubble, then the person's words. */
+  function heldReply(): HTMLElement {
+    const { tc } = trayContext();
+    return drawHeldPrompt(
+      heldPrompt({
+        said: {
+          content: {
+            blocks: [
+              { block: { case: "quote", value: { text: "⟢ Replying:\n\n```\nParis.\n```\n\n⟢ My message:\n" } } },
+              { block: { case: "text", value: { text: "and its population?" } } },
+            ],
+          },
+        },
+      }),
+      tc,
+    );
+  }
+
+  it("draws a reply's quote ahead of the words, as the quote block the collapsed card hides", () => {
+    // Act
+    const body = heldReply().querySelector(".bubble-body");
+    // Assert
+    expect([...(body?.children ?? [])].map((child) => child.className)).toEqual([
+      `queued-quote ${BUBBLE_QUOTE_CLASS}`,
+      "queued-text",
+    ]);
+  });
+
+  it("draws the quote's fenced text as a code block", () => {
+    // Act
+    const quote = heldReply().querySelector(`.${BUBBLE_QUOTE_CLASS}`);
+    // Assert
+    expect(quote?.querySelector("pre code")?.textContent).toBe("Paris.");
+  });
+
   it("renders text blocks as markdown", () => {
     const { tc } = trayContext();
     const card = drawHeldPrompt(
