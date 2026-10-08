@@ -55,6 +55,7 @@ import {
   HOOK_OUTCOMES,
   MERGE_TAB_KINDS,
   MERGE_TAB_STATES,
+  MERGE_TAB_WAITING_KINDS,
   MERGE_TEST_LOG,
   PERMISSION_ANSWERS,
   PLAN_STATES,
@@ -258,7 +259,8 @@ describe("arm coverage", () => {
   it.each(MERGE_TAB_KINDS)("covers every state arm of the %s merge tab", (kind) => {
     const field = FeedMergeTabSchema.fields.find((f) => f.localName === kind);
     if (field?.message === undefined) throw new Error(`no message under the ${kind} tab`);
-    assertCoversOneof(field.message, "state", [...MERGE_TAB_STATES]);
+    const waits = (MERGE_TAB_WAITING_KINDS as readonly string[]).includes(kind);
+    assertCoversOneof(field.message, "state", waits ? [...MERGE_TAB_STATES, "waitingOnUser"] : [...MERGE_TAB_STATES]);
   });
 
   it("covers every updating main step", () => {
@@ -1487,6 +1489,13 @@ describe("merge tabs", () => {
     expect(row.querySelector(`[data-merge-tab="${kind}"]`)?.getAttribute("data-tab-state")).toBe(state);
   });
 
+  it.each(MERGE_TAB_WAITING_KINDS)("draws the %s tab waiting on the user with a ❓", async (kind) => {
+    // Arrange / Act
+    const row = await drawRow(mergeTabRow(kind, "waitingOnUser"));
+    // Assert
+    expect(row.querySelector(`[data-merge-tab="${kind}"] .merge-tab-glyph`)?.textContent).toBe("❓");
+  });
+
   it("draws the label with its round", async () => {
     // Arrange / Act
     const row = await drawRow(mergeTabRow("tests"));
@@ -1537,6 +1546,20 @@ describe("merge tabs", () => {
     const row = await drawRow(mergeTabRow("fixes"));
     // Assert
     expect(row.querySelector("[data-merge-attempt]")?.textContent).toBe("attempt 2/3");
+  });
+
+  it("draws a suite's counts on the right of its row", async () => {
+    // Arrange / Act
+    const row = await drawRow(mergeTabRow("tests"));
+    // Assert
+    expect(row.querySelector('[data-suite-state="running"] .merge-suite-counts')?.textContent).toBe("3/0/5");
+  });
+
+  it("breathes a running suite's dot green while every test so far passed", async () => {
+    // Arrange / Act
+    const row = await drawRow(mergeTabRow("tests"));
+    // Assert
+    expect(row.querySelector('[data-suite-state="running"] .merge-suite-glyph')?.classList.contains("is-passing")).toBe(true);
   });
 
   it("draws the tests tab's log link with the daemon's label", async () => {

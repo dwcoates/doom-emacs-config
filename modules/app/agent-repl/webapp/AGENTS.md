@@ -126,12 +126,12 @@ and are contract on the same terms:
 | `data-datum` on the failed-deploy overlay | each line of a `deployFailed` warning's detail overlay (src/topbar/warnings.ts) | `step` \| `component` \| `rollback` \| `detail` \| `log` (absent when the build archived no log); the `detail` line also wears `.topbar-warning-whole`, which keeps its line breaks. The first push carrying a failed deploy is logged at ERROR as `topbar.deploy-failed` | deploy-failure-every-client, 2026-09-28 |
 | `data-local-arms` / `data-local` | the topbar's `.topbar-warnings` chip (`data-local-arms`), and each client-local row in its list (`data-local`, with `data-arm`) | the standing client-local `FailureKind` arm names, space-separated, first-filed first — absent when none stands; the `#failure-overlay` and its `[data-arm]` cards are GONE | owner ruling, 2026-09-23 |
 | `data-merge-test-log` + `.merge-test-log-link` | the merge bubble tests tab's log link (`renderMergeTestLogLink`, src/link.ts), inside `.merge-test-log` | — (drawn in the response bubble's link blue, `var(--accent)`; its text is `FeedMergeTestLogLabel.text`; a click sends `OpenInEditor` with `target.merge_test_log` = the served token, which never appears in the markup) | merge queue rework, 2026-09-30 |
-| `data-chip="mergeTests"` / `data-panel="mergeTests"` | the 🧪 chip ("🧪 8/12") and the expanded merge tests panel | — (the panel folds away, like the agents panel, when the daemon empties it at the end of testing; a new `FooterExpandedFocus.merge_tests` generation opens and selects it) | merge queue rework, 2026-09-30 |
-| `data-suite-state` / `data-duration` | every merge tests panel row (`data-suite-state`), and a finished row's run-time clock (`data-duration`) | `waiting` \| `running` \| `passed` \| `failed`; a running row's `.footer-row-clock` ticks, a finished one's does not, a waiting one has none | merge queue rework, 2026-09-30 |
 | `.footer-columns` / `.footer-row-main` / `.footer-column-header` + `data-column` | the agents panel's header and rows (`.footer-columns`, each exactly four cells sharing the section's grid through `subgrid`), a row's first cell (`.footer-row-main`: glyph, label, description, any wait, any "not on screen"), and the header's column headers | `data-column`: `tokens` \| `duration`; the header's first cell is the "stop all" control (the "live agents" title is gone), and the row's tokens figure carries no "tok" (the daemon dropped it); widths are measured in test/webkit/footer-columns.webkit.test.ts | footer columns, 2026-10-01 |
+| `data-suite-state` / `data-so-far` / `.merge-suite-counts` | every suite row of the merge bubble's tests tab (src/feed/merge/tests-tab.ts), a running suite's so-far arm, and the counts column on the right of its head line | `data-suite-state`: `running` \| `passed` \| `failed`; `data-so-far` (running only): `unreported` (grey dot) \| `passing` (green) \| `failing` (red), never purple; the counts read "passed/failed/total" with `.is-passed` in `--ok` and `.is-failed` in `--err`, and are absent while the daemon knows none | merge bubble suite counts, 2026-10-08 |
 | `data-step` + `.footer-activity-merge-step` | the salient `merge_step` line under `merging` and `merge failed` (src/footer/merge-step.ts) | the step's case name: `enqueued` \| `preprocessing` \| `rebasing` \| `conflictResolution` \| `testing` \| `fixing` \| `committing` \| `updatingMain` \| `postprocessing`; a testing line also wears `data-edge` (`started` \| `passed` in `tone-green` \| `failed` in `tone-red`), a rebasing line `data-line` (`running` \| `failed`), an updating-main line `data-update-step` (`fetching` \| `fastForwarding`) | merge queue rework, 2026-09-30 |
 | `data-merge-progress` / `data-merge-attempt` / `data-update-step` | the merge bubble's rebasing tab progress ("3/7"), a fixes tab's attempt ("attempt 2/3"), and the updating main tab's step (src/feed/merge/step-tabs.ts) | `data-update-step`: `fetching` \| `fastForwarding`; the other two carry no value | merge queue rework, 2026-09-30 |
 | `.merge-queue-header` / `.merge-queue-stage` / `.merge-queue-duration` + `data-queue-place="current"` | the merge bubble's queue tab, a COLUMN TABLE sharing the agents panel's `.footer-columns` subgrid, `.footer-column-header` and duration column (src/columns.ts, src/feed/merge/queue.ts) | the header's `data-column`: `workspace` \| `stage` \| `duration`; each row is exactly three cells (`.merge-queue-label`, `.merge-queue-stage`: the front's active tab label or "waiting", `.merge-queue-duration`: a `.footer-row-clock` ticking from the entry's `stage_entered_at_ms`); "you are here" is gone and this workspace's own row (`data-queue-place="current"`) is subtly highlighted; widths and row heights are measured in test/webkit/merge-queue-columns.webkit.test.ts | merge bubble durations, 2026-10-01 |
+| `data-tab-state` + `.merge-tab-glyph` | every merge tab badge (src/feed/merge/tab-strip.ts) | `live` (●) \| `settled` (✓ or ✗ by `data-tab-outcome`) \| `waitingOnUser` (❓, conflicts and fixes tabs only, while the merge's agent has a permission ask or question open: the footer reads "merging · waiting on user" for exactly as long) | merge waiting on user, 2026-10-08 |
 | `.merge-tab-duration` | every merge tab badge, between `.merge-tab-label` and `.merge-tab-glyph` (src/feed/merge/tab-strip.ts) | — (a live tab ticks from its state's `started_at_ms`, a settled one shows `ended_at_ms - started_at_ms`; muted, never wrapping, measured in test/webkit/merge-tab-duration.webkit.test.ts) | merge bubble durations, 2026-10-01 |
 | `data-merged-shown` + `.merged-row-probe` | the Recently Merged band's `.repo.merged-section` (`data-merged-shown`), and the invisible one-row-tall box inside it the fit measures its row unit by | the number of merges the band shows, which is also the `(N)` its folded count says: as many, most recent first, as fit in the rail without scrolling (`fitMergedSection`, src/sidebar/merged-fit.ts, re-fitted after every push and on every resize of `.sb-scroll` or a `.sb-pane`); absent while the band is not laid out, when every row shows under the daemon's count | sidebar section counts, 2026-10-08 |
 | `data-component="news-digest"` + `data-news-digest-close` / `data-kind` / `data-effective` / `data-outcome` | the news digest overlay's host (fixed on `#feed-scroll`'s rectangle, src/news-digest/news-digest.ts), its close control, each `.news-digest-section`, an item's effective-date pill, and each `.news-digest-source` row | `data-kind`: the `NewsDigestSectionKind` arm (`backend` \| `deprecation` \| `policy` \| `feature` \| `release` \| `incident`; `backend` is drawn in the warning red); `data-outcome`: `read` \| `failed`; `data-week` (`risks` \| `quiet`) is the "Since last week" section, drawn FIRST, its risk items each carrying a `data-risk-reason` element under the summary and its quiet sentence a `data-week-quiet` element; `data-sdk-version` (`known` \| `unknown`) is the header's middle "SDK Version: …" element; the close control and Escape send `DismissNewsDigest` with the served id, which never appears in the markup, and only the daemon's `none` push takes the overlay down | news digest, 2026-10-02 |
@@ -404,12 +404,16 @@ hand any more:
   (`TailFollow.onTailReached`, the one re-latch in `latchIfLatestVisible`,
   fired only for the reader's own scroll after the latest entry was out of
   view), which closes EVERY expanded entry once (INFO
-  `feed.tail-reached-collapse`) and drops the jump watches. "Left the view" is
+  `feed.tail-reached-collapse`) and drops the jump watches. A MERGE BUBBLE
+  (`data-merge-bubble`) is exempt (owner ruling, 2026-10-08): the reader's
+  open merge bubble stays open until the reader closes it. "Left the view" is
   ONE detector, `createLeftViewWatch` (`src/feed/left-view.ts`: seen first,
   then wholly out, once; a detached row is no departure), shared by the jump
   watch and the selection's `left_view` (selection-visibility.ts). Every
-  expansion is client-owned: `FeedMergeFold` is the merge bubble's INITIAL
-  fold only, and there is no daemon fold verb. A bubble the daemon will not
+  expansion is client-owned but one: `FeedMergeFold` is the merge bubble's
+  fold at its first draw and again whenever a push CHANGES it (folded until
+  the merge fails, open once it has; owner ruling, 2026-10-08), and there is
+  no daemon fold verb. A bubble the daemon will not
   open for a jump is ERROR `feed.jump-expand-failed` and a
   `controlPlaneFailed` on the chip.
 - **ONE HEAT RULE FOR EVERY TOKEN FIGURE AND PERCENTAGE** (owner rulings,
@@ -551,7 +555,14 @@ hand any more:
   (`compensate`), and a tail-following reader holds no anchor. Each correction
   is DEBUG `scroll.anchor-corrected` (cause, trigger, delta, anchor). A height
   change off the tail with no row to anchor on is ERROR `scroll.anchor-missing`.
-  `npm run test:webkit` is its regression test. The expanded footer's section is capped at
+  `npm run test:webkit` is its regression test. The anchor's rows are the
+  ROOT BODY'S ROW LIST (`.feed-body > .feed-rows`, `rootRows` in
+  src/feed/feed.ts), never the feed host's own children, which are one box
+  for the whole feed. A MERGE BUBBLE'S UPDATES MOVE NOTHING (owner ruling,
+  2026-10-08): its row is exempt (`AnchorRows.exempt`), so a follow does not
+  chase a size change the merge bubble alone made (DEBUG
+  `scroll.exempt-change-held`), and its tab body is drawn before the old one
+  comes down, so its own scroll box is never clamped mid-redraw. The expanded footer's section is capped at
   `EXPANDED_FOOTER_MAX_ROWS` (4) and scrolls on its own; its scroll is the
   reader's, and a push redraws the rows INSIDE the kept section so it is never
   detached or reset.

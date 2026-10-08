@@ -437,6 +437,10 @@ func (r *resolver) vendorFault(s *wsState, log dlog.Logger) *frontendv1.FooterSt
 // in flight whose facts name no step it knows is an orchestrator defect,
 // recorded at ERROR and drawn with no substatus rather than a made-up one.
 func (r *resolver) merging(s *wsState, log dlog.Logger) *frontendv1.FooterStatus {
+	if held := mergeWaitingOnUser(s); held != nil {
+		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "merging waiting on user", "step": string(s.merge.Step)})
+		return &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Merging{Merging: held}}
+	}
 	arm := &frontendv1.FooterStatusMerging{Activity: r.mergingActivity(s)}
 	m := s.merge
 	switch m.Step {
@@ -472,6 +476,40 @@ func (r *resolver) merging(s *wsState, log dlog.Logger) *frontendv1.FooterStatus
 	}
 	log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "merging", "step": string(m.Step)})
 	return &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Merging{Merging: arm}}
+}
+
+// mergeWaitingOnUser draws a merge held on the user, or nil when it is not.
+//
+// ONLY CONFLICT RESOLUTION AND FIXING CAN BE HELD: they are the steps that
+// hand this workspace's session a turn of the merge's own, so an ask the
+// session opens while one stands is the merge's agent asking. The substatus
+// and the line that names the ask are one decision, so neither stands alone:
+// a consent ask outranks a question batch, as it does under `waiting`, and the
+// earliest open one of the kind is named. The step's substatus comes back the
+// moment the last ask is answered or withdrawn.
+func mergeWaitingOnUser(s *wsState) *frontendv1.FooterStatusMerging {
+	if s.merge.Step != StepConflictResolution && s.merge.Step != StepFixing {
+		return nil
+	}
+	salient := &frontendv1.FooterStatusMergingSalient{}
+	switch {
+	case len(s.permissionOrder) > 0:
+		ask := s.permissions[s.permissionOrder[0]]
+		salient.At = stamp(ask.at)
+		salient.Kind = &frontendv1.FooterStatusMergingSalient_GatedCall{
+			GatedCall: &frontendv1.FooterStatusActivityGatedCall{Text: ask.text}}
+	case len(s.questionOrder) > 0:
+		batch := s.questions[s.questionOrder[0]]
+		salient.At = stamp(batch.at)
+		salient.Kind = &frontendv1.FooterStatusMergingSalient_QuestionLead{
+			QuestionLead: &frontendv1.FooterStatusActivityQuestionLead{Text: batch.text}}
+	default:
+		return nil
+	}
+	return &frontendv1.FooterStatusMerging{
+		Substatus: &frontendv1.FooterStatusMerging_WaitingOnUser{WaitingOnUser: &frontendv1.FooterSubStatusMergingWaitingOnUser{}},
+		Activity:  &frontendv1.FooterStatusMergingActivity{Tier: &frontendv1.FooterStatusMergingActivity_Salient{Salient: salient}},
+	}
 }
 
 // mergeFailed draws a failed merge, its substatus the AREA it failed in. A

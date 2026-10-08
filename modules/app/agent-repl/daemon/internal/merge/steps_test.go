@@ -27,24 +27,6 @@ func TestANewStepClearsTheLastStepsLine(t *testing.T) {
 	}
 }
 
-func TestANewStepEmptiesTheMergeTestsPanel(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-	r := steppedRun(h)
-	r.setStep(context.Background(), footer.StepTesting, func(f *footer.MergeFacts) {
-		f.Tests = append(f.Tests, testRow("daemon", waitingRowState()))
-		f.TestsRound++
-	})
-
-	// Act.
-	r.setStep(context.Background(), footer.StepCommitting, nil)
-
-	// Assert.
-	if got := h.footer.last(); len(got.Tests) != 0 || got.TestsRound != 1 {
-		t.Fatalf("facts = %+v, want no rows and the round kept", got)
-	}
-}
-
 func TestTheEnqueuedLineNamesTheRequesterAndItsStepInPlainWords(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)

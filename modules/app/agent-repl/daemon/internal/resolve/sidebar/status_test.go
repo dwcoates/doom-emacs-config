@@ -1504,6 +1504,24 @@ func TestRosterResolvesEveryMergeArmWithNothingParked(t *testing.T) {
 	}
 }
 
+func TestAMergeWaitingOnTheUserStaysMergingOnTheRoster(t *testing.T) {
+	// Arrange: the merge's agent resolving a conflict.
+	r := live(t, arrange(t))
+	r.SetMerge(theWS, footer.MergeFacts{State: "merging", Step: footer.StepConflictResolution})
+
+	// Act: it asks the user.
+	r.OnPermission(theWS, &conversationv1.AgentId{Value: "main"}, &conversationv1.AgentPermission{
+		Id: &conversationv1.AgentPermissionId{Value: "p-1"},
+		Result: &conversationv1.AgentPermission_Start{Start: &conversationv1.AgentPermissionStart{
+			Prompt: &conversationv1.AgentPermissionPrompt{Title: "rm -rf build"}}},
+	})
+
+	// Assert
+	if got := statusName(onlyRow(t, r)); got != "merging" {
+		t.Fatalf("status = %q, want merging: waiting on the user is the merge's substatus", got)
+	}
+}
+
 func TestAMergeInFlightDominatesTheLink(t *testing.T) {
 	// Arrange: the daemon owns the merge, so it is knowable whatever the
 	// route is doing.

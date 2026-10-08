@@ -31,7 +31,7 @@ func (r *run) setStep(ctx context.Context, step footer.MergeStep, apply func(*fo
 	now := r.o.deps.Now()
 	r.mu.Lock()
 	changed := r.facts.Step != step
-	facts := footer.MergeFacts{State: StateMerging, Step: step, LineAt: now, TestsRound: r.facts.TestsRound}
+	facts := footer.MergeFacts{State: StateMerging, Step: step, LineAt: now}
 	if apply != nil {
 		apply(&facts)
 	}
@@ -59,7 +59,6 @@ func (r *run) updateFacts(apply func(*footer.MergeFacts)) {
 	now := r.o.deps.Now()
 	r.mu.Lock()
 	facts := r.facts
-	facts.Tests = append([]*frontendv1.FooterMergeTestRow(nil), r.facts.Tests...)
 	apply(&facts)
 	if facts.Line != r.facts.Line {
 		facts.LineAt = now
@@ -149,31 +148,6 @@ func fastForwardingLine(commit string) *frontendv1.FooterStatusActivityMergeStep
 	return &frontendv1.FooterStatusActivityMergeStep{Step: &frontendv1.FooterStatusActivityMergeStep_UpdatingMain{
 		UpdatingMain: &frontendv1.FooterMergeStepUpdatingMain{Step: &frontendv1.FooterMergeStepUpdatingMain_FastForwarding{
 			FastForwarding: &frontendv1.FooterMergeStepUpdatingMainFastForwarding{Commit: commit}}}}}
-}
-
-// testRow is one merge tests panel row.
-func testRow(name string, state *frontendv1.FooterMergeTestRowState) *frontendv1.FooterMergeTestRow {
-	return &frontendv1.FooterMergeTestRow{Name: &frontendv1.FooterMergeTestRowName{Text: name}, State: state}
-}
-
-// waitingRowState, runningRowState, passedRowState and failedRowState are a
-// suite's panel states.
-func waitingRowState() *frontendv1.FooterMergeTestRowState {
-	return &frontendv1.FooterMergeTestRowState{State: &frontendv1.FooterMergeTestRowState_Waiting{Waiting: &frontendv1.FooterMergeTestRowWaiting{}}}
-}
-
-func runningRowState(started time.Time) *frontendv1.FooterMergeTestRowState {
-	return &frontendv1.FooterMergeTestRowState{State: &frontendv1.FooterMergeTestRowState_Running{
-		Running: &frontendv1.FooterMergeTestRowRunning{StartedAtMs: started.UnixMilli()}}}
-}
-
-func settledRowState(passed bool, took time.Duration) *frontendv1.FooterMergeTestRowState {
-	if passed {
-		return &frontendv1.FooterMergeTestRowState{State: &frontendv1.FooterMergeTestRowState_Passed{
-			Passed: &frontendv1.FooterMergeTestRowPassed{DurationMs: took.Milliseconds()}}}
-	}
-	return &frontendv1.FooterMergeTestRowState{State: &frontendv1.FooterMergeTestRowState_Failed{
-		Failed: &frontendv1.FooterMergeTestRowFailed{DurationMs: took.Milliseconds()}}}
 }
 
 // commitLine names one replayed commit the way the narration does.

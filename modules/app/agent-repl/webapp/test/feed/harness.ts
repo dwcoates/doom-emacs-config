@@ -571,7 +571,7 @@ export function subagentRow(
 }
 
 /** A merge bubble row. */
-export function mergeRow(id: string, folded = true): FeedRow {
+export function mergeRow(id: string, folded = true, label = "branch → master"): FeedRow {
   return create(FeedRowSchema, {
     id: feedId(id),
     order: orderFor(id),
@@ -583,7 +583,7 @@ export function mergeRow(id: string, folded = true): FeedRow {
           value: create(FeedMergeSchema, {
             head: {
               glyph: { icon: "merge" },
-              label: { text: "branch → master" },
+              label: { text: label },
               runtime: { startedAtMs: 0n },
               fold: { folded },
             },

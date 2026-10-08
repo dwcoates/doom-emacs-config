@@ -65,7 +65,16 @@ These clicks jump to an entry in the feed:
 - **Scrolling back to the bottom of the feed closes every open entry.**
   - This happens when the newest entry comes back into view and the feed starts following new output again.
   - It closes the entries you opened and any a jump opened that are still open.
+  - A merge bubble is the exception: once you open it, it stays open until you close it.
   - Switching to another window or application also closes open tool output and bubble text, as before.
+
+## The merge bubble
+
+- **A merge bubble stays closed while the merge runs and after it lands.**
+  - Click its head to open it; it stays open until you click the head again.
+- **A merge that fails opens its bubble once, so the failure is in front of you.**
+  - Closing it afterwards keeps it closed.
+- **A merge never opens the expanded footer.** The bubble's tests tab lists the suites, each with passed/failed/total counts on the right.
 - **If a subagent's feed cannot be opened, the jump still scrolls to its bubble.**
   - The failure is listed under the warning chip in the top bar.
 
