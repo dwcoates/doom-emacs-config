@@ -1140,7 +1140,8 @@ is refused, never created. It shares its display with `agent-repl-popup-show`
   defect this exists to prevent.
 - **Feed links in bubbles open through it too.** The webapp sends
   `OpenInEditor{feed_link}` and the DAEMON resolves the href, in this order:
-  an absolute path; a path relative to the worktree root; a bare name as
+  a home-relative path (`~/rest`, beneath the daemon's home); an absolute
+  path; a path relative to the worktree root; a bare name as
   `<worktree>/modules/app/agent-repl/<name>`, then `<git root>/<name>`. A
   resolved link is relayed to Emacs as the same `open_in_editor` push a
   `workspace_file` target produces. An unresolved link draws the footer's
@@ -1153,6 +1154,48 @@ is refused, never created. It shares its display with `agent-repl-popup-show`
   (`commands.el`, `agent-repl--switch-to-project`), and a new worktree's
   initial buffers are added to its perspective without being shown
   (`worktree.el`). Neither is a popup.
+
+## Every file path an agent writes starts at `~/`
+
+Every file or directory an agent names in a prompt, a response, a plan, a
+report or a commit message is written as its full path on disk, starting at
+the home directory: `~/.config/doom/modules/app/agent-repl/webapp/src/footer/footer.ts`,
+with an optional `:<line>` suffix (`~/.config/doom/modules/app/agent-repl/daemon/internal/workspace/links.go:193`).
+This holds for an agent's visible reasoning as much as for its answer, because
+the feed renders both and both are clicked. Files TRACKED in the repository
+(this file, code comments, design docs) keep naming paths relative to the
+agent-repl module, as they do throughout: a checkout can live anywhere, and
+those paths are read in the source, not clicked in a bubble.
+
+- **Name the copy in your own worktree.** A workspace on a feature branch
+  lives in its own worktree (`~/.config/doom-worktrees/<name>/...`), and the
+  same file under `~/.config/doom/...` is master's copy. A link that resolves
+  outside the clicking workspace's worktree is refused
+  (`path_escapes_workspace`), so the path must be the one the reader's
+  workspace holds.
+- **Never** a bare file name (`footer.ts`), a path relative to your working
+  directory (`daemon/internal/workspace/links.go` while in
+  `~/.config/doom/modules/app/agent-repl`), a path relative to the repository
+  root, or an absolute path through a user's home (`/Users/<name>/...`).
+
+Why:
+
+- **It names exactly one file.** The feed link resolver
+  (`daemon/internal/workspace/links.go`, `resolveFeedLink`) expands a leading
+  `~/` to the daemon's home and opens that file, first in its order
+  (`OpenInEditorFeedLink` in `proto/src/agentrepl/v1/endpoint_open_in_editor.proto`).
+  A bare name is looked for in two fixed places only, so a file anywhere
+  deeper fails to open (2026-10-08: a bare `footer.ts` in a bubble resolved to
+  `modules/app/agent-repl/footer.ts` and the repository root, and the real
+  `webapp/src/footer/footer.ts` was never found). A relative path is joined to
+  the worktree root, which is wrong whenever the writer meant another
+  directory.
+- **It names no person.** An absolute path through `/Users/<name>` writes a
+  user's name into the record, which agent-repl never does ("agent-repl names
+  no person" above); `~/` says the same thing for whoever reads it.
+- **It reads the same everywhere.** It does not depend on the writer's working
+  directory, and a shell expands it as written, so the user can paste it into
+  a terminal as well as click it.
 
 ## UI changes require an explicit specification
 
