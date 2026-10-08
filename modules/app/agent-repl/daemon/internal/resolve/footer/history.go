@@ -54,6 +54,13 @@ func (r *resolver) restoreLastTurn(ws ids.WorkspaceID, s *wsState, agent *conver
 		return
 	}
 	s.tok.pageRead = true
+	r.restoreLastTokens(ws, s, main, page)
+}
+
+// restoreLastTokens restates the newest turn's main-agent usage, and its
+// alarm, from the main agent's opening page (restoreLastTurn has decided the
+// page is the one to read).
+func (r *resolver) restoreLastTokens(ws ids.WorkspaceID, s *wsState, main string, page *conversationv1.HistoryPage) {
 	turn, units := lastTurnUsage(page, main)
 	if len(units) == 0 {
 		r.logOf(ws, s).Debug("daemon.footer.tokens_not_restored",
