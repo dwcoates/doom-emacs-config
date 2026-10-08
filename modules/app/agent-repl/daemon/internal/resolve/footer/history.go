@@ -1,10 +1,13 @@
 package footer
 
 import (
+	"time"
+
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/sessionwatcher"
 )
 
 // OnHistoryPage reconciles the strip to a conversation this daemon process
@@ -55,6 +58,63 @@ func (r *resolver) restoreLastTurn(ws ids.WorkspaceID, s *wsState, agent *conver
 	}
 	s.tok.pageRead = true
 	r.restoreLastTokens(ws, s, main, page)
+	r.restoreLastClock(ws, s, main, page)
+}
+
+// restoreLastClock restates the newest turn's frozen clock from the main
+// agent's opening page (restoreLastTurn has decided the page is the one to
+// read). The clock outlives its turn until the next submission exactly as the
+// tokens figure does, and a relaunch is not a submission.
+//
+// THE SPAN IS READ OFF TWO DURABLE ENTRIES, never estimated: the place of the
+// newest turn's user prompt (its start) and of the main agent's terminal for
+// it (its end). A page lacking either — a turn straddling the page's boundary,
+// a turn still running, a turn its shim's death cut with no terminal — leaves
+// the clock idle rather than drawing a duration measured from a guessed edge.
+func (r *resolver) restoreLastClock(ws ids.WorkspaceID, s *wsState, main string, page *conversationv1.HistoryPage) {
+	turn, span, missing := lastTurnSpan(page, main)
+	if span == nil {
+		r.logOf(ws, s).Debug("daemon.footer.clock_not_restored",
+			"the main agent's opening page does not hold its newest turn's start and end; the clock stays idle",
+			dlog.Context{"turn_id": turn, "missing": missing})
+		return
+	}
+	s.lastTurn = span
+	r.logOf(ws, s).Info("daemon.footer.clock_restored",
+		"the clock stands the most recent turn's duration, restated from the main agent's opening page",
+		dlog.Context{"turn_id": turn, "started_at_ms": epochMs(span.startedAt), "ended_at_ms": epochMs(span.endedAt)})
+}
+
+// lastTurnSpan reads the newest turn a page names (newestTurn) and its span:
+// the place of its user prompt and the place of the main agent's terminal for
+// it. With either absent (or placeless) the span is nil and MISSING names what
+// the page lacked.
+func lastTurnSpan(page *conversationv1.HistoryPage, main string) (turn string, span *turnSpan, missing string) {
+	turn = newestTurn(page)
+	if turn == "" {
+		return "", nil, "turn"
+	}
+	var start, end *conversationv1.ConversationPlace
+	for _, entry := range page.GetEntries() {
+		if entry.GetTurn().GetValue() != turn {
+			continue
+		}
+		if entry.GetEntry().GetUserPrompt() != nil && start == nil {
+			start = sessionwatcher.PlaceOf(entry)
+		}
+		frame := entry.GetEntry().GetAgentFrame()
+		if frame != nil && frame.GetAgentId().GetValue() == main && end == nil &&
+			(frame.GetSuccess() != nil || frame.GetFailure() != nil) {
+			end = sessionwatcher.PlaceOf(entry)
+		}
+	}
+	switch {
+	case start == nil:
+		return turn, nil, "prompt"
+	case end == nil:
+		return turn, nil, "terminal"
+	}
+	return turn, &turnSpan{startedAt: time.UnixMilli(start.GetAtMs()), endedAt: time.UnixMilli(end.GetAtMs())}, ""
 }
 
 // restoreLastTokens restates the newest turn's main-agent usage, and its
