@@ -297,6 +297,21 @@ describe("the daemon's reveal window", () => {
     expect(el.getAttribute(REVEALED_ATTRIBUTE)).toBe(renderedLength(el));
   });
 
+  it("reveals a burst's pushes toward the one deadline the daemon's shrinking windows name", () => {
+    // Arrange: the burst's first push states 500ms; a second push of the same
+    // burst lands 10ms later, before any frame, stating the 490ms left.
+    const first = drawFeedResponse(paced("update", "x".repeat(1000), 500), rowContext());
+    document.body.appendChild(first);
+    vi.advanceTimersByTime(10);
+    const el = drawFeedResponse(paced("update", "x".repeat(2000), 490), rowContext(first));
+    // Act
+    vi.advanceTimersByTime(400);
+    const before = Number(el.getAttribute(REVEALED_ATTRIBUTE));
+    vi.advanceTimersByTime(90);
+    // Assert: still typing short of the deadline, done at it.
+    expect([before < 2000, el.getAttribute(REVEALED_ATTRIBUTE)]).toEqual([true, renderedLength(el)]);
+  });
+
   it("spreads from what the previous push left on screen", () => {
     // Arrange / Act: the previous push had only shown 4 of what had arrived.
     const el = drawFeedResponse(paced("update", "abcdefghijklmnopqrstuvwxyz", 1000), rowContext(previousAt(4)));
