@@ -465,7 +465,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// client every other site raises into — the decorated one — or the fault
 	// would be recorded and reach no footer.
 	// THE REVEAL PACER is loaded before the feed it paces, from the windows
-	// of streamed-fragment gaps an earlier daemon recorded, so a restart keeps
+	// of streamed-burst gaps an earlier daemon recorded, so a restart keeps
 	// pacing a model's type-out from its first response.
 	pacer, err := revealpace.Load(ctx, p.DB, log)
 	if err != nil {
@@ -537,7 +537,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// takes the same feed-then-footer order).
 		EntryPlaced: footerResolver.OnEntryPlaced,
 		// THE REVEAL WINDOW on the main agent's live bubbles, measured from the
-		// gaps between their streamed fragments.
+		// gaps between the bursts their streamed fragments arrive in.
 		Pacing: pacer,
 		// A CHESS BOARD's body is the board state's.
 		ChessBoards: chessBoards,
