@@ -33,7 +33,7 @@ import { EXPANDED_CLASS } from "../src/expand.js";
 import { HAS_MORE_CLASS } from "../src/feed/bubble-more.js";
 import { BUBBLE_QUOTE_CLASS } from "../src/bubble/quote.js";
 import { HELD_STATUS_BADGES } from "../src/tray/held-prompt.js";
-import { THINKING_CAP_LINES } from "../src/feed/cards/response.js";
+import { INTERIM_CAP_LINES, THINKING_CAP_LINES } from "../src/feed/cards/response.js";
 import { cascadedValue, installStylesheet, rulesOf, type CssRule } from "./stylesheet.js";
 import { withoutBlockComments } from "./source-text.js";
 
@@ -1635,13 +1635,21 @@ describe("the thinking bubble", () => {
     expect(stylesheet).not.toMatch(/--thinking-border\s*:/);
   });
 
-  it("caps a thinking bubble at the fixed feed cap and sets nothing else", () => {
+  it("caps a thinking bubble at one line and sets nothing else", () => {
     // Arrange / Act — the thinking bubble's cap value (its spec, response.ts).
     const rule = declarationsOf(`.bubble[data-cap-lines="${THINKING_CAP_LINES}"]`);
 
-    // Assert — only the line budget changes; the clip, fade, chevron and
-    // expand rules stay every bubble's own.
-    expect(rule?.trim()).toMatch(/^--bubble-cap-lines:\s*var\(--feed-cap-lines\)\s*;?$/);
+    // Assert — only the line budget changes; the clip, ellipsis and expand
+    // rules stay every bubble's own.
+    expect(rule?.trim()).toMatch(/^--bubble-cap-lines:\s*1\s*;?$/);
+  });
+
+  it("caps an interim response at one line and sets nothing else", () => {
+    // Arrange / Act — the interim response's cap value (its spec, response.ts).
+    const rule = declarationsOf(`.bubble[data-cap-lines="${INTERIM_CAP_LINES}"]`);
+
+    // Assert
+    expect(rule?.trim()).toMatch(/^--bubble-cap-lines:\s*1\s*;?$/);
   });
 
   it("caps the held prompt at one line", () => {
@@ -2780,16 +2788,25 @@ describe("the one bubble rule set", () => {
   });
 
 
-  it("places and fills a bubble only through its role, and the held variant's named fill", () => {
+  it("places and fills a bubble only through its role, and the named fills", () => {
     // Arrange / Act — every rule on a bubble that sets a side margin or its fill.
     const placing = rulesOf(stylesheet).filter(
       (rule) =>
         rule.selectors.some(onBubble) &&
         /(?:^|;)\s*(?:margin-left|margin-right|--bubble-bg|background(?:-color)?)\s*:/.test(rule.declarations),
     );
-    // Assert — the base rule paints the role's token; the roles and held choose it.
+    // Assert — the base rule paints the role's token; the roles choose it, and
+    // so do the owner-named fills: the held variant's (2026-09-23) and the
+    // page-colored thinking and interim fill (2026-10-08).
     expect(placing.flatMap((rule) => rule.selectors).sort()).toEqual(
-      [".bubble", '.bubble[data-role="prompt"]', '.bubble[data-role="response"]', '.bubble[data-variant="held"]'].sort(),
+      [
+        ".bubble",
+        '.bubble[data-role="prompt"]',
+        '.bubble[data-role="response"]',
+        '.bubble[data-variant="held"]',
+        '.bubble[data-variant="thinking"]',
+        ".bubble.interim-response",
+      ].sort(),
     );
   });
 
@@ -2813,7 +2830,11 @@ describe("the one bubble rule set", () => {
             prop !== "" &&
             !prop.startsWith("border") &&
             prop !== "--bubble-bg" &&
-            !(prop === "max-width" && rule.selectors.length === 1 && rule.selectors[0] === held),
+            !(prop === "max-width" && rule.selectors.length === 1 && rule.selectors[0] === held) &&
+            // The dimmed prose of a thinking or interim bubble (owner request,
+            // 2026-10-08) is the one text color a variant sets; its own suite
+            // pins it.
+            !(prop === "color" && rule.selectors.every((sel) => DIMMED_TEXT_SELECTORS.includes(sel))),
         ),
     );
     // Assert — the working wave's own animation is the one other thing a
@@ -3461,5 +3482,205 @@ describe("the cold gate's lead sentence", () => {
 
     // Assert
     expect(declarations).toMatch(/font-weight:\s*700/);
+  });
+});
+
+/**
+ * THE TOOL CARD'S HEADER CONTENT IS GREY (owner request, 2026-10-08): the
+ * input line a tool card titles itself with (the Bash command, the Grep
+ * pattern, both `.cmd`) is a medium-dark grey, readable but not prominent,
+ * where it was the `--accent` blue.
+ */
+describe("the tool card's command grey", () => {
+  it("colors the command line with the command grey token", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".cmd");
+
+    // Assert
+    expect(rule).toMatch(/color:\s*var\(--tool-command\)/);
+  });
+
+  it("leaves no tool card input line in the accent blue", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".cmd") ?? "";
+
+    // Assert
+    expect(rule).not.toMatch(/var\(--accent\)/);
+  });
+
+  it.each([
+    ["light", "#4b5563"],
+    ["dark", "#9ca3af"],
+  ] as const)("defines the %s theme's command grey as %s", (theme, want) => {
+    // Arrange
+    const block = theme === "light" ? (declarationsOf(":root") ?? "") : darkThemeBlock();
+
+    // Act
+    const got = /--tool-command:\s*(#[0-9a-fA-F]{3,6})/.exec(block)?.[1];
+
+    // Assert
+    expect(got).toBe(want);
+  });
+});
+
+/**
+ * THE PAGE-COLORED FILL (owner request, 2026-10-08): a thinking bubble and an
+ * interim response are filled with the page's own `--bg`, so the bubble's
+ * background is not there in either theme; every other response keeps the
+ * purple, and the interim keeps its pear border.
+ */
+/** The two bubble kinds whose prose is the dimmed `--interim-text`. */
+const DIMMED_TEXT_SELECTORS: readonly string[] = ['.bubble[data-variant="thinking"]', ".bubble.interim-response"];
+
+describe("the page-colored fill", () => {
+  /** The `--bubble-bg` the cascade hands a bubble with ATTRS and HOOKS. */
+  function fillOf(attrs: Readonly<Record<string, string>>, hooks: readonly string[]): string {
+    const teardown = installStylesheet();
+    try {
+      const el = document.createElement("div");
+      el.className = ["bubble", "md", ...hooks].join(" ");
+      for (const [name, value] of Object.entries(attrs)) el.setAttribute(name, value);
+      document.body.append(el);
+      const got = cascadedValue(el, "--bubble-bg");
+      el.remove();
+      return got;
+    } finally {
+      teardown();
+    }
+  }
+
+  it("fills a thinking bubble with the page background", () => {
+    // Arrange / Act
+    const got = fillOf({ "data-role": "response", "data-variant": "thinking", "data-state": "success" }, ["assistant", "thinking-bubble"]);
+
+    // Assert
+    expect(got).toBe("var(--bg)");
+  });
+
+  it("fills an interim response with the page background", () => {
+    // Arrange / Act
+    const got = fillOf({ "data-role": "response", "data-variant": "response", "data-state": "success" }, ["assistant", "interim-response"]);
+
+    // Assert
+    expect(got).toBe("var(--bg)");
+  });
+
+  it("keeps the purple fill on the turn's answer", () => {
+    // Arrange / Act
+    const got = fillOf({ "data-role": "response", "data-variant": "response", "data-state": "success" }, ["assistant", "final-response"]);
+
+    // Assert
+    expect(got).toBe("var(--assistant)");
+  });
+
+  it("keeps the pear border on a settled interim response", () => {
+    // Arrange / Act
+    const borders = bordersOn({ "data-role": "response", "data-variant": "response", "data-state": "success" }, ["assistant", "interim-response"]);
+
+    // Assert
+    expect(borders).toEqual(["border-color: var(--interim-response-border)"]);
+  });
+
+  it("paints the page itself with the same background token", () => {
+    // Arrange / Act
+    const body = declarationsOf("body") ?? "";
+
+    // Assert
+    expect(body).toMatch(/background:\s*var\(--bg\)/);
+  });
+});
+
+/**
+ * THE RAIL'S MARK COLUMN (owner request, 2026-10-08): a merge glyph's box is
+ * the dot's width, so its centered character shares the dots' center and every
+ * name starts at one edge. Measured in real WebKit by
+ * test/webkit/sidebar-mark.webkit.test.ts.
+ */
+describe("the rail's mark column", () => {
+  it("sizes the dot by the mark column token", () => {
+    // Arrange / Act
+    const rule = declarationsOf("#ws-sidebar .st");
+
+    // Assert
+    expect(rule).toMatch(/(?:^|;)\s*width:\s*var\(--ws-mark-width\)/);
+  });
+
+  it("sizes a glyph's box by the same token, never by its character", () => {
+    // Arrange / Act
+    const rule = declarationsOf("#ws-sidebar .st-glyph");
+
+    // Assert
+    expect(rule).toMatch(/(?:^|;)\s*width:\s*var\(--ws-mark-width\)/);
+  });
+
+  it("centers the glyph's character in its box", () => {
+    // Arrange / Act
+    const rule = declarationsOf("#ws-sidebar .st-glyph");
+
+    // Assert
+    expect(rule).toMatch(/justify-content:\s*center/);
+  });
+});
+
+/**
+ * THE DIMMED PROSE (owner request, 2026-10-08): a thinking bubble's and an
+ * interim response's text is a slight dimming of the body text in either
+ * theme, through one token.
+ */
+describe("the dimmed prose of a thinking or interim bubble", () => {
+  /** The `color` the cascade hands a response bubble with HOOKS and VARIANT. */
+  function textOf(variant: string, hooks: readonly string[]): string {
+    const teardown = installStylesheet();
+    try {
+      const el = document.createElement("div");
+      el.className = ["bubble", "md", ...hooks].join(" ");
+      el.setAttribute("data-role", "response");
+      el.setAttribute("data-variant", variant);
+      el.setAttribute("data-state", "success");
+      document.body.append(el);
+      const got = cascadedValue(el, "color");
+      el.remove();
+      return got;
+    } finally {
+      teardown();
+    }
+  }
+
+  it("dims a thinking bubble's prose", () => {
+    // Arrange / Act
+    const got = textOf("thinking", ["assistant", "thinking-bubble"]);
+
+    // Assert
+    expect(got).toBe("var(--interim-text)");
+  });
+
+  it("dims an interim response's prose", () => {
+    // Arrange / Act
+    const got = textOf("response", ["assistant", "interim-response"]);
+
+    // Assert
+    expect(got).toBe("var(--interim-text)");
+  });
+
+  it("leaves the turn's answer in the body text", () => {
+    // Arrange / Act
+    const got = textOf("response", ["assistant", "final-response"]);
+
+    // Assert
+    expect(got).not.toBe("var(--interim-text)");
+  });
+
+  it.each([
+    ["light", "#3f434a"],
+    ["dark", "#c3c7ce"],
+  ] as const)("defines the %s theme's dimmed prose as %s", (theme, want) => {
+    // Arrange
+    const block = theme === "light" ? (declarationsOf(":root") ?? "") : darkThemeBlock();
+
+    // Act
+    const got = /--interim-text:\s*(#[0-9a-fA-F]{3,6})/.exec(block)?.[1];
+
+    // Assert
+    expect(got).toBe(want);
   });
 });

@@ -21,6 +21,7 @@
  * highlight through `RosterRowCurrent`, deliberately, so no client can compute
  * it differently. The field is validated and logged, and that is all.
  */
+import { MERGED_ROW_PROBE_CLASS, MERGED_SECTION_CLASS } from "./merged-fit.js";
 import { createControl, type Control } from "../control.js";
 import type {
   RosterCurrentWorkspace,
@@ -292,6 +293,11 @@ export function drawRosterTaskKey(u: RosterTaskKey, path: string): string {
  * has. A REPOSITORY section still draws with no rows, because the grouping
  * would flicker as its last workspace merged; the merged band has no place to
  * keep, so it goes away entire until a merge lands.
+ *
+ * EVERY MERGE IS DRAWN; THE RAIL SHOWS WHAT FITS (owner request, 2026-10-08).
+ * The rows are all drawn here, and the header's count is the daemon's count of
+ * them; once the band is laid out, `fitMergedSection` (merged-fit.ts) hides the
+ * rows past what fits and makes the count say how many it shows.
  */
 export function drawRosterMergedSection(
   u: RosterMergedSection,
@@ -299,7 +305,7 @@ export function drawRosterMergedSection(
   path: string,
 ): HTMLElement {
   const section = daemonFoldedBox(MERGED_FOLD_KEY, drawRosterSectionFold(u.fold, `${path}.fold`), sc);
-  section.classList.add("merged-section");
+  section.classList.add(MERGED_SECTION_CLASS);
   const rows = requireMessage(u.rows, `${path}.rows`);
   const header = requireMessage(u.header, `${path}.header`);
   if (rows.rows.length === 0) {
@@ -320,6 +326,12 @@ export function drawRosterMergedSection(
     ),
   );
   section.appendChild(drawRosterRows(rows, sc, `${path}.rows`, false, true));
+  // THE ROW UNIT the fit counts in (merged-fit.ts): an invisible, out-of-flow
+  // box exactly one merged row tall, measurable while the band is folded.
+  const probe = document.createElement("div");
+  probe.className = MERGED_ROW_PROBE_CLASS;
+  probe.setAttribute("aria-hidden", "true");
+  section.appendChild(probe);
   return section;
 }
 
@@ -338,9 +350,11 @@ export function drawRosterSectionHeader(
   label.textContent = drawRosterLabel(requireMessage(u.label, `${path}.label`), `${path}.label`);
   header.appendChild(label);
   // THE FOLDED COUNT, "(N)", sits between the label and the add control the
-  // repo section appends after this header. The daemon resolves N (nested
-  // family rows included); the stylesheet shows the count under the
-  // section's `.folded` only, and nothing here counts or hides it.
+  // repo section appends after this header. The daemon resolves N (the rows
+  // the unfolded section shows, nested family rows included); the stylesheet
+  // shows the count under the section's `.folded` only, and nothing here
+  // counts or hides it. The Recently Merged band's count is then rewritten by
+  // its fit (merged-fit.ts) to the number of merges the rail shows.
   const count = document.createElement("span");
   count.className = "sb-count";
   count.setAttribute("data-section-count", "");
