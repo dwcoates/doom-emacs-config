@@ -6,7 +6,7 @@ import { create } from "@bufbuild/protobuf";
 import { OpenFeedResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_feed_pb";
 import { FeedIdSchema, FeedRowSchema, type FeedRow } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { clearClientFailures, onClientVerdict } from "../../src/rpc/link.js";
-import { mountBubble } from "../../src/feed/bubble.js";
+import { mountBubble, type WireFold } from "../../src/feed/bubble.js";
 import { foldTitle } from "../../src/feed/title-fold.js";
 import { HAS_MORE_CLASS } from "../../src/feed/bubble-more.js";
 import { drawFeedSubagent } from "../../src/feed/rows/subagent.js";
@@ -41,6 +41,13 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+/** The merge row's own fold and its decider, as the feed reads them. */
+function mergeFold(row: FeedRow): WireFold {
+  const fold =
+    row.row.case === "activity" && row.row.value.unit.case === "merge" ? row.row.value.unit.value.head?.fold : undefined;
+  return { folded: fold?.folded ?? true, byReader: fold?.decidedBy.case === "reader" };
+}
+
 async function settle(): Promise<void> {
   for (let i = 0; i < 30; i += 1) await vi.advanceTimersByTimeAsync(0);
 }
@@ -59,7 +66,7 @@ function mount(
     /** The page's scroll box and tail owner. */
     scroll?: { box: Element; tail: TailFollow };
     /** The daemon's fold, read off each push (a merge row ships one). */
-    foldOf?: (row: FeedRow) => boolean;
+    foldOf?: (row: FeedRow) => WireFold;
     merge?: boolean;
     /** Told each fold the reader makes with the head's toggle. */
     readerFold?: (folded: boolean) => void;
@@ -182,12 +189,6 @@ describe("mountBubble: the initial fold (R2)", () => {
 });
 
 describe("mountBubble: a change of the daemon's fold", () => {
-  /** The merge row's own fold, as the feed reads it. */
-  const mergeFold = (row: FeedRow): boolean =>
-    row.row.case === "activity" && row.row.value.unit.case === "merge"
-      ? (row.row.value.unit.value.head?.fold?.folded ?? true)
-      : true;
-
   it("opens a folded merge bubble when the daemon's fold turns open", async () => {
     // Arrange
     const { bubble } = mount(mergeRow("m1", true), harness(), { folded: true, foldOf: mergeFold });
@@ -229,16 +230,30 @@ describe("mountBubble: a change of the daemon's fold", () => {
   });
 });
 
-describe("mountBubble: a merge bubble never collapses on its own", () => {
-  /** The merge row's own fold, as the feed reads it. */
-  const mergeFold = (row: FeedRow): boolean =>
-    row.row.case === "activity" && row.row.value.unit.case === "merge"
-      ? (row.row.value.unit.value.head?.fold?.folded ?? true)
-      : true;
-
-  it("keeps an open merge bubble open when a push states it folded", async () => {
+describe("mountBubble: a merge bubble folds only by the daemon's success default or the reader", () => {
+  it("folds an open merge bubble when the daemon's fold turns folded (the merge succeeded)", async () => {
     // Arrange
     const { bubble } = mount(mergeRow("m1", false), harness(), { folded: false, foldOf: mergeFold, merge: true });
+    await settle();
+    // Act
+    bubble.update(mergeRow("m1", true));
+    await settle();
+    // Assert
+    expect(bubble.isExpanded()).toBe(false);
+  });
+
+  it("keeps the reader's open over a push stating the daemon's default folded", async () => {
+    // Arrange
+    const { bubble } = mount(mergeRow("m1", true), harness(), {
+      folded: true,
+      foldOf: mergeFold,
+      merge: true,
+      readerFold: () => undefined,
+    });
+    await settle();
+    bubble.element.querySelector<HTMLElement>("[data-expand]")?.click();
+    await settle();
+    bubble.update(mergeRow("m1", false, undefined, "reader"));
     await settle();
     // Act
     bubble.update(mergeRow("m1", true));
@@ -247,38 +262,74 @@ describe("mountBubble: a merge bubble never collapses on its own", () => {
     expect(bubble.isExpanded()).toBe(true);
   });
 
-  it("records at info that a push's fold left the open merge bubble open", async () => {
+  it("records at debug that the reader's fold stood over the daemon's default", async () => {
     // Arrange
-    const { bubble } = mount(mergeRow("m1", false), harness(), { folded: false, foldOf: mergeFold, merge: true });
+    const { bubble } = mount(mergeRow("m1", false), harness(), {
+      folded: false,
+      foldOf: mergeFold,
+      merge: true,
+      readerFold: () => undefined,
+    });
     await settle();
-    const capture = captureLogRecords();
+    bubble.element.querySelector<HTMLElement>("[data-expand]")?.click();
+    await settle();
+    bubble.element.querySelector<HTMLElement>("[data-expand]")?.click();
+    await settle();
+    const capture = captureLogRecords("debug");
     // Act
     bubble.update(mergeRow("m1", true));
     await settle();
     // Assert
-    const record = await forwardedRecord(capture, "feed.merge-bubble-fold-kept-open");
-    expect([record.level.case, record.context?.row]).toEqual(["info", "m1"]);
+    const record = await forwardedRecord(capture, "feed.bubble-reader-fold-kept");
+    expect([record.level.case, record.context?.row]).toEqual(["debug", "m1"]);
   });
 
-  it("still closes an open bubble that is not a merge bubble when its pushed fold turns folded", async () => {
+  it("applies a fold the reader made on another page after a toggle here", async () => {
     // Arrange
-    const { bubble } = mount(mergeRow("m1", false), harness(), { folded: false, foldOf: mergeFold });
+    const { bubble } = mount(mergeRow("m1", false), harness(), {
+      folded: false,
+      foldOf: mergeFold,
+      merge: true,
+      readerFold: () => undefined,
+    });
+    await settle();
+    bubble.element.querySelector<HTMLElement>("[data-expand]")?.click();
+    await settle();
+    bubble.element.querySelector<HTMLElement>("[data-expand]")?.click();
     await settle();
     // Act
-    bubble.update(mergeRow("m1", true));
+    bubble.update(mergeRow("m1", true, undefined, "reader"));
     await settle();
     // Assert
     expect(bubble.isExpanded()).toBe(false);
   });
 });
 
-describe("mountBubble: the reader's fold is told, and only the reader's", () => {
-  /** The merge row's own fold, as the feed reads it. */
-  const mergeFold = (row: FeedRow): boolean =>
-    row.row.case === "activity" && row.row.value.unit.case === "merge"
-      ? (row.row.value.unit.value.head?.fold?.folded ?? true)
-      : true;
+describe("mountBubble: isHeldOpenByReader", () => {
+  it.each([
+    { name: "a bubble open only by the daemon's fold", clicks: 0, want: false },
+    { name: "a bubble the reader closed and reopened", clicks: 2, want: true },
+    { name: "a bubble the reader closed", clicks: 1, want: false },
+  ])("answers $want for $name", async ({ clicks, want }) => {
+    // Arrange
+    const { bubble } = mount(mergeRow("m1", false), harness(), {
+      folded: false,
+      foldOf: mergeFold,
+      merge: true,
+      readerFold: () => undefined,
+    });
+    await settle();
+    // Act
+    for (let i = 0; i < clicks; i += 1) {
+      bubble.element.querySelector<HTMLElement>("[data-expand]")?.click();
+      await settle();
+    }
+    // Assert
+    expect(bubble.isHeldOpenByReader()).toBe(want);
+  });
+});
 
+describe("mountBubble: the reader's fold is told, and only the reader's", () => {
   /** Mount a folded merge bubble whose reader folds are collected. */
   function mountTelling(h: Harness = harness(), folded = true) {
     const told: boolean[] = [];

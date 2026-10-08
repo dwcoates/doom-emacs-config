@@ -118,7 +118,7 @@ describe("drawFeedMerge: malformed views", () => {
         glyph: { icon: "merge" },
         label: { text: "x" },
         runtime: { startedAtMs: 0n },
-        fold: { folded: true },
+        fold: { folded: true, decidedBy: { case: "daemon", value: {} } },
       },
     });
     expect(() => draw(msg)).toThrow(MalformedView);
@@ -135,7 +135,7 @@ describe("drawFeedMerge: malformed views", () => {
         glyph: { icon: "merge" },
         label: { text: "x" },
         runtime: { startedAtMs: 0n },
-        fold: { folded: true },
+        fold: { folded: true, decidedBy: { case: "daemon", value: {} } },
       },
       result: { case: "error", value: { endedAtMs: 1n } },
     });

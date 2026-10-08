@@ -405,11 +405,14 @@ hand any more:
   fired only for the reader's own scroll after the latest entry was out of
   view), which closes EVERY expanded entry once (INFO
   `feed.tail-reached-collapse`) and drops the jump watches. A MERGE BUBBLE
-  (`data-merge-bubble`) NEVER COLLAPSES ON ITS OWN (owner ruling, 2026-10-08):
-  only the reader's head click folds it. The return to the tail skips it, a
-  jump that opened one never watches it (DEBUG `feed.jump-merge-unwatched`),
-  and a push stating an open one folded leaves it open (INFO
-  `feed.merge-bubble-fold-kept-open`). Each fold the READER makes, and only
+  (`data-merge-bubble`) IS OPEN BY DEFAULT AND NEVER COLLAPSES AUTOMATICALLY,
+  save a merge that ended in success, which the DAEMON ships folded (owner
+  ruling, 2026-10-08; module AGENTS.md "A merge bubble never collapses
+  automatically, save a success"). The return to the tail skips it, a jump
+  that opened one never watches it (DEBUG `feed.jump-merge-unwatched`), a
+  page replace opens again one the reader left open, and once the reader has
+  toggled it a push stating the daemon's default leaves the reader's fold
+  (DEBUG `feed.bubble-reader-fold-kept`). Each fold the READER makes, and only
   that, is recorded through `FoldMergeBubble` (`src/feed/fold-merge-bubble.ts`,
   the bubble's `readerFold`) on the daemon's durable head, so a push, a page,
   a reload and a daemon restart all draw it the way the reader left it; a
