@@ -52,6 +52,7 @@ export const ROSTER_STATUS_CASES = [
   "turnDied",
   "merging",
   "mergeQueued",
+  "mergeWaiting",
   "mergeFailed",
   "merged",
   "none",
@@ -84,6 +85,9 @@ export const ROSTER_ARM_CLASS: Readonly<Record<RosterStatusCase, string>> = Obje
  */
 export const GLYPH_CHARS: Readonly<Record<string, string>> = Object.freeze({
   queue: "≡",
+  // A MERGE THAT HOLDS THE WORKSPACE AND WAITS FOR IT TO FALL FREE (owner
+  // ruling, 2026-10-08): an hourglass, so it reads as waiting, not running.
+  await: "⧗",
   recycle: "⟳",
   failed: "✕",
   // A LANDED MERGE DRAWS NOTHING (owner request, 2026-10-08: no green check in
