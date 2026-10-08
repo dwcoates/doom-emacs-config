@@ -191,6 +191,39 @@ missing here or there is a broken seam.")
     ;; Assert
     (should (null missing))))
 
+(ert-deftest agent-repl-test-rpc-serialize-records-one-encode ()
+  "Serializing a request is one top-level encode, recorded once."
+  ;; Arrange
+  (let (formats)
+    (cl-letf (((symbol-function 'agent-repl--log)
+               (lambda (_ws fmt &rest _args) (push fmt formats))))
+      ;; Act
+      (agent-repl-rpc--serialize #'agent-repl-wire-encode-turn-id '(:value "t")))
+    ;; Assert
+    (should (equal formats
+                   '("elisp.wire.encoded message=%s messages=%d codec=%s")))))
+
+(ert-deftest agent-repl-test-rpc-stream-push-records-one-decode ()
+  "A decoded stream push is one top-level decode, recorded once."
+  ;; Arrange
+  (let (formats on-message)
+    (cl-letf (((symbol-function 'agent-repl--capture-log-scope)
+               (lambda (_scope) "stream-ws"))
+              ((symbol-function 'agent-repl--info) #'ignore)
+              ((symbol-function 'agent-repl--log)
+               (lambda (_ws fmt &rest _args) (push fmt formats)))
+              ((symbol-function 'agent-repl-connect-stream)
+               (lambda (_conn _method _json on-push &rest _)
+                 (setq on-message on-push))))
+      (agent-repl-rpc--stream 'conn "M" #'identity #'agent-repl-wire-decode-turn-id
+                              nil #'ignore nil)
+      (setq formats nil)
+      ;; Act
+      (funcall on-message '((value . "t"))))
+    ;; Assert
+    (should (equal formats
+                   '("elisp.wire.decoded message=%s messages=%d codec=%s")))))
+
 ;;;; ---- Tests: method naming and codec pairing ----
 
 (ert-deftest agent-repl-test-rpc-unary-callback-keeps-the-captured-log-workspace ()
@@ -199,8 +232,12 @@ missing here or there is a broken seam.")
   (let (transport-response logged-workspaces)
     (cl-letf (((symbol-function 'agent-repl--capture-log-scope)
                (lambda (_scope) "request-ws"))
+              ;; Only the exchange's own records: the codec's one
+              ;; `elisp.wire.*' record per top-level call is the codec's.
               ((symbol-function 'agent-repl--log)
-               (lambda (ws _fmt &rest _args) (push ws logged-workspaces)))
+               (lambda (ws fmt &rest _args)
+                 (when (string-prefix-p "elisp.rpc." fmt)
+                   (push ws logged-workspaces))))
               ((symbol-function 'agent-repl-connect-unary)
                (lambda (_conn _method _json &rest keys)
                  (setq transport-response (plist-get keys :on-response))))

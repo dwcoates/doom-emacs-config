@@ -916,6 +916,113 @@ that tells its three cases apart."
                      (agent-repl-test-wire-common--parse "{\"address\":\"x\"}"))))
                  '("DaemonStreamEnding" address "unknown field"))))
 
+;;;; ---- One record per top-level codec call ----
+
+(defmacro agent-repl-test-wire-common--capturing-logs (records &rest body)
+  "Run BODY collecting each debug line's formatted text into RECORDS, in order.
+RECORDS names a variable the caller has bound."
+  (declare (indent 1))
+  `(progn
+     (setq ,records nil)
+     (cl-letf (((symbol-function 'agent-repl--log)
+                (lambda (_ws fmt &rest args)
+                  (push (apply #'format fmt args) ,records)))
+               ((symbol-function 'agent-repl--error) (lambda (&rest _) nil)))
+       ,@body)
+     (setq ,records (nreverse ,records))))
+
+(defun agent-repl-test-wire-common--nested-codec (value)
+  "Decode VALUE as a two-message tree: Inner inside Outer."
+  (agent-repl-wire--decoded
+   "Outer" (list :inner (agent-repl-wire--decoded "Inner" value))))
+
+(ert-deftest agent-repl-test-wire-call-decode-writes-one-record-for-the-tree ()
+  "A decoded tree of two messages writes one record naming the outermost."
+  ;; Arrange / Act
+  (let (records)
+    (agent-repl-test-wire-common--capturing-logs records
+      (agent-repl-wire-call 'decode #'agent-repl-test-wire-common--nested-codec 1))
+    ;; Assert
+    (should (equal records
+                   '("elisp.wire.decoded message=Outer messages=2 codec=agent-repl-test-wire-common--nested-codec")))))
+
+(ert-deftest agent-repl-test-wire-call-returns-the-codec-result ()
+  "The call answers exactly what the codec answered."
+  ;; Arrange / Act
+  (let ((result (agent-repl-test-wire-common--quiet
+                  (agent-repl-wire-call 'decode #'agent-repl-test-wire-common--nested-codec 1))))
+    ;; Assert
+    (should (equal result '(:inner 1)))))
+
+(ert-deftest agent-repl-test-wire-call-encode-writes-an-encoded-record ()
+  "An encode is recorded under `elisp.wire.encoded'."
+  ;; Arrange / Act
+  (let (records)
+    (agent-repl-test-wire-common--capturing-logs records
+      (agent-repl-wire-call 'encode #'agent-repl-wire-encode-turn-id '(:value "t-1")))
+    ;; Assert
+    (should (equal records
+                   '("elisp.wire.encoded message=TurnId messages=1 codec=agent-repl-wire-encode-turn-id")))))
+
+(ert-deftest agent-repl-test-wire-codec-outside-a-call-writes-no-record ()
+  "A message decoded outside a top-level call is not recorded on its own."
+  ;; Arrange / Act
+  (let (records)
+    (agent-repl-test-wire-common--capturing-logs records
+      (agent-repl-test-wire-common--nested-codec 1))
+    ;; Assert
+    (should-not records)))
+
+(ert-deftest agent-repl-test-wire-call-nested-in-a-call-is-counted-into-it ()
+  "A top-level call made inside another is one more message of the outer tree."
+  ;; Arrange / Act
+  (let (records)
+    (agent-repl-test-wire-common--capturing-logs records
+      (agent-repl-wire-call
+       'decode
+       (lambda (value)
+         (agent-repl-wire--decoded
+          "Wrapper"
+          (agent-repl-wire-call 'decode #'agent-repl-test-wire-common--nested-codec value)))
+       1))
+    ;; Assert
+    (should (= (length records) 1))
+    (should (string-match-p "message=Wrapper messages=3" (car records)))))
+
+(ert-deftest agent-repl-test-wire-call-breach-writes-no-success-record ()
+  "A codec that breaches the contract signals and records no decode."
+  ;; Arrange
+  (let (records breach)
+    (agent-repl-test-wire-common--capturing-logs records
+      ;; Act
+      (setq breach (agent-repl-test-wire-common--breach
+                    (lambda ()
+                      (agent-repl-wire-call 'decode #'agent-repl-wire-decode-turn-id
+                                            '((value . 7)))))))
+    ;; Assert
+    (should breach)
+    (should-not records)))
+
+(ert-deftest agent-repl-test-wire-call-breach-still-records-the-error ()
+  "A breach inside a top-level call keeps its ERROR record."
+  ;; Arrange
+  (let ((errors nil))
+    (cl-letf (((symbol-function 'agent-repl--error)
+               (lambda (_ws fmt &rest args) (push (apply #'format fmt args) errors)))
+              ((symbol-function 'agent-repl--log) (lambda (&rest _) nil)))
+      ;; Act
+      (ignore-errors
+        (agent-repl-wire-call 'decode #'agent-repl-wire-decode-turn-id '((value . 7)))))
+    ;; Assert
+    (should (= (length errors) 1))
+    (should (string-match-p "elisp.wire.contract-breach message=TurnId" (car errors)))))
+
+(ert-deftest agent-repl-test-wire-call-rejects-an-unknown-direction ()
+  "A direction other than decode or encode is a caller bug and signals."
+  ;; Arrange / Act / Assert
+  (should-error (agent-repl-test-wire-common--quiet
+                  (agent-repl-wire-call 'transcode #'identity 1))))
+
 (provide 'test-wire-common)
 
 ;;; test-wire-common.el ends here
