@@ -84,6 +84,27 @@
 - Its collapsed one-line view shows the person's words, and the quote
   appears when the card is expanded.
 
+### Editors hold the person's words, never a quote
+
+- A held prompt being edited is handed to the editor as the person's words
+  alone (`agentrepl.v1.HostHeldPromptEdit.said`).
+- The commit (`agentrepl.v1.EditHeldPromptCommit.said`) replaces those words,
+  and the daemon puts the held prompt's quotes back ahead of them.
+  - An edit changes what the person typed, never what they replied to.
+  - A commit carrying a quote block is refused, because the editor is never
+    handed one.
+- A rolled-back prompt returns to the composer as the person's words alone
+  (`agentrepl.v1.RollBackSuccess.prompt`).
+  - A resend replies to whatever is selected when it is sent.
+- Only the comments of these three fields changed.
+
+### What reads the person's words
+
+- Command recognition and the classifier read text blocks alone.
+- A quote block is not text, so both see only what the person typed.
+- So a command typed while a bubble is selected is recognized as that
+  command.
+
 ## History replay keeps the split
 
 - The shim records the prompt exactly as the daemon handed it over, quote
@@ -101,4 +122,9 @@
 - `frontend.v1.FeedUserPromptBlock`: new `quote` arm.
 - `frontend.v1.FeedAgentPromptBlock`: new `quote` arm.
 - `frontend.v1.FeedQuoteBlock`: new message, one text field.
-- Every change adds an arm or a message, so no package version changes.
+- `agentrepl.v1.HostHeldPromptEdit.said`,
+  `agentrepl.v1.EditHeldPromptCommit.said` and
+  `agentrepl.v1.RollBackSuccess.prompt`: comments only, saying a quote is
+  left out.
+- Every change adds an arm or a message, or changes a comment, so no package
+  version changes.

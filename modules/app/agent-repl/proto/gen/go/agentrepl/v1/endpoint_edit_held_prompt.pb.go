@@ -213,8 +213,11 @@ func (*EditHeldPromptBegin) Descriptor() ([]byte, []int) {
 
 type EditHeldPromptCommit struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The prompt's NEW content, WHOLE — composed exactly as a submission's
-	// `said` is, and it replaces the held one outright.
+	// The person's NEW words, WHOLE — composed exactly as a submission's
+	// `said` is, and they replace the held prompt's words outright. A quote the
+	// held prompt replies with (conversation.v1.UserQuoteBlock) is not part of
+	// the edit: the daemon keeps it ahead of the new words. A commit carrying a
+	// quote block is refused, because the editor is never handed one.
 	Said          *v11.UserSaid `protobuf:"bytes,1,opt,name=said,proto3" json:"said,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
