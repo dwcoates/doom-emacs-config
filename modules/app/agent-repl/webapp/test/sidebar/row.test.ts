@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { captureLogRecords, type LogCapture } from "../log-capture.js";
 import { create } from "@bufbuild/protobuf";
 import { SelectWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_workspace_pb";
 import { UpdateSidebarViewResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_sidebar_view_pb";
@@ -1156,5 +1157,51 @@ describe("the durable last-selected instant", () => {
 
     // Assert.
     expect(stamped.outerHTML).toBe(plain.outerHTML);
+  });
+});
+
+describe("the row's drawn status is recorded", () => {
+  /** The sidebar.drawn-status records a capture holds, in order. */
+  async function drawnStatuses(capture: LogCapture) {
+    capture.logger.flush();
+    await Promise.resolve();
+    return capture.sent
+      .filter((record) => record.operation === "sidebar.drawn-status")
+      .map((record) => record.context as Record<string, unknown>);
+  }
+
+  it("records the arm a row draws, keyed by its workspace", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    // Act
+    drawRosterRow(row({ id: "ws-1", status: { case: "thinking", value: {} } }), sidebarContext(), "R");
+    // Assert
+    expect(await drawnStatuses(capture)).toEqual([
+      expect.objectContaining({ key: "ws-1", arm: "thinking", source: "daemon" }),
+    ]);
+  });
+
+  it("records nothing when a redraw draws the row's same arm", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const sc = sidebarContext();
+    drawRosterRow(row({ id: "ws-1", status: { case: "thinking", value: {} } }), sc, "R");
+    // Act
+    drawRosterRow(row({ id: "ws-1", status: { case: "thinking", value: {} } }), sc, "R");
+    // Assert
+    expect(await drawnStatuses(capture)).toHaveLength(1);
+  });
+
+  it("records a row whose arm changed with the arm it drew before", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const sc = sidebarContext();
+    drawRosterRow(row({ id: "ws-1", status: { case: "thinking", value: {} } }), sc, "R");
+    // Act
+    drawRosterRow(row({ id: "ws-1", status: { case: "severed", value: {} } }), sc, "R");
+    // Assert
+    expect((await drawnStatuses(capture)).at(-1)).toEqual(
+      expect.objectContaining({ arm: "severed", previous_arm: "thinking" }),
+    );
   });
 });
