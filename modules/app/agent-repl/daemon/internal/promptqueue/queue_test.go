@@ -2,7 +2,11 @@ package promptqueue
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"reflect"
+	"regexp"
+	"strings"
 	"sync"
 	"testing"
 
@@ -11,6 +15,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/lockwatch"
+	"claude-repld/internal/wsm"
 )
 
 func TestNewRefusesEachMissingCollaborator(t *testing.T) {
@@ -224,5 +229,67 @@ func TestAnUnresolvedWorkspaceIsNotWatched(t *testing.T) {
 	}
 	if n := len(stalls.watched); n != 1 {
 		t.Fatalf("registrations = %d (%+v), want only the queue's own mutex", n, stalls.watched)
+	}
+}
+
+func TestStandingReconnectHold(t *testing.T) {
+	reconnect, merge := wsm.HoldReconnect, wsm.HoldMerge
+	retired := &wsm.Tombstone{Kind: tombstoneDropped}
+	tests := []struct {
+		name string
+		held wsm.HeldPrompt
+		want bool
+	}{
+		{name: "a standing reconnect hold", held: wsm.HeldPrompt{Hold: &reconnect}, want: true},
+		{name: "a retired reconnect hold", held: wsm.HeldPrompt{Hold: &reconnect, Tombstone: retired}, want: false},
+		{name: "a standing hold of another kind", held: wsm.HeldPrompt{Hold: &merge}, want: false},
+		{name: "a standing prompt with no hold", held: wsm.HeldPrompt{}, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange / Act
+			got := standingReconnectHold(tt.held)
+			// Assert
+			if got != tt.want {
+				t.Fatalf("standingReconnectHold = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestNoSiteHandRollsTheStandingReconnectHoldTest pins the call sites to the
+// one predicate: a hand-rolled copy of its test fails here rather than
+// drifting from it silently.
+func TestNoSiteHandRollsTheStandingReconnectHoldTest(t *testing.T) {
+	// Arrange
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatalf("glob: %v", err)
+	}
+	handRolled := regexp.MustCompile(`Tombstone\s*[!=]=\s*nil\s*(&&|\|\|)\s*\w+\.Hold\s*[!=]=\s*nil\s*(&&|\|\|)\s*\*\w+\.Hold\s*[!=]=\s*wsm\.HoldReconnect`)
+	const definition = "return h.Tombstone == nil && h.Hold != nil && *h.Hold == wsm.HoldReconnect"
+	definitions := 0
+	for _, file := range files {
+		if strings.HasSuffix(file, "_test.go") {
+			continue
+		}
+		src, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatalf("read %s: %v", file, err)
+		}
+		// Act
+		for i, line := range strings.Split(string(src), "\n") {
+			// Assert
+			if strings.TrimSpace(line) == definition {
+				definitions++
+				continue
+			}
+			if handRolled.MatchString(line) {
+				t.Errorf("%s:%d hand-rolls the standing reconnect hold test; call standingReconnectHold: %s", file, i+1, strings.TrimSpace(line))
+			}
+		}
+	}
+	if definitions != 1 {
+		t.Fatalf("found %d definitions of standingReconnectHold's test, want exactly 1", definitions)
 	}
 }
