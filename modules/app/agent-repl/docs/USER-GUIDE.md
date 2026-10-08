@@ -160,6 +160,19 @@ The top bar's effort selector sits between the model selector and the permission
   - Switching causes token cache misses, as switching the model does; both selectors say so on hover.
 - **A model that takes no effort level shows a dash and offers no list.**
 
+## Zooming the feed text
+
+| Key (input window or page) | Effect |
+|---|---|
+| `C-+` or `C-=` | Make the feed text one small step larger. |
+| `C--` | Make the feed text one small step smaller. |
+
+- Holding a key down keeps stepping, for fine adjustment.
+- Only the feed text changes; Emacs's own font is untouched.
+- The size is one setting for every workspace's page.
+  - It is saved on each step, so it holds after Emacs or the daemon restarts.
+  - The size stops at a smallest and a largest step.
+
 ## When Claude does not start
 
 The footer's `disconnected` status has three vendor substatuses for a Claude SDK that did not start. They are blue: the workspace is unusable until it is up.

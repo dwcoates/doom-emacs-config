@@ -906,7 +906,7 @@ selected, cancel the latest prompt.  Asks first."
   (interactive)
   (agent-repl--input-rollback (agent-repl--ws-current-name) :restore-files))
 
-;; FEED TEXT ZOOM (`C-+' / `C--').  The daemon owns and persists a single
+;; FEED TEXT ZOOM (`C-+' or `C-=' / `C--').  The daemon owns and persists a single
 ;; global feed text scale; Emacs only sends a DIRECTION per keypress and the
 ;; daemon applies a fixed small step, clamps it, and pushes the result to the
 ;; webapp.  These commands NEVER touch Emacs's own font or `text-scale' — they
@@ -940,8 +940,8 @@ silently dropped."
 
 (defun agent-repl-feed-text-scale-increase ()
   "Zoom the webapp FEED text IN one small step (daemon-owned, persisted).
-Bound to `C-+' in the composer, overriding Doom's global text-scale
-binding there.  It NEVER changes Emacs's own font — only the webapp feed
+Bound to `C-+' and `C-=' in the composer, overriding Doom's text-scale
+bindings there.  It NEVER changes Emacs's own font — only the webapp feed
 text — and holding the key auto-repeats the nudge for fine adjustment."
   (interactive)
   (agent-repl--feed-text-scale-adjust :increase))
