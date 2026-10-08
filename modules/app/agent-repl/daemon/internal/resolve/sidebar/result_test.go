@@ -5,7 +5,6 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/resolve/footer"
 	"claude-repld/internal/resolve/sidebar"
@@ -26,13 +25,10 @@ type resultReport struct {
 func resultResolver(t *testing.T, stored *wsm.TurnResult) (sidebar.Resolver, *[]resultReport) {
 	t.Helper()
 	reports := &[]resultReport{}
-	r, err := sidebar.New(testColors(), dlog.NewTestSurfaces(), sidebar.WithResultSink(
+	r, _ := newResolver(t, sidebar.WithResultSink(
 		func(ws ids.WorkspaceID, result *wsm.TurnResult) {
 			*reports = append(*reports, resultReport{ws: ws, result: result})
 		}))
-	if err != nil {
-		t.Fatalf("sidebar.New: %v", err)
-	}
 	rec := workspace(string(theWS), "one")
 	rec.Result = stored
 	r.SetRegistry(registry(rec))
@@ -128,10 +124,7 @@ func TestARestoredResultIsViewedLikeALiveOne(t *testing.T) {
 
 func TestALiveTurnBeforeTheRegistryIsNotOverwrittenByTheRecord(t *testing.T) {
 	// Arrange: the adopted shim's running turn is told before the registry.
-	r, err := sidebar.New(testColors(), dlog.NewTestSurfaces())
-	if err != nil {
-		t.Fatalf("sidebar.New: %v", err)
-	}
+	r, _ := newResolver(t)
 	r.OnLink(theWS, shimclient.LinkConnected)
 	r.OnSessionStarted(theWS, &conversationv1.SessionStarted{VendorSessionId: "vendor-1"})
 	r.OnTurnRunningAtAttach(theWS, "turn-1", nil)

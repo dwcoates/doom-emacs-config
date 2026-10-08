@@ -415,9 +415,3 @@ func (r *rosterState) sessions() map[ids.WorkspaceID]*wsm.Session {
 	}
 	return out
 }
-
-// retryBlocks reports a standing API retry that blocks the row: the vendor is
-// retrying a call and a turn is in flight to be held by it.
-func (s *wsState) retryBlocks() bool {
-	return s.retrying != "" && s.turn != nil
-}

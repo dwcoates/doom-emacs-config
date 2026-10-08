@@ -386,8 +386,13 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	if err != nil {
 		return nil, fmt.Errorf("claude-repld: read the kept account usage: %w", err)
 	}
+	// THE ROSTER PROJECTS THE FOOTER'S STATUS, so the footer tells it each
+	// status edge. The roster is built after the footer (it takes the footer
+	// as its status source), so the edge rides a forwarder bound once it is.
+	statusChanged := &statusChangedForwarder{log: log}
 	footerOpts := []footer.Option{
 		footer.WithVendorServes(vendorServes.VendorServes),
+		footer.WithStatusChanged(statusChanged.StatusChanged),
 		footer.WithAccountUsages(usages),
 		footer.WithAccountUsageSink(accountUsageSink(p.DB)),
 	}
@@ -428,10 +433,19 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// footer. It raises no fault itself, so it needs no decorated client.
 	// THE ROSTER'S LAST TURN RESULT IS DURABLE: a daemon that did not see a
 	// workspace's turn end draws its row as it stood, not `ready`.
-	sidebarResolver, err := sidebar.New(colors, p.Surfaces,
+	sidebarResolver, err := sidebar.New(colors, p.Surfaces, footerResolver,
 		sidebar.WithResultSink(rosterResults(p.DB, p.Surfaces.Global())))
 	if err != nil {
 		return nil, fmt.Errorf("claude-repld: build the sidebar resolver: %w", err)
+	}
+	statusChanged.bind(sidebarResolver)
+	// ONE BRING-UP, ONE CALL, BOTH SURFACES. The roster draws a bring-up as
+	// its availability and the footer as the bring-up window of a route never
+	// seen (ladder.AwaitingBringUp), which the roster then projects; telling
+	// them from one closure keeps the two from standing on different facts.
+	bringingUp := func(ws ids.WorkspaceID, up bool) {
+		footerResolver.SetBringingUp(ws, up)
+		sidebarResolver.SetBringingUp(ws, up)
 	}
 	p.DB = health.ObserveFaults(p.DB, newFaultSurfaces(footerResolver, sidebarResolver, topbarResolver, loudFaults), p.Surfaces)
 
@@ -591,7 +605,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		},
 		Live: func(ws ids.WorkspaceID) bool { return fleet.Live(ws) },
 		BringUp: func(pending []ids.WorkspaceID, done func(ids.WorkspaceID, error)) {
-			editorBringUp(fleet, p.DB, ownership, sidebarResolver.SetBringingUp, log, pending, done)
+			editorBringUp(fleet, p.DB, ownership, bringingUp, log, pending, done)
 		},
 		Now: time.Now,
 		Log: log,
@@ -619,7 +633,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Feed:         feedResolver,
 		Footer:       footerResolver,
 		Topbar:       topbarResolver,
-		BringUps:     sidebarResolver.SetBringingUp,
+		BringUps:     bringingUp,
 		VendorStarts: sidebarResolver.SetVendorStart,
 		Steps:        startupRuns.Step,
 		SessionsUp:   lifecycle.SessionUp,
@@ -780,7 +794,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Shims:            fleet,
 		LockProbe:        fleet.ProbeLock,
 		StartSession:     fleet.Start,
-		BringingUp:       sidebarResolver.SetBringingUp,
+		BringingUp:       bringingUp,
 		PublishViews:     views.PublishViews,
 		StateUnreported: func(ws ids.WorkspaceID, unreported bool) {
 			footerResolver.SetStateUnreported(ws, unreported)
@@ -1139,7 +1153,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			StartSession:           fleet.Start,
 			EnsureServices:         services.step(bootServiceStep(p.Opts.joining != "", restarter.EnsureLoaded, restarter.EnsureCurrent)),
 			Unserved:               fleet.MarkUnserved,
-			BringingUp:             sidebarResolver.SetBringingUp,
+			BringingUp:             bringingUp,
 			AdoptBound:             adoptBound,
 			Log:                    p.Surfaces,
 		},

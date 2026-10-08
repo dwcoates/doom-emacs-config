@@ -13,6 +13,7 @@ import (
 	"claude-repld/internal/ids"
 	"claude-repld/internal/promptqueue"
 	"claude-repld/internal/resolve/feed"
+	"claude-repld/internal/resolve/sidebar"
 	"claude-repld/internal/rollout"
 	"claude-repld/internal/workspace"
 )
@@ -264,6 +265,35 @@ func (f *vendorServesForwarder) VendorServes(ws ids.WorkspaceID, was string) {
 		return
 	}
 	queue.OnVendorServes(ws)
+}
+
+// statusChangedForwarder carries the footer's status edge to the roster,
+// which is built after the footer because it takes the footer as its status
+// source.
+type statusChangedForwarder struct {
+	mu     sync.RWMutex
+	roster sidebar.Resolver
+	log    dlog.Logger
+}
+
+func (f *statusChangedForwarder) bind(roster sidebar.Resolver) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.roster = roster
+}
+
+// StatusChanged tells the roster the workspace's footer status moved.
+func (f *statusChangedForwarder) StatusChanged(ws ids.WorkspaceID) {
+	f.mu.RLock()
+	roster := f.roster
+	f.mu.RUnlock()
+	if roster == nil {
+		f.log.Error("daemon.cmd.status_changed", "the footer's status moved before the roster was wired; the row did not re-project it", dlog.Context{
+			"workspace": string(ws), "invariant_violation": "the roster is bound before any footer edge",
+		})
+		return
+	}
+	roster.FooterStatusChanged(ws)
 }
 
 // mergeMoverForwarder carries a handover's merge moves to the merge

@@ -8,16 +8,15 @@
 // reading `merging` beside a rail reading `merge failed` beside an uncolored
 // tab was the report that produced this package.
 //
-// So the COARSE CLAIM — which of the rungs below a workspace stands on — is
-// resolved ONCE per surface by Resolve, over this one Order, and each surface
-// only maps the winning claim onto its own proto arm. The surfaces may differ
-// in DETAIL (the footer's substatus and activity line, the roster's finer arms
-// and its viewed marker) but never in the coarse claim: FooterClaim and
-// RosterClaim below project every arm each surface can emit back onto the
-// claim it makes, each resolver asserts its own output against the claim it
-// resolved, and the invariant test in resolve/sidebar walks the fact
-// combinations through BOTH real resolvers and requires the two projections
-// to agree.
+// So the ladder is walked ONCE, by the footer resolver, over every fact the
+// daemon holds about the workspace, and the roster row is a PROJECTION of the
+// footer's resolved status (resolve/sidebar): it takes the footer's claim and
+// draws its own arm within it. The surfaces may differ in DETAIL (the
+// footer's substatus and activity line, the roster's finer arms and its
+// viewed marker) but never in the coarse claim, because only one of them
+// resolves it. FooterClaim and RosterArmClaim below project every arm each
+// surface can emit back onto the claim it makes, and the roster asserts its
+// projection against the claim the footer resolved.
 //
 // THE LADDER, strongest claim first:
 //
@@ -93,19 +92,12 @@
 //     `degraded` rung below them: an unusable workspace outranks every
 //     usable one.
 //
-// FACTS ONLY ONE RESOLVER OBSERVES are the limit of the guarantee. The ladder
-// makes the two surfaces agree on every fact both are fed; a fact only one of
-// them is fed can still move that one alone. Today those are:
-//   - the footer's alone: a refused close (closing), a client stream down (an
-//     agent-repl-fault hop), a standing daemon fault that claims
-//     agent_repl_fault, an open question, a cold gate and its answer, a pending wakeup,
-//     and a momentary loading;
-//   - the roster's alone: a durable session record before any link state has
-//     been seen, which it reads as `init` (a link rung) while the footer, with
-//     no link state, reads idle.
-//
-// Closing one means feeding the other resolver the fact, never a second
-// ladder.
+// ONE WALKER, NOT TWO FED ALIKE. The roster once walked this ladder over its
+// own facts beside the footer, and a fact fed to only one of them moved that
+// surface alone: a standing daemon fault drew the strip blue while the rail
+// and the tab read red (owner report, 2026-10-08). Projecting the roster from
+// the footer makes such a fact unable to split the surfaces, whichever
+// resolver it reaches.
 package ladder
 
 // Claim is one coarse workspace status: a rung of the ladder.
@@ -152,13 +144,15 @@ var Order = []Claim{
 
 // AwaitingBringUp reports a workspace whose route has never been seen at all
 // while something already says a session is on its way: a turn the daemon
-// ACCEPTED (the prompt is held for a session still to be brought up), or a
-// session that has announced itself. It stands on the AGENT_REPL_FAULT rung — the
-// route is coming up, and that is the truest claim about it — so both surfaces
-// walk a cold submit monotonically (idle, then the route coming up, then the
-// turn) instead of drawing the turn, then the bring-up, then the turn again.
-func AwaitingBringUp(linkSeen, turnInFlight, sessionAnnounced bool) bool {
-	return !linkSeen && (turnInFlight || sessionAnnounced)
+// ACCEPTED (the prompt is held for a session still to be brought up), a
+// session that has announced itself, or a bring-up of the session under way.
+// It stands on the AGENT_REPL_FAULT rung — the route is coming up, and that is
+// the truest claim about it — so a cold submit walks monotonically (idle, then
+// the route coming up, then the turn) instead of drawing the turn, then the
+// bring-up, then the turn again, and a booting daemon draws a workspace it is
+// bringing up as starting rather than ready.
+func AwaitingBringUp(linkSeen, turnInFlight, sessionAnnounced, bringingUp bool) bool {
+	return !linkSeen && (turnInFlight || sessionAnnounced || bringingUp)
 }
 
 // MergeClaim names the rung a merge state stands on, and the empty claim for
