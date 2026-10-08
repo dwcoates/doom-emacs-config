@@ -34,6 +34,7 @@ import {
   FeedMergeUpdatingMainStepSchema,
   FeedCommandPanelSchema,
   FeedDiffLineSchema,
+  FeedMergeFoldSchema,
 } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 
 import { HARNESS_EPOCH_MS, bootColdOnce, chipFailureArms, startHarness, type Harness } from "./harness";
@@ -95,6 +96,7 @@ import {
   chessBoardUnit,
   hookUnit,
   mergeUnit,
+  type MergeResult,
   responseRow,
   FINDINGS_LOCATION_NO_LINE,
   PLAN_EDIT_PATH,
@@ -655,6 +657,47 @@ describe.each(DIFF_LINE_KINDS)("a %s diff line", (kind) => {
     const row = await drawRow(activityRow(toolCallReturnedUnit("diff")));
     // Assert
     expect(row.querySelector(`[data-diff-line="${kind}"]`)).not.toBeNull();
+  });
+});
+
+/**
+ * A TEXT OUTPUT'S DRAWING (owner request, 2026-10-08): a shell's unified diff
+ * draws as the classic diff, a markdown answer from a call that is not a shell
+ * draws formatted, and the same markdown a shell printed stays verbatim.
+ */
+describe("a text output's drawing", () => {
+  const textUnit = (text: string, shell: boolean) =>
+    activityRow({
+      case: "simpleToolCall",
+      value: {
+        name: { text: shell ? "Bash" : "WebFetch" },
+        input: shell ? { text: "git diff", form: { case: "command", value: {} } } : { text: "https://example.com" },
+        outcome: {
+          case: "returned",
+          value: { verdict: { case: "succeeded", value: {} }, form: { case: "text", value: { text } } },
+        },
+      },
+    });
+
+  it("draws a shell's unified diff as the classic diff, with no marker on a changed line", async () => {
+    // Arrange / Act
+    const row = await drawRow(textUnit("--- a/x\n+++ b/x\n@@ -1 +1 @@\n-old\n+new\n", true));
+    // Assert
+    expect(row.querySelector('.diff-classic [data-diff-line="added"]')?.textContent).toBe("new");
+  });
+
+  it("draws a markdown answer from a call that is not a shell formatted", async () => {
+    // Arrange / Act
+    const row = await drawRow(textUnit("# Title\n\nbody", false));
+    // Assert
+    expect(row.querySelector(".tool-output-md h1")?.textContent).toBe("Title");
+  });
+
+  it("draws the same markdown a shell printed verbatim", async () => {
+    // Arrange / Act
+    const row = await drawRow(textUnit("# Title\n\nbody", true));
+    // Assert
+    expect(row.querySelector("pre.bash-output")?.textContent).toBe("# Title\n\nbody");
   });
 });
 
@@ -1838,43 +1881,102 @@ describe("a live detached shell head's stop", () => {
 // ---------------------------------------------------------------------------
 
 describe("a merge bubble's fold", () => {
-  /** The merge bubble arrives folded (FeedMergeHead.fold.folded = true). */
-  const drawMerge = () => drawRow(activityRow(mergeUnit("update"), { id: feedId("merge-1") }));
+  /** A merge bubble in RESULT, at merge-1. */
+  const mergeRow = (result: MergeResult) => activityRow(mergeUnit(result), { id: feedId("merge-1") });
+  /** The landed merge bubble, which arrives folded (the daemon's success default). */
+  const drawLanded = () => drawRow(mergeRow("success"));
+  /** The same row, its fold now the reader's recorded FOLDED. */
+  const readerRow = (result: MergeResult, folded: boolean) => {
+    const row = mergeRow(result);
+    if (row.row.case !== "activity" || row.row.value.unit.case !== "merge") throw new Error("not a merge row");
+    const head = row.row.value.unit.value.head;
+    if (head === undefined) throw new Error("no head");
+    head.fold = create(FeedMergeFoldSchema, { folded, decidedBy: { case: "reader", value: {} } });
+    return row;
+  };
+  const push = async (row: FeedRow) => {
+    harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, row);
+    await harness.settle();
+  };
+  const expanded = () => harness.row("merge-1")?.dataset.expanded;
 
-  it("starts folded where the wire said", async () => {
+  it.each(["update", "failed", "abandoned"] as const)("starts open for a merge that is %s", async (result) => {
     // Arrange / Act
-    const row = await drawMerge();
+    const row = await drawRow(mergeRow(result));
+    // Assert
+    expect(row.dataset.expanded).toBe("true");
+  });
+
+  it("starts folded for a merge that succeeded", async () => {
+    // Arrange / Act
+    const row = await drawLanded();
     // Assert
     expect(row.dataset.expanded).toBe("false");
   });
 
+  it("folds a running bubble once its merge succeeds live", async () => {
+    // Arrange
+    await drawRow(mergeRow("update"));
+    // Act
+    await push(mergeRow("success"));
+    // Assert
+    expect(expanded()).toBe("false");
+  });
+
+  it.each(["failed", "abandoned"] as const)("leaves a running bubble open when its merge is %s", async (result) => {
+    // Arrange
+    await drawRow(mergeRow("update"));
+    // Act
+    await push(mergeRow(result));
+    // Assert
+    expect(expanded()).toBe("true");
+  });
+
+  it("leaves a running bubble open across its repeated pushes", async () => {
+    // Arrange
+    await drawRow(mergeRow("update"));
+    // Act
+    await push(mergeRow("update"));
+    // Assert
+    expect(expanded()).toBe("true");
+  });
+
   it("opens on the reader's toggle", async () => {
     // Arrange
-    await drawMerge();
+    await drawLanded();
     // Act
     await harness.click('[data-feed-row="merge-1"] [data-expand]');
     // Assert
-    expect(harness.row("merge-1")?.dataset.expanded).toBe("true");
+    expect(expanded()).toBe("true");
   });
 
-  it("keeps the reader's toggle across a re-push of the same row", async () => {
+  it("keeps the reader's open over a re-push stating the success default folded", async () => {
     // Arrange
-    await drawMerge();
+    await drawLanded();
     await harness.click('[data-feed-row="merge-1"] [data-expand]');
-    // Act: the wire still says folded; the reader's toggle wins.
-    harness.fake.pushRow(
-      WORKSPACE_ID,
-      ROOT_FEED,
-      activityRow(mergeUnit("update"), { id: feedId("merge-1") }),
-    );
-    await harness.settle();
+    // Act
+    await push(mergeRow("success"));
     // Assert
-    expect(harness.row("merge-1")?.dataset.expanded).toBe("true");
+    expect(expanded()).toBe("true");
+  });
+
+  it("draws a landed bubble open when its recorded fold is the reader's open", async () => {
+    // Arrange / Act
+    const row = await drawRow(readerRow("success", false));
+    // Assert
+    expect(row.dataset.expanded).toBe("true");
+  });
+
+  it("draws a running bubble folded when its recorded fold is the reader's close", async () => {
+    // Arrange / Act
+    const row = await drawRow(readerRow("update", true));
+    // Assert
+    expect(row.dataset.expanded).toBe("false");
   });
 
   it("records the reader's open with FoldMergeBubble on the head row", async () => {
     // Arrange
-    await drawMerge();
+    await drawLanded();
     // Act
     await harness.click('[data-feed-row="merge-1"] [data-expand]');
     // Assert
@@ -1884,7 +1986,7 @@ describe("a merge bubble's fold", () => {
 
   it("records the reader's close with FoldMergeBubble on the head row", async () => {
     // Arrange
-    await drawMerge();
+    await drawLanded();
     await harness.click('[data-feed-row="merge-1"] [data-expand]');
     // Act
     await harness.click('[data-feed-row="merge-1"] [data-expand]');
@@ -1895,7 +1997,7 @@ describe("a merge bubble's fold", () => {
 
   it("keeps the reader's open bubble open when the daemon refuses to record the fold", async () => {
     // Arrange
-    await drawMerge();
+    await drawLanded();
     harness.fake.answer(
       "foldMergeBubble",
       create(FoldMergeBubbleResponseSchema, {
@@ -1905,12 +2007,12 @@ describe("a merge bubble's fold", () => {
     // Act
     await harness.click('[data-feed-row="merge-1"] [data-expand]');
     // Assert
-    expect(harness.row("merge-1")?.dataset.expanded).toBe("true");
+    expect(expanded()).toBe("true");
   });
 
   it("files a refused fold on the warning chip", async () => {
     // Arrange
-    await drawMerge();
+    await drawLanded();
     harness.fake.answer(
       "foldMergeBubble",
       create(FoldMergeBubbleResponseSchema, {

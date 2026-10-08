@@ -2697,21 +2697,43 @@ message FeedContextCutCompactionFailed {
   FeedOutcomeMarker marker = 2;
 }
 
-// The bubble's ▸/▾ state as the daemon states it. A bubble STARTS folded and
-// stays folded while the merge is queued or running, when it lands and when
-// it is abandoned; it OPENS once the merge has failed, so the failure is in
-// front of the reader. The READER's own fold (agentrepl.v1.FoldMergeBubble) is
-// recorded on this durable row and wins from then on, so it is what every
-// later push, page, reload and restart carries.
+// The bubble's ▸/▾ state, and who decided it.
 //
-// A MERGE BUBBLE NEVER COLLAPSES ON ITS OWN (owner ruling, 2026-10-08): the
-// daemon may open a folded bubble (a failure), but no push it makes ever folds
-// an open one; only the reader's fold does. A client applies this field at the
-// bubble's first draw and again whenever a push CHANGES it.
+// A MERGE BUBBLE IS OPEN BY DEFAULT AND NEVER COLLAPSES AUTOMATICALLY (owner
+// ruling, 2026-10-08, superseding the same day's "folded until it fails").
+// Queued, running, waiting on the user, in conflicts, failed or abandoned, it
+// is drawn open, and nothing folds it: not a push, a page reload, a jump, a
+// scroll, a sweep or a daemon restart.
+//
+// THE ONE EXCEPTION: a merge that ended in SUCCESS is drawn folded, both when
+// it lands live and when its row is restored or repainted from history after
+// a reload or a daemon restart. The daemon alone decides this default, at one
+// site (daemon/internal/resolve/feed/mergefold.go).
+//
+// THE READER'S FOLD ALWAYS WINS. Each fold or unfold the reader makes
+// (agentrepl.v1.FoldMergeBubble) is recorded on this durable row with the
+// `reader` arm, and from then on every push, page, reload and restart carries
+// it, over any default, a success included. A client applies this message at
+// the bubble's first draw and again whenever a push CHANGES `folded`.
 message FeedMergeFold {
   // True for a folded bubble, false for an open one.
   bool folded = 1;
+  // WHO DECIDED `folded`. Unset is a malformed row.
+  oneof decided_by {
+    // The daemon's default for the merge's state: folded for a success, open
+    // for everything else.
+    FeedMergeFoldByDaemon daemon = 2;
+    // The reader's explicit fold or unfold, recorded through
+    // agentrepl.v1.FoldMergeBubble; it outranks every default.
+    FeedMergeFoldByReader reader = 3;
+  }
 }
+
+// `FeedMergeFold.folded` is the daemon's default for the merge's state.
+message FeedMergeFoldByDaemon {}
+
+// `FeedMergeFold.folded` is the reader's own fold, recorded on the durable row.
+message FeedMergeFoldByReader {}
 
 // THE TAB FAMILY — one row per drawn tab of a merge bubble's sub-feed.
 // TWO TAB SHAPES: RESOLVED tabs (queue, rebasing, tests, committing,

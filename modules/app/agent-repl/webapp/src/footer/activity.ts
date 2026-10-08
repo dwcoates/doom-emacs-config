@@ -693,8 +693,8 @@ export function drawGivesUpCountdown(
  *
  * IT IS NEVER EMPTY (owner ruling, 2026-10-06): an account never observed
  * reads "usage not yet seen for this account".
- * The figures ellipsize (newsworthy window first) inside an inline flex box no
- * wider than the cell.
+ * The figures ellipsize (in the fixed order of `orderedAllowances`) inside an
+ * inline flex box no wider than the cell.
  */
 export function drawFooterActivityEnduring(
   u: FooterActivityEnduring,
@@ -793,7 +793,8 @@ export function formatMoney(m: FooterMoney, path: string): string {
 }
 
 /**
- * The usage line: EVERY window the vendor figured, newsworthy first.
+ * The usage line: EVERY window the vendor figured, in the fixed order of
+ * `orderedAllowances`.
  *
  * AN ALLOWANCE THE PRODUCER LEFT UNSET IS DRAWN ABSENT, never required: a
  * figure nobody reported is never drawn. The overage window is drawn beside
@@ -893,9 +894,12 @@ export interface LabelledAllowance {
 }
 
 /**
- * The windows the producer figured — session, weekly, overage — NEWSWORTHY
- * FIRST, stable within each group, so with nothing newsworthy the windows keep
- * the contract's own order and nothing moves under a reader for no reason.
+ * The windows the producer figured, ALWAYS in the one fixed order session,
+ * weekly, overage (owner ruling, 2026-10-08): which window stands left of the
+ * blue "|" and which right never changes. Nothing about a window's figure —
+ * newsworthiness, status, a reset — reorders the line; `newsworthy` only
+ * emphasizes. (The line once drew the newsworthy window first, so the weekly
+ * figure jumped left of the session's the moment it crossed the threshold.)
  * The strip and the tokens sheet draw exactly this list.
  */
 export function orderedAllowances(
@@ -908,10 +912,7 @@ export function orderedAllowances(
     present.push({ label: "weekly", value: u.weekly });
   if (u.overage !== undefined)
     present.push({ label: "overage", value: u.overage });
-  return [
-    ...present.filter((a) => a.value.newsworthy),
-    ...present.filter((a) => !a.value.newsworthy),
-  ];
+  return present;
 }
 
 // ---- the kinds' lines -------------------------------------------------------

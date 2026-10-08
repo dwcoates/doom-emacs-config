@@ -61,6 +61,8 @@ import { renderExternalLink } from "../../link.js";
 import { log } from "../../log.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import { paintSpanClass } from "./paint.js";
+import { drawClassicDiff, parseUnifiedDiff, type ClassicDiffKind } from "./diff-view.js";
+import { drawMarkdownOutput, isMarkdownOutput } from "./markdown-output.js";
 import { stopTicking, tick, TICKING_ATTRIBUTE } from "../ticking.js";
 import { foldTitle } from "../title-fold.js";
 import type { RowContext } from "./context.js";
@@ -116,10 +118,14 @@ export function drawFeedSimpleToolCall(u: FeedSimpleToolCall, rc: RowContext): H
   head.appendChild(drawFeedToolCallName(requireMessage(u.name, `${path}.name`), `${path}.name`));
   card.appendChild(head);
 
-  const parts = drawOutcome(outcome, rc, path, card);
+  const callInput = requireMessage(u.input, `${path}.input`);
+  // A SHELL's output is never markdown (markdown-output.ts): the input line's
+  // form is the feed's structured word that this call ran a command.
+  const shell = callInput.form.case === "command";
+  const parts = drawOutcome(outcome, rc, path, card, shell);
   head.appendChild(parts.badge);
 
-  const input = drawFeedToolCallInput(requireMessage(u.input, `${path}.input`), rc, `${path}.input`);
+  const input = drawFeedToolCallInput(callInput, rc, `${path}.input`);
   card.appendChild(input);
   for (const element of parts.body) card.appendChild(element);
   // A CARD'S TIMER STOPS THE MOMENT ITS UNIT SETTLES. Every arm but `running`
@@ -141,12 +147,13 @@ function drawOutcome(
   rc: RowContext,
   path: string,
   card: HTMLElement,
+  shell: boolean,
 ): OutcomeParts {
   switch (outcome.case) {
     case "running":
       return drawFeedToolCallRunning(outcome.value, rc, `${path}.running`);
     case "returned":
-      return drawFeedToolCallReturned(outcome.value, rc, `${path}.returned`, card);
+      return drawFeedToolCallReturned(outcome.value, rc, `${path}.returned`, card, shell);
     case "denied":
       return drawFeedToolCallDenied(outcome.value, `${path}.denied`);
     default: {
@@ -431,6 +438,7 @@ export function drawFeedToolCallReturned(
   rc: RowContext,
   path: string,
   card: HTMLElement,
+  shell: boolean,
 ): OutcomeParts {
   const verdict = requireCase(u.verdict, `${path}.verdict`);
   // The arm's NAME, read before the exhaustive match narrows the value to
@@ -467,7 +475,7 @@ export function drawFeedToolCallReturned(
   // at all — so the arm is stated on the card rather than inferred from whether
   // an output element happens to be there.
   card.setAttribute("data-output-form", form.case);
-  const body = [...drawForm(form, rc, path, verdict.case === "failed")];
+  const body = [...drawForm(form, rc, path, verdict.case === "failed", shell)];
   for (const element of body) element.setAttribute("data-output-body", "");
   if (u.diagnostics !== undefined) {
     body.push(drawFeedToolCallDiagnostics(u.diagnostics, `${path}.diagnostics`));
@@ -481,10 +489,11 @@ function drawForm(
   rc: RowContext,
   path: string,
   failed: boolean,
+  shell: boolean,
 ): readonly HTMLElement[] {
   switch (form.case) {
     case "text":
-      return [drawFeedToolCallTextOutput(form.value, failed, `${path}.text`)];
+      return [drawFeedToolCallTextOutput(form.value, failed, shell, `${path}.text`)];
     case "code":
       return drawFeedToolCallCodeOutput(form.value, `${path}.code`);
     case "diff":
@@ -592,16 +601,26 @@ export function drawFeedToolCallRuntime(u: FeedToolCallRuntime, path: string): H
   return runtime;
 }
 
-/** The plain-text form: verbatim, height-capped, red when the call failed. */
+/**
+ * The plain-text form: verbatim, height-capped, red when the call failed;
+ * unless it is a unified diff, drawn as the classic diff (diff-view.ts), or
+ * markdown, drawn formatted (markdown-output.ts). A failed call's text is its
+ * error, always verbatim.
+ */
 export function drawFeedToolCallTextOutput(
   u: FeedToolCallTextOutput,
   failed: boolean,
+  shell: boolean,
   path: string,
 ): HTMLElement {
+  const diff = failed ? null : parseUnifiedDiff(u.text);
+  const markdown = diff === null && isMarkdownOutput(u.text, shell, failed);
   log.debug("drawing a text output", {
     operation: "feed.cards.tool-call.text-output",
-    context: { path, failed },
+    context: { path, failed, shell, drawn_as: diff !== null ? "diff" : markdown ? "markdown" : "text" },
   });
+  if (diff !== null) return drawClassicDiff(diff, path);
+  if (markdown) return drawMarkdownOutput(u.text, path);
   const pre = document.createElement("pre");
   pre.className = failed ? "tool-output bash-output stderr" : "tool-output bash-output";
   pre.textContent = u.text;
@@ -653,7 +672,12 @@ export function drawFeedCodeSpan(u: FeedCodeSpan, path: string): HTMLElement {
   return span;
 }
 
-/** The diff form: the arm-typed lines, in order. */
+/**
+ * The diff form: the arm-typed lines, in order, drawn as the classic diff
+ * (diff-view.ts). The wire carries each line's text without any +/- prefix,
+ * because the arm already says which kind of line it is, and the classic
+ * drawing shows that kind as the line's background rather than as a glyph.
+ */
 export function drawFeedToolCallDiffOutput(
   u: FeedToolCallDiffOutput,
   path: string,
@@ -662,51 +686,29 @@ export function drawFeedToolCallDiffOutput(
     operation: "feed.cards.tool-call.diff-output",
     context: { path, lines: u.lines.length },
   });
-  const pre = document.createElement("pre");
-  pre.className = "tool-output diff-output diff";
-  for (const [index, line] of u.lines.entries()) {
-    if (index > 0) pre.appendChild(document.createTextNode("\n"));
-    pre.appendChild(drawFeedDiffLine(line, `${path}.lines[${index}]`));
-  }
-  return pre;
+  return drawClassicDiff(
+    u.lines.map((line, index) => ({ kind: diffLineKind(line, `${path}.lines[${index}]`), text: line.text })),
+    path,
+  );
 }
 
-/**
- * One diff line: the arm is the color, and the GUTTER GLYPH IS THE CLIENT'S.
- *
- * The wire carries the text without any +/- prefix precisely because the arm
- * already says which kind of line it is; re-deriving the kind from a prefix
- * would be the client parsing what it was told.
- */
-export function drawFeedDiffLine(u: FeedDiffLine, path: string): HTMLElement {
+/** One wire diff line's kind, as the classic drawing names it. */
+export function diffLineKind(u: FeedDiffLine, path: string): ClassicDiffKind {
   const kind = requireCase(u.kind, `${path}.kind`);
-  // As above: the name, before the match narrows the value away.
-  const kindArm: string = kind.case;
-  const gutter =
-    kind.case === "added"
-      ? "+"
-      : kind.case === "removed"
-        ? "-"
-        : kind.case === "header" || kind.case === "context"
-          ? " "
-          : unreachableArm(`${path}.kind`, kindArm);
-  const cls =
-    kind.case === "added"
-      ? "add"
-      : kind.case === "removed"
-        ? "del"
-        : kind.case === "header"
-          ? "hunk"
-          : "ctx";
-  log.debug("drawing a diff line", {
-    operation: "feed.cards.tool-call.diff-line",
-    context: { path, kind: kind.case },
-  });
-  const line = document.createElement("span");
-  line.className = cls;
-  line.setAttribute("data-diff-line", kind.case);
-  line.textContent = `${gutter}${u.text}`;
-  return line;
+  switch (kind.case) {
+    case "added":
+      return "added";
+    case "removed":
+      return "removed";
+    case "header":
+      return "header";
+    case "context":
+      return "context";
+    default: {
+      const other: { case: string } = kind;
+      return unreachableArm(`${path}.kind`, other.case);
+    }
+  }
 }
 
 /** The line-list form: the lines verbatim, plus the composed floor. */

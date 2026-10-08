@@ -71,16 +71,15 @@ These clicks jump to an entry in the feed:
 
 ## The merge bubble
 
-- **A merge bubble stays closed while the merge runs and after it lands.**
-  - Click its head to open it; it stays open until you click the head again.
-- **A merge bubble never closes on its own.**
-  - Only your click on its head closes it.
+- **A merge bubble is open while the merge is queued, runs, waits on you, hits conflicts, fails or is abandoned.**
+  - Click its head to close it; it stays closed until you click the head again.
+- **A merge bubble never closes on its own, with one exception: a merge that succeeds closes its bubble.**
   - Scrolling back to the bottom of the feed, scrolling it out of view after a jump opened it, switching windows and new merge progress all leave it open.
-- **Your open or closed choice survives a reload.**
+  - A merge that lands closes its bubble once, and a landed merge's bubble is drawn closed after a reload or a restart too.
+- **Your open or closed choice always wins, and survives a reload.**
+  - Open a landed merge's bubble and it stays open, across a reload too; close a running merge's bubble and it stays closed, even when the merge later fails.
   - Reloading the page, restarting Emacs or restarting the daemon draws the bubble the way you left it.
   - If the daemon cannot record your choice, the failure is listed under the warning chip in the top bar, and the bubble stays the way you left it on this page.
-- **A merge that fails opens its bubble once, so the failure is in front of you.**
-  - Closing it afterwards keeps it closed.
 - **A merge never opens the expanded footer.** The bubble's tests tab lists the suites, each with passed/failed/total counts on the right.
 - **If a subagent's feed cannot be opened, the jump still scrolls to its bubble.**
   - The failure is listed under the warning chip in the top bar.

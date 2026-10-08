@@ -1555,31 +1555,38 @@ writes an `ai-title` line into the session transcript; the shim reads it
 `TopbarTitle.text` from it in preference to the workspace name. The branch
 suffix is a different fact and its rule is unchanged.
 
-## A merge bubble never collapses on its own
+## A merge bubble never collapses automatically, save a success
 
-Owner ruling, 2026-10-08. Only the READER folds a merge bubble.
+Owner ruling, 2026-10-08. A merge bubble is OPEN by default, and only the
+READER folds it, with ONE exception: a merge that ended in success.
 
-- **Nothing closes an open merge bubble but the reader's click on its head.**
-  Not a push, not the return to the feed's tail, not a jump's left-view
-  watch, not a window blur or a hidden page, not a page replace, not a full
-  page reload, not a daemon restart.
-- **The daemon may OPEN a bubble, never fold one.** It ships
-  `FeedMergeFold` folded while the merge is queued, running, landed or
-  abandoned, and opens it once the merge has failed. No push it makes ever
-  turns an open bubble folded (`keepMergeOpen`,
-  `daemon/internal/resolve/feed/mergefold.go`).
-- **The reader's fold is daemon-held.** Each fold the reader makes is sent as
-  `agentrepl.v1.FoldMergeBubble` (`webapp/src/feed/fold-merge-bubble.ts`),
-  and the daemon records it on the bubble's durable head row. Every later
-  push, page, reload and daemon restart carries it, so a bubble the reader
-  left open draws open.
+- **Nothing collapses an open merge bubble automatically.** Not a push, not
+  the return to the feed's tail, not a jump's left-view watch, not a scroll,
+  a window blur or a hidden page, not a page replace, not a full page reload,
+  not a daemon restart, and not the merge's own failure, conflicts, waiting on
+  the user or abandonment.
+- **The one exception: a merge that ended in SUCCESS is drawn folded,** both
+  when it lands live and when its head row is restored or repainted from the
+  durable record after a reload or a daemon restart. The daemon decides it at
+  ONE documented site, `mergeFoldDefault`
+  (`daemon/internal/resolve/feed/mergefold.go`); the merge orchestrator
+  composes its head with no fold, and the resolver settles it on every
+  publication (`settleMergeFold`) and every restore
+  (`resettleRestoredMergeFold`).
+- **The reader's fold always wins.** Each fold or unfold the reader makes is
+  sent as `agentrepl.v1.FoldMergeBubble`
+  (`webapp/src/feed/fold-merge-bubble.ts`), and the daemon records it on the
+  bubble's durable head row under `FeedMergeFold.decided_by.reader`. Every
+  later push, page, reload and daemon restart carries it over the default,
+  a success included. On the page, once the reader has toggled a bubble, a
+  push still stating the daemon's default leaves the reader's fold standing
+  (DEBUG `feed.bubble-reader-fold-kept`).
 - **Only the reader's toggle is sent.** A fold the daemon applied, a jump's
   expansion and a replace's reopening are never recorded. A refused or failed
   record is filed on the warning chip (`control_plane_failed`) and logged;
   the bubble keeps the reader's toggle.
-- **The webapp enforces it too.** A push stating an open merge bubble folded
-  leaves it open (INFO `feed.merge-bubble-fold-kept-open`), and a merge bubble
-  a jump opened is never watched (DEBUG `feed.jump-merge-unwatched`).
+- **A merge bubble a jump opened is never watched** (DEBUG
+  `feed.jump-merge-unwatched`), so leaving the view never folds it.
 
 ## Feed vocabulary: interim, final and thinking responses
 
@@ -1596,7 +1603,9 @@ three words name them. They name DIFFERENT BUBBLES, never stages of one.
   the same turn lands after it (`FeedResponse.interim`,
   `daemon/internal/resolve/feed/interim.go`), because only then is it proven
   not to be the one the turn ends on. Drawn collapsed to one line ending in
-  an ellipsis, on the page's own background, its text slightly dimmed.
+  an ellipsis, on the page's own background, its text the tool card's
+  header grey (`--interim-text` is `var(--tool-command)`, the Bash command's
+  color, in both themes).
 - **Thinking response:** the agent's reasoning bubbles
   (`FeedResponse.thinking`). Never interim and never final; drawn like an
   interim response.
@@ -2135,6 +2144,10 @@ never empty (owner ruling, 2026-10-06). An
 allowance whose reset the client's clock has passed reads "<label> reset
 since last seen", with no percentage. Only each `<number>%` wears
 the percent gradient; labels and reset countdowns stay the line's color. The
+windows ALWAYS stand in one fixed order, session, weekly, overage, left to
+right, whatever their figures say (owner ruling, 2026-10-08;
+`orderedAllowances`, `webapp/src/footer/activity.ts`): which window sits on
+which side of the blue "|" never changes. The
 line draws no reading age: it is enduring, so when it was read does not
 matter. The context window's fill is not an enduring line (owner ruling,
 2026-09-30); the topbar's context chip carries it.

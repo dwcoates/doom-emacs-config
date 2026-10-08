@@ -222,7 +222,13 @@ window.containment = {
     const box = document.getElementById("feed-scroll");
     if (host === null || box === null) throw new Error("the page's shell did not mount");
     served = everyRow();
-    const h = harness({ openFeed: () => openSuccess(page(served), "tok:root") });
+    // THE ROOT PAGE IS SERVED TO THE ROOT FEED ALONE. A merge bubble draws open
+    // by default (owner ruling, 2026-10-08), so it opens its sub-feed at mount;
+    // serving it the root page too would nest every merge inside itself forever.
+    const h = harness({
+      openFeed: (req) =>
+        req.feed === undefined ? openSuccess(page(served), "tok:root") : openSuccess(page([]), `tok:${req.feed.value}`),
+    });
     mountFeed(host, h.ctx, { renderers: createRowRenderers(h.ctx), scrollBox: box });
     for (let i = 0; i < 200 && host.querySelectorAll("[data-feed-row]").length < served.length; i++) {
       await new Promise((resolve) => setTimeout(resolve, 10));

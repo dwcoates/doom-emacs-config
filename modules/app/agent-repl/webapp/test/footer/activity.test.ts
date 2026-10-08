@@ -1363,18 +1363,23 @@ describe("the enduring line", () => {
     ).toBe(false);
   });
 
-  it("draws the newsworthy window first even when it is the weekly one", () => {
+  it("keeps session left of the separator and weekly right of it when only weekly is newsworthy", () => {
+    // Arrange
     const cell = enduringCell({
       usage: {
         session: allowance(0.31, false, 60_000),
         weekly: allowance(0.91, true, 60_000),
       },
     });
-    expect(
-      cell
-        .querySelector(".footer-rate-figures")
-        ?.firstElementChild?.getAttribute("data-allowance"),
-    ).toBe("weekly");
+
+    // Act
+    const figures = cell.querySelector(".footer-rate-figures");
+    const drawn = [...(figures?.children ?? [])].map(
+      (el) => el.getAttribute("data-allowance") ?? el.textContent,
+    );
+
+    // Assert
+    expect(drawn).toEqual(["session", "|", "weekly"]);
   });
 
   it("draws one blue-classed separator between two allowances", () => {
@@ -1600,24 +1605,57 @@ describe("enduringUsage", () => {
 });
 
 describe("orderedAllowances", () => {
-  it("keeps the contract's order when nothing is newsworthy", () => {
+  // The order is session, weekly, overage, whichever windows are newsworthy
+  // (owner ruling, 2026-10-08). Every row but the first is a case that once
+  // drew a newsworthy window ahead of the others.
+  it.each([
+    { name: "nothing is newsworthy", session: false, weekly: false, overage: false },
+    { name: "only weekly is newsworthy", session: false, weekly: true, overage: false },
+    { name: "only overage is newsworthy", session: false, weekly: false, overage: true },
+    { name: "weekly and overage are newsworthy", session: false, weekly: true, overage: true },
+    { name: "session and overage are newsworthy", session: true, weekly: false, overage: true },
+    { name: "every window is newsworthy", session: true, weekly: true, overage: true },
+  ])("keeps session, weekly, overage when $name", ({ session, weekly, overage }) => {
+    // Arrange
     const activity = activityOf(
       "idle",
       unpinnedInit(undefined, {
         usage: {
-          session: allowance(0.1, false, 1000),
-          weekly: allowance(0.1, false, 1000),
-          overage: allowance(0.1, false, 1000),
+          session: allowance(session ? 0.9 : 0.1, session, 1000),
+          weekly: allowance(weekly ? 0.9 : 0.1, weekly, 1000),
+          overage: allowance(overage ? 0.9 : 0.1, overage, 1000),
         },
       }),
     );
     const usage = enduringUsage(activity, "p");
     if (usage === undefined) throw new Error("no usage");
-    expect(orderedAllowances(usage).map((a) => a.label)).toEqual([
-      "session",
-      "weekly",
-      "overage",
-    ]);
+
+    // Act
+    const labels = orderedAllowances(usage).map((a) => a.label);
+
+    // Assert
+    expect(labels).toEqual(["session", "weekly", "overage"]);
+  });
+
+  it("keeps weekly before overage when session is absent and only overage is newsworthy", () => {
+    // Arrange
+    const activity = activityOf(
+      "idle",
+      unpinnedInit(undefined, {
+        usage: {
+          weekly: allowance(0.1, false, 1000),
+          overage: allowance(0.9, true, 1000),
+        },
+      }),
+    );
+    const usage = enduringUsage(activity, "p");
+    if (usage === undefined) throw new Error("no usage");
+
+    // Act
+    const labels = orderedAllowances(usage).map((a) => a.label);
+
+    // Assert
+    expect(labels).toEqual(["weekly", "overage"]);
   });
 });
 

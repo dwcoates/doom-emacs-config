@@ -585,8 +585,13 @@ export function subagentRow(
   });
 }
 
-/** A merge bubble row. */
-export function mergeRow(id: string, folded = true, label = "branch → master"): FeedRow {
+/** A merge bubble row, its fold decided BY the daemon unless said. */
+export function mergeRow(
+  id: string,
+  folded = true,
+  label = "branch → master",
+  by: "daemon" | "reader" = "daemon",
+): FeedRow {
   return create(FeedRowSchema, {
     id: feedId(id),
     order: orderFor(id),
@@ -600,7 +605,7 @@ export function mergeRow(id: string, folded = true, label = "branch → master")
               glyph: { icon: "merge" },
               label: { text: label },
               runtime: { startedAtMs: 0n },
-              fold: { folded },
+              fold: { folded, decidedBy: { case: by, value: {} } },
             },
             result: { case: "update", value: {} },
           }),
