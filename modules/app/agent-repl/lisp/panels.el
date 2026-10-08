@@ -69,6 +69,8 @@
 (declare-function agent-repl-window--ensure-layout "window")
 (declare-function agent-repl-window--panel-buffer "window")
 (defvar agent-repl--global-log-scope)
+(defvar agent-repl-frontend-webview-mode)
+(declare-function agent-repl--ws-add-before-collapse-hook "workspace" (fn))
 (declare-function agent-repl-window--panel-window "window")
 (declare-function agent-repl-window--panels-restorable-p "window")
 (declare-function agent-repl-window--side-window-p "window")
@@ -836,6 +838,64 @@ its deactivation is a genuinely global-scope event."
        ;; the activated hook can restore them if persp-mode drops them.
        (agent-repl--ws-put ws :panels-were-visible (agent-repl--panels-visible-p))
        (agent-repl--redirect-from-agent-before-save)))))
+
+;; THE WEBVIEW'S WINDOW SURVIVES A SWITCH.  An xwidget view belongs to one
+;; (xwidget, window) pair, and on macOS a model has exactly one view
+;; (Emacs 30 src/xwidget.c `x_draw_xwidget_glyph_string'): drawing a webview
+;; in a window with no view for it deletes the model's hidden view and makes
+;; a new one, whose `nsxwidget_init_view' adds the WKWebView's NSView to the
+;; frame again (src/nsxwidget.m) -- and WebKit answers that re-attach with a
+;; SYNCHRONOUS wait on the page's web-content process, 15-100 ms of a frozen
+;; frame per switch (lead's `sample' of the main thread, 2026-10-08).  A view
+;; in a window that survives is only moved off-screen when its buffer leaves
+;; the window and back when it returns (`nsxwidget_hide_view' /
+;; `nsxwidget_show_view', no re-attach).
+;;
+;; persp-mode's restore (`persp-restore-window-conf') collapses the frame to
+;; the SELECTED window (`persp-delete-other-windows') and puts the target's
+;; first window -- the webview, in the panel layout -- into it, splitting the
+;; rest off as new windows.  The selected window at a switch is the composer,
+;; so every switch put the webview into the window that had been the
+;; composer, a window with no view for it: a fresh view every switch.
+;; Selecting the webview's window before the collapse keeps ONE window
+;; hosting every workspace's webview, so each page keeps its view.
+
+(defun agent-repl--frame-webview-window ()
+  "Return the selected frame's main-area window showing an agent-repl webview.
+Nil when no live, non-side window shows a buffer in
+`agent-repl-frontend-webview-mode'.  The side check reads the window
+parameter directly: this runs inside persp-mode's restore, where the
+current perspective may be a placeholder that owns no log sink."
+  (seq-find (lambda (win)
+              (and (not (window-parameter win 'window-side))
+                   (buffer-local-value 'agent-repl-frontend-webview-mode
+                                       (window-buffer win))))
+            (window-list nil 'no-minibuf)))
+
+(defun agent-repl--keep-webview-window-through-restore (&rest _)
+  "Select the frame's webview window so persp-mode's restore keeps it.
+Runs just before `persp-delete-other-windows'
+\(`agent-repl--ws-add-before-collapse-hook'), which keeps the selected
+window and deletes the rest; the restored configuration's first window is
+then put into the kept one, and the restore selects the window its
+configuration saved as selected, so this selection never outlives the
+restore.  No-op when the frame shows no webview or its window is already
+selected.  THIS IS AN OPTIMIZATION: it spares each switch the WebKit
+re-attach described above."
+  (let ((win (agent-repl--frame-webview-window))
+        (scope (agent-repl--ws-log-scope (agent-repl--ws-current-name))))
+    (cond
+     ((null win)
+      (agent-repl--log scope "elisp.panels.restore-keeps-webview-window: none on the frame"))
+     ((eq win (selected-window))
+      (agent-repl--log scope "elisp.panels.restore-keeps-webview-window: window=%S already selected" win))
+     (t
+      (agent-repl--log scope "elisp.panels.restore-keeps-webview-window: window=%S selected over=%S"
+                       win (selected-window))
+      (select-window win 'norecord)))))
+
+(when (modulep! :ui workspaces)
+  (agent-repl--ws-add-before-collapse-hook #'agent-repl--keep-webview-window-through-restore))
 
 (defvar agent-repl--switch-activation-generation 0
   "The generation of the newest perspective activation.
