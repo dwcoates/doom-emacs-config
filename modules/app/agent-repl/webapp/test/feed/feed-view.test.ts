@@ -102,6 +102,7 @@ function stubBubble(row: FeedRow): BubbleLike & { updates: number; expands: numb
       return true;
     },
     isExpanded: () => false,
+    isHeldOpenByReader: () => false,
     collapse: () => undefined,
     child: () => null,
     dispose: () => el.remove(),
@@ -304,11 +305,27 @@ describe("createFeedController: painting a page", () => {
     controller.applyPage(page([mergeRow("m1")]), "replace");
     const before = bubbles.get("m1");
     before?.element.setAttribute("data-merge-bubble", "");
-    if (before !== undefined) before.isExpanded = () => true;
+    if (before !== undefined) {
+      before.isExpanded = () => true;
+      before.isHeldOpenByReader = () => true;
+    }
     // Act
     controller.applyPage(page([mergeRow("m1")]), "replace");
     // Assert
     expect(bubbles.get("m1")?.expands).toBe(1);
+  });
+
+  it("leaves a merge bubble open only by the daemon's fold to the replaced row's fold", () => {
+    // Arrange
+    const { controller, bubbles } = fixture();
+    controller.applyPage(page([mergeRow("m1")]), "replace");
+    const before = bubbles.get("m1");
+    before?.element.setAttribute("data-merge-bubble", "");
+    if (before !== undefined) before.isExpanded = () => true;
+    // Act
+    controller.applyPage(page([mergeRow("m1")]), "replace");
+    // Assert
+    expect(bubbles.get("m1")?.expands).toBe(0);
   });
 
   it("leaves a subagent bubble the reader had open to the replace", () => {
@@ -316,7 +333,10 @@ describe("createFeedController: painting a page", () => {
     const { controller, bubbles } = fixture();
     controller.applyPage(page([subagentRow("b1")]), "replace");
     const before = bubbles.get("b1");
-    if (before !== undefined) before.isExpanded = () => true;
+    if (before !== undefined) {
+      before.isExpanded = () => true;
+      before.isHeldOpenByReader = () => true;
+    }
     // Act
     controller.applyPage(page([subagentRow("b1")]), "replace");
     // Assert
@@ -812,6 +832,17 @@ describe("createFeedController: the walk", () => {
     expect(host.querySelector<HTMLElement>("[data-load-more]")?.hidden).toBe(
       false,
     );
+  });
+
+  it("labels the load-more control \"load previous page\"", () => {
+    // Arrange
+    const { controller, host } = fixture();
+
+    // Act
+    controller.applyPage(page([responseRow("a")], { hasMore: true }), "replace");
+
+    // Assert
+    expect(host.querySelector("[data-load-more]")?.textContent).toBe("load previous page");
   });
 
   it("takes it away once the walk reaches the start", () => {

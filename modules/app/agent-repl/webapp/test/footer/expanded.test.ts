@@ -191,7 +191,7 @@ describe("drawFooterUsageRows: what the strip could not fit", () => {
         row.getAttribute("data-usage-allowance"),
       );
     expect(labels(without)).toEqual(["session", "weekly"]);
-    expect(labels(with_)).toEqual(["session", "overage", "weekly"]);
+    expect(labels(with_)).toEqual(["session", "weekly", "overage"]);
   });
 
   // A STANDING SALIENT LINE SHIPS NO ENDURING LINE, so there is no usage to

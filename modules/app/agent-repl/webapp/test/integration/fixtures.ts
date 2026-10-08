@@ -1432,8 +1432,9 @@ export const mergeUnit = (result: MergeResult): ActivityUnit => ({
       glyph: { icon: "merge" },
       label: { text: "merging ws-1" },
       runtime: { startedAtMs: 1_000n },
-      // R2: the INITIAL fold. A bubble arrives collapsed, like every other.
-      fold: { folded: true },
+      // R2: the INITIAL fold, the daemon's default: open, save a success
+      // (owner ruling, 2026-10-08).
+      fold: { folded: result === "success", decidedBy: { case: "daemon", value: {} } },
     },
     result:
       result === "update"

@@ -71,7 +71,7 @@ import {
 import type { AppContext } from "../rpc/context.js";
 import type { AgentReplClient } from "../rpc/client.js";
 import { buildOpenFeedRequest, buildWatchFeedRequest } from "./requests.js";
-import { mountBubble } from "./bubble.js";
+import { mountBubble, type WireFold } from "./bubble.js";
 import { isMergeBubble, MERGE_BUBBLE_ATTRIBUTE } from "./merge-bubble.js";
 import {
   createFeedController,
@@ -540,12 +540,13 @@ export function mountFeed(
       return mountBubble({
         ...shared,
         body: deps.renderers.mergeBody,
-        initialFolded: mergeFoldOf(row),
+        initialFolded: mergeFoldOf(row).folded,
         foldOf: mergeFoldOf,
         merge: true,
-        // THE READER'S FOLD OUTLIVES THE PAGE (owner ruling, 2026-10-08): it
-        // is recorded on the daemon's durable head, so a reload, a page and a
-        // daemon restart all draw the bubble the way the reader left it.
+        // THE READER'S FOLD OUTLIVES THE PAGE AND WINS (owner ruling,
+        // 2026-10-08): it is recorded on the daemon's durable head, so a
+        // reload, a page and a daemon restart all draw the bubble the way the
+        // reader left it, over the daemon's default.
         readerFold: (folded) =>
           void guardMalformed(
             ctx,
@@ -564,12 +565,26 @@ export function mountFeed(
     });
   }
 
-  /** The daemon's fold on a merge row's head. */
-  function mergeFoldOf(row: FeedRow): boolean {
-    return requireMessage(
+  /**
+   * The fold on a merge row's head, and who decided it. An unset decider is a
+   * malformed row.
+   */
+  function mergeFoldOf(row: FeedRow): WireFold {
+    const fold = requireMessage(
       requireMessage(mergeOf(row).head, "FeedMerge.head").fold,
       "FeedMergeHead.fold",
-    ).folded;
+    );
+    const decided = requireCase(fold.decidedBy, "FeedMergeFold.decided_by");
+    switch (decided.case) {
+      case "daemon":
+        return { folded: fold.folded, byReader: false };
+      case "reader":
+        return { folded: fold.folded, byReader: true };
+      default: {
+        const other: { case: string } = decided;
+        return unreachableArm("FeedMergeFold.decided_by", other.case);
+      }
+    }
   }
 
   // ---- reveal -----------------------------------------------------------
@@ -890,7 +905,7 @@ export function mountFeed(
         return;
       }
       if (isMergeBubble(bubble.element)) {
-        // A MERGE BUBBLE NEVER COLLAPSES ON ITS OWN (owner ruling,
+        // A MERGE BUBBLE NEVER COLLAPSES AUTOMATICALLY (owner ruling,
         // 2026-10-08): the one a jump opened stays open until the reader
         // closes it, so no watch closes it on leaving the view.
         log.debug("a jump opened a merge bubble; it is never watched, only the reader folds it", {

@@ -45,6 +45,31 @@ fold is recorded through `agentrepl.v1.FoldMergeBubble` on the durable head,
 so pushes, reloads and daemon restarts all carry it. The webapp never closes
 an open merge bubble on a push.
 
+## 2a. Open by default; a success is the one fold the daemon makes
+
+Superseding section 2 and its first amendment (owner ruling, 2026-10-08):
+
+- A merge bubble is OPEN by default: queued, running, waiting on the user, in
+  conflicts, failed or abandoned. Nothing collapses it automatically.
+- The ONE exception: a merge that ended in success is drawn FOLDED, live and
+  when its row is restored or repainted from the durable record after a
+  reload or a daemon restart.
+- The reader's explicit fold or unfold always wins over that default, a
+  success included, across reloads and restarts.
+
+Contract change: `FeedMergeFold` gained the `decided_by` oneof, `daemon`
+(`FeedMergeFoldByDaemon`, the default for the merge's state) or `reader`
+(`FeedMergeFoldByReader`, recorded through `FoldMergeBubble`). Unset is a
+malformed row. It is what lets the daemon tell a reader's fold, which it
+keeps, from its own default, which it recomputes on every publication and
+restore; and what lets a page keep the reader's toggle over a push that still
+states the default. A row recorded before the oneof existed is treated as the
+daemon's and repainted with the default on restore.
+
+The default is decided at one site, `mergeFoldDefault` in
+`daemon/internal/resolve/feed/mergefold.go`; the merge orchestrator composes
+its heads with no fold.
+
 ## 3. Suite counts and the running suite's dot
 
 Two owner requests on the merge bubble's tests tab:
