@@ -21,6 +21,7 @@
  */
 import { createControl, type Control } from "../control.js";
 import { WatchWorkspaceRosterResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_workspace_roster_pb";
+import { createDrawnStatusLog } from "../drawn-status.js";
 import { log } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
 import { requireCase, requireMessage, unreachablePushArm } from "../rpc/strict.js";
@@ -133,6 +134,7 @@ export function mountSidebar(host: HTMLElement, ctx: AppContext, deps: SidebarDe
     ctx,
     view,
     openDetails: new Set<string>(),
+    drawnStatus: createDrawnStatusLog("sidebar row", "sidebar.drawn-status"),
     dropdowns: createDropdowns(),
     attention,
     tasks: [],
