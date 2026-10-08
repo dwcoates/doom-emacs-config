@@ -115,9 +115,9 @@ func TestRevealGapWindowsSurfacesACorruptRow(t *testing.T) {
 		row   string
 		field string
 	}{
-		{name: "unknown kind", row: `INSERT INTO reveal_gaps VALUES ('m', 'tool', 0, 5)`, field: "kind"},
-		{name: "negative gap", row: `INSERT INTO reveal_gaps VALUES ('m', 'prose', 0, -5)`, field: "gap_ms"},
-		{name: "a position gap", row: `INSERT INTO reveal_gaps VALUES ('m', 'prose', 1, 5)`, field: "position"},
+		{name: "unknown kind", row: `INSERT INTO reveal_burst_gaps VALUES ('m', 'tool', 0, 5)`, field: "kind"},
+		{name: "negative gap", row: `INSERT INTO reveal_burst_gaps VALUES ('m', 'prose', 0, -5)`, field: "gap_ms"},
+		{name: "a position gap", row: `INSERT INTO reveal_burst_gaps VALUES ('m', 'prose', 1, 5)`, field: "position"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -137,5 +137,45 @@ func TestRevealGapWindowsSurfacesACorruptRow(t *testing.T) {
 				t.Fatalf("RevealGapWindows() = %+v, want nothing on a corrupt read", got)
 			}
 		})
+	}
+}
+
+func TestRevealGapWindowsLeavesTheRetiredPerFragmentWindowsOut(t *testing.T) {
+	// Arrange: a per-fragment window the build before layout 30 wrote.
+	s, _ := testStore(t)
+	corrupt(t, s, `INSERT INTO reveal_gaps VALUES ('m', 'prose', 0, 2)`)
+
+	// Act
+	got, err := s.RevealGapWindows(context.Background())
+
+	// Assert
+	if err != nil {
+		t.Fatalf("RevealGapWindows: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("RevealGapWindows() = %+v, want nothing from the retired reveal_gaps table", got)
+	}
+}
+
+// TestTheMigrationAddsTheBurstGapWindowsBesideTheRetiredOnes pins the
+// layout-30 step: the burst windows' table is new, and the per-fragment one
+// the build before still writes is left in place.
+func TestTheMigrationAddsTheBurstGapWindowsBesideTheRetiredOnes(t *testing.T) {
+	// Arrange
+	path := fixtureAt(t, 29)
+
+	// Act
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
+	if err != nil {
+		t.Fatalf("Open on a layout-29 database: %v", err)
+	}
+	defer handle.Close()
+
+	// Assert
+	s := handle.(*store)
+	for _, table := range []string{"reveal_burst_gaps", "reveal_gaps"} {
+		if got := scalar[int](t, s, `SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, table); got != 1 {
+			t.Fatalf("%s tables after the migration = %d, want 1", table, got)
+		}
 	}
 }

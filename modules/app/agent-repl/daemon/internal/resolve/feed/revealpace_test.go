@@ -100,7 +100,7 @@ func gapsOf(observed []observedGap) []int64 {
 	return out
 }
 
-func TestALiveProseBlockMeasuresTheGapsBetweenItsFragments(t *testing.T) {
+func TestALiveProseBlockMeasuresTheGapsBetweenItsBursts(t *testing.T) {
 	// Arrange
 	h, pacing := newPacedHarness(t)
 	h.deliverPrompt("turn-1", "hello")
@@ -114,6 +114,108 @@ func TestALiveProseBlockMeasuresTheGapsBetweenItsFragments(t *testing.T) {
 	want := []observedGap{{key: proseKey, ms: 40}, {key: proseKey, ms: 60}}
 	if !reflect.DeepEqual(pacing.observed, want) {
 		t.Fatalf("observed = %+v, want %+v", pacing.observed, want)
+	}
+}
+
+func TestFragmentsOfOneBurstAreOneSampleMeasuredFromTheBurstsStart(t *testing.T) {
+	// Arrange: a clump of three fragments, as the vendor delivers them.
+	h, pacing := newPacedHarness(t)
+	h.deliverPrompt("turn-1", "hello")
+	h.fragmentAt("unit-1", "a", 1_000)
+	h.fragmentAt("unit-1", "b", 1_003)
+	h.fragmentAt("unit-1", "c", 1_008)
+
+	// Act
+	h.fragmentAt("unit-1", "d", 1_530)
+
+	// Assert
+	if got := gapsOf(pacing.observed); !slices.Equal(got, []int64{530}) {
+		t.Fatalf("gaps = %v, want [530]: one sample, from the clump's start to the next clump's", got)
+	}
+}
+
+func TestALaterFragmentOfABurstCarriesWhatIsLeftOfTheBurstsWindow(t *testing.T) {
+	// Arrange
+	h, pacing := newPacedHarness(t)
+	pacing.gaps[proseKey] = 500
+	h.deliverPrompt("turn-1", "hello")
+	h.fragmentAt("unit-1", "a", 1_000)
+
+	// Act
+	h.fragmentAt("unit-1", "b", 1_012)
+
+	// Assert
+	if got := h.onlyResponse().GetUpdate().GetRevealWindow().GetExpectedGapMs(); got != 488 {
+		t.Fatalf("reveal window = %d, want 488: the burst's deadline, not a fresh window", got)
+	}
+}
+
+func TestAFragmentStartingABurstCarriesTheFullWindow(t *testing.T) {
+	// Arrange
+	h, pacing := newPacedHarness(t)
+	pacing.gaps[proseKey] = 500
+	h.deliverPrompt("turn-1", "hello")
+	h.fragmentAt("unit-1", "a", 1_000)
+
+	// Act
+	h.fragmentAt("unit-1", "b", 1_300)
+
+	// Assert
+	if got := h.onlyResponse().GetUpdate().GetRevealWindow().GetExpectedGapMs(); got != 500 {
+		t.Fatalf("reveal window = %d, want the full 500", got)
+	}
+}
+
+func TestASettleInsideTheBurstKeepsTheBurstsDeadline(t *testing.T) {
+	// Arrange
+	h, pacing := newPacedHarness(t)
+	pacing.gaps[proseKey] = 500
+	h.deliverPrompt("turn-1", "hello")
+	h.fragmentAt("unit-1", "a", 1_000)
+	h.nowMs = 1_015
+
+	// Act
+	h.settleProse("unit-1", "ab")
+
+	// Assert
+	if got := h.onlyResponse().GetSuccess().GetRevealWindow().GetExpectedGapMs(); got != 485 {
+		t.Fatalf("reveal window = %d, want 485", got)
+	}
+}
+
+func TestASettleAfterAPauseCarriesTheFullWindow(t *testing.T) {
+	// Arrange
+	h, pacing := newPacedHarness(t)
+	pacing.gaps[proseKey] = 500
+	h.deliverPrompt("turn-1", "hello")
+	h.fragmentAt("unit-1", "a", 1_000)
+	h.nowMs = 1_100
+
+	// Act
+	h.settleProse("unit-1", "ab")
+
+	// Assert
+	if got := h.onlyResponse().GetSuccess().GetRevealWindow().GetExpectedGapMs(); got != 500 {
+		t.Fatalf("reveal window = %d, want the full 500 for text landing after the burst", got)
+	}
+}
+
+func TestALaterThinkingFragmentOfABurstCarriesWhatIsLeftOfTheBurstsWindow(t *testing.T) {
+	// Arrange
+	h, pacing := newPacedHarness(t)
+	pacing.gaps[thinkingKey] = 400
+	h.deliverPrompt("turn-1", "hello")
+	h.nowMs = 1_000
+	h.send(thinkingResultFrame("think-1", thinkingTextDelta("a")))
+
+	// Act
+	h.nowMs = 1_010
+	h.send(thinkingResultFrame("think-1", thinkingTextDelta("b")))
+
+	// Assert
+	rows := h.thinkingRows()
+	if len(rows) != 1 || rows[0].GetUpdate().GetRevealWindow().GetExpectedGapMs() != 390 {
+		t.Fatalf("thinking rows = %v, want one carrying the 390ms left of the burst's window", rows)
 	}
 }
 

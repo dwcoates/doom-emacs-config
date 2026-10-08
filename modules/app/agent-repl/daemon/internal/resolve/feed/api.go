@@ -421,7 +421,7 @@ type Deps struct {
 	// frame arriving then is reported as undrawable, which is what a test that
 	// is not about boards never sends. Production always wires it.
 	ChessBoards ChessBoards
-	// Pacing is the daemon's record of streamed-fragment gaps, which puts a
+	// Pacing is the daemon's record of streamed-burst gaps, which puts a
 	// reveal window on the main agent's live prose and thinking bubbles
 	// (revealpace.go). nil measures nothing and serves no window, which is
 	// what a test that is not about pacing wants. Production always wires it.

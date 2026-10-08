@@ -14,9 +14,11 @@ import (
 
 // THE REVEAL WINDOW (docs/protobuf-design/streaming-reveal-window.md). The
 // webapp spreads the text of an arriving bubble it has not yet shown across
-// the time the daemon expects to pass before the next fragment. The daemon
-// learns that time by measuring the gap between consecutive fragments of one
-// block, per model and per block kind, in revealpace's rolling window.
+// the time the daemon expects to pass before the next BURST of fragments
+// arrives. The daemon learns that time by measuring the gap from one burst's
+// start to the next's within one block, per model and per block kind, in
+// revealpace's rolling window, and states on each draw what is left of it
+// (revealpace.Burst).
 //
 // ONLY THE MAIN AGENT'S LIVE FRAMES MEASURE, AND ONLY THEY CARRY A WINDOW.
 // A replay's frames arrive in one burst, so their gaps say nothing about the
@@ -24,7 +26,7 @@ import (
 // subagent's gaps could not be filed under the model that produced them. Both
 // draw with no window, which the webapp paces with its own default.
 
-// RevealPacing is the record of streamed-fragment gaps the resolver measures
+// RevealPacing is the record of streamed-burst gaps the resolver measures
 // into and reads the reveal window from (revealpace.Pacer).
 type RevealPacing interface {
 	Observe(key revealpace.Key, gap time.Duration)
@@ -42,25 +44,25 @@ func (r *resolver) paceKey(s *wsState, agent *conversationv1.AgentId, kind wsm.R
 	return revealpace.Key{Model: s.model, Kind: kind}, true
 }
 
-// observeFragment records a text-bearing fragment's arrival on FOLD: the gap
-// since the fold's previous one is a sample, and the first fragment of a
-// block (whose wait is the time to first token, not the streaming cadence)
-// only starts the clock.
+// observeFragment records a text-bearing fragment's arrival on FOLD's burst:
+// a fragment that starts a new burst samples the gap since the previous
+// burst's start, and the first fragment of a block (whose wait is the time to
+// first token, not the streaming cadence) only starts the clock.
 func (r *resolver) observeFragment(fold *proseState, key revealpace.Key, ok bool) {
 	if !ok {
 		return
 	}
-	now := r.deps.Now()
-	if !fold.lastFragmentAt.IsZero() {
-		r.deps.Pacing.Observe(key, now.Sub(fold.lastFragmentAt))
+	if gap, sampled := fold.burst.Arrive(r.deps.Now()); sampled {
+		r.deps.Pacing.Observe(key, gap)
 		fold.sampled = true
 	}
-	fold.lastFragmentAt = now
 }
 
-// revealWindow answers the reveal window a draw carries, nil when the key
-// does not apply or its window is not yet full.
-func (r *resolver) revealWindow(key revealpace.Key, ok bool) *frontendv1.FeedResponseRevealWindow {
+// revealWindow answers the reveal window a draw of FOLD carries, nil when the
+// key does not apply or its window is not yet full: what is left, at this
+// draw, of the expected time from the fold's current burst's start to the
+// next burst (revealpace.Burst.Window).
+func (r *resolver) revealWindow(fold *proseState, key revealpace.Key, ok bool) *frontendv1.FeedResponseRevealWindow {
 	if !ok {
 		return nil
 	}
@@ -68,7 +70,7 @@ func (r *resolver) revealWindow(key revealpace.Key, ok bool) *frontendv1.FeedRes
 	if !full {
 		return nil
 	}
-	return &frontendv1.FeedResponseRevealWindow{ExpectedGapMs: gap}
+	return &frontendv1.FeedResponseRevealWindow{ExpectedGapMs: fold.burst.Window(gap, r.deps.Now())}
 }
 
 // settlePacing writes FOLD's window to its durable record once the block
