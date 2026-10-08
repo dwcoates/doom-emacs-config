@@ -52,6 +52,26 @@ func (v *verbs) Restart(ctx context.Context, ws ids.WorkspaceID) error {
 	if v.deps.Sessions.CancelVendorStart(ctx, ws) {
 		log.Info(opRestart, "ended the vendor-start retry run in flight; the restart begins a fresh one", nil)
 	}
+	// THE WORKSPACE'S MERGE LETS GO FIRST (owner ruling, 2026-10-08). A merge
+	// drives this workspace's session, so it is brought to a stopping point
+	// exactly as a handover's transfer brings it (merge.SuspendForRestart)
+	// and taken back once the bounce finished, whatever its outcome. A merge
+	// only WAITING for the workspace to fall free never blocks the restart --
+	// the restart is also the escape hatch for live work that went stale --
+	// and waits again on the fresh session. Measured 2026-10-08 18:55:03,
+	// workspace `doom`: the relaunch could not take its hold over the waiting
+	// merge's lease and the restart did nothing.
+	if err := v.deps.Merge.SuspendForRestart(ctx, ws); err != nil {
+		log.Error(opRestart, "the workspace's merge did not reach a stopping point; the restart is refused and the merge taken back", dlog.Context{"cause": err.Error()})
+		v.resumeMerges(ctx, log, ws)
+		return &Refusal{
+			Rpc:    "RestartWorkspace",
+			Arm:    "relaunch_failed",
+			Reason: fmt.Sprintf("the restart of %s did not run: its merge did not reach a stopping point: %v", ws, err),
+			Fields: map[string]any{"detail": "the workspace's merge did not reach a stopping point: " + err.Error()},
+		}
+	}
+	defer v.resumeMerges(ctx, log, ws)
 	v.forceEndTurn(ctx, log, ws)
 	outcome := make(chan error, 1)
 	if err := v.bounceShim(ctx, log, ws, true, func(err error) { outcome <- err }); err != nil {
@@ -73,6 +93,17 @@ func (v *verbs) Restart(ctx context.Context, ws ids.WorkspaceID) error {
 		})
 		return fmt.Errorf("restart %q: the caller left before the restart finished: %w", ws, ctx.Err())
 	}
+}
+
+// resumeMerges takes the workspace's merges back after a restart, on a context
+// the restart's caller leaving cannot cancel. A failure is recorded at ERROR;
+// the merge's own take-back has recorded its cause.
+func (v *verbs) resumeMerges(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID) {
+	if err := v.deps.Merge.ResumeAfterRestart(context.WithoutCancel(ctx), ws); err != nil {
+		log.Error(opRestart, "could not take the workspace's merges back after the restart", dlog.Context{"cause": err.Error()})
+		return
+	}
+	log.Debug(opRestart, "took the workspace's merges back after the restart", nil)
 }
 
 // restartAnswer turns a finished bounce's outcome into the restart's answer:

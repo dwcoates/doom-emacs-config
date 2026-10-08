@@ -904,6 +904,22 @@ type fakeMerge struct {
 	closed      []ids.WorkspaceID
 	enqueued    []ids.WorkspaceID
 	enqueueErr  error
+	// steps records the restart's suspension and take-back, in order, and
+	// the rollout's bounces are appended by the tests that need the order.
+	steps      []string
+	suspendErr error
+}
+
+// SuspendForRestart records the suspension and answers suspendErr.
+func (m *fakeMerge) SuspendForRestart(_ context.Context, ws ids.WorkspaceID) error {
+	m.steps = append(m.steps, "suspend:"+string(ws))
+	return m.suspendErr
+}
+
+// ResumeAfterRestart records the take-back.
+func (m *fakeMerge) ResumeAfterRestart(_ context.Context, ws ids.WorkspaceID) error {
+	m.steps = append(m.steps, "resume:"+string(ws))
+	return nil
 }
 
 func newFakeMerge() *fakeMerge {
