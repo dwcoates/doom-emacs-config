@@ -44,7 +44,6 @@ import {
   FooterViewSchema,
   FooterStatusSchema,
   FooterExpandedSchema,
-  FooterMergeTestRowSchema,
   FooterAllowanceSchema,
   type FooterView,
 } from "../../../proto/gen/ts/frontend/v1/footer_pb";
@@ -1813,7 +1812,7 @@ export function footerStatus(
   return { case: status, value } as StatusArm;
 }
 
-export const FOOTER_CHIPS = ["agents", "tasks", "shells", "monitors", "crons", "mergeTests"] as const;
+export const FOOTER_CHIPS = ["agents", "tasks", "shells", "monitors", "crons"] as const;
 export type FooterChip = (typeof FOOTER_CHIPS)[number];
 
 export const FOOTER_PANELS = ["tokens", ...FOOTER_CHIPS] as const;
@@ -1846,18 +1845,7 @@ type FooterInit = {
 };
 
 /** The panels the daemon's focus can name. */
-export const FOOTER_FOCUS_PANELS = ["agents", "shells", "monitors", "mergeTests"] as const;
-
-/** The merge tests panel's rows: one suite in each state, in the gate's order. */
-export const MERGE_TEST_ROWS: readonly MessageInitShape<typeof FooterMergeTestRowSchema>[] = [
-  { name: { text: "daemon unit" }, state: { state: { case: "passed", value: { durationMs: 95_000n } } } },
-  { name: { text: "elisp" }, state: { state: { case: "failed", value: { durationMs: 7_000n } } } },
-  { name: { text: "webapp" }, state: { state: { case: "running", value: { startedAtMs: 1_000n } } } },
-  { name: { text: "webkit" }, state: { state: { case: "waiting", value: {} } } },
-];
-
-/** The state arms the merge tests panel's rows carry, as MERGE_TEST_ROWS orders them. */
-export const MERGE_TEST_ROW_STATES = ["passed", "failed", "running", "waiting"] as const;
+export const FOOTER_FOCUS_PANELS = ["agents", "shells", "monitors"] as const;
 
 export function footerView(init?: FooterInit): FooterView {
   const chips = init?.chips ?? {
@@ -1866,7 +1854,6 @@ export function footerView(init?: FooterInit): FooterView {
     shells: true,
     monitors: true,
     crons: true,
-    mergeTests: true,
   };
   return create(FooterViewSchema, {
     strip: {
@@ -1894,10 +1881,9 @@ export function footerView(init?: FooterInit): FooterView {
         shells: chips.shells ? { count: 1 } : undefined,
         monitors: chips.monitors ? { count: 4 } : undefined,
         crons: chips.crons ? { count: 2 } : undefined,
-        mergeTests: chips.mergeTests ? { finished: 8, total: 12 } : undefined,
       },
     },
-    expanded: init?.expanded === false ? undefined : footerExpandedInit(chips.mergeTests === true),
+    expanded: init?.expanded === false ? undefined : footerExpandedInit(),
     focus:
       init?.focus === undefined
         ? undefined
@@ -1906,11 +1892,8 @@ export function footerView(init?: FooterInit): FooterView {
 }
 
 /** Every expanded panel, fully resolved, exactly as the daemon ships them. */
-function footerExpandedInit(testing: boolean): MessageInitShape<typeof FooterExpandedSchema> {
+function footerExpandedInit(): MessageInitShape<typeof FooterExpandedSchema> {
   return {
-    // The merge's suites while it is testing; empty (and the chip unset)
-    // otherwise, exactly as the daemon ships the panel.
-    mergeTests: { rows: testing ? [...MERGE_TEST_ROWS] : [] },
     tokens: {
       contextGrowth: { value: "18.2k" },
       input: { value: "42.1k" },

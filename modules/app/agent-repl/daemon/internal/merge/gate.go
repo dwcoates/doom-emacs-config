@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -19,8 +18,7 @@ import (
 
 // This file is the gate's RUN: the selected suites run on the rebased branch
 // in its worktree, their edges streamed to the footer (the testing step's
-// activity line and the merge tests panel) and to the bubble's tests tab as
-// the script writes them, and the whole output written to the round's test
+// activity line) and to the bubble's tests tab as the script writes them, and the whole output written to the round's test
 // log as it runs.
 //
 // THERE IS NO FLAKE RE-RUN: a failure goes to the fixing attempts. And A
@@ -61,15 +59,8 @@ func (r *run) gate(ctx context.Context, round tabRound, tip, head string) (gateV
 		"workspace": string(r.ws), "suites": strings.Join(selection.Suites, ","),
 		"full": selection.Full, "reason": selection.Reason})
 
-	g := &gateRun{r: r, round: round, log: r.o.testLog(r.lease.ID, round.n), started: map[string]time.Time{}}
-	rows := make([]*frontendv1.FooterMergeTestRow, 0, len(selection.Suites))
-	for _, suite := range selection.Suites {
-		rows = append(rows, testRow(suite, waitingRowState()))
-	}
-	r.setStep(ctx, footer.StepTesting, func(f *footer.MergeFacts) {
-		f.Tests = rows
-		f.TestsRound++
-	})
+	g := &gateRun{r: r, round: round, log: r.o.testLog(r.lease.ID, round.n)}
+	r.setStep(ctx, footer.StepTesting, nil)
 	r.upsert(round, testsTab(round.live(), nil, nil))
 
 	argv := r.o.deps.TestCommand(dir)
@@ -142,8 +133,6 @@ type gateRun struct {
 	written bool
 
 	mu sync.Mutex
-	// started is when each suite started, which its clock is read from.
-	started map[string]time.Time
 	// suites are the tab's live rows, in the order the suites started.
 	suites []*frontendv1.FeedMergeTestSuite
 }
@@ -206,35 +195,17 @@ func (g *gateRun) run(ctx context.Context, dir string, argv, selected []string) 
 }
 
 // edge follows one line of the script: a suite starting, passing or failing
-// moves its panel row and its tab row, and takes the testing step's line.
+// moves its tab row and takes the testing step's line.
 func (g *gateRun) edge(line string) {
 	name, state, ok := suiteEdge(line)
 	if !ok {
 		return
 	}
-	now := g.r.o.deps.Now()
 	g.mu.Lock()
-	var row *frontendv1.FooterMergeTestRowState
-	switch state {
-	case suiteStatePassed, suiteStateFailed, suiteStateDeclined:
-		began, known := g.started[name]
-		if !known {
-			began = now
-		}
-		row = settledRowState(state != suiteStateFailed, now.Sub(began))
-	default:
-		g.started[name] = now
-		row = runningRowState(now)
-	}
 	g.setTabSuite(name, state)
 	suites := append([]*frontendv1.FeedMergeTestSuite(nil), g.suites...)
 	g.mu.Unlock()
 	g.r.updateFacts(func(f *footer.MergeFacts) {
-		for i, existing := range f.Tests {
-			if existing.GetName().GetText() == name {
-				f.Tests[i] = testRow(name, row)
-			}
-		}
 		f.Line = suiteLine(name, state)
 	})
 	g.r.upsert(g.round, testsTab(g.round.live(), suites, g.link()))
