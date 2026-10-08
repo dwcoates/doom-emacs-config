@@ -557,7 +557,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	relay := &relayForwarder{}
 	verbsRef := &verbsForwarder{}
 
-	var queue promptqueue.Queue
+	var queue promptqueue.Service
 	healthRef := &healthForwarder{}
 	rolloutRef := &rolloutForwarder{}
 	lifecycle := &lifecycleSink{verbs: verbsRef, relay: relay, health: healthRef, builds: rolloutRef, sessions: p.DB, log: log}
@@ -968,6 +968,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Git:          git,
 		Accounts:     accounts,
 		Queue:        queue,
+		RevivalTurns: queue,
 		Merge:        mergeOrchestrator,
 		Rollout:      rolloutController,
 		Drain:        drainController,

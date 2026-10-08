@@ -59,6 +59,23 @@ func (v *verbs) Interrupt(ctx context.Context, ws ids.WorkspaceID, target Interr
 		return InterruptOutcome{}, err
 	}
 
+	// A TURN STOP DURING A BRING-UP WITHDRAWS THE ACCEPTED TURN. The status
+	// surfaces show a turn, and its stop, from the moment the prompt is
+	// accepted, while the session it will run in is still coming up. Asked
+	// FIRST, before the session is read: the queue answers false once the turn
+	// is the session's, and by then the session already has it in flight.
+	if target.Turn {
+		withdrawn, err := v.deps.RevivalTurns.WithdrawRevivalTurn(ctx, ws)
+		if err != nil {
+			return InterruptOutcome{}, fmt.Errorf("interrupt %q: %w", ws, err)
+		}
+		if withdrawn {
+			v.deps.Merge.OnInterrupt(ctx, ws)
+			log.Debug(opInterrupt, "withdrew the accepted turn before its session came up", nil)
+			return InterruptOutcome{Turn: true}, nil
+		}
+	}
+
 	running, live := v.deps.Freeness(ws)
 	shim, hasShim := v.deps.Shim(ws)
 	if !live || !hasShim {
