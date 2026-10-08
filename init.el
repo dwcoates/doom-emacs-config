@@ -156,7 +156,7 @@
        ;;latex             ; writing papers in Emacs has never been so fun
        ;;lean              ; for folks with too much to prove
        ;;ledger            ; be audit you can be
-       (lua +lsp +tree-sidder)               ; one-based indices? one-based indices
+       (lua +lsp +tree-sitter)               ; one-based indices? one-based indices
        markdown          ; writing docs for people to ignore
        ;;nim               ; python + lisp at the speed of c
        ;;nix               ; I hereby declare "nix geht mehr!"
@@ -182,7 +182,7 @@
        ;;solidity          ; do you need a blockchain? No.
        (swift +lsp +tree-sitter)             ; who asked for emoji variables?
        ;;terra             ; Earth and Moon in alignment for performance.
-       ;;web               ; the tubes
+       (web +tree-sitter)  ; the tubes
        (yaml +tree-sitter)              ; JSON, but readable
        ;;zig               ; C, but simpler
 
