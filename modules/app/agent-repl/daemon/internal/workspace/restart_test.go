@@ -517,3 +517,17 @@ func TestARestartWhoseMergeWillNotLetGoIsRefused(t *testing.T) {
 	}
 	awaitRecord(t, f, "error", opRestart)
 }
+
+// TestRelaunchFailedCarriesItsDetail pins the one refusal's shape every
+// relaunch_failed site shares.
+func TestRelaunchFailedCarriesItsDetail(t *testing.T) {
+	// Arrange: nothing beyond the inputs.
+
+	// Act.
+	refusal := relaunchFailed("w1", "the shim died")
+
+	// Assert.
+	if refusal.Rpc != "RestartWorkspace" || refusal.Arm != "relaunch_failed" || refusal.Fields["detail"] != "the shim died" {
+		t.Fatalf("refusal = %+v, want RestartWorkspace's relaunch_failed carrying the detail", refusal)
+	}
+}

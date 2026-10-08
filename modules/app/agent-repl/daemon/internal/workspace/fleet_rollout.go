@@ -896,14 +896,7 @@ func (f *Fleet) logKillDidNotAnswer(ctx context.Context, ws ids.WorkspaceID, for
 // ordinary shape -- a cold-gated workspace and a relaunch's prelaunched shim
 // both reach it -- and the stop it precedes is recorded on its own.
 func (f *Fleet) logNoSessionToKill(ctx context.Context, ws ids.WorkspaceID, force bool) {
-	record, err := f.deps.DB.Workspace(ctx, ws)
-	if err != nil {
-		f.deps.Log.Global().Debug(opBringUp, "no session was started on this shim; stopping the process",
-			dlog.Context{"workspace": string(ws), "force": force})
-		return
-	}
-	f.deps.Log.WorkspaceOrCentral(record.Dir).Debug(opBringUp,
-		"no session was started on this shim; stopping the process",
+	f.logFor(ctx, ws).Debug(opBringUp, "no session was started on this shim; stopping the process",
 		dlog.Context{"workspace": string(ws), "force": force})
 }
 
