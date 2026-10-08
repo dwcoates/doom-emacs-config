@@ -436,16 +436,19 @@ type Deps struct {
 	Git      gitclient.Git
 	Accounts account.Resolver
 	Queue    promptqueue.Queue
-	Merge    merge.Orchestrator
-	Rollout  rollout.Controller
-	Drain    drain.Controller
-	Health   health.Reporter
-	Feed     feed.Resolver
-	Footer   footer.Resolver
-	Topbar   topbar.Resolver
-	Sidebar  sidebar.Resolver
-	Holds    holds.Resolver
-	Host     HostRelay
+	// RevivalTurns withdraws the accepted turn a turn stop lands on while the
+	// workspace's session is still coming up (the interrupt verb).
+	RevivalTurns promptqueue.RevivalTurns
+	Merge        merge.Orchestrator
+	Rollout      rollout.Controller
+	Drain        drain.Controller
+	Health       health.Reporter
+	Feed         feed.Resolver
+	Footer       footer.Resolver
+	Topbar       topbar.Resolver
+	Sidebar      sidebar.Resolver
+	Holds        holds.Resolver
+	Host         HostRelay
 	// Banners raises the desktop banner an agent notification earns.
 	Banners Banners
 	// Sessions brings sessions up and down; injected so the verbs do not own
@@ -749,6 +752,8 @@ func New(deps Deps) (Verbs, error) {
 		return nil, missing("an account resolver")
 	case deps.Queue == nil:
 		return nil, missing("a prompt queue")
+	case deps.RevivalTurns == nil:
+		return nil, missing("a revival-turn withdrawer")
 	case deps.Merge == nil:
 		return nil, missing("a merge orchestrator")
 	case deps.Rollout == nil:
