@@ -20,26 +20,27 @@
     "An unrecognized level or an UNTIL that is not a decimal integer is a",
     "startup refusal, as an unrecognized level always was.",
     "",
-    "Each case reads the two variables at instant now (Unix seconds). until is",
+    "Each case reads the two variables at instant now (Unix seconds); a null",
+    "level or until is a variable that is not set. until_effective is",
     "the window's end, null when the runtime has no window. outcome names the",
     "decision: default (nothing asked for), honored, no_expiry, expired,",
     "beyond_window, or refused."
   ],
   "window_seconds": 300,
   "cases": [
-    {"name": "unset", "level": "", "until": "", "now": 1000000, "outcome": "default", "effective": "info", "until_effective": null},
-    {"name": "info", "level": "info", "until": "", "now": 1000000, "outcome": "default", "effective": "info", "until_effective": null},
+    {"name": "unset", "level": null, "until": null, "now": 1000000, "outcome": "default", "effective": "info", "until_effective": null},
+    {"name": "info", "level": "info", "until": null, "now": 1000000, "outcome": "default", "effective": "info", "until_effective": null},
     {"name": "info ignores a window", "level": "info", "until": "1000100", "now": 1000000, "outcome": "default", "effective": "info", "until_effective": null},
-    {"name": "debug without a window", "level": "debug", "until": "", "now": 1000000, "outcome": "no_expiry", "effective": "info", "until_effective": null},
-    {"name": "error without a window", "level": "error", "until": "", "now": 1000000, "outcome": "no_expiry", "effective": "info", "until_effective": null},
+    {"name": "debug without a window", "level": "debug", "until": null, "now": 1000000, "outcome": "no_expiry", "effective": "info", "until_effective": null},
+    {"name": "error without a window", "level": "error", "until": null, "now": 1000000, "outcome": "no_expiry", "effective": "info", "until_effective": null},
     {"name": "debug after its window", "level": "debug", "until": "999999", "now": 1000000, "outcome": "expired", "effective": "info", "until_effective": null},
     {"name": "debug at its window's end", "level": "debug", "until": "1000000", "now": 1000000, "outcome": "expired", "effective": "info", "until_effective": null},
     {"name": "debug inside its window", "level": "debug", "until": "1000300", "now": 1000000, "outcome": "honored", "effective": "debug", "until_effective": 1000300},
     {"name": "warn inside its window", "level": "warn", "until": "1000060", "now": 1000000, "outcome": "honored", "effective": "warn", "until_effective": 1000060},
     {"name": "debug beyond the window", "level": "debug", "until": "1000301", "now": 1000000, "outcome": "beyond_window", "effective": "info", "until_effective": null},
-    {"name": "unknown level", "level": "trace", "until": "", "now": 1000000, "outcome": "refused", "effective": null, "until_effective": null},
+    {"name": "unknown level", "level": "trace", "until": null, "now": 1000000, "outcome": "refused", "effective": null, "until_effective": null},
     {"name": "until not a number", "level": "debug", "until": "soon", "now": 1000000, "outcome": "refused", "effective": null, "until_effective": null},
     {"name": "until not an integer", "level": "debug", "until": "1000100.5", "now": 1000000, "outcome": "refused", "effective": null, "until_effective": null},
-    {"name": "until malformed without a level", "level": "", "until": "soon", "now": 1000000, "outcome": "refused", "effective": null, "until_effective": null}
+    {"name": "until malformed without a level", "level": null, "until": "soon", "now": 1000000, "outcome": "refused", "effective": null, "until_effective": null}
   ]
 }

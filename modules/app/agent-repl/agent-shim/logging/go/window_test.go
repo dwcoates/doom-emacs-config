@@ -15,8 +15,8 @@ type windowFixture struct {
 	WindowSeconds int `json:"window_seconds"`
 	Cases         []struct {
 		Name           string  `json:"name"`
-		Level          string  `json:"level"`
-		Until          string  `json:"until"`
+		Level          *string `json:"level"`
+		Until          *string `json:"until"`
 		Now            int64   `json:"now"`
 		Outcome        string  `json:"outcome"`
 		Effective      *string `json:"effective"`
@@ -37,6 +37,13 @@ func loadWindowFixture(t *testing.T) windowFixture {
 	return f
 }
 
+func unsetAsEmpty(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
+
 func TestWindowMaxMatchesTheFixture(t *testing.T) {
 	// Arrange
 	f := loadWindowFixture(t)
@@ -53,21 +60,22 @@ func TestWindowMaxMatchesTheFixture(t *testing.T) {
 func TestSelectLevelAnswersEveryFixtureCase(t *testing.T) {
 	for _, tc := range loadWindowFixture(t).Cases {
 		t.Run(tc.Name, func(t *testing.T) {
-			// Arrange
+			// Arrange: an unset variable reads as empty in Go.
 			now := time.Unix(tc.Now, 0)
+			level, until := unsetAsEmpty(tc.Level), unsetAsEmpty(tc.Until)
 
 			// Act
-			sel, err := SelectLevel(tc.Level, tc.Until, now)
+			sel, err := SelectLevel(level, until, now)
 
 			// Assert
 			if tc.Outcome == "refused" {
 				if err == nil {
-					t.Fatalf("SelectLevel(%q, %q) = %+v, want refusal", tc.Level, tc.Until, sel)
+					t.Fatalf("SelectLevel(%q, %q) = %+v, want refusal", level, until, sel)
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("SelectLevel(%q, %q): %v", tc.Level, tc.Until, err)
+				t.Fatalf("SelectLevel(%q, %q): %v", level, until, err)
 			}
 			if string(sel.Outcome) != tc.Outcome {
 				t.Errorf("outcome = %s, want %s", sel.Outcome, tc.Outcome)
@@ -82,6 +90,22 @@ func TestSelectLevelAnswersEveryFixtureCase(t *testing.T) {
 				t.Errorf("until = %d, want %d", sel.Until.Unix(), *tc.UntilEffective)
 			}
 		})
+	}
+}
+
+func TestSelectionNoteIsSilentForAnHonoredWindow(t *testing.T) {
+	// Arrange
+	sel, err := SelectLevel("debug", "1000100", time.Unix(1000000, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	_, ok := sel.Note()
+
+	// Assert
+	if ok {
+		t.Error("an honored window wrote a note")
 	}
 }
 
@@ -101,11 +125,10 @@ func TestSelectionNoteIsSilentForTheDefault(t *testing.T) {
 	}
 }
 
-func TestSelectionNoteStatesEveryNonDefaultOutcome(t *testing.T) {
+func TestSelectionNoteStatesEveryIgnoredLevel(t *testing.T) {
 	tests := []struct {
 		name, level, until string
 	}{
-		{name: "honored", level: "debug", until: "1000100"},
 		{name: "no expiry", level: "debug", until: ""},
 		{name: "expired", level: "debug", until: "999999"},
 		{name: "beyond window", level: "debug", until: "2000000"},
@@ -228,7 +251,7 @@ func TestExpiryContextNamesTheRevert(t *testing.T) {
 	ctx := e.Context()
 
 	// Assert
-	if ctx["from_level"] != "debug" || ctx["level"] != "info" || ctx["outcome"] != "window_ended" {
+	if ctx["from_level"] != "debug" || ctx["effective_level"] != "info" || ctx["outcome"] != "window_ended" {
 		t.Errorf("context = %v", ctx)
 	}
 }
