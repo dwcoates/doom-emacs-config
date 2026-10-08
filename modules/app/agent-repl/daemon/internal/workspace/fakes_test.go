@@ -837,6 +837,17 @@ type fakeQueue struct {
 	// promptqueue.ErrHoldsChanged surfaced from inside perform) scripts that
 	// through the fake shim or leaves this nil and lets perform run.
 	rollBackErr error
+	// withdraws records every WithdrawRevivalTurn call's workspace, in order;
+	// withdrawn and withdrawErr are what each answers.
+	withdraws   []ids.WorkspaceID
+	withdrawn   bool
+	withdrawErr error
+}
+
+// WithdrawRevivalTurn records the call and answers the scripted outcome.
+func (q *fakeQueue) WithdrawRevivalTurn(_ context.Context, ws ids.WorkspaceID) (bool, error) {
+	q.withdraws = append(q.withdraws, ws)
+	return q.withdrawn, q.withdrawErr
 }
 
 // rollBackCall is one RollBack call the fake queue recorded.
@@ -2007,7 +2018,7 @@ func newFixture(t *testing.T) *fixture {
 	f.hasSession = true
 
 	verbs, err := New(Deps{
-		DB: f.db, Git: f.git, Accounts: f.account, Queue: f.queue, Merge: f.merge,
+		DB: f.db, Git: f.git, Accounts: f.account, Queue: f.queue, RevivalTurns: f.queue, Merge: f.merge,
 		Rollout: f.rollout, Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{parked: &f.topbarParked, coldGates: &f.topbarColdGates, accounts: &f.topbarAccounts, effortSettings: &f.topbarEffortSettings, warnings: &f.topbarWarnings}, Browser: f.browser,
 		Sidebar: f.sidebar, Holds: stubHolds{}, Host: f.host, Banners: f.banners, Sessions: f.fleet,
 		Headless:   f.headless,
