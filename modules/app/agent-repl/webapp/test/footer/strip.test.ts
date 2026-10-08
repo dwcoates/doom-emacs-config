@@ -508,6 +508,22 @@ describe("drawFooterLiveWorkChips", () => {
     expect(row.querySelectorAll(".footer-chip")).toHaveLength(0);
   });
 
+  it("draws NO chips cell at all for a quiet workspace", () => {
+    const { row } = drawStrip();
+    expect(row.querySelector(".footer-chips")).toBeNull();
+  });
+
+  it.each([
+    ["agents", { agents: { count: 1 } }],
+    ["tasks", { tasks: { done: 0, total: 1 } }],
+    ["shells", { shells: { count: 1 } }],
+    ["monitors", { monitors: { count: 1 } }],
+    ["crons", { crons: { count: 1 } }],
+  ])("draws the chips cell when the %s chip alone is set", (_chip, liveWork) => {
+    const { row } = drawStrip({ liveWork });
+    expect(row.querySelector(".footer-chips")).not.toBeNull();
+  });
+
   it.each([
     ["agents", { agents: { count: 3 } }, "3"],
     ["shells", { shells: { count: 2 } }, "2"],
@@ -650,6 +666,24 @@ describe("drawClientDisconnectedStrip: the one strip this client composes", () =
   it("draws NO clock, tokens or chips when nothing was ever pushed", () => {
     const row = drawClientDisconnectedStrip("daemon unreachable", "AnswerColdGate: unavailable");
     expect(row.querySelectorAll(".footer-clock, .footer-tokens, .footer-chips")).toHaveLength(0);
+  });
+
+  it("draws no chips cell from a last pushed strip that had no chip", () => {
+    const h = harness();
+    const row = drawClientDisconnectedStrip("daemon unreachable", "AnswerColdGate: unavailable", {
+      strip: strip({}),
+      deps: { ctx: h.ctx, selection: null, onSelect: () => {}, stops: createStopControls(h.ctx), expiry: IGNORED_EXPIRY },
+    });
+    expect(row.querySelector(".footer-chips")).toBeNull();
+  });
+
+  it("keeps the last pushed chips cell when it had a chip", () => {
+    const h = harness();
+    const row = drawClientDisconnectedStrip("daemon unreachable", "AnswerColdGate: unavailable", {
+      strip: strip({ liveWork: { shells: { count: 1 } } }),
+      deps: { ctx: h.ctx, selection: null, onSelect: () => {}, stops: createStopControls(h.ctx), expiry: IGNORED_EXPIRY },
+    });
+    expect(row.querySelector('.footer-chips [data-chip="shells"]')).not.toBeNull();
   });
 
   it("keeps the last pushed tokens cell, the figures being the last ones and not untrue", () => {
