@@ -3557,3 +3557,35 @@ describe("the page-colored fill", () => {
     expect(body).toMatch(/background:\s*var\(--bg\)/);
   });
 });
+
+/**
+ * THE RAIL'S MARK COLUMN (owner request, 2026-10-08): a merge glyph's box is
+ * the dot's width, so its centered character shares the dots' center and every
+ * name starts at one edge. Measured in real WebKit by
+ * test/webkit/sidebar-mark.webkit.test.ts.
+ */
+describe("the rail's mark column", () => {
+  it("sizes the dot by the mark column token", () => {
+    // Arrange / Act
+    const rule = declarationsOf("#ws-sidebar .st");
+
+    // Assert
+    expect(rule).toMatch(/(?:^|;)\s*width:\s*var\(--ws-mark-width\)/);
+  });
+
+  it("sizes a glyph's box by the same token, never by its character", () => {
+    // Arrange / Act
+    const rule = declarationsOf("#ws-sidebar .st-glyph");
+
+    // Assert
+    expect(rule).toMatch(/(?:^|;)\s*width:\s*var\(--ws-mark-width\)/);
+  });
+
+  it("centers the glyph's character in its box", () => {
+    // Arrange / Act
+    const rule = declarationsOf("#ws-sidebar .st-glyph");
+
+    // Assert
+    expect(rule).toMatch(/justify-content:\s*center/);
+  });
+});
