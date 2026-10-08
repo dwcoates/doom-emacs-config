@@ -15,6 +15,7 @@ import {
 import { ConnectError, Code } from "@connectrpc/connect";
 import { withOrder } from "../feed-order.js";
 import { OpenFeedResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_feed_pb";
+import { FoldMergeBubbleResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_fold_merge_bubble_pb";
 import type { WatchFeedResponse } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_feed_pb";
 import {
   clearClientFailures,
@@ -1122,12 +1123,13 @@ describe("mountFeed: a jump expands its entry and closes it once wholly out of v
   async function jumping(
     bubble: () => ReturnType<typeof openSuccess> = () =>
       openSuccess(page([]), "tok:b1"),
+    bubbleRow: FeedRow = subagentRow("b1"),
   ) {
     const rows = [
       toolCallRow("t1", "returned"),
       responseRow("r0"),
       toolCallRow("t2", "returned"),
-      subagentRow("b1"),
+      bubbleRow,
       responseRow("r1"),
     ];
     const h = harness({
@@ -2735,5 +2737,139 @@ describe("mountFeed: the selected row leaving the viewport ends the selection", 
       m.row("r1").hasAttribute(SELECTED_ROW_ATTRIBUTE),
     ]).toEqual([37, false]);
     m.feed.dispose();
+  });
+});
+
+/**
+ * THE READER'S MERGE BUBBLE FOLD IS THE DAEMON'S TO KEEP (owner ruling,
+ * 2026-10-08). The scripted daemon records each `FoldMergeBubble` on the
+ * merge row's head and serves that head on every later `OpenFeed`, as the
+ * real daemon's durable row does, so a fresh mount is a full page reload.
+ */
+describe("mountFeed: the reader's merge bubble fold", () => {
+  /** A daemon holding one merge bubble (m1) whose recorded fold starts FOLDED. */
+  function recordingDaemon(folded = true): { h: Harness; folded: () => boolean } {
+    let stored = folded;
+    const h = harness({
+      openFeed: (req) =>
+        req.feed === undefined
+          ? openSuccess(page([responseRow("r0"), mergeRow("m1", stored)]), tokenFor(req))
+          : openSuccess(page([]), tokenFor(req)),
+      foldMergeBubble: (req) => {
+        stored = req.fold.case === "close";
+        return create(FoldMergeBubbleResponseSchema, { result: { case: "success", value: {} } });
+      },
+    });
+    return { h, folded: () => stored };
+  }
+
+  /** The merge row's element in HOST. */
+  function mergeRowIn(host: HTMLElement): HTMLElement {
+    const el = host.querySelector<HTMLElement>('[data-feed-row="m1"]');
+    if (el === null) throw new Error("the merge row is not drawn");
+    return el;
+  }
+
+  /** Click the merge bubble's head in HOST, as the reader does. */
+  async function clickHead(host: HTMLElement): Promise<void> {
+    mergeRowIn(host).querySelector<HTMLElement>(".bubble-head")?.click();
+    await settle();
+  }
+
+  it("records the reader's open on the merge bubble's head row", async () => {
+    // Arrange
+    const d = recordingDaemon();
+    const { feed, host } = mount(d.h);
+    await settle();
+    // Act
+    await clickHead(host);
+    // Assert
+    const sent = d.h.calls.foldMergeBubble[0];
+    expect([sent?.row?.value, sent?.fold.case]).toEqual(["m1", "open"]);
+    feed.dispose();
+  });
+
+  it("records the reader's close on the merge bubble's head row", async () => {
+    // Arrange
+    const d = recordingDaemon(false);
+    const { feed, host } = mount(d.h);
+    await settle();
+    // Act
+    await clickHead(host);
+    // Assert
+    const sent = d.h.calls.foldMergeBubble[0];
+    expect([sent?.row?.value, sent?.fold.case]).toEqual(["m1", "close"]);
+    feed.dispose();
+  });
+
+  it("records nothing for a merge bubble the daemon's fold opened", async () => {
+    // Arrange
+    const d = recordingDaemon(false);
+    // Act
+    const { feed } = mount(d.h);
+    await settle();
+    // Assert
+    expect(d.h.calls.foldMergeBubble).toEqual([]);
+    feed.dispose();
+  });
+
+  it("draws a merge bubble the reader opened open after a full reload", async () => {
+    // Arrange
+    const d = recordingDaemon();
+    const first = mount(d.h);
+    await settle();
+    await clickHead(first.host);
+    first.feed.dispose();
+    // Act
+    const reloaded = mount(d.h);
+    await settle();
+    // Assert
+    expect(mergeRowIn(reloaded.host).getAttribute("data-expanded")).toBe("true");
+    reloaded.feed.dispose();
+  });
+
+  it("draws a merge bubble the reader closed closed after a full reload", async () => {
+    // Arrange
+    const d = recordingDaemon(false);
+    const first = mount(d.h);
+    await settle();
+    await clickHead(first.host);
+    first.feed.dispose();
+    // Act
+    const reloaded = mount(d.h);
+    await settle();
+    // Assert
+    expect(mergeRowIn(reloaded.host).getAttribute("data-expanded")).toBe("false");
+    reloaded.feed.dispose();
+  });
+
+  it("keeps a merge bubble the reader opened open when the window blurs", async () => {
+    // Arrange
+    const d = recordingDaemon();
+    const { feed, host } = mount(d.h);
+    await settle();
+    await clickHead(host);
+    // Act
+    window.dispatchEvent(new FocusEvent("blur"));
+    await settle();
+    // Assert
+    expect(mergeRowIn(host).getAttribute("data-expanded")).toBe("true");
+    feed.dispose();
+  });
+
+  it("keeps a merge bubble the reader opened open when the page goes hidden", async () => {
+    // Arrange
+    const d = recordingDaemon();
+    const { feed, host } = mount(d.h);
+    await settle();
+    await clickHead(host);
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    // Act
+    document.dispatchEvent(new Event("visibilitychange"));
+    await settle();
+    // Assert
+    visibility.mockRestore();
+    expect(mergeRowIn(host).getAttribute("data-expanded")).toBe("true");
+    feed.dispose();
   });
 });
