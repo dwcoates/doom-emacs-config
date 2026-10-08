@@ -2531,7 +2531,6 @@ export const HOLD_BADGES: Readonly<Record<string, { label: string; detail?: stri
   holdForTurnEnd: { label: "after this turn" },
   uninterruptibleTurn: { label: "after /compact", detail: "waits for /compact to finish" },
   classificationError: { label: "unclassified" },
-  accepted: { label: "confirmed" },
   shutdown: { label: "restart hold", detail: "held for the scheduled restart (sched-1)" },
   reconnect: { label: "after reconnect", detail: "held until the session reconnects" },
   buildRefresh: { label: "build refresh", detail: "held for the build refresh" },
@@ -2549,17 +2548,23 @@ export function heldPrompt(init?: {
 }): HeldPrompt {
   const classification = init?.classification ?? "interject";
   const hold = init?.hold ?? "reconnect";
-  // `daemon_held` draws no badge of its own: the hold arm's badge says what holds it.
-  const statuses: string[] = classification === "daemonHeld" ? [] : [classification];
-  if (classification === "holdForTurnEnd" && init?.accepted === true) statuses.push("accepted");
-  statuses.push(hold);
+  // THE ONE BADGE IS THE HOLD'S: a hold outranks the verdict, which, unless it
+  // is `daemon_held`, is a note, followed by the verdict's confirmation.
+  const holdBadge = HOLD_BADGES[hold] ?? { label: hold };
+  const notes: string[] = [];
+  if (classification !== "daemonHeld") {
+    const verdict = HOLD_BADGES[classification] ?? { label: classification };
+    notes.push(verdict.detail ?? verdict.label);
+  }
+  if (classification === "holdForTurnEnd" && init?.accepted === true) notes.push("confirmed");
   return create(HeldPromptSchema, {
     turn: turnId(init?.turn ?? HELD_TURN_ID),
     said: userSaid(init?.text ?? "also fix the footer"),
     queuedAt: { atMs: 3_000n },
     classification: classificationValue(classification, init?.accepted),
     hold: holdValue(hold),
-    badges: statuses.map((status) => HOLD_BADGES[status] ?? { label: status }),
+    badge: { ...holdBadge, standsFor: { case: hold, value: {} } },
+    notes: notes.map((sentence) => ({ sentence })),
     foldAbove: init?.foldAbove === undefined ? undefined : { above: turnId(init.foldAbove) },
   });
 }

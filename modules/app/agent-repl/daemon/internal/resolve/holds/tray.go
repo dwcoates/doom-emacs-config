@@ -2,7 +2,6 @@ package holds
 
 import (
 	"sort"
-	"strings"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -77,7 +76,7 @@ func heldPrompt(h wsm.HeldPrompt, editing bool, log dlog.Logger) *frontendv1.Hel
 	if h.Act != nil {
 		out.Act = heldSessionAct(h, log)
 	}
-	out.Badges = heldBadges(out, log)
+	out.Badge, out.Notes = heldStatus(out, log)
 	return out
 }
 
@@ -242,95 +241,151 @@ func setHold(out *frontendv1.HeldPrompt, h wsm.HeldPrompt, log dlog.Logger) {
 // label keeps, so a badge stays one to three words however long a literal grows.
 const commandLabelMax = 24
 
-// heldBadges composes the card's status badges from the projected entry: THE
-// ONE PLACE a held prompt's status words are decided. One badge per standing
-// fact, in the order daemon_hold.proto fixes — the verdict, the edit, the
-// verdict's confirmation, the hold — each a short label and, where the full
-// sentence says more than the label, that sentence as the detail.
+// heldStatus composes the card's ONE badge and the notes for every other
+// standing fact: THE ONE PLACE a held prompt's status words are decided, and
+// the one place its facts are ranked. The strongest standing fact claims the
+// badge, in the order daemon_hold.proto fixes — the edit, the hold, the
+// verdict — and the rest are notes, strongest first, then the verdict's
+// confirmation, then the coalescence.
 //
-// A classification arm it cannot name is recorded LOUDLY and contributes no
-// badge: the projection above never leaves one, and a frontend rejects a badge
-// list that disagrees with the arms, so the defect is refused where it is drawn
-// rather than papered over with invented words.
-func heldBadges(p *frontendv1.HeldPrompt, log dlog.Logger) []*frontendv1.HeldPromptBadge {
+// A fact it cannot name is recorded LOUDLY and contributes nothing: an entry
+// left with no badge is rejected by its frontend, so the defect is refused
+// where it is drawn rather than papered over with invented words.
+func heldStatus(p *frontendv1.HeldPrompt, log dlog.Logger) (*frontendv1.HeldPromptBadge, []*frontendv1.HeldPromptStatusNote) {
 	ctx := dlog.Context{"turn_id": p.GetTurn().GetValue()}
-	var out, confirmed []*frontendv1.HeldPromptBadge
-	switch arm := p.GetClassification().(type) {
-	case *frontendv1.HeldPrompt_Classifying:
-		out = append(out, badge("classifying", "queued — classifying"))
-	case *frontendv1.HeldPrompt_Interject:
-		out = append(out, badge("interrupting", "interjects"))
-	case *frontendv1.HeldPrompt_AfterToolCall:
-		out = append(out, badge("after this tool call", "joins the running turn after its current tool call"))
-	case *frontendv1.HeldPrompt_HoldForTurnEnd:
-		// A refused interrupt is returned to this arm, so it reads the same.
-		out = append(out, badge("after this turn", "after this turn"))
-		if arm.HoldForTurnEnd.GetAccepted().GetAccepted() {
-			confirmed = append(confirmed, badge("confirmed", "confirmed"))
-		}
-	case *frontendv1.HeldPrompt_UninterruptibleTurn:
-		literal, ok := commandLiteral(arm.UninterruptibleTurn.GetCommand())
-		if ok {
-			out = append(out, badge("after "+truncateLabel(literal, commandLabelMax), "waits for "+literal+" to finish"))
-		} else {
-			ctx["command"] = arm.UninterruptibleTurn.GetCommand().String()
-			ctx["invariant_violation"] = "HeldPromptUninterruptibleTurn.command has no literal"
-			ctx["remediation"] = "record a recognized session command with the verdict"
-			log.Error("daemon.holds.badges", "an uninterruptible-turn badge could not name its command", ctx)
-			out = append(out, badge("after a context cut", "waits for a context cut to finish"))
-		}
-	case *frontendv1.HeldPrompt_ClassificationError:
-		out = append(out, badge("unclassified", "unclassified"))
-	case *frontendv1.HeldPrompt_DaemonHeld:
-		// No badge: the hold arm's badge below is what holds the entry.
-	default:
-		ctx["invariant_violation"] = "HeldPrompt.classification has no badge"
-		ctx["remediation"] = "add the arm to heldBadges"
-		log.Error("daemon.holds.badges", "a held prompt's verdict has no badge and was composed without one", ctx)
-	}
+	var ranked []*frontendv1.HeldPromptBadge
 	if p.GetEditing() != nil {
-		out = append(out, badge("editing", "editing"))
+		ranked = append(ranked, badge("editing", "editing", func(b *frontendv1.HeldPromptBadge) {
+			b.StandsFor = &frontendv1.HeldPromptBadge_Editing{Editing: &frontendv1.HeldPromptBadgeEditing{}}
+		}))
+	}
+	if hold := holdBadge(p, ctx, log); hold != nil {
+		ranked = append(ranked, hold)
+	}
+	if verdict := verdictBadge(p, ctx, log); verdict != nil {
+		ranked = append(ranked, verdict)
+	}
+	var notes []*frontendv1.HeldPromptStatusNote
+	for _, lost := range ranked[min(1, len(ranked)):] {
+		notes = append(notes, note(lost.GetDetail(), lost.GetLabel()))
+	}
+	if p.GetHoldForTurnEnd().GetAccepted().GetAccepted() {
+		notes = append(notes, note("", "confirmed"))
 	}
 	if p.GetCoalesced() != nil {
-		out = append(out, badge("coalesced", "later prompts were folded into this one"))
+		notes = append(notes, note("", "later prompts were folded into this one"))
 	}
-	out = append(out, confirmed...)
+	if len(ranked) == 0 {
+		ctx["invariant_violation"] = "a held prompt has no standing fact to badge"
+		ctx["remediation"] = "add the fact to heldStatus"
+		log.Error("daemon.holds.badge", "a held prompt was composed with no badge", ctx)
+		return nil, notes
+	}
+	ctx["label"] = ranked[0].GetLabel()
+	ctx["notes"] = len(notes)
+	log.Debug("daemon.holds.badge", "the held prompt's badge and notes were composed", ctx)
+	return ranked[0], notes
+}
+
+// verdictBadge is the classification arm's badge, nil for `daemon_held` (its
+// hold arm's badge is what holds the entry) and for an arm it cannot name.
+func verdictBadge(p *frontendv1.HeldPrompt, ctx dlog.Context, log dlog.Logger) *frontendv1.HeldPromptBadge {
+	switch arm := p.GetClassification().(type) {
+	case *frontendv1.HeldPrompt_Classifying:
+		return badge("classifying", "queued — classifying", func(b *frontendv1.HeldPromptBadge) {
+			b.StandsFor = &frontendv1.HeldPromptBadge_Classifying{Classifying: &frontendv1.HeldPromptBadgeClassifying{}}
+		})
+	case *frontendv1.HeldPrompt_Interject:
+		return badge("interrupting", "interjects", func(b *frontendv1.HeldPromptBadge) {
+			b.StandsFor = &frontendv1.HeldPromptBadge_Interject{Interject: &frontendv1.HeldPromptBadgeInterject{}}
+		})
+	case *frontendv1.HeldPrompt_AfterToolCall:
+		return badge("after this tool call", "joins the running turn after its current tool call", func(b *frontendv1.HeldPromptBadge) {
+			b.StandsFor = &frontendv1.HeldPromptBadge_AfterToolCall{AfterToolCall: &frontendv1.HeldPromptBadgeAfterToolCall{}}
+		})
+	case *frontendv1.HeldPrompt_HoldForTurnEnd:
+		// A refused interrupt is returned to this arm, so it reads the same.
+		return badge("after this turn", "after this turn", func(b *frontendv1.HeldPromptBadge) {
+			b.StandsFor = &frontendv1.HeldPromptBadge_HoldForTurnEnd{HoldForTurnEnd: &frontendv1.HeldPromptBadgeHoldForTurnEnd{}}
+		})
+	case *frontendv1.HeldPrompt_UninterruptibleTurn:
+		stands := func(b *frontendv1.HeldPromptBadge) {
+			b.StandsFor = &frontendv1.HeldPromptBadge_UninterruptibleTurn{UninterruptibleTurn: &frontendv1.HeldPromptBadgeUninterruptibleTurn{}}
+		}
+		literal, ok := commandLiteral(arm.UninterruptibleTurn.GetCommand())
+		if ok {
+			return badge("after "+truncateLabel(literal, commandLabelMax), "waits for "+literal+" to finish", stands)
+		}
+		ctx["command"] = arm.UninterruptibleTurn.GetCommand().String()
+		ctx["invariant_violation"] = "HeldPromptUninterruptibleTurn.command has no literal"
+		ctx["remediation"] = "record a recognized session command with the verdict"
+		log.Error("daemon.holds.badge", "an uninterruptible-turn badge could not name its command", ctx)
+		return badge("after a context cut", "waits for a context cut to finish", stands)
+	case *frontendv1.HeldPrompt_ClassificationError:
+		return badge("unclassified", "unclassified", func(b *frontendv1.HeldPromptBadge) {
+			b.StandsFor = &frontendv1.HeldPromptBadge_ClassificationError{ClassificationError: &frontendv1.HeldPromptBadgeClassificationError{}}
+		})
+	case *frontendv1.HeldPrompt_DaemonHeld:
+		return nil
+	default:
+		ctx["invariant_violation"] = "HeldPrompt.classification has no badge"
+		ctx["remediation"] = "add the arm to verdictBadge"
+		log.Error("daemon.holds.badge", "a held prompt's verdict has no badge and was composed without one", ctx)
+		return nil
+	}
+}
+
+// holdBadge is the hold arm's badge, nil when no hold is set or for an arm it
+// cannot name.
+func holdBadge(p *frontendv1.HeldPrompt, ctx dlog.Context, log dlog.Logger) *frontendv1.HeldPromptBadge {
 	switch arm := p.GetHold().(type) {
 	case nil:
+		return nil
 	case *frontendv1.HeldPrompt_Shutdown:
 		sentence := "held for the scheduled restart"
 		if id := arm.Shutdown.GetScheduleId(); id != "" {
 			sentence += " (" + id + ")"
 		}
-		out = append(out, badge("restart hold", sentence))
+		return badge("restart hold", sentence, func(b *frontendv1.HeldPromptBadge) {
+			b.StandsFor = &frontendv1.HeldPromptBadge_Shutdown{Shutdown: &frontendv1.HeldPromptBadgeShutdown{}}
+		})
 	case *frontendv1.HeldPrompt_BuildRefresh:
-		out = append(out, badge("build refresh", "held for the build refresh"))
+		return badge("build refresh", "held for the build refresh", func(b *frontendv1.HeldPromptBadge) {
+			b.StandsFor = &frontendv1.HeldPromptBadge_BuildRefresh{BuildRefresh: &frontendv1.HeldPromptBadgeBuildRefresh{}}
+		})
 	case *frontendv1.HeldPrompt_Reconnect:
-		out = append(out, badge("after reconnect", "held until the session reconnects"))
+		return badge("after reconnect", "held until the session reconnects", func(b *frontendv1.HeldPromptBadge) {
+			b.StandsFor = &frontendv1.HeldPromptBadge_Reconnect{Reconnect: &frontendv1.HeldPromptBadgeReconnect{}}
+		})
 	case *frontendv1.HeldPrompt_Merge:
-		out = append(out, badge("after the merge", "held until the merge ends; the workspace stays open for it"))
+		return badge("after the merge", "held until the merge ends; the workspace stays open for it", func(b *frontendv1.HeldPromptBadge) {
+			b.StandsFor = &frontendv1.HeldPromptBadge_Merge{Merge: &frontendv1.HeldPromptBadgeMerge{}}
+		})
 	default:
 		ctx["invariant_violation"] = "HeldPrompt.hold has no badge"
-		ctx["remediation"] = "add the arm to heldBadges"
-		log.Error("daemon.holds.badges", "a held prompt's hold has no badge and was composed without one", ctx)
+		ctx["remediation"] = "add the arm to holdBadge"
+		log.Error("daemon.holds.badge", "a held prompt's hold has no badge and was composed without one", ctx)
+		return nil
 	}
-	labels := make([]string, len(out))
-	for i, b := range out {
-		labels[i] = b.GetLabel()
-	}
-	ctx["labels"] = strings.Join(labels, ",")
-	log.Debug("daemon.holds.badges", "the held prompt's badges were composed", ctx)
-	return out
 }
 
 // badge is one badge: LABEL always, SENTENCE as the detail only when it says
-// more than the label does.
-func badge(label, sentence string) *frontendv1.HeldPromptBadge {
+// more than the label does, and the fact it stands for, which SET installs.
+func badge(label, sentence string, set func(*frontendv1.HeldPromptBadge)) *frontendv1.HeldPromptBadge {
 	b := &frontendv1.HeldPromptBadge{Label: label}
 	if sentence != label {
 		b.Detail = &sentence
 	}
+	set(b)
 	return b
+}
+
+// note says a fact that lost the badge: its full sentence, else its label.
+func note(detail, label string) *frontendv1.HeldPromptStatusNote {
+	if detail == "" {
+		detail = label
+	}
+	return &frontendv1.HeldPromptStatusNote{Sentence: detail}
 }
 
 // truncateLabel keeps at most MAX characters of S, the last of them an
