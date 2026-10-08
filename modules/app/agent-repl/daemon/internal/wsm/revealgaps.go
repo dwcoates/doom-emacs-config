@@ -11,15 +11,40 @@ import (
 
 // revealGapsDDL is the layout-27 addition (docs/protobuf-design/
 // streaming-reveal-window.md): the rolling windows of gaps between consecutive
-// streamed fragments, per model and per block kind, that the daemon averages
-// into frontend.v1.FeedResponseRevealWindow. Kept apart from the rest of the
-// schema for the reason portedPromptsDDL is: a fresh file gets it as part of
-// schemaDDL, a layout-26 file from the 26 -> 27 migration.
+// streamed FRAGMENTS, per model and per block kind.
+//
+// RETIRED AT LAYOUT 30, and kept only for the build before it. Those gaps were
+// mostly the daemon's own folding pace inside one clump of fragments (2ms) and
+// say nothing about when the next clump comes, so averaged with the gaps
+// between bursts they would drag the reveal window back to the per-fragment
+// figure that paced nothing. Nothing in this build reads or writes the table;
+// the build before layout 30 still does while it hands over, which is why the
+// table is not dropped here. Dropping it is a breaking step for a later deploy
+// (MigrationKind: "A BREAKING CHANGE IS SHIPPED AS TWO DEPLOYS").
+const revealGapsDDL = `
+CREATE TABLE reveal_gaps (
+  model    TEXT NOT NULL,
+  kind     TEXT NOT NULL,
+  position INTEGER NOT NULL,
+  gap_ms   INTEGER NOT NULL,
+  PRIMARY KEY (model, kind, position)
+);
+`
+
+// revealBurstGapsDDL is the layout-30 addition (docs/protobuf-design/
+// streaming-reveal-window.md): the rolling windows of gaps from one streamed
+// BURST's start to the next's, per model and per block kind, that the daemon
+// averages into frontend.v1.FeedResponseRevealWindow (internal/revealpace).
+// A new table rather than a reset of reveal_gaps, so the build handing over
+// can never write a per-fragment gap where this build reads burst gaps. Kept
+// apart from the rest of the schema for the reason portedPromptsDDL is: a
+// fresh file gets it as part of schemaDDL, a layout-29 file from the 29 -> 30
+// migration.
 //
 // A window is its rows in position order, oldest first. It belongs to no
 // workspace: a model streams at the same cadence whichever workspace runs it.
-const revealGapsDDL = `
-CREATE TABLE reveal_gaps (
+const revealBurstGapsDDL = `
+CREATE TABLE reveal_burst_gaps (
   model    TEXT NOT NULL,
   kind     TEXT NOT NULL,
   position INTEGER NOT NULL,
@@ -32,7 +57,7 @@ CREATE TABLE reveal_gaps (
 // thinking are kept apart because nothing says they stream at one cadence.
 type RevealKind string
 
-// The two block kinds, spelled as the reveal_gaps row stores them.
+// The two block kinds, spelled as a reveal_burst_gaps row stores them.
 const (
 	RevealKindProse    RevealKind = "prose"
 	RevealKindThinking RevealKind = "thinking"
@@ -43,7 +68,7 @@ func (k RevealKind) valid() bool {
 	return k == RevealKindProse || k == RevealKindThinking
 }
 
-// RevealGapWindow is one model's window of fragment gaps for one block kind.
+// RevealGapWindow is one model's window of burst gaps for one block kind.
 type RevealGapWindow struct {
 	// Model is the model id the gaps were measured under.
 	Model string
@@ -66,12 +91,12 @@ func (s *store) PutRevealGapWindow(ctx context.Context, w RevealGapWindow) error
 	}
 	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx,
-			`DELETE FROM reveal_gaps WHERE model = ? AND kind = ?`, w.Model, string(w.Kind)); err != nil {
+			`DELETE FROM reveal_burst_gaps WHERE model = ? AND kind = ?`, w.Model, string(w.Kind)); err != nil {
 			return err
 		}
 		for position, gap := range w.GapsMs {
 			if _, err := tx.ExecContext(ctx,
-				`INSERT INTO reveal_gaps (model, kind, position, gap_ms) VALUES (?, ?, ?, ?)`,
+				`INSERT INTO reveal_burst_gaps (model, kind, position, gap_ms) VALUES (?, ?, ?, ?)`,
 				w.Model, string(w.Kind), position, gap); err != nil {
 				return err
 			}
@@ -105,7 +130,7 @@ func (s *store) RevealGapWindows(ctx context.Context) ([]RevealGapWindow, error)
 	var out []RevealGapWindow
 	err := s.read(ctx, "daemon.wsm.reveal_gap_windows", dlog.Context{}, func(ctx context.Context) error {
 		rows, err := s.db().QueryContext(ctx,
-			`SELECT model, kind, position, gap_ms FROM reveal_gaps ORDER BY model, kind, position`)
+			`SELECT model, kind, position, gap_ms FROM reveal_burst_gaps ORDER BY model, kind, position`)
 		if err != nil {
 			return err
 		}
@@ -122,10 +147,10 @@ func (s *store) RevealGapWindows(ctx context.Context) ([]RevealGapWindow, error)
 			}
 			key := fmt.Sprintf("%s/%s/%d", model, kind, position)
 			if !RevealKind(kind).valid() {
-				return &DecodeError{Table: "reveal_gaps", Row: key, Field: "kind", Err: fmt.Errorf("a stored kind is prose or thinking")}
+				return &DecodeError{Table: "reveal_burst_gaps", Row: key, Field: "kind", Err: fmt.Errorf("a stored kind is prose or thinking")}
 			}
 			if gap < 0 {
-				return &DecodeError{Table: "reveal_gaps", Row: key, Field: "gap_ms", Err: fmt.Errorf("a stored gap is never negative")}
+				return &DecodeError{Table: "reveal_burst_gaps", Row: key, Field: "gap_ms", Err: fmt.Errorf("a stored gap is never negative")}
 			}
 			last := len(loaded) - 1
 			if last < 0 || loaded[last].Model != model || loaded[last].Kind != RevealKind(kind) {
@@ -133,7 +158,7 @@ func (s *store) RevealGapWindows(ctx context.Context) ([]RevealGapWindow, error)
 				last++
 			}
 			if position != len(loaded[last].GapsMs) {
-				return &DecodeError{Table: "reveal_gaps", Row: key, Field: "position", Err: fmt.Errorf("a window's positions run 0..n-1")}
+				return &DecodeError{Table: "reveal_burst_gaps", Row: key, Field: "position", Err: fmt.Errorf("a window's positions run 0..n-1")}
 			}
 			loaded[last].GapsMs = append(loaded[last].GapsMs, gap)
 		}
