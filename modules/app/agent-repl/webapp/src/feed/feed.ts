@@ -533,10 +533,8 @@ export function mountFeed(
       return mountBubble({
         ...shared,
         body: deps.renderers.mergeBody,
-        initialFolded: requireMessage(
-          requireMessage(mergeOf(row).head, "FeedMerge.head").fold,
-          "FeedMergeHead.fold",
-        ).folded,
+        initialFolded: mergeFoldOf(row),
+        foldOf: mergeFoldOf,
       });
     }
     // A subagent row ships no fold, so it starts collapsed and transfers
@@ -547,6 +545,14 @@ export function mountFeed(
       body: defaultBubbleBody,
       initialFolded: true,
     });
+  }
+
+  /** The daemon's fold on a merge row's head. */
+  function mergeFoldOf(row: FeedRow): boolean {
+    return requireMessage(
+      requireMessage(mergeOf(row).head, "FeedMerge.head").fold,
+      "FeedMergeHead.fold",
+    ).folded;
   }
 
   // ---- reveal -----------------------------------------------------------

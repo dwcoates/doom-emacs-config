@@ -393,6 +393,23 @@ describe("mountFeed: the bubble kinds", () => {
     expect(host.querySelector(".stub-mergeBody")).not.toBeNull();
   });
 
+  it("opens a folded merge bubble when a push ships its fold open (the merge failed)", async () => {
+    // Arrange
+    const channels = new Map<string, Channel<WatchFeedResponse>>();
+    const channel = new Channel<WatchFeedResponse>();
+    channels.set("tok:root", channel);
+    const h = harness({ channels });
+    mount(h);
+    await settle();
+    channel.push(push(mergeRow("m1", true)));
+    await settle();
+    // Act
+    channel.push(push(mergeRow("m1", false)));
+    await settle();
+    // Assert
+    expect(h.calls.openFeed.map((req) => req.feed?.value)).toContain("m1");
+  });
+
   it("opens an unfolded merge bubble's sub-feed by its own id", async () => {
     const h = rootOnly([mergeRow("m1", false)]);
     mount(h);
