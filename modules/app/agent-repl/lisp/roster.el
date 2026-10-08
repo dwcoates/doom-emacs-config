@@ -1039,6 +1039,29 @@ Returns the workspaces whose rows crossed the edge."
                             id previous current)))))
     (nreverse fired)))
 
+(defun agent-repl-roster--record-drawn-statuses (roster)
+  "Record, at INFO, every row of ROSTER whose drawn status arm changed.
+
+The tab paints a workspace from the arm this push carries, so a row whose
+arm differs from the one the last accepted push left — a first sighting
+included — is a tab now drawing something else.  That change is stated on
+the record, with the arm it replaced, so the tab\='s drawn status can be
+read back beside the footer\='s and the rail\='s (owner\='s report,
+2026-10-08: the footer and the tab disagreed, and only the daemon\='s side
+of it was on the record).  A row whose arm did not move says nothing.
+
+Must run BEFORE `agent-repl-roster--record-statuses\=', like every reader
+of the comparison."
+  (agent-repl-roster--walk-status-transitions
+   roster
+   (lambda (transition)
+     (let ((previous (plist-get transition :previous))
+           (current (plist-get transition :current)))
+       (unless (eq previous current)
+         (agent-repl--info (plist-get transition :scope)
+                           "elisp.roster.drawn-status: id=%s from=%s to=%s"
+                           (plist-get transition :id) previous current))))))
+
 (defun agent-repl-roster--run-status-changes (roster)
   "Run `agent-repl-roster-status-change-functions' for every changed arm.
 
@@ -1158,6 +1181,7 @@ dropped."
         ;; BEFORE the statuses are recorded: this compares against the arms
         ;; the LAST push left behind, which the record below replaces.
         (agent-repl-roster--run-status-changes roster)
+        (agent-repl-roster--record-drawn-statuses roster)
         (agent-repl-roster--record-statuses entries)
         ;; Same rule for the viewed marker: edge first, then record.
         (agent-repl-roster--run-viewed-clears entries)

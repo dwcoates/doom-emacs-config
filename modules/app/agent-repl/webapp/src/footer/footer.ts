@@ -46,6 +46,7 @@ import type { Handle } from "../failure/local.js";
 import { frameUndecodable } from "../failure/sink.js";
 import { placeChildren } from "../dom.js";
 import { stopTicking } from "../feed/ticking.js";
+import { createDrawnStatusLog, type DrawnStatus } from "../drawn-status.js";
 import { log } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
 import { onClientVerdict, standingClientFailure } from "../rpc/link.js";
@@ -118,6 +119,9 @@ export function mountFooter(
   // A notice drawn onto the clicked element was gone with the next push; held
   // here, every draw paints it (see `JumpNotices`).
   const notices = createJumpNotices();
+  // WHAT THE STRIP DREW, stated on every change of it: the daemon's arm, or
+  // the client's own verdict standing over it (see `drawn-status.ts`).
+  const drawnStatus = createDrawnStatusLog("footer", "footer.drawn-status");
   // THE DOCK AND THE OPEN SECTION ARE KEPT ACROSS PUSHES, so the section's own
   // scroll box — the reader's — is never detached and never reset. Only their
   // children are redrawn.
@@ -230,6 +234,7 @@ export function mountFooter(
       host.replaceChildren(bare);
       dock = null;
       section = null;
+      drawnStatus.note(ctx.workspace.id, verdictDrawnStatus(verdict));
       return;
     }
     const strip = requireMessage(view.strip, "FooterView.strip");
@@ -285,6 +290,12 @@ export function mountFooter(
       host.replaceChildren(target);
     }
     dock = target;
+    if (verdict !== null) {
+      drawnStatus.note(ctx.workspace.id, verdictDrawnStatus(verdict));
+    } else {
+      const arm = requireCase(requireMessage(strip.status, "FooterStrip.status").status, "FooterStatus.status");
+      drawnStatus.note(ctx.workspace.id, { arm: arm.case, substatus: substatusOf(arm.value), source: "daemon" });
+    }
   }
 
   /**
@@ -485,6 +496,11 @@ export function writeSelection(
       context: { cause: err },
     });
   }
+}
+
+/** The status the strip draws while the client's own verdict stands. */
+function verdictDrawnStatus(verdict: { readonly kind: string }): DrawnStatus {
+  return { arm: "disconnected", substatus: verdict.kind, source: "client_verdict" };
 }
 
 /**
