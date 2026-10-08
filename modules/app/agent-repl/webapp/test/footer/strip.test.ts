@@ -391,29 +391,22 @@ describe("drawFooterTokensCell", () => {
     expect(row.querySelector("[data-verdict]")).toBeNull();
   });
 
-  it.each([
-    ["complete", "✓"],
-    ["incomplete", "✗"],
-    ["invalid", "✗"],
-  ])("draws the %s verdict as %s", (arm, glyph) => {
+  it("draws the complete verdict as ✓", () => {
+    const { row } = drawStrip({
+      tokens: { input: { text: "18.2k in" }, verdict: { verdict: { case: "complete", value: {} } } },
+    });
+    const badge = row.querySelector("[data-verdict]");
+    expect(badge?.getAttribute("data-verdict")).toBe("complete");
+    expect(badge?.textContent).toBe("✓");
+  });
+
+  // OWNER RULING, 2026-10-08: no red ✗ in the tokens cell. A failing verdict's
+  // evidence is the token panel's line, never a glyph on the strip.
+  it.each(["incomplete", "invalid"])("draws the %s verdict as no glyph at all, only the figure", (arm) => {
     const { row } = drawStrip({
       tokens: { input: { text: "18.2k in" }, verdict: { verdict: { case: arm as never, value: {} } } },
     });
-    const badge = row.querySelector("[data-verdict]");
-    expect(badge?.getAttribute("data-verdict")).toBe(arm);
-    expect(badge?.textContent).toBe(glyph);
-  });
-
-  it("gives the invalid verdict a title of its own, distinct from incomplete's", () => {
-    const { row: invalid } = drawStrip({
-      tokens: { input: { text: "x" }, verdict: { verdict: { case: "invalid", value: {} } } },
-    });
-    const { row: incomplete } = drawStrip({
-      tokens: { input: { text: "x" }, verdict: { verdict: { case: "incomplete", value: {} } } },
-    });
-    expect(invalid.querySelector<HTMLElement>("[data-verdict]")?.title).not.toBe(
-      incomplete.querySelector<HTMLElement>("[data-verdict]")?.title,
-    );
+    expect(row.querySelector(".footer-tokens")?.textContent).toBe("18.2k in");
   });
 
   it("refuses a verdict badge whose oneof sets no arm", () => {

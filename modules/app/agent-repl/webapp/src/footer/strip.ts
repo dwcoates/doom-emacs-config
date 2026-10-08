@@ -527,7 +527,8 @@ export function drawFooterTokensCell(u: FooterTokensCell, deps: StripDeps): HTML
     cell.appendChild(alarm);
   }
   if (u.verdict !== undefined) {
-    cell.appendChild(drawFooterTokensCellVerdict(u.verdict, `${path}.verdict`));
+    const badge = drawFooterTokensCellVerdict(u.verdict, `${path}.verdict`);
+    if (badge !== null) cell.appendChild(badge);
   }
   cell.addEventListener("click", (event: MouseEvent) => {
     event.preventDefault();
@@ -550,28 +551,27 @@ export function drawFooterTokensCellInput(u: FooterTokensCellInput): HTMLElement
 }
 
 /**
- * The accounting badge. THE ARM PICKS THE GLYPH, and the two failing arms are
- * given DISTINCT titles: a floor and a contradiction are different problems and
- * one shared "✗" hover would collapse them.
+ * The accounting badge. THE ARM PICKS THE GLYPH, and only a reconciled turn has
+ * one: the cell draws ✓ for `complete` and NOTHING for `incomplete` or
+ * `invalid` (owner ruling, 2026-10-08: no red ✗ in the tokens cell). A failing
+ * verdict's evidence is the token panel's verdict line, reached by clicking the
+ * cell. Every arm is still read, so a malformed or unknown arm is refused here
+ * whether or not it would draw.
  */
-export function drawFooterTokensCellVerdict(u: FooterTokensCellVerdict, path: string): HTMLElement {
+export function drawFooterTokensCellVerdict(u: FooterTokensCellVerdict, path: string): HTMLElement | null {
   const verdict = requireCase(u.verdict, `${path}.verdict`);
-  const badge = document.createElement("span");
-  badge.className = `footer-tokens-verdict arm-${verdict.case}`;
-  badge.setAttribute("data-verdict", verdict.case);
   switch (verdict.case) {
-    case "complete":
+    case "complete": {
+      const badge = document.createElement("span");
+      badge.className = `footer-tokens-verdict arm-${verdict.case}`;
+      badge.setAttribute("data-verdict", verdict.case);
       badge.textContent = "✓";
       badge.title = "every response's usage reconciled";
       return badge;
+    }
     case "incomplete":
-      badge.textContent = "✗";
-      badge.title = "some responses carried no usage — these figures are a floor";
-      return badge;
     case "invalid":
-      badge.textContent = "✗";
-      badge.title = "the observed usage contradicts itself";
-      return badge;
+      return null;
     default: {
       const other: { case: string } = verdict;
       return unreachableArm(`${path}.verdict`, other.case);

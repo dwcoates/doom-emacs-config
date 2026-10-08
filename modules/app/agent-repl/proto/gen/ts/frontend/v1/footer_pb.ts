@@ -6101,7 +6101,10 @@ export const FooterTokensCellAlarmSchema: GenMessage<FooterTokensCellAlarm> = /*
 
 /**
  * The accounting badge. The set arm picks the glyph treatment; the evidence
- * behind it is the panel's verdict line, never this badge.
+ * behind it is the panel's verdict line, never this badge. ONLY `complete`
+ * draws a glyph in the cell (owner ruling, 2026-10-08: no red ✗ in the tokens
+ * cell); a failing arm draws nothing there, and its evidence is the panel's
+ * verdict line alone.
  *
  * @generated from message frontend.v1.FooterTokensCellVerdict
  */
@@ -6122,7 +6125,8 @@ export type FooterTokensCellVerdict = Message<"frontend.v1.FooterTokensCellVerdi
     case: "complete";
   } | {
     /**
-     * Some responses carried no usage, so the figures are a floor (✗).
+     * Some responses carried no usage, so the figures are a floor (no glyph
+     * in the cell).
      *
      * @generated from field: frontend.v1.FooterTokensCellVerdictIncomplete incomplete = 2;
      */
@@ -6130,7 +6134,8 @@ export type FooterTokensCellVerdict = Message<"frontend.v1.FooterTokensCellVerdi
     case: "incomplete";
   } | {
     /**
-     * The observed usage contradicts itself (✗) — a producer defect.
+     * The observed usage contradicts itself — a producer defect (no glyph in
+     * the cell).
      *
      * @generated from field: frontend.v1.FooterTokensCellVerdictInvalid invalid = 3;
      */
