@@ -165,9 +165,13 @@ arriving as an unknown field on some later push."
                        #'string<)))
     (should (equal spelled declared))))
 
-(ert-deftest agent-repl-test-wire-roster-row-status-count-is-thirty ()
-  "The status vocabulary is the 30 arms the contract declares."
-  (should (equal (length agent-repl-wire-roster-row-status-keywords) 30)))
+(ert-deftest agent-repl-test-wire-roster-row-status-count-is-thirty-one ()
+  "The status vocabulary is the 31 arms the contract declares."
+  (should (equal (length agent-repl-wire-roster-row-status-keywords) 31)))
+
+(ert-deftest agent-repl-test-wire-roster-decodes-the-merge-waiting-arm ()
+  "The merge_waiting arm decodes to its keyword."
+  (should (memq :merge-waiting agent-repl-wire-roster-row-status-keywords)))
 
 (ert-deftest agent-repl-test-wire-roster-decodes-the-closing-arm ()
   "The closing arm decodes to its keyword: a refused close."
