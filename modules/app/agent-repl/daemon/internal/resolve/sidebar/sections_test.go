@@ -492,6 +492,42 @@ func TestRepoSectionCountIncludesANestedFamilyRow(t *testing.T) {
 	}
 }
 
+func TestRepoSectionCountLeavesOutAClosedRow(t *testing.T) {
+	// Arrange: one live workspace and one closed one, which rides the wire but
+	// no client draws.
+	r, _ := newResolver(t)
+	closed := workspace("w-closed", "closed")
+	closed.Closed = true
+
+	// Act.
+	r.SetRegistry(registry(workspace("w-live", "live"), closed))
+
+	// Assert: the count is the rows the unfolded section shows.
+	got := latest(t, r).GetRepository().GetSections()[0].GetHeader().GetCount().GetWorkspaces()
+	if got != 1 {
+		t.Fatalf("count = %d, want 1 (the closed row is not drawn)", got)
+	}
+}
+
+func TestRepoSectionCountKeepsALiveChildOfAClosedParent(t *testing.T) {
+	// Arrange: a live child nested under a closed parent, which the client
+	// drops while hoisting the child into its place.
+	r, _ := newResolver(t)
+	parent := workspace("w-parent", "parent")
+	parent.Closed = true
+	child := workspace("w-child", "child")
+	child.Parent = &parent.ID
+
+	// Act.
+	r.SetRegistry(registry(parent, child))
+
+	// Assert.
+	got := latest(t, r).GetRepository().GetSections()[0].GetHeader().GetCount().GetWorkspaces()
+	if got != 1 {
+		t.Fatalf("count = %d, want 1 (the hoisted live child)", got)
+	}
+}
+
 func TestAnEmptyRepoSectionStatesACountOfZero(t *testing.T) {
 	// Arrange.
 	r, _ := newResolver(t)
@@ -519,6 +555,25 @@ func TestRecentlyMergedCountsItsRows(t *testing.T) {
 	got := latest(t, r).GetRecentlyMerged().GetHeader().GetCount().GetWorkspaces()
 	if got != 1 {
 		t.Fatalf("count = %d, want 1", got)
+	}
+}
+
+func TestRecentlyMergedCountsEveryMergedRowThoughEachIsClosed(t *testing.T) {
+	// Arrange: two merges, whose rows are closed by design and are exactly
+	// what the band draws.
+	r, _ := newResolver(t)
+	first := workspace("w-a", "a")
+	first.MergedAt = at(0)
+	second := workspace("w-b", "b")
+	second.MergedAt = at(1)
+
+	// Act.
+	r.SetRegistry(registry(first, second))
+
+	// Assert.
+	got := latest(t, r).GetRecentlyMerged().GetHeader().GetCount().GetWorkspaces()
+	if got != 2 {
+		t.Fatalf("count = %d, want 2", got)
 	}
 }
 
