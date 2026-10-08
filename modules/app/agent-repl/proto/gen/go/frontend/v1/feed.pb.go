@@ -17695,11 +17695,17 @@ func (x *FeedContextCutCompactionFailed) GetMarker() *FeedOutcomeMarker {
 	return nil
 }
 
-// The bubble's ▸/▾ state as the daemon states it. FOLDED while the merge is
-// queued or running, when it lands and when it is abandoned; OPEN once it has
-// failed, so the failure is in front of the reader. A client applies it at the
-// bubble's first draw and again whenever a push CHANGES it; a push repeating
-// it leaves the reader's own toggle standing.
+// The bubble's ▸/▾ state as the daemon states it. A bubble STARTS folded and
+// stays folded while the merge is queued or running, when it lands and when
+// it is abandoned; it OPENS once the merge has failed, so the failure is in
+// front of the reader. The READER's own fold (agentrepl.v1.FoldMergeBubble) is
+// recorded on this durable row and wins from then on, so it is what every
+// later push, page, reload and restart carries.
+//
+// A MERGE BUBBLE NEVER COLLAPSES ON ITS OWN (owner ruling, 2026-10-08): the
+// daemon may open a folded bubble (a failure), but no push it makes ever folds
+// an open one; only the reader's fold does. A client applies this field at the
+// bubble's first draw and again whenever a push CHANGES it.
 type FeedMergeFold struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// True for a folded bubble, false for an open one.
