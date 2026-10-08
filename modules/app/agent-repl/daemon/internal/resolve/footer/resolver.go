@@ -340,6 +340,11 @@ func (r *resolver) tellStatusChanged(pubs []publication) {
 // published view carried. A workspace the footer has published nothing for
 // yet is resolved from what the footer holds for it (the daemon-scoped faults
 // at least), so the answer is always the status the strip would draw.
+//
+// A QUERY IS NOT A FRAME. The roster asks for every workspace it lists, bound
+// or not (a closed workspace is never bound), so an unbound workspace's
+// answer is resolved on the global sink without the unbound-frame violation
+// logOf records for a fact.
 func (r *resolver) Status(ws ids.WorkspaceID) *frontendv1.FooterStatus {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -351,7 +356,11 @@ func (r *resolver) Status(ws ids.WorkspaceID) *frontendv1.FooterStatus {
 		s = newWSState()
 		s.id = ws
 	}
-	return r.status(s, r.logOf(ws, s))
+	log := s.log
+	if log == nil {
+		log = r.log.Global().With(dlog.Context{"workspace_id": string(ws)})
+	}
+	return r.status(s, log)
 }
 
 // log writes the publication's records, after the lock is released.
