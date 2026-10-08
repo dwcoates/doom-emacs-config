@@ -23,18 +23,20 @@
  * content-preserving cause (`prependCompensation`).
  *
  * THE FOLD IS THE READER'S BETWEEN THE DAEMON'S CHANGES (R2). A merge row
- * ships `FeedMergeFold.folded` and a subagent row ships nothing, so a subagent
+ * ships `FeedMergeFold` and a subagent row ships nothing, so a subagent
  * bubble starts collapsed and a merge bubble starts where the daemon says. A
  * re-push redraws the head and leaves the fold alone unless the daemon's fold
- * itself CHANGED (a merge that failed ships open), which is applied once,
- * because a bubble snapping shut under a reader who opened it is the whole
- * failure R2 names.
+ * itself CHANGED, which is applied once, because a bubble snapping shut under
+ * a reader who opened it is the whole failure R2 names.
  *
- * A MERGE BUBBLE NEVER COLLAPSES ON ITS OWN (owner ruling, 2026-10-08). Only
- * the reader's head toggle closes one: a push whose fold turns folded never
- * closes an open merge bubble, and each fold the READER makes is handed to
- * `readerFold`, which records it on the daemon's durable head so a reload
- * draws the bubble the way the reader left it.
+ * A MERGE BUBBLE IS OPEN BY DEFAULT AND NEVER COLLAPSES AUTOMATICALLY, save a
+ * merge that ended in success (owner ruling, 2026-10-08). The DAEMON decides
+ * that default, at one site (`resolve/feed/mergefold.go`); this end applies
+ * the fold it ships, so a success pushed live folds the bubble once. Each fold
+ * the READER makes is handed to `readerFold`, which records it on the
+ * daemon's durable head so a reload draws the bubble the way the reader left
+ * it, and from then on THE READER'S FOLD WINS on this page too: a push still
+ * stating the daemon's default never overrides it.
  */
 import { armButtonRole, CONTROL_SELECTOR } from "../control.js";
 import { log } from "../log.js";
@@ -100,9 +102,11 @@ export interface BubbleOptions {
    * row; a subagent row ships none and leaves this unset). A push whose fold
    * DIFFERS from the last one applied is applied once, as the first draw's
    * was; a push repeating it changes nothing, so the reader's own toggle
-   * stands between two changes.
+   * stands between two changes. Once the reader has toggled the bubble on
+   * this page, only a fold the READER decided (another page's toggle) is
+   * applied; the daemon's default never overrides the reader's.
    */
-  foldOf?: (row: FeedRow) => boolean;
+  foldOf?: (row: FeedRow) => WireFold;
   /**
    * Told each fold the READER makes with the head's toggle (true: closed,
    * false: opened), and nothing else: never a fold a push applied, never a
@@ -114,8 +118,8 @@ export interface BubbleOptions {
   /**
    * Whether this is a MERGE bubble, marked `data-merge-bubble` on its element.
    * The feed holds a merge bubble to its own rules (owner rulings,
-   * 2026-10-08): nothing but the reader's toggle ever closes it (not the
-   * return to the tail, not a push stating it folded, not a jump's watch),
+   * 2026-10-08): nothing on this end ever closes it but the reader's toggle
+   * and the daemon's fold (not the return to the tail, not a jump's watch),
    * and its updates never move the feed's scroll.
    */
   merge?: boolean;
@@ -131,6 +135,14 @@ export interface BubbleOptions {
    * Absent with the scroll box (a fixture rendering a feed on its own).
    */
   scroll?: { readonly box: Element; readonly tail: TailFollow };
+}
+
+/** The daemon's fold on a bubble row, and whether the reader decided it. */
+export interface WireFold {
+  /** True for a folded bubble, false for an open one. */
+  readonly folded: boolean;
+  /** True when the fold is the reader's recorded one, false for the daemon's default. */
+  readonly byReader: boolean;
 }
 
 /** Build the bubble chrome for one bubble row. */
@@ -173,6 +185,9 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
 
   let row = opts.row;
   let wireFold = opts.initialFolded;
+  // Whether the reader toggled this bubble on this page: from then on the
+  // daemon's default fold never overrides the reader's (applyWireFold).
+  let readerHeld = false;
   let expanded = false;
   let child: FeedController | null = null;
   let watch: StreamHandle | null = null;
@@ -208,6 +223,7 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
     },
     expand,
     isExpanded: () => expanded,
+    isHeldOpenByReader: () => readerHeld && expanded,
     collapse: () => {
       if (expanded) collapse();
     },
@@ -230,31 +246,30 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
   }
 
   /**
-   * THE DAEMON'S FOLD, APPLIED ON ITS CHANGE ONLY. A merge bubble stays folded
-   * until its merge fails, when the daemon ships it open; that change opens
-   * it, once. A re-push repeating the fold leaves whatever the reader did.
+   * THE DAEMON'S FOLD, APPLIED ON ITS CHANGE ONLY. A merge bubble is open
+   * until its merge succeeds, when the daemon ships it folded; that change
+   * folds it, once. A re-push repeating the fold leaves whatever the reader
+   * did, and so does a push stating the daemon's default after the reader
+   * toggled the bubble here: the reader's fold always wins.
    */
   function applyWireFold(): void {
     if (opts.foldOf === undefined) return;
     const next = opts.foldOf(row);
-    if (next === wireFold) return;
-    wireFold = next;
-    log.info(`the daemon's fold for a bubble changed to ${next ? "folded" : "open"}; applying it`, {
+    if (next.folded === wireFold) return;
+    if (readerHeld && !next.byReader) {
+      log.debug("a push stated the daemon's default fold over the reader's; the reader's stands", {
+        operation: "feed.bubble-reader-fold-kept",
+        context: { row: id.value, folded: next.folded, expanded },
+      });
+      return;
+    }
+    wireFold = next.folded;
+    log.info(`the daemon's fold for a bubble changed to ${next.folded ? "folded" : "open"}; applying it`, {
       operation: "feed.bubble-fold-applied",
-      context: { row: id.value, folded: next, expanded },
+      context: { row: id.value, folded: next.folded, byReader: next.byReader, expanded },
     });
-    if (next) {
-      if (!expanded) return;
-      if (opts.merge === true) {
-        // A MERGE BUBBLE NEVER COLLAPSES ON ITS OWN: only the reader's toggle
-        // folds it, so a push stating it folded leaves the open bubble open.
-        log.info("a push stated an open merge bubble folded; it stays open, only the reader folds it", {
-          operation: "feed.merge-bubble-fold-kept-open",
-          context: { row: id.value },
-        });
-        return;
-      }
-      collapse();
+    if (next.folded) {
+      if (expanded) collapse();
       return;
     }
     void expand();
@@ -310,6 +325,7 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
   function tellReaderFold(folded: boolean): void {
     if (opts.readerFold === undefined) return;
     wireFold = folded;
+    readerHeld = true;
     opts.readerFold(folded);
   }
 

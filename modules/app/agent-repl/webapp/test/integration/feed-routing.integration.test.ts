@@ -22,6 +22,7 @@ import {
   feedPageError,
   feedPageSuccess,
   mergeUnit,
+  type MergeResult,
   responseRow,
   skillUnit,
   subagentUnit,
@@ -257,10 +258,15 @@ describe("breadcrumbs", () => {
   });
 });
 
-/** The bubble lifecycle, run identically for a subagent and for a merge. */
+/**
+ * The bubble lifecycle, run identically for a subagent and for a merge. The
+ * merge is a LANDED one: a success is the one merge state the daemon draws
+ * folded (owner ruling, 2026-10-08), so the reader's expand drives the
+ * plumbing exactly as it does for a subagent.
+ */
 const BUBBLE_CASES = [
   { name: "a subagent bubble", unit: () => subagentUnit("live") },
-  { name: "a merge bubble", unit: () => mergeUnit("update") },
+  { name: "a merge bubble", unit: () => mergeUnit("success") },
 ] as const;
 
 describe.each(BUBBLE_CASES)("$name", ({ unit }) => {
@@ -492,7 +498,8 @@ describe("the merge bubble's parity with a subagent bubble", () => {
   it("expands through the same rpc sequence for both bubble kinds", async () => {
     // Arrange / Act
     const subagentSequence = await sequenceFor(() => subagentUnit("live"));
-    const mergeSequence = await sequenceFor(() => mergeUnit("update"));
+    // A landed merge: the one merge state that arrives folded.
+    const mergeSequence = await sequenceFor(() => mergeUnit("success"));
     // Assert: a merge-specific nested-content loader would show up here. The
     // one merge-only call is the reader's fold being RECORDED
     // (`FoldMergeBubble`, owner ruling 2026-10-08), which loads nothing.
@@ -502,7 +509,8 @@ describe("the merge bubble's parity with a subagent bubble", () => {
 
   it("expands through OpenFeed then a SUBSCRIPTION on the page's stream, and nothing else", async () => {
     // Arrange / Act
-    const sequence = await sequenceFor(() => mergeUnit("update"));
+    // A landed merge: the one merge state that arrives folded.
+    const sequence = await sequenceFor(() => mergeUnit("success"));
     // Assert: the bubble's tail rides the stream the page already holds. The
     // absence of `watchPage` here is the load-bearing half — the calls were
     // cleared after boot, so a second connection for this tail would appear.
@@ -784,5 +792,56 @@ describe("the reader's folds across a page replace", () => {
     expect(
       harness.$('[data-feed-row="skill-1"] .tool-skill')?.classList.contains("expanded"),
     ).toBe(false);
+  });
+});
+
+/**
+ * A MERGE BUBBLE ACROSS A PAGE REPLACE (owner ruling, 2026-10-08): the replace
+ * draws the daemon's fold, open save a success, and a bubble the READER left
+ * open on this page is opened again, the reader's fold always winning.
+ */
+describe("a merge bubble across a page replace", () => {
+  /** Boot on a page holding one merge in RESULT. */
+  const bootWithMerge = async (result: MergeResult): Promise<void> => {
+    harness = await startHarness({
+      arrange: (fake) => {
+        fake.setPage(WORKSPACE_ID, ROOT_FEED, feedPageSuccess([activityRow(mergeUnit(result), { id: feedId("merge-1") })]));
+      },
+    });
+  };
+  /** Kill the tail so the app re-opens the feed onto a page holding a merge in RESULT. */
+  const replaceWith = async (result: MergeResult): Promise<void> => {
+    harness.fake.setPage(WORKSPACE_ID, ROOT_FEED, feedPageSuccess([activityRow(mergeUnit(result), { id: feedId("merge-1") })]));
+    harness.fake.endStream("watchFeed", WORKSPACE_ID, ROOT_FEED);
+    await harness.tick(5_000);
+  };
+  const expanded = () => harness.row("merge-1")?.dataset.expanded;
+
+  it("leaves a running merge's bubble open across the replace", async () => {
+    // Arrange
+    await bootWithMerge("update");
+    // Act
+    await replaceWith("update");
+    // Assert
+    expect(expanded()).toBe("true");
+  });
+
+  it("draws the bubble folded when the merge succeeded across the replace", async () => {
+    // Arrange
+    await bootWithMerge("update");
+    // Act
+    await replaceWith("success");
+    // Assert
+    expect(expanded()).toBe("false");
+  });
+
+  it("opens again a landed merge's bubble the reader opened, across the replace", async () => {
+    // Arrange
+    await bootWithMerge("success");
+    await harness.click('[data-feed-row="merge-1"] [data-expand]');
+    // Act
+    await replaceWith("success");
+    // Assert
+    expect(expanded()).toBe("true");
   });
 });

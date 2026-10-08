@@ -156,7 +156,7 @@ export function mergeHead(
       glyph: { icon: opts.icon ?? "merge" },
       label: { text: opts.label ?? "branch → master" },
       runtime: { startedAtMs: opts.startedAtMs ?? 0n },
-      fold: { folded: true },
+      fold: { folded: true, decidedBy: { case: "daemon", value: {} } },
     },
     result: arm,
   } as never);
