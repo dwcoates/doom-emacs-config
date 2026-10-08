@@ -4805,13 +4805,15 @@ bubble-body.bubble-body { display: block; }
 
 /* THE LOAD-MORE CONTROL: the walk into the past, at the top of the feed it
    walks. Drawn in the same pill vocabulary as a fold's ticker (.async-ticker)
-   so it reads as feed chrome rather than as a card. */
+   so it reads as feed chrome rather than as a card. Its border is the same
+   token as its text (owner request, 2026-10-08), so the pill is outlined in
+   exactly the color its "load previous page" reads in, in either theme. */
 .feed-load-more {
   align-self: center;
   font-size: 0.75rem;
   padding: 0.1rem 0.8rem;
   border-radius: 99px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--muted);
   background: var(--card);
   color: var(--muted);
   cursor: pointer;

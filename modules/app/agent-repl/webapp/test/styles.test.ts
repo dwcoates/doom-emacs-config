@@ -3692,3 +3692,26 @@ describe("the dimmed prose of a thinking or interim bubble", () => {
     expect(count).toBe(1);
   });
 });
+
+/**
+ * THE LOAD-MORE PILL'S OUTLINE (owner request, 2026-10-08): the "load previous
+ * page" control is outlined in exactly the token its text wears, in both
+ * themes, so the border and the words cannot drift apart.
+ */
+describe("the load-more control's outline", () => {
+  it("keeps the control's text in the muted token", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".feed-load-more") ?? "";
+
+    // Assert
+    expect(rule).toMatch(/(?:^|;)\s*color:\s*var\(--muted\)/);
+  });
+
+  it("borders the control in the same token as its text", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".feed-load-more") ?? "";
+
+    // Assert
+    expect(rule).toMatch(/(?:^|;)\s*border:\s*1px solid var\(--muted\)/);
+  });
+});

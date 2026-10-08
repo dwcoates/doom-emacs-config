@@ -221,8 +221,8 @@ export interface FeedController extends Handle {
   hasMoreHistory(): boolean;
   /**
    * Bring TARGET into the loaded pages through `LoadFeedThrough`, prepending
-   * each streamed page as `loadOlder` prepends its `next` page. The "older"
-   * control is disabled for the whole walk. A failure is logged here and
+   * each streamed page as `loadOlder` prepends its `next` page. The
+   * "load previous page" control is disabled for the whole walk. A failure is logged here and
    * leaves every page already applied in place; the daemon, not this end,
    * words it in the footer.
    */
@@ -263,6 +263,12 @@ const SELECTION_ARM_MESSAGE = {
   bubble: "FeedSelectionBubble",
 } as const;
 
+/**
+ * What the walk control at the top of a feed reads: it loads the page before
+ * the oldest one held (owner request, 2026-10-08; it read "older").
+ */
+export const FEED_LOAD_MORE_LABEL = "load previous page";
+
 /** Build a controller for ONE feed and draw its shell into the host. */
 export function createFeedController(
   opts: FeedControllerOptions,
@@ -289,11 +295,12 @@ export function createFeedController(
   // (the feed is at its start) or left to the walk (unloaded history).
   let walkEdge: "hasMore" | "atStart" | null = null;
   // THE WALK the last page with more named (FeedPageHasMore.walk): what
-  // "older" and a LoadFeedThrough continue. Kept across an at-start page, so a
-  // further ask still names the walk it belongs to.
+  // "load previous page" and a LoadFeedThrough continue. Kept across an
+  // at-start page, so a further ask still names the walk it belongs to.
   let walk: FeedWalkId | undefined;
   // THE LoadFeedThrough WALKS IN FLIGHT: serialized through `throughTail`, and
-  // the "older" control stays disabled while `throughRunning` is above zero.
+  // the "load previous page" control stays disabled while `throughRunning`
+  // is above zero.
   let throughTail: Promise<unknown> = Promise.resolve();
   let throughRunning = 0;
 
@@ -305,7 +312,7 @@ export function createFeedController(
   const loadMore = createControl();
   loadMore.className = "feed-load-more";
   loadMore.setAttribute("data-load-more", "");
-  loadMore.textContent = "older";
+  loadMore.textContent = FEED_LOAD_MORE_LABEL;
 
   const errorSlot = document.createElement("div");
   errorSlot.className = "feed-page-error-slot";
@@ -1553,7 +1560,8 @@ export function createFeedController(
    * The walk to ONE row: `LoadFeedThrough` streams every older page between
    * the oldest loaded page and the page holding TARGET, then ends with
    * `reached` or `error`. Walks are serialized (a second request waits for the
-   * first), and the "older" control is disabled while one runs so the two
+   * first), and the "load previous page" control is disabled while one runs
+   * so the two
    * cannot race over the daemon's one walk.
    */
   function loadThrough(target: FeedId): Promise<LoadThroughOutcome> {
