@@ -2,11 +2,14 @@ package footer
 
 import (
 	"testing"
+	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/shimclient"
+	"claude-repld/internal/wsm"
 )
 
 // usage builds one canonical token record.
@@ -808,7 +811,7 @@ func TestTheIdleCellIsTheStatedDash(t *testing.T) {
 			arrange: func(h *harness) { readContext(h, 100_000) },
 		},
 		{
-			name: "the turn ended",
+			name: "a turn whose main agent stated no usage ended",
 			arrange: func(h *harness) {
 				readContext(h, 100_000)
 				h.r.SetTurn(testWS, &TurnStarted{At: instant})
@@ -817,10 +820,29 @@ func TestTheIdleCellIsTheStatedDash(t *testing.T) {
 			},
 		},
 		{
-			name: "a context cut ended the turn",
+			name: "a context cut that spent nothing ended the turn",
 			arrange: func(h *harness) {
 				h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActCompact})
 				h.r.OnContextCut(testWS, mainAgent, compactedCut())
+			},
+		},
+		{
+			name: "the shim refused the next submission after a spending turn",
+			arrange: func(h *harness) {
+				h.r.SetTurn(testWS, &TurnStarted{At: instant})
+				h.r.OnActivity(testWS, mainAgent, responseFrame("main-1", "success", usage(0, 18_200, 0, 0, 0)))
+				h.r.OnAgentTerminal(testWS, mainAgent, &turn, completed(), nil)
+				h.r.SetTurn(testWS, &TurnStarted{At: instant})
+				h.r.SetTurn(testWS, nil)
+			},
+		},
+		{
+			name: "only a detached agent spent since the last turn opened",
+			arrange: func(h *harness) {
+				h.r.OnDetachedWork(testWS, mainAgent, detachedSubagentWork("work-1", detachedAgent.GetValue(), "Explore"))
+				h.r.SetTurn(testWS, &TurnStarted{At: instant})
+				h.r.OnActivity(testWS, detachedAgent, responseFrame("det-1", "success", usage(0, 50_000, 0, 0, 0)))
+				h.r.OnAgentTerminal(testWS, mainAgent, &turn, completed(), nil)
 			},
 		},
 	}
@@ -841,6 +863,110 @@ func TestTheIdleCellIsTheStatedDash(t *testing.T) {
 				t.Fatalf("idle heat = %v, want unset so the dash draws uncolored", heat)
 			}
 		})
+	}
+}
+
+// TestTheLastTurnsFigureStandsUntilTheNextSubmission is the owner's ruling of
+// 2026-10-08: a turn's figure stays in the cell after the turn ends, however
+// it ended, and clears only when the next prompt is submitted.
+func TestTheLastTurnsFigureStandsUntilTheNextSubmission(t *testing.T) {
+	turn := testTurnID
+	tests := []struct {
+		name string
+		act  func(h *harness)
+		want string
+	}{
+		{
+			name: "the turn completed",
+			act:  func(h *harness) { h.r.OnAgentTerminal(testWS, mainAgent, &turn, completed(), nil) },
+			want: "18.2k in",
+		},
+		{
+			name: "the turn failed",
+			act:  func(h *harness) { failTurn(h, overloaded(time.Minute)) },
+			want: "18.2k in",
+		},
+		{
+			name: "the user interrupted the turn",
+			act: func(h *harness) {
+				h.r.OnAgentTerminal(testWS, mainAgent, &turn, interruptedByUserStop(), nil)
+			},
+			want: "18.2k in",
+		},
+		{
+			name: "the vendor query died under the turn",
+			act:  func(h *harness) { h.r.OnSessionUpdate(testWS, queryDied()) },
+			want: "18.2k in",
+		},
+		{
+			name: "the prompt queue closed the turn with no terminal",
+			act:  func(h *harness) { h.r.SetTurnEnded(testWS, wsm.CloseFailed) },
+			want: "18.2k in",
+		},
+		{
+			name: "the shim died under the turn",
+			act:  func(h *harness) { h.r.OnLink(testWS, shimclient.LinkDead) },
+			want: "18.2k in",
+		},
+		{
+			name: "a compaction's cut ended the turn",
+			act:  func(h *harness) { h.r.OnContextCut(testWS, mainAgent, compactedCut()) },
+			want: "18.2k in",
+		},
+		{
+			name: "the next prompt is held in the queue after the turn ended",
+			act: func(h *harness) {
+				h.r.OnAgentTerminal(testWS, mainAgent, &turn, completed(), nil)
+				h.r.OnSubmission(testWS, Submission{Stage: StageHeld, Position: 1, Queued: 1})
+			},
+			want: "18.2k in",
+		},
+		{
+			name: "the next prompt is submitted after the turn ended",
+			act: func(h *harness) {
+				h.r.OnAgentTerminal(testWS, mainAgent, &turn, completed(), nil)
+				h.r.SetTurn(testWS, &TurnStarted{At: instant})
+			},
+			want: "0 in",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+			h.r.SetTurn(testWS, &TurnStarted{At: instant})
+			h.r.OnActivity(testWS, mainAgent, responseFrame("main-1", "success", usage(0, 18_200, 0, 0, 0)))
+
+			// Act
+			tt.act(h)
+
+			// Assert
+			if got := cellText(t, h); got != tt.want {
+				t.Fatalf("cell = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestTheStandingFigureKeepsItsHeat: the ended turn's figure is drawn exactly
+// as it stood at the turn's end, color included.
+func TestTheStandingFigureKeepsItsHeat(t *testing.T) {
+	// Arrange
+	turn := testTurnID
+	h := newHarness(t)
+	connected(h)
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+	h.r.OnActivity(testWS, mainAgent, responseFrame("main-1", "success", usage(0, 18_200, 0, 0, 0)))
+	running := cellHeat(t, h).GetPosition()
+
+	// Act
+	h.r.OnAgentTerminal(testWS, mainAgent, &turn, completed(), nil)
+
+	// Assert
+	heat := cellHeat(t, h)
+	if heat == nil || heat.GetPosition() != running {
+		t.Fatalf("standing heat = %v, want the running turn's %v", heat, running)
 	}
 }
 

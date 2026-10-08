@@ -1953,7 +1953,11 @@ Every figure is ONE agent's fresh input, never its subagents':
 
 - the footer's tokens cell (`frontend.v1.FooterTokensCell`) is the MAIN agent's
   fresh input for the in-flight turn, colored on a green → yellow → orange →
-  red gradient with stops at 0, 30k, 50k and 100k;
+  red gradient with stops at 0, 30k, 50k and 100k; once the turn ends, however
+  it ended, its figure STANDS until the next prompt is submitted (the daemon's
+  turn reset at `SetTurn`, the edge that raises `working · submitting`), and a
+  relaunched daemon restates it from the main agent's opening history page
+  (owner ruling 2026-10-08, `docs/protobuf-design/footer-last-turn-tokens.md`);
 - a response bubble's cost corner (`frontend.v1.FeedResponseUsageStamp`) is
   the fresh input its agent added since that agent's previous bubble landed,
   frozen when it lands, so a turn's bubbles partition the footer's figure; the
