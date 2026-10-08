@@ -2135,6 +2135,10 @@ never empty (owner ruling, 2026-10-06). An
 allowance whose reset the client's clock has passed reads "<label> reset
 since last seen", with no percentage. Only each `<number>%` wears
 the percent gradient; labels and reset countdowns stay the line's color. The
+windows ALWAYS stand in one fixed order, session, weekly, overage, left to
+right, whatever their figures say (owner ruling, 2026-10-08;
+`orderedAllowances`, `webapp/src/footer/activity.ts`): which window sits on
+which side of the blue "|" never changes. The
 line draws no reading age: it is enduring, so when it was read does not
 matter. The context window's fill is not an enduring line (owner ruling,
 2026-09-30); the topbar's context chip carries it.
