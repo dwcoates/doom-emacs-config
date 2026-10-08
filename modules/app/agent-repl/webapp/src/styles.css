@@ -1679,19 +1679,19 @@ pre {
   margin-left: calc((100% - var(--agent-bubble-cap)) / 2);
   margin-right: auto;
 }
-/* THE ONE BACKGROUND A VARIANT SETS (owner ruling, 2026-09-23): a HELD prompt
-   in the tray is "much more grey than blue", with only a subtle blue hue, so it
-   reads as the prompt it will become that has not been sent yet.
-   NEARLY TRANSPARENT (owner ruling, 2026-09-27): the fill is only very, very
-   subtly different from the feed, 5% of the held tint over 95% of the feed's
-   own background, mixed from the two tokens so both themes follow. It feeds
-   `--bubble-bg`, so anything painted from it matches. */
+/* THE ONE BACKGROUND A VARIANT SETS (owner ruling, 2026-10-08, superseding
+   2026-09-23's grey-blue tint and 2026-09-27's 5% mix of it): a HELD prompt's
+   fill is now the RESPONSE bubble's own token, `--assistant`, exactly — not a
+   copied value — so a prompt the daemon is holding reads in the same color as
+   the agent's settled answer. It feeds `--bubble-bg`, so anything painted
+   from it matches in both themes. The retired `--held-prompt-bg` tint token
+   is gone with it; nothing else read it. */
 /* A HELD prompt is also HALF the one bubble width (owner spec, 2026-09-23),
    derived from the same token rather than a copied number. The body measures
    a tree's column budget off this resolved `max-width` (src/bubble/body.ts), so
    a tree in a held prompt wraps at the halved cap. */
 .bubble[data-variant="held"] {
-  --bubble-bg: color-mix(in srgb, var(--held-prompt-bg) 5%, var(--bg));
+  --bubble-bg: var(--assistant);
   max-width: calc(var(--bubble-max-width) / 2);
 }
 /* THE SECOND BACKGROUND A KIND SETS (owner request, 2026-10-08): a THINKING

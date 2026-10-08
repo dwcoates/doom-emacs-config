@@ -367,7 +367,8 @@ hand any more:
   (`calc(var(--bubble-max-width) / 2)`, so its trees wrap at the half), shows
   collapsed only its ONE first line under the ellipsis (owner ruling,
   2026-09-27) and its status badges, and keeps the rest expand-only; its fill
-  is 5% of the `--held-prompt-bg` tint over the feed's `--bg`; each status badge's color comes from ONE table,
+  is the RESPONSE bubble's own token, `--assistant` (owner ruling, 2026-10-08,
+  superseding the earlier 5% `--held-prompt-bg` tint mix, now retired); each status badge's color comes from ONE table,
   `HELD_STATUS_BADGES`, and its words are the ones the card already said for
   that arm (the proto carries no status text), a hold's standing sentence
   included. A THINKING bubble is a FIXED height (owner requests, 2026-10-07
