@@ -32,6 +32,14 @@ describe("pageAddress", () => {
     expect(pageAddress(`${BOTH}&log_level=debug`).logLevel).toBe("debug");
   });
 
+  it("reads the end of the delivered level's window", () => {
+    expect(pageAddress(`${BOTH}&log_level=debug&log_level_until=1000300`).logLevelUntil).toBe("1000300");
+  });
+
+  it("carries no window end when the host supplies none", () => {
+    expect(pageAddress(BOTH).logLevelUntil).toBeUndefined();
+  });
+
   it("refuses an unknown host-delivered log level", () => {
     expect(() => pageAddress(`${BOTH}&log_level=trace`)).toThrow(/log_level/);
   });
