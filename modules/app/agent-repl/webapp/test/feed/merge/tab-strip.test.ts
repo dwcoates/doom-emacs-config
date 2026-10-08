@@ -61,10 +61,11 @@ describe("readMergeTab: the arms are read from the contract", () => {
   });
 
   it.each(FeedMergeTabSchema.oneofs.find((o) => o.name === "kind")?.fields.map((f) => [f.localName, f]) ?? [])(
-    "holds to the schema: the %s tab is live or settled, since nothing parks",
-    (_kind, field) => {
+    "holds to the schema: the %s tab is live or settled, since nothing parks, and an agentic step that asks can wait on the user",
+    (kind, field) => {
       const message = field.fieldKind === "message" ? field.message : undefined;
-      expect(message === undefined ? [] : [...oneofArms(message, "state")].sort()).toEqual(["live", "settled"]);
+      const want = kind === "conflicts" || kind === "fixes" ? ["live", "settled", "waitingOnUser"] : ["live", "settled"];
+      expect(message === undefined ? [] : [...oneofArms(message, "state")].sort()).toEqual(want);
     },
   );
 
@@ -208,6 +209,36 @@ describe("drawTabDuration: how long the tab has been in its state", () => {
       "merge-tab-duration",
       "merge-tab-glyph is-live",
     ]);
+  });
+});
+
+// A MERGE WAITING ON THE USER (owner request, 2026-10-08): the agentic tab
+// whose agent has an ask open wears a question mark emoji while it stands.
+describe("a tab waiting on the user", () => {
+  it.each(["conflicts", "fixes"] as const)("draws the %s tab's glyph as ❓", (kind) => {
+    const [tab] = mergeTabsOf([tabRow("t1", { kind, state: "waitingOnUser", payload: kind === "fixes" ? { attempt: { attempt: 1, maxAttempts: 3 } } : {} })]);
+    const glyph = drawFeedMergeTab(tab, { active: false, ticker: TICKER }).querySelector(".merge-tab-glyph");
+    expect(glyph?.textContent).toBe("❓");
+  });
+
+  it("marks the state as the hook the suite targets", () => {
+    const [tab] = mergeTabsOf([tabRow("t1", { kind: "conflicts", state: "waitingOnUser" })]);
+    expect(drawFeedMergeTab(tab, { active: false, ticker: TICKER }).getAttribute("data-tab-state")).toBe(
+      "waitingOnUser",
+    );
+  });
+
+  it("keeps ticking from when the tab's work began", () => {
+    const [tab] = mergeTabsOf([tabRow("t1", { kind: "conflicts", state: "waitingOnUser" })]);
+    expect(drawTabDuration(tab, TICKER).textContent).toBe("4s");
+  });
+
+  it("is still where the merge is when the reader has chosen nothing", () => {
+    const tabs = mergeTabsOf([
+      tabRow("t1", { kind: "conflicts", state: "waitingOnUser" }),
+      tabRow("t2", { kind: "queue", state: "settled", outcome: "succeeded" }),
+    ]);
+    expect(autoSelectedTab(tabs)?.id).toBe("t1");
   });
 });
 

@@ -494,6 +494,12 @@ type Sinks struct {
 	// dispatches its own goroutine), so it rides the watcher's stream goroutine
 	// without holding it up.
 	Title TitleSink
+	// Merge is the merge queue's reading of the session's asks. OPTIONAL:
+	// nil routes the asks to the views alone, which is what every test that
+	// does not exercise a merge leaves it. Production always wires it, so a
+	// merge whose conflict resolution or fixing asks the user draws its tab
+	// waiting on the user.
+	Merge MergeSink
 	// Stalls is the lock stall watchdog the watcher registers its mutex with
 	// for as long as it is open. OPTIONAL: nil leaves the mutex unwatched,
 	// which is what every test that does not exercise it leaves it.
@@ -501,6 +507,16 @@ type Sinks struct {
 	// flight under, and it is the lock that held a workspace for eighteen
 	// minutes on 2026-09-27 without a record.
 	Stalls lockwatch.Registry
+}
+
+// MergeSink is the merge queue, seen from the watcher: every permission and
+// question edge, opened by a start and closed by any other result, the same
+// edges the footer reads.
+type MergeSink interface {
+	// OnPermission is a consent ask's edge.
+	OnPermission(ws ids.WorkspaceID, agent *conversationv1.AgentId, p *conversationv1.AgentPermission)
+	// OnQuestion is a question batch's edge.
+	OnQuestion(ws ids.WorkspaceID, agent *conversationv1.AgentId, q *conversationv1.AgentQuestion)
 }
 
 // TitleSink is the synthesized-title synthesizer, seen from the watcher: the

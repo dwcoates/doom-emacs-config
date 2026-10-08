@@ -132,7 +132,6 @@ type factsDoc struct {
 	Total       int    `json:"total"`
 	Attempt     int    `json:"attempt"`
 	MaxAttempts int    `json:"max_attempts"`
-	TestsRound  int    `json:"tests_round"`
 }
 
 // displacedDoc is the durable displaced turn.
@@ -220,7 +219,6 @@ func (d factsDoc) footerFacts(at time.Time) footer.MergeFacts {
 	return footer.MergeFacts{
 		State: StateMerging, Step: footer.MergeStep(d.Step), LineAt: at,
 		Replayed: d.Replayed, Total: d.Total, Attempt: d.Attempt, MaxAttempts: d.MaxAttempts,
-		TestsRound: d.TestsRound,
 	}
 }
 
@@ -279,7 +277,7 @@ func (r *run) checkpoint(ctx context.Context, step string, mutate func(*progress
 	})
 	doc.Facts = factsDoc{
 		Step: string(r.facts.Step), Replayed: r.facts.Replayed, Total: r.facts.Total,
-		Attempt: r.facts.Attempt, MaxAttempts: r.facts.MaxAttempts, TestsRound: r.facts.TestsRound,
+		Attempt: r.facts.Attempt, MaxAttempts: r.facts.MaxAttempts,
 	}
 	doc.TreeAttempts = r.attempts
 	doc.MachineryNoted = r.machinery != nil

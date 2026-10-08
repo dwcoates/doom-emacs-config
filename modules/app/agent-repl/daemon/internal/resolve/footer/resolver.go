@@ -648,24 +648,13 @@ func liveDetachedAgents(s *wsState) map[string]struct{} {
 
 // SetMerge installs the merge facts the footer draws.
 //
-// A NEW TESTING ROUND PUBLISHES THE MERGE TESTS PANEL AS THE FOCUS, under the
-// next generation, through the same edge a detached launch uses: the owner's
-// "that section opens and is selected when testing begins". The panel empties
-// when testing ends, which unsets the chip, so the section falls back to
-// whatever else stands.
+// A MERGE NEVER TOUCHES THE EXPANDED FOOTER: its facts move the strip's
+// merging status, substatus and activity line, and the merge bubble carries
+// the rest, so no merge fact mints a focus.
 func (r *resolver) SetMerge(ws ids.WorkspaceID, facts MergeFacts) {
-	var minted *mintedFocus
 	r.mutate(ws, "daemon.footer.set_merge", "the footer took the merge facts",
-		dlog.Context{"state": facts.State, "step": string(facts.Step), "failed_area": string(facts.FailedArea), "tests_round": facts.TestsRound},
-		func(s *wsState) {
-			minted = mintMergeTestsFocus(s, facts.TestsRound)
-			s.merge = facts
-		})
-	if minted != nil {
-		r.workspaceLog(ws).Info("daemon.footer.focus_minted",
-			"the merge began testing; the merge tests panel is the expanded footer's focus",
-			dlog.Context{"panel": minted.panel.String(), "generation": minted.generation, "trigger": minted.trigger})
-	}
+		dlog.Context{"state": facts.State, "step": string(facts.Step), "failed_area": string(facts.FailedArea)},
+		func(s *wsState) { s.merge = facts })
 }
 
 // SetBringingUp raises, or lowers, the fact that a bring-up of the session is

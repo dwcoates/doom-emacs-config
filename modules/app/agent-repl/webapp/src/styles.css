@@ -7196,9 +7196,23 @@ ar-button.outcome-marker-pill {
 /* The test suites and their daemon-painted output. */
 .merge-suite { padding: 0.2rem 0; }
 .merge-suite-head { display: flex; align-items: baseline; gap: 0.4rem; }
-.merge-suite-glyph.is-live { color: var(--blocked); animation: merge-breathe 1.8s ease-in-out infinite; }
+/* A RUNNING SUITE'S DOT IS NEVER PURPLE (owner ruling, 2026-10-08): it
+   breathes grey before any test has reported, green while every test so far
+   passed, red once one failed. */
+.merge-suite-glyph.is-live { animation: merge-breathe 1.8s ease-in-out infinite; }
+.merge-suite-glyph.is-unreported { color: var(--muted); }
+.merge-suite-glyph.is-passing { color: var(--ok); }
+.merge-suite-glyph.is-failing { color: var(--err); }
 .merge-suite-glyph.is-succeeded { color: var(--ok); opacity: 0.7; }
 .merge-suite-glyph.is-failed { color: var(--err); }
+/* The suite's counts, passed/failed/total, on the right of its head line. */
+.merge-suite-counts {
+  margin-left: auto;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.merge-suite-counts .is-passed { color: var(--ok); }
+.merge-suite-counts .is-failed { color: var(--err); }
 /* The daemon caps the output; the client scrolls what it was given rather
    than letting a suite grow the bubble without bound. */
 .merge-suite-output {

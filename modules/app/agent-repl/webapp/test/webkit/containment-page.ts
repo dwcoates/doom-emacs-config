@@ -43,6 +43,7 @@ import {
   detachedShellRow,
   detachedSubagentRow,
   feedId,
+  chessBoardUnit,
   findingsUnit,
   hookUnit,
   mcpToolCallUnit,
@@ -126,6 +127,8 @@ export function everyRow(): FeedRow[] {
     subagentUnit("live"),
     ...SUBAGENT_OUTCOMES.map((outcome) => subagentUnit(outcome)),
     ...MERGE_RESULTS.map((result) => mergeUnit(result)),
+    chessBoardUnit({ case: "preparing", step: `loading the game ${RUN}` }),
+    chessBoardUnit({ case: "unavailable", reason: `the session is gone ${RUN}` }),
   ];
   const rows: FeedRow[] = [
     userPromptRow(`a long prompt ${RUN}`),

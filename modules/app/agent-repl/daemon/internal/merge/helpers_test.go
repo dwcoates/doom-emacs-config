@@ -1038,6 +1038,9 @@ type fakeQueue struct {
 	db *fakeDB
 
 	submissions []promptqueue.Submission
+	// onSubmit, when set, is told each submission as it is made, outside the
+	// lock, standing for what the session does while the turn runs.
+	onSubmit    func(sub promptqueue.Submission)
 	disposition promptqueue.Disposition
 	err         error
 	// leaseEvents records, per OnLeaseChanged, whether the workspace's merge
@@ -1054,7 +1057,11 @@ func (q *fakeQueue) OnVendorServes(ids.WorkspaceID) {}
 func (q *fakeQueue) Submit(_ context.Context, sub promptqueue.Submission) (promptqueue.Disposition, error) {
 	q.mu.Lock()
 	q.submissions = append(q.submissions, sub)
+	hook := q.onSubmit
 	q.mu.Unlock()
+	if hook != nil {
+		hook(sub)
+	}
 	return q.disposition, q.err
 }
 
@@ -1484,6 +1491,9 @@ func (r *fakeRunner) RunLines(ctx context.Context, dir string, argv []string, on
 type harness struct {
 	t *testing.T
 
+	// asks are the workspace sessions' open asks, as the watcher reports them.
+	asks *Asks
+
 	o       *orchestrator
 	db      *fakeDB
 	git     *fakeGit
@@ -1659,6 +1669,7 @@ func newHarness(t *testing.T) *harness {
 	t.Helper()
 	h := &harness{
 		t:         t,
+		asks:      NewAsks(),
 		db:        newFakeDB(),
 		footer:    &fakeFooter{},
 		sidebar:   &fakeSidebar{},
@@ -1711,7 +1722,7 @@ func newHarness(t *testing.T) *harness {
 func (h *harness) deps() Deps {
 	return Deps{
 		DB: h.db, Git: h.git, Queue: h.queue, Feed: h.feed, Footer: h.footer,
-		Sidebar: h.sidebar, Holds: h.holds, PromptsDir: "prompts",
+		Sidebar: h.sidebar, Holds: h.holds, Asks: h.asks, PromptsDir: "prompts",
 		Policy:      harnessPolicy{h: h},
 		Briefs:      h.loadBrief,
 		SelfRepoDir: "/self/checkout",

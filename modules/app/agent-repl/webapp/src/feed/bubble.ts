@@ -22,11 +22,13 @@
  * wholly ABOVE the viewport, is compensated through the scroll module's
  * content-preserving cause (`prependCompensation`).
  *
- * THE FOLD IS THE READER'S AFTER THE FIRST DRAW (R2). A merge row ships
- * `FeedMergeFold.folded` and a subagent row ships nothing, so a subagent bubble
- * starts collapsed and a merge bubble starts where the daemon says — ONCE. A
- * re-push redraws the head and never touches the fold, because a bubble
- * snapping shut under a reader who opened it is the whole failure R2 names.
+ * THE FOLD IS THE READER'S BETWEEN THE DAEMON'S CHANGES (R2). A merge row
+ * ships `FeedMergeFold.folded` and a subagent row ships nothing, so a subagent
+ * bubble starts collapsed and a merge bubble starts where the daemon says. A
+ * re-push redraws the head and leaves the fold alone unless the daemon's fold
+ * itself CHANGED (a merge that failed ships open), which is applied once,
+ * because a bubble snapping shut under a reader who opened it is the whole
+ * failure R2 names.
  */
 import { armButtonRole, CONTROL_SELECTOR } from "../control.js";
 import { log } from "../log.js";
@@ -64,6 +66,7 @@ import type {
   RowRenderers,
 } from "./renderers.js";
 import { stopTicking } from "./ticking.js";
+import { MERGE_BUBBLE_ATTRIBUTE } from "./merge-bubble.js";
 import { refreshTitleFolds } from "./title-fold.js";
 import type { Overscan } from "./overscan.js";
 import type { TailFollow } from "../scroll.js";
@@ -84,8 +87,23 @@ export interface BubbleOptions {
   bubble: BubbleFactory;
   /** The per-bubble composer, when this build has one (R7). */
   composerFactory?: ComposerFactory;
-  /** The fold this bubble takes on its FIRST draw only. */
+  /** The fold this bubble takes on its first draw. */
   initialFolded: boolean;
+  /**
+   * The daemon's fold as a push states it, for a row that ships one (a merge
+   * row; a subagent row ships none and leaves this unset). A push whose fold
+   * DIFFERS from the last one applied is applied once, as the first draw's
+   * was; a push repeating it changes nothing, so the reader's own toggle
+   * stands between two changes.
+   */
+  foldOf?: (row: FeedRow) => boolean;
+  /**
+   * Whether this is a MERGE bubble, marked `data-merge-bubble` on its element.
+   * The feed holds a merge bubble to its own rules (owner rulings,
+   * 2026-10-08): the return to the tail never closes it, and its updates never
+   * move the feed's scroll.
+   */
+  merge?: boolean;
   /**
    * The overscan buffer rooted on the page's scroll box, threaded down so the
    * rows this bubble's sub-feed holds are pre-rendered by the same instance
@@ -112,6 +130,7 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
   // stacking; the teal wash and the dashed fold separator are gone.
   const el = document.createElement("div");
   el.className = "tool-card bubble-fold";
+  if (opts.merge === true) el.setAttribute(MERGE_BUBBLE_ATTRIBUTE, "");
 
   // The collapsed head reads as a tool-call card's head row (`.tool-head`),
   // not the old async pill: the whole head IS the fold's toggle now (owner
@@ -138,6 +157,7 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
   el.append(headLine, panel);
 
   let row = opts.row;
+  let wireFold = opts.initialFolded;
   let expanded = false;
   let child: FeedController | null = null;
   let watch: StreamHandle | null = null;
@@ -169,6 +189,7 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
     update(next: FeedRow): void {
       row = next;
       drawHead();
+      applyWireFold();
     },
     expand,
     isExpanded: () => expanded,
@@ -191,6 +212,27 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
     const state = head.getAttribute("data-state");
     if (state === null) el.removeAttribute("data-state");
     else el.setAttribute("data-state", state);
+  }
+
+  /**
+   * THE DAEMON'S FOLD, APPLIED ON ITS CHANGE ONLY. A merge bubble stays folded
+   * until its merge fails, when the daemon ships it open; that change opens
+   * it, once. A re-push repeating the fold leaves whatever the reader did.
+   */
+  function applyWireFold(): void {
+    if (opts.foldOf === undefined) return;
+    const next = opts.foldOf(row);
+    if (next === wireFold) return;
+    wireFold = next;
+    log.info(`the daemon's fold for a bubble changed to ${next ? "folded" : "open"}; applying it`, {
+      operation: "feed.bubble-fold-applied",
+      context: { row: id.value, folded: next, expanded },
+    });
+    if (next) {
+      if (expanded) collapse();
+      return;
+    }
+    void expand();
   }
 
   /** Show or hide the sub-feed, and say so on the element and the head. */

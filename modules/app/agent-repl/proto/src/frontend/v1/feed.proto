@@ -2697,8 +2697,13 @@ message FeedContextCutCompactionFailed {
   FeedOutcomeMarker marker = 2;
 }
 
-// The ▸/▾ state. UI preference the daemon holds; see the roster's fold.
+// The bubble's ▸/▾ state as the daemon states it. FOLDED while the merge is
+// queued or running, when it lands and when it is abandoned; OPEN once it has
+// failed, so the failure is in front of the reader. A client applies it at the
+// bubble's first draw and again whenever a push CHANGES it; a push repeating
+// it leaves the reader's own toggle standing.
 message FeedMergeFold {
+  // True for a folded bubble, false for an open one.
   bool folded = 1;
 }
 
@@ -2777,6 +2782,16 @@ message FeedMergeTabSettled {
   }
 }
 message FeedMergeTabSucceeded {}
+// An agentic tab's work is running and held on the user: its agent has a
+// permission ask or a question batch open. Drawn with the ❓ emoji in place of
+// the live glyph, for exactly as long as the footer's merging substatus reads
+// "waiting on user"; the tab is live again once every ask is answered or
+// withdrawn.
+message FeedMergeTabWaitingOnUser {
+  // When the tab's work began, epoch ms. The tab keeps ticking its elapsed
+  // time from it, as a live tab does.
+  int64 started_at_ms = 1;
+}
 message FeedMergeTabFailed {
   // The daemon-composed one-line account; the tab's own content carries
   // the detail.
@@ -2840,6 +2855,9 @@ message FeedMergeTabConflicts {
   oneof state {
     FeedMergeTabLive live = 1;
     FeedMergeTabSettled settled = 3;
+    // The resolution is held on the user: the session has a permission ask
+    // or a question batch open.
+    FeedMergeTabWaitingOnUser waiting_on_user = 4;
   }
   // Tag 2 (`parked`) is RETIRED: nothing parks.
   reserved 2;
@@ -2891,8 +2909,43 @@ message FeedMergeTestSuite {
   // the client paints classes and never parses escapes (the code-span
   // precedent, this component's own wrapper).
   repeated FeedMergeTestSpan output = 5;
+  // How many of the suite's tests have passed and failed so far, out of how
+  // many it runs, drawn in a column on the right of the suite's row. UNSET
+  // while the run has not said how many the suite runs; nothing is drawn
+  // then.
+  FeedMergeTestCounts counts = 6;
 }
-message FeedMergeTestSuiteRunning {}
+// A suite's test counts, drawn "3/1/12": the passed figure green, the failed
+// figure red, the total in the row's own color. Each test is one of the
+// units the test runner schedules for the suite (a Go package, a chunk of
+// test files, a harness script), the finest grain it reports a verdict for.
+message FeedMergeTestCounts {
+  // How many have passed.
+  uint32 passed = 1;
+  // How many have failed, a test the runner cancelled because one it
+  // depends on failed included.
+  uint32 failed = 2;
+  // How many the suite runs. At least passed plus failed.
+  uint32 total = 3;
+}
+// The suite is running. THE ARM IS WHAT ITS TESTS HAVE SAID SO FAR, which
+// the suite's status dot is drawn from.
+message FeedMergeTestSuiteRunning {
+  oneof so_far {
+    // No test has reported a verdict yet, drawn grey.
+    FeedMergeTestSuiteRunningUnreported unreported = 1;
+    // Every test that has reported passed, drawn green.
+    FeedMergeTestSuiteRunningPassing passing = 2;
+    // At least one test has failed, drawn red.
+    FeedMergeTestSuiteRunningFailing failing = 3;
+  }
+}
+// No verdict reported yet.
+message FeedMergeTestSuiteRunningUnreported {}
+// Every verdict so far is a pass.
+message FeedMergeTestSuiteRunningPassing {}
+// At least one verdict is a failure.
+message FeedMergeTestSuiteRunningFailing {}
 message FeedMergeTestSuitePassed {}
 message FeedMergeTestSuiteFailed {}
 message FeedMergeTestSpan {
@@ -2910,6 +2963,9 @@ message FeedMergeTabFixes {
   oneof state {
     FeedMergeTabLive live = 1;
     FeedMergeTabSettled settled = 3;
+    // The fixing attempt is held on the user: the session has a permission
+    // ask or a question batch open.
+    FeedMergeTabWaitingOnUser waiting_on_user = 5;
   }
   // Tag 2 (`parked`) is RETIRED: nothing parks.
   reserved 2;
