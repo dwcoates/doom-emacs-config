@@ -88,6 +88,11 @@
      (owner request, 2026-10-03). */
   --cold-gate-compact-border: #128a3d;
   --err: #dc2626;
+  /* THE CLASSIC DIFF's line backgrounds (owner request, 2026-10-08;
+     src/feed/cards/diff-view.ts): an added line on a soft green, a removed
+     line on a soft red, the text staying the card's own color. */
+  --diff-add-bg: #dcfce7;
+  --diff-del-bg: #fee2e2;
   /* Token figures wear ONE colour wherever a token count is drawn, so a reader
      learns the hue means "tokens" once. Yellow for now, defined here so every
      `.token-count` site (the subagent head's figure is the first) shares it. A
@@ -375,6 +380,8 @@
   :root {
     --bg: #111318;
     --fg: #e5e7eb;
+    --diff-add-bg: #12351f;
+    --diff-del-bg: #3d1a1a;
     --muted: #9ca3af;
     --repo-head-expanded: #e5e7eb;
     --repo-head-collapsed: #6b7280;
@@ -2718,6 +2725,18 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
 .diff .add { color: var(--ok); }
 .diff .del { color: var(--err); }
 .diff .hunk { color: var(--accent); }
+/* THE CLASSIC DIFF (owner request, 2026-10-08; src/feed/cards/diff-view.ts):
+   one block per line, the kind drawn as the line's BACKGROUND, the text in the
+   card's own color, and no +/- marker in the text at all. A hunk header keeps
+   the accent hue and a file header line the muted one, both verbatim. An
+   empty line keeps its height. */
+.diff-classic .diff-line { display: block; min-height: 1.4em; }
+.diff-classic .add { background: var(--diff-add-bg); color: inherit; }
+.diff-classic .del { background: var(--diff-del-bg); color: inherit; }
+.diff-classic .meta { color: var(--muted); }
+/* A text output drawn as markdown (src/feed/cards/markdown-output.ts), minus
+   the phantom leading gap of its first block's own margin. */
+.tool-output-md > :first-child { margin-top: 0; }
 
 .permission {
   border: 1px solid var(--accent);
