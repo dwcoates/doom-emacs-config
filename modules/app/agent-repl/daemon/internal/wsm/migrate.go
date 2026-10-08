@@ -120,6 +120,7 @@ var migrations = []migration{
 	{To: 27, Name: "reveal_gaps", Kind: MigrationAdditive, DDL: revealGapsDDL},
 	{To: 28, Name: "merge_progress", Kind: MigrationAdditive, DDL: mergeProgressDDL},
 	{To: 29, Name: "sidebar_view_maturity_folds", Kind: MigrationAdditive, DDL: maturityFoldsDDL},
+	{To: 30, Name: "reveal_burst_gaps", Kind: MigrationAdditive, DDL: revealBurstGapsDDL},
 }
 
 // repositoriesFoldedDDL adds whether a repository's roster section is
