@@ -33,6 +33,7 @@ import {
 } from "../../proto/gen/ts/agentrepl/v1/endpoint_client_log_pb";
 import { ClientLogThrottle, type ClientLogThrottleOptions } from "./clientlog-throttle.js";
 import { logTimestamp } from "../../agent-shim/logging/ts/timestamp.js";
+import { expiryContext, expiryMessage, LevelWindow, type LevelExpiry } from "../../agent-shim/logging/ts/level-window.js";
 
 /** The four arms of `ClientLogRecord.level`. */
 export type ClientLogLevel = "debug" | "info" | "warn" | "error";
@@ -101,12 +102,8 @@ const LEVEL_ARM = {
   error: "error",
 } as const satisfies Record<ClientLogLevel, NonNullable<ClientLogRecord["level"]["case"]>>;
 
-const LEVEL_RANK = {
-  debug: 0,
-  info: 1,
-  warn: 2,
-  error: 3,
-} as const satisfies Record<ClientLogLevel, number>;
+/** The operation of every level window record: a startup decision and a window that ended. */
+export const LEVEL_WINDOW_OPERATION = "webapp.log.level-window";
 
 /** Parse the page-delivered `AGENT_REPL_LOG_LEVEL` value. */
 export function parseClientLogLevel(value: string | null): ClientLogLevel {
@@ -121,6 +118,8 @@ export function parseClientLogLevel(value: string | null): ClientLogLevel {
  */
 export class ForwardingLogger {
   private readonly throttle: ClientLogThrottle;
+  /** The live threshold: a level other than info reverts to info when its window ends. */
+  private readonly window: LevelWindow;
   private sinkFailures = 0;
   // Set once the daemon answers unknown_workspace: forwarding is over for the
   // life of this logger, because the workspace it logs for is gone.
@@ -135,9 +134,9 @@ export class ForwardingLogger {
     private readonly send: ClientLogSink,
     private readonly consoleFn: (level: ClientLogLevel, line: string) => void = defaultConsole,
     throttleOptions: Omit<ClientLogThrottleOptions, "send" | "droppedRecord"> = {},
-    private readonly minimumLevel: ClientLogLevel = "info",
+    threshold: ClientLogLevel | LevelWindow = "info",
   ) {
-    requireLevel(minimumLevel);
+    this.window = typeof threshold === "string" ? LevelWindow.fixed(requireLevel(threshold)) : threshold;
     this.throttle = new ClientLogThrottle({
       ...throttleOptions,
       send: (record) => this.forward(record),
@@ -158,9 +157,12 @@ export class ForwardingLogger {
     });
   }
 
-  /** Whether the configured `AGENT_REPL_LOG_LEVEL` admits LEVEL. */
-  enabled(level: ClientLogLevel): boolean {
-    return LEVEL_RANK[level] >= LEVEL_RANK[this.minimumLevel];
+  /**
+   * Whether the page's level admits LEVEL now, and the level window this call
+   * found ended (the caller records it at info; the window is info by then).
+   */
+  admits(level: ClientLogLevel): { allowed: boolean; ended: LevelExpiry | null } {
+    return this.window.allows(level);
   }
 
   /**
@@ -418,7 +420,9 @@ function buildRecord(
 
 function emit(level: ClientLogLevel, message: string, options: LogOptions): void {
   if (active === null) throw new Error("the webapp logger is not installed");
-  if (!active.enabled(level)) return;
+  const { allowed, ended } = active.admits(level);
+  if (ended !== null) emit("info", expiryMessage(ended), { operation: LEVEL_WINDOW_OPERATION, context: expiryContext(ended) });
+  if (!allowed) return;
   if (options.dedupKey !== undefined) {
     if (dedupLast.get(options.dedupKey) === message) return;
   }
