@@ -87,6 +87,7 @@ import type { TurnId } from "../../../proto/gen/ts/conversation/v1/turn_pb";
 import type {
   UserContent,
   UserContentBlock,
+  UserQuoteBlock,
   UserSaid,
 } from "../../../proto/gen/ts/conversation/v1/user_pb";
 import {
@@ -105,6 +106,7 @@ import { ConnectError } from "@connectrpc/connect";
 import { controlPlaneFailed } from "../failure/sink.js";
 import { formatTickedAge } from "../duration.js";
 import { markdownSlot } from "../bubble/body.js";
+import { quoteSlot } from "../bubble/quote.js";
 import {
   BUBBLE_MORE_ELLIPSIS,
   ELLIPSIS_CAP_LINES,
@@ -1343,6 +1345,8 @@ export function drawUserContentBlock(
       return drawImageBlock(block.value, `${path}.image`);
     case "unsupported":
       return drawUnsupportedBlock(block.value, `${path}.unsupported`);
+    case "quote":
+      return drawQuoteBlock(block.value, `${path}.quote`);
     default: {
       const other: { case: string } = block;
       return unreachableArm(`${path}.block`, other.case);
@@ -1357,6 +1361,18 @@ export function drawTextBlock(u: TextBlock, path: string): HTMLElement {
     context: { path, length: u.text.length },
   });
   return markdownSlot("queued-text", u.text);
+}
+
+/**
+ * A reply's quote of an earlier bubble: drawn only once the card is expanded
+ * (src/bubble/quote.ts), so the collapsed one line is the person's own words.
+ */
+export function drawQuoteBlock(u: UserQuoteBlock, path: string): HTMLElement {
+  log.debug("drawing a quote block", {
+    operation: "tray.held-prompt.quote-block",
+    context: { path, length: u.text.length },
+  });
+  return quoteSlot("queued-quote", u.text);
 }
 
 /**
