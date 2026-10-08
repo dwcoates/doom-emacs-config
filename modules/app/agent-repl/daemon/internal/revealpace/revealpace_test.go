@@ -253,3 +253,85 @@ func TestPersistSurfacesAndLogsAStoreFailure(t *testing.T) {
 		t.Fatalf("no ERROR daemon.revealpace.persist naming the key and cause: %v", log.Records())
 	}
 }
+
+// at answers the instant ms milliseconds after an arbitrary origin.
+func at(ms int64) time.Time {
+	return time.Date(2026, 10, 8, 15, 31, 25, 0, time.UTC).Add(time.Duration(ms) * time.Millisecond)
+}
+
+func TestBurstArrive(t *testing.T) {
+	cases := []struct {
+		name      string
+		earlier   []int64
+		arriveMs  int64
+		wantGapMs int64
+		wantOK    bool
+	}{
+		{name: "a block's first fragment only starts the clock", earlier: nil, arriveMs: 5_000},
+		{name: "a fragment within the threshold joins the burst", earlier: []int64{1_000}, arriveMs: 1_003},
+		{name: "a fragment exactly at the threshold joins the burst", earlier: []int64{1_000}, arriveMs: 1_020},
+		{name: "a fragment past the threshold starts a burst and samples from the last burst's start", earlier: []int64{1_000, 1_003, 1_010}, arriveMs: 1_530, wantGapMs: 530, wantOK: true},
+		{name: "a burst longer than the threshold stays one burst while each step is within it", earlier: []int64{1_000, 1_015, 1_030, 1_045}, arriveMs: 1_060},
+		{name: "a long chained burst's gap is measured from its start", earlier: []int64{1_000, 1_015, 1_030, 1_045}, arriveMs: 1_500, wantGapMs: 500, wantOK: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			var b Burst
+			for _, ms := range tc.earlier {
+				b.Arrive(at(ms))
+			}
+
+			// Act
+			gap, ok := b.Arrive(at(tc.arriveMs))
+
+			// Assert
+			if ok != tc.wantOK || gap.Milliseconds() != tc.wantGapMs {
+				t.Fatalf("Arrive() = %v, %v, want %dms, %v", gap, ok, tc.wantGapMs, tc.wantOK)
+			}
+		})
+	}
+}
+
+// every answers the instants from through to, step milliseconds apart.
+func every(from, to, step int64) []int64 {
+	var out []int64
+	for ms := from; ms <= to; ms += step {
+		out = append(out, ms)
+	}
+	return out
+}
+
+func TestBurstWindow(t *testing.T) {
+	const expected = 500
+	cases := []struct {
+		name    string
+		arrived []int64
+		drawMs  int64
+		want    uint32
+	}{
+		{name: "a block no fragment reached gets the full window", arrived: nil, drawMs: 1_000, want: expected},
+		{name: "a burst's first fragment gets the full window", arrived: []int64{1_000}, drawMs: 1_000, want: expected},
+		{name: "a later fragment of the burst gets what is left of the burst's window", arrived: []int64{1_000, 1_003, 1_010}, drawMs: 1_010, want: expected - 10},
+		{name: "a draw soon after the burst keeps the burst's deadline", arrived: []int64{1_000, 1_010}, drawMs: 1_030, want: expected - 30},
+		{name: "a draw after a pause past the threshold gets the full window", arrived: []int64{1_000, 1_010}, drawMs: 1_031, want: expected},
+		{name: "a burst outlasting its window gets the floor", arrived: every(1_000, 1_600, 20), drawMs: 1_600, want: 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			var b Burst
+			for _, ms := range tc.arrived {
+				b.Arrive(at(ms))
+			}
+
+			// Act
+			got := b.Window(expected, at(tc.drawMs))
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("Window() = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
