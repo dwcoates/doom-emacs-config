@@ -176,7 +176,9 @@ func (*RollBackResponse_Error) isRollBackResponse_Result() {}
 type RollBackSuccess struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The prompt rolled back, as the user said it: its text and attachments,
-	// for the composer to hold again.
+	// for the composer to hold again. A quote the prompt replied with
+	// (conversation.v1.UserQuoteBlock) is left out: a resend replies to
+	// whatever is selected when it is sent.
 	Prompt *v11.UserSaid `protobuf:"bytes,1,opt,name=prompt,proto3" json:"prompt,omitempty"`
 	// How many files were restored. Present exactly when the plan restored
 	// files.
