@@ -258,6 +258,9 @@ type DB interface {
 	// SetMergedSectionFolded records whether the recently-merged band is
 	// collapsed.
 	SetMergedSectionFolded(ctx context.Context, folded bool) error
+	// SetMaturityFolded records whether a maturity stage's section is
+	// collapsed.
+	SetMaturityFolded(ctx context.Context, stage MaturityStage, folded bool) error
 	// SetGrouping records which grouping every page shows.
 	SetGrouping(ctx context.Context, grouping Grouping) error
 	// SidebarView loads the sidebar's view state that belongs to no row, or
