@@ -411,6 +411,53 @@ describe("mountFeed: the bubble kinds", () => {
     expect(h.calls.openFeed.map((req) => req.feed?.value)).toContain("m1");
   });
 
+  it("folds an open merge bubble when a push ships the daemon's success default folded", async () => {
+    // Arrange
+    const channels = new Map<string, Channel<WatchFeedResponse>>();
+    const channel = new Channel<WatchFeedResponse>();
+    channels.set("tok:root", channel);
+    const h = harness({ channels });
+    const { host } = mount(h);
+    await settle();
+    channel.push(push(mergeRow("m1", false)));
+    await settle();
+    // Act
+    channel.push(push(mergeRow("m1", true)));
+    await settle();
+    // Assert
+    expect(host.querySelector<HTMLElement>(".bubble-fold")?.dataset.expanded).toBe("false");
+  });
+
+  it("opens a merge bubble whose recorded fold is the reader's open", async () => {
+    // Arrange
+    const h = rootOnly([mergeRow("m1", false, undefined, "reader")]);
+    // Act
+    mount(h);
+    await settle();
+    // Assert
+    expect(h.calls.openFeed.map((req) => req.feed?.value)).toContain("m1");
+  });
+
+  it("refuses a merge row whose fold names no decider as an undecodable frame", async () => {
+    // Arrange
+    const row = mergeRow("m1", false);
+    if (row.row.case !== "activity" || row.row.value.unit.case !== "merge") throw new Error("not a merge row");
+    const fold = row.row.value.unit.value.head?.fold;
+    if (fold === undefined) throw new Error("no fold");
+    fold.decidedBy = { case: undefined };
+    const channels = new Map<string, Channel<WatchFeedResponse>>();
+    const channel = new Channel<WatchFeedResponse>();
+    channels.set("tok:root", channel);
+    const h = harness({ channels });
+    mount(h);
+    await settle();
+    // Act
+    channel.push(push(row));
+    await settle();
+    // Assert
+    expect(h.sink.reported).toEqual(["frameUndecodable"]);
+  });
+
   it("opens an unfolded merge bubble's sub-feed by its own id", async () => {
     const h = rootOnly([mergeRow("m1", false)]);
     mount(h);
