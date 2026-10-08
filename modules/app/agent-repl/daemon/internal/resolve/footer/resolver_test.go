@@ -1162,3 +1162,28 @@ func TestConcurrentChangesLeaveTheNewestViewPublished(t *testing.T) {
 		t.Fatalf("published status = disconnected %+v, want none: a stale view (a fault still standing) was published after a newer one", got)
 	}
 }
+
+func TestEndTurnLeavesNoTurnInFlight(t *testing.T) {
+	cases := []struct {
+		name string
+		turn *TurnStarted
+	}{
+		{name: "a turn in flight ends", turn: &TurnStarted{At: instant, Act: ActPrompt}},
+		{name: "no turn in flight stays so", turn: nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			s := newWSState()
+			s.turn = tc.turn
+
+			// Act
+			s.endTurn()
+
+			// Assert
+			if s.turn != nil {
+				t.Fatalf("turn = %+v after endTurn, want none in flight", s.turn)
+			}
+		})
+	}
+}
