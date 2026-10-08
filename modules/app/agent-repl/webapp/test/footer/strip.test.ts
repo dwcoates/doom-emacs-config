@@ -376,6 +376,33 @@ describe("drawFooterClock", () => {
     const { row } = drawStrip();
     expect(row.querySelector("[data-interrupt]")).toBeNull();
   });
+
+  // OWNER RULING, 2026-10-08: the clock is the duration of the prompt, frozen
+  // at the turn's end and standing until the next submission.
+  it("draws a finished turn's duration from its two instants", () => {
+    const { row } = drawStrip({ turnStartedAtMs: BigInt(NOW - 600_000), turnEndedAtMs: BigInt(NOW - 558_000) });
+    expect(row.querySelector(".footer-clock .info-time")?.textContent).toBe("42s");
+  });
+
+  it("never ticks a finished turn's duration", () => {
+    const { row } = drawStrip({ turnStartedAtMs: BigInt(NOW - 600_000), turnEndedAtMs: BigInt(NOW - 558_000) });
+    vi.advanceTimersByTime(3000);
+    expect(row.querySelector(".footer-clock .info-time")?.textContent).toBe("42s");
+  });
+
+  it("draws no stop control for a finished turn's clock", () => {
+    const { row } = drawStrip({ turnStartedAtMs: BigInt(NOW - 600_000), turnEndedAtMs: BigInt(NOW - 558_000) });
+    expect(row.querySelector("[data-interrupt]")).toBeNull();
+  });
+
+  it("marks a finished turn's clock as not live", () => {
+    const { row } = drawStrip({ turnStartedAtMs: BigInt(NOW - 600_000), turnEndedAtMs: BigInt(NOW - 558_000) });
+    expect(row.querySelector(".footer-clock")?.getAttribute("data-live")).toBe("false");
+  });
+
+  it("refuses a turn's end with no start", () => {
+    expect(() => drawStrip({ turnEndedAtMs: BigInt(NOW) })).toThrow(MalformedView);
+  });
 });
 
 // ---- the tokens cell -------------------------------------------------------
@@ -401,29 +428,22 @@ describe("drawFooterTokensCell", () => {
     expect(row.querySelector("[data-verdict]")).toBeNull();
   });
 
-  it.each([
-    ["complete", "✓"],
-    ["incomplete", "✗"],
-    ["invalid", "✗"],
-  ])("draws the %s verdict as %s", (arm, glyph) => {
+  it("draws the complete verdict as ✓", () => {
+    const { row } = drawStrip({
+      tokens: { input: { text: "18.2k in" }, verdict: { verdict: { case: "complete", value: {} } } },
+    });
+    const badge = row.querySelector("[data-verdict]");
+    expect(badge?.getAttribute("data-verdict")).toBe("complete");
+    expect(badge?.textContent).toBe("✓");
+  });
+
+  // OWNER RULING, 2026-10-08: no red ✗ in the tokens cell. A failing verdict's
+  // evidence is the token panel's line, never a glyph on the strip.
+  it.each(["incomplete", "invalid"])("draws the %s verdict as no glyph at all, only the figure", (arm) => {
     const { row } = drawStrip({
       tokens: { input: { text: "18.2k in" }, verdict: { verdict: { case: arm as never, value: {} } } },
     });
-    const badge = row.querySelector("[data-verdict]");
-    expect(badge?.getAttribute("data-verdict")).toBe(arm);
-    expect(badge?.textContent).toBe(glyph);
-  });
-
-  it("gives the invalid verdict a title of its own, distinct from incomplete's", () => {
-    const { row: invalid } = drawStrip({
-      tokens: { input: { text: "x" }, verdict: { verdict: { case: "invalid", value: {} } } },
-    });
-    const { row: incomplete } = drawStrip({
-      tokens: { input: { text: "x" }, verdict: { verdict: { case: "incomplete", value: {} } } },
-    });
-    expect(invalid.querySelector<HTMLElement>("[data-verdict]")?.title).not.toBe(
-      incomplete.querySelector<HTMLElement>("[data-verdict]")?.title,
-    );
+    expect(row.querySelector(".footer-tokens")?.textContent).toBe("18.2k in");
   });
 
   it("refuses a verdict badge whose oneof sets no arm", () => {
@@ -523,6 +543,22 @@ describe("drawFooterLiveWorkChips", () => {
   it("draws NO chips for a quiet workspace", () => {
     const { row } = drawStrip();
     expect(row.querySelectorAll(".footer-chip")).toHaveLength(0);
+  });
+
+  it("draws NO chips cell at all for a quiet workspace", () => {
+    const { row } = drawStrip();
+    expect(row.querySelector(".footer-chips")).toBeNull();
+  });
+
+  it.each([
+    ["agents", { agents: { count: 1 } }],
+    ["tasks", { tasks: { done: 0, total: 1 } }],
+    ["shells", { shells: { count: 1 } }],
+    ["monitors", { monitors: { count: 1 } }],
+    ["crons", { crons: { count: 1 } }],
+  ])("draws the chips cell when the %s chip alone is set", (_chip, liveWork) => {
+    const { row } = drawStrip({ liveWork });
+    expect(row.querySelector(".footer-chips")).not.toBeNull();
   });
 
   it.each([
@@ -667,6 +703,24 @@ describe("drawClientDisconnectedStrip: the one strip this client composes", () =
   it("draws NO clock, tokens or chips when nothing was ever pushed", () => {
     const row = drawClientDisconnectedStrip("daemon unreachable", "AnswerColdGate: unavailable");
     expect(row.querySelectorAll(".footer-clock, .footer-tokens, .footer-chips")).toHaveLength(0);
+  });
+
+  it("draws no chips cell from a last pushed strip that had no chip", () => {
+    const h = harness();
+    const row = drawClientDisconnectedStrip("daemon unreachable", "AnswerColdGate: unavailable", {
+      strip: strip({}),
+      deps: { ctx: h.ctx, selection: null, onSelect: () => {}, stops: createStopControls(h.ctx), expiry: IGNORED_EXPIRY },
+    });
+    expect(row.querySelector(".footer-chips")).toBeNull();
+  });
+
+  it("keeps the last pushed chips cell when it had a chip", () => {
+    const h = harness();
+    const row = drawClientDisconnectedStrip("daemon unreachable", "AnswerColdGate: unavailable", {
+      strip: strip({ liveWork: { shells: { count: 1 } } }),
+      deps: { ctx: h.ctx, selection: null, onSelect: () => {}, stops: createStopControls(h.ctx), expiry: IGNORED_EXPIRY },
+    });
+    expect(row.querySelector('.footer-chips [data-chip="shells"]')).not.toBeNull();
   });
 
   it("keeps the last pushed tokens cell, the figures being the last ones and not untrue", () => {

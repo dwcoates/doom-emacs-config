@@ -256,8 +256,9 @@ export const EASE_MAX_START_RATIO = 2.8;
  * Where a reveal the daemon has paced (frontend.v1.FeedResponseRevealWindow)
  * stands `elapsedMs` into its window: everything from `from` to `to` is
  * revealed across `windowMs`, the time the daemon expects to pass before the
- * next fragment arrives, so a steady stream reads as one continuous type-out
- * rather than a burst and a stall per push.
+ * next burst of fragments arrives (every push of one burst names the same
+ * deadline), so a clumped stream reads as one continuous type-out rather than
+ * a burst and a stall per clump.
  *
  * `from` is what was already on screen when the push was drawn, so text still
  * unrevealed from the previous push is spread along with the new text rather

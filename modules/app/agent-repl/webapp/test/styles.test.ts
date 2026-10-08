@@ -1529,8 +1529,8 @@ describe("the prompt borders", () => {
     // Arrange / Act
     const borders = bordersOn(prompt(variant, working), hooks);
 
-    // Assert
-    expect(borders).toEqual(["border: 1px solid var(--agent-prompt-border)"]);
+    // Assert — half as thick as before (owner ruling, 2026-10-08).
+    expect(borders).toEqual(["border: 0.5px solid var(--agent-prompt-border)"]);
   });
 
   it.each([
@@ -2846,7 +2846,12 @@ describe("the one bubble rule set", () => {
             // The dimmed prose of a thinking or interim bubble (owner request,
             // 2026-10-08) is the one text color a variant sets; its own suite
             // pins it.
-            !(prop === "color" && rule.selectors.every((sel) => DIMMED_TEXT_SELECTORS.includes(sel))),
+            !(prop === "color" && rule.selectors.every((sel) => DIMMED_TEXT_SELECTORS.includes(sel))) &&
+            // NO BUBBLE AT ALL (owner ruling, 2026-10-08): the same two
+            // selectors also turn off the base rule's box-shadow, the one
+            // remaining visible highlight once their fill is already the
+            // page's own --bg; its own suite below pins it.
+            !(prop === "box-shadow" && rule.selectors.every((sel) => DIMMED_TEXT_SELECTORS.includes(sel))),
         ),
     );
     // Assert — the working wave's own animation is the one other thing a
@@ -2954,9 +2959,6 @@ function rgbOf(block: string, token: string): [number, number, number] {
   return [0, 2, 4].map((i) => Number.parseInt(hex.slice(i, i + 2), 16)) as [number, number, number];
 }
 
-/** The spread between an RGB triple's strongest and weakest channel. */
-const chroma = ([r, g, b]: [number, number, number]): number => Math.max(r, g, b) - Math.min(r, g, b);
-
 /** An RGB triple's hue in degrees, 0 to 360. */
 const hueOf = ([r, g, b]: [number, number, number]): number => {
   const [max, min] = [Math.max(r, g, b), Math.min(r, g, b)];
@@ -2995,55 +2997,21 @@ describe("hueOf", () => {
   });
 });
 
-describe("the held prompt's tint: much more grey than blue", () => {
-  it.each([
-    ["light", () => declarationsOf(":root") ?? ""],
-    ["dark", () => darkThemeBlock()],
-  ])("carries a subtle blue hue in the %s theme", (_theme, block) => {
-    // Arrange / Act
-    const [r, g, b] = rgbOf(block(), "--held-prompt-bg");
-    // Assert — blue is the strongest channel, however slightly.
-    expect(b > r && b >= g).toBe(true);
-  });
-
-  it.each([
-    ["light", () => declarationsOf(":root") ?? ""],
-    ["dark", () => darkThemeBlock()],
-  ])("is far greyer than the prompt blue in the %s theme", (_theme, block) => {
-    // Arrange / Act
-    const held = chroma(rgbOf(block(), "--held-prompt-bg"));
-    const prompt = chroma(rgbOf(block(), "--user"));
-    // Assert — at most a third of the prompt blue's saturation.
-    expect(held * 3).toBeLessThanOrEqual(prompt);
-  });
-
-  it("caps the held variant at half the one bubble width token", () => {
-    // Arrange / Act
-    const rule = declarationsOf('.bubble[data-variant="held"]') ?? "";
-    // Assert
-    expect(rule).toMatch(/max-width:\s*calc\(var\(--bubble-max-width\) \/ 2\)\s*;/);
-  });
-
-});
-
 /**
- * THE HELD FILL IS NEARLY TRANSPARENT (owner ruling, 2026-09-27): 5% of the
- * held tint over 95% of the feed's background, mixed from the two tokens so
- * each theme's own pair decides it and no resulting hex is ever written down.
+ * THE HELD PROMPT SHARES THE RESPONSE BUBBLE'S FILL (owner ruling,
+ * 2026-10-08, superseding 2026-09-23's grey-blue tint and 2026-09-27's 5%
+ * mix of it): a held prompt's background must be the SAME as a response
+ * bubble's, through one shared token rather than a copied hex value, in
+ * both themes.
  */
-describe("the held prompt's fill: 5% of the tint over the feed", () => {
-  /** The held fill the mix yields over BLOCK's tokens, channel by channel. */
-  const fillOver = (block: string): [number, number, number] => {
-    const tint = rgbOf(block, "--held-prompt-bg");
-    const feed = rgbOf(block, "--bg");
-    return [0, 1, 2].map((i) => 0.05 * tint[i] + 0.95 * feed[i]) as [number, number, number];
-  };
-
-  it("mixes the held variant's fill from the tint and the feed background", () => {
+describe("the held prompt's fill: the response bubble's own token", () => {
+  it("feeds --bubble-bg from --assistant, exactly as the response role does", () => {
     // Arrange / Act
-    const rule = declarationsOf('.bubble[data-variant="held"]') ?? "";
+    const held = declarationsOf('.bubble[data-variant="held"]') ?? "";
+    const response = declarationsOf('.bubble[data-role="response"]') ?? "";
     // Assert
-    expect(rule).toMatch(/--bubble-bg:\s*color-mix\(in srgb, var\(--held-prompt-bg\) 5%, var\(--bg\)\)\s*;/);
+    expect(held).toMatch(/--bubble-bg:\s*var\(--assistant\)\s*;/);
+    expect(response).toMatch(/--bubble-bg:\s*var\(--assistant\)\s*;/);
   });
 
   it("hardcodes no fill color of its own", () => {
@@ -3053,28 +3021,27 @@ describe("the held prompt's fill: 5% of the tint over the feed", () => {
     expect(rule).not.toMatch(/#[0-9a-fA-F]{3,8}\b|rgba?\(/);
   });
 
-  it.each([
-    ["light", () => declarationsOf(":root") ?? ""],
-    ["dark", () => darkThemeBlock()],
-  ])("sits within two steps of the feed background on every channel in the %s theme", (_theme, block) => {
-    // Arrange
-    const feed = rgbOf(block(), "--bg");
-    // Act
-    const fill = fillOver(block());
-    // Assert
-    expect(fill.map((channel, i) => Math.abs(channel - feed[i]) <= 2)).toEqual([true, true, true]);
+  it("retires the old --held-prompt-bg tint token entirely", () => {
+    // Arrange / Act / Assert
+    expect(stylesheet).not.toMatch(/--held-prompt-bg\s*:/);
   });
 
   it.each([
     ["light", () => declarationsOf(":root") ?? ""],
     ["dark", () => darkThemeBlock()],
-  ])("still differs from the feed background in the %s theme", (_theme, block) => {
-    // Arrange
-    const feed = rgbOf(block(), "--bg");
-    // Act
-    const fill = fillOver(block());
+  ])("resolves to the same RGB as --assistant in the %s theme", (_theme, block) => {
+    // Arrange / Act
+    const assistant = rgbOf(block(), "--assistant");
+    // Assert — the held fill IS --assistant, so they are the same color by
+    // construction; this pins that --assistant itself still resolves.
+    expect(assistant).toHaveLength(3);
+  });
+
+  it("caps the held variant at half the one bubble width token", () => {
+    // Arrange / Act
+    const rule = declarationsOf('.bubble[data-variant="held"]') ?? "";
     // Assert
-    expect(fill.some((channel, i) => Math.round(channel) !== feed[i])).toBe(true);
+    expect(rule).toMatch(/max-width:\s*calc\(var\(--bubble-max-width\) \/ 2\)\s*;/);
   });
 });
 
@@ -3213,11 +3180,11 @@ const luminance = ([r, g, b]: [number, number, number]): number => {
 };
 
 describe("the dark theme's iMessage fills (owner ruling, 2026-09-27)", () => {
-  it("paints a prompt the iMessage dark-mode blue, a notch darker", () => {
+  it("paints a prompt the iMessage dark-mode blue, a further notch darker (owner ruling, 2026-10-08)", () => {
     // Arrange / Act
     const user = rgbOf(darkThemeBlock(), "--user");
     // Assert
-    expect(user).toEqual([0x09, 0x78, 0xea]);
+    expect(user).toEqual([0x08, 0x6e, 0xd6]);
   });
 
   it.each([
@@ -3599,6 +3566,80 @@ describe("the page-colored fill", () => {
 
     // Assert
     expect(body).toMatch(/background:\s*var\(--bg\)/);
+  });
+});
+
+/**
+ * NO BUBBLE AT ALL (owner ruling, 2026-10-08). A thinking bubble and an
+ * interim response already carry the page's own `--bg` as their fill (see
+ * "the page-colored fill" above); this is the one thing that still painted a
+ * visible bubble around them with no fill at all — the base rule's
+ * box-shadow, a soft drop shadow plus an inset top-edge highlight
+ * (--bubble-shadow). It is turned off for exactly these two kinds, and only
+ * these two: every other response and prompt kind keeps it.
+ */
+describe("the box-shadow neither a thinking nor an interim bubble may carry", () => {
+  /** Whether SELECTOR styles a bubble ITSELF (not its strip, box or content). */
+  const onBubble = (selector: string): boolean => /^\.bubble(?![-\w])[^\s>+~]*$/.test(selector);
+
+  /** The `box-shadow` the cascade resolves for a bubble with ATTRS and HOOKS. */
+  function shadowOf(attrs: Readonly<Record<string, string>>, hooks: readonly string[]): string {
+    const teardown = installStylesheet();
+    try {
+      const el = document.createElement("div");
+      el.className = ["bubble", "md", ...hooks].join(" ");
+      for (const [name, value] of Object.entries(attrs)) el.setAttribute(name, value);
+      document.body.append(el);
+      const got = cascadedValue(el, "box-shadow");
+      el.remove();
+      return got;
+    } finally {
+      teardown();
+    }
+  }
+
+  it("drops the bubble shadow and highlight on a thinking bubble", () => {
+    // Arrange / Act
+    const got = shadowOf({ "data-role": "response", "data-variant": "thinking", "data-state": "success" }, ["assistant", "thinking-bubble"]);
+
+    // Assert
+    expect(got).toBe("none");
+  });
+
+  it("drops the bubble shadow and highlight on an interim response", () => {
+    // Arrange / Act
+    const got = shadowOf({ "data-role": "response", "data-variant": "response", "data-state": "success" }, ["assistant", "interim-response"]);
+
+    // Assert
+    expect(got).toBe("none");
+  });
+
+  it("keeps the bubble shadow on the turn's final answer", () => {
+    // Arrange / Act — only the two dimmed kinds drop it; every other kind,
+    // final response included, still reads as a raised, top-lit card.
+    const got = shadowOf({ "data-role": "response", "data-variant": "response", "data-state": "success" }, ["assistant", "final-response"]);
+
+    // Assert
+    expect(got).toBe("var(--bubble-shadow)");
+  });
+
+  it("keeps the bubble shadow on a user prompt", () => {
+    // Arrange / Act
+    const got = shadowOf({ "data-role": "prompt", "data-variant": "user" }, ["user"]);
+
+    // Assert
+    expect(got).toBe("var(--bubble-shadow)");
+  });
+
+  it("sets box-shadow on no other selector than the base rule and these two kinds", () => {
+    // Arrange / Act — every rule in the sheet that sets box-shadow at all.
+    const shadowRules = rulesOf(stylesheet).filter((rule) => /(?:^|;)\s*box-shadow\s*:/.test(rule.declarations));
+    const onABubble = shadowRules.filter((rule) => rule.selectors.some(onBubble));
+
+    // Assert — the base rule (every bubble's default) plus the dimmed pair.
+    expect(onABubble.flatMap((rule) => rule.selectors).sort()).toEqual(
+      [".bubble", ...DIMMED_TEXT_SELECTORS].sort(),
+    );
   });
 });
 

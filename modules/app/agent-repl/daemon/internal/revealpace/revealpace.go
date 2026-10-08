@@ -1,14 +1,22 @@
-// Package revealpace keeps the daemon's record of how often streamed fragments
-// arrive, per model and per block kind, and turns it into the reveal window the
+// Package revealpace keeps the daemon's record of how often streamed text
+// arrives, per model and per block kind, and turns it into the reveal window the
 // webapp paces a response's type-out by (frontend.v1.FeedResponseRevealWindow,
 // docs/protobuf-design/streaming-reveal-window.md).
 //
 // THE DAEMON MEASURES, THE CLIENT ONLY SPREADS. Each key holds a rolling window
-// of the WindowSize most recent gaps between consecutive fragments of one
-// block. Once the window is full its recency-weighted average is the expected
-// gap until the next fragment, and the client spreads whatever it has not yet
-// shown across that span. Until it is full there is no figure, and the client
-// paces with its own default.
+// of the WindowSize most recent gaps between consecutive BURSTS of one block
+// (see Burst). Once the window is full its average is the expected time from a
+// burst's start to the next burst's, and each draw states what is left of it
+// (Burst.Window), so the client spreads whatever it has not yet shown across
+// the time until the next burst. Until the window is full there is no figure,
+// and the client paces with its own default.
+//
+// WHY BURSTS, NOT FRAGMENTS. The vendor's text deltas reach the daemon in
+// clumps: on 2026-10-08 (workspace 096682deb5314ad3, 15:31:25-28) the shim
+// received ~11 deltas within 1ms, then nothing for ~450ms, on a steady ~530ms
+// period. Measured per fragment, ten 2ms gaps and one 500ms gap averaged to
+// ~50ms, so a whole clump was revealed in a frame or two and the reader then
+// watched nothing for the rest of the period: no pacing at all to the eye.
 //
 // The windows live in memory, loaded once at boot, and a key's window is
 // written back when the caller says a block of it settled (Persist), so the
@@ -34,6 +42,16 @@ const WindowSize = 25
 // newest gap weighs 1, the one before it Decay, the one before that Decay², so
 // the latest cadence dominates the average without one outlier owning it.
 const Decay = 0.85
+
+// BurstThreshold is the longest pause between two fragments of one burst.
+//
+// Inside a clump the daemon receives fragments as fast as it can fold them:
+// 1-4ms apart on the 2026-10-08 logs, the first after the store's write batch
+// up to ~8ms, the slowest observed 14-19ms. The vendor's own cadence between
+// fragments that are NOT clumped was 40-60ms on the same logs. 20ms sits between
+// the two, and is just over one 60fps frame (16.7ms): text arriving within a
+// frame of the previous text could not be revealed apart from it anyway.
+const BurstThreshold = 20 * time.Millisecond
 
 // Store is the durable record the windows are loaded from and written to
 // (wsm.DB).
@@ -77,7 +95,7 @@ func Load(ctx context.Context, store Store, log dlog.Logger) (*Pacer, error) {
 	return p, nil
 }
 
-// Observe adds one measured gap to key's window, dropping the oldest once the
+// Observe adds one measured gap between two bursts' starts to key's window, dropping the oldest once the
 // window is full.
 func (p *Pacer) Observe(key Key, gap time.Duration) {
 	ms := gap.Milliseconds()
@@ -85,14 +103,15 @@ func (p *Pacer) Observe(key Key, gap time.Duration) {
 	p.windows[key] = newest(append(p.windows[key], ms))
 	held := len(p.windows[key])
 	p.mu.Unlock()
-	p.log.Debug("daemon.revealpace.observed", "recorded a streamed-fragment gap", dlog.Context{
+	p.log.Debug("daemon.revealpace.observed", "recorded a streamed-burst gap", dlog.Context{
 		"model": key.Model, "kind": string(key.Kind), "gap_ms": ms, "held": held,
 	})
 }
 
-// ExpectedGap answers the recency-weighted average gap of key's window, in
-// whole milliseconds and never below 1, once the window is full. False while
-// it is not: too few gaps have been seen to predict the next one.
+// ExpectedGap answers the expected time from one burst's start to the next's
+// (weightedAverage of key's window), in whole milliseconds and never below 1,
+// once the window is full. False while it is not: too few gaps have been seen
+// to predict the next one.
 func (p *Pacer) ExpectedGap(key Key) (uint32, bool) {
 	p.mu.Lock()
 	gaps := p.windows[key]
@@ -127,16 +146,83 @@ func newest(gaps []int64) []int64 {
 	return append([]int64(nil), gaps[len(gaps)-WindowSize:]...)
 }
 
-// weightedAverage answers the Decay-weighted average of gaps (oldest first),
-// rounded to whole milliseconds and never below 1: a reveal window of zero
-// would mean "reveal in no time", which is a snap, not a pace.
+// weightedAverage answers the expected gap of a window (oldest first): the
+// Decay-weighted average of the gaps, each ALSO weighted by its own length,
+// rounded to whole milliseconds and never below 1. A reveal window of zero
+// would mean "reveal in no time", which is a snap, not a pace; a window of
+// gaps that are all zero has no length to weigh by and answers that floor.
+//
+// WHY LENGTH-WEIGHTED. The bursts do not come evenly: a big clump is followed
+// by a few lone fragments ~50ms apart and then a pause of several hundred ms.
+// No single window fits both, and the two ways of missing are not alike. A
+// window too long for the gap that follows only slows the type-out (the text
+// still unshown is spread again across the next window); a window too short
+// for it STOPS the type-out until the next burst, which is the stall this
+// package exists to remove. Weighting each gap by its length is the expected
+// gap as seen from a random instant (sum g² / sum g), which leans toward the
+// long pauses. Replayed against the 2026-10-08 probe's arrivals, the reveal sat
+// still for 22% of the streaming time with it against 42% with the plain
+// average (and 60% measuring per fragment).
 func weightedAverage(gaps []int64) uint32 {
 	var sum, weights float64
 	weight := 1.0
 	for i := len(gaps) - 1; i >= 0; i-- {
-		sum += weight * float64(gaps[i])
-		weights += weight
+		gap := float64(gaps[i])
+		sum += weight * gap * gap
+		weights += weight * gap
 		weight *= Decay
 	}
+	if weights == 0 {
+		return 1
+	}
 	return uint32(max(1, math.Round(sum/weights)))
+}
+
+// Burst is one block's record of the burst its text is arriving in: when the
+// burst began and when its latest fragment arrived. The zero value is a block
+// no fragment has reached yet.
+type Burst struct {
+	start, last time.Time
+}
+
+// Arrive records a text-bearing fragment arriving at now. A fragment more than
+// BurstThreshold after the previous one starts a new burst, and the time since
+// the previous burst STARTED is a gap sample (the answer, with true). The
+// first fragment of a block only starts the clock: its wait is the time to
+// first token, not the streaming cadence. Any other fragment joins the burst
+// and samples nothing.
+func (b *Burst) Arrive(now time.Time) (time.Duration, bool) {
+	switch {
+	case b.start.IsZero():
+		b.start, b.last = now, now
+		return 0, false
+	case now.Sub(b.last) <= BurstThreshold:
+		b.last = now
+		return 0, false
+	default:
+		gap := now.Sub(b.start)
+		b.start, b.last = now, now
+		return gap, true
+	}
+}
+
+// Window answers the reveal window a draw at now carries, in whole
+// milliseconds and never below 1, given EXPECTED, the expected time from one
+// burst's start to the next's.
+//
+// A DRAW INSIDE A BURST STATES WHAT IS LEFT OF THE BURST'S WINDOW, measured from
+// the burst's start, so every push of one clump names the SAME deadline and the
+// client spreads the whole clump toward it. Restating the full window on each
+// push would push the deadline out by the clump's own length, and a window
+// measured per push would shrink it to nothing.
+//
+// A draw that is not inside a burst — the block's settled whole landing after
+// a pause, or a block with no fragment yet — starts afresh: whatever it adds
+// is spread across the full window. Window never records anything.
+func (b Burst) Window(expected uint32, now time.Time) uint32 {
+	if b.start.IsZero() || now.Sub(b.last) > BurstThreshold {
+		return expected
+	}
+	left := int64(expected) - now.Sub(b.start).Milliseconds()
+	return uint32(max(1, left))
 }

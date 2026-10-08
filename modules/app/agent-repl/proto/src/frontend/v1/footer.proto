@@ -20,7 +20,8 @@
 //                  the small facts a step has (queue position, commit counts).
 //   StatusActivity the finest, DYNAMIC line: typed KINDS whose payload is
 //                  mostly text the daemon composed.
-//   Clock          how long the current turn has been running.
+//   Clock          how long the current turn has been running, or how long
+//                  the most recent turn ran, until the next submission.
 //   Tokens cell    how much the in-flight turn has added to the MAIN agent's
 //                  context window (`--` with no turn in flight), with two
 //                  glyphs; a click target opening the token panel.
@@ -89,7 +90,8 @@ message FooterStrip {
   // Tags 2-3 are RETIRED: the sub-status and activity cells are no longer
   // siblings of the status — each lives INSIDE the status arm that makes it
   // legal, so an illegal pairing is unrepresentable.
-  // The turn clock. The client ticks from the carried instant.
+  // The turn clock. The client ticks from the carried instant while the turn
+  // runs, and draws the most recent turn's frozen duration after it ends.
   FooterClock clock = 4;
   // The tokens CELL: the in-flight turn's FRESH INPUT for the MAIN agent,
   // colored by its size, plus two glyphs, and the click target that opens
@@ -2183,9 +2185,35 @@ message FooterAllowanceRejected {}
 
 // ---- 4. Clock ------------------------------------------------------------
 
-// The turn clock. UNSET = no turn in flight; the cell renders idle.
+// The turn clock: the duration of the prompt, from the turn's start to its
+// end. It follows the tokens cell's lifetime exactly (FooterTokensCell).
+//
+// WHILE A TURN RUNS: `turn_started_at_ms` is set and `turn_ended_at_ms` is
+// unset; the client ticks the elapsed time from the start instant, and the
+// strip offers the turn's stop.
+//
+// WITH NO TURN IN FLIGHT the clock is the MOST RECENT TURN'S, frozen: both
+// instants are set and the client draws `turn_ended_at_ms -
+// turn_started_at_ms` once, never ticking and offering no stop. The end is the
+// first edge that ended the turn, however it ended (completed, failed,
+// interrupted, its query or shim dead, a compaction's cut). It clears the
+// moment the next prompt is SUBMITTED — the same edge that clears the tokens
+// figure; a prompt held in the queue submits nothing and leaves it standing. A
+// daemon relaunch or handover is not a submission: the relaunched daemon
+// restates the clock from the main agent's opening history page — the places
+// of the newest turn's prompt and of its main-agent terminal — when the page
+// holds both.
+//
+// BOTH UNSET = no turn's clock stands (no turn has run, a submission the shim
+// refused, a restated turn whose page lacked its prompt or terminal); the cell
+// renders idle. `turn_ended_at_ms` set without `turn_started_at_ms` is
+// malformed.
 message FooterClock {
+  // When the turn was accepted, epoch ms on the daemon's clock.
   optional int64 turn_started_at_ms = 1;
+  // When the turn ended, epoch ms on the daemon's clock. Set only with no
+  // turn in flight, on the most recent turn's frozen clock.
+  optional int64 turn_ended_at_ms = 2;
 }
 
 // ---- 5. Tokens cell -------------------------------------------------------
@@ -2272,16 +2300,21 @@ message FooterTokensCellInput {
 message FooterTokensCellAlarm {}
 
 // The accounting badge. The set arm picks the glyph treatment; the evidence
-// behind it is the panel's verdict line, never this badge.
+// behind it is the panel's verdict line, never this badge. ONLY `complete`
+// draws a glyph in the cell (owner ruling, 2026-10-08: no red ✗ in the tokens
+// cell); a failing arm draws nothing there, and its evidence is the panel's
+// verdict line alone.
 message FooterTokensCellVerdict {
   // Which verdict the settled turn's reconciliation reached. Exactly one arm
   // is set; the arms are mutually exclusive readings of one reconciliation.
   oneof verdict {
     // Every response's usage was observed and the sums reconcile (✓).
     FooterTokensCellVerdictComplete complete = 1;
-    // Some responses carried no usage, so the figures are a floor (✗).
+    // Some responses carried no usage, so the figures are a floor (no glyph
+    // in the cell).
     FooterTokensCellVerdictIncomplete incomplete = 2;
-    // The observed usage contradicts itself (✗) — a producer defect.
+    // The observed usage contradicts itself — a producer defect (no glyph in
+    // the cell).
     FooterTokensCellVerdictInvalid invalid = 3;
   }
 }
@@ -2297,7 +2330,8 @@ message FooterTokensCellVerdictInvalid {}
 // ---- 6. Live-work chips ----------------------------------------------------
 
 // The live-work chips. An UNSET chip is NOT DRAWN — nothing of that kind
-// exists right now — so a quiet workspace shows no chips at all. A set chip
+// exists right now — so a quiet workspace shows no chips at all, and with
+// every chip unset the strip draws no chips cell either (no empty box). A set chip
 // carries its count, daemon-resolved: the client never counts panel rows to
 // label a chip, even though the rows arrive in the same push (duplicate,
 // don't share). Detached UNMODELED work has no chip: its surfacing home is

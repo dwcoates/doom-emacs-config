@@ -420,6 +420,12 @@ type wsState struct {
 
 	// turn is the accepted turn in flight, nil when the main thread is idle.
 	turn *TurnStarted
+	// lastTurn is the most recent turn's span, the strip clock's frozen
+	// figure while no turn is in flight. Set at the turn's end (endTurn) or
+	// restated from a relaunched daemon's opening page (restoreLastClock);
+	// cleared at the next accepted submission (applyTurnStarted), the same
+	// edge that clears the tokens figure.
+	lastTurn *turnSpan
 	// sessionStarted reports that the session has announced itself, which on
 	// a route never seen is the bring-up window (ladder.AwaitingBringUp).
 	sessionStarted bool
@@ -750,4 +756,11 @@ func (s *wsState) nextOrder() int {
 // vendor is retrying a call and a turn is in flight to be held by it.
 func (s *wsState) retryBlocks() bool {
 	return s.retrying != nil && s.turn != nil
+}
+
+// turnSpan is one finished turn's span: from its acceptance to the first edge
+// that ended it.
+type turnSpan struct {
+	startedAt time.Time
+	endedAt   time.Time
 }

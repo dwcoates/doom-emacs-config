@@ -63,11 +63,18 @@ beforeAll(async () => {
   bubbleId = id;
   // THE BUBBLE IS LAZY: collapsed it is its one head line, and its tabs arrive
   // with the sub-feed when the reader opens it. Open it, as a reader would.
-  if (bubble()?.dataset.expanded !== "true") {
-    const expand = app.$(`[data-feed-row="${bubbleId}"] [data-expand]`);
-    if (expand === null) throw new Error("the collapsed merge bubble draws no expand control");
-    await app.clickElement(expand);
-  }
+  //
+  // THE FOLD IS AWAITED, NEVER LOOKED FOR ONCE. A merge bubble opens by
+  // default and the daemon folds it once the merge SUCCEEDS
+  // (resolve/feed/mergefold.go), and this merge succeeds at once: its branch
+  // is already on its target. A one-shot look at the still-open bubble skipped
+  // the expand, and the success fold that landed after it hid the strip. So
+  // the area waits for the succeeded bubble's fold, then opens it; the
+  // reader's fold wins from then on.
+  await awaitDrawn(app, "the succeeded merge bubble's fold", () => bubble()?.dataset.expanded === "false");
+  const expand = app.$(`[data-feed-row="${bubbleId}"] [data-expand]`);
+  if (expand === null) throw new Error("the folded merge bubble draws no expand control");
+  await app.clickElement(expand);
   await awaitDrawn(
     app,
     "the merge bubble's tab strip",
