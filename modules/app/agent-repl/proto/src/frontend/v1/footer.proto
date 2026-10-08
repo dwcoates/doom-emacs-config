@@ -885,9 +885,9 @@ message FooterStatusMerging {
 }
 // The merge holds the workspace and waits for it to fall free before it
 // starts, drawn "waiting for: the turn, 2 subagents, 1 shell". Every count is
-// what the awaited workspace runs NOW, restated whenever it changes; at least
-// one of them is non-zero while this stands, since a free workspace starts the
-// merge.
+// what the awaited workspace runs NOW, restated whenever it changes. All of
+// them read zero only while the awaited session's facts are not in yet (a
+// session coming up or being relaunched), which is never free.
 //
 // THE MERGE HAS NOT STARTED. Its bubble is not in the feed yet (it is placed
 // when the merge starts, so the bubble is always the last thing in the feed
