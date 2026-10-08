@@ -101,10 +101,8 @@ func TestRestartPushesTheWebappReloadAfterTheRelaunch(t *testing.T) {
 	}
 }
 
-// TestRestartRecordsARelaunchFailure covers where a relaunch failure now goes.
-// The verb ACCEPTS and the engine runs behind it -- it waits for freeness,
-// forever if need be -- so nobody is waiting on the failure to be returned;
-// it is recorded at ERROR instead, and the relaunch's own fault carries it.
+// TestRestartRecordsARelaunchFailure covers the record a relaunch failure
+// leaves: ERROR, and no reload.
 func TestRestartRecordsARelaunchFailure(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
@@ -112,9 +110,7 @@ func TestRestartRecordsARelaunchFailure(t *testing.T) {
 	f.rollout.relaunchErr = errors.New("the shim would not stand down")
 
 	// Act.
-	if err := f.verbs.Restart(context.Background(), "w1"); err != nil {
-		t.Fatalf("Restart: %v", err)
-	}
+	_ = f.verbs.Restart(context.Background(), "w1")
 
 	// Assert.
 	//
@@ -347,9 +343,7 @@ func TestADeferralToldToTheRestartIsRecordedAsAContractBreach(t *testing.T) {
 	f.rollout.relaunchErr = bounce.ErrDeferred
 
 	// Act.
-	if err := f.verbs.Restart(context.Background(), "w1"); err != nil {
-		t.Fatalf("Restart: %v", err)
-	}
+	_ = f.verbs.Restart(context.Background(), "w1")
 
 	// Assert: the fake signals only once the completion has run.
 	f.rollout.awaitRelaunch(t)
@@ -365,5 +359,98 @@ func TestADeferralToldToTheRestartIsRecordedAsAContractBreach(t *testing.T) {
 	}
 	if got := f.rollout.reloadCalls(); len(got) != 0 {
 		t.Fatalf("webapp reloads = %v, want none for a restart that did not finish", got)
+	}
+}
+
+// TestARestartAnswersAFailedRelaunchAsRelaunchFailed pins the answer: the
+// restart's caller is told the relaunch failed, with its cause (owner ruling,
+// 2026-10-08), never a success for a restart that did not happen.
+func TestARestartAnswersAFailedRelaunchAsRelaunchFailed(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.rollout.relaunchErr = errors.New("could not take the restart-pending hold")
+
+	// Act.
+	err := f.verbs.Restart(context.Background(), "w1")
+
+	// Assert.
+	refusal, ok := AsRefusal(err)
+	if !ok || refusal.Arm != "relaunch_failed" || refusal.Fields["detail"] != "could not take the restart-pending hold" {
+		t.Fatalf("Restart = %v, want the relaunch_failed refusal carrying the cause", err)
+	}
+}
+
+// TestARestartAnswersADeferralAsRelaunchFailed covers the contract breach: a
+// deferral is no restart that happened.
+func TestARestartAnswersADeferralAsRelaunchFailed(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.rollout.relaunchErr = bounce.ErrDeferred
+
+	// Act.
+	err := f.verbs.Restart(context.Background(), "w1")
+
+	// Assert.
+	if refusal, ok := AsRefusal(err); !ok || refusal.Arm != "relaunch_failed" {
+		t.Fatalf("Restart = %v, want the relaunch_failed refusal", err)
+	}
+}
+
+// TestARestartAnswersOnlyOnceItHappened pins the order: the reload a finished
+// restart pushes has been pushed by the time the restart answers.
+func TestARestartAnswersOnlyOnceItHappened(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+
+	// Act.
+	err := f.verbs.Restart(context.Background(), "w1")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Restart = %v, want nil", err)
+	}
+	if got := f.rollout.reloadCalls(); len(got) != 1 {
+		t.Fatalf("webapp reloads when the restart answered = %v, want the one a finished restart pushes", got)
+	}
+}
+
+// TestARestartWhoseCallerLeavesAnswersTheCallersEnd covers a caller that
+// stops waiting: the answer is the context's end, recorded at ERROR.
+func TestARestartWhoseCallerLeavesAnswersTheCallersEnd(t *testing.T) {
+	// Arrange: a bounce that never finishes.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.rollout.hold = make(chan struct{})
+	t.Cleanup(func() { close(f.rollout.hold) })
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act.
+	err := f.verbs.Restart(ctx, "w1")
+
+	// Assert.
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Restart = %v, want the caller's end", err)
+	}
+	awaitRecord(t, f, "error", opRestart)
+}
+
+// TestAnUnregisteredRestartAnswersSuccess covers nothing left to replace: the
+// restart's purpose already holds.
+func TestAnUnregisteredRestartAnswersSuccess(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.rollout.relaunchErr = bounce.ErrUnregistered
+
+	// Act.
+	err := f.verbs.Restart(context.Background(), "w1")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Restart = %v, want nil", err)
 	}
 }

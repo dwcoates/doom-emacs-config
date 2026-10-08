@@ -949,6 +949,8 @@ type fakeRollout struct {
 	// runs the engine behind it, so a test synchronizes on this rather than
 	// on the verb's return.
 	done chan struct{}
+	// hold, when set, keeps every bounce from finishing until it is closed.
+	hold chan struct{}
 }
 
 type rolloutCall struct {
@@ -962,12 +964,15 @@ type rolloutCall struct {
 func (r *fakeRollout) BounceShim(ctx context.Context, ws ids.WorkspaceID, reason rollout.RelaunchReason, force bool, done func(error)) (bounce.Decision, error) {
 	r.mu.Lock()
 	r.relaunches = append(r.relaunches, rolloutCall{WS: ws, Reason: reason, Force: force})
-	err, refused := r.relaunchErr, r.refuseErr
+	err, refused, hold := r.relaunchErr, r.refuseErr, r.hold
 	r.mu.Unlock()
 	if refused != nil {
 		return bounce.Decision{}, refused
 	}
 	go func() {
+		if hold != nil {
+			<-hold
+		}
 		if done != nil {
 			done(err)
 		}
