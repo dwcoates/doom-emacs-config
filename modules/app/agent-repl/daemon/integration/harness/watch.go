@@ -262,7 +262,7 @@ func (d *Daemon) DialHTTP1() agentreplv1connect.AgentReplClient {
 //
 // d.ctx expires at DefaultTimeout, which is right for a wait and wrong for a
 // HOLD: the footer's connectivity truth is the pair of participant streams
-// (internal/resolve/footer/status.go, `!s.hostStream || !s.webStream`), so a
+// (internal/resolve/footer/status.go, `s.hostStream != s.webStream`), so a
 // host hold that expires mid-test drops the footer to `disconnected` under a
 // test that is still running — and a real webapp then closes its composer
 // gate and silently swallows every later submission. A hold therefore runs on
