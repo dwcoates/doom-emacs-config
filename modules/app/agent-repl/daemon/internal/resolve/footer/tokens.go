@@ -478,25 +478,33 @@ func (t *tokenState) evaluateAlarm(threshold uint64) {
 		figures.Tokens(over), figures.Tokens(threshold))
 }
 
-// mainFresh answers the main agent's fresh input this turn: the fresh input of
-// every unit filed under the main agent's panel entry. Zero before the main
-// agent has stated any usage.
-func (t *tokenState) mainFresh() uint64 {
+// mainFresh answers the main agent's fresh input this turn — the fresh input
+// of every unit filed under the main agent's panel entry — and whether the
+// main agent has stated any usage in this accounting at all.
+func (t *tokenState) mainFresh() (uint64, bool) {
 	sums, ok := t.groupSums()[mainGroup]
 	if !ok {
-		return 0
+		return 0, false
 	}
-	return sums.misses
+	return sums.misses, true
 }
 
-// cell renders the strip's tokens cell: the main agent's fresh input this turn,
-// with its heat, while a turn is in flight, and the uncolored idle figure
-// otherwise. The glyphs keep their own lifetimes, so an idle cell still carries
-// the most recent turn's alarm and verdict.
+// cell renders the strip's tokens cell: the main agent's fresh input, with its
+// heat. The glyphs keep their own lifetimes, so an idle cell still carries the
+// most recent turn's alarm and verdict.
+//
+// THE FIGURE OUTLIVES ITS TURN (owner ruling, 2026-10-08): a turn's figure
+// stands after the turn ends, however it ended, and clears only at the next
+// turn's start — the accepted submission (SetTurn → reset), the same edge that
+// raises `working · submitting`. A held or queued prompt submits nothing, so
+// the figure stands through it. With no turn in flight the figure is drawn
+// only when the most recent turn's main agent stated usage; otherwise (no turn
+// has run, a turn that spent nothing such as a /clear, a refused submission
+// whose reset left nothing) the cell is the uncolored idle figure, never a
+// `0 in` that no turn spent.
 func (t *tokenState) cell(inFlight bool) *frontendv1.FooterTokensCell {
 	input := &frontendv1.FooterTokensCellInput{Text: idleFigure}
-	if inFlight {
-		fresh := t.mainFresh()
+	if fresh, stated := t.mainFresh(); inFlight || stated {
 		input.Text = figures.Tokens(fresh) + " in"
 		input.Heat = &frontendv1.TokenHeat{Position: figures.TokenHeat(fresh)}
 	}
