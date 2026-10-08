@@ -1776,7 +1776,7 @@ Every restart is immediate: the request carries no mode."
                                                 (plist-get request :workspace))))))
 
 (defun agent-repl-wire-decode-restart-workspace-success (json)
-  "Decode RestartWorkspaceSuccess from JSON.  Empty: the restart is accepted."
+  "Decode RestartWorkspaceSuccess from JSON.  Empty: the restart happened."
   (agent-repl-wire-verbs--decode-empty "RestartWorkspaceSuccess" json))
 
 (defun agent-repl-wire-decode-restart-workspace-unknown-workspace (json)
@@ -1806,6 +1806,18 @@ This daemon released the workspace to a successor; dial `address'."
 not finished adopting this workspace yet."
   (agent-repl-wire-verbs--decode-empty "RestartWorkspaceNotYetAdopted" json))
 
+(defun agent-repl-wire-decode-restart-workspace-relaunch-failed (json)
+  "Decode RestartWorkspaceRelaunchFailed from JSON into a plist (`:detail').
+The relaunch was attempted and failed: the workspace was not restarted."
+  (let ((message "RestartWorkspaceRelaunchFailed"))
+    (agent-repl-wire-verbs--check-keys message json '(detail))
+    (list :detail (agent-repl-wire-verbs--decode-string
+                   message 'detail json))))
+
+(defun agent-repl-wire-decode-restart-workspace-error-relaunch-failed (json)
+  "Decode RestartWorkspaceError's `relaunch_failed' cause arm from JSON."
+  (agent-repl-wire-decode-restart-workspace-relaunch-failed json))
+
 (defun agent-repl-wire-decode-restart-workspace-error-unknown-workspace (json)
   "Decode RestartWorkspaceError's `unknown_workspace' cause arm from JSON."
   (agent-repl-wire-decode-restart-workspace-unknown-workspace json))
@@ -1827,14 +1839,15 @@ not finished adopting this workspace yet."
 THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
 arm this codec does not know is refused as an unknown field."
   (let ((message "RestartWorkspaceError"))
-    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted noSession))
+    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted noSession relaunchFailed))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
            message "cause" json
            (list (list 'unknownWorkspace :unknown-workspace #'agent-repl-wire-decode-restart-workspace-error-unknown-workspace)
          (list 'workspaceRefMismatch :workspace-ref-mismatch #'agent-repl-wire-decode-restart-workspace-error-workspace-ref-mismatch)
          (list 'transferringAway :transferring-away #'agent-repl-wire-decode-restart-workspace-error-transferring-away)
-         (list 'notYetAdopted :not-yet-adopted #'agent-repl-wire-decode-restart-workspace-error-not-yet-adopted))))))
+         (list 'notYetAdopted :not-yet-adopted #'agent-repl-wire-decode-restart-workspace-error-not-yet-adopted)
+         (list 'relaunchFailed :relaunch-failed #'agent-repl-wire-decode-restart-workspace-error-relaunch-failed))))))
 
 (defun agent-repl-wire-decode-restart-workspace-response-success (json)
   "Decode RestartWorkspaceResponse's `success' arm from JSON."

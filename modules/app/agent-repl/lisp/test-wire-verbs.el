@@ -2193,8 +2193,15 @@ at."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_restart_workspace.pb.go" "RestartWorkspaceError")
                        #'string<)
-                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted")
+                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "relaunchFailed")
                        #'string<))))
+
+(ert-deftest agent-repl-test-wire-verbs-restart-error-relaunch-failed-arm ()
+  "RestartWorkspaceError's `relaunch_failed' arm decodes with its detail."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-restart-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"relaunchFailed\":{\"detail\":\"the shim died\"}}"))
+                   '(:cause (:arm :relaunch-failed :value (:detail "the shim died")))))))
 
 (ert-deftest agent-repl-test-wire-verbs-set-priority-error-unknown-workspace-arm ()
   "SetWorkspacePriorityError's `unknown_workspace' arm decodes with everything
