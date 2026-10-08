@@ -5,8 +5,9 @@
  * THE DAEMON RESOLVES THE TIER (footer.proto, the status family's rules): each
  * status arm's activity is a `oneof tier` holding EITHER that arm's salient
  * line OR the unpinned tiers beneath it: the transient over the enduring line.
- * The waiting arm has no unpinned branch at all, because a waiting session is
- * always parked on a salient line. This module walks what it was pushed and
+ * The waiting arm and the two gate arms (permission, question) have no
+ * unpinned branch at all, because a session parked on the user always stands
+ * on a salient line. This module walks what it was pushed and
  * ranks nothing.
  *
  * THE ONE DECISION THIS CLIENT TAKES is the clock comparison inside the
@@ -92,6 +93,10 @@ import type {
   FooterStatusWorkingSalient,
   FooterStatusWaitingActivity,
   FooterStatusWaitingSalient,
+  FooterStatusPermissionActivity,
+  FooterStatusPermissionSalient,
+  FooterStatusQuestionActivity,
+  FooterStatusQuestionSalient,
   FooterMoney,
 } from "../../../proto/gen/ts/frontend/v1/footer_pb";
 import { formatAge, formatCountdown, formatTickedAge } from "../duration.js";
@@ -136,6 +141,8 @@ export type FooterActivity =
   | FooterStatusIdleActivity
   | FooterStatusWorkingActivity
   | FooterStatusWaitingActivity
+  | FooterStatusPermissionActivity
+  | FooterStatusQuestionActivity
   | FooterStatusInterruptedActivity
   | FooterStatusMergingActivity
   | FooterStatusBackgroundActivity
@@ -150,6 +157,8 @@ export type FooterSalient =
   | FooterStatusIdleSalient
   | FooterStatusWorkingSalient
   | FooterStatusWaitingSalient
+  | FooterStatusPermissionSalient
+  | FooterStatusQuestionSalient
   | FooterStatusInterruptedSalient
   | FooterStatusMergingSalient
   | FooterStatusBackgroundSalient
@@ -170,15 +179,20 @@ export type ActivityTier =
 /**
  * The tier a cell carries.
  *
- * THE WAITING CELL IS THE ONE WITH NO ONEOF: it holds its salient line
- * directly, so it is read as the salient tier by construction. Every other
- * cell's `tier` is switched exhaustively, and an unset one is malformed.
+ * THE CELLS OF A SESSION PARKED ON THE USER HAVE NO ONEOF: the waiting,
+ * permission and question cells hold their salient line directly, so each is
+ * read as the salient tier by construction. Every other cell's `tier` is
+ * switched exhaustively, and an unset one is malformed.
  */
 export function activityTier(
   activity: FooterActivity,
   path: string,
 ): ActivityTier {
-  if (activity.$typeName === "frontend.v1.FooterStatusWaitingActivity") {
+  if (
+    activity.$typeName === "frontend.v1.FooterStatusWaitingActivity" ||
+    activity.$typeName === "frontend.v1.FooterStatusPermissionActivity" ||
+    activity.$typeName === "frontend.v1.FooterStatusQuestionActivity"
+  ) {
     return {
       case: "salient",
       value: requireMessage(activity.salient, `${path}.salient`),
