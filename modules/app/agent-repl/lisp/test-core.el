@@ -6416,6 +6416,18 @@ A stale entry guards nothing and hides that the wrapper it named is gone."
               (should-not (agent-repl--log "dropped-ws" "elisp.test.dropped-ws"))))
         (delete-directory project t)))))
 
+(ert-deftest agent-repl-test-dropped-workspace-record-still-checks-its-format ()
+  "A format its arguments do not satisfy signals for a dropped record, as when built."
+  (agent-repl-test--with-dropped-debug
+    ;; Arrange
+    (let ((project (make-temp-file "agent-repl-dropped-format-" t)))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "dropped-format" :project-dir project)
+            ;; Act / Assert
+            (should-error (agent-repl--log "dropped-format" "elisp.test.bad-format n=%d")))
+        (delete-directory project t)))))
+
 (ert-deftest agent-repl-test-dropped-workspace-record-still-checks-its-session-identity ()
   "An invalid session id signals for a dropped record exactly as when built."
   (agent-repl-test--with-dropped-debug

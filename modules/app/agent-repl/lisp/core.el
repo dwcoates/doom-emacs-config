@@ -2287,6 +2287,17 @@ generations."
          (message "[agent-repl] LOG SINK FAILURE path=%s error=%S" path err)
          (error "agent-repl log sink failure for %s: %S" path err))))))
 
+(defun agent-repl--log-check-format (fmt args)
+  "Signal when string FMT does not accept ARGS, as building the record would.
+A dropped workspace-scoped record is never built, but a format whose
+arguments do not match is a call-site bug that building it used to surface
+on every call, at any level.  This keeps that coverage for the one cost of
+formatting the message; only the central fast path skips it, by the owner's
+ruling."
+  (when (stringp fmt)
+    (apply #'format fmt args))
+  nil)
+
 (defun agent-repl--build-log-text (ws fmt args)
   "Build the formatted log line for WS / FMT / ARGS.
 Shared by `agent-repl--do-log' and its message-gated wrappers so the
@@ -2556,7 +2567,9 @@ formatted message and the display text are not built."
           ;; and is signalled unchanged.
           (condition-case err
               (if (not build)
-                  (agent-repl--log-check-identity sink-ws)
+                  (progn
+                    (agent-repl--log-check-identity sink-ws)
+                    (agent-repl--log-check-format fmt args))
 		(setq record (agent-repl--log-record sink-ws level verbosity fmt args
                                                      pseudo-ws operation-fmt unroutable-ws))
 		(when to-file
@@ -2568,7 +2581,9 @@ formatted message and the display text are not built."
                (signal (car err) (cdr err)))
              (announce-central-fallback sink-ws (error-message-string err))
              (if (not build)
-                 (agent-repl--log-check-identity nil)
+                 (progn
+                   (agent-repl--log-check-identity nil)
+                   (agent-repl--log-check-format fmt args))
                (setq record (agent-repl--log-record nil level verbosity fmt args
                                                     nil operation-fmt sink-ws))
                (when to-file
