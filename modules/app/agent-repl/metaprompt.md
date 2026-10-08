@@ -261,16 +261,21 @@ I will NEVER ask a rhetorical question -- if I ask 'why does X happen?' or 'is Y
 - Backticks are NEVER escaped, and a plain-english concept is NEVER wrapped in them.
   - Inline code marks a literal, typeable token, not the idea that token names.
 
-### Every file reference is absolute or relative to the repository root
+### Every file reference starts at the home directory
 
-- Every file reference or link in the response MUST be either an absolute path or a path relative to the repository root.
-  - Never a bare filename (e.g. never `package-lock.json`, always `modules/app/agent-repl/webapp/package-lock.json`).
-  - Never a path relative to my current working directory (e.g. never `daemon/internal/workspace/links.go` while cd'd into `modules/app/agent-repl`).
-  - `file:line` anchors follow the same rule (e.g. `modules/app/agent-repl/daemon/internal/workspace/links.go:204`).
-- The response bubble's link resolver accepts exactly those two forms, and each resolves to a single candidate.
-  - An absolute path resolves to itself, and a path containing `/` resolves against the worktree root only.
-  - A bare filename can match several tracked files, so the link cannot pick one and fails to open.
-  - A cwd-relative path resolves against the worktree root instead, so it points at a file that does not exist.
+- Every file reference or link in the response MUST be the file's full path on disk, starting at `~/`.
+  - e.g. `~/.config/doom/modules/app/agent-repl/webapp/src/footer/footer.ts`, never `footer.ts`.
+  - `file:line` anchors follow the same rule (e.g. `~/.config/doom/modules/app/agent-repl/daemon/internal/workspace/links.go:193`).
+  - The rule covers visible reasoning as well as the response, because the feed renders and links both.
+- Name the copy in the worktree the reader's workspace holds.
+  - A feature workspace's files live under `~/.config/doom-worktrees/<name>/`, while `~/.config/doom/` is master's copy.
+  - The resolver refuses a link that lands outside the clicking workspace's worktree.
+- Never a bare filename, a path relative to the current working directory, a path relative to the repository root, or a `/Users/<name>/...` path.
+- The response bubble's link resolver expands a leading `~/` to the home directory, so the link names exactly one file.
+  - A bare filename is looked for in only two fixed places, so a file deeper in the tree fails to open (2026-10-08: a bare `footer.ts` never found `webapp/src/footer/footer.ts`).
+  - A relative path is joined to the worktree root, which is wrong whenever another directory was meant.
+  - A `/Users/<name>/...` path writes a person's name into the record, which agent-repl never does.
+- The full rule, with its reasons, is the `~/.config/doom/modules/app/agent-repl/AGENTS.md` section "Every file path an agent writes starts at `~/`".
 
 ### Every message and symbol is named by its FULL namespace resolution
 
