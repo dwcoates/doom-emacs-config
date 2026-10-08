@@ -59,8 +59,13 @@ func TestWatchFeedTailsExactlyAfterTheOpenedPageWithNoGapOrOverlap(t *testing.T)
 	if !sawFirst {
 		t.Fatalf("OpenFeed's page = %v, want it to already carry the row pushed before the open", page)
 	}
+	// RESP-1'S INTERIM RESTATEMENT IS NOT AN OVERLAP: resp-2 landing proves
+	// resp-1 is not the turn's answer, and resp-1 is re-pushed carrying
+	// `interim` (resolve/feed/interim.go) — a change the page did not hold.
+	// The tail's first SETTLED row that is not that restatement is resp-2's.
 	got := awaitRow(t, f, tail, "the tail's first row after the open", func(r *frontendv1.FeedRow) bool {
-		return r.GetActivity().GetResponse().GetSuccess() != nil
+		resp := r.GetActivity().GetResponse()
+		return resp.GetSuccess() != nil && !resp.GetInterim()
 	})
 	if md := got.GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown(); md != "second" {
 		t.Fatalf("the tail's first row = %q, want %q (resp-1 must not be re-delivered)", md, "second")
