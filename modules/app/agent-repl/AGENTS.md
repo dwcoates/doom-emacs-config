@@ -2050,7 +2050,11 @@ workspace's shim (rebuilt first when stale, session resumed, forced teardown
 hard-killing what did not stop), releases reconnect holds and reloads the
 workspace's webapp page. It never touches the daemon, the store or the sidecar.
 `RestartWorkspaceRequest.force` and the `no_session` error arm are retired; Emacs
-sends the workspace alone and the webapp menu has one "Restart" entry. It is
+sends the workspace alone and the webapp menu has one "Restart" entry. THE
+ANSWER IS THE OUTCOME (owner ruling, 2026-10-08): the daemon answers once the
+bounce finished, success shows the user nothing, and a relaunch that failed is
+the `relaunch_failed` arm, said in Emacs's echo area and the webapp row as the
+restart failing. It is
 for a stuck workspace (a turn that never ends, a vendor that failed to start, a
 stale shim, a page out of sync), not a routine action: a fresh shim or page may
 speak an API the older running daemon does not. The user-facing account is in
