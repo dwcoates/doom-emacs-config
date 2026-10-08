@@ -1534,3 +1534,103 @@ func TestAResumesSessionFactsAreRecordedBeforeTheWatchOpens(t *testing.T) {
 		t.Fatalf("session row's vendor id when the watch opened = %q, want vendor-1 recorded first", recordedAtWatch)
 	}
 }
+
+// TestAwaitFreeMovesToTheNextWatcherWhenItsWatcherCloses reproduces
+// 2026-10-08T19:02:40: the watcher a freeness wait stood on closed (an
+// adoption, a re-open, a relaunch), and the wait must stand on the
+// workspace's next watcher rather than fail.
+func TestAwaitFreeMovesToTheNextWatcherWhenItsWatcherCloses(t *testing.T) {
+	// Arrange
+	f := newFleetFixture(t)
+	first := &fakeWatcher{free: make(chan error, 1)}
+	next := &fakeWatcher{free: make(chan error, 1)}
+	f.fleet.remember("ws-1", &live{client: f.client, watcher: first})
+	answered := make(chan error, 1)
+	go func() { answered <- f.fleet.AwaitFree(context.Background(), "ws-1") }()
+
+	// Act
+	f.fleet.remember("ws-1", &live{client: f.client, watcher: next})
+	first.free <- sessionwatcher.ErrWatcherClosed
+	next.free <- nil
+
+	// Assert
+	select {
+	case err := <-answered:
+		if err != nil {
+			t.Fatalf("AwaitFree = %v, want nil from the next watcher", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("AwaitFree never answered after the next watcher fell free")
+	}
+}
+
+// TestAwaitFreeWaitsForAClosedWatchersReplacement covers the order the other
+// way round: the watcher closes before the fleet installs its replacement, and
+// the wait stands until it does.
+func TestAwaitFreeWaitsForAClosedWatchersReplacement(t *testing.T) {
+	// Arrange
+	f := newFleetFixture(t)
+	first := &fakeWatcher{free: make(chan error, 1)}
+	next := &fakeWatcher{free: make(chan error, 1)}
+	f.fleet.remember("ws-1", &live{client: f.client, watcher: first})
+	first.free <- sessionwatcher.ErrWatcherClosed
+	answered := make(chan error, 1)
+	go func() { answered <- f.fleet.AwaitFree(context.Background(), "ws-1") }()
+
+	// Act
+	next.free <- nil
+	f.fleet.remember("ws-1", &live{client: f.client, watcher: next})
+
+	// Assert
+	select {
+	case err := <-answered:
+		if err != nil {
+			t.Fatalf("AwaitFree = %v, want nil from the replacement", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("AwaitFree never answered after the replacement was installed")
+	}
+}
+
+// TestAwaitFreeWaitsThroughASessionComingUp pins the gap: a shim installed
+// with no watcher yet is coming up, never free.
+func TestAwaitFreeWaitsThroughASessionComingUp(t *testing.T) {
+	// Arrange
+	f := newFleetFixture(t)
+	f.fleet.remember("ws-1", &live{client: f.client})
+	ctx, cancel := context.WithCancel(context.Background())
+	answered := make(chan error, 1)
+	go func() { answered <- f.fleet.AwaitFree(ctx, "ws-1") }()
+
+	// Act
+	cancel()
+
+	// Assert
+	select {
+	case err := <-answered:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("AwaitFree = %v, want the context's end: a session coming up is not free", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("AwaitFree never answered its context's end")
+	}
+}
+
+// TestAwaitFreeAnswersAWatchersOwnError pins that only a closed watcher is
+// waited past: any other failure is the caller's.
+func TestAwaitFreeAnswersAWatchersOwnError(t *testing.T) {
+	// Arrange
+	f := newFleetFixture(t)
+	w := &fakeWatcher{free: make(chan error, 1)}
+	f.fleet.remember("ws-1", &live{client: f.client, watcher: w})
+	boom := errors.New("boom")
+	w.free <- boom
+
+	// Act
+	err := f.fleet.AwaitFree(context.Background(), "ws-1")
+
+	// Assert
+	if !errors.Is(err, boom) {
+		t.Fatalf("AwaitFree = %v, want %v", err, boom)
+	}
+}
