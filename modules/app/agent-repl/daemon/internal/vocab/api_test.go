@@ -21,6 +21,7 @@ const repoVocabDir = "../../../proto/vocab"
 var mergeArms = []string{
 	"merging",
 	"merge_queued",
+	"merge_waiting",
 	"merge_failed",
 	"merged",
 }
@@ -699,6 +700,7 @@ func TestTheColorAssignmentsFollowTheOwnersColorMeaningsWithNothingParked(t *tes
 		{name: "an unreachable network is blue on the roster", table: "roster", arm: "network_fault", want: "blue"},
 		{name: "a starting route is blue on the roster", table: "roster", arm: "init", want: "blue"},
 		{name: "a queued merge is purple on the roster", table: "roster", arm: "merge_queued", want: "purple"},
+		{name: "a merge waiting for the workspace to fall free is purple on the roster", table: "roster", arm: "merge_waiting", want: "purple"},
 		{name: "a running merge is purple on the roster", table: "roster", arm: "merging", want: "purple"},
 		{name: "a landed merge is green on the roster", table: "roster", arm: "merged", want: "green"},
 		{name: "a failed turn is turquoise on the footer", table: "footer", arm: "turn_failed", want: "turquoise"},

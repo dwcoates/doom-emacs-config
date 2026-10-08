@@ -1771,6 +1771,7 @@ func TestMergeStepWordsAreThePlainWordsOfEachStep(t *testing.T) {
 		step MergeStep
 		want string
 	}{
+		{StepAwaitingFree, "waiting for the workspace to be free"},
 		{StepEnqueued, "enqueued"},
 		{StepPreprocessing, "preprocessing"},
 		{StepRebasing, "rebasing"},

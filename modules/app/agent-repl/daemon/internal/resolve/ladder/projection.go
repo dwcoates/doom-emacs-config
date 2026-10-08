@@ -12,6 +12,7 @@ import (
 // rosterArmClaims places every RosterRow.status arm, by its proto name.
 var rosterArmClaims = map[string]Claim{
 	"merge_queued":    Merging,
+	"merge_waiting":   Merging,
 	"merging":         Merging,
 	"init":            AgentReplFault,
 	"severed":         AgentReplFault,

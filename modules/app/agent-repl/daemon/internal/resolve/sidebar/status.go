@@ -71,6 +71,9 @@ func projectArm(status *frontendv1.FooterStatus, log dlog.Logger) string {
 		if arm.Merging.GetEnqueued() != nil {
 			return "merge_queued"
 		}
+		if arm.Merging.GetAwaitingFree() != nil {
+			return "merge_waiting"
+		}
 		return "merging"
 	case *frontendv1.FooterStatus_MergeFailed:
 		return "merge_failed"
@@ -288,6 +291,9 @@ func setStatus(row *frontendv1.RosterRow, arm string, log dlog.Logger) {
 	case "merge_queued":
 		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"merge_queued\""})
 		row.Status = &frontendv1.RosterRow_MergeQueued{MergeQueued: &frontendv1.RosterRowStatusMergeQueued{}}
+	case "merge_waiting":
+		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"merge_waiting\""})
+		row.Status = &frontendv1.RosterRow_MergeWaiting{MergeWaiting: &frontendv1.RosterRowStatusMergeWaiting{}}
 	case "merge_failed":
 		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"merge_failed\""})
 		row.Status = &frontendv1.RosterRow_MergeFailed{MergeFailed: &frontendv1.RosterRowStatusMergeFailed{}}

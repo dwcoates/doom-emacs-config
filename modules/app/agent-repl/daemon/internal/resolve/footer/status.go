@@ -446,6 +446,8 @@ func (r *resolver) merging(s *wsState, log dlog.Logger) *frontendv1.FooterStatus
 	arm := &frontendv1.FooterStatusMerging{Activity: r.mergingActivity(s)}
 	m := s.merge
 	switch m.Step {
+	case StepAwaitingFree:
+		arm.Substatus = &frontendv1.FooterStatusMerging_AwaitingFree{AwaitingFree: r.awaitingFree(s)}
 	case StepEnqueued:
 		arm.Substatus = &frontendv1.FooterStatusMerging_Enqueued{Enqueued: &frontendv1.FooterSubStatusMergingEnqueued{
 			Place: uint32(m.QueuePlace), Waiting: uint32(m.QueueWaiting)}}
@@ -478,6 +480,31 @@ func (r *resolver) merging(s *wsState, log dlog.Logger) *frontendv1.FooterStatus
 	}
 	log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "merging", "step": string(m.Step)})
 	return &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Merging{Merging: arm}}
+}
+
+// awaitingFree draws what a merge that has not started waits on: the awaited
+// workspace's turn in flight and its live work, read from the footer's own
+// state of that workspace -- the requester's own, or the other workspace's
+// (MergeFacts.AwaitOther). A change to the other workspace republishes this
+// one (awaitersLocked), so the counts never go stale. Called under r.mu.
+func (r *resolver) awaitingFree(s *wsState) *frontendv1.FooterSubStatusMergingAwaitingFree {
+	awaited := s
+	out := &frontendv1.FooterSubStatusMergingAwaitingFree{}
+	if s.merge.AwaitOther != "" {
+		out.OtherWorkspace = s.merge.AwaitOtherName
+		awaited = r.states[s.merge.AwaitOther]
+		if awaited == nil {
+			return out
+		}
+	}
+	out.TurnInFlight = awaited.turn != nil
+	if awaited.liveWorkSeen {
+		out.Subagents = uint32(len(awaited.liveWork.Agents))
+		out.Shells = uint32(len(awaited.liveWork.Shells))
+		out.Monitors = uint32(len(awaited.liveWork.Monitors))
+		out.Pending = uint32(len(awaited.liveWork.Pending))
+	}
+	return out
 }
 
 // mergeWaitingOnUser draws a merge held on the user, or nil when it is not.
