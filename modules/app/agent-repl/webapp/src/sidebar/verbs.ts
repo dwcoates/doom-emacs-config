@@ -61,6 +61,7 @@ import {
   RestartWorkspaceRequestSchema,
   RestartWorkspaceResponseSchema,
   type RestartWorkspaceRequest,
+  type RestartWorkspaceError,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_restart_workspace_pb";
 import {
   SelectWorkspaceRequestSchema,
@@ -213,6 +214,7 @@ async function runSimpleVerb(
         call: (client) =>
           client.restartWorkspace(buildRestartWorkspaceRequest(target.workspace)),
         schema: RestartWorkspaceResponseSchema,
+        refusalText: (cause) => restartWorkspaceRefusal(cause as CauseOf<RestartWorkspaceError>),
       });
       return;
   }
@@ -725,6 +727,19 @@ export function mergeWorkspaceRefusal(cause: CauseOf<MergeWorkspaceError>): stri
       return "that branch does not exist in this repository";
     default:
       return unreachableArm("MergeWorkspaceError.cause", cause.case);
+  }
+}
+
+/**
+ * RestartWorkspace's own arm. A restart answers its outcome (owner ruling,
+ * 2026-10-08), so a relaunch that failed is a refusal the user reads.
+ */
+export function restartWorkspaceRefusal(cause: CauseOf<RestartWorkspaceError>): string {
+  switch (cause.case) {
+    case "relaunchFailed":
+      return `the restart failed: ${cause.value.detail}`;
+    default:
+      return unreachableArm("RestartWorkspaceError.cause", cause.case);
   }
 }
 
