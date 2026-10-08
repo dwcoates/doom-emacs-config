@@ -59,7 +59,8 @@ func (r *run) gate(ctx context.Context, round tabRound, tip, head string) (gateV
 		"workspace": string(r.ws), "suites": strings.Join(selection.Suites, ","),
 		"full": selection.Full, "reason": selection.Reason})
 
-	g := &gateRun{r: r, round: round, log: r.o.testLog(r.lease.ID, round.n)}
+	g := &gateRun{r: r, round: round, log: r.o.testLog(r.lease.ID, round.n),
+		states: map[string]suiteState{}, counts: newSuiteCounts()}
 	r.setStep(ctx, footer.StepTesting, nil)
 	r.upsert(round, testsTab(round.live(), nil, nil))
 
@@ -135,6 +136,10 @@ type gateRun struct {
 	mu sync.Mutex
 	// suites are the tab's live rows, in the order the suites started.
 	suites []*frontendv1.FeedMergeTestSuite
+	// states are each started suite's standing, by name.
+	states map[string]suiteState
+	// counts are each suite's unit counts as the lines have reported them.
+	counts *suiteCounts
 }
 
 // link is the round's log link, nil until the run has written the log.
@@ -195,13 +200,28 @@ func (g *gateRun) run(ctx context.Context, dir string, argv, selected []string) 
 }
 
 // edge follows one line of the script: a suite starting, passing or failing
-// moves its tab row and takes the testing step's line.
+// moves its tab row and takes the testing step's line, and a unit's verdict
+// or a suite's planned total moves the suite's counts.
 func (g *gateRun) edge(line string) {
+	if name, counted := g.countLine(line); counted {
+		g.mu.Lock()
+		state, started := g.states[name]
+		if started {
+			g.setTabSuite(name, state)
+		}
+		suites := append([]*frontendv1.FeedMergeTestSuite(nil), g.suites...)
+		g.mu.Unlock()
+		if started {
+			g.r.upsert(g.round, testsTab(g.round.live(), suites, g.link()))
+		}
+		return
+	}
 	name, state, ok := suiteEdge(line)
 	if !ok {
 		return
 	}
 	g.mu.Lock()
+	g.states[name] = state
 	g.setTabSuite(name, state)
 	suites := append([]*frontendv1.FeedMergeTestSuite(nil), g.suites...)
 	g.mu.Unlock()
@@ -211,17 +231,25 @@ func (g *gateRun) edge(line string) {
 	g.r.upsert(g.round, testsTab(g.round.live(), suites, g.link()))
 }
 
-// setTabSuite stands a suite's tab row at its edge. Called with g.mu held.
-func (g *gateRun) setTabSuite(name string, state suiteState) {
-	suite := &frontendv1.FeedMergeTestSuite{Name: name}
-	switch state {
-	case suiteStatePassed, suiteStateDeclined:
-		suite.State = &frontendv1.FeedMergeTestSuite_Passed{Passed: &frontendv1.FeedMergeTestSuitePassed{}}
-	case suiteStateFailed:
-		suite.State = &frontendv1.FeedMergeTestSuite_Failed{Failed: &frontendv1.FeedMergeTestSuiteFailed{}}
-	default:
-		suite.State = &frontendv1.FeedMergeTestSuite_Running{Running: &frontendv1.FeedMergeTestSuiteRunning{}}
+// countLine moves the counts one line reports, answering the suite it moved.
+// A line it cannot read is recorded at WARN and moves nothing: the run goes
+// on, and the gate's final parse of the whole output fails it loudly.
+func (g *gateRun) countLine(line string) (string, bool) {
+	g.mu.Lock()
+	name, counted, err := g.counts.take(line)
+	g.mu.Unlock()
+	if err != nil {
+		g.r.o.log(context.Background(), g.r.ws).Warn("daemon.merge.tests", "a test runner line could not be counted",
+			dlog.Context{"workspace": string(g.r.ws), "round": g.round.n, "line": line, "error": err.Error()})
+		return "", false
 	}
+	return name, counted
+}
+
+// setTabSuite stands a suite's tab row at its edge, with its counts so far.
+// Called with g.mu held.
+func (g *gateRun) setTabSuite(name string, state suiteState) {
+	suite := tabSuite(name, state, g.counts.of(name))
 	for i, existing := range g.suites {
 		if existing.GetName() == name {
 			g.suites[i] = suite

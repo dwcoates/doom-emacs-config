@@ -4,6 +4,7 @@ import { create } from "@bufbuild/protobuf";
 import {
   FeedMergeTabTestsSchema,
   FeedMergeTestLogSchema,
+  FeedMergeTestSuiteRunningSchema,
   FeedMergeTestSuiteSchema,
   type FeedMergeTestSuite,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
@@ -18,8 +19,10 @@ import {
   drawTestSuites,
 } from "../../../src/feed/merge/tests-tab.js";
 import { oneofArms } from "../../arms.js";
+import STYLESHEET from "../../../src/styles.css?raw";
+import { rulesOf } from "../../stylesheet.js";
 
-/** A suite in STATE, carrying OUTPUT. */
+/** A suite in STATE, carrying OUTPUT; a running one has reported nothing yet. */
 function suite(
   name: string,
   state: "running" | "passed" | "failed",
@@ -27,10 +30,110 @@ function suite(
 ): FeedMergeTestSuite {
   return create(FeedMergeTestSuiteSchema, {
     name,
-    state: { case: state, value: {} },
+    state:
+      state === "running"
+        ? { case: "running", value: { soFar: { case: "unreported", value: {} } } }
+        : { case: state, value: {} },
     output: output.map((s) => ({ text: s.text, paintClass: s.paintClass })),
   });
 }
+
+/** A running suite whose tests have said SO_FAR. */
+function runningSuite(soFar: "unreported" | "passing" | "failing"): FeedMergeTestSuite {
+  return create(FeedMergeTestSuiteSchema, {
+    name: "unit",
+    state: { case: "running", value: { soFar: { case: soFar, value: {} } } },
+  });
+}
+
+describe("drawFeedMergeTestSuite: the running dot says what the tests said so far", () => {
+  it.each([
+    ["unreported", "is-unreported"],
+    ["passing", "is-passing"],
+    ["failing", "is-failing"],
+  ] as const)("draws a %s suite's dot as %s", (soFar, tone) => {
+    const glyph = drawFeedMergeTestSuite(runningSuite(soFar)).querySelector(".merge-suite-glyph");
+    expect(glyph?.classList.contains(tone)).toBe(true);
+  });
+
+  it("stamps the running arm on the suite", () => {
+    expect(drawFeedMergeTestSuite(runningSuite("failing")).getAttribute("data-so-far")).toBe("failing");
+  });
+
+  it("holds to the schema: every so-far arm is drawn", () => {
+    expect([...oneofArms(FeedMergeTestSuiteRunningSchema, "so_far")].sort()).toEqual([
+      "failing",
+      "passing",
+      "unreported",
+    ]);
+  });
+
+  it("refuses a running suite whose so-far oneof is unset", () => {
+    const bare = create(FeedMergeTestSuiteSchema, { name: "unit", state: { case: "running", value: {} } });
+    expect(() => drawFeedMergeTestSuite(bare)).toThrow(MalformedView);
+  });
+});
+
+describe("drawFeedMergeTestSuite: the counts column", () => {
+  /** A passed suite carrying COUNTS. */
+  function counted(counts?: { passed: number; failed: number; total: number }): HTMLElement {
+    return drawFeedMergeTestSuite(
+      create(FeedMergeTestSuiteSchema, { name: "unit", state: { case: "passed", value: {} }, counts }),
+    );
+  }
+
+  it("draws passed/failed/total", () => {
+    expect(counted({ passed: 3, failed: 1, total: 12 }).querySelector(".merge-suite-counts")?.textContent).toBe(
+      "3/1/12",
+    );
+  });
+
+  it("paints the passed figure green", () => {
+    const el = counted({ passed: 3, failed: 1, total: 12 }).querySelector(".merge-suite-counts .is-passed");
+    expect(el?.textContent).toBe("3");
+  });
+
+  it("paints the failed figure red", () => {
+    const el = counted({ passed: 3, failed: 1, total: 12 }).querySelector(".merge-suite-counts .is-failed");
+    expect(el?.textContent).toBe("1");
+  });
+
+  it("draws no counts while the daemon knows none", () => {
+    expect(counted().querySelector(".merge-suite-counts")).toBeNull();
+  });
+
+  it("sits in the suite's head line, after the name", () => {
+    const head = counted({ passed: 0, failed: 0, total: 2 }).querySelector(".merge-suite-head");
+    expect(head?.lastElementChild?.classList.contains("merge-suite-counts")).toBe(true);
+  });
+});
+
+describe("the stylesheet's suite colors", () => {
+  /** The declarations of the rule whose selector is exactly SELECTOR. */
+  function declarationsOf(selector: string): string {
+    return rulesOf(STYLESHEET)
+      .filter((rule) => rule.selectors.includes(selector))
+      .map((rule) => rule.declarations)
+      .join(";");
+  }
+
+  it.each([
+    [".merge-suite-glyph.is-passing", "var(--ok)"],
+    [".merge-suite-glyph.is-failing", "var(--err)"],
+    [".merge-suite-glyph.is-unreported", "var(--muted)"],
+    [".merge-suite-counts .is-passed", "var(--ok)"],
+    [".merge-suite-counts .is-failed", "var(--err)"],
+  ])("colors %s with %s", (selector, color) => {
+    expect(declarationsOf(selector)).toContain(`color: ${color}`);
+  });
+
+  it("paints no suite dot purple", () => {
+    const purple = rulesOf(STYLESHEET).filter(
+      (rule) => rule.selectors.some((one) => one.startsWith(".merge-suite-glyph")) && rule.declarations.includes("--blocked"),
+    );
+    expect(purple).toEqual([]);
+  });
+});
 
 describe("drawTestSuites: one block per suite, in served order", () => {
   it("draws every suite the tab carried", () => {
@@ -149,7 +252,7 @@ describe("drawFeedMergeTabTests: the suites, then the round's log", () => {
   function testsTab(log?: { token: string; label: string }) {
     return create(FeedMergeTabTestsSchema, {
       state: { case: "live", value: {} },
-      suites: [{ name: "unit", state: { case: "running", value: {} }, output: [] }],
+      suites: [{ name: "unit", state: { case: "running", value: { soFar: { case: "unreported", value: {} } } }, output: [] }],
       ...(log === undefined ? {} : { log: { token: { value: log.token }, label: { text: log.label } } }),
     });
   }

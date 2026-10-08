@@ -164,7 +164,7 @@ func TestSuiteEdgeReadsTheScriptsLines(t *testing.T) {
 
 func TestDeclinedSuiteUsesTheNonFailurePresentation(t *testing.T) {
 	// Arrange
-	g := &gateRun{}
+	g := &gateRun{states: map[string]suiteState{}, counts: newSuiteCounts()}
 
 	// Act
 	g.setTabSuite("e2e-emacs", suiteStateDeclined)
