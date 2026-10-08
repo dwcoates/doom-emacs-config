@@ -3529,7 +3529,7 @@ describe("the tool card's command grey", () => {
  * background is not there in either theme; every other response keeps the
  * purple, and the interim keeps its pear border.
  */
-/** The two bubble kinds whose prose is the dimmed `--interim-text`. */
+/** The two bubble kinds whose prose is the dimmed `--interim-text` (the command grey). */
 const DIMMED_TEXT_SELECTORS: readonly string[] = ['.bubble[data-variant="thinking"]', ".bubble.interim-response"];
 
 describe("the page-colored fill", () => {
@@ -3624,8 +3624,8 @@ describe("the rail's mark column", () => {
 
 /**
  * THE DIMMED PROSE (owner request, 2026-10-08): a thinking bubble's and an
- * interim response's text is a slight dimming of the body text in either
- * theme, through one token.
+ * interim response's text is EXACTLY the tool card's header grey (the Bash
+ * command's `--tool-command`) in either theme, by referencing that token.
  */
 describe("the dimmed prose of a thinking or interim bubble", () => {
   /** The `color` the cascade hands a response bubble with HOOKS and VARIANT. */
@@ -3670,17 +3670,25 @@ describe("the dimmed prose of a thinking or interim bubble", () => {
     expect(got).not.toBe("var(--interim-text)");
   });
 
-  it.each([
-    ["light", "#3f434a"],
-    ["dark", "#c3c7ce"],
-  ] as const)("defines the %s theme's dimmed prose as %s", (theme, want) => {
+  it("defines the dimmed prose as the tool card's command grey token", () => {
     // Arrange
-    const block = theme === "light" ? (declarationsOf(":root") ?? "") : darkThemeBlock();
+    const block = declarationsOf(":root") ?? "";
 
     // Act
-    const got = /--interim-text:\s*(#[0-9a-fA-F]{3,6})/.exec(block)?.[1];
+    const got = /--interim-text:\s*([^;]+);/.exec(block)?.[1]?.trim();
 
     // Assert
-    expect(got).toBe(want);
+    expect(got).toBe("var(--tool-command)");
+  });
+
+  it("declares the dimmed prose once, so no theme redefines it away from the command grey", () => {
+    // Arrange
+    const declaration = /--interim-text\s*:/g;
+
+    // Act
+    const count = stylesheet.match(declaration)?.length ?? 0;
+
+    // Assert
+    expect(count).toBe(1);
   });
 });
