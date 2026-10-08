@@ -2225,6 +2225,9 @@ message FeedUserPromptBlock {
     FeedTextBlock text = 1;
     FeedImageBlock image = 2;
     FeedUnsupportedBlock unsupported = 3;
+    // An earlier bubble the person replied to. Drawn ONLY while the bubble is
+    // expanded; the collapsed bubble shows the other blocks alone.
+    FeedQuoteBlock quote = 4;
   }
 }
 
@@ -2249,6 +2252,18 @@ message FeedImageBlock {
 // The raw stays in the record; the row never carries it.
 message FeedUnsupportedBlock {
   string kind = 1;
+}
+
+// AN EARLIER BUBBLE THE PROMPT REPLIED TO (conversation.v1.UserQuoteBlock),
+// resolved for drawing. It belongs to the bubble's EXPANDED view only: a
+// collapsed prompt bubble shows the person's own words and hides every quote
+// block, and expanding the bubble shows each quote in its place among the
+// blocks, ahead of the words it introduces.
+message FeedQuoteBlock {
+  // The quote as the agent received it — the reply preamble, the quoted text
+  // inside a code fence, and the marker introducing the person's message —
+  // drawn as markdown, verbatim. Never parsed.
+  string text = 1;
 }
 
 // ①b A prompt one agent addressed to another — the user kind's sibling,
@@ -2329,6 +2344,9 @@ message FeedAgentPromptBlock {
     FeedTextBlock text = 1;
     FeedImageBlock image = 2;
     FeedUnsupportedBlock unsupported = 3;
+    // A quoted earlier bubble, drawn exactly as on a user row: only while the
+    // bubble is expanded.
+    FeedQuoteBlock quote = 4;
   }
 }
 
