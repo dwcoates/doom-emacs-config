@@ -86,17 +86,21 @@ afterEach(() => {
 });
 
 /** A stub bubble: an element and a record of what was asked of it. */
-function stubBubble(row: FeedRow): BubbleLike & { updates: number } {
+function stubBubble(row: FeedRow): BubbleLike & { updates: number; expands: number } {
   const el = document.createElement("div");
   el.className = "stub-bubble";
   el.setAttribute("data-bubble", row.id?.value ?? "");
   return {
     element: el,
     updates: 0,
+    expands: 0,
     update(): void {
       this.updates += 1;
     },
-    expand: async () => true,
+    async expand(): Promise<boolean> {
+      this.expands += 1;
+      return true;
+    },
     isExpanded: () => false,
     collapse: () => undefined,
     child: () => null,
@@ -292,6 +296,31 @@ describe("createFeedController: painting a page", () => {
     const { controller, host } = fixture();
     controller.applyPage(page([responseRow("b")]), "replace");
     expect(host.querySelector(".stub-response")).not.toBeNull();
+  });
+
+  it("re-opens a merge bubble the reader had open across a page replace", () => {
+    // Arrange
+    const { controller, bubbles } = fixture();
+    controller.applyPage(page([mergeRow("m1")]), "replace");
+    const before = bubbles.get("m1");
+    before?.element.setAttribute("data-merge-bubble", "");
+    if (before !== undefined) before.isExpanded = () => true;
+    // Act
+    controller.applyPage(page([mergeRow("m1")]), "replace");
+    // Assert
+    expect(bubbles.get("m1")?.expands).toBe(1);
+  });
+
+  it("leaves a subagent bubble the reader had open to the replace", () => {
+    // Arrange
+    const { controller, bubbles } = fixture();
+    controller.applyPage(page([subagentRow("b1")]), "replace");
+    const before = bubbles.get("b1");
+    if (before !== undefined) before.isExpanded = () => true;
+    // Act
+    controller.applyPage(page([subagentRow("b1")]), "replace");
+    // Assert
+    expect(bubbles.get("b1")?.expands).toBe(0);
   });
 
   it("replaces the rows whole on a newest page, accumulating nothing", () => {

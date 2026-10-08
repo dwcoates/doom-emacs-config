@@ -66,12 +66,10 @@ import type {
   RowRenderers,
 } from "./renderers.js";
 import { stopTicking } from "./ticking.js";
+import { MERGE_BUBBLE_ATTRIBUTE } from "./merge-bubble.js";
 import { refreshTitleFolds } from "./title-fold.js";
 import type { Overscan } from "./overscan.js";
 import type { TailFollow } from "../scroll.js";
-
-/** The attribute a merge bubble's element wears (BubbleOptions.merge). */
-export const MERGE_BUBBLE_ATTRIBUTE = "data-merge-bubble";
 
 export interface BubbleOptions {
   ctx: AppContext;
