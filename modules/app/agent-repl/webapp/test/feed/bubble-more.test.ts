@@ -26,6 +26,7 @@ import {
   shouldShowMore,
 } from "../../src/feed/bubble-more.js";
 import { BUBBLE_BODY_CLASS } from "../../src/bubble/body.js";
+import { quoteSlot } from "../../src/bubble/quote.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import { BUBBLE_SCROLL_CLASS, bubbleBox as sharedBubbleBox } from "../../src/feed/bubble-scroll.js";
 import { EXPANDED_CLASS } from "../../src/expand.js";
@@ -161,6 +162,15 @@ describe("hidesContentBeyondCap: the body's lines against the collapsed cap", ()
 
     // Act / Assert
     expect(hidesContentBeyondCap(box)).toBe(false);
+  });
+
+  it("counts a reply's quote as hidden, however short the words beside it", () => {
+    // Arrange — one line of words, and the quote the collapsed bubble does not draw.
+    const box = bubbleBox({ lines: 1 });
+    box.querySelector(`.${BUBBLE_BODY_CLASS}`)?.append(quoteSlot("prompt-block", "the quote"));
+
+    // Act / Assert
+    expect(hidesContentBeyondCap(box)).toBe(true);
   });
 
   it("refuses a box that holds no body, and records it at error", async () => {

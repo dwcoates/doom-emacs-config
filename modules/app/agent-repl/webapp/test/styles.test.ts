@@ -31,6 +31,7 @@ import {
 } from "../src/bubble/draw.js";
 import { EXPANDED_CLASS } from "../src/expand.js";
 import { HAS_MORE_CLASS } from "../src/feed/bubble-more.js";
+import { BUBBLE_QUOTE_CLASS } from "../src/bubble/quote.js";
 import { HELD_STATUS_BADGES } from "../src/tray/held-prompt.js";
 import { THINKING_CAP_LINES } from "../src/feed/cards/response.js";
 import { cascadedValue, installStylesheet, rulesOf, type CssRule } from "./stylesheet.js";
@@ -3081,6 +3082,30 @@ describe("the bubble's expand-only region", () => {
   it("takes the hidden region out of layout", () => {
     // Arrange / Act
     const declarations = regionRules().map((rule) => rule.declarations.trim());
+    // Assert
+    expect(declarations).toEqual(["display: none;"]);
+  });
+});
+
+/**
+ * A REPLY'S QUOTE (src/bubble/quote.ts): a block in a prompt bubble's body
+ * that shows only while the one toggle has the bubble's own box open.
+ */
+describe("a reply's quote in a prompt bubble", () => {
+  /** Every rule whose selector names the quote class. */
+  const quoteRules = (): CssRule[] =>
+    rulesOf(stylesheet).filter((rule) => rule.selectors.some((sel) => sel.includes(`.${BUBBLE_QUOTE_CLASS}`)));
+
+  it("hides the quote only in the body of a scroll box that is not expanded", () => {
+    // Arrange / Act
+    const selectors = quoteRules().flatMap((rule) => rule.selectors);
+    // Assert
+    expect(selectors).toEqual([`.bubble-scroll:not(.expanded) > .bubble-body > .${BUBBLE_QUOTE_CLASS}`]);
+  });
+
+  it("takes the hidden quote out of layout", () => {
+    // Arrange / Act
+    const declarations = quoteRules().map((rule) => rule.declarations.trim());
     // Assert
     expect(declarations).toEqual(["display: none;"]);
   });
