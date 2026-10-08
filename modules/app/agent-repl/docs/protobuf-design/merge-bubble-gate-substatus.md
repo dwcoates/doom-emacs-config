@@ -63,3 +63,29 @@ counts each suite's unit verdicts against that total: "ok" is a pass,
 failure, and a declined unit is neither. Units are the finest grain the
 runner reports a verdict for; per-test counts inside a Go package or a vitest
 chunk are not reported by the runner today.
+
+## 4. A merge waiting on the user
+
+While a merge resolves a conflict or fixes failed tests, the workspace's own
+session runs the merge's turns, and that session can stop on a permission ask
+or a question. The merging status outranks the waiting status, so the strip
+used to show only "merging · conflict resolution" and never said the merge
+was stuck on the user.
+
+What changed in the footer contract:
+
+- The merging status's substatus gained "waiting on user". It stands while
+  the merge is on its conflict-resolution or fixing step and the session has a
+  permission ask or a question batch open, and it gives way to the step's own
+  substatus the moment the last ask is answered or withdrawn.
+- The merging activity line gained two kinds, reused from the waiting status:
+  the gated call ("Bash: rm -rf build") and the question batch's lead
+  ("2 questions · Which approach?"). Under "waiting on user" one of them is
+  the line; a consent ask outranks a question batch, as under waiting.
+
+The coarse claim is unchanged: it is still the merging rung, so the roster row
+and the tab bar keep drawing "merging".
+
+How the fact travels: the session watcher hands every permission and question
+edge to the footer resolver, which already keeps the open asks per workspace;
+the substatus is resolved from those and the merge's step, with no new input.
