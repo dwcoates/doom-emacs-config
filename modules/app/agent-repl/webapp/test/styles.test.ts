@@ -3438,26 +3438,3 @@ describe("the cold gate's lead sentence", () => {
     expect(declarations).toMatch(/font-weight:\s*700/);
   });
 });
-
-describe("the page background is red", () => {
-  it("paints the body with the page token", () => {
-    // Arrange / Act
-    const body = declarationsOf("body") ?? "";
-    // Assert
-    expect(body).toMatch(/background:\s*var\(--page-bg\)\s*;/);
-  });
-
-  it("declares the page token pure red in the light theme", () => {
-    // Arrange / Act
-    const page = rgbOf(declarationsOf(":root") ?? "", "--page-bg");
-    // Assert
-    expect(page).toEqual([0xff, 0x00, 0x00]);
-  });
-
-  it("leaves the page token red in the dark theme", () => {
-    // Arrange / Act
-    const dark = darkThemeBlock();
-    // Assert
-    expect(dark).not.toMatch(/--page-bg:/);
-  });
-});

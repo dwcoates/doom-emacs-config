@@ -1,10 +1,6 @@
 :root {
   color-scheme: light dark;
   --bg: #ffffff;
-  /* The page's own fill behind the rail, feed and composer: red in BOTH
-     themes. Kept apart from --bg, which the controls, inputs and panels still
-     paint (and buttons use as their text color), so only the page turns. */
-  --page-bg: #ff0000;
   --fg: #1a1a1a;
   --muted: #6b7280;
   /* A REPOSITORY HEADER'S GREY SAYS ITS FOLD (owner ruling, 2026-10-01): a
@@ -539,7 +535,7 @@
    take no cell. */
 body {
   margin: 0;
-  background: var(--page-bg);
+  background: var(--bg);
   color: var(--fg);
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
