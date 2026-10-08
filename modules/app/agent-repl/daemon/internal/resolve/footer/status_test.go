@@ -1516,6 +1516,109 @@ func TestEachMergeStepDrawsItsOwnSubstatus(t *testing.T) {
 	}
 }
 
+// TestAMergeHeldOnTheUserIsWaitingOnUser covers the merging substatus raised
+// when the merge's own agent asks the user: only conflict resolution and
+// fixing hand the session a turn that can ask.
+func TestAMergeHeldOnTheUserIsWaitingOnUser(t *testing.T) {
+	tests := []struct {
+		name string
+		step MergeStep
+		ask  func(h *harness)
+		want bool
+	}{
+		{"a permission during conflict resolution", StepConflictResolution,
+			func(h *harness) { h.r.OnPermission(testWS, mainAgent, permissionStart("p-1", "rm -rf build")) }, true},
+		{"a question during fixing", StepFixing,
+			func(h *harness) { h.r.OnQuestion(testWS, mainAgent, questionStart("q-1", "Which approach?")) }, true},
+		{"a permission during testing", StepTesting,
+			func(h *harness) { h.r.OnPermission(testWS, mainAgent, permissionStart("p-1", "rm -rf build")) }, false},
+		{"no ask during fixing", StepFixing, func(*harness) {}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+			h.r.SetMerge(testWS, MergeFacts{State: "merging", Step: tt.step, Attempt: 1, MaxAttempts: 3})
+
+			// Act
+			tt.ask(h)
+
+			// Assert
+			got := h.view(t).GetStrip().GetStatus().GetMerging().GetWaitingOnUser() != nil
+			if got != tt.want {
+				t.Fatalf("waiting on user = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAMergeWaitingOnAPermissionDrawsTheGatedCall(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.SetMerge(testWS, MergeFacts{State: "merging", Step: StepConflictResolution})
+
+	// Act
+	h.r.OnPermission(testWS, mainAgent, permissionStart("p-1", "rm -rf build"))
+
+	// Assert
+	line := h.view(t).GetStrip().GetStatus().GetMerging().GetActivity().GetSalient().GetGatedCall().GetText()
+	if line != "Bash: rm -rf build" {
+		t.Fatalf("activity = %q, want the gated call", line)
+	}
+}
+
+func TestAMergeWaitingOnAQuestionDrawsItsLead(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.SetMerge(testWS, MergeFacts{State: "merging", Step: StepFixing, Attempt: 1, MaxAttempts: 3})
+
+	// Act
+	h.r.OnQuestion(testWS, mainAgent, questionStart("q-1", "Which approach?"))
+
+	// Assert
+	line := h.view(t).GetStrip().GetStatus().GetMerging().GetActivity().GetSalient().GetQuestionLead().GetText()
+	if line != "1 question · Which approach?" {
+		t.Fatalf("activity = %q, want the batch's lead", line)
+	}
+}
+
+func TestAnAnsweredAskReturnsTheMergeToItsStep(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.SetMerge(testWS, MergeFacts{State: "merging", Step: StepFixing, Attempt: 2, MaxAttempts: 3})
+	h.r.OnPermission(testWS, mainAgent, permissionStart("p-1", "rm -rf build"))
+
+	// Act
+	h.r.OnPermission(testWS, mainAgent, &conversationv1.AgentPermission{
+		Id:     &conversationv1.AgentPermissionId{Value: "p-1"},
+		Result: &conversationv1.AgentPermission_Success{Success: &conversationv1.AgentPermissionSuccess{}},
+	})
+
+	// Assert
+	if got := h.view(t).GetStrip().GetStatus().GetMerging().GetFixing().GetAttempt(); got != 2 {
+		t.Fatalf("fixing attempt = %d, want the fixing substatus back at attempt 2", got)
+	}
+}
+
+func TestAMergeWaitingOnUserKeepsTheMergingClaim(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.SetMerge(testWS, MergeFacts{State: "merging", Step: StepConflictResolution})
+
+	// Act
+	h.r.OnPermission(testWS, mainAgent, permissionStart("p-1", "rm -rf build"))
+
+	// Assert
+	if got := h.status(t); got != "merging" {
+		t.Fatalf("status = %q, want merging: the ask is a substatus of the merge", got)
+	}
+}
+
 func TestAMergeInFlightWithNoStepIsRecordedAsAnInvariantViolation(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

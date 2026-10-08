@@ -787,6 +787,11 @@ message FooterStatusMerging {
     FooterSubStatusMergingUpdatingMain updating_main = 19;
     // The configured after-merge prompt is running.
     FooterSubStatusMergingPostprocessing postprocessing = 20;
+    // Conflict resolution or fixing is held on the user: this workspace's
+    // session has a permission ask or a question batch open. It stands until
+    // every such ask is answered or withdrawn, and the step's own substatus
+    // stands again.
+    FooterSubStatusMergingWaitingOnUser waiting_on_user = 21;
   }
   // Tags 1-4, 6-9, 11 and 12 (enqueuing, queued, pre_prompt, merge, parked,
   // post_prompt, failed, merged, fixes, conflicts) are RETIRED: the steps
@@ -835,6 +840,9 @@ message FooterSubStatusMergingCommitting {}
 message FooterSubStatusMergingUpdatingMain {}
 // The after-merge prompt is running, drawn "postprocessing".
 message FooterSubStatusMergingPostprocessing {}
+// The merge's agent waits on the user, drawn "waiting on user". The activity
+// line names the ask: the gated call, or the question batch's lead.
+message FooterSubStatusMergingWaitingOnUser {}
 
 // The merge failed and the workspace is back with the user.
 message FooterStatusMergeFailed {
@@ -883,12 +891,19 @@ message FooterStatusMergingActivity {
 message FooterStatusMergingSalient {
   // When this line began standing; the client ticks the relative age.
   FooterStatusActivityAt at = 1;
-  // The one salient line. The merge step's own line ranks first, because it
-  // explains the step; then a deploy's progress and the push notification,
-  // in that order.
+  // The one salient line. The kind that explains the substatus ranks first:
+  // the gated call or the question lead under `waiting_on_user`, else the
+  // merge step's own line; then a deploy's progress and the push
+  // notification, in that order.
   oneof kind {
     // The current step's own line, standing until the step ends.
     FooterStatusActivityMergeStep merge_step = 7;
+    // Under `waiting_on_user`: the gated call, composed ("Bash: rm -rf …"),
+    // standing until the permission is answered or withdrawn.
+    FooterStatusActivityGatedCall gated_call = 8;
+    // Under `waiting_on_user`: the open batch's lead, composed ("2 questions
+    // · Which approach?"), standing until the batch is answered or withdrawn.
+    FooterStatusActivityQuestionLead question_lead = 9;
     // A DEPLOY'S PROGRESS. STATUS-INDEPENDENT: every status arm's salient
     // oneof carries it. See FooterStatusActivityUpdate.
     FooterStatusActivityUpdate update = 3;
