@@ -39,6 +39,12 @@ read by the webapp at the bubble's first draw only. Now:
 
 No field was added; the change is to the field's documented meaning.
 
+Superseded in part (owner ruling, 2026-10-08): a merge bubble never collapses
+on its own. The daemon never pushes an open bubble folded, and the reader's
+fold is recorded through `agentrepl.v1.FoldMergeBubble` on the durable head,
+so pushes, reloads and daemon restarts all carry it. The webapp never closes
+an open merge bubble on a push.
+
 ## 3. Suite counts and the running suite's dot
 
 Two owner requests on the merge bubble's tests tab:

@@ -405,15 +405,24 @@ hand any more:
   fired only for the reader's own scroll after the latest entry was out of
   view), which closes EVERY expanded entry once (INFO
   `feed.tail-reached-collapse`) and drops the jump watches. A MERGE BUBBLE
-  (`data-merge-bubble`) is exempt (owner ruling, 2026-10-08): the reader's
-  open merge bubble stays open until the reader closes it. "Left the view" is
+  (`data-merge-bubble`) NEVER COLLAPSES ON ITS OWN (owner ruling, 2026-10-08):
+  only the reader's head click folds it. The return to the tail skips it, a
+  jump that opened one never watches it (DEBUG `feed.jump-merge-unwatched`),
+  and a push stating an open one folded leaves it open (INFO
+  `feed.merge-bubble-fold-kept-open`). Each fold the READER makes, and only
+  that, is recorded through `FoldMergeBubble` (`src/feed/fold-merge-bubble.ts`,
+  the bubble's `readerFold`) on the daemon's durable head, so a push, a page,
+  a reload and a daemon restart all draw it the way the reader left it; a
+  refused or failed record is a `controlPlaneFailed` on the chip and the
+  bubble keeps the toggle. "Left the view" is
   ONE detector, `createLeftViewWatch` (`src/feed/left-view.ts`: seen first,
   then wholly out, once; a detached row is no departure), shared by the jump
   watch and the selection's `left_view` (selection-visibility.ts). Every
   expansion is client-owned but one: `FeedMergeFold` is the merge bubble's
-  fold at its first draw and again whenever a push CHANGES it (folded until
-  the merge fails, open once it has; owner ruling, 2026-10-08), and there is
-  no daemon fold verb. A bubble the daemon will not
+  fold at its first draw and again whenever a push CHANGES it to open
+  (folded until the merge fails, open once it has; owner ruling, 2026-10-08),
+  and it carries the reader's own last fold once `FoldMergeBubble` recorded
+  one. A bubble the daemon will not
   open for a jump is ERROR `feed.jump-expand-failed` and a
   `controlPlaneFailed` on the chip.
 - **ONE HEAT RULE FOR EVERY TOKEN FIGURE AND PERCENTAGE** (owner rulings,

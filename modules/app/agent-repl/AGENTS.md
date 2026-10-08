@@ -1512,6 +1512,32 @@ writes an `ai-title` line into the session transcript; the shim reads it
 `TopbarTitle.text` from it in preference to the workspace name. The branch
 suffix is a different fact and its rule is unchanged.
 
+## A merge bubble never collapses on its own
+
+Owner ruling, 2026-10-08. Only the READER folds a merge bubble.
+
+- **Nothing closes an open merge bubble but the reader's click on its head.**
+  Not a push, not the return to the feed's tail, not a jump's left-view
+  watch, not a window blur or a hidden page, not a page replace, not a full
+  page reload, not a daemon restart.
+- **The daemon may OPEN a bubble, never fold one.** It ships
+  `FeedMergeFold` folded while the merge is queued, running, landed or
+  abandoned, and opens it once the merge has failed. No push it makes ever
+  turns an open bubble folded (`keepMergeOpen`,
+  `daemon/internal/resolve/feed/mergefold.go`).
+- **The reader's fold is daemon-held.** Each fold the reader makes is sent as
+  `agentrepl.v1.FoldMergeBubble` (`webapp/src/feed/fold-merge-bubble.ts`),
+  and the daemon records it on the bubble's durable head row. Every later
+  push, page, reload and daemon restart carries it, so a bubble the reader
+  left open draws open.
+- **Only the reader's toggle is sent.** A fold the daemon applied, a jump's
+  expansion and a replace's reopening are never recorded. A refused or failed
+  record is filed on the warning chip (`control_plane_failed`) and logged;
+  the bubble keeps the reader's toggle.
+- **The webapp enforces it too.** A push stating an open merge bubble folded
+  leaves it open (INFO `feed.merge-bubble-fold-kept-open`), and a merge bubble
+  a jump opened is never watched (DEBUG `feed.jump-merge-unwatched`).
+
 ## Feed vocabulary: interim, final and thinking responses
 
 Owner ruling, 2026-10-08. A turn draws several agent response bubbles, and
