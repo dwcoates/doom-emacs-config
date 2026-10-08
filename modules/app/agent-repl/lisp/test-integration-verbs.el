@@ -684,11 +684,12 @@ worktree and branch that are already deleted."
 
 ;;;; ---- Success messages (audit finding 70) ----
 
-(ert-deftest agent-repl-itest-verbs-restart-success-messages ()
-  "A Restart success reports itself via `message'.
-Pins fanout \"Restart success -> `message'\" (elisp-fanout.md §9): a
-restart with no Messages-buffer feedback would leave the user unable to
-tell the daemon ever heard the request."
+(ert-deftest agent-repl-itest-verbs-restart-success-is-recorded ()
+  "A Restart success is recorded in the log as the restart having happened.
+The daemon answers a restart once it HAPPENED (owner ruling, 2026-10-08), so
+the success is the outcome itself and the log's `elisp.verbs.restart-done'
+says so; it replaces the earlier \"Restart success -> `message'\" pin, which
+announced a restart still under way."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-verbs--with-workspace daemon ref
@@ -701,10 +702,11 @@ tell the daemon ever heard the request."
           ;; Act.
           (agent-repl-verb-restart agent-repl-itest-verbs--ws)
           (agent-repl-itest--await-call daemon "RestartWorkspace")
-          ;; Assert: "Restart success -> `message'" (elisp-fanout.md §9).
-          (agent-repl-itest--wait-until (lambda () messages) nil
-                                        "the restart success message")
-          (should (cl-some (lambda (m) (string-match-p "restart" m)) messages)))))))
+          ;; Assert.
+          (agent-repl-itest--wait-until
+           (lambda () (cl-some (lambda (m) (string-match-p "elisp\\.verbs\\.restart-done" m)) messages))
+           nil "the restart's done record")
+          (should (cl-some (lambda (m) (string-match-p "elisp\\.verbs\\.restart-done" m)) messages)))))))
 
 (ert-deftest agent-repl-itest-verbs-merge-success-messages-merge-enqueued ()
   "A Merge success reports itself as exactly \"merge enqueued\".
@@ -2176,17 +2178,14 @@ log side, leaving the user-facing text (`--send''s `:on-failure') unpinned."
                       (regexp-quote "merge failed -- the daemon did not answer") m))
                    messages)))))))
 
-;;;; ---- #57: restart success's exact text
+;;;; ---- #57: a restart's success says nothing to the user
 
-;; audit-3 #57
-(ert-deftest agent-repl-itest-verbs-restart-success-messages-the-exact-under-way-text ()
-  "A Restart success messages EXACTLY \"agent-repl: restart under way\".
-The pre-existing `agent-repl-itest-verbs-restart-success-messages' asserts
-only a \"restart\" substring, which the `elisp.verbs.send op=restart' INFO
-line ALSO satisfies -- that line reaches `message' too, quietly, via
-`agent-repl--emit-message' -- so a success handler that never fired would
-still pass it.  Only the exact string proves the SUCCESS branch ran, and
-that it never says \"scheduled\" for a restart that is immediate."
+;; audit-3 #57, re-pinned 2026-10-08
+(ert-deftest agent-repl-itest-verbs-restart-success-shows-no-notice ()
+  "A Restart success shows the user no notice: the restart simply happened.
+Owner ruling 2026-10-08: \"i really expect no notification, i expect it to
+just restart instantly (not 'work on it' when it 'gets around to it')\".
+This replaces the exact \"agent-repl: restart under way\" pin."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-verbs--with-workspace daemon ref
@@ -2197,12 +2196,12 @@ that it never says \"scheduled\" for a restart that is immediate."
           ;; Act.
           (agent-repl-verb-restart agent-repl-itest-verbs--ws)
           (agent-repl-itest--await-call daemon "RestartWorkspace")
-          ;; Assert.
           (agent-repl-itest--wait-until
-           (lambda () (member "agent-repl: restart under way" messages))
-           nil "the exact restart message")
-          (should (member "agent-repl: restart under way" messages))
-          (should-not (member "agent-repl: restart scheduled" messages)))))))
+           (lambda () (cl-some (lambda (m) (string-match-p "elisp\\.verbs\\.restart-done" m)) messages))
+           nil "the restart's done record")
+          ;; Assert.
+          (should-not (cl-remove-if (lambda (m) (string-match-p "\\[agent-repl\\] elisp\\." m))
+                                    messages)))))))
 
 ;;;; ---- #58: admin-verb refusal arms and their op-named slugs
 
