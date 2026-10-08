@@ -40,13 +40,38 @@ func repositorySection(id string) *agentreplv1.SidebarViewFoldSection_Repository
 	return &agentreplv1.SidebarViewFoldSection_Repository{Repository: &workspacev1.RepositoryRef{Id: id}}
 }
 
-func groupingChange(task bool) *agentreplv1.UpdateSidebarViewRequest {
-	show := &agentreplv1.SidebarViewShowGrouping{
-		Grouping: &agentreplv1.SidebarViewShowGrouping_Repository{Repository: &agentreplv1.SidebarViewRepositoryGrouping{}},
-	}
-	if task {
-		show.Grouping = &agentreplv1.SidebarViewShowGrouping_Task{Task: &agentreplv1.SidebarViewTaskGrouping{}}
-	}
+func maturitySection(stage *workspacev1.MaturityStage) *agentreplv1.SidebarViewFoldSection_Maturity {
+	return &agentreplv1.SidebarViewFoldSection_Maturity{Maturity: stage}
+}
+
+func backlogStage() *workspacev1.MaturityStage {
+	return &workspacev1.MaturityStage{Stage: &workspacev1.MaturityStage_Backlog{Backlog: &workspacev1.MaturityStageBacklog{}}}
+}
+
+func inProgressStage() *workspacev1.MaturityStage {
+	return &workspacev1.MaturityStage{Stage: &workspacev1.MaturityStage_InProgress{InProgress: &workspacev1.MaturityStageInProgress{}}}
+}
+
+func mergingStage() *workspacev1.MaturityStage {
+	return &workspacev1.MaturityStage{Stage: &workspacev1.MaturityStage_Merging{Merging: &workspacev1.MaturityStageMerging{}}}
+}
+
+func repositoryGrouping() *agentreplv1.SidebarViewShowGrouping {
+	return &agentreplv1.SidebarViewShowGrouping{
+		Grouping: &agentreplv1.SidebarViewShowGrouping_Repository{Repository: &agentreplv1.SidebarViewRepositoryGrouping{}}}
+}
+
+func taskGrouping() *agentreplv1.SidebarViewShowGrouping {
+	return &agentreplv1.SidebarViewShowGrouping{
+		Grouping: &agentreplv1.SidebarViewShowGrouping_Task{Task: &agentreplv1.SidebarViewTaskGrouping{}}}
+}
+
+func maturityGrouping() *agentreplv1.SidebarViewShowGrouping {
+	return &agentreplv1.SidebarViewShowGrouping{
+		Grouping: &agentreplv1.SidebarViewShowGrouping_Maturity{Maturity: &agentreplv1.SidebarViewMaturityGrouping{}}}
+}
+
+func groupingChange(show *agentreplv1.SidebarViewShowGrouping) *agentreplv1.UpdateSidebarViewRequest {
 	return &agentreplv1.UpdateSidebarViewRequest{
 		Change: &agentreplv1.UpdateSidebarViewRequest_ShowGrouping{ShowGrouping: show},
 	}
@@ -74,6 +99,9 @@ func TestUpdateSidebarViewHandsASectionFoldToTheVerb(t *testing.T) {
 		{"expand a task", &agentreplv1.SidebarViewFoldSection{Section: taskSection("task-1"), Fold: expandFold()}, sectionFold{task: "task-1", folded: false}},
 		{"expand the merged band", &agentreplv1.SidebarViewFoldSection{Section: mergedSection(), Fold: expandFold()}, sectionFold{merged: true, folded: false}},
 		{"collapse the merged band", &agentreplv1.SidebarViewFoldSection{Section: mergedSection(), Fold: collapseFold()}, sectionFold{merged: true, folded: true}},
+		{"collapse the backlog stage", &agentreplv1.SidebarViewFoldSection{Section: maturitySection(backlogStage()), Fold: collapseFold()}, sectionFold{stage: wsm.MaturityBacklog, folded: true}},
+		{"collapse the in-progress stage", &agentreplv1.SidebarViewFoldSection{Section: maturitySection(inProgressStage()), Fold: collapseFold()}, sectionFold{stage: wsm.MaturityInProgress, folded: true}},
+		{"expand the merging stage", &agentreplv1.SidebarViewFoldSection{Section: maturitySection(mergingStage()), Fold: expandFold()}, sectionFold{stage: wsm.MaturityMerging, folded: false}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -140,16 +168,20 @@ func TestUpdateSidebarViewRefusesAnUnknownRepositoryBeforeTheVerb(t *testing.T) 
 func TestUpdateSidebarViewHandsTheGroupingToTheVerb(t *testing.T) {
 	tests := []struct {
 		name string
-		task bool
+		show *agentreplv1.SidebarViewShowGrouping
 		want wsm.Grouping
-	}{{"task", true, wsm.GroupingTask}, {"repository", false, wsm.GroupingRepository}}
+	}{
+		{"task", taskGrouping(), wsm.GroupingTask},
+		{"repository", repositoryGrouping(), wsm.GroupingRepository},
+		{"maturity", maturityGrouping(), wsm.GroupingMaturity},
+	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
 			h := newHarness(t)
 
 			// Act
-			sent(t, h, groupingChange(tt.task))
+			sent(t, h, groupingChange(tt.show))
 
 			// Assert
 			if len(h.Verbs.groupings) != 1 || h.Verbs.groupings[0] != tt.want {
@@ -195,7 +227,7 @@ func TestUpdateSidebarViewFailsAVerbError(t *testing.T) {
 	h.Verbs.sectionFoldErr = errors.New("disk I/O error")
 
 	// Act
-	_, err := h.Client.UpdateSidebarView(context.Background(), connect.NewRequest(groupingChange(true)))
+	_, err := h.Client.UpdateSidebarView(context.Background(), connect.NewRequest(groupingChange(taskGrouping())))
 
 	// Assert
 	if connect.CodeOf(err) != connect.CodeInternal {
@@ -214,6 +246,7 @@ func TestValidateUpdateSidebarViewRequestRefusesAnIncompleteRequest(t *testing.T
 		{"a task fold with a blank id", foldChange(&agentreplv1.SidebarViewFoldSection{Section: taskSection(""), Fold: expandFold()})},
 		{"a repository fold with no ref", foldChange(&agentreplv1.SidebarViewFoldSection{Section: &agentreplv1.SidebarViewFoldSection_Repository{}, Fold: expandFold()})},
 		{"a fold with no fold arm", foldChange(&agentreplv1.SidebarViewFoldSection{Section: mergedSection()})},
+		{"a maturity fold with no stage arm", foldChange(&agentreplv1.SidebarViewFoldSection{Section: maturitySection(&workspacev1.MaturityStage{}), Fold: expandFold()})},
 		{"a grouping with no arm", &agentreplv1.UpdateSidebarViewRequest{
 			Change: &agentreplv1.UpdateSidebarViewRequest_ShowGrouping{ShowGrouping: &agentreplv1.SidebarViewShowGrouping{}}}},
 	}
