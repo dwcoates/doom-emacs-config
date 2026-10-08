@@ -351,6 +351,14 @@ type Queue interface {
 	// the two can never both take it. It never blocks: the decision runs on a
 	// goroutine of its own, which Drain joins.
 	OnDeparted(ws ids.WorkspaceID, departed Watcher, departure sessionwatcher.Departure)
+	// WithdrawRevivalTurn is a turn stop that lands while the workspace's
+	// session is still coming up: it retires the accepted turn the status
+	// surfaces already show (the first prompt held for the revival), so the
+	// stop they offer is honored rather than answered "nothing running" and
+	// then run anyway. It reports false, and retires nothing, when no revival
+	// is in flight or nothing waits on it, which is when the turn (if any) is
+	// already the session's own to kill.
+	WithdrawRevivalTurn(ctx context.Context, ws ids.WorkspaceID) (bool, error)
 	// Reviving reports whether a background revival this queue started for
 	// the workspace is still in flight: from before its bring-up spawns a shim
 	// until the prompt it holds has been handed to that shim. The idle sweep

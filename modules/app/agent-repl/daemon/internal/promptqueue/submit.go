@@ -449,6 +449,59 @@ func (q *queue) keepReconnectHolds(ctx context.Context, ws ids.WorkspaceID, log 
 		dlog.Context{"cause": cause, "held": len(waiting), "turns": waiting})
 }
 
+// WithdrawRevivalTurn implements Queue.
+//
+// UNDER THE DELIVERY LOCK, which is what makes the stop and the delivery
+// exclusive rather than a race: the revival's release un-stamps and delivers
+// its holds under the same lock, and marks the delivered turn in flight on the
+// session before releasing it. So either the accepted turn still waits here and
+// is withdrawn, or it has already been handed to the session, this answers
+// false, and the caller's kill finds it in flight.
+//
+// ONLY THE FIRST waiting prompt is withdrawn: it is the turn the status shows,
+// and a stop stops that one turn. Prompts sent behind it stay held, the next
+// of them is the accepted turn, and the status keeps showing it.
+func (q *queue) WithdrawRevivalTurn(ctx context.Context, ws ids.WorkspaceID) (bool, error) {
+	log, err := q.logger(ctx, ws)
+	if err != nil {
+		return false, err
+	}
+	d := q.lockDelivery(ws)
+	defer d.unlock()
+
+	if !q.isReviving(ws) {
+		log.Debug(opWithdraw, "no revival is in flight; no accepted turn waits on a bring-up", nil)
+		return false, nil
+	}
+	standing, err := q.deps.DB.HeldPrompts(ctx, ws)
+	if err != nil {
+		log.Error(opWithdraw, "could not read the holds waiting on the bring-up", dlog.Context{"cause": err.Error()})
+		return false, fmt.Errorf("withdraw the revival turn on %q: %w", ws, err)
+	}
+	var waiting []wsm.HeldPrompt
+	for _, h := range standing {
+		if standingReconnectHold(h) {
+			waiting = append(waiting, h)
+		}
+	}
+	if len(waiting) == 0 {
+		log.Debug(opWithdraw, "the revival holds no prompt; the accepted turn has been delivered", dlog.Context{"holds": len(standing)})
+		return false, nil
+	}
+	withdrawn := waiting[0]
+	turnLog := log.With(dlog.Context{"turn": string(withdrawn.Turn)})
+	if err := q.dropLocked(ctx, d, withdrawn, tombstoneWithdrawn, opWithdraw, turnLog); err != nil {
+		return false, err
+	}
+	if len(waiting) == 1 {
+		q.setTurn(ws, nil)
+	}
+	turnLog.Info(opWithdraw, "a stop withdrew the accepted turn before its session came up", dlog.Context{
+		"still_held": len(waiting) - 1,
+	})
+	return true, nil
+}
+
 // ReleaseReconnectHolds implements Queue.
 func (q *queue) ReleaseReconnectHolds(ws ids.WorkspaceID) {
 	ctx := context.Background()

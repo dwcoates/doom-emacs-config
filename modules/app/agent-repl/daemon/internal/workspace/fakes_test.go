@@ -837,6 +837,17 @@ type fakeQueue struct {
 	// promptqueue.ErrHoldsChanged surfaced from inside perform) scripts that
 	// through the fake shim or leaves this nil and lets perform run.
 	rollBackErr error
+	// withdraws records every WithdrawRevivalTurn call's workspace, in order;
+	// withdrawn and withdrawErr are what each answers.
+	withdraws   []ids.WorkspaceID
+	withdrawn   bool
+	withdrawErr error
+}
+
+// WithdrawRevivalTurn records the call and answers the scripted outcome.
+func (q *fakeQueue) WithdrawRevivalTurn(_ context.Context, ws ids.WorkspaceID) (bool, error) {
+	q.withdraws = append(q.withdraws, ws)
+	return q.withdrawn, q.withdrawErr
 }
 
 // rollBackCall is one RollBack call the fake queue recorded.

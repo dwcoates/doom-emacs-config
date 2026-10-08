@@ -27,6 +27,7 @@ const (
 	opInterject   = "daemon.promptqueue.interject"
 	opRelease     = "daemon.promptqueue.release"
 	opDrop        = "daemon.promptqueue.drop"
+	opWithdraw    = "daemon.promptqueue.withdraw_revival_turn"
 	opAccept      = "daemon.promptqueue.accept"
 	opAct         = "daemon.promptqueue.session_act"
 	opTurnEnded   = "daemon.promptqueue.turn_ended"
