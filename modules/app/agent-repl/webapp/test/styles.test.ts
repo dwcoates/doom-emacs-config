@@ -2787,16 +2787,25 @@ describe("the one bubble rule set", () => {
   });
 
 
-  it("places and fills a bubble only through its role, and the held variant's named fill", () => {
+  it("places and fills a bubble only through its role, and the named fills", () => {
     // Arrange / Act — every rule on a bubble that sets a side margin or its fill.
     const placing = rulesOf(stylesheet).filter(
       (rule) =>
         rule.selectors.some(onBubble) &&
         /(?:^|;)\s*(?:margin-left|margin-right|--bubble-bg|background(?:-color)?)\s*:/.test(rule.declarations),
     );
-    // Assert — the base rule paints the role's token; the roles and held choose it.
+    // Assert — the base rule paints the role's token; the roles choose it, and
+    // so do the owner-named fills: the held variant's (2026-09-23) and the
+    // page-colored thinking and interim fill (2026-10-08).
     expect(placing.flatMap((rule) => rule.selectors).sort()).toEqual(
-      [".bubble", '.bubble[data-role="prompt"]', '.bubble[data-role="response"]', '.bubble[data-variant="held"]'].sort(),
+      [
+        ".bubble",
+        '.bubble[data-role="prompt"]',
+        '.bubble[data-role="response"]',
+        '.bubble[data-variant="held"]',
+        '.bubble[data-variant="thinking"]',
+        ".bubble.interim-response",
+      ].sort(),
     );
   });
 
@@ -3482,5 +3491,69 @@ describe("the tool card's command grey", () => {
 
     // Assert
     expect(got).toBe(want);
+  });
+});
+
+/**
+ * THE PAGE-COLORED FILL (owner request, 2026-10-08): a thinking bubble and an
+ * interim response are filled with the page's own `--bg`, so the bubble's
+ * background is not there in either theme; every other response keeps the
+ * purple, and the interim keeps its pear border.
+ */
+describe("the page-colored fill", () => {
+  /** The `--bubble-bg` the cascade hands a bubble with ATTRS and HOOKS. */
+  function fillOf(attrs: Readonly<Record<string, string>>, hooks: readonly string[]): string {
+    const teardown = installStylesheet();
+    try {
+      const el = document.createElement("div");
+      el.className = ["bubble", "md", ...hooks].join(" ");
+      for (const [name, value] of Object.entries(attrs)) el.setAttribute(name, value);
+      document.body.append(el);
+      const got = cascadedValue(el, "--bubble-bg");
+      el.remove();
+      return got;
+    } finally {
+      teardown();
+    }
+  }
+
+  it("fills a thinking bubble with the page background", () => {
+    // Arrange / Act
+    const got = fillOf({ "data-role": "response", "data-variant": "thinking", "data-state": "success" }, ["assistant", "thinking-bubble"]);
+
+    // Assert
+    expect(got).toBe("var(--bg)");
+  });
+
+  it("fills an interim response with the page background", () => {
+    // Arrange / Act
+    const got = fillOf({ "data-role": "response", "data-variant": "response", "data-state": "success" }, ["assistant", "interim-response"]);
+
+    // Assert
+    expect(got).toBe("var(--bg)");
+  });
+
+  it("keeps the purple fill on the turn's answer", () => {
+    // Arrange / Act
+    const got = fillOf({ "data-role": "response", "data-variant": "response", "data-state": "success" }, ["assistant", "final-response"]);
+
+    // Assert
+    expect(got).toBe("var(--assistant)");
+  });
+
+  it("keeps the pear border on a settled interim response", () => {
+    // Arrange / Act
+    const borders = bordersOn({ "data-role": "response", "data-variant": "response", "data-state": "success" }, ["assistant", "interim-response"]);
+
+    // Assert
+    expect(borders).toEqual(["border-color: var(--interim-response-border)"]);
+  });
+
+  it("paints the page itself with the same background token", () => {
+    // Arrange / Act
+    const body = declarationsOf("body") ?? "";
+
+    // Assert
+    expect(body).toMatch(/background:\s*var\(--bg\)/);
   });
 });

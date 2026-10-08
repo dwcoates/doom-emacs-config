@@ -345,8 +345,11 @@ hand any more:
   the bubble to be laid out, and an unmeasurable width still fails loudly. A
   redraw given the row's previous draw updates it IN PLACE. The stylesheet has
   ONE rule set on `.bubble`: one size and leading, `[data-role]` sets only the
-  side and `--bubble-bg`, a variant or state only the border, `[data-cap-lines]`
-  the collapsed limit; one scroll box, one has-more measurer (bubble-more.ts)
+  side and `--bubble-bg`, a variant or state only the border (the owner-named
+  fills apart: a held prompt's, below, and a thinking bubble's and an interim
+  response's (`.interim-response`), which is the page's own `--bg`, owner
+  request 2026-10-08), `[data-cap-lines]` the collapsed limit; one scroll box,
+  one has-more measurer (bubble-more.ts)
   and one toggle (expand.ts, which also opens a bubble from its header strip).
   A kind's chrome the reader should see only once the bubble is open goes in
   the spec's `expandOnly`, which the same toggle reveals; there is no second
