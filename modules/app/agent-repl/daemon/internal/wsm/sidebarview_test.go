@@ -288,7 +288,7 @@ func TestSetMaturityFoldedIsReadBackOnItsStageOnly(t *testing.T) {
 				t.Fatalf("SetMaturityFolded: %v", err)
 			}
 			got, err := s.SidebarView(context.Background())
-			want := SidebarView{MergedFolded: true, MaturityFolded: tt.want, Grouping: GroupingRepository}
+			want := SidebarView{MergedFolded: false, MaturityFolded: tt.want, Grouping: GroupingRepository}
 			if err != nil || got != want {
 				t.Fatalf("SidebarView = %+v, %v; want %+v", got, err, want)
 			}
