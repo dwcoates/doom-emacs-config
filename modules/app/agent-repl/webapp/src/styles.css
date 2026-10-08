@@ -1919,8 +1919,8 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
 /* THE EXPANDED RESPONSE (owner ruling, 2026-09-27): while a response bubble's
    own scroll box is open, its border is eggshell, whatever variant or state it
    wears. Only a CAPPED response has a scroll box to open — a thinking bubble,
-   an agentic card, a compaction summary — since interim, final and ended-turn
-   responses are uncapped (`BUBBLE_UNCAPPED`) and never open. ONE rule keyed on
+   an interim response, an agentic card, a compaction summary — since final
+   and cut-short responses are uncapped (`BUBBLE_UNCAPPED`) and never open. ONE rule keyed on
    the role and the open box (`.expanded` lives on the box, the border on the
    bubble, so the bubble is keyed through `:has`), last on the ladder and the
    one `!important` border apart from the selection's, so it outranks every
@@ -2622,7 +2622,8 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
    on every bubble: nothing draws a glyph from `has-more`,
    and no `::before` keys on it. styles.test.ts fails any rule that does. */
 /* THE ELLIPSIS INSTEAD OF THE FADE (owner rulings, 2026-09-27). A bubble whose
-   spec chooses it (`data-more="ellipsis"`, src/bubble/draw.ts: a held prompt)
+   spec chooses it (`data-more="ellipsis"`, src/bubble/draw.ts: a held prompt,
+   a thinking bubble, an interim response)
    shows its ONE collapsed line and, when there is
    more, ends that line in `…`; no fade. The collapsed BODY is clamped to the
    cap's lines, so the engine itself writes the `…` at the end of the last line
