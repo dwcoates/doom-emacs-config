@@ -1663,3 +1663,94 @@ been killed (both the ws plist and the existing file lack the field)."
               (insert-file-contents (agent-repl--state-file tmpdir))
               (should-not (search-forward "e6cb9929-c4bd-4164-b5d1-7fd3bc743bc7" nil t))))
         (delete-directory tmpdir t)))))
+
+;;;; ---- Tests: the unsent history head ----
+
+(defmacro agent-repl-test-history--with-saved-ring (history discard-head &rest body)
+  "Save HISTORY for test-ws to a temp dir, its head unsent when DISCARD-HEAD.
+BODY runs with `file' bound to the history file written."
+  (declare (indent 2))
+  `(agent-repl-test--with-clean-state
+     (let ((tmpdir (make-temp-file "test-hist-unsent-" t)))
+       (unwind-protect
+           (agent-repl-test--with-temp-buffer " *test-hist-unsent*"
+             (setq-local agent-repl--input-history ,history)
+             (setq-local agent-repl--history-discard-entry
+                         (and ,discard-head (car agent-repl--input-history)))
+             (agent-repl--ws-put "test-ws" :project-dir tmpdir)
+             (agent-repl--ws-put "test-ws" :input-buffer (current-buffer))
+             (agent-repl--history-save "test-ws")
+             (let ((file (agent-repl--history-file tmpdir)))
+               ,@body))
+         (delete-directory tmpdir t)))))
+
+(ert-deftest agent-repl-test-history-save-marks-an-unsent-head ()
+  "A ring whose head is the discard's entry is written with the head marked."
+  (agent-repl-test-history--with-saved-ring (list "kept" "sent") t
+    (should (get-text-property 0 'agent-repl-unsent (car (agent-repl--read-sexp-file file))))))
+
+(ert-deftest agent-repl-test-history-save-leaves-a-sent-head-unmarked ()
+  "A ring whose head is not the discard's entry is written unmarked."
+  (agent-repl-test-history--with-saved-ring (list "sent" "older") nil
+    (should-not (get-text-property 0 'agent-repl-unsent (car (agent-repl--read-sexp-file file))))))
+
+(ert-deftest agent-repl-test-history-save-does-not-mark-the-ring-in-memory ()
+  "Marking the head for the file leaves the in-memory entry plain."
+  (agent-repl-test-history--with-saved-ring (list "kept" "sent") t
+    (should-not (text-properties-at 0 (car agent-repl--input-history)))))
+
+(ert-deftest agent-repl-test-history-restore-recognizes-an-unsent-head ()
+  "A marked head read back is the unsent head again."
+  (agent-repl-test-history--with-saved-ring (list "kept" "sent") t
+    (setq-local agent-repl--input-history nil)
+    (setq-local agent-repl--history-discard-entry nil)
+    (agent-repl--history-restore "test-ws")
+    (should (equal (agent-repl--history-unsent-head) "kept"))))
+
+(ert-deftest agent-repl-test-history-restore-strips-the-unsent-mark ()
+  "The restored head carries no text property into the composer."
+  (agent-repl-test-history--with-saved-ring (list "kept" "sent") t
+    (agent-repl--history-restore "test-ws")
+    (should-not (text-properties-at 0 (car agent-repl--input-history)))))
+
+(ert-deftest agent-repl-test-history-restore-of-an-unmarked-head-is-not-unsent ()
+  "An unmarked head read back is not unsent."
+  (agent-repl-test-history--with-saved-ring (list "sent" "older") nil
+    (setq-local agent-repl--history-discard-entry "stale")
+    (agent-repl--history-restore "test-ws")
+    (should-not (agent-repl--history-unsent-head))))
+
+(ert-deftest agent-repl-test-history-unsent-marked-p-refuses-a-non-list ()
+  "File data that is not a list has no unsent head."
+  (should-not (agent-repl--history-unsent-marked-p "just-a-string")))
+
+(ert-deftest agent-repl-test-history-unsent-marked-p-refuses-an-empty-head ()
+  "An empty string head has no character to carry the mark."
+  (should-not (agent-repl--history-unsent-marked-p (list ""))))
+
+(ert-deftest agent-repl-test-history-push-of-the-unsent-head-records-it-as-sent ()
+  "Sending the unsent head's exact words clears its unsent standing."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-temp-buffer " *test-hist-push-unsent*"
+      (setq-local agent-repl--input-history (list "kept"))
+      (setq-local agent-repl--history-discard-entry (car agent-repl--input-history))
+      (agent-repl--history-push "kept")
+      (should-not (agent-repl--history-unsent-head)))))
+
+(ert-deftest agent-repl-test-history-push-of-the-unsent-head-adds-no-entry ()
+  "Sending the unsent head's words still records them only once."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-temp-buffer " *test-hist-push-unsent-once*"
+      (setq-local agent-repl--input-history (list "kept"))
+      (setq-local agent-repl--history-discard-entry (car agent-repl--input-history))
+      (agent-repl--history-push "kept")
+      (should (equal agent-repl--input-history '("kept"))))))
+
+(ert-deftest agent-repl-test-history-unsent-head-after-a-later-push-is-nil ()
+  "A push after the discard buries it: the head is no longer unsent."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-temp-buffer " *test-hist-buried*"
+      (setq-local agent-repl--input-history (list "kept"))
+      (setq-local agent-repl--history-discard-entry (car agent-repl--input-history))
+      (agent-repl--history-push "newer")
+      (should-not (agent-repl--history-unsent-head)))))

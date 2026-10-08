@@ -20,11 +20,13 @@
 (declare-function agent-repl-instantiation-p "workspace")
 (declare-function agent-repl-instantiation-session-id "workspace")
 
-;; `agent-repl--input-history' is buffer-local and declared with
-;; `defvar-local' further down, beside the history commands that own it.
-;; The state save/restore pair above those commands reads and writes it, so
-;; the special declaration has to precede them.
+;; `agent-repl--input-history' and `agent-repl--history-discard-entry' are
+;; buffer-local and declared with `defvar-local' further down, beside the
+;; history commands that own them.  The state save/restore pair above those
+;; commands reads and writes them, so the special declarations have to
+;; precede them.
 (defvar agent-repl--input-history)
+(defvar agent-repl--history-discard-entry)
 
 ;;;; Constants
 
@@ -279,6 +281,38 @@ Same fallback semantics as `agent-repl--history-file-for-read'."
 
 ;;;; History persistence
 
+;; AN UNSENT ENTRY is the one `agent-repl-discard-input' (or the shutdown
+;; save, which saves the same way) recorded at the HEAD of the history ring,
+;; with nothing sent or recorded after it.  In memory it is
+;; `agent-repl--history-discard-entry' being the very string at the head.
+;; On disk the head carries the text property `agent-repl-unsent', so the
+;; file stays the plain list of strings every reader already takes and the
+;; provenance travels on the entry it describes.  Only the head can be
+;; unsent: the discard marker names one entry, and any later push buries it.
+
+(defun agent-repl--history-head-unsent-p (history discard-entry)
+  "Return non-nil when HISTORY's head is DISCARD-ENTRY, the unsent discard."
+  (and (consp history) discard-entry (eq (car history) discard-entry)))
+
+(defun agent-repl--history-mark-unsent-head (history)
+  "Return HISTORY with its head carrying `agent-repl-unsent', for the file.
+HISTORY itself is left untouched."
+  (cons (propertize (car history) 'agent-repl-unsent t) (cdr history)))
+
+(defun agent-repl--history-unsent-marked-p (data)
+  "Return non-nil when the history DATA read from disk has an unsent head."
+  (and (consp data)
+       (stringp (car data))
+       (> (length (car data)) 0)
+       (get-text-property 0 'agent-repl-unsent (car data))
+       t))
+
+(defun agent-repl--history-unsent-head ()
+  "Return the current composer's unsent history head, or nil."
+  (and (agent-repl--history-head-unsent-p
+        agent-repl--input-history agent-repl--history-discard-entry)
+       (car agent-repl--input-history)))
+
 (defun agent-repl--ws-live-input-buffer (ws)
   "Return the live input buffer for workspace WS, or nil.
 WS defaults to the current workspace name."
@@ -307,9 +341,13 @@ WS defaults to the current workspace name."
             (agent-repl--log ws "history-save: missing project-dir ws=%s history-count=%d" ws (length history))
             (error "agent-repl: history-save requires :project-dir for workspace %s" ws))
            (history
-            (agent-repl--log ws "history-save: writing ws=%s file=%s history-count=%d" ws file (length history))
-            (agent-repl--write-sexp-file file history)
-            (agent-repl--log ws "history-save: write complete ws=%s file=%s history-count=%d" ws file (length history)))
+            (let ((unsent (agent-repl--history-head-unsent-p
+                           history (buffer-local-value 'agent-repl--history-discard-entry buf))))
+              (agent-repl--log ws "history-save: writing ws=%s file=%s history-count=%d unsent-head=%s"
+                               ws file (length history) unsent)
+              (agent-repl--write-sexp-file
+               file (if unsent (agent-repl--history-mark-unsent-head history) history))
+              (agent-repl--log ws "history-save: write complete ws=%s file=%s history-count=%d" ws file (length history))))
            (t
             (agent-repl--log ws "history-save: no history to save ws=%s file=%s" ws file))))
       (agent-repl--log ws "history-save: no live input buffer ws=%s" ws))))
@@ -329,9 +367,15 @@ project-root path when only the legacy file exists."
                  (agent-repl--read-sexp-file-if-exists
                   (agent-repl--history-file-for-read root)))))
     (if data
-        (progn
-          (setq agent-repl--input-history data)
-          (agent-repl--log ws "history-restore: loaded ws=%s root=%s history-count=%d" ws root (length data)))
+        (let ((unsent (agent-repl--history-unsent-marked-p data)))
+          (setq agent-repl--input-history
+                (if unsent
+                    (cons (substring-no-properties (car data)) (cdr data))
+                  data))
+          (setq agent-repl--history-discard-entry
+                (and unsent (car agent-repl--input-history)))
+          (agent-repl--log ws "history-restore: loaded ws=%s root=%s history-count=%d unsent-head=%s"
+                           ws root (length data) unsent))
       (agent-repl--log ws "history-restore: no data found ws=%s root=%s history-unchanged=t" ws root))))
 
 ;;;; Session state persistence
@@ -516,6 +560,14 @@ Skips empty strings and duplicates of the most recent entry."
     (cond
      ((string-empty-p text)
       (agent-repl--log ws "history-push: skipped empty input ws=%s history-count=%d" ws (length agent-repl--input-history)))
+     ((and (equal text (car agent-repl--input-history))
+           (agent-repl--history-head-unsent-p
+            agent-repl--input-history agent-repl--history-discard-entry))
+      ;; The words a discard kept are being recorded as sent now: the head
+      ;; stays, but it is no longer unsent, so it is never put back in the
+      ;; composer after a restart.
+      (setq agent-repl--history-discard-entry nil)
+      (agent-repl--log ws "history-push: the unsent discard at the head is now recorded ws=%s input-chars=%d history-count=%d" ws (length text) (length agent-repl--input-history)))
      ((equal text (car agent-repl--input-history))
       (agent-repl--log ws "history-push: skipped duplicate input ws=%s input-chars=%d history-count=%d" ws (length text) (length agent-repl--input-history)))
      (t
