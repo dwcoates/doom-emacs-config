@@ -1621,8 +1621,8 @@ describe("createFeedController: following the tail", () => {
 
 /**
  * A THINKING BUBBLE KEEPS ITS FIXED HEIGHT WHEN IT LANDS (owner request,
- * 2026-10-07). The daemon re-pushes a thinking row settled once its own final
- * text has arrived; its redraw keeps the same feed cap, so nothing above the
+ * 2026-10-07; one line since 2026-10-08). The daemon re-pushes a thinking row
+ * settled once its own final text has arrived; its redraw keeps the same cap, so nothing above the
  * reader changes height and nothing moves. The tail owner is the REAL
  * `TailFollow` over a fake box.
  */
@@ -1702,14 +1702,14 @@ describe("createFeedController: a landed thinking row", () => {
       ?.getAttribute("data-cap-lines");
   }
 
-  it("keeps the feed cap it arrived at", () => {
+  it("keeps the one-line cap it arrived at", () => {
     // Arrange
     const { controller, host } = arriving();
     const before = capOf(host);
     // Act — the daemon re-pushes t1 settled.
     controller.upsert(thinkingRow("t1", true));
     // Assert
-    expect([before, capOf(host)]).toEqual(["feed", "feed"]);
+    expect([before, capOf(host)]).toEqual(["1", "1"]);
   });
 
   it("moves nothing under a reader below it", () => {

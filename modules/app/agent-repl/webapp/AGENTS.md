@@ -101,7 +101,7 @@ and are contract on the same terms:
 | `.topbar-account-cell` class | the strip's first cell, wrapping the connectivity glyph and the account chip in that order | — (the pair is one element, and it is the session-line reveal's anchor) | owner ruling 3, 2026-09-13 |
 | `data-reveal="agent-repl-session"` + `data-began` / `.topbar-session-duration` | the connectivity glyph's dropdown (src/topbar/session.ts), anchored on the `.topbar-connectivity` glyph itself (`data-reveal-anchor="agent-repl-session"`), whose click stops at the glyph so the account cell's options do not also open; its rows are `.topbar-session-row`s (`.topbar-session-label`, `.topbar-session-value`) sharing the token breakdown's row rules | `data-began`: `login` \| `editorStart`; the duration row's value is `formatTickedAge` of the reader's now against `started_at_ms`, ticked by the shared ticker; it is the dropdown's only row (the vendor traffic row was removed, owner ruling 2026-10-06). A connectivity indicator carrying NO session binds nothing: the glyph is unmarked and its click opens the account options, as before | session-traffic, owner ruling 2026-10-06 |
 | `data-reviving` + `.reviving` class | the sidebar `.ws` row (`data-reviving`) and its `.name` (`.reviving`), while the row carries `RosterRowReviving` | `true` — absent once the daemon drops the marker (the revival ended, success or failure). The name wears the subtle `ws-revive-shimmer` ripple, phase-continued across redraws by `REVIVE_SHIMMER_PERIOD_MS` (src/sidebar/reviving.ts), and stopped under reduced motion | owner ruling, 2026-09-19 |
-| `data-role` / `data-variant` / `data-cap-lines` | every blue and purple `.bubble` (src/bubble/draw.ts) | role `prompt` \| `response`; variant `response` \| `thinking` \| `agentic` \| `compaction` \| `user` \| `agent` \| `peer` \| `held` (`turn-ended` retired 2026-10-06: a turn's ending is its outcome marker); cap `feed` \| `1` \| `0` \| `none` (`none` is `BUBBLE_UNCAPPED`: every non-thinking `response`, at full height, whose box wears `.bubble-box` alone; `2` retired 2026-09-27) | one-bubble, 2026-09-23; `none` 2026-09-27 |
+| `data-role` / `data-variant` / `data-cap-lines` | every blue and purple `.bubble` (src/bubble/draw.ts) | role `prompt` \| `response`; variant `response` \| `thinking` \| `agentic` \| `compaction` \| `user` \| `agent` \| `peer` \| `held` (`turn-ended` retired 2026-10-06: a turn's ending is its outcome marker); cap `feed` \| `1` \| `0` \| `none` (`none` is `BUBBLE_UNCAPPED`: the turn's answer and a cut-short `response`, at full height, whose box wears `.bubble-box` alone; `1` with `data-more="ellipsis"` is a held prompt, a thinking bubble and an interim response; `2` retired 2026-09-27) | one-bubble, 2026-09-23; `none` 2026-09-27 |
 | `data-more` | every CAPPED `.bubble` (src/bubble/draw.ts; absent on an uncapped one) | `fade` (the shared has-more bottom fade) \| `ellipsis` (a one-line cap only: the collapsed body is clamped to its line, which the engine ends in `…` exactly when anything follows it, and the fade is hidden) | held-prompt-quiet-one-line, 2026-09-27 |
 | `.bubble-strip` class | every header-strip element of a bubble (a click on it toggles the bubble's scroll box) | — | one-bubble, 2026-09-23 |
 | `.async-work-id` class + `data-work-id` | the last element of a detached subagent head (`.subagent-head`) and of every shell head (`.shell-head`), drawn by `src/feed/work-id.ts` | the daemon's detached-work id, verbatim (absent on a synchronous spawn) | footer-rows-and-work-ids, 2026-09-23 |
@@ -364,23 +364,26 @@ hand any more:
   is 5% of the `--held-prompt-bg` tint over the feed's `--bg`; each status badge's color comes from ONE table,
   `HELD_STATUS_BADGES`, and its words are the ones the card already said for
   that arm (the proto carries no status text), a hold's standing sentence
-  included. A THINKING bubble is a FIXED height (owner request, 2026-10-07):
-  arriving or landed it is under the feed cap (`THINKING_CAP_LINES`,
-  `responseCap`, src/feed/cards/response.ts) and says "more" with the fade, so
-  its own text landing never collapses it. The earlier half-line thinking fade
-  and the one-line landed collapse are gone.
-  A RESPONSE IS NEVER ABBREVIATED (owner request, 2026-09-27): every
-  non-thinking response (arriving, interim pear, final green) and the
-  ended-turn bubble is drawn `BUBBLE_UNCAPPED` (`data-cap-lines="none"`), the
-  one bubble's first-class uncapped mode. Its box wears `.bubble-box` (the
+  included. A THINKING bubble is a FIXED height (owner requests, 2026-10-07
+  and 2026-10-08): arriving or landed it is ONE line under the ellipsis
+  (`THINKING_CAP_LINES`, `responseCap`, src/feed/cards/response.ts), the held
+  prompt's mechanism, so its own text landing never changes its height. An
+  INTERIM response (owner request, 2026-10-08: `isInterimResponse`, any
+  non-thinking response the daemon has not named the turn's answer and the
+  turn's death did not cut short, arriving or settled into the pear) is ONE
+  line under the ellipsis too (`INTERIM_CAP_LINES`); the turn's terminal
+  naming it the answer redraws it as a fresh uncapped bubble.
+  THE TURN'S ANSWER IS NEVER ABBREVIATED (owner request, 2026-09-27): the
+  final green response and a response cut short are drawn `BUBBLE_UNCAPPED`
+  (`data-cap-lines="none"`), the one bubble's first-class uncapped mode. Its box wears `.bubble-box` (the
   structural rules every box shares) but never `.bubble-scroll`, which every
   cap, clip, gutter, zoom cursor, fade, click toggle, carried fold and
   auto-collapse keys on, so it cannot be abbreviated or opened by construction;
   the spec types forbid `expandOnly` on it, a box never switches mode in place
   (`drawBubble` builds a fresh bubble), and `toggleSection` refuses at ERROR
   (`expand.toggle-uncapped`) anything that is not a capped section. Thinking
-  bubbles, prompts, held prompts, peers, agentic cards and compaction
-  summaries stay capped.
+  bubbles, interim responses, prompts, held prompts, peers, agentic cards and
+  compaction summaries stay capped.
 - **ONLY A JUMP'S EXPANSION CLOSES ON LEAVING THE VIEW; THE READER'S CLOSE AT
   THE TAIL** (owner rulings, 2026-10-01, replacing the wheel-armed close of
   2026-09-30). EVERY JUMP to a feed entry (a footer detached-work row, a
