@@ -75,9 +75,10 @@ func subscriptionScenarioFor(name string) (subscriptionScenario, bool) {
 				f.submit("start the work", "k-sub-inv-footer-1", origin)
 				f.shim.ExpectStartTurn()
 			},
-			// The turn's LAST view of the drive: accepted (working).
+			// The turn's LAST view of the drive: taken by the shim (working ·
+			// thinking), which follows the accepted `submitting` on the ack.
 			isFirst: func(msg proto.Message) bool {
-				return msg.(*frontendv1.FooterView).GetStrip().GetStatus().GetWorking() != nil
+				return msg.(*frontendv1.FooterView).GetStrip().GetStatus().GetWorking().GetThinking() != nil
 			},
 			drive2: func(t *testing.T, f *fixture) {
 				f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
