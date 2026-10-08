@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { captureLogRecords, type LogCapture } from "../log-capture.js";
 import { create } from "@bufbuild/protobuf";
 import { WatchFooterResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_footer_pb";
 import {
@@ -1517,5 +1518,49 @@ describe("mountFooter: the transient's expiry", () => {
     await vi.advanceTimersByTimeAsync(10_000);
     // ASSERT
     expect(h.sink.reported).toContain("frameUndecodable");
+  });
+});
+
+describe("mountFooter: the status the strip draws is recorded", () => {
+  afterEach(() => {
+    clearClientFailures();
+  });
+
+  /** The footer.drawn-status records a capture holds, in order. */
+  async function drawnStatuses(capture: LogCapture) {
+    capture.logger.flush();
+    await Promise.resolve();
+    return capture.sent
+      .filter((record) => record.operation === "footer.drawn-status")
+      .map((record) => record.context as Record<string, unknown>);
+  }
+
+  it("records the daemon's arm the strip draws", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const { host, h } = mount();
+    await settle();
+    // Act
+    h.tail.push(pushView(footerView()));
+    await settle();
+    // Assert
+    const drawnArm = host.querySelector<HTMLElement>(".footer-status")?.dataset.arm;
+    expect(await drawnStatuses(capture)).toEqual([
+      expect.objectContaining({ arm: drawnArm, source: "daemon" }),
+    ]);
+  });
+
+  it("records the client's verdict when it stands over the daemon's view", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    mount();
+    await settle();
+    // Act
+    reportClientFailure("unary_transport", "AnswerColdGate: unavailable");
+    // Assert
+    const records = await drawnStatuses(capture);
+    expect(records.at(-1)).toEqual(
+      expect.objectContaining({ arm: "disconnected", substatus: "unary_transport", source: "client_verdict" }),
+    );
   });
 });

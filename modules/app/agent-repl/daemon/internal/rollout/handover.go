@@ -432,6 +432,15 @@ func (c *controller) followHandover(ctx context.Context, plan *handoverPlan, out
 func (c *controller) transfer(ctx context.Context, ws wsm.Workspace, plan *handoverPlan, expected Participants, windows *sync.WaitGroup) error {
 	successor := plan.successor
 	fields := dlog.Context{"workspace": string(ws.ID), "successor": successor}
+	// THE WORKSPACE'S OWN LOG SAYS WHY TWO DAEMONS WRITE FOR IT. For the
+	// length of a transfer this daemon and its successor both record about
+	// the workspace, and a reader of that one log saw two pids publishing
+	// different statuses with nothing there to say which one owned it.
+	wsLog := c.deps.Log.WorkspaceOrCentral(ws.Dir)
+	if !plan.restart {
+		wsLog.Info(opTransfer, "a deploy found this daemon's build older, so it is handing the workspace to its successor; both daemons write for the workspace until the transfer lands",
+			merge(plan.fields, fields))
+	}
 
 	// QUIESCE FIRST. From here on this daemon does NO work for the workspace:
 	// every arrival is held rather than served, so nothing the successor is
@@ -505,6 +514,8 @@ func (c *controller) transfer(ctx context.Context, ws wsm.Workspace, plan *hando
 	c.deps.Pusher.PushTransferred(ws.ID, successor)
 	c.log.Info(opTransfer, "pushed the transfer notice on the workspace's host and web streams",
 		merge(fields, dlog.Context{"expected_host": expected.Host, "expected_web": expected.Web}))
+	wsLog.Info(opTransfer, "the workspace is the successor's now; any later record from this daemon about it is the predecessor winding down, not the workspace's status",
+		merge(plan.fields, fields))
 
 	// THE HOLD THE SUCCESSOR DRAINS is the one this transfer took, unless the
 	// row had already moved before this release: then the successor claimed
