@@ -64,12 +64,7 @@ func (v *verbs) Restart(ctx context.Context, ws ids.WorkspaceID) error {
 	if err := v.deps.Merge.SuspendForRestart(ctx, ws); err != nil {
 		log.Error(opRestart, "the workspace's merge did not reach a stopping point; the restart is refused and the merge taken back", dlog.Context{"cause": err.Error()})
 		v.resumeMerges(ctx, log, ws)
-		return &Refusal{
-			Rpc:    "RestartWorkspace",
-			Arm:    "relaunch_failed",
-			Reason: fmt.Sprintf("the restart of %s did not run: its merge did not reach a stopping point: %v", ws, err),
-			Fields: map[string]any{"detail": "the workspace's merge did not reach a stopping point: " + err.Error()},
-		}
+		return relaunchFailed(ws, "the workspace's merge did not reach a stopping point: "+err.Error())
 	}
 	defer v.resumeMerges(ctx, log, ws)
 	v.forceEndTurn(ctx, log, ws)
@@ -115,11 +110,17 @@ func restartAnswer(ws ids.WorkspaceID, err error) error {
 	case bounce.OutcomeFinished, bounce.OutcomeUnregistered, bounce.OutcomeHandedAcross:
 		return nil
 	}
+	return relaunchFailed(ws, err.Error())
+}
+
+// relaunchFailed is THE one `RestartWorkspaceError.relaunch_failed` refusal:
+// the restart did not happen, and detail says why.
+func relaunchFailed(ws ids.WorkspaceID, detail string) *Refusal {
 	return &Refusal{
 		Rpc:    "RestartWorkspace",
 		Arm:    "relaunch_failed",
-		Reason: fmt.Sprintf("the restart of %s failed: %v", ws, err),
-		Fields: map[string]any{"detail": err.Error()},
+		Reason: fmt.Sprintf("the restart of %s failed: %s", ws, detail),
+		Fields: map[string]any{"detail": detail},
 	}
 }
 
