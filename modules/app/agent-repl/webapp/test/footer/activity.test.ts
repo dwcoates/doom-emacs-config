@@ -1203,14 +1203,14 @@ describe("the enduring line", () => {
     expect(
       enduringCell({ seatSpend: seatSpend(22_388n, 0.0187) }).querySelector(".footer-activity-enduring")
         ?.textContent,
-    ).toBe("$223.88 of $12,000 this month");
+    ).toBe("$223.88\u00a0of $12,000 this month");
   });
 
   it("draws a seat whose spend is not yet seen against its allotment", () => {
     expect(
       enduringCell({ seatSpend: seatSpend() }).querySelector(".footer-activity-enduring")
         ?.textContent,
-    ).toBe("spend not yet seen of $12,000 this month");
+    ).toBe("spend not yet seen\u00a0of $12,000 this month");
   });
 
   it("colors a seat's spend by its utilization through the percent gradient", () => {
