@@ -14,8 +14,14 @@ import type { AttentionRegistry } from "./attention.js";
 import type { Dropdowns } from "./dropdowns.js";
 import type { SidebarView } from "./view.js";
 
-/** The two resolved groupings; which one is drawn is the daemon's view state. */
-export type Grouping = "repository" | "task";
+/** The resolved groupings; which one is drawn is the daemon's view state. */
+export type Grouping = "repository" | "task" | "maturity";
+
+/** Every grouping, in the order the rail's picker offers them. */
+export const GROUPINGS: readonly Grouping[] = ["repository", "task", "maturity"];
+
+/** A maturity stage, as `workspace.v1.MaturityStage`'s arm spells it. */
+export type MaturityStageName = "backlog" | "inProgress" | "merging";
 
 /** A task the assign menu can offer, taken from the task view's sections. */
 export interface TaskChoice {
@@ -61,6 +67,11 @@ export function repoFoldKey(repositoryId: string): string {
 /** The key a task section is identified by on this page (`view.ts`). */
 export function taskFoldKey(taskId: string): string {
   return `task:${taskId}`;
+}
+
+/** The key a maturity stage's section is identified by on this page (`view.ts`). */
+export function maturityFoldKey(stage: MaturityStageName): string {
+  return `maturity:${stage}`;
 }
 
 /**

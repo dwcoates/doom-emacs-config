@@ -551,7 +551,7 @@ WatchWorkspaceRoster push and every tab falls back to a stale blue status."
           "\"key\":{\"repository\":{\"id\":\"r1\",\"dir\":\"/src\"}},"
           "\"header\":{\"label\":{\"text\":\"doom\"},\"count\":{\"workspaces\":2}},"
           "\"rows\":{\"rows\":[]},\"expanded\":{}}]},"
-          "\"task\":{\"sections\":[]},"
+          "\"task\":{\"sections\":[]},\"maturity\":{\"sections\":[]},"
           "\"recentlyMerged\":{\"header\":{\"label\":{\"text\":\"Recently Merged\"},\"count\":{\"workspaces\":2}},"
           "\"rows\":{\"rows\":[]},\"collapsed\":{}},"
           "\"current\":{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/1\"}},"
@@ -568,6 +568,7 @@ WatchWorkspaceRoster push and every tab falls back to a stale blue status."
                                             :rows (:rows nil)
                                             :fold (:arm :expanded :value nil))))
                    :task (:sections nil)
+                   :maturity (:sections nil)
                    :recently-merged (:header (:label (:text "Recently Merged") :count (:workspaces 2))
                                      :rows (:rows nil)
                                      :fold (:arm :collapsed :value nil))
@@ -579,7 +580,7 @@ WatchWorkspaceRoster push and every tab falls back to a stale blue status."
   (should (equal (plist-get (agent-repl-test-wire-roster--decode
                              #'agent-repl-wire-decode-workspace-roster
                              (concat "{\"repository\":{\"sections\":[]},"
-                                     "\"task\":{\"sections\":[]},"
+                                     "\"task\":{\"sections\":[]},\"maturity\":{\"sections\":[]},"
                                      "\"recentlyMerged\":{\"header\":{\"label\":{},\"count\":{}},"
                                      "\"rows\":{},\"collapsed\":{}},\"shownRepository\":{}}"))
                             :current)
@@ -589,7 +590,7 @@ WatchWorkspaceRoster push and every tab falls back to a stale blue status."
   "BOTH groupings arrive fully resolved; an absent one is a breach."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-workspace-roster
-                  (concat "{\"task\":{\"sections\":[]},"
+                  (concat "{\"task\":{\"sections\":[]},\"maturity\":{\"sections\":[]},"
                           "\"recentlyMerged\":{\"header\":{\"label\":{},\"count\":{}},\"rows\":{}}}"))
                  '("WorkspaceRoster" repository "required message field is absent"))))
 
@@ -601,18 +602,26 @@ WatchWorkspaceRoster push and every tab falls back to a stale blue status."
                           "\"recentlyMerged\":{\"header\":{\"label\":{},\"count\":{}},\"rows\":{}}}"))
                  '("WorkspaceRoster" task "required message field is absent"))))
 
+(ert-deftest agent-repl-test-wire-roster-without-the-maturity-view-is-a-breach ()
+  "The maturity grouping is resolved alongside the other two."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-workspace-roster
+                  (concat "{\"repository\":{\"sections\":[]},\"task\":{\"sections\":[]},"
+                          "\"recentlyMerged\":{\"header\":{\"label\":{},\"count\":{}},\"rows\":{}}}"))
+                 '("WorkspaceRoster" maturity "required message field is absent"))))
+
 (ert-deftest agent-repl-test-wire-roster-without-recently-merged-is-a-breach ()
   "The merged section is hoisted onto every roster, always present."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-workspace-roster
-                  "{\"repository\":{\"sections\":[]},\"task\":{\"sections\":[]}}")
+                  "{\"repository\":{\"sections\":[]},\"task\":{\"sections\":[]},\"maturity\":{\"sections\":[]}}")
                  '("WorkspaceRoster" recentlyMerged "required message field is absent"))))
 
 (ert-deftest agent-repl-test-wire-roster-refuses-an-unknown-field ()
   "An unknown key on the roster is refused at the roster."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-workspace-roster
-                  (concat "{\"repository\":{\"sections\":[]},\"task\":{\"sections\":[]},"
+                  (concat "{\"repository\":{\"sections\":[]},\"task\":{\"sections\":[]},\"maturity\":{\"sections\":[]},"
                           "\"recentlyMerged\":{\"header\":{\"label\":{},\"count\":{}},\"rows\":{}},"
                           "\"hibernating\":{}}"))
                  '("WorkspaceRoster" hibernating "unknown field"))))
@@ -625,7 +634,7 @@ WatchWorkspaceRoster push and every tab falls back to a stale blue status."
 
 (defun agent-repl-test-wire-roster--with-shown (shown)
   "A roster JSON whose `shown' members are SHOWN (a JSON fragment, maybe empty)."
-  (concat "{\"repository\":{\"sections\":[]},\"task\":{\"sections\":[]},"
+  (concat "{\"repository\":{\"sections\":[]},\"task\":{\"sections\":[]},\"maturity\":{\"sections\":[]},"
           agent-repl-test-wire-roster--merged-json
           (if (string-empty-p shown) "" (concat "," shown))
           "}"))
@@ -637,6 +646,51 @@ WatchWorkspaceRoster push and every tab falls back to a stale blue status."
                              (agent-repl-test-wire-roster--with-shown "\"shownTask\":{}"))
                             :shown)
                  '(:arm :shown-task :value nil))))
+
+(ert-deftest agent-repl-test-wire-roster-decodes-the-maturity-grouping-shown ()
+  "The maturity grouping is a grouping the daemon can show."
+  (should (equal (plist-get (agent-repl-test-wire-roster--decode
+                             #'agent-repl-wire-decode-workspace-roster
+                             (agent-repl-test-wire-roster--with-shown "\"shownMaturity\":{}"))
+                            :shown)
+                 '(:arm :shown-maturity :value nil))))
+
+(defconst agent-repl-test-wire-roster--maturity-section-json
+  (concat "{\"key\":{\"stage\":{\"inProgress\":{}}},"
+          "\"header\":{\"label\":{\"text\":\"In Progress\"},\"count\":{\"workspaces\":1}},"
+          "\"rows\":{},\"collapsed\":{}}")
+  "A collapsed in-progress maturity section with no rows.")
+
+(ert-deftest agent-repl-test-wire-roster-decodes-a-maturity-section ()
+  "A maturity section decodes its stage key, header, rows and fold."
+  (should (equal (agent-repl-test-wire-roster--decode
+                  #'agent-repl-wire-decode-roster-maturity-section
+                  agent-repl-test-wire-roster--maturity-section-json)
+                 '(:key (:stage (:stage (:arm :in-progress :value nil)))
+                   :header (:label (:text "In Progress") :count (:workspaces 1))
+                   :rows (:rows nil)
+                   :fold (:arm :collapsed :value nil)))))
+
+(ert-deftest agent-repl-test-wire-roster-a-maturity-section-without-a-fold-is-a-breach ()
+  "A maturity section's fold is never unset on the wire."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-maturity-section
+                  (concat "{\"key\":{\"stage\":{\"backlog\":{}}},"
+                          "\"header\":{\"label\":{},\"count\":{}},\"rows\":{}}"))
+                 '("RosterMaturitySection" fold "oneof is unset"))))
+
+(ert-deftest agent-repl-test-wire-roster-decodes-the-maturity-view-in-order ()
+  "The maturity view keeps the resolver's stage order."
+  (should (equal (mapcar (lambda (section)
+                           (plist-get (plist-get (plist-get section :key) :stage) :stage))
+                         (plist-get (agent-repl-test-wire-roster--decode
+                                     #'agent-repl-wire-decode-roster-maturity-view
+                                     (concat "{\"sections\":["
+                                             "{\"key\":{\"stage\":{\"backlog\":{}}},\"header\":{\"label\":{},\"count\":{}},\"rows\":{},\"expanded\":{}},"
+                                             "{\"key\":{\"stage\":{\"merging\":{}}},\"header\":{\"label\":{},\"count\":{}},\"rows\":{},\"expanded\":{}}"
+                                             "]}"))
+                                    :sections))
+                 '((:arm :backlog :value nil) (:arm :merging :value nil)))))
 
 (ert-deftest agent-repl-test-wire-roster-without-a-grouping-shown-is-a-breach ()
   "The grouping shown is never unset on the wire."

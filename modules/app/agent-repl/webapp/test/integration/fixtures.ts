@@ -58,6 +58,7 @@ import {
 } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
 import {
   WorkspaceRosterSchema,
+  RosterMaturitySectionSchema,
   RosterRowSchema,
   type RosterRow,
   type WorkspaceRoster,
@@ -2400,6 +2401,21 @@ export function rosterRow(init?: RosterRowInit): RosterRow {
   });
 }
 
+/** One maturity stage's section, as the daemon resolves it. */
+function maturityStageSection(
+  stage: "backlog" | "inProgress" | "merging",
+  label: string,
+  rows: RosterRow[],
+  collapsed: boolean,
+): MessageInitShape<typeof RosterMaturitySectionSchema> {
+  return {
+    key: { stage: { stage: { case: stage, value: {} } } },
+    header: { label: { text: label }, count: { workspaces: rows.length } },
+    rows: { rows },
+    fold: collapsed ? { case: "collapsed", value: {} } : { case: "expanded", value: {} },
+  };
+}
+
 export function roster(init?: {
   rows?: RosterRow[];
   taskRows?: RosterRow[];
@@ -2416,7 +2432,9 @@ export function roster(init?: {
   /** Replace the repository grouping's sections, IN WIRE ORDER; a section is expanded unless `collapsed`. */
   repositorySections?: { repositoryId: string; label: string; rows: RosterRow[]; collapsed?: boolean }[];
   /** The daemon-held grouping every page shows; the repository's unless said. */
-  shown?: "repository" | "task";
+  shown?: "repository" | "task" | "maturity";
+  /** The in-progress stage's daemon-held fold; expanded unless said. */
+  inProgressCollapsed?: boolean;
   /** The task section's daemon-held fold; expanded unless said. */
   taskCollapsed?: boolean;
   /** The merged band's daemon-held fold; collapsed unless said, as the daemon's default is. */
@@ -2449,6 +2467,13 @@ export function roster(init?: {
         },
       ],
     },
+    maturity: {
+      sections: [
+        maturityStageSection("backlog", "Backlog", [], false),
+        maturityStageSection("inProgress", "In Progress", rows, init?.inProgressCollapsed === true),
+        maturityStageSection("merging", "Merging", [], false),
+      ],
+    },
     recentlyMerged: {
       header: {
         label: { text: "recently merged" },
@@ -2457,7 +2482,12 @@ export function roster(init?: {
       rows: { rows: init?.merged ?? [rosterRow({ id: "ws-merged", status: "merged", when: "merged" })] },
       fold: init?.mergedCollapsed === false ? { case: "expanded", value: {} } : { case: "collapsed", value: {} },
     },
-    shown: init?.shown === "task" ? { case: "shownTask", value: {} } : { case: "shownRepository", value: {} },
+    shown:
+      init?.shown === "task"
+        ? { case: "shownTask", value: {} }
+        : init?.shown === "maturity"
+          ? { case: "shownMaturity", value: {} }
+          : { case: "shownRepository", value: {} },
     current:
       init?.currentUnset === true
         ? undefined
