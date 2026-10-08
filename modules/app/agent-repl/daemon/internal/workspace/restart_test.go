@@ -454,3 +454,66 @@ func TestAnUnregisteredRestartAnswersSuccess(t *testing.T) {
 		t.Fatalf("Restart = %v, want nil", err)
 	}
 }
+
+// TestARestartSuspendsTheWorkspacesMergeBeforeTheBounceAndResumesItAfter pins
+// the order (owner ruling, 2026-10-08): the merge lets go before the shim is
+// replaced and is taken back once the restart finished.
+func TestARestartSuspendsTheWorkspacesMergeBeforeTheBounceAndResumesItAfter(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+
+	// Act.
+	err := f.verbs.Restart(context.Background(), "w1")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Restart = %v, want nil", err)
+	}
+	if got := f.merge.steps; len(got) != 2 || got[0] != "suspend:w1" || got[1] != "resume:w1" {
+		t.Fatalf("merge steps = %v, want the suspension then the take-back", got)
+	}
+}
+
+// TestARestartTakesTheMergeBackAfterAFailedRelaunch pins the take-back on
+// every outcome: a failed relaunch leaves no merge suspended for good.
+func TestARestartTakesTheMergeBackAfterAFailedRelaunch(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.rollout.relaunchErr = errors.New("the prelaunch failed")
+
+	// Act.
+	_ = f.verbs.Restart(context.Background(), "w1")
+
+	// Assert.
+	if got := f.merge.steps; len(got) != 2 || got[1] != "resume:w1" {
+		t.Fatalf("merge steps = %v, want the merge taken back", got)
+	}
+}
+
+// TestARestartWhoseMergeWillNotLetGoIsRefused covers the merge that does not
+// reach a stopping point: the restart bounces nothing, says why, and takes the
+// merge back.
+func TestARestartWhoseMergeWillNotLetGoIsRefused(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.merge.suspendErr = errors.New("the merge did not let go within 7s")
+
+	// Act.
+	err := f.verbs.Restart(context.Background(), "w1")
+
+	// Assert.
+	refusal, ok := AsRefusal(err)
+	if !ok || refusal.Arm != "relaunch_failed" {
+		t.Fatalf("Restart = %v, want the relaunch_failed refusal", err)
+	}
+	if got := f.rollout.relaunchCalls(); len(got) != 0 {
+		t.Fatalf("relaunches = %+v, want none when the merge would not let go", got)
+	}
+	if got := f.merge.steps; len(got) != 2 || got[1] != "resume:w1" {
+		t.Fatalf("merge steps = %v, want the merge taken back", got)
+	}
+	awaitRecord(t, f, "error", opRestart)
+}
