@@ -1833,8 +1833,8 @@ func TestPermissionStartDrawsOpenRowFooterAndBanner(t *testing.T) {
 	if row.GetPermission().GetHeadline().GetText() == "" {
 		t.Fatal("the open permission card carries no headline")
 	}
-	awaitFooter(t, f, footer, "footer waiting.permission", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetWaiting().GetPermission() != nil
+	awaitFooter(t, f, footer, "footer permission", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetStatus().GetPermission() != nil
 	})
 	f.d.AwaitLogRecord(f.d.RunLogPath(), "the permission ask's desktop banner", func(r harness.LogRecord) bool {
 		return r.Operation == "daemon.desktopnotify.post" && r.Message == "posting a desktop banner" &&

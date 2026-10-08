@@ -28,6 +28,7 @@ var rosterArmClaims = map[string]Claim{
 	"vendor_blocked":  VendorFault,
 	"api_retrying":    VendorFault,
 	"permission":      Waiting,
+	"question":        Waiting,
 	"waiting":         Waiting,
 	"submitting":      Thinking,
 	"thinking":        Thinking,
@@ -88,6 +89,8 @@ func FooterClaim(status *frontendv1.FooterStatus) (Claim, bool) {
 		if arm.Waiting.GetWakeup() != nil {
 			return Idle, true
 		}
+		return Waiting, true
+	case *frontendv1.FooterStatus_Permission, *frontendv1.FooterStatus_Question:
 		return Waiting, true
 	case *frontendv1.FooterStatus_Working, *frontendv1.FooterStatus_Loading:
 		return Thinking, true
