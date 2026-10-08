@@ -52,13 +52,16 @@ option go_package = "agentrepl/proto/frontend/v1;frontendv1";
 // Always whole, never a delta — the model is small, so a full replace makes a
 // partially-applied roster unrepresentable.
 message WorkspaceRoster {
-  // BOTH groupings, fully resolved. WHICH ONE IS DRAWN is `shown`: the client
-  // shows one pane and hides the other — a selection between two resolved
+  // EVERY grouping, fully resolved. WHICH ONE IS DRAWN is `shown`: the client
+  // shows one pane and hides the others — a selection between resolved
   // views, exactly as folding hides rows, never a derivation.
   RosterRepositoryView repository = 1;
   RosterTaskView task = 2;
+  // The maturity grouping: one section per stage of a workspace's work.
+  RosterMaturityView maturity = 7;
   // Workspaces whose merge has settled, hoisted out of the groupings above
-  // and rendered under BOTH: that they are done is the interesting fact.
+  // and rendered under EVERY one: that they are done is the interesting fact.
+  // Under the maturity grouping it is the last stage, done.
   RosterMergedSection recently_merged = 3;
   // The selected workspace — the last SelectWorkspace the daemon received.
   // UNSET when there is none.
@@ -70,6 +73,7 @@ message WorkspaceRoster {
   oneof shown {
     RosterShownRepository shown_repository = 5;
     RosterShownTask shown_task = 6;
+    RosterShownMaturity shown_maturity = 8;
   }
 }
 
@@ -78,6 +82,9 @@ message RosterShownRepository {}
 
 // The task grouping is shown. DELIBERATELY EMPTY: the arm is the fact.
 message RosterShownTask {}
+
+// The maturity grouping is shown. DELIBERATELY EMPTY: the arm is the fact.
+message RosterShownMaturity {}
 
 // The priority badge's drawn label.
 message RosterRowPriorityBadge {
@@ -243,6 +250,45 @@ message RosterTaskView {
   repeated RosterTaskSection sections = 1;
 }
 
+// The maturity grouping's sections, in the order they render: EVERY stage,
+// in the order work moves through them (backlog, in progress, merging), each
+// exactly once. A stage with no workspaces still draws its section, so the
+// grouping keeps its shape as work moves on. Clients do not re-sort.
+message RosterMaturityView {
+  repeated RosterMaturitySection sections = 1;
+}
+
+// One stage's section: identity, header, rows.
+message RosterMaturitySection {
+  // The stage's identity: the fold key, echoed to UpdateSidebarView.
+  RosterMaturityKey key = 1;
+  // The header box: label, fold toggle, and the folded count.
+  RosterSectionHeader header = 2;
+  // The rows below the header, nested by branch lineage WITHIN the stage: a
+  // workspace whose parent is in another stage is a root here.
+  RosterRows rows = 3;
+  // WHETHER THE SECTION IS FOLDED. DAEMON-HELD (UpdateSidebarView), because a
+  // fold is no page's own (owner ruling, 2026-10-06). A stage never folded is
+  // expanded. Never unset on a wire section.
+  oneof fold {
+    // The rows are shown.
+    RosterMaturitySectionExpanded expanded = 4;
+    // The rows are hidden; the header and its count stay.
+    RosterMaturitySectionCollapsed collapsed = 5;
+  }
+}
+
+// An expanded stage section. DELIBERATELY EMPTY: the arm is the fact.
+message RosterMaturitySectionExpanded {}
+
+// A collapsed stage section. DELIBERATELY EMPTY: the arm is the fact.
+message RosterMaturitySectionCollapsed {}
+
+// A stage's stable identity — the imported join key.
+message RosterMaturityKey {
+  workspace.v1.MaturityStage stage = 1;
+}
+
 // One repository's section: identity, header, rows.
 message RosterRepoSection {
   // The repository's stable identity — the fold key and the join key; a
@@ -333,9 +379,10 @@ message RosterMergedSectionExpanded {}
 // A collapsed recently-merged band. DELIBERATELY EMPTY: the arm is the fact.
 message RosterMergedSectionCollapsed {}
 
-// A section header as repos and the merged section draw it. The fold it
-// toggles is the SECTION's (RosterRepoSection.fold, RosterMergedSection.fold),
-// never an element of the header.
+// A section header as repos, maturity stages and the merged section draw it.
+// The fold it toggles is the SECTION's (RosterRepoSection.fold,
+// RosterMaturitySection.fold, RosterMergedSection.fold), never an element of
+// the header.
 message RosterSectionHeader {
   RosterLabel label = 1;
   // How many workspaces the section SHOWS UNFOLDED, drawn as "(N)" beside the
@@ -351,7 +398,7 @@ message RosterSectionHeader {
   RosterSectionCount count = 2;
 }
 
-// A section's workspace count. A repository section's is every row of its
+// A section's workspace count. A repository or maturity section's is every row of its
 // rows region, nested family rows included, that is NOT closed
 // (RosterRowClosed): a closed row rides the wire for Emacs but is never
 // drawn, and its live descendants are drawn in its place. The merged band's
