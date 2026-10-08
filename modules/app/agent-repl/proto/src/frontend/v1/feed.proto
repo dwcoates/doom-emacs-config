@@ -2862,8 +2862,43 @@ message FeedMergeTestSuite {
   // the client paints classes and never parses escapes (the code-span
   // precedent, this component's own wrapper).
   repeated FeedMergeTestSpan output = 5;
+  // How many of the suite's tests have passed and failed so far, out of how
+  // many it runs, drawn in a column on the right of the suite's row. UNSET
+  // while the run has not said how many the suite runs; nothing is drawn
+  // then.
+  FeedMergeTestCounts counts = 6;
 }
-message FeedMergeTestSuiteRunning {}
+// A suite's test counts, drawn "3/1/12": the passed figure green, the failed
+// figure red, the total in the row's own color. Each test is one of the
+// units the test runner schedules for the suite (a Go package, a chunk of
+// test files, a harness script), the finest grain it reports a verdict for.
+message FeedMergeTestCounts {
+  // How many have passed.
+  uint32 passed = 1;
+  // How many have failed, a test the runner cancelled because one it
+  // depends on failed included.
+  uint32 failed = 2;
+  // How many the suite runs. At least passed plus failed.
+  uint32 total = 3;
+}
+// The suite is running. THE ARM IS WHAT ITS TESTS HAVE SAID SO FAR, which
+// the suite's status dot is drawn from.
+message FeedMergeTestSuiteRunning {
+  oneof so_far {
+    // No test has reported a verdict yet, drawn grey.
+    FeedMergeTestSuiteRunningUnreported unreported = 1;
+    // Every test that has reported passed, drawn green.
+    FeedMergeTestSuiteRunningPassing passing = 2;
+    // At least one test has failed, drawn red.
+    FeedMergeTestSuiteRunningFailing failing = 3;
+  }
+}
+// No verdict reported yet.
+message FeedMergeTestSuiteRunningUnreported {}
+// Every verdict so far is a pass.
+message FeedMergeTestSuiteRunningPassing {}
+// At least one verdict is a failure.
+message FeedMergeTestSuiteRunningFailing {}
 message FeedMergeTestSuitePassed {}
 message FeedMergeTestSuiteFailed {}
 message FeedMergeTestSpan {

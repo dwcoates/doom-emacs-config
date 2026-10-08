@@ -38,3 +38,28 @@ read by the webapp at the bubble's first draw only. Now:
   who closes the failed bubble keeps it closed.
 
 No field was added; the change is to the field's documented meaning.
+
+## 3. Suite counts and the running suite's dot
+
+Two owner requests on the merge bubble's tests tab:
+
+- Each suite's row carries its test counts, drawn "3/1/12" on the right
+  (passed in green, failed in red, the total in the row's own color). The
+  suite message gained a counts message with the three figures. It is unset
+  while the daemon does not yet know how many tests the suite runs, and
+  nothing is drawn then.
+- A running suite's dot is never purple. The running state gained a oneof
+  saying what the suite's tests have said so far: nothing yet (grey), every
+  verdict a pass (green), or at least one failure (red). The daemon resolves
+  the arm from the counts; the webapp only paints it. Finished suites keep
+  their green and red.
+
+Where the numbers come from: the test runner (`testrun`, behind
+`bin/test-all.sh`) schedules each suite as units (a Go package, a chunk of
+test files, a harness script) and prints one verdict line per unit. It now
+also prints, as a suite starts, how many units the suite runs. The merge gate
+counts each suite's unit verdicts against that total: "ok" is a pass,
+"FAILED" or "NOT RUN" (cancelled because a unit it depends on failed) is a
+failure, and a declined unit is neither. Units are the finest grain the
+runner reports a verdict for; per-test counts inside a Go package or a vitest
+chunk are not reported by the runner today.
