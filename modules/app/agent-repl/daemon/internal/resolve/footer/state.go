@@ -423,6 +423,9 @@ type wsState struct {
 	// sessionStarted reports that the session has announced itself, which on
 	// a route never seen is the bring-up window (ladder.AwaitingBringUp).
 	sessionStarted bool
+	// bringingUp reports a bring-up of the session under way (SetBringingUp),
+	// which on a route never seen is the bring-up window too.
+	bringingUp bool
 	// turnEverRan distinguishes idle·ready from idle·done.
 	turnEverRan bool
 	// pendingEnding is how the turn in flight failed, recorded from its
@@ -587,6 +590,9 @@ type wsState struct {
 	// lastLine is the activity line the last published view carried, so a
 	// CHANGE to it can be recorded and a push that leaves it standing is not.
 	lastLine activityLine
+	// published is the status the last published view carried: what Status
+	// answers, so the roster projects exactly the status this strip shows.
+	published *frontendv1.FooterStatus
 
 	// resumeWaits are the background subagents the shim is waiting to resume
 	// after a network outage, in the order the shim stated them: the LAST

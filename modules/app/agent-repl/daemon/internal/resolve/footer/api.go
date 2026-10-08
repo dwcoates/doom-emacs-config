@@ -370,6 +370,16 @@ type Resolver interface {
 	// `disconnected · dead`. It is lifted by the next link state of any kind,
 	// which belongs to the revival's own spawn.
 	SetParked(ws ids.WorkspaceID, parked bool)
+	// SetBringingUp raises (true) or lowers (false) the fact that a bring-up
+	// of the workspace's session is under way, beside the roster's own
+	// SetBringingUp. On a route never seen it is the bring-up window
+	// (ladder.AwaitingBringUp): `agent_repl_fault · starting`.
+	SetBringingUp(ws ids.WorkspaceID, bringingUp bool)
+	// Status answers the status the workspace's strip shows. It is THE
+	// workspace status: the roster row and the tab bar project it
+	// (resolve/sidebar), so no surface resolves a status of its own. Each
+	// change of its arm or step is told to WithStatusChanged's sink.
+	Status(ws ids.WorkspaceID) *frontendv1.FooterStatus
 	// SetStateUnreported installs, or lifts, the fact that a shim taken back
 	// after a failed handover has not re-reported its session state: the
 	// degraded rung, drawn `degraded · state_unreported`.
@@ -448,6 +458,9 @@ type options struct {
 	// vendorServes is told when a mid-session vendor block stops standing
 	// (WithVendorServes); nil tells no one.
 	vendorServes func(ws ids.WorkspaceID, was string)
+	// statusChanged is told every workspace whose published status arm or
+	// step changed (WithStatusChanged); nil tells no one.
+	statusChanged func(ws ids.WorkspaceID)
 	// usages are the account roots' stored usage evidence, drawn from the
 	// first view (WithAccountUsages).
 	usages []wsm.AccountUsage
@@ -468,6 +481,13 @@ func WithAccountUsages(usages []wsm.AccountUsage) Option {
 // leaves the drawn evidence unaffected.
 func WithAccountUsageSink(sink func(wsm.AccountUsage) error) Option {
 	return func(o *options) { o.usageSink = sink }
+}
+
+// WithStatusChanged sets who is told, off the resolver's lock, each workspace
+// whose published status arm or step changed. The roster is: it projects the
+// footer's status (Status), so it redraws on this edge.
+func WithStatusChanged(fn func(ws ids.WorkspaceID)) Option {
+	return func(o *options) { o.statusChanged = fn }
 }
 
 // WithClock injects the clock the dwell and every `at` stamp are taken from.

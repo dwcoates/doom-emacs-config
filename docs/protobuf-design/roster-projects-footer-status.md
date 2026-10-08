@@ -42,3 +42,20 @@ roster arm to project onto, so the roster's status `oneof` needs new arms.
     footer's status. Within the idle claim the roster keeps its own detail
     (an unread turn result outranks background work), because that ruling
     is the roster's.
+  - Implementation consequences, landed with the projection: the footer now
+    takes the two facts the roster alone used to resolve a claim from. The
+    shim's turn ack (`footer.Resolver.AckTurn`, told beside the roster's from
+    the prompt queue's one `ackTurn`) ends `working · submitting`, and the
+    bring-up under way (`footer.Resolver.SetBringingUp`, told beside the
+    roster's from one closure in `cmd/claude-repld/graph.go`) is the
+    bring-up window of a route never seen (`ladder.AwaitingBringUp`). The
+    roster's old `init` window read from the durable session record alone is
+    gone: a record with no bring-up running reads idle.
+  - The roster redraws in line on the footer's status edge
+    (`footer.WithStatusChanged`). The lock order is roster, then footer; the
+    one footer path reachable while the roster's lock is held (a roster
+    warning teed onto the strip) moves the activity line alone and tells no
+    edge (`footer.mutateLine`).
+  - The roster still folds the link, vendor-start, network-fault,
+    permission and retry facts it once ranked; only its idle detail reads
+    them now. Pruning that state is follow-up work.

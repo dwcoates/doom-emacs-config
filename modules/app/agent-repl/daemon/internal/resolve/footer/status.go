@@ -146,7 +146,7 @@ func (r *resolver) agentReplFault(s *wsState, log dlog.Logger) *frontendv1.Foote
 		if arm := r.agentReplByFault(s, log); arm != nil {
 			return arm
 		}
-		if !ladder.AwaitingBringUp(s.linkSeen, s.turn != nil, s.sessionStarted) {
+		if !ladder.AwaitingBringUp(s.linkSeen, s.turn != nil, s.sessionStarted, s.bringingUp) {
 			return nil
 		}
 		// A TURN ACCEPTED, OR A SESSION ANNOUNCED, ON A ROUTE NEVER SEEN
