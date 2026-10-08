@@ -80,22 +80,26 @@ type pageUsage struct {
 	usage *conversationv1.TokenUsage
 }
 
-// lastTurnUsage reads the newest turn a page names — its entries are served
-// newest first, so the first entry carrying a turn is the newest turn's — and
-// the usage every one of that turn's activity frames by the main agent
-// carried. An entry that names no turn is attributable to none and is skipped.
+// newestTurn names the newest turn a page names. Its entries are served
+// newest first, so the first entry carrying a turn is the newest turn's; an
+// entry that names no turn is attributable to none and is skipped. Empty when
+// no entry names a turn.
+func newestTurn(page *conversationv1.HistoryPage) string {
+	for _, entry := range page.GetEntries() {
+		if id := entry.GetTurn().GetValue(); id != "" {
+			return id
+		}
+	}
+	return ""
+}
+
+// lastTurnUsage reads the newest turn a page names (newestTurn) and the usage
+// every one of that turn's activity frames by the main agent carried.
 func lastTurnUsage(page *conversationv1.HistoryPage, main string) (string, []pageUsage) {
-	turn := ""
+	turn := newestTurn(page)
 	var out []pageUsage
 	for _, entry := range page.GetEntries() {
-		id := entry.GetTurn().GetValue()
-		if id == "" {
-			continue
-		}
-		if turn == "" {
-			turn = id
-		}
-		if id != turn {
+		if turn == "" || entry.GetTurn().GetValue() != turn {
 			continue
 		}
 		frame := entry.GetEntry().GetAgentFrame()
