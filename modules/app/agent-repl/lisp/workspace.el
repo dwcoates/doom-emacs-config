@@ -1006,7 +1006,8 @@ Returns:
     (:merged         . "🔀")
     (:merge-failed   . "⛔")
     (:merging        . "🔄")
-    (:merge-queued   . "🕒"))
+    (:merge-queued   . "🕒")
+    (:merge-waiting  . "⏳"))
   "Alist mapping a render-state keyword to its indicator glyph.
 The glyph half of the render-state unification: renderers resolve a
 workspace's state through `agent-repl--ws-render-status' and look the
@@ -1044,7 +1045,7 @@ Used for registered-but-not-yet-started workspaces (render-status nil)."
 ;; through these, not poke persp-mode directly.
 
 (defconst agent-repl--unfinished-merge-states
-  '(:merging :merge-queued)
+  '(:merging :merge-queued :merge-waiting)
   "Roster status arms that mean WS's merge has NOT reached a verdict.
 
 `:merged' and `:merge-failed' are absent deliberately: both are terminal,

@@ -3595,12 +3595,18 @@ usable (owner ruling, 2026-09-28)."
                        #'string<))))
 
 (ert-deftest agent-repl-test-status-purple-is-the-queued-or-running-merge ()
-  "Purple is spent on the two merge arms with no verdict yet, and on
-nothing else: no merge fact is shown before the requesting turn ends, so
-there is no enqueuing arm (merge-landing.md, Landed change 1)."
+  "Purple is spent on the merge arms with no verdict yet, and on nothing
+else: no merge fact is shown before the requesting turn ends, so there is
+no enqueuing arm (merge-landing.md, Landed change 1); a merge that holds
+the workspace and waits for it to fall free is purple too (owner ruling,
+2026-10-08)."
   ;; Act / Assert
   (should (equal (sort (agent-repl-test-status--arms-taking "purple") #'string<)
-                 (sort (list :merge-queued :merging) #'string<))))
+                 (sort (list :merge-queued :merge-waiting :merging) #'string<))))
+
+(ert-deftest agent-repl-test-status-merge-waiting-draws-the-hourglass ()
+  "A merge waiting for its workspace to fall free draws its own glyph."
+  (should (equal (cdr (assq :merge-waiting agent-repl-status-merge-glyphs)) "⧗")))
 
 (ert-deftest agent-repl-test-status-red-is-the-agent-holding-the-turn ()
   "Red is a turn in flight."
