@@ -32,7 +32,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_restart_workspace.proto.
  */
 export const file_agentrepl_v1_endpoint_restart_workspace: GenFile = /*@__PURE__*/
-  fileDesc("Ci1hZ2VudHJlcGwvdjEvZW5kcG9pbnRfcmVzdGFydF93b3Jrc3BhY2UucHJvdG8SDGFnZW50cmVwbC52MSJVChdSZXN0YXJ0V29ya3NwYWNlUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmSgQIAhADUgVmb3JjZSKUAQoYUmVzdGFydFdvcmtzcGFjZVJlc3BvbnNlEjgKB3N1Y2Nlc3MYASABKAsyJS5hZ2VudHJlcGwudjEuUmVzdGFydFdvcmtzcGFjZVN1Y2Nlc3NIABI0CgVlcnJvchgCIAEoCzIjLmFnZW50cmVwbC52MS5SZXN0YXJ0V29ya3NwYWNlRXJyb3JIAEIICgZyZXN1bHQiGQoXUmVzdGFydFdvcmtzcGFjZVN1Y2Nlc3Mi6gIKFVJlc3RhcnRXb3Jrc3BhY2VFcnJvchJLChF1bmtub3duX3dvcmtzcGFjZRgBIAEoCzIuLmFnZW50cmVwbC52MS5SZXN0YXJ0V29ya3NwYWNlVW5rbm93bldvcmtzcGFjZUgAElQKFndvcmtzcGFjZV9yZWZfbWlzbWF0Y2gYAiABKAsyMi5hZ2VudHJlcGwudjEuUmVzdGFydFdvcmtzcGFjZVdvcmtzcGFjZVJlZk1pc21hdGNoSAASSwoRdHJhbnNmZXJyaW5nX2F3YXkYAyABKAsyLi5hZ2VudHJlcGwudjEuUmVzdGFydFdvcmtzcGFjZVRyYW5zZmVycmluZ0F3YXlIABJGCg9ub3RfeWV0X2Fkb3B0ZWQYBCABKAsyKy5hZ2VudHJlcGwudjEuUmVzdGFydFdvcmtzcGFjZU5vdFlldEFkb3B0ZWRIAEIHCgVjYXVzZUoECAUQBlIKbm9fc2Vzc2lvbiIiCiBSZXN0YXJ0V29ya3NwYWNlVW5rbm93bldvcmtzcGFjZSI8CiRSZXN0YXJ0V29ya3NwYWNlV29ya3NwYWNlUmVmTWlzbWF0Y2gSFAoMcmVnaXN0cnlfZGlyGAEgASgJIjMKIFJlc3RhcnRXb3Jrc3BhY2VUcmFuc2ZlcnJpbmdBd2F5Eg8KB2FkZHJlc3MYASABKAkiHwodUmVzdGFydFdvcmtzcGFjZU5vdFlldEFkb3B0ZWRCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace]);
+  fileDesc("Ci1hZ2VudHJlcGwvdjEvZW5kcG9pbnRfcmVzdGFydF93b3Jrc3BhY2UucHJvdG8SDGFnZW50cmVwbC52MSJVChdSZXN0YXJ0V29ya3NwYWNlUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmSgQIAhADUgVmb3JjZSKUAQoYUmVzdGFydFdvcmtzcGFjZVJlc3BvbnNlEjgKB3N1Y2Nlc3MYASABKAsyJS5hZ2VudHJlcGwudjEuUmVzdGFydFdvcmtzcGFjZVN1Y2Nlc3NIABI0CgVlcnJvchgCIAEoCzIjLmFnZW50cmVwbC52MS5SZXN0YXJ0V29ya3NwYWNlRXJyb3JIAEIICgZyZXN1bHQiGQoXUmVzdGFydFdvcmtzcGFjZVN1Y2Nlc3MiswMKFVJlc3RhcnRXb3Jrc3BhY2VFcnJvchJLChF1bmtub3duX3dvcmtzcGFjZRgBIAEoCzIuLmFnZW50cmVwbC52MS5SZXN0YXJ0V29ya3NwYWNlVW5rbm93bldvcmtzcGFjZUgAElQKFndvcmtzcGFjZV9yZWZfbWlzbWF0Y2gYAiABKAsyMi5hZ2VudHJlcGwudjEuUmVzdGFydFdvcmtzcGFjZVdvcmtzcGFjZVJlZk1pc21hdGNoSAASSwoRdHJhbnNmZXJyaW5nX2F3YXkYAyABKAsyLi5hZ2VudHJlcGwudjEuUmVzdGFydFdvcmtzcGFjZVRyYW5zZmVycmluZ0F3YXlIABJGCg9ub3RfeWV0X2Fkb3B0ZWQYBCABKAsyKy5hZ2VudHJlcGwudjEuUmVzdGFydFdvcmtzcGFjZU5vdFlldEFkb3B0ZWRIABJHCg9yZWxhdW5jaF9mYWlsZWQYBiABKAsyLC5hZ2VudHJlcGwudjEuUmVzdGFydFdvcmtzcGFjZVJlbGF1bmNoRmFpbGVkSABCBwoFY2F1c2VKBAgFEAZSCm5vX3Nlc3Npb24iIgogUmVzdGFydFdvcmtzcGFjZVVua25vd25Xb3Jrc3BhY2UiPAokUmVzdGFydFdvcmtzcGFjZVdvcmtzcGFjZVJlZk1pc21hdGNoEhQKDHJlZ2lzdHJ5X2RpchgBIAEoCSIzCiBSZXN0YXJ0V29ya3NwYWNlVHJhbnNmZXJyaW5nQXdheRIPCgdhZGRyZXNzGAEgASgJIh8KHVJlc3RhcnRXb3Jrc3BhY2VOb3RZZXRBZG9wdGVkIjAKHlJlc3RhcnRXb3Jrc3BhY2VSZWxhdW5jaEZhaWxlZBIOCgZkZXRhaWwYASABKAlCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.RestartWorkspaceRequest
@@ -83,9 +83,12 @@ export const RestartWorkspaceResponseSchema: GenMessage<RestartWorkspaceResponse
   messageDesc(file_agentrepl_v1_endpoint_restart_workspace, 1);
 
 /**
- * The restart is under way: what stood in the way has been told to stop and
- * the bounce has begun. Every visible effect — the stopped work, the
- * relaunch, the reconnect, the page reload — arrives on the streams.
+ * THE RESTART HAPPENED (owner ruling, 2026-10-08: "i expect it to just
+ * restart instantly", never "work on it when it gets around to it"). The
+ * answer is sent once the bounce has finished: the shim was relaunched and the
+ * session resumed on it, or there was nothing left to replace. A client shows
+ * nothing for it; the page reload and the fresh session arrive on the streams.
+ * A relaunch that failed is the `relaunch_failed` error arm, never a success.
  *
  * @generated from message agentrepl.v1.RestartWorkspaceSuccess
  */
@@ -141,6 +144,15 @@ export type RestartWorkspaceError = Message<"agentrepl.v1.RestartWorkspaceError"
      */
     value: RestartWorkspaceNotYetAdopted;
     case: "notYetAdopted";
+  } | {
+    /**
+     * The relaunch was attempted and FAILED: the workspace was not restarted.
+     * A client surfaces it to the user as a failure.
+     *
+     * @generated from field: agentrepl.v1.RestartWorkspaceRelaunchFailed relaunch_failed = 6;
+     */
+    value: RestartWorkspaceRelaunchFailed;
+    case: "relaunchFailed";
   } | { case: undefined; value?: undefined };
 };
 
@@ -214,4 +226,23 @@ export type RestartWorkspaceNotYetAdopted = Message<"agentrepl.v1.RestartWorkspa
  */
 export const RestartWorkspaceNotYetAdoptedSchema: GenMessage<RestartWorkspaceNotYetAdopted> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_restart_workspace, 7);
+
+/**
+ * @generated from message agentrepl.v1.RestartWorkspaceRelaunchFailed
+ */
+export type RestartWorkspaceRelaunchFailed = Message<"agentrepl.v1.RestartWorkspaceRelaunchFailed"> & {
+  /**
+   * Why the relaunch failed, in the daemon's words.
+   *
+   * @generated from field: string detail = 1;
+   */
+  detail: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.RestartWorkspaceRelaunchFailed.
+ * Use `create(RestartWorkspaceRelaunchFailedSchema)` to create a new message.
+ */
+export const RestartWorkspaceRelaunchFailedSchema: GenMessage<RestartWorkspaceRelaunchFailed> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_restart_workspace, 8);
 

@@ -592,6 +592,14 @@ message RosterRow {
     RosterRowStatusMerging merging = 20;
     // Enqueued behind another workspace's merge.
     RosterRowStatusMergeQueued merge_queued = 21;
+    // The merge was asked for and holds the workspace (prompts are held), but
+    // has NOT STARTED: it waits for this workspace -- or the one whose
+    // worktree it rebases in -- to fall free of its turn in flight and its
+    // detached work. PURPLE, like the other merge arms. No merge bubble is
+    // drawn yet: the bubble is placed when the merge starts, so nothing lands
+    // in the feed after it while it runs. The footer's
+    // `FooterSubStatusMergingAwaitingFree` names what it waits on.
+    RosterRowStatusMergeWaiting merge_waiting = 57;
     // The merge failed and the workspace is back with the user. TURQUOISE.
     RosterRowStatusMergeFailed merge_failed = 23;
     // The merge settled successfully.
@@ -833,6 +841,8 @@ message RosterRowStatusDead {}
 message RosterRowStatusMerging {}
 
 message RosterRowStatusMergeQueued {}
+
+message RosterRowStatusMergeWaiting {}
 
 message RosterRowStatusMergeFailed {}
 
