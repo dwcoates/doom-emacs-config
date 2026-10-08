@@ -307,6 +307,44 @@ unrecognized value is a startup refusal, never an ignored setting or a
 substitute value. The record's `verbosity` field remains its diagnostic class;
 it does not create a second persistence switch.
 
+A LEVEL OTHER THAN `info` IS A WINDOW, NEVER A STANDING SETTING. It is
+honored only together with `AGENT_REPL_LOG_LEVEL_UNTIL`, the Unix second
+(decimal integer) the window ends at, and only when that end is in the future
+and no more than five minutes away when the runtime reads it. Without one --
+no UNTIL, an ended window, a window further away than five minutes -- the
+runtime starts at `info` and records, once at `info`, the level it ignored
+(`outcome` `no_expiry`, `expired`, or `beyond_window`). A runtime whose window
+ends while it runs reverts to `info` by itself and records the revert at
+`info` (`outcome` `window_ended`). An UNTIL that is not a decimal integer is a
+startup refusal. So a debug level left in a launchd environment never outlives
+its five minutes: every runtime that starts later comes up at `info`. To turn
+debug on for every runtime, set both, then start or bounce what should pick it
+up:
+
+```sh
+launchctl setenv AGENT_REPL_LOG_LEVEL debug
+launchctl setenv AGENT_REPL_LOG_LEVEL_UNTIL "$(( $(date +%s) + 300 ))"
+```
+
+Emacs's own level is also set at runtime (`agent-repl-set-log-file-level`,
+`agent-repl-toggle-verbose-to-disk`), and a level other than `info` set that
+way is the same five-minute window. The Emacs webview host carries the window
+into the page as `log_level` plus `log_level_until`, so a page reloaded from
+an address whose window ended boots at `info`. Every level window record uses
+the runtime's `level-window` operation (`elisp.core.log-level-window`,
+`daemon.dlog.level_window`, `shim.logging.level-window`,
+`webapp.log.level-window`, `sidecar.logging.level-window`,
+`store.logging.level-window`). `proto/vocab/log-level-window.json` is the
+cross-language contract the Go (`agent-shim/logging/go/window.go`),
+TypeScript (`agent-shim/logging/ts/level-window.ts`) and elisp (`core.el`)
+selections are each asserted against.
+
+A RECORD THAT WILL BE NEITHER PERSISTED NOR SHOWN COSTS NEARLY NOTHING.
+Emacs returns before routing or building a dropped record whose scope is
+certainly central, and routes (with every routing error intact) but never
+serializes a dropped workspace record; the wire codec writes one debug record
+per top-level decode or encode, never one per message.
+
 Hot successful per-event, per-batch, per-heartbeat, or per-file diagnostics
 are `debug`. Lifecycle transitions, invariant violations, named decisions,
 and owned failures retain their contract levels and remain governed by the
