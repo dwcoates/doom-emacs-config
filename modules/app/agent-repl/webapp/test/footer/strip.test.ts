@@ -366,6 +366,33 @@ describe("drawFooterClock", () => {
     const { row } = drawStrip();
     expect(row.querySelector("[data-interrupt]")).toBeNull();
   });
+
+  // OWNER RULING, 2026-10-08: the clock is the duration of the prompt, frozen
+  // at the turn's end and standing until the next submission.
+  it("draws a finished turn's duration from its two instants", () => {
+    const { row } = drawStrip({ turnStartedAtMs: BigInt(NOW - 600_000), turnEndedAtMs: BigInt(NOW - 558_000) });
+    expect(row.querySelector(".footer-clock .info-time")?.textContent).toBe("42s");
+  });
+
+  it("never ticks a finished turn's duration", () => {
+    const { row } = drawStrip({ turnStartedAtMs: BigInt(NOW - 600_000), turnEndedAtMs: BigInt(NOW - 558_000) });
+    vi.advanceTimersByTime(3000);
+    expect(row.querySelector(".footer-clock .info-time")?.textContent).toBe("42s");
+  });
+
+  it("draws no stop control for a finished turn's clock", () => {
+    const { row } = drawStrip({ turnStartedAtMs: BigInt(NOW - 600_000), turnEndedAtMs: BigInt(NOW - 558_000) });
+    expect(row.querySelector("[data-interrupt]")).toBeNull();
+  });
+
+  it("marks a finished turn's clock as not live", () => {
+    const { row } = drawStrip({ turnStartedAtMs: BigInt(NOW - 600_000), turnEndedAtMs: BigInt(NOW - 558_000) });
+    expect(row.querySelector(".footer-clock")?.getAttribute("data-live")).toBe("false");
+  });
+
+  it("refuses a turn's end with no start", () => {
+    expect(() => drawStrip({ turnEndedAtMs: BigInt(NOW) })).toThrow(MalformedView);
+  });
 });
 
 // ---- the tokens cell -------------------------------------------------------

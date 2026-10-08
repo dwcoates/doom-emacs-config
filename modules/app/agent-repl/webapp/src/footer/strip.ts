@@ -69,8 +69,9 @@ import {
   statusWaveStyle,
   statusWordWaves,
 } from "../breathing.js";
-import { liveElapsedClock } from "../elapsed-clock.js";
+import { liveElapsedClock, settledElapsedClock } from "../elapsed-clock.js";
 import { log } from "../log.js";
+import { MalformedView } from "../rpc/malformed.js";
 import { tokenHeatColor } from "../token-heat.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { drawFooterStatusActivity, type ActivityDeps, type FooterActivity } from "./activity.js";
@@ -479,14 +480,28 @@ function substatusFigure(datum: ActivityDatum, text: string): HTMLElement {
 /**
  * The turn clock, and the stop control that only exists while a turn does.
  *
- * The clock's instant IS the liveness fact this cell has: set means a turn is
- * running, so the stop is mounted; unset means the idle dash and no stop, since
- * a control that could only answer "nothing running" is chrome.
+ * The clock's instants ARE the liveness fact this cell has: a start alone means
+ * a turn is running, so the clock ticks and the stop is mounted; a start AND an
+ * end are the most recent turn's frozen duration, drawn once with no tick and
+ * no stop (owner ruling, 2026-10-08: the clock is the duration of the prompt,
+ * standing until the next submission, as the tokens figure does); neither means
+ * the idle dash and no stop, since a control that could only answer "nothing
+ * running" is chrome. An end without a start is malformed.
  */
 export function drawFooterClock(u: FooterClock, deps: StripDeps): HTMLElement {
   const cell = document.createElement("div");
   cell.className = "pfooter-cell pfooter-clock footer-clock";
 
+  if (u.turnEndedAtMs !== undefined) {
+    if (u.turnStartedAtMs === undefined) {
+      throw new MalformedView("FooterClock.turn_ended_at_ms", "a turn's end is set with no start");
+    }
+    const startedAtMs = msOf(u.turnStartedAtMs, "FooterClock.turn_started_at_ms");
+    const endedAtMs = msOf(u.turnEndedAtMs, "FooterClock.turn_ended_at_ms");
+    cell.setAttribute("data-live", "false");
+    cell.appendChild(settledElapsedClock("info-time", endedAtMs - startedAtMs));
+    return cell;
+  }
   if (u.turnStartedAtMs === undefined) {
     const label = document.createElement("span");
     label.className = "info-time";
