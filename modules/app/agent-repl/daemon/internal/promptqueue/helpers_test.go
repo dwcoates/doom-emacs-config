@@ -1080,6 +1080,22 @@ type fakeFooter struct {
 	vendorBlock string
 	// ends are the turn closes the footer was told, in order.
 	ends []wsm.TurnClose
+	// acks counts the turn acks the footer was told.
+	acks int
+}
+
+// AckTurn records the shim's taking of a turn the footer was told.
+func (f *fakeFooter) AckTurn(ids.WorkspaceID) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.acks++
+}
+
+// turnAcks answers how many turn acks the footer was told.
+func (f *fakeFooter) turnAcks() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.acks
 }
 
 // SetTurnEnded records the turn close the footer was told.

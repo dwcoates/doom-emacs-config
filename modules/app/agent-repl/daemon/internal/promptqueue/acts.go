@@ -300,7 +300,7 @@ func (q *queue) runContextCut(ctx context.Context, d *delivery, act Act, sender 
 		log.Error(opAct, "the shim refused the context cut", dlog.Context{"cause": err.Error()})
 		return fmt.Errorf("deliver the context cut on %q: %w", ws, err)
 	}
-	q.deps.Sidebar.AckTurn(ws)
+	q.ackTurn(ws)
 	// The cut IS a turn, so the watcher is handed it like any other. It earns
 	// NO mirrored user-prompt row: a recognized command earns no user message,
 	// and the cut's visible outcome is the separation row the feed resolver
