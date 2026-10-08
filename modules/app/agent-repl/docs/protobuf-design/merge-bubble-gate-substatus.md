@@ -89,3 +89,21 @@ and the tab bar keep drawing "merging".
 How the fact travels: the session watcher hands every permission and question
 edge to the footer resolver, which already keeps the open asks per workspace;
 the substatus is resolved from those and the merge's step, with no new input.
+
+## 5. The merge bubble's tab says ❓ while the merge waits on the user
+
+The conflicts and fixes tabs' state oneofs each gained a "waiting on user"
+arm: a live tab whose agent has a permission ask or a question batch open.
+It carries the instant the tab's work began, so the tab's clock keeps ticking
+as a live tab's does, and the webapp draws its glyph as the ❓ emoji (the one
+emoji among the tab glyphs, by the owner's request). The tab returns to live
+when the last ask is answered or withdrawn, and settles as before.
+
+The merge orchestrator reads the asks from the same session-watcher edges the
+footer reads, through a small ask set built before the orchestrator (so an
+ask opened before a merge resumes at boot is still known). The ask set and the
+footer apply the same rule: only conflict resolution and fixing, and any open
+ask in the workspace's session. Each redraw of the live tab reads the asks at
+that moment under the run's lock, so the last row drawn always says what the
+last ask edge left, and a settled tab is never redrawn live behind its own
+settle.

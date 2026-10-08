@@ -906,6 +906,27 @@ func (s *topbarSink) OnLink(_ ids.WorkspaceID, link LinkState) {
 	s.rec.emit(event{sink: "topbar", method: "OnLink", link: link})
 }
 
+// mergeSink records the merge queue's ask edges.
+type mergeSink struct{ rec *recorder }
+
+func (s *mergeSink) OnPermission(_ ids.WorkspaceID, agent *conversationv1.AgentId, _ *conversationv1.AgentPermission) {
+	s.rec.emit(event{sink: "merge", method: "OnPermission", agent: agent.GetValue()})
+}
+
+func (s *mergeSink) OnQuestion(_ ids.WorkspaceID, agent *conversationv1.AgentId, _ *conversationv1.AgentQuestion) {
+	s.rec.emit(event{sink: "merge", method: "OnQuestion", agent: agent.GetValue()})
+}
+
+// mergeSinkOf binds a merge sink to the recorder, or answers no sink at all
+// (a nil interface, not a typed nil) when none was asked for.
+func mergeSinkOf(merge *mergeSink, rec *recorder) MergeSink {
+	if merge == nil {
+		return nil
+	}
+	merge.rec = rec
+	return merge
+}
+
 type sidebarSink struct{ rec *recorder }
 
 func (s *sidebarSink) OnTurnRunningAtAttach(_ ids.WorkspaceID, turn ids.TurnID, startedAt *time.Time) {
@@ -1123,6 +1144,23 @@ func startHarness(t *testing.T, session Session, prep func(*fakeClient)) *harnes
 // stalls.
 func startHarnessWatched(t *testing.T, session Session, prep func(*fakeClient), stalls lockwatch.Registry) *harness {
 	t.Helper()
+	return startHarnessSinks(t, session, prep, stalls, nil)
+}
+
+// newHarnessWithMerge is newHarness with the merge queue's ask sink wired.
+func newHarnessWithMerge(t *testing.T, session Session) *harness {
+	t.Helper()
+	h := startHarnessSinks(t, session, nil, nil, &mergeSink{})
+	h.session = h.client.nextSessionOpen(t)
+	open := h.client.nextAgentOpenFor(t, "")
+	h.main, h.mainReq = open.stream, open.req
+	return h
+}
+
+// startHarnessSinks starts a watcher with the stall registry and, when set,
+// the merge sink, which records into the harness's recorder.
+func startHarnessSinks(t *testing.T, session Session, prep func(*fakeClient), stalls lockwatch.Registry, merge *mergeSink) *harness {
+	t.Helper()
 	h := &harness{t: t, client: newFakeClient(), rec: newRecorder(), log: dlog.NewTestLogger()}
 	h.lifecycle = &lifecycleSink{rec: h.rec}
 	if prep != nil {
@@ -1140,6 +1178,7 @@ func startHarnessWatched(t *testing.T, session Session, prep func(*fakeClient), 
 		Topbar:    &topbarSink{rec: h.rec},
 		Sidebar:   &sidebarSink{rec: h.rec},
 		Lifecycle: h.lifecycle,
+		Merge:     mergeSinkOf(merge, h.rec),
 		Stalls:    stalls,
 	}, h.log)
 	if err != nil {

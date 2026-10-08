@@ -86,6 +86,13 @@ type run struct {
 	selfCheckout bool
 	// policy is where the requester's repository states its merge policy.
 	policy prompts.Source
+	// agenticMu orders the agentic tab's redraws: the run's own settle and an
+	// ask's change of the waiting state never interleave, so a settled tab is
+	// never drawn live again behind it.
+	agenticMu sync.Mutex
+	// agentic is the conflict-resolution or fixing tab standing live, which an
+	// open ask draws waiting on the user. Nil while no such tab stands.
+	agentic *agenticTab
 	// startedMS is when the run was admitted: the queue tab's end.
 	startedMS int64
 	// queuedMS is when the merge was queued: the head's running clock
@@ -136,6 +143,44 @@ type run struct {
 	// refused (owner ruling, 2026-09-28): the merge must not change the gate
 	// that is judging it.
 	machinery map[string]bool
+}
+
+// agenticTab is a live conflict-resolution or fixing tab: its round, and how
+// its row is drawn at a badge.
+type agenticTab struct {
+	round tabRound
+	draw  func(tabState) *frontendv1.FeedMergeTab
+}
+
+// settleAgentic lets go of the live agentic tab before its settled row is
+// drawn, so no ask redraws it after.
+func (r *run) settleAgentic() {
+	r.agenticMu.Lock()
+	r.agentic = nil
+	r.agenticMu.Unlock()
+}
+
+// setWaitingOnUser redraws the live agentic tab when the session's asks
+// change: waiting on the user, or live again. Nothing stands live: nothing to
+// draw.
+func (r *run) setWaitingOnUser(waiting bool) {
+	r.agenticMu.Lock()
+	defer r.agenticMu.Unlock()
+	if r.agentic == nil {
+		return
+	}
+	r.o.log(context.Background(), r.ws).Info("daemon.merge.waiting_on_user", "the merge's agent asked or was answered; its tab is redrawn",
+		dlog.Context{"workspace": string(r.ws), "tab": r.agentic.round.kind, "round": r.agentic.round.n, "waiting": waiting})
+	r.redrawAgentic()
+}
+
+// redrawAgentic draws the live agentic tab at the asks standing NOW. Called
+// with agenticMu held, so the draws are made in order and each reads the asks
+// afresh: the last row drawn always says what the last ask edge left.
+func (r *run) redrawAgentic() {
+	state := r.agentic.round.live()
+	state.waiting = r.o.deps.Asks.Waiting(r.ws)
+	r.upsert(r.agentic.round, r.agentic.draw(state))
 }
 
 // tabRound is one opened round of one tab kind, carrying the instant its
@@ -214,6 +259,13 @@ func (r *run) closeTab(ctx context.Context, round tabRound, outcome string) {
 	r.mu.Lock()
 	delete(r.openRounds, round.key())
 	r.mu.Unlock()
+	// A CLOSED ROUND IS NO LONGER LIVE, so no ask redraws it: an abandon
+	// closes the live agentic round here without settling its row.
+	r.agenticMu.Lock()
+	if r.agentic != nil && r.agentic.round.key() == round.key() {
+		r.agentic = nil
+	}
+	r.agenticMu.Unlock()
 	if err := r.o.deps.DB.RecordTabInterval(ctx, r.lease.ID, wsm.TabInterval{
 		Round: round.n, Kind: round.kind, StartedAt: round.started, EndedAt: &ended, Outcome: outcome,
 	}); err != nil {
@@ -780,12 +832,12 @@ func (r *run) configuredPrompt(ctx context.Context, kind string, step footer.Mer
 		}
 		r.doneResuming()
 		round := r.activeRound()
-		r.drawLive(ctx, round, step, promptLine(step, text), nil, promptTab(kind, round.live()))
+		r.drawLive(ctx, round, step, promptLine(step, text), nil, func(st tabState) *frontendv1.FeedMergeTab { return promptTab(kind, st) })
 		close, err := r.reattachTurn(ctx, ids.TurnID(res.Turn), text, origin)
 		return round, close, err
 	}
 	round := r.openTab(ctx, kind)
-	r.drawLive(ctx, round, step, promptLine(step, text), nil, promptTab(kind, round.live()))
+	r.drawLive(ctx, round, step, promptLine(step, text), nil, func(st tabState) *frontendv1.FeedMergeTab { return promptTab(kind, st) })
 	turn := wsm.NewTurnID()
 	if err := r.checkpoint(ctx, kind, func(d *progressDoc) {
 		d.PromptIndex, d.Turn, d.Outcome = i, string(turn), landed
@@ -840,11 +892,15 @@ func (r *run) submit(ctx context.Context, turn ids.TurnID, text string, origin c
 
 // drawLive stands an AGENTIC step's round live: the merge's own turns are
 // addressed to it, the footer moves onto the step with its line (and apply's
-// own facts), and the tab is drawn. It is the one shape every agentic round
-// -- a configured prompt, a conflict resolution, a fixing attempt -- opens
-// with, fresh or resumed.
+// own facts), and the tab is drawn at the round's live badge. It is the one
+// shape every agentic round -- a configured prompt, a conflict resolution, a
+// fixing attempt -- opens with, fresh or resumed.
+//
+// A CONFLICT RESOLUTION OR FIXING ROUND IS KEPT so a change of the session's
+// asks redraws it, and is drawn waiting on the user while one is open: the
+// same steps, and the same asks, the footer's "waiting on user" reads.
 func (r *run) drawLive(ctx context.Context, round tabRound, step footer.MergeStep,
-	line *frontendv1.FooterStatusActivityMergeStep, apply func(*footer.MergeFacts), tab *frontendv1.FeedMergeTab) {
+	line *frontendv1.FooterStatusActivityMergeStep, apply func(*footer.MergeFacts), draw func(tabState) *frontendv1.FeedMergeTab) {
 	r.address(round)
 	r.setStep(ctx, step, func(f *footer.MergeFacts) {
 		if apply != nil {
@@ -852,7 +908,14 @@ func (r *run) drawLive(ctx context.Context, round tabRound, step footer.MergeSte
 		}
 		f.Line = line
 	})
-	r.upsert(round, tab)
+	if step != footer.StepConflictResolution && step != footer.StepFixing {
+		r.upsert(round, draw(round.live()))
+		return
+	}
+	r.agenticMu.Lock()
+	defer r.agenticMu.Unlock()
+	r.agentic = &agenticTab{round: round, draw: draw}
+	r.redrawAgentic()
 }
 
 // promptTab builds an agentic prompt tab's kind arm.

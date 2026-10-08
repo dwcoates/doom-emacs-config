@@ -1268,7 +1268,9 @@ export type MergeTabKind = (typeof MERGE_TAB_KINDS)[number];
 
 /** The state arms every tab kind carries: nothing parks, so live or settled. */
 export const MERGE_TAB_STATES = ["live", "settled"] as const;
-export type MergeTabState = (typeof MERGE_TAB_STATES)[number];
+/** The agentic kinds whose tab can also wait on the user. */
+export const MERGE_TAB_WAITING_KINDS = ["conflicts", "fixes"] as const;
+export type MergeTabState = (typeof MERGE_TAB_STATES)[number] | "waitingOnUser";
 
 /** When every fixture tab's work began, and each queue entry its stage. */
 const MERGE_TAB_STARTED_AT_MS = 1_000n;
@@ -1282,8 +1284,17 @@ const settledState = () => ({
   },
 });
 
-/** The state arm a tab carries. */
-const plainState = (state: MergeTabState) => (state === "settled" ? settledState() : liveState());
+/** The state arm a tab carries. Only conflicts and fixes wait on the user. */
+const plainState = (state: MergeTabState) => {
+  if (state === "waitingOnUser") throw new Error("only the conflicts and fixes tabs wait on the user");
+  return state === "settled" ? settledState() : liveState();
+};
+
+/** The state arm a conflicts or fixes tab carries: also waiting on the user. */
+const agenticState = (state: MergeTabState) =>
+  state === "waitingOnUser"
+    ? { case: "waitingOnUser" as const, value: { startedAtMs: MERGE_TAB_STARTED_AT_MS } }
+    : plainState(state);
 
 /** The token and label the tests tab's log link is served with. */
 export const MERGE_TEST_LOG = { token: "merge-log-7f3a", label: "~/.claude-emacs/merge-logs/ws-1-tests-2.log" };
@@ -1382,11 +1393,11 @@ const mergeTabKindValue = (
         },
       };
     case "conflicts":
-      return { case: "conflicts", value: { state: plainState(state) } };
+      return { case: "conflicts", value: { state: agenticState(state) } };
     case "fixes":
       return {
         case: "fixes",
-        value: { state: plainState(state), attempt: { attempt: 2, maxAttempts: 3 } },
+        value: { state: agenticState(state), attempt: { attempt: 2, maxAttempts: 3 } },
       };
     case "prePrompt":
       return { case: "prePrompt", value: { state: plainState(state) } };

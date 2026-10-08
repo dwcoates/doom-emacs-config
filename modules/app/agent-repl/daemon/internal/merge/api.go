@@ -210,6 +210,10 @@ type Deps struct {
 	Sidebar sidebar.Resolver
 	// Holds carries the dequeue offer.
 	Holds holds.Resolver
+	// Asks are the permission asks and question batches open in each
+	// workspace's session: a conflict-resolution or fixing tab whose agent
+	// has one open is drawn waiting on the user.
+	Asks *Asks
 	// Prompts reads the briefs at use time. The field holds the directory,
 	// not a cached brief, because a brief is never cached across a use.
 	PromptsDir string

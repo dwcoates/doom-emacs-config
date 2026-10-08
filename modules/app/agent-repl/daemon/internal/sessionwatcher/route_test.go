@@ -186,6 +186,33 @@ func TestRoutePermission(t *testing.T) {
 	}
 }
 
+// TestRoutePermissionReachesTheMergeQueue covers the merge queue's reading of
+// the asks: a permission edge reaches its sink beside the views'.
+func TestRoutePermissionReachesTheMergeQueue(t *testing.T) {
+	// Arrange.
+	h := newHarnessWithMerge(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act.
+	got := h.route(h.main, entryFrame(frameUpdate("main-1", permissionUpdate("p-1", "act-1", "Claude wants to read foo.txt", "Read file"))))
+
+	// Assert.
+	requireEvent(t, got, "merge.OnPermission")
+}
+
+// TestRouteQuestionReachesTheMergeQueue covers the question edge's half.
+func TestRouteQuestionReachesTheMergeQueue(t *testing.T) {
+	// Arrange.
+	h := newHarnessWithMerge(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act.
+	got := h.route(h.main, entryFrame(frameUpdate("main-1", questionUpdate("q-1", "Pick a branch", "Which branch?"))))
+
+	// Assert.
+	requireEvent(t, got, "merge.OnQuestion")
+}
+
 // TestAnsweredPermissionRetiresTheAttentionMarker covers the user's own
 // answer: the ask that raised the marker is settled, so the notification is
 // SEEN and the marker is cleared without waiting for a workspace switch.

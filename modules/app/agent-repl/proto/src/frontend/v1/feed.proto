@@ -2748,6 +2748,16 @@ message FeedMergeTabSettled {
   }
 }
 message FeedMergeTabSucceeded {}
+// An agentic tab's work is running and held on the user: its agent has a
+// permission ask or a question batch open. Drawn with the ❓ emoji in place of
+// the live glyph, for exactly as long as the footer's merging substatus reads
+// "waiting on user"; the tab is live again once every ask is answered or
+// withdrawn.
+message FeedMergeTabWaitingOnUser {
+  // When the tab's work began, epoch ms. The tab keeps ticking its elapsed
+  // time from it, as a live tab does.
+  int64 started_at_ms = 1;
+}
 message FeedMergeTabFailed {
   // The daemon-composed one-line account; the tab's own content carries
   // the detail.
@@ -2811,6 +2821,9 @@ message FeedMergeTabConflicts {
   oneof state {
     FeedMergeTabLive live = 1;
     FeedMergeTabSettled settled = 3;
+    // The resolution is held on the user: the session has a permission ask
+    // or a question batch open.
+    FeedMergeTabWaitingOnUser waiting_on_user = 4;
   }
   // Tag 2 (`parked`) is RETIRED: nothing parks.
   reserved 2;
@@ -2916,6 +2929,9 @@ message FeedMergeTabFixes {
   oneof state {
     FeedMergeTabLive live = 1;
     FeedMergeTabSettled settled = 3;
+    // The fixing attempt is held on the user: the session has a permission
+    // ask or a question batch open.
+    FeedMergeTabWaitingOnUser waiting_on_user = 5;
   }
   // Tag 2 (`parked`) is RETIRED: nothing parks.
   reserved 2;

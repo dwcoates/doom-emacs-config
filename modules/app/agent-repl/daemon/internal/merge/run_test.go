@@ -540,7 +540,7 @@ func TestDrawLiveStandsAnAgenticRoundLive(t *testing.T) {
 
 	// Act.
 	r.drawLive(context.Background(), round, footer.StepFixing, fixingLine([]string{"daemon"}),
-		func(f *footer.MergeFacts) { f.Attempt = 2 }, fixesTab(round.live(), 2))
+		func(f *footer.MergeFacts) { f.Attempt = 2 }, func(st tabState) *frontendv1.FeedMergeTab { return fixesTab(st, 2) })
 
 	// Assert: the turns are addressed, the footer is on the step with its
 	// line and facts, and the tab is drawn.
