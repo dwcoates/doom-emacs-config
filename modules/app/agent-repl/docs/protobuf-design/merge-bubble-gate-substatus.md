@@ -25,3 +25,16 @@ already carries every suite, so nothing the panel said is lost.
 On the webapp, a page that last had the retired panel open had remembered it
 in its browser storage; that stored value is now forgotten quietly instead of
 raising a warning.
+
+## 2. The merge bubble stays folded until the merge fails
+
+The bubble's fold (`FeedMergeFold`) was shipped folded for every state and
+read by the webapp at the bubble's first draw only. Now:
+
+- The daemon ships it folded while the merge is queued or running, when it
+  lands, and when it is abandoned; it ships it open once the merge has failed.
+- The webapp applies the fold at the first draw and again whenever a push
+  changes it, once. A push that repeats the fold changes nothing, so a reader
+  who closes the failed bubble keeps it closed.
+
+No field was added; the change is to the field's documented meaning.

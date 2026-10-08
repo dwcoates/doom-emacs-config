@@ -127,8 +127,10 @@ func headRow(ws ids.WorkspaceID, lease ids.LeaseID, label string, startedMS int6
 			Glyph:   &frontendv1.FeedMergeGlyph{Icon: "merge"},
 			Label:   &frontendv1.FeedMergeLabel{Text: label},
 			Runtime: &frontendv1.FeedMergeRuntime{StartedAtMs: startedMS},
-			// The bubble opens folded: the footer already carries the merge's
-			// live state, so the open body would only repeat it.
+			// THE BUBBLE STAYS FOLDED UNTIL THE MERGE FAILS (owner ruling,
+			// 2026-10-08): the footer carries a running merge's state and a
+			// landed one needs no reading, while a failure is the reader's to
+			// act on, so it alone ships open.
 			Fold: &frontendv1.FeedMergeFold{Folded: true},
 		},
 	}
@@ -137,6 +139,9 @@ func headRow(ws ids.WorkspaceID, lease ids.LeaseID, label string, startedMS int6
 		merge.Result = &frontendv1.FeedMerge_Success{Success: r}
 	case *frontendv1.FeedMergeError:
 		merge.Result = &frontendv1.FeedMerge_Error{Error: r}
+		if r.GetFailed() != nil {
+			merge.Head.Fold.Folded = false
+		}
 	default:
 		merge.Result = &frontendv1.FeedMerge_Update{Update: &frontendv1.FeedMergeUpdate{}}
 	}

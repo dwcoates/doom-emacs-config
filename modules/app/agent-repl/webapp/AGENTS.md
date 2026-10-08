@@ -397,8 +397,10 @@ hand any more:
   ONE detector, `createLeftViewWatch` (`src/feed/left-view.ts`: seen first,
   then wholly out, once; a detached row is no departure), shared by the jump
   watch and the selection's `left_view` (selection-visibility.ts). Every
-  expansion is client-owned: `FeedMergeFold` is the merge bubble's INITIAL
-  fold only, and there is no daemon fold verb. A bubble the daemon will not
+  expansion is client-owned but one: `FeedMergeFold` is the merge bubble's
+  fold at its first draw and again whenever a push CHANGES it (folded until
+  the merge fails, open once it has; owner ruling, 2026-10-08), and there is
+  no daemon fold verb. A bubble the daemon will not
   open for a jump is ERROR `feed.jump-expand-failed` and a
   `controlPlaneFailed` on the chip.
 - **ONE HEAT RULE FOR EVERY TOKEN FIGURE AND PERCENTAGE** (owner rulings,
