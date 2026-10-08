@@ -1,6 +1,6 @@
 /**
- * blocks — the feed's DRAWN BLOCK VOCABULARY: text, an image, and a block the
- * schema does not model.
+ * blocks — the feed's DRAWN BLOCK VOCABULARY: text, an image, a block the
+ * schema does not model, and a reply's quote of an earlier bubble.
  *
  * feed.proto declares these three as shared messages precisely because both
  * prompt kinds — what a person typed and what one agent addressed to another —
@@ -16,9 +16,11 @@
 import { requireCase, unreachableArm } from "../../rpc/strict.js";
 import { log } from "../../log.js";
 import { markdownSlot } from "../../bubble/body.js";
+import { quoteSlot } from "../../bubble/quote.js";
 import { armName } from "../renderers.js";
 import type {
   FeedImageBlock,
+  FeedQuoteBlock,
   FeedTextBlock,
   FeedUnsupportedBlock,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
@@ -33,6 +35,7 @@ export type PromptBlockArm =
   | { case: "text"; value: FeedTextBlock }
   | { case: "image"; value: FeedImageBlock }
   | { case: "unsupported"; value: FeedUnsupportedBlock }
+  | { case: "quote"; value: FeedQuoteBlock }
   | { case: undefined; value?: undefined };
 
 /**
@@ -81,6 +84,18 @@ export function drawFeedUnsupportedBlock(block: FeedUnsupportedBlock): HTMLEleme
 }
 
 /**
+ * A reply's quote of an earlier bubble: a markdown slot drawn only while the
+ * bubble is expanded (src/bubble/quote.ts), its daemon-composed text verbatim.
+ */
+export function drawFeedQuoteBlock(block: FeedQuoteBlock): HTMLElement {
+  log.info("drawing a prompt quote block", {
+    operation: "feed.draw-quote-block",
+    context: { characters: block.text.length },
+  });
+  return quoteSlot("prompt-block prompt-block-quote", block.text);
+}
+
+/**
  * One block of either prompt kind, by arm.
  *
  * PATH names the field this block came from, so a refusal points at the
@@ -95,6 +110,8 @@ export function drawPromptBlockArm(arm: PromptBlockArm, path: string): HTMLEleme
       return drawFeedImageBlock(block.value);
     case "unsupported":
       return drawFeedUnsupportedBlock(block.value);
+    case "quote":
+      return drawFeedQuoteBlock(block.value);
     default:
       return unreachableArm(path, armName(block));
   }

@@ -2487,6 +2487,13 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
    `.expanded` on the sibling scroll box, so the click that opens the text
    opens this too, and no second fold exists. */
 .bubble-scroll:not(.expanded) ~ .bubble-expand-only { display: none; }
+/* A REPLY'S QUOTE (src/bubble/quote.ts): the earlier bubble a prompt replied
+   to, a block among the prompt's own, shown ONLY once the bubble is opened
+   (owner request, 2026-10-08), so a collapsed prompt is the person's words
+   alone. Keyed on the same one toggle's `.expanded`, on the box the body sits
+   in; child combinators keep an open bubble from showing the quotes of a
+   bubble nested inside it. */
+.bubble-scroll:not(.expanded) > .bubble-body > .bubble-quote { display: none; }
 
 /* THE CARD-LEVEL FOLD (owner ruling, 2026-09-15). A tool-call and a skill card
    are ONE click-to-expand unit: `.tool-fold` is the whole card, the feed-wide

@@ -35,6 +35,7 @@
  * same height and so fires no resize).
  */
 import { BUBBLE_BODY_CLASS } from "../bubble/body.js";
+import { BUBBLE_QUOTE_CLASS } from "../bubble/quote.js";
 import { EXPANDED_CLASS } from "../expand.js";
 import { log } from "../log.js";
 import { onDiscard } from "./ticking.js";
@@ -140,6 +141,9 @@ export const HAS_MORE_UNMEASURABLE = "feed.has-more.unmeasurable";
  * clamp are still laid out, only clipped, and the body holds nothing but those
  * lines (the usage corner floats in the box, beside it, never in it).
  *
+ * A BODY HOLDING A REPLY'S QUOTE always hides content while collapsed: the
+ * quote is drawn only in the expanded bubble.
+ *
  * A bubble box with no body is not a bubble this app drew: an invariant
  * violation, recorded once and thrown, never read as "nothing hidden".
  */
@@ -152,8 +156,15 @@ export function hidesContentBeyondCap(box: HTMLElement): boolean {
     });
     throw new Error("has-more unmeasurable: the bubble's scroll box holds no body");
   }
+  // A REPLY'S QUOTE IS HIDDEN CONTENT. The collapsed bubble draws it not at
+  // all (src/bubble/quote.ts), so its lines are in no height, yet opening the
+  // bubble reveals it.
+  if (body.querySelector(QUOTE_SELECTOR) !== null) return true;
   return renderedLinesHeight(box, body) > box.clientHeight;
 }
+
+/** A reply's quote among the body's blocks (src/bubble/quote.ts). */
+const QUOTE_SELECTOR = `:scope > .${BUBBLE_QUOTE_CLASS}`;
 
 /** The height of BODY's rendered lines, clamped or not (see `hidesContentBeyondCap`). */
 function renderedLinesHeight(box: HTMLElement, body: HTMLElement): number {
