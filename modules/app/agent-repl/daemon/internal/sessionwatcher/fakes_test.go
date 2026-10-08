@@ -1080,6 +1080,9 @@ type harness struct {
 
 	// lifecycle is the lifecycle sink the watcher was built with.
 	lifecycle *lifecycleSink
+	// clock is the watcher's clock; a refused open's re-open fires only when
+	// a test fires it.
+	clock *manualClock
 
 	// sentinels counts the sentinels sent, so each one is a row of its own:
 	// a cut is routed once per pointer, and a second sentinel at the first
@@ -1161,7 +1164,7 @@ func newHarnessWithMerge(t *testing.T, session Session) *harness {
 // the merge sink, which records into the harness's recorder.
 func startHarnessSinks(t *testing.T, session Session, prep func(*fakeClient), stalls lockwatch.Registry, merge *mergeSink) *harness {
 	t.Helper()
-	h := &harness{t: t, client: newFakeClient(), rec: newRecorder(), log: dlog.NewTestLogger()}
+	h := &harness{t: t, client: newFakeClient(), rec: newRecorder(), log: dlog.NewTestLogger(), clock: newManualClock()}
 	h.lifecycle = &lifecycleSink{rec: h.rec}
 	if prep != nil {
 		prep(h.client)
@@ -1180,6 +1183,7 @@ func startHarnessSinks(t *testing.T, session Session, prep func(*fakeClient), st
 		Lifecycle: h.lifecycle,
 		Merge:     mergeSinkOf(merge, h.rec),
 		Stalls:    stalls,
+		Clock:     h.clock,
 	}, h.log)
 	if err != nil {
 		t.Fatalf("Start: %v", err)

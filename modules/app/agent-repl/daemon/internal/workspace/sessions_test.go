@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"claude-repld/internal/clock"
 	"context"
 	"errors"
 	"fmt"
@@ -684,6 +685,7 @@ func newFleetFixtureBoundedAt(t *testing.T, adoptBound time.Duration) *fleetFixt
 			Footer:    footerLinkSink{rec: f.links},
 			Topbar:    topbarLinkSink{rec: f.links},
 			Sidebar:   sidebarLinkSink{rec: f.links},
+			Clock:     clock.System{},
 		},
 		SocketPath: func(ws ids.WorkspaceID) string {
 			if f.socketDir != "" {
