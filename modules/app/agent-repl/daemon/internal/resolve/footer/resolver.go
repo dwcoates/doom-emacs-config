@@ -601,6 +601,15 @@ func (r *resolver) OnTurnRunningAtAttach(ws ids.WorkspaceID, turn ids.TurnID, st
 		})
 }
 
+// endTurn ends the turn in flight. It is the ONE end of a turn the footer
+// watched — the main agent's terminal, the prompt queue's close, a dead shim, a
+// dead query, a compaction's cut — so whatever a turn's end settles is settled
+// in one place, whichever edge arrives first. A refused submission is not a
+// turn that ran, and clears through SetTurn(nil) instead.
+func (s *wsState) endTurn() {
+	s.turn = nil
+}
+
 func (r *resolver) applyTurnStarted(s *wsState, turn *TurnStarted) {
 	s.turn = turn
 	if turn == nil {
@@ -835,7 +844,7 @@ func (r *resolver) OnLink(ws ids.WorkspaceID, link sessionwatcher.LinkState) {
 			// with it and no terminal will ever arrive for it. Kept, it drew
 			// `thinking` over the session brought back in its place.
 			if link == shimclient.LinkDead && s.turn != nil {
-				s.turn = nil
+				s.endTurn()
 			}
 		})
 }
@@ -893,7 +902,7 @@ func (r *resolver) sessionArm(ws ids.WorkspaceID, update *conversationv1.Session
 			if s.turn != nil {
 				s.recordQueryDeath(u.QueryDied)
 			}
-			s.turn = nil
+			s.endTurn()
 			// NO RETRY SURVIVES THE QUERY EITHER.
 			s.retrying = nil
 			// NO COMPACTION SURVIVES THE QUERY IT RAN IN.
@@ -1415,7 +1424,7 @@ func (r *resolver) OnContextCut(ws ids.WorkspaceID, agent *conversationv1.AgentI
 	// states.
 	r.mutate(ws, "daemon.footer.on_context_cut", "the footer took a context cut",
 		dlog.Context{"arm": arm}, func(s *wsState) {
-			s.turn = nil
+			s.endTurn()
 			s.turnEverRan = true
 			s.compacting = false
 			concludeCompactionID(s, cutCompactionID(cut))
