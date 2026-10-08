@@ -9,9 +9,10 @@
  *   - its VARIANT and STATE, which select its BORDER and nothing else (the
  *     thinking/pear/green/blue ladder, the compaction divider's own color, a
  *     user prompt's permanent purple, an agent-to-agent prompt's amber, an
- *     ended turn's red, and a held prompt's NONE) — the one exception is the
- *     held prompt's background, 5% of its grey-blue tint over the feed, which
- *     the rulings name;
+ *     ended turn's red, and a held prompt's NONE) — the exceptions are the
+ *     backgrounds the owner names: the held prompt's, 5% of its grey-blue
+ *     tint over the feed, and a thinking or interim response's, the page's
+ *     own `--bg` (2026-10-08);
  *   - its HEADER STRIP: the elements above the scroll box (a prompt's address
  *     and delivery line, a peer's label, a notice heading, a held prompt's
  *     badges), plus the response's floated usage CORNER inside the box;

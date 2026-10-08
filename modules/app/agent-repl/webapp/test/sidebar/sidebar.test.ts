@@ -12,6 +12,7 @@ import type { ServiceImpl } from "@connectrpc/connect";
 import { PREFS_KEY, drawRailHead, mountSidebar, retireStoredPrefs } from "../../src/sidebar/sidebar.js";
 import { GROUPING_VIEW_KEY } from "../../src/sidebar/view.js";
 import { captureLogRecords, type LogCapture } from "../log-capture.js";
+import { fireResize } from "../resize-observer.js";
 import {
   NOW,
   SINK,
@@ -254,6 +255,30 @@ describe("mounting the rail: the view is the daemon's", () => {
     );
     await settle();
     expect(host.querySelector(".merged-section")?.classList.contains("folded")).toBe(false);
+  });
+});
+
+describe("mounting the rail: the Recently Merged fit", () => {
+  it("watches the rail's scroller, so a resize re-fits the band", async () => {
+    // Arrange
+    const host = document.createElement("nav");
+    mountSidebar(host, ctxFor([roster({ merged: mergedSection([row({ id: "ws-9" })], 1, false) })]), {
+      timers: fakeTimers(),
+    });
+    await settle();
+    // Act / Assert — fireResize throws when nothing observes the element.
+    expect(() => fireResize(host.querySelector(".sb-scroll") as Element)).not.toThrow();
+  });
+
+  it("watches each drawn pane, so a fold or a grouping switch re-fits the band", async () => {
+    // Arrange
+    const host = document.createElement("nav");
+    mountSidebar(host, ctxFor([roster({ merged: mergedSection([row({ id: "ws-9" })], 1, false) })]), {
+      timers: fakeTimers(),
+    });
+    await settle();
+    // Act / Assert
+    expect(() => fireResize(host.querySelector('.sb-pane[data-grouping="task"]') as Element)).not.toThrow();
   });
 });
 

@@ -810,9 +810,16 @@ export type RosterSectionHeader = Message<"frontend.v1.RosterSectionHeader"> & {
   label?: RosterLabel | undefined;
 
   /**
-   * How many workspaces the section holds, drawn as "(N)" beside the label
-   * while the section is FOLDED (the client shows or hides this resolved value
-   * by the section's fold; it never counts rows itself). Always set.
+   * How many workspaces the section SHOWS UNFOLDED, drawn as "(N)" beside the
+   * label while the section is FOLDED (owner request, 2026-10-08: the folded
+   * count equals the rows the unfolded section shows). The client shows or
+   * hides this resolved value by the section's fold; it never counts a
+   * repository's rows itself. Always set.
+   *
+   * THE RECENTLY MERGED BAND'S is every merged row it carries; a client that
+   * shows only the merges that FIT its rail (the webapp: no fixed cap, as many
+   * as fit without scrolling) draws the number it shows instead, from the one
+   * fit that hides the rest, since only it knows its height.
    *
    * @generated from field: frontend.v1.RosterSectionCount count = 2;
    */
@@ -827,9 +834,12 @@ export const RosterSectionHeaderSchema: GenMessage<RosterSectionHeader> = /*@__P
   messageDesc(file_frontend_v1_sidebar, 26);
 
 /**
- * A section's workspace count: every row the section's rows region carries,
- * nested family rows included. Drawn smaller than the label, in the label's
- * own color.
+ * A section's workspace count. A repository section's is every row of its
+ * rows region, nested family rows included, that is NOT closed
+ * (RosterRowClosed): a closed row rides the wire for Emacs but is never
+ * drawn, and its live descendants are drawn in its place. The merged band's
+ * is its row count (each merged row is closed by design, and is exactly what
+ * the band shows). Drawn smaller than the label, in the label's own color.
  *
  * @generated from message frontend.v1.RosterSectionCount
  */
