@@ -329,3 +329,11 @@ func (q *queue) ackTurn(ws ids.WorkspaceID) {
 	q.deps.Footer.AckTurn(ws)
 	q.deps.Sidebar.AckTurn(ws)
 }
+
+// setTurn tells both status surfaces the turn the daemon accepted, nil when
+// none stands: one call, so the footer, whose status the roster projects, never
+// lacks a turn the roster was told of.
+func (q *queue) setTurn(ws ids.WorkspaceID, turn *footer.TurnStarted) {
+	q.deps.Footer.SetTurn(ws, turn)
+	q.deps.Sidebar.SetTurn(ws, turn)
+}

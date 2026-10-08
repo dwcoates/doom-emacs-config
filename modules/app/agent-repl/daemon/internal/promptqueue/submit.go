@@ -323,7 +323,7 @@ func (q *queue) holdForRevival(ctx context.Context, sub Submission, log dlog.Log
 	if err != nil {
 		return Disposition{}, err
 	}
-	// THE ROSTER TAKES THE TURN THE MOMENT IT IS ACCEPTED, not when the
+	// THE STATUS TAKES THE TURN THE MOMENT IT IS ACCEPTED, not when the
 	// revival delivers it. The rpc answers with a minted TurnId right here,
 	// and sidebar.proto's `submitting` is "the turn is accepted and the shim
 	// has not acked it" -- which this turn is for the whole bring-up. Left to
@@ -334,7 +334,7 @@ func (q *queue) holdForRevival(ctx context.Context, sub Submission, log dlog.Log
 	// `none` -> `init` -> `ready` -> `submitting`. The link arm still
 	// outranks this while the route is coming up, so the walk is now
 	// `none` -> `init` -> `submitting` -> `thinking`.
-	q.deps.Sidebar.SetTurn(sub.WS, &footer.TurnStarted{At: q.deps.Now(), Act: footer.ActPrompt})
+	q.setTurn(sub.WS, &footer.TurnStarted{At: q.deps.Now(), Act: footer.ActPrompt})
 	q.reviveInBackground(context.WithoutCancel(ctx), sub.WS, log)
 	return disposition, nil
 }
@@ -440,7 +440,7 @@ func (q *queue) keepReconnectHolds(ctx context.Context, ws ids.WorkspaceID, log 
 		}
 		waiting = append(waiting, string(h.Turn))
 	}
-	q.deps.Sidebar.SetTurn(ws, nil)
+	q.setTurn(ws, nil)
 	if len(waiting) == 0 {
 		log.Debug(opSubmit, "the failed revival leaves no reconnect hold standing", dlog.Context{"cause": cause})
 		return
