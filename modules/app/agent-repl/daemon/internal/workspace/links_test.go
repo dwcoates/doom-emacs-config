@@ -572,3 +572,80 @@ func TestOpenFeedLinkUnderWebFallbackStillOpensAFileThatExists(t *testing.T) {
 		t.Fatalf("relayed %q, want %q", got, want)
 	}
 }
+
+// homeLinkFixture is linkFixture with the worktree beneath the fixture's home,
+// as a user's checkouts are, answering the worktree and its home-relative
+// spelling.
+func homeLinkFixture(t *testing.T) (*fixture, string, string) {
+	t.Helper()
+	f := newFixture(t)
+	dir := filepath.Join(f.home, "checkouts", "repo")
+	touch(t, filepath.Join(dir, ".git"))
+	ws := f.workspace("w1", dir)
+	f.briefs[BriefLinkUnresolved] = linkBrief()
+	rel, err := filepath.Rel(f.home, ws.Dir)
+	if err != nil {
+		t.Fatalf("Rel: %v", err)
+	}
+	return f, ws.Dir, "~/" + rel
+}
+
+func TestOpenFeedLinkResolvesAHomeRelativePathBeneathHome(t *testing.T) {
+	// Arrange
+	f, dir, tilde := homeLinkFixture(t)
+	touch(t, filepath.Join(dir, "lisp/core.el"))
+
+	// Act
+	_, err := f.verbs.OpenFeedLink(context.Background(), "w1", tilde+"/lisp/core.el", true)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("OpenFeedLink: %v", err)
+	}
+	if got, want := relayedPath(t, f), filepath.Join(dir, "lisp/core.el"); got != want {
+		t.Fatalf("relayed %q, want %q", got, want)
+	}
+}
+
+func TestOpenFeedLinkRelaysAHomeRelativePathsLineSuffix(t *testing.T) {
+	// Arrange
+	f, dir, tilde := homeLinkFixture(t)
+	touch(t, filepath.Join(dir, "lisp/core.el"))
+
+	// Act
+	_, err := f.verbs.OpenFeedLink(context.Background(), "w1", tilde+"/lisp/core.el:7", true)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("OpenFeedLink: %v", err)
+	}
+	if line := f.host.editorOpens[0].Line; line == nil || *line != 7 {
+		t.Fatalf("relayed %+v, want line 7", f.host.editorOpens)
+	}
+}
+
+func TestOpenFeedLinkLeavesAnotherUsersHomeUnresolved(t *testing.T) {
+	// Arrange: `~bob/...` names a home this daemon does not expand.
+	f, _ := linkFixture(t)
+
+	// Act
+	_, err := f.verbs.OpenFeedLink(context.Background(), "w1", "~bob/lisp/core.el", true)
+
+	// Assert
+	asRefusal(t, err, ArmLinkUnresolved)
+	if len(f.host.editorOpens) != 0 {
+		t.Fatalf("opens = %+v, want nothing relayed", f.host.editorOpens)
+	}
+}
+
+func TestOpenFeedLinkRefusesAHomeRelativePathOutsideTheWorktree(t *testing.T) {
+	// Arrange: the file exists beneath home, but not in this worktree.
+	f, _, _ := homeLinkFixture(t)
+	touch(t, filepath.Join(f.home, "elsewhere", "notes.txt"))
+
+	// Act
+	_, err := f.verbs.OpenFeedLink(context.Background(), "w1", "~/elsewhere/notes.txt", true)
+
+	// Assert
+	asRefusal(t, err, ArmPathEscapesWorkspace)
+}

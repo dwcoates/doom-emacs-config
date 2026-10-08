@@ -9,6 +9,7 @@ package workspace
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
@@ -469,6 +470,9 @@ type Deps struct {
 	// from. It is what decides whether a repository's one-shot policy is the
 	// corpus or the repository's own `.agent-repl/prompts`.
 	CheckoutRoot string
+	// HomeDir is the user's home directory, absolute: a feed link's leading
+	// `~` expands to it (resolveFeedLink).
+	HomeDir string
 	// Policy probes a repository's policy directory. nil means the real
 	// filesystem (prompts.OnDisk).
 	Policy prompts.Files
@@ -788,6 +792,8 @@ func New(deps Deps) (Verbs, error) {
 		return nil, missing("a prompts directory")
 	case deps.CheckoutRoot == "":
 		return nil, missing("a checkout root")
+	case !filepath.IsAbs(deps.HomeDir):
+		return nil, missing("an absolute home directory")
 	case deps.Log == nil:
 		return nil, missing("log surfaces")
 	}
