@@ -8,16 +8,18 @@ import {
   type UpdateSidebarViewResponse,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_sidebar_view_pb";
 import {
+  RosterMaturityKeySchema,
   RosterRepoSectionSchema,
   RosterTaskSectionSchema,
   WorkspaceRosterSchema,
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import { repoFoldKey } from "../../src/sidebar/context.js";
-import { drawRosterSectionFold, drawWorkspaceRoster } from "../../src/sidebar/roster.js";
+import { drawHeadedSection, drawRosterSectionFold, drawWorkspaceRoster } from "../../src/sidebar/roster.js";
 import { cascadedValue, installStylesheet } from "../stylesheet.js";
 import {
   appContext,
+  maturitySection,
   mergedSection,
   repoSection,
   roster,
@@ -62,10 +64,23 @@ describe("drawRosterSectionFold", () => {
   });
 });
 
-describe("the two groupings", () => {
-  it("draws both, because both arrive resolved", () => {
+describe("the groupings", () => {
+  it("draws every one, because every one arrives resolved", () => {
     const drawn = drawWorkspaceRoster(roster(), sidebarContext());
-    expect(drawn.querySelectorAll("[data-grouping]").length).toBe(2);
+    expect([...drawn.querySelectorAll("[data-grouping]")].map((p) => p.getAttribute("data-grouping"))).toEqual([
+      "repository",
+      "task",
+      "maturity",
+    ]);
+  });
+
+  it("shows the maturity grouping when the daemon says every page shows it", () => {
+    const drawn = drawWorkspaceRoster(roster({ shown: "maturity" }), sidebarContext());
+    expect([pane(drawn, "repository").hidden, pane(drawn, "task").hidden, pane(drawn, "maturity").hidden]).toEqual([
+      true,
+      true,
+      false,
+    ]);
   });
 
   it("shows the repository grouping by default", () => {
@@ -221,7 +236,12 @@ function viewDaemon(answer: UpdateSidebarViewResponse = VIEW_OK): {
 function foldAsked(request: UpdateSidebarViewRequest): { section: string | undefined; id: string; fold: string | undefined } {
   if (request.change.case !== "foldSection") return { section: request.change.case, id: "", fold: undefined };
   const section = request.change.value.section;
-  const id = section.case === "repository" || section.case === "task" ? section.value.id : "";
+  const id =
+    section.case === "repository" || section.case === "task"
+      ? section.value.id
+      : section.case === "maturity"
+        ? (section.value.stage.case ?? "")
+        : "";
   return { section: section.case, id, fold: request.change.value.fold.case };
 }
 
@@ -237,6 +257,12 @@ const FOLDING_SECTIONS = [
     roster: (collapsed: boolean) => roster({ tasks: [taskSection({ id: "task-1", collapsed })] }),
     selector: ".task-section",
     id: "task-1",
+  },
+  {
+    kind: "maturity",
+    roster: (collapsed: boolean) => roster({ maturity: [maturitySection({ stage: "inProgress", collapsed })] }),
+    selector: ".maturity-section",
+    id: "inProgress",
   },
   {
     kind: "recentlyMerged",
@@ -269,7 +295,11 @@ describe("folding a section is the daemon's view, shared by every page", () => {
     const { sc } = viewDaemon();
     const drawn = drawWorkspaceRoster(roster({ merged: mergedSection([MERGED_ROW], 1, false) }), sc);
     await click(pane(drawn, "repository").querySelector(".merged-section [data-section-fold]") as Element);
-    expect([...drawn.querySelectorAll(".merged-section")].map((m) => m.classList.contains("folded"))).toEqual([true, true]);
+    expect([...drawn.querySelectorAll(".merged-section")].map((m) => m.classList.contains("folded"))).toEqual([
+      true,
+      true,
+      true,
+    ]);
   });
 
   it("keeps the asked fold over a push still carrying the old one", async () => {
@@ -425,6 +455,171 @@ describe("closed workspaces never appear in a live grouping", () => {
   });
 });
 
+describe("drawHeadedSection", () => {
+  /** A headed section's wire: a header, rows and a fold. */
+  function wire(init: { collapsed?: boolean; rows?: ReturnType<typeof row>[] } = {}) {
+    return maturitySection({ stage: "backlog", label: "Head", rows: init.rows, collapsed: init.collapsed });
+  }
+  const SHAPE = { foldKey: "k:1", className: "kind-section", target: { case: "recentlyMerged", value: {} } } as const;
+
+  it("draws the box with its kind's class and fold key", () => {
+    const section = drawHeadedSection(wire(), sidebarContext(), "p", SHAPE);
+    expect([section.classList.contains("repo"), section.classList.contains("kind-section"), section.getAttribute("data-section")]).toEqual([
+      true,
+      true,
+      "k:1",
+    ]);
+  });
+
+  it.each([
+    [false, false],
+    [true, true],
+  ])("folds the box collapsed=%s folded=%s, as the wire says", (collapsed, folded) => {
+    const section = drawHeadedSection(wire({ collapsed }), sidebarContext(), "p", SHAPE);
+    expect(section.classList.contains("folded")).toBe(folded);
+  });
+
+  it("draws the header's label and folded count", () => {
+    const section = drawHeadedSection(wire({ rows: [row({ id: "ws-1" })] }), sidebarContext(), "p", SHAPE);
+    expect([section.querySelector(".sb-label")?.textContent, section.querySelector(".sb-count")?.textContent]).toEqual(["Head", "(1)"]);
+  });
+
+  it("drops a closed row from its rows", () => {
+    const section = drawHeadedSection(wire({ rows: [row({ id: "ws-closed", closed: true })] }), sidebarContext(), "p", SHAPE);
+    expect(section.querySelector("[data-roster-row='ws-closed']")).toBeNull();
+  });
+
+  it("hands the header and the box to the decoration, after the count", () => {
+    let handed: [HTMLElement, HTMLElement] | undefined;
+    const section = drawHeadedSection(wire(), sidebarContext(), "p", {
+      ...SHAPE,
+      decorateHeader: (header, box) => {
+        handed = [header, box];
+        header.appendChild(document.createElement("i"));
+      },
+    });
+    expect([handed?.[0] === section.querySelector(".repo-head"), handed?.[1] === section, section.querySelector(".repo-head")?.lastElementChild?.tagName]).toEqual([
+      true,
+      true,
+      "I",
+    ]);
+  });
+
+  it("asks the daemon for the other fold of its target", async () => {
+    const { asked, sc } = viewDaemon();
+    const section = drawHeadedSection(wire(), sc, "p", SHAPE);
+    await click(section.querySelector("[data-section-fold]") as Element);
+    expect(asked.map(foldAsked)).toEqual([{ section: "recentlyMerged", id: "", fold: "collapse" }]);
+  });
+
+  it("refuses a section with no header as a malformed view", () => {
+    const bare = wire();
+    bare.header = undefined;
+    expect(() => drawHeadedSection(bare, sidebarContext(), "p", SHAPE)).toThrow(MalformedView);
+  });
+
+  it("refuses a section with no rows as a malformed view", () => {
+    const bare = wire();
+    bare.rows = undefined;
+    expect(() => drawHeadedSection(bare, sidebarContext(), "p", SHAPE)).toThrow(MalformedView);
+  });
+
+  it("is the one shape the repository and maturity sections share", () => {
+    /** A section's element tree, by tag and class, without the repository's create control. */
+    const outline = (section: Element | null): string[] =>
+      [...(section?.querySelectorAll(":scope > *, :scope > .repo-head > *") ?? [])]
+        .filter((el) => !el.classList.contains("sb-add"))
+        .map((el) => `${el.tagName}.${[...el.classList].join(".")}`);
+    const drawn = drawWorkspaceRoster(
+      roster({
+        repos: [repoSection({ id: "repo-1", label: "x" })],
+        maturity: [maturitySection({ stage: "backlog", label: "x" })],
+      }),
+      sidebarContext(),
+    );
+    expect(outline(drawn.querySelector(".maturity-section"))).toEqual(outline(drawn.querySelector(".repo-section")));
+  });
+});
+
+describe("the maturity grouping", () => {
+  const STAGES = [
+    maturitySection({ stage: "backlog", label: "Backlog", rows: [row({ id: "ws-new" })] }),
+    maturitySection({ stage: "inProgress", label: "In Progress", rows: [row({ id: "ws-busy" })] }),
+    maturitySection({ stage: "merging", label: "Merging" }),
+  ];
+
+  it("draws one section per stage, in the resolver's order", () => {
+    const drawn = drawWorkspaceRoster(roster({ maturity: STAGES }), sidebarContext());
+    const stages = [...pane(drawn, "maturity").querySelectorAll(".maturity-section")].map((s) =>
+      s.getAttribute("data-maturity-stage"),
+    );
+    expect(stages).toEqual(["backlog", "inProgress", "merging"]);
+  });
+
+  it("draws each stage's label", () => {
+    const drawn = drawWorkspaceRoster(roster({ maturity: STAGES }), sidebarContext());
+    const labels = [...pane(drawn, "maturity").querySelectorAll(".maturity-section .sb-label")].map((l) => l.textContent);
+    expect(labels).toEqual(["Backlog", "In Progress", "Merging"]);
+  });
+
+  it("draws a workspace under the stage the daemon filed it in", () => {
+    const drawn = drawWorkspaceRoster(roster({ maturity: STAGES }), sidebarContext());
+    const stage = pane(drawn, "maturity").querySelector("[data-roster-row='ws-busy']")?.closest(".maturity-section");
+    expect(stage?.getAttribute("data-maturity-stage")).toBe("inProgress");
+  });
+
+  it("draws a stage with no rows", () => {
+    const drawn = drawWorkspaceRoster(roster({ maturity: STAGES }), sidebarContext());
+    expect(pane(drawn, "maturity").querySelector("[data-maturity-stage='merging']")).not.toBeNull();
+  });
+
+  it("drops a closed row from a stage", () => {
+    const drawn = drawWorkspaceRoster(
+      roster({ maturity: [maturitySection({ stage: "inProgress", rows: [row({ id: "ws-closed", closed: true })] })] }),
+      sidebarContext(),
+    );
+    expect(pane(drawn, "maturity").querySelector("[data-roster-row='ws-closed']")).toBeNull();
+  });
+
+  it("carries its own copy of the recently-merged band", () => {
+    const drawn = drawWorkspaceRoster(roster({ merged: mergedSection([MERGED_ROW], 1) }), sidebarContext());
+    expect(pane(drawn, "maturity").querySelector(".merged-section [data-roster-row='ws-9']")).not.toBeNull();
+  });
+
+  it.each([
+    [false, false],
+    [true, true],
+  ])("draws a stage collapsed=%s folded=%s, as the daemon says", (collapsed, folded) => {
+    const drawn = drawWorkspaceRoster(
+      roster({ maturity: [maturitySection({ stage: "backlog", collapsed })] }),
+      sidebarContext(),
+    );
+    expect(pane(drawn, "maturity").querySelector(".maturity-section")?.classList.contains("folded")).toBe(folded);
+  });
+
+  it("refuses a stage key with no stage arm as a malformed view", () => {
+    const section = maturitySection({ stage: "backlog" });
+    section.key = create(RosterMaturityKeySchema, { stage: {} });
+    expect(() => drawWorkspaceRoster(roster({ maturity: [section] }), sidebarContext())).toThrow(MalformedView);
+  });
+
+  it("refuses a stage key with no stage as a malformed view", () => {
+    const section = maturitySection({ stage: "backlog" });
+    section.key = create(RosterMaturityKeySchema, {});
+    expect(() => drawWorkspaceRoster(roster({ maturity: [section] }), sidebarContext())).toThrow(MalformedView);
+  });
+
+  it("refuses a roster with no maturity view as a malformed view", () => {
+    const bare = create(WorkspaceRosterSchema, {
+      repository: { sections: [] },
+      task: { sections: [] },
+      recentlyMerged: mergedSection(),
+      shown: { case: "shownRepository", value: {} },
+    });
+    expect(() => drawWorkspaceRoster(bare, sidebarContext())).toThrow(MalformedView);
+  });
+});
+
 describe("recently merged", () => {
   /** A roster carrying one landed merge -- the band only draws with rows. */
   function landed(): ReturnType<typeof roster> {
@@ -447,9 +642,9 @@ describe("recently merged", () => {
     ).not.toBeNull();
   });
 
-  it("appears under BOTH groupings", () => {
+  it("appears under EVERY grouping", () => {
     const drawn = drawWorkspaceRoster(landed(), sidebarContext());
-    expect(drawn.querySelectorAll(".merged-section:not([hidden])").length).toBe(2);
+    expect(drawn.querySelectorAll(".merged-section:not([hidden])").length).toBe(3);
   });
 
   it("starts folded, because settled history should not spend rail height", () => {

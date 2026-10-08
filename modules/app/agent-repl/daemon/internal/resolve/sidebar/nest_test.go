@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"claude-repld/internal/ids"
+	"claude-repld/internal/resolve/sidebar"
 	"claude-repld/internal/wsm"
 )
 
@@ -354,5 +355,83 @@ func TestRosterNestsUnderANonDefaultBranchOccupiedByAnotherWorkspace(t *testing.
 	}
 	if got := rowNames(rows[0].GetChildren()); !equal(got, []string{"child"}) {
 		t.Fatalf("children = %v, want the workspace cut from the feature branch", got)
+	}
+}
+
+// twoRepoRegistry is a registry carrying the fixture repository and a second
+// one, with WS registered across them.
+func twoRepoRegistry(ws ...wsm.Workspace) sidebar.Registry {
+	reg := registry(ws...)
+	reg.Repositories = []wsm.Repository{repo, otherRepo}
+	return reg
+}
+
+// otherRepo is a second repository, so a section can span two.
+var otherRepo = wsm.Repository{ID: "repo-2", Dir: "/repos/two", Name: "beta", DefaultBranch: "main"}
+
+func TestASectionSpanningRepositoriesNestsOnlyWithinOneRepository(t *testing.T) {
+	// Arrange: both in the backlog, so one maturity section carries both.
+	r, _ := newResolver(t)
+	parent := workspace("w-parent", "parent")
+	stranger := workspace("w-stranger", "stranger")
+	stranger.Repo = otherRepo.ID
+	stranger.ParentBranch = parent.Branch
+
+	// Act.
+	r.SetRegistry(twoRepoRegistry(parent, stranger))
+
+	// Assert.
+	rows := latest(t, r).GetMaturity().GetSections()[0].GetRows().GetRows()
+	if got := rowNames(rows); !equal(got, []string{"parent", "stranger"}) || len(rows[0].GetChildren()) != 0 {
+		t.Fatalf("backlog rows = %v, want both at the top level", got)
+	}
+}
+
+func TestASameNamedBranchInTwoRepositoriesIsNoClash(t *testing.T) {
+	// Arrange: one maturity section carries both, each on its own "main".
+	r, surfaces := newResolver(t)
+	first := workspace("w-first", "first")
+	first.Branch = "main"
+	second := workspace("w-second", "second")
+	second.Repo = otherRepo.ID
+	second.Branch = "main"
+
+	// Act.
+	r.SetRegistry(twoRepoRegistry(first, second))
+
+	// Assert.
+	for _, rec := range surfaces.Records() {
+		if rec.Level == "warn" && rec.Operation == "daemon.sidebar.nest" {
+			t.Fatalf("two repositories' same-named branches were recorded as a clash: %+v", rec)
+		}
+	}
+}
+
+func TestASameNamedBranchInAnotherRepositoryOwnsItsOwnFamily(t *testing.T) {
+	// Arrange: each repository has a "feature" workspace and a child cut from
+	// it, all in the backlog, so one section carries the four.
+	r, _ := newResolver(t)
+	parentOne := workspace("w-p1", "p1")
+	parentOne.Branch = "feature"
+	childOne := workspace("w-c1", "c1")
+	childOne.ParentBranch = "feature"
+	parentTwo := workspace("w-p2", "p2")
+	parentTwo.Repo = otherRepo.ID
+	parentTwo.Branch = "feature"
+	childTwo := workspace("w-c2", "c2")
+	childTwo.Repo = otherRepo.ID
+	childTwo.ParentBranch = "feature"
+
+	// Act.
+	r.SetRegistry(twoRepoRegistry(parentOne, childOne, parentTwo, childTwo))
+
+	// Assert.
+	rows := latest(t, r).GetMaturity().GetSections()[0].GetRows().GetRows()
+	families := map[string][]string{}
+	for _, row := range rows {
+		families[row.GetName().GetText()] = rowNames(row.GetChildren())
+	}
+	if len(rows) != 2 || !equal(families["p1"], []string{"c1"}) || !equal(families["p2"], []string{"c2"}) {
+		t.Fatalf("backlog families = %v, want each child under its own repository's parent", families)
 	}
 }

@@ -230,7 +230,7 @@ func TestShowGroupingRecordsTheGroupingAndRepublishesTheRoster(t *testing.T) {
 	tests := []struct {
 		name     string
 		grouping wsm.Grouping
-	}{{"task", wsm.GroupingTask}, {"repository", wsm.GroupingRepository}}
+	}{{"task", wsm.GroupingTask}, {"repository", wsm.GroupingRepository}, {"maturity", wsm.GroupingMaturity}}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
@@ -267,5 +267,61 @@ func TestShowGroupingSurfacesAFailedWriteAtError(t *testing.T) {
 	}
 	if len(f.sidebar.registries) != 0 {
 		t.Fatalf("roster republications = %d, want none for a failed write", len(f.sidebar.registries))
+	}
+}
+
+func TestFoldMaturitySectionRecordsTheFoldAndRepublishesTheRoster(t *testing.T) {
+	tests := []struct {
+		name   string
+		stage  wsm.MaturityStage
+		folded bool
+		want   wsm.MaturityFolds
+	}{
+		{"collapse the backlog", wsm.MaturityBacklog, true, wsm.MaturityFolds{Backlog: true}},
+		{"collapse in progress", wsm.MaturityInProgress, true, wsm.MaturityFolds{InProgress: true}},
+		{"expand merging", wsm.MaturityMerging, false, wsm.MaturityFolds{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			prior := wsm.DefaultSidebarView
+			prior.MaturityFolded = prior.MaturityFolded.With(tt.stage, !tt.folded)
+			f.db.view = &prior
+
+			// Act
+			err := f.verbs.FoldMaturitySection(context.Background(), tt.stage, tt.folded)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("FoldMaturitySection: %v", err)
+			}
+			if len(f.sidebar.registries) != 1 {
+				t.Fatalf("roster republications = %d, want exactly one", len(f.sidebar.registries))
+			}
+			if got := f.sidebar.registries[0].View.MaturityFolded; got != tt.want {
+				t.Fatalf("republished maturity folds = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFoldMaturitySectionSurfacesAFailedWriteAtError(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.db.setMaturityFoldedErr = errors.New("disk I/O error")
+
+	// Act
+	err := f.verbs.FoldMaturitySection(context.Background(), wsm.MaturityBacklog, true)
+
+	// Assert
+	if err == nil {
+		t.Fatal("a failed fold write was answered as success")
+	}
+	if !loggedAtError(f, opFoldMaturitySection) {
+		t.Fatal("the failed write was not recorded at error")
+	}
+	if len(f.sidebar.registries) != 0 {
+		t.Fatalf("roster republications = %d, want none for a failed fold", len(f.sidebar.registries))
 	}
 }

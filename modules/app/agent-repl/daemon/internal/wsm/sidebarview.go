@@ -34,24 +34,103 @@ CREATE TABLE sidebar_view (
 );
 `
 
-// Grouping is which of the sidebar's two resolved views is shown.
+// maturityFoldsDDL is the layout-29 addition: each maturity stage's section
+// fold (frontend.v1.RosterMaturitySection.fold). A stage belongs to no row,
+// so its fold lives on the sidebar_view singleton beside the merged band's.
+// Every stage is expanded (0) until someone folds it.
+//
+// Like the other column-add steps it is an ALTER, applied after sidebar_view
+// on a fresh file and as its own step on a migrated one.
+const maturityFoldsDDL = `
+ALTER TABLE sidebar_view ADD COLUMN backlog_folded INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE sidebar_view ADD COLUMN in_progress_folded INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE sidebar_view ADD COLUMN merging_folded INTEGER NOT NULL DEFAULT 0;
+`
+
+// Grouping is which of the sidebar's resolved views is shown.
 type Grouping string
 
-// The two groupings, spelled as the sidebar_view row stores them.
+// The groupings, spelled as the sidebar_view row stores them.
 const (
 	GroupingRepository Grouping = "repository"
 	GroupingTask       Grouping = "task"
+	GroupingMaturity   Grouping = "maturity"
 )
 
-// valid reports whether g is one of the two groupings.
-func (g Grouping) valid() bool {
-	return g == GroupingRepository || g == GroupingTask
+// Valid reports whether g is one of the groupings.
+func (g Grouping) Valid() bool {
+	return g == GroupingRepository || g == GroupingTask || g == GroupingMaturity
+}
+
+// MaturityStage is one section of the maturity grouping
+// (workspace.v1.MaturityStage): how far along a workspace's work is.
+type MaturityStage string
+
+// The stages, in the order work moves through them.
+const (
+	MaturityBacklog    MaturityStage = "backlog"
+	MaturityInProgress MaturityStage = "in_progress"
+	MaturityMerging    MaturityStage = "merging"
+)
+
+// MaturityStages is every stage, in the order the grouping draws them.
+var MaturityStages = []MaturityStage{MaturityBacklog, MaturityInProgress, MaturityMerging}
+
+// foldColumn is the sidebar_view column that holds the stage's fold, or false
+// when the stage is none of the three.
+func (m MaturityStage) foldColumn() (string, bool) {
+	switch m {
+	case MaturityBacklog:
+		return "backlog_folded", true
+	case MaturityInProgress:
+		return "in_progress_folded", true
+	case MaturityMerging:
+		return "merging_folded", true
+	default:
+		return "", false
+	}
+}
+
+// MaturityFolds is whether each maturity stage's section is collapsed.
+type MaturityFolds struct {
+	Backlog    bool
+	InProgress bool
+	Merging    bool
+}
+
+// Folded reports whether STAGE's section is collapsed. A stage that is none
+// of the three is a caller defect: the stages are this package's own
+// constants, so there is no unknown stage to answer for.
+func (f MaturityFolds) Folded(stage MaturityStage) bool {
+	return *f.slot(stage)
+}
+
+// With answers the folds with STAGE's set to FOLDED.
+func (f MaturityFolds) With(stage MaturityStage, folded bool) MaturityFolds {
+	*f.slot(stage) = folded
+	return f
+}
+
+// slot is STAGE's field, panicking on a stage that is none of the three.
+func (f *MaturityFolds) slot(stage MaturityStage) *bool {
+	switch stage {
+	case MaturityBacklog:
+		return &f.Backlog
+	case MaturityInProgress:
+		return &f.InProgress
+	case MaturityMerging:
+		return &f.Merging
+	default:
+		panic(fmt.Sprintf("wsm: maturity stage %q is none of backlog, in_progress, merging", stage))
+	}
 }
 
 // SidebarView is the sidebar's durable view state that belongs to no row.
 type SidebarView struct {
 	// MergedFolded is whether the recently-merged band is collapsed.
 	MergedFolded bool
+	// MaturityFolded is whether each maturity stage's section is collapsed.
+	MaturityFolded MaturityFolds
 	// Grouping is the grouping every page shows.
 	Grouping Grouping
 }
@@ -81,15 +160,30 @@ func (s *store) SetMergedSectionFolded(ctx context.Context, folded bool) error {
 		`UPDATE sidebar_view SET merged_folded = ? WHERE id = 1`, folded)
 }
 
+// SetMaturityFolded records whether one maturity stage's section is
+// collapsed, leaving the rest of the view as it stands. A stage that is none
+// of the three is a caller defect and is refused loudly rather than persisted.
+func (s *store) SetMaturityFolded(ctx context.Context, stage MaturityStage, folded bool) error {
+	const op = "daemon.wsm.set_maturity_folded"
+	fields := dlog.Context{"stage": string(stage), "folded": folded}
+	column, ok := stage.foldColumn()
+	if !ok {
+		err := fmt.Errorf("wsm: invalid maturity stage %q", stage)
+		s.log.Error(op, "refused a maturity stage that is none of backlog, in_progress, merging", withError(fields, err))
+		return err
+	}
+	return s.updateSidebarView(ctx, op, fields, `UPDATE sidebar_view SET `+column+` = ? WHERE id = 1`, folded)
+}
+
 // SetGrouping records which grouping every page shows, leaving the rest of the
-// view as it stands. A grouping that is neither of the two is a caller defect
+// view as it stands. A grouping that is none of the three is a caller defect
 // and is refused loudly rather than persisted.
 func (s *store) SetGrouping(ctx context.Context, grouping Grouping) error {
 	const op = "daemon.wsm.set_grouping"
 	fields := dlog.Context{"grouping": string(grouping)}
-	if !grouping.valid() {
+	if !grouping.Valid() {
 		err := fmt.Errorf("wsm: invalid grouping %q", grouping)
-		s.log.Error(op, "refused a grouping that is neither repository nor task", withError(fields, err))
+		s.log.Error(op, "refused a grouping that is none of repository, task, maturity", withError(fields, err))
 		return err
 	}
 	return s.updateSidebarView(ctx, op, fields, `UPDATE sidebar_view SET grouping = ? WHERE id = 1`, string(grouping))
@@ -112,16 +206,27 @@ func (s *store) updateSidebarView(ctx context.Context, op string, fields dlog.Co
 
 // SidebarView loads the sidebar's view state, or DefaultSidebarView when
 // nobody has changed it. An absent row is that legitimate "never changed"
-// case and is NOT an error; a stored grouping that is neither of the two is a
+// case and is NOT an error; a stored grouping that is none of the three is a
 // corrupt record, surfaced as a DecodeError.
 func (s *store) SidebarView(ctx context.Context) (SidebarView, error) {
 	view := DefaultSidebarView
 	err := s.read(ctx, "daemon.wsm.sidebar_view", dlog.Context{}, func(ctx context.Context) error {
 		var (
 			folded   bool
+			maturity MaturityFolds
 			grouping string
 		)
-		err := s.db().QueryRowContext(ctx, `SELECT merged_folded, grouping FROM sidebar_view WHERE id = 1`).Scan(&folded, &grouping)
+		// Each stage's column is read straight into its field, through the
+		// same two mappings the write uses, so a stage cannot be read from a
+		// column other than the one it is written to.
+		columns := "merged_folded, grouping"
+		dest := []any{&folded, &grouping}
+		for _, stage := range MaturityStages {
+			column, _ := stage.foldColumn()
+			columns += ", " + column
+			dest = append(dest, maturity.slot(stage))
+		}
+		err := s.db().QueryRowContext(ctx, `SELECT `+columns+` FROM sidebar_view WHERE id = 1`).Scan(dest...)
 		if errors.Is(err, sql.ErrNoRows) {
 			view = DefaultSidebarView
 			return nil
@@ -129,10 +234,10 @@ func (s *store) SidebarView(ctx context.Context) (SidebarView, error) {
 		if err != nil {
 			return err
 		}
-		if !Grouping(grouping).valid() {
-			return &DecodeError{Table: "sidebar_view", Row: "1", Field: "grouping", Err: fmt.Errorf("a stored grouping is repository or task, not %q", grouping)}
+		if !Grouping(grouping).Valid() {
+			return &DecodeError{Table: "sidebar_view", Row: "1", Field: "grouping", Err: fmt.Errorf("a stored grouping is repository, task or maturity, not %q", grouping)}
 		}
-		view = SidebarView{MergedFolded: folded, Grouping: Grouping(grouping)}
+		view = SidebarView{MergedFolded: folded, MaturityFolded: maturity, Grouping: Grouping(grouping)}
 		return nil
 	})
 	return view, err

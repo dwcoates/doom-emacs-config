@@ -9,7 +9,7 @@
 // box it styles:
 //
 //   - a section's fold: RosterRepoSection.fold, RosterTaskSection.fold,
-//     RosterMergedSection.fold;
+//     RosterMaturitySection.fold, RosterMergedSection.fold;
 //   - the grouping shown: WorkspaceRoster.shown.
 //
 // Both are DURABLE: they survive a daemon restart.
@@ -54,6 +54,8 @@ message SidebarViewFoldSection {
     TaskRef task = 2;
     // The recently-merged band; the roster carries exactly one.
     SidebarViewRecentlyMerged recently_merged = 3;
+    // A maturity stage's section, echoed from RosterMaturityKey.
+    workspace.v1.MaturityStage maturity = 6;
   }
   // THE ARM IS THE FOLD ASKED FOR. Unset is malformed.
   oneof fold {
@@ -77,6 +79,7 @@ message SidebarViewShowGrouping {
   oneof grouping {
     SidebarViewRepositoryGrouping repository = 1;
     SidebarViewTaskGrouping task = 2;
+    SidebarViewMaturityGrouping maturity = 3;
   }
 }
 
@@ -85,6 +88,9 @@ message SidebarViewRepositoryGrouping {}
 
 // The task grouping. DELIBERATELY EMPTY: the arm is the fact.
 message SidebarViewTaskGrouping {}
+
+// The maturity grouping. DELIBERATELY EMPTY: the arm is the fact.
+message SidebarViewMaturityGrouping {}
 
 // THE ARM IS THE OUTCOME.
 message UpdateSidebarViewResponse {

@@ -52,28 +52,36 @@ type forest struct {
 // no default branch to exempt and every branch is read as lineage, exactly as
 // before.
 //
+// A BRANCH IS A REPOSITORY'S: the lineage is keyed by repository and branch
+// name together, because a section can span repositories (the task and
+// maturity groupings) and a same-named branch in another repository is
+// another branch, neither a clash nor a parent.
+//
 // Every branch logs, and the two ways the lineage can be ill-formed — two
-// workspaces claiming the same branch, and a cycle — are recorded loudly and
-// resolved by leaving the row at the top level rather than dropping it.
+// workspaces claiming the same branch of one repository, and a cycle — are
+// recorded loudly and resolved by leaving the row at the top level rather
+// than dropping it.
 func nest(in []wsm.Workspace, defaultBranches map[ids.RepoID]string, log dlog.Logger) forest {
 	ordered := sortWorkspaces(in)
 
-	byBranch := map[string]wsm.Workspace{}
+	byBranch := map[repoBranch]wsm.Workspace{}
 	for _, ws := range ordered {
 		if ws.Branch == "" {
 			continue
 		}
-		if prior, clash := byBranch[ws.Branch]; clash {
+		key := repoBranch{repo: ws.Repo, branch: ws.Branch}
+		if prior, clash := byBranch[key]; clash {
 			log.Warn("daemon.sidebar.nest",
 				"two workspaces claim one branch; the first in roster order owns the family",
 				dlog.Context{
+					"repo_id":      string(ws.Repo),
 					"branch":       ws.Branch,
 					"owner":        string(prior.ID),
 					"also_claimed": string(ws.ID),
 				})
 			continue
 		}
-		byBranch[ws.Branch] = ws
+		byBranch[key] = ws
 	}
 
 	present := map[ids.WorkspaceID]struct{}{}
@@ -102,7 +110,7 @@ func nest(in []wsm.Workspace, defaultBranches map[ids.RepoID]string, log dlog.Lo
 					"default_branch": base})
 			continue
 		}
-		p, ok := byBranch[ws.ParentBranch]
+		p, ok := byBranch[repoBranch{repo: ws.Repo, branch: ws.ParentBranch}]
 		if !ok || p.ID == ws.ID {
 			continue
 		}
@@ -131,6 +139,12 @@ func nest(in []wsm.Workspace, defaultBranches map[ids.RepoID]string, log dlog.Lo
 		}
 	}
 	return out
+}
+
+// repoBranch is one repository's branch: the key a branch lineage is read by.
+type repoBranch struct {
+	repo   ids.RepoID
+	branch string
 }
 
 // recordedParent spells a workspace's recorded parent for the record, empty
