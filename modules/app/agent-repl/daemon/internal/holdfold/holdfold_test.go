@@ -36,6 +36,7 @@ func TestSaidText(t *testing.T) {
 		{name: "text blocks join with a newline", said: said(textBlock("first"), textBlock("second")), want: "first\nsecond"},
 		{name: "an image contributes no text", said: said(textBlock("look"), imageBlock(), textBlock("here")), want: "look\nhere"},
 		{name: "nothing said is empty", said: nil, want: ""},
+		{name: "a reply's quote is not the person's words", said: said(quoteBlock(), textBlock("and its population?")), want: "and its population?"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -160,4 +161,11 @@ func TestFoldable(t *testing.T) {
 			}
 		})
 	}
+}
+
+// quoteBlock is a reply's quote of an earlier bubble.
+func quoteBlock() *conversationv1.UserContentBlock {
+	return &conversationv1.UserContentBlock{Block: &conversationv1.UserContentBlock_Quote{
+		Quote: &conversationv1.UserQuoteBlock{Text: "⟢ Replying to an earlier response of yours:\n\n```\nParis.\n```\n\n⟢ My message:\n"},
+	}}
 }
