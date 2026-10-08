@@ -68,14 +68,13 @@ import type {
 import type { FeedId } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { placeChildren } from "../dom.js";
 import { columnHeader, COLUMNS_ROW_CLASS } from "../columns.js";
-import { liveElapsedClock, settledElapsedClock } from "../elapsed-clock.js";
+import { liveElapsedClock } from "../elapsed-clock.js";
 import { frameUndecodable } from "../failure/sink.js";
 import { stopTicking } from "../feed/ticking.js";
 import { log } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
 import { isMalformedView } from "../rpc/malformed.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
-import { toneClass } from "../vocab.js";
 import { footerClockSpan } from "./clock-span.js";
 import { stopControlHasAnswer, type StopControls } from "./stop.js";
 import {
