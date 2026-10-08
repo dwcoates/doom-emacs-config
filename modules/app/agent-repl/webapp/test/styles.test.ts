@@ -3438,3 +3438,41 @@ describe("the cold gate's lead sentence", () => {
     expect(declarations).toMatch(/font-weight:\s*700/);
   });
 });
+
+/**
+ * THE TOOL CARD'S HEADER CONTENT IS GREY (owner request, 2026-10-08): the
+ * input line a tool card titles itself with (the Bash command, the Grep
+ * pattern, both `.cmd`) is a medium-dark grey, readable but not prominent,
+ * where it was the `--accent` blue.
+ */
+describe("the tool card's command grey", () => {
+  it("colors the command line with the command grey token", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".cmd");
+
+    // Assert
+    expect(rule).toMatch(/color:\s*var\(--tool-command\)/);
+  });
+
+  it("leaves no tool card input line in the accent blue", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".cmd") ?? "";
+
+    // Assert
+    expect(rule).not.toMatch(/var\(--accent\)/);
+  });
+
+  it.each([
+    ["light", "#4b5563"],
+    ["dark", "#9ca3af"],
+  ] as const)("defines the %s theme's command grey as %s", (theme, want) => {
+    // Arrange
+    const block = theme === "light" ? (declarationsOf(":root") ?? "") : darkThemeBlock();
+
+    // Act
+    const got = /--tool-command:\s*(#[0-9a-fA-F]{3,6})/.exec(block)?.[1];
+
+    // Assert
+    expect(got).toBe(want);
+  });
+});

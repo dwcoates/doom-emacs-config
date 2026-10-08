@@ -133,6 +133,12 @@
      purple (X11 medium purple); mid-lightness, so one shade reads fine
      in both themes. */
   --tool-title: #9370db;
+  /* A tool card's input line, its header content (the Bash command, the Grep
+     pattern): a medium-dark grey, clearly readable but quieter than the card's
+     purple title (owner request, 2026-10-08; it was the --accent blue). One
+     step darker than --muted, the same grey the collapsed repository header
+     wears; the dark theme lifts it to its own --muted grey. */
+  --tool-command: #4b5563;
   /* Textless-thinking progress indicator: orange, distinct from every other
      status color in the palette. */
   --thinking: #ea580c;
@@ -408,6 +414,7 @@
        lifted a notch, so a response sits lighter than the tool cards. */
     --assistant: #1b1e25;
     --thinking: #fb923c;
+    --tool-command: #9ca3af;
     --retry: #a78bfa;
     --info-ws: #4ade80;
     --info-model: #22d3ee;
@@ -2035,7 +2042,7 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
    tint it: done/running reads identically on a Bash card and an Agent
    card. The two-class selector outranks .badge's transparent default. */
 .tool-card .badge { background: var(--card); }
-.cmd { color: var(--accent); }
+.cmd { color: var(--tool-command); }
 .file-path { color: var(--muted); font-family: ui-monospace, monospace; }
 /* COLLAPSED = NO SCROLL, same model as the shared cap above (owner ruling,
    2026-09-15): the generic tool input/output previews clip while collapsed and
@@ -6439,7 +6446,7 @@ ar-button.outcome-marker-pill {
    applies the treatment that shape of line has always worn: the shell command
    keeps `.cmd.bash-input`, a path keeps the muted `.file-path`, and an unstated
    form is the plain `.tool-input`. Those three rules already exist and are
-   reused untouched; only the query needs a treatment of its own — the accent
+   reused untouched; only the query needs a treatment of its own — the grey
    monospace line WITHOUT the shell chrome, held back a touch so a search
    pattern does not read as a command that ran. */
 .tool-query { opacity: 0.9; }
