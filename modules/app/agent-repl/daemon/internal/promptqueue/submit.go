@@ -435,7 +435,7 @@ func (q *queue) keepReconnectHolds(ctx context.Context, ws ids.WorkspaceID, log 
 	}
 	var waiting []string
 	for _, h := range standing {
-		if h.Tombstone != nil || h.Hold == nil || *h.Hold != wsm.HoldReconnect {
+		if !standingReconnectHold(h) {
 			continue
 		}
 		waiting = append(waiting, string(h.Turn))
@@ -490,7 +490,7 @@ func (q *queue) releaseReconnectHoldsLocked(ctx context.Context, d *delivery, lo
 	}
 	var released []wsm.HeldPrompt
 	for _, h := range standing {
-		if h.Tombstone != nil || h.Hold == nil || *h.Hold != wsm.HoldReconnect {
+		if !standingReconnectHold(h) {
 			continue
 		}
 		if err := q.deps.DB.UpdateHeldPromptHold(ctx, h.Turn, nil, ""); err != nil {
