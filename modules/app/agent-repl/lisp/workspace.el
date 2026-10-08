@@ -60,6 +60,7 @@
 ;; order config.el establishes and resolve each other's calls at call time,
 ;; so the declarations below exist for the byte-compiler alone.
 (declare-function agent-repl--do-log "core")
+(declare-function agent-repl--error "core")
 (declare-function agent-repl--git-string-quiet "core")
 (declare-function agent-repl--info "core")
 (declare-function agent-repl--kill-cause-str "core")
@@ -2263,6 +2264,32 @@ Callers must use this function instead of touching
 persp-mode directly."
   (with-eval-after-load 'persp-mode
     (add-hook 'persp-before-deactivate-functions fn)))
+
+(defun agent-repl--ws-install-before-collapse (fn)
+  "Advise persp-mode's restore collapse to call FN first, now.
+`persp-delete-other-windows' is the step of every persp-mode window
+restore (`persp-restore-window-conf') that collapses the frame to the ONE
+window it keeps -- the selected one -- into which `window-state-put' then
+puts the restored configuration's FIRST window.  FN runs just before it
+and must accept any arguments (`&rest').
+
+A persp-mode without that function is recorded at ERROR and FN is not
+installed: it is a persp-mode this boundary was not written against."
+  (if (fboundp 'persp-delete-other-windows)
+      (advice-add 'persp-delete-other-windows :before fn)
+    (agent-repl--error '(:agent-repl-central "persp-mode's window restore is process-wide")
+                       "elisp.workspace.before-collapse-unavailable: persp-delete-other-windows is not defined; %S not installed"
+                       fn)))
+
+(defun agent-repl--ws-add-before-collapse-hook (fn)
+  "Run FN just before persp-mode collapses the frame to restore a window conf.
+Installs FN through `agent-repl--ws-install-before-collapse' once
+persp-mode loads.
+
+This is the persp-mode restore boundary owned by `workspace.el'.  Callers
+must use this function instead of advising persp-mode directly."
+  (with-eval-after-load 'persp-mode
+    (agent-repl--ws-install-before-collapse fn)))
 
 (defun agent-repl--ws-after-system-load (thunk)
   "Call THUNK once the persp-mode workspace system has loaded.

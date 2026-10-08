@@ -1508,3 +1508,29 @@ func TestResumeFilesTheSessionUnderAHostIdentity(t *testing.T) {
 		})
 	}
 }
+
+// A RESUME'S SESSION FACTS ARE DURABLE BEFORE ITS WATCH OPENS, as the cold
+// bring-up's are: the watch's re-announcement writes the vendor id into the
+// session row (SetVendorSessionID), so the row must exist first. A restart of
+// a workspace whose first vendor start was rejected has no row at all, and the
+// watch opened first raced recordFacts to it: "wsm: not found" at ERROR
+// (integration TestARestartBringsUpAWorkspaceWhoseVendorWasRejected,
+// 2026-10-08).
+func TestAResumesSessionFactsAreRecordedBeforeTheWatchOpens(t *testing.T) {
+	// Arrange: no session row, as after a rejected first start.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	delete(f.db.sessions, ws.ID)
+	recordedAtWatch := ""
+	f.onStartWatcher = func() { recordedAtWatch = f.db.sessions[ws.ID].VendorSessionID }
+
+	// Act.
+	if _, err := f.fleet.Resume(context.Background(), ws.ID, f.client); err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+
+	// Assert.
+	if recordedAtWatch != "vendor-1" {
+		t.Fatalf("session row's vendor id when the watch opened = %q, want vendor-1 recorded first", recordedAtWatch)
+	}
+}

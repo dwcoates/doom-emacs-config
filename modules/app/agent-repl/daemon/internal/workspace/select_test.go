@@ -146,11 +146,10 @@ func TestSetPriorityRepublishesTheRoster(t *testing.T) {
 	}
 }
 
-// TestSelectRefreshesTheRegistryBeforeStampingTheSelection pins the ORDER. The
-// current id and the selection instant are both WSM's, so a roster rendered
-// from the pre-select registry would carry the selection with an unstamped
-// when-column and the switch would appear to land twice.
-func TestSelectRefreshesTheRegistryBeforeStampingTheSelection(t *testing.T) {
+// TestSelectTellsTheRosterAsOnePush pins that a select reaches the roster as
+// ONE mutation carrying both the refreshed registry and the selection, so
+// every client receives one roster per switch rather than two.
+func TestSelectTellsTheRosterAsOnePush(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
@@ -161,9 +160,29 @@ func TestSelectRefreshesTheRegistryBeforeStampingTheSelection(t *testing.T) {
 	}
 
 	// Assert.
-	want := []string{"registry", "selected"}
-	if len(f.sidebar.calls) != len(want) || f.sidebar.calls[0] != want[0] || f.sidebar.calls[1] != want[1] {
+	if want := []string{"registry+selected"}; !slices.Equal(f.sidebar.calls, want) {
 		t.Fatalf("roster calls = %v, want %v", f.sidebar.calls, want)
+	}
+}
+
+// TestSelectWithAnUnreadableRegistryStillTellsTheRosterTheSelection pins the
+// failure arm: a registry read that fails is recorded at ERROR, and the
+// selection still reaches the roster on its own push.
+func TestSelectWithAnUnreadableRegistryStillTellsTheRosterTheSelection(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.db.listWorkspacesErr = errFake
+
+	// Act.
+	_ = f.verbs.Select(context.Background(), "w1")
+
+	// Assert.
+	if want := []string{"selected"}; !slices.Equal(f.sidebar.calls, want) {
+		t.Fatalf("roster calls = %v, want %v", f.sidebar.calls, want)
+	}
+	if got := recordLevel(f, "could not list the workspaces for the roster"); got != "error" {
+		t.Fatalf("the failed registry read was recorded at %q, want error", got)
 	}
 }
 
@@ -448,11 +467,11 @@ func TestSelectTellsTheRosterInOrder(t *testing.T) {
 		startErr error
 		want     []string
 	}{
-		{name: "a live workspace", want: []string{"registry", "selected"}},
+		{name: "a live workspace", want: []string{"registry+selected"}},
 		{name: "a parked workspace that revives", parked: true,
-			want: []string{"registry", "selected", "reviving", "revived"}},
+			want: []string{"registry+selected", "reviving", "revived"}},
 		{name: "a parked workspace whose revival fails", parked: true, startErr: errFake,
-			want: []string{"registry", "selected", "reviving", "revived"}},
+			want: []string{"registry+selected", "reviving", "revived"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

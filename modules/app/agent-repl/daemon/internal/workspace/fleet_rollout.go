@@ -647,6 +647,24 @@ func (f *Fleet) Resume(ctx context.Context, ws ids.WorkspaceID, c shimclient.Cli
 		return rollout.Resumed{Cold: cold}, nil
 	}
 
+	// A resume keeps the session's host identity: the process rotated, the
+	// session did not. A workspace whose session never came up before (a
+	// restart after a failed first start) has none recorded: it takes the one
+	// the fleet's entry carried across the install, else a new one -- never an
+	// empty identity, which the session record refuses.
+	hostSessionID := f.resumedHostSessionID(ws, session.HostSessionID)
+	// THE SESSION FACTS ARE DURABLE BEFORE THE WATCH OPENS, as the cold
+	// bring-up's are (Fleet.Start). The shim re-announces its session on every
+	// new watch, and the watcher records the vendor id it states as the resume
+	// handle (SetVendorSessionID), which writes the session row recordFacts
+	// creates. A restart of a workspace whose first vendor start was rejected
+	// has no row at all, and with the watch opened first that write could
+	// land before the row existed: "wsm: not found" at ERROR for a session
+	// coming up perfectly well (integration
+	// TestARestartBringsUpAWorkspaceWhoseVendorWasRejected, 2026-10-08). A
+	// failure to record is still returned, after the watch opens and the
+	// session is held, so the session it resumed stays watched and usable.
+	factsErr := f.recordFacts(ctx, log, ws, session, started, configDir, hostSessionID, c.PID())
 	// THE WATCHER OUTLIVES THE CALL THAT OPENED IT. `ctx` here is the
 	// relaunch's own, and it is cancelled the moment the relaunch returns:
 	// handed straight to the watcher, it tore the freshly-opened fleet down
@@ -662,19 +680,13 @@ func (f *Fleet) Resume(ctx context.Context, ws ids.WorkspaceID, c shimclient.Cli
 		log.Error(opFleetRollout, "could not re-open the session's watches after a resume", dlog.Context{
 			"cause": err.Error(),
 		})
-		return rollout.Resumed{}, fmt.Errorf("workspace: resume %q: start the watcher: %w", ws, err)
+		return rollout.Resumed{}, errors.Join(fmt.Errorf("workspace: resume %q: start the watcher: %w", ws, err), factsErr)
 	}
-	// A resume keeps the session's host identity: the process rotated, the
-	// session did not. A workspace whose session never came up before (a
-	// restart after a failed first start) has none recorded: it takes the one
-	// the fleet's entry carried across the install, else a new one -- never an
-	// empty identity, which the session record refuses.
-	hostSessionID := f.resumedHostSessionID(ws, session.HostSessionID)
 	if err := f.hold(ctx, log, ws, &live{client: c, watcher: watcher, hostSessionID: hostSessionID, sessionStarted: true}); err != nil {
-		return rollout.Resumed{}, err
+		return rollout.Resumed{}, errors.Join(err, factsErr)
 	}
-	if err := f.recordFacts(ctx, log, ws, session, started, configDir, hostSessionID, c.PID()); err != nil {
-		return rollout.Resumed{}, err
+	if factsErr != nil {
+		return rollout.Resumed{}, factsErr
 	}
 	f.publishHost(ws)
 	log.Info(opFleetRollout, "the session is up on the new shim", dlog.Context{

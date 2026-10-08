@@ -1912,9 +1912,12 @@ Owner ruling, 2026-09-19. `Select` (internal/workspace/select.go) does its work
 in a fixed order, and the order is the contract:
 
 1. **The selection, at once.** `selectCurrent` reads the current workspace,
-   stamps `SetCurrent`, clears the attention marker, republishes the registry
-   and calls `Sidebar.SetSelected`, all under the verbs' `selection` lock, so
-   concurrent selects land WHOLE in the order they took it. Nothing after this
+   stamps `SetCurrent`, clears the attention marker, and hands the roster the
+   re-read registry and the selection in ONE mutation
+   (`Sidebar.SetRegistrySelected`), so a switch is ONE roster push; only a
+   registry read that fails leaves `Sidebar.SetSelected` pushing the selection
+   alone. All of it runs under the verbs' `selection` lock, so concurrent
+   selects land WHOLE in the order they took it. Nothing after this
    step touches `current`: **the stamped selection reflects REQUEST order, and
    a revival completing never re-stamps it.** Before this ruling the revival
    ran first, the sidebar lagged every switch by the bring-up (~0.75s each,

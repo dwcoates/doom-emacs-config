@@ -249,6 +249,34 @@ func (r *resolver) currentWorkspace() *frontendv1.RosterCurrentWorkspace {
 // draw around: the store refuses one on write and on read, so a registry
 // carrying one was composed by a caller that skipped the store.
 func (r *resolver) SetRegistry(reg Registry) {
+	r.assertGrouping(reg)
+	r.mutate("daemon.sidebar.set_registry", "the roster took a registry snapshot",
+		registryContext(reg), r.log.Global(), func() { r.installRegistry(reg) })
+}
+
+// SetRegistrySelected installs the durable half and the user's selection in
+// ONE mutation, so a select reaches every client as ONE roster push.
+//
+// THIS IS AN OPTIMIZATION of SetRegistry followed by SetSelected, which
+// published two whole rosters per switch: Emacs and every page decoded,
+// applied and repainted both (2026-10-08, the laggy-switch report). The
+// selection is installed AFTER the registry, exactly as the two calls did, so
+// a registry that no longer carries ws leaves the roster with no current.
+func (r *resolver) SetRegistrySelected(reg Registry, ws ids.WorkspaceID) {
+	r.assertGrouping(reg)
+	ctx := registryContext(reg)
+	ctx["workspace_id"] = string(ws)
+	r.mutate("daemon.sidebar.set_registry_selected",
+		"the roster took a registry snapshot and the selection, and cleared the workspace's attention marker",
+		ctx, r.log.Global(), func() {
+			r.installRegistry(reg)
+			selected := ws
+			r.state.selected = &selected
+		})
+}
+
+// assertGrouping refuses a registry whose view names neither grouping.
+func (r *resolver) assertGrouping(reg Registry) {
 	if reg.View.Grouping != wsm.GroupingRepository && reg.View.Grouping != wsm.GroupingTask {
 		r.log.Global().Error("daemon.sidebar.set_registry", "the registry's view names a grouping that is neither repository nor task",
 			dlog.Context{
@@ -258,24 +286,30 @@ func (r *resolver) SetRegistry(reg Registry) {
 			})
 		panic(fmt.Sprintf("sidebar: registry view grouping %q is neither repository nor task", reg.View.Grouping))
 	}
-	r.mutate("daemon.sidebar.set_registry", "the roster took a registry snapshot",
-		dlog.Context{
-			"workspaces":   len(reg.Workspaces),
-			"repositories": len(reg.Repositories),
-			"tasks":        len(reg.Tasks),
-			"sessions":     len(reg.Sessions),
-		}, r.log.Global(), func() {
-			r.state.reg = reg
-			r.state.regSeen = true
-			// The registry's selection is the durable one. A selection the
-			// daemon stamped a moment ago stands until WSM catches up, so a
-			// registry that carries none does NOT clear it.
-			if reg.Current != nil {
-				current := *reg.Current
-				r.state.selected = &current
-			}
-			r.forgetNuked()
-		})
+}
+
+// registryContext is the record context every registry install carries.
+func registryContext(reg Registry) dlog.Context {
+	return dlog.Context{
+		"workspaces":   len(reg.Workspaces),
+		"repositories": len(reg.Repositories),
+		"tasks":        len(reg.Tasks),
+		"sessions":     len(reg.Sessions),
+	}
+}
+
+// installRegistry is the registry half of a mutation; it runs under the lock.
+func (r *resolver) installRegistry(reg Registry) {
+	r.state.reg = reg
+	r.state.regSeen = true
+	// The registry's selection is the durable one. A selection the daemon
+	// stamped a moment ago stands until WSM catches up, so a registry that
+	// carries none does NOT clear it.
+	if reg.Current != nil {
+		current := *reg.Current
+		r.state.selected = &current
+	}
+	r.forgetNuked()
 }
 
 // forgetNuked drops the live half of every workspace the registry no longer
