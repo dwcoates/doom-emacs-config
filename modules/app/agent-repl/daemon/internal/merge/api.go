@@ -129,6 +129,15 @@ type Orchestrator interface {
 	// AdoptWorkspace takes every merge of a workspace this daemon now serves
 	// from its durable rows, resuming an admitted one at its recorded step.
 	AdoptWorkspace(ctx context.Context, ws ids.WorkspaceID) error
+	// SuspendForRestart brings a workspace's merge to a stopping point for a
+	// RestartWorkspace, exactly as a transfer does, and stops this daemon
+	// admitting any merge of it until ResumeAfterRestart. A merge that is
+	// still waiting for the workspace to fall free is suspended the same way.
+	SuspendForRestart(ctx context.Context, ws ids.WorkspaceID) error
+	// ResumeAfterRestart takes the workspace's merges back from their durable
+	// rows once the restart's bounce has finished, whatever its outcome: a
+	// merge that was waiting waits again on the fresh session.
+	ResumeAfterRestart(ctx context.Context, ws ids.WorkspaceID) error
 }
 
 // Request is one merge request: the REQUESTING workspace, which the merge

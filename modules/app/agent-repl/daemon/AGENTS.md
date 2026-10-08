@@ -1166,6 +1166,17 @@ Owner rulings, 2026-09-30 (`internal/merge`; the contract is
   and nothing of a workspace it handed away. Holding the handover until the
   merge ended was rejected: a handover never waits on work, and a merge's
   tests and repairs are unbounded.
+- **A RESTART SUSPENDS THE MERGE AND TAKES IT BACK** (owner ruling,
+  2026-10-08). `RestartWorkspace` brings the workspace's merge to the
+  handover's stopping point (`SuspendForRestart`), the relaunch proceeds
+  under the merge's lease instead of taking a restart hold of its own (only
+  for `ReasonRestartVerb`; every other bounce still fails on a merge's lease),
+  and `ResumeAfterRestart` takes the merge back from its durable rows on every
+  outcome. A merge only waiting for the workspace to fall free never blocks a
+  restart and waits again on the fresh session; a started merge resumes at its
+  step, and a merge turn the restart killed is read back closed. A merge that
+  will not reach a stopping point refuses the restart (`relaunch_failed`) and
+  is taken back.
 - The integration fake: a branch with no commits is already on its target, so
   a test that exercises a merge's steps commits work first
   (`harness.CommitWork`); a rebase conflict is scripted per commit
