@@ -75,20 +75,18 @@ func TestHeadLivesOnTheRootFeed(t *testing.T) {
 	}
 }
 
-// TestHeadFoldFollowsTheMergesOutcome covers the bubble's fold: it stays
-// folded while the merge runs, when it lands and when it is abandoned, and
-// ships OPEN only once the merge has failed, so the failure is in front of
-// the reader.
-func TestHeadFoldFollowsTheMergesOutcome(t *testing.T) {
+// TestHeadShipsNoFold covers the producer's half of the bubble's fold: the
+// orchestrator composes every head with NO fold, in every state, because the
+// feed resolver alone decides it (resolve/feed/mergefold.go).
+func TestHeadShipsNoFold(t *testing.T) {
 	tests := []struct {
 		name   string
 		result any
-		folded bool
 	}{
-		{"update", nil, true},
-		{"success", &frontendv1.FeedMergeSuccess{}, true},
-		{"failed", &frontendv1.FeedMergeError{Reason: &frontendv1.FeedMergeError_Failed{Failed: &frontendv1.FeedMergeFailed{}}}, false},
-		{"abandoned", &frontendv1.FeedMergeError{Reason: &frontendv1.FeedMergeError_Abandoned{Abandoned: &frontendv1.FeedMergeAbandoned{}}}, true},
+		{"update", nil},
+		{"success", &frontendv1.FeedMergeSuccess{}},
+		{"failed", &frontendv1.FeedMergeError{Reason: &frontendv1.FeedMergeError_Failed{Failed: &frontendv1.FeedMergeFailed{}}}},
+		{"abandoned", &frontendv1.FeedMergeError{Reason: &frontendv1.FeedMergeError_Abandoned{Abandoned: &frontendv1.FeedMergeAbandoned{}}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -96,9 +94,8 @@ func TestHeadFoldFollowsTheMergesOutcome(t *testing.T) {
 			row := headRow(theWorkspace, "lease-1", "branch", 1, tt.result)
 
 			// Assert.
-			fold := row.GetActivity().GetMerge().GetHead().GetFold()
-			if fold == nil || fold.GetFolded() != tt.folded {
-				t.Fatalf("the head ships fold %+v, want folded=%v", fold, tt.folded)
+			if fold := row.GetActivity().GetMerge().GetHead().GetFold(); fold != nil {
+				t.Fatalf("the head ships fold %+v, want none", fold)
 			}
 		})
 	}

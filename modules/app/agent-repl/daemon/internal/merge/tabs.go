@@ -139,11 +139,9 @@ func headRow(ws ids.WorkspaceID, lease ids.LeaseID, label string, startedMS int6
 			Glyph:   &frontendv1.FeedMergeGlyph{Icon: "merge"},
 			Label:   &frontendv1.FeedMergeLabel{Text: label},
 			Runtime: &frontendv1.FeedMergeRuntime{StartedAtMs: startedMS},
-			// THE BUBBLE STAYS FOLDED UNTIL THE MERGE FAILS (owner ruling,
-			// 2026-10-08): the footer carries a running merge's state and a
-			// landed one needs no reading, while a failure is the reader's to
-			// act on, so it alone ships open.
-			Fold: &frontendv1.FeedMergeFold{Folded: true},
+			// NO FOLD: the feed resolver settles it on publication, the
+			// reader's recorded fold or the daemon's default, at its one
+			// deciding site (resolve/feed/mergefold.go).
 		},
 	}
 	switch r := result.(type) {
@@ -151,9 +149,6 @@ func headRow(ws ids.WorkspaceID, lease ids.LeaseID, label string, startedMS int6
 		merge.Result = &frontendv1.FeedMerge_Success{Success: r}
 	case *frontendv1.FeedMergeError:
 		merge.Result = &frontendv1.FeedMerge_Error{Error: r}
-		if r.GetFailed() != nil {
-			merge.Head.Fold.Folded = false
-		}
 	default:
 		merge.Result = &frontendv1.FeedMerge_Update{Update: &frontendv1.FeedMergeUpdate{}}
 	}
