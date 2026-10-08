@@ -1539,6 +1539,20 @@ describe("merge tabs", () => {
     expect(row.querySelector("[data-merge-attempt]")?.textContent).toBe("attempt 2/3");
   });
 
+  it("draws a suite's counts on the right of its row", async () => {
+    // Arrange / Act
+    const row = await drawRow(mergeTabRow("tests"));
+    // Assert
+    expect(row.querySelector('[data-suite-state="running"] .merge-suite-counts')?.textContent).toBe("3/0/5");
+  });
+
+  it("breathes a running suite's dot green while every test so far passed", async () => {
+    // Arrange / Act
+    const row = await drawRow(mergeTabRow("tests"));
+    // Assert
+    expect(row.querySelector('[data-suite-state="running"] .merge-suite-glyph')?.classList.contains("is-passing")).toBe(true);
+  });
+
   it("draws the tests tab's log link with the daemon's label", async () => {
     // Arrange / Act
     const row = await drawRow(mergeTabRow("tests"));

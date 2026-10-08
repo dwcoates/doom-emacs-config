@@ -3,6 +3,7 @@ package merge
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -49,6 +50,10 @@ var suiteSkipped = regexp.MustCompile(`(?m)^.*?([A-Za-z0-9_-]+): not selected by
 // suiteStarting matches the script's line as a suite starts.
 var suiteStarting = regexp.MustCompile(`^.*?([A-Za-z0-9_-]+): starting\s*$`)
 
+// suitePlanned matches the runner's line naming how many units a suite runs,
+// printed as the suite starts: the total its unit verdicts are counted against.
+var suitePlanned = regexp.MustCompile(`^.*?([A-Za-z0-9_-]+): ([0-9]+) units planned\s*$`)
+
 // GateResult is one run of the target repository's test gate.
 type GateResult struct {
 	// Passed is the run's verdict, which is the script's exit status. A suite
@@ -86,6 +91,12 @@ func (e *gateUnstartedError) Unwrap() error { return e.err }
 func (o *orchestrator) paintSuites(selected []string, output string) ([]*frontendv1.FeedMergeTestSuite, error) {
 	states := parseSuiteStates(output)
 	sections := splitSuiteOutput(output, selected)
+	counts := newSuiteCounts()
+	for _, line := range strings.Split(output, "\n") {
+		if _, _, err := counts.take(line); err != nil {
+			return nil, err
+		}
+	}
 	rows := make([]*frontendv1.FeedMergeTestSuite, 0, len(selected))
 	for _, name := range selected {
 		if states[name] == suiteStateSkipped {
@@ -95,17 +106,8 @@ func (o *orchestrator) paintSuites(selected []string, output string) ([]*fronten
 		if err != nil {
 			return nil, err
 		}
-		row := &frontendv1.FeedMergeTestSuite{Name: name, Output: spans}
-		switch states[name] {
-		case suiteStatePassed, suiteStateDeclined:
-			// The wire has no declined arm. Preserve the explicit DECLINED line
-			// in Output and use the existing non-failure terminal glyph.
-			row.State = &frontendv1.FeedMergeTestSuite_Passed{Passed: &frontendv1.FeedMergeTestSuitePassed{}}
-		case suiteStateFailed:
-			row.State = &frontendv1.FeedMergeTestSuite_Failed{Failed: &frontendv1.FeedMergeTestSuiteFailed{}}
-		default:
-			row.State = &frontendv1.FeedMergeTestSuite_Running{Running: &frontendv1.FeedMergeTestSuiteRunning{}}
-		}
+		row := tabSuite(name, states[name], counts.of(name))
+		row.Output = spans
 		rows = append(rows, row)
 	}
 	return rows, nil
@@ -204,6 +206,10 @@ func splitSuiteOutput(output string, selected []string) map[string]string {
 			lines[m[1]] = append(lines[m[1]], line)
 			continue
 		}
+		if m := suitePlanned.FindStringSubmatch(line); m != nil {
+			lines[m[1]] = append(lines[m[1]], line)
+			continue
+		}
 		name, _, settled := settledSuite(line)
 		if !settled {
 			pending = append(pending, line)
@@ -225,8 +231,90 @@ func splitSuiteOutput(output string, selected []string) map[string]string {
 var unitBegin = regexp.MustCompile(`^.*?unit (\S+) \[([A-Za-z0-9_-]+)\] output:\s*$`)
 
 // unitVerdict is the runner's line settling one unit: it closes the unit's
-// block, or names a unit cancelled before it ran.
-var unitVerdict = regexp.MustCompile(`^.*?unit (\S+) \[([A-Za-z0-9_-]+)\] (?:ok|FAILED|declined|NOT RUN)\b`)
+// block, or names a unit cancelled before it ran. The third group is the
+// verdict.
+var unitVerdict = regexp.MustCompile(`^.*?unit (\S+) \[([A-Za-z0-9_-]+)\] (ok|FAILED|declined|NOT RUN)\b`)
+
+// tabSuite is one suite's tab row at a state, with its counts when known.
+//
+// A RUNNING SUITE SAYS WHAT ITS TESTS HAVE SAID SO FAR, which its dot is drawn
+// from: failing once any unit failed, passing while every verdict is a pass,
+// unreported before the first verdict or with no counts at all.
+func tabSuite(name string, state suiteState, counts *frontendv1.FeedMergeTestCounts) *frontendv1.FeedMergeTestSuite {
+	suite := &frontendv1.FeedMergeTestSuite{Name: name, Counts: counts}
+	switch state {
+	case suiteStatePassed, suiteStateDeclined:
+		// The wire has no declined arm. Preserve the explicit DECLINED line
+		// in Output and use the existing non-failure terminal glyph.
+		suite.State = &frontendv1.FeedMergeTestSuite_Passed{Passed: &frontendv1.FeedMergeTestSuitePassed{}}
+	case suiteStateFailed:
+		suite.State = &frontendv1.FeedMergeTestSuite_Failed{Failed: &frontendv1.FeedMergeTestSuiteFailed{}}
+	default:
+		running := &frontendv1.FeedMergeTestSuiteRunning{}
+		switch {
+		case counts.GetFailed() > 0:
+			running.SoFar = &frontendv1.FeedMergeTestSuiteRunning_Failing{Failing: &frontendv1.FeedMergeTestSuiteRunningFailing{}}
+		case counts.GetPassed() > 0:
+			running.SoFar = &frontendv1.FeedMergeTestSuiteRunning_Passing{Passing: &frontendv1.FeedMergeTestSuiteRunningPassing{}}
+		default:
+			running.SoFar = &frontendv1.FeedMergeTestSuiteRunning_Unreported{Unreported: &frontendv1.FeedMergeTestSuiteRunningUnreported{}}
+		}
+		suite.State = &frontendv1.FeedMergeTestSuite_Running{Running: running}
+	}
+	return suite
+}
+
+// suiteCounts are each suite's unit counts, read off the runner's lines: the
+// planned total from its "N units planned" line, a pass for each "ok" unit
+// verdict, a failure for each "FAILED" or "NOT RUN" one. A declined unit is
+// neither. A suite whose planned line has not been read has no counts.
+type suiteCounts struct {
+	planned map[string]int
+	passed  map[string]int
+	failed  map[string]int
+}
+
+func newSuiteCounts() *suiteCounts {
+	return &suiteCounts{planned: map[string]int{}, passed: map[string]int{}, failed: map[string]int{}}
+}
+
+// take reads one line, answering the suite whose counts it moved. A planned
+// line whose total does not read as a number is an error: the line is the
+// runner's, and a total this gate cannot read is a broken contract.
+func (c *suiteCounts) take(line string) (string, bool, error) {
+	if m := suitePlanned.FindStringSubmatch(line); m != nil {
+		n, err := strconv.Atoi(m[2])
+		if err != nil {
+			return "", false, fmt.Errorf("merge: reading suite %s's planned unit total %q: %w", m[1], m[2], err)
+		}
+		c.planned[m[1]] = n
+		return m[1], true, nil
+	}
+	m := unitVerdict.FindStringSubmatch(line)
+	if m == nil {
+		return "", false, nil
+	}
+	switch m[3] {
+	case "ok":
+		c.passed[m[2]]++
+	case "FAILED", "NOT RUN":
+		c.failed[m[2]]++
+	default:
+		return "", false, nil
+	}
+	return m[2], true, nil
+}
+
+// of answers a suite's counts, nil while its planned total is unknown.
+func (c *suiteCounts) of(name string) *frontendv1.FeedMergeTestCounts {
+	total, known := c.planned[name]
+	if !known {
+		return nil
+	}
+	return &frontendv1.FeedMergeTestCounts{
+		Passed: uint32(c.passed[name]), Failed: uint32(c.failed[name]), Total: uint32(total),
+	}
+}
 
 // settledSuite reports the suite one line settles, if it settles one.
 func settledSuite(line string) (string, suiteState, bool) {

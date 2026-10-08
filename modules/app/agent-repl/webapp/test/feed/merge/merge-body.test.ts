@@ -241,7 +241,7 @@ describe("resolved tabs draw the tab row's own content", () => {
         kind: "tests",
         state: "live",
         payload: {
-          suites: [{ name: "unit", state: { case: "running", value: {} }, output: [] }],
+          suites: [{ name: "unit", state: { case: "running", value: { soFar: { case: "unreported", value: {} } } }, output: [] }],
         },
       }),
     ]);

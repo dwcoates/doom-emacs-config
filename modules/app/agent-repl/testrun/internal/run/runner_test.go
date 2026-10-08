@@ -222,6 +222,24 @@ func TestRunReportsEachSuiteVerdict(t *testing.T) {
 	}
 }
 
+func TestRunSaysHowManyUnitsEachSuiteRunsAsItStarts(t *testing.T) {
+	// Arrange: a suite of three units and a suite of one.
+	r, out, _ := newRunner(2, &fakeExec{scripts: map[string]script{}})
+	specs := []Spec{spec("a1", "a"), spec("a2", "a"), spec("a3", "a"), spec("b1", "b")}
+
+	// Act
+	if _, _, err := r.Run(context.Background(), specs); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert
+	for _, want := range []string{"[agent-repl-tests] a: 3 units planned", "[agent-repl-tests] b: 1 units planned"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("stdout lacks %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestRunNeverExceedsItsSlots(t *testing.T) {
 	// Arrange: six units that each hold until released, two slots.
 	release := make(chan struct{})

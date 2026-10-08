@@ -1,6 +1,7 @@
 // Package run executes a planned set of units on a fixed number of core slots
 // and reports them in the shape bin/test-all.sh always has: one "starting"
-// line per suite, one verdict line per suite, then the summaries.
+// line per suite, followed by its "N units planned" line, one verdict line per
+// suite, then the summaries.
 package run
 
 import (
@@ -153,6 +154,9 @@ func (r *Runner) Run(ctx context.Context, specs []Spec) ([]Result, []SuiteResult
 			suites[name] = sr
 			order = append(order, name)
 			r.Log.Infof("%s: starting", name)
+			// How many units the suite runs, so a reader of the run (the
+			// merge gate's tests tab) can count its unit verdicts against it.
+			r.Log.Infof("%s: %d units planned", name, suiteUnits[name])
 		}
 		return sr
 	}

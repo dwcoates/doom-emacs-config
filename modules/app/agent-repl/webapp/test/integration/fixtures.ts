@@ -1373,7 +1373,8 @@ const mergeTabKindValue = (
             },
             {
               name: "go",
-              state: { case: "running", value: {} },
+              state: { case: "running", value: { soFar: { case: "passing", value: {} } } },
+              counts: { passed: 3, failed: 0, total: 5 },
               output: [{ text: "running", paintClass: "ansi-dim" }],
             },
           ],
