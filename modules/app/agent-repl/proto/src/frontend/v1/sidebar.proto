@@ -551,6 +551,26 @@ message RosterRow {
     // reported failure until the retried agent's first successful response,
     // the turn's end, or a new turn opening.
     RosterRowStatusApiRetrying api_retrying = 39;
+
+    // A close of this workspace was refused because the workspace is not
+    // quiet: a turn in flight, live detached work, held prompts or a queued
+    // merge. BLUE, the same coarse claim as the footer's `closing` status;
+    // the footer's activity line names what blocked the close. It stands
+    // until the refusal is cleared.
+    RosterRowStatusClosing closing = 53;
+    // The DAEMON is impaired: a fault in agent-repl's own process (its
+    // state store read-only, its log sink poisoned, its state unreadable, a
+    // successor that would not start) leaves it unable to serve this
+    // workspace however healthy the session is. BLUE, an agent-repl fault:
+    // the same coarse claim as the footer's
+    // `agent_repl_fault · daemon_impaired`.
+    RosterRowStatusDaemonImpaired daemon_impaired = 54;
+    // The session waits on something other than a tool permission: an open
+    // question to the user, a cold gate standing between it and the next
+    // turn, or an interrupt the user sent that has not yet landed. GREEN, the
+    // same coarse claim as the footer's `waiting` status in those substatuses;
+    // a tool permission keeps its own `permission` arm.
+    RosterRowStatusWaiting waiting = 55;
   }
   // Tags 19 (`merge_enqueuing`) and 22 (`merge_conflict`) are RETIRED: no
   // merge fact is shown before the requesting turn ends, and nothing parks.
@@ -717,6 +737,14 @@ message RosterRowStatusTurnDied {}
 
 // The vendor is retrying a failed mid-turn call.
 message RosterRowStatusApiRetrying {}
+
+// The row's status while a close of the workspace stands refused.
+message RosterRowStatusClosing {}
+// The row's status while the daemon itself cannot serve the workspace.
+message RosterRowStatusDaemonImpaired {}
+// The row's status while the session waits on the user for something other
+// than a tool permission.
+message RosterRowStatusWaiting {}
 
 message RosterRowStatusInit {}
 
