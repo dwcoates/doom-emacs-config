@@ -1173,10 +1173,14 @@ Owner rulings, 2026-09-30 (`internal/merge`; the contract is
   for `ReasonRestartVerb`; every other bounce still fails on a merge's lease),
   and `ResumeAfterRestart` takes the merge back from its durable rows on every
   outcome. A merge only waiting for the workspace to fall free never blocks a
-  restart and waits again on the fresh session; a started merge resumes at its
-  step, and a merge turn the restart killed is read back closed. A merge that
-  will not reach a stopping point refuses the restart (`relaunch_failed`) and
-  is taken back.
+  restart and waits again on the fresh session. A STARTED merge is never cut
+  mid-step (owner ruling, 2026-10-10): the step in flight -- a test run, a
+  repair turn, a rebase -- finishes, the merge lets go at the next step
+  boundary (the next progress record that names a new step), and resumes at
+  exactly that step after the restart. The wait has no timer: the restart's
+  answer comes when the restart happened, however long the step runs, and
+  the editor waits for it. A restart whose caller leaves first withdraws its
+  ask, and the merge goes on.
 - The integration fake: a branch with no commits is already on its target, so
   a test that exercises a merge's steps commits work first
   (`harness.CommitWork`); a rebase conflict is scripted per commit
