@@ -482,6 +482,10 @@ const (
 	// is bound to the merge it waits on (bindMergeHold): recording one keeps
 	// the merge's requester open once it lands.
 	HoldMerge
+	// HoldColdGate holds while the workspace's session is parked at its cold
+	// gate: the prompt waits for the user's answer to the gate, which a prompt
+	// never gives, and the session that answer brings up delivers it.
+	HoldColdGate
 )
 
 // ClassificationArm is the classifier's verdict on a held prompt: ONE column
