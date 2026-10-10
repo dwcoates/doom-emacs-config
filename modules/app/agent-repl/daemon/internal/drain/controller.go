@@ -105,6 +105,9 @@ func (c *controller) Schedule(ctx context.Context, s wsm.DrainSchedule) error {
 		c.log.Error(opSchedule, "refused a schedule whose reason will not decode", withCause(fields, err))
 		return err
 	}
+	for k, v := range reasonFields(reason) {
+		fields[k] = v
+	}
 	if err := c.deps.DB.PutDrainSchedule(ctx, s); err != nil {
 		c.log.Error(opSchedule, "could not put the drain schedule in force", withCause(fields, err))
 		return fmt.Errorf("drain: schedule: %w", err)
@@ -297,7 +300,7 @@ func (c *controller) ShutdownNow(ctx context.Context, reason *agentreplv1.DrainR
 		},
 		MintedAtMs: milliseconds(c.deps.Clock.Now()),
 	})
-	c.log.Info(opNow, "announced an immediate shutdown", nil)
+	c.log.Info(opNow, "announced an immediate shutdown", reasonFields(reason))
 	// THE LATCH GOES UP BEFORE ANYTHING IS ENDED, and that is the ordering
 	// this line exists for. It used to be raised by the spawn sweep two lines
 	// down, which is AFTER the walk below has already stood every registered

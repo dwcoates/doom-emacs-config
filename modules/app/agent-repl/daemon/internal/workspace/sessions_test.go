@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -361,6 +362,8 @@ type fakeWatcher struct {
 	closed bool
 	// turn is what TurnInFlight answers, nil for an idle session.
 	turn *ids.TurnID
+	// live is what LiveWork answers.
+	live sessionwatcher.LiveWorkSet
 	// standDown is the fixture's shared step order, appended to when the
 	// daemon declares the session ending.
 	standDown *[]string
@@ -434,7 +437,7 @@ func (w *fakeWatcher) SetMainAgent(*conversationv1.AgentId) {}
 func (w *fakeWatcher) OnTurnOpened(ids.WorkspaceID, *conversationv1.AgentPrompt, *conversationv1.HistoryPage) {
 }
 
-func (w *fakeWatcher) LiveWork() sessionwatcher.LiveWorkSet { return sessionwatcher.LiveWorkSet{} }
+func (w *fakeWatcher) LiveWork() sessionwatcher.LiveWorkSet { return w.live }
 
 // fixtureSDKVersion is the Agent SDK version the fixture shim reports.
 const fixtureSDKVersion = "0.2.97"
@@ -4865,5 +4868,43 @@ func TestABringUpRefusesALockThatOutlastsTheBound(t *testing.T) {
 	// Assert.
 	if err == nil || len(f.supervisor.spawns) != 0 || f.probes < 2 {
 		t.Fatalf("Start = %v, spawns = %d, probes = %d; want a refusal after waiting", err, len(f.supervisor.spawns), f.probes)
+	}
+}
+
+func TestBlockersNameTheTurnAndEveryLiveItem(t *testing.T) {
+	// Arrange
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	turn := ids.TurnID("t-1")
+	f.watcher.turn = &turn
+	f.watcher.live = sessionwatcher.LiveWorkSet{
+		Shells: []*conversationv1.DetachedWorkId{{Value: "toolu_shell"}},
+		Agents: []*conversationv1.AgentId{{Value: "toolu_agent"}},
+	}
+
+	// Act
+	got := f.fleet.Blockers(ws.ID)
+
+	// Assert
+	want := []string{"turn:t-1", "agent:toolu_agent", "shell:toolu_shell"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Blockers = %v, want %v", got, want)
+	}
+}
+
+func TestBlockersAreNoneForAWorkspaceWithNoSession(t *testing.T) {
+	// Arrange
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+
+	// Act
+	got := f.fleet.Blockers(ws.ID)
+
+	// Assert
+	if len(got) != 0 {
+		t.Fatalf("Blockers = %v, want none for a workspace with no session", got)
 	}
 }

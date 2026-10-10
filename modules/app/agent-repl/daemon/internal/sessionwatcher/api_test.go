@@ -4,6 +4,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"reflect"
 	"sort"
 	"testing"
 
@@ -300,6 +301,36 @@ func TestEverySinkMethodHasAWatcherCaller(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			if !called[name] {
 				t.Fatalf("the watcher never calls sinks.%s; the resolver behind it never learns the fact it asks for", name)
+			}
+		})
+	}
+}
+
+func TestLiveWorkSetNames(t *testing.T) {
+	tests := []struct {
+		name string
+		live LiveWorkSet
+		want []string
+	}{
+		{name: "nothing live names nothing", live: LiveWorkSet{}, want: []string{}},
+		{
+			name: "every kind is named by its prefix, sorted",
+			live: LiveWorkSet{
+				Shells:   []*conversationv1.DetachedWorkId{workID("s-1")},
+				Agents:   []*conversationv1.AgentId{agentID("a-1")},
+				Monitors: []*conversationv1.DetachedWorkId{workID("m-1")},
+				Pending:  []*conversationv1.DetachedWorkId{workID("p-1")},
+			},
+			want: []string{"agent:a-1", "monitor:m-1", "pending:p-1", "shell:s-1"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange / Act
+			got := tt.live.Names()
+			// Assert
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("Names() = %v, want %v", got, tt.want)
 			}
 		})
 	}
