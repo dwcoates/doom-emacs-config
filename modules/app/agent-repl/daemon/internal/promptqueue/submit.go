@@ -556,6 +556,11 @@ func (q *queue) releaseReconnectHoldsLocked(ctx context.Context, d *delivery, lo
 		log.Info(opSubmit, message, dlog.Context{"hold": kind.String(), "why": why, "moved": moved})
 		return
 	}
+	// THE FACTS COME FIRST: until they are in, an adopted shim's running turn
+	// reads as none, and the release would deliver beside it (sessionhold.go).
+	if q.factsPending(ws, "the session-up release", log, q.releaseReconnectHoldsLocked) {
+		return
+	}
 
 	standing, err := q.deps.DB.HeldPrompts(ctx, ws)
 	if err != nil {
@@ -564,14 +569,16 @@ func (q *queue) releaseReconnectHoldsLocked(ctx context.Context, d *delivery, lo
 		return
 	}
 	var released, unjudged []wsm.HeldPrompt
-	free := 0
 	for _, h := range standing {
 		if h.Tombstone != nil || q.claimedByCall(ws, h.Turn) {
 			continue
 		}
 		if h.Hold == nil {
-			free++
-			if h.Classification == nil {
+			// ONLY A STRANDED ORDINARY PROMPT IS DRIVEN: no hold, no verdict,
+			// ordinary delivery, not a session act. A deferred prompt and a
+			// verdicted one wait for the turn's end, and a session act for what
+			// is ahead of it; the session coming up is neither.
+			if stranded(h) {
 				unjudged = append(unjudged, h)
 			}
 			continue
@@ -587,7 +594,7 @@ func (q *queue) releaseReconnectHoldsLocked(ctx context.Context, d *delivery, lo
 		released = append(released, h)
 	}
 	_, running := q.runningTurn(ws)
-	if len(released) == 0 && len(unjudged) == 0 && (free == 0 || running) {
+	if len(released) == 0 && len(unjudged) == 0 {
 		log.Debug(opSubmit, "the session's coming up released no reconnect hold", dlog.Context{"holds": len(standing)})
 		return
 	}
@@ -597,9 +604,9 @@ func (q *queue) releaseReconnectHoldsLocked(ctx context.Context, d *delivery, lo
 			return
 		}
 	}
-	if free > 0 {
-		log.Info(opSubmit, "prompts stand unheld on a session that serves; the session's serving drives them",
-			dlog.Context{"free": free, "unjudged": len(unjudged), "running": running})
+	if len(unjudged) > 0 {
+		log.Info(opSubmit, "stranded prompts stand unheld on a session that serves; the session's serving drives them",
+			dlog.Context{"stranded": len(unjudged), "running": running})
 	}
 	q.classifyReleased(ctx, d, append(released, unjudged...), log)
 }

@@ -415,3 +415,136 @@ func TestALeaseEvaluationThatChangesNothingDeliversNothingBesideARunningTurn(t *
 		t.Fatalf("started = %v, want nothing beside the running turn", got)
 	}
 }
+
+// ---- the facts come first (2026-10-10, post-merge) --------------------------
+//
+// A boot adopts a shim mid-turn and releases its holds before the watcher has
+// taken the session facts up, so TurnInFlight answers nil for the turn the
+// shim is running. The release and the idle pop must deliver nothing on that
+// nil, and must take their step again from the facts-in edge.
+
+// adoptedBeforeFacts is a session that serves whose facts are not yet in, with
+// a stranded row standing.
+func adoptedBeforeFacts(t *testing.T) *harness {
+	t.Helper()
+	h := newHarness(t)
+	h.watcher.factsPending = true
+	strandedRow(t, h, "t1")
+	return h
+}
+
+func TestASessionUpReleaseBeforeTheFactsDeliversNothing(t *testing.T) {
+	// Arrange
+	h := adoptedBeforeFacts(t)
+
+	// Act
+	h.q.ReleaseReconnectHolds(theWorkspace)
+
+	// Assert
+	if got := h.sender.started(); len(got) != 0 {
+		t.Fatalf("started = %v, want nothing before the facts say whether a turn runs", got)
+	}
+}
+
+func TestASessionUpReleaseWhoseFactsNameARunningTurnDeliversNothingBesideIt(t *testing.T) {
+	// Arrange
+	h := adoptedBeforeFacts(t)
+	h.q.ReleaseReconnectHolds(theWorkspace)
+	adopted := idsTurn("t0")
+
+	// Act: the facts arrive naming the adopted shim's running turn.
+	h.watcher.takeFacts(&adopted)
+	h.q.releasing.Wait()
+
+	// Assert
+	if got := h.sender.started(); len(got) != 0 {
+		t.Fatalf("started = %v, want nothing beside the adopted turn", got)
+	}
+}
+
+func TestASessionUpReleaseWhoseFactsNameNoTurnDeliversTheStrandedPrompt(t *testing.T) {
+	// Arrange
+	h := adoptedBeforeFacts(t)
+	h.q.ReleaseReconnectHolds(theWorkspace)
+
+	// Act: the facts arrive with nothing in flight.
+	h.watcher.takeFacts(nil)
+	h.q.releasing.Wait()
+
+	// Assert
+	if got := h.sender.started(); len(got) != 1 || got[0] != "t1" {
+		t.Fatalf("started = %v, want the stranded prompt delivered once the facts are in", got)
+	}
+}
+
+func TestAnIdlePopBeforeTheFactsDeliversNothing(t *testing.T) {
+	// Arrange
+	h := adoptedBeforeFacts(t)
+
+	// Act: a boot's orphan-lease release reaches the holds through here.
+	h.q.OnLeaseChanged(theWorkspace)
+
+	// Assert
+	if got := h.sender.started(); len(got) != 0 {
+		t.Fatalf("started = %v, want nothing before the facts say whether a turn runs", got)
+	}
+}
+
+func TestAnIdlePopWhoseFactsNameARunningTurnDeliversNothingBesideIt(t *testing.T) {
+	// Arrange
+	h := adoptedBeforeFacts(t)
+	h.q.OnLeaseChanged(theWorkspace)
+	adopted := idsTurn("t0")
+
+	// Act
+	h.watcher.takeFacts(&adopted)
+	h.q.releasing.Wait()
+
+	// Assert
+	if got := h.sender.started(); len(got) != 0 {
+		t.Fatalf("started = %v, want nothing beside the adopted turn", got)
+	}
+}
+
+func TestASessionUpReleaseNeverDrivesARestoredDeferredPrompt(t *testing.T) {
+	tests := []struct {
+		name string
+		row  func(h *harness)
+	}{
+		{name: "a deferred prompt restored with no hold and no verdict", row: func(h *harness) {
+			putRow(t, h, wsm.HeldPrompt{Delivery: wsm.DeliveryDeferred})
+		}},
+		{name: "a deferred prompt restored with its turn-end verdict", row: func(h *harness) {
+			putRow(t, h, wsm.HeldPrompt{Delivery: wsm.DeliveryDeferred,
+				Classification: &wsm.Classification{Arm: wsm.ArmHoldForTurnEnd, At: instant}})
+		}},
+		{name: "an ordinary prompt restored with its turn-end verdict", row: func(h *harness) {
+			putRow(t, h, wsm.HeldPrompt{Classification: &wsm.Classification{Arm: wsm.ArmHoldForTurnEnd, At: instant}})
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: a session that serves, facts in, nothing running.
+			h := newHarness(t)
+			tc.row(h)
+
+			// Act
+			h.q.ReleaseReconnectHolds(theWorkspace)
+
+			// Assert
+			if got := h.sender.started(); len(got) != 0 {
+				t.Fatalf("started = %v, want the prompt left for the turn's end", got)
+			}
+		})
+	}
+}
+
+// putRow records t1 as a standing row shaped by OVER's delivery and verdict.
+func putRow(t *testing.T, h *harness, over wsm.HeldPrompt) {
+	t.Helper()
+	over.Workspace, over.Turn, over.Said, over.QueuedAt = theWorkspace, "t1", userSaid("restored"), instant
+	over.Origin = conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT.String()
+	if err := h.db.PutHeldPrompt(context.Background(), over); err != nil {
+		t.Fatalf("PutHeldPrompt: %v", err)
+	}
+}

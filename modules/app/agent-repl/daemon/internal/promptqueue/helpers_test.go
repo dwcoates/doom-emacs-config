@@ -708,10 +708,55 @@ type fakeWatcher struct {
 	// factsPending reports a pure attach whose session facts have not
 	// arrived: the watcher then answers not free, whatever it holds.
 	factsPending bool
+	// factsIn closes when takeFacts takes the session facts up; nil until a
+	// wait asks for it.
+	factsIn chan struct{}
 	// standOnOpening makes the fake stand an opening turn in flight, and
 	// retire it on a refused open, as the real watcher does (OnTurnOpening,
 	// OnTurnOpenFailed).
 	standOnOpening bool
+}
+
+// SessionFactsIn answers whether the facts are in, as the real watcher does.
+func (w *fakeWatcher) SessionFactsIn() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return !w.factsPending
+}
+
+// AwaitSessionFacts waits for takeFacts, or answers at once when the facts are
+// already in.
+func (w *fakeWatcher) AwaitSessionFacts(ctx context.Context) error {
+	w.mu.Lock()
+	if !w.factsPending {
+		w.mu.Unlock()
+		return nil
+	}
+	if w.factsIn == nil {
+		w.factsIn = make(chan struct{})
+	}
+	ch := w.factsIn
+	w.mu.Unlock()
+	select {
+	case <-ch:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// takeFacts takes the session facts up, with RUNNING as the turn they name
+// in flight (nil for none), and releases every wait on them: the real
+// watcher's facts-in edge, in one step.
+func (w *fakeWatcher) takeFacts(running *ids.TurnID) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.inFlight = running
+	w.factsPending = false
+	if w.factsIn == nil {
+		w.factsIn = make(chan struct{})
+	}
+	close(w.factsIn)
 }
 
 // Free answers the real watcher's judgement: facts in, no turn, no live work.

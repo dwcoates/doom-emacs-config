@@ -105,3 +105,52 @@ func (q *queue) reholdForSession(ctx context.Context, ws ids.WorkspaceID, turn i
 	}
 	return q.pushTray(ctx, ws, log)
 }
+
+// factsPending reports whether the workspace's session watcher has not yet
+// taken up the session facts, and when so arranges for AGAIN to run under the
+// delivery lock once they are in.
+//
+// UNTIL THE FACTS ARE IN, "NO TURN RUNS" CANNOT BE READ. An adopted shim's turn
+// is unknown to the watcher until the shim re-announces its session, so
+// TurnInFlight answers nil for a turn that is running. A boot's session-up
+// release read that nil as idle and delivered a restored deferred prompt into
+// the adopted shim's running turn (integration TestADeferredHoldSurvivesA
+// DaemonRestartStillDeferred under load, 2026-10-10). So nothing is delivered
+// on that nil: the step is taken again from the facts-in edge.
+func (q *queue) factsPending(ws ids.WorkspaceID, what string, log dlog.Logger, again func(context.Context, *delivery, dlog.Logger)) bool {
+	watcher, ok := q.deps.Watcher(ws)
+	if !ok || watcher.SessionFactsIn() {
+		return false
+	}
+	q.mu.Lock()
+	if q.exiting {
+		q.mu.Unlock()
+		log.Debug(opSubmit, "the daemon is exiting; a step waiting on the session's facts is not taken", dlog.Context{"step": what})
+		return true
+	}
+	q.releasing.Add(1)
+	q.mu.Unlock()
+	log.Info(opSubmit, "the session's facts are not in, so whether a turn runs is unknown; the step waits for them", dlog.Context{"step": what})
+	go func() {
+		defer q.releasing.Done()
+		if err := watcher.AwaitSessionFacts(q.life); err != nil {
+			log.Info(opSubmit, "the session's facts never came in; the step is left to the session's next edge", dlog.Context{
+				"step": what, "cause": err.Error(),
+			})
+			return
+		}
+		d := q.lockDelivery(ws)
+		defer d.unlock()
+		log.Debug(opSubmit, "the session's facts are in; the step waiting on them is taken", dlog.Context{"step": what})
+		again(context.Background(), d, log)
+	}()
+	return true
+}
+
+// stranded reports whether a standing entry is a prompt nothing holds and
+// nothing has judged, on the ordinary delivery: the shape an older build left
+// behind when a delivery failed after its hold was lifted (doom, 2026-10-10).
+func stranded(h wsm.HeldPrompt) bool {
+	return h.Tombstone == nil && h.Hold == nil && h.Classification == nil &&
+		h.Delivery == wsm.DeliveryOrdinary && h.Act == nil
+}
