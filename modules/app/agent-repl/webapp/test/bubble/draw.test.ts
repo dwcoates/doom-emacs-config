@@ -286,8 +286,8 @@ describe("drawBubble: the structure every kind shares", () => {
     expect(body.parentElement).toBe(bubble.querySelector(`:scope > .${BUBBLE_SCROLL_CLASS}`));
   });
 
-  it.each([
-    { name: "a capped", capLines: "feed" as const },
+  it.each<{ name: string; capLines: BubbleCapLines }>([
+    { name: "a capped", capLines: "feed" },
     { name: "an uncapped", capLines: BUBBLE_UNCAPPED },
   ])("answers $name bubble's box, the one the body hangs in", ({ capLines }) => {
     // Arrange / Act
