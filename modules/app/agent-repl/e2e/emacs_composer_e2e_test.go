@@ -466,8 +466,9 @@ func TestEmacsDeferredPromptIsSubmittedDeferredAtOnce(t *testing.T) {
 	t.Parallel()
 	s := newEmacsScenario(t)
 	e := s.E
+	// Before the observer, so it counts only this scenario's submissions.
+	connectSession(t, s)
 	armSubmissionObserver(t, e)
-	installArmObserver(t, e)
 
 	const deferred = "and then tell me about the roster"
 
@@ -575,6 +576,41 @@ func installArmObserver(t *testing.T, e *Emacs) {
                               (setq arm (agent-repl-roster-row-status row))))
                           agent-repl-roster--rows-by-id)
                  arm))
+             t)`)
+}
+
+// connectSession drives ONE warm-up turn from the composer and returns once
+// the workspace's row has settled on `:done', so the scenario's own turn runs
+// on a session that is up AND connected on all three hops.
+//
+// WHY A TURN AND NOT A WAIT. Before a session exists the daemon has seen no
+// link, so neither the footer nor the topbar can claim a hop down: an open
+// webview whose web stream has not yet attached reads exactly as one that
+// has. Under load the fake SDK's turn (~50ms) can run and end inside that
+// window, and every running arm it would have published is outranked by the
+// `severed' the missing web hop draws (daemon.md invariant 11). `:done' is
+// drawn only below that rung, so it is the latch: it stands only once the
+// link is seen and both the host and the web streams are held.
+//
+// The arm is read off the module's own per-push hook rather than polled,
+// because `:done' is not the row's resting arm: viewing the result moves it.
+func connectSession(t *testing.T, s *emacsScenario) {
+	t.Helper()
+	e := s.E
+	installArmObserver(t, e)
+	e.Eval(`(progn
+             (defvar agent-repl-e2e--warm-arms nil)
+             (setq agent-repl-e2e--warm-arms nil)
+             (defun agent-repl-e2e--record-warm-arm (_roster)
+               (push (agent-repl-e2e--arm-of ` + elispString(s.Name) + `) agent-repl-e2e--warm-arms))
+             (add-hook 'agent-repl-roster-update-functions #'agent-repl-e2e--record-warm-arm)
+             t)`)
+	typeIntoComposer(e, s.Input, "bring the session up")
+	e.KeysIn(s.Input, "RET")
+	e.AwaitTrue("the warm-up turn to settle on a connected session",
+		`(and (memq :done agent-repl-e2e--warm-arms) t)`)
+	e.Eval(`(progn
+             (remove-hook 'agent-repl-roster-update-functions #'agent-repl-e2e--record-warm-arm)
              t)`)
 }
 
