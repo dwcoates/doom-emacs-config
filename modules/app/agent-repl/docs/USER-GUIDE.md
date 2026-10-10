@@ -227,6 +227,10 @@ The footer's `disconnected` status has three vendor substatuses for a Claude SDK
   - If the relaunch fails, Emacs says "the restart failed:" with the reason, and the sidebar's Restart entry shows it too.
 - **A merge waiting for the workspace does not block it.**
   - The merge waits through the restart and starts once the fresh session is free.
+- **A merge in the middle of a step finishes that step first.**
+  - A test run, a repair turn or a rebase in progress is never cut off: the restart happens as soon as that step ends.
+  - The merge then goes on from the next step, after the restart.
+  - Until the step ends, the restart has not happened yet, and the input stays held.
 - **When to use it:**
   - A turn never ends.
   - The footer reads `vendor rejection` or `vendor failed`, or the Claude SDK is not responding.

@@ -690,16 +690,6 @@ queue onward is WS's own feed merge bubble, footer and roster row."
      :ws ws :op "merge"
      :on-success (lambda (_) (message "merge enqueued")))))
 
-(defcustom agent-repl-restart-timeout-seconds 75
-  "Seconds a restart's answer may take: it is sent once the restart HAPPENED.
-The daemon answers `RestartWorkspace' with its outcome (owner ruling,
-2026-10-08): the bounded force-end of the running turn (2s), the shim's
-relaunch, and the resumed session's `StartSession', which the daemon bounds
-at 60s (`workspace.DefaultStartSessionBound').  This sits above their sum,
-so a slow but healthy restart is never reported as a failure."
-  :type 'number
-  :group 'agent-repl)
-
 (defun agent-repl-verb-restart (ws)
   "Restart WS's backend and webapp page, immediately.
 There is ONE mode.  The DAEMON owns everything the restart entails: it
@@ -720,14 +710,19 @@ restart instantly\").  The daemon answers once the restart happened, so a
 success says nothing -- the fresh session and the page reload are what the
 user sees -- and a relaunch that FAILED is its `relaunch_failed' arm,
 recorded at ERROR and said in the echo area as a failure, never as a
-refusal."
+refusal.
+
+THE CALL HAS NO TIMEOUT (owner ruling, 2026-10-10).  A restart over a merge
+in the middle of a step waits for that step -- a test run, a repair turn --
+to finish before it happens, and the answer waits with it, however long that
+takes; a dropped connection still ends the call (`agent-repl-connect-unary')."
   (let ((ref (agent-repl-verbs--ref ws)))
     (agent-repl-host-take-restart-hold ws)
     (agent-repl-verbs--send
      #'agent-repl-rpc-restart-workspace (agent-repl-verbs--conn ws)
      (list :workspace ref)
      :ws ws :op "restart"
-     :timeout agent-repl-restart-timeout-seconds
+     :timeout :none
      :on-success
      (lambda (_)
        (agent-repl--info ws "elisp.verbs.restart-done ws=%s" ws))
