@@ -73,6 +73,14 @@ func (w *watcher) AwaitSessionFacts(ctx context.Context) error {
 	}
 }
 
+// SessionFactsIn reports whether the session facts have been taken up, the
+// same fact AwaitSessionFacts waits on, without waiting.
+func (w *watcher) SessionFactsIn() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.started
+}
+
 // registerFreeWaiter takes the answer that needs no wait, or files a waiter.
 // It is separate from AwaitFree so the registration is one atomic step: the
 // caller — and an in-package test — holds the channel BEFORE the edge it is
