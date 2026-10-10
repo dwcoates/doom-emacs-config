@@ -39,22 +39,30 @@ const prose = (n: number): string => [...WORDS, ...WORDS].slice(0, n).join(" ");
 interface Drawn {
   bubble: number;
   lines: number;
+  /** The words on the first line, in order. */
+  firstLine: string;
   firstLineRight: number;
   corner: { right: number; top: number; width: number; height: number };
   stamp: { right: number; top: number };
   ago: { right: number; top: number; opacity: string };
 }
 
-/** Draw one response bubble holding TEXT, its cap mode CAP, and measure it. */
-async function draw(page: Page, opts: { text: string; ghost: boolean; revealed?: boolean; cap?: string }): Promise<Drawn> {
+/**
+ * Draw one response bubble holding TEXT, its cap mode CAP, and measure it. With
+ * ELLIPSIS it is a one-line ellipsis bubble (an interim response), open or closed.
+ */
+async function draw(
+  page: Page,
+  opts: { text: string; ghost: boolean; revealed?: boolean; cap?: string; ellipsis?: "open" | "closed" },
+): Promise<Drawn> {
   return page.evaluate(
-    ({ text, ghost, revealed, cap, labels, property, labelsCss, noGhost }) => {
+    ({ text, ghost, revealed, cap, ellipsis, labels, property, labelsCss, noGhost }) => {
       document.getElementById("ghost-switch")!.textContent = ghost ? "" : noGhost;
       const reserve = labels.map((l) => `<span class="usage-reserve-label">${l}</span>`).join("");
       const feed = document.getElementById("feed")!;
       feed.innerHTML = `<div class="feed-item" style="content-visibility: visible">
-        <div class="bubble md assistant" data-role="response" data-variant="response" data-cap-lines="${cap}" data-state="success">
-          <div class="bubble-box"><span class="usage-corner${revealed ? " usage-corner--revealed" : ""}" data-tokens="12.3k"><span class="usage-reserve" aria-hidden="true">${reserve}</span><span class="usage-slider"><span class="usage-stamp">12.3k</span><span class="usage-ago">5m 30s ago</span></span></span><bubble-body class="bubble-body"><div class="response-prose" data-markdown><p>${text
+        <div class="bubble md assistant${ellipsis === null ? "" : " interim-response"}" data-role="response" data-variant="response" data-cap-lines="${ellipsis === null ? cap : "1"}"${ellipsis === null ? "" : ' data-more="ellipsis"'} data-state="success">
+          <div class="bubble-box${ellipsis === null ? "" : " bubble-scroll"}${ellipsis === "open" ? " expanded" : ""}"><span class="usage-corner${revealed ? " usage-corner--revealed" : ""}" data-tokens="12.3k"><span class="usage-reserve" aria-hidden="true">${reserve}</span><span class="usage-slider"><span class="usage-stamp">12.3k</span><span class="usage-ago">5m 30s ago</span></span></span><bubble-body class="bubble-body"><div class="response-prose" data-markdown><p>${text
             .split(" ")
             .map((w) => `<span class="w">${w}</span>`)
             .join(" ")}</p></div></bubble-body></div>
@@ -67,10 +75,12 @@ async function draw(page: Page, opts: { text: string; ghost: boolean; revealed?:
       // so a position taken from its right edge carries float noise below that.
       const px = (v: number): number => Math.round(v * 100) / 100;
       const tops = new Map<number, number>();
+      const words = new Map<number, string[]>();
       for (const w of feed.querySelectorAll(".w")) {
         const r = rel(w);
         const top = Math.round(r.top);
         tops.set(top, Math.max(tops.get(top) ?? 0, r.right));
+        words.set(top, [...(words.get(top) ?? []), w.textContent ?? ""]);
       }
       const firstTop = Math.min(...tops.keys());
       const corner = rel(feed.querySelector(".usage-corner")!);
@@ -80,6 +90,7 @@ async function draw(page: Page, opts: { text: string; ghost: boolean; revealed?:
       return {
         bubble: b.width,
         lines: tops.size,
+        firstLine: words.get(firstTop)!.join(" "),
         firstLineRight: b.right - tops.get(firstTop)!,
         corner: {
           right: px(b.right - corner.right),
@@ -96,12 +107,34 @@ async function draw(page: Page, opts: { text: string; ghost: boolean; revealed?:
       ghost: opts.ghost,
       revealed: opts.revealed ?? false,
       cap: opts.cap ?? "none",
+      ellipsis: opts.ellipsis ?? null,
       labels: [...USAGE_AGE_RESERVE_LABELS],
       property: USAGE_RESERVE_LABELS_PROPERTY,
       labelsCss: usageReserveLabelsCss(),
       noGhost: NO_GHOST,
     },
   );
+}
+
+/** A headless WebKit page holding an empty feed over the real stylesheet, transitions off, with the ghost switch. */
+async function openFeed(): Promise<{ browser: Browser; page: Page }> {
+  const css = await readFile(path.join(here, "../../src/styles.css"), "utf8");
+  const browser = await webkit.launch();
+  const page = await browser.newPage({ viewport: { width: 1100, height: 900 } });
+  await page.setContent(`<!doctype html><html><head></head><body>
+    <div id="main-col">
+      <div id="feed-scroll" class="scroll-zone">
+        <main id="feed" data-feed="root"></main>
+      </div>
+    </div></body></html>`);
+  await page.addStyleTag({ content: css });
+  await page.addStyleTag({ content: NO_TRANSITIONS });
+  await page.evaluate(() => {
+    const sw = document.createElement("style");
+    sw.id = "ghost-switch";
+    document.head.appendChild(sw);
+  });
+  return { browser, page };
 }
 
 /** The corner's outer footprint, margins included: what the ghost must add. */
@@ -120,22 +153,7 @@ describe("the usage corner's sizing ghost in WebKit", () => {
   let page: Page;
 
   beforeAll(async () => {
-    const css = await readFile(path.join(here, "../../src/styles.css"), "utf8");
-    browser = await webkit.launch();
-    page = await browser.newPage({ viewport: { width: 1100, height: 900 } });
-    await page.setContent(`<!doctype html><html><head></head><body>
-      <div id="main-col">
-        <div id="feed-scroll" class="scroll-zone">
-          <main id="feed" data-feed="root"></main>
-        </div>
-      </div></body></html>`);
-    await page.addStyleTag({ content: css });
-    await page.addStyleTag({ content: NO_TRANSITIONS });
-    await page.evaluate(() => {
-      const sw = document.createElement("style");
-      sw.id = "ghost-switch";
-      document.head.appendChild(sw);
-    });
+    ({ browser, page } = await openFeed());
   });
 
   afterAll(async () => {
@@ -217,5 +235,55 @@ describe("the usage corner's sizing ghost in WebKit", () => {
 
     // Assert
     expect(after.bubble).toBe(before.bubble);
+  });
+});
+
+/**
+ * AN ELLIPSIS BUBBLE OPENS TO WHAT IT SHOWED CLOSED (owner request,
+ * 2026-10-10). A closed interim's clamped body is a box of its own beside the
+ * corner, so its bubble is the text plus the corner; an open one used to shrink
+ * to the text alone and wrap its first line around the corner. The ghost on the
+ * open bubble keeps its width and its first line.
+ */
+describe("an ellipsis bubble with a corner in WebKit", () => {
+  let browser: Browser;
+  let page: Page;
+
+  beforeAll(async () => {
+    ({ browser, page } = await openFeed());
+  });
+
+  afterAll(async () => {
+    await browser.close();
+  });
+
+  it.each([4, 10, 16])("keeps a %i-word interim on one line once opened", async (n) => {
+    // Arrange / Act
+    const drawn = await draw(page, { text: prose(n), ghost: true, ellipsis: "open" });
+
+    // Assert
+    expect(drawn.lines).toBe(1);
+  });
+
+  it.each([4, 10, 16, 40])("keeps a %i-word interim's width once opened", async (n) => {
+    // Arrange
+    const closed = await draw(page, { text: prose(n), ghost: true, ellipsis: "closed" });
+
+    // Act
+    const open = await draw(page, { text: prose(n), ghost: true, ellipsis: "open" });
+
+    // Assert
+    expect(Math.abs(open.bubble - closed.bubble)).toBeLessThanOrEqual(1);
+  });
+
+  it.each([4, 10, 16, 40])("keeps a %i-word interim's first line once opened", async (n) => {
+    // Arrange
+    const closed = await draw(page, { text: prose(n), ghost: true, ellipsis: "closed" });
+
+    // Act
+    const open = await draw(page, { text: prose(n), ghost: true, ellipsis: "open" });
+
+    // Assert
+    expect(open.firstLine).toBe(closed.firstLine);
   });
 });
