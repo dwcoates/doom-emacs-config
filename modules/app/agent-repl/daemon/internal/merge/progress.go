@@ -257,6 +257,7 @@ func (r *run) checkpoint(ctx context.Context, step string, mutate func(*progress
 	}
 	r.mu.Lock()
 	doc := r.prog
+	previous := doc.Step
 	doc.Version = progressVersion
 	doc.Step = step
 	doc.Repo = string(r.repo)
@@ -309,7 +310,58 @@ func (r *run) checkpoint(ctx context.Context, step string, mutate func(*progress
 	}
 	r.o.log(ctx, r.ws).Debug(op, "recorded the merge's progress", dlog.Context{
 		"workspace": string(r.ws), "lease": string(r.lease.ID), "step": step, "round": doc.Active.N, "turn": doc.Turn})
+	if step != previous && r.stopAtStepBoundary() {
+		r.o.log(ctx, r.ws).Info("daemon.merge.restart", "the merge reached the step boundary its workspace's restart waits for; it lets go here and resumes at this step", dlog.Context{
+			"workspace": string(r.ws), "lease": string(r.lease.ID), "finished": previous, "step": step})
+		return errMergeStopping
+	}
 	return nil
+}
+
+// beginSteps marks the run as having left its queue for its steps, and
+// reports whether a restart already asked it to stop -- in which case it
+// stops at the queue's own record, before any step begins.
+func (r *run) beginSteps() bool {
+	r.o.mu.Lock()
+	r.executing = true
+	stop := r.stopAtBoundary
+	r.o.mu.Unlock()
+	if stop {
+		return r.stopAtStepBoundary()
+	}
+	return false
+}
+
+// withdrawBoundaryStop takes back a restart's ask that the run stop at its
+// next step boundary, and reports whether it was still standing: false when
+// the run already stopped there.
+func (r *run) withdrawBoundaryStop() bool {
+	r.o.mu.Lock()
+	defer r.o.mu.Unlock()
+	select {
+	case <-r.atBoundary:
+		return false
+	default:
+	}
+	r.stopAtBoundary = false
+	delete(r.o.transferred, r.ws)
+	return true
+}
+
+// stopAtStepBoundary answers whether a restart asked this run to stop at its
+// next step boundary, and if so takes the stop: the run is suspending from
+// here (it records and publishes nothing more) and the restart waiting on
+// atBoundary is told. It is called only where the run's record names the
+// step it would resume at.
+func (r *run) stopAtStepBoundary() bool {
+	r.o.mu.Lock()
+	defer r.o.mu.Unlock()
+	if !r.stopAtBoundary || r.suspending {
+		return false
+	}
+	r.suspending = true
+	close(r.atBoundary)
+	return true
 }
 
 // restoreFrom stands a resumed run where its record left it: the tab rounds,

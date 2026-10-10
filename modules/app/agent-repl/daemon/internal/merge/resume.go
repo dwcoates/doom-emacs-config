@@ -49,7 +49,7 @@ func (o *orchestrator) startResumed(ctx context.Context, repo wsm.RepoKey, ws id
 	runCtx, cancel := context.WithCancelCause(ctx)
 	r := &run{
 		o: o, ws: ws, repo: repo, lease: lease, lock: lock,
-		ctx: runCtx, cancel: cancel, finished: make(chan struct{}),
+		ctx: runCtx, cancel: cancel, finished: make(chan struct{}), atBoundary: make(chan struct{}),
 		startedMS: doc.StartedMS, queuedMS: doc.QueuedMS,
 		rounds:     map[string]int{},
 		openRounds: map[string]tabRound{},

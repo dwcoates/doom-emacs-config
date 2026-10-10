@@ -156,6 +156,10 @@ type orchestrator struct {
 	// suspended run's git gate, immediately before it waits for the commands
 	// in flight: a test releases a held command from inside that wait.
 	onGitStopWait func()
+	// onBoundaryAsk, when set, is called once a restart has asked a running
+	// merge to stop at its next step boundary, before the restart waits for
+	// it. Nil in production; tests release the step in flight from it.
+	onBoundaryAsk func()
 	// onDrainWait, when set, is called once the drain has stopped admitting
 	// and snapshotted the terminal work, immediately before it begins waiting.
 	// It exists so a test releases a held terminal from inside the drain's own

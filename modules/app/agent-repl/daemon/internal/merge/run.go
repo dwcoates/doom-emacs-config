@@ -108,6 +108,20 @@ type run struct {
 	// under the orchestrator's mutex: by the drain, or by a registration or a
 	// terminal that arrives after the drain began.
 	suspending bool
+	// executing reports that the run left its queue and began its steps
+	// (execute). Until then nothing a restart could lose is in flight: its
+	// wait for the workspace to fall free is simply let go. Guarded by the
+	// orchestrator's mutex, the same lock a restart's ask is read under.
+	executing bool
+	// stopAtBoundary is a restart's ask that this run stop at its next STEP
+	// BOUNDARY (owner ruling, 2026-10-10): the step in flight -- a test run, a
+	// repair turn, a rebase -- finishes, the next step's record is written,
+	// and the run lets go there, to resume at exactly that step once the
+	// restart finished. Guarded by the orchestrator's mutex.
+	stopAtBoundary bool
+	// atBoundary is closed once the run stopped at the boundary a restart
+	// asked for.
+	atBoundary chan struct{}
 	// git is the run's gate in front of the daemon's git (gatedgit.go): the
 	// drain stops it, and waits for the command in flight, before the exit.
 	git *gatedGit
@@ -397,7 +411,7 @@ func (o *orchestrator) start(ctx context.Context, repo wsm.RepoKey, ws ids.Works
 	o.mu.Unlock()
 	r := &run{
 		o: o, ws: ws, source: entry.Source, job: job, repo: repo, lease: lease, lock: lock,
-		ctx: runCtx, cancel: cancel, finished: make(chan struct{}), displaces: displaces,
+		ctx: runCtx, cancel: cancel, finished: make(chan struct{}), atBoundary: make(chan struct{}), displaces: displaces,
 		startedMS:  o.deps.Now().UnixMilli(),
 		queuedMS:   entry.EnqueuedAt.UnixMilli(),
 		rounds:     map[string]int{},
@@ -648,6 +662,12 @@ func sameDir(a, b string) bool {
 // execute runs the method the source and the target select, and lands
 // whatever end it reaches on the one terminal path.
 func (r *run) execute(ctx context.Context) error {
+	// THE STEPS BEGIN HERE, and a restart that asked before them is answered
+	// here: the record already stands at the queue, which is the boundary.
+	if r.beginSteps() {
+		r.end(ctx, errMergeStopping)
+		return errMergeStopping
+	}
 	// The run leaves the queue here: the wait is over and the first step
 	// begins, so the queue interval ends. A run resumed past its queue left it
 	// before the restart.
