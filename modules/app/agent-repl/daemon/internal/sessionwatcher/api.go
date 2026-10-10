@@ -12,6 +12,7 @@ package sessionwatcher
 import (
 	"claude-repld/internal/clock"
 	"context"
+	"sort"
 	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -67,6 +68,35 @@ type LiveWorkSet struct {
 // Empty reports whether any detached work is live.
 func (s LiveWorkSet) Empty() bool {
 	return len(s.Agents) == 0 && len(s.Shells) == 0 && len(s.Monitors) == 0 && len(s.Pending) == 0
+}
+
+// The prefixes a live item's record name carries: its kind, then its handle.
+const (
+	NameAgent   = "agent:"
+	NameShell   = "shell:"
+	NameMonitor = "monitor:"
+	NamePending = "pending:"
+)
+
+// Names spells every live item for a record, kind and handle ("agent:<id>",
+// "shell:<id>", "monitor:<id>", "pending:<id>"), sorted, so a record of what
+// a wait is waiting on names each item the way every live-work record does.
+func (s LiveWorkSet) Names() []string {
+	names := make([]string, 0, len(s.Agents)+len(s.Shells)+len(s.Monitors)+len(s.Pending))
+	for _, a := range s.Agents {
+		names = append(names, NameAgent+a.GetValue())
+	}
+	for _, w := range s.Shells {
+		names = append(names, NameShell+w.GetValue())
+	}
+	for _, w := range s.Monitors {
+		names = append(names, NameMonitor+w.GetValue())
+	}
+	for _, w := range s.Pending {
+		names = append(names, NamePending+w.GetValue())
+	}
+	sort.Strings(names)
+	return names
 }
 
 // NotificationKind names what a host notification is about. A typed spelling

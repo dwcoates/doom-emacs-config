@@ -621,9 +621,10 @@ func (r *run) awaitFree(ctx context.Context, ws ids.WorkspaceID) error {
 			f.AwaitOtherName = r.o.workspaceName(ctx, ws)
 		}
 	})
+	fields["blockers"] = r.o.deps.Freeness.Blockers(ws)
 	log.Info(op, "the merge waits for the workspace's turn and detached work to end; nothing is stopped to hurry it", fields)
 	if err := r.o.deps.Freeness.AwaitFree(ctx, ws); err != nil {
-		return fmt.Errorf("the workspace %s never fell free: %w", ws, err)
+		return fmt.Errorf("the workspace %s never fell free (waiting on %v): %w", ws, r.o.deps.Freeness.Blockers(ws), err)
 	}
 	log.Info(op, "the workspace fell free; the merge proceeds", fields)
 	return nil

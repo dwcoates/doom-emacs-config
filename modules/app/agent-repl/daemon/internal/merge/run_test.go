@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -664,4 +665,37 @@ func TestASuspendedRunTellsThePumpNothingFailed(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Fatalf("the pump was told %v, want no failure for a suspended run", err)
 	}
+}
+
+func TestAMergeWaitingForItsWorkspaceNamesWhatItWaitsOn(t *testing.T) {
+	// Arrange: the 2026-10-08 wait named nothing, so a shell that never left
+	// the live set held a merge for 52 minutes with no record of why.
+	h := newHarness(t)
+	h.emacsRepo()
+	h.landsCleanly("abc123def4567")
+	h.gatePasses("daemon")
+	h.freeness.busy = true
+	h.freeness.blockers = []string{"shell:toolu_left_live"}
+	h.freeness.waiting = make(chan struct{})
+	h.freeness.release = make(chan struct{})
+	enqueue(t, h)
+
+	// Act
+	done := admitAsync(h, context.Background())
+	<-h.freeness.waiting
+	h.freeness.busy = false
+	close(h.freeness.release)
+	<-done
+
+	// Assert
+	for _, record := range h.logs.Global().(*dlog.TestLogger).Records() {
+		if record.Operation == "daemon.merge.await_free" && record.Level == "info" &&
+			record.Message == "the merge waits for the workspace's turn and detached work to end; nothing is stopped to hurry it" {
+			if !reflect.DeepEqual(record.Context["blockers"], []string{"shell:toolu_left_live"}) {
+				t.Fatalf("the wait's record names %v, want the live shell", record.Context["blockers"])
+			}
+			return
+		}
+	}
+	t.Fatal("no record of the merge's wait")
 }
