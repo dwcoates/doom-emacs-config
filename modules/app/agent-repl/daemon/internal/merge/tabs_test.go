@@ -325,3 +325,34 @@ func TestTheCommittingTabCarriesTheMergeCommitsSubject(t *testing.T) {
 		t.Fatalf("committing tab = %+v", c)
 	}
 }
+
+// TestPublishHeadPinsALiveHeadAndSettlesAResolvedOne covers the head's place:
+// pinned to the feed's bottom while the merge is in flight, and settled where
+// it stands by the first publication carrying how the merge resolved.
+func TestPublishHeadPinsALiveHeadAndSettlesAResolvedOne(t *testing.T) {
+	tests := []struct {
+		name       string
+		result     any
+		wantPinned bool
+	}{
+		{name: "in flight", result: nil, wantPinned: true},
+		{name: "landed", result: &frontendv1.FeedMergeSuccess{Commit: "abc123"}, wantPinned: false},
+		{name: "failed", result: &frontendv1.FeedMergeError{Reason: &frontendv1.FeedMergeError_Failed{Failed: &frontendv1.FeedMergeFailed{Summary: "tests failed"}}}, wantPinned: false},
+		{name: "abandoned", result: &frontendv1.FeedMergeError{Reason: &frontendv1.FeedMergeError_Abandoned{Abandoned: &frontendv1.FeedMergeAbandoned{Summary: "closed"}}}, wantPinned: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act.
+			h.o.publishHead(theWorkspace, "lease-1", "feature → master", 1, tt.result)
+
+			// Assert.
+			heads := h.feed.headPublications()
+			if len(heads) != 1 || heads[0].Pinned != tt.wantPinned || !heads[0].Feed.Root {
+				t.Fatalf("heads = %+v, want one root head published pinned=%v", heads, tt.wantPinned)
+			}
+		})
+	}
+}

@@ -23,7 +23,7 @@ func waitingForFree(t *testing.T, h *harness) <-chan error {
 
 // TestARestartSuspendsAMergeWaitingForItsWorkspace pins that a merge only
 // waiting never blocks a restart: its wait lets go, its lease and record
-// stand, and nothing of it is drawn.
+// stand, and its bubble stays pinned.
 func TestARestartSuspendsAMergeWaitingForItsWorkspace(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
@@ -45,14 +45,18 @@ func TestARestartSuspendsAMergeWaitingForItsWorkspace(t *testing.T) {
 	if step := recordedStep(t, h); step != TabQueue {
 		t.Fatalf("the record stands at %q, want %q", step, TabQueue)
 	}
-	if heads := h.feed.headIDs(); len(heads) != 0 {
-		t.Fatalf("the suspended waiting merge drew %v, want no bubble", heads)
+	heads := h.feed.headPublications()
+	if len(heads) == 0 {
+		t.Fatal("the suspended waiting merge drew no bubble, want its bubble standing pinned")
+	}
+	if unpinned := livePublishedUnpinned(heads); len(unpinned) != 0 {
+		t.Fatalf("the suspended waiting merge drew %v unpinned, want it pinned", unpinned)
 	}
 }
 
 // TestAMergeWaitingThroughARestartWaitsAgainOnTheFreshSession covers the
-// resume: the merge waits for freeness afresh, draws nothing while it does,
-// and is placed and lands once the fresh session is free.
+// resume: the merge waits for freeness afresh with its bubble pinned, and
+// starts and lands once the fresh session is free.
 func TestAMergeWaitingThroughARestartWaitsAgainOnTheFreshSession(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
@@ -74,7 +78,7 @@ func TestAMergeWaitingThroughARestartWaitsAgainOnTheFreshSession(t *testing.T) {
 	// Act.
 	resumed := admitAsync(h, context.Background())
 	<-h.freeness.waiting
-	headsWhileWaiting := len(h.feed.headIDs())
+	headsWhileWaiting := h.feed.headPublications()
 	h.freeness.busy = false
 	close(release)
 	err := <-resumed
@@ -83,8 +87,11 @@ func TestAMergeWaitingThroughARestartWaitsAgainOnTheFreshSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the resumed merge ended on: %v", err)
 	}
-	if headsWhileWaiting != 0 {
-		t.Fatalf("the resumed merge drew %d head(s) while it waited again, want none", headsWhileWaiting)
+	if len(headsWhileWaiting) == 0 {
+		t.Fatal("the resumed merge drew no bubble while it waited again, want its bubble pinned")
+	}
+	if unpinned := livePublishedUnpinned(headsWhileWaiting); len(unpinned) != 0 {
+		t.Fatalf("the resumed merge drew %v unpinned while it waited again, want it pinned", unpinned)
 	}
 	if facts := h.footer.last(); facts.State != StateMerged {
 		t.Fatalf("the merge stands at %q (%s), want it landed", facts.State, facts.Detail)
