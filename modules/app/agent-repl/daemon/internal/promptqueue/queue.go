@@ -188,6 +188,11 @@ type queue struct {
 	// nothing, because the state client it would read is about to close and
 	// every registered bounce ends with the process anyway.
 	exiting bool
+	// life is the queue's own lifetime, ended by Drain: a goroutine that waits
+	// on an edge the queue does not own (a session's facts arriving) waits
+	// under it, so Drain's join is never held by a watcher that never answers.
+	life    context.Context
+	endLife context.CancelFunc
 
 	// editSeq mints each edit's identity; guarded by mu.
 	editSeq uint64
@@ -238,6 +243,7 @@ func newQueue(deps Deps) (*queue, error) {
 		deps:   deps,
 		states: make(map[ids.WorkspaceID]*wsState),
 	}
+	q.life, q.endLife = context.WithCancel(context.Background())
 	// THE QUEUE'S OWN MUTEX IS DAEMON-WIDE: every workspace's Submit takes
 	// it, so its stall is recorded in the run log. It lives as long as the
 	// process, so it is never unwatched.
@@ -371,6 +377,7 @@ func (q *queue) Drain(bound time.Duration) bool {
 	q.mu.Lock()
 	q.exiting = true
 	q.mu.Unlock()
+	q.endLife()
 	left := make(chan struct{})
 	go func() {
 		q.classifying.Wait()

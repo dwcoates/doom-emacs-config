@@ -1425,9 +1425,19 @@ with no hold and no verdict, drawn "classifying", with nothing to re-drive it.
   still returns `ErrNoSession`, so the caller's ERROR stands. Either way the
   session coming up (`ReleaseReconnectHolds`, the one guaranteed edge)
   delivers it. `standingSessionHold` is the one predicate for both holds.
-- **WHAT STANDS UNHELD IS DRIVEN.** The session-up release also delivers a
-  free entry when nothing runs and classifies unjudged free entries against
-  the turn it starts. A lease evaluation that changes nothing still pops a
+- **THE FACTS COME FIRST.** Until the watcher has taken the session facts
+  up, an adopted shim's running turn reads as none, so the session-up release
+  and the idle pop deliver nothing on that nil: they wait
+  (`queue.factsPending`, under the queue's lifetime, joined by `Drain`) and
+  take their step again from the facts-in edge
+  (`Watcher.AwaitSessionFacts`). A boot once delivered a restored deferred
+  prompt into an adopted shim's running turn this way.
+- **WHAT STANDS UNHELD IS DRIVEN, IF IT IS STRANDED.** The session-up release
+  also delivers a STRANDED entry when nothing runs, and classifies stranded
+  entries against the turn it starts. A stranded entry is an ordinary prompt
+  with no hold, no verdict and no session act (`stranded`). A deferred prompt
+  or a verdicted one waits for the turn's end and is never driven by the
+  release. A lease evaluation that changes nothing still pops a
   free entry when nothing runs (a handover's drain reaches a transferred
   workspace only through it). The boot settles every inert survivor's holds
   after its carried gate is raised again (`settleSessionlessHolds`). So a row
