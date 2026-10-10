@@ -2,6 +2,7 @@ package promptqueue
 
 import (
 	"context"
+	"fmt"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
@@ -89,4 +90,18 @@ func (q *queue) holdForSession(ctx context.Context, ws ids.WorkspaceID, kind wsm
 		_ = q.pushTray(ctx, ws, log)
 	}
 	return moved
+}
+
+// reholdForSession puts ONE entry a delivery could not hand to the session back
+// on the hold that names why, so the session coming up delivers it rather than
+// leaving it standing with no hold for nothing to re-drive. The caller holds the
+// delivery lock.
+func (q *queue) reholdForSession(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID, kind wsm.HoldKind, log dlog.Logger) error {
+	if err := q.deps.DB.UpdateHeldPromptHold(ctx, turn, &kind, ""); err != nil {
+		log.Error(opDeliver, "could not put an undelivered prompt back on the hold that waits for the session", dlog.Context{
+			"turn": string(turn), "hold": kind.String(), "cause": err.Error(),
+		})
+		return fmt.Errorf("hold %q on %q for the session: %w", turn, ws, err)
+	}
+	return q.pushTray(ctx, ws, log)
 }

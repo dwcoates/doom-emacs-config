@@ -305,6 +305,20 @@ func (q *queue) mayPop(ctx context.Context, ws ids.WorkspaceID, log dlog.Logger)
 		q.holdFreeForVendorBlock(ctx, ws, block, log)
 		return nil, false, nil
 	}
+	// A SESSION THAT IS THERE AND DOES NOT SERVE IS POPPED NOTHING
+	// (sessionhold.go): a standing cold gate, or a shim with no started
+	// session or no watcher. What waits is held under the hold that names why,
+	// and the session coming up releases it. A workspace with NO shim is not
+	// this case: the delivery revives it (deliverHeld), as a hibernated
+	// session's lease release requires.
+	if kind, why, waiting := q.sessionWait(ws); waiting {
+		if _, shim := q.deps.Client(ws); shim || kind == wsm.HoldColdGate {
+			moved := q.holdForSession(ctx, ws, kind, opTurnEnded, log)
+			log.Info(opTurnEnded, "the session does not serve; nothing is delivered and the waiting prompts are held for it",
+				dlog.Context{"hold": kind.String(), "why": why, "moved": moved})
+			return nil, false, nil
+		}
+	}
 	// A REFUSING LEASE OWNS THE SESSION, so nothing held is delivered into it.
 	// PolicyHold stamps every standing hold and nextDeliverable filters those,
 	// but PolicyRefuse (a merge lease an older build wrote) stamps none — it
@@ -431,6 +445,12 @@ func (q *queue) OnLeaseChanged(ws ids.WorkspaceID) {
 		if _, live := q.deps.Client(ws); !live {
 			want = &leaseHold{kind: wsm.HoldReconnect}
 			revivalPending = true
+		} else if kind, why, waiting := q.sessionWait(ws); waiting && kind == wsm.HoldColdGate {
+			// A LEASE ENDING OVER A SESSION PARKED AT ITS COLD GATE delivers
+			// nothing into it: its holds wait for the gate's answer.
+			log.Info(opLeaseChange, "the lease ended while the session is parked at its cold gate; its holds wait for the gate's answer",
+				dlog.Context{"why": why, "holds": len(standing)})
+			want = &leaseHold{kind: wsm.HoldColdGate}
 		} else if block, blocked := q.vendorBlocked(ws); blocked {
 			// A LEASE ENDING UNDER A MID-SESSION VENDOR BLOCK delivers
 			// nothing into it: its holds are held after reconnect, and the
