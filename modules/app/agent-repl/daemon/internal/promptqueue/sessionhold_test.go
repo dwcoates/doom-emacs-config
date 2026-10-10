@@ -1,0 +1,265 @@
+package promptqueue
+
+import (
+	"context"
+	"testing"
+
+	conversationv1 "agentrepl/proto/conversation/v1"
+
+	"claude-repld/internal/classifier"
+	"claude-repld/internal/dlog"
+	"claude-repld/internal/ids"
+	"claude-repld/internal/wsm"
+)
+
+// THE 2026-10-10 INCIDENT, deterministically: a prompt is held for the revival
+// of a workspace with no session, the revival parks the session at its cold
+// gate, and the prompt must wait at the gate (never delivered, never stranded,
+// never an error) until the gate's answer brings the session up and delivers
+// it.
+
+// gateDetail is the standing gate's own account in these tests.
+const gateDetail = "the conversation is cold at 90,000 context tokens"
+
+// parkAtGate states what a revival that parks at its cold gate leaves: a shim
+// client, no started session, no watcher, and the gate standing.
+func parkAtGate(h *harness) {
+	h.noSession = false
+	h.notStarted = true
+	h.noWatcher = true
+	h.coldGate = gateDetail
+}
+
+// answerGate states what the gate's answer leaves: the gate gone and the
+// session up and watched.
+func answerGate(h *harness) {
+	h.coldGate = ""
+	h.notStarted = false
+	h.noWatcher = false
+}
+
+// revivedIntoTheGate submits t1 to a workspace with no session whose revival
+// parks at the cold gate, and joins the revival.
+func revivedIntoTheGate(t *testing.T) *harness {
+	t.Helper()
+	h := newHarness(t)
+	h.noSession = true
+	h.reviveHook = func() { parkAtGate(h) }
+	if _, err := h.q.Submit(context.Background(), submission("t1", "the owner's prompt")); err != nil {
+		t.Fatalf("Submit = %v, want the prompt held for the revival", err)
+	}
+	h.waitRevivals()
+	return h
+}
+
+// strandedRow records the row an older build left behind: a standing prompt
+// with no hold and no verdict.
+func strandedRow(t *testing.T, h *harness, turn ids.TurnID) {
+	t.Helper()
+	if err := h.db.PutHeldPrompt(context.Background(), wsm.HeldPrompt{
+		Workspace: theWorkspace, Turn: turn, Said: userSaid("stranded"),
+		Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT.String(), QueuedAt: instant,
+	}); err != nil {
+		t.Fatalf("PutHeldPrompt: %v", err)
+	}
+}
+
+// heldUnder reports whether the turn's standing hold is under KIND.
+func heldUnder(h *harness, turn ids.TurnID, kind wsm.HoldKind) bool {
+	got := h.db.hold(turn)
+	return got.Tombstone == nil && got.Hold != nil && *got.Hold == kind
+}
+
+// errorRecords answers every ERROR record.
+func errorRecords(records []dlog.Record) []dlog.Record {
+	var out []dlog.Record
+	for _, r := range records {
+		if r.Level == "error" {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+func TestAColdGatedRevivalHoldsItsPromptAtTheGate(t *testing.T) {
+	// Arrange / Act
+	h := revivedIntoTheGate(t)
+
+	// Assert
+	if !heldUnder(h, "t1", wsm.HoldColdGate) {
+		t.Fatalf("hold = %+v, want t1 held at the cold gate", h.db.hold("t1"))
+	}
+}
+
+func TestAColdGatedRevivalStartsNoTurn(t *testing.T) {
+	// Arrange / Act
+	h := revivedIntoTheGate(t)
+
+	// Assert
+	if got := h.sender.started(); len(got) != 0 {
+		t.Fatalf("started = %v, want nothing sent into a session parked at its gate", got)
+	}
+}
+
+func TestAColdGatedRevivalRecordsNoError(t *testing.T) {
+	// Arrange / Act
+	h := revivedIntoTheGate(t)
+
+	// Assert
+	if got := errorRecords(h.log.Records()); len(got) != 0 {
+		t.Fatalf("error records = %+v, want none: a gate is a designed state", got)
+	}
+}
+
+func TestAColdGatedRevivalNeverSaysTheVendorServes(t *testing.T) {
+	// Arrange / Act
+	h := revivedIntoTheGate(t)
+
+	// Assert
+	if logged(h.log.Records(), "info", opSubmit, "the session is up and the vendor serves it; released the prompts held after reconnect") {
+		t.Fatal("the release claimed a served session for one parked at its cold gate")
+	}
+}
+
+func TestAColdGatedRevivalNeverSaysItRevivedTheSession(t *testing.T) {
+	// Arrange / Act
+	h := revivedIntoTheGate(t)
+
+	// Assert
+	if logged(h.log.Records(), "info", opSubmit, "revived the workspace's session for the submission") {
+		t.Fatal("the revival claimed a session it parked at its cold gate")
+	}
+}
+
+func TestAColdGatedRevivalSaysItParkedAtTheGate(t *testing.T) {
+	// Arrange / Act
+	h := revivedIntoTheGate(t)
+
+	// Assert
+	if !logged(h.log.Records(), "info", opSubmit, "the revival brought the shim up parked at its cold gate; the prompts wait for the gate's answer") {
+		t.Fatalf("records = %+v, want the park said at INFO", h.log.Records())
+	}
+}
+
+func TestAColdGatedRevivalPublishesTheColdGateHold(t *testing.T) {
+	// Arrange / Act
+	h := revivedIntoTheGate(t)
+
+	// Assert
+	last := h.holds.last()
+	if len(last) != 1 || last[0].Hold == nil || *last[0].Hold != wsm.HoldColdGate {
+		t.Fatalf("last tray = %+v, want t1 drawn at the cold gate", last)
+	}
+}
+
+func TestAnsweringTheColdGateDeliversThePromptHeldBehindIt(t *testing.T) {
+	// Arrange
+	h := revivedIntoTheGate(t)
+	answerGate(h)
+
+	// Act: the answer's session-up edge.
+	h.q.ReleaseReconnectHolds(theWorkspace)
+
+	// Assert
+	if got := h.sender.started(); len(got) != 1 || got[0] != "t1" {
+		t.Fatalf("started = %v, want t1 delivered once the gate is answered", got)
+	}
+}
+
+func TestAnsweringTheColdGateRetiresTheDeliveredHold(t *testing.T) {
+	// Arrange
+	h := revivedIntoTheGate(t)
+	answerGate(h)
+
+	// Act
+	h.q.ReleaseReconnectHolds(theWorkspace)
+
+	// Assert
+	if got := h.db.hold("t1").Tombstone; got == nil || got.Kind != tombstoneDelivered {
+		t.Fatalf("tombstone = %+v, want t1 retired as delivered", got)
+	}
+}
+
+func TestASessionUpReleaseIntoAShimWithNoStartedSessionKeepsTheReconnectHold(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.notStarted = true
+	if _, err := h.q.Submit(context.Background(), submission("t1", "hello")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	// Act
+	h.q.ReleaseReconnectHolds(theWorkspace)
+
+	// Assert
+	if !heldUnder(h, "t1", wsm.HoldReconnect) || len(h.sender.started()) != 0 {
+		t.Fatalf("hold = %+v, started = %v, want t1 still waiting under the reconnect hold", h.db.hold("t1"), h.sender.started())
+	}
+}
+
+func TestASessionUpReleaseDrivesAStrandedUnheldPrompt(t *testing.T) {
+	// Arrange: the row the incident left, on a session that serves.
+	h := newHarness(t)
+	strandedRow(t, h, "t1")
+
+	// Act
+	h.q.ReleaseReconnectHolds(theWorkspace)
+
+	// Assert
+	if got := h.sender.started(); len(got) != 1 || got[0] != "t1" {
+		t.Fatalf("started = %v, want the stranded prompt delivered", got)
+	}
+}
+
+func TestASessionUpReleaseHoldsAStrandedPromptAtTheStandingGate(t *testing.T) {
+	// Arrange: the row the incident left, on the session parked at its gate.
+	h := newHarness(t)
+	parkAtGate(h)
+	strandedRow(t, h, "t1")
+
+	// Act
+	h.q.ReleaseReconnectHolds(theWorkspace)
+
+	// Assert
+	if !heldUnder(h, "t1", wsm.HoldColdGate) {
+		t.Fatalf("hold = %+v, want the stranded prompt held at the cold gate", h.db.hold("t1"))
+	}
+}
+
+func TestASessionUpReleaseLeavesABuildRefreshHoldStanding(t *testing.T) {
+	// Arrange: a hold of another condition behind the gate.
+	h := newHarness(t)
+	parkAtGate(h)
+	strandedRow(t, h, "t1")
+	refresh := wsm.HoldBuildRefresh
+	if err := h.db.UpdateHeldPromptHold(context.Background(), "t1", &refresh, ""); err != nil {
+		t.Fatalf("UpdateHeldPromptHold: %v", err)
+	}
+
+	// Act
+	h.q.ReleaseReconnectHolds(theWorkspace)
+
+	// Assert
+	if !heldUnder(h, "t1", wsm.HoldBuildRefresh) {
+		t.Fatalf("hold = %+v, want the build-refresh hold untouched", h.db.hold("t1"))
+	}
+}
+
+func TestASessionUpReleaseClassifiesAStrandedPromptBehindTheOneItDelivers(t *testing.T) {
+	// Arrange: two rows the incident's build left, on a session that serves.
+	h := newHarness(t)
+	h.watcher.standOnOpening = true
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"}
+	strandedRow(t, h, "t1")
+	strandedRow(t, h, "t2")
+
+	// Act
+	h.q.ReleaseReconnectHolds(theWorkspace)
+	h.q.waitForClassifications()
+
+	// Assert: t1 runs, and t2 is judged against it rather than left unjudged.
+	got := h.db.hold("t2")
+	if got.Classification == nil || got.Classification.Arm != wsm.ArmHoldForTurnEnd {
+		t.Fatalf("t2 = %+v, want it classified against the turn t1 started", got)
+	}
+}

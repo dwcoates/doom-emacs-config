@@ -231,8 +231,8 @@ func TestAnUnresolvedWorkspaceIsNotWatched(t *testing.T) {
 	}
 }
 
-func TestStandingReconnectHold(t *testing.T) {
-	reconnect, merge := wsm.HoldReconnect, wsm.HoldMerge
+func TestStandingSessionHold(t *testing.T) {
+	reconnect, coldGate, merge := wsm.HoldReconnect, wsm.HoldColdGate, wsm.HoldMerge
 	retired := &wsm.Tombstone{Kind: tombstoneDropped}
 	tests := []struct {
 		name string
@@ -241,28 +241,30 @@ func TestStandingReconnectHold(t *testing.T) {
 	}{
 		{name: "a standing reconnect hold", held: wsm.HeldPrompt{Hold: &reconnect}, want: true},
 		{name: "a retired reconnect hold", held: wsm.HeldPrompt{Hold: &reconnect, Tombstone: retired}, want: false},
+		{name: "a standing cold-gate hold", held: wsm.HeldPrompt{Hold: &coldGate}, want: true},
+		{name: "a retired cold-gate hold", held: wsm.HeldPrompt{Hold: &coldGate, Tombstone: retired}, want: false},
 		{name: "a standing hold of another kind", held: wsm.HeldPrompt{Hold: &merge}, want: false},
 		{name: "a standing prompt with no hold", held: wsm.HeldPrompt{}, want: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange / Act
-			got := standingReconnectHold(tt.held)
+			got := standingSessionHold(tt.held)
 			// Assert
 			if got != tt.want {
-				t.Fatalf("standingReconnectHold = %v, want %v", got, tt.want)
+				t.Fatalf("standingSessionHold = %v, want %v", got, tt.want)
 			}
 		})
 	}
 }
 
-// TestNoSiteHandRollsTheStandingReconnectHoldTest pins the call sites to the
+// TestNoSiteHandRollsTheStandingSessionHoldTest pins the call sites to the
 // one predicate: a hand-rolled copy of its test fails here rather than
 // drifting from it silently.
-func TestNoSiteHandRollsTheStandingReconnectHoldTest(t *testing.T) {
+func TestNoSiteHandRollsTheStandingSessionHoldTest(t *testing.T) {
 	// Arrange
 	handRolled := regexp.MustCompile(`Tombstone\s*[!=]=\s*nil\s*(&&|\|\|)\s*\w+\.Hold\s*[!=]=\s*nil\s*(&&|\|\|)\s*\*\w+\.Hold\s*[!=]=\s*wsm\.HoldReconnect`)
-	const definition = "return h.Tombstone == nil && h.Hold != nil && *h.Hold == wsm.HoldReconnect"
+	const definition = "return h.Tombstone == nil && h.Hold != nil && waitsOnSession(*h.Hold)"
 	definitions := 0
 	for _, file := range sourcescan.Production(t) {
 		// Act
@@ -273,11 +275,11 @@ func TestNoSiteHandRollsTheStandingReconnectHoldTest(t *testing.T) {
 				continue
 			}
 			if handRolled.MatchString(line) {
-				t.Errorf("%s:%d hand-rolls the standing reconnect hold test; call standingReconnectHold: %s", file.Name, i+1, strings.TrimSpace(line))
+				t.Errorf("%s:%d hand-rolls the standing session hold test; call standingSessionHold: %s", file.Name, i+1, strings.TrimSpace(line))
 			}
 		}
 	}
 	if definitions != 1 {
-		t.Fatalf("found %d definitions of standingReconnectHold's test, want exactly 1", definitions)
+		t.Fatalf("found %d definitions of standingSessionHold's test, want exactly 1", definitions)
 	}
 }
