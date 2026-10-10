@@ -595,9 +595,10 @@ func TestAWaitingEntryKeepsItsQueuedTimeAcrossRepublishes(t *testing.T) {
 	}
 }
 
-// TestAMergeInLineDrawsNoBubble pins the placement rule: a merge waiting in
-// line has not started, so nothing of it is in the feed.
-func TestAMergeInLineDrawsNoBubble(t *testing.T) {
+// TestAMergeInLineIsDrawnInABubblePinnedToTheFeedsBottom pins the placement
+// rule: a merge waiting in line has its bubble from the moment it is queued,
+// pinned to the feed's bottom until it resolves.
+func TestAMergeInLineIsDrawnInABubblePinnedToTheFeedsBottom(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	h.db.paused[h.repoKey()] = true
@@ -607,8 +608,16 @@ func TestAMergeInLineDrawsNoBubble(t *testing.T) {
 	queueAnother(t, h, "ws-2", "two")
 
 	// Assert.
-	if heads := h.feed.headIDs(); len(heads) != 0 {
-		t.Fatalf("merges in line drew bubbles %v, want none", heads)
+	heads := h.feed.headPublications()
+	drawn := map[wsm.WorkspaceID]bool{}
+	for _, head := range heads {
+		drawn[head.WS] = true
+	}
+	if !drawn[theWorkspace] || !drawn["ws-2"] {
+		t.Fatalf("merges in line drew bubbles for %v, want both workspaces", drawn)
+	}
+	if unpinned := livePublishedUnpinned(heads); len(unpinned) != 0 {
+		t.Fatalf("merges in line drew %v unpinned, want every live head pinned", unpinned)
 	}
 }
 

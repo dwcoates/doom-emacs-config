@@ -11,7 +11,6 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/dlog"
-	"claude-repld/internal/feedid"
 	"claude-repld/internal/gitclient"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/promptqueue"
@@ -806,13 +805,13 @@ func (o *orchestrator) publishAbandoned(ctx context.Context, ws ids.WorkspaceID,
 			return
 		}
 		label := o.abandonedLabel(ctx, ws, entry.Source)
-		o.deps.Feed.UpsertDurable(ws, feedid.Feed{Root: true}, headRow(ws, ledger, label, queued,
+		o.publishHead(ws, ledger, label, queued,
 			&frontendv1.FeedMergeError{
 				EndedAtMs: o.nowMS(),
 				Reason: &frontendv1.FeedMergeError_Abandoned{
 					Abandoned: &frontendv1.FeedMergeAbandoned{Summary: summary},
 				},
-			}))
+			})
 	}
 	// The surfaces come AFTER the terminal, in the teardown's own order: the
 	// footer leaves its merging state and the roster sheds every merge arm

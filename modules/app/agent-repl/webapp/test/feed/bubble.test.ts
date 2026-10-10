@@ -3,7 +3,7 @@ import { createControl } from "../../src/control.js";
 import { ITEM_EXPANDED_EVENT } from "../../src/expand.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
-import { OpenFeedResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_feed_pb";
+import { OpenFeedResponseSchema, type OpenFeedResponse } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_feed_pb";
 import { FeedIdSchema, FeedRowSchema, type FeedRow } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { clearClientFailures, onClientVerdict } from "../../src/rpc/link.js";
 import { mountBubble, type WireFold } from "../../src/feed/bubble.js";
@@ -240,6 +240,52 @@ describe("mountBubble: a merge bubble folds only by the daemon's success default
     await settle();
     // Assert
     expect(bubble.isExpanded()).toBe(false);
+  });
+
+  it("ends folded when the merge succeeds while the bubble's first open is in flight", async () => {
+    // Arrange: a merge bubble drawn open at its queueing, whose open has not
+    // answered yet (2026-10-10: the success fold landed mid-open and the open
+    // then left the bubble expanded for good).
+    let answer: (response: OpenFeedResponse) => void = () => undefined;
+    const h = harness({
+      openFeed: (req) =>
+        new Promise<OpenFeedResponse>((resolve) => {
+          answer = (response) => resolve(response);
+          void req;
+        }),
+    });
+    const { bubble } = mount(mergeRow("m1", false), h, { folded: false, foldOf: mergeFold, merge: true });
+    await settle();
+    // Act
+    bubble.update(mergeRow("m1", true));
+    await settle();
+    answer(openSuccess(page([]), "tok:m1"));
+    await settle();
+    // Assert
+    expect(bubble.isExpanded()).toBe(false);
+  });
+
+  it("records an open closed again because a fold superseded it", async () => {
+    // Arrange
+    let answer: (response: OpenFeedResponse) => void = () => undefined;
+    const h = harness({
+      openFeed: () =>
+        new Promise<OpenFeedResponse>((resolve) => {
+          answer = resolve;
+        }),
+    });
+    const { bubble } = mount(mergeRow("m1", false), h, { folded: false, foldOf: mergeFold, merge: true });
+    await settle();
+    const capture = captureLogRecords();
+    // Act
+    bubble.update(mergeRow("m1", true));
+    await settle();
+    answer(openSuccess(page([]), "tok:m1"));
+    await settle();
+    // Assert
+    capture.logger.flush();
+    await Promise.resolve();
+    expect(capture.sent.filter((r) => r.operation === "feed.bubble-open-superseded")).toHaveLength(1);
   });
 
   it("keeps the reader's open over a push stating the daemon's default folded", async () => {

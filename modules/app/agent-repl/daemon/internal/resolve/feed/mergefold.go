@@ -144,7 +144,7 @@ func (r *resolver) SetMergeFold(ws ids.WorkspaceID, id *frontendv1.FeedId, folde
 		return false
 	}
 	if !f.nonDurable[id.GetValue()] {
-		r.recordDurable(s, root, id.GetValue())
+		r.recordDurable(s, root, id.GetValue(), "")
 	}
 	r.logger(ws).Info("daemon.feed.merge_fold",
 		"recorded the reader's fold on a merge bubble", dlog.Context{"row": id.GetValue(), "folded": folded})
