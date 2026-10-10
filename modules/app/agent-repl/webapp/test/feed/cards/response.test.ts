@@ -1996,6 +1996,112 @@ describe("the incremental reveal reconciles the prose without rebuilding it", ()
   });
 });
 
+/**
+ * A COLLAPSED BUBBLE STOPS TYPING ONCE IT IS FULL (owner request, 2026-10-10):
+ * once the revealed text runs past a collapsed bubble's cap, the rest of the
+ * arriving prose is drawn whole rather than typed out unseen.
+ */
+describe("the type-out of a collapsed bubble", () => {
+  const LINE_PX = 20;
+  /** Enough prose that a first frame reveals only a small part of it. */
+  const LONG = "x".repeat(5000);
+  /** LONG's rendered length: markdown-it ends its paragraph with a newline. */
+  const RENDERED_LONG = LONG.length + 1;
+  /** A few animation frames of the faked clock: the slot's first paint, then the type-out's first steps. */
+  const FRAME_MS = 100;
+
+  /**
+   * An arriving response (THINKING or not) holding MARKDOWN, mounted, whose
+   * body renders LINES lines and whose collapsed box shows one; OPEN expands it.
+   */
+  function arriving(opts: {
+    thinking: boolean;
+    lines: number;
+    open?: boolean;
+    markdown?: string;
+    previous?: HTMLElement;
+  }): HTMLElement {
+    const el = drawFeedResponse(
+      response({ thinking: opts.thinking, result: { case: "update", value: { prose: { markdown: opts.markdown ?? LONG } } } }),
+      rowContext(opts.previous),
+    );
+    if (opts.previous === undefined) mount(el);
+    const box = el.querySelector<HTMLElement>(`:scope > .${BUBBLE_BOX_CLASS}`);
+    const body = box?.querySelector<HTMLElement>(":scope > .bubble-body");
+    if (box === null || box === undefined || body === null || body === undefined) throw new Error("the bubble drew no box");
+    if (opts.open === true) box.classList.add(EXPANDED_CLASS);
+    Object.defineProperty(box, "clientHeight", { configurable: true, value: LINE_PX });
+    Object.defineProperty(body, "offsetHeight", { configurable: true, value: opts.lines * LINE_PX });
+    Object.defineProperty(body, "scrollHeight", { configurable: true, value: opts.lines * LINE_PX });
+    return el;
+  }
+
+  /** The characters ELEMENT has revealed so far. */
+  const revealed = (el: HTMLElement): number => Number(el.getAttribute(REVEALED_ATTRIBUTE));
+
+  it("draws the rest whole on the first frame that runs past the collapsed cap", () => {
+    // Arrange
+    const el = arriving({ thinking: true, lines: 4 });
+    // Act
+    vi.advanceTimersByTime(FRAME_MS);
+    // Assert
+    expect(revealed(el)).toBe(RENDERED_LONG);
+  });
+
+  it("keeps typing while the collapsed bubble's text still fits its cap", () => {
+    // Arrange
+    const el = arriving({ thinking: true, lines: 1 });
+    // Act
+    vi.advanceTimersByTime(FRAME_MS);
+    // Assert
+    expect([revealed(el) > 0, revealed(el) < RENDERED_LONG]).toEqual([true, true]);
+  });
+
+  it("keeps typing in a bubble the reader expanded", () => {
+    // Arrange
+    const el = arriving({ thinking: true, lines: 4, open: true });
+    // Act
+    vi.advanceTimersByTime(FRAME_MS);
+    // Assert
+    expect([revealed(el) > 0, revealed(el) < RENDERED_LONG]).toEqual([true, true]);
+  });
+
+  it("keeps typing in an uncapped answer however long it runs", () => {
+    // Arrange
+    const el = arriving({ thinking: false, lines: 4 });
+    // Act
+    vi.advanceTimersByTime(FRAME_MS);
+    // Assert
+    expect([revealed(el) > 0, revealed(el) < RENDERED_LONG]).toEqual([true, true]);
+  });
+
+  it("draws a later push whole on its own first frame once the bubble was full", () => {
+    // Arrange
+    const first = arriving({ thinking: true, lines: 4 });
+    vi.advanceTimersByTime(FRAME_MS);
+    // Act
+    const again = arriving({ thinking: true, lines: 4, markdown: LONG + "y".repeat(5000), previous: first });
+    vi.advanceTimersByTime(FRAME_MS);
+    // Assert
+    expect(revealed(again)).toBe(RENDERED_LONG + 5000);
+  });
+
+  it("records drawing the rest whole with the row and how far the type-out had reached", async () => {
+    // Arrange
+    arriving({ thinking: true, lines: 4 });
+    const capture = captureLogRecords("debug");
+    // Act
+    vi.advanceTimersByTime(FRAME_MS);
+    // Assert
+    const record = await forwardedRecord(capture, "feed.cards.response.collapsed-full");
+    expect([record.level.case, record.context?.row, Number(record.context?.total)]).toEqual([
+      "debug",
+      "row-1",
+      RENDERED_LONG,
+    ]);
+  });
+});
+
 describe("the thinking bubble", () => {
   it("draws a thinking response as a purple assistant bubble marked thinking", () => {
     // Arrange, Act — a thinking-flagged response.

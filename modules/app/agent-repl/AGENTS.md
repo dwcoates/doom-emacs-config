@@ -1614,9 +1614,10 @@ three words name them. They name DIFFERENT BUBBLES, never stages of one.
   the same turn lands after it (`FeedResponse.interim`,
   `daemon/internal/resolve/feed/interim.go`), because only then is it proven
   not to be the one the turn ends on. Drawn collapsed to one line ending in
-  an ellipsis, on the page's own background, its text the tool card's
-  header grey (`--interim-text` is `var(--tool-command)`, the Bash command's
-  color, in both themes).
+  an ellipsis, on the page's own background, its text half way between the
+  tool card's header grey and the body text (`--interim-text` is an even
+  `color-mix` of `--tool-command`, the Bash command's color, and `--fg`, in
+  both themes).
 - **Thinking response:** the agent's reasoning bubbles
   (`FeedResponse.thinking`). Never interim and never final; drawn like an
   interim response.

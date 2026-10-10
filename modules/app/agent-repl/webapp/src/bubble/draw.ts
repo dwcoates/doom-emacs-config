@@ -211,6 +211,8 @@ export type BubbleSpec = PromptBubbleSpec | ResponseBubbleSpec;
 /** A drawn bubble: the element, the body, and the content nodes the body now holds. */
 export interface DrawnBubble {
   bubble: HTMLElement;
+  /** The box the body hangs in: the scroll box, capped or not (`bubbleBox`). */
+  box: HTMLElement;
   body: BubbleBody;
   /** The live content, position for position with the spec's (see `paintBody`). */
   content: readonly ChildNode[];
@@ -281,7 +283,7 @@ export function drawBubble(spec: BubbleSpec, previous?: HTMLElement): DrawnBubbl
   // Painted LAST, inside the finished bubble: a slot holding a tree measures
   // against the bubble around it, so the body must already hang in one.
   const content = paintBody(body, spec.content);
-  return { bubble, body, content };
+  return { bubble, box: scroll, body, content };
 }
 
 /** The parts of a bubble a redraw keeps. */

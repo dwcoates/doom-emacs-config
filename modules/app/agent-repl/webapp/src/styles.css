@@ -143,12 +143,13 @@
      step darker than --muted, the same grey the collapsed repository header
      wears; the dark theme lifts it to its own --muted grey. */
   --tool-command: #4b5563;
-  /* The prose of a thinking bubble or an interim response (owner request,
-     2026-10-08): EXACTLY the tool card's header grey, the one the Bash
-     command wears. It is that token, not a copy of its value, so the two
-     cannot drift; the dark theme redefines --tool-command alone, and this
-     follows it. */
-  --interim-text: var(--tool-command);
+  /* The prose of a thinking bubble or an interim response: HALF WAY between
+     the tool card's header grey (the one the Bash command wears) and the body
+     text a full response bubble wears (owner request, 2026-10-10; it was
+     exactly --tool-command, which read too dim). It mixes the two tokens
+     rather than copying a value, so it cannot drift from either; the dark
+     theme redefines --tool-command and --fg alone, and this follows both. */
+  --interim-text: color-mix(in srgb, var(--tool-command), var(--fg));
   /* Textless-thinking progress indicator: orange, distinct from every other
      status color in the palette. */
   --thinking: #ea580c;
@@ -4622,8 +4623,20 @@ bubble-body.bubble-body { display: block; }
    its first line wraps. It changes NOTHING about the corner: the corner's
    element, box, reveal and hover are untouched, and the ghost is zero-height,
    so no line is shortened by it and the first line still flows beside the
-   real corner. A capped bubble (thinking, agentic, compaction) has no ghost,
-   so its fold, fade and ellipsis clamp measure exactly what they did. */
+   real corner. A fade-capped bubble (agentic, compaction) has no ghost, so
+   its fold and fade measure exactly what they did.
+
+   AN OPEN ELLIPSIS BUBBLE HAS THE GHOST, A CLOSED ONE NEVER (owner request,
+   2026-10-10: an interim that showed its whole one line collapsed wrapped it
+   once selected). The collapsed ellipsis clamp makes the body a box of its own
+   (`display: -webkit-box`), and a box of its own beside a float DOES add to
+   the fit-content width: the bubble is the text plus the corner, and the line
+   sits beside the corner whole. Opening it drops the clamp, the body rejoins
+   the corner's formatting context, and without the ghost the bubble shrank to
+   the text alone and wrapped the line around the corner. With the ghost the
+   open bubble is the text plus the same footprint, so its width and its first
+   line are what the collapsed one showed. The closed box must not have it: its
+   own box already counts the corner, and the ghost would count it twice. */
 .usage-corner {
   /* THE ONE SIZE both figures read (owner ruling, 2026-09-15): set here and
      inherited, so the token, the duration and both reserves cannot differ. */
@@ -4667,7 +4680,8 @@ bubble-body.bubble-body { display: block; }
    `em` in one resolves against the corner's own font size on the corner and
    the ghost's identical one on the ghost. */
 .usage-corner,
-.bubble[data-cap-lines="none"] .usage-corner + .bubble-body > .response-prose:first-child > p:first-child {
+.bubble[data-cap-lines="none"] .usage-corner + .bubble-body > .response-prose:first-child > p:first-child,
+.bubble[data-more="ellipsis"] > .bubble-scroll.expanded > .usage-corner + .bubble-body > .response-prose:first-child > p:first-child {
   /* The half-leading of the corner's line: the space between its line box's
      top and the figures' em box. It is part of the top gap as drawn, so the
      right gap carries it too. */
@@ -4695,7 +4709,8 @@ bubble-body.bubble-body { display: block; }
    widest of them, exactly like the corner's one-cell reserve grid. The
    real-WebKit suite (test/webkit/usage-corner-ghost.webkit.test.ts) holds the
    ghost's width to the corner's measured footprint. */
-.bubble[data-cap-lines="none"] .usage-corner + .bubble-body > .response-prose:first-child > p:first-child::before {
+.bubble[data-cap-lines="none"] .usage-corner + .bubble-body > .response-prose:first-child > p:first-child::before,
+.bubble[data-more="ellipsis"] > .bubble-scroll.expanded > .usage-corner + .bubble-body > .response-prose:first-child > p:first-child::before {
   content: var(--usage-reserve-labels);
   float: right;
   height: 0;
