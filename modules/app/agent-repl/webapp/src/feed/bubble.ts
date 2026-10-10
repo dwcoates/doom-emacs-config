@@ -189,6 +189,13 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
   // daemon's default fold never overrides the reader's (applyWireFold).
   let readerHeld = false;
   let expanded = false;
+  // WHETHER THE BUBBLE IS STILL WANTED OPEN. An open is a round trip, and a
+  // fold can land while it is in flight -- the daemon's success fold on a
+  // merge bubble drawn open at its queueing, or the reader's own collapse.
+  // Every expand sets it and every fold clears it, and an open that completes
+  // finds it cleared and closes again, so the fold that arrived mid-open is
+  // the one that stands.
+  let wantOpen = false;
   let child: FeedController | null = null;
   let watch: StreamHandle | null = null;
   let composer: Handle | null = null;
@@ -269,6 +276,7 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
       context: { row: id.value, folded: next.folded, byReader: next.byReader, expanded },
     });
     if (next.folded) {
+      wantOpen = false;
       if (expanded) collapse();
       return;
     }
@@ -356,6 +364,7 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
    */
   async function expand(): Promise<boolean> {
     if (disposed) return false;
+    wantOpen = true;
     if (expanded) return true;
     if (opening !== null) return opening;
     opening = open();
@@ -393,6 +402,14 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
         );
         openWatch(requireMessage(result.value.watch, "OpenFeedSuccess.watch"));
         applyExpanded(true);
+        if (!wantOpen) {
+          log.info("a bubble was folded while its open was in flight; the open is closed again", {
+            operation: "feed.bubble-open-superseded",
+            context: { row: id.value },
+          });
+          collapse();
+          return false;
+        }
         return true;
       }
       case "error":
@@ -536,6 +553,7 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
    * it, so the next expansion begins from a fresh `OpenFeed` page.
    */
   function collapse(): void {
+    wantOpen = false;
     const above = heightWhollyAboveViewport();
     log.info("collapsing a bubble", {
       operation: "feed.bubble-collapse",
