@@ -2060,6 +2060,53 @@ func TestAnAnnouncedStartingShimIsAdoptedAsTheInertSurvivorItIs(t *testing.T) {
 	}
 }
 
+// TestAnInertSurvivorsHoldsAreSettledAfterItsCarriedGateStands pins the boot
+// recovery of the 2026-10-10 doom prompt: a survivor with no session (a shim
+// parked at its cold gate) has its holds settled, and only after the carries
+// are taken up, which is where its gate is raised again.
+func TestAnInertSurvivorsHoldsAreSettledAfterItsCarriedGateStands(t *testing.T) {
+	// Arrange: the starting-shim arrangement above, an inert survivor.
+	const recordedPID = 4242
+	var h *harness
+	h = newHarness(t, func(deps *Deps, harn *harness) {
+		h = harn
+		deps.Clock = &bootStepClock{now: instant}
+		deps.ShimAlive = func(int) bool { return true }
+		deps.AdoptBound = 200 * time.Millisecond
+	})
+	ws := h.register(t, t.TempDir(), sessionlock.StateFree)
+	socket := h.deps.Layout.ShimSocket(string(ws.ID))
+	bindAfter(h, socket, 1)(&h.deps, h)
+	seq, err := New(h.deps)
+	if err != nil {
+		t.Fatalf("boot.New: %v", err)
+	}
+	h.seq = seq
+	pid := recordedPID
+	if err := h.db.SetSpawnedShimPID(context.Background(), ws.ID, &pid); err != nil {
+		t.Fatalf("SetSpawnedShimPID: %v", err)
+	}
+	settledAtTakeUp := -1
+	h.rollout.onTakeUp = func() {
+		h.queue.mu.Lock()
+		settledAtTakeUp = len(h.queue.reconnects)
+		h.queue.mu.Unlock()
+	}
+
+	// Act.
+	if _, err := h.seq.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Assert.
+	h.queue.mu.Lock()
+	got := append([]wsm.WorkspaceID(nil), h.queue.reconnects...)
+	h.queue.mu.Unlock()
+	if settledAtTakeUp != 0 || len(got) != 1 || got[0] != ws.ID {
+		t.Fatalf("settled at take-up = %d, settled = %v, want [%v] settled after the carries", settledAtTakeUp, got, ws.ID)
+	}
+}
+
 // TestAStartingShimThatNeverAnnouncesItselfIsRecordedAtError pins the one loud
 // record of this path. Every other outcome is the ordinary course of a boot
 // and stays at INFO.

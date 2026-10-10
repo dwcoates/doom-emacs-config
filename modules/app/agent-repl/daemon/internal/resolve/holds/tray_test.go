@@ -21,9 +21,9 @@ func TestTrayConvertsEachClassificationArm(t *testing.T) {
 		want string
 	}{
 		{
-			name: "unjudged draws classifying",
+			name: "unjudged with nothing classifying draws awaiting_delivery",
 			held: hold("t1", "fix the flaky test"),
-			want: "classifying",
+			want: "awaiting_delivery",
 		},
 		{
 			name: "classifying",
@@ -58,6 +58,11 @@ func TestTrayConvertsEachClassificationArm(t *testing.T) {
 		{
 			name: "unjudged under a daemon hold draws daemon_held",
 			held: func() wsm.HeldPrompt { h := hold("t1", "after the merge"); h.Hold = kindOf(wsm.HoldMerge); return h }(),
+			want: "daemon_held",
+		},
+		{
+			name: "unjudged under the cold-gate hold draws daemon_held",
+			held: func() wsm.HeldPrompt { h := hold("t1", "wake up"); h.Hold = kindOf(wsm.HoldColdGate); return h }(),
 			want: "daemon_held",
 		},
 		{
@@ -185,6 +190,7 @@ func TestTrayConvertsEachHoldArm(t *testing.T) {
 		{name: "reconnect", kind: kindOf(wsm.HoldReconnect), want: "reconnect"},
 		{name: "build refresh", kind: kindOf(wsm.HoldBuildRefresh), want: "build_refresh"},
 		{name: "merge", kind: kindOf(wsm.HoldMerge), want: "merge"},
+		{name: "cold gate", kind: kindOf(wsm.HoldColdGate), want: "cold_gate"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -373,6 +379,8 @@ func classificationName(p *frontendv1.HeldPrompt) string {
 		return "classification_error"
 	case *frontendv1.HeldPrompt_DaemonHeld:
 		return "daemon_held"
+	case *frontendv1.HeldPrompt_AwaitingDelivery:
+		return "awaiting_delivery"
 	default:
 		return ""
 	}
@@ -389,6 +397,8 @@ func holdName(p *frontendv1.HeldPrompt) string {
 		return "build_refresh"
 	case *frontendv1.HeldPrompt_Merge:
 		return "merge"
+	case *frontendv1.HeldPrompt_ColdGate:
+		return "cold_gate"
 	default:
 		return ""
 	}
@@ -521,6 +531,21 @@ func TestHeldStatusComposesEveryStatus(t *testing.T) {
 			want: wantStatus{badge: wantBadge{"after reconnect", "held until the session reconnects"}, fact: "reconnect", notes: []string{"after this turn"}},
 		},
 		{
+			name: "cold-gate hold under daemon_held draws the hold's badge alone",
+			p:    &frontendv1.HeldPrompt{Classification: &frontendv1.HeldPrompt_DaemonHeld{DaemonHeld: &frontendv1.HeldPromptDaemonHeld{}}, Hold: &frontendv1.HeldPrompt_ColdGate{ColdGate: &frontendv1.HeldPromptColdGateHold{}}},
+			want: wantStatus{badge: wantBadge{"awaiting cold gate", "held until the cold gate is answered; a prompt never answers it"}, fact: "cold_gate", notes: []string{}},
+		},
+		{
+			name: "a cold-gate hold outranks a turn-end verdict",
+			p:    &frontendv1.HeldPrompt{Classification: holdForTurnEnd(false), Hold: &frontendv1.HeldPrompt_ColdGate{ColdGate: &frontendv1.HeldPromptColdGateHold{}}},
+			want: wantStatus{badge: wantBadge{"awaiting cold gate", "held until the cold gate is answered; a prompt never answers it"}, fact: "cold_gate", notes: []string{"after this turn"}},
+		},
+		{
+			name: "awaiting delivery",
+			p:    &frontendv1.HeldPrompt{Classification: &frontendv1.HeldPrompt_AwaitingDelivery{AwaitingDelivery: &frontendv1.HeldPromptAwaitingDelivery{}}},
+			want: wantStatus{badge: wantBadge{"queued", "waits its turn in the queue; nothing is classifying it"}, fact: "awaiting_delivery", notes: []string{}},
+		},
+		{
 			name: "coalescence is a note",
 			p:    &frontendv1.HeldPrompt{Classification: &frontendv1.HeldPrompt_Classifying{Classifying: &frontendv1.HeldPromptClassifying{}}, Coalesced: &frontendv1.HeldPromptCoalesced{}},
 			want: wantStatus{badge: wantBadge{"classifying", "queued — classifying"}, fact: "classifying", notes: []string{"later prompts were folded into this one"}},
@@ -556,6 +581,8 @@ func TestHeldStatusLabelsAreOneToThreeWords(t *testing.T) {
 		{Classification: holdForTurnEnd(false), Hold: &frontendv1.HeldPrompt_BuildRefresh{BuildRefresh: &frontendv1.HeldPromptBuildRefreshHold{}}},
 		{Classification: holdForTurnEnd(false), Hold: &frontendv1.HeldPrompt_Reconnect{Reconnect: &frontendv1.HeldPromptReconnectHold{}}},
 		{Classification: &frontendv1.HeldPrompt_DaemonHeld{DaemonHeld: &frontendv1.HeldPromptDaemonHeld{}}, Hold: &frontendv1.HeldPrompt_Merge{Merge: &frontendv1.HeldPromptMergeHold{}}},
+		{Classification: &frontendv1.HeldPrompt_DaemonHeld{DaemonHeld: &frontendv1.HeldPromptDaemonHeld{}}, Hold: &frontendv1.HeldPrompt_ColdGate{ColdGate: &frontendv1.HeldPromptColdGateHold{}}},
+		{Classification: &frontendv1.HeldPrompt_AwaitingDelivery{AwaitingDelivery: &frontendv1.HeldPromptAwaitingDelivery{}}},
 	}
 
 	for _, p := range all {
@@ -770,7 +797,9 @@ func TestTrayMarksACoalescedHold(t *testing.T) {
 func TestTrayComposesTheCoalescedNote(t *testing.T) {
 	// Arrange.
 	r, _ := newResolver(t)
-	held := hold("t1", "a\nb")
+	// A classifier in flight is the stamped arm: an unjudged record draws
+	// awaiting_delivery since 2026-10-10.
+	held := verdict(hold("t1", "a\nb"), wsm.ArmClassifying, "")
 	held.Coalesced = true
 
 	// Act.
