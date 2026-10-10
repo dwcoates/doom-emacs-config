@@ -970,6 +970,10 @@ describe("the footer status wave's stylesheet contract", () => {
 const GHOST_HOST =
   '.bubble[data-cap-lines="none"] .usage-corner + .bubble-body > .response-prose:first-child > p:first-child';
 
+/** The ghost's second host: the first paragraph of an OPEN ellipsis bubble with a corner. */
+const OPEN_ELLIPSIS_GHOST_HOST =
+  '.bubble[data-more="ellipsis"] > .bubble-scroll.expanded > .usage-corner + .bubble-body > .response-prose:first-child > p:first-child';
+
 /**
  * The corner's geometry tokens: the one rule that declares them for both of
  * their readers, the corner and the ghost's host paragraph. They moved out of
@@ -977,8 +981,12 @@ const GHOST_HOST =
  */
 function cornerTokens(): string {
   return (
-    rulesOf(stylesheet).find((rule) => rule.selectors.includes(".usage-corner") && rule.selectors.includes(GHOST_HOST))
-      ?.declarations ?? ""
+    rulesOf(stylesheet).find(
+      (rule) =>
+        rule.selectors.includes(".usage-corner") &&
+        rule.selectors.includes(GHOST_HOST) &&
+        rule.selectors.includes(OPEN_ELLIPSIS_GHOST_HOST),
+    )?.declarations ?? ""
   );
 }
 
@@ -1058,6 +1066,46 @@ describe("the usage corner's sizing ghost", () => {
 
     // Assert
     expect(declarations).toMatch(/padding-right:\s*calc\(var\(--usage-corner-gap\) - var\(--bubble-scroll-gap\)\)/);
+  });
+
+  it("hosts the ghost on the same rule in an open ellipsis bubble", () => {
+    // Arrange / Act
+    const open = declarationsOf(`${OPEN_ELLIPSIS_GHOST_HOST}::before`);
+
+    // Assert
+    expect(open).toBe(ghost());
+  });
+
+  /** Whether the first paragraph of an ellipsis bubble, OPEN or not, hosts a ghost. */
+  function ellipsisHostsGhost(open: boolean): boolean {
+    const bubble = document.createElement("div");
+    bubble.className = "bubble md assistant interim-response";
+    bubble.setAttribute("data-role", "response");
+    bubble.setAttribute("data-cap-lines", "1");
+    bubble.setAttribute("data-more", "ellipsis");
+    bubble.innerHTML = `<div class="bubble-box bubble-scroll${open ? " expanded" : ""}"><span class="usage-corner"></span><div class="bubble-body"><div class="response-prose"><p>prose</p></div></div></div>`;
+    const p = bubble.querySelector("p");
+    if (p === null) throw new Error("the bubble drew no paragraph");
+    return rulesOf(stylesheet)
+      .flatMap((rule) => rule.selectors)
+      .filter((sel) => sel.endsWith("p:first-child::before"))
+      .some((sel) => p.matches(sel.replace(/::before$/, "")));
+  }
+
+  it("hosts the ghost in an open ellipsis bubble", () => {
+    // Arrange / Act
+    const hosts = ellipsisHostsGhost(true);
+
+    // Assert
+    expect(hosts).toBe(true);
+  });
+
+  it("never hosts the ghost in a closed ellipsis bubble, whose clamped box already counts the corner", () => {
+    // Arrange / Act
+    const hosts = ellipsisHostsGhost(false);
+
+    // Assert
+    expect(hosts).toBe(false);
   });
 
   it("draws the reserved labels it is handed, one per line", () => {
