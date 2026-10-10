@@ -2511,13 +2511,14 @@ export const HOLD_CLASSIFICATION_ARMS = [
   "uninterruptibleTurn",
   "classificationError",
   "daemonHeld",
+  "awaitingDelivery",
 ] as const;
 export type HoldClassificationArm = (typeof HOLD_CLASSIFICATION_ARMS)[number];
 
 /** The ONE classification that draws an [accept] button (ruled). */
 export const HOLD_ACCEPTABLE_ARM = "holdForTurnEnd";
 
-export const HOLD_ARMS = ["shutdown", "reconnect", "buildRefresh", "merge"] as const;
+export const HOLD_ARMS = ["shutdown", "reconnect", "buildRefresh", "merge", "coldGate"] as const;
 export type HoldArm = (typeof HOLD_ARMS)[number];
 
 type HeldPromptInit = MessageInitShape<typeof HeldPromptSchema>;
@@ -2544,6 +2545,8 @@ const classificationValue = (
       return { case: "classificationError", value: { detail: "the classifier timed out" } };
     case "daemonHeld":
       return { case: "daemonHeld", value: {} };
+    case "awaitingDelivery":
+      return { case: "awaitingDelivery", value: {} };
   }
 };
 
@@ -2557,6 +2560,8 @@ const holdValue = (arm: HoldArm): NonNullable<HeldPromptInit["hold"]> => {
       return { case: "buildRefresh", value: {} };
     case "merge":
       return { case: "merge", value: {} };
+    case "coldGate":
+      return { case: "coldGate", value: {} };
   }
 };
 
@@ -2577,6 +2582,8 @@ export const HOLD_BADGES: Readonly<Record<string, { label: string; detail?: stri
   reconnect: { label: "after reconnect", detail: "held until the session reconnects" },
   buildRefresh: { label: "build refresh", detail: "held for the build refresh" },
   merge: { label: "after the merge", detail: "held until the merge ends; the workspace stays open for it" },
+  coldGate: { label: "awaiting cold gate", detail: "held until the cold gate is answered; a prompt never answers it" },
+  awaitingDelivery: { label: "queued", detail: "waits its turn in the queue; nothing is classifying it" },
 };
 
 export function heldPrompt(init?: {

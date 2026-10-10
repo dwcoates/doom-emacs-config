@@ -1765,6 +1765,12 @@ hover tooltip. Answering
 or retracting the gate restores both. Never gate either side on a signal the
 other cannot see.
 
+A prompt never answers the gate (judgement call 11; owner, re-affirmed
+2026-10-10). A NEW prompt is refused `cold_gate`. One already held when a
+revival parks at the gate waits in the held tray under the `cold_gate` hold,
+badge "awaiting cold gate", and the session the gate's answer brings up
+delivers it (`daemon/AGENTS.md`, "A prompt waits at the cold gate").
+
 ## What each status color means
 
 Owner ruling, 2026-09-28. A workspace's status color answers ONE question on

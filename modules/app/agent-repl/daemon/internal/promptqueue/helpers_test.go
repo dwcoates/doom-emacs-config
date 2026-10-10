@@ -1339,6 +1339,9 @@ type harness struct {
 	clientReaped bool
 	// coldGate is the standing gate's own account, empty when no gate stands.
 	coldGate string
+	// noWatcher keeps the shim client while the session has no watcher: a shim
+	// parked at its cold gate, or a session between its start and its watch.
+	noWatcher bool
 
 	// hostPublishes counts the host-view republications the queue asked for.
 	hostMu        sync.Mutex
@@ -1395,7 +1398,7 @@ func newHarness(t *testing.T) *harness {
 			}
 			return nil
 		},
-		Watcher:        func(ids.WorkspaceID) (Watcher, bool) { return h.watcher, !h.noSession },
+		Watcher:        func(ids.WorkspaceID) (Watcher, bool) { return h.watcher, !h.noSession && !h.noWatcher },
 		SessionStarted: func(ids.WorkspaceID) bool { return !h.noSession && !h.notStarted },
 		SessionAbsent:  func(ids.WorkspaceID) bool { return h.sessionAbsent },
 		ColdGate: func(ids.WorkspaceID) (string, bool) {

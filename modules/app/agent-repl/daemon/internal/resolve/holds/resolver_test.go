@@ -301,7 +301,9 @@ func TestTrayKeepsTheEditingMarkerAcrossAHoldsPush(t *testing.T) {
 func TestTrayBadgesThePromptBeingEdited(t *testing.T) {
 	// Arrange.
 	r, _ := newResolver(t)
-	r.SetHeldPrompts(testWS, []wsm.HeldPrompt{hold("t1", "one")})
+	// A classifier in flight is the stamped arm: an unjudged record draws
+	// awaiting_delivery since 2026-10-10.
+	r.SetHeldPrompts(testWS, []wsm.HeldPrompt{verdict(hold("t1", "one"), wsm.ArmClassifying, "")})
 
 	// Act.
 	r.SetEditing(testWS, "t1")

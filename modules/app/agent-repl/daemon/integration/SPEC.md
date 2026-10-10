@@ -193,6 +193,10 @@ the vendor (`AGENT_REPL_FORBID_VENDOR_CALLS=1` in every process).
   AnswerColdGate; AnswerColdGate{pay} re-opens with `cold_remediation{pay}`;
   {compact{model,scope}} echoes exactly; a scope the menu never served is
   refused with the intended arm
+- a prompt held for a revival whose resume answers `cold` waits at the gate
+  (tray `cold_gate` hold and badge, no StartTurn); AnswerColdGate{pay}
+  brings the session up and the held prompt is its first StartTurn (the
+  2026-10-10 doom incident)
 - the config dir is DETERMINED: a workspace under MULTI_REPO_ROOT spawns
   with CLAUDE_CONFIG_DIR = the multi-repo root, another with the default;
   the topbar account reads each root's .claude.json email; a root without
