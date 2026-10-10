@@ -3,6 +3,7 @@ package footer
 import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	"claude-repld/internal/sessionwatcher"
 )
 
 // focusPanel is the expanded panel a focus names. The zero value is no focus
@@ -99,9 +100,9 @@ func launchedWork(s *wsState, previous, next LiveWorkSet) []string {
 			out = append(out, prefix+id)
 		}
 	}
-	take("agent:", agentIDSet(previous.Agents), agentIDSet(next.Agents))
-	take("shell:", workIDSet(previous.Shells), workIDSet(next.Shells))
-	take("monitor:", workIDSet(previous.Monitors), workIDSet(next.Monitors))
+	take(sessionwatcher.NameAgent, agentIDSet(previous.Agents), agentIDSet(next.Agents))
+	take(sessionwatcher.NameShell, workIDSet(previous.Shells), workIDSet(next.Shells))
+	take(sessionwatcher.NameMonitor, workIDSet(previous.Monitors), workIDSet(next.Monitors))
 	return out
 }
 

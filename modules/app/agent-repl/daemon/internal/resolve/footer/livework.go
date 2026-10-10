@@ -110,21 +110,21 @@ func reconcileLiveWork(s *wsState, live LiveWorkSet, now time.Time) (dropped, ad
 		s.tok.forgetAgent(row.createdAgent)
 		s.rememberRetired(row)
 		delete(s.agents, unit)
-		dropped = append(dropped, "agent:"+unit)
+		dropped = append(dropped, sessionwatcher.NameAgent+unit)
 	}
 	for id := range s.shells {
 		if rowIsListed(shells, id) {
 			continue
 		}
 		delete(s.shells, id)
-		dropped = append(dropped, "shell:"+id)
+		dropped = append(dropped, sessionwatcher.NameShell+id)
 	}
 	for unit := range s.monitors {
 		if rowIsListed(monitors, unit) {
 			continue
 		}
 		delete(s.monitors, unit)
-		dropped = append(dropped, "monitor:"+unit)
+		dropped = append(dropped, sessionwatcher.NameMonitor+unit)
 	}
 
 	for _, id := range sortedKeys(agents) {
@@ -139,9 +139,9 @@ func reconcileLiveWork(s *wsState, live LiveWorkSet, now time.Time) (dropped, ad
 		// run rather than a zero time, which would draw a runtime measured from
 		// the epoch; the run's own start frame installs the true instant.
 		s.agents[id] = s.minimalAgentRow(id, id, now, provenanceLiveWorkSet)
-		added = append(added, "agent:"+id)
+		added = append(added, sessionwatcher.NameAgent+id)
 		if retiredAny(s, id) {
-			readded = append(readded, "agent:"+id)
+			readded = append(readded, sessionwatcher.NameAgent+id)
 		}
 	}
 	for _, id := range sortedKeys(shells) {
@@ -149,9 +149,9 @@ func reconcileLiveWork(s *wsState, live LiveWorkSet, now time.Time) (dropped, ad
 			continue
 		}
 		s.shells[id] = &shellRow{work: id, startedAt: now, order: s.nextOrder()}
-		added = append(added, "shell:"+id)
+		added = append(added, sessionwatcher.NameShell+id)
 		if retiredAny(s, id) {
-			readded = append(readded, "shell:"+id)
+			readded = append(readded, sessionwatcher.NameShell+id)
 		}
 	}
 	for _, id := range sortedKeys(monitors) {
@@ -159,7 +159,7 @@ func reconcileLiveWork(s *wsState, live LiveWorkSet, now time.Time) (dropped, ad
 			continue
 		}
 		s.monitors[id] = &monitorRow{unit: id, startedAt: now, order: s.nextOrder()}
-		added = append(added, "monitor:"+id)
+		added = append(added, sessionwatcher.NameMonitor+id)
 	}
 	return dropped, added, readded
 }
