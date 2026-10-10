@@ -327,10 +327,17 @@ func (q *queue) pushTray(ctx context.Context, ws ids.WorkspaceID, log dlog.Logge
 	return nil
 }
 
-// standingReconnectHold reports whether a hold is standing (not retired) under
-// the reconnect hold: a prompt that waits for a session to come up.
-func standingReconnectHold(h wsm.HeldPrompt) bool {
-	return h.Tombstone == nil && h.Hold != nil && *h.Hold == wsm.HoldReconnect
+// standingSessionHold reports whether a hold is standing (not retired) under a
+// hold that waits on the SESSION: the reconnect hold (a session coming up) or
+// the cold-gate hold (a session parked at its gate). The session coming up is
+// what releases both.
+func standingSessionHold(h wsm.HeldPrompt) bool {
+	return h.Tombstone == nil && h.Hold != nil && waitsOnSession(*h.Hold)
+}
+
+// waitsOnSession reports whether a hold kind waits on the session coming up.
+func waitsOnSession(kind wsm.HoldKind) bool {
+	return kind == wsm.HoldReconnect || kind == wsm.HoldColdGate
 }
 
 // standingHold finds one workspace's standing hold by turn.

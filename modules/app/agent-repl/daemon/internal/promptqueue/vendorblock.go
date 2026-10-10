@@ -88,7 +88,7 @@ func (q *queue) releaseBeforeSubmit(ctx context.Context, d *delivery, log dlog.L
 	}
 	waiting := 0
 	for _, h := range standing {
-		if standingReconnectHold(h) {
+		if standingSessionHold(h) {
 			waiting++
 		}
 	}
