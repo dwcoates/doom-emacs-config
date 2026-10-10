@@ -3,6 +3,7 @@ package wsm
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"testing"
 )
 
@@ -80,6 +81,79 @@ func TestPutDurableFeedRowRefusesAMovedOrderKey(t *testing.T) {
 	}
 	if !loggedOperation(log, "daemon.wsm.put_durable_feed_row", "error") {
 		t.Fatalf("the refusal was not logged at error: %v", log.Records())
+	}
+}
+
+// TestPutDurableFeedRowSettlesAPinnedRowOnce covers the one permitted move: a
+// publication naming the recorded pin key as SettledFrom moves the row to its
+// settled key, and the record carries the settling publication.
+func TestPutDurableFeedRowSettlesAPinnedRowOnce(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	if err := s.PutDurableFeedRow(context.Background(), durableRow(ws.ID, "row-1", "~a", "running")); err != nil {
+		t.Fatalf("PutDurableFeedRow: %v", err)
+	}
+	settle := durableRow(ws.ID, "row-1", "2.b", "landed")
+	settle.SettledFrom = "~a"
+
+	// Act
+	err := s.PutDurableFeedRow(context.Background(), settle)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("PutDurableFeedRow settle: %v", err)
+	}
+	got, _ := s.DurableFeedRows(context.Background(), ws.ID)
+	if len(got) != 1 || got[0].OrderKey != "2.b" || string(got[0].Row) != "landed" {
+		t.Fatalf("rows = %+v, want the row at its settled key as last published", got)
+	}
+}
+
+// TestPutDurableFeedRowRefusesASettleFromAnotherKey covers each settle the
+// record cannot honor: nothing moves, and the refusal is an ERROR.
+func TestPutDurableFeedRowRefusesASettleFromAnotherKey(t *testing.T) {
+	tests := []struct {
+		name     string
+		recorded string
+		from     string
+		want     []string
+	}{
+		{name: "the recorded key is not the one settled from", recorded: "~a", from: "~z", want: []string{"~a"}},
+		{name: "the row was never recorded", recorded: "", from: "~a", want: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, log := testStore(t)
+			ws := testWorkspace(t, s)
+			if tt.recorded != "" {
+				if err := s.PutDurableFeedRow(context.Background(), durableRow(ws.ID, "row-1", tt.recorded, "running")); err != nil {
+					t.Fatalf("PutDurableFeedRow: %v", err)
+				}
+			}
+			settle := durableRow(ws.ID, "row-1", "2.b", "landed")
+			settle.SettledFrom = tt.from
+
+			// Act
+			err := s.PutDurableFeedRow(context.Background(), settle)
+
+			// Assert
+			if err == nil {
+				t.Fatal("a settle the record cannot honor was recorded")
+			}
+			got, _ := s.DurableFeedRows(context.Background(), ws.ID)
+			var keys []string
+			for _, row := range got {
+				keys = append(keys, row.OrderKey)
+			}
+			if fmt.Sprint(keys) != fmt.Sprint(tt.want) {
+				t.Fatalf("recorded keys = %v, want %v", keys, tt.want)
+			}
+			if !loggedOperation(log, "daemon.wsm.put_durable_feed_row", "error") {
+				t.Fatalf("the refusal was not logged at error: %v", log.Records())
+			}
+		})
 	}
 }
 
