@@ -557,6 +557,12 @@ type Watcher interface {
 	// they leave no turn in flight and no live work. A pure attach whose
 	// facts have not arrived is NOT free, whatever TurnInFlight answers.
 	Free() bool
+	// SessionFactsIn reports, without waiting, whether the session facts are
+	// in. Before they are, TurnInFlight's nil does NOT mean no turn runs: an
+	// adopted shim's turn is not yet known.
+	SessionFactsIn() bool
+	// AwaitSessionFacts blocks until the session facts are in, or ctx ends.
+	AwaitSessionFacts(ctx context.Context) error
 	// SetMainAgent names the session's main agent from an accepted turn.
 	SetMainAgent(agent *conversationv1.AgentId)
 	// OnTurnOpening records a turn BEFORE StartTurn is dispatched, so a
