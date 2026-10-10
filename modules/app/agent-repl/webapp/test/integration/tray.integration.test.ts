@@ -118,6 +118,7 @@ const CLASSIFICATION_TEXT: Record<HoldClassificationArm, string> = {
   uninterruptibleTurn: "",
   classificationError: "the classifier timed out",
   daemonHeld: "",
+  awaitingDelivery: "",
 };
 
 describe("classification detail", () => {
