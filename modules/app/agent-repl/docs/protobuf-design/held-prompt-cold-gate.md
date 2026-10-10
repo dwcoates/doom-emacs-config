@@ -52,9 +52,9 @@ The owner's rulings (2026-10-10):
   hold, then the verdict) is unchanged. `cold_gate` is a hold arm and ranks
   with the holds. `awaiting_delivery` is a verdict arm and ranks with the
   verdicts.
-- **Words:** `cold_gate` reads "after the cold gate", detail "held until the
-  cold gate is answered; a prompt never answers it", in the
-  "after reconnect" / "after the merge" pattern. `awaiting_delivery` reads
+- **Words:** `cold_gate` reads "awaiting cold gate" (a badge label is one to
+  three words, `TestHeldStatusLabelsAreOneToThreeWords`), detail "held until
+  the cold gate is answered; a prompt never answers it". `awaiting_delivery` reads
   "queued", detail "waits its turn in the queue; nothing is classifying it".
 - **Webapp colors:** `cold_gate` is teal, like `reconnect`, because the
   session is not up. `awaiting_delivery` is muted, because nothing is acting
