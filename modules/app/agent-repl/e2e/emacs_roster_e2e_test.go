@@ -40,7 +40,7 @@ func TestEmacsRosterArmsPaintTheTabInOrder(t *testing.T) {
 	t.Parallel()
 	s := newEmacsScenario(t)
 	e := s.E
-	installArmObserver(t, e)
+	connectSession(t, s)
 
 	// Record each DISTINCT arm this workspace's row moves through, in the
 	// order the pushes carried them.
@@ -272,6 +272,10 @@ func TestEmacsUnfocusedTurnEndRaisesTheDaemonsBanner(t *testing.T) {
 	t.Parallel()
 	s := newEmacsScenario(t)
 	e := s.E
+	connectSession(t, s)
+	// The warm-up turn may have posted a banner of its own; only one posted
+	// after it counts.
+	before := len(e.Notifier.Invocations())
 
 	e.Eval(`(progn
              (defun agent-repl-e2e--unfocused (&rest _) nil)
@@ -303,13 +307,14 @@ func TestEmacsUnfocusedTurnEndRaisesTheDaemonsBanner(t *testing.T) {
 	e.AwaitEval("the daemon's banner program to record the completed-turn banner", recordForm,
 		func(raw json.RawMessage) bool {
 			var text string
-			return json.Unmarshal(raw, &text) == nil && strings.Contains(text, "turn completed")
+			return json.Unmarshal(raw, &text) == nil && strings.Contains(text, "turn completed") &&
+				completedBanners(e.Notifier.Invocations()[before:]) > 0
 		})
 
 	wantTitle := "✅ " + s.Name + " turn completed"
 	found := false
 	var argvs [][]string
-	for _, inv := range e.Notifier.Invocations() {
+	for _, inv := range e.Notifier.Invocations()[before:] {
 		argvs = append(argvs, inv.Argv)
 		for _, arg := range inv.Argv {
 			if strings.HasPrefix(arg, wantTitle) {
@@ -394,4 +399,16 @@ func decodeBool(raw json.RawMessage) bool {
 		return false
 	}
 	return string(raw) != "false"
+}
+
+// completedBanners counts the completed-turn banners among INVOCATIONS, by
+// the phrase the scenario reads the recorder file for.
+func completedBanners(invocations []harness.Invocation) int {
+	n := 0
+	for _, inv := range invocations {
+		for _, arg := range inv.Argv {
+			n += strings.Count(arg, "turn completed")
+		}
+	}
+	return n
 }
