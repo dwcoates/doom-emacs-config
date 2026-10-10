@@ -40,3 +40,37 @@ stay at the bottom while newer rows arrive. This change amends that contract.
   (owner, 2026-10-10).
 
 ## Landed changes
+
+### 1. FeedRowOrder gains a pinned condition (agent-decided, owner delegated the design 2026-10-10)
+
+- WHAT: `frontend.v1.FeedRowOrder` gains `optional FeedRowOrderPinned pinned`,
+  an empty presence message. The order contract changes from "fixed for the
+  row's life" to "fixed once assigned". A pinned row's key sorts after every
+  unpinned key in its feed. It is re-pushed exactly once with a new key and
+  `pinned` unset when it settles, and the new key sorts just after the feed's
+  newest row at that moment.
+- WHY: the owner wants the merge bubble at the bottom of the feed from the
+  moment it is drawn until the merge resolves, and then to stay where it
+  resolved.
+- Alternatives rejected:
+  - Moving `FeedRow.order` into a `oneof placement { order; pinned }`. It is
+    more literal, but it churns every key read and fixture (about 120 webapp
+    sites and 24 Go sites) for no extra guarantee. With the key-sort design,
+    pinned rows sort correctly with no client special case.
+  - A client-side pin with no key, drawn after all keyed rows. This would make
+    clients decide position, which `FeedRowOrder` forbids ("a client never
+    decides a position").
+- `pinned` is an optional presence message, not a state oneof: absence means
+  no condition, presence means the condition. It does not change how the key
+  is interpreted, because sorting is by key either way.
+- Consequences:
+  - The daemon mints pin keys in a class that sorts after every placed class.
+    Placed keys start with `0`, `1` or `2`; pin keys start with `~`.
+  - A pin key is minted from the moment of pinning plus a counter. That makes
+    it unique across daemon restarts, and the existing durable-row restore
+    (`reserveOrder`) parses it like an entry key.
+  - The daemon re-records a settled row's durable record at its new key.
+  - The webapp accepts exactly one key change per row, from pinned to
+    unpinned, by moving the row. Every other key change stays an ERROR.
+  - New placed rows follow the newest PLACED row and skip pinned ones (the
+    `predecessor` class match), so the pinned row stays below them.
