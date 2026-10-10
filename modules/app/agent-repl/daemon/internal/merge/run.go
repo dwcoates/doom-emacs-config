@@ -13,7 +13,6 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/dlog"
-	"claude-repld/internal/feedid"
 	"claude-repld/internal/gitclient"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/promptqueue"
@@ -132,10 +131,6 @@ type run struct {
 	// queueRound is the ledger round of the QUEUE tab, opened at admission and
 	// closed when the run leaves the queue for its first step.
 	queueRound tabRound
-	// placed reports that the merge STARTED and its bubble is in the feed
-	// (place). Until then the run holds the workspace and waits for it to
-	// fall free, and nothing of the merge is drawn in the feed. Guarded by mu.
-	placed bool
 
 	mu sync.Mutex
 	// rounds counts each tab kind's opened rounds, which is what makes a second
@@ -324,7 +319,7 @@ func (r *run) head(result any) {
 	if r.exiting() {
 		return
 	}
-	r.o.deps.Feed.UpsertDurable(r.ws, feedid.Feed{Root: true}, headRow(r.ws, r.lease.ID, r.label(), r.queuedMS, result))
+	r.o.publishHead(r.ws, r.lease.ID, r.label(), r.queuedMS, result)
 }
 
 // label is the bubble's head line: what is merged, and where to.
@@ -487,7 +482,7 @@ func (r *run) admit(ctx context.Context) error {
 
 	// THE QUEUE IS A TAB. The merge is the one being worked on now, so it is
 	// no longer counted among the waiting. Its ledger interval opens here; its
-	// row is drawn when the merge starts (place).
+	// row is redrawn by the queue republish below.
 	r.queueRound = r.openTab(ctx, TabQueue)
 	// THE MERGE HOLDS THE WORKSPACE BUT HAS NOT STARTED: purple
 	// `merge_waiting` until the workspace falls free (owner ruling,
@@ -520,41 +515,27 @@ func (r *run) admit(ctx context.Context) error {
 	return r.execute(ctx)
 }
 
-// place STARTS the merge in the feed: its bubble's head is drawn now, at the
-// feed's tail, and its queue tab with it.
+// place STARTS the merge once the workspace is free: its bubble, drawn pinned
+// to the feed's bottom since the merge was queued (publishHead), is restated,
+// and the queue republished so the queue tab settles at this start.
 //
-// THE BUBBLE IS PLACED ONLY ONCE THE WORKSPACE IS FREE (owner ruling,
-// 2026-10-08): "while merging, the merge bubble is necessarily the last thing
-// in the feed, because things only land outside of it after the merge has
-// finished". A feed row's order is minted once, at its first draw
-// (resolve/feed/order.go), so a bubble drawn while the workspace still ran a
-// turn or detached work was overtaken by every row those wrote -- measured
-// 2026-10-08, workspace `doom`: two subagents' completions woke the agent and
-// their turns drew below a bubble placed 3 minutes earlier. From here the
-// merge's own turns draw inside the bubble and the user's prompts are held,
-// so nothing can land after it until it ends.
+// THE BUBBLE STANDS LAST WHILE THE MERGE IS IN FLIGHT because it is PINNED
+// (frontend.v1 FeedRowOrder.pinned), not because nothing is drawn after it: a
+// turn or detached work the workspace still runs while the merge waits draws
+// above the bubble, and the bubble settles where it stands when the merge
+// resolves (owner ruling, 2026-10-10).
 func (r *run) place(ctx context.Context) error {
 	if r.exiting() {
 		return nil
 	}
-	r.mu.Lock()
-	r.placed = true
-	r.mu.Unlock()
 	r.head(nil)
 	if err := r.o.republishQueue(ctx, r.repo); err != nil {
 		return fmt.Errorf("could not publish the queue: %w", err)
 	}
-	r.o.log(ctx, r.ws).Info("daemon.merge.start", "the workspace is free; the merge starts and its bubble is placed at the feed's tail", dlog.Context{
+	r.o.log(ctx, r.ws).Info("daemon.merge.start", "the workspace is free; the merge starts in the bubble pinned at the feed's bottom", dlog.Context{
 		"workspace": string(r.ws), "lease": string(r.lease.ID),
 	})
 	return nil
-}
-
-// isPlaced reports whether the merge started and its bubble is in the feed.
-func (r *run) isPlaced() bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.placed
 }
 
 // takeSession resolves where the requester's repository states its merge

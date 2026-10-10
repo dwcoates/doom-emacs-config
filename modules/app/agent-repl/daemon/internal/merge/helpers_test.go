@@ -1205,6 +1205,9 @@ type synthesized struct {
 	Feed feedid.Feed
 	Row  *frontendv1.FeedRow
 	At   int
+	// Pinned reports the row was published pinned to its feed's bottom
+	// (UpsertDurablePinned).
+	Pinned bool
 }
 
 // UpsertDurable is the ONE way the orchestrator publishes a row: every merge
@@ -1212,12 +1215,23 @@ type synthesized struct {
 // so a merge row published any other way panics on the embedded nil
 // interface rather than passing unrecorded.
 func (f *fakeFeed) UpsertDurable(ws ids.WorkspaceID, feed feedid.Feed, row *frontendv1.FeedRow) {
+	f.record(ws, feed, row, false)
+}
+
+// UpsertDurablePinned is UpsertDurable for a row pinned to its feed's bottom:
+// a merge head while the merge is in flight.
+func (f *fakeFeed) UpsertDurablePinned(ws ids.WorkspaceID, feed feedid.Feed, row *frontendv1.FeedRow) {
+	f.record(ws, feed, row, true)
+}
+
+// record appends one published row in the harness's shared sequence.
+func (f *fakeFeed) record(ws ids.WorkspaceID, feed feedid.Feed, row *frontendv1.FeedRow, pinned bool) {
 	at := f.seq()
 	if f.onUpsert != nil {
 		f.onUpsert(row)
 	}
 	f.mu.Lock()
-	f.rows = append(f.rows, synthesized{WS: ws, Feed: feed, Row: row, At: at})
+	f.rows = append(f.rows, synthesized{WS: ws, Feed: feed, Row: row, At: at, Pinned: pinned})
 	f.mu.Unlock()
 }
 

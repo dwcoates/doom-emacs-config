@@ -307,9 +307,22 @@ message FeedRowRemoved {}
 // byte order and code-unit order agree); a shorter key that is a prefix of a
 // longer one sorts first. No two rows of one feed share a key.
 //
-// FIXED FOR THE ROW'S LIFE. Every later push of the same row id carries the
-// same key, so an update never moves a row. A changed key is a daemon invariant
-// violation.
+// FIXED ONCE ASSIGNED. Every later push of the same row id carries the same
+// key, so an update never moves a row. A changed key is a daemon invariant
+// violation, with ONE exception: a PINNED row (`pinned` set) is re-pushed
+// exactly once with a new key and `pinned` unset, when it SETTLES, and from
+// then on that key is fixed like any other. A key change on a row that was not
+// pinned, or a row that turns pinned after it was placed, is still a violation.
+//
+// PINNED ROWS STAND AT THE FEED'S BOTTOM. A pinned row's key sorts after every
+// unpinned row's key in its feed, now and as new rows arrive, so a client
+// sorting by key verbatim draws it below everything else with no special case;
+// pinned rows sort among themselves by key, in the order they were pinned. The
+// daemon pins a row whose content is still in flight and should stay in view
+// while the conversation moves on (a merge bubble from the moment the merge is
+// queued until it resolves). When it settles, its new key sorts just after the
+// newest row of the feed at that moment, so it stays where it was drawn and
+// every row written afterward lands below it.
 //
 // STABLE ACROSS DAEMON RESTARTS for a row drawn from a stored conversation
 // entry: the key is minted from where that entry sits in its conversation, so
@@ -322,7 +335,19 @@ message FeedRowRemoved {}
 message FeedRowOrder {
   // The key. Never empty.
   string key = 1;
+  // SET while the row is PINNED to the feed's bottom: its key is a pin key that
+  // sorts after every unpinned row and will be replaced exactly once, when the
+  // row settles. UNSET for a placed row, whose key is fixed for good. A client
+  // sorts by `key` alone either way; this tells it that the one key change it
+  // will see for this row is expected, and that it moves the row rather than
+  // being refused.
+  optional FeedRowOrderPinned pinned = 2;
 }
+
+// The pinned condition of a row's order (FeedRowOrder.pinned). EMPTY: its
+// presence is the whole fact. A row stops being pinned only by a push that
+// carries a new key with this unset.
+message FeedRowOrderPinned {}
 
 // A message another Claude session sent into this conversation: an
 // inter-session peer message. The client
