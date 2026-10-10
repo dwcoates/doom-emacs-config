@@ -95,6 +95,7 @@ import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/str
 import { SmoothReveal, windowedReveal } from "../../smooth.js";
 import { MalformedView } from "../../rpc/malformed.js";
 import { tickWhileShown } from "../ticking.js";
+import { shouldShowMore } from "../bubble-more.js";
 import { tokenHeatColor } from "../../token-heat.js";
 import type { RowContext } from "./context.js";
 import { FINAL_RESPONSE_CLASS } from "../rows/turn-ended.js";
@@ -251,7 +252,7 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
   // keeps its identity (and a reader scrolled inside it keeps their place) and
   // the prose is reconciled node by node. Everything the wire can refuse was
   // read above, so a malformed push leaves the bubble exactly as it was.
-  const { bubble, body, content } = drawBubble(
+  const { bubble, box, body, content } = drawBubble(
     {
       role: "response",
       variant: u.thinking ? "thinking" : "response",
@@ -288,7 +289,7 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
   if (typesOut) {
     revealSlot(body, slot, resumed);
     markRevealed(bubble, resumed);
-    animate(bubble, body, slot, resumed, windowMs, startSpeed, rc);
+    animate(bubble, box, body, slot, resumed, windowMs, startSpeed, rc);
   } else {
     showWhole(bubble, body, slot);
   }
@@ -725,9 +726,20 @@ function cutShortMarker(): HTMLElement {
  * layout) has no text to pace, so the loop waits for its paint rather than
  * spinning. A host with no `requestAnimationFrame` (a test, an unusual
  * embedder) draws the prose whole rather than not at all.
+ *
+ * A COLLAPSED BUBBLE STOPS TYPING ONCE IT IS FULL (owner request, 2026-10-10).
+ * The type-out is for a reader watching the text arrive, and a collapsed
+ * bubble (a thinking bubble's one line, say) shows nothing past its cap. So
+ * the first frame on which the revealed text already runs past the collapsed
+ * BOX's cap (`shouldShowMore`, the measure the "more" signal draws from) draws
+ * the rest whole, and every later push of the row resumes from that whole and
+ * stops on its own first frame, so the bubble lands as the text arrives. Until
+ * the cap is reached it types out as before, and an expanded bubble (open
+ * folds never show more) or an uncapped one types out to the end.
  */
 function animate(
   bubble: HTMLElement,
+  box: HTMLElement,
   body: BubbleBody,
   slot: HTMLElement,
   resumed: number,
@@ -774,7 +786,16 @@ function animate(
     revealSlot(body, slot, done ? undefined : shown);
     markRevealed(bubble, Math.min(shown, text.length));
     markRevealSpeed(bubble, speed);
-    if (!done) frame(step);
+    if (done) return;
+    if (shouldShowMore(box)) {
+      log.debug("a collapsed bubble is full; drawing the rest of the arriving prose whole", {
+        operation: "feed.cards.response.collapsed-full",
+        context: { row: rc.row.id?.value ?? "unset", shown, total: text.length },
+      });
+      showWhole(bubble, body, slot);
+      return;
+    }
+    frame(step);
   };
   frame(step);
 }

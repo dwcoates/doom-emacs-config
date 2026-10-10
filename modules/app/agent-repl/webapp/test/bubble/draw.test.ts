@@ -286,6 +286,25 @@ describe("drawBubble: the structure every kind shares", () => {
     expect(body.parentElement).toBe(bubble.querySelector(`:scope > .${BUBBLE_SCROLL_CLASS}`));
   });
 
+  it.each([
+    { name: "a capped", capLines: "feed" as const },
+    { name: "an uncapped", capLines: BUBBLE_UNCAPPED },
+  ])("answers $name bubble's box, the one the body hangs in", ({ capLines }) => {
+    // Arrange / Act
+    const { box, body } = drawBubble(spec("response", { capLines }));
+    // Assert
+    expect(body.parentElement).toBe(box);
+  });
+
+  it("answers the box it kept on an in-place redraw", () => {
+    // Arrange
+    const first = drawBubble(spec("response"));
+    // Act
+    const again = drawBubble(spec("response"), first.bubble);
+    // Assert
+    expect(again.box).toBe(first.box);
+  });
+
   it("builds the body as the one bubble-body element", () => {
     // Arrange / Act
     const { body } = drawBubble(spec("agentic"));
