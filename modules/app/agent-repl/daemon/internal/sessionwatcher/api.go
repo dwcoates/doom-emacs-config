@@ -615,6 +615,10 @@ type Watcher interface {
 	// the nil before the facts. A watcher closed first answers
 	// ErrWatcherClosed.
 	AwaitSessionFacts(ctx context.Context) error
+	// SessionFactsIn reports, without waiting, whether the session facts have
+	// been taken up. Until they are, TurnInFlight answers nil for a turn an
+	// adopted shim may be running, so "no turn runs" cannot be read from it.
+	SessionFactsIn() bool
 	// SetMainAgent names the session's main agent — the WatchAgent address the
 	// turn runs under. The prompt queue calls it with
 	// StartTurnSuccess.prompt.agent after every accepted turn; it is the
