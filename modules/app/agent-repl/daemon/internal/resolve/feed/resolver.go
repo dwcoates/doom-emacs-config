@@ -771,6 +771,16 @@ func (f *feedState) insert(id string, rank rowRank) {
 	f.order[at] = id
 }
 
+// drop takes a row's id out of the feed's order and forgets its rank, leaving
+// its content in place: the first half of re-filing a settling row, which
+// insert completes at its new rank.
+func (f *feedState) drop(id string) {
+	if at := f.indexOf(id); at >= 0 {
+		f.order = append(f.order[:at], f.order[at+1:]...)
+	}
+	delete(f.rank, id)
+}
+
 // firstRank is the rank a row takes at its first draw: the rank of the row it
 // replaces when the placement says so, a freshly minted key otherwise.
 func (r *resolver) firstRank(s *wsState, f *feedState, id string, at placement) (rowRank, string) {
@@ -779,6 +789,9 @@ func (r *resolver) firstRank(s *wsState, f *feedState, id string, at placement) 
 		// draws it where that row stood rather than below everything drawn
 		// since.
 		return *at.inherit, "inherited"
+	}
+	if at.pin == pinDraw {
+		return rowRank{plane: s.plane, key: r.mintPin(f)}, "pinned"
 	}
 	key, how := r.mintOrder(s, f, id)
 	return rowRank{plane: s.plane, key: key}, how
@@ -841,7 +854,27 @@ type placement struct {
 	// draw instead of minting a new one: a detached shell's head replacing the
 	// running card it was, at that card's own position in the feed.
 	inherit *rowRank
+	// pin says what this publication does to the row's PINNED condition
+	// (order.go, pinClass). The zero value keeps whatever the row already is,
+	// so a restatement — a fold, a supersede re-push — never moves a row; only
+	// a producer naming pinDraw or pinSettle does.
+	pin pinIntent
 }
+
+// pinIntent is what one publication does to a row's pinned condition.
+type pinIntent int
+
+const (
+	// pinKeep restates the row as it stands: pinned stays pinned, placed
+	// stays placed. A row first drawn this way is placed.
+	pinKeep pinIntent = iota
+	// pinDraw draws the row pinned: a pin key at its first draw, and pinned
+	// on every publication after. A row already placed is refused (settleRank).
+	pinDraw
+	// pinSettle settles a pinned row where it stands (settleRank); a row that
+	// is not pinned is restated, and one first drawn this way is placed.
+	pinSettle
+)
 
 // place answers where an agent's rows go, and whether they can go anywhere,
 // for the row's own turn (rowTurn): see placeTurn.
@@ -967,6 +1000,8 @@ func (r *resolver) upsert(s *wsState, at placement, row *frontendv1.FeedRow, dur
 	rank, how := f.rank[id], "restated"
 	if !seen {
 		rank, how = r.firstRank(s, f, id, at)
+	} else {
+		rank, how = r.settleRank(s, f, id, rank, at)
 	}
 	r.stampOrder(s, f, id, snapshot, rank.key)
 	if s.plane != planeLive {
@@ -1322,10 +1357,38 @@ func (r *resolver) UpsertDurable(ws ids.WorkspaceID, feed feedid.Feed, row *fron
 	r.logger(ws).Debug("daemon.feed.durable",
 		"a durable daemon-synthesized row was upserted",
 		dlog.Context{"feed": r.feedKey(ws, feed), "row": row.GetId().GetValue()})
+	r.upsertDurable(s, placement{feed: feed, pin: pinSettle}, row)
+}
+
+// UpsertDurablePinned is UpsertDurable for a row PINNED to its feed's bottom
+// (frontend.v1 FeedRowOrder.pinned): it is drawn below every placed row, and
+// stays there on every publication through this method. Its next publication
+// through UpsertDurable settles it where it stands, once and for good.
+func (r *resolver) UpsertDurablePinned(ws ids.WorkspaceID, feed feedid.Feed, row *frontendv1.FeedRow) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s := r.state(ws)
+	r.logger(ws).Debug("daemon.feed.durable",
+		"a durable daemon-synthesized row was upserted pinned",
+		dlog.Context{"feed": r.feedKey(ws, feed), "row": row.GetId().GetValue()})
+	r.upsertDurable(s, placement{feed: feed, pin: pinDraw}, row)
+}
+
+// upsertDurable is the one durable write: the row is published, then recorded
+// at the key it was published with — and when this publication settled a
+// pinned row, recorded as moving from its pin key (wsm.DurableFeedRow
+// .SettledFrom). Called with r.mu held.
+func (r *resolver) upsertDurable(s *wsState, at placement, row *frontendv1.FeedRow) {
 	// A MERGE HEAD'S FOLD IS SETTLED HERE, AND ONLY IN mergefold.go.
-	r.settleMergeFold(s, feed, row)
-	r.upsert(s, placement{feed: feed}, row, true)
-	r.recordDurable(s, feed, row.GetId().GetValue())
+	r.settleMergeFold(s, at.feed, row)
+	f, id := r.feed(s, at.feed), row.GetId().GetValue()
+	prior, seen := f.rank[id]
+	r.upsert(s, at, row, true)
+	settledFrom := ""
+	if seen && isPinKey(prior.key) && f.rank[id].key != prior.key {
+		settledFrom = prior.key
+	}
+	r.recordDurable(s, at.feed, id, settledFrom)
 }
 
 // UpsertCommandPanel mints a NON-DURABLE root-feed row carrying a recognized
