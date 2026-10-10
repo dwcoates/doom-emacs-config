@@ -63,6 +63,33 @@ func orderClass(p rowPlane) byte {
 // followSep separates a follower's base from its follow count.
 const followSep = '.'
 
+// PINNED ROWS (frontend.v1 FeedRowOrder.pinned) are keyed in their own class,
+// which sorts after every plane class, so a pinned row stands below every
+// placed row of its feed however many arrive after it:
+//
+//	~<at_ms:16 hex><n:8 hex>   a pinned row: the moment it was pinned, and its
+//	                           index among the rows pinned in that millisecond
+//
+// The moment makes a pin key unique across daemon restarts with no counter
+// kept on disk, and pins sort among themselves in the order they were made. A
+// pinned row is never a predecessor (predecessor matches the plane class), so
+// a placed row never follows one. When the row SETTLES it is re-keyed exactly
+// once with a placed key (settleRank), and the pin key is never seen again.
+const pinClass = '~'
+
+// isPinKey reports whether KEY is a pinned row's key.
+func isPinKey(key string) bool {
+	return key != "" && key[0] == pinClass
+}
+
+// mintPin mints the key of a row being pinned at its first draw.
+func (r *resolver) mintPin(f *feedState) string {
+	base := fmt.Sprintf("%c%016x", pinClass, uint64(r.deps.Now().UnixMilli()))
+	n := f.entryRows[base]
+	f.entryRows[base] = n + 1
+	return fmt.Sprintf("%s%08x", base, n)
+}
+
 // entryBase is the key prefix every row drawn from one entry shares.
 func entryBase(class byte, place *conversationv1.ConversationPlace) string {
 	return fmt.Sprintf("%c%016x%08x", class, uint64(place.GetAtMs()), place.GetOrdinal())
@@ -173,17 +200,54 @@ func (r *resolver) predecessor(s *wsState, f *feedState, class byte) string {
 	return ""
 }
 
-// stampOrder writes a row's order onto the snapshot about to be published.
+// stampOrder writes a row's order onto the snapshot about to be published,
+// and states it pinned exactly when its key is a pin key, so the pinned
+// condition can never disagree with the key a reader sorts by.
 //
-// A KEY NEVER CHANGES. A family restating a row it copied carries the key that
-// row already had; one carrying any OTHER key is this resolver contradicting
-// itself, recorded at ERROR — and the row keeps its original key, so a reader
-// never sees it move.
+// A KEY NEVER CHANGES once placed. A family restating a row it copied carries
+// the key that row already had; one carrying any OTHER key is this resolver
+// contradicting itself, recorded at ERROR — and the row keeps its own key, so
+// a reader never sees it move. The one move a row makes, a pinned row
+// settling, is decided by settleRank before this, never by a carried key.
 func (r *resolver) stampOrder(s *wsState, f *feedState, id string, snapshot *frontendv1.FeedRow, key string) {
 	if carried := snapshot.GetOrder().GetKey(); carried != "" && carried != key {
 		r.logger(s.id).Error("daemon.feed.order_changed",
 			"a row was restated with an order key other than the one it was placed with; it keeps its original key",
 			dlog.Context{"feed": f.key, "row": id, "key": key, "restated_key": carried})
 	}
-	snapshot.Order = &frontendv1.FeedRowOrder{Key: key}
+	order := &frontendv1.FeedRowOrder{Key: key}
+	if isPinKey(key) {
+		order.Pinned = &frontendv1.FeedRowOrderPinned{}
+	}
+	snapshot.Order = order
+}
+
+// settleRank answers the rank a row ALREADY DRAWN takes for this publication.
+//
+//   - A PINNED row published to settle (pinSettle) SETTLES: it leaves its pin
+//     key, takes a placed key just after the feed's newest placed row
+//     (mintOrder), and keeps that key for good. It is the one move a row ever
+//     makes.
+//   - A PLACED row published to pin (pinDraw) is refused at ERROR and keeps
+//     its place: a row never re-pins, because a reader would see a settled row
+//     jump.
+//   - Anything else — every restatement (pinKeep) — restates the rank the row
+//     already has.
+func (r *resolver) settleRank(s *wsState, f *feedState, id string, rank rowRank, at placement) (rowRank, string) {
+	switch {
+	case at.pin == pinDraw && !isPinKey(rank.key):
+		r.logger(s.id).Error("daemon.feed.pin_refused",
+			"a placed row was published pinned; a row never pins again once placed, and it keeps its place",
+			dlog.Context{"feed": f.key, "row": id, "key": rank.key})
+	case at.pin == pinSettle && isPinKey(rank.key):
+		f.drop(id)
+		key, how := r.mintOrder(s, f, id)
+		settled := rowRank{plane: s.plane, key: key}
+		f.insert(id, settled)
+		r.logger(s.id).Info("daemon.feed.row_settled",
+			"a pinned row settled where it stood: it left the feed's bottom for a fixed key after the newest placed row",
+			dlog.Context{"feed": f.key, "row": id, "pin_key": rank.key, "key": key, "how": how, "index": f.indexOf(id)})
+		return settled, "settled"
+	}
+	return rank, "restated"
 }

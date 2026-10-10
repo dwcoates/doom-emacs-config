@@ -418,3 +418,38 @@ func TestReserveOrderRefusesAKeyTooShortToBeAnEntryKey(t *testing.T) {
 		t.Fatal("reserveOrder accepted a key too short to be an entry key")
 	}
 }
+
+func TestSettlingAPinnedRowRecordsItsMoveFromThePinKey(t *testing.T) {
+	// Arrange
+	store := newFakeDurableRows()
+	r, _ := daemonOver(t, store)
+	r.UpsertDurablePinned(testWorkspace, rootFeed(), mergeHeadRow("queued"))
+	pinned, _ := store.recorded(testWorkspace, mergeHeadRow("").GetId().GetValue())
+
+	// Act
+	r.UpsertDurable(testWorkspace, rootFeed(), mergeHeadRow("landed"))
+
+	// Assert
+	settled, _ := store.recorded(testWorkspace, mergeHeadRow("").GetId().GetValue())
+	published := feedRows(r, rootFeed())[0].GetOrder().GetKey()
+	if settled.SettledFrom != pinned.OrderKey || settled.OrderKey != published {
+		t.Fatalf("recorded %q from %q, want %q from the pin key %q", settled.OrderKey, settled.SettledFrom, published, pinned.OrderKey)
+	}
+}
+
+func TestANewDaemonDrawsAPinnedRowAgainStillPinned(t *testing.T) {
+	// Arrange
+	store := newFakeDurableRows()
+	first, _ := daemonOver(t, store)
+	first.UpsertDurablePinned(testWorkspace, rootFeed(), mergeHeadRow("queued"))
+	want := feedRows(first, rootFeed())[0].GetOrder()
+
+	// Act
+	second, _ := daemonOver(t, store)
+
+	// Assert
+	got := feedRows(second, rootFeed())[0].GetOrder()
+	if got.GetKey() != want.GetKey() || got.GetPinned() == nil {
+		t.Fatalf("order = %+v, want %+v still pinned", got, want)
+	}
+}
