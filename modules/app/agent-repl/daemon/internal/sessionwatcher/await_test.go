@@ -198,6 +198,45 @@ func TestAwaitSessionFactsIsReleasedByTheReannouncementWithItsTurn(t *testing.T)
 	}
 }
 
+func TestSessionFactsInAnswersTrueForAStartedSession(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("turn-1")})
+
+	// Act / Assert.
+	if !h.w.SessionFactsIn() {
+		t.Fatal("SessionFactsIn on a started session = false, want true")
+	}
+}
+
+func TestSessionFactsInAnswersFalseForAPureAttachBeforeItsFacts(t *testing.T) {
+	// Arrange.
+	h := startHarness(t, Session{}, nil)
+	h.session = h.client.nextSessionOpen(t)
+
+	// Act / Assert.
+	if h.w.SessionFactsIn() {
+		t.Fatal("SessionFactsIn on a pure attach with no facts = true, want false")
+	}
+}
+
+func TestSessionFactsInAnswersTrueOnceTheReannouncementLands(t *testing.T) {
+	// Arrange.
+	h := newHarnessAttachingPurely(t)
+	answered := make(chan error, 1)
+	go func() { answered <- h.w.AwaitSessionFacts(context.Background()) }()
+
+	// Act.
+	h.sendSessionStarted(t, sessionStarted("turn-1"))
+	if err := <-answered; err != nil {
+		t.Fatalf("AwaitSessionFacts = %v, want nil", err)
+	}
+
+	// Assert.
+	if !h.w.SessionFactsIn() {
+		t.Fatal("SessionFactsIn after the re-announcement = false, want true")
+	}
+}
+
 func TestAwaitSessionFactsAnswersItsContext(t *testing.T) {
 	// Arrange.
 	h := newHarnessAttachingPurely(t)
