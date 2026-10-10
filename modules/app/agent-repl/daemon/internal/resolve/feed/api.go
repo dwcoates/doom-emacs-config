@@ -186,6 +186,14 @@ type Resolver interface {
 	// moment that workspace's feed is first touched; a bind's reset forgets
 	// them with every other row.
 	UpsertDurable(ws ids.WorkspaceID, feed feedid.Feed, row *frontendv1.FeedRow)
+	// UpsertDurablePinned is UpsertDurable for a row PINNED to its feed's
+	// bottom (frontend.v1 FeedRowOrder.pinned): drawn below every placed row
+	// for as long as it is published through this method. Its next
+	// publication through UpsertDurable SETTLES it — it takes a fixed key just
+	// after the feed's newest placed row, where it stood — once and for good.
+	// A row already placed is never pinned again: the call is refused at
+	// ERROR and the row keeps its place.
+	UpsertDurablePinned(ws ids.WorkspaceID, feed feedid.Feed, row *frontendv1.FeedRow)
 	// UpsertAtTurnAddress upserts a daemon-synthesized row of one turn at
 	// THE ADDRESS THAT TURN DRAWS AT rather than a named feed: the accepted
 	// prompt of a merge's own turn belongs in its tab, and every other

@@ -536,3 +536,142 @@ func TestADaemonRowMadeAfterAnOlderDaemonRowSortsAtTheMomentItWasMade(t *testing
 		t.Fatalf("page rows = %v, want %v", got, want)
 	}
 }
+
+// ---- pinned rows (FeedRowOrder.pinned) ----
+
+// rootSynthRow is a daemon-made row on the root feed named ID.
+func rootSynthRow(id string) *frontendv1.FeedRow {
+	return &frontendv1.FeedRow{
+		Id:  testEncode(feedid.Ref{WS: testWorkspace, Feed: rootFeed(), Row: feedid.RowKey{Kind: feedid.KindSynth, ID: id}}),
+		Row: &frontendv1.FeedRow_MergeTab{MergeTab: &frontendv1.FeedMergeTab{}},
+	}
+}
+
+func TestAPinnedRowStandsBelowARowPlacedAfterIt(t *testing.T) {
+	// Arrange
+	r, _ := daemonOver(t, newFakeDurableRows())
+	head, later := mergeHeadRow("queued"), rootSynthRow("later")
+	r.UpsertDurablePinned(testWorkspace, rootFeed(), head)
+
+	// Act
+	r.UpsertSynthesized(testWorkspace, rootFeed(), later)
+
+	// Assert
+	rows := feedRows(r, rootFeed())
+	want := []string{later.GetId().GetValue(), head.GetId().GetValue()}
+	if strings.Join(rowIDs(rows), ",") != strings.Join(want, ",") {
+		t.Fatalf("rows = %v, want the later row above the pinned head %v", rowIDs(rows), want)
+	}
+	if rows[1].GetOrder().GetPinned() == nil {
+		t.Fatalf("the head's order = %+v, want it stated pinned", rows[1].GetOrder())
+	}
+}
+
+func TestAPinnedRowRepublishedPinnedKeepsItsPinKey(t *testing.T) {
+	// Arrange
+	r, _ := daemonOver(t, newFakeDurableRows())
+	r.UpsertDurablePinned(testWorkspace, rootFeed(), mergeHeadRow("queued"))
+	first := feedRows(r, rootFeed())[0].GetOrder().GetKey()
+
+	// Act
+	r.UpsertDurablePinned(testWorkspace, rootFeed(), mergeHeadRow("testing"))
+
+	// Assert
+	order := feedRows(r, rootFeed())[0].GetOrder()
+	if order.GetKey() != first || order.GetPinned() == nil {
+		t.Fatalf("order = %+v, want the pin key %q still pinned", order, first)
+	}
+}
+
+func TestSettlingAPinnedRowPlacesItAfterTheNewestPlacedRow(t *testing.T) {
+	// Arrange
+	r, log := daemonOver(t, newFakeDurableRows())
+	head, before := mergeHeadRow("queued"), rootSynthRow("before")
+	r.UpsertDurablePinned(testWorkspace, rootFeed(), head)
+	r.UpsertSynthesized(testWorkspace, rootFeed(), before)
+
+	// Act
+	r.UpsertDurable(testWorkspace, rootFeed(), mergeHeadRow("landed"))
+
+	// Assert
+	rows := feedRows(r, rootFeed())
+	if rowIDs(rows)[1] != head.GetId().GetValue() {
+		t.Fatalf("rows = %v, want the settled head after %q", rowIDs(rows), before.GetId().GetValue())
+	}
+	settled := rows[1].GetOrder()
+	if settled.GetPinned() != nil || isPinKey(settled.GetKey()) || settled.GetKey() <= rows[0].GetOrder().GetKey() {
+		t.Fatalf("settled order = %+v, want an unpinned key after %q", settled, rows[0].GetOrder().GetKey())
+	}
+	if !hasRecordIn(log, "info", "daemon.feed.row_settled") {
+		t.Fatalf("records = %+v, want the settle recorded at info", log.Records())
+	}
+}
+
+func TestARowPlacedAfterASettledRowLandsBelowIt(t *testing.T) {
+	// Arrange
+	r, _ := daemonOver(t, newFakeDurableRows())
+	head, after := mergeHeadRow("queued"), rootSynthRow("after")
+	r.UpsertDurablePinned(testWorkspace, rootFeed(), head)
+	r.UpsertDurable(testWorkspace, rootFeed(), mergeHeadRow("landed"))
+
+	// Act
+	r.UpsertSynthesized(testWorkspace, rootFeed(), after)
+
+	// Assert
+	want := []string{head.GetId().GetValue(), after.GetId().GetValue()}
+	if got := rowIDs(feedRows(r, rootFeed())); strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("rows = %v, want the settled head above the later row %v", got, want)
+	}
+}
+
+func TestPinningAPlacedRowIsRefusedAndItKeepsItsPlace(t *testing.T) {
+	// Arrange
+	r, log := daemonOver(t, newFakeDurableRows())
+	r.UpsertDurable(testWorkspace, rootFeed(), mergeHeadRow("landed"))
+	placed := feedRows(r, rootFeed())[0].GetOrder().GetKey()
+
+	// Act
+	r.UpsertDurablePinned(testWorkspace, rootFeed(), mergeHeadRow("queued"))
+
+	// Assert
+	order := feedRows(r, rootFeed())[0].GetOrder()
+	if order.GetKey() != placed || order.GetPinned() != nil {
+		t.Fatalf("order = %+v, want the placed key %q unpinned", order, placed)
+	}
+	if !hasRecordIn(log, "error", "daemon.feed.pin_refused") {
+		t.Fatalf("records = %+v, want the refusal recorded at error", log.Records())
+	}
+}
+
+func TestARestatedPinnedRowStaysPinned(t *testing.T) {
+	// Arrange
+	r, _ := daemonOver(t, newFakeDurableRows())
+	head := mergeHeadRow("queued")
+	r.UpsertDurablePinned(testWorkspace, rootFeed(), head)
+	pinned := feedRows(r, rootFeed())[0].GetOrder().GetKey()
+
+	// Act: the reader folds the bubble, which restates its head.
+	r.SetMergeFold(testWorkspace, head.GetId(), true)
+
+	// Assert
+	order := feedRows(r, rootFeed())[0].GetOrder()
+	if order.GetKey() != pinned || order.GetPinned() == nil {
+		t.Fatalf("order = %+v, want the pin key %q still pinned", order, pinned)
+	}
+}
+
+func TestTwoPinnedRowsStandInTheOrderTheyWerePinned(t *testing.T) {
+	// Arrange
+	r, _ := daemonOver(t, newFakeDurableRows())
+	first, second := rootSynthRow("pinned-first"), rootSynthRow("pinned-second")
+
+	// Act
+	r.UpsertDurablePinned(testWorkspace, rootFeed(), first)
+	r.UpsertDurablePinned(testWorkspace, rootFeed(), second)
+
+	// Assert
+	want := []string{first.GetId().GetValue(), second.GetId().GetValue()}
+	if got := rowIDs(feedRows(r, rootFeed())); strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("rows = %v, want %v", got, want)
+	}
+}
