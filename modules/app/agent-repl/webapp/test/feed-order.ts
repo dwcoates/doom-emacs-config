@@ -14,6 +14,7 @@
  */
 import { clone, create } from "@bufbuild/protobuf";
 import {
+  FeedRowOrderPinnedSchema,
   FeedRowOrderSchema,
   FeedRowSchema,
   type FeedRow,
@@ -49,4 +50,14 @@ export function withoutOrder(row: FeedRow): FeedRow {
 /** Forget every minted key. Called before every test. */
 export function resetOrderKeys(): void {
   minted.clear();
+}
+
+/** A copy of ROW PINNED to the feed's bottom at pin KEY (FeedRowOrder.pinned). */
+export function withPinnedOrder(row: FeedRow, key: string): FeedRow {
+  const copy = clone(FeedRowSchema, row);
+  copy.order = create(FeedRowOrderSchema, {
+    key,
+    pinned: create(FeedRowOrderPinnedSchema, {}),
+  });
+  return copy;
 }
