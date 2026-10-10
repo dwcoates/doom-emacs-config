@@ -10,6 +10,7 @@ import (
 	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 	"google.golang.org/protobuf/encoding/prototext"
 
 	"claude-repld/internal/feedid"
@@ -135,6 +136,32 @@ func (f *fakeFeed) headIDs() []string {
 	for _, row := range f.rows {
 		if row.Row.GetActivity().GetMerge() != nil {
 			out = append(out, prototext.Format(row.Row.GetId()))
+		}
+	}
+	return out
+}
+
+// headPublications reports every publication of a merge head, in order, with
+// whether it was published pinned.
+func (f *fakeFeed) headPublications() []synthesized {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []synthesized
+	for _, row := range f.rows {
+		if row.Row.GetActivity().GetMerge() != nil {
+			out = append(out, row)
+		}
+	}
+	return out
+}
+
+// livePublishedUnpinned reports the head publications that carry no result
+// yet were published unpinned: a live head that would have settled early.
+func livePublishedUnpinned(heads []synthesized) []string {
+	var out []string
+	for _, head := range heads {
+		if _, live := head.Row.GetActivity().GetMerge().GetResult().(*frontendv1.FeedMerge_Update); live && !head.Pinned {
+			out = append(out, prototext.Format(head.Row.GetId()))
 		}
 	}
 	return out

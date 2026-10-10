@@ -160,6 +160,23 @@ func headRow(ws ids.WorkspaceID, lease ids.LeaseID, label string, startedMS int6
 	}
 }
 
+// publishHead publishes the bubble's head with RESULT, the arm in force.
+//
+// THE HEAD IS PINNED TO THE ROOT FEED'S BOTTOM WHILE THE MERGE IS IN FLIGHT
+// and settles where it stands when the merge resolves (owner ruling,
+// 2026-10-10; frontend.v1 FeedRowOrder.pinned): a live head (no result) is
+// published pinned, and the first publication carrying a result — landed,
+// failed or abandoned — settles it, after which every later row lands below
+// it.
+func (o *orchestrator) publishHead(ws ids.WorkspaceID, lease ids.LeaseID, label string, startedMS int64, result any) {
+	row := headRow(ws, lease, label, startedMS, result)
+	if result == nil {
+		o.deps.Feed.UpsertDurablePinned(ws, feedid.Feed{Root: true}, row)
+		return
+	}
+	o.deps.Feed.UpsertDurable(ws, feedid.Feed{Root: true}, row)
+}
+
 // branchLabel resolves the head's branch line ("ABC/fix-flaky → master").
 func branchLabel(source, target string) string {
 	return fmt.Sprintf("%s → %s", source, target)

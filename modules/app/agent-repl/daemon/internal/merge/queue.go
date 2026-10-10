@@ -9,7 +9,6 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/dlog"
-	"claude-repld/internal/feedid"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/resolve/footer"
 	"claude-repld/internal/wsm"
@@ -356,14 +355,12 @@ func (o *orchestrator) republishQueue(ctx context.Context, repo wsm.RepoKey) err
 	}
 	place := 0
 	for _, entry := range entries {
-		// ONLY A MERGE THAT STARTED HAS A BUBBLE (owner ruling, 2026-10-08;
-		// run.place). A merge waiting in line, or holding its workspace while
-		// it waits for it to fall free, is drawn by its footer and roster
-		// facts alone: a bubble placed before the merge starts is overtaken
-		// by every row the workspace writes meanwhile. Its ledger identity is
-		// still minted as it takes its place, so the bubble the merge starts
-		// in carries the identity it was queued under.
-		if lease, ok := o.leaseOf(entry.Workspace); ok && o.started(entry.Workspace) {
+		// EVERY MERGE IN LINE HAS A BUBBLE, from the moment it is queued, PINNED
+		// to the feed's bottom until it resolves (owner ruling, 2026-10-10;
+		// publishHead), so every row the workspace writes while the merge
+		// waits lands above it. Its ledger identity is minted as it takes its
+		// place, so the head has its queue tab to hang on from the start.
+		if lease, ok := o.leaseOf(entry.Workspace); ok {
 			// THE HEAD'S CLOCK RUNS FROM WHEN THE MERGE WAS QUEUED
 			// (frontend.v1.FeedMergeRuntime), so a queue change never restarts
 			// it.
@@ -373,8 +370,7 @@ func (o *orchestrator) republishQueue(ctx context.Context, repo wsm.RepoKey) err
 					dlog.Context{"repo": string(repo), "workspace": string(entry.Workspace), "error": err.Error()})
 				return err
 			}
-			o.deps.Feed.UpsertDurable(entry.Workspace, feedid.Feed{Root: true},
-				headRow(entry.Workspace, lease, o.bubbleLabel(ctx, entry), queued, nil))
+			o.publishHead(entry.Workspace, lease, o.bubbleLabel(ctx, entry), queued, nil)
 			state, drawn, err := o.queueTabState(entry)
 			if err != nil {
 				o.deps.Log.Global().Error("daemon.merge.queue", "could not resolve when a queued merge's queue tab began; the queue is not drawn",
@@ -431,13 +427,6 @@ func (o *orchestrator) bubbleLabel(ctx context.Context, entry wsm.MergeQueueEntr
 		return string(entry.Workspace)
 	}
 	return label
-}
-
-// started reports whether a workspace's merge has started: its run placed
-// its bubble (run.place).
-func (o *orchestrator) started(ws ids.WorkspaceID) bool {
-	r, running := o.runFor(ws)
-	return running && r.isPlaced()
 }
 
 // leaseOf reports the LEDGER identity a workspace's merge bubble is keyed by.

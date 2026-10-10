@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"google.golang.org/protobuf/encoding/prototext"
+
 	"claude-repld/internal/wsm"
 )
 
@@ -223,11 +225,25 @@ func headsSince(h *harness, n int) []string {
 	return h.feed.headIDs()[n:]
 }
 
-// A queued merge has not started, so it has no bubble (owner ruling,
-// 2026-10-08); what a restart and a handover keep is the identity it was
-// queued under, which the bubble it starts in carries.
+// A queued merge has its bubble, pinned to the feed's bottom (owner ruling,
+// 2026-10-10); a restart and a handover draw it again under the identity it
+// was queued under, still pinned.
 
-func TestARestartKeepsAQueuedMergesIdentityAndDrawsNoBubble(t *testing.T) {
+// queuedHeadsAre fails unless HEADS is a non-empty run of LEDGER's head, every
+// one published pinned.
+func queuedHeadsAre(t *testing.T, heads []synthesized, ledger wsm.LeaseID) {
+	t.Helper()
+	if len(heads) == 0 {
+		t.Fatal("no bubble was drawn for the queued merge")
+	}
+	for _, head := range heads {
+		if id := prototext.Format(head.Row.GetId()); id != headIDOf(ledger) || !head.Pinned {
+			t.Fatalf("drew %s (pinned %v), want the bubble the merge waited in, %s, pinned", id, head.Pinned, headIDOf(ledger))
+		}
+	}
+}
+
+func TestARestartRedrawsAQueuedMergeInTheBubbleItWaitedIn(t *testing.T) {
 	// Arrange: a merge waiting in a paused queue.
 	h := newHarness(t)
 	h.db.paused[h.repoKey()] = true
@@ -242,15 +258,13 @@ func TestARestartKeepsAQueuedMergesIdentityAndDrawsNoBubble(t *testing.T) {
 	}
 
 	// Assert.
-	if heads := headsSince(h, before); len(heads) != 0 {
-		t.Fatalf("the restart drew %v for a merge that has not started, want none", heads)
-	}
+	queuedHeadsAre(t, h.feed.headPublications()[before:], ledger)
 	if got, ok := h.o.leaseOf(theWorkspace); !ok || got != ledger {
 		t.Fatalf("the recovered merge's identity = %q (%v), want %q", got, ok, ledger)
 	}
 }
 
-func TestAHandoverKeepsAQueuedMergesIdentityAndDrawsNoBubble(t *testing.T) {
+func TestAHandoverRedrawsAQueuedMergeInTheBubbleItWaitedIn(t *testing.T) {
 	// Arrange: a merge waiting in a paused queue, its workspace handed over.
 	h := newHarness(t)
 	h.db.paused[h.repoKey()] = true
@@ -268,9 +282,7 @@ func TestAHandoverKeepsAQueuedMergesIdentityAndDrawsNoBubble(t *testing.T) {
 	}
 
 	// Assert.
-	if heads := headsSince(h, before); len(heads) != 0 {
-		t.Fatalf("the successor drew %v for a merge that has not started, want none", heads)
-	}
+	queuedHeadsAre(t, h.feed.headPublications()[before:], ledger)
 	if got, ok := h.o.leaseOf(theWorkspace); !ok || got != ledger {
 		t.Fatalf("the adopted merge's identity = %q (%v), want %q", got, ok, ledger)
 	}
