@@ -970,6 +970,10 @@ describe("the footer status wave's stylesheet contract", () => {
 const GHOST_HOST =
   '.bubble[data-cap-lines="none"] .usage-corner + .bubble-body > .response-prose:first-child > p:first-child';
 
+/** The ghost's second host: the first paragraph of an OPEN ellipsis bubble with a corner. */
+const OPEN_ELLIPSIS_GHOST_HOST =
+  '.bubble[data-more="ellipsis"] > .bubble-scroll.expanded > .usage-corner + .bubble-body > .response-prose:first-child > p:first-child';
+
 /**
  * The corner's geometry tokens: the one rule that declares them for both of
  * their readers, the corner and the ghost's host paragraph. They moved out of
@@ -977,8 +981,12 @@ const GHOST_HOST =
  */
 function cornerTokens(): string {
   return (
-    rulesOf(stylesheet).find((rule) => rule.selectors.includes(".usage-corner") && rule.selectors.includes(GHOST_HOST))
-      ?.declarations ?? ""
+    rulesOf(stylesheet).find(
+      (rule) =>
+        rule.selectors.includes(".usage-corner") &&
+        rule.selectors.includes(GHOST_HOST) &&
+        rule.selectors.includes(OPEN_ELLIPSIS_GHOST_HOST),
+    )?.declarations ?? ""
   );
 }
 
@@ -1058,6 +1066,46 @@ describe("the usage corner's sizing ghost", () => {
 
     // Assert
     expect(declarations).toMatch(/padding-right:\s*calc\(var\(--usage-corner-gap\) - var\(--bubble-scroll-gap\)\)/);
+  });
+
+  it("hosts the ghost on the same rule in an open ellipsis bubble", () => {
+    // Arrange / Act
+    const open = declarationsOf(`${OPEN_ELLIPSIS_GHOST_HOST}::before`);
+
+    // Assert
+    expect(open).toBe(ghost());
+  });
+
+  /** Whether the first paragraph of an ellipsis bubble, OPEN or not, hosts a ghost. */
+  function ellipsisHostsGhost(open: boolean): boolean {
+    const bubble = document.createElement("div");
+    bubble.className = "bubble md assistant interim-response";
+    bubble.setAttribute("data-role", "response");
+    bubble.setAttribute("data-cap-lines", "1");
+    bubble.setAttribute("data-more", "ellipsis");
+    bubble.innerHTML = `<div class="bubble-box bubble-scroll${open ? " expanded" : ""}"><span class="usage-corner"></span><div class="bubble-body"><div class="response-prose"><p>prose</p></div></div></div>`;
+    const p = bubble.querySelector("p");
+    if (p === null) throw new Error("the bubble drew no paragraph");
+    return rulesOf(stylesheet)
+      .flatMap((rule) => rule.selectors)
+      .filter((sel) => sel.endsWith("p:first-child::before"))
+      .some((sel) => p.matches(sel.replace(/::before$/, "")));
+  }
+
+  it("hosts the ghost in an open ellipsis bubble", () => {
+    // Arrange / Act
+    const hosts = ellipsisHostsGhost(true);
+
+    // Assert
+    expect(hosts).toBe(true);
+  });
+
+  it("never hosts the ghost in a closed ellipsis bubble, whose clamped box already counts the corner", () => {
+    // Arrange / Act
+    const hosts = ellipsisHostsGhost(false);
+
+    // Assert
+    expect(hosts).toBe(false);
   });
 
   it("draws the reserved labels it is handed, one per line", () => {
@@ -3508,7 +3556,7 @@ describe("the tool card's command grey", () => {
  * background is not there in either theme; every other response keeps the
  * purple, and the interim keeps its pear border.
  */
-/** The two bubble kinds whose prose is the dimmed `--interim-text` (the command grey). */
+/** The two bubble kinds whose prose is the dimmed `--interim-text` (half way from the command grey to the body text). */
 const DIMMED_TEXT_SELECTORS: readonly string[] = ['.bubble[data-variant="thinking"]', ".bubble.interim-response"];
 
 describe("the page-colored fill", () => {
@@ -3676,9 +3724,10 @@ describe("the rail's mark column", () => {
 });
 
 /**
- * THE DIMMED PROSE (owner request, 2026-10-08): a thinking bubble's and an
- * interim response's text is EXACTLY the tool card's header grey (the Bash
- * command's `--tool-command`) in either theme, by referencing that token.
+ * THE DIMMED PROSE (owner request, 2026-10-10): a thinking bubble's and an
+ * interim response's text sits half way between the tool card's header grey
+ * (the Bash command's `--tool-command`) and the body text (`--fg`) in either
+ * theme, by mixing those two tokens.
  */
 describe("the dimmed prose of a thinking or interim bubble", () => {
   /** The `color` the cascade hands a response bubble with HOOKS and VARIANT. */
@@ -3723,7 +3772,7 @@ describe("the dimmed prose of a thinking or interim bubble", () => {
     expect(got).not.toBe("var(--interim-text)");
   });
 
-  it("defines the dimmed prose as the tool card's command grey token", () => {
+  it("defines the dimmed prose as an even mix of the command grey and the body text", () => {
     // Arrange
     const block = declarationsOf(":root") ?? "";
 
@@ -3731,10 +3780,10 @@ describe("the dimmed prose of a thinking or interim bubble", () => {
     const got = /--interim-text:\s*([^;]+);/.exec(block)?.[1]?.trim();
 
     // Assert
-    expect(got).toBe("var(--tool-command)");
+    expect(got).toBe("color-mix(in srgb, var(--tool-command), var(--fg))");
   });
 
-  it("declares the dimmed prose once, so no theme redefines it away from the command grey", () => {
+  it("declares the dimmed prose once, so no theme redefines it away from the mix", () => {
     // Arrange
     const declaration = /--interim-text\s*:/g;
 
