@@ -143,12 +143,13 @@
      step darker than --muted, the same grey the collapsed repository header
      wears; the dark theme lifts it to its own --muted grey. */
   --tool-command: #4b5563;
-  /* The prose of a thinking bubble or an interim response (owner request,
-     2026-10-08): EXACTLY the tool card's header grey, the one the Bash
-     command wears. It is that token, not a copy of its value, so the two
-     cannot drift; the dark theme redefines --tool-command alone, and this
-     follows it. */
-  --interim-text: var(--tool-command);
+  /* The prose of a thinking bubble or an interim response: HALF WAY between
+     the tool card's header grey (the one the Bash command wears) and the body
+     text a full response bubble wears (owner request, 2026-10-10; it was
+     exactly --tool-command, which read too dim). It mixes the two tokens
+     rather than copying a value, so it cannot drift from either; the dark
+     theme redefines --tool-command and --fg alone, and this follows both. */
+  --interim-text: color-mix(in srgb, var(--tool-command), var(--fg));
   /* Textless-thinking progress indicator: orange, distinct from every other
      status color in the palette. */
   --thinking: #ea580c;
