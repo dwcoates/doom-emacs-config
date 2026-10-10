@@ -1188,3 +1188,55 @@ func TestFireRecordsAFailedAcquisitionAtError(t *testing.T) {
 		t.Fatalf("a failed acquisition was recorded %d time(s) at error, want once", errs)
 	}
 }
+
+func TestShutdownNowRecordsWhyTheDaemonIsGoingDown(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	reason := &agentreplv1.DrainReason{Kind: &agentreplv1.DrainReason_Operator{
+		Operator: &agentreplv1.DrainReasonOperator{Note: "hard bounce"},
+	}}
+
+	// Act
+	if err := h.c.ShutdownNow(context.Background(), reason); err != nil {
+		t.Fatalf("ShutdownNow: %v", err)
+	}
+
+	// Assert
+	for _, rec := range records(h.log, opNow) {
+		if rec.Message == "announced an immediate shutdown" {
+			if rec.Context["reason"] != "operator" || rec.Context["note"] != "hard bounce" {
+				t.Fatalf("context = %v, want the operator's reason and note", rec.Context)
+			}
+			return
+		}
+	}
+	t.Fatalf("no announcement record; records = %v", records(h.log, opNow))
+}
+
+func TestScheduleRecordsWhyTheDaemonWillGoDown(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	note, err := EncodeReason(&agentreplv1.DrainReason{Kind: &agentreplv1.DrainReason_Operator{
+		Operator: &agentreplv1.DrainReasonOperator{Note: "replacing the disk"},
+	}})
+	if err != nil {
+		t.Fatalf("EncodeReason: %v", err)
+	}
+	s := wsm.DrainSchedule{Reason: note, Deadline: instant.Add(time.Hour), SetAt: instant}
+
+	// Act
+	if err := h.c.Schedule(context.Background(), s); err != nil {
+		t.Fatalf("Schedule: %v", err)
+	}
+
+	// Assert
+	for _, rec := range records(h.log, opSchedule) {
+		if rec.Message == "a drain is scheduled and announced" {
+			if rec.Context["reason"] != "operator" || rec.Context["note"] != "replacing the disk" {
+				t.Fatalf("context = %v, want the operator's reason and note", rec.Context)
+			}
+			return
+		}
+	}
+	t.Fatalf("no schedule record; records = %v", records(h.log, opSchedule))
+}
