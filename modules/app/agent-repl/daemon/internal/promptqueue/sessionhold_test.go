@@ -2,6 +2,7 @@ package promptqueue
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -242,6 +243,127 @@ func TestASessionUpReleaseLeavesABuildRefreshHoldStanding(t *testing.T) {
 	// Assert
 	if !heldUnder(h, "t1", wsm.HoldBuildRefresh) {
 		t.Fatalf("hold = %+v, want the build-refresh hold untouched", h.db.hold("t1"))
+	}
+}
+
+func TestAPopIntoAParkedSessionHoldsTheEntryAtTheGate(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	parkAtGate(h)
+	strandedRow(t, h, "t1")
+	d := h.q.lockDelivery(theWorkspace)
+
+	// Act
+	delivered, err := h.q.popAndDeliver(context.Background(), d, h.log.Global())
+	d.unlock()
+
+	// Assert
+	if delivered || err != nil || !heldUnder(h, "t1", wsm.HoldColdGate) {
+		t.Fatalf("pop = (%v, %v), hold = %+v, want nothing delivered and t1 held at the gate", delivered, err, h.db.hold("t1"))
+	}
+}
+
+func TestAPopIntoAShimWithNoStartedSessionHoldsTheEntryForTheReconnect(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.notStarted = true
+	strandedRow(t, h, "t1")
+	d := h.q.lockDelivery(theWorkspace)
+
+	// Act
+	delivered, err := h.q.popAndDeliver(context.Background(), d, h.log.Global())
+	d.unlock()
+
+	// Assert
+	if delivered || err != nil || !heldUnder(h, "t1", wsm.HoldReconnect) {
+		t.Fatalf("pop = (%v, %v), hold = %+v, want nothing delivered and t1 held for the reconnect", delivered, err, h.db.hold("t1"))
+	}
+}
+
+func TestADeliveryThatFindsNoWatcherPutsTheEntryBackOnTheReconnectHold(t *testing.T) {
+	// Arrange: a shim and a started session with no watcher, which nothing
+	// explains: the defect the ERROR still names.
+	h := newHarness(t)
+	h.noWatcher = true
+	strandedRow(t, h, "t1")
+	d := h.q.lockDelivery(theWorkspace)
+
+	// Act
+	_, _ = h.q.deliverHeld(context.Background(), d, h.db.hold("t1"), h.log.Global())
+	d.unlock()
+
+	// Assert
+	if !heldUnder(h, "t1", wsm.HoldReconnect) {
+		t.Fatalf("hold = %+v, want t1 back on the reconnect hold", h.db.hold("t1"))
+	}
+}
+
+func TestADeliveryThatFindsNoWatcherStillAnswersNoSession(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.noWatcher = true
+	strandedRow(t, h, "t1")
+	d := h.q.lockDelivery(theWorkspace)
+
+	// Act
+	_, err := h.q.deliverHeld(context.Background(), d, h.db.hold("t1"), h.log.Global())
+	d.unlock()
+
+	// Assert
+	if !errors.Is(err, ErrNoSession) {
+		t.Fatalf("deliverHeld = %v, want ErrNoSession still surfaced", err)
+	}
+}
+
+func TestADeliveryWhoseRevivalParksAtTheGateHoldsTheEntryThere(t *testing.T) {
+	// Arrange: a hibernated workspace's held prompt, released by its lease.
+	h := newHarness(t)
+	h.noSession = true
+	h.reviveHook = func() { parkAtGate(h) }
+	strandedRow(t, h, "t1")
+	d := h.q.lockDelivery(theWorkspace)
+
+	// Act
+	sent, err := h.q.deliverHeld(context.Background(), d, h.db.hold("t1"), h.log.Global())
+	d.unlock()
+
+	// Assert
+	if sent || err != nil || !heldUnder(h, "t1", wsm.HoldColdGate) {
+		t.Fatalf("deliverHeld = (%v, %v), hold = %+v, want t1 held at the gate with no error", sent, err, h.db.hold("t1"))
+	}
+}
+
+func TestReleaseRefusesAPromptHeldAtTheColdGate(t *testing.T) {
+	// Arrange
+	h := revivedIntoTheGate(t)
+
+	// Act
+	err := h.q.Release(context.Background(), theWorkspace, "t1")
+
+	// Assert
+	if !errors.Is(err, ErrReleaseRefused) {
+		t.Fatalf("Release = %v, want refused while the gate stands", err)
+	}
+}
+
+func TestALeaseEndingOverAParkedSessionHoldsItsPromptsAtTheGate(t *testing.T) {
+	// Arrange: a merge-held prompt on a session parked at its gate.
+	h := newHarness(t)
+	parkAtGate(h)
+	h.lease(wsm.HolderMerge, wsm.PolicyHold)
+	strandedRow(t, h, "t1")
+	merge := wsm.HoldMerge
+	if err := h.db.UpdateHeldPromptHold(context.Background(), "t1", &merge, ""); err != nil {
+		t.Fatalf("UpdateHeldPromptHold: %v", err)
+	}
+	h.clearLease()
+
+	// Act
+	h.q.OnLeaseChanged(theWorkspace)
+
+	// Assert
+	if !heldUnder(h, "t1", wsm.HoldColdGate) || len(h.sender.started()) != 0 {
+		t.Fatalf("hold = %+v, started = %v, want t1 held at the gate and nothing sent", h.db.hold("t1"), h.sender.started())
 	}
 }
 

@@ -2,6 +2,7 @@ package promptqueue
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -81,6 +82,13 @@ func (q *queue) Release(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID
 	}
 	if held.Hold != nil && *held.Hold == wsm.HoldReconnect {
 		log.Warn(opRelease, "the session is not up or its vendor does not serve it; the release is refused until it reconnects", nil)
+		return ErrReleaseRefused
+	}
+	// A PROMPT NEVER ANSWERS THE COLD GATE, a forced one included: sending it
+	// would re-read the cold conversation without the user's answer, which is
+	// the one spend the gate exists to ask about (judgement call 11).
+	if held.Hold != nil && *held.Hold == wsm.HoldColdGate {
+		log.Info(opRelease, "the session is parked at its cold gate; the release is refused until the gate is answered", nil)
 		return ErrReleaseRefused
 	}
 	// A MERGE DRIVES THE SESSION: a prompt forced into it would run inside the
@@ -242,17 +250,29 @@ func (q *queue) deliverHeld(ctx context.Context, d *delivery, held wsm.HeldPromp
 		}
 		if !revived {
 			log.Warn(opDeliver, "the workspace has no session to deliver the hold to", nil)
-			return false, ErrNoSession
+			return false, q.undelivered(ctx, ws, held.Turn, wsm.HoldReconnect, ErrNoSession, log)
 		}
 		if sender, ok = q.deps.Client(ws); !ok {
 			log.Error(opDeliver, "the revived workspace still has no session to deliver the hold to", nil)
-			return false, ErrNoSession
+			return false, q.undelivered(ctx, ws, held.Turn, wsm.HoldReconnect, ErrNoSession, log)
 		}
+	}
+	// A SESSION PARKED AT ITS COLD GATE IS HANDED NOTHING, and the entry is
+	// not an error: a revival above (or before this delivery) parked it, and
+	// the gate's answer is the session-up edge that delivers it. The entry goes
+	// back on the cold-gate hold, never left standing with no hold
+	// (2026-10-10).
+	if kind, why, waiting := q.sessionWait(ws); waiting && kind == wsm.HoldColdGate {
+		log.Info(opDeliver, "the session is parked at its cold gate; the entry is held until the gate is answered", dlog.Context{"why": why})
+		if err := q.reholdForSession(ctx, ws, held.Turn, kind, log); err != nil {
+			return false, err
+		}
+		return false, nil
 	}
 	watcher, ok := q.deps.Watcher(ws)
 	if !ok {
 		log.Warn(opDeliver, "the workspace has no session watcher", nil)
-		return false, ErrNoSession
+		return false, q.undelivered(ctx, ws, held.Turn, wsm.HoldReconnect, ErrNoSession, log)
 	}
 
 	sub := submissionOf(held)
@@ -275,6 +295,18 @@ func (q *queue) deliverHeld(ctx context.Context, d *delivery, held wsm.HeldPromp
 	}
 
 	return true, q.retireDelivered(ctx, ws, held.Turn, log)
+}
+
+// undelivered answers CAUSE for an entry no session could take, after putting
+// it back on the hold that waits for the session (KIND), so the session coming
+// up delivers it. The failure is still the caller's to record: this keeps the
+// entry from being stranded, never the error from being said.
+func (q *queue) undelivered(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID, kind wsm.HoldKind, cause error, log dlog.Logger) error {
+	if err := q.reholdForSession(ctx, ws, turn, kind, log); err != nil {
+		return errors.Join(cause, err)
+	}
+	log.Info(opDeliver, "the undelivered entry is back on its hold; the session coming up delivers it", dlog.Context{"hold": kind.String()})
+	return cause
 }
 
 // retireDelivered retires a hold the session took: tombstoned as delivered,
