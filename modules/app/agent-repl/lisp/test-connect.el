@@ -739,6 +739,45 @@ A CONTENTS of nil means the file is absent — the legal no-daemon state."
       (should (eq (plist-get failure :kind) :transport))
       (should (string-match-p "no HTTP response" (plist-get failure :message))))))
 
+(ert-deftest agent-repl-test-connect-unary-untimed-arms-no-timer ()
+  "A `:none' timeout arms no timer: the call waits for its answer."
+  ;; Arrange
+  (agent-repl-test-connect--with-transport
+    (let ((conn (agent-repl-test-connect--conn))
+          (timers 0))
+      (cl-letf (((symbol-function 'run-at-time)
+                 (lambda (&rest _) (setq timers (1+ timers)) nil)))
+        ;; Act
+        (agent-repl-connect-unary conn "RestartWorkspace" "{}" :timeout :none))
+      ;; Assert
+      (should (= timers 0)))))
+
+(ert-deftest agent-repl-test-connect-unary-default-arms-its-timer ()
+  "With no timeout given, the call arms the default deadline's timer."
+  ;; Arrange
+  (agent-repl-test-connect--with-transport
+    (let ((conn (agent-repl-test-connect--conn))
+          (delays nil))
+      (cl-letf (((symbol-function 'run-at-time)
+                 (lambda (delay &rest _) (push delay delays) nil)))
+        ;; Act
+        (agent-repl-connect-unary conn "DaemonHealth" "{}"))
+      ;; Assert
+      (should (equal delays (list agent-repl-connect-unary-timeout-seconds))))))
+
+(ert-deftest agent-repl-test-connect-unary-untimed-still-fails-on-a-drop ()
+  "An untimed call whose connection drops fails as a transport failure."
+  ;; Arrange
+  (agent-repl-test-connect--with-transport
+    (let ((conn (agent-repl-test-connect--conn))
+          (failure nil))
+      (agent-repl-connect-unary conn "RestartWorkspace" "{}" :timeout :none
+                                :on-failure (lambda (d) (setq failure d)))
+      ;; Act
+      (agent-repl-test-connect--exit (agent-repl-test-connect--last-spawn))
+      ;; Assert
+      (should (eq (plist-get failure :kind) :transport)))))
+
 (ert-deftest agent-repl-test-connect-unary-names-a-refused-connection ()
   "A connection that never landed fails naming the socket\'s own reason.
 `curl' put `Failed to connect\' on its stderr; the sentinel event carries
