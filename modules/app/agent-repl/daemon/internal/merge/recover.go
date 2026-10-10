@@ -12,7 +12,6 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/dlog"
-	"claude-repld/internal/feedid"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/promptqueue"
 	"claude-repld/internal/resolve/footer"
@@ -249,12 +248,11 @@ func (o *orchestrator) recoverAdmitted(ctx context.Context, repo wsm.RepoKey, en
 			// The bubble that was live gets its terminal, so the trace of the
 			// interrupted merge ends where a reader can see it rather than simply
 			// stopping mid-tab.
-			o.deps.Feed.UpsertDurable(ws, feedid.Feed{Root: true}, headRow(ws, lease.ID,
-				o.abandonedLabel(ctx, ws, entry.Source), o.nowMS(),
+			o.publishHead(ws, lease.ID, o.abandonedLabel(ctx, ws, entry.Source), o.nowMS(),
 				&frontendv1.FeedMergeError{
 					EndedAtMs: o.nowMS(),
 					Reason:    &frontendv1.FeedMergeError_Failed{Failed: &frontendv1.FeedMergeFailed{Summary: summary}},
-				}))
+				})
 		}
 		o.publish(ws, MergeFacts{State: StateFailed, FailedArea: footer.FailedOther, Detail: summary})
 		return nil
@@ -345,12 +343,8 @@ func (o *orchestrator) recoverResumable(ctx context.Context, repo wsm.RepoKey, l
 	// THE SAME BUBBLE, AT ONCE: its head is redrawn live under the identity it
 	// always had, and the footer shows the step the merge stands on before the
 	// resumed run's first word.
-	// A MERGE THAT HAD NOT LEFT ITS QUEUE HAD NOT STARTED and has no bubble:
-	// the resumed run places it once the workspace is free.
-	if doc.Step != TabQueue {
-		label := branchLabel(doc.Subject.Branch, doc.Subject.subject().targetLabel())
-		o.deps.Feed.UpsertDurable(ws, feedid.Feed{Root: true}, headRow(ws, lease.ID, label, doc.QueuedMS, nil))
-	}
+	label := branchLabel(doc.Subject.Branch, doc.Subject.subject().targetLabel())
+	o.publishHead(ws, lease.ID, label, doc.QueuedMS, nil)
 	o.publish(ws, doc.Facts.footerFacts(o.deps.Now()))
 	// THE RUN LOG CARRIES IT TOO: a merge resumed is a fact about the
 	// restart, and the durable run log is where a boot sequence is read.
