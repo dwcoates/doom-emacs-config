@@ -20,8 +20,16 @@ type DurableFeedRow struct {
 	// numbers it.
 	Plane int
 	// OrderKey is the order key the row was first drawn at, which every later
-	// publication restates.
+	// publication restates — or, on the one publication that SETTLES a pinned
+	// row, the key it settles at.
 	OrderKey string
+	// SettledFrom is set on the one publication that settles a pinned row
+	// (frontend.v1 FeedRowOrder.pinned): the pin key the row is recorded at
+	// now, which OrderKey replaces. The replacement is a compare-and-set — it
+	// is refused unless the recorded key is exactly this one — so a row moves
+	// at most once and only from where the caller believes it stands. Empty on
+	// every other publication, whose key must match the recorded one.
+	SettledFrom string
 	// Row is the encoded frontend.v1.FeedRow as last published.
 	Row []byte
 }
@@ -42,9 +50,11 @@ func (r DurableFeedRow) validate() error {
 }
 
 // PutDurableFeedRow records one durable feed row, replacing the row's previous
-// publication. The order key of a row already recorded never changes: a row
+// publication. The order key of a row already recorded never changes — a row
 // keeps the place it was first drawn at, so a replacement that names another
-// is refused.
+// is refused — except on the one publication that settles a pinned row
+// (DurableFeedRow.SettledFrom), which moves it from its pin key to its settled
+// key exactly once.
 func (s *store) PutDurableFeedRow(ctx context.Context, row DurableFeedRow) error {
 	const op = "daemon.wsm.put_durable_feed_row"
 	fields := dlog.Context{"workspace": string(row.Workspace), "row": row.RowID, "order_key": row.OrderKey}
@@ -60,8 +70,19 @@ func (s *store) PutDurableFeedRow(ctx context.Context, row DurableFeedRow) error
 		case errors.Is(err, sql.ErrNoRows):
 		case err != nil:
 			return err
+		case row.SettledFrom != "":
+			if key != row.SettledFrom {
+				return fmt.Errorf("wsm: durable feed row %s settles from %q but is recorded at %q", row.RowID, row.SettledFrom, key)
+			}
+			_, err = tx.ExecContext(ctx,
+				`UPDATE durable_feed_rows SET order_key = ?, plane = ?, row = ? WHERE workspace_id = ? AND row_id = ?`,
+				row.OrderKey, row.Plane, row.Row, row.Workspace, row.RowID)
+			return err
 		case key != row.OrderKey:
 			return fmt.Errorf("wsm: durable feed row %s was drawn at %q, not %q", row.RowID, key, row.OrderKey)
+		}
+		if row.SettledFrom != "" {
+			return fmt.Errorf("wsm: durable feed row %s settles from %q but was never recorded", row.RowID, row.SettledFrom)
 		}
 		_, err = tx.ExecContext(ctx,
 			`INSERT INTO durable_feed_rows (workspace_id, row_id, plane, order_key, row) VALUES (?, ?, ?, ?, ?)

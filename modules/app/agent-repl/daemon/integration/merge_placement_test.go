@@ -20,15 +20,15 @@ func isMergeHead(r *frontendv1.FeedRow) bool {
 	return r.GetActivity().GetMerge().GetHead() != nil
 }
 
-// TestTheMergeBubbleIsPlacedOnlyOnceTheWorkspaceIsFreeAndStaysLast pins the
-// owner's invariant (2026-10-08): "while merging, the merge bubble is
-// necessarily the last thing in the feed, because things only land outside of
-// it after the merge has finished". A merge asked for while a background
-// subagent runs waits for the workspace to fall free; a turn the vendor starts
-// meanwhile draws its rows BEFORE any bubble exists, the bubble is placed only
-// once the subagent settles, and no root row lands after it until the merge
-// has landed.
-func TestTheMergeBubbleIsPlacedOnlyOnceTheWorkspaceIsFreeAndStaysLast(t *testing.T) {
+// TestTheMergeBubbleIsPinnedLastFromItsQueueingAndSettlesWhereItLands pins the
+// owner's invariant (2026-10-10): the merge bubble appears the moment the
+// merge is queued and stays at the bottom of the feed until the merge
+// resolves, then stays where it resolved. A merge asked for while a background
+// subagent runs waits for the workspace to fall free; its bubble is drawn
+// PINNED while it waits, a turn the vendor starts meanwhile draws its rows
+// ABOVE the pinned bubble, and the landed head settles at a key after every
+// row drawn before it.
+func TestTheMergeBubbleIsPinnedLastFromItsQueueingAndSettlesWhereItLands(t *testing.T) {
 	t.Parallel()
 	// Arrange: a running turn with a live background subagent, the root feed
 	// tailed before anything is asked.
@@ -88,33 +88,41 @@ func TestTheMergeBubbleIsPlacedOnlyOnceTheWorkspaceIsFreeAndStaysLast(t *testing
 		return isMergeHead(r) && r.GetActivity().GetMerge().GetSuccess() != nil
 	}))
 
-	// Assert: no bubble while the merge waited; the bubble follows the woken
-	// turn's rows; nothing landed after it while the merge ran.
-	if headDrawnWhileWaiting {
-		t.Fatal("a merge bubble was drawn while the merge waited for the workspace to fall free")
+	// Assert: the bubble was drawn pinned while the merge waited; the woken
+	// turn's row sorts above it; the landed head settled after every row drawn
+	// before it.
+	if !headDrawnWhileWaiting {
+		t.Fatal("no merge bubble was drawn while the merge waited for the workspace to fall free")
 	}
-	var head *frontendv1.FeedRow
+	var landed *frontendv1.FeedRow
 	for _, r := range seen {
-		if isMergeHead(r) {
-			head = r
-			break
-		}
-	}
-	if head == nil {
-		t.Fatal("the merge drew no bubble")
-	}
-	placed := head.GetOrder().GetKey()
-	if waiting.GetOrder().GetKey() >= placed {
-		t.Fatalf("the woken turn's row (order %q) sorts after the merge bubble (order %q), want it before", waiting.GetOrder().GetKey(), placed)
-	}
-	started := false
-	for _, r := range seen {
-		if r == head {
-			started = true
+		if !isMergeHead(r) {
 			continue
 		}
-		if started && !isMergeHead(r) && r.GetOrder().GetKey() > placed {
-			t.Fatalf("row %v (order %q) landed after the merge bubble (order %q) while the merge ran", r.GetId(), r.GetOrder().GetKey(), placed)
+		if r.GetActivity().GetMerge().GetSuccess() != nil {
+			landed = r
+			continue
+		}
+		if r.GetOrder().GetPinned() == nil {
+			t.Fatalf("a live merge head was drawn unpinned (order %v), want it pinned until the merge resolves", r.GetOrder())
+		}
+		if waiting.GetOrder().GetKey() >= r.GetOrder().GetKey() {
+			t.Fatalf("the woken turn's row (order %q) sorts after the pinned bubble (order %q), want it above", waiting.GetOrder().GetKey(), r.GetOrder().GetKey())
+		}
+	}
+	if landed == nil {
+		t.Fatal("the merge drew no landed head")
+	}
+	settled := landed.GetOrder()
+	if settled.GetPinned() != nil {
+		t.Fatalf("the landed head's order = %v, want it settled (unpinned)", settled)
+	}
+	for _, r := range seen {
+		if r == landed || isMergeHead(r) {
+			continue
+		}
+		if r.GetOrder().GetKey() >= settled.GetKey() {
+			t.Fatalf("row %v (order %q) sorts at or after the settled bubble (order %q), want every row drawn before the settle above it", r.GetId(), r.GetOrder().GetKey(), settled.GetKey())
 		}
 	}
 }
