@@ -200,9 +200,10 @@ export interface FeedControllerOptions {
 interface RowState {
   row: FeedRow;
   /**
-   * The row's `FeedRow.order` key as first placed. FIXED for the row's life: a
-   * later push carrying another key is a daemon invariant violation, logged, and
-   * never moves the row (`keepKey`).
+   * The row's `FeedRow.order` key. FIXED once placed: a later push carrying
+   * another key is a daemon invariant violation, logged, and never moves the
+   * row (`keepKey`) — except the one move a PINNED row makes when it settles
+   * (`settlesPinned`).
    */
   key: string;
   element: HTMLElement;
@@ -625,7 +626,10 @@ export function createFeedController(
     insertPushed(row, id, key);
   }
 
-  /** A push of a row this feed holds: redrawn IN PLACE, never moved. */
+  /**
+   * A push of a row this feed holds: redrawn IN PLACE, never moved — unless it
+   * is a pinned row settling, which moves once to its settled key.
+   */
   function replaceHeld(
     held: RowState,
     row: FeedRow,
@@ -636,7 +640,8 @@ export function createFeedController(
       operation: "feed.row-replaced",
       context: { feed: feedName(), row: id, kind: row.row.case ?? "unset" },
     });
-    keepKey(held, id, key);
+    if (settlesPinned(held, row, key)) settle(held, id, key);
+    else keepKey(held, id, key);
     updateHeld(held, row);
     truncateAtSeparation(row, id);
     announce();
@@ -697,7 +702,8 @@ export function createFeedController(
     const id = requireMessage(row.id, "FeedRow.id").value;
     const held = states.get(id);
     if (held !== undefined) {
-      keepKey(held, id, key);
+      if (settlesPinned(held, row, key)) settle(held, id, key);
+      else keepKey(held, id, key);
       updateHeld(held, row);
       return;
     }
@@ -731,7 +737,43 @@ export function createFeedController(
   }
 
   /**
-   * THE KEY IS FIXED FOR THE ROW'S LIFE (FeedRowOrder). A push of a held row
+   * THE ONE MOVE A ROW MAKES (FeedRowOrder.pinned): a held row drawn PINNED to
+   * the feed's bottom, pushed with another key and no longer pinned, has
+   * SETTLED. Every other key change is `keepKey`'s violation.
+   */
+  function settlesPinned(held: RowState, row: FeedRow, key: string): boolean {
+    return (
+      held.key !== key &&
+      held.row.order?.pinned !== undefined &&
+      row.order?.pinned === undefined
+    );
+  }
+
+  /**
+   * Re-file a settling row at its settled key. The daemon mints that key just
+   * after the feed's newest placed row, so the row stays where the reader saw
+   * it and every row placed afterward lands below it.
+   */
+  function settle(held: RowState, id: string, key: string): void {
+    const from = order.indexOf(id);
+    if (from >= 0) order.splice(from, 1);
+    const index = positionOf(key, id);
+    fileAt(id, index);
+    log.info(`feed row ${id} settled from the feed's bottom at its key`, {
+      operation: "feed.row-settled",
+      context: {
+        feed: feedName(),
+        row: id,
+        pinned_key: held.key,
+        key,
+        position: index,
+      },
+    });
+    held.key = key;
+  }
+
+  /**
+   * THE KEY IS FIXED ONCE PLACED (FeedRowOrder). A push of a held row
    * carrying another key is the daemon's invariant violation: recorded at
    * ERROR with both keys, and the row stays exactly where its first key put it.
    */
@@ -1217,7 +1259,7 @@ export function createFeedController(
       dirty: true,
     };
     states.set(id, state);
-    order.splice(index, 0, id);
+    fileAt(id, index);
     // WATCH THE NEW ROW so the overscan buffer can pre-render it before the
     // reader reaches it. Every row born on this feed passes here exactly once,
     // bubble or not, so this is the one place a row starts being watched.
@@ -1232,6 +1274,14 @@ export function createFeedController(
     carryForRow(id, bubble.element);
     element.append(bubble.element);
     mirrorState(state);
+  }
+
+  /**
+   * THE ONE INSERTION INTO THE ORDER: ID at INDEX, the position its key's
+   * binary search found (`positionOf`), never an arrival position.
+   */
+  function fileAt(id: string, index: number): void {
+    order.splice(index, 0, id);
   }
 
   /** Drop every row: the feed is being repainted from a fresh newest page. */
