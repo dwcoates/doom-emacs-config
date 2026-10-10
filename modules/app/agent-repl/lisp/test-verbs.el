@@ -496,6 +496,21 @@ just restart instantly\" -- this replaces the earlier \"under way\" notice."
     ;; Assert
     (should-not (agent-repl-test-verbs--messaged-p "restart refused"))))
 
+(ert-deftest agent-repl-verbs-restart-waits-with-no-timeout ()
+  "A restart's answer waits as long as the daemon's restart does.
+Owner ruling 2026-10-10: a restart over a merge mid-step happens at the
+step's end, however long that takes, and the call waits for it."
+  (agent-repl-test-verbs--with nil
+    ;; Arrange
+    (let ((timeout 'unset))
+      (cl-letf (((symbol-function 'agent-repl-rpc-restart-workspace)
+                 (lambda (_conn _request &rest keys)
+                   (setq timeout (plist-get keys :timeout)))))
+        ;; Act
+        (agent-repl-verb-restart "ws-one"))
+      ;; Assert
+      (should (eq timeout :none)))))
+
 ;;;; ---- Interrupt -------------------------------------------------------
 
 (ert-deftest agent-repl-verbs-interrupt-targets-the-turn ()

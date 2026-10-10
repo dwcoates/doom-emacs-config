@@ -591,6 +591,18 @@ func (f *Fleet) Running(ws ids.WorkspaceID) (Running, bool) {
 	return Running{Turn: session.watcher.TurnInFlight(), LiveWork: session.watcher.LiveWork()}, true
 }
 
+// Blockers names what keeps a workspace from being free: its turn in flight
+// and each live detached item, for a record of what a freeness wait waits on.
+// A workspace with no session, or one parked behind a cold gate, has none.
+func (f *Fleet) Blockers(ws ids.WorkspaceID) []string {
+	running, _ := f.Running(ws)
+	names := running.LiveWork.Names()
+	if running.Turn != nil {
+		names = append([]string{"turn:" + string(*running.Turn)}, names...)
+	}
+	return names
+}
+
 // Health answers the liveness probe health.Deps.Live takes: whether a session
 // exists and whether its link is serving.
 func (f *Fleet) Health(ws ids.WorkspaceID) (bool, bool) {

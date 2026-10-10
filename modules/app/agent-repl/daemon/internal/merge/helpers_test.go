@@ -1571,6 +1571,7 @@ type harness struct {
 // than on elapsed time.
 type fakeFreeness struct {
 	busy     bool
+	blockers []string
 	awaitErr error
 	waiting  chan struct{}
 	release  chan struct{}
@@ -1580,6 +1581,14 @@ type fakeFreeness struct {
 }
 
 func (f *fakeFreeness) Free(ids.WorkspaceID) bool { return !f.busy }
+
+// Blockers answers the scripted blockers while busy, none once free.
+func (f *fakeFreeness) Blockers(ids.WorkspaceID) []string {
+	if !f.busy {
+		return nil
+	}
+	return f.blockers
+}
 
 func (f *fakeFreeness) AwaitFree(ctx context.Context, _ ids.WorkspaceID) error {
 	f.mu.Lock()

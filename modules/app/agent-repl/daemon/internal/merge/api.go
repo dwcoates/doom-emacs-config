@@ -388,6 +388,10 @@ type Freeness interface {
 	Free(ws ids.WorkspaceID) bool
 	// AwaitFree blocks until the workspace is free, or until ctx ends.
 	AwaitFree(ctx context.Context, ws ids.WorkspaceID) error
+	// Blockers names what keeps the workspace from being free right now --
+	// its turn in flight ("turn:<id>") and each live detached item
+	// (sessionwatcher.LiveWorkSet.Names) -- empty when it is free.
+	Blockers(ws ids.WorkspaceID) []string
 }
 
 // AdmissionPause blocks a merge run at admission. It exists for the test seam
