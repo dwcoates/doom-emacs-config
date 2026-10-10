@@ -203,6 +203,13 @@ The footer's `disconnected` status has three vendor substatuses for a Claude SDK
   - They wait in the tray with the badge "after reconnect".
   - They are delivered when a session next comes up on the workspace, however it comes up.
   - A failed start never drops them.
+- **A prompt that is waiting on the cold gate shows the badge "awaiting cold gate".**
+  - This happens when you send to a workspace with no live session and it comes back parked at its cold gate.
+  - The prompt never answers the gate for you, because answering it spends money: pay, clear or compact in the gate card.
+  - The session your answer brings up delivers the prompt.
+  - Send now is refused while the gate stands, and Cancel still drops the prompt.
+- **A held prompt reads "classifying" only while the classifier is actually deciding it.**
+  - A prompt that nothing is classifying and nothing holds reads "queued", and it is delivered in order.
 
 ## Restarting a stuck workspace
 
