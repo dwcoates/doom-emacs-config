@@ -1397,6 +1397,46 @@ Design record `docs/protobuf-design/vendor-start-resilience.md`.
   (`restartAnswer`). A caller that leaves first is answered its context's end
   at ERROR, and the bounce runs on and records its own outcome.
 
+## A prompt waits at the cold gate, and nothing that waits on a session is left unheld
+
+Owner rulings, 2026-10-10 (`internal/promptqueue/sessionhold.go`; design
+record `docs/protobuf-design/held-prompt-cold-gate.md`). The incident: a
+prompt held for doom's revival was released into a session the revival had
+parked at its cold gate. The release logged "the session is up and the vendor
+serves it", the delivery failed for want of a watcher, and the prompt stood
+with no hold and no verdict, drawn "classifying", with nothing to re-drive it.
+
+- **A PROMPT NEVER ANSWERS THE COLD GATE.** Judgement call 11 and owner ruling
+  2 stand: only `AnswerColdGate` spends the cold re-read. A NEW submission is
+  refused `cold_gate` as before. A prompt ALREADY held when a revival parks at
+  the gate is held under `wsm.HoldColdGate` (the tray's `cold_gate` arm, badge
+  "awaiting cold gate"). Send now on it is refused, and Cancel drops it.
+- **ONLY A SESSION THAT SERVES IS HANDED A PROMPT** (`queue.sessionWait`): no
+  standing gate, a shim client, a started session and a watcher.
+  - The session-up release (`releaseReconnectHoldsLocked`) holds what waits
+    at the gate, or under the reconnect hold for a session that is not up.
+    It never claims a served session it does not have.
+  - The pop (`mayPop`) does the same for a shim that is there and does not
+    serve. A workspace with no shim still revives on delivery.
+  - A lease ending over a parked session holds its prompts at the gate.
+- **AN UNDELIVERED ENTRY GOES BACK ON ITS HOLD** (`deliverHeld`). A delivery
+  whose revival parked at the gate holds the entry there, with no error. One
+  that found no client or no watcher re-holds it under the reconnect hold and
+  still returns `ErrNoSession`, so the caller's ERROR stands. Either way the
+  session coming up (`ReleaseReconnectHolds`, the one guaranteed edge)
+  delivers it. `standingSessionHold` is the one predicate for both holds.
+- **WHAT STANDS UNHELD IS DRIVEN.** The session-up release also delivers a
+  free entry when nothing runs and classifies unjudged free entries against
+  the turn it starts. A lease evaluation that changes nothing still pops a
+  free entry when nothing runs (a handover's drain reaches a transferred
+  workspace only through it). The boot settles every inert survivor's holds
+  after its carried gate is raised again (`settleSessionlessHolds`). So a row
+  an older build stranded is delivered or held truthfully on the next edge.
+- **`classifying` MEANS A CLASSIFIER IS RUNNING.** It is drawn only from the
+  stamped `wsm.ArmClassifying`. A record with no verdict and no hold is
+  `awaiting_delivery` (badge "queued"), and one a daemon condition holds is
+  `daemon_held`.
+
 ## A coalesced bounce runs every kind it was asked, never one in place of another
 
 The prompt queue's bounce registry (`internal/promptqueue/bounce.go`) keeps
@@ -2232,11 +2272,13 @@ SUBMIT_PROMPT_DELIVERY_DEFERRED` (`internal/promptqueue/classify.go`,
   restore and a handover's successor honor it; an unknown value fails the
   hold's decode rather than being read as ordinary.
 - **HELD LIKE ANY HELD PROMPT.** It is in the tray. A merge or a cold gate
-  refuses a NEW submission (deferred or not); Emacs writes a refused deferred
-  submission to the held-prompt ingress with its `delivery`, whose backoff
-  retries it until the condition clears. The ingress submits it under the same
-  delivery. A user's Release from the tray still sends it through: that is a
-  later, explicit request.
+  refuses a NEW submission (deferred or not), and one already held when a
+  revival parks at the gate waits under the cold-gate hold; Emacs writes a
+  refused deferred submission to the held-prompt ingress with its `delivery`,
+  whose backoff retries it until the condition clears. The ingress submits it
+  under the same delivery. A user's Release from the tray still sends it
+  through (that is a later, explicit request), except from the cold-gate
+  hold, which only the gate's answer lifts.
 
 ## A BROWSER page holds ONE stream; Emacs holds its own
 
