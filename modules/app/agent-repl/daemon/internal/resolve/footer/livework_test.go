@@ -1,6 +1,8 @@
 package footer
 
 import (
+	"claude-repld/internal/sourcescan"
+	"regexp"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -321,5 +323,21 @@ func TestASetThatReListsARetiredRunReopensAMinimalRowAndSaysSo(t *testing.T) {
 	last := jumps[len(jumps)-1]
 	if last.Context["provenance"] != "live_work_set" || last.Context["retired_before"] != true {
 		t.Fatalf("jump record = %+v, want provenance live_work_set and retired_before true", last.Context)
+	}
+}
+
+// TestNoFooterSourceSpellsALiveItemPrefix pins the footer's live-work records
+// to the session watcher's one spelling of an item's name
+// (sessionwatcher.NameAgent and its siblings): a hand-written prefix here
+// would drift from the names every other record uses.
+func TestNoFooterSourceSpellsALiveItemPrefix(t *testing.T) {
+	// Arrange
+	literal := regexp.MustCompile(`"(agent|shell|monitor|pending):"`)
+	// Act
+	for _, file := range sourcescan.Production(t) {
+		// Assert
+		if loc := literal.FindIndex(file.Source); loc != nil {
+			t.Errorf("%s spells %s itself; use the sessionwatcher.Name* prefix", file.Name, file.Source[loc[0]:loc[1]])
+		}
 	}
 }
