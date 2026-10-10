@@ -531,6 +531,9 @@ func (q *queue) OnLeaseChanged(ws ids.WorkspaceID) {
 // popIfIdle delivers the next free entry when no turn runs, as a turn end
 // would. The caller holds the delivery lock (d).
 func (q *queue) popIfIdle(ctx context.Context, d *delivery, log dlog.Logger) {
+	if q.factsPending(d.ws, "the idle delivery", log, q.popIfIdle) {
+		return
+	}
 	if watcher, ok := q.deps.Watcher(d.ws); ok && watcher.TurnInFlight() != nil {
 		return
 	}
