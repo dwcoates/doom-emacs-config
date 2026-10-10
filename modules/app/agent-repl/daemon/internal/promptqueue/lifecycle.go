@@ -498,6 +498,15 @@ func (q *queue) OnLeaseChanged(ws ids.WorkspaceID) {
 			dlog.Context{"holds": len(standing)})
 		if revivalPending {
 			q.reviveInBackground(ctx, ws, log)
+			return
+		}
+		// AN UNCHANGED TRAY CAN STILL HOLD AN ENTRY NOTHING DRIVES: a free
+		// entry with nothing running, which an older build stranded (doom,
+		// 2026-10-10) and which a handover's drain reaches through here with
+		// no session-up edge of its own. With no lease holding it, it is
+		// delivered as a turn end would deliver it.
+		if want == nil {
+			q.popIfIdle(ctx, d, log)
 		}
 		return
 	}
@@ -516,7 +525,13 @@ func (q *queue) OnLeaseChanged(ws ids.WorkspaceID) {
 	if want != nil {
 		return
 	}
-	if watcher, ok := q.deps.Watcher(ws); ok && watcher.TurnInFlight() != nil {
+	q.popIfIdle(ctx, d, log)
+}
+
+// popIfIdle delivers the next free entry when no turn runs, as a turn end
+// would. The caller holds the delivery lock (d).
+func (q *queue) popIfIdle(ctx context.Context, d *delivery, log dlog.Logger) {
+	if watcher, ok := q.deps.Watcher(d.ws); ok && watcher.TurnInFlight() != nil {
 		return
 	}
 	if _, err := q.popAndDeliver(ctx, d, log); err != nil {

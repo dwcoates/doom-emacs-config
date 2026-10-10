@@ -385,3 +385,33 @@ func TestASessionUpReleaseClassifiesAStrandedPromptBehindTheOneItDelivers(t *tes
 		t.Fatalf("t2 = %+v, want it classified against the turn t1 started", got)
 	}
 }
+
+func TestALeaseEvaluationThatChangesNothingDeliversAStrandedPrompt(t *testing.T) {
+	// Arrange: the row the incident left, on a session that serves, reached by
+	// a handover's drain (OnLeaseChanged with no lease standing).
+	h := newHarness(t)
+	strandedRow(t, h, "t1")
+
+	// Act
+	h.q.OnLeaseChanged(theWorkspace)
+
+	// Assert
+	if got := h.sender.started(); len(got) != 1 || got[0] != "t1" {
+		t.Fatalf("started = %v, want the stranded prompt delivered", got)
+	}
+}
+
+func TestALeaseEvaluationThatChangesNothingDeliversNothingBesideARunningTurn(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.watcher.running("t0")
+	strandedRow(t, h, "t1")
+
+	// Act
+	h.q.OnLeaseChanged(theWorkspace)
+
+	// Assert
+	if got := h.sender.started(); len(got) != 0 {
+		t.Fatalf("started = %v, want nothing beside the running turn", got)
+	}
+}
