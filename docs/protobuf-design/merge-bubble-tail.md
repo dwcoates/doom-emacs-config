@@ -74,3 +74,23 @@ stay at the bottom while newer rows arrive. This change amends that contract.
     unpinned, by moving the row. Every other key change stays an ERROR.
   - New placed rows follow the newest PLACED row and skip pinned ones (the
     `predecessor` class match), so the pinned row stays below them.
+
+### 2. Only the producer settles a pinned row (agent-decided, 2026-10-10)
+
+- WHAT: the resolver's publication intent is a three-way choice. Keep (the
+  default) restates a row as it stands. Draw pinned pins a row. Settle settles
+  a pinned row. `UpsertDurablePinned` draws pinned and `UpsertDurable`
+  settles. Every other path (a fold, a supersede re-push, a restore) keeps.
+- WHY: the reader's fold on a merge bubble restates its head through the
+  generic restate path. If "published without pin" had meant "settle", folding
+  a queued merge's bubble would have settled it mid-flight.
+- Consequences:
+  - A placed row published pinned is refused at ERROR
+    (`daemon.feed.pin_refused`) and keeps its place.
+  - The merge's `publishHead` is the one site that decides pinned versus
+    settled: no result means pinned, and any result settles.
+  - The merge-in-line, restart, resume and adoption paths now all draw the
+    bubble pinned. The 2026-10-08 `run.placed` / `started()` gate is removed,
+    and the merge tests and `integration/merge_placement_test.go` that pinned
+    "no bubble until started" now pin the reverse, per the owner's 2026-10-10
+    ruling.
