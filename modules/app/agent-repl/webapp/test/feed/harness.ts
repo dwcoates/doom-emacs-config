@@ -178,8 +178,11 @@ export class Channel<T> {
 
 /** What a scripted daemon answers with, and what it was asked. */
 export interface FeedScript {
-  /** Answers OpenFeed, by the requested feed id ("" = the root feed). */
-  openFeed?: (req: OpenFeedRequest) => OpenFeedResponse;
+  /**
+   * Answers OpenFeed, by the requested feed id ("" = the root feed). A promise
+   * holds the open in flight until the test resolves it.
+   */
+  openFeed?: (req: OpenFeedRequest) => OpenFeedResponse | Promise<OpenFeedResponse>;
   /** The tail each opened token yields. Keyed by token value. */
   channels?: Map<string, Channel<WatchFeedResponse>>;
   getFeedPage?: (req: GetFeedPageRequest) => GetFeedPageResponse;
