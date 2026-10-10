@@ -60,9 +60,11 @@ import type {
   HeldSessionAct,
   HeldPromptBadge,
   HeldPromptStatusNote,
+  HeldPromptAwaitingDelivery,
   HeldPromptBuildRefreshHold,
   HeldPromptClassificationError,
   HeldPromptClassifying,
+  HeldPromptColdGateHold,
   HeldPromptDaemonHeld,
   HeldPromptHoldForTurnEnd,
   HeldPromptAfterToolCall,
@@ -155,6 +157,8 @@ export const NO_RELEASE_TITLES: Readonly<Record<string, string>> = {
     "the session is not up, so a prompt sent now would have nowhere to be delivered — it is delivered when the session reconnects",
   merge:
     "a merge is driving the session, so a prompt sent now would run inside it — it is delivered the moment the merge ends",
+  coldGate:
+    "the session is parked at its cold gate, and a prompt never answers the gate — it is delivered once the gate is answered",
 };
 
 /**
@@ -338,7 +342,8 @@ function holdCardHooks(hold: string | null): string[] {
     case "merge":
       return ["held-right", "lease-card"];
     case "reconnect":
-      // The card's `data-hold` names the reconnect; it wears no hook of its own.
+    case "coldGate":
+      // The card's `data-hold` names the wait; it wears no hook of its own.
       return ["held-right"];
     default:
       return unreachableArm("HeldPrompt.hold", hold);
@@ -414,6 +419,11 @@ function drawClassification(
       return drawHeldPromptDaemonHeld(
         classification.value,
         `${path}.daemon_held`,
+      );
+    case "awaitingDelivery":
+      return drawHeldPromptAwaitingDelivery(
+        classification.value,
+        `${path}.awaiting_delivery`,
       );
     default: {
       const other: { case: string } = classification;
@@ -563,6 +573,25 @@ export function drawHeldPromptDaemonHeld(
 }
 
 /**
+ * Nothing is classifying the entry and nothing holds it: it waits its place in
+ * the queue. No rationale and no accept, because no verdict exists.
+ */
+export function drawHeldPromptAwaitingDelivery(
+  _u: HeldPromptAwaitingDelivery,
+  path: string,
+): Verdict {
+  log.debug("drawing a held prompt awaiting delivery", {
+    operation: "tray.held-prompt.awaiting-delivery",
+    context: { path },
+  });
+  return {
+    acceptedState: null,
+    detail: null,
+    offersAccept: false,
+  };
+}
+
+/**
  * The command a cut is running, spelled as the user types it.
  *
  * UNSPECIFIED carries no spec by design — it names no command — so it is a
@@ -605,6 +634,8 @@ function drawHold(
       );
     case "merge":
       return drawHeldPromptMergeHold(hold.value, `${path}.merge`);
+    case "coldGate":
+      return drawHeldPromptColdGateHold(hold.value, `${path}.cold_gate`);
     default: {
       const other: { case: string } = hold;
       return unreachableArm(path, other.case);
@@ -658,6 +689,18 @@ export function drawHeldPromptMergeHold(
     context: { path },
   });
   return "merge";
+}
+
+/** Held until the cold gate is answered. Empty on the wire: presence is the fact. */
+export function drawHeldPromptColdGateHold(
+  _u: HeldPromptColdGateHold,
+  path: string,
+): HeldStatus {
+  log.debug("drawing a cold-gate hold", {
+    operation: "tray.held-prompt.cold-gate-hold",
+    context: { path },
+  });
+  return "coldGate";
 }
 
 /** What the actions row needs to know about the entry it acts on. */
@@ -1206,6 +1249,9 @@ export type HeldBadgeTone = "ok" | "err" | "run" | "muted" | "amber" | "teal";
  *   - a shutdown, build-refresh or merge hold: coordinated daemon work, amber;
  *   - a reconnect hold: the machinery bringing a session up, the
  *     hibernation teal;
+ *   - a cold-gate hold: the session is not up either, waiting on the gate's
+ *     answer, so the same teal;
+ *   - awaiting delivery: nothing is acting on the entry, muted;
  *   - editing (EditHeldPrompt): the prompt is being worked on in the editor,
  *     the in-flight orange.
  */
@@ -1220,6 +1266,8 @@ export const HELD_STATUS_BADGES = {
   buildRefresh: "amber",
   merge: "amber",
   reconnect: "teal",
+  coldGate: "teal",
+  awaitingDelivery: "muted",
   editing: "run",
 } as const satisfies Record<HeldStatus, HeldBadgeTone>;
 

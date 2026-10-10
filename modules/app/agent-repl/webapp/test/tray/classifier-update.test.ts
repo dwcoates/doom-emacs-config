@@ -124,7 +124,7 @@ describe("classifierRouteOf", () => {
     expect(classifierRouteOf(arm)).toBe(route);
   });
 
-  it.each(["classifying", "uninterruptibleTurn", "classificationError", "daemonHeld"] as const)(
+  it.each(["classifying", "uninterruptibleTurn", "classificationError", "daemonHeld", "awaitingDelivery"] as const)(
     "answers null for %s, which no classifier decided",
     (arm) => {
       // Act / Assert

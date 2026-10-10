@@ -39,7 +39,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file frontend/v1/daemon_hold.proto.
  */
 export const file_frontend_v1_daemon_hold: GenFile = /*@__PURE__*/
-  fileDesc("Ch1mcm9udGVuZC92MS9kYWVtb25faG9sZC5wcm90bxILZnJvbnRlbmQudjEiPAoORGFlbW9uSG9sZFRyYXkSKgoFaXRlbXMYAiADKAsyGy5mcm9udGVuZC52MS5EYWVtb25Ib2xkSXRlbSJsCg5EYWVtb25Ib2xkSXRlbRIpCgZwcm9tcHQYASABKAsyFy5mcm9udGVuZC52MS5IZWxkUHJvbXB0SAASJwoFb2ZmZXIYAiABKAsyFi5mcm9udGVuZC52MS5IZWxkT2ZmZXJIAEIGCgRpdGVtIrUJCgpIZWxkUHJvbXB0EiUKBHR1cm4YASABKAsyFy5jb252ZXJzYXRpb24udjEuVHVybklkEicKBHNhaWQYAiABKAsyGS5jb252ZXJzYXRpb24udjEuVXNlclNhaWQSMgoJcXVldWVkX2F0GAMgASgLMh8uZnJvbnRlbmQudjEuSGVsZFByb21wdFF1ZXVlZEF0EjkKC2NsYXNzaWZ5aW5nGAQgASgLMiIuZnJvbnRlbmQudjEuSGVsZFByb21wdENsYXNzaWZ5aW5nSAASNQoJaW50ZXJqZWN0GAUgASgLMiAuZnJvbnRlbmQudjEuSGVsZFByb21wdEludGVyamVjdEgAEkIKEWhvbGRfZm9yX3R1cm5fZW5kGAYgASgLMiUuZnJvbnRlbmQudjEuSGVsZFByb21wdEhvbGRGb3JUdXJuRW5kSAASPwoPYWZ0ZXJfdG9vbF9jYWxsGBEgASgLMiQuZnJvbnRlbmQudjEuSGVsZFByb21wdEFmdGVyVG9vbENhbGxIABJKChR1bmludGVycnVwdGlibGVfdHVybhgHIAEoCzIqLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRVbmludGVycnVwdGlibGVUdXJuSAASSgoUY2xhc3NpZmljYXRpb25fZXJyb3IYCCABKAsyKi5mcm9udGVuZC52MS5IZWxkUHJvbXB0Q2xhc3NpZmljYXRpb25FcnJvckgAEjgKC2RhZW1vbl9oZWxkGBMgASgLMiEuZnJvbnRlbmQudjEuSGVsZFByb21wdERhZW1vbkhlbGRIABI3CghzaHV0ZG93bhgJIAEoCzIjLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRTaHV0ZG93bkhvbGRIARI5CglyZWNvbm5lY3QYCyABKAsyJC5mcm9udGVuZC52MS5IZWxkUHJvbXB0UmVjb25uZWN0SG9sZEgBEkAKDWJ1aWxkX3JlZnJlc2gYDCABKAsyJy5mcm9udGVuZC52MS5IZWxkUHJvbXB0QnVpbGRSZWZyZXNoSG9sZEgBEjEKBW1lcmdlGBQgASgLMiAuZnJvbnRlbmQudjEuSGVsZFByb21wdE1lcmdlSG9sZEgBEi8KB2VkaXRpbmcYDSABKAsyHi5mcm9udGVuZC52MS5IZWxkUHJvbXB0RWRpdGluZxIrCgViYWRnZRgVIAEoCzIcLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRCYWRnZRIwCgVub3RlcxgWIAMoCzIhLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRTdGF0dXNOb3RlEjMKCWNvYWxlc2NlZBgPIAEoCzIgLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRDb2FsZXNjZWQSKAoDYWN0GBAgASgLMhsuZnJvbnRlbmQudjEuSGVsZFNlc3Npb25BY3QSOQoKZm9sZF9hYm92ZRgSIAEoCzIgLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRGb2xkQWJvdmVIAogBAUIQCg5jbGFzc2lmaWNhdGlvbkIGCgRob2xkQg0KC19mb2xkX2Fib3ZlSgQIChALSgQIDhAPUgprZWVwX2FsaXZlUgZiYWRnZXMiPQoTSGVsZFByb21wdEZvbGRBYm92ZRImCgVhYm92ZRgBIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWQiFQoTSGVsZFByb21wdENvYWxlc2NlZCKQAQoOSGVsZFNlc3Npb25BY3QSMQoFbW9kZWwYASABKAsyIC5mcm9udGVuZC52MS5IZWxkU2Vzc2lvbkFjdE1vZGVsSAASRAoPcGVybWlzc2lvbl9tb2RlGAIgASgLMikuZnJvbnRlbmQudjEuSGVsZFNlc3Npb25BY3RQZXJtaXNzaW9uTW9kZUgAQgUKA2FjdCIkChNIZWxkU2Vzc2lvbkFjdE1vZGVsEg0KBW1vZGVsGAEgASgJIiwKHEhlbGRTZXNzaW9uQWN0UGVybWlzc2lvbk1vZGUSDAoEbW9kZRgBIAEoCSKgBgoPSGVsZFByb21wdEJhZGdlEg0KBWxhYmVsGAEgASgJEhMKBmRldGFpbBgCIAEoCUgBiAEBEj4KC2NsYXNzaWZ5aW5nGAMgASgLMicuZnJvbnRlbmQudjEuSGVsZFByb21wdEJhZGdlQ2xhc3NpZnlpbmdIABI6CglpbnRlcmplY3QYBCABKAsyJS5mcm9udGVuZC52MS5IZWxkUHJvbXB0QmFkZ2VJbnRlcmplY3RIABJECg9hZnRlcl90b29sX2NhbGwYBSABKAsyKS5mcm9udGVuZC52MS5IZWxkUHJvbXB0QmFkZ2VBZnRlclRvb2xDYWxsSAASRwoRaG9sZF9mb3JfdHVybl9lbmQYBiABKAsyKi5mcm9udGVuZC52MS5IZWxkUHJvbXB0QmFkZ2VIb2xkRm9yVHVybkVuZEgAEk8KFHVuaW50ZXJydXB0aWJsZV90dXJuGAcgASgLMi8uZnJvbnRlbmQudjEuSGVsZFByb21wdEJhZGdlVW5pbnRlcnJ1cHRpYmxlVHVybkgAEk8KFGNsYXNzaWZpY2F0aW9uX2Vycm9yGAggASgLMi8uZnJvbnRlbmQudjEuSGVsZFByb21wdEJhZGdlQ2xhc3NpZmljYXRpb25FcnJvckgAEjYKB2VkaXRpbmcYCSABKAsyIy5mcm9udGVuZC52MS5IZWxkUHJvbXB0QmFkZ2VFZGl0aW5nSAASOAoIc2h1dGRvd24YCiABKAsyJC5mcm9udGVuZC52MS5IZWxkUHJvbXB0QmFkZ2VTaHV0ZG93bkgAEkEKDWJ1aWxkX3JlZnJlc2gYCyABKAsyKC5mcm9udGVuZC52MS5IZWxkUHJvbXB0QmFkZ2VCdWlsZFJlZnJlc2hIABI6CglyZWNvbm5lY3QYDCABKAsyJS5mcm9udGVuZC52MS5IZWxkUHJvbXB0QmFkZ2VSZWNvbm5lY3RIABIyCgVtZXJnZRgNIAEoCzIhLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRCYWRnZU1lcmdlSABCDAoKc3RhbmRzX2ZvckIJCgdfZGV0YWlsIhwKGkhlbGRQcm9tcHRCYWRnZUNsYXNzaWZ5aW5nIhoKGEhlbGRQcm9tcHRCYWRnZUludGVyamVjdCIeChxIZWxkUHJvbXB0QmFkZ2VBZnRlclRvb2xDYWxsIh8KHUhlbGRQcm9tcHRCYWRnZUhvbGRGb3JUdXJuRW5kIiQKIkhlbGRQcm9tcHRCYWRnZVVuaW50ZXJydXB0aWJsZVR1cm4iJAoiSGVsZFByb21wdEJhZGdlQ2xhc3NpZmljYXRpb25FcnJvciIYChZIZWxkUHJvbXB0QmFkZ2VFZGl0aW5nIhkKF0hlbGRQcm9tcHRCYWRnZVNodXRkb3duIh0KG0hlbGRQcm9tcHRCYWRnZUJ1aWxkUmVmcmVzaCIaChhIZWxkUHJvbXB0QmFkZ2VSZWNvbm5lY3QiFgoUSGVsZFByb21wdEJhZGdlTWVyZ2UiKAoUSGVsZFByb21wdFN0YXR1c05vdGUSEAoIc2VudGVuY2UYASABKAkiEwoRSGVsZFByb21wdEVkaXRpbmciIwoSSGVsZFByb21wdFF1ZXVlZEF0Eg0KBWF0X21zGAEgASgDIhcKFUhlbGRQcm9tcHRDbGFzc2lmeWluZyIoChNIZWxkUHJvbXB0SW50ZXJqZWN0EhEKCXJhdGlvbmFsZRgBIAEoCSIsChdIZWxkUHJvbXB0QWZ0ZXJUb29sQ2FsbBIRCglyYXRpb25hbGUYASABKAkiYAoYSGVsZFByb21wdEhvbGRGb3JUdXJuRW5kEhEKCXJhdGlvbmFsZRgBIAEoCRIxCghhY2NlcHRlZBgCIAEoCzIfLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRBY2NlcHRlZCImChJIZWxkUHJvbXB0QWNjZXB0ZWQSEAoIYWNjZXB0ZWQYASABKAgiUQodSGVsZFByb21wdFVuaW50ZXJydXB0aWJsZVR1cm4SMAoHY29tbWFuZBgBIAEoDjIfLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uQ29tbWFuZCIvCh1IZWxkUHJvbXB0Q2xhc3NpZmljYXRpb25FcnJvchIOCgZkZXRhaWwYASABKAkiLQoWSGVsZFByb21wdFNodXRkb3duSG9sZBITCgtzY2hlZHVsZV9pZBgBIAEoCSIZChdIZWxkUHJvbXB0UmVjb25uZWN0SG9sZCIVChNIZWxkUHJvbXB0TWVyZ2VIb2xkIhYKFEhlbGRQcm9tcHREYWVtb25IZWxkIhwKGkhlbGRQcm9tcHRCdWlsZFJlZnJlc2hIb2xkIlEKCUhlbGRPZmZlchI7Cg1tZXJnZV9kZXF1ZXVlGAEgASgLMiIuZnJvbnRlbmQudjEuSGVsZE9mZmVyTWVyZ2VEZXF1ZXVlSABCBwoFb2ZmZXIiSQoVSGVsZE9mZmVyTWVyZ2VEZXF1ZXVlEjAKCGhlYWRsaW5lGAEgASgLMh4uZnJvbnRlbmQudjEuSGVsZE9mZmVySGVhZGxpbmUiIQoRSGVsZE9mZmVySGVhZGxpbmUSDAoEdGV4dBgBIAEoCUIoWiZhZ2VudHJlcGwvcHJvdG8vZnJvbnRlbmQvdjE7ZnJvbnRlbmR2MWIGcHJvdG8z", [file_conversation_v1_slash_command, file_conversation_v1_turn, file_conversation_v1_user]);
+  fileDesc("Ch1mcm9udGVuZC92MS9kYWVtb25faG9sZC5wcm90bxILZnJvbnRlbmQudjEiPAoORGFlbW9uSG9sZFRyYXkSKgoFaXRlbXMYAiADKAsyGy5mcm9udGVuZC52MS5EYWVtb25Ib2xkSXRlbSJsCg5EYWVtb25Ib2xkSXRlbRIpCgZwcm9tcHQYASABKAsyFy5mcm9udGVuZC52MS5IZWxkUHJvbXB0SAASJwoFb2ZmZXIYAiABKAsyFi5mcm9udGVuZC52MS5IZWxkT2ZmZXJIAEIGCgRpdGVtIrUKCgpIZWxkUHJvbXB0EiUKBHR1cm4YASABKAsyFy5jb252ZXJzYXRpb24udjEuVHVybklkEicKBHNhaWQYAiABKAsyGS5jb252ZXJzYXRpb24udjEuVXNlclNhaWQSMgoJcXVldWVkX2F0GAMgASgLMh8uZnJvbnRlbmQudjEuSGVsZFByb21wdFF1ZXVlZEF0EjkKC2NsYXNzaWZ5aW5nGAQgASgLMiIuZnJvbnRlbmQudjEuSGVsZFByb21wdENsYXNzaWZ5aW5nSAASNQoJaW50ZXJqZWN0GAUgASgLMiAuZnJvbnRlbmQudjEuSGVsZFByb21wdEludGVyamVjdEgAEkIKEWhvbGRfZm9yX3R1cm5fZW5kGAYgASgLMiUuZnJvbnRlbmQudjEuSGVsZFByb21wdEhvbGRGb3JUdXJuRW5kSAASPwoPYWZ0ZXJfdG9vbF9jYWxsGBEgASgLMiQuZnJvbnRlbmQudjEuSGVsZFByb21wdEFmdGVyVG9vbENhbGxIABJKChR1bmludGVycnVwdGlibGVfdHVybhgHIAEoCzIqLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRVbmludGVycnVwdGlibGVUdXJuSAASSgoUY2xhc3NpZmljYXRpb25fZXJyb3IYCCABKAsyKi5mcm9udGVuZC52MS5IZWxkUHJvbXB0Q2xhc3NpZmljYXRpb25FcnJvckgAEjgKC2RhZW1vbl9oZWxkGBMgASgLMiEuZnJvbnRlbmQudjEuSGVsZFByb21wdERhZW1vbkhlbGRIABJEChFhd2FpdGluZ19kZWxpdmVyeRgXIAEoCzInLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRBd2FpdGluZ0RlbGl2ZXJ5SAASNwoIc2h1dGRvd24YCSABKAsyIy5mcm9udGVuZC52MS5IZWxkUHJvbXB0U2h1dGRvd25Ib2xkSAESOQoJcmVjb25uZWN0GAsgASgLMiQuZnJvbnRlbmQudjEuSGVsZFByb21wdFJlY29ubmVjdEhvbGRIARJACg1idWlsZF9yZWZyZXNoGAwgASgLMicuZnJvbnRlbmQudjEuSGVsZFByb21wdEJ1aWxkUmVmcmVzaEhvbGRIARIxCgVtZXJnZRgUIAEoCzIgLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRNZXJnZUhvbGRIARI4Cgljb2xkX2dhdGUYGCABKAsyIy5mcm9udGVuZC52MS5IZWxkUHJvbXB0Q29sZEdhdGVIb2xkSAESLwoHZWRpdGluZxgNIAEoCzIeLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRFZGl0aW5nEisKBWJhZGdlGBUgASgLMhwuZnJvbnRlbmQudjEuSGVsZFByb21wdEJhZGdlEjAKBW5vdGVzGBYgAygLMiEuZnJvbnRlbmQudjEuSGVsZFByb21wdFN0YXR1c05vdGUSMwoJY29hbGVzY2VkGA8gASgLMiAuZnJvbnRlbmQudjEuSGVsZFByb21wdENvYWxlc2NlZBIoCgNhY3QYECABKAsyGy5mcm9udGVuZC52MS5IZWxkU2Vzc2lvbkFjdBI5Cgpmb2xkX2Fib3ZlGBIgASgLMiAuZnJvbnRlbmQudjEuSGVsZFByb21wdEZvbGRBYm92ZUgCiAEBQhAKDmNsYXNzaWZpY2F0aW9uQgYKBGhvbGRCDQoLX2ZvbGRfYWJvdmVKBAgKEAtKBAgOEA9SCmtlZXBfYWxpdmVSBmJhZGdlcyI9ChNIZWxkUHJvbXB0Rm9sZEFib3ZlEiYKBWFib3ZlGAEgASgLMhcuY29udmVyc2F0aW9uLnYxLlR1cm5JZCIVChNIZWxkUHJvbXB0Q29hbGVzY2VkIpABCg5IZWxkU2Vzc2lvbkFjdBIxCgVtb2RlbBgBIAEoCzIgLmZyb250ZW5kLnYxLkhlbGRTZXNzaW9uQWN0TW9kZWxIABJECg9wZXJtaXNzaW9uX21vZGUYAiABKAsyKS5mcm9udGVuZC52MS5IZWxkU2Vzc2lvbkFjdFBlcm1pc3Npb25Nb2RlSABCBQoDYWN0IiQKE0hlbGRTZXNzaW9uQWN0TW9kZWwSDQoFbW9kZWwYASABKAkiLAocSGVsZFNlc3Npb25BY3RQZXJtaXNzaW9uTW9kZRIMCgRtb2RlGAEgASgJIqYHCg9IZWxkUHJvbXB0QmFkZ2USDQoFbGFiZWwYASABKAkSEwoGZGV0YWlsGAIgASgJSAGIAQESPgoLY2xhc3NpZnlpbmcYAyABKAsyJy5mcm9udGVuZC52MS5IZWxkUHJvbXB0QmFkZ2VDbGFzc2lmeWluZ0gAEjoKCWludGVyamVjdBgEIAEoCzIlLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRCYWRnZUludGVyamVjdEgAEkQKD2FmdGVyX3Rvb2xfY2FsbBgFIAEoCzIpLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRCYWRnZUFmdGVyVG9vbENhbGxIABJHChFob2xkX2Zvcl90dXJuX2VuZBgGIAEoCzIqLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRCYWRnZUhvbGRGb3JUdXJuRW5kSAASTwoUdW5pbnRlcnJ1cHRpYmxlX3R1cm4YByABKAsyLy5mcm9udGVuZC52MS5IZWxkUHJvbXB0QmFkZ2VVbmludGVycnVwdGlibGVUdXJuSAASTwoUY2xhc3NpZmljYXRpb25fZXJyb3IYCCABKAsyLy5mcm9udGVuZC52MS5IZWxkUHJvbXB0QmFkZ2VDbGFzc2lmaWNhdGlvbkVycm9ySAASNgoHZWRpdGluZxgJIAEoCzIjLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRCYWRnZUVkaXRpbmdIABI4CghzaHV0ZG93bhgKIAEoCzIkLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRCYWRnZVNodXRkb3duSAASQQoNYnVpbGRfcmVmcmVzaBgLIAEoCzIoLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRCYWRnZUJ1aWxkUmVmcmVzaEgAEjoKCXJlY29ubmVjdBgMIAEoCzIlLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRCYWRnZVJlY29ubmVjdEgAEjIKBW1lcmdlGA0gASgLMiEuZnJvbnRlbmQudjEuSGVsZFByb21wdEJhZGdlTWVyZ2VIABI5Cgljb2xkX2dhdGUYDiABKAsyJC5mcm9udGVuZC52MS5IZWxkUHJvbXB0QmFkZ2VDb2xkR2F0ZUgAEkkKEWF3YWl0aW5nX2RlbGl2ZXJ5GA8gASgLMiwuZnJvbnRlbmQudjEuSGVsZFByb21wdEJhZGdlQXdhaXRpbmdEZWxpdmVyeUgAQgwKCnN0YW5kc19mb3JCCQoHX2RldGFpbCIcChpIZWxkUHJvbXB0QmFkZ2VDbGFzc2lmeWluZyIaChhIZWxkUHJvbXB0QmFkZ2VJbnRlcmplY3QiHgocSGVsZFByb21wdEJhZGdlQWZ0ZXJUb29sQ2FsbCIfCh1IZWxkUHJvbXB0QmFkZ2VIb2xkRm9yVHVybkVuZCIkCiJIZWxkUHJvbXB0QmFkZ2VVbmludGVycnVwdGlibGVUdXJuIiQKIkhlbGRQcm9tcHRCYWRnZUNsYXNzaWZpY2F0aW9uRXJyb3IiGAoWSGVsZFByb21wdEJhZGdlRWRpdGluZyIZChdIZWxkUHJvbXB0QmFkZ2VTaHV0ZG93biIdChtIZWxkUHJvbXB0QmFkZ2VCdWlsZFJlZnJlc2giGgoYSGVsZFByb21wdEJhZGdlUmVjb25uZWN0IhYKFEhlbGRQcm9tcHRCYWRnZU1lcmdlIhkKF0hlbGRQcm9tcHRCYWRnZUNvbGRHYXRlIiEKH0hlbGRQcm9tcHRCYWRnZUF3YWl0aW5nRGVsaXZlcnkiKAoUSGVsZFByb21wdFN0YXR1c05vdGUSEAoIc2VudGVuY2UYASABKAkiEwoRSGVsZFByb21wdEVkaXRpbmciIwoSSGVsZFByb21wdFF1ZXVlZEF0Eg0KBWF0X21zGAEgASgDIhcKFUhlbGRQcm9tcHRDbGFzc2lmeWluZyIoChNIZWxkUHJvbXB0SW50ZXJqZWN0EhEKCXJhdGlvbmFsZRgBIAEoCSIsChdIZWxkUHJvbXB0QWZ0ZXJUb29sQ2FsbBIRCglyYXRpb25hbGUYASABKAkiYAoYSGVsZFByb21wdEhvbGRGb3JUdXJuRW5kEhEKCXJhdGlvbmFsZRgBIAEoCRIxCghhY2NlcHRlZBgCIAEoCzIfLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRBY2NlcHRlZCImChJIZWxkUHJvbXB0QWNjZXB0ZWQSEAoIYWNjZXB0ZWQYASABKAgiUQodSGVsZFByb21wdFVuaW50ZXJydXB0aWJsZVR1cm4SMAoHY29tbWFuZBgBIAEoDjIfLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uQ29tbWFuZCIvCh1IZWxkUHJvbXB0Q2xhc3NpZmljYXRpb25FcnJvchIOCgZkZXRhaWwYASABKAkiLQoWSGVsZFByb21wdFNodXRkb3duSG9sZBITCgtzY2hlZHVsZV9pZBgBIAEoCSIZChdIZWxkUHJvbXB0UmVjb25uZWN0SG9sZCIVChNIZWxkUHJvbXB0TWVyZ2VIb2xkIhYKFEhlbGRQcm9tcHREYWVtb25IZWxkIhgKFkhlbGRQcm9tcHRDb2xkR2F0ZUhvbGQiHAoaSGVsZFByb21wdEF3YWl0aW5nRGVsaXZlcnkiHAoaSGVsZFByb21wdEJ1aWxkUmVmcmVzaEhvbGQiUQoJSGVsZE9mZmVyEjsKDW1lcmdlX2RlcXVldWUYASABKAsyIi5mcm9udGVuZC52MS5IZWxkT2ZmZXJNZXJnZURlcXVldWVIAEIHCgVvZmZlciJJChVIZWxkT2ZmZXJNZXJnZURlcXVldWUSMAoIaGVhZGxpbmUYASABKAsyHi5mcm9udGVuZC52MS5IZWxkT2ZmZXJIZWFkbGluZSIhChFIZWxkT2ZmZXJIZWFkbGluZRIMCgR0ZXh0GAEgASgJQihaJmFnZW50cmVwbC9wcm90by9mcm9udGVuZC92MTtmcm9udGVuZHYxYgZwcm90bzM", [file_conversation_v1_slash_command, file_conversation_v1_turn, file_conversation_v1_user]);
 
 /**
  * The tray, resolved by the daemon and pushed on EVERY change. An empty
@@ -155,7 +155,8 @@ export type HeldPrompt = Message<"frontend.v1.HeldPrompt"> & {
   classification: {
     /**
      * A classifier is still deciding. Expect this arm to be replaced by one of
-     * the verdicts below.
+     * the verdicts below. Set ONLY while a classifier call is in flight; an
+     * entry nothing is classifying is `awaiting_delivery` or `daemon_held`.
      *
      * @generated from field: frontend.v1.HeldPromptClassifying classifying = 4;
      */
@@ -228,20 +229,34 @@ export type HeldPrompt = Message<"frontend.v1.HeldPrompt"> & {
      */
     value: HeldPromptDaemonHeld;
     case: "daemonHeld";
+  } | {
+    /**
+     * NOTHING IS CLASSIFYING THIS ENTRY AND NO DAEMON CONDITION HOLDS IT: it
+     * waits its place in the queue, and the next drain -- a turn's end, the
+     * session coming up -- delivers it in order. Set when no verdict was
+     * recorded and no classifier is running, so a held card never claims a
+     * decision is being made when none is: `classifying` is drawn ONLY while
+     * a classifier call is in flight (owner, 2026-10-10).
+     *
+     * @generated from field: frontend.v1.HeldPromptAwaitingDelivery awaiting_delivery = 23;
+     */
+    value: HeldPromptAwaitingDelivery;
+    case: "awaitingDelivery";
   } | { case: undefined; value?: undefined };
 
   /**
    * WHAT is holding this entry, when something other than a running turn is.
    *
    * An entry is held by at most one thing at a time: a drain lease, a
-   * pending reconnect, a build refresh and a merge are mutually exclusive
+   * pending reconnect, a standing cold gate, a build refresh and a merge are
+   * mutually exclusive
    * session conditions, and an entry held by two of them at once
    * would have two different sets of exits and two different states to
    * render. Stating them as arms makes that impossible to express rather than
    * merely unlikely. No arm set means the entry is held by the ordinary case
    * — a turn is running — and the classifier decides when it is delivered.
    *
-   * THESE FOUR ARE THE WHOLE SET, and they are entry-scoped.
+   * THESE FIVE ARE THE WHOLE SET, and they are entry-scoped.
    *
    * @generated from oneof frontend.v1.HeldPrompt.hold
    */
@@ -281,6 +296,15 @@ export type HeldPrompt = Message<"frontend.v1.HeldPrompt"> & {
      */
     value: HeldPromptMergeHold;
     case: "merge";
+  } | {
+    /**
+     * The workspace's session is parked at its cold gate, and the prompt
+     * waits for the user's answer to the gate.
+     *
+     * @generated from field: frontend.v1.HeldPromptColdGateHold cold_gate = 24;
+     */
+    value: HeldPromptColdGateHold;
+    case: "coldGate";
   } | { case: undefined; value?: undefined };
 
   /**
@@ -612,6 +636,22 @@ export type HeldPromptBadge = Message<"frontend.v1.HeldPromptBadge"> & {
      */
     value: HeldPromptBadgeMerge;
     case: "merge";
+  } | {
+    /**
+     * Held until the user answers the session's cold gate.
+     *
+     * @generated from field: frontend.v1.HeldPromptBadgeColdGate cold_gate = 14;
+     */
+    value: HeldPromptBadgeColdGate;
+    case: "coldGate";
+  } | {
+    /**
+     * Waits its place in the queue; nothing is classifying it.
+     *
+     * @generated from field: frontend.v1.HeldPromptBadgeAwaitingDelivery awaiting_delivery = 15;
+     */
+    value: HeldPromptBadgeAwaitingDelivery;
+    case: "awaitingDelivery";
   } | { case: undefined; value?: undefined };
 };
 
@@ -788,6 +828,36 @@ export const HeldPromptBadgeMergeSchema: GenMessage<HeldPromptBadgeMerge> = /*@_
   messageDesc(file_frontend_v1_daemon_hold, 19);
 
 /**
+ * The badge shows the cold-gate hold.
+ *
+ * @generated from message frontend.v1.HeldPromptBadgeColdGate
+ */
+export type HeldPromptBadgeColdGate = Message<"frontend.v1.HeldPromptBadgeColdGate"> & {
+};
+
+/**
+ * Describes the message frontend.v1.HeldPromptBadgeColdGate.
+ * Use `create(HeldPromptBadgeColdGateSchema)` to create a new message.
+ */
+export const HeldPromptBadgeColdGateSchema: GenMessage<HeldPromptBadgeColdGate> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_daemon_hold, 20);
+
+/**
+ * The badge shows an entry waiting its place in the queue, unclassified.
+ *
+ * @generated from message frontend.v1.HeldPromptBadgeAwaitingDelivery
+ */
+export type HeldPromptBadgeAwaitingDelivery = Message<"frontend.v1.HeldPromptBadgeAwaitingDelivery"> & {
+};
+
+/**
+ * Describes the message frontend.v1.HeldPromptBadgeAwaitingDelivery.
+ * Use `create(HeldPromptBadgeAwaitingDeliverySchema)` to create a new message.
+ */
+export const HeldPromptBadgeAwaitingDeliverySchema: GenMessage<HeldPromptBadgeAwaitingDelivery> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_daemon_hold, 21);
+
+/**
  * One standing fact the card's badge does not show, said in full.
  *
  * @generated from message frontend.v1.HeldPromptStatusNote
@@ -807,7 +877,7 @@ export type HeldPromptStatusNote = Message<"frontend.v1.HeldPromptStatusNote"> &
  * Use `create(HeldPromptStatusNoteSchema)` to create a new message.
  */
 export const HeldPromptStatusNoteSchema: GenMessage<HeldPromptStatusNote> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_daemon_hold, 20);
+  messageDesc(file_frontend_v1_daemon_hold, 22);
 
 /**
  * The prompt is being edited in the editor's input. DELIBERATELY EMPTY: the
@@ -823,7 +893,7 @@ export type HeldPromptEditing = Message<"frontend.v1.HeldPromptEditing"> & {
  * Use `create(HeldPromptEditingSchema)` to create a new message.
  */
 export const HeldPromptEditingSchema: GenMessage<HeldPromptEditing> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_daemon_hold, 21);
+  messageDesc(file_frontend_v1_daemon_hold, 23);
 
 /**
  * When a held prompt was queued.
@@ -844,7 +914,7 @@ export type HeldPromptQueuedAt = Message<"frontend.v1.HeldPromptQueuedAt"> & {
  * Use `create(HeldPromptQueuedAtSchema)` to create a new message.
  */
 export const HeldPromptQueuedAtSchema: GenMessage<HeldPromptQueuedAt> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_daemon_hold, 22);
+  messageDesc(file_frontend_v1_daemon_hold, 24);
 
 /**
  * The classifier is still running: the entry is queued and undecided.
@@ -859,7 +929,7 @@ export type HeldPromptClassifying = Message<"frontend.v1.HeldPromptClassifying">
  * Use `create(HeldPromptClassifyingSchema)` to create a new message.
  */
 export const HeldPromptClassifyingSchema: GenMessage<HeldPromptClassifying> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_daemon_hold, 23);
+  messageDesc(file_frontend_v1_daemon_hold, 25);
 
 /**
  * Deliver NOW: interrupt the running turn and submit once it has ended.
@@ -880,7 +950,7 @@ export type HeldPromptInterject = Message<"frontend.v1.HeldPromptInterject"> & {
  * Use `create(HeldPromptInterjectSchema)` to create a new message.
  */
 export const HeldPromptInterjectSchema: GenMessage<HeldPromptInterject> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_daemon_hold, 24);
+  messageDesc(file_frontend_v1_daemon_hold, 26);
 
 /**
  * Deliver NOW into the running turn, which takes it after its current tool
@@ -902,7 +972,7 @@ export type HeldPromptAfterToolCall = Message<"frontend.v1.HeldPromptAfterToolCa
  * Use `create(HeldPromptAfterToolCallSchema)` to create a new message.
  */
 export const HeldPromptAfterToolCallSchema: GenMessage<HeldPromptAfterToolCall> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_daemon_hold, 25);
+  messageDesc(file_frontend_v1_daemon_hold, 27);
 
 /**
  * Deliver when the turn ends on its own; do not interrupt for it.
@@ -933,7 +1003,7 @@ export type HeldPromptHoldForTurnEnd = Message<"frontend.v1.HeldPromptHoldForTur
  * Use `create(HeldPromptHoldForTurnEndSchema)` to create a new message.
  */
 export const HeldPromptHoldForTurnEndSchema: GenMessage<HeldPromptHoldForTurnEnd> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_daemon_hold, 26);
+  messageDesc(file_frontend_v1_daemon_hold, 28);
 
 /**
  * The user's confirmation of a hold.
@@ -956,7 +1026,7 @@ export type HeldPromptAccepted = Message<"frontend.v1.HeldPromptAccepted"> & {
  * Use `create(HeldPromptAcceptedSchema)` to create a new message.
  */
 export const HeldPromptAcceptedSchema: GenMessage<HeldPromptAccepted> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_daemon_hold, 27);
+  messageDesc(file_frontend_v1_daemon_hold, 29);
 
 /**
  * NOTHING CLASSIFIED THIS ENTRY, because the turn in front of it is a CONTEXT
@@ -994,7 +1064,7 @@ export type HeldPromptUninterruptibleTurn = Message<"frontend.v1.HeldPromptUnint
  * Use `create(HeldPromptUninterruptibleTurnSchema)` to create a new message.
  */
 export const HeldPromptUninterruptibleTurnSchema: GenMessage<HeldPromptUninterruptibleTurn> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_daemon_hold, 28);
+  messageDesc(file_frontend_v1_daemon_hold, 30);
 
 /**
  * The classifier could not be believed (it answered with neither token, or
@@ -1019,7 +1089,7 @@ export type HeldPromptClassificationError = Message<"frontend.v1.HeldPromptClass
  * Use `create(HeldPromptClassificationErrorSchema)` to create a new message.
  */
 export const HeldPromptClassificationErrorSchema: GenMessage<HeldPromptClassificationError> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_daemon_hold, 29);
+  messageDesc(file_frontend_v1_daemon_hold, 31);
 
 /**
  * Held by a scheduled shutdown's drain lease. The classifier NEVER runs on
@@ -1045,14 +1115,16 @@ export type HeldPromptShutdownHold = Message<"frontend.v1.HeldPromptShutdownHold
  * Use `create(HeldPromptShutdownHoldSchema)` to create a new message.
  */
 export const HeldPromptShutdownHoldSchema: GenMessage<HeldPromptShutdownHold> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_daemon_hold, 30);
+  messageDesc(file_frontend_v1_daemon_hold, 32);
 
 /**
  * Held because the workspace's session is NOT UP and the prompt waits for it to
  * reconnect: a revival or cold resume in progress, a compaction the user chose
  * at the cold gate still landing, a vendor start being retried, or a session
  * whose start failed outright and waits for the user's restart. The card's
- * badge reads "after reconnect".
+ * badge reads "after reconnect". A session parked at a STANDING cold gate is
+ * not this arm but `cold_gate` (HeldPromptColdGateHold): what it waits on is
+ * the user's answer, not the machinery.
  *
  * ALSO A SESSION THAT IS UP BUT REFUSED MID-SESSION (owner, 2026-10-06): while
  * the vendor refuses the session (usage limit, auth, billing, vendor error, an
@@ -1085,7 +1157,7 @@ export type HeldPromptReconnectHold = Message<"frontend.v1.HeldPromptReconnectHo
  * Use `create(HeldPromptReconnectHoldSchema)` to create a new message.
  */
 export const HeldPromptReconnectHoldSchema: GenMessage<HeldPromptReconnectHold> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_daemon_hold, 31);
+  messageDesc(file_frontend_v1_daemon_hold, 33);
 
 /**
  * Held because a merge of this workspace is in flight: the merge drives the
@@ -1107,7 +1179,7 @@ export type HeldPromptMergeHold = Message<"frontend.v1.HeldPromptMergeHold"> & {
  * Use `create(HeldPromptMergeHoldSchema)` to create a new message.
  */
 export const HeldPromptMergeHoldSchema: GenMessage<HeldPromptMergeHold> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_daemon_hold, 32);
+  messageDesc(file_frontend_v1_daemon_hold, 34);
 
 /**
  * No classifier ran and none will: a daemon condition holds the entry (the
@@ -1123,7 +1195,54 @@ export type HeldPromptDaemonHeld = Message<"frontend.v1.HeldPromptDaemonHeld"> &
  * Use `create(HeldPromptDaemonHeldSchema)` to create a new message.
  */
 export const HeldPromptDaemonHeldSchema: GenMessage<HeldPromptDaemonHeld> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_daemon_hold, 33);
+  messageDesc(file_frontend_v1_daemon_hold, 35);
+
+/**
+ * Held because the workspace's session is PARKED AT ITS COLD GATE: the shim
+ * is up, no session is started on it, and the gate asks the user to pay,
+ * clear or compact before the cold conversation is re-read.
+ *
+ * A PROMPT NEVER ANSWERS THE GATE. Answering it spends the user's money, and
+ * only the gate's own answer (AnswerColdGate) may do that
+ * (REALTEST-JUDGEMENT-CALLS.md "The cold gate's feedback", call 11; owner
+ * ruling 2, 2026-09-13, re-affirmed 2026-10-10). A prompt that was already
+ * held when a revival parked at the gate waits here instead of being sent
+ * into a session that does not exist.
+ *
+ * The exits are delivery once the answer brings the session up (the same
+ * session-up edge that releases `reconnect`), or the user's cancel. The
+ * classifier NEVER runs while an entry is held here, and there is NO
+ * force-through. DELIBERATELY EMPTY: the gate's own sentence is the feed's
+ * gate card and the footer's, never restated here.
+ *
+ * @generated from message frontend.v1.HeldPromptColdGateHold
+ */
+export type HeldPromptColdGateHold = Message<"frontend.v1.HeldPromptColdGateHold"> & {
+};
+
+/**
+ * Describes the message frontend.v1.HeldPromptColdGateHold.
+ * Use `create(HeldPromptColdGateHoldSchema)` to create a new message.
+ */
+export const HeldPromptColdGateHoldSchema: GenMessage<HeldPromptColdGateHold> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_daemon_hold, 36);
+
+/**
+ * No classifier is running on this entry and no daemon condition holds it: it
+ * waits its place in the queue and is delivered in order by the next drain.
+ * DELIBERATELY EMPTY: the arm's presence is the whole fact.
+ *
+ * @generated from message frontend.v1.HeldPromptAwaitingDelivery
+ */
+export type HeldPromptAwaitingDelivery = Message<"frontend.v1.HeldPromptAwaitingDelivery"> & {
+};
+
+/**
+ * Describes the message frontend.v1.HeldPromptAwaitingDelivery.
+ * Use `create(HeldPromptAwaitingDeliverySchema)` to create a new message.
+ */
+export const HeldPromptAwaitingDeliverySchema: GenMessage<HeldPromptAwaitingDelivery> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_daemon_hold, 37);
 
 /**
  * Held because the session's shim is being restarted onto the current build
@@ -1141,7 +1260,7 @@ export type HeldPromptBuildRefreshHold = Message<"frontend.v1.HeldPromptBuildRef
  * Use `create(HeldPromptBuildRefreshHoldSchema)` to create a new message.
  */
 export const HeldPromptBuildRefreshHoldSchema: GenMessage<HeldPromptBuildRefreshHold> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_daemon_hold, 34);
+  messageDesc(file_frontend_v1_daemon_hold, 38);
 
 /**
  * A question the daemon holds for the user's answer. THE ARM IS THE QUESTION.
@@ -1175,7 +1294,7 @@ export type HeldOffer = Message<"frontend.v1.HeldOffer"> & {
  * Use `create(HeldOfferSchema)` to create a new message.
  */
 export const HeldOfferSchema: GenMessage<HeldOffer> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_daemon_hold, 35);
+  messageDesc(file_frontend_v1_daemon_hold, 39);
 
 /**
  * The merge-dequeue question, resolved for drawing: the daemon composes the
@@ -1201,7 +1320,7 @@ export type HeldOfferMergeDequeue = Message<"frontend.v1.HeldOfferMergeDequeue">
  * Use `create(HeldOfferMergeDequeueSchema)` to create a new message.
  */
 export const HeldOfferMergeDequeueSchema: GenMessage<HeldOfferMergeDequeue> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_daemon_hold, 36);
+  messageDesc(file_frontend_v1_daemon_hold, 40);
 
 /**
  * The sentence an offer card leads with, composed daemon-side.
@@ -1223,5 +1342,5 @@ export type HeldOfferHeadline = Message<"frontend.v1.HeldOfferHeadline"> & {
  * Use `create(HeldOfferHeadlineSchema)` to create a new message.
  */
 export const HeldOfferHeadlineSchema: GenMessage<HeldOfferHeadline> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_daemon_hold, 37);
+  messageDesc(file_frontend_v1_daemon_hold, 41);
 
