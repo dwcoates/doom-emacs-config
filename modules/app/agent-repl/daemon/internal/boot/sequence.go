@@ -111,6 +111,11 @@ func (s *sequence) Run(ctx context.Context) (Report, error) {
 		if err := s.takeUpCarries(ctx, log, &report); err != nil {
 			return Report{}, err
 		}
+		// A SURVIVOR WITH NO SESSION HAS ITS HOLDS SETTLED once its carried
+		// gate stands (takeUpCarries raised it): a prompt waiting on a session
+		// parked at its cold gate is held at the gate, and the gate's answer
+		// delivers it (2026-10-10).
+		s.settleSessionlessHolds(log, &report)
 		if err := s.closeOrphans(ctx, log, clientless, &report); err != nil {
 			return Report{}, err
 		}
@@ -636,6 +641,22 @@ func (s *sequence) restoreHolds(ctx context.Context, log dlog.Logger, report *Re
 		s.deps.Queue.ReleaseReconnectHolds(adopted.Workspace)
 	}
 	return nil
+}
+
+// settleSessionlessHolds settles the holds of every adopted survivor that holds
+// no session. restoreHolds releases an adopted SESSION's holds; an inert
+// survivor (a shim parked at its cold gate, or one still starting) was left
+// out, so a prompt an older build stranded on it with no hold stood unheld and
+// drew as a classification nothing was running (doom, 2026-10-10). The queue's
+// release holds each entry under what it waits on -- the cold gate, or the
+// session coming up -- and the session coming up delivers it.
+func (s *sequence) settleSessionlessHolds(log dlog.Logger, report *Report) {
+	for _, ws := range report.AdoptedInert {
+		s.deps.Queue.ReleaseReconnectHolds(ws)
+	}
+	log.Debug("daemon.boot.settle_holds", "settled the holds of the survivors that hold no session", dlog.Context{
+		"workspaces": len(report.AdoptedInert),
+	})
 }
 
 // closeOrphans closes, in ONE TRANSACTION per workspace, every turn that never
