@@ -547,6 +547,15 @@ describe("drawHeldPrompt hold arms", () => {
       arm: "merge",
       line: "wire merge",
     },
+    {
+      name: "cold_gate",
+      prompt: heldPrompt({
+        classification: { case: "daemonHeld", value: {} },
+        hold: { case: "coldGate", value: {} },
+      }),
+      arm: "coldGate",
+      line: "wire coldGate",
+    },
   ];
 
   for (const hold of holds) {
@@ -712,6 +721,35 @@ describe("drawHeldPrompt release availability", () => {
     expect(
       card.querySelector<HTMLElement>('[data-held-action="release"]')?.title,
     ).toContain("a merge is driving the session");
+  });
+
+  it("warns on the release button that a prompt never answers the cold gate", () => {
+    // Arrange
+    const { tc } = trayContext();
+    // Act
+    const card = drawHeldPrompt(
+      heldPrompt({
+        classification: { case: "daemonHeld", value: {} },
+        hold: { case: "coldGate", value: {} },
+      }),
+      tc,
+    );
+    // Assert
+    expect(
+      card.querySelector<HTMLElement>('[data-held-action="release"]')?.title,
+    ).toContain("a prompt never answers the gate");
+  });
+
+  it("marks an awaiting-delivery entry's arm on the card", () => {
+    // Arrange
+    const { tc } = trayContext();
+    // Act
+    const card = drawHeldPrompt(
+      heldPrompt({ classification: { case: "awaitingDelivery", value: {} } }),
+      tc,
+    );
+    // Assert
+    expect(card.getAttribute("data-arm")).toBe("awaitingDelivery");
   });
 
   it("still offers release under a build refresh, which forbids nothing", () => {
@@ -1159,6 +1197,7 @@ describe("the held prompt's spec: a prompt bubble on the held fill", () => {
     ],
     ["a merge hold", { case: "merge", value: {} }, ["lease-card"]],
     ["a session-starting hold", { case: "reconnect", value: {} }, []],
+    ["a cold-gate hold", { case: "coldGate", value: {} }, []],
   ] as const)(
     "names %s by its hook, which selects no border",
     (_name, hold, frames) => {
@@ -1331,6 +1370,8 @@ const EXPECTED_BADGES: Readonly<Record<HeldStatus, string>> = {
   buildRefresh: "amber",
   merge: "amber",
   reconnect: "teal",
+  coldGate: "teal",
+  awaitingDelivery: "muted",
   editing: "run",
 };
 
@@ -1401,6 +1442,19 @@ describe("the daemon's badge words", () => {
           classification: { case: "daemonHeld", value: {} },
           hold: { case: "merge", value: {} },
         }),
+    ],
+    [
+      "coldGate",
+      () =>
+        heldPrompt({
+          classification: { case: "daemonHeld", value: {} },
+          hold: { case: "coldGate", value: {} },
+        }),
+    ],
+    [
+      "awaitingDelivery",
+      () =>
+        heldPrompt({ classification: { case: "awaitingDelivery", value: {} } }),
     ],
     [
       "editing",
@@ -1723,6 +1777,19 @@ describe("every status a held card shows is a badge in the table's tone", () => 
           classification: { case: "daemonHeld", value: {} },
           hold: { case: "merge", value: {} },
         }),
+    ],
+    [
+      "coldGate",
+      () =>
+        heldPrompt({
+          classification: { case: "daemonHeld", value: {} },
+          hold: { case: "coldGate", value: {} },
+        }),
+    ],
+    [
+      "awaitingDelivery",
+      () =>
+        heldPrompt({ classification: { case: "awaitingDelivery", value: {} } }),
     ],
     [
       "editing",

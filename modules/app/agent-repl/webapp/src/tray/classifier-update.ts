@@ -82,6 +82,7 @@ export function classifierRouteOf(
     case "uninterruptibleTurn":
     case "classificationError":
     case "daemonHeld":
+    case "awaitingDelivery":
       return null;
     default: {
       const other: string = classification;

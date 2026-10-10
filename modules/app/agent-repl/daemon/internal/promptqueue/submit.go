@@ -435,7 +435,7 @@ func (q *queue) keepReconnectHolds(ctx context.Context, ws ids.WorkspaceID, log 
 	}
 	var waiting []string
 	for _, h := range standing {
-		if !standingReconnectHold(h) {
+		if !standingSessionHold(h) {
 			continue
 		}
 		waiting = append(waiting, string(h.Turn))
@@ -480,7 +480,7 @@ func (q *queue) WithdrawRevivalTurn(ctx context.Context, ws ids.WorkspaceID) (bo
 	}
 	var waiting []wsm.HeldPrompt
 	for _, h := range standing {
-		if standingReconnectHold(h) {
+		if standingSessionHold(h) {
 			waiting = append(waiting, h)
 		}
 	}
@@ -512,9 +512,9 @@ func (q *queue) ReleaseReconnectHolds(ws ids.WorkspaceID) {
 	q.releaseReconnectHolds(ctx, ws, log)
 }
 
-// releaseReconnectHolds un-stamps every reconnect hold on a workspace whose
-// session is now up and whose vendor serves it, and classifies and delivers
-// what it released (classifyReleased).
+// releaseReconnectHolds settles the holds that wait on the session of a
+// workspace whose session has come up: released and delivered when the session
+// serves, held under the hold that names why when it does not (sessionhold.go).
 func (q *queue) releaseReconnectHolds(ctx context.Context, ws ids.WorkspaceID, log dlog.Logger) {
 	// SERIALIZED AGAINST A TURN END AND A LEASE CHANGE, for the reason
 	// OnTurnEnded states: all three deliver from the same standing holds.
@@ -525,6 +525,17 @@ func (q *queue) releaseReconnectHolds(ctx context.Context, ws ids.WorkspaceID, l
 
 // releaseReconnectHoldsLocked is releaseReconnectHolds under the delivery
 // lock the caller holds (d).
+//
+// IT RELEASES ONLY INTO A SESSION THAT SERVES. A revival that parks at its
+// cold gate returns success with a shim and no session, and before 2026-10-10
+// this released the revival's prompt into it, logged "the session is up and the
+// vendor serves it", and stranded the prompt when the delivery found no watcher.
+//
+// IT ALSO DRIVES WHAT WAITS UNHELD. A free entry with nothing running is
+// delivered here, and an unjudged free entry is classified against the turn the
+// release starts: the session serving is a guaranteed edge, and an entry an
+// older build left standing with no hold (the 2026-10-10 doom prompt) has no
+// other one.
 func (q *queue) releaseReconnectHoldsLocked(ctx context.Context, d *delivery, log dlog.Logger) {
 	ws := d.ws
 	// A VENDOR THAT STILL REFUSES THE SESSION SERVES NOTHING: the holds stand
@@ -534,6 +545,17 @@ func (q *queue) releaseReconnectHoldsLocked(ctx context.Context, d *delivery, lo
 			dlog.Context{"vendor_block": block})
 		return
 	}
+	// A SESSION THAT DOES NOT SERVE IS HANDED NOTHING: what waits on it is
+	// held under the hold that names why, and the session coming up releases it.
+	if kind, why, waiting := q.sessionWait(ws); waiting {
+		moved := q.holdForSession(ctx, ws, kind, opSubmit, log)
+		message := "the session does not serve yet; the prompts waiting on it stay held until it comes up"
+		if kind == wsm.HoldColdGate {
+			message = "the session is parked at its cold gate; the prompts waiting on it are held until the gate is answered, which a prompt never does"
+		}
+		log.Info(opSubmit, message, dlog.Context{"hold": kind.String(), "why": why, "moved": moved})
+		return
+	}
 
 	standing, err := q.deps.DB.HeldPrompts(ctx, ws)
 	if err != nil {
@@ -541,9 +563,20 @@ func (q *queue) releaseReconnectHoldsLocked(ctx context.Context, d *delivery, lo
 			dlog.Context{"cause": err.Error()})
 		return
 	}
-	var released []wsm.HeldPrompt
+	var released, unjudged []wsm.HeldPrompt
+	free := 0
 	for _, h := range standing {
-		if !standingReconnectHold(h) {
+		if h.Tombstone != nil || q.claimedByCall(ws, h.Turn) {
+			continue
+		}
+		if h.Hold == nil {
+			free++
+			if h.Classification == nil {
+				unjudged = append(unjudged, h)
+			}
+			continue
+		}
+		if !standingSessionHold(h) {
 			continue
 		}
 		if err := q.deps.DB.UpdateHeldPromptHold(ctx, h.Turn, nil, ""); err != nil {
@@ -553,15 +586,22 @@ func (q *queue) releaseReconnectHoldsLocked(ctx context.Context, d *delivery, lo
 		}
 		released = append(released, h)
 	}
-	if len(released) == 0 {
+	_, running := q.runningTurn(ws)
+	if len(released) == 0 && len(unjudged) == 0 && (free == 0 || running) {
 		log.Debug(opSubmit, "the session's coming up released no reconnect hold", dlog.Context{"holds": len(standing)})
 		return
 	}
-	log.Info(opSubmit, "the session is up and the vendor serves it; released the prompts held after reconnect", dlog.Context{"released": len(released)})
-	if err := q.pushTray(ctx, ws, log); err != nil {
-		return
+	if len(released) > 0 {
+		log.Info(opSubmit, "the session is up and the vendor serves it; released the prompts held after reconnect", dlog.Context{"released": len(released)})
+		if err := q.pushTray(ctx, ws, log); err != nil {
+			return
+		}
 	}
-	q.classifyReleased(ctx, d, released, log)
+	if free > 0 {
+		log.Info(opSubmit, "prompts stand unheld on a session that serves; the session's serving drives them",
+			dlog.Context{"free": free, "unjudged": len(unjudged), "running": running})
+	}
+	q.classifyReleased(ctx, d, append(released, unjudged...), log)
 }
 
 // revive brings a parked session back up for a submission that found none.
@@ -578,6 +618,16 @@ func (q *queue) revive(ctx context.Context, ws ids.WorkspaceID, log dlog.Logger)
 		log.Error(opSubmit, "the revival failed; the submission cannot be delivered",
 			dlog.Context{"cause": err.Error()})
 		return false, fmt.Errorf("submit to %q: revive the session: %w", ws, err)
+	}
+	// A REVIVAL THAT PARKS AT ITS COLD GATE IS NOT A SESSION UP. The bring-up
+	// succeeded and left a shim with no session, waiting on the user's answer;
+	// saying "revived" here is how the 2026-10-10 record came to read as a
+	// served session.
+	if q.deps.ColdGate != nil {
+		if detail, gated := q.deps.ColdGate(ws); gated {
+			log.Info(opSubmit, "the revival brought the shim up parked at its cold gate; the prompts wait for the gate's answer", dlog.Context{"detail": detail})
+			return true, nil
+		}
 	}
 	log.Info(opSubmit, "revived the workspace's session for the submission", nil)
 	return true, nil

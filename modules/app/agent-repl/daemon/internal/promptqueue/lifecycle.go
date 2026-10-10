@@ -305,6 +305,20 @@ func (q *queue) mayPop(ctx context.Context, ws ids.WorkspaceID, log dlog.Logger)
 		q.holdFreeForVendorBlock(ctx, ws, block, log)
 		return nil, false, nil
 	}
+	// A SESSION THAT IS THERE AND DOES NOT SERVE IS POPPED NOTHING
+	// (sessionhold.go): a standing cold gate, or a shim with no started
+	// session or no watcher. What waits is held under the hold that names why,
+	// and the session coming up releases it. A workspace with NO shim is not
+	// this case: the delivery revives it (deliverHeld), as a hibernated
+	// session's lease release requires.
+	if kind, why, waiting := q.sessionWait(ws); waiting {
+		if _, shim := q.deps.Client(ws); shim || kind == wsm.HoldColdGate {
+			moved := q.holdForSession(ctx, ws, kind, opTurnEnded, log)
+			log.Info(opTurnEnded, "the session does not serve; nothing is delivered and the waiting prompts are held for it",
+				dlog.Context{"hold": kind.String(), "why": why, "moved": moved})
+			return nil, false, nil
+		}
+	}
 	// A REFUSING LEASE OWNS THE SESSION, so nothing held is delivered into it.
 	// PolicyHold stamps every standing hold and nextDeliverable filters those,
 	// but PolicyRefuse (a merge lease an older build wrote) stamps none — it
@@ -431,6 +445,12 @@ func (q *queue) OnLeaseChanged(ws ids.WorkspaceID) {
 		if _, live := q.deps.Client(ws); !live {
 			want = &leaseHold{kind: wsm.HoldReconnect}
 			revivalPending = true
+		} else if kind, why, waiting := q.sessionWait(ws); waiting && kind == wsm.HoldColdGate {
+			// A LEASE ENDING OVER A SESSION PARKED AT ITS COLD GATE delivers
+			// nothing into it: its holds wait for the gate's answer.
+			log.Info(opLeaseChange, "the lease ended while the session is parked at its cold gate; its holds wait for the gate's answer",
+				dlog.Context{"why": why, "holds": len(standing)})
+			want = &leaseHold{kind: wsm.HoldColdGate}
 		} else if block, blocked := q.vendorBlocked(ws); blocked {
 			// A LEASE ENDING UNDER A MID-SESSION VENDOR BLOCK delivers
 			// nothing into it: its holds are held after reconnect, and the
@@ -478,6 +498,15 @@ func (q *queue) OnLeaseChanged(ws ids.WorkspaceID) {
 			dlog.Context{"holds": len(standing)})
 		if revivalPending {
 			q.reviveInBackground(ctx, ws, log)
+			return
+		}
+		// AN UNCHANGED TRAY CAN STILL HOLD AN ENTRY NOTHING DRIVES: a free
+		// entry with nothing running, which an older build stranded (doom,
+		// 2026-10-10) and which a handover's drain reaches through here with
+		// no session-up edge of its own. With no lease holding it, it is
+		// delivered as a turn end would deliver it.
+		if want == nil {
+			q.popIfIdle(ctx, d, log)
 		}
 		return
 	}
@@ -496,7 +525,13 @@ func (q *queue) OnLeaseChanged(ws ids.WorkspaceID) {
 	if want != nil {
 		return
 	}
-	if watcher, ok := q.deps.Watcher(ws); ok && watcher.TurnInFlight() != nil {
+	q.popIfIdle(ctx, d, log)
+}
+
+// popIfIdle delivers the next free entry when no turn runs, as a turn end
+// would. The caller holds the delivery lock (d).
+func (q *queue) popIfIdle(ctx context.Context, d *delivery, log dlog.Logger) {
+	if watcher, ok := q.deps.Watcher(d.ws); ok && watcher.TurnInFlight() != nil {
 		return
 	}
 	if _, err := q.popAndDeliver(ctx, d, log); err != nil {

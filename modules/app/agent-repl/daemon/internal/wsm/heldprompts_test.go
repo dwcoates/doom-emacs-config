@@ -381,6 +381,30 @@ func TestUpdateHeldPromptHoldRequiresAScheduleForAShutdownHold(t *testing.T) {
 	}
 }
 
+// TestUpdateHeldPromptHoldRoundTripsAColdGateHold pins that the cold-gate hold
+// a parked revival stamps is stored and read back as that kind.
+func TestUpdateHeldPromptHoldRoundTripsAColdGateHold(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	turn := standingHold(t, s, ws.ID)
+	hold := HoldColdGate
+
+	// Act
+	if err := s.UpdateHeldPromptHold(context.Background(), turn, &hold, ""); err != nil {
+		t.Fatalf("UpdateHeldPromptHold: %v", err)
+	}
+	got, err := s.HeldPrompts(context.Background(), ws.ID)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("HeldPrompts: %v", err)
+	}
+	if got[0].Hold == nil || *got[0].Hold != HoldColdGate {
+		t.Fatalf("hold = %v, want the cold-gate hold", got[0].Hold)
+	}
+}
+
 func TestUpdateHeldPromptHoldRefusesAnUnknownPrompt(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)
