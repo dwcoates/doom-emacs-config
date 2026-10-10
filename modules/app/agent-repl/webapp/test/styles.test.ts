@@ -3508,7 +3508,7 @@ describe("the tool card's command grey", () => {
  * background is not there in either theme; every other response keeps the
  * purple, and the interim keeps its pear border.
  */
-/** The two bubble kinds whose prose is the dimmed `--interim-text` (the command grey). */
+/** The two bubble kinds whose prose is the dimmed `--interim-text` (half way from the command grey to the body text). */
 const DIMMED_TEXT_SELECTORS: readonly string[] = ['.bubble[data-variant="thinking"]', ".bubble.interim-response"];
 
 describe("the page-colored fill", () => {
@@ -3676,9 +3676,10 @@ describe("the rail's mark column", () => {
 });
 
 /**
- * THE DIMMED PROSE (owner request, 2026-10-08): a thinking bubble's and an
- * interim response's text is EXACTLY the tool card's header grey (the Bash
- * command's `--tool-command`) in either theme, by referencing that token.
+ * THE DIMMED PROSE (owner request, 2026-10-10): a thinking bubble's and an
+ * interim response's text sits half way between the tool card's header grey
+ * (the Bash command's `--tool-command`) and the body text (`--fg`) in either
+ * theme, by mixing those two tokens.
  */
 describe("the dimmed prose of a thinking or interim bubble", () => {
   /** The `color` the cascade hands a response bubble with HOOKS and VARIANT. */
@@ -3723,7 +3724,7 @@ describe("the dimmed prose of a thinking or interim bubble", () => {
     expect(got).not.toBe("var(--interim-text)");
   });
 
-  it("defines the dimmed prose as the tool card's command grey token", () => {
+  it("defines the dimmed prose as an even mix of the command grey and the body text", () => {
     // Arrange
     const block = declarationsOf(":root") ?? "";
 
@@ -3731,10 +3732,10 @@ describe("the dimmed prose of a thinking or interim bubble", () => {
     const got = /--interim-text:\s*([^;]+);/.exec(block)?.[1]?.trim();
 
     // Assert
-    expect(got).toBe("var(--tool-command)");
+    expect(got).toBe("color-mix(in srgb, var(--tool-command), var(--fg))");
   });
 
-  it("declares the dimmed prose once, so no theme redefines it away from the command grey", () => {
+  it("declares the dimmed prose once, so no theme redefines it away from the mix", () => {
     // Arrange
     const declaration = /--interim-text\s*:/g;
 
