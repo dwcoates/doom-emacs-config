@@ -14,8 +14,10 @@ stay at the bottom while newer rows arrive. This change amends that contract.
 ## Context
 
 - Objective (owner, 2026-10-10): the merge bubble appears immediately when a
-  merge is queued, stays persistently at the bottom of the feed while it is in
-  flight, and settles where it ends once the merge concludes.
+  merge is queued and stays at the bottom of the feed only from when it is
+  first drawn until the merge finishes. Once finished it stays where it
+  finished, which is a place in the flow and not the bottom: rows written after
+  the finish land below it.
 - Ruling on conclusion (owner, 2026-10-10, "Settle where it ends"): pinned to
   the bottom while queued or merging; when it lands or fails it stays where it
   is and new output flows below it. The rejected alternatives were "pinned
