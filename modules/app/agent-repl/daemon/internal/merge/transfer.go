@@ -74,12 +74,15 @@ type suspension struct {
 	cause error
 	// moved is said once a suspended run let go.
 	moved string
+	// stepBoundary asks a run that began its steps to finish the step in
+	// flight and let go at the next boundary, rather than at once.
+	stepBoundary bool
 }
 
 var (
 	suspendTransfer = suspension{op: "daemon.merge.transfer", cause: errHandedOver,
 		moved: "a merge is suspended at a stopping point for its workspace's transfer; the successor resumes it at the step it recorded"}
-	suspendRestart = suspension{op: "daemon.merge.restart", cause: errRestarting,
+	suspendRestart = suspension{op: "daemon.merge.restart", cause: errRestarting, stepBoundary: true,
 		moved: "a merge is suspended at a stopping point for its workspace's restart; it resumes at the step it recorded once the restart finished"}
 )
 
@@ -95,7 +98,18 @@ func (o *orchestrator) suspendFor(ctx context.Context, ws ids.WorkspaceID, why s
 	delete(o.requested, ws)
 	r, running := o.runsByWorkspace[ws]
 	mark, terminal := o.terminals[ws]
-	if running && !terminal {
+	// A RESTART WAITS FOR THE STEP IN FLIGHT (owner ruling, 2026-10-10). A
+	// run that began its steps is asked to stop at its next step boundary and
+	// goes on until it gets there; a transfer, and a run still only waiting
+	// for its workspace, is suspended at once. The ask and the run's own
+	// beginSteps are decided under this one lock, so a run that begins its
+	// steps right now either sees the ask or is seen executing here.
+	atBoundary := running && !terminal && why.stepBoundary
+	if atBoundary {
+		r.stopAtBoundary = true
+		atBoundary = r.executing
+	}
+	if running && !terminal && !atBoundary {
 		r.suspending = true
 	}
 	o.mu.Unlock()
@@ -127,10 +141,41 @@ func (o *orchestrator) suspendFor(ctx context.Context, ws ids.WorkspaceID, why s
 		log.Info(op, "a merge finished its terminal before its workspace moved", fields)
 		return nil
 	}
-	o.awaitStoppingPoints(op, []*run{r})
-	fields["step"] = r.progressStep()
-	log.Info(op, why.moved, fields)
-	r.cancel(why.cause)
+	if atBoundary {
+		// NO TIMER: the boundary comes when the step in flight ends, however
+		// long its tests or its repair turn run, and the restart's caller
+		// waits for it (owner ruling, 2026-10-10). A run that concludes
+		// instead of reaching another boundary has nothing left to resume.
+		fields["step"] = r.progressStep()
+		log.Info(op, "the restart waits for the merge to finish the step in flight; it lets go at the next step boundary", fields)
+		if o.onBoundaryAsk != nil {
+			o.onBoundaryAsk()
+		}
+		select {
+		case <-r.atBoundary:
+		case <-r.finished:
+			o.forgetMoved(ws)
+			log.Info(op, "the merge concluded before its next step boundary; the restart proceeds with nothing to resume", fields)
+			return nil
+		case <-ctx.Done():
+			// THE CALLER LEFT: the ask is withdrawn, so the merge never stops
+			// for a restart no one is waiting to run -- unless it already
+			// stopped, which the take-back after a refused restart resumes.
+			if !r.withdrawBoundaryStop() {
+				log.Info(op, "the restart's caller left as the merge reached its step boundary; the take-back resumes it", fields)
+			} else {
+				log.Info(op, "the restart's caller left before the merge's step boundary; the ask is withdrawn and the merge goes on", fields)
+			}
+			return ctx.Err()
+		}
+		fields["step"] = r.progressStep()
+		log.Info(op, why.moved, fields)
+	} else {
+		o.awaitStoppingPoints(op, []*run{r})
+		fields["step"] = r.progressStep()
+		log.Info(op, why.moved, fields)
+		r.cancel(why.cause)
+	}
 	select {
 	case <-r.finished:
 	case <-time.After(bound):

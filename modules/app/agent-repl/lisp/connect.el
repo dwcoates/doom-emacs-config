@@ -658,7 +658,10 @@ receives the parsed response alist on HTTP 200.  ON-FAILURE receives a
 failure plist (see `agent-repl-connect--failure') for a Connect error, a
 transport failure, a timeout, or a 200 whose body will not parse.  Exactly
 one of the two runs, exactly once.  TIMEOUT defaults to
-`agent-repl-connect-unary-timeout-seconds'.  Nothing is ever retried here;
+`agent-repl-connect-unary-timeout-seconds'; the keyword `:none' arms no
+timer at all, for a call whose answer legitimately waits on work of unbounded
+length -- a dropped connection still ends it, through the sentinel, so a dead
+daemon is a transport failure and never a call left hanging.  Nothing is ever retried here;
 retry policy belongs to the caller that knows whether the call is
 idempotent.  Returns the socket process."
   (let ((log-scope
@@ -757,7 +760,10 @@ idempotent.  Returns the socket process."
       ;; A REFUSED CONNECT CAN ANSWER BEFORE THE DIAL RETURNS -- the kernel
       ;; refuses on the spot and the sentinel runs from inside the write.  An
       ;; exchange already settled must not arm a timer nothing will cancel.
-      (unless settled
+      (when (eq timeout :none)
+        (agent-repl--log log-scope "elisp.connect.unary-untimed method=%S address=%S"
+                         method address))
+      (unless (or settled (eq timeout :none))
         (setq timer
               (run-at-time (or timeout agent-repl-connect-unary-timeout-seconds) nil
                            (lambda ()

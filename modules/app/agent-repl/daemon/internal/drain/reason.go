@@ -9,6 +9,7 @@ import (
 
 	"google.golang.org/protobuf/encoding/protojson"
 
+	"claude-repld/internal/dlog"
 	"claude-repld/internal/wsm"
 )
 
@@ -42,6 +43,27 @@ func DecodeReason(stored string) (*agentreplv1.DrainReason, error) {
 		return nil, fmt.Errorf("drain: the stored drain reason %q names no arm", stored)
 	}
 	return &reason, nil
+}
+
+// reasonFields is a drain reason as a record's context: the arm it names and,
+// for an operator's reason, the operator's own note. Every record of a
+// shutdown or a schedule carries it, so the log says WHY the daemon is going
+// down, not only that it is (2026-10-08 19:02:40: an immediate shutdown ended
+// a merge mid-wait, and its record carried no context at all).
+func reasonFields(reason *agentreplv1.DrainReason) dlog.Context {
+	fields := dlog.Context{}
+	switch arm := reason.GetKind().(type) {
+	case *agentreplv1.DrainReason_Deploy:
+		fields["reason"] = "deploy"
+	case *agentreplv1.DrainReason_Maintenance:
+		fields["reason"] = "maintenance"
+	case *agentreplv1.DrainReason_Operator:
+		fields["reason"] = "operator"
+		fields["note"] = arm.Operator.GetNote()
+	default:
+		panic(fmt.Sprintf("drain: reasonFields of a reason with no known arm: %T", arm))
+	}
+	return fields
 }
 
 // ScheduleID is a schedule's stable identity, derived from the instant it was

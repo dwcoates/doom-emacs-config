@@ -2,7 +2,10 @@ package merge
 
 import (
 	"context"
+	"errors"
 	"testing"
+
+	"claude-repld/internal/dlog"
 )
 
 // waitingForFree admits the harness's merge into its wait for the workspace to
@@ -88,36 +91,71 @@ func TestAMergeWaitingThroughARestartWaitsAgainOnTheFreshSession(t *testing.T) {
 	}
 }
 
-// TestARestartSuspendsAStartedMergeAtAStoppingPoint pins the started merge:
-// the restart suspends it exactly as a handover does, under its own record.
-func TestARestartSuspendsAStartedMergeAtAStoppingPoint(t *testing.T) {
+// heldInGateForRestart is heldInGateForTransfer with the held gate scripted
+// to pass, and released from the moment the restart asks for its boundary.
+func heldInGateForRestart(t *testing.T, h *harness) <-chan error {
+	t.Helper()
+	release, done := heldInGateForTransfer(t, h)
+	h.gatePasses("daemon")
+	h.o.onBoundaryAsk = func() { close(release) }
+	return done
+}
+
+// TestARestartLetsTheStepInFlightFinish pins the owner's stopping point
+// (2026-10-10): a restart arriving mid-gate does not cut the tests; they
+// finish, and the merge lets go at the next step's boundary.
+func TestARestartLetsTheStepInFlightFinish(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
-	release, done := heldInGateForTransfer(t, h)
-	t.Cleanup(func() { close(release) })
+	done := heldInGateForRestart(t, h)
 
 	// Act.
 	err := h.o.SuspendForRestart(context.Background(), theWorkspace)
 
 	// Assert.
 	if err != nil {
-		t.Fatalf("SuspendForRestart = %v, want the merge suspended", err)
+		t.Fatalf("SuspendForRestart = %v, want the merge stopped at its boundary", err)
 	}
 	if err := <-done; err != nil {
 		t.Fatalf("the pump was told %v, want no failure", err)
 	}
-	if record, found := recordWith(h, "info", "daemon.merge.restart"); !found || record.Context["step"] != TabTests {
-		t.Fatalf("the restart's record is %+v (found %v), want the suspension naming its step", record, found)
+	if step := recordedStep(t, h); step != TabCommitting {
+		t.Fatalf("the record stands at %q, want the step after the finished tests, %q", step, TabCommitting)
 	}
 }
 
-// TestAStartedMergeResumesAfterARestartInItsBubble covers the started
-// merge's resume: it goes on at its step, in the same bubble.
-func TestAStartedMergeResumesAfterARestartInItsBubble(t *testing.T) {
+// TestARestartRecordsTheBoundaryItStoppedAt pins the record: which step
+// finished and which one the merge resumes at.
+func TestARestartRecordsTheBoundaryItStoppedAt(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
-	release, done := heldInGateForTransfer(t, h)
-	t.Cleanup(func() { close(release) })
+	done := heldInGateForRestart(t, h)
+
+	// Act.
+	if err := h.o.SuspendForRestart(context.Background(), theWorkspace); err != nil {
+		t.Fatalf("SuspendForRestart: %v", err)
+	}
+	<-done
+
+	// Assert.
+	for _, record := range h.logs.Global().(*dlog.TestLogger).Records() {
+		if record.Operation == "daemon.merge.restart" && record.Context["finished"] != nil {
+			if record.Context["finished"] != TabTests || record.Context["step"] != TabCommitting {
+				t.Fatalf("the boundary record is %+v, want tests finished and committing next", record.Context)
+			}
+			return
+		}
+	}
+	t.Fatal("no record names the step boundary the merge stopped at")
+}
+
+// TestAMergeStoppedForARestartResumesAtItsBoundary covers the take-back: the
+// merge goes on at the step it stopped before, in the same bubble, and the
+// tests it finished are never run again.
+func TestAMergeStoppedForARestartResumesAtItsBoundary(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	done := heldInGateForRestart(t, h)
 	if err := h.o.SuspendForRestart(context.Background(), theWorkspace); err != nil {
 		t.Fatalf("SuspendForRestart: %v", err)
 	}
@@ -125,8 +163,8 @@ func TestAStartedMergeResumesAfterARestartInItsBubble(t *testing.T) {
 	lease, _, _ := h.db.Lease(context.Background(), theWorkspace)
 	h.runner.mu.Lock()
 	h.runner.before = nil
+	gateRuns := len(h.runner.argv)
 	h.runner.mu.Unlock()
-	h.gatePasses("daemon")
 	h.git.ancestry["0000000000000000000000000000000000000000>feature"] = true
 
 	// Act.
@@ -141,10 +179,43 @@ func TestAStartedMergeResumesAfterARestartInItsBubble(t *testing.T) {
 	if facts := h.footer.last(); facts.State != StateMerged {
 		t.Fatalf("the merge stands at %q (%s), want it landed", facts.State, facts.Detail)
 	}
+	h.runner.mu.Lock()
+	rerun := len(h.runner.argv) - gateRuns
+	h.runner.mu.Unlock()
+	if rerun != 0 {
+		t.Fatalf("the resumed merge ran the gate %d more time(s), want the finished tests never rerun", rerun)
+	}
 	for _, id := range h.feed.headIDs() {
 		if id != headIDOf(lease.ID) {
 			t.Fatalf("a head was drawn as %s, want every head the merge's own", id)
 		}
+	}
+}
+
+// TestARestartWhoseCallerLeavesWithdrawsItsAsk covers the restart's caller
+// leaving before the boundary: the ask is taken back and the merge goes on to
+// land, never stopping for a restart no one runs.
+func TestARestartWhoseCallerLeavesWithdrawsItsAsk(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	release, done := heldInGateForTransfer(t, h)
+	h.gatePasses("daemon")
+	ctx, cancel := context.WithCancel(context.Background())
+	h.o.onBoundaryAsk = cancel
+
+	// Act.
+	err := h.o.SuspendForRestart(ctx, theWorkspace)
+	close(release)
+
+	// Assert.
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("SuspendForRestart = %v, want the caller's leaving", err)
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("the merge ended on %v, want it landed", err)
+	}
+	if facts := h.footer.last(); facts.State != StateMerged {
+		t.Fatalf("the merge stands at %q (%s), want it landed after the withdrawn ask", facts.State, facts.Detail)
 	}
 }
 
