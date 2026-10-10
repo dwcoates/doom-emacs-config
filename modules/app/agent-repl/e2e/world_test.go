@@ -384,10 +384,12 @@ func (w *World) WatchFooter(ws *workspacev1.WorkspaceRef) *FooterWatch {
 const ArtifactsEnv = "AGENT_REPL_E2E_ARTIFACTS"
 
 // artifactTailBytes bounds how much of one log a failing test prints when no
-// artifacts directory is configured. Sized to hold the whole of an ordinary
-// single-turn run log (the largest observed sink in this suite is a few tens
-// of kilobytes) while refusing to dump an unbounded file into a CI transcript.
-const artifactTailBytes = 64 << 10
+// artifacts directory is configured. Sized to hold a failing test's WHOLE
+// daemon log while still refusing an unbounded file. MEASURED 2026-10-10: a
+// two-turn TestHookBlocked's daemon log was 1.2MB at debug, and the 64KB tail
+// this bound used to keep started 17ms after the hook it had to explain, so
+// the gate's archive held no evidence of where the card went.
+const artifactTailBytes = 2 << 20
 
 // preserveLogsOnFailure keeps the whole world's structured logs — the
 // daemon's, every shim's, the store's and the sidecar's — alive past the
