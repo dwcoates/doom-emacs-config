@@ -3,6 +3,7 @@ package promptqueue
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -18,10 +19,11 @@ func newVendorBlockHarness(t *testing.T) *harness {
 	h := newHarness(t)
 	h.watcher.standOnOpening = true
 	h.judge.verdict = classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"}
-	tick := 0
+	// THE CLOCK IS READ FROM THE RELEASE'S AND THE CLASSIFIERS' GOROUTINES,
+	// so its tick is atomic: a plain counter raced under -race.
+	var tick atomic.Int64
 	h.q.deps.Now = func() time.Time {
-		tick++
-		return instant.Add(time.Duration(tick) * time.Second)
+		return instant.Add(time.Duration(tick.Add(1)) * time.Second)
 	}
 	return h
 }
