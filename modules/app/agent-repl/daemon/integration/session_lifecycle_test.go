@@ -440,6 +440,72 @@ func TestStartSessionResumeColdStandsAGateBlockingReopenUntilAnswered(t *testing
 	})
 }
 
+// TestAPromptHeldForARevivalThatParksAtTheColdGateWaitsThereAndTheAnswerDeliversIt
+// is the 2026-10-10 doom incident end to end: a prompt sent to a workspace
+// with no live session is held for the revival, the revival's resume is
+// answered cold, and the prompt must wait at the gate (badge "awaiting cold
+// gate", no StartTurn) until AnswerColdGate brings the session up and delivers
+// it. A prompt never answers the gate.
+func TestAPromptHeldForARevivalThatParksAtTheColdGateWaitsThereAndTheAnswerDeliversIt(t *testing.T) {
+	t.Parallel()
+	// Arrange: kill to get a resumable session, then script the resume as cold.
+	f := newOpened(t, harness.Opts{})
+	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a bring-up the test blocks or kills, a session fault the test opens, the shim death the test drives, the shim link the test severs.
+	f.d.ExpectWarnings("daemon.shimclient.redial", "daemon.sessionwatcher.reopen", "daemon.health.open_fault", "daemon.sessionwatcher.link_fault",
+		"daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.watch_session",
+		"daemon.shimclient.exit", "daemon.shimclient.kill_session", "daemon.workspace.bring_up",
+		"daemon.workspace.kill")
+	f.shim.ExpectStartSession()
+	if _, err := f.d.Client().KillWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.KillWorkspaceRequest{Workspace: f.ws})); err != nil {
+		t.Fatalf("KillWorkspace = error %v, want a success", err)
+	}
+	f.shim.AwaitGone()
+	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{ColdOnResume: &harness.ShimColdFacts{
+		ContextTokens:   123456,
+		LastRequestAtMS: 1_700_000_000_000,
+		RequestedModel:  "sonnet",
+		CacheTTLMS:      300_000,
+	}})
+	feed := f.watchRootFeed()
+	holds := f.d.WatchHolds(f.ws)
+
+	// Act: the prompt revives the workspace, and the revival parks at the gate.
+	resp := f.submit("the owner's prompt", "k-cold-gate-held", origin)
+	turn := resp.GetSuccess().GetTurn().GetTurn()
+	if turn.GetValue() == "" {
+		t.Fatalf("SubmitPrompt on a workspace with no session = %v, want a minted TurnId", resp)
+	}
+	shim := f.d.ShimAt(f.d.SocketPath(f.ws) + ".ctl")
+	shim.ExpectStartSession()
+	gateRow := awaitRow(t, f, feed, "the cold gate row", func(r *frontendv1.FeedRow) bool {
+		return r.GetColdGate().GetStanding() != nil
+	})
+
+	// Assert: the prompt waits at the gate, badged as such, and nothing was sent.
+	harness.AwaitView(t, f.d.Ctx(), holds, "the prompt held at the cold gate", func(tray *frontendv1.DaemonHoldTray) bool {
+		p := promptHeldEntry(tray, turn)
+		return p.GetColdGate() != nil && p.GetBadge().GetColdGate() != nil
+	})
+	if n := shim.Count(harness.RPCStartTurn); n != 0 {
+		t.Fatalf("StartTurn count = %d while the gate stands, want 0: a prompt never answers the gate", n)
+	}
+
+	// Act: the user answers the gate.
+	if _, err := f.d.Client().AnswerColdGate(f.d.Ctx(), connect.NewRequest(&agentreplv1.AnswerColdGateRequest{
+		Workspace: f.ws,
+		Gate:      gateRow.GetId(),
+		Choice:    &agentreplv1.AnswerColdGateRequest_Pay{Pay: &agentreplv1.AnswerColdGatePay{}},
+	})); err != nil {
+		t.Fatalf("AnswerColdGate{pay} = error %v, want a success", err)
+	}
+
+	// Assert: the session the answer brings up is handed the held prompt.
+	shim.ExpectStartSession()
+	if got := shim.ExpectStartTurn(); got.GetTurn().GetValue() != turn.GetValue() {
+		t.Fatalf("StartTurn turn = %q, want the held prompt %q delivered", got.GetTurn().GetValue(), turn.GetValue())
+	}
+}
+
 func TestAnswerColdGateCompactEchoesExactly(t *testing.T) {
 	t.Parallel()
 	// Arrange
