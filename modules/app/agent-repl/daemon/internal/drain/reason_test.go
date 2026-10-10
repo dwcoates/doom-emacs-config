@@ -1,11 +1,13 @@
 package drain
 
 import (
+	"reflect"
 	"testing"
 	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
+	"claude-repld/internal/dlog"
 	"claude-repld/internal/wsm"
 )
 
@@ -99,4 +101,52 @@ func TestScheduleIDDistinguishesTwoSchedules(t *testing.T) {
 	if got {
 		t.Fatalf("two schedules put in force at different instants share an id")
 	}
+}
+
+func TestReasonFieldsNamesTheArm(t *testing.T) {
+	tests := []struct {
+		name   string
+		reason *agentreplv1.DrainReason
+		want   dlog.Context
+	}{
+		{
+			name:   "deploy",
+			reason: &agentreplv1.DrainReason{Kind: &agentreplv1.DrainReason_Deploy{Deploy: &agentreplv1.DrainReasonDeploy{}}},
+			want:   dlog.Context{"reason": "deploy"},
+		},
+		{
+			name:   "maintenance",
+			reason: &agentreplv1.DrainReason{Kind: &agentreplv1.DrainReason_Maintenance{Maintenance: &agentreplv1.DrainReasonMaintenance{}}},
+			want:   dlog.Context{"reason": "maintenance"},
+		},
+		{
+			name: "operator, with its note",
+			reason: &agentreplv1.DrainReason{Kind: &agentreplv1.DrainReason_Operator{
+				Operator: &agentreplv1.DrainReasonOperator{Note: "swapping the disk"},
+			}},
+			want: dlog.Context{"reason": "operator", "note": "swapping the disk"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange / Act
+			got := reasonFields(tt.reason)
+			// Assert
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("reasonFields = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestReasonFieldsPanicsOnAnArmlessReason(t *testing.T) {
+	// Arrange: every caller has already refused or failed to decode such a
+	// reason, so one reaching here is a broken invariant.
+	defer func() {
+		if recover() == nil {
+			t.Fatal("reasonFields of an armless reason did not panic")
+		}
+	}()
+	// Act
+	reasonFields(&agentreplv1.DrainReason{})
 }
