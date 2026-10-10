@@ -2582,7 +2582,7 @@ export const HOLD_BADGES: Readonly<Record<string, { label: string; detail?: stri
   reconnect: { label: "after reconnect", detail: "held until the session reconnects" },
   buildRefresh: { label: "build refresh", detail: "held for the build refresh" },
   merge: { label: "after the merge", detail: "held until the merge ends; the workspace stays open for it" },
-  coldGate: { label: "after the cold gate", detail: "held until the cold gate is answered; a prompt never answers it" },
+  coldGate: { label: "awaiting cold gate", detail: "held until the cold gate is answered; a prompt never answers it" },
   awaitingDelivery: { label: "queued", detail: "waits its turn in the queue; nothing is classifying it" },
 };
 

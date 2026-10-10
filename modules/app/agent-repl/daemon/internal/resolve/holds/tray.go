@@ -122,11 +122,16 @@ func heldSessionAct(h wsm.HeldPrompt, log dlog.Logger) *frontendv1.HeldSessionAc
 	}
 }
 
-// setClassification projects the durable verdict onto the tray's oneof. A
-// record with NO verdict yet is the `classifying` arm — the judge is still
-// running — which is why the arm is never left unset. EXCEPT one a daemon
-// condition holds: the classifier never runs on such an entry, so its arm is
-// `daemon_held` rather than a decision that is not being made.
+// setClassification projects the durable verdict onto the tray's oneof, which
+// is never left unset.
+//
+// A RECORD WITH NO VERDICT IS NOT BEING CLASSIFIED. The queue stamps
+// wsm.ArmClassifying before every classifier call, so `classifying` is drawn
+// from that stamp alone. A record with no verdict is either held by a daemon
+// condition (`daemon_held`: the classifier never runs on it) or waits its place
+// in the queue (`awaiting_delivery`). Before 2026-10-10 the second drew
+// `classifying`, and a prompt stranded with neither verdict nor hold read
+// "queued — classifying" for a classification nothing was running.
 func setClassification(out *frontendv1.HeldPrompt, h wsm.HeldPrompt, log dlog.Logger) {
 	ctx := dlog.Context{"turn_id": string(h.Turn)}
 	classifying := &frontendv1.HeldPrompt_Classifying{Classifying: &frontendv1.HeldPromptClassifying{}}
@@ -137,8 +142,8 @@ func setClassification(out *frontendv1.HeldPrompt, h wsm.HeldPrompt, log dlog.Lo
 		return
 	}
 	if h.Classification == nil {
-		log.Debug("daemon.holds.classification", "an unjudged hold drew the classifying arm", ctx)
-		out.Classification = classifying
+		log.Debug("daemon.holds.classification", "an unjudged hold nothing classifies drew the awaiting_delivery arm", ctx)
+		out.Classification = &frontendv1.HeldPrompt_AwaitingDelivery{AwaitingDelivery: &frontendv1.HeldPromptAwaitingDelivery{}}
 		return
 	}
 	switch h.Classification.Arm {
@@ -229,6 +234,10 @@ func setHold(out *frontendv1.HeldPrompt, h wsm.HeldPrompt, log dlog.Logger) {
 		ctx["hold"] = "merge"
 		log.Debug("daemon.holds.hold", "the hold waits for the merge to end", ctx)
 		out.Hold = &frontendv1.HeldPrompt_Merge{Merge: &frontendv1.HeldPromptMergeHold{}}
+	case wsm.HoldColdGate:
+		ctx["hold"] = "cold_gate"
+		log.Debug("daemon.holds.hold", "the hold waits for the cold gate's answer", ctx)
+		out.Hold = &frontendv1.HeldPrompt_ColdGate{ColdGate: &frontendv1.HeldPromptColdGateHold{}}
 	default:
 		ctx["hold"] = int(*h.Hold)
 		ctx["invariant_violation"] = "unknown wsm.HoldKind"
@@ -325,6 +334,10 @@ func verdictBadge(p *frontendv1.HeldPrompt, ctx dlog.Context, log dlog.Logger) *
 		return badge("unclassified", "unclassified", func(b *frontendv1.HeldPromptBadge) {
 			b.StandsFor = &frontendv1.HeldPromptBadge_ClassificationError{ClassificationError: &frontendv1.HeldPromptBadgeClassificationError{}}
 		})
+	case *frontendv1.HeldPrompt_AwaitingDelivery:
+		return badge("queued", "waits its turn in the queue; nothing is classifying it", func(b *frontendv1.HeldPromptBadge) {
+			b.StandsFor = &frontendv1.HeldPromptBadge_AwaitingDelivery{AwaitingDelivery: &frontendv1.HeldPromptBadgeAwaitingDelivery{}}
+		})
 	case *frontendv1.HeldPrompt_DaemonHeld:
 		return nil
 	default:
@@ -360,6 +373,10 @@ func holdBadge(p *frontendv1.HeldPrompt, ctx dlog.Context, log dlog.Logger) *fro
 	case *frontendv1.HeldPrompt_Merge:
 		return badge("after the merge", "held until the merge ends; the workspace stays open for it", func(b *frontendv1.HeldPromptBadge) {
 			b.StandsFor = &frontendv1.HeldPromptBadge_Merge{Merge: &frontendv1.HeldPromptBadgeMerge{}}
+		})
+	case *frontendv1.HeldPrompt_ColdGate:
+		return badge("awaiting cold gate", "held until the cold gate is answered; a prompt never answers it", func(b *frontendv1.HeldPromptBadge) {
+			b.StandsFor = &frontendv1.HeldPromptBadge_ColdGate{ColdGate: &frontendv1.HeldPromptBadgeColdGate{}}
 		})
 	default:
 		ctx["invariant_violation"] = "HeldPrompt.hold has no badge"
