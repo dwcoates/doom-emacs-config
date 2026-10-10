@@ -14,6 +14,7 @@ Answer {{token_after_tool_call}} when the new message bears on the running work 
 Answer {{token_interrupt}} only when the new message makes the step in progress wrong or wasted, so letting it finish would cost something:
 - A stop, abort, or countermand of the running work.
 - A redirect to different work, or a report that the current approach is wrong and must not continue.
+- An instruction tied to the running turn's ending, such as "when you're done, do X", "after this finishes, merge", or "once that's complete, ...". It names something that happens after the turn ends, and the agent must know about it BEFORE that point, so it cannot wait until the turn is over. This is different from a loose, free-standing remark with no chronological or ordinal tie to the turn, such as "when you get a chance" or "when you've got time"; those do not depend on when the turn ends and are judged like any other message.
 
 Answer {{token_hold}} only when the new message is genuinely independent of the running turn and loses nothing by being handled after it: an unrelated new request, a follow-up that builds on the finished result, or a standalone question.
 
