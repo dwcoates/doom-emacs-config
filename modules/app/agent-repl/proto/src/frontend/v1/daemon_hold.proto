@@ -80,7 +80,8 @@ message HeldPrompt {
   // cannot be set on an entry no classifier held.
   oneof classification {
     // A classifier is still deciding. Expect this arm to be replaced by one of
-    // the verdicts below.
+    // the verdicts below. Set ONLY while a classifier call is in flight; an
+    // entry nothing is classifying is `awaiting_delivery` or `daemon_held`.
     HeldPromptClassifying classifying = 4;
     // The verdict is that this prompt should interrupt the running turn rather
     // than wait for it.
@@ -113,18 +114,26 @@ message HeldPrompt {
     // and no verdict was reached before the hold was stamped, so a held card
     // never claims a decision is being made when none is.
     HeldPromptDaemonHeld daemon_held = 19;
+    // NOTHING IS CLASSIFYING THIS ENTRY AND NO DAEMON CONDITION HOLDS IT: it
+    // waits its place in the queue, and the next drain -- a turn's end, the
+    // session coming up -- delivers it in order. Set when no verdict was
+    // recorded and no classifier is running, so a held card never claims a
+    // decision is being made when none is: `classifying` is drawn ONLY while
+    // a classifier call is in flight (owner, 2026-10-10).
+    HeldPromptAwaitingDelivery awaiting_delivery = 23;
   }
   // WHAT is holding this entry, when something other than a running turn is.
   //
   // An entry is held by at most one thing at a time: a drain lease, a
-  // pending reconnect, a build refresh and a merge are mutually exclusive
+  // pending reconnect, a standing cold gate, a build refresh and a merge are
+  // mutually exclusive
   // session conditions, and an entry held by two of them at once
   // would have two different sets of exits and two different states to
   // render. Stating them as arms makes that impossible to express rather than
   // merely unlikely. No arm set means the entry is held by the ordinary case
   // — a turn is running — and the classifier decides when it is delivered.
   //
-  // THESE FOUR ARE THE WHOLE SET, and they are entry-scoped.
+  // THESE FIVE ARE THE WHOLE SET, and they are entry-scoped.
   oneof hold {
     // The daemon is draining toward a scheduled shutdown and is not admitting
     // new work.
@@ -138,6 +147,9 @@ message HeldPrompt {
     HeldPromptBuildRefreshHold build_refresh = 12;
     // A merge of this workspace is in flight and drives its session.
     HeldPromptMergeHold merge = 20;
+    // The workspace's session is parked at its cold gate, and the prompt
+    // waits for the user's answer to the gate.
+    HeldPromptColdGateHold cold_gate = 24;
   }
   // Tag 10 and the name `keep_alive` are RETIRED and must not be revived. A
   // cache keep-alive is the shim's own mechanism: a real prompt that arrives
@@ -277,6 +289,10 @@ message HeldPromptBadge {
     HeldPromptBadgeReconnect reconnect = 12;
     // Held while a merge of the workspace drives its session.
     HeldPromptBadgeMerge merge = 13;
+    // Held until the user answers the session's cold gate.
+    HeldPromptBadgeColdGate cold_gate = 14;
+    // Waits its place in the queue; nothing is classifying it.
+    HeldPromptBadgeAwaitingDelivery awaiting_delivery = 15;
   }
 }
 // The badge shows the classifier still deciding.
@@ -301,6 +317,10 @@ message HeldPromptBadgeBuildRefresh {}
 message HeldPromptBadgeReconnect {}
 // The badge shows the merge hold.
 message HeldPromptBadgeMerge {}
+// The badge shows the cold-gate hold.
+message HeldPromptBadgeColdGate {}
+// The badge shows an entry waiting its place in the queue, unclassified.
+message HeldPromptBadgeAwaitingDelivery {}
 // One standing fact the card's badge does not show, said in full.
 message HeldPromptStatusNote {
   // The fact as one sentence ("held until the merge ends"), drawn verbatim
@@ -403,7 +423,9 @@ message HeldPromptShutdownHold {
 // reconnect: a revival or cold resume in progress, a compaction the user chose
 // at the cold gate still landing, a vendor start being retried, or a session
 // whose start failed outright and waits for the user's restart. The card's
-// badge reads "after reconnect".
+// badge reads "after reconnect". A session parked at a STANDING cold gate is
+// not this arm but `cold_gate` (HeldPromptColdGateHold): what it waits on is
+// the user's answer, not the machinery.
 //
 // ALSO A SESSION THAT IS UP BUT REFUSED MID-SESSION (owner, 2026-10-06): while
 // the vendor refuses the session (usage limit, auth, billing, vendor error, an
@@ -440,6 +462,29 @@ message HeldPromptMergeHold {}
 // No classifier ran and none will: a daemon condition holds the entry (the
 // `hold` arm). DELIBERATELY EMPTY: the hold arm says what holds it.
 message HeldPromptDaemonHeld {}
+
+// Held because the workspace's session is PARKED AT ITS COLD GATE: the shim
+// is up, no session is started on it, and the gate asks the user to pay,
+// clear or compact before the cold conversation is re-read.
+//
+// A PROMPT NEVER ANSWERS THE GATE. Answering it spends the user's money, and
+// only the gate's own answer (AnswerColdGate) may do that
+// (REALTEST-JUDGEMENT-CALLS.md "The cold gate's feedback", call 11; owner
+// ruling 2, 2026-09-13, re-affirmed 2026-10-10). A prompt that was already
+// held when a revival parked at the gate waits here instead of being sent
+// into a session that does not exist.
+//
+// The exits are delivery once the answer brings the session up (the same
+// session-up edge that releases `reconnect`), or the user's cancel. The
+// classifier NEVER runs while an entry is held here, and there is NO
+// force-through. DELIBERATELY EMPTY: the gate's own sentence is the feed's
+// gate card and the footer's, never restated here.
+message HeldPromptColdGateHold {}
+
+// No classifier is running on this entry and no daemon condition holds it: it
+// waits its place in the queue and is delivered in order by the next drain.
+// DELIBERATELY EMPTY: the arm's presence is the whole fact.
+message HeldPromptAwaitingDelivery {}
 
 // Held because the session's shim is being restarted onto the current build
 // at the turn boundary (automatic stale-shim refresh). The classifier never
