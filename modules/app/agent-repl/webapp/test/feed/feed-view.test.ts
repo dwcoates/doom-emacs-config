@@ -64,7 +64,12 @@ import {
   PROMPT_WAVE_WORKING,
 } from "../../src/breathing.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
-import { orderFor, withOrder, withoutOrder } from "../feed-order.js";
+import {
+  orderFor,
+  withOrder,
+  withPinnedOrder,
+  withoutOrder,
+} from "../feed-order.js";
 import {
   TailFollow,
   centerDelta,
@@ -3277,6 +3282,109 @@ describe("createFeedController: every row is placed by its order key", () => {
     // Assert
     const record = await forwardedRecord(capture, "feed.row-order-changed");
     expect(record.level.case).toBe("error");
+  });
+
+  it("draws a pinned row below a row pushed after it", () => {
+    // Arrange
+    const { controller, host } = fixture();
+    controller.applyPage(incidentPage(), "replace");
+    controller.upsert(withPinnedOrder(responseRow("bubble"), "~0001"));
+    // Act
+    controller.upsert(withOrder(responseRow("late"), "k0900"));
+    // Assert
+    expect(drawnIds(host)).toEqual([
+      "prompt",
+      "early",
+      "answer",
+      "end",
+      "late",
+      "bubble",
+    ]);
+  });
+
+  it("moves a settling pinned row to its settled key", () => {
+    // Arrange
+    const { controller, host } = fixture();
+    controller.applyPage(incidentPage(), "replace");
+    controller.upsert(withPinnedOrder(responseRow("bubble"), "~0001"));
+    controller.upsert(withOrder(responseRow("late"), "k0900"));
+    controller.upsert(withOrder(responseRow("bubble", "landed"), "k0950"));
+    // Act — a row placed after the settle.
+    controller.upsert(withOrder(responseRow("next"), "k0990"));
+    // Assert
+    expect(drawnIds(host)).toEqual([
+      "prompt",
+      "early",
+      "answer",
+      "end",
+      "late",
+      "bubble",
+      "next",
+    ]);
+  });
+
+  it("records a settling pinned row at INFO, naming both keys", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const { controller } = fixture();
+    controller.applyPage(incidentPage(), "replace");
+    controller.upsert(withPinnedOrder(responseRow("bubble"), "~0001"));
+    // Act
+    controller.upsert(withOrder(responseRow("bubble", "landed"), "k0950"));
+    // Assert
+    const record = await forwardedRecord(capture, "feed.row-settled");
+    expect({ level: record.level.case, context: record.context }).toEqual({
+      level: "info",
+      context: expect.objectContaining({
+        row: "bubble",
+        pinned_key: "~0001",
+        key: "k0950",
+      }) as unknown,
+    });
+  });
+
+  it("settles a pinned row a page serves at its settled key", () => {
+    // Arrange
+    const { controller, host } = fixture();
+    controller.applyPage(incidentPage(), "replace");
+    controller.upsert(withPinnedOrder(responseRow("bubble"), "~0001"));
+    controller.upsert(withOrder(responseRow("late"), "k0900"));
+    // Act — a reconnect's page carries the bubble already settled.
+    controller.applyPage(
+      page(
+        keyed([
+          [responseRow("bubble", "landed"), "k0450"],
+          [responseRow("late"), "k0900"],
+        ]),
+      ),
+      "prepend",
+    );
+    // Assert
+    expect(drawnIds(host)).toEqual([
+      "prompt",
+      "early",
+      "bubble",
+      "answer",
+      "end",
+      "late",
+    ]);
+  });
+
+  it("keeps a pinned row in place when it is re-pushed pinned at another key", () => {
+    // Arrange
+    const { controller, host } = fixture();
+    controller.applyPage(incidentPage(), "replace");
+    controller.upsert(withPinnedOrder(responseRow("bubble"), "~0001"));
+    // Act — the daemon breaks the fixed-key invariant for a still-pinned row.
+    controller.upsert(withPinnedOrder(responseRow("bubble"), "k0150"));
+    // Assert
+    expect(drawnIds(host)).toEqual([
+      "prompt",
+      "early",
+      "answer",
+      "end",
+      "bubble",
+    ]);
   });
 
   it("records a new row carrying another row's key at ERROR", async () => {
