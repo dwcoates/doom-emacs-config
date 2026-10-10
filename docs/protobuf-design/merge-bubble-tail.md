@@ -27,4 +27,16 @@ stay at the bottom while newer rows arrive. This change amends that contract.
   overtaken by every row the workspace writes while it waits. Pinning the
   bubble to the tail removes that reason, so the gate is removed.
 
+## Settled rules
+
+- A feed row is either PLACED (a fixed order key, as every row is today) or
+  PINNED (no place in the flow yet; drawn after every placed row). A pinned row
+  is placed exactly once, when it settles, at the position it holds at that
+  moment: it takes a key just after the feed's newest row, so every row written
+  afterward is placed below it. From then on its key never changes. The order
+  invariant becomes "fixed once assigned" (owner, 2026-10-10).
+- The merge bubble is pinned the moment it is first created (when the merge is
+  queued) and placed when the merge resolves (landed, failed, or abandoned)
+  (owner, 2026-10-10).
+
 ## Landed changes
