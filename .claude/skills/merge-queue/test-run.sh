@@ -170,6 +170,44 @@ test_enqueue_own_refuses_the_main_worktree() {
   fi
 }
 
+test_announce_one_shot_requests_the_one_shot_merge() {
+  mkfixture
+  invoke --announce-one-shot
+  expect_args "--announce-one-shot announces this workspace's own branch a one-shot" "merge-queue -own -one-shot"
+}
+
+test_announce_one_shot_front_goes_to_the_front() {
+  mkfixture
+  invoke --announce-one-shot --front
+  expect_args "--announce-one-shot --front announces the one-shot at the front of the queue" "merge-queue -own -one-shot -front"
+}
+
+test_announce_one_shot_allows_uncommitted_work() {
+  mkfixture
+  DIRTY=" M file.el" invoke --announce-one-shot
+  expect_args "--announce-one-shot announces with work still uncommitted" "merge-queue -own -one-shot"
+}
+
+test_announce_one_shot_refuses_an_argument() {
+  mkfixture
+  invoke --announce-one-shot --keep-open
+  if [ "$RUN_RC" -eq 2 ] && [ -z "$(daemon_args)" ]; then
+    pass "--announce-one-shot refuses an argument and requests nothing"
+  else
+    fail "--announce-one-shot refuses an argument and requests nothing" "exit=$RUN_RC" "$RUN_OUT"
+  fi
+}
+
+test_announce_one_shot_refusal_is_exit_5() {
+  mkfixture
+  DAEMON_EXIT=6 invoke --announce-one-shot
+  if [ "$RUN_RC" -eq 5 ]; then
+    pass "a refused one-shot announcement exits 5"
+  else
+    fail "a refused one-shot announcement exits 5" "exit=$RUN_RC" "$RUN_OUT"
+  fi
+}
+
 test_land_workspace_requests_without_waiting() {
   mkfixture
   invoke --land-workspace "$FX/other"
@@ -442,17 +480,19 @@ test_land_commits_flattens_a_prefixed_branch_into_one_directory() {
 }
 
 test_workspace_verbs_share_one_main_worktree_refusal() {
-  local own commits
+  local own commits oneshot
   mkfixture
   TOP="$FX/main" invoke --enqueue-own
   own="$RUN_RC|$RUN_OUT"
   TOP="$FX/main" invoke --land-commits c1
   commits="$RUN_RC|$RUN_OUT"
+  TOP="$FX/main" invoke --announce-one-shot
+  oneshot="$RUN_RC|$RUN_OUT"
   # shellcheck disable=SC2016 # the literal call-site text is what is counted
-  if [ "$own" = "$commits" ] && [ "${own%%|*}" -eq 2 ] && [ "$(grep -c 'top="$(workspace_top)"' "$RUN")" -eq 2 ]; then
-    pass "--enqueue-own and --land-commits refuse the main worktree through the one shared check"
+  if [ "$own" = "$commits" ] && [ "$own" = "$oneshot" ] && [ "${own%%|*}" -eq 2 ] && [ "$(grep -c 'top="$(workspace_top)"' "$RUN")" -eq 3 ]; then
+    pass "--enqueue-own, --land-commits and --announce-one-shot refuse the main worktree through the one shared check"
   else
-    fail "--enqueue-own and --land-commits refuse the main worktree through the one shared check" "own=$own" "commits=$commits"
+    fail "--enqueue-own, --land-commits and --announce-one-shot refuse the main worktree through the one shared check" "own=$own" "commits=$commits" "one-shot=$oneshot"
   fi
 }
 
@@ -523,6 +563,11 @@ test_enqueue_own_in_place_runs_in_this_workspace
 test_enqueue_own_refuses_an_unknown_option
 test_enqueue_own_refuses_uncommitted_work
 test_enqueue_own_refuses_the_main_worktree
+test_announce_one_shot_requests_the_one_shot_merge
+test_announce_one_shot_front_goes_to_the_front
+test_announce_one_shot_allows_uncommitted_work
+test_announce_one_shot_refuses_an_argument
+test_announce_one_shot_refusal_is_exit_5
 test_land_workspace_requests_without_waiting
 test_land_workspace_refuses_its_own
 test_land_branch_requests_the_branch
