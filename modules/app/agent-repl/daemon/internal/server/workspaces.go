@@ -832,6 +832,60 @@ func (s *server) SetWorkspaceHidden(
 	return connect.NewResponse(resp), nil
 }
 
+// SetWorkspaceParent retargets a workspace's merge, to another workspace of
+// its repository or to the main checkout, and queues the notice in its
+// session in the same operation (internal/retarget). The new nesting arrives
+// on the roster stream.
+func (s *server) SetWorkspaceParent(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.SetWorkspaceParentRequest],
+) (*connect.Response[agentreplv1.SetWorkspaceParentResponse], error) {
+	const rpc = "SetWorkspaceParent"
+	if err := validateSetWorkspaceParentRequest(req.Msg); err != nil {
+		return nil, err
+	}
+	resp := &agentreplv1.SetWorkspaceParentResponse{}
+	subject, cerr, done := s.subjectFor(ctx, rpc, req.Msg.GetWorkspace(), resp)
+	if done {
+		return answer(resp, cerr)
+	}
+	var parent *ids.WorkspaceID
+	if child := req.Msg.GetChildOf(); child != nil {
+		// THE PARENT IS RESOLVED AGAINST THE REGISTRY ALONE: it is not the
+		// subject of the request, so which daemon serves it does not matter,
+		// and its two resolution refusals are the parent's own arms.
+		resolvedParent, r, err := s.resolveRegistered(ctx, rpc, child.GetParent())
+		if err != nil {
+			return answer(resp, failResolution(subject.Log, rpc, err))
+		}
+		if r != nil {
+			arm, ok := parentArms[r.Arm]
+			if !ok {
+				return answer(resp, fail(subject.Log, rpc, fmt.Errorf("the parent's resolution refused with %q, which has no parent arm", r.Arm)))
+			}
+			r.Arm = arm
+			return answer(resp, s.refuse(subject.Log, rpc, resp, *r))
+		}
+		id := resolvedParent.Record.ID
+		parent = &id
+	}
+	if err := s.deps.Retarget.Retarget(ctx, subject.Record.ID, parent); err != nil {
+		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
+	}
+	resp.Result = &agentreplv1.SetWorkspaceParentResponse_Success{
+		Success: &agentreplv1.SetWorkspaceParentSuccess{},
+	}
+	return connect.NewResponse(resp), nil
+}
+
+// parentArms renames the parent ref's resolution refusals onto
+// SetWorkspaceParentError's parent arms. A resolution answers exactly these
+// two, so any other arm is a defect, failed at ERROR rather than renamed.
+var parentArms = map[string]string{
+	workspace.ArmUnknownWorkspace:     workspace.ArmUnknownParent,
+	workspace.ArmWorkspaceRefMismatch: "parent_ref_mismatch",
+}
+
 // FoldRepository expands or collapses one repository's roster section. The
 // new fold arrives on the roster stream.
 func (s *server) FoldRepository(

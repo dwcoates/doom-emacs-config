@@ -235,6 +235,27 @@ func (f *fakeOwnership) Standing(context.Context, ids.WorkspaceID) (workspace.St
 	return f.standing, f.err
 }
 
+// retargetCall is one Retarget the operation received.
+type retargetCall struct {
+	ws     ids.WorkspaceID
+	parent string
+}
+
+// fakeRetarget answers err and records each retarget.
+type fakeRetarget struct {
+	err   error
+	calls []retargetCall
+}
+
+func (f *fakeRetarget) Retarget(_ context.Context, ws ids.WorkspaceID, parent *ids.WorkspaceID) error {
+	call := retargetCall{ws: ws}
+	if parent != nil {
+		call.parent = string(*parent)
+	}
+	f.calls = append(f.calls, call)
+	return f.err
+}
+
 // fakeVerbs answers whatever the test wired, and records the calls made.
 type fakeVerbs struct {
 	workspace.Verbs
@@ -1165,6 +1186,7 @@ type harness struct {
 	DB        *fakeDB
 	Ownership *fakeOwnership
 	Verbs     *fakeVerbs
+	Retarget  *fakeRetarget
 	Prompts   *fakePrompts
 	Queue     *fakeQueue
 	Merge     *fakeMerge
@@ -1219,6 +1241,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		}},
 		Ownership:  &fakeOwnership{standing: workspace.StandingOwned},
 		Verbs:      &fakeVerbs{},
+		Retarget:   &fakeRetarget{},
 		Prompts:    &fakePrompts{},
 		Queue:      &fakeQueue{},
 		Merge:      &fakeMerge{},
@@ -1250,6 +1273,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		Prompts:           h.Prompts,
 		Queue:             h.Queue,
 		Verbs:             h.Verbs,
+		Retarget:          h.Retarget,
 		Merge:             h.Merge,
 		Drain:             h.Drain,
 		Rollout:           h.Rollout,
