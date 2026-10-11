@@ -96,7 +96,7 @@
 (defvar agent-repl--history-discard-entry)
 (declare-function agent-repl--on-close "agent-repl-panels" ())
 (declare-function agent-repl-host-ref "agent-repl-host" (ws))
-(declare-function agent-repl-host-conn "agent-repl-host" (ws))
+(declare-function agent-repl-host-conn-or-primary "agent-repl-host" (ws))
 (declare-function agent-repl-host-composer-gate "agent-repl-host" (ws))
 (declare-function agent-repl-host-selection "agent-repl-host" (ws))
 (declare-function agent-repl-link-primary "agent-repl-daemon-link" ())
@@ -694,7 +694,7 @@ dropped just because the daemon is the authority."
   (let* ((arm (plist-get move :arm))
          (prefix (cdr (assq arm agent-repl--input-selection-flash-prefixes)))
          (ref (agent-repl-host-ref ws))
-         (conn (or (agent-repl-host-conn ws) (agent-repl-link-primary))))
+         (conn (agent-repl-host-conn-or-primary ws)))
     (cond
      ((null ref)
       (agent-repl--warn ws "elisp.input.select-feed-row-no-ref ws=%s move=%S" ws move)
@@ -920,7 +920,7 @@ FILES is `:keep-files' or `:restore-files'.  The plan is asked for
 synchronously, so the confirmation is read in the command loop of the key
 that asked for it."
   (let ((ref (agent-repl-host-ref ws))
-        (conn (or (agent-repl-host-conn ws) (agent-repl-link-primary))))
+        (conn (agent-repl-host-conn-or-primary ws)))
     (cond
      ((null ref)
       (agent-repl--warn ws "elisp.input.rollback-no-ref ws=%s files=%S" ws files)
@@ -989,7 +989,7 @@ ref; the current workspace only supplies the daemon connection and the
 log scope.  A missing connection is surfaced through the log rather than
 silently dropped."
   (let* ((ws (agent-repl--ws-current-name))
-         (conn (or (and ws (agent-repl-host-conn ws)) (agent-repl-link-primary))))
+         (conn (agent-repl-host-conn-or-primary ws)))
     (if (null conn)
         (agent-repl--warn ws "elisp.input.feed-text-scale-no-conn dir=%S" direction)
       (agent-repl--info ws "elisp.input.feed-text-scale dir=%S" direction)
@@ -1753,7 +1753,7 @@ The ref is REQUIRED on every submit: it names WHICH workspace the
 submission belongs to, and it is the daemon-minted echo token, never a
 value Emacs constructs from a path."
   (let ((ref (agent-repl-host-ref ws))
-        (conn (or (agent-repl-host-conn ws) (agent-repl-link-primary)))
+        (conn (agent-repl-host-conn-or-primary ws))
         (first-attempt (null key))
         (key (or key (agent-repl--uuid))))
     (agent-repl--with-log-context
