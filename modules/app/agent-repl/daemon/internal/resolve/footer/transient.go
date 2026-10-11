@@ -10,6 +10,7 @@ import (
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/protoarm"
 )
 
 // THE TRANSIENT TIER (owner rulings, 2026-09-28 and 2026-09-30; footer.proto
@@ -69,12 +70,11 @@ func (r *resolver) unpinned(s *wsState) *frontendv1.FooterActivityTransientOverE
 // transientKind names a transient's kind arm for the record, "unset" for one
 // with none.
 func transientKind(t *frontendv1.FooterActivityTransient) string {
-	m := t.ProtoReflect()
-	field := m.WhichOneof(m.Descriptor().Oneofs().ByName("kind"))
-	if field == nil {
+	arm, ok := protoarm.Name(t.ProtoReflect(), "kind")
+	if !ok {
 		return "unset"
 	}
-	return string(field.Name())
+	return string(arm)
 }
 
 // agentLabel is the label a transient carries for work the agent `id` raised:
@@ -203,12 +203,11 @@ func sessionChangeText(update *conversationv1.SessionUpdate) (string, bool) {
 // permissionModeName is the mode's arm name, rendered lowercase with spaces as
 // every status cell renders an arm name. An unset mode reads "unstated".
 func permissionModeName(mode *conversationv1.AgentPermissionMode) string {
-	m := mode.ProtoReflect()
-	field := m.WhichOneof(m.Descriptor().Oneofs().ByName("mode"))
-	if field == nil {
+	arm, ok := protoarm.Name(mode.ProtoReflect(), "mode")
+	if !ok {
 		return "unstated"
 	}
-	return armWords(field.Name())
+	return armWords(arm)
 }
 
 // mcpServerText composes an MCP server's health change.

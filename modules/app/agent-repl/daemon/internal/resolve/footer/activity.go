@@ -10,6 +10,7 @@ import (
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/health"
+	"claude-repld/internal/protoarm"
 )
 
 // THE ACTIVITY CELL is the strip's finest cell, and every status arm ALWAYS
@@ -319,8 +320,8 @@ func activityLineOf(status *frontendv1.FooterStatus) activityLine {
 	if salientField := activity.Descriptor().Fields().ByName("salient"); salientField != nil && activity.Descriptor().Oneofs().ByName("tier") == nil {
 		return kindLine("salient", activity.Get(salientField).Message())
 	}
-	tier := activity.WhichOneof(activity.Descriptor().Oneofs().ByName("tier"))
-	if tier == nil || tier.Kind() != protoreflect.MessageKind {
+	tier, ok := protoarm.Set(activity, "tier")
+	if !ok || tier.Kind() != protoreflect.MessageKind {
 		return activityLine{}
 	}
 	cell := activity.Get(tier).Message()

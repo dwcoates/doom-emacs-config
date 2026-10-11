@@ -9,6 +9,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/protoarm"
 	"claude-repld/internal/resolve/holds"
 	"claude-repld/internal/wsm"
 )
@@ -171,9 +172,8 @@ func (r *resolver) renderHeld(s *wsState, h *heldState) *frontendv1.FeedHeld {
 // of a kind is posed at a time.
 func heldOfferKey(offer *frontendv1.HeldOffer) feedid.RowKey {
 	kind := "unset"
-	m := offer.ProtoReflect()
-	if arm := m.WhichOneof(m.Descriptor().Oneofs().ByName("offer")); arm != nil {
-		kind = string(arm.Name())
+	if arm, ok := protoarm.Name(offer.ProtoReflect(), "offer"); ok {
+		kind = string(arm)
 	}
 	return feedid.RowKey{Kind: feedid.KindHeldOffer, ID: kind}
 }

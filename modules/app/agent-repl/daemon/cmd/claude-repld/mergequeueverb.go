@@ -24,6 +24,7 @@ import (
 
 	"claude-repld/internal/commandfile"
 	"claude-repld/internal/envc"
+	"claude-repld/internal/protoarm"
 	"claude-repld/internal/stateroot"
 )
 
@@ -757,11 +758,11 @@ func rowStatus(row *frontendv1.RosterRow) string {
 	if row == nil {
 		return statusAbsent
 	}
-	field := row.ProtoReflect().WhichOneof(row.ProtoReflect().Descriptor().Oneofs().ByName("status"))
-	if field == nil {
+	arm, ok := protoarm.Name(row.ProtoReflect(), "status")
+	if !ok {
 		return "unset"
 	}
-	return string(field.Name())
+	return string(arm)
 }
 
 // canonicalDir resolves a directory's symlinks through its longest existing
