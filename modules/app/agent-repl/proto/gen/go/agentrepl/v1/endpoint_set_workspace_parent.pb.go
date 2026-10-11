@@ -368,6 +368,7 @@ type SetWorkspaceParentError struct {
 	//	*SetWorkspaceParentError_ParentInOtherRepository
 	//	*SetWorkspaceParentError_Cycle
 	//	*SetWorkspaceParentError_NoMergeLayout
+	//	*SetWorkspaceParentError_ColdGate
 	Cause         isSetWorkspaceParentError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -491,6 +492,15 @@ func (x *SetWorkspaceParentError) GetNoMergeLayout() *SetWorkspaceParentNoMergeL
 	return nil
 }
 
+func (x *SetWorkspaceParentError) GetColdGate() *SetWorkspaceParentColdGate {
+	if x != nil {
+		if x, ok := x.Cause.(*SetWorkspaceParentError_ColdGate); ok {
+			return x.ColdGate
+		}
+	}
+	return nil
+}
+
 type isSetWorkspaceParentError_Cause interface {
 	isSetWorkspaceParentError_Cause()
 }
@@ -546,6 +556,13 @@ type SetWorkspaceParentError_NoMergeLayout struct {
 	NoMergeLayout *SetWorkspaceParentNoMergeLayout `protobuf:"bytes,9,opt,name=no_merge_layout,json=noMergeLayout,proto3,oneof"`
 }
 
+type SetWorkspaceParentError_ColdGate struct {
+	// The workspace's session is parked at its cold gate, which takes no
+	// prompt until the gate is answered, so the notice cannot be queued and
+	// the retarget is not made. Answer the gate, then retarget.
+	ColdGate *SetWorkspaceParentColdGate `protobuf:"bytes,10,opt,name=cold_gate,json=coldGate,proto3,oneof"`
+}
+
 func (*SetWorkspaceParentError_UnknownWorkspace) isSetWorkspaceParentError_Cause() {}
 
 func (*SetWorkspaceParentError_WorkspaceRefMismatch) isSetWorkspaceParentError_Cause() {}
@@ -563,6 +580,8 @@ func (*SetWorkspaceParentError_ParentInOtherRepository) isSetWorkspaceParentErro
 func (*SetWorkspaceParentError_Cycle) isSetWorkspaceParentError_Cause() {}
 
 func (*SetWorkspaceParentError_NoMergeLayout) isSetWorkspaceParentError_Cause() {}
+
+func (*SetWorkspaceParentError_ColdGate) isSetWorkspaceParentError_Cause() {}
 
 // The workspace id is not in the daemon's registry. DELIBERATELY EMPTY.
 type SetWorkspaceParentUnknownWorkspace struct {
@@ -936,6 +955,44 @@ func (*SetWorkspaceParentNoMergeLayout) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_set_workspace_parent_proto_rawDescGZIP(), []int{14}
 }
 
+// The workspace's session is parked at its cold gate. DELIBERATELY EMPTY: the
+// gate itself is drawn in the workspace's feed.
+type SetWorkspaceParentColdGate struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetWorkspaceParentColdGate) Reset() {
+	*x = SetWorkspaceParentColdGate{}
+	mi := &file_agentrepl_v1_endpoint_set_workspace_parent_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetWorkspaceParentColdGate) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetWorkspaceParentColdGate) ProtoMessage() {}
+
+func (x *SetWorkspaceParentColdGate) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_set_workspace_parent_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetWorkspaceParentColdGate.ProtoReflect.Descriptor instead.
+func (*SetWorkspaceParentColdGate) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_set_workspace_parent_proto_rawDescGZIP(), []int{15}
+}
+
 var File_agentrepl_v1_endpoint_set_workspace_parent_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_set_workspace_parent_proto_rawDesc = "" +
@@ -953,7 +1010,7 @@ const file_agentrepl_v1_endpoint_set_workspace_parent_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\v2'.agentrepl.v1.SetWorkspaceParentSuccessH\x00R\asuccess\x12=\n" +
 	"\x05error\x18\x02 \x01(\v2%.agentrepl.v1.SetWorkspaceParentErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"\x1b\n" +
-	"\x19SetWorkspaceParentSuccess\"\xf8\x06\n" +
+	"\x19SetWorkspaceParentSuccess\"\xc1\a\n" +
 	"\x17SetWorkspaceParentError\x12_\n" +
 	"\x11unknown_workspace\x18\x01 \x01(\v20.agentrepl.v1.SetWorkspaceParentUnknownWorkspaceH\x00R\x10unknownWorkspace\x12l\n" +
 	"\x16workspace_ref_mismatch\x18\x02 \x01(\v24.agentrepl.v1.SetWorkspaceParentWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12_\n" +
@@ -963,7 +1020,9 @@ const file_agentrepl_v1_endpoint_set_workspace_parent_proto_rawDesc = "" +
 	"\x13parent_ref_mismatch\x18\x06 \x01(\v21.agentrepl.v1.SetWorkspaceParentParentRefMismatchH\x00R\x11parentRefMismatch\x12v\n" +
 	"\x1aparent_in_other_repository\x18\a \x01(\v27.agentrepl.v1.SetWorkspaceParentParentInOtherRepositoryH\x00R\x17parentInOtherRepository\x12=\n" +
 	"\x05cycle\x18\b \x01(\v2%.agentrepl.v1.SetWorkspaceParentCycleH\x00R\x05cycle\x12W\n" +
-	"\x0fno_merge_layout\x18\t \x01(\v2-.agentrepl.v1.SetWorkspaceParentNoMergeLayoutH\x00R\rnoMergeLayoutB\a\n" +
+	"\x0fno_merge_layout\x18\t \x01(\v2-.agentrepl.v1.SetWorkspaceParentNoMergeLayoutH\x00R\rnoMergeLayout\x12G\n" +
+	"\tcold_gate\x18\n" +
+	" \x01(\v2(.agentrepl.v1.SetWorkspaceParentColdGateH\x00R\bcoldGateB\a\n" +
 	"\x05cause\"$\n" +
 	"\"SetWorkspaceParentUnknownWorkspace\"K\n" +
 	"&SetWorkspaceParentWorkspaceRefMismatch\x12!\n" +
@@ -977,7 +1036,8 @@ const file_agentrepl_v1_endpoint_set_workspace_parent_proto_rawDesc = "" +
 	")SetWorkspaceParentParentInOtherRepository\x122\n" +
 	"\x15parent_repository_dir\x18\x01 \x01(\tR\x13parentRepositoryDir\"\x19\n" +
 	"\x17SetWorkspaceParentCycle\"!\n" +
-	"\x1fSetWorkspaceParentNoMergeLayoutB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\x1fSetWorkspaceParentNoMergeLayout\"\x1c\n" +
+	"\x1aSetWorkspaceParentColdGateB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_set_workspace_parent_proto_rawDescOnce sync.Once
@@ -991,7 +1051,7 @@ func file_agentrepl_v1_endpoint_set_workspace_parent_proto_rawDescGZIP() []byte 
 	return file_agentrepl_v1_endpoint_set_workspace_parent_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_set_workspace_parent_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
+var file_agentrepl_v1_endpoint_set_workspace_parent_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
 var file_agentrepl_v1_endpoint_set_workspace_parent_proto_goTypes = []any{
 	(*SetWorkspaceParentRequest)(nil),                 // 0: agentrepl.v1.SetWorkspaceParentRequest
 	(*SetWorkspaceParentChild)(nil),                   // 1: agentrepl.v1.SetWorkspaceParentChild
@@ -1008,13 +1068,14 @@ var file_agentrepl_v1_endpoint_set_workspace_parent_proto_goTypes = []any{
 	(*SetWorkspaceParentParentInOtherRepository)(nil), // 12: agentrepl.v1.SetWorkspaceParentParentInOtherRepository
 	(*SetWorkspaceParentCycle)(nil),                   // 13: agentrepl.v1.SetWorkspaceParentCycle
 	(*SetWorkspaceParentNoMergeLayout)(nil),           // 14: agentrepl.v1.SetWorkspaceParentNoMergeLayout
-	(*v1.WorkspaceRef)(nil),                           // 15: workspace.v1.WorkspaceRef
+	(*SetWorkspaceParentColdGate)(nil),                // 15: agentrepl.v1.SetWorkspaceParentColdGate
+	(*v1.WorkspaceRef)(nil),                           // 16: workspace.v1.WorkspaceRef
 }
 var file_agentrepl_v1_endpoint_set_workspace_parent_proto_depIdxs = []int32{
-	15, // 0: agentrepl.v1.SetWorkspaceParentRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	16, // 0: agentrepl.v1.SetWorkspaceParentRequest.workspace:type_name -> workspace.v1.WorkspaceRef
 	1,  // 1: agentrepl.v1.SetWorkspaceParentRequest.child_of:type_name -> agentrepl.v1.SetWorkspaceParentChild
 	2,  // 2: agentrepl.v1.SetWorkspaceParentRequest.top_level:type_name -> agentrepl.v1.SetWorkspaceParentTopLevel
-	15, // 3: agentrepl.v1.SetWorkspaceParentChild.parent:type_name -> workspace.v1.WorkspaceRef
+	16, // 3: agentrepl.v1.SetWorkspaceParentChild.parent:type_name -> workspace.v1.WorkspaceRef
 	4,  // 4: agentrepl.v1.SetWorkspaceParentResponse.success:type_name -> agentrepl.v1.SetWorkspaceParentSuccess
 	5,  // 5: agentrepl.v1.SetWorkspaceParentResponse.error:type_name -> agentrepl.v1.SetWorkspaceParentError
 	6,  // 6: agentrepl.v1.SetWorkspaceParentError.unknown_workspace:type_name -> agentrepl.v1.SetWorkspaceParentUnknownWorkspace
@@ -1026,11 +1087,12 @@ var file_agentrepl_v1_endpoint_set_workspace_parent_proto_depIdxs = []int32{
 	12, // 12: agentrepl.v1.SetWorkspaceParentError.parent_in_other_repository:type_name -> agentrepl.v1.SetWorkspaceParentParentInOtherRepository
 	13, // 13: agentrepl.v1.SetWorkspaceParentError.cycle:type_name -> agentrepl.v1.SetWorkspaceParentCycle
 	14, // 14: agentrepl.v1.SetWorkspaceParentError.no_merge_layout:type_name -> agentrepl.v1.SetWorkspaceParentNoMergeLayout
-	15, // [15:15] is the sub-list for method output_type
-	15, // [15:15] is the sub-list for method input_type
-	15, // [15:15] is the sub-list for extension type_name
-	15, // [15:15] is the sub-list for extension extendee
-	0,  // [0:15] is the sub-list for field type_name
+	15, // 15: agentrepl.v1.SetWorkspaceParentError.cold_gate:type_name -> agentrepl.v1.SetWorkspaceParentColdGate
+	16, // [16:16] is the sub-list for method output_type
+	16, // [16:16] is the sub-list for method input_type
+	16, // [16:16] is the sub-list for extension type_name
+	16, // [16:16] is the sub-list for extension extendee
+	0,  // [0:16] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_set_workspace_parent_proto_init() }
@@ -1056,6 +1118,7 @@ func file_agentrepl_v1_endpoint_set_workspace_parent_proto_init() {
 		(*SetWorkspaceParentError_ParentInOtherRepository)(nil),
 		(*SetWorkspaceParentError_Cycle)(nil),
 		(*SetWorkspaceParentError_NoMergeLayout)(nil),
+		(*SetWorkspaceParentError_ColdGate)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -1063,7 +1126,7 @@ func file_agentrepl_v1_endpoint_set_workspace_parent_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_set_workspace_parent_proto_rawDesc), len(file_agentrepl_v1_endpoint_set_workspace_parent_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   15,
+			NumMessages:   16,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
