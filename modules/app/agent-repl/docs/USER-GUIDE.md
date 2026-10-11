@@ -85,6 +85,10 @@ These clicks jump to an entry in the feed:
   - Open a landed merge's bubble and it stays open, across a reload too; close a running merge's bubble and it stays closed, even when the merge later fails.
   - Reloading the page, restarting Emacs or restarting the daemon draws the bubble the way you left it.
   - If the daemon cannot record your choice, the failure is listed under the warning chip in the top bar, and the bubble stays the way you left it on this page.
+- **A merge never opens the expanded footer.** The bubble's tests tab lists the suites, each with passed/failed/total counts on the right.
+- **If a subagent's feed cannot be opened, the jump still scrolls to its bubble.**
+  - The failure is listed under the warning chip in the top bar.
+
 ## Detached merges
 
 - **An agent's `/merge-queue own` merges in a merge workspace, so your workspace is never held.**
@@ -103,10 +107,6 @@ These clicks jump to an entry in the feed:
   - A failed merge leaves the merge workspace open where it stopped, for you to finish.
 - **A merge workspace nobody has used for 15 calendar days is removed.**
   - The bubble's buttons then read `merge workspace removed` and do nothing.
-
-- **A merge never opens the expanded footer.** The bubble's tests tab lists the suites, each with passed/failed/total counts on the right.
-- **If a subagent's feed cannot be opened, the jump still scrolls to its bubble.**
-  - The failure is listed under the warning chip in the top bar.
 
 ## File links in prompts and responses
 
