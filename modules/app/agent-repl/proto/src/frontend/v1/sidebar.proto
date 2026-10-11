@@ -394,6 +394,12 @@ message RosterRepoSection {
     // the bar (their sessions are untouched).
     RosterRepoSectionCollapsed collapsed = 5;
   }
+  // How far the repository's primary branch stands from its upstream, drawn
+  // as the hover text over the header's label. The daemon measures it in the
+  // background (a fetch of the upstream's remote, then a count), once at
+  // startup and every five minutes after, so it may be up to that old. Always
+  // set: a repository not yet measured carries the pending arm.
+  RosterRepoDivergence divergence = 6;
 }
 
 // An expanded repository section. DELIBERATELY EMPTY: the arm is the fact.
@@ -401,6 +407,56 @@ message RosterRepoSectionExpanded {}
 
 // A collapsed repository section. DELIBERATELY EMPTY: the arm is the fact.
 message RosterRepoSectionCollapsed {}
+
+// ---- Repository divergence: the label hover's ahead/behind count ----
+
+// Where the repository's primary branch (workspace.v1.RepositoryRef's
+// repository's default branch, the one top-level merges land on) stands
+// against the remote branch it tracks. The client draws the set arm as the
+// label's hover text and derives nothing from it.
+message RosterRepoDivergence {
+  // THE ARM IS THE MEASUREMENT'S OUTCOME. Unset is malformed.
+  oneof state {
+    // No measurement has finished since this daemon started.
+    RosterRepoDivergencePending pending = 1;
+    // The branch and its upstream were counted against each other.
+    RosterRepoDivergenceCounted counted = 2;
+    // The primary branch tracks no remote branch, so there is nothing to
+    // count against. An ordinary answer, not a failure.
+    RosterRepoDivergenceNoUpstream no_upstream = 3;
+    // The last measurement could not be made; the counts it would have
+    // replaced are not shown, because they could be arbitrarily stale.
+    RosterRepoDivergenceFailed failed = 4;
+  }
+}
+
+// No measurement has finished yet. DELIBERATELY EMPTY: the arm is the fact.
+message RosterRepoDivergencePending {}
+
+// The primary branch counted against its upstream after a fresh fetch.
+message RosterRepoDivergenceCounted {
+  // The primary branch's short name, e.g. "master".
+  string branch = 1;
+  // The upstream's short name, e.g. "origin/master".
+  string upstream = 2;
+  // Commits on the primary branch that its upstream does not have.
+  uint32 ahead = 3;
+  // Commits on the upstream that the primary branch does not have.
+  uint32 behind = 4;
+}
+
+// The primary branch tracks no upstream.
+message RosterRepoDivergenceNoUpstream {
+  // The primary branch's short name, e.g. "master".
+  string branch = 1;
+}
+
+// The last measurement failed.
+message RosterRepoDivergenceFailed {
+  // What failed, in words fit for the hover (the daemon's log carries the
+  // full evidence under daemon.repodivergence.*).
+  string reason = 1;
+}
 
 // A repository's stable identity — the imported join key (and the echo
 // token CreateWorkspace takes back).
