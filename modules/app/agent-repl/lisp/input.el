@@ -37,6 +37,13 @@
 ;;                             answered, nothing to await -- the webapp
 ;;                             draws the panel or the refusal card, so
 ;;                             Emacs logs it and clears the input
+;;   success `ask_answered'    the send was a STANDING ASK's typed answer
+;;                             (a question's active question, or a
+;;                             permission denied with it as the reason);
+;;                             no turn, so it is handled like a command
+;;                             answer: logged, input cleared
+;;   error `ask_not_standing'  the ask settled before the typed answer
+;;                             reached it: refused, the text is KEPT
 ;;   error `merging'           refused: the text is KEPT so the user can
 ;;                             resubmit once the merge resolves
 ;;   transport failure         the daemon never answered: the prompt is
@@ -1499,6 +1506,13 @@ it."
      (agent-repl--info ws "elisp.input.command-answered ws=%s origin=%S arm=%S value=%S"
                        ws origin arm (plist-get success :value))
      (agent-repl--input-accepted ws raw arm from-buffer))
+    (:ask-answered
+     ;; The send answered the ask standing on the feed: no turn was
+     ;; minted, so nothing is awaited and no send posthook runs.  The
+     ;; card's re-push in the webapp is the visible effect.
+     (agent-repl--info ws "elisp.input.ask-answered ws=%s origin=%S raw-len=%d"
+                       ws origin (length raw))
+     (agent-repl--input-accepted ws raw :ask-answered from-buffer))
     (arm
      (agent-repl--error ws "elisp.input.unknown-success-arm ws=%s arm=%S" ws arm))))
 
@@ -1584,6 +1598,12 @@ A SESSION EXISTS -- the shim is up, which is exactly why the gate could
 be raised -- and it takes no prompt until the gate is answered, which
 happens in the panel and nowhere else.  So the sentence names the place
 the answer is given rather than reporting a broken session.")
+
+(defconst agent-repl--input-ask-not-standing-flash
+  "the ask was already answered; nothing was sent"
+  "The composer flash for `SubmitPromptError''s `ask_not_standing' arm.
+The send was a standing ask's typed answer and the ask settled before it
+arrived, so it reached nobody and the text stays in the composer.")
 
 (defconst agent-repl--input-no-session-flash
   "no session; the daemon is starting it"
@@ -1673,6 +1693,16 @@ arms in `agent-repl--input-deferred-held-arms' rather than refused by them."
            (agent-repl--input-flash ws "model change refused")
            (message "agent-repl: model change refused%s"
                     (if (string-empty-p detail) "" (format " -- %s" detail)))))
+        (:ask-not-standing
+         ;; The send was routed as a standing ask's TYPED ANSWER and the ask
+         ;; settled first.  The text was meant as that answer, so it was not
+         ;; delivered as a prompt instead; it is an answer about a standing
+         ;; that moved on, recorded at INFO, not queued (a re-drive would
+         ;; reach the session as a prompt the user never meant), and the
+         ;; text stays so the user decides what to do with it.
+         (agent-repl--info ws "elisp.input.refused-ask-not-standing ws=%s origin=%S arm=%S" ws origin arm)
+         (agent-repl--input-flash ws agent-repl--input-ask-not-standing-flash)
+         (message "agent-repl: %s" agent-repl--input-ask-not-standing-flash))
         (:no-session
          ;; The workspace has NO SESSION AT ALL, which is the daemon's own
          ;; to bring up.  Like the cold gate this is an answer rather than a
