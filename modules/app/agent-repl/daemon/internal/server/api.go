@@ -77,6 +77,9 @@ type Deps struct {
 	// the transcript's backfill. Only the party that spawns and supervises
 	// shims can know them, and the server must not reach into it for them.
 	SessionFacts SessionFacts
+	// SlashCommands backs ListSlashCommands: every workspace's standing
+	// slash-command catalog, as its session last stated it.
+	SlashCommands SlashCommandCatalogs
 	// Login backs the four login verbs; WatchLoginTerminal is a SERVER stream
 	// and SendLoginInput is unary.
 	Login login.Manager
@@ -420,6 +423,8 @@ func New(deps Deps) (Server, error) {
 		// without it no workspace with a session can be served a host view at
 		// all, and a daemon that cannot do that is not one to start.
 		return nil, missing("a session-facts source")
+	case deps.SlashCommands == nil:
+		return nil, missing("the slash-command catalogs")
 	}
 
 	life, cancel := context.WithCancel(context.Background())

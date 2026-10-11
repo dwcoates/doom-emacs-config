@@ -23,6 +23,7 @@ import (
 	"claude-repld/internal/classifier"
 	"claude-repld/internal/classifierupdate"
 	"claude-repld/internal/clock"
+	"claude-repld/internal/commandcatalog"
 	"claude-repld/internal/commandfile"
 	"claude-repld/internal/desktopnotify"
 	"claude-repld/internal/dlog"
@@ -613,6 +614,10 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// merge orchestrator built below.
 	mergeAsks := merge.NewAsks()
 
+	// THE SESSIONS' SLASH-COMMAND CATALOGS, as the Emacs composer completes
+	// from them. Fed by the fleet's watchers and read by ListSlashCommands.
+	slashCommands := commandcatalog.New()
+
 	fleet, err = workspace.NewFleet(workspace.FleetDeps{
 		PublishHost: relay.PublishHostWorkspace,
 		DB:          p.DB,
@@ -628,6 +633,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			Lifecycle: lifecycle,
 			Title:     titleSynth,
 			Merge:     mergeAsks,
+			Commands:  slashCommands,
 			Stalls:    stalls,
 			Clock:     clock.System{},
 		},
@@ -1109,6 +1115,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Server: server.Deps{
 			Instance:          p.Instance,
 			SessionFacts:      hostSessionFacts{fleet: fleet},
+			SlashCommands:     slashCommands,
 			DB:                p.DB,
 			Prompts:           handler,
 			Queue:             queue,

@@ -519,6 +519,10 @@ type Sinks struct {
 	Sidebar   SidebarSink
 	Holds     HoldsSink
 	Lifecycle LifecycleSink
+	// Commands keeps the workspace's standing slash-command catalog, which the
+	// Emacs composer completes from. REQUIRED: it is not a view, and the
+	// catalog has no other reader.
+	Commands CommandCatalogSink
 	// Title is the synthesized-title trigger sink. OPTIONAL: nil disables title
 	// synthesis, which is what every test that does not exercise it leaves it.
 	// Production always wires it. Its calls are non-blocking (the synthesizer
@@ -542,6 +546,14 @@ type Sinks struct {
 	// watcher waits on, for a refused watch's re-open (reopen.go). REQUIRED:
 	// production wires clock.System, and a test a clock it fires by hand.
 	Clock clock.Clock
+}
+
+// CommandCatalogSink is the slash-command catalog table, seen from the
+// watcher: every catalog the session states, whole.
+type CommandCatalogSink interface {
+	// OnCommandCatalog installs the catalog the session just stated,
+	// replacing the one that stood.
+	OnCommandCatalog(ws ids.WorkspaceID, catalog *conversationv1.SessionCommandCatalog)
 }
 
 // MergeSink is the merge queue, seen from the watcher: every permission and
