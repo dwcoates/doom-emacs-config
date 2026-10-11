@@ -28,7 +28,7 @@
  * row's `data-unit="skill"` so a skill's nested work keeps the teal card's
  * always-open, shared-cap, scrolled-not-clipped guarantees.
  */
-import { drawToolHead, drawToolName } from "./tool-head.js";
+import { drawTitledToolHead } from "./tool-head.js";
 import type {
   FeedSkill,
   FeedSkillAllowances,
@@ -76,8 +76,7 @@ export function drawFeedSkill(u: FeedSkill, _rc: RowContext): HTMLElement {
   // status as a badge beside it, so a skill card heads "Skill" exactly as a
   // Bash card heads "Bash", and the invocation sits under the head where a
   // Bash card's command line does.
-  const head = drawToolHead();
-  head.append(drawToolName(SKILL_TITLE));
+  const head = drawTitledToolHead(SKILL_TITLE);
   card.append(head);
 
   // THE INVOCATION LINE IS THE CARD'S TITLE (owner ruling, 2026-09-23): the
