@@ -242,3 +242,6 @@ sidebar's walk" and the create-landing rule above. Not yet implemented.
   branch-lineage nesting (a workspace registered from Emacs nested under the
   workspace owning the branch it was cut from) is removed, since such a
   workspace merges into the primary branch.
+- **Creation contract approved (owner, 2026-10-11):** the owner reviewed the
+  `fork_source` field and the three new error arms as landed and approved
+  them unchanged, settling the "shape chosen by the implementer" flag above.
