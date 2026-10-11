@@ -1,5 +1,5 @@
 /**
- * requests — the three ANSWER verbs the ask cards send, built in ONE place,
+ * requests — the verbs the ask cards send, built in ONE place,
  * symmetrically with the drawing side's `draw<Message>` functions.
  *
  * WHY A BUILDER PER REQUEST. Every one of these verbs is an ECHO: the row's own
@@ -12,10 +12,9 @@
  * in one file, instead of being a rule reviewers have to re-check at every
  * click handler.
  *
- * ABSENCE IS ABSENCE. An unset deny reason and an unset free-text answer are
- * left unset rather than sent as an empty string: "the user typed nothing" and
- * "the user typed the empty string" are different claims, and the schema models
- * the first as the field not being there.
+ * NOTHING TYPED TRAVELS HERE. A deny's reason and a question's typed answer
+ * are the editor's (a plain send made while the ask stands), so no builder in
+ * this file carries free text.
  */
 import { create, type MessageInitShape } from "@bufbuild/protobuf";
 import type { WorkspaceRef } from "../../../../proto/gen/ts/workspace/v1/workspace_pb";
@@ -25,9 +24,9 @@ import {
   type AnswerPermissionRequest,
 } from "../../../../proto/gen/ts/agentrepl/v1/endpoint_answer_permission_pb";
 import {
-  AnswerQuestionRequestSchema,
-  type AnswerQuestionRequest,
-} from "../../../../proto/gen/ts/agentrepl/v1/endpoint_answer_question_pb";
+  UpdateQuestionDraftRequestSchema,
+  type UpdateQuestionDraftRequest,
+} from "../../../../proto/gen/ts/agentrepl/v1/endpoint_update_question_draft_pb";
 import {
   AnswerColdGateRequestSchema,
   type AnswerColdGateRequest,
@@ -35,12 +34,11 @@ import {
 import type { AgentModel } from "../../../../proto/gen/ts/conversation/v1/api_pb";
 import type { SessionCompactScope } from "../../../../proto/gen/ts/conversation/v1/session_pb";
 
-/** Which button of the consent card was pressed. */
-export type PermissionAnswer =
-  | { kind: "allowOnce" }
-  | { kind: "allowStanding" }
-  /** The reason is absent unless the user actually typed one. */
-  | { kind: "deny"; reason?: string };
+/**
+ * Which button of the consent card was pressed. A deny carries no reason: a
+ * deny WITH a reason is typed in the editor's composer, never on the card.
+ */
+export type PermissionAnswer = { kind: "allowOnce" } | { kind: "allowStanding" } | { kind: "deny" };
 
 /**
  * Answer one consent card.
@@ -78,45 +76,49 @@ function permissionArm(
     case "allowStanding":
       return { case: "allowStanding", value: {} };
     case "deny":
-      return {
-        case: "deny",
-        value:
-          answer.reason === undefined ? {} : { reason: { text: answer.reason } },
-      };
+      return { case: "deny", value: {} };
   }
 }
 
-/** One question's answer, as the card collected it. */
-export interface QuestionAnswer {
-  /** The question's text, ECHOED verbatim — how the ask is reconstructed. */
-  questionText: string;
-  /** The chosen option labels, echoed verbatim. Empty for free text alone. */
-  chosen: readonly string[];
-  /** The free text, when the user typed any. */
-  otherText?: string;
-}
+/** One click on a standing question card, naming its question by served text. */
+export type QuestionDraftEdit =
+  /** A tab: show this question. */
+  | { kind: "show"; questionText: string }
+  /** An option: answer a single-select with it, or toggle a multi-select's tick. */
+  | { kind: "pick"; questionText: string; label: string }
+  /** A multi-select's confirm: its ticks are its answer. */
+  | { kind: "confirm"; questionText: string };
 
 /**
- * Answer a whole question batch in ONE verb.
+ * Edit a standing question card's daemon-owned draft with one click.
  *
- * The batch is one ask, so it is one submission: sending a verb per question
- * would let a batch be half-answered, which is a state neither the card nor the
- * shim has a meaning for.
+ * There is no "answer the batch" verb on this end any more: the click that
+ * answers the last question is the one the daemon delivers the batch on.
  */
-export function buildAnswerQuestionRequest(
+export function buildUpdateQuestionDraftRequest(
   workspace: WorkspaceRef,
   question: FeedId,
-  answers: readonly QuestionAnswer[],
-): AnswerQuestionRequest {
-  return create(AnswerQuestionRequestSchema, {
+  edit: QuestionDraftEdit,
+): UpdateQuestionDraftRequest {
+  return create(UpdateQuestionDraftRequestSchema, {
     workspace,
     question,
-    answers: answers.map((answer) => ({
-      questionText: answer.questionText,
-      chosen: [...answer.chosen],
-      ...(answer.otherText === undefined ? {} : { otherText: { text: answer.otherText } }),
-    })),
+    edit: questionDraftArm(edit),
   });
+}
+
+/** The request's oneof arm for EDIT, as an INIT shape (see permissionArm). */
+function questionDraftArm(
+  edit: QuestionDraftEdit,
+): MessageInitShape<typeof UpdateQuestionDraftRequestSchema>["edit"] {
+  switch (edit.kind) {
+    case "show":
+      return { case: "show", value: { questionText: edit.questionText } };
+    case "pick":
+      return { case: "pick", value: { questionText: edit.questionText, label: edit.label } };
+    case "confirm":
+      return { case: "confirm", value: { questionText: edit.questionText } };
+  }
 }
 
 /** Which remediation the cold gate's reader chose. */

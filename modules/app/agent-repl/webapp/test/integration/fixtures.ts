@@ -997,7 +997,17 @@ export const QUESTION_TWO = {
   options: ["unit", "integration"],
 } as const;
 
-export function questionRow(state: QuestionState, overrides?: Partial<RowInit>): FeedRow {
+/** A standing card's daemon-owned draft: the shown question and one draft each. */
+export interface QuestionDraftInit {
+  active?: number;
+  drafts?: { chosen?: string[]; otherText?: { text: string }; answered?: boolean }[];
+}
+
+export function questionRow(
+  state: QuestionState,
+  overrides?: Partial<RowInit>,
+  draft: QuestionDraftInit = {},
+): FeedRow {
   return feedRow(
     {
       case: "question",
@@ -1048,7 +1058,13 @@ export function questionRow(state: QuestionState, overrides?: Partial<RowInit>):
               }
             : state === "expired"
               ? { case: "expired", value: { atMs: 5_000n } }
-              : { case: "open", value: {} },
+              : {
+                  case: "open",
+                  value: {
+                    active: draft.active ?? 0,
+                    drafts: [0, 1].map((i) => draft.drafts?.[i] ?? {}),
+                  },
+                },
       },
     },
     overrides,
