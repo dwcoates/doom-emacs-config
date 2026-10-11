@@ -28,7 +28,7 @@ import {
   QUESTION_STATE_ARMS,
   QUESTION_TITLE,
   TAB_GLYPHS,
-  TYPE_IN_EDITOR_HINT,
+  optionNumeral,
   TYPED_LABEL,
 } from "../../../src/feed/asks/question.js";
 import { drawFeedTab, FEED_TAB_CLASS, FEED_TAB_STRIP_CLASS } from "../../../src/feed/tabs.js";
@@ -176,9 +176,46 @@ describe("the standing batch", () => {
     expect(el.querySelector("input, textarea, [data-question-other], [data-question-submit]")).toBeNull();
   });
 
-  it("says the typed answer is entered in the editor", () => {
+  it("draws no line saying where to type", () => {
     const el = drawFeedQuestion(open(), askHarness().rc);
-    expect(el.querySelector("[data-ask-hint]")?.textContent).toBe(TYPE_IN_EDITOR_HINT);
+    expect(el.querySelector("[data-ask-hint], .ask-hint")).toBeNull();
+  });
+
+  it("numbers each option from 1 in the served order", () => {
+    const el = drawFeedQuestion(open([item({ options: [{ label: "a" }, { label: "b" }, { label: "c" }] })]), askHarness().rc);
+    const numbers = [...el.querySelectorAll(".q-opt .q-opt-number")].map((n) => n.textContent);
+    expect(numbers).toEqual(["1.", "2.", "3."]);
+  });
+
+  it("writes an option's numeral as its number and a dot", () => {
+    expect([optionNumeral(1), optionNumeral(12)]).toEqual(["1.", "12."]);
+  });
+
+  it("draws the number before the label, outside the hook's served value", () => {
+    const el = drawFeedQuestion(open([item({ options: [{ label: "a" }] })]), askHarness().rc);
+    const option = el.querySelector('[data-question-option="a"]');
+    expect([...(option?.children ?? [])].map((c) => c.className)).toEqual(["q-opt-number", "q-opt-label"]);
+  });
+
+  it("draws the question text as inline markdown", () => {
+    const el = drawFeedQuestion(open([item({ text: "Run `make test`?" })]), askHarness().rc);
+    expect(el.querySelector(".q-text code")?.textContent).toBe("make test");
+  });
+
+  it("draws an option's label as inline markdown, keeping the served label on the hook", () => {
+    const el = drawFeedQuestion(open([item({ options: [{ label: "use `foo()`" }] })]), askHarness().rc);
+    const option = el.querySelector('[data-question-option="use `foo()`"]');
+    expect(option?.querySelector(".q-opt-label code")?.textContent).toBe("foo()");
+  });
+
+  it("draws an option's description as inline markdown", () => {
+    const el = drawFeedQuestion(open([item({ options: [{ label: "a", description: "**fast**" }] })]), askHarness().rc);
+    expect(el.querySelector(".q-opt-description strong")?.textContent).toBe("fast");
+  });
+
+  it("escapes raw HTML in a served string rather than drawing it", () => {
+    const el = drawFeedQuestion(open([item({ text: "<b>bold</b>?" })]), askHarness().rc);
+    expect([el.querySelector(".q-text b"), el.querySelector(".q-text")?.textContent]).toEqual([null, "<b>bold</b>?"]);
   });
 
   it("draws the confirm only on a multi-select", () => {
@@ -210,6 +247,11 @@ describe("the tabs", () => {
     expect([...(first?.children ?? [])].map((c) => [c.className, c.textContent])).toEqual(
       [...expected.children].map((c) => [c.className, c.textContent]),
     );
+  });
+
+  it("draws a tab's header as inline markdown", () => {
+    const el = drawFeedQuestion(open([item({ header: "`cfg`" }), item()]), askHarness().rc);
+    expect(el.querySelector('[data-question-tab="0"] .feed-group-tab-label code')?.textContent).toBe("cfg");
   });
 
   it("marks the daemon's active question as the active tab", () => {
@@ -407,6 +449,28 @@ describe("the settled card", () => {
       askHarness().rc,
     );
     expect(el.querySelector(".q-chosen")?.textContent).toBe("read, write");
+  });
+
+  it("draws each chosen label as its own inline markdown", () => {
+    const el = drawFeedQuestion(
+      question({
+        case: "answered",
+        value: { atMs: 0n, answers: [{ header: { text: "Scope" }, chosen: ["*a", "b*"] }] },
+      }),
+      askHarness().rc,
+    );
+    expect([el.querySelector(".q-chosen em"), el.querySelector(".q-chosen")?.textContent]).toEqual([null, "*a, b*"]);
+  });
+
+  it("draws the verdict's header chip as inline markdown", () => {
+    const el = drawFeedQuestion(
+      question({
+        case: "answered",
+        value: { atMs: 0n, answers: [{ header: { text: "`Scope`" }, chosen: ["read"] }] },
+      }),
+      askHarness().rc,
+    );
+    expect(el.querySelector(".q-chip code")?.textContent).toBe("Scope");
   });
 
   it("draws the free text that was given", () => {
