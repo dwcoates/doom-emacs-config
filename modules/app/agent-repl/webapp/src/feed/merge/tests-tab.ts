@@ -226,8 +226,10 @@ function setAttribute(el: HTMLElement, name: string, value: string): void {
 
 /**
  * The suite's counts on the right of its head line, "3/1/12": passed in green,
- * failed in red, the total in the row's own color. Drawn only when the daemon
- * knows them; the figures are the daemon's, never counted here.
+ * failed in red, the total in the row's own color. The red failed figure is
+ * drawn only once a test has failed, so a suite with none reads "3/12". Drawn
+ * only when the daemon knows them; the figures are the daemon's, never counted
+ * here.
  */
 export function drawFeedMergeTestCounts(counts: FeedMergeTestCounts): HTMLElement {
   const el = document.createElement("span");
@@ -235,10 +237,14 @@ export function drawFeedMergeTestCounts(counts: FeedMergeTestCounts): HTMLElemen
   const passed = document.createElement("span");
   passed.className = "is-passed";
   passed.textContent = String(counts.passed);
-  const failed = document.createElement("span");
-  failed.className = "is-failed";
-  failed.textContent = String(counts.failed);
-  el.append(passed, "/", failed, `/${String(counts.total)}`);
+  el.append(passed, "/");
+  if (counts.failed > 0) {
+    const failed = document.createElement("span");
+    failed.className = "is-failed";
+    failed.textContent = String(counts.failed);
+    el.append(failed, "/");
+  }
+  el.append(String(counts.total));
   return el;
 }
 
