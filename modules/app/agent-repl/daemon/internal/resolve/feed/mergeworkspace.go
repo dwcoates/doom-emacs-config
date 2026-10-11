@@ -7,6 +7,7 @@ import (
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/mergetab"
 )
 
 // removedSwitchLabel is a merge-workspace switch's text once the workspace it
@@ -66,26 +67,10 @@ func switchesTo(row *frontendv1.FeedRow, mergeWS ids.WorkspaceID) bool {
 	if target := row.GetActivity().GetMerge().GetHead().GetWorkspaceSwitch().GetAvailable().GetTarget(); target != nil {
 		return target.GetId() == string(mergeWS)
 	}
-	if sw := tabSwitch(row.GetMergeTab()); sw != nil {
+	if sw := mergetab.Switch(row.GetMergeTab()); sw != nil {
 		return sw.GetAvailable().GetTarget().GetId() == string(mergeWS)
 	}
 	return false
-}
-
-// tabSwitch answers an agentic merge tab's switch, nil for any other tab or
-// for a tab that carries none.
-func tabSwitch(tab *frontendv1.FeedMergeTab) *frontendv1.FeedMergeTabWorkspaceSwitch {
-	switch arm := tab.GetKind().(type) {
-	case *frontendv1.FeedMergeTab_PrePrompt:
-		return arm.PrePrompt.GetWorkspaceSwitch()
-	case *frontendv1.FeedMergeTab_Conflicts:
-		return arm.Conflicts.GetWorkspaceSwitch()
-	case *frontendv1.FeedMergeTab_Fixes:
-		return arm.Fixes.GetWorkspaceSwitch()
-	case *frontendv1.FeedMergeTab_PostPrompt:
-		return arm.PostPrompt.GetWorkspaceSwitch()
-	}
-	return nil
 }
 
 // markSwitchRemoved turns ROW's switch to its removed arm.
@@ -99,7 +84,7 @@ func markSwitchRemoved(row *frontendv1.FeedRow, removedAtMS int64) {
 		}
 		return
 	}
-	if sw := tabSwitch(row.GetMergeTab()); sw != nil {
+	if sw := mergetab.Switch(row.GetMergeTab()); sw != nil {
 		sw.Label = &frontendv1.FeedMergeTabWorkspaceSwitchLabel{Text: removedSwitchLabel}
 		sw.Availability = &frontendv1.FeedMergeTabWorkspaceSwitch_Removed{
 			Removed: &frontendv1.FeedMergeTabWorkspaceSwitchRemoved{RemovedAtMs: removedAtMS},
