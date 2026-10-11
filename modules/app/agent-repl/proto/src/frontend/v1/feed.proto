@@ -2709,9 +2709,12 @@ message FeedWorktreeBranch {
 // in that workspace, and its own session does the conflict resolution and the
 // fixing, so those turns ALSO appear in the workspace's main feed as ordinary
 // turns. A DETACHED merge runs in a merge workspace forked from the
-// requester: its agentic turns are that workspace's, the requester's feed
-// carries only this bubble (and, at the end, the handback marker), and the
-// head's `workspace_switch` takes the user to the merge workspace.
+// requester, and its bubble has TWO PLACEMENTS, each a feed of its own: the
+// merge workspace's feed draws it exactly as an in-place merge, and the
+// requester's feed draws it with the head's `workspace_switch` and, on each
+// AGENTIC tab, a switch in place of that tab's rows, which are never streamed
+// across workspaces. The requester's feed also carries the handback marker
+// once the merge ends.
 message FeedMerge {
   FeedMergeHead head = 1;
   // THE ARM IS THE STATE of the merge as a whole — the head's badge. WHAT it
@@ -2987,6 +2990,13 @@ message FeedMergeTabPrePrompt {
     FeedMergeTabLive live = 1;
     FeedMergeTabSettled settled = 2;
   }
+  // PRESENT only on the requesting workspace's placement of a DETACHED
+  // merge's bubble (FeedMergeHead.workspace_switch is set there too): this
+  // tab's agentic work runs in the merge workspace, so its rows are NOT
+  // streamed here and the tab draws this switch in their place. UNSET on an
+  // in-place merge and on the merge workspace's own bubble, where the rows
+  // are parented to this tab as usual.
+  optional FeedMergeTabWorkspaceSwitch workspace_switch = 3;
 }
 
 // RESOLVED: the branch being rebased onto the target's tip, in the
@@ -3032,6 +3042,13 @@ message FeedMergeTabConflicts {
   // Tag 2 (`parked`) is RETIRED: nothing parks.
   reserved 2;
   reserved "parked";
+  // PRESENT only on the requesting workspace's placement of a DETACHED
+  // merge's bubble (FeedMergeHead.workspace_switch is set there too): this
+  // tab's agentic work runs in the merge workspace, so its rows are NOT
+  // streamed here and the tab draws this switch in their place. UNSET on an
+  // in-place merge and on the merge workspace's own bubble, where the rows
+  // are parented to this tab as usual.
+  optional FeedMergeTabWorkspaceSwitch workspace_switch = 5;
 }
 
 // RESOLVED: the programmatic test run — suites, progress, and COLORED
@@ -3142,6 +3159,13 @@ message FeedMergeTabFixes {
   reserved "parked";
   // Which attempt this is, drawn "attempt 2/3".
   FeedMergeFixAttempt attempt = 4;
+  // PRESENT only on the requesting workspace's placement of a DETACHED
+  // merge's bubble (FeedMergeHead.workspace_switch is set there too): this
+  // tab's agentic work runs in the merge workspace, so its rows are NOT
+  // streamed here and the tab draws this switch in their place. UNSET on an
+  // in-place merge and on the merge workspace's own bubble, where the rows
+  // are parented to this tab as usual.
+  optional FeedMergeTabWorkspaceSwitch workspace_switch = 6;
 }
 // A fixing attempt's place among the attempts allowed.
 message FeedMergeFixAttempt {
@@ -3206,6 +3230,51 @@ message FeedMergeTabPostPrompt {
     FeedMergeTabLive live = 1;
     FeedMergeTabSettled settled = 2;
   }
+  // PRESENT only on the requesting workspace's placement of a DETACHED
+  // merge's bubble (FeedMergeHead.workspace_switch is set there too): this
+  // tab's agentic work runs in the merge workspace, so its rows are NOT
+  // streamed here and the tab draws this switch in their place. UNSET on an
+  // in-place merge and on the merge workspace's own bubble, where the rows
+  // are parented to this tab as usual.
+  optional FeedMergeTabWorkspaceSwitch workspace_switch = 3;
+}
+
+// An agentic tab's switch to the merge workspace its work runs in, drawn in
+// the tab's content area in place of the rows the requesting workspace's
+// placement does not stream. Shared by every agentic tab kind; it is the
+// tab's own element, distinct from the bubble head's.
+message FeedMergeTabWorkspaceSwitch {
+  // The button's text, daemon-composed and drawn verbatim ("resolving
+  // conflicts in the merge workspace", or, once removed, "merge workspace
+  // removed").
+  FeedMergeTabWorkspaceSwitchLabel label = 1;
+  // Whether there is a workspace to switch to. The two are exclusive: a
+  // removed workspace has no ref a switch could name.
+  oneof availability {
+    // The workspace exists, open or closed.
+    FeedMergeTabWorkspaceSwitchAvailable available = 2;
+    // The daemon removed the workspace; the button is drawn disabled.
+    FeedMergeTabWorkspaceSwitchRemoved removed = 3;
+  }
+}
+
+// The tab switch's label element.
+message FeedMergeTabWorkspaceSwitchLabel {
+  // Drawn verbatim.
+  string text = 1;
+}
+
+// The merge workspace exists. Clicking calls agentrepl.v1.SelectWorkspace
+// with `target`, which revives a closed workspace.
+message FeedMergeTabWorkspaceSwitchAvailable {
+  // The merge workspace, echoed verbatim on the switch.
+  workspace.v1.WorkspaceRef target = 1;
+}
+
+// The merge workspace was removed after 15 calendar days without activity.
+message FeedMergeTabWorkspaceSwitchRemoved {
+  // When the daemon removed it, epoch milliseconds.
+  int64 removed_at_ms = 1;
 }
 
 // The repo queue snapshot the queue tab draws: who is ahead, this
