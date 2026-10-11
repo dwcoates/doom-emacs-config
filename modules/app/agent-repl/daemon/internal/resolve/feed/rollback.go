@@ -84,7 +84,7 @@ func (r *resolver) rollbackPrompts(s *wsState) []rollbackPrompt {
 		return nil
 	}
 	var out []rollbackPrompt
-	for _, id := range f.order[boundIndex(f, f.order)+1:] {
+	for _, id := range f.order[cutIndex(f, f.order)+1:] {
 		row := f.rows[id]
 		if row.GetUserPrompt() == nil || f.rank[id].plane.inheritedPast() {
 			continue
