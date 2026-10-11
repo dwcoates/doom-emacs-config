@@ -2,8 +2,8 @@ package mergetab
 
 import (
 	"os"
-	"regexp"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
