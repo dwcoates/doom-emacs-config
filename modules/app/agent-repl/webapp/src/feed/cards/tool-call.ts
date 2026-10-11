@@ -25,6 +25,7 @@
  * computed the other way round: there is no client threshold on quietness and
  * no ticking clock on a settled call.
  */
+import { drawToolHead, drawToolName } from "./tool-head.js";
 import { createControl } from "../../control.js";
 import {
   type FeedCodeSpan,
@@ -113,8 +114,7 @@ export function drawFeedSimpleToolCall(u: FeedSimpleToolCall, rc: RowContext): H
   card.className = "tool-card tool-fold";
   card.setAttribute("data-state", outcome.case);
 
-  const head = document.createElement("div");
-  head.className = "tool-head";
+  const head = drawToolHead();
   head.appendChild(drawFeedToolCallName(requireMessage(u.name, `${path}.name`), `${path}.name`));
   card.appendChild(head);
 
@@ -172,10 +172,7 @@ export function drawFeedToolCallName(u: FeedToolCallName, path: string): HTMLEle
     operation: "feed.cards.tool-call.name",
     context: { path },
   });
-  const name = document.createElement("span");
-  name.className = "tool-name";
-  name.textContent = u.text;
-  return name;
+  return drawToolName(u.text);
 }
 
 /**

@@ -39,6 +39,8 @@
  * row's own concern — so the instant is stamped on the element and carried
  * across re-pushes, which keeps a growing wait from restarting every push.
  */
+import { drawToolHead, drawToolName } from "../cards/tool-head.js";
+import { drawAskHint } from "./hint.js";
 import { createControl, type Control } from "../../control.js";
 import { formatTickedAge } from "../../duration.js";
 import { log } from "../../log.js";
@@ -117,8 +119,7 @@ export function drawFeedPermission(u: FeedPermission, rc: RowContext): HTMLEleme
   const card = document.createElement("div");
   card.setAttribute("data-state", state.case);
 
-  const head = document.createElement("div");
-  head.className = "tool-head perm-head";
+  const head = drawToolHead("perm-head");
   head.append(
     drawFeedPermissionHeadline(requireMessage(u.headline, `${PATH}.headline`), `${PATH}.headline`),
   );
@@ -142,7 +143,7 @@ export function drawFeedPermission(u: FeedPermission, rc: RowContext): HTMLEleme
       card.className = "tool-card ask-card permission pending";
       head.append(waitingClock(card, rc));
       card.append(drawOpenActions(u, rc));
-      card.append(drawDenyHint());
+      card.append(drawAskHint(DENY_IN_EDITOR_HINT));
       return card;
     case "answered": {
       card.className = "tool-card ask-card permission resolved";
@@ -171,10 +172,7 @@ export function drawFeedPermissionHeadline(
     operation: "feed.asks.permission.headline",
     context: { path },
   });
-  const el = document.createElement("span");
-  el.className = "tool-name perm-headline";
-  el.textContent = u.text;
-  return el;
+  return drawToolName(u.text, "perm-headline");
 }
 
 /** The qualifying subtitle, verbatim. */
@@ -336,14 +334,6 @@ function drawOpenActions(u: FeedPermission, rc: RowContext): HTMLElement {
   return actions;
 }
 
-/** Where a deny's reason is typed, said under the buttons. */
-function drawDenyHint(): HTMLElement {
-  const hint = document.createElement("div");
-  hint.className = "ask-hint";
-  hint.setAttribute("data-ask-hint", "");
-  hint.textContent = DENY_IN_EDITOR_HINT;
-  return hint;
-}
 
 /** Send the answer, and draw a refusal at the buttons if it was refused. */
 async function answer(
