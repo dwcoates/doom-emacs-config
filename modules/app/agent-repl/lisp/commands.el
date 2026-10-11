@@ -1050,6 +1050,11 @@ afterwards is a logging defect."
 `M-0\=' is left to Doom (`+workspace/switch-to-final\='), which is the one
 numeral whose meaning does not need a slot index to be right."))
 
+(defun agent-repl--last-tab-slot ()
+  "The 1-based slot of the LAST tab on the drawn bar, never below 1.
+An empty bar still answers 1, so the switch reports its own no-tabs miss."
+  (max 1 (length (agent-repl--drawn-tab-names))))
+
 (defmacro agent-repl--define-switch-numerals ()
   "Define `agent-repl-switch-to-workspace-1' .. `-9'.
 
@@ -1073,7 +1078,7 @@ exact slots and report a miss."
        (interactive)
        (agent-repl-switch-to-workspace
         ,(if (= n agent-repl-switch-numeral-count)
-             `(max 1 (min ,n (length (agent-repl--drawn-tab-names))))
+             `(min ,n (agent-repl--last-tab-slot))
            n))))))
 
 (agent-repl--define-switch-numerals)
