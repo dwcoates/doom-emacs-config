@@ -214,3 +214,26 @@ sidebar's walk" and the create-landing rule above. Not yet implemented.
   startup bring-up order read this list; `agent-repl-roster-walk` and
   `sidebar.TabOrder()` stop deriving tab order from the groupings. Collapsed
   and hidden workspaces behave exactly as today (no number, no stop).
+
+### MoveWorkspace replaces SwapWorkspacePlaces (2026-10-11)
+
+- **What:** `agentrepl.v1.MoveWorkspace` (`endpoint_move_workspace.proto`)
+  replaces `SwapWorkspacePlaces` and its file, including the `not_siblings`
+  arm, as agreed.
+- **Why:** `SPC TAB p` moves the current workspace onto the pressed tab;
+  any two workspaces can move.
+
+### Creation contract (2026-10-11)
+
+- **What:** `CreateWorkspaceRequest.fork_source` (`CreateWorkspaceForkSource`)
+  for a top-level fork; three new error arms (`base_ref_off_primary_branch`,
+  `unknown_fork_source`, `fork_source_has_no_conversation`); comments on
+  `parent`, `base_ref`, `priority` and the priority files restated for the
+  rules (a child is cut from its parent's tip and inherits its priority; a base
+  ref beside a parent is InvalidArgument; landing is second-to-last within the
+  priority).
+- **Shape chosen by the implementer, not sketched to the owner:** the owner
+  agreed the description and asked to proceed; the field and arm names above
+  are the implementer's, kept additive so `parent.fork` (the child fork) is
+  untouched. Flagged in the session report for the owner to revisit.
+- **Sweep:** `SwapWorkspacePlaces*` removed; nothing else obviated.
