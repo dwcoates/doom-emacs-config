@@ -120,6 +120,19 @@ func (q *queue) joinLocked(ctx context.Context, d *delivery, sub Submission, run
 		q.recordWaiting(ctx, sub, "the prompt's hold could not be read, so it waits for the running turn to end", log)
 		return
 	}
+	// A SHIM CALL IN FLIGHT DEFERS THE JOIN, it does not refuse it (call.go):
+	// one call at a time keeps the join off the shim until the call settles,
+	// and the call (a StartTurn above all) is often the very one opening the
+	// turn the prompt joins. Recorded waiting here, the prompt would wait out
+	// a turn it was judged to join, because its verdict is never taken again
+	// (integration TestTheOwnersWorkedExampleOfTheHeldQueue under load,
+	// 2026-10-11). The call's settle takes the join again (redrive).
+	if q.deferToCall(d, log, "join") {
+		q.mu.Lock()
+		d.state.deferredJoins = append(d.state.deferredJoins, deferredJoin{sub: sub, running: running})
+		q.mu.Unlock()
+		return
+	}
 	if reason, blocked := q.joinBlocked(sub.WS, held, running); blocked {
 		log.Info(opJoin, "the prompt cannot join the running turn; it waits for it to end", dlog.Context{"why": reason})
 		q.recordWaiting(ctx, sub, reason, log)
@@ -183,13 +196,9 @@ func (q *queue) joinLocked(ctx context.Context, d *delivery, sub Submission, run
 // joinBlocked answers why HELD cannot join RUNNING now, if something keeps
 // it: the running turn ended before the prompt was sent (it then waits for the
 // pop, in order), another prompt already joins it, the workspace drains for a
-// bounce, or an edit withholds the prompt.
+// bounce, or an edit withholds the prompt. A shim call in flight is not among
+// them: it defers the join to its settle (joinLocked).
 func (q *queue) joinBlocked(ws ids.WorkspaceID, held wsm.HeldPrompt, running ids.TurnID) (string, bool) {
-	// ONE SHIM CALL AT A TIME (call.go): a delivery in flight is ahead of
-	// the join, and its settle may leave no turn to join.
-	if call, ok := q.standingCall(ws); ok {
-		return "a delivery to the shim (" + call.what + ") is in flight, so the prompt waits for the running turn to end", true
-	}
 	if !q.isRunning(ws, running) {
 		return "the turn it was to join ended before it was sent, so it waits its turn", true
 	}
