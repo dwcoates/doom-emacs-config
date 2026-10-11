@@ -150,6 +150,17 @@ func (r *resolver) stepPage(ws ids.WorkspaceID, feed feedid.Feed, reader ReaderI
 	if gap, ok := r.planGap(s, f, durable, end, bound, found); ok && !bounded && !step.noSource {
 		return nil, nil, &gap, nil
 	}
+	// AN OPENING STARTS AT THE NEWEST CUT (see `deliverable`): a compaction's
+	// divider is where a fresh reader begins, and the rows above it are the
+	// walk's to page back to, so the page claims more whenever any exist.
+	if step.open {
+		if at := cutIndex(f, durable[:end]); at >= 0 && (!found || at > start) {
+			log.Debug("daemon.feed.open_at_cut",
+				"an opening was served from the feed's newest cut; the rows above it are left to the walk",
+				dlog.Context{"feed": f.key, "reader": string(reader), "row": durable[at], "above": at, "older": older})
+			return r.servePage(s, f, w, reader, durable, at, end, at > 0 || older, true), r.openToken(ws, f, true), nil, nil
+		}
+	}
 	if !found {
 		if loadable {
 			return nil, nil, &plan, nil
@@ -277,30 +288,37 @@ func (r *resolver) CloseReader(ws ids.WorkspaceID, reader ReaderID) {
 		"a reader's page walk was dropped", dlog.Context{"reader": string(reader), "had_walk": had})
 }
 
-// THE FEED BEGINS AT THE NEWEST SEPARATION.
+// THE FEED OPENS AT ITS NEWEST CUT, AND ITS HISTORY ENDS AT ITS NEWEST CLEAR.
 //
 // A compaction or a clear is the session saying that what came before it is no
-// longer the conversation: after a compaction the surviving account IS the
-// summary the divider carries, and after a clear there is no surviving account
-// at all. Delivering the rows above such a divider offers a reader a
-// conversation the agent no longer has — and, with two compactions in a row,
-// draws the older divider and its now-superseded summary above the newer one.
+// longer the conversation. The two differ in what a reader may still see:
+//
+//   - A CLEAR ENDS THE FEED'S HISTORY. Nothing survived it, so the rows above
+//     the newest `cleared` divider are never served in a page, never walked
+//     back to, and never pushed. That is the DELIVERY bound this function
+//     applies.
+//   - A COMPACTION ONLY MOVES WHERE THE FEED OPENS (owner ruling, 2026-10-10).
+//     A fresh opening starts at the newest `compacted` divider and shows
+//     nothing above it, but the page claims more, so a reader can page back
+//     through what happened before the compaction, down to the newest clear.
+//     The rows above it are still kept off the live push (pushWithheldByBound):
+//     they reach a reader only through the walk.
 //
 // So the bound is a DELIVERY bound and nothing more. No row is retired, no
 // feedid is minted twice, and the store's book keeps every pointer it had: the
-// rows above the newest separation are simply not served in a page and not
-// walked back to. Moving the bound is therefore always safe — a separation
-// drawn later just makes the delivered order shorter.
+// rows above the newest clear are simply not served in a page and not walked
+// back to. Moving the bound is therefore always safe — a clear drawn later
+// just makes the delivered order shorter.
 //
-// WHICH SEPARATIONS BOUND. Only the two that cut context: `cleared` and
+// WHICH SEPARATIONS COUNT. Only the two that cut context: `cleared` and
 // `compacted`. A `compaction_failed` divider cut NOTHING — that is the whole
 // of what it says — and the worktree arms change no context at all, so neither
-// may hide the conversation behind it.
+// may hide the conversation behind it nor move where the feed opens.
 //
-// It is computed from the order rather than remembered as a pointer because a
-// history replay and the live plane draw into the same feed by different
-// routes: the NEWEST bounding separation is a fact about the row order, and
-// reading it off the order cannot disagree with the order.
+// Both are computed from the order rather than remembered as a pointer because
+// a history replay and the live plane draw into the same feed by different
+// routes: the NEWEST cut is a fact about the row order, and reading it off the
+// order cannot disagree with the order.
 //
 // WHAT THE BOUND HIDES IS CONVERSATION ORDER, NOT ARRIVAL. A cut can arrive
 // on the live plane after a reconnect replayed the conversation that FOLLOWED
@@ -309,7 +327,7 @@ func (r *resolver) CloseReader(ws ids.WorkspaceID, reader ReaderID) {
 // the cut whatever their arrival. `boundHides` states the rule.
 func (r *resolver) deliverable(s *wsState, f *feedState, action string) ([]string, bool) {
 	durable := durableOrder(f)
-	at := boundIndex(f, durable)
+	at := historyEndIndex(f, durable)
 	if at < 0 {
 		return durable, false
 	}
@@ -325,7 +343,7 @@ func (r *resolver) deliverable(s *wsState, f *feedState, action string) ([]strin
 	}
 	if withheld > 0 {
 		r.logger(s.id).Info("daemon.feed.bound_at_separation",
-			"the feed's delivery begins at its newest separation; the rows before it were not served",
+			"the feed's delivery begins at its newest clear; the rows before it were not served",
 			dlog.Context{
 				"feed": f.key, "action": action, "row": durable[at],
 				"withheld": withheld, "delivered": len(delivered),
@@ -354,28 +372,43 @@ func boundHides(row, bound rowRank) bool {
 	return row.before(bound)
 }
 
-// boundIndex is the index in ORDER of the newest separation delivery begins
-// at, or -1 when this feed has none.
-func boundIndex(f *feedState, order []string) int {
+// cutIndex is the index in ORDER of the newest separation that cut context (a
+// clear or a compaction), or -1 when ORDER has none: where an opening starts,
+// and the rows above which the live push withholds.
+func cutIndex(f *feedState, order []string) int {
+	return newestIndex(f, order, cutsContext)
+}
+
+// historyEndIndex is the index in ORDER of the newest clear, or -1 when ORDER
+// has none: the delivery bound, above which nothing is served or walked to.
+func historyEndIndex(f *feedState, order []string) int {
+	return newestIndex(f, order, endsHistory)
+}
+
+// newestIndex is the index in ORDER of the newest row IS reports, or -1.
+func newestIndex(f *feedState, order []string, is func(*frontendv1.FeedRow) bool) int {
 	for i := len(order) - 1; i >= 0; i-- {
-		if boundsDelivery(f.rows[order[i]]) {
+		if is(f.rows[order[i]]) {
 			return i
 		}
 	}
 	return -1
 }
 
-// boundsDelivery reports whether a row is a separation that CUT CONTEXT.
-func boundsDelivery(row *frontendv1.FeedRow) bool {
-	separation := row.GetSeparation()
-	if separation == nil {
-		return false
-	}
-	switch separation.GetKind().(type) {
+// cutsContext reports whether a row is a separation that CUT CONTEXT.
+func cutsContext(row *frontendv1.FeedRow) bool {
+	switch row.GetSeparation().GetKind().(type) {
 	case *frontendv1.FeedSessionSeparation_Cleared, *frontendv1.FeedSessionSeparation_Compacted:
 		return true
 	}
 	return false
+}
+
+// endsHistory reports whether a row is a separation the feed's history ends
+// at: a clear, which nothing survived.
+func endsHistory(row *frontendv1.FeedRow) bool {
+	_, cleared := row.GetSeparation().GetKind().(*frontendv1.FeedSessionSeparation_Cleared)
+	return cleared
 }
 
 // durableOrder is the feed's row order with the non-durable rows removed. A
