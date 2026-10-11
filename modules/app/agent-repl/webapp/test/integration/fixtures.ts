@@ -687,6 +687,10 @@ export const subagentHandbackRow = (overrides?: Partial<RowInit>): FeedRow =>
     overrides,
   );
 
+/** A detached merge's hand-back badge (`FeedRow.merge_handback`). */
+export const mergeHandbackRow = (overrides?: Partial<RowInit>): FeedRow =>
+  feedRow({ case: "mergeHandback", value: { label: { text: "merge of fix-flaky landed" } } }, overrides);
+
 /**
  * A REMOVAL — `FeedRow.removed`, the DUAL of an upsert on the same tail: the
  * daemon retired the row this one keys, so the client drops it rather than

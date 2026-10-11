@@ -4,6 +4,7 @@ import { create } from "@bufbuild/protobuf";
 import {
   FeedMergeSchema,
   FeedMergeErrorSchema,
+  FeedMergeWorkspaceSwitchSchema,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { MalformedView } from "../../../src/rpc/malformed.js";
 import { drawFeedMerge, drawFeedMergeGlyph } from "../../../src/feed/merge/merge.js";
@@ -206,5 +207,32 @@ describe("drawFeedMerge: a settled head's clocks", () => {
     const h = harness({ ticker });
     drawFeedMerge(mergeHead({ case: "failed", endedAtMs: 12_000n, summary: "tests never passed" }), rowContext(h.ctx, mergeRow("m1")));
     expect(ticker.live()).toBe(0);
+  });
+});
+
+describe("drawFeedMerge: a detached merge's switch", () => {
+  it("draws the switch to the merge workspace when the head carries one", () => {
+    const msg = mergeHead({ case: "update" });
+    msg.head!.workspaceSwitch = create(FeedMergeWorkspaceSwitchSchema, {
+      label: { text: "open merge workspace" },
+      availability: { case: "available", value: { target: { id: "ws-merge", dir: "/w/merge" } } },
+    });
+    const el = draw(msg);
+    expect(el.querySelector(".merge-workspace-switch-head .merge-workspace-switch-button")?.textContent).toBe(
+      "open merge workspace",
+    );
+  });
+
+  it("keeps the switch on a settled merge", () => {
+    const msg = mergeHead({ case: "success", endedAtMs: 61_000n, commit: "a1b2c3d" });
+    msg.head!.workspaceSwitch = create(FeedMergeWorkspaceSwitchSchema, {
+      label: { text: "open merge workspace" },
+      availability: { case: "available", value: { target: { id: "ws-merge", dir: "/w/merge" } } },
+    });
+    expect(draw(msg).querySelector(".merge-workspace-switch-head")).not.toBeNull();
+  });
+
+  it("draws no switch for an in-place merge", () => {
+    expect(draw(mergeHead({ case: "update" })).querySelector(".merge-workspace-switch")).toBeNull();
   });
 });

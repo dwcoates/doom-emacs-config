@@ -555,7 +555,7 @@
    They are drawn here to the native bezel's measured geometry and colors
    (test/webkit/control.webkit.test.ts holds the geometry to a real button's):
    the same box, a rounded fill, a hairline ring and a soft drop. */
-:where(.perm-actions ar-button, .outcome-marker-actions ar-button, ar-button.composer-send, ar-button.command-refused-support) {
+:where(.perm-actions ar-button, .outcome-marker-actions ar-button, ar-button.composer-send, ar-button.command-refused-support, ar-button.merge-workspace-switch-button) {
   min-height: 15px;
   padding: 1px 8px 2px 8px;
   border: 1px solid transparent;
@@ -566,15 +566,15 @@
   background-color: #ffffff;
   box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.14), inset 0 -0.5px 0 rgba(0, 0, 0, 0.18);
 }
-:where(.perm-actions ar-button, .outcome-marker-actions ar-button, ar-button.composer-send, ar-button.command-refused-support)[aria-disabled="true"] {
+:where(.perm-actions ar-button, .outcome-marker-actions ar-button, ar-button.composer-send, ar-button.command-refused-support, ar-button.merge-workspace-switch-button)[aria-disabled="true"] {
   box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.08), inset 0 -0.5px 0 rgba(0, 0, 0, 0.1);
 }
 @media (prefers-color-scheme: dark) {
-  :where(.perm-actions ar-button, .outcome-marker-actions ar-button, ar-button.composer-send, ar-button.command-refused-support) {
+  :where(.perm-actions ar-button, .outcome-marker-actions ar-button, ar-button.composer-send, ar-button.command-refused-support, ar-button.merge-workspace-switch-button) {
     background-color: rgb(86, 86, 86);
     box-shadow: inset 0 0.5px 0 rgba(255, 255, 255, 0.09), inset 0 0 0 0.5px rgba(0, 0, 0, 0.25);
   }
-  :where(.perm-actions ar-button, .outcome-marker-actions ar-button, ar-button.composer-send, ar-button.command-refused-support)[aria-disabled="true"] {
+  :where(.perm-actions ar-button, .outcome-marker-actions ar-button, ar-button.composer-send, ar-button.command-refused-support, ar-button.merge-workspace-switch-button)[aria-disabled="true"] {
     background-color: rgb(58, 58, 58);
   }
 }
@@ -2153,6 +2153,11 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
 /* A subagent's hand-back marker: the plain pill, quiet, since the report it
    marks is drawn in the subagent's own card (owner ruling, 2026-09-27). */
 .badge.subagent-handback-badge { color: var(--muted); }
+/* A detached merge's hand-back marker: the same quiet pill, led by the merge
+   glyph so it reads as the merge's (the confirmed mock, 2026-10-11). The
+   merge itself is read in its bubble. */
+.badge.merge-handback-badge { color: var(--muted); }
+.badge.merge-handback-badge::before { content: "⇄ "; }
 /* An undelivered subagent result's reason: one quiet line under the report. */
 .subagent-result-reason { color: var(--muted); }
 .badge.run { color: var(--thinking); display: inline-flex; align-items: center; gap: 0.3rem; }
@@ -2891,7 +2896,8 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
    column as a separator rather than reading as a badge. */
 .result,
 .system-note,
-.subagent-handback-badge {
+.subagent-handback-badge,
+.merge-handback-badge {
   width: fit-content;
   max-width: var(--agent-bubble-cap);
   margin-left: calc((100% - var(--agent-bubble-cap)) / 2);
@@ -5527,7 +5533,9 @@ ar-button.outcome-marker-pill {
 #ws-sidebar .ws[data-blink="steady"] .sb-attn { opacity: 1; }
 
 /* The priority badge: the resolver's own label, drawn verbatim, in the quiet
-   pill treatment the rail already uses for its counts. */
+   pill treatment the rail already uses for its counts. A merge workspace's
+   marker ("merge → master") wears the same pill. */
+#ws-sidebar .sb-merge-workspace,
 #ws-sidebar .sb-prio {
   flex: 0 0 auto;
   font-size: 0.62rem;
@@ -7173,6 +7181,13 @@ ar-button.outcome-marker-pill {
 .merge-badge.is-succeeded { color: var(--ok); }
 .merge-badge.is-failed { color: var(--err); }
 .merge-badge.is-abandoned { color: var(--muted); }
+/* THE SWITCH TO A DETACHED MERGE'S MERGE WORKSPACE (workspace-switch.ts): a
+   prominent button at the head line's right end, there for the bubble's whole
+   life, and in an agentic tab's content in place of the rows the requester's
+   copy never streams. Disabled once the workspace was removed. */
+.merge-workspace-switch-head { order: 1; margin-left: auto; flex: 0 0 auto; }
+.merge-workspace-switch-tab { display: block; padding: 0.3rem 0; }
+.merge-workspace-switch-refusal { color: var(--err); font-size: 0.85em; }
 /* BREATHING, NOT BLINKING: a live thing should read as alive at a glance
    without pulling the eye off whatever the reader is actually reading. */
 @keyframes merge-breathe {
