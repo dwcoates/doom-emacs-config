@@ -1171,3 +1171,51 @@ func TestTheRosterRecordsEachPublishedStatusArmChange(t *testing.T) {
 		})
 	}
 }
+
+func TestAMergeWorkspacesRowSaysWhereItLands(t *testing.T) {
+	// Arrange: a merge workspace forked from w1, landing on master.
+	r, _ := newResolver(t)
+	merging := workspace("w2", "one-merge")
+	merging.ParentBranch = "master"
+	merging.MergeOf = &wsm.MergeOrigin{Requester: "w1", Request: "request-1"}
+
+	// Act
+	r.SetRegistry(registry(merging))
+
+	// Assert
+	if got := onlyRow(t, r).GetMergeWorkspace().GetLabel().GetText(); got != "merge → master" {
+		t.Fatalf("marker = %q, want it to say the merge lands on master", got)
+	}
+}
+
+func TestAnOrdinaryRowWearsNoMergeWorkspaceMarker(t *testing.T) {
+	// Arrange
+	r, _ := newResolver(t)
+
+	// Act
+	r.SetRegistry(registry(workspace("w1", "one")))
+
+	// Assert
+	if marker := onlyRow(t, r).GetMergeWorkspace(); marker != nil {
+		t.Fatalf("marker = %+v, want none", marker)
+	}
+}
+
+func TestAMergeWorkspaceNestsUnderTheWorkspaceItWasForkedFrom(t *testing.T) {
+	// Arrange
+	r, _ := newResolver(t)
+	requester := workspace("w1", "one")
+	merging := workspace("w2", "one-merge")
+	parent := requester.ID
+	merging.Parent = &parent
+	merging.MergeOf = &wsm.MergeOrigin{Requester: requester.ID, Request: "request-1"}
+
+	// Act
+	r.SetRegistry(registry(requester, merging))
+
+	// Assert
+	rows := repoRows(t, latest(t, r))
+	if len(rows) != 1 || len(rows[0].GetChildren()) != 1 || rows[0].GetChildren()[0].GetName().GetText() != "one-merge" {
+		t.Fatalf("rows = %v, want the merge workspace nested under its requester", rowNames(rows))
+	}
+}
