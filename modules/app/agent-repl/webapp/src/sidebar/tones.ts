@@ -91,7 +91,10 @@ export const GLYPH_CHARS: Readonly<Record<string, string>> = Object.freeze({
   // ruling, 2026-10-08): an hourglass, so it reads as waiting, not running.
   await: "⧗",
   recycle: "⟳",
-  failed: "✕",
+  // THE ONE FAILURE MARK (owner ruling, 2026-10-11): a failed merge and a
+  // one-shot that ended without a live merge draw the same grey cross the
+  // Emacs tab bar does, with the emoji presentation selector.
+  failed: "\u2716\uFE0F",
   // A LANDED MERGE DRAWS NOTHING (owner request, 2026-10-08: no green check in
   // the rail). The vocabulary still names its glyph `check`, which other
   // surfaces may draw; here the name maps to no character, so the mark's box
@@ -133,6 +136,22 @@ export function rosterArmMark(arm: string): RosterArmMark {
   }
   const glyph = glyphName(arm as RosterStatusCase);
   return { toneClass: tone, glyph, char: GLYPH_CHARS[glyph] ?? "" };
+}
+
+/**
+ * The mark for a row standing on ARM whose one-shot mark (`RosterRowOneShot`)
+ * is ONE_SHOT_FAILED.
+ *
+ * A failed one-shot draws the failure mark in place of the arm's own, on the
+ * arm's own tone; an open permission or question gate outranks it, so the
+ * gate's emoji stands while the gate does. An armed one-shot draws nothing of
+ * its own here: the rail never draws the one-shot mark itself (owner ruling,
+ * 2026-10-11).
+ */
+export function rosterRowMark(arm: string, oneShotFailed: boolean): RosterArmMark {
+  const mark = rosterArmMark(arm);
+  if (!oneShotFailed || gateGlyph(arm) !== undefined) return mark;
+  return { toneClass: mark.toneClass, glyph: "failed", char: GLYPH_CHARS.failed ?? "" };
 }
 
 /**

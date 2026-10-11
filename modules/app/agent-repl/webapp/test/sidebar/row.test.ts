@@ -12,6 +12,7 @@ import {
   HOVER_OPEN_DELAY_MS,
   MERGED_TODAY_CLASS,
   drawRosterRow,
+  drawRosterRowOneShot,
   mergedToday,
   drawRosterRowWhen,
   drawStatusMark,
@@ -1430,5 +1431,58 @@ describe("a merge that landed today", () => {
 
   it("leaves the name's own colour class untouched", () => {
     expect(mergedRow(NOW).querySelector(".name")?.classList.contains(MERGED_TODAY_CLASS)).toBe(false);
+  });
+});
+
+describe("the one-shot mark", () => {
+  it("draws a failed one-shot's failure mark in place of the dot", () => {
+    const drawn = drawRosterRow(
+      row({ id: "ws-1", status: { case: "done", value: {} }, oneShot: "failed" }),
+      sidebarContext(),
+      "R",
+    );
+    expect(dotOf(drawn).getAttribute("data-glyph")).toBe("failed");
+    expect(dotOf(drawn).textContent).toBe("\u2716\uFE0F");
+  });
+
+  it("draws nothing of its own for an armed one-shot", () => {
+    const drawn = drawRosterRow(
+      row({ id: "ws-1", status: { case: "done", value: {} }, oneShot: "armed" }),
+      sidebarContext(),
+      "R",
+    );
+    expect(dotOf(drawn).getAttribute("data-glyph")).toBe("dot");
+  });
+
+  it("keeps an open gate's emoji over a failed one-shot", () => {
+    const drawn = drawRosterRow(
+      row({ id: "ws-1", status: { case: "permission", value: {} }, oneShot: "failed" }),
+      sidebarContext(),
+      "R",
+    );
+    expect(dotOf(drawn).getAttribute("data-glyph")).toBe("exclaim");
+  });
+
+  it("refuses a one-shot mark with no outcome", () => {
+    const malformed = create(RosterRowSchema, {
+      workspace: { workspace: { id: "ws-1", dir: "/w" } },
+      name: { text: "one" },
+      status: { case: "done", value: {} },
+      current: { current: false },
+      closed: { closed: false },
+      when: {},
+      detail: {},
+      oneShot: {},
+    });
+    expect(() => drawRosterRow(malformed, sidebarContext(), "R")).toThrow(MalformedView);
+  });
+
+  it.each([
+    ["armed", false],
+    ["failed", true],
+  ] as const)("answers whether the %s outcome is drawn", (outcome, drawn) => {
+    const mark = row({ id: "ws-1", oneShot: outcome }).oneShot;
+    expect(mark).toBeDefined();
+    expect(drawRosterRowOneShot(mark!, "R.oneShot")).toBe(drawn);
   });
 });
