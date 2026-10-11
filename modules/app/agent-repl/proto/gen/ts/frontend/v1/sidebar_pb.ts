@@ -891,7 +891,9 @@ export const RosterTaskKeySchema: GenMessage<RosterTaskKey> = /*@__PURE__*/
 /**
  * The recently-merged section: header and one group per repository. It has
  * no key of its own — the roster carries exactly one, so its fold identity is
- * fixed.
+ * fixed. It holds a WEEK of merges (owner request, 2026-10-11): a merge older
+ * than that is drawn in no section, and the daemon re-renders the instant one
+ * ages out.
  *
  *   ▾ Recently Merged            (2)        RosterMergedSection
  *     repo-a                                  RosterMergedRepoGroup → header
