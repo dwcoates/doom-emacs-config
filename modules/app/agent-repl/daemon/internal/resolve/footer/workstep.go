@@ -8,6 +8,7 @@ import (
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/protoarm"
 )
 
 // THE WORKING STEP.
@@ -166,8 +167,8 @@ func (r *resolver) OnMainAgent(ws ids.WorkspaceID, agent *conversationv1.AgentId
 // recorded at ERROR: the tables above must cover the whole contract.
 func (r *resolver) classify(ws ids.WorkspaceID, s *wsState, act *conversationv1.AgentActivity) (feedKind, itemPhase, bool) {
 	msg := act.ProtoReflect()
-	field := msg.WhichOneof(msg.Descriptor().Oneofs().ByName("item"))
-	if field == nil {
+	field, ok := protoarm.Set(msg, "item")
+	if !ok {
 		return feedKind{}, phaseNone, false
 	}
 	kind, known := feedKinds[field.Name()]

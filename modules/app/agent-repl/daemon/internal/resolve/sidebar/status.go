@@ -4,6 +4,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/protoarm"
 	"claude-repld/internal/resolve/ladder"
 	"claude-repld/internal/wsm"
 )
@@ -157,10 +158,11 @@ func vendorFaultArm(fault *frontendv1.FooterStatusVendorFault) string {
 
 // footerArmName names the footer status's arm for a record, "unset" for none.
 func footerArmName(status *frontendv1.FooterStatus) string {
-	if status.GetStatus() == nil {
+	arm, ok := protoarm.Name(status.ProtoReflect(), "status")
+	if !ok {
 		return "unset"
 	}
-	return string(status.ProtoReflect().WhichOneof(status.ProtoReflect().Descriptor().Oneofs().ByName("status")).Name())
+	return string(arm)
 }
 
 // noSessionArm names `none` — registered, but no session was ever created —
