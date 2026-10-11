@@ -156,7 +156,7 @@ describe("the highlight and the receded styling", () => {
     // Arrange / Act
     const declarations = currentRowDeclarations();
     // Assert
-    expect(declarations.some((d) => /border-left:\s*3px solid var\(--accent\)/.test(d))).toBe(true);
+    expect(declarations.some((d) => /border-left:\s*var\(--row-gutter-w\) solid var\(--accent\)/.test(d))).toBe(true);
   });
 
   it.each([
