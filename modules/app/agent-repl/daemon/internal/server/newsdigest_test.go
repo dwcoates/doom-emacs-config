@@ -196,7 +196,7 @@ func TestNewRefusesAMissingNewsDigest(t *testing.T) {
 		Drain: h.Drain, Rollout: h.Rollout, Deploy: h.Deployer, Health: h.Health, Login: h.Login,
 		Ownership: h.Ownership, SuccessorAddress: func() string { return "" },
 		Feed: h.Feed, Footer: h.Footer, Topbar: h.Topbar, Sidebar: h.Sidebar,
-		Holds: h.Holds, LoudFaults: &h.LoudFaults, Focus: h.Focus, PersistentWifi: h.PersistentWifi,
+		LoudFaults: &h.LoudFaults, Focus: h.Focus, PersistentWifi: h.PersistentWifi,
 		WebappDist: h.WebappDist, ImageOrigin: http.NotFoundHandler(), Log: h.Surfaces,
 	}
 

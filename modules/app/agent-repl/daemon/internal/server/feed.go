@@ -106,7 +106,7 @@ func (s *server) OpenFeed(
 
 	walk := mintWalk()
 	reader := readerFor(walk, subject.Record.ID, req.Msg.GetFeed())
-	page, token, err := s.deps.Feed.OpenPage(ctx, subject.Record.ID, target, reader)
+	page, token, held, err := s.deps.Feed.OpenPage(ctx, subject.Record.ID, target, reader)
 	if err != nil {
 		if refused, ok := s.asRefusal(err); ok {
 			return answer(resp, s.refuse(subject.Log, rpc, resp, refused))
@@ -115,9 +115,10 @@ func (s *server) OpenFeed(
 	}
 	s.rememberToken(token.GetValue(), subject.Record.ID, target)
 	subject.Log.Debug("daemon.server.open_feed", "opened a feed and minted its watch token",
-		dlog.Context{"token": token.GetValue(), "rows": len(page.GetSuccess().GetRows())})
+		dlog.Context{"token": token.GetValue(), "rows": len(page.GetSuccess().GetRows()),
+			"root": target.Root, "held": len(held.GetItems())})
 	resp.Result = &agentreplv1.OpenFeedResponse_Success{
-		Success: &agentreplv1.OpenFeedSuccess{Page: stampWalk(page, walk), Watch: token},
+		Success: &agentreplv1.OpenFeedSuccess{Page: stampWalk(page, walk), Watch: token, Held: held},
 	}
 	return connect.NewResponse(resp), nil
 }
@@ -186,7 +187,7 @@ func (s *server) watchFeed(
 		return endStream(log, rpc, err)
 	}
 
-	rows := tail.Rows(streamCtx)
+	pubs := tail.Publications(streamCtx)
 
 	// THE RESPONSE-SELECTION PUSH RIDES THE ROOT FEED'S WATCH ONLY. The
 	// FeedSelection frame names rows of THIS feed (the selected/centered
@@ -212,23 +213,24 @@ func (s *server) watchFeed(
 		case <-streamCtx.Done():
 			log.Debug(rpc, "the feed tail ended on cancellation", nil)
 			return nil
-		case row, ok := <-rows:
+		case pub, ok := <-pubs:
 			if !ok {
 				log.Debug(rpc, "the feed tail's subscription closed", nil)
 				return nil
 			}
-			if row == nil {
-				log.Error(rpc, "the feed resolver raised an empty row; it was not sent", nil)
+			frame, sendable := feedFrame(pub)
+			if !sendable {
+				log.Error(rpc, "the feed resolver raised a publication carrying neither a row nor a held change; it was not sent", nil)
 				continue
 			}
-			if err := out.Send(&agentreplv1.WatchFeedResponse{Row: row}); err != nil {
+			if err := out.Send(frame); err != nil {
 				log.Debug(rpc, "the feed tail's client went away", dlog.Context{"cause": err.Error()})
 				return nil
 			}
 		case sel, ok := <-selections:
 			if !ok {
 				// The selection subscription closes only on streamCtx
-				// cancellation, which the row arm handles too; loop and let the
+				// cancellation, which the publication arm handles too; loop and let the
 				// Done case end the stream cleanly.
 				selections = nil
 				continue
@@ -292,7 +294,7 @@ func (s *server) GetFeedPage(
 	reader := readerFor(walk, subject.Record.ID, req.Msg.GetFeed())
 	var page *frontendv1.FeedPage
 	if req.Msg.GetFirst() != nil {
-		page, _, err = s.deps.Feed.OpenPage(ctx, subject.Record.ID, target, reader)
+		page, _, _, err = s.deps.Feed.OpenPage(ctx, subject.Record.ID, target, reader)
 	} else {
 		page, err = s.deps.Feed.NextPage(ctx, subject.Record.ID, target, reader)
 	}
@@ -306,4 +308,17 @@ func (s *server) GetFeedPage(
 		dlog.Context{"rows": len(page.GetSuccess().GetRows())})
 	resp.Result = &agentreplv1.GetFeedPageResponse_Success{Success: stampWalk(page, walk)}
 	return connect.NewResponse(resp), nil
+}
+
+// feedFrame is one publication of the feed resolver as the WatchFeed frame that
+// carries it: a row frame, or a held-section frame. False is a publication
+// carrying neither, which is not sent.
+func feedFrame(pub feed.Publication) (*agentreplv1.WatchFeedResponse, bool) {
+	switch {
+	case pub.Row != nil:
+		return &agentreplv1.WatchFeedResponse{Row: pub.Row}, true
+	case pub.Held != nil:
+		return &agentreplv1.WatchFeedResponse{Held: pub.Held}, true
+	}
+	return nil, false
 }

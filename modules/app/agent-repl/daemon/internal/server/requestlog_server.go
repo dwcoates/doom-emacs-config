@@ -615,24 +615,6 @@ func (s *requestLoggingServer) WatchFooter(
 	return s.server.WatchFooter(ctx, req, stream)
 }
 
-func (s *requestLoggingServer) WatchDaemonHolds(
-	ctx context.Context,
-	req *connect.Request[agentreplv1.WatchDaemonHoldsRequest],
-	stream *connect.ServerStream[agentreplv1.WatchDaemonHoldsResponse],
-) (err error) {
-	boundary, err := s.server.beginRequest(ctx, "WatchDaemonHolds", req.Header().Get(requestIDHeader), requestMessage(req))
-	if err != nil {
-		return boundaryFailure(err)
-	}
-	boundary.log.Debug("daemon.server.watch_daemon_holds", "entered the rpc handler", boundary.entryContext())
-	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
-	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
-	defer func() {
-		boundary.log.Debug("daemon.server.watch_daemon_holds", "completed the rpc handler", boundary.completionContext(err))
-	}()
-	return s.server.WatchDaemonHolds(ctx, req, stream)
-}
-
 func (s *requestLoggingServer) UpdateHeldPrompt(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.UpdateHeldPromptRequest],

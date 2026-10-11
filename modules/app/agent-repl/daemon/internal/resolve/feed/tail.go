@@ -6,7 +6,6 @@ import (
 	"sync"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
-	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
@@ -22,15 +21,15 @@ import (
 // so a slow reader never blocks an upsert.
 type tailSub struct {
 	mu     sync.Mutex
-	queue  []*frontendv1.FeedRow
+	queue  []Publication
 	signal chan struct{}
-	out    chan *frontendv1.FeedRow
+	out    chan Publication
 }
 
-// enqueue appends a row and wakes the pump. It never blocks.
-func (s *tailSub) enqueue(row *frontendv1.FeedRow) {
+// enqueue appends a publication and wakes the pump. It never blocks.
+func (s *tailSub) enqueue(pub Publication) {
 	s.mu.Lock()
-	s.queue = append(s.queue, row)
+	s.queue = append(s.queue, pub)
 	s.mu.Unlock()
 	select {
 	case s.signal <- struct{}{}:
@@ -38,18 +37,18 @@ func (s *tailSub) enqueue(row *frontendv1.FeedRow) {
 	}
 }
 
-// dequeue removes the oldest queued row, reporting false when the queue is
-// empty.
-func (s *tailSub) dequeue() (*frontendv1.FeedRow, bool) {
+// dequeue removes the oldest queued publication, reporting false when the
+// queue is empty.
+func (s *tailSub) dequeue() (Publication, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if len(s.queue) == 0 {
-		return nil, false
+		return Publication{}, false
 	}
-	row := s.queue[0]
-	s.queue[0] = nil
+	pub := s.queue[0]
+	s.queue[0] = Publication{}
 	s.queue = s.queue[1:]
-	return row, true
+	return pub, true
 }
 
 // tail is one open tail: the subscriber and the token it answers to.
@@ -63,9 +62,9 @@ type tail struct {
 // Token is the watch token this tail answers to.
 func (t *tail) Token() *agentreplv1.FeedWatchToken { return t.token }
 
-// Rows yields every row upsert from the pinned start, in order, closing only
-// when ctx is cancelled.
-func (t *tail) Rows(ctx context.Context) <-chan *frontendv1.FeedRow {
+// Publications yields every publication from the pinned start, in order,
+// closing only when ctx is cancelled.
+func (t *tail) Publications(ctx context.Context) <-chan Publication {
 	go t.pump(ctx)
 	return t.sub.out
 }
@@ -82,10 +81,10 @@ func (t *tail) pump(ctx context.Context) {
 		close(t.sub.out)
 	}()
 	for {
-		row, ok := t.sub.dequeue()
+		pub, ok := t.sub.dequeue()
 		if ok {
 			select {
-			case t.sub.out <- row:
+			case t.sub.out <- pub:
 			case <-ctx.Done():
 				return
 			}
@@ -123,7 +122,7 @@ func (r *resolver) Tail(ctx context.Context, ws ids.WorkspaceID, feed feedid.Fee
 
 	s := r.state(ws)
 	f := r.feed(s, feed)
-	sub := &tailSub{signal: make(chan struct{}, 1), out: make(chan *frontendv1.FeedRow)}
+	sub := &tailSub{signal: make(chan struct{}, 1), out: make(chan Publication)}
 
 	// The pin, honored exactly: every publication after the token's sequence
 	// is replayed before the tail follows, so the seam between the page and
@@ -145,11 +144,11 @@ func (r *resolver) Tail(ctx context.Context, ws ids.WorkspaceID, feed feedid.Fee
 			r.logger(ws).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "entry.seq <= minted.afterSeq"})
 			continue
 		}
-		if entry.row.GetRemoved() == nil && r.withheldFromPush(s, f, entry.row.GetId().GetValue()) {
+		if r.withheldPublication(s, f, entry.pub) {
 			withheld++
 			continue
 		}
-		sub.enqueue(entry.row)
+		sub.enqueue(entry.pub)
 		replayed++
 	}
 	f.subs[sub] = struct{}{}

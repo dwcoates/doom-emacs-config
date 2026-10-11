@@ -6,7 +6,7 @@
 // docs/overhaul/daemon.md section "Queue, holds, leases — contract facts",
 // proto/src/conversation/v1/permission.proto, proto/src/frontend/v1/feed.proto
 // and daemon_hold.proto. Every assertion here is on a WatchFeed / WatchTopbar
-// / WatchDaemonHolds frame — never on shim or store internals (SPEC.md
+// / root-feed held-section frame — never on shim or store internals (SPEC.md
 // section B, "Frontends: none").
 //
 // GROUNDING NOTE — golden name vs. fake-SDK scenario name are NOT the same
@@ -410,7 +410,7 @@ func TestPermissionUndecidableParked(t *testing.T) {
 // facts": "One turn in flight PER AGENT, structurally... A prompt submitted
 // while a turn runs is HELD daemon-side". Turn one is lifecycle.ts's "!hold"
 // scenario (parks until interrupted), so a second submission on the SAME
-// agent is provably held rather than merely fast. WatchDaemonHolds shows the
+// agent is provably held rather than merely fast. The root feed's held section shows the
 // HeldPrompt; UpdateHeldPrompt{release} delivers it, per daemon_hold.proto's
 // "Deliver NOW — override the hold (interrupting the running turn when that
 // is what delivery takes)".
@@ -425,8 +425,8 @@ func TestHeldTurnGate(t *testing.T) {
 	// Act
 	turn2 := SubmitPrompt(t, w, ws, "a second prompt, held behind the running turn")
 
-	// Assert: the tray shows turn2 held.
-	tray := harness.AwaitView(t, w.Ctx(), holds, "the tray to show turn2 held", func(v *frontendv1.DaemonHoldTray) bool {
+	// Assert: the held section shows turn2 held.
+	tray := harness.AwaitView(t, w.Ctx(), holds, "the held section to show turn2 held", func(v *frontendv1.FeedHeld) bool {
 		for _, item := range v.GetItems() {
 			if item.GetPrompt().GetTurn().GetValue() == turn2.GetValue() {
 				return true
@@ -454,9 +454,9 @@ func TestHeldTurnGate(t *testing.T) {
 		t.Fatalf("UpdateHeldPrompt{release} = %v, %v, want a success", resp, err)
 	}
 
-	// Assert: the tray empties turn2's hold, and turn2 actually runs to a
+	// Assert: the held section drops turn2's hold, and turn2 actually runs to a
 	// terminal.
-	harness.AwaitView(t, w.Ctx(), holds, "the tray to empty turn2's hold", func(v *frontendv1.DaemonHoldTray) bool {
+	harness.AwaitView(t, w.Ctx(), holds, "the held section to drop turn2's hold", func(v *frontendv1.FeedHeld) bool {
 		for _, item := range v.GetItems() {
 			if item.GetPrompt().GetTurn().GetValue() == turn2.GetValue() {
 				return false

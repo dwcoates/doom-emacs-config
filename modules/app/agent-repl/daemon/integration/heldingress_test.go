@@ -61,7 +61,7 @@ func heldWrite(t *testing.T, stateDir, name, projectDir, key, prompt string) str
 }
 
 // heldTexts lists the tray's held prompts' words, in display order.
-func heldTexts(tray *frontendv1.DaemonHoldTray) []string {
+func heldTexts(tray *frontendv1.FeedHeld) []string {
 	var out []string
 	for _, item := range tray.GetItems() {
 		if p := item.GetPrompt(); p != nil {
@@ -105,7 +105,7 @@ func TestIngestedHeldPromptsWaitBehindTheRunningTurnInOrderInTheHeldTray(t *test
 	heldWrite(t, f.d.StateDir, "held_20260928T120001.000000002_aaaaaaaa_k-h2.json", f.repo.Dir, "k-h2", "the second held prompt")
 
 	// Assert: the tray shows both, in the order they were written.
-	got := awaitView(t, f, holds, "both ingested prompts in the held tray", func(tray *frontendv1.DaemonHoldTray) bool {
+	got := awaitView(t, f, holds, "both ingested prompts in the held tray", func(tray *frontendv1.FeedHeld) bool {
 		return len(heldTexts(tray)) == 2
 	})
 	if texts := heldTexts(got); texts[0] != "the first held prompt" || texts[1] != "the second held prompt" {
@@ -141,7 +141,7 @@ func TestADaemonStartIngestsHeldPromptsWrittenWhileNoDaemonServed(t *testing.T) 
 	if st := nd.Shim(f.ws).ExpectStartTurn(); text(st.GetSaid()) != "written while down, first" {
 		t.Fatalf("first delivered = %q, want the first-written prompt", text(st.GetSaid()))
 	}
-	got := awaitView(t, f, holds, "the second prompt held behind the first", func(tray *frontendv1.DaemonHoldTray) bool {
+	got := awaitView(t, f, holds, "the second prompt held behind the first", func(tray *frontendv1.FeedHeld) bool {
 		return len(heldTexts(tray)) == 1
 	})
 	if texts := heldTexts(got); texts[0] != "written while down, second" {

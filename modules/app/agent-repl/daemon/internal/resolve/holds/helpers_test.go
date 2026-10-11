@@ -1,7 +1,6 @@
 package holds_test
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -21,37 +20,39 @@ const testWS = ids.WorkspaceID("ws-holds")
 // order, so a conversion assertion never depends on wall-clock.
 var queuedAt = time.UnixMilli(1_700_000_000_000)
 
-// newResolver builds a bound resolver plus the surfaces its records land in.
-func newResolver(t *testing.T) (holds.Resolver, *dlog.TestSurfaces) {
+// renderer is a test stand-in for the held section's prompt half: it takes
+// the same setters the feed resolver does and renders through holds.Prompts.
+type renderer struct {
+	held    []wsm.HeldPrompt
+	editing ids.TurnID
+	log     dlog.Logger
+	cards   []holds.Card
+}
+
+// SetHeldPrompts records the standing holds, as the prompt queue states them,
+// and renders them at once, as the feed resolver does on every change.
+func (r *renderer) SetHeldPrompts(_ ids.WorkspaceID, held []wsm.HeldPrompt) {
+	r.held = held
+	r.cards = holds.Prompts(r.held, r.editing, r.log)
+}
+
+// SetEditing records the hold being edited, and renders again.
+func (r *renderer) SetEditing(_ ids.WorkspaceID, turn ids.TurnID) {
+	r.editing = turn
+	r.cards = holds.Prompts(r.held, r.editing, r.log)
+}
+
+// newRenderer builds a renderer plus the surfaces its records land in.
+func newRenderer(t *testing.T) (*renderer, *dlog.TestSurfaces) {
 	t.Helper()
 	surfaces := dlog.NewTestSurfaces()
-	r, err := holds.New(surfaces)
-	if err != nil {
-		t.Fatalf("holds.New: %v", err)
-	}
-	if err := r.SetWorkspaceDir(testWS, t.TempDir()); err != nil {
-		t.Fatalf("SetWorkspaceDir: %v", err)
-	}
-	return r, surfaces
+	return &renderer{log: surfaces.Global()}, surfaces
 }
 
-// latest reads the tray the resolver last published, failing when it published
-// none.
-func latest(t *testing.T, r holds.Resolver) *frontendv1.DaemonHoldTray {
+// latest answers the cards the renderer last rendered.
+func latest(t *testing.T, r *renderer) []holds.Card {
 	t.Helper()
-	tray, ok := r.Topic(testWS).Latest()
-	if !ok {
-		t.Fatal("the tray published nothing")
-	}
-	return tray
-}
-
-// subscribe opens a subscription that is torn down with the test.
-func subscribe(t *testing.T, r holds.Resolver) <-chan *frontendv1.DaemonHoldTray {
-	t.Helper()
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	return r.Topic(testWS).Subscribe(ctx)
+	return r.cards
 }
 
 // said builds a user submission carrying one line of text.
@@ -82,29 +83,25 @@ func verdict(h wsm.HeldPrompt, arm wsm.ClassificationArm, reason string) wsm.Hel
 	return h
 }
 
-// prompts reads the tray's prompt entries, failing on any item that is not one.
-func prompts(t *testing.T, tray *frontendv1.DaemonHoldTray) []*frontendv1.HeldPrompt {
+// prompts reads the rendered cards' prompts, failing on a nil one.
+func prompts(t *testing.T, cards []holds.Card) []*frontendv1.HeldPrompt {
 	t.Helper()
-	var out []*frontendv1.HeldPrompt
-	for i, item := range tray.GetItems() {
-		p, ok := item.GetItem().(*frontendv1.DaemonHoldItem_Prompt)
-		if !ok {
-			continue
+	out := make([]*frontendv1.HeldPrompt, 0, len(cards))
+	for i, card := range cards {
+		if card.Prompt == nil {
+			t.Fatalf("card %d carried a nil prompt", i)
 		}
-		if p.Prompt == nil {
-			t.Fatalf("item %d carried a nil prompt", i)
-		}
-		out = append(out, p.Prompt)
+		out = append(out, card.Prompt)
 	}
 	return out
 }
 
-// onlyPrompt reads the tray's single prompt entry.
-func onlyPrompt(t *testing.T, tray *frontendv1.DaemonHoldTray) *frontendv1.HeldPrompt {
+// onlyPrompt reads the single rendered card's prompt.
+func onlyPrompt(t *testing.T, cards []holds.Card) *frontendv1.HeldPrompt {
 	t.Helper()
-	got := prompts(t, tray)
+	got := prompts(t, cards)
 	if len(got) != 1 {
-		t.Fatalf("tray carried %d prompts, want exactly 1", len(got))
+		t.Fatalf("rendered %d prompts, want exactly 1", len(got))
 	}
 	return got[0]
 }

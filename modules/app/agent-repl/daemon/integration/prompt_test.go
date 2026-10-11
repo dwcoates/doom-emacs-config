@@ -178,7 +178,7 @@ func TestSubmitPromptWithOriginUnspecifiedIsRefused(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // promptHeldEntry finds a tray item's HeldPrompt by its turn, or nil.
-func promptHeldEntry(tray *frontendv1.DaemonHoldTray, turn *conversationv1.TurnId) *frontendv1.HeldPrompt {
+func promptHeldEntry(tray *frontendv1.FeedHeld, turn *conversationv1.TurnId) *frontendv1.HeldPrompt {
 	for _, item := range tray.GetItems() {
 		if p := item.GetPrompt(); p != nil && p.GetTurn().GetValue() == turn.GetValue() {
 			return p
@@ -201,7 +201,7 @@ func TestAHeldPromptShowsClassifyingThenAVerdictFromTheFakeHeuristic(t *testing.
 	// (internal/promptqueue/classify.go's `hold`) and pushed SYNCHRONOUSLY,
 	// before the classifier's goroutine is even started -- so it is on the
 	// channel before SubmitPrompt's own response returns, deterministically.
-	awaitView(t, f, holds, "the initial empty tray", func(tray *frontendv1.DaemonHoldTray) bool {
+	awaitView(t, f, holds, "the initial empty tray", func(tray *frontendv1.FeedHeld) bool {
 		return len(tray.GetItems()) == 0
 	})
 
@@ -247,7 +247,7 @@ func TestAPromptBeginningWithStopTakesTheFastPathToInterjectAndInterruptsTheRunn
 	})
 	killReq := f.shim.ExpectKillTurn()
 	_ = killReq
-	tray := awaitView(t, f, holds, "the interject verdict", func(tray *frontendv1.DaemonHoldTray) bool {
+	tray := awaitView(t, f, holds, "the interject verdict", func(tray *frontendv1.FeedHeld) bool {
 		p := promptHeldEntry(tray, turn2)
 		return p != nil && p.GetInterject() != nil
 	})
@@ -358,7 +358,7 @@ func TestAPromptHeldBehindAnUninterruptibleContextCutSkipsClassifyingAndRefusesR
 	}
 	f.shim.ExpectStartTurn()
 	holds := f.d.WatchHolds(f.ws)
-	awaitView(t, f, holds, "the initial empty tray", func(tray *frontendv1.DaemonHoldTray) bool {
+	awaitView(t, f, holds, "the initial empty tray", func(tray *frontendv1.FeedHeld) bool {
 		return len(tray.GetItems()) == 0
 	})
 	f.d.ExpectWarnings("daemon.promptqueue.release")
@@ -457,7 +457,7 @@ func TestARevivalTimeHeldPromptCarriesTheReconnectHoldAndRefusesRelease(t *testi
 
 	// Assert: the tray carries hold.reconnect, with no classification
 	// verdict at all -- the lease projects the hold before any turn exists.
-	tray := awaitView(t, f, holds, "the reconnect hold", func(tray *frontendv1.DaemonHoldTray) bool {
+	tray := awaitView(t, f, holds, "the reconnect hold", func(tray *frontendv1.FeedHeld) bool {
 		return promptHeldEntry(tray, turn).GetReconnect() != nil
 	})
 	p := promptHeldEntry(tray, turn)
@@ -511,7 +511,7 @@ func TestUpdateHeldPromptDropRemovesTheEntryDurablyAcrossADaemonRestart(t *testi
 
 	// Assert: gone before the restart too.
 	holds := f.d.WatchHolds(f.ws)
-	awaitView(t, f, holds, "the dropped entry gone", func(tray *frontendv1.DaemonHoldTray) bool {
+	awaitView(t, f, holds, "the dropped entry gone", func(tray *frontendv1.FeedHeld) bool {
 		return promptHeldEntry(tray, turn2) == nil
 	})
 
@@ -581,7 +581,7 @@ func TestAHeldPromptSurvivesADaemonRestart(t *testing.T) {
 
 	// Assert
 	holds := nd.WatchHolds(f.ws)
-	got := awaitView(t, f, holds, "the survived held entry", func(tray *frontendv1.DaemonHoldTray) bool {
+	got := awaitView(t, f, holds, "the survived held entry", func(tray *frontendv1.FeedHeld) bool {
 		return promptHeldEntry(tray, turn2) != nil
 	})
 	if promptHeldEntry(got, turn2) == nil {
@@ -618,7 +618,7 @@ func TestACorruptedHeldPromptRowFailsBootLoudlyWithExactlyOneRestoreError(t *tes
 	turn2 := resp2.GetSuccess().GetTurn().GetTurn()
 	f.submit("second held prompt", "k-corrupt-2", origin)
 	holds := f.d.WatchHolds(f.ws)
-	awaitView(t, f, holds, "both held entries standing", func(tray *frontendv1.DaemonHoldTray) bool {
+	awaitView(t, f, holds, "both held entries standing", func(tray *frontendv1.FeedHeld) bool {
 		return len(tray.GetItems()) == 2
 	})
 	if got := f.d.CountRows("held_prompts"); got != 2 {
@@ -671,7 +671,7 @@ func TestAHeldPromptMirrorsToTheTrayOnlyUntilDelivery(t *testing.T) {
 	holds := f.d.WatchHolds(f.ws)
 	resp2 := f.submit("a held prompt", "k-held-mirror", origin)
 	turn2 := resp2.GetSuccess().GetTurn().GetTurn()
-	awaitView(t, f, holds, "the held entry standing", func(tray *frontendv1.DaemonHoldTray) bool {
+	awaitView(t, f, holds, "the held entry standing", func(tray *frontendv1.FeedHeld) bool {
 		return promptHeldEntry(tray, turn2) != nil
 	})
 
@@ -720,7 +720,7 @@ func TestAcceptOnAHoldForTurnEndVerdictFlipsAcceptedAndRePushesTheTray(t *testin
 	resp2 := f.submit("please also check the other file", "k-accept", origin)
 	turn2 := resp2.GetSuccess().GetTurn().GetTurn()
 	holds := f.d.WatchHolds(f.ws)
-	awaitView(t, f, holds, "the hold_for_turn_end verdict", func(tray *frontendv1.DaemonHoldTray) bool {
+	awaitView(t, f, holds, "the hold_for_turn_end verdict", func(tray *frontendv1.FeedHeld) bool {
 		p := promptHeldEntry(tray, turn2)
 		return p != nil && p.GetHoldForTurnEnd() != nil
 	})
@@ -740,7 +740,7 @@ func TestAcceptOnAHoldForTurnEndVerdictFlipsAcceptedAndRePushesTheTray(t *testin
 
 	// Assert: the entry flips to accepted and the tray is re-pushed
 	// (internal/promptqueue/holdactions.go's Accept).
-	got := awaitView(t, f, holds, "the accepted flag on the re-pushed tray", func(tray *frontendv1.DaemonHoldTray) bool {
+	got := awaitView(t, f, holds, "the accepted flag on the re-pushed tray", func(tray *frontendv1.FeedHeld) bool {
 		p := promptHeldEntry(tray, turn2)
 		return p != nil && p.GetHoldForTurnEnd().GetAccepted().GetAccepted()
 	})
@@ -767,7 +767,7 @@ func TestAcceptOnAnInterjectVerdictAnswersAcceptNotApplicable(t *testing.T) {
 	f.shim.Hang()
 	resp2 := f.submit("stop and rebase instead", "k-interject-accept", origin)
 	turn2 := resp2.GetSuccess().GetTurn().GetTurn()
-	awaitView(t, f, holds, "the interject verdict", func(tray *frontendv1.DaemonHoldTray) bool {
+	awaitView(t, f, holds, "the interject verdict", func(tray *frontendv1.FeedHeld) bool {
 		p := promptHeldEntry(tray, turn2)
 		return p != nil && p.GetInterject() != nil
 	})
@@ -826,7 +826,7 @@ func TestAFailedInterjectRevertsToHoldForTurnEndAndFifoOrder(t *testing.T) {
 	// Assert: the entry reverts to held for the turn's end — never the
 	// "unclassified" classification_error — and the footer's interrupting
 	// status clears.
-	tray := awaitView(t, f, holds, "the hold_for_turn_end verdict", func(tray *frontendv1.DaemonHoldTray) bool {
+	tray := awaitView(t, f, holds, "the hold_for_turn_end verdict", func(tray *frontendv1.FeedHeld) bool {
 		p := promptHeldEntry(tray, turn2)
 		return p != nil && p.GetHoldForTurnEnd() != nil
 	})
@@ -949,7 +949,7 @@ func TestPromptsHeldBeforeAMergeLeaseStayHeld(t *testing.T) {
 	f.shim.ExpectStartTurn()
 	resp2 := f.submit("a prompt held before the merge", "k-preheld", origin)
 	turn2 := resp2.GetSuccess().GetTurn().GetTurn()
-	awaitView(t, f, f.d.WatchHolds(f.ws), "the pre-merge held entry", func(tray *frontendv1.DaemonHoldTray) bool {
+	awaitView(t, f, f.d.WatchHolds(f.ws), "the pre-merge held entry", func(tray *frontendv1.FeedHeld) bool {
 		return promptHeldEntry(tray, turn2) != nil
 	})
 
@@ -1022,7 +1022,7 @@ func TestUpdateMergeQueueEvictWhileTheDequeueOfferStandsClearsItAndTheHeadingCou
 	})); err != nil {
 		t.Fatalf("Interrupt(turn) = error %v, want a success", err)
 	}
-	tray := awaitView(t, behind, holds, "the merge-dequeue held offer", func(tray *frontendv1.DaemonHoldTray) bool {
+	tray := awaitView(t, behind, holds, "the merge-dequeue held offer", func(tray *frontendv1.FeedHeld) bool {
 		return mergeDequeueOffer(tray) != nil
 	})
 
@@ -1041,7 +1041,7 @@ func TestUpdateMergeQueueEvictWhileTheDequeueOfferStandsClearsItAndTheHeadingCou
 	}
 
 	// Assert: the offer is cleared and the heading reflects the empty tray.
-	got := awaitView(t, behind, holds, "the offer cleared by the operator evict", func(tray *frontendv1.DaemonHoldTray) bool {
+	got := awaitView(t, behind, holds, "the offer cleared by the operator evict", func(tray *frontendv1.FeedHeld) bool {
 		return mergeDequeueOffer(tray) == nil
 	})
 	if mergeDequeueOffer(got) != nil {
@@ -2191,7 +2191,7 @@ func TestADeferredPromptIsNeverInterjectedAndRunsAsItsOwnTurn(t *testing.T) {
 	turn := resp.GetSuccess().GetTurn().GetTurn()
 
 	// Assert: held for the turn's end, never classifying, never interjected.
-	tray := awaitView(t, f, holds, "the deferred prompt in the tray", func(tray *frontendv1.DaemonHoldTray) bool {
+	tray := awaitView(t, f, holds, "the deferred prompt in the tray", func(tray *frontendv1.FeedHeld) bool {
 		return promptHeldEntry(tray, turn) != nil
 	})
 	if p := promptHeldEntry(tray, turn); p.GetHoldForTurnEnd() == nil {
@@ -2228,7 +2228,7 @@ func TestADeferredHoldSurvivesADaemonRestartStillDeferred(t *testing.T) {
 
 	// Assert
 	holds := nd.WatchHolds(f.ws)
-	got := awaitView(t, f, holds, "the restored deferred hold", func(tray *frontendv1.DaemonHoldTray) bool {
+	got := awaitView(t, f, holds, "the restored deferred hold", func(tray *frontendv1.FeedHeld) bool {
 		return promptHeldEntry(tray, turn) != nil
 	})
 	if p := promptHeldEntry(got, turn); p.GetHoldForTurnEnd() == nil {

@@ -167,37 +167,6 @@ func subscriptionScenarioFor(name string) (subscriptionScenario, bool) {
 			},
 		}, true
 
-	case "WatchDaemonHolds":
-		var turn2, turn3 *conversationv1.TurnId
-		return subscriptionScenario{
-			drive1: func(t *testing.T, f *fixture) {
-				f.submit("start the work", "k-sub-inv-holds-run", origin)
-				f.shim.ExpectStartTurn()
-				resp := f.submit("a follow-up while it runs", "k-sub-inv-holds-1", origin)
-				turn2 = resp.GetSuccess().GetTurn().GetTurn()
-				if turn2.GetValue() == "" {
-					t.Fatalf("SubmitPrompt while a turn runs = %v, want a minted TurnId (it is HELD)", resp)
-				}
-			},
-			isFirst: func(msg proto.Message) bool {
-				e := promptHeldEntry(msg.(*frontendv1.DaemonHoldTray), turn2)
-				return e != nil && e.GetHoldForTurnEnd() != nil
-			},
-			drive2: func(t *testing.T, f *fixture) {
-				resp := f.submit("a second follow-up while it still runs", "k-sub-inv-holds-2", origin)
-				turn3 = resp.GetSuccess().GetTurn().GetTurn()
-				if turn3.GetValue() == "" {
-					t.Fatalf("SubmitPrompt while a turn runs = %v, want a minted TurnId (it is HELD)", resp)
-				}
-			},
-			isSecond: func(msg proto.Message) bool {
-				tray := msg.(*frontendv1.DaemonHoldTray)
-				e2 := promptHeldEntry(tray, turn2)
-				e3 := promptHeldEntry(tray, turn3)
-				return e2 != nil && e2.GetHoldForTurnEnd() != nil && e3 != nil && e3.GetHoldForTurnEnd() != nil
-			},
-		}, true
-
 	// WatchHostWorkspace has NO scenario here on purpose. Its only lightweight
 	// two-step driver in this suite is OpenInEditor, and that is a one-shot
 	// host RELAY — a command sent once to whoever is listening — not a
@@ -273,13 +242,12 @@ func TestSubscriptionInvariantAcrossWatchKinds(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // TestFlushOnAcceptAcrossWatchKinds asserts that every Watch* stream's
-// response headers reach the client at accept time, before any push. Three
-// kinds — WatchDaemonHolds, WatchHostWorkspace and WatchWebWorkspace — turn
-// out to ALWAYS have a view to send even on a workspace that was only just
-// registered (holds publishes the empty tray at SetWorkspaceDir/registration
-// time; the two per-workspace link streams compose and publish their state
-// synchronously before every subscribe — "COMPOSE BEFORE SUBSCRIBING",
-// internal/server/streams.go). For those three the no-view flush path this
+// response headers reach the client at accept time, before any push. Two
+// kinds — WatchHostWorkspace and WatchWebWorkspace — turn out to ALWAYS have
+// a view to send even on a workspace that was only just registered (the two
+// per-workspace link streams compose and publish their state synchronously
+// before every subscribe — "COMPOSE BEFORE SUBSCRIBING",
+// internal/server/streams.go). For those two the no-view flush path this
 // test exercises for every other kind never actually fires, so the
 // assertion here is deliberately per-kind rather than one blanket
 // ExpectNoPush, per the sub-brief's own instruction.
@@ -305,11 +273,6 @@ func TestFlushOnAcceptAcrossWatchKinds(t *testing.T) {
 			}
 
 			switch k.Name {
-			case "WatchDaemonHolds":
-				tray := harness.AwaitNext(t, d.Ctx(), s, k.Name+": the tray a fresh registration opens with")
-				if got := len(tray.(*frontendv1.DaemonHoldTray).GetItems()); got != 0 {
-					t.Fatalf("%s on a fresh registration = %d items, want the empty tray (it is a complete answer, published at registration)", k.Name, got)
-				}
 			case "WatchHostWorkspace":
 				push := harness.AwaitNext(t, d.Ctx(), s, k.Name+": the host push a registered-but-unopened workspace opens with")
 				if push.(*agentreplv1.WatchHostWorkspaceResponse).GetHost().GetNone() == nil {
@@ -415,15 +378,11 @@ func TestWatchDaemonFlushesHeadersBeforeAnyFrameWhenNoDrainWasEverScheduled(t *t
 	harness.ExpectNoPush(t, s, harness.ProbeWindow, "WatchDaemon with no drain ever scheduled carries no other frame")
 }
 
-// TestWatchDaemonHoldsFlushesHeadersThenPushesTheAlreadyEmptyTray is the
-// sub-brief's specific "WatchDaemonHolds with an empty tray" case. Per
-// internal/resolve/holds/resolver.go ("THE EMPTY TRAY IS A COMPLETE ANSWER,
-// and binding is when it can first be given"), SetWorkspaceDir — called at
-// REGISTRATION — already publishes the empty tray, so a subscriber opening
-// on a merely-registered workspace does NOT find "no view due": it gets the
-// empty tray as an ordinary first push. Asserting a blanket ExpectNoPush here
-// would be asserting a claim the source contradicts.
-func TestWatchDaemonHoldsFlushesHeadersThenPushesTheAlreadyEmptyTray(t *testing.T) {
+// TestARegisteredWorkspacesRootFeedOpensWithTheEmptyHeldSection: the held
+// section rides the root feed (feed_held.proto), and an empty section is a
+// complete answer, so a merely-registered workspace's root feed opens with it
+// rather than leaving the section unstated.
+func TestARegisteredWorkspacesRootFeedOpensWithTheEmptyHeldSection(t *testing.T) {
 	t.Parallel()
 	// Arrange: registered, never opened.
 	f := newRegistered(t, harness.Opts{})
@@ -431,11 +390,10 @@ func TestWatchDaemonHoldsFlushesHeadersThenPushesTheAlreadyEmptyTray(t *testing.
 	// Act
 	holds := f.d.WatchHolds(f.ws)
 
-	// Assert: headers arrive, and the already-published empty tray follows.
-	holds.AwaitHeaders(t, f.d.Ctx(), "WatchDaemonHolds")
-	tray := harness.AwaitNext(t, f.d.Ctx(), holds, "the empty tray a fresh registration already published")
-	if got := len(tray.GetItems()); got != 0 {
-		t.Fatalf("WatchDaemonHolds on a fresh registration = %d items, want the empty tray", got)
+	// Assert
+	held := harness.AwaitNext(t, f.d.Ctx(), holds, "the held section the root feed opened with")
+	if got := len(held.GetItems()); got != 0 {
+		t.Fatalf("the opened held section = %d items, want the empty section", got)
 	}
 }
 
@@ -512,7 +470,7 @@ func TestHoldsIdenticalSecondAcceptProducesNoSecondPush(t *testing.T) {
 	resp := f.submit("a follow-up while it runs", "k-accept-held", origin)
 	turn := resp.GetSuccess().GetTurn().GetTurn()
 	holds := f.d.WatchHolds(f.ws)
-	awaitView(t, f, holds, "the hold_for_turn_end verdict", func(tray *frontendv1.DaemonHoldTray) bool {
+	awaitView(t, f, holds, "the hold_for_turn_end verdict", func(tray *frontendv1.FeedHeld) bool {
 		e := promptHeldEntry(tray, turn)
 		return e != nil && e.GetHoldForTurnEnd() != nil
 	})
@@ -525,7 +483,7 @@ func TestHoldsIdenticalSecondAcceptProducesNoSecondPush(t *testing.T) {
 	if err != nil || accept1.Msg.GetSuccess() == nil {
 		t.Fatalf("UpdateHeldPrompt{accept} = (%v, %v), want a success", accept1, err)
 	}
-	awaitView(t, f, holds, "the tray after the first accept", func(tray *frontendv1.DaemonHoldTray) bool {
+	awaitView(t, f, holds, "the tray after the first accept", func(tray *frontendv1.FeedHeld) bool {
 		return promptHeldEntry(tray, turn).GetHoldForTurnEnd().GetAccepted().GetAccepted()
 	})
 
@@ -596,10 +554,6 @@ func transportClosedRPCs() []transportClosedRPC {
 		}},
 		{"WatchTopbar", func(d *harness.Daemon, ws *workspacev1.WorkspaceRef) error {
 			s, err := d.Client().WatchTopbar(d.Ctx(), connect.NewRequest(&agentreplv1.WatchTopbarRequest{Workspace: ws}))
-			return firstReceiveErr(s, err)
-		}},
-		{"WatchDaemonHolds", func(d *harness.Daemon, ws *workspacev1.WorkspaceRef) error {
-			s, err := d.Client().WatchDaemonHolds(d.Ctx(), connect.NewRequest(&agentreplv1.WatchDaemonHoldsRequest{Workspace: ws}))
 			return firstReceiveErr(s, err)
 		}},
 		{"WatchHostWorkspace", func(d *harness.Daemon, ws *workspacev1.WorkspaceRef) error {

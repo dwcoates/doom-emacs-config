@@ -46,7 +46,7 @@ func TestAPromptDuringAUsageLimitIsHeldAfterReconnectAndDeliveredWhenTheVendorSe
 	turn := resp.GetSuccess().GetTurn().GetTurn()
 
 	// Assert: held after reconnect, unclassified, and not sent.
-	tray := awaitView(t, f, holds, "the after-reconnect hold", func(tray *frontendv1.DaemonHoldTray) bool {
+	tray := awaitView(t, f, holds, "the after-reconnect hold", func(tray *frontendv1.FeedHeld) bool {
 		return promptHeldEntry(tray, turn).GetReconnect() != nil
 	})
 	if entry := promptHeldEntry(tray, turn); entry.GetDaemonHeld() == nil {
@@ -79,7 +79,7 @@ func TestASubmissionWhileHeldAndIdleTriesTheOldestHeldPromptNow(t *testing.T) {
 		return v.GetStrip().GetStatus().GetVendorFault().GetUsageLimit() != nil
 	})
 	first := f.submit("held first", "k-try-1", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT).GetSuccess().GetTurn().GetTurn()
-	awaitView(t, f, holds, "the first prompt held after reconnect", func(tray *frontendv1.DaemonHoldTray) bool {
+	awaitView(t, f, holds, "the first prompt held after reconnect", func(tray *frontendv1.FeedHeld) bool {
 		return promptHeldEntry(tray, first).GetReconnect() != nil
 	})
 	expectRPCCount(t, f.shim, harness.RPCStartTurn, 0, harness.ProbeWindow)
@@ -92,7 +92,7 @@ func TestASubmissionWhileHeldAndIdleTriesTheOldestHeldPromptNow(t *testing.T) {
 	if started.GetTurn().GetValue() != first.GetValue() {
 		t.Fatalf("StartTurn turn = %q, want the oldest held %q", started.GetTurn().GetValue(), first.GetValue())
 	}
-	awaitView(t, f, holds, "the second prompt held behind the first", func(tray *frontendv1.DaemonHoldTray) bool {
+	awaitView(t, f, holds, "the second prompt held behind the first", func(tray *frontendv1.FeedHeld) bool {
 		return promptHeldEntry(tray, second) != nil && promptHeldEntry(tray, first) == nil
 	})
 }
@@ -120,7 +120,7 @@ func TestATriedPromptTheVendorBlocksIsCutAndHeldAgainInItsPlace(t *testing.T) {
 		return v.GetStrip().GetStatus().GetVendorFault().GetUsageLimit() != nil
 	})
 	first := f.submit("held first", "k-rehold-1", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT).GetSuccess().GetTurn().GetTurn()
-	awaitView(t, f, holds, "the first prompt held after reconnect", func(tray *frontendv1.DaemonHoldTray) bool {
+	awaitView(t, f, holds, "the first prompt held after reconnect", func(tray *frontendv1.FeedHeld) bool {
 		return promptHeldEntry(tray, first).GetReconnect() != nil
 	})
 	second := f.submit("try now", "k-rehold-2", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT).GetSuccess().GetTurn().GetTurn()
@@ -133,7 +133,7 @@ func TestATriedPromptTheVendorBlocksIsCutAndHeldAgainInItsPlace(t *testing.T) {
 
 	// Assert: the first prompt is held again, under a new turn, ahead of the
 	// second; it was cut from the vendor conversation; the fault stands.
-	tray := awaitView(t, f, holds, "the tried prompt held again ahead of the second", func(tray *frontendv1.DaemonHoldTray) bool {
+	tray := awaitView(t, f, holds, "the tried prompt held again ahead of the second", func(tray *frontendv1.FeedHeld) bool {
 		items := tray.GetItems()
 		if len(items) != 2 {
 			return false

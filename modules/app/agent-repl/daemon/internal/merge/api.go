@@ -218,7 +218,7 @@ type Deps struct {
 	Footer  footer.Resolver
 	Sidebar sidebar.Resolver
 	// Holds carries the dequeue offer.
-	Holds holds.Resolver
+	Holds holds.Sink
 	// Asks are the permission asks and question batches open in each
 	// workspace's session: a conflict-resolution or fixing tab whose agent
 	// has one open is drawn waiting on the user.

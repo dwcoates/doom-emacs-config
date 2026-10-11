@@ -13,6 +13,31 @@ import (
 	"claude-repld/internal/feedid"
 )
 
+// tailRows adapts a tail's publications to the rows they carry, in order: a
+// row publication's row, and each row a held-section change moved. For the
+// tests about rows, which a held change carries only as the rows it moved.
+func tailRows(ctx context.Context, tail Tail) <-chan *frontendv1.FeedRow {
+	pubs := tail.Publications(ctx)
+	out := make(chan *frontendv1.FeedRow)
+	go func() {
+		defer close(out)
+		for pub := range pubs {
+			rows := pub.Held.GetRows()
+			if pub.Row != nil {
+				rows = []*frontendv1.FeedRow{pub.Row}
+			}
+			for _, row := range rows {
+				select {
+				case out <- row:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}
+	}()
+	return out
+}
+
 // THE PIN is the whole point of the token: a reader misses no row between the
 // page it was served and the first row it streams, and sees none twice.
 
@@ -34,7 +59,7 @@ func TestTailReplaysRowsPublishedBetweenThePageAndTheWatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Tail: %v", err)
 	}
-	rows := tail.Rows(ctx)
+	rows := tailRows(ctx, tail)
 
 	// Assert: exactly the two rows published after the page, in order, and the
 	// paged row is NOT replayed.
@@ -61,7 +86,7 @@ func TestTailFollowsRowsPublishedAfterItOpened(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Tail: %v", err)
 	}
-	rows := tail.Rows(ctx)
+	rows := tailRows(ctx, tail)
 
 	// Act.
 	h.deliverPrompt("turn-1", "live")
@@ -84,7 +109,7 @@ func TestTailDeliversEachRowExactlyOnce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Tail: %v", err)
 	}
-	rows := tail.Rows(ctx)
+	rows := tailRows(ctx, tail)
 
 	// Act.
 	h.deliverPrompt("turn-2", "after the watch")
@@ -112,7 +137,7 @@ func TestTailClosesOnlyOnTheReadersCancellation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Tail: %v", err)
 	}
-	rows := tail.Rows(ctx)
+	rows := tailRows(ctx, tail)
 
 	// Act.
 	cancel()
@@ -137,7 +162,7 @@ func TestRetiringARowPushesARemovalToAnOpenTail(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Tail: %v", err)
 	}
-	rows := tail.Rows(ctx)
+	rows := tailRows(ctx, tail)
 	h.deliverPrompt("turn-1", "live")
 	if got := (<-rows).GetId().GetValue(); got != h.promptRowID("turn-1") {
 		t.Fatalf("streamed row = %q, want turn-1's before its removal", got)
@@ -170,7 +195,7 @@ func TestRetiringAnAbsentRowPushesNothingToAnOpenTail(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Tail: %v", err)
 	}
-	rows := tail.Rows(ctx)
+	rows := tailRows(ctx, tail)
 
 	// Act: retire a row this feed never held, then publish a real one.
 	h.resolver.RetireRow(testWorkspace, rootFeed(),
@@ -270,7 +295,7 @@ func TestAnIdenticalUpsertIsNotPublishedTwice(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Tail: %v", err)
 	}
-	rows := tail.Rows(ctx)
+	rows := tailRows(ctx, tail)
 
 	// Act: the SAME prompt again, then a different one behind it.
 	h.deliverPrompt("turn-1", "on the page")
@@ -308,7 +333,7 @@ func (h *harness) tailFrom(feed feedid.Feed, token *agentreplv1.FeedWatchToken) 
 	if err != nil {
 		h.t.Fatalf("Tail: %v", err)
 	}
-	return tail.Rows(ctx)
+	return tailRows(ctx, tail)
 }
 
 // pushedBefore drains a tail until the SENTINEL row arrives and answers the id
