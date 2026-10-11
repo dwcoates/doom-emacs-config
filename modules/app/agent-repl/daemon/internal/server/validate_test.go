@@ -362,6 +362,28 @@ func TestEachRequestValidatorNamesTheFieldItRefusesWithTargetsAndSources(t *test
 			field: "visibility",
 		},
 		{
+			name: "set parent with no workspace",
+			check: func() *connect.Error {
+				return validateSetWorkspaceParentRequest(&agentreplv1.SetWorkspaceParentRequest{})
+			},
+			field: "workspace",
+		},
+		{
+			name: "set parent with no parent arm",
+			check: func() *connect.Error {
+				return validateSetWorkspaceParentRequest(&agentreplv1.SetWorkspaceParentRequest{Workspace: ref()})
+			},
+			field: "parent",
+		},
+		{
+			name: "set parent as a child of no workspace",
+			check: func() *connect.Error {
+				return validateSetWorkspaceParentRequest(&agentreplv1.SetWorkspaceParentRequest{Workspace: ref(),
+					Parent: &agentreplv1.SetWorkspaceParentRequest_ChildOf{ChildOf: &agentreplv1.SetWorkspaceParentChild{}}})
+			},
+			field: "child_of.parent",
+		},
+		{
 			name: "set priority with no workspace",
 			check: func() *connect.Error {
 				return validateSetWorkspacePriorityRequest(&agentreplv1.SetWorkspacePriorityRequest{})
@@ -492,6 +514,20 @@ func TestEachRequestValidatorAcceptsAWellFormedRequestWithTargetsAndSources(t *t
 					Workspace:  ref(),
 					Visibility: &agentreplv1.SetWorkspaceHiddenRequest_Hide{Hide: &agentreplv1.SetWorkspaceHiddenHide{}},
 				})
+			},
+		},
+		{
+			name: "set parent to top-level",
+			check: func() *connect.Error {
+				return validateSetWorkspaceParentRequest(&agentreplv1.SetWorkspaceParentRequest{Workspace: ref(),
+					Parent: &agentreplv1.SetWorkspaceParentRequest_TopLevel{TopLevel: &agentreplv1.SetWorkspaceParentTopLevel{}}})
+			},
+		},
+		{
+			name: "set parent as a child",
+			check: func() *connect.Error {
+				return validateSetWorkspaceParentRequest(&agentreplv1.SetWorkspaceParentRequest{Workspace: ref(),
+					Parent: &agentreplv1.SetWorkspaceParentRequest_ChildOf{ChildOf: &agentreplv1.SetWorkspaceParentChild{Parent: ref()}}})
 			},
 		},
 		{

@@ -494,6 +494,23 @@ func (s *requestLoggingServer) SetWorkspacePriority(
 	return s.server.SetWorkspacePriority(ctx, req)
 }
 
+func (s *requestLoggingServer) SetWorkspaceParent(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.SetWorkspaceParentRequest],
+) (resp *connect.Response[agentreplv1.SetWorkspaceParentResponse], err error) {
+	boundary, err := s.server.beginRequest(ctx, "SetWorkspaceParent", req.Header().Get(requestIDHeader), requestMessage(req))
+	if err != nil {
+		return nil, boundaryFailure(err)
+	}
+	boundary.log.Debug("daemon.server.set_workspace_parent", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
+	defer func() {
+		boundary.log.Debug("daemon.server.set_workspace_parent", "completed the rpc handler", boundary.completionContext(err))
+	}()
+	return s.server.SetWorkspaceParent(ctx, req)
+}
+
 func (s *requestLoggingServer) SetWorkspaceHidden(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.SetWorkspaceHiddenRequest],

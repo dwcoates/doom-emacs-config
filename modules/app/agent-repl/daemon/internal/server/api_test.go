@@ -27,6 +27,22 @@ func TestNewRefusesAMissingDependency(t *testing.T) {
 	}
 }
 
+// TestNewRefusesAMissingRetarget pins that the retarget operation is
+// required: SetWorkspaceParent has no other way to change a merge target.
+func TestNewRefusesAMissingRetarget(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	deps := Deps{DB: h.DB, Prompts: h.Prompts, Queue: h.Queue, Verbs: h.Verbs}
+
+	// Act.
+	_, err := New(deps)
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "the retarget operation") {
+		t.Fatalf("New = %v, want the refusal naming the retarget operation", err)
+	}
+}
+
 // TestNewRefusesMissingLoudFaults pins that the standing loud faults are
 // required: an Emacs stream with nothing to subscribe to would never be told
 // a failed deploy.
@@ -34,7 +50,7 @@ func TestNewRefusesMissingLoudFaults(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	deps := Deps{
-		DB: h.DB, Prompts: h.Prompts, Queue: h.Queue, Verbs: h.Verbs, Merge: h.Merge,
+		DB: h.DB, Prompts: h.Prompts, Queue: h.Queue, Verbs: h.Verbs, Retarget: h.Retarget, Merge: h.Merge,
 		Drain: h.Drain, Rollout: h.Rollout, Deploy: h.Deployer, Health: h.Health, Login: h.Login,
 		Ownership: h.Ownership, SuccessorAddress: func() string { return "" },
 		Feed: h.Feed, Footer: h.Footer, Topbar: h.Topbar, Sidebar: h.Sidebar,
@@ -56,7 +72,7 @@ func TestNewRefusesAMissingWebappDist(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	deps := Deps{
-		DB: h.DB, Prompts: h.Prompts, Queue: h.Queue, Verbs: h.Verbs, Merge: h.Merge,
+		DB: h.DB, Prompts: h.Prompts, Queue: h.Queue, Verbs: h.Verbs, Retarget: h.Retarget, Merge: h.Merge,
 		Drain: h.Drain, Rollout: h.Rollout, Health: h.Health, Login: h.Login,
 		Ownership: h.Ownership, SuccessorAddress: func() string { return "" },
 		Feed: h.Feed, Footer: h.Footer, Topbar: h.Topbar, Sidebar: h.Sidebar,

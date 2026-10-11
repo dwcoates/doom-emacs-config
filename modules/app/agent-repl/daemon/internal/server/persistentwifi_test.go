@@ -120,7 +120,7 @@ func TestNewRefusesAMissingPersistentWifiController(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	deps := Deps{
-		DB: h.DB, Prompts: h.Prompts, Queue: h.Queue, Verbs: h.Verbs, Merge: h.Merge,
+		DB: h.DB, Prompts: h.Prompts, Queue: h.Queue, Verbs: h.Verbs, Retarget: h.Retarget, Merge: h.Merge,
 		Drain: h.Drain, Rollout: h.Rollout, Deploy: h.Deployer, Health: h.Health, Login: h.Login,
 		Ownership: h.Ownership, SuccessorAddress: func() string { return "" },
 		Feed: h.Feed, Footer: h.Footer, Topbar: h.Topbar, Sidebar: h.Sidebar,
