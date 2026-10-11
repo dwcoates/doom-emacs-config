@@ -125,7 +125,35 @@ var migrations = []migration{
 	{To: 32, Name: "hidden_workspaces", Kind: MigrationAdditive, DDL: hiddenWorkspacesDDL},
 	{To: 33, Name: "merge_workspaces", Kind: MigrationAdditive, DDL: mergeWorkspacesDDL},
 	{To: 34, Name: "commit_count", Kind: MigrationAdditive, DDL: commitCountDDL},
+	{To: 35, Name: "workspaces_place", Kind: MigrationAdditive, DDL: workspacePlaceDDL},
 }
+
+// workspacePlaceDDL adds the stored roster place (see schema.go's `place`) and
+// seeds it from the order the roster drew before places existed: priority
+// strongest first (P0.5 is 0, unprioritized sorts last), then name, then id.
+// So the first roster a migrated daemon publishes draws exactly what the last
+// one before it did.
+//
+// IT IS ADDITIVE. The previous build's INSERT names no place, so a row it
+// writes while a joining successor has already migrated takes the default 0,
+// and the workspaces_land_unplaced trigger moves it after every other place
+// before the next write. No row rests on 0, so that insert never meets the
+// unique index's refusal.
+const workspacePlaceDDL = `
+ALTER TABLE workspaces ADD COLUMN place INTEGER NOT NULL DEFAULT 0;
+UPDATE workspaces SET place = (
+  SELECT ranked.rank FROM (
+    SELECT id, ROW_NUMBER() OVER (
+      ORDER BY CASE WHEN priority IS NULL THEN 1 ELSE 0 END, priority, name, id
+    ) AS rank FROM workspaces
+  ) AS ranked WHERE ranked.id = workspaces.id
+);
+CREATE UNIQUE INDEX workspaces_by_place ON workspaces(place);
+CREATE TRIGGER workspaces_land_unplaced AFTER INSERT ON workspaces WHEN NEW.place = 0
+BEGIN
+  UPDATE workspaces SET place = (SELECT MAX(place) FROM workspaces) + 1 WHERE id = NEW.id;
+END;
+`
 
 // repositoriesFoldedDDL adds whether a repository's roster section is
 // collapsed (frontend.v1.RosterRepoSection.fold). Every existing repository

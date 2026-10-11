@@ -9,20 +9,6 @@ import (
 	"claude-repld/internal/wsm"
 )
 
-// unprioritized is the rank an unprioritized workspace sorts at: BELOW every
-// stated priority, and stated as a rank rather than as a special case so the
-// comparison below has exactly one shape.
-const unprioritized = 1 << 30
-
-// priorityRank is a workspace's ordering rank. P0.5 is the strongest claim and
-// sorts first; a workspace with no priority sorts after every one that has one.
-func priorityRank(p *wsm.Priority) int {
-	if p == nil {
-		return unprioritized
-	}
-	return int(*p)
-}
-
 // priorityLabel is the badge's drawn label, and the empty string when the
 // workspace is unprioritized — which draws NO badge rather than an empty one.
 func priorityLabel(p *wsm.Priority) string {
@@ -44,7 +30,7 @@ func priorityLabel(p *wsm.Priority) string {
 }
 
 // priorityBadge composes the badge, or nil when the workspace is
-// unprioritized. Ordering is already the resolver's; this is only the label.
+// unprioritized. Priority only picks a workspace's landing place; this is only the label.
 func priorityBadge(p *wsm.Priority) *frontendv1.RosterRowPriorityBadge {
 	label := priorityLabel(p)
 	if label == "" {
@@ -54,24 +40,18 @@ func priorityBadge(p *wsm.Priority) *frontendv1.RosterRowPriorityBadge {
 }
 
 // sortWorkspaces puts workspaces in ROSTER ORDER, which every client — the
-// Emacs tab bar included — follows strictly and never re-sorts:
+// Emacs tab bar included — follows strictly and never re-sorts: ascending
+// STORED PLACE (wsm's place.go), unique across the registry, so no tie-break
+// exists to disagree about.
 //
-//  1. PRIORITY, strongest first: P0.5, P1, P2, P3, then unprioritized.
-//  2. NAME, ascending, so the order is stable for workspaces alike in priority.
-//  3. The workspace id, so two workspaces alike in both still draw in one
-//     fixed order rather than swapping between pushes.
-//
-// THE ORDER IS A PROPERTY OF THE WORKSPACES, NEVER OF THE SELECTION. Roster
-// order once broke a priority tie on LAST SELECTED, and that made the drawn
-// order move under the user: selecting a workspace stamps its
-// last_selected_at, the registry re-pushes, and the row the user had just
-// landed on hopped to the front of its priority band. Cycling right and then
-// left therefore did not return the user where they started — realtest 4 went
-// explanation-engine → ABC/chess960-review-failures-enm → rt4-bootstrap-1.
-// Every individual switch was correct for the order it saw; the order was
-// what moved. Selection changes what is UNDERLINED and nothing about what is
-// where, so no field stamped at selection time may order the bar. The
-// selection instant still draws, in the row's when column.
+// THE PLACE IS THE WORKSPACE'S OWN, NEVER THE SELECTION'S, AND NEVER ITS
+// PRIORITY'S. Roster order once broke a priority tie on LAST SELECTED, and
+// that made the drawn order move under the user: selecting a workspace stamped
+// its last_selected_at, the registry re-pushed, and the row the user had just
+// landed on hopped to the front of its priority band, so cycling right and
+// then left did not return the user where they started. Priority now decides
+// only where a workspace LANDS at create and re-open; after that only the
+// user's own swaps move it.
 //
 // It sorts a copy: the slice belongs to the registry's caller.
 func sortWorkspaces(in []wsm.Workspace) []wsm.Workspace {
@@ -81,17 +61,10 @@ func sortWorkspaces(in []wsm.Workspace) []wsm.Workspace {
 	return out
 }
 
-// lessWorkspace is roster order's comparison, stated once so sections, nested
-// children and the merged section cannot order themselves differently.
+// lessWorkspace is roster order's comparison, stated once so sections and
+// nested children cannot order themselves differently.
 func lessWorkspace(a, b wsm.Workspace) bool {
-	ap, bp := priorityRank(a.Priority), priorityRank(b.Priority)
-	if ap != bp {
-		return ap < bp
-	}
-	if a.Name != b.Name {
-		return a.Name < b.Name
-	}
-	return a.ID < b.ID
+	return a.Place < b.Place
 }
 
 // compareRecentFirst orders two instants MOST RECENT FIRST, with "never"
