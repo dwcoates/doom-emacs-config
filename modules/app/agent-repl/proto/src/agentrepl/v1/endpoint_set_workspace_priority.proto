@@ -1,6 +1,7 @@
 // endpoint_set_workspace_priority.proto — SetWorkspacePriority: set or
-// clear a workspace's priority after creation. SIDEBAR section. The roster
-// resolver orders by priority and the roster row carries the badge fact;
+// clear a workspace's priority after creation. SIDEBAR section. The
+// workspace keeps its stored roster place (priority only picks the landing
+// place at create and re-open) and the roster row carries the badge fact;
 // the new state arrives on the roster stream.
 
 syntax = "proto3";

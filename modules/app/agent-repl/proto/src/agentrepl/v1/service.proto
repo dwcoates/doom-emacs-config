@@ -206,7 +206,7 @@ service AgentRepl {
   // See endpoint_restart_workspace.proto.
   rpc RestartWorkspace(RestartWorkspaceRequest) returns (RestartWorkspaceResponse);
 
-  // Set or clear a workspace's priority; the roster orders by it. See
+  // Set or clear a workspace's priority badge; the workspace keeps its place. See
   // endpoint_set_workspace_priority.proto.
   rpc SetWorkspacePriority(SetWorkspacePriorityRequest) returns (SetWorkspacePriorityResponse);
   // Move a workspace into the hidden section or back out; a hidden workspace
