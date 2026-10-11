@@ -60,6 +60,9 @@
 
 set -uo pipefail
 
+# shellcheck source=../../../modules/app/agent-repl/bin/lib-worktrees.sh
+. "$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../../modules/app/agent-repl/bin/lib-worktrees.sh"
+
 die() {
   printf 'merge-queue: %s\n' "$*" >&2
   exit 2
@@ -69,13 +72,10 @@ log() {
   printf 'merge-queue: %s\n' "$*"
 }
 
-# main_worktree answers the repository's main worktree: the first entry git
-# lists.
-main_worktree() {
-  local line
-  line="$(git worktree list --porcelain 2>/dev/null | sed -n 1p)" || return 1
-  [ "${line#worktree }" != "$line" ] || return 1
-  printf '%s\n' "${line#worktree }"
+# repo_main_worktree answers the repository's main worktree: the first entry
+# git lists (lib-worktrees.sh).
+repo_main_worktree() {
+  main_worktree . 2>/dev/null
 }
 
 # workspace_top answers the worktree this shell is inside, refusing the
@@ -83,7 +83,7 @@ main_worktree() {
 workspace_top() {
   local top main
   top="$(git rev-parse --show-toplevel 2>/dev/null)" || die "not inside a git worktree"
-  main="$(main_worktree)" || die "not inside a git repository"
+  main="$(repo_main_worktree)" || die "not inside a git repository"
   [ "$top" != "$main" ] || die "$top is the repository's main worktree, not a workspace; use --land-branch for a branch"
   printf '%s\n' "$top"
 }
@@ -95,7 +95,7 @@ daemon_bin() {
   if [ -n "${AGENT_REPL_DAEMON_BIN:-}" ]; then
     bin="$AGENT_REPL_DAEMON_BIN"
   else
-    main="$(main_worktree)" || die "not inside a git repository"
+    main="$(repo_main_worktree)" || die "not inside a git repository"
     bin="$main/modules/app/agent-repl/daemon/bin/claude-repld"
   fi
   [ -x "$bin" ] || die "the daemon binary $bin is missing or not executable"
@@ -163,7 +163,7 @@ case "${1:-}" in
     shift
     [ "$#" -gt 0 ] || die "--land-commits needs at least one commit"
     top="$(workspace_top)" || exit 2
-    main="$(main_worktree)" || die "not inside a git repository"
+    main="$(repo_main_worktree)" || die "not inside a git repository"
     target="$(git -C "$main" rev-parse --abbrev-ref HEAD)" || die "could not read the main worktree's branch"
     own="$(git -C "$top" rev-parse --abbrev-ref HEAD)" || die "could not read this workspace's branch"
     wanted=()
@@ -206,7 +206,7 @@ case "${1:-}" in
     ;;
   --remove-branch)
     [ -n "${2:-}" ] || die "--remove-branch needs a branch name"
-    main="$(main_worktree)" || die "not inside a git repository"
+    main="$(repo_main_worktree)" || die "not inside a git repository"
     wt="$(git -C "$main" worktree list --porcelain 2>/dev/null |
       awk -v want="branch refs/heads/$2" '/^worktree /{dir=substr($0,10)} $0==want{print dir}')"
     if [ -n "$wt" ]; then

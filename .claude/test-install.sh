@@ -47,37 +47,53 @@ fail() { echo "  FAIL: $1"; FAIL=$((FAIL + 1)); shift; if [ $# -gt 0 ]; then pri
 # (checked-in <repo>/.claude/skills symlink), not a user-level installed skill.
 LOCAL_SKILL_NAMES=( profile runtime-eval-code workspace-close emit-workspace-commands.sh )
 
-# Build a synthetic repo containing a fresh copy of install.sh, the
-# pre-commit hook, a manifest with one cached skill 'foo' whose impl is
-# $1, and the local-skill source dirs.  When $1 is omitted, an existing
-# impl dir is created under the repo so install succeeds; pass a
-# nonexistent path to exercise the FAIL-HARD branch.
+# Build a synthetic repo containing a fresh copy of install.sh and the
+# requirements runner it delegates to, the pre-commit hook, and a requirements
+# manifest naming the local skills, the hook, and one external skill 'foo'
+# whose source is $1 (reached through FOO_SKILL_ROOT, as a real external skill
+# is reached through MULTI_REPO_ROOT). When $1 is omitted an existing source
+# dir is created under the repo so install succeeds; pass a nonexistent path
+# to exercise the fail-hard branch.
 mkfake_repo() {
   local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
   local impl_path="${1:-$root/impl/foo}"
-  mkdir -p "$root/.claude" \
-           "$root/.githooks" \
-           "$root/modules/app/agent-repl/skills-cache" \
-           "$root/modules/app/agent-repl/skills"
+  local module="$root/modules/app/agent-repl"
+  mkdir -p "$root/.claude" "$root/.githooks" "$module/bin" "$module/skills"
   cp "$REPO_ROOT/.claude/install.sh" "$root/.claude/install.sh"
+  cp "$REPO_ROOT/modules/app/agent-repl/bin/requirements.sh" "$module/bin/requirements.sh"
+  cp "$REPO_ROOT/modules/app/agent-repl/bin/lib-worktrees.sh" "$module/bin/lib-worktrees.sh"
   cp "$REPO_ROOT/.githooks/pre-commit" "$root/.githooks/pre-commit"
-  chmod +x "$root/.claude/install.sh" "$root/.githooks/pre-commit"
+  chmod +x "$root/.claude/install.sh" "$module/bin/requirements.sh" "$root/.githooks/pre-commit"
   # Create the default impl only when the caller did not supply one.
   if [ -z "${1:-}" ]; then
     mkdir -p "$root/impl/foo"
     echo "impl-content" > "$root/impl/foo/SKILL.md"
   fi
-  cat > "$root/modules/app/agent-repl/skills-cache/manifest.sh" <<EOF
-CACHED_SKILLS=("foo|$impl_path")
-EOF
-  # Local-skill source dirs (install.sh links straight to these).
+  write_manifest "$root" "$impl_path"
+  # Local-skill source dirs (the manifest links straight to these).
   for s in "${LOCAL_SKILL_NAMES[@]}"; do
-    mkdir -p "$root/modules/app/agent-repl/skills/$s"
-    printf 'name: %s\n' "$s" > "$root/modules/app/agent-repl/skills/$s/SKILL.md"
+    mkdir -p "$module/skills/$s"
+    printf 'name: %s\n' "$s" > "$module/skills/$s/SKILL.md"
   done
-  # Init git so install.sh can resolve --show-toplevel + --git-path.
+  # Init git so the runner can resolve --show-toplevel + --git-path.
   git -C "$root" init
   echo "$root"
+}
+
+# write_manifest ROOT FOO_SOURCE: the synthetic repo's requirements manifest.
+# FOO_SKILL_ROOT is recorded beside it for run_install to export.
+write_manifest() {
+  local root="$1" impl_path="$2" s
+  {
+    printf '{"system": "agent-repl", "requirements": ['
+    printf '{"id": "skill-foo", "kind": "skill_link", "why": "a test skill", "profile": "run", "name": "foo", "source": {"env": "FOO_SKILL_ROOT", "path": "%s"}}' "$(basename "$impl_path")"
+    for s in "${LOCAL_SKILL_NAMES[@]}"; do
+      printf ', {"id": "skill-%s", "kind": "skill_link", "why": "a local skill", "profile": "run", "name": "%s", "source": {"repo": "modules/app/agent-repl/skills/%s"}}' "$s" "$s" "$s"
+    done
+    printf ', {"id": "pre-commit-hook", "kind": "git_hook", "why": "the lint gate", "profile": "dev", "hook": "pre-commit", "source": ".githooks/pre-commit", "markers": ["AGENT_REPL_MANAGED_HOOK: agent-repl-precommit", "CLAUDE_REPL_MANAGED_HOOK: claude-repl-precommit"]}'
+    printf ']}\n'
+  } > "$root/modules/app/agent-repl/requirements.json"
+  dirname "$impl_path" > "$root/.foo-skill-root"
 }
 
 mkfake_home() {
@@ -92,7 +108,8 @@ LAST_RC=0
 run_install() {
   local repo="$1" home="$2" action="${3:-install}"
   set +e
-  HOME="$home" bash "$repo/.claude/install.sh" "$action" >"$repo/.install.log" 2>&1
+  HOME="$home" FOO_SKILL_ROOT="$(cat "$repo/.foo-skill-root")" \
+    bash "$repo/.claude/install.sh" "$action" >"$repo/.install.log" 2>&1
   LAST_RC=$?
   set -e
 }
@@ -171,15 +188,11 @@ test_install_fresh_symlinks_to_impl() {
 }
 
 # --- install: the default action reports success in its EXIT CODE ---
-# Regression: the services step used to be guarded by a short-circuit
-# `[ "$WITH_SERVICES" -eq 1 ] && install_agent_shim_services` that was the
-# last command in its case arm, so with the opt-in flag OFF a fully
-# successful install exited 1.
 test_install_default_action_exits_zero() {
   local repo home; repo="$(mkfake_repo)"; home="$(mkfake_home)"
   run_install "$repo" "$home"
-  if [ "$LAST_RC" -eq 0 ] && grep -q "^\[install\] Done\." "$repo/.install.log"; then
-    pass "default install (no services flag) exits zero"
+  if [ "$LAST_RC" -eq 0 ] && grep -q "install: every required entry is met" "$repo/.install.log"; then
+    pass "default install exits zero"
   else
     fail "default install exit code" "rc: $LAST_RC" "$(cat "$repo/.install.log")"
   fi
@@ -191,8 +204,8 @@ test_uninstall_default_action_exits_zero() {
   local repo home; repo="$(mkfake_repo)"; home="$(mkfake_home)"
   run_install "$repo" "$home"
   run_install "$repo" "$home" uninstall
-  if [ "$LAST_RC" -eq 0 ] && grep -q "^\[uninstall\] Done\." "$repo/.install.log"; then
-    pass "default uninstall (no services flag) exits zero"
+  if [ "$LAST_RC" -eq 0 ] && grep -q "uninstall: done" "$repo/.install.log"; then
+    pass "default uninstall exits zero"
   else
     fail "default uninstall exit code" "rc: $LAST_RC" "$(cat "$repo/.install.log")"
   fi
@@ -218,7 +231,7 @@ test_install_fails_hard_when_impl_missing() {
   local repo home; repo="$(mkfake_repo "/nonexistent/impl-$$")"; home="$(mkfake_home)"
   run_install "$repo" "$home"
   if [ "$LAST_RC" -ne 0 ] \
-     && grep -q "ERROR: canonical impl for 'foo' not found" "$repo/.install.log" \
+     && grep -q "foo's source /nonexistent/impl-$$ does not exist" "$repo/.install.log" \
      && [ ! -L "$home/.claude/skills/foo" ]; then
     pass "missing impl fails hard with no symlink created"
   else
@@ -237,12 +250,11 @@ test_install_rejects_nonmain_worktree_impl() {
   # Point the manifest's skill impl INSIDE the linked (non-main) worktree.
   mkdir -p "$repo/linked-wt/impl/bar"
   echo x > "$repo/linked-wt/impl/bar/SKILL.md"
-  cat > "$repo/modules/app/agent-repl/skills-cache/manifest.sh" <<EOF
-CACHED_SKILLS=("bar|$repo/linked-wt/impl/bar")
-EOF
+  write_manifest "$repo" "$repo/linked-wt/impl/bar"
+  sed -i '' 's/"name": "foo"/"name": "bar"/' "$repo/modules/app/agent-repl/requirements.json"
   run_install "$repo" "$home"
   if [ "$LAST_RC" -ne 0 ] \
-     && grep -q "non-main worktree" "$repo/.install.log" \
+     && grep -q "inside a linked worktree" "$repo/.install.log" \
      && [ ! -L "$home/.claude/skills/bar" ]; then
     pass "rejects a skill impl inside a non-main worktree"
   else
@@ -260,7 +272,7 @@ test_local_skills_link_to_main_worktree() {
   git -C "$repo" worktree add -q --detach "$repo/linked-wt" >/dev/null
   # Invoke install.sh from the LINKED worktree's own checkout.
   set +e
-  HOME="$home" \
+  HOME="$home" FOO_SKILL_ROOT="$(cat "$repo/.foo-skill-root")" \
     bash "$repo/linked-wt/.claude/install.sh" install >"$repo/.install.log" 2>&1
   LAST_RC=$?
   set -e
@@ -283,9 +295,9 @@ test_install_preserves_non_symlink_file() {
   local repo home; repo="$(mkfake_repo)"; home="$(mkfake_home)"
   echo "user file" > "$home/.claude/skills/foo"
   run_install "$repo" "$home"
-  if [ -f "$home/.claude/skills/foo" ] && [ ! -L "$home/.claude/skills/foo" ] \
-     && grep -q "non-symlink file" "$repo/.install.log"; then
-    pass "non-symlink file is left untouched with a warning"
+  if [ "$LAST_RC" -ne 0 ] && [ -f "$home/.claude/skills/foo" ] && [ ! -L "$home/.claude/skills/foo" ] \
+     && grep -q "is a file of yours" "$repo/.install.log"; then
+    pass "non-symlink file is left untouched, and the install fails naming it"
   else
     fail "non-symlink preservation" "rc: $LAST_RC" "$(cat "$repo/.install.log")"
   fi
@@ -313,7 +325,7 @@ test_install_refreshes_managed_hook() {
   echo "# tampered" >> "$repo/.fakegit/hooks/pre-commit"
   run_install "$repo" "$home"  # rerun
   if ! grep -q "^# tampered" "$repo/.fakegit/hooks/pre-commit" \
-     && grep -q "Refreshed managed pre-commit hook" "$repo/.install.log"; then
+     && grep -q "pre-commit-hook is outdated" "$repo/.install.log"; then
     pass "managed pre-commit hook refreshed on rerun"
   else
     fail "managed hook refresh" "$(cat "$repo/.install.log")"
@@ -336,7 +348,7 @@ test_install_refreshes_legacy_marked_hook() {
   run_install "$repo" "$home"
   if ! grep -q "echo stale" "$repo/.fakegit/hooks/pre-commit" \
      && grep -q "AGENT_REPL_MANAGED_HOOK" "$repo/.fakegit/hooks/pre-commit" \
-     && grep -q "Refreshed managed pre-commit hook" "$repo/.install.log"; then
+     && grep -q "pre-commit-hook is outdated" "$repo/.install.log"; then
     pass "legacy-marked pre-commit hook is refreshed, not called foreign"
   else
     fail "legacy-marked hook refresh" "rc: $LAST_RC" "$(cat "$repo/.install.log")"
@@ -370,7 +382,7 @@ test_install_hookspath_is_source_dir_exits_zero() {
   git -C "$repo" config core.hooksPath "$repo/.githooks"
   run_install "$repo" "$home"
   if [ "$LAST_RC" -eq 0 ] \
-     && grep -q "already live via core.hooksPath" "$repo/.install.log" \
+     && grep -q "is the checked-in hook (core.hooksPath)" "$repo/.install.log" \
      && grep -q "agent-repl-precommit" "$repo/.githooks/pre-commit"; then
     pass "core.hooksPath pointing at .githooks installs as a no-op, exit 0"
   else
@@ -399,9 +411,9 @@ test_install_preserves_foreign_pre_commit() {
   printf '#!/bin/sh\necho foreign\n' > "$repo/.fakegit/hooks/pre-commit"
   chmod +x "$repo/.fakegit/hooks/pre-commit"
   run_install "$repo" "$home"
-  if grep -q "echo foreign" "$repo/.fakegit/hooks/pre-commit" \
-     && grep -q "foreign pre-commit hook" "$repo/.install.log"; then
-    pass "foreign pre-commit hook is preserved"
+  if [ "$LAST_RC" -ne 0 ] && grep -q "echo foreign" "$repo/.fakegit/hooks/pre-commit" \
+     && grep -q "is a hook of yours" "$repo/.install.log"; then
+    pass "foreign pre-commit hook is preserved, and the install fails naming it"
   else
     fail "foreign pre-commit preservation" "$(cat "$repo/.install.log")"
   fi

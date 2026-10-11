@@ -1,0 +1,51 @@
+{
+  "system": "shim-sidecar",
+  "requirements": [
+    {
+      "id": "go",
+      "kind": "program",
+      "why": "builds the Go systems (daemon, store, sidecar, shim-lock); Emacs cold start and every deploy run bin/build-frontend.sh",
+      "profile": "run",
+      "platforms": [
+        "darwin",
+        "linux"
+      ],
+      "command": "go",
+      "version": {
+        "args": [
+          "version"
+        ],
+        "min": "1.24"
+      },
+      "install": {
+        "brew": "go"
+      }
+    },
+    {
+      "id": "launchctl",
+      "kind": "program",
+      "why": "loads the store and sidecar as launchd user agents",
+      "profile": "run",
+      "platforms": [
+        "darwin"
+      ],
+      "command": "launchctl",
+      "install": {
+        "manual": "launchctl ships with macOS."
+      }
+    },
+    {
+      "id": "service-shim-claude-sidecar",
+      "kind": "launchd_service",
+      "why": "watches Claude transcripts and spools into the store, kept running by launchd",
+      "profile": "run",
+      "platforms": [
+        "darwin"
+      ],
+      "label": "com.agentrepl.shim-claude-sidecar",
+      "plist": "launchd/com.agentrepl.shim-claude-sidecar.plist",
+      "build_target": "sidecar",
+      "binary": "shim-claude-sidecar"
+    }
+  ]
+}

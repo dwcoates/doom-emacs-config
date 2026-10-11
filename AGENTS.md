@@ -123,11 +123,12 @@ New code added to the agent-repl module must include instrumentation via `agent-
 
 ## Skill symlinks: always target the MAIN worktree, never a linked one
 
-The skill installer (`.claude/install.sh` + `modules/app/agent-repl/skills-cache/manifest.sh`) symlinks each managed skill into `~/.claude/skills/`. **Every symlink MUST point into the MAIN worktree of its repo, never a transient linked worktree.**
+The installer (`.claude/install.sh`, which runs `modules/app/agent-repl/bin/requirements.sh install`) symlinks each managed skill into `~/.claude/skills/` from its `skill_link` entry in `modules/app/agent-repl/requirements.json`. **Every symlink MUST point into the MAIN worktree of its repo, never a transient linked worktree.**
 
 - A linked worktree (anything under `~/.config/doom-worktrees/*`, agent worktrees, etc.) is ephemeral — its path dangles the moment the worktree is pruned, leaving a broken skill symlink.
-- `install.sh` resolves the main worktree via `git worktree list --porcelain` (its first `worktree` entry) and sources repo-local skills from there, regardless of which worktree the script is invoked from.
-- `install.sh` **fails hard** (`_impl_in_nonmain_worktree`) when any manifest impl path resolves inside a non-main worktree. Do not add such an entry to `manifest.sh`.
+- A `{"repo": ...}` source resolves against the MAIN worktree (`git worktree list --porcelain`'s first `worktree` entry), whichever worktree runs the installer.
+- The installer reports a skill whose source resolves inside a linked worktree as `failed` and links nothing. Do not add such an entry.
+- A skill from another repository is an `{"env": ..., "path": ...}` source under that repository's root variable (the explanation-engine skills live under `$MULTI_REPO_ROOT`), never a path spelled for one machine.
 - A skill with no home in the main worktree is NOT eligible to be managed. Re-home it (commit it into `modules/app/agent-repl/skills/` for repo-local skills, or its repo's main checkout for external skills) before adding it back.
 
 The workspace-command skills (`workspace-merge`, `workspace-status`, `workspace-update`, `generate-workspace`) were folded into the single `/workspace` skill — manage `workspace`, not the removed per-command names.

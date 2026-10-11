@@ -2,7 +2,7 @@
 
 ;; Loaded by `doom doctor' to surface configuration and daemon problems.
 ;;
-;; TWO KINDS OF CHECK.
+;; THREE KINDS OF CHECK.
 ;;
 ;; The PROVIDER checks come from the loaded sources: each provider answers a
 ;; list of (LEVEL . MESSAGE) pairs and this file translates them into
@@ -10,6 +10,11 @@
 ;; treated as a failure -- `doom doctor' loads this file independently of the
 ;; full module, so a provider's absence usually means its source did not
 ;; load, which is not itself the finding to report.
+;;
+;; The REQUIREMENTS check asks bin/requirements.sh, the one reader of the
+;; requirement manifests, for its report (`check --json'): every unmet
+;; required entry is an error and every unmet optional one a warning, each
+;; carrying the fix the runner names.  The doctor checks no requirement itself.
 ;;
 ;; The DAEMON PROBE asks the running daemon for its own verdict, over a
 ;; FRESH connection built for that one question.  Three outcomes, and the
@@ -143,6 +148,62 @@ healthy daemon is not one."
              (list (cons 'warn (format "agent-repl: no daemon answering at %s (stale daemon.addr)"
                                        address)))))))))))
 
+;;;; ---- The requirements ----
+
+(defconst agent-repl--doctor-requirements-script
+  (expand-file-name "bin/requirements.sh" (file-name-directory (or load-file-name buffer-file-name)))
+  "The requirements runner the doctor asks, beside this file.")
+
+(defun agent-repl--doctor-run-requirements ()
+  "Run the requirements check and answer (EXIT . OUTPUT).
+OUTPUT is the runner's standard output and standard error together: the
+JSON report, or the reason it could not make one.  THE ONE PROCESS SEAM
+the tests stub."
+  (with-temp-buffer
+    (let ((exit (call-process agent-repl--doctor-requirements-script nil t nil "check" "--json")))
+      (cons exit (buffer-string)))))
+
+(defun agent-repl--doctor-requirement-issue (entry)
+  "The doctor issue for one unmet requirement ENTRY of the runner's report.
+A required entry is an error and an optional one a warning; each names the
+fix the runner gave."
+  (let ((optional (eq (gethash "optional" entry) t)))
+    (cons (if optional 'warn 'error)
+          (format "agent-repl: requirement %s is %s%s: %s. %s Fix: %s"
+                  (gethash "id" entry) (gethash "status" entry)
+                  (if optional " (optional)" "")
+                  (gethash "detail" entry) (gethash "why" entry) (gethash "fix" entry)))))
+
+(defun agent-repl--doctor-requirements-issues ()
+  "Return every unmet requirement as a (LEVEL . MESSAGE) doctor issue.
+The manifests are the one record of what agent-repl needs, and
+bin/requirements.sh the one reader of them, so the doctor asks it rather
+than checking anything itself.  A runner that refuses the manifests (exit
+2) or answers something that is not its report is itself an error."
+  (let* ((result (agent-repl--doctor-run-requirements))
+         (exit (car result))
+         (output (cdr result)))
+    (agent-repl--doctor-log "doctor: requirements exit=%S output-bytes=%d" exit (length output))
+    (if (not (memq exit '(0 1)))
+        (progn
+          (agent-repl--doctor-log "doctor: requirements refused exit=%S output=%S" exit output)
+          (list (cons 'error (format "agent-repl: bin/requirements.sh check could not run (exit %S): %s"
+                                     exit (string-trim output)))))
+      (let ((report (condition-case err
+                        (json-parse-string output)
+                      (json-parse-error
+                       (agent-repl--doctor-log "doctor: requirements unparseable error=%S output=%S" err output)
+                       :unparseable))))
+        (if (eq report :unparseable)
+            (list (cons 'error (format "agent-repl: bin/requirements.sh check answered no report (exit %S): %s"
+                                       exit (string-trim output))))
+          (let ((issues (delq nil (mapcar (lambda (entry)
+                                            (unless (equal (gethash "status" entry) "ok")
+                                              (agent-repl--doctor-requirement-issue entry)))
+                                          report))))
+            (agent-repl--doctor-log "doctor: requirements entries=%d unmet=%d" (length report) (length issues))
+            issues))))))
+
 ;;;; ---- Aggregation ----
 
 (let ((issues
@@ -164,6 +225,7 @@ healthy daemon is not one."
                     "doctor: provider=%s outcome=skipped reason=unbound" provider)
                    nil))
                '(agent-repl--widget-doctor-issues
+                 agent-repl--doctor-requirements-issues
                  agent-repl--doctor-daemon-issues)))))
   (agent-repl--doctor-log
    "doctor: aggregation issue-count=%d issues=%S" (length issues) issues)

@@ -78,8 +78,8 @@ STORE_LABEL="com.agentrepl.shim-store"
 SIDECAR_LABEL="com.agentrepl.shim-claude-sidecar"
 SOCK_MAX="${AGENT_REPL_STORE_SOCK_MAX:-180}"
 
-# WHERE THE PLISTS LIVE. The same directory `.claude/install.sh`
-# (install_agent_shim_services) copies each rewritten template into, and the
+# WHERE THE PLISTS LIVE. The same directory the installer (bin/requirements.sh,
+# the launchd_service kind) writes each rewritten template into, and the
 # same `$LABEL.plist` naming, because a bootstrap needs the file the service
 # was bootstrapped from originally. Overridable for the hermetic harness, for
 # the same reason AGENT_REPL_LAUNCHCTL is.
@@ -175,7 +175,7 @@ fi
 if [ "$KEEP_DOWN" -eq 0 ]; then
     for label in "$STORE_LABEL" "$SIDECAR_LABEL"; do
         plist="$(service_plist "$label")"
-        [ -f "$plist" ] || die "$plist is missing; this reset boots the services out and needs their plists to bring them back. Nothing was stopped and nothing was removed. Re-run .claude/install.sh --with-agent-shim-services to reinstall them."
+        [ -f "$plist" ] || die "$plist is missing; this reset boots the services out and needs their plists to bring them back. Nothing was stopped and nothing was removed. Re-run .claude/install.sh to reinstall them."
     done
 fi
 
