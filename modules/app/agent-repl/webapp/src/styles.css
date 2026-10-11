@@ -2290,6 +2290,13 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
 .tool-card.bubble-fold[data-expanded="true"] {
   max-height: var(--feed-item-max-h);
 }
+/* AN EXPANDED MERGE BUBBLE STOPS A QUARTER SHORT OF THAT CEILING (owner
+   ruling, 2026-10-11): 75% of `--feed-item-max-h`, so it tracks every resize
+   the ceiling does. Only the merge bubble; subagent bubbles keep the full
+   ceiling. */
+.tool-card.bubble-fold[data-merge-bubble][data-expanded="true"] {
+  max-height: calc(var(--feed-item-max-h) * 0.75);
+}
 .bubble-fold[data-expanded="true"] > .bubble-head { flex: 0 0 auto; }
 .bubble-fold[data-expanded="true"] > .bubble-subfeed {
   flex: 0 1 auto;
