@@ -411,8 +411,12 @@ func TestRowDetailCarriesTheCommitCount(t *testing.T) {
 			r.SetRegistry(registry(ws))
 
 			// Assert.
-			got := latest(t, r).GetRecentlyMerged().GetRows().GetRows()
-			if !tc.merged {
+			var got []*frontendv1.RosterRow
+			if tc.merged {
+				for _, group := range latest(t, r).GetRecentlyMerged().GetGroups() {
+					got = append(got, group.GetRows().GetRows()...)
+				}
+			} else {
 				got = []*frontendv1.RosterRow{onlyRow(t, r)}
 			}
 			if len(got) != 1 || got[0].GetDetail().GetCommits() == nil || got[0].GetDetail().GetCommits().GetCount() != tc.count {
