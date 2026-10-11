@@ -25,7 +25,7 @@
  * against a fresh render: the reconcile then compares full text with full
  * text, keeps every unchanged node, and the reveal is applied again after.
  */
-import { revealSlice } from "../smooth.js";
+import { revealSlice } from "../reveal-pace.js";
 
 /** The attribute an element wears while none of its text is revealed. */
 export const UNREVEALED_ATTRIBUTE = "data-unrevealed";
