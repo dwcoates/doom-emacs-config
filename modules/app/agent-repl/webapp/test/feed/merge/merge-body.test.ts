@@ -479,3 +479,120 @@ describe("a redraw of the tab's content", () => {
 
 });
 
+
+/** A sub-feed whose ordinary row path reuses each row's element, as the real one does. */
+class CachingSubfeed extends FakeSubfeed {
+  private readonly elements = new Map<string, HTMLElement>();
+
+  override drawRow(row: Parameters<FakeSubfeed["drawRow"]>[0]): HTMLElement {
+    const value = row.id?.value ?? "unset";
+    const held = this.elements.get(value);
+    if (held !== undefined) return held;
+    const el = super.drawRow(row);
+    this.elements.set(value, el);
+    return el;
+  }
+}
+
+/** A tests tab row carrying one running suite at PASSED of 10. */
+const testsTab = (passed: number) =>
+  tabRow("t-tests", {
+    kind: "tests",
+    state: "live",
+    payload: {
+      suites: [
+        { name: "unit", state: { case: "running", value: { soFar: { case: "passing", value: {} } } }, counts: { passed, failed: 0, total: 10 } },
+      ],
+    },
+  });
+
+/**
+ * A MERGE BUBBLE'S BODY IS DRAWN IN PLACE (owner request, 2026-10-10): the
+ * daemon re-pushes a running tab on every beat of its work, and a body rebuilt
+ * on each push restarted every live dot, which read as the dots blinking.
+ */
+describe("the body redraws in place", () => {
+  it("keeps a tab's element and its live dot across a push that moved only the tab's content", () => {
+    // Arrange
+    const view = new FakeSubfeed([testsTab(1)]);
+    const { host } = mount(view);
+    const tab = host.querySelector(".merge-tab");
+    const glyph = host.querySelector(".merge-tab-glyph");
+    // Act
+    view.push([testsTab(2)]);
+    // Assert
+    expect([host.querySelector(".merge-tab"), host.querySelector(".merge-tab-glyph")]).toEqual([tab, glyph]);
+  });
+
+  it("keeps the shown suite's element and its live dot across a push of new counts", () => {
+    // Arrange
+    const view = new FakeSubfeed([testsTab(1)]);
+    const { host } = mount(view);
+    const glyph = host.querySelector(".merge-suite-glyph");
+    // Act
+    view.push([testsTab(2)]);
+    // Assert
+    expect([host.querySelector(".merge-suite-glyph"), host.querySelector(".merge-suite-counts")?.textContent]).toEqual([
+      glyph,
+      "2/0/10",
+    ]);
+  });
+
+  it("leaves a resolved tab's content standing when its row did not change", () => {
+    // Arrange
+    const rebasing = tabRow("t-rebase", { kind: "rebasing", state: "live" });
+    const view = new FakeSubfeed([rebasing]);
+    const { host } = mount(view);
+    const content = host.querySelector(".merge-tab-panel")?.firstElementChild;
+    // Act
+    view.push([rebasing]);
+    // Assert
+    expect(host.querySelector(".merge-tab-panel")?.firstElementChild).toBe(content);
+  });
+
+  it("redraws a resolved tab's content when its row changed", () => {
+    // Arrange
+    const view = new FakeSubfeed([tabRow("t-rebase", { kind: "rebasing", state: "live", payload: { progress: { replayed: 1, total: 7 } } })]);
+    const { host } = mount(view);
+    // Act
+    view.push([tabRow("t-rebase", { kind: "rebasing", state: "live", payload: { progress: { replayed: 3, total: 7 } } })]);
+    // Assert
+    expect(host.querySelector(".merge-tab-panel")?.textContent).toContain("3/7");
+  });
+
+  it("keeps an agentic tab's rows container, and a row that stays is never moved", () => {
+    // Arrange
+    const view = new CachingSubfeed([tabRow("t1", { kind: "conflicts", state: "live" }), childRow("r1", "t1")]);
+    const { host } = mount(view);
+    const container = host.querySelector(".merge-tab-rows");
+    const row = host.querySelector('[data-feed-row="r1"]');
+    // Act
+    view.push([tabRow("t1", { kind: "conflicts", state: "live" }), childRow("r1", "t1"), childRow("r2", "t1")]);
+    // Assert
+    expect([host.querySelector(".merge-tab-rows"), host.querySelector('[data-feed-row="r1"]'), host.querySelectorAll(".merge-tab-rows > *").length]).toEqual([
+      container,
+      row,
+      2,
+    ]);
+  });
+
+  it("draws the newly shown tab's content afresh when the shown tab changes", () => {
+    // Arrange
+    const view = new FakeSubfeed([tabRow("t-rebase", { kind: "rebasing", state: "live" })]);
+    const { host } = mount(view);
+    // Act
+    view.push([tabRow("t-rebase", { kind: "rebasing", state: "settled" }), testsTab(1)]);
+    // Assert
+    expect(host.querySelector(".merge-tab-panel")?.getAttribute("data-merge-tab-body")).toBe("tests");
+  });
+
+  it("stops the clock of a tab no longer served", () => {
+    // Arrange
+    const view = new FakeSubfeed([tabRow("t-rebase", { kind: "rebasing", state: "live" }), testsTab(1)]);
+    const { host } = mount(view);
+    // Act
+    view.push([testsTab(1)]);
+    // Assert
+    expect(host.querySelectorAll(".merge-tab")).toHaveLength(1);
+  });
+});

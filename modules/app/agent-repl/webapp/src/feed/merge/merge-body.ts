@@ -28,10 +28,12 @@
  * an ask open says so on its badge (❓, tab-strip.ts); the ask itself is
  * answered where every ask is, never in the bubble.
  */
+import { equals } from "@bufbuild/protobuf";
 import { log } from "../../log.js";
+import { placeChildren } from "../../dom.js";
 import { requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import type { Handle } from "../../failure/local.js";
-import type { FeedRow } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
+import { FeedRowSchema, type FeedRow } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import {
   NEST_ATTRIBUTE,
   drawBreadcrumbTrail,
@@ -43,12 +45,13 @@ import {
   AGENTIC_KINDS,
   autoSelectedTab,
   drawFeedMergeTab,
+  updateFeedMergeTab,
   mergeTabsOf,
   type MergeTab,
 } from "./tab-strip.js";
 import { replaceTicking, stopTicking } from "../ticking.js";
 import { drawFeedMergeQueue } from "./queue.js";
-import { drawFeedMergeTabTests } from "./tests-tab.js";
+import { drawFeedMergeTabTests, updateFeedMergeTabTests } from "./tests-tab.js";
 import {
   drawFeedMergeTabCommitting,
   drawFeedMergeTabFixesAttempt,
@@ -86,6 +89,11 @@ export const mergeBubbleBody: BubbleBodyRenderer = (mount, view, rc): Handle => 
 
   mount.append(strip, summary, panel, loose);
 
+  /** Each drawn tab's element, and the tab and activeness it was drawn from, by tab id. */
+  const drawnTabs = new Map<string, { el: HTMLElement; tab: MergeTab; active: boolean }>();
+  /** The tab the panel last drew, kept while that same tab stays the one shown. */
+  let shown: MergeTab | null = null;
+
   const draw = (): void => {
     drawBreadcrumbTrail(breadcrumbs, view.breadcrumbs(), rc, mount);
     const tabs = mergeTabsOf(view.rows());
@@ -95,21 +103,64 @@ export const mergeBubbleBody: BubbleBodyRenderer = (mount, view, rc): Handle => 
       operation: "merge.draw-body",
       context: { tabs: tabs.length, active: active?.kind ?? "none", picked: picked ?? "auto" },
     });
-    replaceTicking(
-      strip,
-      tabs.map((tab) => {
-        const el = drawFeedMergeTab(tab, { active: tab.id === active?.id, ticker: rc.ctx.ticker });
+    drawStrip(tabs, active);
+    drawSummary(summary, active);
+    drawPanel(active);
+    drawLooseRows(loose, tabs, view);
+  };
+
+  /**
+   * THE STRIP IS DRAWN IN PLACE (owner request, 2026-10-10). The daemon
+   * re-pushes a tab row on every beat of its work — a tests tab on every unit
+   * verdict, many times a second — and a strip rebuilt on each push restarted
+   * every live tab's breathing dot, which read as the dots blinking. Each tab
+   * keeps its element for its whole life, repainted only where its tab or its
+   * activeness changed (`updateFeedMergeTab`).
+   */
+  function drawStrip(tabs: readonly MergeTab[], active: MergeTab | undefined): void {
+    const els = tabs.map((tab) => {
+      const isActive = tab.id === active?.id;
+      const drawn = drawnTabs.get(tab.id);
+      if (drawn === undefined) {
+        const el = drawFeedMergeTab(tab, { active: isActive, ticker: rc.ctx.ticker });
         el.addEventListener("click", () => {
           picked = tab.id;
           draw();
         });
+        drawnTabs.set(tab.id, { el, tab, active: isActive });
         return el;
-      }),
-    );
-    drawSummary(summary, active);
+      }
+      if (drawn.active !== isActive || !equals(FeedRowSchema, drawn.tab.row, tab.row)) {
+        updateFeedMergeTab(drawn.el, tab, drawn.tab, { active: isActive, ticker: rc.ctx.ticker });
+        drawn.tab = tab;
+        drawn.active = isActive;
+      }
+      return drawn.el;
+    });
+    const served = new Set(tabs.map((tab) => tab.id));
+    for (const [id, drawn] of drawnTabs) {
+      if (served.has(id)) continue;
+      stopTicking(drawn.el);
+      drawnTabs.delete(id);
+    }
+    placeChildren(strip, els);
+  }
+
+  /**
+   * THE PANEL IS DRAWN IN PLACE while the same tab stays the one shown
+   * (`updateTabBody`), for the reason the strip is; a different tab is drawn
+   * afresh (`drawTabBody`).
+   */
+  function drawPanel(active: MergeTab | undefined): void {
+    if (active !== undefined && shown !== null && shown.id === active.id && shown.kind === active.kind) {
+      if (updateTabBody(panel, active, shown, view, rc)) {
+        shown = active;
+        return;
+      }
+    }
     drawTabBody(panel, active, view, rc);
-    drawLooseRows(loose, tabs, view);
-  };
+    shown = active ?? null;
+  }
 
   /**
    * Let go of the reader's pick when a tab they have never seen arrives.
@@ -211,6 +262,53 @@ export function drawTabBody(
   replaceTicking(host, content);
 }
 
+/**
+ * Bring HOST, showing TAB's content as it was drawn from PREVIOUS (the same
+ * tab), to TAB IN PLACE, answering whether it could. A tests tab updates its
+ * suites where they stand (`updateFeedMergeTabTests`); an agentic tab places
+ * its rows in the container it already has, so a row that stays is never
+ * moved; any other tab is left as it stands when its row did not change, and
+ * answers false (draw afresh) when it did.
+ */
+export function updateTabBody(
+  host: HTMLElement,
+  tab: MergeTab,
+  previous: MergeTab,
+  view: SubfeedView,
+  rc: RowContext,
+): boolean {
+  const path = "FeedMergeTab.kind";
+  const kind = requireCase(tab.tab.kind, path);
+  const before = requireCase(previous.tab.kind, path);
+  switch (kind.case) {
+    case "tests":
+      if (before.case !== "tests") return false;
+      updateFeedMergeTabTests(host, kind.value, before.value, rc.ctx, `${path}.tests`);
+      return true;
+    case "fixes": {
+      if (before.case !== "fixes") return false;
+      const rows = host.querySelector<HTMLElement>(":scope > .merge-tab-rows");
+      const attempt = host.firstElementChild;
+      if (rows === null || attempt === null || attempt === rows) return false;
+      if (!equals(FeedRowSchema, previous.row, tab.row)) {
+        attempt.replaceWith(drawFeedMergeTabFixesAttempt(kind.value, `${path}.fixes`));
+      }
+      placeChildren(rows, agenticRowsOf(tab, view));
+      return true;
+    }
+    case "prePrompt":
+    case "conflicts":
+    case "postPrompt": {
+      const rows = host.querySelector<HTMLElement>(":scope > .merge-tab-rows");
+      if (rows === null) return false;
+      placeChildren(rows, agenticRowsOf(tab, view));
+      return true;
+    }
+    default:
+      return equals(FeedRowSchema, previous.row, tab.row);
+  }
+}
+
 /** The selected tab's content, drawn off the document. */
 function drawTabContent(tab: MergeTab, view: SubfeedView, rc: RowContext): HTMLElement[] {
   const path = "FeedMergeTab.kind";
@@ -250,17 +348,23 @@ function drawTabContent(tab: MergeTab, view: SubfeedView, rc: RowContext): HTMLE
 export function drawAgenticRows(tab: MergeTab, view: SubfeedView): HTMLElement {
   // Every row is drawn first and only then moved into the new container, so
   // no row leaves the document while another is still being drawn.
+  const rows = agenticRowsOf(tab, view);
+  const el = document.createElement("div");
+  el.className = "merge-tab-rows";
+  el.setAttribute(NEST_ATTRIBUTE, "");
+  el.append(...rows);
+  return el;
+}
+
+/** The rows parented to TAB, in feed order, each drawn through the ordinary path. */
+function agenticRowsOf(tab: MergeTab, view: SubfeedView): HTMLElement[] {
   const rows: HTMLElement[] = [];
   for (const row of view.rows()) {
     if (row.row.case === "mergeTab") continue;
     if (parentOf(row) !== tab.id) continue;
     rows.push(view.drawRow(row));
   }
-  const el = document.createElement("div");
-  el.className = "merge-tab-rows";
-  el.setAttribute(NEST_ATTRIBUTE, "");
-  el.append(...rows);
-  return el;
+  return rows;
 }
 
 /** The container a row names, or undefined for a top-level row. */

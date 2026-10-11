@@ -28,6 +28,7 @@ import type { Ticker } from "../../clock.js";
 import { liveElapsedClock, settledElapsedClock } from "../../elapsed-clock.js";
 import { log } from "../../log.js";
 import { msOf, requireCase, requireMessage } from "../../rpc/strict.js";
+import { stopTicking } from "../ticking.js";
 import type {
   FeedMergeTab,
   FeedMergeTabLabel,
@@ -157,6 +158,46 @@ export function drawFeedMergeTab(
   return el;
 }
 
+/**
+ * Bring EL, a tab drawn from PREVIOUS, to TAB IN PLACE.
+ *
+ * THE TAB KEEPS ITS ELEMENTS, so a push that changed nothing the reader sees
+ * changes nothing drawn: the state glyph is the same element repainted only
+ * where its state moved, so a live dot's breath runs on unbroken (a fresh
+ * element restarts it, which read as the dot blinking on every push), and the
+ * duration is redrawn only when its clock's instants moved, so a live clock
+ * keeps its one subscription.
+ */
+export function updateFeedMergeTab(
+  el: HTMLElement,
+  tab: MergeTab,
+  previous: MergeTab,
+  opts: { active: boolean; ticker: Ticker },
+): void {
+  el.setAttribute("data-merge-tab", tab.kind);
+  el.setAttribute("data-tab-state", tab.state);
+  if (tab.outcome !== undefined) el.setAttribute("data-tab-outcome", tab.outcome);
+  else el.removeAttribute("data-tab-outcome");
+  el.setAttribute("aria-selected", opts.active ? "true" : "false");
+  el.classList.toggle("is-active", opts.active);
+  const label = el.querySelector(":scope > .merge-tab-label");
+  const nextLabel = drawFeedMergeTabLabel(requireMessage(tab.tab.label, `${PATH}.label`));
+  if (label === null) el.prepend(nextLabel);
+  else if (label.textContent !== nextLabel.textContent) label.replaceWith(nextLabel);
+  const duration = el.querySelector(`:scope > .${TAB_DURATION_CLASS}`);
+  if (duration === null || tab.startedMs !== previous.startedMs || tab.endedMs !== previous.endedMs) {
+    const next = drawTabDuration(tab, opts.ticker);
+    if (duration === null) el.append(next);
+    else {
+      stopTicking(duration);
+      duration.replaceWith(next);
+    }
+  }
+  const glyph = el.querySelector<HTMLElement>(":scope > .merge-tab-glyph");
+  if (glyph === null) el.append(drawTabStateGlyph(tab));
+  else paintTabStateGlyph(glyph, tab);
+}
+
 /** The class of a tab's duration, beside its label. */
 export const TAB_DURATION_CLASS = "merge-tab-duration";
 
@@ -186,35 +227,42 @@ export function drawFeedMergeTabLabel(label: FeedMergeTabLabel): HTMLElement {
 /** The state glyph: filled dot live, check or cross settled. */
 export function drawTabStateGlyph(tab: MergeTab): HTMLElement {
   const el = document.createElement("span");
-  el.className = "merge-tab-glyph";
   el.setAttribute("aria-hidden", "true");
+  paintTabStateGlyph(el, tab);
+  return el;
+}
+
+/**
+ * Paint EL as TAB's state glyph, touching only what differs, so a glyph whose
+ * state did not move is left exactly as it stands (its breath unbroken).
+ */
+export function paintTabStateGlyph(el: HTMLElement, tab: MergeTab): void {
+  const [modifier, glyph] = tabGlyphOf(tab);
+  const className = modifier === null ? "merge-tab-glyph" : `merge-tab-glyph ${modifier}`;
+  if (el.className !== className) el.className = className;
+  if (el.textContent !== glyph) el.textContent = glyph;
+}
+
+/** TAB's glyph modifier class and its glyph, by its state. */
+function tabGlyphOf(tab: MergeTab): [string | null, string] {
   switch (tab.state) {
     case "live":
-      el.classList.add("is-live");
-      el.textContent = STATE_GLYPHS.live;
-      return el;
+      return ["is-live", STATE_GLYPHS.live];
     case "waitingOnUser":
       // The merge's agent has a permission ask or a question open: the tab
       // says so for exactly as long as the footer reads "waiting on user".
-      el.classList.add("is-waiting-on-user");
-      el.textContent = STATE_GLYPHS.waitingOnUser;
-      return el;
+      return ["is-waiting-on-user", STATE_GLYPHS.waitingOnUser];
     case "settled":
-      if (tab.outcome === "failed") {
-        el.classList.add("is-failed");
-        el.textContent = STATE_GLYPHS.failed;
-        return el;
-      }
-      el.classList.add("is-succeeded");
-      el.textContent = STATE_GLYPHS.succeeded;
-      return el;
+      return tab.outcome === "failed"
+        ? ["is-failed", STATE_GLYPHS.failed]
+        : ["is-succeeded", STATE_GLYPHS.succeeded];
     default:
       // Unreachable through `readMergeTab`, which validates the arm first.
       log.warn(`a merge tab reports a state this build has no glyph for: ${tab.state}`, {
         operation: "merge.unknown-tab-state",
         context: { state: tab.state, kind: tab.kind },
       });
-      return el;
+      return [null, ""];
   }
 }
 
