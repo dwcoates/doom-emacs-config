@@ -21,6 +21,8 @@ import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
 import type { FeedRow, FeedSelection, FeedTextScale } from "../../frontend/v1/feed_pb";
 import { file_frontend_v1_feed } from "../../frontend/v1/feed_pb";
+import type { FeedHeld } from "../../frontend/v1/feed_held_pb";
+import { file_frontend_v1_feed_held } from "../../frontend/v1/feed_held_pb";
 import type { FeedWatchToken } from "./feed_token_pb";
 import { file_agentrepl_v1_feed_token } from "./feed_token_pb";
 import type { Message } from "@bufbuild/protobuf";
@@ -29,7 +31,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_watch_feed.proto.
  */
 export const file_agentrepl_v1_endpoint_watch_feed: GenFile = /*@__PURE__*/
-  fileDesc("CiZhZ2VudHJlcGwvdjEvZW5kcG9pbnRfd2F0Y2hfZmVlZC5wcm90bxIMYWdlbnRyZXBsLnYxIj8KEFdhdGNoRmVlZFJlcXVlc3QSKwoFd2F0Y2gYASABKAsyHC5hZ2VudHJlcGwudjEuRmVlZFdhdGNoVG9rZW4ixgEKEVdhdGNoRmVlZFJlc3BvbnNlEiEKA3JvdxgBIAEoCzIULmZyb250ZW5kLnYxLkZlZWRSb3cSMgoJc2VsZWN0aW9uGAIgASgLMhouZnJvbnRlbmQudjEuRmVlZFNlbGVjdGlvbkgAiAEBEjgKD2ZlZWRfdGV4dF9zY2FsZRgDIAEoCzIaLmZyb250ZW5kLnYxLkZlZWRUZXh0U2NhbGVIAYgBAUIMCgpfc2VsZWN0aW9uQhIKEF9mZWVkX3RleHRfc2NhbGVCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_frontend_v1_feed, file_agentrepl_v1_feed_token]);
+  fileDesc("CiZhZ2VudHJlcGwvdjEvZW5kcG9pbnRfd2F0Y2hfZmVlZC5wcm90bxIMYWdlbnRyZXBsLnYxIj8KEFdhdGNoRmVlZFJlcXVlc3QSKwoFd2F0Y2gYASABKAsyHC5hZ2VudHJlcGwudjEuRmVlZFdhdGNoVG9rZW4ihQIKEVdhdGNoRmVlZFJlc3BvbnNlEiEKA3JvdxgBIAEoCzIULmZyb250ZW5kLnYxLkZlZWRSb3cSMgoJc2VsZWN0aW9uGAIgASgLMhouZnJvbnRlbmQudjEuRmVlZFNlbGVjdGlvbkgAiAEBEjgKD2ZlZWRfdGV4dF9zY2FsZRgDIAEoCzIaLmZyb250ZW5kLnYxLkZlZWRUZXh0U2NhbGVIAYgBARI0CgRoZWxkGAQgASgLMiEuYWdlbnRyZXBsLnYxLldhdGNoRmVlZEhlbGRDaGFuZ2VIAogBAUIMCgpfc2VsZWN0aW9uQhIKEF9mZWVkX3RleHRfc2NhbGVCBwoFX2hlbGQiXgoTV2F0Y2hGZWVkSGVsZENoYW5nZRIjCgRoZWxkGAEgASgLMhUuZnJvbnRlbmQudjEuRmVlZEhlbGQSIgoEcm93cxgCIAMoCzIULmZyb250ZW5kLnYxLkZlZWRSb3dCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_frontend_v1_feed, file_frontend_v1_feed_held, file_agentrepl_v1_feed_token]);
 
 /**
  * Opens the tail of the ONE feed the token names.
@@ -59,8 +61,8 @@ export const WatchFeedRequestSchema: GenMessage<WatchFeedRequest> = /*@__PURE__*
  * task bubble another act touched). The client upserts by FeedRow.id.
  *
  * A frame carries EXACTLY ONE of a row upsert (`row`), a response-selection
- * push (`selection`), or a feed-text-scale push (`feed_text_scale`), never more
- * than one. The selection push is the daemon's per-workspace
+ * push (`selection`), a feed-text-scale push (`feed_text_scale`), or a
+ * held-section change (`held`), never more than one. The selection push is the daemon's per-workspace
  * reply-to-a-past-response state (reply-to-a-past-response mode), pushed on
  * the ROOT feed's watch so the webapp recolors the selected final-response
  * bubble, center-scrolls it, and suppresses tail-follow while a selection is
@@ -97,6 +99,16 @@ export type WatchFeedResponse = Message<"agentrepl.v1.WatchFeedResponse"> & {
    * @generated from field: optional frontend.v1.FeedTextScale feed_text_scale = 3;
    */
   feedTextScale?: FeedTextScale | undefined;
+
+  /**
+   * The root feed's held section changed. Set on a held-section frame; unset
+   * otherwise. Carried on the ROOT feed's watch only, in publication order
+   * with its rows, so a tail opened at OpenFeed's pin misses no change of the
+   * section either.
+   *
+   * @generated from field: optional agentrepl.v1.WatchFeedHeldChange held = 4;
+   */
+  held?: WatchFeedHeldChange | undefined;
 };
 
 /**
@@ -105,4 +117,43 @@ export type WatchFeedResponse = Message<"agentrepl.v1.WatchFeedResponse"> & {
  */
 export const WatchFeedResponseSchema: GenMessage<WatchFeedResponse> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_watch_feed, 1);
+
+/**
+ * One change of the root feed's held section: the section as it now stands,
+ * and every row that moved between the section and the rows in the same change.
+ *
+ * ONE FRAME, SO AN ITEM IS NEVER DRAWN TWICE OR NOT AT ALL. An item that
+ * settles leaves the section and becomes a row in this one frame; a client
+ * applies `rows` and `held` together, before it draws, and never draws a state
+ * in which the item is in both places or in neither.
+ *
+ * @generated from message agentrepl.v1.WatchFeedHeldChange
+ */
+export type WatchFeedHeldChange = Message<"agentrepl.v1.WatchFeedHeldChange"> & {
+  /**
+   * The held section, whole. Replaces the section the client holds.
+   *
+   * @generated from field: frontend.v1.FeedHeld held = 1;
+   */
+  held?: FeedHeld | undefined;
+
+  /**
+   * The row publications made in the same change, in order: the row an item
+   * settled as (keyed at the moment it settled, the bottom of the feed, and
+   * carrying the item's own FeedId), or the removal of a row whose item
+   * returned to the section (a prompt's acceptance withdrawn when its
+   * delivery found no session). These rows ride ONLY here, never also as
+   * `row` frames. Empty when the change only reshaped the section.
+   *
+   * @generated from field: repeated frontend.v1.FeedRow rows = 2;
+   */
+  rows: FeedRow[];
+};
+
+/**
+ * Describes the message agentrepl.v1.WatchFeedHeldChange.
+ * Use `create(WatchFeedHeldChangeSchema)` to create a new message.
+ */
+export const WatchFeedHeldChangeSchema: GenMessage<WatchFeedHeldChange> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_watch_feed, 2);
 

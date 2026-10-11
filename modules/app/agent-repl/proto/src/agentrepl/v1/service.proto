@@ -56,7 +56,6 @@ import "agentrepl/v1/endpoint_fold_repository.proto";
 import "agentrepl/v1/endpoint_update_sidebar_view.proto";
 import "agentrepl/v1/endpoint_set_workspace_priority.proto";
 import "agentrepl/v1/endpoint_watch_footer.proto";
-import "agentrepl/v1/endpoint_watch_daemon_holds.proto";
 import "agentrepl/v1/endpoint_update_held_prompt.proto";
 import "agentrepl/v1/endpoint_edit_held_prompt.proto";
 import "agentrepl/v1/endpoint_fold_held_prompt.proto";
@@ -242,10 +241,10 @@ service AgentRepl {
   // The footer's stream: the view, whole.
   rpc WatchFooter(WatchFooterRequest) returns (stream WatchFooterResponse);
 
-  // ---- DAEMON-HOLD TRAY ----
-
-  // The tray's stream: the tray, whole.
-  rpc WatchDaemonHolds(WatchDaemonHoldsRequest) returns (stream WatchDaemonHoldsResponse);
+  // ---- HELD SECTION ----
+  //
+  // The section itself rides the root feed's own connection: OpenFeed's
+  // answer and WatchFeed's held-section frames. These are its actions.
 
   // Act on a held prompt: deliver now, or discard. See
   // endpoint_update_held_prompt.proto.
@@ -267,7 +266,7 @@ service AgentRepl {
   // endpoint_update_classifier_prompt.proto.
   rpc UpdateClassifierPrompt(UpdateClassifierPromptRequest) returns (UpdateClassifierPromptResponse);
 
-  // Answer a question the daemon parked in the tray. See
+  // Answer a question the daemon holds in the feed's held section. See
   // endpoint_answer_held_offer.proto.
   rpc AnswerHeldOffer(AnswerHeldOfferRequest) returns (AnswerHeldOfferResponse);
 
