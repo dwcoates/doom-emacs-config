@@ -784,7 +784,7 @@ func showArm() *agentreplv1.SetWorkspaceHiddenRequest_Show {
 // reaching the verb with the id the registry resolved.
 func TestSetWorkspaceHiddenHandsThePlaceToTheVerb(t *testing.T) {
 	tests := []struct {
-		name       string
+		name string
 		req  *agentreplv1.SetWorkspaceHiddenRequest
 		want bool
 	}{
