@@ -3,6 +3,7 @@ package promptqueue
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -11,6 +12,7 @@ import (
 	"claude-repld/internal/classifier"
 	"claude-repld/internal/feedid"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/sourcescan"
 	"claude-repld/internal/wsm"
 )
 
@@ -801,5 +803,58 @@ func TestTheDeliveryLockIsFreeWhileAReleasesInterruptIsSent(t *testing.T) {
 	// Assert
 	if !observed || !free {
 		t.Fatalf("interrupt sent = %v, delivery lock free = %v; want it sent with the lock free", observed, free)
+	}
+}
+
+func TestTakeAllAnswersTheLedgerAndClearsIt(t *testing.T) {
+	tests := []struct {
+		name   string
+		ledger []Submission
+	}{
+		{name: "an empty ledger", ledger: nil},
+		{name: "one entry", ledger: []Submission{submission("t1", "first")}},
+		{name: "two entries in order", ledger: []Submission{submission("t1", "first"), submission("t2", "second")}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ledger := slices.Clone(tc.ledger)
+
+			// Act
+			taken := takeAll(h.q, &ledger)
+
+			// Assert
+			if len(taken) != len(tc.ledger) || ledger != nil {
+				t.Fatalf("taken %d of %d, ledger left %v; want all taken and the ledger cleared", len(taken), len(tc.ledger), ledger)
+			}
+			for i := range taken {
+				if taken[i].Turn != tc.ledger[i].Turn {
+					t.Fatalf("taken[%d] = %s, want %s in order", i, taken[i].Turn, tc.ledger[i].Turn)
+				}
+			}
+		})
+	}
+}
+
+func TestEveryLedgerARedriveSettlesIsTakenThroughTakeAll(t *testing.T) {
+	tests := []struct {
+		ledger string
+	}{
+		{ledger: "parked"},
+		{ledger: "deferredJoins"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.ledger, func(t *testing.T) {
+			// Arrange, Act
+			taken := sourcescan.Count(t, "takeAll(q, &d.state."+tc.ledger+")")
+			byHand := sourcescan.Count(t, "state."+tc.ledger+" = nil")
+
+			// Assert: a ledger cleared by hand would drift from takeAll's
+			// take-exactly-once shape.
+			if taken != 1 || byHand != 0 {
+				t.Fatalf("%s taken through takeAll %d times and cleared by hand %d times, want once and never", tc.ledger, taken, byHand)
+			}
+		})
 	}
 }
