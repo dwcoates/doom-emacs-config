@@ -34,6 +34,7 @@ The owner chose the remedy: the vendor's `forkSession` writes the fork's transcr
 - File-edit checkpoints of pre-fork turns are not supported in a fork. The vendor's `forkSession` does not copy file-history snapshots.
 - Rolling back into inherited entries is not supported. This matches the existing rule in `daemon/internal/resolve/feed/rollback.go:89`.
 - Inherited history loads as pages on demand ("load more"), never pushed live. The owner called this "perfect".
+- A fork taken mid-turn ends just before the turn in flight started, which is that turn's opening prompt. The fork therefore holds only finished turns, which the parent never rewrites, so the fork's inherited rows cannot change after the fork. The owner then directed the change to be carried end to end and merged in one shot, with the orchestrator's recommendations standing as the design: a fork point that names a record rather than an instant, and the pointer held by the daemon.
 
 ## Verified facts
 
