@@ -1,6 +1,6 @@
 /**
- * tool-group — a maximal run of CONSECUTIVE same-kind tool cards, drawn as ONE
- * bubble whose members are selectable as TABS.
+ * tool-group — a maximal run of CONSECUTIVE same-kind tool cards, shown one at a
+ * time in its own card, with its members selectable as TABS inside that card.
  *
  * WHY IT LIVES AT THE SEQUENCE LAYER. Grouping is a fact about ADJACENCY — ten
  * Bash cards in a row, three subagent cards in a row — and adjacency is known
@@ -25,6 +25,15 @@
  * store across redraws, keyed by its first member) precisely so that pick
  * survives a re-arrange.
  *
+ * THE TABS SIT INSIDE THE MEMBER'S OWN CARD (owner ruling, 2026-10-10). There
+ * is no outer bubble: the group draws no chrome of its own, and the strip is
+ * laid over the top of the shown member's `.tool-card`, whose top padding grows
+ * by the strip's measured height (`--feed-group-strip-h`, kept current by a
+ * `ResizeObserver` on the strip). The strip is NOT a child of the card: the card
+ * belongs to its renderer, and a redraw that keeps a scrolled box morphs the
+ * card's children by index (keep-scroll.ts), which a foreign first child would
+ * throw off. So the group owns the strip and the stylesheet places it.
+ *
  * ANCHORING REACHES A GROUPED MEMBER. An inactive tab's member is hidden and so
  * has no layout box; a reveal/scroll-to-row that lands on one first activates
  * its tab (`activateGroupedMember`) so the member is shown before it is scrolled
@@ -36,8 +45,14 @@ import { log } from "../log.js";
 import { placeChildren } from "../dom.js";
 import type { FeedRow } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 
-/** The class the group container (the tabbed bubble) wears. */
+/** The class the group container wears; it draws no bubble of its own. */
 export const FEED_GROUP_CLASS = "feed-group";
+
+/**
+ * The custom property the group carries its strip's height on, in px: the
+ * extra top padding a member card leaves so the strip sits inside it.
+ */
+export const STRIP_HEIGHT_PROPERTY = "--feed-group-strip-h";
 
 /** The attribute a tab button carries the member id it selects on. */
 export const GROUP_TAB_MEMBER_ATTRIBUTE = "data-group-tab-member";
@@ -240,6 +255,14 @@ function createToolGroup(kind: string): ToolGroup {
   group.append(strip, panel);
   wrapper.append(group);
 
+  // THE STRIP'S HEIGHT IS MEASURED, NOT ASSUMED: the tabs wrap onto more rows
+  // as the run grows, and the member card's top padding must follow so the
+  // strip never covers the card's head.
+  const stripSize = new ResizeObserver(() => {
+    group.style.setProperty(STRIP_HEIGHT_PROPERTY, `${String(strip.offsetHeight)}px`);
+  });
+  stripSize.observe(strip);
+
   activators.set(group, (id) => {
     picked = id;
     layout(current);
@@ -305,6 +328,7 @@ function createToolGroup(kind: string): ToolGroup {
     update: layout,
     dispose(): void {
       activators.delete(group);
+      stripSize.disconnect();
       // The members are the controller's; the arrange pass that dropped this
       // group has already re-placed or discarded each of them, so the wrapper is
       // detached without touching them.
