@@ -2,6 +2,7 @@ package desktopnotify
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	"claude-repld/internal/dlog"
@@ -14,16 +15,24 @@ const opPost = "daemon.desktopnotify.post"
 // opChime is the operation a chime's records carry.
 const opChime = "daemon.desktopnotify.chime"
 
-// ClickSink is told a banner was clicked: the server pushes the host stream's
+// ClickSink is told a READ-BACK banner was clicked (a handed banner's click
+// selects the workspace itself): the server pushes the host stream's
 // notification_clicked, and Emacs raises its frame and selects the tab.
 type ClickSink interface {
 	NotificationClicked(ws ids.WorkspaceID)
 }
 
-// Names answers the name a banner titles a workspace by: the roster row's
-// name, which is the name the workspace's tab carries.
-type Names interface {
-	WorkspaceName(ctx context.Context, ws ids.WorkspaceID) (string, error)
+// Workspace is what a banner needs of its workspace: the name it is titled by
+// (the roster row's name, which the workspace's tab carries) and the directory
+// its click's WorkspaceRef echoes.
+type Workspace struct {
+	Name string
+	Dir  string
+}
+
+// Workspaces answers each banner's Workspace from the registry.
+type Workspaces interface {
+	Workspace(ctx context.Context, ws ids.WorkspaceID) (Workspace, error)
 }
 
 // Compose builds one banner from the workspace's name. It runs on the banner's
@@ -46,16 +55,16 @@ type Deps struct {
 	ChimeErr error
 	// Clicks is told each clicked banner's workspace.
 	Clicks ClickSink
-	// Names titles each banner.
-	Names Names
+	// Workspaces titles each banner and names its click's target.
+	Workspaces Workspaces
 	// Log is the notifier's canonical logger.
 	Log dlog.Logger
 }
 
 // Notifier posts desktop banners and rings chimes. Every banner and chime runs
-// on a goroutine of its own, because the banner program blocks until the
-// banner is clicked or dismissed and the player until the sound ends; Close
-// cancels and joins them all.
+// on a goroutine of its own, because composing a banner may call a model, a
+// read-back banner program blocks until the banner is clicked or dismissed,
+// and the player until the sound ends; Close cancels and joins them all.
 type Notifier struct {
 	deps   Deps
 	ctx    context.Context
@@ -71,8 +80,8 @@ type Notifier struct {
 // New builds a notifier. It panics on a missing collaborator, because a
 // half-wired notifier is a boot defect, not a runtime condition.
 func New(deps Deps) *Notifier {
-	if deps.Focus == nil || deps.Clicks == nil || deps.Names == nil || deps.Log == nil {
-		panic("desktopnotify: New requires Focus, Clicks, Names and Log")
+	if deps.Focus == nil || deps.Clicks == nil || deps.Workspaces == nil || deps.Log == nil {
+		panic("desktopnotify: New requires Focus, Clicks, Workspaces and Log")
 	}
 	if (deps.Backend == nil) == (deps.BackendErr == nil) {
 		panic("desktopnotify: New requires exactly one of Backend and BackendErr")
@@ -157,7 +166,7 @@ func (n *Notifier) Raise(ws ids.WorkspaceID, kind, text string) {
 
 // show composes and posts one banner, and relays its click.
 func (n *Notifier) show(ws ids.WorkspaceID, log dlog.Logger, compose Compose) {
-	name, err := n.deps.Names.WorkspaceName(n.ctx, ws)
+	workspace, err := n.deps.Workspaces.Workspace(n.ctx, ws)
 	switch {
 	case stoodDown(n.ctx, err):
 		log.Info(opPost, "the daemon stood down while the workspace was named; no desktop banner", dlog.Context{"cause": err.Error()})
@@ -166,7 +175,7 @@ func (n *Notifier) show(ws ids.WorkspaceID, log dlog.Logger, compose Compose) {
 		log.Error(opPost, "could not name the workspace; no desktop banner", dlog.Context{"cause": err.Error()})
 		return
 	}
-	banner := compose(n.ctx, name)
+	banner := compose(n.ctx, workspace.Name)
 	if n.deps.Focus.Focused() {
 		log.Info(opPost, "Emacs was focused while the banner was composed; no desktop banner", nil)
 		return
@@ -180,7 +189,7 @@ func (n *Notifier) show(ws ids.WorkspaceID, log dlog.Logger, compose Compose) {
 	log.Info(opPost, "posting a desktop banner", dlog.Context{
 		"program": n.deps.Backend.Program(), "title": banner.Title,
 	})
-	clicked, err := n.deps.Backend.Post(n.ctx, ws, banner)
+	outcome, err := n.deps.Backend.Post(n.ctx, Target{ID: ws, Dir: workspace.Dir}, banner)
 	switch {
 	case stoodDown(n.ctx, err):
 		log.Info(opPost, "the daemon stood down while a banner awaited its click", dlog.Context{"cause": err.Error()})
@@ -188,11 +197,15 @@ func (n *Notifier) show(ws ids.WorkspaceID, log dlog.Logger, compose Compose) {
 		log.Error(opPost, "the desktop banner program failed", dlog.Context{
 			"program": n.deps.Backend.Program(), "title": banner.Title, "cause": err.Error(),
 		})
-	case clicked:
+	case outcome == Clicked:
 		log.Info(opPost, "the banner was clicked; asking Emacs to select the workspace", nil)
 		n.deps.Clicks.NotificationClicked(ws)
-	default:
+	case outcome == Handed:
+		log.Info(opPost, "the platform holds the banner; its click selects the workspace itself", nil)
+	case outcome == Unclicked:
 		log.Debug(opPost, "the banner was dismissed or timed out", nil)
+	default:
+		panic(fmt.Sprintf("desktopnotify: the banner backend answered an unknown outcome %d", outcome))
 	}
 }
 
