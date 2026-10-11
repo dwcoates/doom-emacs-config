@@ -53,7 +53,7 @@ beforeAll(async () => {
   // the merge lands.
   const response = await app.ctx.client.mergeWorkspace({
     workspace: app.ctx.workspace,
-    source: { source: { case: "ownBranch", value: { keepOpen: true } } },
+    source: { source: { case: "ownBranch", value: { run: { case: "inPlace", value: { keepOpen: true } } } } },
   });
   expect(response.result.case, `MergeWorkspace answered ${response.result.case}`).toBe("success");
   await awaitDrawn(app, "the merge bubble", () => mergeRows().length > 0);
