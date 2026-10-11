@@ -174,13 +174,14 @@ func (q *queue) takeRedrive(state *wsState) bool {
 	return owed
 }
 
-// takeParked answers and clears the submissions parked behind a call.
-func (q *queue) takeParked(state *wsState) []Submission {
+// takeAll answers and clears the ledger at LEDGER, under q.mu: what a call's
+// settle owes is taken exactly once, by the one redrive that settles it.
+func takeAll[T any](q *queue, ledger *[]T) []T {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	parked := state.parked
-	state.parked = nil
-	return parked
+	taken := *ledger
+	*ledger = nil
+	return taken
 }
 
 // deferredJoin is a join a standing shim call deferred: SUB, judged to join
@@ -190,22 +191,13 @@ type deferredJoin struct {
 	running ids.TurnID
 }
 
-// takeDeferredJoins answers and clears the joins deferred behind a call.
-func (q *queue) takeDeferredJoins(state *wsState) []deferredJoin {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	joins := state.deferredJoins
-	state.deferredJoins = nil
-	return joins
-}
-
 // redriveJoins takes again every join deferred behind the settled call. Each
 // is judged against the turn it was to join as at its verdict: the join goes
 // if that turn still runs and nothing else keeps it, and otherwise the prompt
 // is recorded waiting with the reason (joinLocked). The caller holds the
 // delivery lock.
 func (q *queue) redriveJoins(ctx context.Context, d *delivery, log dlog.Logger) {
-	for _, join := range q.takeDeferredJoins(d.state) {
+	for _, join := range takeAll(q, &d.state.deferredJoins) {
 		log.Debug(opCall, "taking again a join deferred behind the shim call", dlog.Context{
 			"turn": string(join.sub.Turn), "running_turn": string(join.running),
 		})
@@ -246,7 +238,7 @@ func (q *queue) holdBehindCall(ctx context.Context, d *delivery, sub Submission,
 // held prompt. The caller holds the delivery lock.
 func (q *queue) redrive(d *delivery) {
 	ctx := context.Background()
-	parked := q.takeParked(d.state)
+	parked := takeAll(q, &d.state.parked)
 	log, err := q.logger(ctx, d.ws)
 	if err != nil {
 		// q.logger recorded the failure. The parked prompts are durable holds
