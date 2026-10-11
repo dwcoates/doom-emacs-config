@@ -187,28 +187,32 @@ the module."
 (defconst agent-repl-switch-numeral-modifiers '("M" "s")
   "The modifiers the tab-bar slot chords ride: Meta (Option) and Super (Command).")
 
-(defvar agent-repl-workspace-numerals-mode-map
-  (let ((map (make-sparse-keymap)))
-    (dolist (modifier agent-repl-switch-numeral-modifiers)
-      (dotimes (i agent-repl-switch-numeral-count)
-        (let ((n (1+ i)))
-          (define-key map (kbd (format "%s-%d" modifier n))
-                      (intern (format "agent-repl-switch-to-workspace-%d" n)))))
-      (define-key map (kbd (format "%s-0" modifier)) 'agent-repl-switch-to-last-workspace))
-    ;; DOOM'S OWN WORKSPACE NAVIGATION IS REMAPPED, wherever it is bound
-    ;; (`SPC TAB [', `SPC TAB ]', `SPC TAB 1'..`9'): those commands switch the
-    ;; frame locally over persp-mode's list, and every switch trigger must
-    ;; instead REQUEST the switch of the daemon and walk the drawn bar.
-    ;; Doom's `+workspace/switch-to-N' is 0-based, the slot chords 1-based.
-    (define-key map [remap +workspace/switch-left] 'agent-repl-switch-left)
-    (define-key map [remap +workspace/switch-right] 'agent-repl-switch-right)
+(defun agent-repl--fill-workspace-numerals-map (map)
+  "Bind the tab-bar chords and Doom-navigation remaps into MAP."
+  (dolist (modifier agent-repl-switch-numeral-modifiers)
     (dotimes (i agent-repl-switch-numeral-count)
-      (define-key map (vector 'remap (intern (format "+workspace/switch-to-%d" i)))
-                  (intern (format "agent-repl-switch-to-workspace-%d" (1+ i)))))
-    (define-key map [remap +workspace/switch-to-final] 'agent-repl-switch-to-last-workspace)
-    ;; `evil-make-intercept-map' with no STATE, written as the data it writes.
-    (define-key map [intercept-state] 'all)
-    map)
+      (let ((n (1+ i)))
+        (define-key map (kbd (format "%s-%d" modifier n))
+                    (intern (format "agent-repl-switch-to-workspace-%d" n)))))
+    (define-key map (kbd (format "%s-0" modifier)) 'agent-repl-switch-to-last-workspace))
+  ;; DOOM'S OWN WORKSPACE NAVIGATION IS REMAPPED, wherever it is bound
+  ;; (`SPC TAB [', `SPC TAB ]', `SPC TAB 1'..`9'): those commands switch the
+  ;; frame locally over persp-mode's list, and every switch trigger must
+  ;; instead REQUEST the switch of the daemon and walk the drawn bar.
+  ;; Doom's `+workspace/switch-to-N' is 0-based, the slot chords 1-based.
+  (define-key map [remap +workspace/switch-left] 'agent-repl-switch-left)
+  (define-key map [remap +workspace/switch-right] 'agent-repl-switch-right)
+  (dotimes (i agent-repl-switch-numeral-count)
+    (define-key map (vector 'remap (intern (format "+workspace/switch-to-%d" i)))
+                (intern (format "agent-repl-switch-to-workspace-%d" (1+ i)))))
+  (define-key map [remap +workspace/switch-to-final] 'agent-repl-switch-to-last-workspace)
+  ;; `evil-make-intercept-map' with no STATE, written as the data it writes.
+  (define-key map [intercept-state] 'all))
+
+;; Refilled on EVERY load (`agent-repl-refill-keymap'), so a hot reload
+;; rebuilds the live map: built inside the `defvar', the `M-0' chord added
+;; after Emacs started never reached it.
+(defvar agent-repl-workspace-numerals-mode-map (make-sparse-keymap)
   "Keymap carrying `M-0\=' .. `M-9\=' and `s-0\=' .. `s-9\=', the bar chords.
 `M-1\=' .. `M-9\=' are slots, `M-0\=' the last tab on the bar.
 Built from `agent-repl-switch-numeral-count', the modifiers in
@@ -216,6 +220,9 @@ Built from `agent-repl-switch-numeral-count', the modifiers in
 generates from the same number, so a chord with no command behind it --
 or a command with no chord -- cannot be spelled.  An evil intercept map
 for every state; see the commentary above.")
+
+(agent-repl-refill-keymap agent-repl-workspace-numerals-mode-map
+                          #'agent-repl--fill-workspace-numerals-map)
 
 (define-minor-mode agent-repl-workspace-numerals-mode
   "Make `M-0\=' .. `M-9\=' and `s-0\=' .. `s-9\=' switch to a DRAWN TAB.
