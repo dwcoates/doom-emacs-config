@@ -849,6 +849,9 @@ body::after {
 
 /* Workspace rows. Children nest inside .kids, which draws the family guide
    line; indentation therefore compounds per generation. */
+/* ONE GUTTER WIDTH for every bar a rail row draws on its left (the
+   selection's accent, a merge-today's off-white), so the two never drift. */
+#ws-sidebar { --row-gutter-w: 3px; }
 #ws-sidebar .row {
   display: flex;
   align-items: center;
@@ -1048,8 +1051,8 @@ body::after {
    src/sidebar/row.ts, so the bar goes at midnight. The selector stays below
    `.ws.current > .row`'s weight, so a current merged row shows the accent. */
 #ws-sidebar .row.merged-today {
-  border-left: 3px solid var(--merged-today-gutter);
-  padding-left: calc(0.9rem - 3px);
+  border-left: var(--row-gutter-w) solid var(--merged-today-gutter);
+  padding-left: calc(0.9rem - var(--row-gutter-w));
 }
 /* REVIVING (frontend.v1.RosterRowReviving): the daemon is bringing this
    parked workspace's session back up. A SUBTLE shimmer on the NAME alone
@@ -1100,10 +1103,10 @@ body::after {
    ONLY selection mark (owner ruling, 2026-10-11): no row tint, no bolder
    name. */
 #ws-sidebar .ws.current > .row {
-  border-left: 3px solid var(--accent);
-  padding-left: calc(0.9rem - 3px);
+  border-left: var(--row-gutter-w) solid var(--accent);
+  padding-left: calc(0.9rem - var(--row-gutter-w));
 }
-#ws-sidebar .kids .ws.current > .row { padding-left: calc(0.55rem - 3px); }
+#ws-sidebar .kids .ws.current > .row { padding-left: calc(0.55rem - var(--row-gutter-w)); }
 
 /* Workspaces whose agent-repl is closed (and merged ones) stay listed but
    recede. */
