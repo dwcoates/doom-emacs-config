@@ -19,4 +19,13 @@ lands remains the only automatic open-to-folded change. Held prompts become
 held feed items in the same section, rather than a separate tray on a separate
 stream.
 
+## Process
+
+- 2026-10-10, owner: the owner reviews the ASCII layouts of the UI only. The
+  protobuf shapes are designed and landed by the orchestrator afterwards,
+  without putting them to the owner, checked box-for-box against the agreed
+  layouts and against this skill's design principles. A question that only a
+  protobuf could raise is put to the owner as a question about the UI or the
+  behavior, never as a sketch.
+
 ## Landed changes
