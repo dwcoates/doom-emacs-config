@@ -1295,6 +1295,39 @@ to the staged progress the daemon pushes on the WatchDaemon channel."
                            (agent-repl-verbs--closed-rows roster))
                    '("merged-one")))))
 
+;;;; ---- The row walk ----
+
+(ert-deftest agent-repl-verbs-all-rows-is-the-roster-walk ()
+  "The verbs walk the rows `agent-repl-roster-walk' walks, in its order.
+ONE WALK serves the tab bar and the verbs, so a hand-rolled verb walk that
+skipped a section the bar walks fails here rather than passing silently."
+  (let* ((kid (agent-repl-test-verbs--row
+               :workspace (list :workspace (agent-repl-test-verbs--ref "kid" "/tmp/kid"))
+               :name (list :text "kid")))
+         (parent (agent-repl-test-verbs--row :children (list kid)))
+         (merged (agent-repl-test-verbs--row
+                  :workspace (list :workspace (agent-repl-test-verbs--ref "m" "/tmp/m"))
+                  :name (list :text "merged-one")))
+         (roster (agent-repl-test-verbs--roster (list parent) (list merged))))
+    (should (equal (agent-repl-verbs--all-rows roster)
+                   (mapcar (lambda (entry) (plist-get entry :row))
+                           (agent-repl-roster-walk roster))))
+    (should (equal (mapcar #'agent-repl-verbs--row-name
+                           (agent-repl-verbs--all-rows roster))
+                   '("row-one" "kid" "merged-one")))))
+
+(ert-deftest agent-repl-verbs-all-rows-defaults-to-the-live-roster ()
+  "With no ROSTER the walk reads `agent-repl-roster-view'."
+  (let ((agent-repl-roster-view
+         (agent-repl-test-verbs--roster (list (agent-repl-test-verbs--row)))))
+    (should (equal (mapcar #'agent-repl-verbs--row-name (agent-repl-verbs--all-rows))
+                   '("row-one")))))
+
+(ert-deftest agent-repl-verbs-all-rows-of-no-roster-is-empty ()
+  "Before the first push there is no roster, and so no rows."
+  (let ((agent-repl-roster-view nil))
+    (should (null (agent-repl-verbs--all-rows)))))
+
 ;;;; ---- Create: the standard form ----
 
 (ert-deftest agent-repl-verbs-create-standard-sends-the-repository-and-form ()
