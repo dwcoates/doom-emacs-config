@@ -570,6 +570,38 @@ describe("createFeedController: the newest separation bounds the feed", () => {
     expect(drawnIds(host)).toEqual(["a", "cut"]);
   });
 
+  it("stops offering older pages when a clear arrives", () => {
+    // Arrange: a feed whose page had more above it.
+    const { controller, host } = fixture();
+    controller.applyPage(page([responseRow("a")], { hasMore: true }), "replace");
+    // Act
+    controller.upsert(separationRow("cut", "cleared"));
+    // Assert
+    expect(controller.hasMoreHistory()).toBe(false);
+    expect(host.querySelector("[data-load-more]")).toBeNull();
+  });
+
+  it("stops offering older pages when a clear arrives with nothing held above it", () => {
+    // Arrange: an empty page that had more above it.
+    const { controller, host } = fixture();
+    controller.applyPage(page([], { hasMore: true }), "replace");
+    // Act
+    controller.upsert(separationRow("cut", "cleared"));
+    // Assert
+    expect(controller.hasMoreHistory()).toBe(false);
+    expect(host.querySelector("[data-load-more]")).toBeNull();
+  });
+
+  it("records the walk ending at a clear at INFO", async () => {
+    const capture = captureLogRecords();
+    const { controller } = fixture();
+    controller.applyPage(page([responseRow("a")], { hasMore: true }), "replace");
+    controller.upsert(separationRow("cut", "cleared"));
+    const record = await forwardedRecord(capture, "feed.walk-ended-at-clear");
+    expect(record.level.case).toBe("info");
+    expect(record.context).toMatchObject({ row: "cut" });
+  });
+
   it("records the drop at INFO with the count it dropped", async () => {
     const capture = captureLogRecords();
     const { controller } = fixture();
