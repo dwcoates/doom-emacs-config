@@ -224,6 +224,7 @@ type harness struct {
 	db    *fakeDB
 	queue *fakeQueue
 	feed  *fakeFeed
+	asks  *fakeAsks
 
 	// asked records every panel command the source was asked for.
 	askedMu  sync.Mutex
@@ -241,6 +242,36 @@ type harness struct {
 	movedOn []ids.WorkspaceID
 }
 
+// fakeAsks is the standing-ask answerer: it answers `answered` and `err`, and
+// records every typed answer it was handed.
+type fakeAsks struct {
+	mu       sync.Mutex
+	answered bool
+	err      error
+	calls    []fakeAskCall
+}
+
+// fakeAskCall is one AnswerStandingAsk call.
+type fakeAskCall struct {
+	ws     ids.WorkspaceID
+	target *feedid.Ref
+	text   string
+}
+
+func (a *fakeAsks) AnswerStandingAsk(_ context.Context, ws ids.WorkspaceID, target *feedid.Ref, text string) (bool, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.calls = append(a.calls, fakeAskCall{ws: ws, target: target, text: text})
+	return a.answered, a.err
+}
+
+// asked reads back the typed answers the answerer was handed.
+func (a *fakeAsks) asked() []fakeAskCall {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]fakeAskCall(nil), a.calls...)
+}
+
 // moved reads back the workspaces the handler said moved on.
 func (h *harness) moved() []ids.WorkspaceID {
 	h.movedMu.Lock()
@@ -254,6 +285,7 @@ func newHarness(t *testing.T) *harness {
 		db:     newFakeDB(),
 		queue:  &fakeQueue{},
 		feed:   &fakeFeed{},
+		asks:   &fakeAsks{},
 		minted: "minted-turn",
 		log:    dlog.NewTestSurfaces(),
 		panel: &agentreplv1.SubmitPromptCommandPanel{
@@ -264,6 +296,7 @@ func newHarness(t *testing.T) *harness {
 		DB:    h.db,
 		Queue: h.queue,
 		Feed:  h.feed,
+		Asks:  h.asks,
 		Panels: func(_ context.Context, _ ids.WorkspaceID, command conversationv1.SessionCommand) (*agentreplv1.SubmitPromptCommandPanel, error) {
 			h.askedMu.Lock()
 			h.asked = append(h.asked, command)

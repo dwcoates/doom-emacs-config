@@ -24,6 +24,7 @@ import "agentrepl/v1/endpoint_interrupt.proto";
 import "agentrepl/v1/endpoint_inspect_chess_board_square.proto";
 import "agentrepl/v1/endpoint_answer_permission.proto";
 import "agentrepl/v1/endpoint_answer_question.proto";
+import "agentrepl/v1/endpoint_update_question_draft.proto";
 import "agentrepl/v1/endpoint_answer_cold_gate.proto";
 import "agentrepl/v1/endpoint_watch_workspace_roster.proto";
 import "agentrepl/v1/endpoint_create_workspace.proto";
@@ -150,6 +151,11 @@ service AgentRepl {
   rpc AnswerPermission(AnswerPermissionRequest) returns (AnswerPermissionResponse);
   // The question card's submission — answers echo the served values.
   rpc AnswerQuestion(AnswerQuestionRequest) returns (AnswerQuestionResponse);
+  // One click on a standing question card: show a question, pick an option,
+  // or confirm a multi-select. The daemon owns the draft and delivers the
+  // batch itself once every question is answered. See
+  // endpoint_update_question_draft.proto.
+  rpc UpdateQuestionDraft(UpdateQuestionDraftRequest) returns (UpdateQuestionDraftResponse);
   // The cold-context gate's buttons — pay, clear, or compact{model, scope}.
   rpc AnswerColdGate(AnswerColdGateRequest) returns (AnswerColdGateResponse);
 

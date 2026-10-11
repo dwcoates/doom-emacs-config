@@ -111,8 +111,19 @@ message SubmitPromptSuccess {
     // effect (the model change, restated authoritatively) arrives on the
     // component streams, never in this answer. (Landing 6, 2026-09-01.)
     SubmitPromptCommandActed command_acted = 4;
+    // It ANSWERED A STANDING ASK instead of minting a turn. A plain user
+    // send (PROMPT_ORIGIN_USER_SENT, _USER_SENT_AND_HIDE, _WEBAPP_USER_SENT)
+    // with the ordinary delivery, made while an ask stands on the addressed
+    // feed, is the user's typed answer to the OLDEST such ask: a question
+    // batch's ACTIVE question takes the text as its typed answer
+    // (frontend.v1.FeedQuestionOpen), and a permission ask is denied with the
+    // text as the reason relayed to the agent. Empty: the visible effect is
+    // the card's re-push.
+    SubmitPromptAskAnswered ask_answered = 5;
   }
 }
+// The answered-a-standing-ask answer. Empty on purpose (see the arm).
+message SubmitPromptAskAnswered {}
 
 // The acted-without-a-turn answer. Empty on purpose (see the arm).
 message SubmitPromptCommandActed {}
@@ -217,8 +228,16 @@ message SubmitPromptError {
     SubmitPromptModelNotInCatalog model_not_in_catalog = 13;
     // A `/model` act the vendor itself refused. Same disposition as above.
     SubmitPromptModelRefused model_refused = 14;
+    // The submission was a typed answer to a standing ask
+    // (SubmitPromptAskAnswered) and the ask settled before the answer
+    // reached it. Nothing was submitted: the text was meant as that ask's
+    // answer, so it is not delivered as a prompt instead. The composer
+    // keeps the text.
+    SubmitPromptAskNotStanding ask_not_standing = 15;
   }
 }
+// The settled-ask refusal. Empty: the arm is the whole fact.
+message SubmitPromptAskNotStanding {}
 
 // The model a `/model` act named is not in this session's catalog.
 message SubmitPromptModelNotInCatalog {
