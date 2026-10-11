@@ -11,6 +11,7 @@ import {
   BUBBLE_CAP_ATTRIBUTE,
   BUBBLE_CAP_LINES,
   BUBBLE_EXPAND_ONLY_CLASS,
+  BUBBLE_FOOTER_CLASS,
   BUBBLE_MORE_ATTRIBUTE,
   BUBBLE_MORE_ELLIPSIS,
   BUBBLE_MORE_FADE,
@@ -384,6 +385,24 @@ describe("drawBubble: the structure every kind shares", () => {
     expect(footer.classList.contains(BUBBLE_EXPAND_ONLY_CLASS)).toBe(false);
   });
 
+  it("marks the always-shown footer as the footer", () => {
+    // Arrange
+    const footer = el("response-cut-short-marker");
+    // Act
+    drawBubble(spec("response", { footer: [footer] }));
+    // Assert
+    expect(footer.classList.contains(BUBBLE_FOOTER_CLASS)).toBe(true);
+  });
+
+  it("leaves every expand-only element unmarked as footer", () => {
+    // Arrange
+    const expandOnly = [el("details"), el("actions")];
+    // Act
+    drawBubble(spec("held", { expandOnly, footer: [el("response-cut-short-marker")] }));
+    // Assert
+    expect(expandOnly.map((node) => node.classList.contains(BUBBLE_FOOTER_CLASS))).toEqual([false, false]);
+  });
+
   it("draws no strip element when the kind has none", () => {
     // Arrange / Act
     const { bubble } = drawBubble(spec("user"));
@@ -543,6 +562,42 @@ describe("drawBubble: a redraw given its previous draw updates it in place", () 
     drawBubble(spec("held", { footer: [said()] }), first);
     // Assert
     expect([first.querySelector(".marker") === kept, kept?.classList.contains(BUBBLE_EXPAND_ONLY_CLASS)]).toEqual([
+      true,
+      false,
+    ]);
+  });
+
+  it("marks a kept element that moved to the footer as the footer", () => {
+    // Arrange
+    const said = (): HTMLElement => {
+      const node = el("marker", "same");
+      node.setAttribute(SAYS_ATTRIBUTE, "same");
+      return node;
+    };
+    const first = drawBubble(spec("held", { expandOnly: [said()] })).bubble;
+    const kept = first.querySelector(".marker");
+    // Act
+    drawBubble(spec("held", { footer: [said()] }), first);
+    // Assert
+    expect([first.querySelector(".marker") === kept, kept?.classList.contains(BUBBLE_FOOTER_CLASS)]).toEqual([
+      true,
+      true,
+    ]);
+  });
+
+  it("takes the footer mark off a kept element that moved to the expand-only region", () => {
+    // Arrange
+    const said = (): HTMLElement => {
+      const node = el("marker", "same");
+      node.setAttribute(SAYS_ATTRIBUTE, "same");
+      return node;
+    };
+    const first = drawBubble(spec("held", { footer: [said()] })).bubble;
+    const kept = first.querySelector(".marker");
+    // Act
+    drawBubble(spec("held", { expandOnly: [said()] }), first);
+    // Assert
+    expect([first.querySelector(".marker") === kept, kept?.classList.contains(BUBBLE_FOOTER_CLASS)]).toEqual([
       true,
       false,
     ]);
