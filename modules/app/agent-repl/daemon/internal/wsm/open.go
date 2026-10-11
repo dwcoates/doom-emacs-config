@@ -575,6 +575,13 @@ func (s *store) write(ctx context.Context, op string, fields dlog.Context, fn fu
 			s.log.Debug(op, "the repository is still in use; the retirement was refused", withError(fields, err))
 			return err
 		}
+		// A REFUSED RETARGET is the store answering what was asked (an
+		// unknown or foreign parent, a cycle, no merge geometry); the verb
+		// turns it into the rpc's arm and records it at its own level.
+		if _, ok := AsParentRefused(err); ok {
+			s.log.Debug(op, "the retarget was refused; nothing was written", withError(fields, err))
+			return err
+		}
 		s.log.Error(op, "refused the write", withError(fields, err))
 		return err
 	}

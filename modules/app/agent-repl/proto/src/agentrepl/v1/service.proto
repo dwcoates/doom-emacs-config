@@ -56,6 +56,7 @@ import "agentrepl/v1/endpoint_set_permission_mode.proto";
 import "agentrepl/v1/endpoint_fold_repository.proto";
 import "agentrepl/v1/endpoint_update_sidebar_view.proto";
 import "agentrepl/v1/endpoint_set_workspace_hidden.proto";
+import "agentrepl/v1/endpoint_set_workspace_parent.proto";
 import "agentrepl/v1/endpoint_set_workspace_priority.proto";
 import "agentrepl/v1/endpoint_watch_footer.proto";
 import "agentrepl/v1/endpoint_update_held_prompt.proto";
@@ -210,6 +211,10 @@ service AgentRepl {
   // Move a workspace into the hidden section or back out; a hidden workspace
   // is off the Emacs tab bar. See endpoint_set_workspace_hidden.proto.
   rpc SetWorkspaceHidden(SetWorkspaceHiddenRequest) returns (SetWorkspaceHiddenResponse);
+  // Retarget a workspace's merge: make it a child of another workspace of the
+  // same repository, or top-level. Its session is told in the same operation.
+  // See endpoint_set_workspace_parent.proto.
+  rpc SetWorkspaceParent(SetWorkspaceParentRequest) returns (SetWorkspaceParentResponse);
   rpc FoldRepository(FoldRepositoryRequest) returns (FoldRepositoryResponse);
   // Change one piece of the sidebar's view state (a fold, the grouping),
   // pushed to every page on the roster stream. See

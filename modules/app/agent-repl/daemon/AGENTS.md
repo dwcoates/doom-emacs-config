@@ -1248,6 +1248,26 @@ INFO `daemon.commandfile.merge_queue` (`outcome` `evicted`, `not_queued`,
 `paused`, `resumed`) or WARN `daemon.commandfile.entry` (the refusal in
 `cause`). Evicting what is not queued is `not_queued`, never a refusal.
 
+## A retarget always tells the workspace
+
+A workspace's parent is its merge target (`creation_jobs.target_dir`) and
+its roster nesting (`workspaces.parent_id`). `SetWorkspaceParent` and the
+command file's `retarget` entry change both, and both go through ONE
+operation, `internal/retarget`, which never answers success unless the
+notice naming the new target is queued in the workspace's session.
+
+- Never call the `workspace` verb `SetParent` from anywhere else: it records
+  the retarget and tells nobody. `retarget.Service` is its only caller.
+- The two stored facts move in one `wsm` transaction (`SetParent`), which
+  also checks the parent's repository and the cycle, so a racing retarget
+  cannot close a cycle the check did not see.
+- A notice that cannot be queued undoes the retarget (`RestoreParent`); a
+  session parked at its cold gate refuses the notice, so the retarget answers
+  `cold_gate` and changes nothing.
+- The records: INFO `daemon.workspace.set_parent` for the write and the undo,
+  INFO `daemon.retarget` once the notice is queued, ERROR `daemon.retarget`
+  for a notice that failed for any reason but the cold gate.
+
 ## A lease dies with the process that took it
 
 A workspace's occupancy lease (`wsm.leases`: merge, restart, drain, hibernate)

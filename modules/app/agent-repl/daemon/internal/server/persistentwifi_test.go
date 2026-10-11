@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"errors"
-	"net/http"
 	"strings"
 	"testing"
 
@@ -119,14 +118,7 @@ func TestWhichDaemonStreamsSubscribeToThePersistentWifiStanding(t *testing.T) {
 func TestNewRefusesAMissingPersistentWifiController(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
-	deps := Deps{
-		DB: h.DB, Prompts: h.Prompts, Queue: h.Queue, Verbs: h.Verbs, Merge: h.Merge,
-		Drain: h.Drain, Rollout: h.Rollout, Deploy: h.Deployer, Health: h.Health, Login: h.Login,
-		Ownership: h.Ownership, SuccessorAddress: func() string { return "" },
-		Feed: h.Feed, Footer: h.Footer, Topbar: h.Topbar, Sidebar: h.Sidebar,
-		LoudFaults: &h.LoudFaults, Focus: h.Focus,
-		WebappDist: h.WebappDist, ImageOrigin: http.NotFoundHandler(), Log: h.Surfaces,
-	}
+	deps := h.withoutDep(func(d *Deps) { d.PersistentWifi = nil })
 
 	// Act.
 	_, err := New(deps)

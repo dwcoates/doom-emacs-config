@@ -304,6 +304,13 @@ type Verbs interface {
 	// SetHidden moves the workspace into the roster's hidden section, or back
 	// out of it, and republishes the roster.
 	SetHidden(ctx context.Context, ws ids.WorkspaceID, hidden bool) error
+	// SetParent retargets the workspace's merge to parent's checkout (nil:
+	// the repository's main checkout), records parent as its roster parent,
+	// and republishes the roster. It tells the workspace's session NOTHING:
+	// internal/retarget, its only caller, pairs it with the notice.
+	SetParent(ctx context.Context, ws ids.WorkspaceID, parent *ids.WorkspaceID) (wsm.ParentChange, error)
+	// RestoreParent undoes change unless a later retarget superseded it.
+	RestoreParent(ctx context.Context, change wsm.ParentChange) error
 	// FoldRepository records whether a repository's roster section is
 	// collapsed and republishes the roster. An unknown repository is refused
 	// with ArmUnknownRepository.

@@ -884,7 +884,7 @@ at WARN `daemon.commandfile.quarantine` with the refused entry and field in its
 cause.
 
 EVERY DIRECTORY FIELD (`git_root`, `project_dir`, `dir`, `source_dir`,
-`evict_dir`, `repository_dir`) goes through
+`evict_dir`, `repository_dir`, `parent`) goes through
 `dirpath.Absolute` before anything reads it. A leading `~` expands to the home
 directory the daemon resolved at boot, because the `/create-or-update-workspace`
 skill's contract says a leading `~` is expanded downstream. `~user` and any path
@@ -933,6 +933,39 @@ WORKSPACE WITH NOTHING ON THE QUEUE IS AN ANSWER, NOT A FAILURE: the rpc's
 refusal (`already_paused`, `not_paused`, `unknown_repository`, an unregistered
 requester or `evict_dir`) quarantines the file at WARN
 `daemon.commandfile.entry` with the arm in its `cause`.
+
+### Retargeting a workspace's merge
+
+A `retarget` entry is `SetWorkspaceParent` for an agent, and calls the same
+operation (`internal/retarget`), so a file's retarget TELLS THE WORKSPACE'S
+SESSION exactly as the rpc's does:
+
+```json
+{"type": "retarget", "workspace": "<display name>", "project_dir": "/abs/worktree", "parent": "/abs/parent/worktree"}
+```
+
+| field | meaning |
+|---|---|
+| `project_dir` | the retargeted workspace, keyed by its worktree root like every entry that targets an existing workspace; `workspace` beside it is display only |
+| `parent` | REQUIRED KEY. A registered workspace's worktree root makes the workspace its CHILD: the merge lands in that checkout. `null`, or the repository's own main checkout, makes it TOP-LEVEL: the merge lands in the main checkout on the default branch. An absent key is refused, because clearing a parent changes where work lands. `parent` is refused on any other type |
+
+The parent directory is resolved through the same read as a create's
+`source_ws` (`parentAt`). A directory no workspace is registered at is the
+`unknown_parent` refusal; every other refusal is the operation's own
+(`parent_in_other_repository`, `cycle`, `no_merge_layout`, `cold_gate`, the
+ownership arms). Each refusal quarantines the file at INFO
+`daemon.commandfile.entry`, and nothing is changed or sent; a retarget that
+FAILED (rather than refused) quarantines it at WARN.
+
+THE RETARGET AND ITS NOTICE ARE ONE OPERATION. `retarget.Service.Retarget`
+records the new parent and merge target (`workspace` `SetParent`, one `wsm`
+transaction over `workspaces.parent_id` and `creation_jobs.target_dir`), then
+queues the `workspace-retargeted` brief into the workspace's session through
+the prompt handler, deferred, under `PROMPT_ORIGIN_WORKSPACE_RETARGETED`. A
+notice that cannot be queued undoes the retarget (`RestoreParent`, which
+leaves a later retarget standing), so a workspace is never retargeted without
+being told. A merge already running lands where it began; one still waiting
+in line reads the new target when it is admitted.
 
 ## heldingress
 

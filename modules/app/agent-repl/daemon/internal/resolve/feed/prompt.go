@@ -350,7 +350,8 @@ func AuthorLabel(origin conversationv1.PromptOrigin) string {
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_TEST_REPAIR,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_BEFORE_ACTION,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_AFTER_ACTION,
-		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME:
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_RETARGETED:
 		return "Merge"
 	case conversationv1.PromptOrigin_PROMPT_ORIGIN_RESUME_AFTER_RESTART:
 		return "Resumed after restart"

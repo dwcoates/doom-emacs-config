@@ -416,3 +416,70 @@ func TestAWorkspaceWhoseRepositoryIsUnregisteredIsRefused(t *testing.T) {
 		t.Fatalf("cause = %q, want the missing repository named", cause)
 	}
 }
+
+func TestParentAtReadsADirectoryWithinTheRepository(t *testing.T) {
+	tests := []struct {
+		name     string
+		dir      string
+		wantMain bool
+		wantWS   ids.WorkspaceID
+		wantErr  bool
+	}{
+		{name: "the main checkout is no parent", dir: "/repo", wantMain: true},
+		{name: "a registered worktree is that workspace", dir: "/worktrees/feature-one", wantWS: "w1"},
+		{name: "a directory that is neither is unregistered", dir: "/worktrees/gone", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := createFixture(t)
+			in := f.ingress.(*ingress)
+
+			// Act.
+			ws, main, err := in.parentAt(context.Background(), tt.dir, wsm.Repository{ID: "r1", Dir: "/repo"})
+
+			// Assert.
+			if tt.wantErr {
+				var unregistered *unregisteredParentError
+				if !errors.As(err, &unregistered) || !errors.Is(err, wsm.ErrNotFound) {
+					t.Fatalf("err = %v, want an unregistered parent wrapping ErrNotFound", err)
+				}
+				return
+			}
+			if err != nil || main != tt.wantMain || ws.ID != tt.wantWS {
+				t.Fatalf("parentAt = (%q, %v, %v), want (%q, %v, nil)", ws.ID, main, err, tt.wantWS, tt.wantMain)
+			}
+		})
+	}
+}
+
+func TestWorkspaceRepositoryReadsTheRowsRepository(t *testing.T) {
+	repositories := []wsm.Repository{{ID: "r1", Dir: "/repo"}}
+	tests := []struct {
+		name    string
+		ws      wsm.Workspace
+		want    ids.RepoID
+		wantErr string
+	}{
+		{name: "a held repository", ws: wsm.Workspace{ID: "w1", Repo: "r1"}, want: "r1"},
+		{name: "a repository the registry does not hold", ws: wsm.Workspace{ID: "w1", Repo: "r-gone"},
+			wantErr: `workspace "w1" at "/tree/w1" names repository "r-gone", which the registry does not hold`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act.
+			repo, err := workspaceRepository(repositories, tt.ws, "/tree/w1")
+
+			// Assert.
+			if tt.wantErr != "" {
+				if err == nil || err.Error() != tt.wantErr {
+					t.Fatalf("err = %v, want %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil || repo.ID != tt.want {
+				t.Fatalf("workspaceRepository = (%q, %v), want %q", repo.ID, err, tt.want)
+			}
+		})
+	}
+}

@@ -66,6 +66,16 @@ type DB interface {
 	// SetHidden records whether a workspace sits in the roster's hidden
 	// section; an unknown workspace is ErrNotFound.
 	SetHidden(ctx context.Context, id WorkspaceID, hidden bool) error
+	// SetParent retargets a workspace: its recorded parent (nil: top-level)
+	// and its merge target directory, in one transaction. A parent the
+	// registry does not hold, of another repository, or beneath the
+	// workspace, and a workspace with no creation job, are refused with a
+	// ParentRefusedError; an unknown workspace is ErrNotFound.
+	SetParent(ctx context.Context, id WorkspaceID, parent *WorkspaceID) (ParentChange, error)
+	// RestoreParent puts a retarget's prior target back while the workspace
+	// still stands as the retarget left it; stale reports a retarget that
+	// has since been superseded, which is left alone.
+	RestoreParent(ctx context.Context, change ParentChange) (stale bool, err error)
 	// SetAttention sets or clears the roster's attention marker.
 	SetAttention(ctx context.Context, id WorkspaceID, on bool) error
 	// SetResult records, or clears with nil, the roster's last turn result.

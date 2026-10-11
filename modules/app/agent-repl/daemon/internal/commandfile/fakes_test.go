@@ -215,6 +215,16 @@ func (d *fakeDB) WorkspaceByDir(_ context.Context, dir string) (wsm.Workspace, e
 	return ws, nil
 }
 
+// Workspace answers the recorded workspace with this id.
+func (d *fakeDB) Workspace(_ context.Context, id ids.WorkspaceID) (wsm.Workspace, error) {
+	for _, ws := range d.byDir {
+		if ws.ID == id {
+			return ws, nil
+		}
+	}
+	return wsm.Workspace{}, fmt.Errorf("no workspace %q: %w", id, wsm.ErrNotFound)
+}
+
 func (d *fakeDB) ListRepositories(context.Context) ([]wsm.Repository, error) {
 	if d.listErr != nil {
 		return nil, d.listErr
@@ -268,16 +278,38 @@ func (s *fakeSurfaces) ClientLog(string, dlog.ClientRecord) error { return errFa
 
 func (s *fakeSurfaces) Close() error { return nil }
 
+// retargetCall is one retarget the ingress asked for.
+type retargetCall struct {
+	WS     ids.WorkspaceID
+	Parent string
+}
+
+// fakeRetarget records every retarget the ingress drove.
+type fakeRetarget struct {
+	calls []retargetCall
+	err   error
+}
+
+func (r *fakeRetarget) Retarget(_ context.Context, ws ids.WorkspaceID, parent *ids.WorkspaceID) error {
+	call := retargetCall{WS: ws}
+	if parent != nil {
+		call.Parent = string(*parent)
+	}
+	r.calls = append(r.calls, call)
+	return r.err
+}
+
 // fixture is one arranged ingress plus every fake behind it.
 type fixture struct {
-	ingress Ingress
-	dir     string
-	verbs   *fakeVerbs
-	merge   *fakeMerge
-	prompts *fakePrompts
-	db      *fakeDB
-	log     *fakeSurfaces
-	now     time.Time
+	ingress  Ingress
+	dir      string
+	verbs    *fakeVerbs
+	merge    *fakeMerge
+	prompts  *fakePrompts
+	retarget *fakeRetarget
+	db       *fakeDB
+	log      *fakeSurfaces
+	now      time.Time
 	// serves is what the ingress's serving answer says.
 	serves bool
 }
@@ -286,17 +318,18 @@ type fixture struct {
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
 	f := &fixture{
-		dir:     t.TempDir(),
-		verbs:   newFakeVerbs(),
-		merge:   &fakeMerge{},
-		prompts: &fakePrompts{},
-		db:      &fakeDB{byDir: map[string]wsm.Workspace{}},
-		log:     newFakeSurfaces(),
-		now:     fixedNow,
-		serves:  true,
+		dir:      t.TempDir(),
+		verbs:    newFakeVerbs(),
+		merge:    &fakeMerge{},
+		prompts:  &fakePrompts{},
+		retarget: &fakeRetarget{},
+		db:       &fakeDB{byDir: map[string]wsm.Workspace{}},
+		log:      newFakeSurfaces(),
+		now:      fixedNow,
+		serves:   true,
 	}
 	ingress, err := New(Deps{
-		Dir: f.dir, Verbs: f.verbs, DB: f.db, Merge: f.merge, Prompts: f.prompts, Log: f.log,
+		Dir: f.dir, Verbs: f.verbs, DB: f.db, Merge: f.merge, Prompts: f.prompts, Retarget: f.retarget, Log: f.log,
 		Home:     fixtureHome,
 		Serves:   func() bool { return f.serves },
 		Interval: 10 * time.Millisecond,

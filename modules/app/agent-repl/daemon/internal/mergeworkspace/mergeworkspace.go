@@ -9,8 +9,6 @@ package mergeworkspace
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"time"
@@ -156,11 +154,7 @@ func handbackText(mergeWS wsm.Workspace, out merge.DetachedOutcome) (string, str
 // handbackKey mints a handback's idempotency key: every ending is its own
 // report.
 func handbackKey() (string, error) {
-	var b [16]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return "", fmt.Errorf("mint the handback's idempotency key: %w", err)
-	}
-	return "merge-handback-" + hex.EncodeToString(b[:]), nil
+	return prompthandler.MintKey("merge-handback")
 }
 
 // Run sweeps for idle merge workspaces at once and then on every TICK, until

@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -13,7 +14,9 @@ import (
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/ids"
 	"claude-repld/internal/merge"
+	"claude-repld/internal/promptqueue"
 	"claude-repld/internal/workspace"
 	"claude-repld/internal/wsm"
 )
@@ -875,6 +878,234 @@ func TestSetWorkspaceHiddenRefusesAMissingVisibility(t *testing.T) {
 	}
 	if len(h.Verbs.hiddenSets) != 0 {
 		t.Fatalf("hidden sets = %+v, want none for a malformed request", h.Verbs.hiddenSets)
+	}
+}
+
+// ---- SetWorkspaceParent ----------------------------------------------------
+
+// parentWorkspaceID is the registered workspace a retarget names as the new
+// parent.
+const parentWorkspaceID = ids.WorkspaceID("ws-parent")
+
+// withParent registers the parent workspace beside the test workspace.
+func withParent(h *harness) {
+	h.DB.workspaces[parentWorkspaceID] = wsm.Workspace{ID: parentWorkspaceID, Dir: "/tmp/agent-repl-parent", Name: "parent"}
+}
+
+func childOf(ref *workspacev1.WorkspaceRef) *agentreplv1.SetWorkspaceParentRequest_ChildOf {
+	return &agentreplv1.SetWorkspaceParentRequest_ChildOf{ChildOf: &agentreplv1.SetWorkspaceParentChild{Parent: ref}}
+}
+
+func topLevel() *agentreplv1.SetWorkspaceParentRequest_TopLevel {
+	return &agentreplv1.SetWorkspaceParentRequest_TopLevel{TopLevel: &agentreplv1.SetWorkspaceParentTopLevel{}}
+}
+
+// TestSetWorkspaceParentHandsTheTargetToTheRetarget pins each target arm
+// reaching the retarget operation with the ids the registry resolved.
+func TestSetWorkspaceParentHandsTheTargetToTheRetarget(t *testing.T) {
+	tests := []struct {
+		name string
+		req  *agentreplv1.SetWorkspaceParentRequest
+		want retargetCall
+	}{
+		{"child of a workspace", &agentreplv1.SetWorkspaceParentRequest{
+			Workspace: ref(), Parent: childOf(&workspacev1.WorkspaceRef{Id: string(parentWorkspaceID), Dir: "/tmp/agent-repl-parent"}),
+		}, retargetCall{ws: testWorkspaceID, parent: string(parentWorkspaceID)}},
+		{"top-level", &agentreplv1.SetWorkspaceParentRequest{Workspace: ref(), Parent: topLevel()},
+			retargetCall{ws: testWorkspaceID}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			withParent(h)
+
+			// Act
+			resp, err := h.Client.SetWorkspaceParent(context.Background(), connect.NewRequest(tt.req))
+
+			// Assert
+			if err != nil {
+				t.Fatalf("SetWorkspaceParent: %v", err)
+			}
+			if resp.Msg.GetSuccess() == nil {
+				t.Fatalf("result = %v, want success", resp.Msg.GetResult())
+			}
+			if len(h.Retarget.calls) != 1 || h.Retarget.calls[0] != tt.want {
+				t.Fatalf("retargets = %+v, want %+v", h.Retarget.calls, tt.want)
+			}
+		})
+	}
+}
+
+// TestSetWorkspaceParentRefusesBeforeRetargeting pins the refusals the
+// handler answers itself — the subject's and the parent ref's — each on its
+// own arm and none reaching the retarget.
+func TestSetWorkspaceParentRefusesBeforeRetargeting(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(h *harness)
+		req     *agentreplv1.SetWorkspaceParentRequest
+		check   func(e *agentreplv1.SetWorkspaceParentError) bool
+	}{
+		{
+			name:  "an unknown workspace",
+			req:   &agentreplv1.SetWorkspaceParentRequest{Workspace: &workspacev1.WorkspaceRef{Id: "ws-nope"}, Parent: topLevel()},
+			check: func(e *agentreplv1.SetWorkspaceParentError) bool { return e.GetUnknownWorkspace() != nil },
+		},
+		{
+			name: "a workspace ref whose dir disagrees",
+			req:  &agentreplv1.SetWorkspaceParentRequest{Workspace: &workspacev1.WorkspaceRef{Id: string(testWorkspaceID), Dir: "/elsewhere"}, Parent: topLevel()},
+			check: func(e *agentreplv1.SetWorkspaceParentError) bool {
+				return e.GetWorkspaceRefMismatch().GetRegistryDir() == testWorkspaceDir
+			},
+		},
+		{
+			name:    "a workspace handed to a successor",
+			arrange: func(h *harness) { h.Ownership.standing = workspace.StandingTransferringAway },
+			req:     &agentreplv1.SetWorkspaceParentRequest{Workspace: ref(), Parent: topLevel()},
+			check:   func(e *agentreplv1.SetWorkspaceParentError) bool { return e.GetTransferringAway() != nil },
+		},
+		{
+			name:    "a workspace not yet adopted",
+			arrange: func(h *harness) { h.Ownership.standing = workspace.StandingNotYetAdopted },
+			req:     &agentreplv1.SetWorkspaceParentRequest{Workspace: ref(), Parent: topLevel()},
+			check:   func(e *agentreplv1.SetWorkspaceParentError) bool { return e.GetNotYetAdopted() != nil },
+		},
+		{
+			name:  "an unknown parent",
+			req:   &agentreplv1.SetWorkspaceParentRequest{Workspace: ref(), Parent: childOf(&workspacev1.WorkspaceRef{Id: "ws-gone"})},
+			check: func(e *agentreplv1.SetWorkspaceParentError) bool { return e.GetUnknownParent() != nil },
+		},
+		{
+			name: "a parent ref whose dir disagrees",
+			req: &agentreplv1.SetWorkspaceParentRequest{Workspace: ref(),
+				Parent: childOf(&workspacev1.WorkspaceRef{Id: string(parentWorkspaceID), Dir: "/elsewhere"})},
+			check: func(e *agentreplv1.SetWorkspaceParentError) bool {
+				return e.GetParentRefMismatch().GetRegistryDir() == "/tmp/agent-repl-parent"
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			withParent(h)
+			if tt.arrange != nil {
+				tt.arrange(h)
+			}
+
+			// Act
+			resp, err := h.Client.SetWorkspaceParent(context.Background(), connect.NewRequest(tt.req))
+
+			// Assert
+			if err != nil {
+				t.Fatalf("SetWorkspaceParent: %v", err)
+			}
+			if !tt.check(resp.Msg.GetError()) {
+				t.Fatalf("result = %v, want the %s arm", resp.Msg.GetResult(), tt.name)
+			}
+			if len(h.Retarget.calls) != 0 {
+				t.Fatalf("retargets = %+v, want none for a refusal", h.Retarget.calls)
+			}
+		})
+	}
+}
+
+// TestSetWorkspaceParentMapsTheRetargetsRefusals pins each refusal the
+// retarget operation raises answering its own arm.
+func TestSetWorkspaceParentMapsTheRetargetsRefusals(t *testing.T) {
+	tests := []struct {
+		name  string
+		err   error
+		check func(e *agentreplv1.SetWorkspaceParentError) bool
+	}{
+		{"unknown parent", &workspace.Refusal{Arm: workspace.ArmUnknownParent, Reason: "gone", NotFound: true},
+			func(e *agentreplv1.SetWorkspaceParentError) bool { return e.GetUnknownParent() != nil }},
+		{"parent in another repository", &workspace.Refusal{Arm: workspace.ArmParentInOtherRepository, Reason: "foreign",
+			Fields: map[string]any{"parent_repository_dir": "/other"}},
+			func(e *agentreplv1.SetWorkspaceParentError) bool {
+				return e.GetParentInOtherRepository().GetParentRepositoryDir() == "/other"
+			}},
+		{"cycle", &workspace.Refusal{Arm: workspace.ArmCycle, Reason: "loop"},
+			func(e *agentreplv1.SetWorkspaceParentError) bool { return e.GetCycle() != nil }},
+		{"no merge layout", &workspace.Refusal{Arm: workspace.ArmNoMergeLayout, Reason: "registered"},
+			func(e *agentreplv1.SetWorkspaceParentError) bool { return e.GetNoMergeLayout() != nil }},
+		{"cold gate", fmt.Errorf("retarget ws-1: notify: submit: %w", &promptqueue.ColdGateRefusal{Detail: "resumed cold"}),
+			func(e *agentreplv1.SetWorkspaceParentError) bool { return e.GetColdGate() != nil }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.Retarget.err = tt.err
+
+			// Act
+			resp, err := h.Client.SetWorkspaceParent(context.Background(),
+				connect.NewRequest(&agentreplv1.SetWorkspaceParentRequest{Workspace: ref(), Parent: topLevel()}))
+
+			// Assert
+			if err != nil {
+				t.Fatalf("SetWorkspaceParent: %v", err)
+			}
+			if !tt.check(resp.Msg.GetError()) {
+				t.Fatalf("result = %v, want the %s arm", resp.Msg.GetResult(), tt.name)
+			}
+		})
+	}
+}
+
+// TestSetWorkspaceParentFailsAFailedRetargetAsInternal pins a retarget that
+// broke, rather than refused, answering Internal and recorded at error.
+func TestSetWorkspaceParentFailsAFailedRetargetAsInternal(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	log := dlog.NewTestLogger()
+	h.Surfaces.workspace = log
+	h.Retarget.err = errors.New("disk I/O error")
+
+	// Act
+	_, err := h.Client.SetWorkspaceParent(context.Background(),
+		connect.NewRequest(&agentreplv1.SetWorkspaceParentRequest{Workspace: ref(), Parent: topLevel()}))
+
+	// Assert
+	if connect.CodeOf(err) != connect.CodeInternal {
+		t.Fatalf("code = %v (%v), want Internal", connect.CodeOf(err), err)
+	}
+	recorded := false
+	for _, r := range log.Records() {
+		recorded = recorded || (r.Level == "error" && r.Operation == "SetWorkspaceParent")
+	}
+	if !recorded {
+		t.Fatalf("records = %+v, want the failed retarget recorded at error", log.Records())
+	}
+}
+
+// TestSetWorkspaceParentRefusesAMalformedRequest pins an unset target arm, and
+// a child_of arm naming no parent, as malformed requests reaching no retarget.
+func TestSetWorkspaceParentRefusesAMalformedRequest(t *testing.T) {
+	tests := []struct {
+		name string
+		req  *agentreplv1.SetWorkspaceParentRequest
+	}{
+		{"no target arm", &agentreplv1.SetWorkspaceParentRequest{Workspace: ref()}},
+		{"a child_of naming no parent", &agentreplv1.SetWorkspaceParentRequest{Workspace: ref(), Parent: childOf(nil)}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+
+			// Act
+			_, err := h.Client.SetWorkspaceParent(context.Background(), connect.NewRequest(tt.req))
+
+			// Assert
+			if connect.CodeOf(err) != connect.CodeInvalidArgument {
+				t.Fatalf("code = %v (%v), want InvalidArgument", connect.CodeOf(err), err)
+			}
+			if len(h.Retarget.calls) != 0 {
+				t.Fatalf("retargets = %+v, want none for a malformed request", h.Retarget.calls)
+			}
+		})
 	}
 }
 

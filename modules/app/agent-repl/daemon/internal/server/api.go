@@ -41,6 +41,7 @@ import (
 	"claude-repld/internal/resolve/footer"
 	"claude-repld/internal/resolve/sidebar"
 	"claude-repld/internal/resolve/topbar"
+	"claude-repld/internal/retarget"
 	"claude-repld/internal/rollout"
 	"claude-repld/internal/workspace"
 	"claude-repld/internal/wsm"
@@ -62,6 +63,9 @@ type Deps struct {
 	Queue promptqueue.Queue
 	// Verbs backs every workspace, task, answer and link verb.
 	Verbs workspace.Verbs
+	// Retarget backs SetWorkspaceParent: the retarget and its notice to the
+	// workspace's session, as one operation.
+	Retarget retarget.Retargeter
 	// Merge backs MergeWorkspace, UpdateMergeQueue and AnswerHeldOffer.
 	Merge merge.Orchestrator
 	// Drain backs UpdateShutdownSchedule.
@@ -370,6 +374,8 @@ func New(deps Deps) (Server, error) {
 		return nil, missing("a prompt queue")
 	case deps.Verbs == nil:
 		return nil, missing("the workspace verbs")
+	case deps.Retarget == nil:
+		return nil, missing("the retarget operation")
 	case deps.Merge == nil:
 		return nil, missing("a merge orchestrator")
 	case deps.Drain == nil:

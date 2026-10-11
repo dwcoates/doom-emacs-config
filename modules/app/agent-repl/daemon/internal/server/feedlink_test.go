@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -244,5 +245,18 @@ func TestOpenInEditorRefusesAFeedLinkWithNoOnUnresolvedArm(t *testing.T) {
 	// Assert.
 	if connect.CodeOf(err) != connect.CodeInvalidArgument || len(h.Verbs.editorOpens) != 0 {
 		t.Fatalf("err = %v, opens = %v; want invalid_argument and nothing opened", err, h.Verbs.editorOpens)
+	}
+}
+
+func TestLinkQuestionKeyIsTheSharedDaemonKeyShape(t *testing.T) {
+	// Act
+	key, err := linkQuestionKey()
+
+	// Assert
+	if err != nil {
+		t.Fatalf("linkQuestionKey: %v", err)
+	}
+	if !regexp.MustCompile(`^link-unresolved-[0-9a-f]{32}$`).MatchString(key) {
+		t.Fatalf("key = %q, want prompthandler.MintKey's shape under the link-unresolved prefix", key)
 	}
 }
