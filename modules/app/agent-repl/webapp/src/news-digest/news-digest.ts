@@ -35,9 +35,8 @@ import type {
   NewsDigestWeek,
 } from "../../../proto/gen/ts/frontend/v1/news_digest_pb";
 import { createControl } from "../control.js";
-import { escapeHtml } from "../highlight.js";
 import { installProseLinkRouting, renderExternalLink } from "../link.js";
-import { inline, renderMarkdown } from "../markdown.js";
+import { renderMarkdown, setInlineMarkdown } from "../markdown.js";
 import { log } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
 import { guardMalformed } from "../rpc/guard.js";
@@ -421,7 +420,7 @@ export function drawItem(ctx: AppContext, item: NewsDigestItem, path: string, re
   titleElement.className = "news-digest-item-title";
   // MARKDOWN, as a response bubble draws it (owner, 2026-10-06): the title
   // takes inline markup only, the summary the full block renderer.
-  titleElement.innerHTML = inline(escapeHtml(title.text));
+  setInlineMarkdown(titleElement, title.text);
   head.append(titleElement);
   if (item.effective !== undefined) {
     const effective = document.createElement("span");
