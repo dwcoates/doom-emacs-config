@@ -114,6 +114,8 @@
 ;; Defined by roster.el.  Declared, never defined here.
 (declare-function agent-repl-roster-repository-of "agent-repl-roster" (id &optional roster))
 (declare-function agent-repl-roster-walk "agent-repl-roster" (roster))
+(declare-function agent-repl-roster-drawn-tab-order "agent-repl-roster" ())
+(declare-function agent-repl-host-request-switch "agent-repl-host" (ws trigger))
 (defvar agent-repl-roster-view)
 
 ;; Defined by session.el.  Declared, never defined here.
@@ -470,11 +472,17 @@ must leave the other a no-op."
                    (cons row (agent-repl-verbs--flatten-rows (plist-get row :children))))
                  rows)))
 
+(defun agent-repl-verbs--roster-or-view (roster)
+  "Return ROSTER, or `agent-repl-roster-view' when ROSTER is nil.
+THE ONE DEFAULTING every roster reader here shares: a nil ROSTER means the
+last accepted push, and nil again before roster.el has loaded or pushed."
+  (or roster (and (boundp 'agent-repl-roster-view) agent-repl-roster-view)))
+
 (defun agent-repl-verbs--all-rows (&optional roster)
   "Return every row of ROSTER (default `agent-repl-roster-view'), in walk order.
 THE ONE WALK is `agent-repl-roster-walk' -- the tab bar's own -- so a verb
 can never look for a row in fewer sections than the bar draws tabs from."
-  (let ((roster (or roster (and (boundp 'agent-repl-roster-view) agent-repl-roster-view))))
+  (let ((roster (agent-repl-verbs--roster-or-view roster)))
     (mapcar (lambda (entry) (plist-get entry :row))
             (agent-repl-roster-walk roster))))
 
@@ -485,7 +493,7 @@ can never look for a row in fewer sections than the bar draws tabs from."
 
 (defun agent-repl-verbs--repo-sections (&optional roster)
   "Return ROSTER's repository sections, in the resolver's order."
-  (let ((roster (or roster (and (boundp 'agent-repl-roster-view) agent-repl-roster-view))))
+  (let ((roster (agent-repl-verbs--roster-or-view roster)))
     (plist-get (plist-get roster :repository) :sections)))
 
 (defun agent-repl-verbs--section-ref (section)
@@ -832,7 +840,26 @@ of its own beyond the echo: the push is the new state."
      :ws ws :op (if hidden "hide" "show")
      :on-success
      (lambda (_)
-       (message "agent-repl: %s %s" ws (if hidden "hidden" "shown"))))))
+       (message "agent-repl: %s %s" ws (if hidden "hidden" "shown"))
+       (agent-repl-verbs--land-after-visibility ws hidden)))))
+
+(defun agent-repl-verbs--land-after-visibility (ws hidden)
+  "Request the switch an accepted visibility change of WS lands on.
+A HIDE lands on the FIRST tab the bar draws other than WS: the hidden tab
+is off the bar, so staying on it would leave the frame on a workspace the
+picture no longer offers.  WS is excluded BY NAME rather than trusted to
+be gone already, so the landing is the same whether the roster push that
+takes WS off the bar arrives before this ack or after it.  A SHOW lands on
+WS itself, which is what bringing a workspace back is for.
+
+A hide that leaves no other drawn tab has nowhere to land, and stays put
+with a record saying so."
+  (if (not hidden)
+      (agent-repl-host-request-switch ws 'show)
+    (let ((target (car (remove ws (agent-repl-roster-drawn-tab-order)))))
+      (if target
+          (agent-repl-host-request-switch target 'hide)
+        (agent-repl--info ws "elisp.verbs.hide-landing-none ws=%s" ws)))))
 
 (cl-defun agent-repl-verb-create (repository form
                                              &key initial-prompt base-ref name
@@ -1716,10 +1743,38 @@ Clearing is the absence of the field, which no level label can spell.")
 (defun agent-repl-hide-workspace (&optional ws)
   "Hide the current workspace (`SPC TAB h').
 It moves to the sidebar's HIDDEN WORKSPACES section and off the tab bar,
-so the tab numbers close up over it; its session runs on untouched.
-Clicking its row in that section shows it again."
+so the tab numbers close up over it; its session runs on untouched,
+and the frame lands on the first tab the bar still draws.  Clicking its
+row in that section, or picking it from `SPC TAB H', shows it again."
   (interactive)
   (agent-repl-verb-set-hidden (agent-repl-verbs--target-ws ws "Hide workspace: ") t))
+
+(defun agent-repl-verbs--hidden-rows (&optional roster)
+  "Return the OPEN rows of ROSTER's hidden section, in walk order.
+ROSTER defaults to `agent-repl-roster-view'.  A closed row has no tab to
+switch to, so only open rows are offered back."
+  (let* ((roster (agent-repl-verbs--roster-or-view roster))
+         (rows (plist-get (plist-get (plist-get roster :hidden) :rows) :rows)))
+    (cl-remove-if #'agent-repl-verbs--row-closed-p
+                  (agent-repl-verbs--flatten-rows rows))))
+
+(defun agent-repl-show-hidden-workspace ()
+  "Show a hidden workspace again and switch to it (`SPC TAB H').
+Completes over the workspaces the sidebar's HIDDEN WORKSPACES section
+holds, by their tab names.  The chosen one comes back onto the tab bar,
+and the frame lands on it once the daemon accepts."
+  (interactive)
+  (let ((names (delq nil (mapcar (lambda (row)
+                                   (agent-repl--ws-by-ref-id
+                                    (plist-get (agent-repl-verbs--row-ref row) :id)))
+                                 (agent-repl-verbs--hidden-rows)))))
+    (unless names
+      (agent-repl--info '(:agent-repl-central "the hidden-workspace picker spans every workspace")
+                        "elisp.verbs.show-hidden-none")
+      (user-error "agent-repl: no hidden workspaces"))
+    (let ((choice (completing-read "Show hidden workspace: " names nil t)))
+      (agent-repl--info choice "elisp.verbs.show-hidden-chosen ws=%s" choice)
+      (agent-repl-verb-set-hidden choice nil))))
 
 (defun agent-repl-set-priority (&optional ws)
   "Set or clear the current workspace's priority."

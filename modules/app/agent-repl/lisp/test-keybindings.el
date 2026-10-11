@@ -63,7 +63,8 @@
                  agent-repl-fork-workspace-static
                  agent-repl-register-repository
                  agent-repl-set-priority
-                 agent-repl-hide-workspace))
+                 agent-repl-hide-workspace
+                 agent-repl-show-hidden-workspace))
     (should (commandp cmd))))
 
 (ert-deftest agent-repl-test-keybindings-admin-verbs-are-defined ()
@@ -281,6 +282,11 @@ walked for KEY followed by its #\\='COMMAND."
   "`SPC TAB h\=' hides the current workspace: off the tab bar, into the sidebar's hidden section."
   (should (eq (agent-repl-test-keybindings--leader-prefix-binding "TAB" "h")
               'agent-repl-hide-workspace)))
+
+(ert-deftest agent-repl-test-keybindings-spc-tab-shift-h-shows-a-hidden-workspace ()
+  "`SPC TAB H\=' picks a hidden workspace, shows it again and switches to it."
+  (should (eq (agent-repl-test-keybindings--leader-prefix-binding "TAB" "H")
+              'agent-repl-show-hidden-workspace)))
 
 (ert-deftest agent-repl-test-keybindings-leaves-m-0-to-doom ()
   "`M-0' is the one numeral the module does not claim."

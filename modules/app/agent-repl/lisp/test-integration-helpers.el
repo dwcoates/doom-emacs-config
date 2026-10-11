@@ -324,8 +324,7 @@ Unless KEEP-STATE-DIR, deletes its private state dir."
       (agent-repl-itest--wait-until
        (lambda () (not (process-live-p process)))
        5 "the fake daemon to exit")
-      (when (process-live-p process)
-        (delete-process process)))
+      (agent-repl-test--reap-process process))
     (let ((stderr (agent-repl-itest-daemon-stderr-buffer daemon)))
       (when (buffer-live-p stderr) (kill-buffer stderr))))
   ;; THE SHARED STATE ROOT OUTLIVES EVERY DAEMON THAT EVER BOUND IT.  A
@@ -1176,14 +1175,12 @@ them."
   ;; a process that is already dead, which is exactly the case that escaped.
   (when (processp agent-repl-daemon--build-process)
     (set-process-sentinel agent-repl-daemon--build-process #'ignore)
-    (when (process-live-p agent-repl-daemon--build-process)
-      (delete-process agent-repl-daemon--build-process)))
+    (agent-repl-test--reap-process agent-repl-daemon--build-process))
   (when (timerp agent-repl-daemon--build-status-timer)
     (cancel-timer agent-repl-daemon--build-status-timer))
   (when (processp agent-repl--frontend-daemon-process)
     (set-process-sentinel agent-repl--frontend-daemon-process #'ignore)
-    (when (process-live-p agent-repl--frontend-daemon-process)
-      (delete-process agent-repl--frontend-daemon-process)))
+    (agent-repl-test--reap-process agent-repl--frontend-daemon-process))
   ;; THE RECONNECT TIMER IS A COLD-START TRIGGER, not just a link detail.
   ;; `agent-repl-daemon-ensure' is registered on
   ;; `agent-repl-link-no-daemon-functions' at load time, so a reconnect that
