@@ -2114,6 +2114,43 @@ because what happens on completion is the repository's own directive."
       (agent-repl-create-oneshot t)
       (should (equal (plist-get (agent-repl-test-verbs--request :create) :model) "haiku")))))
 
+;;;; ---- Create: the required-prompt reader ----
+
+(ert-deftest agent-repl-verbs-read-required-prompt-returns-the-text-as-read ()
+  "A non-blank answer comes back untouched, surrounding whitespace included."
+  ;; Arrange.
+  (cl-letf (((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p) " ask \n")))
+    ;; Act / Assert.
+    (should (equal (agent-repl-verbs--read-required-prompt "Q: " "refused") " ask \n"))))
+
+(ert-deftest agent-repl-verbs-read-required-prompt-refuses-a-blank-answer ()
+  "A whitespace-only answer is refused with the caller's refusal."
+  ;; Arrange.
+  (cl-letf (((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p) " \t\n")))
+    ;; Act.
+    (let ((err (should-error (agent-repl-verbs--read-required-prompt "Q: " "it IS its prompt")
+                             :type 'user-error)))
+      ;; Assert.
+      (should (equal (cadr err) "agent-repl: it IS its prompt")))))
+
+(ert-deftest agent-repl-verbs-prompt-only-creates-share-the-required-prompt-reader ()
+  "The one-shot and help creates both read their prompt through the shared reader."
+  ;; Arrange.
+  (let ((agent-repl-roster-view
+         (agent-repl-test-verbs--roster (list (agent-repl-test-verbs--row)) nil
+                                        (agent-repl-test-verbs--help-sections)))
+        (prompts nil))
+    (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
+      (agent-repl-test-verbs--with-help-repo "/tmp/agent-repl-test/doom/.git"
+        (cl-letf (((symbol-function 'agent-repl-verbs--read-required-prompt)
+                   (lambda (prompt-text _refusal) (push prompt-text prompts) "q")))
+          ;; Act.
+          (agent-repl-create-oneshot nil)
+          (agent-repl-create-help-workspace)
+          ;; Assert.
+          (should (equal (reverse prompts)
+                         '("One-shot commission: " "agent-repl question: "))))))))
+
 ;;;; ---- Create: the help workspace (SPC o h) ----
 
 (defmacro agent-repl-test-verbs--with-help-repo (common-dir &rest body)
