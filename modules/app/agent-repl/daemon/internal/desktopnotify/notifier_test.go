@@ -12,11 +12,13 @@ import (
 	"claude-repld/internal/ids"
 )
 
-// fakeBackend records each posted banner and answers a scripted click.
+// fakeBackend records each posted banner and its target, and answers a
+// scripted outcome.
 type fakeBackend struct {
 	mu      sync.Mutex
 	posted  []Banner
-	clicked bool
+	targets []Target
+	outcome Outcome
 	err     error
 	// block, when set, holds Post until closed or ctx ends.
 	block chan struct{}
@@ -24,18 +26,25 @@ type fakeBackend struct {
 
 func (b *fakeBackend) Program() string { return "fake-banner" }
 
-func (b *fakeBackend) Post(ctx context.Context, _ ids.WorkspaceID, banner Banner) (bool, error) {
+func (b *fakeBackend) Post(ctx context.Context, target Target, banner Banner) (Outcome, error) {
 	b.mu.Lock()
 	b.posted = append(b.posted, banner)
+	b.targets = append(b.targets, target)
 	b.mu.Unlock()
 	if b.block != nil {
 		select {
 		case <-b.block:
 		case <-ctx.Done():
-			return false, ctx.Err()
+			return Unclicked, ctx.Err()
 		}
 	}
-	return b.clicked, b.err
+	return b.outcome, b.err
+}
+
+func (b *fakeBackend) postedTargets() []Target {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([]Target(nil), b.targets...)
 }
 
 func (b *fakeBackend) banners() []Banner {
@@ -93,15 +102,18 @@ func (c *fakeClicks) clicked() []ids.WorkspaceID {
 	return append([]ids.WorkspaceID(nil), c.got...)
 }
 
-// fakeNames answers one name, or one error.
-type fakeNames struct {
-	name string
-	err  error
+// fakeWorkspaces answers one workspace, or one error.
+type fakeWorkspaces struct {
+	workspace Workspace
+	err       error
 }
 
-func (n fakeNames) WorkspaceName(context.Context, ids.WorkspaceID) (string, error) {
-	return n.name, n.err
+func (w fakeWorkspaces) Workspace(context.Context, ids.WorkspaceID) (Workspace, error) {
+	return w.workspace, w.err
 }
+
+// named is the fixture's workspace.
+var named = fakeWorkspaces{workspace: Workspace{Name: "ws-name", Dir: "/work/ws-name"}}
 
 type notifierFixture struct {
 	notifier *Notifier
@@ -112,11 +124,11 @@ type notifierFixture struct {
 	log      *dlog.TestLogger
 }
 
-func newNotifierFixture(t *testing.T, names Names) notifierFixture {
+func newNotifierFixture(t *testing.T, workspaces Workspaces) notifierFixture {
 	t.Helper()
 	log := dlog.NewTestLogger()
 	f := notifierFixture{focus: NewFocus(log), backend: &fakeBackend{}, chime: &fakeChime{}, clicks: &fakeClicks{}, log: log}
-	f.notifier = New(Deps{Focus: f.focus, Backend: f.backend, Chime: f.chime, Clicks: f.clicks, Names: names, Log: log})
+	f.notifier = New(Deps{Focus: f.focus, Backend: f.backend, Chime: f.chime, Clicks: f.clicks, Workspaces: workspaces, Log: log})
 	return f
 }
 
@@ -136,7 +148,7 @@ func hasRecord(log *dlog.TestLogger, level, message string) (dlog.Record, bool) 
 
 func TestNotifierPostsWhenEmacsIsUnfocused(t *testing.T) {
 	// Arrange
-	f := newNotifierFixture(t, fakeNames{name: "ws-name"})
+	f := newNotifierFixture(t, named)
 	f.focus.Attach(false)
 
 	// Act
@@ -152,7 +164,7 @@ func TestNotifierPostsWhenEmacsIsUnfocused(t *testing.T) {
 
 func TestNotifierRaisesAnAgentNotificationUnderTheWorkspaceName(t *testing.T) {
 	// Arrange
-	f := newNotifierFixture(t, fakeNames{name: "ws-name"})
+	f := newNotifierFixture(t, named)
 
 	// Act
 	f.notifier.Raise("ws1", "permission_requested", "Run the tests?")
@@ -167,7 +179,7 @@ func TestNotifierRaisesAnAgentNotificationUnderTheWorkspaceName(t *testing.T) {
 
 func TestNotifierPostsWithNoEmacsStream(t *testing.T) {
 	// Arrange
-	f := newNotifierFixture(t, fakeNames{name: "ws-name"})
+	f := newNotifierFixture(t, named)
 
 	// Act
 	f.notifier.Post("ws1", "turn_ended", titledBy)
@@ -181,7 +193,7 @@ func TestNotifierPostsWithNoEmacsStream(t *testing.T) {
 
 func TestNotifierPostsNothingWhenEmacsIsFocused(t *testing.T) {
 	// Arrange
-	f := newNotifierFixture(t, fakeNames{name: "ws-name"})
+	f := newNotifierFixture(t, named)
 	f.focus.Attach(true)
 	composed := false
 
@@ -203,7 +215,7 @@ func TestNotifierPostsNothingWhenEmacsIsFocused(t *testing.T) {
 
 func TestNotifierRechecksFocusAfterComposing(t *testing.T) {
 	// Arrange
-	f := newNotifierFixture(t, fakeNames{name: "ws-name"})
+	f := newNotifierFixture(t, named)
 	release := f.focus.Attach(false)
 	_ = release
 
@@ -225,8 +237,8 @@ func TestNotifierRechecksFocusAfterComposing(t *testing.T) {
 
 func TestNotifierRelaysAClick(t *testing.T) {
 	// Arrange
-	f := newNotifierFixture(t, fakeNames{name: "ws-name"})
-	f.backend.clicked = true
+	f := newNotifierFixture(t, named)
+	f.backend.outcome = Clicked
 
 	// Act
 	f.notifier.Post("ws1", "turn_ended", titledBy)
@@ -238,9 +250,58 @@ func TestNotifierRelaysAClick(t *testing.T) {
 	}
 }
 
+func TestNotifierPostsToTheWorkspacesTarget(t *testing.T) {
+	// Arrange
+	f := newNotifierFixture(t, named)
+
+	// Act
+	f.notifier.Post("ws1", "turn_ended", titledBy)
+	f.notifier.wg.Wait()
+
+	// Assert
+	if got := f.backend.postedTargets(); len(got) != 1 || got[0] != (Target{ID: "ws1", Dir: "/work/ws-name"}) {
+		t.Fatalf("targets = %+v, want the workspace's id and directory", got)
+	}
+}
+
+func TestNotifierRecordsAHandedBannerAndRelaysNoClick(t *testing.T) {
+	// Arrange
+	f := newNotifierFixture(t, named)
+	f.backend.outcome = Handed
+
+	// Act
+	f.notifier.Post("ws1", "turn_ended", titledBy)
+	f.notifier.wg.Wait()
+
+	// Assert
+	if got := f.clicks.clicked(); len(got) != 0 {
+		t.Fatalf("clicks = %v, want none: a handed banner's click selects the workspace itself", got)
+	}
+	r, ok := hasRecord(f.log, "info", "the platform holds the banner; its click selects the workspace itself")
+	if !ok || r.Context["workspace"] != "ws1" || r.Context["kind"] != "turn_ended" {
+		t.Fatalf("record = %+v (found=%v), want the handed banner recorded with its workspace and kind", r, ok)
+	}
+}
+
+func TestNotifierPanicsOnAnUnknownOutcome(t *testing.T) {
+	// Arrange
+	f := newNotifierFixture(t, named)
+	f.backend.outcome = Outcome(99)
+
+	// Assert
+	defer func() {
+		if recover() == nil {
+			t.Fatal("an unknown outcome was accepted")
+		}
+	}()
+
+	// Act
+	f.notifier.show("ws1", f.log, titledBy)
+}
+
 func TestNotifierRelaysNoClickForADismissal(t *testing.T) {
 	// Arrange
-	f := newNotifierFixture(t, fakeNames{name: "ws-name"})
+	f := newNotifierFixture(t, named)
 
 	// Act
 	f.notifier.Post("ws1", "turn_ended", titledBy)
@@ -254,7 +315,7 @@ func TestNotifierRelaysNoClickForADismissal(t *testing.T) {
 
 func TestNotifierRecordsAFailedProgram(t *testing.T) {
 	// Arrange
-	f := newNotifierFixture(t, fakeNames{name: "ws-name"})
+	f := newNotifierFixture(t, named)
 	f.backend.err = errors.New("exit status 64")
 
 	// Act
@@ -276,7 +337,7 @@ func TestNotifierRecordsAFailedProgram(t *testing.T) {
 
 func TestNotifierRecordsAnUnnameableWorkspace(t *testing.T) {
 	// Arrange
-	f := newNotifierFixture(t, fakeNames{err: errors.New("no such workspace")})
+	f := newNotifierFixture(t, fakeWorkspaces{err: errors.New("no such workspace")})
 
 	// Act
 	f.notifier.Post("ws1", "turn_ended", titledBy)
@@ -292,18 +353,18 @@ func TestNotifierRecordsAnUnnameableWorkspace(t *testing.T) {
 	}
 }
 
-// ctxNames answers only once its ctx ends, with the ctx's own error: a name
-// lookup the stand-down cut short.
-type ctxNames struct{}
+// ctxWorkspaces answers only once its ctx ends, with the ctx's own error: a
+// workspace lookup the stand-down cut short.
+type ctxWorkspaces struct{}
 
-func (ctxNames) WorkspaceName(ctx context.Context, _ ids.WorkspaceID) (string, error) {
+func (ctxWorkspaces) Workspace(ctx context.Context, _ ids.WorkspaceID) (Workspace, error) {
 	<-ctx.Done()
-	return "", ctx.Err()
+	return Workspace{}, ctx.Err()
 }
 
 func TestNotifierCloseEndsANameLookupWithoutAnError(t *testing.T) {
 	// Arrange
-	f := newNotifierFixture(t, ctxNames{})
+	f := newNotifierFixture(t, ctxWorkspaces{})
 	f.notifier.Post("ws1", "turn_ended", titledBy)
 
 	// Act
@@ -326,7 +387,7 @@ func TestNotifierRecordsAMissingProgram(t *testing.T) {
 	log := dlog.NewTestLogger()
 	n := New(Deps{
 		Focus: NewFocus(log), BackendErr: errors.New("alerter is not installed"), Chime: &fakeChime{},
-		Clicks: &fakeClicks{}, Names: fakeNames{name: "ws-name"}, Log: log,
+		Clicks: &fakeClicks{}, Workspaces: named, Log: log,
 	})
 
 	// Act
@@ -342,7 +403,7 @@ func TestNotifierRecordsAMissingProgram(t *testing.T) {
 
 func TestNotifierCloseEndsABannerAwaitingItsClick(t *testing.T) {
 	// Arrange
-	f := newNotifierFixture(t, fakeNames{name: "ws-name"})
+	f := newNotifierFixture(t, named)
 	f.backend.block = make(chan struct{})
 	f.notifier.Post("ws1", "turn_ended", titledBy)
 
@@ -360,7 +421,7 @@ func TestNotifierCloseEndsABannerAwaitingItsClick(t *testing.T) {
 
 func TestNotifierPostsNothingAfterClose(t *testing.T) {
 	// Arrange
-	f := newNotifierFixture(t, fakeNames{name: "ws-name"})
+	f := newNotifierFixture(t, named)
 	f.notifier.Close()
 
 	// Act
@@ -378,7 +439,7 @@ func TestNotifierPostsNothingAfterClose(t *testing.T) {
 
 func TestNotifierRingsWhenEmacsIsFocused(t *testing.T) {
 	// Arrange
-	f := newNotifierFixture(t, fakeNames{name: "ws-name"})
+	f := newNotifierFixture(t, named)
 	f.focus.Attach(true)
 
 	// Act
@@ -400,7 +461,7 @@ func TestNotifierRingsWhenEmacsIsFocused(t *testing.T) {
 
 func TestNotifierRingsWhenEmacsIsUnfocused(t *testing.T) {
 	// Arrange
-	f := newNotifierFixture(t, fakeNames{name: "ws-name"})
+	f := newNotifierFixture(t, named)
 	f.focus.Attach(false)
 
 	// Act
@@ -415,7 +476,7 @@ func TestNotifierRingsWhenEmacsIsUnfocused(t *testing.T) {
 
 func TestNotifierRecordsAFailedChime(t *testing.T) {
 	// Arrange
-	f := newNotifierFixture(t, fakeNames{name: "ws-name"})
+	f := newNotifierFixture(t, named)
 	f.chime.err = errors.New("exit status 1")
 
 	// Act
@@ -434,7 +495,7 @@ func TestNotifierRecordsAMissingChime(t *testing.T) {
 	log := dlog.NewTestLogger()
 	n := New(Deps{
 		Focus: NewFocus(log), Backend: &fakeBackend{}, ChimeErr: errors.New("afplay is not installed"),
-		Clicks: &fakeClicks{}, Names: fakeNames{name: "ws-name"}, Log: log,
+		Clicks: &fakeClicks{}, Workspaces: named, Log: log,
 	})
 
 	// Act
@@ -450,7 +511,7 @@ func TestNotifierRecordsAMissingChime(t *testing.T) {
 
 func TestNotifierCloseEndsAPlayingChime(t *testing.T) {
 	// Arrange
-	f := newNotifierFixture(t, fakeNames{name: "ws-name"})
+	f := newNotifierFixture(t, named)
 	f.chime.block = make(chan struct{})
 	f.notifier.Ring("ws1", KindTurnEnded)
 
@@ -468,7 +529,7 @@ func TestNotifierCloseEndsAPlayingChime(t *testing.T) {
 
 func TestNotifierRingsNothingAfterClose(t *testing.T) {
 	// Arrange
-	f := newNotifierFixture(t, fakeNames{name: "ws-name"})
+	f := newNotifierFixture(t, named)
 	f.notifier.Close()
 
 	// Act
@@ -489,11 +550,11 @@ func TestNewRefusesAHalfWiredNotifier(t *testing.T) {
 		name string
 		deps Deps
 	}{
-		{name: "no focus", deps: Deps{Backend: &fakeBackend{}, Chime: &fakeChime{}, Clicks: &fakeClicks{}, Names: fakeNames{}, Log: dlog.NewTestLogger()}},
-		{name: "both backend and error", deps: Deps{Focus: NewFocus(dlog.NewTestLogger()), Backend: &fakeBackend{}, BackendErr: errors.New("x"), Chime: &fakeChime{}, Clicks: &fakeClicks{}, Names: fakeNames{}, Log: dlog.NewTestLogger()}},
-		{name: "neither backend nor error", deps: Deps{Focus: NewFocus(dlog.NewTestLogger()), Chime: &fakeChime{}, Clicks: &fakeClicks{}, Names: fakeNames{}, Log: dlog.NewTestLogger()}},
-		{name: "both chime and error", deps: Deps{Focus: NewFocus(dlog.NewTestLogger()), Backend: &fakeBackend{}, Chime: &fakeChime{}, ChimeErr: errors.New("x"), Clicks: &fakeClicks{}, Names: fakeNames{}, Log: dlog.NewTestLogger()}},
-		{name: "neither chime nor error", deps: Deps{Focus: NewFocus(dlog.NewTestLogger()), Backend: &fakeBackend{}, Clicks: &fakeClicks{}, Names: fakeNames{}, Log: dlog.NewTestLogger()}},
+		{name: "no focus", deps: Deps{Backend: &fakeBackend{}, Chime: &fakeChime{}, Clicks: &fakeClicks{}, Workspaces: fakeWorkspaces{}, Log: dlog.NewTestLogger()}},
+		{name: "both backend and error", deps: Deps{Focus: NewFocus(dlog.NewTestLogger()), Backend: &fakeBackend{}, BackendErr: errors.New("x"), Chime: &fakeChime{}, Clicks: &fakeClicks{}, Workspaces: fakeWorkspaces{}, Log: dlog.NewTestLogger()}},
+		{name: "neither backend nor error", deps: Deps{Focus: NewFocus(dlog.NewTestLogger()), Chime: &fakeChime{}, Clicks: &fakeClicks{}, Workspaces: fakeWorkspaces{}, Log: dlog.NewTestLogger()}},
+		{name: "both chime and error", deps: Deps{Focus: NewFocus(dlog.NewTestLogger()), Backend: &fakeBackend{}, Chime: &fakeChime{}, ChimeErr: errors.New("x"), Clicks: &fakeClicks{}, Workspaces: fakeWorkspaces{}, Log: dlog.NewTestLogger()}},
+		{name: "neither chime nor error", deps: Deps{Focus: NewFocus(dlog.NewTestLogger()), Backend: &fakeBackend{}, Clicks: &fakeClicks{}, Workspaces: fakeWorkspaces{}, Log: dlog.NewTestLogger()}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
