@@ -191,3 +191,7 @@ sidebar's walk" and the create-landing rule above. Not yet implemented.
   where the registry says.
 - **Repository sections** keep their current sort; only rows within a section,
   and children under their parent, sort by registry order.
+- **Keys (owner, 2026-10-11):** lowercase asks for a prompt, capital for a
+  name. `n`/`N` stay as they are. `f`/`F` fork into `master`. `c`/`C` become
+  the child fork (cut from the current workspace's tip, merging back into
+  it), replacing today's child commands.
