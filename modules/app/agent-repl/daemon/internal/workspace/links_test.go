@@ -434,17 +434,61 @@ func TestOpenFeedLinkRelaysALineSuffix(t *testing.T) {
 	}
 }
 
-func TestOpenFeedLinkRefusesAPathThatResolvesOutsideTheWorktree(t *testing.T) {
+func TestOpenFeedLinkRelaysAnAbsolutePathOutsideTheWorktree(t *testing.T) {
 	// Arrange: an existing file in another directory.
 	f, _ := linkFixture(t)
-	outside := filepath.Join(t.TempDir(), "secret.txt")
+	outside := filepath.Join(t.TempDir(), "notes.txt")
 	touch(t, outside)
 
 	// Act.
 	_, err := f.verbs.OpenFeedLink(context.Background(), "w1", outside, true)
 
 	// Assert.
-	asRefusal(t, err, ArmPathEscapesWorkspace)
+	if err != nil {
+		t.Fatalf("OpenFeedLink: %v", err)
+	}
+	if got := relayedPath(t, f); got != outside {
+		t.Fatalf("relayed %q, want the file outside the worktree %q", got, outside)
+	}
+}
+
+func TestOpenFeedLinkLogsWhetherTheRelayedFileIsInTheWorktree(t *testing.T) {
+	cases := []struct {
+		name     string
+		inside   bool
+		expected bool
+	}{
+		{name: "a file inside the worktree", inside: true, expected: true},
+		{name: "a file outside the worktree", inside: false, expected: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			f, dir := linkFixture(t)
+			path := filepath.Join(t.TempDir(), "notes.txt")
+			if tc.inside {
+				path = filepath.Join(dir, "notes.txt")
+			}
+			touch(t, path)
+
+			// Act.
+			_, err := f.verbs.OpenFeedLink(context.Background(), "w1", path, true)
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("OpenFeedLink: %v", err)
+			}
+			for _, rec := range f.log.logger.Records() {
+				if rec.Operation == opOpenInEditor && rec.Context["resolved"] == path {
+					if got := rec.Context["in_worktree"]; got != tc.expected {
+						t.Fatalf("in_worktree = %v, want %v", got, tc.expected)
+					}
+					return
+				}
+			}
+			t.Fatalf("records = %+v, want the relay logged under %s", f.log.logger.Records(), opOpenInEditor)
+		})
+	}
 }
 
 func TestOpenFeedLinkAnswersLinkUnresolvedForAFileNowhere(t *testing.T) {
@@ -638,14 +682,20 @@ func TestOpenFeedLinkLeavesAnotherUsersHomeUnresolved(t *testing.T) {
 	}
 }
 
-func TestOpenFeedLinkRefusesAHomeRelativePathOutsideTheWorktree(t *testing.T) {
+func TestOpenFeedLinkRelaysAHomeRelativePathOutsideTheWorktree(t *testing.T) {
 	// Arrange: the file exists beneath home, but not in this worktree.
 	f, _, _ := homeLinkFixture(t)
-	touch(t, filepath.Join(f.home, "elsewhere", "notes.txt"))
+	want := filepath.Join(f.home, "elsewhere", "notes.txt")
+	touch(t, want)
 
 	// Act
-	_, err := f.verbs.OpenFeedLink(context.Background(), "w1", "~/elsewhere/notes.txt", true)
+	_, err := f.verbs.OpenFeedLink(context.Background(), "w1", "~/elsewhere/notes.txt:7", true)
 
 	// Assert
-	asRefusal(t, err, ArmPathEscapesWorkspace)
+	if err != nil {
+		t.Fatalf("OpenFeedLink: %v", err)
+	}
+	if relayedPath(t, f) != want || f.host.editorOpens[0].Line == nil || *f.host.editorOpens[0].Line != 7 {
+		t.Fatalf("relayed %+v, want %s at line 7", f.host.editorOpens, want)
+	}
 }
