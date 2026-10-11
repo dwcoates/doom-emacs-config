@@ -2,7 +2,9 @@ package feed
 
 import (
 	"errors"
+	"os"
 	"slices"
+	"strings"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -743,5 +745,45 @@ func TestASendOfOptionNumbersTheQuestionCannotTakeIsRefusedWithoutChangingTheDra
 				t.Fatal("the refused send left no record")
 			}
 		})
+	}
+}
+
+func TestInServedOrderAnswersTheHeldLabelsInTheServedOrder(t *testing.T) {
+	tests := []struct {
+		name string
+		held map[string]bool
+		want []string
+	}{
+		{"nothing held", map[string]bool{}, nil},
+		{"held out of order", map[string]bool{"c": true, "a": true}, []string{"a", "c"}},
+		{"a label held false", map[string]bool{"a": false, "b": true}, []string{"b"}},
+		{"a label never served", map[string]bool{"z": true, "b": true}, []string{"b"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange, Act.
+			got := inServedOrder([]string{"a", "b", "c"}, tc.held)
+
+			// Assert.
+			if !slices.Equal(got, tc.want) {
+				t.Fatalf("inServedOrder = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestTheChosenLabelsAreOrderedThroughInServedOrder(t *testing.T) {
+	// Arrange: a hand-rolled ordering that drifted from the helper fails here.
+	source, err := os.ReadFile("questiondraft.go")
+	if err != nil {
+		t.Fatalf("read questiondraft.go: %v", err)
+	}
+
+	// Act.
+	calls := strings.Count(string(source), "inServedOrder(")
+
+	// Assert: the definition plus toggleLabel's and pickByNumber's calls.
+	if calls != 3 {
+		t.Fatalf("inServedOrder( appears %d times, want its definition and two call sites", calls)
 	}
 }
