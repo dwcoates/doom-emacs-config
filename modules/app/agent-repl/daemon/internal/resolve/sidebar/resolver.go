@@ -239,6 +239,7 @@ func (r *resolver) render(log dlog.Logger, cause string) *frontendv1.WorkspaceRo
 		Maturity:       r.maturityView(live, rc, log),
 		Hidden:         r.hiddenSection(hidden, rc, log),
 		RecentlyMerged: r.mergedSection(merged, rc, log),
+		TabBar:         r.tabBar(),
 	}
 	setShownGrouping(out, r.state.reg.View.Grouping)
 	if cur := r.currentWorkspace(); cur != nil {

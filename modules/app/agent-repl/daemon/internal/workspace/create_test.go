@@ -1207,3 +1207,337 @@ func TestCreateHandsAPlainCreatesNamingCallNoConversation(t *testing.T) {
 		t.Fatalf("naming prompt = %q, want an empty conversation", f.headless.calls[0].Prompt)
 	}
 }
+
+func TestCreateChecksAnExplicitTopLevelBaseRefAgainstThePrimaryBranch(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.git.defaultBranch = "main"
+	spec := standardSpec(t, f)
+	spec.BaseRef = "origin/main"
+
+	// Act.
+	if _, err := f.verbs.Create(context.Background(), spec); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Assert.
+	if want := []string{"origin/main..main"}; !slices.Equal(f.git.ancestorChecks, want) {
+		t.Fatalf("ancestry checks = %v, want %v", f.git.ancestorChecks, want)
+	}
+}
+
+func TestCreateRefusesATopLevelBaseRefOffThePrimaryBranch(t *testing.T) {
+	// Arrange: the base is another branch's unmerged commit.
+	f := newFixture(t)
+	f.git.defaultBranch = "main"
+	f.git.offPrimary = map[string]bool{"feature-tip": true}
+	spec := standardSpec(t, f)
+	spec.BaseRef = "feature-tip"
+
+	// Act.
+	_, err := f.verbs.Create(context.Background(), spec)
+
+	// Assert.
+	refusal := asRefusal(t, err, ArmBaseRefOffPrimaryBranch)
+	if refusal.Fields["ref"] != "feature-tip" || refusal.Fields["primary_branch"] != "main" {
+		t.Fatalf("refusal fields = %v, want the ref and the primary branch", refusal.Fields)
+	}
+	if len(f.git.created) != 0 {
+		t.Fatalf("worktrees created = %v, want none", f.git.created)
+	}
+}
+
+func TestCreateFailsLoudlyWhenTheAncestryCheckFails(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.git.defaultBranch = "main"
+	f.git.ancestorErr = errors.New("git exploded")
+	spec := standardSpec(t, f)
+	spec.BaseRef = "origin/main"
+
+	// Act.
+	_, err := f.verbs.Create(context.Background(), spec)
+
+	// Assert.
+	if err == nil || !errors.Is(err, f.git.ancestorErr) {
+		t.Fatalf("Create error = %v, want the check's failure", err)
+	}
+	if len(f.git.created) != 0 {
+		t.Fatalf("worktrees created = %v, want none", f.git.created)
+	}
+	if !loggedAtError(f, opCreate) {
+		t.Fatal("the failed ancestry check was not logged at error")
+	}
+}
+
+func TestCreateCutsAChildFromItsParentsTip(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.git.defaultBranch = "main"
+	parent := f.workspace("parent", t.TempDir())
+	spec := standardSpec(t, f)
+	id := parent.ID
+	spec.Parent = &id
+
+	// Act.
+	if _, err := f.verbs.Create(context.Background(), spec); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Assert: the child starts from the parent's branch, never the default.
+	if got := f.git.created[0].BaseRef; got != parent.Branch {
+		t.Fatalf("base ref = %q, want the parent's branch %q", got, parent.Branch)
+	}
+	if len(f.git.ancestorChecks) != 0 {
+		t.Fatalf("ancestry checks = %v, want none for a child", f.git.ancestorChecks)
+	}
+}
+
+func TestCreateChildInheritsItsParentsPriority(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	parent := f.workspace("parent", t.TempDir())
+	p1 := wsm.PriorityP1
+	record := f.db.byDir[parent.Dir]
+	record.Priority = &p1
+	f.db.with(record)
+	spec := standardSpec(t, f)
+	id := parent.ID
+	spec.Parent = &id
+
+	// Act.
+	created, err := f.verbs.Create(context.Background(), spec)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Assert.
+	if got := f.db.byDir[created.Dir].Priority; got == nil || *got != wsm.PriorityP1 {
+		t.Fatalf("child priority = %v, want the parent's P1", got)
+	}
+}
+
+func TestCreateChildKeepsAPriorityItWasGiven(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	parent := f.workspace("parent", t.TempDir())
+	p1, p3 := wsm.PriorityP1, wsm.PriorityP3
+	record := f.db.byDir[parent.Dir]
+	record.Priority = &p1
+	f.db.with(record)
+	spec := standardSpec(t, f)
+	id := parent.ID
+	spec.Parent = &id
+	spec.Priority = &p3
+
+	// Act.
+	created, err := f.verbs.Create(context.Background(), spec)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Assert.
+	if got := f.db.byDir[created.Dir].Priority; got == nil || *got != wsm.PriorityP3 {
+		t.Fatalf("child priority = %v, want the given P3", got)
+	}
+}
+
+func TestCreateATopLevelWorkspaceInheritsNoPriority(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+
+	// Act.
+	created, err := f.verbs.Create(context.Background(), standardSpec(t, f))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Assert.
+	if got := f.db.byDir[created.Dir].Priority; got != nil {
+		t.Fatalf("priority = %v, want none", *got)
+	}
+}
+
+// forkIntoPrimarySpec is a fork of `source` into the primary branch.
+func forkIntoPrimarySpec(t *testing.T, f *fixture, source ids.WorkspaceID) CreateSpec {
+	t.Helper()
+	spec := standardSpec(t, f)
+	spec.ForkFrom = &source
+	spec.ForkIntoPrimary = true
+	return spec
+}
+
+func TestCreateForkIntoPrimaryHasNoParentAndStartsFromThePrimaryBranch(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.git.defaultBranch = "main"
+	f.briefs[BriefForkIntoPrimary] = prompts.Prompt{Name: BriefForkIntoPrimary, Body: "FORK OF {{origin}}\n", Placeholders: []string{"origin"}}
+	source := f.workspace("source", t.TempDir())
+	f.db.sessions[source.ID] = wsm.Session{Workspace: source.ID, VendorSessionID: "vendor-1"}
+	f.account.transcript = account.Transcript{Path: "/transcripts/vendor-1.jsonl", ConfigDir: "/roots/default"}
+
+	// Act.
+	if _, err := f.verbs.Create(context.Background(), forkIntoPrimarySpec(t, f, source.ID)); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Assert.
+	if got := f.git.created[0].BaseRef; got != "main" {
+		t.Fatalf("base ref = %q, want the primary branch", got)
+	}
+	if facts := f.db.registered[len(f.db.registered)-1]; facts.Parent != nil {
+		t.Fatalf("registered parent = %v, want none", *facts.Parent)
+	}
+	if len(f.account.ported) != 1 {
+		t.Fatalf("ported transcripts = %+v, want the source's ported once", f.account.ported)
+	}
+}
+
+func TestCreateForkIntoPrimaryOpensWithTheNoteNamingTheSource(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.briefs[BriefForkIntoPrimary] = prompts.Prompt{Name: BriefForkIntoPrimary, Body: "FORK OF {{origin}}\n", Placeholders: []string{"origin"}}
+	source := f.workspace("source", t.TempDir())
+	f.db.sessions[source.ID] = wsm.Session{Workspace: source.ID, VendorSessionID: "vendor-1"}
+	f.account.transcript = account.Transcript{Path: "/transcripts/vendor-1.jsonl", ConfigDir: "/roots/default"}
+
+	// Act.
+	if _, err := f.verbs.Create(context.Background(), forkIntoPrimarySpec(t, f, source.ID)); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Assert.
+	sent := f.queue.submissions[0].Said.GetContent().GetBlocks()[0].GetText().GetText()
+	if want := prompts.Wrap("FORK OF "+source.Name+"\n") + "fix the login bug"; sent != want {
+		t.Fatalf("first message = %q, want %q", sent, want)
+	}
+}
+
+func TestCreateForkIntoPrimaryWithoutItsBriefIsRefused(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	source := f.workspace("source", t.TempDir())
+	f.db.sessions[source.ID] = wsm.Session{Workspace: source.ID, VendorSessionID: "vendor-1"}
+	f.account.transcript = account.Transcript{Path: "/transcripts/vendor-1.jsonl", ConfigDir: "/roots/default"}
+
+	// Act.
+	_, err := f.verbs.Create(context.Background(), forkIntoPrimarySpec(t, f, source.ID))
+
+	// Assert.
+	asRefusal(t, err, ArmBriefMissing)
+	if !loggedAtError(f, opCreate) {
+		t.Fatal("the missing brief was not logged at error")
+	}
+}
+
+func TestCreateRefusesAForkIntoPrimaryOfASourceWithNoConversation(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	source := f.workspace("source", t.TempDir())
+
+	// Act.
+	_, err := f.verbs.Create(context.Background(), forkIntoPrimarySpec(t, f, source.ID))
+
+	// Assert.
+	asRefusal(t, err, ArmForkSourceHasNoConversation)
+	if len(f.git.created) != 0 {
+		t.Fatalf("worktrees created = %v, want none", f.git.created)
+	}
+}
+
+// parentAndBaseSpec is a create naming the fixture's parent and an explicit
+// base, as the command-file ingress sends one.
+func parentAndBaseSpec(t *testing.T, f *fixture, base string) (CreateSpec, wsm.Workspace) {
+	t.Helper()
+	parent := f.workspace("parent", t.TempDir())
+	spec := standardSpec(t, f)
+	id := parent.ID
+	spec.Parent = &id
+	spec.BaseRef = base
+	return spec, parent
+}
+
+func TestCreateWithAParentAndItsTipAsTheBaseMakesAChild(t *testing.T) {
+	// Arrange: the fake resolves a ref to "sha-of-<ref>", so naming the
+	// parent's branch is naming its tip.
+	f := newFixture(t)
+	f.git.defaultBranch = "main"
+	spec, parent := parentAndBaseSpec(t, f, "")
+	spec.BaseRef = parent.Branch
+
+	// Act.
+	if _, err := f.verbs.Create(context.Background(), spec); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Assert.
+	if facts := f.db.registered[len(f.db.registered)-1]; facts.Parent == nil || *facts.Parent != parent.ID {
+		t.Fatalf("registered parent = %v, want %s", facts.Parent, parent.ID)
+	}
+	if got := f.git.created[0].BaseRef; got != parent.Branch {
+		t.Fatalf("base ref = %q, want the parent's branch", got)
+	}
+}
+
+func TestCreateWithAParentAndABaseOnThePrimaryBranchIsTopLevel(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.git.defaultBranch = "main"
+	spec, _ := parentAndBaseSpec(t, f, "origin/main")
+
+	// Act.
+	if _, err := f.verbs.Create(context.Background(), spec); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Assert.
+	if facts := f.db.registered[len(f.db.registered)-1]; facts.Parent != nil {
+		t.Fatalf("registered parent = %v, want none for a base on the primary branch", *facts.Parent)
+	}
+	if got := f.git.created[0].BaseRef; got != "origin/main" {
+		t.Fatalf("base ref = %q, want origin/main", got)
+	}
+}
+
+func TestCreateWithAParentAndABaseElsewhereIsRefused(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.git.defaultBranch = "main"
+	f.git.offPrimary = map[string]bool{"elsewhere": true}
+	spec, _ := parentAndBaseSpec(t, f, "elsewhere")
+
+	// Act.
+	_, err := f.verbs.Create(context.Background(), spec)
+
+	// Assert.
+	asRefusal(t, err, ArmBaseRefOffPrimaryBranch)
+	if len(f.git.created) != 0 {
+		t.Fatalf("worktrees created = %v, want none", f.git.created)
+	}
+}
+
+func TestCreateWithAParentForkAndABaseOnThePrimaryBranchForksIntoIt(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.git.defaultBranch = "main"
+	f.briefs[BriefForkIntoPrimary] = prompts.Prompt{Name: BriefForkIntoPrimary, Body: "FORK OF {{origin}}\n", Placeholders: []string{"origin"}}
+	spec, parent := parentAndBaseSpec(t, f, "origin/main")
+	f.db.sessions[parent.ID] = wsm.Session{Workspace: parent.ID, VendorSessionID: "vendor-1"}
+	f.account.transcript = account.Transcript{Path: "/transcripts/vendor-1.jsonl", ConfigDir: "/roots/default"}
+	id := parent.ID
+	spec.ForkFrom = &id
+
+	// Act.
+	if _, err := f.verbs.Create(context.Background(), spec); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Assert: no parent, the conversation ported, the note in the first message.
+	if facts := f.db.registered[len(f.db.registered)-1]; facts.Parent != nil {
+		t.Fatalf("registered parent = %v, want none", *facts.Parent)
+	}
+	sent := f.queue.submissions[0].Said.GetContent().GetBlocks()[0].GetText().GetText()
+	if !strings.HasPrefix(sent, prompts.Wrap("FORK OF "+parent.Name+"\n")) {
+		t.Fatalf("first message = %q, want it to open with the fork note", sent)
+	}
+}

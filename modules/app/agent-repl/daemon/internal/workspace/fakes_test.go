@@ -27,7 +27,6 @@ import (
 	"claude-repld/internal/merge"
 	"claude-repld/internal/promptqueue"
 	"claude-repld/internal/prompts"
-	"claude-repld/internal/publish"
 	"claude-repld/internal/resolve/feed"
 	"claude-repld/internal/resolve/footer"
 	"claude-repld/internal/resolve/sidebar"
@@ -49,9 +48,9 @@ var errFake = errors.New("workspace test: arranged failure")
 type fakeDB struct {
 	wsm.DB
 
-	// swaps is every SwapPlaces call, in order; swapErr fails it.
-	swaps   [][2]ids.WorkspaceID
-	swapErr error
+	// moves is every MovePlace call, in order; moveErr fails it.
+	moves   [][2]ids.WorkspaceID
+	moveErr error
 
 	// rolledBack is each workspace's rolled-back turns; rolledBackErr fails
 	// the read.
@@ -362,11 +361,11 @@ func (d *fakeDB) Tasks(context.Context) ([]wsm.Task, error) { return d.tasks, ni
 
 func (d *fakeDB) Current(context.Context) (*ids.WorkspaceID, error) { return d.current, nil }
 
-func (d *fakeDB) SwapPlaces(_ context.Context, a, b ids.WorkspaceID) error {
-	if d.swapErr != nil {
-		return d.swapErr
+func (d *fakeDB) MovePlace(_ context.Context, ws, target ids.WorkspaceID) error {
+	if d.moveErr != nil {
+		return d.moveErr
 	}
-	d.swaps = append(d.swaps, [2]ids.WorkspaceID{a, b})
+	d.moves = append(d.moves, [2]ids.WorkspaceID{ws, target})
 	return nil
 }
 
@@ -634,6 +633,12 @@ type fakeGit struct {
 	defaultErr      error
 
 	resolveErr error
+	// offPrimary are the base refs IsAncestor answers NOT on the primary
+	// branch; every other ref is on it. ancestorErr fails the check itself.
+	offPrimary  map[string]bool
+	ancestorErr error
+	// ancestorChecks records each IsAncestor call as "ancestor..descendant".
+	ancestorChecks []string
 	// existingBranches are the branches this repository already holds, which
 	// is what the naming call's collision probe asks for.
 	existingBranches map[string]bool
@@ -667,6 +672,14 @@ func (g *fakeGit) ResolveRef(_ context.Context, _, ref string) (string, error) {
 		return "", g.resolveErr
 	}
 	return "sha-of-" + ref, nil
+}
+
+func (g *fakeGit) IsAncestor(_ context.Context, _, ancestor, descendant string) (bool, error) {
+	g.ancestorChecks = append(g.ancestorChecks, ancestor+".."+descendant)
+	if g.ancestorErr != nil {
+		return false, g.ancestorErr
+	}
+	return !g.offPrimary[ancestor], nil
 }
 
 func (g *fakeGit) BranchExists(_ context.Context, _, branch string) (bool, error) {
@@ -1332,18 +1345,6 @@ type fakeSidebar struct {
 	// calls records the ORDER the resolver was told things in, which is what
 	// decides whether a push carries a whole view or a half-refreshed one.
 	calls []string
-	// topic is the published roster a verb judges the drawn tree by; a test
-	// publishes onto it, and an unpublished topic is a roster never resolved.
-	topic *publish.Topic[*frontendv1.WorkspaceRoster]
-}
-
-func (s *fakeSidebar) Topic() *publish.Topic[*frontendv1.WorkspaceRoster] {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.topic == nil {
-		s.topic = publish.NewLatestOnly[*frontendv1.WorkspaceRoster]()
-	}
-	return s.topic
 }
 
 // revivingEdge is one SetReviving call.

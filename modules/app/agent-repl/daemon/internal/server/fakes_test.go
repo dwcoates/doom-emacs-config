@@ -260,9 +260,11 @@ func (f *fakeRetarget) Retarget(_ context.Context, ws ids.WorkspaceID, parent *i
 type fakeVerbs struct {
 	workspace.Verbs
 
-	// swaps records every SwapPlaces pair; swapErr is what it answers.
-	swaps   [][2]ids.WorkspaceID
-	swapErr error
+	// createSpecs records every Create spec, in order.
+	createSpecs []workspace.CreateSpec
+	// moves records every Move pair; moveErr is what it answers.
+	moves   [][2]ids.WorkspaceID
+	moveErr error
 
 	// editorOpens records every relayed open, a workspace file's path or a
 	// daemon file's.
@@ -415,6 +417,7 @@ func (f *fakeVerbs) begin() (workspace.Teardown, error) {
 // detachment by asserting Create still SUCCEEDED after the request was
 // cancelled.
 func (f *fakeVerbs) Create(ctx context.Context, spec workspace.CreateSpec) (wsm.Workspace, error) {
+	f.createSpecs = append(f.createSpecs, spec)
 	for _, stage := range f.createStages {
 		if spec.Progress != nil {
 			spec.Progress.Stage(stage)
@@ -1434,9 +1437,9 @@ type repositoryFold struct {
 	folded bool
 }
 
-func (v *fakeVerbs) SwapPlaces(_ context.Context, ws, other ids.WorkspaceID) error {
-	v.swaps = append(v.swaps, [2]ids.WorkspaceID{ws, other})
-	return v.swapErr
+func (v *fakeVerbs) Move(_ context.Context, ws, target ids.WorkspaceID) error {
+	v.moves = append(v.moves, [2]ids.WorkspaceID{ws, target})
+	return v.moveErr
 }
 
 func (v *fakeVerbs) FoldRepository(_ context.Context, repo ids.RepoID, folded bool) error {
