@@ -548,7 +548,7 @@ when the daemon answered the register with REFUSAL, a decoded error."
                                     :rows (list :rows rows))))
         :task (list :sections nil)
         :recently-merged (list :header (list :label (list :text "m"))
-                               :rows (list :rows nil))
+                               :groups nil)
         :current nil))
 
 (defmacro agent-repl-test-commands--with-rows (rows history &rest body)

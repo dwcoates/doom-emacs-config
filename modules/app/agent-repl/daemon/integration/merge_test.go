@@ -3,6 +3,7 @@
 package integration
 
 import (
+	"agentrepl/protohelpers/rosterwalk"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -508,7 +509,7 @@ func TestALandedMergeProducesSuccessFooterRosterAndRemovesTheWorktree(t *testing
 	// whichever of the two snapshots happened to arrive first — and read
 	// `inactive` whenever the close had already landed.
 	awaitRoster(t, f.d, roster, "the merged workspace under recently_merged, stated merged", func(r *frontendv1.WorkspaceRoster) bool {
-		for _, row := range r.GetRecentlyMerged().GetRows().GetRows() {
+		for _, row := range rosterwalk.MergedRows(r) {
 			if row.GetWorkspace().GetWorkspace().GetId() == f.ws.GetId() {
 				return row.GetMerged() != nil
 			}

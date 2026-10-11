@@ -871,9 +871,65 @@ THE ARM IS THE FOLD, the daemon's view state; it is never unset."
   "Decode `RosterMergedSection''s `header' field VALUE."
   (agent-repl-wire-decode-roster-section-header value))
 
-(defun agent-repl-wire-decode-roster-merged-section-rows (value)
-  "Decode `RosterMergedSection''s `rows' field VALUE as RosterRows."
+(defun agent-repl-wire-decode-roster-merged-repo-group-key (value)
+  "Decode `RosterMergedRepoGroup''s `key' field VALUE as a RosterRepoKey."
+  (agent-repl-wire-decode-roster-repo-key value))
+
+(defun agent-repl-wire-decode-roster-merged-repo-group-header-label (value)
+  "Decode `RosterMergedRepoGroupHeader''s `label' field VALUE."
+  (agent-repl-wire-decode-roster-label value))
+
+(defun agent-repl-wire-decode-roster-merged-repo-group-header (value)
+  "Decode VALUE as `RosterMergedRepoGroupHeader', a plist `(:label L)'.
+A group's header is its repository's label and nothing to toggle."
+  (let ((object (agent-repl-wire--object "RosterMergedRepoGroupHeader" value)))
+    (agent-repl-wire--check-keys "RosterMergedRepoGroupHeader" object '(label))
+    (agent-repl-wire--decoded
+     "RosterMergedRepoGroupHeader"
+     (list :label (agent-repl-wire--decode-message
+                   "RosterMergedRepoGroupHeader" 'label object
+                   #'agent-repl-wire-decode-roster-merged-repo-group-header-label)))))
+
+(defun agent-repl-wire-decode-roster-merged-repo-group-rows (value)
+  "Decode `RosterMergedRepoGroup''s `rows' field VALUE as RosterRows."
   (agent-repl-wire-decode-roster-rows value))
+
+(defun agent-repl-wire-decode-roster-merged-repo-group-shown (value)
+  "Decode VALUE as the empty message `RosterMergedRepoGroupShown'."
+  (agent-repl-wire--decode-empty "RosterMergedRepoGroupShown" value))
+
+(defun agent-repl-wire-decode-roster-merged-repo-group-repository-collapsed (value)
+  "Decode VALUE as the empty message `RosterMergedRepoGroupRepositoryCollapsed'."
+  (agent-repl-wire--decode-empty "RosterMergedRepoGroupRepositoryCollapsed" value))
+
+(defun agent-repl-wire-decode-roster-merged-repo-group-drawn (object)
+  "Decode `RosterMergedRepoGroup''s `drawn' oneof from OBJECT.
+THE ARM IS THE REPOSITORY'S FOLD, as the daemon resolved it; it is never
+unset.  A `:repository-collapsed' group's workspaces are off the tab bar,
+as every workspace of a collapsed repository is."
+  (agent-repl-wire--decode-oneof
+   "RosterMergedRepoGroup" 'drawn object
+   '((shown :shown agent-repl-wire-decode-roster-merged-repo-group-shown)
+     (repositoryCollapsed :repository-collapsed
+                          agent-repl-wire-decode-roster-merged-repo-group-repository-collapsed))))
+
+(defun agent-repl-wire-decode-roster-merged-repo-group (value)
+  "Decode VALUE as `RosterMergedRepoGroup', a plist `(:key :header :rows :drawn)'."
+  (let ((object (agent-repl-wire--object "RosterMergedRepoGroup" value)))
+    (agent-repl-wire--check-keys "RosterMergedRepoGroup" object
+                                 '(key header rows shown repositoryCollapsed))
+    (agent-repl-wire--decoded
+     "RosterMergedRepoGroup"
+     (list :key (agent-repl-wire--decode-message
+                 "RosterMergedRepoGroup" 'key object
+                 #'agent-repl-wire-decode-roster-merged-repo-group-key)
+           :header (agent-repl-wire--decode-message
+                    "RosterMergedRepoGroup" 'header object
+                    #'agent-repl-wire-decode-roster-merged-repo-group-header)
+           :rows (agent-repl-wire--decode-message
+                  "RosterMergedRepoGroup" 'rows object
+                  #'agent-repl-wire-decode-roster-merged-repo-group-rows)
+           :drawn (agent-repl-wire-decode-roster-merged-repo-group-drawn object)))))
 
 (defun agent-repl-wire-decode-roster-merged-section-expanded (value)
   "Decode VALUE as the empty message `RosterMergedSectionExpanded'."
@@ -892,13 +948,21 @@ THE ARM IS THE FOLD, the daemon's view state; it is never unset."
      (collapsed :collapsed agent-repl-wire-decode-roster-merged-section-collapsed))))
 
 (defun agent-repl-wire-decode-roster-merged-section (value)
-  "Decode VALUE as `RosterMergedSection', a plist `(:header :rows :fold)'.
-It has no key of its own — the roster carries exactly one."
-  (agent-repl-wire--decode-keyless-section
-   "RosterMergedSection" value
-   #'agent-repl-wire-decode-roster-merged-section-header
-   #'agent-repl-wire-decode-roster-merged-section-rows
-   #'agent-repl-wire-decode-roster-merged-section-fold))
+  "Decode VALUE as `RosterMergedSection', a plist `(:header :groups :fold)'.
+It has no key of its own — the roster carries exactly one — and its rows
+sit in one `RosterMergedRepoGroup' per repository."
+  (let ((object (agent-repl-wire--object "RosterMergedSection" value)))
+    (agent-repl-wire--check-keys "RosterMergedSection" object
+                                 '(header groups expanded collapsed))
+    (agent-repl-wire--decoded
+     "RosterMergedSection"
+     (list :header (agent-repl-wire--decode-message
+                    "RosterMergedSection" 'header object
+                    #'agent-repl-wire-decode-roster-merged-section-header)
+           :groups (agent-repl-wire--decode-repeated
+                    "RosterMergedSection" 'groups object
+                    #'agent-repl-wire-decode-roster-merged-repo-group)
+           :fold (agent-repl-wire-decode-roster-merged-section-fold object)))))
 
 (defun agent-repl-wire--decode-keyless-section (message-name value header rows fold)
   "Decode VALUE as MESSAGE-NAME, a section the roster carries exactly one of.

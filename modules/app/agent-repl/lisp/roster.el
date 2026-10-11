@@ -300,12 +300,19 @@ children, which is the render order the contract's nesting states."
   "Return non-nil when the daemon holds repository SECTION collapsed."
   (eq (plist-get (plist-get section :fold) :arm) :collapsed))
 
+(defun agent-repl-roster--merged-group-collapsed-p (group)
+  "Return non-nil when recently-merged GROUP's repository is collapsed.
+The daemon resolves the group's `drawn' arm from the repository's own fold,
+so its workspaces leave the bar exactly as that repository's others do."
+  (eq (plist-get (plist-get group :drawn) :arm) :repository-collapsed))
+
 (defun agent-repl-roster-walk (roster)
   "Return ROSTER's rows in tab order: `(:row ROW :label REPO-LABEL)' entries.
 Repository sections in the resolver's order, each section's rows
 depth-first, then the hidden section's rows, then the recently-merged
-section's rows.  THE TASK VIEW IS IGNORED — it is the same workspaces
-regrouped, and walking it too would give every workspace a second tab.
+band's rows, group by group.  THE TASK VIEW IS IGNORED — it is the same
+workspaces regrouped, and walking it too would give every workspace a
+second tab.
 
 A HIDDEN WORKSPACE IS WALKED AS A COLLAPSED REPOSITORY'S IS: it keeps its
 tab (its session is untouched), and `:collapsed' takes it off the bar's
@@ -325,11 +332,14 @@ hidden from the bar whichever way it is folded."
        (plist-get (plist-get (plist-get hidden :header) :label) :text)
        acc
        t))
-    (let ((merged (plist-get roster :recently-merged)))
-      (agent-repl-roster--walk-rows
-       (plist-get (plist-get merged :rows) :rows)
-       (plist-get (plist-get (plist-get merged :header) :label) :text)
-       acc))
+    (let* ((merged (plist-get roster :recently-merged))
+           (label (plist-get (plist-get (plist-get merged :header) :label) :text)))
+      (dolist (group (plist-get merged :groups))
+        (agent-repl-roster--walk-rows
+         (plist-get (plist-get group :rows) :rows)
+         label
+         acc
+         (agent-repl-roster--merged-group-collapsed-p group))))
     (nreverse (car acc))))
 
 (defun agent-repl-roster--section-holds-id-p (section id)

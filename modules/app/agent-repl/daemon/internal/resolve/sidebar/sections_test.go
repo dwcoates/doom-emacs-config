@@ -1,15 +1,19 @@
 package sidebar_test
 
 import (
+	"agentrepl/protohelpers/rosterwalk"
 	"testing"
 	"time"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/resolve/footer"
 	"claude-repld/internal/resolve/sidebar"
 	"claude-repld/internal/wsm"
+
+	"google.golang.org/protobuf/proto"
 )
 
 func TestRosterResolvesEveryGrouping(t *testing.T) {
@@ -203,7 +207,7 @@ func TestRecentlyMergedCarriesTheMergedRow(t *testing.T) {
 	r.SetRegistry(registry(merged))
 
 	// Assert.
-	got := rowNames(latest(t, r).GetRecentlyMerged().GetRows().GetRows())
+	got := rowNames(rosterwalk.MergedRows(latest(t, r)))
 	if !equal(got, []string{"merged"}) {
 		t.Fatalf("merged rows = %v, want the merged workspace", got)
 	}
@@ -275,7 +279,7 @@ func dirsInRoster(roster *frontendv1.WorkspaceRoster) map[string]bool {
 	for _, section := range roster.GetTask().GetSections() {
 		walk(section.GetRows().GetRows())
 	}
-	walk(roster.GetRecentlyMerged().GetRows().GetRows())
+	walk(rosterwalk.MergedRows(roster))
 	return out
 }
 
@@ -766,7 +770,7 @@ func TestRecentlyMergedHoistsOutOfTheMaturityGrouping(t *testing.T) {
 			t.Fatalf("a merged workspace reached the %s stage", maturityStageName(section))
 		}
 	}
-	if len(roster.GetRecentlyMerged().GetRows().GetRows()) != 1 {
+	if len(rosterwalk.MergedRows(roster)) != 1 {
 		t.Fatal("the merged workspace is not in the recently-merged band")
 	}
 }
@@ -947,7 +951,7 @@ func TestAMergedHiddenWorkspaceFilesUnderRecentlyMerged(t *testing.T) {
 	if len(roster.GetHidden().GetRows().GetRows()) != 0 {
 		t.Fatal("a merged workspace was filed under hidden")
 	}
-	if got := rowNames(roster.GetRecentlyMerged().GetRows().GetRows()); !equal(got, []string{"merged"}) {
+	if got := rowNames(rosterwalk.MergedRows(roster)); !equal(got, []string{"merged"}) {
 		t.Fatalf("merged rows = %v, want the merged workspace", got)
 	}
 }
@@ -977,5 +981,161 @@ func TestHiddenSectionStatesItsFold(t *testing.T) {
 				t.Fatalf("fold = %v, want collapsed=%v", section.GetFold(), tt.wantCollapsed)
 			}
 		})
+	}
+}
+
+// mergedIn is a workspace of REPOSITORY merged at offset D.
+func mergedIn(id string, repository wsm.Repository, d time.Duration) wsm.Workspace {
+	ws := workspace(id, id)
+	ws.Repo = repository.ID
+	ws.MergedAt = at(d)
+	return ws
+}
+
+func TestRecentlyMergedGroupsByRepositoryInTheRepositoryGroupingsOrder(t *testing.T) {
+	// Arrange: beta is registered first, alpha sorts first by name.
+	r, _ := newResolver(t)
+	reg := twoRepoRegistry(mergedIn("b1", otherRepo, 0), mergedIn("a1", repo, 0))
+	reg.Repositories = []wsm.Repository{otherRepo, repo}
+
+	// Act.
+	r.SetRegistry(reg)
+
+	// Assert.
+	groups := latest(t, r).GetRecentlyMerged().GetGroups()
+	var got []string
+	for _, g := range groups {
+		got = append(got, g.GetHeader().GetLabel().GetText()+"="+g.GetKey().GetRepository().GetId())
+	}
+	want := []string{"alpha=" + string(repo.ID), "beta=" + string(otherRepo.ID)}
+	if !equal(got, want) {
+		t.Fatalf("groups = %v, want %v", got, want)
+	}
+}
+
+func TestRecentlyMergedGroupKeepsTheRepositoryDir(t *testing.T) {
+	// Arrange.
+	r, _ := newResolver(t)
+
+	// Act.
+	r.SetRegistry(registry(mergedIn("a1", repo, 0)))
+
+	// Assert: the key is the repository section's own join key.
+	group := latest(t, r).GetRecentlyMerged().GetGroups()[0]
+	section := latest(t, r).GetRepository().GetSections()[0]
+	if !proto.Equal(group.GetKey(), section.GetKey()) {
+		t.Fatalf("group key = %v, want the repository section's %v", group.GetKey(), section.GetKey())
+	}
+}
+
+func TestRecentlyMergedGroupOrdersItsRowsMostRecentFirst(t *testing.T) {
+	// Arrange.
+	r, _ := newResolver(t)
+
+	// Act.
+	r.SetRegistry(registry(mergedIn("older", repo, 0), mergedIn("newer", repo, time.Minute)))
+
+	// Assert.
+	got := rowNames(latest(t, r).GetRecentlyMerged().GetGroups()[0].GetRows().GetRows())
+	if !equal(got, []string{"newer", "older"}) {
+		t.Fatalf("group rows = %v, want most recent first", got)
+	}
+}
+
+func TestRecentlyMergedLeavesARepositoryWithNoMergeWithoutAGroup(t *testing.T) {
+	// Arrange: beta has only a live workspace.
+	r, _ := newResolver(t)
+	live := workspace("b-live", "b-live")
+	live.Repo = otherRepo.ID
+	reg := twoRepoRegistry(live, mergedIn("a1", repo, 0))
+
+	// Act.
+	r.SetRegistry(reg)
+
+	// Assert.
+	groups := latest(t, r).GetRecentlyMerged().GetGroups()
+	if len(groups) != 1 || groups[0].GetKey().GetRepository().GetId() != string(repo.ID) {
+		t.Fatalf("groups = %v, want only alpha's", groups)
+	}
+}
+
+func TestRecentlyMergedGroupFollowsItsRepositorysFold(t *testing.T) {
+	tests := []struct {
+		name          string
+		folded        bool
+		wantCollapsed bool
+	}{
+		{"an expanded repository's group is shown", false, false},
+		{"a collapsed repository's group is not", true, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			r, _ := newResolver(t)
+			reg := registry(mergedIn("a1", repo, 0))
+			reg.Repositories[0].Folded = tt.folded
+
+			// Act.
+			r.SetRegistry(reg)
+
+			// Assert: the arm is always set, and it is the repository's fold.
+			group := latest(t, r).GetRecentlyMerged().GetGroups()[0]
+			if (group.GetRepositoryCollapsed() != nil) != tt.wantCollapsed || (group.GetShown() != nil) == tt.wantCollapsed {
+				t.Fatalf("drawn = %v, want repository_collapsed=%v", group.GetDrawn(), tt.wantCollapsed)
+			}
+		})
+	}
+}
+
+func TestRecentlyMergedKeepsACollapsedRepositorysRowsOnTheWire(t *testing.T) {
+	// Arrange.
+	r, _ := newResolver(t)
+	reg := registry(mergedIn("a1", repo, 0))
+	reg.Repositories[0].Folded = true
+
+	// Act.
+	r.SetRegistry(reg)
+
+	// Assert.
+	if got := rowNames(rosterwalk.MergedRows(latest(t, r))); !equal(got, []string{"a1"}) {
+		t.Fatalf("merged rows = %v, want the collapsed repository's merge still carried", got)
+	}
+}
+
+func TestRecentlyMergedCountLeavesOutACollapsedRepositorysRows(t *testing.T) {
+	// Arrange: beta is collapsed and has two merges; alpha has one.
+	r, _ := newResolver(t)
+	reg := twoRepoRegistry(mergedIn("b1", otherRepo, 0), mergedIn("b2", otherRepo, 0), mergedIn("a1", repo, 0))
+	reg.Repositories[1].Folded = true
+
+	// Act.
+	r.SetRegistry(reg)
+
+	// Assert.
+	if got := latest(t, r).GetRecentlyMerged().GetHeader().GetCount().GetWorkspaces(); got != 1 {
+		t.Fatalf("count = %d, want only the expanded repository's 1", got)
+	}
+}
+
+func TestRecentlyMergedRecordsAMergeNamingAnUnregisteredRepository(t *testing.T) {
+	// Arrange.
+	r, surfaces := newResolver(t)
+	stray := mergedIn("stray", wsm.Repository{ID: ids.RepoID("repo-missing")}, 0)
+
+	// Act.
+	r.SetRegistry(registry(stray, mergedIn("a1", repo, 0)))
+
+	// Assert: recorded once with its diagnosis, and the band keeps the rest.
+	var found []dlog.Record
+	for _, rec := range surfaces.Records() {
+		if rec.Level == "error" && rec.Operation == "daemon.sidebar.merged_section" {
+			found = append(found, rec)
+		}
+	}
+	if len(found) != 1 || found[0].Context["repo_id"] != "repo-missing" || found[0].Context["workspaces"] != 1 {
+		t.Fatalf("records = %v, want one naming repo-missing and its 1 workspace", found)
+	}
+	if got := rowNames(rosterwalk.MergedRows(latest(t, r))); !equal(got, []string{"a1"}) {
+		t.Fatalf("merged rows = %v, want the registered repository's merge", got)
 	}
 }

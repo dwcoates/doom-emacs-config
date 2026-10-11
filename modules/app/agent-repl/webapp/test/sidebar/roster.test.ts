@@ -8,6 +8,7 @@ import {
   type UpdateSidebarViewResponse,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_sidebar_view_pb";
 import {
+  RosterLabelSchema,
   RosterMaturityKeySchema,
   RosterSectionHeaderSchema,
   RosterRepoSectionSchema,
@@ -20,8 +21,10 @@ import { repoFoldKey } from "../../src/sidebar/context.js";
 import {
   drawHeadedSection,
   drawRosterSectionFold,
+  drawSectionLabel,
   drawWorkspaceRoster,
   MERGED_TODAY_COUNT_CLASS,
+  SECTION_LABEL_CLASS,
 } from "../../src/sidebar/roster.js";
 import { cascadedValue, installStylesheet } from "../stylesheet.js";
 import {
@@ -29,6 +32,8 @@ import {
   fakeTicker,
   hiddenSection,
   maturitySection,
+  mergedBand,
+  mergedGroup,
   mergedSection,
   NOW,
   repoSection,
@@ -1454,7 +1459,6 @@ describe("the open Recently Merged band's today count", () => {
     { name: "every merge that landed today", rows: () => [mergedAt("ws-1", NOW), mergedAt("ws-2", startOfToday())], want: "(2)" },
     { name: "none of yesterday's merges", rows: () => [mergedAt("ws-1", NOW), mergedAt("ws-2", startOfToday() - 1)], want: "(1)" },
     { name: "zero when nothing merged today", rows: () => [mergedAt("ws-1", startOfToday() - 1)], want: "(0)" },
-    { name: "no row without a merged instant", rows: () => [mergedAt("ws-1", NOW), row({ id: "ws-2", closed: true })], want: "(1)" },
   ])("counts $name", ({ rows, want }) => {
     // Act
     const drawn = drawBand(rows());
@@ -1465,7 +1469,7 @@ describe("the open Recently Merged band's today count", () => {
   it("counts the merges the fit hides, not only the ones it shows", () => {
     // Arrange
     const drawn = drawBand([mergedAt("ws-1", NOW), mergedAt("ws-2", NOW), mergedAt("ws-3", NOW)]);
-    const rows = [...pane(drawn, "repository").querySelectorAll<HTMLElement>(".merged-section > .rows > *")];
+    const rows = [...pane(drawn, "repository").querySelectorAll<HTMLElement>(".merged-section .merged-group > .rows > *")];
     // Act
     rows.slice(1).forEach((r) => (r.hidden = true));
     // Assert
@@ -1516,6 +1520,135 @@ describe("the open Recently Merged band's today count", () => {
     const bad = mergedAt("ws-1", NOW);
     bad.when = undefined;
     expect(() => drawBand([bad])).toThrow(MalformedView);
+  });
+
+  it("refuses a merged row whose when-column is on another arm than merged", () => {
+    const bad = row({ id: "ws-1", closed: true, when: { case: "active", value: { atMs: BigInt(NOW) } } });
+    expect(() => drawBand([bad])).toThrow(MalformedView);
+  });
+
+  it("leaves a collapsed repository's merges out of the count", () => {
+    // Arrange — beta's merge landed today, but beta is collapsed.
+    const drawn = drawWorkspaceRoster(
+      roster({
+        merged: mergedBand(
+          [
+            mergedGroup({ id: "alpha", rows: [mergedAt("ws-1", NOW)] }),
+            mergedGroup({ id: "beta", rows: [mergedAt("ws-2", NOW)], repositoryCollapsed: true }),
+          ],
+          1,
+          false,
+        ),
+      }),
+      sidebarContext(),
+    );
+    // Assert
+    expect(todayCount(drawn).textContent).toBe("(1)");
+  });
+});
+
+describe("drawSectionLabel", () => {
+  it("draws the label's text in the section label span", () => {
+    const label = drawSectionLabel(create(RosterLabelSchema, { text: "alpha" }), "p");
+    expect([label.tagName, label.className, label.textContent]).toEqual(["SPAN", SECTION_LABEL_CLASS, "alpha"]);
+  });
+
+  it("is the one label every section header and merged group header draws", () => {
+    // Arrange — a repository section, the merged band, and its group.
+    const drawn = drawWorkspaceRoster(
+      roster({
+        repos: [repoSection({ id: "repo-1", label: "alpha" })],
+        merged: mergedBand([mergedGroup({ id: "repo-1", label: "alpha", rows: [row({ id: "ws-m", closed: true })] })], 1, false),
+      }),
+      sidebarContext(),
+    );
+    const repository = pane(drawn, "repository");
+    const heads = [
+      ...repository.querySelectorAll(".repo-section > .repo-head, .merged-section > .repo-head, .merged-group-head"),
+    ];
+    // Assert — each header holds exactly one label span, and nothing else draws its text.
+    expect(heads.map((h) => h.querySelectorAll(`:scope > .${SECTION_LABEL_CLASS}`).length)).toEqual([1, 1, 1]);
+  });
+});
+
+describe("recently merged repository groups", () => {
+  const merge = (id: string) => row({ id, closed: true, status: { case: "merged", value: {} } });
+  const groupsIn = (drawn: HTMLElement): HTMLElement[] => [
+    ...pane(drawn, "repository").querySelectorAll<HTMLElement>(".merged-section > .rows > .merged-group"),
+  ];
+  const twoGroups = (betaCollapsed = false) =>
+    mergedBand(
+      [
+        mergedGroup({ id: "alpha", label: "alpha", rows: [merge("ws-a")] }),
+        mergedGroup({ id: "beta", label: "beta", rows: [merge("ws-b")], repositoryCollapsed: betaCollapsed }),
+      ],
+      undefined,
+      false,
+    );
+
+  it("draws one group per wire group, in wire order, under its repository's label", () => {
+    const drawn = drawWorkspaceRoster(roster({ merged: twoGroups() }), sidebarContext());
+    expect(groupsIn(drawn).map((g) => [g.getAttribute("data-repository"), g.querySelector(".merged-group-head")?.textContent])).toEqual([
+      ["alpha", "alpha"],
+      ["beta", "beta"],
+    ]);
+  });
+
+  it("draws a group's rows inside the group", () => {
+    const drawn = drawWorkspaceRoster(roster({ merged: twoGroups() }), sidebarContext());
+    expect(groupsIn(drawn).map((g) => [...g.querySelectorAll(":scope > .rows > .ws")].length)).toEqual([1, 1]);
+  });
+
+  it("draws no fold toggle on a group's header", () => {
+    const drawn = drawWorkspaceRoster(roster({ merged: twoGroups() }), sidebarContext());
+    expect(groupsIn(drawn).map((g) => g.querySelector("[data-section-fold]"))).toEqual([null, null]);
+  });
+
+  it("states each row's merged instant for the fit", () => {
+    const drawn = drawWorkspaceRoster(
+      roster({ merged: mergedBand([mergedGroup({ id: "alpha", rows: [row({ id: "ws-a", closed: true, when: { case: "merged", value: { atMs: 42n } } })] })], 1, false) }),
+      sidebarContext(),
+    );
+    expect(groupsIn(drawn)[0].querySelector(":scope > .rows > .ws")?.getAttribute("data-merged-at")).toBe("42");
+  });
+
+  it("leaves a collapsed repository's group undrawn", () => {
+    const drawn = drawWorkspaceRoster(roster({ merged: twoGroups(true) }), sidebarContext());
+    expect(groupsIn(drawn).map((g) => g.hidden)).toEqual([false, true]);
+  });
+
+  it("leaves the band out when every merge is a collapsed repository's", () => {
+    const drawn = drawWorkspaceRoster(
+      roster({ merged: mergedBand([mergedGroup({ id: "alpha", rows: [merge("ws-a")], repositoryCollapsed: true })], 0, false) }),
+      sidebarContext(),
+    );
+    expect(pane(drawn, "repository").querySelector(".merged-section")?.getAttribute("data-merged-empty")).toBe("true");
+  });
+
+  it("takes a repository's group out at once when the repository section is folded", async () => {
+    const { sc } = viewDaemon();
+    const drawn = drawWorkspaceRoster(
+      roster({ repos: [repoSection({ id: "beta" })], merged: twoGroups() }),
+      sc,
+    );
+    await click(pane(drawn, "repository").querySelector(".repo-section [data-section-fold]") as Element);
+    expect(groupsIn(drawn).map((g) => g.hidden)).toEqual([false, true]);
+  });
+
+  it("puts a repository's group back at once when the repository section is unfolded", async () => {
+    const { sc } = viewDaemon();
+    const drawn = drawWorkspaceRoster(
+      roster({ repos: [repoSection({ id: "beta", collapsed: true })], merged: twoGroups(true) }),
+      sc,
+    );
+    await click(pane(drawn, "repository").querySelector(".repo-section [data-section-fold]") as Element);
+    expect(groupsIn(drawn).map((g) => g.hidden)).toEqual([false, false]);
+  });
+
+  it("refuses a group whose drawn arm is unset", () => {
+    const bad = mergedGroup({ id: "alpha", rows: [merge("ws-a")] });
+    bad.drawn = { case: undefined };
+    expect(() => drawWorkspaceRoster(roster({ merged: mergedBand([bad], 1, false) }), sidebarContext())).toThrow(MalformedView);
   });
 });
 
