@@ -22,6 +22,7 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
+	"agentrepl/protohelpers/rosterwalk"
 
 	"connectrpc.com/connect"
 
@@ -196,18 +197,7 @@ func raArm(r *frontendv1.WorkspaceRoster, id string) string {
 // roster nests worktree rows under their parent, so a flat scan of the
 // top-level rows would miss exactly the workspaces this suite creates.
 func raWalkRows(r *frontendv1.WorkspaceRoster, visit func(*frontendv1.RosterRow)) {
-	var walk func(rows []*frontendv1.RosterRow)
-	walk = func(rows []*frontendv1.RosterRow) {
-		for _, row := range rows {
-			visit(row)
-			walk(row.GetChildren())
-		}
+	for _, row := range rosterwalk.AllRows(r) {
+		visit(row)
 	}
-	for _, s := range r.GetRepository().GetSections() {
-		walk(s.GetRows().GetRows())
-	}
-	for _, s := range r.GetTask().GetSections() {
-		walk(s.GetRows().GetRows())
-	}
-	walk(r.GetRecentlyMerged().GetRows().GetRows())
 }

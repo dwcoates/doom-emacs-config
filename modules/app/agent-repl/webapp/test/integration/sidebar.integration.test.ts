@@ -472,6 +472,21 @@ describe("row decoration", () => {
     // Assert
     expect(harness.$('[data-roster-row="ws-merged"]')).not.toBeNull();
   });
+
+  it("draws a merged row inside its repository's group", async () => {
+    // Arrange / Act
+    await withRoster({ mergedCollapsed: false });
+    // Assert
+    const group = harness.$('[data-grouping="repository"] .merged-group [data-roster-row="ws-merged"]')?.closest(".merged-group");
+    expect(group?.querySelector(".merged-group-head")?.textContent).toBe("doom");
+  });
+
+  it("leaves a collapsed repository's merges out of the band", async () => {
+    // Arrange / Act
+    await withRoster({ mergedCollapsed: false, mergedRepositoryCollapsed: true });
+    // Assert
+    expect(harness.$('[data-grouping="repository"] .merged-section')?.getAttribute("data-merged-empty")).toBe("true");
+  });
 });
 
 describe("the when column", () => {

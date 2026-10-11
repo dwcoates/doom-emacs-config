@@ -1,6 +1,7 @@
 package sidebar_test
 
 import (
+	"agentrepl/protohelpers/rosterwalk"
 	"testing"
 	"time"
 
@@ -285,7 +286,7 @@ func TestRecentlyMergedOrdersMostRecentFirst(t *testing.T) {
 	r.SetRegistry(registry(older, newer))
 
 	// Assert: recency is the section's whole meaning.
-	got := rowNames(latest(t, r).GetRecentlyMerged().GetRows().GetRows())
+	got := rowNames(rosterwalk.MergedRows(latest(t, r)))
 	if !equal(got, []string{"zzz-newer", "aaa-older"}) {
 		t.Fatalf("merged order = %v, want the most recent merge first", got)
 	}

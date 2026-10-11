@@ -28,6 +28,15 @@ func ids(rows []*frontendv1.RosterRow) []string {
 	return out
 }
 
+// mergedOf is a recently-merged band of one group per rows region.
+func mergedOf(groups ...*frontendv1.RosterRows) *frontendv1.RosterMergedSection {
+	section := &frontendv1.RosterMergedSection{}
+	for _, rows := range groups {
+		section.Groups = append(section.Groups, &frontendv1.RosterMergedRepoGroup{Rows: rows})
+	}
+	return section
+}
+
 // rowsOf wraps rows in a rows region.
 func rowsOf(rows ...*frontendv1.RosterRow) *frontendv1.RosterRows {
 	return &frontendv1.RosterRows{Rows: rows}
@@ -68,7 +77,7 @@ func TestAllRows(t *testing.T) {
 		{name: "a nil roster lists nothing", roster: nil, want: nil},
 		{name: "repository sections, then task sections, then hidden, then recently merged, in that order",
 			roster: &frontendv1.WorkspaceRoster{
-				RecentlyMerged: &frontendv1.RosterMergedSection{Rows: rowsOf(row("m"))},
+				RecentlyMerged: mergedOf(rowsOf(row("m"))),
 				Hidden:         &frontendv1.RosterHiddenSection{Rows: rowsOf(row("h", row("h1")))},
 				Task: &frontendv1.RosterTaskView{Sections: []*frontendv1.RosterTaskSection{
 					{Rows: rowsOf(row("t"))}}},
@@ -82,7 +91,7 @@ func TestAllRows(t *testing.T) {
 					{Rows: rowsOf(row("r", row("r1")))}}},
 				Task: &frontendv1.RosterTaskView{Sections: []*frontendv1.RosterTaskSection{
 					{Rows: rowsOf(row("t", row("t1")))}}},
-				RecentlyMerged: &frontendv1.RosterMergedSection{Rows: rowsOf(row("m", row("m1")))},
+				RecentlyMerged: mergedOf(rowsOf(row("m", row("m1")))),
 			},
 			want: []string{"r", "r1", "t", "t1", "m", "m1"}},
 	}
@@ -94,6 +103,43 @@ func TestAllRows(t *testing.T) {
 			// Assert.
 			if !slices.Equal(got, tc.want) {
 				t.Fatalf("AllRows = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestMergedRows(t *testing.T) {
+	collapsed := &frontendv1.RosterMergedRepoGroup{
+		Rows:  rowsOf(row("c")),
+		Drawn: &frontendv1.RosterMergedRepoGroup_RepositoryCollapsed{RepositoryCollapsed: &frontendv1.RosterMergedRepoGroupRepositoryCollapsed{}},
+	}
+	cases := []struct {
+		name   string
+		roster *frontendv1.WorkspaceRoster
+		want   []string
+	}{
+		{name: "a nil roster lists nothing", roster: nil, want: nil},
+		{name: "a band with no groups lists nothing",
+			roster: &frontendv1.WorkspaceRoster{RecentlyMerged: &frontendv1.RosterMergedSection{}}, want: nil},
+		{name: "groups are listed in the band's order",
+			roster: &frontendv1.WorkspaceRoster{RecentlyMerged: mergedOf(rowsOf(row("a1"), row("a2")), rowsOf(row("b1")))},
+			want:   []string{"a1", "a2", "b1"}},
+		{name: "a collapsed repository's group is listed too",
+			roster: &frontendv1.WorkspaceRoster{RecentlyMerged: &frontendv1.RosterMergedSection{
+				Groups: []*frontendv1.RosterMergedRepoGroup{collapsed}}},
+			want: []string{"c"}},
+		{name: "nested rows in a group are flattened",
+			roster: &frontendv1.WorkspaceRoster{RecentlyMerged: mergedOf(rowsOf(row("m", row("m1"))))},
+			want:   []string{"m", "m1"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act.
+			got := ids(MergedRows(tc.roster))
+
+			// Assert.
+			if !slices.Equal(got, tc.want) {
+				t.Fatalf("MergedRows = %v, want %v", got, tc.want)
 			}
 		})
 	}
@@ -112,6 +158,7 @@ func TestRosterwalkIsTheOnlyChildWalk(t *testing.T) {
 		t.Fatalf("%s is not the agent-repl root: %v", root, err)
 	}
 	generated := filepath.Join(root, "proto", "gen")
+	e2e := filepath.Join(root, "e2e") + string(filepath.Separator)
 	self, err := filepath.Abs(".")
 	if err != nil {
 		t.Fatalf("resolve this package: %v", err)
@@ -129,7 +176,9 @@ func TestRosterwalkIsTheOnlyChildWalk(t *testing.T) {
 			}
 			return nil
 		}
-		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+		// The e2e suite reads live rosters, so its tests are readers too; every
+		// other _test.go builds rows rather than walking them.
+		if !strings.HasSuffix(path, ".go") || (strings.HasSuffix(path, "_test.go") && !strings.HasPrefix(path, e2e)) {
 			return nil
 		}
 		body, err := os.ReadFile(path)

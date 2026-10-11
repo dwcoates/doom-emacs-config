@@ -52,12 +52,15 @@ func TestTabOrder(t *testing.T) {
 		{name: "the hidden section's open rows keep their tabs, before recently merged", roster: &frontendv1.WorkspaceRoster{
 			Repository:     &frontendv1.RosterRepositoryView{Sections: []*frontendv1.RosterRepoSection{section(tabRow("a", false))}},
 			Hidden:         &frontendv1.RosterHiddenSection{Rows: &frontendv1.RosterRows{Rows: []*frontendv1.RosterRow{tabRow("h", false, tabRow("h1", false)), tabRow("hc", true)}}},
-			RecentlyMerged: &frontendv1.RosterMergedSection{Rows: &frontendv1.RosterRows{Rows: []*frontendv1.RosterRow{tabRow("m", false)}}},
+			RecentlyMerged: mergedBand([]*frontendv1.RosterRow{tabRow("m", false)}),
 		}, want: []string{"a", "h", "h1", "m"}},
 		{name: "recently merged comes last", roster: &frontendv1.WorkspaceRoster{
 			Repository:     &frontendv1.RosterRepositoryView{Sections: []*frontendv1.RosterRepoSection{section(tabRow("a", false))}},
-			RecentlyMerged: &frontendv1.RosterMergedSection{Rows: &frontendv1.RosterRows{Rows: []*frontendv1.RosterRow{tabRow("m", false), tabRow("gone", true)}}},
+			RecentlyMerged: mergedBand([]*frontendv1.RosterRow{tabRow("m", false), tabRow("gone", true)}),
 		}, want: []string{"a", "m"}},
+		{name: "recently merged groups are walked in the band's order", roster: &frontendv1.WorkspaceRoster{
+			RecentlyMerged: mergedBand([]*frontendv1.RosterRow{tabRow("m1", false)}, []*frontendv1.RosterRow{tabRow("m2", false)}),
+		}, want: []string{"m1", "m2"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -70,4 +73,13 @@ func TestTabOrder(t *testing.T) {
 			}
 		})
 	}
+}
+
+// mergedBand is a recently-merged band of one group per rows list.
+func mergedBand(groups ...[]*frontendv1.RosterRow) *frontendv1.RosterMergedSection {
+	band := &frontendv1.RosterMergedSection{}
+	for _, rows := range groups {
+		band.Groups = append(band.Groups, &frontendv1.RosterMergedRepoGroup{Rows: &frontendv1.RosterRows{Rows: rows}})
+	}
+	return band
 }
