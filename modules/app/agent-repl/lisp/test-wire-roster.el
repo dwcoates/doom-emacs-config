@@ -73,7 +73,8 @@ status arm and whatever else the case is about."
                    :children nil
                    :when nil
                    :detail (:branch nil :parent-branch nil :summary nil)
-                   :closed (:closed nil)))))
+                   :closed (:closed nil)
+                   :merge-workspace nil))))
 
 (ert-deftest agent-repl-test-wire-roster-row-decodes-the-viewed-marker ()
   "A row carrying `viewed' decodes it as PRESENT — the PARTIAL display mode."
@@ -125,6 +126,31 @@ status arm and whatever else the case is about."
                   (agent-repl-test-wire-roster--row
                    "\"done\":{}" "\"detachedLive\":{\"count\":1}"))
                  '("RosterRowDetachedLive" count "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-roster-row-decodes-the-merge-workspace-marker ()
+  "A row carrying `mergeWorkspace' decodes its label (2026-10-11 regression:
+the codec refused it, dropping every roster push while a merge workspace stood)."
+  (should (equal (plist-get (agent-repl-test-wire-roster--decode
+                             #'agent-repl-wire-decode-roster-row
+                             (agent-repl-test-wire-roster--row
+                              "\"merging\":{}" "\"mergeWorkspace\":{\"label\":{\"text\":\"merge → master\"}}"))
+                            :merge-workspace)
+                 '(:label (:text "merge → master")))))
+
+(ert-deftest agent-repl-test-wire-roster-row-without-a-merge-workspace-decodes-nil ()
+  "A row with no `mergeWorkspace' decodes the marker as absent."
+  (should-not (plist-get (agent-repl-test-wire-roster--decode
+                          #'agent-repl-wire-decode-roster-row
+                          (agent-repl-test-wire-roster--row "\"ready\":{}"))
+                         :merge-workspace)))
+
+(ert-deftest agent-repl-test-wire-roster-row-merge-workspace-refuses-an-unknown-field ()
+  "`RosterRowMergeWorkspace' carries only its label: anything else is unknown."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-row
+                  (agent-repl-test-wire-roster--row
+                   "\"merging\":{}" "\"mergeWorkspace\":{\"target\":\"master\"}"))
+                 '("RosterRowMergeWorkspace" target "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-roster-row-decodes-the-last-selected-instant ()
   "A row carrying `lastSelected' decodes its durable selection instant."
