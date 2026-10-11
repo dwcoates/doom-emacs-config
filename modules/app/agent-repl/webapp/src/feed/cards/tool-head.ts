@@ -30,3 +30,14 @@ export function drawToolName(text: string, ...extra: string[]): HTMLElement {
   name.textContent = text;
   return name;
 }
+
+/**
+ * A head that names its tool with a title the CLIENT owns rather than the wire:
+ * a card whose kind alone says which tool it is (a question, a skill) heads the
+ * way a call names its tool, with its badge, if any, appended after.
+ */
+export function drawTitledToolHead(title: string): HTMLElement {
+  const head = drawToolHead();
+  head.append(drawToolName(title));
+  return head;
+}
