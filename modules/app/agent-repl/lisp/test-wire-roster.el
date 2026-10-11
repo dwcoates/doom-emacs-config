@@ -72,7 +72,7 @@ status arm and whatever else the case is about."
                    :current (:current nil)
                    :children nil
                    :when nil
-                   :detail (:branch nil :parent-branch nil :summary nil)
+                   :detail (:branch nil :parent-branch nil :summary nil :commits nil)
                    :closed (:closed nil)
                    :merge-workspace nil))))
 
@@ -401,7 +401,7 @@ WatchWorkspaceRoster push and every tab falls back to a stale blue status."
   "Each detail line is PRESENT OR ABSENT BY MESSAGE PRESENCE."
   (should (equal (agent-repl-test-wire-roster--decode
                   #'agent-repl-wire-decode-roster-row-detail "{}")
-                 '(:branch nil :parent-branch nil :summary nil))))
+                 '(:branch nil :parent-branch nil :summary nil :commits nil))))
 
 (ert-deftest agent-repl-test-wire-roster-detail-present-lines-decode ()
   "A present line decodes to its own plist, an absent sibling to nil."
@@ -410,7 +410,30 @@ WatchWorkspaceRoster push and every tab falls back to a stale blue status."
                   "{\"branch\":{\"name\":\"proto/wire\"},\"summary\":{\"text\":\"codec\"}}")
                  '(:branch (:name "proto/wire")
                    :parent-branch nil
-                   :summary (:text "codec")))))
+                   :summary (:text "codec")
+                   :commits nil))))
+
+(ert-deftest agent-repl-test-wire-roster-detail-commits-decode ()
+  "A present commit count decodes to its plist."
+  (should (equal (plist-get (agent-repl-test-wire-roster--decode
+                             #'agent-repl-wire-decode-roster-row-detail
+                             "{\"commits\":{\"count\":7}}")
+                            :commits)
+                 '(:count 7))))
+
+(ert-deftest agent-repl-test-wire-roster-detail-commits-zero-is-present ()
+  "A zero count, which protojson omits, decodes as a present count of 0."
+  (should (equal (plist-get (agent-repl-test-wire-roster--decode
+                             #'agent-repl-wire-decode-roster-row-detail
+                             "{\"commits\":{}}")
+                            :commits)
+                 '(:count 0))))
+
+(ert-deftest agent-repl-test-wire-roster-detail-commits-refuses-a-negative-count ()
+  "A negative count breaches the unsigned field."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-row-detail-commits "{\"count\":-1}")
+                 '("RosterRowDetailCommits" count "expected a non-negative integer"))))
 
 (ert-deftest agent-repl-test-wire-roster-detail-present-empty-line-is-not-absent ()
   "A line present but empty decodes to its plist, not to nil."
