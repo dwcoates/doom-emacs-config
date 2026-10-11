@@ -14,7 +14,7 @@ import (
 // THE DRAWN DIVIDER BOUNDS EXACTLY WHEN ITS CUT DOES: the feed reads the bound
 // off drawn rows (boundsDelivery) and the session watcher off the page's cuts
 // (contextcut.Bounds), and the two must be one rule. Each case is one arm.
-func TestADividerBoundsDeliveryExactlyWhenItsCutBounds(t *testing.T) {
+func TestADividerCutsContextExactlyWhenItsCutBounds(t *testing.T) {
 	cases := []struct {
 		name string
 		cut  *conversationv1.ContextCut
@@ -35,8 +35,11 @@ func TestADividerBoundsDeliveryExactlyWhenItsCutBounds(t *testing.T) {
 
 			// Assert.
 			row := h.only(rootFeed())
-			if got, want := boundsDelivery(row), contextcut.Bounds(tc.cut); got != want {
-				t.Fatalf("boundsDelivery = %v, contextcut.Bounds = %v; the two rules disagree", got, want)
+			if got, want := endsHistory(row), tc.name == "cleared"; got != want {
+				t.Fatalf("endsHistory = %v, want %v: only a clear ends the feed's history", got, want)
+			}
+			if got, want := cutsContext(row), contextcut.Bounds(tc.cut); got != want {
+				t.Fatalf("cutsContext = %v, contextcut.Bounds = %v; the two rules disagree", got, want)
 			}
 		})
 	}

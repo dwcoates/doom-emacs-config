@@ -7421,28 +7421,33 @@ ar-button.outcome-marker-pill {
 
 /* ────────────────────────────────────────────────────────────────────────
    THE TABBED TOOL GROUP (tool-group.ts). A maximal run of >=2 consecutive
-   same-specific-kind tool cards collapses into one bubble whose members are
-   selectable as tabs. The `.feed-group` shares the feed's card grey, border and
-   radius so a group reads as one card, and the shared width cap already keys on
-   `.feed-item > .feed-group` (see the feed-card rule above). The tab strip
-   mirrors the merge strip's chrome; a member card inside a panel keeps its own
-   look, only its width cap lifted so it fills the group rather than being capped
-   twice.
+   same-specific-kind tool cards is shown one member at a time behind a tab
+   strip. THERE IS NO OUTER BUBBLE (owner ruling, 2026-10-10): `.feed-group`
+   draws no chrome, and the strip sits INSIDE the shown member's own card, with
+   no line between the tabs and the card's head. The strip is the group's, not
+   the card's (see tool-group.ts), so it is laid over the card: placed at the
+   card's border-plus-padding inset, and the card's top padding grows by the
+   strip's measured height (`--feed-group-strip-h`). The shared width cap still
+   keys on `.feed-item > .feed-group` (see the feed-card rule above), and the
+   member card inside the panel has its own cap lifted so it fills the group.
    ──────────────────────────────────────────────────────────────────────── */
 .feed-group {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 0.3rem 0.5rem;
+  position: relative;
 }
-/* The strip: one tab per member, icon + 1-based index, wrapping when many. */
+/* The strip: one tab per member, icon + 1-based index, wrapping when many.
+   Inset by the member card's 1px border and its 0.3rem top / 0.75rem side
+   padding, and raised over the card, which comes later in the document. */
 .feed-group-strip {
+  position: absolute;
+  z-index: 1;
+  top: calc(1px + 0.3rem);
+  left: calc(1px + 0.75rem);
+  right: calc(1px + 0.75rem);
   display: flex;
   flex-wrap: wrap;
   /* Scaled with the tabs it holds, by the same 1.25. */
   gap: 0.156rem;
   padding: 0.062rem 0 0.188rem;
-  border-bottom: 1px solid var(--line, rgba(128, 128, 128, 0.25));
 }
 .feed-group-tab {
   display: inline-flex;
@@ -7468,17 +7473,19 @@ ar-button.outcome-marker-pill {
 }
 .feed-group-tab-icon { color: var(--muted); }
 .feed-group-tab-index { font-variant-numeric: tabular-nums; }
-.feed-group-panel { padding-top: 0.3rem; }
 /* A member fills the group rather than being capped a second time inside it: the
    group already stops at the shared card ceiling, so the inner `.feed-item >
    .tool-card` cap is lifted here and the member spans the panel. */
 .feed-group-panel > .feed-item {
   content-visibility: visible;
 }
+/* The member card is taller by the strip: the strip's own inset above it, the
+   strip itself, and the same gap again beneath it before the card's head. */
 .feed-group-panel > .feed-item > .tool-card {
   max-width: none;
   margin-left: 0;
   margin-right: 0;
+  padding-top: calc(0.3rem + var(--feed-group-strip-h) + 0.3rem);
 }
 
 /* ---- the detached-work id (src/feed/work-id.ts) ---- */

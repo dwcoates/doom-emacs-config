@@ -53,18 +53,17 @@ func (h *harness) liveCut(at string) {
 	h.cutAt(at, compactedCut("summary at "+at))
 }
 
-// delivered answers every row id a reader is served, oldest first, with the
-// ported conversation left out: what these cases pin is the store's copy and
-// the fork's own rows.
+// delivered answers every row id an opening of the root feed serves, oldest
+// first, with the ported conversation left out: what these cases pin is the
+// store's copy and the fork's own rows.
 func (h *harness) delivered() []string {
 	h.t.Helper()
+	page, _ := h.openPage(rootFeed(), "reader-delivered")
 	h.resolver.mu.Lock()
 	defer h.resolver.mu.Unlock()
-	s := h.resolver.state(testWorkspace)
-	f := h.resolver.feed(s, rootFeed())
-	order, _ := h.resolver.deliverable(s, f, "test")
+	f := h.resolver.feed(h.resolver.state(testWorkspace), rootFeed())
 	var out []string
-	for _, id := range order {
+	for _, id := range rowIDs(pageRows(h.t, page)) {
 		if f.rank[id].plane == planePorted {
 			continue
 		}

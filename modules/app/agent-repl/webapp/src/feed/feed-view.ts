@@ -74,6 +74,7 @@ import {
   type FeedId,
   type FeedPage,
   type FeedPageError,
+  type FeedPageSuccess,
   type FeedSelection,
   type FeedTurnActivity,
   type FeedRow,
@@ -104,6 +105,7 @@ import { drawFeedTurnEnded } from "./rows/turn-ended.js";
 import {
   drawFeedSessionSeparation,
   separationBoundsFeed,
+  separationEndsHistory,
 } from "./rows/separation.js";
 import { drawFeedMergeTabRow } from "./merge/tab-row.js";
 import { isOwnTurn } from "../composer/own-turns.js";
@@ -309,6 +311,9 @@ export function createFeedController(
   // is above zero.
   let throughTail: Promise<unknown> = Promise.resolve();
   let throughRunning = 0;
+  // THE RE-ANCHORS IN FLIGHT (reanchorAtCompaction): "load previous page"
+  // stays disabled while one runs, so the old walk is never continued.
+  let reanchoring = 0;
 
   opts.host.setAttribute(
     "data-feed",
@@ -369,7 +374,7 @@ export function createFeedController(
   };
 
   loadMore.addEventListener("click", () => {
-    void guardMalformed(opts.ctx, "feed.load-older", loadOlder());
+    void guardMalformed(opts.ctx, "feed.load-older", serializeWalk(loadOlder));
   });
 
   const bodyHandle = opts.body(bodyMount, subfeed, opts.bodyContext);
@@ -479,12 +484,7 @@ export function createFeedController(
         const incoming = result.value.rows;
         const keys = incoming.map(orderKeyOf);
         replaceTicking(errorSlot);
-        const edge = requireCase(result.value.edge, "FeedPageSuccess.edge");
-        if (edge.case === "hasMore") {
-          walk = requireMessage(edge.value.walk, "FeedPageHasMore.walk");
-          opts.host.prepend(loadMore);
-        } else loadMore.remove();
-        walkEdge = edge.case;
+        applyEdge(result.value);
         crumbs = requireMessage(
           result.value.breadcrumbs,
           "FeedPageSuccess.breadcrumbs",
@@ -525,6 +525,19 @@ export function createFeedController(
       default:
         unreachableArm("FeedPage.result", armName(result));
     }
+  }
+
+  /**
+   * Take a page's EDGE as the walk's: the walk it names and whether
+   * "load previous page" is offered.
+   */
+  function applyEdge(success: FeedPageSuccess): void {
+    const edge = requireCase(success.edge, "FeedPageSuccess.edge");
+    if (edge.case === "hasMore") {
+      walk = requireMessage(edge.value.walk, "FeedPageHasMore.walk");
+      opts.host.prepend(loadMore);
+    } else loadMore.remove();
+    walkEdge = edge.case;
   }
 
   /** The rows whose MERGE bubble the reader left open on this page, by row id. */
@@ -689,6 +702,15 @@ export function createFeedController(
     const below = atTail ? null : sampleSuccessor(index);
     insertAt(row, id, key, index);
     truncateAtSeparation(row, id);
+    if (separationBoundsFeed(row) && !separationEndsHistory(row)) {
+      reanchoring += 1;
+      loadMore.disabled = true;
+      void guardMalformed(
+        opts.ctx,
+        "feed.walk-reanchor",
+        serializeWalk(() => reanchorAtCompaction(id)),
+      );
+    }
     announce();
     keepPlaceAboveInsert(below);
     if (isSentPrompt(row)) parkOnSentPrompt(id);
@@ -1192,10 +1214,10 @@ export function createFeedController(
    * THE FEED BEGINS AT THE NEWEST SEPARATION, on this side too.
    *
    * A compaction or a clear arriving on the tail says the rows above it are no
-   * longer the conversation — the daemon stops serving them from this moment,
-   * so a client that kept them on screen would be the only place they still
-   * existed, and after a second compaction the reader would be looking at two
-   * dividers and a superseded summary.
+   * longer the conversation, so they leave the screen: after a second
+   * compaction the reader would otherwise be looking at two dividers and a
+   * superseded summary. Above a compaction they stay reachable through
+   * "load previous page" (`reanchorAtCompaction`); above a clear nothing is.
    *
    * The divider itself STAYS, and for a compaction so does the summary it
    * carries: that summary is the whole of what survived, and it lives on this
@@ -1203,6 +1225,17 @@ export function createFeedController(
    */
   function truncateAtSeparation(row: FeedRow, id: string): void {
     if (!separationBoundsFeed(row)) return;
+    // A CLEAR ENDS THE FEED'S HISTORY: the daemon serves nothing above it, so
+    // the walk stands at the start and "load previous page" goes, whether or
+    // not any row was held above the divider.
+    if (separationEndsHistory(row) && walkEdge === "hasMore") {
+      walkEdge = "atStart";
+      loadMore.remove();
+      log.info("a clear put the feed at its start; older pages are no longer offered", {
+        operation: "feed.walk-ended-at-clear",
+        context: { feed: feedName(), row: id },
+      });
+    }
     const at = order.indexOf(id);
     if (at <= 0) return;
     const dropped = order.splice(0, at);
@@ -1584,6 +1617,18 @@ export function createFeedController(
     });
     clearRefusals();
     loadMore.disabled = true;
+    const page = await askFeedPage("next");
+    releaseLoadMore();
+    if (page !== null) applyPage(page, "prepend");
+  }
+
+  /**
+   * Ask the daemon for one page of this feed's walk: the next older (`next`,
+   * continuing the walk this feed holds) or a fresh newest (`first`, which
+   * starts a new one). A request that never reached the daemon, or that it
+   * refused, is drawn as a refusal at the control and answers null.
+   */
+  async function askFeedPage(which: "first" | "next"): Promise<FeedPage | null> {
     let response: GetFeedPageResponse;
     try {
       response = await callUnary(
@@ -1591,26 +1636,78 @@ export function createFeedController(
         "GetFeedPage",
         (client) =>
           client.getFeedPage(
-            buildGetFeedPageRequest(opts.ctx.workspace, feedId(), "next", walk),
+            which === "next"
+              ? buildGetFeedPageRequest(opts.ctx.workspace, feedId(), "next", walk)
+              : buildGetFeedPageRequest(opts.ctx.workspace, feedId(), "first"),
           ),
         GetFeedPageResponseSchema,
       );
     } catch {
       loadMore.after(refusalAt("transport", "the daemon could not be reached"));
-      loadMore.disabled = false;
-      return;
+      return null;
     }
-    loadMore.disabled = false;
     const result = requireCase(response.result, "GetFeedPageResponse.result");
     switch (result.case) {
       case "success":
-        applyPage(result.value, "prepend");
-        return;
+        return result.value;
       case "error":
         loadMore.after(refusalAt("error", "older pages are not available"));
+        return null;
+      default:
+        return unreachableArm("GetFeedPageResponse.result", armName(result));
+    }
+  }
+
+  /**
+   * Enable "load previous page" again unless a walk to a row or a re-anchor
+   * still holds it.
+   */
+  function releaseLoadMore(): void {
+    loadMore.disabled = throughRunning > 0 || reanchoring > 0;
+  }
+
+  /**
+   * A COMPACTION THAT ARRIVES ON AN OPEN FEED STARTS A NEW WALK AT ITS DIVIDER.
+   *
+   * The rows above the divider were just dropped from the screen, but the
+   * daemon still serves them to a walk paging back (owner ruling, 2026-10-10).
+   * The walk this feed held stands wherever its last page left it — below the
+   * rows just dropped, or at a start the compaction moved — so its next page
+   * would skip them. A fresh opening (`GetFeedPage` `first`) is asked for only
+   * after the divider was placed, so the daemon's opening starts at that
+   * divider, and only its EDGE is taken: the rows on screen are already the
+   * divider and what follows it. "load previous page" is held disabled until
+   * the new walk lands, so no page of the old walk is asked for meanwhile.
+   */
+  async function reanchorAtCompaction(divider: string): Promise<void> {
+    log.info("a compaction arrived; the walk starts again at its divider", {
+      operation: "feed.walk-reanchor",
+      context: { feed: feedName(), row: divider },
+    });
+    clearRefusals();
+    let answer: FeedPage | null;
+    try {
+      answer = await askFeedPage("first");
+    } finally {
+      reanchoring -= 1;
+      releaseLoadMore();
+    }
+    if (answer === null) return;
+    const page = requireCase(answer.result, "FeedPage.result");
+    switch (page.case) {
+      case "success":
+        applyEdge(page.value);
+        log.info("the walk now starts at the compaction's divider", {
+          operation: "feed.walk-reanchored",
+          context: { feed: feedName(), row: divider, edge: walkEdge ?? "none" },
+        });
+        return;
+      case "error":
+        drawPageError(page.value);
+        announce();
         return;
       default:
-        unreachableArm("GetFeedPageResponse.result", armName(result));
+        unreachableArm("FeedPage.result", armName(page));
     }
   }
 
@@ -1623,7 +1720,16 @@ export function createFeedController(
    * cannot race over the daemon's one walk.
    */
   function loadThrough(target: FeedId): Promise<LoadThroughOutcome> {
-    const run = throughTail.then(() => runLoadThrough(target));
+    return serializeWalk(() => runLoadThrough(target));
+  }
+
+  /**
+   * Run STEP after every walk request already queued, so no two of them —
+   * an older page, a walk to a row, a re-anchor at a compaction — are ever in
+   * flight together, and none lands on a walk another has replaced.
+   */
+  function serializeWalk<T>(step: () => Promise<T>): Promise<T> {
+    const run = throughTail.then(step);
     throughTail = run.then(
       () => undefined,
       () => undefined,
@@ -1643,7 +1749,7 @@ export function createFeedController(
       return await consumeLoadThrough(target);
     } finally {
       throughRunning -= 1;
-      if (throughRunning === 0) loadMore.disabled = false;
+      releaseLoadMore();
     }
   }
 

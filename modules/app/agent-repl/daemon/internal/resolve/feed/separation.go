@@ -79,13 +79,7 @@ func (r *resolver) OnClearReceived(ws ids.WorkspaceID, turn ids.TurnID) {
 
 	// The optimistic bar bounds delivery at once, which is what CLEARS the feed
 	// for the reader; the same fact drawContextCut records when a cut confirms.
-	if boundsDelivery(row) {
-		f := r.feed(s, at.feed)
-		withheld := boundIndex(f, durableOrder(f))
-		log.Info("daemon.feed.delivery_bound_moved",
-			"an optimistic /clear divider moved the feed's delivery bound: nothing above it is served or pushed from here on",
-			dlog.Context{"feed": f.key, "row": id.GetValue(), "kind": "cleared", "withheld": withheld})
-	}
+	r.recordCutMoved(s, at.feed, row, "an optimistic /clear divider")
 }
 
 // OnCompactReceived registers a /compact as a directive turn so it, like a
@@ -276,20 +270,29 @@ func (r *resolver) drawContextCut(s *wsState, agent *conversationv1.AgentId, cut
 			dlog.Context{"turn": string(confirmedClearTurn), "row": id.GetValue()})
 	}
 
-	// THE FEED NOW BEGINS HERE (see `deliverable`). The bound is read off the
-	// order at every page, so there is nothing to store; what is recorded is
-	// the MOMENT it moved, and how much of the feed a reader is about to stop
-	// being served — the count a client's own truncation should match.
-	if boundsDelivery(row) {
-		f := r.feed(s, at.feed)
-		withheld := boundIndex(f, durableOrder(f))
-		log.Info("daemon.feed.delivery_bound_moved",
-			"a context cut moved the feed's delivery bound: nothing above this divider is served or pushed from here on",
-			dlog.Context{
-				"feed": f.key, "row": id.GetValue(),
-				"kind": separationArm(separation), "withheld": withheld,
-			})
+	r.recordCutMoved(s, at.feed, row, "a context cut")
+}
+
+// recordCutMoved records the MOMENT a divider moved where the feed opens or
+// where its history ends (see `deliverable`). Both are read off the order at
+// every page, so there is nothing to store; what is recorded is how much of
+// the feed now sits above the divider — for a clear, what a reader is about to
+// stop being served, the count a client's own truncation should match. WHAT
+// names the divider for the record. A row that cut no context moves nothing.
+func (r *resolver) recordCutMoved(s *wsState, addr feedid.Feed, row *frontendv1.FeedRow, what string) {
+	if !cutsContext(row) {
+		return
 	}
+	f := r.feed(s, addr)
+	above := cutIndex(f, durableOrder(f))
+	ctx := dlog.Context{"feed": f.key, "row": row.GetId().GetValue(), "kind": separationArm(row.GetSeparation()), "above": above}
+	if endsHistory(row) {
+		r.logger(s.id).Info("daemon.feed.delivery_bound_moved",
+			what+" moved the feed's delivery bound: nothing above this divider is served or pushed from here on", ctx)
+		return
+	}
+	r.logger(s.id).Info("daemon.feed.opening_moved",
+		what+" moved where the feed opens: an opening starts at this divider, and the rows above it are reached only by paging back", ctx)
 }
 
 // compactionLabel words a compaction's divider. A MANUAL compaction is

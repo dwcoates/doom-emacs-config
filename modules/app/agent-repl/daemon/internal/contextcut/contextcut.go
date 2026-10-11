@@ -1,6 +1,7 @@
 // Package contextcut states, once, which context cuts BOUND a conversation:
 // the cuts after which what came before is no longer the conversation, so
-// the feed begins at the newest of them (owner ruling, 2026-09-14).
+// the feed opens at the newest of them (owner ruling, 2026-09-14). Only a
+// clear also ends what a reader can page back to (owner ruling, 2026-10-10).
 package contextcut
 
 import (
