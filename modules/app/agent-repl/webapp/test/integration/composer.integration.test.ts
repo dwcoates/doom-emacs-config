@@ -518,6 +518,7 @@ describe("command panels", () => {
       "commandPanel",
       "commandRefused",
       "commandActed",
+      "askAnswered",
     ]);
   });
 
@@ -736,6 +737,35 @@ describe("submission does not derive state", () => {
 // component streams, never in this answer. So the box clears — the words are
 // spent — and the composer draws nothing at all.
 // ---------------------------------------------------------------------------
+
+describe("an ask-answered answer", () => {
+  /** Submit words the daemon delivered as a standing ask's typed answer. */
+  const submitAnswer = async (): Promise<void> => {
+    harness = await startHarness({ composer: true });
+    harness.fake.answer(
+      "submitPrompt",
+      create(SubmitPromptResponseSchema, {
+        result: { case: "success", value: { outcome: { case: "askAnswered", value: {} } } },
+      }),
+    );
+    await type("use OAuth");
+    await send();
+  };
+
+  it("clears the draft", async () => {
+    // Arrange / Act
+    await submitAnswer();
+    // Assert
+    expect((harness.$('[data-component="composer"] textarea') as HTMLTextAreaElement).value).toBe("");
+  });
+
+  it("draws no refusal and no feed row of its own", async () => {
+    // Arrange / Act: the card's re-push is the visible effect.
+    await submitAnswer();
+    // Assert
+    expect([harness.refusalArms(), harness.rowIds()]).toEqual([[], []]);
+  });
+});
 
 describe("a command-acted answer", () => {
   /** Submit a session-acting command whose answer mints no turn. */
