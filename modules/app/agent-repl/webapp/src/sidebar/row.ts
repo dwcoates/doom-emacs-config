@@ -804,7 +804,7 @@ function tickMergedToday(row: HTMLElement, sc: SidebarContext, mergedAtMs: numbe
 }
 
 /** Run PAINT now and on every tick of the shared ticker, until the next push. */
-function tickPaint(sc: SidebarContext, paint: (nowMs: number) => void): void {
+export function tickPaint(sc: SidebarContext, paint: (nowMs: number) => void): void {
   paint(sc.ctx.ticker.now());
   sc.onDispose(sc.ctx.ticker.subscribe(paint));
 }

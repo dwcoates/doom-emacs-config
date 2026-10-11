@@ -71,7 +71,7 @@ import { drawCreateWorkspaceControl } from "./create.js";
 import { toggleHiddenDropdown } from "./dropdowns.js";
 import { changeView } from "./view-change.js";
 import { foldViewKey, GROUPING_VIEW_KEY, paintSectionFold, paintTriangle } from "./view.js";
-import { drawRosterRow, expandVisibleRows, type RowPlace } from "./row.js";
+import { drawRosterRow, drawRosterRowWhenMerged, expandVisibleRows, mergedToday, tickPaint, type RowPlace } from "./row.js";
 import {
   buildUpdateTaskRequest,
   drawCreateTaskControl,
@@ -447,6 +447,7 @@ export function drawRosterMergedSection(
     hideClosed: false,
     place: "merged",
     leftOut: { when: (rows) => rows.rows.length === 0, attribute: "data-merged-empty" },
+    decorateHeader: (header) => header.appendChild(drawMergedTodayCount(requireMessage(u.rows, `${path}.rows`), sc, `${path}.rows`)),
   });
   if (section.hidden) return section;
   // THE ROW UNIT the fit counts in (merged-fit.ts): an invisible, out-of-flow
@@ -456,6 +457,29 @@ export function drawRosterMergedSection(
   probe.setAttribute("aria-hidden", "true");
   section.appendChild(probe);
   return section;
+}
+
+/** The class of the open band's merged-today count. */
+export const MERGED_TODAY_COUNT_CLASS = "sb-today-count";
+
+/**
+ * The open band's "(K)": how many of its merges landed TODAY (local date),
+ * counted over EVERY row the daemon sent, including those the fit hides
+ * (owner request, 2026-10-11). The stylesheet shows it only while the band is
+ * unfolded, where the folded count is not, and the shared ticker recounts it,
+ * so it drops at midnight together with the green names.
+ */
+export function drawMergedTodayCount(rows: RosterRows, sc: SidebarContext, path: string): HTMLElement {
+  const mergedAt = rows.rows.flatMap((row, i) => {
+    const when = requireMessage(row.when, `${path}.rows[${i}].when`);
+    return when.shown.case === "merged" ? [drawRosterRowWhenMerged(when.shown.value, `${path}.rows[${i}].when.merged`)] : [];
+  });
+  const count = document.createElement("span");
+  count.className = MERGED_TODAY_COUNT_CLASS;
+  tickPaint(sc, (nowMs) => {
+    count.textContent = `(${mergedAt.filter((atMs) => mergedToday(atMs, nowMs)).length})`;
+  });
+  return count;
 }
 
 /** The class the hidden-workspaces section is drawn with. */

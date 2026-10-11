@@ -17,17 +17,26 @@ import {
 import { SetWorkspaceHiddenResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_hidden_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import { repoFoldKey } from "../../src/sidebar/context.js";
-import { drawHeadedSection, drawRosterSectionFold, drawWorkspaceRoster } from "../../src/sidebar/roster.js";
+import {
+  drawHeadedSection,
+  drawRosterSectionFold,
+  drawWorkspaceRoster,
+  MERGED_TODAY_COUNT_CLASS,
+} from "../../src/sidebar/roster.js";
 import { cascadedValue, installStylesheet } from "../stylesheet.js";
 import {
   appContext,
+  fakeTicker,
   hiddenSection,
   maturitySection,
   mergedSection,
+  NOW,
   repoSection,
   roster,
   row,
   sidebarContext,
+  startOfToday,
+  startOfTomorrow,
   taskSection,
 } from "./harness.js";
 
@@ -1430,6 +1439,83 @@ describe("a section's folded count", () => {
   it("draws no count on a task section header", () => {
     const drawn = drawWorkspaceRoster(roster({ tasks: [taskSection({ id: "t-1" })] }), sidebarContext());
     expect(pane(drawn, "task").querySelector(".task-head .sb-count")).toBeNull();
+  });
+});
+
+describe("the open Recently Merged band's today count", () => {
+  const mergedAt = (id: string, atMs: number) =>
+    row({ id, closed: true, status: { case: "merged", value: {} }, when: { case: "merged", value: { atMs: BigInt(atMs) } } });
+  const drawBand = (rows = [mergedAt("ws-1", NOW)], collapsed = false, sc = sidebarContext()): HTMLElement =>
+    drawWorkspaceRoster(roster({ merged: mergedSection(rows, rows.length, collapsed) }), sc);
+  const todayCount = (drawn: HTMLElement): HTMLElement =>
+    pane(drawn, "repository").querySelector(`.merged-section > .repo-head .${MERGED_TODAY_COUNT_CLASS}`) as HTMLElement;
+
+  it.each([
+    { name: "every merge that landed today", rows: () => [mergedAt("ws-1", NOW), mergedAt("ws-2", startOfToday())], want: "(2)" },
+    { name: "none of yesterday's merges", rows: () => [mergedAt("ws-1", NOW), mergedAt("ws-2", startOfToday() - 1)], want: "(1)" },
+    { name: "zero when nothing merged today", rows: () => [mergedAt("ws-1", startOfToday() - 1)], want: "(0)" },
+    { name: "no row without a merged instant", rows: () => [mergedAt("ws-1", NOW), row({ id: "ws-2", closed: true })], want: "(1)" },
+  ])("counts $name", ({ rows, want }) => {
+    // Act
+    const drawn = drawBand(rows());
+    // Assert
+    expect(todayCount(drawn).textContent).toBe(want);
+  });
+
+  it("counts the merges the fit hides, not only the ones it shows", () => {
+    // Arrange
+    const drawn = drawBand([mergedAt("ws-1", NOW), mergedAt("ws-2", NOW), mergedAt("ws-3", NOW)]);
+    const rows = [...pane(drawn, "repository").querySelectorAll<HTMLElement>(".merged-section > .rows > *")];
+    // Act
+    rows.slice(1).forEach((r) => (r.hidden = true));
+    // Assert
+    expect(todayCount(drawn).textContent).toBe("(3)");
+  });
+
+  it("sits right after the folded count in the band's header", () => {
+    expect(todayCount(drawBand()).previousElementSibling?.hasAttribute("data-section-count")).toBe(true);
+  });
+
+  it("drops a merge once the shared ticker crosses midnight", () => {
+    // Arrange
+    const ticker = fakeTicker();
+    const drawn = drawBand([mergedAt("ws-1", NOW)], false, sidebarContext(appContext({}, ticker)));
+    // Act
+    ticker.tick(startOfTomorrow());
+    // Assert
+    expect(todayCount(drawn).textContent).toBe("(0)");
+  });
+
+  it("shows while the band is unfolded", () => {
+    const drawn = drawBand([mergedAt("ws-1", NOW)], false);
+    expect(inRail(drawn, () => cascadedValue(todayCount(drawn), "display"))).not.toBe("none");
+  });
+
+  it("hides while the band is folded, where the folded count shows", () => {
+    const drawn = drawBand([mergedAt("ws-1", NOW)], true);
+    expect(inRail(drawn, () => cascadedValue(todayCount(drawn), "display"))).toBe("none");
+  });
+
+  it("draws grey, the size of the folded count", () => {
+    const drawn = drawBand();
+    expect(inRail(drawn, () => [cascadedValue(todayCount(drawn), "color"), cascadedValue(todayCount(drawn), "font-size")])).toEqual([
+      "var(--muted)",
+      "0.85em",
+    ]);
+  });
+
+  it("is drawn on no other section's header", () => {
+    const drawn = drawWorkspaceRoster(
+      roster({ repos: [repoSection({ id: "repo-1", rows: [row({ id: "ws-1" })] })], hidden: hiddenSection([HIDDEN_ROW]) }),
+      sidebarContext(),
+    );
+    expect(drawn.querySelector(`.${MERGED_TODAY_COUNT_CLASS}`)).toBeNull();
+  });
+
+  it("refuses a merged row whose when-column is unset", () => {
+    const bad = mergedAt("ws-1", NOW);
+    bad.when = undefined;
+    expect(() => drawBand([bad])).toThrow(MalformedView);
   });
 });
 
