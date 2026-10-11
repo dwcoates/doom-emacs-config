@@ -501,10 +501,7 @@ func (s *store) SetClosed(ctx context.Context, id WorkspaceID, closed bool) erro
 	if !closed {
 		return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
 			var was bool
-			err := tx.QueryRowContext(ctx, `SELECT closed FROM workspaces WHERE id = ?`, id).Scan(&was)
-			if errors.Is(err, sql.ErrNoRows) {
-				return fmt.Errorf("wsm: workspace %s: %w", id, ErrNotFound)
-			}
+			err := scanWorkspaceRow(ctx, tx, id, "closed", &was)
 			if err != nil {
 				return err
 			}
@@ -521,10 +518,7 @@ func (s *store) SetClosed(ctx context.Context, id WorkspaceID, closed bool) erro
 	}
 	var released sql.NullString
 	err := s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
-		err := tx.QueryRowContext(ctx, `SELECT serving_instance FROM workspaces WHERE id = ?`, id).Scan(&released)
-		if errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("wsm: workspace %s: %w", id, ErrNotFound)
-		}
+		err := scanWorkspaceRow(ctx, tx, id, "serving_instance", &released)
 		if err != nil {
 			return err
 		}
