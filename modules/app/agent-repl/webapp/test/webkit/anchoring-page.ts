@@ -3,11 +3,10 @@
  *
  * Bundled by that test into one script and run in headless WebKit, over the
  * REAL stylesheet (src/styles.css, injected by the test) and the REAL feed
- * scroll wiring: the tail owner, the box observer and the overscan band, built
- * exactly as `mountFeed` builds them (src/feed/feed.ts). Only the rows are
- * synthetic: `.feed-item` wrappers holding one block of a fixed, varied height,
- * so a row's first layout changes its height from the stylesheet's
- * `contain-intrinsic-size` guess to a known real one.
+ * scroll wiring: the tail owner and the box observer, built exactly as
+ * `mountFeed` builds them (src/feed/feed.ts). Only the rows are synthetic:
+ * `.feed-item` wrappers holding one block of a fixed, varied height, which a
+ * test can grow to stand in for a row above the reader changing height.
  *
  * WHAT IT MEASURES IS WHAT IS PAINTED. A frame's sample is taken in a
  * ResizeObserver created AFTER the feed's own, whose target is resized on
@@ -15,11 +14,9 @@
  * animation frames, layout, then the resize observers in creation order, and
  * only then paints. So the sample sees the layout the feed's own corrections
  * left, which is the frame the reader sees. Reading layout anywhere else -- a
- * task between two frames -- sees growth an IntersectionObserver callback
- * has just caused but no rendering update has corrected yet, a state that is
- * never painted.
+ * task between two frames -- sees growth no rendering update has corrected
+ * yet, a state that is never painted.
  */
-import { createOverscan } from "../../src/feed/overscan.js";
 import { ForwardingLogger, bindLogContext, setLogger } from "../../src/log.js";
 import { TailFollow, feedAnchorRows, observeScrollBox, revealGeometry } from "../../src/scroll.js";
 
@@ -41,6 +38,8 @@ export interface AnchoringPage {
   park(): Promise<void>;
   /** One reader gesture of PX upward, then FRAMES painted frames of measurement. */
   stepUp(px: number, frames: number): Promise<StepResult>;
+  /** Grow the row just above the viewport by PX, then FRAMES painted frames of measurement. */
+  growAbove(px: number, frames: number): Promise<StepResult>;
   /** Every record the page's logger has written so far, as `level operation`. */
   records(): string[];
 }
@@ -75,8 +74,7 @@ function mount(): { box: HTMLElement; host: HTMLElement; tail: TailFollow } {
     host.append(item);
   }
   // As mountFeed builds it: the tail owner reading the latest entry and
-  // anchoring on the feed's rows, the box observer, and the overscan band
-  // watching every row.
+  // anchoring on the feed's rows, and the box observer.
   const tail = new TailFollow(
     box,
     () => {
@@ -86,9 +84,6 @@ function mount(): { box: HTMLElement; host: HTMLElement; tail: TailFollow } {
     feedAnchorRows(box, host),
   );
   observeScrollBox(box, tail);
-  const overscan = createOverscan(box);
-  if (overscan === null) throw new Error("this engine ships no IntersectionObserver");
-  for (const row of host.children) overscan.observe(row as HTMLElement);
   return { box, host, tail };
 }
 
@@ -129,6 +124,18 @@ function rowAt(box: HTMLElement, host: HTMLElement, offset: number): HTMLElement
   }
   if (below === null) throw new Error(`no row at or below ${y.toString()}px`);
   return below;
+}
+
+/** The last row whose bottom sits above the viewport's top. */
+function rowAbove(box: HTMLElement, host: HTMLElement): HTMLElement {
+  const top = box.getBoundingClientRect().top;
+  let above: HTMLElement | null = null;
+  for (const row of host.children) {
+    if (row.getBoundingClientRect().bottom > top) break;
+    above = row as HTMLElement;
+  }
+  if (above === null) throw new Error("no row sits wholly above the viewport");
+  return above;
 }
 
 /**
@@ -174,6 +181,22 @@ window.anchoring = {
     for (let i = 0; i < frames; i++) {
       const at = await frame(() => tracked.getBoundingClientRect().top);
       worst = Math.max(worst, Math.abs(at - before - want));
+    }
+    return { worst, top: box.scrollTop };
+  },
+  async growAbove(px, frames) {
+    // Where the tracked row is PAINTED, and the growth, in that same frame.
+    const { tracked, before } = await frame(() => {
+      const row = rowAt(box, host, 400);
+      const at = row.getBoundingClientRect().top;
+      const card = rowAbove(box, host).firstElementChild as HTMLElement;
+      card.style.height = `${(card.offsetHeight + px).toString()}px`;
+      return { tracked: row, before: at };
+    });
+    let worst = 0;
+    for (let i = 0; i < frames; i++) {
+      const at = await frame(() => tracked.getBoundingClientRect().top);
+      worst = Math.max(worst, Math.abs(at - before));
     }
     return { worst, top: box.scrollTop };
   },
