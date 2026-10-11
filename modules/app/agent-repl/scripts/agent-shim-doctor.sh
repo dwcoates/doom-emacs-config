@@ -137,7 +137,7 @@ check_store_socket_present() {
     record "store-socket-present" "PASS" "socket exists at $STORE_SOCK"
   else
     record "store-socket-present" "FAIL" "no socket at $STORE_SOCK" \
-      "shim-store not running; check '$STORE_LABEL' via launchctl or (re)run install.sh --with-agent-shim-services"
+      "shim-store not running; check '$STORE_LABEL' via launchctl or (re)run .claude/install.sh"
   fi
 }
 
@@ -241,7 +241,7 @@ check_store_connect_rpc() {
   if [ ! -S "$STORE_SOCK" ]; then
     record "$name" "FAIL" \
       "no store socket at $STORE_SOCK; $procedure unreachable (request_id=$request_id)" \
-      "shim-store is not serving; check '$STORE_LABEL' via launchctl or (re)run install.sh --with-agent-shim-services" \
+      "shim-store is not serving; check '$STORE_LABEL' via launchctl or (re)run .claude/install.sh" \
       "$(store_probe_metadata "$request_id" 0 "$procedure" false "missing_socket" "the store socket does not exist" null)" \
       "$instr,\"curl_exit\":null}"
     return 0
@@ -392,7 +392,7 @@ check_launchd_service() {
   local out
   if ! out="$(launchctl print "gui/$(id -u)/$label" 2>/dev/null)"; then
     record "$name" "FAIL" "$label not loaded in launchd" \
-      "install/load it: install.sh --with-agent-shim-services (then launchctl bootstrap)"
+      "install and load it: .claude/install.sh"
     return 0
   fi
   # A loaded-and-running service reports a numeric pid; a loaded-but-dead one
