@@ -491,9 +491,9 @@ func requireOneRow(res sql.Result, what string) error {
 // missing-directory close) can leave a closed row a later handover transfers.
 // This is the one helper every close goes through.
 //
-// A RE-OPEN LANDS THE WORKSPACE AGAIN: a closed workspace turning open moves
-// to the place its priority lands it on (place.go), in the same transaction
-// as the flag. Re-opening touches nothing else, because the bring-up claims
+// A RE-OPEN MOVES THE WORKSPACE LAST: a closed workspace turning open moves
+// to the place after every other one (place.go), in the same transaction as
+// the flag, whatever its priority. Re-opening touches nothing else, because the bring-up claims
 // serving itself; marking an already-open workspace open moves nothing.
 func (s *store) SetClosed(ctx context.Context, id WorkspaceID, closed bool) error {
 	const op = "daemon.wsm.set_closed"
@@ -511,7 +511,7 @@ func (s *store) SetClosed(ctx context.Context, id WorkspaceID, closed bool) erro
 			if _, err := tx.ExecContext(ctx, `UPDATE workspaces SET closed = 0 WHERE id = ?`, id); err != nil {
 				return err
 			}
-			at, err := reland(ctx, tx, id)
+			at, err := moveLast(ctx, tx, id)
 			fields["place"] = at
 			return err
 		})
