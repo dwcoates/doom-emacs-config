@@ -148,3 +148,37 @@ owner was not asked about protobuf shapes.
   handler, and the webapp's tray. Obviated-declaration sweep: nothing else
   imports the deleted file, and no surviving message references
   `DaemonHoldTray` or `DaemonHoldItem`.
+
+### I1 — implementation (2026-10-11), as built
+
+- DAEMON: the feed resolver owns the section (resolve/feed/held.go). Its
+  publication log carries a row or a held change (`Publication`), and a tail
+  replays both under one pin. A held prompt is "settled" exactly when its
+  prompt row is drawn on the feed its turn draws on, so the acceptance mirror
+  and the resolver's own draw settle it alike, and a retired mirror returns it.
+  `resolve/holds` is now the held-prompt renderer (`holds.Prompts`) and the
+  `holds.Sink` the prompt queue and merge orchestrator state their holds to;
+  the tray resolver, its topic, `WatchDaemonHolds`, handover's holds
+  republication and workspace registration's holds bind are gone.
+- STORE: a held merge's head is recorded in a new `held_feed_merges` table
+  (wsm layout 31, additive), so a new daemon holds it again with the reader's
+  fold intact; it is dropped when the merge settles and recorded as a durable
+  feed row at the key it settled at. A durable row of a merge recorded live by
+  a daemon before the held section stays a row until its merge ends.
+- WEBAPP: `src/tray` is now `src/held`; `held/section.ts` reconciles items by
+  id, a merge drawn as the feed's own merge bubble. A held change's rows are
+  drawn before the section, and a settling merge's row takes the bubble it
+  was held as (`FeedController.settle`). `TailFollow`'s merge exemption is
+  deleted.
+- LOOK: the held section is laid out in the feed's own rhythm — the row gap
+  above its first item and between items, no delimiter line, the feed's text
+  scale — so a held merge settles without moving. Held prompts therefore lose
+  the thin line between consecutive cards and sit 0.5rem below the last row
+  rather than 1rem. This follows from layout A (no divider; items read as the
+  newest rows); the owner is told before landing.
+- MERGE BODY: redrawn in place (tabs keyed by id, suites keyed by name, the
+  panel kept while the same tab is shown), so live dots breathe unbroken.
+- VERIFIED: daemon unit and integration suites, the e2e suite (including the
+  webapp layer), the webapp unit, integration and WebKit suites, the Go fake
+  daemon's suite, and a new WebKit test asserting a held merge's growth never
+  moves the painted tail.
