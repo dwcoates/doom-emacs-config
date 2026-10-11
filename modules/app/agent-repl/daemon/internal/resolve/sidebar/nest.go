@@ -150,10 +150,7 @@ type repoBranch struct {
 // recordedParent spells a workspace's recorded parent for the record, empty
 // when it has none and the branch lineage is what answered.
 func recordedParent(ws wsm.Workspace) string {
-	if ws.Parent == nil {
-		return ""
-	}
-	return string(*ws.Parent)
+	return ids.Optional(ws.Parent)
 }
 
 // cycles reports whether following the parent chain from ws returns to ws. A
