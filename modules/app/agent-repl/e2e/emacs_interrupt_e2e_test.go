@@ -133,8 +133,14 @@ func emGHIOpenPanel(t *testing.T, e *Emacs) {
 // user submits: the composer's RET is `map! :map agent-repl-input-mode-map
 // :ni "RET"` in `input.el`, so pressing it asserts the binding as well as
 // the command.
+//
+// The workspace's session must be up first: the daemon refuses a submit to a
+// workspace with no session (`no_session`), and opening the panel does not
+// wait for the session. A settled roster arm is published only once the
+// session is serving, so awaiting one orders the submit after it.
 func emGHISubmit(t *testing.T, e *Emacs, ws, text string) {
 	t.Helper()
+	emGHIAwaitStatus(t, e, ws, "the workspace's session to be up before the submit", emGHISettledArms...)
 	buffer := e.EvalString(`(buffer-name (agent-repl--input-buffer ` + elispString(ws) + `))`)
 	e.Eval(`(with-current-buffer (agent-repl--input-buffer ` + elispString(ws) + `)
                  (erase-buffer)

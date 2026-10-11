@@ -31,7 +31,7 @@
 import MarkdownIt from "markdown-it";
 import taskLists from "markdown-it-task-lists";
 import { escapeHtml, highlightCode } from "./highlight.js";
-import { FILE_LINK_EXTENSIONS, hasFileExtension, isFileLinkHref, isWebHref } from "./href.js";
+import { codeSpanFileHref, FILE_LINK_EXTENSIONS, hasFileExtension, isFileLinkHref, isWebHref } from "./href.js";
 import { isMetapromptTree, renderTreeHtml } from "./metaprompt-tree.js";
 
 /**
@@ -55,11 +55,13 @@ export function inline(escaped: string): string {
     return `\u0000${codeSpans.length - 1}\u0000`;
   });
   // Links: [text](url) — a web URL or a file link (path or bare file name).
+  // A code span in the link text is restored here as plain code: it is
+  // already inside an anchor, so it must not become one of its own below.
   out = out.replace(
     /\[([^\]]+)\]\(([^)\s]+)\)/g,
     (whole: string, text: string, url: string) =>
       isWebHref(url) || isFileLinkHref(url)
-        ? `<a href="${url}" target="_blank" rel="noopener noreferrer">${text}</a>`
+        ? `<a href="${url}" target="_blank" rel="noopener noreferrer">${restoreCodeSpans(text, codeSpans, false)}</a>`
         : whole,
   );
   // Bold before italic so ** is not consumed as two *.
@@ -68,8 +70,22 @@ export function inline(escaped: string): string {
   // The NUL sentinel is the point: it is the one character that cannot survive HTML-escaping, so
   // a code span lifted out under it cannot be forged by the text being rendered. It is written as
   // an escape here rather than the literal byte it used to be, which was invisible in an editor.
-  // eslint-disable-next-line no-control-regex -- see above
-  return out.replace(/\u0000(\d+)\u0000/g, (_m, i: string) => `<code>${codeSpans[Number(i)]}</code>`);
+  return restoreCodeSpans(out, codeSpans, true);
+}
+
+/**
+ * Put the code spans `inline` lifted out back into TEXT. With LINK, a span
+ * that is wholly a `~/` path (`codeSpanFileHref`) is wrapped in a file-link
+ * anchor, as the markdown-it pipeline's `code-span-file-link` rule does.
+ */
+function restoreCodeSpans(text: string, codeSpans: readonly string[], link: boolean): string {
+  // eslint-disable-next-line no-control-regex -- see `inline`
+  return text.replace(/\u0000(\d+)\u0000/g, (_m, i: string) => {
+    const code = codeSpans[Number(i)];
+    const html = `<code>${code}</code>`;
+    const href = link ? codeSpanFileHref(code) : null;
+    return href === null ? html : `<a href="${href}" target="_blank" rel="noopener noreferrer">${html}</a>`;
+  });
 }
 
 // One shared instance. `html: false` is the security linchpin (see file
@@ -122,6 +138,27 @@ md.core.ruler.after("linkify", "file-linkify", (state) => {
       if (DOMAIN_EXTENSIONS.has(label.slice(label.lastIndexOf(".") + 1).toLowerCase())) {
         token.attrSet("data-web-fallback", "");
       }
+    });
+  }
+  return true;
+});
+
+// A CODE SPAN THAT IS WHOLLY A `~/` PATH IS A FILE LINK (`codeSpanFileHref`):
+// the span keeps its code styling inside an anchor whose href is the path. A
+// span already inside a link stays plain code, since anchors cannot nest.
+md.core.ruler.after("file-linkify", "code-span-file-link", (state) => {
+  for (const block of state.tokens) {
+    if (!block.children) continue;
+    let linkDepth = 0;
+    block.children = block.children.flatMap((token) => {
+      if (token.type === "link_open") linkDepth++;
+      if (token.type === "link_close") linkDepth--;
+      if (token.type !== "code_inline" || linkDepth > 0) return [token];
+      const href = codeSpanFileHref(token.content);
+      if (href === null) return [token];
+      const open = new state.Token("link_open", "a", 1);
+      open.attrSet("href", href);
+      return [open, token, new state.Token("link_close", "a", -1)];
     });
   }
   return true;
