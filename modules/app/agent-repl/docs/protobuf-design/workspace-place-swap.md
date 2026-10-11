@@ -120,3 +120,9 @@ sidebar's walk" and the create-landing rule above. Not yet implemented.
   can be moved freely afterwards.
 - **Any two workspaces can swap**, so the `not_siblings` refusal and
   `rosterwalk.RepositorySiblings` are obviated by these rulings.
+- **Creation landing, refined:** a new workspace lands second-to-last among
+  the open workspaces. With none open it takes the first place; with exactly
+  one open it lands after that one. Its priority bucket matters only when the
+  workspace it was created from (as its child, or from the master workspace)
+  has a priority; when that bucket has no open workspace, it lands
+  second-to-last as usual.
