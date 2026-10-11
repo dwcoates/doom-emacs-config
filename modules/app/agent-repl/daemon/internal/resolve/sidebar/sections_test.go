@@ -9,6 +9,7 @@ import (
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/repodivergence"
 	"claude-repld/internal/resolve/footer"
 	"claude-repld/internal/resolve/sidebar"
 	"claude-repld/internal/wsm"
@@ -1138,4 +1139,90 @@ func TestRecentlyMergedRecordsAMergeNamingAnUnregisteredRepository(t *testing.T)
 	if got := rowNames(rosterwalk.MergedRows(latest(t, r))); !equal(got, []string{"a1"}) {
 		t.Fatalf("merged rows = %v, want the registered repository's merge", got)
 	}
+}
+
+func TestRepoSectionNeverMeasuredIsPending(t *testing.T) {
+	// Arrange.
+	r, _ := newResolver(t)
+
+	// Act.
+	r.SetRegistry(registry())
+
+	// Assert.
+	divergence := latest(t, r).GetRepository().GetSections()[0].GetDivergence()
+	if divergence.GetPending() == nil {
+		t.Fatalf("divergence = %v, want the pending arm", divergence)
+	}
+}
+
+func TestRepoSectionDrawsItsDivergenceMeasure(t *testing.T) {
+	tests := []struct {
+		name    string
+		measure repodivergence.Measure
+		want    *frontendv1.RosterRepoDivergence
+	}{
+		{
+			name:    "counted",
+			measure: repodivergence.Counted{Branch: "master", Upstream: "origin/master", Ahead: 3, Behind: 9},
+			want: &frontendv1.RosterRepoDivergence{State: &frontendv1.RosterRepoDivergence_Counted{
+				Counted: &frontendv1.RosterRepoDivergenceCounted{Branch: "master", Upstream: "origin/master", Ahead: 3, Behind: 9}}},
+		},
+		{
+			name:    "no upstream",
+			measure: repodivergence.NoUpstream{Branch: "main"},
+			want: &frontendv1.RosterRepoDivergence{State: &frontendv1.RosterRepoDivergence_NoUpstream{
+				NoUpstream: &frontendv1.RosterRepoDivergenceNoUpstream{Branch: "main"}}},
+		},
+		{
+			name:    "failed",
+			measure: repodivergence.Failed{Reason: "fetching origin failed: offline"},
+			want: &frontendv1.RosterRepoDivergence{State: &frontendv1.RosterRepoDivergence_Failed{
+				Failed: &frontendv1.RosterRepoDivergenceFailed{Reason: "fetching origin failed: offline"}}},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			r, _ := newResolver(t)
+			r.SetRegistry(registry())
+
+			// Act.
+			r.SetRepoDivergence(repo.ID, tc.measure)
+
+			// Assert: the measure is pushed on its own, not on the next registry.
+			got := latest(t, r).GetRepository().GetSections()[0].GetDivergence()
+			if !proto.Equal(got, tc.want) {
+				t.Fatalf("divergence = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRepoDivergenceMeasuredBeforeTheRegistryIsDrawnOnceItArrives(t *testing.T) {
+	// Arrange: the startup sweep can finish before the first registry.
+	r, _ := newResolver(t)
+	r.SetRepoDivergence(repo.ID, repodivergence.NoUpstream{Branch: "main"})
+
+	// Act.
+	r.SetRegistry(registry())
+
+	// Assert.
+	if got := latest(t, r).GetRepository().GetSections()[0].GetDivergence().GetNoUpstream().GetBranch(); got != "main" {
+		t.Fatalf("no-upstream branch = %q, want the measure taken before the registry", got)
+	}
+}
+
+func TestRepoDivergenceRefusesAMissingMeasure(t *testing.T) {
+	// Arrange.
+	r, _ := newResolver(t)
+	r.SetRegistry(registry())
+	defer func() {
+		// Assert.
+		if recover() == nil {
+			t.Fatal("a nil measure was accepted; it is a caller's broken invariant")
+		}
+	}()
+
+	// Act.
+	r.SetRepoDivergence(repo.ID, nil)
 }
