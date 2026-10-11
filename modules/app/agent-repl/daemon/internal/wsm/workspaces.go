@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"claude-repld/internal/dirpath"
@@ -419,9 +420,30 @@ func (s *store) ListRepositories(ctx context.Context) ([]Repository, error) {
 // setWorkspaceField is the one write path for a single workspace column: it
 // refuses an unknown workspace rather than silently affecting no rows.
 func (s *store) setWorkspaceField(ctx context.Context, op, column string, id WorkspaceID, value any, fields dlog.Context) error {
+	return s.setWorkspaceColumns(ctx, op, id, fields, workspaceColumn{name: column, value: value})
+}
+
+// workspaceColumn is one column setWorkspaceColumns assigns, and its value.
+type workspaceColumn struct {
+	name  string
+	value any
+}
+
+// setWorkspaceColumns assigns COLUMNS on one workspace's row in ONE statement,
+// so they land together or not at all. It is the one write path for a plain
+// update of a workspace's own columns, and it refuses an unknown workspace
+// rather than silently affecting no rows.
+func (s *store) setWorkspaceColumns(ctx context.Context, op string, id WorkspaceID, fields dlog.Context, columns ...workspaceColumn) error {
 	fields["workspace"] = string(id)
+	assignments := make([]string, len(columns))
+	args := make([]any, 0, len(columns)+1)
+	for i, column := range columns {
+		assignments[i] = column.name + " = ?"
+		args = append(args, column.value)
+	}
+	args = append(args, id)
 	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
-		res, err := tx.ExecContext(ctx, `UPDATE workspaces SET `+column+` = ? WHERE id = ?`, value, id)
+		res, err := tx.ExecContext(ctx, `UPDATE workspaces SET `+strings.Join(assignments, ", ")+` WHERE id = ?`, args...)
 		if err != nil {
 			return err
 		}
@@ -539,13 +561,9 @@ func (s *store) SetResult(ctx context.Context, id WorkspaceID, result *TurnResul
 		end, read = string(result.End), result.Read
 		fields["end"], fields["read"] = string(result.End), result.Read
 	}
-	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
-		res, err := tx.ExecContext(ctx, `UPDATE workspaces SET result_end = ?, result_read = ? WHERE id = ?`, end, read, id)
-		if err != nil {
-			return err
-		}
-		return requireOneRow(res, fmt.Sprintf("wsm: workspace %s", id))
-	})
+	return s.setWorkspaceColumns(ctx, op, id, fields,
+		workspaceColumn{name: "result_end", value: end},
+		workspaceColumn{name: "result_read", value: read})
 }
 
 // SetMergedAt records that the workspace's merge landed, and, when COMMITS is
@@ -560,13 +578,9 @@ func (s *store) SetMergedAt(ctx context.Context, id WorkspaceID, at time.Time, c
 		return s.setWorkspaceField(ctx, op, "merged_at", id, nanos(at), fields)
 	}
 	fields["commit_count"] = *commits
-	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
-		res, err := tx.ExecContext(ctx, `UPDATE workspaces SET merged_at = ?, commit_count = ? WHERE id = ?`, nanos(at), int64(*commits), id)
-		if err != nil {
-			return err
-		}
-		return requireOneRow(res, fmt.Sprintf("wsm: workspace %s", id))
-	})
+	return s.setWorkspaceColumns(ctx, op, id, fields,
+		workspaceColumn{name: "merged_at", value: nanos(at)},
+		workspaceColumn{name: "commit_count", value: int64(*commits)})
 }
 
 // SetPriority sets or clears a workspace's roster priority. An undeclared
