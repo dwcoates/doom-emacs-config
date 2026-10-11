@@ -38,6 +38,7 @@ import type {
   RosterMergedRepoGroup,
   RosterMergedRepoGroupHeader,
   RosterMergedSection,
+  RosterRepoDivergence,
   RosterRepoKey,
   RosterRepoSection,
   RosterRepositoryView,
@@ -284,6 +285,10 @@ export function drawRosterRepoSection(
   path: string,
 ): HTMLElement {
   const key = drawRosterRepoKey(requireMessage(u.key, `${path}.key`), `${path}.key`);
+  const divergence = drawRosterRepoDivergence(
+    requireMessage(u.divergence, `${path}.divergence`),
+    `${path}.divergence`,
+  );
   // THE FOLD IS THE DAEMON'S: the Emacs tab bar hides a collapsed
   // repository's workspaces off the same pushed arm, so the two can never
   // disagree.
@@ -291,8 +296,42 @@ export function drawRosterRepoSection(
     foldKey: repoFoldKey(key.id),
     className: "repo-section",
     target: { case: "repository", value: key },
-    decorateHeader: (header, section) => header.appendChild(drawCreateWorkspaceControl(key, section, sc)),
+    decorateHeader: (header, section) => {
+      headerLabel(header).title = divergence;
+      header.appendChild(drawCreateWorkspaceControl(key, section, sc));
+    },
   });
+}
+
+/**
+ * The repository label's hover: its primary branch against its upstream, as
+ * the daemon last measured it. EVERY arm is named; unset is malformed.
+ */
+export function drawRosterRepoDivergence(u: RosterRepoDivergence, path: string): string {
+  const arm = requireCase(u.state, `${path}.state`);
+  switch (arm.case) {
+    case "pending":
+      return "ahead/behind not measured yet";
+    case "counted":
+      return `${arm.value.branch}: ${arm.value.ahead} ahead, ${arm.value.behind} behind ${arm.value.upstream}`;
+    case "noUpstream":
+      return `${arm.value.branch} tracks no upstream`;
+    case "failed":
+      return `ahead/behind unknown: ${arm.value.reason}`;
+    default: {
+      const other: { case: string } = arm;
+      return unreachableArm(`${path}.state`, other.case);
+    }
+  }
+}
+
+/** The label a section header draws (`drawRosterSectionHeader`). */
+function headerLabel(header: HTMLElement): HTMLElement {
+  const label = header.querySelector<HTMLElement>(`:scope > .${SECTION_LABEL_CLASS}`);
+  if (label === null) {
+    throw new Error("a section header was drawn without its label");
+  }
+  return label;
 }
 
 /** What every headed section shares on the wire: its header and its fold. */
