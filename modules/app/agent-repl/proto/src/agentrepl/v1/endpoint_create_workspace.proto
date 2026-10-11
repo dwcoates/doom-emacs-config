@@ -35,18 +35,23 @@ message CreateWorkspaceRequest {
   }
 
   // The parent workspace, when this create is spawned FROM one. UNSET = a
-  // TOP-LEVEL workspace: its merge target is the repo's MAIN worktree and
-  // default branch. PRESENT = a child: its merge target is the PARENT's
-  // worktree and branch, and the roster nests it under the parent. The
-  // choice is recorded into the merge layout facts at creation.
+  // TOP-LEVEL workspace: cut from the primary branch, its merge target is
+  // the repo's MAIN worktree and default branch. PRESENT = a child: cut from
+  // the parent's tip, its merge target is the PARENT's worktree and branch,
+  // and the roster nests it under the parent. A workspace is never cut from
+  // one branch and merged into another. The choice is recorded into the
+  // merge layout facts at creation.
   optional CreateWorkspaceParent parent = 4;
 
   // The session model at creation. UNSET = the daemon's default; presence,
   // never an empty-string sentinel.
   optional string model = 5;
 
-  // The workspace's priority. UNSET = unprioritized. The roster resolver
-  // orders by it; changeable later via SetWorkspacePriority.
+  // The workspace's priority. UNSET = unprioritized, except that a child
+  // inherits its parent's priority. A new workspace lands second-to-last among
+  // the open workspaces of its priority, or second-to-last among all open
+  // workspaces when it has none or none share it; changeable later via
+  // SetWorkspacePriority.
   optional WorkspacePriority priority = 6;
 
   // Explicit consent to a session whose permission mode disables the
@@ -68,6 +73,24 @@ message CreateWorkspaceRequest {
   // only the outcomes that can arrive after the ack — naming, worktree, spawn,
   // and success — ride progress.
   optional string op_id = 8;
+
+  // Copy this workspace's conversation into a new TOP-LEVEL workspace: the
+  // worktree is cut from the primary branch and merges into it, and only the
+  // conversation comes from `fork_source`. Set only when `parent` is unset
+  // (InvalidArgument otherwise): a child fork is `parent.fork`. UNSET = the
+  // new workspace starts a fresh conversation, or forks its parent's.
+  //
+  // THE CONVERSATION DESCRIBES EDITS THE WORKTREE DOES NOT HAVE. The daemon
+  // prefixes the commission with a note naming `fork_source`, so the agent
+  // can tell the user, when a later request relies on that workspace's
+  // changes, that they were not carried over.
+  optional CreateWorkspaceForkSource fork_source = 9;
+}
+
+// The workspace whose conversation a top-level fork copies.
+message CreateWorkspaceForkSource {
+  // The workspace to copy the conversation from, as the roster served it.
+  workspace.v1.WorkspaceRef workspace = 1;
 }
 
 // The ordinary workspace create.
@@ -76,8 +99,13 @@ message CreateWorkspaceStandard {
   // empty workspace; presence, never an empty UserSaid. Also the naming
   // input: the daemon derives the slug from it when no name is supplied.
   optional conversation.v1.UserSaid initial_prompt = 1;
-  // The ref to branch from. UNSET = the repo's default branch resolution;
-  // presence, not an empty-string sentinel.
+  // The ref to branch from. UNSET = the repo's default branch resolution for
+  // a top-level workspace, and the parent's tip for a child. A child ALWAYS
+  // starts from its parent's tip, so a base ref beside a `parent` is refused
+  // (InvalidArgument). A top-level workspace merges into the primary branch,
+  // so its base ref must already lie on that branch (an ancestor of it, or
+  // its tip); anything else is refused with `base_ref_off_primary_branch`.
+  // Presence, not an empty-string sentinel.
   optional string base_ref = 2;
   // A user-supplied workspace name. UNSET = the daemon mints the name
   // (slug from the initial prompt when present).
@@ -116,8 +144,8 @@ message CreateWorkspaceParent {
   workspace.v1.WorkspaceRef workspace = 1;
   // Fork the parent's conversation into the new workspace's session
   // (resume the parent's transcript in the new worktree). UNSET = the new
-  // workspace starts a fresh conversation. Confined here by construction:
-  // a fork without a parent is unrepresentable.
+  // workspace starts a fresh conversation. A fork into a TOP-LEVEL workspace
+  // is CreateWorkspaceRequest.fork_source instead.
   optional CreateWorkspaceFork fork = 2;
 }
 
@@ -207,6 +235,13 @@ message CreateWorkspaceError {
     // The repository, or the worktree the create would register, lies inside
     // a temporary directory.
     CreateWorkspaceInsideTemporaryDirectory inside_temporary_directory = 14;
+    // A top-level workspace's base ref is not on the primary branch, so the
+    // workspace would carry another branch's unmerged commits into it.
+    CreateWorkspaceBaseRefOffPrimaryBranch base_ref_off_primary_branch = 15;
+    // The fork source workspace is not in the daemon's registry.
+    CreateWorkspaceUnknownForkSource unknown_fork_source = 16;
+    // The fork source workspace has no conversation to copy.
+    CreateWorkspaceForkSourceHasNoConversation fork_source_has_no_conversation = 17;
   }
 }
 message CreateWorkspaceUngatedWithoutConsent {}
@@ -232,6 +267,21 @@ message CreateWorkspaceUnknownParent {}
 message CreateWorkspaceBaseRefUnresolved {
   // The ref that did not resolve.
   string ref = 1;
+}
+// Names the base ref and the primary branch it does not lie on.
+message CreateWorkspaceBaseRefOffPrimaryBranch {
+  // The base ref the request named.
+  string ref = 1;
+  // The repository's primary branch.
+  string primary_branch = 2;
+}
+// Names the fork source the registry does not hold.
+message CreateWorkspaceUnknownForkSource {
+  workspace.v1.WorkspaceRef workspace = 1;
+}
+// Names the fork source that has no conversation.
+message CreateWorkspaceForkSourceHasNoConversation {
+  workspace.v1.WorkspaceRef workspace = 1;
 }
 message CreateWorkspaceWorktreeCreationFailed {
   // Git's own account of the failure.
