@@ -1402,14 +1402,28 @@ func (f *fakeFooter) last() footer.MergeFacts {
 
 type fakeSidebar struct {
 	sidebar.Resolver
-	mu    sync.Mutex
-	facts []footer.MergeFacts
+	mu        sync.Mutex
+	facts     []footer.MergeFacts
+	requested []bool
 }
 
 func (s *fakeSidebar) SetMerge(_ ids.WorkspaceID, facts footer.MergeFacts) {
 	s.mu.Lock()
 	s.facts = append(s.facts, facts)
 	s.mu.Unlock()
+}
+
+func (s *fakeSidebar) SetMergeRequested(_ ids.WorkspaceID, requested bool) {
+	s.mu.Lock()
+	s.requested = append(s.requested, requested)
+	s.mu.Unlock()
+}
+
+// requestedSeen answers every request fact the roster was told, in order.
+func (s *fakeSidebar) requestedSeen() []bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]bool(nil), s.requested...)
 }
 
 // fakeHolds records the tray's offers.
