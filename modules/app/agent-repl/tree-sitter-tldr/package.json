@@ -1,0 +1,12 @@
+{
+  "name": "tree-sitter-tldr",
+  "private": true,
+  "description": "The tree-sitter grammar of the metaprompt's TLDR tree and of the prompt entries that answer it.",
+  "scripts": {
+    "generate": "tree-sitter generate --abi 14",
+    "test": "../bin/background.sh bash ./test-tree-sitter-tldr.sh"
+  },
+  "devDependencies": {
+    "tree-sitter-cli": "0.25.10"
+  }
+}
