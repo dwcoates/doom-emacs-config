@@ -51,6 +51,7 @@ import (
 	"claude-repld/internal/resolve/footer"
 	"claude-repld/internal/resolve/sidebar"
 	"claude-repld/internal/resolve/topbar"
+	"claude-repld/internal/retarget"
 	"claude-repld/internal/revealpace"
 	"claude-repld/internal/rollout"
 	"claude-repld/internal/scriptrunner"
@@ -1027,6 +1028,15 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Now:        time.Now,
 	})
 	detachedRef.bind(detached)
+	// THE RETARGET pairs the verb that records a new merge target with the
+	// notice queued through the same handler every prompt takes, so the rpc
+	// and the command file share one operation.
+	retargeter := retarget.New(retarget.Deps{
+		Verbs:   verbs,
+		Prompts: handler,
+		Briefs:  merge.BriefsFrom(paths.PromptsDir),
+		Log:     p.Surfaces,
+	})
 	ingress, err := commandfile.New(commandfile.Deps{
 		Dir: p.Layout.OutputDir(),
 		// The ingress joins the pattern onto its own directory, so it takes
@@ -1142,6 +1152,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			Prompts:           handler,
 			Queue:             queue,
 			Verbs:             verbs,
+			Retarget:          retargeter,
 			Merge:             mergeOrchestrator,
 			Drain:             drainController,
 			Rollout:           rolloutController,
