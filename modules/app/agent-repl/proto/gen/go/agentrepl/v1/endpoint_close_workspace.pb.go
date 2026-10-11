@@ -7,7 +7,7 @@
 //
 // A close REQUIRES QUIET: no turn in flight, no live async work, and NO
 // HELD PROMPTS — a held prompt is undelivered user intent, and a close may
-// never silently discard it; the user releases or drops it in the tray
+// never silently discard it; the user releases or drops it in the held section
 // first. A busy workspace refuses, and the refusal MANIFESTS IN THE FOOTER (status
 // `closing`, sub-status `close blocked`, the daemon's composed reasons as
 // the activity line) — pushed on the footer stream beside this response, so
@@ -351,7 +351,7 @@ type CloseWorkspaceBlocked struct {
 	TurnInFlight bool `protobuf:"varint,1,opt,name=turn_in_flight,json=turnInFlight,proto3" json:"turn_in_flight,omitempty"`
 	// Detached items live now (subagents, runs, tasks).
 	LiveWork uint32 `protobuf:"varint,2,opt,name=live_work,json=liveWork,proto3" json:"live_work,omitempty"`
-	// Held prompts in the tray — undelivered user intent.
+	// Held prompts in the held section — undelivered user intent.
 	HeldPrompts uint32 `protobuf:"varint,3,opt,name=held_prompts,json=heldPrompts,proto3" json:"held_prompts,omitempty"`
 	// The workspace is queued for, or inside, a merge.
 	MergeQueued bool `protobuf:"varint,4,opt,name=merge_queued,json=mergeQueued,proto3" json:"merge_queued,omitempty"`

@@ -11,6 +11,7 @@ package agentrepl.v1;
 
 import "workspace/v1/workspace.proto";
 import "frontend/v1/feed.proto";
+import "frontend/v1/feed_held.proto";
 import "agentrepl/v1/feed_token.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
@@ -37,8 +38,13 @@ message OpenFeedSuccess {
   // The feed's newest page, ready to draw before the tail begins.
   frontend.v1.FeedPage page = 1;
   // The tail's address, pinned to begin exactly after this page's newest
-  // row. Echoed verbatim to WatchFeed.
+  // row and this held section. Echoed verbatim to WatchFeed.
   FeedWatchToken watch = 2;
+  // The root feed's held section as it stands at the pin, drawn after the
+  // page's rows. SET for the root feed and UNSET for every sub-feed, which has
+  // no held section. Every later change of it arrives as a WatchFeed
+  // held-section frame.
+  optional frontend.v1.FeedHeld held = 3;
 }
 
 // Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).

@@ -1,13 +1,13 @@
 // endpoint_edit_held_prompt.proto — EditHeldPrompt: EDITING a held prompt.
 // DAEMON-HOLD TRAY section. Owner spec, 2026-09-23.
 //
-// The tray card's Edit button BEGINS an edit; the editor's composer COMMITS
+// The held card's Edit button BEGINS an edit; the editor's composer COMMITS
 // or CANCELS it. THE ARM IS THE STEP.
 //
 //   begin  — the daemon CLAIMS the held prompt as being edited. While the
 //            claim stands, that prompt AND EVERY PROMPT QUEUED AFTER IT stay
 //            held: none is delivered, not by a turn's end, not by a verdict,
-//            not by a release. The claim is published two ways: the tray entry
+//            not by a release. The claim is published two ways: the held item
 //            carries HeldPrompt.editing, and the workspace's host view carries
 //            HostWorkspace.held_prompt_edit, which is what puts the prompt's
 //            content into the editor's input.
@@ -60,7 +60,7 @@ export type EditHeldPromptRequest = Message<"agentrepl.v1.EditHeldPromptRequest"
 
   /**
    * WHICH held prompt — the daemon-minted turn it is held under, echoed from
-   * the tray entry (begin) or from the host view's edit (commit, cancel).
+   * the held item (begin) or from the host view's edit (commit, cancel).
    *
    * @generated from field: conversation.v1.TurnId turn = 2;
    */
@@ -186,7 +186,7 @@ export const EditHeldPromptResponseSchema: GenMessage<EditHeldPromptResponse> = 
   messageDesc(file_agentrepl_v1_endpoint_edit_held_prompt, 4);
 
 /**
- * Done; the tray's and the host view's new state arrive on their streams.
+ * Done; the held section's and the host view's new state arrive on their streams.
  *
  * @generated from message agentrepl.v1.EditHeldPromptSuccess
  */
@@ -299,7 +299,7 @@ export type EditHeldPromptError = Message<"agentrepl.v1.EditHeldPromptError"> & 
      * BEING DELIVERED: the prompt's delivery call to the agent is in flight
      * right now, so it is neither held nor delivered yet. Refused rather than
      * raced. Once the call settles the prompt is either delivered, or (if the
-     * call failed) back in the tray and open to this request again.
+     * call failed) back in the held section and open to this request again.
      *
      * @generated from field: agentrepl.v1.EditHeldPromptBeingDelivered being_delivered = 11;
      */

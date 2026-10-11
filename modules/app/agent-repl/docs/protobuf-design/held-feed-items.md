@@ -123,3 +123,28 @@ owner was not asked about protobuf shapes.
   a held item growing is ordinary content growth, which a standing follow keeps
   in view (owner ruling 2026-10-10, superseding 2026-10-08: a merge bubble's
   growth pushes the feed up and never scrolls it).
+
+### P1 — the protobufs (landed)
+
+- `frontend/v1/daemon_hold.proto` is renamed `frontend/v1/feed_held.proto`.
+  `DaemonHoldTray` and `DaemonHoldItem` are replaced by `FeedHeld` (the
+  section, whole) and `FeedHeldItem` (a FeedId plus a `merge` | `prompt` |
+  `offer` arm). `HeldPrompt`, `HeldOffer` and everything under them keep their
+  shapes; only their comments now say "held section" for "tray".
+- The merge arm is `frontend.v1.FeedMerge`, the same message the settled row's
+  `activity.merge` carries, so one renderer draws both. It is not a whole
+  `FeedRow`, because a held item has no order key yet and `FeedRow.order` is
+  required on every row.
+- `agentrepl.v1.WatchFeedResponse.held` (tag 4) carries
+  `agentrepl.v1.WatchFeedHeldChange { FeedHeld held; repeated FeedRow rows; }`,
+  declared in the endpoint file because only WatchFeed carries it.
+- `agentrepl.v1.OpenFeedSuccess.held` (tag 3) is set for the root feed only.
+- `WatchDaemonHolds`, `endpoint_watch_daemon_holds.proto`, and the page
+  multiplex arms `PageFrame.holds` (7) and `SubscribePageRequest.holds` (8)
+  are retired; the tags are reserved.
+- CONSEQUENCES: every consumer of `daemon_hold_pb` / `DaemonHoldTray` breaks:
+  the daemon's holds resolver, server streams and page multiplex, the
+  integration harness's `WatchHolds`, the Emacs fake daemon's refusing
+  handler, and the webapp's tray. Obviated-declaration sweep: nothing else
+  imports the deleted file, and no surviving message references
+  `DaemonHoldTray` or `DaemonHoldItem`.

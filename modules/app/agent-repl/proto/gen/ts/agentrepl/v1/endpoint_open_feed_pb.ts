@@ -15,6 +15,8 @@ import type { WorkspaceRef } from "../../workspace/v1/workspace_pb";
 import { file_workspace_v1_workspace } from "../../workspace/v1/workspace_pb";
 import type { FeedId, FeedPage } from "../../frontend/v1/feed_pb";
 import { file_frontend_v1_feed } from "../../frontend/v1/feed_pb";
+import type { FeedHeld } from "../../frontend/v1/feed_held_pb";
+import { file_frontend_v1_feed_held } from "../../frontend/v1/feed_held_pb";
 import type { FeedWatchToken } from "./feed_token_pb";
 import { file_agentrepl_v1_feed_token } from "./feed_token_pb";
 import type { Message } from "@bufbuild/protobuf";
@@ -23,7 +25,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_open_feed.proto.
  */
 export const file_agentrepl_v1_endpoint_open_feed: GenFile = /*@__PURE__*/
-  fileDesc("CiVhZ2VudHJlcGwvdjEvZW5kcG9pbnRfb3Blbl9mZWVkLnByb3RvEgxhZ2VudHJlcGwudjEicQoPT3BlbkZlZWRSZXF1ZXN0Ei0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSJgoEZmVlZBgCIAEoCzITLmZyb250ZW5kLnYxLkZlZWRJZEgAiAEBQgcKBV9mZWVkInwKEE9wZW5GZWVkUmVzcG9uc2USMAoHc3VjY2VzcxgBIAEoCzIdLmFnZW50cmVwbC52MS5PcGVuRmVlZFN1Y2Nlc3NIABIsCgVlcnJvchgCIAEoCzIbLmFnZW50cmVwbC52MS5PcGVuRmVlZEVycm9ySABCCAoGcmVzdWx0ImMKD09wZW5GZWVkU3VjY2VzcxIjCgRwYWdlGAEgASgLMhUuZnJvbnRlbmQudjEuRmVlZFBhZ2USKwoFd2F0Y2gYAiABKAsyHC5hZ2VudHJlcGwudjEuRmVlZFdhdGNoVG9rZW4ivgMKDU9wZW5GZWVkRXJyb3ISQwoRdW5rbm93bl93b3Jrc3BhY2UYASABKAsyJi5hZ2VudHJlcGwudjEuT3BlbkZlZWRVbmtub3duV29ya3NwYWNlSAASTAoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzIqLmFnZW50cmVwbC52MS5PcGVuRmVlZFdvcmtzcGFjZVJlZk1pc21hdGNoSAASQwoRdHJhbnNmZXJyaW5nX2F3YXkYAyABKAsyJi5hZ2VudHJlcGwudjEuT3BlbkZlZWRUcmFuc2ZlcnJpbmdBd2F5SAASPgoPbm90X3lldF9hZG9wdGVkGAQgASgLMiMuYWdlbnRyZXBsLnYxLk9wZW5GZWVkTm90WWV0QWRvcHRlZEgAEkEKEGZlZWRfdW5kZWNvZGFibGUYBSABKAsyJS5hZ2VudHJlcGwudjEuT3BlbkZlZWRGZWVkVW5kZWNvZGFibGVIABJJChVmZWVkX25vdF9pbl93b3Jrc3BhY2UYBiABKAsyKC5hZ2VudHJlcGwudjEuT3BlbkZlZWRGZWVkTm90SW5Xb3Jrc3BhY2VIAEIHCgVjYXVzZSIaChhPcGVuRmVlZFVua25vd25Xb3Jrc3BhY2UiNAocT3BlbkZlZWRXb3Jrc3BhY2VSZWZNaXNtYXRjaBIUCgxyZWdpc3RyeV9kaXIYASABKAkiKwoYT3BlbkZlZWRUcmFuc2ZlcnJpbmdBd2F5Eg8KB2FkZHJlc3MYASABKAkiFwoVT3BlbkZlZWROb3RZZXRBZG9wdGVkIhkKF09wZW5GZWVkRmVlZFVuZGVjb2RhYmxlIhwKGk9wZW5GZWVkRmVlZE5vdEluV29ya3NwYWNlQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_workspace_v1_workspace, file_frontend_v1_feed, file_agentrepl_v1_feed_token]);
+  fileDesc("CiVhZ2VudHJlcGwvdjEvZW5kcG9pbnRfb3Blbl9mZWVkLnByb3RvEgxhZ2VudHJlcGwudjEicQoPT3BlbkZlZWRSZXF1ZXN0Ei0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSJgoEZmVlZBgCIAEoCzITLmZyb250ZW5kLnYxLkZlZWRJZEgAiAEBQgcKBV9mZWVkInwKEE9wZW5GZWVkUmVzcG9uc2USMAoHc3VjY2VzcxgBIAEoCzIdLmFnZW50cmVwbC52MS5PcGVuRmVlZFN1Y2Nlc3NIABIsCgVlcnJvchgCIAEoCzIbLmFnZW50cmVwbC52MS5PcGVuRmVlZEVycm9ySABCCAoGcmVzdWx0IpYBCg9PcGVuRmVlZFN1Y2Nlc3MSIwoEcGFnZRgBIAEoCzIVLmZyb250ZW5kLnYxLkZlZWRQYWdlEisKBXdhdGNoGAIgASgLMhwuYWdlbnRyZXBsLnYxLkZlZWRXYXRjaFRva2VuEigKBGhlbGQYAyABKAsyFS5mcm9udGVuZC52MS5GZWVkSGVsZEgAiAEBQgcKBV9oZWxkIr4DCg1PcGVuRmVlZEVycm9yEkMKEXVua25vd25fd29ya3NwYWNlGAEgASgLMiYuYWdlbnRyZXBsLnYxLk9wZW5GZWVkVW5rbm93bldvcmtzcGFjZUgAEkwKFndvcmtzcGFjZV9yZWZfbWlzbWF0Y2gYAiABKAsyKi5hZ2VudHJlcGwudjEuT3BlbkZlZWRXb3Jrc3BhY2VSZWZNaXNtYXRjaEgAEkMKEXRyYW5zZmVycmluZ19hd2F5GAMgASgLMiYuYWdlbnRyZXBsLnYxLk9wZW5GZWVkVHJhbnNmZXJyaW5nQXdheUgAEj4KD25vdF95ZXRfYWRvcHRlZBgEIAEoCzIjLmFnZW50cmVwbC52MS5PcGVuRmVlZE5vdFlldEFkb3B0ZWRIABJBChBmZWVkX3VuZGVjb2RhYmxlGAUgASgLMiUuYWdlbnRyZXBsLnYxLk9wZW5GZWVkRmVlZFVuZGVjb2RhYmxlSAASSQoVZmVlZF9ub3RfaW5fd29ya3NwYWNlGAYgASgLMiguYWdlbnRyZXBsLnYxLk9wZW5GZWVkRmVlZE5vdEluV29ya3NwYWNlSABCBwoFY2F1c2UiGgoYT3BlbkZlZWRVbmtub3duV29ya3NwYWNlIjQKHE9wZW5GZWVkV29ya3NwYWNlUmVmTWlzbWF0Y2gSFAoMcmVnaXN0cnlfZGlyGAEgASgJIisKGE9wZW5GZWVkVHJhbnNmZXJyaW5nQXdheRIPCgdhZGRyZXNzGAEgASgJIhcKFU9wZW5GZWVkTm90WWV0QWRvcHRlZCIZChdPcGVuRmVlZEZlZWRVbmRlY29kYWJsZSIcChpPcGVuRmVlZEZlZWROb3RJbldvcmtzcGFjZUIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_workspace_v1_workspace, file_frontend_v1_feed, file_frontend_v1_feed_held, file_agentrepl_v1_feed_token]);
 
 /**
  * @generated from message agentrepl.v1.OpenFeedRequest
@@ -99,11 +101,21 @@ export type OpenFeedSuccess = Message<"agentrepl.v1.OpenFeedSuccess"> & {
 
   /**
    * The tail's address, pinned to begin exactly after this page's newest
-   * row. Echoed verbatim to WatchFeed.
+   * row and this held section. Echoed verbatim to WatchFeed.
    *
    * @generated from field: agentrepl.v1.FeedWatchToken watch = 2;
    */
   watch?: FeedWatchToken | undefined;
+
+  /**
+   * The root feed's held section as it stands at the pin, drawn after the
+   * page's rows. SET for the root feed and UNSET for every sub-feed, which has
+   * no held section. Every later change of it arrives as a WatchFeed
+   * held-section frame.
+   *
+   * @generated from field: optional frontend.v1.FeedHeld held = 3;
+   */
+  held?: FeedHeld | undefined;
 };
 
 /**
