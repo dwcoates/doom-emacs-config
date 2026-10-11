@@ -29,6 +29,7 @@ import { fileURLToPath } from "node:url";
 import { webkit, type Browser, type Page } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { bundlePage } from "./bundle";
+import { screenshotPixels } from "./pixels";
 import type { StripMeasure, TopbarPage } from "./topbar-page";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -64,37 +65,24 @@ interface Rig {
  */
 async function wifiCentroids(rig: Rig, offset: number): Promise<{ disc: number; glyph: number }> {
   await rig.page.evaluate((o) => window.topbarPage.drawWifi(o), offset);
-  const shot = await rig.page.screenshot({ clip: { x: 0, y: 0, width: 80, height: 40 } });
-  const dev = await rig.page.evaluate(async (b64) => {
-    const img = new Image();
-    img.src = `data:image/png;base64,${b64}`;
-    await img.decode();
-    const canvas = document.createElement("canvas");
-    canvas.width = img.width;
-    canvas.height = img.height;
-    const g = canvas.getContext("2d");
-    if (g === null) throw new Error("no 2d context");
-    g.drawImage(img, 0, 0);
-    const d = g.getImageData(0, 0, img.width, img.height).data;
-    let discW = 0;
-    let discX = 0;
-    let glyphW = 0;
-    let glyphX = 0;
-    for (let y = 0; y < img.height; y++) {
-      for (let x = 0; x < img.width; x++) {
-        const k = (y * img.width + x) * 4;
-        const [r, gr, b] = [d[k], d[k + 1], d[k + 2]];
-        const cover = 1 - Math.min(r, gr, b) / 255;
-        discW += cover;
-        discX += cover * (x + 0.5);
-        const green = Math.max(0, gr - Math.max(r, b));
-        glyphW += green;
-        glyphX += green * (x + 0.5);
-      }
+  const px = await screenshotPixels(rig.page, { x: 0, y: 0, width: 80, height: 40 });
+  let discW = 0;
+  let discX = 0;
+  let glyphW = 0;
+  let glyphX = 0;
+  for (let y = 0; y < px.height; y++) {
+    for (let x = 0; x < px.width; x++) {
+      const [r, gr, b] = px.rgba(x, y);
+      const cover = 1 - Math.min(r, gr, b) / 255;
+      discW += cover;
+      discX += cover * (x + 0.5);
+      const green = Math.max(0, gr - Math.max(r, b));
+      glyphW += green;
+      glyphX += green * (x + 0.5);
     }
-    if (discW === 0 || glyphW === 0) throw new Error("the chip painted no disc or no glyph");
-    return { disc: discX / discW, glyph: glyphX / glyphW };
-  }, shot.toString("base64"));
+  }
+  if (discW === 0 || glyphW === 0) throw new Error("the chip painted no disc or no glyph");
+  const dev = { disc: discX / discW, glyph: glyphX / glyphW };
   return { disc: dev.disc / rig.dpr, glyph: dev.glyph / rig.dpr };
 }
 
