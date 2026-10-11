@@ -163,6 +163,7 @@ import {
   toVendorPermissionMode,
 } from "./permission-gate.js";
 import { SessionPushes } from "./pushes.js";
+import { probeVendorFact } from "./vendor-probe.js";
 import { VendorCadence } from "./vendor-cadence.js";
 import { classifyAgentFailure, NetworkResume, type ReachabilityProbe, type ResumeDelivery } from "./network-resume.js";
 import { networkReach, type NetworkReach } from "./network-reach.js";
@@ -1701,22 +1702,12 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   }
 
   async function probeContextUsage(): Promise<void> {
-    const active = query;
-    if (active === undefined) return;
-    try {
-      pushes.push(contextUsageUpdate(await active.getContextUsage()));
-      // THE SAME OPERATION SUCCEEDING IS THE RECOVERY. A probe that answers
-      // proves the last refusal was a moment, not a state.
-      pushes.resolveComponent(CONTEXT_USAGE_COMPONENT, 0);
-    } catch (err) {
-      pushes.fault(
-        sessionFault(
-          { kind: "vendorQueryFailed" },
-          CONTEXT_USAGE_COMPONENT,
-          `getContextUsage failed: ${err instanceof Error ? err.message : String(err)}`,
-        ),
-      );
-    }
+    await probeVendorFact(pushes, query, {
+      component: CONTEXT_USAGE_COMPONENT,
+      call: "getContextUsage",
+      read: (active) => active.getContextUsage(),
+      take: (usage) => pushes.push(contextUsageUpdate(usage)),
+    });
   }
 
   /** One usage window, or absence when the vendor could not state it. */
@@ -1939,20 +1930,14 @@ export function createEngine(deps: EngineDeps): SessionEngine {
 
   /** Re-read the account's model list, and state the health of that read. */
   async function pushModelCatalog(): Promise<void> {
-    const active = query;
-    if (active === undefined) return;
-    try {
-      modelCatalog = modelOptions(await active.supportedModels());
-      pushes.resolveComponent(MODEL_CATALOG_COMPONENT, 0);
-    } catch (err) {
-      pushes.fault(
-        sessionFault(
-          { kind: "vendorQueryFailed" },
-          MODEL_CATALOG_COMPONENT,
-          `supportedModels failed: ${err instanceof Error ? err.message : String(err)}`,
-        ),
-      );
-    }
+    await probeVendorFact(pushes, query, {
+      component: MODEL_CATALOG_COMPONENT,
+      call: "supportedModels",
+      read: (active) => active.supportedModels(),
+      take: (models) => {
+        modelCatalog = modelOptions(models);
+      },
+    });
   }
 
   /**
@@ -1963,44 +1948,28 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * dropped by the push table, so a re-read states only a change.
    */
   async function pushCommandCatalog(): Promise<void> {
-    const active = query;
-    if (active === undefined) return;
-    try {
-      const catalog = commandCatalogOf(await active.supportedCommands());
-      if (query !== active) return;
-      const changed = pushes.push(commandCatalogUpdate(catalog));
-      pushes.resolveComponent(COMMAND_CATALOG_COMPONENT, 0);
-      LOGGER.debug(
-        { commands: catalog.commands.length, changed },
-        "read the runtime's slash-command catalog",
-      );
-    } catch (err) {
-      pushes.fault(
-        sessionFault(
-          { kind: "vendorQueryFailed" },
-          COMMAND_CATALOG_COMPONENT,
-          `supportedCommands failed: ${err instanceof Error ? err.message : String(err)}`,
-        ),
-      );
-    }
+    await probeVendorFact(pushes, query, {
+      component: COMMAND_CATALOG_COMPONENT,
+      call: "supportedCommands",
+      read: (active) => active.supportedCommands(),
+      take: (commands) => {
+        const catalog = commandCatalogOf(commands);
+        const changed = pushes.push(commandCatalogUpdate(catalog));
+        LOGGER.debug({ commands: catalog.commands.length, changed }, "read the runtime's slash-command catalog");
+      },
+    });
   }
 
   /** Probe every declared mcp server's health and state each one. */
   async function pushMcpServerStatus(): Promise<void> {
-    const active = query;
-    if (active === undefined) return;
-    try {
-      for (const status of await active.mcpServerStatus()) pushes.push(mcpUpdate(status));
-      pushes.resolveComponent(MCP_STATUS_COMPONENT, 0);
-    } catch (err) {
-      pushes.fault(
-        sessionFault(
-          { kind: "vendorQueryFailed" },
-          MCP_STATUS_COMPONENT,
-          `mcpServerStatus failed: ${err instanceof Error ? err.message : String(err)}`,
-        ),
-      );
-    }
+    await probeVendorFact(pushes, query, {
+      component: MCP_STATUS_COMPONENT,
+      call: "mcpServerStatus",
+      read: (active) => active.mcpServerStatus(),
+      take: (statuses) => {
+        for (const status of statuses) pushes.push(mcpUpdate(status));
+      },
+    });
   }
 
   async function pushAccountUsage(): Promise<void> {
