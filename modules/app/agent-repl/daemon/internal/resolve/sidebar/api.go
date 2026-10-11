@@ -20,6 +20,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/publish"
+	"claude-repld/internal/repodivergence"
 	"claude-repld/internal/resolve/footer"
 	"claude-repld/internal/sessionwatcher"
 	"claude-repld/internal/vocab"
@@ -143,6 +144,10 @@ type Resolver interface {
 	// prompt, first line only. Empty omits the line rather than drawing it
 	// blank.
 	SetSummary(ws ids.WorkspaceID, text string)
+	// SetRepoDivergence installs a repository's latest ahead/behind measure
+	// (repodivergence), drawn as its section label's hover. A repository never
+	// measured is drawn pending.
+	SetRepoDivergence(repo ids.RepoID, measure repodivergence.Measure)
 	// FooterStatusChanged redraws the roster because the footer's status for
 	// the workspace moved: the row's status is a projection of it.
 	FooterStatusChanged(ws ids.WorkspaceID)

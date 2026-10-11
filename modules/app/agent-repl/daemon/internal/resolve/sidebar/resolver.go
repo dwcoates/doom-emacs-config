@@ -13,6 +13,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/publish"
+	"claude-repld/internal/repodivergence"
 	"claude-repld/internal/resolve/footer"
 	"claude-repld/internal/resolve/ladder"
 	"claude-repld/internal/sessionwatcher"
@@ -381,6 +382,16 @@ func (r *resolver) SetMergeRequested(ws ids.WorkspaceID, requested bool) {
 				s.setOneShotFailed(false, "merge_requested", log)
 			}
 		})
+}
+
+// SetRepoDivergence installs a repository's latest ahead/behind measure.
+func (r *resolver) SetRepoDivergence(repo ids.RepoID, measure repodivergence.Measure) {
+	if measure == nil {
+		panic(fmt.Sprintf("sidebar: SetRepoDivergence(%s) was handed no measure", repo))
+	}
+	r.mutate("daemon.sidebar.set_repo_divergence", "the roster took a repository's divergence measure",
+		dlog.Context{"repo_id": string(repo), "measure": fmt.Sprintf("%T", measure)}, r.log.Global(),
+		func() { r.state.divergence[repo] = measure })
 }
 
 // SetSelected records the user's selection.
