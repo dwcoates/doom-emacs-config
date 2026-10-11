@@ -36,7 +36,7 @@
  * can no longer match. Markdown is presentation only: what a click echoes is
  * the served string, never the drawn one.
  */
-import { drawToolHead, drawToolName } from "../cards/tool-head.js";
+import { drawTitledToolHead } from "../cards/tool-head.js";
 import { createControl, type Control } from "../../control.js";
 import { log } from "../../log.js";
 import { setInlineMarkdown } from "../../markdown.js";
@@ -102,7 +102,7 @@ export function drawFeedQuestion(u: FeedQuestion, rc: RowContext): HTMLElement {
 
   const card = document.createElement("div");
   card.setAttribute("data-state", state.case);
-  card.append(drawHead());
+  card.append(drawTitledToolHead(QUESTION_TITLE));
 
   switch (state.case) {
     case "open":
@@ -120,13 +120,6 @@ export function drawFeedQuestion(u: FeedQuestion, rc: RowContext): HTMLElement {
     default:
       return unreachableArm(`${PATH}.state`, armName(state));
   }
-}
-
-/** The tool card's head: the card's name where a call names its tool. */
-function drawHead(): HTMLElement {
-  const head = drawToolHead();
-  head.append(drawToolName(QUESTION_TITLE));
-  return head;
 }
 
 /**

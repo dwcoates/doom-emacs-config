@@ -7,7 +7,7 @@ import {
   type FeedSkill,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { MalformedView } from "../../../src/rpc/malformed.js";
-import { drawFeedSkill, SKILL_OUTCOME_ARMS } from "../../../src/feed/cards/skill.js";
+import { drawFeedSkill, SKILL_OUTCOME_ARMS, SKILL_TITLE } from "../../../src/feed/cards/skill.js";
 import { EXPANDED_CLASS, installClickExpand } from "../../../src/expand.js";
 import type { RowContext } from "../../../src/feed/renderers.js";
 import { harness, rowContext } from "../harness.js";
@@ -84,9 +84,31 @@ describe("drawFeedSkill", () => {
     }
   });
 
-  it("draws the invocation line verbatim as the head", () => {
+  it("heads the card with the tool's name, as a Bash card heads with Bash", () => {
     const el = drawFeedSkill(skill({ case: "running", value: {} }), rc());
-    expect(el.querySelector(".tool-name")?.textContent).toBe(INVOCATION);
+    expect(el.querySelector(".tool-head > .tool-name")?.textContent).toBe(SKILL_TITLE);
+  });
+
+  it("draws the invocation line verbatim under the head, not in it", () => {
+    const el = drawFeedSkill(skill({ case: "running", value: {} }), rc());
+    expect(el.querySelector(".tool-head > .skill-input")).toBeNull();
+    expect(el.querySelector(":scope > .skill-input")?.textContent).toBe(INVOCATION);
+  });
+
+  it("draws the invocation as a command line, without the shell's $ chrome", () => {
+    const el = drawFeedSkill(skill({ case: "running", value: {} }), rc());
+    const line = el.querySelector(".skill-input") as HTMLElement;
+    expect(line.tagName).toBe("PRE");
+    expect(line.classList.contains("cmd")).toBe(true);
+  });
+
+  it("places the invocation line between the head and the document", () => {
+    const el = drawFeedSkill(skill(loaded("# doc")), rc());
+    expect([...el.children].map((c) => c.classList[0])).toEqual([
+      "tool-head",
+      "cmd",
+      "tool-output",
+    ]);
   });
 
   const states = [
@@ -102,9 +124,10 @@ describe("drawFeedSkill", () => {
       expect(el.getAttribute("data-state")).toBe(c.arm);
     });
 
-    it(`badges the ${c.arm} arm`, () => {
+    it(`badges the ${c.arm} arm beside the head's name`, () => {
       const el = drawFeedSkill(skill(c.outcome), rc());
-      expect(el.querySelector(".tool-head .badge")?.textContent).toBe(c.badge);
+      const head = el.querySelector(".tool-head") as HTMLElement;
+      expect([...head.children].map((child) => child.textContent)).toEqual([SKILL_TITLE, c.badge]);
     });
   }
 
@@ -236,7 +259,7 @@ describe("drawFeedSkill malformed input", () => {
 });
 
 /**
- * THE INVOCATION IS THE CARD'S TITLE (owner ruling, 2026-09-23): the one
+ * THE INVOCATION LINE IS THE CARD'S TITLE (owner ruling, 2026-09-23): the one
  * two-line title fold (title-fold.ts). A loaded card is a `.tool-fold` and owns
  * it; a card in any other arm has no fold, so the title is its own.
  */
@@ -245,7 +268,7 @@ describe("drawFeedSkill: the title fold", () => {
   function drawn(outcome: InitOfFeedSkill) {
     const el = drawFeedSkill(skill(outcome), rc());
     document.body.replaceChildren(el);
-    return { el, title: el.querySelector(".tool-head > .tool-name") as HTMLElement };
+    return { el, title: el.querySelector(":scope > .skill-input") as HTMLElement };
   }
 
   const UNFOLDED: { arm: string; outcome: InitOfFeedSkill }[] = [
@@ -275,7 +298,7 @@ describe("drawFeedSkill: the title fold", () => {
     const { title } = drawn(outcome);
 
     // Assert
-    expect([...title.classList]).toEqual(["tool-name", TITLE_FOLD_CLASS, TITLE_FOLD_STANDALONE_CLASS]);
+    expect([...title.classList]).toEqual(["cmd", "skill-input", TITLE_FOLD_CLASS, TITLE_FOLD_STANDALONE_CLASS]);
   });
 
   it("wears has-more when the invocation overflows its one line", () => {
