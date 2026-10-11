@@ -413,6 +413,23 @@ ruling, 2026-09-13, item 6), and the roster row is where that happens."
       ;; Assert
       (should (equal (agent-repl--panels-take-arrival-reason "new-id") "registered")))))
 
+(ert-deftest agent-repl-test-commands-add-project-switched-away-from-arms-nothing ()
+  "A register the user switched away from in Emacs does not land on arrival."
+  ;; Arrange
+  (agent-repl-test-commands--registering (list :id "new-id" :dir "/tmp/proj/")
+    (let ((agent-repl-host--editor-switches 0)
+          (landed nil))
+      (cl-letf (((symbol-function 'agent-repl--ws-name-for-dir)
+                 (lambda (dir) (and (equal dir "/tmp/proj/") "registered")))
+                ((symbol-function 'agent-repl-switch-to-project)
+                 (lambda (dir) (setq landed dir))))
+        (agent-repl-add-project-workspace "/tmp/proj")
+        (setq agent-repl-host--editor-switches 1)
+        ;; Act
+        (agent-repl-test-commands--tab-arrives "new-id" "registered")
+        ;; Assert
+        (should-not landed)))))
+
 (ert-deftest agent-repl-test-commands-add-project-refused-arms-nothing ()
   "A register the daemon REFUSED moves the user nowhere.
 There is no workspace to come up on, so nothing is switched to and
@@ -437,7 +454,7 @@ ANSWER is the ref the register answered with, or nil for a refusal."
                (lambda (kind phase &rest _) (push (cons kind phase) phases))))
       (agent-repl-test-commands--registering answer
         (cl-letf (((symbol-function 'agent-repl--ws-name-for-dir) (lambda (_dir) nil))
-                  ((symbol-function 'agent-repl-verbs-select-minted) (lambda (_ref) nil)))
+                  ((symbol-function 'agent-repl-verbs-select-minted) (lambda (_ref _dispatched-at) nil)))
           (agent-repl-add-project-workspace "/tmp/proj"))))
     (nreverse phases)))
 
@@ -1030,7 +1047,7 @@ and `--switched' to the workspace whose switch was requested of the daemon."
                ((symbol-function 'agent-repl-verb-open)
                 (lambda (ref) (setq agent-repl-test-commands--opened ref)))
                ((symbol-function 'agent-repl-verbs-select-minted)
-                (lambda (ref &optional lander)
+                (lambda (ref _dispatched-at &optional lander)
                   (setq agent-repl-test-commands--landed (cons ref lander)))))
        ,@body)))
 
@@ -1156,6 +1173,24 @@ and `--switched' to the workspace whose switch was requested of the daemon."
       (should (equal (plist-get (car agent-repl-test-commands--landed) :id) "id-shut"))
       (should (eq (cdr agent-repl-test-commands--landed)
                   #'agent-repl-verbs--land-on-tab)))))
+
+(ert-deftest agent-repl-test-commands-switcher-opening-snapshots-the-switch-count ()
+  "Opening an absent workspace lands only while the user stays put in Emacs."
+  ;; Arrange
+  (agent-repl-test-commands--switcher
+      (list (agent-repl-test-commands--row "shut" "id-shut" 100 t)) nil
+    (let ((agent-repl-host--editor-switches 7)
+          (dispatched nil))
+      (cl-letf (((symbol-function 'agent-repl--ws-by-ref-id) (lambda (_id) nil))
+                ((symbol-function 'completing-read)
+                 (agent-repl-test-commands--pick "shut (closed)"))
+                ((symbol-function 'agent-repl-verbs-select-minted)
+                 (lambda (_ref dispatched-at &optional _lander)
+                   (setq dispatched dispatched-at))))
+        ;; Act
+        (agent-repl-switch-to-project)
+        ;; Assert
+        (should (eql dispatched 7))))))
 
 (ert-deftest agent-repl-test-commands-switcher-refuses-a-candidate-with-no-ref ()
   "The ref is daemon-minted: a candidate without one cannot be opened."

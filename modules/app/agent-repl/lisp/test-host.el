@@ -183,6 +183,8 @@ unary rpc can produce, which the contract never collapses into one."
          (agent-repl-host--select-in-flight nil)
          (agent-repl-host--select-queued nil)
          (agent-repl-host-last-request nil)
+         (agent-repl-host--editor-switches 0)
+         (agent-repl-host-automatic-switch nil)
          (agent-repl-roster-following nil)
          (agent-repl-test-host--held nil)
          (agent-repl-test-host--reapplied 0)
@@ -975,6 +977,132 @@ an echo would race a newer request and take the frame back."
     ;; Assert
     (should (agent-repl-test-host--logged-p
              :info "elisp.host.select-local-activation ws=ws-1 command=some-command"))))
+
+;;;; ---- Counting the switches the user makes in Emacs ----
+
+(ert-deftest agent-repl-test-host-a-switch-request-is-counted ()
+  "A switch the user asked for in Emacs is counted."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-host-request-switch "ws-1" 'cycle)
+    ;; Assert
+    (should (= (agent-repl-host-editor-switch-count) 1))))
+
+(ert-deftest agent-repl-test-host-a-switch-request-is-counted-even-unsent ()
+  "A request that could not be sent is still the user's move in Emacs."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (cl-letf (((symbol-function 'message) #'ignore))
+      ;; Act
+      (agent-repl-host-request-switch "ws-unknown" 'slot))
+    ;; Assert
+    (should (= (agent-repl-host-editor-switch-count) 1))))
+
+(ert-deftest agent-repl-test-host-the-startup-selection-is-not-counted ()
+  "The startup selecting its first tab is Emacs's own, not the user's."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-host-request-switch "ws-1" 'startup)
+    ;; Assert
+    (should (= (agent-repl-host-editor-switch-count) 0))))
+
+(ert-deftest agent-repl-test-host-a-counted-switch-is-recorded-at-info ()
+  "Every counted switch is in the log with its origin and the new count."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-host-request-switch "ws-1" 'picker)
+    ;; Assert
+    (should (agent-repl-test-host--logged-p
+             :info "elisp.host.editor-switch ws=ws-1 origin=picker count=1"))))
+
+(ert-deftest agent-repl-test-host-a-local-activation-is-counted ()
+  "A perspective activation an Emacs command made is the user's switch."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (setq agent-repl-test-host--current-ws "ws-1")
+    ;; Act
+    (agent-repl-host--on-workspace-activated)
+    ;; Assert
+    (should (= (agent-repl-host-editor-switch-count) 1))))
+
+(ert-deftest agent-repl-test-host-an-activation-onto-a-plain-perspective-is-counted ()
+  "Switching to a perspective that is no workspace still moves the user."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (setq agent-repl-test-host--current-ws "main")
+    ;; Act
+    (agent-repl-host--on-workspace-activated)
+    ;; Assert
+    (should (= (agent-repl-host-editor-switch-count) 1))))
+
+(ert-deftest agent-repl-test-host-an-activation-following-the-roster-is-not-counted ()
+  "A follow of the roster is a sidebar's or an agent's switch, never Emacs's."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (setq agent-repl-test-host--current-ws "ws-1")
+    ;; Act
+    (let ((agent-repl-roster-following t))
+      (agent-repl-host--on-workspace-activated))
+    ;; Assert
+    (should (= (agent-repl-host-editor-switch-count) 0))))
+
+(ert-deftest agent-repl-test-host-a-background-activation-is-not-counted ()
+  "A transient background activation moves the user nowhere."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (setq agent-repl-test-host--current-ws "ws-1")
+    ;; Act
+    (let ((agent-repl--eager-open-in-progress t))
+      (agent-repl-host--on-workspace-activated))
+    ;; Assert
+    (should (= (agent-repl-host-editor-switch-count) 0))))
+
+(ert-deftest agent-repl-test-host-an-automatic-activation-is-not-counted ()
+  "A move Emacs made on its own account is not the user's switch."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (setq agent-repl-test-host--current-ws "ws-1")
+    ;; Act
+    (let ((agent-repl-host-automatic-switch t))
+      (agent-repl-host--on-workspace-activated))
+    ;; Assert
+    (should (= (agent-repl-host-editor-switch-count) 0))))
+
+(ert-deftest agent-repl-test-host-an-automatic-activation-still-selects ()
+  "Not counting an automatic move does not keep it from the daemon."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (setq agent-repl-test-host--current-ws "ws-1"
+          agent-repl-test-host--calls nil)
+    ;; Act
+    (let ((agent-repl-host-automatic-switch t))
+      (agent-repl-host--on-workspace-activated))
+    ;; Assert
+    (should (equal (car (car agent-repl-test-host--calls)) "SelectWorkspace"))))
+
+(ert-deftest agent-repl-test-host-an-uncounted-automatic-activation-is-recorded ()
+  "An activation left uncounted says why."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (setq agent-repl-test-host--current-ws "ws-1")
+    ;; Act
+    (let ((agent-repl-host-automatic-switch t))
+      (agent-repl-host--on-workspace-activated))
+    ;; Assert
+    (should (agent-repl-test-host--logged-p
+             :log "elisp.host.editor-switch-uncounted ws=ws-1 reason=automatic"))))
 
 (ert-deftest agent-repl-test-host-select-transferring-away-goes-to-the-handover ()
   "The refusal is where a lagging client learns the workspace moved."
@@ -2359,6 +2487,27 @@ user's next sidebar click."
         (agent-repl-host-on-link-up conn))
       ;; Assert
       (should (equal switched '("ws-1"))))))
+
+(ert-deftest agent-repl-test-host-link-up-reselect-moves-the-frame-as-an-automatic-switch ()
+  "Restoring the user's own selection is not a new switch by the user."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-connect-open "127.0.0.1:9001"))
+          (automatic nil))
+      (setq agent-repl-host-last-selected-id "id-before-the-outage"
+            agent-repl-test-host--current-ws "ws-2")
+      (cl-letf (((symbol-function 'agent-repl--live-ws-names)
+                 (lambda () '("ws-2" "ws-1")))
+                ((symbol-function 'agent-repl--ws-get)
+                 (lambda (ws _key) (concat "/tmp/" ws)))
+                ((symbol-function 'agent-repl--ws-by-ref-id)
+                 (lambda (id) (and (equal id "id-before-the-outage") "ws-1")))
+                ((symbol-function 'agent-repl--ws-switch)
+                 (lambda (&rest _) (setq automatic agent-repl-host-automatic-switch))))
+        ;; Act
+        (agent-repl-host-on-link-up conn))
+      ;; Assert
+      (should automatic))))
 
 (ert-deftest agent-repl-test-host-link-up-reselect-reports-a-workspace-that-did-not-come-back ()
   "A selection whose workspace the new daemon refused is reported, not moved.

@@ -113,6 +113,7 @@
 ;; Defined by core.el, which loads first; declared special here so this file
 ;; byte-compiles standalone and the binding below is a dynamic one.
 (defvar agent-repl--eager-open-in-progress)
+(defvar agent-repl-host-automatic-switch)
 (defvar persp-nil-name)
 (defvar persp-names-cache)
 (defvar persp-mode)
@@ -1850,7 +1851,10 @@ workspace the user is still standing on."
                 nil)
             (agent-repl--info ws "elisp.workspace.teardown-landing: ws=%s decision=land current=%s target=%s"
                               ws current target)
-            (agent-repl--ws-switch target)
+            ;; Leaving a workspace being torn down is Emacs's move, whoever
+            ;; asked for the teardown (a sidebar row or an agent may have).
+            (let ((agent-repl-host-automatic-switch t))
+              (agent-repl--ws-switch target))
             (agent-repl--info ws "elisp.workspace.teardown-landing: ws=%s landed=%s" ws target)
             target))))))
 
@@ -2169,7 +2173,9 @@ is moved to a real workspace first so the kill does not strand it."
              '(:agent-repl-central "workspace numbering spans the whole session")
              "elisp.workspace.pseudo-delete-vacate current=%s target=%s"
              current (car reals))
-            (agent-repl--ws-switch (car reals))))
+            ;; Retiring the placeholder is Emacs's move, not the user's.
+            (let ((agent-repl-host-automatic-switch t))
+              (agent-repl--ws-switch (car reals)))))
         (dolist (pseudo pseudos)
           (if (agent-repl--pseudo-perspective-killable-p pseudo)
               (progn

@@ -342,6 +342,27 @@
           (should (eq placed buf))
           (should (zerop (hash-table-count agent-repl--ffw-pending))))))))
 
+(ert-deftest agent-repl-test-ffw-pending-fire-switches-as-an-automatic-switch ()
+  "The tab's arrival moves the frame on Emacs's account, never the user's.
+Counted as the user's switch, it withdrew the landing the same visit's
+register asked for."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--ffw-with-pending
+      (agent-repl-test--ffw-with-file-buffer buf "ffw-repo/a.el"
+        (let* ((root (agent-repl-test--ffw-home-path "ffw-repo"))
+               (automatic nil))
+          ;; Arrange
+          (agent-repl--ffw-pending-register root buf)
+          (agent-repl--ws-put "ffw-ws" :project-dir root)
+          (let ((persp-names-cache '("ffw-ws")))
+            (cl-letf (((symbol-function 'agent-repl--ws-switch)
+                       (lambda (_ws &rest _) (setq automatic agent-repl-host-automatic-switch)))
+                      ((symbol-function 'agent-repl--ffw-place) #'ignore))
+              ;; Act
+              (agent-repl--ffw-pending-fire)))
+          ;; Assert
+          (should automatic))))))
+
 (ert-deftest agent-repl-test-ffw-pending-latest-wins-for-one-root ()
   "A second visit into a still-waiting root replaces the first file."
   (agent-repl-test--with-clean-state

@@ -74,7 +74,8 @@
 (declare-function agent-repl-host-pending-selection "host" ())
 (declare-function agent-repl-link-primary "agent-repl-daemon-link" ())
 (declare-function agent-repl-verbs-select-minted "agent-repl-verbs"
-                  (ref &optional lander))
+                  (ref dispatched-at &optional lander))
+(declare-function agent-repl-host-editor-switch-count "host" ())
 (declare-function agent-repl-verbs--land-on-tab "agent-repl-verbs" (ref why ws))
 (declare-function agent-repl-verb-open "agent-repl-verbs" (ref))
 (declare-function agent-repl-workspace-progress-report "mutation-progress" (kind phase &rest details))
@@ -601,7 +602,9 @@ workspace\'s own panel.  The minted ref is handed to
 they just made through ONE mechanism.  A register the daemon REFUSED
 moves the user nowhere: there is no workspace to come up on."
   (interactive (list (read-directory-name "Add project directory: " nil nil t)))
-  (let ((canonical (file-name-as-directory (expand-file-name dir))))
+  (let ((canonical (file-name-as-directory (expand-file-name dir)))
+        ;; The gesture's moment: a switch in Emacs after it withdraws the landing.
+        (dispatched-at (agent-repl-host-editor-switch-count)))
     (unless (file-directory-p canonical)
       (user-error "agent-repl: %s is not a directory" canonical))
     (agent-repl--info '(:agent-repl-central "project setup and command generation precede workspace ownership") "elisp.commands.add-project dir=%s" canonical)
@@ -625,7 +628,7 @@ moves the user nowhere: there is no workspace to come up on."
              (agent-repl--panels-note-arrival-reason
               (plist-get ref :id) "registered")
              (agent-repl-workspace-progress-report :register :completed canonical)
-             (agent-repl-verbs-select-minted ref))
+             (agent-repl-verbs-select-minted ref dispatched-at))
          ;; A REGISTER THAT DID NOT LAND IS SAID OUT LOUD.  It only ever
          ;; reached the log before, so a refused or unanswered register was
          ;; indistinguishable from one that worked and simply did not move
@@ -812,8 +815,10 @@ daemon-minted and there is no spelling of it Emacs could construct."
         (agent-repl--info (agent-repl--ws-current-log-name)
                           "elisp.commands.switch-opens-absent name=%s id=%s"
                           (plist-get entry :name) (plist-get ref :id))
-        (agent-repl-verb-open ref)
-        (agent-repl-verbs-select-minted ref #'agent-repl-verbs--land-on-tab))
+        (let ((dispatched-at (agent-repl-host-editor-switch-count)))
+          (agent-repl-verb-open ref)
+          (agent-repl-verbs-select-minted
+           ref dispatched-at #'agent-repl-verbs--land-on-tab)))
        (t
         (agent-repl--warn (agent-repl--ws-current-log-name)
                           "elisp.commands.switch-no-ref name=%S" choice)
