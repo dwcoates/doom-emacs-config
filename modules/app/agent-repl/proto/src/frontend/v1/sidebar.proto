@@ -63,6 +63,13 @@ message WorkspaceRoster {
   // and rendered under EVERY one: that they are done is the interesting fact.
   // Under the maturity grouping it is the last stage, done.
   RosterMergedSection recently_merged = 3;
+  // Workspaces the user has hidden (agentrepl.v1.SetWorkspaceHidden),
+  // hoisted out of every grouping above and rendered under EVERY one, above
+  // the recently-merged band. A hidden workspace keeps its session and its
+  // editor tab, but the Emacs tab bar does not draw, number or navigate to it,
+  // exactly as for a workspace of a collapsed repository section. A merged
+  // workspace is in recently_merged, never here. Always set.
+  RosterHiddenSection hidden = 9;
   // The selected workspace — the last SelectWorkspace the daemon received.
   // UNSET when there is none.
   optional RosterCurrentWorkspace current = 4;
@@ -378,6 +385,39 @@ message RosterMergedSectionExpanded {}
 
 // A collapsed recently-merged band. DELIBERATELY EMPTY: the arm is the fact.
 message RosterMergedSectionCollapsed {}
+
+// The hidden-workspaces section: header and rows. It has no key of its own --
+// the roster carries exactly one, so its fold identity is fixed.
+//
+// A SECTION WITH NO ROWS IS NOT DRAWN: the wire always carries it, and the
+// client leaves it out of the rail until a workspace is hidden.
+//
+// Its rows are nested by branch lineage among the hidden workspaces alone,
+// as a repository section's are among its own, so a hidden family keeps its
+// shape. Clicking a row here asks SetWorkspaceHidden to show it again.
+message RosterHiddenSection {
+  // The label and the count a folded section draws beside it.
+  RosterSectionHeader header = 1;
+  // The hidden workspaces, in roster order.
+  RosterRows rows = 2;
+  // WHETHER THE SECTION IS FOLDED. DAEMON-HELD (UpdateSidebarView), so every
+  // page draws the same fold. It folds the SIDEBAR's rows only: a hidden
+  // workspace is off the Emacs tab bar whichever arm is set. Never folded or
+  // unfolded by anyone, it is EXPANDED, so a hidden workspace stays in reach
+  // of the click that shows it again. Never unset on the wire.
+  oneof fold {
+    // The hidden rows are shown in the sidebar.
+    RosterHiddenSectionExpanded expanded = 3;
+    // The hidden rows are folded away; the header and its count stay.
+    RosterHiddenSectionCollapsed collapsed = 4;
+  }
+}
+
+// An expanded hidden-workspaces section. DELIBERATELY EMPTY: the arm is the fact.
+message RosterHiddenSectionExpanded {}
+
+// A collapsed hidden-workspaces section. DELIBERATELY EMPTY: the arm is the fact.
+message RosterHiddenSectionCollapsed {}
 
 // A section header as repos, maturity stages and the merged section draw it.
 // The fold it toggles is the SECTION's (RosterRepoSection.fold,
