@@ -16,6 +16,7 @@ func TestValidateSlugAcceptsTheNamingRule(t *testing.T) {
 		{name: "one word", slug: "login"},
 		{name: "two words", slug: "flaky-login"},
 		{name: "three words", slug: "flaky-login-test"},
+		{name: "four words", slug: "agent-repl-emacs-bindings"},
 		{name: "digits are words", slug: "bump-v2-deps"},
 	}
 	for _, tt := range tests {
@@ -36,7 +37,7 @@ func TestValidateSlugRefusesWhatTheRuleForbids(t *testing.T) {
 		slug string
 	}{
 		{name: "empty", slug: ""},
-		{name: "four words", slug: "fix-the-login-bug"},
+		{name: "five words", slug: "fix-the-flaky-login-bug"},
 		{name: "uppercase", slug: "Fix-Login"},
 		{name: "spaces", slug: "fix login"},
 		{name: "a sentence around the name", slug: "the name is fix-login"},
@@ -87,13 +88,13 @@ func TestSlugWordCountCountsAlphanumericRuns(t *testing.T) {
 // what the naming call's correction carries back to the model.
 func TestValidateSlugNamesAnOverLongAnswersWordCount(t *testing.T) {
 	// Arrange.
-	answer := "agent-repl-input-shorter"
+	answer := "agent-repl-input-box-shorter"
 
 	// Act.
 	err := ValidateSlug(answer)
 
 	// Assert.
-	want := fmt.Sprintf("the answer is 4 words, over the %d-word limit", SlugWordLimit)
+	want := fmt.Sprintf("the answer is 5 words, over the %d-word limit", SlugWordLimit)
 	if err == nil || err.Error() != want {
 		t.Fatalf("ValidateSlug(%q) = %v, want %q", answer, err, want)
 	}
