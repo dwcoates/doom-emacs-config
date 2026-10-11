@@ -1,20 +1,21 @@
 ---
 name: merge-queue
-description: Land work on master through the agent-repl merge queue — the ONLY way into master in this repository. From this workspace, request the merge of its own branch, only some commits of its own branch (a fix made amid unfinished work), another workspace's branch, a subagent's branch, or a branch already merged upstream, then end the turn; the merge runs in this workspace and its outcome (landed, or failed in conflicts, tests or other) and any conflict or test-failure repairs arrive in this session. Also controls the queue itself, taking this workspace's or another workspace's merge off the queue and pausing or resuming the queue for one repository or all. Use whenever work is finished and must reach master, whenever you would otherwise run git merge, git commit, git cherry-pick or git push onto master, when a subagent reports a finished branch, whenever a queued merge must be removed or the queue paused or resumed, or when invoked as /merge-queue.
-argument-hint: "own [keep-open] | workspace <worktree-dir> | branch <branch-name> | commits <commit>... | pr-merged | dequeue own | dequeue workspace <worktree-dir> | pause [<repo-dir>] | resume [<repo-dir>]"
+description: Land work on master through the agent-repl merge queue — the ONLY way into master in this repository. From this workspace, request the merge of its own branch, only some commits of its own branch (a fix made amid unfinished work), another workspace's branch, a subagent's branch, or a branch already merged upstream, then end the turn. Its own branch merges detached by default, in a merge workspace forked from this one, so this workspace stays free and the outcome arrives here as a report; every other merge runs in this workspace, and its outcome (landed, or failed in conflicts, tests or other) and any conflict or test-failure repairs arrive in this session. Also controls the queue itself, taking this workspace's or another workspace's merge off the queue and pausing or resuming the queue for one repository or all. Use whenever work is finished and must reach master, whenever you would otherwise run git merge, git commit, git cherry-pick or git push onto master, when a subagent reports a finished branch, whenever a queued merge must be removed or the queue paused or resumed, or when invoked as /merge-queue.
+argument-hint: "own [in-place | keep-open] | workspace <worktree-dir> | branch <branch-name> | commits <commit>... | pr-merged | dequeue own | dequeue workspace <worktree-dir> | pause [<repo-dir>] | resume [<repo-dir>]"
 allowed-tools: Bash(.claude/skills/merge-queue/run.sh:*)
 ---
 
 ## What This Skill Does
 
-Asks the merge queue, from this workspace, to land a finished branch in its merge target: master for a workspace made off the main checkout, the PARENT workspace's checkout for a workspace created explicitly as a child of another. The merge runs in this workspace once the turn ends, and its outcome reports into this session; nothing merges by hand. It also removes a queued merge and pauses or resumes the queue, answering at once.
+Asks the merge queue, from this workspace, to land a finished branch in its merge target: master for a workspace made off the main checkout, the PARENT workspace's checkout for a workspace created explicitly as a child of another. Once the turn ends, this workspace's own branch is merged DETACHED by default: in a merge workspace forked from this conversation, while this workspace stays free, with the outcome reported back into this session. Every other merge, and an own-branch merge asked for in place, runs in this workspace and reports into this session; nothing merges by hand. It also removes a queued merge and pauses or resumes the queue, answering at once.
 
 ## Arguments
 
 | Argument | Behaviour |
 |---|---|
-| `own` | Merge the branch checked out in this workspace's worktree now, into master, or into its parent workspace when it is a child; this workspace closes once it lands. |
-| `own keep-open` | Merge the branch checked out in this workspace's worktree now, into master, or into its parent workspace when it is a child, and keep this workspace open once it lands. |
+| `own` | Merge the branch checked out in this workspace's worktree as it stands now, into master, or into its parent workspace when it is a child, DETACHED: in a merge workspace forked from this one, leaving this workspace free; the outcome is reported back into this session. |
+| `own in-place` | Merge the branch checked out in this workspace's worktree in THIS workspace, holding its prompts until the merge ends; this workspace closes once it lands. |
+| `own keep-open` | Merge the branch checked out in this workspace's worktree in THIS workspace, and keep this workspace open once it lands. |
 | `workspace <worktree-dir>` | Merge the branch checked out in ANOTHER workspace's worktree (for example a one-shot a subagent ran in), into master, or into that workspace's parent when it is a child; that workspace closes once it lands. |
 | `branch <branch-name>` | Merge a branch that is no workspace (a subagent's `Agent`-tool branch). |
 | `commits <commit>...` | Merge ONLY the named commits of this workspace's branch, rebased onto master, leaving the rest of the branch unmerged; this workspace stays open. |
@@ -29,10 +30,11 @@ Asks the merge queue, from this workspace, to land a finished branch in its merg
 0. Confirm the work is ready (merge arguments only; skip to step 1 for `dequeue`, `pause` and `resume`).
   - Every change is committed, and the applicable tests passed before each commit.
   - The branch to land is the one checked out in the worktree being merged; a worktree with no branch checked out is refused.
-  - **Why this lives here**: the queue lands exactly what is committed, and a red test gate comes back as a repair prompt in this session.
+  - **Why this lives here**: the queue lands exactly what is committed, and a red test gate comes back as a repair prompt in the session the merge runs in.
 
 1. Dispatch on the argument.
   - a. If `own`: call `.claude/skills/merge-queue/run.sh --enqueue-own`.
+    - *NOTE*: with `own in-place`, call `.claude/skills/merge-queue/run.sh --enqueue-own --in-place` instead.
     - *NOTE*: with `own keep-open`, call `.claude/skills/merge-queue/run.sh --enqueue-own --keep-open` instead.
     - `EXIT CODE 0:` The merge is requested. Continue to step 2.
     - `EXIT CODE 2:` IMMEDIATELY terminate and surface the raw error.
@@ -82,13 +84,14 @@ Asks the merge queue, from this workspace, to land a finished branch in its merg
   - CRITICAL: the merge cannot start while this turn runs, so do NOT wait, poll, or check on it.
 
 3. Answer the merge's prompts (later turns).
+  - *NOTE*: a detached `own` merge sends its conflict and test-failure prompts to its merge workspace, never to this session; this session receives only its report of how the merge ended, which needs no answer beyond step 3d.
   - a. A conflict-resolution prompt: resolve the conflicted files in the worktree the prompt names and `git add` them.
     - CRITICAL: NEVER run `git rebase --continue`, `--abort` or `--skip`; the queue continues the rebase itself.
   - b. A test-failure prompt: fix the failure in the worktree the prompt names and commit the fix with its tests.
   - c. A LANDED outcome for a `branch` or `commits` merge: call `.claude/skills/merge-queue/run.sh --remove-branch <branch-name>`.
     - `EXIT CODE 0:` The subagent's worktree and branch are gone. Report the landing and stop.
     - `EXIT CODE 2:` IMMEDIATELY terminate and surface the raw error.
-  - d. A failed outcome (conflicts, tests or other): report it in one line and STOP.
+  - d. A failed outcome (conflicts, tests or other), or a detached merge's report of how it ended: report it in one line and STOP.
 
 4. Refused.
   - Report the printed refusal verbatim and STOP.
