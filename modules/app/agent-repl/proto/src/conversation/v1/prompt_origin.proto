@@ -96,4 +96,12 @@ enum PromptOrigin {
   // and how agent-repl could avoid or resolve such links. Submitted without
   // interrupting the running turn.
   PROMPT_ORIGIN_LINK_UNRESOLVED = 30;
+  // The daemon's report to a workspace's session that a DETACHED merge it
+  // asked for has ended (agentrepl.v1.MergeWorkspaceSourceOwnBranchDetached):
+  // that the branch landed, or what failed and that the merge workspace is
+  // open for the user to finish. Submitted through the prompt queue like any
+  // submission, so it waits behind a running turn. The feed draws it as the
+  // FeedRow.merge_handback marker, never as a prompt bubble: the words are
+  // the daemon's, and the merge itself is read in its bubble.
+  PROMPT_ORIGIN_MERGE_HANDBACK = 31;
 }
