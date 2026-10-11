@@ -17,6 +17,7 @@ import (
 	"claude-repld/internal/intakegate"
 	"claude-repld/internal/merge"
 	"claude-repld/internal/prompthandler"
+	"claude-repld/internal/retarget"
 	"claude-repld/internal/workspace"
 	"claude-repld/internal/wsm"
 )
@@ -50,6 +51,9 @@ type Deps struct {
 	// Prompts is the same SubmitPrompt body the rpc calls, which is what makes
 	// a command-file prompt indistinguishable from a typed one.
 	Prompts prompthandler.Handler
+	// Retarget is the same operation SetWorkspaceParent calls: the retarget
+	// and its notice to the workspace's session, as one.
+	Retarget retarget.Retargeter
 	// Log is the ingress's logger.
 	Log dlog.Surfaces
 	// Home is the absolute home directory a leading `~` in an entry's
@@ -100,6 +104,8 @@ func New(deps Deps) (Ingress, error) {
 		return nil, fmt.Errorf("commandfile: the merge orchestrator is required")
 	case deps.Prompts == nil:
 		return nil, fmt.Errorf("commandfile: the prompt handler is required")
+	case deps.Retarget == nil:
+		return nil, fmt.Errorf("commandfile: the retarget operation is required")
 	case deps.Log == nil:
 		return nil, fmt.Errorf("commandfile: log surfaces are required")
 	case deps.Serves == nil:

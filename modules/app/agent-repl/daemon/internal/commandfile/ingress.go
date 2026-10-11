@@ -16,6 +16,7 @@ import (
 	"claude-repld/internal/ids"
 	"claude-repld/internal/intakegate"
 	"claude-repld/internal/merge"
+	"claude-repld/internal/promptqueue"
 	"claude-repld/internal/workspace"
 	"claude-repld/internal/wsm"
 )
@@ -259,6 +260,13 @@ func answered(err error) bool {
 	if _, ok := workspace.AsRefusal(err); ok {
 		return true
 	}
+	// A SESSION PARKED AT ITS COLD GATE refuses a prompt by the gate's own
+	// name: the queue's answer, which the rpc route answers on its cold_gate
+	// arm.
+	var coldGate *promptqueue.ColdGateRefusal
+	if errors.As(err, &coldGate) {
+		return true
+	}
 	_, ok := merge.Refused(err)
 	return ok
 }
@@ -315,6 +323,8 @@ func (i *ingress) apply(ctx context.Context, log dlog.Logger, file string, index
 		return i.applyMergeEvict(ctx, log, entry)
 	case TypeMergePause, TypeMergeResume:
 		return i.applyMergePause(ctx, log, entry)
+	case TypeRetarget:
+		return i.applyRetarget(ctx, log, entry)
 	case TypeClose:
 		ws, err := i.target(ctx, entry)
 		if err != nil {
@@ -459,6 +469,57 @@ func (i *ingress) applyMergePause(ctx context.Context, log dlog.Logger, entry En
 	outcome["outcome"] = "resumed"
 	log.Info(opMergeQueue, "resumed the merge queue", outcome)
 	return nil
+}
+
+// applyRetarget maps a retarget entry onto the retarget operation
+// SetWorkspaceParent runs, so the file's retarget tells the workspace's
+// session exactly as the rpc's does. The parent is keyed by its worktree
+// root; null, or the repository's own main checkout, is top-level.
+func (i *ingress) applyRetarget(ctx context.Context, log dlog.Logger, entry Entry) error {
+	ws, err := i.target(ctx, entry)
+	if err != nil {
+		return err
+	}
+	parent, err := i.retargetParent(ctx, log, ws, entry.Parent.Dir)
+	if err != nil {
+		return err
+	}
+	return i.deps.Retarget.Retarget(ctx, ws, parent)
+}
+
+// retargetParent answers the parent a retarget's directory names: none for no
+// directory or for the workspace's repository's main checkout, else the
+// registered workspace there. A directory nothing is registered at is the
+// unknown_parent refusal; a parent of another repository is left to the
+// retarget, which refuses it by name.
+func (i *ingress) retargetParent(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, dir string) (*ids.WorkspaceID, error) {
+	if dir == "" {
+		return nil, nil
+	}
+	record, err := i.deps.DB.Workspace(ctx, ws)
+	if err != nil {
+		return nil, fmt.Errorf("read the retargeted workspace %q: %w", ws, err)
+	}
+	repositories, err := i.deps.DB.ListRepositories(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("read the repository registry: %w", err)
+	}
+	repo, found := wsm.RepositoryWithID(repositories, record.Repo)
+	if !found {
+		return nil, fmt.Errorf("workspace %q names repository %q, which the registry does not hold", ws, record.Repo)
+	}
+	parent, main, err := i.parentAt(ctx, dir, repo)
+	var unregistered *unregisteredParentError
+	if errors.As(err, &unregistered) && errors.Is(err, wsm.ErrNotFound) {
+		return nil, workspace.UnknownParentRefusal(log, dir, err)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("parent: %w", err)
+	}
+	if main {
+		return nil, nil
+	}
+	return &parent.ID, nil
 }
 
 // applyCreate maps a create entry onto the ordinary creation verb. A one-shot
