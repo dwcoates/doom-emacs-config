@@ -7506,20 +7506,25 @@ ar-button.outcome-marker-pill {
 .feed-group {
   position: relative;
 }
-/* The strip: one tab per member, icon + 1-based index, wrapping when many.
-   Inset by the member card's 1px border and its 0.3rem top / 0.75rem side
-   padding, and raised over the card, which comes later in the document. */
+/* EVERY FEED TAB STRIP (src/feed/tabs.ts): one tab per entry, icon + 1-based
+   index (+ label), wrapping when many. Its size only; where a strip sits is its
+   card's concern. */
+.feed-tab-strip {
+  display: flex;
+  flex-wrap: wrap;
+  /* Scaled with the tabs it holds, by the same 1.25. */
+  gap: 0.156rem;
+  padding: 0.062rem 0 0.188rem;
+}
+/* The tool group's strip, inset by the member card's 1px border and its
+   0.3rem top / 0.75rem side padding, and raised over the card, which comes
+   later in the document. */
 .feed-group-strip {
   position: absolute;
   z-index: 1;
   top: calc(1px + 0.3rem);
   left: calc(1px + 0.75rem);
   right: calc(1px + 0.75rem);
-  display: flex;
-  flex-wrap: wrap;
-  /* Scaled with the tabs it holds, by the same 1.25. */
-  gap: 0.156rem;
-  padding: 0.062rem 0 0.188rem;
 }
 .feed-group-tab {
   display: inline-flex;

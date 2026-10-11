@@ -355,8 +355,10 @@ describe("the tab strip's size (styles.css)", () => {
     return match[1];
   }
 
+  // The strip's size is the SHARED feed tab strip's (src/feed/tabs.ts), which
+  // the group's strip wears beside its own positioning class.
   it("grows the strip's gap and padding by a quarter", () => {
-    const body = ruleBodyOf(".feed-group-strip");
+    const body = ruleBodyOf(".feed-tab-strip");
     expect(body).toMatch(/(^|[;\s])gap\s*:\s*0\.156rem\s*;/);
     expect(body).toMatch(/(^|[;\s])padding\s*:\s*0\.062rem 0 0\.188rem\s*;/);
   });
