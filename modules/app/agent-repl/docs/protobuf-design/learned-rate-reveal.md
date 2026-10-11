@@ -165,12 +165,17 @@ Supersedes the pacing model of `streaming-reveal-window.md`.
 ## Webapp-side model (not contract, recorded for implementers)
 
 - **One speed rule** (`webapp/src/reveal-pace.ts`). With `bank` = rendered
-  characters arrived but not shown, the speed is
-  `max(clamp(bank / 0.3 s, min, max), bank / bank_limit)`, zero for an empty
-  bank. A steady arrival speed keeps a steady bank, and `bank / 0.3 s` is the
-  speed that keeps it steady, so the reveal follows the arrivals about 0.3 s
-  behind within the bounds; a stream faster than the maximum settles about one
-  bank limit behind.
+  characters arrived but not shown and `limit` = `max × bank_limit`, the speed
+  is `clamp(bank / 0.3 s, min, max)` while `bank ≤ limit`, and
+  `max + (bank − limit) / 0.3 s` past it; zero for an empty bank. A steady
+  arrival speed keeps a steady bank, and `bank / 0.3 s` is the speed that keeps
+  it steady, so the reveal follows the arrivals about 0.3 s behind within the
+  bounds; a stream faster than the maximum settles just past the limit.
+  - Why the excess is caught up on 0.3 s and not on the bank limit: a whole
+    block landing in one push (a settle with no streamed fragments before it;
+    the e2e `!md` scenario drops ~3.2k characters at once) took ~7 s to type
+    out when the excess drained on a 1.5 s time constant; on 0.3 s it takes
+    under 4 s, with no jump.
 - **Across pushes** only the shown length is carried (`data-revealed`); the
   windowed reveal's carried speed (`data-reveal-speed`) is gone.
 - **A draw with no pace** (a replay) and the error arm are drawn whole; the

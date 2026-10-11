@@ -76,9 +76,22 @@ describe("revealSpeed", () => {
     expect(revealSpeed(bank, PACE)).toBe(55);
   });
 
-  it("goes past the maximum only to hold a bank over its limit at the limit", () => {
-    // Act / Assert: 165 banked is 3s at the maximum; typed at 110 it is 1.5s.
-    expect(revealSpeed(165, PACE)).toBe(110);
+  it("goes past the maximum by a bank's excess over its limit, caught up on the follow time", () => {
+    // Act / Assert: 165 banked is 82.5 past the 82.5-character limit.
+    expect(revealSpeed(165, PACE)).toBeCloseTo(55 + 82.5 / FOLLOW_SECONDS);
+  });
+
+  it("types a whole block landing at once out within a few seconds", () => {
+    // Arrange: 3200 characters arrive in one push.
+    let shown = 0;
+    let elapsed = 0;
+    // Act: frames of 16ms until done.
+    while (shown < 3200) {
+      shown = advanceReveal(shown, 3200, 16, PACE);
+      elapsed += 16;
+    }
+    // Assert: the excess is caught up quickly and the last limit's worth types at the maximum.
+    expect(elapsed).toBeLessThan(4000);
   });
 });
 
@@ -118,7 +131,7 @@ describe("advanceReveal", () => {
     expect(Math.max(...speeds)).toBeLessThanOrEqual(55);
   });
 
-  it("holds a stream faster than the maximum about one bank limit behind", () => {
+  it("holds a stream faster than the maximum just past the bank limit", () => {
     // Arrange: text arriving at 100 chars/sec for 10s, in 16ms frames.
     let shown = 0;
     let arrived = 0;
@@ -127,10 +140,10 @@ describe("advanceReveal", () => {
       arrived += 100 * 0.016;
       shown = advanceReveal(shown, arrived, 16, PACE);
     }
-    // Assert: the reveal trails by the limit's 1.5s of arrivals, give or take.
-    const lagSeconds = (arrived - shown) / 100;
-    expect(lagSeconds).toBeGreaterThan(1.3);
-    expect(lagSeconds).toBeLessThan(1.6);
+    // Assert: the bank settles just past its 82.5-character limit.
+    const bank = arrived - shown;
+    expect(bank).toBeGreaterThan(82.5);
+    expect(bank).toBeLessThan(100);
   });
 });
 

@@ -32,6 +32,7 @@ import {
   BOOT_BUDGET_MS,
   TURN_TEST_MS,
   awaitDrawn,
+  awaitTypedOut,
   bootLayer,
   driveTurn,
   rowID,
@@ -73,6 +74,7 @@ it(
   async () => {
     // Arrange / Act
     const row = await family("md", "activity", "response");
+    await awaitTypedOut(app, row);
     // Assert — the markdown showcase body, and the state the row settled in.
     expect(row.querySelector(".bubble-body")).not.toBeNull();
     expect(textOf(row)).toContain("Markdown showcase");
@@ -95,6 +97,7 @@ it(
   async () => {
     // Arrange / Act
     const row = await family("md", "activity", "response");
+    await awaitTypedOut(app, row);
     // Assert — six drawn tree rows (four branches plus the two continuations
     // the wrap added), and the wrapped branch's own rails on the continuation
     // that hangs beneath it.
