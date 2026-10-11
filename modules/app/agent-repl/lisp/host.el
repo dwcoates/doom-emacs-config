@@ -184,6 +184,15 @@ treats as having no connection."
             now
           (agent-repl-link-live))))))
 
+(defun agent-repl-host-conn-or-primary (ws)
+  "Return the connection a per-workspace call for WS goes out on, or nil.
+WS\='s own serving connection (`agent-repl-host-conn') when it has one, and
+otherwise the primary link -- a workspace not yet attached to a daemon is
+still addressed on the link every registration rides.  A nil WS (no
+current workspace) is addressed on the primary link alone.  Nil only when
+neither stands, which every caller treats as having no connection."
+  (or (and ws (agent-repl-host-conn ws)) (agent-repl-link-primary)))
+
 (defun agent-repl-host-stream (ws)
   "Return WS's standing `WatchHostWorkspace' stream, or nil."
   (plist-get (agent-repl-host--entry ws) :stream))
@@ -534,7 +543,7 @@ is no connection to send it on."
   "Send WS\='s SelectWorkspace now, holding the in-flight slot until it answers.
 ON-SETTLED is as `agent-repl-host-select' documents."
   (let ((ref (agent-repl-host-ref ws))
-        (conn (or (agent-repl-host-conn ws) (agent-repl-link-primary))))
+        (conn (agent-repl-host-conn-or-primary ws)))
     (cond
      ((null ref)
       (agent-repl--log ws "elisp.host.select-skipped ws=%s reason=no-ref" ws)
@@ -670,7 +679,7 @@ Answers t when the request was sent or queued, nil otherwise."
                         ws trigger)
       (message "[agent-repl] Cannot switch to %s: the daemon has not registered it" ws)
       nil)
-     ((null (or (agent-repl-host-conn ws) (agent-repl-link-primary)))
+     ((null (agent-repl-host-conn-or-primary ws))
       (agent-repl--warn ws "elisp.host.switch-request-unsent ws=%s trigger=%s reason=no-connection"
                         ws trigger)
       (message "[agent-repl] Cannot switch to %s: no daemon connection" ws)
@@ -698,7 +707,7 @@ there is no local state to roll back to.
 Answers nil without calling anything when WS has no ref or no connection
 yet: an unregistered workspace has no row to mark."
   (let ((ref (agent-repl-host-ref ws))
-        (conn (or (agent-repl-host-conn ws) (agent-repl-link-primary))))
+        (conn (agent-repl-host-conn-or-primary ws)))
     (cond
      ((null ref)
       (agent-repl--log ws "elisp.host.mark-viewed-skipped ws=%s reason=no-ref" ws)
