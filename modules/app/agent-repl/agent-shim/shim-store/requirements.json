@@ -1,0 +1,51 @@
+{
+  "system": "shim-store",
+  "requirements": [
+    {
+      "id": "go",
+      "kind": "program",
+      "why": "builds the Go systems (daemon, store, sidecar, shim-lock); Emacs cold start and every deploy run bin/build-frontend.sh",
+      "profile": "run",
+      "platforms": [
+        "darwin",
+        "linux"
+      ],
+      "command": "go",
+      "version": {
+        "args": [
+          "version"
+        ],
+        "min": "1.24"
+      },
+      "install": {
+        "brew": "go"
+      }
+    },
+    {
+      "id": "launchctl",
+      "kind": "program",
+      "why": "loads the store and sidecar as launchd user agents",
+      "profile": "run",
+      "platforms": [
+        "darwin"
+      ],
+      "command": "launchctl",
+      "install": {
+        "manual": "launchctl ships with macOS."
+      }
+    },
+    {
+      "id": "service-shim-store",
+      "kind": "launchd_service",
+      "why": "the event store every shim and the daemon write through, kept running by launchd",
+      "profile": "run",
+      "platforms": [
+        "darwin"
+      ],
+      "label": "com.agentrepl.shim-store",
+      "plist": "launchd/com.agentrepl.shim-store.plist",
+      "build_target": "store",
+      "binary": "shim-store"
+    }
+  ]
+}

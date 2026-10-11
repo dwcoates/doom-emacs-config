@@ -1,0 +1,39 @@
+{
+  "system": "shim",
+  "requirements": [
+    {
+      "id": "node",
+      "kind": "program",
+      "why": "builds and runs the TypeScript systems (shim, webapp) and the protobuf TypeScript codegen",
+      "profile": "run",
+      "platforms": [
+        "darwin",
+        "linux"
+      ],
+      "command": "node",
+      "version": {
+        "args": [
+          "--version"
+        ],
+        "min": "20.0"
+      },
+      "install": {
+        "brew": "node"
+      }
+    },
+    {
+      "id": "npm",
+      "kind": "program",
+      "why": "installs the TypeScript systems' dependencies from their lockfiles",
+      "profile": "run",
+      "platforms": [
+        "darwin",
+        "linux"
+      ],
+      "command": "npm",
+      "install": {
+        "brew": "node"
+      }
+    }
+  ]
+}

@@ -1,0 +1,39 @@
+{
+  "system": "e2e",
+  "requirements": [
+    {
+      "id": "go",
+      "kind": "program",
+      "why": "builds the Go systems (daemon, store, sidecar, shim-lock); Emacs cold start and every deploy run bin/build-frontend.sh",
+      "profile": "run",
+      "platforms": [
+        "darwin",
+        "linux"
+      ],
+      "command": "go",
+      "version": {
+        "args": [
+          "version"
+        ],
+        "min": "1.24"
+      },
+      "install": {
+        "brew": "go"
+      }
+    },
+    {
+      "id": "docker",
+      "kind": "program",
+      "why": "the Emacs e2e scenarios run Emacs in a Linux container under Xvfb",
+      "profile": "dev",
+      "platforms": [
+        "darwin",
+        "linux"
+      ],
+      "command": "docker",
+      "install": {
+        "brew_cask": "docker"
+      }
+    }
+  ]
+}
