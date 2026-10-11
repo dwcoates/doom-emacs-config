@@ -46,6 +46,22 @@ export const WORKSPACE = create(WorkspaceRefSchema, { id: "ws-self", dir: "/w/se
 /** A fixed "now", so every age in a fixture is exact. */
 export const NOW = 1_700_000_000_000;
 
+/**
+ * Local midnight at the start of NOW's day, and of the day after: a merge
+ * case pinned to either sits on a known side of a date line whatever zone
+ * the suite runs in.
+ */
+export function startOfToday(): number {
+  const midnight = new Date(NOW);
+  midnight.setHours(0, 0, 0, 0);
+  return midnight.getTime();
+}
+export function startOfTomorrow(): number {
+  const midnight = new Date(startOfToday());
+  midnight.setDate(midnight.getDate() + 1);
+  return midnight.getTime();
+}
+
 /** A sink that swallows: no sidebar test asserts on client-local failures. */
 export const SINK: FailureSink = { report: () => undefined, retract: () => undefined };
 
