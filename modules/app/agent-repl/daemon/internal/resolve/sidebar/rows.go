@@ -216,9 +216,11 @@ func when(rec wsm.Workspace) *frontendv1.RosterRowWhen {
 	return out
 }
 
-// detail composes the expanded panel. Each of the three lines is OMITTED when
-// there is nothing to say rather than drawn blank, which is why each is its own
-// message rather than a string on the panel.
+// detail composes the expanded panel. Each line is OMITTED when there is
+// nothing to say rather than drawn blank, which is why each is its own message
+// rather than a string on the panel. The commit count is the record's as the
+// last turn close (or, merged, the landing) left it; a workspace never counted
+// carries no count line.
 func detail(rec wsm.Workspace, summary string) *frontendv1.RosterRowDetail {
 	out := &frontendv1.RosterRowDetail{}
 	if rec.Branch != "" {
@@ -229,6 +231,9 @@ func detail(rec wsm.Workspace, summary string) *frontendv1.RosterRowDetail {
 	}
 	if summary != "" {
 		out.Summary = &frontendv1.RosterRowDetailSummary{Text: summary}
+	}
+	if rec.CommitCount != nil {
+		out.Commits = &frontendv1.RosterRowDetailCommits{Count: *rec.CommitCount}
 	}
 	return out
 }
