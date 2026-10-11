@@ -471,7 +471,8 @@ type OpenInEditorError_NotYetAdopted struct {
 }
 
 type OpenInEditorError_PathEscapesWorkspace struct {
-	// The path resolves outside the workspace's worktree.
+	// A `workspace_file` path resolves outside the workspace's worktree.
+	// Never answered for a `feed_link`, which may open any file.
 	PathEscapesWorkspace *OpenInEditorPathEscapesWorkspace `protobuf:"bytes,5,opt,name=path_escapes_workspace,json=pathEscapesWorkspace,proto3,oneof"`
 }
 
@@ -747,8 +748,9 @@ func (*OpenInEditorUnknownMergeTestLog) Descriptor() ([]byte, []int) {
 //  4. A BARE file name: <worktree root>/modules/app/agent-repl/<name>, then
 //     <git project root of the worktree>/<name>.
 //
-// A link that resolves outside the worktree is refused as for any workspace
-// file. A link that resolves to nothing is `link_unresolved`.
+// A link may resolve anywhere on the host, inside the worktree or outside it:
+// unlike a `workspace_file`, it is never refused as `path_escapes_workspace`.
+// A link that resolves to nothing is `link_unresolved`.
 type OpenInEditorFeedLink struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The link's href exactly as the bubble rendered it, optionally carrying a
