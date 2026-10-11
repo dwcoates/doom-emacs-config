@@ -94,12 +94,22 @@ it(
       await submit(app, "another one to wait");
       await awaitDrawn(app, "the held prompt", () => app.$$("[data-held-turn]").length > 0);
     }
-    const card = app.$$("[data-held-turn]")[0];
+    // THE CARD IS THE WAITING SUBMISSION'S, FOUND BY ITS TEXT. The tray can
+    // also hold the parked turn itself while its revival delivers it, and a
+    // call in flight claims that hold, so the daemon refuses to drop it.
+    const waiting = (): HTMLElement | undefined =>
+      app.$$("[data-held-turn]").find((held) => textOf(held).includes("to wait"));
+    await awaitDrawn(app, "the waiting submission's held card", () => waiting() !== undefined);
+    const card = waiting() as HTMLElement;
     const turn = card.dataset.heldTurn;
-    const action = card.querySelector<HTMLElement>("[data-held-action]");
-    expect(action, "the held card drew no action to take").not.toBeNull();
+    // THE DROP, NAMED. The card's first action is "Send now" (release), which
+    // the daemon refuses while the parked turn's delivery is in flight
+    // (holdactions.go, Release) -- so clicking the first action discarded
+    // nothing exactly when the run was slow enough to land inside that window.
+    const action = card.querySelector<HTMLElement>('[data-held-action="drop"]');
+    expect(action, "the held card drew no drop to take").not.toBeNull();
 
-    // Act — the card's own control, which calls UpdateHeldPrompt.
+    // Act — the card's own drop, which calls UpdateHeldPrompt.
     await app.clickElement(action as HTMLElement);
 
     // Assert — the daemon replaced the whole list, and this hold is not in it.
@@ -161,7 +171,11 @@ it(
 it(
   "draws the page-wide restart banner from the daemon's own drain push",
   async () => {
-    // Arrange — the banner host is empty before any schedule exists.
+    // Arrange — the workspace is idle, since a drain waits for every
+    // workspace to fall free before it announces the restart this test reads;
+    // a turn an earlier act left parked would hold the announcement forever.
+    await releaseParkedTurn();
+    // The banner host is empty before any schedule exists.
     expect(app.$('[data-component="drain-banner"] [data-restarting]')).toBeNull();
 
     // Act — schedule a drain through the app's own client.

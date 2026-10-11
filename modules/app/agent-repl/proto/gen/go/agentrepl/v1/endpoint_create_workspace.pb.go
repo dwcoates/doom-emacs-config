@@ -1481,7 +1481,7 @@ func (x *CreateWorkspaceOneShotPolicyMissing) GetMissingFiles() []string {
 
 // EVERY DYNAMICALLY CREATED WORKSPACE IS NAMED BY THE MODEL. A create that
 // supplies no name gets one from a headless call the daemon makes inside
-// Create, constrained to at most three lowercase hyphenated words. There is
+// Create, constrained to at most four lowercase hyphenated words. There is
 // no word-truncation fallback — a name nobody chose is not a name — so a
 // naming call that cannot answer REFUSES the create, and the user retries or
 // supplies a name.

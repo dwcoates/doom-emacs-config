@@ -75,7 +75,8 @@ unmerged pending this design.
 
 Every dynamically created workspace whose client supplied no name gets its
 name from a headless Haiku call the daemon makes inside `Create`, constrained
-to at most three words, lowercase, hyphenated.
+to at most four words, lowercase, hyphenated (three until the owner ruling
+of 2026-10-11).
 
 - The current word-truncation path — `workspace.Slug`
   (`daemon/internal/workspace/naming.go`) — is **DELETED**, not kept as a
@@ -252,7 +253,7 @@ Recommend one new brief, `prompts/workspace-naming.md`:
 
 - header `<!-- used by: daemon/internal/workspace (Create, the naming call); placeholders: {{prompt}} -->`
 - body states the rule the daemon then enforces: lowercase, hyphen-separated,
-  at most three words, naming the SUBJECT of the work and never its
+  at most four words, naming the SUBJECT of the work and never its
   provenance, no prefix, no trailing hash, and nothing but the name in the
   answer.
 - the provenance rules are worth carrying over verbatim from
@@ -320,10 +321,10 @@ C1 and C3 both need the probe; only the tail differs. **Open question (Q4).**
 
 ### 4.4 Validating the model's answer
 
-The three-word rule is the daemon's, enforced on the answer, not hoped for:
+The four-word rule is the daemon's, enforced on the answer, not hoped for:
 
-- trim, lowercase-compare: the answer must match `^[a-z0-9]+(-[a-z0-9]+){0,2}$`
-  — at most three hyphen-separated lowercase alphanumeric words, no leading or
+- trim, lowercase-compare: the answer must match `^[a-z0-9]+(-[a-z0-9]+){0,3}$`
+  — at most four hyphen-separated lowercase alphanumeric words, no leading or
   trailing hyphen, no slash, no path component.
 - length bounded by the existing `SlugMaxLen` (40).
 - an answer that fails is NOT trimmed, truncated, or repaired. Repairing is
@@ -404,7 +405,7 @@ enum CreateWorkspaceNamingCause {
   CREATE_WORKSPACE_NAMING_CAUSE_TIMEOUT = 2;
   // The call failed: a non-zero exit, an unreadable envelope, no binary.
   CREATE_WORKSPACE_NAMING_CAUSE_CALL_FAILED = 3;
-  // Every answer failed the three-word rule.
+  // Every answer failed the four-word rule.
   CREATE_WORKSPACE_NAMING_CAUSE_INVALID_ANSWER = 4;
 }
 ```
