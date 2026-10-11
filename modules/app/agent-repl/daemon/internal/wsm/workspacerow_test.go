@@ -3,11 +3,10 @@ package wsm
 import (
 	"context"
 	"errors"
-	"os"
-	"path/filepath"
 	"regexp"
-	"strings"
 	"testing"
+
+	"claude-repld/internal/sourcescan"
 )
 
 func TestScanWorkspaceRowReadsTheNamedColumns(t *testing.T) {
@@ -49,27 +48,19 @@ func TestScanWorkspaceRowRefusesAnUnknownWorkspace(t *testing.T) {
 // hand-rolls a by-id workspace read, whose not-found mapping would drift.
 func TestEveryByIdColumnReadGoesThroughScanWorkspaceRow(t *testing.T) {
 	// Arrange.
-	sources, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatalf("glob: %v", err)
-	}
 	handRolled := regexp.MustCompile("FROM workspaces WHERE id = \\?`, \\w+\\)\\.Scan\\(")
 	var offenders []string
 
 	// Act.
-	for _, path := range sources {
+	for _, file := range sourcescan.Production(t) {
 		// workspacerow.go IS the helper. faults.go's existence check names the
 		// FAULT's workspace in its refusal, a different answer from a
 		// workspace read's.
-		if strings.HasSuffix(path, "_test.go") || path == "workspacerow.go" || path == "faults.go" {
+		if file.Name == "workspacerow.go" || file.Name == "faults.go" {
 			continue
 		}
-		body, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatalf("read %s: %v", path, err)
-		}
-		if handRolled.Match(body) {
-			offenders = append(offenders, path)
+		if handRolled.Match(file.Source) {
+			offenders = append(offenders, file.Name)
 		}
 	}
 
