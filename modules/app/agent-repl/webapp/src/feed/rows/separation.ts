@@ -63,9 +63,10 @@ export const SEPARATION_ARMS: readonly string[] = [...Object.keys(ACCENTS), "com
  * A compaction or a clear is the session saying that what came before it is no
  * longer the conversation: after a compaction the surviving account is the
  * summary THIS row carries, and after a clear there is no surviving account at
- * all. The daemon stops delivering the rows above such a divider, and a client
- * that already has them on screen drops them, so the two agree on where the
- * feed starts without the daemon having to retire anything.
+ * all. A feed opens at such a divider, and a client that already has the rows
+ * above it on screen drops them, so the two agree on where the feed starts
+ * without the daemon having to retire anything. Only a clear also ends what
+ * paging back can reach (`separationEndsHistory`).
  *
  * `compactionFailed` cut NOTHING — that is the whole of what it says — and the
  * worktree arms change no context, so neither may hide the conversation behind
@@ -75,6 +76,15 @@ export function separationBoundsFeed(row: FeedRow): boolean {
   if (row.row.case !== "separation") return false;
   const kind = row.row.value.kind.case;
   return kind === "cleared" || kind === "compacted";
+}
+
+/**
+ * Whether this row is a CLEAR: the divider the feed's history ends at. Nothing
+ * survived a clear, so the daemon never serves a row above it and never walks
+ * back past it (owner ruling, 2026-10-10) — a feed holding one is at its start.
+ */
+export function separationEndsHistory(row: FeedRow): boolean {
+  return row.row.case === "separation" && row.row.value.kind.case === "cleared";
 }
 
 /**

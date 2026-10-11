@@ -359,12 +359,12 @@ func TestOpenPageAfterAReplayCarriesTheReplayedRows(t *testing.T) {
 	}
 }
 
-// ---- THE FEED BEGINS AT THE NEWEST SEPARATION ----
+// ---- THE FEED OPENS AT ITS NEWEST CUT; ITS HISTORY ENDS AT ITS NEWEST CLEAR ----
 //
 // A compaction or a clear is the session saying that what came before it is no
-// longer the conversation. The rows above the newest such divider are not
-// served on a first page and not reachable by walking back; the divider itself
-// is, and for a compaction it CARRIES the surviving summary.
+// longer the conversation. An opening starts at the newest such divider and
+// serves nothing above it. Above a COMPACTION the page claims more and the walk
+// pages back through what came before; above a CLEAR nothing is ever served.
 //
 // It is a DELIVERY bound: nothing is retired and no identity is reminted, so
 // the cases below assert what a READER is served, never what the feed holds.
@@ -393,71 +393,165 @@ func clearedCut() *conversationv1.ContextCut {
 	}
 }
 
-func TestTheFirstPageStartsAtTheNewestSeparation(t *testing.T) {
-	// Arrange: a conversation, a compaction, and two turns after it.
-	h := newHarness(t)
-	for i := 1; i <= 5; i++ {
-		h.deliverPrompt(fmt.Sprintf("turn-%d", i), "prompt")
+// pageEdge is a served page's edge arm.
+func pageEdge(t *testing.T, page *frontendv1.FeedPage) any {
+	t.Helper()
+	return page.GetResult().(*frontendv1.FeedPage_Success).Success.GetEdge()
+}
+
+// atStart reports whether a served page reaches the feed's start.
+func atStart(t *testing.T, page *frontendv1.FeedPage) bool {
+	t.Helper()
+	_, ok := pageEdge(t, page).(*frontendv1.FeedPageSuccess_AtStart)
+	return ok
+}
+
+// walkToStart serves READER's walk older pages until one reaches the start,
+// answering every row served, oldest first, opening page included.
+func (h *harness) walkToStart(t *testing.T, reader ReaderID, first *frontendv1.FeedPage) []string {
+	t.Helper()
+	served := rowIDs(pageRows(t, first))
+	page := first
+	for walks := 0; !atStart(t, page); walks++ {
+		if walks > 8 {
+			t.Fatalf("the walk never reached the start; served %v", served)
+		}
+		older, err := h.resolver.NextPage(context.Background(), testWorkspace, rootFeed(), reader)
+		if err != nil {
+			t.Fatalf("NextPage: %v", err)
+		}
+		served = append(rowIDs(pageRows(t, older)), served...)
+		page = older
 	}
+	return served
+}
+
+func TestAnOpeningStartsAtTheNewestCut(t *testing.T) {
+	cases := []struct {
+		name string
+		cut  *conversationv1.ContextCut
+		// directive is the turn whose prompt asks for the cut: a clear's
+		// divider is keyed on it.
+		directive string
+		divider   func(h *harness) string
+		// more is whether the opening claims older rows.
+		more bool
+	}{
+		{
+			name: "compacted", cut: compactedCut("what survived"),
+			divider: func(h *harness) string { return h.separationRowID("entry-cut") },
+			more:    true,
+		},
+		{
+			name: "cleared", cut: clearedCut(), directive: "/clear",
+			divider: func(h *harness) string { return h.clearDividerRowID("turn-6") },
+			more:    false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: a conversation, a cut, and a turn after it.
+			h := newHarness(t)
+			for i := 1; i <= 5; i++ {
+				h.deliverPrompt(fmt.Sprintf("turn-%d", i), "prompt")
+			}
+			if tc.directive != "" {
+				h.deliverPrompt("turn-6", tc.directive)
+			}
+			h.cutAt("entry-cut", tc.cut)
+			h.deliverPrompt("turn-7", "prompt")
+
+			// Act.
+			page, _ := h.openPage(rootFeed(), "reader-1")
+
+			// Assert: the divider first, then the turn after it.
+			got := rowIDs(pageRows(t, page))
+			want := []string{tc.divider(h), h.promptRowID("turn-7")}
+			if !equalIDs(got, want) {
+				t.Fatalf("page rows = %v, want %v", got, want)
+			}
+			if atStart(t, page) == tc.more {
+				t.Fatalf("edge = %T, want more = %v", pageEdge(t, page), tc.more)
+			}
+		})
+	}
+}
+
+func TestAnOpeningAtACompactionIsRecorded(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "prompt")
 	h.cutAt("entry-cut", compactedCut("what survived"))
-	h.deliverPrompt("turn-6", "prompt")
-	h.deliverPrompt("turn-7", "prompt")
 
 	// Act.
-	page, _ := h.openPage(rootFeed(), "reader-1")
-
-	// Assert: the divider first, then the turns after it, and at_start.
-	got := rowIDs(pageRows(t, page))
-	want := []string{h.separationRowID("entry-cut"), h.promptRowID("turn-6"), h.promptRowID("turn-7")}
-	if len(got) != len(want) {
-		t.Fatalf("page rows = %v, want %v", got, want)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("page rows = %v, want %v", got, want)
-		}
-	}
-	success := page.GetResult().(*frontendv1.FeedPage_Success).Success
-	if _, ok := success.GetEdge().(*frontendv1.FeedPageSuccess_AtStart); !ok {
-		t.Fatalf("edge = %T, want at_start: the feed begins at the divider", success.GetEdge())
-	}
-}
-
-func TestLoadOlderAtTheSeparationAnswersNothingOlder(t *testing.T) {
-	// Arrange: five rows above the cut, four below it, so the newest page is
-	// short of the bound and one walk reaches it.
-	h := newHarness(t)
-	for i := 1; i <= 5; i++ {
-		h.deliverPrompt(fmt.Sprintf("turn-%d", i), "prompt")
-	}
-	h.cutAt("entry-cut", compactedCut("what survived"))
-	for i := 6; i <= 9; i++ {
-		h.deliverPrompt(fmt.Sprintf("turn-%d", i), "prompt")
-	}
 	h.openPage(rootFeed(), "reader-1")
 
-	// Act: the walk back, then one more ask at the bound.
-	if _, err := h.resolver.NextPage(context.Background(), testWorkspace, rootFeed(), "reader-1"); err != nil {
-		t.Fatalf("NextPage: %v", err)
-	}
-	page, err := h.resolver.NextPage(context.Background(), testWorkspace, rootFeed(), "reader-1")
-	if err != nil {
-		t.Fatalf("NextPage: %v", err)
-	}
-
-	// Assert: at_start, and nothing from above the cut was ever served.
-	success := page.GetResult().(*frontendv1.FeedPage_Success).Success
-	if _, ok := success.GetEdge().(*frontendv1.FeedPageSuccess_AtStart); !ok {
-		t.Fatalf("edge = %T, want at_start", success.GetEdge())
-	}
-	for _, id := range rowIDs(success.GetRows()) {
-		if id == h.promptRowID("turn-5") {
-			t.Fatalf("a row from above the cut was served: %q", id)
-		}
+	// Assert.
+	if !h.hasRecordWith("debug", "daemon.feed.open_at_cut", "row", h.separationRowID("entry-cut")) {
+		t.Fatal("serving an opening from the cut was not recorded")
 	}
 }
 
-func TestTwoCompactionsDeliverOnlyTheNewestDividerAndItsSummary(t *testing.T) {
+func TestPagingBackFromAnOpeningStopsOnlyAtAClear(t *testing.T) {
+	cases := []struct {
+		name string
+		cut  *conversationv1.ContextCut
+		// directive is the turn whose prompt asks for the cut.
+		directive string
+		divider   func(h *harness) string
+		// above is whether the walk reaches the turns above the cut.
+		above bool
+	}{
+		{
+			name: "compacted", cut: compactedCut("what survived"),
+			divider: func(h *harness) string { return h.separationRowID("entry-cut") },
+			above:   true,
+		},
+		{
+			name: "cleared", cut: clearedCut(), directive: "/clear",
+			divider: func(h *harness) string { return h.clearDividerRowID("turn-6") },
+			above:   false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: five turns above the cut and four below it.
+			h := newHarness(t)
+			for i := 1; i <= 5; i++ {
+				h.deliverPrompt(fmt.Sprintf("turn-%d", i), "prompt")
+			}
+			if tc.directive != "" {
+				h.deliverPrompt("turn-6", tc.directive)
+			}
+			h.cutAt("entry-cut", tc.cut)
+			for i := 7; i <= 10; i++ {
+				h.deliverPrompt(fmt.Sprintf("turn-%d", i), "prompt")
+			}
+			first, _ := h.openPage(rootFeed(), "reader-1")
+
+			// Act.
+			served := h.walkToStart(t, "reader-1", first)
+
+			// Assert: the turns above the cut only when the cut was no clear,
+			// then the divider and every turn after it.
+			var want []string
+			if tc.above {
+				for i := 1; i <= 5; i++ {
+					want = append(want, h.promptRowID(fmt.Sprintf("turn-%d", i)))
+				}
+			}
+			want = append(want, tc.divider(h))
+			for i := 7; i <= 10; i++ {
+				want = append(want, h.promptRowID(fmt.Sprintf("turn-%d", i)))
+			}
+			if !equalIDs(served, want) {
+				t.Fatalf("walked rows = %v, want %v", served, want)
+			}
+		})
+	}
+}
+
+func TestTwoCompactionsOpenAtTheNewestDividerAndItsSummary(t *testing.T) {
 	// Arrange: a compaction, a turn, and a second compaction over it.
 	h := newHarness(t)
 	h.deliverPrompt("turn-1", "prompt")
@@ -477,6 +571,28 @@ func TestTwoCompactionsDeliverOnlyTheNewestDividerAndItsSummary(t *testing.T) {
 	summary := rows[0].GetSeparation().GetCompacted().GetSummary().GetMarkdown()
 	if summary != "the second account" {
 		t.Fatalf("summary = %q, want the newest compaction's", summary)
+	}
+}
+
+func TestPagingBackAcrossTwoCompactionsReachesTheOlderDivider(t *testing.T) {
+	// Arrange: a compaction, a turn, and a second compaction over it.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "prompt")
+	h.cutAt("entry-first", compactedCut("the first account"))
+	h.deliverPrompt("turn-2", "prompt")
+	h.cutAt("entry-second", compactedCut("the second account"))
+	first, _ := h.openPage(rootFeed(), "reader-1")
+
+	// Act.
+	served := h.walkToStart(t, "reader-1", first)
+
+	// Assert: the whole conversation, the older divider included.
+	want := []string{
+		h.promptRowID("turn-1"), h.separationRowID("entry-first"),
+		h.promptRowID("turn-2"), h.separationRowID("entry-second"),
+	}
+	if !equalIDs(served, want) {
+		t.Fatalf("walked rows = %v, want %v", served, want)
 	}
 }
 
@@ -508,16 +624,16 @@ func TestAClearDeliversTheDividerAndTheTurnsAfterIt(t *testing.T) {
 	}
 }
 
-func TestASeparationAfterThePageWasServedMovesTheBoundForTheWalk(t *testing.T) {
-	// Arrange: a reader standing on a page served BEFORE the cut.
+func TestAClearAfterThePageWasServedMovesTheBoundForTheWalk(t *testing.T) {
+	// Arrange: a reader standing on a page served BEFORE the clear.
 	h := newHarness(t)
 	for i := 1; i <= 5; i++ {
 		h.deliverPrompt(fmt.Sprintf("turn-%d", i), "prompt")
 	}
 	h.openPage(rootFeed(), "reader-1")
 
-	// Act: the cut lands, then the reader walks back.
-	h.cutAt("entry-cut", compactedCut("what survived"))
+	// Act: the clear lands, then the reader walks back.
+	h.cutAt("entry-cut", clearedCut())
 	page, err := h.resolver.NextPage(context.Background(), testWorkspace, rootFeed(), "reader-1")
 	if err != nil {
 		t.Fatalf("NextPage: %v", err)
@@ -529,23 +645,56 @@ func TestASeparationAfterThePageWasServedMovesTheBoundForTheWalk(t *testing.T) {
 	if len(got) != 1 || got[0] != h.separationRowID("entry-cut") {
 		t.Fatalf("page rows = %v, want only the divider", got)
 	}
-	success := page.GetResult().(*frontendv1.FeedPage_Success).Success
-	if _, ok := success.GetEdge().(*frontendv1.FeedPageSuccess_AtStart); !ok {
-		t.Fatalf("edge = %T, want at_start", success.GetEdge())
+	if !atStart(t, page) {
+		t.Fatalf("edge = %T, want at_start", pageEdge(t, page))
 	}
 }
 
-func TestTheDeliveryBoundMoveIsRecordedAtInfo(t *testing.T) {
+func TestACutsMoveIsRecordedAtInfo(t *testing.T) {
+	cases := []struct {
+		name      string
+		cut       *conversationv1.ContextCut
+		operation string
+		absent    string
+	}{
+		{name: "cleared", cut: clearedCut(), operation: "daemon.feed.delivery_bound_moved", absent: "daemon.feed.opening_moved"},
+		{name: "compacted", cut: compactedCut("what survived"), operation: "daemon.feed.opening_moved", absent: "daemon.feed.delivery_bound_moved"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.deliverPrompt("turn-1", "prompt")
+
+			// Act.
+			h.cutAt("entry-cut", tc.cut)
+
+			// Assert: the move, with how much of the feed sits above it.
+			if !h.hasRecordWith("info", tc.operation, "above", 1) {
+				t.Fatalf("the cut's move was not recorded at INFO as %s", tc.operation)
+			}
+			if h.hasRecord("info", tc.absent) {
+				t.Fatalf("the cut was also recorded as %s", tc.absent)
+			}
+		})
+	}
+}
+
+func TestACompactionThatFailedMovesNothing(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	h.deliverPrompt("turn-1", "prompt")
 
 	// Act.
-	h.cutAt("entry-cut", compactedCut("what survived"))
+	h.cutAt("entry-failed", &conversationv1.ContextCut{
+		Cut: &conversationv1.ContextCut_CompactionFailed{
+			CompactionFailed: &conversationv1.ContextCompactionFailed{Error: "the summarizer refused"},
+		},
+	})
 
 	// Assert.
-	if !h.hasRecord("info", "daemon.feed.delivery_bound_moved") {
-		t.Fatal("the bound moving was not recorded at INFO")
+	if h.hasRecord("info", "daemon.feed.opening_moved") || h.hasRecord("info", "daemon.feed.delivery_bound_moved") {
+		t.Fatal("a compaction that cut nothing was recorded as moving the feed")
 	}
 }
 
