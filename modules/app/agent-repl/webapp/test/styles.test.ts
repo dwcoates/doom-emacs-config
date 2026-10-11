@@ -2225,6 +2225,33 @@ describe("the reviving shimmer's stylesheet contract", () => {
   });
 });
 
+/** Every rule whose selector list names the working (waving) prompt bubble. */
+function workingPromptRules(): CssRule[] {
+  return rulesOf(stylesheet).filter((rule) => rule.selectors.includes('.bubble[data-role="prompt"][data-wave="working"]'));
+}
+
+describe("workingPromptRules", () => {
+  it("finds the rule carrying the wave's gradient and its animation", () => {
+    // Arrange / Act
+    const declarations = workingPromptRules().map((rule) => rule.declarations).join("\n");
+
+    // Assert
+    expect(declarations).toMatch(/background-image:\s*linear-gradient/);
+    expect(declarations).toMatch(/animation:\s*bubble-wave/);
+  });
+
+  it("is the one lookup of the working prompt's rules in this file", () => {
+    // Arrange
+    const source = readFileSync(fileURLToPath(import.meta.url), "utf8");
+
+    // Act
+    const handRolled = source.split(`rule.selectors.includes('${'.bubble[data-role="prompt"][data-wave="working"]'}'`).length - 1;
+
+    // Assert — the helper's own body is the single site.
+    expect(handRolled).toBe(1);
+  });
+});
+
 /**
  * THE PROMPT GLIMMER'S INTENSITY (owner ruling, 2026-09-21: "make the
  * glimmering in the webapp response bubbles 50% more intense").
@@ -2270,9 +2297,7 @@ describe("the prompt glimmer's intensity", () => {
 
   it("carries the intensity in the token alone, so the gradient rule is untouched by it", () => {
     // Arrange / Act — the band's own rule names the token and no literal wash.
-    const waving = rulesOf(stylesheet).filter((rule) =>
-      rule.selectors.includes('.bubble[data-role="prompt"][data-wave="working"]'),
-    );
+    const waving = workingPromptRules();
     const gradient = waving.find((rule) => /background-image/.test(rule.declarations))?.declarations ?? "";
 
     // Assert
@@ -2282,9 +2307,7 @@ describe("the prompt glimmer's intensity", () => {
 
   it("holds the 3.2s period the effect had before the intensity ruling", () => {
     // Arrange / Act — intensity is the wash alone; the pass must not speed up.
-    const waving = rulesOf(stylesheet).filter((rule) =>
-      rule.selectors.includes('.bubble[data-role="prompt"][data-wave="working"]'),
-    );
+    const waving = workingPromptRules();
 
     // Assert
     expect(
@@ -2308,8 +2331,7 @@ describe("the prompt glimmer's intensity", () => {
 describe("the prompt glimmer's band geometry", () => {
   /** The working prompt's gradient stops, as percentages of the image. */
   function bandStops(): { start: number; peak: number; end: number } {
-    const gradient = rulesOf(stylesheet)
-      .filter((rule) => rule.selectors.includes('.bubble[data-role="prompt"][data-wave="working"]'))
+    const gradient = workingPromptRules()
       .map((rule) => /background-image:\s*linear-gradient\(90deg,\s*transparent ([\d.]+)%,\s*var\(--bubble-wave\) ([\d.]+)%,\s*transparent ([\d.]+)%\)/.exec(rule.declarations))
       .find((match) => match !== null);
     if (gradient === undefined || gradient === null) throw new Error("no working-prompt band gradient found");
