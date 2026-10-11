@@ -444,3 +444,20 @@ func TestTheTabBarDrawsAMergedWorkspaceEvenWhenHidden(t *testing.T) {
 		t.Fatalf("tab bar = %v, want the merged tab drawn", got)
 	}
 }
+
+func TestTheTabBarWithholdsAMergedWorkspaceOfACollapsedRepository(t *testing.T) {
+	// Arrange: its merged group follows the repository's fold, so its tab does.
+	r, _ := newResolver(t)
+	merged := placed(workspace("w-m", "merged"), 1)
+	merged.MergedAt = at(0)
+	reg := registry(merged)
+	reg.Repositories[0].Folded = true
+
+	// Act.
+	r.SetRegistry(reg)
+
+	// Assert.
+	if got := tabIDsOf(latest(t, r)); !equal(got, []string{"w-m:collapsed"}) {
+		t.Fatalf("tab bar = %v, want the merged tab withheld", got)
+	}
+}

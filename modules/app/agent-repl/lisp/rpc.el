@@ -93,8 +93,8 @@
 (declare-function agent-repl-wire-encode-set-workspace-hidden-request "wire-verbs" (request))
 (declare-function agent-repl-wire-decode-set-workspace-hidden-response "wire-verbs" (json))
 (declare-function agent-repl-wire-decode-set-workspace-priority-response "wire-verbs" (alist))
-(declare-function agent-repl-wire-encode-swap-workspace-places-request "wire-verbs" (request))
-(declare-function agent-repl-wire-decode-swap-workspace-places-response "wire-verbs" (alist))
+(declare-function agent-repl-wire-encode-move-workspace-request "wire-verbs" (request))
+(declare-function agent-repl-wire-decode-move-workspace-response "wire-verbs" (alist))
 (declare-function agent-repl-wire-encode-submit-prompt-request "wire-verbs" (request))
 (declare-function agent-repl-wire-decode-submit-prompt-response "wire-verbs" (alist))
 (declare-function agent-repl-wire-encode-select-feed-row-request "wire-verbs" (request))
@@ -387,11 +387,11 @@ Clearing is the ABSENCE of the priority field, never a sentinel value.")
 A hidden workspace keeps its session and its tab; the roster push that
 follows takes its tab off the bar's drawing, numbering and navigation.")
 
-(agent-repl-rpc--defverb agent-repl-rpc-swap-workspace-places
-  "SwapWorkspacePlaces"
-  agent-repl-wire-encode-swap-workspace-places-request
-  agent-repl-wire-decode-swap-workspace-places-response
-  "Exchange two sibling workspaces' roster places.")
+(agent-repl-rpc--defverb agent-repl-rpc-move-workspace
+  "MoveWorkspace"
+  agent-repl-wire-encode-move-workspace-request
+  agent-repl-wire-decode-move-workspace-response
+  "Move one workspace onto another's place in the registry order.")
 
 (agent-repl-rpc--defverb agent-repl-rpc-submit-prompt
   "SubmitPrompt"

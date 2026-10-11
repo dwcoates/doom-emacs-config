@@ -220,8 +220,8 @@ answers a bare success, which is what almost every verb's success is."
                  (agent-repl-test-verbs--stub :set-priority))
                 ((symbol-function 'agent-repl-rpc-set-workspace-hidden)
                  (agent-repl-test-verbs--stub :set-hidden))
-                ((symbol-function 'agent-repl-rpc-swap-workspace-places)
-                 (agent-repl-test-verbs--stub :swap-places))
+                ((symbol-function 'agent-repl-rpc-move-workspace)
+                 (agent-repl-test-verbs--stub :move))
                 ((symbol-function 'agent-repl-rpc-update-shutdown-schedule)
                  (agent-repl-test-verbs--stub :shutdown-schedule))
                 ((symbol-function 'agent-repl-rpc-update-merge-queue)
@@ -830,7 +830,7 @@ A reader that hand-rolls the defaulting reads the view a second time and fails h
         (should-not agent-repl-test-verbs--sent)
         (should-not agent-repl-test-verbs--switch-requests)))))
 
-;;;; ---- SwapWorkspacePlaces ----
+;;;; ---- MoveWorkspace ----
 
 (defmacro agent-repl-test-verbs--with-two-refs (&rest body)
   "Run BODY with `ws-one' and `ws-two' resolving to two distinct refs."
@@ -839,52 +839,36 @@ A reader that hand-rolls the defaulting reads the view a second time and fails h
               (lambda (ws) (agent-repl-test-verbs--ref (concat "id-" ws) (concat "/w/" ws)))))
      ,@body))
 
-(ert-deftest agent-repl-verbs-swap-places-carries-both-refs ()
-  "SwapWorkspacePlaces names the current workspace and the other by ref."
+(ert-deftest agent-repl-verbs-move-carries-both-refs ()
+  "MoveWorkspace names the workspace to move and the target by ref."
   (agent-repl-test-verbs--with nil
     (agent-repl-test-verbs--with-two-refs
       ;; Act.
-      (agent-repl-verb-swap-places "ws-one" "ws-two")
+      (agent-repl-verb-move "ws-one" "ws-two")
       ;; Assert.
-      (let ((request (agent-repl-test-verbs--request :swap-places)))
+      (let ((request (agent-repl-test-verbs--request :move)))
         (should (equal (plist-get request :workspace) (agent-repl-test-verbs--ref "id-ws-one" "/w/ws-one")))
-        (should (equal (plist-get request :other) (agent-repl-test-verbs--ref "id-ws-two" "/w/ws-two")))))))
+        (should (equal (plist-get request :target) (agent-repl-test-verbs--ref "id-ws-two" "/w/ws-two")))))))
 
-(ert-deftest agent-repl-verbs-swap-places-success-says-so ()
-  "A swap the daemon made is reported to the user."
+(ert-deftest agent-repl-verbs-move-success-says-so ()
+  "A move the daemon made is reported to the user."
   (agent-repl-test-verbs--with nil
     (agent-repl-test-verbs--with-two-refs
       ;; Act.
-      (agent-repl-verb-swap-places "ws-one" "ws-two")
+      (agent-repl-verb-move "ws-one" "ws-two")
       ;; Assert.
-      (should (agent-repl-test-verbs--messaged-p "ws-one and ws-two swapped places")))))
+      (should (agent-repl-test-verbs--messaged-p "moved ws-one to ws-two's place")))))
 
-(ert-deftest agent-repl-verbs-swap-places-not-siblings-is-an-ordinary-answer ()
-  "A not_siblings refusal is said plainly and recorded at INFO, never as a
-generic refusal."
+(ert-deftest agent-repl-verbs-move-refusals-take-the-generic-path ()
+  "A refused move is reported by the generic refusal path."
   (agent-repl-test-verbs--with
-      '((:swap-places . (:response (:arm :error :value (:cause (:arm :not-siblings :value nil))))))
-    (agent-repl-test-verbs--with-two-refs
-      (let (logged)
-        (cl-letf (((symbol-function 'agent-repl--info)
-                   (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
-          ;; Act.
-          (agent-repl-verb-swap-places "ws-one" "ws-two"))
-        ;; Assert.
-        (should (agent-repl-test-verbs--messaged-p "have different parents"))
-        (should-not (agent-repl-test-verbs--messaged-p "swap-places refused"))
-        (should (cl-some (lambda (m) (string-prefix-p "elisp.verbs.swap-places-not-siblings" m)) logged))))))
-
-(ert-deftest agent-repl-verbs-swap-places-other-refusals-take-the-generic-path ()
-  "Every refusal but not_siblings is reported by the generic refusal path."
-  (agent-repl-test-verbs--with
-      '((:swap-places . (:response (:arm :error :value (:cause (:arm :unknown-workspace
-                                                                    :value (:workspace (:id "id-ws-two" :dir "/w/ws-two"))))))))
+      '((:move . (:response (:arm :error :value (:cause (:arm :unknown-workspace
+                                                              :value (:workspace (:id "id-ws-two" :dir "/w/ws-two"))))))))
     (agent-repl-test-verbs--with-two-refs
       ;; Act.
-      (agent-repl-verb-swap-places "ws-one" "ws-two")
+      (agent-repl-verb-move "ws-one" "ws-two")
       ;; Assert.
-      (should (agent-repl-test-verbs--messaged-p "swap-places refused: unknown-workspace")))))
+      (should (agent-repl-test-verbs--messaged-p "move refused: unknown-workspace")))))
 
 ;;;; ---- Ack handling: one test per outcome ----
 
@@ -1632,16 +1616,17 @@ branch -- so a `read-string' here would be a question the ruling removed."
         (should-not (plist-get standard :name))
         (should-not (plist-get standard :base-ref))))))
 
-(ert-deftest agent-repl-verbs-child-create-command-sends-the-parent ()
-  "`agent-repl-create-child-workspace\=' makes the new workspace a CHILD."
+(ert-deftest agent-repl-verbs-fork-into-primary-sends-a-fork-source-and-no-parent ()
+  "`SPC TAB f\=' forks the conversation into a TOP-LEVEL workspace: the
+current workspace rides as the fork source, and no parent is sent."
   (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
     (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
                (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
-              ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p) "do a thing"))
-              ((symbol-function 'read-string) (lambda (&rest _) "")))
-      (agent-repl-create-child-workspace)
-      (should (equal (plist-get (agent-repl-test-verbs--request :create) :parent)
-                     (list :workspace (agent-repl-test-verbs--ref)))))))
+              ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p) "fork it")))
+      (agent-repl-fork-workspace-into-primary)
+      (let ((request (agent-repl-test-verbs--request :create)))
+        (should (equal (plist-get request :fork-source) (agent-repl-test-verbs--ref)))
+        (should-not (plist-get request :parent))))))
 
 (ert-deftest agent-repl-verbs-create-command-sends-no-parent ()
   "`SPC TAB n\=' is never a child: it sends no parent at all."
@@ -1785,23 +1770,24 @@ branch -- so a `read-string' here would be a question the ruling removed."
       (should-error (agent-repl-create-workspace-static) :type 'user-error)
       (should-not agent-repl-test-verbs--sent))))
 
-(ert-deftest agent-repl-verbs-child-static-create-sends-the-parent-and-the-name ()
-  "`agent-repl-create-child-workspace-static\=' names a child, and asks no prompt."
+(ert-deftest agent-repl-verbs-named-fork-into-primary-sends-the-name-and-no-prompt ()
+  "`SPC TAB F\=' names the fork into the primary branch and asks no prompt."
   ;; Arrange.
   (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
-    (cl-letf (((symbol-function 'agent-repl-verbs--read-repository)
-               (lambda () (agent-repl-test-verbs--repo-ref)))
+    (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
+               (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
               ((symbol-function 'agent-repl-verbs--read-prompt)
-               (lambda (_p) (error "a static create asks for no prompt")))
+               (lambda (_p) (error "a named fork asks for no prompt")))
               ((symbol-function 'read-string) (lambda (&rest _) "named-one")))
       ;; Act.
-      (agent-repl-create-child-workspace-static)
+      (agent-repl-fork-workspace-into-primary-static)
       ;; Assert.
       (let ((request (agent-repl-test-verbs--request :create)))
-        (should (equal (plist-get request :parent)
-                       (list :workspace (agent-repl-test-verbs--ref))))
+        (should (equal (plist-get request :fork-source) (agent-repl-test-verbs--ref)))
+        (should-not (plist-get request :parent))
         (should (equal (plist-get (plist-get (plist-get request :form) :value) :name)
-                       "named-one"))))))
+                       "named-one"))
+        (should-not (plist-get (plist-get (plist-get request :form) :value) :initial-prompt))))))
 
 (ert-deftest agent-repl-verbs-static-create-sends-no-parent ()
   "`SPC TAB N\=' is never a child: it sends no parent at all."
@@ -1896,11 +1882,11 @@ branch -- so a `read-string' here would be a question the ruling removed."
 
 (defconst agent-repl-test-verbs--creation-commands
   '(agent-repl-create-workspace
-    agent-repl-create-child-workspace
     agent-repl-create-workspace-static
-    agent-repl-create-child-workspace-static
     agent-repl-fork-workspace
     agent-repl-fork-workspace-static
+    agent-repl-fork-workspace-into-primary
+    agent-repl-fork-workspace-into-primary-static
     agent-repl-create-oneshot)
   "Every interactive creation command.")
 
@@ -1940,11 +1926,11 @@ A fork that left no trace was indistinguishable from one never run."
   "A quit out of a creation question is recorded, then propagates as a quit."
   ;; Arrange: each command, and the question it is quit out of.
   (dolist (case '((agent-repl-create-workspace prompt)
-                  (agent-repl-create-child-workspace prompt)
                   (agent-repl-create-workspace-static name)
-                  (agent-repl-create-child-workspace-static name)
                   (agent-repl-fork-workspace prompt)
                   (agent-repl-fork-workspace-static name)
+                  (agent-repl-fork-workspace-into-primary prompt)
+                  (agent-repl-fork-workspace-into-primary-static name)
                   (agent-repl-create-oneshot prompt)))
     (pcase-let ((`(,command ,read) case))
       (ert-info ((symbol-name command))

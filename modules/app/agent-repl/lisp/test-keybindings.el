@@ -57,8 +57,8 @@
                  agent-repl-restart-workspace
                  agent-repl-create-workspace
                  agent-repl-create-workspace-static
-                 agent-repl-create-child-workspace
-                 agent-repl-create-child-workspace-static
+                 agent-repl-fork-workspace-into-primary
+                 agent-repl-fork-workspace-into-primary-static
                  agent-repl-fork-workspace
                  agent-repl-fork-workspace-static
                  agent-repl-register-repository
@@ -272,23 +272,33 @@ walked for KEY followed by its #\\='COMMAND."
         (end-of-file nil)))
     found))
 
-(ert-deftest agent-repl-test-keybindings-spc-tab-f-upper-is-the-named-fork ()
-  "`SPC TAB F\=' runs the named fork, beside `SPC TAB f\=' for the dynamic one."
-  (should (eq (agent-repl-test-keybindings--leader-prefix-binding "TAB" "F")
-              'agent-repl-fork-workspace-static)))
-
-(ert-deftest agent-repl-test-keybindings-spc-tab-f-is-the-dynamic-fork ()
-  "`SPC TAB f\=' still runs the dynamic fork: the named one is its OWN key."
+(ert-deftest agent-repl-test-keybindings-spc-tab-f-forks-into-the-primary-branch ()
+  "`SPC TAB f\=' forks the conversation into a top-level workspace."
   (should (eq (agent-repl-test-keybindings--leader-prefix-binding "TAB" "f")
+              'agent-repl-fork-workspace-into-primary)))
+
+(ert-deftest agent-repl-test-keybindings-spc-tab-f-upper-is-the-named-fork-into-the-primary-branch ()
+  "`SPC TAB F\=' is `SPC TAB f\=' asking for a name instead of a prompt."
+  (should (eq (agent-repl-test-keybindings--leader-prefix-binding "TAB" "F")
+              'agent-repl-fork-workspace-into-primary-static)))
+
+(ert-deftest agent-repl-test-keybindings-spc-tab-c-is-the-child-fork ()
+  "`SPC TAB c\=' is the child fork, which merges back into the current workspace."
+  (should (eq (agent-repl-test-keybindings--leader-prefix-binding "TAB" "c")
               'agent-repl-fork-workspace)))
+
+(ert-deftest agent-repl-test-keybindings-spc-tab-c-upper-is-the-named-child-fork ()
+  "`SPC TAB C\=' is the child fork asking for a name instead of a prompt."
+  (should (eq (agent-repl-test-keybindings--leader-prefix-binding "TAB" "C")
+              'agent-repl-fork-workspace-static)))
 
 (ert-deftest agent-repl-test-keybindings-spc-tab-h-hides-the-workspace ()
   "`SPC TAB h\=' hides the current workspace: off the tab bar, into the sidebar's hidden section."
   (should (eq (agent-repl-test-keybindings--leader-prefix-binding "TAB" "h")
               'agent-repl-hide-workspace)))
 
-(ert-deftest agent-repl-test-keybindings-spc-tab-p-is-the-place-swap ()
-  "`SPC TAB p\=' swaps the current workspace's place with a drawn tab."
+(ert-deftest agent-repl-test-keybindings-spc-tab-p-is-the-move ()
+  "`SPC TAB p\=' moves the current workspace onto a drawn tab's place."
   (should (eq (agent-repl-test-keybindings--leader-prefix-binding "TAB" "p")
               'agent-repl-workspace-place)))
 

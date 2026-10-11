@@ -643,7 +643,7 @@ WatchWorkspaceRoster push and every tab falls back to a stale blue status."
           "\"task\":{\"sections\":[]},\"maturity\":{\"sections\":[]},"
           "\"hidden\":{\"header\":{\"label\":{\"text\":\"Hidden Workspaces\"},\"count\":{\"workspaces\":0}},"
           "\"rows\":{\"rows\":[]},\"expanded\":{}},"
-          "\"recentlyMerged\":{\"header\":{\"label\":{\"text\":\"Recently Merged\"},\"count\":{\"workspaces\":2}},"
+          "\"tabBar\":{},\"recentlyMerged\":{\"header\":{\"label\":{\"text\":\"Recently Merged\"},\"count\":{\"workspaces\":2}},"
           "\"groups\":[],\"collapsed\":{}},"
           "\"current\":{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/1\"}},"
           "\"shownRepository\":{}}")
@@ -666,8 +666,34 @@ WatchWorkspaceRoster push and every tab falls back to a stale blue status."
                    :recently-merged (:header (:label (:text "Recently Merged") :count (:workspaces 2))
                                      :groups nil
                                      :fold (:arm :collapsed :value nil))
+                   :tab-bar (:tabs nil)
                    :current (:workspace (:id "ws-1" :dir "/w/1"))
                    :shown (:arm :shown-repository :value nil)))))
+
+(ert-deftest agent-repl-test-wire-roster-decodes-the-tab-bar ()
+  "The tab bar is the registry's order, each tab its ref and visibility arm."
+  (should (equal (agent-repl-test-wire-roster--decode
+                  #'agent-repl-wire-decode-roster-tab-bar
+                  (concat "{\"tabs\":["
+                          "{\"workspace\":{\"id\":\"b\",\"dir\":\"/w/b\"},\"drawn\":{}},"
+                          "{\"workspace\":{\"id\":\"c\",\"dir\":\"/w/c\"},\"withheldCollapsed\":{}},"
+                          "{\"workspace\":{\"id\":\"a\",\"dir\":\"/w/a\"},\"withheldHidden\":{}}]}"))
+                 '(:tabs ((:workspace (:id "b" :dir "/w/b") :visibility (:arm :drawn :value nil))
+                          (:workspace (:id "c" :dir "/w/c") :visibility (:arm :withheld-collapsed :value nil))
+                          (:workspace (:id "a" :dir "/w/a") :visibility (:arm :withheld-hidden :value nil)))))))
+
+(ert-deftest agent-repl-test-wire-roster-a-tab-without-visibility-is-a-breach ()
+  "A tab must say whether it is drawn; an unset visibility is a breach."
+  (should (agent-repl-test-wire-roster--breach
+           #'agent-repl-wire-decode-roster-tab
+           "{\"workspace\":{\"id\":\"a\",\"dir\":\"/w/a\"}}")))
+
+(ert-deftest agent-repl-test-wire-roster-without-the-tab-bar-is-a-breach ()
+  "The tab bar is always set; a roster without one is a breach."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-workspace-roster
+                  (replace-regexp-in-string "\"tabBar\":{}," "" agent-repl-test-wire-roster--roster-json t t))
+                 '("WorkspaceRoster" tabBar "required message field is absent"))))
 
 (ert-deftest agent-repl-test-wire-roster-absent-current-is-nil ()
   "UNSET current means there is no selected workspace."
@@ -676,7 +702,7 @@ WatchWorkspaceRoster push and every tab falls back to a stale blue status."
                              (concat "{\"repository\":{\"sections\":[]},"
                                      "\"task\":{\"sections\":[]},\"maturity\":{\"sections\":[]},"
                                      "\"hidden\":{\"header\":{\"label\":{},\"count\":{}},\"rows\":{},\"expanded\":{}},"
-                                     "\"recentlyMerged\":{\"header\":{\"label\":{},\"count\":{}},"
+                                     "\"tabBar\":{},\"recentlyMerged\":{\"header\":{\"label\":{},\"count\":{}},"
                                      "\"groups\":[],\"collapsed\":{}},\"shownRepository\":{}}"))
                             :current)
                  nil)))
@@ -687,7 +713,7 @@ WatchWorkspaceRoster push and every tab falls back to a stale blue status."
                   #'agent-repl-wire-decode-workspace-roster
                   (concat "{\"task\":{\"sections\":[]},\"maturity\":{\"sections\":[]},"
                           "\"hidden\":{\"header\":{\"label\":{},\"count\":{}},\"rows\":{},\"expanded\":{}},"
-                          "\"recentlyMerged\":{\"header\":{\"label\":{},\"count\":{}},\"groups\":[]}}"))
+                          "\"tabBar\":{},\"recentlyMerged\":{\"header\":{\"label\":{},\"count\":{}},\"groups\":[]}}"))
                  '("WorkspaceRoster" repository "required message field is absent"))))
 
 (ert-deftest agent-repl-test-wire-roster-without-the-task-view-is-a-breach ()
@@ -695,7 +721,7 @@ WatchWorkspaceRoster push and every tab falls back to a stale blue status."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-workspace-roster
                   (concat "{\"repository\":{\"sections\":[]},"
-                          "\"recentlyMerged\":{\"header\":{\"label\":{},\"count\":{}},\"groups\":[]}}"))
+                          "\"tabBar\":{},\"recentlyMerged\":{\"header\":{\"label\":{},\"count\":{}},\"groups\":[]}}"))
                  '("WorkspaceRoster" task "required message field is absent"))))
 
 (ert-deftest agent-repl-test-wire-roster-without-the-maturity-view-is-a-breach ()
@@ -703,7 +729,7 @@ WatchWorkspaceRoster push and every tab falls back to a stale blue status."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-workspace-roster
                   (concat "{\"repository\":{\"sections\":[]},\"task\":{\"sections\":[]},"
-                          "\"recentlyMerged\":{\"header\":{\"label\":{},\"count\":{}},\"groups\":[]}}"))
+                          "\"tabBar\":{},\"recentlyMerged\":{\"header\":{\"label\":{},\"count\":{}},\"groups\":[]}}"))
                  '("WorkspaceRoster" maturity "required message field is absent"))))
 
 (ert-deftest agent-repl-test-wire-roster-without-recently-merged-is-a-breach ()
@@ -719,7 +745,7 @@ WatchWorkspaceRoster push and every tab falls back to a stale blue status."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-workspace-roster
                   (concat "{\"repository\":{\"sections\":[]},\"task\":{\"sections\":[]},\"maturity\":{\"sections\":[]},"
-                          "\"recentlyMerged\":{\"header\":{\"label\":{},\"count\":{}},\"groups\":[],\"collapsed\":{}}}"))
+                          "\"tabBar\":{},\"recentlyMerged\":{\"header\":{\"label\":{},\"count\":{}},\"groups\":[],\"collapsed\":{}}}"))
                  '("WorkspaceRoster" hidden "required message field is absent"))))
 
 (ert-deftest agent-repl-test-wire-roster-decodes-a-collapsed-hidden-section ()
@@ -795,7 +821,7 @@ A hand-rolled hidden-section decoder would skip the shared helper and fail here.
                   #'agent-repl-wire-decode-workspace-roster
                   (concat "{\"repository\":{\"sections\":[]},\"task\":{\"sections\":[]},\"maturity\":{\"sections\":[]},"
                           "\"hidden\":{\"header\":{\"label\":{},\"count\":{}},\"rows\":{},\"expanded\":{}},"
-                          "\"recentlyMerged\":{\"header\":{\"label\":{},\"count\":{}},\"groups\":[]},"
+                          "\"tabBar\":{},\"recentlyMerged\":{\"header\":{\"label\":{},\"count\":{}},\"groups\":[]},"
                           "\"hibernating\":{}}"))
                  '("WorkspaceRoster" hibernating "unknown field"))))
 
@@ -806,7 +832,7 @@ A hand-rolled hidden-section decoder would skip the shared helper and fail here.
   "An empty hidden section, expanded, as a JSON member.")
 
 (defconst agent-repl-test-wire-roster--merged-json
-  "\"recentlyMerged\":{\"header\":{\"label\":{},\"count\":{}},\"groups\":[],\"collapsed\":{}}"
+  "\"tabBar\":{},\"recentlyMerged\":{\"header\":{\"label\":{},\"count\":{}},\"groups\":[],\"collapsed\":{}}"
   "A merged band, collapsed, as a JSON member.")
 
 (defun agent-repl-test-wire-roster--with-shown (shown)
