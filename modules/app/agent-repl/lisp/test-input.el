@@ -1775,6 +1775,17 @@ used to interrupt before the overhaul."
   (should (eq (lookup-key agent-repl-input-mode-map (kbd "C-c C-k"))
               #'agent-repl-interrupt-turn)))
 
+(ert-deftest agent-repl-test-input-ret-sends-in-the-plain-map ()
+  "`RET' in the composer's plain mode map sends, so emacs state can send.
+The `map!' `:ni' entry reaches evil's normal and insert maps only."
+  (should (eq (lookup-key agent-repl-input-mode-map (kbd "RET"))
+              #'agent-repl-send)))
+
+(ert-deftest agent-repl-test-input-s-ret-inserts-newline-in-the-plain-map ()
+  "`S-RET' in the composer's plain mode map inserts a newline, without sending."
+  (should (eq (lookup-key agent-repl-input-mode-map (kbd "S-RET"))
+              #'newline)))
+
 (ert-deftest agent-repl-test-input-interrupt-turn-is-a-command ()
   "The chord's target is a real interactive command, not a dead symbol."
   (should (commandp #'agent-repl-interrupt-turn)))
