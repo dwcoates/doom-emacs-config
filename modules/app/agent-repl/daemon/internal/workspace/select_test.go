@@ -882,3 +882,69 @@ func TestSelectOnADaemonStandingDownLeavesTheSelectionStanding(t *testing.T) {
 		t.Fatalf("current = %v, want w1", f.db.current)
 	}
 }
+
+func TestSetHiddenRecordsTheFlagAndRepublishesTheRoster(t *testing.T) {
+	tests := []struct {
+		name   string
+		hidden bool
+	}{{"hide", true}, {"show", false}}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			f.workspace("w1", t.TempDir())
+			prior := f.db.workspaces["w1"]
+			prior.Hidden = !tt.hidden
+			f.db.workspaces["w1"] = prior
+
+			// Act
+			err := f.verbs.SetHidden(context.Background(), "w1", tt.hidden)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("SetHidden: %v", err)
+			}
+			if got := f.db.workspaces["w1"].Hidden; got != tt.hidden {
+				t.Fatalf("recorded hidden = %v, want %v", got, tt.hidden)
+			}
+			if len(f.sidebar.registries) != 1 {
+				t.Fatalf("roster republications = %d, want exactly one", len(f.sidebar.registries))
+			}
+		})
+	}
+}
+
+func TestSetHiddenRefusesAnUnknownWorkspace(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+
+	// Act
+	err := f.verbs.SetHidden(context.Background(), "nope", true)
+
+	// Assert
+	asRefusal(t, err, ArmUnknownWorkspace)
+	if len(f.sidebar.registries) != 0 {
+		t.Fatalf("roster republications = %d, want none for a refusal", len(f.sidebar.registries))
+	}
+}
+
+func TestSetHiddenSurfacesAFailedWriteAtError(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.db.setHiddenErr = errors.New("disk I/O error")
+
+	// Act
+	err := f.verbs.SetHidden(context.Background(), "w1", true)
+
+	// Assert
+	if err == nil {
+		t.Fatal("a failed hidden write was answered as success")
+	}
+	if !loggedAtError(f, opSetHidden) {
+		t.Fatal("the failed write was not recorded at error")
+	}
+	if len(f.sidebar.registries) != 0 {
+		t.Fatalf("roster republications = %d, want none for a failed write", len(f.sidebar.registries))
+	}
+}

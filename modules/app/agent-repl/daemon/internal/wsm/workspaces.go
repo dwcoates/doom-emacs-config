@@ -30,7 +30,7 @@ func normalizeDir(dir string) (string, error) {
 
 // workspaceColumns is the one select list every workspace read shares, so a
 // column added to the row can never be decoded by only some of them.
-const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, last_selected_at, last_activity_at, merged_at, spawned_shim_pid, created_at, result_end, result_read`
+const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, last_selected_at, last_activity_at, merged_at, spawned_shim_pid, created_at, result_end, result_read, hidden`
 
 // scanWorkspace decodes one workspace row all-or-nothing: an out-of-range
 // priority is a decode failure, never a silently substituted default.
@@ -48,7 +48,7 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 		end      sql.NullString
 		read     bool
 	)
-	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &created, &end, &read); err != nil {
+	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &created, &end, &read, &ws.Hidden); err != nil {
 		return Workspace{}, err
 	}
 	if end.Valid {
@@ -550,6 +550,13 @@ func (s *store) SetPriority(ctx context.Context, id WorkspaceID, p *Priority) er
 	}
 	fields["priority"] = int(*p)
 	return s.setWorkspaceField(ctx, op, "priority", id, int(*p), fields)
+}
+
+// SetHidden records whether a workspace sits in the roster's hidden section.
+// An unknown workspace is refused (ErrNotFound), never a write that touched
+// nothing.
+func (s *store) SetHidden(ctx context.Context, id WorkspaceID, hidden bool) error {
+	return s.setWorkspaceField(ctx, "daemon.wsm.set_hidden", "hidden", id, hidden, dlog.Context{"hidden": hidden})
 }
 
 // SetCurrent records the user's selection of a workspace at an instant. At most
