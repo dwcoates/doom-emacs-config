@@ -25,9 +25,12 @@ type fakeDB struct {
 	writes        []uint32
 }
 
-func (f *fakeDB) Workspace(_ context.Context, id wsm.WorkspaceID) (wsm.Workspace, error) {
+func (f *fakeDB) Workspace(ctx context.Context, id wsm.WorkspaceID) (wsm.Workspace, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return wsm.Workspace{}, err
+	}
 	if f.readErr != nil {
 		return wsm.Workspace{}, f.readErr
 	}
@@ -38,9 +41,12 @@ func (f *fakeDB) Workspace(_ context.Context, id wsm.WorkspaceID) (wsm.Workspace
 	return rec, nil
 }
 
-func (f *fakeDB) SetLiveCommitCount(_ context.Context, _ wsm.WorkspaceID, count uint32) (bool, error) {
+func (f *fakeDB) SetLiveCommitCount(ctx context.Context, _ wsm.WorkspaceID, count uint32) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
 	if f.writeErr != nil {
 		return false, f.writeErr
 	}
@@ -66,13 +72,22 @@ type fakeGit struct {
 	// is told as each count starts.
 	hold    chan struct{}
 	entered chan struct{}
+	// during, when set, runs as the count is taken (a test's daemon exit),
+	// and the count answers the context's error if that ended it.
+	during func()
 }
 
-func (g *fakeGit) CountCommits(_ context.Context, dir, base, tip string) (uint32, error) {
+func (g *fakeGit) CountCommits(ctx context.Context, dir, base, tip string) (uint32, error) {
 	g.mu.Lock()
 	g.asked = append(g.asked, [3]string{dir, base, tip})
-	hold, entered := g.hold, g.entered
+	hold, entered, during := g.hold, g.entered, g.during
 	g.mu.Unlock()
+	if during != nil {
+		during()
+		if err := ctx.Err(); err != nil {
+			return 0, err
+		}
+	}
 	if entered != nil {
 		entered <- struct{}{}
 	}
@@ -108,7 +123,10 @@ func newHarness(t *testing.T, rec wsm.Workspace) *harness {
 	r, err := New(Deps{
 		DB:  h.db,
 		Git: h.git,
-		PublishRegistry: func(context.Context) error {
+		PublishRegistry: func(ctx context.Context) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			h.published <- struct{}{}
 			return h.publishOK
 		},
@@ -383,5 +401,86 @@ func TestRunRecountsAgainForACloseDuringACount(t *testing.T) {
 	h.git.mu.Unlock()
 	if asked != 2 {
 		t.Fatalf("git was asked %d times, want twice", asked)
+	}
+}
+
+func (h *harness) errors() []dlog.Record {
+	var out []dlog.Record
+	for _, rec := range h.log.Records() {
+		if rec.Level == "error" {
+			out = append(out, rec)
+		}
+	}
+	return out
+}
+
+func TestARecountTheExitCutsShortBeforeTheReadIsNotAFault(t *testing.T) {
+	// Arrange
+	h := newHarness(t, live())
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act
+	h.r.recount(ctx, theWorkspace)
+
+	// Assert
+	if len(h.git.asked) != 0 || len(h.db.written()) != 0 {
+		t.Fatalf("a cut-short recount went on: git %v, writes %v", h.git.asked, h.db.written())
+	}
+	if _, ok := h.record("info", "the daemon's exit cut a recount short before the workspace was read; the next turn close recounts"); !ok {
+		t.Fatalf("no info record of the cut-short read: %v", h.log.Records())
+	}
+	if errs := h.errors(); len(errs) != 0 {
+		t.Fatalf("error records = %v, want none", errs)
+	}
+}
+
+func TestARecountTheExitCutsShortBeforeGitAnswersWritesNothing(t *testing.T) {
+	// Arrange
+	h := newHarness(t, live())
+	ctx, cancel := context.WithCancel(context.Background())
+	h.git.during = cancel
+
+	// Act
+	h.r.recount(ctx, theWorkspace)
+
+	// Assert
+	if len(h.db.written()) != 0 || len(h.published) != 0 {
+		t.Fatalf("a count git never answered was recorded: writes %v", h.db.written())
+	}
+	if _, ok := h.record("info", "the daemon's exit cut a recount short before git answered; the next turn close recounts"); !ok {
+		t.Fatalf("no info record of the cut-short count: %v", h.log.Records())
+	}
+	if errs := h.errors(); len(errs) != 0 {
+		t.Fatalf("error records = %v, want none", errs)
+	}
+}
+
+func TestATakenCountIsRecordedEvenWhenTheExitFollows(t *testing.T) {
+	// Arrange: git answers, and the exit lands as it does.
+	h := newHarness(t, live())
+	ctx, cancel := context.WithCancel(context.Background())
+	h.git.hold, h.git.entered = make(chan struct{}), make(chan struct{}, 1)
+	done := make(chan struct{})
+	go func() {
+		h.r.recount(ctx, theWorkspace)
+		close(done)
+	}()
+	<-h.git.entered
+
+	// Act
+	cancel()
+	h.git.hold <- struct{}{}
+	<-done
+
+	// Assert
+	if got := h.db.written(); len(got) != 1 || got[0] != 4 {
+		t.Fatalf("writes = %v, want the taken count recorded", got)
+	}
+	if len(h.published) != 1 {
+		t.Fatalf("republishes = %d, want the recorded count republished", len(h.published))
+	}
+	if errs := h.errors(); len(errs) != 0 {
+		t.Fatalf("error records = %v, want none", errs)
 	}
 }
