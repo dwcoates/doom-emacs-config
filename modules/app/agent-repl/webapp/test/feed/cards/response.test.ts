@@ -29,11 +29,8 @@ import {
   isInterimResponse,
   responseCap,
   responseCapLines,
-  REVEAL_SPEED_ATTRIBUTE,
   carriedNumber,
   revealedSoFar,
-  revealSpeedSoFar,
-  revealWindowMs,
   usageAgeWithinReserve,
   usageReserveLabelsCss,
 } from "../../../src/feed/cards/response.js";
@@ -58,6 +55,9 @@ import { captureLogRecords, forwardedRecord } from "../../log-capture.js";
 import { orderFor } from "../../feed-order.js";
 
 const SINK: FailureSink = { report: () => {}, retract: () => {} };
+
+/** The reveal pace every live draw carries: the daemon's thinking default. */
+const PACE = { minCharsPerSecond: 45, maxCharsPerSecond: 55, bankLimitMs: 1500 };
 
 /** A row context; the response card calls no verb of its own. */
 function rowContext(previous?: HTMLElement): RowContext {
@@ -207,7 +207,7 @@ describe("the broken state", () => {
 describe("the arriving state", () => {
   it("draws no arriving indicator: a streaming response shows its prose only", () => {
     const el = drawFeedResponse(
-      response({ result: { case: "update", value: { prose: { markdown: "typing" } } } }),
+      response({ result: { case: "update", value: { prose: { markdown: "typing" }, revealPace: PACE } } }),
       rowContext(),
     );
     expect(el.querySelector(".response-arriving")).toBeNull();
@@ -216,7 +216,7 @@ describe("the arriving state", () => {
 
   it("shows nothing of a first-seen response before the first frame", () => {
     const el = drawFeedResponse(
-      response({ result: { case: "update", value: { prose: { markdown: "hello world" } } } }),
+      response({ result: { case: "update", value: { prose: { markdown: "hello world" }, revealPace: PACE } } }),
       rowContext(),
     );
     expect(el.getAttribute(REVEALED_ATTRIBUTE)).toBe("0");
@@ -224,7 +224,7 @@ describe("the arriving state", () => {
 
   it("types the prose out as time passes", () => {
     const el = drawFeedResponse(
-      response({ result: { case: "update", value: { prose: { markdown: "hello world" } } } }),
+      response({ result: { case: "update", value: { prose: { markdown: "hello world" }, revealPace: PACE } } }),
       rowContext(),
     );
     document.body.appendChild(el);
@@ -238,7 +238,7 @@ describe("the arriving state", () => {
     previous.setAttribute(REVEALED_ATTRIBUTE, "5");
     // Act
     const el = drawFeedResponse(
-      response({ result: { case: "update", value: { prose: { markdown: "hello world" } } } }),
+      response({ result: { case: "update", value: { prose: { markdown: "hello world" }, revealPace: PACE } } }),
       rowContext(previous),
     );
     // Assert: the first paint already carries what was on screen.
@@ -249,7 +249,7 @@ describe("the arriving state", () => {
     // Arrange: prose long enough that the reveal is still behind when the
     // bubble is taken out of the document.
     const el = drawFeedResponse(
-      response({ result: { case: "update", value: { prose: { markdown: "x".repeat(5000) } } } }),
+      response({ result: { case: "update", value: { prose: { markdown: "x".repeat(5000) }, revealPace: PACE } } }),
       rowContext(),
     );
     document.body.appendChild(el);
@@ -263,7 +263,7 @@ describe("the arriving state", () => {
   });
 });
 
-describe("the daemon's reveal window", () => {
+describe("the daemon's reveal pace", () => {
   /** The element a previous push of the row returned, LENGTH characters shown. */
   function previousAt(length: number): HTMLElement {
     const previous = document.createElement("div");
@@ -271,63 +271,58 @@ describe("the daemon's reveal window", () => {
     return previous;
   }
 
-  /** A paced bubble: MARKDOWN in ARM, with a reveal window of WINDOWMS. */
-  function paced(arm: "update" | "success", markdown: string, windowMs: number): FeedResponse {
-    return response({ result: { case: arm, value: { prose: { markdown }, revealWindow: { expectedGapMs: windowMs } } } });
+  /** A paced bubble: MARKDOWN in ARM, at the thinking default pace. */
+  function paced(arm: "update" | "success", markdown: string, revealPace = PACE): FeedResponse {
+    return response({ result: { case: arm, value: { prose: { markdown }, revealPace } } });
   }
 
-  it("spreads an arriving bubble's unshown text evenly across the window", () => {
-    // Arrange
-    const el = drawFeedResponse(paced("update", "x".repeat(5000), 1000), rowContext());
+  it("types an arriving bubble out at the maximum while the arrivals outrun it", () => {
+    // Arrange: 60 characters banked, within the 82.5-character limit.
+    const el = drawFeedResponse(paced("update", "x".repeat(60)), rowContext());
     document.body.appendChild(el);
     // Act
     vi.advanceTimersByTime(500);
-    // Assert: about half, where the backlog-chasing default would be nearly done.
+    // Assert: about 27 at 55 chars/sec.
     const shown = Number(el.getAttribute(REVEALED_ATTRIBUTE));
-    expect(shown > 2300 && shown < 2700).toBe(true);
+    expect(shown > 22 && shown < 30).toBe(true);
   });
 
-  it("finishes an arriving bubble's reveal when the window ends", () => {
-    // Arrange
-    const el = drawFeedResponse(paced("update", "hello world", 100), rowContext(previousAt(1)));
+  it("catches a bank past its limit up to the limit rather than falling further behind", () => {
+    // Arrange: 5000 characters banked, far past 1.5s at 55 chars/sec.
+    const el = drawFeedResponse(paced("update", "x".repeat(5000)), rowContext());
     document.body.appendChild(el);
     // Act
-    vi.advanceTimersByTime(150);
-    // Assert
-    expect(el.getAttribute(REVEALED_ATTRIBUTE)).toBe(renderedLength(el));
+    vi.advanceTimersByTime(100);
+    // Assert: well past the 5.5 the maximum alone would show.
+    expect(Number(el.getAttribute(REVEALED_ATTRIBUTE))).toBeGreaterThan(200);
   });
 
-  it("reveals a burst's pushes toward the one deadline the daemon's shrinking windows name", () => {
-    // Arrange: the burst's first push states 500ms; a second push of the same
-    // burst lands 10ms later, before any frame, stating the 490ms left.
-    const first = drawFeedResponse(paced("update", "x".repeat(1000), 500), rowContext());
-    document.body.appendChild(first);
-    vi.advanceTimersByTime(10);
-    const el = drawFeedResponse(paced("update", "x".repeat(2000), 490), rowContext(first));
-    // Act
-    vi.advanceTimersByTime(400);
-    const before = Number(el.getAttribute(REVEALED_ATTRIBUTE));
-    vi.advanceTimersByTime(90);
-    // Assert: still typing short of the deadline, done at it.
-    expect([before < 2000, el.getAttribute(REVEALED_ATTRIBUTE)]).toEqual([true, renderedLength(el)]);
-  });
-
-  it("spreads from what the previous push left on screen", () => {
+  it("resumes from what the previous push left on screen", () => {
     // Arrange / Act: the previous push had only shown 4 of what had arrived.
-    const el = drawFeedResponse(paced("update", "abcdefghijklmnopqrstuvwxyz", 1000), rowContext(previousAt(4)));
+    const el = drawFeedResponse(paced("update", "abcdefghijklmnopqrstuvwxyz"), rowContext(previousAt(4)));
     // Assert
     expect(el.querySelector(".bubble-body")?.textContent?.trim()).toBe("abcd");
   });
 
-  it("types out a paced settled bubble's leftover text instead of drawing it at once", () => {
+  it("types out a settled bubble's leftover text instead of drawing it at once", () => {
     // Arrange
-    const el = drawFeedResponse(paced("success", "hello world", 100), rowContext(previousAt(5)));
+    const el = drawFeedResponse(paced("success", "hello world"), rowContext(previousAt(5)));
     document.body.appendChild(el);
     // Act
     const atDraw = el.getAttribute(REVEALED_ATTRIBUTE);
-    vi.advanceTimersByTime(150);
+    vi.advanceTimersByTime(1000);
     // Assert
     expect([atDraw, el.getAttribute(REVEALED_ATTRIBUTE)]).toEqual(["5", renderedLength(el)]);
+  });
+
+  it("draws an unpaced arriving bubble whole at once: a replay", () => {
+    // Arrange / Act
+    const el = drawFeedResponse(
+      response({ result: { case: "update", value: { prose: { markdown: "hello world" } } } }),
+      rowContext(),
+    );
+    // Assert
+    expect(el.getAttribute(REVEALED_ATTRIBUTE)).toBe(renderedLength(el));
   });
 
   it("draws an unpaced settled bubble whole at once", () => {
@@ -340,46 +335,9 @@ describe("the daemon's reveal window", () => {
     expect(el.getAttribute(REVEALED_ATTRIBUTE)).toBe(renderedLength(el));
   });
 
-  it("records how fast a paced reveal is moving, for the next push to ease from", () => {
-    // Arrange
-    const el = drawFeedResponse(paced("update", "x".repeat(1000), 1000), rowContext());
-    document.body.appendChild(el);
-    // Act
-    vi.advanceTimersByTime(500);
-    // Assert: a window with no carried speed moves at its average, 1 char/ms.
-    expect(Number(el.getAttribute(REVEAL_SPEED_ATTRIBUTE))).toBeCloseTo(1);
-  });
-
-  it("eases a paced push up from the speed the previous push was moving at", () => {
-    // Arrange: the previous push's reveal had come to rest.
-    const previous = previousAt(0);
-    previous.setAttribute(REVEAL_SPEED_ATTRIBUTE, "0");
-    const el = drawFeedResponse(paced("update", "x".repeat(1000), 1000), rowContext(previous));
-    document.body.appendChild(el);
-    // Act
-    vi.advanceTimersByTime(100);
-    // Assert: well short of the 100 an even spread would show by now.
-    expect(Number(el.getAttribute(REVEALED_ATTRIBUTE))).toBeLessThan(60);
-  });
-
-  it("carries no speed out of an unpaced reveal", () => {
-    // Arrange
-    const previous = previousAt(0);
-    previous.setAttribute(REVEAL_SPEED_ATTRIBUTE, "0.5");
-    const el = drawFeedResponse(
-      response({ result: { case: "update", value: { prose: { markdown: "hello world" } } } }),
-      rowContext(previous),
-    );
-    document.body.appendChild(el);
-    // Act
-    vi.advanceTimersByTime(16);
-    // Assert
-    expect(el.hasAttribute(REVEAL_SPEED_ATTRIBUTE)).toBe(false);
-  });
-
   it("never shows a half-typed construct's raw syntax while typing it out", () => {
     // Arrange
-    const el = drawFeedResponse(paced("update", "**bold** and more", 1000), rowContext());
+    const el = drawFeedResponse(paced("update", "**bold** and more"), rowContext());
     document.body.appendChild(el);
     // Act
     vi.advanceTimersByTime(100);
@@ -387,13 +345,10 @@ describe("the daemon's reveal window", () => {
     expect(el.querySelector(`.${RESPONSE_PROSE_CLASS}`)?.textContent?.includes("*")).toBe(false);
   });
 
-  it("answers no window when the daemon sent none", () => {
-    expect(revealWindowMs(undefined, "FeedResponse.update.reveal_window")).toBeUndefined();
-  });
-
-  it("refuses a window of zero as malformed", () => {
+  it("refuses a malformed pace", () => {
     // Arrange
-    const draw = (): HTMLElement => drawFeedResponse(paced("update", "hi", 0), rowContext());
+    const draw = (): HTMLElement =>
+      drawFeedResponse(paced("update", "hi", { minCharsPerSecond: 0, maxCharsPerSecond: 55, bankLimitMs: 1500 }), rowContext());
     // Act / Assert
     expect(draw).toThrow(MalformedView);
   });
@@ -1146,7 +1101,7 @@ describe("the notice register", () => {
     const el = drawFeedResponse(
       response({
         notice: { heading: "a system remark" },
-        result: { case: "update", value: { prose: { markdown: "the words" } } },
+        result: { case: "update", value: { prose: { markdown: "the words" }, revealPace: PACE } },
       }),
       rowContext(),
     );
@@ -1246,28 +1201,6 @@ describe("carriedNumber", () => {
 
   it("is the one parse every carried reveal fact goes through", () => {
     expect(responseSource.match(/Number\.parse(?:Int|Float)\(/g)).toHaveLength(1);
-  });
-});
-
-describe("revealSpeedSoFar", () => {
-  it("carries no speed on a row's first draw", () => {
-    expect(revealSpeedSoFar(undefined)).toBeUndefined();
-  });
-
-  it("carries no speed when the previous element recorded none", () => {
-    expect(revealSpeedSoFar(document.createElement("div"))).toBeUndefined();
-  });
-
-  it("resumes the speed the previous draw recorded", () => {
-    const previous = document.createElement("div");
-    previous.setAttribute(REVEAL_SPEED_ATTRIBUTE, "0.25");
-    expect(revealSpeedSoFar(previous)).toBe(0.25);
-  });
-
-  it("carries no speed for a value that is not a speed", () => {
-    const previous = document.createElement("div");
-    previous.setAttribute(REVEAL_SPEED_ATTRIBUTE, "-1");
-    expect(revealSpeedSoFar(previous)).toBeUndefined();
   });
 });
 
@@ -1871,7 +1804,7 @@ describe("the incremental reveal reconciles the prose without rebuilding it", ()
     // Arrange — a tree with long branches, so the reveal spends many frames
     // inside it and the leading root line settles well before the tail.
     const el = drawFeedResponse(
-      response({ result: { case: "update", value: { prose: { markdown: SHOWCASE_TREE } } } }),
+      response({ result: { case: "update", value: { prose: { markdown: SHOWCASE_TREE }, revealPace: PACE } } }),
       rowContext(),
     );
     document.body.appendChild(el);
@@ -1902,7 +1835,7 @@ describe("the incremental reveal reconciles the prose without rebuilding it", ()
     // Arrange — the tree types out in a 1000px column (93 columns), in the
     // turn's answer, which is uncapped (a replayed answer still arriving).
     const el = drawFeedResponse(
-      response({ finalAnswer: true, result: { case: "update", value: { prose: { markdown: SHOWCASE_TREE } } } }),
+      response({ finalAnswer: true, result: { case: "update", value: { prose: { markdown: SHOWCASE_TREE }, revealPace: PACE } } }),
       rowContext(),
     );
     const column = mount(el);
@@ -1930,7 +1863,7 @@ describe("the incremental reveal reconciles the prose without rebuilding it", ()
     const markdown =
       "First paragraph, complete and stable.\n\nSecond paragraph that keeps on growing word by word right here.";
     const el = drawFeedResponse(
-      response({ result: { case: "update", value: { prose: { markdown } } } }),
+      response({ result: { case: "update", value: { prose: { markdown }, revealPace: PACE } } }),
       rowContext(),
     );
     document.body.appendChild(el);
@@ -2022,7 +1955,7 @@ describe("the type-out of a collapsed bubble", () => {
     previous?: HTMLElement;
   }): HTMLElement {
     const el = drawFeedResponse(
-      response({ thinking: opts.thinking, result: { case: "update", value: { prose: { markdown: opts.markdown ?? LONG } } } }),
+      response({ thinking: opts.thinking, result: { case: "update", value: { prose: { markdown: opts.markdown ?? LONG }, revealPace: PACE } } }),
       rowContext(opts.previous),
     );
     if (opts.previous === undefined) mount(el);
@@ -2106,7 +2039,7 @@ describe("the thinking bubble", () => {
   it("draws a thinking response as a purple assistant bubble marked thinking", () => {
     // Arrange, Act — a thinking-flagged response.
     const el = drawFeedResponse(
-      response({ thinking: true, result: { case: "update", value: { prose: { markdown: "weighing" } } } }),
+      response({ thinking: true, result: { case: "update", value: { prose: { markdown: "weighing" }, revealPace: PACE } } }),
       rowContext(),
     );
     // Assert — the purple assistant bubble also carries the thinking marker.
@@ -2117,7 +2050,7 @@ describe("the thinking bubble", () => {
   it("leaves an ordinary response bubble unmarked as thinking", () => {
     // Arrange, Act — no thinking flag.
     const el = drawFeedResponse(
-      response({ result: { case: "update", value: { prose: { markdown: "an answer" } } } }),
+      response({ result: { case: "update", value: { prose: { markdown: "an answer" }, revealPace: PACE } } }),
       rowContext(),
     );
     // Assert
