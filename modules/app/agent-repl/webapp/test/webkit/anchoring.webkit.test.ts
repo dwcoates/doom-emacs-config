@@ -1,18 +1,19 @@
 /**
- * THE FEED KEEPS THE READER'S CONTENT STILL ON THE FIRST SCROLL UP, IN WEBKIT.
+ * THE FEED KEEPS THE READER'S CONTENT STILL, IN WEBKIT.
  *
- * The Emacs webview is WebKit, which has no native CSS scroll anchoring. Every
- * `.feed-item` is `content-visibility: auto`, so a row above the reader has
- * never been laid out until the overscan band reaches it, and its first layout
- * changes its height from the stylesheet's guess to its real one. Chromium's
- * native anchoring absorbs that; WebKit moved the content under the reader
- * (measured 2026-09-27: 54 of 120 steps drifting, 10,431px, before the feed
- * owned its anchoring). The second pass was always still, because
- * `contain-intrinsic-size: auto` remembers each row's real size.
+ * The Emacs webview is WebKit, which has no native CSS scroll anchoring.
+ *
+ * - EVERY ROW IS LAID OUT AT ITS REAL HEIGHT (owner ruling, 2026-10-11): no
+ *   row stands in a guessed height, so the first scroll up changes no row's
+ *   height and the anchoring has nothing to correct. Under the retired
+ *   `content-visibility: auto` the same pass drifted (measured 2026-09-27: 54
+ *   of 120 steps, 10,431px) and leaned on corrections to hold still.
+ * - A ROW ABOVE THE READER THAT DOES CHANGE HEIGHT (a late render, a card
+ *   settling) is absorbed by the feed's own anchoring.
  *
  * This runs the real stylesheet and the real scroll module in real headless
- * WebKit (anchoring-page.ts) and asserts that no painted frame of the first
- * upward pass moves the tracked row by a pixel more than the reader scrolled.
+ * WebKit (anchoring-page.ts) and asserts that no painted frame moves the
+ * tracked row by a pixel more than the reader scrolled.
  *
  * Its browser is Playwright's WebKit build pinned by `playwright-core`
  * (package.json); `npx playwright-core install webkit` fetches it once.
@@ -42,6 +43,23 @@ interface PassDrift {
   max: number;
 }
 
+/** How far a row above the reader grows, and how many times. */
+const GROW_PX = 230;
+const GROWTHS = 10;
+
+/** Fold one measured step into DRIFT when it moved past rounding. */
+function addDrift(drift: PassDrift, step: StepResult): void {
+  if (step.worst <= TOLERANCE_PX) return;
+  drift.steps += 1;
+  drift.total += step.worst;
+  drift.max = Math.max(drift.max, step.worst);
+}
+
+/** DRIFT with its pixel figures rounded, as the assertions compare it. */
+function rounded(drift: PassDrift): PassDrift {
+  return { steps: drift.steps, total: Math.round(drift.total), max: Math.round(drift.max) };
+}
+
 /** Scroll the page's feed up STEPS times from its tail, summing what drifted. */
 async function scrollUpPass(page: Page): Promise<PassDrift> {
   await page.evaluate(() => window.anchoring.park());
@@ -51,21 +69,38 @@ async function scrollUpPass(page: Page): Promise<PassDrift> {
       ([px, frames]) => window.anchoring.stepUp(px, frames),
       [STEP_PX, FRAMES_PER_STEP] as const,
     );
-    if (step.worst > TOLERANCE_PX) {
-      drift.steps += 1;
-      drift.total += step.worst;
-      drift.max = Math.max(drift.max, step.worst);
-    }
+    addDrift(drift, step);
     if (step.top <= 0) break;
   }
-  return { steps: drift.steps, total: Math.round(drift.total), max: Math.round(drift.max) };
+  return rounded(drift);
+}
+
+/** Grow the row just above the reader GROWTHS times, summing what drifted. */
+async function growAbovePass(page: Page): Promise<PassDrift> {
+  const drift: PassDrift = { steps: 0, total: 0, max: 0 };
+  for (let i = 0; i < GROWTHS; i++) {
+    const step: StepResult = await page.evaluate(
+      ([px, frames]) => window.anchoring.growAbove(px, frames),
+      [GROW_PX, FRAMES_PER_STEP] as const,
+    );
+    addDrift(drift, step);
+  }
+  return rounded(drift);
+}
+
+/** How many anchoring corrections RECORDS hold. */
+function corrections(records: string[]): number {
+  return records.filter((r) => r === "debug scroll.anchor-corrected").length;
 }
 
 describe("the feed's scroll anchoring in WebKit", () => {
   let browser: Browser;
-  /** The first upward pass over a fresh page, and every record the page wrote. */
+  /** The first upward pass over a fresh page, and every record it wrote. */
   let first: PassDrift;
-  let records: string[];
+  let firstRecords: string[];
+  /** Rows above the reader growing after that pass, and every record since. */
+  let grown: PassDrift;
+  let grownRecords: string[];
 
   beforeAll(async () => {
     const [script, css] = await Promise.all([
@@ -81,9 +116,10 @@ describe("the feed's scroll anchoring in WebKit", () => {
     await page.addScriptTag({ content: script });
     await page.waitForFunction(() => (window as { anchoring?: AnchoringPage }).anchoring !== undefined);
     if (errors.length > 0) throw new Error(`the page failed to boot: ${errors.join("; ")}`);
-    // Every row above the tail has never been laid out yet.
     first = await scrollUpPass(page);
-    records = await page.evaluate(() => window.anchoring.records());
+    firstRecords = await page.evaluate(() => window.anchoring.records());
+    grown = await growAbovePass(page);
+    grownRecords = (await page.evaluate(() => window.anchoring.records())).slice(firstRecords.length);
   });
 
   afterAll(async () => {
@@ -94,13 +130,22 @@ describe("the feed's scroll anchoring in WebKit", () => {
     expect(first).toEqual({ steps: 0, total: 0, max: 0 });
   });
 
-  it("owes that stillness to the feed's own anchoring, which corrected the view", () => {
-    // WebKit has no native anchoring, so a still pass with no correction would
-    // mean the rows never changed height: a vacuous pass.
-    expect(records.filter((r) => r === "debug scroll.anchor-corrected").length).toBeGreaterThan(0);
+  it("changes no row's height on the first pass up, so nothing is corrected", () => {
+    // A correction here would be a row standing in a guessed height.
+    expect(corrections(firstRecords)).toBe(0);
   });
 
-  it("writes no error through the pass", () => {
-    expect(records.filter((r) => r.startsWith("error "))).toEqual([]);
+  it("holds the reader's content still while a row above them grows", () => {
+    expect(grown).toEqual({ steps: 0, total: 0, max: 0 });
+  });
+
+  it("owes that stillness to the feed's own anchoring, which corrected the view", () => {
+    // WebKit has no native anchoring, so a still pass with no correction would
+    // mean the growth never reached the layout: a vacuous pass.
+    expect(corrections(grownRecords)).toBeGreaterThan(0);
+  });
+
+  it("writes no error through either pass", () => {
+    expect([...firstRecords, ...grownRecords].filter((r) => r.startsWith("error "))).toEqual([]);
   });
 });

@@ -38,11 +38,16 @@ func (f *fakeWorkspaces) CreateMergeWorkspace(ctx context.Context, requester wsm
 	return register(f.t, f.db, "sample-merge", &origin), nil
 }
 
-func (f *fakeWorkspaces) Nuke(_ context.Context, ws ids.WorkspaceID) error {
+// Nuke records the nuke and, as a real nuke does, removes the workspace from
+// the registry, so a later sweep cannot find it again.
+func (f *fakeWorkspaces) Nuke(ctx context.Context, ws ids.WorkspaceID) error {
 	if f.nukeErr != nil {
 		return f.nukeErr
 	}
 	f.nuked = append(f.nuked, ws)
+	if _, err := f.db.Forget(ctx, ws); err != nil {
+		f.t.Fatalf("fake Nuke: forget %s: %v", ws, err)
+	}
 	return nil
 }
 
