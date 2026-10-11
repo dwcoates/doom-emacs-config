@@ -253,7 +253,7 @@ const commandLabelMax = 24
 // heldStatus composes the card's ONE badge and the notes for every other
 // standing fact: THE ONE PLACE a held prompt's status words are decided, and
 // the one place its facts are ranked. The strongest standing fact claims the
-// badge, in the order daemon_hold.proto fixes — the edit, the hold, the
+// badge, in the order feed_held.proto fixes — the edit, the hold, the
 // verdict — and the rest are notes, strongest first, then the verdict's
 // confirmation, then the coalescence.
 //

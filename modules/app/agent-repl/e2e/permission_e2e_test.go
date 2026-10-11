@@ -5,7 +5,7 @@
 // Connect API. Contract: docs/overhaul/shim.md section "The permission gate",
 // docs/overhaul/daemon.md section "Queue, holds, leases — contract facts",
 // proto/src/conversation/v1/permission.proto, proto/src/frontend/v1/feed.proto
-// and daemon_hold.proto. Every assertion here is on a WatchFeed / WatchTopbar
+// and feed_held.proto. Every assertion here is on a WatchFeed / WatchTopbar
 // / root-feed held-section frame — never on shim or store internals (SPEC.md
 // section B, "Frontends: none").
 //
@@ -411,7 +411,7 @@ func TestPermissionUndecidableParked(t *testing.T) {
 // while a turn runs is HELD daemon-side". Turn one is lifecycle.ts's "!hold"
 // scenario (parks until interrupted), so a second submission on the SAME
 // agent is provably held rather than merely fast. The root feed's held section shows the
-// HeldPrompt; UpdateHeldPrompt{release} delivers it, per daemon_hold.proto's
+// HeldPrompt; UpdateHeldPrompt{release} delivers it, per feed_held.proto's
 // "Deliver NOW — override the hold (interrupting the running turn when that
 // is what delivery takes)".
 func TestHeldTurnGate(t *testing.T) {

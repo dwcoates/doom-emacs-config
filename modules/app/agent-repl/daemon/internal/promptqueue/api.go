@@ -69,7 +69,7 @@ var (
 	// ErrShimHasNoSession is the SHIM's own refusal of a delivery because it
 	// holds no session (StartTurnFailure.no_session). The sender's typed
 	// refusal answers errors.Is against it. A delivery refused so is HELD
-	// under the reconnect hold rather than lost (daemon_hold.proto,
+	// under the reconnect hold rather than lost (feed_held.proto,
 	// HeldPromptReconnectHold).
 	ErrShimHasNoSession = errors.New("promptqueue: the shim holds no session")
 	// ErrColdGate is a submission to a workspace whose session is PARKED AT

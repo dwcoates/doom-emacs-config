@@ -1313,7 +1313,7 @@ export const HELD_NOTE_CLASS = "queued-status-note";
  * the notes for every other standing fact as expand-only lines.
  *
  * A badge with no fact or an empty label, and a note with an empty sentence,
- * are malformed views (daemon_hold.proto), logged and thrown, never drawn.
+ * are malformed views (feed_held.proto), logged and thrown, never drawn.
  */
 export function drawHeldPromptBadge(
   wire: HeldPromptBadge,
