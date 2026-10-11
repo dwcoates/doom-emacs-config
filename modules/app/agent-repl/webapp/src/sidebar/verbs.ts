@@ -832,14 +832,20 @@ export function buildNukeWorkspaceRequest(workspace: WorkspaceRef): NukeWorkspac
  * MergeWorkspace: enqueue; the merge's life thereafter is the feed's.
  *
  * The rail's Merge verb is "merge this workspace": the row's workspace asks to
- * merge ITS OWN branch, and is closed once it lands (`keep_open` false), which
- * is what the verb has always done. The other sources are for callers that
- * name another workspace or a branch; the rail has no such affordance.
+ * merge ITS OWN branch IN PLACE, and is closed once it lands (`keep_open`
+ * false), which is what the verb has always done. The other sources are for
+ * callers that name another workspace or a branch; the rail has no such
+ * affordance.
  */
 export function buildMergeWorkspaceRequest(workspace: WorkspaceRef): MergeWorkspaceRequest {
   return create(MergeWorkspaceRequestSchema, {
     workspace,
-    source: { source: { case: "ownBranch", value: { keepOpen: false } } },
+    source: {
+      source: {
+        case: "ownBranch",
+        value: { run: { case: "inPlace", value: { keepOpen: false } } },
+      },
+    },
   });
 }
 

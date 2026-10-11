@@ -9,7 +9,7 @@ func TestOwnBranchNamesTheRequestersBranchAndItsKeepOpen(t *testing.T) {
 
 		// Assert
 		own := source.GetOwnBranch()
-		if own == nil || own.GetKeepOpen() != keepOpen {
+		if own == nil || own.GetInPlace() == nil || own.GetInPlace().GetKeepOpen() != keepOpen {
 			t.Fatalf("OwnBranch(%v) = %v, want the own-branch arm with keep_open %v", keepOpen, source, keepOpen)
 		}
 	}

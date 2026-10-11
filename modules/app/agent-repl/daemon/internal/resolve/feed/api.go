@@ -289,6 +289,10 @@ type Resolver interface {
 	// restates the row with it (mergefold.go). False is a row that is not a
 	// merge head this daemon holds.
 	SetMergeFold(ws ids.WorkspaceID, id *frontendv1.FeedId, folded bool) bool
+	// MarkMergeWorkspaceRemoved restates every switch in WS's feeds that takes
+	// the user to MERGEWS as removed, and answers how many rows it restated
+	// (mergeworkspace.go).
+	MarkMergeWorkspaceRemoved(ws, mergeWS ids.WorkspaceID, removedAtMS int64) int
 	// TakeTurnEnding answers what a turn's LIVE end said — the final answer's
 	// prose, the errored ending's line, the terminal's failure class — and
 	// forgets it. False is a turn whose ending was not drawn live here. The

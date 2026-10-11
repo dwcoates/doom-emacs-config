@@ -364,7 +364,8 @@ The requesting workspace is the ref; the source is `own_branch' with
     ;; Assert
     (should (equal (agent-repl-test-verbs--request :merge)
                    (list :workspace (agent-repl-test-verbs--ref)
-                         :source '(:arm :own-branch :value (:keep-open nil)))))))
+                         :source '(:arm :own-branch
+                                   :value (:run (:arm :in-place :value (:keep-open nil)))))))))
 
 (ert-deftest agent-repl-verbs-merge-keep-open-sends-keep-open ()
   "KEEP-OPEN asks the daemon to leave the workspace open once it lands."
@@ -374,7 +375,7 @@ The requesting workspace is the ref; the source is `own_branch' with
     (agent-repl-verb-merge "ws-one" 'keep)
     ;; Assert
     (should (equal (plist-get (agent-repl-test-verbs--request :merge) :source)
-                   '(:arm :own-branch :value (:keep-open t))))))
+                   '(:arm :own-branch :value (:run (:arm :in-place :value (:keep-open t))))))))
 
 (ert-deftest agent-repl-verbs-open-echoes-the-given-ref ()
   "OpenWorkspace carries the closed row's own ref, not the current one's."
@@ -2899,7 +2900,7 @@ persp-mode perspective such as \"main\" appears in the registry."
         (call-interactively #'agent-repl-merge-workspace))
       ;; Assert
       (should (equal (plist-get (agent-repl-test-verbs--request :merge) :source)
-                     '(:arm :own-branch :value (:keep-open nil)))))))
+                     '(:arm :own-branch :value (:run (:arm :in-place :value (:keep-open nil)))))))))
 
 (ert-deftest agent-repl-verbs-merge-command-with-prefix-keeps-open ()
   "`C-u SPC TAB M' merges the current workspace and keeps it open."
@@ -2911,7 +2912,7 @@ persp-mode perspective such as \"main\" appears in the registry."
         (call-interactively #'agent-repl-merge-workspace))
       ;; Assert
       (should (equal (plist-get (agent-repl-test-verbs--request :merge) :source)
-                     '(:arm :own-branch :value (:keep-open t)))))))
+                     '(:arm :own-branch :value (:run (:arm :in-place :value (:keep-open t)))))))))
 
 (ert-deftest agent-repl-verbs-merge-with-an-empty-registry-refuses ()
   "And merge, which shares the same current-perspective default."

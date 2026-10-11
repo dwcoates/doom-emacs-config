@@ -405,6 +405,7 @@ func TestAMergeEntryNamingOneSourceValidates(t *testing.T) {
 	}{
 		{name: "own branch", entry: Entry{Type: TypeMerge, Workspace: "w1"}},
 		{name: "own branch kept open", entry: Entry{Type: TypeMerge, Workspace: "w1", KeepOpen: true}},
+		{name: "own branch detached", entry: Entry{Type: TypeMerge, Workspace: "w1", Detached: true}},
 		{name: "a branch", entry: Entry{Type: TypeMerge, Workspace: "w1", Branch: "agent-1/fix"}},
 		{name: "another workspace", entry: Entry{Type: TypeMerge, Workspace: "w1", SourceDir: "/wt/two"}},
 		{name: "merged upstream", entry: Entry{Type: TypeMerge, Workspace: "w1", PRWasMerged: true}},
@@ -431,6 +432,8 @@ func TestAMergeEntryNamingTwoSourcesIsRefused(t *testing.T) {
 		{name: "a branch already merged upstream", entry: Entry{Type: TypeMerge, Workspace: "w1", Branch: "b", PRWasMerged: true}},
 		{name: "keep_open on a branch", entry: Entry{Type: TypeMerge, Workspace: "w1", Branch: "b", KeepOpen: true}},
 		{name: "keep_open on merged upstream", entry: Entry{Type: TypeMerge, Workspace: "w1", PRWasMerged: true, KeepOpen: true}},
+		{name: "detached on a branch", entry: Entry{Type: TypeMerge, Workspace: "w1", Branch: "b", Detached: true}},
+		{name: "detached and kept open", entry: Entry{Type: TypeMerge, Workspace: "w1", Detached: true, KeepOpen: true}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -134,13 +134,19 @@ test_enqueue_own_keep_open_keeps_the_workspace() {
   expect_args "--enqueue-own --keep-open asks to keep this workspace open" "merge-queue -own -keep-open"
 }
 
+test_enqueue_own_in_place_runs_in_this_workspace() {
+  mkfixture
+  invoke --enqueue-own --in-place
+  expect_args "--enqueue-own --in-place asks for the merge to run in this workspace" "merge-queue -own -in-place"
+}
+
 test_enqueue_own_refuses_an_unknown_option() {
   mkfixture
   invoke --enqueue-own --bogus
   if [ "$RUN_RC" -eq 2 ] && [ -z "$(daemon_args)" ]; then
-    pass "--enqueue-own refuses an option other than --keep-open"
+    pass "--enqueue-own refuses an option other than --in-place or --keep-open"
   else
-    fail "--enqueue-own refuses an option other than --keep-open" "exit=$RUN_RC" "$RUN_OUT"
+    fail "--enqueue-own refuses an option other than --in-place or --keep-open" "exit=$RUN_RC" "$RUN_OUT"
   fi
 }
 
@@ -452,6 +458,7 @@ test_workspace_verbs_share_one_main_worktree_refusal() {
 
 test_enqueue_own_requests_the_own_branch
 test_enqueue_own_keep_open_keeps_the_workspace
+test_enqueue_own_in_place_runs_in_this_workspace
 test_enqueue_own_refuses_an_unknown_option
 test_enqueue_own_refuses_uncommitted_work
 test_enqueue_own_refuses_the_main_worktree

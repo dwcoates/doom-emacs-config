@@ -89,6 +89,7 @@ import {
   peerMessageRow,
   subagentResultUnit,
   subagentHandbackRow,
+  mergeHandbackRow,
   removedRow,
   detachedSubagentRow,
   feedId,
@@ -157,6 +158,7 @@ describe("arm coverage", () => {
       "shellHead",
       "peerMessage",
       "subagentHandback",
+      "mergeHandback",
       "removed",
       "permission",
       "question",
@@ -1000,6 +1002,18 @@ describe("a subagent hand-back", () => {
     const row = await drawRow(subagentHandbackRow());
     // Assert
     expect(row.querySelector(".subagent-handback-badge")?.children.length).toBe(0);
+  });
+});
+
+describe("a detached merge's hand-back", () => {
+  it("draws the label the daemon composed, verbatim, as a badge", async () => {
+    // Arrange / Act
+    const row = await drawRow(mergeHandbackRow());
+    // Assert
+    expect([row.querySelector(".merge-handback-badge")?.textContent, row.querySelector(".bubble")]).toEqual([
+      "merge of fix-flaky landed",
+      null,
+    ]);
   });
 });
 

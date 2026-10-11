@@ -30,7 +30,7 @@ func normalizeDir(dir string) (string, error) {
 
 // workspaceColumns is the one select list every workspace read shares, so a
 // column added to the row can never be decoded by only some of them.
-const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, last_selected_at, last_activity_at, merged_at, spawned_shim_pid, created_at, result_end, result_read, hidden`
+const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, last_selected_at, last_activity_at, merged_at, spawned_shim_pid, created_at, result_end, result_read, hidden, merge_of, merge_request_id`
 
 // scanWorkspace decodes one workspace row all-or-nothing: an out-of-range
 // priority is a decode failure, never a silently substituted default.
@@ -47,9 +47,17 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 		created  int64
 		end      sql.NullString
 		read     bool
+		mergeOf  sql.NullString
+		request  sql.NullString
 	)
-	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &created, &end, &read, &ws.Hidden); err != nil {
+	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &created, &end, &read, &ws.Hidden, &mergeOf, &request); err != nil {
 		return Workspace{}, err
+	}
+	if mergeOf.Valid != request.Valid {
+		return Workspace{}, &DecodeError{Table: "workspaces", Row: string(ws.ID), Field: "merge_of", Err: errors.New("a merge workspace records both its requester and its request")}
+	}
+	if mergeOf.Valid {
+		ws.MergeOf = &MergeOrigin{Requester: WorkspaceID(mergeOf.String), Request: DetachedMergeID(request.String)}
 	}
 	if end.Valid {
 		result := TurnResultEnd(end.String)
@@ -150,11 +158,16 @@ func (s *store) RegisterWorkspace(ctx context.Context, dir string, facts Registe
 			ParentBranch: facts.ParentBranch,
 			Parent:       facts.Parent,
 			CreatedAt:    time.Now().UTC(),
+			MergeOf:      facts.MergeOf,
+		}
+		var mergeOf, request any
+		if out.MergeOf != nil {
+			mergeOf, request = string(out.MergeOf.Requester), string(out.MergeOf.Request)
 		}
 		_, err = tx.ExecContext(ctx,
-			`INSERT INTO workspaces (id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, is_current, last_selected_at, merged_at, serving_instance, created_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, NULL, NULL, 0, NULL, NULL, NULL, ?)`,
-			out.ID, out.Repo, out.Dir, out.Name, out.Branch, out.ParentBranch, nullWorkspace(out.Parent), nanos(out.CreatedAt))
+			`INSERT INTO workspaces (id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, is_current, last_selected_at, merged_at, serving_instance, created_at, merge_of, merge_request_id)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, NULL, NULL, 0, NULL, NULL, NULL, ?, ?, ?)`,
+			out.ID, out.Repo, out.Dir, out.Name, out.Branch, out.ParentBranch, nullWorkspace(out.Parent), nanos(out.CreatedAt), mergeOf, request)
 		if err != nil {
 			return err
 		}

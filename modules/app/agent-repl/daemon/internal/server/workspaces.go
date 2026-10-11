@@ -655,7 +655,8 @@ func (s *server) MergeWorkspace(
 	if err != nil {
 		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
 	}
-	if err := s.deps.Merge.Enqueue(ctx, merge.Request{Workspace: subject.Record.ID, Source: source, By: merge.RequestedByUser}); err != nil {
+	detached := req.Msg.GetSource().GetOwnBranch().GetDetached() != nil
+	if err := s.deps.Merge.Enqueue(ctx, merge.Request{Workspace: subject.Record.ID, Source: source, By: merge.RequestedByUser, Detached: detached}); err != nil {
 		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
 	}
 	// The verb moved the session's standing or the composer's gate; the host
@@ -674,7 +675,10 @@ func (s *server) MergeWorkspace(
 func (s *server) mergeSource(ctx context.Context, requester ids.WorkspaceID, source *agentreplv1.MergeWorkspaceSource) (wsm.MergeSource, error) {
 	switch arm := source.GetSource().(type) {
 	case *agentreplv1.MergeWorkspaceSource_OwnBranch:
-		return wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch, KeepOpen: arm.OwnBranch.GetKeepOpen()}, nil
+		// THE RUN DECIDES keep_open: only an in-place merge can close the
+		// requester. A detached run is carried on the request (merge.Request),
+		// which mints its identity.
+		return wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch, KeepOpen: arm.OwnBranch.GetInPlace().GetKeepOpen()}, nil
 	case *agentreplv1.MergeWorkspaceSource_Workspace:
 		id := ids.WorkspaceID(arm.Workspace.GetRef().GetId())
 		record, ended, err := s.registryWorkspace(ctx, id)

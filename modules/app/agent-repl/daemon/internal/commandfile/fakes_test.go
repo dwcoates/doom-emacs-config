@@ -129,7 +129,9 @@ type fakeMerge struct {
 	by []merge.Requester
 	// sources records what each enqueue merges.
 	sources []wsm.MergeSource
-	err     error
+	// detached is each request's run: true for a detached merge.
+	detached []bool
+	err      error
 
 	// evicted records every Evict, and evictErr is what Evict answers.
 	evicted  []ids.WorkspaceID
@@ -163,6 +165,7 @@ func (m *fakeMerge) Enqueue(_ context.Context, req merge.Request) error {
 	m.enqueued = append(m.enqueued, req.Workspace)
 	m.by = append(m.by, req.By)
 	m.sources = append(m.sources, req.Source)
+	m.detached = append(m.detached, req.Detached)
 	return nil
 }
 

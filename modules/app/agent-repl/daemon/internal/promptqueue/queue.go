@@ -70,6 +70,10 @@ type wsState struct {
 	// be judged against; the call's settle delivers or judges them (redrive).
 	// Guarded by q.mu.
 	parked []Submission
+	// deferredJoins are the joins a standing call deferred (joinLocked); the
+	// call's settle takes each again against the turn it was judged to join
+	// (redrive). Guarded by q.mu.
+	deferredJoins []deferredJoin
 
 	// reviving reports that a BACKGROUND revival goroutine is already running,
 	// so a second submission joins it rather than spawning a second one.

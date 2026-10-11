@@ -797,8 +797,11 @@ func TestApplyFileMapsEachMergeSourceOntoTheRequest(t *testing.T) {
 		name string
 		body string
 		want wsm.MergeSource
+		// detached is whether the request runs in a merge workspace.
+		detached bool
 	}{
 		{name: "own branch", body: `[{"type":"merge","workspace":"w1"}]`, want: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}},
+		{name: "own branch detached", body: `[{"type":"merge","workspace":"w1","detached":true}]`, want: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}, detached: true},
 		{name: "own branch kept open", body: `[{"type":"merge","workspace":"w1","keep_open":true}]`, want: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch, KeepOpen: true}},
 		{name: "a branch", body: `[{"type":"merge","workspace":"w1","branch":"agent-1/fix"}]`, want: wsm.MergeSource{Kind: wsm.MergeSourceBranch, Branch: "agent-1/fix"}},
 		{name: "another workspace", body: `[{"type":"merge","workspace":"w1","source_dir":"/tree/w2"}]`, want: wsm.MergeSource{Kind: wsm.MergeSourceWorkspace, Workspace: "w2"}},
@@ -818,8 +821,8 @@ func TestApplyFileMapsEachMergeSourceOntoTheRequest(t *testing.T) {
 			}
 
 			// Assert.
-			if len(f.merge.sources) != 1 || f.merge.sources[0] != tt.want || f.merge.enqueued[0] != "w1" {
-				t.Fatalf("requests = %v from %v, want %+v from w1", f.merge.sources, f.merge.enqueued, tt.want)
+			if len(f.merge.sources) != 1 || f.merge.sources[0] != tt.want || f.merge.enqueued[0] != "w1" || f.merge.detached[0] != tt.detached {
+				t.Fatalf("requests = %v (detached %v) from %v, want %+v (detached %v) from w1", f.merge.sources, f.merge.detached, f.merge.enqueued, tt.want, tt.detached)
 			}
 		})
 	}

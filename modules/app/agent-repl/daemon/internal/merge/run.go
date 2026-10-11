@@ -311,7 +311,7 @@ func (r *run) upsert(round tabRound, tab *frontendv1.FeedMergeTab) {
 	if r.exiting() {
 		return
 	}
-	r.o.deps.Feed.UpsertDurable(r.ws, mergeFeed(r.lease.ID), tabRow(r.ws, r.lease.ID, round.kind, round.n, tab))
+	r.o.publishTab(r.ws, r.lease.ID, round.kind, round.n, tab)
 }
 
 // head publishes the bubble's head row with the state arm in force.

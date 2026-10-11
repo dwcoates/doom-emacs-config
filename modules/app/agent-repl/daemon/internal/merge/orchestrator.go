@@ -105,6 +105,11 @@ type orchestrator struct {
 	// later acquired under, so the queued bubble and the admitted one are one
 	// bubble.
 	ledgerOf map[ids.WorkspaceID]ids.LeaseID
+	// mirrorOf caches, per merging workspace, its bubble's SECOND placement:
+	// set (non-nil) for a merge workspace, nil for every other. A workspace's
+	// merge origin and dir are fixed at its registration, so the answer never
+	// changes once read.
+	mirrorOf map[ids.WorkspaceID]*mirror
 	// resumes are the merges the boot recovery found a progress record for,
 	// keyed by workspace: the admission pump runs each from its record, ahead
 	// of anything waiting in its repository's line (Recover, startResumed).
@@ -210,6 +215,7 @@ func newOrchestrator(deps Deps) (*orchestrator, error) {
 		runsByWorkspace: map[ids.WorkspaceID]*run{},
 		requested:       map[ids.WorkspaceID]*requestWait{},
 		ledgerOf:        map[ids.WorkspaceID]ids.LeaseID{},
+		mirrorOf:        map[ids.WorkspaceID]*mirror{},
 		resumes:         map[ids.WorkspaceID]progressDoc{},
 		transferred:     map[ids.WorkspaceID]bool{},
 		offers:          map[ids.WorkspaceID]bool{},

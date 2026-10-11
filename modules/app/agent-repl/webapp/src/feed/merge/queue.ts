@@ -35,16 +35,6 @@ import { liveElapsedClock } from "../../elapsed-clock.js";
 import { log } from "../../log.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import { guardMalformed } from "../../rpc/guard.js";
-import { crossCuttingSentence } from "../../rpc/refuse.js";
-import { SELECT_WORKSPACE_EXPECTED_ARMS } from "../../rpc/refusal.js";
-import { callUnary } from "../../rpc/unary.js";
-import { isMalformedView } from "../../rpc/malformed.js";
-import { create } from "@bufbuild/protobuf";
-import {
-  SelectWorkspaceRequestSchema,
-  SelectWorkspaceResponseSchema,
-  type SelectWorkspaceResponse,
-} from "../../../../proto/gen/ts/agentrepl/v1/endpoint_select_workspace_pb";
 import type {
   FeedMergeQueue,
   FeedMergeQueueEntry,
@@ -52,6 +42,7 @@ import type {
 import type { WorkspaceRef } from "../../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { armName } from "../renderers.js";
 import type { RowContext } from "../renderers.js";
+import { jumpToWorkspace, type JumpSite } from "./jump.js";
 import { drawFeedMergeTabLabel } from "./tab-strip.js";
 
 const PATH = "FeedMergeQueue";
@@ -150,76 +141,21 @@ export function drawFeedMergeQueueEntry(
   return el;
 }
 
+/** Where a merge queue entry's jump is recorded and its refusal drawn. */
+const QUEUE_JUMP: JumpSite = {
+  describe: "a merge queue entry",
+  operation: "merge.queue-select",
+  refusalClass: "merge-queue-refusal",
+};
+
 /**
- * The jump: `SelectWorkspace`, echoed verbatim, answered at the row.
- *
- * A MALFORMED VIEW IS NOT A TRANSPORT FAILURE and travels up loudly rather
- * than being drawn as "could not be reached", which would state the wrong
- * thing about the daemon.
+ * The jump: `SelectWorkspace`, echoed verbatim, answered at the row
+ * (`jumpToWorkspace`).
  */
-export async function selectQueueEntryWorkspace(
+export function selectQueueEntryWorkspace(
   entry: HTMLElement,
   rc: RowContext,
   workspace: WorkspaceRef,
 ): Promise<void> {
-  clearRefusal(entry);
-  log.info("selecting a workspace from a merge queue entry", {
-    operation: "merge.queue-select",
-    context: { workspace: workspace.id },
-  });
-  let response: SelectWorkspaceResponse;
-  try {
-    response = await callUnary(
-      rc.ctx,
-      "SelectWorkspace",
-      (client) => client.selectWorkspace(create(SelectWorkspaceRequestSchema, { workspace })),
-      SelectWorkspaceResponseSchema,
-    );
-  } catch (err) {
-    if (isMalformedView(err)) throw err;
-    entry.append(drawRefusal("transport", "the daemon could not be reached"));
-    return;
-  }
-  const result = requireCase(response.result, "SelectWorkspaceResponse.result");
-  switch (result.case) {
-    case "success":
-      // Nothing is drawn: the roster stream carries the new `current`.
-      return;
-    case "error": {
-      const cause = requireCase(result.value.cause, "SelectWorkspaceError.cause");
-      const expected = SELECT_WORKSPACE_EXPECTED_ARMS[cause.case];
-      if (expected !== undefined) {
-        // An expected answer, not a refusal: nothing is drawn at the entry.
-        log.info(`SelectWorkspace was answered ${cause.case}: ${expected}`, {
-          operation: "merge.queue-select-expected-answer",
-          context: { arm: cause.case, workspace: workspace.id },
-        });
-        return;
-      }
-      const sentence =
-        crossCuttingSentence("SelectWorkspace", cause) ?? "that workspace could not be selected";
-      log.warn(`SelectWorkspace was refused: ${sentence}`, {
-        operation: "merge.queue-select-refused",
-        context: { arm: cause.case, workspace: workspace.id },
-      });
-      entry.append(drawRefusal(cause.case, sentence));
-      return;
-    }
-    default:
-      return unreachableArm("SelectWorkspaceResponse.result", armName(result));
-  }
-}
-
-/** The refusal, inside the row that made the call. */
-function drawRefusal(arm: string, text: string): HTMLElement {
-  const el = document.createElement("div");
-  el.className = "refusal merge-queue-refusal";
-  el.setAttribute("data-arm", arm);
-  el.textContent = text;
-  return el;
-}
-
-/** Drop whatever a previous click on this row left behind. */
-function clearRefusal(entry: HTMLElement): void {
-  for (const stale of entry.querySelectorAll(":scope > .merge-queue-refusal")) stale.remove();
+  return jumpToWorkspace(entry, rc, workspace, QUEUE_JUMP);
 }

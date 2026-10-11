@@ -12,9 +12,14 @@
 # refusal's cause when refused.
 #
 # Verbs:
-#   --enqueue-own [--keep-open]  Merge this workspace's own branch. The
-#                                workspace closes once it lands, unless
-#                                --keep-open.
+#   --enqueue-own [--in-place | --keep-open]
+#                                Merge this workspace's own branch. By
+#                                default it runs detached, in a merge
+#                                workspace forked from this one, and this
+#                                workspace stays free. --in-place runs it in
+#                                this workspace, which closes once it lands;
+#                                --keep-open runs it in place and keeps this
+#                                workspace open.
 #   --land-workspace <dir>       Merge ANOTHER workspace's branch, named by its
 #                                worktree. That workspace closes once it lands.
 #   --land-branch <branch>       Merge a branch that is no workspace (a
@@ -131,7 +136,8 @@ case "${1:-}" in
     case "${2:-}" in
       "") ;;
       --keep-open) keep=(-keep-open) ;;
-      *) die "--enqueue-own takes only --keep-open, not $2" ;;
+      --in-place) keep=(-in-place) ;;
+      *) die "--enqueue-own takes only --in-place or --keep-open, not $2" ;;
     esac
     top="$(workspace_top)" || exit 2
     if [ -n "$(git -C "$top" status --porcelain 2>/dev/null)" ]; then
@@ -227,7 +233,7 @@ case "${1:-}" in
     run_verb "$control"
     ;;
   *)
-    printf 'usage: run.sh --enqueue-own [--keep-open] | --land-workspace <dir> | --land-branch <branch> | --land-commits <commit>... | --pr-merged | --remove-branch <branch> | --dequeue-own | --dequeue-workspace <dir> | --pause-queue [<repo-dir>] | --resume-queue [<repo-dir>]\n' >&2
+    printf 'usage: run.sh --enqueue-own [--in-place | --keep-open] | --land-workspace <dir> | --land-branch <branch> | --land-commits <commit>... | --pr-merged | --remove-branch <branch> | --dequeue-own | --dequeue-workspace <dir> | --pause-queue [<repo-dir>] | --resume-queue [<repo-dir>]\n' >&2
     exit 1
     ;;
 esac
