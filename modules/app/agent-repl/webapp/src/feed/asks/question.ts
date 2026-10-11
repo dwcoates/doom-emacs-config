@@ -28,6 +28,8 @@
  * the values it served, so a label this end trimmed or re-cased is a label it
  * can no longer match.
  */
+import { drawToolHead, drawToolName } from "../cards/tool-head.js";
+import { drawAskHint } from "./hint.js";
 import { createControl, type Control } from "../../control.js";
 import { log } from "../../log.js";
 import {
@@ -117,12 +119,8 @@ export function drawFeedQuestion(u: FeedQuestion, rc: RowContext): HTMLElement {
 
 /** The tool card's head: the card's name where a call names its tool. */
 function drawHead(): HTMLElement {
-  const head = document.createElement("div");
-  head.className = "tool-head";
-  const name = document.createElement("span");
-  name.className = "tool-name";
-  name.textContent = QUESTION_TITLE;
-  head.append(name);
+  const head = drawToolHead();
+  head.append(drawToolName(QUESTION_TITLE));
   return head;
 }
 
@@ -198,11 +196,7 @@ function drawOpenBatch(u: FeedQuestion, open: FeedQuestionOpen, rc: RowContext):
   });
   wrap.append(shown);
 
-  const hint = document.createElement("div");
-  hint.className = "ask-hint";
-  hint.setAttribute("data-ask-hint", "");
-  hint.textContent = TYPE_IN_EDITOR_HINT;
-  wrap.append(hint, status);
+  wrap.append(drawAskHint(TYPE_IN_EDITOR_HINT), status);
   return wrap;
 }
 
