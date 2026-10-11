@@ -77,6 +77,8 @@ owner was not asked about protobuf shapes.
 
 ### D2 — what is held: merges, prompts, offers
 
+- SUPERSEDED for merges by R1: a running merge's bubble is master's pinned
+  row, not a held item.
 - A merge bubble is held while its merge is live (queued or running), decided
   by the feed resolver from the merge head row's own result arm. A terminal
   head (success or error) settles it.
@@ -102,6 +104,8 @@ owner was not asked about protobuf shapes.
 
 ### D4 — a held item's identity is the FeedId its settled row will carry
 
+- SUPERSEDED for merges by R1; it stands for prompts.
+
 - A merge's held item carries the merge head row's FeedId, a prompt's carries
   the FeedId its prompt row will carry, and an offer's is minted from the offer
   kind. The webapp therefore keeps one element per item across the settle:
@@ -109,6 +113,8 @@ owner was not asked about protobuf shapes.
   rows.
 
 ### D5 — order within the section
+
+- SUPERSEDED by R1: prompts in queue order, then the offer.
 
 - Merges first, then prompts in queue order, then the offer. A prompt held
   while a merge runs is delivered after the merge, so the item that settles
@@ -125,6 +131,8 @@ owner was not asked about protobuf shapes.
   growth pushes the feed up and never scrolls it).
 
 ### P1 — the protobufs (landed)
+
+- The `merge` arm is SUPERSEDED by R1 and retired (tag 2 reserved).
 
 - `frontend/v1/daemon_hold.proto` is renamed `frontend/v1/feed_held.proto`.
   `DaemonHoldTray` and `DaemonHoldItem` are replaced by `FeedHeld` (the
@@ -150,6 +158,9 @@ owner was not asked about protobuf shapes.
   `DaemonHoldTray` or `DaemonHoldItem`.
 
 ### I1 — implementation (2026-10-11), as built
+
+- The held-merge parts (STORE, the settle of a merge's bubble) are SUPERSEDED
+  by R1 and were never landed.
 
 - DAEMON: the feed resolver owns the section (resolve/feed/held.go). Its
   publication log carries a row or a held change (`Publication`), and a tail
@@ -182,3 +193,24 @@ owner was not asked about protobuf shapes.
   webapp layer), the webapp unit, integration and WebKit suites, the Go fake
   daemon's suite, and a new WebKit test asserting a held merge's growth never
   moves the painted tail.
+
+### R1 — 2026-10-11: a running merge's bubble is master's pinned row
+
+- WHAT: master landed its own home for the running merge's bubble while this
+  work was in flight (merge-bubble-tail, owner-ruled 2026-10-10): the merge
+  head is a row of the root feed pinned below every settled row
+  (`frontend.v1.FeedRowOrder.pinned`, `UpsertDurablePinned` in the feed
+  resolver), and its pin settles to an ordinary key when the merge lands
+  (`wsm.DurableFeedRow.SettledFrom`). The held section keeps prompts and
+  offers only. `frontend.v1.FeedHeldItem.merge` is retired (tag 2 and the
+  name reserved), the `held_feed_merges` table and `FeedController.settle`
+  are not landed, and the held section orders prompts then the offer.
+- WHY: both designs answer the same owner rulings (the bubble sits at the
+  feed's bottom, grows the feed upward, keeps its element and fold across the
+  landing, and folds only when the merge lands). Two homes for one bubble
+  would be two ways to draw it, so the one already on master is kept, and
+  the held section stays the home of what has not yet been delivered.
+- KEPT: the held section on the root feed's connection (D1, D3), the
+  `TailFollow` exemption's deletion (a pinned merge's growth is growth at the
+  tail, which a standing follow keeps in view), the merge body redrawn in
+  place, and the WebKit test, which now grows the pinned merge row.
