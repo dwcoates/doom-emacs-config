@@ -2293,6 +2293,75 @@ describe("the prompt glimmer's intensity", () => {
   });
 });
 
+/**
+ * THE PROMPT GLIMMER DARKENS, NEVER BRIGHTENS (owner ruling, 2026-10-11: "the
+ * bright brights on the current wave are too bright").
+ *
+ * The band is a dark wash on a two-bubble-wide image panned from 200% to
+ * -100%, a travel of three bubble widths. A point of the bubble sits under the
+ * band for the band's own width of that travel, so a band narrower than the
+ * bubble keeps every point at its plain fill for most of the pass: the bubble
+ * reads as resting at its own color with a darker band crossing it. A band
+ * spanning the whole image (the retired 0%-100%) darkened each point for two
+ * thirds of the pass, and the plain fill flashed through the gap as a glint.
+ */
+describe("the prompt glimmer's band geometry", () => {
+  /** The working prompt's gradient stops, as percentages of the image. */
+  function bandStops(): { start: number; peak: number; end: number } {
+    const gradient = rulesOf(stylesheet)
+      .filter((rule) => rule.selectors.includes('.bubble[data-role="prompt"][data-wave="working"]'))
+      .map((rule) => /background-image:\s*linear-gradient\(90deg,\s*transparent ([\d.]+)%,\s*var\(--bubble-wave\) ([\d.]+)%,\s*transparent ([\d.]+)%\)/.exec(rule.declarations))
+      .find((match) => match !== null);
+    if (gradient === undefined || gradient === null) throw new Error("no working-prompt band gradient found");
+    return { start: Number(gradient[1]), peak: Number(gradient[2]), end: Number(gradient[3]) };
+  }
+
+  /** The image is `background-size: 200%`, so one image percent is 0.02 bubble widths. */
+  const BUBBLES_PER_IMAGE_PERCENT = 2 / 100;
+  /** `200%` to `-100%` of a leftover of minus one bubble width: three bubble widths. */
+  const PASS_TRAVEL_BUBBLES = 3;
+
+  it("keeps the band narrower than the bubble, so the bubble's own fill is the resting color", () => {
+    // Arrange / Act
+    const { start, end } = bandStops();
+
+    // Assert
+    expect((end - start) * BUBBLES_PER_IMAGE_PERCENT).toBeLessThan(1);
+  });
+
+  it("darkens each point for under a third of the pass", () => {
+    // Arrange / Act
+    const { start, end } = bandStops();
+    const darkFraction = ((end - start) * BUBBLES_PER_IMAGE_PERCENT) / PASS_TRAVEL_BUBBLES;
+
+    // Assert
+    expect(darkFraction).toBeLessThan(1 / 3);
+  });
+
+  it("peaks the wash at the band's center, so the band is symmetric", () => {
+    // Arrange / Act
+    const { start, peak, end } = bandStops();
+
+    // Assert
+    expect(peak - start).toBeCloseTo(end - peak, 5);
+  });
+
+  it("still enters fully off the left edge and leaves fully off the right", () => {
+    // Arrange — the keyframes' offsets, in bubble widths from the box's left edge.
+    const { start, end } = bandStops();
+    const fromOffset = -2;
+    const toOffset = 1;
+
+    // Act
+    const bandRightAtFrom = fromOffset + end * BUBBLES_PER_IMAGE_PERCENT;
+    const bandLeftAtTo = toOffset + start * BUBBLES_PER_IMAGE_PERCENT;
+
+    // Assert
+    expect(bandRightAtFrom).toBeLessThanOrEqual(0);
+    expect(bandLeftAtTo).toBeGreaterThanOrEqual(1);
+  });
+});
+
 // THE ASYNC BUBBLE'S EXPANDED CAP (owner ruling, 2026-09-23) is `75cqh`, which
 // only means "three quarters of the feed" while the feed's scrolling viewport is
 // the size container `cqh` resolves against. The cap itself is asserted on a
