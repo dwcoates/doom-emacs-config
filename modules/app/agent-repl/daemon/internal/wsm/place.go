@@ -10,10 +10,10 @@ import (
 )
 
 // A WORKSPACE'S ROSTER PLACE is the stored order its siblings draw in, on the
-// sidebar and on the tab bar that walks it (schema.go's `place`). Priority only
-// decides the place a workspace LANDS on -- when it is created and when it is
-// re-opened -- and the user's swaps move it after that; a later priority change
-// leaves it where it is.
+// sidebar and on the tab bar that walks it (schema.go's `place`). A created
+// workspace LANDS on the place its priority picks; a re-opened one always moves
+// to the LAST place; the user's swaps move it after that, and a later priority
+// change leaves it where it is.
 //
 // Places are unique (the workspaces_by_place index), so siblings never tie and
 // a swap always moves something. At rest every place is at least 1: 0 is the
@@ -57,6 +57,11 @@ func landingPlace(ctx context.Context, tx *sql.Tx, repo RepoID, p *Priority, sel
 			return 0, err
 		}
 	}
+	return lastPlace(ctx, tx, self)
+}
+
+// lastPlace answers the place after every other workspace's, self left out.
+func lastPlace(ctx context.Context, tx *sql.Tx, self WorkspaceID) (int64, error) {
 	var last sql.NullInt64
 	if err := tx.QueryRowContext(ctx, `SELECT MAX(place) FROM workspaces WHERE id <> ?`, self).Scan(&last); err != nil {
 		return 0, err
@@ -64,34 +69,18 @@ func landingPlace(ctx context.Context, tx *sql.Tx, repo RepoID, p *Priority, sel
 	return last.Int64 + 1, nil
 }
 
-// reland moves an existing workspace onto the place its priority lands it on,
-// as landingPlace decides. It parks the row first, so the shift around the
-// landing place can pass over the place it is leaving.
-func reland(ctx context.Context, tx *sql.Tx, id WorkspaceID) (int64, error) {
-	var (
-		repo     RepoID
-		priority sql.NullInt64
-	)
-	err := scanWorkspaceRow(ctx, tx, id, "repo_id, priority", &repo, &priority)
+// moveLast moves an existing workspace onto the place after every other one:
+// where a re-opened workspace always goes, whatever its priority.
+func moveLast(ctx context.Context, tx *sql.Tx, id WorkspaceID) (int64, error) {
+	at, err := lastPlace(ctx, tx, id)
 	if err != nil {
 		return 0, err
 	}
-	var p *Priority
-	if priority.Valid {
-		level := Priority(priority.Int64)
-		p = &level
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE workspaces SET place = ? WHERE id = ?`, parkedPlace, id); err != nil {
-		return 0, err
-	}
-	at, err := landingPlace(ctx, tx, repo, p, id)
+	res, err := tx.ExecContext(ctx, `UPDATE workspaces SET place = ? WHERE id = ?`, at, id)
 	if err != nil {
 		return 0, err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE workspaces SET place = ? WHERE id = ?`, at, id); err != nil {
-		return 0, err
-	}
-	return at, nil
+	return at, requireOneRow(res, fmt.Sprintf("wsm: workspace %s", id))
 }
 
 // SwapPlaces exchanges two workspaces' roster places in one transaction. An

@@ -9,15 +9,17 @@ so a swap needs a stored place and a daemon rpc to exchange two of them.
 
 ## Core design principles
 
-### A stored place orders the roster; priority only picks where a workspace lands
+### A stored place orders the roster; priority only picks where a created workspace lands
 
-- **Principle (owner, 2026-10-11):** priority only controls where a new or
-  re-opened workspace lands by default in the tab-bar and sidebar order; the
-  user may reorder freely so that workspaces of one priority need not be
-  contiguous.
+- **Principle (owner, 2026-10-11):** priority only controls where a new
+  workspace lands by default in the tab-bar and sidebar order; the user may
+  reorder freely so that workspaces of one priority need not be contiguous.
+- **Amended (owner, 2026-10-11, later the same day):** opening a workspace
+  always puts it in the final position (last in the tab bar), whatever its
+  priority. The earlier wording had priority deciding the re-open place too.
 - **Consequences:** every workspace carries a persisted place; roster order
-  among siblings is place order; creating or re-opening a workspace assigns a
-  place derived from its priority; setting a priority later does not move the
+  among siblings is place order; creating a workspace assigns a place derived
+  from its priority, and re-opening one moves it after every other place; setting a priority later does not move the
   workspace.
 - **Reopens:** `claude-repld.internal.resolve.sidebar.lessWorkspace()`'s
   priority-then-name order, and the `SetWorkspacePriority` comment "the roster
@@ -82,10 +84,17 @@ so a swap needs a stored place and a daemon rpc to exchange two of them.
   `ALTER TABLE ... DROP COLUMN` (the rewrite swallows the closing paren), so
   the column's comment sits on its index. The integration fixture's layout-3
   undo relies on that drop.
-- **Landing:** create and re-open put a workspace just before the first
+- **Landing:** create puts a workspace just before the first
   workspace of its repository whose priority is weaker, which is the end of
   its own priority's run; unprioritized lands last. The create path now passes
   the priority into RegisterWorkspace, because a later SetWorkspacePriority no
   longer moves anything.
 - **Sibling test:** the daemon judges siblings against the roster it last
   published (`rosterwalk.RepositorySiblings`), the same tree the user sees.
+- **Re-open:** both re-open paths (OpenWorkspace, and a RegisterWorkspace
+  announcement of a closed workspace) go through `wsm.SetClosed(false)`,
+  which moves the workspace to the place after every other one. Since the
+  place is compared only among siblings, "last" means last within its
+  repository section (and last under its parent when nested); the tab bar
+  walks sections in repository-name order, so the workspace is the last tab
+  of its own section, not of the whole bar.

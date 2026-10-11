@@ -237,15 +237,13 @@ func TestSwapPlacesRefusesAWorkspaceWithItself(t *testing.T) {
 	}
 }
 
-func TestReopeningAClosedWorkspaceLandsItAgain(t *testing.T) {
-	// Arrange: a P1 workspace swapped behind an unprioritized one, then closed.
-	s, _ := testStore(t)
+func TestReopeningAClosedWorkspaceMovesItLast(t *testing.T) {
+	// Arrange: a P1 workspace first, behind it an unprioritized one; the P1
+	// workspace is closed.
+	s, log := testStore(t)
 	repoDir := placeRepo(t)
 	p1 := registerIn(t, s, repoDir, "p1", priority(PriorityP1))
-	none := registerIn(t, s, repoDir, "none", nil)
-	if err := s.SwapPlaces(context.Background(), p1.ID, none.ID); err != nil {
-		t.Fatalf("SwapPlaces: %v", err)
-	}
+	registerIn(t, s, repoDir, "none", nil)
 	if err := s.SetClosed(context.Background(), p1.ID, true); err != nil {
 		t.Fatalf("SetClosed(true): %v", err)
 	}
@@ -255,9 +253,12 @@ func TestReopeningAClosedWorkspaceLandsItAgain(t *testing.T) {
 		t.Fatalf("SetClosed(false): %v", err)
 	}
 
-	// Assert: the priority decides where the re-opened workspace lands.
-	if got := orderedNames(t, s); !slices.Equal(got, []string{"p1", "none"}) {
-		t.Fatalf("place order = %v, want [p1 none]", got)
+	// Assert: the re-opened workspace goes last, whatever its priority.
+	if got := orderedNames(t, s); !slices.Equal(got, []string{"none", "p1"}) {
+		t.Fatalf("place order = %v, want [none p1]", got)
+	}
+	if loggedOperation(log, "daemon.wsm.set_closed", "error") {
+		t.Fatalf("the re-open logged an error: %v", log.Records())
 	}
 }
 
