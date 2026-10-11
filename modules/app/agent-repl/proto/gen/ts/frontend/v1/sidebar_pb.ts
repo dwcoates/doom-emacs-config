@@ -1687,13 +1687,15 @@ export type RosterRow = Message<"frontend.v1.RosterRow"> & {
   closed?: RosterRowClosed | undefined;
 
   /**
-   * PRESENT iff this workspace is a MERGE WORKSPACE: one the daemon forked
+   * PRESENT iff this workspace is an UNMERGED MERGE WORKSPACE: one the daemon forked
    * from another to carry a detached merge
    * (agentrepl.v1.MergeWorkspaceSourceOwnBranchDetached). Such a row is
    * nested under the workspace it was forked from, like a child, but it
    * lands on that workspace's own target branch rather than into it; this
    * marker is what says so, so the nesting is not read as "merges into its
-   * parent". UNSET for every other workspace.
+   * parent". UNSET for every other workspace, and UNSET once the merge
+   * workspace has merged: a recently-merged row draws only its name and its
+   * merge age.
    *
    * @generated from field: optional frontend.v1.RosterRowMergeWorkspace merge_workspace = 58;
    */
