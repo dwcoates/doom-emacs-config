@@ -359,8 +359,27 @@ func (r *resolver) forgetNuked() {
 
 // SetMerge installs one workspace's merge facts.
 func (r *resolver) SetMerge(ws ids.WorkspaceID, facts footer.MergeFacts) {
-	r.mutateWorkspace(ws, "daemon.sidebar.set_merge", "the roster took the merge facts",
-		dlog.Context{"state": facts.State}, func(s *wsState) { s.merge = facts })
+	r.mutateWorkspaceLogged(ws, "daemon.sidebar.set_merge", "the roster took the merge facts",
+		dlog.Context{"state": facts.State}, func(s *wsState, log dlog.Logger) {
+			s.merge = facts
+			// THE MERGE'S OWN FACTS SUPERSEDE ITS REQUEST: a merge the
+			// orchestrator reports is in line (or done), and one it forgot was
+			// abandoned, so either way no request is left standing.
+			s.mergeRequested = false
+			s.noteMergeForOneShot(facts, log)
+		})
+}
+
+// SetMergeRequested raises (true) or lowers (false) the fact that a merge is
+// RECORDED for the workspace and waiting for its requesting turn to end.
+func (r *resolver) SetMergeRequested(ws ids.WorkspaceID, requested bool) {
+	r.mutateWorkspaceLogged(ws, "daemon.sidebar.set_merge_requested", "the roster took whether a merge request is recorded",
+		dlog.Context{"requested": requested}, func(s *wsState, log dlog.Logger) {
+			s.mergeRequested = requested
+			if requested {
+				s.setOneShotFailed(false, "merge_requested", log)
+			}
+		})
 }
 
 // SetSelected records the user's selection.
@@ -519,6 +538,7 @@ func (r *resolver) SetTurnEnded(ws ids.WorkspaceID, how TurnClose) {
 		dlog.Context{"close": int(how)}, func(s *wsState, log dlog.Logger) {
 			cut := contextCut(s.turn)
 			s.turn = nil
+			s.noteTurnEndedForOneShot(log)
 			// THE TURN'S END IS THE RETRY'S END: nothing is left to retry for.
 			s.retrying = ""
 			s.turnEverRan = true
