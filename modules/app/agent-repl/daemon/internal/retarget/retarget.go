@@ -97,7 +97,7 @@ func (s *Service) Retarget(ctx context.Context, ws ids.WorkspaceID, parent *ids.
 		return err
 	}
 	log := s.deps.Log.Global().With(dlog.Context{
-		"workspace": string(ws), "parent": parentID(parent), "target_dir": change.After.Dir,
+		"workspace": string(ws), "parent": ids.Optional(parent), "target_dir": change.After.Dir,
 	})
 	turn, err := s.notify(ctx, change)
 	if err != nil {
@@ -153,12 +153,4 @@ func Describe(target wsm.MergeTarget) string {
 // notice.
 func randomKey() (string, error) {
 	return prompthandler.MintKey("workspace-retargeted")
-}
-
-// parentID spells an optional parent for records, empty for top-level.
-func parentID(parent *ids.WorkspaceID) string {
-	if parent == nil {
-		return ""
-	}
-	return string(*parent)
 }

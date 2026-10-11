@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/ids"
 )
 
 // THE PARENT AND THE MERGE TARGET ARE ONE FACT, STORED TWICE. A workspace's
@@ -114,7 +115,7 @@ type ParentChange struct {
 // close a cycle the check did not see. An unknown workspace is ErrNotFound.
 func (s *store) SetParent(ctx context.Context, id WorkspaceID, parent *WorkspaceID) (ParentChange, error) {
 	const op = "daemon.wsm.set_parent"
-	fields := dlog.Context{"workspace": string(id), "parent": optionalID(parent)}
+	fields := dlog.Context{"workspace": string(id), "parent": ids.Optional(parent)}
 	var change ParentChange
 	err := s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
@@ -134,13 +135,13 @@ func (s *store) SetParent(ctx context.Context, id WorkspaceID, parent *Workspace
 func (s *store) RestoreParent(ctx context.Context, change ParentChange) (stale bool, err error) {
 	const op = "daemon.wsm.restore_parent"
 	fields := dlog.Context{"workspace": string(change.Workspace),
-		"from_parent": optionalID(change.After.Parent), "to_parent": optionalID(change.Before.Parent)}
+		"from_parent": ids.Optional(change.After.Parent), "to_parent": ids.Optional(change.Before.Parent)}
 	err = s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
 		current, err := readTarget(ctx, tx, change.Workspace)
 		if err != nil {
 			return err
 		}
-		if optionalID(current.parent) != optionalID(change.After.Parent) || current.targetDir != change.After.Dir {
+		if ids.Optional(current.parent) != ids.Optional(change.After.Parent) || current.targetDir != change.After.Dir {
 			stale = true
 			return nil
 		}
@@ -307,12 +308,4 @@ func descendsFrom(ctx context.Context, tx *sql.Tx, start, ancestor WorkspaceID) 
 		at = WorkspaceID(parent.String)
 	}
 	return false, fmt.Errorf("wsm: the recorded parents above %s cycle", start)
-}
-
-// optionalID spells an optional workspace id for records, empty for none.
-func optionalID(id *WorkspaceID) string {
-	if id == nil {
-		return ""
-	}
-	return string(*id)
 }
