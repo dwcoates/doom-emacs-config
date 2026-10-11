@@ -240,11 +240,11 @@ export function drawRosterRow(
 
   const when = requireMessage(u.when, `${path}.when`);
   line.appendChild(drawRosterRowWhen(when, sc, `${path}.when`));
-  // A MERGE THAT LANDED TODAY IS GREEN (owner request, 2026-10-11): the name
-  // turns green while its merge is on today's local date, and back to the
-  // repository names' colour once the shared ticker crosses midnight.
+  // A MERGE THAT LANDED TODAY CARRIES A GUTTER (owner request, 2026-10-11):
+  // the row draws an off-white bar while its merge is on today's local date,
+  // and drops it once the shared ticker crosses midnight.
   if (merged && when.shown.case === "merged") {
-    tickMergedToday(label, sc, drawRosterRowWhenMerged(when.shown.value, `${path}.when.merged`));
+    tickMergedToday(line, sc, drawRosterRowWhenMerged(when.shown.value, `${path}.when.merged`));
   }
   const target: VerbTarget = { sc, workspace, name };
   line.appendChild(drawMenuControl(ws, target));
@@ -796,10 +796,10 @@ function tickAge(host: HTMLElement, sc: SidebarContext, atMs: number): void {
   });
 }
 
-/** Mark a merged row's NAME green now and on every tick while its merge is today's. */
-function tickMergedToday(name: HTMLElement, sc: SidebarContext, mergedAtMs: number): void {
+/** Mark a merged ROW's gutter now and on every tick while its merge is today's. */
+function tickMergedToday(row: HTMLElement, sc: SidebarContext, mergedAtMs: number): void {
   tickPaint(sc, (nowMs) => {
-    name.classList.toggle(MERGED_TODAY_CLASS, mergedToday(mergedAtMs, nowMs));
+    row.classList.toggle(MERGED_TODAY_CLASS, mergedToday(mergedAtMs, nowMs));
   });
 }
 
@@ -809,7 +809,7 @@ function tickPaint(sc: SidebarContext, paint: (nowMs: number) => void): void {
   sc.onDispose(sc.ctx.ticker.subscribe(paint));
 }
 
-/** The class a merged row's name carries while its merge landed today. */
+/** The class a merged row carries while its merge landed today. */
 export const MERGED_TODAY_CLASS = "merged-today";
 
 /** Whether MERGED_AT_MS falls on the same LOCAL calendar date as NOW_MS. */
