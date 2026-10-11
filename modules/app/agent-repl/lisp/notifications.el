@@ -12,9 +12,12 @@
 ;;     reports it -- on the WatchDaemon request it connects with (rpc.el) and
 ;;     by `ReportEditorFocus' on every change after (`agent-repl--focus-report').
 ;;
-;;   - WHAT A CLICK DOES.  The host stream's `notification_clicked' push asks
-;;     Emacs to raise its frame and select the clicked workspace's tab
-;;     (`agent-repl--notification-activate').
+;;   - WHAT A CLICK DOES, on Linux.  The host stream's `notification_clicked'
+;;     push asks Emacs to raise its frame and select the clicked workspace's
+;;     tab (`agent-repl--notification-activate').  On macOS the banner
+;;     program brings Emacs forward and the click's own SelectWorkspace moves
+;;     the roster's `current', which the frame follows like any other switch,
+;;     so no push reaches Emacs.
 ;;
 ;; The tab BLINK is neither: it is drawn from the roster's attention marker
 ;; (status.el), not from any notification.
