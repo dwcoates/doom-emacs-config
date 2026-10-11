@@ -197,11 +197,14 @@ func TestBubbleRefusedNotDeliverable(t *testing.T) {
 // UpdateAgent{prompt} to a subagent whose own turn is running is refused
 // with this arm"; endpoint_submit_prompt.proto:
 // SubmitPromptError.bubble_refused{kind: agent_busy}. Driven by the
-// `subagent-detached-live` scenario (agent-shim/claude/shim/src/fake/
+// `subagent-detached-utterance` scenario (agent-shim/claude/shim/src/fake/
 // scenarios/subagents.ts), whose subagent is "left LIVE after the turn ends"
 // and "Nothing here ever finishes the agent" (its own doc comment) — a
 // deterministic, never-settles busy target, avoiding any race against a
-// subagent that might complete on its own.
+// subagent that might complete on its own. It raises NO ask: a send to a
+// bubble with a standing ask answers that ask instead of reaching the shim,
+// so `subagent-detached-live`, whose agent asks right after its turn ends,
+// would race the send against the ask's arrival.
 // ===========================================================================
 
 func TestBubbleRefusedAgentBusy(t *testing.T) {
@@ -216,7 +219,7 @@ func TestBubbleRefusedAgentBusy(t *testing.T) {
 	repo := harness.NewRepo(t)
 	ws := harness.Register(t, w.Daemon, repo.Dir)
 
-	turn := SubmitPrompt(t, w, ws, "!subagent-detached-live")
+	turn := SubmitPrompt(t, w, ws, "!subagent-detached-utterance")
 	AwaitTurnEnded(t, w, ws, turn)
 
 	bubble := rfAwaitFeedRow(t, w, ws, nil, "the live detached-subagent bubble", func(r *frontendv1.FeedRow) bool {
