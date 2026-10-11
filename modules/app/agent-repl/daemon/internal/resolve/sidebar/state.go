@@ -2,6 +2,7 @@ package sidebar
 
 import (
 	"claude-repld/internal/ids"
+	"claude-repld/internal/repodivergence"
 	"claude-repld/internal/resolve/footer"
 	"claude-repld/internal/resolve/ladder"
 	"claude-repld/internal/shimclient"
@@ -402,11 +403,17 @@ type rosterState struct {
 	// selected is the user's selection, which the daemon stamps the moment
 	// SelectWorkspace arrives rather than waiting for WSM to echo it back.
 	selected *ids.WorkspaceID
+	// divergence is each repository's last ahead/behind measure
+	// (SetRepoDivergence). A repository with none is drawn pending.
+	divergence map[ids.RepoID]repodivergence.Measure
 }
 
 // newRosterState builds an empty roster accumulation.
 func newRosterState() *rosterState {
-	return &rosterState{workspaces: map[ids.WorkspaceID]*wsState{}}
+	return &rosterState{
+		workspaces: map[ids.WorkspaceID]*wsState{},
+		divergence: map[ids.RepoID]repodivergence.Measure{},
+	}
 }
 
 // workspace resolves a workspace's live half, minting it on first sight.
