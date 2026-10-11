@@ -2241,3 +2241,14 @@ func (f *fakeFeed) installed() []*wsm.OutputAddress {
 	defer f.mu.Unlock()
 	return append([]*wsm.OutputAddress(nil), f.addresses...)
 }
+
+// THE DIVERGENCE MEASURE'S OPERATIONS are no part of a merge either.
+func (g *fakeGit) Upstream(context.Context, string, string) (gitclient.Upstream, bool, error) {
+	g.record("upstream")
+	return gitclient.Upstream{}, false, errors.New("fakeGit: the merge never reads an upstream")
+}
+
+func (g *fakeGit) AheadBehind(context.Context, string, string, string) (int, int, error) {
+	g.record("ahead_behind")
+	return 0, 0, errors.New("fakeGit: the merge never counts ahead/behind")
+}
