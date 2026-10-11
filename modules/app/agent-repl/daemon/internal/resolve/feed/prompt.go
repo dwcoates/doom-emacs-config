@@ -45,7 +45,7 @@ func (r *resolver) drawAgentPrompt(s *wsState, agent *conversationv1.AgentId, pr
 			if !placed {
 				return
 			}
-			row := r.userPromptRow(s, at, turn, joined, prompt.GetOrigin(), blocks)
+			row := r.userPromptRow(s, at, turn, joined, prompt.GetOrigin(), prompt.GetSaid(), blocks)
 			log.Debug("daemon.feed.folded_prompt",
 				"a prompt folded into a running turn was drawn under that turn",
 				dlog.Context{"turn": turn.GetValue(), "folded_into": joined.GetValue(), "blocks": len(blocks)})
@@ -122,7 +122,7 @@ func (r *resolver) drawAgentPrompt(s *wsState, agent *conversationv1.AgentId, pr
 		if !placed {
 			return
 		}
-		row := r.userPromptRow(s, at, turn, turn, prompt.GetOrigin(), blocks)
+		row := r.userPromptRow(s, at, turn, turn, prompt.GetOrigin(), prompt.GetSaid(), blocks)
 		if turn.GetValue() != "" && !s.rolledBack[ids.TurnID(turn.GetValue())] {
 			// THE PROMPT AS SAID, kept so a rollback can hand it back to the
 			// composer whole (rollback.go): the row holds only drawn blocks.
@@ -187,18 +187,29 @@ func (r *resolver) userPromptRow(
 	prompt *conversationv1.TurnId,
 	turn *conversationv1.TurnId,
 	origin conversationv1.PromptOrigin,
+	said *conversationv1.UserSaid,
 	blocks []*frontendv1.FeedUserPromptBlock,
 ) *frontendv1.FeedRow {
-	return &frontendv1.FeedRow{
-		Id:   r.rowID(s.id, at.feed, feedid.RowKey{Kind: feedid.KindPrompt, ID: prompt.GetValue()}),
-		Turn: turn,
-		Row: &frontendv1.FeedRow_UserPrompt{UserPrompt: &frontendv1.FeedUserPrompt{
-			Author: &frontendv1.FeedUserPromptAuthor{Label: AuthorLabel(origin)},
-			Result: &frontendv1.FeedUserPrompt_Success{Success: &frontendv1.FeedUserPromptSuccess{
-				Body: &frontendv1.FeedUserPromptBody{Blocks: blocks},
-			}},
+	row := PromptRow(origin, said, blocks)
+	row.Id = r.rowID(s.id, at.feed, feedid.RowKey{Kind: feedid.KindPrompt, ID: prompt.GetValue()})
+	row.Turn = turn
+	return row
+}
+
+// PromptRow is what a delivered prompt's row DRAWS, before its identity and
+// turn are stamped on: a user-prompt bubble carrying the drawn blocks under its
+// author.
+//
+// It is EXPORTED because the prompt queue's mirror of an accepted prompt draws
+// the same row under the same FeedId; the two draws compose the row here, so
+// they can never disagree about what a prompt is drawn as.
+func PromptRow(origin conversationv1.PromptOrigin, said *conversationv1.UserSaid, blocks []*frontendv1.FeedUserPromptBlock) *frontendv1.FeedRow {
+	return &frontendv1.FeedRow{Row: &frontendv1.FeedRow_UserPrompt{UserPrompt: &frontendv1.FeedUserPrompt{
+		Author: &frontendv1.FeedUserPromptAuthor{Label: AuthorLabel(origin)},
+		Result: &frontendv1.FeedUserPrompt_Success{Success: &frontendv1.FeedUserPromptSuccess{
+			Body: &frontendv1.FeedUserPromptBody{Blocks: blocks},
 		}},
-	}
+	}}}
 }
 
 // ① THE PROMPT'S WORKING FLAG. FeedUserPrompt.working / FeedAgentPrompt.working
@@ -269,8 +280,9 @@ func (r *resolver) drawPortedPrompt(s *wsState, prompt PortedPrompt) {
 		s.knowTurn(ids.TurnID(prompt.Turn))
 	}
 	at := r.outputPlacement(s, turnOf(turn))
-	blocks := r.drawUserBlocks(s, SaidText(prompt.Text).GetContent())
-	row := r.userPromptRow(s, at, turn, turn, prompt.Origin, blocks)
+	said := SaidText(prompt.Text)
+	blocks := r.drawUserBlocks(s, said.GetContent())
+	row := r.userPromptRow(s, at, turn, turn, prompt.Origin, said, blocks)
 	r.logger(s.id).Debug("daemon.feed.ported_prompt",
 		"a prompt ported from the parent workspace was drawn on the fork's feed",
 		dlog.Context{"turn": prompt.Turn, "origin": prompt.Origin.String(), "blocks": len(blocks)})
