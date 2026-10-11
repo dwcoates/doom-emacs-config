@@ -80,19 +80,21 @@ CREATE TABLE workspaces (
   -- turnResultDDL.
   result_end       TEXT,
   result_read      INTEGER NOT NULL DEFAULT 0,
-  -- THE WORKSPACE'S ROSTER PLACE: siblings draw in ascending place, on the
-  -- sidebar and on the tab bar that walks it. Priority only picks the place a
-  -- workspace LANDS on (create, re-open); the user's swaps move it after that.
-  -- This build's insert always states a place of at least 1. An insert that
-  -- states none (the build before places, still writing during a handover)
-  -- takes 0, and workspaces_land_unplaced moves it after every other place.
-  -- See workspacePlaceDDL and place.go.
   place            INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE UNIQUE INDEX workspaces_one_current ON workspaces(is_current) WHERE is_current = 1;
+-- THE place COLUMN IS THE WORKSPACE'S ROSTER PLACE: siblings draw in ascending place, on
+-- the sidebar and on the tab bar that walks it. Priority only picks the place a
+-- workspace LANDS on (create, re-open); the user's swaps move it after that.
+-- This build's insert always states a place of at least 1. An insert that
+-- states none (the build before places, still writing during a handover)
+-- takes 0, and workspaces_land_unplaced moves it after every other place.
 -- One workspace per place, so two siblings can never tie and a swap can never
--- exchange two equal places into a no-op.
+-- exchange two equal places into a no-op. See workspacePlaceDDL and place.go.
+--
+-- The comment lives here, not inside the table: SQLite's DROP COLUMN rewrite
+-- of a last column preceded by a comment leaves the table text unparsable.
 CREATE UNIQUE INDEX workspaces_by_place ON workspaces(place);
 CREATE TRIGGER workspaces_land_unplaced AFTER INSERT ON workspaces WHEN NEW.place = 0
 BEGIN
