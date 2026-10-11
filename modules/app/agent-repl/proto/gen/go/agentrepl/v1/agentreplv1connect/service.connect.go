@@ -127,9 +127,8 @@ const (
 	// AgentReplSetWorkspaceParentProcedure is the fully-qualified name of the AgentRepl's
 	// SetWorkspaceParent RPC.
 	AgentReplSetWorkspaceParentProcedure = "/agentrepl.v1.AgentRepl/SetWorkspaceParent"
-	// AgentReplSwapWorkspacePlacesProcedure is the fully-qualified name of the AgentRepl's
-	// SwapWorkspacePlaces RPC.
-	AgentReplSwapWorkspacePlacesProcedure = "/agentrepl.v1.AgentRepl/SwapWorkspacePlaces"
+	// AgentReplMoveWorkspaceProcedure is the fully-qualified name of the AgentRepl's MoveWorkspace RPC.
+	AgentReplMoveWorkspaceProcedure = "/agentrepl.v1.AgentRepl/MoveWorkspace"
 	// AgentReplFoldRepositoryProcedure is the fully-qualified name of the AgentRepl's FoldRepository
 	// RPC.
 	AgentReplFoldRepositoryProcedure = "/agentrepl.v1.AgentRepl/FoldRepository"
@@ -281,7 +280,7 @@ var (
 	agentReplSetWorkspacePriorityMethodDescriptor     = agentReplServiceDescriptor.Methods().ByName("SetWorkspacePriority")
 	agentReplSetWorkspaceHiddenMethodDescriptor       = agentReplServiceDescriptor.Methods().ByName("SetWorkspaceHidden")
 	agentReplSetWorkspaceParentMethodDescriptor       = agentReplServiceDescriptor.Methods().ByName("SetWorkspaceParent")
-	agentReplSwapWorkspacePlacesMethodDescriptor      = agentReplServiceDescriptor.Methods().ByName("SwapWorkspacePlaces")
+	agentReplMoveWorkspaceMethodDescriptor            = agentReplServiceDescriptor.Methods().ByName("MoveWorkspace")
 	agentReplFoldRepositoryMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("FoldRepository")
 	agentReplUpdateSidebarViewMethodDescriptor        = agentReplServiceDescriptor.Methods().ByName("UpdateSidebarView")
 	agentReplCreateTaskMethodDescriptor               = agentReplServiceDescriptor.Methods().ByName("CreateTask")
@@ -419,7 +418,8 @@ type AgentReplClient interface {
 	// Bounce the workspace's shim (rebuild if stale); graceful unless forced.
 	// See endpoint_restart_workspace.proto.
 	RestartWorkspace(context.Context, *connect.Request[v1.RestartWorkspaceRequest]) (*connect.Response[v1.RestartWorkspaceResponse], error)
-	// Set or clear a workspace's priority badge; the workspace keeps its place. See
+	// Set or clear a workspace's priority; setting one moves the workspace to
+	// second-to-last within that priority. See
 	// endpoint_set_workspace_priority.proto.
 	SetWorkspacePriority(context.Context, *connect.Request[v1.SetWorkspacePriorityRequest]) (*connect.Response[v1.SetWorkspacePriorityResponse], error)
 	// Move a workspace into the hidden section or back out; a hidden workspace
@@ -429,9 +429,9 @@ type AgentReplClient interface {
 	// same repository, or top-level. Its session is told in the same operation.
 	// See endpoint_set_workspace_parent.proto.
 	SetWorkspaceParent(context.Context, *connect.Request[v1.SetWorkspaceParentRequest]) (*connect.Response[v1.SetWorkspaceParentResponse], error)
-	// Exchange two sibling workspaces' stored roster places. See
-	// endpoint_swap_workspace_places.proto.
-	SwapWorkspacePlaces(context.Context, *connect.Request[v1.SwapWorkspacePlacesRequest]) (*connect.Response[v1.SwapWorkspacePlacesResponse], error)
+	// Move one workspace onto another's place in the registry order. See
+	// endpoint_move_workspace.proto.
+	MoveWorkspace(context.Context, *connect.Request[v1.MoveWorkspaceRequest]) (*connect.Response[v1.MoveWorkspaceResponse], error)
 	FoldRepository(context.Context, *connect.Request[v1.FoldRepositoryRequest]) (*connect.Response[v1.FoldRepositoryResponse], error)
 	// Change one piece of the sidebar's view state (a fold, the grouping),
 	// pushed to every page on the roster stream. See
@@ -772,10 +772,10 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(agentReplSetWorkspaceParentMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
-		swapWorkspacePlaces: connect.NewClient[v1.SwapWorkspacePlacesRequest, v1.SwapWorkspacePlacesResponse](
+		moveWorkspace: connect.NewClient[v1.MoveWorkspaceRequest, v1.MoveWorkspaceResponse](
 			httpClient,
-			baseURL+AgentReplSwapWorkspacePlacesProcedure,
-			connect.WithSchema(agentReplSwapWorkspacePlacesMethodDescriptor),
+			baseURL+AgentReplMoveWorkspaceProcedure,
+			connect.WithSchema(agentReplMoveWorkspaceMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
 		foldRepository: connect.NewClient[v1.FoldRepositoryRequest, v1.FoldRepositoryResponse](
@@ -1079,7 +1079,7 @@ type agentReplClient struct {
 	setWorkspacePriority     *connect.Client[v1.SetWorkspacePriorityRequest, v1.SetWorkspacePriorityResponse]
 	setWorkspaceHidden       *connect.Client[v1.SetWorkspaceHiddenRequest, v1.SetWorkspaceHiddenResponse]
 	setWorkspaceParent       *connect.Client[v1.SetWorkspaceParentRequest, v1.SetWorkspaceParentResponse]
-	swapWorkspacePlaces      *connect.Client[v1.SwapWorkspacePlacesRequest, v1.SwapWorkspacePlacesResponse]
+	moveWorkspace            *connect.Client[v1.MoveWorkspaceRequest, v1.MoveWorkspaceResponse]
 	foldRepository           *connect.Client[v1.FoldRepositoryRequest, v1.FoldRepositoryResponse]
 	updateSidebarView        *connect.Client[v1.UpdateSidebarViewRequest, v1.UpdateSidebarViewResponse]
 	createTask               *connect.Client[v1.CreateTaskRequest, v1.CreateTaskResponse]
@@ -1286,9 +1286,9 @@ func (c *agentReplClient) SetWorkspaceParent(ctx context.Context, req *connect.R
 	return c.setWorkspaceParent.CallUnary(ctx, req)
 }
 
-// SwapWorkspacePlaces calls agentrepl.v1.AgentRepl.SwapWorkspacePlaces.
-func (c *agentReplClient) SwapWorkspacePlaces(ctx context.Context, req *connect.Request[v1.SwapWorkspacePlacesRequest]) (*connect.Response[v1.SwapWorkspacePlacesResponse], error) {
-	return c.swapWorkspacePlaces.CallUnary(ctx, req)
+// MoveWorkspace calls agentrepl.v1.AgentRepl.MoveWorkspace.
+func (c *agentReplClient) MoveWorkspace(ctx context.Context, req *connect.Request[v1.MoveWorkspaceRequest]) (*connect.Response[v1.MoveWorkspaceResponse], error) {
+	return c.moveWorkspace.CallUnary(ctx, req)
 }
 
 // FoldRepository calls agentrepl.v1.AgentRepl.FoldRepository.
@@ -1602,7 +1602,8 @@ type AgentReplHandler interface {
 	// Bounce the workspace's shim (rebuild if stale); graceful unless forced.
 	// See endpoint_restart_workspace.proto.
 	RestartWorkspace(context.Context, *connect.Request[v1.RestartWorkspaceRequest]) (*connect.Response[v1.RestartWorkspaceResponse], error)
-	// Set or clear a workspace's priority badge; the workspace keeps its place. See
+	// Set or clear a workspace's priority; setting one moves the workspace to
+	// second-to-last within that priority. See
 	// endpoint_set_workspace_priority.proto.
 	SetWorkspacePriority(context.Context, *connect.Request[v1.SetWorkspacePriorityRequest]) (*connect.Response[v1.SetWorkspacePriorityResponse], error)
 	// Move a workspace into the hidden section or back out; a hidden workspace
@@ -1612,9 +1613,9 @@ type AgentReplHandler interface {
 	// same repository, or top-level. Its session is told in the same operation.
 	// See endpoint_set_workspace_parent.proto.
 	SetWorkspaceParent(context.Context, *connect.Request[v1.SetWorkspaceParentRequest]) (*connect.Response[v1.SetWorkspaceParentResponse], error)
-	// Exchange two sibling workspaces' stored roster places. See
-	// endpoint_swap_workspace_places.proto.
-	SwapWorkspacePlaces(context.Context, *connect.Request[v1.SwapWorkspacePlacesRequest]) (*connect.Response[v1.SwapWorkspacePlacesResponse], error)
+	// Move one workspace onto another's place in the registry order. See
+	// endpoint_move_workspace.proto.
+	MoveWorkspace(context.Context, *connect.Request[v1.MoveWorkspaceRequest]) (*connect.Response[v1.MoveWorkspaceResponse], error)
 	FoldRepository(context.Context, *connect.Request[v1.FoldRepositoryRequest]) (*connect.Response[v1.FoldRepositoryResponse], error)
 	// Change one piece of the sidebar's view state (a fold, the grouping),
 	// pushed to every page on the roster stream. See
@@ -1951,10 +1952,10 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(agentReplSetWorkspaceParentMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
-	agentReplSwapWorkspacePlacesHandler := connect.NewUnaryHandler(
-		AgentReplSwapWorkspacePlacesProcedure,
-		svc.SwapWorkspacePlaces,
-		connect.WithSchema(agentReplSwapWorkspacePlacesMethodDescriptor),
+	agentReplMoveWorkspaceHandler := connect.NewUnaryHandler(
+		AgentReplMoveWorkspaceProcedure,
+		svc.MoveWorkspace,
+		connect.WithSchema(agentReplMoveWorkspaceMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
 	agentReplFoldRepositoryHandler := connect.NewUnaryHandler(
@@ -2287,8 +2288,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplSetWorkspaceHiddenHandler.ServeHTTP(w, r)
 		case AgentReplSetWorkspaceParentProcedure:
 			agentReplSetWorkspaceParentHandler.ServeHTTP(w, r)
-		case AgentReplSwapWorkspacePlacesProcedure:
-			agentReplSwapWorkspacePlacesHandler.ServeHTTP(w, r)
+		case AgentReplMoveWorkspaceProcedure:
+			agentReplMoveWorkspaceHandler.ServeHTTP(w, r)
 		case AgentReplFoldRepositoryProcedure:
 			agentReplFoldRepositoryHandler.ServeHTTP(w, r)
 		case AgentReplUpdateSidebarViewProcedure:
@@ -2514,8 +2515,8 @@ func (UnimplementedAgentReplHandler) SetWorkspaceParent(context.Context, *connec
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.SetWorkspaceParent is not implemented"))
 }
 
-func (UnimplementedAgentReplHandler) SwapWorkspacePlaces(context.Context, *connect.Request[v1.SwapWorkspacePlacesRequest]) (*connect.Response[v1.SwapWorkspacePlacesResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.SwapWorkspacePlaces is not implemented"))
+func (UnimplementedAgentReplHandler) MoveWorkspace(context.Context, *connect.Request[v1.MoveWorkspaceRequest]) (*connect.Response[v1.MoveWorkspaceResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.MoveWorkspace is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) FoldRepository(context.Context, *connect.Request[v1.FoldRepositoryRequest]) (*connect.Response[v1.FoldRepositoryResponse], error) {
