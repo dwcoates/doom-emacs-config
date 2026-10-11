@@ -1,0 +1,93 @@
+{
+  "system": "proto",
+  "requirements": [
+    {
+      "id": "node",
+      "kind": "program",
+      "why": "builds and runs the TypeScript systems (shim, webapp) and the protobuf TypeScript codegen",
+      "profile": "run",
+      "platforms": [
+        "darwin",
+        "linux"
+      ],
+      "command": "node",
+      "version": {
+        "args": [
+          "--version"
+        ],
+        "min": "20.0"
+      },
+      "install": {
+        "brew": "node"
+      }
+    },
+    {
+      "id": "npm",
+      "kind": "program",
+      "why": "installs the TypeScript systems' dependencies from their lockfiles",
+      "profile": "run",
+      "platforms": [
+        "darwin",
+        "linux"
+      ],
+      "command": "npm",
+      "install": {
+        "brew": "node"
+      }
+    },
+    {
+      "id": "protoc",
+      "kind": "program",
+      "why": "compiles proto/src into the generated Go and TypeScript bindings (make -C proto all)",
+      "profile": "dev",
+      "platforms": [
+        "darwin",
+        "linux"
+      ],
+      "command": "protoc",
+      "install": {
+        "brew": "protobuf"
+      }
+    },
+    {
+      "id": "protoc-gen-go",
+      "kind": "program",
+      "why": "the Go protobuf plugin, pinned to the version proto/Makefile checks the generated headers against",
+      "profile": "dev",
+      "platforms": [
+        "darwin",
+        "linux"
+      ],
+      "command": "protoc-gen-go",
+      "version": {
+        "args": [
+          "--version"
+        ],
+        "min": "1.36.11"
+      },
+      "install": {
+        "go_install": "google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.11"
+      }
+    },
+    {
+      "id": "protoc-gen-connect-go",
+      "kind": "program",
+      "why": "the Connect Go plugin, pinned to the version proto/Makefile names",
+      "profile": "dev",
+      "platforms": [
+        "darwin",
+        "linux"
+      ],
+      "command": "protoc-gen-connect-go",
+      "version": {
+        "args": [
+          "--version"
+        ],
+        "min": "1.17.0"
+      },
+      "install": {
+        "go_install": "connectrpc.com/connect/cmd/protoc-gen-connect-go@v1.17.0"
+      }
+    }
+  ]
+}
