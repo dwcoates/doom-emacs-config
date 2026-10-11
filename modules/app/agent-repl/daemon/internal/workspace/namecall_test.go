@@ -213,14 +213,14 @@ func TestNamingCorrectionStatesTheLimitAndTheCount(t *testing.T) {
 		want string
 	}{
 		{name: "the word limit", want: fmt.Sprintf("the name must be AT MOST %d words", SlugWordLimit)},
-		{name: "the previous answer's word count", want: "It has 4 words"},
+		{name: "the previous answer's word count", want: "It has 5 words"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange.
 			f := newFixture(t)
 			script(f,
-				headlessAnswer{text: "agent-repl-input-shorter"},
+				headlessAnswer{text: "agent-repl-input-box-shorter"},
 				headlessAnswer{text: "input-shorter"})
 
 			// Act.
