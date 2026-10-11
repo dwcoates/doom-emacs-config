@@ -65,6 +65,7 @@
  * markdown and a half-typed construct (`**`, an opening fence) is never drawn
  * as its raw syntax. Both attributes count rendered characters.
  */
+import { fitsReserve, reserveLabels, reserveLabelsCss } from "../../width-reserve.js";
 import type {
   FeedResponse,
   FeedResponseError,
@@ -460,11 +461,6 @@ const USAGE_AGE_WIDEST_MS: readonly number[] = [
   59 * 1000,
 ];
 
-/** A label with every figure zeroed: in tabular figures, the same width. */
-function zeroFigures(label: string): string {
-  return label.replace(/\d/g, "0");
-}
-
 /** The duration's label for an age, as the corner draws it. */
 function usageAgeLabel(ageMs: number): string {
   return `${formatAge(ageMs)} ago`;
@@ -477,9 +473,7 @@ function usageAgeLabel(ageMs: number): string {
  * Derived from `formatAge` itself, so a formatter that changes its shapes
  * changes the reserve with it.
  */
-export const USAGE_AGE_RESERVE_LABELS: readonly string[] = USAGE_AGE_WIDEST_MS.map((ms) =>
-  zeroFigures(usageAgeLabel(ms)),
-);
+export const USAGE_AGE_RESERVE_LABELS: readonly string[] = reserveLabels(USAGE_AGE_WIDEST_MS, usageAgeLabel);
 
 /** The custom property the sizing ghost (styles.css) reads its reserved labels from. */
 export const USAGE_RESERVE_LABELS_PROPERTY = "--usage-reserve-labels";
@@ -490,7 +484,7 @@ export const USAGE_RESERVE_LABELS_PROPERTY = "--usage-reserve-labels";
  * the widest label, exactly as the corner's one-cell reserve grid is.
  */
 export function usageReserveLabelsCss(): string {
-  return `"${USAGE_AGE_RESERVE_LABELS.join("\\A ")}"`;
+  return reserveLabelsCss(USAGE_AGE_RESERVE_LABELS);
 }
 
 /**
@@ -499,11 +493,7 @@ export function usageReserveLabelsCss(): string {
  * that is "no wider". An age of a thousand days or more does not fit.
  */
 export function usageAgeWithinReserve(label: string): boolean {
-  const zeroed = zeroFigures(label);
-  const shape = zeroed.replace(/0+/g, "0");
-  return USAGE_AGE_RESERVE_LABELS.some(
-    (reserved) => reserved.replace(/0+/g, "0") === shape && zeroed.length <= reserved.length,
-  );
+  return fitsReserve(label, USAGE_AGE_RESERVE_LABELS);
 }
 
 /**
