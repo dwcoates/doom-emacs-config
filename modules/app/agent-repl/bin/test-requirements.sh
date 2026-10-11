@@ -96,7 +96,7 @@ run() {
   set -e
 }
 
-has() { printf '%s\n' "$OUT" | grep -qF -- "$1"; }
+has() { grep -qF -- "$1" <<<"$OUT"; }
 ran() { grep -qF -- "$1" "$CASE/transcript"; }
 
 PROGRAM='{"id": "tool", "kind": "program", "why": "the case needs it", "profile": "run", "platforms": ["darwin"], "command": "tool", "install": {"brew": "tool"}}'
@@ -111,7 +111,7 @@ test_the_real_manifests_honor_the_contract() {
   OUT="$(env -i HOME="$TMP" PATH="/usr/bin:/bin" AGENT_REPL_REQUIREMENTS_PLATFORM=darwin /bin/bash "$RUNNER" list 2>&1)"
   RC=$?
   set -e
-  if [ "$RC" -eq 0 ] && printf '%s\n' "$OUT" | grep -q '^terminal-notifier	' && printf '%s\n' "$OUT" | grep -q '^service-shim-store	'; then
+  if [ "$RC" -eq 0 ] && grep -q '^terminal-notifier	' <<<"$OUT" && grep -q '^service-shim-store	' <<<"$OUT"; then
     pass "the real manifests load, validate and list"
   else
     fail "the real manifests" "rc=$RC" "$OUT"
