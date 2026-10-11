@@ -1,7 +1,7 @@
 ---
 name: merge-queue
-description: Land work on master through the agent-repl merge queue — the ONLY way into master in this repository. From this workspace, request the merge of its own branch, only some commits of its own branch (a fix made amid unfinished work), another workspace's branch, a subagent's branch, or a branch already merged upstream, then end the turn. Its own branch merges detached by default, in a merge workspace forked from this one, so this workspace stays free and the outcome arrives here as a report; every other merge runs in this workspace, and its outcome (landed, or failed in conflicts, tests or other) and any conflict or test-failure repairs arrive in this session. Any merge may be asked for at the FRONT of the queue, ahead of every ordinary merge waiting (a hotfix). Also controls the queue itself, taking this workspace's or another workspace's merge off the queue and pausing or resuming the queue for one repository or all. Use whenever work is finished and must reach master, whenever you would otherwise run git merge, git commit, git cherry-pick or git push onto master, when a subagent reports a finished branch, whenever a queued merge must be removed or the queue paused or resumed, or when invoked as /merge-queue.
-argument-hint: "own [in-place | keep-open] [front] | workspace <worktree-dir> [front] | branch <branch-name> [front] | commits <commit>... [front] | pr-merged [front] | dequeue own | dequeue workspace <worktree-dir> | pause [<repo-dir>] | resume [<repo-dir>]"
+description: Land work on master through the agent-repl merge queue — the ONLY way into master in this repository. From this workspace, request the merge of its own branch, only some commits of its own branch (a fix made amid unfinished work), another workspace's branch, a subagent's branch, or a branch already merged upstream, then end the turn. It also announces, from anywhere inside a turn, a one-shot merge of this workspace that runs once the turn ends and closes this workspace once it lands. Its own branch merges detached by default, in a merge workspace forked from this one, so this workspace stays free and the outcome arrives here as a report; every other merge runs in this workspace, and its outcome (landed, or failed in conflicts, tests or other) and any conflict or test-failure repairs arrive in this session. Any merge may be asked for at the FRONT of the queue, ahead of every ordinary merge waiting (a hotfix). Also controls the queue itself, taking this workspace's or another workspace's merge off the queue and pausing or resuming the queue for one repository or all. Use whenever work is finished and must reach master, whenever you would otherwise run git merge, git commit, git cherry-pick or git push onto master, when a subagent reports a finished branch, whenever a queued merge must be removed or the queue paused or resumed, or when invoked as /merge-queue.
+argument-hint: "own [in-place | keep-open] [front] | one-shot [front] | workspace <worktree-dir> [front] | branch <branch-name> [front] | commits <commit>... [front] | pr-merged [front] | dequeue own | dequeue workspace <worktree-dir> | pause [<repo-dir>] | resume [<repo-dir>]"
 allowed-tools: Bash(.claude/skills/merge-queue/run.sh:*)
 ---
 
@@ -16,11 +16,12 @@ Asks the merge queue, from this workspace, to land a finished branch in its merg
 | `own` | Merge the branch checked out in this workspace's worktree as it stands now, into master, or into its parent workspace when it is a child, DETACHED: in a merge workspace forked from this one, leaving this workspace free; the outcome is reported back into this session. |
 | `own in-place` | Merge the branch checked out in this workspace's worktree in THIS workspace, holding its prompts until the merge ends; this workspace closes once it lands. |
 | `own keep-open` | Merge the branch checked out in this workspace's worktree in THIS workspace, and keep this workspace open once it lands. |
+| `one-shot` | Announce NOW, without ending the turn, that this workspace merges its branch in place once the current turn ends and closes once it lands; this workspace is marked a one-shot at once. |
 | `workspace <worktree-dir>` | Merge the branch checked out in ANOTHER workspace's worktree (for example a one-shot a subagent ran in), into master, or into that workspace's parent when it is a child; that workspace closes once it lands. |
 | `branch <branch-name>` | Merge a branch that is no workspace (a subagent's `Agent`-tool branch). |
 | `commits <commit>...` | Merge ONLY the named commits of this workspace's branch, rebased onto master, leaving the rest of the branch unmerged; this workspace stays open. |
 | `pr-merged` | This workspace's branch already merged upstream; update master from upstream and close this workspace. |
-| `front` | Added to any merge argument above (`own`, `workspace`, `branch`, `commits`, `pr-merged`): the merge goes to the FRONT of its queue once it is put in line, ahead of every ordinary merge waiting and behind any earlier front merge, never ahead of the merge already running. |
+| `front` | Added to any merge argument above (`own`, `one-shot`, `workspace`, `branch`, `commits`, `pr-merged`): the merge goes to the FRONT of its queue once it is put in line, ahead of every ordinary merge waiting and behind any earlier front merge, never ahead of the merge already running. |
 | `dequeue own` | Take this workspace's own merge off the queue. |
 | `dequeue workspace <worktree-dir>` | Take ANOTHER workspace's merge off the queue, by its worktree. |
 | `pause [<repo-dir>]` | Pause the queue of the repository whose main checkout is `<repo-dir>`, else of every repository. |
@@ -28,13 +29,13 @@ Asks the merge queue, from this workspace, to land a finished branch in its merg
 
 ## Steps
 
-0. Confirm the work is ready (merge arguments only; skip to step 1 for `dequeue`, `pause` and `resume`).
+0. Confirm the work is ready (merge arguments only; skip to step 1 for `one-shot`, `dequeue`, `pause` and `resume`).
   - Every change is committed, and the applicable tests passed before each commit.
   - The branch to land is the one checked out in the worktree being merged; a worktree with no branch checked out is refused.
   - **Why this lives here**: the queue lands exactly what is committed, and a red test gate comes back as a repair prompt in the session the merge runs in.
 
 1. Dispatch on the argument.
-  - *NOTE*: when `front` was given with a merge argument (steps 1a–1e), append `--front` to that step's `run.sh` call; the exit codes are unchanged.
+  - *NOTE*: when `front` was given with a merge argument (steps 1a–1e and 1j), append `--front` to that step's `run.sh` call; the exit codes are unchanged.
   - a. If `own`: call `.claude/skills/merge-queue/run.sh --enqueue-own`.
     - *NOTE*: with `own in-place`, call `.claude/skills/merge-queue/run.sh --enqueue-own --in-place` instead.
     - *NOTE*: with `own keep-open`, call `.claude/skills/merge-queue/run.sh --enqueue-own --keep-open` instead.
@@ -80,6 +81,10 @@ Asks the merge queue, from this workspace, to land a finished branch in its merg
     - `EXIT CODE 2:` IMMEDIATELY terminate and surface the raw error.
     - `EXIT CODE 5:` The resume was refused. Go to step 4.
     - `EXIT CODE 8:` No answer arrived in time. Go to step 6.
+  - j. If `one-shot`: call `.claude/skills/merge-queue/run.sh --announce-one-shot`.
+    - `EXIT CODE 0:` The one-shot merge is announced. Go to step 7.
+    - `EXIT CODE 2:` IMMEDIATELY terminate and surface the raw error.
+    - `EXIT CODE 5:` The announcement was refused. Go to step 4.
 
 2. End the turn.
   - Say in one line that the merge is requested, then END THE TURN IMMEDIATELY.
@@ -105,6 +110,14 @@ Asks the merge queue, from this workspace, to land a finished branch in its merg
 6. Unanswered (`dequeue`, `pause`, `resume`).
   - Report the printed lines verbatim and STOP.
   - CRITICAL: NEVER re-issue the request; it stays pending.
+
+7. Announced (`one-shot`).
+  - Say in one line that the one-shot merge is announced, then CONTINUE the turn's work.
+  - Commit every change, with its tests passing, before the turn ends.
+    - *NOTE*: work left uncommitted when the turn ends fails the merge, and this workspace stays open.
+  - End the turn normally once the work is done.
+  - CRITICAL: NEVER also request `own` for this workspace; the announcement is its merge request.
+  - Answer the merge's later prompts as in step 3.
 
 ## Notes
 
