@@ -136,6 +136,15 @@ export const PROMPT_CAP_LINES = 5 satisfies CappedLines;
 export const BUBBLE_CLASS = "bubble";
 export { BUBBLE_EXPAND_ONLY_CLASS, BUBBLE_STRIP_CLASS };
 
+/**
+ * The class every element of a bubble's FOOTER wears: chrome after the scroll
+ * box shown in both states (a cut-short marker). The stylesheet keys the "more
+ * below" fade's anchor on it: a box a footer follows ends its fade at its own
+ * bottom edge, above the footer, while a box nothing shown follows ends it at
+ * the bubble's.
+ */
+export const BUBBLE_FOOTER_CLASS = "bubble-footer";
+
 /** What every bubble spec states, whatever its role. */
 interface BubbleSpecBase {
   /** The `data-state` value, when the kind's message has a state arm. */
@@ -273,7 +282,10 @@ export function drawBubble(spec: BubbleSpec, previous?: HTMLElement): DrawnBubbl
   const after = keepSaid(liveChrome(bubble, "footer", scroll), [...expandOnly, ...(spec.footer ?? [])]);
   // Position decides the region, so a kept element that moved between the two
   // takes the class of the one it now stands in.
-  after.forEach((el, i) => el.classList.toggle(BUBBLE_EXPAND_ONLY_CLASS, i < expandOnly.length));
+  after.forEach((el, i) => {
+    el.classList.toggle(BUBBLE_EXPAND_ONLY_CLASS, i < expandOnly.length);
+    el.classList.toggle(BUBBLE_FOOTER_CLASS, i >= expandOnly.length);
+  });
   placeChildren(bubble, [...strip, scroll, ...after]);
 
   const liveCorner = reused === null ? [] : [...scroll.children].filter((el) => el !== body);
