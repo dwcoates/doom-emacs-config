@@ -192,7 +192,7 @@ func TestTheTakeoverClaimsAnOrphanOnTheJoiningReadOnlyHandle(t *testing.T) {
 		t.Fatalf("Serving: %v", err)
 	}
 	if owner == nil || *owner != selfInstance {
-		t.Fatalf("serving owner = %q, want this daemon: the takeover promotes before it claims", ownerText(owner))
+		t.Fatalf("serving owner = %q, want this daemon: the takeover promotes before it claims", ids.Optional(owner))
 	}
 }
 

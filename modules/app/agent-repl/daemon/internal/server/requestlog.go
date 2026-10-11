@@ -120,6 +120,18 @@ func requestWorkspaceID(msg proto.Message) string {
 	return workspace.Get(id).String()
 }
 
+// enter records the rpc's entry under its boundary operation and answers the
+// record of its completion, which the caller defers over its named error.
+func (b requestBoundary) enter() func(*error) {
+	operation := boundaryOperation(b.rpc)
+	b.log.Debug(operation, "entered the rpc handler", b.entryContext())
+	b.log.Debug(operation, "resolved the rpc request scope", b.entryContext())
+	b.log.Debug(operation, "delegated the rpc request", b.entryContext())
+	return func(err *error) {
+		b.log.Debug(operation, "completed the rpc handler", b.completionContext(*err))
+	}
+}
+
 func (b requestBoundary) entryContext() dlog.Context {
 	return dlog.Context{
 		"rpc":          b.rpc,

@@ -104,4 +104,11 @@ enum PromptOrigin {
   // FeedRow.merge_handback marker, never as a prompt bubble: the words are
   // the daemon's, and the merge itself is read in its bubble.
   PROMPT_ORIGIN_MERGE_HANDBACK = 31;
+  // The daemon's notice to a workspace's session that its merge target was
+  // changed (agentrepl.v1.SetWorkspaceParent): it names the new target — the
+  // parent workspace's name and checkout, or the repository's default branch
+  // — and says the workspace's own-branch merge now lands there. Submitted
+  // through the prompt queue as a deferred prompt, so it waits behind a
+  // running turn and wakes an idle agent. Drawn as an ordinary prompt bubble.
+  PROMPT_ORIGIN_WORKSPACE_RETARGETED = 32;
 }

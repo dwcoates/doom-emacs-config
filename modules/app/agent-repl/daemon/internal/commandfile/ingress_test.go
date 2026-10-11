@@ -3,6 +3,7 @@ package commandfile
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -13,6 +14,7 @@ import (
 
 	"claude-repld/internal/ids"
 	"claude-repld/internal/merge"
+	"claude-repld/internal/promptqueue"
 	"claude-repld/internal/workspace"
 	"claude-repld/internal/wsm"
 )
@@ -20,8 +22,11 @@ import (
 func TestNewRefusesMissingCollaborators(t *testing.T) {
 	full := Deps{
 		Dir: "/output", Verbs: newFakeVerbs(), Merge: &fakeMerge{},
-		Prompts: &fakePrompts{}, Log: newFakeSurfaces(),
+		Prompts: &fakePrompts{}, Retarget: &fakeRetarget{}, Log: newFakeSurfaces(),
 		Serves: func() bool { return true }, Home: "/Users/me",
+	}
+	if _, err := New(full); err != nil {
+		t.Fatalf("New(full) = %v, want the complete deps accepted so each strip is what is refused", err)
 	}
 	tests := []struct {
 		name  string
@@ -31,6 +36,7 @@ func TestNewRefusesMissingCollaborators(t *testing.T) {
 		{name: "no verbs", strip: func(d *Deps) { d.Verbs = nil }},
 		{name: "no merge orchestrator", strip: func(d *Deps) { d.Merge = nil }},
 		{name: "no prompt handler", strip: func(d *Deps) { d.Prompts = nil }},
+		{name: "no retarget operation", strip: func(d *Deps) { d.Retarget = nil }},
 		{name: "no log surfaces", strip: func(d *Deps) { d.Log = nil }},
 		{name: "no serving answer", strip: func(d *Deps) { d.Serves = nil }},
 		{name: "no home directory", strip: func(d *Deps) { d.Home = "" }},
@@ -1088,5 +1094,134 @@ func TestApplyFileQuarantinesAPauseTheOrchestratorRefuses(t *testing.T) {
 				t.Fatalf("record cause %q, want the %s arm named", cause, tt.arm)
 			}
 		})
+	}
+}
+
+// RETARGET entries reach the retarget operation SetWorkspaceParent runs, the
+// parent keyed by its worktree root and null (or the main checkout) top-level.
+
+func TestApplyFileMapsRetargetOntoTheRetargetOperation(t *testing.T) {
+	tests := []struct {
+		name   string
+		parent string
+		want   retargetCall
+	}{
+		{name: "to a parent workspace", parent: `"/tree/p1"`, want: retargetCall{WS: "w1", Parent: "p1"}},
+		{name: "to top-level by null", parent: `null`, want: retargetCall{WS: "w1"}},
+		{name: "to top-level by the main checkout", parent: `"/repo"`, want: retargetCall{WS: "w1"}},
+		{name: "to a parent named by a tilde path", parent: `"~/tree/p2"`, want: retargetCall{WS: "w1", Parent: "p2"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.repository("r1", "/repo")
+			f.member("w1", "r1", "child", "/tree/w1")
+			f.member("p1", "r1", "parent", "/tree/p1")
+			f.member("p2", "r1", "home-parent", fixtureHome+"/tree/p2")
+			path := f.write(t, "workspace_commands_retarget.json",
+				`[{"type":"retarget","workspace":"child","project_dir":"/tree/w1","parent":`+tt.parent+`}]`)
+
+			// Act.
+			err := f.ingress.ApplyFile(context.Background(), path)
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("ApplyFile: %v", err)
+			}
+			if len(f.retarget.calls) != 1 || f.retarget.calls[0] != tt.want {
+				t.Fatalf("retargets = %+v, want %+v", f.retarget.calls, tt.want)
+			}
+		})
+	}
+}
+
+func TestApplyFileQuarantinesARetargetAsAnAnswerOrAFault(t *testing.T) {
+	tests := []struct {
+		name      string
+		parent    string
+		err       error
+		wantCause string
+		wantLevel string
+		wantCalls int
+	}{
+		{name: "a parent directory no workspace is at", parent: `"/tree/none"`,
+			wantCause: "unknown_parent", wantLevel: "info"},
+		{name: "the retarget's typed refusal", parent: `null`,
+			err:       &workspace.Refusal{Rpc: "SetWorkspaceParent", Arm: workspace.ArmCycle, Reason: "loop"},
+			wantCause: "cycle", wantLevel: "info", wantCalls: 1},
+		{name: "a session parked at its cold gate", parent: `null`,
+			err:       fmt.Errorf("retarget w1: notify: submit: %w", &promptqueue.ColdGateRefusal{Detail: "resumed cold"}),
+			wantCause: "cold gate", wantLevel: "info", wantCalls: 1},
+		{name: "a retarget that failed", parent: `null`, err: errors.New("disk I/O error"),
+			wantCause: "disk I/O error", wantLevel: "warn", wantCalls: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.repository("r1", "/repo")
+			f.member("w1", "r1", "child", "/tree/w1")
+			f.retarget.err = tt.err
+			path := f.write(t, "workspace_commands_retarget.json",
+				`[{"type":"retarget","workspace":"child","project_dir":"/tree/w1","parent":`+tt.parent+`}]`)
+
+			// Act.
+			err := f.ingress.ApplyFile(context.Background(), path)
+
+			// Assert.
+			if !errors.Is(err, ErrQuarantined) || !strings.Contains(err.Error(), tt.wantCause) {
+				t.Fatalf("ApplyFile = %v, want the file quarantined naming %q", err, tt.wantCause)
+			}
+			if len(f.retarget.calls) != tt.wantCalls {
+				t.Fatalf("retargets = %+v, want %d", f.retarget.calls, tt.wantCalls)
+			}
+			f.record(t, opEntry, tt.wantLevel)
+		})
+	}
+}
+
+func TestApplyFileRefusesARetargetOfAnUnregisteredWorkspace(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	path := f.write(t, "workspace_commands_retarget.json",
+		`[{"type":"retarget","workspace":"ghost","project_dir":"/tree/ghost","parent":null}]`)
+
+	// Act.
+	err := f.ingress.ApplyFile(context.Background(), path)
+
+	// Assert.
+	if !errors.Is(err, ErrQuarantined) || !strings.Contains(err.Error(), "no workspace is registered") {
+		t.Fatalf("ApplyFile = %v, want the file quarantined naming the unregistered workspace", err)
+	}
+	if len(f.retarget.calls) != 0 {
+		t.Fatalf("retargets = %+v, want none", f.retarget.calls)
+	}
+}
+
+// TestCreateAndRetargetShareTheParentSpelling pins that the create's
+// source_ws and the retarget's parent read one directory the same way through
+// parentAt: the main checkout is no parent on both.
+func TestCreateAndRetargetShareTheParentSpelling(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.repository("r1", "/repo")
+	f.member("w1", "r1", "child", "/tree/w1")
+	path := f.write(t, "workspace_commands_both.json",
+		`[{"type":"create","name":"n","git_root":"/repo","source_ws":{"name":"main","path":"/repo"}},`+
+			`{"type":"retarget","workspace":"child","project_dir":"/tree/w1","parent":"/repo"}]`)
+
+	// Act.
+	err := f.ingress.ApplyFile(context.Background(), path)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ApplyFile: %v", err)
+	}
+	if f.verbs.calls[0].Spec.Parent != nil {
+		t.Fatalf("create parent = %v, want none for the main checkout", *f.verbs.calls[0].Spec.Parent)
+	}
+	if len(f.retarget.calls) != 1 || f.retarget.calls[0].Parent != "" {
+		t.Fatalf("retargets = %+v, want top-level for the main checkout", f.retarget.calls)
 	}
 }

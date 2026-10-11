@@ -693,13 +693,14 @@ no client ever sends them.")
 
 (defconst agent-repl-wire-shim-only-prompt-origins
   '("PROMPT_ORIGIN_VENDOR_STARTED" "PROMPT_ORIGIN_LINK_UNRESOLVED"
-    "PROMPT_ORIGIN_MERGE_HANDBACK")
+    "PROMPT_ORIGIN_MERGE_HANDBACK" "PROMPT_ORIGIN_WORKSPACE_RETARGETED")
   "PromptOrigin values no client ever sends: only the shim or the daemon does.
 VENDOR_STARTED names a turn the vendor began on its own, which the shim
 adopts; an editor submit carrying it would claim the vendor started a
 turn the user in fact sent.  LINK_UNRESOLVED is the daemon's own question
 after a clicked feed link resolved to no file.  MERGE_HANDBACK is the
-daemon's report of how a detached merge ended.  None has an elisp
+daemon's report of how a detached merge ended.  WORKSPACE_RETARGETED is
+the daemon's notice that a workspace's merge target changed.  None has an elisp
 spelling at all.")
 
 (defun agent-repl-wire-encode-prompt-origin (value)

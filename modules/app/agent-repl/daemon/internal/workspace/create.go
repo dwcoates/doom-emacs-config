@@ -258,7 +258,7 @@ func (v *verbs) Create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 	global.Debug(opCreate, "recorded the creation job before materialization", dlog.Context{
 		"branch": branch, "worktree_dir": worktreeDir, "target_dir": targetDir,
 		"base_ref": baseRef,
-		"parent":   parentID(parent),
+		"parent":   ids.Optional(parent),
 	})
 
 	reportCreateStage(spec, CreateStageCreatingWorktree)
@@ -383,7 +383,7 @@ func (v *verbs) validateCreate(log dlog.Logger, spec CreateSpec) error {
 		spec.OneShot || strings.TrimSpace(spec.InitialPrompt) != "" || strings.TrimSpace(spec.Name) != "") {
 		log.Error(opCreate, "a merge workspace's create spec contradicts itself", dlog.Context{
 			"requester": string(spec.MergeOf.Requester), "request": string(spec.MergeOf.Request),
-			"fork_from": parentID(spec.ForkFrom), "parent": parentID(spec.Parent), "one_shot": spec.OneShot,
+			"fork_from": ids.Optional(spec.ForkFrom), "parent": ids.Optional(spec.Parent), "one_shot": spec.OneShot,
 			"has_prompt": strings.TrimSpace(spec.InitialPrompt) != "", "name": spec.Name,
 		})
 		return fmt.Errorf("create: a merge workspace forks from its requester %s and is named, prompted and targeted by the daemon alone", spec.MergeOf.Requester)
@@ -594,15 +594,6 @@ func (v *verbs) loadMergeOrigin(ctx context.Context, log dlog.Logger, of wsm.Mer
 		return mergeOrigin{}, fmt.Errorf("create: merge workspace of %s: the requester has no creation job", of.Requester)
 	}
 	return mergeOrigin{requester: requester, job: job}, nil
-}
-
-// parentID spells a parent for the record, empty when the create was spawned
-// from no workspace.
-func parentID(parent *ids.WorkspaceID) string {
-	if parent == nil {
-		return ""
-	}
-	return string(*parent)
 }
 
 // parentWorkspace answers the workspace this create was spawned from, nil when

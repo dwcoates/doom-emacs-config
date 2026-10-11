@@ -1426,7 +1426,7 @@ func TestAHandoverAdoptionClaimsOnTheJoiningReadOnlyHandle(t *testing.T) {
 		t.Fatalf("Serving: %v", err)
 	}
 	if owner == nil || *owner != selfInstance {
-		t.Fatalf("serving owner = %q, want this daemon once the adoption promoted its handle", ownerText(owner))
+		t.Fatalf("serving owner = %q, want this daemon once the adoption promoted its handle", ids.Optional(owner))
 	}
 }
 

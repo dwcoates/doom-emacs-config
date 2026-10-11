@@ -581,6 +581,23 @@ func validateSetWorkspaceHiddenRequest(req *agentreplv1.SetWorkspaceHiddenReques
 	return nil
 }
 
+// validateSetWorkspaceParentRequest is SetWorkspaceParentRequest's base
+// function: a workspace and the new target are both required, and a child_of
+// target names its parent.
+func validateSetWorkspaceParentRequest(req *agentreplv1.SetWorkspaceParentRequest) *connect.Error {
+	if err := validateWorkspaceRef("workspace", req.GetWorkspace()); err != nil {
+		return err
+	}
+	switch target := req.GetParent().(type) {
+	case *agentreplv1.SetWorkspaceParentRequest_ChildOf:
+		return validateWorkspaceRef("child_of.parent", target.ChildOf.GetParent())
+	case *agentreplv1.SetWorkspaceParentRequest_TopLevel:
+		return nil
+	default:
+		return invalid("parent", "a parent arm is required")
+	}
+}
+
 // validateFoldRepositoryRequest is FoldRepositoryRequest's base function.
 func validateFoldRepositoryRequest(req *agentreplv1.FoldRepositoryRequest) *connect.Error {
 	if err := validateRepositoryRef("repository", req.GetRepository()); err != nil {

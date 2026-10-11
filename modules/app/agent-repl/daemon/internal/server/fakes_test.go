@@ -235,6 +235,27 @@ func (f *fakeOwnership) Standing(context.Context, ids.WorkspaceID) (workspace.St
 	return f.standing, f.err
 }
 
+// retargetCall is one Retarget the operation received.
+type retargetCall struct {
+	ws     ids.WorkspaceID
+	parent string
+}
+
+// fakeRetarget answers err and records each retarget.
+type fakeRetarget struct {
+	err   error
+	calls []retargetCall
+}
+
+func (f *fakeRetarget) Retarget(_ context.Context, ws ids.WorkspaceID, parent *ids.WorkspaceID) error {
+	call := retargetCall{ws: ws}
+	if parent != nil {
+		call.parent = string(*parent)
+	}
+	f.calls = append(f.calls, call)
+	return f.err
+}
+
 // fakeVerbs answers whatever the test wired, and records the calls made.
 type fakeVerbs struct {
 	workspace.Verbs
@@ -1158,13 +1179,17 @@ func (f *fakeSidebar) Topic() *publish.Topic[*frontendv1.WorkspaceRoster] { retu
 
 // harness is one running surface over real Connect handlers.
 type harness struct {
-	t         *testing.T
+	t *testing.T
+	// Deps is the COMPLETE dependency set the surface was built from, so a
+	// test of one missing dependency strips exactly that one (withoutDep).
+	Deps      Deps
 	Server    Server
 	HTTP      *httptest.Server
 	Client    agentreplv1connect.AgentReplClient
 	DB        *fakeDB
 	Ownership *fakeOwnership
 	Verbs     *fakeVerbs
+	Retarget  *fakeRetarget
 	Prompts   *fakePrompts
 	Queue     *fakeQueue
 	Merge     *fakeMerge
@@ -1219,6 +1244,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		}},
 		Ownership:  &fakeOwnership{standing: workspace.StandingOwned},
 		Verbs:      &fakeVerbs{},
+		Retarget:   &fakeRetarget{},
 		Prompts:    &fakePrompts{},
 		Queue:      &fakeQueue{},
 		Merge:      &fakeMerge{},
@@ -1250,6 +1276,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		Prompts:           h.Prompts,
 		Queue:             h.Queue,
 		Verbs:             h.Verbs,
+		Retarget:          h.Retarget,
 		Merge:             h.Merge,
 		Drain:             h.Drain,
 		Rollout:           h.Rollout,
@@ -1281,6 +1308,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		apply(&deps)
 	}
 
+	h.Deps = deps
 	surface, err := New(deps)
 	if err != nil {
 		t.Fatalf("build the surface: %v", err)
@@ -1550,4 +1578,13 @@ func (f *fakeEditorInstances) Connected(_ context.Context, instance string) (boo
 
 func (f *fakeNewsDigest) Topic() *publish.Topic[*agentreplv1.NewsDigestStanding] {
 	return &f.topic
+}
+
+// withoutDep answers the harness's complete Deps with ONE dependency stripped,
+// so New's refusal of that dependency is the only refusal it can make,
+// whatever order New checks its dependencies in.
+func (h *harness) withoutDep(strip func(*Deps)) Deps {
+	deps := h.Deps
+	strip(&deps)
+	return deps
 }

@@ -207,16 +207,7 @@ func TestCreateWorkspaceWithAParentNestsTheChildAndTargetsTheParentsWorktreeOnMe
 
 	// Assert: the roster nests the child under the parent.
 	awaitRoster(t, d, roster, "the child nested under its parent", func(r *frontendv1.WorkspaceRoster) bool {
-		parentRow := rosterRepoRow(r, parent.GetId())
-		if parentRow == nil {
-			return false
-		}
-		for _, c := range parentRow.GetChildren() {
-			if c.GetWorkspace().GetWorkspace().GetId() == child.GetId() {
-				return true
-			}
-		}
-		return false
+		return rosterNests(r, parent.GetId(), child.GetId())
 	})
 
 	// Assert: the child's merge lands into the parent's worktree, not main.

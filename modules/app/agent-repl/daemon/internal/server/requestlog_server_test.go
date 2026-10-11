@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 
@@ -101,6 +102,24 @@ func TestRepresentativeRPCHandlersRecordRequestBoundaries(t *testing.T) {
 			req.Header().Set(requestIDHeader, id)
 			_, err := client.MergeWorkspace(ctx, req)
 			return err
+		}},
+		{name: "set workspace parent", operation: "daemon.server.set_workspace_parent", invoke: func(ctx context.Context, client agentreplv1connect.AgentReplClient, id string) error {
+			req := connect.NewRequest(&agentreplv1.SetWorkspaceParentRequest{})
+			req.Header().Set(requestIDHeader, id)
+			_, err := client.SetWorkspaceParent(ctx, req)
+			return err
+		}},
+		{name: "watch footer, a streaming rpc", operation: "daemon.server.watch_footer", invoke: func(ctx context.Context, client agentreplv1connect.AgentReplClient, id string) error {
+			req := connect.NewRequest(&agentreplv1.WatchFooterRequest{})
+			req.Header().Set(requestIDHeader, id)
+			stream, err := client.WatchFooter(ctx, req)
+			if err != nil {
+				return err
+			}
+			defer stream.Close()
+			for stream.Receive() {
+			}
+			return stream.Err()
 		}},
 		{name: "restart workspace", operation: "daemon.server.restart_workspace", invoke: func(ctx context.Context, client agentreplv1connect.AgentReplClient, id string) error {
 			req := connect.NewRequest(&agentreplv1.RestartWorkspaceRequest{})
@@ -201,5 +220,55 @@ func TestRequestBoundaryRecordsNoErrorWhenTheWorkspaceSinkCannotBeResolved(t *te
 		if rec.Operation == "daemon.server.request_boundary" {
 			t.Fatalf("the boundary recorded an error for an unsinkable workspace: %+v", rec)
 		}
+	}
+}
+
+// TestEveryWrapperIsOneCallToTheSharedBoundary fails a wrapper that hand-rolls
+// its own boundary instead of delegating through serveUnary or serveStream.
+func TestEveryWrapperIsOneCallToTheSharedBoundary(t *testing.T) {
+	// Arrange.
+	raw, err := os.ReadFile("requestlog_server.go")
+	if err != nil {
+		t.Fatalf("read requestlog_server.go: %v", err)
+	}
+	source := string(raw)
+
+	// Act.
+	wrappers := strings.Count(source, "func (s *requestLoggingServer) ")
+	shared := strings.Count(source, "return serveUnary(s, ctx, ") + strings.Count(source, "return serveStream(s, ctx, ")
+
+	// Assert.
+	if wrappers == 0 || wrappers != shared {
+		t.Fatalf("%d wrappers and %d delegate through serveUnary or serveStream; every wrapper must", wrappers, shared)
+	}
+	if got := strings.Count(source, "s.server.beginRequest("); got != 2 {
+		t.Fatalf("beginRequest is called %d times, want once in each shared boundary", got)
+	}
+}
+
+// TestBoundaryEnterRecordsEntryAndCompletionUnderTheRPCsOperation pins the
+// four records every rpc's boundary writes, under the operation its name
+// spells.
+func TestBoundaryEnterRecordsEntryAndCompletionUnderTheRPCsOperation(t *testing.T) {
+	// Arrange.
+	log := &recordingLogger{}
+	boundary := requestBoundary{log: log, rpc: "SetWorkspaceParent", requestID: "r-1"}
+	failed := errors.New("refused")
+
+	// Act.
+	boundary.enter()(&failed)
+
+	// Assert.
+	want := []string{"entered the rpc handler", "resolved the rpc request scope", "delegated the rpc request", "completed the rpc handler"}
+	if len(log.records) != len(want) {
+		t.Fatalf("records = %+v, want %d", log.records, len(want))
+	}
+	for i, record := range log.records {
+		if record.Operation != "daemon.server.set_workspace_parent" || record.Message != want[i] || record.Level != "DEBUG" {
+			t.Fatalf("record %d = %+v, want DEBUG %q under daemon.server.set_workspace_parent", i, record, want[i])
+		}
+	}
+	if log.records[3].Context["outcome"] != "error" {
+		t.Fatalf("completion = %+v, want the error outcome", log.records[3])
 	}
 }

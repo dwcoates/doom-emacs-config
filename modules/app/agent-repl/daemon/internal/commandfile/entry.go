@@ -35,6 +35,10 @@ const (
 	// repository's record when no other workspace references it. It destroys
 	// no files.
 	TypeForget = "forget"
+	// TypeRetarget changes where a workspace's merge lands, and tells its
+	// session, through the same operation SetWorkspaceParent runs
+	// (internal/retarget).
+	TypeRetarget = "retarget"
 	// TypeOpen re-opens a closed workspace.
 	TypeOpen = "open"
 	// TypeSwitch selects a workspace.
@@ -168,11 +172,59 @@ type Entry struct {
 	// merge_evict takes off the queue (UpdateMergeQueueEvict.workspace).
 	// Unset evicts the requester's own merge. Evict-only.
 	EvictDir string `json:"evict_dir,omitempty"`
+	// THE RETARGET'S FIELD.
+
+	// Parent is a retarget's new parent, by its worktree root: a registered
+	// workspace of the same repository, whose checkout the merge then lands
+	// in. A JSON null is TOP-LEVEL — the merge lands in the repository's main
+	// checkout — and so is the main checkout's own path. The key is REQUIRED
+	// on a retarget: an absent key is not "top-level", because clearing a
+	// parent changes where work lands and is asked for by name.
+	Parent PresentDir `json:"parent,omitzero"`
+
 	// RepositoryDir names the repository, by its main checkout, whose queue a
 	// merge_pause or merge_resume addresses (RepositoryRef.dir). Unset is
 	// every repository, the daemon-wide switch the rpc's unset ref means.
 	// Pause- and resume-only.
 	RepositoryDir string `json:"repository_dir,omitempty"`
+}
+
+// PresentDir is a directory field whose PRESENCE is meaningful apart from its
+// value: `"parent": null` is a stated request, and a missing key is none.
+// encoding/json reads both as the zero value of a plain or pointer field, so
+// the key's presence is recorded by the decode itself.
+type PresentDir struct {
+	// Present reports that the key was in the entry, null included.
+	Present bool
+	// Dir is the directory, empty for null.
+	Dir string
+}
+
+// MarshalJSON writes the directory, or null for a present key with none. An
+// absent key is the zero value, which the field's omitzero leaves out.
+func (d PresentDir) MarshalJSON() ([]byte, error) {
+	if d.Dir == "" {
+		return []byte("null"), nil
+	}
+	return json.Marshal(d.Dir)
+}
+
+// UnmarshalJSON records the key's presence, and its directory unless null.
+func (d *PresentDir) UnmarshalJSON(data []byte) error {
+	d.Present = true
+	if string(data) == "null" {
+		d.Dir = ""
+		return nil
+	}
+	var dir string
+	if err := json.Unmarshal(data, &dir); err != nil {
+		return fmt.Errorf("a directory or null: %w", err)
+	}
+	if dir == "" {
+		return fmt.Errorf("an empty directory is neither a directory nor null")
+	}
+	d.Dir = dir
+	return nil
 }
 
 // SourceWorkspace is a create's `source_ws`: the workspace it was spawned
@@ -209,6 +261,9 @@ func (e Entry) Validate() error {
 	if e.Type != TypeMergeEvict && e.EvictDir != "" && e.Type != "" {
 		return fmt.Errorf("%s: evict_dir is a %s's field, and no %s reads it", e.Type, TypeMergeEvict, e.Type)
 	}
+	if e.Type != TypeRetarget && e.Parent.Present && e.Type != "" {
+		return fmt.Errorf("%s: parent is a %s's field, and no %s reads it", e.Type, TypeRetarget, e.Type)
+	}
 	if e.Type != TypeMergePause && e.Type != TypeMergeResume && e.RepositoryDir != "" && e.Type != "" {
 		return fmt.Errorf("%s: repository_dir is a %s's or a %s's field, and no %s reads it", e.Type, TypeMergePause, TypeMergeResume, e.Type)
 	}
@@ -230,6 +285,14 @@ func (e Entry) Validate() error {
 			return err
 		}
 		return e.validateMergeSource()
+	case TypeRetarget:
+		if err := e.requireTarget(); err != nil {
+			return err
+		}
+		if !e.Parent.Present {
+			return fmt.Errorf("%s: parent is required: a workspace's directory, or null for top-level", TypeRetarget)
+		}
+		return nil
 	case TypeClose, TypeForget, TypeOpen, TypeSwitch, TypeMergeEvict, TypeMergePause, TypeMergeResume:
 		return e.requireTarget()
 	case TypeTaskCreate:
@@ -418,6 +481,12 @@ func (e Entry) withAbsolutePaths(home string) (Entry, error) {
 		{name: "source_dir", value: &e.SourceDir},
 		{name: "evict_dir", value: &e.EvictDir},
 		{name: "repository_dir", value: &e.RepositoryDir},
+	}
+	if e.Parent.Dir != "" {
+		fields = append(fields, struct {
+			name  string
+			value *string
+		}{name: "parent", value: &e.Parent.Dir})
 	}
 	if e.SourceWS != nil {
 		// A COPY, so resolving the path never writes through to the entry

@@ -135,6 +135,10 @@ func (s *fakeServer) SetWorkspaceHidden(ctx context.Context, req *connect.Reques
 	return handleUnary[v1.SetWorkspaceHiddenRequest, v1.SetWorkspaceHiddenResponse](ctx, s, "SetWorkspaceHidden", req.Msg)
 }
 
+func (s *fakeServer) SetWorkspaceParent(ctx context.Context, req *connect.Request[v1.SetWorkspaceParentRequest]) (*connect.Response[v1.SetWorkspaceParentResponse], error) {
+	return handleUnary[v1.SetWorkspaceParentRequest, v1.SetWorkspaceParentResponse](ctx, s, "SetWorkspaceParent", req.Msg)
+}
+
 func (s *fakeServer) FoldRepository(ctx context.Context, req *connect.Request[v1.FoldRepositoryRequest]) (*connect.Response[v1.FoldRepositoryResponse], error) {
 	return handleUnary[v1.FoldRepositoryRequest, v1.FoldRepositoryResponse](ctx, s, "FoldRepository", req.Msg)
 }
