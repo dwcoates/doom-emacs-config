@@ -40,3 +40,22 @@ so a swap needs a stored place and a daemon rpc to exchange two of them.
   the tenth drawn tab.
 
 ## Landed changes
+
+### SwapWorkspacePlaces (2026-10-11)
+
+- **What:** added `agentrepl.v1.SwapWorkspacePlaces` and its endpoint file
+  `endpoint_swap_workspace_places.proto`, listed in `service.proto` beside
+  `SetWorkspacePriority`.
+- **Why:** the owner's `SPC TAB p` swaps the current workspace with the one at
+  a drawn tab slot; the daemon owns roster order, so the swap is a daemon
+  write.
+- **Shape decisions:** the request carries two roster-served
+  `workspace.v1.WorkspaceRef`s, never a slot number, because only Emacs knows
+  which tabs are hidden under folded repositories. The response returns no
+  order; the roster stream pushes it. Refusing a non-sibling pair is the
+  `not_siblings` failure arm, because no place exchange can serve it.
+- **Consequences:** the daemon needs a stored place per workspace (schema
+  column + migration seeded from today's order), the resolver orders siblings
+  by place, and create / re-open assign a landing place from priority.
+- **Open:** whether `SetWorkspacePriority` stops moving a workspace that
+  already has a place (recommended yes, unanswered).
