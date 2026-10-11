@@ -379,6 +379,7 @@ const CAUSE_FILL: Readonly<Record<string, Record<string, unknown>>> = {
   },
   namingFailed: { model: "haiku", cause: "invalid_answer", attempts: 2, answer: "Fix The Login" },
   insideTemporaryDirectory: { dir: "/private/tmp/scratch", temporaryRoot: "/private/tmp" },
+  baseRefOffPrimaryBranch: { ref: "feature-tip", primaryBranch: "main" },
 };
 
 describe("CreateWorkspace's typed refusal", () => {
@@ -391,6 +392,15 @@ describe("CreateWorkspace's typed refusal", () => {
     expect(
       createWorkspaceRefusal({ case: "briefMissing", value: { name: "ship-the-rail" } } as never),
     ).toContain("ship-the-rail");
+  });
+
+  it("names the base ref and the primary branch it is not on", () => {
+    const said = createWorkspaceRefusal({
+      case: "baseRefOffPrimaryBranch",
+      value: { ref: "feature-tip", primaryBranch: "main" },
+    } as never);
+    expect(said).toContain("feature-tip");
+    expect(said).toContain("main");
   });
 
   it("names the base ref that would not resolve", () => {
