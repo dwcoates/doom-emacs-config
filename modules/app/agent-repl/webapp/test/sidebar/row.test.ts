@@ -30,6 +30,8 @@ import {
   fakeTimers,
   row,
   sidebarContext,
+  startOfToday,
+  startOfTomorrow,
 } from "./harness.js";
 import { createSidebarView } from "../../src/sidebar/view.js";
 import stylesheet from "../../src/styles.css?raw";
@@ -1299,18 +1301,6 @@ describe("the row's drawn status is recorded", () => {
 });
 
 describe("a merge that landed today", () => {
-  // Local midnight at the start of NOW's day, so every case is on a known
-  // side of a date line whatever zone the suite runs in.
-  const startOfToday = (): number => {
-    const midnight = new Date(NOW);
-    midnight.setHours(0, 0, 0, 0);
-    return midnight.getTime();
-  };
-  const startOfTomorrow = (): number => {
-    const midnight = new Date(startOfToday());
-    midnight.setDate(midnight.getDate() + 1);
-    return midnight.getTime();
-  };
   const mergedRow = (atMs: number, sc = sidebarContext(), merged = true): HTMLElement =>
     drawRosterRow(
       row({ id: "ws-1", status: { case: "merged", value: {} }, when: { case: "merged", value: { atMs: BigInt(atMs) } } }),
