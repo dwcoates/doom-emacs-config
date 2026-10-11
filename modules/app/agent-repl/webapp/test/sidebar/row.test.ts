@@ -156,7 +156,7 @@ describe("the highlight and the receded styling", () => {
     // Arrange / Act
     const declarations = currentRowDeclarations();
     // Assert
-    expect(declarations.some((d) => /border-left:\s*3px solid var\(--accent\)/.test(d))).toBe(true);
+    expect(declarations.some((d) => /border-left:\s*var\(--row-gutter-w\) solid var\(--accent\)/.test(d))).toBe(true);
   });
 
   it.each([
@@ -1318,8 +1318,8 @@ describe("a merge that landed today", () => {
       "R",
       merged ? "merged" : "grouping",
     );
-  const isGreen = (drawn: HTMLElement): boolean | undefined =>
-    drawn.querySelector(".name")?.classList.contains(MERGED_TODAY_CLASS);
+  const hasGutter = (drawn: HTMLElement): boolean | undefined =>
+    drawn.querySelector(".row")?.classList.contains(MERGED_TODAY_CLASS);
 
   it.each([
     { name: "the same instant", at: () => NOW, now: () => NOW, want: true },
@@ -1331,31 +1331,35 @@ describe("a merge that landed today", () => {
     expect(mergedToday(at(), now())).toBe(want);
   });
 
-  it("draws the name green", () => {
-    expect(isGreen(mergedRow(NOW - 60_000))).toBe(true);
+  it("marks the row with the gutter", () => {
+    expect(hasGutter(mergedRow(NOW - 60_000))).toBe(true);
   });
 
-  it("leaves a merge from yesterday in the repository names' colour", () => {
-    expect(isGreen(mergedRow(startOfToday() - 1))).toBe(false);
+  it("leaves a merge from yesterday without the gutter", () => {
+    expect(hasGutter(mergedRow(startOfToday() - 1))).toBe(false);
   });
 
-  it("turns the name back once the shared ticker crosses midnight", () => {
+  it("drops the gutter once the shared ticker crosses midnight", () => {
     // Arrange
     const ticker = fakeTicker();
     const drawn = mergedRow(NOW, sidebarContext(appContext({}, ticker)));
     // Act
     ticker.tick(startOfTomorrow());
     // Assert
-    expect(isGreen(drawn)).toBe(false);
+    expect(hasGutter(drawn)).toBe(false);
   });
 
-  it("registers the green's tick as a teardown beside the age's", () => {
+  it("registers the gutter's tick as a teardown beside the age's", () => {
     const sc = sidebarContext();
     mergedRow(NOW, sc);
     expect(sc.disposers.length).toBe(2);
   });
 
   it("is not marked on a row drawn outside the merged band", () => {
-    expect(isGreen(mergedRow(NOW, sidebarContext(), false))).toBe(false);
+    expect(hasGutter(mergedRow(NOW, sidebarContext(), false))).toBe(false);
+  });
+
+  it("leaves the name's own colour class untouched", () => {
+    expect(mergedRow(NOW).querySelector(".name")?.classList.contains(MERGED_TODAY_CLASS)).toBe(false);
   });
 });
