@@ -72,10 +72,7 @@ func reland(ctx context.Context, tx *sql.Tx, id WorkspaceID) (int64, error) {
 		repo     RepoID
 		priority sql.NullInt64
 	)
-	err := tx.QueryRowContext(ctx, `SELECT repo_id, priority FROM workspaces WHERE id = ?`, id).Scan(&repo, &priority)
-	if errors.Is(err, sql.ErrNoRows) {
-		return 0, fmt.Errorf("wsm: workspace %s: %w", id, ErrNotFound)
-	}
+	err := scanWorkspaceRow(ctx, tx, id, "repo_id, priority", &repo, &priority)
 	if err != nil {
 		return 0, err
 	}
@@ -112,10 +109,7 @@ func (s *store) SwapPlaces(ctx context.Context, a, b WorkspaceID) error {
 	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
 		place := func(id WorkspaceID) (int64, error) {
 			var at int64
-			err := tx.QueryRowContext(ctx, `SELECT place FROM workspaces WHERE id = ?`, id).Scan(&at)
-			if errors.Is(err, sql.ErrNoRows) {
-				return 0, fmt.Errorf("wsm: workspace %s: %w", id, ErrNotFound)
-			}
+			err := scanWorkspaceRow(ctx, tx, id, "place", &at)
 			return at, err
 		}
 		pa, err := place(a)
