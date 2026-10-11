@@ -1,7 +1,7 @@
 // endpoint_fold_held_prompt.proto — FoldHeldPrompt: FOLDING a held prompt into
 // the held prompt directly ahead of it. DAEMON-HOLD TRAY section.
 //
-// The tray card's "fold above" button sends it. The folded prompt's content
+// The held card's "fold above" button sends it. The folded prompt's content
 // (text, images and every other block it carries, in order) is appended to the
 // entry ahead of it, separated from that entry's own words by a blank line, and
 // the folded prompt leaves the queue. The entry ahead keeps its place in the
@@ -19,7 +19,7 @@
 // old words never applies to the new ones.
 //
 // BOTH ENTRIES ARE NAMED BY TYPED ECHO TOKENS: `turn` is the folded prompt's
-// own TurnId from its tray entry, and `above` is the TurnId the same entry's
+// own TurnId from its held item, and `above` is the TurnId the same entry's
 // HeldPromptFoldAbove carried. The daemon folds into `above` and nothing else:
 // when `above` is no longer the entry directly ahead, the request is refused
 // and nothing is folded, so a prompt is never folded into an entry the user
@@ -62,7 +62,7 @@ export type FoldHeldPromptRequest = Message<"agentrepl.v1.FoldHeldPromptRequest"
 
   /**
    * The held prompt being folded: the daemon-minted turn it is held under,
-   * echoed from its tray entry (HeldPrompt.turn). It leaves the queue on
+   * echoed from its held item (HeldPrompt.turn). It leaves the queue on
    * success.
    *
    * @generated from field: conversation.v1.TurnId turn = 2;
@@ -71,7 +71,7 @@ export type FoldHeldPromptRequest = Message<"agentrepl.v1.FoldHeldPromptRequest"
 
   /**
    * The entry the client saw directly ahead of `turn`, echoed verbatim from
-   * that same tray entry's HeldPromptFoldAbove.above. The daemon folds into
+   * that same held item's HeldPromptFoldAbove.above. The daemon folds into
    * this entry only, and refuses with `above_moved` when it is no longer the
    * one directly ahead. It must differ from `turn`; a request naming one
    * entry twice is Connect InvalidArgument.
@@ -127,8 +127,8 @@ export const FoldHeldPromptResponseSchema: GenMessage<FoldHeldPromptResponse> = 
   messageDesc(file_agentrepl_v1_endpoint_fold_held_prompt, 1);
 
 /**
- * Done. The tray's new state — the folded card gone, the entry ahead carrying
- * the merged words and its coalesced badge — arrives on WatchDaemonHolds.
+ * Done. The held section's new state — the folded card gone, the entry ahead carrying
+ * the merged words and its coalesced badge — arrives on the root feed's held-section frame (WatchFeed).
  *
  * @generated from message agentrepl.v1.FoldHeldPromptSuccess
  */
@@ -218,7 +218,7 @@ export type FoldHeldPromptError = Message<"agentrepl.v1.FoldHeldPromptError"> & 
     /**
      * `above` is no longer the entry directly ahead of `turn`: the queue's
      * order changed, or `above` was delivered, dropped or folded since the
-     * tray was drawn.
+     * held section was drawn.
      *
      * @generated from field: agentrepl.v1.FoldHeldPromptAboveMoved above_moved = 8;
      */
@@ -247,7 +247,7 @@ export type FoldHeldPromptError = Message<"agentrepl.v1.FoldHeldPromptError"> & 
      * BEING DELIVERED: the prompt's delivery call to the agent is in flight
      * right now, so it is neither held nor delivered yet. Refused rather than
      * raced. Once the call settles the prompt is either delivered, or (if the
-     * call failed) back in the tray and open to this request again.
+     * call failed) back in the held section and open to this request again.
      *
      * @generated from field: agentrepl.v1.FoldHeldPromptBeingDelivered being_delivered = 11;
      */
@@ -354,7 +354,7 @@ export const FoldHeldPromptNoSuchHoldSchema: GenMessage<FoldHeldPromptNoSuchHold
   messageDesc(file_agentrepl_v1_endpoint_fold_held_prompt, 8);
 
 /**
- * The folded prompt is no longer held. DELIBERATELY EMPTY: the tray's next
+ * The folded prompt is no longer held. DELIBERATELY EMPTY: the held section's next
  * push already takes its card down, and how it left (delivered, dropped,
  * folded) changes nothing the client does.
  *
@@ -395,7 +395,7 @@ export type FoldHeldPromptAboveMoved = Message<"agentrepl.v1.FoldHeldPromptAbove
   /**
    * The entry that IS directly ahead of `turn` now, for the record and the
    * log. UNSET when nothing stands ahead of `turn` (it is first in the
-   * queue). A client never folds into it on its own: the next tray push
+   * queue). A client never folds into it on its own: the next held-section push
    * offers it, and the user decides again.
    *
    * @generated from field: optional conversation.v1.TurnId current_above = 1;

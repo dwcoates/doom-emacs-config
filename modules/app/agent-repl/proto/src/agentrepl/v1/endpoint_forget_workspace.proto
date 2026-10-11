@@ -80,7 +80,7 @@ message ForgetWorkspaceBlocked {
   bool turn_in_flight = 1;
   // Detached items live now (subagents, runs, tasks).
   uint32 live_work = 2;
-  // Held prompts in the tray — undelivered user intent.
+  // Held prompts in the held section — undelivered user intent.
   uint32 held_prompts = 3;
   // The workspace is queued for, or inside, a merge.
   bool merge_queued = 4;

@@ -2,7 +2,7 @@
 // deploy tooling's drain-and-exit control. DAEMON ADMIN section. The
 // schedule is ANNOUNCED: WatchDaemon pushes drain_scheduled /
 // drain_cancelled so every client draws the standing banner; the other
-// consequences arrive on the existing surfaces (held prompts in the tray
+// consequences arrive on the existing surfaces (held prompts in the held section
 // during the drain, footer status). Consolidates the old
 // ScheduleShutdown / CancelScheduledShutdown / Shutdown trio.
 
@@ -61,7 +61,7 @@ export const UpdateShutdownScheduleRequestSchema: GenMessage<UpdateShutdownSched
 
 /**
  * Drain then exit at/after this instant: finish in-flight turns, hold new
- * prompts (tray-visible), exit when quiet.
+ * prompts (visible in the held section), exit when quiet.
  *
  * @generated from message agentrepl.v1.UpdateShutdownScheduleSchedule
  */
