@@ -256,13 +256,13 @@ describe("the when-column", () => {
     expect(drawn.querySelector(".when")?.textContent).toBe("1h");
   });
 
-  it("names a settled merge in its own words", () => {
+  it("draws a settled merge as a bare relative age", () => {
     const drawn = drawRosterRow(
       row({ id: "ws-1", when: { case: "merged", value: { atMs: BigInt(NOW - 3_600_000) } } }),
       sidebarContext(),
       "R",
     );
-    expect(drawn.querySelector(".when")?.textContent).toBe("merged 1h");
+    expect(drawn.querySelector(".when")?.textContent).toBe("1h");
   });
 
 });
@@ -1213,3 +1213,4 @@ describe("the row's drawn status is recorded", () => {
     );
   });
 });
+
