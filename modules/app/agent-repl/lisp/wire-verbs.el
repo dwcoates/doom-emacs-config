@@ -5,7 +5,7 @@
 ;; The protojson CODEC for the agentrepl.v1 WORKSPACE VERBS and DAEMON-ADMIN
 ;; verbs Emacs calls: CreateWorkspace, RegisterRepository, OpenWorkspace,
 ;; CloseWorkspace, KillWorkspace, NukeWorkspace, MergeWorkspace,
-;; RestartWorkspace, SetWorkspacePriority, SubmitPrompt,
+;; RestartWorkspace, SetWorkspacePriority, SetWorkspaceHidden, SubmitPrompt,
 ;; UpdateShutdownSchedule, Deploy, UpdateMergeQueue, DaemonHealth and
 ;; SessionHealth.
 ;;
@@ -4406,6 +4406,56 @@ reaching the wire."
 There is no result oneof to unwrap: the response is the clamped scale now
 in force, which the caller may echo."
   (list :scale (agent-repl-wire--decode-double "AdjustFeedTextScaleResponse" 'scale json)))
+
+;;;; ---- SetWorkspaceHidden ---------------------------------------------
+;;
+;; Move a workspace into the sidebar's hidden section, or back out of it.
+;; See endpoint_set_workspace_hidden.proto.
+
+(defun agent-repl-wire-encode-set-workspace-hidden-hide (value)
+  "Encode SetWorkspaceHiddenHide from VALUE.  Empty: the arm is the request."
+  (agent-repl-wire--encode-empty "SetWorkspaceHiddenHide" value))
+
+(defun agent-repl-wire-encode-set-workspace-hidden-show (value)
+  "Encode SetWorkspaceHiddenShow from VALUE.  Empty: the arm is the request."
+  (agent-repl-wire--encode-empty "SetWorkspaceHiddenShow" value))
+
+(defun agent-repl-wire-encode-set-workspace-hidden-request (request)
+  "Encode SetWorkspaceHiddenRequest from plist REQUEST.
+REQUEST is (:workspace REF :visibility (:arm ARM :value nil)), ARM `:hide'
+or `:show'.  Both are required: an unset visibility is refused here,
+before anything is sent."
+  (let ((message "SetWorkspaceHiddenRequest"))
+    (list (cons 'workspace
+                (agent-repl-wire-encode-workspace-ref
+                 (agent-repl-wire-verbs--require message "workspace"
+                                                  (plist-get request :workspace))))
+          (agent-repl-wire-verbs--encode-oneof
+           message "visibility" (plist-get request :visibility)
+           '((:hide hide agent-repl-wire-encode-set-workspace-hidden-hide)
+             (:show show agent-repl-wire-encode-set-workspace-hidden-show))))))
+
+(defun agent-repl-wire-decode-set-workspace-hidden-success (json)
+  "Decode SetWorkspaceHiddenSuccess from JSON.
+Empty: the roster push carries the new state."
+  (agent-repl-wire-verbs--decode-empty "SetWorkspaceHiddenSuccess" json))
+
+(defun agent-repl-wire-decode-set-workspace-hidden-error (json)
+  "Decode SetWorkspaceHiddenError from JSON into (:cause (:arm ARM :value V)).
+THE ARM IS THE REFUSAL: the four cross-cutting ownership arms."
+  (let ((message "SetWorkspaceHiddenError"))
+    (agent-repl-wire-verbs--check-keys
+     message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted))
+    (list :cause
+          (agent-repl-wire-verbs--decode-oneof
+           message "cause" json (agent-repl-wire-verbs--handover-arms "SetWorkspaceHidden")))))
+
+(defun agent-repl-wire-decode-set-workspace-hidden-response (json)
+  "Decode SetWorkspaceHiddenResponse from JSON into (:arm ARM :value V)."
+  (agent-repl-wire-verbs--decode-result
+   "SetWorkspaceHiddenResponse" json
+   #'agent-repl-wire-decode-set-workspace-hidden-success
+   #'agent-repl-wire-decode-set-workspace-hidden-error))
 
 (provide 'agent-repl-wire-verbs)
 

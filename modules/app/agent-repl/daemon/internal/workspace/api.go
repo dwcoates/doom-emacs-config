@@ -288,6 +288,9 @@ type Verbs interface {
 	MarkViewed(ctx context.Context, ws ids.WorkspaceID) error
 	// SetPriority sets or clears the roster priority.
 	SetPriority(ctx context.Context, ws ids.WorkspaceID, p *wsm.Priority) error
+	// SetHidden moves the workspace into the roster's hidden section, or back
+	// out of it, and republishes the roster.
+	SetHidden(ctx context.Context, ws ids.WorkspaceID, hidden bool) error
 	// FoldRepository records whether a repository's roster section is
 	// collapsed and republishes the roster. An unknown repository is refused
 	// with ArmUnknownRepository.
@@ -299,6 +302,9 @@ type Verbs interface {
 	// FoldMergedSection records whether the recently-merged band is collapsed
 	// and republishes the roster.
 	FoldMergedSection(ctx context.Context, folded bool) error
+	// FoldHiddenSection records whether the hidden-workspaces section is
+	// collapsed and republishes the roster.
+	FoldHiddenSection(ctx context.Context, folded bool) error
 	// FoldMaturitySection records whether a maturity stage's section is
 	// collapsed and republishes the roster.
 	FoldMaturitySection(ctx context.Context, stage wsm.MaturityStage, folded bool) error

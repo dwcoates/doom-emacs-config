@@ -15,11 +15,13 @@ import {
   RosterRowDetailSchema,
   RosterRowWhenSchema,
   RosterMaturitySectionSchema,
+  RosterHiddenSectionSchema,
   RosterMergedSectionSchema,
   RosterRepoSectionSchema,
   RosterTaskSectionSchema,
   WorkspaceRosterSchema,
   type RosterMaturitySection,
+  type RosterHiddenSection,
   type RosterMergedSection,
   type RosterRepoSection,
   type RosterRow,
@@ -255,6 +257,23 @@ export function mergedSection(
   });
 }
 
+/**
+ * The hidden-workspaces section. Its daemon-held fold is EXPANDED unless
+ * said, as the daemon draws a section nobody has folded; its count is the
+ * rows it carries unless said.
+ */
+export function hiddenSection(
+  rows: RosterRow[] = [],
+  count: number = rows.length,
+  collapsed: boolean = false,
+): RosterHiddenSection {
+  return create(RosterHiddenSectionSchema, {
+    header: { label: { text: "Hidden Workspaces" }, count: { workspaces: count } },
+    rows: { rows },
+    fold: collapsed ? { case: "collapsed", value: {} } : { case: "expanded", value: {} },
+  });
+}
+
 /** The `WorkspaceRoster.shown` arm each grouping is spelled with. */
 const SHOWN_ARMS = {
   repository: { case: "shownRepository", value: {} },
@@ -268,6 +287,7 @@ export function roster(init: {
   tasks?: RosterTaskSection[];
   maturity?: RosterMaturitySection[];
   merged?: RosterMergedSection;
+  hidden?: RosterHiddenSection;
   current?: string;
   /** The daemon-held grouping every page shows; the repository's unless said. */
   shown?: Grouping;
@@ -277,6 +297,7 @@ export function roster(init: {
     task: { sections: init.tasks ?? [] },
     maturity: { sections: init.maturity ?? [] },
     recentlyMerged: init.merged ?? mergedSection(),
+    hidden: init.hidden ?? hiddenSection(),
     shown: SHOWN_ARMS[init.shown ?? "repository"],
     ...(init.current === undefined
       ? {}

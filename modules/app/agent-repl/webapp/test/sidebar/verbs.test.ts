@@ -56,6 +56,7 @@ import {
   restartWorkspaceRefusal,
   buildSelectWorkspaceRequest,
   buildSetWorkspacePriorityRequest,
+  buildSetWorkspaceHiddenRequest,
   drawKillConfirm,
   drawNukeConfirm,
   assignWorkspaceTaskRefusal,
@@ -133,6 +134,14 @@ describe("the requests each verb is", () => {
 
   it("clears a priority by omitting the field, never by a sentinel level", () => {
     expect(buildSetWorkspacePriorityRequest(TARGET_WS, "clear").priority).toBeUndefined();
+  });
+
+  it.each([
+    [true, "hide"],
+    [false, "show"],
+  ] as const)("asks hidden=%s as the %s arm", (hidden, arm) => {
+    const request = buildSetWorkspaceHiddenRequest(TARGET_WS, hidden);
+    expect([request.workspace, request.visibility.case]).toEqual([TARGET_WS, arm]);
   });
 
   it("assigns a task by echoing its id", () => {

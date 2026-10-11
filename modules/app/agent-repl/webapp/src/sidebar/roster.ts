@@ -27,6 +27,7 @@ import { MERGED_ROW_PROBE_CLASS, MERGED_SECTION_CLASS } from "./merged-fit.js";
 import { createControl, type Control } from "../control.js";
 import type {
   RosterCurrentWorkspace,
+  RosterHiddenSection,
   RosterLabel,
   RosterMaturityKey,
   RosterMaturitySection,
@@ -57,6 +58,7 @@ import type { SidebarViewFoldSectionSchema } from "../../../proto/gen/ts/agentre
 import { log } from "../log.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import {
+  HIDDEN_FOLD_KEY,
   MERGED_FOLD_KEY,
   maturityFoldKey,
   repoFoldKey,
@@ -69,7 +71,7 @@ import { drawCreateWorkspaceControl } from "./create.js";
 import { toggleHiddenDropdown } from "./dropdowns.js";
 import { changeView } from "./view-change.js";
 import { foldViewKey, GROUPING_VIEW_KEY, paintSectionFold, paintTriangle } from "./view.js";
-import { drawRosterRow, expandVisibleRows } from "./row.js";
+import { drawRosterRow, expandVisibleRows, type RowPlace } from "./row.js";
 import {
   buildUpdateTaskRequest,
   drawCreateTaskControl,
@@ -91,6 +93,7 @@ export function drawWorkspaceRoster(u: WorkspaceRoster, sc: SidebarContext): HTM
   const task = requireMessage(u.task, `${path}.task`);
   const maturity = requireMessage(u.maturity, `${path}.maturity`);
   const merged = requireMessage(u.recentlyMerged, `${path}.recently_merged`);
+  const hidden = requireMessage(u.hidden, `${path}.hidden`);
   const current =
     u.current === undefined
       ? null
@@ -102,6 +105,7 @@ export function drawWorkspaceRoster(u: WorkspaceRoster, sc: SidebarContext): HTM
       task_sections: task.sections.length,
       maturity_sections: maturity.sections.length,
       merged_rows: merged.rows?.rows.length ?? 0,
+      hidden_rows: hidden.rows?.rows.length ?? 0,
       current,
       grouping: drawRosterShown(u.shown, `${path}.shown`),
     },
@@ -123,15 +127,10 @@ export function drawWorkspaceRoster(u: WorkspaceRoster, sc: SidebarContext): HTM
 
   const roster = document.createElement("div");
   roster.className = "sb-roster";
-  roster.appendChild(
-    pane("repository", drawRosterRepositoryView(repository, sc, `${path}.repository`), sc, merged, `${path}.recently_merged`),
-  );
-  roster.appendChild(
-    pane("task", drawRosterTaskView(task, sc, `${path}.task`), sc, merged, `${path}.recently_merged`),
-  );
-  roster.appendChild(
-    pane("maturity", drawRosterMaturityView(maturity, sc, `${path}.maturity`), sc, merged, `${path}.recently_merged`),
-  );
+  const bands: PaneBands = { hidden, merged, path };
+  roster.appendChild(pane("repository", drawRosterRepositoryView(repository, sc, `${path}.repository`), sc, bands));
+  roster.appendChild(pane("task", drawRosterTaskView(task, sc, `${path}.task`), sc, bands));
+  roster.appendChild(pane("maturity", drawRosterMaturityView(maturity, sc, `${path}.maturity`), sc, bands));
   const shown = sc.view.track(GROUPING_VIEW_KEY, drawRosterShown(u.shown, `${path}.shown`), (grouping) =>
     showPane(roster, grouping),
   );
@@ -163,19 +162,24 @@ export function showPane(roster: ParentNode, grouping: string): void {
   }
 }
 
-/** One grouping's pane, with its own copy of the recently-merged band. */
-function pane(
-  grouping: Grouping,
-  body: HTMLElement,
-  sc: SidebarContext,
-  merged: RosterMergedSection,
-  mergedPath: string,
-): HTMLElement {
+/** The sections drawn under EVERY grouping, and the roster path they sit at. */
+interface PaneBands {
+  hidden: RosterHiddenSection;
+  merged: RosterMergedSection;
+  path: string;
+}
+
+/**
+ * One grouping's pane, with its own copies of the sections every grouping
+ * draws below its own: the hidden workspaces, then the recently-merged band.
+ */
+function pane(grouping: Grouping, body: HTMLElement, sc: SidebarContext, bands: PaneBands): HTMLElement {
   const element = document.createElement("div");
   element.className = "sb-pane";
   element.setAttribute("data-grouping", grouping);
   element.appendChild(body);
-  element.appendChild(drawRosterMergedSection(merged, sc, mergedPath));
+  element.appendChild(drawRosterHiddenSection(bands.hidden, sc, `${bands.path}.hidden`));
+  element.appendChild(drawRosterMergedSection(bands.merged, sc, `${bands.path}.recently_merged`));
   return element;
 }
 
@@ -303,6 +307,19 @@ export interface HeadedSectionShape {
   target: MessageInitShape<typeof SidebarViewFoldSectionSchema>["section"];
   /** Anything the kind adds to its header, after the folded count. */
   decorateHeader?: (header: HTMLElement, section: HTMLElement) => void;
+  /**
+   * Whether closed rows are dropped (`drawRosterRows`); they are unless said.
+   * The recently-merged band keeps them: its rows are closed by design.
+   */
+  hideClosed?: boolean;
+  /** Which kind of section the rows sit in (`RowPlace`); a grouping's unless said. */
+  place?: RowPlace;
+  /**
+   * A section the rail leaves out while it draws nothing: WHEN says so from the
+   * wire, and ATTRIBUTE marks the undrawn box. Absent, the section always draws
+   * (a repository with no rows still draws, so the grouping does not flicker).
+   */
+  leftOut?: { when: (rows: RosterRows, header: RosterSectionHeader, path: string) => boolean; attribute: string };
 }
 
 /**
@@ -310,8 +327,13 @@ export interface HeadedSectionShape {
  * folded as the daemon says, the label-and-count header whose gesture asks
  * for the other fold, and the rows with closed workspaces dropped.
  *
- * THE ONE SHAPE the repository and maturity sections draw, so the two can
- * never disagree on how a header folds or which rows a live section hides.
+ * THE ONE SHAPE every folding section but a task's draws — repository,
+ * maturity stage, hidden workspaces, recently merged — so none can disagree
+ * with another on how a header folds or which rows it drops.
+ *
+ * A LEFT-OUT SECTION IS VALIDATED WHOLE, then left undrawn: a malformed empty
+ * section is still a contract breach, and skipping the checks would hide it
+ * until the section next drew.
  */
 export function drawHeadedSection(
   u: HeadedSectionWire,
@@ -321,15 +343,21 @@ export function drawHeadedSection(
 ): HTMLElement {
   const section = daemonFoldedBox(shape.foldKey, drawRosterSectionFold(u.fold, `${path}.fold`), sc);
   section.classList.add(shape.className);
-  const header = drawRosterSectionHeader(
-    requireMessage(u.header, `${path}.header`),
-    section,
-    sectionFold(sc, shape.foldKey, shape.target),
-    `${path}.header`,
-  );
-  shape.decorateHeader?.(header, section);
-  section.appendChild(header);
-  section.appendChild(drawRosterRows(requireMessage(u.rows, `${path}.rows`), sc, `${path}.rows`, true));
+  const header = requireMessage(u.header, `${path}.header`);
+  const rows = requireMessage(u.rows, `${path}.rows`);
+  const hideClosed = shape.hideClosed ?? true;
+  const place = shape.place ?? "grouping";
+  if (shape.leftOut?.when(rows, header, `${path}.header`) === true) {
+    drawRosterSectionHeader(header, section, sectionFold(sc, shape.foldKey, shape.target), `${path}.header`);
+    drawRosterRows(rows, sc, `${path}.rows`, hideClosed, place);
+    section.hidden = true;
+    section.setAttribute(shape.leftOut.attribute, "true");
+    return section;
+  }
+  const head = drawRosterSectionHeader(header, section, sectionFold(sc, shape.foldKey, shape.target), `${path}.header`);
+  shape.decorateHeader?.(head, section);
+  section.appendChild(head);
+  section.appendChild(drawRosterRows(rows, sc, `${path}.rows`, hideClosed, place));
   return section;
 }
 
@@ -412,28 +440,15 @@ export function drawRosterMergedSection(
   sc: SidebarContext,
   path: string,
 ): HTMLElement {
-  const section = daemonFoldedBox(MERGED_FOLD_KEY, drawRosterSectionFold(u.fold, `${path}.fold`), sc);
-  section.classList.add(MERGED_SECTION_CLASS);
-  const rows = requireMessage(u.rows, `${path}.rows`);
-  const header = requireMessage(u.header, `${path}.header`);
-  if (rows.rows.length === 0) {
-    // Validated whole first, then left undrawn: a malformed empty section is
-    // still a contract breach, and skipping the checks would hide it until the
-    // first merge landed.
-    drawRosterLabel(requireMessage(header.label, `${path}.header.label`), `${path}.header.label`);
-    section.hidden = true;
-    section.setAttribute("data-merged-empty", "true");
-    return section;
-  }
-  section.appendChild(
-    drawRosterSectionHeader(
-      header,
-      section,
-      sectionFold(sc, MERGED_FOLD_KEY, { case: "recentlyMerged", value: {} }),
-      `${path}.header`,
-    ),
-  );
-  section.appendChild(drawRosterRows(rows, sc, `${path}.rows`, false, true));
+  const section = drawHeadedSection(u, sc, path, {
+    foldKey: MERGED_FOLD_KEY,
+    className: MERGED_SECTION_CLASS,
+    target: { case: "recentlyMerged", value: {} },
+    hideClosed: false,
+    place: "merged",
+    leftOut: { when: (rows) => rows.rows.length === 0, attribute: "data-merged-empty" },
+  });
+  if (section.hidden) return section;
   // THE ROW UNIT the fit counts in (merged-fit.ts): an invisible, out-of-flow
   // box exactly one merged row tall, measurable while the band is folded.
   const probe = document.createElement("div");
@@ -441,6 +456,41 @@ export function drawRosterMergedSection(
   probe.setAttribute("aria-hidden", "true");
   section.appendChild(probe);
   return section;
+}
+
+/** The class the hidden-workspaces section is drawn with. */
+export const HIDDEN_SECTION_CLASS = "hidden-section";
+
+/**
+ * The hidden-workspaces section: the workspaces the user hid, hoisted out of
+ * every grouping. They keep their sessions and their editor tabs; the Emacs
+ * tab bar does not draw them.
+ *
+ * A SECTION THAT DRAWS NO ROW IS NOT DRAWN. The wire always carries it, so
+ * the emptiness is answered here, off the daemon's own count of the rows it
+ * shows (closed rows ride the wire but are never drawn): a heading over
+ * nothing is a fold toggle onto nothing.
+ *
+ * CLICKING A ROW SHOWS THE WORKSPACE AGAIN (`SetWorkspaceHidden`), rather
+ * than selecting it: the push that follows moves it back into its groupings
+ * and onto the tab bar.
+ */
+export function drawRosterHiddenSection(
+  u: RosterHiddenSection,
+  sc: SidebarContext,
+  path: string,
+): HTMLElement {
+  return drawHeadedSection(u, sc, path, {
+    foldKey: HIDDEN_FOLD_KEY,
+    className: HIDDEN_SECTION_CLASS,
+    target: { case: "hidden", value: {} },
+    place: "hidden",
+    leftOut: {
+      when: (_rows, header, headerPath) =>
+        drawRosterSectionCount(requireMessage(header.count, `${headerPath}.count`), `${headerPath}.count`) === 0,
+      attribute: "data-hidden-empty",
+    },
+  });
 }
 
 /** The header repos and the merged band share: a label and a fold toggle. */
@@ -581,14 +631,15 @@ export function drawRosterTaskDone(u: RosterTaskDone, path: string): boolean {
  * `hideClosed` drops closed, killed and nuked workspaces from a live grouping
  * (owner ruling, 2026-09-14) and hoists their live descendants up in their
  * place. The recently-merged band leaves it OFF: its rows are `closed = true`
- * by design and are exactly what that band exists to show.
+ * by design and are exactly what that band exists to show. `place` is which
+ * kind of section the rows sit in (`RowPlace`).
  */
 export function drawRosterRows(
   u: RosterRows,
   sc: SidebarContext,
   path: string,
   hideClosed = false,
-  merged = false,
+  place: RowPlace = "grouping",
 ): HTMLElement {
   const rows = document.createElement("div");
   rows.className = "rows";
@@ -596,7 +647,7 @@ export function drawRosterRows(
     ? expandVisibleRows(u.rows, `${path}.rows`)
     : u.rows.map((row, index) => ({ row, path: `${path}.rows[${index}]` }));
   for (const entry of drawn) {
-    rows.appendChild(drawRosterRow(entry.row, sc, entry.path, merged));
+    rows.appendChild(drawRosterRow(entry.row, sc, entry.path, place));
   }
   return rows;
 }

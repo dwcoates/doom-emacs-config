@@ -197,7 +197,7 @@ included) and the tab bar follows it.  The bar DRAWS the subset
 `agent-repl-roster-drawn-tab-order' answers.")
 
 (defvar agent-repl-roster--hidden-tabs nil
-  "Tab names whose repository the daemon holds COLLAPSED.
+  "Tab names whose repository the daemon holds COLLAPSED, or that are HIDDEN.
 They keep their tabs (their sessions are untouched) and are off the
 bar's drawing, numbering and navigation.  Set by the reconcile pass from
 the same push as `agent-repl-roster--tab-order'.")
@@ -303,9 +303,15 @@ children, which is the render order the contract's nesting states."
 (defun agent-repl-roster-walk (roster)
   "Return ROSTER's rows in tab order: `(:row ROW :label REPO-LABEL)' entries.
 Repository sections in the resolver's order, each section's rows
-depth-first, then the recently-merged section's rows.  THE TASK VIEW IS
-IGNORED — it is the same workspaces regrouped, and walking it too would
-give every workspace a second tab."
+depth-first, then the hidden section's rows, then the recently-merged
+section's rows.  THE TASK VIEW IS IGNORED — it is the same workspaces
+regrouped, and walking it too would give every workspace a second tab.
+
+A HIDDEN WORKSPACE IS WALKED AS A COLLAPSED REPOSITORY'S IS: it keeps its
+tab (its session is untouched), and `:collapsed' takes it off the bar's
+drawing, numbering and navigation by the one hiding machinery there is.
+The hidden section's own fold folds sidebar rows only, so its rows are
+hidden from the bar whichever way it is folded."
   (let ((acc (list nil)))
     (dolist (section (plist-get (plist-get roster :repository) :sections))
       (agent-repl-roster--walk-rows
@@ -313,6 +319,12 @@ give every workspace a second tab."
        (plist-get (plist-get (plist-get section :header) :label) :text)
        acc
        (agent-repl-roster--section-collapsed-p section)))
+    (let ((hidden (plist-get roster :hidden)))
+      (agent-repl-roster--walk-rows
+       (plist-get (plist-get hidden :rows) :rows)
+       (plist-get (plist-get (plist-get hidden :header) :label) :text)
+       acc
+       t))
     (let ((merged (plist-get roster :recently-merged)))
       (agent-repl-roster--walk-rows
        (plist-get (plist-get merged :rows) :rows)

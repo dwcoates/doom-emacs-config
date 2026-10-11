@@ -63,6 +63,9 @@ type DB interface {
 	Current(ctx context.Context) (*WorkspaceID, error)
 	// SetPriority sets or clears a workspace's roster priority.
 	SetPriority(ctx context.Context, id WorkspaceID, p *Priority) error
+	// SetHidden records whether a workspace sits in the roster's hidden
+	// section; an unknown workspace is ErrNotFound.
+	SetHidden(ctx context.Context, id WorkspaceID, hidden bool) error
 	// SetAttention sets or clears the roster's attention marker.
 	SetAttention(ctx context.Context, id WorkspaceID, on bool) error
 	// SetResult records, or clears with nil, the roster's last turn result.
@@ -261,6 +264,9 @@ type DB interface {
 	// SetMaturityFolded records whether a maturity stage's section is
 	// collapsed.
 	SetMaturityFolded(ctx context.Context, stage MaturityStage, folded bool) error
+	// SetHiddenSectionFolded records whether the hidden-workspaces section is
+	// collapsed.
+	SetHiddenSectionFolded(ctx context.Context, folded bool) error
 	// SetGrouping records which grouping every page shows.
 	SetGrouping(ctx context.Context, grouping Grouping) error
 	// SidebarView loads the sidebar's view state that belongs to no row, or

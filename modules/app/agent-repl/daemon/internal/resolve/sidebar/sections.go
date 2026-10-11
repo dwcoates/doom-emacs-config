@@ -17,6 +17,9 @@ import (
 // author for the same reason every other drawn string does.
 const MergedSectionLabel = "Recently Merged"
 
+// HiddenSectionLabel is the hidden-workspaces section's heading.
+const HiddenSectionLabel = "Hidden Workspaces"
+
 // repositoryView resolves the repository grouping: ONE SECTION PER REPOSITORY,
 // its rows nested by branch lineage and ordered in roster order.
 //
@@ -246,6 +249,32 @@ func (r *resolver) mergedSection(merged []wsm.Workspace, rc rowContext, log dlog
 	}
 	setMergedFold(section, r.state.reg.View.MergedFolded)
 	return section
+}
+
+// hiddenSection resolves the hidden-workspaces section: the workspaces the
+// user hid (SetWorkspaceHidden), hoisted out of every grouping. Its rows nest
+// by lineage among the hidden workspaces alone, as a repository section's do
+// among its own, so a hidden family keeps its shape; its count is the rows it
+// draws, closed rows left out, exactly as a repository section counts.
+func (r *resolver) hiddenSection(hidden []wsm.Workspace, rc rowContext, log dlog.Logger) *frontendv1.RosterHiddenSection {
+	rows := r.sectionRows(hidden, rc, log.With(dlog.Context{"section": "hidden"}))
+	section := &frontendv1.RosterHiddenSection{
+		Header: sectionHeader(HiddenSectionLabel, drawnLiveRowCount(rows)),
+		Rows:   rows,
+	}
+	setHiddenFold(section, r.state.reg.View.HiddenFolded)
+	return section
+}
+
+// setHiddenFold states the hidden section's fold. The fold is the daemon's so
+// every page draws the same one (UpdateSidebarView); it folds sidebar rows
+// only, never a tab.
+func setHiddenFold(section *frontendv1.RosterHiddenSection, folded bool) {
+	if folded {
+		section.Fold = &frontendv1.RosterHiddenSection_Collapsed{Collapsed: &frontendv1.RosterHiddenSectionCollapsed{}}
+		return
+	}
+	section.Fold = &frontendv1.RosterHiddenSection_Expanded{Expanded: &frontendv1.RosterHiddenSectionExpanded{}}
 }
 
 // setShownGrouping states which grouping every page shows. The grouping is

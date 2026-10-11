@@ -9,16 +9,19 @@ import {
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_sidebar_view_pb";
 import {
   RosterMaturityKeySchema,
+  RosterSectionHeaderSchema,
   RosterRepoSectionSchema,
   RosterTaskSectionSchema,
   WorkspaceRosterSchema,
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
+import { SetWorkspaceHiddenResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_hidden_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import { repoFoldKey } from "../../src/sidebar/context.js";
 import { drawHeadedSection, drawRosterSectionFold, drawWorkspaceRoster } from "../../src/sidebar/roster.js";
 import { cascadedValue, installStylesheet } from "../stylesheet.js";
 import {
   appContext,
+  hiddenSection,
   maturitySection,
   mergedSection,
   repoSection,
@@ -35,6 +38,8 @@ const VIEW_UNKNOWN_TASK = create(UpdateSidebarViewResponseSchema, {
 });
 /** One settled merge, so the merged band draws. */
 const MERGED_ROW = row({ id: "ws-9", closed: true, status: { case: "merged", value: {} } });
+/** One hidden workspace, so the hidden section draws. */
+const HIDDEN_ROW = row({ id: "ws-8" });
 
 async function click(control: Element): Promise<void> {
   (control as HTMLElement).dispatchEvent(new MouseEvent("click", { bubbles: true }));
@@ -116,7 +121,7 @@ describe("the sections", () => {
       roster({ repos: [repoSection({ id: "b" }), repoSection({ id: "a" })] }),
       sidebarContext(),
     );
-    const keys = [...pane(drawn, "repository").querySelectorAll(".repo:not(.merged-section)")].map(
+    const keys = [...pane(drawn, "repository").querySelectorAll(".repo.repo-section")].map(
       (el) => el.getAttribute("data-section"),
     );
     expect(keys).toEqual([repoFoldKey("b"), repoFoldKey("a")]);
@@ -268,6 +273,12 @@ const FOLDING_SECTIONS = [
     kind: "recentlyMerged",
     roster: (collapsed: boolean) => roster({ merged: mergedSection([MERGED_ROW], 1, collapsed) }),
     selector: ".merged-section",
+    id: "",
+  },
+  {
+    kind: "hidden",
+    roster: (collapsed: boolean) => roster({ hidden: hiddenSection([HIDDEN_ROW], 1, collapsed) }),
+    selector: ".hidden-section",
     id: "",
   },
 ] as const;
@@ -524,6 +535,75 @@ describe("drawHeadedSection", () => {
     expect(() => drawHeadedSection(bare, sidebarContext(), "p", SHAPE)).toThrow(MalformedView);
   });
 
+  it("keeps a closed row when told not to drop closed rows", () => {
+    const section = drawHeadedSection(wire({ rows: [row({ id: "ws-closed", closed: true })] }), sidebarContext(), "p", {
+      ...SHAPE,
+      hideClosed: false,
+    });
+    expect(section.querySelector("[data-roster-row='ws-closed']")).not.toBeNull();
+  });
+
+  it("draws its rows in the place it is given", async () => {
+    const shown: string[] = [];
+    const sc = sidebarContext(
+      appContext({
+        setWorkspaceHidden: (request) => {
+          shown.push(request.workspace?.id ?? "");
+          return create(SetWorkspaceHiddenResponseSchema, { result: { case: "success", value: {} } });
+        },
+      }),
+    );
+    const section = drawHeadedSection(wire({ rows: [row({ id: "ws-1" })] }), sc, "p", { ...SHAPE, place: "hidden" });
+    await click(section.querySelector("[data-select]") as Element);
+    expect(shown).toEqual(["ws-1"]);
+  });
+
+  it("leaves the box out, marked, when its left-out test says so", () => {
+    const section = drawHeadedSection(wire(), sidebarContext(), "p", {
+      ...SHAPE,
+      leftOut: { when: () => true, attribute: "data-test-empty" },
+    });
+    expect([section.hidden, section.getAttribute("data-test-empty"), section.querySelector(".repo-head")]).toEqual([
+      true,
+      "true",
+      null,
+    ]);
+  });
+
+  it("draws the box whole when its left-out test says no", () => {
+    const section = drawHeadedSection(wire(), sidebarContext(), "p", {
+      ...SHAPE,
+      leftOut: { when: () => false, attribute: "data-test-empty" },
+    });
+    expect([section.hidden, section.querySelector(".repo-head") !== null]).toEqual([false, true]);
+  });
+
+  it("still refuses a malformed header in a left-out box", () => {
+    const bare = wire();
+    bare.header = create(RosterSectionHeaderSchema, { label: { text: "Head" } });
+    expect(() =>
+      drawHeadedSection(bare, sidebarContext(), "p", { ...SHAPE, leftOut: { when: () => true, attribute: "data-test-empty" } }),
+    ).toThrow(MalformedView);
+  });
+
+  // EVERY FOLDING SECTION BUT A TASK'S IS ONE SHAPE: each draws its box through
+  // drawHeadedSection, so each carries the same header and fold control. A
+  // hand-rolled section that drew its own header would carry neither here.
+  it.each([
+    ["repository", ".repo-section", roster({ repos: [repoSection({ id: "repo-1" })] })],
+    ["maturity", ".maturity-section", roster({ maturity: [maturitySection({ stage: "backlog" })] })],
+    ["hidden", ".hidden-section", roster({ hidden: hiddenSection([HIDDEN_ROW]) })],
+    ["merged", ".merged-section", roster({ merged: mergedSection([MERGED_ROW]) })],
+  ] as const)("draws the %s section in the one headed shape", (_kind, selector, made) => {
+    const drawn = drawWorkspaceRoster(made, sidebarContext());
+    const section = drawn.querySelector(selector) as HTMLElement;
+    expect([
+      section.querySelector(":scope > .repo-head > [data-section-fold]") !== null,
+      section.querySelector(":scope > .repo-head > [data-section-count]") !== null,
+      section.querySelector(":scope > .rows") !== null,
+    ]).toEqual([true, true, true]);
+  });
+
   it("is the one shape the repository and maturity sections share", () => {
     /** A section's element tree, by tag and class, without the repository's create control. */
     const outline = (section: Element | null): string[] =>
@@ -710,6 +790,77 @@ describe("recently merged", () => {
     expect(
       (pane(drawn, "repository").querySelector(".merged-section") as HTMLElement).hidden,
     ).toBe(true);
+  });
+});
+
+describe("hidden workspaces", () => {
+  it("draws the hidden row under every grouping", () => {
+    const drawn = drawWorkspaceRoster(roster({ hidden: hiddenSection([HIDDEN_ROW]) }), sidebarContext());
+    expect(
+      ["repository", "task", "maturity"].map(
+        (grouping) => pane(drawn, grouping).querySelector(".hidden-section [data-roster-row='ws-8']") !== null,
+      ),
+    ).toEqual([true, true, true]);
+  });
+
+  it("draws the section above the recently-merged band", () => {
+    const drawn = drawWorkspaceRoster(
+      roster({ hidden: hiddenSection([HIDDEN_ROW]), merged: mergedSection([MERGED_ROW]) }),
+      sidebarContext(),
+    );
+    const bands = [...pane(drawn, "repository").querySelectorAll(".hidden-section, .merged-section")];
+    expect(bands.map((band) => band.classList.contains("hidden-section"))).toEqual([true, false]);
+  });
+
+  it("draws the daemon's heading and count", () => {
+    const drawn = drawWorkspaceRoster(roster({ hidden: hiddenSection([HIDDEN_ROW], 1) }), sidebarContext());
+    const section = pane(drawn, "repository").querySelector(".hidden-section") as HTMLElement;
+    expect([section.querySelector(".sb-label")?.textContent, section.querySelector(".sb-count")?.textContent]).toEqual([
+      "Hidden Workspaces",
+      "(1)",
+    ]);
+  });
+
+  it("keeps the section out of the rail when nothing is hidden", () => {
+    const drawn = drawWorkspaceRoster(roster(), sidebarContext());
+    const section = pane(drawn, "repository").querySelector(".hidden-section") as HTMLElement;
+    expect([section.hidden, section.querySelector(".sb-label")]).toEqual([true, null]);
+  });
+
+  it("keeps the section out of the rail when its only row is closed", () => {
+    const drawn = drawWorkspaceRoster(
+      roster({ hidden: hiddenSection([row({ id: "ws-gone", closed: true })], 0) }),
+      sidebarContext(),
+    );
+    expect((pane(drawn, "repository").querySelector(".hidden-section") as HTMLElement).hidden).toBe(true);
+  });
+
+  it("drops a closed row and keeps the open one", () => {
+    const drawn = drawWorkspaceRoster(
+      roster({ hidden: hiddenSection([row({ id: "ws-gone", closed: true }), HIDDEN_ROW], 1) }),
+      sidebarContext(),
+    );
+    const section = pane(drawn, "repository").querySelector(".hidden-section") as HTMLElement;
+    expect([...section.querySelectorAll("[data-roster-row]")].map((r) => r.getAttribute("data-roster-row"))).toEqual([
+      "ws-8",
+    ]);
+  });
+
+  it("refuses a roster with no hidden section as a malformed view", () => {
+    const bare = create(WorkspaceRosterSchema, {
+      repository: { sections: [] },
+      task: { sections: [] },
+      maturity: { sections: [] },
+      recentlyMerged: mergedSection(),
+      shown: { case: "shownRepository", value: {} },
+    });
+    expect(() => drawWorkspaceRoster(bare, sidebarContext())).toThrow(MalformedView);
+  });
+
+  it("refuses an empty hidden section with no fold as a malformed view", () => {
+    const section = hiddenSection();
+    section.fold = { case: undefined };
+    expect(() => drawWorkspaceRoster(roster({ hidden: section }), sidebarContext())).toThrow(MalformedView);
   });
 });
 
