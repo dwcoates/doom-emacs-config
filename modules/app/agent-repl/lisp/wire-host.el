@@ -1789,6 +1789,157 @@ UpdatePersistentWifiMode's success)."
      "WatchDaemonResponse"
      (agent-repl-wire-decode-watch-daemon-response-push object))))
 
+;;;; ---- ListSlashCommands ----
+
+(defun agent-repl-wire-encode-list-slash-commands-request-workspace (value)
+  "Encode `ListSlashCommandsRequest''s `workspace' field VALUE."
+  (agent-repl-wire-encode-workspace-ref value))
+
+(defun agent-repl-wire-encode-list-slash-commands-request (value)
+  "Encode the ListSlashCommandsRequest plist VALUE `(:workspace REF)'.
+The composer asks for every slash command the workspace's runtime answers."
+  (unless (plist-member value :workspace)
+    (agent-repl-wire--fail "ListSlashCommandsRequest" 'workspace
+                           "required message field is absent"))
+  (agent-repl-wire--encoded
+   "ListSlashCommandsRequest"
+   (list (cons 'workspace
+               (agent-repl-wire-encode-list-slash-commands-request-workspace
+                (plist-get value :workspace))))))
+
+(defun agent-repl-wire-decode-session-command-catalog-entry-alias (value)
+  "Decode one `SessionCommandCatalogEntry.aliases' element VALUE, a string."
+  (if (stringp value)
+      value
+    (agent-repl-wire--fail "SessionCommandCatalogEntry" 'aliases "expected a string")))
+
+(defun agent-repl-wire-decode-session-command-catalog-entry (value)
+  "Decode VALUE as `SessionCommandCatalogEntry', a plist
+\(:name :description :argument-hint :aliases).
+One command the runtime answers: its name WITHOUT the leading slash, and
+the runtime's own description and argument hint, nil when it states none."
+  (let* ((message "SessionCommandCatalogEntry")
+         (object (agent-repl-wire--object message value)))
+    (agent-repl-wire--check-keys message object '(name description argumentHint aliases))
+    (let ((name (agent-repl-wire--decode-string message 'name object)))
+      (when (string-empty-p name)
+        (agent-repl-wire--fail message 'name "a command name is never empty"))
+      (agent-repl-wire--decoded
+       message
+       (list :name name
+             :description (agent-repl-wire--decode-optional-string message 'description object)
+             :argument-hint (agent-repl-wire--decode-optional-string message 'argumentHint object)
+             :aliases (agent-repl-wire--decode-repeated
+                       message 'aliases object
+                       #'agent-repl-wire-decode-session-command-catalog-entry-alias))))))
+
+(defun agent-repl-wire-decode-session-command-catalog (value)
+  "Decode VALUE as `SessionCommandCatalog', a plist (:commands LIST).
+The runtime's whole catalog, in the order the runtime listed it."
+  (let* ((message "SessionCommandCatalog")
+         (object (agent-repl-wire--object message value)))
+    (agent-repl-wire--check-keys message object '(commands))
+    (agent-repl-wire--decoded
+     message
+     (list :commands (agent-repl-wire--decode-repeated
+                      message 'commands object
+                      #'agent-repl-wire-decode-session-command-catalog-entry)))))
+
+(defun agent-repl-wire-decode-list-slash-commands-stated (value)
+  "Decode VALUE as `ListSlashCommandsStated', a plist (:catalog CATALOG)."
+  (let* ((message "ListSlashCommandsStated")
+         (object (agent-repl-wire--object message value)))
+    (agent-repl-wire--check-keys message object '(catalog))
+    (agent-repl-wire--decoded
+     message
+     (list :catalog (agent-repl-wire--decode-message
+                     message 'catalog object
+                     #'agent-repl-wire-decode-session-command-catalog)))))
+
+(defun agent-repl-wire-decode-list-slash-commands-unstated (value)
+  "Decode VALUE as the empty message `ListSlashCommandsUnstated'.
+No session of the workspace has stated its catalog yet."
+  (agent-repl-wire--decode-empty "ListSlashCommandsUnstated" value))
+
+(defun agent-repl-wire-decode-list-slash-commands-success (value)
+  "Decode VALUE as `ListSlashCommandsSuccess', the `catalog' oneof plist.
+UNSTATED IS AN ANSWER: it arrives inside success, never as an error."
+  (let* ((message "ListSlashCommandsSuccess")
+         (object (agent-repl-wire--object message value)))
+    (agent-repl-wire--check-keys message object '(stated unstated))
+    (agent-repl-wire--decoded
+     message
+     (agent-repl-wire--decode-oneof
+      message 'catalog object
+      '((stated :stated agent-repl-wire-decode-list-slash-commands-stated)
+        (unstated :unstated agent-repl-wire-decode-list-slash-commands-unstated))))))
+
+(defun agent-repl-wire-decode-list-slash-commands-workspace-ref-mismatch (value)
+  "Decode VALUE as `ListSlashCommandsWorkspaceRefMismatch'.
+The answer is a plist (`:registry-dir'): the echoed dir disagrees with the
+registry's dir for this id."
+  (let ((object (agent-repl-wire--object "ListSlashCommandsWorkspaceRefMismatch" value)))
+    (agent-repl-wire--check-keys "ListSlashCommandsWorkspaceRefMismatch" object '(registryDir))
+    (agent-repl-wire--decoded
+     "ListSlashCommandsWorkspaceRefMismatch"
+     (list :registry-dir (agent-repl-wire--decode-string
+                          "ListSlashCommandsWorkspaceRefMismatch" 'registryDir object)))))
+
+(defun agent-repl-wire-decode-list-slash-commands-transferring-away (value)
+  "Decode VALUE as `ListSlashCommandsTransferringAway', a plist (`:address').
+This daemon released the workspace to a successor; dial `address'."
+  (let ((object (agent-repl-wire--object "ListSlashCommandsTransferringAway" value)))
+    (agent-repl-wire--check-keys "ListSlashCommandsTransferringAway" object '(address))
+    (agent-repl-wire--decoded
+     "ListSlashCommandsTransferringAway"
+     (list :address (agent-repl-wire--decode-string
+                     "ListSlashCommandsTransferringAway" 'address object)))))
+
+(defun agent-repl-wire-decode-list-slash-commands-error-unknown-workspace (value)
+  "Decode ListSlashCommandsError's `unknown_workspace' cause arm from VALUE.
+The workspace id is not in the daemon's registry."
+  (agent-repl-wire--decode-empty "ListSlashCommandsUnknownWorkspace" value))
+
+(defun agent-repl-wire-decode-list-slash-commands-error-workspace-ref-mismatch (value)
+  "Decode ListSlashCommandsError's `workspace_ref_mismatch' cause arm from VALUE."
+  (agent-repl-wire-decode-list-slash-commands-workspace-ref-mismatch value))
+
+(defun agent-repl-wire-decode-list-slash-commands-error-transferring-away (value)
+  "Decode ListSlashCommandsError's `transferring_away' cause arm from VALUE."
+  (agent-repl-wire-decode-list-slash-commands-transferring-away value))
+
+(defun agent-repl-wire-decode-list-slash-commands-error-not-yet-adopted (value)
+  "Decode ListSlashCommandsError's `not_yet_adopted' cause arm from VALUE.
+A joining daemon has not finished adopting this workspace yet."
+  (agent-repl-wire--decode-empty "ListSlashCommandsNotYetAdopted" value))
+
+(defun agent-repl-wire-decode-list-slash-commands-error (value)
+  "Decode VALUE as `ListSlashCommandsError', a plist (:cause ONEOF).
+THE ARM IS THE REFUSAL, so an unset cause is a contract breach."
+  (let ((object (agent-repl-wire--object "ListSlashCommandsError" value)))
+    (agent-repl-wire--check-keys "ListSlashCommandsError" object
+                                 '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted))
+    (agent-repl-wire--decoded
+     "ListSlashCommandsError"
+     (list :cause
+           (agent-repl-wire--decode-oneof
+            "ListSlashCommandsError" 'cause object
+            '((unknownWorkspace :unknown-workspace agent-repl-wire-decode-list-slash-commands-error-unknown-workspace)
+              (workspaceRefMismatch :workspace-ref-mismatch agent-repl-wire-decode-list-slash-commands-error-workspace-ref-mismatch)
+              (transferringAway :transferring-away agent-repl-wire-decode-list-slash-commands-error-transferring-away)
+              (notYetAdopted :not-yet-adopted agent-repl-wire-decode-list-slash-commands-error-not-yet-adopted)))))))
+
+(defun agent-repl-wire-decode-list-slash-commands-response (value)
+  "Decode VALUE as `ListSlashCommandsResponse'.  THE ARM IS THE OUTCOME."
+  (let ((object (agent-repl-wire--object "ListSlashCommandsResponse" value)))
+    (agent-repl-wire--check-keys "ListSlashCommandsResponse" object '(success error))
+    (agent-repl-wire--decoded
+     "ListSlashCommandsResponse"
+     (agent-repl-wire--decode-oneof
+      "ListSlashCommandsResponse" 'result object
+      '((success :success agent-repl-wire-decode-list-slash-commands-success)
+        (error :error agent-repl-wire-decode-list-slash-commands-error))))))
+
 (provide 'wire-host)
 
 ;;; wire-host.el ends here

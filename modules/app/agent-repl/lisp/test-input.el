@@ -3615,3 +3615,10 @@ This is what an Emacs restart does to it.  Returns the new buffer."
         ;; Assert
         (should (equal (with-current-buffer buf (agent-repl--history-unsent-head))
                        "retry me"))))))
+
+(ert-deftest agent-repl-test-input-mode-installs-slash-command-completion ()
+  "The composer's mode puts slash-command completion on its own capf list."
+  (with-temp-buffer
+    (agent-repl-input-mode)
+    (should (memq #'agent-repl-command-completion-at-point completion-at-point-functions))
+    (should (local-variable-p 'completion-at-point-functions))))

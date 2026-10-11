@@ -115,6 +115,8 @@
 (declare-function agent-repl-wire-encode-daemon-health-request "wire-verbs" (request))
 (declare-function agent-repl-wire-decode-daemon-health-response "wire-verbs" (alist))
 (declare-function agent-repl-wire-encode-session-health-request "wire-verbs" (request))
+(declare-function agent-repl-wire-encode-list-slash-commands-request "wire-host" (request))
+(declare-function agent-repl-wire-decode-list-slash-commands-response "wire-host" (alist))
 (declare-function agent-repl-wire-decode-session-health-response "wire-verbs" (alist))
 
 ;;;; ---- The two generic paths ----
@@ -495,6 +497,14 @@ transport failure means there is not one.")
   agent-repl-wire-encode-session-health-request
   agent-repl-wire-decode-session-health-response
   "Ask the daemon for one workspace session's health verdict and faults.")
+
+(agent-repl-rpc--defverb agent-repl-rpc-list-slash-commands
+  "ListSlashCommands"
+  agent-repl-wire-encode-list-slash-commands-request
+  agent-repl-wire-decode-list-slash-commands-response
+  "Ask the daemon for every slash command one workspace's runtime answers.
+The answer is the catalog the workspace's session last stated, or
+`unstated' when none has been: the composer's completion source.")
 
 ;;;; ---- Streams ----
 
