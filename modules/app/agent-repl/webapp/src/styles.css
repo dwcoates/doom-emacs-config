@@ -202,6 +202,9 @@
      notice uses, since a turn the user chose to stop reads as a warning, not
      the --err red a genuine failure carries. */
   --interrupted: #ca8a04;
+  /* A merge test suite that has started and not finished: the same true
+     yellow, so a run in progress never reads as the green of a pass. */
+  --suite-running: #ca8a04;
   /* The rule a context CLEAR draws: red, the loudest thing in the palette,
      because everything above it is context the session no longer has. */
   --clear-divider: #dc2626;
@@ -478,6 +481,7 @@
     --search-current: #f97316;
     --remediation: #facc15;
     --interrupted: #facc15;
+    --suite-running: #facc15;
     --clear-divider: #ef4444;
     --compact-rule: #f97316;
     --final-response: #4ade80;
@@ -7310,12 +7314,12 @@ ar-button.outcome-marker-pill {
 /* The test suites and their daemon-painted output. */
 .merge-suite { padding: 0.2rem 0; }
 .merge-suite-head { display: flex; align-items: baseline; gap: 0.4rem; }
-/* A RUNNING SUITE'S DOT IS NEVER PURPLE (owner ruling, 2026-10-08): it
-   breathes grey before any test has reported, green while every test so far
-   passed, red once one failed. */
+/* A RUNNING SUITE'S DOT IS NEVER PURPLE (owner ruling, 2026-10-08) and
+   NEVER GREEN (owner request, 2026-10-11): it breathes yellow while started
+   and unfinished, red once a test failed. Green belongs to the settled ✓. */
 .merge-suite-glyph.is-live { animation: merge-breathe 1.8s ease-in-out infinite; }
-.merge-suite-glyph.is-unreported { color: var(--muted); }
-.merge-suite-glyph.is-passing { color: var(--ok); }
+.merge-suite-glyph.is-unreported { color: var(--suite-running); }
+.merge-suite-glyph.is-passing { color: var(--suite-running); }
 .merge-suite-glyph.is-failing { color: var(--err); }
 .merge-suite-glyph.is-succeeded { color: var(--ok); opacity: 0.7; }
 .merge-suite-glyph.is-failed { color: var(--err); }
