@@ -45,8 +45,10 @@ func (f *fakeWorkspaces) Nuke(ctx context.Context, ws ids.WorkspaceID) error {
 		return f.nukeErr
 	}
 	f.nuked = append(f.nuked, ws)
+	// Errorf, not Fatalf: Run calls this off the test goroutine.
 	if _, err := f.db.Forget(ctx, ws); err != nil {
-		f.t.Fatalf("fake Nuke: forget %s: %v", ws, err)
+		f.t.Errorf("Forget %s: %v", ws, err)
+		return err
 	}
 	return nil
 }
