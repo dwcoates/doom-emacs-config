@@ -898,19 +898,19 @@ scope, never nil: a nil scope is refused by the ladder as a routing error
       (should (member "elisp.commands.open-most-recent target=a"
                       (agent-repl-test-commands--info-messages))))))
 
-;;;; ---- SPC TAB p: swap places with a drawn tab ----
+;;;; ---- SPC TAB p: move to a drawn tab ----
 
-(defvar agent-repl-test-commands--swapped nil
-  "The (WS OTHER) pair a place command requested, bound by `--placing'.")
+(defvar agent-repl-test-commands--moved nil
+  "The (WS TARGET) pair a move command requested, bound by `--placing'.")
 
 (defmacro agent-repl-test-commands--placing (tabs hidden current &rest body)
   "Run BODY on a bar of TABS, HIDDEN of them undrawn, with CURRENT active.
-Binds `agent-repl-test-commands--swapped' to the (WS OTHER) pair requested
+Binds `agent-repl-test-commands--moved' to the (WS TARGET) pair requested
 of the daemon, nil when none was."
   (declare (indent 3))
-  `(let ((agent-repl-test-commands--swapped nil))
-     (cl-letf (((symbol-function 'agent-repl-verb-swap-places)
-                (lambda (ws other) (setq agent-repl-test-commands--swapped (list ws other))))
+  `(let ((agent-repl-test-commands--moved nil))
+     (cl-letf (((symbol-function 'agent-repl-verb-move)
+                (lambda (ws target) (setq agent-repl-test-commands--moved (list ws target))))
                ((symbol-function 'agent-repl--ws-log-name) (lambda (ws) ws))
                ((symbol-function 'message) (lambda (&rest _) nil)))
        (agent-repl-test-commands--with-hidden-bar ,tabs ,hidden ,current ,@body))))
@@ -935,24 +935,24 @@ of the daemon, nil when none was."
   (should (equal (cadr (interactive-form 'agent-repl-workspace-place))
                  '(list (agent-repl--read-place-slot)))))
 
-(ert-deftest agent-repl-test-commands-place-swaps-with-the-nth-drawn-tab ()
-  "Slot N counts the DRAWN tabs, and the current workspace swaps with it."
+(ert-deftest agent-repl-test-commands-place-moves-onto-the-nth-drawn-tab ()
+  "Slot N counts the DRAWN tabs, and the current workspace moves onto it."
   (agent-repl-test-commands--placing '("first" "second" "third") nil "first"
     (agent-repl-workspace-place 3)
-    (should (equal agent-repl-test-commands--swapped '("first" "third")))))
+    (should (equal agent-repl-test-commands--moved '("first" "third")))))
 
 (ert-deftest agent-repl-test-commands-place-counts-only-drawn-tabs ()
   "A hidden tab takes no slot, exactly as for the numeral chords."
   (agent-repl-test-commands--placing '("first" "hidden" "third") '("hidden") "first"
     (agent-repl-workspace-place 2)
-    (should (equal agent-repl-test-commands--swapped '("first" "third")))))
+    (should (equal agent-repl-test-commands--moved '("first" "third")))))
 
 (ert-deftest agent-repl-test-commands-place-past-the-end-is-a-recorded-no-op ()
   "A slot the bar does not draw requests nothing and records the miss."
   (agent-repl-test-commands--capturing-info
     (agent-repl-test-commands--placing '("first" "second") nil "first"
       (agent-repl-workspace-place 10)
-      (should-not agent-repl-test-commands--swapped))
+      (should-not agent-repl-test-commands--moved))
     (should (member "elisp.commands.place-out-of-range slot=10 tabs=2"
                     (agent-repl-test-commands--info-messages)))))
 
@@ -961,7 +961,7 @@ of the daemon, nil when none was."
   (agent-repl-test-commands--capturing-info
     (agent-repl-test-commands--placing '("first" "second") nil "second"
       (agent-repl-workspace-place 2)
-      (should-not agent-repl-test-commands--swapped))
+      (should-not agent-repl-test-commands--moved))
     (should (member "elisp.commands.place-own-slot slot=2 ws=second"
                     (agent-repl-test-commands--info-messages)))))
 
@@ -970,12 +970,12 @@ of the daemon, nil when none was."
   (agent-repl-test-commands--capturing-info
     (agent-repl-test-commands--placing '("first" "second") nil "main"
       (agent-repl-workspace-place 1)
-      (should-not agent-repl-test-commands--swapped))
+      (should-not agent-repl-test-commands--moved))
     (should (member "elisp.commands.place-no-tab current=main slot=1"
                     (agent-repl-test-commands--info-messages)))))
 
 (ert-deftest agent-repl-test-commands-place-records-its-target ()
-  "A swap request records `elisp.commands.place slot=N ws=<ws> target=<ws>'."
+  "A move request records `elisp.commands.place slot=N ws=<ws> target=<ws>'."
   (agent-repl-test-commands--capturing-info
     (agent-repl-test-commands--placing '("first" "second") nil "first"
       (agent-repl-workspace-place 2))
