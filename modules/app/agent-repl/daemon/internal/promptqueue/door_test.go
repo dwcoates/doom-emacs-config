@@ -289,3 +289,21 @@ func TestEveryClosePathClosesTheDurableRow(t *testing.T) {
 		})
 	}
 }
+
+func TestEveryClosePathOwesTheBranchARecount(t *testing.T) {
+	for _, path := range closePaths {
+		t.Run(path.name, func(t *testing.T) {
+			// Arrange
+			w := newDoorWorld(t)
+
+			// Act
+			path.live(t, w)
+
+			// Assert
+			got := w.h.commits.recounts()
+			if len(got) != 1 || got[0] != w.ws {
+				t.Fatalf("recounts owed = %v, want exactly [%s]", got, w.ws)
+			}
+		})
+	}
+}

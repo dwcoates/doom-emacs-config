@@ -23,6 +23,10 @@ import (
 // either way, and a feed left showing it running is the defect this door
 // exists to make impossible; the failed write is recorded at ERROR and handed
 // back. doorguard_test.go fails any other production site that closes a turn.
+//
+// EVERY CLOSE ALSO OWES THE BRANCH A RECOUNT: the turn may have committed, and
+// the roster's detail panel states the count as of the last turn. turnClosed is
+// the one place all three paths say so, beside the feed's ending.
 
 // closeTurn closes one turn's row with HOW and draws its ending.
 func (q *queue) closeTurn(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID, how wsm.TurnClose, log dlog.Logger) error {
@@ -41,9 +45,17 @@ func (q *queue) closeTurn(ctx context.Context, ws ids.WorkspaceID, turn ids.Turn
 			"turn": string(turn), "close": how.String(),
 		})
 	}
-	q.deps.Feed.OnTurnClosed(ws, turn, wsm.RecordedClose{How: how, At: at})
-	q.retireCutIf(ws, turn, func() (dlog.Logger, bool) { return log, true })
+	q.turnClosed(ws, turn, wsm.RecordedClose{How: how, At: at}, func() (dlog.Logger, bool) { return log, true })
 	return err
+}
+
+// turnClosed is what every close of a turn's row is followed by: the feed
+// draws its ending, a context cut riding the turn retires, and the branch is
+// owed a recount.
+func (q *queue) turnClosed(ws ids.WorkspaceID, turn ids.TurnID, close wsm.RecordedClose, log func() (dlog.Logger, bool)) {
+	q.deps.Feed.OnTurnClosed(ws, turn, close)
+	q.retireCutIf(ws, turn, log)
+	q.deps.Commits.TurnClosed(ws)
 }
 
 // CloseOrphans closes, in one transaction, every turn of a workspace that has
@@ -57,8 +69,7 @@ func (q *queue) CloseOrphans(ctx context.Context, ws ids.WorkspaceID, at time.Ti
 		return wsm.OrphanReport{}, fmt.Errorf("close the orphaned turns of %q: %w", ws, err)
 	}
 	for _, turn := range report.Turns {
-		q.deps.Feed.OnTurnClosed(ws, turn, wsm.RecordedClose{How: wsm.CloseOrphaned, At: report.At})
-		q.retireCutIf(ws, turn, q.workspaceLog(ctx, ws))
+		q.turnClosed(ws, turn, wsm.RecordedClose{How: wsm.CloseOrphaned, At: report.At}, q.workspaceLog(ctx, ws))
 	}
 	return report, nil
 }
@@ -73,8 +84,7 @@ func (q *queue) ClaimDisplacedTurn(ctx context.Context, ws ids.WorkspaceID, turn
 		return false, fmt.Errorf("claim the displaced turn %q on %q: %w", turn, ws, err)
 	}
 	if claim.Closed {
-		q.deps.Feed.OnTurnClosed(ws, turn, wsm.RecordedClose{How: wsm.CloseOrphaned, At: at})
-		q.retireCutIf(ws, turn, q.workspaceLog(ctx, ws))
+		q.turnClosed(ws, turn, wsm.RecordedClose{How: wsm.CloseOrphaned, At: at}, q.workspaceLog(ctx, ws))
 	}
 	return claim.Claimed, nil
 }
