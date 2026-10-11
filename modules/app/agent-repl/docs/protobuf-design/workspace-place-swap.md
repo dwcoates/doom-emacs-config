@@ -195,3 +195,9 @@ sidebar's walk" and the create-landing rule above. Not yet implemented.
   name. `n`/`N` stay as they are. `f`/`F` fork into `master`. `c`/`C` become
   the child fork (cut from the current workspace's tip, merging back into
   it), replacing today's child commands.
+- **Base ref stays, checked by the daemon (owner, 2026-10-11):** a create
+  that names a parent refuses any base ref and always cuts from the parent's
+  tip; a create with no parent accepts a base ref only when it is an
+  ancestor of (or equal to) the primary branch. Both refusals are typed
+  error arms. The four existing workspaces cut from `master` that merge into
+  another workspace are left alone.
