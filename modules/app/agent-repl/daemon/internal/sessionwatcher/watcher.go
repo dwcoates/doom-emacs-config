@@ -585,14 +585,6 @@ func (w *watcher) TurnInFlight() *ids.TurnID {
 	return &turn
 }
 
-// turnIDValue renders an optional turn for transition records.
-func turnIDValue(turn *ids.TurnID) string {
-	if turn == nil {
-		return ""
-	}
-	return string(*turn)
-}
-
 // Free reports freeness: no turn in flight AND an empty live-work set.
 func (w *watcher) Free() bool {
 	w.mu.Lock()
@@ -782,7 +774,7 @@ func (w *watcher) foldJoinLocked(turn, into ids.TurnID) {
 	}
 	if !waiting {
 		w.log.Info("daemon.sessionwatcher.turn_folded_unheld", "a folded prompt's row named a turn this watcher was not holding; nothing ends", dlog.Context{
-			"turn_id": string(turn), "folded_into": string(into), "turn_in_flight": turnValue(w.turn),
+			"turn_id": string(turn), "folded_into": string(into), "turn_in_flight": ids.Optional(w.turn),
 		})
 		return
 	}
@@ -855,7 +847,7 @@ func (w *watcher) standTurnLocked(turn ids.TurnID, operation, message string) bo
 		})
 		return false
 	}
-	before := turnIDValue(w.turn)
+	before := ids.Optional(w.turn)
 	w.turn = &turn
 	w.turnAccepted = true
 	if w.adopted != nil && *w.adopted != turn {
@@ -885,7 +877,7 @@ func (w *watcher) OnTurnOpenFailed(ws ids.WorkspaceID, turn ids.TurnID) {
 	if w.turn == nil || *w.turn != turn {
 		return
 	}
-	before := turnIDValue(w.turn)
+	before := ids.Optional(w.turn)
 	w.turn = nil
 	w.log.Debug("daemon.sessionwatcher.turn_open_failed", "the shim refused a turn; it no longer stands in flight", dlog.Context{
 		"turn_id": string(turn), "state": "turn_in_flight", "before": before, "after": "",
@@ -2090,7 +2082,7 @@ func (w *watcher) applySessionStartedLocked(started *conversationv1.SessionStart
 func (w *watcher) standOpenAsksLocked(asks []*conversationv1.SessionOpenAsk) {
 	for _, ask := range asks {
 		agent := ask.GetAgent()
-		ctx := dlog.Context{"agent_id": agent.GetValue(), "turn_in_flight": turnValue(w.turn)}
+		ctx := dlog.Context{"agent_id": agent.GetValue(), "turn_in_flight": ids.Optional(w.turn)}
 		switch {
 		case isOpenPermission(ask.GetPermission()):
 			permission := ask.GetPermission()

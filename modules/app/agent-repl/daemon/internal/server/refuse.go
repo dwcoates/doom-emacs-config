@@ -443,9 +443,11 @@ func (s *server) resolveRefLogging(
 // resolveRegistered resolves a workspace ref against the registry ALONE,
 // without the serving-standing gate resolveRefLogging puts in front of it.
 //
-// It exists for the one rpc whose answer must not depend on which daemon
-// serves the workspace: ClientLog (see subjectForClientLog). Every other rpc
-// is INTAKE and goes through the standing gate first.
+// It exists for the refs whose answer must not depend on which daemon serves
+// the workspace: ClientLog's subject (see subjectForClientLog), and
+// SetWorkspaceParent's new PARENT, which is named as a merge target rather
+// than acted on. Every rpc's subject is INTAKE and goes through the standing
+// gate first.
 func (s *server) resolveRegistered(ctx context.Context, rpc string, ref *workspacev1.WorkspaceRef) (resolved, *refusal, error) {
 	id := ids.WorkspaceID(ref.GetId())
 

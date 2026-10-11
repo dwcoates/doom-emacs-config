@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"claude-repld/internal/merge"
+	"claude-repld/internal/promptqueue"
 	"claude-repld/internal/workspace"
 )
 
@@ -25,6 +26,7 @@ func TestARefusedEntryIsAnAnswerAndAFailedOneIsAFault(t *testing.T) {
 				Reason: "/private/tmp/scratch is inside the temporary directory /private/tmp; agent-repl does not register temporary folders"},
 			wantLevel: "info",
 		},
+		{name: "the prompt queue's cold gate", err: &promptqueue.ColdGateRefusal{Detail: "resumed cold"}, wantLevel: "info"},
 		{name: "the merge orchestrator's typed refusal", err: &merge.RefusalError{Arm: merge.ArmNotPaused, Reason: "arranged"}, wantLevel: "info"},
 		{name: "a failure that is no refusal", err: errors.New("the registry could not be read"), wantLevel: "warn"},
 	}

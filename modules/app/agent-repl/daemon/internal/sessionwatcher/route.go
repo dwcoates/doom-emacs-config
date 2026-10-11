@@ -5,6 +5,7 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
+
 	"google.golang.org/protobuf/proto"
 
 	"claude-repld/internal/contextcut"
@@ -659,7 +660,7 @@ func (w *watcher) adoptVendorTurnLocked(prompt *conversationv1.AgentPrompt) {
 	}
 	if w.turnKnownLocked(turn) {
 		w.log.Debug("daemon.sessionwatcher.turn_adopted_again", "a vendor-started turn's prompt row was served again; the turn was already taken up", dlog.Context{
-			"turn_id": string(turn), "turn_in_flight": turnValue(w.turn),
+			"turn_id": string(turn), "turn_in_flight": ids.Optional(w.turn),
 		})
 		return
 	}
@@ -785,7 +786,7 @@ func (w *watcher) closingReplayedLocked(a *agentWatch, frame *conversationv1.Age
 		// whichever turn is open NOW: that is how a store restart once ended
 		// a live turn with the previous turn's terminal (2026-09-23 12:38:36).
 		w.log.Info("daemon.sessionwatcher.terminal_replayed", "a terminal row already served was served again; it is dropped", dlog.Context{
-			"agent_id": agent.GetValue(), "pointer": at.GetValue(), "turn_in_flight": turnValue(w.turn),
+			"agent_id": agent.GetValue(), "pointer": at.GetValue(), "turn_in_flight": ids.Optional(w.turn),
 		})
 		return true
 	}
@@ -793,7 +794,7 @@ func (w *watcher) closingReplayedLocked(a *agentWatch, frame *conversationv1.Age
 	// whatever compaction or turn the views are drawing NOW, and drop a
 	// context figure read after it.
 	w.log.Info("daemon.sessionwatcher.context_cut_replayed", "a cut row already served was served again; it is dropped", dlog.Context{
-		"agent_id": agent.GetValue(), "pointer": at.GetValue(), "turn_in_flight": turnValue(w.turn),
+		"agent_id": agent.GetValue(), "pointer": at.GetValue(), "turn_in_flight": ids.Optional(w.turn),
 	})
 	return true
 }
@@ -1205,7 +1206,7 @@ func (w *watcher) routeTerminalLocked(a *agentWatch, agent *conversationv1.Agent
 		// DEBUG, NOT WARN: the hold is the design, and the race is an
 		// ordinary consequence of two planes with no ordering between them.
 		w.log.Debug("daemon.sessionwatcher.turn_end_withheld", "a terminal arrived before the main agent was named", dlog.Context{
-			"agent_id": agent.GetValue(), "turn_id": turnValue(w.turn),
+			"agent_id": agent.GetValue(), "turn_id": ids.Optional(w.turn),
 		})
 		if w.held != nil {
 			// ONE SLOT, and a second occupant means the main watch produced
@@ -1284,19 +1285,19 @@ func (w *watcher) terminalTurnLocked(agent *conversationv1.AgentId, stamp *conve
 	for _, waiting := range w.waiting {
 		if waiting.turn == named {
 			w.log.Info("daemon.sessionwatcher.terminal_turn_waiting", "a terminal named a turn waiting behind the turn in flight; it ends that turn", dlog.Context{
-				"agent_id": agent.GetValue(), "turn_id": string(named), "turn_in_flight": turnValue(w.turn),
+				"agent_id": agent.GetValue(), "turn_id": string(named), "turn_in_flight": ids.Optional(w.turn),
 			})
 			return &named
 		}
 	}
 	if w.turnKnownLocked(named) {
 		w.log.Debug("daemon.sessionwatcher.terminal_turn_not_open", "a terminal named a turn that is not in flight; it ends nothing that is open", dlog.Context{
-			"agent_id": agent.GetValue(), "turn_id": string(named), "turn_in_flight": turnValue(w.turn),
+			"agent_id": agent.GetValue(), "turn_id": string(named), "turn_in_flight": ids.Optional(w.turn),
 		})
 		return nil
 	}
 	w.log.Error("daemon.sessionwatcher.terminal_turn_unknown", "a terminal named a turn this daemon never opened or replayed; it ends nothing", dlog.Context{
-		"agent_id": agent.GetValue(), "turn_id": string(named), "turn_in_flight": turnValue(w.turn),
+		"agent_id": agent.GetValue(), "turn_id": string(named), "turn_in_flight": ids.Optional(w.turn),
 	})
 	return nil
 }
@@ -1334,7 +1335,7 @@ func (w *watcher) releaseHeldTerminalLocked() {
 	}
 	w.held = nil
 	w.log.Debug("daemon.sessionwatcher.turn_end_released", "the held terminal was routed once the main agent was named", dlog.Context{
-		"agent_id": held.agent.GetValue(), "turn_id": turnValue(w.turn),
+		"agent_id": held.agent.GetValue(), "turn_id": ids.Optional(w.turn),
 	})
 	w.routeTerminalLocked(w.mainWatchLocked(), held.agent, held.stamp, held.place, held.success, held.failure)
 	// OFF THE CALLER'S GOROUTINE. See flushTurnEndsAsync: the naming arrives on
@@ -1385,14 +1386,6 @@ func turnCloseOf(success *conversationv1.AgentSuccess, failure *conversationv1.A
 		return wsm.CloseKilled
 	}
 	return wsm.CloseCompleted
-}
-
-// turnValue renders a turn id for a log record.
-func turnValue(turn *ids.TurnID) string {
-	if turn == nil {
-		return ""
-	}
-	return string(*turn)
 }
 
 // ---- detached work ----

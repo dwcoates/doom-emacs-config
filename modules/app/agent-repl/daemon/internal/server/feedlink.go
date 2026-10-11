@@ -2,8 +2,6 @@ package server
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -11,6 +9,7 @@ import (
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/prompthandler"
 	"claude-repld/internal/replyquote"
 	"claude-repld/internal/workspace"
 	"claude-repld/internal/wsm"
@@ -53,9 +52,5 @@ func (s *server) askAboutUnresolvedLink(ctx context.Context, log dlog.Logger, ws
 // linkQuestionKey mints the idempotency key an unresolved link's question is
 // submitted under: every click is its own question.
 func linkQuestionKey() (string, error) {
-	var b [16]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return "", fmt.Errorf("mint the question's idempotency key: %w", err)
-	}
-	return "link-unresolved-" + hex.EncodeToString(b[:]), nil
+	return prompthandler.MintKey("link-unresolved")
 }

@@ -500,6 +500,17 @@ func rosterRepoRow(roster *frontendv1.WorkspaceRoster, id string) *frontendv1.Ro
 	return nil
 }
 
+// rosterNests reports whether the repository grouping draws the child's row
+// among the parent's children.
+func rosterNests(roster *frontendv1.WorkspaceRoster, parentID, childID string) bool {
+	for _, c := range rosterRepoRow(roster, parentID).GetChildren() {
+		if c.GetWorkspace().GetWorkspace().GetId() == childID {
+			return true
+		}
+	}
+	return false
+}
+
 // rosterTaskRow finds a workspace's row under a named task section.
 func rosterTaskRow(roster *frontendv1.WorkspaceRoster, taskID, id string) *frontendv1.RosterRow {
 	for _, s := range roster.GetTask().GetSections() {
