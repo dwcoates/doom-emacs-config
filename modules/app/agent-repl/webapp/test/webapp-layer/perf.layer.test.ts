@@ -151,8 +151,8 @@ it(
       );
       // Row 3a: the origin is THE FRAME'S OWN ARRIVAL. §C row 3a restates
       // "visible" as the first response element entering the DOM, because
-      // `smooth.ts` paces the character reveal at 200 cps on a 0.3 s constant
-      // by design — a type-out, not a latency.
+      // `reveal-pace.ts` paces the character reveal at the daemon's learned
+      // chars/sec by design — a type-out, not a latency.
       const armedResponse = probe.armFromFrame(() => responseRows().length > responsesBefore);
 
       // Act.

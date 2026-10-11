@@ -5,8 +5,10 @@ import (
 	"errors"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
-	"time"
+
+	"google.golang.org/protobuf/proto"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -15,27 +17,31 @@ import (
 	"claude-repld/internal/wsm"
 )
 
-// fakePacing records what the resolver measures and persists, and answers a
-// set expected gap.
+// fakePacing records what the resolver measures and persists, and answers
+// set bounds per key and per kind.
 type fakePacing struct {
-	observed  []observedGap
-	persisted []revealpace.Key
-	gaps      map[revealpace.Key]uint32
-	persistOK error
+	observed   []observedSpeed
+	persisted  []revealpace.Key
+	bounds     map[revealpace.Key]revealpace.Bounds
+	kindBounds map[wsm.RevealKind]revealpace.Bounds
+	persistOK  error
 }
 
-type observedGap struct {
-	key revealpace.Key
-	ms  int64
+type observedSpeed struct {
+	key            revealpace.Key
+	charsPerSecond float64
 }
 
-func (f *fakePacing) Observe(key revealpace.Key, gap time.Duration) {
-	f.observed = append(f.observed, observedGap{key: key, ms: gap.Milliseconds()})
+func (f *fakePacing) Observe(key revealpace.Key, charsPerSecond float64) {
+	f.observed = append(f.observed, observedSpeed{key: key, charsPerSecond: charsPerSecond})
 }
 
-func (f *fakePacing) ExpectedGap(key revealpace.Key) (uint32, bool) {
-	gap, ok := f.gaps[key]
-	return gap, ok
+func (f *fakePacing) Bounds(key revealpace.Key) revealpace.Bounds {
+	return f.bounds[key]
+}
+
+func (f *fakePacing) KindBounds(kind wsm.RevealKind) revealpace.Bounds {
+	return f.kindBounds[kind]
 }
 
 func (f *fakePacing) Persist(_ context.Context, key revealpace.Key) error {
@@ -53,12 +59,42 @@ var (
 	thinkingKey = revealpace.Key{Model: pacedModel, Kind: wsm.RevealKindThinking}
 )
 
+// The bounds every fake pacer answers, distinct per source so a test can tell
+// which record a pace was read from.
+var (
+	proseBounds        = revealpace.Bounds{MinCharsPerSecond: 49, MaxCharsPerSecond: 90}
+	thinkingBounds     = revealpace.Bounds{MinCharsPerSecond: 45, MaxCharsPerSecond: 55}
+	proseKindBounds    = revealpace.Bounds{MinCharsPerSecond: 30, MaxCharsPerSecond: 70}
+	thinkingKindBounds = revealpace.Bounds{MinCharsPerSecond: 20, MaxCharsPerSecond: 40}
+)
+
+func newFakePacing() *fakePacing {
+	return &fakePacing{
+		bounds: map[revealpace.Key]revealpace.Bounds{proseKey: proseBounds, thinkingKey: thinkingBounds},
+		kindBounds: map[wsm.RevealKind]revealpace.Bounds{
+			wsm.RevealKindProse: proseKindBounds, wsm.RevealKindThinking: thinkingKindBounds,
+		},
+	}
+}
+
+// paceOf answers the wire pace bounds b are served as.
+func paceOf(b revealpace.Bounds) *frontendv1.FeedResponseRevealPace {
+	return &frontendv1.FeedResponseRevealPace{
+		MinCharsPerSecond: b.MinCharsPerSecond,
+		MaxCharsPerSecond: b.MaxCharsPerSecond,
+		BankLimitMs:       1500,
+	}
+}
+
+// chars answers n copies of "x".
+func chars(n int) string { return strings.Repeat("x", n) }
+
 // newPacedHarness is a harness whose resolver measures into a fake pacer and
 // whose session runs pacedModel.
 func newPacedHarness(t *testing.T) (*harness, *fakePacing) {
 	t.Helper()
 	h := newHarness(t)
-	pacing := &fakePacing{gaps: map[revealpace.Key]uint32{}}
+	pacing := newFakePacing()
 	h.resolver.deps.Pacing = pacing
 	h.resolver.OnSessionStarted(testWorkspace, &conversationv1.SessionStarted{EffectiveModel: &conversationv1.AgentModel{Name: pacedModel}})
 	return h, pacing
@@ -92,176 +128,25 @@ func (h *harness) onlyResponse() *frontendv1.FeedResponse {
 	return rows[0].GetActivity().GetResponse()
 }
 
-func gapsOf(observed []observedGap) []int64 {
-	out := make([]int64, 0, len(observed))
-	for _, o := range observed {
-		out = append(out, o.ms)
-	}
-	return out
-}
-
-func TestALiveProseBlockMeasuresTheGapsBetweenItsBursts(t *testing.T) {
-	// Arrange
+func TestALiveProseBlockMeasuresItsArrivalSpeed(t *testing.T) {
+	// Arrange: 10 chars at 1.000s (left out: they arrived at the start), 60
+	// more over the next second.
 	h, pacing := newPacedHarness(t)
 	h.deliverPrompt("turn-1", "hello")
+	h.fragmentAt("unit-1", chars(10), 1_000)
+	h.fragmentAt("unit-1", chars(30), 1_400)
+	h.nowMs = 2_000
 
 	// Act
-	h.fragmentAt("unit-1", "a", 1_000)
-	h.fragmentAt("unit-1", "b", 1_040)
-	h.fragmentAt("unit-1", "c", 1_100)
+	h.settleProse("unit-1", chars(70))
 
 	// Assert
-	want := []observedGap{{key: proseKey, ms: 40}, {key: proseKey, ms: 60}}
+	want := []observedSpeed{{key: proseKey, charsPerSecond: 60}}
 	if !reflect.DeepEqual(pacing.observed, want) {
 		t.Fatalf("observed = %+v, want %+v", pacing.observed, want)
 	}
-}
-
-func TestFragmentsOfOneBurstAreOneSampleMeasuredFromTheBurstsStart(t *testing.T) {
-	// Arrange: a clump of three fragments, as the vendor delivers them.
-	h, pacing := newPacedHarness(t)
-	h.deliverPrompt("turn-1", "hello")
-	h.fragmentAt("unit-1", "a", 1_000)
-	h.fragmentAt("unit-1", "b", 1_003)
-	h.fragmentAt("unit-1", "c", 1_008)
-
-	// Act
-	h.fragmentAt("unit-1", "d", 1_530)
-
-	// Assert
-	if got := gapsOf(pacing.observed); !slices.Equal(got, []int64{530}) {
-		t.Fatalf("gaps = %v, want [530]: one sample, from the clump's start to the next clump's", got)
-	}
-}
-
-func TestALaterFragmentOfABurstCarriesWhatIsLeftOfTheBurstsWindow(t *testing.T) {
-	// Arrange
-	h, pacing := newPacedHarness(t)
-	pacing.gaps[proseKey] = 500
-	h.deliverPrompt("turn-1", "hello")
-	h.fragmentAt("unit-1", "a", 1_000)
-
-	// Act
-	h.fragmentAt("unit-1", "b", 1_012)
-
-	// Assert
-	if got := h.onlyResponse().GetUpdate().GetRevealWindow().GetExpectedGapMs(); got != 488 {
-		t.Fatalf("reveal window = %d, want 488: the burst's deadline, not a fresh window", got)
-	}
-}
-
-func TestAFragmentStartingABurstCarriesTheFullWindow(t *testing.T) {
-	// Arrange
-	h, pacing := newPacedHarness(t)
-	pacing.gaps[proseKey] = 500
-	h.deliverPrompt("turn-1", "hello")
-	h.fragmentAt("unit-1", "a", 1_000)
-
-	// Act
-	h.fragmentAt("unit-1", "b", 1_300)
-
-	// Assert
-	if got := h.onlyResponse().GetUpdate().GetRevealWindow().GetExpectedGapMs(); got != 500 {
-		t.Fatalf("reveal window = %d, want the full 500", got)
-	}
-}
-
-func TestASettleInsideTheBurstKeepsTheBurstsDeadline(t *testing.T) {
-	// Arrange
-	h, pacing := newPacedHarness(t)
-	pacing.gaps[proseKey] = 500
-	h.deliverPrompt("turn-1", "hello")
-	h.fragmentAt("unit-1", "a", 1_000)
-	h.nowMs = 1_015
-
-	// Act
-	h.settleProse("unit-1", "ab")
-
-	// Assert
-	if got := h.onlyResponse().GetSuccess().GetRevealWindow().GetExpectedGapMs(); got != 485 {
-		t.Fatalf("reveal window = %d, want 485", got)
-	}
-}
-
-func TestASettleAfterAPauseCarriesTheFullWindow(t *testing.T) {
-	// Arrange
-	h, pacing := newPacedHarness(t)
-	pacing.gaps[proseKey] = 500
-	h.deliverPrompt("turn-1", "hello")
-	h.fragmentAt("unit-1", "a", 1_000)
-	h.nowMs = 1_100
-
-	// Act
-	h.settleProse("unit-1", "ab")
-
-	// Assert
-	if got := h.onlyResponse().GetSuccess().GetRevealWindow().GetExpectedGapMs(); got != 500 {
-		t.Fatalf("reveal window = %d, want the full 500 for text landing after the burst", got)
-	}
-}
-
-func TestALaterThinkingFragmentOfABurstCarriesWhatIsLeftOfTheBurstsWindow(t *testing.T) {
-	// Arrange
-	h, pacing := newPacedHarness(t)
-	pacing.gaps[thinkingKey] = 400
-	h.deliverPrompt("turn-1", "hello")
-	h.nowMs = 1_000
-	h.send(thinkingResultFrame("think-1", thinkingTextDelta("a")))
-
-	// Act
-	h.nowMs = 1_010
-	h.send(thinkingResultFrame("think-1", thinkingTextDelta("b")))
-
-	// Assert
-	rows := h.thinkingRows()
-	if len(rows) != 1 || rows[0].GetUpdate().GetRevealWindow().GetExpectedGapMs() != 390 {
-		t.Fatalf("thinking rows = %v, want one carrying the 390ms left of the burst's window", rows)
-	}
-}
-
-func TestABlocksFirstFragmentOnlyStartsTheClock(t *testing.T) {
-	// Arrange
-	h, pacing := newPacedHarness(t)
-	h.deliverPrompt("turn-1", "hello")
-
-	// Act
-	h.fragmentAt("unit-1", "a", 5_000)
-
-	// Assert
-	if len(pacing.observed) != 0 {
-		t.Fatalf("observed = %+v, want no sample from a block's first fragment", pacing.observed)
-	}
-}
-
-func TestAnEmptyFragmentIsNotASample(t *testing.T) {
-	// Arrange
-	h, pacing := newPacedHarness(t)
-	h.deliverPrompt("turn-1", "hello")
-	h.fragmentAt("unit-1", "a", 1_000)
-
-	// Act
-	h.fragmentAt("unit-1", "", 1_030)
-	h.fragmentAt("unit-1", "b", 1_050)
-
-	// Assert
-	if got := gapsOf(pacing.observed); !slices.Equal(got, []int64{50}) {
-		t.Fatalf("gaps = %v, want [50] measured from the last text-bearing fragment", got)
-	}
-}
-
-func TestANewBlocksFirstFragmentIsNotMeasuredFromThePreviousBlock(t *testing.T) {
-	// Arrange
-	h, pacing := newPacedHarness(t)
-	h.deliverPrompt("turn-1", "hello")
-	h.fragmentAt("unit-1", "a", 1_000)
-	h.settleProse("unit-1", "a")
-
-	// Act
-	h.fragmentAt("unit-2", "b", 3_000)
-
-	// Assert
-	if len(pacing.observed) != 0 {
-		t.Fatalf("observed = %+v, want the gap across blocks left out", pacing.observed)
+	if !reflect.DeepEqual(pacing.persisted, []revealpace.Key{proseKey}) {
+		t.Fatalf("persisted = %v, want [%v]", pacing.persisted, proseKey)
 	}
 }
 
@@ -271,144 +156,135 @@ func TestALiveThinkingBlockMeasuresUnderTheThinkingKind(t *testing.T) {
 	h.deliverPrompt("turn-1", "hello")
 	h.nowMs = 1_000
 	h.send(thinkingResultFrame("think-1", thinkingTextDelta("a")))
+	h.nowMs = 3_000
 
 	// Act
-	h.nowMs = 1_025
-	h.send(thinkingResultFrame("think-1", thinkingTextDelta("b")))
+	h.send(thinkingResultFrame("think-1", thinkingTextSuccess("a"+chars(100))))
 
 	// Assert
-	want := []observedGap{{key: thinkingKey, ms: 25}}
+	want := []observedSpeed{{key: thinkingKey, charsPerSecond: 50}}
 	if !reflect.DeepEqual(pacing.observed, want) {
 		t.Fatalf("observed = %+v, want %+v", pacing.observed, want)
 	}
 }
 
-func TestAnArrivingBubbleCarriesTheExpectedGapOnceTheWindowIsFull(t *testing.T) {
-	// Arrange
-	h, pacing := newPacedHarness(t)
-	pacing.gaps[proseKey] = 45
-	h.deliverPrompt("turn-1", "hello")
-
-	// Act
-	h.fragmentAt("unit-1", "a", 1_000)
-
-	// Assert
-	if got := h.onlyResponse().GetUpdate().GetRevealWindow().GetExpectedGapMs(); got != 45 {
-		t.Fatalf("reveal window = %d, want 45", got)
-	}
-}
-
-func TestAnArrivingBubbleCarriesNoWindowWhileTheWindowIsFilling(t *testing.T) {
-	// Arrange
-	h, _ := newPacedHarness(t)
-	h.deliverPrompt("turn-1", "hello")
-
-	// Act
-	h.fragmentAt("unit-1", "a", 1_000)
-
-	// Assert
-	if window := h.onlyResponse().GetUpdate().RevealWindow; window != nil {
-		t.Fatalf("reveal window = %v, want none before the window is full", window)
-	}
-}
-
-func TestASettledBubbleCarriesTheExpectedGap(t *testing.T) {
-	// Arrange
-	h, pacing := newPacedHarness(t)
-	pacing.gaps[proseKey] = 45
-	h.deliverPrompt("turn-1", "hello")
-	h.fragmentAt("unit-1", "a", 1_000)
-
-	// Act
-	h.settleProse("unit-1", "ab")
-
-	// Assert
-	if got := h.onlyResponse().GetSuccess().GetRevealWindow().GetExpectedGapMs(); got != 45 {
-		t.Fatalf("reveal window = %d, want 45", got)
-	}
-}
-
-func TestAThinkingBubbleReadsTheThinkingWindow(t *testing.T) {
-	// Arrange
-	h, pacing := newPacedHarness(t)
-	pacing.gaps[proseKey] = 45
-	pacing.gaps[thinkingKey] = 90
-	h.deliverPrompt("turn-1", "hello")
-
-	// Act
-	h.send(thinkingResultFrame("think-1", thinkingTextDelta("a")))
-
-	// Assert
-	rows := h.thinkingRows()
-	if len(rows) != 1 || rows[0].GetUpdate().GetRevealWindow().GetExpectedGapMs() != 90 {
-		t.Fatalf("thinking rows = %v, want one carrying the 90ms thinking window", rows)
-	}
-}
-
-func TestASettledBlockPersistsTheWindowItAddedTo(t *testing.T) {
-	// Arrange
+func TestABlockSpeedCountsCharactersNotBytes(t *testing.T) {
+	// Arrange: 50 two-byte characters after the first fragment, over 1s.
 	h, pacing := newPacedHarness(t)
 	h.deliverPrompt("turn-1", "hello")
 	h.fragmentAt("unit-1", "a", 1_000)
-	h.fragmentAt("unit-1", "b", 1_040)
+	h.nowMs = 2_000
 
 	// Act
-	h.settleProse("unit-1", "ab")
+	h.settleProse("unit-1", "a"+strings.Repeat("é", 50))
 
 	// Assert
-	if !reflect.DeepEqual(pacing.persisted, []revealpace.Key{proseKey}) {
-		t.Fatalf("persisted = %v, want [%v]", pacing.persisted, proseKey)
+	want := []observedSpeed{{key: proseKey, charsPerSecond: 50}}
+	if !reflect.DeepEqual(pacing.observed, want) {
+		t.Fatalf("observed = %+v, want %+v", pacing.observed, want)
 	}
 }
 
-func TestARedeliveredSettlePersistsNothingMore(t *testing.T) {
-	// Arrange: the stream plane settles, then the file plane restates it.
+func TestABlockTooSmallToMeasureIsLeftOut(t *testing.T) {
+	cases := []struct {
+		name      string
+		settledAt int64
+		markdown  string
+	}{
+		{name: "too few characters", settledAt: 2_000, markdown: "a" + chars(minMeasuredChars-1)},
+		{name: "too short a time", settledAt: 1_000 + minMeasuredDuration.Milliseconds() - 1, markdown: "a" + chars(100)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h, pacing := newPacedHarness(t)
+			h.deliverPrompt("turn-1", "hello")
+			h.fragmentAt("unit-1", "a", 1_000)
+			h.nowMs = tc.settledAt
+
+			// Act
+			h.settleProse("unit-1", tc.markdown)
+
+			// Assert
+			if len(pacing.observed) != 0 || len(pacing.persisted) != 0 {
+				t.Fatalf("observed %v, persisted %v, want neither for a block too small to measure", pacing.observed, pacing.persisted)
+			}
+			if !h.hasRecordWith("debug", "daemon.feed.reveal_block_unmeasured", "kind", string(wsm.RevealKindProse)) {
+				t.Fatal("no DEBUG record of the unmeasured block")
+			}
+		})
+	}
+}
+
+func TestABlockThatNeverStreamedIsNotMeasured(t *testing.T) {
+	// Arrange: the settled whole lands with no fragment before it.
+	h, pacing := newPacedHarness(t)
+	h.deliverPrompt("turn-1", "hello")
+	h.nowMs = 5_000
+
+	// Act
+	h.settleProse("unit-1", chars(200))
+
+	// Assert
+	if len(pacing.observed) != 0 {
+		t.Fatalf("observed = %+v, want nothing for a block that never streamed", pacing.observed)
+	}
+}
+
+func TestARestartedBlockMeasuresFromItsNewFirstFragment(t *testing.T) {
+	// Arrange: a block streams, restarts, and streams again.
 	h, pacing := newPacedHarness(t)
 	h.deliverPrompt("turn-1", "hello")
 	h.fragmentAt("unit-1", "a", 1_000)
-	h.fragmentAt("unit-1", "b", 1_040)
-	h.settleProse("unit-1", "ab")
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame("unit-1", &conversationv1.AgentResponseStart{}, nil), nil, nil)
+	h.fragmentAt("unit-1", "b", 9_000)
+	h.nowMs = 10_000
 
 	// Act
-	h.settleProse("unit-1", "ab")
+	h.settleProse("unit-1", "b"+chars(80))
 
 	// Assert
-	if len(pacing.persisted) != 1 {
-		t.Fatalf("persisted = %v, want one write for one block", pacing.persisted)
+	want := []observedSpeed{{key: proseKey, charsPerSecond: 80}}
+	if !reflect.DeepEqual(pacing.observed, want) {
+		t.Fatalf("observed = %+v, want %+v measured from the restart", pacing.observed, want)
 	}
 }
 
-func TestASettledBlockThatMeasuredNothingPersistsNothing(t *testing.T) {
+func TestABlockCutShortIsNotMeasured(t *testing.T) {
 	// Arrange
 	h, pacing := newPacedHarness(t)
 	h.deliverPrompt("turn-1", "hello")
-	h.fragmentAt("unit-1", "a", 1_000)
-
-	// Act
-	h.settleProse("unit-1", "a")
-
-	// Assert
-	if len(pacing.persisted) != 0 {
-		t.Fatalf("persisted = %v, want nothing for a block that added no gap", pacing.persisted)
-	}
-}
-
-func TestABlockCutShortPersistsTheWindowItAddedTo(t *testing.T) {
-	// Arrange
-	h, pacing := newPacedHarness(t)
-	h.deliverPrompt("turn-1", "hello")
-	h.fragmentAt("unit-1", "a", 1_000)
-	h.fragmentAt("unit-1", "b", 1_040)
+	h.fragmentAt("unit-1", chars(10), 1_000)
+	h.nowMs = 3_000
 
 	// Act
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
 		responseFrame("unit-1", &conversationv1.AgentResponseFailure{
-			Prose: &conversationv1.AgentResponseProse{Markdown: "ab"},
+			Prose: &conversationv1.AgentResponseProse{Markdown: chars(200)},
 		}, nil), nil, nil)
 
 	// Assert
-	if !reflect.DeepEqual(pacing.persisted, []revealpace.Key{proseKey}) {
-		t.Fatalf("persisted = %v, want [%v]", pacing.persisted, proseKey)
+	if len(pacing.observed) != 0 || len(pacing.persisted) != 0 {
+		t.Fatalf("observed %v, persisted %v, want neither for a block the turn's death cut short", pacing.observed, pacing.persisted)
+	}
+}
+
+func TestARedeliveredSettleMeasuresNothingMore(t *testing.T) {
+	// Arrange: the stream plane settles, then the file plane restates it.
+	h, pacing := newPacedHarness(t)
+	h.deliverPrompt("turn-1", "hello")
+	h.fragmentAt("unit-1", "a", 1_000)
+	h.nowMs = 2_000
+	h.settleProse("unit-1", "a"+chars(100))
+
+	// Act
+	h.nowMs = 2_500
+	h.settleProse("unit-1", "a"+chars(100))
+
+	// Assert
+	if len(pacing.observed) != 1 || len(pacing.persisted) != 1 {
+		t.Fatalf("observed %v, persisted %v, want one of each for one block", pacing.observed, pacing.persisted)
 	}
 }
 
@@ -418,10 +294,10 @@ func TestAFailedPersistIsRaisedOnTheTopbar(t *testing.T) {
 	pacing.persistOK = errors.New("disk full")
 	h.deliverPrompt("turn-1", "hello")
 	h.fragmentAt("unit-1", "a", 1_000)
-	h.fragmentAt("unit-1", "b", 1_040)
+	h.nowMs = 2_000
 
 	// Act
-	h.settleProse("unit-1", "ab")
+	h.settleProse("unit-1", "a"+chars(100))
 
 	// Assert
 	if !slices.Contains(h.warnings.keys(), "reveal_pacing_unsaved") {
@@ -432,59 +308,141 @@ func TestAFailedPersistIsRaisedOnTheTopbar(t *testing.T) {
 	}
 }
 
-func TestNoModelMeansNoMeasurementAndNoWindow(t *testing.T) {
-	// Arrange: a session whose model was never stated.
-	h := newHarness(t)
-	pacing := &fakePacing{gaps: map[revealpace.Key]uint32{{Kind: wsm.RevealKindProse}: 45}}
-	h.resolver.deps.Pacing = pacing
+func TestAnArrivingBubbleCarriesItsModelsPace(t *testing.T) {
+	// Arrange
+	h, _ := newPacedHarness(t)
 	h.deliverPrompt("turn-1", "hello")
 
 	// Act
 	h.fragmentAt("unit-1", "a", 1_000)
-	h.fragmentAt("unit-1", "b", 1_040)
 
 	// Assert
-	if len(pacing.observed) != 0 || h.onlyResponse().GetUpdate().RevealWindow != nil {
-		t.Fatalf("observed %v and window %v, want neither without a model", pacing.observed, h.onlyResponse().GetUpdate().RevealWindow)
+	if got := h.onlyResponse().GetUpdate().GetRevealPace(); !proto.Equal(got, paceOf(proseBounds)) {
+		t.Fatalf("reveal pace = %v, want %v", got, paceOf(proseBounds))
 	}
 }
 
-func TestAReplayedBlockIsNotMeasured(t *testing.T) {
-	// Arrange: the workspace is drawing a history page.
-	h, pacing := newPacedHarness(t)
-	pacing.gaps[proseKey] = 45
+func TestASettledBubbleCarriesItsModelsPace(t *testing.T) {
+	// Arrange
+	h, _ := newPacedHarness(t)
 	h.deliverPrompt("turn-1", "hello")
-	h.resolver.state(testWorkspace).plane = planeHistory
+	h.fragmentAt("unit-1", "a", 1_000)
 
 	// Act
-	h.fragmentAt("unit-1", "a", 1_000)
-	h.fragmentAt("unit-1", "b", 1_040)
+	h.settleProse("unit-1", "ab")
 
 	// Assert
-	if len(pacing.observed) != 0 {
-		t.Fatalf("observed = %+v, want a replay's burst left out", pacing.observed)
-	}
-	if window := h.onlyResponse().GetUpdate().RevealWindow; window != nil {
-		t.Fatalf("reveal window = %v, want none on a replayed draw", window)
+	if got := h.onlyResponse().GetSuccess().GetRevealPace(); !proto.Equal(got, paceOf(proseBounds)) {
+		t.Fatalf("reveal pace = %v, want %v", got, paceOf(proseBounds))
 	}
 }
 
-func TestASubagentsBlockIsNotMeasured(t *testing.T) {
+func TestAThinkingBubbleCarriesTheThinkingPace(t *testing.T) {
+	// Arrange
+	h, _ := newPacedHarness(t)
+	h.deliverPrompt("turn-1", "hello")
+
+	// Act
+	h.send(thinkingResultFrame("think-1", thinkingTextDelta("a")))
+
+	// Assert
+	rows := h.thinkingRows()
+	if len(rows) != 1 || !proto.Equal(rows[0].GetUpdate().GetRevealPace(), paceOf(thinkingBounds)) {
+		t.Fatalf("thinking rows = %v, want one carrying %v", rows, paceOf(thinkingBounds))
+	}
+}
+
+func TestASubagentsBubbleCarriesItsKindsPaceAndIsNotMeasured(t *testing.T) {
 	// Arrange: a subagent whose model the daemon does not know.
 	h, pacing := newPacedHarness(t)
 	h.deliverPrompt("turn-1", "hello")
-	sub := &conversationv1.AgentId{Value: "agent-sub"}
-	h.spawnSubagent("spawn-1", sub, "Explore", "look")
+	h.spawnSubagent("spawn-1", subAgent(), "Explore", "look")
+	h.nowMs = 1_000
+	h.resolver.OnActivity(testWorkspace, subAgent(),
+		responseFrame("sub-unit", &conversationv1.AgentResponseUpdate{NewMarkdown: "a"}, nil), nil, nil)
+	h.nowMs = 3_000
 
 	// Act
-	for i, at := range []int64{1_000, 1_040} {
-		h.nowMs = at
-		h.resolver.OnActivity(testWorkspace, sub,
-			responseFrame("sub-unit", &conversationv1.AgentResponseUpdate{NewMarkdown: string(rune('a' + i))}, nil), nil, nil)
-	}
+	h.resolver.OnActivity(testWorkspace, subAgent(),
+		responseFrame("sub-unit", &conversationv1.AgentResponseSuccess{
+			Prose: &conversationv1.AgentResponseProse{Markdown: "a" + chars(100)},
+		}, nil), nil, nil)
 
 	// Assert
 	if len(pacing.observed) != 0 {
-		t.Fatalf("observed = %+v, want a subagent's gaps left out", pacing.observed)
+		t.Fatalf("observed = %+v, want a subagent's block left out", pacing.observed)
+	}
+	var got *frontendv1.FeedResponseRevealPace
+	for _, row := range h.rows(subFeed()) {
+		if r := row.GetActivity().GetResponse(); r != nil {
+			got = r.GetSuccess().GetRevealPace()
+		}
+	}
+	if !proto.Equal(got, paceOf(proseKindBounds)) {
+		t.Fatalf("subagent reveal pace = %v, want the kind-wide %v", got, paceOf(proseKindBounds))
+	}
+}
+
+func TestNoModelMeansTheKindsPaceAndNoMeasurement(t *testing.T) {
+	// Arrange: a session whose model was never stated.
+	h := newHarness(t)
+	pacing := newFakePacing()
+	h.resolver.deps.Pacing = pacing
+	h.deliverPrompt("turn-1", "hello")
+	h.fragmentAt("unit-1", "a", 1_000)
+	h.nowMs = 3_000
+
+	// Act
+	h.settleProse("unit-1", "a"+chars(100))
+
+	// Assert
+	if len(pacing.observed) != 0 {
+		t.Fatalf("observed = %+v, want nothing measured without a model", pacing.observed)
+	}
+	if got := h.onlyResponse().GetSuccess().GetRevealPace(); !proto.Equal(got, paceOf(proseKindBounds)) {
+		t.Fatalf("reveal pace = %v, want the kind-wide %v", got, paceOf(proseKindBounds))
+	}
+}
+
+func TestAReplayedBlockIsNotMeasuredAndCarriesNoPace(t *testing.T) {
+	// Arrange: the workspace is drawing a history page.
+	h, pacing := newPacedHarness(t)
+	h.deliverPrompt("turn-1", "hello")
+	h.resolver.state(testWorkspace).plane = planeHistory
+	h.fragmentAt("unit-1", "a", 1_000)
+	h.nowMs = 3_000
+
+	// Act
+	h.settleProse("unit-1", "a"+chars(100))
+
+	// Assert
+	if len(pacing.observed) != 0 {
+		t.Fatalf("observed = %+v, want a replay left out", pacing.observed)
+	}
+	if pace := h.onlyResponse().GetSuccess().RevealPace; pace != nil {
+		t.Fatalf("reveal pace = %v, want none on a replayed draw", pace)
+	}
+}
+
+func TestNoPacingRecordMeansNoPace(t *testing.T) {
+	// Arrange: a resolver with no pacing record wired.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "hello")
+
+	// Act
+	h.fragmentAt("unit-1", "a", 1_000)
+
+	// Assert
+	if pace := h.onlyResponse().GetUpdate().RevealPace; pace != nil {
+		t.Fatalf("reveal pace = %v, want none without a pacing record", pace)
+	}
+}
+
+// thinkingTextSuccess is a reasoning block's settled whole.
+func thinkingTextSuccess(text string) *conversationv1.AgentThinkingSuccess {
+	return &conversationv1.AgentThinkingSuccess{
+		Reasoning: &conversationv1.AgentThinkingSuccess_Text{
+			Text: &conversationv1.AgentThinkingText{Text: text},
+		},
 	}
 }
