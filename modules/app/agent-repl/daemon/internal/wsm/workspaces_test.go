@@ -601,7 +601,7 @@ func TestSetMergedAtPersistsTheInstant(t *testing.T) {
 	ws := testWorkspace(t, s)
 
 	// Act
-	if err := s.SetMergedAt(context.Background(), ws.ID, instant); err != nil {
+	if err := s.SetMergedAt(context.Background(), ws.ID, instant, nil); err != nil {
 		t.Fatalf("SetMergedAt: %v", err)
 	}
 
