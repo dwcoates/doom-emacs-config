@@ -33,6 +33,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
+	"agentrepl/protohelpers/rosterwalk"
 
 	"connectrpc.com/connect"
 
@@ -353,24 +354,12 @@ func perfDrainRoster(t *testing.T, w *World, roster *harness.Stream[*frontendv1.
 }
 
 // perfWalkRosterRows visits every row in every grouping, including nested
-// families. Its own copy rather than the Emacs area's `walkRosterRows`: the
-// perf phase must not couple to a file another layer owns.
+// families, through rosterwalk.AllRows. Its own name rather than the Emacs
+// area's `walkRosterRows`: the perf phase must not couple to a file another
+// layer owns.
 func perfWalkRosterRows(r *frontendv1.WorkspaceRoster, visit func(*frontendv1.RosterRow)) {
-	var walk func(rows []*frontendv1.RosterRow)
-	walk = func(rows []*frontendv1.RosterRow) {
-		for _, row := range rows {
-			visit(row)
-			walk(row.GetChildren())
-		}
-	}
-	for _, s := range r.GetRepository().GetSections() {
-		walk(s.GetRows().GetRows())
-	}
-	for _, s := range r.GetTask().GetSections() {
-		walk(s.GetRows().GetRows())
-	}
-	for _, g := range r.GetRecentlyMerged().GetGroups() {
-		walk(g.GetRows().GetRows())
+	for _, row := range rosterwalk.AllRows(r) {
+		visit(row)
 	}
 }
 
