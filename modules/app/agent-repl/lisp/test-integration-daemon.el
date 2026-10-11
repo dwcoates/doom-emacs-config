@@ -445,7 +445,7 @@ nothing here can hang past it."
                        (expand-file-name "build.sh" boot-dir) "exit 0"))
                ;; Starts and idles WITHOUT ever writing daemon.addr.
                (start (agent-repl-itest-daemon--write-script
-                       (expand-file-name "start.sh" boot-dir) "sleep 30"))
+                       (expand-file-name "start.sh" boot-dir) "exec sleep 30"))
                (agent-repl-daemon-build-script build)
                (agent-repl-daemon-command (list start))
                ;; "wait for daemon.addr up to
@@ -696,7 +696,7 @@ to the remediation loop that reads these runs by level."
         (let* ((build (agent-repl-itest-daemon--write-script
                        (expand-file-name "build.sh" boot-dir) "exit 0"))
                (start (agent-repl-itest-daemon--write-script
-                       (expand-file-name "start.sh" boot-dir) "sleep 30"))
+                       (expand-file-name "start.sh" boot-dir) "exec sleep 30"))
                (agent-repl-daemon-build-script build)
                (agent-repl-daemon-command (list start))
                ;; 250ms, not a second: what these scenarios assert is that
@@ -731,7 +731,7 @@ the BUILD state, and this build succeeded — a timeout that painted
         (let* ((build (agent-repl-itest-daemon--write-script
                        (expand-file-name "build.sh" boot-dir) "exit 0"))
                (start (agent-repl-itest-daemon--write-script
-                       (expand-file-name "start.sh" boot-dir) "sleep 30"))
+                       (expand-file-name "start.sh" boot-dir) "exec sleep 30"))
                (agent-repl-daemon-build-script build)
                (agent-repl-daemon-command (list start))
                ;; 250ms for the same reason as its siblings above: the
