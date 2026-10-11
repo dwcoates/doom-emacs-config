@@ -494,6 +494,24 @@ model as the webapp."
         (should-not (assq 'show body))
         (should (equal (alist-get 'id (alist-get 'workspace body)) (plist-get ref :id)))))))
 
+(ert-deftest agent-repl-itest-verbs-show-sends-the-show-arm-then-selects ()
+  "Showing a hidden workspace sends the `show' arm, then selects that workspace."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-workspace daemon ref
+      ;; Act.
+      (agent-repl-verb-set-hidden agent-repl-itest-verbs--ws nil)
+      (agent-repl-itest--await-call daemon "SetWorkspaceHidden")
+      (agent-repl-itest--await-call daemon "SelectWorkspace")
+      ;; Assert.
+      (let ((body (agent-repl-itest-verbs--body daemon "SetWorkspaceHidden")))
+        (should (assq 'show body))
+        (should-not (assq 'hide body)))
+      (should (equal (alist-get 'id (alist-get 'workspace
+                                               (agent-repl-itest-verbs--body
+                                                daemon "SelectWorkspace")))
+                     (plist-get ref :id))))))
+
 ;;;; ---- Daemon-admin verbs ----
 
 (ert-deftest agent-repl-itest-verbs-shutdown-schedule-sends-a-reason ()

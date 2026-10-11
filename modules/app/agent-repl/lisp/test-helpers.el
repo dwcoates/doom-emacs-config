@@ -883,6 +883,23 @@ fail with `file-missing'."
       (make-directory dir t)))
   (with-temp-file path (insert content)))
 
+(defun agent-repl-test--reap-process (process)
+  "Kill PROCESS's whole process group, then delete PROCESS.
+A stub script's children OUTLIVE a kill aimed at the script's own pid:
+`sh' runs `sleep 30' as a child, SIGKILL takes the shell, and the orphaned
+`sleep' keeps every fd it inherited open for the rest of its life -- the
+daemon's stdio log among them, which held the run's RAM disk busy past
+teardown.  `make-process' starts every child in a session of its own, so
+the group is exactly PROCESS and its descendants, and signalling it reaps
+them all whatever the script does.  A group that is already empty answers
+-1, which is the outcome wanted, not a failure.
+PROCESS must be a subprocess, never a network connection: a connection
+has no pid and no group."
+  (when (process-live-p process)
+    (signal-process (- (process-id process)) 'SIGKILL))
+  (when (processp process)
+    (delete-process process)))
+
 ;;;; ---- Generated protocol vocabulary ----
 ;;
 ;; The Emacs frontend hand-declares protocol spellings (frame oneof arms,
