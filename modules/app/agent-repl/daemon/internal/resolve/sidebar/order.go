@@ -2,7 +2,6 @@ package sidebar
 
 import (
 	"sort"
-	"time"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -65,41 +64,4 @@ func sortWorkspaces(in []wsm.Workspace) []wsm.Workspace {
 // nested children cannot order themselves differently.
 func lessWorkspace(a, b wsm.Workspace) bool {
 	return a.Place < b.Place
-}
-
-// compareRecentFirst orders two instants MOST RECENT FIRST, with "never"
-// sorting last. It answers a three-way comparison so the caller can fall
-// through to the next key on a tie.
-func compareRecentFirst(a, b *time.Time) int {
-	switch {
-	case a == nil && b == nil:
-		return 0
-	case a == nil:
-		return 1
-	case b == nil:
-		return -1
-	case a.After(*b):
-		return -1
-	case b.After(*a):
-		return 1
-	default:
-		return 0
-	}
-}
-
-// sortMerged orders the recently-merged section MOST RECENTLY MERGED FIRST.
-// The section's whole meaning is recency, so it does NOT take roster order:
-// ordering "recently merged" by priority would bury the merge that just
-// landed. The workspace id breaks a tie so the order is fixed.
-func sortMerged(in []wsm.Workspace) []wsm.Workspace {
-	out := make([]wsm.Workspace, len(in))
-	copy(out, in)
-	sort.SliceStable(out, func(i, j int) bool {
-		a, b := out[i].MergedAt, out[j].MergedAt
-		if c := compareRecentFirst(a, b); c != 0 {
-			return c < 0
-		}
-		return out[i].ID < out[j].ID
-	})
-	return out
 }

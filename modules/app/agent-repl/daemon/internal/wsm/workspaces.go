@@ -186,7 +186,7 @@ func (s *store) RegisterWorkspace(ctx context.Context, dir string, facts Registe
 		if out.MergeOf != nil {
 			mergeOf, request = string(out.MergeOf.Requester), string(out.MergeOf.Request)
 		}
-		out.Place, err = landingPlace(ctx, tx, out.Repo, out.Priority, out.ID)
+		out.Place, err = landingPlace(ctx, tx, out.Priority, out.ID)
 		if err != nil {
 			return err
 		}
@@ -491,30 +491,14 @@ func requireOneRow(res sql.Result, what string) error {
 // missing-directory close) can leave a closed row a later handover transfers.
 // This is the one helper every close goes through.
 //
-// A RE-OPEN MOVES THE WORKSPACE LAST: a closed workspace turning open moves
-// to the place after every other one (place.go), in the same transaction as
-// the flag, whatever its priority. Re-opening touches nothing else, because the bring-up claims
-// serving itself; marking an already-open workspace open moves nothing.
+// A RE-OPEN MOVES NOTHING: the workspace returns to the place it held in the
+// registry when it was closed (place.go). Re-opening touches only the flag,
+// because the bring-up claims serving itself.
 func (s *store) SetClosed(ctx context.Context, id WorkspaceID, closed bool) error {
 	const op = "daemon.wsm.set_closed"
 	fields := dlog.Context{"closed": closed, "workspace": string(id)}
 	if !closed {
-		return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
-			var was bool
-			err := scanWorkspaceRow(ctx, tx, id, "closed", &was)
-			if err != nil {
-				return err
-			}
-			if !was {
-				return nil
-			}
-			if _, err := tx.ExecContext(ctx, `UPDATE workspaces SET closed = 0 WHERE id = ?`, id); err != nil {
-				return err
-			}
-			at, err := moveLast(ctx, tx, id)
-			fields["place"] = at
-			return err
-		})
+		return s.setWorkspaceColumns(ctx, op, id, fields, workspaceColumn{name: "closed", value: false})
 	}
 	var released sql.NullString
 	err := s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
@@ -617,9 +601,10 @@ func (s *store) SetMergedAt(ctx context.Context, id WorkspaceID, at time.Time, c
 		workspaceColumn{name: "commit_count", value: int64(*commits)})
 }
 
-// SetPriority sets or clears a workspace's priority badge. It leaves the
-// workspace's place alone: priority only picks where a workspace lands (see
-// place.go). An undeclared priority is refused rather than stored for a later read to trip over.
+// SetPriority sets or clears a workspace's priority. SETTING one moves the
+// workspace to second-to-last among the open workspaces of that priority, in
+// the same transaction (place.go); CLEARING one moves nothing. An undeclared
+// priority is refused rather than stored for a later read to trip over.
 func (s *store) SetPriority(ctx context.Context, id WorkspaceID, p *Priority) error {
 	const op = "daemon.wsm.set_priority"
 	fields := dlog.Context{"workspace": string(id)}
@@ -633,7 +618,19 @@ func (s *store) SetPriority(ctx context.Context, id WorkspaceID, p *Priority) er
 		return err
 	}
 	fields["priority"] = int(*p)
-	return s.setWorkspaceField(ctx, op, "priority", id, int(*p), fields)
+	fields["workspace"] = string(id)
+	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `UPDATE workspaces SET priority = ? WHERE id = ?`, int(*p), id)
+		if err != nil {
+			return err
+		}
+		if err := requireOneRow(res, fmt.Sprintf("wsm: workspace %s", id)); err != nil {
+			return err
+		}
+		at, err := reland(ctx, tx, id, p)
+		fields["place"] = at
+		return err
+	})
 }
 
 // SetHidden records whether a workspace sits in the roster's hidden section.

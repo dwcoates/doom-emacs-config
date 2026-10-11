@@ -29,9 +29,6 @@ const (
 	ArmWorkspaceRefMismatch = "workspace_ref_mismatch"
 	// ArmUnknownWorkspace is a ref naming an id the registry does not hold.
 	ArmUnknownWorkspace = "unknown_workspace"
-	// ArmNotSiblings refuses a place swap of two workspaces that are not one
-	// parent's children in the repository view.
-	ArmNotSiblings = "not_siblings"
 	// ArmTransferringAway is a workspace this daemon has handed to a successor.
 	ArmTransferringAway = "transferring_away"
 	// ArmNotYetAdopted is a workspace a joining daemon has not adopted yet.
@@ -70,6 +67,9 @@ const (
 	// ArmBaseRefUnresolved is a creation whose base ref does not resolve in
 	// the repository it is cut from.
 	ArmBaseRefUnresolved = "base_ref_unresolved"
+	// ArmBaseRefOffPrimaryBranch refuses a top-level create whose explicit
+	// base ref is not on the primary branch it would merge into.
+	ArmBaseRefOffPrimaryBranch = "base_ref_off_primary_branch"
 	// ArmUnknownRepository is a creation naming a repository the daemon
 	// cannot act in. The registry may still hold the row -- what it names is
 	// gone from disk, which is the same answer to the client as a ref that
@@ -86,6 +86,9 @@ const (
 	ArmNamingFailed = "naming_failed"
 	// ArmForkParentHasNoConversation is a fork whose parent never had one.
 	ArmForkParentHasNoConversation = "fork_parent_has_no_conversation"
+	// ArmForkSourceHasNoConversation is a fork into the primary branch whose
+	// source never had a conversation.
+	ArmForkSourceHasNoConversation = "fork_source_has_no_conversation"
 	// ArmSessionDeleted is a bring-up of a session whose record is terminal by
 	// deletion: a deleted session refuses resurrection.
 	ArmSessionDeleted = "session_deleted"

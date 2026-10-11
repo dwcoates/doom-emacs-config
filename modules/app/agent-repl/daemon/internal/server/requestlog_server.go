@@ -268,11 +268,11 @@ func (s *requestLoggingServer) SetWorkspaceHidden(
 	return serveUnary(s, ctx, "SetWorkspaceHidden", req, s.server.SetWorkspaceHidden)
 }
 
-func (s *requestLoggingServer) SwapWorkspacePlaces(
+func (s *requestLoggingServer) MoveWorkspace(
 	ctx context.Context,
-	req *connect.Request[agentreplv1.SwapWorkspacePlacesRequest],
-) (*connect.Response[agentreplv1.SwapWorkspacePlacesResponse], error) {
-	return serveUnary(s, ctx, "SwapWorkspacePlaces", req, s.server.SwapWorkspacePlaces)
+	req *connect.Request[agentreplv1.MoveWorkspaceRequest],
+) (*connect.Response[agentreplv1.MoveWorkspaceResponse], error) {
+	return serveUnary(s, ctx, "MoveWorkspace", req, s.server.MoveWorkspace)
 }
 
 func (s *requestLoggingServer) CreateTask(

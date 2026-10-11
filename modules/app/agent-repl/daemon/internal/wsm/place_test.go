@@ -57,46 +57,59 @@ func orderedNames(t *testing.T, s *store) []string {
 
 func priority(p Priority) *Priority { return &p }
 
+// landing is one workspace a landing test registers, closed or not.
+type landing struct {
+	name     string
+	priority *Priority
+	closed   bool
+}
+
 func TestRegisterLandsWorkspacesOnPlaces(t *testing.T) {
 	cases := []struct {
 		name  string
-		given []struct {
-			name     string
-			priority *Priority
-		}
-		want []string
+		given []landing
+		want  []string
 	}{
 		{
-			name: "an unprioritized workspace lands after every place",
-			given: []struct {
-				name     string
-				priority *Priority
-			}{{"first", nil}, {"second", nil}},
-			want: []string{"first", "second"},
+			name:  "the first workspace takes the first place",
+			given: []landing{{name: "only"}},
+			want:  []string{"only"},
 		},
 		{
-			name: "a prioritized workspace lands before the first weaker one",
-			given: []struct {
-				name     string
-				priority *Priority
-			}{{"none", nil}, {"p3", priority(PriorityP3)}, {"p1", priority(PriorityP1)}},
-			want: []string{"p1", "p3", "none"},
+			name:  "with one open workspace the new one lands after it",
+			given: []landing{{name: "first"}, {name: "second"}},
+			want:  []string{"first", "second"},
 		},
 		{
-			name: "a workspace joins the end of its own priority's run",
-			given: []struct {
-				name     string
-				priority *Priority
-			}{{"p1-a", priority(PriorityP1)}, {"none", nil}, {"p1-b", priority(PriorityP1)}},
-			want: []string{"p1-a", "p1-b", "none"},
+			name:  "with two or more open the new one lands second-to-last",
+			given: []landing{{name: "a"}, {name: "b"}, {name: "new"}},
+			want:  []string{"a", "new", "b"},
 		},
 		{
-			name: "a workspace with nothing weaker lands last",
-			given: []struct {
-				name     string
-				priority *Priority
-			}{{"p05", priority(PriorityP05)}, {"p3", priority(PriorityP3)}},
-			want: []string{"p05", "p3"},
+			name:  "a closed workspace does not count as last",
+			given: []landing{{name: "a"}, {name: "closed", closed: true}, {name: "c"}, {name: "new"}},
+			want:  []string{"a", "new", "c", "closed"},
+		},
+		{
+			name: "a prioritized workspace lands second-to-last within its priority",
+			given: []landing{
+				{name: "p1-a", priority: priority(PriorityP1)}, {name: "none"},
+				{name: "p1-b", priority: priority(PriorityP1)}, {name: "p1-new", priority: priority(PriorityP1)},
+			},
+			want: []string{"p1-a", "p1-new", "p1-b", "none"},
+		},
+		{
+			name:  "a priority nobody open shares lands second-to-last overall",
+			given: []landing{{name: "a"}, {name: "b"}, {name: "p2", priority: priority(PriorityP2)}},
+			want:  []string{"a", "p2", "b"},
+		},
+		{
+			name: "a priority one open workspace shares lands after it",
+			given: []landing{
+				{name: "p3", priority: priority(PriorityP3)}, {name: "none"},
+				{name: "p3-new", priority: priority(PriorityP3)},
+			},
+			want: []string{"p3", "p3-new", "none"},
 		},
 	}
 	for _, tc := range cases {
@@ -107,7 +120,12 @@ func TestRegisterLandsWorkspacesOnPlaces(t *testing.T) {
 
 			// Act.
 			for _, ws := range tc.given {
-				registerIn(t, s, repoDir, ws.name, ws.priority)
+				registered := registerIn(t, s, repoDir, ws.name, ws.priority)
+				if ws.closed {
+					if err := s.SetClosed(context.Background(), registered.ID, true); err != nil {
+						t.Fatalf("SetClosed: %v", err)
+					}
+				}
 			}
 
 			// Assert.
@@ -115,6 +133,21 @@ func TestRegisterLandsWorkspacesOnPlaces(t *testing.T) {
 				t.Fatalf("place order = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestLandingCountsOpenWorkspacesOfEveryRepository(t *testing.T) {
+	// Arrange: the tab bar interleaves repositories, so landing does too.
+	s, _ := testStore(t)
+	registerIn(t, s, placeRepo(t), "a", nil)
+	registerIn(t, s, placeRepo(t), "b", nil)
+
+	// Act.
+	registerIn(t, s, placeRepo(t), "new", nil)
+
+	// Assert.
+	if got := orderedNames(t, s); !slices.Equal(got, []string{"a", "new", "b"}) {
+		t.Fatalf("place order = %v, want [a new b]", got)
 	}
 }
 
@@ -157,44 +190,110 @@ func TestRegisterRefusesAnUndeclaredPriorityWritingNothing(t *testing.T) {
 	}
 }
 
-func TestSetPriorityLeavesThePlaceAlone(t *testing.T) {
-	// Arrange.
+func TestSettingAPriorityMovesTheWorkspaceSecondToLastWithinIt(t *testing.T) {
+	// Arrange: two open P1 workspaces and two plain ones, the last plain one
+	// about to take P1.
 	s, _ := testStore(t)
 	repoDir := placeRepo(t)
-	registerIn(t, s, repoDir, "first", nil)
-	second := registerIn(t, s, repoDir, "second", nil)
+	registerIn(t, s, repoDir, "p1-a", priority(PriorityP1))
+	registerIn(t, s, repoDir, "p1-b", priority(PriorityP1))
+	registerIn(t, s, repoDir, "plain", nil)
+	mover := registerIn(t, s, repoDir, "mover", nil)
+	before := orderedNames(t, s)
 
 	// Act.
-	if err := s.SetPriority(context.Background(), second.ID, priority(PriorityP05)); err != nil {
+	if err := s.SetPriority(context.Background(), mover.ID, priority(PriorityP1)); err != nil {
 		t.Fatalf("SetPriority: %v", err)
 	}
 
-	// Assert.
-	if got := orderedNames(t, s); !slices.Equal(got, []string{"first", "second"}) {
-		t.Fatalf("place order = %v, want the priority change to move nothing", got)
+	// Assert: the mover sits just before the last P1 workspace.
+	got := orderedNames(t, s)
+	if i, j := slices.Index(got, "mover"), slices.Index(got, before[slices.Index(before, "p1-b")]); i != j-1 {
+		t.Fatalf("place order = %v, want mover right before p1-b", got)
 	}
 }
 
-func TestSwapPlacesExchangesTheTwoPlaces(t *testing.T) {
+func TestClearingAPriorityMovesNothing(t *testing.T) {
 	// Arrange.
 	s, _ := testStore(t)
 	repoDir := placeRepo(t)
-	a := registerIn(t, s, repoDir, "a", nil)
+	p1 := registerIn(t, s, repoDir, "p1", priority(PriorityP1))
+	registerIn(t, s, repoDir, "a", nil)
 	registerIn(t, s, repoDir, "b", nil)
-	c := registerIn(t, s, repoDir, "c", nil)
+	before := orderedNames(t, s)
 
 	// Act.
-	if err := s.SwapPlaces(context.Background(), a.ID, c.ID); err != nil {
-		t.Fatalf("SwapPlaces: %v", err)
+	if err := s.SetPriority(context.Background(), p1.ID, nil); err != nil {
+		t.Fatalf("SetPriority(nil): %v", err)
 	}
 
 	// Assert.
-	if got := orderedNames(t, s); !slices.Equal(got, []string{"c", "b", "a"}) {
-		t.Fatalf("place order = %v, want [c b a]", got)
+	if got := orderedNames(t, s); !slices.Equal(got, before) {
+		t.Fatalf("place order = %v, want %v unchanged", got, before)
 	}
 }
 
-func TestSwapPlacesRefusesAnUnknownWorkspaceWritingNothing(t *testing.T) {
+func TestSettingAPriorityOnAnUnknownWorkspaceIsNotFound(t *testing.T) {
+	// Arrange.
+	s, _ := testStore(t)
+	registerIn(t, s, placeRepo(t), "a", nil)
+
+	// Act.
+	err := s.SetPriority(context.Background(), "ws-missing", priority(PriorityP1))
+
+	// Assert.
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("SetPriority error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestMovePlace(t *testing.T) {
+	cases := []struct {
+		name        string
+		mover, onto string
+		want        []string
+	}{
+		{name: "moving right lands on the target's place and shifts the passed ones left",
+			mover: "a", onto: "c", want: []string{"b", "c", "a", "d"}},
+		{name: "moving left lands on the target's place and shifts the passed ones right",
+			mover: "d", onto: "b", want: []string{"a", "d", "b", "c"}},
+		{name: "moving onto a neighbour exchanges the two",
+			mover: "b", onto: "c", want: []string{"a", "c", "b", "d"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: places a, b, c, d in order (each lands after the last
+			// by being moved there).
+			s, _ := testStore(t)
+			repoDir := placeRepo(t)
+			ids := map[string]WorkspaceID{}
+			for _, name := range []string{"a", "b", "c", "d"} {
+				ids[name] = registerIn(t, s, repoDir, name, nil).ID
+			}
+			for _, name := range []string{"b", "c", "d"} {
+				order := orderedNames(t, s)
+				if err := s.MovePlace(context.Background(), ids[name], ids[order[len(order)-1]]); err != nil && order[len(order)-1] != name {
+					t.Fatalf("arrange MovePlace: %v", err)
+				}
+			}
+			if got := orderedNames(t, s); !slices.Equal(got, []string{"a", "b", "c", "d"}) {
+				t.Fatalf("arranged order = %v, want [a b c d]", got)
+			}
+
+			// Act.
+			if err := s.MovePlace(context.Background(), ids[tc.mover], ids[tc.onto]); err != nil {
+				t.Fatalf("MovePlace: %v", err)
+			}
+
+			// Assert.
+			if got := orderedNames(t, s); !slices.Equal(got, tc.want) {
+				t.Fatalf("place order = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestMovePlaceRefusesAnUnknownWorkspaceWritingNothing(t *testing.T) {
 	// Arrange.
 	s, log := testStore(t)
 	repoDir := placeRepo(t)
@@ -203,83 +302,61 @@ func TestSwapPlacesRefusesAnUnknownWorkspaceWritingNothing(t *testing.T) {
 	before := placesByName(t, s)
 
 	// Act.
-	err := s.SwapPlaces(context.Background(), a.ID, "ws-missing")
+	err := s.MovePlace(context.Background(), a.ID, "ws-missing")
 
 	// Assert.
 	if !errors.Is(err, ErrNotFound) {
-		t.Fatalf("SwapPlaces error = %v, want ErrNotFound", err)
+		t.Fatalf("MovePlace error = %v, want ErrNotFound", err)
 	}
-	after := placesByName(t, s)
-	for name, place := range before {
-		if after[name] != place {
-			t.Fatalf("place of %s moved from %d to %d on a refused swap", name, place, after[name])
-		}
+	if after := placesByName(t, s); !maps.Equal(after, before) {
+		t.Fatalf("places moved from %v to %v on a refused move", before, after)
 	}
-	if !loggedOperation(log, "daemon.wsm.swap_places", "debug") {
-		t.Fatalf("the refused swap was not recorded at debug: %v", log.Records())
+	if !loggedOperation(log, "daemon.wsm.move_place", "debug") {
+		t.Fatalf("the refused move was not recorded at debug: %v", log.Records())
 	}
 }
 
-func TestSwapPlacesRefusesAWorkspaceWithItself(t *testing.T) {
+func TestMovePlaceRefusesAWorkspaceOntoItself(t *testing.T) {
 	// Arrange.
 	s, log := testStore(t)
 	a := registerIn(t, s, placeRepo(t), "a", nil)
 
 	// Act.
-	err := s.SwapPlaces(context.Background(), a.ID, a.ID)
+	err := s.MovePlace(context.Background(), a.ID, a.ID)
 
 	// Assert.
 	if err == nil {
-		t.Fatal("SwapPlaces of a workspace with itself succeeded")
+		t.Fatal("MovePlace of a workspace onto itself succeeded")
 	}
-	if !loggedOperation(log, "daemon.wsm.swap_places", "error") {
+	if !loggedOperation(log, "daemon.wsm.move_place", "error") {
 		t.Fatalf("the refusal was not logged at error: %v", log.Records())
 	}
 }
 
-func TestReopeningAClosedWorkspaceMovesItLast(t *testing.T) {
-	// Arrange: a P1 workspace first, behind it an unprioritized one; the P1
-	// workspace is closed.
+func TestReopeningAClosedWorkspaceRestoresItsPlace(t *testing.T) {
+	// Arrange: three workspaces, the middle one closed while others land.
 	s, log := testStore(t)
 	repoDir := placeRepo(t)
-	p1 := registerIn(t, s, repoDir, "p1", priority(PriorityP1))
-	registerIn(t, s, repoDir, "none", nil)
-	if err := s.SetClosed(context.Background(), p1.ID, true); err != nil {
+	registerIn(t, s, repoDir, "a", nil)
+	b := registerIn(t, s, repoDir, "b", nil)
+	registerIn(t, s, repoDir, "c", nil)
+	if err := s.SetClosed(context.Background(), b.ID, true); err != nil {
 		t.Fatalf("SetClosed(true): %v", err)
 	}
+	registerIn(t, s, repoDir, "d", nil)
+	before := orderedNames(t, s)
 
 	// Act.
-	if err := s.SetClosed(context.Background(), p1.ID, false); err != nil {
+	if err := s.SetClosed(context.Background(), b.ID, false); err != nil {
 		t.Fatalf("SetClosed(false): %v", err)
 	}
 
-	// Assert: the re-opened workspace goes last, whatever its priority.
-	if got := orderedNames(t, s); !slices.Equal(got, []string{"none", "p1"}) {
-		t.Fatalf("place order = %v, want [none p1]", got)
+	// Assert: nothing moved; b is back where it was.
+	if got := orderedNames(t, s); !slices.Equal(got, before) {
+		t.Fatalf("place order = %v, want %v", got, before)
 	}
 	if loggedOperation(log, "daemon.wsm.set_closed", "error") {
 		t.Fatalf("the re-open logged an error: %v", log.Records())
-	}
-}
-
-func TestMarkingAnOpenWorkspaceOpenMovesNothing(t *testing.T) {
-	// Arrange: a P1 workspace the user swapped behind an unprioritized one.
-	s, _ := testStore(t)
-	repoDir := placeRepo(t)
-	p1 := registerIn(t, s, repoDir, "p1", priority(PriorityP1))
-	none := registerIn(t, s, repoDir, "none", nil)
-	if err := s.SwapPlaces(context.Background(), p1.ID, none.ID); err != nil {
-		t.Fatalf("SwapPlaces: %v", err)
-	}
-
-	// Act.
-	if err := s.SetClosed(context.Background(), p1.ID, false); err != nil {
-		t.Fatalf("SetClosed(false): %v", err)
-	}
-
-	// Assert.
-	if got := orderedNames(t, s); !slices.Equal(got, []string{"none", "p1"}) {
-		t.Fatalf("place order = %v, want the user's order kept", got)
 	}
 }
 
@@ -327,8 +404,9 @@ func TestTheSchemaRefusesTwoWorkspacesOnOnePlace(t *testing.T) {
 	}
 }
 
-func TestTheMigrationSeedsPlacesFromTheOrderBeforePlaces(t *testing.T) {
-	// Arrange: a layout-3 file with workspaces of mixed priority.
+func TestTheMigrationSeedsPlacesFromTheTabOrderBeforePlaces(t *testing.T) {
+	// Arrange: a layout-3 file with workspaces of mixed priority, a child,
+	// and a merged one. The fixture's own workspace is unprioritized too.
 	path := layout3Fixture(t)
 	for _, row := range []struct {
 		id, name string
@@ -349,12 +427,48 @@ func TestTheMigrationSeedsPlacesFromTheOrderBeforePlaces(t *testing.T) {
 	}
 	defer handle.Close()
 
-	// Assert: priority strongest first, then name.
+	// Assert: priority strongest first, then name, as the bar drew them.
 	want := []string{"omega", "zeta", "aaa", fixtureWorkspaceName}
 	if fixtureWorkspaceName < "aaa" {
 		want = []string{"omega", "zeta", fixtureWorkspaceName, "aaa"}
 	}
 	if got := orderedNames(t, handle.(*store)); !slices.Equal(got, want) {
 		t.Fatalf("seeded place order = %v, want %v", got, want)
+	}
+}
+
+func TestTheMigrationSeedsAChildRightAfterItsParent(t *testing.T) {
+	// Arrange: parent "b" with child "z", and a sibling "c" of the parent.
+	// The fixture's own workspace shares the repository.
+	path := layout3Fixture(t)
+	execRaw(t, path, `INSERT INTO workspaces (id, repo_id, dir, name, branch, parent_branch, closed, attention, is_current, created_at)
+		VALUES ('ws-b', 'repo-1', '/tmp/ws-b', 'b', 'b', 'master', 0, 0, 0, 1)`)
+	execRaw(t, path, `INSERT INTO workspaces (id, repo_id, dir, name, branch, parent_branch, closed, attention, is_current, created_at)
+		VALUES ('ws-c', 'repo-1', '/tmp/ws-c', 'c', 'c', 'master', 0, 0, 0, 1)`)
+	execRaw(t, path, `INSERT INTO workspaces (id, repo_id, dir, name, branch, parent_branch, closed, attention, is_current, created_at)
+		VALUES ('ws-z', 'repo-1', '/tmp/ws-z', 'z', 'z', 'b', 0, 0, 0, 1)`)
+
+	// Act: the child's recorded parent arrives with a later layout, so it is
+	// stamped by hand once the file has migrated up to that column.
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	handle.Close()
+	stampRaw(t, path, 34)
+	execRaw(t, path, `DROP TRIGGER workspaces_land_unplaced`)
+	execRaw(t, path, `DROP INDEX workspaces_by_place`)
+	execRaw(t, path, `ALTER TABLE workspaces DROP COLUMN place`)
+	execRaw(t, path, `UPDATE workspaces SET parent_id = 'ws-b' WHERE id = 'ws-z'`)
+	handle, err = Open(context.Background(), path, WithUnsyncedWrites())
+	if err != nil {
+		t.Fatalf("re-Open: %v", err)
+	}
+	defer handle.Close()
+
+	// Assert.
+	got := orderedNames(t, handle.(*store))
+	if i := slices.Index(got, "z"); i != slices.Index(got, "b")+1 {
+		t.Fatalf("seeded place order = %v, want z right after its parent b", got)
 	}
 }

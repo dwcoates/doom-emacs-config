@@ -61,15 +61,16 @@ type Workspace struct {
 	// Attention marks the roster's attention badge; set on a host
 	// notification, cleared on SelectWorkspace.
 	Attention bool
-	// Priority is the roster's priority badge, nil when unset. It decides only
-	// the place the workspace lands on at create and re-open (see place.go).
+	// Priority is the roster's priority badge, nil when unset. It also picks
+	// where the workspace lands when it is created or its priority is set
+	// (see place.go).
 	Priority *Priority
 	// Hidden reports whether the user moved the workspace into the roster's
 	// hidden section (agentrepl.v1.SetWorkspaceHidden): off every grouping and
 	// off the editor's tab bar, its session and tab untouched.
 	Hidden bool
-	// Place is the workspace's roster place: siblings draw in ascending place.
-	// Unique across the registry, and at least 1.
+	// Place is the workspace's position in the registry order, which the
+	// sidebar and the tab bar both follow. Unique, and at least 1.
 	Place int64
 	// Task is the task this workspace is assigned to, nil when unassigned.
 	Task *TaskID
