@@ -196,7 +196,8 @@ type DB interface {
   ListWorkspaces() ([]Workspace, error); ListRepositories() ([]Repository, error)
   SetClosed(id WorkspaceID, closed bool) error; SetCurrent(id WorkspaceID, at time.Time) error; Current() (*WorkspaceID, error)
   SetPriority(id WorkspaceID, p *Priority) error; SetAttention(id WorkspaceID, on bool) error
-  SetMergedAt(id WorkspaceID, at time.Time) error
+  SetMergedAt(id WorkspaceID, at time.Time, commits *uint32) error   // commits: the count the merge brought in, nil keeps the recorded one
+  SetLiveCommitCount(id WorkspaceID, count uint32) (bool, error)     // the turn-close recount; refused (false) once merged_at is set
   // nuke's durable half AND the whole of forget: the workspace's rows, plus the repository's
   // when no other workspace references it (nothing else ever deleted a repository record).
   Forget(id WorkspaceID) (ForgetReport, error)
