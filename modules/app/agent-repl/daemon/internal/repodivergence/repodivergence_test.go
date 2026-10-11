@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"claude-repld/internal/clock/clocktest"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/gitclient"
 	"claude-repld/internal/ids"
@@ -100,23 +101,6 @@ func (r *fakeRegistry) ListRepositories(context.Context) ([]wsm.Repository, erro
 	return r.repos, r.err
 }
 
-// fakeClock records every wait asked of it and fires only when told.
-type fakeClock struct {
-	asked chan time.Duration
-	fire  chan time.Time
-}
-
-func newFakeClock() *fakeClock {
-	return &fakeClock{asked: make(chan time.Duration, 16), fire: make(chan time.Time)}
-}
-
-func (c *fakeClock) Now() time.Time { return time.Time{} }
-
-func (c *fakeClock) After(d time.Duration) <-chan time.Time {
-	c.asked <- d
-	return c.fire
-}
-
 // told is one sink call.
 type told struct {
 	repo    ids.RepoID
@@ -127,14 +111,14 @@ type world struct {
 	t        *testing.T
 	git      *fakeGit
 	registry *fakeRegistry
-	clock    *fakeClock
+	clock    *clocktest.Scripted
 	log      *dlog.TestLogger
 	mu       sync.Mutex
 	sunk     []told
 }
 
 func newWorld(t *testing.T, git *fakeGit, repos ...wsm.Repository) *world {
-	return &world{t: t, git: git, registry: &fakeRegistry{repos: repos}, clock: newFakeClock(), log: dlog.NewTestLogger()}
+	return &world{t: t, git: git, registry: &fakeRegistry{repos: repos}, clock: clocktest.New(time.Time{}), log: dlog.NewTestLogger()}
 }
 
 func repo(id string) wsm.Repository {
@@ -403,7 +387,7 @@ func TestTheFirstSweepRunsAtOnce(t *testing.T) {
 
 	// Act.
 	startRun(t, w.measurer())
-	first := <-w.clock.asked // asked only once the first sweep is over
+	first := <-w.clock.Asked // asked only once the first sweep is over
 
 	// Assert.
 	if got := w.told(); len(got) != 1 {
@@ -418,11 +402,11 @@ func TestEverySweepAfterTheFirstWaitsTheCadence(t *testing.T) {
 	// Arrange.
 	w := newWorld(t, tracking(), repo("a"))
 	startRun(t, w.measurer())
-	<-w.clock.asked
+	<-w.clock.Asked
 
 	// Act.
-	w.clock.fire <- time.Time{}
-	second := <-w.clock.asked
+	w.clock.Fire <- time.Time{}
+	second := <-w.clock.Asked
 
 	// Assert.
 	if second != DefaultEvery {
@@ -437,7 +421,7 @@ func TestTheScheduleEndsWithItsContext(t *testing.T) {
 	// Arrange.
 	w := newWorld(t, tracking(), repo("a"))
 	run := startRun(t, w.measurer())
-	<-w.clock.asked
+	<-w.clock.Asked
 
 	// Act.
 	run.cancel()
