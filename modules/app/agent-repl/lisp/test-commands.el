@@ -936,6 +936,36 @@ scope, never nil: a nil scope is refused by the ladder as a routing error
     (agent-repl-switch-to-workspace-9)
     (should (equal agent-repl-test-commands--switched "t9"))))
 
+(ert-deftest agent-repl-test-commands-switch-to-last-lands-on-the-last-tab ()
+  "`M-0' on a three-tab bar lands on the tab at the end of the bar."
+  (agent-repl-test-commands--with-bar '("first" "second" "third") "first"
+    (agent-repl-switch-to-last-workspace)
+    (should (equal agent-repl-test-commands--switched "third"))))
+
+(ert-deftest agent-repl-test-commands-switch-to-last-reaches-past-slot-nine ()
+  "`M-0' on an eleven-tab bar lands on the eleventh tab, past every slot chord."
+  (agent-repl-test-commands--with-bar
+      '("t1" "t2" "t3" "t4" "t5" "t6" "t7" "t8" "t9" "t10" "t11") "t1"
+    (agent-repl-switch-to-last-workspace)
+    (should (equal agent-repl-test-commands--switched "t11"))))
+
+(ert-deftest agent-repl-test-commands-switch-to-last-skips-undrawn-tabs ()
+  "`M-0' counts the DRAWN bar, so a hidden trailing tab is not the target."
+  (agent-repl-test-commands--with-hidden-bar '("first" "second" "third") '("third") "first"
+    (agent-repl-switch-to-last-workspace)
+    (should (equal agent-repl-test-commands--switched "second"))))
+
+(ert-deftest agent-repl-test-commands-switch-to-last-on-an-empty-bar-is-a-logged-no-op ()
+  "`M-0' with no tabs drawn requests nothing and records the no-tabs miss."
+  ;; Arrange / Act
+  (agent-repl-test-commands--capturing-info
+    (agent-repl-test-commands--with-bar nil "first"
+      (agent-repl-switch-to-last-workspace)
+      ;; Assert
+      (should-not agent-repl-test-commands--switched))
+    (should (member "elisp.commands.switch-to-workspace-no-tabs n=1"
+                    (agent-repl-test-commands--info-messages)))))
+
 (ert-deftest agent-repl-test-commands-last-tab-slot-is-the-bar-length ()
   "The last-tab slot is the count of DRAWN tabs."
   (agent-repl-test-commands--with-bar '("first" "second" "third") "first"
