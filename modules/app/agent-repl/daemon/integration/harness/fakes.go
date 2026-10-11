@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"claude-repld/internal/shellword"
 )
 
 // Recorder is a fake executable that appends its argv to a record file, so a
@@ -144,8 +146,8 @@ func NewRecorderExecutable(t *testing.T, dir, name string) *Recorder {
 		t:       t,
 	}
 	script := "#!/bin/sh\n" +
-		"AGENT_REPL_FAKE_RECORD=" + shellQuote(r.Record) + "\n" +
-		"AGENT_REPL_FAKE_CONTROL=" + shellQuote(r.Control) + "\n" +
+		"AGENT_REPL_FAKE_RECORD=" + shellword.Quote(r.Record) + "\n" +
+		"AGENT_REPL_FAKE_CONTROL=" + shellword.Quote(r.Control) + "\n" +
 		"export AGENT_REPL_FAKE_RECORD AGENT_REPL_FAKE_CONTROL\n" +
 		strings.TrimPrefix(recorderScript, "#!/bin/sh\n")
 	if err := os.WriteFile(r.Path, []byte(script), 0o755); err != nil {
@@ -316,8 +318,6 @@ func writeFile(t *testing.T, path, content string) {
 		t.Fatalf("harness: write %s: %v", path, err)
 	}
 }
-
-func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
 
 // FakeHostNetwork is the Wi-Fi network the fake host tools report joined.
 const FakeHostNetwork = "Harness Net"

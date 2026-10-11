@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/shellword"
 )
 
 // This file holds the merge queue's REBASE and the two other gits the queue's
@@ -80,7 +81,7 @@ func (c *client) StartRebase(ctx context.Context, dir, onto string, commits []st
 	// THE SEQUENCE EDITOR COPIES THE DAEMON'S TODO OVER GIT'S. git runs it as
 	// `<editor> <todo-path>`, so `cp '<ours>'` makes the list the daemon wrote
 	// the list git replays, with its breaks.
-	env := append([]string{"GIT_SEQUENCE_EDITOR=cp " + shellQuote(todo)}, rebaseEnv...)
+	env := append([]string{"GIT_SEQUENCE_EDITOR=cp " + shellword.Quote(todo)}, rebaseEnv...)
 	return c.rebaseCommand(ctx, operation, dir, env, "rebase", "-i", "--empty=drop", onto)
 }
 
@@ -186,10 +187,4 @@ func writeRebaseTodo(commits []string) (string, error) {
 		return "", fmt.Errorf("gitclient: closing the rebase todo list %s: %w", f.Name(), err)
 	}
 	return f.Name(), nil
-}
-
-// shellQuote quotes one word for sh, so a todo path with spaces or quotes in
-// it reaches cp as one argument.
-func shellQuote(word string) string {
-	return "'" + strings.ReplaceAll(word, "'", `'\''`) + "'"
 }
