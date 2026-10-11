@@ -825,7 +825,7 @@ Only the raw wire text can tell an explicit false from an omitted field
       ;; Assert.
       (let ((raw (car (agent-repl-itest--call-raw-bodies daemon "MergeWorkspace"))))
         (should (string-match-p
-                 (regexp-quote "\"source\":{\"ownBranch\":{\"keepOpen\":false}}")
+                 (regexp-quote "\"source\":{\"ownBranch\":{\"inPlace\":{\"keepOpen\":false}}}")
                  raw))))))
 
 (ert-deftest agent-repl-itest-verbs-merge-keep-open-sends-keep-open-true ()
@@ -840,7 +840,7 @@ Only the raw wire text can tell an explicit false from an omitted field
       ;; Assert.
       (should (eq (agent-repl-itest--body-field
                    (agent-repl-itest-verbs--body daemon "MergeWorkspace")
-                   'source 'ownBranch 'keepOpen)
+                   'source 'ownBranch 'inPlace 'keepOpen)
                   t)))))
 
 ;;;; ---- CreateWorkspaceRequest fields (audit finding 75) ----

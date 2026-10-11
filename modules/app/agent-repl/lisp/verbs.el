@@ -692,7 +692,8 @@ queue onward is WS's own feed merge bubble, footer and roster row."
      #'agent-repl-rpc-merge-workspace (agent-repl-verbs--conn ws)
      (list :workspace ref
            :source (list :arm :own-branch
-                         :value (list :keep-open (and keep-open t))))
+                         :value (list :run (list :arm :in-place
+                                                 :value (list :keep-open (and keep-open t))))))
      :ws ws :op "merge"
      :on-success (lambda (_) (message "merge enqueued")))))
 
