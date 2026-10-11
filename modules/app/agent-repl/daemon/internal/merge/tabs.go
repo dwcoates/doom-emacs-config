@@ -14,6 +14,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/mergetab"
 	"claude-repld/internal/wsm"
 )
 
@@ -238,25 +239,12 @@ func tabSwitchLabel(kind string) string {
 // tab is one. A resolved tab carries its whole content in every placement and
 // gets no switch.
 func withTabSwitch(tab *frontendv1.FeedMergeTab, kind string, target *workspacev1.WorkspaceRef) bool {
-	sw := &frontendv1.FeedMergeTabWorkspaceSwitch{
+	return mergetab.SetSwitch(tab, &frontendv1.FeedMergeTabWorkspaceSwitch{
 		Label: &frontendv1.FeedMergeTabWorkspaceSwitchLabel{Text: tabSwitchLabel(kind)},
 		Availability: &frontendv1.FeedMergeTabWorkspaceSwitch_Available{
 			Available: &frontendv1.FeedMergeTabWorkspaceSwitchAvailable{Target: target},
 		},
-	}
-	switch arm := tab.GetKind().(type) {
-	case *frontendv1.FeedMergeTab_PrePrompt:
-		arm.PrePrompt.WorkspaceSwitch = sw
-	case *frontendv1.FeedMergeTab_Conflicts:
-		arm.Conflicts.WorkspaceSwitch = sw
-	case *frontendv1.FeedMergeTab_Fixes:
-		arm.Fixes.WorkspaceSwitch = sw
-	case *frontendv1.FeedMergeTab_PostPrompt:
-		arm.PostPrompt.WorkspaceSwitch = sw
-	default:
-		return false
-	}
-	return true
+	})
 }
 
 // publishHead publishes the bubble's head with RESULT, the arm in force, in
