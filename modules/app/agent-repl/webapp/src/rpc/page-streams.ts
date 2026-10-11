@@ -6,8 +6,8 @@
  * HTTP/2, so this page talks HTTP/1.1 — which caps it at about SIX connections
  * per host. A server-streaming Connect call pins one for its whole life, and
  * this webapp held six (`WatchWorkspaceRoster`, `WatchWebWorkspace`,
- * `WatchDaemon`, `WatchTopbar`, `WatchFooter`, `WatchDaemonHolds`) before its
- * feed tail was even opened. The seventh did NOT fail: it QUEUED, forever, with
+ * `WatchDaemon`, `WatchTopbar`, `WatchFooter`, and a held-prompt tray's own)
+ * before its feed tail was even opened. The seventh did NOT fail: it QUEUED, forever, with
  * no request on the wire, no error and no card — so `WatchFeed` was never
  * issued and no row the workspace produced after the page loaded was ever
  * drawn. Reloading appeared to fix it only because a fresh `OpenFeed` page

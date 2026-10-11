@@ -51,7 +51,7 @@ import { isMalformedView } from "../rpc/malformed.js";
 import { crossCuttingSentence } from "../rpc/refuse.js";
 import { requireCase, unreachableArm } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
-import { DROPPED_EVENT, type HeldPromptDroppedDetail } from "../tray/held-prompt.js";
+import { DROPPED_EVENT, type HeldPromptDroppedDetail } from "../held/held-prompt.js";
 
 /** What every mount answers with. */
 export interface Handle {

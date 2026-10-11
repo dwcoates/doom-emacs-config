@@ -1457,7 +1457,7 @@ body::after {
   color: var(--init);
 }
 
-/* The scrolling region: the feed plus the hold tray at its tail, so the two
+/* The scrolling region: the feed plus its held section at its tail, so the two
    move together and a reader at the bottom sees the held prompts after the
    last row. It takes the leftover height between the drain banner and the
    docked footer; its children lay out in ordinary block flow. */
@@ -1499,7 +1499,7 @@ body::after {
 }
 
 /* The band's trailing spacer: the scrolled content's last box, one gap tall,
-   after #feed AND the hold tray, so the gap is the same whether or not
+   after #feed AND the held section, so the gap is the same whether or not
    anything is held. A pseudo-element rather than padding on #feed-scroll:
    padding would shrink the size container's content box and so every `cqh`
    measured against it. It is not a DOM child, so the tail follow's child
@@ -1513,7 +1513,7 @@ body::after {
 
 #feed {
   /* No bottom padding: the gap below the last row is the band's trailing
-     spacer (#feed-scroll::after), which the hold tray also rests on. */
+     spacer (#feed-scroll::after), which the held section also rests on. */
   padding: 1rem 1rem 0;
   display: flex;
   flex-direction: column;
@@ -4298,15 +4298,17 @@ body.draining #composer-input::placeholder {
 
 /* ---- the shell's new mount points (index.html, shell.ts) ---------------- */
 
-/* The held-prompt tray: the feed's TAIL region, inside the scroll zone, so it
-   sits after the last row rather than as chrome docked under the feed. It
-   shares the feed's horizontal padding so a held prompt lines up with the
-   bubbles above it, and pays no layout at all while nothing is held. Its top
-   padding is the 1rem #feed's bottom padding used to put between the last row
-   and the first held prompt; below the last held prompt the gap is the feed's
-   one bottom gap (#feed-scroll::after), never a second copy here. */
+/* The root feed's HELD SECTION (src/held/section.ts): the feed's TAIL region,
+   inside the scroll zone, so a held item sits after the last row rather than
+   as chrome docked under the feed. It is laid out in the feed's OWN rhythm —
+   the feed's horizontal padding, the row gap above its first item, the row
+   gap between items, the feed's text scale — so a held item reads exactly as
+   the newest row does. It pays no layout at all while nothing is held. Below the
+   last held item the gap is the feed's one bottom gap (#feed-scroll::after),
+   never a second copy here. */
 #hold-tray {
-  padding: 1rem 1rem 0;
+  padding: 0.5rem 1rem 0;
+  font-size: calc(1em * var(--feed-text-scale));
 }
 #hold-tray:empty { display: none; }
 
@@ -4317,7 +4319,7 @@ body.draining #composer-input::placeholder {
 /* ---- shared list delimiters (every dropdown, panel, tray and menu) ------ */
 
 /* ONE rule for the subtle thin grey line between rows, so an expanded footer
-   panel, a topbar dropdown, a command panel and the hold tray all delimit
+   panel, a topbar dropdown and a command panel all delimit
    their rows identically. Between rows only -- never above the first or below
    the last, which would read as a border around the list. */
 .list-rows > * + * {
@@ -5111,12 +5113,15 @@ ar-button.outcome-marker-pill {
   border-radius: 3px;
 }
 
-/* ---- hold tray (src/tray) ---------------------------------------------- */
+/* ---- held section (src/held) ------------------------------------------ */
 
-/* The items list. Delimited by the one shared `.list-rows` rule, so a held
-   prompt is separated from the next exactly as a footer panel's rows are. */
-.hold-tray-items > * + * { padding-top: 0.5rem; }
-.hold-tray-items > * { padding-bottom: 0.5rem; }
+/* The items list, in the same column rhythm as the feed's rows (.feed-rows),
+   with no delimiter between items: the section reads as the newest rows. */
+.held-section-items {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
 
 /* The ticking queued-at age, first in the expand-only details (a badge row no
    longer holds it). Tabular so the number does not shuffle once a second. */
@@ -5125,7 +5130,7 @@ ar-button.outcome-marker-pill {
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
-/* THE HELD STATUS BADGES (src/tray/held-prompt.ts `HELD_STATUS_BADGES`, owner
+/* THE HELD STATUS BADGES (src/held/held-prompt.ts `HELD_STATUS_BADGES`, owner
    spec 2026-09-23). Every status a held prompt shows is the tool cards' own
    `.badge`, colored by the ONE table's tone class: `ok` (interrupting, green),
    `err` (waiting, red), `run` (classifying, the in-flight orange) come from the
