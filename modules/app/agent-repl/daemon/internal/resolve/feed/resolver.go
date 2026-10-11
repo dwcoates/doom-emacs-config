@@ -207,6 +207,9 @@ type wsState struct {
 	// an answer is delivered to the right agent and echoed against the batch
 	// the user actually saw.
 	questionAsks map[string]*questionState
+	// askSeq numbers the asks this workspace opened, so the oldest standing
+	// one is decidable (StandingAsk).
+	askSeq uint64
 	// turnEvidence collects per-turn evidence lines — a mid-turn api error, a
 	// compaction that failed — that the turn's terminal row surfaces.
 	turnEvidence map[string][]turnEvidenceLine

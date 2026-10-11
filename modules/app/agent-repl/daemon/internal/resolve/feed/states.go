@@ -361,16 +361,44 @@ type permissionState struct {
 	// agent is who asked. THE ANSWER VERB NEEDS IT: an answer is delivered to
 	// the agent that is blocked, and the client sends only the ask's identity.
 	agent *conversationv1.AgentId
+	// opened is the workspace's ask sequence at the card's first draw, so the
+	// OLDEST standing ask is the one a typed answer goes to (StandingAsk).
+	opened uint64
 }
 
 // questionState is what the daemon SERVED for one question ask, which is what
-// an answer is echoed against.
+// an answer is echoed against, and the ask's DRAFT while it stands.
+//
+// THE DRAFT LIVES HERE AND NOWHERE ELSE: the card's clicks and the editor's
+// typed answer both edit this record (questiondraft.go), and the open card is
+// drawn from it, so no client holds a second copy that could disagree.
 type questionState struct {
 	// agent is who asked; the answer is delivered back to it.
 	agent *conversationv1.AgentId
 	// batch is the batch as served, so an answer naming a question the batch
 	// never carried is refused rather than forwarded.
 	batch *conversationv1.AgentQuestionBatch
+	// at is where the card was last drawn, so a draft edit re-publishes it in
+	// place.
+	at placement
+	// row is the card's identity.
+	row *frontendv1.FeedId
+	// turn is the turn the card was stamped with.
+	turn *conversationv1.TurnId
+	// open is true while the ask stands: from its start until its success or
+	// failure frame.
+	open bool
+	// delivering is true from the edit that answered the last question until
+	// the delivery settles: the batch is CLAIMED, so no second edit can
+	// deliver it twice and a typed answer no longer routes to it.
+	delivering bool
+	// active is the question the card shows, and the one a typed answer edits.
+	active int
+	// drafts is what each question has been given so far, in the batch's
+	// order.
+	drafts []*frontendv1.FeedQuestionDraft
+	// opened is the workspace's ask sequence at the ask's start (StandingAsk).
+	opened uint64
 }
 
 // subagentState is one bubble's carried facts across its frames.

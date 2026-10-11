@@ -14,6 +14,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/resolve/feed"
 	"claude-repld/internal/workspace"
 )
 
@@ -243,6 +244,61 @@ func (s *server) AnswerQuestion(
 	}
 	resp.Result = &agentreplv1.AnswerQuestionResponse_Success{
 		Success: &agentreplv1.AnswerQuestionSuccess{},
+	}
+	return connect.NewResponse(resp), nil
+}
+
+// UpdateQuestionDraft applies one click to a standing question card's
+// daemon-owned draft; the click that answers the batch's last question
+// delivers it. Each arm echoes the served question text (and a pick its served
+// label), which the verbs check against the batch.
+func (s *server) UpdateQuestionDraft(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.UpdateQuestionDraftRequest],
+) (*connect.Response[agentreplv1.UpdateQuestionDraftResponse], error) {
+	const rpc = "UpdateQuestionDraft"
+	if err := validateUpdateQuestionDraftRequest(req.Msg); err != nil {
+		return nil, err
+	}
+	resp := &agentreplv1.UpdateQuestionDraftResponse{}
+	subject, r, err := s.resolveRef(ctx, rpc, req.Msg.GetWorkspace())
+	if err != nil {
+		return nil, fail(s.log, rpc, err)
+	}
+	if r != nil {
+		return answer(resp, s.refuse(s.log, rpc, resp, *r))
+	}
+	ref, refused := askIDFrom(rpc, subject.Record.ID, req.Msg.GetQuestion())
+	if refused != nil {
+		return answer(resp, s.refuse(subject.Log, rpc, resp, s.fill(refusal{
+			Arm: "ask_not_standing", Reason: refused.Reason, NotFound: true,
+		})))
+	}
+
+	var edit feed.QuestionEdit
+	switch arm := req.Msg.GetEdit().(type) {
+	case *agentreplv1.UpdateQuestionDraftRequest_Show:
+		edit = feed.QuestionEdit{Kind: feed.EditShow, Question: arm.Show.GetQuestionText()}
+	case *agentreplv1.UpdateQuestionDraftRequest_Pick:
+		edit = feed.QuestionEdit{Kind: feed.EditPick, Question: arm.Pick.GetQuestionText(), Label: arm.Pick.GetLabel()}
+	case *agentreplv1.UpdateQuestionDraftRequest_Confirm:
+		edit = feed.QuestionEdit{Kind: feed.EditConfirm, Question: arm.Confirm.GetQuestionText()}
+	default:
+		// VALIDATED ABOVE: an unset arm never reaches here.
+		panic(fmt.Sprintf("UpdateQuestionDraft: validated request carries edit %T", arm))
+	}
+
+	if err := s.deps.Verbs.UpdateQuestionDraft(ctx, subject.Record.ID, ref.Row.ID, edit); err != nil {
+		// A value the batch never served is `unserved_value{text}`; the shim's
+		// `no_open_ask` (the agent stopped asking before the delivery reached
+		// it) is the card no longer standing.
+		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, map[string]string{
+			workspace.ArmUnservedAnswer: "unserved_value",
+			workspace.ArmShimNoOpenAsk:  "ask_not_standing",
+		}))
+	}
+	resp.Result = &agentreplv1.UpdateQuestionDraftResponse_Success{
+		Success: &agentreplv1.UpdateQuestionDraftSuccess{},
 	}
 	return connect.NewResponse(resp), nil
 }

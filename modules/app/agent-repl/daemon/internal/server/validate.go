@@ -363,6 +363,37 @@ func validateAnswerQuestionAnswer(field string, answer *agentreplv1.AnswerQuesti
 	return nil
 }
 
+// validateUpdateQuestionDraftRequest is UpdateQuestionDraftRequest's base
+// function: every edit arm names its question, and a pick its option.
+func validateUpdateQuestionDraftRequest(req *agentreplv1.UpdateQuestionDraftRequest) *connect.Error {
+	if err := validateWorkspaceRef("workspace", req.GetWorkspace()); err != nil {
+		return err
+	}
+	if err := validateFeedID("question", req.GetQuestion()); err != nil {
+		return err
+	}
+	switch edit := req.GetEdit().(type) {
+	case *agentreplv1.UpdateQuestionDraftRequest_Show:
+		if edit.Show.GetQuestionText() == "" {
+			return invalid("show.question_text", "a show names the question it shows")
+		}
+	case *agentreplv1.UpdateQuestionDraftRequest_Pick:
+		if edit.Pick.GetQuestionText() == "" {
+			return invalid("pick.question_text", "a pick names the question it answers")
+		}
+		if edit.Pick.GetLabel() == "" {
+			return invalid("pick.label", "a pick names the option it clicks")
+		}
+	case *agentreplv1.UpdateQuestionDraftRequest_Confirm:
+		if edit.Confirm.GetQuestionText() == "" {
+			return invalid("confirm.question_text", "a confirm names the question it confirms")
+		}
+	default:
+		return invalid("edit", "a draft edit arm is required")
+	}
+	return nil
+}
+
 // validateAnswerColdGateRequest is AnswerColdGateRequest's base function.
 func validateAnswerColdGateRequest(req *agentreplv1.AnswerColdGateRequest) *connect.Error {
 	if err := validateWorkspaceRef("workspace", req.GetWorkspace()); err != nil {

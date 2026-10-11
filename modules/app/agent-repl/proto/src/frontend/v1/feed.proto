@@ -2040,7 +2040,8 @@ message FeedShellLostProcessEnded {}
 // The consent card: the turn blocked on the user's permission for one gated
 // call. Buttons (allow once / always allow / deny) are agentrepl verbs
 // echoing this row's FeedId; the card's state change arrives as this row's
-// re-push.
+// re-push. A deny WITH A REASON is typed in the editor's composer
+// (agentrepl.v1.SubmitPromptAskAnswered), never on the card.
 message FeedPermission {
   // The vendor's rendered sentence ("Claude wants to read foo.txt") —
   // resolved end to end; no consumer composes it from the tool.
@@ -2142,7 +2143,8 @@ message FeedPermissionAbandoned {
 // an agentrepl verb echoing this row's FeedId plus the SERVED VALUES
 // (question text, option labels — the echo-the-value convention); the
 // card's state change arrives as this row's re-push. The free-text "Other"
-// escape is ALWAYS drawn, whether or not the agent asked for one.
+// escape is ALWAYS available, whether or not the agent asked for one: it is
+// typed in the editor's composer, never on the card.
 message FeedQuestion {
   // The questions, in the batch's order (one to four).
   repeated FeedQuestionItem questions = 1;
@@ -2204,8 +2206,30 @@ message FeedQuestionOptionDescription {
   // The description, drawn verbatim.
   string text = 1;
 }
-// Open: awaiting the user's choices.
-message FeedQuestionOpen {}
+// Open: awaiting the user's choices. THE DAEMON OWNS THE DRAFT: which
+// question is shown and what each has been given so far live daemon-side, so
+// a click on the card (agentrepl.v1.UpdateQuestionDraft) and a typed answer
+// from the editor (agentrepl.v1.SubmitPromptAskAnswered) edit one record. The
+// batch is delivered by the daemon the moment every draft is answered; there
+// is no submit.
+message FeedQuestionOpen {
+  // The question the card shows, as an index into FeedQuestion.questions —
+  // also the question an editor send answers.
+  uint32 active = 1;
+  // One draft per question, in the batch's order.
+  repeated FeedQuestionDraft drafts = 2;
+}
+// What one question has been given so far.
+message FeedQuestionDraft {
+  // The option labels chosen or ticked, verbatim, in the served order.
+  repeated string chosen = 1;
+  // The answer typed in the editor, when one was.
+  optional FeedQuestionOtherText other_text = 2;
+  // Whether the question counts as answered: a single-select once an option
+  // is chosen or an answer typed, a multi-select once confirmed or an answer
+  // typed. Stated by the daemon, never inferred by a client.
+  bool answered = 3;
+}
 // Answered: what was given, per question, drawn as the verdict lines. The
 // answers ride the row because the settled card is drawn from the row alone
 // — a cold repaint has nothing else to draw the choices from.
