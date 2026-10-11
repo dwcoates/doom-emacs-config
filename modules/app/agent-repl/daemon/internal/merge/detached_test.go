@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -16,6 +14,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/mergetab"
+	"claude-repld/internal/sourcescan"
 	"claude-repld/internal/wsm"
 )
 
@@ -442,24 +441,17 @@ func TestAnEvictedDetachedMergeIsHandedBackAsAbandoned(t *testing.T) {
 }
 
 func TestEveryMergeTabIsPublishedThroughPublishTab(t *testing.T) {
-	// Arrange: the package's own non-test sources.
-	files, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatalf("Glob: %v", err)
-	}
+	// Arrange / Act: the package's own production sources.
+	files := sourcescan.Production(t)
 
-	// Act / Assert: tabRow is composed only inside publishTab, so no tab can
-	// reach one placement and miss the other.
+	// Assert: tabRow is composed only inside publishTab, so no tab can reach
+	// one placement and miss the other.
 	for _, file := range files {
-		if strings.HasSuffix(file, "_test.go") || file == "tabs.go" {
+		if file.Name == "tabs.go" {
 			continue
 		}
-		source, err := os.ReadFile(file)
-		if err != nil {
-			t.Fatalf("ReadFile %s: %v", file, err)
-		}
-		if strings.Contains(string(source), "tabRow(") {
-			t.Errorf("%s composes a tab row itself, want every tab published through publishTab", file)
+		if strings.Contains(string(file.Source), "tabRow(") {
+			t.Errorf("%s composes a tab row itself, want every tab published through publishTab", file.Name)
 		}
 	}
 }
