@@ -69,6 +69,27 @@ fork's outcome comes back into the main conversation.
 - What it does not claim: pinning, tabs, folding, durations and the test gate
   are untouched.
 
+### The requester's bubble never streams the merge workspace's rows
+
+- In the owner's terms (2026-10-11): "we just don't support streaming the
+  child workspace's stuff there anymore in the merge bubble. The user can
+  switch to the merge workspace by a button shown there on the relevant
+  tabs."
+- Consequences for the contract: a detached merge's bubble has two
+  placements, each its own feed in its own workspace. The merge workspace's
+  placement is an ordinary in-place bubble. The requester's placement carries
+  the same tabs, but each agentic tab (pre-prompt, conflicts, fixes,
+  post-prompt) draws a switch in place of its rows. No feed of one workspace
+  is ever read through another, so `daemon.internal.server.feedOf()` keeps its
+  rule that a feed belongs to the requesting workspace.
+- Decisions it reopens: the earlier plan to serve the requester's bubble
+  sub-feed from the merge workspace's own sub-feed (a cross-workspace read
+  gated in `feedOf`). That plan is dropped.
+- What it does not claim: resolved tabs (queue, rebasing, tests, committing,
+  updating main) still carry their whole content in both placements, since
+  their content rides the tab row itself and is published to each placement
+  by the one merge run.
+
 ### Landed merge workspaces are kept, and every merge workspace is cleaned up after 15 calendar days of inactivity
 
 - In the owner's terms: clean them after 15 days of inactivity, calendar
@@ -166,3 +187,23 @@ increment.
 - Consequences: the roster resolver sets it from the daemon's own record of
   the workspace being a merge workspace, which the workspace table gains (an
   internal column, not part of the contract).
+
+### 6. Agentic tabs in the requester's placement draw a switch instead of rows
+
+- What changed: `frontend.v1.FeedMergeTabPrePrompt`,
+  `frontend.v1.FeedMergeTabConflicts`, `frontend.v1.FeedMergeTabFixes` and
+  `frontend.v1.FeedMergeTabPostPrompt` each gain an optional
+  `workspace_switch` (`frontend.v1.FeedMergeTabWorkspaceSwitch`: label plus an
+  `available`/`removed` availability oneof, the same shape as the head's
+  switch). `frontend.v1.FeedMerge`'s comment describes the two placements.
+- Why: the owner's ruling that the requester's bubble does not stream the
+  merge workspace's rows. The switch is set exactly where rows would have
+  been, so a tab is never drawn empty without a reason.
+- Why one shared tab-switch message across the four arms, and a separate
+  message from the head's: the four arms are variants of one component (the
+  tab), like the shared `FeedMergeTabLive`; the head is a different component,
+  so it keeps its own wrapper.
+- Consequences: the merge run publishes every tab to both placements, setting
+  the switch on agentic tabs only in the requester's placement. The feed
+  resolver never parents a merge workspace's rows to a tab in the requester's
+  feed.
