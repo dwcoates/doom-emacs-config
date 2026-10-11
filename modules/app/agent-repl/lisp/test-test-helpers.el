@@ -509,6 +509,85 @@ test-popup.el tests the popup module itself and records one level lower."
     ;; Assert
     (should (equal temporary-file-directory before))))
 
+;;;; ---- Reaping a subprocess with its children ----
+
+(defun agent-repl-test-helpers--spawn-parent-of-sleep ()
+  "Spawn a shell that backgrounds a `sleep' child; return (PROCESS . CHILD-PID)."
+  (let* ((buffer (generate-new-buffer " *reap-test*"))
+         (process (make-process :name "agent-repl-reap-test" :buffer buffer
+                                :command (list "/bin/sh" "-c" "sleep 30 & echo $!; wait")
+                                :connection-type 'pipe :noquery t)))
+    (while (not (with-current-buffer buffer
+                  (string-match-p "[0-9]+\n" (buffer-string))))
+      (accept-process-output process 0.05))
+    (cons process (string-to-number (with-current-buffer buffer (buffer-string))))))
+
+(defun agent-repl-test-helpers--pid-gone-p (pid)
+  "Return non-nil once PID is no longer a running process.
+A zombie awaiting its reaper counts as gone: it holds no fds."
+  (let ((attributes (process-attributes pid)))
+    (or (null attributes) (equal (alist-get 'state attributes) "Z"))))
+
+(ert-deftest agent-repl-test-helpers-reap-process-kills-the-child-too ()
+  "Reaping a live shell takes its backgrounded child with it."
+  ;; Arrange
+  (let* ((spawned (agent-repl-test-helpers--spawn-parent-of-sleep))
+         (process (car spawned))
+         (child (cdr spawned))
+         (deadline (+ (float-time) 2)))
+    (unwind-protect
+        (progn
+          ;; Act
+          (agent-repl-test--reap-process process)
+          (while (and (not (agent-repl-test-helpers--pid-gone-p child))
+                      (< (float-time) deadline))
+            (accept-process-output nil 0.01))
+          ;; Assert
+          (should-not (process-live-p process))
+          (should (agent-repl-test-helpers--pid-gone-p child)))
+      (signal-process child 'SIGKILL)
+      (kill-buffer (process-buffer process)))))
+
+(ert-deftest agent-repl-test-helpers-reap-process-deletes-a-dead-process ()
+  "A process that already exited is deleted without a signal."
+  ;; Arrange
+  (let ((process (make-process :name "agent-repl-reap-dead" :command '("/usr/bin/true")
+                               :connection-type 'pipe :noquery t))
+        (signalled nil))
+    (while (process-live-p process) (accept-process-output process 0.05))
+    (cl-letf (((symbol-function 'signal-process)
+               (lambda (&rest args) (push args signalled) 0)))
+      ;; Act
+      (agent-repl-test--reap-process process))
+    ;; Assert
+    (should-not signalled)
+    (should-not (memq process (process-list)))))
+
+(ert-deftest agent-repl-test-helpers-reap-process-ignores-nil ()
+  "No process at all is a no-op."
+  ;; Act / Assert
+  (should-not (agent-repl-test--reap-process nil)))
+
+(ert-deftest agent-repl-test-helpers-subprocess-reaps-share-one-helper ()
+  "Every subprocess reap in the shared harness goes through the group kill.
+A site that hand-rolls `delete-process' on a subprocess orphans its children."
+  ;; Arrange
+  (with-temp-buffer
+    (insert-file-contents
+     (expand-file-name "test-integration-helpers.el" agent-repl-test-helpers--dir))
+    ;; Act
+    (let ((hand-rolled
+           (cl-loop for name in '("agent-repl-daemon--build-process"
+                                  "agent-repl--frontend-daemon-process")
+                    when (progn (goto-char (point-min))
+                                (search-forward (format "(delete-process %s)" name) nil t))
+                    collect name))
+          (helper (progn (goto-char (point-min))
+                         (how-many (regexp-quote "(agent-repl-test--reap-process")))))
+      ;; Assert
+      (should-not hand-rolled)
+      (should (= helper 3)))))
+
 (provide 'test-test-helpers)
 
 ;;; test-test-helpers.el ends here
