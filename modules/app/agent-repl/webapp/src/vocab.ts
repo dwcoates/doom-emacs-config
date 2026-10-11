@@ -56,6 +56,7 @@ const ROSTER_STATUS: Readonly<Record<string, Color>> = renderColors.roster_statu
 const FOOTER_STATUS: Readonly<Record<string, Color>> = renderColors.footer_status as Record<string, Color>;
 const TOPBAR_CONNECTIVITY: Readonly<Record<string, Color>> = renderColors.topbar_connectivity as Record<string, Color>;
 const MERGE_GLYPHS: Readonly<Record<string, string>> = renderColors.merge_glyphs;
+const GATE_GLYPHS: Readonly<Record<string, string>> = renderColors.gate_glyphs;
 const FAILURE_SIDES: Readonly<Record<string, Color>> = renderColors.failure_sides as Record<string, Color>;
 const FEED_SUBAGENT_DOT: Readonly<Record<string, Color>> = renderColors.feed_subagent_dot as Record<string, Color>;
 const FEED_SHELL_DOT: Readonly<Record<string, Color>> = renderColors.feed_shell_dot as Record<string, Color>;
@@ -173,6 +174,17 @@ export function mergeGlyph(arm: string): string {
     );
   }
   return name;
+}
+
+/**
+ * The glyph NAME a gate arm (a pending permission or question) reports itself
+ * with, or undefined for an arm that is no gate.
+ *
+ * Unlike `mergeGlyph`, absence is an answer rather than a breach: every arm
+ * is asked, and only the gates the shared vocabulary names have a glyph.
+ */
+export function gateGlyph(arm: string): string | undefined {
+  return GATE_GLYPHS[protoArmName(arm)];
 }
 
 /**
