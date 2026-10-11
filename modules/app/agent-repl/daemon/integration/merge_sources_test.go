@@ -3,6 +3,7 @@
 package integration
 
 import (
+	"agentrepl/protohelpers/rosterwalk"
 	"database/sql"
 	"os"
 	"path/filepath"
@@ -175,7 +176,7 @@ func TestAnotherWorkspacesBranchLandsAndClosesThatWorkspace(t *testing.T) {
 		t.Fatalf("the merge ended %v, want landed", merge.GetResult())
 	}
 	awaitRoster(t, s.d, roster, "the other workspace under recently_merged", func(r *frontendv1.WorkspaceRoster) bool {
-		for _, row := range r.GetRecentlyMerged().GetRows().GetRows() {
+		for _, row := range rosterwalk.MergedRows(r) {
 			if row.GetWorkspace().GetWorkspace().GetId() == other.ws.GetId() {
 				return true
 			}

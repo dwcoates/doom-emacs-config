@@ -30,6 +30,7 @@
 //   │   └────────────┘                      │
 //   │   ? closed-row  (greyed)        5d    │  inactive arm · RosterRowClosed
 //   │ ▸ Recently Merged            (3)      │  RosterMergedSection (folded)
+//   │     repo-name                         │    RosterMergedRepoGroup
 //   └───────────────────────────────────────┘
 //
 // A repo section and the recently-merged section share one header shape
@@ -362,11 +363,39 @@ message RosterTaskKey {
   string task_id = 1;
 }
 
-// The recently-merged section: header and rows. It has no key of its own —
-// the roster carries exactly one, so its fold identity is fixed.
+// The recently-merged section: header and one group per repository. It has
+// no key of its own — the roster carries exactly one, so its fold identity is
+// fixed.
+//
+//   ▾ Recently Merged            (2)        RosterMergedSection
+//     repo-a                                  RosterMergedRepoGroup → header
+//       ✓ merged-row               3m           RosterRow
+//     repo-b                                  RosterMergedRepoGroup → header
+//       ✓ merged-row               1d           RosterRow
+//
+// THE REPOSITORY FOLD IS THE ONLY FOLD A GROUP HAS. A group draws no fold
+// toggle of its own: collapsing a repository in the repository grouping
+// (RosterRepoSection.fold) takes that repository's group out of this band,
+// and expanding it puts the group back. The band's own fold still folds the
+// whole band.
 message RosterMergedSection {
+  // The band's label and the count it draws while folded: every row of the
+  // groups whose repository is EXPANDED (RosterMergedRepoGroupShown), so a
+  // collapsed repository's merges are never counted.
   RosterSectionHeader header = 1;
-  RosterRows rows = 2;
+  reserved 2;
+  reserved "rows";
+  // One group per repository that has at least one merged workspace, in the
+  // repository grouping's order (by repository name, then id). A repository
+  // with no merged workspace has no group. Rows are FLAT within a group, most
+  // recently merged first: a settled merge has no family left to draw.
+  //
+  // A COLLAPSED REPOSITORY'S GROUP STILL RIDES THE WIRE, on the
+  // RosterMergedRepoGroupRepositoryCollapsed arm, so every reader that walks
+  // the roster's rows (the Emacs tab bar, the daemon's tab order, the
+  // merge-queue verb's lookups) still sees every merged workspace; only the
+  // sidebar leaves the group undrawn.
+  repeated RosterMergedRepoGroup groups = 5;
   // WHETHER THE BAND IS FOLDED. DAEMON-HELD (UpdateSidebarView), because a
   // fold is no page's own: opening it in one workspace's page opens it in
   // every page (owner ruling, 2026-10-06). Never folded or unfolded by
@@ -385,6 +414,45 @@ message RosterMergedSectionExpanded {}
 
 // A collapsed recently-merged band. DELIBERATELY EMPTY: the arm is the fact.
 message RosterMergedSectionCollapsed {}
+
+// One repository's merged workspaces inside the recently-merged band.
+message RosterMergedRepoGroup {
+  // The repository's stable identity, the same key its RosterRepoSection
+  // carries. A client holding an in-flight fold of that repository section
+  // applies it to this group too, so the group leaves or returns with the
+  // section on the gesture, not a push later.
+  RosterRepoKey key = 1;
+  // The group's header box: the repository's label, with no fold toggle.
+  RosterMergedRepoGroupHeader header = 2;
+  // The repository's merged workspaces, most recently merged first.
+  RosterRows rows = 3;
+  // WHETHER THE SIDEBAR DRAWS THE GROUP, resolved from the repository's own
+  // fold (the same daemon-held fact as RosterRepoSection.fold, resolved in the
+  // same render, so the two never disagree). Never unset on the wire.
+  oneof drawn {
+    // The repository is expanded: the group is drawn under the band.
+    RosterMergedRepoGroupShown shown = 4;
+    // The repository is collapsed: the group is not drawn, and its rows are
+    // neither counted by the band's header nor drawn by the band. Its
+    // workspaces are off the Emacs tab bar, as every workspace of a collapsed
+    // repository is.
+    RosterMergedRepoGroupRepositoryCollapsed repository_collapsed = 5;
+  }
+}
+
+// A merged group's header: the repository's label, and nothing to toggle.
+message RosterMergedRepoGroupHeader {
+  // The repository's display name, as its RosterRepoSection's header draws it.
+  RosterLabel label = 1;
+}
+
+// A shown merged group: its repository is expanded. DELIBERATELY EMPTY: the
+// arm is the fact.
+message RosterMergedRepoGroupShown {}
+
+// An undrawn merged group: its repository is collapsed in the repository
+// grouping. DELIBERATELY EMPTY: the arm is the fact.
+message RosterMergedRepoGroupRepositoryCollapsed {}
 
 // The hidden-workspaces section: header and rows. It has no key of its own --
 // the roster carries exactly one, so its fold identity is fixed.
@@ -431,7 +499,8 @@ message RosterSectionHeader {
   // hides this resolved value by the section's fold; it never counts a
   // repository's rows itself. Always set.
   //
-  // THE RECENTLY MERGED BAND'S is every merged row it carries; a client that
+  // THE RECENTLY MERGED BAND'S is every row of its drawn groups (a collapsed
+  // repository's group is never counted); a client that
   // shows only the merges that FIT its rail (the webapp: no fixed cap, as many
   // as fit without scrolling) draws the number it shows instead, from the one
   // fit that hides the rest, since only it knows its height.
@@ -442,8 +511,8 @@ message RosterSectionHeader {
 // rows region, nested family rows included, that is NOT closed
 // (RosterRowClosed): a closed row rides the wire for Emacs but is never
 // drawn, and its live descendants are drawn in its place. The merged band's
-// is its row count (each merged row is closed by design, and is exactly what
-// the band shows). Drawn smaller than the label, in the label's own color.
+// is the row count of its drawn groups (each merged row is closed by design,
+// and is exactly what the band shows). Drawn smaller than the label, in the label's own color.
 message RosterSectionCount {
   uint32 workspaces = 1;
 }

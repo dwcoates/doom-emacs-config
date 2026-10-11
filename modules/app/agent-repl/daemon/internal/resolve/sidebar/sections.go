@@ -32,30 +32,42 @@ func (r *resolver) repositoryView(live []wsm.Workspace, rc rowContext, log dlog.
 		byRepo[ws.Repo] = append(byRepo[ws.Repo], ws)
 	}
 
-	repos := make([]wsm.Repository, len(r.state.reg.Repositories))
-	copy(repos, r.state.reg.Repositories)
-	sort.SliceStable(repos, func(i, j int) bool {
-		if repos[i].Name != repos[j].Name {
-			return repos[i].Name < repos[j].Name
-		}
-		return repos[i].ID < repos[j].ID
-	})
-
 	out := &frontendv1.RosterRepositoryView{}
-	for _, repo := range repos {
+	for _, repo := range sortRepositories(r.state.reg.Repositories) {
 		rows := r.sectionRows(byRepo[repo.ID], rc, log.With(dlog.Context{"repo_id": string(repo.ID)}))
 		delete(byRepo, repo.ID)
 		section := &frontendv1.RosterRepoSection{
-			Key: &frontendv1.RosterRepoKey{
-				Repository: &workspacev1.RepositoryRef{Id: string(repo.ID), Dir: repo.Dir}},
+			Key:    repoKey(repo),
 			Header: sectionHeader(repo.Name, drawnLiveRowCount(rows)),
 			Rows:   rows,
 		}
 		setRepoFold(section, repo.Folded)
 		out.Sections = append(out.Sections, section)
 	}
-	r.assertRepositoryInvariant(byRepo, log)
+	r.assertRepositoryInvariant(byRepo, "daemon.sidebar.repository_view", "the repo grouping", log)
 	return out
+}
+
+// sortRepositories is THE repository order every per-repository list in the
+// roster takes, by name and then id: the repository grouping's sections and
+// the recently-merged band's groups, so the two read in the same order.
+func sortRepositories(in []wsm.Repository) []wsm.Repository {
+	out := make([]wsm.Repository, len(in))
+	copy(out, in)
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Name != out[j].Name {
+			return out[i].Name < out[j].Name
+		}
+		return out[i].ID < out[j].ID
+	})
+	return out
+}
+
+// repoKey is a repository's join key, as its section and its merged group
+// both carry it.
+func repoKey(repo wsm.Repository) *frontendv1.RosterRepoKey {
+	return &frontendv1.RosterRepoKey{
+		Repository: &workspacev1.RepositoryRef{Id: string(repo.ID), Dir: repo.Dir}}
 }
 
 // setRepoFold states the repository's fold on its section: the ONE arm the
@@ -85,10 +97,10 @@ func setRepoFold(section *frontendv1.RosterRepoSection, folded bool) {
 // So reaching here is a defect in one of those, not a state to render, and it
 // is recorded the way this resolver records every other assertion it cannot
 // serve (see assertArm): loudly, once, naming the remedy.
-func (r *resolver) assertRepositoryInvariant(byRepo map[ids.RepoID][]wsm.Workspace, log dlog.Logger) {
+func (r *resolver) assertRepositoryInvariant(byRepo map[ids.RepoID][]wsm.Workspace, operation, leftOutOf string, log dlog.Logger) {
 	for repo, orphans := range byRepo {
-		log.Error("daemon.sidebar.repository_view",
-			"workspaces name a repository the registry does not carry and were left out of the repo grouping",
+		log.Error(operation,
+			"workspaces name a repository the registry does not carry and were left out of "+leftOutOf,
 			dlog.Context{
 				"repo_id":             string(repo),
 				"workspaces":          len(orphans),
@@ -234,21 +246,58 @@ func setMaturityFold(section *frontendv1.RosterMaturitySection, folded bool) {
 }
 
 // mergedSection resolves the recently-merged section: the rows hoisted out of
-// every grouping, most recently merged first. It is rendered under every
-// grouping because that these workspaces are done is the interesting fact,
-// and it is FLAT — a settled merge has no family left to draw.
+// every grouping, ONE GROUP PER REPOSITORY in the repository grouping's order,
+// each group most recently merged first. It is rendered under every grouping
+// because that these workspaces are done is the interesting fact, and its rows
+// are FLAT — a settled merge has no family left to draw.
+//
+// A group follows its repository's fold: a collapsed repository's group rides
+// the wire on its repository_collapsed arm (so every roster walker still sees
+// its workspaces) and the band's count leaves its rows out.
 func (r *resolver) mergedSection(merged []wsm.Workspace, rc rowContext, log dlog.Logger) *frontendv1.RosterMergedSection {
 	rc.tree = forest{}
-	rows := &frontendv1.RosterRows{}
-	for _, ws := range sortMerged(merged) {
-		rows.Rows = append(rows.Rows, r.row(ws, rc, log))
+	byRepo := map[ids.RepoID][]wsm.Workspace{}
+	for _, ws := range merged {
+		byRepo[ws.Repo] = append(byRepo[ws.Repo], ws)
 	}
-	section := &frontendv1.RosterMergedSection{
-		Header: sectionHeader(MergedSectionLabel, len(rows.GetRows())),
-		Rows:   rows,
+	section := &frontendv1.RosterMergedSection{}
+	shownRows := 0
+	for _, repo := range sortRepositories(r.state.reg.Repositories) {
+		workspaces, ok := byRepo[repo.ID]
+		delete(byRepo, repo.ID)
+		if !ok {
+			continue
+		}
+		rows := &frontendv1.RosterRows{}
+		for _, ws := range sortMerged(workspaces) {
+			rows.Rows = append(rows.Rows, r.row(ws, rc, log))
+		}
+		group := &frontendv1.RosterMergedRepoGroup{
+			Key:    repoKey(repo),
+			Header: &frontendv1.RosterMergedRepoGroupHeader{Label: &frontendv1.RosterLabel{Text: repo.Name}},
+			Rows:   rows,
+		}
+		setMergedGroupDrawn(group, repo.Folded)
+		if !repo.Folded {
+			shownRows += len(rows.GetRows())
+		}
+		section.Groups = append(section.Groups, group)
 	}
+	r.assertRepositoryInvariant(byRepo, "daemon.sidebar.merged_section", "the recently-merged band", log)
+	section.Header = sectionHeader(MergedSectionLabel, shownRows)
 	setMergedFold(section, r.state.reg.View.MergedFolded)
 	return section
+}
+
+// setMergedGroupDrawn states whether the sidebar draws a merged group, from
+// its repository's own fold: the same fact RosterRepoSection.fold states.
+func setMergedGroupDrawn(group *frontendv1.RosterMergedRepoGroup, repositoryFolded bool) {
+	if repositoryFolded {
+		group.Drawn = &frontendv1.RosterMergedRepoGroup_RepositoryCollapsed{
+			RepositoryCollapsed: &frontendv1.RosterMergedRepoGroupRepositoryCollapsed{}}
+		return
+	}
+	group.Drawn = &frontendv1.RosterMergedRepoGroup_Shown{Shown: &frontendv1.RosterMergedRepoGroupShown{}}
 }
 
 // hiddenSection resolves the hidden-workspaces section: the workspaces the

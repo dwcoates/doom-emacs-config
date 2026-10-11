@@ -34,5 +34,16 @@ func AllRows(roster *frontendv1.WorkspaceRoster) []*frontendv1.RosterRow {
 		out = append(out, FlattenRows(section.GetRows().GetRows())...)
 	}
 	out = append(out, FlattenRows(roster.GetHidden().GetRows().GetRows())...)
-	return append(out, FlattenRows(roster.GetRecentlyMerged().GetRows().GetRows())...)
+	return append(out, MergedRows(roster)...)
+}
+
+// MergedRows lists every row of the recently-merged band, group by group in
+// the band's order, each flattened -- a collapsed repository's group included,
+// because the band carries it for every reader but the sidebar's drawing.
+func MergedRows(roster *frontendv1.WorkspaceRoster) []*frontendv1.RosterRow {
+	var out []*frontendv1.RosterRow
+	for _, group := range roster.GetRecentlyMerged().GetGroups() {
+		out = append(out, FlattenRows(group.GetRows().GetRows())...)
+	}
+	return out
 }
