@@ -131,7 +131,7 @@ type fakeMerge struct {
 	sources []wsm.MergeSource
 	// detached is each request's run: true for a detached merge.
 	detached []bool
-	err     error
+	err      error
 
 	// evicted records every Evict, and evictErr is what Evict answers.
 	evicted  []ids.WorkspaceID

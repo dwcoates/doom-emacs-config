@@ -15,6 +15,7 @@ import (
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/mergetab"
 	"claude-repld/internal/wsm"
 )
 
@@ -321,10 +322,10 @@ func TestAnAgenticTabCarriesTheSwitchInTheRequestersPlacementOnly(t *testing.T) 
 			if len(own) != 1 || len(mirrored) != 1 {
 				t.Fatalf("tabs: merge workspace %d, requester %d; want one in each", len(own), len(mirrored))
 			}
-			if tabSwitchOf(own[0]) != nil {
+			if mergetab.Switch(own[0]) != nil {
 				t.Fatal("the merge workspace's own tab carries a switch")
 			}
-			got := tabSwitchOf(mirrored[0])
+			got := mergetab.Switch(mirrored[0])
 			if (got != nil) != tt.agentic {
 				t.Fatalf("requester's tab switch = %+v, want present = %v", got, tt.agentic)
 			}
@@ -333,21 +334,6 @@ func TestAnAgenticTabCarriesTheSwitchInTheRequestersPlacementOnly(t *testing.T) 
 			}
 		})
 	}
-}
-
-// tabSwitchOf answers an agentic tab's switch, nil for any other.
-func tabSwitchOf(tab *frontendv1.FeedMergeTab) *frontendv1.FeedMergeTabWorkspaceSwitch {
-	switch arm := tab.GetKind().(type) {
-	case *frontendv1.FeedMergeTab_PrePrompt:
-		return arm.PrePrompt.GetWorkspaceSwitch()
-	case *frontendv1.FeedMergeTab_Conflicts:
-		return arm.Conflicts.GetWorkspaceSwitch()
-	case *frontendv1.FeedMergeTab_Fixes:
-		return arm.Fixes.GetWorkspaceSwitch()
-	case *frontendv1.FeedMergeTab_PostPrompt:
-		return arm.PostPrompt.GetWorkspaceSwitch()
-	}
-	return nil
 }
 
 func TestAnInPlaceMergesBubbleIsDrawnInItsOwnFeedAlone(t *testing.T) {
@@ -435,7 +421,6 @@ func TestALandedDetachedMergeIsHandedBackAsLanded(t *testing.T) {
 		t.Fatalf("handbacks = %+v, want the landing told to the requester", sent)
 	}
 }
-
 
 func TestAnEvictedDetachedMergeIsHandedBackAsAbandoned(t *testing.T) {
 	// Arrange: a detached request handed off and waiting in line.

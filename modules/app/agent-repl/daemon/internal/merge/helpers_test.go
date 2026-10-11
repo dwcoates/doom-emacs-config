@@ -1830,8 +1830,8 @@ func (h *harness) deps() Deps {
 		Home:     "/home/tester",
 		Detached: h.detached,
 		Rollout:  h.rollout,
-		Now:     h.clock,
-		Log:     h.logs,
+		Now:      h.clock,
+		Log:      h.logs,
 	}
 }
 
