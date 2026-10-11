@@ -126,3 +126,15 @@ sidebar's walk" and the create-landing rule above. Not yet implemented.
   workspace it was created from (as its child, or from the master workspace)
   has a priority; when that bucket has no open workspace, it lands
   second-to-last as usual.
+- **Priority inheritance (owner, 2026-10-11):** a workspace created as a child
+  (branched from its parent's branch) inherits the parent's priority. A
+  workspace created from another workspace but branched from the master
+  branch (a tangential hotfix made during unrelated work) does not.
+- **Evidence (live registry, read-only, 2026-10-11):** the registry records a
+  parent for BOTH kinds; only `parent_branch` tells them apart. Of 7
+  recorded parents, 4 are master-based (`feed-development` and `ship-gns`
+  from `iterm-2`, `revert-green-background-fro` from
+  `unambiguous-file-links-rzv`, `ad-hoc-deploys-gje` from
+  `emacs-bindings-support`) and 3 are true children whose `parent_branch` is
+  a commit (`unambiguous-file-links-rzv`, `fork-cache-miss-oiu`,
+  `feed-tick-flicker-ncg`). No workspace in the registry carries a priority.
