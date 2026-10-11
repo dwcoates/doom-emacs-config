@@ -134,6 +134,7 @@ import {
 } from "./cold.js";
 import { TranscriptTitleTail } from "./title.js";
 import { sessionTitleUpdate } from "../convert/session-title.js";
+import { commandCatalogOf, commandCatalogUpdate } from "../convert/command-catalog.js";
 import { ForegroundUnitTable } from "./foreground.js";
 import { LiveWorkTable, ShellRunStarts, type LiveWorkEntry } from "./detached.js";
 import {
@@ -520,6 +521,8 @@ const MCP_STATUS_COMPONENT = "vendor-mcp-status";
 const EFFORT_COMPONENT = "vendor-applied-effort";
 /** The model catalog read: transient, recovered by a later StartSession's read. */
 const MODEL_CATALOG_COMPONENT = "vendor-model-catalog";
+/** The slash-command catalog read: transient, recovered by the next read. */
+const COMMAND_CATALOG_COMPONENT = "vendor-command-catalog";
 /** Reading the record's open obligations: transient, recovered by any later read. */
 const LIVE_WORK_COMPONENT = "store-live-work";
 /** Serving history out of the store: transient, recovered by the next served read. */
@@ -1926,6 +1929,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // an unhealthy verdict no later success could lift. A re-read is also the
     // honest answer to a catalog that changed under the account.
     await pushModelCatalog();
+    // THE COMMAND CATALOG CAN CHANGE UNDER A SESSION (a skill added mid-session),
+    // so it is re-read with the rest; an unchanged one pushes nothing.
+    await pushCommandCatalog();
     // The level the vendor sends can move under a turn (a vendor-side model
     // fallback), so it is re-read with the rest.
     await pushAppliedEffort();
@@ -1944,6 +1950,36 @@ export function createEngine(deps: EngineDeps): SessionEngine {
           { kind: "vendorQueryFailed" },
           MODEL_CATALOG_COMPONENT,
           `supportedModels failed: ${err instanceof Error ? err.message : String(err)}`,
+        ),
+      );
+    }
+  }
+
+  /**
+   * Read the runtime's slash-command catalog and state it on the session stream.
+   *
+   * NEVER REJECTS: a read that fails is a `SessionFault` on the catalog's own
+   * component, which the next read that answers lifts. An unchanged catalog is
+   * dropped by the push table, so a re-read states only a change.
+   */
+  async function pushCommandCatalog(): Promise<void> {
+    const active = query;
+    if (active === undefined) return;
+    try {
+      const catalog = commandCatalogOf(await active.supportedCommands());
+      if (query !== active) return;
+      const changed = pushes.push(commandCatalogUpdate(catalog));
+      pushes.resolveComponent(COMMAND_CATALOG_COMPONENT, 0);
+      LOGGER.debug(
+        { commands: catalog.commands.length, changed },
+        "read the runtime's slash-command catalog",
+      );
+    } catch (err) {
+      pushes.fault(
+        sessionFault(
+          { kind: "vendorQueryFailed" },
+          COMMAND_CATALOG_COMPONENT,
+          `supportedCommands failed: ${err instanceof Error ? err.message : String(err)}`,
         ),
       );
     }
@@ -4757,6 +4793,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     const contextUsageMs = deps.nowMs() - contextUsageFrom;
     pushSessionTitle();
     void pushAccountUsage();
+    // THE COMMAND CATALOG IS NOT AWAITED: the opening owes nobody the list,
+    // and the push table replays it to every watch that opens after it lands.
+    void pushCommandCatalog();
     // The readiness signal, and the reason a consumer may open WatchSession
     // before anything else exists.
     pushes.push(pushes.diagnostics());
