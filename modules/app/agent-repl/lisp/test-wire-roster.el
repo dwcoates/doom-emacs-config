@@ -65,6 +65,7 @@ status arm and whatever else the case is about."
                    :viewed nil
                    :reviving nil
                    :detached-live nil
+                   :one-shot nil
                    :last-selected nil
                    :availability (:arm :available :value nil)
                    :name (:text "fix-flaky")
@@ -75,6 +76,41 @@ status arm and whatever else the case is about."
                    :detail (:branch nil :parent-branch nil :summary nil :commits nil)
                    :closed (:closed nil)
                    :merge-workspace nil))))
+
+(ert-deftest agent-repl-test-wire-roster-row-decodes-the-one-shot-mark ()
+  "A row carrying `oneShot' decodes its outcome arm."
+  (dolist (case '(("armed" . :armed) ("failed" . :failed)))
+    (should (equal (plist-get (agent-repl-test-wire-roster--decode
+                               #'agent-repl-wire-decode-roster-row
+                               (agent-repl-test-wire-roster--row
+                                "\"ready\":{}"
+                                (format "\"oneShot\":{\"%s\":{}}" (car case))))
+                              :one-shot)
+                   (list :arm (cdr case) :value nil)))))
+
+(ert-deftest agent-repl-test-wire-roster-row-one-shot-with-no-outcome-is-refused ()
+  "`RosterRowOneShot' with its outcome unset is a contract breach."
+  (should (equal (car (agent-repl-test-wire-roster--breach
+                       #'agent-repl-wire-decode-roster-row
+                       (agent-repl-test-wire-roster--row
+                        "\"ready\":{}" "\"oneShot\":{}")))
+                 "RosterRowOneShot")))
+
+(ert-deftest agent-repl-test-wire-roster-row-one-shot-with-two-outcomes-is-refused ()
+  "`RosterRowOneShot' with both arms set is a contract breach."
+  (should (equal (car (agent-repl-test-wire-roster--breach
+                       #'agent-repl-wire-decode-roster-row
+                       (agent-repl-test-wire-roster--row
+                        "\"ready\":{}" "\"oneShot\":{\"armed\":{},\"failed\":{}}")))
+                 "RosterRowOneShot")))
+
+(ert-deftest agent-repl-test-wire-roster-row-one-shot-arm-carries-no-payload ()
+  "`RosterRowOneShotFailed' is EMPTY: a field inside it is an unknown field."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-row
+                  (agent-repl-test-wire-roster--row
+                   "\"ready\":{}" "\"oneShot\":{\"failed\":{\"why\":1}}"))
+                 '("RosterRowOneShotFailed" why "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-roster-row-decodes-the-viewed-marker ()
   "A row carrying `viewed' decodes it as PRESENT — the PARTIAL display mode."
