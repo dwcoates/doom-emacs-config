@@ -34,7 +34,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file conversation/v1/slash_command.proto.
  */
 export const file_conversation_v1_slash_command: GenFile = /*@__PURE__*/
-  fileDesc("CiNjb252ZXJzYXRpb24vdjEvc2xhc2hfY29tbWFuZC5wcm90bxIPY29udmVyc2F0aW9uLnYxIkoKElNlc3Npb25Db21tYW5kU3BlYxIPCgdsaXRlcmFsGAEgASgJEhIKCnRha2VzX2FyZ3MYAiABKAgSDwoHYWxpYXNlcxgDIAMoCSLGAQoKQ29udGV4dEN1dBIyCgdjbGVhcmVkGAEgASgLMh8uY29udmVyc2F0aW9uLnYxLkNvbnRleHRDbGVhcmVkSAASNgoJY29tcGFjdGVkGAIgASgLMiEuY29udmVyc2F0aW9uLnYxLkNvbnRleHRDb21wYWN0ZWRIABJFChFjb21wYWN0aW9uX2ZhaWxlZBgDIAEoCzIoLmNvbnZlcnNhdGlvbi52MS5Db250ZXh0Q29tcGFjdGlvbkZhaWxlZEgAQgUKA2N1dCJvChdDb250ZXh0Q29tcGFjdGlvbkZhaWxlZBINCgVlcnJvchgBIAEoCRI2Cgpjb21wYWN0aW9uGAIgASgLMh0uY29udmVyc2F0aW9uLnYxLkNvbXBhY3Rpb25JZEgAiAEBQg0KC19jb21wYWN0aW9uIh0KDENvbXBhY3Rpb25JZBINCgV2YWx1ZRgBIAEoCSJAChFDb250ZXh0VG9rZW5EZWx0YRIVCg10b2tlbnNfYmVmb3JlGAEgASgDEhQKDHRva2Vuc19hZnRlchgCIAEoAyIQCg5Db250ZXh0Q2xlYXJlZCLzAgoQQ29udGV4dENvbXBhY3RlZBI0CgdzdW1tYXJ5GAEgASgLMiMuY29udmVyc2F0aW9uLnYxLkFnZW50UmVzcG9uc2VQcm9zZRIyCgZ0b2tlbnMYAiABKAsyIi5jb252ZXJzYXRpb24udjEuQ29udGV4dFRva2VuRGVsdGESQAoJcmVxdWVzdGVkGAMgASgLMisuY29udmVyc2F0aW9uLnYxLkNvbnRleHRDb21wYWN0aW9uUmVxdWVzdGVkSAASQAoJYXV0b21hdGljGAQgASgLMisuY29udmVyc2F0aW9uLnYxLkNvbnRleHRDb21wYWN0aW9uQXV0b21hdGljSAASEwoLZHVyYXRpb25fbXMYBSABKAQSNgoKY29tcGFjdGlvbhgIIAEoCzIdLmNvbnZlcnNhdGlvbi52MS5Db21wYWN0aW9uSWRIAYgBAUIJCgd0cmlnZ2VyQg0KC19jb21wYWN0aW9uSgQIBhAHSgQIBxAIIhwKGkNvbnRleHRDb21wYWN0aW9uUmVxdWVzdGVkIhwKGkNvbnRleHRDb21wYWN0aW9uQXV0b21hdGljKpIMCg5TZXNzaW9uQ29tbWFuZBIfChtTRVNTSU9OX0NPTU1BTkRfVU5TUEVDSUZJRUQQABI1ChVTRVNTSU9OX0NPTU1BTkRfQ0xFQVIQARoakqYdFgoGL2NsZWFyGgYvcmVzZXQaBC9uZXcSLQoXU0VTU0lPTl9DT01NQU5EX0NPTVBBQ1QQAhoQkqYdDAoIL2NvbXBhY3QQARIpChVTRVNTSU9OX0NPTU1BTkRfTU9ERUwQAxoOkqYdCgoGL21vZGVsEAESJQoUU0VTU0lPTl9DT01NQU5EX0NPU1QQBBoLkqYdBwoFL2Nvc3QSJwoVU0VTU0lPTl9DT01NQU5EX1VTQUdFEAUaDJKmHQgKBi91c2FnZRIpChZTRVNTSU9OX0NPTU1BTkRfU1RBVFVTEAYaDZKmHQkKBy9zdGF0dXMSKwoXU0VTU0lPTl9DT01NQU5EX0NPTlRFWFQQBxoOkqYdCgoIL2NvbnRleHQSKQoWU0VTU0lPTl9DT01NQU5EX0NPTkZJRxAIGg2Sph0JCgcvY29uZmlnEiUKFFNFU1NJT05fQ09NTUFORF9IRUxQEAkaC5KmHQcKBS9oZWxwEikKFlNFU1NJT05fQ09NTUFORF9ET0NUT1IQChoNkqYdCQoHL2RvY3RvchInChVTRVNTSU9OX0NPTU1BTkRfTE9HSU4QCxoMkqYdCAoGL2xvZ2luEikKFlNFU1NJT05fQ09NTUFORF9MT0dPVVQQDBoNkqYdCQoHL2xvZ291dBIpChZTRVNTSU9OX0NPTU1BTkRfTUVNT1JZEA0aDZKmHQkKBy9tZW1vcnkSMwobU0VTU0lPTl9DT01NQU5EX1BFUk1JU1NJT05TEA4aEpKmHQ4KDC9wZXJtaXNzaW9ucxIpChZTRVNTSU9OX0NPTU1BTkRfQUdFTlRTEA8aDZKmHQkKBy9hZ2VudHMSIwoTU0VTU0lPTl9DT01NQU5EX01DUBAQGgqSph0GCgQvbWNwEicKFVNFU1NJT05fQ09NTUFORF9IT09LUxARGgySph0ICgYvaG9va3MSNwocU0VTU0lPTl9DT01NQU5EX09VVFBVVF9TVFlMRRASGhWSph0RCg0vb3V0cHV0LXN0eWxlEAESNwodU0VTU0lPTl9DT01NQU5EX1JFTEVBU0VfTk9URVMQExoUkqYdEAoOL3JlbGVhc2Utbm90ZXMSJwoVU0VTU0lPTl9DT01NQU5EX1RPRE9TEBQaDJKmHQgKBi90b2RvcxIrChZTRVNTSU9OX0NPTU1BTkRfRVhQT1JUEBUaD5KmHQsKBy9leHBvcnQQARItChdTRVNTSU9OX0NPTU1BTkRfQUREX0RJUhAWGhCSph0MCggvYWRkLWRpchABEisKFlNFU1NJT05fQ09NTUFORF9SRVNVTUUQFxoPkqYdCwoHL3Jlc3VtZRABEiUKFFNFU1NJT05fQ09NTUFORF9FWElUEBgaC5KmHQcKBS9leGl0Ej0KIFNFU1NJT05fQ09NTUFORF9QUklWQUNZX1NFVFRJTkdTEBkaF5KmHRMKES9wcml2YWN5LXNldHRpbmdzEjEKGlNFU1NJT05fQ09NTUFORF9TVEFUVVNMSU5FEBoaEZKmHQ0KCy9zdGF0dXNsaW5lEjkKHlNFU1NJT05fQ09NTUFORF9URVJNSU5BTF9TRVRVUBAbGhWSph0RCg8vdGVybWluYWwtc2V0dXASIwoTU0VTU0lPTl9DT01NQU5EX1ZJTRAcGgqSph0GCgQvdmltEikKFlNFU1NJT05fQ09NTUFORF9SRVdJTkQQHRoNkqYdCQoHL3Jld2luZBIjChNTRVNTSU9OX0NPTU1BTkRfQlVHEB4aCpKmHQYKBC9idWcSKwoWU0VTU0lPTl9DT01NQU5EX0VGRk9SVBAfGg+Sph0LCgcvZWZmb3J0EAESKwoWU0VTU0lPTl9DT01NQU5EX1BMVUdJThAgGg+Sph0LCgcvcGx1Z2luEAESNQocU0VTU0lPTl9DT01NQU5EX0xPV19QUklPUklUWRAhGhOSph0PCg0vbG93LXByaW9yaXR5OnoKFHNlc3Npb25fY29tbWFuZF9zcGVjEiEuZ29vZ2xlLnByb3RvYnVmLkVudW1WYWx1ZU9wdGlvbnMY4tQDIAEoCzIjLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uQ29tbWFuZFNwZWNSEnNlc3Npb25Db21tYW5kU3BlY0IwWi5hZ2VudHJlcGwvcHJvdG8vY29udmVyc2F0aW9uL3YxO2NvbnZlcnNhdGlvbnYxYgZwcm90bzM", [file_conversation_v1_agent_activity, file_google_protobuf_descriptor]);
+  fileDesc("CiNjb252ZXJzYXRpb24vdjEvc2xhc2hfY29tbWFuZC5wcm90bxIPY29udmVyc2F0aW9uLnYxIkoKElNlc3Npb25Db21tYW5kU3BlYxIPCgdsaXRlcmFsGAEgASgJEhIKCnRha2VzX2FyZ3MYAiABKAgSDwoHYWxpYXNlcxgDIAMoCSJWChVTZXNzaW9uQ29tbWFuZENhdGFsb2cSPQoIY29tbWFuZHMYASADKAsyKy5jb252ZXJzYXRpb24udjEuU2Vzc2lvbkNvbW1hbmRDYXRhbG9nRW50cnkikwEKGlNlc3Npb25Db21tYW5kQ2F0YWxvZ0VudHJ5EgwKBG5hbWUYASABKAkSGAoLZGVzY3JpcHRpb24YAiABKAlIAIgBARIaCg1hcmd1bWVudF9oaW50GAMgASgJSAGIAQESDwoHYWxpYXNlcxgEIAMoCUIOCgxfZGVzY3JpcHRpb25CEAoOX2FyZ3VtZW50X2hpbnQixgEKCkNvbnRleHRDdXQSMgoHY2xlYXJlZBgBIAEoCzIfLmNvbnZlcnNhdGlvbi52MS5Db250ZXh0Q2xlYXJlZEgAEjYKCWNvbXBhY3RlZBgCIAEoCzIhLmNvbnZlcnNhdGlvbi52MS5Db250ZXh0Q29tcGFjdGVkSAASRQoRY29tcGFjdGlvbl9mYWlsZWQYAyABKAsyKC5jb252ZXJzYXRpb24udjEuQ29udGV4dENvbXBhY3Rpb25GYWlsZWRIAEIFCgNjdXQibwoXQ29udGV4dENvbXBhY3Rpb25GYWlsZWQSDQoFZXJyb3IYASABKAkSNgoKY29tcGFjdGlvbhgCIAEoCzIdLmNvbnZlcnNhdGlvbi52MS5Db21wYWN0aW9uSWRIAIgBAUINCgtfY29tcGFjdGlvbiIdCgxDb21wYWN0aW9uSWQSDQoFdmFsdWUYASABKAkiQAoRQ29udGV4dFRva2VuRGVsdGESFQoNdG9rZW5zX2JlZm9yZRgBIAEoAxIUCgx0b2tlbnNfYWZ0ZXIYAiABKAMiEAoOQ29udGV4dENsZWFyZWQi8wIKEENvbnRleHRDb21wYWN0ZWQSNAoHc3VtbWFyeRgBIAEoCzIjLmNvbnZlcnNhdGlvbi52MS5BZ2VudFJlc3BvbnNlUHJvc2USMgoGdG9rZW5zGAIgASgLMiIuY29udmVyc2F0aW9uLnYxLkNvbnRleHRUb2tlbkRlbHRhEkAKCXJlcXVlc3RlZBgDIAEoCzIrLmNvbnZlcnNhdGlvbi52MS5Db250ZXh0Q29tcGFjdGlvblJlcXVlc3RlZEgAEkAKCWF1dG9tYXRpYxgEIAEoCzIrLmNvbnZlcnNhdGlvbi52MS5Db250ZXh0Q29tcGFjdGlvbkF1dG9tYXRpY0gAEhMKC2R1cmF0aW9uX21zGAUgASgEEjYKCmNvbXBhY3Rpb24YCCABKAsyHS5jb252ZXJzYXRpb24udjEuQ29tcGFjdGlvbklkSAGIAQFCCQoHdHJpZ2dlckINCgtfY29tcGFjdGlvbkoECAYQB0oECAcQCCIcChpDb250ZXh0Q29tcGFjdGlvblJlcXVlc3RlZCIcChpDb250ZXh0Q29tcGFjdGlvbkF1dG9tYXRpYyqSDAoOU2Vzc2lvbkNvbW1hbmQSHwobU0VTU0lPTl9DT01NQU5EX1VOU1BFQ0lGSUVEEAASNQoVU0VTU0lPTl9DT01NQU5EX0NMRUFSEAEaGpKmHRYKBi9jbGVhchoGL3Jlc2V0GgQvbmV3Ei0KF1NFU1NJT05fQ09NTUFORF9DT01QQUNUEAIaEJKmHQwKCC9jb21wYWN0EAESKQoVU0VTU0lPTl9DT01NQU5EX01PREVMEAMaDpKmHQoKBi9tb2RlbBABEiUKFFNFU1NJT05fQ09NTUFORF9DT1NUEAQaC5KmHQcKBS9jb3N0EicKFVNFU1NJT05fQ09NTUFORF9VU0FHRRAFGgySph0ICgYvdXNhZ2USKQoWU0VTU0lPTl9DT01NQU5EX1NUQVRVUxAGGg2Sph0JCgcvc3RhdHVzEisKF1NFU1NJT05fQ09NTUFORF9DT05URVhUEAcaDpKmHQoKCC9jb250ZXh0EikKFlNFU1NJT05fQ09NTUFORF9DT05GSUcQCBoNkqYdCQoHL2NvbmZpZxIlChRTRVNTSU9OX0NPTU1BTkRfSEVMUBAJGguSph0HCgUvaGVscBIpChZTRVNTSU9OX0NPTU1BTkRfRE9DVE9SEAoaDZKmHQkKBy9kb2N0b3ISJwoVU0VTU0lPTl9DT01NQU5EX0xPR0lOEAsaDJKmHQgKBi9sb2dpbhIpChZTRVNTSU9OX0NPTU1BTkRfTE9HT1VUEAwaDZKmHQkKBy9sb2dvdXQSKQoWU0VTU0lPTl9DT01NQU5EX01FTU9SWRANGg2Sph0JCgcvbWVtb3J5EjMKG1NFU1NJT05fQ09NTUFORF9QRVJNSVNTSU9OUxAOGhKSph0OCgwvcGVybWlzc2lvbnMSKQoWU0VTU0lPTl9DT01NQU5EX0FHRU5UUxAPGg2Sph0JCgcvYWdlbnRzEiMKE1NFU1NJT05fQ09NTUFORF9NQ1AQEBoKkqYdBgoEL21jcBInChVTRVNTSU9OX0NPTU1BTkRfSE9PS1MQERoMkqYdCAoGL2hvb2tzEjcKHFNFU1NJT05fQ09NTUFORF9PVVRQVVRfU1RZTEUQEhoVkqYdEQoNL291dHB1dC1zdHlsZRABEjcKHVNFU1NJT05fQ09NTUFORF9SRUxFQVNFX05PVEVTEBMaFJKmHRAKDi9yZWxlYXNlLW5vdGVzEicKFVNFU1NJT05fQ09NTUFORF9UT0RPUxAUGgySph0ICgYvdG9kb3MSKwoWU0VTU0lPTl9DT01NQU5EX0VYUE9SVBAVGg+Sph0LCgcvZXhwb3J0EAESLQoXU0VTU0lPTl9DT01NQU5EX0FERF9ESVIQFhoQkqYdDAoIL2FkZC1kaXIQARIrChZTRVNTSU9OX0NPTU1BTkRfUkVTVU1FEBcaD5KmHQsKBy9yZXN1bWUQARIlChRTRVNTSU9OX0NPTU1BTkRfRVhJVBAYGguSph0HCgUvZXhpdBI9CiBTRVNTSU9OX0NPTU1BTkRfUFJJVkFDWV9TRVRUSU5HUxAZGheSph0TChEvcHJpdmFjeS1zZXR0aW5ncxIxChpTRVNTSU9OX0NPTU1BTkRfU1RBVFVTTElORRAaGhGSph0NCgsvc3RhdHVzbGluZRI5Ch5TRVNTSU9OX0NPTU1BTkRfVEVSTUlOQUxfU0VUVVAQGxoVkqYdEQoPL3Rlcm1pbmFsLXNldHVwEiMKE1NFU1NJT05fQ09NTUFORF9WSU0QHBoKkqYdBgoEL3ZpbRIpChZTRVNTSU9OX0NPTU1BTkRfUkVXSU5EEB0aDZKmHQkKBy9yZXdpbmQSIwoTU0VTU0lPTl9DT01NQU5EX0JVRxAeGgqSph0GCgQvYnVnEisKFlNFU1NJT05fQ09NTUFORF9FRkZPUlQQHxoPkqYdCwoHL2VmZm9ydBABEisKFlNFU1NJT05fQ09NTUFORF9QTFVHSU4QIBoPkqYdCwoHL3BsdWdpbhABEjUKHFNFU1NJT05fQ09NTUFORF9MT1dfUFJJT1JJVFkQIRoTkqYdDwoNL2xvdy1wcmlvcml0eTp6ChRzZXNzaW9uX2NvbW1hbmRfc3BlYxIhLmdvb2dsZS5wcm90b2J1Zi5FbnVtVmFsdWVPcHRpb25zGOLUAyABKAsyIy5jb252ZXJzYXRpb24udjEuU2Vzc2lvbkNvbW1hbmRTcGVjUhJzZXNzaW9uQ29tbWFuZFNwZWNCMFouYWdlbnRyZXBsL3Byb3RvL2NvbnZlcnNhdGlvbi92MTtjb252ZXJzYXRpb252MWIGcHJvdG8z", [file_conversation_v1_agent_activity, file_google_protobuf_descriptor]);
 
 /**
  * Everything about a session command that is a FACT rather than an event: how
@@ -96,6 +96,93 @@ export const SessionCommandSpecSchema: GenMessage<SessionCommandSpec> = /*@__PUR
   messageDesc(file_conversation_v1_slash_command, 0);
 
 /**
+ * EVERY slash command the session's agent runtime would answer if typed as
+ * `/<name>`: its built-in commands, and every skill, custom command, plugin
+ * command and MCP prompt the user added to it through any settings source
+ * (user, project, local or plugin). It is the RUNTIME'S OWN ANSWER — the
+ * vendor's command list read back from the live process — never a list a
+ * consumer assembles by scanning directories, so a command the runtime would
+ * not run never appears and one it would run is never missing.
+ *
+ * It is DELIBERATELY NOT `SessionCommand`. That enum is the closed set the
+ * daemon RECOGNIZES and suppresses a user message for; this catalog is what a
+ * composer may OFFER while the user types. Most entries here expand into a
+ * prompt and are drawn like any prompt, and the catalog is open: its members
+ * are whatever the runtime holds at the moment it was read.
+ *
+ * A STANDING SET: every statement is the whole catalog, and the last statement
+ * is the truth. An EMPTY catalog is a real answer (a runtime offering no
+ * commands), never "not read yet" — an unread catalog is simply not stated.
+ *
+ * @generated from message conversation.v1.SessionCommandCatalog
+ */
+export type SessionCommandCatalog = Message<"conversation.v1.SessionCommandCatalog"> & {
+  /**
+   * The commands, in the order the runtime listed them. Names are unique
+   * within one statement.
+   *
+   * @generated from field: repeated conversation.v1.SessionCommandCatalogEntry commands = 1;
+   */
+  commands: SessionCommandCatalogEntry[];
+};
+
+/**
+ * Describes the message conversation.v1.SessionCommandCatalog.
+ * Use `create(SessionCommandCatalogSchema)` to create a new message.
+ */
+export const SessionCommandCatalogSchema: GenMessage<SessionCommandCatalog> = /*@__PURE__*/
+  messageDesc(file_conversation_v1_slash_command, 1);
+
+/**
+ * One command the runtime answers, with the facts a composer draws beside it.
+ *
+ * @generated from message conversation.v1.SessionCommandCatalogEntry
+ */
+export type SessionCommandCatalogEntry = Message<"conversation.v1.SessionCommandCatalogEntry"> & {
+  /**
+   * The command's name as the runtime spells it, WITHOUT the leading slash
+   * ("merge-queue", "compact", "plugin-name:skill"). What the user types is
+   * `/` followed by exactly this. Never empty.
+   *
+   * @generated from field: string name = 1;
+   */
+  name: string;
+
+  /**
+   * What the command does, in the runtime's own words — for a skill, the
+   * description its frontmatter declares. UNSET when the runtime states none.
+   *
+   * @generated from field: optional string description = 2;
+   */
+  description?: string | undefined;
+
+  /**
+   * How the command's argument is spelled, in the runtime's own words
+   * ("<target>", "[instructions]"). UNSET when the command states no argument
+   * hint, which is not a claim that it takes no argument.
+   *
+   * @generated from field: optional string argument_hint = 3;
+   */
+  argumentHint?: string | undefined;
+
+  /**
+   * Other names the runtime answers as this SAME command, each without the
+   * leading slash. A composer may offer each alias, and completing one sends
+   * the alias as typed — the runtime resolves it.
+   *
+   * @generated from field: repeated string aliases = 4;
+   */
+  aliases: string[];
+};
+
+/**
+ * Describes the message conversation.v1.SessionCommandCatalogEntry.
+ * Use `create(SessionCommandCatalogEntrySchema)` to create a new message.
+ */
+export const SessionCommandCatalogEntrySchema: GenMessage<SessionCommandCatalogEntry> = /*@__PURE__*/
+  messageDesc(file_conversation_v1_slash_command, 2);
+
+/**
  * The conversation was cut here, and the reader must see where.
  *
  * @generated from message conversation.v1.ContextCut
@@ -139,7 +226,7 @@ export type ContextCut = Message<"conversation.v1.ContextCut"> & {
  * Use `create(ContextCutSchema)` to create a new message.
  */
 export const ContextCutSchema: GenMessage<ContextCut> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_slash_command, 1);
+  messageDesc(file_conversation_v1_slash_command, 3);
 
 /**
  * A compaction that did not happen. The context is unchanged and still needs
@@ -169,7 +256,7 @@ export type ContextCompactionFailed = Message<"conversation.v1.ContextCompaction
  * Use `create(ContextCompactionFailedSchema)` to create a new message.
  */
 export const ContextCompactionFailedSchema: GenMessage<ContextCompactionFailed> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_slash_command, 2);
+  messageDesc(file_conversation_v1_slash_command, 4);
 
 /**
  * One compaction's identity: the vendor's id for the FIRST `compacting` status
@@ -190,7 +277,7 @@ export type CompactionId = Message<"conversation.v1.CompactionId"> & {
  * Use `create(CompactionIdSchema)` to create a new message.
  */
 export const CompactionIdSchema: GenMessage<CompactionId> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_slash_command, 3);
+  messageDesc(file_conversation_v1_slash_command, 5);
 
 /**
  * What the cut did to the context's size: how many tokens it held before,
@@ -227,7 +314,7 @@ export type ContextTokenDelta = Message<"conversation.v1.ContextTokenDelta"> & {
  * Use `create(ContextTokenDeltaSchema)` to create a new message.
  */
 export const ContextTokenDeltaSchema: GenMessage<ContextTokenDelta> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_slash_command, 4);
+  messageDesc(file_conversation_v1_slash_command, 6);
 
 /**
  * History was discarded with nothing left in its place.
@@ -245,7 +332,7 @@ export type ContextCleared = Message<"conversation.v1.ContextCleared"> & {
  * Use `create(ContextClearedSchema)` to create a new message.
  */
 export const ContextClearedSchema: GenMessage<ContextCleared> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_slash_command, 5);
+  messageDesc(file_conversation_v1_slash_command, 7);
 
 /**
  * History was replaced by a summary of itself.
@@ -326,7 +413,7 @@ export type ContextCompacted = Message<"conversation.v1.ContextCompacted"> & {
  * Use `create(ContextCompactedSchema)` to create a new message.
  */
 export const ContextCompactedSchema: GenMessage<ContextCompacted> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_slash_command, 6);
+  messageDesc(file_conversation_v1_slash_command, 8);
 
 /**
  * The cut was asked for.
@@ -341,7 +428,7 @@ export type ContextCompactionRequested = Message<"conversation.v1.ContextCompact
  * Use `create(ContextCompactionRequestedSchema)` to create a new message.
  */
 export const ContextCompactionRequestedSchema: GenMessage<ContextCompactionRequested> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_slash_command, 7);
+  messageDesc(file_conversation_v1_slash_command, 9);
 
 /**
  * The producer cut on its own because the context was filling.
@@ -356,7 +443,7 @@ export type ContextCompactionAutomatic = Message<"conversation.v1.ContextCompact
  * Use `create(ContextCompactionAutomaticSchema)` to create a new message.
  */
 export const ContextCompactionAutomaticSchema: GenMessage<ContextCompactionAutomatic> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_slash_command, 8);
+  messageDesc(file_conversation_v1_slash_command, 10);
 
 /**
  * A slash command the CLI answers ITSELF, rather than a prompt for the agent.
