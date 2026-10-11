@@ -25,7 +25,7 @@ import type {
   HeldOffer,
   HeldOfferHeadline,
   HeldOfferMergeDequeue,
-} from "../../../proto/gen/ts/frontend/v1/daemon_hold_pb";
+} from "../../../proto/gen/ts/frontend/v1/feed_held_pb";
 import {
   AnswerHeldOfferResponseSchema,
   type AnswerHeldOfferError,
@@ -36,17 +36,17 @@ import { isMalformedView } from "../rpc/malformed.js";
 import { guardMalformed } from "../rpc/guard.js";
 import { crossCuttingSentence } from "../rpc/refuse.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
-import type { TrayContext } from "./context.js";
+import type { HeldContext } from "./context.js";
 
 /** The two answers the merge-dequeue question takes. */
 export type MergeDequeueDecision = "keep" | "release";
 
 /** One parked question. */
-export function drawHeldOffer(u: HeldOffer, tc: TrayContext): HTMLElement {
+export function drawHeldOffer(u: HeldOffer, tc: HeldContext): HTMLElement {
   const path = "HeldOffer";
   const offer = requireCase(u.offer, `${path}.offer`);
   log.debug("drawing a held offer", {
-    operation: "tray.held-offer",
+    operation: "held.held-offer",
     context: { offer: offer.case },
   });
 
@@ -68,11 +68,11 @@ export function drawHeldOffer(u: HeldOffer, tc: TrayContext): HTMLElement {
 /** The merge-dequeue question: the daemon's sentence, and the two answers. */
 export function drawHeldOfferMergeDequeue(
   u: HeldOfferMergeDequeue,
-  tc: TrayContext,
+  tc: HeldContext,
   path: string,
 ): HTMLElement {
   log.debug("drawing a merge-dequeue offer", {
-    operation: "tray.held-offer.merge-dequeue",
+    operation: "held.held-offer.merge-dequeue",
     context: { path },
   });
   const body = document.createElement("div");
@@ -95,7 +95,7 @@ export function drawHeldOfferMergeDequeue(
 /** The composed sentence, verbatim. */
 export function drawHeldOfferHeadline(u: HeldOfferHeadline, path: string): HTMLElement {
   log.debug("drawing a held offer headline", {
-    operation: "tray.held-offer.headline",
+    operation: "held.held-offer.headline",
     context: { path },
   });
   const headline = document.createElement("div");
@@ -108,14 +108,14 @@ function decisionButton(
   decision: MergeDequeueDecision,
   label: string,
   extraClass: string,
-  tc: TrayContext,
+  tc: HeldContext,
 ): Control {
   return labelledControl({
     className: extraClass,
     hook: ["data-offer-decision", decision],
     label,
     onClick: (button) => {
-      void guardMalformed(tc.ctx, "tray.held-offer.answer", answer(decision, tc, button));
+      void guardMalformed(tc.ctx, "held.held-offer.answer", answer(decision, tc, button));
     },
   });
 }
@@ -129,7 +129,7 @@ function decisionButton(
  */
 async function answer(
   decision: MergeDequeueDecision,
-  tc: TrayContext,
+  tc: HeldContext,
   button: Control,
 ): Promise<void> {
   const actions = button.parentElement;
@@ -158,7 +158,7 @@ async function answer(
     const say = crossCuttingSentence("AnswerHeldOffer", cause) ?? answerHeldOfferRefusal(cause);
     drawRefusal(actions, cause.case, say);
     log.warn(`AnswerHeldOffer refused a ${decision}`, {
-      operation: "tray.held-offer.refused",
+      operation: "held.held-offer.refused",
       context: { decision, arm: cause.case, sentence: say },
     });
   } catch (err) {
@@ -168,7 +168,7 @@ async function answer(
     if (isMalformedView(err)) throw err;
     drawRefusal(actions, "error", "the daemon could not be reached");
     log.error(`AnswerHeldOffer failed for a ${decision}: ${String(err)}`, {
-      operation: "tray.held-offer.failed",
+      operation: "held.held-offer.failed",
       context: { decision, cause: err },
     });
   } finally {

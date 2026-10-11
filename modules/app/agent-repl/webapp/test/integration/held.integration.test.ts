@@ -16,10 +16,10 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
-  DaemonHoldItemSchema,
+  FeedHeldItemSchema,
   HeldPromptSchema,
   HeldOfferSchema,
-} from "../../../proto/gen/ts/frontend/v1/daemon_hold_pb";
+} from "../../../proto/gen/ts/frontend/v1/feed_held_pb";
 import {
   UpdateHeldPromptRequestSchema,
   UpdateHeldPromptResponseSchema,
@@ -42,7 +42,7 @@ import {
   assertCoversOneof,
   heldOfferItem,
   heldPromptItem,
-  holdTray,
+  heldSection,
   type HoldClassificationArm,
 } from "./fixtures";
 
@@ -55,14 +55,14 @@ afterEach(async () => {
 });
 
 /** Boot with one tray already scripted. */
-async function withTray(init: Parameters<typeof holdTray>[0]): Promise<Harness> {
-  harness = await startHarness({ arrange: (fake) => fake.setTray(WORKSPACE_ID, holdTray(init)) });
+async function withTray(init: Parameters<typeof heldSection>[0]): Promise<Harness> {
+  harness = await startHarness({ arrange: (fake) => fake.setHeld(WORKSPACE_ID, heldSection(init)) });
   return harness;
 }
 
 describe("arm coverage", () => {
-  it("covers both tray item kinds", () => {
-    assertCoversOneof(DaemonHoldItemSchema, "item", ["prompt", "offer"]);
+  it("covers every held item kind", () => {
+    assertCoversOneof(FeedHeldItemSchema, "item", ["prompt", "offer", "merge"]);
   });
 
   it("covers every hold classification arm", () => {
@@ -152,7 +152,7 @@ describe("classification detail", () => {
     const rendered: string[] = [];
     for (const classification of HOLD_CLASSIFICATION_ARMS) {
       // Act
-      harness.fake.setTray(WORKSPACE_ID, holdTray({ items: [heldPromptItem({ classification })] }));
+      harness.fake.setHeld(WORKSPACE_ID, heldSection({ items: [heldPromptItem({ classification })] }));
       await harness.settle();
       rendered.push(harness.$(`[data-held-turn="${HELD_TURN_ID}"]`)?.innerHTML ?? "");
     }
@@ -177,7 +177,7 @@ describe("hold reasons draw distinctly", () => {
     const rendered: string[] = [];
     for (const hold of HOLD_ARMS) {
       // Act
-      harness.fake.setTray(WORKSPACE_ID, holdTray({ items: [heldPromptItem({ hold })] }));
+      harness.fake.setHeld(WORKSPACE_ID, heldSection({ items: [heldPromptItem({ hold })] }));
       await harness.settle();
       rendered.push(harness.$(`[data-held-turn="${HELD_TURN_ID}"]`)?.innerHTML ?? "");
     }
@@ -285,7 +285,7 @@ describe("release and drop", () => {
 
 describe("the fold above button", () => {
   /** Two held prompts, the second offered a fold into the first. */
-  const foldable = (): Parameters<typeof holdTray>[0] => ({
+  const foldable = (): Parameters<typeof heldSection>[0] => ({
     items: [
       heldPromptItem({ turn: "turn-ahead", text: "first words" }),
       heldPromptItem({ turn: "turn-behind", text: "second words", foldAbove: "turn-ahead" }),
@@ -340,7 +340,7 @@ describe("the fold above button", () => {
 });
 
 describe("the update classifier button", () => {
-  const classified = (): Parameters<typeof holdTray>[0] => ({
+  const classified = (): Parameters<typeof heldSection>[0] => ({
     items: [heldPromptItem({ turn: "turn-held", text: "after the tests pass, bump the version", classification: "holdForTurnEnd" })],
   });
 
@@ -522,7 +522,7 @@ describe("an empty tray", () => {
     // Arrange
     await withTray({ items: [] });
     // Act
-    harness.fake.setTray(WORKSPACE_ID, holdTray({ items: [heldPromptItem({ turn: "turn-a" })] }));
+    harness.fake.setHeld(WORKSPACE_ID, heldSection({ items: [heldPromptItem({ turn: "turn-a" })] }));
     await harness.settle();
     // Assert
     expect(harness.$('[data-held-turn="turn-a"]')).not.toBeNull();
@@ -534,7 +534,7 @@ describe("whole-list replacement", () => {
     // Arrange
     await withTray({ items: [heldPromptItem({ turn: "turn-a" }), heldPromptItem({ turn: "turn-b" })] });
     // Act
-    harness.fake.setTray(WORKSPACE_ID, holdTray({ items: [heldPromptItem({ turn: "turn-a" })] }));
+    harness.fake.setHeld(WORKSPACE_ID, heldSection({ items: [heldPromptItem({ turn: "turn-a" })] }));
     await harness.settle();
     // Assert
     expect(harness.$('[data-held-turn="turn-b"]')).toBeNull();

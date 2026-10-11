@@ -23,7 +23,7 @@ import {
   feedPageSuccess,
   feedId,
   footerView,
-  holdTray,
+  heldSection,
   heldPromptItem,
   responseRow,
   roster,
@@ -335,13 +335,26 @@ describe("view streams", () => {
     expect((push.push.case === "roster" ? push.push.value : undefined)?.repository?.sections[0]?.rows?.rows[0]?.name?.text).toBe("ported");
   });
 
-  it("pushes the scripted tray", async () => {
+  it("states the scripted held section in the root feed's open", async () => {
     // Arrange
-    fake.setTray(WORKSPACE_ID, holdTray({ items: [heldPromptItem({ text: "held one" })] }));
+    fake.setHeld(WORKSPACE_ID, heldSection({ items: [heldPromptItem({ text: "held one" })] }));
     // Act
-    const [push] = await take(client.watchDaemonHolds({ workspace: workspaceRef() }), 1);
+    const opened = await client.openFeed({ workspace: workspaceRef() });
     // Assert
-    expect(push.tray?.items).toHaveLength(1);
+    expect(opened.result.case === "success" ? opened.result.value.held?.items : undefined).toHaveLength(1);
+  });
+
+  it("pushes a later held section on the root feed's tail", async () => {
+    // Arrange
+    const opened = await client.openFeed({ workspace: workspaceRef() });
+    const watch = opened.result.case === "success" ? opened.result.value.watch : undefined;
+    const reader = take(client.watchFeed({ watch }), 1);
+    await fake.awaitStream("watchFeed");
+    // Act
+    fake.setHeld(WORKSPACE_ID, heldSection({ items: [heldPromptItem({ text: "held one" })] }));
+    // Assert
+    const [push] = await reader;
+    expect(push.held?.held?.items).toHaveLength(1);
   });
 
   it("delivers a later setter to an already-open stream", async () => {

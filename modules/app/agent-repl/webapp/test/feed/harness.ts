@@ -50,6 +50,12 @@ import {
   type LoadFeedThroughResponse,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_load_feed_through_pb";
 import { FeedWatchTokenSchema } from "../../../proto/gen/ts/agentrepl/v1/feed_token_pb";
+import {
+  FeedHeldItemSchema,
+  FeedHeldSchema,
+  type FeedHeld,
+  type FeedHeldItem,
+} from "../../../proto/gen/ts/frontend/v1/feed_held_pb";
 import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { TurnIdSchema } from "../../../proto/gen/ts/conversation/v1/turn_pb";
 import {
@@ -308,14 +314,57 @@ export function tokenFor(req: OpenFeedRequest): string {
   return `tok:${req.feed?.value ?? "root"}`;
 }
 
-/** An OpenFeed success answering PAGE and minting TOKEN. */
-export function openSuccess(answer: FeedPage, token: string): OpenFeedResponse {
+/**
+ * An OpenFeed success answering PAGE and minting TOKEN. The ROOT feed's open
+ * states its held section, HELD (the empty one unless said); a sub-feed's
+ * states none.
+ */
+export function openSuccess(answer: FeedPage, token: string, held?: FeedHeld): OpenFeedResponse {
+  const root = token === "tok:root";
   return create(OpenFeedResponseSchema, {
     result: {
       case: "success",
-      value: { page: answer, watch: create(FeedWatchTokenSchema, { value: token }) },
+      value: {
+        page: answer,
+        watch: create(FeedWatchTokenSchema, { value: token }),
+        ...(root ? { held: held ?? create(FeedHeldSchema, {}) } : {}),
+      },
     },
   });
+}
+
+/** The root feed's held section, holding ITEMS in order. */
+export function heldSection(items: readonly FeedHeldItem[]): FeedHeld {
+  return create(FeedHeldSchema, { items: [...items] });
+}
+
+/** A held prompt item for TURN, keyed by ID. */
+export function heldPromptItem(id: string, turn: string, text = "held words"): FeedHeldItem {
+  return create(FeedHeldItemSchema, {
+    id: feedId(id),
+    item: {
+      case: "prompt",
+      value: {
+        turn: { value: turn },
+        said: { content: { blocks: [{ block: { case: "text", value: { text } } }] } },
+        queuedAt: { atMs: 0n },
+        classification: { case: "classifying", value: {} },
+        badge: {
+          label: "classifying",
+          detail: "queued — classifying",
+          standsFor: { case: "classifying", value: {} },
+        },
+      },
+    },
+  });
+}
+
+/**
+ * A tail push carrying a change of the held section: HELD whole, and the ROWS
+ * that moved with it.
+ */
+export function pushHeld(held: FeedHeld, rows: readonly FeedRow[] = []): WatchFeedResponse {
+  return create(WatchFeedResponseSchema, { held: { held, rows: [...rows] } });
 }
 
 /** A page of ROWS. */

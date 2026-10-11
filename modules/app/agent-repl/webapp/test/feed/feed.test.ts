@@ -6,6 +6,7 @@ import { create } from "@bufbuild/protobuf";
 import {
   FeedBreadcrumbSchema,
   FeedPageSchema,
+  FeedRowSchema,
   type FeedRow,
 } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import {
@@ -31,10 +32,13 @@ import {
   Channel,
   feedId,
   harness,
+  heldPromptItem,
+  heldSection,
   mergeRow,
   openSuccess,
   page,
   push,
+  pushHeld,
   pushSelection,
   responseRow,
   stubRenderers,
@@ -474,7 +478,7 @@ describe("mountFeed: the bubble kinds", () => {
  * fixture lays the root rows out from a height table in a 300px viewport, so
  * the tail owner reads real-looking edges for the rows the feed drew.
  */
-describe("mountFeed: a merge bubble's update", () => {
+describe("mountFeed: a row growing above a scrolled-away reader", () => {
   /** A mounted root feed whose rows are laid out from HEIGHTS by row id. */
   async function laidOut(rows: FeedRow[], heights: Record<string, number>) {
     const channels = new Map<string, Channel<WatchFeedResponse>>();
@@ -543,18 +547,6 @@ describe("mountFeed: a merge bubble's update", () => {
     };
   }
 
-  it("leaves a following reader where they are when the merge bubble grows", async () => {
-    // Arrange — the merge bubble is the last row, partly in view at the tail.
-    const f = await laidOut([responseRow("r1"), mergeRow("m1")], { r1: 1000, m1: 400 });
-    f.readerAt(1100);
-    const before = f.top();
-    // Act
-    await f.grow("m1", 600, mergeRow("m1", true, "branch → trunk"));
-    // Assert
-    expect(f.top()).toBe(before);
-    f.feed.dispose();
-  });
-
   it("keeps the rows under a scrolled-away reader still when any row above them grows", async () => {
     // Arrange — THE ANCHOR IS A ROOT ROW: the reader stands inside r2.
     const f = await laidOut([responseRow("r1"), responseRow("r2"), responseRow("r3")], { r1: 400, r2: 1000, r3: 1000 });
@@ -607,65 +599,155 @@ describe("rootRows", () => {
 
 /**
  * A HELD PROMPT'S FIRST DRAW PARKS THE FEED (owner ruling, 2026-09-23): the
- * tray calls `promptHeld`, and the feed parks at its tail and follows under the
- * `promptHeld` cause, as a sent prompt does.
+ * root feed's held section draws a held prompt's card for the first time, and
+ * the feed parks at its tail and follows under the `promptHeld` cause, as a
+ * sent prompt does.
  */
-describe("mountFeed: promptHeld", () => {
+describe("mountFeed: a held prompt's first draw", () => {
   afterEach(() => {
     resetLoggingForTests();
   });
 
-  it("parks the feed at its tail", async () => {
-    // Arrange
-    const { feed, host } = mount();
-    await settle();
-    const scroll = host.parentElement as HTMLElement;
+  /** A root feed whose open states SECTION, mounted in a scroll box with a held host. */
+  async function mountedHeld(held = heldSection([heldPromptItem("prompt:t1", "t1")])) {
+    const h = harness({ openFeed: (req) => openSuccess(page([]), tokenFor(req), held) });
+    const scroll = document.createElement("div");
+    const host = document.createElement("div");
+    const heldHost = document.createElement("section");
+    scroll.append(host, heldHost);
+    document.body.replaceChildren(scroll);
     scriptFeedBox(scroll);
-    // Act
-    feed.promptHeld("t1");
+    const capture = captureLogRecords("debug");
+    const feed = mountFeed(host, h.ctx, { renderers: stubRenderers(), scrollBox: scroll, heldHost });
+    await settle();
+    return { feed, scroll, heldHost, capture };
+  }
+
+  it("parks the feed at its tail", async () => {
+    // Arrange / Act
+    const m = await mountedHeld();
     // Assert
-    expect(scroll.scrollTop).toBe(2000);
+    expect(m.scroll.scrollTop).toBe(2000);
   });
 
   it("records the park under the promptHeld cause", async () => {
-    // Arrange
-    const { feed, host } = mount();
-    await settle();
-    scriptFeedBox(host.parentElement as HTMLElement);
-    const capture = captureLogRecords("debug");
-    // Act
-    feed.promptHeld("t1");
+    // Arrange / Act
+    const m = await mountedHeld();
     // Assert
-    const record = await forwardedRecord(capture, "scroll.feed-moved");
-    expect((record.context as Record<string, unknown>).cause).toBe(
-      "promptHeld",
-    );
+    m.capture.logger.flush();
+    await Promise.resolve();
+    const moves = m.capture.sent.filter((r) => r.operation === "scroll.feed-moved");
+    expect(moves.map((r) => (r.context as Record<string, unknown>).cause)).toContain("promptHeld");
   });
 
   it("logs the held prompt it parked for", async () => {
-    // Arrange
-    const { feed, host } = mount();
-    await settle();
-    scriptFeedBox(host.parentElement as HTMLElement);
-    const capture = captureLogRecords("debug");
-    // Act
-    feed.promptHeld("t1");
+    // Arrange / Act
+    const m = await mountedHeld();
     // Assert
-    const record = await forwardedRecord(capture, "feed.held-prompt-parked");
+    const record = await forwardedRecord(m.capture, "feed.held-prompt-parked");
     expect(record.context).toMatchObject({ turn: "t1" });
   });
 
   it("logs, and moves nothing, when the feed has no scroll box", async () => {
     // Arrange
     const host = document.createElement("div");
-    const feed = mountFeed(host, harness().ctx, { renderers: stubRenderers() });
-    await settle();
+    const heldHost = document.createElement("section");
+    const h = harness({
+      openFeed: (req) => openSuccess(page([]), tokenFor(req), heldSection([heldPromptItem("prompt:t1", "t1")])),
+    });
     const capture = captureLogRecords("debug");
     // Act
-    feed.promptHeld("t1");
+    mountFeed(host, h.ctx, { renderers: stubRenderers(), heldHost });
+    await settle();
     // Assert
     const record = await forwardedRecord(capture, "feed.held-prompt-unparked");
     expect(record.context).toMatchObject({ turn: "t1" });
+  });
+});
+
+/**
+ * THE ROOT FEED'S HELD SECTION (held/section.ts): stated by the root feed's
+ * open, changed by its watch's held frames, and settled into the rows in the
+ * same frame that takes the item out.
+ */
+describe("mountFeed: the held section", () => {
+  /** A root feed with a held host, tailing a channel the test drives. */
+  async function mountedSection(held = heldSection([])) {
+    const channels = new Map<string, Channel<WatchFeedResponse>>();
+    const channel = new Channel<WatchFeedResponse>();
+    channels.set("tok:root", channel);
+    const h = harness({ channels, openFeed: (req) => openSuccess(page([responseRow("r1")]), tokenFor(req), held) });
+    const scroll = document.createElement("div");
+    const host = document.createElement("div");
+    const heldHost = document.createElement("section");
+    scroll.append(host, heldHost);
+    document.body.replaceChildren(scroll);
+    const feed = mountFeed(host, h.ctx, { renderers: stubRenderers(), scrollBox: scroll, heldHost });
+    await settle();
+    return { feed, host, heldHost, channel, h };
+  }
+
+  it("draws the section the root feed's open states", async () => {
+    const m = await mountedSection(heldSection([heldPromptItem("prompt:t1", "t1")]));
+    expect(m.heldHost.querySelector('[data-held-turn="t1"]')).not.toBeNull();
+  });
+
+  it("redraws the section a held frame carries", async () => {
+    // Arrange
+    const m = await mountedSection();
+    // Act
+    m.channel.push(pushHeld(heldSection([heldPromptItem("prompt:t2", "t2")])));
+    await settle();
+    // Assert
+    expect(m.heldHost.querySelector('[data-held-turn="t2"]')).not.toBeNull();
+  });
+
+  it("draws a settled prompt's row and drops its card in the one frame", async () => {
+    // Arrange
+    const m = await mountedSection(heldSection([heldPromptItem("p2", "t2")]));
+    // Act
+    m.channel.push(pushHeld(heldSection([]), [userPromptRow("p2", "held words")]));
+    await settle();
+    // Assert
+    expect([m.host.querySelector('[data-feed-row="p2"]') !== null, m.heldHost.querySelector('[data-held-turn="t2"]')]).toEqual([
+      true,
+      null,
+    ]);
+  });
+
+  it("drops a row a held frame removes as its item returns to the section", async () => {
+    // Arrange
+    const m = await mountedSection();
+    m.channel.push(pushHeld(heldSection([]), [userPromptRow("p2", "held words")]));
+    await settle();
+    // Act
+    const removal = create(FeedRowSchema, { id: feedId("p2"), order: userPromptRow("p2", "x").order, row: { case: "removed", value: {} } });
+    m.channel.push(pushHeld(heldSection([heldPromptItem("p2", "t2")]), [removal]));
+    await settle();
+    // Assert
+    expect([m.host.querySelector('[data-feed-row="p2"]'), m.heldHost.querySelector('[data-held-turn="t2"]') !== null]).toEqual([
+      null,
+      true,
+    ]);
+  });
+
+  it("refuses a root open that states no held section", async () => {
+    // Arrange
+    const h = harness({
+      openFeed: (req) =>
+        create(OpenFeedResponseSchema, {
+          result: { case: "success", value: { page: page([]), watch: { value: tokenFor(req) } } },
+        }),
+    });
+    const scroll = document.createElement("div");
+    const host = document.createElement("div");
+    scroll.append(host);
+    document.body.replaceChildren(scroll);
+    // Act
+    mountFeed(host, h.ctx, { renderers: stubRenderers(), scrollBox: scroll });
+    await settle();
+    // Assert: no tail was opened on the malformed open.
+    expect(h.calls.watchFeed).toHaveLength(0);
   });
 });
 
@@ -2491,11 +2573,11 @@ describe("latestEntry", () => {
     expect(latestEntry(box)?.id).toBe("group");
   });
 
-  it("answers the last held entry when the tray holds something", () => {
+  it("answers the last held entry when the held section holds something", () => {
     // Arrange
     const box = zone(
       '<main id="feed"><article data-feed-row="r1"></article></main>' +
-        '<section id="hold-tray"><div class="hold-tray"><div class="hold-tray-items">' +
+        '<section id="hold-tray"><div class="held-section"><div class="held-section-items">' +
         '<article data-held-turn="t1"></article><article data-held-turn="t2"></article></div></div></section>',
     );
     // Act + Assert
@@ -2528,7 +2610,7 @@ describe("mountFeed: the latest-visible latch", () => {
     tray.innerHTML =
       held === 0
         ? ""
-        : `<div class="hold-tray"><div class="hold-tray-items">${cards.join("")}</div></div>`;
+        : `<div class="held-section"><div class="held-section-items">${cards.join("")}</div></div>`;
     scroll.append(host, tray);
     document.body.replaceChildren(scroll);
     scriptFeedBox(scroll);

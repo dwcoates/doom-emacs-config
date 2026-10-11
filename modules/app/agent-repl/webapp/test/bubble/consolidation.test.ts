@@ -47,7 +47,7 @@ const KINDS = [
   "feed/rows/agent-prompt.ts",
   "feed/rows/peer-message.ts",
   "feed/rows/separation.ts",
-  "tray/held-prompt.ts",
+  "held/held-prompt.ts",
 ] as const;
 
 describe("every blue and purple bubble is built by drawBubble", () => {

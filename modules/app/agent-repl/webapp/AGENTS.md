@@ -28,7 +28,7 @@ src/bubble/               THE ONE BUBBLE: draw (drawBubble, the spec) and body (
 src/feed/                 the feed mechanism (feed, feed-view, bubble, rows)
   renderers.ts              THE SEAM, plus createRowRenderers: the registry
   cards/ asks/ merge/       the fifteen row renderers
-src/footer/ src/topbar/ src/sidebar/ src/tray/ src/composer/ src/panels/
+src/footer/ src/topbar/ src/sidebar/ src/held/ src/composer/ src/panels/
 src/login/ src/lifecycle/ src/failure/      the remaining components
 src/news-digest/          the daily Claude news digest overlay over the feed
 test/                     one test file per source module, mirroring src/
@@ -50,7 +50,7 @@ test/integration/         the whole app under jsdom against a fake daemon
 5. the mounts, in index.html's own top-to-bottom order, with two forced
    exceptions: the login overlay precedes the topbar's `watch` (whose account
    control opens it), and the feed precedes the footer (whose jump rows reveal
-   rows). sidebar, topbar `watch`, feed, hold tray, footer, composer (dev mode
+   rows). sidebar, topbar `watch`, feed (with its held section), footer, composer (dev mode
    only), login overlay, lifecycle. The news digest overlay is mounted with the
    lifecycle (just before it), because the lifecycle's `WatchDaemon` stream is
    what carries its `news_digest` standing.
@@ -93,7 +93,7 @@ and are contract on the same terms:
 | `data-attention` | the cold gate row the model picker routed to | `coldGate` | 10 |
 | `data-footer-notice` | the footer notice drawn when no cold gate row is on the page | `coldGate` | 10 |
 | `data-wave` | the `.bubble.user` of a prompt row whose turn is IN FLIGHT | `working` — present exactly while the row's daemon-stated `working` flag (`FeedUserPrompt.working`, `FeedAgentPrompt.working`) is set, drawn at the bubble's draw and moved in place when the daemon re-pushes the row at the turn's terminal; never inferred from final-answer marks or `turn_ended` rows | int-fix-bubble-wave, redrawn by owner ruling 2026-09-14; daemon-owned since fix/prompt-working-until-turn-ends |
-| `.held-right` class | every held-prompt card in the hold tray | — (the rail: a held prompt hangs where the `.bubble.user` it will become hangs) | owner ruling 1, 2026-09-13 |
+| `.held-right` class | every held-prompt card in the feed's held section | — (the rail: a held prompt hangs where the `.bubble.user` it will become hangs) | owner ruling 1, 2026-09-13 |
 | `.ws.open` class | a sidebar row whose detail panel is showing | — (there is NO chevron: the row opens its own panel on hover after `HOVER_OPEN_DELAY_MS` and closes it `HOVER_CLOSE_GRACE_MS` after the pointer leaves BOTH the row and the panel; keyboard focus opens it at once) | owner ruling, 2026-09-14 |
 | `data-client-verdict` | the `.pfooter` dock, while a client link verdict stands | the verdict's kind (`unary_transport`, `stream_ended`, `subscription_source_ended`, `unsubscribe_failed`, `client_log_failed`, `daemon_unreachable_card`, `frame_undecodable_card`, `feed_not_tailing`) — absent whenever the daemon's pushed view is the one drawn | webapp/footer-client-states |
 | `data-cold-gate-progress` | the cold-gate card's progress slot, inside `.hibernation-actions` | — (empty and `hidden` unless an answer is in flight AND the footer view carries a `compaction` activity; its text is the daemon's own line, verbatim) | cold-gate feedback, 2026-09-14 |
@@ -108,8 +108,8 @@ and are contract on the same terms:
 | `data-work-id` / `data-jump` / `data-jump-unresolved` | every footer detached-work row (`.footer-row-jump`: agents, shells, monitors) | `data-work-id` is `FooterWorkId.value`; exactly one of `data-jump` (the entry's FeedId: a subagent's bubble, a shell's head, a monitor's Monitor tool-call card) and `data-jump-unresolved` (`notDrawn`; `noFeedEntry` is retired, owner ruling 2026-09-23) | footer-rows-and-work-ids, 2026-09-23 |
 | `.bubble-expand-only` class | every element of a bubble's expand-only region (`expandOnly` in src/bubble/draw.ts), after the scroll box | — (hidden while the sibling `.bubble-scroll` is not `.expanded`; a held prompt's one `.queued-details` element — queued age, rationale or failure detail, actions — wears it) | held-prompt-compact-badges, 2026-09-23 |
 | `.bubble-quote` class | a reply's quote block in a prompt bubble's body: a feed prompt's `.prompt-block-quote` (`FeedQuoteBlock`) and a held prompt's `.queued-quote` (`conversation.v1.UserQuoteBlock`), drawn by `quoteSlot` (src/bubble/quote.ts) | — (hidden while the bubble's `.bubble-scroll` is not `.expanded`, so a collapsed prompt shows only the person's words; a body holding one always wears `has-more` while collapsed) | reply-quote rendering, 2026-10-08 |
-| `data-held-status` + `.held-badge` class | every status badge in a held prompt's header strip (a `.badge`) | the status: a `classification` arm, a `hold` arm, or `accepted`; its tone class comes from `HELD_STATUS_BADGES` (src/tray/held-prompt.ts), the one table | held-prompt-compact-badges, 2026-09-23 |
-| `data-held-action="release"` | the held card's release control | `release` — the wire verb and the hook; the control is LABELLED "Send now" (`SEND_NOW_LABEL`, src/tray/held-prompt.ts), which is also its accessible name, and its forbidding-arm tooltips (`NO_RELEASE_TITLES`) say "send", never "release" | send-now-label, 2026-09-23 |
+| `data-held-status` + `.held-badge` class | every status badge in a held prompt's header strip (a `.badge`) | the status: a `classification` arm, a `hold` arm, or `accepted`; its tone class comes from `HELD_STATUS_BADGES` (src/held/held-prompt.ts), the one table | held-prompt-compact-badges, 2026-09-23 |
+| `data-held-action="release"` | the held card's release control | `release` — the wire verb and the hook; the control is LABELLED "Send now" (`SEND_NOW_LABEL`, src/held/held-prompt.ts), which is also its accessible name, and its forbidding-arm tooltips (`NO_RELEASE_TITLES`) say "send", never "release" | send-now-label, 2026-09-23 |
 | `data-held-action="edit"` / `data-editing` / `data-held-status="editing"` | the held card's Edit control (between Send now and Cancel), the card while its entry carries `HeldPrompt.editing`, and that entry's `editing` status badge in the header strip | `edit`; `true` — absent when the daemon states no edit; the badge's tone is `HELD_STATUS_BADGES.editing` | edit-held-prompt, 2026-09-23 |
 | `data-held-action="fold"` + `.queued-action-fold` class | the held card's "fold above" control (`FOLD_ABOVE_LABEL`), last in the actions row; drawn only while the entry carries `HeldPrompt.fold_above` | `fold` — the hook; the click sends `FoldHeldPrompt` with the entry's own turn and the served `fold_above.above`, and a refusal is the row's `.queued-refusal[data-arm]`, as Send now's is | held-fold-above, 2026-09-30 |
 | `.entry-selected` class (with `data-revealed` / `data-selected-row` (valued `response`, `prompt` or `bubble`) on the row) | the CARD of the selected feed entry — the row's first element child (a bubble, a tool card, a detached bubble's fold), never the full-width `.feed-item` | — (the row states WHICH act selected it: `data-revealed` while a footer detached-work jump's landing stands, `data-selected-row` while the reply-to-a-past-response selection names it; `syncSelectedEntry` (src/feed/selected-entry.ts) derives the class from those facts, and the chrome mirror re-derives it after every body draw so a replaced card inherits it. The stylesheet draws an inset `--selected-response` outline, and on a final response turns its own border blue instead; the old `.row-revealed` bar and `.response-selected` class are gone) | selected-mark-on-card, 2026-09-23 |
@@ -509,7 +509,7 @@ hand any more:
   A bubble's own scroll box (an expanded thinking, prompt, tool or async
   bubble) has NO implicit writer: it moves only on the reader's input. The
   feed moves implicitly only for the closed set `SCROLL_CAUSES` —
-  `promptSent`, `promptHeld` (a held prompt's card drawn in the tray for the
+  `promptSent`, `promptHeld` (a held prompt's card drawn in the held section for the
   FIRST time parks the feed at its tail and follows, as a sent prompt does; a
   re-push or a removal moves nothing), `selectionMoved`, `detachedWorkSelected`,
   `entryJumped` (every other jump: a breadcrumb, a hook's gated-call link,
@@ -521,7 +521,7 @@ hand any more:
   — each a named `TailFollow` cause, each move recorded at DEBUG as
   `scroll.feed-moved` with its cause. A follow starts from a parking cause, or
   (`latestVisible`, owner rule 2026-09-23) whenever the reader can SEE the feed
-  column's latest entry (the last root row, or the hold tray's last card;
+  column's latest entry (the last root row, or the held section's last item;
   `latestEntry` in src/feed/feed.ts, "can see" defined once by
   `latestEntryVisible`), evaluated on every scroll event, resize and row
   upsert. That latch moves nothing; later content then keeps the tail in view.
@@ -571,11 +571,11 @@ hand any more:
   `npm run test:webkit` is its regression test. The anchor's rows are the
   ROOT BODY'S ROW LIST (`.feed-body > .feed-rows`, `rootRows` in
   src/feed/feed.ts), never the feed host's own children, which are one box
-  for the whole feed. A MERGE BUBBLE'S UPDATES MOVE NOTHING (owner ruling,
-  2026-10-08): its row is exempt (`AnchorRows.exempt`), so a follow does not
-  chase a size change the merge bubble alone made (DEBUG
-  `scroll.exempt-change-held`), and its tab body is drawn before the old one
-  comes down, so its own scroll box is never clamped mid-redraw. The expanded footer's section is capped at
+  for the whole feed. NO ROW IS EXEMPT FROM THE FOLLOW (owner ruling,
+  2026-10-10): a running merge's bubble is the row pinned to the feed's
+  bottom (`FeedRowOrder.pinned`), so its growth is growth at the tail, which a
+  standing follow keeps in view like any other. Its tab body is drawn before
+  the old one comes down, so its own scroll box is never clamped mid-redraw. The expanded footer's section is capped at
   `EXPANDED_FOOTER_MAX_ROWS` (4) and scrolls on its own; its scroll is the
   reader's, and a push redraws the rows INSIDE the kept section so it is never
   detached or reset.
@@ -730,7 +730,7 @@ regression hit. `test/main.test.ts` now runs the real boot under jsdom, with
 only the wire and the mounts substituted, and it reads 100% again -- honestly
 this time.
 Three type-only modules (`src/feed/cards/context.ts`, `src/topbar/context.ts`,
-`src/tray/context.ts`) left the report entirely, because a file of `interface`
+`src/held/context.ts`) left the report entirely, because a file of `interface`
 declarations has no statement to cover and v8 was scoring it 100% of nothing.
 
 `npm run coverage:verify` (`bin/coverage-honesty.mjs` at the module root) is
