@@ -864,18 +864,25 @@ THE ARM IS THE FOLD, the daemon's view state; it is never unset."
 (defun agent-repl-wire-decode-roster-merged-section (value)
   "Decode VALUE as `RosterMergedSection', a plist `(:header :rows :fold)'.
 It has no key of its own — the roster carries exactly one."
-  (let ((object (agent-repl-wire--object "RosterMergedSection" value)))
-    (agent-repl-wire--check-keys "RosterMergedSection" object
+  (agent-repl-wire--decode-keyless-section
+   "RosterMergedSection" value
+   #'agent-repl-wire-decode-roster-merged-section-header
+   #'agent-repl-wire-decode-roster-merged-section-rows
+   #'agent-repl-wire-decode-roster-merged-section-fold))
+
+(defun agent-repl-wire--decode-keyless-section (message-name value header rows fold)
+  "Decode VALUE as MESSAGE-NAME, a section the roster carries exactly one of.
+Such a section is a plist `(:header :rows :fold)' with no key of its own,
+so a `key' on the wire is an unknown field.  HEADER and ROWS decode their
+fields' values; FOLD decodes the fold oneof from the whole object."
+  (let ((object (agent-repl-wire--object message-name value)))
+    (agent-repl-wire--check-keys message-name object
                                  '(header rows expanded collapsed))
     (agent-repl-wire--decoded
-     "RosterMergedSection"
-     (list :header (agent-repl-wire--decode-message
-                    "RosterMergedSection" 'header object
-                    #'agent-repl-wire-decode-roster-merged-section-header)
-           :rows (agent-repl-wire--decode-message
-                  "RosterMergedSection" 'rows object
-                  #'agent-repl-wire-decode-roster-merged-section-rows)
-           :fold (agent-repl-wire-decode-roster-merged-section-fold object)))))
+     message-name
+     (list :header (agent-repl-wire--decode-message message-name 'header object header)
+           :rows (agent-repl-wire--decode-message message-name 'rows object rows)
+           :fold (funcall fold object)))))
 
 ;;;; ---- The hidden-workspaces section ----
 
@@ -907,18 +914,11 @@ sidebar rows only: a hidden workspace is off the tab bar either way."
 (defun agent-repl-wire-decode-roster-hidden-section (value)
   "Decode VALUE as `RosterHiddenSection', a plist `(:header :rows :fold)'.
 It has no key of its own — the roster carries exactly one."
-  (let ((object (agent-repl-wire--object "RosterHiddenSection" value)))
-    (agent-repl-wire--check-keys "RosterHiddenSection" object
-                                 '(header rows expanded collapsed))
-    (agent-repl-wire--decoded
-     "RosterHiddenSection"
-     (list :header (agent-repl-wire--decode-message
-                    "RosterHiddenSection" 'header object
-                    #'agent-repl-wire-decode-roster-hidden-section-header)
-           :rows (agent-repl-wire--decode-message
-                  "RosterHiddenSection" 'rows object
-                  #'agent-repl-wire-decode-roster-hidden-section-rows)
-           :fold (agent-repl-wire-decode-roster-hidden-section-fold object)))))
+  (agent-repl-wire--decode-keyless-section
+   "RosterHiddenSection" value
+   #'agent-repl-wire-decode-roster-hidden-section-header
+   #'agent-repl-wire-decode-roster-hidden-section-rows
+   #'agent-repl-wire-decode-roster-hidden-section-fold))
 
 ;;;; ---- The views and the roster ----
 
