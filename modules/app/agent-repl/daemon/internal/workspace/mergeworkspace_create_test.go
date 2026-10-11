@@ -152,3 +152,49 @@ func TestCreateFailsAMergeWorkspaceWhoseRequesterHasNoCreationJob(t *testing.T) 
 		t.Fatal("the missing creation job was not recorded at ERROR")
 	}
 }
+
+func TestCreateMergeWorkspaceForksInTheRequestersRepository(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	requester, _ := mergeRequester(t, f)
+	repoDir := mainWorktree(t, f)
+	requester.Repo = f.db.repositories[len(f.db.repositories)-1].ID
+	f.db.with(requester)
+	origin := wsm.MergeOrigin{Requester: requester.ID, Request: "request-1"}
+
+	// Act
+	if _, err := f.verbs.CreateMergeWorkspace(context.Background(), requester, origin, "ABC/sample"); err != nil {
+		t.Fatalf("CreateMergeWorkspace: %v", err)
+	}
+
+	// Assert: forked from the requester, cut from its branch, recorded as its
+	// merge workspace.
+	facts := f.db.registered[len(f.db.registered)-1]
+	if facts.MergeOf == nil || *facts.MergeOf != origin || len(f.account.ported) != 1 {
+		t.Fatalf("registered %+v with %d ported transcripts, want the requester's fork", facts, len(f.account.ported))
+	}
+	if job := f.db.putJobs[len(f.db.putJobs)-1]; job.BaseRef != "ABC/sample" {
+		t.Fatalf("base = %q, want the requester's branch", job.BaseRef)
+	}
+	if len(f.git.created) != 1 || f.git.created[0].RepoDir != repoDir {
+		t.Fatalf("created = %+v, want the worktree cut in the requester's repository", f.git.created)
+	}
+}
+
+func TestCreateMergeWorkspaceFailsLoudlyForARequesterWithNoRepository(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	requester, _ := mergeRequester(t, f)
+	requester.Repo = "repo-unregistered"
+
+	// Act
+	_, err := f.verbs.CreateMergeWorkspace(context.Background(), requester, wsm.MergeOrigin{Requester: requester.ID, Request: "request-1"}, "ABC/sample")
+
+	// Assert
+	if err == nil || len(f.git.created) != 0 {
+		t.Fatalf("CreateMergeWorkspace = %v with %d worktrees, want an error with nothing built", err, len(f.git.created))
+	}
+	if !loggedAtError(f, opCreate) {
+		t.Fatal("the unresolved repository was not recorded at ERROR")
+	}
+}

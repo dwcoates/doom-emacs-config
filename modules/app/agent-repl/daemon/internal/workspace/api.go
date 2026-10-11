@@ -248,6 +248,10 @@ type Verbs interface {
 	// naming rule, branch, worktree, layout facts recorded, and REGISTRATION
 	// ONLY AFTER MATERIALIZATION.
 	Create(ctx context.Context, spec CreateSpec) (wsm.Workspace, error)
+	// CreateMergeWorkspace creates the MERGE WORKSPACE a detached merge runs
+	// in: a fork of REQUESTER's conversation in a worktree of its own on BRANCH
+	// as it stands now, recorded as forked for ORIGIN's request.
+	CreateMergeWorkspace(ctx context.Context, requester wsm.Workspace, origin wsm.MergeOrigin, branch string) (wsm.Workspace, error)
 	// RequestCommandSupport composes the add-support brief from
 	// prompts/add-support-slash-command.md — LOUD when the brief is absent —
 	// and creates a support workspace through the ordinary standard form with
