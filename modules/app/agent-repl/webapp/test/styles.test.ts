@@ -4204,3 +4204,22 @@ describe("the ask cards' square controls", () => {
     expect([stylesheet.match(/--tab-radius: 0\.25rem;/g)?.length, stylesheet.match(/--ask-verdict-size: 0\.85rem;/g)?.length]).toEqual([1, 1]);
   });
 });
+
+/**
+ * EVERY ROW IS LAID OUT AT ITS REAL HEIGHT (owner ruling, 2026-10-11). A row
+ * skipped under `content-visibility: auto` stood in a guessed height, so a new
+ * row at the tail drew a frame of blank placeholder and the scrollbar was sized
+ * from guesses. No rule may skip a box's layout or stand in a guessed size.
+ */
+describe("the stylesheet's real-height contract", () => {
+  it.each(["content-visibility", "contain-intrinsic-size"])("declares %s nowhere", (property) => {
+    // Arrange
+    const declaring = new RegExp(`(?:^|[\\s;])${property}\\s*:`);
+
+    // Act
+    const selectors = rulesOf(stylesheet).filter((rule) => declaring.test(rule.declarations)).flatMap((rule) => rule.selectors);
+
+    // Assert
+    expect(selectors).toEqual([]);
+  });
+});

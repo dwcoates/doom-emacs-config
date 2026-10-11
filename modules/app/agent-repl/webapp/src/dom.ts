@@ -49,8 +49,7 @@ export function scrollbarWidthPx(box: { offsetWidth: number; clientWidth: number
  *
  * WHY NOT `replaceChildren`. Removing an element from the document and putting
  * it back is not a no-op to a browser: its layout box is torn down and rebuilt,
- * which RESETS the scroll position of every scroll box inside it and restarts
- * `content-visibility` skipping around it. A feed that re-laid every row with
+ * which RESETS the scroll position of every scroll box inside it. A feed that re-laid every row with
  * `replaceChildren` on each live push therefore snapped every expanded bubble
  * the reader was scrolled inside back to its top, several times a second
  * (owner rule, 2026-09-23: the user owns the scroll). So an element already in

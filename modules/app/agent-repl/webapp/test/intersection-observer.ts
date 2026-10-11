@@ -5,15 +5,15 @@
  *
  * jsdom performs no layout, so it ships no `IntersectionObserver`: nothing ever
  * enters or leaves a viewport there, and nothing would ever be delivered even
- * if the class existed. The feed's overscan buffer (overscan.ts) subscribes one
- * to the scroll box, so without this every mount of the feed under jsdom would
- * take the "no IntersectionObserver" no-op path and the overscan wiring would
- * never run in a test.
+ * if the class existed. The feed's selection watches (selection-visibility.ts,
+ * left-view.ts) subscribe ones to the scroll box, so without this every mount
+ * of the feed under jsdom would take the "no IntersectionObserver" no-op path
+ * and those watches would never run in a test.
  *
  * The substitution is deliberately NOT a no-op class. It keeps the registry of
  * what is observed and the options each observer was built with, so a test can
  * assert the root and margin the app asked for, and `fireIntersection` is the
- * test's way of saying "this element crossed the band" — and it THROWS when
+ * test's way of saying "this element entered or left the root" — and it THROWS when
  * nothing observes the element handed to it, so a mount that forgot to observe
  * a row fails the fire rather than passing a silent no-op.
  */
@@ -81,7 +81,7 @@ export function intersectionObservers(): readonly IntersectionRegistration[] {
 }
 
 /**
- * Report that TARGET crossed the band — into it when INTERSECTING is true, out
+ * Report that TARGET entered or left the root — into it when INTERSECTING is true, out
  * of it when false — to every observer watching it.
  *
  * Throws when nothing is watching it. A test that fires at a feed row is

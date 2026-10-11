@@ -564,13 +564,13 @@ describe("TailFollow's follow", () => {
   it("records the reader ending the follow", async () => {
     // Arrange
     const f = following();
-    const capture = captureLogRecords("debug");
+    const capture = captureLogRecords("info");
     // Act
     f.box.scrollTop = 400;
     f.gesture();
-    // Assert
+    // Assert — at INFO, the default threshold, so the log writes it.
     const record = await forwardedRecord(capture, "scroll.follow-ended");
-    expect(record.context).toMatchObject({ cause: "promptSent", from: 700, to: 400 });
+    expect([record.level.case, record.context]).toMatchObject(["info", { cause: "promptSent", from: 700, to: 400 }]);
   });
 
   it("does not restart the follow when the reader scrolls back to the tail", () => {
@@ -1154,16 +1154,16 @@ describe("TailFollow's latest-visible latch", () => {
     expect(await moves(capture)).toEqual([{ cause: "latestVisible", from: 650, to: 1100, follow: true }]);
   });
 
-  it("records the latch at DEBUG as a follow started by latestVisible", async () => {
-    // Arrange
+  it("records the latch at INFO as a follow started by latestVisible", async () => {
+    // Arrange — the default threshold, so the record is one the log writes.
     const l = withLatest(100);
-    const capture = captureLogRecords("debug");
+    const capture = captureLogRecords("info");
     // Act
     l.box.scrollTop = 650;
     l.gesture();
     // Assert
     const record = await forwardedRecord(capture, "scroll.follow-started");
-    expect(record.context).toMatchObject({ cause: "latestVisible", at: 650 });
+    expect([record.level.case, record.context]).toMatchObject(["info", { cause: "latestVisible", at: 650 }]);
   });
 
   it("does not latch while the latest entry is out of view", () => {
@@ -1647,6 +1647,137 @@ describe("observeScrollBox", () => {
     fireResize(box.element);
     // Assert — the reservation IS the footer's height, not an approximation.
     expect(box.top() - before).toBe(48);
+  });
+
+  it("records the move a resize made at INFO, with its cause", async () => {
+    // Arrange — the default threshold: a move the reader sees is one the log writes.
+    const box = scrollBox({ scrollHeight: 1000, clientHeight: 300, scrollTop: 700 });
+    const tail = new TailFollow(box.element);
+    tail.initialPlacement();
+    observeScrollBox(box.element, tail);
+    const capture = captureLogRecords("info");
+    // Act
+    box.loseHeight(48);
+    fireResize(box.element);
+    // Assert
+    const record = await forwardedRecord(capture, "scroll.feed-moved");
+    expect([record.level.case, record.context]).toMatchObject([
+      "info",
+      { cause: "initialPlacement", from: 700, to: 748, follow: true },
+    ]);
+  });
+
+  it("records a move no cause wrote and no reader input made, at INFO", async () => {
+    // Arrange — a standing follow at the tail of 1000 - 300.
+    const box = scrollBox({ scrollHeight: 1000, clientHeight: 300, scrollTop: 700 });
+    const tail = new TailFollow(box.element);
+    tail.initialPlacement();
+    observeScrollBox(box.element, tail);
+    const capture = captureLogRecords("info");
+    // Act — the browser pulls the box 32px off its tail on its own.
+    box.element.scrollTop = 668;
+    box.element.dispatchEvent(new Event("scroll"));
+    // Assert
+    const record = await forwardedRecord(capture, "scroll.feed-moved-uncaused");
+    expect([record.level.case, record.context]).toMatchObject([
+      "info",
+      { from: 700, to: 668, scroll_height: 1000, client_height: 300, following: true, cause: "initialPlacement" },
+    ]);
+  });
+
+  it("does not record the reader's own move as uncaused", async () => {
+    // Arrange
+    const box = scrollBox({ scrollHeight: 1000, clientHeight: 300, scrollTop: 700 });
+    const tail = new TailFollow(box.element);
+    tail.initialPlacement();
+    observeScrollBox(box.element, tail);
+    const capture = captureLogRecords("info");
+    // Act — a wheel precedes the movement, so the reader made it.
+    box.element.dispatchEvent(new Event("wheel"));
+    box.element.scrollTop = 668;
+    box.element.dispatchEvent(new Event("scroll"));
+    // Assert
+    capture.logger.flush();
+    await Promise.resolve();
+    expect(capture.sent.filter((r) => r.operation === "scroll.feed-moved-uncaused")).toEqual([]);
+  });
+
+  it("does not record the box's clamp on shrinking content as uncaused", async () => {
+    // Arrange
+    const box = scrollBox({ scrollHeight: 1000, clientHeight: 300, scrollTop: 700 });
+    const tail = new TailFollow(box.element);
+    tail.initialPlacement();
+    observeScrollBox(box.element, tail);
+    const capture = captureLogRecords("info");
+    // Act — the content loses 100px and the box clamps its position to 600.
+    box.contentGrows(-100);
+    box.element.dispatchEvent(new Event("scroll"));
+    // Assert
+    capture.logger.flush();
+    await Promise.resolve();
+    expect(capture.sent.filter((r) => r.operation === "scroll.feed-moved-uncaused")).toEqual([]);
+  });
+
+  it("records the box's viewport height change at INFO", async () => {
+    // Arrange
+    const box = scrollBox({ scrollHeight: 1000, clientHeight: 300, scrollTop: 700 });
+    const tail = new TailFollow(box.element);
+    tail.initialPlacement();
+    observeScrollBox(box.element, tail);
+    const capture = captureLogRecords("info");
+    // Act — the footer takes 48px of the box.
+    box.loseHeight(48);
+    fireResize(box.element);
+    // Assert — the size as the resize found it, before the follow re-landed it.
+    const record = await forwardedRecord(capture, "scroll.box-resized");
+    expect([record.level.case, record.context]).toMatchObject([
+      "info",
+      {
+        scroll_height: 1000,
+        scroll_height_delta: 0,
+        client_height: 252,
+        client_height_delta: -48,
+        at: 700,
+        following: true,
+        cause: "initialPlacement",
+      },
+    ]);
+  });
+
+  it("records the content height change at INFO", async () => {
+    // Arrange — a reader away from the tail, so no follow stands.
+    const box = scrollBox({ scrollHeight: 1000, clientHeight: 300, scrollTop: 200 });
+    const tail = new TailFollow(box.element);
+    observeScrollBox(box.element, tail);
+    const capture = captureLogRecords("info");
+    // Act
+    box.contentGrows(120);
+    fireResize(box.content);
+    // Assert
+    const record = await forwardedRecord(capture, "scroll.box-resized");
+    expect(record.context).toMatchObject({
+      scroll_height: 1120,
+      scroll_height_delta: 120,
+      client_height_delta: 0,
+      at: 200,
+      following: false,
+      cause: "none",
+    });
+  });
+
+  it("records no resize when neither height changed", async () => {
+    // Arrange — an observer delivery for a box whose sizes stand where they were.
+    const box = scrollBox({ scrollHeight: 1000, clientHeight: 300, scrollTop: 700 });
+    const tail = new TailFollow(box.element);
+    tail.initialPlacement();
+    observeScrollBox(box.element, tail);
+    const capture = captureLogRecords("info");
+    // Act
+    fireResize(box.element);
+    // Assert
+    capture.logger.flush();
+    await Promise.resolve();
+    expect(capture.sent.filter((r) => r.operation === "scroll.box-resized")).toEqual([]);
   });
 
   it("leaves a reader who scrolled away exactly where they are", () => {
