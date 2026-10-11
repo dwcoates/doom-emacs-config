@@ -639,10 +639,13 @@ func TestCreateRecordsThePriority(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	// Assert.
-	got := f.db.priorities[created.ID]
+	// Assert: the priority rides the registration, which lands the place.
+	got := f.db.byDir[created.Dir].Priority
 	if got == nil || *got != wsm.PriorityP1 {
-		t.Fatalf("recorded priority = %v, want P1", got)
+		t.Fatalf("registered priority = %v, want P1", got)
+	}
+	if facts := f.db.registered[len(f.db.registered)-1]; facts.Priority == nil || *facts.Priority != wsm.PriorityP1 {
+		t.Fatalf("registration facts priority = %v, want P1", facts.Priority)
 	}
 }
 

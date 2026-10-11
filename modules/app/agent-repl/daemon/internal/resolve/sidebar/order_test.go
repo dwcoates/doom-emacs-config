@@ -10,41 +10,58 @@ import (
 	"claude-repld/internal/wsm"
 )
 
-func TestRosterOrdersByPriorityStrongestFirst(t *testing.T) {
+func TestRosterOrdersByPlace(t *testing.T) {
 	// Arrange.
 	r, _ := newResolver(t)
 	reg := registry(
-		prioritized(workspace("w3", "three"), wsm.PriorityP3),
-		prioritized(workspace("w05", "half"), wsm.PriorityP05),
-		prioritized(workspace("w2", "two"), wsm.PriorityP2),
-		prioritized(workspace("w1", "one"), wsm.PriorityP1),
+		placed(workspace("w3", "three"), 3),
+		placed(workspace("w1", "one"), 1),
+		placed(workspace("w2", "two"), 2),
 	)
 
 	// Act.
 	r.SetRegistry(reg)
 
 	// Assert.
-	want := []string{"half", "one", "two", "three"}
+	want := []string{"one", "two", "three"}
 	if got := rowNames(repoRows(t, latest(t, r))); !equal(got, want) {
 		t.Fatalf("order = %v, want %v", got, want)
 	}
 }
 
-func TestRosterOrdersEveryPriorityBeforeTheUnprioritized(t *testing.T) {
-	// Arrange.
+func TestRosterOrderIgnoresPriority(t *testing.T) {
+	// Arrange: a P0.5 workspace placed after an unprioritized one.
 	r, _ := newResolver(t)
 	reg := registry(
-		workspace("w-none", "aaa-unprioritized"),
-		prioritized(workspace("w3", "zzz-p3"), wsm.PriorityP3),
+		placed(prioritized(workspace("w-high", "high"), wsm.PriorityP05), 2),
+		placed(workspace("w-none", "none"), 1),
 	)
 
 	// Act.
 	r.SetRegistry(reg)
 
-	// Assert: the name would order these the other way round, so only priority can.
-	want := []string{"zzz-p3", "aaa-unprioritized"}
+	// Assert: priority only picks a landing place; the place orders.
+	want := []string{"none", "high"}
 	if got := rowNames(repoRows(t, latest(t, r))); !equal(got, want) {
-		t.Fatalf("order = %v, want the prioritized workspace first", got)
+		t.Fatalf("order = %v, want %v", got, want)
+	}
+}
+
+func TestRosterOrderIgnoresTheName(t *testing.T) {
+	// Arrange.
+	r, _ := newResolver(t)
+	reg := registry(
+		placed(workspace("w-a", "alpha"), 2),
+		placed(workspace("w-z", "zulu"), 1),
+	)
+
+	// Act.
+	r.SetRegistry(reg)
+
+	// Assert.
+	want := []string{"zulu", "alpha"}
+	if got := rowNames(repoRows(t, latest(t, r))); !equal(got, want) {
+		t.Fatalf("order = %v, want %v", got, want)
 	}
 }
 
@@ -164,49 +181,18 @@ func selectNamed(t *testing.T, reg sidebar.Registry, name string, when *time.Tim
 	return selection{}
 }
 
-func TestRosterBreaksASelectionTieOnTheName(t *testing.T) {
-	// Arrange.
-	r, _ := newResolver(t)
-	b := workspace("w-b", "bravo")
-	b.LastSelectedAt = at(0)
-	a := workspace("w-a", "alpha")
-	a.LastSelectedAt = at(0)
-
-	// Act.
-	r.SetRegistry(registry(b, a))
-
-	// Assert.
-	want := []string{"alpha", "bravo"}
-	if got := rowNames(repoRows(t, latest(t, r))); !equal(got, want) {
-		t.Fatalf("order = %v, want %v", got, want)
-	}
-}
-
-func TestRosterBreaksANameTieOnTheWorkspaceId(t *testing.T) {
-	// Arrange: two workspaces alike in every drawn field.
-	r, _ := newResolver(t)
-
-	// Act.
-	r.SetRegistry(registry(workspace("w-b", "same"), workspace("w-a", "same")))
-
-	// Assert.
-	rows := repoRows(t, latest(t, r))
-	if rows[0].GetWorkspace().GetWorkspace().GetId() != "w-a" {
-		t.Fatal("two identical rows did not draw in one fixed order")
-	}
-}
-
 func TestRosterOrdersChildrenTheSameWayWithinTheirParent(t *testing.T) {
 	// Arrange.
 	r, _ := newResolver(t)
 	parent := workspace("w-parent", "parent")
-	childLow := workspace("w-low", "aaa-child")
-	childLow.ParentBranch = parent.Branch
-	childHigh := prioritized(workspace("w-high", "zzz-child"), wsm.PriorityP05)
-	childHigh.ParentBranch = parent.Branch
+	parent = placed(parent, 1)
+	childLate := placed(workspace("w-late", "aaa-child"), 3)
+	childLate.ParentBranch = parent.Branch
+	childEarly := placed(workspace("w-early", "zzz-child"), 2)
+	childEarly.ParentBranch = parent.Branch
 
 	// Act.
-	r.SetRegistry(registry(parent, childLow, childHigh))
+	r.SetRegistry(registry(parent, childLate, childEarly))
 
 	// Assert: the same rule applies inside the family as outside it.
 	rows := repoRows(t, latest(t, r))

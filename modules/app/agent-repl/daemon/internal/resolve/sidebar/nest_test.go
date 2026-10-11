@@ -287,10 +287,10 @@ func TestRosterDrawsACutFromTheDefaultBranchAtTheTopLevelEvenWhenAWorkspaceOccup
 	}
 }
 
-// TestRosterLetsPriorityReorderTwoWorkspacesCutFromTheDefaultBranch is
+// TestRosterLetsPlaceReorderTwoWorkspacesCutFromTheDefaultBranch is
 // realtest 8's shape: the repository row and a workspace created inside it,
-// given priorities that contradict the order they were drawn in.
-func TestRosterLetsPriorityReorderTwoWorkspacesCutFromTheDefaultBranch(t *testing.T) {
+// given places that contradict the order they were drawn in.
+func TestRosterLetsPlaceReorderTwoWorkspacesCutFromTheDefaultBranch(t *testing.T) {
 	// Arrange.
 	r, _ := newResolver(t)
 	main := workspace("w-main", "alpha")
@@ -300,14 +300,14 @@ func TestRosterLetsPriorityReorderTwoWorkspacesCutFromTheDefaultBranch(t *testin
 
 	// Act.
 	r.SetRegistry(registry(
-		prioritized(main, wsm.PriorityP3),
-		prioritized(second, wsm.PriorityP1),
+		placed(main, 2),
+		placed(second, 1),
 	))
 
 	// Assert.
 	want := []string{"second", "alpha"}
 	if got := rowNames(repoRows(t, latest(t, r))); !equal(got, want) {
-		t.Fatalf("order = %v, want %v: priority orders the roster and nesting must not outrank it", got, want)
+		t.Fatalf("order = %v, want %v: place orders the roster and nesting must not outrank it", got, want)
 	}
 }
 

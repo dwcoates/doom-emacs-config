@@ -283,6 +283,9 @@ func (v *verbs) Create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 		RepoDir:       repoDir,
 		DefaultBranch: defaultBranch,
 		MergeOf:       spec.MergeOf,
+		// The priority rides the insert, because it decides the place the
+		// workspace lands on.
+		Priority: spec.Priority,
 	})
 	if err != nil {
 		return wsm.Workspace{}, fmt.Errorf("create %q: register: %w", branch, err)
@@ -303,13 +306,6 @@ func (v *verbs) Create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 		return wsm.Workspace{}, fmt.Errorf("create %q: resolve log sink: %w", branch, err)
 	}
 	log = log.With(dlog.Context{"workspace": string(record.ID)})
-
-	if spec.Priority != nil {
-		if err := v.deps.DB.SetPriority(ctx, record.ID, spec.Priority); err != nil {
-			log.Error(opCreate, "could not record the creation priority", dlog.Context{"cause": err.Error()})
-			return wsm.Workspace{}, fmt.Errorf("create %q: priority: %w", branch, err)
-		}
-	}
 
 	// The spawn facts the fleet reads at bring-up. The model and permission
 	// mode are recorded HERE, before any session exists, because
