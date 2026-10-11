@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"claude-repld/internal/clock/clocktest"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/gitclient"
 	"claude-repld/internal/ids"
@@ -238,31 +239,12 @@ func (r *fakeRegistry) ListWorkspaces(context.Context) ([]wsm.Workspace, error) 
 	return r.workspaces, r.workspacesErr
 }
 
-// fakeClock is a Clock the test drives: Now is fixed, and After hands the
-// test each requested wait and a channel it fires by hand.
-type fakeClock struct {
-	now   time.Time
-	asked chan time.Duration
-	fire  chan time.Time
-}
-
-func newFakeClock() *fakeClock {
-	return &fakeClock{now: now, asked: make(chan time.Duration, 16), fire: make(chan time.Time)}
-}
-
-func (c *fakeClock) Now() time.Time { return c.now }
-
-func (c *fakeClock) After(d time.Duration) <-chan time.Time {
-	c.asked <- d
-	return c.fire
-}
-
 // world is one test's repositories, worktrees and reaper.
 type world struct {
 	t        *testing.T
 	git      *fakeGit
 	registry *fakeRegistry
-	clock    *fakeClock
+	clock    *clocktest.Scripted
 	log      *dlog.TestLogger
 	live     []ids.WorkspaceID
 	lockPath string
@@ -279,7 +261,7 @@ func newWorld(t *testing.T) *world {
 		t:        t,
 		git:      newFakeGit(),
 		registry: &fakeRegistry{},
-		clock:    newFakeClock(),
+		clock:    clocktest.New(now),
 		log:      dlog.NewTestLogger(),
 		lockPath: filepath.Join(root, "locks", "worktree-reap.lock"),
 		root:     root,

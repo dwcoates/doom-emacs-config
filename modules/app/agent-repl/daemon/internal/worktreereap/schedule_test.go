@@ -49,7 +49,7 @@ func TestTheFirstSweepWaitsTheStartDelay(t *testing.T) {
 	startRun(t, r)
 
 	// Assert.
-	if got := <-w.clock.asked; got != DefaultStartDelay {
+	if got := <-w.clock.Asked; got != DefaultStartDelay {
 		t.Fatalf("the first wait = %v, want the start delay %v", got, DefaultStartDelay)
 	}
 }
@@ -60,11 +60,11 @@ func TestTheStartDelaysExpirySweeps(t *testing.T) {
 	repo := w.addRepo("repo")
 	dir := w.addTree(repo, tree{name: "landed"})
 	startRun(t, w.reaper())
-	<-w.clock.asked
+	<-w.clock.Asked
 
 	// Act.
-	w.clock.fire <- now
-	<-w.clock.asked // the next wait is asked for once the sweep is over
+	w.clock.Fire <- now
+	<-w.clock.Asked // the next wait is asked for once the sweep is over
 
 	// Assert.
 	if !w.git.saw("remove " + dir) {
@@ -76,13 +76,13 @@ func TestEverySweepAfterTheFirstWaitsTheCadence(t *testing.T) {
 	// Arrange.
 	w := newWorld(t)
 	startRun(t, w.reaper())
-	<-w.clock.asked
+	<-w.clock.Asked
 
 	// Act.
-	w.clock.fire <- now
-	second := <-w.clock.asked
-	w.clock.fire <- now
-	third := <-w.clock.asked
+	w.clock.Fire <- now
+	second := <-w.clock.Asked
+	w.clock.Fire <- now
+	third := <-w.clock.Asked
 
 	// Assert.
 	if second != DefaultEvery || third != DefaultEvery {
@@ -98,11 +98,11 @@ func TestAFailedSweepDoesNotEndTheSchedule(t *testing.T) {
 	w := newWorld(t)
 	w.registry.reposErr = errScripted
 	startRun(t, w.reaper())
-	<-w.clock.asked
+	<-w.clock.Asked
 
 	// Act.
-	w.clock.fire <- now
-	next := <-w.clock.asked
+	w.clock.Fire <- now
+	next := <-w.clock.Asked
 
 	// Assert.
 	if next != DefaultEvery {
@@ -114,7 +114,7 @@ func TestTheScheduleEndsWithItsContext(t *testing.T) {
 	// Arrange.
 	w := newWorld(t)
 	run := startRun(t, w.reaper())
-	<-w.clock.asked
+	<-w.clock.Asked
 
 	// Act.
 	run.cancel()
