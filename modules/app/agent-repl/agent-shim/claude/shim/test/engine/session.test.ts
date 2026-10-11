@@ -32,6 +32,7 @@ import type {
   ContextUsageLike,
   McpServerStatusLike,
   ModelInfoLike,
+  SlashCommandLike,
 } from "../../src/sdk/types.js";
 import { mainAgentId, promptVendorUuid } from "../../src/convert/ids.js";
 // STATICALLY, NOT `await import(...)` AT THE CALL SITE: the engine recognizes
@@ -14957,5 +14958,142 @@ describe("the live-work level the shim pushes", () => {
     expect(response.result.case === "success" ? response.result.value.session?.contract : undefined).toBe(
       conversationv1.SessionContract.LIVE_WORK_LEVEL,
     );
+  });
+});
+
+/**
+ * THE RUNTIME'S SLASH-COMMAND CATALOG, read and stated on the session stream.
+ *
+ * WHAT THIS GUARDS: that the composer's completions are the runtime's own
+ * answer, read once the session is up and re-read with the session's other
+ * pulled facts, so a skill added mid-session reaches the daemon after the next
+ * turn. A read that fails is a fault on its own component, never a silently
+ * empty catalog.
+ */
+describe("the slash-command catalog", () => {
+  /** Every catalog the engine pushed, as name lists, in push order. */
+  function statedCatalogs(spy: { mock: { calls: unknown[][] } }): string[][] {
+    return spy.mock.calls
+      .map(([update]) => update as conversationv1.SessionUpdate)
+      .filter((update) => update.update.case === "commandCatalog")
+      .map((update) =>
+        update.update.case === "commandCatalog" ? update.update.value.commands.map((entry) => entry.name) : [],
+      );
+  }
+
+  function faultComponents(h: Harness): string[] {
+    const update = h.engine.pushes.diagnostics().update;
+    if (update.case !== "diagnostics" || update.value.health.case !== "unhealthy") return [];
+    return update.value.health.value.faults.map((fault) => fault.component);
+  }
+
+  async function closeTurn(h: Harness, turn: string): Promise<void> {
+    await h.engine.startTurn(
+      create(shimv1.StartTurnRequestSchema, {
+        turn: create(conversationv1.TurnIdSchema, { value: turn }),
+        said: textSaid("go"),
+        origin: conversationv1.PromptOrigin.USER_SENT,
+      }),
+    );
+    h.queries[0]?.query.emit(resultMessage());
+  }
+
+  function commands(...names: string[]): SlashCommandLike[] {
+    return names.map((name) => ({ name, description: `the ${name} command`, argumentHint: "" }));
+  }
+
+  it("states the runtime's catalog once the session is up", async () => {
+    // Arrange.
+    const h = harness({
+      onQueryCreated: (query) => {
+        query.commands = commands("merge-queue", "compact");
+      },
+    });
+    const pushed = vi.spyOn(h.engine.pushes, "push");
+
+    // Act.
+    await started(h);
+
+    // Assert.
+    await vi.waitFor(() => {
+      expect(statedCatalogs(pushed)).toEqual([["merge-queue", "compact"]]);
+    });
+  });
+
+  it("states a changed catalog when a turn's end re-reads it", async () => {
+    // Arrange.
+    let current = commands("compact");
+    const h = harness({
+      onQueryCreated: (query) => {
+        query.supportedCommands = async (): Promise<SlashCommandLike[]> => current;
+      },
+    });
+    const pushed = vi.spyOn(h.engine.pushes, "push");
+    await started(h);
+    await vi.waitFor(() => {
+      expect(statedCatalogs(pushed)).toHaveLength(1);
+    });
+
+    // Act.
+    current = commands("compact", "new-skill");
+    await closeTurn(h, "turn-1");
+
+    // Assert.
+    await vi.waitFor(() => {
+      expect(statedCatalogs(pushed).at(-1)).toEqual(["compact", "new-skill"]);
+    });
+  });
+
+  it("faults the catalog's own component when the read fails, and states no catalog", async () => {
+    // Arrange.
+    const h = harness({
+      onQueryCreated: (query) => {
+        query.supportedCommands = async (): Promise<SlashCommandLike[]> => {
+          throw new Error("the vendor is busy");
+        };
+      },
+    });
+    const pushed = vi.spyOn(h.engine.pushes, "push");
+
+    // Act.
+    await started(h);
+
+    // Assert.
+    await vi.waitFor(() => {
+      expect(faultComponents(h)).toContain("vendor-command-catalog");
+    });
+    const update = h.engine.pushes.diagnostics().update;
+    const details =
+      update.case === "diagnostics" && update.value.health.case === "unhealthy"
+        ? update.value.health.value.faults.map((fault) => fault.detail)
+        : [];
+    expect(details).toContain("supportedCommands failed: the vendor is busy");
+    expect(statedCatalogs(pushed)).toEqual([]);
+  });
+
+  it("clears the catalog's fault when the next read answers", async () => {
+    // Arrange.
+    let reads = 0;
+    const h = harness({
+      onQueryCreated: (query) => {
+        query.supportedCommands = async (): Promise<SlashCommandLike[]> => {
+          reads += 1;
+          if (reads === 1) throw new Error("the vendor is busy");
+          return commands("compact");
+        };
+      },
+    });
+    await started(h);
+    await vi.waitFor(() => {
+      expect(faultComponents(h)).toContain("vendor-command-catalog");
+    });
+
+    // Act.
+    await closeTurn(h, "turn-1");
+
+    // Assert.
+    await vi.waitFor(() => {
+      expect(faultComponents(h)).not.toContain("vendor-command-catalog");
+    });
   });
 });
