@@ -471,12 +471,16 @@ other stock xwidget binding still resolves through the parent."
 (defconst agent-repl--frontend-copy-keys '("y" "C-c" "s-c")
   "The keys that copy the webview's selection: vim's, the terminal's, macOS's.")
 
-(defvar agent-repl-frontend-webview-mode-map
-  (let ((map (make-sparse-keymap)))
-    (dolist (key agent-repl--frontend-copy-keys)
-      (define-key map (kbd key) #'agent-repl-frontend-copy-selection))
-    map)
+(defun agent-repl--frontend-fill-webview-map (map)
+  "Bind the copy chords in MAP."
+  (dolist (key agent-repl--frontend-copy-keys)
+    (define-key map (kbd key) #'agent-repl-frontend-copy-selection)))
+
+(defvar agent-repl-frontend-webview-mode-map (make-sparse-keymap)
   "Keymap of `agent-repl-frontend-webview-mode': the copy chords.")
+
+(agent-repl-refill-keymap agent-repl-frontend-webview-mode-map
+                          #'agent-repl--frontend-fill-webview-map)
 
 (define-minor-mode agent-repl-frontend-webview-mode
   "Give an agent-repl webview its copy chords: `y', `C-c' and `s-c'.
