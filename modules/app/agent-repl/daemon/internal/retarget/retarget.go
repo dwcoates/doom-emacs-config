@@ -12,8 +12,6 @@ package retarget
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 
@@ -152,13 +150,9 @@ func Describe(target wsm.MergeTarget) string {
 }
 
 // randomKey mints a notice's idempotency key: every retarget is its own
-// notice, so a key is never reused.
+// notice.
 func randomKey() (string, error) {
-	var b [16]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return "", err
-	}
-	return "workspace-retargeted-" + hex.EncodeToString(b[:]), nil
+	return prompthandler.MintKey("workspace-retargeted")
 }
 
 // parentID spells an optional parent for records, empty for top-level.
