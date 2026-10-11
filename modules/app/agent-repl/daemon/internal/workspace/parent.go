@@ -29,7 +29,7 @@ func (v *verbs) SetParent(ctx context.Context, ws ids.WorkspaceID, parent *ids.W
 	if err != nil {
 		return wsm.ParentChange{}, err
 	}
-	fields := dlog.Context{"parent": parentID(parent)}
+	fields := dlog.Context{"parent": ids.Optional(parent)}
 	change, err := v.deps.DB.SetParent(ctx, ws, parent)
 	if refused, ok := wsm.AsParentRefused(err); ok {
 		return wsm.ParentChange{}, parentRefusal(log, refused)
@@ -44,8 +44,8 @@ func (v *verbs) SetParent(ctx context.Context, ws ids.WorkspaceID, parent *ids.W
 		return wsm.ParentChange{}, fmt.Errorf("set parent of %q: %w", ws, err)
 	}
 	log.Info(opSetParent, "recorded the workspace's new parent and merge target", dlog.Context{
-		"parent": parentID(parent), "target_dir": change.After.Dir,
-		"previous_parent": parentID(change.Before.Parent), "previous_target_dir": change.Before.Dir,
+		"parent": ids.Optional(parent), "target_dir": change.After.Dir,
+		"previous_parent": ids.Optional(change.Before.Parent), "previous_target_dir": change.Before.Dir,
 	})
 	v.republishRegistry(ctx, log, opSetParent)
 	return change, nil
@@ -59,8 +59,8 @@ func (v *verbs) RestoreParent(ctx context.Context, change wsm.ParentChange) erro
 	if err != nil {
 		return err
 	}
-	fields := dlog.Context{"parent": parentID(change.Before.Parent), "target_dir": change.Before.Dir,
-		"undone_parent": parentID(change.After.Parent), "undone_target_dir": change.After.Dir}
+	fields := dlog.Context{"parent": ids.Optional(change.Before.Parent), "target_dir": change.Before.Dir,
+		"undone_parent": ids.Optional(change.After.Parent), "undone_target_dir": change.After.Dir}
 	stale, err := v.deps.DB.RestoreParent(ctx, change)
 	if err != nil {
 		log.Error(opSetParent, "could not undo a retarget whose notice was not queued", withCause(fields, err))

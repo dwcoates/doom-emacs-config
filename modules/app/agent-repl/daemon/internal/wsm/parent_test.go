@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"claude-repld/internal/ids"
 )
 
 // parentFamily is one repository with a main checkout and the workspaces a
@@ -134,8 +136,8 @@ func TestSetParentMovesTheParentAndTheMergeTargetTogether(t *testing.T) {
 
 			// Assert
 			parent, target := targetOf(t, s, f.byName[tt.subject].ID)
-			if optionalID(parent) != optionalID(f.id(tt.wantParent)) {
-				t.Fatalf("parent = %q, want %q", optionalID(parent), optionalID(f.id(tt.wantParent)))
+			if ids.Optional(parent) != ids.Optional(f.id(tt.wantParent)) {
+				t.Fatalf("parent = %q, want %q", ids.Optional(parent), ids.Optional(f.id(tt.wantParent)))
 			}
 			want := f.repoDir
 			if tt.wantTargetOf != "" {
@@ -163,7 +165,7 @@ func TestSetParentReportsTheTargetBeforeAndAfter(t *testing.T) {
 		Before:    MergeTarget{Parent: f.id("parent"), ParentName: "parent", Dir: f.byName["parent"].Dir, DefaultBranch: "master"},
 		After:     MergeTarget{Dir: f.repoDir, DefaultBranch: "master"},
 	}
-	if optionalID(change.Before.Parent) != optionalID(want.Before.Parent) || change.Before.ParentName != want.Before.ParentName ||
+	if ids.Optional(change.Before.Parent) != ids.Optional(want.Before.Parent) || change.Before.ParentName != want.Before.ParentName ||
 		change.Before.Dir != want.Before.Dir || change.Before.DefaultBranch != want.Before.DefaultBranch {
 		t.Fatalf("before = %+v, want %+v", change.Before, want.Before)
 	}
@@ -254,8 +256,8 @@ func TestSetParentRefuses(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Workspace: %v", err)
 			}
-			if optionalID(after.Parent) != optionalID(before.Parent) {
-				t.Fatalf("parent changed on a refusal: %q -> %q", optionalID(before.Parent), optionalID(after.Parent))
+			if ids.Optional(after.Parent) != ids.Optional(before.Parent) {
+				t.Fatalf("parent changed on a refusal: %q -> %q", ids.Optional(before.Parent), ids.Optional(after.Parent))
 			}
 			for _, r := range log.Records() {
 				if r.Level == "error" || r.Level == "warn" {
@@ -328,8 +330,8 @@ func TestRestoreParent(t *testing.T) {
 				t.Fatalf("stale = %v, want %v", stale, tt.wantStale)
 			}
 			parent, target := targetOf(t, s, f.byName["child"].ID)
-			if optionalID(parent) != optionalID(f.id(tt.wantParent)) || target != f.byName[tt.wantParent].Dir {
-				t.Fatalf("parent = %q at %q, want %q at %q", optionalID(parent), target, tt.wantParent, f.byName[tt.wantParent].Dir)
+			if ids.Optional(parent) != ids.Optional(f.id(tt.wantParent)) || target != f.byName[tt.wantParent].Dir {
+				t.Fatalf("parent = %q at %q, want %q at %q", ids.Optional(parent), target, tt.wantParent, f.byName[tt.wantParent].Dir)
 			}
 		})
 	}

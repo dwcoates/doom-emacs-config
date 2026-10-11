@@ -36,3 +36,12 @@ type TaskID string
 
 // FaultID identifies one recorded fault.
 type FaultID string
+
+// Optional spells an optional id for a record or a log field: the id, or
+// empty for none.
+func Optional[ID ~string](id *ID) string {
+	if id == nil {
+		return ""
+	}
+	return string(*id)
+}

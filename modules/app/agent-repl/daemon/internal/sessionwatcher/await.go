@@ -97,7 +97,7 @@ func (w *watcher) registerFreeWaiter() (ch chan error, standing bool, err error)
 	ch = make(chan error, 1)
 	w.freeWaiters = append(w.freeWaiters, ch)
 	w.log.Debug("daemon.sessionwatcher.await_free", "a caller is waiting for freeness", dlog.Context{
-		"turn_in_flight": turnValue(w.turn),
+		"turn_in_flight": ids.Optional(w.turn),
 		"waiters":        len(w.freeWaiters),
 	})
 	return ch, true, nil
@@ -206,7 +206,7 @@ func (w *watcher) dropWaitingLocked(turn ids.TurnID, why string) bool {
 		}
 		w.waiting = append(w.waiting[:i], w.waiting[i+1:]...)
 		w.log.Debug("daemon.sessionwatcher.turn_waiting_dropped", why, dlog.Context{
-			"turn_id": string(turn), "turn_in_flight": turnValue(w.turn), "still_waiting": len(w.waiting),
+			"turn_id": string(turn), "turn_in_flight": ids.Optional(w.turn), "still_waiting": len(w.waiting),
 		})
 		return true
 	}

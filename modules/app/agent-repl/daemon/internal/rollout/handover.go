@@ -1057,7 +1057,7 @@ func (c *controller) served(ctx context.Context) (transfer, untransferable []wsm
 			// daemon as the owner, and the workspace is handed over.
 			if _, live := c.deps.Shims.Client(ws.ID); !live {
 				c.log.Debug(opHandover, "a workspace this daemon holds no session for is served by another instance or none; it is not handed over",
-					dlog.Context{"workspace": string(ws.ID), "owner": ownerText(owner)})
+					dlog.Context{"workspace": string(ws.ID), "owner": ids.Optional(owner)})
 				continue
 			}
 			if err := c.reclaimLiveSession(ctx, ws.ID, owner); err != nil {
@@ -1091,21 +1091,13 @@ func (c *controller) served(ctx context.Context) (transfer, untransferable []wsm
 	return out, left, nil
 }
 
-// ownerText spells a serving owner for a record; none is the empty string.
-func ownerText(owner *ids.InstanceID) string {
-	if owner == nil {
-		return ""
-	}
-	return string(*owner)
-}
-
 // reclaimLiveSession repairs the serving row of a workspace this daemon holds
 // a live session for while the row names another instance (or none), stating
 // the violation at ERROR first. A claim that fails abandons the handover: the
 // transfer would then release nothing and the successor would refuse the
 // adoption of a workspace "served by an unexpected daemon".
 func (c *controller) reclaimLiveSession(ctx context.Context, ws ids.WorkspaceID, owner *ids.InstanceID) error {
-	fields := dlog.Context{"workspace": string(ws), "owner": ownerText(owner), "instance": string(c.deps.Instance)}
+	fields := dlog.Context{"workspace": string(ws), "owner": ids.Optional(owner), "instance": string(c.deps.Instance)}
 	c.log.Error(opHandover, "this daemon holds a live session for a workspace whose serving row names another instance; the live session is the truth, so it is reclaimed and handed over", fields)
 	if err := c.deps.DB.ClaimServing(ctx, ws, c.deps.Instance); err != nil {
 		c.log.Error(opHandover, "could not reclaim serving ownership of a workspace this daemon holds a live session for", withCause(fields, err))
