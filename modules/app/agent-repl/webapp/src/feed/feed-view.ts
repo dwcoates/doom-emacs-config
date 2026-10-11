@@ -1188,9 +1188,7 @@ export function createFeedController(
     }
     const state = states.get(id);
     if (state !== undefined) {
-      state.bubble?.dispose();
-      stopTicking(state.element);
-      state.element.remove();
+      discardRow(state);
       states.delete(id);
     }
     order.splice(at, 1);
@@ -1232,9 +1230,7 @@ export function createFeedController(
     for (const gone of dropped) {
       const state = states.get(gone);
       if (state === undefined) continue;
-      state.bubble?.dispose();
-      stopTicking(state.element);
-      state.element.remove();
+      discardRow(state);
       states.delete(gone);
     }
     log.info(
@@ -1304,11 +1300,7 @@ export function createFeedController(
 
   /** Drop every row: the feed is being repainted from a fresh newest page. */
   function clearRows(): void {
-    for (const state of states.values()) {
-      state.bubble?.dispose();
-      stopTicking(state.element);
-      state.element.remove();
-    }
+    for (const state of states.values()) discardRow(state);
     states.clear();
     order.length = 0;
   }
@@ -1929,6 +1921,18 @@ export function createFeedController(
  * without it, or with an empty key, is a malformed view — refused, never
  * defaulted to where it happened to arrive.
  */
+/**
+ * THE ONE WAY A ROW LEAVES THE FEED: its bubble's sub-feed is disposed, its
+ * clocks stop, and its element leaves the document. Every drop (a removal, the
+ * truncation above a separation, a repaint from a fresh page) goes through
+ * here, so none can leave a clock ticking or a sub-feed open behind it.
+ */
+export function discardRow(state: { bubble: BubbleLike | null; element: HTMLElement }): void {
+  state.bubble?.dispose();
+  stopTicking(state.element);
+  state.element.remove();
+}
+
 export function orderKeyOf(row: FeedRow): string {
   const key = requireMessage(row.order, "FeedRow.order").key;
   if (key === "")

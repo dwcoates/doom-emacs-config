@@ -22,8 +22,10 @@ import {
   forgetOwnTurns,
   rememberOwnTurn,
 } from "../../src/composer/own-turns.js";
+import feedViewSource from "../../src/feed/feed-view.ts?raw";
 import {
   createFeedController,
+  discardRow,
   isBubbleRow,
   type BubbleLike,
   type FeedController,
@@ -762,6 +764,60 @@ describe("createFeedController: a feed emptied whole", () => {
     controller.applyPage(page([]), "replace");
     // Assert.
     expect(drawnIds(host)).toEqual([]);
+  });
+});
+
+describe("discardRow", () => {
+  /** A drawn row's state: its element in the document, and a bubble spy or none. */
+  function drawnRow(withBubble: boolean) {
+    const element = document.createElement("article");
+    document.body.replaceChildren(element);
+    let disposed = 0;
+    const bubble = withBubble ? ({ dispose: () => { disposed += 1; } } as unknown as BubbleLike) : null;
+    return { state: { element, bubble }, disposed: () => disposed };
+  }
+
+  it("disposes the row's bubble", () => {
+    // Arrange
+    const r = drawnRow(true);
+    // Act
+    discardRow(r.state);
+    // Assert
+    expect(r.disposed()).toBe(1);
+  });
+
+  it("runs the element's discard hooks, so its clocks and measurers stop", () => {
+    // Arrange
+    const r = drawnRow(false);
+    let stopped = 0;
+    onDiscard(r.state.element, () => { stopped += 1; });
+    // Act
+    discardRow(r.state);
+    // Assert
+    expect(stopped).toBe(1);
+  });
+
+  it("takes the element out of the document", () => {
+    // Arrange
+    const r = drawnRow(false);
+    // Act
+    discardRow(r.state);
+    // Assert
+    expect(r.state.element.isConnected).toBe(false);
+  });
+
+  it("drops a row with no bubble without failing", () => {
+    // Arrange
+    const r = drawnRow(false);
+    // Act + Assert
+    expect(() => discardRow(r.state)).not.toThrow();
+  });
+
+  it("is the only place feed-view.ts tears a row down", () => {
+    // Arrange -- a hand-rolled drop would repeat the bubble's disposal.
+    const disposals = feedViewSource.match(/\.bubble\?\.dispose\(\)/g) ?? [];
+    // Act + Assert
+    expect(disposals).toHaveLength(1);
   });
 });
 
