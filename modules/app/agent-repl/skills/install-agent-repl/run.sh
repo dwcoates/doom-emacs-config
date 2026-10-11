@@ -53,7 +53,7 @@ case "${1:-}" in
     log "running doom doctor"
     out="$(doom doctor 2>&1)"
     printf '%s\n' "$out"
-    if printf '%s\n' "$out" | grep -q 'agent-repl:'; then exit 1; fi
+    if grep -q 'agent-repl:' <<<"$out"; then exit 1; fi
     ;;
   *)
     usage
