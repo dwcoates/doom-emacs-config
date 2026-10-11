@@ -128,3 +128,50 @@ Supersedes the pacing model of `streaming-reveal-window.md`.
   - The daemon's burst-gap machinery (`revealpace.Burst`, `weightedAverage`,
     `reveal_burst_gaps`) has no remaining reader; the table is retired with a
     later breaking step, per the wsm two-deploy rule.
+
+## Daemon-side model (not contract, recorded for implementers)
+
+- **What a sample is.** One settled block of the MAIN agent, on the LIVE
+  plane, with the session's model known: the characters (runes) of its
+  settled whole minus those its first text-bearing fragment brought, over the
+  time from that fragment's receipt to the settle's
+  (`daemon/internal/resolve/feed/revealpace.go`). The first fragment's text is
+  left out because it arrived at the start instant.
+  - Left out: blocks under 40 characters or under 200 ms (they say nothing
+    about streaming speed), a block that never streamed (a settled whole with
+    no fragment before it), a block the turn's death cut short (the failure
+    arm), replays, subagents.
+  - Accepted cost: the transcript plane's settle can land before the stream
+    plane's last fragments (`response.go`, "THE SAME BLOCK'S SETTLED WHOLE"),
+    which overstates that block's speed. The bounds are low percentiles, so a
+    few fast outliers barely move them.
+- **Window.** The 50 most recent block speeds per (model, kind), oldest
+  dropped first (`revealpace.WindowSize`). A key with fewer than 20
+  (`revealpace.MinBlocks`) serves its kind's default.
+- **Bounds.** Nearest-rank 25th and 38th percentiles of the window, rounded to
+  whole chars/sec, never below 1, minimum never above maximum.
+- **Defaults.** Thinking 45-55, prose 49-90 chars/sec: the same percentiles
+  measured off the store on 2026-10-10 (2149 thinking and 845 prose blocks of
+  the last 7 days, each block's characters over its row's first-insert to
+  last-write time, blocks over 60 s dropped as rewrites).
+- **Kind-wide bounds** (subagents, a main agent whose model is not known
+  yet): the percentiles of every model's window of that kind pooled, once the
+  pool holds 20 speeds; the default before that. No separate record is kept.
+- **Persistence.** `wsm` table `reveal_block_speeds` (layout 31, additive). A
+  window is written when a measured block settles. `reveal_burst_gaps`
+  (layout 30) and `reveal_gaps` (layout 27) are retired and dropped by a later
+  breaking step.
+
+## Webapp-side model (not contract, recorded for implementers)
+
+- **One speed rule** (`webapp/src/reveal-pace.ts`). With `bank` = rendered
+  characters arrived but not shown, the speed is
+  `max(clamp(bank / 0.3 s, min, max), bank / bank_limit)`, zero for an empty
+  bank. A steady arrival speed keeps a steady bank, and `bank / 0.3 s` is the
+  speed that keeps it steady, so the reveal follows the arrivals about 0.3 s
+  behind within the bounds; a stream faster than the maximum settles about one
+  bank limit behind.
+- **Across pushes** only the shown length is carried (`data-revealed`); the
+  windowed reveal's carried speed (`data-reveal-speed`) is gone.
+- **A draw with no pace** (a replay) and the error arm are drawn whole; the
+  200 chars/sec `SmoothReveal` fallback is gone with `smooth.ts`.
