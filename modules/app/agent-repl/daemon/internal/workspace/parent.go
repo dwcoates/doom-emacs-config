@@ -91,3 +91,12 @@ func parentRefusal(log dlog.Logger, refused *wsm.ParentRefusedError) *Refusal {
 	}
 	panic(fmt.Sprintf("workspace: undeclared retarget refusal %s", refused.Refusal))
 }
+
+// UnknownParentRefusal is the unknown_parent refusal for a new parent named
+// by a directory no workspace is registered at: the command file's spelling
+// of a parent, which it resolves before the retarget is asked for. It is
+// recorded at INFO, as every refusal is.
+func UnknownParentRefusal(log dlog.Logger, dir string, cause error) *Refusal {
+	return refuse(log, rpcSetParent, ArmUnknownParent,
+		fmt.Sprintf("no workspace is registered at the new parent's directory %q: %v", dir, cause), true)
+}
