@@ -224,11 +224,15 @@ here, which is what makes this the painted/unpainted answer."
 
 ;;;; ---- Rendering --------------------------------------------------------
 
-(defvar agent-repl-open-progress-mode-map
-  (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "q") #'quit-window)
-    map)
+(defun agent-repl--open-progress-fill-map (map)
+  "Bind `q' to `quit-window' in MAP."
+  (define-key map (kbd "q") #'quit-window))
+
+(defvar agent-repl-open-progress-mode-map (make-sparse-keymap)
   "Keymap for `agent-repl-open-progress-mode'.")
+
+(agent-repl-refill-keymap agent-repl-open-progress-mode-map
+                          #'agent-repl--open-progress-fill-map)
 
 (define-derived-mode agent-repl-open-progress-mode special-mode "Agent-Opening"
   "Major mode for the agent-repl workspace-open placeholder."

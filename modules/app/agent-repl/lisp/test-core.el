@@ -4639,6 +4639,95 @@ module loaded, about jobs nothing owns any more."
         (should (agent-repl--agent-input-buffer-p buf))
       (kill-buffer buf))))
 
+;;;; ---- Tests: keymaps a reload rebuilds ----
+
+(ert-deftest agent-repl-test-refill-keymap-keeps-the-keymap-object ()
+  "The refilled map is the SAME object, so holders of it see the new chords."
+  ;; Arrange
+  (let* ((map (make-sparse-keymap))
+         (held map))
+    ;; Act
+    (agent-repl-refill-keymap map (lambda (m) (define-key m (kbd "M-0") 'ignore)))
+    ;; Assert
+    (should (eq (lookup-key held (kbd "M-0")) 'ignore))))
+
+(ert-deftest agent-repl-test-refill-keymap-adds-a-chord-an-earlier-fill-lacked ()
+  "A chord the source gained since the first load is live after the refill."
+  ;; Arrange
+  (let ((map (make-sparse-keymap)))
+    (agent-repl-refill-keymap map (lambda (m) (define-key m (kbd "M-1") 'ignore)))
+    ;; Act
+    (agent-repl-refill-keymap map (lambda (m)
+                                    (define-key m (kbd "M-1") 'ignore)
+                                    (define-key m (kbd "M-0") 'ding)))
+    ;; Assert
+    (should (eq (lookup-key map (kbd "M-0")) 'ding))))
+
+(ert-deftest agent-repl-test-refill-keymap-drops-a-chord-the-source-removed ()
+  "A chord the source no longer binds does not linger from an earlier load."
+  ;; Arrange
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "M-9") 'ignore)
+    ;; Act
+    (agent-repl-refill-keymap map #'ignore)
+    ;; Assert
+    (should-not (lookup-key map (kbd "M-9")))))
+
+(ert-deftest agent-repl-test-refill-keymap-keeps-the-parent ()
+  "The map's parent survives the refill, as `define-derived-mode' set it."
+  ;; Arrange
+  (let ((parent (make-sparse-keymap))
+        (map (make-sparse-keymap)))
+    (set-keymap-parent map parent)
+    ;; Act
+    (agent-repl-refill-keymap map #'ignore)
+    ;; Assert
+    (should (eq (keymap-parent map) parent))))
+
+(ert-deftest agent-repl-test-refill-keymap-returns-the-map ()
+  "The refill answers the map it filled."
+  (let ((map (make-sparse-keymap)))
+    (should (eq (agent-repl-refill-keymap map #'ignore) map))))
+
+(ert-deftest agent-repl-test-refill-keymap-rejects-a-non-keymap ()
+  "A non-keymap is an invariant violation and fails hard, calling no fill."
+  ;; Arrange
+  (let ((called nil))
+    ;; Act / Assert
+    (should-error (agent-repl-refill-keymap '(not-a-keymap) (lambda (_) (setq called t))))
+    (should-not called)))
+
+(defconst agent-repl-test-core--lisp-dir
+  (file-name-directory (or load-file-name buffer-file-name))
+  "The lisp/ directory under test, resolved at load time.")
+
+(defun agent-repl-test-core--defvar-keymaps-built-inline ()
+  "Return (FILE . VAR) for each top-level keymap `defvar' in lisp/ built inline.
+A `-map' `defvar' whose initializer is anything but `(make-sparse-keymap)'
+builds its bindings once per Emacs, so a reload never updates it."
+  (let ((dir agent-repl-test-core--lisp-dir)
+        found)
+    (dolist (file (directory-files dir t "\\`[^.].*\\.el\\'"))
+      (unless (string-prefix-p "test-" (file-name-nondirectory file))
+        (with-temp-buffer
+          (insert-file-contents file)
+          (condition-case nil
+              (while t
+                (let ((form (read (current-buffer))))
+                  (when (and (eq (car-safe form) 'defvar)
+                             (string-suffix-p "-map" (symbol-name (cadr form)))
+                             (cddr form)
+                             (not (equal (nth 2 form) '(make-sparse-keymap))))
+                    (push (cons (file-name-nondirectory file) (cadr form)) found))))
+            (end-of-file nil)))))
+    found))
+
+(ert-deftest agent-repl-test-refill-keymap-every-module-keymap-starts-empty ()
+  "Every module keymap `defvar' starts empty and is filled by a reloadable form.
+Shared shape with `agent-repl-refill-keymap': a keymap built inside its
+`defvar' silently keeps the first load's bindings across every reload."
+  (should-not (agent-repl-test-core--defvar-keymaps-built-inline)))
+
 (provide 'test-core)
 
 ;;; test-core.el ends here
