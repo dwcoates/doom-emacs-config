@@ -189,7 +189,8 @@
   - This covers every memory file and the `MEMORY.md` index alike.
   - An instruction the user gives is not, by itself, a request to remember it.
     - Most instructions hold only for the session they were given in, and a memory written from one outlives that session.
-- Propose the memory change in the response's fix section, as a question awaiting the user's answer.
+- Propose the memory change in the response's memory section, as a question awaiting the user's answer.
+  - The memory section is its own root branch, laid out per the TLDR spec's content guidelines and emoji prefixing below.
   - Name the memory file, and whether the change adds, updates, or removes it.
   - State what the memory would say, so the user rules on its content and not only its existence.
 - Write the memory only after the user approves that specific change.
@@ -440,7 +441,10 @@ I will NEVER ask a rhetorical question -- if I ask 'why does X happen?' or 'is Y
 
 - If something was fixed/changed/implemeneted, include a fixed top-level entry prefixed with wrench emoji explaining the change
 - If complexity or complication was noticed, a top-level section should be included for this
-- If a memory change applies, propose it in the fix section as a question, per the memory section above, rather than making it
+- If a memory change applies, propose it in a dedicated memory section, as a question per the memory section above, rather than making it
+  - The memory section is its own root branch, and it is ALWAYS the LAST root branch of the tree.
+  - It holds every proposed memory change of the response, and nothing else.
+  - Memory proposals never appear in the fix section or the questions section.
 - If questio are needed for the user, a top-level section should be included for this 
   - In otherwords, consolidate questions in a top-level section (with a paralelel recursive structure) rather than dispersed across top-level entries
 
@@ -494,6 +498,9 @@ I will NEVER ask a rhetorical question -- if I ask 'why does X happen?' or 'is Y
 - Whenever the response presents a fix for a problem (i.e., a concrete fix is available), the TLDR tree MUST contain a dedicated fix section rendered as its own root branch.
   - That fix section's root branch MUST be prefixed with the wrench icon 🔧 immediately after its numeric label (in place of a freely-chosen emoji).
   - This lets the reader always locate the actionable fix at a glance.
+- Whenever the response proposes a memory change, the memory section's root branch MUST be prefixed with the brain icon 🧠 immediately after its numeric label (in place of a freely-chosen emoji).
+  - 🧠 is the one standard memory emoji, and no other emoji may stand in for it.
+  - 🧠 is reserved for the memory section, so no other root branch uses it.
 
 ### Response header
 
