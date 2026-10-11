@@ -54,6 +54,7 @@
 (declare-function agent-repl--ws-known-p "workspace" (ws))
 (declare-function agent-repl--ws-open-p "workspace" (ws))
 (declare-function agent-repl--ws-switch "workspace" (ws &rest args))
+(defvar agent-repl-host-automatic-switch)
 (declare-function agent-repl--ws-name-for-dir "worktree" (dir))
 (declare-function agent-repl-verb-open "verbs" (ref))
 (declare-function agent-repl-verbs--ref "verbs" (ws))
@@ -317,7 +318,11 @@ fires exactly ONCE because it is removed before the placement runs."
          (remhash root agent-repl--ffw-pending)
          (agent-repl--info ws "find-file-workspace: tab arrived root=%s ws=%s buffer=%s"
                            root ws (buffer-name buffer))
-         (agent-repl--ws-switch ws)
+         ;; The tab's ARRIVAL moves the frame, not a new gesture of the user's:
+         ;; counting it would withdraw the landing the same visit asked for
+         ;; (`agent-repl-host-automatic-switch').
+         (let ((agent-repl-host-automatic-switch t))
+           (agent-repl--ws-switch ws))
          (let ((win (agent-repl--ffw-place buffer)))
            (agent-repl--info ws "find-file-workspace: placed root=%s ws=%s buffer=%s window=%S"
                              root ws (buffer-name buffer) win))))))
