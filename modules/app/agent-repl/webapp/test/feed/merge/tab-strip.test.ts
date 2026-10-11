@@ -207,7 +207,7 @@ describe("drawTabDuration: how long the tab has been in its state", () => {
     const el = drawFeedMergeTab(tab, { active: false, ticker: TICKER });
     expect([...el.children].map((c) => c.className)).toEqual([
       "merge-tab-label",
-      "merge-tab-duration",
+      "merge-tab-duration reserved-clock",
       "merge-tab-glyph is-live",
     ]);
   });
