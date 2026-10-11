@@ -151,6 +151,11 @@ var layout3Undo = map[int][]string{
 		`ALTER TABLE merge_queue DROP COLUMN source_detach_id`,
 	},
 	34: {`ALTER TABLE workspaces DROP COLUMN commit_count`},
+	35: {
+		`DROP TRIGGER workspaces_land_unplaced`,
+		`DROP INDEX workspaces_by_place`,
+		`ALTER TABLE workspaces DROP COLUMN place`,
+	},
 }
 
 // demoteToLayout3 takes a stopped daemon's state database back to layout 3 by
