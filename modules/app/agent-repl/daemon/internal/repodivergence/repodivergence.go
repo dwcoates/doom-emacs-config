@@ -134,15 +134,10 @@ func New(deps Deps) (*Measurer, error) {
 // never end the loop.
 func (m *Measurer) Run(ctx context.Context) error {
 	m.deps.Log.Debug(opRun, "the repository divergence measurer is scheduled", dlog.Context{"every": m.deps.Every.String()})
-	for {
-		m.Sweep(ctx)
-		select {
-		case <-ctx.Done():
-			m.deps.Log.Debug(opRun, "the repository divergence measurer stopped with its context", nil)
-			return ctx.Err()
-		case <-m.deps.Clock.After(m.deps.Every):
-		}
-	}
+	m.Sweep(ctx)
+	err := clock.Repeat(ctx, m.deps.Clock, m.deps.Every, m.deps.Every, m.Sweep)
+	m.deps.Log.Debug(opRun, "the repository divergence measurer stopped with its context", nil)
+	return err
 }
 
 // Sweep measures every registered repository once, handing each outcome to the
