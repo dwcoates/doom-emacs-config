@@ -20,6 +20,18 @@ and the daemon Emacs starts, see them.
 | `AGENT_REPL_PERSISTENT_WIFI_HOTSPOT` | Your phone hotspot's name, in your shell profile. Either apostrophe spelling joins. | Persistent-wifi mode, which joins the hotspot when it turns on and leaves it when it turns off. | Turning the mode on or off still changes the power settings. The hotspot step fails, naming the variable. |
 | `AGENT_WORKSPACE_PREFIX` | Optional. A prefix for new workspace branches, such as your initials, in your shell profile. The older `CLAUDE_WORKSPACE_PREFIX` is still read when this one is unset. | Workspace creation, which names a branch `<prefix>/<name>`. | Branches get no prefix. |
 
+## Asking about agent-repl
+
+`SPC o h` asks a question about agent-repl in a new help workspace.
+
+- It asks for the question alone, and the composer's text is the default.
+- The workspace is made in the repository agent-repl's own source lives in, whichever workspace you ask from.
+  - That repository must be on the roster. If it is not, the command says so. Add it with `SPC TAB C-n`.
+- The agent answers with the `/agent-repl-help` skill, which maps agent-repl's user, architecture and developer documentation and its code.
+- The agent changes nothing without your explicit approval, in that turn or any later one.
+  - The help workspace is not a one-shot. Nothing merges when the answer is done, and you can keep asking.
+- The opening instruction the agent receives is `agent-repl-help-preamble`. It is hidden from the drawn prompt.
+
 ## Selecting a bubble
 
 One bubble at a time can be selected in the feed. A selected bubble has the
