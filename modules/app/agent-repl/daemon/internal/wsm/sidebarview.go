@@ -47,6 +47,19 @@ ALTER TABLE sidebar_view ADD COLUMN in_progress_folded INTEGER NOT NULL DEFAULT 
 ALTER TABLE sidebar_view ADD COLUMN merging_folded INTEGER NOT NULL DEFAULT 0;
 `
 
+// hiddenWorkspacesDDL is the layout-32 addition: whether each workspace sits
+// in the roster's hidden section (frontend.v1.WorkspaceRoster.hidden), and
+// that section's fold on the sidebar_view singleton beside the merged band's.
+// Every existing workspace is shown (0) and the section is expanded (0) until
+// someone changes either.
+//
+// Like the other column-add steps it is an ALTER, applied after sidebar_view
+// on a fresh file and as its own step on a migrated one.
+const hiddenWorkspacesDDL = `
+ALTER TABLE workspaces ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE sidebar_view ADD COLUMN hidden_folded INTEGER NOT NULL DEFAULT 0;
+`
+
 // Grouping is which of the sidebar's resolved views is shown.
 type Grouping string
 
@@ -131,6 +144,8 @@ type SidebarView struct {
 	MergedFolded bool
 	// MaturityFolded is whether each maturity stage's section is collapsed.
 	MaturityFolded MaturityFolds
+	// HiddenFolded is whether the hidden-workspaces section is collapsed.
+	HiddenFolded bool
 	// Grouping is the grouping every page shows.
 	Grouping Grouping
 }
@@ -158,6 +173,13 @@ func (s *store) SetTaskFolded(ctx context.Context, id TaskID, folded bool) error
 func (s *store) SetMergedSectionFolded(ctx context.Context, folded bool) error {
 	return s.updateSidebarView(ctx, "daemon.wsm.set_merged_section_folded", dlog.Context{"folded": folded},
 		`UPDATE sidebar_view SET merged_folded = ? WHERE id = 1`, folded)
+}
+
+// SetHiddenSectionFolded records whether the hidden-workspaces section is
+// collapsed, leaving the rest of the view as it stands.
+func (s *store) SetHiddenSectionFolded(ctx context.Context, folded bool) error {
+	return s.updateSidebarView(ctx, "daemon.wsm.set_hidden_section_folded", dlog.Context{"folded": folded},
+		`UPDATE sidebar_view SET hidden_folded = ? WHERE id = 1`, folded)
 }
 
 // SetMaturityFolded records whether one maturity stage's section is
@@ -213,14 +235,15 @@ func (s *store) SidebarView(ctx context.Context) (SidebarView, error) {
 	err := s.read(ctx, "daemon.wsm.sidebar_view", dlog.Context{}, func(ctx context.Context) error {
 		var (
 			folded   bool
+			hidden   bool
 			maturity MaturityFolds
 			grouping string
 		)
 		// Each stage's column is read straight into its field, through the
 		// same two mappings the write uses, so a stage cannot be read from a
 		// column other than the one it is written to.
-		columns := "merged_folded, grouping"
-		dest := []any{&folded, &grouping}
+		columns := "merged_folded, grouping, hidden_folded"
+		dest := []any{&folded, &grouping, &hidden}
 		for _, stage := range MaturityStages {
 			column, _ := stage.foldColumn()
 			columns += ", " + column
@@ -237,7 +260,7 @@ func (s *store) SidebarView(ctx context.Context) (SidebarView, error) {
 		if !Grouping(grouping).Valid() {
 			return &DecodeError{Table: "sidebar_view", Row: "1", Field: "grouping", Err: fmt.Errorf("a stored grouping is repository, task or maturity, not %q", grouping)}
 		}
-		view = SidebarView{MergedFolded: folded, MaturityFolded: maturity, Grouping: Grouping(grouping)}
+		view = SidebarView{MergedFolded: folded, MaturityFolded: maturity, HiddenFolded: hidden, Grouping: Grouping(grouping)}
 		return nil
 	})
 	return view, err

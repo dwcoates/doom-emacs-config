@@ -348,6 +348,20 @@ func TestEachRequestValidatorNamesTheFieldItRefusesWithTargetsAndSources(t *test
 			field: "dir",
 		},
 		{
+			name: "set hidden with no workspace",
+			check: func() *connect.Error {
+				return validateSetWorkspaceHiddenRequest(&agentreplv1.SetWorkspaceHiddenRequest{})
+			},
+			field: "workspace",
+		},
+		{
+			name: "set hidden with no visibility arm",
+			check: func() *connect.Error {
+				return validateSetWorkspaceHiddenRequest(&agentreplv1.SetWorkspaceHiddenRequest{Workspace: ref()})
+			},
+			field: "visibility",
+		},
+		{
 			name: "set priority with no workspace",
 			check: func() *connect.Error {
 				return validateSetWorkspacePriorityRequest(&agentreplv1.SetWorkspacePriorityRequest{})
@@ -469,6 +483,15 @@ func TestEachRequestValidatorAcceptsAWellFormedRequestWithTargetsAndSources(t *t
 			name: "register",
 			check: func() *connect.Error {
 				return validateRegisterWorkspaceRequest(&agentreplv1.RegisterWorkspaceRequest{Dir: testWorkspaceDir})
+			},
+		},
+		{
+			name: "set hidden",
+			check: func() *connect.Error {
+				return validateSetWorkspaceHiddenRequest(&agentreplv1.SetWorkspaceHiddenRequest{
+					Workspace:  ref(),
+					Visibility: &agentreplv1.SetWorkspaceHiddenRequest_Hide{Hide: &agentreplv1.SetWorkspaceHiddenHide{}},
+				})
 			},
 		},
 		{

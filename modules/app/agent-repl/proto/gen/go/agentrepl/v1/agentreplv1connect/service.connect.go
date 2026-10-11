@@ -118,6 +118,9 @@ const (
 	// AgentReplSetWorkspacePriorityProcedure is the fully-qualified name of the AgentRepl's
 	// SetWorkspacePriority RPC.
 	AgentReplSetWorkspacePriorityProcedure = "/agentrepl.v1.AgentRepl/SetWorkspacePriority"
+	// AgentReplSetWorkspaceHiddenProcedure is the fully-qualified name of the AgentRepl's
+	// SetWorkspaceHidden RPC.
+	AgentReplSetWorkspaceHiddenProcedure = "/agentrepl.v1.AgentRepl/SetWorkspaceHidden"
 	// AgentReplFoldRepositoryProcedure is the fully-qualified name of the AgentRepl's FoldRepository
 	// RPC.
 	AgentReplFoldRepositoryProcedure = "/agentrepl.v1.AgentRepl/FoldRepository"
@@ -266,6 +269,7 @@ var (
 	agentReplMergeWorkspaceMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("MergeWorkspace")
 	agentReplRestartWorkspaceMethodDescriptor         = agentReplServiceDescriptor.Methods().ByName("RestartWorkspace")
 	agentReplSetWorkspacePriorityMethodDescriptor     = agentReplServiceDescriptor.Methods().ByName("SetWorkspacePriority")
+	agentReplSetWorkspaceHiddenMethodDescriptor       = agentReplServiceDescriptor.Methods().ByName("SetWorkspaceHidden")
 	agentReplFoldRepositoryMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("FoldRepository")
 	agentReplUpdateSidebarViewMethodDescriptor        = agentReplServiceDescriptor.Methods().ByName("UpdateSidebarView")
 	agentReplCreateTaskMethodDescriptor               = agentReplServiceDescriptor.Methods().ByName("CreateTask")
@@ -401,6 +405,9 @@ type AgentReplClient interface {
 	// Set or clear a workspace's priority; the roster orders by it. See
 	// endpoint_set_workspace_priority.proto.
 	SetWorkspacePriority(context.Context, *connect.Request[v1.SetWorkspacePriorityRequest]) (*connect.Response[v1.SetWorkspacePriorityResponse], error)
+	// Move a workspace into the hidden section or back out; a hidden workspace
+	// is off the Emacs tab bar. See endpoint_set_workspace_hidden.proto.
+	SetWorkspaceHidden(context.Context, *connect.Request[v1.SetWorkspaceHiddenRequest]) (*connect.Response[v1.SetWorkspaceHiddenResponse], error)
 	FoldRepository(context.Context, *connect.Request[v1.FoldRepositoryRequest]) (*connect.Response[v1.FoldRepositoryResponse], error)
 	// Change one piece of the sidebar's view state (a fold, the grouping),
 	// pushed to every page on the roster stream. See
@@ -723,6 +730,12 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(agentReplSetWorkspacePriorityMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		setWorkspaceHidden: connect.NewClient[v1.SetWorkspaceHiddenRequest, v1.SetWorkspaceHiddenResponse](
+			httpClient,
+			baseURL+AgentReplSetWorkspaceHiddenProcedure,
+			connect.WithSchema(agentReplSetWorkspaceHiddenMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 		foldRepository: connect.NewClient[v1.FoldRepositoryRequest, v1.FoldRepositoryResponse](
 			httpClient,
 			baseURL+AgentReplFoldRepositoryProcedure,
@@ -1021,6 +1034,7 @@ type agentReplClient struct {
 	mergeWorkspace           *connect.Client[v1.MergeWorkspaceRequest, v1.MergeWorkspaceResponse]
 	restartWorkspace         *connect.Client[v1.RestartWorkspaceRequest, v1.RestartWorkspaceResponse]
 	setWorkspacePriority     *connect.Client[v1.SetWorkspacePriorityRequest, v1.SetWorkspacePriorityResponse]
+	setWorkspaceHidden       *connect.Client[v1.SetWorkspaceHiddenRequest, v1.SetWorkspaceHiddenResponse]
 	foldRepository           *connect.Client[v1.FoldRepositoryRequest, v1.FoldRepositoryResponse]
 	updateSidebarView        *connect.Client[v1.UpdateSidebarViewRequest, v1.UpdateSidebarViewResponse]
 	createTask               *connect.Client[v1.CreateTaskRequest, v1.CreateTaskResponse]
@@ -1210,6 +1224,11 @@ func (c *agentReplClient) RestartWorkspace(ctx context.Context, req *connect.Req
 // SetWorkspacePriority calls agentrepl.v1.AgentRepl.SetWorkspacePriority.
 func (c *agentReplClient) SetWorkspacePriority(ctx context.Context, req *connect.Request[v1.SetWorkspacePriorityRequest]) (*connect.Response[v1.SetWorkspacePriorityResponse], error) {
 	return c.setWorkspacePriority.CallUnary(ctx, req)
+}
+
+// SetWorkspaceHidden calls agentrepl.v1.AgentRepl.SetWorkspaceHidden.
+func (c *agentReplClient) SetWorkspaceHidden(ctx context.Context, req *connect.Request[v1.SetWorkspaceHiddenRequest]) (*connect.Response[v1.SetWorkspaceHiddenResponse], error) {
+	return c.setWorkspaceHidden.CallUnary(ctx, req)
 }
 
 // FoldRepository calls agentrepl.v1.AgentRepl.FoldRepository.
@@ -1521,6 +1540,9 @@ type AgentReplHandler interface {
 	// Set or clear a workspace's priority; the roster orders by it. See
 	// endpoint_set_workspace_priority.proto.
 	SetWorkspacePriority(context.Context, *connect.Request[v1.SetWorkspacePriorityRequest]) (*connect.Response[v1.SetWorkspacePriorityResponse], error)
+	// Move a workspace into the hidden section or back out; a hidden workspace
+	// is off the Emacs tab bar. See endpoint_set_workspace_hidden.proto.
+	SetWorkspaceHidden(context.Context, *connect.Request[v1.SetWorkspaceHiddenRequest]) (*connect.Response[v1.SetWorkspaceHiddenResponse], error)
 	FoldRepository(context.Context, *connect.Request[v1.FoldRepositoryRequest]) (*connect.Response[v1.FoldRepositoryResponse], error)
 	// Change one piece of the sidebar's view state (a fold, the grouping),
 	// pushed to every page on the roster stream. See
@@ -1837,6 +1859,12 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		AgentReplSetWorkspacePriorityProcedure,
 		svc.SetWorkspacePriority,
 		connect.WithSchema(agentReplSetWorkspacePriorityMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplSetWorkspaceHiddenHandler := connect.NewUnaryHandler(
+		AgentReplSetWorkspaceHiddenProcedure,
+		svc.SetWorkspaceHidden,
+		connect.WithSchema(agentReplSetWorkspaceHiddenMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
 	agentReplFoldRepositoryHandler := connect.NewUnaryHandler(
@@ -2163,6 +2191,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplRestartWorkspaceHandler.ServeHTTP(w, r)
 		case AgentReplSetWorkspacePriorityProcedure:
 			agentReplSetWorkspacePriorityHandler.ServeHTTP(w, r)
+		case AgentReplSetWorkspaceHiddenProcedure:
+			agentReplSetWorkspaceHiddenHandler.ServeHTTP(w, r)
 		case AgentReplFoldRepositoryProcedure:
 			agentReplFoldRepositoryHandler.ServeHTTP(w, r)
 		case AgentReplUpdateSidebarViewProcedure:
@@ -2374,6 +2404,10 @@ func (UnimplementedAgentReplHandler) RestartWorkspace(context.Context, *connect.
 
 func (UnimplementedAgentReplHandler) SetWorkspacePriority(context.Context, *connect.Request[v1.SetWorkspacePriorityRequest]) (*connect.Response[v1.SetWorkspacePriorityResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.SetWorkspacePriority is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) SetWorkspaceHidden(context.Context, *connect.Request[v1.SetWorkspaceHiddenRequest]) (*connect.Response[v1.SetWorkspaceHiddenResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.SetWorkspaceHidden is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) FoldRepository(context.Context, *connect.Request[v1.FoldRepositoryRequest]) (*connect.Response[v1.FoldRepositoryResponse], error) {

@@ -73,11 +73,14 @@ type fakeDB struct {
 	// read.
 	view                 *wsm.SidebarView
 	setMergedFoldedErr   error
+	setHiddenFoldedErr   error
 	setMaturityFoldedErr error
 	setGroupingErr       error
 	viewErr              error
 	// workspaceErr fails the one-workspace read, which the map cannot.
 	workspaceErr error
+	// setHiddenErr fails the hidden-flag write.
+	setHiddenErr error
 	current      *ids.WorkspaceID
 	sessions     map[ids.WorkspaceID]wsm.Session
 	// sessionErr makes every session read fail, which is the only way to
@@ -366,6 +369,21 @@ func (d *fakeDB) SetCurrent(_ context.Context, id ids.WorkspaceID, at time.Time)
 
 func (d *fakeDB) SetAttention(_ context.Context, id ids.WorkspaceID, on bool) error {
 	d.attention[id] = on
+	return nil
+}
+
+// SetHidden records the hidden flag on the workspace's record, so the
+// republished registry carries it.
+func (d *fakeDB) SetHidden(_ context.Context, id ids.WorkspaceID, hidden bool) error {
+	if d.setHiddenErr != nil {
+		return d.setHiddenErr
+	}
+	ws, ok := d.workspaces[id]
+	if !ok {
+		return wsm.ErrNotFound
+	}
+	ws.Hidden = hidden
+	d.workspaces[id] = ws
 	return nil
 }
 
@@ -2404,6 +2422,17 @@ func (d *fakeDB) SetMergedSectionFolded(_ context.Context, folded bool) error {
 	}
 	view := d.currentView()
 	view.MergedFolded = folded
+	d.view = &view
+	return nil
+}
+
+// SetHiddenSectionFolded records the hidden section's fold.
+func (d *fakeDB) SetHiddenSectionFolded(_ context.Context, folded bool) error {
+	if d.setHiddenFoldedErr != nil {
+		return d.setHiddenFoldedErr
+	}
+	view := d.currentView()
+	view.HiddenFolded = folded
 	d.view = &view
 	return nil
 }

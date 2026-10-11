@@ -68,6 +68,10 @@ import {
   type SelectWorkspaceRequest,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_workspace_pb";
 import {
+  SetWorkspaceHiddenRequestSchema,
+  type SetWorkspaceHiddenRequest,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_hidden_pb";
+import {
   SetWorkspacePriorityRequestSchema,
   SetWorkspacePriorityResponseSchema,
   type SetWorkspacePriorityRequest,
@@ -860,6 +864,20 @@ export function buildSetWorkspacePriorityRequest(
   return create(SetWorkspacePriorityRequestSchema, {
     workspace,
     priority: create(WorkspacePrioritySchema, { level: priorityLevel(choice) }),
+  });
+}
+
+/**
+ * SetWorkspaceHidden: into the hidden section when HIDDEN, back out otherwise.
+ * The arm is the place asked for, never a flag beside it.
+ */
+export function buildSetWorkspaceHiddenRequest(
+  workspace: WorkspaceRef,
+  hidden: boolean,
+): SetWorkspaceHiddenRequest {
+  return create(SetWorkspaceHiddenRequestSchema, {
+    workspace,
+    visibility: hidden ? { case: "hide", value: {} } : { case: "show", value: {} },
   });
 }
 

@@ -1,0 +1,87 @@
+// endpoint_set_workspace_hidden.proto — SetWorkspaceHidden: move a workspace
+// into the sidebar's HIDDEN WORKSPACES section, or back out of it. SIDEBAR
+// section.
+//
+// A HIDDEN WORKSPACE KEEPS EVERYTHING BUT ITS PLACE. Its session, worktree and
+// editor tab are untouched; the roster resolver hoists its row out of every
+// grouping into frontend.v1.WorkspaceRoster.hidden, and the Emacs tab bar
+// stops drawing, numbering and navigating to its tab, exactly as it does for
+// a workspace whose repository section is collapsed. The new state arrives on
+// the roster stream.
+//
+// DURABLE: the daemon records the flag on the workspace, so a hidden
+// workspace stays hidden across a daemon restart.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message SetWorkspaceHiddenRequest {
+  // The workspace, echoed from its roster row (or the editor's tab).
+  workspace.v1.WorkspaceRef workspace = 1;
+  // THE ARM IS THE PLACE ASKED FOR: into the hidden section, or back into
+  // the groupings. Unset is a malformed request (Connect InvalidArgument).
+  // Asking for the place a workspace already holds is NOT refused: two
+  // clients may race to the same state, and both have what they asked for.
+  oneof visibility {
+    SetWorkspaceHiddenHide hide = 2;
+    SetWorkspaceHiddenShow show = 3;
+  }
+}
+
+// Move the workspace into the hidden section. DELIBERATELY EMPTY: the arm is
+// the request.
+message SetWorkspaceHiddenHide {}
+
+// Move the workspace back into the groupings it belongs to. DELIBERATELY
+// EMPTY: the arm is the request.
+message SetWorkspaceHiddenShow {}
+
+// THE ARM IS THE OUTCOME.
+message SetWorkspaceHiddenResponse {
+  oneof result {
+    SetWorkspaceHiddenSuccess success = 1;
+    SetWorkspaceHiddenError error = 2;
+  }
+}
+
+// Recorded; the roster push carries the new state.
+message SetWorkspaceHiddenSuccess {}
+
+// The daemon's refusals. Validation failures (an unset field or arm, a blank
+// id) are Connect InvalidArgument, never an arm.
+message SetWorkspaceHiddenError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    SetWorkspaceHiddenUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    SetWorkspaceHiddenWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    SetWorkspaceHiddenTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    SetWorkspaceHiddenNotYetAdopted not_yet_adopted = 4;
+  }
+}
+
+// The workspace id is not in the daemon's registry. DELIBERATELY EMPTY.
+message SetWorkspaceHiddenUnknownWorkspace {}
+
+// The echoed dir disagrees with the registry's dir for this id.
+message SetWorkspaceHiddenWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+
+// This daemon released the workspace to a successor.
+message SetWorkspaceHiddenTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+
+// A joining daemon has not finished adopting this workspace yet.
+// DELIBERATELY EMPTY.
+message SetWorkspaceHiddenNotYetAdopted {}
