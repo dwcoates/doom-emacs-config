@@ -16,6 +16,7 @@ import (
 	"claude-repld/internal/account"
 	"claude-repld/internal/agentreplsession"
 	"claude-repld/internal/boot"
+	"claude-repld/internal/branchcommits"
 	"claude-repld/internal/bringup"
 	"claude-repld/internal/buildid"
 	"claude-repld/internal/checkout"
@@ -694,11 +695,26 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Log: log,
 	})
 
+	// ---- the branch commit recounter ----
+	//
+	// The queue's turn-close door owes it each workspace whose turn closed;
+	// its one background loop counts them and republishes the roster.
+	commitRecounter, err := branchcommits.New(branchcommits.Deps{
+		DB:              p.DB,
+		Git:             git,
+		PublishRegistry: verbsRef.publishRegistry("a branch was recounted"),
+		Log:             p.Surfaces,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("claude-repld: build the branch commit recounter: %w", err)
+	}
+
 	// ---- the prompt queue ----
 
 	var drainController drain.Controller
 	queue, err = promptqueue.New(promptqueue.Deps{
 		TurnBanners:    turnBanners,
+		Commits:        commitRecounter,
 		StripSentinels: stripSentinels,
 		ResolveImage:   resolveImage,
 		DB:             p.DB,
@@ -1122,6 +1138,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		}},
 		{Name: "lock_watchdog", Run: stalls.Run},
 		{Name: "persistent_wifi", Run: wifi.Run},
+		{Name: "branch_commits", Run: commitRecounter.Run},
 		{Name: "news_digest", Run: digest.Run},
 		{Name: "chess_boards", Run: func(ctx context.Context) error {
 			chessBoards.Run(ctx, feedResolver.RefreshChessBoards)
