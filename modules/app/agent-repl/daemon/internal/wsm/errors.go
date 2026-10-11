@@ -336,6 +336,11 @@ func (m MergeSource) validate() error {
 	if m.KeepOpen && !m.Kind.ClosesRequester() {
 		return fmt.Errorf("a %s source cannot keep the requester open", m.Kind)
 	}
+	// A DETACHED MERGE NEVER CLOSES ITS REQUESTER, so keeping it open means
+	// nothing, and only the requester's own branch runs detached.
+	if m.Detach != "" && (m.Kind != MergeSourceOwnBranch || m.KeepOpen) {
+		return fmt.Errorf("a detached merge is an own-branch merge that never keeps the requester open, not a %s source with keep_open %v", m.Kind, m.KeepOpen)
+	}
 	if (m.Workspace != "") != (m.Kind == MergeSourceWorkspace) {
 		return fmt.Errorf("a %s source names workspace %q", m.Kind, m.Workspace)
 	}

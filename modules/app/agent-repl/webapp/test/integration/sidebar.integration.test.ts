@@ -676,7 +676,8 @@ describe("the merge verb's source", () => {
     // Assert
     const [request] = harness.fake.calls<MergeWorkspaceRequest>("mergeWorkspace");
     const source = request.source?.source;
-    expect(source?.case === "ownBranch" ? { keepOpen: source.value.keepOpen } : source?.case).toEqual({
+    const run = source?.case === "ownBranch" ? source.value.run : undefined;
+    expect(run?.case === "inPlace" ? { keepOpen: run.value.keepOpen } : run?.case).toEqual({
       keepOpen: false,
     });
   });

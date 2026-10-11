@@ -107,6 +107,14 @@ const (
 	// and how agent-repl could avoid or resolve such links. Submitted without
 	// interrupting the running turn.
 	PromptOrigin_PROMPT_ORIGIN_LINK_UNRESOLVED PromptOrigin = 30
+	// The daemon's report to a workspace's session that a DETACHED merge it
+	// asked for has ended (agentrepl.v1.MergeWorkspaceSourceOwnBranchDetached):
+	// that the branch landed, or what failed and that the merge workspace is
+	// open for the user to finish. Submitted through the prompt queue like any
+	// submission, so it waits behind a running turn. The feed draws it as the
+	// FeedRow.merge_handback marker, never as a prompt bubble: the words are
+	// the daemon's, and the merge itself is read in its bubble.
+	PromptOrigin_PROMPT_ORIGIN_MERGE_HANDBACK PromptOrigin = 31
 )
 
 // Enum value maps for PromptOrigin.
@@ -142,6 +150,7 @@ var (
 		28: "PROMPT_ORIGIN_RESUME_AFTER_RESTART",
 		29: "PROMPT_ORIGIN_VENDOR_STARTED",
 		30: "PROMPT_ORIGIN_LINK_UNRESOLVED",
+		31: "PROMPT_ORIGIN_MERGE_HANDBACK",
 	}
 	PromptOrigin_value = map[string]int32{
 		"PROMPT_ORIGIN_UNSPECIFIED":                 0,
@@ -174,6 +183,7 @@ var (
 		"PROMPT_ORIGIN_RESUME_AFTER_RESTART":        28,
 		"PROMPT_ORIGIN_VENDOR_STARTED":              29,
 		"PROMPT_ORIGIN_LINK_UNRESOLVED":             30,
+		"PROMPT_ORIGIN_MERGE_HANDBACK":              31,
 	}
 )
 
@@ -208,7 +218,7 @@ var File_conversation_v1_prompt_origin_proto protoreflect.FileDescriptor
 
 const file_conversation_v1_prompt_origin_proto_rawDesc = "" +
 	"\n" +
-	"#conversation/v1/prompt_origin.proto\x12\x0fconversation.v1*\x8b\t\n" +
+	"#conversation/v1/prompt_origin.proto\x12\x0fconversation.v1*\xad\t\n" +
 	"\fPromptOrigin\x12\x1d\n" +
 	"\x19PROMPT_ORIGIN_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17PROMPT_ORIGIN_USER_SENT\x10\x01\x12$\n" +
@@ -240,7 +250,8 @@ const file_conversation_v1_prompt_origin_proto_rawDesc = "" +
 	")PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME\x10\x1a\x12&\n" +
 	"\"PROMPT_ORIGIN_RESUME_AFTER_RESTART\x10\x1c\x12 \n" +
 	"\x1cPROMPT_ORIGIN_VENDOR_STARTED\x10\x1d\x12!\n" +
-	"\x1dPROMPT_ORIGIN_LINK_UNRESOLVED\x10\x1eB0Z.agentrepl/proto/conversation/v1;conversationv1b\x06proto3"
+	"\x1dPROMPT_ORIGIN_LINK_UNRESOLVED\x10\x1e\x12 \n" +
+	"\x1cPROMPT_ORIGIN_MERGE_HANDBACK\x10\x1fB0Z.agentrepl/proto/conversation/v1;conversationv1b\x06proto3"
 
 var (
 	file_conversation_v1_prompt_origin_proto_rawDescOnce sync.Once

@@ -84,6 +84,15 @@ type CreateSpec struct {
 	// caller relaying them to a client. Nil for the legacy synchronous create,
 	// which emits nothing; the verb never assumes it is set.
 	Progress CreateProgress
+	// MergeOf, when set, makes this create a MERGE WORKSPACE: a fork of
+	// MergeOf.Requester made to carry that workspace's detached merge. The spec
+	// must then fork from the requester (ForkFrom) and name nothing else the
+	// daemon derives here: the name is the requester's branch with a "-merge"
+	// suffix, disambiguated; the merge target, the branch it lands on and the
+	// configured merge actions are the REQUESTER's own, so the merge workspace
+	// lands where the requester would have; and the roster nests it under the
+	// requester.
+	MergeOf *wsm.MergeOrigin
 }
 
 // CreateStage is one stage a Create passes through between acceptance and its
@@ -239,6 +248,10 @@ type Verbs interface {
 	// naming rule, branch, worktree, layout facts recorded, and REGISTRATION
 	// ONLY AFTER MATERIALIZATION.
 	Create(ctx context.Context, spec CreateSpec) (wsm.Workspace, error)
+	// CreateMergeWorkspace creates the MERGE WORKSPACE a detached merge runs
+	// in: a fork of REQUESTER's conversation in a worktree of its own on BRANCH
+	// as it stands now, recorded as forked for ORIGIN's request.
+	CreateMergeWorkspace(ctx context.Context, requester wsm.Workspace, origin wsm.MergeOrigin, branch string) (wsm.Workspace, error)
 	// RequestCommandSupport composes the add-support brief from
 	// prompts/add-support-slash-command.md — LOUD when the brief is absent —
 	// and creates a support workspace through the ordinary standard form with

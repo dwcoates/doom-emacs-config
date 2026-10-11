@@ -20,6 +20,7 @@ package merge
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"claude-repld/internal/dlog"
@@ -150,6 +151,63 @@ type Request struct {
 	// By says who asked, which decides whether the admission may displace the
 	// requester's turn in flight (see Requester).
 	By Requester
+	// Detached runs an own-branch merge in a MERGE WORKSPACE forked from the
+	// requester instead of in the requester
+	// (agentrepl.v1.MergeWorkspaceSourceOwnBranchDetached). It is legal on the
+	// own-branch source alone, which never keeps the requester open.
+	Detached bool
+}
+
+// DetachedMerges forks the merge workspace a detached request runs in, and
+// hands a detached merge's outcome back to the workspace that asked for it.
+// The merge package never creates a workspace or submits to another
+// workspace's session itself: this seam is the one way it does either.
+type DetachedMerges interface {
+	// Fork answers the merge workspace forked for REQUEST, creating it when
+	// none is registered yet: a fork of the requester's conversation, its own
+	// worktree on BRANCH as it stands now, landing where the requester would.
+	// It is idempotent per request, so a hand-off a restart cut short finds
+	// the workspace already forked.
+	Fork(ctx context.Context, requester wsm.Workspace, request wsm.DetachedMergeID, branch string) (wsm.Workspace, error)
+	// HandBack reports how a detached merge ended to the conversation of the
+	// workspace that asked for it.
+	HandBack(ctx context.Context, requester ids.WorkspaceID, mergeWS wsm.Workspace, outcome DetachedOutcome) error
+}
+
+// DetachedOutcome is how a detached merge ended, for its handback. THE KIND IS
+// THE END; Summary is its one-line account, and Branch is the requester's
+// branch the merge was asked for.
+type DetachedOutcome struct {
+	Kind    DetachedOutcomeKind
+	Summary string
+	Branch  string
+}
+
+// DetachedOutcomeKind names how a detached merge ended.
+type DetachedOutcomeKind int
+
+const (
+	// DetachedLanded is a merge whose branch landed on its target.
+	DetachedLanded DetachedOutcomeKind = iota
+	// DetachedFailed is a merge that ran and gave up; the merge workspace is
+	// left open where it stopped.
+	DetachedFailed
+	// DetachedAbandoned is a merge taken off the queue before it ran, or a
+	// detached request whose merge workspace could not be forked.
+	DetachedAbandoned
+)
+
+// String names the kind for the log record.
+func (k DetachedOutcomeKind) String() string {
+	switch k {
+	case DetachedLanded:
+		return "landed"
+	case DetachedFailed:
+		return "failed"
+	case DetachedAbandoned:
+		return "abandoned"
+	}
+	return fmt.Sprintf("DetachedOutcomeKind(%d)", int(k))
 }
 
 // Requester names who asked for a merge.
@@ -214,6 +272,9 @@ type Deps struct {
 	TurnInFlight func(ws ids.WorkspaceID) (ids.TurnID, bool)
 	// Feed carries the merge bubble's tabs.
 	Feed feed.Resolver
+	// Detached forks a detached request's merge workspace and hands its
+	// outcome back to the requester.
+	Detached DetachedMerges
 	// Footer and Sidebar receive the merge facts.
 	Footer  footer.Resolver
 	Sidebar sidebar.Resolver

@@ -33,7 +33,11 @@ import { log } from "../../log.js";
 import { placeChildren } from "../../dom.js";
 import { requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import type { Handle } from "../../failure/local.js";
-import { FeedRowSchema, type FeedRow } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
+import {
+  FeedRowSchema,
+  type FeedMergeTabWorkspaceSwitch,
+  type FeedRow,
+} from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import {
   NEST_ATTRIBUTE,
   drawBreadcrumbTrail,
@@ -58,6 +62,7 @@ import {
   drawFeedMergeTabRebasing,
   drawFeedMergeTabUpdatingMain,
 } from "./step-tabs.js";
+import { drawMergeWorkspaceSwitch, switchFacts } from "./workspace-switch.js";
 
 /** The merge bubble's body renderer. */
 export const mergeBubbleBody: BubbleBodyRenderer = (mount, view, rc): Handle => {
@@ -326,16 +331,35 @@ function drawTabContent(tab: MergeTab, view: SubfeedView, rc: RowContext): HTMLE
       return [drawFeedMergeTabUpdatingMain(kind.value, `${path}.updating_main`)];
     case "fixes":
       // AGENTIC, and it names which attempt it is above the rows it holds.
-      return [drawFeedMergeTabFixesAttempt(kind.value, `${path}.fixes`), drawAgenticRows(tab, view)];
+      return [drawFeedMergeTabFixesAttempt(kind.value, `${path}.fixes`), agenticContent(tab, kind.value, view, rc, `${path}.fixes`)];
     case "prePrompt":
     case "conflicts":
     case "postPrompt":
-      return [drawAgenticRows(tab, view)];
+      return [agenticContent(tab, kind.value, view, rc, `${path}.${kind.case}`)];
     default: {
       const other: { case: string } = kind;
       return unreachableArm(path, other.case);
     }
   }
+}
+
+/**
+ * An agentic tab's content: its rows, or, in the requesting workspace's copy
+ * of a DETACHED merge's bubble, the switch to the merge workspace those rows
+ * belong to. The rows never cross workspaces, so a tab carrying the switch has
+ * none to draw.
+ */
+function agenticContent(
+  tab: MergeTab,
+  arm: { workspaceSwitch?: FeedMergeTabWorkspaceSwitch },
+  view: SubfeedView,
+  rc: RowContext,
+  path: string,
+): HTMLElement {
+  if (arm.workspaceSwitch !== undefined) {
+    return drawMergeWorkspaceSwitch(switchFacts(arm.workspaceSwitch, `${path}.workspace_switch`), rc, "tab");
+  }
+  return drawAgenticRows(tab, view);
 }
 
 /**

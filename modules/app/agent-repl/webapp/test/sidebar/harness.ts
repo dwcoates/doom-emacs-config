@@ -182,6 +182,8 @@ export function row(init: {
   /** The durable last-selected instant, epoch ms; omitted = never selected. */
   lastSelectedAtMs?: bigint;
   priority?: string;
+  /** A merge workspace's marker label; omitted for any other workspace. */
+  mergeWorkspace?: string;
   /** The when-column's ARM; omitted leaves the column empty. */
   when?: MessageInitShape<typeof RosterRowWhenSchema>["shown"];
   detail?: MessageInitShape<typeof RosterRowDetailSchema>;
@@ -197,6 +199,7 @@ export function row(init: {
     detail: init.detail ?? {},
     children: init.children ?? [],
     ...(init.attention === true ? { attention: {} } : {}),
+    ...(init.mergeWorkspace !== undefined ? { mergeWorkspace: { label: { text: init.mergeWorkspace } } } : {}),
     ...(init.viewed === true ? { viewed: {} } : {}),
     ...(init.reviving === true ? { reviving: {} } : {}),
     ...(init.lastSelectedAtMs === undefined ? {} : { lastSelected: { atMs: init.lastSelectedAtMs } }),

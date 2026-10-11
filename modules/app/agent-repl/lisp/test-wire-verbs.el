@@ -1973,20 +1973,33 @@ at."
                    (list :workspace agent-repl-test-wire-verbs--ref :source source))))
 
 (ert-deftest agent-repl-test-wire-verbs-merge-request-own-branch-closing ()
-  "An own-branch merge spells `keep_open' false explicitly."
+  "An in-place own-branch merge spells `keep_open' false explicitly."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (agent-repl-test-wire-verbs--merge-json
-                    '(:arm :own-branch :value (:keep-open nil)))
+                    '(:arm :own-branch :value (:run (:arm :in-place :value (:keep-open nil)))))
                    (concat "{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"},"
-                           "\"source\":{\"ownBranch\":{\"keepOpen\":false}}}")))))
+                           "\"source\":{\"ownBranch\":{\"inPlace\":{\"keepOpen\":false}}}}")))))
 
 (ert-deftest agent-repl-test-wire-verbs-merge-request-own-branch-keep-open ()
-  "An own-branch merge that keeps the workspace open spells `keep_open' true."
+  "An in-place own-branch merge that keeps the workspace open spells `keep_open' true."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (agent-repl-test-wire-verbs--merge-json
-                    '(:arm :own-branch :value (:keep-open t)))
+                    '(:arm :own-branch :value (:run (:arm :in-place :value (:keep-open t)))))
                    (concat "{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"},"
-                           "\"source\":{\"ownBranch\":{\"keepOpen\":true}}}")))))
+                           "\"source\":{\"ownBranch\":{\"inPlace\":{\"keepOpen\":true}}}}")))))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-request-own-branch-detached ()
+  "A detached own-branch merge spells its empty `detached' arm."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-test-wire-verbs--merge-json
+                    '(:arm :own-branch :value (:run (:arm :detached))))
+                   (concat "{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"},"
+                           "\"source\":{\"ownBranch\":{\"detached\":{}}}}")))))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-request-own-branch-with-no-run-is-refused ()
+  "An own-branch merge that names no run is refused before it is sent."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-test-wire-verbs--merge-json '(:arm :own-branch :value nil)))))
 
 (ert-deftest agent-repl-test-wire-verbs-merge-request-workspace-source ()
   "A workspace source carries the other workspace's ref verbatim."

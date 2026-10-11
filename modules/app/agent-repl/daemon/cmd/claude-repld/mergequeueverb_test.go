@@ -246,12 +246,14 @@ func TestTheMergeQueueVerbNamesEachSource(t *testing.T) {
 		args  func(f *mergeFixture) []string
 		check func(f *mergeFixture, e commandfile.Entry) bool
 	}{
-		{name: "own branch", args: func(*mergeFixture) []string { return []string{"-own"} },
+		{name: "own branch, detached by default", args: func(*mergeFixture) []string { return []string{"-own"} },
 			check: func(_ *mergeFixture, e commandfile.Entry) bool {
-				return !e.KeepOpen && e.Branch == "" && e.SourceDir == "" && !e.PRWasMerged
+				return e.Detached && !e.KeepOpen && e.Branch == "" && e.SourceDir == "" && !e.PRWasMerged
 			}},
-		{name: "own branch kept open", args: func(*mergeFixture) []string { return []string{"-own", "-keep-open"} },
-			check: func(_ *mergeFixture, e commandfile.Entry) bool { return e.KeepOpen }},
+		{name: "own branch in place", args: func(*mergeFixture) []string { return []string{"-own", "-in-place"} },
+			check: func(_ *mergeFixture, e commandfile.Entry) bool { return !e.Detached && !e.KeepOpen }},
+		{name: "own branch kept open, in place", args: func(*mergeFixture) []string { return []string{"-own", "-keep-open"} },
+			check: func(_ *mergeFixture, e commandfile.Entry) bool { return e.KeepOpen && !e.Detached }},
 		{name: "a branch", args: func(*mergeFixture) []string { return []string{"-branch", "agent-1/fix"} },
 			check: func(_ *mergeFixture, e commandfile.Entry) bool { return e.Branch == "agent-1/fix" }},
 		{name: "another workspace", args: func(f *mergeFixture) []string { return []string{"-dir", f.other} },
@@ -298,6 +300,7 @@ func TestTheMergeQueueVerbRefusesAMalformedRequest(t *testing.T) {
 		{name: "no source", args: nil},
 		{name: "two sources", args: []string{"-own", "-branch", "b"}},
 		{name: "keep-open off the own branch", args: []string{"-branch", "b", "-keep-open"}},
+		{name: "in-place off the own branch", args: []string{"-branch", "b", "-in-place"}},
 		{name: "a dir that is not there", args: []string{"-dir", "/no/such/worktree"}},
 	}
 	for _, tt := range tests {
@@ -471,6 +474,25 @@ func TestTheMergeQueueVerbRefusesToWaitWhileTheCallersTurnRuns(t *testing.T) {
 	// Assert.
 	if code != exitFailure || !strings.Contains(f.errOut.String(), "starts only when that turn ends") || len(f.commandFiles(t)) != 0 {
 		t.Fatalf("exit %d, stderr %q; want the refusal and no command", code, f.errOut.String())
+	}
+}
+
+func TestTheMergeQueueVerbWaitsOnlyOnAnInPlaceMerge(t *testing.T) {
+	// Arrange: an own-branch merge that lands.
+	f := newMergeFixture(t)
+	f.daemons = []*fakeMergeDaemon{{script: frames(
+		roster(rosterRow(f.worktree, "done", 0)),
+		roster(rosterRow(f.worktree, statusMerging, 0)),
+		roster(rosterRow(f.worktree, statusMergedDone, 7)),
+	)}}
+
+	// Act
+	code := f.run(t, "-own", "-wait")
+
+	// Assert: the wait is on the calling workspace's own merge, so it runs in
+	// place rather than detached.
+	if entry := f.writtenEntry(t); code != exitSuccess || entry.Detached {
+		t.Fatalf("exit %d, entry %+v; want an in-place merge waited on", code, entry)
 	}
 }
 
