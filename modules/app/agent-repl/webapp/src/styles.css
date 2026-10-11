@@ -979,9 +979,9 @@ body::after {
 
 /* THE BANDS UNDER EVERY GROUPING -- Hidden Workspaces, then Recently Merged
    -- hold no grouping's sections, so each is set off from the list above by
-   ONE shared light rule. Recently Merged is settled history rather than live
-   work and carries a purple header matching its rows' dots; Hidden's header
-   keeps the repository headers' colour. */
+   ONE shared light rule. Both bands' headers are drawn purple: Recently
+   Merged's matches its rows' dots, and Hidden's matches Recently Merged's
+   (owner request, 2026-10-11). The rows under either keep their own colours. */
 #ws-sidebar .repo.hidden-section,
 #ws-sidebar .repo.merged-section {
   margin-top: 0.5rem;
@@ -1004,7 +1004,8 @@ body::after {
   /* One row's drawn height, and the unit the cap below counts in. */
   --merged-row-h: calc(var(--merged-row-pad-y) * 2 + var(--merged-row-line-h));
 }
-#ws-sidebar .repo.merged-section .repo-head { color: var(--info-agents); }
+#ws-sidebar .repo.hidden-section > .repo-head,
+#ws-sidebar .repo.merged-section > .repo-head { color: var(--info-agents); }
 /* The LINE BOX is pinned, not the row height. Setting `height` drew every
    merged row taller than the content inside it, so the section stood taller
    than the entries it holds — ten merges reached about twelve rows' worth of
