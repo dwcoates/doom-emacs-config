@@ -411,3 +411,44 @@ func TestHandbackKeyIsTheSharedDaemonKeyShape(t *testing.T) {
 		t.Fatalf("key = %q, want prompthandler.MintKey's shape under the merge-handback prefix", key)
 	}
 }
+
+func TestSweepStoppedByItsContextIsNoFault(t *testing.T) {
+	// Arrange: the daemon stopping mid-sweep.
+	f := newFixture(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act
+	removed := f.svc.Sweep(ctx)
+
+	// Assert
+	if removed != 0 || len(f.workspaces.nuked) != 0 {
+		t.Fatalf("removed %d, nuked %v; want nothing swept", removed, f.workspaces.nuked)
+	}
+	if f.loggedAt("error") || !f.loggedAt("info") {
+		t.Fatal("a sweep its context ended was not recorded at INFO alone")
+	}
+}
+
+func TestSweepThatCannotReadTheRegistryIsAnError(t *testing.T) {
+	// Arrange: a state database that is gone.
+	f := newFixture(t)
+	f.db.Close()
+
+	// Act
+	removed := f.svc.Sweep(context.Background())
+
+	// Assert
+	if removed != 0 || len(f.workspaces.nuked) != 0 {
+		t.Fatalf("removed %d, nuked %v; want nothing swept", removed, f.workspaces.nuked)
+	}
+	var cause any
+	for _, r := range f.logs.Records() {
+		if r.Level == "error" && r.Operation == op {
+			cause = r.Context["cause"]
+		}
+	}
+	if cause == nil {
+		t.Fatal("an unreadable registry was not recorded at ERROR with its cause")
+	}
+}
