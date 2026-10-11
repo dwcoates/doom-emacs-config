@@ -110,6 +110,7 @@
 
 ;; Defined by roster.el.  Declared, never defined here.
 (declare-function agent-repl-roster-repository-of "agent-repl-roster" (id &optional roster))
+(declare-function agent-repl-roster-walk "agent-repl-roster" (roster))
 (defvar agent-repl-roster-view)
 
 ;; Defined by session.el.  Declared, never defined here.
@@ -468,16 +469,11 @@ must leave the other a no-op."
 
 (defun agent-repl-verbs--all-rows (&optional roster)
   "Return every row of ROSTER (default `agent-repl-roster-view'), in walk order.
-Repository sections depth-first, then the recently-merged section."
+THE ONE WALK is `agent-repl-roster-walk' -- the tab bar's own -- so a verb
+can never look for a row in fewer sections than the bar draws tabs from."
   (let ((roster (or roster (and (boundp 'agent-repl-roster-view) agent-repl-roster-view))))
-    (append
-     (apply #'append
-            (mapcar (lambda (section)
-                      (agent-repl-verbs--flatten-rows
-                       (plist-get (plist-get section :rows) :rows)))
-                    (plist-get (plist-get roster :repository) :sections)))
-     (agent-repl-verbs--flatten-rows
-      (plist-get (plist-get (plist-get roster :recently-merged) :rows) :rows)))))
+    (mapcar (lambda (entry) (plist-get entry :row))
+            (agent-repl-roster-walk roster))))
 
 (defun agent-repl-verbs--closed-rows (&optional roster)
   "Return the CLOSED rows of ROSTER -- exactly what OpenWorkspace can reopen."
