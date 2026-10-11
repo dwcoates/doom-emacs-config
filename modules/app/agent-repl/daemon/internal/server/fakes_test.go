@@ -265,6 +265,10 @@ type fakeVerbs struct {
 	// verb, so the handler's own resolution is what a test asserts.
 	markViewed    []ids.WorkspaceID
 	markViewedErr error
+	// hiddenSets records every SetWorkspaceHidden the verb received;
+	// setHiddenErr is what it answers.
+	hiddenSets   []hiddenSet
+	setHiddenErr error
 	// folds records every FoldRepository the handler resolved onto the verb,
 	// and foldErr is what the verb answers instead.
 	folds   []repositoryFold
@@ -475,6 +479,17 @@ func (f *fakeVerbs) Select(ctx context.Context, _ ids.WorkspaceID) error {
 		return fmt.Errorf("select: revive: %w", ctx.Err())
 	}
 	return f.selectErr
+}
+
+// hiddenSet is one SetHidden the verb received.
+type hiddenSet struct {
+	ws     ids.WorkspaceID
+	hidden bool
+}
+
+func (f *fakeVerbs) SetHidden(_ context.Context, ws ids.WorkspaceID, hidden bool) error {
+	f.hiddenSets = append(f.hiddenSets, hiddenSet{ws: ws, hidden: hidden})
+	return f.setHiddenErr
 }
 
 func (f *fakeVerbs) MarkViewed(_ context.Context, ws ids.WorkspaceID) error {
@@ -1377,11 +1392,13 @@ func (v *fakeVerbs) FoldRepository(_ context.Context, repo ids.RepoID, folded bo
 	return v.foldErr
 }
 
-// sectionFold is one FoldTaskSection (task set), FoldMergedSection (merged)
-// or FoldMaturitySection (stage set) the verb received.
+// sectionFold is one FoldTaskSection (task set), FoldMergedSection (merged),
+// FoldHiddenSection (hidden) or FoldMaturitySection (stage set) the verb
+// received.
 type sectionFold struct {
 	task   ids.TaskID
 	merged bool
+	hidden bool
 	stage  wsm.MaturityStage
 	folded bool
 }
@@ -1393,6 +1410,11 @@ func (v *fakeVerbs) FoldTaskSection(_ context.Context, task ids.TaskID, folded b
 
 func (v *fakeVerbs) FoldMergedSection(_ context.Context, folded bool) error {
 	v.sectionFolds = append(v.sectionFolds, sectionFold{merged: true, folded: folded})
+	return v.sectionFoldErr
+}
+
+func (v *fakeVerbs) FoldHiddenSection(_ context.Context, folded bool) error {
+	v.sectionFolds = append(v.sectionFolds, sectionFold{hidden: true, folded: folded})
 	return v.sectionFoldErr
 }
 

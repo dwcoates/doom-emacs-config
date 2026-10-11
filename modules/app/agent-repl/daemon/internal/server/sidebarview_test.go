@@ -36,6 +36,10 @@ func mergedSection() *agentreplv1.SidebarViewFoldSection_RecentlyMerged {
 	return &agentreplv1.SidebarViewFoldSection_RecentlyMerged{RecentlyMerged: &agentreplv1.SidebarViewRecentlyMerged{}}
 }
 
+func hiddenSection() *agentreplv1.SidebarViewFoldSection_Hidden {
+	return &agentreplv1.SidebarViewFoldSection_Hidden{Hidden: &agentreplv1.SidebarViewHidden{}}
+}
+
 func repositorySection(id string) *agentreplv1.SidebarViewFoldSection_Repository {
 	return &agentreplv1.SidebarViewFoldSection_Repository{Repository: &workspacev1.RepositoryRef{Id: id}}
 }
@@ -99,6 +103,8 @@ func TestUpdateSidebarViewHandsASectionFoldToTheVerb(t *testing.T) {
 		{"expand a task", &agentreplv1.SidebarViewFoldSection{Section: taskSection("task-1"), Fold: expandFold()}, sectionFold{task: "task-1", folded: false}},
 		{"expand the merged band", &agentreplv1.SidebarViewFoldSection{Section: mergedSection(), Fold: expandFold()}, sectionFold{merged: true, folded: false}},
 		{"collapse the merged band", &agentreplv1.SidebarViewFoldSection{Section: mergedSection(), Fold: collapseFold()}, sectionFold{merged: true, folded: true}},
+		{"collapse the hidden section", &agentreplv1.SidebarViewFoldSection{Section: hiddenSection(), Fold: collapseFold()}, sectionFold{hidden: true, folded: true}},
+		{"expand the hidden section", &agentreplv1.SidebarViewFoldSection{Section: hiddenSection(), Fold: expandFold()}, sectionFold{hidden: true, folded: false}},
 		{"collapse the backlog stage", &agentreplv1.SidebarViewFoldSection{Section: maturitySection(backlogStage()), Fold: collapseFold()}, sectionFold{stage: wsm.MaturityBacklog, folded: true}},
 		{"collapse the in-progress stage", &agentreplv1.SidebarViewFoldSection{Section: maturitySection(inProgressStage()), Fold: collapseFold()}, sectionFold{stage: wsm.MaturityInProgress, folded: true}},
 		{"expand the merging stage", &agentreplv1.SidebarViewFoldSection{Section: maturitySection(mergingStage()), Fold: expandFold()}, sectionFold{stage: wsm.MaturityMerging, folded: false}},

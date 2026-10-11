@@ -8,6 +8,7 @@ import (
 
 	"claude-repld/internal/ids"
 	"claude-repld/internal/resolve/footer"
+	"claude-repld/internal/resolve/sidebar"
 	"claude-repld/internal/wsm"
 )
 
@@ -836,6 +837,144 @@ func TestMaturitySectionStatesItsFold(t *testing.T) {
 				if (section.GetCollapsed() != nil) != wantCollapsed || (section.GetExpanded() != nil) == wantCollapsed {
 					t.Fatalf("%s fold = %v, want collapsed=%v", maturityStageName(section), section.GetFold(), wantCollapsed)
 				}
+			}
+		})
+	}
+}
+
+// hiddenWorkspace is a registered workspace the user hid.
+func hiddenWorkspace(id, name string) wsm.Workspace {
+	ws := workspace(id, name)
+	ws.Hidden = true
+	return ws
+}
+
+func TestAHiddenWorkspaceHoistsOutOfEveryGrouping(t *testing.T) {
+	// Arrange.
+	r, _ := newResolver(t)
+	task := wsm.Task{ID: ids.TaskID("task-1"), Title: "the task", CreatedAt: epoch}
+	taskID := task.ID
+	hidden := hiddenWorkspace("w-hidden", "hidden")
+	hidden.Task = &taskID
+	reg := registry(hidden, workspace("w-live", "live"))
+	reg.Tasks = []wsm.Task{task}
+
+	// Act.
+	r.SetRegistry(reg)
+
+	// Assert.
+	roster := latest(t, r)
+	if got := rowNames(repoRows(t, roster)); !equal(got, []string{"live"}) {
+		t.Fatalf("repo rows = %v, want the hidden workspace hoisted out", got)
+	}
+	if rows := roster.GetTask().GetSections()[0].GetRows().GetRows(); len(rows) != 0 {
+		t.Fatalf("task rows = %v, want the hidden workspace hoisted out", rowNames(rows))
+	}
+	for _, section := range roster.GetMaturity().GetSections() {
+		if rowFor(section.GetRows().GetRows(), "w-hidden") != nil {
+			t.Fatal("a hidden workspace stayed in the maturity grouping")
+		}
+	}
+}
+
+func TestTheHiddenSectionCarriesTheHiddenRow(t *testing.T) {
+	// Arrange.
+	r, _ := newResolver(t)
+
+	// Act.
+	r.SetRegistry(registry(hiddenWorkspace("w-hidden", "hidden"), workspace("w-live", "live")))
+
+	// Assert.
+	section := latest(t, r).GetHidden()
+	if got := rowNames(section.GetRows().GetRows()); !equal(got, []string{"hidden"}) {
+		t.Fatalf("hidden rows = %v, want the one hidden workspace", got)
+	}
+	if got := section.GetHeader().GetLabel().GetText(); got != sidebar.HiddenSectionLabel {
+		t.Fatalf("hidden label = %q, want %q", got, sidebar.HiddenSectionLabel)
+	}
+	if got := section.GetHeader().GetCount().GetWorkspaces(); got != 1 {
+		t.Fatalf("hidden count = %d, want 1", got)
+	}
+}
+
+func TestTheHiddenSectionIsOnTheWireWithNothingHidden(t *testing.T) {
+	// Arrange.
+	r, _ := newResolver(t)
+
+	// Act.
+	r.SetRegistry(registry(workspace("w-live", "live")))
+
+	// Assert.
+	section := latest(t, r).GetHidden()
+	if section == nil || section.GetHeader() == nil || section.GetFold() == nil {
+		t.Fatalf("hidden section = %v, want it whole with no rows", section)
+	}
+	if len(section.GetRows().GetRows()) != 0 || section.GetHeader().GetCount().GetWorkspaces() != 0 {
+		t.Fatalf("hidden section = %v, want no rows and a zero count", section)
+	}
+}
+
+func TestTheHiddenSectionCountLeavesOutAClosedRow(t *testing.T) {
+	// Arrange.
+	r, _ := newResolver(t)
+	closed := hiddenWorkspace("w-closed", "closed")
+	closed.Closed = true
+
+	// Act.
+	r.SetRegistry(registry(closed, hiddenWorkspace("w-open", "open")))
+
+	// Assert.
+	section := latest(t, r).GetHidden()
+	if len(section.GetRows().GetRows()) != 2 {
+		t.Fatalf("hidden rows = %v, want both on the wire", rowNames(section.GetRows().GetRows()))
+	}
+	if got := section.GetHeader().GetCount().GetWorkspaces(); got != 1 {
+		t.Fatalf("hidden count = %d, want 1 (the closed row is not drawn)", got)
+	}
+}
+
+func TestAMergedHiddenWorkspaceFilesUnderRecentlyMerged(t *testing.T) {
+	// Arrange.
+	r, _ := newResolver(t)
+	merged := hiddenWorkspace("w-merged", "merged")
+	merged.MergedAt = at(0)
+
+	// Act.
+	r.SetRegistry(registry(merged))
+
+	// Assert.
+	roster := latest(t, r)
+	if len(roster.GetHidden().GetRows().GetRows()) != 0 {
+		t.Fatal("a merged workspace was filed under hidden")
+	}
+	if got := rowNames(roster.GetRecentlyMerged().GetRows().GetRows()); !equal(got, []string{"merged"}) {
+		t.Fatalf("merged rows = %v, want the merged workspace", got)
+	}
+}
+
+func TestHiddenSectionStatesItsFold(t *testing.T) {
+	tests := []struct {
+		name          string
+		folded        bool
+		wantCollapsed bool
+	}{
+		{"an expanded section", false, false},
+		{"a collapsed section", true, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			r, _ := newResolver(t)
+			reg := registry(hiddenWorkspace("w1", "one"))
+			reg.View.HiddenFolded = tt.folded
+
+			// Act.
+			r.SetRegistry(reg)
+
+			// Assert: the arm is always set, and it is the recorded fold.
+			section := latest(t, r).GetHidden()
+			if (section.GetCollapsed() != nil) != tt.wantCollapsed || (section.GetExpanded() != nil) == tt.wantCollapsed {
+				t.Fatalf("fold = %v, want collapsed=%v", section.GetFold(), tt.wantCollapsed)
 			}
 		})
 	}
