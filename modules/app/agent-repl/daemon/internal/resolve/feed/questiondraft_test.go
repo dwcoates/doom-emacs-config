@@ -6,6 +6,7 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	"google.golang.org/protobuf/proto"
 
 	"claude-repld/internal/feedid"
 )
@@ -524,5 +525,58 @@ func TestATargetHeadingNoSubFeedAddressesNoAsk(t *testing.T) {
 	// Assert.
 	if found {
 		t.Fatal("a target heading no sub-feed found an ask")
+	}
+}
+
+// ---- QuestionSelection ----
+
+func TestQuestionSelectionNamesTheQuestionAndKeepsTheChoicesInOrder(t *testing.T) {
+	// Act.
+	got := QuestionSelection("Which suites?", []string{"webapp", "daemon"}, nil)
+
+	// Assert.
+	if got.GetQuestion().GetText() != "Which suites?" {
+		t.Fatalf("question = %q", got.GetQuestion().GetText())
+	}
+	if len(got.GetChosen()) != 2 || got.GetChosen()[0].GetLabel().GetLabel() != "webapp" || got.GetChosen()[1].GetLabel().GetLabel() != "daemon" {
+		t.Fatalf("chosen = %+v, want [webapp daemon] in order", got.GetChosen())
+	}
+	if got.GetFreeText() != nil {
+		t.Fatalf("free text = %+v, want unset when nothing was typed", got.GetFreeText())
+	}
+}
+
+func TestQuestionSelectionCarriesATypedAnswerEvenWhenEmpty(t *testing.T) {
+	// Arrange: an empty typed string is still something typed, unlike nil.
+	empty := ""
+
+	// Act.
+	got := QuestionSelection("q?", nil, &empty)
+
+	// Assert.
+	if got.GetFreeText() == nil || got.GetFreeText().GetText() != "" || len(got.GetChosen()) != 0 {
+		t.Fatalf("selection = %+v, want the empty typed answer and no choices", got)
+	}
+}
+
+func TestADeliveredDraftIsBuiltThroughQuestionSelection(t *testing.T) {
+	// Arrange: a hand-rolled selection that drifted from the builder fails here.
+	h := newHarness(t)
+	h.openTwoQuestionAsk()
+	h.edit(pickAuth("OAuth"))
+
+	// Act.
+	outcome := h.edit(QuestionEdit{Kind: EditType, Text: "typed"})
+
+	// Assert.
+	typed := "typed"
+	want := []*conversationv1.AgentQuestionSelection{
+		QuestionSelection("Which auth method?", []string{"OAuth"}, nil),
+		QuestionSelection("Which suites?", nil, &typed),
+	}
+	for i, got := range outcome.Deliver.GetAnswers() {
+		if !proto.Equal(got, want[i]) {
+			t.Fatalf("answer %d = %+v, want %+v", i, got, want[i])
+		}
 	}
 }

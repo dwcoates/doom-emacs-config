@@ -260,3 +260,24 @@ func TestAnswerStandingAskSurfacesTheQuestionsRefusal(t *testing.T) {
 	}
 	asRefusal(t, err, ArmAskNotStanding)
 }
+
+func TestDeniedByUserCarriesTheReasonVerbatim(t *testing.T) {
+	tests := []struct {
+		name    string
+		message string
+	}{
+		{"a typed reason", "use the read-only path"},
+		{"no reason", ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act.
+			got := DeniedByUser(tc.message)
+
+			// Assert.
+			if got.Denied.GetMessage() != tc.message {
+				t.Fatalf("message = %q, want %q", got.Denied.GetMessage(), tc.message)
+			}
+		})
+	}
+}
