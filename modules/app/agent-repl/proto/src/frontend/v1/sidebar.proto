@@ -183,6 +183,44 @@ message RosterRowReviving {}
 // the editor's own; this marker only states the fact it is chosen from.
 message RosterRowDetachedLive {}
 
+// The ONE-SHOT mark: the workspace was created as a one-shot — given one
+// prompt and expected to finish by asking for its own merge — and whether it
+// has ended WITHOUT a merge live behind it.
+//
+// THE DAEMON DECIDES IT. The workspace is a one-shot when its creation asked
+// for the one-shot form; that never changes, so the mark stands for the
+// workspace's whole life. The outcome is resolved from the turns and the
+// merge the daemon itself runs, never from the status arm: a merge the turn
+// asked for is put in line only after that turn ends, so the status arm alone
+// would read a one-shot that DID ask for its merge as one that did not.
+//
+// Each surface chooses which outcomes it draws: the Emacs tab bar draws both
+// arms, the webapp sidebar draws only `failed`. A permission or question
+// gate's glyph is drawn in place of the mark while the gate is open.
+message RosterRowOneShot {
+  // How the one-shot stands. Exactly one arm is set; an unset outcome is a
+  // contract breach and is rejected loudly.
+  oneof outcome {
+    // The one-shot has not ended without a live merge: its first turn has
+    // not ended yet, a turn is running, or a merge it asked for is recorded,
+    // queued, running or landed.
+    RosterRowOneShotArmed armed = 1;
+    // The one-shot ENDED WITHOUT A LIVE MERGE: its last turn ended with no
+    // merge asked for, or the merge it asked for failed. It stands until the
+    // workspace starts a turn that reaches `thinking`, which returns the row
+    // to `armed`.
+    RosterRowOneShotFailed failed = 2;
+  }
+}
+
+// A one-shot that has not ended without a live merge. Drawn as the one-shot
+// glyph on the tab bar, and not at all on the webapp sidebar.
+message RosterRowOneShotArmed {}
+
+// A one-shot whose last turn ended with no merge asked for, or whose merge
+// failed. Drawn as the failure glyph on the tab bar and the webapp sidebar.
+message RosterRowOneShotFailed {}
+
 // The workspace's AVAILABILITY: whether the daemon has this workspace's
 // session to offer an editor. An editor OPENS a workspace — its tab, its
 // panels, its webapp — only once the row says the daemon has finished
@@ -599,6 +637,11 @@ message RosterRow {
   // runs in this workspace, absent otherwise. See RosterRowDetachedLive,
   // which carries the marker's whole contract.
   optional RosterRowDetachedLive detached_live = 40;
+
+  // The row's ONE-SHOT mark: present exactly when the workspace was created
+  // as a one-shot, for the workspace's whole life, absent for every other
+  // workspace. See RosterRowOneShot, which carries the mark's whole contract.
+  optional RosterRowOneShot one_shot = 59;
 
   // The row's display name.
   RosterRowName name = 2;

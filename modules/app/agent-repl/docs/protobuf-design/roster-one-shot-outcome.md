@@ -70,3 +70,32 @@ ended without a live merge.
   `done` with no merge for at least one render. Evidence tier: existing code.
 
 ## Landed changes
+
+### 1. `frontend.v1.RosterRow.one_shot` (2026-10-11)
+
+- **What:** `RosterRow` gains `optional RosterRowOneShot one_shot = 59`.
+  `RosterRowOneShot` is a `oneof outcome` of two empty arms, `armed` and
+  `failed`. Absent means the workspace is not a one-shot.
+- **Why:** the owner wants a one-shot's tab to say it is a one-shot, and to
+  say when it ended without a live merge, and the editor draws only what the
+  daemon resolves.
+- **Agreement:** the owner agreed the shape in prose (one optional field,
+  armed and failed arms) and asked for implementation without a separate
+  sketch review.
+- **Consequences:**
+  - The daemon reads one-shot off the creation job, so `wsm.Workspace` gains
+    a read-only `OneShot` filled from `creation_jobs` in the shared select
+    list, and a read-only `MergePending` (a `merge_queue` row stands in any
+    state) for seeding the outcome after a restart: the boot publishes the
+    roster BEFORE it recovers merges (`daemon/internal/boot/sequence.go`,
+    `BindViews` before `recoverMerges`), so the seed cannot read in-memory
+    merge facts.
+  - The merge orchestrator tells the roster when a request is RECORDED
+    (`Sidebar.SetMergeRequested`), so a one-shot that asked for its merge is
+    `armed` on the very push that ends its turn. No client sees the merge any
+    earlier: the request fact feeds only this outcome.
+  - `failed` is entered on a turn end with no merge requested, queued or
+    running, and on a merge failing; it clears when a turn reaches
+    `thinking`, when a merge is requested, or when one is queued or running.
+  - The tab bar stops drawing the in-flight and landed merge glyphs; a failed
+    merge on any workspace draws ✖️ (the same mark as a failed one-shot).
