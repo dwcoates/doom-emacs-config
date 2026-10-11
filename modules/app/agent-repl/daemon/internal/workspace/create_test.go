@@ -14,6 +14,7 @@ import (
 	"claude-repld/internal/account"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/prompts"
+	"claude-repld/internal/sourcescan"
 	"claude-repld/internal/wsm"
 )
 
@@ -1539,5 +1540,81 @@ func TestCreateWithAParentForkAndABaseOnThePrimaryBranchForksIntoIt(t *testing.T
 	sent := f.queue.submissions[0].Said.GetContent().GetBlocks()[0].GetText().GetText()
 	if !strings.HasPrefix(sent, prompts.Wrap("FORK OF "+parent.Name+"\n")) {
 		t.Fatalf("first message = %q, want it to open with the fork note", sent)
+	}
+}
+
+func TestResolveBaseAnswersTheCommit(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+
+	// Act.
+	commit, err := f.verbs.(*verbs).resolveBase(context.Background(), f.log.logger, "/repo", "main")
+
+	// Assert.
+	if err != nil || commit != "sha-of-main" {
+		t.Fatalf("resolveBase = (%q, %v), want sha-of-main", commit, err)
+	}
+}
+
+func TestResolveBaseRefusesAnUnresolvableRef(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.git.resolveErr = errors.New("no such ref")
+
+	// Act.
+	_, err := f.verbs.(*verbs).resolveBase(context.Background(), f.log.logger, "/repo", "nope")
+
+	// Assert.
+	refusal := asRefusal(t, err, ArmBaseRefUnresolved)
+	if refusal.Fields["ref"] != "nope" {
+		t.Fatalf("refusal fields = %v, want the ref", refusal.Fields)
+	}
+}
+
+func TestRequireOnPrimary(t *testing.T) {
+	tests := []struct {
+		name       string
+		offPrimary bool
+		gitErr     error
+		wantArm    string
+		wantErr    bool
+	}{
+		{name: "a base on the primary branch passes"},
+		{name: "a base off the primary branch is refused", offPrimary: true, wantArm: ArmBaseRefOffPrimaryBranch, wantErr: true},
+		{name: "a check git cannot answer fails", gitErr: errors.New("git exploded"), wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.git.offPrimary = map[string]bool{"base": tt.offPrimary}
+			f.git.ancestorErr = tt.gitErr
+
+			// Act.
+			err := f.verbs.(*verbs).requireOnPrimary(context.Background(), f.log.logger, "/repo", "base", "main")
+
+			// Assert.
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("requireOnPrimary = %v, want error %v", err, tt.wantErr)
+			}
+			if tt.wantArm != "" {
+				asRefusal(t, err, tt.wantArm)
+			}
+			if tt.gitErr != nil && !loggedAtError(f, opCreate) {
+				t.Fatal("the failed check was not logged at error")
+			}
+		})
+	}
+}
+
+// TestEveryAncestryCheckGoesThroughRequireOnPrimary pins that no create path
+// asks git whether a base is on the primary branch by hand.
+func TestEveryAncestryCheckGoesThroughRequireOnPrimary(t *testing.T) {
+	// Act.
+	calls := sourcescan.Count(t, "Git.IsAncestor(")
+
+	// Assert: the one call is requireOnPrimary's own.
+	if calls != 1 {
+		t.Fatalf("Git.IsAncestor( appears %d times in this package, want only requireOnPrimary's", calls)
 	}
 }
