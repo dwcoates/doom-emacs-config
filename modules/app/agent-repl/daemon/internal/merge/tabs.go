@@ -1,13 +1,17 @@
 package merge
 
 import (
+	"context"
 	"fmt"
 	"strconv"
+
+	"google.golang.org/protobuf/proto"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
+	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/wsm"
@@ -160,21 +164,142 @@ func headRow(ws ids.WorkspaceID, lease ids.LeaseID, label string, startedMS int6
 	}
 }
 
-// publishHead publishes the bubble's head with RESULT, the arm in force.
+// placement is one feed a merge bubble is drawn in: the merging workspace's
+// own, and, for a MERGE WORKSPACE, its requester's too. `mergeWS` is set only
+// on the requester's placement: the ref of the merge workspace its switches
+// take the user to.
+type placement struct {
+	ws      ids.WorkspaceID
+	mergeWS *workspacev1.WorkspaceRef
+}
+
+// mirror is what a merging workspace's second placement needs: the requester
+// whose feed carries it, and the merge workspace's own ref for its switches.
+type mirror struct {
+	requester ids.WorkspaceID
+	self      *workspacev1.WorkspaceRef
+}
+
+// placements answers every feed WS's merge bubble is drawn in, its own first.
+//
+// A DETACHED MERGE'S BUBBLE HAS TWO PLACEMENTS (frontend.v1.FeedMerge): the
+// merge workspace's feed draws it exactly as an in-place merge, and the
+// requester's feed draws the same bubble with the head's switch and, on each
+// agentic tab, a switch in place of the rows, which never cross workspaces.
+// A merging workspace whose record cannot be read is recorded at ERROR and its
+// bubble is drawn in its own placement alone, so the merge workspace's own
+// bubble never waits on the read.
+func (o *orchestrator) placements(ws ids.WorkspaceID) []placement {
+	own := placement{ws: ws}
+	o.mu.Lock()
+	second, cached := o.mirrorOf[ws]
+	o.mu.Unlock()
+	if !cached {
+		record, err := o.deps.DB.Workspace(context.Background(), ws)
+		if err != nil {
+			o.deps.Log.Global().Error("daemon.merge.placement", "could not read whether the merging workspace is a merge workspace; its bubble is drawn in its own feed alone",
+				dlog.Context{"workspace": string(ws), "error": err.Error()})
+			return []placement{own}
+		}
+		if record.MergeOf != nil {
+			second = &mirror{requester: record.MergeOf.Requester, self: &workspacev1.WorkspaceRef{Id: string(ws), Dir: record.Dir}}
+		}
+		o.mu.Lock()
+		o.mirrorOf[ws] = second
+		o.mu.Unlock()
+	}
+	if second == nil {
+		return []placement{own}
+	}
+	return []placement{own, {ws: second.requester, mergeWS: second.self}}
+}
+
+// headSwitchLabel is the bubble head's switch text while the merge workspace
+// exists.
+const headSwitchLabel = "open merge workspace"
+
+// tabSwitchLabel is an agentic tab's switch text: what that tab's agent is
+// doing in the merge workspace.
+func tabSwitchLabel(kind string) string {
+	switch kind {
+	case TabPrePrompt:
+		return "running the pre-merge prompt in the merge workspace"
+	case TabConflicts:
+		return "resolving conflicts in the merge workspace"
+	case TabFixes:
+		return "fixing the failed tests in the merge workspace"
+	case TabPostPrompt:
+		return "running the post-merge prompt in the merge workspace"
+	}
+	return ""
+}
+
+// withTabSwitch sets the switch on an AGENTIC tab's arm and reports whether the
+// tab is one. A resolved tab carries its whole content in every placement and
+// gets no switch.
+func withTabSwitch(tab *frontendv1.FeedMergeTab, kind string, target *workspacev1.WorkspaceRef) bool {
+	sw := &frontendv1.FeedMergeTabWorkspaceSwitch{
+		Label: &frontendv1.FeedMergeTabWorkspaceSwitchLabel{Text: tabSwitchLabel(kind)},
+		Availability: &frontendv1.FeedMergeTabWorkspaceSwitch_Available{
+			Available: &frontendv1.FeedMergeTabWorkspaceSwitchAvailable{Target: target},
+		},
+	}
+	switch arm := tab.GetKind().(type) {
+	case *frontendv1.FeedMergeTab_PrePrompt:
+		arm.PrePrompt.WorkspaceSwitch = sw
+	case *frontendv1.FeedMergeTab_Conflicts:
+		arm.Conflicts.WorkspaceSwitch = sw
+	case *frontendv1.FeedMergeTab_Fixes:
+		arm.Fixes.WorkspaceSwitch = sw
+	case *frontendv1.FeedMergeTab_PostPrompt:
+		arm.PostPrompt.WorkspaceSwitch = sw
+	default:
+		return false
+	}
+	return true
+}
+
+// publishHead publishes the bubble's head with RESULT, the arm in force, in
+// every placement.
 //
 // THE HEAD IS PINNED TO THE ROOT FEED'S BOTTOM WHILE THE MERGE IS IN FLIGHT
 // and settles where it stands when the merge resolves (owner ruling,
 // 2026-10-10; frontend.v1 FeedRowOrder.pinned): a live head (no result) is
 // published pinned, and the first publication carrying a result — landed,
 // failed or abandoned — settles it, after which every later row lands below
-// it.
+// it. The requester's placement carries the switch to the merge workspace for
+// the bubble's whole life.
 func (o *orchestrator) publishHead(ws ids.WorkspaceID, lease ids.LeaseID, label string, startedMS int64, result any) {
-	row := headRow(ws, lease, label, startedMS, result)
-	if result == nil {
-		o.deps.Feed.UpsertDurablePinned(ws, feedid.Feed{Root: true}, row)
-		return
+	for _, at := range o.placements(ws) {
+		row := headRow(at.ws, lease, label, startedMS, result)
+		if at.mergeWS != nil {
+			row.GetActivity().GetMerge().Head.WorkspaceSwitch = &frontendv1.FeedMergeWorkspaceSwitch{
+				Label: &frontendv1.FeedMergeWorkspaceSwitchLabel{Text: headSwitchLabel},
+				Availability: &frontendv1.FeedMergeWorkspaceSwitch_Available{
+					Available: &frontendv1.FeedMergeWorkspaceSwitchAvailable{Target: at.mergeWS},
+				},
+			}
+		}
+		if result == nil {
+			o.deps.Feed.UpsertDurablePinned(at.ws, feedid.Feed{Root: true}, row)
+			continue
+		}
+		o.deps.Feed.UpsertDurable(at.ws, feedid.Feed{Root: true}, row)
 	}
-	o.deps.Feed.UpsertDurable(ws, feedid.Feed{Root: true}, row)
+}
+
+// publishTab publishes one tab round in every placement. The merge workspace's
+// own placement is the tab as composed; the requester's is a copy whose
+// agentic tab draws a switch in place of rows it never streams.
+func (o *orchestrator) publishTab(ws ids.WorkspaceID, lease ids.LeaseID, kind string, round int, tab *frontendv1.FeedMergeTab) {
+	for _, at := range o.placements(ws) {
+		drawn := tab
+		if at.mergeWS != nil {
+			drawn = proto.Clone(tab).(*frontendv1.FeedMergeTab)
+			withTabSwitch(drawn, kind, at.mergeWS)
+		}
+		o.deps.Feed.UpsertDurable(at.ws, mergeFeed(lease), tabRow(at.ws, lease, kind, round, drawn))
+	}
 }
 
 // branchLabel resolves the head's branch line ("ABC/fix-flaky → master").

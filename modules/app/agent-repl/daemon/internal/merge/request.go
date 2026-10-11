@@ -43,6 +43,18 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) error {
 		log.Warn(op, "refused a merge request", withField(fields, "error", err.Error()))
 		return err
 	}
+	if req.Detached {
+		// ONLY THE REQUESTER'S OWN BRANCH RUNS DETACHED, and never kept open:
+		// the boundary that builds the request guarantees it, so a request
+		// that breaks it is a defect in that caller.
+		if source.Kind != wsm.MergeSourceOwnBranch || source.KeepOpen {
+			err := fmt.Errorf("merge: a detached merge of %s must be an own-branch merge that never keeps the requester open, not %s (keep_open %v)", ws, source.Kind, source.KeepOpen)
+			log.Error(op, "a detached merge request contradicts itself", withField(fields, "error", err.Error()))
+			return err
+		}
+		source.Detach = wsm.NewDetachedMergeID()
+		fields["detach"] = string(source.Detach)
+	}
 	if source.Branch != "" {
 		fields["branch"] = source.Branch
 	}
@@ -82,8 +94,9 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) error {
 	}
 	o.mu.Lock()
 	o.repoOf[ws] = repo
-	// ONLY THE USER'S OWN ASK MAY DISPLACE THE TURN IN FLIGHT (see Requester).
-	if req.By == RequestedByUser {
+	// ONLY THE USER'S OWN ASK MAY DISPLACE THE TURN IN FLIGHT (see Requester),
+	// and a DETACHED merge displaces nothing: it never runs in the requester.
+	if req.By == RequestedByUser && !req.Detached {
 		o.displaces[ws] = true
 	} else {
 		delete(o.displaces, ws)
@@ -263,6 +276,14 @@ func (o *orchestrator) queueRequest(ctx context.Context, ws ids.WorkspaceID, rep
 			dlog.Context{"workspace": string(ws)})
 		return nil
 	}
+	// A DETACHED REQUEST IS HANDED TO ITS MERGE WORKSPACE HERE, at the moment
+	// it would have been put in line: the requesting turn has ended, so the
+	// fork holds that whole turn.
+	if entry, found, err := o.requestOf(ctx, repo, ws); err != nil {
+		return err
+	} else if found && entry.Source.Detach != "" {
+		return o.handOffDetached(ctx, ws, repo, entry.Source)
+	}
 	// THE BUBBLE EXISTS FROM HERE: the ledger identity it is addressed by is
 	// minted as the merge takes its place, and written on its row with that
 	// place, so republishQueue can draw it -- and the next daemon to serve the
@@ -282,4 +303,63 @@ func (o *orchestrator) queueRequest(ctx context.Context, ws ids.WorkspaceID, rep
 	}
 	o.kick(repo)
 	return nil
+}
+
+// requestOf answers WS's row in REPO's queue, false when it has none.
+func (o *orchestrator) requestOf(ctx context.Context, repo wsm.RepoKey, ws ids.WorkspaceID) (wsm.MergeQueueEntry, bool, error) {
+	entries, err := o.deps.DB.MergeQueue(ctx, repo)
+	if err != nil {
+		return wsm.MergeQueueEntry{}, false, err
+	}
+	for _, entry := range entries {
+		if entry.Workspace == ws {
+			return entry, true, nil
+		}
+	}
+	return wsm.MergeQueueEntry{}, false, nil
+}
+
+// handOffDetached runs a detached request: it forks the merge workspace (or
+// finds the one a restart left forked), moves the request onto it durably, and
+// puts the merge workspace's own in-place merge in line. From there the merge
+// is an ordinary merge of the merge workspace, which draws its bubble in the
+// requester's feed too (placements).
+//
+// A FORK THAT FAILS ENDS THE REQUEST: it leaves the requester's queue, and the
+// requester is told through its handback, so a request never stands in nobody's
+// line waiting for a fork that will not come.
+func (o *orchestrator) handOffDetached(ctx context.Context, requester ids.WorkspaceID, repo wsm.RepoKey, source wsm.MergeSource) error {
+	const op = "daemon.merge.detached"
+	log := o.log(ctx, requester)
+	fields := dlog.Context{"workspace": string(requester), "repo": string(repo), "detach": string(source.Detach), "branch": source.Branch}
+	record, err := o.deps.DB.Workspace(ctx, requester)
+	if err != nil {
+		log.Error(op, "could not read the workspace a detached merge was asked for", withField(fields, "error", err.Error()))
+		return err
+	}
+	forked, err := o.deps.Detached.Fork(ctx, record, source.Detach, source.Branch)
+	if err != nil {
+		log.Error(op, "could not fork the merge workspace for a detached merge; the request is dropped and the requester told", withField(fields, "error", err.Error()))
+		if dropErr := o.deps.DB.RemoveMergeQueueEntry(ctx, repo, requester, "detached_fork_failed"); dropErr != nil {
+			log.Error(op, "could not drop the detached request whose fork failed", withField(fields, "error", dropErr.Error()))
+			return dropErr
+		}
+		o.mu.Lock()
+		delete(o.repoOf, requester)
+		o.mu.Unlock()
+		return o.deps.Detached.HandBack(ctx, requester, wsm.Workspace{}, DetachedOutcome{
+			Kind: DetachedAbandoned, Summary: fmt.Sprintf("the merge workspace could not be created: %v", err), Branch: source.Branch,
+		})
+	}
+	fields["merge_workspace"] = string(forked.ID)
+	if err := o.deps.DB.HandOffDetachedMerge(ctx, repo, requester, source.Detach, forked.ID, forked.Branch, o.deps.Now()); err != nil {
+		log.Error(op, "could not hand the detached request to its merge workspace; it stays recorded for the next boot", withField(fields, "error", err.Error()))
+		return err
+	}
+	o.mu.Lock()
+	delete(o.repoOf, requester)
+	o.repoOf[forked.ID] = repo
+	o.mu.Unlock()
+	log.Info(op, "handed a detached merge to its merge workspace", fields)
+	return o.queueRequest(ctx, forked.ID, repo)
 }

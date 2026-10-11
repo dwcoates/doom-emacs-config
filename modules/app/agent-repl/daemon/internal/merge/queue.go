@@ -378,8 +378,8 @@ func (o *orchestrator) republishQueue(ctx context.Context, repo wsm.RepoKey) err
 				return err
 			}
 			if drawn {
-				o.deps.Feed.UpsertDurable(entry.Workspace, mergeFeed(lease), tabRow(entry.Workspace, lease, TabQueue, 1,
-					queueTab(queueSnapshot(entries, entry.Workspace, names, dirs, standings), state)))
+				o.publishTab(entry.Workspace, lease, TabQueue, 1,
+					queueTab(queueSnapshot(entries, entry.Workspace, names, dirs, standings), state))
 			} else {
 				o.log(ctx, entry.Workspace).Debug("daemon.merge.queue", "an admitted merge's run is not registered yet; its admission draws its queue tab",
 					dlog.Context{"repo": string(repo), "workspace": string(entry.Workspace)})
