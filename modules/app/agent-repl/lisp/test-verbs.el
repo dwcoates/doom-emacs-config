@@ -2150,6 +2150,17 @@ trailing-slash removal alone, so the fixture directories need not exist."
   (should (string-match-p "/agent-repl-help" agent-repl-help-preamble))
   (should (string-match-p "explicit approval" agent-repl-help-preamble)))
 
+(ert-deftest agent-repl-verbs-help-preamble-names-a-skill-the-module-ships ()
+  "The skill the preamble names is one this module ships, under its own name."
+  ;; Arrange.
+  (let ((skill-md (expand-file-name "skills/agent-repl-help/SKILL.md"
+                                    (file-name-directory agent-repl-metaprompt-file))))
+    ;; Act / Assert.
+    (should (file-exists-p skill-md))
+    (with-temp-buffer
+      (insert-file-contents skill-md)
+      (should (re-search-forward "^name: agent-repl-help$" nil t)))))
+
 (ert-deftest agent-repl-verbs-help-creates-in-agent-repls-repository ()
   "The help workspace goes to agent-repl's repository, not the current workspace's."
   ;; Arrange.
