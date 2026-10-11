@@ -48,6 +48,7 @@ import (
 	"claude-repld/internal/prompthandler"
 	"claude-repld/internal/promptqueue"
 	"claude-repld/internal/prompts"
+	"claude-repld/internal/repodivergence"
 	"claude-repld/internal/resolve/feed"
 	"claude-repld/internal/resolve/footer"
 	"claude-repld/internal/resolve/sidebar"
@@ -1086,6 +1087,23 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		return nil, err
 	}
 
+	// THE REPOSITORY DIVERGENCE MEASURER fetches each registered repository's
+	// primary-branch upstream once now and every five minutes after, and hands
+	// each ahead/behind count to the roster, which draws it as the repository
+	// section's label hover. Background work: it takes no interactive lock.
+	divergence, err := repodivergence.New(repodivergence.Deps{
+		Git:      git,
+		Registry: p.DB,
+		Sink:     sidebarResolver.SetRepoDivergence,
+		Clock:    clock.System{},
+		Every:    repodivergence.DefaultEvery,
+		Timeout:  repodivergence.DefaultTimeout,
+		Log:      log,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("claude-repld: build the repository divergence measurer: %w", err)
+	}
+
 	// THE DAILY NEWS DIGEST runs only on the daemon that serves, one run at a
 	// time across processes, and its condensing call bills the default account.
 	digest, err := buildNewsDigest(newsDigestInputs{
@@ -1128,6 +1146,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			return runShimLogRolls(ctx, p.Surfaces.ShimRollRequests(), p.DB, rolloutController)
 		}},
 		{Name: "worktree_reaper", Run: reaper.Run},
+		{Name: "repo_divergence", Run: divergence.Run},
 		{Name: "merge_workspace_sweep", Run: func(ctx context.Context) error {
 			// HOURLY: a merge workspace goes after 15 calendar days idle, so
 			// an hour's lateness is nothing, and a sweep reads two tables.
