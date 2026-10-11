@@ -1750,6 +1750,16 @@ pre {
    is a permanent smudge rather than a resting bubble. A resting prompt is its
    plain `--user` fill and nothing else.
 
+   DEFAULT <-> DARKER, NEVER DEFAULT <-> BRIGHTER (owner ruling, 2026-10-11:
+   "the bright brights on the current wave are too bright"). The band was a
+   wash spanning the whole two-bubble-wide image, so every point of the bubble
+   sat under it for two thirds of each pass: the bubble read as dark, and the
+   eye followed the plain fill flashing through the gap between passes as a
+   bright glint. The wash now fills only the image's middle 30%-70%, a band
+   0.8 bubble widths wide, so each point spends under a third of the pass under
+   it: the bubble rests at its own `--user` fill and a darker band sweeps over
+   it. The wash's strength (`--bubble-wave`) and the period are unchanged.
+
    The band is a two-viewport-wide gradient panned across a one-viewport window
    (`background-size: 200%`, `background-repeat: no-repeat`), so the only
    animated property is `background-position-x`: no layout, no geometry, and
@@ -1768,7 +1778,7 @@ pre {
    text's own box at its own phase. One animated element means there is nothing
    for a second phase to drift against. */
 .bubble[data-role="prompt"][data-wave="working"] {
-  background-image: linear-gradient(90deg, transparent 0%, var(--bubble-wave) 50%, transparent 100%);
+  background-image: linear-gradient(90deg, transparent 30%, var(--bubble-wave) 50%, transparent 70%);
   background-size: 200% 100%;
   background-repeat: no-repeat;
   animation: bubble-wave 3.2s linear infinite;
