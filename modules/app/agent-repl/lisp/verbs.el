@@ -55,6 +55,8 @@
 (declare-function agent-repl--panels-note-arrival-reason "agent-repl-panels"
                   (id reason))
 (declare-function agent-repl--path-canonical "agent-repl-core" (path))
+(declare-function agent-repl--meta-wrap "agent-repl-core" (text))
+(declare-function agent-repl--repo-key-for-dir "agent-repl-workspace" (dir))
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--info "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--warn "agent-repl-core" (ws fmt &rest args))
@@ -117,6 +119,7 @@
 (declare-function agent-repl-roster-drawn-tab-order "agent-repl-roster" ())
 (declare-function agent-repl-host-request-switch "agent-repl-host" (ws trigger))
 (defvar agent-repl-roster-view)
+(defvar agent-repl-metaprompt-file)
 
 ;; Defined by session.el.  Declared, never defined here.
 (defvar agent-repl-interactive-model)
@@ -1970,6 +1973,15 @@ the obvious default rather than something to retype."
                        "elisp.verbs.read-prompt prompt=%S composer=none" prompt-text))
     (read-string prompt-text initial)))
 
+(defun agent-repl-verbs--read-required-prompt (prompt-text refusal)
+  "Read a creation prompt with PROMPT-TEXT that must not be blank.
+The text is returned as read.  A blank or whitespace-only answer is
+refused with REFUSAL, before any request is built."
+  (let ((text (agent-repl-verbs--read-prompt prompt-text)))
+    (when (string-empty-p (string-trim text))
+      (user-error "agent-repl: %s" refusal))
+    text))
+
 (defconst agent-repl-verbs--create-log-scope
   '(:agent-repl-central "workspace creation and daemon administration can precede workspace ownership")
   "The central log scope every creation command records under.
@@ -2229,10 +2241,8 @@ A prefix argument PICK-MODEL asks for the model."
          (prompt (agent-repl-verbs--read-for
                   command 'prompt
                   (lambda ()
-                    (let ((text (agent-repl-verbs--read-prompt "One-shot commission: ")))
-                      (when (string-empty-p (string-trim text))
-                        (user-error "agent-repl: a one-shot IS its prompt"))
-                      text))))
+                    (agent-repl-verbs--read-required-prompt
+                     "One-shot commission: " "a one-shot IS its prompt"))))
          (model (and pick-model
                      (agent-repl-verbs--read-for
                       command 'model #'agent-repl-verbs--read-model))))
@@ -2241,6 +2251,98 @@ A prefix argument PICK-MODEL asks for the model."
      repository :one-shot
      :prompt prompt
      :model model)))
+
+;;;; ---- The help workspace (`SPC o h') ----------------------------------
+;;
+;; A help workspace is a STANDARD workspace whose opening prompt is the
+;; user's question about agent-repl behind a meta-wrapped preamble.  The
+;; preamble is what makes it help: it names the `/agent-repl-help' skill
+;; (the static map of agent-repl's documentation and code) and forbids
+;; implementation without the user's explicit approval.  It is not a
+;; one-shot -- nothing is merged on completion, and the conversation goes
+;; on for as long as the user keeps asking.
+;;
+;; THE REPOSITORY IS FIXED, never derived from the current workspace: the
+;; question is about agent-repl, so the workspace is made in the repository
+;; agent-repl's own source lives in, from whichever workspace (or none) the
+;; user asks from.
+
+(defcustom agent-repl-help-preamble
+  "The following prompt is a QUESTION about agent-repl, not a commission. \
+Answer it with the /agent-repl-help skill, which maps agent-repl's user, \
+architecture and developer documentation and its code. Do not implement \
+anything, edit any file, or commit anything without the user's explicit \
+approval; that holds for every turn of this conversation, not only this one. \
+Here is the question:"
+  "The meta-wrapped preamble `agent-repl-create-help-workspace' opens with.
+It reaches the agent verbatim ahead of the user\='s question, and is
+stripped from the drawn bubble like every other harness-injected span."
+  :type 'string
+  :group 'agent-repl)
+
+(defun agent-repl-verbs--help-prompt (question)
+  "Compose a help workspace\='s opening prompt from the user\='s QUESTION.
+The preamble is meta-wrapped, so the drawn bubble is QUESTION alone while
+the agent receives both."
+  (concat (agent-repl--meta-wrap agent-repl-help-preamble) "\n\n" question))
+
+(defun agent-repl-verbs--help-repository ()
+  "Return the `RepositoryRef' of the repository agent-repl\='s source lives in.
+The repository is found by its main worktree: the parent of the git
+common-dir of the module root (the directory holding
+`agent-repl-metaprompt-file'), so a module loaded from a linked worktree
+still names its main checkout.  It is matched against the roster\='s
+repository sections by canonical directory.
+
+Refuses when the module root is not in a git repository, or when that
+repository is not on the roster -- the help workspace has nowhere else to
+go, and registering the repository (`SPC TAB C-n') is the user\='s act."
+  (let* ((module-root (file-name-directory agent-repl-metaprompt-file))
+         (common-dir (agent-repl--repo-key-for-dir module-root)))
+    (unless common-dir
+      (agent-repl--error agent-repl-verbs--create-log-scope
+                         "elisp.verbs.help-repository-unresolved module-root=%s cause=not-a-git-repository"
+                         module-root)
+      (user-error "agent-repl: agent-repl's source at %s is in no git repository" module-root))
+    (let* ((main (agent-repl--path-canonical (file-name-directory common-dir)))
+           (section (cl-find-if
+                     (lambda (section)
+                       (let ((dir (plist-get (agent-repl-verbs--section-ref section) :dir)))
+                         (and dir (equal (agent-repl--path-canonical dir) main))))
+                     (agent-repl-verbs--repo-sections))))
+      (unless section
+        (agent-repl--warn agent-repl-verbs--create-log-scope
+                          "elisp.verbs.help-repository-unregistered module-root=%s main=%s"
+                          module-root main)
+        (user-error "agent-repl: agent-repl's repository %s is not on the roster; register it with SPC TAB C-n"
+                    main))
+      (agent-repl-verbs--section-ref section))))
+
+(defun agent-repl-create-help-workspace ()
+  "Create a HELP workspace (`SPC o h\='): a question about agent-repl.
+Asks for the question alone, defaulting to the composer\='s text, and
+creates a standard workspace in agent-repl\='s own repository
+\(`agent-repl-verbs--help-repository\=') whose opening prompt is the
+question behind `agent-repl-help-preamble'.  The daemon mints the name.
+
+THE NEW WORKSPACE IS SELECTED: the user asked in order to read the answer."
+  (interactive)
+  (let ((command 'agent-repl-create-help-workspace))
+    (agent-repl-verbs--create-invoked command)
+    (let* ((repository (agent-repl-verbs--read-for
+                        command 'repository #'agent-repl-verbs--help-repository))
+           (question (agent-repl-verbs--read-for
+                      command 'prompt
+                      (lambda ()
+                        (string-trim
+                         (agent-repl-verbs--read-required-prompt
+                          "agent-repl question: " "a help workspace IS its question"))))))
+      (agent-repl--info agent-repl-verbs--create-log-scope
+                        "elisp.verbs.create-help repository=%s" (plist-get repository :dir))
+      (agent-repl-verb-create
+       repository :standard
+       :initial-prompt (agent-repl-verbs--help-prompt question)
+       :select t))))
 
 ;;;; ---- Shutdown and merge-queue commands --------------------------------
 
