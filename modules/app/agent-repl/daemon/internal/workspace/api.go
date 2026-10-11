@@ -299,7 +299,7 @@ type Verbs interface {
 	// touches no durable record — the mode is a view fact, not a workspace
 	// fact.
 	MarkViewed(ctx context.Context, ws ids.WorkspaceID) error
-	// SetPriority sets or clears the roster priority.
+	// SetPriority sets or clears the roster priority badge.
 	SetPriority(ctx context.Context, ws ids.WorkspaceID, p *wsm.Priority) error
 	// SetHidden moves the workspace into the roster's hidden section, or back
 	// out of it, and republishes the roster.
@@ -311,6 +311,9 @@ type Verbs interface {
 	SetParent(ctx context.Context, ws ids.WorkspaceID, parent *ids.WorkspaceID) (wsm.ParentChange, error)
 	// RestoreParent undoes change unless a later retarget superseded it.
 	RestoreParent(ctx context.Context, change wsm.ParentChange) error
+	// SwapPlaces exchanges two sibling workspaces' roster places; a pair that
+	// is not siblings is refused with ArmNotSiblings.
+	SwapPlaces(ctx context.Context, ws, other ids.WorkspaceID) error
 	// FoldRepository records whether a repository's roster section is
 	// collapsed and republishes the roster. An unknown repository is refused
 	// with ArmUnknownRepository.

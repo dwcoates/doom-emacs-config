@@ -29,6 +29,9 @@ const (
 	ArmWorkspaceRefMismatch = "workspace_ref_mismatch"
 	// ArmUnknownWorkspace is a ref naming an id the registry does not hold.
 	ArmUnknownWorkspace = "unknown_workspace"
+	// ArmNotSiblings refuses a place swap of two workspaces that are not one
+	// parent's children in the repository view.
+	ArmNotSiblings = "not_siblings"
 	// ArmTransferringAway is a workspace this daemon has handed to a successor.
 	ArmTransferringAway = "transferring_away"
 	// ArmNotYetAdopted is a workspace a joining daemon has not adopted yet.

@@ -598,6 +598,21 @@ func validateSetWorkspaceParentRequest(req *agentreplv1.SetWorkspaceParentReques
 	}
 }
 
+// validateSwapWorkspacePlacesRequest is SwapWorkspacePlacesRequest's base
+// function: two refs naming two different workspaces.
+func validateSwapWorkspacePlacesRequest(req *agentreplv1.SwapWorkspacePlacesRequest) *connect.Error {
+	if err := validateWorkspaceRef("workspace", req.GetWorkspace()); err != nil {
+		return err
+	}
+	if err := validateWorkspaceRef("other", req.GetOther()); err != nil {
+		return err
+	}
+	if req.GetWorkspace().GetId() == req.GetOther().GetId() {
+		return invalid("other", "a workspace cannot swap places with itself")
+	}
+	return nil
+}
+
 // validateFoldRepositoryRequest is FoldRepositoryRequest's base function.
 func validateFoldRepositoryRequest(req *agentreplv1.FoldRepositoryRequest) *connect.Error {
 	if err := validateRepositoryRef("repository", req.GetRepository()); err != nil {

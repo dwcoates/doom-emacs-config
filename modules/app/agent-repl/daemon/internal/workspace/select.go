@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 
+	"agentrepl/protohelpers/rosterwalk"
+
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/shimclient"
@@ -170,9 +172,8 @@ func (v *verbs) SetHidden(ctx context.Context, ws ids.WorkspaceID, hidden bool) 
 	return nil
 }
 
-// SetPriority sets or clears the roster's ordering priority. The roster orders
-// by it; clients — Emacs tabs included — follow roster order strictly, so this
-// is the only place the order is decided.
+// SetPriority sets or clears the roster's priority badge. The workspace keeps
+// its place: priority only picks where a workspace lands (wsm's place.go).
 func (v *verbs) SetPriority(ctx context.Context, ws ids.WorkspaceID, p *wsm.Priority) error {
 	_, log, err := v.owned(ctx, "SetWorkspacePriority", ws)
 	if err != nil {
@@ -184,5 +185,40 @@ func (v *verbs) SetPriority(ctx context.Context, ws ids.WorkspaceID, p *wsm.Prio
 	}
 	log.Debug(opSetPriority, "recorded the priority", dlog.Context{"cleared": p == nil})
 	v.republishRegistry(ctx, log, opSetPriority)
+	return nil
+}
+
+// SwapPlaces exchanges two workspaces' roster places, so the sidebar and the
+// tab bar that walks it draw them swapped. Only SIBLINGS swap -- both rows in
+// one rows list of the published repository view (rosterwalk's
+// RepositorySiblings) -- because one place exchange moves a pair on both
+// surfaces only when they share a parent; any other pair is refused
+// ArmNotSiblings with nothing written.
+func (v *verbs) SwapPlaces(ctx context.Context, ws, other ids.WorkspaceID) error {
+	const rpc = "SwapWorkspacePlaces"
+	_, log, err := v.owned(ctx, rpc, ws)
+	if err != nil {
+		return err
+	}
+	if _, _, err := v.owned(ctx, rpc, other); err != nil {
+		return err
+	}
+	log = log.With(dlog.Context{"other": string(other)})
+	roster, published := v.deps.Sidebar.Topic().Latest()
+	if !published {
+		err := fmt.Errorf("swap places of %q and %q: the roster has not been published", ws, other)
+		log.Error(opSwapPlaces, "no roster is published to judge the pair against", dlog.Context{"cause": err.Error()})
+		return err
+	}
+	if !rosterwalk.RepositorySiblings(roster, string(ws), string(other)) {
+		return refuse(log, rpc, ArmNotSiblings,
+			fmt.Sprintf("workspaces %q and %q are not siblings in the repository view", ws, other), false)
+	}
+	if err := v.deps.DB.SwapPlaces(ctx, ws, other); err != nil {
+		log.Error(opSwapPlaces, "could not exchange the places", dlog.Context{"cause": err.Error()})
+		return fmt.Errorf("swap places of %q and %q: %w", ws, other, err)
+	}
+	log.Debug(opSwapPlaces, "exchanged the two workspaces' places", nil)
+	v.republishRegistry(ctx, log, opSwapPlaces)
 	return nil
 }
