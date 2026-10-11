@@ -24,6 +24,7 @@
  * elapsed-clock builder every other clock on the page uses.
  */
 import { createControl, type Control } from "../../control.js";
+import { repaintMark } from "../../dom.js";
 import type { Ticker } from "../../clock.js";
 import { liveElapsedClock, settledElapsedClock } from "../../elapsed-clock.js";
 import { log } from "../../log.js";
@@ -238,9 +239,7 @@ export function drawTabStateGlyph(tab: MergeTab): HTMLElement {
  */
 export function paintTabStateGlyph(el: HTMLElement, tab: MergeTab): void {
   const [modifier, glyph] = tabGlyphOf(tab);
-  const className = modifier === null ? "merge-tab-glyph" : `merge-tab-glyph ${modifier}`;
-  if (el.className !== className) el.className = className;
-  if (el.textContent !== glyph) el.textContent = glyph;
+  repaintMark(el, modifier === null ? "merge-tab-glyph" : `merge-tab-glyph ${modifier}`, glyph);
 }
 
 /** TAB's glyph modifier class and its glyph, by its state. */
