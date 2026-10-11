@@ -24,7 +24,7 @@ import {
   updatedSentence,
   type ClassifierExample,
   type ClassifierUpdateForm,
-} from "../../src/tray/classifier-update.js";
+} from "../../src/held/classifier-update.js";
 import type { Control } from "../../src/control.js";
 import { oneofArms } from "../arms.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
@@ -333,7 +333,7 @@ describe("the classifier update form", () => {
     parts(form).apply.click();
     await settle();
     // Assert
-    const record = await forwardedRecord(capture, "tray.classifier-update.refused");
+    const record = await forwardedRecord(capture, "held.classifier-update.refused");
     expect(record.level.case).toBe("info");
   });
 
@@ -374,7 +374,7 @@ describe("the classifier update form", () => {
     parts(form).apply.click();
     await settle();
     // Assert
-    const record = await forwardedRecord(capture, "tray.classifier-update.failed");
+    const record = await forwardedRecord(capture, "held.classifier-update.failed");
     expect([parts(form).status.getAttribute("data-arm"), parts(form).status.textContent, record.level.case]).toEqual([
       "failed",
       "daemon gone",

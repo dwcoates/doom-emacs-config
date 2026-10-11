@@ -24,7 +24,7 @@ import {
   feedId,
   feedPageSuccess,
   footerView,
-  holdTray,
+  heldSection,
   heldPromptItem,
   responseRow,
   roster,
@@ -93,12 +93,13 @@ const STREAM_CASES: StreamCase[] = [
     drawn: (marker) => marker,
   },
   {
-    name: "WatchDaemonHolds",
-    rpc: "watchDaemonHolds",
-    // The heading is undrawn (owner ruling 2), so the marker rides the one
-    // thing the tray does draw: the held prompt's own words.
+    // The root feed's held section rides the feed's own tail: its frame is a
+    // WatchFeed frame, and the marker rides the held prompt's own words.
+    name: "WatchFeed (the held section)",
+    rpc: "watchFeed",
+    needsOpenFeed: true,
     push: (fake, marker) =>
-      fake.setTray(WORKSPACE_ID, holdTray({ items: [heldPromptItem({ text: marker })] })),
+      fake.setHeld(WORKSPACE_ID, heldSection({ items: [heldPromptItem({ text: marker })] })),
     selector: '[data-component="hold-tray"]',
     drawn: (marker) => marker,
   },

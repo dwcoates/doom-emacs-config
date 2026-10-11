@@ -7,7 +7,7 @@
 //
 // A close REQUIRES QUIET: no turn in flight, no live async work, and NO
 // HELD PROMPTS — a held prompt is undelivered user intent, and a close may
-// never silently discard it; the user releases or drops it in the tray
+// never silently discard it; the user releases or drops it in the held section
 // first. A busy workspace refuses, and the refusal MANIFESTS IN THE FOOTER (status
 // `closing`, sub-status `close blocked`, the daemon's composed reasons as
 // the activity line) — pushed on the footer stream beside this response, so
@@ -179,7 +179,7 @@ export type CloseWorkspaceBlocked = Message<"agentrepl.v1.CloseWorkspaceBlocked"
   liveWork: number;
 
   /**
-   * Held prompts in the tray — undelivered user intent.
+   * Held prompts in the held section — undelivered user intent.
    *
    * @generated from field: uint32 held_prompts = 3;
    */

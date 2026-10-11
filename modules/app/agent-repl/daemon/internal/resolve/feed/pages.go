@@ -22,17 +22,18 @@ import (
 // on the spot, daemon → shim → store; what it holds (an earlier reader's
 // load) is served from memory.
 
-// OpenPage answers OpenFeed: the newest page of one feed, plus the watch token
-// the tail echoes. The feed's newest store page is read first unless it is
-// held and no entry has moved it since.
-func (r *resolver) OpenPage(ctx context.Context, ws ids.WorkspaceID, feed feedid.Feed, reader ReaderID) (*frontendv1.FeedPage, *agentreplv1.FeedWatchToken, error) {
+// OpenPage answers OpenFeed: the newest page of one feed, the watch token the
+// tail echoes, and — for the root feed only — the held section as it stands at
+// that token's pin (nil for a sub-feed). The feed's newest store page is read
+// first unless it is held and no entry has moved it since.
+func (r *resolver) OpenPage(ctx context.Context, ws ids.WorkspaceID, feed feedid.Feed, reader ReaderID) (*frontendv1.FeedPage, *agentreplv1.FeedWatchToken, *frontendv1.FeedHeld, error) {
 	return r.walkPage(ctx, ws, feed, reader, true)
 }
 
 // NextPage answers GetFeedPage's next arm: the page before this reader's
 // current position, read on the spot when the daemon does not hold it.
 func (r *resolver) NextPage(ctx context.Context, ws ids.WorkspaceID, feed feedid.Feed, reader ReaderID) (*frontendv1.FeedPage, error) {
-	page, _, err := r.walkPage(ctx, ws, feed, reader, false)
+	page, _, _, err := r.walkPage(ctx, ws, feed, reader, false)
 	return page, err
 }
 
@@ -41,7 +42,7 @@ func (r *resolver) NextPage(ctx context.Context, ws ids.WorkspaceID, feed feedid
 // remains. Loads of one workspace are serialized (loadMu) and read off the
 // resolver's mutex; the page itself is composed, and an opening's token
 // minted, under it, so no row falls between the page and its tail.
-func (r *resolver) walkPage(ctx context.Context, ws ids.WorkspaceID, feed feedid.Feed, reader ReaderID, open bool) (*frontendv1.FeedPage, *agentreplv1.FeedWatchToken, error) {
+func (r *resolver) walkPage(ctx context.Context, ws ids.WorkspaceID, feed feedid.Feed, reader ReaderID, open bool) (*frontendv1.FeedPage, *agentreplv1.FeedWatchToken, *frontendv1.FeedHeld, error) {
 	mu := r.loadMu(ws)
 	mu.Lock()
 	defer mu.Unlock()
@@ -49,13 +50,19 @@ func (r *resolver) walkPage(ctx context.Context, ws ids.WorkspaceID, feed feedid
 	for {
 		r.mu.Lock()
 		page, token, plan, err := r.stepPage(ws, feed, reader, &step)
+		// THE HELD SECTION IS READ UNDER THE LOCK THAT PINNED THE TOKEN, so it is
+		// the section as of the pin, and the tail delivers every change after it.
+		var held *frontendv1.FeedHeld
+		if err == nil && plan == nil && token != nil && feed.Root {
+			held = r.currentHeld(r.state(ws))
+		}
 		r.mu.Unlock()
 		if err != nil || plan == nil {
-			return page, token, err
+			return page, token, held, err
 		}
 		if _, err := r.load(ctx, *plan); err != nil {
 			if !errors.Is(err, ErrNoHistorySource) {
-				return nil, nil, err
+				return nil, nil, nil, err
 			}
 			step.noSource = true
 			if plan.newest {

@@ -56,6 +56,7 @@ import {
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_feed_pb";
 import {
   WatchFeedResponseSchema,
+  type WatchFeedHeldChange,
   type WatchFeedResponse,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_feed_pb";
 import {
@@ -72,7 +73,7 @@ import type { AppContext } from "../rpc/context.js";
 import type { AgentReplClient } from "../rpc/client.js";
 import { buildOpenFeedRequest, buildWatchFeedRequest } from "./requests.js";
 import { mountBubble, type WireFold } from "./bubble.js";
-import { isMergeBubble, MERGE_BUBBLE_ATTRIBUTE } from "./merge-bubble.js";
+import { isMergeBubble } from "./merge-bubble.js";
 import {
   createFeedController,
   type BubbleLike,
@@ -88,7 +89,11 @@ import {
 } from "./renderers.js";
 import { drawFeedSubagent, drawFeedDetachedSubagent } from "./rows/subagent.js";
 import { FEED_GROUP_CLASS, activateGroupedMember } from "./tool-group.js";
-import { HELD_ENTRY_SELECTOR } from "../tray/tray.js";
+import {
+  HELD_ENTRY_SELECTOR,
+  mountHeldSection,
+  type HeldSection,
+} from "../held/section.js";
 import { tick, stopTicking } from "./ticking.js";
 import { createOverscan } from "./overscan.js";
 import { REVEAL_ATTRIBUTE, syncSelectedEntry } from "./selected-entry.js";
@@ -112,6 +117,13 @@ export interface FeedDeps {
    * is neither (a fixture rendering the feed on its own).
    */
   scrollBox?: HTMLElement;
+  /**
+   * Where the root feed's held section draws: the page's own `#hold-tray`,
+   * after the rows in the same scroll zone. Absent in a fixture rendering the
+   * feed on its own, which then draws no held section (and still requires the
+   * daemon to state one).
+   */
+  heldHost?: HTMLElement;
 }
 
 export interface FeedHandle extends Handle {
@@ -121,13 +133,6 @@ export interface FeedHandle extends Handle {
    * (`detachedWorkSelected`, one of the closed set of scroll causes).
    */
   readonly selectDetachedWork: (id: FeedId) => Promise<boolean>;
-  /**
-   * A held prompt's card was drawn in the hold tray for the FIRST time: park
-   * the feed at its tail and follow (`promptHeld`, one of the closed set of
-   * scroll causes). The tray hangs in this feed's scroll box, after the rows,
-   * so the tail is where the card is.
-   */
-  readonly promptHeld: (turn: string) => void;
   /**
    * This page's workspace was just switched to (`sidebar/selection-edge.ts`):
    * park the feed at its tail and follow (`workspaceSelected`, one of the
@@ -160,9 +165,8 @@ export function mountFeed(
           // THE ROWS ARE THE ROOT BODY'S ROW LIST, not the feed host's own
           // children (the page-error slot and the body mount), which held one
           // box for the whole feed and so never moved when a row above the
-          // reader changed height. A MERGE BUBBLE'S ROW IS EXEMPT: its updates
-          // never move the feed (owner ruling, 2026-10-08).
-          feedAnchorRows(scrollBox, () => rootRows(host), `[${MERGE_BUBBLE_ATTRIBUTE}]`),
+          // reader changed height.
+          feedAnchorRows(scrollBox, () => rootRows(host)),
         );
   // The tail owner's OTHER two inputs, which only a mount holding the real
   // element can give it: the box's scroll events and the box's size changes.
@@ -310,19 +314,23 @@ export function mountFeed(
       ? null
       : installBackgroundClear(scrollBox, ctx, () => root.selectionActive());
 
+  // THE ROOT FEED'S HELD SECTION (held/section.ts): drawn after the rows, fed
+  // by this feed's own open and watch.
+  const held: HeldSection | null =
+    deps.heldHost === undefined ? null : mountHeldSection(deps.heldHost, ctx, { promptHeld });
+
   openWatch();
 
   return {
     selectDetachedWork,
-    promptHeld,
     workspaceSelected,
     dispose,
   };
 
   /**
    * A HELD PROMPT JUST LANDED PUTS THE READER AT THE TAIL (owner ruling,
-   * 2026-09-23), as a sent prompt does: called only after the tray drew the
-   * card, and only on its first draw. It parks at the TAIL rather than on the
+   * 2026-09-23), as a sent prompt does: called only after the held section
+   * drew the card, and only on its first draw. It parks at the TAIL rather than on the
    * card, so whatever was drawn after it is included and the follow keeps
    * tracking. A fixture feed with no scroll box has no tail to park.
    */
@@ -416,9 +424,25 @@ export function mountFeed(
           root.applySelection(response.selection);
           return;
         }
+        if (response.held !== undefined) {
+          applyHeldChange(response.held);
+          return;
+        }
         root.upsert(requireMessage(response.row, "WatchFeedResponse.row"));
       },
     });
+  }
+
+  /**
+   * One change of the held section, applied whole BEFORE the page can paint:
+   * every row that moved first (an item that settled, drawn at the bottom, or
+   * a row whose item returned, as its removal), then the section itself. So no
+   * frame ever draws an item in both places or in neither (WatchFeedHeldChange).
+   */
+  function applyHeldChange(change: WatchFeedHeldChange): void {
+    for (const row of change.rows) root.upsert(row);
+    const section = requireMessage(change.held, "WatchFeedHeldChange.held");
+    held?.apply(section);
   }
 
   /**
@@ -447,6 +471,10 @@ export function mountFeed(
           requireMessage(result.value.page, "OpenFeedSuccess.page"),
           "replace",
         );
+        // THE ROOT FEED'S OPEN STATES ITS HELD SECTION, as of the same pin as
+        // the page: the tail then carries every later change of it.
+        const section = requireMessage(result.value.held, "OpenFeedSuccess.held");
+        held?.apply(section);
         markConversationDrawn("page");
         const token = requireMessage(
           result.value.watch,
@@ -1041,6 +1069,7 @@ export function mountFeed(
     uninstallExpand();
     uninstallSelect();
     host.removeEventListener(ITEM_EXPANDED_EVENT, onItemExpanded);
+    held?.dispose();
     uninstallClear?.();
     overscan?.dispose();
     selectionVisibility?.dispose();

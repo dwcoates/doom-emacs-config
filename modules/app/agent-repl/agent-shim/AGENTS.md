@@ -62,11 +62,11 @@ When the user submits a prompt the daemon cannot deliver yet, the daemon HOLDS
 it, classifies it, and shows it in a tray at the feed's tail with force /
 cancel / accept actions.
 
-None of that is ours. `frontend.v1`'s `daemon_hold.proto` says it directly: a
+None of that is ours. `frontend.v1`'s `feed_held.proto` says it directly: a
 queued prompt is not a conversation record, it is daemon-owned pending intent
 the vendor never saw, drawn beside the feed and never in it. So:
 
-- **`DaemonHoldTray` / `HeldPrompt` / `HeldOffer`** are `frontend.v1`. There is
+- **`FeedHeld` / `HeldPrompt` / `HeldOffer`** are `frontend.v1`. There is
   no vendor fact for "a prompt the user typed that we have not sent yet"; it is
   an artifact of the DAEMON's decision to hold it back. It is never written to
   the store, so it has no `store.v1` envelope either.

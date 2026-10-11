@@ -7,7 +7,7 @@
 //
 // A close REQUIRES QUIET: no turn in flight, no live async work, and NO
 // HELD PROMPTS — a held prompt is undelivered user intent, and a close may
-// never silently discard it; the user releases or drops it in the tray
+// never silently discard it; the user releases or drops it in the held section
 // first. A busy workspace refuses, and the refusal MANIFESTS IN THE FOOTER (status
 // `closing`, sub-status `close blocked`, the daemon's composed reasons as
 // the activity line) — pushed on the footer stream beside this response, so
@@ -63,7 +63,7 @@ message CloseWorkspaceBlocked {
   bool turn_in_flight = 1;
   // Detached items live now (subagents, runs, tasks).
   uint32 live_work = 2;
-  // Held prompts in the tray — undelivered user intent.
+  // Held prompts in the held section — undelivered user intent.
   uint32 held_prompts = 3;
   // The workspace is queued for, or inside, a merge.
   bool merge_queued = 4;

@@ -58,7 +58,7 @@ export type SubmitPromptRequest = Message<"agentrepl.v1.SubmitPromptRequest"> & 
   workspace?: WorkspaceRef | undefined;
 
   /**
-   * The composed prompt — one canonical form client → daemon → tray → shim →
+   * The composed prompt — one canonical form client → daemon → held section → shim →
    * record (a held prompt IS a UserSaid).
    *
    * @generated from field: conversation.v1.UserSaid said = 1;
@@ -158,7 +158,7 @@ export type SubmitPromptSuccess = Message<"agentrepl.v1.SubmitPromptSuccess"> & 
   outcome: {
     /**
      * It is a prompt: the daemon minted the turn (delivered now or held — a
-     * hold is visible in the tray, not an error here).
+     * hold is visible in the held section, not an error here).
      *
      * @generated from field: agentrepl.v1.SubmitPromptTurn turn = 1;
      */
@@ -787,7 +787,7 @@ export enum SubmitPromptDelivery {
    * It goes to the session at once when nothing runs. While a turn runs it is
    * held until that turn ends and is then delivered as a turn of its own:
    * it is never classified, so it can never earn an interject. It is held
-   * like any other held prompt -- it shows in the held tray, a merge or a cold
+   * like any other held prompt -- it shows in the feed's held section, a merge or a cold
    * gate keeps it held, and it survives a restart of the daemon, the shim and
    * the client -- and a turn end delivers held prompts one at a time, oldest
    * first, so several deferred prompts run as that many turns in order.

@@ -375,7 +375,7 @@ func (q *queue) reviveInBackground(ctx context.Context, ws ids.WorkspaceID, log 
 		}()
 		revived, err := q.revive(ctx, ws, log)
 		if err != nil {
-			// THE BRING-UP FAILED, and daemon_hold.proto settles what that
+			// THE BRING-UP FAILED, and feed_held.proto settles what that
 			// means for the entries waiting on it: "A FAILED BRING-UP NEVER
 			// DROPS THESE ENTRIES." They wait under the reconnect hold for
 			// whatever brings a session up next -- a retry, a restart, a
@@ -417,7 +417,7 @@ func (q *queue) reviveInBackground(ctx context.Context, ws ids.WorkspaceID, log 
 // keepReconnectHolds records, loudly, that a FAILED bring-up leaves every
 // reconnect hold on the workspace standing.
 //
-// A failed bring-up NEVER drops these entries (daemon_hold.proto,
+// A failed bring-up NEVER drops these entries (feed_held.proto,
 // HeldPromptReconnectHold): the prompt waits for the session to reconnect, and
 // whatever brings a session up next delivers it. Before 2026-10-02 the entries
 // were tombstoned here, and a prompt sent to a workspace whose vendor would not

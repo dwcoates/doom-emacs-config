@@ -44,7 +44,7 @@ const (
 	// It goes to the session at once when nothing runs. While a turn runs it is
 	// held until that turn ends and is then delivered as a turn of its own:
 	// it is never classified, so it can never earn an interject. It is held
-	// like any other held prompt -- it shows in the held tray, a merge or a cold
+	// like any other held prompt -- it shows in the feed's held section, a merge or a cold
 	// gate keeps it held, and it survives a restart of the daemon, the shim and
 	// the client -- and a turn end delivers held prompts one at a time, oldest
 	// first, so several deferred prompts run as that many turns in order.
@@ -99,7 +99,7 @@ type SubmitPromptRequest struct {
 	// `feed` is set it must belong to this workspace, else the submission is
 	// refused.
 	Workspace *v1.WorkspaceRef `protobuf:"bytes,5,opt,name=workspace,proto3" json:"workspace,omitempty"`
-	// The composed prompt — one canonical form client → daemon → tray → shim →
+	// The composed prompt — one canonical form client → daemon → held section → shim →
 	// record (a held prompt IS a UserSaid).
 	Said *v11.UserSaid `protobuf:"bytes,1,opt,name=said,proto3" json:"said,omitempty"`
 	// Client-minted; the daemon refuses duplicates by it, so a retried request
@@ -376,7 +376,7 @@ type isSubmitPromptSuccess_Outcome interface {
 
 type SubmitPromptSuccess_Turn struct {
 	// It is a prompt: the daemon minted the turn (delivered now or held — a
-	// hold is visible in the tray, not an error here).
+	// hold is visible in the held section, not an error here).
 	Turn *SubmitPromptTurn `protobuf:"bytes,1,opt,name=turn,proto3,oneof"`
 }
 

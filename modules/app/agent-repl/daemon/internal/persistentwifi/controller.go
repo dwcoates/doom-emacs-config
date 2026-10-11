@@ -8,10 +8,12 @@ import (
 	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
+
 	"google.golang.org/protobuf/proto"
 
 	"claude-repld/internal/clock"
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/protoarm"
 	"claude-repld/internal/publish"
 )
 
@@ -290,13 +292,9 @@ func displayArm(d *agentreplv1.UpdatePersistentWifiModeDisplay) string { return 
 // package and panics rather than being named.
 func outcomeArm(m proto.Message) string {
 	r := m.ProtoReflect()
-	oneof := r.Descriptor().Oneofs().ByName("outcome")
-	if oneof == nil {
-		panic(fmt.Sprintf("persistentwifi: %s has no outcome oneof", r.Descriptor().FullName()))
-	}
-	field := r.WhichOneof(oneof)
-	if field == nil {
+	arm, ok := protoarm.Name(r, "outcome")
+	if !ok {
 		panic(fmt.Sprintf("persistentwifi: %s was built with no outcome", r.Descriptor().FullName()))
 	}
-	return string(field.Name())
+	return string(arm)
 }

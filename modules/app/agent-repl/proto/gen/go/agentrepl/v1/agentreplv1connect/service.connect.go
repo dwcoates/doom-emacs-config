@@ -144,9 +144,6 @@ const (
 	AgentReplSelectAccountProcedure = "/agentrepl.v1.AgentRepl/SelectAccount"
 	// AgentReplWatchFooterProcedure is the fully-qualified name of the AgentRepl's WatchFooter RPC.
 	AgentReplWatchFooterProcedure = "/agentrepl.v1.AgentRepl/WatchFooter"
-	// AgentReplWatchDaemonHoldsProcedure is the fully-qualified name of the AgentRepl's
-	// WatchDaemonHolds RPC.
-	AgentReplWatchDaemonHoldsProcedure = "/agentrepl.v1.AgentRepl/WatchDaemonHolds"
 	// AgentReplUpdateHeldPromptProcedure is the fully-qualified name of the AgentRepl's
 	// UpdateHeldPrompt RPC.
 	AgentReplUpdateHeldPromptProcedure = "/agentrepl.v1.AgentRepl/UpdateHeldPrompt"
@@ -277,7 +274,6 @@ var (
 	agentReplSetPermissionModeMethodDescriptor        = agentReplServiceDescriptor.Methods().ByName("SetPermissionMode")
 	agentReplSelectAccountMethodDescriptor            = agentReplServiceDescriptor.Methods().ByName("SelectAccount")
 	agentReplWatchFooterMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("WatchFooter")
-	agentReplWatchDaemonHoldsMethodDescriptor         = agentReplServiceDescriptor.Methods().ByName("WatchDaemonHolds")
 	agentReplUpdateHeldPromptMethodDescriptor         = agentReplServiceDescriptor.Methods().ByName("UpdateHeldPrompt")
 	agentReplEditHeldPromptMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("EditHeldPrompt")
 	agentReplFoldHeldPromptMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("FoldHeldPrompt")
@@ -431,8 +427,6 @@ type AgentReplClient interface {
 	SelectAccount(context.Context, *connect.Request[v1.SelectAccountRequest]) (*connect.Response[v1.SelectAccountResponse], error)
 	// The footer's stream: the view, whole.
 	WatchFooter(context.Context, *connect.Request[v1.WatchFooterRequest]) (*connect.ServerStreamForClient[v1.WatchFooterResponse], error)
-	// The tray's stream: the tray, whole.
-	WatchDaemonHolds(context.Context, *connect.Request[v1.WatchDaemonHoldsRequest]) (*connect.ServerStreamForClient[v1.WatchDaemonHoldsResponse], error)
 	// Act on a held prompt: deliver now, or discard. See
 	// endpoint_update_held_prompt.proto.
 	UpdateHeldPrompt(context.Context, *connect.Request[v1.UpdateHeldPromptRequest]) (*connect.Response[v1.UpdateHeldPromptResponse], error)
@@ -449,7 +443,7 @@ type AgentReplClient interface {
 	// the daemon commits that one file. See
 	// endpoint_update_classifier_prompt.proto.
 	UpdateClassifierPrompt(context.Context, *connect.Request[v1.UpdateClassifierPromptRequest]) (*connect.Response[v1.UpdateClassifierPromptResponse], error)
-	// Answer a question the daemon parked in the tray. See
+	// Answer a question the daemon holds in the feed's held section. See
 	// endpoint_answer_held_offer.proto.
 	AnswerHeldOffer(context.Context, *connect.Request[v1.AnswerHeldOfferRequest]) (*connect.Response[v1.AnswerHeldOfferResponse], error)
 	// The deploy tooling's drain-and-exit control. See
@@ -788,12 +782,6 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(agentReplWatchFooterMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
-		watchDaemonHolds: connect.NewClient[v1.WatchDaemonHoldsRequest, v1.WatchDaemonHoldsResponse](
-			httpClient,
-			baseURL+AgentReplWatchDaemonHoldsProcedure,
-			connect.WithSchema(agentReplWatchDaemonHoldsMethodDescriptor),
-			connect.WithClientOptions(opts...),
-		),
 		updateHeldPrompt: connect.NewClient[v1.UpdateHeldPromptRequest, v1.UpdateHeldPromptResponse](
 			httpClient,
 			baseURL+AgentReplUpdateHeldPromptProcedure,
@@ -1031,7 +1019,6 @@ type agentReplClient struct {
 	setPermissionMode        *connect.Client[v1.SetPermissionModeRequest, v1.SetPermissionModeResponse]
 	selectAccount            *connect.Client[v1.SelectAccountRequest, v1.SelectAccountResponse]
 	watchFooter              *connect.Client[v1.WatchFooterRequest, v1.WatchFooterResponse]
-	watchDaemonHolds         *connect.Client[v1.WatchDaemonHoldsRequest, v1.WatchDaemonHoldsResponse]
 	updateHeldPrompt         *connect.Client[v1.UpdateHeldPromptRequest, v1.UpdateHeldPromptResponse]
 	editHeldPrompt           *connect.Client[v1.EditHeldPromptRequest, v1.EditHeldPromptResponse]
 	foldHeldPrompt           *connect.Client[v1.FoldHeldPromptRequest, v1.FoldHeldPromptResponse]
@@ -1264,11 +1251,6 @@ func (c *agentReplClient) SelectAccount(ctx context.Context, req *connect.Reques
 // WatchFooter calls agentrepl.v1.AgentRepl.WatchFooter.
 func (c *agentReplClient) WatchFooter(ctx context.Context, req *connect.Request[v1.WatchFooterRequest]) (*connect.ServerStreamForClient[v1.WatchFooterResponse], error) {
 	return c.watchFooter.CallServerStream(ctx, req)
-}
-
-// WatchDaemonHolds calls agentrepl.v1.AgentRepl.WatchDaemonHolds.
-func (c *agentReplClient) WatchDaemonHolds(ctx context.Context, req *connect.Request[v1.WatchDaemonHoldsRequest]) (*connect.ServerStreamForClient[v1.WatchDaemonHoldsResponse], error) {
-	return c.watchDaemonHolds.CallServerStream(ctx, req)
 }
 
 // UpdateHeldPrompt calls agentrepl.v1.AgentRepl.UpdateHeldPrompt.
@@ -1550,8 +1532,6 @@ type AgentReplHandler interface {
 	SelectAccount(context.Context, *connect.Request[v1.SelectAccountRequest]) (*connect.Response[v1.SelectAccountResponse], error)
 	// The footer's stream: the view, whole.
 	WatchFooter(context.Context, *connect.Request[v1.WatchFooterRequest], *connect.ServerStream[v1.WatchFooterResponse]) error
-	// The tray's stream: the tray, whole.
-	WatchDaemonHolds(context.Context, *connect.Request[v1.WatchDaemonHoldsRequest], *connect.ServerStream[v1.WatchDaemonHoldsResponse]) error
 	// Act on a held prompt: deliver now, or discard. See
 	// endpoint_update_held_prompt.proto.
 	UpdateHeldPrompt(context.Context, *connect.Request[v1.UpdateHeldPromptRequest]) (*connect.Response[v1.UpdateHeldPromptResponse], error)
@@ -1568,7 +1548,7 @@ type AgentReplHandler interface {
 	// the daemon commits that one file. See
 	// endpoint_update_classifier_prompt.proto.
 	UpdateClassifierPrompt(context.Context, *connect.Request[v1.UpdateClassifierPromptRequest]) (*connect.Response[v1.UpdateClassifierPromptResponse], error)
-	// Answer a question the daemon parked in the tray. See
+	// Answer a question the daemon holds in the feed's held section. See
 	// endpoint_answer_held_offer.proto.
 	AnswerHeldOffer(context.Context, *connect.Request[v1.AnswerHeldOfferRequest]) (*connect.Response[v1.AnswerHeldOfferResponse], error)
 	// The deploy tooling's drain-and-exit control. See
@@ -1903,12 +1883,6 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(agentReplWatchFooterMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
-	agentReplWatchDaemonHoldsHandler := connect.NewServerStreamHandler(
-		AgentReplWatchDaemonHoldsProcedure,
-		svc.WatchDaemonHolds,
-		connect.WithSchema(agentReplWatchDaemonHoldsMethodDescriptor),
-		connect.WithHandlerOptions(opts...),
-	)
 	agentReplUpdateHeldPromptHandler := connect.NewUnaryHandler(
 		AgentReplUpdateHeldPromptProcedure,
 		svc.UpdateHeldPrompt,
@@ -2183,8 +2157,6 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplSelectAccountHandler.ServeHTTP(w, r)
 		case AgentReplWatchFooterProcedure:
 			agentReplWatchFooterHandler.ServeHTTP(w, r)
-		case AgentReplWatchDaemonHoldsProcedure:
-			agentReplWatchDaemonHoldsHandler.ServeHTTP(w, r)
 		case AgentReplUpdateHeldPromptProcedure:
 			agentReplUpdateHeldPromptHandler.ServeHTTP(w, r)
 		case AgentReplEditHeldPromptProcedure:
@@ -2416,10 +2388,6 @@ func (UnimplementedAgentReplHandler) SelectAccount(context.Context, *connect.Req
 
 func (UnimplementedAgentReplHandler) WatchFooter(context.Context, *connect.Request[v1.WatchFooterRequest], *connect.ServerStream[v1.WatchFooterResponse]) error {
 	return connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.WatchFooter is not implemented"))
-}
-
-func (UnimplementedAgentReplHandler) WatchDaemonHolds(context.Context, *connect.Request[v1.WatchDaemonHoldsRequest], *connect.ServerStream[v1.WatchDaemonHoldsResponse]) error {
-	return connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.WatchDaemonHolds is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) UpdateHeldPrompt(context.Context, *connect.Request[v1.UpdateHeldPromptRequest]) (*connect.Response[v1.UpdateHeldPromptResponse], error) {

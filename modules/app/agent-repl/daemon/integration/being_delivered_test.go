@@ -29,7 +29,7 @@ func TestAHeldPromptMidDeliveryIsRefusedAsBeingDelivered(t *testing.T) {
 	f.shim.ExpectStartTurn()
 	first := f.submit("first words", "k-first", origin).GetSuccess().GetTurn().GetTurn()
 	second := f.submit("second words", "k-second", origin).GetSuccess().GetTurn().GetTurn()
-	awaitView(t, f, holds, "both prompts held", func(tray *frontendv1.DaemonHoldTray) bool {
+	awaitView(t, f, holds, "both prompts held", func(tray *frontendv1.FeedHeld) bool {
 		return promptHeldEntry(tray, first) != nil && promptHeldEntry(tray, second) != nil
 	})
 	f.shim.Hang()
@@ -62,7 +62,7 @@ func TestAHeldPromptMidDeliveryIsRefusedAsBeingDelivered(t *testing.T) {
 	if foldErr != nil || fold.Msg.GetError().GetBeingDelivered() == nil {
 		t.Fatalf("fold = (%v, %v), want being_delivered", fold, foldErr)
 	}
-	awaitView(t, f, holds, "the first prompt delivered and the second still held", func(tray *frontendv1.DaemonHoldTray) bool {
+	awaitView(t, f, holds, "the first prompt delivered and the second still held", func(tray *frontendv1.FeedHeld) bool {
 		return promptHeldEntry(tray, first) == nil && promptHeldEntry(tray, second) != nil
 	})
 }

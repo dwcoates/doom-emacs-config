@@ -32,7 +32,7 @@ import {
 import { EXPANDED_CLASS } from "../src/expand.js";
 import { HAS_MORE_CLASS } from "../src/feed/bubble-more.js";
 import { BUBBLE_QUOTE_CLASS } from "../src/bubble/quote.js";
-import { HELD_STATUS_BADGES } from "../src/tray/held-prompt.js";
+import { HELD_STATUS_BADGES } from "../src/held/held-prompt.js";
 import { INTERIM_CAP_LINES, THINKING_CAP_LINES } from "../src/feed/cards/response.js";
 import { cascadedValue, installStylesheet, rulesOf, type CssRule } from "./stylesheet.js";
 import { withoutBlockComments } from "./source-text.js";
@@ -2404,7 +2404,7 @@ describe("the feed's bottom gap", () => {
     expect(total).toBe(1.25);
   });
 
-  it("gives the hold tray no bottom gap of its own, so a tray rests on the same one", () => {
+  it("gives the held section no bottom gap of its own, so it rests on the same one", () => {
     // Arrange / Act
     const bottom = paddingBottom(allDeclarationsOf("#hold-tray"));
 
@@ -2412,12 +2412,29 @@ describe("the feed's bottom gap", () => {
     expect(bottom).toBe("0");
   });
 
-  it("keeps the 1rem between the last row and the first held prompt on the tray's top", () => {
-    // Arrange / Act
+  it("puts the feed's own row gap between the last row and the first held item", () => {
+    // Arrange / Act — a held prompt that settles out of the held section into
+    // the rows then lands where it already stood (owner ruling, 2026-10-10).
     const top = paddingTop(allDeclarationsOf("#hold-tray"));
 
     // Assert
-    expect(top).toBe("1rem");
+    expect(top).toBe(valueOf(allDeclarationsOf("#feed"), "gap"));
+  });
+
+  it("spaces the held items by the feed's own row gap", () => {
+    // Arrange / Act
+    const gap = valueOf(allDeclarationsOf(".held-section-items"), "gap");
+
+    // Assert
+    expect(gap).toBe(valueOf(allDeclarationsOf(".feed-rows"), "gap"));
+  });
+
+  it("draws the held section at the feed's own text scale", () => {
+    // Arrange / Act
+    const size = valueOf(allDeclarationsOf("#hold-tray"), "font-size");
+
+    // Assert
+    expect(size).toBe(valueOf(allDeclarationsOf("#feed"), "font-size"));
   });
 });
 
@@ -3161,7 +3178,7 @@ describe("a reply's quote in a prompt bubble", () => {
 
 /**
  * THE HELD STATUS BADGES' COLORS (owner spec, 2026-09-23): each tone the one
- * table (src/tray/held-prompt.ts) assigns resolves to its semantic token, on the
+ * table (src/held/held-prompt.ts) assigns resolves to its semantic token, on the
  * tool cards' own `.badge`. WAITING red and INTERRUPTING green are the owner's.
  */
 describe("the held status badges' colors", () => {

@@ -33,7 +33,7 @@ import {
   subagentUnit,
   footerView,
   heldPromptItem,
-  holdTray,
+  heldSection,
   permissionRow,
   roster,
   rosterRow,
@@ -537,7 +537,7 @@ const MOVE_SITES: MoveSite[] = [
     name: "UpdateHeldPrompt (the hold tray)",
     rpc: "updateHeldPrompt",
     click: '[data-held-action="drop"]',
-    arrange: (h) => h.fake.setTray(WORKSPACE_ID, holdTray({ items: [heldPromptItem()] })),
+    arrange: (h) => h.fake.setHeld(WORKSPACE_ID, heldSection({ items: [heldPromptItem()] })),
   },
   {
     name: "CloseWorkspace (a sidebar verb)",

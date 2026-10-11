@@ -1,13 +1,13 @@
 // endpoint_edit_held_prompt.proto — EditHeldPrompt: EDITING a held prompt.
 // DAEMON-HOLD TRAY section. Owner spec, 2026-09-23.
 //
-// The tray card's Edit button BEGINS an edit; the editor's composer COMMITS
+// The held card's Edit button BEGINS an edit; the editor's composer COMMITS
 // or CANCELS it. THE ARM IS THE STEP.
 //
 //   begin  — the daemon CLAIMS the held prompt as being edited. While the
 //            claim stands, that prompt AND EVERY PROMPT QUEUED AFTER IT stay
 //            held: none is delivered, not by a turn's end, not by a verdict,
-//            not by a release. The claim is published two ways: the tray entry
+//            not by a release. The claim is published two ways: the held item
 //            carries HeldPrompt.editing, and the workspace's host view carries
 //            HostWorkspace.held_prompt_edit, which is what puts the prompt's
 //            content into the editor's input.
@@ -58,7 +58,7 @@ type EditHeldPromptRequest struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	Workspace *v1.WorkspaceRef       `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
 	// WHICH held prompt — the daemon-minted turn it is held under, echoed from
-	// the tray entry (begin) or from the host view's edit (commit, cancel).
+	// the held item (begin) or from the host view's edit (commit, cancel).
 	Turn *v11.TurnId `protobuf:"bytes,2,opt,name=turn,proto3" json:"turn,omitempty"`
 	// THE ARM IS THE STEP.
 	//
@@ -379,7 +379,7 @@ func (*EditHeldPromptResponse_Success) isEditHeldPromptResponse_Result() {}
 
 func (*EditHeldPromptResponse_Error) isEditHeldPromptResponse_Result() {}
 
-// Done; the tray's and the host view's new state arrive on their streams.
+// Done; the held section's and the host view's new state arrive on their streams.
 type EditHeldPromptSuccess struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -636,7 +636,7 @@ type EditHeldPromptError_BeingDelivered struct {
 	// BEING DELIVERED: the prompt's delivery call to the agent is in flight
 	// right now, so it is neither held nor delivered yet. Refused rather than
 	// raced. Once the call settles the prompt is either delivered, or (if the
-	// call failed) back in the tray and open to this request again.
+	// call failed) back in the held section and open to this request again.
 	BeingDelivered *EditHeldPromptBeingDelivered `protobuf:"bytes,11,opt,name=being_delivered,json=beingDelivered,proto3,oneof"`
 }
 

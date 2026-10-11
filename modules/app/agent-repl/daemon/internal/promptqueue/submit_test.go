@@ -533,7 +533,7 @@ func TestSubmitSurfacesAFailedRevival(t *testing.T) {
 	}
 }
 
-// TestAFailedRevivalKeepsItsReconnectHolds pins daemon_hold.proto's settled
+// TestAFailedRevivalKeepsItsReconnectHolds pins feed_held.proto's settled
 // exit for HeldPromptReconnectHold: "A FAILED BRING-UP NEVER DROPS THESE
 // ENTRIES." The prompt waits for whatever brings a session up next.
 func TestAFailedRevivalKeepsItsReconnectHolds(t *testing.T) {

@@ -11,7 +11,7 @@
  * width, whose header strip is its status BADGES, whose content is what the
  * user said, painted by the one body pipeline, and which collapses to ONE line
  * ending in the one bubble's ellipsis when there is more, never a fade (owner
- * ruling, 2026-09-27), opened by the one toggle (expand.ts, armed on the tray).
+ * ruling, 2026-09-27), opened by the one toggle (expand.ts, armed on the held section).
  *
  * COLLAPSED IT IS ONE LINE AND ITS BADGES (owner spec, 2026-09-23; one line,
  * 2026-09-27). The rest —
@@ -37,7 +37,7 @@
  * EDIT BEGINS A DAEMON-OWNED EDIT (EditHeldPrompt). The card's Edit control
  * asks the daemon to claim the prompt; the editor's input takes its content
  * off the host view, and the card says it is being edited only because the
- * daemon's tray entry carries `editing`. A refused or failed begin is filed on
+ * daemon's held item carries `editing`. A refused or failed begin is filed on
  * the topbar's warning chip (owner spec, 2026-09-23), never drawn at the row.
  *
  * FOLD ABOVE IS DAEMON-OFFERED (FoldHeldPrompt). The control is drawn only
@@ -74,7 +74,7 @@ import type {
   HeldPromptReconnectHold,
   HeldPromptShutdownHold,
   HeldPromptUninterruptibleTurn,
-} from "../../../proto/gen/ts/frontend/v1/daemon_hold_pb";
+} from "../../../proto/gen/ts/frontend/v1/feed_held_pb";
 import type {
   ImageBlock,
   UnsupportedBlock,
@@ -131,7 +131,7 @@ import {
   requireMessage,
   unreachableArm,
 } from "../rpc/strict.js";
-import type { TrayContext } from "./context.js";
+import type { HeldContext } from "./context.js";
 import {
   UPDATE_CLASSIFIER_LABEL,
   classifierRouteOf,
@@ -164,14 +164,14 @@ export const NO_RELEASE_TITLES: Readonly<Record<string, string>> = {
 /**
  * One held prompt.
  *
- * The three tray hooks ride the card itself: `data-held-turn` is the echoed
+ * The three held-section hooks ride the card itself: `data-held-turn` is the echoed
  * `TurnId`, `data-arm` the classification's arm, `data-hold` the hold's arm or
  * the literal `none` — absence stated rather than left to be inferred from a
  * missing attribute.
  */
 export function drawHeldPrompt(
   u: HeldPrompt,
-  tc: TrayContext,
+  tc: HeldContext,
   previous?: HTMLElement,
 ): HTMLElement {
   const path = "HeldPrompt";
@@ -192,7 +192,7 @@ export function drawHeldPrompt(
     );
   }
   log.debug("drawing a held prompt", {
-    operation: "tray.held-prompt",
+    operation: "held.held-prompt",
     context: {
       turn: turn.value,
       classification: classification.case,
@@ -258,7 +258,7 @@ export function drawHeldPrompt(
     }),
   );
 
-  // PREVIOUS, this turn's card from the tray's last drawing, is updated in
+  // PREVIOUS, this turn's card from the section's last drawing, is updated in
   // place (drawBubble), so a push never replaces the box a reader opened.
   const card = drawBubble(
     {
@@ -327,7 +327,7 @@ export function drawHeldSessionAct(
 
 /**
  * The card's hooks: `held-right` is the RAIL every held prompt wears (owner
- * ruling 1, 2026-09-13) — the hook the tray is found by; the rail itself is the
+ * ruling 1, 2026-09-13) — the hook the held section is found by; the rail itself is the
  * prompt role's — and a hold that is not the turn's is named by its hook.
  * The hooks select NO border: a held prompt has none until it is received
  * (owner ruling, 2026-09-23); they stay as the stable names the integration
@@ -353,12 +353,12 @@ function holdCardHooks(hold: string | null): string[] {
 /** The ticking "queued 12s ago" age. The instant ships; the clock is ours. */
 export function drawHeldPromptQueuedAt(
   u: HeldPromptQueuedAt,
-  tc: TrayContext,
+  tc: HeldContext,
   path: string,
 ): HTMLElement {
   const atMs = msOf(u.atMs, `${path}.at_ms`);
   log.debug("drawing a held prompt's queued age", {
-    operation: "tray.held-prompt.queued-at",
+    operation: "held.held-prompt.queued-at",
     context: { path, at_ms: atMs },
   });
   const age = document.createElement("span");
@@ -443,7 +443,7 @@ export function drawHeldPromptClassifying(
   path: string,
 ): Verdict {
   log.debug("drawing a classifying held prompt", {
-    operation: "tray.held-prompt.classifying",
+    operation: "held.held-prompt.classifying",
     context: { path },
   });
   return {
@@ -459,7 +459,7 @@ export function drawHeldPromptInterject(
   path: string,
 ): Verdict {
   log.debug("drawing an interjecting held prompt", {
-    operation: "tray.held-prompt.interject",
+    operation: "held.held-prompt.interject",
     context: { path },
   });
   return {
@@ -478,7 +478,7 @@ export function drawHeldPromptAfterToolCall(
   path: string,
 ): Verdict {
   log.debug("drawing a held prompt joining the running turn", {
-    operation: "tray.held-prompt.after-tool-call",
+    operation: "held.held-prompt.after-tool-call",
     context: { path },
   });
   return {
@@ -502,7 +502,7 @@ export function drawHeldPromptHoldForTurnEnd(
 ): Verdict {
   const confirmed = u.accepted?.accepted === true;
   log.debug("drawing a hold-for-turn-end held prompt", {
-    operation: "tray.held-prompt.hold-for-turn-end",
+    operation: "held.held-prompt.hold-for-turn-end",
     context: { path, accepted: confirmed },
   });
   return {
@@ -523,7 +523,7 @@ export function drawHeldPromptUninterruptibleTurn(
 ): Verdict {
   const literal = sessionCommandLiteral(u.command, `${path}.command`);
   log.debug("drawing an uninterruptible-turn held prompt", {
-    operation: "tray.held-prompt.uninterruptible-turn",
+    operation: "held.held-prompt.uninterruptible-turn",
     context: { path, command: literal },
   });
   return {
@@ -539,7 +539,7 @@ export function drawHeldPromptClassificationError(
   path: string,
 ): Verdict {
   log.warn("drawing an unclassified held prompt", {
-    operation: "tray.held-prompt.classification-error",
+    operation: "held.held-prompt.classification-error",
     context: { path, detail: u.detail },
   });
   const detail = document.createElement("div");
@@ -562,7 +562,7 @@ export function drawHeldPromptDaemonHeld(
   path: string,
 ): Verdict {
   log.debug("drawing a daemon-held prompt", {
-    operation: "tray.held-prompt.daemon-held",
+    operation: "held.held-prompt.daemon-held",
     context: { path },
   });
   return {
@@ -581,7 +581,7 @@ export function drawHeldPromptAwaitingDelivery(
   path: string,
 ): Verdict {
   log.debug("drawing a held prompt awaiting delivery", {
-    operation: "tray.held-prompt.awaiting-delivery",
+    operation: "held.held-prompt.awaiting-delivery",
     context: { path },
   });
   return {
@@ -649,7 +649,7 @@ export function drawHeldPromptShutdownHold(
   path: string,
 ): HeldStatus {
   log.debug("drawing a shutdown hold", {
-    operation: "tray.held-prompt.shutdown-hold",
+    operation: "held.held-prompt.shutdown-hold",
     context: { path, schedule_id: u.scheduleId },
   });
   return "shutdown";
@@ -661,7 +661,7 @@ export function drawHeldPromptReconnectHold(
   path: string,
 ): HeldStatus {
   log.debug("drawing a reconnect hold", {
-    operation: "tray.held-prompt.reconnect-hold",
+    operation: "held.held-prompt.reconnect-hold",
     context: { path },
   });
   return "reconnect";
@@ -673,7 +673,7 @@ export function drawHeldPromptBuildRefreshHold(
   path: string,
 ): HeldStatus {
   log.debug("drawing a build-refresh hold", {
-    operation: "tray.held-prompt.build-refresh-hold",
+    operation: "held.held-prompt.build-refresh-hold",
     context: { path },
   });
   return "buildRefresh";
@@ -685,7 +685,7 @@ export function drawHeldPromptMergeHold(
   path: string,
 ): HeldStatus {
   log.debug("drawing a merge hold", {
-    operation: "tray.held-prompt.merge-hold",
+    operation: "held.held-prompt.merge-hold",
     context: { path },
   });
   return "merge";
@@ -697,7 +697,7 @@ export function drawHeldPromptColdGateHold(
   path: string,
 ): HeldStatus {
   log.debug("drawing a cold-gate hold", {
-    operation: "tray.held-prompt.cold-gate-hold",
+    operation: "held.held-prompt.cold-gate-hold",
     context: { path },
   });
   return "coldGate";
@@ -705,7 +705,7 @@ export function drawHeldPromptColdGateHold(
 
 /** What the actions row needs to know about the entry it acts on. */
 interface ActionSpec {
-  tc: TrayContext;
+  tc: HeldContext;
   turn: TurnId;
   text: string;
   classification: string;
@@ -736,7 +736,7 @@ export function drawHeldPromptActions(spec: ActionSpec): HTMLElement {
   const noReleaseTitle =
     forbids === null ? undefined : NO_RELEASE_TITLES[forbids];
   log.debug("drawing a held prompt's actions", {
-    operation: "tray.held-prompt.actions",
+    operation: "held.held-prompt.actions",
     context: {
       turn: spec.turn.value,
       release: noReleaseTitle === undefined,
@@ -753,7 +753,7 @@ export function drawHeldPromptActions(spec: ActionSpec): HTMLElement {
   // needs, the daemon refuses it and the refusal is said at this control —
   // which is the contract's own answer to a verb that cannot run. Withholding
   // the button instead hid the reason in a hover and left the reader guessing
-  // whether the tray had simply failed to draw it.
+  // whether the held section had simply failed to draw it.
   // The release is LABELLED "Send now" (owner ruling, 2026-09-23): to the
   // reader it sends the held prompt at once. The wire verb is still `release`,
   // and so are the hooks it is found by.
@@ -792,7 +792,7 @@ function actionButton(
     onClick: (button) => {
       void guardMalformed(
         spec.tc.ctx,
-        "tray.held-prompt.action",
+        "held.held-prompt.action",
         run(action, spec, button),
       );
     },
@@ -856,7 +856,7 @@ interface RowRefusal {
  * call that never landed is drawn as the row's next sibling and logged, and
  * re-enables the row so it can be retried. Answers whether the call succeeded.
  *
- * Success leaves the row alone: the tray's own push is what takes the card
+ * Success leaves the row alone: the held section's own push is what takes the card
  * down or redraws it, and re-enabling a row about to be replaced would only
  * flicker.
  */
@@ -875,7 +875,7 @@ async function rowCall(
     if (refused === null) return true;
     drawRowRefusal(row, refused.arm, refused.say);
     log.warn(`${rpc} refused a ${action}`, {
-      operation: "tray.held-prompt.action-refused",
+      operation: "held.held-prompt.action-refused",
       context: { turn, action, arm: refused.arm, sentence: refused.say },
     });
     return false;
@@ -886,7 +886,7 @@ async function rowCall(
     if (isMalformedView(err)) throw err;
     drawRowRefusal(row, "error", "the daemon could not be reached");
     log.error(`${rpc} failed for a ${action}: ${String(err)}`, {
-      operation: "tray.held-prompt.action-failed",
+      operation: "held.held-prompt.action-failed",
       context: { turn, action, cause: err },
     });
     return false;
@@ -931,7 +931,7 @@ function foldAboveButton(spec: ActionSpec, above: TurnId): Control {
     onClick: (button) => {
       void guardMalformed(
         spec.tc.ctx,
-        "tray.held-prompt.fold",
+        "held.held-prompt.fold",
         fold(spec, above, button),
       );
     },
@@ -945,7 +945,7 @@ async function fold(
   button: Control,
 ): Promise<void> {
   log.info("folding a held prompt into the one ahead", {
-    operation: "tray.held-prompt.fold",
+    operation: "held.held-prompt.fold",
     context: { turn: spec.turn.value, above: above.value },
   });
   await rowCall(button, "FoldHeldPrompt", "fold", spec.turn.value, async () => {
@@ -1008,7 +1008,7 @@ export function foldHeldPromptRefusal(cause: FoldHeldPromptCause): string {
 /**
  * What every held-prompt endpoint's `being_delivered` arm says: the prompt is
  * on its way to the agent, so it is neither held nor delivered yet, and a
- * failed delivery puts it back in the tray.
+ * failed delivery puts it back in the held section.
  */
 export const BEING_DELIVERED =
   "this prompt is being delivered right now; if the delivery fails it returns to the tray";
@@ -1040,7 +1040,7 @@ function editButton(spec: ActionSpec): Control {
     onClick: (button) => {
       void guardMalformed(
         spec.tc.ctx,
-        "tray.held-prompt.edit",
+        "held.held-prompt.edit",
         beginEdit(spec, button),
       );
     },
@@ -1048,14 +1048,14 @@ function editButton(spec: ActionSpec): Control {
 }
 
 /**
- * Ask the daemon to begin an edit. Success changes nothing here: the tray's
+ * Ask the daemon to begin an edit. Success changes nothing here: the section's
  * push draws the editing badge, and the host view hands the editor the words.
  * A refusal or a failure is filed on the warning chip and logged.
  */
 async function beginEdit(spec: ActionSpec, button: Control): Promise<void> {
   const row = button.parentElement;
   log.info("beginning an edit of a held prompt", {
-    operation: "tray.held-prompt.edit",
+    operation: "held.held-prompt.edit",
     context: { turn: spec.turn.value },
   });
   setRowDisabled(row, true);
@@ -1077,7 +1077,7 @@ async function beginEdit(spec: ActionSpec, button: Control): Promise<void> {
       if (!(err instanceof ConnectError)) throw err;
       const failed = callFailure(err);
       log.error(`EditHeldPrompt failed for a begin: ${failed.text}`, {
-        operation: "tray.held-prompt.edit-failed",
+        operation: "held.held-prompt.edit-failed",
         context: { turn: spec.turn.value, arm: failed.arm },
       });
       spec.tc.ctx.failures.report(
@@ -1092,7 +1092,7 @@ async function beginEdit(spec: ActionSpec, button: Control): Promise<void> {
     switch (result.case) {
       case "success":
         log.info("the daemon began the edit; its pushes draw it", {
-          operation: "tray.held-prompt.edit-begun",
+          operation: "held.held-prompt.edit-begun",
           context: { turn: spec.turn.value },
         });
         return;
@@ -1103,7 +1103,7 @@ async function beginEdit(spec: ActionSpec, button: Control): Promise<void> {
           "EditHeldPromptError.cause",
         );
         log.info(`EditHeldPrompt refused a begin: ${said.text}`, {
-          operation: "tray.held-prompt.edit-refused",
+          operation: "held.held-prompt.edit-refused",
           context: {
             turn: spec.turn.value,
             arm: said.arm,
@@ -1135,7 +1135,7 @@ type UpdateHeldPromptCause = NonNullable<UpdateHeldPromptError["cause"]> & {
  *
  * The four cross-cutting causes are worded once in `rpc/refusal.ts`; these four
  * are about the hold itself, and three of them mean THE CARD IS ALREADY STALE
- * — the tray's next push takes it down — so each says which kind of stale it
+ * — the section's next push takes it down — so each says which kind of stale it
  * is rather than a single "refused" that would read as a dead button.
  */
 export function updateHeldPromptRefusal(
@@ -1193,7 +1193,7 @@ function handBackDroppedText(
   turn: string,
 ): void {
   log.info("handing a dropped prompt's text back", {
-    operation: "tray.held-prompt.dropped",
+    operation: "held.held-prompt.dropped",
     context: { turn, length: text.length },
   });
   const detail: HeldPromptDroppedDetail = { text };
@@ -1281,7 +1281,7 @@ export const HELD_BADGE_CLASS = "held-badge";
 export function heldBadgeClasses(status: string): string {
   if (!Object.hasOwn(HELD_STATUS_BADGES, status)) {
     log.error(`a held prompt status has no badge: ${status}`, {
-      operation: "tray.held-prompt.badge-unknown-status",
+      operation: "held.held-prompt.badge-unknown-status",
       context: { status },
     });
     throw new MalformedView(
@@ -1313,7 +1313,7 @@ export const HELD_NOTE_CLASS = "queued-status-note";
  * the notes for every other standing fact as expand-only lines.
  *
  * A badge with no fact or an empty label, and a note with an empty sentence,
- * are malformed views (daemon_hold.proto), logged and thrown, never drawn.
+ * are malformed views (feed_held.proto), logged and thrown, never drawn.
  */
 export function drawHeldPromptBadge(
   wire: HeldPromptBadge,
@@ -1323,7 +1323,7 @@ export function drawHeldPromptBadge(
   const status = requireCase(wire.standsFor, `${path}.stands_for`).case;
   if (wire.label === "") {
     log.error("a held prompt's badge carried an empty label", {
-      operation: "tray.held-prompt.badge-empty-label",
+      operation: "held.held-prompt.badge-empty-label",
       context: { path, status },
     });
     throw new MalformedView(`${path}.label`, "the badge label is empty");
@@ -1339,7 +1339,7 @@ export function drawHeldPromptBadge(
   for (const [index, n] of notes.entries()) {
     if (n.sentence === "") {
       log.error("a held prompt's note carried an empty sentence", {
-        operation: "tray.held-prompt.note-empty",
+        operation: "held.held-prompt.note-empty",
         context: { path: `${path}.notes[${index}]` },
       });
       throw new MalformedView(`HeldPrompt.notes[${index}].sentence`, "the note is empty");
@@ -1369,7 +1369,7 @@ function rationale(text: string): HTMLElement | null {
 export function drawUserSaid(u: UserSaid, path: string): HTMLElement[] {
   const content = requireMessage(u.content, `${path}.content`);
   log.debug("drawing what a user said", {
-    operation: "tray.held-prompt.said",
+    operation: "held.held-prompt.said",
     context: { path, blocks: content.blocks.length },
   });
   const drawn: HTMLElement[] = [];
@@ -1405,7 +1405,7 @@ export function drawUserContentBlock(
 /** Words, as markdown — a slot the one body pipeline paints, as a feed prompt's are. */
 export function drawTextBlock(u: TextBlock, path: string): HTMLElement {
   log.debug("drawing a text block", {
-    operation: "tray.held-prompt.text-block",
+    operation: "held.held-prompt.text-block",
     context: { path, length: u.text.length },
   });
   return markdownSlot("queued-text", u.text);
@@ -1417,7 +1417,7 @@ export function drawTextBlock(u: TextBlock, path: string): HTMLElement {
  */
 export function drawQuoteBlock(u: UserQuoteBlock, path: string): HTMLElement {
   log.debug("drawing a quote block", {
-    operation: "tray.held-prompt.quote-block",
+    operation: "held.held-prompt.quote-block",
     context: { path, length: u.text.length },
   });
   return quoteSlot("queued-quote", u.text);
@@ -1433,7 +1433,7 @@ export function drawQuoteBlock(u: UserQuoteBlock, path: string): HTMLElement {
 export function drawImageBlock(u: ImageBlock, path: string): HTMLElement {
   const location = requireCase(u.location, `${path}.location`);
   log.debug("drawing an image block", {
-    operation: "tray.held-prompt.image-block",
+    operation: "held.held-prompt.image-block",
     context: { path, location: location.case, media_type: u.mediaType },
   });
   switch (location.case) {
@@ -1468,7 +1468,7 @@ export function drawImageBlock(u: ImageBlock, path: string): HTMLElement {
  */
 export function drawUnsupportedBlock(u: UnsupportedBlock, path: string): null {
   log.warn(`a held prompt carried an unmodeled ${u.kind} block`, {
-    operation: "tray.held-prompt.unsupported-block",
+    operation: "held.held-prompt.unsupported-block",
     context: { path, kind: u.kind },
   });
   return null;

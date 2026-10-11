@@ -38,7 +38,6 @@ import (
 	"claude-repld/internal/publish"
 	"claude-repld/internal/resolve/feed"
 	"claude-repld/internal/resolve/footer"
-	"claude-repld/internal/resolve/holds"
 	"claude-repld/internal/resolve/sidebar"
 	"claude-repld/internal/resolve/topbar"
 	"claude-repld/internal/rollout"
@@ -820,9 +819,11 @@ func (f *fakeLogin) Close(context.Context, ids.WorkspaceID) error { return f.clo
 // fakeFeed answers the page and tail seams.
 type fakeFeed struct {
 	feed.Resolver
-	page      *frontendv1.FeedPage
-	token     *agentreplv1.FeedWatchToken
-	openErr   error
+	page    *frontendv1.FeedPage
+	token   *agentreplv1.FeedWatchToken
+	openErr error
+	// held is the held section OpenPage answers with.
+	held      *frontendv1.FeedHeld
 	nextPage  *frontendv1.FeedPage
 	nextErr   error
 	tail      *fakeTail
@@ -971,11 +972,11 @@ func (f *fakeFeed) RollBackTurns(_ ids.WorkspaceID, turns []ids.TurnID) error {
 	return f.rollBackTurnsErr
 }
 
-func (f *fakeFeed) OpenPage(_ context.Context, _ ids.WorkspaceID, target feedid.Feed, reader feed.ReaderID) (*frontendv1.FeedPage, *agentreplv1.FeedWatchToken, error) {
+func (f *fakeFeed) OpenPage(_ context.Context, _ ids.WorkspaceID, target feedid.Feed, reader feed.ReaderID) (*frontendv1.FeedPage, *agentreplv1.FeedWatchToken, *frontendv1.FeedHeld, error) {
 	f.openCalls++
 	f.lastFeed = target
 	f.lastRead = reader
-	return f.page, f.token, f.openErr
+	return f.page, f.token, f.held, f.openErr
 }
 
 func (f *fakeFeed) NextPage(context.Context, ids.WorkspaceID, feedid.Feed, feed.ReaderID) (*frontendv1.FeedPage, error) {
@@ -989,17 +990,17 @@ func (f *fakeFeed) Tail(context.Context, ids.WorkspaceID, feedid.Feed, *agentrep
 	return f.tail, nil
 }
 
-// fakeTail hands the handler a row channel the test drives.
+// fakeTail hands the handler a publication channel the test drives.
 type fakeTail struct {
-	rows  chan *frontendv1.FeedRow
+	pubs  chan feed.Publication
 	token *agentreplv1.FeedWatchToken
 }
 
-func (t *fakeTail) Rows(context.Context) <-chan *frontendv1.FeedRow { return t.rows }
+func (t *fakeTail) Publications(context.Context) <-chan feed.Publication { return t.pubs }
 
 func (t *fakeTail) Token() *agentreplv1.FeedWatchToken { return t.token }
 
-// fakeFooter, fakeTopbar, fakeSidebar and fakeHolds each own one topic per
+// fakeFooter, fakeTopbar and fakeSidebar each own one topic per
 // workspace, which is exactly the publisher seam the handlers subscribe to.
 type fakeFooter struct {
 	footer.Resolver
@@ -1124,15 +1125,6 @@ type fakeSidebar struct {
 
 func (f *fakeSidebar) Topic() *publish.Topic[*frontendv1.WorkspaceRoster] { return &f.topic }
 
-type fakeHolds struct {
-	holds.Resolver
-	topic publish.Topic[*frontendv1.DaemonHoldTray]
-}
-
-func (f *fakeHolds) Topic(ids.WorkspaceID) *publish.Topic[*frontendv1.DaemonHoldTray] {
-	return &f.topic
-}
-
 // harness is one running surface over real Connect handlers.
 type harness struct {
 	t         *testing.T
@@ -1155,7 +1147,6 @@ type harness struct {
 	Footer    *fakeFooter
 	Topbar    *fakeTopbar
 	Sidebar   *fakeSidebar
-	Holds     *fakeHolds
 	// LoudFaults is the standing loud faults every Emacs stream is told.
 	LoudFaults publish.Topic[*agentreplv1.DaemonFaultsStanding]
 	// Focus is Emacs's desktop focus, attached by an Emacs WatchDaemon stream.
@@ -1208,7 +1199,6 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		Footer:     &fakeFooter{},
 		Topbar:     &fakeTopbar{},
 		Sidebar:    &fakeSidebar{},
-		Holds:      &fakeHolds{},
 		Surfaces:   &fakeSurfaces{},
 		Focus:      desktopnotify.NewFocus(dlog.NewTestLogger()),
 		WebappDist: dist,
@@ -1239,7 +1229,6 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		Footer:            h.Footer,
 		Topbar:            h.Topbar,
 		Sidebar:           h.Sidebar,
-		Holds:             h.Holds,
 		LoudFaults:        &h.LoudFaults,
 		Focus:             h.Focus,
 		PersistentWifi:    h.PersistentWifi,

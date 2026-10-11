@@ -287,7 +287,7 @@ func TestOpenFeedWithNoSessionServesWhatIsHeld(t *testing.T) {
 	h.deliverPromptAt("turn-1", "live", 100)
 
 	// Act.
-	page, _, err := h.resolver.OpenPage(context.Background(), testWorkspace, rootFeed(), "reader-1")
+	page, _, _, err := h.resolver.OpenPage(context.Background(), testWorkspace, rootFeed(), "reader-1")
 
 	// Assert.
 	if err != nil {
@@ -305,7 +305,7 @@ func TestOpenFeedWhoseReadFailsIsHistoryUnavailable(t *testing.T) {
 	store.failFrom = 1
 
 	// Act.
-	_, _, err := h.resolver.OpenPage(context.Background(), testWorkspace, rootFeed(), "reader-1")
+	_, _, _, err := h.resolver.OpenPage(context.Background(), testWorkspace, rootFeed(), "reader-1")
 
 	// Assert.
 	if !errors.Is(err, ErrHistoryUnavailable) {
@@ -460,7 +460,7 @@ func TestAPageWithNoBoundaryIsHistoryUnavailable(t *testing.T) {
 	})
 
 	// Act.
-	_, _, err := h.resolver.OpenPage(context.Background(), testWorkspace, rootFeed(), "reader-1")
+	_, _, _, err := h.resolver.OpenPage(context.Background(), testWorkspace, rootFeed(), "reader-1")
 
 	// Assert.
 	if !errors.Is(err, ErrHistoryUnavailable) {

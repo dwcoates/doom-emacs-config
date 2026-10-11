@@ -15,7 +15,6 @@ import (
 	"claude-repld/internal/promptqueue"
 	"claude-repld/internal/publish"
 	"claude-repld/internal/resolve/footer"
-	"claude-repld/internal/resolve/holds"
 	"claude-repld/internal/resolve/sidebar"
 	"claude-repld/internal/resolve/topbar"
 	"claude-repld/internal/vocab"
@@ -216,17 +215,15 @@ func TestDrainIntakeOnAnUnheldWorkspaceSucceeds(t *testing.T) {
 	}
 }
 
-// viewFixture is the four real resolvers plus one subscription per topic, so
+// viewFixture is the three real resolvers plus one subscription per topic, so
 // a republication is OBSERVED on the topic rather than inferred.
 type viewFixture struct {
 	topbar  topbar.Resolver
 	footer  footer.Resolver
-	holds   holds.Resolver
 	sidebar sidebar.Resolver
 
 	topbarRows  <-chan *frontendv1.TopbarView
 	footerRows  <-chan *frontendv1.FooterView
-	holdsRows   <-chan *frontendv1.DaemonHoldTray
 	sidebarRows <-chan *frontendv1.WorkspaceRoster
 }
 
@@ -246,7 +243,7 @@ func testColors(t *testing.T) vocab.RenderColors {
 // synchronization device: each wait returns the moment its value arrives.
 const waitDeadline = 5 * time.Second
 
-// newViewFixture arranges the four resolvers with the workspace bound and one
+// newViewFixture arranges the three resolvers with the workspace bound and one
 // value published on each, then subscribes and consumes that first delivery,
 // so every later delivery is a republication.
 func newViewFixture(t *testing.T, ws ids.WorkspaceID) *viewFixture {
@@ -262,15 +259,11 @@ func newViewFixture(t *testing.T, ws ids.WorkspaceID) *viewFixture {
 	if err != nil {
 		t.Fatalf("footer.New: %v", err)
 	}
-	tray, err := holds.New(log)
-	if err != nil {
-		t.Fatalf("holds.New: %v", err)
-	}
 	roster, err := sidebar.New(testColors(t), log, foot)
 	if err != nil {
 		t.Fatalf("sidebar.New: %v", err)
 	}
-	for _, bind := range []func(ids.WorkspaceID, string) error{top.SetWorkspaceDir, foot.SetWorkspaceDir, tray.SetWorkspaceDir} {
+	for _, bind := range []func(ids.WorkspaceID, string) error{top.SetWorkspaceDir, foot.SetWorkspaceDir} {
 		if err := bind(ws, dir); err != nil {
 			t.Fatalf("SetWorkspaceDir: %v", err)
 		}
@@ -282,23 +275,20 @@ func newViewFixture(t *testing.T, ws ids.WorkspaceID) *viewFixture {
 	// republication rather than about any of them.
 	top.Topic(ws).Publish(&frontendv1.TopbarView{})
 	foot.Topic(ws).Publish(&frontendv1.FooterView{})
-	tray.Topic(ws).Publish(&frontendv1.DaemonHoldTray{})
 	roster.Topic().Publish(&frontendv1.WorkspaceRoster{})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	f := &viewFixture{
-		topbar: top, footer: foot, holds: tray, sidebar: roster,
+		topbar: top, footer: foot, sidebar: roster,
 		topbarRows:  top.Topic(ws).Subscribe(ctx),
 		footerRows:  foot.Topic(ws).Subscribe(ctx),
-		holdsRows:   tray.Topic(ws).Subscribe(ctx),
 		sidebarRows: roster.Topic().Subscribe(ctx),
 	}
 	// Subscribe delivers the latest value first; consuming it leaves every
 	// later delivery a republication.
 	awaitTopbar(t, f.topbarRows)
 	awaitFooter(t, f.footerRows)
-	awaitHolds(t, f.holdsRows)
 	awaitRoster(t, f.sidebarRows)
 	return f
 }
@@ -321,15 +311,6 @@ func awaitFooter(t *testing.T, ch <-chan *frontendv1.FooterView) {
 	}
 }
 
-func awaitHolds(t *testing.T, ch <-chan *frontendv1.DaemonHoldTray) {
-	t.Helper()
-	select {
-	case <-ch:
-	case <-time.After(waitDeadline):
-		t.Fatal("the hold tray topic delivered nothing")
-	}
-}
-
 func awaitRoster(t *testing.T, ch <-chan *frontendv1.WorkspaceRoster) {
 	t.Helper()
 	select {
@@ -340,12 +321,12 @@ func awaitRoster(t *testing.T, ch <-chan *frontendv1.WorkspaceRoster) {
 }
 
 // TestPublishViewsRepublishesEveryStandingView covers the repaint an adoption
-// owes a re-attached client: all four standing views are pushed again.
+// owes a re-attached client: all three standing views are pushed again.
 func TestPublishViewsRepublishesEveryStandingView(t *testing.T) {
 	// Arrange
 	ws := ids.WorkspaceID("ws-1")
 	f := newViewFixture(t, ws)
-	views, err := NewViews(f.topbar, f.footer, f.holds, f.sidebar, dlog.NewTestLogger())
+	views, err := NewViews(f.topbar, f.footer, f.sidebar, dlog.NewTestLogger())
 	if err != nil {
 		t.Fatalf("NewViews: %v", err)
 	}
@@ -358,7 +339,6 @@ func TestPublishViewsRepublishesEveryStandingView(t *testing.T) {
 	// Assert
 	awaitTopbar(t, f.topbarRows)
 	awaitFooter(t, f.footerRows)
-	awaitHolds(t, f.holdsRows)
 	awaitRoster(t, f.sidebarRows)
 }
 
@@ -377,15 +357,11 @@ func TestPublishViewsSkipsAViewNothingHasPublished(t *testing.T) {
 	if err != nil {
 		t.Fatalf("footer.New: %v", err)
 	}
-	tray, err := holds.New(surfaces)
-	if err != nil {
-		t.Fatalf("holds.New: %v", err)
-	}
 	roster, err := sidebar.New(testColors(t), surfaces, foot)
 	if err != nil {
 		t.Fatalf("sidebar.New: %v", err)
 	}
-	views, err := NewViews(top, foot, tray, roster, log)
+	views, err := NewViews(top, foot, roster, log)
 	if err != nil {
 		t.Fatalf("NewViews: %v", err)
 	}

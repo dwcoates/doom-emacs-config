@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
-import { ancestorMatching, placeChildren, scrollbarWidthPx } from "../src/dom.js";
+import { ancestorMatching, placeChildren, repaintMark, scrollbarWidthPx } from "../src/dom.js";
 import { codeOf } from "./source-text.js";
 
 describe("scrollbarWidthPx", () => {
@@ -198,5 +198,42 @@ describe("placeChildren", () => {
     const fresh = document.createElement("article");
     // Act + Assert
     expect(placeChildren(parent, [el.a, fresh, el.b])).toBe(1);
+  });
+});
+
+describe("repaintMark", () => {
+  it("paints the class and the text it is handed", () => {
+    // Arrange
+    const el = document.createElement("span");
+    // Act
+    repaintMark(el, "glyph is-live", "●");
+    // Assert
+    expect([el.className, el.textContent]).toEqual(["glyph is-live", "●"]);
+  });
+
+  it("writes neither when the element already holds both", () => {
+    // Arrange — a recording element whose class and text writes are counted.
+    const el = document.createElement("span");
+    el.className = "glyph is-live";
+    el.textContent = "●";
+    const observer = new MutationObserver(() => undefined);
+    observer.observe(el, { attributes: true, childList: true, characterData: true, subtree: true });
+    // Act
+    repaintMark(el, "glyph is-live", "●");
+    // Assert
+    expect(observer.takeRecords()).toHaveLength(0);
+    observer.disconnect();
+  });
+
+  it("is how every in-place glyph repaint is written", () => {
+    // Arrange — the modules that repaint a breathing state glyph in place.
+    const sites = ["feed/merge/tab-strip.ts", "feed/merge/tests-tab.ts"].map((file) =>
+      readFileSync(join(__dirname, "../src", file), "utf8"),
+    );
+    // Act
+    const handRolled = sites.filter((source) => /\.className !== /.test(source));
+    const shared = sites.filter((source) => source.includes("repaintMark("));
+    // Assert
+    expect([handRolled.length, shared.length]).toEqual([0, sites.length]);
   });
 });
