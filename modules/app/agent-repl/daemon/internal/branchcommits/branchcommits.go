@@ -14,6 +14,13 @@
 // so the last count recorded is always one taken after the last close, and a
 // stale count can never land after a fresher one.
 //
+// A COUNT IS RECORDED WHOLE OR NOT AT ALL. Reading the record and running git
+// follow the serving lifetime: the daemon's exit cuts them short, which is the
+// exit and not a fault, and the next turn close recounts. Once git has
+// answered, the write and the roster republish run to the end whatever the
+// lifetime does: they are local and bounded, and the daemon joins this loop
+// before it closes the state database, so a count is never taken and lost.
+//
 // A MERGED WORKSPACE IS NOT RECOUNTED: its branch is inside its parent, so the
 // count would read zero. The merge stamps the count it brought in, and the
 // store refuses a live write once merged_at is set (wsm.SetLiveCommitCount),
@@ -134,6 +141,11 @@ func (r *Recounter) next() (ids.WorkspaceID, bool) {
 // recount counts one workspace's branch and records the count when it moved.
 func (r *Recounter) recount(ctx context.Context, ws ids.WorkspaceID) {
 	record, err := r.deps.DB.Workspace(ctx, ws)
+	if err != nil && ctx.Err() != nil {
+		r.deps.Log.Global().Info(opRecount, "the daemon's exit cut a recount short before the workspace was read; the next turn close recounts", dlog.Context{
+			"workspace": string(ws), "cause": err.Error()})
+		return
+	}
 	if errors.Is(err, wsm.ErrNotFound) {
 		// The workspace was forgotten after its turn closed: nothing to count.
 		r.deps.Log.Global().Debug(opRecount, "a workspace owed a recount is no longer registered", dlog.Context{
@@ -156,6 +168,11 @@ func (r *Recounter) recount(ctx context.Context, ws ids.WorkspaceID) {
 		return
 	}
 	count, err := r.deps.Git.CountCommits(ctx, record.Dir, record.ParentBranch, record.Branch)
+	if err != nil && ctx.Err() != nil {
+		fields["cause"] = err.Error()
+		log.Info(opRecount, "the daemon's exit cut a recount short before git answered; the next turn close recounts", fields)
+		return
+	}
 	if err != nil {
 		fields["error"] = err.Error()
 		log.Error(opRecount, "could not count the branch's commits; the panel keeps the last count", fields)
@@ -166,7 +183,8 @@ func (r *Recounter) recount(ctx context.Context, ws ids.WorkspaceID) {
 		log.Debug(opRecount, "the branch's commit count is unchanged", fields)
 		return
 	}
-	applied, err := r.deps.DB.SetLiveCommitCount(ctx, ws, count)
+	settle := context.WithoutCancel(ctx)
+	applied, err := r.deps.DB.SetLiveCommitCount(settle, ws, count)
 	if err != nil {
 		fields["error"] = err.Error()
 		log.Error(opRecount, "could not record the branch's commit count", fields)
@@ -177,7 +195,7 @@ func (r *Recounter) recount(ctx context.Context, ws ids.WorkspaceID) {
 		return
 	}
 	log.Debug(opRecount, "recorded the branch's commit count", fields)
-	if err := r.deps.PublishRegistry(ctx); err != nil {
+	if err := r.deps.PublishRegistry(settle); err != nil {
 		fields["error"] = fmt.Sprintf("republish the roster: %v", err)
 		log.Error(opRecount, "could not republish the roster after a recount", fields)
 	}
