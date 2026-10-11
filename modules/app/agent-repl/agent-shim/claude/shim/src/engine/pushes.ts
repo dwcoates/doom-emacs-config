@@ -165,6 +165,12 @@ export class SessionPushes {
   // every level here it is replayed once it has been stated, so a session
   // that never waited states nothing, and one whose last wait ended replays
   // the empty set it stated then.
+  //
+  // `commandCatalog` is a STANDING SET whose producer obligation is the same
+  // restatement on every open (session.proto): it is read beside the opening
+  // without being awaited, so it usually lands before the daemon's watch
+  // exists, and a consumer that attached later would otherwise offer no
+  // completions until the catalog next changed.
   private static readonly REPLAYED = [
     "contextUsage",
     "modelChanged",
@@ -174,6 +180,7 @@ export class SessionPushes {
     "title",
     "networkResumeWaits",
     "effortChanged",
+    "commandCatalog",
   ];
 
   /**

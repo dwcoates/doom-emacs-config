@@ -131,6 +131,50 @@ enum SessionCommand {
   SESSION_COMMAND_LOW_PRIORITY = 33 [(session_command_spec) = {literal: "/low-priority"}];
 }
 
+// ---- The command catalog: every slash command the session's runtime answers ----
+
+// EVERY slash command the session's agent runtime would answer if typed as
+// `/<name>`: its built-in commands, and every skill, custom command, plugin
+// command and MCP prompt the user added to it through any settings source
+// (user, project, local or plugin). It is the RUNTIME'S OWN ANSWER — the
+// vendor's command list read back from the live process — never a list a
+// consumer assembles by scanning directories, so a command the runtime would
+// not run never appears and one it would run is never missing.
+//
+// It is DELIBERATELY NOT `SessionCommand`. That enum is the closed set the
+// daemon RECOGNIZES and suppresses a user message for; this catalog is what a
+// composer may OFFER while the user types. Most entries here expand into a
+// prompt and are drawn like any prompt, and the catalog is open: its members
+// are whatever the runtime holds at the moment it was read.
+//
+// A STANDING SET: every statement is the whole catalog, and the last statement
+// is the truth. An EMPTY catalog is a real answer (a runtime offering no
+// commands), never "not read yet" — an unread catalog is simply not stated.
+message SessionCommandCatalog {
+  // The commands, in the order the runtime listed them. Names are unique
+  // within one statement.
+  repeated SessionCommandCatalogEntry commands = 1;
+}
+
+// One command the runtime answers, with the facts a composer draws beside it.
+message SessionCommandCatalogEntry {
+  // The command's name as the runtime spells it, WITHOUT the leading slash
+  // ("merge-queue", "compact", "plugin-name:skill"). What the user types is
+  // `/` followed by exactly this. Never empty.
+  string name = 1;
+  // What the command does, in the runtime's own words — for a skill, the
+  // description its frontmatter declares. UNSET when the runtime states none.
+  optional string description = 2;
+  // How the command's argument is spelled, in the runtime's own words
+  // ("<target>", "[instructions]"). UNSET when the command states no argument
+  // hint, which is not a claim that it takes no argument.
+  optional string argument_hint = 3;
+  // Other names the runtime answers as this SAME command, each without the
+  // leading slash. A composer may offer each alias, and completing one sends
+  // the alias as typed — the runtime resolves it.
+  repeated string aliases = 4;
+}
+
 // ---- Context cuts: what /clear, /compact and auto-compaction leave behind ----
 
 // The conversation was cut here, and the reader must see where.

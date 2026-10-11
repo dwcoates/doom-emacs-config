@@ -3676,3 +3676,51 @@ Registering on a daemon that is handing over would only fail."
 (provide 'test-host)
 
 ;;; test-host.el ends here
+
+;;;; ---- agent-repl-host-conn-or-primary ----
+
+(ert-deftest agent-repl-test-host-conn-or-primary-prefers-the-workspace-conn ()
+  "A workspace with its own serving connection is addressed on it."
+  (cl-letf (((symbol-function 'agent-repl-host-conn) (lambda (_ws) 'ws-conn))
+            ((symbol-function 'agent-repl-link-primary) (lambda () 'primary)))
+    (should (eq (agent-repl-host-conn-or-primary "ws-1") 'ws-conn))))
+
+(ert-deftest agent-repl-test-host-conn-or-primary-falls-to-the-primary-link ()
+  "A workspace with no serving connection yet is addressed on the primary link."
+  (cl-letf (((symbol-function 'agent-repl-host-conn) (lambda (_ws) nil))
+            ((symbol-function 'agent-repl-link-primary) (lambda () 'primary)))
+    (should (eq (agent-repl-host-conn-or-primary "ws-1") 'primary))))
+
+(ert-deftest agent-repl-test-host-conn-or-primary-addresses-no-workspace-on-the-primary ()
+  "A nil workspace never asks for a workspace connection."
+  (cl-letf (((symbol-function 'agent-repl-host-conn)
+             (lambda (ws) (error "asked for the connection of %S" ws)))
+            ((symbol-function 'agent-repl-link-primary) (lambda () 'primary)))
+    (should (eq (agent-repl-host-conn-or-primary nil) 'primary))))
+
+(ert-deftest agent-repl-test-host-conn-or-primary-is-nil-with-no-link ()
+  "Nil when neither a workspace connection nor a primary link stands."
+  (cl-letf (((symbol-function 'agent-repl-host-conn) (lambda (_ws) nil))
+            ((symbol-function 'agent-repl-link-primary) (lambda () nil)))
+    (should-not (agent-repl-host-conn-or-primary "ws-1"))))
+
+(ert-deftest agent-repl-test-host-conn-or-primary-is-the-only-spelling ()
+  "No source hand-rolls the workspace-conn-else-primary fallback.
+Every per-workspace call resolves its connection through
+`agent-repl-host-conn-or-primary', so a site that spells the fallback
+itself is a second copy free to drift from it."
+  (let ((pattern "(or (\\(?:and ws (\\)?agent-repl-host-conn ws))?[[:space:]\n]*(agent-repl-link-primary)")
+        (offenders nil))
+    (dolist (file (directory-files agent-repl-test--module-dir t "\\`[^.].*\\.el\\'"))
+      (unless (string-prefix-p "test-" (file-name-nondirectory file))
+        (with-temp-buffer
+          (insert-file-contents file)
+          (goto-char (point-min))
+          (while (re-search-forward pattern nil t)
+            (unless (and (string= (file-name-nondirectory file) "host.el")
+                         (save-excursion
+                           (beginning-of-defun)
+                           (looking-at "(defun agent-repl-host-conn-or-primary ")))
+              (push (format "%s:%d" (file-name-nondirectory file) (line-number-at-pos))
+                    offenders))))))
+    (should-not offenders)))

@@ -134,6 +134,7 @@ import {
 } from "./cold.js";
 import { TranscriptTitleTail } from "./title.js";
 import { sessionTitleUpdate } from "../convert/session-title.js";
+import { commandCatalogOf, commandCatalogUpdate } from "../convert/command-catalog.js";
 import { ForegroundUnitTable } from "./foreground.js";
 import { LiveWorkTable, ShellRunStarts, type LiveWorkEntry } from "./detached.js";
 import {
@@ -162,6 +163,7 @@ import {
   toVendorPermissionMode,
 } from "./permission-gate.js";
 import { SessionPushes } from "./pushes.js";
+import { probeVendorFact } from "./vendor-probe.js";
 import { VendorCadence } from "./vendor-cadence.js";
 import { classifyAgentFailure, NetworkResume, type ReachabilityProbe, type ResumeDelivery } from "./network-resume.js";
 import { networkReach, type NetworkReach } from "./network-reach.js";
@@ -520,6 +522,8 @@ const MCP_STATUS_COMPONENT = "vendor-mcp-status";
 const EFFORT_COMPONENT = "vendor-applied-effort";
 /** The model catalog read: transient, recovered by a later StartSession's read. */
 const MODEL_CATALOG_COMPONENT = "vendor-model-catalog";
+/** The slash-command catalog read: transient, recovered by the next read. */
+const COMMAND_CATALOG_COMPONENT = "vendor-command-catalog";
 /** Reading the record's open obligations: transient, recovered by any later read. */
 const LIVE_WORK_COMPONENT = "store-live-work";
 /** Serving history out of the store: transient, recovered by the next served read. */
@@ -1698,22 +1702,12 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   }
 
   async function probeContextUsage(): Promise<void> {
-    const active = query;
-    if (active === undefined) return;
-    try {
-      pushes.push(contextUsageUpdate(await active.getContextUsage()));
-      // THE SAME OPERATION SUCCEEDING IS THE RECOVERY. A probe that answers
-      // proves the last refusal was a moment, not a state.
-      pushes.resolveComponent(CONTEXT_USAGE_COMPONENT, 0);
-    } catch (err) {
-      pushes.fault(
-        sessionFault(
-          { kind: "vendorQueryFailed" },
-          CONTEXT_USAGE_COMPONENT,
-          `getContextUsage failed: ${err instanceof Error ? err.message : String(err)}`,
-        ),
-      );
-    }
+    await probeVendorFact(pushes, query, {
+      component: CONTEXT_USAGE_COMPONENT,
+      call: "getContextUsage",
+      read: (active) => active.getContextUsage(),
+      take: (usage) => pushes.push(contextUsageUpdate(usage)),
+    });
   }
 
   /** One usage window, or absence when the vendor could not state it. */
@@ -1926,6 +1920,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // an unhealthy verdict no later success could lift. A re-read is also the
     // honest answer to a catalog that changed under the account.
     await pushModelCatalog();
+    // THE COMMAND CATALOG CAN CHANGE UNDER A SESSION (a skill added mid-session),
+    // so it is re-read with the rest; an unchanged one pushes nothing.
+    await pushCommandCatalog();
     // The level the vendor sends can move under a turn (a vendor-side model
     // fallback), so it is re-read with the rest.
     await pushAppliedEffort();
@@ -1933,38 +1930,46 @@ export function createEngine(deps: EngineDeps): SessionEngine {
 
   /** Re-read the account's model list, and state the health of that read. */
   async function pushModelCatalog(): Promise<void> {
-    const active = query;
-    if (active === undefined) return;
-    try {
-      modelCatalog = modelOptions(await active.supportedModels());
-      pushes.resolveComponent(MODEL_CATALOG_COMPONENT, 0);
-    } catch (err) {
-      pushes.fault(
-        sessionFault(
-          { kind: "vendorQueryFailed" },
-          MODEL_CATALOG_COMPONENT,
-          `supportedModels failed: ${err instanceof Error ? err.message : String(err)}`,
-        ),
-      );
-    }
+    await probeVendorFact(pushes, query, {
+      component: MODEL_CATALOG_COMPONENT,
+      call: "supportedModels",
+      read: (active) => active.supportedModels(),
+      take: (models) => {
+        modelCatalog = modelOptions(models);
+      },
+    });
+  }
+
+  /**
+   * Read the runtime's slash-command catalog and state it on the session stream.
+   *
+   * NEVER REJECTS: a read that fails is a `SessionFault` on the catalog's own
+   * component, which the next read that answers lifts. An unchanged catalog is
+   * dropped by the push table, so a re-read states only a change.
+   */
+  async function pushCommandCatalog(): Promise<void> {
+    await probeVendorFact(pushes, query, {
+      component: COMMAND_CATALOG_COMPONENT,
+      call: "supportedCommands",
+      read: (active) => active.supportedCommands(),
+      take: (commands) => {
+        const catalog = commandCatalogOf(commands);
+        const changed = pushes.push(commandCatalogUpdate(catalog));
+        LOGGER.debug({ commands: catalog.commands.length, changed }, "read the runtime's slash-command catalog");
+      },
+    });
   }
 
   /** Probe every declared mcp server's health and state each one. */
   async function pushMcpServerStatus(): Promise<void> {
-    const active = query;
-    if (active === undefined) return;
-    try {
-      for (const status of await active.mcpServerStatus()) pushes.push(mcpUpdate(status));
-      pushes.resolveComponent(MCP_STATUS_COMPONENT, 0);
-    } catch (err) {
-      pushes.fault(
-        sessionFault(
-          { kind: "vendorQueryFailed" },
-          MCP_STATUS_COMPONENT,
-          `mcpServerStatus failed: ${err instanceof Error ? err.message : String(err)}`,
-        ),
-      );
-    }
+    await probeVendorFact(pushes, query, {
+      component: MCP_STATUS_COMPONENT,
+      call: "mcpServerStatus",
+      read: (active) => active.mcpServerStatus(),
+      take: (statuses) => {
+        for (const status of statuses) pushes.push(mcpUpdate(status));
+      },
+    });
   }
 
   async function pushAccountUsage(): Promise<void> {
@@ -4757,6 +4762,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     const contextUsageMs = deps.nowMs() - contextUsageFrom;
     pushSessionTitle();
     void pushAccountUsage();
+    // THE COMMAND CATALOG IS NOT AWAITED: the opening owes nobody the list,
+    // and the push table replays it to every watch that opens after it lands.
+    void pushCommandCatalog();
     // The readiness signal, and the reason a consumer may open WatchSession
     // before anything else exists.
     pushes.push(pushes.diagnostics());
