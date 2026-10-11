@@ -268,7 +268,7 @@ export function drawCreateWorkspaceForm(
 type CreateWorkspaceCause = NonNullable<CreateWorkspaceError["cause"]> & { case: string };
 
 /**
- * What each of CreateWorkspace's fourteen refusals says.
+ * What each of CreateWorkspace's seventeen refusals says.
  *
  * NONE OF THE CROSS-CUTTING FOUR CAN REACH THIS RPC: a creation is addressed
  * to a repository, not to an existing workspace, so every arm here is the
@@ -310,6 +310,12 @@ export function createWorkspaceRefusal(cause: CreateWorkspaceCause): string {
       })${cause.value.answer !== "" ? `: the model answered "${cause.value.answer}"` : ""}`;
     case "insideTemporaryDirectory":
       return `${cause.value.dir} is inside the temporary directory ${cause.value.temporaryRoot}; agent-repl does not register temporary folders`;
+    case "baseRefOffPrimaryBranch":
+      return `the base ref ${cause.value.ref} is not on ${cause.value.primaryBranch}, which this workspace would merge into`;
+    case "unknownForkSource":
+      return "the daemon does not know the workspace to fork from";
+    case "forkSourceHasNoConversation":
+      return "the workspace to fork from has no conversation to copy";
     default: {
       const other: { case: string } = cause;
       return unreachableArm("CreateWorkspaceError.cause", other.case);
