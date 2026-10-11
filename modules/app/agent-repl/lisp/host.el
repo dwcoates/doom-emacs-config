@@ -660,16 +660,57 @@ Read by the roster's follow record, which states how long the frame took
 to arrive after the request: the end-to-end latency of a keyboard switch,
 from one log line.")
 
+(defvar agent-repl-host--editor-switches 0
+  "How many workspace switches the user has made IN EMACS, ever.
+Only grows.  A landing on a workspace the user asked Emacs to make
+snapshots it when the gesture is made, and lands only if it has not moved
+since (`agent-repl-verbs-select-minted'): a user who switched away while
+the workspace was being minted is not dragged back to it.
+
+ONLY EMACS COUNTS.  A switch a sidebar row or an agent made reaches Emacs
+as the roster's `current' and moves the frame as a FOLLOW
+\(`agent-repl-roster-following'), which is never counted; neither is a
+transient background activation (`agent-repl--eager-open-in-progress') nor
+a move Emacs makes on its own account (`agent-repl-host-automatic-switch').
+What is counted is every switch request from an Emacs gesture
+\(`agent-repl-host-request-switch') and every perspective activation an
+Emacs command made directly (`agent-repl-host--on-workspace-activated').")
+
+(defvar agent-repl-host-automatic-switch nil
+  "Non-nil while Emacs moves the frame on its own account, not the user\='s.
+Bound around the landing on a freshly minted workspace and the link-up
+re-select, whose activations must not count as a switch the user made
+\(`agent-repl-host--editor-switches').")
+
+(defun agent-repl-host-editor-switch-count ()
+  "Return how many workspace switches the user has made in Emacs.
+See `agent-repl-host--editor-switches'."
+  agent-repl-host--editor-switches)
+
+(defun agent-repl-host--count-editor-switch (ws origin)
+  "Count a workspace switch to WS the user made in Emacs, through ORIGIN.
+ORIGIN is the request trigger or `activation', for the record."
+  (setq agent-repl-host--editor-switches (1+ agent-repl-host--editor-switches))
+  (agent-repl--info (or ws '(:agent-repl-central "a switch to a perspective without a workspace has no workspace sink"))
+                    "elisp.host.editor-switch ws=%s origin=%s count=%d"
+                    ws origin agent-repl-host--editor-switches))
+
 (defun agent-repl-host-request-switch (ws trigger)
   "Ask the daemon to make WS the current workspace; move nothing here.
 TRIGGER names what the user did (a symbol such as `cycle', `slot',
 `picker', `notification'), for the record.  The frame follows when the
 roster's `current' names WS (`agent-repl-roster-apply-current').
 
+Every trigger but `startup' is a switch the user made in Emacs and is
+counted (`agent-repl-host--editor-switches'); the startup\='s selection of
+its first tab is Emacs's own.
+
 A request that cannot be sent is LOUD: a switch the user asked for that
 goes nowhere is reported in the echo area and at WARN, never dropped.
 Answers t when the request was sent or queued, nil otherwise."
   (let ((shown (agent-repl--ws-current-name)))
+    (unless (eq trigger 'startup)
+      (agent-repl-host--count-editor-switch ws trigger))
     (setq agent-repl-host-last-request (cons ws (float-time)))
     (agent-repl--info ws "elisp.host.switch-requested ws=%s trigger=%s shown=%s pending=%s"
                       ws trigger shown (or (agent-repl-host-pending-selection) "none"))
@@ -767,12 +808,18 @@ docstring in `core.el\=')."
      ;; echo and the frame went back.
      (agent-repl-roster-following
       (agent-repl--log ws "elisp.host.select-skipped ws=%s reason=followed-roster" ws))
-     ((and ws (agent-repl-host--entry ws))
+     (t
       ;; A switch Emacs made itself (a Doom command, a teardown landing, a
-      ;; file placed in its workspace): the daemon is told after the fact.
-      (agent-repl--info ws "elisp.host.select-local-activation ws=%s command=%S"
-                        ws this-command)
-      (agent-repl-host-select ws)))))
+      ;; file placed in its workspace) is the user's, unless Emacs made it
+      ;; on its own account.
+      (if agent-repl-host-automatic-switch
+          (agent-repl--log ws "elisp.host.editor-switch-uncounted ws=%s reason=automatic" ws)
+        (agent-repl-host--count-editor-switch ws 'activation))
+      ;; The daemon is told after the fact.
+      (when (and ws (agent-repl-host--entry ws))
+        (agent-repl--info ws "elisp.host.select-local-activation ws=%s command=%S"
+                          ws this-command)
+        (agent-repl-host-select ws))))))
 
 ;;;; ---- Subscribe ----
 
@@ -1631,7 +1678,9 @@ next sidebar click."
     (let ((ws (agent-repl-host--ws-for-dir dir)))
       (agent-repl--info ws "elisp.host.link-up-reselect ws=%s dir=%S" ws dir)
       (unless (equal ws (agent-repl--ws-current-name))
-        (agent-repl--ws-switch ws))
+        ;; Restoring the user's own selection is not a new switch by them.
+        (let ((agent-repl-host-automatic-switch t))
+          (agent-repl--ws-switch ws)))
       (agent-repl-host-select
        ws (lambda (outcome)
             (setq agent-repl-host-reselect-pending nil)
