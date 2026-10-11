@@ -670,6 +670,37 @@ never signalled as an error."
       (should (equal (plist-get request :workspace) (agent-repl-test-verbs--ref)))
       (should (eq (plist-get (plist-get request :visibility) :arm) :hide)))))
 
+(ert-deftest agent-repl-verbs-roster-or-view-prefers-the-given-roster ()
+  "A given roster is answered verbatim, whatever the view holds."
+  (let ((agent-repl-roster-view '(:view t)))
+    (should (equal (agent-repl-verbs--roster-or-view '(:given t)) '(:given t)))))
+
+(ert-deftest agent-repl-verbs-roster-or-view-defaults-to-the-view ()
+  "A nil roster answers `agent-repl-roster-view'."
+  (let ((agent-repl-roster-view '(:view t)))
+    (should (equal (agent-repl-verbs--roster-or-view nil) '(:view t)))))
+
+(ert-deftest agent-repl-verbs-roster-or-view-is-nil-before-any-push ()
+  "A nil roster before any push answers nil."
+  (let ((agent-repl-roster-view nil))
+    (should-not (agent-repl-verbs--roster-or-view nil))))
+
+(defconst agent-repl-test-verbs--source
+  (expand-file-name "verbs.el" (file-name-directory (or load-file-name buffer-file-name)))
+  "verbs.el beside this suite, for the tests that read its source.")
+
+(ert-deftest agent-repl-verbs-roster-defaulting-has-one-home ()
+  "Every roster reader in verbs.el defaults through `agent-repl-verbs--roster-or-view'.
+A reader that hand-rolls the defaulting reads the view a second time and fails here."
+  ;; Arrange.
+  (with-temp-buffer
+    (insert-file-contents agent-repl-test-verbs--source)
+    ;; Act.
+    (let ((reads (how-many (regexp-quote "(boundp 'agent-repl-roster-view)")
+                           (point-min) (point-max))))
+      ;; Assert.
+      (should (= reads 1)))))
+
 (ert-deftest agent-repl-verbs-hide-lands-on-the-first-drawn-tab ()
   "An accepted hide switches to the first tab the bar draws."
   (agent-repl-test-verbs--with nil
