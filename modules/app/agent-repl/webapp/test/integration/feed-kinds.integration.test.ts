@@ -1583,7 +1583,7 @@ describe("merge tabs", () => {
     // Arrange / Act
     const row = await drawRow(mergeTabRow("tests"));
     // Assert
-    expect(row.querySelector('[data-suite-state="running"] .merge-suite-counts')?.textContent).toBe("3/0/5");
+    expect(row.querySelector('[data-suite-state="running"] .merge-suite-counts')?.textContent).toBe("3/5");
   });
 
   it("breathes a running suite's dot green while every test so far passed", async () => {
