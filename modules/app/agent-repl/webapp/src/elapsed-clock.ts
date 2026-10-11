@@ -22,10 +22,25 @@ import { fitsReserve, reserveLabels, reserveLabelsCss } from "./width-reserve.js
  * every tick of the shared clock.
  */
 export function liveElapsedClock(ticker: Ticker, className: string, startedMs: number): HTMLElement {
+  return tickingClock(ticker, className, (nowMs) => formatTickedElapsed(nowMs - startedMs));
+}
+
+/**
+ * THE ONE TICKING CLOCK: a span wearing CLASSNAME that paints READING of the
+ * shared clock now and on every tick, handing each painted text to PAINTED.
+ */
+function tickingClock(
+  ticker: Ticker,
+  className: string,
+  reading: (nowMs: number) => string,
+  painted: (text: string) => void = () => {},
+): HTMLElement {
   const el = document.createElement("span");
   el.className = className;
   tick(el, ticker, (nowMs) => {
-    el.textContent = formatTickedElapsed(nowMs - startedMs);
+    const text = reading(nowMs);
+    el.textContent = text;
+    painted(text);
   });
   return el;
 }
@@ -91,13 +106,8 @@ export function reservedTickingClock(
   reserve: readonly string[],
   reading: (nowMs: number) => string,
 ): HTMLElement {
-  const el = document.createElement("span");
-  el.className = className;
-  reserveWidth(el, reserve);
   let overflowReported = false;
-  tick(el, ticker, (nowMs) => {
-    const text = reading(nowMs);
-    el.textContent = text;
+  const el = tickingClock(ticker, className, reading, (text) => {
     if (overflowReported || fitsReserve(text, reserve)) return;
     overflowReported = true;
     log.error("a reserved clock's reading outgrew its reserved width", {
@@ -105,6 +115,7 @@ export function reservedTickingClock(
       context: { class_name: className, reading: text, reserve },
     });
   });
+  reserveWidth(el, reserve);
   return el;
 }
 
