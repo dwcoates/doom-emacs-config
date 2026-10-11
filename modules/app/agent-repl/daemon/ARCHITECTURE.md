@@ -383,7 +383,8 @@ the sink interfaces above plus daemon-fact setters:
   (accounting, unmodeled, detached unmodeled, session faults, degraded
   windows), context chip from `context_usage`, account from the config
   root's `.claude.json`.
-- sidebar: both groupings, priority order, attention marker (set on
+- sidebar: both groupings, stored-place order (priority only picks a
+  workspace's landing place; SwapWorkspacePlaces exchanges siblings), attention marker (set on
   notification, cleared on SelectWorkspace), recently merged, `current`,
   status arm from session/merge/link facts; `SetMerge(ws, MergeFacts)`,
   `SetSelected(ws)`, `SetRegistry(...)` on any WSM change.
