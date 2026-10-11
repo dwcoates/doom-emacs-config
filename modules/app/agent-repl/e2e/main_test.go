@@ -37,6 +37,10 @@ import (
 // uses — they are harmless byproducts of a build routine this suite does not
 // own) before running the suite.
 func TestMain(m *testing.M) {
+	// A re-exec as a stand-in store (storedump_test.go) runs no suite.
+	if mode := os.Getenv(envStandInStore); mode != "" {
+		os.Exit(runStandInStore(mode))
+	}
 	os.Exit(runSuite(m))
 }
 
