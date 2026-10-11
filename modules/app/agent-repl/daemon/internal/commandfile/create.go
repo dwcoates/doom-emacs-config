@@ -102,10 +102,21 @@ func (i *ingress) repositoryOf(ctx context.Context, dir string) (wsm.Repository,
 	if err != nil {
 		return wsm.Repository{}, false, fmt.Errorf("git_root: look up the workspace at %q: %w", dir, err)
 	}
-	if repo, found := wsm.RepositoryWithID(repositories, ws.Repo); found {
-		return repo, true, nil
+	repo, err := workspaceRepository(repositories, ws, dir)
+	if err != nil {
+		return wsm.Repository{}, false, fmt.Errorf("git_root: %w", err)
 	}
-	return wsm.Repository{}, false, fmt.Errorf("git_root: workspace %q at %q names repository %q, which the registry does not hold", ws.ID, dir, ws.Repo)
+	return repo, true, nil
+}
+
+// workspaceRepository answers the registered repository a workspace, reached
+// at dir, names. The workspace row's repository is a foreign key, so a
+// registry that does not hold it is refused, never defaulted.
+func workspaceRepository(repositories []wsm.Repository, ws wsm.Workspace, dir string) (wsm.Repository, error) {
+	if repo, found := wsm.RepositoryWithID(repositories, ws.Repo); found {
+		return repo, nil
+	}
+	return wsm.Repository{}, fmt.Errorf("workspace %q at %q names repository %q, which the registry does not hold", ws.ID, dir, ws.Repo)
 }
 
 // sourceParent answers the parent a create's `source_ws` names: none for no

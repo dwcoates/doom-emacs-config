@@ -452,3 +452,34 @@ func TestParentAtReadsADirectoryWithinTheRepository(t *testing.T) {
 		})
 	}
 }
+
+func TestWorkspaceRepositoryReadsTheRowsRepository(t *testing.T) {
+	repositories := []wsm.Repository{{ID: "r1", Dir: "/repo"}}
+	tests := []struct {
+		name    string
+		ws      wsm.Workspace
+		want    ids.RepoID
+		wantErr string
+	}{
+		{name: "a held repository", ws: wsm.Workspace{ID: "w1", Repo: "r1"}, want: "r1"},
+		{name: "a repository the registry does not hold", ws: wsm.Workspace{ID: "w1", Repo: "r-gone"},
+			wantErr: `workspace "w1" at "/tree/w1" names repository "r-gone", which the registry does not hold`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act.
+			repo, err := workspaceRepository(repositories, tt.ws, "/tree/w1")
+
+			// Assert.
+			if tt.wantErr != "" {
+				if err == nil || err.Error() != tt.wantErr {
+					t.Fatalf("err = %v, want %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil || repo.ID != tt.want {
+				t.Fatalf("workspaceRepository = (%q, %v), want %q", repo.ID, err, tt.want)
+			}
+		})
+	}
+}
