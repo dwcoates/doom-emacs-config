@@ -128,13 +128,24 @@ describe("the stylesheet's suite colors", () => {
   }
 
   it.each([
-    [".merge-suite-glyph.is-passing", "var(--ok)"],
+    [".merge-suite-glyph.is-passing", "var(--suite-running)"],
     [".merge-suite-glyph.is-failing", "var(--err)"],
-    [".merge-suite-glyph.is-unreported", "var(--muted)"],
+    [".merge-suite-glyph.is-unreported", "var(--suite-running)"],
+    [".merge-suite-glyph.is-succeeded", "var(--ok)"],
+    [".merge-suite-glyph.is-failed", "var(--err)"],
     [".merge-suite-counts .is-passed", "var(--ok)"],
     [".merge-suite-counts .is-failed", "var(--err)"],
   ])("colors %s with %s", (selector, color) => {
     expect(declarationsOf(selector)).toContain(`color: ${color}`);
+  });
+
+  it("paints no running suite dot green", () => {
+    const green = rulesOf(STYLESHEET).filter(
+      (rule) =>
+        rule.selectors.some((one) => one === ".merge-suite-glyph.is-unreported" || one === ".merge-suite-glyph.is-passing") &&
+        rule.declarations.includes("--ok"),
+    );
+    expect(green).toEqual([]);
   });
 
   it("paints no suite dot purple", () => {

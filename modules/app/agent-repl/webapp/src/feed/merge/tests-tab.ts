@@ -177,8 +177,9 @@ function paintSuite(el: HTMLElement, suite: FeedMergeTestSuite): void {
   switch (state.case) {
     case "running": {
       // THE DOT SAYS WHAT THE TESTS HAVE SAID SO FAR (owner ruling,
-      // 2026-10-08), never purple: grey before any verdict, green while every
-      // verdict is a pass, red once one failed. The daemon resolved the arm.
+      // 2026-10-08), never purple and never green (owner request, 2026-10-11):
+      // yellow before any verdict and while every verdict is a pass, red once
+      // one failed. The daemon resolved the arm.
       const soFar = requireCase(state.value.soFar, `${PATH}.state.running.so_far`);
       repaintMark(glyph, `merge-suite-glyph is-live is-${soFar.case}`, SUITE_GLYPHS.running);
       setAttribute(el, "data-so-far", soFar.case);
