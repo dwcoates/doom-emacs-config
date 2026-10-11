@@ -196,6 +196,9 @@ const (
 	// AgentReplAdoptHostWorkspaceProcedure is the fully-qualified name of the AgentRepl's
 	// AdoptHostWorkspace RPC.
 	AgentReplAdoptHostWorkspaceProcedure = "/agentrepl.v1.AgentRepl/AdoptHostWorkspace"
+	// AgentReplListSlashCommandsProcedure is the fully-qualified name of the AgentRepl's
+	// ListSlashCommands RPC.
+	AgentReplListSlashCommandsProcedure = "/agentrepl.v1.AgentRepl/ListSlashCommands"
 	// AgentReplWatchWebWorkspaceProcedure is the fully-qualified name of the AgentRepl's
 	// WatchWebWorkspace RPC.
 	AgentReplWatchWebWorkspaceProcedure = "/agentrepl.v1.AgentRepl/WatchWebWorkspace"
@@ -293,6 +296,7 @@ var (
 	agentReplWatchHostWorkspaceMethodDescriptor       = agentReplServiceDescriptor.Methods().ByName("WatchHostWorkspace")
 	agentReplWatchDaemonMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("WatchDaemon")
 	agentReplAdoptHostWorkspaceMethodDescriptor       = agentReplServiceDescriptor.Methods().ByName("AdoptHostWorkspace")
+	agentReplListSlashCommandsMethodDescriptor        = agentReplServiceDescriptor.Methods().ByName("ListSlashCommands")
 	agentReplWatchWebWorkspaceMethodDescriptor        = agentReplServiceDescriptor.Methods().ByName("WatchWebWorkspace")
 	agentReplOpenLoginMethodDescriptor                = agentReplServiceDescriptor.Methods().ByName("OpenLogin")
 	agentReplWatchLoginTerminalMethodDescriptor       = agentReplServiceDescriptor.Methods().ByName("WatchLoginTerminal")
@@ -489,6 +493,9 @@ type AgentReplClient interface {
 	// Emacs's half of the handover rendezvous, called on the NEW daemon. See
 	// endpoint_adopt_host_workspace.proto.
 	AdoptHostWorkspace(context.Context, *connect.Request[v1.AdoptHostWorkspaceRequest]) (*connect.Response[v1.AdoptHostWorkspaceResponse], error)
+	// Every slash command the workspace's agent runtime answers, for the
+	// composer's completion. See endpoint_list_slash_commands.proto.
+	ListSlashCommands(context.Context, *connect.Request[v1.ListSlashCommandsRequest]) (*connect.Response[v1.ListSlashCommandsResponse], error)
 	// The webview's standing daemon-link stream for one workspace. See
 	// endpoint_watch_web_workspace.proto.
 	WatchWebWorkspace(context.Context, *connect.Request[v1.WatchWebWorkspaceRequest]) (*connect.ServerStreamForClient[v1.WatchWebWorkspaceResponse], error)
@@ -896,6 +903,12 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(agentReplAdoptHostWorkspaceMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		listSlashCommands: connect.NewClient[v1.ListSlashCommandsRequest, v1.ListSlashCommandsResponse](
+			httpClient,
+			baseURL+AgentReplListSlashCommandsProcedure,
+			connect.WithSchema(agentReplListSlashCommandsMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 		watchWebWorkspace: connect.NewClient[v1.WatchWebWorkspaceRequest, v1.WatchWebWorkspaceResponse](
 			httpClient,
 			baseURL+AgentReplWatchWebWorkspaceProcedure,
@@ -1038,6 +1051,7 @@ type agentReplClient struct {
 	watchHostWorkspace       *connect.Client[v1.WatchHostWorkspaceRequest, v1.WatchHostWorkspaceResponse]
 	watchDaemon              *connect.Client[v1.WatchDaemonRequest, v1.WatchDaemonResponse]
 	adoptHostWorkspace       *connect.Client[v1.AdoptHostWorkspaceRequest, v1.AdoptHostWorkspaceResponse]
+	listSlashCommands        *connect.Client[v1.ListSlashCommandsRequest, v1.ListSlashCommandsResponse]
 	watchWebWorkspace        *connect.Client[v1.WatchWebWorkspaceRequest, v1.WatchWebWorkspaceResponse]
 	openLogin                *connect.Client[v1.OpenLoginRequest, v1.OpenLoginResponse]
 	watchLoginTerminal       *connect.Client[v1.WatchLoginTerminalRequest, v1.LoginTerminalOutput]
@@ -1348,6 +1362,11 @@ func (c *agentReplClient) AdoptHostWorkspace(ctx context.Context, req *connect.R
 	return c.adoptHostWorkspace.CallUnary(ctx, req)
 }
 
+// ListSlashCommands calls agentrepl.v1.AgentRepl.ListSlashCommands.
+func (c *agentReplClient) ListSlashCommands(ctx context.Context, req *connect.Request[v1.ListSlashCommandsRequest]) (*connect.Response[v1.ListSlashCommandsResponse], error) {
+	return c.listSlashCommands.CallUnary(ctx, req)
+}
+
 // WatchWebWorkspace calls agentrepl.v1.AgentRepl.WatchWebWorkspace.
 func (c *agentReplClient) WatchWebWorkspace(ctx context.Context, req *connect.Request[v1.WatchWebWorkspaceRequest]) (*connect.ServerStreamForClient[v1.WatchWebWorkspaceResponse], error) {
 	return c.watchWebWorkspace.CallServerStream(ctx, req)
@@ -1594,6 +1613,9 @@ type AgentReplHandler interface {
 	// Emacs's half of the handover rendezvous, called on the NEW daemon. See
 	// endpoint_adopt_host_workspace.proto.
 	AdoptHostWorkspace(context.Context, *connect.Request[v1.AdoptHostWorkspaceRequest]) (*connect.Response[v1.AdoptHostWorkspaceResponse], error)
+	// Every slash command the workspace's agent runtime answers, for the
+	// composer's completion. See endpoint_list_slash_commands.proto.
+	ListSlashCommands(context.Context, *connect.Request[v1.ListSlashCommandsRequest]) (*connect.Response[v1.ListSlashCommandsResponse], error)
 	// The webview's standing daemon-link stream for one workspace. See
 	// endpoint_watch_web_workspace.proto.
 	WatchWebWorkspace(context.Context, *connect.Request[v1.WatchWebWorkspaceRequest], *connect.ServerStream[v1.WatchWebWorkspaceResponse]) error
@@ -1997,6 +2019,12 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(agentReplAdoptHostWorkspaceMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	agentReplListSlashCommandsHandler := connect.NewUnaryHandler(
+		AgentReplListSlashCommandsProcedure,
+		svc.ListSlashCommands,
+		connect.WithSchema(agentReplListSlashCommandsMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	agentReplWatchWebWorkspaceHandler := connect.NewServerStreamHandler(
 		AgentReplWatchWebWorkspaceProcedure,
 		svc.WatchWebWorkspace,
@@ -2195,6 +2223,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplWatchDaemonHandler.ServeHTTP(w, r)
 		case AgentReplAdoptHostWorkspaceProcedure:
 			agentReplAdoptHostWorkspaceHandler.ServeHTTP(w, r)
+		case AgentReplListSlashCommandsProcedure:
+			agentReplListSlashCommandsHandler.ServeHTTP(w, r)
 		case AgentReplWatchWebWorkspaceProcedure:
 			agentReplWatchWebWorkspaceHandler.ServeHTTP(w, r)
 		case AgentReplOpenLoginProcedure:
@@ -2464,6 +2494,10 @@ func (UnimplementedAgentReplHandler) WatchDaemon(context.Context, *connect.Reque
 
 func (UnimplementedAgentReplHandler) AdoptHostWorkspace(context.Context, *connect.Request[v1.AdoptHostWorkspaceRequest]) (*connect.Response[v1.AdoptHostWorkspaceResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.AdoptHostWorkspace is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) ListSlashCommands(context.Context, *connect.Request[v1.ListSlashCommandsRequest]) (*connect.Response[v1.ListSlashCommandsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.ListSlashCommands is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) WatchWebWorkspace(context.Context, *connect.Request[v1.WatchWebWorkspaceRequest], *connect.ServerStream[v1.WatchWebWorkspaceResponse]) error {

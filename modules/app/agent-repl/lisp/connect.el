@@ -661,9 +661,9 @@ one of the two runs, exactly once.  TIMEOUT defaults to
 `agent-repl-connect-unary-timeout-seconds'; the keyword `:none' arms no
 timer at all, for a call whose answer legitimately waits on work of unbounded
 length -- a dropped connection still ends it, through the sentinel, so a dead
-daemon is a transport failure and never a call left hanging.  Nothing is ever retried here;
-retry policy belongs to the caller that knows whether the call is
-idempotent.  Returns the socket process."
+daemon is a transport failure and never a call left hanging.  Nothing is
+ever retried here; retry policy belongs to the caller that knows whether
+the call is idempotent.  Returns the socket process."
   (let ((log-scope
          (agent-repl--capture-log-scope
           '(:agent-repl-context "an unscoped transport exchange is process-wide"))))

@@ -1706,3 +1706,97 @@ replaces it."
 (provide 'test-wire-host)
 
 ;;; test-wire-host.el ends here
+
+;;;; ---- ListSlashCommands ----
+
+(ert-deftest agent-repl-test-wire-host-list-slash-commands-request-echoes-the-ref ()
+  "ListSlashCommands carries only the daemon-minted ref."
+  (should (equal (agent-repl-test-wire-host--quiet
+                   (json-serialize
+                    (agent-repl-wire-encode-list-slash-commands-request
+                     '(:workspace (:id "ws-7" :dir "/w/fix")))))
+                 "{\"workspace\":{\"id\":\"ws-7\",\"dir\":\"/w/fix\"}}")))
+
+(ert-deftest agent-repl-test-wire-host-list-slash-commands-request-without-a-ref-is-refused ()
+  "An incomplete request errors before send, never on the wire."
+  (should (equal (agent-repl-test-wire-host--quiet
+                   (condition-case err
+                       (progn (agent-repl-wire-encode-list-slash-commands-request nil) nil)
+                     (agent-repl-wire-error (cdr err))))
+                 '("ListSlashCommandsRequest" workspace
+                   "required message field is absent"))))
+
+(ert-deftest agent-repl-test-wire-host-list-slash-commands-stated-decodes ()
+  "A stated catalog decodes every entry, its optional facts nil when absent."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-list-slash-commands-response
+                  (concat "{\"success\":{\"stated\":{\"catalog\":{\"commands\":["
+                          "{\"name\":\"merge-queue\",\"description\":\"Land work\","
+                          "\"argumentHint\":\"<own>\"},"
+                          "{\"name\":\"usage\",\"aliases\":[\"cost\"]}]}}}}"))
+                 '(:arm :success
+                   :value (:arm :stated
+                           :value (:catalog
+                                   (:commands
+                                    ((:name "merge-queue" :description "Land work"
+                                      :argument-hint "<own>" :aliases nil)
+                                     (:name "usage" :description nil
+                                      :argument-hint nil :aliases ("cost"))))))))))
+
+(ert-deftest agent-repl-test-wire-host-list-slash-commands-empty-catalog-decodes ()
+  "An empty stated catalog is a catalog with no commands."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-list-slash-commands-response
+                  "{\"success\":{\"stated\":{\"catalog\":{}}}}")
+                 '(:arm :success :value (:arm :stated :value (:catalog (:commands nil)))))))
+
+(ert-deftest agent-repl-test-wire-host-list-slash-commands-unstated-decodes ()
+  "Unstated is an answer inside success."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-list-slash-commands-response
+                  "{\"success\":{\"unstated\":{}}}")
+                 '(:arm :success :value (:arm :unstated :value nil)))))
+
+(ert-deftest agent-repl-test-wire-host-list-slash-commands-error-arm-decodes ()
+  "The error arm decodes to its keyword with the cause the daemon named."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-list-slash-commands-response
+                  "{\"error\":{\"transferringAway\":{\"address\":\"127.0.0.1:9\"}}}")
+                 '(:arm :error
+                   :value (:cause (:arm :transferring-away
+                                   :value (:address "127.0.0.1:9")))))))
+
+(ert-deftest agent-repl-test-wire-host-list-slash-commands-unset-success-is-a-breach ()
+  "A success naming neither stated nor unstated is a breach."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-list-slash-commands-response
+                  "{\"success\":{}}")
+                 '("ListSlashCommandsSuccess" catalog "oneof is unset"))))
+
+(ert-deftest agent-repl-test-wire-host-list-slash-commands-stated-without-catalog-is-a-breach ()
+  "A stated arm carrying no catalog is a breach."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-list-slash-commands-response
+                  "{\"success\":{\"stated\":{}}}")
+                 '("ListSlashCommandsStated" catalog "required message field is absent"))))
+
+(ert-deftest agent-repl-test-wire-host-list-slash-commands-nameless-entry-is-a-breach ()
+  "A command entry with no name is a breach: nothing completes to a bare slash."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-list-slash-commands-response
+                  "{\"success\":{\"stated\":{\"catalog\":{\"commands\":[{\"description\":\"x\"}]}}}}")
+                 '("SessionCommandCatalogEntry" name "a command name is never empty"))))
+
+(ert-deftest agent-repl-test-wire-host-list-slash-commands-unknown-entry-field-is-a-breach ()
+  "An entry field this codec does not hold is refused."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-list-slash-commands-response
+                  "{\"success\":{\"stated\":{\"catalog\":{\"commands\":[{\"name\":\"a\",\"kind\":\"skill\"}]}}}}")
+                 '("SessionCommandCatalogEntry" kind "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-host-list-slash-commands-non-string-alias-is-a-breach ()
+  "An alias that is not a string is a breach."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-list-slash-commands-response
+                  "{\"success\":{\"stated\":{\"catalog\":{\"commands\":[{\"name\":\"a\",\"aliases\":[7]}]}}}}")
+                 '("SessionCommandCatalogEntry" aliases "expected a string"))))
