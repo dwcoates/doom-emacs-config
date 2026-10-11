@@ -3563,6 +3563,12 @@ describe("the expanded-item ceiling", () => {
     expect(declarationsOf(selector)).toMatch(/max-height:\s*var\(--feed-item-max-h\)/);
   });
 
+  it("caps an expanded merge bubble a quarter short of the ceiling", () => {
+    expect(declarationsOf('.tool-card.bubble-fold[data-merge-bubble][data-expanded="true"]')).toMatch(
+      /max-height:\s*calc\(var\(--feed-item-max-h\) \* 0\.75\)/,
+    );
+  });
+
   it("never caps a response or prompt bubble's scroll box at the item ceiling", () => {
     expect(declarationsOf(".bubble > .bubble-scroll.expanded")).not.toMatch(/--feed-item-max-h/);
   });
