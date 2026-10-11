@@ -10,6 +10,7 @@ import {
 import {
   RosterLabelSchema,
   RosterMaturityKeySchema,
+  RosterRepoDivergenceSchema,
   RosterSectionHeaderSchema,
   RosterRepoSectionSchema,
   RosterTaskSectionSchema,
@@ -20,6 +21,7 @@ import { MalformedView } from "../../src/rpc/malformed.js";
 import { repoFoldKey } from "../../src/sidebar/context.js";
 import {
   drawHeadedSection,
+  drawRosterRepoDivergence,
   drawRosterSectionFold,
   drawSectionLabel,
   drawWorkspaceRoster,
@@ -1709,5 +1711,52 @@ describe("recently merged rows", () => {
       sidebarContext(),
     );
     expect(pane(drawn, "repository").querySelector(".repo-section [data-roster-row='ws-1'] .st")).not.toBeNull();
+  });
+});
+
+describe("the repository label's divergence hover", () => {
+  function labelTitle(divergence: Parameters<typeof repoSection>[0]["divergence"]): string {
+    const drawn = drawWorkspaceRoster(roster({ repos: [repoSection({ id: "repo-1", divergence })] }), sidebarContext());
+    const label = pane(drawn, "repository").querySelector<HTMLElement>(".repo-section .sb-label");
+    if (label === null) throw new Error("no repository label drawn");
+    return label.title;
+  }
+
+  it("says the daemon has not measured yet while the measure is pending", () => {
+    expect(labelTitle({ state: { case: "pending", value: {} } })).toBe("ahead/behind not measured yet");
+  });
+
+  it("draws the counts against the upstream once counted", () => {
+    expect(
+      labelTitle({
+        state: { case: "counted", value: { branch: "master", upstream: "origin/master", ahead: 2, behind: 7 } },
+      }),
+    ).toBe("master: 2 ahead, 7 behind origin/master");
+  });
+
+  it("says the branch tracks nothing when it has no upstream", () => {
+    expect(labelTitle({ state: { case: "noUpstream", value: { branch: "main" } } })).toBe("main tracks no upstream");
+  });
+
+  it("draws the failure's reason when the measure failed", () => {
+    expect(labelTitle({ state: { case: "failed", value: { reason: "fetching origin failed: offline" } } })).toBe(
+      "ahead/behind unknown: fetching origin failed: offline",
+    );
+  });
+
+  it("refuses an unset measurement arm as a malformed view", () => {
+    expect(() => drawRosterRepoDivergence(create(RosterRepoDivergenceSchema, {}), "divergence")).toThrow(MalformedView);
+  });
+
+  it("refuses a repository section with no divergence as a malformed view", () => {
+    const section = create(RosterRepoSectionSchema, {
+      key: { repository: { id: "repo-1", dir: "/repo/repo-1" } },
+      header: { label: { text: "repo-1" }, count: { workspaces: 0 } },
+      rows: { rows: [] },
+      fold: { case: "expanded", value: {} },
+    });
+    const wire = roster({ repos: [] });
+    wire.repository = { $typeName: "frontend.v1.RosterRepositoryView", sections: [section] };
+    expect(() => drawWorkspaceRoster(wire, sidebarContext())).toThrow(MalformedView);
   });
 });

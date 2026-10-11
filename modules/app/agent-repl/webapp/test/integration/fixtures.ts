@@ -2375,6 +2375,14 @@ function repositoryFold(collapsed: boolean): MessageInitShape<typeof RosterRepoS
 }
 
 /**
+ * A repository section's divergence before the daemon's first measurement
+ * (`frontend.v1.RosterRepoSection.divergence`, always set on the wire).
+ */
+const PENDING_DIVERGENCE: MessageInitShape<typeof RosterRepoSectionSchema>["divergence"] = {
+  state: { case: "pending", value: {} },
+};
+
+/**
  * The merge arms the vocabulary paints with glyphs. All carry a glyph; only
  * the ones render-colors.json declares in `colored_merge_arms` also spend a
  * color (every one does since 2026-09-28; merge_failed is turquoise).
@@ -2474,12 +2482,14 @@ export function roster(init?: {
         header: { label: { text: section.label }, count: { workspaces: section.rows.length } },
         rows: { rows: section.rows },
         fold: repositoryFold(section.collapsed === true),
+        divergence: PENDING_DIVERGENCE,
       })) ?? [
         {
           key: { repository: repositoryRef() },
           header: { label: { text: "doom" }, count: { workspaces: rows.length } },
           rows: { rows },
           fold: repositoryFold(false),
+          divergence: PENDING_DIVERGENCE,
         },
       ],
     },
