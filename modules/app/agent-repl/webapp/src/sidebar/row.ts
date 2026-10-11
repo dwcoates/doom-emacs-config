@@ -746,9 +746,13 @@ function appendDetailLine(list: HTMLElement, label: string, value: string): void
  * column's position in the band says what the age counts from.
  */
 function tickAge(host: HTMLElement, sc: SidebarContext, atMs: number): void {
-  const paint = (nowMs: number): void => {
+  tickPaint(sc, (nowMs) => {
     host.textContent = formatTickedAge(nowMs - atMs);
-  };
+  });
+}
+
+/** Run PAINT now and on every tick of the shared ticker, until the next push. */
+function tickPaint(sc: SidebarContext, paint: (nowMs: number) => void): void {
   paint(sc.ctx.ticker.now());
   sc.onDispose(sc.ctx.ticker.subscribe(paint));
 }
