@@ -3,9 +3,9 @@ package feed
 import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	"time"
 
 	"claude-repld/internal/feedid"
-	"claude-repld/internal/revealpace"
 )
 
 // The accumulation. Every one of these exists because a frame of an upserted
@@ -192,14 +192,13 @@ type proseState struct {
 	// row is the fold's own row identity, so a settled sibling's whole can retire
 	// this fragment's row when the two are the same block under divergent ids.
 	row *frontendv1.FeedId
-	// burst is the burst the fold's text is arriving in live, zero before its
-	// first text-bearing fragment: the gap from one burst's start to the next
-	// is a reveal pacing sample, and the burst's start is what each draw's
-	// reveal window is measured from (revealpace.go).
-	burst revealpace.Burst
-	// sampled records that this fold added a gap to its reveal pacing window
-	// that the window's durable record does not hold yet.
-	sampled bool
+	// firstFragmentAt is when the fold's first text-bearing fragment arrived
+	// live, zero before it: a measured block's arrival speed is taken over
+	// the time since (revealpace.go).
+	firstFragmentAt time.Time
+	// firstFragmentChars is how many characters that first fragment brought,
+	// which arrived at firstFragmentAt and so are left out of the speed.
+	firstFragmentChars int
 }
 
 // prose resolves a response's fold, creating it on first sight.

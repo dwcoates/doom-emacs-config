@@ -9,7 +9,6 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
 	"claude-repld/internal/resolve/turnfault"
-	"claude-repld/internal/revealpace"
 	"claude-repld/internal/wsm"
 )
 
@@ -64,7 +63,7 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 	}
 
 	bubble := &frontendv1.FeedResponse{}
-	pace, paced := r.paceKey(s, agent, wsm.RevealKindProse)
+	pace := r.revealSourceOf(s, agent, wsm.RevealKindProse)
 	if fold.usage != "" {
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "fold.usage != \"\""})
 		bubble.Usage = usageStamp(fold, 0)
@@ -76,7 +75,7 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 		fold.markdown = ""
 		fold.settled = false
 		fold.notice = false
-		fold.burst = revealpace.Burst{}
+		resetPacing(fold)
 		bubble.Result = &frontendv1.FeedResponse_Update{Update: &frontendv1.FeedResponseUpdate{
 			Prose: &frontendv1.FeedResponseProse{Markdown: ""},
 		}}
@@ -129,11 +128,11 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 			return nil, errNotARow
 		}
 		if state.Update.GetNewMarkdown() != "" {
-			r.observeFragment(fold, pace, paced)
+			r.observeFragment(fold, pace, state.Update.GetNewMarkdown())
 		}
 		bubble.Result = &frontendv1.FeedResponse_Update{Update: &frontendv1.FeedResponseUpdate{
-			Prose:        &frontendv1.FeedResponseProse{Markdown: fold.markdown},
-			RevealWindow: r.revealWindow(fold, pace, paced),
+			Prose:      &frontendv1.FeedResponseProse{Markdown: fold.markdown},
+			RevealPace: r.revealPace(pace),
 		}}
 	case *conversationv1.AgentResponse_Success:
 		// THE TERMINAL RESTATES THE WHOLE. Whatever the fold accumulated is
@@ -170,10 +169,10 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 				"a vendor-synthesized notice was drawn as a notice rather than as the agent's answer",
 				dlog.Context{"unit": unit, "subject": noticeSubject(notice.SynthesizedNotice)})
 		}
-		r.settlePacing(s, fold, pace, paced)
+		r.settlePacing(s, fold, pace)
 		bubble.Result = &frontendv1.FeedResponse_Success{Success: &frontendv1.FeedResponseSuccess{
-			Prose:        &frontendv1.FeedResponseProse{Markdown: fold.markdown},
-			RevealWindow: r.revealWindow(fold, pace, paced),
+			Prose:      &frontendv1.FeedResponseProse{Markdown: fold.markdown},
+			RevealPace: r.revealPace(pace),
 		}}
 	case *conversationv1.AgentResponse_Failure:
 		// The prose that landed stays drawn, marked broken. WHY it died is the
@@ -195,7 +194,7 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 		s.landStamp(fold)
 		fold.notice = false
 		r.stampSettled(fold, state.Failure.GetSettledAt().GetAtMs())
-		r.settlePacing(s, fold, pace, paced)
+		resetPacing(fold)
 		bubble.Result = &frontendv1.FeedResponse_Error{Error: &frontendv1.FeedResponseError{
 			Prose: &frontendv1.FeedResponseProse{Markdown: fold.markdown},
 		}}

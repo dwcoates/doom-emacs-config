@@ -3,9 +3,9 @@ package revealpace
 import (
 	"context"
 	"errors"
+	"math"
 	"reflect"
 	"testing"
-	"time"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/wsm"
@@ -13,13 +13,13 @@ import (
 
 // fakeStore is the durable record, in memory, with injectable failures.
 type fakeStore struct {
-	windows []wsm.RevealGapWindow
-	puts    []wsm.RevealGapWindow
+	windows []wsm.RevealSpeedWindow
+	puts    []wsm.RevealSpeedWindow
 	readErr error
 	putErr  error
 }
 
-func (f *fakeStore) PutRevealGapWindow(_ context.Context, w wsm.RevealGapWindow) error {
+func (f *fakeStore) PutRevealSpeedWindow(_ context.Context, w wsm.RevealSpeedWindow) error {
 	if f.putErr != nil {
 		return f.putErr
 	}
@@ -27,17 +27,21 @@ func (f *fakeStore) PutRevealGapWindow(_ context.Context, w wsm.RevealGapWindow)
 	return nil
 }
 
-func (f *fakeStore) RevealGapWindows(context.Context) ([]wsm.RevealGapWindow, error) {
+func (f *fakeStore) RevealSpeedWindows(context.Context) ([]wsm.RevealSpeedWindow, error) {
 	return f.windows, f.readErr
 }
 
-var prose = Key{Model: "claude-opus-5", Kind: wsm.RevealKindProse}
+var (
+	prose    = Key{Model: "claude-opus-5", Kind: wsm.RevealKindProse}
+	thinking = Key{Model: "claude-opus-5", Kind: wsm.RevealKindThinking}
+)
 
-// constant answers n gaps of ms each.
-func constant(n int, ms int64) []int64 {
-	out := make([]int64, n)
+// ramp answers n speeds 1, 2, ..., n, so the p-th percentile of a window of
+// them is the value at index n*p/100, plus one.
+func ramp(n int) []float64 {
+	out := make([]float64, n)
 	for i := range out {
-		out[i] = ms
+		out[i] = float64(i + 1)
 	}
 	return out
 }
@@ -52,6 +56,12 @@ func load(t *testing.T, store *fakeStore) (*Pacer, *dlog.TestLogger) {
 	return p, log
 }
 
+func observeAll(p *Pacer, key Key, speeds []float64) {
+	for _, s := range speeds {
+		p.Observe(key, s)
+	}
+}
+
 func hasRecord(log *dlog.TestLogger, level, operation string) (dlog.Record, bool) {
 	for _, r := range log.Records() {
 		if r.Level == level && r.Operation == operation {
@@ -61,155 +71,261 @@ func hasRecord(log *dlog.TestLogger, level, operation string) (dlog.Record, bool
 	return dlog.Record{}, false
 }
 
-func TestExpectedGapIsAbsentUntilTheWindowIsFull(t *testing.T) {
+func TestDefaultBoundsPerKind(t *testing.T) {
+	cases := []struct {
+		name string
+		kind wsm.RevealKind
+		want Bounds
+	}{
+		{name: "thinking", kind: wsm.RevealKindThinking, want: Bounds{MinCharsPerSecond: 45, MaxCharsPerSecond: 55}},
+		{name: "prose", kind: wsm.RevealKindProse, want: Bounds{MinCharsPerSecond: 49, MaxCharsPerSecond: 90}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := DefaultBounds(tc.kind)
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("DefaultBounds(%s) = %+v, want %+v", tc.kind, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestDefaultBoundsPanicsOnAnUnknownKind(t *testing.T) {
+	// Assert
+	defer func() {
+		if recover() == nil {
+			t.Fatal("DefaultBounds accepted an unknown kind")
+		}
+	}()
+
+	// Act
+	DefaultBounds("tool")
+}
+
+func TestBoundsIsTheKindsDefaultUntilEnoughBlocks(t *testing.T) {
 	// Arrange
 	p, _ := load(t, &fakeStore{})
-	for range WindowSize - 1 {
-		p.Observe(prose, 40*time.Millisecond)
-	}
+	observeAll(p, prose, ramp(MinBlocks-1))
 
 	// Act
-	_, ok := p.ExpectedGap(prose)
+	got := p.Bounds(prose)
 
 	// Assert
-	if ok {
-		t.Fatalf("ExpectedGap answered with %d gaps, want none until %d", WindowSize-1, WindowSize)
+	if want := DefaultBounds(wsm.RevealKindProse); got != want {
+		t.Fatalf("Bounds with %d blocks = %+v, want the default %+v", MinBlocks-1, got, want)
 	}
 }
 
-func TestExpectedGapOfAConstantWindowIsThatGap(t *testing.T) {
-	// Arrange
+func TestBoundsAreTheWindowsPercentilesOnceEnoughBlocks(t *testing.T) {
+	// Arrange: 1..40 shuffled into arrival order, so the percentiles come
+	// from the sorted speeds and not from the order they arrived in.
 	p, _ := load(t, &fakeStore{})
-	for range WindowSize {
-		p.Observe(prose, 40*time.Millisecond)
+	speeds := ramp(40)
+	for i, j := 0, len(speeds)-1; i < j; i, j = i+1, j-1 {
+		speeds[i], speeds[j] = speeds[j], speeds[i]
 	}
+	observeAll(p, prose, speeds)
 
 	// Act
-	got, ok := p.ExpectedGap(prose)
+	got := p.Bounds(prose)
 
-	// Assert
-	if !ok || got != 40 {
-		t.Fatalf("ExpectedGap() = %d, %v, want 40, true", got, ok)
+	// Assert: index 40*25/100 = 10 holds 11, index 40*38/100 = 15 holds 16.
+	if want := (Bounds{MinCharsPerSecond: 11, MaxCharsPerSecond: 16}); got != want {
+		t.Fatalf("Bounds = %+v, want %+v", got, want)
 	}
 }
 
-func TestExpectedGapWeighsTheNewestGapMost(t *testing.T) {
-	// Arrange: a long run of 10ms gaps, then one 1000ms gap.
+func TestBoundsRoundToWholeCharsPerSecond(t *testing.T) {
+	// Arrange: every block arrived at 44.6 chars/sec.
 	p, _ := load(t, &fakeStore{})
-	for range WindowSize - 1 {
-		p.Observe(prose, 10*time.Millisecond)
+	for range MinBlocks {
+		p.Observe(prose, 44.6)
 	}
-	p.Observe(prose, time.Second)
-	unweighted := (int64(WindowSize-1)*10 + 1000) / WindowSize
 
 	// Act
-	got, _ := p.ExpectedGap(prose)
+	got := p.Bounds(prose)
 
 	// Assert
-	if int64(got) <= unweighted {
-		t.Fatalf("ExpectedGap() = %d, want above the plain average %d", got, unweighted)
+	if want := (Bounds{MinCharsPerSecond: 45, MaxCharsPerSecond: 45}); got != want {
+		t.Fatalf("Bounds = %+v, want %+v", got, want)
 	}
 }
 
-func TestExpectedGapIsNeverBelowOneMillisecond(t *testing.T) {
-	// Arrange
+func TestBoundsAreNeverBelowOneCharPerSecond(t *testing.T) {
+	// Arrange: every block arrived at a crawl.
 	p, _ := load(t, &fakeStore{})
-	for range WindowSize {
-		p.Observe(prose, 0)
+	for range MinBlocks {
+		p.Observe(prose, 0.2)
 	}
 
 	// Act
-	got, _ := p.ExpectedGap(prose)
+	got := p.Bounds(prose)
 
 	// Assert
-	if got != 1 {
-		t.Fatalf("ExpectedGap() = %d, want 1", got)
+	if want := (Bounds{MinCharsPerSecond: 1, MaxCharsPerSecond: 1}); got != want {
+		t.Fatalf("Bounds = %+v, want %+v", got, want)
 	}
 }
 
-func TestObserveDropsTheOldestGapOnceFull(t *testing.T) {
-	// Arrange: a full window of 1000ms gaps, then a full window of 10ms ones.
+func TestObserveDropsTheOldestSpeedOnceFull(t *testing.T) {
+	// Arrange: a full window of slow blocks, then a full window of fast ones.
 	p, _ := load(t, &fakeStore{})
 	for range WindowSize {
-		p.Observe(prose, time.Second)
+		p.Observe(prose, 10)
+	}
+	for range WindowSize {
+		p.Observe(prose, 100)
 	}
 
 	// Act
-	for range WindowSize {
-		p.Observe(prose, 10*time.Millisecond)
-	}
+	got := p.Bounds(prose)
 
 	// Assert
-	if got, _ := p.ExpectedGap(prose); got != 10 {
-		t.Fatalf("ExpectedGap() = %d, want 10 once every old gap rolled out", got)
+	if want := (Bounds{MinCharsPerSecond: 100, MaxCharsPerSecond: 100}); got != want {
+		t.Fatalf("Bounds = %+v, want only the newest window %+v", got, want)
+	}
+}
+
+func TestObservePanicsOnASpeedThatIsNotPositiveAndFinite(t *testing.T) {
+	cases := []struct {
+		name  string
+		speed float64
+	}{
+		{name: "zero", speed: 0},
+		{name: "negative", speed: -3},
+		{name: "infinite", speed: math.Inf(1)},
+		{name: "NaN", speed: math.NaN()},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			p, _ := load(t, &fakeStore{})
+
+			// Assert
+			defer func() {
+				if recover() == nil {
+					t.Fatalf("Observe accepted %v", tc.speed)
+				}
+				if got := p.Bounds(prose); got != DefaultBounds(wsm.RevealKindProse) {
+					t.Fatalf("a refused speed changed the window: Bounds = %+v", got)
+				}
+			}()
+
+			// Act
+			p.Observe(prose, tc.speed)
+		})
 	}
 }
 
 func TestWindowsAreKeptPerModelAndKind(t *testing.T) {
 	// Arrange
 	p, _ := load(t, &fakeStore{})
-	thinking := Key{Model: prose.Model, Kind: wsm.RevealKindThinking}
-	other := Key{Model: "claude-sonnet-5", Kind: wsm.RevealKindProse}
-	for range WindowSize {
-		p.Observe(prose, 40*time.Millisecond)
+	for range MinBlocks {
+		p.Observe(prose, 130)
 	}
 
 	// Act
-	_, thinkingOK := p.ExpectedGap(thinking)
-	_, otherOK := p.ExpectedGap(other)
+	gotThinking := p.Bounds(thinking)
+	gotOtherModel := p.Bounds(Key{Model: "claude-haiku-4-5", Kind: wsm.RevealKindProse})
 
 	// Assert
-	if thinkingOK || otherOK {
-		t.Fatalf("another key answered from this key's window (thinking %v, other model %v)", thinkingOK, otherOK)
+	if want := DefaultBounds(wsm.RevealKindThinking); gotThinking != want {
+		t.Fatalf("thinking Bounds = %+v, want its own default %+v", gotThinking, want)
+	}
+	if want := DefaultBounds(wsm.RevealKindProse); gotOtherModel != want {
+		t.Fatalf("another model's Bounds = %+v, want its own default %+v", gotOtherModel, want)
+	}
+}
+
+func TestKindBoundsPoolsEveryModelOfTheKind(t *testing.T) {
+	// Arrange: two models, neither with enough blocks alone, enough together,
+	// and a thinking window that must stay out of the prose pool.
+	p, _ := load(t, &fakeStore{})
+	for range MinBlocks / 2 {
+		p.Observe(prose, 60)
+		p.Observe(Key{Model: "claude-haiku-4-5", Kind: wsm.RevealKindProse}, 60)
+	}
+	for range MinBlocks {
+		p.Observe(thinking, 7)
+	}
+
+	// Act
+	got := p.KindBounds(wsm.RevealKindProse)
+
+	// Assert
+	if want := (Bounds{MinCharsPerSecond: 60, MaxCharsPerSecond: 60}); got != want {
+		t.Fatalf("KindBounds = %+v, want the pooled prose %+v", got, want)
+	}
+}
+
+func TestKindBoundsIsTheKindsDefaultUntilEnoughBlocks(t *testing.T) {
+	// Arrange
+	p, _ := load(t, &fakeStore{})
+	observeAll(p, prose, ramp(MinBlocks-1))
+
+	// Act
+	got := p.KindBounds(wsm.RevealKindProse)
+
+	// Assert
+	if want := DefaultBounds(wsm.RevealKindProse); got != want {
+		t.Fatalf("KindBounds = %+v, want the default %+v", got, want)
 	}
 }
 
 func TestLoadResumesTheStoredWindows(t *testing.T) {
 	// Arrange
-	store := &fakeStore{windows: []wsm.RevealGapWindow{{Model: prose.Model, Kind: prose.Kind, GapsMs: constant(WindowSize, 55)}}}
+	store := &fakeStore{windows: []wsm.RevealSpeedWindow{{Model: prose.Model, Kind: prose.Kind, CharsPerSecond: ramp(40)}}}
 
 	// Act
-	p, _ := load(t, store)
+	p, log := load(t, store)
 
 	// Assert
-	if got, ok := p.ExpectedGap(prose); !ok || got != 55 {
-		t.Fatalf("ExpectedGap() = %d, %v, want 55, true", got, ok)
+	if want := (Bounds{MinCharsPerSecond: 11, MaxCharsPerSecond: 16}); p.Bounds(prose) != want {
+		t.Fatalf("Bounds after load = %+v, want %+v", p.Bounds(prose), want)
+	}
+	if _, ok := hasRecord(log, "info", "daemon.revealpace.loaded"); !ok {
+		t.Fatalf("no INFO load record: %v", log.Records())
 	}
 }
 
-func TestLoadKeepsOnlyTheNewestGapsOfAnOversizedWindow(t *testing.T) {
-	// Arrange: a stored window longer than WindowSize, its oldest gaps 1000ms.
-	gaps := append(constant(5, 1000), constant(WindowSize, 20)...)
-	store := &fakeStore{windows: []wsm.RevealGapWindow{{Model: prose.Model, Kind: prose.Kind, GapsMs: gaps}}}
-	p, _ := load(t, store)
+func TestLoadKeepsOnlyTheNewestSpeedsOfAnOversizedWindow(t *testing.T) {
+	// Arrange: an older build's longer window, slow first and fast last.
+	speeds := append(make([]float64, 0, 2*WindowSize), make([]float64, WindowSize)...)
+	for i := range speeds {
+		speeds[i] = 10
+	}
+	for range WindowSize {
+		speeds = append(speeds, 100)
+	}
+	store := &fakeStore{windows: []wsm.RevealSpeedWindow{{Model: prose.Model, Kind: prose.Kind, CharsPerSecond: speeds}}}
 
 	// Act
-	err := p.Persist(context.Background(), prose)
+	p, _ := load(t, store)
 
 	// Assert
-	if err != nil {
-		t.Fatalf("Persist: %v", err)
-	}
-	if !reflect.DeepEqual(store.puts[0].GapsMs, constant(WindowSize, 20)) {
-		t.Fatalf("persisted %v, want the newest %d gaps", store.puts[0].GapsMs, WindowSize)
+	if want := (Bounds{MinCharsPerSecond: 100, MaxCharsPerSecond: 100}); p.Bounds(prose) != want {
+		t.Fatalf("Bounds = %+v, want only the newest %d speeds %+v", p.Bounds(prose), WindowSize, want)
 	}
 }
 
 func TestLoadFailsWhenTheStoreCannotBeRead(t *testing.T) {
 	// Arrange
 	log := dlog.NewTestLogger()
-	cause := errors.New("disk gone")
+	store := &fakeStore{readErr: errors.New("disk gone")}
 
 	// Act
-	p, err := Load(context.Background(), &fakeStore{readErr: cause}, log)
+	p, err := Load(context.Background(), store, log)
 
 	// Assert
-	if !errors.Is(err, cause) || p != nil {
-		t.Fatalf("Load() = %v, %v, want nil and the store's error", p, err)
+	if err == nil || p != nil {
+		t.Fatalf("Load = (%v, %v), want a failure and no pacer", p, err)
 	}
-	record, ok := hasRecord(log, "error", "daemon.revealpace.load")
-	if !ok || record.Context["error"] != cause.Error() {
-		t.Fatalf("no ERROR daemon.revealpace.load naming the cause: %v", log.Records())
+	r, ok := hasRecord(log, "error", "daemon.revealpace.load")
+	if !ok || r.Context["error"] != "disk gone" {
+		t.Fatalf("no ERROR load record carrying the cause: %v", log.Records())
 	}
 }
 
@@ -217,8 +333,8 @@ func TestPersistWritesTheKeysWindowOldestFirst(t *testing.T) {
 	// Arrange
 	store := &fakeStore{}
 	p, _ := load(t, store)
-	p.Observe(prose, 10*time.Millisecond)
-	p.Observe(prose, 20*time.Millisecond)
+	p.Observe(prose, 10)
+	p.Observe(prose, 20)
 
 	// Act
 	err := p.Persist(context.Background(), prose)
@@ -227,7 +343,7 @@ func TestPersistWritesTheKeysWindowOldestFirst(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Persist: %v", err)
 	}
-	want := []wsm.RevealGapWindow{{Model: prose.Model, Kind: prose.Kind, GapsMs: []int64{10, 20}}}
+	want := []wsm.RevealSpeedWindow{{Model: prose.Model, Kind: prose.Kind, CharsPerSecond: []float64{10, 20}}}
 	if !reflect.DeepEqual(store.puts, want) {
 		t.Fatalf("puts = %+v, want %+v", store.puts, want)
 	}
@@ -235,124 +351,19 @@ func TestPersistWritesTheKeysWindowOldestFirst(t *testing.T) {
 
 func TestPersistSurfacesAndLogsAStoreFailure(t *testing.T) {
 	// Arrange
-	cause := errors.New("disk full")
-	store := &fakeStore{}
+	store := &fakeStore{putErr: errors.New("disk full")}
 	p, log := load(t, store)
-	p.Observe(prose, 10*time.Millisecond)
-	store.putErr = cause
+	p.Observe(prose, 10)
 
 	// Act
 	err := p.Persist(context.Background(), prose)
 
 	// Assert
-	if !errors.Is(err, cause) {
-		t.Fatalf("Persist() error = %v, want the store's error", err)
+	if err == nil {
+		t.Fatal("Persist swallowed the store's failure")
 	}
-	record, ok := hasRecord(log, "error", "daemon.revealpace.persist")
-	if !ok || record.Context["model"] != prose.Model || record.Context["kind"] != string(prose.Kind) || record.Context["error"] != cause.Error() {
-		t.Fatalf("no ERROR daemon.revealpace.persist naming the key and cause: %v", log.Records())
-	}
-}
-
-func TestExpectedGapLeansTowardTheLongGaps(t *testing.T) {
-	// Arrange: lone fragments 50ms apart alternating with 450ms pauses, whose
-	// plain average is 250ms.
-	p, _ := load(t, &fakeStore{})
-	for i := range WindowSize {
-		gap := 50 * time.Millisecond
-		if i%2 == 0 {
-			gap = 450 * time.Millisecond
-		}
-		p.Observe(prose, gap)
-	}
-
-	// Act
-	got, _ := p.ExpectedGap(prose)
-
-	// Assert
-	if got <= 350 {
-		t.Fatalf("ExpectedGap() = %d, want above 350: a window that stops before the long pause ends stalls the type-out", got)
-	}
-}
-
-// at answers the instant ms milliseconds after an arbitrary origin.
-func at(ms int64) time.Time {
-	return time.Date(2026, 10, 8, 15, 31, 25, 0, time.UTC).Add(time.Duration(ms) * time.Millisecond)
-}
-
-func TestBurstArrive(t *testing.T) {
-	cases := []struct {
-		name      string
-		earlier   []int64
-		arriveMs  int64
-		wantGapMs int64
-		wantOK    bool
-	}{
-		{name: "a block's first fragment only starts the clock", earlier: nil, arriveMs: 5_000},
-		{name: "a fragment within the threshold joins the burst", earlier: []int64{1_000}, arriveMs: 1_003},
-		{name: "a fragment exactly at the threshold joins the burst", earlier: []int64{1_000}, arriveMs: 1_020},
-		{name: "a fragment past the threshold starts a burst and samples from the last burst's start", earlier: []int64{1_000, 1_003, 1_010}, arriveMs: 1_530, wantGapMs: 530, wantOK: true},
-		{name: "a burst longer than the threshold stays one burst while each step is within it", earlier: []int64{1_000, 1_015, 1_030, 1_045}, arriveMs: 1_060},
-		{name: "a long chained burst's gap is measured from its start", earlier: []int64{1_000, 1_015, 1_030, 1_045}, arriveMs: 1_500, wantGapMs: 500, wantOK: true},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange
-			var b Burst
-			for _, ms := range tc.earlier {
-				b.Arrive(at(ms))
-			}
-
-			// Act
-			gap, ok := b.Arrive(at(tc.arriveMs))
-
-			// Assert
-			if ok != tc.wantOK || gap.Milliseconds() != tc.wantGapMs {
-				t.Fatalf("Arrive() = %v, %v, want %dms, %v", gap, ok, tc.wantGapMs, tc.wantOK)
-			}
-		})
-	}
-}
-
-// every answers the instants from through to, step milliseconds apart.
-func every(from, to, step int64) []int64 {
-	var out []int64
-	for ms := from; ms <= to; ms += step {
-		out = append(out, ms)
-	}
-	return out
-}
-
-func TestBurstWindow(t *testing.T) {
-	const expected = 500
-	cases := []struct {
-		name    string
-		arrived []int64
-		drawMs  int64
-		want    uint32
-	}{
-		{name: "a block no fragment reached gets the full window", arrived: nil, drawMs: 1_000, want: expected},
-		{name: "a burst's first fragment gets the full window", arrived: []int64{1_000}, drawMs: 1_000, want: expected},
-		{name: "a later fragment of the burst gets what is left of the burst's window", arrived: []int64{1_000, 1_003, 1_010}, drawMs: 1_010, want: expected - 10},
-		{name: "a draw soon after the burst keeps the burst's deadline", arrived: []int64{1_000, 1_010}, drawMs: 1_030, want: expected - 30},
-		{name: "a draw after a pause past the threshold gets the full window", arrived: []int64{1_000, 1_010}, drawMs: 1_031, want: expected},
-		{name: "a burst outlasting its window gets the floor", arrived: every(1_000, 1_600, 20), drawMs: 1_600, want: 1},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange
-			var b Burst
-			for _, ms := range tc.arrived {
-				b.Arrive(at(ms))
-			}
-
-			// Act
-			got := b.Window(expected, at(tc.drawMs))
-
-			// Assert
-			if got != tc.want {
-				t.Fatalf("Window() = %d, want %d", got, tc.want)
-			}
-		})
+	r, ok := hasRecord(log, "error", "daemon.revealpace.persist")
+	if !ok || r.Context["error"] != "disk full" || r.Context["model"] != prose.Model || r.Context["kind"] != string(prose.Kind) {
+		t.Fatalf("no ERROR persist record carrying the key and cause: %v", log.Records())
 	}
 }
