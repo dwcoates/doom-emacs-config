@@ -14,7 +14,8 @@ import (
 // tab. A tab is withheld, not dropped, when the user hid its workspace or its
 // repository's section is collapsed, so a client cycling from a withheld
 // current workspace still knows its neighbours. A merged workspace files under
-// recently merged whatever its hidden flag, and its tab is drawn.
+// recently merged whatever its hidden flag, so only its repository's fold can
+// withhold its tab, exactly as its merged group follows that fold.
 func (r *resolver) tabBar() *frontendv1.RosterTabBar {
 	folded := map[ids.RepoID]bool{}
 	for _, repo := range r.state.reg.Repositories {
@@ -29,7 +30,7 @@ func (r *resolver) tabBar() *frontendv1.RosterTabBar {
 		switch {
 		case ws.MergedAt == nil && ws.Hidden:
 			tab.Visibility = &frontendv1.RosterTab_WithheldHidden{WithheldHidden: &frontendv1.RosterTabWithheldHidden{}}
-		case ws.MergedAt == nil && folded[ws.Repo]:
+		case folded[ws.Repo]:
 			tab.Visibility = &frontendv1.RosterTab_WithheldCollapsed{WithheldCollapsed: &frontendv1.RosterTabWithheldCollapsed{}}
 		default:
 			tab.Visibility = &frontendv1.RosterTab_Drawn{Drawn: &frontendv1.RosterTabDrawn{}}

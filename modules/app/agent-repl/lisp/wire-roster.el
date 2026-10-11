@@ -1147,6 +1147,60 @@ name, which is not unique."
   "Decode `WorkspaceRoster''s `hidden' field VALUE."
   (agent-repl-wire-decode-roster-hidden-section value))
 
+(defun agent-repl-wire-decode-roster-tab-drawn (value)
+  "Decode VALUE as the empty message `RosterTabDrawn'."
+  (agent-repl-wire--decode-empty "RosterTabDrawn" value))
+
+(defun agent-repl-wire-decode-roster-tab-withheld-collapsed (value)
+  "Decode VALUE as the empty message `RosterTabWithheldCollapsed'."
+  (agent-repl-wire--decode-empty "RosterTabWithheldCollapsed" value))
+
+(defun agent-repl-wire-decode-roster-tab-withheld-hidden (value)
+  "Decode VALUE as the empty message `RosterTabWithheldHidden'."
+  (agent-repl-wire--decode-empty "RosterTabWithheldHidden" value))
+
+(defun agent-repl-wire-decode-roster-tab-workspace (value)
+  "Decode `RosterTab''s `workspace' field VALUE."
+  (agent-repl-wire-decode-workspace-ref value))
+
+(defun agent-repl-wire-decode-roster-tab (value)
+  "Decode VALUE as `RosterTab', a plist `(:workspace REF :visibility ARM)'.
+The arm is `:drawn', `:withheld-collapsed' or `:withheld-hidden'; only a
+drawn tab takes a number and a navigation stop."
+  (let ((object (agent-repl-wire--object "RosterTab" value)))
+    (agent-repl-wire--check-keys
+     "RosterTab" object '(workspace drawn withheldCollapsed withheldHidden))
+    (agent-repl-wire--decoded
+     "RosterTab"
+     (list :workspace (agent-repl-wire--decode-message
+                       "RosterTab" 'workspace object
+                       #'agent-repl-wire-decode-roster-tab-workspace)
+           :visibility (agent-repl-wire--decode-oneof
+                        "RosterTab" 'visibility object
+                        '((drawn :drawn agent-repl-wire-decode-roster-tab-drawn)
+                          (withheldCollapsed :withheld-collapsed agent-repl-wire-decode-roster-tab-withheld-collapsed)
+                          (withheldHidden :withheld-hidden agent-repl-wire-decode-roster-tab-withheld-hidden)))))))
+
+(defun agent-repl-wire-decode-roster-tab-bar-tabs (value)
+  "Decode one of `RosterTabBar''s `tabs' VALUE."
+  (agent-repl-wire-decode-roster-tab value))
+
+(defun agent-repl-wire-decode-roster-tab-bar (value)
+  "Decode VALUE as `RosterTabBar', a plist `(:tabs TABS)'.
+Every open workspace in registry order, first tab first; withheld tabs
+stay in the list."
+  (let ((object (agent-repl-wire--object "RosterTabBar" value)))
+    (agent-repl-wire--check-keys "RosterTabBar" object '(tabs))
+    (agent-repl-wire--decoded
+     "RosterTabBar"
+     (list :tabs (agent-repl-wire--decode-repeated
+                  "RosterTabBar" 'tabs object
+                  #'agent-repl-wire-decode-roster-tab-bar-tabs)))))
+
+(defun agent-repl-wire-decode-workspace-roster-tab-bar (value)
+  "Decode `WorkspaceRoster''s `tab_bar' field VALUE."
+  (agent-repl-wire-decode-roster-tab-bar value))
+
 (defun agent-repl-wire-decode-workspace-roster-current (value)
   "Decode `WorkspaceRoster''s optional `current' field VALUE."
   (agent-repl-wire-decode-roster-current-workspace value))
@@ -1175,13 +1229,14 @@ THE ARM IS THE GROUPING every page shows; it is never unset."
 (defun agent-repl-wire-decode-workspace-roster (value)
   "Decode VALUE as `WorkspaceRoster'.
 Returns `(:repository V :task V :maturity V :hidden H :recently-merged S
-:current C-or-nil :shown ARM)'.  EVERY grouping arrives fully resolved:
+:tab-bar B :current C-or-nil :shown ARM)'.  EVERY grouping arrives fully
+resolved:
 which one is drawn is the daemon's view state (`shown'), a selection
 between resolved views, never a derivation."
   (let ((object (agent-repl-wire--object "WorkspaceRoster" value)))
     (agent-repl-wire--check-keys
      "WorkspaceRoster" object
-     '(repository task maturity hidden recentlyMerged current
+     '(repository task maturity hidden recentlyMerged tabBar current
                   shownRepository shownTask shownMaturity))
     (agent-repl-wire--decoded
      "WorkspaceRoster"
@@ -1200,6 +1255,9 @@ between resolved views, never a derivation."
            :recently-merged (agent-repl-wire--decode-message
                              "WorkspaceRoster" 'recentlyMerged object
                              #'agent-repl-wire-decode-workspace-roster-recently-merged)
+           :tab-bar (agent-repl-wire--decode-message
+                     "WorkspaceRoster" 'tabBar object
+                     #'agent-repl-wire-decode-workspace-roster-tab-bar)
            :current (agent-repl-wire--decode-optional-message
                      "WorkspaceRoster" 'current object
                      #'agent-repl-wire-decode-workspace-roster-current)

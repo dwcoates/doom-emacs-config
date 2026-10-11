@@ -1279,6 +1279,35 @@ headers, which a caller must not paper over."
 NAME is the canonical spelling, e.g. \"Content-Type\"."
   (alist-get (intern name) (agent-repl-itest--call-headers daemon method index)))
 
+;;;; ---- Roster tab bars ----
+
+(defun agent-repl-itest--with-tab-bar (roster)
+  "Return the protojson ROSTER with a `tabBar', unless it already carries one.
+The daemon always sends the tab bar; a fixture that states no order of its
+own gets the open rows in the order it lists them -- each repository
+section depth-first, then the hidden rows, then each merged group's rows --
+with a collapsed section's or merged group's tabs and every hidden row's
+withheld, exactly as the daemon withholds them.  A fixture testing an order of its own sets
+`tabBar' itself."
+  (if (assq 'tabBar roster)
+      roster
+    (let (tabs)
+      (cl-labels ((walk (rows arm)
+                    (seq-doseq (row rows)
+                      (unless (eq (alist-get 'closed (alist-get 'closed row)) t)
+                        (push `((workspace . ,(alist-get 'workspace (alist-get 'workspace row)))
+                                (,arm . ()))
+                              tabs))
+                      (walk (or (alist-get 'children row) []) arm))))
+        (seq-doseq (section (or (alist-get 'sections (alist-get 'repository roster)) []))
+          (walk (or (alist-get 'rows (alist-get 'rows section)) [])
+                (if (assq 'collapsed section) 'withheldCollapsed 'drawn)))
+        (walk (or (alist-get 'rows (alist-get 'rows (alist-get 'hidden roster))) []) 'withheldHidden)
+        (seq-doseq (group (or (alist-get 'groups (alist-get 'recentlyMerged roster)) []))
+          (walk (or (alist-get 'rows (alist-get 'rows group)) [])
+                (if (assq 'repositoryCollapsed group) 'withheldCollapsed 'drawn))))
+      (append roster `((tabBar . ((tabs . ,(vconcat (nreverse tabs))))))))))
+
 (provide 'test-integration-helpers)
 
 ;;; test-integration-helpers.el ends here
