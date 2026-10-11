@@ -2,7 +2,9 @@ package server
 
 import (
 	"context"
-	"net/http"
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -32,7 +34,7 @@ func TestNewRefusesAMissingDependency(t *testing.T) {
 func TestNewRefusesAMissingRetarget(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
-	deps := Deps{DB: h.DB, Prompts: h.Prompts, Queue: h.Queue, Verbs: h.Verbs}
+	deps := h.withoutDep(func(d *Deps) { d.Retarget = nil })
 
 	// Act.
 	_, err := New(deps)
@@ -49,13 +51,7 @@ func TestNewRefusesAMissingRetarget(t *testing.T) {
 func TestNewRefusesMissingLoudFaults(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
-	deps := Deps{
-		DB: h.DB, Prompts: h.Prompts, Queue: h.Queue, Verbs: h.Verbs, Retarget: h.Retarget, Merge: h.Merge,
-		Drain: h.Drain, Rollout: h.Rollout, Deploy: h.Deployer, Health: h.Health, Login: h.Login,
-		Ownership: h.Ownership, SuccessorAddress: func() string { return "" },
-		Feed: h.Feed, Footer: h.Footer, Topbar: h.Topbar, Sidebar: h.Sidebar,
-		WebappDist: h.WebappDist, ImageOrigin: http.NotFoundHandler(), Log: h.Surfaces,
-	}
+	deps := h.withoutDep(func(d *Deps) { d.LoudFaults = nil })
 
 	// Act.
 	_, err := New(deps)
@@ -71,20 +67,14 @@ func TestNewRefusesMissingLoudFaults(t *testing.T) {
 func TestNewRefusesAMissingWebappDist(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
-	deps := Deps{
-		DB: h.DB, Prompts: h.Prompts, Queue: h.Queue, Verbs: h.Verbs, Retarget: h.Retarget, Merge: h.Merge,
-		Drain: h.Drain, Rollout: h.Rollout, Health: h.Health, Login: h.Login,
-		Ownership: h.Ownership, SuccessorAddress: func() string { return "" },
-		Feed: h.Feed, Footer: h.Footer, Topbar: h.Topbar, Sidebar: h.Sidebar,
-		LoudFaults: &h.LoudFaults, Focus: h.Focus, Log: h.Surfaces,
-	}
+	deps := h.withoutDep(func(d *Deps) { d.WebappDist = "" })
 
 	// Act.
 	_, err := New(deps)
 
 	// Assert.
-	if err == nil {
-		t.Fatal("New accepted a Deps with no webapp dist directory")
+	if err == nil || !strings.Contains(err.Error(), "the webapp dist directory") {
+		t.Fatalf("New = %v, want the refusal naming the webapp dist directory", err)
 	}
 }
 
@@ -321,5 +311,56 @@ func TestNewRefusesAMissingClassifierPrompt(t *testing.T) {
 	// Assert.
 	if err == nil || !strings.Contains(err.Error(), "the classifier prompt updater") {
 		t.Fatalf("New = %v, want the refusal naming the classifier prompt updater", err)
+	}
+}
+
+// TestWithoutDepStripsOnlyTheOneDependency pins the helper every New refusal
+// test shares: the stripped copy differs from the complete set in exactly the
+// one field, and the harness's own set is untouched.
+func TestWithoutDepStripsOnlyTheOneDependency(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	deps := h.withoutDep(func(d *Deps) { d.Retarget = nil })
+
+	// Assert.
+	if deps.Retarget != nil || h.Deps.Retarget == nil {
+		t.Fatalf("stripped retarget = %v, harness retarget = %v; want only the copy stripped", deps.Retarget, h.Deps.Retarget)
+	}
+	if deps.DB == nil || deps.WebappDist != h.Deps.WebappDist {
+		t.Fatal("withoutDep stripped more than the one dependency")
+	}
+}
+
+// TestNoTestHandBuildsTheSurfacesDeps fails a test that spells its own Deps
+// literal instead of stripping the harness's complete set: a hand-built set
+// passes or fails on New's check ORDER rather than on the dependency it names.
+func TestNoTestHandBuildsTheSurfacesDeps(t *testing.T) {
+	// Arrange.
+	handBuilt := regexp.MustCompile(`(:= |New\()Deps\{[^}]`)
+	files, err := filepath.Glob("*_test.go")
+	if err != nil {
+		t.Fatalf("glob: %v", err)
+	}
+	var offenders []string
+
+	// Act.
+	for _, file := range files {
+		if file == "fakes_test.go" {
+			continue
+		}
+		raw, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatalf("read %s: %v", file, err)
+		}
+		if handBuilt.MatchString(string(raw)) {
+			offenders = append(offenders, file)
+		}
+	}
+
+	// Assert.
+	if len(offenders) != 0 {
+		t.Fatalf("hand-built Deps literals in %v; strip the harness's set with withoutDep", offenders)
 	}
 }
