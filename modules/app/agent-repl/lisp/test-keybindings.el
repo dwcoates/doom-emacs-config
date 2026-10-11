@@ -84,6 +84,10 @@
   "The ONE one-shot command exists: there is no finish to choose between."
   (should (commandp 'agent-repl-create-oneshot)))
 
+(ert-deftest agent-repl-test-keybindings-help-workspace-command-is-defined ()
+  "The SPC o h help-workspace command exists."
+  (should (commandp 'agent-repl-create-help-workspace)))
+
 (ert-deftest agent-repl-test-keybindings-oneshot-finish-commands-are-gone ()
   "The per-finish one-shot commands died with the finish choice."
   (dolist (cmd '(agent-repl-create-oneshot-self-merge
