@@ -1163,8 +1163,8 @@ type harness struct {
 	ChessBoards      *fakeChessSquares
 	// SlashCommands is the real catalog table, which a test feeds directly.
 	SlashCommands *commandcatalog.Catalogs
-	Surfaces         *fakeSurfaces
-	WebappDist       string
+	Surfaces      *fakeSurfaces
+	WebappDist    string
 }
 
 // option customizes a harness before it is built.

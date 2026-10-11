@@ -6,16 +6,9 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	"google.golang.org/protobuf/proto"
 
+	"claude-repld/internal/commandcatalog/catalogtest"
 	"claude-repld/internal/ids"
 )
-
-func catalogOf(names ...string) *conversationv1.SessionCommandCatalog {
-	catalog := &conversationv1.SessionCommandCatalog{}
-	for _, name := range names {
-		catalog.Commands = append(catalog.Commands, &conversationv1.SessionCommandCatalogEntry{Name: name})
-	}
-	return catalog
-}
 
 func TestCatalog(t *testing.T) {
 	tests := []struct {
@@ -35,21 +28,21 @@ func TestCatalog(t *testing.T) {
 			name:      "a stated catalog is answered",
 			statedTo:  map[ids.WorkspaceID][][]string{"ws-1": {{"merge-queue", "compact"}}},
 			ask:       "ws-1",
-			want:      catalogOf("merge-queue", "compact"),
+			want:      catalogtest.Named("merge-queue", "compact"),
 			wantKnown: true,
 		},
 		{
 			name:      "a later statement replaces the earlier one whole",
 			statedTo:  map[ids.WorkspaceID][][]string{"ws-1": {{"compact"}, {"new-skill"}}},
 			ask:       "ws-1",
-			want:      catalogOf("new-skill"),
+			want:      catalogtest.Named("new-skill"),
 			wantKnown: true,
 		},
 		{
 			name:      "an empty catalog is a known answer",
 			statedTo:  map[ids.WorkspaceID][][]string{"ws-1": {{}}},
 			ask:       "ws-1",
-			want:      catalogOf(),
+			want:      catalogtest.Named(),
 			wantKnown: true,
 		},
 		{
@@ -65,7 +58,7 @@ func TestCatalog(t *testing.T) {
 			catalogs := New()
 			for ws, statements := range tt.statedTo {
 				for _, names := range statements {
-					catalogs.OnCommandCatalog(ws, catalogOf(names...))
+					catalogs.OnCommandCatalog(ws, catalogtest.Named(names...))
 				}
 			}
 
