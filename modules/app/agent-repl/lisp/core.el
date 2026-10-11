@@ -4426,4 +4426,29 @@ under `emacs -Q', where Evil is absent."
       (dolist (binding agent-repl-feed-zoom-keys)
         (evil-define-key* state map (kbd (car binding)) (cdr binding))))))
 
+;;;; ---- Keymaps a reload rebuilds ------------------------------------------
+
+;; A keymap built inside `(defvar MAP (let ...))' is built ONCE per Emacs:
+;; `defvar' skips its initializer when MAP is already bound, so a hot reload
+;; leaves the live keymap as the FIRST load built it and every chord added
+;; since is silently absent (observed 2026-10-11: `M-0' still ran Doom's
+;; `+workspace/switch-to-final' after the module that binds it reloaded).
+;; Refilling the map IN PLACE on every load makes the live map equal the
+;; source by construction.  In place rather than a new keymap, because
+;; `minor-mode-map-alist' and every buffer's `use-local-map' hold the keymap
+;; OBJECT, not the variable.
+
+(defun agent-repl-refill-keymap (map fill)
+  "Empty MAP in place, keeping its parent, then call FILL with MAP.
+Called at load time beside `(defvar MAP (make-sparse-keymap))', so every
+load, reloads included, rebuilds MAP from the source FILL is.  A binding
+removed from FILL is gone after the reload, not lingering from an earlier
+load.  Returns MAP."
+  (cl-assert (keymapp map) nil "agent-repl-refill-keymap: not a keymap: %S" map)
+  (let ((parent (keymap-parent map)))
+    (setcdr map nil)
+    (set-keymap-parent map parent))
+  (funcall fill map)
+  map)
+
 (agent-repl--assert-heartbeat-armed-when-owners-load)

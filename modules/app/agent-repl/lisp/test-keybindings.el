@@ -319,6 +319,19 @@ walked for KEY followed by its #\\='COMMAND."
           (should (eq (key-binding (kbd "M-0")) 'agent-repl-switch-to-last-workspace)))
       (use-global-map saved))))
 
+(ert-deftest agent-repl-test-keybindings-reload-rebuilds-the-live-numerals-map ()
+  "Reloading keybindings.el puts `M-0' back on the SAME live keymap object.
+A map built inside its `defvar' kept the first load's chords forever, so
+`M-0', added after Emacs started, never reached the running map."
+  ;; Arrange
+  (let ((live agent-repl-workspace-numerals-mode-map))
+    (define-key live (kbd "M-0") nil)
+    ;; Act
+    (load agent-repl-test-keybindings--file nil t)
+    ;; Assert
+    (should (eq agent-repl-workspace-numerals-mode-map live))
+    (should (eq (lookup-key live (kbd "M-0")) 'agent-repl-switch-to-last-workspace))))
+
 ;;;; ---- The helpers a binding needs ----
 
 (ert-deftest agent-repl-test-keybindings-read-known-workspace-defaults-to-current ()
