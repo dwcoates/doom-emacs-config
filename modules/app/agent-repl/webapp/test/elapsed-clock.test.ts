@@ -162,6 +162,17 @@ describe("reservedTickingClock", () => {
   });
 });
 
+describe("the clocks share one ticking builder", () => {
+  it("subscribes the shared clock in exactly one place in elapsed-clock.ts", () => {
+    // Arrange -- a hand-rolled clock would take a second subscription of its own.
+    const text = readFileSync(path.join(here, "..", "src", "elapsed-clock.ts"), "utf8");
+    // Act
+    const subscriptions = text.match(/\btick\(el, ticker,/g) ?? [];
+    // Assert
+    expect(subscriptions).toHaveLength(1);
+  });
+});
+
 // EVERY CARD HEAD'S CLOCK IS RESERVED: a head that built its clock with the
 // unreserved builders would slide its neighbors on every tick again.
 describe("the card heads' clocks share the reserved builders", () => {
