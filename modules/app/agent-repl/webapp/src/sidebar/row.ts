@@ -32,6 +32,7 @@ import type {
   RosterRowCurrent,
   RosterRowDetail,
   RosterRowDetailBranch,
+  RosterRowDetailCommits,
   RosterRowDetailParentBranch,
   RosterRowDetailSummary,
   RosterRowName,
@@ -192,9 +193,8 @@ export function drawRosterRow(
   });
 
   // A RECENTLY-MERGED ROW DRAWS PLAIN (owner request, 2026-10-02): no status
-  // dot, and its name in the grey a viewed workspace's wears. The dot is the
-  // detail panel's pointer trigger, so such a row opens that panel by keyboard
-  // focus alone.
+  // dot, and its name in the grey a viewed workspace's wears. With no dot, its
+  // NAME is the detail panel's pointer trigger (owner request, 2026-10-11).
   let statusMark: HTMLElement | null = null;
   if (!merged) {
     statusMark = drawStatusMark(status.case, `${path}.status`);
@@ -263,7 +263,7 @@ export function drawRosterRow(
   );
   // AFTER the panel is in the tree: the hover wiring listens on the panel too,
   // so the pointer can travel from the row into it without it closing.
-  installHoverPanel(ws, line, statusMark, sc, workspace.id);
+  installHoverPanel(ws, line, statusMark ?? label, sc, workspace.id);
 
   const visibleChildren = expandVisibleRows(u.children, `${path}.children`);
   if (visibleChildren.length > 0) {
@@ -433,7 +433,7 @@ export function drawRosterRowWhenMerged(u: RosterRowWhenMerged, path: string): n
 }
 
 /**
- * The detail panel: three lines, each PRESENT OR ABSENT by message presence.
+ * The detail panel: its lines, each PRESENT OR ABSENT by message presence.
  *
  * An absent line is OMITTED, never drawn blank — which is why each field is
  * checked for presence rather than for a non-empty string. The panel itself is
@@ -453,6 +453,9 @@ export function drawRosterRowDetail(u: RosterRowDetail, path: string): HTMLEleme
       drawRosterRowDetailParentBranch(u.parentBranch, `${path}.parent_branch`),
     );
   }
+  if (u.commits !== undefined) {
+    appendDetailLine(list, "commits", String(drawRosterRowDetailCommits(u.commits, `${path}.commits`)));
+  }
   if (list.childElementCount > 0) detail.appendChild(list);
   if (u.summary !== undefined) {
     const summary = document.createElement("p");
@@ -466,6 +469,7 @@ export function drawRosterRowDetail(u: RosterRowDetail, path: string): HTMLEleme
       path,
       branch: u.branch !== undefined,
       parent_branch: u.parentBranch !== undefined,
+      commits: u.commits !== undefined,
       summary: u.summary !== undefined,
     },
   });
@@ -485,6 +489,15 @@ export function drawRosterRowDetailParentBranch(
 ): string {
   void path;
   return u.name;
+}
+
+/**
+ * How many commits the workspace's branch holds beyond its merge-base with
+ * the branch it was cut from; on a merged row, the commits its merge landed.
+ */
+export function drawRosterRowDetailCommits(u: RosterRowDetailCommits, path: string): number {
+  void path;
+  return u.count;
 }
 
 /** The workspace's last prompt summary, in its own voice. */
@@ -537,9 +550,11 @@ export function drawStatusMark(arm: RosterStatusCase, path: string): HTMLElement
  * page that opened it, never the daemon's view state (owner ruling,
  * 2026-10-06).
  *
- * THE POINTER'S TRIGGER IS THE STATUS DOT ALONE (owner request, 2026-10-02):
- * hovering the rest of the row opens nothing, and the pointer leaving the dot
- * for the row closes the panel as it does for anywhere else.
+ * THE POINTER'S TRIGGER IS ONE ELEMENT OF THE ROW: the status dot (owner
+ * request, 2026-10-02), or, on a recently-merged row, which draws no dot, the
+ * name (owner request, 2026-10-11). Hovering the rest of the row opens
+ * nothing, and the pointer leaving the trigger for the row closes the panel as
+ * it does for anywhere else.
  *
  * The keyboard gets the same panel through `focusin`/`focusout`, without the
  * intent delay — a focus move is deliberate in a way a pointer's path is not.
@@ -550,7 +565,7 @@ export const HOVER_CLOSE_GRACE_MS = 120;
 function installHoverPanel(
   ws: HTMLElement,
   line: HTMLElement,
-  dot: HTMLElement | null,
+  trigger: HTMLElement,
   sc: SidebarContext,
   workspaceId: string,
 ): void {
@@ -620,13 +635,12 @@ function installHoverPanel(
     }, HOVER_CLOSE_GRACE_MS);
   };
 
-  // A row with no dot (a recently-merged one) has no pointer trigger.
-  dot?.addEventListener("mouseenter", () => {
+  trigger.addEventListener("mouseenter", () => {
     pointerOverRow = true;
     if (ws.classList.contains("open")) cancelTimers();
     else scheduleOpen();
   });
-  dot?.addEventListener("mouseleave", () => {
+  trigger.addEventListener("mouseleave", () => {
     pointerOverRow = false;
     scheduleClose();
   });
