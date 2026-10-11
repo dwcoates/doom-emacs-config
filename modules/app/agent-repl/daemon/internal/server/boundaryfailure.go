@@ -2,9 +2,9 @@ package server
 
 import "connectrpc.com/connect"
 
-// boundaryFailure is the ONE answer every generated rpc wrapper gives when
-// beginRequest could not bind the request's scope. It is spelled once so the
-// fifty-nine wrappers in requestlog_server.go cannot drift apart on it.
+// boundaryFailure is the ONE answer every rpc's boundary gives when
+// beginRequest could not bind the request's scope. The two shared boundaries
+// in requestlog_server.go (serveUnary, serveStream) are its only callers.
 //
 // A request whose own context ended is answered CANCELED: the caller left, and
 // calling that an internal failure would tell it the daemon broke.
