@@ -78,6 +78,15 @@ export function separationBoundsFeed(row: FeedRow): boolean {
 }
 
 /**
+ * Whether this row is a CLEAR: the divider the feed's history ends at. Nothing
+ * survived a clear, so the daemon never serves a row above it and never walks
+ * back past it (owner ruling, 2026-10-10) — a feed holding one is at its start.
+ */
+export function separationEndsHistory(row: FeedRow): boolean {
+  return row.row.case === "separation" && row.row.value.kind.case === "cleared";
+}
+
+/**
  * The divider.
  *
  * `tokens` is set on the CONTEXT arms only — every cut has one, even a clear
