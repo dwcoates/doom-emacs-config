@@ -40,6 +40,7 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	"agentrepl/protohelpers/rosterwalk"
 
 	"connectrpc.com/connect"
 
@@ -292,21 +293,8 @@ func rosterHasRefID(r *frontendv1.WorkspaceRoster, id string) bool {
 }
 
 func walkRosterRows(r *frontendv1.WorkspaceRoster, visit func(*frontendv1.RosterRow)) {
-	var walk func(rows []*frontendv1.RosterRow)
-	walk = func(rows []*frontendv1.RosterRow) {
-		for _, row := range rows {
-			visit(row)
-			walk(row.GetChildren())
-		}
-	}
-	for _, s := range r.GetRepository().GetSections() {
-		walk(s.GetRows().GetRows())
-	}
-	for _, s := range r.GetTask().GetSections() {
-		walk(s.GetRows().GetRows())
-	}
-	for _, g := range r.GetRecentlyMerged().GetGroups() {
-		walk(g.GetRows().GetRows())
+	for _, row := range rosterwalk.AllRows(r) {
+		visit(row)
 	}
 }
 
