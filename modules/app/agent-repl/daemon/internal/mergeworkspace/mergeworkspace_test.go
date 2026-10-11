@@ -3,6 +3,7 @@ package mergeworkspace
 import (
 	"context"
 	"errors"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -388,5 +389,18 @@ func TestRunSweepsAtOnceAndOnEveryTick(t *testing.T) {
 	// Assert: removed once, and the second sweep found nothing to do.
 	if len(f.workspaces.nuked) != 1 {
 		t.Fatalf("nuked %v, want the idle workspace removed once", f.workspaces.nuked)
+	}
+}
+
+func TestHandbackKeyIsTheSharedDaemonKeyShape(t *testing.T) {
+	// Act
+	key, err := handbackKey()
+
+	// Assert
+	if err != nil {
+		t.Fatalf("handbackKey: %v", err)
+	}
+	if !regexp.MustCompile(`^merge-handback-[0-9a-f]{32}$`).MatchString(key) {
+		t.Fatalf("key = %q, want prompthandler.MintKey's shape under the merge-handback prefix", key)
 	}
 }
