@@ -400,7 +400,8 @@
 ;; `agent-repl-workspace-numerals-mode-map' to the
 ;; `agent-repl-switch-to-workspace-N' commands, which index the DRAWN TAB BAR
 ;; (`agent-repl-roster-tab-order') rather than persp-mode's perspective list
-;; the way Doom's own `+workspace/switch-to-N' does.  `M-0' is left to Doom.
+;; the way Doom's own `+workspace/switch-to-N' does.  `M-0' switches to the
+;; LAST tab on that drawn bar (`agent-repl-switch-to-last-workspace').
 ;; `s-{' / `s-}' walk that same drawn order left and right.  All of it is in
 ;; the module, so the merge-sentinel reload (which only reloads the agent-repl
 ;; module's `config.el') picks it up automatically.
