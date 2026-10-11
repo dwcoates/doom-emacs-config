@@ -1188,6 +1188,24 @@ func TestAMergeWorkspacesRowSaysWhereItLands(t *testing.T) {
 	}
 }
 
+func TestAMergedMergeWorkspacesRowWearsNoMarker(t *testing.T) {
+	// Arrange: a merge workspace that has landed, so it sits in Recently Merged.
+	r, _ := newResolver(t)
+	merged := workspace("w2", "one-merge")
+	merged.ParentBranch = "master"
+	merged.MergeOf = &wsm.MergeOrigin{Requester: "w1", Request: "request-1"}
+	merged.MergedAt = at(0)
+
+	// Act
+	r.SetRegistry(registry(merged))
+
+	// Assert
+	row := rowFor(latest(t, r).GetRecentlyMerged().GetRows().GetRows(), "w2")
+	if marker := row.GetMergeWorkspace(); marker != nil {
+		t.Fatalf("marker = %+v, want none once the merge workspace has merged", marker)
+	}
+}
+
 func TestAnOrdinaryRowWearsNoMergeWorkspaceMarker(t *testing.T) {
 	// Arrange
 	r, _ := newResolver(t)
