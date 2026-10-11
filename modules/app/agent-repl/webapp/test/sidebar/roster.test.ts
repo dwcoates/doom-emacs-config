@@ -9,10 +9,12 @@ import {
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_sidebar_view_pb";
 import {
   RosterMaturityKeySchema,
+  RosterSectionHeaderSchema,
   RosterRepoSectionSchema,
   RosterTaskSectionSchema,
   WorkspaceRosterSchema,
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
+import { SetWorkspaceHiddenResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_hidden_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import { repoFoldKey } from "../../src/sidebar/context.js";
 import { drawHeadedSection, drawRosterSectionFold, drawWorkspaceRoster } from "../../src/sidebar/roster.js";
@@ -531,6 +533,75 @@ describe("drawHeadedSection", () => {
     const bare = wire();
     bare.rows = undefined;
     expect(() => drawHeadedSection(bare, sidebarContext(), "p", SHAPE)).toThrow(MalformedView);
+  });
+
+  it("keeps a closed row when told not to drop closed rows", () => {
+    const section = drawHeadedSection(wire({ rows: [row({ id: "ws-closed", closed: true })] }), sidebarContext(), "p", {
+      ...SHAPE,
+      hideClosed: false,
+    });
+    expect(section.querySelector("[data-roster-row='ws-closed']")).not.toBeNull();
+  });
+
+  it("draws its rows in the place it is given", async () => {
+    const shown: string[] = [];
+    const sc = sidebarContext(
+      appContext({
+        setWorkspaceHidden: (request) => {
+          shown.push(request.workspace?.id ?? "");
+          return create(SetWorkspaceHiddenResponseSchema, { result: { case: "success", value: {} } });
+        },
+      }),
+    );
+    const section = drawHeadedSection(wire({ rows: [row({ id: "ws-1" })] }), sc, "p", { ...SHAPE, place: "hidden" });
+    await click(section.querySelector("[data-select]") as Element);
+    expect(shown).toEqual(["ws-1"]);
+  });
+
+  it("leaves the box out, marked, when its left-out test says so", () => {
+    const section = drawHeadedSection(wire(), sidebarContext(), "p", {
+      ...SHAPE,
+      leftOut: { when: () => true, attribute: "data-test-empty" },
+    });
+    expect([section.hidden, section.getAttribute("data-test-empty"), section.querySelector(".repo-head")]).toEqual([
+      true,
+      "true",
+      null,
+    ]);
+  });
+
+  it("draws the box whole when its left-out test says no", () => {
+    const section = drawHeadedSection(wire(), sidebarContext(), "p", {
+      ...SHAPE,
+      leftOut: { when: () => false, attribute: "data-test-empty" },
+    });
+    expect([section.hidden, section.querySelector(".repo-head") !== null]).toEqual([false, true]);
+  });
+
+  it("still refuses a malformed header in a left-out box", () => {
+    const bare = wire();
+    bare.header = create(RosterSectionHeaderSchema, { label: { text: "Head" } });
+    expect(() =>
+      drawHeadedSection(bare, sidebarContext(), "p", { ...SHAPE, leftOut: { when: () => true, attribute: "data-test-empty" } }),
+    ).toThrow(MalformedView);
+  });
+
+  // EVERY FOLDING SECTION BUT A TASK'S IS ONE SHAPE: each draws its box through
+  // drawHeadedSection, so each carries the same header and fold control. A
+  // hand-rolled section that drew its own header would carry neither here.
+  it.each([
+    ["repository", ".repo-section", roster({ repos: [repoSection({ id: "repo-1" })] })],
+    ["maturity", ".maturity-section", roster({ maturity: [maturitySection({ stage: "backlog" })] })],
+    ["hidden", ".hidden-section", roster({ hidden: hiddenSection([HIDDEN_ROW]) })],
+    ["merged", ".merged-section", roster({ merged: mergedSection([MERGED_ROW]) })],
+  ] as const)("draws the %s section in the one headed shape", (_kind, selector, made) => {
+    const drawn = drawWorkspaceRoster(made, sidebarContext());
+    const section = drawn.querySelector(selector) as HTMLElement;
+    expect([
+      section.querySelector(":scope > .repo-head > [data-section-fold]") !== null,
+      section.querySelector(":scope > .repo-head > [data-section-count]") !== null,
+      section.querySelector(":scope > .rows") !== null,
+    ]).toEqual([true, true, true]);
   });
 
   it("is the one shape the repository and maturity sections share", () => {
