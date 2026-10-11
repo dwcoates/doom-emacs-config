@@ -294,7 +294,6 @@ func TestValidateRefusesACreateFieldOnAnyOtherVerb(t *testing.T) {
 	}{
 		{name: "git_root", entry: Entry{GitRoot: "/r"}, field: "git_root"},
 		{name: "name", entry: Entry{Name: "n"}, field: "name"},
-		{name: "one_shot", entry: Entry{OneShot: true}, field: "one_shot"},
 		{name: "base_ref", entry: Entry{BaseRef: "HEAD"}, field: "base_ref"},
 		{name: "source_ws", entry: Entry{SourceWS: &SourceWorkspace{Path: "/r"}}, field: "source_ws"},
 		{name: "base_commit", entry: Entry{BaseCommit: "HEAD"}, field: "base_commit"},
@@ -412,6 +411,7 @@ func TestAMergeEntryNamingOneSourceValidates(t *testing.T) {
 		{name: "own branch", entry: Entry{Type: TypeMerge, Workspace: "w1"}},
 		{name: "own branch kept open", entry: Entry{Type: TypeMerge, Workspace: "w1", KeepOpen: true}},
 		{name: "own branch detached", entry: Entry{Type: TypeMerge, Workspace: "w1", Detached: true}},
+		{name: "own branch one-shot", entry: Entry{Type: TypeMerge, Workspace: "w1", OneShot: true}},
 		{name: "a branch", entry: Entry{Type: TypeMerge, Workspace: "w1", Branch: "agent-1/fix"}},
 		{name: "another workspace", entry: Entry{Type: TypeMerge, Workspace: "w1", SourceDir: "/wt/two"}},
 		{name: "merged upstream", entry: Entry{Type: TypeMerge, Workspace: "w1", PRWasMerged: true}},
@@ -451,6 +451,44 @@ func TestAMergeEntryNamingTwoSourcesIsRefused(t *testing.T) {
 				t.Fatalf("Validate() = nil, want the contradiction refused")
 			}
 		})
+	}
+}
+
+func TestAOneShotMergeEntryThatContradictsItselfIsRefused(t *testing.T) {
+	tests := []struct {
+		name    string
+		entry   Entry
+		wantErr string
+	}{
+		{name: "on a branch", entry: Entry{Type: TypeMerge, Workspace: "w1", OneShot: true, Branch: "b"}, wantErr: "one_shot merges the requester's OWN branch"},
+		{name: "on another workspace", entry: Entry{Type: TypeMerge, Workspace: "w1", OneShot: true, SourceDir: "/wt/two"}, wantErr: "one_shot merges the requester's OWN branch"},
+		{name: "on merged upstream", entry: Entry{Type: TypeMerge, Workspace: "w1", OneShot: true, PRWasMerged: true}, wantErr: "one_shot merges the requester's OWN branch"},
+		{name: "kept open", entry: Entry{Type: TypeMerge, Workspace: "w1", OneShot: true, KeepOpen: true}, wantErr: "cannot keep_open"},
+		{name: "detached", entry: Entry{Type: TypeMerge, Workspace: "w1", OneShot: true, Detached: true}, wantErr: "cannot run detached"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act.
+			err := tt.entry.Validate()
+
+			// Assert.
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("Validate() = %v, want an error containing %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestOneShotOnAnEntryOtherThanACreateOrAMergeIsRefused(t *testing.T) {
+	// Arrange.
+	entry := Entry{Type: TypeClose, Workspace: "w1", OneShot: true}
+
+	// Act.
+	err := entry.Validate()
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "close: one_shot is a create's or a merge's field") {
+		t.Fatalf("Validate() = %v, want one_shot refused on a close", err)
 	}
 }
 

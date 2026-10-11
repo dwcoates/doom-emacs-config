@@ -336,6 +336,11 @@ type DB interface {
 	// repository's durable queue, in the requested state (in nobody's line),
 	// refusing a workspace already requested, queued or admitted there.
 	RequestMerge(ctx context.Context, repo RepoKey, id WorkspaceID, source MergeSource, at time.Time) error
+	// RequestOneShotMerge records RequestMerge's request for the requester's
+	// own branch, in place, and marks the requester a one-shot on its creation
+	// job, in one transaction. Any other source is refused, and so is a
+	// requester with no creation job.
+	RequestOneShotMerge(ctx context.Context, repo RepoKey, id WorkspaceID, source MergeSource, at time.Time) error
 	// MergeWorkspaceFor loads the merge workspace forked for one detached
 	// request; false when none is registered for it yet.
 	MergeWorkspaceFor(ctx context.Context, request DetachedMergeID) (Workspace, bool, error)
