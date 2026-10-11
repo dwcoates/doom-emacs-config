@@ -4,8 +4,9 @@ The owner asked (2026-10-11) for a HIDDEN WORKSPACES section in the sidebar. A
 workspace in it is not drawn on the Emacs tab bar, so the tab numbers shift to
 the next workspace over, using exactly the machinery a collapsed repository
 section already uses. The section itself is not drawn when nothing is hidden.
-`SPC TAB h` hides the current workspace, and clicking a row in the hidden
-section shows it again.
+`SPC TAB h` hides the current workspace and lands on the first tab the bar
+still draws. Clicking a row in the hidden section shows it again, and so does
+`SPC TAB H`, which picks a hidden workspace in Emacs and switches to it.
 
 The owner asked for the work to be planned and executed without waiting on
 design rounds, so the shapes below were settled by following the nearest
