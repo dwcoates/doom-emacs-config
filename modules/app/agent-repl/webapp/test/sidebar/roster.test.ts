@@ -1458,7 +1458,21 @@ describe("recently merged rows", () => {
 
   it("draws a row merged today with the off-white gutter bar", async () => {
     const css = (await import("../../src/styles.css?raw")).default;
-    expect(css).toContain("#ws-sidebar .row.merged-today {\n  border-left: 3px solid var(--merged-today-gutter);");
+    expect(css).toContain("#ws-sidebar .row.merged-today {\n  border-left: var(--row-gutter-w) solid var(--merged-today-gutter);");
+  });
+
+  it("declares the one rail gutter width every row bar draws in", async () => {
+    const css = (await import("../../src/styles.css?raw")).default;
+    expect(css).toContain("#ws-sidebar { --row-gutter-w: 3px; }");
+  });
+
+  it("draws the selection's bar and the merge-today bar at the shared width", async () => {
+    const css = (await import("../../src/styles.css?raw")).default;
+    const bar = (selector: string): string | undefined =>
+      css.split(`${selector} {\n`)[1]?.split("}")[0];
+    expect([bar("#ws-sidebar .ws.current > .row"), bar("#ws-sidebar .row.merged-today")].map((b) =>
+      b?.includes("border-left: var(--row-gutter-w) solid") && b.includes("padding-left: calc(0.9rem - var(--row-gutter-w))"),
+    )).toEqual([true, true]);
   });
 
   it("no longer colours a name merged today", async () => {
