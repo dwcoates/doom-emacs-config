@@ -61,6 +61,7 @@ mkfake_repo() {
   mkdir -p "$root/.claude" "$root/.githooks" "$module/bin" "$module/skills"
   cp "$REPO_ROOT/.claude/install.sh" "$root/.claude/install.sh"
   cp "$REPO_ROOT/modules/app/agent-repl/bin/requirements.sh" "$module/bin/requirements.sh"
+  cp "$REPO_ROOT/modules/app/agent-repl/bin/lib-worktrees.sh" "$module/bin/lib-worktrees.sh"
   cp "$REPO_ROOT/.githooks/pre-commit" "$root/.githooks/pre-commit"
   chmod +x "$root/.claude/install.sh" "$module/bin/requirements.sh" "$root/.githooks/pre-commit"
   # Create the default impl only when the caller did not supply one.

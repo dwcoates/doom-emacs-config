@@ -153,6 +153,8 @@ ROOT="$(cd "$THIS_DIR/.." && pwd)"
 . "$THIS_DIR/lib-deploy-stamp.sh"
 # shellcheck source=lib-node-store.sh
 . "$THIS_DIR/lib-node-store.sh"
+# shellcheck source=lib-worktrees.sh
+. "$THIS_DIR/lib-worktrees.sh"
 
 SHIM_DIR="$ROOT/agent-shim/claude/shim"
 WEBAPP_DIR="$ROOT/webapp"
@@ -446,8 +448,7 @@ worktree_roots() {
     fi
     if command -v git >/dev/null 2>&1 &&
            git -C "$ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-        git -C "$ROOT" worktree list --porcelain 2>/dev/null |
-            awk '/^worktree /{ $1=""; sub(/^ /,""); print }'
+        worktree_list "$ROOT" 2>/dev/null
         return 0
     fi
     printf '%s\n' "$WORKTREE_ROOT"

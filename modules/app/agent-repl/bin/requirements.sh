@@ -92,21 +92,14 @@ platform() {
   esac
 }
 
+# shellcheck source=lib-worktrees.sh
+. "$THIS_DIR/lib-worktrees.sh"
+
 # The repository's MAIN worktree. A skill link must never point into a linked
 # worktree, whose path dangles the moment it is pruned, so repo-relative skill
 # sources always resolve here, whichever worktree runs the script.
-main_worktree() {
-  local first
-  first="$(git -C "$MODULE_DIR" worktree list --porcelain | sed -n 1p)"
-  case "$first" in
-    "worktree "*) printf '%s\n' "${first#worktree }" ;;
-    *) err "main-worktree: git worktree list answered no worktree for $MODULE_DIR"; exit 2 ;;
-  esac
-}
-
-# The roots of every LINKED worktree (every entry after the first).
-linked_worktrees() {
-  git -C "$MODULE_DIR" worktree list --porcelain | sed -n 's/^worktree //p' | sed 1d
+module_main_worktree() {
+  main_worktree "$MODULE_DIR" || { err "main-worktree: git worktree list answered no worktree for $MODULE_DIR"; exit 2; }
 }
 
 repo_top() { git -C "$MODULE_DIR" rev-parse --show-toplevel; }
@@ -294,7 +287,7 @@ skill_source() {
   local e="$1" repo env path
   repo="$(field "$e" .source.repo)"
   if [ -n "$repo" ]; then
-    printf '%s/%s\n' "$(main_worktree)" "$repo"
+    printf '%s/%s\n' "$(module_main_worktree)" "$repo"
     return
   fi
   env="$(field "$e" .source.env)"
@@ -322,7 +315,7 @@ in_linked_worktree() {
     [ -n "$root" ] || continue
     root="$(physical "$root")"
     case "$path" in "$root"/*|"$root") return 0 ;; esac
-  done < <(linked_worktrees)
+  done < <(linked_worktrees "$MODULE_DIR")
   return 1
 }
 
