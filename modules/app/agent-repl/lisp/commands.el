@@ -78,6 +78,7 @@
 (declare-function agent-repl-host-editor-switch-count "host" ())
 (declare-function agent-repl-verbs--land-on-tab "agent-repl-verbs" (ref why ws))
 (declare-function agent-repl-verb-open "agent-repl-verbs" (ref))
+(declare-function agent-repl-verb-swap-places "agent-repl-verbs" (ws other))
 (declare-function agent-repl-workspace-progress-report "mutation-progress" (kind phase &rest details))
 (declare-function agent-repl-verbs--all-rows "agent-repl-verbs" (&optional roster))
 (declare-function agent-repl-roster-tab-order "agent-repl-roster" ())
@@ -910,7 +911,7 @@ resets."
 
 THE DRAWN ORDER IS NAVIGATION'S ONLY ORDER.  `agent-repl-roster-tab-order'
 is the tab bar's own order (roster.el sets it from the daemon resolver's
-walk, priority included), so left/right and the numeral chords walk the
+walk, in stored place order), so left/right and the numeral chords walk the
 PICTURE THE USER IS LOOKING AT by construction rather than agreeing with
 it by coincidence.
 
@@ -1040,6 +1041,55 @@ afterwards is a logging defect."
         (agent-repl--info log-ws "elisp.commands.switch-to-workspace n=%d target=%s"
                           index target)
         (agent-repl-host-request-switch target 'slot))))))
+
+(defun agent-repl--place-slot (char)
+  "Return the tab slot the digit CHAR names: `1'..`9' are slots 1-9 and
+`0' is slot 10, the digit row's own order."
+  (if (eq char ?0) 10 (- char ?0)))
+
+(defun agent-repl--read-place-slot ()
+  "Read ONE digit and return the tab slot it names.
+`read-char-choice' returns on the keystroke itself, so the digit needs no
+RET to send, and any other key is refused in place."
+  (agent-repl--place-slot
+   (read-char-choice "Swap places with tab (1-9, 0 = 10): "
+                     (number-sequence ?0 ?9))))
+
+(defun agent-repl-workspace-place (slot)
+  "Swap the current workspace's roster place with the workspace at tab SLOT.
+Interactively SLOT is read as one digit, `0' naming slot 10.  SLOT counts
+the DRAWN tabs (`agent-repl--drawn-tab-names'), exactly as the numeral
+chords do, so the digit names the tab the user is looking at.
+
+The daemon owns roster order, so the swap is REQUESTED of it
+\(`agent-repl-verb-swap-places') and the bar redraws from the next roster
+push.  Only workspaces with one parent swap, on the sidebar and the bar
+alike; the daemon refuses any other pair.
+
+A current workspace with no tab, a slot past the end of the bar, and the
+current workspace's own slot are REPORTED no-ops, recorded at `info' like
+every other navigation gesture."
+  (interactive (list (agent-repl--read-place-slot)))
+  (let* ((names (agent-repl--drawn-tab-names))
+         (current (agent-repl--ws-current-name))
+         (log-ws (or (agent-repl--ws-log-name current)
+                     '(:agent-repl-context "a place swap from a placeholder names no workspace")))
+         (target (and (<= 1 slot (length names)) (nth (1- slot) names))))
+    (cond
+     ((not (member current names))
+      (agent-repl--info log-ws "elisp.commands.place-no-tab current=%s slot=%d" current slot)
+      (message "[agent-repl] The current workspace has no tab to swap"))
+     ((null target)
+      (agent-repl--info log-ws "elisp.commands.place-out-of-range slot=%d tabs=%d"
+                        slot (length names))
+      (message "[agent-repl] No workspace tab %d -- the bar draws %d" slot (length names)))
+     ((equal target current)
+      (agent-repl--info log-ws "elisp.commands.place-own-slot slot=%d ws=%s" slot current)
+      (message "[agent-repl] %s is already tab %d" current slot))
+     (t
+      (agent-repl--info log-ws "elisp.commands.place slot=%d ws=%s target=%s"
+                        slot current target)
+      (agent-repl-verb-swap-places current target)))))
 
 (eval-and-compile
   ;; The count is needed at EXPANSION time by the macro below and at RUN time

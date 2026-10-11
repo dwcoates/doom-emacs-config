@@ -107,6 +107,7 @@
 (declare-function agent-repl-rpc-register-repository "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-set-workspace-priority "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-set-workspace-hidden "agent-repl-rpc" (conn request &rest keys))
+(declare-function agent-repl-rpc-swap-workspace-places "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-deploy "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-update-shutdown-schedule "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-update-merge-queue "agent-repl-rpc" (conn request &rest keys))
@@ -864,6 +865,29 @@ with a record saying so."
       (if target
           (agent-repl-host-request-switch target 'hide)
         (agent-repl--info ws "elisp.verbs.hide-landing-none ws=%s" ws)))))
+
+(defun agent-repl-verb-swap-places (ws other)
+  "Swap WS's roster place with OTHER's, so the tab bar and sidebar draw them
+exchanged.  Only SIBLINGS swap -- two workspaces with one parent in the
+repository view -- and the daemon judges that against the roster it
+published.  Its `not_siblings' refusal is an ordinary answer to a user
+action, so it is claimed here, recorded at INFO and said in plain words;
+every other arm takes the generic refusal path.  The new order arrives on
+the roster stream, so success changes no editor state."
+  (agent-repl-verbs--send
+   #'agent-repl-rpc-swap-workspace-places (agent-repl-verbs--conn ws)
+   (list :workspace (agent-repl-verbs--ref ws) :other (agent-repl-verbs--ref other))
+   :ws ws :op "swap-places"
+   :on-success
+   (lambda (_)
+     (message "agent-repl: %s and %s swapped places" ws other))
+   :on-error
+   (lambda (value)
+     (when (eq (plist-get (agent-repl-verbs--refusal-arm value) :arm) :not-siblings)
+       (agent-repl--info ws "elisp.verbs.swap-places-not-siblings ws=%s other=%s" ws other)
+       (message "agent-repl: %s and %s have different parents, so they cannot swap places"
+                ws other)
+       t))))
 
 (cl-defun agent-repl-verb-create (repository form
                                              &key initial-prompt base-ref name
