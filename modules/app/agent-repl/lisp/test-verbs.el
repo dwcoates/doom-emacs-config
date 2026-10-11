@@ -119,7 +119,9 @@ answers a bare success, which is what almost every verb's success is."
   (declare (indent 1))
   `(let ((agent-repl-test-verbs--sent nil)
          (agent-repl-verbs--pending-landing nil)
+         (agent-repl-verbs--pending-landing-dispatched-at nil)
          (agent-repl-verbs--pending-landing-lander nil)
+         (agent-repl-host--editor-switches 0)
          (agent-repl-test-verbs--tab-switched nil)
          (agent-repl-test-verbs--torn-down nil)
          (agent-repl-test-verbs--messages nil)
@@ -1861,9 +1863,9 @@ lands the user on Doom's empty-project fallback, so the landing waits."
   ;; Arrange.
   (agent-repl-test-verbs--with nil
     (cl-letf (((symbol-function 'agent-repl--ws-by-ref-id) (lambda (_id) nil)))
-      (agent-repl-verbs-select-minted (agent-repl-test-verbs--ref "first" "/tmp/a"))
+      (agent-repl-verbs-select-minted (agent-repl-test-verbs--ref "first" "/tmp/a") 0)
       ;; Act.
-      (agent-repl-verbs-select-minted (agent-repl-test-verbs--ref "second" "/tmp/b"))
+      (agent-repl-verbs-select-minted (agent-repl-test-verbs--ref "second" "/tmp/b") 0)
       ;; Assert.
       (should (equal (plist-get agent-repl-verbs--pending-landing :id) "second")))))
 
@@ -2789,6 +2791,19 @@ persp-mode perspective such as \"main\" appears in the registry."
                (lambda (&rest _) "   ")))
       (should-not (agent-repl-verbs--read-model)))))
 
+(ert-deftest agent-repl-verbs-register-repository-switched-away-from-moves-nothing ()
+  "Registering a repository withdraws its landing on a switch in Emacs too."
+  ;; Arrange.
+  (agent-repl-test-verbs--with (agent-repl-test-verbs--register-repository-answer)
+    (agent-repl-test-verbs--picking-file "/tmp/agent-repl-test/repo/README.md"
+      (cl-letf (((symbol-function 'agent-repl--ws-by-ref-id) (lambda (_id) nil)))
+        (agent-repl-register-repository)))
+    (agent-repl-test-verbs--user-switches)
+    ;; Act.
+    (agent-repl-test-verbs--tab-arrives "ws-id-1" "repo-ws")
+    ;; Assert.
+    (should-not agent-repl-test-verbs--tab-switched)))
+
 (provide 'test-verbs)
 
 ;;; test-verbs.el ends here
@@ -2803,7 +2818,7 @@ came back CLOSED left behind."
   (agent-repl-test-verbs--with nil
     (let (logs)
       (cl-letf (((symbol-function 'agent-repl--ws-by-ref-id) (lambda (_id) nil)))
-        (agent-repl-verbs-select-minted (agent-repl-test-verbs--ref "waiting" "/tmp/w"))
+        (agent-repl-verbs-select-minted (agent-repl-test-verbs--ref "waiting" "/tmp/w") 0)
         (cl-letf (((symbol-function 'agent-repl--log)
                    (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logs))))
           ;; Act.
@@ -2819,7 +2834,7 @@ came back CLOSED left behind."
   (agent-repl-test-verbs--with nil
     (let (logs)
       (cl-letf (((symbol-function 'agent-repl--ws-by-ref-id) (lambda (_id) nil)))
-        (agent-repl-verbs-select-minted (agent-repl-test-verbs--ref "arrives" "/tmp/w")))
+        (agent-repl-verbs-select-minted (agent-repl-test-verbs--ref "arrives" "/tmp/w") 0))
       (cl-letf (((symbol-function 'agent-repl--log)
                  (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logs)))
                 ((symbol-function 'agent-repl-switch-to-project) #'ignore))
@@ -2835,11 +2850,115 @@ came back CLOSED left behind."
   ;; Arrange.
   (agent-repl-test-verbs--with nil
     (cl-letf (((symbol-function 'agent-repl--ws-by-ref-id) (lambda (_id) nil)))
-      (agent-repl-verbs-select-minted (agent-repl-test-verbs--ref "kept" "/tmp/w"))
+      (agent-repl-verbs-select-minted (agent-repl-test-verbs--ref "kept" "/tmp/w") 0)
       ;; Act.
       (agent-repl-verbs--pending-landing-fire))
     ;; Assert.
     (should (equal (plist-get agent-repl-verbs--pending-landing :id) "kept"))))
+
+;;;; ---- A landing the user switched away from is withdrawn ----
+
+(defun agent-repl-test-verbs--user-switches ()
+  "Record that the user switched workspaces in Emacs, as host.el counts it."
+  (setq agent-repl-host--editor-switches (1+ agent-repl-host--editor-switches)))
+
+(ert-deftest agent-repl-verbs-a-landing-switched-away-from-before-the-answer-moves-nothing ()
+  "A user who switched in Emacs before the answer is not dragged back."
+  ;; Arrange.
+  (agent-repl-test-verbs--with nil
+    (agent-repl-test-verbs--user-switches)
+    (cl-letf (((symbol-function 'agent-repl--ws-by-ref-id) (lambda (_id) "new-ws")))
+      ;; Act.
+      (agent-repl-verbs-select-minted (agent-repl-test-verbs--ref "new" "/tmp/n") 0))
+    ;; Assert.
+    (should-not agent-repl-test-verbs--selected)))
+
+(ert-deftest agent-repl-verbs-a-landing-switched-away-from-before-the-answer-waits-for-nothing ()
+  "A withdrawn landing leaves no landing pending for its tab."
+  ;; Arrange.
+  (agent-repl-test-verbs--with nil
+    (agent-repl-test-verbs--user-switches)
+    (cl-letf (((symbol-function 'agent-repl--ws-by-ref-id) (lambda (_id) nil)))
+      ;; Act.
+      (agent-repl-verbs-select-minted (agent-repl-test-verbs--ref "new" "/tmp/n") 0))
+    ;; Assert.
+    (should-not agent-repl-verbs--pending-landing)))
+
+(ert-deftest agent-repl-verbs-a-withdrawn-landing-is-recorded-at-info ()
+  "An automatic move that did not happen says why, with both counts."
+  ;; Arrange.
+  (agent-repl-test-verbs--with nil
+    (let (infos)
+      (agent-repl-test-verbs--user-switches)
+      (cl-letf (((symbol-function 'agent-repl--ws-by-ref-id) (lambda (_id) nil))
+                ((symbol-function 'agent-repl--info)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) infos))))
+        ;; Act.
+        (agent-repl-verbs-select-minted (agent-repl-test-verbs--ref "new" "/tmp/n") 0))
+      ;; Assert.
+      (should (member "elisp.verbs.landing-withdrawn id=new dir=/tmp/n edge=answered reason=user-switched dispatched-at=0 now=1"
+                      infos)))))
+
+(ert-deftest agent-repl-verbs-a-landing-switched-away-from-while-waiting-moves-nothing ()
+  "A switch in Emacs while the tab is on its way withdraws the landing."
+  ;; Arrange.
+  (agent-repl-test-verbs--with nil
+    (cl-letf (((symbol-function 'agent-repl--ws-by-ref-id) (lambda (_id) nil)))
+      (agent-repl-verbs-select-minted (agent-repl-test-verbs--ref "new" "/tmp/n") 0))
+    (agent-repl-test-verbs--user-switches)
+    ;; Act.
+    (agent-repl-test-verbs--tab-arrives "new" "new-ws")
+    ;; Assert.
+    (should-not agent-repl-test-verbs--selected)))
+
+(ert-deftest agent-repl-verbs-a-withdrawn-waiting-landing-is-cleared ()
+  "The tab arrived and the landing was judged, so nothing stays pending."
+  ;; Arrange.
+  (agent-repl-test-verbs--with nil
+    (cl-letf (((symbol-function 'agent-repl--ws-by-ref-id) (lambda (_id) nil)))
+      (agent-repl-verbs-select-minted (agent-repl-test-verbs--ref "new" "/tmp/n") 0))
+    (agent-repl-test-verbs--user-switches)
+    ;; Act.
+    (agent-repl-test-verbs--tab-arrives "new" "new-ws")
+    ;; Assert.
+    (should-not agent-repl-verbs--pending-landing)))
+
+(ert-deftest agent-repl-verbs-a-waiting-landing-with-no-switch-still-lands ()
+  "Without a switch in Emacs the tab's arrival lands the user as before."
+  ;; Arrange.
+  (agent-repl-test-verbs--with nil
+    (cl-letf (((symbol-function 'agent-repl--ws-by-ref-id) (lambda (_id) nil)))
+      (agent-repl-verbs-select-minted (agent-repl-test-verbs--ref "new" "/tmp/n") 0))
+    ;; Act.
+    (agent-repl-test-verbs--tab-arrives "new" "new-ws")
+    ;; Assert.
+    (should (equal agent-repl-test-verbs--selected '("/tmp/n")))))
+
+(ert-deftest agent-repl-verbs-a-landing-is-an-automatic-switch ()
+  "The landing's own activation must not count as the user's switch."
+  ;; Arrange.
+  (agent-repl-test-verbs--with nil
+    (let (automatic)
+      (cl-letf (((symbol-function 'agent-repl--ws-by-ref-id) (lambda (_id) "new-ws"))
+                ((symbol-function 'agent-repl-switch-to-project)
+                 (lambda (_dir) (setq automatic agent-repl-host-automatic-switch))))
+        ;; Act.
+        (agent-repl-verbs-select-minted (agent-repl-test-verbs--ref "new" "/tmp/n") 0))
+      ;; Assert.
+      (should automatic))))
+
+(ert-deftest agent-repl-verbs-create-switched-away-from-while-minting-moves-nothing ()
+  "A create the user switched away from in Emacs does not land on arrival."
+  ;; Arrange.
+  (agent-repl-test-verbs--with (agent-repl-test-verbs--created
+                                (agent-repl-test-verbs--ref "new-id" "/tmp/agent-repl-test/new"))
+    (cl-letf (((symbol-function 'agent-repl--ws-by-ref-id) (lambda (_id) nil)))
+      (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard :select t))
+    (agent-repl-test-verbs--user-switches)
+    ;; Act.
+    (agent-repl-test-verbs--tab-arrives "new-id" "new-ws")
+    ;; Assert.
+    (should-not agent-repl-test-verbs--selected)))
 
 ;;;; ---- The arrival reason a verb leaves for the roster (owner ruling #6) ----
 
