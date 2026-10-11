@@ -12,6 +12,7 @@ import (
 	"agentrepl/logging/buildreport"
 
 	"claude-repld/internal/buildid"
+	"claude-repld/internal/shellword"
 	"claude-repld/internal/wsm"
 )
 
@@ -117,9 +118,9 @@ func NewFakeDeployBuilder(t *testing.T, dir string, src DeploySources) *DeployBu
 	}
 	service := func(name, real string) string {
 		if real == "" {
-			return `printf 'harness %s\n' ` + shellQuote(name) + ` > "$out/cache-bin/` + name + `"`
+			return `printf 'harness %s\n' ` + shellword.Quote(name) + ` > "$out/cache-bin/` + name + `"`
 		}
-		return `cp ` + shellQuote(real) + ` "$out/cache-bin/` + name + `"`
+		return `cp ` + shellword.Quote(real) + ` "$out/cache-bin/` + name + `"`
 	}
 	// The staging arm runs AFTER the invocation is recorded and BEFORE the
 	// scripted exit, so a staged build still counts as one invocation.
@@ -128,8 +129,8 @@ func NewFakeDeployBuilder(t *testing.T, dir string, src DeploySources) *DeployBu
   out="$2"
   mode="$(cat "$control.staged")"
   mkdir -p "$out/agent-shim/claude/shim/dist" "$out/webapp/dist" "$out/daemon/bin" "$out/cache-bin"
-  cp ` + shellQuote(src.ShimMain) + ` "$out/agent-shim/claude/shim/dist/main.js"
-  cp -R ` + shellQuote(src.WebappDist) + `/. "$out/webapp/dist/"
+  cp ` + shellword.Quote(src.ShimMain) + ` "$out/agent-shim/claude/shim/dist/main.js"
+  cp -R ` + shellword.Quote(src.WebappDist) + `/. "$out/webapp/dist/"
   if [ "$mode" = "` + string(DeployStaleDaemon) + `" ]; then
     printf '#!/bin/sh\n# a harness daemon build\necho ` + strconv.Itoa(wsm.LayoutVersion) + `\n' > "$out/daemon/bin/claude-repld"
     chmod +x "$out/daemon/bin/claude-repld"
@@ -140,7 +141,7 @@ func NewFakeDeployBuilder(t *testing.T, dir string, src DeploySources) *DeployBu
     printf '#!/bin/sh\n# a harness daemon build on the next layout, by additive steps\ncase "$1" in -migration-kind-from=*) echo additive ;; *) echo ` + strconv.Itoa(wsm.LayoutVersion+1) + ` ;; esac\n' > "$out/daemon/bin/claude-repld"
     chmod +x "$out/daemon/bin/claude-repld"
   else
-    cp ` + shellQuote(daemonBinary) + ` "$out/daemon/bin/claude-repld"
+    cp ` + shellword.Quote(daemonBinary) + ` "$out/daemon/bin/claude-repld"
   fi
   if [ "$mode" = "` + string(DeployStaleWebapp) + `" ]; then
     printf '<script src="/assets/index-` + stagedWebappEntry + `.js"></script>' > "$out/webapp/dist/index.html"

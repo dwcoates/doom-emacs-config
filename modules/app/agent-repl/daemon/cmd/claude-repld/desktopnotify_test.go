@@ -4,11 +4,20 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
+	"google.golang.org/protobuf/encoding/protojson"
+
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
+
+	"claude-repld/internal/desktopnotify"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/shellword"
 	"claude-repld/internal/wsm"
 )
 
@@ -23,30 +32,94 @@ func (d namesDB) Workspace(context.Context, ids.WorkspaceID) (wsm.Workspace, err
 	return d.record, d.err
 }
 
-func TestWorkspaceNamesAnswersTheRegistryName(t *testing.T) {
+func TestBannerWorkspacesAnswersTheRegistryNameAndDirectory(t *testing.T) {
 	// Arrange
-	names := workspaceNames{db: namesDB{record: wsm.Workspace{Name: "fix-flaky-reconnect"}}}
+	workspaces := bannerWorkspaces{db: namesDB{record: wsm.Workspace{Name: "fix-flaky-reconnect", Dir: "/work/fix-flaky-reconnect"}}}
 
 	// Act
-	got, err := names.WorkspaceName(context.Background(), "ws1")
+	got, err := workspaces.Workspace(context.Background(), "ws1")
 
 	// Assert
-	if err != nil || got != "fix-flaky-reconnect" {
-		t.Fatalf("WorkspaceName = (%q, %v), want the registry name", got, err)
+	want := desktopnotify.Workspace{Name: "fix-flaky-reconnect", Dir: "/work/fix-flaky-reconnect"}
+	if err != nil || got != want {
+		t.Fatalf("Workspace = (%+v, %v), want %+v", got, err, want)
 	}
 }
 
-func TestWorkspaceNamesSurfacesAFailedRead(t *testing.T) {
+func TestBannerWorkspacesSurfacesAFailedRead(t *testing.T) {
 	// Arrange
 	cause := errors.New("no such workspace")
-	names := workspaceNames{db: namesDB{err: cause}}
+	workspaces := bannerWorkspaces{db: namesDB{err: cause}}
 
 	// Act
-	_, err := names.WorkspaceName(context.Background(), "ws1")
+	_, err := workspaces.Workspace(context.Background(), "ws1")
 
 	// Assert
-	if !errors.Is(err, cause) {
-		t.Fatalf("WorkspaceName error = %v, want the read's cause", err)
+	if !errors.Is(err, cause) || !strings.Contains(err.Error(), `"ws1"`) {
+		t.Fatalf("Workspace error = %v, want the read's cause naming the workspace", err)
+	}
+}
+
+// argvRecorder writes an executable that writes each of its arguments on its
+// own NUL-terminated line into a file beside it, and answers that file.
+func argvRecorder(t *testing.T, dir string) (exe, record string) {
+	t.Helper()
+	exe = filepath.Join(dir, "claude-repld")
+	record = filepath.Join(dir, "argv")
+	script := "#!/bin/sh\nfor a in \"$@\"; do printf '%s\\0' \"$a\"; done > " + shellword.Quote(record) + "\n"
+	if err := os.WriteFile(exe, []byte(script), 0o755); err != nil {
+		t.Fatalf("write %s: %v", exe, err)
+	}
+	return exe, record
+}
+
+func TestSelectWorkspaceClickRunsTheDaemonsSelectWorkspace(t *testing.T) {
+	cases := []struct {
+		name   string
+		target desktopnotify.Target
+		state  string
+	}{
+		{name: "a plain directory", target: desktopnotify.Target{ID: "ws1", Dir: "/work/ws1"}, state: "/state"},
+		{name: "quotes and spaces stay inside their words", target: desktopnotify.Target{ID: "ws2", Dir: `/work/it's "here"`}, state: "/state dir/x"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			exe, record := argvRecorder(t, t.TempDir())
+			command := selectWorkspaceClick(exe, tc.state)(tc.target)
+
+			// Act
+			if out, err := exec.Command("/bin/sh", "-c", command).CombinedOutput(); err != nil {
+				t.Fatalf("sh -c %q: %v: %s", command, err, out)
+			}
+
+			// Assert
+			raw, err := os.ReadFile(record)
+			if err != nil {
+				t.Fatalf("read %s: %v", record, err)
+			}
+			argv := strings.Split(strings.TrimSuffix(string(raw), "\x00"), "\x00")
+			if len(argv) != 5 || !reflect.DeepEqual(argv[:4], []string{"call", "-state-dir", tc.state, "SelectWorkspace"}) {
+				t.Fatalf("the click ran %q, want call -state-dir %q SelectWorkspace <request>", argv, tc.state)
+			}
+			var request agentreplv1.SelectWorkspaceRequest
+			if err := protojson.Unmarshal([]byte(argv[4]), &request); err != nil {
+				t.Fatalf("the call verb cannot read the click's request %q: %v", argv[4], err)
+			}
+			if request.GetWorkspace().GetId() != string(tc.target.ID) || request.GetWorkspace().GetDir() != tc.target.Dir {
+				t.Fatalf("request = %v, want the target's id and directory", &request)
+			}
+		})
+	}
+}
+
+func TestSelectWorkspaceClickNamesTheCallVerbsMethod(t *testing.T) {
+	// Act
+	method := agentReplService().Methods().ByName("SelectWorkspace")
+
+	// Assert
+	if method == nil || method.IsStreamingServer() || method.IsStreamingClient() {
+		t.Fatalf("SelectWorkspace = %v, want a unary AgentRepl method the call verb can send", method)
 	}
 }
 
@@ -87,17 +160,21 @@ func TestClickForwarderRefusesAClickBeforeTheServerIsBound(t *testing.T) {
 
 func TestResolveBannerBackendTakesTheOverride(t *testing.T) {
 	// Arrange
-	t.Setenv("AGENT_REPL_NOTIFIER_CMD", "/tmp/fake-banner")
+	fake := filepath.Join(t.TempDir(), "fake-banner")
+	if err := os.WriteFile(fake, []byte("#!/bin/sh\necho 'terminal-notifier 3.1.0.'\n"), 0o755); err != nil {
+		t.Fatalf("write %s: %v", fake, err)
+	}
+	t.Setenv("AGENT_REPL_NOTIFIER_CMD", fake)
 	log := dlog.NewTestLogger()
 
 	// Act
-	backend, err := resolveBannerBackend(log)
+	backend, err := resolveBannerBackend(context.Background(), log, selectWorkspaceClick("/bin/claude-repld", "/state"))
 
 	// Assert
 	if err != nil {
 		t.Fatalf("resolveBannerBackend: %v", err)
 	}
-	if backend.Program() != "/tmp/fake-banner" {
+	if backend.Program() != fake {
 		t.Fatalf("program = %q, want the override", backend.Program())
 	}
 }

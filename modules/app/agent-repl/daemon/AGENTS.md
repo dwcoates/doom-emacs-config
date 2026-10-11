@@ -449,7 +449,7 @@ ending row, live and on replay.
 | `AGENT_REPL_INTEGRATION_ARTIFACTS` | test only (harness, not the daemon) | the directory a FAILING integration test copies its daemon's `<state root>/logs/*.log` into, one subdirectory per test (`integration/harness/artifacts.go`); unset, a failing test prints a bounded tail of each log instead, so a red in a full run never leaves only its failure line. The e2e layer's sibling is `AGENT_REPL_E2E_ARTIFACTS` |
 | `AGENT_REPL_LOCK_DIR` | test only | overrides `~/.cache/agent-repl/run` for the kernel-lock probes (the fake shim honors it too) |
 | `AGENT_REPL_BROWSER_CMD` | operator/test | the external browser launcher command for OpenExternal |
-| `AGENT_REPL_NOTIFIER_CMD` | operator/test | the desktop banner program's binary (`internal/desktopnotify`); the platform's argv is unchanged, only the program it is handed to. Unset: `alerter` (macOS) or `notify-send` (Linux) on PATH, and a missing one is ERROR at boot and on every banner. The integration harness and the Emacs e2e layer point it at a recorder, so no test raises a real banner |
+| `AGENT_REPL_NOTIFIER_CMD` | operator/test | the desktop banner program's binary (`internal/desktopnotify`); the platform's argv is unchanged, only the program it is handed to. Unset: `terminal-notifier` (macOS, version 3 or later, checked with `-version` at boot) or `notify-send` (Linux) on PATH, and a missing or too-old one is ERROR at boot and on every banner. The integration harness and the Emacs e2e layer point it at a recorder, so no test raises a real banner |
 | `AGENT_REPL_CHIME_CMD` | operator/test | the turn-end chime player's binary (`internal/desktopnotify`); the platform's argv is unchanged. Unset: `afplay` playing `Glass.aiff` (macOS) or `canberra-gtk-play --id=complete` (Linux) on PATH, and a missing one is ERROR at boot and on every chime. Every live turn end rings it whether or not Emacs is focused, so the turn-end banner is posted without a sound of its own. The integration harness and the Emacs e2e layer point it at a recorder, so no test plays a real sound |
 | `AGENT_REPL_CLAUDE_BIN` | test only | the `claude` binary every one of the daemon's OWN calls execs: the login pty, and `internal/headless`'s runs (the classifier's routing question and the workspace naming call). A fake script in tests. Naming it EXPLICITLY is also what makes those spawns legal under `AGENT_REPL_FORBID_VENDOR_CALLS`: the guard refuses only the bare default `claude`, since an explicit path is by definition not a call to the real CLI |
 | `AGENT_REPL_DEPLOY_BUILDER` | test only | ONE executable a deploy runs as `<exe> --out <staging>` in place of the real build (`make -C proto all`, then `bin/build-frontend.sh --out <staging> <target>` per target). The integration harness's fake stages what runs, a stale component, or a failure (`integration/harness/deploybuild.go`) |
@@ -463,9 +463,9 @@ ending row, live and on replay.
 ## The daemon posts every desktop banner (`internal/desktopnotify`)
 
 Emacs owns two facts and nothing else: whether it is focused (stated on its
-WatchDaemon request and moved by `ReportEditorFocus`), and the tab selection a
-click asks for (the host stream's `notification_clicked`). The rule is
-Emacs-wide: a focused Emacs, whatever workspace it shows, gets no banner.
+WatchDaemon request and moved by `ReportEditorFocus`), and, on Linux, the tab
+selection a click asks for (the host stream's `notification_clicked`). The rule
+is Emacs-wide: a focused Emacs, whatever workspace it shows, gets no banner.
 
 - **The focus lives and dies with Emacs's WatchDaemon stream**
   (`desktopnotify.Focus`): attached from the request, released when the stream
@@ -482,10 +482,23 @@ Emacs-wide: a focused Emacs, whatever workspace it shows, gets no banner.
 - **Agent notifications** (a permission ask, a question, an agent push) raise
   the workspace's banner from `workspace.verbs.Notify`, beside the attention
   marker it already set.
-- **Every banner runs on its own goroutine** (the program blocks until a click,
-  a dismissal or its 60s timeout); focus is read before composing and again
-  after, and `Notifier.Close` cancels and joins them before the state client
-  closes.
+- **A click reaches the workspace one of two ways, by platform.**
+  - macOS HANDS the banner to the platform (`desktopnotify.Handed`):
+    `terminal-notifier` posts it under its own signed identity and exits, and
+    the banner stores its click: `-activate org.gnu.Emacs` brings Emacs forward,
+    and `-execute` runs this daemon binary's own
+    `call -state-dir <root> SelectWorkspace <ref>` (`selectWorkspaceClick`), so
+    the click reaches whichever daemon serves when it lands, and Emacs's frame
+    follows the roster's `current`. Nothing waits on the click, so no timeout
+    can lose it. Every free value is backslash-prefixed, because
+    terminal-notifier reads its options through NSUserDefaults, which misreads
+    a value starting with `[`, `(`, `{` or a quote.
+  - Linux READS the click BACK: `notify-send --wait` blocks until a click, a
+    dismissal or its 60s timeout, and a click is relayed to Emacs as the host
+    stream's `notification_clicked`.
+- **Every banner runs on its own goroutine**; focus is read before composing
+  and again after, and `Notifier.Close` cancels and joins them before the state
+  client closes.
 
 ## The `-fake` classifier (deterministic)
 
