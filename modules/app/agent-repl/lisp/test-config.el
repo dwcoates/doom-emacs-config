@@ -416,6 +416,90 @@ nothing."
                ((symbol-function 'agent-repl-connect-close) (lambda (_c) nil)))
        ,@body)))
 
+;;;; ---- The doctor's requirements check ----
+
+(defun agent-repl-config-test--requirements-report (&rest entries)
+  "A runner report of ENTRIES, each a plist of the report's fields."
+  (json-serialize
+   (vconcat (mapcar (lambda (e)
+                      (list :id (plist-get e :id) :status (plist-get e :status)
+                            :optional (if (plist-get e :optional) t :false)
+                            :detail "d" :why "w." :fix "f"))
+                    entries))))
+
+(defvar agent-repl-config-test--doctor-records nil
+  "Every doctor log record the current test made, formatted, oldest first.")
+
+(defmacro agent-repl-config-test--with-requirements (exit output &rest body)
+  "Run BODY with the doctor's runner answering EXIT and OUTPUT.
+Every doctor log record lands in `agent-repl-config-test--doctor-records'."
+  (declare (indent 2))
+  `(agent-repl-config-test--with-doctor
+     (setq agent-repl-config-test--doctor-records nil)
+     (cl-letf (((symbol-function 'agent-repl--doctor-run-requirements)
+                (lambda () (cons ,exit ,output)))
+               ((symbol-function 'agent-repl--doctor-log)
+                (lambda (fmt &rest args)
+                  (setq agent-repl-config-test--doctor-records
+                        (append agent-repl-config-test--doctor-records (list (apply #'format fmt args)))))))
+       ,@body)))
+
+(ert-deftest agent-repl-config-test-doctor-requirements-all-met-is-no-finding ()
+  "Every requirement met is no finding."
+  (agent-repl-config-test--with-requirements 0
+      (agent-repl-config-test--requirements-report '(:id "go" :status "ok"))
+    (should-not (agent-repl--doctor-requirements-issues))))
+
+(ert-deftest agent-repl-config-test-doctor-unmet-required-requirement-is-an-error ()
+  "An unmet required entry is an error naming its status and fix."
+  (agent-repl-config-test--with-requirements 1
+      (agent-repl-config-test--requirements-report '(:id "go" :status "ok")
+                                                   '(:id "terminal-notifier" :status "outdated"))
+    (should (equal (agent-repl--doctor-requirements-issues)
+                   '((error . "agent-repl: requirement terminal-notifier is outdated: d. w. Fix: f"))))))
+
+(ert-deftest agent-repl-config-test-doctor-unmet-optional-requirement-is-a-warning ()
+  "An unmet optional entry is a warning, marked optional."
+  (agent-repl-config-test--with-requirements 0
+      (agent-repl-config-test--requirements-report '(:id "prefix" :status "needs-user" :optional t))
+    (should (equal (agent-repl--doctor-requirements-issues)
+                   '((warn . "agent-repl: requirement prefix is needs-user (optional): d. w. Fix: f"))))))
+
+(ert-deftest agent-repl-config-test-doctor-refused-manifests-are-an-error ()
+  "A runner that refuses the manifests (exit 2) is an error carrying its reason."
+  (agent-repl-config-test--with-requirements 2 "[requirements] ERROR: manifest: x: unknown kind magic\n"
+    (should (equal (agent-repl--doctor-requirements-issues)
+                   '((error . "agent-repl: bin/requirements.sh check could not run (exit 2): [requirements] ERROR: manifest: x: unknown kind magic"))))
+    (should (member "doctor: requirements refused exit=2 output=\"[requirements] ERROR: manifest: x: unknown kind magic\n\""
+                    agent-repl-config-test--doctor-records))))
+
+(ert-deftest agent-repl-config-test-doctor-unparseable-requirements-report-is-an-error ()
+  "A runner answer that is not its report is an error, never silence."
+  (agent-repl-config-test--with-requirements 1 "not json"
+    (should (equal (agent-repl--doctor-requirements-issues)
+                   '((error . "agent-repl: bin/requirements.sh check answered no report (exit 1): not json"))))
+    (should (seq-some (lambda (r) (string-prefix-p "doctor: requirements unparseable error=" r))
+                      agent-repl-config-test--doctor-records))))
+
+(ert-deftest agent-repl-config-test-doctor-runs-the-module-runner-check-json ()
+  "The doctor runs the module's own runner with check --json."
+  (agent-repl-config-test--with-doctor
+    (let (called)
+      (cl-letf (((symbol-function 'call-process)
+                 (lambda (program _in _out _display &rest args)
+                   (setq called (cons program args))
+                   (insert "[]")
+                   0)))
+        (should (equal (agent-repl--doctor-run-requirements) '(0 . "[]")))
+        (should (equal called (list (expand-file-name "bin/requirements.sh" agent-repl-config-test--module-root)
+                                    "check" "--json")))))))
+
+(ert-deftest agent-repl-config-test-doctor-aggregates-the-requirements-provider ()
+  "The aggregation names the requirements provider, so doom doctor runs it."
+  (with-temp-buffer
+    (insert-file-contents (expand-file-name "doctor.el" agent-repl-config-test--module-root))
+    (should (search-forward "agent-repl--doctor-requirements-issues\n" nil t))))
+
 (ert-deftest agent-repl-config-test-doctor-reports-no-daemon-addr ()
   "An absent daemon.addr means no daemon has been started."
   (agent-repl-config-test--with-doctor
