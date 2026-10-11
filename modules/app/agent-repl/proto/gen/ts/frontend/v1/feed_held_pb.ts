@@ -1,20 +1,23 @@
 // feed_held.proto — THE HELD SECTION: the part of a workspace's ROOT feed
 // that holds what has not yet settled into the conversation's history — a
-// merge still running, a prompt the daemon is holding for delivery, a question
-// waiting for the user's answer. It is drawn at the root feed's tail, after
-// every row, with no heading and no divider, so a held item reads exactly as
-// the feed's newest row does.
+// prompt the daemon is holding for delivery, a question waiting for the user's
+// answer. It is drawn at the root feed's tail, after every row, with no
+// heading and no divider, so a held item reads exactly as the feed's newest
+// row does.
 //
 //   … settled rows, in order-key order …
-//   ┌ merge bubble ─────────────────────────────────────────┐   FeedHeldItem.merge
-//   │ ● merging ABC/fix-flaky-test → master          3m 12s │
+//   ┌ merge bubble ─────────────────────────────────────────┐   FeedRowOrder.pinned
+//   │ ● merging ABC/fix-flaky-test → master          3m 12s │   (a row, not held)
 //   └───────────────────────────────────────────────────────┘
 //   "also fix the footer"        ⏳ held · merge running       FeedHeldItem.prompt
 //   ?  take this merge off the queue?      [dequeue] [keep]    FeedHeldItem.offer
 //
-// HELD, THEN SETTLED. An item that settles — a merge that ends, a prompt the
-// daemon accepts for delivery — leaves this section and becomes an ordinary
-// row of the feed, keyed at the moment it settles: the bottom. Its row carries
+// A RUNNING MERGE IS NOT HELD. Its bubble is a row of the feed pinned below
+// every settled row (FeedRowOrder.pinned), updated in place while it runs.
+//
+// HELD, THEN SETTLED. A prompt that settles — the daemon accepts it for
+// delivery — leaves this section and becomes an ordinary row of the feed,
+// keyed at the moment it settles: the bottom. Its row carries
 // the SAME FeedId its held item carried, so a client keeps one element across
 // the move, and the move reaches the client as ONE change (the root feed's
 // held-section frame carries the section and the rows that settled out of it
@@ -45,7 +48,7 @@ import type { TurnId } from "../../conversation/v1/turn_pb";
 import { file_conversation_v1_turn } from "../../conversation/v1/turn_pb";
 import type { UserSaid } from "../../conversation/v1/user_pb";
 import { file_conversation_v1_user } from "../../conversation/v1/user_pb";
-import type { FeedId, FeedMerge } from "./feed_pb";
+import type { FeedId } from "./feed_pb";
 import { file_frontend_v1_feed } from "./feed_pb";
 import type { Message } from "@bufbuild/protobuf";
 
@@ -53,7 +56,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file frontend/v1/feed_held.proto.
  */
 export const file_frontend_v1_feed_held: GenFile = /*@__PURE__*/
-  fileDesc("Chtmcm9udGVuZC92MS9mZWVkX2hlbGQucHJvdG8SC2Zyb250ZW5kLnYxIjQKCEZlZWRIZWxkEigKBWl0ZW1zGAEgAygLMhkuZnJvbnRlbmQudjEuRmVlZEhlbGRJdGVtIrQBCgxGZWVkSGVsZEl0ZW0SHwoCaWQYASABKAsyEy5mcm9udGVuZC52MS5GZWVkSWQSJwoFbWVyZ2UYAiABKAsyFi5mcm9udGVuZC52MS5GZWVkTWVyZ2VIABIpCgZwcm9tcHQYAyABKAsyFy5mcm9udGVuZC52MS5IZWxkUHJvbXB0SAASJwoFb2ZmZXIYBCABKAsyFi5mcm9udGVuZC52MS5IZWxkT2ZmZXJIAEIGCgRpdGVtIrUKCgpIZWxkUHJvbXB0EiUKBHR1cm4YASABKAsyFy5jb252ZXJzYXRpb24udjEuVHVybklkEicKBHNhaWQYAiABKAsyGS5jb252ZXJzYXRpb24udjEuVXNlclNhaWQSMgoJcXVldWVkX2F0GAMgASgLMh8uZnJvbnRlbmQudjEuSGVsZFByb21wdFF1ZXVlZEF0EjkKC2NsYXNzaWZ5aW5nGAQgASgLMiIuZnJvbnRlbmQudjEuSGVsZFByb21wdENsYXNzaWZ5aW5nSAASNQoJaW50ZXJqZWN0GAUgASgLMiAuZnJvbnRlbmQudjEuSGVsZFByb21wdEludGVyamVjdEgAEkIKEWhvbGRfZm9yX3R1cm5fZW5kGAYgASgLMiUuZnJvbnRlbmQudjEuSGVsZFByb21wdEhvbGRGb3JUdXJuRW5kSAASPwoPYWZ0ZXJfdG9vbF9jYWxsGBEgASgLMiQuZnJvbnRlbmQudjEuSGVsZFByb21wdEFmdGVyVG9vbENhbGxIABJKChR1bmludGVycnVwdGlibGVfdHVybhgHIAEoCzIqLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRVbmludGVycnVwdGlibGVUdXJuSAASSgoUY2xhc3NpZmljYXRpb25fZXJyb3IYCCABKAsyKi5mcm9udGVuZC52MS5IZWxkUHJvbXB0Q2xhc3NpZmljYXRpb25FcnJvckgAEjgKC2RhZW1vbl9oZWxkGBMgASgLMiEuZnJvbnRlbmQudjEuSGVsZFByb21wdERhZW1vbkhlbGRIABJEChFhd2FpdGluZ19kZWxpdmVyeRgXIAEoCzInLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRBd2FpdGluZ0RlbGl2ZXJ5SAASNwoIc2h1dGRvd24YCSABKAsyIy5mcm9udGVuZC52MS5IZWxkUHJvbXB0U2h1dGRvd25Ib2xkSAESOQoJcmVjb25uZWN0GAsgASgLMiQuZnJvbnRlbmQudjEuSGVsZFByb21wdFJlY29ubmVjdEhvbGRIARJACg1idWlsZF9yZWZyZXNoGAwgASgLMicuZnJvbnRlbmQudjEuSGVsZFByb21wdEJ1aWxkUmVmcmVzaEhvbGRIARIxCgVtZXJnZRgUIAEoCzIgLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRNZXJnZUhvbGRIARI4Cgljb2xkX2dhdGUYGCABKAsyIy5mcm9udGVuZC52MS5IZWxkUHJvbXB0Q29sZEdhdGVIb2xkSAESLwoHZWRpdGluZxgNIAEoCzIeLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRFZGl0aW5nEisKBWJhZGdlGBUgASgLMhwuZnJvbnRlbmQudjEuSGVsZFByb21wdEJhZGdlEjAKBW5vdGVzGBYgAygLMiEuZnJvbnRlbmQudjEuSGVsZFByb21wdFN0YXR1c05vdGUSMwoJY29hbGVzY2VkGA8gASgLMiAuZnJvbnRlbmQudjEuSGVsZFByb21wdENvYWxlc2NlZBIoCgNhY3QYECABKAsyGy5mcm9udGVuZC52MS5IZWxkU2Vzc2lvbkFjdBI5Cgpmb2xkX2Fib3ZlGBIgASgLMiAuZnJvbnRlbmQudjEuSGVsZFByb21wdEZvbGRBYm92ZUgCiAEBQhAKDmNsYXNzaWZpY2F0aW9uQgYKBGhvbGRCDQoLX2ZvbGRfYWJvdmVKBAgKEAtKBAgOEA9SCmtlZXBfYWxpdmVSBmJhZGdlcyI9ChNIZWxkUHJvbXB0Rm9sZEFib3ZlEiYKBWFib3ZlGAEgASgLMhcuY29udmVyc2F0aW9uLnYxLlR1cm5JZCIVChNIZWxkUHJvbXB0Q29hbGVzY2VkIpABCg5IZWxkU2Vzc2lvbkFjdBIxCgVtb2RlbBgBIAEoCzIgLmZyb250ZW5kLnYxLkhlbGRTZXNzaW9uQWN0TW9kZWxIABJECg9wZXJtaXNzaW9uX21vZGUYAiABKAsyKS5mcm9udGVuZC52MS5IZWxkU2Vzc2lvbkFjdFBlcm1pc3Npb25Nb2RlSABCBQoDYWN0IiQKE0hlbGRTZXNzaW9uQWN0TW9kZWwSDQoFbW9kZWwYASABKAkiLAocSGVsZFNlc3Npb25BY3RQZXJtaXNzaW9uTW9kZRIMCgRtb2RlGAEgASgJIqYHCg9IZWxkUHJvbXB0QmFkZ2USDQoFbGFiZWwYASABKAkSEwoGZGV0YWlsGAIgASgJSAGIAQESPgoLY2xhc3NpZnlpbmcYAyABKAsyJy5mcm9udGVuZC52MS5IZWxkUHJvbXB0QmFkZ2VDbGFzc2lmeWluZ0gAEjoKCWludGVyamVjdBgEIAEoCzIlLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRCYWRnZUludGVyamVjdEgAEkQKD2FmdGVyX3Rvb2xfY2FsbBgFIAEoCzIpLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRCYWRnZUFmdGVyVG9vbENhbGxIABJHChFob2xkX2Zvcl90dXJuX2VuZBgGIAEoCzIqLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRCYWRnZUhvbGRGb3JUdXJuRW5kSAASTwoUdW5pbnRlcnJ1cHRpYmxlX3R1cm4YByABKAsyLy5mcm9udGVuZC52MS5IZWxkUHJvbXB0QmFkZ2VVbmludGVycnVwdGlibGVUdXJuSAASTwoUY2xhc3NpZmljYXRpb25fZXJyb3IYCCABKAsyLy5mcm9udGVuZC52MS5IZWxkUHJvbXB0QmFkZ2VDbGFzc2lmaWNhdGlvbkVycm9ySAASNgoHZWRpdGluZxgJIAEoCzIjLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRCYWRnZUVkaXRpbmdIABI4CghzaHV0ZG93bhgKIAEoCzIkLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRCYWRnZVNodXRkb3duSAASQQoNYnVpbGRfcmVmcmVzaBgLIAEoCzIoLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRCYWRnZUJ1aWxkUmVmcmVzaEgAEjoKCXJlY29ubmVjdBgMIAEoCzIlLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRCYWRnZVJlY29ubmVjdEgAEjIKBW1lcmdlGA0gASgLMiEuZnJvbnRlbmQudjEuSGVsZFByb21wdEJhZGdlTWVyZ2VIABI5Cgljb2xkX2dhdGUYDiABKAsyJC5mcm9udGVuZC52MS5IZWxkUHJvbXB0QmFkZ2VDb2xkR2F0ZUgAEkkKEWF3YWl0aW5nX2RlbGl2ZXJ5GA8gASgLMiwuZnJvbnRlbmQudjEuSGVsZFByb21wdEJhZGdlQXdhaXRpbmdEZWxpdmVyeUgAQgwKCnN0YW5kc19mb3JCCQoHX2RldGFpbCIcChpIZWxkUHJvbXB0QmFkZ2VDbGFzc2lmeWluZyIaChhIZWxkUHJvbXB0QmFkZ2VJbnRlcmplY3QiHgocSGVsZFByb21wdEJhZGdlQWZ0ZXJUb29sQ2FsbCIfCh1IZWxkUHJvbXB0QmFkZ2VIb2xkRm9yVHVybkVuZCIkCiJIZWxkUHJvbXB0QmFkZ2VVbmludGVycnVwdGlibGVUdXJuIiQKIkhlbGRQcm9tcHRCYWRnZUNsYXNzaWZpY2F0aW9uRXJyb3IiGAoWSGVsZFByb21wdEJhZGdlRWRpdGluZyIZChdIZWxkUHJvbXB0QmFkZ2VTaHV0ZG93biIdChtIZWxkUHJvbXB0QmFkZ2VCdWlsZFJlZnJlc2giGgoYSGVsZFByb21wdEJhZGdlUmVjb25uZWN0IhYKFEhlbGRQcm9tcHRCYWRnZU1lcmdlIhkKF0hlbGRQcm9tcHRCYWRnZUNvbGRHYXRlIiEKH0hlbGRQcm9tcHRCYWRnZUF3YWl0aW5nRGVsaXZlcnkiKAoUSGVsZFByb21wdFN0YXR1c05vdGUSEAoIc2VudGVuY2UYASABKAkiEwoRSGVsZFByb21wdEVkaXRpbmciIwoSSGVsZFByb21wdFF1ZXVlZEF0Eg0KBWF0X21zGAEgASgDIhcKFUhlbGRQcm9tcHRDbGFzc2lmeWluZyIoChNIZWxkUHJvbXB0SW50ZXJqZWN0EhEKCXJhdGlvbmFsZRgBIAEoCSIsChdIZWxkUHJvbXB0QWZ0ZXJUb29sQ2FsbBIRCglyYXRpb25hbGUYASABKAkiYAoYSGVsZFByb21wdEhvbGRGb3JUdXJuRW5kEhEKCXJhdGlvbmFsZRgBIAEoCRIxCghhY2NlcHRlZBgCIAEoCzIfLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRBY2NlcHRlZCImChJIZWxkUHJvbXB0QWNjZXB0ZWQSEAoIYWNjZXB0ZWQYASABKAgiUQodSGVsZFByb21wdFVuaW50ZXJydXB0aWJsZVR1cm4SMAoHY29tbWFuZBgBIAEoDjIfLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uQ29tbWFuZCIvCh1IZWxkUHJvbXB0Q2xhc3NpZmljYXRpb25FcnJvchIOCgZkZXRhaWwYASABKAkiLQoWSGVsZFByb21wdFNodXRkb3duSG9sZBITCgtzY2hlZHVsZV9pZBgBIAEoCSIZChdIZWxkUHJvbXB0UmVjb25uZWN0SG9sZCIVChNIZWxkUHJvbXB0TWVyZ2VIb2xkIhYKFEhlbGRQcm9tcHREYWVtb25IZWxkIhgKFkhlbGRQcm9tcHRDb2xkR2F0ZUhvbGQiHAoaSGVsZFByb21wdEF3YWl0aW5nRGVsaXZlcnkiHAoaSGVsZFByb21wdEJ1aWxkUmVmcmVzaEhvbGQiUQoJSGVsZE9mZmVyEjsKDW1lcmdlX2RlcXVldWUYASABKAsyIi5mcm9udGVuZC52MS5IZWxkT2ZmZXJNZXJnZURlcXVldWVIAEIHCgVvZmZlciJJChVIZWxkT2ZmZXJNZXJnZURlcXVldWUSMAoIaGVhZGxpbmUYASABKAsyHi5mcm9udGVuZC52MS5IZWxkT2ZmZXJIZWFkbGluZSIhChFIZWxkT2ZmZXJIZWFkbGluZRIMCgR0ZXh0GAEgASgJQihaJmFnZW50cmVwbC9wcm90by9mcm9udGVuZC92MTtmcm9udGVuZHYxYgZwcm90bzM", [file_conversation_v1_slash_command, file_conversation_v1_turn, file_conversation_v1_user, file_frontend_v1_feed]);
+  fileDesc("Chtmcm9udGVuZC92MS9mZWVkX2hlbGQucHJvdG8SC2Zyb250ZW5kLnYxIjQKCEZlZWRIZWxkEigKBWl0ZW1zGAEgAygLMhkuZnJvbnRlbmQudjEuRmVlZEhlbGRJdGVtIpgBCgxGZWVkSGVsZEl0ZW0SHwoCaWQYASABKAsyEy5mcm9udGVuZC52MS5GZWVkSWQSKQoGcHJvbXB0GAMgASgLMhcuZnJvbnRlbmQudjEuSGVsZFByb21wdEgAEicKBW9mZmVyGAQgASgLMhYuZnJvbnRlbmQudjEuSGVsZE9mZmVySABCBgoEaXRlbUoECAIQA1IFbWVyZ2UitQoKCkhlbGRQcm9tcHQSJQoEdHVybhgBIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWQSJwoEc2FpZBgCIAEoCzIZLmNvbnZlcnNhdGlvbi52MS5Vc2VyU2FpZBIyCglxdWV1ZWRfYXQYAyABKAsyHy5mcm9udGVuZC52MS5IZWxkUHJvbXB0UXVldWVkQXQSOQoLY2xhc3NpZnlpbmcYBCABKAsyIi5mcm9udGVuZC52MS5IZWxkUHJvbXB0Q2xhc3NpZnlpbmdIABI1CglpbnRlcmplY3QYBSABKAsyIC5mcm9udGVuZC52MS5IZWxkUHJvbXB0SW50ZXJqZWN0SAASQgoRaG9sZF9mb3JfdHVybl9lbmQYBiABKAsyJS5mcm9udGVuZC52MS5IZWxkUHJvbXB0SG9sZEZvclR1cm5FbmRIABI/Cg9hZnRlcl90b29sX2NhbGwYESABKAsyJC5mcm9udGVuZC52MS5IZWxkUHJvbXB0QWZ0ZXJUb29sQ2FsbEgAEkoKFHVuaW50ZXJydXB0aWJsZV90dXJuGAcgASgLMiouZnJvbnRlbmQudjEuSGVsZFByb21wdFVuaW50ZXJydXB0aWJsZVR1cm5IABJKChRjbGFzc2lmaWNhdGlvbl9lcnJvchgIIAEoCzIqLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRDbGFzc2lmaWNhdGlvbkVycm9ySAASOAoLZGFlbW9uX2hlbGQYEyABKAsyIS5mcm9udGVuZC52MS5IZWxkUHJvbXB0RGFlbW9uSGVsZEgAEkQKEWF3YWl0aW5nX2RlbGl2ZXJ5GBcgASgLMicuZnJvbnRlbmQudjEuSGVsZFByb21wdEF3YWl0aW5nRGVsaXZlcnlIABI3CghzaHV0ZG93bhgJIAEoCzIjLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRTaHV0ZG93bkhvbGRIARI5CglyZWNvbm5lY3QYCyABKAsyJC5mcm9udGVuZC52MS5IZWxkUHJvbXB0UmVjb25uZWN0SG9sZEgBEkAKDWJ1aWxkX3JlZnJlc2gYDCABKAsyJy5mcm9udGVuZC52MS5IZWxkUHJvbXB0QnVpbGRSZWZyZXNoSG9sZEgBEjEKBW1lcmdlGBQgASgLMiAuZnJvbnRlbmQudjEuSGVsZFByb21wdE1lcmdlSG9sZEgBEjgKCWNvbGRfZ2F0ZRgYIAEoCzIjLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRDb2xkR2F0ZUhvbGRIARIvCgdlZGl0aW5nGA0gASgLMh4uZnJvbnRlbmQudjEuSGVsZFByb21wdEVkaXRpbmcSKwoFYmFkZ2UYFSABKAsyHC5mcm9udGVuZC52MS5IZWxkUHJvbXB0QmFkZ2USMAoFbm90ZXMYFiADKAsyIS5mcm9udGVuZC52MS5IZWxkUHJvbXB0U3RhdHVzTm90ZRIzCgljb2FsZXNjZWQYDyABKAsyIC5mcm9udGVuZC52MS5IZWxkUHJvbXB0Q29hbGVzY2VkEigKA2FjdBgQIAEoCzIbLmZyb250ZW5kLnYxLkhlbGRTZXNzaW9uQWN0EjkKCmZvbGRfYWJvdmUYEiABKAsyIC5mcm9udGVuZC52MS5IZWxkUHJvbXB0Rm9sZEFib3ZlSAKIAQFCEAoOY2xhc3NpZmljYXRpb25CBgoEaG9sZEINCgtfZm9sZF9hYm92ZUoECAoQC0oECA4QD1IKa2VlcF9hbGl2ZVIGYmFkZ2VzIj0KE0hlbGRQcm9tcHRGb2xkQWJvdmUSJgoFYWJvdmUYASABKAsyFy5jb252ZXJzYXRpb24udjEuVHVybklkIhUKE0hlbGRQcm9tcHRDb2FsZXNjZWQikAEKDkhlbGRTZXNzaW9uQWN0EjEKBW1vZGVsGAEgASgLMiAuZnJvbnRlbmQudjEuSGVsZFNlc3Npb25BY3RNb2RlbEgAEkQKD3Blcm1pc3Npb25fbW9kZRgCIAEoCzIpLmZyb250ZW5kLnYxLkhlbGRTZXNzaW9uQWN0UGVybWlzc2lvbk1vZGVIAEIFCgNhY3QiJAoTSGVsZFNlc3Npb25BY3RNb2RlbBINCgVtb2RlbBgBIAEoCSIsChxIZWxkU2Vzc2lvbkFjdFBlcm1pc3Npb25Nb2RlEgwKBG1vZGUYASABKAkipgcKD0hlbGRQcm9tcHRCYWRnZRINCgVsYWJlbBgBIAEoCRITCgZkZXRhaWwYAiABKAlIAYgBARI+CgtjbGFzc2lmeWluZxgDIAEoCzInLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRCYWRnZUNsYXNzaWZ5aW5nSAASOgoJaW50ZXJqZWN0GAQgASgLMiUuZnJvbnRlbmQudjEuSGVsZFByb21wdEJhZGdlSW50ZXJqZWN0SAASRAoPYWZ0ZXJfdG9vbF9jYWxsGAUgASgLMikuZnJvbnRlbmQudjEuSGVsZFByb21wdEJhZGdlQWZ0ZXJUb29sQ2FsbEgAEkcKEWhvbGRfZm9yX3R1cm5fZW5kGAYgASgLMiouZnJvbnRlbmQudjEuSGVsZFByb21wdEJhZGdlSG9sZEZvclR1cm5FbmRIABJPChR1bmludGVycnVwdGlibGVfdHVybhgHIAEoCzIvLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRCYWRnZVVuaW50ZXJydXB0aWJsZVR1cm5IABJPChRjbGFzc2lmaWNhdGlvbl9lcnJvchgIIAEoCzIvLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRCYWRnZUNsYXNzaWZpY2F0aW9uRXJyb3JIABI2CgdlZGl0aW5nGAkgASgLMiMuZnJvbnRlbmQudjEuSGVsZFByb21wdEJhZGdlRWRpdGluZ0gAEjgKCHNodXRkb3duGAogASgLMiQuZnJvbnRlbmQudjEuSGVsZFByb21wdEJhZGdlU2h1dGRvd25IABJBCg1idWlsZF9yZWZyZXNoGAsgASgLMiguZnJvbnRlbmQudjEuSGVsZFByb21wdEJhZGdlQnVpbGRSZWZyZXNoSAASOgoJcmVjb25uZWN0GAwgASgLMiUuZnJvbnRlbmQudjEuSGVsZFByb21wdEJhZGdlUmVjb25uZWN0SAASMgoFbWVyZ2UYDSABKAsyIS5mcm9udGVuZC52MS5IZWxkUHJvbXB0QmFkZ2VNZXJnZUgAEjkKCWNvbGRfZ2F0ZRgOIAEoCzIkLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRCYWRnZUNvbGRHYXRlSAASSQoRYXdhaXRpbmdfZGVsaXZlcnkYDyABKAsyLC5mcm9udGVuZC52MS5IZWxkUHJvbXB0QmFkZ2VBd2FpdGluZ0RlbGl2ZXJ5SABCDAoKc3RhbmRzX2ZvckIJCgdfZGV0YWlsIhwKGkhlbGRQcm9tcHRCYWRnZUNsYXNzaWZ5aW5nIhoKGEhlbGRQcm9tcHRCYWRnZUludGVyamVjdCIeChxIZWxkUHJvbXB0QmFkZ2VBZnRlclRvb2xDYWxsIh8KHUhlbGRQcm9tcHRCYWRnZUhvbGRGb3JUdXJuRW5kIiQKIkhlbGRQcm9tcHRCYWRnZVVuaW50ZXJydXB0aWJsZVR1cm4iJAoiSGVsZFByb21wdEJhZGdlQ2xhc3NpZmljYXRpb25FcnJvciIYChZIZWxkUHJvbXB0QmFkZ2VFZGl0aW5nIhkKF0hlbGRQcm9tcHRCYWRnZVNodXRkb3duIh0KG0hlbGRQcm9tcHRCYWRnZUJ1aWxkUmVmcmVzaCIaChhIZWxkUHJvbXB0QmFkZ2VSZWNvbm5lY3QiFgoUSGVsZFByb21wdEJhZGdlTWVyZ2UiGQoXSGVsZFByb21wdEJhZGdlQ29sZEdhdGUiIQofSGVsZFByb21wdEJhZGdlQXdhaXRpbmdEZWxpdmVyeSIoChRIZWxkUHJvbXB0U3RhdHVzTm90ZRIQCghzZW50ZW5jZRgBIAEoCSITChFIZWxkUHJvbXB0RWRpdGluZyIjChJIZWxkUHJvbXB0UXVldWVkQXQSDQoFYXRfbXMYASABKAMiFwoVSGVsZFByb21wdENsYXNzaWZ5aW5nIigKE0hlbGRQcm9tcHRJbnRlcmplY3QSEQoJcmF0aW9uYWxlGAEgASgJIiwKF0hlbGRQcm9tcHRBZnRlclRvb2xDYWxsEhEKCXJhdGlvbmFsZRgBIAEoCSJgChhIZWxkUHJvbXB0SG9sZEZvclR1cm5FbmQSEQoJcmF0aW9uYWxlGAEgASgJEjEKCGFjY2VwdGVkGAIgASgLMh8uZnJvbnRlbmQudjEuSGVsZFByb21wdEFjY2VwdGVkIiYKEkhlbGRQcm9tcHRBY2NlcHRlZBIQCghhY2NlcHRlZBgBIAEoCCJRCh1IZWxkUHJvbXB0VW5pbnRlcnJ1cHRpYmxlVHVybhIwCgdjb21tYW5kGAEgASgOMh8uY29udmVyc2F0aW9uLnYxLlNlc3Npb25Db21tYW5kIi8KHUhlbGRQcm9tcHRDbGFzc2lmaWNhdGlvbkVycm9yEg4KBmRldGFpbBgBIAEoCSItChZIZWxkUHJvbXB0U2h1dGRvd25Ib2xkEhMKC3NjaGVkdWxlX2lkGAEgASgJIhkKF0hlbGRQcm9tcHRSZWNvbm5lY3RIb2xkIhUKE0hlbGRQcm9tcHRNZXJnZUhvbGQiFgoUSGVsZFByb21wdERhZW1vbkhlbGQiGAoWSGVsZFByb21wdENvbGRHYXRlSG9sZCIcChpIZWxkUHJvbXB0QXdhaXRpbmdEZWxpdmVyeSIcChpIZWxkUHJvbXB0QnVpbGRSZWZyZXNoSG9sZCJRCglIZWxkT2ZmZXISOwoNbWVyZ2VfZGVxdWV1ZRgBIAEoCzIiLmZyb250ZW5kLnYxLkhlbGRPZmZlck1lcmdlRGVxdWV1ZUgAQgcKBW9mZmVyIkkKFUhlbGRPZmZlck1lcmdlRGVxdWV1ZRIwCghoZWFkbGluZRgBIAEoCzIeLmZyb250ZW5kLnYxLkhlbGRPZmZlckhlYWRsaW5lIiEKEUhlbGRPZmZlckhlYWRsaW5lEgwKBHRleHQYASABKAlCKFomYWdlbnRyZXBsL3Byb3RvL2Zyb250ZW5kL3YxO2Zyb250ZW5kdjFiBnByb3RvMw", [file_conversation_v1_slash_command, file_conversation_v1_turn, file_conversation_v1_user, file_frontend_v1_feed]);
 
 /**
  * The held section of one workspace's root feed, resolved by the daemon and
@@ -64,10 +67,8 @@ export const file_frontend_v1_feed_held: GenFile = /*@__PURE__*/
  */
 export type FeedHeld = Message<"frontend.v1.FeedHeld"> & {
   /**
-   * The held items, in display order: every held merge first, then the held
-   * prompts in queue order, then a posed offer. A prompt held while a merge
-   * runs is delivered after the merge, so the item that settles first sits
-   * nearest the settled rows.
+   * The held items, in display order: the held prompts in queue order, then a
+   * posed offer. The prompt that settles first sits nearest the settled rows.
    *
    * @generated from field: repeated frontend.v1.FeedHeldItem items = 1;
    */
@@ -89,9 +90,9 @@ export const FeedHeldSchema: GenMessage<FeedHeld> = /*@__PURE__*/
 export type FeedHeldItem = Message<"frontend.v1.FeedHeldItem"> & {
   /**
    * The item's identity, and the reconciliation key a client keeps its element
-   * under. For a merge it is the merge head row's FeedId, and for a prompt the
-   * FeedId its prompt row will carry once it settles, so the settled row and
-   * the held item are one element to the client. An offer, which never settles,
+   * under. For a prompt it is the FeedId its prompt row will carry once it
+   * settles, so the settled row and the held item are one element to the
+   * client. An offer, which never settles,
    * has a FeedId of its own. Opaque and daemon-minted, like every FeedId.
    *
    * @generated from field: frontend.v1.FeedId id = 1;
@@ -100,24 +101,12 @@ export type FeedHeldItem = Message<"frontend.v1.FeedHeldItem"> & {
 
   /**
    * What is held. THE ARM IS THE KIND, and each kind is answered differently —
-   * a merge runs to its end, a prompt is released or dropped, an offer is
-   * answered — so a consumer routes on the arm rather than on anything inside
-   * it.
+   * a prompt is released or dropped, an offer is answered — so a consumer
+   * routes on the arm rather than on anything inside it.
    *
    * @generated from oneof frontend.v1.FeedHeldItem.item
    */
   item: {
-    /**
-     * A merge that is still queued or running. Drawn as the merge bubble it
-     * settles as: the same head, and the same sub-feed opened by `id`
-     * (OpenFeed), so its tabs and its fold carry across the settle. Its result
-     * arm is always `update` here; a terminal merge has settled.
-     *
-     * @generated from field: frontend.v1.FeedMerge merge = 2;
-     */
-    value: FeedMerge;
-    case: "merge";
-  } | {
     /**
      * A prompt the daemon is holding for delivery.
      *
