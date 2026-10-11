@@ -377,20 +377,34 @@ func draftAnswers(served *questionState) *conversationv1.AgentQuestionAnswers {
 	answers := &conversationv1.AgentQuestionAnswers{}
 	for i, asked := range served.batch.GetQuestions() {
 		draft := served.drafts[i]
-		selection := &conversationv1.AgentQuestionSelection{
-			Question: &conversationv1.AgentQuestionText{Text: asked.GetQuestion().GetText()},
-		}
-		for _, label := range draft.GetChosen() {
-			selection.Chosen = append(selection.Chosen, &conversationv1.AgentQuestionChoice{
-				Label: &conversationv1.AgentQuestionOptionLabel{Label: label},
-			})
-		}
+		var other *string
 		if draft.OtherText != nil {
-			selection.FreeText = &conversationv1.AgentQuestionFreeText{Text: draft.GetOtherText().GetText()}
+			text := draft.GetOtherText().GetText()
+			other = &text
 		}
-		answers.Answers = append(answers.Answers, selection)
+		answers.Answers = append(answers.Answers, QuestionSelection(asked.GetQuestion().GetText(), draft.GetChosen(), other))
 	}
 	return answers
+}
+
+// QuestionSelection builds ONE question's answer for the producer: the question
+// named by its served text, the chosen labels in order, and the typed answer
+// when other is non-nil (nil is "nothing typed", never the empty string). It
+// is the one builder of the shape, for the card's own draft and for a client's
+// whole-batch answer alike.
+func QuestionSelection(question string, chosen []string, other *string) *conversationv1.AgentQuestionSelection {
+	selection := &conversationv1.AgentQuestionSelection{
+		Question: &conversationv1.AgentQuestionText{Text: question},
+	}
+	for _, label := range chosen {
+		selection.Chosen = append(selection.Chosen, &conversationv1.AgentQuestionChoice{
+			Label: &conversationv1.AgentQuestionOptionLabel{Label: label},
+		})
+	}
+	if other != nil {
+		selection.FreeText = &conversationv1.AgentQuestionFreeText{Text: *other}
+	}
+	return selection
 }
 
 // publishOpenQuestion re-publishes a standing card from its draft, in place.

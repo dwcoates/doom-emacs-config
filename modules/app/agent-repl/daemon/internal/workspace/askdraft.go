@@ -57,10 +57,8 @@ func (v *verbs) AnswerStandingAsk(ctx context.Context, ws ids.WorkspaceID, targe
 		log.Info(opStandingAsk, "the typed send denies the standing permission ask with its text as the reason", nil)
 		return true, v.AnswerPermission(ctx, ws, &conversationv1.AgentAnswer{
 			Answer: &conversationv1.AgentAnswer_PermissionDecision{PermissionDecision: &conversationv1.AgentPermissionDecision{
-				Ask: &conversationv1.AgentPermissionId{Value: ask.ID},
-				Decision: &conversationv1.AgentPermissionDecision_Denied{
-					Denied: &conversationv1.AgentPermissionDeniedByUser{Message: text},
-				},
+				Ask:      &conversationv1.AgentPermissionId{Value: ask.ID},
+				Decision: DeniedByUser(text),
 			}},
 		})
 	default:
@@ -104,4 +102,13 @@ func (v *verbs) editQuestionDraft(ctx context.Context, rpc string, ws ids.Worksp
 		return err
 	}
 	return nil
+}
+
+// DeniedByUser is a permission decision's deny arm carrying the user's reason
+// (empty for none): the one builder of the shape, for the card's deny button
+// and a typed deny alike.
+func DeniedByUser(message string) *conversationv1.AgentPermissionDecision_Denied {
+	return &conversationv1.AgentPermissionDecision_Denied{
+		Denied: &conversationv1.AgentPermissionDeniedByUser{Message: message},
+	}
 }
