@@ -33,7 +33,6 @@ import (
 	"claude-repld/internal/prompts"
 	"claude-repld/internal/resolve/feed"
 	"claude-repld/internal/resolve/footer"
-	"claude-repld/internal/resolve/holds"
 	"claude-repld/internal/resolve/sidebar"
 	"claude-repld/internal/resolve/topbar"
 	"claude-repld/internal/rollout"
@@ -451,7 +450,6 @@ type Deps struct {
 	Footer       footer.Resolver
 	Topbar       topbar.Resolver
 	Sidebar      sidebar.Resolver
-	Holds        holds.Resolver
 	Host         HostRelay
 	// Banners raises the desktop banner an agent notification earns.
 	Banners Banners
@@ -775,8 +773,6 @@ func New(deps Deps) (Verbs, error) {
 		return nil, missing("a topbar resolver")
 	case deps.Sidebar == nil:
 		return nil, missing("a sidebar resolver")
-	case deps.Holds == nil:
-		return nil, missing("a holds resolver")
 	case deps.Host == nil:
 		return nil, missing("a host relay")
 	case deps.Banners == nil:

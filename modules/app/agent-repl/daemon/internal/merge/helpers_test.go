@@ -1404,7 +1404,7 @@ func (s *fakeSidebar) SetMerge(_ ids.WorkspaceID, facts footer.MergeFacts) {
 
 // fakeHolds records the tray's offers.
 type fakeHolds struct {
-	holds.Resolver
+	holds.Sink
 	mu     sync.Mutex
 	offers []*frontendv1.HeldOffer
 }

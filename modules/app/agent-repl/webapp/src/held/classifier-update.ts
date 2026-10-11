@@ -8,13 +8,13 @@
  * classifier's brief and commits it. The card's own words and verdict ride the
  * request as the worked example the rewrite is shown.
  *
- * THE FORM OUTLIVES THE PUSH. The tray redraws a card's expand-only details on
+ * THE FORM OUTLIVES THE PUSH. The section redraws a card's expand-only details on
  * every push, and a push can land while the reader is typing (another prompt
  * queued, a badge changed). So the form is ONE element per held turn, kept by
  * `ClassifierUpdateForms` across pushes and handed back to every drawing of
  * that turn's card, where `drawBubble` keeps it in place: what the reader typed,
  * the focus, and an update in flight all survive a redraw. The registry lives
- * as long as the tray, and drops a turn's form once its card has left.
+ * as long as the section, and drops a turn's form once its card has left.
  *
  * AN OUTCOME IS SAID AT THE FORM, and a failure is ALSO filed on the warning
  * chip when the card has already left (its prompt was delivered while the
@@ -32,7 +32,7 @@ import {
   type UpdateClassifierPromptUncommittedChanges,
   type UpdateClassifierPromptUnchanged,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_classifier_prompt_pb";
-import type { HeldPrompt } from "../../../proto/gen/ts/frontend/v1/daemon_hold_pb";
+import type { HeldPrompt } from "../../../proto/gen/ts/frontend/v1/feed_held_pb";
 import { labelledControl, type Control } from "../control.js";
 import { controlPlaneFailed } from "../failure/sink.js";
 import { log } from "../log.js";
@@ -122,7 +122,7 @@ export interface ClassifierUpdateForm {
   toggle(): void;
 }
 
-/** Every held turn's form, kept across the tray's pushes. */
+/** Every held turn's form, kept across the section's pushes. */
 export class ClassifierUpdateForms {
   private readonly forms = new Map<string, FormState>();
 
@@ -139,7 +139,7 @@ export class ClassifierUpdateForms {
     return state.form;
   }
 
-  /** Drop the form of every turn not in HELD: its card has left the tray. */
+  /** Drop the form of every turn not in HELD: its card has left the section. */
   retain(held: readonly string[]): void {
     for (const turn of [...this.forms.keys()]) {
       if (!held.includes(turn)) this.forms.delete(turn);
@@ -176,7 +176,7 @@ function createForm(ctx: AppContext, turn: string, example: ClassifierExample): 
   const apply = button("apply", "Apply", () => {
     void guardMalformed(
       ctx,
-      "tray.classifier-update.apply",
+      "held.classifier-update.apply",
       submit(ctx, turn, state.example, { element, input, status, dismiss, syncApply }),
     );
   });
@@ -201,7 +201,7 @@ function createForm(ctx: AppContext, turn: string, example: ClassifierExample): 
       toggle: () => {
         element.hidden = !element.hidden;
         log.debug("toggled a held card's classifier update form", {
-          operation: "tray.classifier-update.toggle",
+          operation: "held.classifier-update.toggle",
           context: { turn, open: !element.hidden },
         });
         if (!element.hidden) input.focus();
@@ -231,7 +231,7 @@ interface FormParts {
 async function submit(ctx: AppContext, turn: string, example: ClassifierExample, parts: FormParts): Promise<void> {
   const instruction = parts.input.value.trim();
   log.info("asking the daemon to update the classifier", {
-    operation: "tray.classifier-update.apply",
+    operation: "held.classifier-update.apply",
     context: { turn, route: ClassifierRoute[example.route], length: instruction.length },
   });
   setBusy(parts, true);
@@ -251,7 +251,7 @@ async function submit(ctx: AppContext, turn: string, example: ClassifierExample,
     switch (result.case) {
       case "success":
         log.info("the daemon updated the classifier", {
-          operation: "tray.classifier-update.updated",
+          operation: "held.classifier-update.updated",
           context: { turn, commit: result.value.commit, path: result.value.path },
         });
         parts.input.value = "";
@@ -262,7 +262,7 @@ async function submit(ctx: AppContext, turn: string, example: ClassifierExample,
         // A typed refusal is an ANSWER, recorded at INFO; the daemon records
         // its failures at ERROR where they happen.
         log.info(`UpdateClassifierPrompt refused: ${said.text}`, {
-          operation: "tray.classifier-update.refused",
+          operation: "held.classifier-update.refused",
           context: { turn, arm: said.arm, sentence: said.text },
         });
         failed(ctx, parts, said.arm, said.text);
@@ -279,7 +279,7 @@ async function submit(ctx: AppContext, turn: string, example: ClassifierExample,
     if (isMalformedView(err) || !(err instanceof ConnectError)) throw err;
     const failure = callFailure(err);
     log.error(`UpdateClassifierPrompt failed: ${failure.text}`, {
-      operation: "tray.classifier-update.failed",
+      operation: "held.classifier-update.failed",
       context: { turn, arm: failure.arm, cause: err },
     });
     failed(ctx, parts, failure.arm, failure.text);

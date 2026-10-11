@@ -54,7 +54,7 @@ func TestTheOwnersWorkedExampleOfTheHeldQueue(t *testing.T) {
 	compact := f.submit("/compact", "k-compact", origin).GetSuccess().GetTurn().GetTurn()
 
 	// Assert: the /compact is on the tray, waiting and unclassified.
-	awaitView(t, f, holds, "the held /compact on the tray", func(tray *frontendv1.DaemonHoldTray) bool {
+	awaitView(t, f, holds, "the held /compact on the tray", func(tray *frontendv1.FeedHeld) bool {
 		p := promptHeldEntry(tray, compact)
 		return p != nil && p.GetHoldForTurnEnd() != nil && text(p.GetSaid()) == "/compact"
 	})
@@ -69,7 +69,7 @@ func TestTheOwnersWorkedExampleOfTheHeldQueue(t *testing.T) {
 	readDoc := f.submit("read the doc file and continue", "k-read", origin).GetSuccess().GetTurn().GetTurn()
 
 	// Assert: held behind the cut, never classified.
-	awaitView(t, f, holds, "the prompt held behind the running compaction", func(tray *frontendv1.DaemonHoldTray) bool {
+	awaitView(t, f, holds, "the prompt held behind the running compaction", func(tray *frontendv1.FeedHeld) bool {
 		p := promptHeldEntry(tray, readDoc)
 		return p != nil && p.GetUninterruptibleTurn() != nil
 	})

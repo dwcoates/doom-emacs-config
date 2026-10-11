@@ -47,7 +47,6 @@ import (
 	"claude-repld/internal/prompts"
 	"claude-repld/internal/resolve/feed"
 	"claude-repld/internal/resolve/footer"
-	"claude-repld/internal/resolve/holds"
 	"claude-repld/internal/resolve/sidebar"
 	"claude-repld/internal/resolve/topbar"
 	"claude-repld/internal/revealpace"
@@ -546,11 +545,6 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		return nil, fmt.Errorf("claude-repld: build the feed resolver: %w", err)
 	}
 
-	holdsResolver, err := holds.New(p.Surfaces)
-	if err != nil {
-		return nil, fmt.Errorf("claude-repld: build the hold tray: %w", err)
-	}
-
 	// ---- the forwarders, and the fleet they let exist first ----
 
 	pushes := &serverForwarder{}
@@ -630,7 +624,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			Footer:    footerResolver,
 			Topbar:    topbarResolver,
 			Sidebar:   sidebarResolver,
-			Holds:     holdsResolver,
+			Holds:     feedResolver,
 			Lifecycle: lifecycle,
 			Title:     titleSynth,
 			Merge:     mergeAsks,
@@ -700,7 +694,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Feed:           feedResolver,
 		Footer:         footerResolver,
 		Sidebar:        sidebarResolver,
-		Holds:          holdsResolver,
+		Holds:          feedResolver,
 		Client:         fleet.Sender,
 		Revive:         fleet.Start,
 		Watcher:        fleet.Watcher,
@@ -726,7 +720,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	if err != nil {
 		return nil, fmt.Errorf("claude-repld: build the handover intake: %w", err)
 	}
-	views, err := handover.NewViews(topbarResolver, footerResolver, holdsResolver, sidebarResolver, log)
+	views, err := handover.NewViews(topbarResolver, footerResolver, sidebarResolver, log)
 	if err != nil {
 		return nil, fmt.Errorf("claude-repld: build the view republisher: %w", err)
 	}
@@ -909,7 +903,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Feed:         feedResolver,
 		Footer:       footerResolver,
 		Sidebar:      sidebarResolver,
-		Holds:        holdsResolver,
+		Holds:        feedResolver,
 		PromptsDir:   paths.PromptsDir,
 		CheckoutRoot: paths.Checkout,
 		Briefs:       merge.BriefsFrom(paths.PromptsDir),
@@ -978,7 +972,6 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Footer:       footerResolver,
 		Topbar:       topbarResolver,
 		Sidebar:      sidebarResolver,
-		Holds:        holdsResolver,
 		Host:         relay,
 		Banners:      notifier,
 		Sessions:     fleet,
@@ -1133,7 +1126,6 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			Footer:            footerResolver,
 			Topbar:            topbarResolver,
 			Sidebar:           sidebarResolver,
-			Holds:             holdsResolver,
 			LoudFaults:        loudFaults.Topic(),
 			Focus:             focus,
 			PersistentWifi:    wifi,

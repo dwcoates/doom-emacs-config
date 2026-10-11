@@ -166,7 +166,7 @@ func TestWatchFeedTailsFromTheMintedToken(t *testing.T) {
 	h := newHarness(t)
 	h.Feed.page = page()
 	h.Feed.token = &agentreplv1.FeedWatchToken{Value: "ft-1"}
-	h.Feed.tail = &fakeTail{rows: make(chan *frontendv1.FeedRow, 1), token: h.Feed.token}
+	h.Feed.tail = &fakeTail{pubs: make(chan feed.Publication, 1), token: h.Feed.token}
 	if _, err := h.Client.OpenFeed(context.Background(),
 		connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ref()})); err != nil {
 		t.Fatalf("OpenFeed: %v", err)
@@ -181,7 +181,7 @@ func TestWatchFeedTailsFromTheMintedToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("WatchFeed: %v", err)
 	}
-	h.Feed.tail.rows <- &frontendv1.FeedRow{Id: &frontendv1.FeedId{Value: "row-1"}}
+	h.Feed.tail.pubs <- feed.Publication{Row: &frontendv1.FeedRow{Id: &frontendv1.FeedId{Value: "row-1"}}}
 	if !stream.Receive() {
 		t.Fatalf("receive the row: %v", stream.Err())
 	}
@@ -198,7 +198,7 @@ func openRootWatch(t *testing.T, h *harness, ctx context.Context) *connect.Serve
 	t.Helper()
 	h.Feed.page = page()
 	h.Feed.token = &agentreplv1.FeedWatchToken{Value: "ft-1"}
-	h.Feed.tail = &fakeTail{rows: make(chan *frontendv1.FeedRow, 1), token: h.Feed.token}
+	h.Feed.tail = &fakeTail{pubs: make(chan feed.Publication, 1), token: h.Feed.token}
 	if _, err := h.Client.OpenFeed(context.Background(),
 		connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ref()})); err != nil {
 		t.Fatalf("OpenFeed: %v", err)

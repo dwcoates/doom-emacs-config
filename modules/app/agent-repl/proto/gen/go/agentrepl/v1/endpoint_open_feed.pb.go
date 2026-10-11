@@ -175,8 +175,13 @@ type OpenFeedSuccess struct {
 	// The feed's newest page, ready to draw before the tail begins.
 	Page *v11.FeedPage `protobuf:"bytes,1,opt,name=page,proto3" json:"page,omitempty"`
 	// The tail's address, pinned to begin exactly after this page's newest
-	// row. Echoed verbatim to WatchFeed.
-	Watch         *FeedWatchToken `protobuf:"bytes,2,opt,name=watch,proto3" json:"watch,omitempty"`
+	// row and this held section. Echoed verbatim to WatchFeed.
+	Watch *FeedWatchToken `protobuf:"bytes,2,opt,name=watch,proto3" json:"watch,omitempty"`
+	// The root feed's held section as it stands at the pin, drawn after the
+	// page's rows. SET for the root feed and UNSET for every sub-feed, which has
+	// no held section. Every later change of it arrives as a WatchFeed
+	// held-section frame.
+	Held          *v11.FeedHeld `protobuf:"bytes,3,opt,name=held,proto3,oneof" json:"held,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -221,6 +226,13 @@ func (x *OpenFeedSuccess) GetPage() *v11.FeedPage {
 func (x *OpenFeedSuccess) GetWatch() *FeedWatchToken {
 	if x != nil {
 		return x.Watch
+	}
+	return nil
+}
+
+func (x *OpenFeedSuccess) GetHeld() *v11.FeedHeld {
+	if x != nil {
+		return x.Held
 	}
 	return nil
 }
@@ -617,7 +629,7 @@ var File_agentrepl_v1_endpoint_open_feed_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_open_feed_proto_rawDesc = "" +
 	"\n" +
-	"%agentrepl/v1/endpoint_open_feed.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\x1a\x16frontend/v1/feed.proto\x1a\x1dagentrepl/v1/feed_token.proto\"\x82\x01\n" +
+	"%agentrepl/v1/endpoint_open_feed.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\x1a\x16frontend/v1/feed.proto\x1a\x1bfrontend/v1/feed_held.proto\x1a\x1dagentrepl/v1/feed_token.proto\"\x82\x01\n" +
 	"\x0fOpenFeedRequest\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12,\n" +
 	"\x04feed\x18\x02 \x01(\v2\x13.frontend.v1.FeedIdH\x00R\x04feed\x88\x01\x01B\a\n" +
@@ -625,10 +637,12 @@ const file_agentrepl_v1_endpoint_open_feed_proto_rawDesc = "" +
 	"\x10OpenFeedResponse\x129\n" +
 	"\asuccess\x18\x01 \x01(\v2\x1d.agentrepl.v1.OpenFeedSuccessH\x00R\asuccess\x123\n" +
 	"\x05error\x18\x02 \x01(\v2\x1b.agentrepl.v1.OpenFeedErrorH\x00R\x05errorB\b\n" +
-	"\x06result\"p\n" +
+	"\x06result\"\xa9\x01\n" +
 	"\x0fOpenFeedSuccess\x12)\n" +
 	"\x04page\x18\x01 \x01(\v2\x15.frontend.v1.FeedPageR\x04page\x122\n" +
-	"\x05watch\x18\x02 \x01(\v2\x1c.agentrepl.v1.FeedWatchTokenR\x05watch\"\xac\x04\n" +
+	"\x05watch\x18\x02 \x01(\v2\x1c.agentrepl.v1.FeedWatchTokenR\x05watch\x12.\n" +
+	"\x04held\x18\x03 \x01(\v2\x15.frontend.v1.FeedHeldH\x00R\x04held\x88\x01\x01B\a\n" +
+	"\x05_held\"\xac\x04\n" +
 	"\rOpenFeedError\x12U\n" +
 	"\x11unknown_workspace\x18\x01 \x01(\v2&.agentrepl.v1.OpenFeedUnknownWorkspaceH\x00R\x10unknownWorkspace\x12b\n" +
 	"\x16workspace_ref_mismatch\x18\x02 \x01(\v2*.agentrepl.v1.OpenFeedWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12U\n" +
@@ -674,6 +688,7 @@ var file_agentrepl_v1_endpoint_open_feed_proto_goTypes = []any{
 	(*v11.FeedId)(nil),                   // 11: frontend.v1.FeedId
 	(*v11.FeedPage)(nil),                 // 12: frontend.v1.FeedPage
 	(*FeedWatchToken)(nil),               // 13: agentrepl.v1.FeedWatchToken
+	(*v11.FeedHeld)(nil),                 // 14: frontend.v1.FeedHeld
 }
 var file_agentrepl_v1_endpoint_open_feed_proto_depIdxs = []int32{
 	10, // 0: agentrepl.v1.OpenFeedRequest.workspace:type_name -> workspace.v1.WorkspaceRef
@@ -682,17 +697,18 @@ var file_agentrepl_v1_endpoint_open_feed_proto_depIdxs = []int32{
 	3,  // 3: agentrepl.v1.OpenFeedResponse.error:type_name -> agentrepl.v1.OpenFeedError
 	12, // 4: agentrepl.v1.OpenFeedSuccess.page:type_name -> frontend.v1.FeedPage
 	13, // 5: agentrepl.v1.OpenFeedSuccess.watch:type_name -> agentrepl.v1.FeedWatchToken
-	4,  // 6: agentrepl.v1.OpenFeedError.unknown_workspace:type_name -> agentrepl.v1.OpenFeedUnknownWorkspace
-	5,  // 7: agentrepl.v1.OpenFeedError.workspace_ref_mismatch:type_name -> agentrepl.v1.OpenFeedWorkspaceRefMismatch
-	6,  // 8: agentrepl.v1.OpenFeedError.transferring_away:type_name -> agentrepl.v1.OpenFeedTransferringAway
-	7,  // 9: agentrepl.v1.OpenFeedError.not_yet_adopted:type_name -> agentrepl.v1.OpenFeedNotYetAdopted
-	8,  // 10: agentrepl.v1.OpenFeedError.feed_undecodable:type_name -> agentrepl.v1.OpenFeedFeedUndecodable
-	9,  // 11: agentrepl.v1.OpenFeedError.feed_not_in_workspace:type_name -> agentrepl.v1.OpenFeedFeedNotInWorkspace
-	12, // [12:12] is the sub-list for method output_type
-	12, // [12:12] is the sub-list for method input_type
-	12, // [12:12] is the sub-list for extension type_name
-	12, // [12:12] is the sub-list for extension extendee
-	0,  // [0:12] is the sub-list for field type_name
+	14, // 6: agentrepl.v1.OpenFeedSuccess.held:type_name -> frontend.v1.FeedHeld
+	4,  // 7: agentrepl.v1.OpenFeedError.unknown_workspace:type_name -> agentrepl.v1.OpenFeedUnknownWorkspace
+	5,  // 8: agentrepl.v1.OpenFeedError.workspace_ref_mismatch:type_name -> agentrepl.v1.OpenFeedWorkspaceRefMismatch
+	6,  // 9: agentrepl.v1.OpenFeedError.transferring_away:type_name -> agentrepl.v1.OpenFeedTransferringAway
+	7,  // 10: agentrepl.v1.OpenFeedError.not_yet_adopted:type_name -> agentrepl.v1.OpenFeedNotYetAdopted
+	8,  // 11: agentrepl.v1.OpenFeedError.feed_undecodable:type_name -> agentrepl.v1.OpenFeedFeedUndecodable
+	9,  // 12: agentrepl.v1.OpenFeedError.feed_not_in_workspace:type_name -> agentrepl.v1.OpenFeedFeedNotInWorkspace
+	13, // [13:13] is the sub-list for method output_type
+	13, // [13:13] is the sub-list for method input_type
+	13, // [13:13] is the sub-list for extension type_name
+	13, // [13:13] is the sub-list for extension extendee
+	0,  // [0:13] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_open_feed_proto_init() }
@@ -706,6 +722,7 @@ func file_agentrepl_v1_endpoint_open_feed_proto_init() {
 		(*OpenFeedResponse_Success)(nil),
 		(*OpenFeedResponse_Error)(nil),
 	}
+	file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[2].OneofWrappers = []any{}
 	file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[3].OneofWrappers = []any{
 		(*OpenFeedError_UnknownWorkspace)(nil),
 		(*OpenFeedError_WorkspaceRefMismatch)(nil),

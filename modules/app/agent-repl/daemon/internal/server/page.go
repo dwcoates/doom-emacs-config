@@ -516,14 +516,6 @@ func (s *server) pageWatchFor(
 		return pageWatch{"WatchFooter", func(ctx context.Context) error {
 			return s.watchFooter(ctx, watch.Footer, sink)
 		}}, true
-	case *agentreplv1.SubscribePageRequest_Holds:
-		sink := pageSink[agentreplv1.WatchDaemonHoldsResponse]{page: page, sub: sub,
-			wrap: func(m *agentreplv1.WatchDaemonHoldsResponse) *agentreplv1.PageFrame {
-				return &agentreplv1.PageFrame{Payload: &agentreplv1.PageFrame_Holds{Holds: m}}
-			}}
-		return pageWatch{"WatchDaemonHolds", func(ctx context.Context) error {
-			return s.watchDaemonHolds(ctx, watch.Holds, sink)
-		}}, true
 	case *agentreplv1.SubscribePageRequest_Feed:
 		sink := pageSink[agentreplv1.WatchFeedResponse]{page: page, sub: sub,
 			wrap: func(m *agentreplv1.WatchFeedResponse) *agentreplv1.PageFrame {

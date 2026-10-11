@@ -179,14 +179,6 @@ func (s *fakeServer) WatchFooter(ctx context.Context, req *connect.Request[v1.Wa
 		fmt.Errorf("fakedaemon mocks only Emacs's streams; WatchFooter is a webapp stream"))
 }
 
-func (s *fakeServer) WatchDaemonHolds(ctx context.Context, req *connect.Request[v1.WatchDaemonHoldsRequest], stream *connect.ServerStream[v1.WatchDaemonHoldsResponse]) error {
-	s.record(ctx, "WatchDaemonHolds", req.Msg)
-	logWarn("fakedaemon.stream.not-mocked", "a stream this fake does not mock was called",
-		map[string]any{"method": "WatchDaemonHolds"})
-	return connect.NewError(connect.CodeUnimplemented,
-		fmt.Errorf("fakedaemon mocks only Emacs's streams; WatchDaemonHolds is a webapp stream"))
-}
-
 func (s *fakeServer) UpdateHeldPrompt(ctx context.Context, req *connect.Request[v1.UpdateHeldPromptRequest]) (*connect.Response[v1.UpdateHeldPromptResponse], error) {
 	return handleUnary[v1.UpdateHeldPromptRequest, v1.UpdateHeldPromptResponse](ctx, s, "UpdateHeldPrompt", req.Msg)
 }

@@ -16,16 +16,19 @@
  * token, in the response bubble's link blue (`renderMergeTestLogLink`).
  */
 import { log } from "../../log.js";
+import { placeChildren, repaintMark } from "../../dom.js";
 import { requireCase } from "../../rpc/strict.js";
 import { paintSpanClass } from "../cards/paint.js";
 import { armName } from "../renderers.js";
 import { unreachableArm } from "../../rpc/strict.js";
-import type {
-  FeedMergeTabTests,
-  FeedMergeTestCounts,
-  FeedMergeTestLog,
-  FeedMergeTestSpan,
-  FeedMergeTestSuite,
+import { equals } from "@bufbuild/protobuf";
+import {
+  FeedMergeTestLogSchema,
+  type FeedMergeTabTests,
+  type FeedMergeTestCounts,
+  type FeedMergeTestLog,
+  type FeedMergeTestSpan,
+  type FeedMergeTestSuite,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { renderMergeTestLogLink } from "../../link.js";
 import type { AppContext } from "../../rpc/context.js";
@@ -50,6 +53,32 @@ export function drawFeedMergeTabTests(
   return parts;
 }
 
+/**
+ * Bring HOST, a tests tab's content as `drawFeedMergeTabTests` drew it from
+ * PREVIOUS, to U IN PLACE: the suites updated where they stand
+ * (`updateTestSuites`), and the log line redrawn only when it changed.
+ */
+export function updateFeedMergeTabTests(
+  host: HTMLElement,
+  u: FeedMergeTabTests,
+  previous: FeedMergeTabTests,
+  ctx: AppContext,
+  path: string,
+): void {
+  const suites = host.querySelector<HTMLElement>(":scope > .merge-suites");
+  if (suites === null) throw new Error("merge: a drawn tests tab lost its suites");
+  updateTestSuites(suites, u.suites);
+  const logLine = host.querySelector(":scope > .merge-test-log");
+  if (u.log === undefined) {
+    logLine?.remove();
+    return;
+  }
+  if (logLine !== null && previous.log !== undefined && equals(FeedMergeTestLogSchema, previous.log, u.log)) return;
+  const next = drawFeedMergeTestLog(u.log, ctx, `${path}.log`);
+  if (logLine === null) host.append(next);
+  else logLine.replaceWith(next);
+}
+
 /** The log line: "log:" and the link, whose text is the daemon's label. */
 export function drawFeedMergeTestLog(u: FeedMergeTestLog, ctx: AppContext, path: string): HTMLElement {
   const el = document.createElement("div");
@@ -66,6 +95,31 @@ export function drawTestSuites(suites: readonly FeedMergeTestSuite[]): HTMLEleme
   return el;
 }
 
+/**
+ * Bring EL, a tests tab's suites as `drawTestSuites` drew them, to SUITES IN
+ * PLACE: each suite keeps its element, keyed by its name, and is repainted
+ * where it changed (`updateFeedMergeTestSuite`); a new suite is drawn into its
+ * place, and one no longer served is dropped. A push that only moved a running
+ * suite's counts therefore moves only those figures, and its live dot breathes
+ * on unbroken.
+ */
+export function updateTestSuites(el: HTMLElement, suites: readonly FeedMergeTestSuite[]): void {
+  const held = new Map<string, HTMLElement>();
+  for (const child of el.querySelectorAll<HTMLElement>(":scope > .merge-suite")) {
+    held.set(child.getAttribute(SUITE_NAME_ATTRIBUTE) ?? "", child);
+  }
+  const next = suites.map((suite) => {
+    const existing = held.get(suite.name);
+    if (existing === undefined) return drawFeedMergeTestSuite(suite);
+    updateFeedMergeTestSuite(existing, suite);
+    return existing;
+  });
+  placeChildren(el, next);
+}
+
+/** The attribute a suite's element carries its name under, to be found again. */
+const SUITE_NAME_ATTRIBUTE = "data-suite";
+
 /** One suite: its name, its state glyph, its painted output. */
 export function drawFeedMergeTestSuite(suite: FeedMergeTestSuite): HTMLElement {
   const state = requireCase(suite.state, `${PATH}.state`);
@@ -76,7 +130,7 @@ export function drawFeedMergeTestSuite(suite: FeedMergeTestSuite): HTMLElement {
 
   const el = document.createElement("div");
   el.className = "merge-suite";
-  el.setAttribute("data-suite-state", state.case);
+  el.setAttribute(SUITE_NAME_ATTRIBUTE, suite.name);
 
   const head = document.createElement("div");
   head.className = "merge-suite-head";
@@ -85,43 +139,89 @@ export function drawFeedMergeTestSuite(suite: FeedMergeTestSuite): HTMLElement {
   const glyph = document.createElement("span");
   glyph.className = "merge-suite-glyph";
   glyph.setAttribute("aria-hidden", "true");
-  switch (state.case) {
-    case "running": {
-      // THE DOT SAYS WHAT THE TESTS HAVE SAID SO FAR (owner ruling,
-      // 2026-10-08), never purple: grey before any verdict, green while every
-      // verdict is a pass, red once one failed. The daemon resolved the arm.
-      const soFar = requireCase(state.value.soFar, `${PATH}.state.running.so_far`);
-      glyph.classList.add("is-live", `is-${soFar.case}`);
-      glyph.textContent = SUITE_GLYPHS.running;
-      el.setAttribute("data-so-far", soFar.case);
-      break;
-    }
-    case "passed":
-      glyph.classList.add("is-succeeded");
-      glyph.textContent = SUITE_GLYPHS.passed;
-      break;
-    case "failed":
-      glyph.classList.add("is-failed");
-      glyph.textContent = SUITE_GLYPHS.failed;
-      break;
-    default:
-      return unreachableArm(`${PATH}.state`, armName(state));
-  }
   head.append(glyph);
 
   const name = document.createElement("span");
   name.className = "merge-suite-name";
   name.textContent = suite.name;
   head.append(name);
-  if (suite.counts !== undefined) head.append(drawFeedMergeTestCounts(suite.counts));
 
-  if (suite.output.length > 0) {
-    const pre = document.createElement("pre");
+  paintSuite(el, suite);
+  return el;
+}
+
+/**
+ * Bring EL, a suite's element, to SUITE in place: its state, its glyph, its
+ * counts and its output, each touched only where it changed (`paintSuite`).
+ */
+export function updateFeedMergeTestSuite(el: HTMLElement, suite: FeedMergeTestSuite): void {
+  log.debug("updating a merge test suite in place", {
+    operation: "merge.update-suite",
+    context: { suite: suite.name, arm: suite.state.case ?? "unset" },
+  });
+  paintSuite(el, suite);
+}
+
+/**
+ * Paint EL, a suite's element, as SUITE. THE GLYPH AND THE OUTPUT KEEP THEIR
+ * ELEMENTS: a glyph is repainted only where its state moved, so a running
+ * suite's breathing dot is never restarted, and the output box keeps the
+ * element the reader may have scrolled, its spans replaced only when they
+ * changed.
+ */
+function paintSuite(el: HTMLElement, suite: FeedMergeTestSuite): void {
+  const state = requireCase(suite.state, `${PATH}.state`);
+  setAttribute(el, "data-suite-state", state.case);
+  const glyph = el.querySelector<HTMLElement>(":scope > .merge-suite-head > .merge-suite-glyph");
+  if (glyph === null) throw new Error("merge: a drawn suite lost its glyph");
+  switch (state.case) {
+    case "running": {
+      // THE DOT SAYS WHAT THE TESTS HAVE SAID SO FAR (owner ruling,
+      // 2026-10-08), never purple: grey before any verdict, green while every
+      // verdict is a pass, red once one failed. The daemon resolved the arm.
+      const soFar = requireCase(state.value.soFar, `${PATH}.state.running.so_far`);
+      repaintMark(glyph, `merge-suite-glyph is-live is-${soFar.case}`, SUITE_GLYPHS.running);
+      setAttribute(el, "data-so-far", soFar.case);
+      break;
+    }
+    case "passed":
+      repaintMark(glyph, "merge-suite-glyph is-succeeded", SUITE_GLYPHS.passed);
+      el.removeAttribute("data-so-far");
+      break;
+    case "failed":
+      repaintMark(glyph, "merge-suite-glyph is-failed", SUITE_GLYPHS.failed);
+      el.removeAttribute("data-so-far");
+      break;
+    default:
+      unreachableArm(`${PATH}.state`, armName(state));
+  }
+
+  const head = glyph.parentElement as HTMLElement;
+  const counts = head.querySelector(":scope > .merge-suite-counts");
+  const nextCounts = suite.counts === undefined ? null : drawFeedMergeTestCounts(suite.counts);
+  if (nextCounts === null) counts?.remove();
+  else if (counts === null) head.append(nextCounts);
+  else if (counts.textContent !== nextCounts.textContent) counts.replaceWith(nextCounts);
+
+  let pre = el.querySelector<HTMLElement>(":scope > .merge-suite-output");
+  if (suite.output.length === 0) {
+    pre?.remove();
+    return;
+  }
+  if (pre === null) {
+    pre = document.createElement("pre");
     pre.className = "merge-suite-output";
-    for (const span of suite.output) pre.append(drawFeedMergeTestSpan(span));
     el.append(pre);
   }
-  return el;
+  const spans = suite.output.map(drawFeedMergeTestSpan);
+  const same =
+    spans.length === pre.children.length && spans.every((span, i) => span.isEqualNode(pre.children[i] ?? null));
+  if (!same) pre.replaceChildren(...spans);
+}
+
+/** Set EL's NAME to VALUE only when it differs. */
+function setAttribute(el: HTMLElement, name: string, value: string): void {
+  if (el.getAttribute(name) !== value) el.setAttribute(name, value);
 }
 
 /**

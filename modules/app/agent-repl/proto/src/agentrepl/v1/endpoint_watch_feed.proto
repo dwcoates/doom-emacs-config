@@ -18,6 +18,7 @@ syntax = "proto3";
 package agentrepl.v1;
 
 import "frontend/v1/feed.proto";
+import "frontend/v1/feed_held.proto";
 import "agentrepl/v1/feed_token.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
@@ -34,8 +35,8 @@ message WatchFeedRequest {
 // task bubble another act touched). The client upserts by FeedRow.id.
 //
 // A frame carries EXACTLY ONE of a row upsert (`row`), a response-selection
-// push (`selection`), or a feed-text-scale push (`feed_text_scale`), never more
-// than one. The selection push is the daemon's per-workspace
+// push (`selection`), a feed-text-scale push (`feed_text_scale`), or a
+// held-section change (`held`), never more than one. The selection push is the daemon's per-workspace
 // reply-to-a-past-response state (reply-to-a-past-response mode), pushed on
 // the ROOT feed's watch so the webapp recolors the selected final-response
 // bubble, center-scrolls it, and suppresses tail-follow while a selection is
@@ -55,4 +56,28 @@ message WatchFeedResponse {
   // The feed text scale (zoom), whole. Set on a feed-text-scale frame; unset
   // otherwise. Pushed on every open feed's watch, root and sub-feed alike.
   optional frontend.v1.FeedTextScale feed_text_scale = 3;
+  // The root feed's held section changed. Set on a held-section frame; unset
+  // otherwise. Carried on the ROOT feed's watch only, in publication order
+  // with its rows, so a tail opened at OpenFeed's pin misses no change of the
+  // section either.
+  optional WatchFeedHeldChange held = 4;
+}
+
+// One change of the root feed's held section: the section as it now stands,
+// and every row that moved between the section and the rows in the same change.
+//
+// ONE FRAME, SO AN ITEM IS NEVER DRAWN TWICE OR NOT AT ALL. An item that
+// settles leaves the section and becomes a row in this one frame; a client
+// applies `rows` and `held` together, before it draws, and never draws a state
+// in which the item is in both places or in neither.
+message WatchFeedHeldChange {
+  // The held section, whole. Replaces the section the client holds.
+  frontend.v1.FeedHeld held = 1;
+  // The row publications made in the same change, in order: the row an item
+  // settled as (keyed at the moment it settled, the bottom of the feed, and
+  // carrying the item's own FeedId), or the removal of a row whose item
+  // returned to the section (a prompt's acceptance withdrawn when its
+  // delivery found no session). These rows ride ONLY here, never also as
+  // `row` frames. Empty when the change only reshaped the section.
+  repeated frontend.v1.FeedRow rows = 2;
 }

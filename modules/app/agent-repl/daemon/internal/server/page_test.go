@@ -906,10 +906,6 @@ func TestAPageThatEndsReleasesEverySubscription(t *testing.T) {
 			Request: &agentreplv1.SubscribePageRequest_Topbar{
 				Topbar: &agentreplv1.WatchTopbarRequest{Workspace: ref()},
 			}},
-		{Page: "page-1", Subscription: "holds-1",
-			Request: &agentreplv1.SubscribePageRequest_Holds{
-				Holds: &agentreplv1.WatchDaemonHoldsRequest{Workspace: ref()},
-			}},
 	} {
 		if _, err := h.Client.SubscribePage(ctx, connect.NewRequest(req)); err != nil {
 			t.Fatalf("subscribe %s: %v", req.GetSubscription(), err)
@@ -924,7 +920,6 @@ func TestAPageThatEndsReleasesEverySubscription(t *testing.T) {
 	awaitSubscribers(t, "roster", &h.Sidebar.topic, 0)
 	awaitSubscribers(t, "footer", &h.Footer.topic, 0)
 	awaitSubscribers(t, "topbar", &h.Topbar.topic, 0)
-	awaitSubscribers(t, "holds", &h.Holds.topic, 0)
 	deadline := time.Now().Add(2 * time.Second)
 	for {
 		if _, held := surface.pageFor("page-1"); !held {

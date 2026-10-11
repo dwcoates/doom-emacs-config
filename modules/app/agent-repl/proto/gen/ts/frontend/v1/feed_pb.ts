@@ -5053,7 +5053,7 @@ export type FeedOutcomeResend = Message<"frontend.v1.FeedOutcomeResend"> & {
    * THE PROMPT AS IT WAS SAID, an ECHO VALUE the client hands back verbatim
    * and never draws. It is the one conversation.v1 record a feed row carries
    * besides the turn stamp, because SubmitPrompt takes exactly this type
-   * (the held-prompt tray carries it the same way, daemon_hold.proto).
+   * (a held prompt carries it the same way, feed_held.proto).
    *
    * @generated from field: conversation.v1.UserSaid said = 1;
    */

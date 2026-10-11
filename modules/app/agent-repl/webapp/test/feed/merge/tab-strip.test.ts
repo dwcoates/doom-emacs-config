@@ -17,6 +17,7 @@ import {
   drawTabDuration,
   mergeTabsOf,
   readMergeTab,
+  updateFeedMergeTab,
 } from "../../../src/feed/merge/tab-strip.js";
 import { oneofArms } from "../../arms.js";
 import { TAB_STARTED_AT_MS, id, tabRow } from "./fixtures.js";
@@ -285,5 +286,57 @@ describe("drawTabStateGlyph: a state this build has no glyph for", () => {
     expect(el.getAttribute("data-tab-state")).toBe("rewinding");
     expect(glyph?.textContent).toBe("");
     expect(glyph?.className).toBe("merge-tab-glyph");
+  });
+});
+
+/**
+ * A TAB IS DRAWN IN PLACE (owner request, 2026-10-10): a push repaints only
+ * what moved, so a live tab's breathing dot is never a fresh element.
+ */
+describe("updateFeedMergeTab", () => {
+  /** TAB drawn, then updated to NEXT; answers the element and its parts before and after. */
+  function updated(tab: Parameters<typeof tabRow>[1], next: Parameters<typeof tabRow>[1], active = false) {
+    const before = readMergeTab(tabRow("t1", tab), tabRow("t1", tab).row.value as never);
+    const after = readMergeTab(tabRow("t1", next), tabRow("t1", next).row.value as never);
+    const el = drawFeedMergeTab(before, { active: false, ticker: TICKER });
+    const glyph = el.querySelector(".merge-tab-glyph");
+    const duration = el.querySelector(".merge-tab-duration");
+    updateFeedMergeTab(el, after, before, { active, ticker: TICKER });
+    return { el, glyph, duration };
+  }
+
+  it("keeps the live glyph's element when its state did not move", () => {
+    const u = updated({ kind: "tests", state: "live" }, { kind: "tests", state: "live", round: 2 });
+    expect(u.el.querySelector(".merge-tab-glyph")).toBe(u.glyph);
+  });
+
+  it("repaints the glyph in place when the tab settles", () => {
+    const u = updated({ kind: "tests", state: "live" }, { kind: "tests", state: "settled", outcome: "failed" });
+    const glyph = u.el.querySelector(".merge-tab-glyph");
+    expect([glyph, glyph?.className, u.el.getAttribute("data-tab-outcome")]).toEqual([
+      u.glyph,
+      "merge-tab-glyph is-failed",
+      "failed",
+    ]);
+  });
+
+  it("keeps the duration's element while its instants did not move", () => {
+    const u = updated({ kind: "tests", state: "live" }, { kind: "tests", state: "live", round: 2 });
+    expect(u.el.querySelector(".merge-tab-duration")).toBe(u.duration);
+  });
+
+  it("redraws the duration when the tab's instants moved", () => {
+    const u = updated({ kind: "tests", state: "live" }, { kind: "tests", state: "settled" });
+    expect(u.el.querySelector(".merge-tab-duration")).not.toBe(u.duration);
+  });
+
+  it("redraws the label when the round moved", () => {
+    const u = updated({ kind: "tests", state: "live" }, { kind: "tests", state: "live", round: 2 });
+    expect(u.el.querySelector(".merge-tab-label")?.textContent).toBe("tests (2)");
+  });
+
+  it("marks the tab active when it became the shown one", () => {
+    const u = updated({ kind: "tests", state: "live" }, { kind: "tests", state: "live" }, true);
+    expect([u.el.classList.contains("is-active"), u.el.getAttribute("aria-selected")]).toEqual([true, "true"]);
   });
 });

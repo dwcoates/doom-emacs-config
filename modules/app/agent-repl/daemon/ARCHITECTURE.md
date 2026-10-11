@@ -65,11 +65,12 @@ daemon/
     publish/       generic Topic[T] with the never-miss-never-end-stale subscription invariant
     sessionwatcher/ one per live workspace/shim: owns every shim watch; connectivity truth; routes
     resolve/
-      feed/        feed resolver (row synthesis, prose fold, output address, pages, tail tokens)
+      feed/        feed resolver (row synthesis, prose fold, output address, pages, tail tokens,
+                   the root feed's held section)
       footer/      footer resolver
       topbar/      topbar resolver
       sidebar/     sidebar (roster) resolver
-      holds/       hold-tray resolver
+      holds/       held-prompt rendering (the held section's prompt cards); the section is the feed's
     sessioncommand/ the ONE parse of text as a slash command (the SessionCommand enum's spec
                    option) and the context-cut predicate; prompthandler and promptqueue both use it
     prompthandler/ SubmitPrompt body (command recognition, mirror, forward to queue)
@@ -694,7 +695,7 @@ generated arms when the landing merges (one place each):
 ## Standing-stream mechanics (connect-go v1.17.0, system-wide rule)
 
 - SERVER: every Watch* handler (WatchFeed, WatchFooter, WatchTopbar,
-  WatchWorkspaceRoster, WatchDaemonHolds, WatchHostWorkspace, WatchDaemon,
+  WatchWorkspaceRoster, WatchHostWorkspace, WatchDaemon,
   WatchWebWorkspace, WatchLoginTerminal) FLUSHES its response headers the
   moment it accepts the stream (`stream.ResponseHeader()` set, then an
   explicit flush via the underlying `http.Flusher` / `connect` send of the

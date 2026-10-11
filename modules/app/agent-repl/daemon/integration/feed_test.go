@@ -2265,7 +2265,7 @@ func TestAVendorStartedTurnHoldsAPromptAndItsEndStampsTheAnsweringResponse(t *te
 		return r.Operation == "daemon.promptqueue.turn_adopted" && r.Level == "info" && r.Context["turn"] == vendorTurn
 	})
 	held := f.submit("the held prompt", "k-behind-vendor", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT).GetSuccess().GetTurn().GetTurn()
-	awaitView(t, f, holds, "the prompt held for the vendor turn's end", func(tray *frontendv1.DaemonHoldTray) bool {
+	awaitView(t, f, holds, "the prompt held for the vendor turn's end", func(tray *frontendv1.FeedHeld) bool {
 		return promptHeldEntry(tray, held).GetHoldForTurnEnd() != nil
 	})
 	if n := f.shim.Count(harness.RPCStartTurn); n != 0 {
@@ -2327,7 +2327,7 @@ func TestAPromptRacingAVendorStartedTurnEndsOnItsOwnTerminalAndHoldsTheNextBehin
 		return r.Operation == "daemon.promptqueue.turn_adopted" && r.Level == "info" && r.Context["turn"] == vendorTurn
 	})
 	held := f.submit("the held prompt", "k-behind-both", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT).GetSuccess().GetTurn().GetTurn()
-	awaitView(t, f, holds, "the prompt held for a turn end", func(tray *frontendv1.DaemonHoldTray) bool {
+	awaitView(t, f, holds, "the prompt held for a turn end", func(tray *frontendv1.FeedHeld) bool {
 		return promptHeldEntry(tray, held).GetHoldForTurnEnd() != nil
 	})
 	f.shim.PushAgentFrameIn(mainAgent, vendorTurn, successFrame(mainAgent, nil))

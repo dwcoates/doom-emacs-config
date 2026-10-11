@@ -149,7 +149,7 @@ await Promise.all([
   import("../src/panels/panels.js"),
   import("../src/sidebar/sidebar.js"),
   import("../src/topbar/topbar.js"),
-  import("../src/tray/tray.js"),
+  import("../src/held/section.js"),
   import("../src/failure/sink.js"),
   import("../src/failure/local.js"),
   import("../src/rpc/client.js"),

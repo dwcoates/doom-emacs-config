@@ -65,12 +65,12 @@ import {
   RosterRepoSectionSchema,
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import {
-  DaemonHoldTraySchema,
-  DaemonHoldItemSchema,
+  FeedHeldSchema,
+  FeedHeldItemSchema,
   HeldPromptSchema,
-  type DaemonHoldTray,
+  type FeedHeld,
   type HeldPrompt,
-} from "../../../proto/gen/ts/frontend/v1/daemon_hold_pb";
+} from "../../../proto/gen/ts/frontend/v1/feed_held_pb";
 import { FailureKindSchema, type FailureKind } from "../../../proto/gen/ts/frontend/v1/failure_pb";
 import {
   WatchHostWorkspaceResponseSchema,
@@ -152,7 +152,7 @@ export type RowArm = NonNullable<RowInit["row"]>;
 export type ActivityUnit = NonNullable<MessageInitShape<typeof FeedTurnActivitySchema>["unit"]>;
 export type StatusArm = NonNullable<MessageInitShape<typeof FooterStatusSchema>["status"]>;
 export type WarningInit = MessageInitShape<typeof TopbarWarningSchema>;
-export type HoldItemInit = MessageInitShape<typeof DaemonHoldItemSchema>;
+export type HeldItemInit = MessageInitShape<typeof FeedHeldItemSchema>;
 
 // ---------------------------------------------------------------------------
 // Identity
@@ -2618,28 +2618,31 @@ export function heldPrompt(init?: {
   });
 }
 
-export const heldPromptItem = (init?: Parameters<typeof heldPrompt>[0]): HoldItemInit => ({
+/** A held prompt item, keyed as the daemon keys it: by its prompt row's id. */
+export const heldPromptItem = (init?: Parameters<typeof heldPrompt>[0]): HeldItemInit => ({
+  id: { value: `held:prompt:${init?.turn ?? HELD_TURN_ID}` },
   item: { case: "prompt", value: heldPrompt(init) },
 });
 
 export const HELD_OFFER_ARMS = ["mergeDequeue"] as const;
 export const HELD_OFFER_HEADLINE = "your merge is queued behind 2 others";
 
-export const heldOfferItem = (headline = HELD_OFFER_HEADLINE): HoldItemInit => ({
+export const heldOfferItem = (headline = HELD_OFFER_HEADLINE): HeldItemInit => ({
+  id: { value: "held:offer:merge_dequeue" },
   item: {
     case: "offer",
     value: { offer: { case: "mergeDequeue", value: { headline: { text: headline } } } },
   },
 });
 
-export function holdTray(init?: { items?: HoldItemInit[] }): DaemonHoldTray {
-  return create(DaemonHoldTraySchema, {
+export function heldSection(init?: { items?: HeldItemInit[] }): FeedHeld {
+  return create(FeedHeldSchema, {
     items: init?.items ?? [heldPromptItem()],
   });
 }
 
-/** The fake daemon's default tray: nothing held — so it draws nothing. */
-export const emptyTray = (): DaemonHoldTray => holdTray({ items: [] });
+/** The fake daemon's default held section: nothing held — so it draws nothing. */
+export const emptyHeld = (): FeedHeld => heldSection({ items: [] });
 
 // ---------------------------------------------------------------------------
 // Failures (the six client-local arms the webapp's own overlay mints)

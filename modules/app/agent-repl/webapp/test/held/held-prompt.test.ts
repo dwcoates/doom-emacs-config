@@ -31,7 +31,7 @@ import {
   HeldPromptSchema,
   HeldSessionActSchema,
   type HeldPrompt,
-} from "../../../proto/gen/ts/frontend/v1/daemon_hold_pb";
+} from "../../../proto/gen/ts/frontend/v1/feed_held_pb";
 import { SessionCommand } from "../../../proto/gen/ts/conversation/v1/slash_command_pb";
 import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { createAgentReplClient } from "../../src/rpc/client.js";
@@ -56,12 +56,12 @@ import {
   sessionCommandLiteral,
   type HeldPromptDroppedDetail,
   type HeldStatus,
-} from "../../src/tray/held-prompt.js";
+} from "../../src/held/held-prompt.js";
 import { BUBBLE_QUOTE_CLASS } from "../../src/bubble/quote.js";
-import * as heldPromptModule from "../../src/tray/held-prompt.js";
-import type { TrayContext } from "../../src/tray/context.js";
-import { testTrayContext } from "./tray-context.js";
-import { UPDATE_CLASSIFIER_LABEL } from "../../src/tray/classifier-update.js";
+import * as heldPromptModule from "../../src/held/held-prompt.js";
+import type { HeldContext } from "../../src/held/context.js";
+import { testHeldContext } from "./held-context.js";
+import { UPDATE_CLASSIFIER_LABEL } from "../../src/held/classifier-update.js";
 import {
   BUBBLE_CAP_ATTRIBUTE,
   BUBBLE_EXPAND_ONLY_CLASS,
@@ -85,7 +85,7 @@ import { HAS_MORE_CLASS, refreshHasMore } from "../../src/feed/bubble-more.js";
 import { resetLoggingForTests } from "../../src/log.js";
 import { selectorOf } from "../stylesheet.js";
 import { codeOf } from "../source-text.js";
-import heldPromptSource from "../../src/tray/held-prompt.ts?raw";
+import heldPromptSource from "../../src/held/held-prompt.ts?raw";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 
 const WORKSPACE = create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" });
@@ -117,7 +117,7 @@ function trayContext(
   answer: () => ReturnType<typeof successResponse> = successResponse,
   seen: UpdateHeldPromptRequest[] = [],
   ticker: Ticker = fakeTicker(),
-): { tc: TrayContext; seen: UpdateHeldPromptRequest[]; ctx: AppContext } {
+): { tc: HeldContext; seen: UpdateHeldPromptRequest[]; ctx: AppContext } {
   const transport = createRouterTransport(({ service }) => {
     service(AgentRepl, {
       updateHeldPrompt: (request) => {
@@ -133,7 +133,7 @@ function trayContext(
     failures: SINK,
     composerEnabled: false,
   });
-  return { tc: testTrayContext(ctx), seen, ctx };
+  return { tc: testHeldContext(ctx), seen, ctx };
 }
 
 const successResponse = () =>
@@ -179,7 +179,7 @@ function heldPrompt(overrides: Partial<HeldPromptInit> = {}): HeldPrompt {
     ...(overrides.badge !== undefined ? { badge: overrides.badge } : {}),
     ...(overrides.notes !== undefined ? { notes: overrides.notes } : {}),
   });
-  // THE DAEMON'S ONE BADGE and its notes, ranked as daemon_hold.proto fixes.
+  // THE DAEMON'S ONE BADGE and its notes, ranked as feed_held.proto fixes.
   // Their words are deliberately ones no card would compose (`wire <status>`),
   // so an assertion on them proves the card drew the wire verbatim.
   if (overrides.badge === undefined) serveStatus(prompt);
@@ -927,7 +927,7 @@ describe("the queued-at age", () => {
   it("registers its unsubscriber with the tray's teardown", () => {
     const { ctx } = trayContext();
     const disposers: Array<() => void> = [];
-    const tc: TrayContext = testTrayContext(ctx, (fn) => disposers.push(fn));
+    const tc: HeldContext = testHeldContext(ctx, (fn) => disposers.push(fn));
     drawHeldPrompt(heldPrompt(), tc);
     expect(disposers).toHaveLength(1);
   });
@@ -1357,7 +1357,7 @@ describe("the tray's own logging", () => {
  * THE STATUS BADGES (owner spec, 2026-09-23): every status a held card can show
  * is a `.badge` whose color class comes from ONE table. The owner's anchors are
  * WAITING red and INTERRUPTING green; the rest are listed here for the owner to
- * confirm, and the table in src/tray/held-prompt.ts must match them row for row.
+ * confirm, and the table in src/held/held-prompt.ts must match them row for row.
  */
 const EXPECTED_BADGES: Readonly<Record<HeldStatus, string>> = {
   classifying: "run",
@@ -1538,7 +1538,7 @@ describe("the daemon's badge words", () => {
     // Assert
     const record = await forwardedRecord(
       capture,
-      "tray.held-prompt.badge-empty-label",
+      "held.held-prompt.badge-empty-label",
     );
     expect(record.level.case).toBe("error");
   });
@@ -1624,7 +1624,7 @@ describe("the daemon's badge words", () => {
     // Act
     expect(() => drawHeldPrompt(prompt, tc)).toThrow(MalformedView);
     // Assert
-    const record = await forwardedRecord(capture, "tray.held-prompt.note-empty");
+    const record = await forwardedRecord(capture, "held.held-prompt.note-empty");
     expect(record.level.case).toBe("error");
   });
 
@@ -1698,7 +1698,7 @@ describe("the held status badge table", () => {
     // Assert
     const record = await forwardedRecord(
       capture,
-      "tray.held-prompt.badge-unknown-status",
+      "held.held-prompt.badge-unknown-status",
     );
     expect([
       record.level.case,
@@ -1991,7 +1991,7 @@ function editContext(
     create(EditHeldPromptResponseSchema, {
       result: { case: "success", value: {} },
     }),
-): { tc: TrayContext; seen: EditHeldPromptRequest[]; reported: FailureKind[] } {
+): { tc: HeldContext; seen: EditHeldPromptRequest[]; reported: FailureKind[] } {
   const seen: EditHeldPromptRequest[] = [];
   const reported: FailureKind[] = [];
   const transport = createRouterTransport(({ service }) => {
@@ -2012,7 +2012,7 @@ function editContext(
     },
     composerEnabled: false,
   });
-  return { tc: testTrayContext(ctx), seen, reported };
+  return { tc: testHeldContext(ctx), seen, reported };
 }
 
 /** An EditHeldPrompt refusal carrying ARM and its payload. */
@@ -2119,7 +2119,7 @@ describe("the Edit control", () => {
     // Assert
     const record = await forwardedRecord(
       capture,
-      "tray.held-prompt.edit-refused",
+      "held.held-prompt.edit-refused",
     );
     expect([record.level.case, record.context?.arm]).toEqual([
       "info",
@@ -2153,7 +2153,7 @@ describe("the Edit control", () => {
     // Assert
     const record = await forwardedRecord(
       capture,
-      "tray.held-prompt.edit-failed",
+      "held.held-prompt.edit-failed",
     );
     expect(record.level.case).toBe("error");
   });
@@ -2511,7 +2511,7 @@ describe("a coalesced hold", () => {
 function foldContext(
   answer: () => ReturnType<typeof foldSuccess>,
   seen: FoldHeldPromptRequest[] = [],
-): { tc: TrayContext; seen: FoldHeldPromptRequest[] } {
+): { tc: HeldContext; seen: FoldHeldPromptRequest[] } {
   const transport = createRouterTransport(({ service }) => {
     service(AgentRepl, {
       foldHeldPrompt: (request) => {
@@ -2527,7 +2527,7 @@ function foldContext(
     failures: SINK,
     composerEnabled: false,
   });
-  return { tc: testTrayContext(ctx), seen };
+  return { tc: testHeldContext(ctx), seen };
 }
 
 const foldSuccess = () =>
@@ -2695,7 +2695,7 @@ describe("the fold above control", () => {
     // Assert
     const record = await forwardedRecord(
       capture,
-      "tray.held-prompt.action-refused",
+      "held.held-prompt.action-refused",
     );
     expect(record.level.case).toBe("warn");
   });
