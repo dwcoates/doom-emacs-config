@@ -714,3 +714,22 @@ func (v *verbs) submitInitialPrompt(ctx context.Context, log dlog.Logger, record
 // ported prompt rows from the same shape and cannot import this one. This is
 // the name the daemon's ingress paths already code against.
 func SaidText(text string) *conversationv1.UserSaid { return feed.SaidText(text) }
+
+// CreateMergeWorkspace creates the merge workspace a detached merge runs in
+// (CreateSpec.MergeOf), in the requester's own repository.
+func (v *verbs) CreateMergeWorkspace(ctx context.Context, requester wsm.Workspace, origin wsm.MergeOrigin, branch string) (wsm.Workspace, error) {
+	repoDir, err := v.repoDirOf(ctx, requester)
+	if err != nil {
+		v.deps.Log.Global().Error(opCreate, "could not resolve the repository a merge workspace is forked in", dlog.Context{
+			"requester": string(requester.ID), "request": string(origin.Request), "cause": err.Error(),
+		})
+		return wsm.Workspace{}, fmt.Errorf("create the merge workspace of %s: %w", requester.ID, err)
+	}
+	from := requester.ID
+	return v.Create(ctx, CreateSpec{
+		RepoDir:  repoDir,
+		BaseRef:  branch,
+		ForkFrom: &from,
+		MergeOf:  &origin,
+	})
+}
