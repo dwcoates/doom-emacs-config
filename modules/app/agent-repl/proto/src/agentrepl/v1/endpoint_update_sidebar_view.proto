@@ -9,7 +9,8 @@
 // box it styles:
 //
 //   - a section's fold: RosterRepoSection.fold, RosterTaskSection.fold,
-//     RosterMaturitySection.fold, RosterMergedSection.fold;
+//     RosterMaturitySection.fold, RosterMergedSection.fold,
+//     RosterHiddenSection.fold;
 //   - the grouping shown: WorkspaceRoster.shown.
 //
 // Both are DURABLE: they survive a daemon restart.
@@ -56,6 +57,10 @@ message SidebarViewFoldSection {
     SidebarViewRecentlyMerged recently_merged = 3;
     // A maturity stage's section, echoed from RosterMaturityKey.
     workspace.v1.MaturityStage maturity = 6;
+    // The hidden-workspaces section; the roster carries exactly one. Its
+    // fold hides rows in the sidebar only: a hidden workspace is off the
+    // Emacs tab bar whether the section is folded or not.
+    SidebarViewHidden hidden = 7;
   }
   // THE ARM IS THE FOLD ASKED FOR. Unset is malformed.
   oneof fold {
@@ -66,6 +71,9 @@ message SidebarViewFoldSection {
 
 // The recently-merged band. DELIBERATELY EMPTY: the arm is the section.
 message SidebarViewRecentlyMerged {}
+
+// The hidden-workspaces section. DELIBERATELY EMPTY: the arm is the section.
+message SidebarViewHidden {}
 
 // Show the section's rows.
 message SidebarViewExpand {}

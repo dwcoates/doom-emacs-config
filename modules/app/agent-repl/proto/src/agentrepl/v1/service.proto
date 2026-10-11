@@ -54,6 +54,7 @@ import "agentrepl/v1/endpoint_set_effort.proto";
 import "agentrepl/v1/endpoint_set_permission_mode.proto";
 import "agentrepl/v1/endpoint_fold_repository.proto";
 import "agentrepl/v1/endpoint_update_sidebar_view.proto";
+import "agentrepl/v1/endpoint_set_workspace_hidden.proto";
 import "agentrepl/v1/endpoint_set_workspace_priority.proto";
 import "agentrepl/v1/endpoint_watch_footer.proto";
 import "agentrepl/v1/endpoint_update_held_prompt.proto";
@@ -200,6 +201,9 @@ service AgentRepl {
   // Set or clear a workspace's priority; the roster orders by it. See
   // endpoint_set_workspace_priority.proto.
   rpc SetWorkspacePriority(SetWorkspacePriorityRequest) returns (SetWorkspacePriorityResponse);
+  // Move a workspace into the hidden section or back out; a hidden workspace
+  // is off the Emacs tab bar. See endpoint_set_workspace_hidden.proto.
+  rpc SetWorkspaceHidden(SetWorkspaceHiddenRequest) returns (SetWorkspaceHiddenResponse);
   rpc FoldRepository(FoldRepositoryRequest) returns (FoldRepositoryResponse);
   // Change one piece of the sidebar's view state (a fold, the grouping),
   // pushed to every page on the roster stream. See
