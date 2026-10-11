@@ -44,9 +44,6 @@ func TestProductionDiagnosticsDoNotBypassDlog(t *testing.T) {
 		{path: "cmd/agent-repld/agentcli.go", fn: "runtimeHealth", callee: "fmt.Fprintln", count: 1, reason: "the agent CLI is a command whose product is its output: its usage, its refusals and the daemon's answer are its injected stdout and stderr, and the daemon logs every rpc it answers itself"},
 		{path: "cmd/agent-repld/roster.go", fn: "say", callee: "fmt.Fprintf", count: 1, reason: "the agent CLI is a command whose product is its output: its usage, its refusals and the daemon's answer are its injected stdout and stderr, and the daemon logs every rpc it answers itself"},
 		{path: "internal/dlog/surfaces.go", fn: "write", callee: "fmt.Fprintf", count: 1, reason: "a request racing closed surfaces must be answered while the first dropped record is surfaced"},
-		{path: "internal/treefmt/treefmt.go", fn: "Report", callee: "fmt.Fprintf", count: 2, reason: "formatter warnings are the treefmt command's injected stderr output"},
-		{path: "internal/treefmt/treefmt.go", fn: "Main", callee: "fmt.Fprintln", count: 1, reason: "argument failure is the treefmt command's injected stderr output"},
-		{path: "internal/treefmt/treefmt.go", fn: "Main", callee: "fmt.Fprintf", count: 4, reason: "format failures are the treefmt command's injected stderr output"},
 	}
 
 	// Arrange.

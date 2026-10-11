@@ -2662,7 +2662,7 @@ html[data-page-unshown] *::after {
 
 /* Metaprompt TLDR trees: the webapp wraps each branch to the bubble's
    column budget at its CAP (metaprompt-tree.ts, a port of the daemon's
-   treefmt), so every line arrives here already fitted and the
+   former treefmt), so every line arrives here already fitted and the
    continuation rails (│ / spaces under a wrapped branch) are REAL
    characters the wrapper emitted, not rails the stylesheet repaints.
    `pre-wrap` never breaks a fitted line; it breaks only the degenerate

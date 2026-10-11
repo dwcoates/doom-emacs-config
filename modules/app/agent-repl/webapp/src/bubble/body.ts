@@ -29,7 +29,7 @@ const logTreeIssue: TreeIssue = (message, context) => {
  * Markdown → HTML, with the metaprompt TLDR tree WRAPPED to the measured COLS.
  *
  * The tree arrives unwrapped, one physical line per branch; the wrapper
- * (metaprompt-tree.ts, a port of the daemon's treefmt) breaks every branch too
+ * (metaprompt-tree.ts, a port of the daemon's former treefmt) breaks every branch too
  * wide for COLS onto continuation lines under its own text column, so the tree
  * fills the bubble and re-flows when the bubble's width changes. Stray prose
  * around the tree keeps the markdown path — which itself wraps a fenced tree to

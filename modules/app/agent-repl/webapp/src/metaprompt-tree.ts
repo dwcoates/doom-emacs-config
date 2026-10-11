@@ -8,14 +8,14 @@
  * continuation lines, so no line exceeds the width the bubble can show and the
  * tree fills its bubble and re-flows on resize.
  *
- * THE WRAP ENGINE IS A ONE-TO-ONE PORT of the daemon's `treefmt` package
- * (`daemon/internal/treefmt/treefmt.go`), which is itself the owner's
- * format_trees.py ported to Go: the same parser, the same packer, the same
- * width model, the same idempotence, the same error surface. The wrapping used
- * to run in the daemon at a fixed 105 columns; it runs HERE now, at the live
- * width the bubble measures, because the daemon cannot know how many characters
- * fit a given pixel width and so cannot re-flow on resize. Each ported function
- * carries its Go/Python name so the three can be read side by side.
+ * THE WRAP ENGINE IS A ONE-TO-ONE PORT of the owner's format_trees.py, by way
+ * of the daemon's former Go port of it (`treefmt`, since deleted): the same
+ * parser, the same packer, the same width model, the same idempotence, the
+ * same error surface. The wrapping used to run in the daemon at a fixed 105
+ * columns; it runs HERE now, at the live width the bubble measures, because
+ * the daemon cannot know how many characters fit a given pixel width and so
+ * cannot re-flow on resize. This is the only implementation. Each ported
+ * function carries its Go/Python name so it can be read beside the original.
  *
  * A wrapped branch's continuation lines
  *

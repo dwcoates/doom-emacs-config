@@ -29,8 +29,8 @@ const TREE = [
 const identity = (s: string): string => s;
 
 /**
- * wrapBody is the oracle harness, mirroring the daemon treefmt suite's own
- * `wrap` helper: format a bare tree body and return the wrapped text lines
+ * wrapBody is the oracle harness, mirroring the former daemon treefmt suite's
+ * own `wrap` helper: format a bare tree body and return the wrapped text lines
  * rejoined, so a case can be stated exactly as the Go test states it.
  */
 function wrapBody(body: string, width: number): string {
@@ -77,12 +77,12 @@ describe("isMetapromptTree", () => {
   });
 });
 
-// --- The wrap engine, checked against the daemon treefmt suite's own cases ---
+// --- The wrap engine, checked against the former daemon treefmt suite's cases ---
 //
 // Each case below has the same input, width and expectation as the Go test it
-// mirrors (daemon/internal/treefmt/treefmt_test.go), so the TypeScript port is
-// checked against the daemon algorithm's own evidence rather than a rewrite of
-// it. The daemon used a fixed 105-column width; the port takes the width as an
+// was carried over from (the daemon's treefmt suite, since deleted with the Go
+// port), so the TypeScript port is checked against the original algorithm's own
+// evidence rather than a rewrite of it. The daemon used a fixed 105-column width; the port takes the width as an
 // argument, but the algorithm producing the wrap is identical.
 
 describe("visibleWidth (rendered width)", () => {
