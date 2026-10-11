@@ -1827,7 +1827,7 @@ describe("the selected-entry mark (a jump's landing, the feed selection)", () =>
     expect(css.includes(".row-revealed")).toBe(false);
   });
 
-  it("keeps the ring off a selected final response, whose own border turns blue", () => {
+  it("keeps the ring off a selected final response, whose fill turns grey", () => {
     // Arrange
     const card = document.createElement("div");
     card.className = "bubble final-response entry-selected";
@@ -1836,15 +1836,15 @@ describe("the selected-entry mark (a jump's landing, the feed selection)", () =>
     expect(card.matches(".entry-selected:not(.bubble)")).toBe(false);
   });
 
-  it("recolors every selected bubble's own border with the blue selection token", () => {
+  it("fills every selected bubble with the grey selection token, over every kind's own fill", () => {
     // Arrange / Act
     const rule = declarationsOf(".bubble.entry-selected");
 
     // Assert
-    expect(rule).toMatch(/border-color:\s*var\(--selected-entry\)\s*!important/);
+    expect(rule).toMatch(/--bubble-bg:\s*var\(--selected-bubble-bg\)\s*!important/);
   });
 
-  it("keeps the ring off a selected prompt, whose own border turns blue", () => {
+  it("keeps the ring off a selected prompt, whose fill turns grey", () => {
     // Arrange
     const card = document.createElement("div");
     card.className = "bubble user entry-selected";
@@ -1854,12 +1854,37 @@ describe("the selected-entry mark (a jump's landing, the feed selection)", () =>
     expect(card.matches(".entry-selected:not(.bubble)")).toBe(false);
   });
 
-  it("recolors only the border it reserves, so selecting never reflows a bubble", () => {
+  it("sets the fill alone, so selecting never recolors a border or reflows a bubble", () => {
     // Arrange / Act
     const rule = declarationsOf(".bubble.entry-selected") ?? "";
 
     // Assert
-    expect(rule.trim()).toBe("border-color: var(--selected-entry) !important;");
+    expect(rule.trim()).toBe("--bubble-bg: var(--selected-bubble-bg) !important;");
+  });
+
+  it.each([
+    ["light", () => declarationsOf(":root") ?? ""],
+    ["dark", darkThemeBlock],
+  ] as const)("fills a selected bubble a neutral grey in the %s theme", (_theme, block) => {
+    // Arrange / Act
+    const [r, g, b] = rgbOf(block(), "--selected-bubble-bg");
+
+    // Assert — no channel strays far from the others.
+    expect(Math.max(r, g, b) - Math.min(r, g, b)).toBeLessThanOrEqual(16);
+  });
+
+  it.each([
+    ["light", () => declarationsOf(":root") ?? ""],
+    ["dark", darkThemeBlock],
+  ] as const)("fills a selected bubble a little lighter than a response in the %s theme", (_theme, block) => {
+    // Arrange
+    const css = block();
+
+    // Act
+    const [response, selected] = [luminance(rgbOf(css, "--assistant")), luminance(rgbOf(css, "--selected-bubble-bg"))];
+
+    // Assert
+    expect(selected).toBeGreaterThan(response);
   });
 
   it("defines the --selected-entry token so the blue rule resolves", () => {
@@ -2740,16 +2765,16 @@ describe("the expanded response's eggshell border", () => {
     expect(rule.trim()).toBe("border-color: var(--expanded-response-border) !important;");
   });
 
-  it("shares the !important border tier only with the selection, so it outranks every other by construction", () => {
+  it("is the one !important border, so it outranks every other by construction", () => {
     // Arrange / Act
     const important = rulesOf(stylesheet)
       .filter((rule) => /(?:^|;)\s*border[\w-]*\s*:[^;]*!important/.test(rule.declarations))
       .map((rule) => rule.selectors.join(", "));
     // Assert
-    expect(important.sort()).toEqual([".bubble.entry-selected", EGGSHELL_SELECTOR].sort());
+    expect(important).toEqual([EGGSHELL_SELECTOR]);
   });
 
-  /** Every selected bubble kind: the selection's blue is what paints, open or not, never eggshell. */
+  /** Every selected bubble kind: its fill is the mark, so no border is forced on it, open or not, never eggshell. */
   const SELECTED = [
     ["a selected final response", { "data-role": "response", "data-variant": "response", "data-state": "success" }, ["final-response", "entry-selected"]],
     ["a selected interim response", { "data-role": "response", "data-variant": "response", "data-state": "success" }, ["entry-selected"]],
@@ -2758,13 +2783,13 @@ describe("the expanded response's eggshell border", () => {
     ["a selected agent prompt", { "data-role": "prompt", "data-variant": "agent" }, ["user", "prompt-agent", "entry-selected"]],
   ] as const;
 
-  it.each(SELECTED)("borders %s blue, open or not", (_label, attrs, hooks) => {
+  it.each(SELECTED)("forces no border on %s, open or not", (_label, attrs, hooks) => {
     // Arrange
     const states = [bubbleOf(attrs, hooks, true), bubbleOf(attrs, hooks, false)];
     // Act
     const borders = states.map((el) => borderOf(el));
     // Assert
-    expect(borders).toEqual(["var(--selected-entry)", "var(--selected-entry)"]);
+    expect(borders).toEqual([null, null]);
   });
 
   it.each([
@@ -2997,11 +3022,13 @@ describe("the one bubble rule set", () => {
         /(?:^|;)\s*(?:margin-left|margin-right|--bubble-bg|background(?:-color)?)\s*:/.test(rule.declarations),
     );
     // Assert — the base rule paints the role's token; the roles choose it, and
-    // so do the owner-named fills: the held variant's (2026-09-23) and the
-    // page-colored thinking and interim fill (2026-10-08).
+    // so do the owner-named fills: the held variant's (2026-09-23), the
+    // page-colored thinking and interim fill (2026-10-08) and the selected
+    // bubble's grey (2026-10-11).
     expect(placing.flatMap((rule) => rule.selectors).sort()).toEqual(
       [
         ".bubble",
+        ".bubble.entry-selected",
         '.bubble[data-role="prompt"]',
         '.bubble[data-role="response"]',
         '.bubble[data-variant="held"]',

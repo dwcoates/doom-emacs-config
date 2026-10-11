@@ -216,12 +216,16 @@
      nothing on screen. A fainter line is what reads thinner: the same hue, at
      this share of its strength, in both themes. */
   --interim-response-border-strength: 50%;
-  /* THE SELECTED ENTRY's color: the ring on a card a footer detached-work
-     jump landed on, and the border of the row the feed's selection names — a
-     final response the next prompt replies to, where it replaces the green a
-     final answer wears at rest, or a prompt the rollback keys act on — so the
-     one selected bubble is unmistakable among those around it. */
+  /* THE SELECTED ENTRY's color: the ring on a non-bubble card a footer
+     detached-work jump landed on. A selected BUBBLE is marked by its fill
+     instead (--selected-bubble-bg, below). */
   --selected-entry: #2563eb;
+  /* THE SELECTED BUBBLE's fill (owner ruling, 2026-10-11): a moderate neutral
+     grey, a little lighter than the response bubble's own --assistant, worn
+     by the row the feed's selection names — a final response the next prompt
+     replies to, or a prompt the rollback keys act on — so the one selected
+     bubble is unmistakable among those around it. */
+  --selected-bubble-bg: #ebebee;
   /* THE EXPANDED RESPONSE's border (owner ruling, 2026-09-27): eggshell white,
      worn by every response bubble while its scroll box is open, over whatever
      the ladder would otherwise draw. A shade deeper than true eggshell here,
@@ -461,8 +465,10 @@
     --final-response: #4ade80;
     --interim-response-border: #d2d22c;
     /* Brighter blue for the dark theme, as the other state borders lift, so
-       the selected-entry hairline still reads against the dark bubble. */
+       the selected-entry ring still reads against the dark page. */
     --selected-entry: #60a5fa;
+    /* A moderate grey a little lighter than the dark --assistant (#1b1e25). */
+    --selected-bubble-bg: #2c3039;
     /* True eggshell for the dark theme, as the other state borders lift. */
     --expanded-response-border: #f0ead6;
     /* Brighter light purple for the dark theme, as the other state borders
@@ -1796,8 +1802,8 @@ pre {
    HALF AS THICK (owner ruling, 2026-10-08): 0.5px, a real one-device-pixel
    line on a Retina display rather than the two it rounded up to at 1px, so
    it visibly reads thinner. Never reflows the feed beyond that half pixel:
-   the border-color overrides below (selected-entry's blue, the expanded
-   response's eggshell) recolor this same width and never restate it, so
+   the border-color override below (the expanded response's eggshell)
+   recolors this same width and never restate it, so
    there is no second width anywhere to drift out of step with this one. */
 .bubble[data-role="prompt"][data-variant="agent"],
 .bubble[data-role="prompt"][data-variant="peer"] {
@@ -1966,22 +1972,21 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
    ring: an outline pulled inside the card's own border box never reflows the
    feed, never replaces the card's own shadow, and is not clipped by the row's
    paint containment (`content-visibility`).
-   A bubble is excluded: its own border is its mark (below). */
+   A bubble is excluded: its fill is its mark (below). */
 .entry-selected:not(.bubble) {
   outline: 2px solid var(--selected-entry);
   outline-offset: -2px;
 }
-/* THE SELECTED BUBBLE (owner ruling, 2026-10-01): whatever its kind — a final,
-   interim or thinking response, a user prompt, an agent prompt — its own
-   border turns blue (in place of a final answer's green, an interim's gold, a
-   prompt's none or amber), which is the whole mark, so no ring sits over it.
-   It recolors the border the bubble already reserves, so selecting never
-   reflows it, and it returns to its own border the moment the selection
-   clears. `!important` because it must outrank every kind's own border, and
-   the open-box eggshell below is written to exclude a selected bubble, so the
-   two can never meet on one bubble. */
+/* THE SELECTED BUBBLE (owner ruling, 2026-10-11, superseding 2026-10-01's
+   blue border): whatever its kind — a final, interim or thinking response, a
+   user prompt, an agent prompt — its fill turns a moderate grey
+   (--selected-bubble-bg), which is the whole mark, so no ring sits over it and
+   its border stays the one its kind wears. It sets `--bubble-bg` alone, so
+   selecting never reflows the bubble, and it returns to its own fill the
+   moment the selection clears. `!important` because it must outrank every
+   kind's own fill (a held prompt's, a thinking bubble's, an interim's). */
 .bubble.entry-selected {
-  border-color: var(--selected-entry) !important;
+  --bubble-bg: var(--selected-bubble-bg) !important;
 }
 /* THE EXPANDED RESPONSE (owner ruling, 2026-09-27): while a response bubble's
    own scroll box is open, its border is eggshell, whatever variant or state it
@@ -1990,11 +1995,12 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
    and cut-short responses are uncapped (`BUBBLE_UNCAPPED`) and never open. ONE rule keyed on
    the role and the open box (`.expanded` lives on the box, the border on the
    bubble, so the bubble is keyed through `:has`), last on the ladder and the
-   one `!important` border apart from the selection's, so it outranks every
+   one `!important` border, so it outranks every
    other border rule by construction rather than by a specificity count. A
    SELECTED bubble is excluded: on the root feed a bubble is open exactly while
-   it is selected, and the selection's blue is its mark, so the eggshell shows
-   only on an open bubble that cannot be selected (one in a sub-feed). It sets
+   it is selected, and the selection's grey fill is its mark with no colored
+   border over it, so the eggshell shows only on an open bubble that cannot be
+   selected (one in a sub-feed). It sets
    the color alone:
    the 0.3px the base reserves is recolored, never reflowed, and closing the
    box hands the ladder's own border straight back. */

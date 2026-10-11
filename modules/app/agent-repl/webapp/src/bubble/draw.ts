@@ -7,12 +7,12 @@
  *   - its ROLE, which is its side and its background: a prompt hangs on the
  *     right rail in blue, a response on the left rail in purple;
  *   - its VARIANT and STATE, which select its BORDER and nothing else (the
- *     thinking/pear/green/blue ladder, the compaction divider's own color, a
+ *     thinking/pear/green ladder, the compaction divider's own color, a
  *     user prompt's permanent purple, an agent-to-agent prompt's amber, an
  *     ended turn's red, and a held prompt's NONE) — the exceptions are the
  *     backgrounds the owner names: the held prompt's, 5% of its grey-blue
  *     tint over the feed, and a thinking or interim response's, the page's
- *     own `--bg` (2026-10-08);
+ *     own `--bg` (2026-10-08), and a selected bubble's grey (2026-10-11);
  *   - its HEADER STRIP: the elements above the scroll box (a prompt's address
  *     and delivery line, a peer's label, a notice heading, a held prompt's
  *     badges), plus the response's floated usage CORNER inside the box;

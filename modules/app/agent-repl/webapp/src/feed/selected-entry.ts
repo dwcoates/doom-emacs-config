@@ -19,7 +19,7 @@
  */
 import { log } from "../log.js";
 
-/** The class the selected entry's CARD wears; the stylesheet rings it. */
+/** The class the selected entry's CARD wears; the stylesheet rings a card and greys a bubble's fill. */
 export const SELECTED_ENTRY_CLASS = "entry-selected";
 
 /** The attribute a row wears while it is the one a jump landed on. */
