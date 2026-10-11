@@ -27,8 +27,7 @@
  * something the daemon deliberately refused to state.
  */
 import { createControl } from "../../control.js";
-import { formatTickedElapsed } from "../../duration.js";
-import { liveElapsedClock, settledElapsedClock } from "../../elapsed-clock.js";
+import { reservedLiveElapsedClock, reservedQuietClock, reservedSettledElapsedClock } from "../../elapsed-clock.js";
 import { log } from "../../log.js";
 import { callUnary } from "../../rpc/unary.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
@@ -183,14 +182,15 @@ export function drawFeedSubagent(msg: FeedSubagent, rc: RowContext): HTMLElement
     case "settled": {
       const outcome = requireCase(state.value.outcome, `${PATH}.settled.outcome`);
       el.setAttribute("data-state", outcome.case);
-      el.append(drawSettledClock(runtime, state.value));
       const word = document.createElement("span");
       word.className = `subagent-outcome ${SETTLED_BADGES[outcome.case]}`;
       word.textContent =
         outcome.case === "lost"
           ? `${SETTLED_WORDS.lost}${lostCauseClause(outcome.value)}`
           : SETTLED_WORDS[outcome.case];
-      el.append(word);
+      // THE BADGE COMES BEFORE THE CLOCK (owner ruling, 2026-10-11): the head
+      // reads title, outcome, then how long it ran.
+      el.append(word, drawSettledClock(runtime, state.value));
       // A CARD'S TIMER STOPS THE MOMENT ITS UNIT SETTLES. The settled clock is
       // frozen at the span the MESSAGE reports, and this element carries no
       // live subscription onward from a terminal draw.
@@ -204,11 +204,10 @@ export function drawFeedSubagent(msg: FeedSubagent, rc: RowContext): HTMLElement
       el.setAttribute("data-state", "settling");
       const startedMs = msOf(runtime.startedAtMs, `${PATH}.runtime.started_at_ms`);
       const stoppedMs = msOf(state.value.stoppedAtMs, `${PATH}.settling.stopped_at_ms`);
-      el.append(settledElapsedClock("subagent-clock", stoppedMs - startedMs));
       const word = document.createElement("span");
       word.className = "subagent-outcome badge muted";
       word.textContent = "settling";
-      el.append(word);
+      el.append(word, reservedSettledElapsedClock("subagent-clock", stoppedMs - startedMs));
       stopTicking(el);
       break;
     }
@@ -234,7 +233,7 @@ function isDetachedRow(rc: RowContext): boolean {
 /** The live clock, counting up from the original start. */
 function drawLiveClock(runtime: FeedSubagentRuntime, rc: RowContext): HTMLElement {
   const startedMs = msOf(runtime.startedAtMs, `${PATH}.runtime.started_at_ms`);
-  return liveElapsedClock(rc.ctx.ticker, "subagent-clock", startedMs);
+  return reservedLiveElapsedClock(rc.ctx.ticker, "subagent-clock", startedMs);
 }
 
 /** The settled clock: the span that ran, stopped where the run stopped. */
@@ -244,7 +243,7 @@ function drawSettledClock(
 ): HTMLElement {
   const startedMs = msOf(runtime.startedAtMs, `${PATH}.runtime.started_at_ms`);
   const endedMs = msOf(settled.endedAtMs, `${PATH}.settled.ended_at_ms`);
-  return settledElapsedClock("subagent-clock", endedMs - startedMs);
+  return reservedSettledElapsedClock("subagent-clock", endedMs - startedMs);
 }
 
 /**
@@ -259,12 +258,7 @@ export function drawFeedSubagentLastProgress(
   rc: RowContext,
 ): HTMLElement {
   const atMs = msOf(lastProgress.atMs, `${PATH}.live.last_progress.at_ms`);
-  const el = document.createElement("span");
-  el.className = "subagent-quiet";
-  tick(el, rc.ctx.ticker, (nowMs) => {
-    el.textContent = `quiet for ${formatTickedElapsed(nowMs - atMs)}`;
-  });
-  return el;
+  return reservedQuietClock(rc.ctx.ticker, "subagent-quiet", atMs);
 }
 
 /**
