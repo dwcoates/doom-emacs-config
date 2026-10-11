@@ -581,10 +581,7 @@ export function drawRosterMergedRepoGroupDrawn(drawn: RosterMergedRepoGroup["dra
 export function drawRosterMergedRepoGroupHeader(u: RosterMergedRepoGroupHeader, path: string): HTMLElement {
   const head = document.createElement("div");
   head.className = MERGED_GROUP_HEAD_CLASS;
-  const label = document.createElement("span");
-  label.className = "sb-label";
-  label.textContent = drawRosterLabel(requireMessage(u.label, `${path}.label`), `${path}.label`);
-  head.appendChild(label);
+  head.appendChild(drawSectionLabel(requireMessage(u.label, `${path}.label`), `${path}.label`));
   return head;
 }
 
@@ -658,10 +655,7 @@ export function drawRosterSectionHeader(
   const header = document.createElement("div");
   header.className = "repo-head";
   header.appendChild(drawFoldToggle(section, gesture));
-  const label = document.createElement("span");
-  label.className = "sb-label";
-  label.textContent = drawRosterLabel(requireMessage(u.label, `${path}.label`), `${path}.label`);
-  header.appendChild(label);
+  header.appendChild(drawSectionLabel(requireMessage(u.label, `${path}.label`), `${path}.label`));
   // THE FOLDED COUNT, "(N)", sits between the label and the add control the
   // repo section appends after this header. The daemon resolves N (the rows
   // the unfolded section shows, nested family rows included); the stylesheet
@@ -766,6 +760,20 @@ export function drawRosterTaskSectionHeader(
   header.appendChild(menu);
   header.addEventListener("click", () => fold(section, header));
   return header;
+}
+
+/** The class every section header's label is drawn with. */
+export const SECTION_LABEL_CLASS = "sb-label";
+
+/**
+ * A section header's label box: the label's text in the `sb-label` span every
+ * section header (and every Recently Merged group header) draws it in.
+ */
+export function drawSectionLabel(u: RosterLabel, path: string): HTMLElement {
+  const label = document.createElement("span");
+  label.className = SECTION_LABEL_CLASS;
+  label.textContent = drawRosterLabel(u, path);
+  return label;
 }
 
 /** A section's display label. DISPLAY ONLY — the key beside it is identity. */
