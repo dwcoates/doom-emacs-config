@@ -111,9 +111,12 @@ ANSWER is `(:response PLIST)', `(:failure DETAIL)', or nil to answer nothing."
 
 (ert-deftest agent-repl-test-command-completion-annotation-hint-and-description ()
   "The annotation is the argument hint, then the description."
-  (should (equal (agent-repl--command-completion-annotation
-                  agent-repl-test-command-completion--catalog "/merge-queue")
-                 " <own|branch>  Land work on master")))
+  ;; Arrange: wide enough that the cut (tested below) plays no part.
+  (let ((agent-repl-command-completion-annotation-width 100))
+    ;; Act / Assert
+    (should (equal (agent-repl--command-completion-annotation
+                    agent-repl-test-command-completion--catalog "/merge-queue")
+                   " <own|branch>  Land work on master"))))
 
 (ert-deftest agent-repl-test-command-completion-annotation-of-an-alias ()
   "An alias is annotated with the command it names."
@@ -137,6 +140,151 @@ ANSWER is `(:response PLIST)', `(:failure DETAIL)', or nil to answer nothing."
   "A command stating no description has no doc signature."
   (should-not (agent-repl--command-completion-description
                agent-repl-test-command-completion--catalog "/clear")))
+
+;;;; ---- The annotation's width ----
+
+(ert-deftest agent-repl-test-command-completion-annotation-is-cut-to-the-width ()
+  "An annotation longer than the width is cut there, ending in an ellipsis."
+  ;; Arrange
+  (let ((agent-repl-command-completion-annotation-width 10)
+        (catalog '((:name "x" :description "abcdefghijklmnop" :argument-hint nil :aliases nil))))
+    ;; Act / Assert
+    (should (equal (agent-repl--command-completion-annotation catalog "/x")
+                   " abcdefghi…"))))
+
+(ert-deftest agent-repl-test-command-completion-annotation-at-the-width-is-whole ()
+  "An annotation exactly the width long is not cut."
+  ;; Arrange
+  (let ((agent-repl-command-completion-annotation-width 10)
+        (catalog '((:name "x" :description "abcdefghij" :argument-hint nil :aliases nil))))
+    ;; Act / Assert
+    (should (equal (agent-repl--command-completion-annotation catalog "/x")
+                   " abcdefghij"))))
+
+(ert-deftest agent-repl-test-command-completion-annotation-width-defaults-to-25 ()
+  "The default width is 25 columns."
+  (should (= (default-value 'agent-repl-command-completion-annotation-width) 25)))
+
+;;;; ---- Marking known commands ----
+
+(defun agent-repl-test-command-completion--marked ()
+  "Return the strings the current buffer marks as known commands, in order."
+  (mapcar (lambda (ov) (buffer-substring-no-properties (overlay-start ov) (overlay-end ov)))
+          (sort (cl-remove-if-not
+                 (lambda (ov) (overlay-get ov 'agent-repl-command-completion-known))
+                 (overlays-in (point-min) (point-max)))
+                (lambda (a b) (< (overlay-start a) (overlay-start b))))))
+
+(defmacro agent-repl-test-command-completion--marking (&rest body)
+  "Run BODY in a buffer holding the fixture catalog and marking on change."
+  (declare (indent 0))
+  `(with-temp-buffer
+     (setq agent-repl--command-completion-catalog agent-repl-test-command-completion--catalog)
+     (add-hook 'after-change-functions #'agent-repl--command-completion-on-change nil t)
+     ,@body))
+
+(ert-deftest agent-repl-test-command-completion-mark-a-typed-known-command ()
+  "A typed slash word naming a known command is marked with the known face."
+  (agent-repl-test-command-completion--marking
+    ;; Act
+    (insert "please /merge-queue now")
+    ;; Assert
+    (should (equal (agent-repl-test-command-completion--marked) '("/merge-queue")))
+    (should (eq (get-char-property 9 'face) 'agent-repl-command-completion-known))))
+
+(ert-deftest agent-repl-test-command-completion-mark-an-alias ()
+  "A slash word naming an alias is marked."
+  (agent-repl-test-command-completion--marking
+    ;; Act
+    (insert "/cost")
+    ;; Assert
+    (should (equal (agent-repl-test-command-completion--marked) '("/cost")))))
+
+(ert-deftest agent-repl-test-command-completion-mark-skips-an-unknown-word ()
+  "A slash word naming no command is not marked."
+  (agent-repl-test-command-completion--marking
+    ;; Act
+    (insert "/usr/local /nope")
+    ;; Assert
+    (should-not (agent-repl-test-command-completion--marked))))
+
+(ert-deftest agent-repl-test-command-completion-mark-skips-a-mid-word-slash ()
+  "A slash inside a word is not a slash word, even naming a command."
+  (agent-repl-test-command-completion--marking
+    ;; Act
+    (insert "see a/usage")
+    ;; Assert
+    (should-not (agent-repl-test-command-completion--marked))))
+
+(ert-deftest agent-repl-test-command-completion-mark-adjacent-words ()
+  "Two known slash words separated by one space are both marked."
+  (agent-repl-test-command-completion--marking
+    ;; Act
+    (insert "/usage /clear")
+    ;; Assert
+    (should (equal (agent-repl-test-command-completion--marked) '("/usage" "/clear")))))
+
+(ert-deftest agent-repl-test-command-completion-mark-at-a-line-start ()
+  "A known slash word starting a later line is marked."
+  (agent-repl-test-command-completion--marking
+    ;; Act
+    (insert "first line\n/clear")
+    ;; Assert
+    (should (equal (agent-repl-test-command-completion--marked) '("/clear")))))
+
+(ert-deftest agent-repl-test-command-completion-mark-is-removed-when-the-word-changes ()
+  "Typing on past a known command unmarks the slash word."
+  (agent-repl-test-command-completion--marking
+    ;; Arrange
+    (insert "/usage")
+    ;; Act
+    (insert "x")
+    ;; Assert
+    (should-not (agent-repl-test-command-completion--marked))))
+
+(ert-deftest agent-repl-test-command-completion-mark-is-not-duplicated ()
+  "Editing elsewhere on a marked line leaves exactly one mark."
+  (agent-repl-test-command-completion--marking
+    ;; Arrange
+    (insert "/usage ")
+    ;; Act
+    (insert "more")
+    ;; Assert
+    (should (equal (agent-repl-test-command-completion--marked) '("/usage")))))
+
+(ert-deftest agent-repl-test-command-completion-mark-without-a-catalog ()
+  "With no catalog in hand nothing is marked."
+  (with-temp-buffer
+    (add-hook 'after-change-functions #'agent-repl--command-completion-on-change nil t)
+    ;; Act
+    (insert "/usage")
+    ;; Assert
+    (should-not (agent-repl-test-command-completion--marked))))
+
+(ert-deftest agent-repl-test-command-completion-stated-catalog-marks-the-composer ()
+  "Installing a stated catalog marks the known words already in the composer."
+  (agent-repl-test-command-completion--with
+      (list :response (agent-repl-test-command-completion--stated
+                       agent-repl-test-command-completion--catalog))
+    ;; Arrange
+    (insert "run /merge-queue")
+    ;; Act
+    (agent-repl-command-completion-refresh "ws-1")
+    ;; Assert
+    (should (equal (agent-repl-test-command-completion--marked) '("/merge-queue")))))
+
+(ert-deftest agent-repl-test-command-completion-unstated-unmarks-the-composer ()
+  "An unstated answer removes every mark from the composer."
+  (agent-repl-test-command-completion--with
+      '(:response (:arm :success :value (:arm :unstated :value nil)))
+    ;; Arrange
+    (insert "run /merge-queue")
+    (agent-repl--command-completion-install
+     (current-buffer) agent-repl-test-command-completion--catalog)
+    ;; Act
+    (agent-repl-command-completion-refresh "ws-1")
+    ;; Assert
+    (should-not (agent-repl-test-command-completion--marked))))
 
 ;;;; ---- completion-at-point ----
 

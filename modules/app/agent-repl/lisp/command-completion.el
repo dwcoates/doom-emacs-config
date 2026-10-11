@@ -25,6 +25,16 @@
 ;;
 ;; THE COMPLETION IS NON-EXCLUSIVE.  `/usr/local' or any slash word that
 ;; names no command falls through to the next completion function.
+;;
+;; A POPUP ROW STAYS NARROW.  Each candidate's annotation (argument hint,
+;; then description) is cut to `agent-repl-command-completion-annotation-width'
+;; columns; the full description is the candidate's doc signature.
+;;
+;; A KNOWN COMMAND IS PURPLE IN THE COMPOSER.  Every slash word naming a
+;; command in the catalog in hand -- typed, completed or pasted -- takes
+;; `agent-repl-command-completion-known' through an overlay.  An edit
+;; re-marks the lines it touched; a newly installed catalog re-marks the
+;; whole composer.
 
 ;;; Code:
 
@@ -39,6 +49,16 @@
 (declare-function agent-repl-host-conn-or-primary "agent-repl-host" (ws))
 (declare-function agent-repl-host-route-handover "agent-repl-host" (ws arm slug))
 (declare-function agent-repl-rpc-list-slash-commands "agent-repl-rpc" (conn request &rest keys))
+
+(defcustom agent-repl-command-completion-annotation-width 25
+  "Columns a completion candidate's annotation may take in the popup."
+  :type 'natnum
+  :group 'agent-repl)
+
+(defface agent-repl-command-completion-known
+  '((t :foreground "#c678dd"))
+  "Face of a slash word in the composer that names a known command."
+  :group 'agent-repl)
 
 (defvar-local agent-repl--command-completion-catalog nil
   "The slash commands this composer completes, or nil when none are known.
@@ -85,15 +105,58 @@ of a line or after whitespace, and point sits inside it or at its end."
 
 (defun agent-repl--command-completion-annotation (catalog candidate)
   "Return CANDIDATE's annotation from CATALOG: its argument hint, then description.
-Empty when the runtime stated neither."
+Cut to `agent-repl-command-completion-annotation-width' columns, ending in
+an ellipsis when cut.  Empty when the runtime stated neither."
   (let* ((entry (agent-repl--command-completion-entry catalog candidate))
          (parts (delq nil (list (plist-get entry :argument-hint)
                                 (plist-get entry :description)))))
-    (if parts (concat " " (string-join parts "  ")) "")))
+    (if parts
+        (concat " " (truncate-string-to-width
+                     (string-join parts "  ")
+                     agent-repl-command-completion-annotation-width nil nil "…"))
+      "")))
 
 (defun agent-repl--command-completion-description (catalog candidate)
   "Return CANDIDATE's description from CATALOG, or nil when it states none."
   (plist-get (agent-repl--command-completion-entry catalog candidate) :description))
+
+;;;; ---- Marking known commands ----
+
+(defun agent-repl--command-completion-mark (beg end)
+  "Mark every known slash word on the lines BEG to END, and unmark the rest.
+A known slash word -- as `agent-repl--command-completion-bounds' finds it --
+names a command in the composer's catalog, by its name or an alias, and
+takes `agent-repl-command-completion-known'."
+  (save-excursion
+    (let ((beg (progn (goto-char beg) (line-beginning-position)))
+          (end (progn (goto-char end) (line-end-position)))
+          (catalog agent-repl--command-completion-catalog))
+      (remove-overlays beg end 'agent-repl-command-completion-known t)
+      (when catalog
+        (goto-char beg)
+        (while (search-forward "/" end t)
+          (when-let* ((bounds (agent-repl--command-completion-bounds)))
+            (when (and (= (car bounds) (1- (point)))
+                       (agent-repl--command-completion-entry
+                        catalog (buffer-substring-no-properties (car bounds) (cdr bounds))))
+              (let ((ov (make-overlay (car bounds) (cdr bounds))))
+                (overlay-put ov 'agent-repl-command-completion-known t)
+                (overlay-put ov 'face 'agent-repl-command-completion-known)))
+            (goto-char (cdr bounds))))))))
+
+(defun agent-repl--command-completion-on-change (beg end _len)
+  "Re-mark the composer's lines BEG to END after an edit.
+The composer's `after-change-functions' entry; unlogged, as it runs per
+keystroke."
+  (agent-repl--command-completion-mark beg end))
+
+(defun agent-repl--command-completion-install (buf catalog)
+  "Make CATALOG composer BUF's catalog and re-mark the whole composer.
+A BUF that died since it asked is left alone."
+  (when (buffer-live-p buf)
+    (with-current-buffer buf
+      (setq agent-repl--command-completion-catalog catalog)
+      (agent-repl--command-completion-mark (point-min) (point-max)))))
 
 ;;;; ---- Asking the daemon ----
 
@@ -109,14 +172,10 @@ as it stood and is logged; a handover arm is walked by host.el."
           (let ((commands (plist-get (plist-get (plist-get catalog :value) :catalog) :commands)))
             (agent-repl--log ws "elisp.command-completion.answered ws=%s outcome=stated commands=%d"
                              ws (length commands))
-            (when (buffer-live-p buf)
-              (with-current-buffer buf
-                (setq agent-repl--command-completion-catalog commands)))))
+            (agent-repl--command-completion-install buf commands)))
          (:unstated
           (agent-repl--log ws "elisp.command-completion.answered ws=%s outcome=unstated" ws)
-          (when (buffer-live-p buf)
-            (with-current-buffer buf
-              (setq agent-repl--command-completion-catalog nil))))
+          (agent-repl--command-completion-install buf nil))
          (other
           (agent-repl--error ws "elisp.command-completion.unknown-catalog-arm ws=%s arm=%S"
                              ws other)))))
