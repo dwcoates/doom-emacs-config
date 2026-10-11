@@ -878,6 +878,43 @@ func (s *server) SetWorkspaceParent(
 	return connect.NewResponse(resp), nil
 }
 
+// SwapWorkspacePlaces exchanges two sibling workspaces' roster places. Both
+// refs resolve as any workspace ref does, and a refusal of either names the
+// ref it refused; the new order arrives on the roster stream.
+func (s *server) SwapWorkspacePlaces(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.SwapWorkspacePlacesRequest],
+) (*connect.Response[agentreplv1.SwapWorkspacePlacesResponse], error) {
+	const rpc = "SwapWorkspacePlaces"
+	if err := validateSwapWorkspacePlacesRequest(req.Msg); err != nil {
+		return nil, err
+	}
+	resp := &agentreplv1.SwapWorkspacePlacesResponse{}
+	var subjects []resolved
+	for _, ref := range []*workspacev1.WorkspaceRef{req.Msg.GetWorkspace(), req.Msg.GetOther()} {
+		subject, r, err := s.resolveRef(ctx, rpc, ref)
+		if err != nil {
+			return answer(resp, failResolution(s.log, rpc, err))
+		}
+		if r != nil {
+			named := *r
+			named.Fields = map[string]any{"workspace": ref}
+			for field, value := range r.Fields {
+				named.Fields[field] = value
+			}
+			return answer(resp, s.refuse(s.log, rpc, resp, named))
+		}
+		subjects = append(subjects, subject)
+	}
+	if err := s.deps.Verbs.SwapPlaces(ctx, subjects[0].Record.ID, subjects[1].Record.ID); err != nil {
+		return answer(resp, s.answerRefusal(subjects[0].Log, rpc, resp, err, nil))
+	}
+	resp.Result = &agentreplv1.SwapWorkspacePlacesResponse_Success{
+		Success: &agentreplv1.SwapWorkspacePlacesSuccess{},
+	}
+	return connect.NewResponse(resp), nil
+}
+
 // parentArms renames the parent ref's resolution refusals onto
 // SetWorkspaceParentError's parent arms. A resolution answers exactly these
 // two, so any other arm is a defect, failed at ERROR rather than renamed.

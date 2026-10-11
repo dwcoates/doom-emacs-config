@@ -268,6 +268,23 @@ func (s *requestLoggingServer) SetWorkspaceHidden(
 	return serveUnary(s, ctx, "SetWorkspaceHidden", req, s.server.SetWorkspaceHidden)
 }
 
+func (s *requestLoggingServer) SwapWorkspacePlaces(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.SwapWorkspacePlacesRequest],
+) (resp *connect.Response[agentreplv1.SwapWorkspacePlacesResponse], err error) {
+	boundary, err := s.server.beginRequest(ctx, "SwapWorkspacePlaces", req.Header().Get(requestIDHeader), requestMessage(req))
+	if err != nil {
+		return nil, boundaryFailure(err)
+	}
+	boundary.log.Debug("daemon.server.swap_workspace_places", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
+	defer func() {
+		boundary.log.Debug("daemon.server.swap_workspace_places", "completed the rpc handler", boundary.completionContext(err))
+	}()
+	return s.server.SwapWorkspacePlaces(ctx, req)
+}
+
 func (s *requestLoggingServer) CreateTask(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.CreateTaskRequest],

@@ -260,6 +260,10 @@ func (f *fakeRetarget) Retarget(_ context.Context, ws ids.WorkspaceID, parent *i
 type fakeVerbs struct {
 	workspace.Verbs
 
+	// swaps records every SwapPlaces pair; swapErr is what it answers.
+	swaps   [][2]ids.WorkspaceID
+	swapErr error
+
 	// editorOpens records every relayed open, a workspace file's path or a
 	// daemon file's.
 	editorOpens []string
@@ -1428,6 +1432,11 @@ func receiveHostEvent(
 type repositoryFold struct {
 	repo   ids.RepoID
 	folded bool
+}
+
+func (v *fakeVerbs) SwapPlaces(_ context.Context, ws, other ids.WorkspaceID) error {
+	v.swaps = append(v.swaps, [2]ids.WorkspaceID{ws, other})
+	return v.swapErr
 }
 
 func (v *fakeVerbs) FoldRepository(_ context.Context, repo ids.RepoID, folded bool) error {

@@ -27,6 +27,7 @@ import (
 	"claude-repld/internal/merge"
 	"claude-repld/internal/promptqueue"
 	"claude-repld/internal/prompts"
+	"claude-repld/internal/publish"
 	"claude-repld/internal/resolve/feed"
 	"claude-repld/internal/resolve/footer"
 	"claude-repld/internal/resolve/sidebar"
@@ -47,6 +48,10 @@ var errFake = errors.New("workspace test: arranged failure")
 // outside that set nil-panics, which is the loud failure the test wants.
 type fakeDB struct {
 	wsm.DB
+
+	// swaps is every SwapPlaces call, in order; swapErr fails it.
+	swaps   [][2]ids.WorkspaceID
+	swapErr error
 
 	// rolledBack is each workspace's rolled-back turns; rolledBackErr fails
 	// the read.
@@ -304,7 +309,7 @@ func (d *fakeDB) RegisterWorkspace(_ context.Context, dir string, facts wsm.Regi
 	ws := wsm.Workspace{
 		ID: ids.WorkspaceID("ws-" + filepath.Base(dir)), Dir: dir, Repo: "repo-1",
 		Name: facts.Name, Branch: facts.Branch, ParentBranch: facts.ParentBranch,
-		Parent: facts.Parent,
+		Parent: facts.Parent, Priority: facts.Priority,
 	}
 	d.with(ws)
 	d.createdNew = true
@@ -356,6 +361,14 @@ func (d *fakeDB) ListRepositories(context.Context) ([]wsm.Repository, error) {
 func (d *fakeDB) Tasks(context.Context) ([]wsm.Task, error) { return d.tasks, nil }
 
 func (d *fakeDB) Current(context.Context) (*ids.WorkspaceID, error) { return d.current, nil }
+
+func (d *fakeDB) SwapPlaces(_ context.Context, a, b ids.WorkspaceID) error {
+	if d.swapErr != nil {
+		return d.swapErr
+	}
+	d.swaps = append(d.swaps, [2]ids.WorkspaceID{a, b})
+	return nil
+}
 
 func (d *fakeDB) SetClosed(_ context.Context, id ids.WorkspaceID, closed bool) error {
 	if d.setClosedErr != nil {
@@ -1319,6 +1332,18 @@ type fakeSidebar struct {
 	// calls records the ORDER the resolver was told things in, which is what
 	// decides whether a push carries a whole view or a half-refreshed one.
 	calls []string
+	// topic is the published roster a verb judges the drawn tree by; a test
+	// publishes onto it, and an unpublished topic is a roster never resolved.
+	topic *publish.Topic[*frontendv1.WorkspaceRoster]
+}
+
+func (s *fakeSidebar) Topic() *publish.Topic[*frontendv1.WorkspaceRoster] {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.topic == nil {
+		s.topic = publish.NewLatestOnly[*frontendv1.WorkspaceRoster]()
+	}
+	return s.topic
 }
 
 // revivingEdge is one SetReviving call.
