@@ -138,3 +138,23 @@ sidebar's walk" and the create-landing rule above. Not yet implemented.
   `emacs-bindings-support`) and 3 are true children whose `parent_branch` is
   a commit (`unambiguous-file-links-rzv`, `fork-cache-miss-oiu`,
   `feed-tick-flicker-ncg`). No workspace in the registry carries a priority.
+- **Recently Merged (owner, 2026-10-11):** may order by registry order, but
+  keeps its merged-today marking (the white line on the bar) and the count
+  beside the "Recently Merged" heading unchanged.
+- **Re-open (owner, 2026-10-11, supersedes "re-open goes last"):** a
+  re-opened workspace returns to the place it held in the registry when it
+  was closed.
+- **Priority change (owner, 2026-10-11, supersedes "a priority change moves
+  nothing"):** setting a non-null priority moves the workspace to
+  second-to-last within that priority's open workspaces; it can be reordered
+  freely afterwards. Clearing a priority moves nothing.
+- **Merges are out of scope:** nothing about merge targets or the merge queue
+  changes; only the sidebar and tab-bar views do.
+- **Verified creation facts (code, 2026-10-11):** `SPC TAB n` sends no parent
+  and no base ref, so the workspace is cut from the default branch and merges
+  into the main worktree. `SPC TAB c`/`C` send a parent but no base ref; the
+  daemon defaults the base to the default branch
+  (`workspace/create.go:204`) while the merge target is the parent's worktree
+  (`mergeTargetDir`, `create.go:550`). The workspace skill always records its
+  source workspace as the parent and bases on the source's HEAD, or on the
+  main branch with `--master`.
