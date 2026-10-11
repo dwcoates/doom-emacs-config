@@ -147,6 +147,18 @@ type wsState struct {
 
 	// merge is what the merge orchestrator last told the roster.
 	merge footer.MergeFacts
+	// mergeRequested reports a merge RECORDED for this workspace that is not
+	// yet in line: its requesting turn has not ended (SetMergeRequested). It
+	// is never drawn; it feeds only the one-shot outcome (oneshot.go), and the
+	// merge's own facts supersede it once the merge is in line.
+	mergeRequested bool
+	// oneShotFailed is the one-shot outcome: the workspace ended without a
+	// live merge behind it (oneshot.go). Tracked for every workspace and drawn
+	// only on a one-shot's row.
+	oneShotFailed bool
+	// oneShotSettled reports that a live edge has decided the outcome, which
+	// retires the one-time seed from the durable record.
+	oneShotSettled bool
 	// summary is the row detail's summary line, empty when none is set.
 	summary string
 }
