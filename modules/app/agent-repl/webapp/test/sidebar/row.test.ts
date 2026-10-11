@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { captureLogRecords, type LogCapture } from "../log-capture.js";
+import { captureLogRecords, forwardedRecord, type LogCapture } from "../log-capture.js";
 import { create } from "@bufbuild/protobuf";
 import { SelectWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_workspace_pb";
+import { SetWorkspaceHiddenResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_hidden_pb";
 import { UpdateSidebarViewResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_sidebar_view_pb";
 import { RosterRowSchema } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
@@ -488,6 +489,62 @@ describe("expandVisibleRows", () => {
       "R",
     );
     expect(visible[0]?.path).toBe("R[0].children[0]");
+  });
+});
+
+describe("the row click in the hidden section", () => {
+  it("shows the workspace again, and selects nothing", async () => {
+    const shown: string[] = [];
+    const selected: string[] = [];
+    const sc = sidebarContext(
+      appContext({
+        setWorkspaceHidden: (request) => {
+          shown.push(`${request.workspace?.id ?? ""}:${request.visibility.case ?? ""}`);
+          return create(SetWorkspaceHiddenResponseSchema, { result: { case: "success", value: {} } });
+        },
+        selectWorkspace: (request) => {
+          selected.push(request.workspace?.id ?? "");
+          return SELECT_OK;
+        },
+      }),
+    );
+    const drawn = drawRosterRow(row({ id: "ws-1" }), sc, "R", "hidden");
+    await click(drawn.querySelector("[data-select]") as Element);
+    expect([shown, selected]).toEqual([["ws-1:show"], []]);
+  });
+
+  it("shows a hidden child row by its own ref", async () => {
+    const shown: string[] = [];
+    const sc = sidebarContext(
+      appContext({
+        setWorkspaceHidden: (request) => {
+          shown.push(request.workspace?.id ?? "");
+          return create(SetWorkspaceHiddenResponseSchema, { result: { case: "success", value: {} } });
+        },
+      }),
+    );
+    const drawn = drawRosterRow(row({ id: "ws-1", children: [row({ id: "ws-2" })] }), sc, "R", "hidden");
+    await click(drawn.querySelector("[data-roster-row='ws-2'] [data-select]") as Element);
+    expect(shown).toEqual(["ws-2"]);
+  });
+
+  it("says a refusal at the row itself", async () => {
+    const sc = sidebarContext(
+      appContext({
+        setWorkspaceHidden: () =>
+          create(SetWorkspaceHiddenResponseSchema, {
+            result: { case: "error", value: { cause: { case: "unknownWorkspace", value: {} } } },
+          }),
+      }),
+    );
+    const capture = captureLogRecords();
+    const drawn = drawRosterRow(row({ id: "ws-1" }), sc, "R", "hidden");
+    await click(drawn.querySelector("[data-select]") as Element);
+    const record = await forwardedRecord(capture, "sidebar.verbs.refused");
+    expect([drawn.querySelector(":scope > .sb-refusal")?.textContent, record.level.case]).toEqual([
+      "the daemon does not know this workspace",
+      "warn",
+    ]);
   });
 });
 
@@ -1259,7 +1316,7 @@ describe("a merge that landed today", () => {
       row({ id: "ws-1", status: { case: "merged", value: {} }, when: { case: "merged", value: { atMs: BigInt(atMs) } } }),
       sc,
       "R",
-      merged,
+      merged ? "merged" : "grouping",
     );
   const isGreen = (drawn: HTMLElement): boolean | undefined =>
     drawn.querySelector(".name")?.classList.contains(MERGED_TODAY_CLASS);

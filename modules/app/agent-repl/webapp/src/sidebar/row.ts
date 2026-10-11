@@ -45,6 +45,7 @@ import type {
   RosterRowWorkspace,
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { SelectWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_workspace_pb";
+import { SetWorkspaceHiddenResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_hidden_pb";
 import type { WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { formatTickedAge } from "../duration.js";
 import { log } from "../log.js";
@@ -58,6 +59,7 @@ import { guardMalformed } from "../rpc/guard.js";
 import { clampReveal } from "../topbar/clamp.js";
 import {
   buildSelectWorkspaceRequest,
+  buildSetWorkspaceHiddenRequest,
   drawRowMenu,
   runVerb,
   type VerbTarget,
@@ -103,6 +105,17 @@ export function expandVisibleRows(rows: readonly RosterRow[], basePath: string):
 }
 
 /**
+ * Which kind of section a row is drawn in, which decides what it looks like
+ * and what a click on it does:
+ *
+ *   - `grouping`: a live grouping's section. Drawn whole; a click selects it.
+ *   - `merged`: the recently-merged band. Drawn plain; a click selects it.
+ *   - `hidden`: the hidden-workspaces section. Drawn whole; a click SHOWS it
+ *     again (`SetWorkspaceHidden`), which is the section's one gesture.
+ */
+export type RowPlace = "grouping" | "merged" | "hidden";
+
+/**
  * One roster row, with its family nested under it.
  *
  * Returns the WHOLE subtree — the row line, the detail panel and the children
@@ -115,8 +128,9 @@ export function drawRosterRow(
   u: RosterRow,
   sc: SidebarContext,
   path: string,
-  merged = false,
+  place: RowPlace = "grouping",
 ): HTMLElement {
+  const merged = place === "merged";
   const workspace = drawRosterRowWorkspace(
     requireMessage(u.workspace, `${path}.workspace`),
     `${path}.workspace`,
@@ -165,6 +179,10 @@ export function drawRosterRow(
   line.setAttribute("data-select", "");
   line.addEventListener("click", (event) => {
     event.preventDefault();
+    if (place === "hidden") {
+      void guardMalformed(sc.ctx, "sidebar.row.show", showWorkspace(line, sc, workspace));
+      return;
+    }
     void guardMalformed(sc.ctx, "sidebar.row.select", selectWorkspace(line, sc, workspace));
   });
   line.addEventListener("contextmenu", (event) => {
@@ -248,7 +266,7 @@ export function drawRosterRow(
     const kids = document.createElement("div");
     kids.className = "kids";
     for (const child of visibleChildren) {
-      kids.appendChild(drawRosterRow(child.row, sc, child.path, merged));
+      kids.appendChild(drawRosterRow(child.row, sc, child.path, place));
     }
     ws.appendChild(kids);
   }
@@ -730,6 +748,28 @@ async function selectWorkspace(
     call: (client) => client.selectWorkspace(buildSelectWorkspaceRequest(workspace)),
     schema: SelectWorkspaceResponseSchema,
     expectedArms: SELECT_WORKSPACE_EXPECTED_ARMS,
+  });
+}
+
+/**
+ * Show a hidden workspace again: the click on its row in the hidden section.
+ * The push that follows moves it back into its groupings and onto the tab
+ * bar, so a success draws nothing here.
+ */
+async function showWorkspace(
+  line: HTMLElement,
+  sc: SidebarContext,
+  workspace: WorkspaceRef,
+): Promise<void> {
+  log.info("showing a hidden workspace from the rail", {
+    operation: "sidebar.row.show",
+    context: { workspace: workspace.id },
+  });
+  await runVerb(line, {
+    sc,
+    rpc: "SetWorkspaceHidden",
+    call: (client) => client.setWorkspaceHidden(buildSetWorkspaceHiddenRequest(workspace, false)),
+    schema: SetWorkspaceHiddenResponseSchema,
   });
 }
 
