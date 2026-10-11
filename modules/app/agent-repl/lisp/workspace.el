@@ -1305,6 +1305,7 @@ Callers must use this function instead of calling
 `+workspace-current-name' directly or wrapping it themselves with
 `fboundp'."
   (and (fboundp '+workspace-current-name)
+       (fboundp 'safe-persp-name)
        (+workspace-current-name)))
 
 (defun agent-repl--ws-log-name (ws)
