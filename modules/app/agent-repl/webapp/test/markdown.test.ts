@@ -277,7 +277,7 @@ describe("setInlineMarkdown", () => {
 // `innerHTML = inline(escapeHtml(...))` again fails here rather than drifting.
 describe("setInlineMarkdown's call sites", () => {
   const here = path.dirname(fileURLToPath(import.meta.url));
-  it.each(["src/news-digest/news-digest.ts"])(
+  it.each(["src/news-digest/news-digest.ts", "src/feed/asks/question.ts", "src/feed/tabs.ts"])(
     "%s draws inline markdown through setInlineMarkdown",
     (file) => {
       // Arrange

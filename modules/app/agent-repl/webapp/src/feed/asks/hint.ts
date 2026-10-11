@@ -1,7 +1,8 @@
 /**
- * hint — WHERE TO TYPE: the one line a standing ask card draws under its
- * controls to say that its free text (a deny's reason, a question's own
- * answer) is typed in the Emacs composer and sent, never on the card.
+ * hint — WHERE TO TYPE: the one line the standing permission card draws under
+ * its controls to say that a deny's reason is typed in the Emacs composer and
+ * sent, never on the card. (The question card draws none: owner ruling,
+ * 2026-10-11.)
  */
 
 /** The attribute the hint is found by. */
