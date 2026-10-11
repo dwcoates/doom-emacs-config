@@ -14,7 +14,7 @@ installResizeObserver();
 
 /**
  * jsdom implements no `IntersectionObserver` either, and the feed mount
- * subscribes one for the overscan pre-render band (overscan.ts). This project
+ * subscribes ones for the selection's visibility (selection-visibility.ts). This project
  * does not load `test/setup.ts`, so it installs the same substitution itself.
  */
 installIntersectionObserver();

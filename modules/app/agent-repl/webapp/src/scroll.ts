@@ -100,9 +100,8 @@ export interface ScrollPosition {
  * - `prependCompensation`: content above the reader changed height, and the
  *   view shifts by exactly that, so the content under the reader stays put.
  *   This is THE FEED'S SCROLL ANCHORING (`TailFollow`, "THE FEED OWNS ITS
- *   SCROLL ANCHORING"): any row above the anchor changing height — its first
- *   layout under `content-visibility: auto`, a late render, older rows landing
- *   above, a bubble whose sub-feed lies wholly above the viewport collapsing.
+ *   SCROLL ANCHORING"): any row above the anchor changing height — a late
+ *   render, older rows landing above, a bubble whose sub-feed lies wholly above the viewport collapsing.
  * - `latestVisible`: the reader can SEE the feed's latest entry
  *   (`latestEntryVisible`), so the follow latches where the view already is.
  *   Latching moves nothing; later content then keeps the tail in view, and
@@ -318,14 +317,12 @@ function rowName(row: Element): string {
  * `sync` compares the box's live position against the last one this owner
  * knows about, so a read can never precede the movement it is about.
  *
- * THE FEED OWNS ITS SCROLL ANCHORING (2026-09-27). Every `.feed-item` is
- * `content-visibility: auto`, so a row above the reader is first laid out when
- * the overscan band (feed/overscan.ts) reaches it, and its height changes from
- * the stylesheet's guess to its real one. Chromium's native CSS scroll
- * anchoring absorbs that; WebKit, the Emacs webview's engine, has none, and the
- * content under the reader jumped on every first scroll up (measured: 52 of 120
- * steps, up to 436px, test/webkit/anchoring.webkit.test.ts). So this owner
- * anchors, for every change in row height, whatever caused it:
+ * THE FEED OWNS ITS SCROLL ANCHORING (2026-09-27). A row above the reader can
+ * change height while they read: a late render, a card settling, older rows
+ * landing, a sub-feed collapsing. Chromium's native CSS scroll anchoring
+ * absorbs that; WebKit, the Emacs webview's engine, has none, and the content
+ * under the reader would jump (test/webkit/anchoring.webkit.test.ts). So this
+ * owner anchors, for every change in row height, whatever caused it:
  *
  * - it holds ONE anchor (`findAnchor`: the first root row starting in view)
  *   and that row's top in the box's CONTENT coordinates (viewport top minus

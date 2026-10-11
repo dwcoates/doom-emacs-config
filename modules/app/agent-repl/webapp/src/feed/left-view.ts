@@ -26,7 +26,7 @@
  * once none does.
  *
  * Absent `IntersectionObserver` (a bare jsdom), there is no watch at all
- * (null), the same standing overscan.ts gives it.
+ * (null).
  */
 
 /** What a watcher hears about the one element it watches. */

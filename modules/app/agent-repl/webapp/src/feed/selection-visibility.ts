@@ -19,8 +19,7 @@
  * resets the watch, so a report about a row the reader has stepped away from
  * is never sent.
  *
- * Absent `IntersectionObserver` (a bare jsdom), there is no watch at all: the
- * same standing overscan.ts gives it.
+ * Absent `IntersectionObserver` (a bare jsdom), there is no watch at all.
  */
 import type { FeedId } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { log } from "../log.js";
