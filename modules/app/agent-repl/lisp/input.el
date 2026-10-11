@@ -97,6 +97,7 @@
 (declare-function agent-repl--on-close "agent-repl-panels" ())
 (declare-function agent-repl-host-ref "agent-repl-host" (ws))
 (declare-function agent-repl-host-conn-or-primary "agent-repl-host" (ws))
+(declare-function agent-repl-command-completion-at-point "command-completion" ())
 (declare-function agent-repl-host-composer-gate "agent-repl-host" (ws))
 (declare-function agent-repl-host-selection "agent-repl-host" (ws))
 (declare-function agent-repl-link-primary "agent-repl-daemon-link" ())
@@ -278,6 +279,9 @@ The standing notice first, then the held-prompt waiting line."
   ;; Intentionally unlogged: `after-change-functions' runs per keystroke, so
   ;; logging it would overwhelm the durable input/send lifecycle diagnostics.
   (add-hook 'after-change-functions #'agent-repl--history-on-change nil t)
+  ;; A WORD STARTING WITH `/' completes against the workspace's runtime
+  ;; (command-completion.el).
+  (add-hook 'completion-at-point-functions #'agent-repl-command-completion-at-point nil t)
   (add-hook 'kill-buffer-hook #'agent-repl--input-cancel-flash-timer nil t))
 
 (defun agent-repl--input-buffer (ws)

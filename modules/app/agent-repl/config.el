@@ -321,6 +321,11 @@ returning the SHA string (or the sentinel \"unknown\" when undetermined)."
 (agent-repl--load-module "status")
 (agent-repl--load-module "autosave")
 (agent-repl--load-module "input")
+;; WHY: command-completion.el is the composer's slash-command completion
+;; (`agent-repl-input-mode' installs its capf).  It asks the daemon through
+;; rpc.el and resolves the workspace's ref and connection through host.el,
+;; both loaded above.
+(agent-repl--load-module "command-completion")
 ;; WHY: clipboard-image.el binds `agent-repl-attach-clipboard-image' into
 ;; `agent-repl-input-mode-map' (input.el) and writes captured images under
 ;; the workspace dir via `agent-repl--ws-dir' (status.el) -- both already
