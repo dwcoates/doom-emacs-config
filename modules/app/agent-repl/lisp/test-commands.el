@@ -929,6 +929,23 @@ scope, never nil: a nil scope is refused by the ladder as a routing error
     (agent-repl-switch-to-workspace-9)
     (should (equal agent-repl-test-commands--switched "third"))))
 
+(ert-deftest agent-repl-test-commands-last-numeral-on-a-long-bar-is-slot-nine ()
+  "`M-9' on an eleven-tab bar is the ninth tab, not the last."
+  (agent-repl-test-commands--with-bar
+      '("t1" "t2" "t3" "t4" "t5" "t6" "t7" "t8" "t9" "t10" "t11") "t1"
+    (agent-repl-switch-to-workspace-9)
+    (should (equal agent-repl-test-commands--switched "t9"))))
+
+(ert-deftest agent-repl-test-commands-last-tab-slot-is-the-bar-length ()
+  "The last-tab slot is the count of DRAWN tabs."
+  (agent-repl-test-commands--with-bar '("first" "second" "third") "first"
+    (should (= (agent-repl--last-tab-slot) 3))))
+
+(ert-deftest agent-repl-test-commands-last-tab-slot-on-an-empty-bar-is-one ()
+  "An empty bar still answers slot 1, never 0."
+  (agent-repl-test-commands--with-bar nil "first"
+    (should (= (agent-repl--last-tab-slot) 1))))
+
 (ert-deftest agent-repl-test-commands-switch-to-workspace-records-its-target ()
   "A numeral chord writes `elisp.commands.switch-to-workspace n=N target=<ws>'."
   ;; Arrange / Act
