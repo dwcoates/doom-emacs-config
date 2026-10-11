@@ -44,7 +44,6 @@ func newBoardsFixture(t *testing.T) *boardsFixture {
 	pollsAs(r, livePoll)
 	log := dlog.NewTestLogger()
 	life, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
 	b, err := New(Deps{
 		Log: log, Run: r, Getenv: envOf(map[string]string{EngineDirEnv: checkout}),
 		PluginDir: t.TempDir(), HTTP: http.DefaultClient, Life: life,
@@ -52,6 +51,13 @@ func newBoardsFixture(t *testing.T) *boardsFixture {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
+	// Registered after every TempDir above, so it runs before their removal:
+	// the boards' lifetime ends and every resolution is joined first, and no
+	// resolution writes into a fixture dir being removed.
+	t.Cleanup(func() {
+		cancel()
+		b.Wait()
+	})
 	settles := make(chan Session, 64)
 	b.settled = func(s Session) { settles <- s }
 	return &boardsFixture{boards: b, runner: r, webapp: w, log: log, cli: cli, settles: settles}
@@ -286,6 +292,70 @@ func TestRunHandsEveryChangeToApplyAndStopsWithItsContext(t *testing.T) {
 	// Assert.
 	if len(got) != 1 || got[0] != testSession {
 		t.Fatalf("applied %v, want the board's session", got)
+	}
+}
+
+// blockTheWidgetBuild makes the widget build wait for release, signalling
+// entered once it starts, so a resolution is held under way.
+func blockTheWidgetBuild(f *boardsFixture, cli string) (entered, release chan struct{}) {
+	entered, release = make(chan struct{}), make(chan struct{})
+	f.runner.on("npm run build", func(string, []string) (string, int, error) {
+		close(entered)
+		<-release
+		return writeWidgetDist(cli)
+	})
+	return entered, release
+}
+
+func TestWaitJoinsAResolutionUnderWay(t *testing.T) {
+	// Arrange.
+	f := newBoardsFixture(t)
+	f.webapp.answerWidget(nil)
+	entered, release := blockTheWidgetBuild(f, f.cli)
+	f.boards.Board(testSession)
+	<-entered
+	waited := make(chan struct{})
+	go func() { f.boards.Wait(); close(waited) }()
+
+	// Act.
+	close(release)
+	<-waited
+
+	// Assert: the resolution had settled by the time Wait returned.
+	select {
+	case got := <-f.settles:
+		if got != testSession {
+			t.Fatalf("settled %v, want the board's session", got)
+		}
+	default:
+		t.Fatal("Wait returned while the board's resolution was still under way")
+	}
+}
+
+func TestRunReturnsOnlyOnceEveryResolutionEnded(t *testing.T) {
+	// Arrange: a resolution held under way, and Run's context already over.
+	f := newBoardsFixture(t)
+	f.webapp.answerWidget(nil)
+	entered, release := blockTheWidgetBuild(f, f.cli)
+	f.boards.Board(testSession)
+	<-entered
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	done := make(chan struct{})
+	go func() { f.boards.Run(ctx, func([]Session) {}); close(done) }()
+
+	// Act.
+	close(release)
+	<-done
+
+	// Assert: the resolution had settled by the time Run returned.
+	select {
+	case got := <-f.settles:
+		if got != testSession {
+			t.Fatalf("settled %v, want the board's session", got)
+		}
+	default:
+		t.Fatal("Run returned while the board's resolution was still under way")
 	}
 }
 

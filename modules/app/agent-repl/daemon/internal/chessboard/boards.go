@@ -58,6 +58,10 @@ type Boards struct {
 	changed map[Session]struct{}
 	// wake is signalled when changed gains a session.
 	wake chan struct{}
+	// resolutions counts every resolution goroutine under way, so Wait (and
+	// Run, when it stops) joins them: no resolution outlives the boards'
+	// owner, writing into a plugin dir or checkout its owner is tearing down.
+	resolutions sync.WaitGroup
 	// settled is told each session whose resolution ended, after its body is
 	// recorded. nil in production; a test waits on it, because a resolution
 	// that changes nothing publishes nothing to wait on.
@@ -123,7 +127,11 @@ func (b *Boards) Board(s Session) *frontendv1.FeedChessBoard {
 	}
 	if !e.resolving {
 		e.resolving = true
-		go b.resolve(s)
+		b.resolutions.Add(1)
+		go func() {
+			defer b.resolutions.Done()
+			b.resolve(s)
+		}()
 	}
 	return bubble(headingFor(s), e.body)
 }
@@ -185,8 +193,10 @@ func (b *Boards) Changed(ctx context.Context) ([]Session, error) {
 }
 
 // Run hands every change to apply until ctx ends: the loop the feed resolver
-// is driven by.
+// is driven by. It returns only once every resolution under way has ended
+// (Wait), so the component that runs it stops with no board still resolving.
 func (b *Boards) Run(ctx context.Context, apply func([]Session)) {
+	defer b.Wait()
 	for {
 		sessions, err := b.Changed(ctx)
 		if err != nil {
@@ -195,6 +205,12 @@ func (b *Boards) Run(ctx context.Context, apply func([]Session)) {
 		}
 		apply(sessions)
 	}
+}
+
+// Wait blocks until every resolution under way has ended. Each one is bounded
+// by Deps.Life, so ending Life makes Wait return promptly.
+func (b *Boards) Wait() {
+	b.resolutions.Wait()
 }
 
 // resolve readies the backend and fetches the session's widget data, then
