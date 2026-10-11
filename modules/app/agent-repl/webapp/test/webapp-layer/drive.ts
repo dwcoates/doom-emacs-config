@@ -11,6 +11,8 @@
  * against the real chain and is recorded in `e2e/WEBAPP-LAYER-SPEC.md` §F2.
  */
 import { type Control } from "../../src/control.js";
+import { fullTextOf } from "../../src/bubble/text-reveal.js";
+import { RESPONSE_PROSE_CLASS } from "../../src/feed/cards/response.js";
 import { expect } from "vitest";
 
 import type { MountedApp } from "../integration/harness";
@@ -392,6 +394,19 @@ export async function driveScenarioRow(
 /** Wait for the turn to be terminal — its `turn_ended` row is drawn. */
 export async function awaitTurnEnded(app: MountedApp, expected = 1): Promise<void> {
   await awaitDrawn(app, `${expected} turn_ended row(s)`, () => rows(app, "turnEnded").length >= expected);
+}
+
+/**
+ * Wait until a response ROW's type-out has finished: its prose shows every
+ * character it holds. A live response types its text out at the daemon's
+ * reveal pace even once it has settled (src/reveal-pace.ts), so a test that
+ * reads a settled response's body waits for the reveal, never for a duration.
+ */
+export async function awaitTypedOut(app: MountedApp, row: HTMLElement): Promise<void> {
+  await awaitDrawn(app, `the full text of response row ${rowID(row)}`, () => {
+    const prose = row.querySelector(`.${RESPONSE_PROSE_CLASS}`);
+    return prose !== null && (prose.textContent ?? "") === fullTextOf(prose);
+  });
 }
 
 /** The trimmed text of an element, for a verbatim assertion. */
