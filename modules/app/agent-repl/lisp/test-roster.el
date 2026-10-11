@@ -25,8 +25,8 @@
 (defun agent-repl-test-roster--row (id name status &rest overrides)
   "Return a decoded `RosterRow' plist for ID, NAME and STATUS.
 OVERRIDES is a plist merged over the defaults: `:closed', `:children',
-`:attention', `:priority', `:viewed', `:detached-live', `:current', `:dir',
-`:availability'
+`:attention', `:priority', `:viewed', `:detached-live', `:one-shot' (an
+outcome arm keyword), `:current', `:dir', `:availability'
 \(an arm keyword, default `:available')."
   (let ((dir (or (plist-get overrides :dir) (concat "/w/" id))))
     (list :workspace (list :workspace (list :id id :dir dir))
@@ -34,6 +34,8 @@ OVERRIDES is a plist merged over the defaults: `:closed', `:children',
           :priority (plist-get overrides :priority)
           :viewed (plist-get overrides :viewed)
           :detached-live (plist-get overrides :detached-live)
+          :one-shot (let ((outcome (plist-get overrides :one-shot)))
+                      (and outcome (list :arm outcome :value nil)))
           :availability (list :arm (or (plist-get overrides :availability) :available)
                               :value nil)
           :name (list :text name)
@@ -1573,6 +1575,35 @@ user's next sidebar click."
   "Before any push carried its row, a workspace has no detached-work fact."
   (agent-repl-test-roster--with-editor
     (should-not (agent-repl-roster-detached-live-for-ws "one"))))
+
+(ert-deftest agent-repl-test-roster-row-one-shot-reads-the-outcome ()
+  "A row carrying `RosterRowOneShot' reads as its outcome arm."
+  (dolist (outcome '(:armed :failed))
+    (should (eq (agent-repl-roster-row-one-shot
+                 (agent-repl-test-roster--row "a" "one" :done :one-shot outcome))
+                outcome))))
+
+(ert-deftest agent-repl-test-roster-row-one-shot-when-no-one-shot ()
+  "A row without the mark reads as no one-shot."
+  (should-not (agent-repl-roster-row-one-shot
+               (agent-repl-test-roster--row "a" "one" :done))))
+
+(ert-deftest agent-repl-test-roster-one-shot-for-ws-after-a-push ()
+  "After a push, a workspace's one-shot outcome is its current row's."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    ;; Act
+    (agent-repl-roster-apply
+     (agent-repl-test-roster--roster
+      :sections (list (agent-repl-test-roster--section
+                       "repo" (list (agent-repl-test-roster--row "a" "one" :done :one-shot :failed))))))
+    ;; Assert
+    (should (eq (agent-repl-roster-one-shot-for-ws "one") :failed))))
+
+(ert-deftest agent-repl-test-roster-one-shot-for-ws-before-any-push ()
+  "Before any push carried its row, a workspace has no one-shot outcome."
+  (agent-repl-test-roster--with-editor
+    (should-not (agent-repl-roster-one-shot-for-ws "one"))))
 
 (defmacro agent-repl-test-roster--recording-viewed-clears (var &rest body)
   "Run BODY with the viewed-cleared hook recording each WS onto VAR."
