@@ -2606,8 +2606,7 @@ whole promise is that the process is still there afterwards."
                     ;; Assert: still there.
                     (accept-process-output nil 0.05)
                     (should (process-attributes pid))))
-              (when (process-live-p proc)
-                (signal-process (process-id proc) 'SIGKILL)))))
+              (agent-repl-test--reap-process proc))))
       (delete-directory dir t))))
 
 (ert-deftest agent-repl-test-daemon-the-deliberate-stop-still-stops-it ()
