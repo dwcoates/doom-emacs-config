@@ -534,7 +534,7 @@ describe("the body redraws in place", () => {
     // Assert
     expect([host.querySelector(".merge-suite-glyph"), host.querySelector(".merge-suite-counts")?.textContent]).toEqual([
       glyph,
-      "2/0/10",
+      "2/10",
     ]);
   });
 
