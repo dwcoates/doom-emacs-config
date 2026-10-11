@@ -201,3 +201,16 @@ sidebar's walk" and the create-landing rule above. Not yet implemented.
   ancestor of (or equal to) the primary branch. Both refusals are typed
   error arms. The four existing workspaces cut from `master` that merge into
   another workspace are left alone.
+
+### Tab order on the roster (2026-10-11)
+
+- **What:** `frontend.v1.WorkspaceRoster.tab_bar` (`RosterTabBar`, a list of
+  `RosterTab`: a `workspace.v1.WorkspaceRef` plus a `visibility` oneof of
+  drawn, withheld because the repository is collapsed, or withheld because
+  the user hid it).
+- **Why:** the tab bar is now the registry order, not the sidebar read top to
+  bottom, so the daemon resolves it and Emacs draws it as sent.
+- **Consequences:** Emacs' tab bar, numerals, `s-{`/`s-}` and the daemon's
+  startup bring-up order read this list; `agent-repl-roster-walk` and
+  `sidebar.TabOrder()` stop deriving tab order from the groupings. Collapsed
+  and hidden workspaces behave exactly as today (no number, no stop).
