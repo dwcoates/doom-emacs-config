@@ -84,6 +84,8 @@
 (declare-function agent-repl-host-route-handover "agent-repl-host" (ws arm slug))
 (declare-function agent-repl-host-take-restart-hold "agent-repl-host" (ws))
 (declare-function agent-repl-host-release-restart-hold "agent-repl-host" (ws reason))
+(declare-function agent-repl-host-editor-switch-count "agent-repl-host" ())
+(defvar agent-repl-host-automatic-switch)
 (declare-function agent-repl-switch-to-project "commands" (&optional project))
 (declare-function agent-repl-link-primary "agent-repl-daemon-link" ())
 (declare-function agent-repl-link-connect "agent-repl-daemon-link" ())
@@ -865,7 +867,9 @@ fork fact lives inside the parent by construction, so there is no request
 that carries it alone -- encoding one would silently drop the fork and
 create a plain workspace the caller never asked for.
 
-SELECT makes the new workspace CURRENT once the daemon answers.  The
+SELECT makes the new workspace CURRENT once the daemon answers, unless
+the user has switched workspaces in Emacs since this create was
+dispatched (`agent-repl-verbs-select-minted\=').  The
 answer is the one place the minted identity exists before the roster push
 carries it: `CreateWorkspaceSuccess.workspace\' exists precisely because
 callers learn the identity from the response.  The selection is the SAME
@@ -889,6 +893,9 @@ and the new workspace\'s tab arrives through the roster push."
   ;; are registered BEFORE the send, so a progress event never outruns them.
   (let ((op-id (agent-repl-mutation-progress-new-op-id))
         (arrival-reason (if fork "forked" "created"))
+        ;; THE DISPATCH IS THE MOMENT THE USER ASKED to stand on what this
+        ;; makes; a switch they make in Emacs after it withdraws the landing.
+        (dispatched-at (agent-repl-host-editor-switch-count))
         ;; THE ACK AND THE PROGRESS STREAM ARE TWO CHANNELS, so the daemon's
         ;; first stage push can overtake the rpc's own ack.  Once anything
         ;; later in the sequence has been shown, the ack has nothing left to
@@ -911,7 +918,7 @@ and the new workspace\'s tab arrives through the roster push."
          ;; selects) still opens its panels when its tab arrives.
          (agent-repl--panels-note-arrival-reason (plist-get ref :id) arrival-reason)
          (when select
-           (agent-repl-verbs-select-minted ref))))
+           (agent-repl-verbs-select-minted ref dispatched-at))))
      :on-failed
      (lambda (arm detail)
        (setq progressed t)
@@ -953,7 +960,7 @@ and the new workspace\'s tab arrives through the roster push."
        (agent-repl--panels-note-arrival-reason
         (plist-get (plist-get success :workspace) :id) arrival-reason)
        (when select
-         (agent-repl-verbs--select-created success)))
+         (agent-repl-verbs--select-created success dispatched-at)))
      :on-error
      ;; A SYNCHRONOUS refusal (validation, an unknown repository) is answered
      ;; on the rpc before the work detaches, so no progress will follow: the
@@ -1087,8 +1094,16 @@ files it needs, because the user\='s next move is to write exactly those."
                 (format "%s in %s" (string-join files ", ") dir)
               dir))))
 
-(defun agent-repl-verbs-select-minted (ref &optional lander)
+(defun agent-repl-verbs-select-minted (ref dispatched-at &optional lander)
   "Stand on the workspace REF names, once the daemon has minted it.
+
+DISPATCHED-AT is `agent-repl-host-editor-switch-count\=' when the user
+made the gesture that minted REF.  THE LANDING IS WITHDRAWN once the user
+has switched workspaces IN EMACS since then, whether before the answer or
+while the landing waits for its tab: the user has moved on, and dragging
+them back to the new workspace takes them off their own choice.  A
+switch made from the sidebar or by an agent is not the user\='s move in
+Emacs and withdraws nothing (`agent-repl-host--editor-switches\=').
 
 LANDER is HOW the landing is made, and defaults to
 `agent-repl-verbs--land-on\=' -- a projectile switch to the minted
@@ -1124,9 +1139,13 @@ new workspace did not come up."
              '(:agent-repl-central
                "a minted workspace awaiting its roster row has no sink"))
            "elisp.verbs.select-minted dir=%s" dir)
-          ;; Owner ruling 2026-10-06: a created workspace is landed on when it becomes available, even if the user selected another meanwhile.
-          (if ws
-              (funcall land ref "already-a-tab" ws)
+          ;; Owner ruling 2026-10-11: a created workspace is landed on when it
+          ;; becomes available, unless the user switched in Emacs meanwhile.
+          (cond
+           ((agent-repl-verbs--landing-withdrawn-p ref dispatched-at "answered"))
+           (ws
+            (agent-repl-verbs--land ref "already-a-tab" ws land))
+           (t
             ;; THE TAB IS NOT HERE YET.  The minted ref is the daemon's
             ;; ANSWER, and the workspace itself reaches Emacs on the ROSTER
             ;; stream -- `agent-repl-roster--open-tab' is the whole of its
@@ -1142,7 +1161,7 @@ new workspace did not come up."
             ;; `agent-repl--ffw-pending-fire' waits for one: the arrival of
             ;; the tab fires it. Nothing here polls, retries or schedules --
             ;; a tab that never arrives simply leaves the landing pending.
-            (agent-repl-verbs--pending-landing-register ref land)))
+            (agent-repl-verbs--pending-landing-register ref dispatched-at land))))
       (agent-repl--error '(:agent-repl-central
                            "a malformed minted reference owns no workspace sink")
                          "elisp.verbs.select-minted-no-dir ref=%S" ref)
@@ -1155,11 +1174,37 @@ the user stands in one place -- so a second mint supersedes a first that
 is still waiting rather than queueing behind it.  Cleared the moment it
 fires, so nothing here outlives the arrival it waits on.")
 
+(defun agent-repl-verbs--landing-withdrawn-p (ref dispatched-at edge)
+  "Return non-nil when the landing on REF is withdrawn at EDGE.
+It is withdrawn when the user has switched workspaces in Emacs since
+DISPATCHED-AT (`agent-repl-verbs-select-minted\='); the withdrawal is
+recorded at INFO, since an automatic move that did not happen must not
+be invisible.  EDGE names where the landing was judged, for the record."
+  (let ((now (agent-repl-host-editor-switch-count)))
+    (unless (= now dispatched-at)
+      (agent-repl--info '(:agent-repl-central
+                          "a withdrawn landing moves the user to no workspace")
+                        "elisp.verbs.landing-withdrawn id=%s dir=%s edge=%s reason=user-switched dispatched-at=%d now=%d"
+                        (plist-get ref :id) (plist-get ref :dir) edge dispatched-at now)
+      t)))
+
+(defun agent-repl-verbs--land (ref why ws land)
+  "Stand on WS named by REF through LAND, recording WHY.
+The move is Emacs\='s own, not a switch the user made
+(`agent-repl-host-automatic-switch\=')."
+  (let ((agent-repl-host-automatic-switch t))
+    (funcall land ref why ws)))
+
 (defun agent-repl-verbs--land-on (ref why ws)
   "Stand on workspace WS named by REF, recording WHY the landing ran now."
   (let ((dir (plist-get ref :dir)))
     (agent-repl--info ws "elisp.verbs.land-on ws=%s dir=%s why=%s" ws dir why)
     (agent-repl-switch-to-project dir)))
+
+(defvar agent-repl-verbs--pending-landing-dispatched-at nil
+  "The switch count `agent-repl-verbs--pending-landing\=' was dispatched at.
+Set and cleared with the ref it belongs to; see
+`agent-repl-verbs-select-minted\='.")
 
 (defvar agent-repl-verbs--pending-landing-lander nil
   "The lander `agent-repl-verbs--pending-landing\=' is waiting to be made with.
@@ -1196,32 +1241,37 @@ the roster row itself."
                     ws (plist-get ref :dir) why)
   (agent-repl--ws-switch ws))
 
-(defun agent-repl-verbs--pending-landing-register (ref &optional lander)
+(defun agent-repl-verbs--pending-landing-register (ref dispatched-at &optional lander)
   "Record REF as the landing waiting for its tab to reach the roster.
-LANDER is how it will be made when the tab arrives; see
-`agent-repl-verbs-select-minted\='."
+DISPATCHED-AT and LANDER are as `agent-repl-verbs-select-minted\='
+documents."
   (agent-repl--info '(:agent-repl-central "workspace creation and daemon administration can precede workspace ownership") "elisp.verbs.pending-landing-registered dir=%s id=%s"
                     (plist-get ref :dir) (plist-get ref :id))
   (setq agent-repl-verbs--pending-landing-lander
         (or lander #'agent-repl-verbs--land-on))
+  (setq agent-repl-verbs--pending-landing-dispatched-at dispatched-at)
   (setq agent-repl-verbs--pending-landing ref))
 
 (defun agent-repl-verbs--pending-landing-fire (&rest _)
   "Land on the pending minted workspace once its tab exists.
 Installed on `agent-repl-roster-update-functions', the hook the roster
 runs after it has reconciled a push into tabs, so the ARRIVAL of the tab
-is what lands the user.  Fires exactly once: the pending ref is cleared
-before the landing runs."
+is what lands the user, unless the user has switched in Emacs since the
+dispatch (`agent-repl-verbs-select-minted\=').  Fires exactly once: the
+pending ref is cleared before the landing runs or is withdrawn."
   (when-let* ((ref agent-repl-verbs--pending-landing)
               (id (plist-get ref :id)))
     (let ((ws (agent-repl--ws-by-ref-id id)))
       (if ws
           (let ((land (or agent-repl-verbs--pending-landing-lander
-                          #'agent-repl-verbs--land-on)))
+                          #'agent-repl-verbs--land-on))
+                (dispatched-at agent-repl-verbs--pending-landing-dispatched-at))
             (setq agent-repl-verbs--pending-landing nil
+                  agent-repl-verbs--pending-landing-dispatched-at nil
                   agent-repl-verbs--pending-landing-lander nil)
             (agent-repl--info ws "elisp.verbs.pending-landing-arrived ws=%s id=%s" ws id)
-            (funcall land ref "tab-arrived" ws))
+            (unless (agent-repl-verbs--landing-withdrawn-p ref dispatched-at "tab-arrived")
+              (agent-repl-verbs--land ref "tab-arrived" ws land)))
         ;; A LANDING THAT IS STILL WAITING SAYS SO.  Nothing here polls or
         ;; times out -- a tab that never arrives simply leaves the landing
         ;; pending -- and for as long as that lasted the log went silent
@@ -1241,12 +1291,12 @@ before the landing runs."
 (defvar agent-repl-roster-update-functions)
 (add-hook 'agent-repl-roster-update-functions #'agent-repl-verbs--pending-landing-fire)
 
-(defun agent-repl-verbs--select-created (success)
+(defun agent-repl-verbs--select-created (success dispatched-at)
   "Stand on the workspace CreateWorkspaceSuccess names.
 The identity lives in the success\'s own ref, which is handed to
 `agent-repl-verbs-select-minted\' -- the one landing every minted
-workspace comes up through."
-  (agent-repl-verbs-select-minted (plist-get success :workspace)))
+workspace comes up through -- with DISPATCHED-AT, as it documents."
+  (agent-repl-verbs-select-minted (plist-get success :workspace) dispatched-at))
 
 (cl-defun agent-repl-verbs--create-form (form &key initial-prompt base-ref name
                                               merge-actions prompt)
@@ -1819,7 +1869,8 @@ The ack still names both facts because the two halves are independently
 new: the repository may be already known while the workspace is freshly
 opened."
   (interactive)
-  (let ((path (agent-repl-verbs--register-repository-read-path)))
+  (let ((path (agent-repl-verbs--register-repository-read-path))
+        (dispatched-at (agent-repl-host-editor-switch-count)))
     ;; The gesture leaves a mark the instant it is made, exactly as every
     ;; other way of putting a workspace on the roster now does.
     (agent-repl-workspace-progress-report :register-repository :requested path)
@@ -1846,7 +1897,7 @@ opened."
          (agent-repl--panels-note-arrival-reason
           (plist-get workspace :id) "registered")
          (agent-repl-verbs-select-minted
-          workspace #'agent-repl-verbs--land-on-tab)))
+          workspace dispatched-at #'agent-repl-verbs--land-on-tab)))
      :on-error
      (lambda (value) (agent-repl-verbs--register-repository-on-error path value)))))
 
