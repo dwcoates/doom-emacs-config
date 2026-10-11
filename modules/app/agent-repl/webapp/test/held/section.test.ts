@@ -18,6 +18,7 @@ import { testAppContext } from "../rpc/app-context.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import type { HeldContext } from "../../src/held/context.js";
 import { testHeldContext } from "./held-context.js";
+import { heldPromptItem } from "../feed/harness.js";
 import {
   HELD_ENTRY_SELECTOR,
   HELD_ITEM_ATTRIBUTE,
@@ -60,24 +61,7 @@ function heldContext(ticker: Ticker = fakeTicker()): HeldContext {
 }
 
 /** A held prompt item on TURN, keyed by its prompt row's id. */
-const promptItem = (turn: string, text = "hi"): FeedHeldItem =>
-  create(FeedHeldItemSchema, {
-    id: { value: `prompt:${turn}` },
-    item: {
-      case: "prompt",
-      value: {
-        turn: { value: turn },
-        said: { content: { blocks: [{ block: { case: "text", value: { text } } }] } },
-        queuedAt: { atMs: BigInt(NOW) },
-        classification: { case: "classifying", value: {} },
-        badge: {
-          label: "classifying",
-          detail: "queued — classifying",
-          standsFor: { case: "classifying", value: {} },
-        },
-      },
-    },
-  });
+const promptItem = (turn: string, text = "hi"): FeedHeldItem => heldPromptItem(`prompt:${turn}`, turn, text);
 
 /** A held prompt on TURN whose words run to a second line. */
 const multiLineItem = (turn: string): FeedHeldItem => promptItem(turn, "first\nsecond");
