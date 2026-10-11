@@ -23,7 +23,7 @@ func (h *harness) openRootTail() <-chan *frontendv1.FeedRow {
 	if err != nil {
 		h.t.Fatalf("Tail: %v", err)
 	}
-	return tail.Rows(ctx)
+	return tailRows(ctx, tail)
 }
 
 // retiredPrompt is the prompt entry as the shim last served it.

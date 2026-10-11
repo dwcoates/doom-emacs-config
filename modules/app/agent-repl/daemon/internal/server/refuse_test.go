@@ -426,7 +426,6 @@ func TestStreamVerbsEndQuietlyWhenTheClientsContextIsCancelled(t *testing.T) {
 	tests := []string{
 		"WatchFooter",
 		"WatchTopbar",
-		"WatchDaemonHolds",
 		"WatchHostWorkspace",
 		"WatchWebWorkspace",
 		"WatchFeed",

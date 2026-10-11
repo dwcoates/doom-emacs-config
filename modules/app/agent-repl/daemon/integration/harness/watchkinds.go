@@ -62,13 +62,6 @@ func WatchKinds() []WatchKind {
 			},
 		},
 		{
-			Name:         "WatchDaemonHolds",
-			PerWorkspace: true,
-			Open: func(d *Daemon, ws *workspacev1.WorkspaceRef) *Stream[proto.Message] {
-				return eraseStream(d.WatchHolds(ws))
-			},
-		},
-		{
 			Name:         "WatchHostWorkspace",
 			PerWorkspace: true,
 			Open: func(d *Daemon, ws *workspacev1.WorkspaceRef) *Stream[proto.Message] {

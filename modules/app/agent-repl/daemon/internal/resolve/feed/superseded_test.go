@@ -385,7 +385,7 @@ func (h *harness) tailOf(ctx context.Context) <-chan *frontendv1.FeedRow {
 	if err != nil {
 		h.t.Fatalf("Tail: %v", err)
 	}
-	return tail.Rows(ctx)
+	return tailRows(ctx, tail)
 }
 
 func TestTheSupersededRowIsRePushed(t *testing.T) {

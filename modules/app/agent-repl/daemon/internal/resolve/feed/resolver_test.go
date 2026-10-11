@@ -940,7 +940,7 @@ func responseSuccessActivity(unit, markdown string) *conversationv1.AgentActivit
 // openPage opens a reader's page, failing the test on a refusal.
 func (h *harness) openPage(feed feedid.Feed, reader ReaderID) (*frontendv1.FeedPage, *agentreplv1.FeedWatchToken) {
 	h.t.Helper()
-	page, token, err := h.resolver.OpenPage(context.Background(), testWorkspace, feed, reader)
+	page, token, _, err := h.resolver.OpenPage(context.Background(), testWorkspace, feed, reader)
 	if err != nil {
 		h.t.Fatalf("OpenPage: %v", err)
 	}

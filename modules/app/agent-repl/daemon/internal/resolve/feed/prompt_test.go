@@ -516,7 +516,7 @@ func TestATurnsTerminalRepublishesItsPromptSettled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Tail: %v", err)
 	}
-	rows := tail.Rows(ctx)
+	rows := tailRows(ctx, tail)
 
 	// Act: the terminal, then a marker row that bounds the read.
 	h.terminal("turn-1", interruptedByUser(), nil)
@@ -551,7 +551,7 @@ func TestAReplayedPromptOfAnEndedTurnArrivesSettled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Tail: %v", err)
 	}
-	rows := tail.Rows(ctx)
+	rows := tailRows(ctx, tail)
 
 	// Act: the opening page replays the prompt (with an edited text, so the
 	// replay is a publication rather than churn), then a marker row behind it.

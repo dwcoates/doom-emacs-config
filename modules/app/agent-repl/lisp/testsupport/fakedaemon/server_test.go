@@ -407,17 +407,6 @@ func TestEveryWebappStreamIsRefusedAsUnimplemented(t *testing.T) {
 			},
 		},
 		{
-			name: "WatchDaemonHolds",
-			open: func(ctx context.Context, c agentreplv1connectClient) (interface{ Err() error }, func() error) {
-				s, err := c.WatchDaemonHolds(ctx, connect.NewRequest(&agentreplv1.WatchDaemonHoldsRequest{}))
-				if err != nil {
-					t.Fatalf("open WatchDaemonHolds: %v", err)
-				}
-				s.Receive()
-				return s, s.Close
-			},
-		},
-		{
 			name: "WatchWebWorkspace",
 			open: func(ctx context.Context, c agentreplv1connectClient) (interface{ Err() error }, func() error) {
 				s, err := c.WatchWebWorkspace(ctx, connect.NewRequest(&agentreplv1.WatchWebWorkspaceRequest{}))

@@ -81,14 +81,13 @@ func pageFrames(
 }
 
 // TestOnePageHoldsEveryViewOverOneConnection pins the mux end to end against a
-// real daemon: a page that watches ALL EIGHT of the views `SubscribePage`
+// real daemon: a page that watches ALL SEVEN of the views `SubscribePage`
 // carries hears from every one of them, and it opened exactly ONE connection to
 // do it.
 //
-// The eight are the whole standing surface a webview draws — the roster, the
-// workspace's web link, the daemon's own facts, the topbar, the footer, the
-// hold tray, a feed tail and the login terminal. Six of them were what filled a
-// browser's connection budget before the seventh silently queued forever.
+// The seven are the whole standing surface a webview draws — the roster, the
+// workspace's web link, the daemon's own facts, the topbar, the footer, a feed
+// tail (the root feed's carries its held section) and the login terminal.
 func TestOnePageHoldsEveryViewOverOneConnection(t *testing.T) {
 	t.Parallel()
 	// Arrange: an opened workspace, and a page client whose dials are counted.
@@ -115,7 +114,7 @@ func TestOnePageHoldsEveryViewOverOneConnection(t *testing.T) {
 		t.Fatalf("OpenLogin = error %v, want a success", err)
 	}
 
-	// Act: eight subscriptions, on the one stream.
+	// Act: seven subscriptions, on the one stream.
 	subscriptions := []*agentreplv1.SubscribePageRequest{
 		{Subscription: "roster", Request: &agentreplv1.SubscribePageRequest_Roster{
 			Roster: &agentreplv1.WatchWorkspaceRosterRequest{}}},
@@ -127,8 +126,6 @@ func TestOnePageHoldsEveryViewOverOneConnection(t *testing.T) {
 			Topbar: &agentreplv1.WatchTopbarRequest{Workspace: f.ws}}},
 		{Subscription: "footer", Request: &agentreplv1.SubscribePageRequest_Footer{
 			Footer: &agentreplv1.WatchFooterRequest{Workspace: f.ws}}},
-		{Subscription: "holds", Request: &agentreplv1.SubscribePageRequest_Holds{
-			Holds: &agentreplv1.WatchDaemonHoldsRequest{Workspace: f.ws}}},
 		{Subscription: "feed", Request: &agentreplv1.SubscribePageRequest_Feed{
 			Feed: &agentreplv1.WatchFeedRequest{Watch: feedResp.Msg.GetSuccess().GetWatch()}}},
 		{Subscription: "login", Request: &agentreplv1.SubscribePageRequest_LoginTerminal{
@@ -143,7 +140,7 @@ func TestOnePageHoldsEveryViewOverOneConnection(t *testing.T) {
 
 	// The two views nothing has published to yet: a prompt makes a feed row,
 	// and a scheduled drain makes a daemon-level fact.
-	f.submit("draw every view at once", "k-page-mux-all-eight", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	f.submit("draw every view at once", "k-page-mux-all-seven", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	if _, err := f.d.Client().UpdateShutdownSchedule(ctx, connect.NewRequest(&agentreplv1.UpdateShutdownScheduleRequest{
 		Action: &agentreplv1.UpdateShutdownScheduleRequest_Schedule{Schedule: &agentreplv1.UpdateShutdownScheduleSchedule{
 			AtMs: time.Now().Add(time.Hour).UnixMilli(), Reason: drainReasonDeploy(),
@@ -160,7 +157,6 @@ func TestOnePageHoldsEveryViewOverOneConnection(t *testing.T) {
 		"daemon": func(p *agentreplv1.PageFrame) bool { return p.GetDaemon() != nil },
 		"topbar": func(p *agentreplv1.PageFrame) bool { return p.GetTopbar() != nil },
 		"footer": func(p *agentreplv1.PageFrame) bool { return p.GetFooter() != nil },
-		"holds":  func(p *agentreplv1.PageFrame) bool { return p.GetHolds() != nil },
 		"feed":   func(p *agentreplv1.PageFrame) bool { return p.GetFeed() != nil },
 		"login":  func(p *agentreplv1.PageFrame) bool { return p.GetLoginTerminal() != nil },
 	}
@@ -169,7 +165,7 @@ func TestOnePageHoldsEveryViewOverOneConnection(t *testing.T) {
 		frame := awaitPageFrame(t, ctx, frames, missingSubscriptions(want, heard))
 		push := frame.GetPush()
 		if push == nil {
-			t.Fatalf("the page carried %T while eight subscriptions were live", frame.GetFrame())
+			t.Fatalf("the page carried %T while seven subscriptions were live", frame.GetFrame())
 		}
 		arm, known := want[push.GetSubscription()]
 		if !known {
@@ -182,7 +178,7 @@ func TestOnePageHoldsEveryViewOverOneConnection(t *testing.T) {
 		heard[push.GetSubscription()] = true
 	}
 	if got := dialer.count(); got != 1 {
-		t.Fatalf("the page opened %d connections to hold eight views, want exactly 1", got)
+		t.Fatalf("the page opened %d connections to hold seven views, want exactly 1", got)
 	}
 }
 
