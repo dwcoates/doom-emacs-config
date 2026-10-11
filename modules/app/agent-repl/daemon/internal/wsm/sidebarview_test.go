@@ -121,6 +121,21 @@ func TestSidebarViewWritesAreReadBack(t *testing.T) {
 			want: SidebarView{MergedFolded: true, Grouping: GroupingTask},
 		},
 		{
+			name:  "folding the hidden section keeps the band and the grouping",
+			write: func(s *store) error { return s.SetHiddenSectionFolded(context.Background(), true) },
+			want:  SidebarView{HiddenFolded: true, Grouping: GroupingRepository},
+		},
+		{
+			name: "unfolding the hidden section again replaces its fold",
+			write: func(s *store) error {
+				if err := s.SetHiddenSectionFolded(context.Background(), true); err != nil {
+					return err
+				}
+				return s.SetHiddenSectionFolded(context.Background(), false)
+			},
+			want: SidebarView{Grouping: GroupingRepository},
+		},
+		{
 			name: "unfolding the band again replaces the fold",
 			write: func(s *store) error {
 				if err := s.SetMergedSectionFolded(context.Background(), true); err != nil {
@@ -425,6 +440,34 @@ func TestTheMigrationAddsTheMaturityFolds(t *testing.T) {
 	for _, column := range []string{"backlog_folded", "in_progress_folded", "merging_folded"} {
 		if got := scalar[int](t, s, `SELECT count(*) FROM pragma_table_info('sidebar_view') WHERE name = ?`, column); got != 1 {
 			t.Fatalf("sidebar_view.%s columns after the migration = %d, want 1", column, got)
+		}
+	}
+}
+
+func TestTheDefaultViewExpandsTheHiddenSection(t *testing.T) {
+	// Arrange, Act, Assert
+	if DefaultSidebarView.HiddenFolded {
+		t.Fatalf("DefaultSidebarView = %+v, want the hidden section expanded", DefaultSidebarView)
+	}
+}
+
+// TestTheMigrationAddsTheHiddenWorkspaces pins the layout-32 step.
+func TestTheMigrationAddsTheHiddenWorkspaces(t *testing.T) {
+	// Arrange
+	path := fixtureAt(t, 31)
+
+	// Act
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
+	if err != nil {
+		t.Fatalf("Open on a layout-31 database: %v", err)
+	}
+	defer handle.Close()
+
+	// Assert
+	s := handle.(*store)
+	for _, column := range []struct{ table, name string }{{"workspaces", "hidden"}, {"sidebar_view", "hidden_folded"}} {
+		if got := scalar[int](t, s, `SELECT count(*) FROM pragma_table_info(?) WHERE name = ?`, column.table, column.name); got != 1 {
+			t.Fatalf("%s.%s columns after the migration = %d, want 1", column.table, column.name, got)
 		}
 	}
 }

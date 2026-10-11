@@ -770,6 +770,114 @@ func TestOpenWorkspaceRelaysNoUnmappedStage(t *testing.T) {
 	}
 }
 
+// ---- SetWorkspaceHidden ----------------------------------------------------
+
+func hideArm() *agentreplv1.SetWorkspaceHiddenRequest_Hide {
+	return &agentreplv1.SetWorkspaceHiddenRequest_Hide{Hide: &agentreplv1.SetWorkspaceHiddenHide{}}
+}
+
+func showArm() *agentreplv1.SetWorkspaceHiddenRequest_Show {
+	return &agentreplv1.SetWorkspaceHiddenRequest_Show{Show: &agentreplv1.SetWorkspaceHiddenShow{}}
+}
+
+// TestSetWorkspaceHiddenHandsThePlaceToTheVerb pins each visibility arm
+// reaching the verb with the id the registry resolved.
+func TestSetWorkspaceHiddenHandsThePlaceToTheVerb(t *testing.T) {
+	tests := []struct {
+		name       string
+		req  *agentreplv1.SetWorkspaceHiddenRequest
+		want bool
+	}{
+		{"hide", &agentreplv1.SetWorkspaceHiddenRequest{Workspace: ref(), Visibility: hideArm()}, true},
+		{"show", &agentreplv1.SetWorkspaceHiddenRequest{Workspace: ref(), Visibility: showArm()}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+
+			// Act
+			resp, err := h.Client.SetWorkspaceHidden(context.Background(),
+				connect.NewRequest(tt.req))
+
+			// Assert
+			if err != nil {
+				t.Fatalf("SetWorkspaceHidden: %v", err)
+			}
+			if resp.Msg.GetSuccess() == nil {
+				t.Fatalf("result = %v, want success", resp.Msg.GetResult())
+			}
+			want := hiddenSet{ws: testWorkspaceID, hidden: tt.want}
+			if len(h.Verbs.hiddenSets) != 1 || h.Verbs.hiddenSets[0] != want {
+				t.Fatalf("hidden sets = %+v, want %+v", h.Verbs.hiddenSets, want)
+			}
+		})
+	}
+}
+
+// TestSetWorkspaceHiddenRefusesAnUnknownWorkspace pins that an id the
+// registry does not hold answers the unknown_workspace arm and reaches no verb.
+func TestSetWorkspaceHiddenRefusesAnUnknownWorkspace(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	resp, err := h.Client.SetWorkspaceHidden(context.Background(),
+		connect.NewRequest(&agentreplv1.SetWorkspaceHiddenRequest{
+			Workspace: &workspacev1.WorkspaceRef{Id: "ws-nope"}, Visibility: hideArm(),
+		}))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("SetWorkspaceHidden: %v", err)
+	}
+	if resp.Msg.GetError().GetUnknownWorkspace() == nil {
+		t.Fatalf("result = %v, want unknown_workspace", resp.Msg.GetResult())
+	}
+	if len(h.Verbs.hiddenSets) != 0 {
+		t.Fatalf("hidden sets = %+v, want none for an unknown workspace", h.Verbs.hiddenSets)
+	}
+}
+
+// TestSetWorkspaceHiddenMapsTheVerbsRefusal pins a refusal the verb raises
+// answering its own arm.
+func TestSetWorkspaceHiddenMapsTheVerbsRefusal(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.Verbs.setHiddenErr = &workspace.Refusal{Arm: workspace.ArmNotYetAdopted, Reason: "still adopting"}
+
+	// Act
+	resp, err := h.Client.SetWorkspaceHidden(context.Background(),
+		connect.NewRequest(&agentreplv1.SetWorkspaceHiddenRequest{Workspace: ref(), Visibility: hideArm()}))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("SetWorkspaceHidden: %v", err)
+	}
+	if resp.Msg.GetError().GetNotYetAdopted() == nil {
+		t.Fatalf("result = %v, want not_yet_adopted", resp.Msg.GetResult())
+	}
+}
+
+// TestSetWorkspaceHiddenRefusesAMissingVisibility pins an unset arm as a
+// malformed request that reaches no verb.
+func TestSetWorkspaceHiddenRefusesAMissingVisibility(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	_, err := h.Client.SetWorkspaceHidden(context.Background(),
+		connect.NewRequest(&agentreplv1.SetWorkspaceHiddenRequest{Workspace: ref()}))
+
+	// Assert
+	if connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("code = %v (%v), want InvalidArgument", connect.CodeOf(err), err)
+	}
+	if len(h.Verbs.hiddenSets) != 0 {
+		t.Fatalf("hidden sets = %+v, want none for a malformed request", h.Verbs.hiddenSets)
+	}
+}
+
 // ---- MarkWorkspaceViewed ---------------------------------------------------
 // TestMarkWorkspaceViewedAnswersSuccess pins the editor's viewed report
 // reaching the verb with the id the registry resolved.

@@ -14,6 +14,7 @@ import (
 const (
 	opFoldTaskSection     = "daemon.workspace.fold_task_section"
 	opFoldMergedSection   = "daemon.workspace.fold_merged_section"
+	opFoldHiddenSection   = "daemon.workspace.fold_hidden_section"
 	opFoldMaturitySection = "daemon.workspace.fold_maturity_section"
 	opShowGrouping        = "daemon.workspace.show_grouping"
 )
@@ -48,6 +49,20 @@ func (v *verbs) FoldMergedSection(ctx context.Context, folded bool) error {
 	}
 	log.Info(opFoldMergedSection, "recorded the recently-merged band's fold", nil)
 	v.republishRegistry(ctx, log, opFoldMergedSection)
+	return nil
+}
+
+// FoldHiddenSection records whether the hidden-workspaces section is
+// collapsed, then republishes the roster to every page. There is nothing to
+// refuse: the roster carries exactly one hidden section.
+func (v *verbs) FoldHiddenSection(ctx context.Context, folded bool) error {
+	log := v.deps.Log.Global().With(dlog.Context{"folded": folded})
+	if err := v.deps.DB.SetHiddenSectionFolded(ctx, folded); err != nil {
+		log.Error(opFoldHiddenSection, "could not record the hidden section's fold", dlog.Context{"cause": err.Error()})
+		return fmt.Errorf("fold the hidden section: %w", err)
+	}
+	log.Info(opFoldHiddenSection, "recorded the hidden section's fold", nil)
+	v.republishRegistry(ctx, log, opFoldHiddenSection)
 	return nil
 }
 

@@ -803,6 +803,31 @@ func (s *server) SetWorkspacePriority(
 	return connect.NewResponse(resp), nil
 }
 
+// SetWorkspaceHidden moves a workspace into the roster's hidden section, or
+// back out of it. The new state arrives on the roster stream.
+func (s *server) SetWorkspaceHidden(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.SetWorkspaceHiddenRequest],
+) (*connect.Response[agentreplv1.SetWorkspaceHiddenResponse], error) {
+	const rpc = "SetWorkspaceHidden"
+	if err := validateSetWorkspaceHiddenRequest(req.Msg); err != nil {
+		return nil, err
+	}
+	resp := &agentreplv1.SetWorkspaceHiddenResponse{}
+	subject, cerr, done := s.subjectFor(ctx, rpc, req.Msg.GetWorkspace(), resp)
+	if done {
+		return answer(resp, cerr)
+	}
+	hidden := req.Msg.GetHide() != nil
+	if err := s.deps.Verbs.SetHidden(ctx, subject.Record.ID, hidden); err != nil {
+		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
+	}
+	resp.Result = &agentreplv1.SetWorkspaceHiddenResponse_Success{
+		Success: &agentreplv1.SetWorkspaceHiddenSuccess{},
+	}
+	return connect.NewResponse(resp), nil
+}
+
 // FoldRepository expands or collapses one repository's roster section. The
 // new fold arrives on the roster stream.
 func (s *server) FoldRepository(

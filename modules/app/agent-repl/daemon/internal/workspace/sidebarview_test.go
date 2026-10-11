@@ -153,6 +153,56 @@ func TestFoldMergedSectionSurfacesAFailedWriteAtError(t *testing.T) {
 	}
 }
 
+func TestFoldHiddenSectionRecordsTheFoldAndRepublishesTheRoster(t *testing.T) {
+	tests := []struct {
+		name   string
+		folded bool
+	}{{"collapse", true}, {"expand", false}}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			prior := wsm.DefaultSidebarView
+			prior.HiddenFolded = !tt.folded
+			f.db.view = &prior
+
+			// Act
+			err := f.verbs.FoldHiddenSection(context.Background(), tt.folded)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("FoldHiddenSection: %v", err)
+			}
+			if len(f.sidebar.registries) != 1 {
+				t.Fatalf("roster republications = %d, want exactly one", len(f.sidebar.registries))
+			}
+			if got := f.sidebar.registries[0].View.HiddenFolded; got != tt.folded {
+				t.Fatalf("republished hidden fold = %v, want %v", got, tt.folded)
+			}
+		})
+	}
+}
+
+func TestFoldHiddenSectionSurfacesAFailedWriteAtError(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.db.setHiddenFoldedErr = errors.New("disk I/O error")
+
+	// Act
+	err := f.verbs.FoldHiddenSection(context.Background(), false)
+
+	// Assert
+	if err == nil {
+		t.Fatal("a failed fold write was answered as success")
+	}
+	if !loggedAtError(f, opFoldHiddenSection) {
+		t.Fatal("the failed write was not recorded at error")
+	}
+	if len(f.sidebar.registries) != 0 {
+		t.Fatalf("roster republications = %d, want none for a failed fold", len(f.sidebar.registries))
+	}
+}
+
 func TestTheRepublishedRosterCarriesTheDefaultViewWhenNoneWasSet(t *testing.T) {
 	// Arrange
 	f := newFixture(t)
