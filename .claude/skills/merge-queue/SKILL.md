@@ -34,7 +34,13 @@ Asks the merge queue, from this workspace, to land a finished branch in its merg
 0. Confirm the work is ready (merge arguments only; skip to step 1 for `one-shot`, `dequeue`, `pause`, `resume`, `hold-rollouts` and `release-rollouts`).
   - Every change is committed, and the applicable tests passed before each commit.
   - The branch to land is the one checked out in the worktree being merged; a worktree with no branch checked out is refused.
-  - **Why this lives here**: the queue lands exactly what is committed, and a red test gate comes back as a repair prompt in the session the merge runs in.
+  - For `own`: this workspace's requested changes are FULLY implemented.
+    - Every ruling the user gave in this workspace is implemented.
+    - No part of a ruling is deferred as an "open question".
+    - An open question you raised that the user's rulings already answer is unfinished work.
+    - Nothing the user asked for is left unfinished.
+    - CRITICAL: if anything is unfinished, finish it, or STOP and surface it to the user. NEVER request the `own` merge instead.
+  - **Why this lives here**: the queue lands exactly what is committed, and a red test gate comes back as a repair prompt in the session the merge runs in. An `own` merge lands the branch as it stands when the turn ends, so a ruling left half-done lands half-done.
 
 1. Dispatch on the argument.
   - *NOTE*: when `front` was given with a merge argument (steps 1a–1e and 1j), append `--front` to that step's `run.sh` call; the exit codes are unchanged.
@@ -128,7 +134,8 @@ Asks the merge queue, from this workspace, to land a finished branch in its merg
 
 ## Notes
 
-- **CRITICAL: NEVER merge, commit, cherry-pick, rebase, reset or push onto master by hand.** The queue is the only path into master, and any other path is refused.
+- **CRITICAL: NEVER merge, commit, cherry-pick, rebase, reset or push onto master by hand, nor remove a merge from the queue or pause or resume the queue by hand.** The queue is the only path into master, and this skill is the only way to control it.
+- **CRITICAL: NEVER request an `own` merge while anything the user asked for in this workspace is unfinished.** A ruling partly implemented, with the rest relabelled as an open question, is unfinished; finish it, or stop and surface it.
 - **CRITICAL: On a failed or refused merge, report and stop.** Never retry by hand, never work around the queue.
 - **IMPORTANT NOTE: A subagent's branch goes through `branch`, the same sequence.** Never fold it into master yourself.
 - **IMPORTANT NOTE: To land a fix without the unfinished work around it, use `commits` with only the fix's commits.** Never cherry-pick them onto master by hand.
