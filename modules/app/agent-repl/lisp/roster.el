@@ -310,8 +310,9 @@ so its workspaces leave the bar exactly as that repository's others do."
   "Return ROSTER's rows in tab order: `(:row ROW :label REPO-LABEL)' entries.
 Repository sections in the resolver's order, each section's rows
 depth-first, then the hidden section's rows, then the recently-merged
-band's rows, group by group.  THE TASK VIEW IS IGNORED — it is the same workspaces
-regrouped, and walking it too would give every workspace a second tab.
+band's rows, group by group.  THE TASK VIEW IS IGNORED — it is the same
+workspaces regrouped, and walking it too would give every workspace a
+second tab.
 
 A HIDDEN WORKSPACE IS WALKED AS A COLLAPSED REPOSITORY'S IS: it keeps its
 tab (its session is untouched), and `:collapsed' takes it off the bar's
