@@ -472,11 +472,17 @@ must leave the other a no-op."
                    (cons row (agent-repl-verbs--flatten-rows (plist-get row :children))))
                  rows)))
 
+(defun agent-repl-verbs--roster-or-view (roster)
+  "Return ROSTER, or `agent-repl-roster-view' when ROSTER is nil.
+THE ONE DEFAULTING every roster reader here shares: a nil ROSTER means the
+last accepted push, and nil again before roster.el has loaded or pushed."
+  (or roster (and (boundp 'agent-repl-roster-view) agent-repl-roster-view)))
+
 (defun agent-repl-verbs--all-rows (&optional roster)
   "Return every row of ROSTER (default `agent-repl-roster-view'), in walk order.
 THE ONE WALK is `agent-repl-roster-walk' -- the tab bar's own -- so a verb
 can never look for a row in fewer sections than the bar draws tabs from."
-  (let ((roster (or roster (and (boundp 'agent-repl-roster-view) agent-repl-roster-view))))
+  (let ((roster (agent-repl-verbs--roster-or-view roster)))
     (mapcar (lambda (entry) (plist-get entry :row))
             (agent-repl-roster-walk roster))))
 
@@ -487,7 +493,7 @@ can never look for a row in fewer sections than the bar draws tabs from."
 
 (defun agent-repl-verbs--repo-sections (&optional roster)
   "Return ROSTER's repository sections, in the resolver's order."
-  (let ((roster (or roster (and (boundp 'agent-repl-roster-view) agent-repl-roster-view))))
+  (let ((roster (agent-repl-verbs--roster-or-view roster)))
     (plist-get (plist-get roster :repository) :sections)))
 
 (defun agent-repl-verbs--section-ref (section)
@@ -1747,7 +1753,7 @@ row in that section, or picking it from `SPC TAB H', shows it again."
   "Return the OPEN rows of ROSTER's hidden section, in walk order.
 ROSTER defaults to `agent-repl-roster-view'.  A closed row has no tab to
 switch to, so only open rows are offered back."
-  (let* ((roster (or roster (and (boundp 'agent-repl-roster-view) agent-repl-roster-view)))
+  (let* ((roster (agent-repl-verbs--roster-or-view roster))
          (rows (plist-get (plist-get (plist-get roster :hidden) :rows) :rows)))
     (cl-remove-if #'agent-repl-verbs--row-closed-p
                   (agent-repl-verbs--flatten-rows rows))))
