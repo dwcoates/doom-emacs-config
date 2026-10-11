@@ -78,6 +78,7 @@ import "agentrepl/v1/endpoint_report_editor_focus.proto";
 import "agentrepl/v1/endpoint_watch_host_workspace.proto";
 import "agentrepl/v1/endpoint_watch_daemon.proto";
 import "agentrepl/v1/endpoint_adopt_host_workspace.proto";
+import "agentrepl/v1/endpoint_list_slash_commands.proto";
 import "agentrepl/v1/endpoint_watch_web_workspace.proto";
 import "agentrepl/v1/endpoint_adopt_web_workspace.proto";
 import "agentrepl/v1/endpoint_watch_page.proto";
@@ -334,6 +335,10 @@ service AgentRepl {
   // Emacs's half of the handover rendezvous, called on the NEW daemon. See
   // endpoint_adopt_host_workspace.proto.
   rpc AdoptHostWorkspace(AdoptHostWorkspaceRequest) returns (AdoptHostWorkspaceResponse);
+
+  // Every slash command the workspace's agent runtime answers, for the
+  // composer's completion. See endpoint_list_slash_commands.proto.
+  rpc ListSlashCommands(ListSlashCommandsRequest) returns (ListSlashCommandsResponse);
 
   // ---- WEB LINK ----
   // The webview's connection surface: neither host-natured nor a drawn

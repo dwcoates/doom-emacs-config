@@ -78,7 +78,7 @@
 (declare-function agent-repl--read-known-workspace "agent-repl-keybindings" (prompt))
 (declare-function agent-repl--kill-one-workspace "agent-repl-workspace" (ws &optional preserve))
 (declare-function agent-repl-host-ref "agent-repl-host" (ws))
-(declare-function agent-repl-host-conn "agent-repl-host" (ws))
+(declare-function agent-repl-host-conn-or-primary "agent-repl-host" (ws))
 (declare-function agent-repl-host-faults "agent-repl-host" (ws))
 (declare-function agent-repl-host-handle-refusal "agent-repl-host" (ws arm))
 (declare-function agent-repl-host-route-handover "agent-repl-host" (ws arm slug))
@@ -194,8 +194,7 @@ with the picker's own message before any wire call is made."
 A workspace's own connection is preferred because during a blue-green
 handover the two daemons own different workspaces, and a per-workspace
 call must reach the daemon that owns THAT workspace."
-  (or (and ws (agent-repl-host-conn ws))
-      (agent-repl-link-primary)
+  (or (agent-repl-host-conn-or-primary ws)
       ;; A daemon-admin verb can be the FIRST thing that needs the link --
       ;; nothing about `SPC' on a fresh frame guarantees one is already
       ;; standing -- so the link is stood here rather than refused.

@@ -294,6 +294,149 @@ func (x *SessionCommandSpec) GetAliases() []string {
 	return nil
 }
 
+// EVERY slash command the session's agent runtime would answer if typed as
+// `/<name>`: its built-in commands, and every skill, custom command, plugin
+// command and MCP prompt the user added to it through any settings source
+// (user, project, local or plugin). It is the RUNTIME'S OWN ANSWER — the
+// vendor's command list read back from the live process — never a list a
+// consumer assembles by scanning directories, so a command the runtime would
+// not run never appears and one it would run is never missing.
+//
+// It is DELIBERATELY NOT `SessionCommand`. That enum is the closed set the
+// daemon RECOGNIZES and suppresses a user message for; this catalog is what a
+// composer may OFFER while the user types. Most entries here expand into a
+// prompt and are drawn like any prompt, and the catalog is open: its members
+// are whatever the runtime holds at the moment it was read.
+//
+// A STANDING SET: every statement is the whole catalog, and the last statement
+// is the truth. An EMPTY catalog is a real answer (a runtime offering no
+// commands), never "not read yet" — an unread catalog is simply not stated.
+type SessionCommandCatalog struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The commands, in the order the runtime listed them. Names are unique
+	// within one statement.
+	Commands      []*SessionCommandCatalogEntry `protobuf:"bytes,1,rep,name=commands,proto3" json:"commands,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SessionCommandCatalog) Reset() {
+	*x = SessionCommandCatalog{}
+	mi := &file_conversation_v1_slash_command_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SessionCommandCatalog) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SessionCommandCatalog) ProtoMessage() {}
+
+func (x *SessionCommandCatalog) ProtoReflect() protoreflect.Message {
+	mi := &file_conversation_v1_slash_command_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SessionCommandCatalog.ProtoReflect.Descriptor instead.
+func (*SessionCommandCatalog) Descriptor() ([]byte, []int) {
+	return file_conversation_v1_slash_command_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *SessionCommandCatalog) GetCommands() []*SessionCommandCatalogEntry {
+	if x != nil {
+		return x.Commands
+	}
+	return nil
+}
+
+// One command the runtime answers, with the facts a composer draws beside it.
+type SessionCommandCatalogEntry struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The command's name as the runtime spells it, WITHOUT the leading slash
+	// ("merge-queue", "compact", "plugin-name:skill"). What the user types is
+	// `/` followed by exactly this. Never empty.
+	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// What the command does, in the runtime's own words — for a skill, the
+	// description its frontmatter declares. UNSET when the runtime states none.
+	Description *string `protobuf:"bytes,2,opt,name=description,proto3,oneof" json:"description,omitempty"`
+	// How the command's argument is spelled, in the runtime's own words
+	// ("<target>", "[instructions]"). UNSET when the command states no argument
+	// hint, which is not a claim that it takes no argument.
+	ArgumentHint *string `protobuf:"bytes,3,opt,name=argument_hint,json=argumentHint,proto3,oneof" json:"argument_hint,omitempty"`
+	// Other names the runtime answers as this SAME command, each without the
+	// leading slash. A composer may offer each alias, and completing one sends
+	// the alias as typed — the runtime resolves it.
+	Aliases       []string `protobuf:"bytes,4,rep,name=aliases,proto3" json:"aliases,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SessionCommandCatalogEntry) Reset() {
+	*x = SessionCommandCatalogEntry{}
+	mi := &file_conversation_v1_slash_command_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SessionCommandCatalogEntry) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SessionCommandCatalogEntry) ProtoMessage() {}
+
+func (x *SessionCommandCatalogEntry) ProtoReflect() protoreflect.Message {
+	mi := &file_conversation_v1_slash_command_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SessionCommandCatalogEntry.ProtoReflect.Descriptor instead.
+func (*SessionCommandCatalogEntry) Descriptor() ([]byte, []int) {
+	return file_conversation_v1_slash_command_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *SessionCommandCatalogEntry) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *SessionCommandCatalogEntry) GetDescription() string {
+	if x != nil && x.Description != nil {
+		return *x.Description
+	}
+	return ""
+}
+
+func (x *SessionCommandCatalogEntry) GetArgumentHint() string {
+	if x != nil && x.ArgumentHint != nil {
+		return *x.ArgumentHint
+	}
+	return ""
+}
+
+func (x *SessionCommandCatalogEntry) GetAliases() []string {
+	if x != nil {
+		return x.Aliases
+	}
+	return nil
+}
+
 // The conversation was cut here, and the reader must see where.
 type ContextCut struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -309,7 +452,7 @@ type ContextCut struct {
 
 func (x *ContextCut) Reset() {
 	*x = ContextCut{}
-	mi := &file_conversation_v1_slash_command_proto_msgTypes[1]
+	mi := &file_conversation_v1_slash_command_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -321,7 +464,7 @@ func (x *ContextCut) String() string {
 func (*ContextCut) ProtoMessage() {}
 
 func (x *ContextCut) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_slash_command_proto_msgTypes[1]
+	mi := &file_conversation_v1_slash_command_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -334,7 +477,7 @@ func (x *ContextCut) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ContextCut.ProtoReflect.Descriptor instead.
 func (*ContextCut) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_slash_command_proto_rawDescGZIP(), []int{1}
+	return file_conversation_v1_slash_command_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *ContextCut) GetCut() isContextCut_Cut {
@@ -412,7 +555,7 @@ type ContextCompactionFailed struct {
 
 func (x *ContextCompactionFailed) Reset() {
 	*x = ContextCompactionFailed{}
-	mi := &file_conversation_v1_slash_command_proto_msgTypes[2]
+	mi := &file_conversation_v1_slash_command_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -424,7 +567,7 @@ func (x *ContextCompactionFailed) String() string {
 func (*ContextCompactionFailed) ProtoMessage() {}
 
 func (x *ContextCompactionFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_slash_command_proto_msgTypes[2]
+	mi := &file_conversation_v1_slash_command_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -437,7 +580,7 @@ func (x *ContextCompactionFailed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ContextCompactionFailed.ProtoReflect.Descriptor instead.
 func (*ContextCompactionFailed) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_slash_command_proto_rawDescGZIP(), []int{2}
+	return file_conversation_v1_slash_command_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *ContextCompactionFailed) GetError() string {
@@ -466,7 +609,7 @@ type CompactionId struct {
 
 func (x *CompactionId) Reset() {
 	*x = CompactionId{}
-	mi := &file_conversation_v1_slash_command_proto_msgTypes[3]
+	mi := &file_conversation_v1_slash_command_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -478,7 +621,7 @@ func (x *CompactionId) String() string {
 func (*CompactionId) ProtoMessage() {}
 
 func (x *CompactionId) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_slash_command_proto_msgTypes[3]
+	mi := &file_conversation_v1_slash_command_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -491,7 +634,7 @@ func (x *CompactionId) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CompactionId.ProtoReflect.Descriptor instead.
 func (*CompactionId) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_slash_command_proto_rawDescGZIP(), []int{3}
+	return file_conversation_v1_slash_command_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *CompactionId) GetValue() string {
@@ -523,7 +666,7 @@ type ContextTokenDelta struct {
 
 func (x *ContextTokenDelta) Reset() {
 	*x = ContextTokenDelta{}
-	mi := &file_conversation_v1_slash_command_proto_msgTypes[4]
+	mi := &file_conversation_v1_slash_command_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -535,7 +678,7 @@ func (x *ContextTokenDelta) String() string {
 func (*ContextTokenDelta) ProtoMessage() {}
 
 func (x *ContextTokenDelta) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_slash_command_proto_msgTypes[4]
+	mi := &file_conversation_v1_slash_command_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -548,7 +691,7 @@ func (x *ContextTokenDelta) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ContextTokenDelta.ProtoReflect.Descriptor instead.
 func (*ContextTokenDelta) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_slash_command_proto_rawDescGZIP(), []int{4}
+	return file_conversation_v1_slash_command_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *ContextTokenDelta) GetTokensBefore() int64 {
@@ -574,7 +717,7 @@ type ContextCleared struct {
 
 func (x *ContextCleared) Reset() {
 	*x = ContextCleared{}
-	mi := &file_conversation_v1_slash_command_proto_msgTypes[5]
+	mi := &file_conversation_v1_slash_command_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -586,7 +729,7 @@ func (x *ContextCleared) String() string {
 func (*ContextCleared) ProtoMessage() {}
 
 func (x *ContextCleared) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_slash_command_proto_msgTypes[5]
+	mi := &file_conversation_v1_slash_command_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -599,7 +742,7 @@ func (x *ContextCleared) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ContextCleared.ProtoReflect.Descriptor instead.
 func (*ContextCleared) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_slash_command_proto_rawDescGZIP(), []int{5}
+	return file_conversation_v1_slash_command_proto_rawDescGZIP(), []int{7}
 }
 
 // History was replaced by a summary of itself.
@@ -642,7 +785,7 @@ type ContextCompacted struct {
 
 func (x *ContextCompacted) Reset() {
 	*x = ContextCompacted{}
-	mi := &file_conversation_v1_slash_command_proto_msgTypes[6]
+	mi := &file_conversation_v1_slash_command_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -654,7 +797,7 @@ func (x *ContextCompacted) String() string {
 func (*ContextCompacted) ProtoMessage() {}
 
 func (x *ContextCompacted) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_slash_command_proto_msgTypes[6]
+	mi := &file_conversation_v1_slash_command_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -667,7 +810,7 @@ func (x *ContextCompacted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ContextCompacted.ProtoReflect.Descriptor instead.
 func (*ContextCompacted) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_slash_command_proto_rawDescGZIP(), []int{6}
+	return file_conversation_v1_slash_command_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *ContextCompacted) GetSummary() *AgentResponseProse {
@@ -750,7 +893,7 @@ type ContextCompactionRequested struct {
 
 func (x *ContextCompactionRequested) Reset() {
 	*x = ContextCompactionRequested{}
-	mi := &file_conversation_v1_slash_command_proto_msgTypes[7]
+	mi := &file_conversation_v1_slash_command_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -762,7 +905,7 @@ func (x *ContextCompactionRequested) String() string {
 func (*ContextCompactionRequested) ProtoMessage() {}
 
 func (x *ContextCompactionRequested) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_slash_command_proto_msgTypes[7]
+	mi := &file_conversation_v1_slash_command_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -775,7 +918,7 @@ func (x *ContextCompactionRequested) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ContextCompactionRequested.ProtoReflect.Descriptor instead.
 func (*ContextCompactionRequested) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_slash_command_proto_rawDescGZIP(), []int{7}
+	return file_conversation_v1_slash_command_proto_rawDescGZIP(), []int{9}
 }
 
 // The producer cut on its own because the context was filling.
@@ -787,7 +930,7 @@ type ContextCompactionAutomatic struct {
 
 func (x *ContextCompactionAutomatic) Reset() {
 	*x = ContextCompactionAutomatic{}
-	mi := &file_conversation_v1_slash_command_proto_msgTypes[8]
+	mi := &file_conversation_v1_slash_command_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -799,7 +942,7 @@ func (x *ContextCompactionAutomatic) String() string {
 func (*ContextCompactionAutomatic) ProtoMessage() {}
 
 func (x *ContextCompactionAutomatic) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_slash_command_proto_msgTypes[8]
+	mi := &file_conversation_v1_slash_command_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -812,7 +955,7 @@ func (x *ContextCompactionAutomatic) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ContextCompactionAutomatic.ProtoReflect.Descriptor instead.
 func (*ContextCompactionAutomatic) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_slash_command_proto_rawDescGZIP(), []int{8}
+	return file_conversation_v1_slash_command_proto_rawDescGZIP(), []int{10}
 }
 
 var file_conversation_v1_slash_command_proto_extTypes = []protoimpl.ExtensionInfo{
@@ -841,7 +984,16 @@ const file_conversation_v1_slash_command_proto_rawDesc = "" +
 	"\aliteral\x18\x01 \x01(\tR\aliteral\x12\x1d\n" +
 	"\n" +
 	"takes_args\x18\x02 \x01(\bR\ttakesArgs\x12\x18\n" +
-	"\aaliases\x18\x03 \x03(\tR\aaliases\"\xec\x01\n" +
+	"\aaliases\x18\x03 \x03(\tR\aaliases\"`\n" +
+	"\x15SessionCommandCatalog\x12G\n" +
+	"\bcommands\x18\x01 \x03(\v2+.conversation.v1.SessionCommandCatalogEntryR\bcommands\"\xbd\x01\n" +
+	"\x1aSessionCommandCatalogEntry\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12%\n" +
+	"\vdescription\x18\x02 \x01(\tH\x00R\vdescription\x88\x01\x01\x12(\n" +
+	"\rargument_hint\x18\x03 \x01(\tH\x01R\fargumentHint\x88\x01\x01\x12\x18\n" +
+	"\aaliases\x18\x04 \x03(\tR\aaliasesB\x0e\n" +
+	"\f_descriptionB\x10\n" +
+	"\x0e_argument_hint\"\xec\x01\n" +
 	"\n" +
 	"ContextCut\x12;\n" +
 	"\acleared\x18\x01 \x01(\v2\x1f.conversation.v1.ContextClearedH\x00R\acleared\x12A\n" +
@@ -963,38 +1115,41 @@ func file_conversation_v1_slash_command_proto_rawDescGZIP() []byte {
 }
 
 var file_conversation_v1_slash_command_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_conversation_v1_slash_command_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_conversation_v1_slash_command_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
 var file_conversation_v1_slash_command_proto_goTypes = []any{
 	(SessionCommand)(0),                   // 0: conversation.v1.SessionCommand
 	(*SessionCommandSpec)(nil),            // 1: conversation.v1.SessionCommandSpec
-	(*ContextCut)(nil),                    // 2: conversation.v1.ContextCut
-	(*ContextCompactionFailed)(nil),       // 3: conversation.v1.ContextCompactionFailed
-	(*CompactionId)(nil),                  // 4: conversation.v1.CompactionId
-	(*ContextTokenDelta)(nil),             // 5: conversation.v1.ContextTokenDelta
-	(*ContextCleared)(nil),                // 6: conversation.v1.ContextCleared
-	(*ContextCompacted)(nil),              // 7: conversation.v1.ContextCompacted
-	(*ContextCompactionRequested)(nil),    // 8: conversation.v1.ContextCompactionRequested
-	(*ContextCompactionAutomatic)(nil),    // 9: conversation.v1.ContextCompactionAutomatic
-	(*AgentResponseProse)(nil),            // 10: conversation.v1.AgentResponseProse
-	(*descriptorpb.EnumValueOptions)(nil), // 11: google.protobuf.EnumValueOptions
+	(*SessionCommandCatalog)(nil),         // 2: conversation.v1.SessionCommandCatalog
+	(*SessionCommandCatalogEntry)(nil),    // 3: conversation.v1.SessionCommandCatalogEntry
+	(*ContextCut)(nil),                    // 4: conversation.v1.ContextCut
+	(*ContextCompactionFailed)(nil),       // 5: conversation.v1.ContextCompactionFailed
+	(*CompactionId)(nil),                  // 6: conversation.v1.CompactionId
+	(*ContextTokenDelta)(nil),             // 7: conversation.v1.ContextTokenDelta
+	(*ContextCleared)(nil),                // 8: conversation.v1.ContextCleared
+	(*ContextCompacted)(nil),              // 9: conversation.v1.ContextCompacted
+	(*ContextCompactionRequested)(nil),    // 10: conversation.v1.ContextCompactionRequested
+	(*ContextCompactionAutomatic)(nil),    // 11: conversation.v1.ContextCompactionAutomatic
+	(*AgentResponseProse)(nil),            // 12: conversation.v1.AgentResponseProse
+	(*descriptorpb.EnumValueOptions)(nil), // 13: google.protobuf.EnumValueOptions
 }
 var file_conversation_v1_slash_command_proto_depIdxs = []int32{
-	6,  // 0: conversation.v1.ContextCut.cleared:type_name -> conversation.v1.ContextCleared
-	7,  // 1: conversation.v1.ContextCut.compacted:type_name -> conversation.v1.ContextCompacted
-	3,  // 2: conversation.v1.ContextCut.compaction_failed:type_name -> conversation.v1.ContextCompactionFailed
-	4,  // 3: conversation.v1.ContextCompactionFailed.compaction:type_name -> conversation.v1.CompactionId
-	10, // 4: conversation.v1.ContextCompacted.summary:type_name -> conversation.v1.AgentResponseProse
-	5,  // 5: conversation.v1.ContextCompacted.tokens:type_name -> conversation.v1.ContextTokenDelta
-	8,  // 6: conversation.v1.ContextCompacted.requested:type_name -> conversation.v1.ContextCompactionRequested
-	9,  // 7: conversation.v1.ContextCompacted.automatic:type_name -> conversation.v1.ContextCompactionAutomatic
-	4,  // 8: conversation.v1.ContextCompacted.compaction:type_name -> conversation.v1.CompactionId
-	11, // 9: conversation.v1.session_command_spec:extendee -> google.protobuf.EnumValueOptions
-	1,  // 10: conversation.v1.session_command_spec:type_name -> conversation.v1.SessionCommandSpec
-	11, // [11:11] is the sub-list for method output_type
-	11, // [11:11] is the sub-list for method input_type
-	10, // [10:11] is the sub-list for extension type_name
-	9,  // [9:10] is the sub-list for extension extendee
-	0,  // [0:9] is the sub-list for field type_name
+	3,  // 0: conversation.v1.SessionCommandCatalog.commands:type_name -> conversation.v1.SessionCommandCatalogEntry
+	8,  // 1: conversation.v1.ContextCut.cleared:type_name -> conversation.v1.ContextCleared
+	9,  // 2: conversation.v1.ContextCut.compacted:type_name -> conversation.v1.ContextCompacted
+	5,  // 3: conversation.v1.ContextCut.compaction_failed:type_name -> conversation.v1.ContextCompactionFailed
+	6,  // 4: conversation.v1.ContextCompactionFailed.compaction:type_name -> conversation.v1.CompactionId
+	12, // 5: conversation.v1.ContextCompacted.summary:type_name -> conversation.v1.AgentResponseProse
+	7,  // 6: conversation.v1.ContextCompacted.tokens:type_name -> conversation.v1.ContextTokenDelta
+	10, // 7: conversation.v1.ContextCompacted.requested:type_name -> conversation.v1.ContextCompactionRequested
+	11, // 8: conversation.v1.ContextCompacted.automatic:type_name -> conversation.v1.ContextCompactionAutomatic
+	6,  // 9: conversation.v1.ContextCompacted.compaction:type_name -> conversation.v1.CompactionId
+	13, // 10: conversation.v1.session_command_spec:extendee -> google.protobuf.EnumValueOptions
+	1,  // 11: conversation.v1.session_command_spec:type_name -> conversation.v1.SessionCommandSpec
+	12, // [12:12] is the sub-list for method output_type
+	12, // [12:12] is the sub-list for method input_type
+	11, // [11:12] is the sub-list for extension type_name
+	10, // [10:11] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_conversation_v1_slash_command_proto_init() }
@@ -1003,13 +1158,14 @@ func file_conversation_v1_slash_command_proto_init() {
 		return
 	}
 	file_conversation_v1_agent_activity_proto_init()
-	file_conversation_v1_slash_command_proto_msgTypes[1].OneofWrappers = []any{
+	file_conversation_v1_slash_command_proto_msgTypes[2].OneofWrappers = []any{}
+	file_conversation_v1_slash_command_proto_msgTypes[3].OneofWrappers = []any{
 		(*ContextCut_Cleared)(nil),
 		(*ContextCut_Compacted)(nil),
 		(*ContextCut_CompactionFailed)(nil),
 	}
-	file_conversation_v1_slash_command_proto_msgTypes[2].OneofWrappers = []any{}
-	file_conversation_v1_slash_command_proto_msgTypes[6].OneofWrappers = []any{
+	file_conversation_v1_slash_command_proto_msgTypes[4].OneofWrappers = []any{}
+	file_conversation_v1_slash_command_proto_msgTypes[8].OneofWrappers = []any{
 		(*ContextCompacted_Requested)(nil),
 		(*ContextCompacted_Automatic)(nil),
 	}
@@ -1019,7 +1175,7 @@ func file_conversation_v1_slash_command_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_conversation_v1_slash_command_proto_rawDesc), len(file_conversation_v1_slash_command_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   9,
+			NumMessages:   11,
 			NumExtensions: 1,
 			NumServices:   0,
 		},

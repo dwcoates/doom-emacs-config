@@ -290,6 +290,16 @@ message SessionUpdate {
     // process holds running, pushed whenever that membership changes. See
     // SessionLiveWork, which carries the level's whole contract.
     SessionLiveWork live_work = 34;
+    // THE COMMAND CATALOG: every slash command the session's runtime answers,
+    // whole (SessionCommandCatalog carries the set's contract). PRODUCER
+    // OBLIGATIONS: the shim reads the catalog from the vendor once the session
+    // is up and again whenever it re-reads the session's facts, states it on
+    // every read that CHANGED it, and restates the standing catalog once on
+    // every WatchSession open, after the opening re-announcement — so a
+    // consumer that attaches late learns the catalog from its own stream. NOT
+    // stated before the first read answers; a read that fails is a
+    // SessionFault on the catalog's own component and states nothing.
+    SessionCommandCatalog command_catalog = 35;
   }
 }
 
