@@ -220,9 +220,14 @@ export function drawRosterRow(
     line.appendChild(drawRosterRowPriorityBadge(u.priority, `${path}.priority`));
   }
 
-  line.appendChild(
-    drawRosterRowWhen(requireMessage(u.when, `${path}.when`), sc, `${path}.when`),
-  );
+  const when = requireMessage(u.when, `${path}.when`);
+  line.appendChild(drawRosterRowWhen(when, sc, `${path}.when`));
+  // A MERGE THAT LANDED TODAY IS GREEN (owner request, 2026-10-11): the name
+  // turns green while its merge is on today's local date, and back to the
+  // repository names' colour once the shared ticker crosses midnight.
+  if (merged && when.shown.case === "merged") {
+    tickMergedToday(label, sc, drawRosterRowWhenMerged(when.shown.value, `${path}.when.merged`));
+  }
   const target: VerbTarget = { sc, workspace, name };
   line.appendChild(drawMenuControl(ws, target));
   ws.appendChild(line);
@@ -358,25 +363,13 @@ export function drawRosterRowWhen(
   when.setAttribute("data-when", shown.case);
   switch (shown.case) {
     case "active":
-      tickAge(
-        when,
-        sc,
-        drawRosterRowWhenActive(shown.value, `${path}.active`),
-        (age) => age,
-      );
+      tickAge(when, sc, drawRosterRowWhenActive(shown.value, `${path}.active`));
       return when;
     case "created":
-      tickAge(
-        when,
-        sc,
-        drawRosterRowWhenCreated(shown.value, `${path}.created`),
-        (age) => age,
-      );
+      tickAge(when, sc, drawRosterRowWhenCreated(shown.value, `${path}.created`));
       return when;
     case "merged":
-      tickAge(when, sc, drawRosterRowWhenMerged(shown.value, `${path}.merged`), (age) =>
-        `merged ${age}`,
-      );
+      tickAge(when, sc, drawRosterRowWhenMerged(shown.value, `${path}.merged`));
       return when;
     default: {
       const other: { case: string } = shown;
@@ -752,16 +745,40 @@ function appendDetailLine(list: HTMLElement, label: string, value: string): void
   list.appendChild(dd);
 }
 
-/** Paint an age now and on every tick, through the SHARED ticker. */
-function tickAge(
-  host: HTMLElement,
-  sc: SidebarContext,
-  atMs: number,
-  compose: (age: string) => string,
-): void {
-  const paint = (nowMs: number): void => {
-    host.textContent = compose(formatTickedAge(nowMs - atMs));
-  };
+/**
+ * Paint an age now and on every tick, through the SHARED ticker. Every arm
+ * draws the bare age (owner request, 2026-10-11: no "merged " prefix), so the
+ * column's position in the band says what the age counts from.
+ */
+function tickAge(host: HTMLElement, sc: SidebarContext, atMs: number): void {
+  tickPaint(sc, (nowMs) => {
+    host.textContent = formatTickedAge(nowMs - atMs);
+  });
+}
+
+/** Mark a merged row's NAME green now and on every tick while its merge is today's. */
+function tickMergedToday(name: HTMLElement, sc: SidebarContext, mergedAtMs: number): void {
+  tickPaint(sc, (nowMs) => {
+    name.classList.toggle(MERGED_TODAY_CLASS, mergedToday(mergedAtMs, nowMs));
+  });
+}
+
+/** Run PAINT now and on every tick of the shared ticker, until the next push. */
+function tickPaint(sc: SidebarContext, paint: (nowMs: number) => void): void {
   paint(sc.ctx.ticker.now());
   sc.onDispose(sc.ctx.ticker.subscribe(paint));
+}
+
+/** The class a merged row's name carries while its merge landed today. */
+export const MERGED_TODAY_CLASS = "merged-today";
+
+/** Whether MERGED_AT_MS falls on the same LOCAL calendar date as NOW_MS. */
+export function mergedToday(mergedAtMs: number, nowMs: number): boolean {
+  const merged = new Date(mergedAtMs);
+  const now = new Date(nowMs);
+  return (
+    merged.getFullYear() === now.getFullYear() &&
+    merged.getMonth() === now.getMonth() &&
+    merged.getDate() === now.getDate()
+  );
 }
