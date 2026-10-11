@@ -100,6 +100,14 @@ describe("drawFeedMergeTestSuite: the counts column", () => {
     expect(el?.textContent).toBe("1");
   });
 
+  it("draws passed/total while no test has failed", () => {
+    expect(counted({ passed: 3, failed: 0, total: 12 }).querySelector(".merge-suite-counts")?.textContent).toBe("3/12");
+  });
+
+  it("draws no red failed figure while no test has failed", () => {
+    expect(counted({ passed: 3, failed: 0, total: 12 }).querySelector(".merge-suite-counts .is-failed")).toBeNull();
+  });
+
   it("draws no counts while the daemon knows none", () => {
     expect(counted().querySelector(".merge-suite-counts")).toBeNull();
   });
@@ -320,7 +328,7 @@ describe("updateTestSuites", () => {
   it("moves the counts a push carries", () => {
     const el = drawTestSuites([countedSuite("unit", 1, 10)]);
     updateTestSuites(el, [countedSuite("unit", 2, 10)]);
-    expect(el.querySelector(".merge-suite-counts")?.textContent).toBe("2/0/10");
+    expect(el.querySelector(".merge-suite-counts")?.textContent).toBe("2/10");
   });
 
   it("repaints the dot in place when the suite settles", () => {
