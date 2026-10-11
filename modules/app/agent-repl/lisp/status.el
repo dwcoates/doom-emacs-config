@@ -764,6 +764,17 @@ with the glyph saying which of the two it is, and `:merge-failed\=' and
 `:merged\=' their shared turquoise and green, each drawing its glyph over
 it.")
 
+(defconst agent-repl-status-gate-glyphs
+  '((:permission . "❗")
+    (:question   . "❓"))
+  "The character each gate arm draws, keyed by the fixture\='s glyph NAMES.
+
+proto/vocab/render-colors.json\='s `gate_glyphs\=' section names WHICH
+glyph a gate on the user gets (exclaim, ask); this is the tab bar\='s
+mapping, the same two emoji the webapp sidebar draws in place of its dot
+\(owner request, 2026-10-11).  The arm keeps its green, so the tab reads
+`[N] ❗ name\=' or `[N] ❓ name\='.")
+
 (defconst agent-repl-status-inactive-glyph "?"
   "The glyph an `inactive\=' row draws.
 Registered but with no open perspective, so there is no live session
@@ -1085,11 +1096,13 @@ at ERROR rather than painted."
 
 (defun agent-repl-status-tab-glyph (ws arm)
   "Return the glyph WS draws for ARM, or nil when it draws none.
-Three glyphs exist, in precedence order: the merge pipeline's (every
+Four glyphs exist, in precedence order: the merge pipeline's (every
 merge arm draws its glyph over its color: purple in flight, turquoise
-for `:merge-failed', green for `:merged'), the inactive question mark,
-and the attention marker."
+for `:merge-failed', green for `:merged'), a gate's emoji (a pending
+permission or question), the inactive question mark, and the attention
+marker."
   (let ((glyph (or (alist-get arm agent-repl-status-merge-glyphs)
+                   (alist-get arm agent-repl-status-gate-glyphs)
                    (and (eq arm :inactive) agent-repl-status-inactive-glyph)
                    (and (agent-repl-status-attention-visible-p ws)
                         agent-repl-status-attention-glyph))))
@@ -1538,8 +1551,8 @@ themed frame and on the no-theme sandbox alike."
 Two things live there, in this order: the roster's PRIORITY BADGE label
 \(resolver-composed and drawn verbatim; ordering is already the
 resolver's and this is only the label) and the arm's glyph
-\(the merge pipeline's, the inactive question mark, or the attention
-marker).  Both are absent far more often than present, so the whole run
+\(the merge pipeline's, a gate's emoji, the inactive question mark, or
+the attention marker).  Both are absent far more often than present, so the whole run
 is nil in the ordinary case and the tab is name and bracket alone.
 
 A BLANK PART IS NO PART.  A roster row can carry a priority label that is
