@@ -231,25 +231,12 @@ func (v *verbs) Create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 	// A base ref that does not resolve is REFUSED before anything is recorded
 	// or materialized: git would otherwise fail halfway through `worktree add`
 	// and leave the creation job standing for a workspace that cannot exist.
-	if _, err := v.deps.Git.ResolveRef(ctx, repoDir, baseRef); err != nil {
-		// The arm spells `ref`, so the ref TRAVELS AS THE FIELD and not only
-		// inside the sentence: a client rendering the arm names the bad ref.
-		return wsm.Workspace{}, refuseWith(global, "CreateWorkspace", ArmBaseRefUnresolved,
-			fmt.Sprintf("the base ref %q does not resolve in %q: %v", baseRef, repoDir, err), false,
-			map[string]any{"ref": baseRef})
+	if _, err := v.resolveBase(ctx, global, repoDir, baseRef); err != nil {
+		return wsm.Workspace{}, err
 	}
 	if parent == nil && spec.BaseRef != "" {
-		onPrimary, err := v.deps.Git.IsAncestor(ctx, repoDir, baseRef, defaultBranch)
-		if err != nil {
-			global.Error(opCreate, "could not check the base ref against the primary branch", dlog.Context{
-				"base_ref": baseRef, "primary_branch": defaultBranch, "cause": err.Error(),
-			})
-			return wsm.Workspace{}, fmt.Errorf("create %q: check base ref %q: %w", branch, baseRef, err)
-		}
-		if !onPrimary {
-			return wsm.Workspace{}, refuseWith(global, "CreateWorkspace", ArmBaseRefOffPrimaryBranch,
-				fmt.Sprintf("the base ref %q is not on the primary branch %q, and a top-level workspace merges into it", baseRef, defaultBranch), false,
-				map[string]any{"ref": baseRef, "primary_branch": defaultBranch})
+		if err := v.requireOnPrimary(ctx, global, repoDir, baseRef, defaultBranch); err != nil {
+			return wsm.Workspace{}, fmt.Errorf("create %q: %w", branch, err)
 		}
 	}
 
@@ -827,11 +814,9 @@ func (v *verbs) settleParentAndBase(ctx context.Context, log dlog.Logger, spec C
 		log.Error(opCreate, "could not read the parent workspace", withCause(fields, err))
 		return CreateSpec{}, fmt.Errorf("create: parent workspace %q: %w", *parent, err)
 	}
-	base, err := v.deps.Git.ResolveRef(ctx, repoDir, spec.BaseRef)
+	base, err := v.resolveBase(ctx, log, repoDir, spec.BaseRef)
 	if err != nil {
-		return CreateSpec{}, refuseWith(log, "CreateWorkspace", ArmBaseRefUnresolved,
-			fmt.Sprintf("the base ref %q does not resolve in %q: %v", spec.BaseRef, repoDir, err), false,
-			map[string]any{"ref": spec.BaseRef})
+		return CreateSpec{}, err
 	}
 	tip, err := v.deps.Git.ResolveRef(ctx, repoDir, parentRecord.Branch)
 	if err != nil {
@@ -843,18 +828,48 @@ func (v *verbs) settleParentAndBase(ctx context.Context, log dlog.Logger, spec C
 		spec.BaseRef = ""
 		return spec, nil
 	}
-	onPrimary, err := v.deps.Git.IsAncestor(ctx, repoDir, spec.BaseRef, defaultBranch)
-	if err != nil {
-		log.Error(opCreate, "could not check the base ref against the primary branch", withCause(fields, err))
-		return CreateSpec{}, fmt.Errorf("create: check base ref %q: %w", spec.BaseRef, err)
-	}
-	if !onPrimary {
-		return CreateSpec{}, refuseWith(log, "CreateWorkspace", ArmBaseRefOffPrimaryBranch,
-			fmt.Sprintf("the base ref %q is neither the parent's tip nor on the primary branch %q", spec.BaseRef, defaultBranch), false,
-			map[string]any{"ref": spec.BaseRef, "primary_branch": defaultBranch})
+	if err := v.requireOnPrimary(ctx, log, repoDir, spec.BaseRef, defaultBranch); err != nil {
+		return CreateSpec{}, fmt.Errorf("create: %w", err)
 	}
 	log.Info(opCreate, "the base is on the primary branch, so the workspace is top-level and merges into it", fields)
 	spec.Parent = nil
 	spec.ForkIntoPrimary = spec.ForkFrom != nil
 	return spec, nil
+}
+
+// resolveBase answers the commit baseRef names, or the ArmBaseRefUnresolved
+// refusal. A base that does not resolve is refused before anything is
+// recorded or materialized: git would otherwise fail halfway through
+// `worktree add` and leave the creation job standing for a workspace that
+// cannot exist. The arm spells `ref`, so the ref TRAVELS AS THE FIELD and not
+// only inside the sentence.
+func (v *verbs) resolveBase(ctx context.Context, log dlog.Logger, repoDir, baseRef string) (string, error) {
+	commit, err := v.deps.Git.ResolveRef(ctx, repoDir, baseRef)
+	if err != nil {
+		return "", refuseWith(log, "CreateWorkspace", ArmBaseRefUnresolved,
+			fmt.Sprintf("the base ref %q does not resolve in %q: %v", baseRef, repoDir, err), false,
+			map[string]any{"ref": baseRef})
+	}
+	return commit, nil
+}
+
+// requireOnPrimary answers nil when baseRef already lies on the primary
+// branch (an ancestor of it, or its tip), the ArmBaseRefOffPrimaryBranch
+// refusal when it does not, and an error recorded at ERROR when git cannot
+// tell. A workspace that merges into the primary branch must be cut from it,
+// or it would carry another branch's unmerged commits in.
+func (v *verbs) requireOnPrimary(ctx context.Context, log dlog.Logger, repoDir, baseRef, defaultBranch string) error {
+	onPrimary, err := v.deps.Git.IsAncestor(ctx, repoDir, baseRef, defaultBranch)
+	if err != nil {
+		log.Error(opCreate, "could not check the base ref against the primary branch", dlog.Context{
+			"base_ref": baseRef, "primary_branch": defaultBranch, "cause": err.Error(),
+		})
+		return fmt.Errorf("check base ref %q: %w", baseRef, err)
+	}
+	if !onPrimary {
+		return refuseWith(log, "CreateWorkspace", ArmBaseRefOffPrimaryBranch,
+			fmt.Sprintf("the base ref %q is not on the primary branch %q, which the workspace would merge into", baseRef, defaultBranch), false,
+			map[string]any{"ref": baseRef, "primary_branch": defaultBranch})
+	}
+	return nil
 }
