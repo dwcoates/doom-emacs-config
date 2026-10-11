@@ -41,6 +41,7 @@ import (
 	"claude-repld/internal/lockwatch"
 	"claude-repld/internal/login"
 	"claude-repld/internal/merge"
+	"claude-repld/internal/mergeworkspace"
 	"claude-repld/internal/paint"
 	"claude-repld/internal/persistentwifi"
 	"claude-repld/internal/prompthandler"
@@ -891,7 +892,9 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// ---- the merge orchestrator ----
 
 	ownership = workspace.NewOwnership(rolloutController)
+	detachedRef := &detachedForwarder{}
 	mergeOrchestrator, err := merge.New(merge.Deps{
+		Detached:    detachedRef,
 		PublishHost: relay.PublishHostWorkspace,
 		// The verbs own the roster's durable half and are built AFTER the
 		// orchestrator, so the republish reads them out of the forwarder.
@@ -1014,6 +1017,16 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	if err != nil {
 		return nil, fmt.Errorf("claude-repld: build the prompt handler: %w", err)
 	}
+	detached := mergeworkspace.New(mergeworkspace.Deps{
+		DB:         p.DB,
+		Workspaces: verbs,
+		Prompts:    handler,
+		Feed:       feedResolver,
+		Briefs:     merge.BriefsFrom(paths.PromptsDir),
+		Log:        p.Surfaces,
+		Now:        time.Now,
+	})
+	detachedRef.bind(detached)
 	ingress, err := commandfile.New(commandfile.Deps{
 		Dir: p.Layout.OutputDir(),
 		// The ingress joins the pattern onto its own directory, so it takes
@@ -1100,6 +1113,14 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			return runShimLogRolls(ctx, p.Surfaces.ShimRollRequests(), p.DB, rolloutController)
 		}},
 		{Name: "worktree_reaper", Run: reaper.Run},
+		{Name: "merge_workspace_sweep", Run: func(ctx context.Context) error {
+			// HOURLY: a merge workspace goes after 15 calendar days idle, so
+			// an hour's lateness is nothing, and a sweep reads two tables.
+			ticker := time.NewTicker(time.Hour)
+			defer ticker.Stop()
+			detached.Run(ctx, ticker.C)
+			return nil
+		}},
 		{Name: "lock_watchdog", Run: stalls.Run},
 		{Name: "persistent_wifi", Run: wifi.Run},
 		{Name: "news_digest", Run: digest.Run},
