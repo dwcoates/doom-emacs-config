@@ -307,8 +307,12 @@ type fakeVerbs struct {
 	setEffort    conversationv1.AgentEffortLevel
 	setEffortErr error
 
-	answerPermissionErr  error
-	answerQuestionErr    error
+	answerPermissionErr error
+	answerQuestionErr   error
+	// draftEdits is every UpdateQuestionDraft call's ask and edit, in order;
+	// draftErr is what it answers.
+	draftEdits           []fakeServerDraftEdit
+	draftErr             error
 	setPermissionModeErr error
 	// selectAccountDir is the root the last SelectAccount named; the answer
 	// and the failure the fixture hands back sit beside it.
@@ -507,6 +511,17 @@ func (f *fakeVerbs) AnswerPermission(context.Context, ids.WorkspaceID, *conversa
 
 func (f *fakeVerbs) AnswerQuestion(context.Context, ids.WorkspaceID, *conversationv1.AgentAnswer) error {
 	return f.answerQuestionErr
+}
+
+// fakeServerDraftEdit is one UpdateQuestionDraft call.
+type fakeServerDraftEdit struct {
+	ask  string
+	edit feed.QuestionEdit
+}
+
+func (f *fakeVerbs) UpdateQuestionDraft(_ context.Context, _ ids.WorkspaceID, ask string, edit feed.QuestionEdit) error {
+	f.draftEdits = append(f.draftEdits, fakeServerDraftEdit{ask: ask, edit: edit})
+	return f.draftErr
 }
 
 // fakePrompts answers one submission outcome and records the said it was

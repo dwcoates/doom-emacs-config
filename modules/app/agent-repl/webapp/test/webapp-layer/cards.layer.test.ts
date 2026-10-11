@@ -3,7 +3,8 @@
  *
  * These are the two families where the PAGE is a participant rather than a
  * viewer: the real shim asks, the card draws with its controls, the user
- * clicks, the app calls `AnswerPermission`/`AnswerQuestion`, and the card's
+ * clicks, the app calls `AnswerPermission`/`UpdateQuestionDraft` (or a typed
+ * answer goes out as a plain send), and the card's
  * new state arrives on the FEED PUSH rather than in the rpc's response. No
  * layer below the webapp can cover that round trip.
  *
@@ -22,6 +23,7 @@ import type { MountedApp } from "../integration/harness";
 import {
   BOOT_BUDGET_MS,
   TURN_TEST_MS,
+  answerQuestionsByTyping,
   awaitDrawn,
   bootLayer,
   rows,
@@ -51,7 +53,7 @@ afterAll(async () => {
  * TWO STEPS, BOTH THROUGH THE PAGE'S OWN CONTROLS:
  *
  *  1. Answer whatever is still open the way a user would — deny a permission,
- *     submit a question's free-text escape.
+ *     type an answer to each unanswered question.
  *  2. If the turn STILL has not ended, interrupt it from the footer's own
  *     clock control. This is not belt-and-braces: `perm-hold` is documented
  *     (permissions.ts, and permission_e2e_test.go's own header) as a turn that
@@ -63,22 +65,8 @@ async function releaseWorkspace(): Promise<void> {
   const openPermissions = app.$$(
     '[data-feed-row][data-row-kind="permission"] [data-permission="deny"]',
   );
-  const openQuestions = app.$$(
-    '[data-feed-row][data-row-kind="question"] [data-question-submit]',
-  );
   for (const deny of openPermissions) await app.clickElement(deny);
-  for (const submitButton of openQuestions) {
-    const card = submitButton.closest("[data-feed-row]");
-    const other = card?.querySelector<HTMLInputElement>(
-      "[data-question-other]",
-    );
-    if (other) {
-      other.value = "teardown answer";
-      other.dispatchEvent(new Event("input", { bubbles: true }));
-      await app.settle();
-    }
-    await app.clickElement(submitButton);
-  }
+  await answerQuestionsByTyping(app, "teardown answer");
   if (everyTurnEnded()) return;
 
   // THE FOOTER'S OWN INTERRUPT, once it says the turn runs: a parked turn
@@ -149,7 +137,9 @@ it(
     expect(card.querySelectorAll("[data-permission]").length).toBeGreaterThan(
       0,
     );
-    expect(card.querySelector("[data-permission-reason]")).not.toBeNull();
+    // A deny's reason is typed in the editor: the card says so, and has no field.
+    expect(card.querySelector("[data-permission-reason]")).toBeNull();
+    expect(card.querySelector("[data-ask-hint]")).not.toBeNull();
     expect(card.querySelector(".perm-waiting")).not.toBeNull();
   },
   TURN_TEST_MS,
@@ -230,17 +220,17 @@ it(
 
 // §F4 #21.
 it(
-  "always draws a question's free-text escape alongside its options",
+  "draws a question's options, and says a typed answer is entered in the editor",
   async () => {
-    // Arrange / Act — a single-choice ask, which still gets the escape.
+    // Arrange / Act
     const card = await ask("ask-single", "question");
 
-    // Assert
+    // Assert — options on the card, and no text field or submit of its own.
     expect(
       card.querySelectorAll("[data-question-option]").length,
     ).toBeGreaterThan(0);
-    expect(card.querySelector("[data-question-other]")).not.toBeNull();
-    expect(card.querySelector("[data-question-submit]")).not.toBeNull();
+    expect(card.querySelector("[data-ask-hint]")).not.toBeNull();
+    expect(card.querySelector("[data-question-other], [data-question-submit]")).toBeNull();
   },
   TURN_TEST_MS,
 );
@@ -261,31 +251,22 @@ it(
 );
 
 it(
-  "answers a question through the free-text escape rather than an option",
+  "answers a question with a typed send rather than an option",
   async () => {
-    // Arrange — `ask-free` still draws whatever options the ask carried (the
-    // escape is ALWAYS drawn, it is not an option-less mode), so this test is
-    // about answering THROUGH the escape.
+    // Arrange
     const card = await ask("ask-free", "question");
     const id = card.dataset.feedRow;
-    const other = card.querySelector<HTMLInputElement>("[data-question-other]");
-    expect(other, "the free-text escape is always drawn").not.toBeNull();
 
-    // Act — type into the escape and submit, picking no option at all.
-    (other as HTMLInputElement).value = "something else entirely";
-    (other as HTMLInputElement).dispatchEvent(
-      new Event("input", { bubbles: true }),
-    );
-    await app.settle();
-    await app.click(`[data-feed-row="${id}"] [data-question-submit]`);
+    // Act — a plain send while the card stands is its typed answer.
+    await answerQuestionsByTyping(app, "something else entirely");
 
     // Assert — the card closes on the answer the page sent.
     await awaitDrawn(
       app,
       `the answered state on question row ${id}`,
-      () => app.$(`[data-feed-row="${id}"] [data-question-submit]`) === null,
+      () => app.$(`[data-feed-row="${id}"] .q-tabbed`) === null,
     );
-    expect(app.$(`[data-feed-row="${id}"] [data-state]`)).not.toBeNull();
+    expect(textOf(app.$(`[data-feed-row="${id}"]`))).toContain("something else entirely");
   },
   TURN_TEST_MS,
 );
@@ -301,15 +282,14 @@ it(
     const option = card.querySelector<HTMLElement>("[data-question-option]");
     expect(option, "the open card drew no option to pick").not.toBeNull();
 
-    // Act — pick an option, then submit through the card's own control.
+    // Act — the pick answers the batch's one question, which delivers it.
     await app.clickElement(option as HTMLElement);
-    await app.click(`[data-feed-row="${id}"] [data-question-submit]`);
 
-    // Assert — the card states its new state, and the submit control is gone.
+    // Assert — the card states its new state, and its open batch is gone.
     await awaitDrawn(
       app,
       `the answered state on question row ${id}`,
-      () => app.$(`[data-feed-row="${id}"] [data-question-submit]`) === null,
+      () => app.$(`[data-feed-row="${id}"] .q-tabbed`) === null,
     );
     const answered = app.$(`[data-feed-row="${id}"] [data-state]`);
     expect(answered).not.toBeNull();

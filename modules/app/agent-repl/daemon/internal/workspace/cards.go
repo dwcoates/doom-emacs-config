@@ -3,6 +3,7 @@ package workspace
 import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 
+	"claude-repld/internal/feedid"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/resolve/feed"
 	"claude-repld/internal/resolve/topbar"
@@ -49,6 +50,22 @@ func (c *cards) Question(ws ids.WorkspaceID, id *conversationv1.AgentQuestionId)
 		return ServedQuestion{}, false
 	}
 	return ServedQuestion{Agent: agent, Batch: batch}, true
+}
+
+// EditQuestionDraft edits a standing batch's draft where the feed resolver
+// holds it: the card is drawn from that record, so it is edited nowhere else.
+func (c *cards) EditQuestionDraft(ws ids.WorkspaceID, ask string, edit feed.QuestionEdit) (feed.QuestionDraftOutcome, error) {
+	return c.feed.EditQuestionDraft(ws, ask, edit)
+}
+
+// ReleaseQuestionDelivery frees a failed delivery's claim, in the resolver.
+func (c *cards) ReleaseQuestionDelivery(ws ids.WorkspaceID, ask string) {
+	c.feed.ReleaseQuestionDelivery(ws, ask)
+}
+
+// StandingAsk answers the oldest ask standing on the addressed feed.
+func (c *cards) StandingAsk(ws ids.WorkspaceID, target *feedid.Ref) (feed.StandingAsk, bool) {
+	return c.feed.StandingAsk(ws, target)
 }
 
 // ColdGate answers the menu a standing cold gate served. The FLEET raised it,

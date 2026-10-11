@@ -98,7 +98,7 @@ func (s *server) SubmitPrompt(
 		req.Msg.GetIdempotencyKey(), req.Msg.GetOrigin(), delivery, target)
 	if err != nil {
 		if refused, ok := s.asRefusal(err); ok {
-			return answer(resp, s.refuse(subject.Log, rpc, resp, submitRefusal(modelActRefused(err, bubbleRefused(refused)))))
+			return answer(resp, s.refuse(subject.Log, rpc, resp, submitRefusal(modelActRefused(err, bubbleRefused(askRefused(refused))))))
 		}
 		return nil, fail(subject.Log, rpc, err)
 	}
@@ -107,7 +107,9 @@ func (s *server) SubmitPrompt(
 	// or a prompt alike (a genuine success — a minted turn, a hold, a command
 	// answer — never a refusal arm or a transport error), and the webapp
 	// returns to the tail where the new prompt lands.
-	if sentWithSelection && cerr == nil && resp.GetError() == nil {
+	// A TYPED ANSWER TO A STANDING ASK is not the prompt the selection was
+	// chosen for, so it leaves the selection standing.
+	if sentWithSelection && cerr == nil && resp.GetError() == nil && outcome.Recognition != prompthandler.RecognizedAskAnswer {
 		s.endSelection(subject.Log, subject.Record.ID, sentWith, returnToTail(), "prompt_sent")
 	}
 	return answer(resp, cerr)
@@ -149,6 +151,14 @@ func (s *server) encodeSubmitOutcome(
 						Command: outcome.RefusedCommand,
 					},
 				},
+			},
+		}
+		return nil
+	case prompthandler.RecognizedAskAnswer:
+		log.Debug("daemon.server.submit_prompt", "answered that the send was a standing ask's typed answer", nil)
+		resp.Result = &agentreplv1.SubmitPromptResponse_Success{
+			Success: &agentreplv1.SubmitPromptSuccess{
+				Outcome: &agentreplv1.SubmitPromptSuccess_AskAnswered{AskAnswered: &agentreplv1.SubmitPromptAskAnswered{}},
 			},
 		}
 		return nil
@@ -300,6 +310,17 @@ func modelActRefused(err error, r refusal) refusal {
 		r.Arm = armModelNotInCatalog
 	case "vendor_refused":
 		r.Arm = armModelRefused
+	}
+	return r
+}
+
+// askRefused names a typed answer's refusal by the landed
+// SubmitPromptError.ask_not_standing arm when the ask it was routed to settled
+// first: the shim's `no_open_ask` (the agent stopped asking before the answer
+// reached it) is that same fact said by the shim.
+func askRefused(r refusal) refusal {
+	if r.Arm == workspace.ArmShimNoOpenAsk {
+		r.Arm = workspace.ArmAskNotStanding
 	}
 	return r
 }

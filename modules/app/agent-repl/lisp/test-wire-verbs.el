@@ -1405,12 +1405,12 @@ the form is its prompt and nothing else."
                    "unknownWorkspace" "workspaceRefMismatch"))))
 
 (ert-deftest agent-repl-test-wire-verbs-submit-outcome-arms-pinned ()
-  "SubmitPromptSuccess's outcome oneof has exactly the four arms decoded here."
+  "SubmitPromptSuccess's outcome oneof has exactly the five arms decoded here."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_submit_prompt.pb.go"
                         "SubmitPromptSuccess")
                        #'string<)
-                 '("commandActed" "commandPanel" "commandRefused" "turn"))))
+                 '("askAnswered" "commandActed" "commandPanel" "commandRefused" "turn"))))
 
 (ert-deftest agent-repl-test-wire-verbs-submit-panel-arms-pinned ()
   "SubmitPromptCommandPanel's panel oneof has exactly the six arms decoded
@@ -1427,7 +1427,7 @@ here."
                         "agentrepl/v1/endpoint_submit_prompt.pb.go"
                         "SubmitPromptError")
                        #'string<)
-                 '("bubbleRefused" "coldGate" "duplicateSubmission"
+                 '("askNotStanding" "bubbleRefused" "coldGate" "duplicateSubmission"
                    "feedNotInWorkspace" "feedUndecodable" "merging"
                    "modelNotInCatalog" "modelRefused" "noSession"
                    "notYetAdopted" "transferringAway" "unknownWorkspace"
@@ -2364,6 +2364,21 @@ empty, with nothing to await."
                     (agent-repl-test-wire-verbs--parse "{\"commandActed\":{}}"))
                    '(:arm :command-acted :value nil)))))
 
+(ert-deftest agent-repl-test-wire-verbs-submit-success-ask-answered-arm ()
+  "SubmitPromptSuccess's `ask_answered' arm decodes as the answer it is:
+empty, with no turn to await."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-submit-prompt-success
+                    (agent-repl-test-wire-verbs--parse "{\"askAnswered\":{}}"))
+                   '(:arm :ask-answered :value nil)))))
+
+(ert-deftest agent-repl-test-wire-verbs-submit-error-ask-not-standing-arm ()
+  "SubmitPromptError's `ask_not_standing' arm decodes empty."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-submit-prompt-error
+                    (agent-repl-test-wire-verbs--parse "{\"askNotStanding\":{}}"))
+                   '(:reason (:arm :ask-not-standing :value nil))))))
+
 (ert-deftest agent-repl-test-wire-verbs-merge-queue-error-unknown-repository-arm ()
   "UpdateMergeQueueError's `unknown_repository' arm decodes with everything it
 carries."
@@ -2527,7 +2542,7 @@ decodes."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_submit_prompt.pb.go" "SubmitPromptError")
                        #'string<)
-                 (sort (list "merging" "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "feedNotInWorkspace" "feedUndecodable" "noSession" "duplicateSubmission" "bubbleRefused" "coldGate" "modelNotInCatalog" "modelRefused")
+                 (sort (list "merging" "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "feedNotInWorkspace" "feedUndecodable" "noSession" "duplicateSubmission" "bubbleRefused" "coldGate" "modelNotInCatalog" "modelRefused" "askNotStanding")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-shutdown-error-nothing-scheduled-arm ()

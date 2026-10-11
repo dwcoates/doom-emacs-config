@@ -300,6 +300,16 @@ export function mountComposer(
             operation: "composer.command-acted",
           });
           return;
+        case "askAnswered":
+          // THE WORDS ANSWERED A STANDING ASK: a question's shown question took
+          // them as its typed answer, or a permission was denied with them as
+          // the reason. No turn was minted; the card's re-push is the visible
+          // effect, so the box clears and this component draws nothing.
+          accepted();
+          log.info("SubmitPrompt answered a standing ask without minting a turn", {
+            operation: "composer.ask-answered",
+          });
+          return;
         default: {
           const other: { case: string } = outcome;
           unreachableArm("SubmitPromptSuccess.outcome", other.case);
@@ -464,6 +474,8 @@ export function submitPromptRefusal(reason: SubmitPromptReason): string {
       return modelRefusalSentence("that model is not in this session's catalog", reason.value.detail);
     case "modelRefused":
       return modelRefusalSentence("the vendor refused that model", reason.value.detail);
+    case "askNotStanding":
+      return "the ask was already answered before your answer reached it — your text is kept";
     default: {
       const other: { case: string } = reason;
       return unreachableArm("SubmitPromptError.reason", other.case);

@@ -79,6 +79,10 @@ func (s *fakeServer) AnswerQuestion(ctx context.Context, req *connect.Request[v1
 	return handleUnary[v1.AnswerQuestionRequest, v1.AnswerQuestionResponse](ctx, s, "AnswerQuestion", req.Msg)
 }
 
+func (s *fakeServer) UpdateQuestionDraft(ctx context.Context, req *connect.Request[v1.UpdateQuestionDraftRequest]) (*connect.Response[v1.UpdateQuestionDraftResponse], error) {
+	return handleUnary[v1.UpdateQuestionDraftRequest, v1.UpdateQuestionDraftResponse](ctx, s, "UpdateQuestionDraft", req.Msg)
+}
+
 func (s *fakeServer) AnswerColdGate(ctx context.Context, req *connect.Request[v1.AnswerColdGateRequest]) (*connect.Response[v1.AnswerColdGateResponse], error) {
 	return handleUnary[v1.AnswerColdGateRequest, v1.AnswerColdGateResponse](ctx, s, "AnswerColdGate", req.Msg)
 }

@@ -40,7 +40,8 @@
  * to. `findRowElement` still returns the member's element wherever it sits, so
  * feedids, selection and the reveal walk keep working.
  */
-import { createControl, type Control } from "../control.js";
+import type { Control } from "../control.js";
+import { drawFeedTab, drawFeedTabStrip } from "./tabs.js";
 import { log } from "../log.js";
 import { placeChildren } from "../dom.js";
 import type { FeedRow } from "../../../proto/gen/ts/frontend/v1/feed_pb";
@@ -245,9 +246,7 @@ function createToolGroup(kind: string): ToolGroup {
   group.className = FEED_GROUP_CLASS;
   group.setAttribute("data-group-kind", kind);
 
-  const strip = document.createElement("div");
-  strip.className = "feed-group-strip";
-  strip.setAttribute("role", "tablist");
+  const strip = drawFeedTabStrip("feed-group-strip");
 
   const panel = document.createElement("div");
   panel.className = "feed-group-panel";
@@ -295,31 +294,16 @@ function createToolGroup(kind: string): ToolGroup {
 
   /** One tab: the kind's icon and the member's 1-based index. */
   function tab(member: GroupMember, index: number, activeId: string): Control {
-    const btn = createControl();
-    // A CONTROL so the feed-wide click-to-expand handler treats it as one
-    // (CLICK_THROUGH_SELECTOR in expand.ts) and a tab pick never toggles a
-    // capped section.
-    btn.className = "feed-group-tab";
-    btn.setAttribute(GROUP_TAB_MEMBER_ATTRIBUTE, member.id);
-    btn.setAttribute("role", "tab");
-    const active = member.id === activeId;
-    btn.setAttribute("aria-selected", active ? "true" : "false");
-    btn.classList.toggle("is-active", active);
-
-    const icon = document.createElement("span");
-    icon.className = "feed-group-tab-icon";
-    icon.setAttribute("aria-hidden", "true");
-    icon.textContent = groupGlyph(kind);
-
-    const idx = document.createElement("span");
-    idx.className = "feed-group-tab-index";
-    idx.textContent = String(index + 1);
-
-    btn.append(icon, idx);
-    btn.addEventListener("click", () => {
-      picked = member.id;
-      layout(current);
+    const btn = drawFeedTab({
+      icon: groupGlyph(kind),
+      index: index + 1,
+      active: member.id === activeId,
+      onPick: () => {
+        picked = member.id;
+        layout(current);
+      },
     });
+    btn.setAttribute(GROUP_TAB_MEMBER_ATTRIBUTE, member.id);
     return btn;
   }
 

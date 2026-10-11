@@ -25,11 +25,22 @@
  * the ask, and the policy denial is worded by the daemon precisely so it never
  * reads as the user's own act.
  *
+ * THE CARD IS A TOOL CARD (owner ruling, 2026-10-11): the grey `.tool-card`
+ * chrome a Bash call wears, with the vendor's headline where a call names its
+ * tool and the waiting clock beside it where a call's badge sits.
+ *
+ * A DENY WITH A REASON IS TYPED IN THE EDITOR. The card's deny button refuses
+ * with no reason; a plain send made while the card stands denies it with the
+ * text as the reason relayed to the agent (agentrepl.v1.
+ * SubmitPromptAskAnswered), and the card says so. It has no text field.
+ *
  * THE WAITING CLOCK IS THE CLIENT'S, from the row's FIRST DRAW. The schema
  * carries no arrival instant for an open ask — the proto says the wait is the
  * row's own concern — so the instant is stamped on the element and carried
  * across re-pushes, which keeps a growing wait from restarting every push.
  */
+import { drawToolHead, drawToolName } from "../cards/tool-head.js";
+import { drawAskHint } from "./hint.js";
 import { createControl, type Control } from "../../control.js";
 import { formatTickedAge } from "../../duration.js";
 import { log } from "../../log.js";
@@ -77,6 +88,9 @@ const BUTTON_LABELS = {
   deny: "deny",
 } as const satisfies Record<(typeof PERMISSION_BUTTONS)[number], string>;
 
+/** Where a deny's reason is entered: the card says so under its buttons. */
+export const DENY_IN_EDITOR_HINT = "to deny with a reason, type it in Emacs and send it";
+
 /** The verdict line each allowing arm draws. */
 const VERDICT_WORDS = {
   allowedOnce: "allowed once",
@@ -105,8 +119,7 @@ export function drawFeedPermission(u: FeedPermission, rc: RowContext): HTMLEleme
   const card = document.createElement("div");
   card.setAttribute("data-state", state.case);
 
-  const head = document.createElement("div");
-  head.className = "perm-head";
+  const head = drawToolHead("perm-head");
   head.append(
     drawFeedPermissionHeadline(requireMessage(u.headline, `${PATH}.headline`), `${PATH}.headline`),
   );
@@ -127,12 +140,13 @@ export function drawFeedPermission(u: FeedPermission, rc: RowContext): HTMLEleme
 
   switch (state.case) {
     case "open":
-      card.className = "permission pending";
-      card.append(waitingClock(card, rc));
+      card.className = "tool-card ask-card permission pending";
+      head.append(waitingClock(card, rc));
       card.append(drawOpenActions(u, rc));
+      card.append(drawAskHint(DENY_IN_EDITOR_HINT));
       return card;
     case "answered": {
-      card.className = "permission resolved";
+      card.className = "tool-card ask-card permission resolved";
       // An answered card's STATE is the answer given: "answered" alone says
       // only that the ask is over, never whether it was allowed or refused.
       const answer = requireCase(state.value.answer, `${PATH}.answered.answer`);
@@ -141,7 +155,7 @@ export function drawFeedPermission(u: FeedPermission, rc: RowContext): HTMLEleme
       return card;
     }
     case "abandoned":
-      card.className = "permission resolved";
+      card.className = "tool-card ask-card permission resolved";
       card.append(drawFeedPermissionAbandoned(state.value, rc, `${PATH}.abandoned`));
       return card;
     default:
@@ -158,10 +172,7 @@ export function drawFeedPermissionHeadline(
     operation: "feed.asks.permission.headline",
     context: { path },
   });
-  const el = document.createElement("span");
-  el.className = "perm-headline";
-  el.textContent = u.text;
-  return el;
+  return drawToolName(u.text, "perm-headline");
 }
 
 /** The qualifying subtitle, verbatim. */
@@ -299,16 +310,10 @@ export function drawFeedPermissionAbandoned(
   return el;
 }
 
-/** The open state's buttons, and the deny reason field beside them. */
+/** The open state's buttons. */
 function drawOpenActions(u: FeedPermission, rc: RowContext): HTMLElement {
   const actions = document.createElement("div");
   actions.className = "perm-actions";
-
-  const reason = document.createElement("input");
-  reason.type = "text";
-  reason.className = "perm-reason";
-  reason.setAttribute("data-permission-reason", "");
-  reason.placeholder = "why not (optional)";
 
   const buttons: Control[] = [];
   for (const kind of PERMISSION_BUTTONS) {
@@ -321,30 +326,14 @@ function drawOpenActions(u: FeedPermission, rc: RowContext): HTMLElement {
     button.setAttribute("data-permission", kind);
     button.textContent = BUTTON_LABELS[kind];
     button.addEventListener("click", () => {
-      void answer(rc, actions, buttons, answerFor(kind, reason.value));
+      void answer(rc, actions, buttons, { kind });
     });
     buttons.push(button);
     actions.append(button);
   }
-  actions.append(reason);
   return actions;
 }
 
-/**
- * The answer one button stands for.
- *
- * The deny reason is carried ONLY when the user actually typed one — a blank
- * field is no reason, not an empty reason.
- */
-export function answerFor(
-  kind: (typeof PERMISSION_BUTTONS)[number],
-  typed: string,
-): PermissionAnswer {
-  if (kind === "allowOnce") return { kind: "allowOnce" };
-  if (kind === "allowStanding") return { kind: "allowStanding" };
-  const reason = typed.trim();
-  return reason === "" ? { kind: "deny" } : { kind: "deny", reason };
-}
 
 /** Send the answer, and draw a refusal at the buttons if it was refused. */
 async function answer(
@@ -357,7 +346,7 @@ async function answer(
   clearRefusals(actions);
   log.info(`answering a permission card with ${chosen.kind}`, {
     operation: "feed.asks.permission.answer",
-    context: { row: id.value, answer: chosen.kind, reason: "reason" in chosen },
+    context: { row: id.value, answer: chosen.kind },
   });
   const answered = await whileInFlight(buttons, () =>
     callUnary(

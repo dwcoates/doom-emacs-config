@@ -6,14 +6,17 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/proto"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/resolve/feed"
 	"claude-repld/internal/workspace"
 )
 
@@ -40,6 +43,35 @@ func askIDFrom(rpc string, ws ids.WorkspaceID, id *frontendv1.FeedId) (feedid.Re
 		}
 	}
 	return ref, nil
+}
+
+// askRow is the card verbs' shared prologue: resolve the request's workspace
+// and decode the clicked row into the ask it addresses. A refused workspace
+// answers its own arm, and a row that does not decode or belongs to another
+// workspace answers `ask_not_standing`; either way the response is filled, and
+// done reports that the caller answers it as it stands. err is a failure to
+// resolve at all, already reported.
+func (s *server) askRow(
+	ctx context.Context,
+	rpc string,
+	ws *workspacev1.WorkspaceRef,
+	row *frontendv1.FeedId,
+	resp proto.Message,
+) (subject resolved, ref feedid.Ref, done *connect.Error, answered bool, err error) {
+	subject, r, err := s.resolveRef(ctx, rpc, ws)
+	if err != nil {
+		return resolved{}, feedid.Ref{}, nil, false, fail(s.log, rpc, err)
+	}
+	if r != nil {
+		return resolved{}, feedid.Ref{}, s.refuse(s.log, rpc, resp, *r), true, nil
+	}
+	ref, refused := askIDFrom(rpc, subject.Record.ID, row)
+	if refused != nil {
+		return resolved{}, feedid.Ref{}, s.refuse(subject.Log, rpc, resp, s.fill(refusal{
+			Arm: "ask_not_standing", Reason: refused.Reason, NotFound: true,
+		})), true, nil
+	}
+	return subject, ref, nil, false, nil
 }
 
 // Interrupt stops what the target names. "Nothing was running" is a SUCCESS
@@ -123,18 +155,12 @@ func (s *server) AnswerPermission(
 		return nil, err
 	}
 	resp := &agentreplv1.AnswerPermissionResponse{}
-	subject, r, err := s.resolveRef(ctx, rpc, req.Msg.GetWorkspace())
+	subject, ref, refusedWith, refused, err := s.askRow(ctx, rpc, req.Msg.GetWorkspace(), req.Msg.GetPermission(), resp)
 	if err != nil {
-		return nil, fail(s.log, rpc, err)
+		return nil, err
 	}
-	if r != nil {
-		return answer(resp, s.refuse(s.log, rpc, resp, *r))
-	}
-	ref, refused := askIDFrom(rpc, subject.Record.ID, req.Msg.GetPermission())
-	if refused != nil {
-		return answer(resp, s.refuse(subject.Log, rpc, resp, s.fill(refusal{
-			Arm: "ask_not_standing", Reason: refused.Reason, NotFound: true,
-		})))
+	if refused {
+		return answer(resp, refusedWith)
 	}
 
 	decision := &conversationv1.AgentPermissionDecision{
@@ -160,11 +186,7 @@ func (s *server) AnswerPermission(
 			},
 		}
 	default:
-		decision.Decision = &conversationv1.AgentPermissionDecision_Denied{
-			Denied: &conversationv1.AgentPermissionDeniedByUser{
-				Message: req.Msg.GetDeny().GetReason().GetText(),
-			},
-		}
+		decision.Decision = workspace.DeniedByUser(req.Msg.GetDeny().GetReason().GetText())
 	}
 
 	err = s.deps.Verbs.AnswerPermission(ctx, subject.Record.ID, &conversationv1.AgentAnswer{
@@ -192,36 +214,22 @@ func (s *server) AnswerQuestion(
 		return nil, err
 	}
 	resp := &agentreplv1.AnswerQuestionResponse{}
-	subject, r, err := s.resolveRef(ctx, rpc, req.Msg.GetWorkspace())
+	subject, ref, refusedWith, refused, err := s.askRow(ctx, rpc, req.Msg.GetWorkspace(), req.Msg.GetQuestion(), resp)
 	if err != nil {
-		return nil, fail(s.log, rpc, err)
+		return nil, err
 	}
-	if r != nil {
-		return answer(resp, s.refuse(s.log, rpc, resp, *r))
-	}
-	ref, refused := askIDFrom(rpc, subject.Record.ID, req.Msg.GetQuestion())
-	if refused != nil {
-		return answer(resp, s.refuse(subject.Log, rpc, resp, s.fill(refusal{
-			Arm: "ask_not_standing", Reason: refused.Reason, NotFound: true,
-		})))
+	if refused {
+		return answer(resp, refusedWith)
 	}
 
 	selections := make([]*conversationv1.AgentQuestionSelection, 0, len(req.Msg.GetAnswers()))
 	for _, given := range req.Msg.GetAnswers() {
-		selection := &conversationv1.AgentQuestionSelection{
-			Question: &conversationv1.AgentQuestionText{Text: given.GetQuestionText()},
-		}
-		for _, chosen := range given.GetChosen() {
-			selection.Chosen = append(selection.Chosen, &conversationv1.AgentQuestionChoice{
-				Label: &conversationv1.AgentQuestionOptionLabel{Label: chosen},
-			})
-		}
+		var other *string
 		if given.OtherText != nil {
-			selection.FreeText = &conversationv1.AgentQuestionFreeText{
-				Text: given.GetOtherText().GetText(),
-			}
+			text := given.GetOtherText().GetText()
+			other = &text
 		}
-		selections = append(selections, selection)
+		selections = append(selections, feed.QuestionSelection(given.GetQuestionText(), given.GetChosen(), other))
 	}
 
 	err = s.deps.Verbs.AnswerQuestion(ctx, subject.Record.ID, &conversationv1.AgentAnswer{
@@ -243,6 +251,55 @@ func (s *server) AnswerQuestion(
 	}
 	resp.Result = &agentreplv1.AnswerQuestionResponse_Success{
 		Success: &agentreplv1.AnswerQuestionSuccess{},
+	}
+	return connect.NewResponse(resp), nil
+}
+
+// UpdateQuestionDraft applies one click to a standing question card's
+// daemon-owned draft; the click that answers the batch's last question
+// delivers it. Each arm echoes the served question text (and a pick its served
+// label), which the verbs check against the batch.
+func (s *server) UpdateQuestionDraft(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.UpdateQuestionDraftRequest],
+) (*connect.Response[agentreplv1.UpdateQuestionDraftResponse], error) {
+	const rpc = "UpdateQuestionDraft"
+	if err := validateUpdateQuestionDraftRequest(req.Msg); err != nil {
+		return nil, err
+	}
+	resp := &agentreplv1.UpdateQuestionDraftResponse{}
+	subject, ref, refusedWith, refused, err := s.askRow(ctx, rpc, req.Msg.GetWorkspace(), req.Msg.GetQuestion(), resp)
+	if err != nil {
+		return nil, err
+	}
+	if refused {
+		return answer(resp, refusedWith)
+	}
+
+	var edit feed.QuestionEdit
+	switch arm := req.Msg.GetEdit().(type) {
+	case *agentreplv1.UpdateQuestionDraftRequest_Show:
+		edit = feed.QuestionEdit{Kind: feed.EditShow, Question: arm.Show.GetQuestionText()}
+	case *agentreplv1.UpdateQuestionDraftRequest_Pick:
+		edit = feed.QuestionEdit{Kind: feed.EditPick, Question: arm.Pick.GetQuestionText(), Label: arm.Pick.GetLabel()}
+	case *agentreplv1.UpdateQuestionDraftRequest_Confirm:
+		edit = feed.QuestionEdit{Kind: feed.EditConfirm, Question: arm.Confirm.GetQuestionText()}
+	default:
+		// VALIDATED ABOVE: an unset arm never reaches here.
+		panic(fmt.Sprintf("UpdateQuestionDraft: validated request carries edit %T", arm))
+	}
+
+	if err := s.deps.Verbs.UpdateQuestionDraft(ctx, subject.Record.ID, ref.Row.ID, edit); err != nil {
+		// A value the batch never served is `unserved_value{text}`; the shim's
+		// `no_open_ask` (the agent stopped asking before the delivery reached
+		// it) is the card no longer standing.
+		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, map[string]string{
+			workspace.ArmUnservedAnswer: "unserved_value",
+			workspace.ArmShimNoOpenAsk:  "ask_not_standing",
+		}))
+	}
+	resp.Result = &agentreplv1.UpdateQuestionDraftResponse_Success{
+		Success: &agentreplv1.UpdateQuestionDraftSuccess{},
 	}
 	return connect.NewResponse(resp), nil
 }

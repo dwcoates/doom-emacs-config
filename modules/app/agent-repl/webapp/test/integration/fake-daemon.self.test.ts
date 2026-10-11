@@ -85,6 +85,7 @@ describe("every rpc answers", () => {
       ["interrupt", client.interrupt({ workspace, target: { case: "turn", value: {} } })],
       ["answerPermission", client.answerPermission({ workspace, permission: feedId("p"), answer: { case: "allowOnce", value: {} } })],
       ["answerQuestion", client.answerQuestion({ workspace, question: feedId("q"), answers: [] })],
+      ["updateQuestionDraft", client.updateQuestionDraft({ workspace, question: feedId("q"), edit: { case: "show", value: { questionText: "q?" } } })],
       ["answerColdGate", client.answerColdGate({ workspace, gate: feedId("g"), choice: { case: "pay", value: {} } })],
       ["createWorkspace", client.createWorkspace({ form: { case: "standard", value: {} } })],
       ["openWorkspace", client.openWorkspace({ workspace })],

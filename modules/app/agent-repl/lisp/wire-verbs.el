@@ -2200,6 +2200,16 @@ was recognized and queued as an act that mints no turn; the visible effect
 arrives on the component streams."
   (agent-repl-wire-verbs--decode-empty "SubmitPromptCommandActed" json))
 
+(defun agent-repl-wire-decode-submit-prompt-ask-answered (json)
+  "Decode SubmitPromptAskAnswered from JSON.  Empty: a plain send made
+while an ask stood was delivered as that ask's typed answer and minted no
+turn; the visible effect is the card's re-push."
+  (agent-repl-wire-verbs--decode-empty "SubmitPromptAskAnswered" json))
+
+(defun agent-repl-wire-decode-submit-prompt-success-ask-answered (json)
+  "Decode SubmitPromptSuccess's `ask_answered' outcome arm from JSON."
+  (agent-repl-wire-decode-submit-prompt-ask-answered json))
+
 (defun agent-repl-wire-decode-submit-prompt-success-turn (json)
   "Decode SubmitPromptSuccess's `turn' outcome arm from JSON."
   (agent-repl-wire-decode-submit-prompt-turn json))
@@ -2218,11 +2228,12 @@ arrives on the component streams."
 
 (defun agent-repl-wire-decode-submit-prompt-success (json)
   "Decode SubmitPromptSuccess from JSON into (:arm ARM :value V).
-All four arms are ANSWERS: a minted turn, a resolved panel, a
-recognized-but-unsupported command, or a session-acting command the daemon
-acted on.  Only the turn arm means there is anything to await."
+All five arms are ANSWERS: a minted turn, a resolved panel, a
+recognized-but-unsupported command, a session-acting command the daemon
+acted on, or a typed answer to a standing ask.  Only the turn arm means
+there is anything to await."
   (let ((message "SubmitPromptSuccess"))
-    (agent-repl-wire-verbs--check-keys message json '(turn commandPanel commandRefused commandActed))
+    (agent-repl-wire-verbs--check-keys message json '(turn commandPanel commandRefused commandActed askAnswered))
     (agent-repl-wire-verbs--decode-oneof
      message "outcome" json
      (list (list 'turn :turn #'agent-repl-wire-decode-submit-prompt-success-turn)
@@ -2231,7 +2242,9 @@ acted on.  Only the turn arm means there is anything to await."
            (list 'commandRefused :command-refused
                  #'agent-repl-wire-decode-submit-prompt-success-command-refused)
            (list 'commandActed :command-acted
-                 #'agent-repl-wire-decode-submit-prompt-success-command-acted)))))
+                 #'agent-repl-wire-decode-submit-prompt-success-command-acted)
+           (list 'askAnswered :ask-answered
+                 #'agent-repl-wire-decode-submit-prompt-success-ask-answered)))))
 
 (defun agent-repl-wire-decode-submit-prompt-refused-merging (json)
   "Decode SubmitPromptRefusedMerging from JSON.  Empty: a merge is in flight
@@ -2358,6 +2371,16 @@ is the vendor's own sentence, never switched on."
   "Decode SubmitPromptError's `model_refused' reason arm from JSON."
   (agent-repl-wire-decode-submit-prompt-model-refused json))
 
+(defun agent-repl-wire-decode-submit-prompt-ask-not-standing (json)
+  "Decode SubmitPromptAskNotStanding from JSON.  Empty: the send was a
+typed answer to a standing ask that settled before the answer reached it,
+so nothing was submitted."
+  (agent-repl-wire-verbs--decode-empty "SubmitPromptAskNotStanding" json))
+
+(defun agent-repl-wire-decode-submit-prompt-error-ask-not-standing (json)
+  "Decode SubmitPromptError's `ask_not_standing' reason arm from JSON."
+  (agent-repl-wire-decode-submit-prompt-ask-not-standing json))
+
 (defun agent-repl-wire-decode-submit-prompt-error-duplicate-submission (json)
   "Decode SubmitPromptError's `duplicate_submission' reason arm from JSON."
   (agent-repl-wire-decode-submit-prompt-duplicate-submission json))
@@ -2407,7 +2430,7 @@ logs, and is never switched on."
 THE ARM IS THE REFUSAL, so an unset reason is a contract breach and an
 arm this codec does not know is refused as an unknown field."
   (let ((message "SubmitPromptError"))
-    (agent-repl-wire-verbs--check-keys message json '(merging unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted feedNotInWorkspace feedUndecodable noSession duplicateSubmission bubbleRefused coldGate modelNotInCatalog modelRefused))
+    (agent-repl-wire-verbs--check-keys message json '(merging unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted feedNotInWorkspace feedUndecodable noSession duplicateSubmission bubbleRefused coldGate modelNotInCatalog modelRefused askNotStanding))
     (list :reason
           (agent-repl-wire-verbs--decode-oneof
            message "reason" json
@@ -2423,7 +2446,8 @@ arm this codec does not know is refused as an unknown field."
          (list 'bubbleRefused :bubble-refused #'agent-repl-wire-decode-submit-prompt-error-bubble-refused)
          (list 'coldGate :cold-gate #'agent-repl-wire-decode-submit-prompt-error-cold-gate)
          (list 'modelNotInCatalog :model-not-in-catalog #'agent-repl-wire-decode-submit-prompt-error-model-not-in-catalog)
-         (list 'modelRefused :model-refused #'agent-repl-wire-decode-submit-prompt-error-model-refused))))))
+         (list 'modelRefused :model-refused #'agent-repl-wire-decode-submit-prompt-error-model-refused)
+         (list 'askNotStanding :ask-not-standing #'agent-repl-wire-decode-submit-prompt-error-ask-not-standing))))))
 
 (defun agent-repl-wire-decode-submit-prompt-response-success (json)
   "Decode SubmitPromptResponse's `success' arm from JSON."
