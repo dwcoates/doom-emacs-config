@@ -145,6 +145,16 @@ function darkThemeBlock(): string {
 }
 
 /**
+ * Each theme's name and the raw text of its token block: the top-level `:root`
+ * for the light theme, the media query's for the dark. The one table every
+ * per-theme token test iterates, so no suite hand-rolls its own pair.
+ */
+const THEME_BLOCKS = [
+  ["light", (): string => declarationsOf(":root") ?? ""],
+  ["dark", darkThemeBlock],
+] as const;
+
+/**
  * The boxes that CLIP while collapsed (owner ruling, 2026-09-15: "remove the
  * scroll from the collapsed bubble views"). Every click-to-expand capped section
  * and the response/prompt bubble's scroll box: no inner scroll while collapsed,
@@ -1862,10 +1872,7 @@ describe("the selected-entry mark (a jump's landing, the feed selection)", () =>
     expect(rule.trim()).toBe("--bubble-bg: var(--selected-bubble-bg) !important;");
   });
 
-  it.each([
-    ["light", () => declarationsOf(":root") ?? ""],
-    ["dark", darkThemeBlock],
-  ] as const)("fills a selected bubble a neutral grey in the %s theme", (_theme, block) => {
+  it.each(THEME_BLOCKS)("fills a selected bubble a neutral grey in the %s theme", (_theme, block) => {
     // Arrange / Act
     const [r, g, b] = rgbOf(block(), "--selected-bubble-bg");
 
@@ -1873,10 +1880,7 @@ describe("the selected-entry mark (a jump's landing, the feed selection)", () =>
     expect(Math.max(r, g, b) - Math.min(r, g, b)).toBeLessThanOrEqual(16);
   });
 
-  it.each([
-    ["light", () => declarationsOf(":root") ?? ""],
-    ["dark", darkThemeBlock],
-  ] as const)("fills a selected bubble a little lighter than a response in the %s theme", (_theme, block) => {
+  it.each(THEME_BLOCKS)("fills a selected bubble a little lighter than a response in the %s theme", (_theme, block) => {
     // Arrange
     const css = block();
 
@@ -2792,10 +2796,7 @@ describe("the expanded response's eggshell border", () => {
     expect(borders).toEqual([null, null]);
   });
 
-  it.each([
-    ["light", () => declarationsOf(":root") ?? ""],
-    ["dark", darkThemeBlock],
-  ] as const)("defines the eggshell token in the %s theme", (_theme, block) => {
+  it.each(THEME_BLOCKS)("defines the eggshell token in the %s theme", (_theme, block) => {
     // Arrange / Act
     const declared = block();
     // Assert
@@ -3242,10 +3243,7 @@ describe("the held prompt's fill: the response bubble's own token", () => {
     expect(stylesheet).not.toMatch(/--held-prompt-bg\s*:/);
   });
 
-  it.each([
-    ["light", () => declarationsOf(":root") ?? ""],
-    ["dark", () => darkThemeBlock()],
-  ])("resolves to the same RGB as --assistant in the %s theme", (_theme, block) => {
+  it.each(THEME_BLOCKS)("resolves to the same RGB as --assistant in the %s theme", (_theme, block) => {
     // Arrange / Act
     const assistant = rgbOf(block(), "--assistant");
     // Assert — the held fill IS --assistant, so they are the same color by
@@ -4039,5 +4037,28 @@ describe("the classic diff", () => {
 
     // Assert
     expect(got).toBeDefined();
+  });
+});
+
+describe("THEME_BLOCKS, the per-theme token table", () => {
+  it.each([
+    ["light", "#ffffff"],
+    ["dark", "#111318"],
+  ] as const)("hands the %s theme its own token block", (theme, bg) => {
+    // Arrange
+    const block = THEME_BLOCKS.find(([name]) => name === theme)?.[1];
+    // Act
+    const declared = block?.() ?? "";
+    // Assert
+    expect(declared).toMatch(new RegExp(`--bg:\\s*${bg};`));
+  });
+
+  it("is the only per-theme table in this suite", () => {
+    // Arrange
+    const source = readFileSync(fileURLToPath(import.meta.url), "utf8");
+    // Act — a hand-rolled pair repeats the light entry outside the helper.
+    const lightEntries = source.match(/\["light", \(\)(?:: string)? => declarationsOf\(":root"\)/g) ?? [];
+    // Assert
+    expect(lightEntries).toHaveLength(1);
   });
 });
