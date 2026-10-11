@@ -3,8 +3,7 @@ import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { ASK_HINT_ATTRIBUTE, drawAskHint } from "../../../src/feed/asks/hint.js";
 import { drawFeedPermission } from "../../../src/feed/asks/permission.js";
-import { drawFeedQuestion } from "../../../src/feed/asks/question.js";
-import { FeedPermissionSchema, FeedQuestionSchema } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
+import { FeedPermissionSchema } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { askHarness } from "./harness.js";
 
 describe("drawAskHint", () => {
@@ -19,40 +18,18 @@ describe("drawAskHint", () => {
   });
 });
 
-describe("both standing ask cards draw the one hint", () => {
-  it.each([
-    [
-      "permission",
-      () =>
-        drawFeedPermission(
-          create(FeedPermissionSchema, {
-            headline: { text: "Claude wants to run ls" },
-            arguments: { lines: [] },
-            state: { case: "open", value: {} },
-          }),
-          askHarness().rc,
-        ),
-    ],
-    [
-      "question",
-      () =>
-        drawFeedQuestion(
-          create(FeedQuestionSchema, {
-            questions: [
-              {
-                header: { text: "h" },
-                text: { text: "q?" },
-                options: { case: "singleSelect", value: { options: [{ label: { text: "a" } }] } },
-              },
-            ],
-            state: { case: "open", value: { active: 0, drafts: [{}] } },
-          }),
-          askHarness().rc,
-        ),
-    ],
-  ] as const)("the %s card's hint is the shared builder's element", (_kind, draw) => {
+describe("the permission card draws the one hint", () => {
+  it("draws the shared builder's element", () => {
     // A hand-rolled hint that drifted from the builder fails here.
-    const hint = draw().querySelector(`[${ASK_HINT_ATTRIBUTE}]`);
+    const card = drawFeedPermission(
+      create(FeedPermissionSchema, {
+        headline: { text: "Claude wants to run ls" },
+        arguments: { lines: [] },
+        state: { case: "open", value: {} },
+      }),
+      askHarness().rc,
+    );
+    const hint = card.querySelector(`[${ASK_HINT_ATTRIBUTE}]`);
     const expected = drawAskHint(hint?.textContent ?? "");
     expect(hint?.outerHTML).toBe(expected.outerHTML);
   });

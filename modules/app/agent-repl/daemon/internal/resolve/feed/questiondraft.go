@@ -3,6 +3,10 @@ package feed
 import (
 	"errors"
 	"fmt"
+	"regexp"
+	"strconv"
+	"strings"
+	"unicode"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -36,6 +40,8 @@ const (
 	// EditConfirm confirms a multi-select: its ticks are its answer.
 	EditConfirm
 	// EditType answers the ACTIVE question with typed text (an editor send).
+	// A send of ONLY option numbers (optionNumbers) picks those options
+	// instead: the card numbers them from 1, in the served order.
 	EditType
 )
 
@@ -165,8 +171,10 @@ func (r *resolver) EditQuestionDraft(ws ids.WorkspaceID, ask string, edit Questi
 		}
 	}
 	r.publishOpenQuestion(s, served)
+	_, numbered := optionNumbers(edit.Text)
 	log.Info("daemon.feed.question_draft", "applied a draft edit", dlog.Context{
 		"question": index, "active": served.active, "deliver": outcome.Deliver != nil,
+		"by_number": edit.Kind == EditType && numbered,
 	})
 	return outcome, nil
 }
@@ -251,6 +259,9 @@ func (r *resolver) addressedFeedKey(s *wsState, target *feedid.Ref) (string, boo
 // question it touched.
 func (r *resolver) applyQuestionEdit(served *questionState, edit QuestionEdit) (int, error) {
 	if edit.Kind == EditType {
+		if numbers, ok := optionNumbers(edit.Text); ok {
+			return served.active, pickByNumber(served, edit.Text, numbers)
+		}
 		draft := served.drafts[served.active]
 		if served.batch.GetQuestions()[served.active].GetSingleSelect() != nil {
 			// A typed answer to a single-select REPLACES the pick: it is the
@@ -308,6 +319,51 @@ func (r *resolver) applyQuestionEdit(served *questionState, edit QuestionEdit) (
 	return index, nil
 }
 
+// optionNumbersPattern is a send of only option numbers: one, or several
+// delimited by whitespace or a comma (with or without whitespace after it).
+var optionNumbersPattern = regexp.MustCompile(`^[0-9]+(?:(?:,\s*|\s+)[0-9]+)*$`)
+
+// optionNumbers reads TEXT, trimmed, as a send of option numbers and answers
+// them in the order typed. Anything else in the send makes it typed text.
+func optionNumbers(text string) ([]string, bool) {
+	trimmed := strings.TrimSpace(text)
+	if !optionNumbersPattern.MatchString(trimmed) {
+		return nil, false
+	}
+	return strings.FieldsFunc(trimmed, func(r rune) bool {
+		return r == ',' || unicode.IsSpace(r)
+	}), true
+}
+
+// pickByNumber answers the ACTIVE question with the options NUMBERS name,
+// 1-based in the served order: a single-select's one pick, or a multi-select's
+// whole set of ticks. Either way the send IS the answer, so it replaces any
+// typed text and answers the question. Every number is checked before the
+// draft is touched, so a refused send leaves the draft as it was.
+func pickByNumber(served *questionState, text string, numbers []string) error {
+	asked := served.batch.GetQuestions()[served.active]
+	labels := servedLabels(asked)
+	picked := map[string]bool{}
+	for _, number := range numbers {
+		n, err := strconv.Atoi(number)
+		if err != nil || n < 1 || n > len(labels) {
+			return &UnservedQuestionValueError{
+				Text: text,
+				Why:  fmt.Sprintf("the question offers no option numbered %s of %d", number, len(labels)),
+			}
+		}
+		picked[labels[n-1]] = true
+	}
+	if asked.GetSingleSelect() != nil && len(picked) > 1 {
+		return &UnservedQuestionValueError{Text: text, Why: "a single-select question takes one option number"}
+	}
+	draft := served.drafts[served.active]
+	draft.Chosen = inServedOrder(labels, picked)
+	draft.OtherText = nil
+	draft.Answered = true
+	return nil
+}
+
 // servedQuestion finds a question of the batch by its served text.
 func servedQuestion(batch *conversationv1.AgentQuestionBatch, text string) (int, *conversationv1.AgentQuestionAsked, error) {
 	for i, asked := range batch.GetQuestions() {
@@ -349,9 +405,16 @@ func toggleLabel(served, chosen []string, label string) []string {
 		ticked[c] = true
 	}
 	ticked[label] = !ticked[label]
+	return inServedOrder(served, ticked)
+}
+
+// inServedOrder answers the SERVED labels that are set in held, in the served
+// order: the one way a question's chosen labels are ordered, so a draft never
+// depends on the order of the clicks or of the typed numbers.
+func inServedOrder(served []string, held map[string]bool) []string {
 	var out []string
 	for _, l := range served {
-		if ticked[l] {
+		if held[l] {
 			out = append(out, l)
 		}
 	}

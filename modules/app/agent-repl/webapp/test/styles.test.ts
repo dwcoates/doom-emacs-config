@@ -4151,3 +4151,56 @@ describe("THEME_BLOCKS, the per-theme token table", () => {
     expect(lightEntries).toHaveLength(1);
   });
 });
+
+/**
+ * THE ASK CARDS' SQUARE CONTROLS (owner ruling, 2026-10-11): a question's
+ * options and a settled ask's verdict badges wear the feed tab's corner, and
+ * the verdict badges read at the given answer's size.
+ */
+describe("the ask cards' square controls", () => {
+  /** The cascaded PROPERTY of a CLASS element placed inside a PARENT element. */
+  function cascadedIn(parentClass: string, childClass: string, property: string): string {
+    const parent = document.createElement("div");
+    parent.className = parentClass;
+    const child = document.createElement("span");
+    child.className = childClass;
+    parent.append(child);
+    document.body.replaceChildren(parent);
+    return cascadedValue(child, property);
+  }
+
+  it.each([
+    ["a feed tab", "feed-group-tab-strip", "feed-group-tab"],
+    ["a merge tab", "merge-tabs", "merge-tab"],
+    ["a question option", "q-opts", "q-opt"],
+    ["a question verdict's header chip", "q-verdict", "badge q-chip"],
+    ["a permission verdict's badge", "perm-verdict", "badge ok"],
+  ])("rounds %s by the one tab corner", (_name, parentClass, childClass) => {
+    // Arrange
+    const teardown = installStylesheet();
+    // Act
+    const radius = cascadedIn(parentClass, childClass, "border-radius");
+    // Assert
+    expect(radius).toBe("var(--tab-radius)");
+    teardown();
+  });
+
+  it.each([
+    ["the given answers", "tool-card", "q-verdicts"],
+    ["a question verdict's header chip", "q-verdict", "badge q-chip"],
+    ["a permission verdict's badge", "perm-verdict", "badge err"],
+  ])("sizes %s by the one settled-answer size", (_name, parentClass, childClass) => {
+    // Arrange
+    const teardown = installStylesheet();
+    // Act
+    const size = cascadedIn(parentClass, childClass, "font-size");
+    // Assert
+    expect(size).toBe("var(--ask-verdict-size)");
+    teardown();
+  });
+
+  it("declares the tab corner square and the settled-answer size once", () => {
+    // Arrange / Act / Assert
+    expect([stylesheet.match(/--tab-radius: 0\.25rem;/g)?.length, stylesheet.match(/--ask-verdict-size: 0\.85rem;/g)?.length]).toEqual([1, 1]);
+  });
+});

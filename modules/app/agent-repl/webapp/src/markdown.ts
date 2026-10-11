@@ -74,6 +74,15 @@ export function inline(escaped: string): string {
 }
 
 /**
+ * Draw TEXT into EL as inline markdown: escaped first, then given `inline`'s
+ * markup. The one way a short served string (a title, a question, an option
+ * label) is drawn as a response bubble draws its inline markup.
+ */
+export function setInlineMarkdown(el: HTMLElement, text: string): void {
+  el.innerHTML = inline(escapeHtml(text));
+}
+
+/**
  * Put the code spans `inline` lifted out back into TEXT. With LINK, a span
  * that is wholly a `~/` path (`codeSpanFileHref`) is wrapped in a file-link
  * anchor, as the markdown-it pipeline's `code-span-file-link` rule does.
