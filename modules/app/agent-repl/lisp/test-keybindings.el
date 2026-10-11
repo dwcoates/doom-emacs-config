@@ -288,13 +288,32 @@ walked for KEY followed by its #\\='COMMAND."
   (should (eq (agent-repl-test-keybindings--leader-prefix-binding "TAB" "H")
               'agent-repl-show-hidden-workspace)))
 
-(ert-deftest agent-repl-test-keybindings-leaves-m-0-to-doom ()
-  "`M-0' is the one numeral the module does not claim."
-  (should-not (lookup-key agent-repl-workspace-numerals-mode-map (kbd "M-0"))))
+(ert-deftest agent-repl-test-keybindings-m-0-switches-to-the-last-tab ()
+  "`M-0' runs the last-tab command, not Doom's persp-indexed final switch."
+  (should (eq (lookup-key agent-repl-workspace-numerals-mode-map (kbd "M-0"))
+              'agent-repl-switch-to-last-workspace)))
 
-(ert-deftest agent-repl-test-keybindings-leaves-s-0-to-doom ()
-  "`s-0' stays Doom's too: the final-workspace chord needs no slot index."
-  (should-not (lookup-key agent-repl-workspace-numerals-mode-map (kbd "s-0"))))
+(ert-deftest agent-repl-test-keybindings-s-0-matches-m-0 ()
+  "Command-0 (`s-0\=') runs the SAME command as Option-0 (`M-0\=')."
+  (should (eq (lookup-key agent-repl-workspace-numerals-mode-map (kbd "s-0"))
+              (lookup-key agent-repl-workspace-numerals-mode-map (kbd "M-0")))))
+
+(ert-deftest agent-repl-test-keybindings-doom-switch-to-final-is-remapped ()
+  "Doom's `+workspace/switch-to-final\=', wherever bound, runs the last-tab command."
+  (should (eq (lookup-key agent-repl-workspace-numerals-mode-map
+                          [remap +workspace/switch-to-final])
+              'agent-repl-switch-to-last-workspace)))
+
+(ert-deftest agent-repl-test-keybindings-m-0-shadows-dooms-own ()
+  "`M-0' reaches OUR command even with Doom's final switch in `global-map'."
+  (let ((saved (current-global-map)))
+    (unwind-protect
+        (progn
+          (use-global-map (copy-keymap saved))
+          (define-key (current-global-map) (kbd "M-0") '+workspace/switch-to-final)
+          (agent-repl-workspace-numerals-mode 1)
+          (should (eq (key-binding (kbd "M-0")) 'agent-repl-switch-to-last-workspace)))
+      (use-global-map saved))))
 
 ;;;; ---- The helpers a binding needs ----
 
