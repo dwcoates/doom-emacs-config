@@ -311,7 +311,6 @@ func (v *verbs) bindResolvers(log dlog.Logger, id wsm.WorkspaceID, dir string) e
 	}{
 		{"footer", v.deps.Footer.SetWorkspaceDir},
 		{"topbar", v.deps.Topbar.SetWorkspaceDir},
-		{"holds", v.deps.Holds.SetWorkspaceDir},
 	}
 	for _, b := range binds {
 		if err := b.bind(id, dir); err != nil {

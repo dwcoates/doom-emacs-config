@@ -39,7 +39,6 @@ import (
 	"claude-repld/internal/publish"
 	"claude-repld/internal/resolve/feed"
 	"claude-repld/internal/resolve/footer"
-	"claude-repld/internal/resolve/holds"
 	"claude-repld/internal/resolve/sidebar"
 	"claude-repld/internal/resolve/topbar"
 	"claude-repld/internal/rollout"
@@ -110,8 +109,6 @@ type Deps struct {
 	Topbar topbar.Resolver
 	// Sidebar backs WatchWorkspaceRoster, the one editor-global stream.
 	Sidebar sidebar.Resolver
-	// Holds backs WatchDaemonHolds.
-	Holds holds.Resolver
 	// LoudFaults is the daemon's standing loud faults, the `faults_standing`
 	// state every Emacs WatchDaemon stream subscribes to (a webview's never
 	// does: its topbar and footer views carry the same faults).
@@ -394,8 +391,6 @@ func New(deps Deps) (Server, error) {
 		return nil, missing("a topbar resolver")
 	case deps.Sidebar == nil:
 		return nil, missing("a sidebar resolver")
-	case deps.Holds == nil:
-		return nil, missing("a holds resolver")
 	case deps.LoudFaults == nil:
 		return nil, missing("the standing loud faults")
 	case deps.Focus == nil:

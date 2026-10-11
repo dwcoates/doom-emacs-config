@@ -216,7 +216,7 @@ func TestInterruptOnAQueuedWorkspaceRaisesTheDequeueHeldOffer(t *testing.T) {
 	}
 
 	// Assert: the dequeue offer is raised.
-	got := awaitView(t, behind, holds, "the merge-dequeue held offer", func(tray *frontendv1.DaemonHoldTray) bool {
+	got := awaitView(t, behind, holds, "the merge-dequeue held offer", func(tray *frontendv1.FeedHeld) bool {
 		return mergeDequeueOffer(tray) != nil
 	})
 	if mergeDequeueOffer(got) == nil {
@@ -236,7 +236,7 @@ func TestAnswerHeldOfferReleaseEvictsTheQueuedMerge(t *testing.T) {
 	})); err != nil {
 		t.Fatalf("Interrupt(turn) = error %v, want a success", err)
 	}
-	awaitView(t, behind, holds, "the merge-dequeue held offer", func(tray *frontendv1.DaemonHoldTray) bool {
+	awaitView(t, behind, holds, "the merge-dequeue held offer", func(tray *frontendv1.FeedHeld) bool {
 		return mergeDequeueOffer(tray) != nil
 	})
 
@@ -273,7 +273,7 @@ func TestAnswerHeldOfferKeepKeepsTheQueuedMerge(t *testing.T) {
 	})); err != nil {
 		t.Fatalf("Interrupt(turn) = error %v, want a success", err)
 	}
-	awaitView(t, behind, holds, "the merge-dequeue held offer", func(tray *frontendv1.DaemonHoldTray) bool {
+	awaitView(t, behind, holds, "the merge-dequeue held offer", func(tray *frontendv1.FeedHeld) bool {
 		return mergeDequeueOffer(tray) != nil
 	})
 
@@ -290,7 +290,7 @@ func TestAnswerHeldOfferKeepKeepsTheQueuedMerge(t *testing.T) {
 		t.Fatalf("AnswerHeldOffer(keep) = %v, %v, want a success", resp.Msg, err)
 	}
 	holds2 := behind.d.WatchHolds(behind.ws)
-	got := awaitView(t, behind, holds2, "the tray with the offer cleared", func(tray *frontendv1.DaemonHoldTray) bool {
+	got := awaitView(t, behind, holds2, "the tray with the offer cleared", func(tray *frontendv1.FeedHeld) bool {
 		return mergeDequeueOffer(tray) == nil
 	})
 	if mergeDequeueOffer(got) != nil {
@@ -1288,7 +1288,7 @@ func mergeBranchOf(t *testing.T, ws *workspacev1.WorkspaceRef) string {
 }
 
 // mergeDequeueOffer finds the merge_dequeue held offer, if standing.
-func mergeDequeueOffer(tray *frontendv1.DaemonHoldTray) *frontendv1.HeldOffer {
+func mergeDequeueOffer(tray *frontendv1.FeedHeld) *frontendv1.HeldOffer {
 	for _, item := range tray.GetItems() {
 		if offer := item.GetOffer(); offer.GetMergeDequeue() != nil {
 			return offer

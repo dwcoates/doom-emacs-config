@@ -29,7 +29,6 @@ import (
 	"claude-repld/internal/prompts"
 	"claude-repld/internal/resolve/feed"
 	"claude-repld/internal/resolve/footer"
-	"claude-repld/internal/resolve/holds"
 	"claude-repld/internal/resolve/sidebar"
 	"claude-repld/internal/resolve/topbar"
 	"claude-repld/internal/rollout"
@@ -2054,7 +2053,7 @@ func newFixture(t *testing.T) *fixture {
 	verbs, err := New(Deps{
 		DB: f.db, Git: f.git, Accounts: f.account, Queue: f.queue, RevivalTurns: f.queue, Merge: f.merge,
 		Rollout: f.rollout, Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{parked: &f.topbarParked, coldGates: &f.topbarColdGates, accounts: &f.topbarAccounts, effortSettings: &f.topbarEffortSettings, warnings: &f.topbarWarnings}, Browser: f.browser,
-		Sidebar: f.sidebar, Holds: stubHolds{}, Host: f.host, Banners: f.banners, Sessions: f.fleet,
+		Sidebar: f.sidebar, Host: f.host, Banners: f.banners, Sessions: f.fleet,
 		Headless:   f.headless,
 		Health:     f.health,
 		PromptsDir: "/prompts", CheckoutRoot: fixtureCheckoutRoot, HomeDir: f.home, Log: f.log,
@@ -2185,7 +2184,7 @@ func (f *fixture) workspace(id ids.WorkspaceID, dir string) wsm.Workspace {
 	return ws
 }
 
-// stubTopbar and stubHolds satisfy the resolver seams the verbs hold but never
+// stubTopbar satisfies the resolver seam the verbs hold but never
 // call, so a test that does call one nil-panics rather than passing quietly.
 type stubTopbar struct {
 	topbar.Resolver
@@ -2205,7 +2204,6 @@ type stubTopbar struct {
 	// nil-panics, as every seam a test did not wire does.
 	window *int64
 }
-type stubHolds struct{ holds.Resolver }
 
 func (s stubTopbar) SetColdGate(_ ids.WorkspaceID, gate topbar.ColdGate) {
 	if s.coldGates != nil {
@@ -2261,7 +2259,6 @@ func (s stubTopbar) RaiseWarning(_ ids.WorkspaceID, key, line string) {
 		*s.warnings = append(*s.warnings, key+": "+line)
 	}
 }
-func (stubHolds) SetWorkspaceDir(ids.WorkspaceID, string) error { return nil }
 
 // asRefusal fails the test unless err is a refusal naming arm.
 func asRefusal(t *testing.T, err error, arm string) *Refusal {

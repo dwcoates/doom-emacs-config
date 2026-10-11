@@ -580,8 +580,8 @@ around anything.
   `sessionwatcher.watcher` (per workspace, unwatched at `Close`),
   `promptqueue.drain` and `promptqueue.verdicts` (per workspace, registered
   when the queue first resolves the workspace's logger), and the daemon-wide
-  `promptqueue.queue` and `feed.resolver`. The footer, topbar, sidebar and
-  holds resolvers are only reached under the watcher's mutex or the delivery
+  `promptqueue.queue` and `feed.resolver`. The footer, topbar and sidebar
+  resolvers are only reached under the watcher's mutex or the delivery
   lock, so a wedge there reports as those. `workspace.Fleet`'s start gate is
   NOT watched: it is held across a whole bring-up, up to the 60s
   `StartSession` bound, legitimately. A new hot lock on the prompt or feed path

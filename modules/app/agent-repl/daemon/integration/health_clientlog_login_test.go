@@ -1087,7 +1087,7 @@ func TestASubmitPromptRequiringClassificationUnderNoFakeIsHeldForTurnEnd(t *test
 	f.submit("start the work", "k-running", origin)
 	f.shim.ExpectStartTurn()
 	holds := f.d.WatchHolds(f.ws)
-	awaitView(t, f, holds, "the initial empty tray", func(tray *frontendv1.DaemonHoldTray) bool {
+	awaitView(t, f, holds, "the initial empty tray", func(tray *frontendv1.FeedHeld) bool {
 		return len(tray.GetItems()) == 0
 	})
 

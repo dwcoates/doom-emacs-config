@@ -187,7 +187,7 @@ func TestARemovalCarriesTheRemovedRowsKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Tail: %v", err)
 	}
-	rows := tail.Rows(ctx)
+	rows := tailRows(ctx, tail)
 
 	// Act.
 	h.resolver.mu.Lock()
@@ -250,7 +250,7 @@ func TestALateRowIsPushedWithTheKeyOfItsTruePlace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Tail: %v", err)
 	}
-	rows := tail.Rows(ctx)
+	rows := tailRows(ctx, tail)
 
 	// Act.
 	h.sendAt(settledResponse("late-1330", "written at 13:30"), 1330)

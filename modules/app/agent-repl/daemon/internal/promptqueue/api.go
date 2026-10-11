@@ -388,8 +388,9 @@ type Deps struct {
 	// daemon's acceptance of a turn — because nothing on the shim's streams
 	// states it, and a roster left to infer it reads `ready` while a turn runs.
 	Sidebar sidebar.Resolver
-	// Holds is the tray the queue publishes its holds to.
-	Holds holds.Resolver
+	// Holds is the feed's held section, which the queue states its standing
+	// holds and edit claim to.
+	Holds holds.Sink
 	// Client resolves a workspace's shim client; the queue never dials one
 	// itself.
 	Client ClientFunc

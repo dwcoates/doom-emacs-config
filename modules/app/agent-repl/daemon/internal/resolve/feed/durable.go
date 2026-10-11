@@ -78,15 +78,15 @@ func (r *resolver) restoreDurable(s *wsState) {
 			log.Error(opDurable, "a durable row's id names no feed and is drawn nowhere", fields)
 			continue
 		}
+		rank := rowRank{plane: rowPlane(stored.Plane), key: stored.OrderKey}
+		// A restored merge head is repainted with the daemon's default unless
+		// the reader folded it (mergefold.go).
+		r.resettleRestoredMergeFold(s, row)
 		if err := reserveOrder(r.feed(s, ref.Feed), stored.OrderKey); err != nil {
 			fields["cause"] = err.Error()
 			log.Error(opDurable, "a durable row's order key cannot be read and the row is drawn nowhere", fields)
 			continue
 		}
-		rank := rowRank{plane: rowPlane(stored.Plane), key: stored.OrderKey}
-		// A restored merge head is repainted with the daemon's default unless
-		// the reader folded it (mergefold.go).
-		r.resettleRestoredMergeFold(s, row)
 		r.upsert(s, placement{feed: ref.Feed, inherit: &rank}, row, true)
 		drawn++
 	}

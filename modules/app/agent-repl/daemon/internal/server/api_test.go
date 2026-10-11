@@ -38,7 +38,7 @@ func TestNewRefusesMissingLoudFaults(t *testing.T) {
 		Drain: h.Drain, Rollout: h.Rollout, Deploy: h.Deployer, Health: h.Health, Login: h.Login,
 		Ownership: h.Ownership, SuccessorAddress: func() string { return "" },
 		Feed: h.Feed, Footer: h.Footer, Topbar: h.Topbar, Sidebar: h.Sidebar,
-		Holds: h.Holds, WebappDist: h.WebappDist, ImageOrigin: http.NotFoundHandler(), Log: h.Surfaces,
+		WebappDist: h.WebappDist, ImageOrigin: http.NotFoundHandler(), Log: h.Surfaces,
 	}
 
 	// Act.
@@ -60,7 +60,7 @@ func TestNewRefusesAMissingWebappDist(t *testing.T) {
 		Drain: h.Drain, Rollout: h.Rollout, Health: h.Health, Login: h.Login,
 		Ownership: h.Ownership, SuccessorAddress: func() string { return "" },
 		Feed: h.Feed, Footer: h.Footer, Topbar: h.Topbar, Sidebar: h.Sidebar,
-		Holds: h.Holds, LoudFaults: &h.LoudFaults, Focus: h.Focus, Log: h.Surfaces,
+		LoudFaults: &h.LoudFaults, Focus: h.Focus, Log: h.Surfaces,
 	}
 
 	// Act.
