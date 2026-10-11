@@ -504,9 +504,9 @@ func (i *ingress) retargetParent(ctx context.Context, log dlog.Logger, ws ids.Wo
 	if err != nil {
 		return nil, fmt.Errorf("read the repository registry: %w", err)
 	}
-	repo, found := wsm.RepositoryWithID(repositories, record.Repo)
-	if !found {
-		return nil, fmt.Errorf("workspace %q names repository %q, which the registry does not hold", ws, record.Repo)
+	repo, err := workspaceRepository(repositories, record, record.Dir)
+	if err != nil {
+		return nil, err
 	}
 	parent, main, err := i.parentAt(ctx, dir, repo)
 	var unregistered *unregisteredParentError
