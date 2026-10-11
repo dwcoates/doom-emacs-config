@@ -287,6 +287,11 @@ walked for KEY followed by its #\\='COMMAND."
   (should (eq (agent-repl-test-keybindings--leader-prefix-binding "TAB" "h")
               'agent-repl-hide-workspace)))
 
+(ert-deftest agent-repl-test-keybindings-spc-tab-p-is-the-place-swap ()
+  "`SPC TAB p\=' swaps the current workspace's place with a drawn tab."
+  (should (eq (agent-repl-test-keybindings--leader-prefix-binding "TAB" "p")
+              'agent-repl-workspace-place)))
+
 (ert-deftest agent-repl-test-keybindings-spc-tab-shift-h-shows-a-hidden-workspace ()
   "`SPC TAB H\=' picks a hidden workspace, shows it again and switches to it."
   (should (eq (agent-repl-test-keybindings--leader-prefix-binding "TAB" "H")

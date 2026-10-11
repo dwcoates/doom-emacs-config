@@ -220,6 +220,8 @@ answers a bare success, which is what almost every verb's success is."
                  (agent-repl-test-verbs--stub :set-priority))
                 ((symbol-function 'agent-repl-rpc-set-workspace-hidden)
                  (agent-repl-test-verbs--stub :set-hidden))
+                ((symbol-function 'agent-repl-rpc-swap-workspace-places)
+                 (agent-repl-test-verbs--stub :swap-places))
                 ((symbol-function 'agent-repl-rpc-update-shutdown-schedule)
                  (agent-repl-test-verbs--stub :shutdown-schedule))
                 ((symbol-function 'agent-repl-rpc-update-merge-queue)
@@ -827,6 +829,62 @@ A reader that hand-rolls the defaulting reads the view a second time and fails h
         (should (member "elisp.verbs.show-hidden-none" logged))
         (should-not agent-repl-test-verbs--sent)
         (should-not agent-repl-test-verbs--switch-requests)))))
+
+;;;; ---- SwapWorkspacePlaces ----
+
+(defmacro agent-repl-test-verbs--with-two-refs (&rest body)
+  "Run BODY with `ws-one' and `ws-two' resolving to two distinct refs."
+  (declare (indent 0))
+  `(cl-letf (((symbol-function 'agent-repl-host-ref)
+              (lambda (ws) (agent-repl-test-verbs--ref (concat "id-" ws) (concat "/w/" ws)))))
+     ,@body))
+
+(ert-deftest agent-repl-verbs-swap-places-carries-both-refs ()
+  "SwapWorkspacePlaces names the current workspace and the other by ref."
+  (agent-repl-test-verbs--with nil
+    (agent-repl-test-verbs--with-two-refs
+      ;; Act.
+      (agent-repl-verb-swap-places "ws-one" "ws-two")
+      ;; Assert.
+      (let ((request (agent-repl-test-verbs--request :swap-places)))
+        (should (equal (plist-get request :workspace) (agent-repl-test-verbs--ref "id-ws-one" "/w/ws-one")))
+        (should (equal (plist-get request :other) (agent-repl-test-verbs--ref "id-ws-two" "/w/ws-two")))))))
+
+(ert-deftest agent-repl-verbs-swap-places-success-says-so ()
+  "A swap the daemon made is reported to the user."
+  (agent-repl-test-verbs--with nil
+    (agent-repl-test-verbs--with-two-refs
+      ;; Act.
+      (agent-repl-verb-swap-places "ws-one" "ws-two")
+      ;; Assert.
+      (should (agent-repl-test-verbs--messaged-p "ws-one and ws-two swapped places")))))
+
+(ert-deftest agent-repl-verbs-swap-places-not-siblings-is-an-ordinary-answer ()
+  "A not_siblings refusal is said plainly and recorded at INFO, never as a
+generic refusal."
+  (agent-repl-test-verbs--with
+      '((:swap-places . (:response (:arm :error :value (:cause (:arm :not-siblings :value nil))))))
+    (agent-repl-test-verbs--with-two-refs
+      (let (logged)
+        (cl-letf (((symbol-function 'agent-repl--info)
+                   (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+          ;; Act.
+          (agent-repl-verb-swap-places "ws-one" "ws-two"))
+        ;; Assert.
+        (should (agent-repl-test-verbs--messaged-p "have different parents"))
+        (should-not (agent-repl-test-verbs--messaged-p "swap-places refused"))
+        (should (cl-some (lambda (m) (string-prefix-p "elisp.verbs.swap-places-not-siblings" m)) logged))))))
+
+(ert-deftest agent-repl-verbs-swap-places-other-refusals-take-the-generic-path ()
+  "Every refusal but not_siblings is reported by the generic refusal path."
+  (agent-repl-test-verbs--with
+      '((:swap-places . (:response (:arm :error :value (:cause (:arm :unknown-workspace
+                                                                    :value (:workspace (:id "id-ws-two" :dir "/w/ws-two"))))))))
+    (agent-repl-test-verbs--with-two-refs
+      ;; Act.
+      (agent-repl-verb-swap-places "ws-one" "ws-two")
+      ;; Assert.
+      (should (agent-repl-test-verbs--messaged-p "swap-places refused: unknown-workspace")))))
 
 ;;;; ---- Ack handling: one test per outcome ----
 

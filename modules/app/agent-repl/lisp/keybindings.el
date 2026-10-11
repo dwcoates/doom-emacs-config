@@ -139,7 +139,8 @@ the module."
        :desc "Hide current workspace (off the tab bar)" "h" #'agent-repl-hide-workspace
        :desc "Show a hidden workspace and switch to it" "H" #'agent-repl-show-hidden-workspace
        :desc "Merge current workspace (enqueue; C-u keeps it open)" "M" #'agent-repl-merge-workspace
-       :desc "Open most recent workspace" "R" #'agent-repl-open-most-recent-workspace))
+       :desc "Open most recent workspace" "R" #'agent-repl-open-most-recent-workspace
+       :desc "Swap places with tab (digit, 0 = 10)" "p" #'agent-repl-workspace-place))
 
 ;; Tabs follow ROSTER ORDER strictly (the resolver orders them, priority
 ;; included), so these two are navigation over a given order and never a
