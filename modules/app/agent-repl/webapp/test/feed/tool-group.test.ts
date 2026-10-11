@@ -8,6 +8,7 @@ import { orderFor } from "../feed-order.js";
 import {
   FEED_GROUP_CLASS,
   GROUP_TAB_MEMBER_ATTRIBUTE,
+  STRIP_HEIGHT_PROPERTY,
   activateGroupedMember,
   createToolGroupStore,
   groupGlyph,
@@ -22,6 +23,7 @@ import {
   toolCallRow,
   userPromptRow,
 } from "./harness.js";
+import { fireResize } from "../resize-observer.js";
 
 /** A FeedRow carrying one activity unit, by arm name, with an empty value. */
 function activityRow(id: string, unit: string): FeedRow {
@@ -253,6 +255,54 @@ describe("createToolGroupStore", () => {
   });
 });
 
+describe("the strip's measured height", () => {
+  /** The group's strip, and the `.feed-group` it sizes. */
+  function partsOf(wrapper: HTMLElement): { group: HTMLElement; strip: HTMLElement } {
+    const group = wrapper.querySelector<HTMLElement>(`.${FEED_GROUP_CLASS}`);
+    const strip = wrapper.querySelector<HTMLElement>(".feed-group-strip");
+    if (group === null || strip === null) throw new Error("the group drew no strip");
+    return { group, strip };
+  }
+
+  it("carries the strip's height onto the group when the strip resizes", () => {
+    // Arrange: a strip laid out 18px tall (jsdom performs no layout).
+    const store = createToolGroupStore();
+    const wrapper = store.arrange(groupKey("tool:Bash", "a"), "tool:Bash", [member("a"), member("b")]);
+    const { group, strip } = partsOf(wrapper);
+    Object.defineProperty(strip, "offsetHeight", { configurable: true, value: 18 });
+    // Act
+    fireResize(strip);
+    // Assert
+    expect(group.style.getPropertyValue(STRIP_HEIGHT_PROPERTY)).toBe("18px");
+  });
+
+  it("follows the strip when its tabs wrap onto another row", () => {
+    // Arrange: a measured strip that then grows to two rows.
+    const store = createToolGroupStore();
+    const wrapper = store.arrange(groupKey("tool:Bash", "a"), "tool:Bash", [member("a"), member("b")]);
+    const { group, strip } = partsOf(wrapper);
+    Object.defineProperty(strip, "offsetHeight", { configurable: true, value: 18 });
+    fireResize(strip);
+    Object.defineProperty(strip, "offsetHeight", { configurable: true, value: 36 });
+    // Act
+    fireResize(strip);
+    // Assert
+    expect(group.style.getPropertyValue(STRIP_HEIGHT_PROPERTY)).toBe("36px");
+  });
+
+  it("stops watching the strip once the group is disposed", () => {
+    // Arrange: a group dropped by a pass that did not place it.
+    const store = createToolGroupStore();
+    const wrapper = store.arrange(groupKey("tool:Bash", "a"), "tool:Bash", [member("a"), member("b")]);
+    const { strip } = partsOf(wrapper);
+    store.prune();
+    // Act
+    store.prune();
+    // Assert: nothing observes the strip any more.
+    expect(() => fireResize(strip)).toThrow(/no ResizeObserver/);
+  });
+});
+
 describe("activateGroupedMember", () => {
   it("brings the tab holding an element to the front", () => {
     // Arrange: a group showing its newest member (b), with a hidden member a.
@@ -309,6 +359,29 @@ describe("the tab strip's size (styles.css)", () => {
     const body = ruleBodyOf(".feed-group-strip");
     expect(body).toMatch(/(^|[;\s])gap\s*:\s*0\.156rem\s*;/);
     expect(body).toMatch(/(^|[;\s])padding\s*:\s*0\.062rem 0 0\.188rem\s*;/);
+  });
+
+  it("draws no outer bubble around the group", () => {
+    const body = ruleBodyOf(".feed-group");
+    expect(body).not.toMatch(/(^|[;\s])(background|border|padding)\s*:/);
+  });
+
+  it("draws no line between the tabs and the card's content", () => {
+    expect(ruleBodyOf(".feed-group-strip")).not.toMatch(/border/);
+  });
+
+  it("lays the strip over the member card, inset by the card's border and padding", () => {
+    const body = ruleBodyOf(".feed-group-strip");
+    expect(body).toMatch(/(^|[;\s])position\s*:\s*absolute\s*;/);
+    expect(body).toMatch(/(^|[;\s])top\s*:\s*calc\(1px \+ 0\.3rem\)\s*;/);
+    expect(body).toMatch(/(^|[;\s])left\s*:\s*calc\(1px \+ 0\.75rem\)\s*;/);
+  });
+
+  it("grows the member card's top padding by the strip's measured height", () => {
+    const body = ruleBodyOf(".feed-group-panel > .feed-item > .tool-card");
+    expect(body).toMatch(
+      new RegExp(`padding-top\\s*:\\s*calc\\(0\\.3rem \\+ var\\(${STRIP_HEIGHT_PROPERTY}\\) \\+ 0\\.3rem\\)\\s*;`),
+    );
   });
 
   it("grows a tab's gap, padding and font-size by the same quarter", () => {
