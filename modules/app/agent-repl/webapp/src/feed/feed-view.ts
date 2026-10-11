@@ -104,6 +104,7 @@ import { drawFeedTurnEnded } from "./rows/turn-ended.js";
 import {
   drawFeedSessionSeparation,
   separationBoundsFeed,
+  separationEndsHistory,
 } from "./rows/separation.js";
 import { drawFeedMergeTabRow } from "./merge/tab-row.js";
 import { isOwnTurn } from "../composer/own-turns.js";
@@ -1203,6 +1204,17 @@ export function createFeedController(
    */
   function truncateAtSeparation(row: FeedRow, id: string): void {
     if (!separationBoundsFeed(row)) return;
+    // A CLEAR ENDS THE FEED'S HISTORY: the daemon serves nothing above it, so
+    // the walk stands at the start and "load previous page" goes, whether or
+    // not any row was held above the divider.
+    if (separationEndsHistory(row) && walkEdge === "hasMore") {
+      walkEdge = "atStart";
+      loadMore.remove();
+      log.info("a clear put the feed at its start; older pages are no longer offered", {
+        operation: "feed.walk-ended-at-clear",
+        context: { feed: feedName(), row: id },
+      });
+    }
     const at = order.indexOf(id);
     if (at <= 0) return;
     const dropped = order.splice(0, at);
