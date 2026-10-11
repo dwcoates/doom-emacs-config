@@ -1300,11 +1300,18 @@ returns nil when that function is unbound (e.g. during tests that
 do not load persp-mode, or early during startup before the workspace
 system is ready).
 
+`+workspace-current-name' is a Doom autoload, so it is bound for the
+whole session, including before persp-mode loads.  It calls
+`get-current-persp', which persp-mode defines, and signals
+`void-function' until then.  `get-current-persp' being bound is
+therefore what says persp-mode is loaded.
+
 This is the persp-mode identity boundary owned by `workspace.el'.
 Callers must use this function instead of calling
 `+workspace-current-name' directly or wrapping it themselves with
 `fboundp'."
   (and (fboundp '+workspace-current-name)
+       (fboundp 'get-current-persp)
        (+workspace-current-name)))
 
 (defun agent-repl--ws-log-name (ws)

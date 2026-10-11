@@ -1166,6 +1166,17 @@ workspace's badge."
       (fmakunbound '+workspace-current-name)
       (should-not (agent-repl--ws-current-name)))))
 
+(ert-deftest agent-repl-test-ws-current-name-returns-nil-before-persp-mode-loads ()
+  "ws-current-name returns nil while persp-mode's `get-current-persp' is void.
+Doom autoloads `+workspace-current-name', so it is bound before persp-mode
+loads, and calling it in that window signals `void-function'."
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function '+workspace-current-name)
+               (lambda () (safe-persp-name (get-current-persp))))
+              ((symbol-function 'get-current-persp) nil))
+      (fmakunbound 'get-current-persp)
+      (should-not (agent-repl--ws-current-name)))))
+
 (ert-deftest agent-repl-test-ws-current-name-returns-nil-when-no-persp ()
   "ws-current-name returns nil when the workspace system returns nil."
   (agent-repl-test--with-clean-state

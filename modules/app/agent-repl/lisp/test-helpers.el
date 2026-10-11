@@ -307,6 +307,8 @@ advice's effect would be invisible)."
   (defun persp-remove-buffer (_buf &optional _persp) "Stub." nil))
 (unless (fboundp 'safe-persp-name)
   (defun safe-persp-name (persp) "Stub." persp))
+(unless (fboundp 'get-current-persp)
+  (defun get-current-persp (&optional _frame _window) "Stub." nil))
 
 ;; Doom dashboard stubs
 (unless (boundp '+doom-dashboard-buffer-name)
