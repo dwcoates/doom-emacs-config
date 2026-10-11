@@ -538,6 +538,23 @@ func TestRevListWalksTheMergesSecondParentOldestFirst(t *testing.T) {
 	}
 }
 
+func TestRevListCountsTheRange(t *testing.T) {
+	// Arrange: two commits on feature beyond main.
+	s, repo, dir := world(t)
+	base := repo.BranchHeads["main"]
+	repo.AddBranch("feature", base)
+	first := s.AddCommit(repo, "feature", "first", []string{base}, []string{"a.txt"})
+	s.AddCommit(repo, "feature", "second", []string{first.SHA}, []string{"b.txt"})
+
+	// Act.
+	got := Run(s, "/", []string{"-C", dir, "rev-list", "--count", "main..feature"})
+
+	// Assert.
+	if got.Exit != 0 || got.Stdout != "2\n" {
+		t.Fatalf("rev-list --count = %+v, want 2", got)
+	}
+}
+
 func TestDiffOverARangeListsTheChangedPaths(t *testing.T) {
 	// Arrange.
 	s, repo, dir := world(t)

@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -666,6 +667,30 @@ func (c *client) LandedRange(ctx context.Context, targetDir, mergeCommit string)
 		return nil, err
 	}
 	return c.parseCommits(operation, targetDir, out)
+}
+
+// CountCommits answers how many commits are reachable from tip and not from
+// base. Merges count, exactly as LandedRange lists them, so a branch's count
+// before its merge and the count its merge brought in are one rule.
+func (c *client) CountCommits(ctx context.Context, dir, base, tip string) (uint32, error) {
+	const operation = "daemon.gitclient.count_commits"
+
+	out, err := c.run(ctx, operation, dir, "rev-list", "--count", base+".."+tip)
+	if err != nil {
+		return 0, err
+	}
+	count, err := strconv.ParseUint(strings.TrimSpace(out), 10, 32)
+	if err != nil {
+		c.log.Global().Error(operation, "git's commit count was unreadable", dlog.Context{
+			"dir":    dir,
+			"base":   base,
+			"tip":    tip,
+			"output": out,
+			"cause":  err.Error(),
+		})
+		return 0, fmt.Errorf("gitclient: unreadable commit count %q for %s..%s in %s: %w", out, base, tip, dir, err)
+	}
+	return uint32(count), nil
 }
 
 // ChangedPaths lists the paths a range touched. The rollout controller

@@ -1591,6 +1591,81 @@ func TestRevertMergeFailurePropagates(t *testing.T) {
 
 // --- LandedRange --------------------------------------------------------
 
+// --- CountCommits -------------------------------------------------------
+
+func TestCountCommitsAsksForTheRangeCount(t *testing.T) {
+	// Arrange.
+	git, _ := newTestClient(t)
+	fake := newFakeGit(t, ok("3\n"))
+
+	// Act.
+	if _, err := git.CountCommits(context.Background(), "/repo", "master", "feature"); err != nil {
+		t.Fatalf("CountCommits: %v", err)
+	}
+
+	// Assert.
+	fake.assertSubject(0, "rev-list", "--count", "master..feature")
+}
+
+func TestCountCommitsAnswersGitsCount(t *testing.T) {
+	tests := []struct {
+		name   string
+		output string
+		want   uint32
+	}{
+		{name: "a count", output: "7\n", want: 7},
+		{name: "zero", output: "0\n", want: 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			git, _ := newTestClient(t)
+			newFakeGit(t, ok(tc.output))
+
+			// Act.
+			got, err := git.CountCommits(context.Background(), "/repo", "master", "feature")
+
+			// Assert.
+			if err != nil || got != tc.want {
+				t.Fatalf("CountCommits = %d, %v; want %d with no error", got, err, tc.want)
+			}
+		})
+	}
+}
+
+func TestCountCommitsRefusesAnUnreadableCount(t *testing.T) {
+	// Arrange.
+	git, surfaces := newTestClient(t)
+	newFakeGit(t, ok("lots\n"))
+
+	// Act.
+	_, err := git.CountCommits(context.Background(), "/repo", "master", "feature")
+
+	// Assert.
+	if err == nil {
+		t.Fatal("CountCommits answered a count git never gave")
+	}
+	record, ok := recordFor(surfaces.records(), "error", "daemon.gitclient.count_commits")
+	if !ok || record.Context["output"] != "lots" || record.Context["tip"] != "feature" {
+		t.Fatalf("daemon.gitclient.count_commits error record = %+v (found %v), want the output and the range", record, ok)
+	}
+}
+
+func TestCountCommitsSurfacesGitsFailure(t *testing.T) {
+	// Arrange.
+	git, _ := newTestClient(t)
+	newFakeGit(t, fails(128, "fatal: bad revision 'master..feature'\n"))
+
+	// Act.
+	_, err := git.CountCommits(context.Background(), "/repo", "master", "feature")
+
+	// Assert.
+	var failure *Error
+	if !errors.As(err, &failure) || failure.ExitCode != 128 {
+		t.Fatalf("CountCommits error = %v (%T), want git's own exit-128 failure", err, err)
+	}
+}
+
 func TestLandedRangeWalksTheSecondParentHistory(t *testing.T) {
 	// Arrange: reading the range off the COMMIT means the answer survives the
 	// source branch being deleted, moved or merged again later.
