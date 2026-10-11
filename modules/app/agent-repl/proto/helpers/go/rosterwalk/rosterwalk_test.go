@@ -199,3 +199,43 @@ func TestRosterwalkIsTheOnlyChildWalk(t *testing.T) {
 		t.Fatalf("these files walk RosterRow.children by hand; flatten through rosterwalk instead: %v", offenders)
 	}
 }
+
+func TestRepositorySiblings(t *testing.T) {
+	// Arrange: two repository sections, a family in the first, and a merged row.
+	roster := &frontendv1.WorkspaceRoster{
+		Repository: &frontendv1.RosterRepositoryView{Sections: []*frontendv1.RosterRepoSection{
+			{Rows: rowsOf(row("a", row("a1", row("a1x")), row("a2")), row("b"))},
+			{Rows: rowsOf(row("c", row("c1")))},
+		}},
+		Task: &frontendv1.RosterTaskView{Sections: []*frontendv1.RosterTaskSection{
+			{Rows: rowsOf(row("t1"), row("t2"))}}},
+		RecentlyMerged: &frontendv1.RosterMergedSection{Rows: rowsOf(row("m1"), row("m2"))},
+	}
+	cases := []struct {
+		name   string
+		roster *frontendv1.WorkspaceRoster
+		a, b   string
+		want   bool
+	}{
+		{name: "two top-level rows of one section are siblings", roster: roster, a: "a", b: "b", want: true},
+		{name: "two children of one parent are siblings", roster: roster, a: "a1", b: "a2", want: true},
+		{name: "a parent and its child are not siblings", roster: roster, a: "a", b: "a1", want: false},
+		{name: "children of different parents are not siblings", roster: roster, a: "a1x", b: "a2", want: false},
+		{name: "top-level rows of different sections are not siblings", roster: roster, a: "b", b: "c", want: false},
+		{name: "task-view rows are not siblings", roster: roster, a: "t1", b: "t2", want: false},
+		{name: "recently-merged rows are not siblings", roster: roster, a: "m1", b: "m2", want: false},
+		{name: "a workspace the roster does not draw has no siblings", roster: roster, a: "a", b: "nope", want: false},
+		{name: "a nil roster holds no siblings", roster: nil, a: "a", b: "b", want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act.
+			got := RepositorySiblings(tc.roster, tc.a, tc.b)
+
+			// Assert.
+			if got != tc.want {
+				t.Fatalf("RepositorySiblings(%q, %q) = %v, want %v", tc.a, tc.b, got, tc.want)
+			}
+		})
+	}
+}
