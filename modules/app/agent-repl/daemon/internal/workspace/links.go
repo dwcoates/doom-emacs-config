@@ -190,8 +190,9 @@ var lineSuffix = regexp.MustCompile(`^(.+):([1-9][0-9]*)$`)
 //  4. a BARE name, under <worktree>/modules/app/agent-repl, then under the git
 //     project root of the worktree.
 //
-// An optional `:<line>` suffix is split off first. Containment is NOT judged
-// here: the caller refuses a resolved path outside the worktree.
+// An optional `:<line>` suffix is split off first. A resolved path may lie
+// anywhere on the host: a bubble link names a file the reader chose to open,
+// so it is not held to the worktree.
 //
 // A `~`-prefixed path dirpath.Absolute refuses (`~user/...`, another user's
 // home) is looked for nowhere: its one candidate is the href as written, and
@@ -252,7 +253,9 @@ func gitProjectRoot(dir string) (string, bool) {
 
 // OpenFeedLink resolves a non-web link clicked in a prompt or response bubble
 // and relays the file it names onto the workspace's host stream, exactly as a
-// workspace file's click is relayed.
+// workspace file's click is relayed. The file may lie OUTSIDE the worktree:
+// unlike a workspace_file target, which the feed row served from inside it, a
+// bubble link is whatever path the text named, and the reader clicked it.
 //
 // A LINK THAT NAMES NO FILE IS ANSWERED, NEVER DROPPED. Under REPORT the
 // footer draws the transient `unknown_file` line (the status is untouched),
@@ -275,13 +278,10 @@ func (v *verbs) OpenFeedLink(ctx context.Context, ws ids.WorkspaceID, href strin
 		}
 		return v.unresolvedLink(ctx, log, record, href, link)
 	}
-	if !within(record.Dir, link.path) {
-		return nil, refuse(log, "OpenInEditor", ArmPathEscapesWorkspace,
-			fmt.Sprintf("link %q resolves to %q, which is outside workspace %q", href, link.path, record.Dir), false)
-	}
 	v.deps.Host.OpenInEditor(ws, link.path, link.line)
 	log.Info(opOpenInEditor, "relayed a feed link's open-in-editor click", dlog.Context{
 		"href": href, "resolved": link.path, "has_line": link.line != nil,
+		"in_worktree": within(record.Dir, link.path),
 	})
 	return nil, nil
 }

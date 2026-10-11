@@ -201,7 +201,8 @@ export type OpenInEditorError = Message<"agentrepl.v1.OpenInEditorError"> & {
     case: "notYetAdopted";
   } | {
     /**
-     * The path resolves outside the workspace's worktree.
+     * A `workspace_file` path resolves outside the workspace's worktree.
+     * Never answered for a `feed_link`, which may open any file.
      *
      * @generated from field: agentrepl.v1.OpenInEditorPathEscapesWorkspace path_escapes_workspace = 5;
      */
@@ -337,8 +338,9 @@ export const OpenInEditorUnknownMergeTestLogSchema: GenMessage<OpenInEditorUnkno
  *   3. A path with a directory part: relative to the workspace's worktree root.
  *   4. A BARE file name: <worktree root>/modules/app/agent-repl/<name>, then
  *      <git project root of the worktree>/<name>.
- * A link that resolves outside the worktree is refused as for any workspace
- * file. A link that resolves to nothing is `link_unresolved`.
+ * A link may resolve anywhere on the host, inside the worktree or outside it:
+ * unlike a `workspace_file`, it is never refused as `path_escapes_workspace`.
+ * A link that resolves to nothing is `link_unresolved`.
  *
  * @generated from message agentrepl.v1.OpenInEditorFeedLink
  */
