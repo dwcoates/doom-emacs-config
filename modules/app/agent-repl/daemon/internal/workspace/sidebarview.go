@@ -42,27 +42,28 @@ func (v *verbs) FoldTaskSection(ctx context.Context, task ids.TaskID, folded boo
 // then republishes the roster to every page. There is nothing to refuse: the
 // roster carries exactly one band.
 func (v *verbs) FoldMergedSection(ctx context.Context, folded bool) error {
-	log := v.deps.Log.Global().With(dlog.Context{"folded": folded})
-	if err := v.deps.DB.SetMergedSectionFolded(ctx, folded); err != nil {
-		log.Error(opFoldMergedSection, "could not record the recently-merged band's fold", dlog.Context{"cause": err.Error()})
-		return fmt.Errorf("fold the recently-merged band: %w", err)
-	}
-	log.Info(opFoldMergedSection, "recorded the recently-merged band's fold", nil)
-	v.republishRegistry(ctx, log, opFoldMergedSection)
-	return nil
+	return v.foldSingletonSection(ctx, opFoldMergedSection, "recently-merged band", v.deps.DB.SetMergedSectionFolded, folded)
 }
 
 // FoldHiddenSection records whether the hidden-workspaces section is
 // collapsed, then republishes the roster to every page. There is nothing to
 // refuse: the roster carries exactly one hidden section.
 func (v *verbs) FoldHiddenSection(ctx context.Context, folded bool) error {
-	log := v.deps.Log.Global().With(dlog.Context{"folded": folded})
-	if err := v.deps.DB.SetHiddenSectionFolded(ctx, folded); err != nil {
-		log.Error(opFoldHiddenSection, "could not record the hidden section's fold", dlog.Context{"cause": err.Error()})
-		return fmt.Errorf("fold the hidden section: %w", err)
+	return v.foldSingletonSection(ctx, opFoldHiddenSection, "hidden section", v.deps.DB.SetHiddenSectionFolded, folded)
+}
+
+// foldSingletonSection records the fold of a section the roster carries
+// exactly one of (no key, so nothing to refuse), then republishes the roster
+// to every page. A failed write is recorded at error under OP, naming
+// SECTION, and nothing is republished.
+func (v *verbs) foldSingletonSection(ctx context.Context, op, section string, write func(context.Context, bool) error, folded bool) error {
+	log := v.deps.Log.Global().With(dlog.Context{"folded": folded, "section": section})
+	if err := write(ctx, folded); err != nil {
+		log.Error(op, "could not record the "+section+"'s fold", dlog.Context{"cause": err.Error()})
+		return fmt.Errorf("fold the %s: %w", section, err)
 	}
-	log.Info(opFoldHiddenSection, "recorded the hidden section's fold", nil)
-	v.republishRegistry(ctx, log, opFoldHiddenSection)
+	log.Info(op, "recorded the "+section+"'s fold", nil)
+	v.republishRegistry(ctx, log, op)
 	return nil
 }
 
