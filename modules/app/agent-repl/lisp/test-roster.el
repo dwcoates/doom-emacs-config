@@ -2523,10 +2523,14 @@ saying the roster had been asked for one and declined."
   ;; still pending when the tab arrives.
   (agent-repl-test-roster--with-editor
     (let ((agent-repl--panels-arrivals-armed t)
-          (agent-repl-verbs--pending-landing '(:id "a" :dir "/w/one"))
+          (agent-repl-verbs--pending-landing nil)
+          (agent-repl-verbs--pending-landing-dispatched-at nil)
+          (agent-repl-verbs--pending-landing-lander nil)
+          (agent-repl-host--editor-switches 0)
           (agent-repl-roster-update-functions
            (list #'agent-repl-verbs--pending-landing-fire))
           order)
+      (agent-repl-verbs--pending-landing-register '(:id "a" :dir "/w/one") 0)
       (cl-letf (((symbol-function 'agent-repl--panels-open-on-arrival)
                  (lambda (_ws _id) (setq order (append order '(panels)))))
                 ((symbol-function 'agent-repl-switch-to-project)
