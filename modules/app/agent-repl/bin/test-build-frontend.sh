@@ -94,6 +94,7 @@ make_tree() {
     cp "$SCRIPT_UNDER_TEST" "$root/bin/build-frontend.sh"
     cp "$THIS_DIR/lib-deploy-stamp.sh" "$root/bin/lib-deploy-stamp.sh"
     cp "$THIS_DIR/lib-node-store.sh" "$root/bin/lib-node-store.sh"
+    cp "$THIS_DIR/lib-worktrees.sh" "$root/bin/lib-worktrees.sh"
 
     # Sources.
     echo "export const x = 1" > "$root/agent-shim/claude/shim/src/main.ts"

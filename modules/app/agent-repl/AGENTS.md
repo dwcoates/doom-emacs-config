@@ -1138,6 +1138,48 @@ who wrote it, and no person's value is a default.
   - Dated reports under `docs/` are a historical record and are not rewritten.
   - A skill's `lineage_root:` line is the GNS address it was first published under, and stays as published.
 
+## Requirements: the manifests are the one record of what a machine needs
+
+Everything agent-repl needs on a machine is an entry in a requirement
+manifest, and `bin/requirements.sh` is the one program that reads them.
+`.claude/install.sh` runs it, `doom doctor` reports from it, and the
+`/install-agent-repl` skill drives it on a new machine.
+
+- **Where entries live.**
+  - `requirements.json` at the module root holds agent-repl-wide entries: Emacs, Doom, the Claude CLI, the banner program, environment variables, skills, the pre-commit hook, and module-wide dev tools.
+  - Each system keeps its own `requirements.json` beside its code (`daemon/`, `webapp/`, `proto/`, `e2e/`, `agent-shim/claude/shim/`, `agent-shim/shim-lock/`, `agent-shim/shim-store/`, `agent-shim/claude/shim-sidecar/`), and the root's `includes` names every one of them.
+  - An id two systems share (a toolchain like `go` or `node`) is declared identically in each, and the runner refuses any difference.
+- **The runner names no requirement.** It knows only the kinds an entry may be (`program`, `emacs`, `env`, `notification_permission`, `skill_link`, `git_hook`, `launchd_service`), and checks and installs each kind one way.
+  - A new dependency is a manifest entry, never a script edit.
+  - A dependency no kind can express is a new kind, added to the runner with its tests in `bin/test-requirements.sh`. It is never shell embedded in a manifest.
+- **Profiles.** `run` is what using agent-repl needs, and `dev` is what building and testing it needs.
+- **Statuses.** `install` acts only on `missing` and `outdated` entries.
+  - `needs-user` is a value or a choice only the user can supply, or a file of theirs that is never overwritten.
+  - `failed` is a broken entry, which nothing papers over.
+  - An `optional` entry never fails a run, and is always reported.
+
+### Every change keeps the manifests true
+
+- A change that adds, drops or re-versions anything a machine must provide updates the manifest of the system that needs it, in the same change.
+  - Examples are a program a script runs, a minimum version, an environment variable, a launchd service, a skill, or a hook.
+  - A person-level value also gets its row in the Setup section of `docs/USER-GUIDE.md` (see the section above).
+- `bin/test-requirements.sh` checks the real manifests against the contract, and that every system manifest is included.
+
+### A run that finds a manifest inadequate fixes it, generically
+
+An agent running `bin/requirements.sh` (directly, through `.claude/install.sh`,
+or through `/install-agent-repl`) that hits a failure the manifests should have
+prevented fixes the manifests or the runner, not the machine.
+
+- The fix is generic: it holds for every machine and every person.
+  - Examples are a missing entry, a wrong minimum version, an install step that does not work on a stock machine, or a kind that cannot express a real need.
+  - It never encodes the running user's paths, accounts, names or choices.
+  - A value that differs per person is an `env` entry with a USER-GUIDE row, never a literal.
+- Ambiguity that only the user can resolve is surfaced to them, never guessed.
+  - Examples are which account, which directory, or whether to replace something of theirs.
+  - The metaprompt's TLDR spec gives it its own branch near the bottom of the response.
+- Hand-repairing the machine to get past a failure, without fixing the manifest that let it happen, leaves the next machine to fail the same way. It is not a fix.
+
 ## The editor popup is the one place a file opens
 
 Emacs has ONE path that shows a file or directory the system points at, named

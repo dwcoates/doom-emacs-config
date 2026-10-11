@@ -3,10 +3,12 @@
 launchd user-agent plists for the two OS-managed shim-ecosystem services:
 `com.agentrepl.shim-store` and `com.agentrepl.shim-claude-sidecar` (both
 `RunAtLoad` + `KeepAlive`, so they are always available at login and
-recreated on failure). Installed idempotently by `.claude/install.sh`.
+recreated on failure). Installed idempotently by `.claude/install.sh`, which runs
+`bin/requirements.sh install`: each service is a `launchd_service` entry in its
+system's `requirements.json` (`agent-shim/shim-store/`, `agent-shim/claude/shim-sidecar/`).
 
 Both files are TEMPLATES: they use `~/`-relative paths so they read portably,
-and `.claude/install.sh` (`install_agent_shim_services`) rewrites every leading
+and the installer (`bin/requirements.sh`, `rendered_plist`) rewrites every leading
 `~/` to the invoking user's absolute `$HOME` when copying them into
 `~/Library/LaunchAgents/`. launchd does not expand `~` itself, so neither
 template is ever loaded directly.

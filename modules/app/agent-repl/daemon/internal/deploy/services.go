@@ -108,7 +108,7 @@ func (r *Restarter) RestartStore(ctx context.Context) error {
 	if _, err := os.Stat(plist); err != nil {
 		r.Log.Error(opServices, "the sidecar's plist is missing; nothing was stopped", withCause(fields, err))
 		return fmt.Errorf("deploy: the store restart boots the sidecar out and needs %s to bring it back: %w "+
-			"(re-run .claude/install.sh --with-agent-shim-services)", plist, err)
+			"(re-run .claude/install.sh)", plist, err)
 	}
 	if err := r.stopSidecar(ctx, fields); err != nil {
 		return err
@@ -263,7 +263,7 @@ func (r *Restarter) ensureLoaded(ctx context.Context, label string, fields dlog.
 	if _, err := os.Stat(plist); err != nil {
 		r.Log.Error(opServices, "a service is not loaded and its plist is missing", withCause(fields, err))
 		return false, fmt.Errorf("deploy: %s is not loaded and %s cannot bring it back: %w "+
-			"(re-run .claude/install.sh --with-agent-shim-services)", label, plist, err)
+			"(re-run .claude/install.sh)", label, plist, err)
 	}
 	r.Log.Info(opServices, "a service was not loaded; bootstrapping it", fields)
 	if err := r.Launchd.Bootstrap(ctx, plist); err != nil {
