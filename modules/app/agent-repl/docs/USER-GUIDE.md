@@ -6,6 +6,13 @@ user guide"). Controls that predate this guide are not all listed yet.
 
 ## Setup
 
+Run `bash .claude/install.sh` from this repository, or ask an agent to run
+`/install-agent-repl`. It installs everything agent-repl needs that is missing:
+Emacs with xwidgets, the Go and Node toolchains, `terminal-notifier`, the
+Claude Code skills, the git hook, and the store and sidecar services. It then
+lists what only you can provide. `bash .claude/install.sh check` reports the
+same thing without changing anything, and `doom doctor` reports it too.
+
 agent-repl names no person and holds no person's values as defaults. The
 values below are yours to set. A value that is missing or does not match
 fails loudly, and the error points back to this section.
@@ -18,6 +25,7 @@ and the daemon Emacs starts, see them.
 | Your work account | Sign in to Claude with `~/.claude-chesscom` as the config dir. Its email is read from `~/.claude-chesscom/.claude.json`. | Workspaces under `$MULTI_REPO_ROOT`, and the GNS login rule in `metaprompt.md`. | Those workspaces run logged out. An agent that needs to renew a GNS token stops and says so. |
 | A Chrome profile per account | Sign each account's email in to its own Chrome profile. | Links clicked in a workspace open in the profile signed in as that workspace's account. A logged-out workspace opens links with no profile chosen. | The click fails with `launch_failed`, naming the email that no profile is signed in as. |
 | `AGENT_REPL_PERSISTENT_WIFI_HOTSPOT` | Your phone hotspot's name, in your shell profile. Either apostrophe spelling joins. | Persistent-wifi mode, which joins the hotspot when it turns on and leaves it when it turns off. | Turning the mode on or off still changes the power settings. The hotspot step fails, naming the variable. |
+| `MULTI_REPO_ROOT` | Optional. The directory holding your work repositories, including the `explanation-engine` checkout, in your shell profile. | The installer, which links the `/create-or-update-workspace` and `/create-or-update-skill` skills from `$MULTI_REPO_ROOT/explanation-engine`, and workspaces worked under the work account. | Those two skills are not linked, and the installer reports it. |
 | `AGENT_WORKSPACE_PREFIX` | Optional. A prefix for new workspace branches, such as your initials, in your shell profile. The older `CLAUDE_WORKSPACE_PREFIX` is still read when this one is unset. | Workspace creation, which names a branch `<prefix>/<name>`. | Branches get no prefix. |
 
 ## Asking about agent-repl
