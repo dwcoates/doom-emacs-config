@@ -1,20 +1,23 @@
 // feed_held.proto — THE HELD SECTION: the part of a workspace's ROOT feed
 // that holds what has not yet settled into the conversation's history — a
-// merge still running, a prompt the daemon is holding for delivery, a question
-// waiting for the user's answer. It is drawn at the root feed's tail, after
-// every row, with no heading and no divider, so a held item reads exactly as
-// the feed's newest row does.
+// prompt the daemon is holding for delivery, a question waiting for the user's
+// answer. It is drawn at the root feed's tail, after every row, with no
+// heading and no divider, so a held item reads exactly as the feed's newest
+// row does.
 //
 //   … settled rows, in order-key order …
-//   ┌ merge bubble ─────────────────────────────────────────┐   FeedHeldItem.merge
-//   │ ● merging ABC/fix-flaky-test → master          3m 12s │
+//   ┌ merge bubble ─────────────────────────────────────────┐   FeedRowOrder.pinned
+//   │ ● merging ABC/fix-flaky-test → master          3m 12s │   (a row, not held)
 //   └───────────────────────────────────────────────────────┘
 //   "also fix the footer"        ⏳ held · merge running       FeedHeldItem.prompt
 //   ?  take this merge off the queue?      [dequeue] [keep]    FeedHeldItem.offer
 //
-// HELD, THEN SETTLED. An item that settles — a merge that ends, a prompt the
-// daemon accepts for delivery — leaves this section and becomes an ordinary
-// row of the feed, keyed at the moment it settles: the bottom. Its row carries
+// A RUNNING MERGE IS NOT HELD. Its bubble is a row of the feed pinned below
+// every settled row (FeedRowOrder.pinned), updated in place while it runs.
+//
+// HELD, THEN SETTLED. A prompt that settles — the daemon accepts it for
+// delivery — leaves this section and becomes an ordinary row of the feed,
+// keyed at the moment it settles: the bottom. Its row carries
 // the SAME FeedId its held item carried, so a client keeps one element across
 // the move, and the move reaches the client as ONE change (the root feed's
 // held-section frame carries the section and the rows that settled out of it
@@ -48,36 +51,32 @@ option go_package = "agentrepl/proto/frontend/v1;frontendv1";
 // carried WHOLE on every change. An empty items list is a meaningful value —
 // the daemon is holding nothing for the user — not an absent one.
 message FeedHeld {
-  // The held items, in display order: every held merge first, then the held
-  // prompts in queue order, then a posed offer. A prompt held while a merge
-  // runs is delivered after the merge, so the item that settles first sits
-  // nearest the settled rows.
+  // The held items, in display order: the held prompts in queue order, then a
+  // posed offer. The prompt that settles first sits nearest the settled rows.
   repeated FeedHeldItem items = 1;
 }
 
 // One held item: its identity, and what it is.
 message FeedHeldItem {
   // The item's identity, and the reconciliation key a client keeps its element
-  // under. For a merge it is the merge head row's FeedId, and for a prompt the
-  // FeedId its prompt row will carry once it settles, so the settled row and
-  // the held item are one element to the client. An offer, which never settles,
+  // under. For a prompt it is the FeedId its prompt row will carry once it
+  // settles, so the settled row and the held item are one element to the
+  // client. An offer, which never settles,
   // has a FeedId of its own. Opaque and daemon-minted, like every FeedId.
   FeedId id = 1;
   // What is held. THE ARM IS THE KIND, and each kind is answered differently —
-  // a merge runs to its end, a prompt is released or dropped, an offer is
-  // answered — so a consumer routes on the arm rather than on anything inside
-  // it.
+  // a prompt is released or dropped, an offer is answered — so a consumer
+  // routes on the arm rather than on anything inside it.
   oneof item {
-    // A merge that is still queued or running. Drawn as the merge bubble it
-    // settles as: the same head, and the same sub-feed opened by `id`
-    // (OpenFeed), so its tabs and its fold carry across the settle. Its result
-    // arm is always `update` here; a terminal merge has settled.
-    FeedMerge merge = 2;
     // A prompt the daemon is holding for delivery.
     HeldPrompt prompt = 3;
     // A question the daemon is holding for the user's answer.
     HeldOffer offer = 4;
   }
+  // Tag 2 and the name `merge` are RETIRED: a running merge's bubble is the
+  // row pinned to the feed's bottom (FeedRowOrder.pinned), never held.
+  reserved 2;
+  reserved "merge";
 }
 
 // A prompt the daemon is holding for delivery.
