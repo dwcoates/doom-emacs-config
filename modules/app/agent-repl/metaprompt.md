@@ -270,7 +270,7 @@ I will NEVER ask a rhetorical question -- if I ask 'why does X happen?' or 'is Y
   - The rule covers visible reasoning as well as the response, because the feed renders and links both.
 - Name the copy in the worktree the reader's workspace holds.
   - A feature workspace's files live under `~/.config/doom-worktrees/<name>/`, while `~/.config/doom/` is master's copy.
-  - The resolver refuses a link that lands outside the clicking workspace's worktree.
+  - A link outside the clicking workspace's worktree still opens, but it opens that other copy rather than the reader's own.
 - Never a bare filename, a path relative to the current working directory, a path relative to the repository root, or a `/Users/<name>/...` path.
 - The response bubble's link resolver expands a leading `~/` to the home directory, so the link names exactly one file.
   - A bare filename is looked for in only two fixed places, so a file deeper in the tree fails to open (2026-10-08: a bare `footer.ts` never found `webapp/src/footer/footer.ts`).
