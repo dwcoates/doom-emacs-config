@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"claude-repld/internal/ids"
@@ -202,5 +203,24 @@ func TestRestoreParentSurfacesAFailedWriteAtError(t *testing.T) {
 	}
 	if !loggedAtError(f, opSetParent) {
 		t.Fatal("the failed undo was not recorded at error")
+	}
+}
+
+func TestUnknownParentRefusalIsTheUnknownParentArmAtInfo(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+
+	// Act
+	refusal := UnknownParentRefusal(f.log.logger, "/nowhere", wsm.ErrNotFound)
+
+	// Assert
+	if refusal.Arm != ArmUnknownParent || refusal.Rpc != rpcSetParent || !refusal.NotFound {
+		t.Fatalf("refusal = %+v, want SetWorkspaceParent's unknown_parent, not found", refusal)
+	}
+	if !strings.Contains(refusal.Reason, "/nowhere") {
+		t.Fatalf("reason = %q, want the directory named", refusal.Reason)
+	}
+	if !hasLogRecord(f, "info", opRefusal) {
+		t.Fatalf("records = %+v, want the refusal recorded at info", f.log.logger.Records())
 	}
 }

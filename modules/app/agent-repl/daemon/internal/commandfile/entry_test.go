@@ -1,6 +1,7 @@
 package commandfile
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -31,6 +32,8 @@ func TestValidateAcceptsEveryAcceptedShape(t *testing.T) {
 		{name: "merge pause of one repository", entry: Entry{Type: TypeMergePause, ProjectDir: "/tree", RepositoryDir: "/repo"}},
 		{name: "merge resume of every repository", entry: Entry{Type: TypeMergeResume, ProjectDir: "/tree"}},
 		{name: "merge resume of one repository", entry: Entry{Type: TypeMergeResume, ProjectDir: "/tree", RepositoryDir: "/repo"}},
+		{name: "retarget to a parent", entry: Entry{Type: TypeRetarget, ProjectDir: "/tree", Parent: PresentDir{Present: true, Dir: "/tree2"}}},
+		{name: "retarget to top-level", entry: Entry{Type: TypeRetarget, ProjectDir: "/tree", Parent: PresentDir{Present: true}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -67,6 +70,9 @@ func TestValidateRefusesEveryIncompleteShape(t *testing.T) {
 		{name: "merge resume with no requester", entry: Entry{Type: TypeMergeResume}},
 		{name: "evict_dir on a close", entry: Entry{Type: TypeClose, Dir: "/tree", EvictDir: "/tree2"}},
 		{name: "repository_dir on a merge", entry: Entry{Type: TypeMerge, Dir: "/tree", RepositoryDir: "/repo"}},
+		{name: "retarget with no target", entry: Entry{Type: TypeRetarget, Parent: PresentDir{Present: true}}},
+		{name: "retarget with no parent key", entry: Entry{Type: TypeRetarget, ProjectDir: "/tree"}},
+		{name: "parent on a close", entry: Entry{Type: TypeClose, Dir: "/tree", Parent: PresentDir{Present: true}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -481,5 +487,89 @@ func TestWithAbsolutePathsExpandsTheSourceDir(t *testing.T) {
 	// Assert.
 	if err != nil || got.SourceDir != "/home/u/wt/two" {
 		t.Fatalf("withAbsolutePaths = (%+v, %v), want the source dir under home", got, err)
+	}
+}
+
+func TestParentKeepsAPresentNullApartFromAnAbsentKey(t *testing.T) {
+	tests := []struct {
+		name string
+		json string
+		want PresentDir
+	}{
+		{name: "a directory", json: `{"type":"retarget","project_dir":"/t","parent":"/p"}`, want: PresentDir{Present: true, Dir: "/p"}},
+		{name: "null", json: `{"type":"retarget","project_dir":"/t","parent":null}`, want: PresentDir{Present: true}},
+		{name: "absent", json: `{"type":"close","project_dir":"/t"}`, want: PresentDir{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act.
+			entries, err := parse([]byte("[" + tt.json + "]"))
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("parse: %v", err)
+			}
+			if entries[0].Parent != tt.want {
+				t.Fatalf("parent = %+v, want %+v", entries[0].Parent, tt.want)
+			}
+		})
+	}
+}
+
+func TestParentRefusesWhatIsNeitherADirectoryNorNull(t *testing.T) {
+	tests := []struct {
+		name   string
+		parent string
+	}{
+		{name: "an empty string", parent: `""`},
+		{name: "a number", parent: `7`},
+		{name: "an object", parent: `{"path":"/p"}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act.
+			_, err := parse([]byte(`[{"type":"retarget","project_dir":"/t","parent":` + tt.parent + `}]`))
+
+			// Assert.
+			if err == nil {
+				t.Fatalf("parse accepted parent %s", tt.parent)
+			}
+		})
+	}
+}
+
+func TestParentRoundTripsThroughWrite(t *testing.T) {
+	tests := []struct {
+		name   string
+		parent PresentDir
+	}{
+		{name: "a directory", parent: PresentDir{Present: true, Dir: "/p"}},
+		{name: "null", parent: PresentDir{Present: true}},
+		{name: "absent", parent: PresentDir{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			typ := TypeRetarget
+			if !tt.parent.Present {
+				typ = TypeClose
+			}
+			entry := Entry{Type: typ, ProjectDir: "/t", Parent: tt.parent}
+
+			// Act.
+			data, err := json.Marshal([]Entry{entry})
+			if err != nil {
+				t.Fatalf("Marshal: %v", err)
+			}
+			entries, err := parse(data)
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("parse(%s): %v", data, err)
+			}
+			if entries[0].Parent != tt.parent {
+				t.Fatalf("parent = %+v after %s, want %+v", entries[0].Parent, data, tt.parent)
+			}
+		})
 	}
 }

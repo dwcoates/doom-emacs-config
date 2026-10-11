@@ -1043,12 +1043,13 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// the NAME pattern: the layout's CommandFileGlob is the whole path,
 		// and joining that onto the directory again yields a pattern that
 		// matches nothing at all.
-		Glob:    filepath.Base(p.Layout.CommandFileGlob()),
-		Verbs:   verbs,
-		DB:      p.DB,
-		Merge:   mergeOrchestrator,
-		Prompts: handler,
-		Home:    paths.Home,
+		Glob:     filepath.Base(p.Layout.CommandFileGlob()),
+		Verbs:    verbs,
+		DB:       p.DB,
+		Merge:    mergeOrchestrator,
+		Prompts:  handler,
+		Retarget: retargeter,
+		Home:     paths.Home,
 		// ONLY THE DAEMON THAT SERVES TAKES INTAKE (internal/intakegate): not
 		// a successor still joining, not an incumbent handing over.
 		Serves: rolloutController.ServesIntake,
