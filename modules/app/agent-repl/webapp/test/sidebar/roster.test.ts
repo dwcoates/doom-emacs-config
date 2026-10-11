@@ -1276,6 +1276,11 @@ describe("recently merged rows", () => {
     expect(css).toContain("#ws-sidebar .row .name.merged-name { color: var(--repo-head-expanded); }");
   });
 
+  it("styles a name merged today with the success green", async () => {
+    const css = (await import("../../src/styles.css?raw")).default;
+    expect(css).toContain("#ws-sidebar .row .name.merged-name.merged-today { color: var(--ok); }");
+  });
+
   it("keeps the merged arm on the row, the hook contract's", () => {
     expect(mergedRow(drawnMerged()).getAttribute("data-arm")).toBe("merged");
   });

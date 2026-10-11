@@ -9,7 +9,9 @@ import { MalformedView } from "../../src/rpc/malformed.js";
 import {
   HOVER_CLOSE_GRACE_MS,
   HOVER_OPEN_DELAY_MS,
+  MERGED_TODAY_CLASS,
   drawRosterRow,
+  mergedToday,
   drawRosterRowWhen,
   drawStatusMark,
   expandVisibleRows,
@@ -1214,3 +1216,64 @@ describe("the row's drawn status is recorded", () => {
   });
 });
 
+describe("a merge that landed today", () => {
+  // Local midnight at the start of NOW's day, so every case is on a known
+  // side of a date line whatever zone the suite runs in.
+  const startOfToday = (): number => {
+    const midnight = new Date(NOW);
+    midnight.setHours(0, 0, 0, 0);
+    return midnight.getTime();
+  };
+  const startOfTomorrow = (): number => {
+    const midnight = new Date(startOfToday());
+    midnight.setDate(midnight.getDate() + 1);
+    return midnight.getTime();
+  };
+  const mergedRow = (atMs: number, sc = sidebarContext(), merged = true): HTMLElement =>
+    drawRosterRow(
+      row({ id: "ws-1", status: { case: "merged", value: {} }, when: { case: "merged", value: { atMs: BigInt(atMs) } } }),
+      sc,
+      "R",
+      merged,
+    );
+  const isGreen = (drawn: HTMLElement): boolean | undefined =>
+    drawn.querySelector(".name")?.classList.contains(MERGED_TODAY_CLASS);
+
+  it.each([
+    { name: "the same instant", at: () => NOW, now: () => NOW, want: true },
+    { name: "local midnight that began today", at: startOfToday, now: () => NOW, want: true },
+    { name: "the last millisecond of yesterday", at: () => startOfToday() - 1, now: () => NOW, want: false },
+    { name: "a merge seen again after midnight", at: () => NOW, now: startOfTomorrow, want: false },
+  ])("decides $name by the local calendar date", ({ at, now, want }) => {
+    // Act + Assert
+    expect(mergedToday(at(), now())).toBe(want);
+  });
+
+  it("draws the name green", () => {
+    expect(isGreen(mergedRow(NOW - 60_000))).toBe(true);
+  });
+
+  it("leaves a merge from yesterday in the repository names' colour", () => {
+    expect(isGreen(mergedRow(startOfToday() - 1))).toBe(false);
+  });
+
+  it("turns the name back once the shared ticker crosses midnight", () => {
+    // Arrange
+    const ticker = fakeTicker();
+    const drawn = mergedRow(NOW, sidebarContext(appContext({}, ticker)));
+    // Act
+    ticker.tick(startOfTomorrow());
+    // Assert
+    expect(isGreen(drawn)).toBe(false);
+  });
+
+  it("registers the green's tick as a teardown beside the age's", () => {
+    const sc = sidebarContext();
+    mergedRow(NOW, sc);
+    expect(sc.disposers.length).toBe(2);
+  });
+
+  it("is not marked on a row drawn outside the merged band", () => {
+    expect(isGreen(mergedRow(NOW, sidebarContext(), false))).toBe(false);
+  });
+});
