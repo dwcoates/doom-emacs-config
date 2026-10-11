@@ -1399,7 +1399,7 @@ describe("an open question", () => {
     const row = await drawRow(questionRow("open"));
     // Assert
     expect(row.querySelector("input, textarea, [data-question-other], [data-question-submit]")).toBeNull();
-    expect(row.querySelector("[data-ask-hint]")).not.toBeNull();
+    expect(row.querySelector("[data-ask-hint]")).toBeNull();
   });
 
   it("draws one shared feed tab per question", async () => {
