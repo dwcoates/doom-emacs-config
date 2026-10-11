@@ -1152,6 +1152,9 @@ manifest, and `bin/requirements.sh` is the one program that reads them.
 - **The runner names no requirement.** It knows only the kinds an entry may be (`program`, `emacs`, `env`, `notification_permission`, `skill_link`, `git_hook`, `launchd_service`), and checks and installs each kind one way.
   - A new dependency is a manifest entry, never a script edit.
   - A dependency no kind can express is a new kind, added to the runner with its tests in `bin/test-requirements.sh`. It is never shell embedded in a manifest.
+- **A retired skill stays in the manifest, marked `"retired": true`.**
+  - Install then removes the link it once made on every machine, and leaves a file of the user's at that name alone.
+  - Deleting the entry instead would leave every other machine with a dangling link.
 - **Profiles.** `run` is what using agent-repl needs, and `dev` is what building and testing it needs.
 - **Statuses.** `install` acts only on `missing` and `outdated` entries.
   - `needs-user` is a value or a choice only the user can supply, or a file of theirs that is never overwritten.
