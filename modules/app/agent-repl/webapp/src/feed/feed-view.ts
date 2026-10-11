@@ -1022,7 +1022,7 @@ export function createFeedController(
    * Apply the daemon's feed selection (`FeedSelection`, one oneof).
    *
    * THREE EFFECTS, in the order the reader experiences them:
-   *  - the selection border moves to the selected row (a final response or a
+   *  - the selection mark (a bubble's grey fill) moves to the selected row (a final response or a
    *    prompt) and off every other row's -- a re-push (C-p/C-n, C-S-p/C-S-n)
    *    marks one row and clears the rest, and `none` clears them all;
    *  - while a row is selected the follow is released, so new rows append
