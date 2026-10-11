@@ -551,15 +551,10 @@ describe("drawBubble: a redraw given its previous draw updates it in place", () 
 
   it("takes the expand-only mark off a kept element that moved to the footer", () => {
     // Arrange
-    const said = (): HTMLElement => {
-      const node = el("marker", "same");
-      node.setAttribute(SAYS_ATTRIBUTE, "same");
-      return node;
-    };
-    const first = drawBubble(spec("held", { expandOnly: [said()] })).bubble;
+    const first = drawBubble(spec("held", { expandOnly: [said("marker", "same")] })).bubble;
     const kept = first.querySelector(".marker");
     // Act
-    drawBubble(spec("held", { footer: [said()] }), first);
+    drawBubble(spec("held", { footer: [said("marker", "same")] }), first);
     // Assert
     expect([first.querySelector(".marker") === kept, kept?.classList.contains(BUBBLE_EXPAND_ONLY_CLASS)]).toEqual([
       true,
@@ -569,15 +564,10 @@ describe("drawBubble: a redraw given its previous draw updates it in place", () 
 
   it("marks a kept element that moved to the footer as the footer", () => {
     // Arrange
-    const said = (): HTMLElement => {
-      const node = el("marker", "same");
-      node.setAttribute(SAYS_ATTRIBUTE, "same");
-      return node;
-    };
-    const first = drawBubble(spec("held", { expandOnly: [said()] })).bubble;
+    const first = drawBubble(spec("held", { expandOnly: [said("marker", "same")] })).bubble;
     const kept = first.querySelector(".marker");
     // Act
-    drawBubble(spec("held", { footer: [said()] }), first);
+    drawBubble(spec("held", { footer: [said("marker", "same")] }), first);
     // Assert
     expect([first.querySelector(".marker") === kept, kept?.classList.contains(BUBBLE_FOOTER_CLASS)]).toEqual([
       true,
@@ -587,15 +577,10 @@ describe("drawBubble: a redraw given its previous draw updates it in place", () 
 
   it("takes the footer mark off a kept element that moved to the expand-only region", () => {
     // Arrange
-    const said = (): HTMLElement => {
-      const node = el("marker", "same");
-      node.setAttribute(SAYS_ATTRIBUTE, "same");
-      return node;
-    };
-    const first = drawBubble(spec("held", { footer: [said()] })).bubble;
+    const first = drawBubble(spec("held", { footer: [said("marker", "same")] })).bubble;
     const kept = first.querySelector(".marker");
     // Act
-    drawBubble(spec("held", { expandOnly: [said()] }), first);
+    drawBubble(spec("held", { expandOnly: [said("marker", "same")] }), first);
     // Assert
     expect([first.querySelector(".marker") === kept, kept?.classList.contains(BUBBLE_FOOTER_CLASS)]).toEqual([
       true,
