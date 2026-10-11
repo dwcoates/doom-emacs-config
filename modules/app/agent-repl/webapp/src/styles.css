@@ -1000,6 +1000,14 @@ body::after {
   --merged-row-h: calc(var(--merged-row-pad-y) * 2 + var(--merged-row-line-h));
 }
 #ws-sidebar .repo.merged-section .repo-head { color: var(--info-agents); }
+/* HIDDEN WORKSPACES sits between the grouping and Recently Merged, set apart
+   by the same light rule: it holds no grouping's sections either. Its header
+   keeps the repository headers' colour. */
+#ws-sidebar .repo.hidden-section {
+  margin-top: 0.5rem;
+  padding-top: 0.4rem;
+  border-top: 1px solid color-mix(in srgb, var(--muted) 30%, transparent);
+}
 /* The LINE BOX is pinned, not the row height. Setting `height` drew every
    merged row taller than the content inside it, so the section stood taller
    than the entries it holds — ten merges reached about twelve rows' worth of

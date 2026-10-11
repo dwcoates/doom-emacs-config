@@ -2441,6 +2441,8 @@ export function roster(init?: {
   taskCollapsed?: boolean;
   /** The merged band's daemon-held fold; collapsed unless said, as the daemon's default is. */
   mergedCollapsed?: boolean;
+  /** The hidden section's rows; none unless said, so the section is not drawn. */
+  hidden?: RosterRow[];
 }): WorkspaceRoster {
   const rows = init?.rows ?? [rosterRow()];
   return create(WorkspaceRosterSchema, {
@@ -2475,6 +2477,11 @@ export function roster(init?: {
         maturityStageSection("inProgress", "In Progress", rows, init?.inProgressCollapsed === true),
         maturityStageSection("merging", "Merging", [], false),
       ],
+    },
+    hidden: {
+      header: { label: { text: "Hidden Workspaces" }, count: { workspaces: (init?.hidden ?? []).length } },
+      rows: { rows: init?.hidden ?? [] },
+      fold: { case: "expanded", value: {} },
     },
     recentlyMerged: {
       header: {
