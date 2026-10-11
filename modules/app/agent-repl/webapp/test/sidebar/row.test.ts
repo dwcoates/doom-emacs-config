@@ -219,6 +219,18 @@ describe("the priority badge", () => {
   });
 });
 
+describe("the merge-workspace marker", () => {
+  it("draws the resolver's label verbatim", () => {
+    const drawn = drawRosterRow(row({ id: "ws-1", mergeWorkspace: "merge → master" }), sidebarContext(), "R");
+    expect(drawn.querySelector(".sb-merge-workspace")?.textContent).toBe("merge → master");
+  });
+
+  it("draws no marker for any other workspace", () => {
+    const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
+    expect(drawn.querySelector(".sb-merge-workspace")).toBeNull();
+  });
+});
+
 describe("the when-column", () => {
   it("is empty when the daemon has nothing to show", () => {
     const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");

@@ -596,3 +596,38 @@ describe("the body redraws in place", () => {
     expect(host.querySelectorAll(".merge-tab")).toHaveLength(1);
   });
 });
+
+describe("an agentic tab in the requester's copy of a detached merge", () => {
+  /** A switch payload naming the merge workspace. */
+  const SWITCH = {
+    workspaceSwitch: {
+      label: { text: "resolving conflicts in the merge workspace" },
+      availability: { case: "available", value: { target: { id: "ws-merge", dir: "/w/merge" } } },
+    },
+  };
+
+  it("draws the switch in place of its rows", () => {
+    const view = new FakeSubfeed([tabRow("t1", { kind: "conflicts", state: "live", payload: SWITCH })]);
+    const { host } = mount(view);
+    const panel = host.querySelector(".merge-tab-panel");
+    expect([
+      panel?.querySelector(".merge-workspace-switch-tab .merge-workspace-switch-button")?.textContent,
+      panel?.querySelector(".merge-tab-rows"),
+    ]).toEqual(["resolving conflicts in the merge workspace", null]);
+  });
+
+  it("draws a fixes tab's attempt above its switch", () => {
+    const view = new FakeSubfeed([
+      tabRow("t1", { kind: "fixes", state: "live", payload: { ...SWITCH, attempt: { attempt: 1, maxAttempts: 3 } } }),
+    ]);
+    const { host } = mount(view);
+    const panel = host.querySelector(".merge-tab-panel");
+    expect(panel?.lastElementChild?.classList.contains("merge-workspace-switch-tab")).toBe(true);
+  });
+
+  it("draws its rows as before when it carries no switch", () => {
+    const view = new FakeSubfeed([tabRow("t1", { kind: "conflicts", state: "live" })]);
+    const { host } = mount(view);
+    expect(host.querySelector(".merge-tab-panel .merge-tab-rows")).not.toBeNull();
+  });
+});

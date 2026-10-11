@@ -30,6 +30,7 @@ import { FEED_MERGE_HEAD_GLYPH } from "../../vocab.js";
 import { armName } from "../renderers.js";
 import type { RowContext } from "../renderers.js";
 import { stopTicking } from "../ticking.js";
+import { drawMergeWorkspaceSwitch, switchFacts } from "./workspace-switch.js";
 import type {
   FeedMerge,
   FeedMergeError,
@@ -59,6 +60,13 @@ export function drawFeedMerge(msg: FeedMerge, rc: RowContext): HTMLElement {
   const el = document.createElement("div");
   el.className = "merge-head";
   el.append(drawFeedMergeHead(head));
+  // A DETACHED MERGE'S BUBBLE CARRIES ITS SWITCH for its whole life: queued,
+  // running and settled alike (workspace-switch.ts).
+  if (head.workspaceSwitch !== undefined) {
+    el.append(
+      drawMergeWorkspaceSwitch(switchFacts(head.workspaceSwitch, `${PATH}.head.workspace_switch`), rc, "head"),
+    );
+  }
 
   const runtime = requireMessage(head.runtime, `${PATH}.head.runtime`);
   switch (result.case) {

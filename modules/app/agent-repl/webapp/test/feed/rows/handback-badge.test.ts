@@ -28,7 +28,7 @@ describe("drawHandbackBadge", () => {
   });
 
   it("is what every handback badge row draws through", () => {
-    for (const file of ["subagent-handback.ts"]) {
+    for (const file of ["subagent-handback.ts", "merge-handback.ts"]) {
       const source = codeOf(readFileSync(join(process.cwd(), "src/feed/rows", file), "utf8"));
       expect(source.includes("drawHandbackBadge("), file).toBe(true);
       expect(source.includes("createElement("), file).toBe(false);

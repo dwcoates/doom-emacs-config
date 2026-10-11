@@ -116,7 +116,7 @@ describe("jumpToWorkspace", () => {
   });
 
   it("is the one SelectWorkspace call site in the merge bubble", () => {
-    for (const file of ["queue.ts", "merge.ts", "merge-body.ts"]) {
+    for (const file of ["queue.ts", "merge.ts", "merge-body.ts", "workspace-switch.ts"]) {
       const source = codeOf(readFileSync(join(process.cwd(), "src/feed/merge", file), "utf8"));
       expect(source.includes("selectWorkspace("), file).toBe(false);
     }
