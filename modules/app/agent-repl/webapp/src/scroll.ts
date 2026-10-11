@@ -816,6 +816,21 @@ export class TailFollow {
     if (this.lastTop > reachable) this.lastTop = reachable;
     const top = this.box.scrollTop;
     if (top === this.lastTop) return;
+    // A movement this owner did not write, past the clamp, with no reader
+    // input behind it, has no named cause: the browser moved the box itself.
+    if (!this.touched) {
+      log.info("the feed moved with no reader input and no named cause", {
+        operation: "scroll.feed-moved-uncaused",
+        context: {
+          from: this.lastTop,
+          to: top,
+          scroll_height: this.box.scrollHeight,
+          client_height: this.box.clientHeight,
+          following: this.following,
+          cause: this.cause ?? "none",
+        },
+      });
+    }
     // The reader's movement ends a standing follow unless it went DOWN and
     // landed at the tail: any upward pixel ends it (a flick upward starts with
     // a few px), and so does a downward one that stops short of the tail.

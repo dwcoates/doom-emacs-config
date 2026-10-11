@@ -1667,6 +1667,57 @@ describe("observeScrollBox", () => {
     ]);
   });
 
+  it("records a move no cause wrote and no reader input made, at INFO", async () => {
+    // Arrange — a standing follow at the tail of 1000 - 300.
+    const box = scrollBox({ scrollHeight: 1000, clientHeight: 300, scrollTop: 700 });
+    const tail = new TailFollow(box.element);
+    tail.initialPlacement();
+    observeScrollBox(box.element, tail);
+    const capture = captureLogRecords("info");
+    // Act — the browser pulls the box 32px off its tail on its own.
+    box.element.scrollTop = 668;
+    box.element.dispatchEvent(new Event("scroll"));
+    // Assert
+    const record = await forwardedRecord(capture, "scroll.feed-moved-uncaused");
+    expect([record.level.case, record.context]).toMatchObject([
+      "info",
+      { from: 700, to: 668, scroll_height: 1000, client_height: 300, following: true, cause: "initialPlacement" },
+    ]);
+  });
+
+  it("does not record the reader's own move as uncaused", async () => {
+    // Arrange
+    const box = scrollBox({ scrollHeight: 1000, clientHeight: 300, scrollTop: 700 });
+    const tail = new TailFollow(box.element);
+    tail.initialPlacement();
+    observeScrollBox(box.element, tail);
+    const capture = captureLogRecords("info");
+    // Act — a wheel precedes the movement, so the reader made it.
+    box.element.dispatchEvent(new Event("wheel"));
+    box.element.scrollTop = 668;
+    box.element.dispatchEvent(new Event("scroll"));
+    // Assert
+    capture.logger.flush();
+    await Promise.resolve();
+    expect(capture.sent.filter((r) => r.operation === "scroll.feed-moved-uncaused")).toEqual([]);
+  });
+
+  it("does not record the box's clamp on shrinking content as uncaused", async () => {
+    // Arrange
+    const box = scrollBox({ scrollHeight: 1000, clientHeight: 300, scrollTop: 700 });
+    const tail = new TailFollow(box.element);
+    tail.initialPlacement();
+    observeScrollBox(box.element, tail);
+    const capture = captureLogRecords("info");
+    // Act — the content loses 100px and the box clamps its position to 600.
+    box.contentGrows(-100);
+    box.element.dispatchEvent(new Event("scroll"));
+    // Assert
+    capture.logger.flush();
+    await Promise.resolve();
+    expect(capture.sent.filter((r) => r.operation === "scroll.feed-moved-uncaused")).toEqual([]);
+  });
+
   it("records the box's viewport height change at INFO", async () => {
     // Arrange
     const box = scrollBox({ scrollHeight: 1000, clientHeight: 300, scrollTop: 700 });
