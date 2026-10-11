@@ -669,14 +669,18 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// THE DAEMON POSTS EVERY DESKTOP BANNER. Emacs's focus rides its
 	// WatchDaemon stream (server.Deps.Focus) and decides each one; a click is
 	// relayed to the host stream through the server, bound late.
+	selfExe, err := os.Executable()
+	if err != nil {
+		return nil, fmt.Errorf("claude-repld: resolve this daemon's own binary: %w", err)
+	}
 	focus := desktopnotify.NewFocus(log)
-	backend, backendErr := resolveBannerBackend(log)
+	backend, backendErr := resolveBannerBackend(ctx, log, selectWorkspaceClick(selfExe, p.Layout.Dir()))
 	chime, chimeErr := resolveChime(log)
 	clicks := &clickForwarder{}
 	notifier := desktopnotify.New(desktopnotify.Deps{
 		Focus: focus, Backend: backend, BackendErr: backendErr,
 		Chime: chime, ChimeErr: chimeErr,
-		Clicks: clicks, Names: workspaceNames{db: p.DB}, Log: log,
+		Clicks: clicks, Workspaces: bannerWorkspaces{db: p.DB}, Log: log,
 	})
 	turnBanners := desktopnotify.NewTurnBanners(desktopnotify.TurnDeps{
 		Endings: feedResolver,
@@ -765,10 +769,6 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	loginWatch, err := agentreplsession.NewLoginWatch(account.ReadLoginRecord, agentReplSession, time.Now, log)
 	if err != nil {
 		return nil, fmt.Errorf("claude-repld: build the login watch: %w", err)
-	}
-	selfExe, err := os.Executable()
-	if err != nil {
-		return nil, fmt.Errorf("claude-repld: resolve this daemon's own binary: %w", err)
 	}
 	holdoutWarnEvery, err := resolveHoldoutWarnEvery()
 	if err != nil {

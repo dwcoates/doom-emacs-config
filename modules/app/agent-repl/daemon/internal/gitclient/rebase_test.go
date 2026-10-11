@@ -315,16 +315,6 @@ func TestWriteRebaseTodoBreaksAfterEveryPickButTheLast(t *testing.T) {
 	}
 }
 
-func TestShellQuoteKeepsAPathWithAQuoteOneWord(t *testing.T) {
-	// Arrange / Act.
-	got := shellQuote("/tmp/it's here")
-
-	// Assert.
-	if want := `'/tmp/it'\''s here'`; got != want {
-		t.Fatalf("shellQuote = %s, want %s", got, want)
-	}
-}
-
 func TestAddWorktreeChecksTheExistingBranchOut(t *testing.T) {
 	// Arrange.
 	git, _ := newTestClient(t)

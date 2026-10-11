@@ -18,18 +18,25 @@ import (
 // operator can point it at a build of the program outside PATH.
 const EnvNotifierCmd = "AGENT_REPL_NOTIFIER_CMD"
 
-// ClickTimeout is how long a banner stays clickable before the program
-// dismisses it itself. The program blocks until a click, a dismissal or this
-// timeout, which is what lets the daemon read the click back.
+// ClickTimeout is how long a banner that is READ BACK stays clickable before
+// the program dismisses it itself: such a program (notify-send) blocks until a
+// click, a dismissal or this timeout, which is what lets the daemon read the
+// click back. A banner HANDED to the platform (terminal-notifier) has no such
+// wait: macOS keeps it, and its click runs the action stored with it.
 const ClickTimeout = 60 * time.Second
 
 // postBound bounds one banner program's whole run: its own click timeout plus
 // the program's start and exit. A run past it is a hung program.
 const postBound = ClickTimeout + 10*time.Second
 
-// EmacsBundleID is the bundle the macOS banner is attributed to. macOS
-// foregrounds a banner's originating application when it is clicked, so
-// attributing it to Emacs brings Emacs forward as Emacs selects the tab.
+// versionBound bounds the version query a platform's minimum version is
+// checked with at boot.
+const versionBound = 10 * time.Second
+
+// EmacsBundleID is the application a macOS banner's click brings forward. The
+// banner program activates it from the click itself -- the one moment macOS
+// lets an application hand activation to another -- so Emacs comes forward
+// while the click's SelectWorkspace moves its frame to the workspace.
 const EmacsBundleID = "org.gnu.Emacs"
 
 // Banner is one desktop notification.
@@ -43,6 +50,32 @@ type Banner struct {
 	// its banner is silent and the turn sounds exactly once.
 	Silent bool
 }
+
+// Target is the workspace a banner is posted for: the id its group and its
+// click name, and the directory the click's WorkspaceRef echoes.
+type Target struct {
+	ID  ids.WorkspaceID
+	Dir string
+}
+
+// ClickAction answers the sh command a HANDED banner's click runs for its
+// target. It is the daemon's own `call SelectWorkspace`, so the click reaches
+// whichever daemon serves when it lands, however long after the post that is.
+type ClickAction func(target Target) string
+
+// Outcome is what posting one banner came to.
+type Outcome int
+
+const (
+	// Unclicked is a read-back banner that was dismissed or timed out.
+	Unclicked Outcome = iota
+	// Clicked is a read-back banner that was clicked; the daemon relays it.
+	Clicked
+	// Handed is a banner given to the platform with its click action stored
+	// on it: the click selects the workspace by itself, and nothing is read
+	// back.
+	Handed
+)
 
 // Runner executes one banner program and answers its standard output. It is
 // the package's one exec seam, so every backend is tested with no process.
@@ -66,13 +99,14 @@ func (ExecRunner) Run(ctx context.Context, bin string, args []string) (string, e
 	return stdout.String(), nil
 }
 
-// Backend posts one banner and blocks until it is clicked, dismissed or timed
-// out, reporting whether it was clicked.
+// Backend posts one banner.
 type Backend interface {
 	// Program names the banner program, for the record.
 	Program() string
-	// Post shows the banner for workspace ws.
-	Post(ctx context.Context, ws ids.WorkspaceID, banner Banner) (clicked bool, err error)
+	// Post shows the banner for target, answering what it came to: a
+	// read-back program blocks until the banner is clicked, dismissed or timed
+	// out; a handed one returns once the platform holds it.
+	Post(ctx context.Context, target Target, banner Banner) (Outcome, error)
 }
 
 // Platform names a platform's banner program and how it is spoken to.
@@ -80,57 +114,76 @@ type Platform struct {
 	// Program is the program's default binary name, looked up on PATH.
 	Program string
 	// args composes the argv for one banner.
-	args func(ws ids.WorkspaceID, banner Banner) []string
-	// clicked reads the program's standard output for a click.
-	clicked func(stdout string) bool
+	args func(target Target, banner Banner) []string
+	// outcome reads the program's standard output.
+	outcome func(stdout string) Outcome
+	// minMajor, when non-zero, is the lowest major version the program may be:
+	// versionArgs asks it, and the first number in its answer is the major.
+	minMajor    int
+	versionArgs []string
 }
 
-// PlatformFor answers the banner program for a GOOS: alerter on macOS (it
-// posts through UNUserNotificationCenter and reports a click on stdout), and
-// notify-send on Linux (libnotify, whose --wait prints the invoked action).
-func PlatformFor(goos string) (Platform, error) {
+// PlatformFor answers the banner program for a GOOS: terminal-notifier on
+// macOS (version 3 or later, the UserNotifications rebuild: an older one posts
+// through an API macOS 26 drops without a word), whose banner is HANDED to the
+// platform with click's command stored on it; and notify-send on Linux
+// (libnotify, whose --wait prints the invoked action), READ BACK.
+func PlatformFor(goos string, click ClickAction) (Platform, error) {
 	switch goos {
 	case "darwin":
-		return Platform{Program: "alerter", args: alerterArgs, clicked: alerterClicked}, nil
+		if click == nil {
+			panic("desktopnotify: the macOS banner needs its click action")
+		}
+		return Platform{
+			Program:     "terminal-notifier",
+			args:        func(target Target, banner Banner) []string { return terminalNotifierArgs(target, banner, click) },
+			outcome:     func(string) Outcome { return Handed },
+			minMajor:    3,
+			versionArgs: []string{"-version"},
+		}, nil
 	case "linux":
-		return Platform{Program: "notify-send", args: notifySendArgs, clicked: notifySendClicked}, nil
+		return Platform{Program: "notify-send", args: notifySendArgs, outcome: notifySendOutcome}, nil
 	default:
 		return Platform{}, fmt.Errorf("desktop notifications are not supported on %s", goos)
 	}
 }
 
-// alerterArgs is alerter's argv. Its flags are double-dash long options (the
-// Swift ArgumentParser build refuses single-dash spellings and posts nothing),
-// and the --group keyed to the workspace coalesces that workspace's banners.
-func alerterArgs(ws ids.WorkspaceID, banner Banner) []string {
+// terminalNotifierArgs is terminal-notifier's argv. The -group keyed to the
+// workspace replaces that workspace's previous banner; -activate brings Emacs
+// forward on the click and -execute runs the click's SelectWorkspace.
+//
+// EVERY FREE VALUE IS BACKSLASH-PREFIXED. terminal-notifier reads its options
+// through NSUserDefaults, which parses a value as a property list first: one
+// starting with `[`, `(`, `{` or a quote is misread and the banner is refused.
+// The program strips one leading backslash from every value, so prefixing each
+// one makes every value a plain string whatever it starts with.
+func terminalNotifierArgs(target Target, banner Banner, click ClickAction) []string {
 	args := []string{
-		"--title", banner.Title,
-		"--message", banner.Body,
+		"-title", literal(banner.Title),
+		"-message", literal(banner.Body),
 	}
 	if !banner.Silent {
-		args = append(args, "--sound", "default")
+		args = append(args, "-sound", "default")
 	}
 	return append(args,
-		"--sender", EmacsBundleID,
-		"--timeout", strconv.Itoa(int(ClickTimeout/time.Second)),
-		"--group", "agent-repl:"+string(ws),
+		"-group", literal(bannerGroup(target.ID)),
+		"-activate", EmacsBundleID,
+		"-execute", literal(click(target)),
 	)
 }
 
-// alerterClicked reads alerter's activation token: @CONTENTCLICKED for the
-// banner itself, @ACTIONCLICKED for an action; @TIMEOUT and @CLOSED are not
-// clicks.
-func alerterClicked(stdout string) bool {
-	token := strings.TrimSpace(stdout)
-	return strings.HasPrefix(token, "@CONTENTCLICKED") || strings.HasPrefix(token, "@ACTIONCLICKED")
-}
+// literal escapes one terminal-notifier value so it is read as plain text.
+func literal(value string) string { return `\` + value }
+
+// bannerGroup is the group a workspace's banners share.
+func bannerGroup(ws ids.WorkspaceID) string { return "agent-repl:" + string(ws) }
 
 // notifySendAction is the action a Linux banner click invokes.
 const notifySendAction = "default"
 
 // notifySendArgs is notify-send's argv. The `default` action is what a click
 // on the banner body invokes, and --wait keeps the program alive to print it.
-func notifySendArgs(_ ids.WorkspaceID, banner Banner) []string {
+func notifySendArgs(_ Target, banner Banner) []string {
 	return []string{
 		"--app-name=Emacs",
 		"--action=" + notifySendAction + "=Open",
@@ -141,9 +194,12 @@ func notifySendArgs(_ ids.WorkspaceID, banner Banner) []string {
 	}
 }
 
-// notifySendClicked reads notify-send's invoked action.
-func notifySendClicked(stdout string) bool {
-	return strings.TrimSpace(stdout) == notifySendAction
+// notifySendOutcome reads notify-send's invoked action.
+func notifySendOutcome(stdout string) Outcome {
+	if strings.TrimSpace(stdout) == notifySendAction {
+		return Clicked
+	}
+	return Unclicked
 }
 
 // programBackend is a Backend over one platform's banner program.
@@ -155,13 +211,53 @@ type programBackend struct {
 
 // NewBackend resolves the platform's banner program: $AGENT_REPL_NOTIFIER_CMD
 // when set (override), else the platform's program on PATH. An error names a
-// platform with no banner program or a program that is not installed.
-func NewBackend(platform Platform, override string, lookPath func(string) (string, error), runner Runner) (Backend, error) {
+// platform with no banner program, a program that is not installed, or one
+// older than the platform's minimum version.
+func NewBackend(ctx context.Context, platform Platform, override string, lookPath func(string) (string, error), runner Runner) (Backend, error) {
 	bin, err := resolveProgram("banner", platform.Program, override, lookPath)
 	if err != nil {
 		return nil, err
 	}
+	if platform.minMajor > 0 {
+		if err := checkMajor(ctx, runner, bin, platform); err != nil {
+			return nil, err
+		}
+	}
 	return &programBackend{bin: bin, platform: platform, runner: runner}, nil
+}
+
+// checkMajor refuses a program older than the platform's minimum major
+// version, or one whose version cannot be read.
+func checkMajor(ctx context.Context, runner Runner, bin string, platform Platform) error {
+	ctx, cancel := context.WithTimeout(ctx, versionBound)
+	defer cancel()
+	out, err := runner.Run(ctx, bin, platform.versionArgs)
+	if err != nil {
+		return fmt.Errorf("ask the banner program %s its version: %w", bin, err)
+	}
+	major, ok := firstNumber(out)
+	if !ok {
+		return fmt.Errorf("the banner program %s answered no version: %q", bin, strings.TrimSpace(out))
+	}
+	if major < platform.minMajor {
+		return fmt.Errorf("the banner program %s is version %d, older than the %d this platform needs: %q",
+			bin, major, platform.minMajor, strings.TrimSpace(out))
+	}
+	return nil
+}
+
+// firstNumber answers the first run of digits in s.
+func firstNumber(s string) (int, bool) {
+	start := strings.IndexAny(s, "0123456789")
+	if start < 0 {
+		return 0, false
+	}
+	end := start
+	for end < len(s) && s[end] >= '0' && s[end] <= '9' {
+		end++
+	}
+	n, err := strconv.Atoi(s[start:end])
+	return n, err == nil
 }
 
 // resolveProgram answers the binary one of the notifier's programs runs:
@@ -182,14 +278,14 @@ func resolveProgram(role, program, override string, lookPath func(string) (strin
 func (b *programBackend) Program() string { return b.bin }
 
 // Post implements Backend.
-func (b *programBackend) Post(ctx context.Context, ws ids.WorkspaceID, banner Banner) (bool, error) {
+func (b *programBackend) Post(ctx context.Context, target Target, banner Banner) (Outcome, error) {
 	ctx, cancel := context.WithTimeout(ctx, postBound)
 	defer cancel()
-	stdout, err := b.runner.Run(ctx, b.bin, b.platform.args(ws, banner))
+	stdout, err := b.runner.Run(ctx, b.bin, b.platform.args(target, banner))
 	if err != nil {
-		return false, err
+		return Unclicked, err
 	}
-	return b.platform.clicked(stdout), nil
+	return b.platform.outcome(stdout), nil
 }
 
 // EnvChimeCmd overrides the chime program's binary, exactly as EnvNotifierCmd

@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"claude-repld/internal/shellword"
 )
 
 // Recorder is a fake executable that appends its argv to a record file, so a
@@ -144,8 +146,8 @@ func NewRecorderExecutable(t *testing.T, dir, name string) *Recorder {
 		t:       t,
 	}
 	script := "#!/bin/sh\n" +
-		"AGENT_REPL_FAKE_RECORD=" + shellQuote(r.Record) + "\n" +
-		"AGENT_REPL_FAKE_CONTROL=" + shellQuote(r.Control) + "\n" +
+		"AGENT_REPL_FAKE_RECORD=" + shellword.Quote(r.Record) + "\n" +
+		"AGENT_REPL_FAKE_CONTROL=" + shellword.Quote(r.Control) + "\n" +
 		"export AGENT_REPL_FAKE_RECORD AGENT_REPL_FAKE_CONTROL\n" +
 		strings.TrimPrefix(recorderScript, "#!/bin/sh\n")
 	if err := os.WriteFile(r.Path, []byte(script), 0o755); err != nil {
@@ -216,12 +218,24 @@ func NewFakeBrowser(t *testing.T, dir string) *Recorder {
 	return NewRecorderExecutable(t, dir, "browser")
 }
 
+// FakeNotifierVersion is what the fake banner program prints for every run:
+// the version answer macOS's banner program must give at boot (terminal-notifier
+// 3 or later). A Linux banner reads it as no click, a dismissal.
+const FakeNotifierVersion = "terminal-notifier 3.1.0.\n"
+
+// NotifierVersionQuery is the argument the daemon asks the macOS banner
+// program its version with, at boot: a run that is not a banner.
+const NotifierVersionQuery = "-version"
+
 // NewFakeNotifier writes the desktop banner program the daemon posts through
-// (AGENT_REPL_NOTIFIER_CMD). It records the platform argv and prints nothing,
-// which every platform reads as a dismissal; SetStdout scripts a click.
+// (AGENT_REPL_NOTIFIER_CMD). It records the platform argv and prints
+// FakeNotifierVersion, which the macOS boot check accepts and every
+// read-back platform reads as a dismissal; SetStdout scripts a click.
 func NewFakeNotifier(t *testing.T, dir string) *Recorder {
 	t.Helper()
-	return NewRecorderExecutable(t, dir, "notifier")
+	r := NewRecorderExecutable(t, dir, "notifier")
+	r.SetStdout(FakeNotifierVersion)
+	return r
 }
 
 // NewFakeChime writes the turn-end sound player the daemon rings through
@@ -316,8 +330,6 @@ func writeFile(t *testing.T, path, content string) {
 		t.Fatalf("harness: write %s: %v", path, err)
 	}
 }
-
-func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
 
 // FakeHostNetwork is the Wi-Fi network the fake host tools report joined.
 const FakeHostNetwork = "Harness Net"
