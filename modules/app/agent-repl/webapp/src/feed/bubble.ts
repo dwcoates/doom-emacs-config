@@ -38,6 +38,7 @@
  * it, and from then on THE READER'S FOLD WINS on this page too: a push still
  * stating the daemon's default never overrides it.
  */
+import { drawToolHead } from "./cards/tool-head.js";
 import { armButtonRole, CONTROL_SELECTOR } from "../control.js";
 import { log } from "../log.js";
 import { announceItemExpanded } from "../expand.js";
@@ -166,8 +167,7 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
   // The head is therefore the accessible toggle in its own right — `role`,
   // `tabIndex`, `aria-expanded` and Enter/Space activation all ride it, the
   // affordance the removed `<button>` used to carry.
-  const headLine = document.createElement("div");
-  headLine.className = "tool-head bubble-head";
+  const headLine = drawToolHead("bubble-head");
   headLine.setAttribute("data-expand", id.value);
   armButtonRole(headLine);
   headLine.setAttribute("aria-expanded", "false");

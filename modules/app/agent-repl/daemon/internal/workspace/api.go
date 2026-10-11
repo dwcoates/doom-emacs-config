@@ -355,6 +355,16 @@ type Verbs interface {
 	// AnswerQuestion delivers the question card's answer, echoing the served
 	// values.
 	AnswerQuestion(ctx context.Context, ws ids.WorkspaceID, answer *conversationv1.AgentAnswer) error
+	// UpdateQuestionDraft applies one click to a standing question card's
+	// daemon-owned draft and, when the click answered the batch's last
+	// question, delivers the batch (askdraft.go).
+	UpdateQuestionDraft(ctx context.Context, ws ids.WorkspaceID, ask string, edit feed.QuestionEdit) error
+	// AnswerStandingAsk takes a user's typed send as the answer to the oldest
+	// ask standing on the addressed feed (target nil = the root): the active
+	// question of a batch takes it as its typed answer, a permission ask is
+	// denied with it as the reason. It answers false, having done nothing,
+	// when no ask stands there.
+	AnswerStandingAsk(ctx context.Context, ws ids.WorkspaceID, target *feedid.Ref, text string) (bool, error)
 	// OpenExternal opens a clicked link in the pinned external browser.
 	OpenExternal(ctx context.Context, ws ids.WorkspaceID, url string) error
 	// OpenInEditor RELAYS a web link click onto the workspace's host stream
@@ -632,6 +642,13 @@ type Cards interface {
 	// Question answers the served question batch, false when nothing with that
 	// id is standing.
 	Question(ws ids.WorkspaceID, id *conversationv1.AgentQuestionId) (ServedQuestion, bool)
+	// EditQuestionDraft applies one edit to a standing question batch's
+	// draft, where the feed resolver holds it (feed.Resolver.EditQuestionDraft).
+	EditQuestionDraft(ws ids.WorkspaceID, ask string, edit feed.QuestionEdit) (feed.QuestionDraftOutcome, error)
+	// ReleaseQuestionDelivery frees a claimed batch whose delivery failed.
+	ReleaseQuestionDelivery(ws ids.WorkspaceID, ask string)
+	// StandingAsk answers the oldest ask standing on the addressed feed.
+	StandingAsk(ws ids.WorkspaceID, target *feedid.Ref) (feed.StandingAsk, bool)
 	// ColdGate answers the standing cold gate's served menu, false when no
 	// gate stands.
 	ColdGate(ws ids.WorkspaceID) (ServedColdGate, bool)

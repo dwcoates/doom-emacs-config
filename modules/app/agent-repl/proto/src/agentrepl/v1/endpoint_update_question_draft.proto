@@ -1,0 +1,115 @@
+// endpoint_update_question_draft.proto — UpdateQuestionDraft: one click on a
+// standing question card. FEED section.
+//
+// THE DAEMON OWNS THE DRAFT. Which question the card shows and what each
+// question has been given so far live daemon-side and ride the card as
+// frontend.v1.FeedQuestionOpen, so the webapp's clicks and the editor's typed
+// answer (agentrepl.v1.SubmitPromptAskAnswered) edit ONE record. There is no
+// submit: the moment every question is answered the daemon delivers the batch
+// itself. Success is "applied" — the card's new state arrives as the row's
+// re-push.
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+import "frontend/v1/feed.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message UpdateQuestionDraftRequest {
+  // The workspace whose card this is.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // The question card's row, exactly as the feed served it.
+  frontend.v1.FeedId question = 2;
+  // WHAT THE CLICK DID. Every arm names its question by ECHOING the served
+  // text, never by position.
+  oneof edit {
+    // A tab was clicked: show this question.
+    UpdateQuestionDraftShow show = 3;
+    // An option was clicked. On a single-select it becomes the answer (a
+    // click on the option already chosen clears it); on a multi-select it
+    // toggles the tick and leaves the question unanswered until confirmed.
+    UpdateQuestionDraftPick pick = 4;
+    // A multi-select's confirm was clicked: its ticks are its answer.
+    UpdateQuestionDraftConfirm confirm = 5;
+  }
+}
+
+// Show one question.
+message UpdateQuestionDraftShow {
+  // The question's text, echoed verbatim.
+  string question_text = 1;
+}
+
+// Click one option.
+message UpdateQuestionDraftPick {
+  // The question's text, echoed verbatim.
+  string question_text = 1;
+  // The option's label, echoed verbatim.
+  string label = 2;
+}
+
+// Confirm one multi-select question.
+message UpdateQuestionDraftConfirm {
+  // The question's text, echoed verbatim.
+  string question_text = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message UpdateQuestionDraftResponse {
+  oneof result {
+    UpdateQuestionDraftSuccess success = 1;
+    UpdateQuestionDraftError error = 2;
+  }
+}
+
+// Applied (and, when it answered the last question, delivered). Empty on
+// purpose — the card's new state is the feed's push.
+message UpdateQuestionDraftSuccess {}
+
+// Validation failures (unset field, blank string) are Connect InvalidArgument, never an arm.
+message UpdateQuestionDraftError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    UpdateQuestionDraftUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    UpdateQuestionDraftWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    UpdateQuestionDraftTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    UpdateQuestionDraftNotYetAdopted not_yet_adopted = 4;
+    // The question card is no longer standing, or its answers are already
+    // being delivered.
+    UpdateQuestionDraftAskNotStanding ask_not_standing = 5;
+    // A question text or option label the batch never served, or a confirm
+    // on a question that is not a multi-select.
+    UpdateQuestionDraftUnservedValue unserved_value = 6;
+    // The click answered the last question and the workspace has no session
+    // to deliver the batch to.
+    UpdateQuestionDraftNoSession no_session = 7;
+  }
+}
+
+message UpdateQuestionDraftUnknownWorkspace {}
+
+message UpdateQuestionDraftWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+
+message UpdateQuestionDraftTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+
+message UpdateQuestionDraftNotYetAdopted {}
+
+message UpdateQuestionDraftAskNotStanding {}
+
+message UpdateQuestionDraftUnservedValue {
+  // The unserved text, as echoed.
+  string text = 1;
+}
+
+message UpdateQuestionDraftNoSession {}

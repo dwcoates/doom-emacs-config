@@ -16,6 +16,7 @@
  * fact would be two things to keep in step, and the reader wants to land on the
  * real card with its output.
  */
+import { drawToolHead, drawToolName } from "./tool-head.js";
 import { armButtonRole } from "../../control.js";
 import type {
   FeedHook,
@@ -51,8 +52,7 @@ export function drawFeedHook(u: FeedHook, rc: RowContext): HTMLElement {
     outcome.case === "blocked" ? "tool-card tool-hook tool-hook-blocked" : "tool-card tool-hook";
   card.setAttribute("data-state", outcome.case);
 
-  const head = document.createElement("div");
-  head.className = "tool-head";
+  const head = drawToolHead();
   // THE HEADLINE IS THE CARD'S TITLE (owner ruling, 2026-09-23): the
   // one-line title fold. A hook card has no card-level fold, so the headline is
   // its own (title-fold.ts). No draw here stops the card's ticking, so folding
@@ -98,10 +98,7 @@ export function drawFeedHookHeadline(u: FeedHookHeadline, path: string): HTMLEle
     operation: "feed.cards.hook.headline",
     context: { path },
   });
-  const headline = document.createElement("span");
-  headline.className = "tool-name";
-  headline.textContent = u.text;
-  return headline;
+  return drawToolName(u.text);
 }
 
 /**

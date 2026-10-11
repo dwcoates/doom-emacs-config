@@ -1592,6 +1592,99 @@ WARN and must never reach the `unknown-error-arm' ERROR branch."
                      agent-repl-test-input--error
                      "elisp.input.unknown-error-arm"))))))
 
+(defconst agent-repl-test-input--ask-answered-answer
+  '(:response (:arm :success :value (:arm :ask-answered :value nil)))
+  "A scripted `ask_answered' success: the send answered a standing ask.")
+
+(ert-deftest agent-repl-input-ask-answered-arm-clears-the-composer ()
+  "A typed answer to a standing ask landed: nothing awaited, so the input
+clears."
+  (agent-repl-test-input--with
+    (setq agent-repl-test-input--answer agent-repl-test-input--ask-answered-answer)
+    (agent-repl-test-input--type "use OAuth")
+    (agent-repl--send :user-sent)
+    (should (equal (agent-repl-test-input--composer-text) ""))))
+
+(ert-deftest agent-repl-input-ask-answered-arm-runs-no-posthooks ()
+  "No turn was minted, so there is nothing for a posthook to post-process."
+  (agent-repl-test-input--with
+    (setq agent-repl-test-input--answer agent-repl-test-input--ask-answered-answer)
+    (let* ((ran nil)
+           (agent-repl-send-posthooks
+            (list (cons "" (lambda (_ws _raw) (setq ran t))))))
+      (agent-repl-test-input--type "use OAuth")
+      (agent-repl--send :user-sent)
+      (should-not ran))))
+
+(ert-deftest agent-repl-input-ask-answered-arm-is-recorded ()
+  "The typed answer is recorded at INFO, never as an unknown success arm."
+  (agent-repl-test-input--with
+    (setq agent-repl-test-input--answer agent-repl-test-input--ask-answered-answer)
+    (agent-repl-test-input--type "use OAuth")
+    (agent-repl-test-input--capturing-rungs
+      (agent-repl--send :user-sent)
+      (should (agent-repl-test-input--rung-has-p
+               agent-repl-test-input--info "elisp.input.ask-answered"))
+      (should-not (agent-repl-test-input--rung-has-p
+                   agent-repl-test-input--error "elisp.input.unknown-success-arm")))))
+
+(defconst agent-repl-test-input--ask-not-standing-answer
+  '(:response (:arm :error :value (:reason (:arm :ask-not-standing :value nil))))
+  "A scripted `ask_not_standing' refusal: the ask settled first.")
+
+(ert-deftest agent-repl-input-ask-not-standing-keeps-the-text ()
+  "The typed answer reached nobody, so the composer keeps the text."
+  (agent-repl-test-input--with
+    (setq agent-repl-test-input--answer agent-repl-test-input--ask-not-standing-answer)
+    (agent-repl-test-input--type "use OAuth")
+    (agent-repl--send :user-sent)
+    (should (equal (agent-repl-test-input--composer-text) "use OAuth"))))
+
+(ert-deftest agent-repl-input-ask-not-standing-is-not-queued ()
+  "A re-drive would reach the session as a prompt the user never meant, so
+nothing is held."
+  (agent-repl-test-input--with
+    (setq agent-repl-test-input--answer agent-repl-test-input--ask-not-standing-answer)
+    (agent-repl-test-input--type "use OAuth")
+    (agent-repl--send :user-sent)
+    (should-not agent-repl-test-input--queued)))
+
+(ert-deftest agent-repl-input-ask-not-standing-flashes-and-records-it ()
+  "The refusal says what happened and is recorded at INFO, not as an
+unknown arm."
+  (agent-repl-test-input--with
+    (setq agent-repl-test-input--answer agent-repl-test-input--ask-not-standing-answer)
+    (agent-repl-test-input--type "use OAuth")
+    (agent-repl-test-input--capturing-rungs
+      (agent-repl--send :user-sent)
+      (should (equal (buffer-local-value 'agent-repl-input-notice
+                                         agent-repl-test-input--buffer)
+                     agent-repl--input-ask-not-standing-flash))
+      (should (agent-repl-test-input--rung-has-p
+               agent-repl-test-input--info "elisp.input.refused-ask-not-standing"))
+      (should-not (agent-repl-test-input--rung-has-p
+                   agent-repl-test-input--error "elisp.input.unknown-error-arm")))))
+
+(ert-deftest agent-repl-input-say-refusal-flashes-and-echoes-the-sentence ()
+  "The helper flashes the sentence in the composer and echoes it alone."
+  (agent-repl-test-input--with
+    (agent-repl--input-say-refusal "ws-one" "refused for a reason")
+    (should (equal (buffer-local-value 'agent-repl-input-notice agent-repl-test-input--buffer)
+                   "refused for a reason"))
+    (should (member "agent-repl: refused for a reason" agent-repl-test-input--messages))))
+
+(ert-deftest agent-repl-input-say-refusal-appends-a-detail-verbatim ()
+  "A non-empty detail rides the echo in parentheses, verbatim."
+  (agent-repl-test-input--with
+    (agent-repl--input-say-refusal "ws-one" "refused" "the daemon's words")
+    (should (member "agent-repl: refused (the daemon's words)" agent-repl-test-input--messages))))
+
+(ert-deftest agent-repl-input-say-refusal-drops-an-empty-detail ()
+  "An empty detail adds nothing, not an empty pair of parentheses."
+  (agent-repl-test-input--with
+    (agent-repl--input-say-refusal "ws-one" "refused" "")
+    (should (member "agent-repl: refused" agent-repl-test-input--messages))))
+
 (defconst agent-repl-test-input--no-session-answer
   '(:response (:arm :error :value (:reason (:arm :no-session :value nil))))
   "A scripted `no_session' refusal: a workspace with no session at all.")

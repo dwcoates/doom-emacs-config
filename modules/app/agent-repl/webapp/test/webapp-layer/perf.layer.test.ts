@@ -27,7 +27,7 @@
 import { afterAll, beforeAll, expect, it } from "vitest";
 
 import type { MountedApp } from "../integration/harness";
-import { BOOT_BUDGET_MS, TURN_BUDGET_MS, awaitDrawn, bootLayer, rows } from "./drive";
+import { BOOT_BUDGET_MS, TURN_BUDGET_MS, answerQuestionsByTyping, awaitDrawn, bootLayer, rows } from "./drive";
 import {
   ApplyProbe,
   PERF_SAMPLES,
@@ -341,24 +341,9 @@ function isCurrent(id: string): boolean {
   return rosterRow(id)?.getAttribute("data-current") === "true";
 }
 
-/** Answer every standing question card through its own free-text escape. */
+/** Answer every standing question card with a typed answer, as a user does. */
 async function answerStandingQuestions(): Promise<void> {
-  const submits = app.$$('[data-feed-row][data-row-kind="question"] [data-question-submit]');
-  for (const submitButton of submits) {
-    const card = submitButton.closest("[data-feed-row]");
-    const other = card?.querySelector<HTMLInputElement>("[data-question-other]");
-    if (other) {
-      other.value = "perf answer";
-      other.dispatchEvent(new Event("input", { bubbles: true }));
-      await app.settle();
-    }
-    await app.clickElement(submitButton);
-  }
-  await awaitDrawn(
-    app,
-    "every question card to leave its standing state",
-    () => app.$$('[data-row-kind="question"][data-state="standing"]').length === 0,
-  );
+  await answerQuestionsByTyping(app, "perf answer");
 }
 
 /** An environment value the Go driver owes this child. */

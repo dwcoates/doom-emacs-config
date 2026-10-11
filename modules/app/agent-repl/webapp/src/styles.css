@@ -1932,8 +1932,8 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
 /* THE feed-card rule: one maximum width for every full-width card the feed
    draws, and it is the SAME `--agent-bubble-cap` the assistant's response
    bubble is capped at. A permission request, the resolved card that replaces
-   it, an AskUserQuestion Q&A, an unsupported-command or /status panel (all
-   `.permission`), a lone `.tool-card`, a consecutive-run `.feed-group`
+   it, an AskUserQuestion Q&A (both `.tool-card`s since 2026-10-11), an
+   unsupported-command or /status panel, a lone `.tool-card`, a consecutive-run `.feed-group`
    wrapping one, and a thinking fold now all stop at the response's right
    edge — no card kind is allowed a wider or a narrower ceiling than the
    answer it sits beside, so the feed reads as one column rather than a stack
@@ -1949,7 +1949,6 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
    are NOT centered — each fits its text and hugs its own rail (see below). */
 .feed-item > .tool-card,
 .feed-item > .feed-group,
-.feed-item > .permission,
 .feed-item > .thinking {
   max-width: var(--agent-bubble-cap);
   margin-left: auto;
@@ -2830,14 +2829,6 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
    the phantom leading gap of its first block's own margin. */
 .tool-output-md > :first-child { margin-top: 0; }
 
-.permission {
-  border: 1px solid var(--accent);
-  border-radius: 8px;
-  padding: 0.6rem 0.9rem;
-  font-size: calc(0.9rem * var(--feed-text-scale));
-}
-.permission.resolved { border-color: var(--border); color: var(--muted); }
-.perm-head { font-weight: 600; margin-bottom: 0.35rem; }
 .perm-actions { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
 .perm-actions ar-button { cursor: pointer; }
 
@@ -3213,16 +3204,6 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
   color: var(--accent);
   font-weight: 600;
 }
-/* The pending picker rings itself in yellow, overriding the blue .permission
-   border, so the panel awaiting an answer stands apart from an ordinary
-   allow/deny prompt. Scoped to .pending so a resolved picker keeps the muted
-   grey border of a settled prompt. */
-.permission.pending.question { border-color: var(--q-border); }
-.permission.question .perm-actions ar-button[data-q-submit][aria-disabled="true"] {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
 /* An unsupported slash command's card (see unsupported.ts). Rings in the
    --err red a refusal carries, scoped to .pending so the card fades to the
    settled grey once the support workspace has been asked for. The in-flight
@@ -6296,11 +6277,11 @@ ar-button.outcome-marker-pill {
 
 /* ---- feed asks: the consent card (src/feed/asks/permission.ts) ---------- */
 
-/* THE CARD IS THE EXISTING `.permission` PROMPT, unchanged: the blue ring while
-   it stands, the muted grey once it settles, the `.perm-head` title and the
-   `.perm-actions` button row. Below are only the elements the new schema added
-   — the vendor's subtitle, the trigger note, the argument preview, the waiting
-   clock and the verdict line. */
+/* THE CARD IS A TOOL CARD (owner ruling, 2026-10-11): the grey `.tool-card`
+   chrome, the vendor's headline as its `.tool-name`, the waiting clock beside
+   it in the `.tool-head`, and the `.perm-actions` button row. Below are the
+   card's own elements — the vendor's subtitle, the trigger note, the argument
+   preview, the waiting clock, the editor hint and the verdict line. */
 
 .perm-subtitle {
   color: var(--muted);
@@ -6327,26 +6308,21 @@ ar-button.outcome-marker-pill {
   overflow-wrap: anywhere;
 }
 /* How long the turn has been blocked on this ask, ticking from the row's first
-   draw. Muted: it is a fact about the wait, not a deadline. */
+   draw, in the head where a tool call's badge sits. Muted: it is a fact about
+   the wait, not a deadline. */
 .perm-waiting {
-  display: block;
-  margin-top: 0.35rem;
   color: var(--muted);
   font-size: 0.75rem;
   font-variant-numeric: tabular-nums;
 }
-/* The deny reason field sits AFTER the buttons and grows to fill the row, so it
-   never pushes the decision the user came for off to the side. */
-.perm-reason {
-  font: inherit;
-  font-size: 0.8rem;
-  flex: 1 1 8rem;
-  min-width: 0;
-  padding: 0.15rem 0.4rem;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg);
-  color: var(--fg);
+/* WHERE TO TYPE (both ask cards): a deny's reason and a question's own answer
+   are typed in the Emacs composer, never on the card, and this line says so.
+   Quiet, under the card's controls. */
+.ask-hint {
+  margin-top: 0.4rem;
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-style: italic;
 }
 .perm-actions ar-button[aria-disabled="true"] {
   opacity: 0.45;
@@ -6369,89 +6345,31 @@ ar-button.outcome-marker-pill {
 
 /* ---- feed asks: the question card (src/feed/asks/question.ts) ----------- */
 
-/* THE PICKER IS THE EXISTING AskUserQuestion PANEL: the yellow ring while it
-   awaits an answer, the `.q-chip` title, the italic `.q-text`, and the pill
-   `.q-opt` chips laid out in a wrapping row. What changed is that an option is
-   now a real radio or checkbox inside its chip — the batch submits once, so a
-   chip has to carry a selection rather than being a button that answers — and
-   that the free-text escape is always drawn. */
-
-/* The input sits inside the pill it belongs to. */
-.q-opt input {
-  margin-right: 0.4em;
-  vertical-align: middle;
-}
+/* THE CARD IS A TOOL CARD (owner ruling, 2026-10-11): grey `.tool-card` chrome
+   and, for a batch, the SAME tabs a run of tool calls wears (`.feed-tab-strip`
+   + `.feed-group-tab`, src/feed/tabs.ts), here in flow under the head rather
+   than laid over the card. An option is a pill control that is `.selected`
+   when the daemon's draft holds it; a typed answer is the editor's, drawn as a
+   quiet line under the options. */
+.q-tabs { margin-bottom: 0.3rem; }
 .q-opt-description {
   color: var(--muted);
   font-size: 0.85em;
   margin-left: 0.4em;
 }
-/* ALWAYS DRAWN, whether or not the agent asked for it: a person answering a
-   machine's multiple choice must always be able to say something it did not
-   think of. Full width under the chips, so it reads as another way to answer
-   rather than as one more option. */
-.q-other {
-  font: inherit;
-  font-size: 0.85em;
-  display: block;
-  width: 100%;
-  margin-top: 0.45em;
-  padding: 0.2rem 0.45rem;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg);
-  color: var(--fg);
-}
-/* The note a blocked submit leaves BESIDE THE QUESTION that is missing — not at
-   the button, because the button is not where the gap is. */
-.q-note {
-  margin-top: 0.3em;
-  color: var(--thinking);
-  font-size: 0.8rem;
-}
-
-/* ---- feed asks: the question batch as TABS (src/feed/asks/question.ts) ---
-   A batch is drawn one question per TAB: a wrapping strip of tab buttons, then
-   one visible `.q-panel` at a time. Answering a question auto-advances to the
-   next unanswered tab; the strip marks answered tabs with a check. */
-.q-tabs {
+/* What was typed in the editor for the shown question. */
+.q-typed {
   display: flex;
-  flex-wrap: wrap;
+  align-items: baseline;
   gap: 0.35em;
-  margin-bottom: 0.55em;
-}
-.q-tab {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35em;
-  font: inherit;
+  margin-top: 0.45em;
   font-size: 0.85em;
-  cursor: pointer;
-  border: 1px solid var(--border);
-  background: var(--q-opt-bg);
-  color: var(--muted);
-  border-radius: 999px;
-  padding: 0.2em 0.75em;
 }
-.q-tab:hover { border-color: var(--accent); }
-/* The active tab is the panel on show: accent ring, accent text. */
-.q-tab.active {
-  border-color: var(--accent);
-  color: var(--accent);
-  font-weight: 600;
-}
-/* An answered tab wears a green check; a pending tab's marker is empty. */
-.q-tab.answered .q-tab-marker { color: var(--ok); }
-.q-tab-marker {
-  width: 0.9em;
-  text-align: center;
-  font-weight: 700;
-}
-/* Only the active panel shows; a class rule so it outranks nothing that would
-   force it visible, and the UA `[hidden]` rule keeps the rest collapsed. */
+.q-typed-label { color: var(--muted); }
+/* Only the shown panel is drawn visible; the UA `[hidden]` rule keeps the rest
+   collapsed, and this class rule outranks nothing that would force it on. */
 .q-panel[hidden] { display: none; }
-/* The multi-select's commit button: it advances the tab, so it reads as a
-   forward action rather than the batch's final submit. */
+/* The multi-select's confirm: a tick is not an answer, and this is. */
 .q-confirm {
   font: inherit;
   font-size: 0.85em;
@@ -6464,6 +6382,10 @@ ar-button.outcome-marker-pill {
   padding: 0.2em 0.75em;
 }
 .q-confirm:hover { border-color: var(--accent); }
+.ask-card ar-button[aria-disabled="true"] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
 .q-verdicts {
   font-size: 0.85rem;
 }
@@ -7506,20 +7428,25 @@ ar-button.outcome-marker-pill {
 .feed-group {
   position: relative;
 }
-/* The strip: one tab per member, icon + 1-based index, wrapping when many.
-   Inset by the member card's 1px border and its 0.3rem top / 0.75rem side
-   padding, and raised over the card, which comes later in the document. */
+/* EVERY FEED TAB STRIP (src/feed/tabs.ts): one tab per entry, icon + 1-based
+   index (+ label), wrapping when many. Its size only; where a strip sits is its
+   card's concern. */
+.feed-tab-strip {
+  display: flex;
+  flex-wrap: wrap;
+  /* Scaled with the tabs it holds, by the same 1.25. */
+  gap: 0.156rem;
+  padding: 0.062rem 0 0.188rem;
+}
+/* The tool group's strip, inset by the member card's 1px border and its
+   0.3rem top / 0.75rem side padding, and raised over the card, which comes
+   later in the document. */
 .feed-group-strip {
   position: absolute;
   z-index: 1;
   top: calc(1px + 0.3rem);
   left: calc(1px + 0.75rem);
   right: calc(1px + 0.75rem);
-  display: flex;
-  flex-wrap: wrap;
-  /* Scaled with the tabs it holds, by the same 1.25. */
-  gap: 0.156rem;
-  padding: 0.062rem 0 0.188rem;
 }
 .feed-group-tab {
   display: inline-flex;

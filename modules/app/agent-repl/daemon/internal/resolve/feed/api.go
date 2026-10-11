@@ -240,6 +240,21 @@ type Resolver interface {
 	// agent blocked on it and the batch as served, so an answer naming a
 	// question the batch never carried is refused rather than forwarded.
 	ServedQuestion(ws ids.WorkspaceID, ask string) (*conversationv1.AgentId, *conversationv1.AgentQuestionBatch, bool)
+	// EditQuestionDraft applies one edit to a STANDING question batch's draft
+	// — the record the open card is drawn from — and re-publishes the card
+	// (questiondraft.go). When the edit answered the batch's last question
+	// the outcome carries the answers to deliver and the batch is CLAIMED:
+	// no further edit applies, and a typed answer no longer routes to it,
+	// until the delivery settles the ask or ReleaseQuestionDelivery frees it.
+	// Refuses ErrQuestionNotStanding and *UnservedQuestionValueError.
+	EditQuestionDraft(ws ids.WorkspaceID, ask string, edit QuestionEdit) (QuestionDraftOutcome, error)
+	// ReleaseQuestionDelivery frees a claimed batch whose delivery failed, so
+	// the next edit that leaves it answered delivers it again.
+	ReleaseQuestionDelivery(ws ids.WorkspaceID, ask string)
+	// StandingAsk answers the OLDEST ask standing on the feed a submission
+	// addresses (the root when target is nil, else the sub-feed headed by
+	// target) — the ask a user's typed send answers.
+	StandingAsk(ws ids.WorkspaceID, target *feedid.Ref) (StandingAsk, bool)
 
 	// FinalResponses answers the workspace's ordered selectable final-response
 	// rows — the ones drawn with the green final-answer border, oldest first —

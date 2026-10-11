@@ -28,6 +28,7 @@
  * row's `data-unit="skill"` so a skill's nested work keeps the teal card's
  * always-open, shared-cap, scrolled-not-clipped guarantees.
  */
+import { drawToolHead, drawToolName } from "./tool-head.js";
 import type {
   FeedSkill,
   FeedSkillAllowances,
@@ -67,8 +68,7 @@ export function drawFeedSkill(u: FeedSkill, _rc: RowContext): HTMLElement {
   card.className = "tool-card tool-skill";
   card.setAttribute("data-state", outcome.case);
 
-  const head = document.createElement("div");
-  head.className = "tool-head";
+  const head = drawToolHead();
   // THE INVOCATION IS THE CARD'S TITLE (owner ruling, 2026-09-23): the
   // one-line title fold. A LOADED card is a `.tool-fold` (below) and owns it; a
   // card in any other state has no fold of its own, so the title is its own
@@ -130,10 +130,7 @@ export function drawFeedSkillInvocation(
     operation: "feed.cards.skill.invocation",
     context: { path },
   });
-  const el = document.createElement("span");
-  el.className = "tool-name";
-  el.textContent = u.text;
-  return el;
+  return drawToolName(u.text);
 }
 
 /**

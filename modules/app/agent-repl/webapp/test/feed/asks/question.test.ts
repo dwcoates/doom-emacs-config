@@ -3,10 +3,10 @@ import { type Control } from "../../../src/control.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create, type MessageInitShape } from "@bufbuild/protobuf";
 import {
-  AnswerQuestionErrorSchema,
-  AnswerQuestionResponseSchema,
-  type AnswerQuestionResponse,
-} from "../../../../proto/gen/ts/agentrepl/v1/endpoint_answer_question_pb";
+  UpdateQuestionDraftErrorSchema,
+  UpdateQuestionDraftResponseSchema,
+  type UpdateQuestionDraftResponse,
+} from "../../../../proto/gen/ts/agentrepl/v1/endpoint_update_question_draft_pb";
 import {
   FeedIdSchema,
   FeedQuestionItemSchema,
@@ -26,14 +26,19 @@ import {
   drawFeedQuestion,
   EXPIRED_TEXT,
   QUESTION_STATE_ARMS,
-  UNANSWERED_NOTE,
+  QUESTION_TITLE,
+  TAB_GLYPHS,
+  TYPE_IN_EDITOR_HINT,
+  TYPED_LABEL,
 } from "../../../src/feed/asks/question.js";
+import { drawFeedTab, FEED_TAB_CLASS, FEED_TAB_STRIP_CLASS } from "../../../src/feed/tabs.js";
 import { armsOf } from "../arms.js";
 import { askHarness, ROW_ID, settle as drain, WORKSPACE } from "./harness.js";
 import { stopClocks } from "../../../src/feed/ticking.js";
 import { orderFor } from "../../feed-order.js";
 
 type InitState = MessageInitShape<typeof FeedQuestionSchema>["state"];
+type InitDraft = { chosen?: string[]; otherText?: { text: string }; answered?: boolean };
 
 /** One question of a batch, single- or multi-select. */
 function item(
@@ -62,64 +67,23 @@ function question(state: InitState, questions: FeedQuestionItem[] = [item()]): F
   return create(FeedQuestionSchema, { questions, state });
 }
 
-/** A refused answer carrying CAUSE. */
-function refused(cause: MessageInitShape<typeof AnswerQuestionErrorSchema>["cause"]) {
-  return create(AnswerQuestionResponseSchema, { result: { case: "error", value: { cause } } });
+/** A standing card over QUESTIONS, showing ACTIVE, with one draft per question. */
+function open(
+  questions: FeedQuestionItem[] = [item()],
+  opts: { active?: number; drafts?: InitDraft[] } = {},
+): FeedQuestion {
+  const drafts = questions.map((_q, i) => opts.drafts?.[i] ?? {});
+  return question({ case: "open", value: { active: opts.active ?? 0, drafts } }, questions);
 }
 
-/** Tick one option's input, by its served label. */
-function pick(el: HTMLElement, label: string): void {
-  const input = el.querySelector<HTMLInputElement>(`[data-question-option="${label}"]`);
-  if (input !== null) input.checked = true;
+/** A refused edit carrying CAUSE. */
+function refused(cause: MessageInitShape<typeof UpdateQuestionDraftErrorSchema>["cause"]) {
+  return create(UpdateQuestionDraftResponseSchema, { result: { case: "error", value: { cause } } });
 }
 
-/** Type into one question's free-text field, by the question's index. */
-function type(el: HTMLElement, index: number, text: string): void {
-  const blocks = el.querySelectorAll<HTMLElement>("[data-question]");
-  const field = blocks[index]?.querySelector<HTMLInputElement>("[data-question-other]");
-  if (field != null) field.value = text;
-}
-
-/** Click an option's input inside one question, firing the real toggle path. */
-function clickOpt(el: HTMLElement, index: number, label: string): void {
-  const blocks = el.querySelectorAll<HTMLElement>("[data-question]");
-  blocks[index]
-    ?.querySelector<HTMLInputElement>(`[data-question-option="${label}"]`)
-    ?.click();
-}
-
-/** Click one question's tab, by index. */
-function clickTab(el: HTMLElement, index: number): void {
-  el.querySelector<Control>(`[data-question-tab="${index}"]`)?.click();
-}
-
-/** Press one multi-select question's confirm button, by index. */
-function confirmQ(el: HTMLElement, index: number): void {
-  const blocks = el.querySelectorAll<HTMLElement>("[data-question]");
-  blocks[index]?.querySelector<Control>("[data-question-confirm]")?.click();
-}
-
-/** The index of the active (shown) tab, or -1 when none is. */
-function activeTab(el: HTMLElement): number {
-  const t = el.querySelector(".q-tab.active");
-  return t === null ? -1 : Number(t.getAttribute("data-question-tab"));
-}
-
-/** Each tab's answered flag, in the batch's order. */
-function answeredFlags(el: HTMLElement): boolean[] {
-  return [...el.querySelectorAll<HTMLElement>(".q-tab")].map(
-    (t) => t.getAttribute("data-answered") === "true",
-  );
-}
-
-/** Whether one question's option input is currently checked, by index + label. */
-function isChecked(el: HTMLElement, index: number, label: string): boolean {
-  const blocks = el.querySelectorAll<HTMLElement>("[data-question]");
-  return (
-    blocks[index]?.querySelector<HTMLInputElement>(
-      `[data-question-option="${label}"]`,
-    )?.checked === true
-  );
+/** Click one option of the shown question, by its served label. */
+function clickOpt(el: HTMLElement, label: string): void {
+  el.querySelector<Control>(`[data-question-option="${label}"]`)?.click();
 }
 
 /** A batch of `n` single-select questions, each headed and texted by its index. */
@@ -139,424 +103,203 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+describe("the card's chrome", () => {
+  it.each([
+    ["open", open()],
+    ["answered", question({ case: "answered", value: { atMs: 0n, answers: [] } })],
+    ["expired", question({ case: "expired", value: { atMs: 0n } })],
+  ] as const)("wears the tool card's chrome when %s", (_state, u) => {
+    const el = drawFeedQuestion(u, askHarness().rc);
+    expect(el.classList.contains("tool-card")).toBe(true);
+    expect(el.querySelector(".tool-head .tool-name")?.textContent).toBe(QUESTION_TITLE);
+  });
+
+  it("draws every state the schema carries", () => {
+    expect([...QUESTION_STATE_ARMS].sort()).toEqual(armsOf(FeedQuestionSchema.oneofs, "state").sort());
+  });
+});
+
 describe("the standing batch", () => {
-  it("draws one block per question, in the batch's order", () => {
-    const el = drawFeedQuestion(
-      question({ case: "open", value: {} }, [item({ header: "one" }), item({ header: "two" })]),
-      askHarness().rc,
-    );
-    expect([...el.querySelectorAll(".q-chip")].map((n) => n.textContent)).toEqual(["one", "two"]);
+  it("draws one panel per question, in the batch's order", () => {
+    const el = drawFeedQuestion(open([item({ text: "one?" }), item({ text: "two?" })]), askHarness().rc);
+    expect([...el.querySelectorAll(".q-text")].map((t) => t.textContent)).toEqual(["one?", "two?"]);
   });
 
-  it("draws the question text verbatim", () => {
-    const el = drawFeedQuestion(question({ case: "open", value: {} }), askHarness().rc);
-    expect(el.querySelector(".q-text")?.textContent).toBe("Which auth method?");
-  });
-
-  it("draws radios for a single-select", () => {
-    const el = drawFeedQuestion(question({ case: "open", value: {} }), askHarness().rc);
-    expect(el.querySelector<HTMLInputElement>("[data-question-option]")?.type).toBe("radio");
-  });
-
-  it("draws checkboxes for a multi-select", () => {
-    const el = drawFeedQuestion(
-      question({ case: "open", value: {} }, [item({ multi: true })]),
-      askHarness().rc,
-    );
-    expect(el.querySelector<HTMLInputElement>("[data-question-option]")?.type).toBe("checkbox");
-  });
-
-  it("groups a single-select's radios per question, so two never share a pick", () => {
-    const el = drawFeedQuestion(
-      question({ case: "open", value: {} }, [item(), item()]),
-      askHarness().rc,
-    );
-    const names = [...el.querySelectorAll<HTMLInputElement>("[data-question-option]")].map(
-      (i) => i.name,
-    );
-    expect(new Set(names).size).toBe(2);
+  it("shows only the question the daemon names active", () => {
+    const el = drawFeedQuestion(open(singles(3), { active: 1 }), askHarness().rc);
+    const hidden = [...el.querySelectorAll<HTMLElement>("[data-question-panel]")].map((p) => p.hidden);
+    expect(hidden).toEqual([true, false, true]);
   });
 
   it("hooks each option by its SERVED label", () => {
-    const el = drawFeedQuestion(question({ case: "open", value: {} }), askHarness().rc);
-    expect(
-      [...el.querySelectorAll("[data-question-option]")].map((n) =>
-        n.getAttribute("data-question-option"),
-      ),
-    ).toEqual(["OAuth 2.0", "API key"]);
+    const el = drawFeedQuestion(open([item({ options: [{ label: "Read  Only" }] })]), askHarness().rc);
+    expect(el.querySelector('[data-question-option="Read  Only"]')).not.toBeNull();
   });
 
   it("draws an option's description when the agent gave one", () => {
     const el = drawFeedQuestion(
-      question({ case: "open", value: {} }, [
-        item({ options: [{ label: "OAuth 2.0", description: "the usual" }] }),
-      ]),
+      open([item({ options: [{ label: "OAuth 2.0", description: "the ordinary path" }] })]),
       askHarness().rc,
     );
-    expect(el.querySelector(".q-opt-description")?.textContent).toBe("the usual");
+    expect(el.querySelector(".q-opt-description")?.textContent).toBe("the ordinary path");
   });
 
   it("draws no description when the agent gave none", () => {
-    const el = drawFeedQuestion(question({ case: "open", value: {} }), askHarness().rc);
+    const el = drawFeedQuestion(open(), askHarness().rc);
     expect(el.querySelector(".q-opt-description")).toBeNull();
   });
 
-  it("always draws the free-text escape, per question", () => {
-    const el = drawFeedQuestion(
-      question({ case: "open", value: {} }, [item(), item()]),
-      askHarness().rc,
-    );
-    expect(el.querySelectorAll("[data-question-other]").length).toBe(2);
+  it("marks the options the draft holds as selected, and only those", () => {
+    const el = drawFeedQuestion(open([item()], { drafts: [{ chosen: ["API key"], answered: true }] }), askHarness().rc);
+    const selected = [...el.querySelectorAll(".q-opt.selected")].map((o) => o.getAttribute("data-question-option"));
+    expect(selected).toEqual(["API key"]);
+    expect(el.querySelector('[data-question-option="API key"]')?.getAttribute("aria-pressed")).toBe("true");
   });
 
-  it("draws ONE submit for the whole batch", () => {
+  it("draws an answer typed in the editor, verbatim", () => {
     const el = drawFeedQuestion(
-      question({ case: "open", value: {} }, [item(), item(), item()]),
+      open([item()], { drafts: [{ otherText: { text: "mutual TLS" }, answered: true }] }),
       askHarness().rc,
     );
-    expect(el.querySelectorAll("[data-question-submit]").length).toBe(1);
+    const typed = el.querySelector("[data-question-typed]");
+    expect(typed?.querySelector(".q-typed-label")?.textContent).toBe(TYPED_LABEL);
+    expect(typed?.querySelector(".q-other-given")?.textContent).toBe("mutual TLS");
   });
 
-  it("draws every state the schema carries", () => {
-    expect([...QUESTION_STATE_ARMS].sort()).toEqual(
-      armsOf(FeedQuestionSchema.oneofs, "state").sort(),
-    );
+  it("draws no typed line when nothing was typed", () => {
+    const el = drawFeedQuestion(open(), askHarness().rc);
+    expect(el.querySelector("[data-question-typed]")).toBeNull();
+  });
+
+  it("has no text field and no submit of its own", () => {
+    const el = drawFeedQuestion(open([item(), item({ multi: true })]), askHarness().rc);
+    expect(el.querySelector("input, textarea, [data-question-other], [data-question-submit]")).toBeNull();
+  });
+
+  it("says the typed answer is entered in the editor", () => {
+    const el = drawFeedQuestion(open(), askHarness().rc);
+    expect(el.querySelector("[data-ask-hint]")?.textContent).toBe(TYPE_IN_EDITOR_HINT);
+  });
+
+  it("draws the confirm only on a multi-select", () => {
+    const el = drawFeedQuestion(open([item(), item({ multi: true })]), askHarness().rc);
+    const panels = el.querySelectorAll("[data-question]");
+    expect(panels[0]?.querySelector("[data-question-confirm]")).toBeNull();
+    expect(panels[1]?.querySelector("[data-question-confirm]")?.textContent).toBe(CONFIRM_TEXT);
   });
 });
 
-describe("the tabbed layout", () => {
-  it("draws one tab per question of the batch", () => {
-    const el = drawFeedQuestion(question({ case: "open", value: {} }, singles(3)), askHarness().rc);
-    expect(el.querySelectorAll(".q-tab").length).toBe(3);
+describe("the tabs", () => {
+  it("draws no tab strip for a one-question batch", () => {
+    const el = drawFeedQuestion(open(), askHarness().rc);
+    expect(el.querySelector("[data-question-tabs]")).toBeNull();
   });
 
-  it("labels each tab with its question's header", () => {
-    const el = drawFeedQuestion(
-      question({ case: "open", value: {} }, [item({ header: "one" }), item({ header: "two" })]),
-      askHarness().rc,
+  it("draws one shared feed tab per question of a batch", () => {
+    const el = drawFeedQuestion(open(singles(3)), askHarness().rc);
+    const strip = el.querySelector("[data-question-tabs]");
+    expect(strip?.classList.contains(FEED_TAB_STRIP_CLASS)).toBe(true);
+    expect(strip?.querySelectorAll(`.${FEED_TAB_CLASS}`)).toHaveLength(3);
+  });
+
+  it("draws each tab as the tool group's tab is drawn, labelled with its header", () => {
+    // A hand-rolled tab that drifted from the shared one fails here.
+    const el = drawFeedQuestion(open(singles(2)), askHarness().rc);
+    const expected = drawFeedTab({ icon: "?", index: 1, label: "q0", active: true, onPick: () => {} });
+    const first = el.querySelector<HTMLElement>('[data-question-tab="0"]');
+    expect([...(first?.children ?? [])].map((c) => [c.className, c.textContent])).toEqual(
+      [...expected.children].map((c) => [c.className, c.textContent]),
     );
-    expect([...el.querySelectorAll(".q-tab-label")].map((n) => n.textContent)).toEqual([
-      "one",
-      "two",
-    ]);
   });
 
-  it("shows exactly one panel at a time", () => {
-    const el = drawFeedQuestion(question({ case: "open", value: {} }, singles(3)), askHarness().rc);
-    const shown = [...el.querySelectorAll<HTMLElement>(".q-panel")].filter((p) => !p.hidden);
-    expect(shown.length).toBe(1);
+  it("marks the daemon's active question as the active tab", () => {
+    const el = drawFeedQuestion(open(singles(3), { active: 2 }), askHarness().rc);
+    const active = [...el.querySelectorAll("[data-question-tab]")].map((t) => t.classList.contains("is-active"));
+    expect(active).toEqual([false, false, true]);
   });
 
-  it("shows the first question's panel by default", () => {
-    const el = drawFeedQuestion(question({ case: "open", value: {} }, singles(3)), askHarness().rc);
-    expect(activeTab(el)).toBe(0);
-  });
-
-  it("draws a single tab for a one-question batch", () => {
-    const el = drawFeedQuestion(question({ case: "open", value: {} }), askHarness().rc);
-    expect(el.querySelectorAll(".q-tab").length).toBe(1);
-  });
-
-  it("auto-advances to the next tab when a single-select is answered", () => {
-    const el = drawFeedQuestion(question({ case: "open", value: {} }, singles(2)), askHarness().rc);
-    clickOpt(el, 0, "OAuth 2.0");
-    expect(activeTab(el)).toBe(1);
-  });
-
-  it("does not advance a multi-select on a mere tick", () => {
-    const el = drawFeedQuestion(
-      question({ case: "open", value: {} }, [item({ multi: true }), item()]),
-      askHarness().rc,
-    );
-    clickOpt(el, 0, "OAuth 2.0");
-    // The tick is not the commit point for a multi-select, so the reader stays.
-    expect(activeTab(el)).toBe(0);
-  });
-
-  it("advances a multi-select once its answer is confirmed", () => {
-    const el = drawFeedQuestion(
-      question({ case: "open", value: {} }, [item({ multi: true }), item()]),
-      askHarness().rc,
-    );
-    clickOpt(el, 0, "OAuth 2.0");
-    confirmQ(el, 0);
-    expect(activeTab(el)).toBe(1);
-  });
-
-  it("draws the confirm button only on a multi-select", () => {
-    const el = drawFeedQuestion(
-      question({ case: "open", value: {} }, [item(), item({ multi: true })]),
-      askHarness().rc,
-    );
-    const confirms = [...el.querySelectorAll<HTMLElement>("[data-question]")].map(
-      (b) => b.querySelector("[data-question-confirm]") !== null,
-    );
-    expect(confirms).toEqual([false, true]);
-  });
-
-  it("words the multi-select confirm the same way everywhere", () => {
-    const el = drawFeedQuestion(
-      question({ case: "open", value: {} }, [item({ multi: true })]),
-      askHarness().rc,
-    );
-    expect(el.querySelector("[data-question-confirm]")?.textContent).toBe(CONFIRM_TEXT);
-  });
-
-  it("marks a tab answered once its question carries an answer", () => {
-    const el = drawFeedQuestion(question({ case: "open", value: {} }, singles(2)), askHarness().rc);
-    clickOpt(el, 0, "OAuth 2.0");
-    expect(answeredFlags(el)[0]).toBe(true);
-  });
-
-  it("leaves an untouched question's tab pending", () => {
-    const el = drawFeedQuestion(question({ case: "open", value: {} }, singles(2)), askHarness().rc);
-    clickOpt(el, 0, "OAuth 2.0");
-    expect(answeredFlags(el)[1]).toBe(false);
-  });
-
-  it("returns to a prior question when its tab is clicked", () => {
-    const el = drawFeedQuestion(question({ case: "open", value: {} }, singles(2)), askHarness().rc);
-    clickOpt(el, 0, "OAuth 2.0");
-    clickTab(el, 0);
-    expect(activeTab(el)).toBe(0);
-  });
-
-  it("reveals the first unanswered question on a blocked submit", async () => {
-    const el = drawFeedQuestion(question({ case: "open", value: {} }, singles(2)), askHarness().rc);
-    clickOpt(el, 0, "OAuth 2.0"); // answers q0, advances to q1
-    clickTab(el, 0); // step back so the active tab is not the missing one
-    el.querySelector<Control>("[data-question-submit]")?.click();
-    await settle();
-    expect(activeTab(el)).toBe(1);
-  });
-
-  it("submits the whole batch unchanged from the tabbed layout", async () => {
-    const h = askHarness();
-    const el = drawFeedQuestion(question({ case: "open", value: {} }, singles(2)), h.rc);
-    clickOpt(el, 0, "OAuth 2.0");
-    clickOpt(el, 1, "API key");
-    el.querySelector<Control>("[data-question-submit]")?.click();
-    await settle();
-    expect(h.calls.question[0]?.answers.map((a) => a.chosen)).toEqual([
-      ["OAuth 2.0"],
-      ["API key"],
-    ]);
-  });
-
-  it("submits a one-question batch exactly as before", async () => {
-    const h = askHarness();
-    const el = drawFeedQuestion(question({ case: "open", value: {} }), h.rc);
-    clickOpt(el, 0, "OAuth 2.0");
-    el.querySelector<Control>("[data-question-submit]")?.click();
-    await settle();
-    expect(h.calls.question[0]?.answers[0]?.chosen).toEqual(["OAuth 2.0"]);
+  it("wears the answered glyph on an answered question's tab, and the pending one elsewhere", () => {
+    const el = drawFeedQuestion(open(singles(2), { drafts: [{ chosen: ["API key"], answered: true }, {}] }), askHarness().rc);
+    const glyphs = [...el.querySelectorAll("[data-question-tab] .feed-group-tab-icon")].map((g) => g.textContent);
+    expect(glyphs).toEqual([TAB_GLYPHS.answered, TAB_GLYPHS.pending]);
+    const flags = [...el.querySelectorAll("[data-question-tab]")].map((t) => t.getAttribute("data-answered"));
+    expect(flags).toEqual(["true", "false"]);
   });
 });
 
-describe("toggling a selection off", () => {
-  it("clears a single-select when its chosen radio is clicked again", () => {
-    const el = drawFeedQuestion(question({ case: "open", value: {} }), askHarness().rc);
-    clickOpt(el, 0, "OAuth 2.0");
-    clickOpt(el, 0, "OAuth 2.0");
-    expect(isChecked(el, 0, "OAuth 2.0")).toBe(false);
-  });
-
-  it("clears a multi-select when its ticked box is clicked again", () => {
-    const el = drawFeedQuestion(
-      question({ case: "open", value: {} }, [item({ multi: true })]),
-      askHarness().rc,
-    );
-    clickOpt(el, 0, "OAuth 2.0");
-    clickOpt(el, 0, "OAuth 2.0");
-    expect(isChecked(el, 0, "OAuth 2.0")).toBe(false);
-  });
-
-  it("returns a question to pending once its last choice is cleared", () => {
-    const el = drawFeedQuestion(question({ case: "open", value: {} }, singles(2)), askHarness().rc);
-    clickOpt(el, 0, "OAuth 2.0");
-    clickTab(el, 0);
-    clickOpt(el, 0, "OAuth 2.0"); // deselect
-    expect(answeredFlags(el)[0]).toBe(false);
-  });
-
-  it("does not advance on a deselect", () => {
-    const el = drawFeedQuestion(question({ case: "open", value: {} }, singles(2)), askHarness().rc);
-    clickOpt(el, 0, "OAuth 2.0"); // advances to q1
-    clickTab(el, 0); // back to q0
-    clickOpt(el, 0, "OAuth 2.0"); // deselect
-    expect(activeTab(el)).toBe(0);
-  });
-
-  it("sends no selection for a question whose choice was cleared", async () => {
+describe("a click edits the daemon's draft", () => {
+  it("sends a tab click as a show of its question, echoing the served text", async () => {
     const h = askHarness();
-    const el = drawFeedQuestion(question({ case: "open", value: {} }), h.rc);
-    clickOpt(el, 0, "OAuth 2.0"); // select
-    clickOpt(el, 0, "OAuth 2.0"); // clear
-    type(el, 0, "neither"); // an empty question would block submit, so give text
-    el.querySelector<Control>("[data-question-submit]")?.click();
+    const el = drawFeedQuestion(open(singles(2)), h.rc);
+    el.querySelector<Control>('[data-question-tab="1"]')?.click();
     await settle();
-    expect(h.calls.question[0]?.answers[0]?.chosen).toEqual([]);
+    expect(h.calls.draft).toHaveLength(1);
+    expect(h.calls.draft[0]?.edit).toMatchObject({ case: "show", value: { questionText: "q1?" } });
   });
-});
 
-describe("submitting", () => {
-  it("echoes this card's own row", async () => {
+  it("sends an option click as a pick, echoing the served text and label", async () => {
     const h = askHarness();
-    const el = drawFeedQuestion(question({ case: "open", value: {} }), h.rc);
-    pick(el, "OAuth 2.0");
-    el.querySelector<Control>("[data-question-submit]")?.click();
+    const el = drawFeedQuestion(open(), h.rc);
+    clickOpt(el, "API key");
     await settle();
-    expect(h.calls.question[0]?.question?.value).toBe(ROW_ID);
+    expect(h.calls.draft[0]?.edit).toMatchObject({
+      case: "pick",
+      value: { questionText: "Which auth method?", label: "API key" },
+    });
   });
 
-  it("echoes each question's text verbatim", async () => {
+  it("sends a click on a held option as a pick too, which the daemon reads as a clear", async () => {
     const h = askHarness();
-    const el = drawFeedQuestion(question({ case: "open", value: {} }), h.rc);
-    pick(el, "OAuth 2.0");
-    el.querySelector<Control>("[data-question-submit]")?.click();
+    const el = drawFeedQuestion(open([item()], { drafts: [{ chosen: ["API key"], answered: true }] }), h.rc);
+    clickOpt(el, "API key");
     await settle();
-    expect(h.calls.question[0]?.answers[0]?.questionText).toBe("Which auth method?");
+    expect(h.calls.draft[0]?.edit.case).toBe("pick");
   });
 
-  it("echoes the chosen label verbatim", async () => {
+  it("sends a multi-select's confirm as a confirm of its question", async () => {
     const h = askHarness();
-    const el = drawFeedQuestion(question({ case: "open", value: {} }), h.rc);
-    pick(el, "API key");
-    el.querySelector<Control>("[data-question-submit]")?.click();
+    const el = drawFeedQuestion(open([item({ multi: true, text: "Which suites?" })]), h.rc);
+    el.querySelector<Control>("[data-question-confirm]")?.click();
     await settle();
-    expect(h.calls.question[0]?.answers[0]?.chosen).toEqual(["API key"]);
+    expect(h.calls.draft[0]?.edit).toMatchObject({ case: "confirm", value: { questionText: "Which suites?" } });
   });
 
-  it("sends every ticked label on a multi-select", async () => {
+  it("echoes this card's own row and workspace", async () => {
     const h = askHarness();
-    const el = drawFeedQuestion(
-      question({ case: "open", value: {} }, [item({ multi: true })]),
-      h.rc,
-    );
-    pick(el, "OAuth 2.0");
-    pick(el, "API key");
-    el.querySelector<Control>("[data-question-submit]")?.click();
+    const el = drawFeedQuestion(open(), h.rc);
+    clickOpt(el, "OAuth 2.0");
     await settle();
-    expect(h.calls.question[0]?.answers[0]?.chosen).toEqual(["OAuth 2.0", "API key"]);
+    expect([h.calls.draft[0]?.question?.value, h.calls.draft[0]?.workspace?.id]).toEqual([ROW_ID, WORKSPACE.id]);
   });
 
-  it("never sends two labels for a single-select", async () => {
+  it("latches every control of the card while a click is in flight", () => {
     const h = askHarness();
-    const el = drawFeedQuestion(question({ case: "open", value: {} }), h.rc);
-    // Both inputs forced on, which radios would not allow but a stray script
-    // could: the collector must still hand back at most one.
-    for (const input of el.querySelectorAll<HTMLInputElement>("[data-question-option]")) {
-      input.checked = true;
-    }
-    el.querySelector<Control>("[data-question-submit]")?.click();
-    await settle();
-    expect(h.calls.question[0]?.answers[0]?.chosen.length).toBe(1);
+    const el = drawFeedQuestion(open([item(), item({ multi: true })]), h.rc);
+    clickOpt(el, "OAuth 2.0");
+    const controls = [...el.querySelectorAll<Control>("ar-button")];
+    expect(controls.length).toBeGreaterThan(0);
+    expect(controls.every((c) => c.disabled)).toBe(true);
   });
 
-  it("carries the free text when the user typed some", async () => {
+  it("leaves the controls latched once the edit landed, for the row's re-push", async () => {
     const h = askHarness();
-    const el = drawFeedQuestion(question({ case: "open", value: {} }), h.rc);
-    pick(el, "OAuth 2.0");
-    type(el, 0, "with PKCE");
-    el.querySelector<Control>("[data-question-submit]")?.click();
+    const el = drawFeedQuestion(open(), h.rc);
+    clickOpt(el, "OAuth 2.0");
     await settle();
-    expect(h.calls.question[0]?.answers[0]?.otherText?.text).toBe("with PKCE");
+    expect(el.querySelector<Control>('[data-question-option="API key"]')?.disabled).toBe(true);
   });
 
-  it("sends free text alone when nothing was ticked", async () => {
-    const h = askHarness();
-    const el = drawFeedQuestion(question({ case: "open", value: {} }), h.rc);
-    type(el, 0, "neither, use mTLS");
-    el.querySelector<Control>("[data-question-submit]")?.click();
-    await settle();
-    expect(h.calls.question[0]?.answers[0]?.chosen).toEqual([]);
-  });
-
-  it("leaves the free text unset when nothing was typed", async () => {
-    const h = askHarness();
-    const el = drawFeedQuestion(question({ case: "open", value: {} }), h.rc);
-    pick(el, "OAuth 2.0");
-    el.querySelector<Control>("[data-question-submit]")?.click();
-    await settle();
-    expect(h.calls.question[0]?.answers[0]?.otherText).toBeUndefined();
-  });
-
-  it("sends one answer per question of the batch", async () => {
-    const h = askHarness();
-    const el = drawFeedQuestion(
-      question({ case: "open", value: {} }, [item({ text: "one?" }), item({ text: "two?" })]),
-      h.rc,
-    );
-    type(el, 0, "a");
-    type(el, 1, "b");
-    el.querySelector<Control>("[data-question-submit]")?.click();
-    await settle();
-    expect(h.calls.question[0]?.answers.map((a) => a.questionText)).toEqual(["one?", "two?"]);
-  });
-
-  it("latches the submit inert while the batch is in flight", () => {
-    const el = drawFeedQuestion(question({ case: "open", value: {} }), askHarness().rc);
-    pick(el, "OAuth 2.0");
-    const submit = el.querySelector<Control>("[data-question-submit]");
-    submit?.click();
-    expect(submit?.disabled).toBe(true);
-  });
-
-  it("draws a transport failure at the submit", async () => {
+  it("draws a transport failure at the card and gives the controls back", async () => {
     const h = askHarness({ fail: true });
-    const el = drawFeedQuestion(question({ case: "open", value: {} }), h.rc);
-    pick(el, "OAuth 2.0");
-    el.querySelector<Control>("[data-question-submit]")?.click();
+    const el = drawFeedQuestion(open(), h.rc);
+    clickOpt(el, "OAuth 2.0");
     await settle();
-    expect(el.querySelector(".perm-actions .refusal")?.getAttribute("data-arm")).toBe("transport");
+    expect(el.querySelector(".q-status .refusal")?.getAttribute("data-arm")).toBe("transport");
+    expect(el.querySelector<Control>('[data-question-option="OAuth 2.0"]')?.disabled).toBe(false);
   });
 });
 
-describe("an incomplete batch", () => {
-  it("blocks the submit rather than sending a partial batch", async () => {
-    const h = askHarness();
-    const el = drawFeedQuestion(
-      question({ case: "open", value: {} }, [item(), item()]),
-      h.rc,
-    );
-    type(el, 0, "a");
-    el.querySelector<Control>("[data-question-submit]")?.click();
-    await settle();
-    expect(h.calls.question.length).toBe(0);
-  });
-
-  it("says so beside the question that is missing", async () => {
-    const el = drawFeedQuestion(
-      question({ case: "open", value: {} }, [item(), item()]),
-      askHarness().rc,
-    );
-    type(el, 0, "a");
-    el.querySelector<Control>("[data-question-submit]")?.click();
-    await settle();
-    const notes = [...el.querySelectorAll<HTMLElement>(".q-note")].map((n) => n.hidden);
-    expect(notes).toEqual([true, false]);
-  });
-
-  it("words the note the same way everywhere", async () => {
-    const el = drawFeedQuestion(question({ case: "open", value: {} }), askHarness().rc);
-    el.querySelector<Control>("[data-question-submit]")?.click();
-    await settle();
-    expect(el.querySelector(".q-note")?.textContent).toBe(UNANSWERED_NOTE);
-  });
-
-  it("clears the note once the question is answered", async () => {
-    const el = drawFeedQuestion(question({ case: "open", value: {} }), askHarness().rc);
-    const submit = el.querySelector<Control>("[data-question-submit]");
-    submit?.click();
-    await settle();
-    pick(el, "OAuth 2.0");
-    submit?.click();
-    await settle();
-    expect(el.querySelector<HTMLElement>(".q-note")?.hidden).toBe(true);
-  });
-});
-
-describe("a refused batch", () => {
+describe("a refused edit", () => {
   const causes = [
     { arm: "unknownWorkspace", cause: { case: "unknownWorkspace", value: {} }, text: "the daemon does not know this workspace" },
     {
@@ -577,17 +320,12 @@ describe("a refused batch", () => {
     {
       arm: "askNotStanding",
       cause: { case: "askNotStanding", value: {} },
-      text: "this ask is no longer standing",
+      text: "this question is no longer standing",
     },
     {
       arm: "unservedValue",
       cause: { case: "unservedValue", value: { text: "SAML" } },
-      text: 'the batch never served "SAML"',
-    },
-    {
-      arm: "multiPickOnSingleSelect",
-      cause: { case: "multiPickOnSingleSelect", value: {} },
-      text: "several options were picked on a single-select question",
+      text: 'the question never served "SAML"',
     },
     {
       arm: "noSession",
@@ -597,45 +335,48 @@ describe("a refused batch", () => {
   ] as const;
 
   for (const c of causes) {
-    it(`says what ${c.arm} means, at the submit`, async () => {
-      const h = askHarness({ question: refused(c.cause) });
-      const el = drawFeedQuestion(question({ case: "open", value: {} }), h.rc);
-      pick(el, "OAuth 2.0");
-      el.querySelector<Control>("[data-question-submit]")?.click();
+    it(`says what ${c.arm} means, at the card`, async () => {
+      const h = askHarness({ draft: refused(c.cause) });
+      const el = drawFeedQuestion(open(), h.rc);
+      clickOpt(el, "OAuth 2.0");
       await settle();
-      const drawn = el.querySelector(".perm-actions .refusal");
+      const drawn = el.querySelector(".q-status .refusal");
       expect([drawn?.getAttribute("data-arm"), drawn?.textContent]).toEqual([c.arm, c.text]);
     });
   }
 
   it("words every cause the schema declares", () => {
-    expect(causes.map((c) => c.arm).sort()).toEqual(
-      armsOf(AnswerQuestionErrorSchema.oneofs, "cause").sort(),
-    );
+    expect(causes.map((c) => c.arm).sort()).toEqual(armsOf(UpdateQuestionDraftErrorSchema.oneofs, "cause").sort());
   });
 
-  it("gives the submit back so the reader can act on the cause", async () => {
-    const h = askHarness({ question: refused({ case: "noSession", value: {} } as never) });
-    const el = drawFeedQuestion(question({ case: "open", value: {} }), h.rc);
-    pick(el, "OAuth 2.0");
-    const submit = el.querySelector<Control>("[data-question-submit]");
-    submit?.click();
+  it("gives the controls back so the reader can act on the cause", async () => {
+    const h = askHarness({ draft: refused({ case: "noSession", value: {} } as never) });
+    const el = drawFeedQuestion(open(), h.rc);
+    clickOpt(el, "OAuth 2.0");
     await settle();
-    expect(submit?.disabled).toBe(false);
+    expect(el.querySelector<Control>('[data-question-option="OAuth 2.0"]')?.disabled).toBe(false);
+  });
+
+  it("clears the last refusal when the next click is sent", async () => {
+    const h = askHarness({ draft: refused({ case: "noSession", value: {} } as never) });
+    const el = drawFeedQuestion(open(), h.rc);
+    clickOpt(el, "OAuth 2.0");
+    await settle();
+    clickOpt(el, "OAuth 2.0");
+    await settle();
+    expect(el.querySelectorAll(".q-status .refusal")).toHaveLength(1);
   });
 
   it("states an unset cause as unreadable rather than as a cause", async () => {
     const h = askHarness({
-      question: create(AnswerQuestionResponseSchema, { result: { case: "error", value: {} } }),
+      draft: create(UpdateQuestionDraftResponseSchema, { result: { case: "error", value: {} } }),
     });
-    const el = drawFeedQuestion(question({ case: "open", value: {} }), h.rc);
-    pick(el, "OAuth 2.0");
-    el.querySelector<Control>("[data-question-submit]")?.click();
+    const el = drawFeedQuestion(open(), h.rc);
+    clickOpt(el, "OAuth 2.0");
     await settle();
     // An error with no cause set is a frame this build cannot read, not a
-    // refusal with no words: it is reported through the failure sink, and no
-    // sentence is invented at the control (src/rpc/refuse.ts).
-    expect(el.querySelector(".perm-actions .refusal")).toBeNull();
+    // refusal with no words (src/rpc/refuse.ts).
+    expect(el.querySelector(".q-status .refusal[data-arm='noSession']")).toBeNull();
   });
 });
 
@@ -661,180 +402,137 @@ describe("the settled card", () => {
     const el = drawFeedQuestion(
       question({
         case: "answered",
-        value: {
-          atMs: 0n,
-          answers: [{ header: { text: "Auth method" }, chosen: ["OAuth 2.0", "API key"] }],
-        },
+        value: { atMs: 0n, answers: [{ header: { text: "Scope" }, chosen: ["read", "write"] }] },
       }),
       askHarness().rc,
     );
-    expect(el.querySelector(".q-chosen")?.textContent).toBe("OAuth 2.0, API key");
+    expect(el.querySelector(".q-chosen")?.textContent).toBe("read, write");
   });
 
   it("draws the free text that was given", () => {
     const el = drawFeedQuestion(
       question({
         case: "answered",
-        value: {
-          atMs: 0n,
-          answers: [
-            { header: { text: "Auth method" }, chosen: [], otherText: { text: "use mTLS" } },
-          ],
-        },
+        value: { atMs: 0n, answers: [{ header: { text: "Scope" }, chosen: [], otherText: { text: "admin only" } }] },
       }),
       askHarness().rc,
     );
-    expect(el.querySelector(".q-other-given")?.textContent).toBe("use mTLS");
+    expect(el.querySelector(".q-other-given")?.textContent).toBe("admin only");
   });
 
   it("draws no chosen labels for a free-text-only answer", () => {
     const el = drawFeedQuestion(
       question({
         case: "answered",
-        value: {
-          atMs: 0n,
-          answers: [
-            { header: { text: "Auth method" }, chosen: [], otherText: { text: "use mTLS" } },
-          ],
-        },
+        value: { atMs: 0n, answers: [{ header: { text: "Scope" }, chosen: [], otherText: { text: "admin only" } }] },
       }),
       askHarness().rc,
     );
     expect(el.querySelector(".q-chosen")).toBeNull();
   });
 
-  it("offers no submit once the batch is settled", () => {
-    const el = drawFeedQuestion(
-      question({ case: "answered", value: { atMs: 0n, answers: [] } }),
-      askHarness().rc,
-    );
-    expect(el.querySelector("[data-question-submit]")).toBeNull();
+  it("offers no controls once the batch is settled", () => {
+    const el = drawFeedQuestion(question({ case: "answered", value: { atMs: 0n, answers: [] } }), askHarness().rc);
+    expect(el.querySelector("ar-button")).toBeNull();
   });
 
   it("stamps when the answers landed", () => {
     vi.setSystemTime(60_000);
-    const el = drawFeedQuestion(
-      question({ case: "answered", value: { atMs: 0n, answers: [] } }),
-      askHarness().rc,
-    );
+    const el = drawFeedQuestion(question({ case: "answered", value: { atMs: 0n, answers: [] } }), askHarness().rc);
     expect(el.querySelector(".q-when")?.textContent).toBe("1m ago");
   });
 
   it("keeps ticking the stamp after its turn's clocks are stopped", async () => {
     vi.setSystemTime(0);
-    const el = drawFeedQuestion(
-      question({ case: "answered", value: { atMs: 0n, answers: [] } }),
-      askHarness().rc,
-    );
+    const el = drawFeedQuestion(question({ case: "answered", value: { atMs: 0n, answers: [] } }), askHarness().rc);
     document.body.append(el);
     stopClocks(el);
     await vi.advanceTimersByTimeAsync(5_000);
     expect(el.querySelector(".q-when")?.textContent).toBe("5s ago");
   });
 
-  it("reads the stamp's nearest second when a tick samples just short of one", () => {
-    // Arrange + Act: the answer instant does not share the shared ticker's phase.
-    vi.setSystemTime(4920);
-    const el = drawFeedQuestion(
-      question({ case: "answered", value: { atMs: 0n, answers: [] } }),
-      askHarness().rc,
-    );
-    // Assert: five real seconds ago reads 5s, not the lagging 4s.
-    expect(el.querySelector(".q-when")?.textContent).toBe("5s ago");
-  });
-
   it("draws an expired ask as expired, never as pending forever", () => {
-    const el = drawFeedQuestion(
-      question({ case: "expired", value: { atMs: 0n } }),
-      askHarness().rc,
-    );
+    const el = drawFeedQuestion(question({ case: "expired", value: { atMs: 0n } }), askHarness().rc);
     expect(el.querySelector(".q-verdict .badge")?.textContent).toBe(EXPIRED_TEXT);
   });
 
-  it("offers no submit on an expired ask", () => {
-    const el = drawFeedQuestion(
-      question({ case: "expired", value: { atMs: 0n } }),
-      askHarness().rc,
-    );
-    expect(el.querySelector("[data-question-submit]")).toBeNull();
+  it("offers no controls on an expired ask", () => {
+    const el = drawFeedQuestion(question({ case: "expired", value: { atMs: 0n } }), askHarness().rc);
+    expect(el.querySelector("ar-button")).toBeNull();
   });
 });
 
 describe("drawFeedQuestion malformed input", () => {
   it("refuses a card whose state oneof is unset", () => {
-    expect(() => drawFeedQuestion(create(FeedQuestionSchema, {}), askHarness().rc)).toThrow(
-      MalformedView,
+    expect(() => drawFeedQuestion(create(FeedQuestionSchema, {}), askHarness().rc)).toThrow(MalformedView);
+  });
+
+  it("refuses a standing card whose drafts do not match its questions", () => {
+    const u = question({ case: "open", value: { active: 0, drafts: [{}] } }, singles(2));
+    expect(() => drawFeedQuestion(u, askHarness().rc)).toThrow(
+      "malformed view at FeedQuestion.open.drafts: 1 drafts for 2 questions",
+    );
+  });
+
+  it("refuses a standing card whose active question is out of range", () => {
+    expect(() => drawFeedQuestion(open(singles(2), { active: 2 }), askHarness().rc)).toThrow(
+      "malformed view at FeedQuestion.open.active: 2 names no question of 2",
     );
   });
 
   it("refuses a question whose options oneof is unset", () => {
-    const bad = create(FeedQuestionItemSchema, {
-      header: { text: "h" },
-      text: { text: "t" },
-    });
-    expect(() =>
-      drawFeedQuestion(question({ case: "open", value: {} }, [bad]), askHarness().rc),
-    ).toThrow(MalformedView);
+    const bad = create(FeedQuestionItemSchema, { header: { text: "h" }, text: { text: "t" } });
+    expect(() => drawFeedQuestion(open([bad]), askHarness().rc)).toThrow(MalformedView);
   });
 
   it("refuses a question with no text", () => {
     const bad = item();
     (bad as unknown as { text: undefined }).text = undefined;
-    expect(() =>
-      drawFeedQuestion(question({ case: "open", value: {} }, [bad]), askHarness().rc),
-    ).toThrow(MalformedView);
+    expect(() => drawFeedQuestion(open([bad]), askHarness().rc)).toThrow(MalformedView);
   });
 
   it("refuses a question with no header", () => {
     const bad = item();
     (bad as unknown as { header: undefined }).header = undefined;
-    expect(() =>
-      drawFeedQuestion(question({ case: "open", value: {} }, [bad]), askHarness().rc),
-    ).toThrow(MalformedView);
+    expect(() => drawFeedQuestion(open([bad]), askHarness().rc)).toThrow(MalformedView);
   });
 
   it("refuses an option with no label", () => {
     const bad = item();
-    (
-      bad.options as unknown as { value: { options: { label: undefined }[] } }
-    ).value.options[0].label = undefined;
-    expect(() =>
-      drawFeedQuestion(question({ case: "open", value: {} }, [bad]), askHarness().rc),
-    ).toThrow(MalformedView);
+    (bad.options as unknown as { value: { options: { label: undefined }[] } }).value.options[0].label = undefined;
+    expect(() => drawFeedQuestion(open([bad]), askHarness().rc)).toThrow(MalformedView);
   });
 
   it("refuses a state arm this build does not know", () => {
-    const u = question({ case: "open", value: {} });
-    (u as unknown as { state: { case: string; value: unknown } }).state = {
-      case: "withdrawn",
-      value: {},
-    };
+    const u = open();
+    (u as unknown as { state: { case: string; value: unknown } }).state = { case: "withdrawn", value: {} };
     expect(() => drawFeedQuestion(u, askHarness().rc)).toThrow(MalformedView);
+  });
+
+  it("refuses an options arm that is neither single- nor multi-select, by name", () => {
+    const bad = item();
+    (bad as unknown as { options: { case: string; value: unknown } }).options = { case: "rankOrder", value: { options: [] } };
+    expect(() => drawFeedQuestion(open([bad]), askHarness().rc)).toThrow(
+      "malformed view at FeedQuestion.questions[0].options: arm 'rankOrder' is not one this build can draw",
+    );
   });
 });
 
 /**
- * A row context whose AnswerQuestion hands ANSWER back UNALTERED, and a sink
- * that keeps what was filed.
+ * A row context whose UpdateQuestionDraft hands ANSWER back UNALTERED, and a
+ * sink that keeps what was filed.
  *
  * `createRouterTransport` re-encodes the response through the frozen schema,
- * which DROPS an arm no descriptor knows and turns "an arm this build cannot
- * draw" into "a oneof sets no arm" — a different refusal from the one under
- * test. A fake client is how an arm a NEWER daemon set actually reaches the
- * renderer.
+ * which DROPS an arm no descriptor knows. A fake client is how an arm a NEWER
+ * daemon set actually reaches the renderer.
  */
-function unalteredQuestion(answer: AnswerQuestionResponse): {
-  rc: RowContext;
-  filed: FailureKind[];
-} {
+function unalteredDraft(answer: UpdateQuestionDraftResponse): { rc: RowContext; filed: FailureKind[] } {
   const filed: FailureKind[] = [];
   return {
     filed,
     rc: {
       ctx: testAppContext({
-        client: {
-          answerQuestion: () => Promise.resolve(answer),
-        } as unknown as AgentReplClient,
+        client: { updateQuestionDraft: () => Promise.resolve(answer) } as unknown as AgentReplClient,
         workspace: WORKSPACE,
         ticker: createTicker(1000),
         failures: { report: (kind) => filed.push(kind), retract: () => {} },
@@ -850,43 +548,18 @@ function unalteredQuestion(answer: AnswerQuestionResponse): {
 describe("an answer this build cannot read", () => {
   it("files the unknown result arm by name rather than drawing a refusal", async () => {
     // Arrange: a newer daemon answers with a result arm this build has no case for.
-    const answer = create(AnswerQuestionResponseSchema, {
-      result: { case: "success", value: {} },
-    });
-    (answer as unknown as { result: { case: string; value: unknown } }).result = {
-      case: "deferred",
-      value: {},
-    };
-    const h = unalteredQuestion(answer);
-    const el = drawFeedQuestion(question({ case: "open", value: {} }), h.rc);
-    pick(el, "OAuth 2.0");
+    const answer = create(UpdateQuestionDraftResponseSchema, { result: { case: "success", value: {} } });
+    (answer as unknown as { result: { case: string; value: unknown } }).result = { case: "deferred", value: {} };
+    const h = unalteredDraft(answer);
+    const el = drawFeedQuestion(open(), h.rc);
     // Act
-    el.querySelector<Control>("[data-question-submit]")?.click();
+    clickOpt(el, "OAuth 2.0");
     await settle();
     // Assert
     const kind = h.filed[0]?.kind;
-    expect(
-      kind?.case === "frameUndecodable" ? [kind.value.frameHead, kind.value.cause] : null,
-    ).toEqual([
-      "AnswerQuestionResponse.result",
+    expect(kind?.case === "frameUndecodable" ? [kind.value.frameHead, kind.value.cause] : null).toEqual([
+      "UpdateQuestionDraftResponse.result",
       "arm 'deferred' is not one this build can draw",
     ]);
-  });
-});
-
-describe("a question whose options arm this build cannot read", () => {
-  it("refuses an options arm that is neither single- nor multi-select, by name", () => {
-    // Arrange
-    const bad = item();
-    (bad as unknown as { options: { case: string; value: unknown } }).options = {
-      case: "rankOrder",
-      value: { options: [] },
-    };
-    // Act / Assert
-    expect(() =>
-      drawFeedQuestion(question({ case: "open", value: {} }, [bad]), askHarness().rc),
-    ).toThrow(
-      "malformed view at FeedQuestion.questions[0].options: arm 'rankOrder' is not one this build can draw",
-    );
   });
 });
