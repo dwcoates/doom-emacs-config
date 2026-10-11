@@ -213,6 +213,21 @@
 - Effort stays at `medium` for every tier.
   - Effort above `medium` is reserved for dispatches the user explicitly asks to run deeper.
 
+## Requirements
+
+### A requirements failure is fixed in the manifests, generically, and only the user's own choices go to the user
+
+- When running `bin/requirements.sh` (directly, via `.claude/install.sh`, or via `/install-agent-repl`) hits a failure the manifests should have prevented, fix the manifests or the runner.
+  - Never only repair the machine in front of you, because the next machine then fails the same way.
+  - The contract is the Requirements section of `modules/app/agent-repl/AGENTS.md`.
+- Every such fix is generic.
+  - It holds for every machine and every person.
+  - It never encodes the running user's paths, accounts, names or choices.
+  - A per-person value becomes an `env` entry with its row in the Setup section of `docs/USER-GUIDE.md`, never a literal.
+- Ambiguity only the user can resolve is surfaced, never guessed.
+  - Examples are which account or directory, a value they must supply, or whether to replace a file of theirs.
+  - It goes in the response's dedicated setup branch (see the TLDR spec's content guidelines).
+
 ## GNS authentication
 
 ### Renew an expired GNS token yourself, only in the work account's Chrome profile
@@ -447,6 +462,11 @@ I will NEVER ask a rhetorical question -- if I ask 'why does X happen?' or 'is Y
   - Memory proposals never appear in the fix section or the questions section.
 - If questio are needed for the user, a top-level section should be included for this 
   - In otherwords, consolidate questions in a top-level section (with a paralelel recursive structure) rather than dispersed across top-level entries
+- If setting up a machine left something only the user can resolve, it goes in a dedicated setup root branch
+  - Examples are a value to supply, a choice between their accounts or directories, or a file of theirs in the way
+  - The setup branch is prefixed with the toolbox icon 🧰, and no other root branch uses it
+  - It sits near the bottom of the tree, after the questions branch and before the memory branch
+  - Each leaf names the requirement's manifest id, what the user must do, and the generic fix already made to the manifests, if any
 
 ### Per-bullet constraints
 
