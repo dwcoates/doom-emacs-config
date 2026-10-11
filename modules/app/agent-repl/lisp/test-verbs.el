@@ -117,7 +117,11 @@ HIDDEN-ROWS, when given, are the hidden section's rows."
         :hidden (list :header (list :label (list :text "Hidden Workspaces"))
                       :rows (list :rows hidden-rows))
         :recently-merged (list :header (list :label (list :text "Recently Merged"))
-                               :rows (list :rows merged-rows))
+                               :groups (and merged-rows
+                                            (list (list :key (list :repository (agent-repl-test-verbs--repo-ref))
+                                                        :header (list :label (list :text "repo-one"))
+                                                        :rows (list :rows merged-rows)
+                                                        :drawn (list :arm :shown :value nil)))))
         :current nil))
 
 (defmacro agent-repl-test-verbs--with (answers &rest body)
@@ -2324,7 +2328,7 @@ this test needs the genuinely sectionless roster."
          (list :repository (list :sections nil)
                :task (list :sections nil)
                :recently-merged (list :header (list :label (list :text "Recently Merged"))
-                                      :rows (list :rows nil))
+                                      :groups nil)
                :current nil)))
     (agent-repl-test-verbs--with nil
       (should-error (agent-repl-verbs--read-repository) :type 'user-error))))

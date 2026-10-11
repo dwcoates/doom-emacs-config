@@ -99,9 +99,19 @@ OVERRIDES replaces top-level entries (notably `current')."
                 (rows . ((rows . [])))
                 (expanded . ())))
      (recentlyMerged . ((header . ((label . ((text . "recently merged"))) (count . ((workspaces . 1)))))
-                         (rows . ((rows . [])))
+                         (groups . [])
                          (collapsed . ())))
      (shownRepository . ()))))
+
+(defun agent-repl-itest-roster--merged-group (rows arm)
+  "Return a RosterMergedRepoGroup protojson alist of the fixture repository.
+ROWS is a vector of RosterRow alists; ARM is the `drawn' arm's key symbol,
+`shown' or `repositoryCollapsed'."
+  `((key . ((repository . ((id . "repo-itest")
+                           (dir . ,agent-repl-itest-roster--repo-dir)))))
+    (header . ((label . ((text . "itest-repo")))))
+    (rows . ((rows . ,rows)))
+    (,arm . ())))
 
 (defun agent-repl-itest-roster--push (daemon roster)
   "Push ROSTER on DAEMON's roster stream."
@@ -148,7 +158,7 @@ order apart from declaration order."
                (rows . ((rows . [])))
                (expanded . ())))
     (recentlyMerged . ((header . ((label . ((text . "recently merged"))) (count . ((workspaces . 1)))))
-                        (rows . ((rows . [])))
+                        (groups . [])
                         (collapsed . ())))
     (shownRepository . ())))
 
@@ -731,7 +741,8 @@ tucked ahead of the repo section would land its tab in the wrong slot."
                  (list (agent-repl-itest-roster--row "ws-repo" "ws-repo" 'ready))
                  `(recentlyMerged
                    . ((header . ((label . ((text . "recently merged"))) (count . ((workspaces . 1)))))
-                      (rows . ((rows . ,(vector merged-row))))
+                      (groups . ,(vector (agent-repl-itest-roster--merged-group
+                                          (vector merged-row) 'shown)))
                       (collapsed . ())))))
         ;; Assert.
         (agent-repl-itest--wait-until
@@ -1613,7 +1624,7 @@ pinned directly."
           (task . ((sections . [])))
           (maturity . ((sections . [])))
           (recentlyMerged . ((header . ((label . ((text . "recently merged"))) (count . ((workspaces . 1)))))
-                             (rows . ((rows . [])))))))))
+                             (groups . [])))))))
    :type 'agent-repl-wire-error))
 
 (defun agent-repl-itest-roster--host-live (composer)

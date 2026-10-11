@@ -54,10 +54,20 @@ COLLAPSED non-nil makes the daemon hold the section collapsed."
         :rows (list :rows rows)
         :fold (list :arm (if collapsed :collapsed :expanded) :value nil)))
 
-(cl-defun agent-repl-test-roster--roster (&key sections hidden merged current)
+(defun agent-repl-test-roster--merged-group (label rows &optional collapsed)
+  "Return a decoded `RosterMergedRepoGroup' for repository LABEL holding ROWS.
+COLLAPSED non-nil puts it on the `repository_collapsed' arm."
+  (list :key (list :repository (list :id (concat "r-" label) :dir (concat "/r/" label)))
+        :header (list :label (list :text label))
+        :rows (list :rows rows)
+        :drawn (list :arm (if collapsed :repository-collapsed :shown) :value nil)))
+
+(cl-defun agent-repl-test-roster--roster (&key sections hidden merged merged-groups current)
   "Return a decoded `WorkspaceRoster' plist from SECTIONS, HIDDEN, MERGED and CURRENT.
 HIDDEN is the hidden section's rows; the section itself is always there,
-expanded, as the daemon always sends it."
+expanded, as the daemon always sends it.  MERGED is the recently-merged
+rows, carried in one shown group; MERGED-GROUPS, when given, is the band's
+groups instead."
   (list :repository (list :sections sections)
         ;; The task view is deliberately POPULATED in these fixtures: it is
         ;; the same workspaces regrouped, and the walk must ignore it.
@@ -72,7 +82,10 @@ expanded, as the daemon always sends it."
                       :rows (list :rows hidden)
                       :fold (list :arm :expanded :value nil))
         :recently-merged (list :header (list :label (list :text "Recently Merged"))
-                               :rows (list :rows merged))
+                               :groups (or merged-groups
+                                           (and merged
+                                                (list (agent-repl-test-roster--merged-group
+                                                       "alpha" merged)))))
         :current (and current (list :workspace (list :id current :dir (concat "/w/" current))))))
 
 ;;;; ---- Harness ----
@@ -283,6 +296,44 @@ whose calls are the observation."
                        (agent-repl-roster-walk roster))))
       ;; Assert
       (should (equal ids '("a" "m"))))))
+
+(ert-deftest agent-repl-test-roster-walk-visits-merged-groups-in-order ()
+  "The recently-merged band's groups are walked in the band's order."
+  ;; Arrange
+  (let ((roster (agent-repl-test-roster--roster
+                 :merged-groups
+                 (list (agent-repl-test-roster--merged-group
+                        "alpha" (list (agent-repl-test-roster--row "m1" "m1" :merged)))
+                       (agent-repl-test-roster--merged-group
+                        "beta" (list (agent-repl-test-roster--row "m2" "m2" :merged)))))))
+    ;; Act
+    (let ((ids (mapcar (lambda (e) (agent-repl-roster-row-id (plist-get e :row)))
+                       (agent-repl-roster-walk roster))))
+      ;; Assert
+      (should (equal ids '("m1" "m2"))))))
+
+(ert-deftest agent-repl-test-roster-walk-collapses-a-collapsed-repositorys-merged-group ()
+  "A merged group on `repository_collapsed' is walked off the bar's drawing."
+  ;; Arrange
+  (let ((roster (agent-repl-test-roster--roster
+                 :merged-groups
+                 (list (agent-repl-test-roster--merged-group
+                        "alpha" (list (agent-repl-test-roster--row "m1" "m1" :merged)) t)))))
+    ;; Act
+    (let ((entry (car (agent-repl-roster-walk roster))))
+      ;; Assert
+      (should (plist-get entry :collapsed)))))
+
+(ert-deftest agent-repl-test-roster-walk-keeps-a-shown-merged-group-on-the-bar ()
+  "A merged group on `shown' is walked as drawn, under the band's label."
+  ;; Arrange
+  (let ((roster (agent-repl-test-roster--roster
+                 :merged (list (agent-repl-test-roster--row "m1" "m1" :merged)))))
+    ;; Act
+    (let ((entry (car (agent-repl-roster-walk roster))))
+      ;; Assert
+      (should-not (plist-get entry :collapsed))
+      (should (equal (plist-get entry :label) "Recently Merged")))))
 
 (ert-deftest agent-repl-test-roster-walk-ignores-the-task-view ()
   "The task view is the same rows regrouped; walking it would double them."
