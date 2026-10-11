@@ -50,6 +50,11 @@ separate manual step that an orchestrating agent forgot in practice:
   - `standing_down` is NOT carried: on the sibling host endpoints it exists
     only where the daemon would start a session (SelectWorkspace). The notice
     is a queued prompt, which a session that is not up holds until bring-up.
+  - `cold_gate` (tag 10): the notice goes through the prompt queue, which
+    refuses any prompt while the session is parked at its cold gate
+    (`daemon/internal/promptqueue/submit.go`, `ColdGateRefusal`). By the
+    one-operation principle a notice that cannot be queued means no
+    retarget, so the gate is answered by name rather than as a failure.
 - **Unset parent arm is InvalidArgument, never "top-level"**: clearing a parent
   changes where work lands, so it is asked for by name.
 - **Consequences**:
