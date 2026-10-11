@@ -81,6 +81,11 @@ type Workspace struct {
 	LastActivityAt *time.Time
 	// MergedAt is when the workspace's merge landed, nil when it has not.
 	MergedAt *time.Time
+	// CommitCount is how many commits the workspace's branch holds beyond its
+	// merge-base with ParentBranch: recounted when a turn closes, and fixed
+	// at the count the merge brought in once MergedAt is set. Nil when it has
+	// never been counted.
+	CommitCount *uint32
 	// CreatedAt is when the record was minted.
 	CreatedAt time.Time
 	// SpawnedShimPID is the pid of a shim a daemon SPAWNED for this workspace,
