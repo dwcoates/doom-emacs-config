@@ -2689,6 +2689,19 @@ the survivor the roster's durable instant says was selected most recently."
       ;; Assert
       (should (equal agent-repl-test-ws--events '((:switch "keeper")))))))
 
+(ert-deftest agent-repl-test-land-before-teardown-is-an-automatic-switch ()
+  "Leaving a workspace being torn down is Emacs's move, never the user's switch."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-ws--with-teardown "gone" '("gone" "keeper")
+      (let (automatic)
+        (cl-letf (((symbol-function 'agent-repl--ws-switch)
+                   (lambda (&rest _) (setq automatic agent-repl-host-automatic-switch))))
+          ;; Act
+          (agent-repl--land-before-teardown "gone"))
+        ;; Assert
+        (should automatic)))))
+
 (ert-deftest agent-repl-test-land-before-teardown-skips-a-built-in-perspective ()
   "Doom's startup `main' is not a landing: the user goes to a REAL workspace.
 `main' is auto-vivified into the registry by a persp hook, so it can lead
@@ -3489,6 +3502,26 @@ from memory -- is what this now pins, plus the rejoin that follows it."
         (agent-repl--delete-pseudo-perspectives)
         ;; Assert
         (should (equal killed '("main")))))))
+
+(ert-deftest agent-repl-test-delete-pseudos-vacates-as-an-automatic-switch ()
+  "Moving the frame off a retiring placeholder is not the user's switch."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((persp-mode t)
+          (persp-nil-name "none")
+          (+workspaces-main "main")
+          (persp-names-cache '("none" "main" "doom"))
+          (agent-repl--pseudo-perspectives-deleted nil)
+          (automatic nil))
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "main"))
+                ((symbol-function 'agent-repl--ws-switch)
+                 (lambda (&rest _) (setq automatic agent-repl-host-automatic-switch)))
+                ((symbol-function 'agent-repl--ws-persp-kill) #'ignore)
+                ((symbol-function 'agent-repl--info) (lambda (&rest _) nil)))
+        ;; Act
+        (agent-repl--delete-pseudo-perspectives)
+        ;; Assert
+        (should automatic)))))
 
 (ert-deftest agent-repl-test-delete-pseudos-waits-while-the-startup-is-choosing ()
   "Standing in \"main\" while the startup has not chosen: nothing moves, nothing dies, the one-shot stays."
