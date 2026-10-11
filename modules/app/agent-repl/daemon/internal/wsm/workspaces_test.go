@@ -678,6 +678,70 @@ func TestSetPriorityRefusesAnUndeclaredArm(t *testing.T) {
 	}
 }
 
+func TestANewWorkspaceIsShown(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+
+	// Act
+	ws := testWorkspace(t, s)
+
+	// Assert
+	if ws.Hidden {
+		t.Fatalf("a newly registered workspace is hidden")
+	}
+}
+
+func TestSetHiddenIsReadBack(t *testing.T) {
+	tests := []struct {
+		name   string
+		writes []bool
+		want   bool
+	}{
+		{name: "hiding a workspace", writes: []bool{true}, want: true},
+		{name: "showing a hidden workspace again", writes: []bool{true, false}, want: false},
+		{name: "hiding a hidden workspace again", writes: []bool{true, true}, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			ws := testWorkspace(t, s)
+
+			// Act
+			for _, hidden := range tt.writes {
+				if err := s.SetHidden(context.Background(), ws.ID, hidden); err != nil {
+					t.Fatalf("SetHidden(%v): %v", hidden, err)
+				}
+			}
+
+			// Assert
+			got, err := s.Workspace(context.Background(), ws.ID)
+			if err != nil {
+				t.Fatalf("Workspace: %v", err)
+			}
+			if got.Hidden != tt.want {
+				t.Fatalf("hidden = %v, want %v", got.Hidden, tt.want)
+			}
+		})
+	}
+}
+
+func TestSetHiddenRefusesAnUnknownWorkspace(t *testing.T) {
+	// Arrange
+	s, log := testStore(t)
+
+	// Act
+	err := s.SetHidden(context.Background(), WorkspaceID("no-such-workspace"), true)
+
+	// Assert
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("SetHidden on an unknown workspace = %v, want ErrNotFound", err)
+	}
+	if !loggedOperation(log, "daemon.wsm.set_hidden", "debug") {
+		t.Fatalf("the missed write was not recorded under its operation: %v", log.Records())
+	}
+}
+
 func TestSetCurrentSelectsExactlyOneWorkspace(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)

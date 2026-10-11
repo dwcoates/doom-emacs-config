@@ -538,6 +538,18 @@ func validateSetWorkspacePriorityRequest(req *agentreplv1.SetWorkspacePriorityRe
 	return nil
 }
 
+// validateSetWorkspaceHiddenRequest is SetWorkspaceHiddenRequest's base
+// function: a workspace and the place asked for are both required.
+func validateSetWorkspaceHiddenRequest(req *agentreplv1.SetWorkspaceHiddenRequest) *connect.Error {
+	if err := validateWorkspaceRef("workspace", req.GetWorkspace()); err != nil {
+		return err
+	}
+	if req.GetVisibility() == nil {
+		return invalid("visibility", "a visibility arm is required")
+	}
+	return nil
+}
+
 // validateFoldRepositoryRequest is FoldRepositoryRequest's base function.
 func validateFoldRepositoryRequest(req *agentreplv1.FoldRepositoryRequest) *connect.Error {
 	if err := validateRepositoryRef("repository", req.GetRepository()); err != nil {

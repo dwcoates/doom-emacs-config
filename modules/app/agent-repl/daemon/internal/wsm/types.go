@@ -63,6 +63,10 @@ type Workspace struct {
 	Attention bool
 	// Priority is the roster's ordering priority, nil when unset.
 	Priority *Priority
+	// Hidden reports whether the user moved the workspace into the roster's
+	// hidden section (agentrepl.v1.SetWorkspaceHidden): off every grouping and
+	// off the editor's tab bar, its session and tab untouched.
+	Hidden bool
 	// Task is the task this workspace is assigned to, nil when unassigned.
 	Task *TaskID
 	// LastSelectedAt is when the user last selected the workspace.

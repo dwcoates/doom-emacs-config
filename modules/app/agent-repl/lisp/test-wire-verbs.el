@@ -547,6 +547,64 @@ THE ARM IS THE REFUSAL, so a bare error says nothing the caller can act on."
                      :value (:cause (:arm :not-yet-adopted :value nil)))))))
 
 
+;;;; ---- SetWorkspaceHidden ----------------------------------------------
+
+(ert-deftest agent-repl-test-wire-verbs-set-hidden-hide ()
+  "A hide carries the workspace and the empty `hide' arm."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-encode-set-workspace-hidden-request
+                    (list :workspace agent-repl-test-wire-verbs--ref
+                          :visibility '(:arm :hide :value nil)))
+                   '((workspace . ((id . "ws-1") (dir . "/w/one")))
+                     (hide))))))
+
+(ert-deftest agent-repl-test-wire-verbs-set-hidden-show ()
+  "A show carries the workspace and the empty `show' arm."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-encode-set-workspace-hidden-request
+                    (list :workspace agent-repl-test-wire-verbs--ref
+                          :visibility '(:arm :show :value nil)))
+                   '((workspace . ((id . "ws-1") (dir . "/w/one")))
+                     (show))))))
+
+(ert-deftest agent-repl-test-wire-verbs-set-hidden-without-visibility ()
+  "A hidden change with no visibility arm is incomplete and errors before send."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-encode-set-workspace-hidden-request
+                   (list :workspace agent-repl-test-wire-verbs--ref))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-set-hidden-without-workspace ()
+  "A hidden change with no workspace is incomplete and errors before send."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-encode-set-workspace-hidden-request
+                   '(:visibility (:arm :hide :value nil)))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-set-hidden-response-success ()
+  "An accepted hidden change decodes to the empty success arm."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-set-workspace-hidden-response
+                    (agent-repl-test-wire-verbs--parse "{\"success\":{}}"))
+                   '(:arm :success :value nil)))))
+
+(ert-deftest agent-repl-test-wire-verbs-set-hidden-response-error ()
+  "A refused hidden change decodes to the error arm carrying its cause."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-set-workspace-hidden-response
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"error\":{\"workspaceRefMismatch\":{\"registryDir\":\"/w/registry\"}}}"))
+                   '(:arm :error
+                     :value (:cause (:arm :workspace-ref-mismatch :value (:registry-dir "/w/registry"))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-set-hidden-error-refuses-an-unknown-arm ()
+  "An arm this codec does not know is refused as an unknown field."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-set-workspace-hidden-error
+                   (agent-repl-test-wire-verbs--parse "{\"stillHidden\":{}}"))
+                  :type 'agent-repl-wire-error)))
+
+
 ;;;; ---- SubmitPromptRequest ---------------------------------------------
 
 (ert-deftest agent-repl-test-wire-verbs-submit-request-shape ()

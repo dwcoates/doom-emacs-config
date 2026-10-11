@@ -54,8 +54,10 @@ COLLAPSED non-nil makes the daemon hold the section collapsed."
         :rows (list :rows rows)
         :fold (list :arm (if collapsed :collapsed :expanded) :value nil)))
 
-(cl-defun agent-repl-test-roster--roster (&key sections merged current)
-  "Return a decoded `WorkspaceRoster' plist from SECTIONS, MERGED and CURRENT."
+(cl-defun agent-repl-test-roster--roster (&key sections hidden merged current)
+  "Return a decoded `WorkspaceRoster' plist from SECTIONS, HIDDEN, MERGED and CURRENT.
+HIDDEN is the hidden section's rows; the section itself is always there,
+expanded, as the daemon always sends it."
   (list :repository (list :sections sections)
         ;; The task view is deliberately POPULATED in these fixtures: it is
         ;; the same workspaces regrouped, and the walk must ignore it.
@@ -66,6 +68,9 @@ COLLAPSED non-nil makes the daemon hold the section collapsed."
                                                   :done (list :done :false))
                                     :rows (plist-get s :rows)))
                             sections))
+        :hidden (list :header (list :label (list :text "Hidden Workspaces"))
+                      :rows (list :rows hidden)
+                      :fold (list :arm :expanded :value nil))
         :recently-merged (list :header (list :label (list :text "Recently Merged"))
                                :rows (list :rows merged))
         :current (and current (list :workspace (list :id current :dir (concat "/w/" current))))))
@@ -2724,6 +2729,57 @@ saying the roster had been asked for one and declined."
       (funcall push t)
       (funcall push nil)
       (should (equal (agent-repl-roster-drawn-tab-order) '("two"))))))
+
+;;;; ---- A hidden workspace's tab is off the bar ----
+
+(ert-deftest agent-repl-test-roster-walk-marks-every-hidden-row-collapsed ()
+  "The hidden section's rows, children included, walk as collapsed.
+Its own fold is EXPANDED here: that fold is the sidebar's, never the bar's."
+  (let ((walked (agent-repl-roster-walk
+                 (agent-repl-test-roster--roster
+                  :sections (list (agent-repl-test-roster--section
+                                   "open" (list (agent-repl-test-roster--row "w1" "one" :ready))))
+                  :hidden (list (agent-repl-test-roster--row
+                                 "w2" "two" :ready
+                                 :children (list (agent-repl-test-roster--row "w3" "three" :ready))))))))
+    (should (equal (mapcar (lambda (entry) (plist-get entry :collapsed)) walked) '(nil t t)))))
+
+(ert-deftest agent-repl-test-roster-walk-puts-the-hidden-section-before-recently-merged ()
+  "The walk is repositories, then hidden, then recently merged."
+  (let ((walked (agent-repl-roster-walk
+                 (agent-repl-test-roster--roster
+                  :sections (list (agent-repl-test-roster--section
+                                   "open" (list (agent-repl-test-roster--row "w1" "one" :ready))))
+                  :hidden (list (agent-repl-test-roster--row "w2" "two" :ready))
+                  :merged (list (agent-repl-test-roster--row "w3" "three" :merged))))))
+    (should (equal (mapcar (lambda (entry) (agent-repl-roster-row-id (plist-get entry :row))) walked)
+                   '("w1" "w2" "w3")))))
+
+(ert-deftest agent-repl-test-roster-reconcile-keeps-a-hidden-workspaces-tab-off-the-drawing ()
+  "A hidden workspace keeps its tab, and the drawn numbering closes up over it."
+  (agent-repl-test-roster--with-editor
+    (agent-repl-roster-reconcile
+     (agent-repl-test-roster--roster
+      :sections (list (agent-repl-test-roster--section
+                       "repo" (list (agent-repl-test-roster--row "w1" "one" :ready)
+                                    (agent-repl-test-roster--row "w3" "three" :ready))))
+      :hidden (list (agent-repl-test-roster--row "w2" "two" :ready))))
+    (should (member "two" (agent-repl-roster-tab-order)))
+    (should (equal (agent-repl-roster-drawn-tab-order) '("one" "three")))))
+
+(ert-deftest agent-repl-test-roster-reconcile-draws-a-workspace-again-once-shown ()
+  "The next push that moves the workspace back into its repository draws its tab."
+  (agent-repl-test-roster--with-editor
+    (let ((one (agent-repl-test-roster--row "w1" "one" :ready))
+          (two (agent-repl-test-roster--row "w2" "two" :ready)))
+      (agent-repl-roster-reconcile
+       (agent-repl-test-roster--roster
+        :sections (list (agent-repl-test-roster--section "repo" (list one)))
+        :hidden (list two)))
+      (agent-repl-roster-reconcile
+       (agent-repl-test-roster--roster
+        :sections (list (agent-repl-test-roster--section "repo" (list one two)))))
+      (should (equal (agent-repl-roster-drawn-tab-order) '("one" "two"))))))
 
 ;;;; ---- The editor's startup holds every fresh tab out of the bar ----
 

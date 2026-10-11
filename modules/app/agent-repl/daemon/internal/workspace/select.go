@@ -152,6 +152,24 @@ func (v *verbs) MarkViewed(ctx context.Context, ws ids.WorkspaceID) error {
 	return nil
 }
 
+// SetHidden moves a workspace into the roster's hidden section, or back out of
+// it. The roster hoists a hidden workspace's row out of every grouping, and the
+// editor's tab bar stops drawing its tab off that same push; its session and
+// tab are untouched. Asking for the place it already holds is success.
+func (v *verbs) SetHidden(ctx context.Context, ws ids.WorkspaceID, hidden bool) error {
+	_, log, err := v.owned(ctx, "SetWorkspaceHidden", ws)
+	if err != nil {
+		return err
+	}
+	if err := v.deps.DB.SetHidden(ctx, ws, hidden); err != nil {
+		log.Error(opSetHidden, "could not record whether the workspace is hidden", dlog.Context{"hidden": hidden, "cause": err.Error()})
+		return fmt.Errorf("set hidden on %q: %w", ws, err)
+	}
+	log.Info(opSetHidden, "recorded whether the workspace is hidden", dlog.Context{"hidden": hidden})
+	v.republishRegistry(ctx, log, opSetHidden)
+	return nil
+}
+
 // SetPriority sets or clears the roster's ordering priority. The roster orders
 // by it; clients — Emacs tabs included — follow roster order strictly, so this
 // is the only place the order is decided.

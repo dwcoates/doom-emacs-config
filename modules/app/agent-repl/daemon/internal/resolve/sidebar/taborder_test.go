@@ -49,6 +49,11 @@ func TestTabOrder(t *testing.T) {
 			Repository: &frontendv1.RosterRepositoryView{Sections: []*frontendv1.RosterRepoSection{
 				section(tabRow("a", true, tabRow("a1", false)), tabRow("b", false))}},
 		}, want: []string{"a1", "b"}},
+		{name: "the hidden section's open rows keep their tabs, before recently merged", roster: &frontendv1.WorkspaceRoster{
+			Repository:     &frontendv1.RosterRepositoryView{Sections: []*frontendv1.RosterRepoSection{section(tabRow("a", false))}},
+			Hidden:         &frontendv1.RosterHiddenSection{Rows: &frontendv1.RosterRows{Rows: []*frontendv1.RosterRow{tabRow("h", false, tabRow("h1", false)), tabRow("hc", true)}}},
+			RecentlyMerged: &frontendv1.RosterMergedSection{Rows: &frontendv1.RosterRows{Rows: []*frontendv1.RosterRow{tabRow("m", false)}}},
+		}, want: []string{"a", "h", "h1", "m"}},
 		{name: "recently merged comes last", roster: &frontendv1.WorkspaceRoster{
 			Repository:     &frontendv1.RosterRepositoryView{Sections: []*frontendv1.RosterRepoSection{section(tabRow("a", false))}},
 			RecentlyMerged: &frontendv1.RosterMergedSection{Rows: &frontendv1.RosterRows{Rows: []*frontendv1.RosterRow{tabRow("m", false), tabRow("gone", true)}}},

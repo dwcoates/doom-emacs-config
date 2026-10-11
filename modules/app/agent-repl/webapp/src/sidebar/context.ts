@@ -81,3 +81,9 @@ export function maturityFoldKey(stage: MaturityStageName): string {
  * has no key of its own — its identity is that there is only ever one.
  */
 export const MERGED_FOLD_KEY = "merged";
+
+/**
+ * The hidden-workspaces section's fold key. FIXED for the same reason as
+ * `MERGED_FOLD_KEY`: the roster carries exactly one such section.
+ */
+export const HIDDEN_FOLD_KEY = "hidden";

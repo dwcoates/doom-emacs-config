@@ -500,6 +500,8 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
      "tells the user the interrupt left the turn running")
     ("verbs.el" agent-repl-verb-set-priority "agent-repl: priority %s"
      "confirms the user's priority command")
+    ("verbs.el" agent-repl-verb-set-hidden "agent-repl: %s %s"
+     "confirms the user's hide or show of a workspace")
     ("verbs.el" agent-repl-verbs-select-minted
      "agent-repl: the new workspace carries no directory to switch to"
      "reports why the requested new workspace cannot be selected")

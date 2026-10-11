@@ -977,13 +977,18 @@ body::after {
    that run is over. */
 #ws-sidebar .st-merging { animation: ws-spin 1.4s linear infinite; }
 
-/* Recently Merged: settled history rather than live work, so it is set off
-   from the by-repo list above by a light rule and carries a purple header
-   matching its rows' dots. */
+/* THE BANDS UNDER EVERY GROUPING -- Hidden Workspaces, then Recently Merged
+   -- hold no grouping's sections, so each is set off from the list above by
+   ONE shared light rule. Recently Merged is settled history rather than live
+   work and carries a purple header matching its rows' dots; Hidden's header
+   keeps the repository headers' colour. */
+#ws-sidebar .repo.hidden-section,
 #ws-sidebar .repo.merged-section {
   margin-top: 0.5rem;
   padding-top: 0.4rem;
   border-top: 1px solid color-mix(in srgb, var(--muted) 30%, transparent);
+}
+#ws-sidebar .repo.merged-section {
   /* NO FIXED CAP (owner request, 2026-10-08): every merge is drawn, and the
      rail shows as many as fit without scrolling (src/sidebar/merged-fit.ts,
      which measures a row through `.merged-row-probe` below).

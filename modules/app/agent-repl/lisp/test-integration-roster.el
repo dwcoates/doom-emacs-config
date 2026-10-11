@@ -95,6 +95,9 @@ OVERRIDES replaces top-level entries (notably `current')."
              (expanded . ()))])))
      (task . ((sections . [])))
      (maturity . ((sections . [])))
+     (hidden . ((header . ((label . ((text . "Hidden Workspaces"))) (count . ((workspaces . 0)))))
+                (rows . ((rows . [])))
+                (expanded . ())))
      (recentlyMerged . ((header . ((label . ((text . "recently merged"))) (count . ((workspaces . 1)))))
                          (rows . ((rows . [])))
                          (collapsed . ())))
@@ -141,6 +144,9 @@ order apart from declaration order."
              (expanded . ()))])))
     (task . ((sections . [])))
     (maturity . ((sections . [])))
+    (hidden . ((header . ((label . ((text . "Hidden Workspaces"))) (count . ((workspaces . 0)))))
+               (rows . ((rows . [])))
+               (expanded . ())))
     (recentlyMerged . ((header . ((label . ((text . "recently merged"))) (count . ((workspaces . 1)))))
                         (rows . ((rows . [])))
                         (collapsed . ())))
@@ -1966,6 +1972,47 @@ sidebar.proto:60 marks `task' non-optional; audit-1 #49 pinned
       (should (agent-repl-itest--logged-p daemon "elisp.rpc.push-invalid" "error"))
       (should (agent-repl-itest-roster--push-invalid-carries-raw
                daemon "ws-no-task-marker")))))
+
+(ert-deftest agent-repl-itest-roster-roster-missing-hidden-is-refused ()
+  "A `WorkspaceRoster' with no `hidden' field at all is a contract breach.
+sidebar.proto: the hidden section is always set, empty when nothing is
+hidden, so its absence is a malformed push, dropped at ERROR."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-roster--with-subscription daemon
+      ;; Act.
+      (agent-repl-itest-roster--push
+       daemon (agent-repl-itest-roster--roster-missing
+               (list (agent-repl-itest-roster--row
+                      "ws-no-hidden-marker" "ws-no-hidden-marker" 'ready))
+               'hidden))
+      ;; Assert.
+      (agent-repl-itest--await-log daemon "elisp.rpc.push-invalid" "error")
+      (should (agent-repl-itest--logged-p daemon "elisp.rpc.push-invalid" "error"))
+      (should (agent-repl-itest-roster--push-invalid-carries-raw
+               daemon "ws-no-hidden-marker")))))
+
+(ert-deftest agent-repl-itest-roster-a-hidden-row-keeps-its-tab-off-the-drawing ()
+  "A row in the pushed `hidden' section gets a tab the bar does not draw.
+The hidden section walks after the repository sections, as a collapsed
+repository's rows do: in the tab order, out of the drawn order."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-roster--with-subscription daemon
+      (let ((hidden-row (agent-repl-itest-roster--row "ws-hidden" "ws-hidden" 'ready)))
+        ;; Act.
+        (agent-repl-itest-roster--push
+         daemon (agent-repl-itest-roster--roster
+                 (list (agent-repl-itest-roster--row "ws-repo" "ws-repo" 'ready))
+                 `(hidden
+                   . ((header . ((label . ((text . "Hidden Workspaces"))) (count . ((workspaces . 1)))))
+                      (rows . ((rows . ,(vector hidden-row))))
+                      (expanded . ())))))
+        ;; Assert.
+        (agent-repl-itest--wait-until
+         (lambda () (equal (agent-repl-roster-tab-order) '("ws-repo" "ws-hidden")))
+         nil "the repo section's row, then the hidden row")
+        (should (equal (agent-repl-roster-drawn-tab-order) '("ws-repo")))))))
 
 ;; audit-3 #42
 (ert-deftest agent-repl-itest-roster-priority-badge-clears-when-the-row-drops-it ()

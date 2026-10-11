@@ -203,19 +203,25 @@ func (r *resolver) mutateWorkspaceLogged(ws ids.WorkspaceID, operation, message 
 func (r *resolver) render(log dlog.Logger, cause string) *frontendv1.WorkspaceRoster {
 	rc := rowContext{sessions: r.state.sessions(), selected: r.state.selected, cause: cause}
 
-	var live, merged []wsm.Workspace
+	// A MERGED workspace files under recently_merged whatever its hidden flag:
+	// it has no tab to hide, and that it is done is the more useful fact.
+	var live, hidden, merged []wsm.Workspace
 	for _, ws := range r.state.reg.Workspaces {
-		if ws.MergedAt != nil {
+		switch {
+		case ws.MergedAt != nil:
 			merged = append(merged, ws)
-			continue
+		case ws.Hidden:
+			hidden = append(hidden, ws)
+		default:
+			live = append(live, ws)
 		}
-		live = append(live, ws)
 	}
 
 	out := &frontendv1.WorkspaceRoster{
 		Repository:     r.repositoryView(live, rc, log),
 		Task:           r.taskView(live, rc, log),
 		Maturity:       r.maturityView(live, rc, log),
+		Hidden:         r.hiddenSection(hidden, rc, log),
 		RecentlyMerged: r.mergedSection(merged, rc, log),
 	}
 	setShownGrouping(out, r.state.reg.View.Grouping)
