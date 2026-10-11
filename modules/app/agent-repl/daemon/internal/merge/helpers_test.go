@@ -71,6 +71,7 @@ type fakeDB struct {
 	// mergedAt, closed and releasedLeases are what the teardown's ordering is
 	// asserted against.
 	mergedAt       map[ids.WorkspaceID]time.Time
+	landedCommits  map[ids.WorkspaceID]uint32
 	closed         map[ids.WorkspaceID]bool
 	releasedLeases []wsm.LeaseID
 	policies       map[wsm.LeaseID]wsm.LeasePolicy
@@ -128,6 +129,7 @@ func newFakeDB() *fakeDB {
 		queues:        map[wsm.RepoKey][]wsm.MergeQueueEntry{},
 		paused:        map[wsm.RepoKey]bool{},
 		mergedAt:      map[ids.WorkspaceID]time.Time{},
+		landedCommits: map[ids.WorkspaceID]uint32{},
 		closed:        map[ids.WorkspaceID]bool{},
 		policies:      map[wsm.LeaseID]wsm.LeasePolicy{},
 		progress:      map[ids.WorkspaceID]wsm.MergeProgress{},
@@ -298,13 +300,16 @@ func (f *fakeDB) SetLeasePolicy(_ context.Context, lease wsm.LeaseID, p wsm.Leas
 	return nil
 }
 
-func (f *fakeDB) SetMergedAt(_ context.Context, id ids.WorkspaceID, at time.Time) error {
+func (f *fakeDB) SetMergedAt(_ context.Context, id ids.WorkspaceID, at time.Time, commits *uint32) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.shut {
 		return errStateClientClosed
 	}
 	f.mergedAt[id] = at
+	if commits != nil {
+		f.landedCommits[id] = *commits
+	}
 	return nil
 }
 
