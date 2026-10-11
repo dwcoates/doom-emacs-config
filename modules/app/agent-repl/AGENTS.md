@@ -1170,9 +1170,9 @@ those paths are read in the source, not clicked in a bubble.
 - **Name the copy in your own worktree.** A workspace on a feature branch
   lives in its own worktree (`~/.config/doom-worktrees/<name>/...`), and the
   same file under `~/.config/doom/...` is master's copy. A link that resolves
-  outside the clicking workspace's worktree is refused
-  (`path_escapes_workspace`), so the path must be the one the reader's
-  workspace holds.
+  outside the clicking workspace's worktree still opens, but it opens THAT
+  file, so a master path opens master's copy rather than the one the
+  reader's workspace holds.
 - **Never** a bare file name (`footer.ts`), a path relative to your working
   directory (`daemon/internal/workspace/links.go` while in
   `~/.config/doom/modules/app/agent-repl`), a path relative to the repository
