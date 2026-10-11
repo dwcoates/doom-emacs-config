@@ -2945,28 +2945,42 @@ describe("the response body custom element", () => {
  * every second must hold a fixed footprint so its growth cannot push a
  * neighbor onto a new line under the reader.
  */
-describe("the shell head's clocks hold a fixed footprint", () => {
-  const clocks = [".shell-clock", ".shell-quiet"];
+describe("a card head's clock holds a fixed footprint", () => {
+  it.each([
+    ["one unbreakable run", /white-space:\s*nowrap/],
+    ["tabular figures", /font-variant-numeric:\s*tabular-nums/],
+    ["a box that takes its ghost's width", /display:\s*inline-block/],
+  ])("draws a reserved clock as %s", (_name, declaration) => {
+    // Arrange / Act
+    const decls = declarationsOf(".reserved-clock") ?? "";
+    // Assert
+    expect(decls).toMatch(declaration);
+  });
 
-  it.each(clocks)("%s is one unbreakable run", (selector) => {
+  it.each([
+    ["reads the clock's reserved labels", /content:\s*var\(--clock-reserve-labels\)/],
+    ["takes no height", /height:\s*0/],
+    ["is never painted", /visibility:\s*hidden/],
+    ["lays its labels out a line each", /white-space:\s*pre/],
+  ])("draws a ghost that %s", (_name, declaration) => {
+    // Arrange / Act
+    const decls = declarationsOf(".reserved-clock::before") ?? "";
+    // Assert
+    expect(decls).toMatch(declaration);
+  });
+
+  it.each([".shell-clock", ".shell-quiet"])("leaves %s no guessed minimum width of its own", (selector) => {
+    // Arrange / Act
+    const decls = declarationsOf(selector) ?? "";
+    // Assert
+    expect(decls).not.toMatch(/min-width/);
+  });
+
+  it.each([".shell-stop", ".subagent-stop"])("keeps %s and its answer on one line", (selector) => {
     // Arrange / Act
     const decls = declarationsOf(selector) ?? "";
     // Assert
     expect(decls).toMatch(/white-space:\s*nowrap/);
-  });
-
-  it.each(clocks)("%s draws tabular figures", (selector) => {
-    // Arrange / Act
-    const decls = declarationsOf(selector) ?? "";
-    // Assert
-    expect(decls).toMatch(/font-variant-numeric:\s*tabular-nums/);
-  });
-
-  it.each(clocks)("%s reserves a minimum width", (selector) => {
-    // Arrange / Act
-    const decls = declarationsOf(selector) ?? "";
-    // Assert
-    expect(decls).toMatch(/min-width:\s*\d+ch/);
   });
 });
 

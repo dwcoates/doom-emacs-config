@@ -26,7 +26,7 @@
 import { createControl, type Control } from "../../control.js";
 import { repaintMark } from "../../dom.js";
 import type { Ticker } from "../../clock.js";
-import { liveElapsedClock, settledElapsedClock } from "../../elapsed-clock.js";
+import { reservedLiveElapsedClock, reservedSettledElapsedClock } from "../../elapsed-clock.js";
 import { log } from "../../log.js";
 import { msOf, requireCase, requireMessage } from "../../rpc/strict.js";
 import { stopTicking } from "../ticking.js";
@@ -208,8 +208,8 @@ export const TAB_DURATION_CLASS = "merge-tab-duration";
  */
 export function drawTabDuration(tab: MergeTab, ticker: Ticker): HTMLElement {
   return tab.endedMs === undefined
-    ? liveElapsedClock(ticker, TAB_DURATION_CLASS, tab.startedMs)
-    : settledElapsedClock(TAB_DURATION_CLASS, tab.endedMs - tab.startedMs);
+    ? reservedLiveElapsedClock(ticker, TAB_DURATION_CLASS, tab.startedMs)
+    : reservedSettledElapsedClock(TAB_DURATION_CLASS, tab.endedMs - tab.startedMs);
 }
 
 /**

@@ -5,6 +5,7 @@ import {
   FeedSubagentLostSchema,
   FeedSubagentSchema,
   FeedSubagentSettledSchema,
+  FeedSubagentSettlingSchema,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { InterruptResponseSchema } from "../../../../proto/gen/ts/agentrepl/v1/endpoint_interrupt_pb";
 import { INTERRUPT_ERROR_ARMS } from "../../../src/interrupt-error.js";
@@ -14,7 +15,7 @@ import {
   SUBAGENT_SETTLED_ARMS,
   drawFeedSubagent,
 } from "../../../src/feed/rows/subagent.js";
-import { countingTicker, harness, rowContext, subagentRow, type Harness } from "../harness.js";
+import { countingTicker, drawnBefore, harness, rowContext, subagentRow, type Harness } from "../harness.js";
 import { captureLogRecords, forwardedRecord } from "../../log-capture.js";
 import {
   HAS_MORE_CLASS,
@@ -646,5 +647,27 @@ describe("drawFeedSubagent: the detached-work id", () => {
 
     // Assert
     expect(el.querySelector(".async-work-id")?.textContent ?? null).toBe(want);
+  });
+});
+
+// THE BADGE COMES BEFORE THE CLOCK (owner ruling, 2026-10-11): the head reads
+// title, outcome, then how long it ran.
+describe("drawFeedSubagent: the badge before the clock", () => {
+  it("draws a settled head's outcome before its clock", () => {
+    // Arrange / Act
+    const { el } = drawRow(subagentRow("s", { settled: { endedAtMs: 8000n, outcome: "succeeded" } }));
+    // Assert
+    expect(drawnBefore(el.querySelector(".subagent-outcome"), el.querySelector(".subagent-clock"))).toBe(true);
+  });
+
+  it("draws a settling head's badge before its clock", () => {
+    // Arrange
+    const row = subagentRow("s");
+    if (row.row.case !== "activity" || row.row.value.unit.case !== "subagent") throw new Error("fixture is not a subagent");
+    row.row.value.unit.value.state = { case: "settling", value: create(FeedSubagentSettlingSchema, { stoppedAtMs: 5000n }) };
+    // Act
+    const { el } = drawRow(row);
+    // Assert
+    expect(drawnBefore(el.querySelector(".subagent-outcome"), el.querySelector(".subagent-clock"))).toBe(true);
   });
 });
