@@ -1,6 +1,7 @@
 package sidebar_test
 
 import (
+	"agentrepl/protohelpers/rosterwalk"
 	"testing"
 	"time"
 
@@ -301,7 +302,7 @@ func TestMergedBeatsLastActiveInTheWhenColumn(t *testing.T) {
 	r.SetRegistry(registry(ws))
 
 	// Assert: that the workspace is done is the more interesting fact.
-	row := rowFor(latest(t, r).GetRecentlyMerged().GetRows().GetRows(), "w1")
+	row := rowFor(rosterwalk.MergedRows(latest(t, r)), "w1")
 	if got := row.GetWhen().GetMerged().GetAtMs(); got != epoch.Add(time.Hour).UnixMilli() {
 		t.Fatalf("when = %v, want the merge instant", row.GetWhen())
 	}
@@ -452,7 +453,7 @@ func TestRowRecedesWhenTheWorkspaceMerged(t *testing.T) {
 	r.SetRegistry(registry(merged))
 
 	// Assert.
-	row := rowFor(latest(t, r).GetRecentlyMerged().GetRows().GetRows(), "w1")
+	row := rowFor(rosterwalk.MergedRows(latest(t, r)), "w1")
 	if !row.GetClosed().GetClosed() {
 		t.Fatal("a merged workspace's row did not recede")
 	}
@@ -1200,7 +1201,7 @@ func TestAMergedMergeWorkspacesRowWearsNoMarker(t *testing.T) {
 	r.SetRegistry(registry(merged))
 
 	// Assert
-	row := rowFor(latest(t, r).GetRecentlyMerged().GetRows().GetRows(), "w2")
+	row := rowFor(rosterwalk.MergedRows(latest(t, r)), "w2")
 	if marker := row.GetMergeWorkspace(); marker != nil {
 		t.Fatalf("marker = %+v, want none once the merge workspace has merged", marker)
 	}

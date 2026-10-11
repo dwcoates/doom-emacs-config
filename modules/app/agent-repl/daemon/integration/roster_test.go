@@ -3,6 +3,7 @@
 package integration
 
 import (
+	"agentrepl/protohelpers/rosterwalk"
 	"testing"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
@@ -310,7 +311,7 @@ func TestRecentlyMergedListsAMergedWorkspaceWithItsMergeInstant(t *testing.T) {
 
 	// Assert
 	got := awaitRoster(t, d, roster, "the merged workspace under recently_merged", func(r *frontendv1.WorkspaceRoster) bool {
-		for _, row := range r.GetRecentlyMerged().GetRows().GetRows() {
+		for _, row := range rosterwalk.MergedRows(r) {
 			if row.GetWorkspace().GetWorkspace().GetId() == f.ws.GetId() {
 				return true
 			}
@@ -318,7 +319,7 @@ func TestRecentlyMergedListsAMergedWorkspaceWithItsMergeInstant(t *testing.T) {
 		return false
 	})
 	var row *frontendv1.RosterRow
-	for _, r := range got.GetRecentlyMerged().GetRows().GetRows() {
+	for _, r := range rosterwalk.MergedRows(got) {
 		if r.GetWorkspace().GetWorkspace().GetId() == f.ws.GetId() {
 			row = r
 		}
