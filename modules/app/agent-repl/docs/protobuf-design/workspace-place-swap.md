@@ -158,3 +158,23 @@ sidebar's walk" and the create-landing rule above. Not yet implemented.
   (`mergeTargetDir`, `create.go:550`). The workspace skill always records its
   source workspace as the parent and bases on the source's HEAD, or on the
   main branch with `--master`.
+
+## Create-command rework rulings (owner, 2026-10-11)
+
+- `SPC TAB c` and `SPC TAB C` are removed.
+- A workspace's code is cut from `master` and merges into `master`, or is cut
+  from another workspace's tip and merges into that workspace; the two mixed
+  combinations are not created. Nesting follows the merge target.
+- The conversation is a separate axis: new for `n`/`N`, copied from the
+  current workspace for both kinds of fork.
+- `f` forks into `master` (code from `master`, conversation copied); `F` forks
+  as a child (code from the current tip, merges back into it). `n` makes a
+  new workspace in the current repository; `N` lets the user pick the
+  repository. Each has a prompt version and a name version; how the two are
+  told apart is open.
+- A fork into `master` gets a prompt prefix: it says the workspace is a fork,
+  names the originating workspace, and says the code came from `master` with
+  only the conversation copied. The agent raises that only when a later user
+  prompt relies on changes from the originating workspace that are not
+  present. Calling the user's expectation otherwise is operator error, not a
+  defect.
