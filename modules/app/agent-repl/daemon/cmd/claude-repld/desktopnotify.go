@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,6 +12,7 @@ import (
 	"claude-repld/internal/desktopnotify"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/shellword"
 	"claude-repld/internal/wsm"
 )
 
@@ -18,15 +20,44 @@ import (
 const opDesktopNotify = "daemon.cmd.desktop_notify"
 
 // resolveBannerBackend resolves the platform's banner program once, at boot.
-func resolveBannerBackend(log dlog.Logger) (desktopnotify.Backend, error) {
+// click is the command a banner the platform holds runs when it is clicked.
+func resolveBannerBackend(ctx context.Context, log dlog.Logger, click desktopnotify.ClickAction) (desktopnotify.Backend, error) {
 	return resolveNotifyProgram(log, "banner", desktopnotify.EnvNotifierCmd,
 		func(goos, override string) (desktopnotify.Backend, error) {
-			platform, err := desktopnotify.PlatformFor(goos)
+			platform, err := desktopnotify.PlatformFor(goos, click)
 			if err != nil {
 				return nil, err
 			}
-			return desktopnotify.NewBackend(platform, override, exec.LookPath, desktopnotify.ExecRunner{})
+			return desktopnotify.NewBackend(ctx, platform, override, exec.LookPath, desktopnotify.ExecRunner{})
 		})
+}
+
+// selectWorkspaceClick is the click a banner the platform holds runs: this
+// daemon binary's own `call SelectWorkspace` for the banner's workspace,
+// against this daemon's state root.
+//
+// THE CLICK REACHES WHICHEVER DAEMON SERVES WHEN IT LANDS. The command names
+// the state root, not an address, so a banner clicked after a restart or a
+// deploy selects the workspace on the daemon serving then; the binary path is
+// the deployed one, which a deploy replaces in place. The state root is
+// spelled out because the platform runs the command in a bare environment,
+// without the $AGENT_REPL_STATE_DIR this daemon may have been started with.
+func selectWorkspaceClick(selfExe, stateDir string) desktopnotify.ClickAction {
+	return func(target desktopnotify.Target) string {
+		type ref struct {
+			ID  string `json:"id"`
+			Dir string `json:"dir"`
+		}
+		request, err := json.Marshal(struct {
+			Workspace ref `json:"workspace"`
+		}{Workspace: ref{ID: string(target.ID), Dir: target.Dir}})
+		if err != nil {
+			panic(fmt.Sprintf("claude-repld: encode a SelectWorkspace request of two strings: %v", err))
+		}
+		return "exec " + shellword.Quote(selfExe) + " " + callVerb +
+			" -state-dir " + shellword.Quote(stateDir) +
+			" SelectWorkspace " + shellword.Quote(string(request))
+	}
 }
 
 // resolveChime resolves the platform's turn-end chime player once, at boot.
@@ -61,22 +92,24 @@ func resolveNotifyProgram[T interface{ Program() string }](log dlog.Logger, role
 	return program, nil
 }
 
-// workspaceNames titles a banner by the roster row's name: the workspace's
-// registry name, which is also the name its tab carries.
-type workspaceNames struct {
+// bannerWorkspaces answers a banner's workspace from the registry: the name
+// it is titled by, which is also the name its tab carries, and the directory
+// its click's WorkspaceRef echoes.
+type bannerWorkspaces struct {
 	db wsm.DB
 }
 
-// WorkspaceName answers the workspace's registry name.
-func (n workspaceNames) WorkspaceName(ctx context.Context, ws ids.WorkspaceID) (string, error) {
-	record, err := n.db.Workspace(ctx, ws)
+// Workspace answers the workspace's registry name and directory.
+func (w bannerWorkspaces) Workspace(ctx context.Context, ws ids.WorkspaceID) (desktopnotify.Workspace, error) {
+	record, err := w.db.Workspace(ctx, ws)
 	if err != nil {
-		return "", fmt.Errorf("name workspace %q: %w", ws, err)
+		return desktopnotify.Workspace{}, fmt.Errorf("read workspace %q for its banner: %w", ws, err)
 	}
-	return record.Name, nil
+	return desktopnotify.Workspace{Name: record.Name, Dir: record.Dir}, nil
 }
 
-// clickForwarder carries a banner's click to the server's host stream. The
+// clickForwarder carries a READ-BACK banner's click to the server's host
+// stream. The
 // notifier is built before the server exists, so the server is bound late,
 // exactly as the host relay is.
 type clickForwarder struct {
