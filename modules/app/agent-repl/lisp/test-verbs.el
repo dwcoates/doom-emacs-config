@@ -47,6 +47,13 @@ to its project directory, so it is recorded separately from
 `agent-repl-test-verbs--selected' -- a test that says the origin was left
 alone has to be able to tell the two apart.")
 
+(defvar agent-repl-test-verbs--switch-requests nil
+  "Workspaces handed to `agent-repl-host-request-switch', oldest first.
+The request is host.el's daemon boundary, so it is RECORDED here.")
+
+(defvar agent-repl-test-verbs--drawn nil
+  "What the stubbed `agent-repl-roster-drawn-tab-order' answers.")
+
 (defun agent-repl-test-verbs--ref (&optional id dir)
   "Return a decoded `WorkspaceRef' plist, echoed verbatim by production."
   (list :id (or id "ws-id-1") :dir (or dir "/tmp/agent-repl-test/ws-1")))
@@ -97,8 +104,9 @@ current workspace's row sits in, so a create test hands them this."
       (setq row (plist-put row (pop overrides) (pop overrides))))
     row))
 
-(defun agent-repl-test-verbs--roster (rows &optional merged-rows sections)
-  "Return a decoded `WorkspaceRoster' carrying ROWS in one repo section."
+(defun agent-repl-test-verbs--roster (rows &optional merged-rows sections hidden-rows)
+  "Return a decoded `WorkspaceRoster' carrying ROWS in one repo section.
+HIDDEN-ROWS, when given, are the hidden section's rows."
   (list :repository
         (list :sections
               (or sections
@@ -106,6 +114,8 @@ current workspace's row sits in, so a create test hands them this."
                               :header (list :label (list :text "repo-one"))
                               :rows (list :rows rows)))))
         :task (list :sections nil)
+        :hidden (list :header (list :label (list :text "Hidden Workspaces"))
+                      :rows (list :rows hidden-rows))
         :recently-merged (list :header (list :label (list :text "Recently Merged"))
                                :rows (list :rows merged-rows))
         :current nil))
@@ -128,8 +138,17 @@ answers a bare success, which is what almost every verb's success is."
          (agent-repl-test-verbs--handover nil)
          (agent-repl-test-verbs--selected nil)
          (agent-repl-test-verbs--restart-holds nil)
+         (agent-repl-test-verbs--switch-requests nil)
+         (agent-repl-test-verbs--drawn nil)
          (agent-repl-test-verbs--answers ,answers))
-     (cl-letf* (((symbol-function 'agent-repl-host-ref)
+     (cl-letf* (((symbol-function 'agent-repl-host-request-switch)
+                 (lambda (ws _trigger)
+                   (setq agent-repl-test-verbs--switch-requests
+                         (append agent-repl-test-verbs--switch-requests (list ws)))
+                   t))
+                ((symbol-function 'agent-repl-roster-drawn-tab-order)
+                 (lambda () agent-repl-test-verbs--drawn))
+                ((symbol-function 'agent-repl-host-ref)
                  (lambda (_ws) (agent-repl-test-verbs--ref)))
                 ((symbol-function 'agent-repl--ws-require-known)
                  (lambda (_ws _context) nil))
@@ -650,6 +669,159 @@ never signalled as an error."
     (let ((request (agent-repl-test-verbs--request :set-hidden)))
       (should (equal (plist-get request :workspace) (agent-repl-test-verbs--ref)))
       (should (eq (plist-get (plist-get request :visibility) :arm) :hide)))))
+
+(ert-deftest agent-repl-verbs-roster-or-view-prefers-the-given-roster ()
+  "A given roster is answered verbatim, whatever the view holds."
+  (let ((agent-repl-roster-view '(:view t)))
+    (should (equal (agent-repl-verbs--roster-or-view '(:given t)) '(:given t)))))
+
+(ert-deftest agent-repl-verbs-roster-or-view-defaults-to-the-view ()
+  "A nil roster answers `agent-repl-roster-view'."
+  (let ((agent-repl-roster-view '(:view t)))
+    (should (equal (agent-repl-verbs--roster-or-view nil) '(:view t)))))
+
+(ert-deftest agent-repl-verbs-roster-or-view-is-nil-before-any-push ()
+  "A nil roster before any push answers nil."
+  (let ((agent-repl-roster-view nil))
+    (should-not (agent-repl-verbs--roster-or-view nil))))
+
+(defconst agent-repl-test-verbs--source
+  (expand-file-name "verbs.el" (file-name-directory (or load-file-name buffer-file-name)))
+  "verbs.el beside this suite, for the tests that read its source.")
+
+(ert-deftest agent-repl-verbs-roster-defaulting-has-one-home ()
+  "Every roster reader in verbs.el defaults through `agent-repl-verbs--roster-or-view'.
+A reader that hand-rolls the defaulting reads the view a second time and fails here."
+  ;; Arrange.
+  (with-temp-buffer
+    (insert-file-contents agent-repl-test-verbs--source)
+    ;; Act.
+    (let ((reads (how-many (regexp-quote "(boundp 'agent-repl-roster-view)")
+                           (point-min) (point-max))))
+      ;; Assert.
+      (should (= reads 1)))))
+
+(ert-deftest agent-repl-verbs-hide-lands-on-the-first-drawn-tab ()
+  "An accepted hide switches to the first tab the bar draws."
+  (agent-repl-test-verbs--with nil
+    ;; Arrange.
+    (setq agent-repl-test-verbs--drawn '("ws-zero" "ws-one" "ws-two"))
+    ;; Act.
+    (agent-repl-verb-set-hidden "ws-one" t)
+    ;; Assert.
+    (should (equal agent-repl-test-verbs--switch-requests '("ws-zero")))))
+
+(ert-deftest agent-repl-verbs-hide-of-the-first-tab-lands-on-the-next ()
+  "Hiding the first drawn tab lands on the one after it, whether or not the push removed it yet."
+  (agent-repl-test-verbs--with nil
+    ;; Arrange: the push that takes ws-one off the bar has not arrived.
+    (setq agent-repl-test-verbs--drawn '("ws-one" "ws-two"))
+    ;; Act.
+    (agent-repl-verb-set-hidden "ws-one" t)
+    ;; Assert.
+    (should (equal agent-repl-test-verbs--switch-requests '("ws-two")))))
+
+(ert-deftest agent-repl-verbs-hide-of-the-only-tab-stays-and-logs ()
+  "A hide that leaves no other drawn tab requests no switch and records why."
+  (agent-repl-test-verbs--with nil
+    ;; Arrange.
+    (setq agent-repl-test-verbs--drawn '("ws-one"))
+    (let (logged)
+      (cl-letf (((symbol-function 'agent-repl--info)
+                 (lambda (ws fmt &rest args) (push (cons ws (apply #'format fmt args)) logged))))
+        ;; Act.
+        (agent-repl-verb-set-hidden "ws-one" t))
+      ;; Assert.
+      (should-not agent-repl-test-verbs--switch-requests)
+      (should (member '("ws-one" . "elisp.verbs.hide-landing-none ws=ws-one") logged)))))
+
+(ert-deftest agent-repl-verbs-hide-refused-requests-no-switch ()
+  "A refused hide leaves the frame where it is."
+  (agent-repl-test-verbs--with
+      '((:set-hidden . (:response (:arm :error
+                                   :value (:cause (:arm :unknown-workspace :value nil))))))
+    ;; Arrange.
+    (setq agent-repl-test-verbs--drawn '("ws-zero" "ws-one"))
+    ;; Act.
+    (agent-repl-verb-set-hidden "ws-one" t)
+    ;; Assert.
+    (should-not agent-repl-test-verbs--switch-requests)))
+
+(ert-deftest agent-repl-verbs-show-lands-on-the-shown-workspace ()
+  "An accepted show switches to the workspace brought back."
+  (agent-repl-test-verbs--with nil
+    ;; Arrange.
+    (setq agent-repl-test-verbs--drawn '("ws-zero"))
+    ;; Act.
+    (agent-repl-verb-set-hidden "ws-one" nil)
+    ;; Assert.
+    (should (equal agent-repl-test-verbs--switch-requests '("ws-one")))))
+
+(ert-deftest agent-repl-verbs-hidden-rows-flattens-and-drops-closed ()
+  "The hidden section's open rows, children included; closed rows are dropped."
+  ;; Arrange.
+  (let* ((child (agent-repl-test-verbs--row
+                 :workspace (list :workspace (agent-repl-test-verbs--ref "kid" "/tmp/k"))
+                 :name (list :text "child")))
+         (parent (agent-repl-test-verbs--row :name (list :text "parent")
+                                             :children (list child)))
+         (closed (agent-repl-test-verbs--row
+                  :workspace (list :workspace (agent-repl-test-verbs--ref "cid" "/tmp/c"))
+                  :name (list :text "closed")
+                  :closed (list :closed t)))
+         (roster (agent-repl-test-verbs--roster nil nil nil (list parent closed))))
+    ;; Act.
+    (let ((rows (agent-repl-verbs--hidden-rows roster)))
+      ;; Assert.
+      (should (equal (mapcar #'agent-repl-verbs--row-name rows) '("parent" "child"))))))
+
+(ert-deftest agent-repl-verbs-hidden-rows-reads-the-roster-view ()
+  "With no ROSTER the hidden rows come from `agent-repl-roster-view'."
+  ;; Arrange.
+  (let ((agent-repl-roster-view
+         (agent-repl-test-verbs--roster nil nil nil
+                                        (list (agent-repl-test-verbs--row
+                                               :name (list :text "hid"))))))
+    ;; Act / Assert.
+    (should (equal (mapcar #'agent-repl-verbs--row-name (agent-repl-verbs--hidden-rows))
+                   '("hid")))))
+
+(ert-deftest agent-repl-verbs-show-hidden-offers-tab-names-shows-and-switches ()
+  "`SPC TAB H' offers the hidden workspaces' tabs, shows the pick and switches to it."
+  ;; Arrange.
+  (let* ((hidden (agent-repl-test-verbs--row
+                  :workspace (list :workspace (agent-repl-test-verbs--ref "hid" "/tmp/h"))
+                  :name (list :text "hidden-one")))
+         (agent-repl-roster-view (agent-repl-test-verbs--roster nil nil nil (list hidden)))
+         (offered nil))
+    (agent-repl-test-verbs--with nil
+      (cl-letf (((symbol-function 'agent-repl--ws-by-ref-id)
+                 (lambda (id) (and (equal id "hid") "hidden-one·repo")))
+                ((symbol-function 'completing-read)
+                 (lambda (_p candidates &rest _) (setq offered candidates) "hidden-one·repo")))
+        ;; Act.
+        (agent-repl-show-hidden-workspace)
+        ;; Assert.
+        (should (equal offered '("hidden-one·repo")))
+        (should (eq (plist-get (plist-get (agent-repl-test-verbs--request :set-hidden)
+                                          :visibility)
+                               :arm)
+                    :show))
+        (should (equal agent-repl-test-verbs--switch-requests '("hidden-one·repo")))))))
+
+(ert-deftest agent-repl-verbs-show-hidden-with-none-refuses-and-logs ()
+  "`SPC TAB H' with nothing hidden is a user error, recorded, and sends nothing."
+  ;; Arrange.
+  (let ((agent-repl-roster-view (agent-repl-test-verbs--roster nil))
+        (logged nil))
+    (agent-repl-test-verbs--with nil
+      (cl-letf (((symbol-function 'agent-repl--info)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+        ;; Act / Assert.
+        (should-error (agent-repl-show-hidden-workspace) :type 'user-error)
+        (should (member "elisp.verbs.show-hidden-none" logged))
+        (should-not agent-repl-test-verbs--sent)
+        (should-not agent-repl-test-verbs--switch-requests)))))
 
 ;;;; ---- Ack handling: one test per outcome ----
 
