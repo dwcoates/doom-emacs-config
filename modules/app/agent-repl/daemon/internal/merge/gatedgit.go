@@ -403,6 +403,14 @@ func (g *gatedGit) CommitsBetween(ctx context.Context, dir, base, tip string) ([
 	return g.inner.CommitsBetween(ctx, dir, base, tip)
 }
 
+func (g *gatedGit) CountCommits(ctx context.Context, dir, base, tip string) (uint32, error) {
+	if err := g.enter("CountCommits"); err != nil {
+		return 0, err
+	}
+	defer g.leave()
+	return g.inner.CountCommits(ctx, dir, base, tip)
+}
+
 func (g *gatedGit) StartRebase(ctx context.Context, dir, onto string, commits []string) (gitclient.RebaseStep, error) {
 	if err := g.enter("StartRebase"); err != nil {
 		return gitclient.RebaseStep{}, err
