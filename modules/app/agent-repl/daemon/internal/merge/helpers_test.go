@@ -417,6 +417,29 @@ func (f *fakeDB) MergeLedger(_ context.Context, id ids.WorkspaceID) ([]wsm.Merge
 func (f *fakeDB) RequestMerge(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID, source wsm.MergeSource, at time.Time) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	return f.requestMergeLocked(repo, id, source, at)
+}
+
+// RequestOneShotMerge records the request and marks the requester's creation
+// job a one-shot, as the store does in one transaction: a refused request
+// marks nothing.
+func (f *fakeDB) RequestOneShotMerge(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID, source wsm.MergeSource, at time.Time) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	job, ok := f.jobs[id]
+	if !ok {
+		return fmt.Errorf("no creation job records %s", id)
+	}
+	if err := f.requestMergeLocked(repo, id, source, at); err != nil {
+		return err
+	}
+	job.OneShot = true
+	f.jobs[id] = job
+	return nil
+}
+
+// requestMergeLocked is RequestMerge's body, with f.mu held.
+func (f *fakeDB) requestMergeLocked(repo wsm.RepoKey, id ids.WorkspaceID, source wsm.MergeSource, at time.Time) error {
 	if f.enqueueErr != nil {
 		err := f.enqueueErr
 		f.enqueueErr = nil
@@ -1623,6 +1646,13 @@ type harness struct {
 	holds   *fakeHolds
 	runner  *fakeRunner
 	logs    *dlog.TestSurfaces
+	// registryPublishes counts PublishRegistry calls, and publishErr, when
+	// set, fails every one.
+	registryPublishes int
+	publishErr        error
+	// requestedAtPublish is the roster's merge-requested facts as they stood
+	// at each PublishRegistry call, so a test can assert what a push drew.
+	requestedAtPublish [][]bool
 	// pauseInTerminal is the terminal seam the drain's tests wire.
 	pauseInTerminal AdmissionPause
 	rollout         *fakeRollout
@@ -1880,6 +1910,14 @@ func (h *harness) deps() Deps {
 		TestRunner: h.runner,
 		Governor:   h.governor,
 		Painter:    fakePainter{},
+		PublishRegistry: func(context.Context) error {
+			requested := h.sidebar.requestedSeen()
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			h.registryPublishes++
+			h.requestedAtPublish = append(h.requestedAtPublish, requested)
+			return h.publishErr
+		},
 		StartSession: func(_ context.Context, ws ids.WorkspaceID) error {
 			h.mu.Lock()
 			h.startedSessions = append(h.startedSessions, ws)
@@ -2260,6 +2298,26 @@ func (h *harness) registerOther(ws ids.WorkspaceID, name, branch string) string 
 func (h *harness) request(t *testing.T, source wsm.MergeSource, by Requester) error {
 	t.Helper()
 	return h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: source, By: by})
+}
+
+// requestOneShot asks for the harness workspace's one-shot merge, as an agent.
+func (h *harness) requestOneShot(t *testing.T, source wsm.MergeSource, detached bool) error {
+	t.Helper()
+	return h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: source, By: RequestedByAgent, Detached: detached, OneShot: true})
+}
+
+// publishes answers how many times the roster's durable half was republished.
+func (h *harness) publishes() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.registryPublishes
+}
+
+// oneShot answers whether the harness workspace's creation job is a one-shot.
+func (h *harness) oneShot() bool {
+	h.db.mu.Lock()
+	defer h.db.mu.Unlock()
+	return h.db.jobs[theWorkspace].OneShot
 }
 
 // runWait runs the harness workspace's standing request wait to its end, as

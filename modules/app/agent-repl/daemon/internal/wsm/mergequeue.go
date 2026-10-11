@@ -28,7 +28,50 @@ func normalizeRepoKey(repo RepoKey) (RepoKey, error) {
 // only at QueueMerge. A workspace already in that queue in ANY state is
 // REFUSED with the place it holds: a merge is asked for once.
 func (s *store) RequestMerge(ctx context.Context, repo RepoKey, id WorkspaceID, source MergeSource, at time.Time) error {
-	const op = "daemon.wsm.request_merge"
+	return s.requestMerge(ctx, "daemon.wsm.request_merge", repo, id, source, at, nil)
+}
+
+// RequestOneShotMerge records a ONE-SHOT merge: RequestMerge's request, and
+// the requester marked a one-shot on its creation job (CreationJob.OneShot),
+// in ONE transaction. The mark is the fact every surface reads a one-shot
+// from, so it can never stand without the merge it announces, nor a refused
+// request leave it behind.
+//
+// A one-shot merge lands the requester's OWN branch IN PLACE and closes the
+// requester once it lands, so any other source is refused before anything is
+// written. A requester with no creation job is refused too: the merge reads
+// its geometry from that job, so there is nothing to mark and nothing to
+// merge.
+func (s *store) RequestOneShotMerge(ctx context.Context, repo RepoKey, id WorkspaceID, source MergeSource, at time.Time) error {
+	const op = "daemon.wsm.request_one_shot_merge"
+	if !source.IsOneShot() {
+		err := fmt.Errorf("a one-shot merge is an own-branch merge that runs in place and closes the requester, not a %s source with keep_open %v and detach %q",
+			source.Kind, source.KeepOpen, source.Detach)
+		s.log.Error(op, "refused a one-shot merge request whose source is no one-shot", withError(dlog.Context{
+			"repo": string(repo), "workspace": string(id), "source": source.Kind.String()}, err))
+		return fmt.Errorf("wsm: one-shot merge request for %s: %w", id, err)
+	}
+	return s.requestMerge(ctx, op, repo, id, source, at, func(ctx context.Context, tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `UPDATE creation_jobs SET one_shot = 1 WHERE workspace_id = ?`, id)
+		if err != nil {
+			return err
+		}
+		marked, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if marked != 1 {
+			return fmt.Errorf("wsm: one-shot merge request for %s: no creation job records the workspace, so it cannot be marked a one-shot", id)
+		}
+		return nil
+	})
+}
+
+// requestMerge is the one body every merge request is recorded through:
+// the key normalized, the source validated, a workspace already in the queue
+// refused with the place it holds, then the request row written and MARK (when
+// non-nil) run in the same transaction.
+func (s *store) requestMerge(ctx context.Context, op string, repo RepoKey, id WorkspaceID, source MergeSource, at time.Time, mark func(context.Context, *sql.Tx) error) error {
 	key, err := normalizeRepoKey(repo)
 	if err != nil {
 		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(dlog.Context{"repo": string(repo), "workspace": string(id)}, err))
@@ -55,7 +98,13 @@ func (s *store) RequestMerge(ctx context.Context, repo RepoKey, id WorkspaceID, 
 		if !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
-		return insertRequest(ctx, tx, key, id, source, at)
+		if err := insertRequest(ctx, tx, key, id, source, at); err != nil {
+			return err
+		}
+		if mark == nil {
+			return nil
+		}
+		return mark(ctx, tx)
 	})
 }
 

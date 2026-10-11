@@ -116,6 +116,10 @@ These clicks jump to an entry in the feed:
   - The merge runs there, and every prompt you send to your own workspace goes straight through meanwhile.
   - Commits you make after the merge was asked for are not part of it; they go through your next merge.
   - `/merge-queue own in-place`, `keep-open` or `--wait` merges in your workspace instead, holding your prompts as before.
+- **An agent can announce a one-shot merge before its turn is over, with `/merge-queue one-shot`.**
+  - The workspace is marked a one-shot at once, so its tab shows the one-shot mark while the agent keeps working.
+  - When the turn ends, the workspace's branch merges in place, and the workspace closes once the merge lands.
+  - Work left uncommitted when the turn ends fails the merge, and the workspace stays open.
 - **The merge workspace sits under yours in the sidebar, marked with where it lands (`merge → master`).**
   - It carries the merge's statuses; your own row keeps its own.
 - **Your feed shows the merge's bubble, with an `open merge workspace` button in its header for the bubble's whole life.**

@@ -1260,8 +1260,16 @@ Owner rulings, 2026-10-11 (`internal/merge/chain.go`, `internal/cpugov`).
   the cwd (the deepest match). It asks through the command-file ingress
   (`commandfile.Write`), so the merge is an agent's ask
   (`merge.RequestedByAgent`) exactly as a skill-written file is.
-- Exactly one source: `-own [-keep-open]`, `-dir WORKTREE` (another
-  workspace), `-branch B` (a branch that is no workspace), or `-pr-merged`.
+- Exactly one source: `-own [-keep-open | -one-shot]`, `-dir WORKTREE`
+  (another workspace), `-branch B` (a branch that is no workspace), or
+  `-pr-merged`.
+- `-own -one-shot` ANNOUNCES a one-shot merge from inside the turn it
+  follows: the command file's merge carries `one_shot`, the request
+  (`merge.Request.OneShot`) runs in place once the turn ends and closes the
+  requester once it lands, and `wsm.DB.RequestOneShotMerge` records it and
+  marks `creation_jobs.one_shot` in ONE transaction, then republishes the
+  roster. So a one-shot mark never stands without its merge, and a refused
+  request marks nothing.
 - Without `-wait` it returns when the ingress settles the file: `applied/` is
   requested (exit 0), `quarantine/` is a refusal (exit 6).
 - `-wait` reads the outcome off `WatchWorkspaceRoster` (the row's status as it
