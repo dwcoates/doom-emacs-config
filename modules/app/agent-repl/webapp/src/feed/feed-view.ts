@@ -1617,6 +1617,18 @@ export function createFeedController(
     });
     clearRefusals();
     loadMore.disabled = true;
+    const page = await askFeedPage("next");
+    releaseLoadMore();
+    if (page !== null) applyPage(page, "prepend");
+  }
+
+  /**
+   * Ask the daemon for one page of this feed's walk: the next older (`next`,
+   * continuing the walk this feed holds) or a fresh newest (`first`, which
+   * starts a new one). A request that never reached the daemon, or that it
+   * refused, is drawn as a refusal at the control and answers null.
+   */
+  async function askFeedPage(which: "first" | "next"): Promise<FeedPage | null> {
     let response: GetFeedPageResponse;
     try {
       response = await callUnary(
@@ -1624,26 +1636,25 @@ export function createFeedController(
         "GetFeedPage",
         (client) =>
           client.getFeedPage(
-            buildGetFeedPageRequest(opts.ctx.workspace, feedId(), "next", walk),
+            which === "next"
+              ? buildGetFeedPageRequest(opts.ctx.workspace, feedId(), "next", walk)
+              : buildGetFeedPageRequest(opts.ctx.workspace, feedId(), "first"),
           ),
         GetFeedPageResponseSchema,
       );
     } catch {
       loadMore.after(refusalAt("transport", "the daemon could not be reached"));
-      releaseLoadMore();
-      return;
+      return null;
     }
-    releaseLoadMore();
     const result = requireCase(response.result, "GetFeedPageResponse.result");
     switch (result.case) {
       case "success":
-        applyPage(result.value, "prepend");
-        return;
+        return result.value;
       case "error":
         loadMore.after(refusalAt("error", "older pages are not available"));
-        return;
+        return null;
       default:
-        unreachableArm("GetFeedPageResponse.result", armName(result));
+        return unreachableArm("GetFeedPageResponse.result", armName(result));
     }
   }
 
@@ -1674,48 +1685,29 @@ export function createFeedController(
       context: { feed: feedName(), row: divider },
     });
     clearRefusals();
-    let response: GetFeedPageResponse;
+    let answer: FeedPage | null;
     try {
-      response = await callUnary(
-        opts.ctx,
-        "GetFeedPage",
-        (client) =>
-          client.getFeedPage(
-            buildGetFeedPageRequest(opts.ctx.workspace, feedId(), "first"),
-          ),
-        GetFeedPageResponseSchema,
-      );
-    } catch {
-      loadMore.after(refusalAt("transport", "the daemon could not be reached"));
-      return;
+      answer = await askFeedPage("first");
     } finally {
       reanchoring -= 1;
       releaseLoadMore();
     }
-    const result = requireCase(response.result, "GetFeedPageResponse.result");
-    switch (result.case) {
-      case "success": {
-        const page = requireCase(result.value.result, "FeedPage.result");
-        if (page.case === "error") {
-          drawPageError(page.value);
-          announce();
-          return;
-        }
-        if (page.case !== "success") {
-          unreachableArm("FeedPage.result", armName(page));
-        }
+    if (answer === null) return;
+    const page = requireCase(answer.result, "FeedPage.result");
+    switch (page.case) {
+      case "success":
         applyEdge(page.value);
         log.info("the walk now starts at the compaction's divider", {
           operation: "feed.walk-reanchored",
           context: { feed: feedName(), row: divider, edge: walkEdge ?? "none" },
         });
         return;
-      }
       case "error":
-        loadMore.after(refusalAt("error", "older pages are not available"));
+        drawPageError(page.value);
+        announce();
         return;
       default:
-        unreachableArm("GetFeedPageResponse.result", armName(result));
+        unreachableArm("FeedPage.result", armName(page));
     }
   }
 

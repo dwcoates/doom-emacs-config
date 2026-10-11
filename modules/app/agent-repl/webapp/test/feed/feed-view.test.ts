@@ -1134,6 +1134,20 @@ describe("createFeedController: a live compaction re-anchors the walk", () => {
     expect(host.querySelector<HTMLButtonElement>("[data-load-more]")?.disabled).toBe(false);
   });
 
+  it("draws the daemon's refusal at the control, as an older page's ask does", async () => {
+    // Arrange
+    const h = harness({
+      getFeedPage: () => create(GetFeedPageResponseSchema, { result: { case: "error", value: {} } }),
+    });
+    const { controller, host } = fixture(h);
+    controller.applyPage(page([responseRow("a")], { hasMore: true }), "replace");
+    // Act
+    controller.upsert(separationRow("cut"));
+    await settle();
+    // Assert
+    expect(host.querySelector(".refusal")?.getAttribute("data-arm")).toBe("error");
+  });
+
   it("records the re-anchor at INFO with its divider", async () => {
     // Arrange
     const capture = captureLogRecords();
