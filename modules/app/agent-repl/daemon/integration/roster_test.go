@@ -143,6 +143,30 @@ func TestSettingAPriorityLeavesTheRosterOrder(t *testing.T) {
 	})
 }
 
+func TestReopeningAWorkspaceMovesItLast(t *testing.T) {
+	t.Parallel()
+	// Arrange: two workspaces, the first one closed.
+	d := newDaemon(t, harness.Opts{})
+	repo := harness.NewRepo(t)
+	roster := d.WatchRoster()
+	firstDir := worktreeOf(t, repo, "first")
+	first := harness.Register(t, d, firstDir)
+	second := harness.Register(t, d, worktreeOf(t, repo, "second"))
+	if _, err := d.Client().CloseWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Workspace: first})); err != nil {
+		t.Fatalf("CloseWorkspace = error %v, want a success with nothing live", err)
+	}
+
+	// Act: announcing the closed workspace re-opens it.
+	harness.Register(t, d, firstDir)
+
+	// Assert.
+	awaitRoster(t, d, roster, "the re-opened workspace drawn last", func(r *frontendv1.WorkspaceRoster) bool {
+		row := rosterRow(r, first.GetId())
+		return row != nil && !row.GetClosed().GetClosed() &&
+			sameOrder(repoRowIDs(r), []string{second.GetId(), first.GetId()})
+	})
+}
+
 func TestSwapWorkspacePlacesExchangesTwoSiblings(t *testing.T) {
 	t.Parallel()
 	// Arrange: three top-level workspaces of one repository.
