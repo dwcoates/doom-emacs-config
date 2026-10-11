@@ -193,6 +193,8 @@ answers a bare success, which is what almost every verb's success is."
                  (agent-repl-test-verbs--stub :register-repository))
                 ((symbol-function 'agent-repl-rpc-set-workspace-priority)
                  (agent-repl-test-verbs--stub :set-priority))
+                ((symbol-function 'agent-repl-rpc-set-workspace-hidden)
+                 (agent-repl-test-verbs--stub :set-hidden))
                 ((symbol-function 'agent-repl-rpc-update-shutdown-schedule)
                  (agent-repl-test-verbs--stub :shutdown-schedule))
                 ((symbol-function 'agent-repl-rpc-update-merge-queue)
@@ -617,6 +619,35 @@ never signalled as an error."
   (agent-repl-test-verbs--with nil
     (agent-repl-verb-set-priority "ws-one" nil)
     (should-not (plist-get (agent-repl-test-verbs--request :set-priority) :priority))))
+
+(ert-deftest agent-repl-verbs-set-hidden-carries-the-hide-arm ()
+  "Hiding a workspace names it and sets the `hide' visibility arm."
+  (agent-repl-test-verbs--with nil
+    (agent-repl-verb-set-hidden "ws-one" t)
+    (let ((request (agent-repl-test-verbs--request :set-hidden)))
+      (should (equal (plist-get request :workspace) (agent-repl-test-verbs--ref)))
+      (should (equal (plist-get request :visibility) (list :arm :hide :value nil))))))
+
+(ert-deftest agent-repl-verbs-set-hidden-carries-the-show-arm ()
+  "Showing a workspace again sets the `show' visibility arm."
+  (agent-repl-test-verbs--with nil
+    (agent-repl-verb-set-hidden "ws-one" nil)
+    (should (equal (plist-get (agent-repl-test-verbs--request :set-hidden) :visibility)
+                   (list :arm :show :value nil)))))
+
+(ert-deftest agent-repl-verbs-set-hidden-success-echoes-the-change ()
+  "An accepted hide says so in the echo area; the push is the new state."
+  (agent-repl-test-verbs--with nil
+    (agent-repl-verb-set-hidden "ws-one" t)
+    (should (agent-repl-test-verbs--messaged-p "ws-one hidden"))))
+
+(ert-deftest agent-repl-verbs-hide-command-targets-the-current-workspace ()
+  "`agent-repl-hide-workspace' (`SPC TAB h') hides the current workspace."
+  (agent-repl-test-verbs--with nil
+    (agent-repl-hide-workspace)
+    (let ((request (agent-repl-test-verbs--request :set-hidden)))
+      (should (equal (plist-get request :workspace) (agent-repl-test-verbs--ref)))
+      (should (eq (plist-get (plist-get request :visibility) :arm) :hide)))))
 
 ;;;; ---- Ack handling: one test per outcome ----
 

@@ -102,6 +102,7 @@
 (declare-function agent-repl-workspace-progress-report "mutation-progress" (kind phase &rest details))
 (declare-function agent-repl-rpc-register-repository "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-set-workspace-priority "agent-repl-rpc" (conn request &rest keys))
+(declare-function agent-repl-rpc-set-workspace-hidden "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-deploy "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-update-shutdown-schedule "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-update-merge-queue "agent-repl-rpc" (conn request &rest keys))
@@ -815,6 +816,21 @@ sentinel level, so a nil priority omits it from the request entirely."
      :on-success
      (lambda (_)
        (message "agent-repl: priority %s" (or priority "cleared"))))))
+
+(defun agent-repl-verb-set-hidden (ws hidden)
+  "Move WS into the sidebar's hidden section when HIDDEN, else back out.
+A hidden workspace keeps its session and its tab; the roster push that
+follows takes the tab off the bar's drawing, numbering and navigation,
+exactly as a collapsed repository's tabs are.  A success draws nothing
+of its own beyond the echo: the push is the new state."
+  (let ((ref (agent-repl-verbs--ref ws)))
+    (agent-repl-verbs--send
+     #'agent-repl-rpc-set-workspace-hidden (agent-repl-verbs--conn ws)
+     (list :workspace ref :visibility (list :arm (if hidden :hide :show) :value nil))
+     :ws ws :op (if hidden "hide" "show")
+     :on-success
+     (lambda (_)
+       (message "agent-repl: %s %s" ws (if hidden "hidden" "shown"))))))
 
 (cl-defun agent-repl-verb-create (repository form
                                              &key initial-prompt base-ref name
@@ -1646,6 +1662,14 @@ Clearing is the absence of the field, which no level label can spell.")
          (choice (completing-read "Priority: " labels nil t)))
     (unless (equal choice agent-repl-verbs-priority-clear-label)
       (cdr (assoc choice agent-repl-verbs-priority-levels)))))
+
+(defun agent-repl-hide-workspace (&optional ws)
+  "Hide the current workspace (`SPC TAB h').
+It moves to the sidebar's HIDDEN WORKSPACES section and off the tab bar,
+so the tab numbers close up over it; its session runs on untouched.
+Clicking its row in that section shows it again."
+  (interactive)
+  (agent-repl-verb-set-hidden (agent-repl-verbs--target-ws ws "Hide workspace: ") t))
 
 (defun agent-repl-set-priority (&optional ws)
   "Set or clear the current workspace's priority."
