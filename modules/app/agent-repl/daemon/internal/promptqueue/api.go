@@ -452,6 +452,10 @@ type Deps struct {
 	// draws its ending in the feed — so a banner is raised for exactly the
 	// turns whose end the clients are shown. REQUIRED.
 	TurnBanners TurnBanners
+	// Commits recounts a workspace's branch commits. THE DOOR tells it every
+	// turn close, so the roster's detail panel states the count as of the
+	// workspace's last turn. REQUIRED.
+	Commits CommitRecounter
 	// Log is the queue's logger.
 	Log dlog.Surfaces
 	// Stalls is the lock stall watchdog. OPTIONAL: nil leaves the queue's
@@ -460,6 +464,12 @@ type Deps struct {
 	// mutex and then the workspace's delivery lock, so a hold past Emacs's
 	// unary timeout on either is a SubmitPrompt that never answers.
 	Stalls lockwatch.Registry
+}
+
+// CommitRecounter owes a workspace a recount of its branch commits
+// (branchcommits.Recounter.TurnClosed). It never blocks the door.
+type CommitRecounter interface {
+	TurnClosed(ws ids.WorkspaceID)
 }
 
 // TurnBanners raises a turn end's desktop banner

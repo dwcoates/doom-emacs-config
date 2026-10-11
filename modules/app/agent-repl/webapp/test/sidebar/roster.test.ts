@@ -1456,9 +1456,9 @@ describe("the open Recently Merged band's today count", () => {
     pane(drawn, "repository").querySelector(`.merged-section > .repo-head .${MERGED_TODAY_COUNT_CLASS}`) as HTMLElement;
 
   it.each([
-    { name: "every merge that landed today", rows: () => [mergedAt("ws-1", NOW), mergedAt("ws-2", startOfToday())], want: "(2)" },
-    { name: "none of yesterday's merges", rows: () => [mergedAt("ws-1", NOW), mergedAt("ws-2", startOfToday() - 1)], want: "(1)" },
-    { name: "zero when nothing merged today", rows: () => [mergedAt("ws-1", startOfToday() - 1)], want: "(0)" },
+    { name: "every merge that landed today", rows: () => [mergedAt("ws-1", NOW), mergedAt("ws-2", startOfToday())], want: "(2 today)" },
+    { name: "none of yesterday's merges", rows: () => [mergedAt("ws-1", NOW), mergedAt("ws-2", startOfToday() - 1)], want: "(1 today)" },
+    { name: "zero when nothing merged today", rows: () => [mergedAt("ws-1", startOfToday() - 1)], want: "(0 today)" },
   ])("counts $name", ({ rows, want }) => {
     // Act
     const drawn = drawBand(rows());
@@ -1473,7 +1473,7 @@ describe("the open Recently Merged band's today count", () => {
     // Act
     rows.slice(1).forEach((r) => (r.hidden = true));
     // Assert
-    expect(todayCount(drawn).textContent).toBe("(3)");
+    expect(todayCount(drawn).textContent).toBe("(3 today)");
   });
 
   it("sits right after the folded count in the band's header", () => {
@@ -1487,7 +1487,7 @@ describe("the open Recently Merged band's today count", () => {
     // Act
     ticker.tick(startOfTomorrow());
     // Assert
-    expect(todayCount(drawn).textContent).toBe("(0)");
+    expect(todayCount(drawn).textContent).toBe("(0 today)");
   });
 
   it("shows while the band is unfolded", () => {
@@ -1543,7 +1543,7 @@ describe("the open Recently Merged band's today count", () => {
       sidebarContext(),
     );
     // Assert
-    expect(todayCount(drawn).textContent).toBe("(1)");
+    expect(todayCount(drawn).textContent).toBe("(1 today)");
   });
 });
 

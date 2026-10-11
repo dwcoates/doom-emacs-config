@@ -25,6 +25,7 @@ func TestNewRefusesEachMissingCollaborator(t *testing.T) {
 		return Deps{
 			DB: h.db, Judge: h.judge, Feed: h.feed, Footer: h.footer, Holds: h.holds,
 			TurnBanners: &fakeTurnBanners{},
+			Commits:     &fakeRecounter{},
 			Client:      func(ids.WorkspaceID) (Sender, bool) { return h.sender, true },
 			Watcher:     func(ids.WorkspaceID) (Watcher, bool) { return h.watcher, true },
 			ResolveImage: func(*conversationv1.ImageBlock) (string, string, error) {
@@ -42,6 +43,7 @@ func TestNewRefusesEachMissingCollaborator(t *testing.T) {
 		{"classifier", func(d *Deps) { d.Judge = nil }},
 		{"feed resolver", func(d *Deps) { d.Feed = nil }},
 		{"turn banners", func(d *Deps) { d.TurnBanners = nil }},
+		{"commit recounter", func(d *Deps) { d.Commits = nil }},
 		{"footer resolver", func(d *Deps) { d.Footer = nil }},
 		{"holds resolver", func(d *Deps) { d.Holds = nil }},
 		{"client resolver", func(d *Deps) { d.Client = nil }},

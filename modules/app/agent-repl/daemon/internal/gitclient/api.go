@@ -96,6 +96,10 @@ type Git interface {
 	// LandedRange lists what a merge commit brought in, walking its second
 	// parent's history.
 	LandedRange(ctx context.Context, targetDir, mergeCommit string) ([]Commit, error)
+	// CountCommits answers how many commits are reachable from tip and not
+	// from base (`base..tip`), merges included: the commits a branch holds
+	// beyond its merge-base with base.
+	CountCommits(ctx context.Context, dir, base, tip string) (uint32, error)
 	// ChangedPaths lists the paths a range touched. The rollout controller
 	// classifies subsystems from it.
 	ChangedPaths(ctx context.Context, dir, rangeSpec string) ([]string, error)
