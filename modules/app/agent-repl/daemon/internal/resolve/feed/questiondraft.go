@@ -357,14 +357,8 @@ func pickByNumber(served *questionState, text string, numbers []string) error {
 	if asked.GetSingleSelect() != nil && len(picked) > 1 {
 		return &UnservedQuestionValueError{Text: text, Why: "a single-select question takes one option number"}
 	}
-	var chosen []string
-	for _, label := range labels {
-		if picked[label] {
-			chosen = append(chosen, label)
-		}
-	}
 	draft := served.drafts[served.active]
-	draft.Chosen = chosen
+	draft.Chosen = inServedOrder(labels, picked)
 	draft.OtherText = nil
 	draft.Answered = true
 	return nil
@@ -411,9 +405,16 @@ func toggleLabel(served, chosen []string, label string) []string {
 		ticked[c] = true
 	}
 	ticked[label] = !ticked[label]
+	return inServedOrder(served, ticked)
+}
+
+// inServedOrder answers the SERVED labels that are set in held, in the served
+// order: the one way a question's chosen labels are ordered, so a draft never
+// depends on the order of the clicks or of the typed numbers.
+func inServedOrder(served []string, held map[string]bool) []string {
 	var out []string
 	for _, l := range served {
-		if ticked[l] {
+		if held[l] {
 			out = append(out, l)
 		}
 	}
