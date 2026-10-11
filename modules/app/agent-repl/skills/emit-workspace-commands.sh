@@ -3,9 +3,9 @@
 # to ${AGENT_REPL_STATE_DIR:-$HOME/.claude-emacs}/output/workspace_commands_<uuid>.json.
 #
 # Repo-local impl: explanation-engine folded the original into its
-# `/workspace' super-skill (`workspace/run.sh --emit-commands'), which
-# drags in a python3 dependency.  The doom agent-repl skills
-# (runtime-eval-code, workspace-close) only need this trivial
+# `/create-or-update-workspace' skill (`run.sh --emit-commands'), which
+# drags in a python3 dependency.  The doom agent-repl skill
+# (runtime-eval-code) only needs this trivial
 # uuidgen-only emitter, so it lives here and is installed as a
 # repo-local managed skill rather than pulled from explanation-engine.
 set -e
@@ -18,7 +18,8 @@ if ! command -v uuidgen &>/dev/null; then
   exit 1
 fi
 
-mkdir -p ${AGENT_REPL_STATE_DIR:-$HOME/.claude-emacs}/output
-tmp=$(mktemp ${AGENT_REPL_STATE_DIR:-$HOME/.claude-emacs}/output/.workspace_commands_XXXXXX.json)
+out_dir="${AGENT_REPL_STATE_DIR:-$HOME/.claude-emacs}/output"
+mkdir -p "$out_dir"
+tmp="$(mktemp "$out_dir/.workspace_commands_XXXXXX.json")"
 cat > "$tmp"
-mv "$tmp" ${AGENT_REPL_STATE_DIR:-$HOME/.claude-emacs}/output/workspace_commands_$(uuidgen).json
+mv "$tmp" "$out_dir/workspace_commands_$(uuidgen).json"
