@@ -505,7 +505,8 @@ retires every `storedAssistantEvent`-seeded pre-restart fixture named in
 No webapp, no WebSocket, no Emacs. Every test dials the daemon's Connect
 API directly (`agentreplv1connect.AgentReplClient`, same client type
 `harness.Daemon.client` already wraps) and asserts on watch-stream frames
-(`WatchFeed`, `WatchAgentSession` equivalents, `WatchDaemonHolds`, footer/
+(`WatchFeed` and the root feed's held section on it, `WatchAgentSession`
+equivalents, footer/
 topbar/sidebar resolver output) — the same surface the webapp itself would
 consume, one layer lower.
 
@@ -676,7 +677,7 @@ way `AGENTS.md`-style "structural gate" checks do elsewhere in this repo.
 
 Each entry: **name** — scenario(s) driven — contract citation — frames
 asserted. "Frames" names the `agentreplv1`/`frontendv1` shapes the daemon
-renders on `WatchFeed`/`WatchAgentSession`/`WatchDaemonHolds`/footer-topbar
+renders on `WatchFeed` (its held section included)/`WatchAgentSession`/footer-topbar
 streams, per `PROTO-CHANGES.md`'s landing ledger and the per-system contract
 docs. File-per-area grouping is given in section E.
 
@@ -732,8 +733,8 @@ docs. File-per-area grouping is given in section E.
     `daemon.md` merge/hold family + `shim.md` gate section — the ask stays
     open with no terminal; daemon-side this is the parked-prompt flow.
 16. **HeldTurnGate** — `held-turn-gate` — `daemon.md` §"Queue, holds, leases"
-    — a turn HELD while another runs on the same agent; `WatchDaemonHolds`
-    shows the `HeldPrompt`; `UpdateHeldPrompt` delivers it once the gate
+    — a turn HELD while another runs on the same agent; the root feed's held
+    section shows the `HeldPrompt`; `UpdateHeldPrompt` delivers it once the gate
     clears.
 17. **PermissionModeChangedMidSession** — `permission-mode-changed` —
     `shim.md` gate section, `set_mode` — `SessionUpdate` reflects the new

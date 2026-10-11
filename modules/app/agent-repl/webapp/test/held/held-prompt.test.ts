@@ -179,7 +179,7 @@ function heldPrompt(overrides: Partial<HeldPromptInit> = {}): HeldPrompt {
     ...(overrides.badge !== undefined ? { badge: overrides.badge } : {}),
     ...(overrides.notes !== undefined ? { notes: overrides.notes } : {}),
   });
-  // THE DAEMON'S ONE BADGE and its notes, ranked as daemon_hold.proto fixes.
+  // THE DAEMON'S ONE BADGE and its notes, ranked as feed_held.proto fixes.
   // Their words are deliberately ones no card would compose (`wire <status>`),
   // so an assertion on them proves the card drew the wire verbatim.
   if (overrides.badge === undefined) serveStatus(prompt);
