@@ -124,6 +124,9 @@ const (
 	// AgentReplSetWorkspaceHiddenProcedure is the fully-qualified name of the AgentRepl's
 	// SetWorkspaceHidden RPC.
 	AgentReplSetWorkspaceHiddenProcedure = "/agentrepl.v1.AgentRepl/SetWorkspaceHidden"
+	// AgentReplSetWorkspaceParentProcedure is the fully-qualified name of the AgentRepl's
+	// SetWorkspaceParent RPC.
+	AgentReplSetWorkspaceParentProcedure = "/agentrepl.v1.AgentRepl/SetWorkspaceParent"
 	// AgentReplFoldRepositoryProcedure is the fully-qualified name of the AgentRepl's FoldRepository
 	// RPC.
 	AgentReplFoldRepositoryProcedure = "/agentrepl.v1.AgentRepl/FoldRepository"
@@ -274,6 +277,7 @@ var (
 	agentReplRestartWorkspaceMethodDescriptor         = agentReplServiceDescriptor.Methods().ByName("RestartWorkspace")
 	agentReplSetWorkspacePriorityMethodDescriptor     = agentReplServiceDescriptor.Methods().ByName("SetWorkspacePriority")
 	agentReplSetWorkspaceHiddenMethodDescriptor       = agentReplServiceDescriptor.Methods().ByName("SetWorkspaceHidden")
+	agentReplSetWorkspaceParentMethodDescriptor       = agentReplServiceDescriptor.Methods().ByName("SetWorkspaceParent")
 	agentReplFoldRepositoryMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("FoldRepository")
 	agentReplUpdateSidebarViewMethodDescriptor        = agentReplServiceDescriptor.Methods().ByName("UpdateSidebarView")
 	agentReplCreateTaskMethodDescriptor               = agentReplServiceDescriptor.Methods().ByName("CreateTask")
@@ -417,6 +421,10 @@ type AgentReplClient interface {
 	// Move a workspace into the hidden section or back out; a hidden workspace
 	// is off the Emacs tab bar. See endpoint_set_workspace_hidden.proto.
 	SetWorkspaceHidden(context.Context, *connect.Request[v1.SetWorkspaceHiddenRequest]) (*connect.Response[v1.SetWorkspaceHiddenResponse], error)
+	// Retarget a workspace's merge: make it a child of another workspace of the
+	// same repository, or top-level. Its session is told in the same operation.
+	// See endpoint_set_workspace_parent.proto.
+	SetWorkspaceParent(context.Context, *connect.Request[v1.SetWorkspaceParentRequest]) (*connect.Response[v1.SetWorkspaceParentResponse], error)
 	FoldRepository(context.Context, *connect.Request[v1.FoldRepositoryRequest]) (*connect.Response[v1.FoldRepositoryResponse], error)
 	// Change one piece of the sidebar's view state (a fold, the grouping),
 	// pushed to every page on the roster stream. See
@@ -751,6 +759,12 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(agentReplSetWorkspaceHiddenMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		setWorkspaceParent: connect.NewClient[v1.SetWorkspaceParentRequest, v1.SetWorkspaceParentResponse](
+			httpClient,
+			baseURL+AgentReplSetWorkspaceParentProcedure,
+			connect.WithSchema(agentReplSetWorkspaceParentMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 		foldRepository: connect.NewClient[v1.FoldRepositoryRequest, v1.FoldRepositoryResponse](
 			httpClient,
 			baseURL+AgentReplFoldRepositoryProcedure,
@@ -1051,6 +1065,7 @@ type agentReplClient struct {
 	restartWorkspace         *connect.Client[v1.RestartWorkspaceRequest, v1.RestartWorkspaceResponse]
 	setWorkspacePriority     *connect.Client[v1.SetWorkspacePriorityRequest, v1.SetWorkspacePriorityResponse]
 	setWorkspaceHidden       *connect.Client[v1.SetWorkspaceHiddenRequest, v1.SetWorkspaceHiddenResponse]
+	setWorkspaceParent       *connect.Client[v1.SetWorkspaceParentRequest, v1.SetWorkspaceParentResponse]
 	foldRepository           *connect.Client[v1.FoldRepositoryRequest, v1.FoldRepositoryResponse]
 	updateSidebarView        *connect.Client[v1.UpdateSidebarViewRequest, v1.UpdateSidebarViewResponse]
 	createTask               *connect.Client[v1.CreateTaskRequest, v1.CreateTaskResponse]
@@ -1250,6 +1265,11 @@ func (c *agentReplClient) SetWorkspacePriority(ctx context.Context, req *connect
 // SetWorkspaceHidden calls agentrepl.v1.AgentRepl.SetWorkspaceHidden.
 func (c *agentReplClient) SetWorkspaceHidden(ctx context.Context, req *connect.Request[v1.SetWorkspaceHiddenRequest]) (*connect.Response[v1.SetWorkspaceHiddenResponse], error) {
 	return c.setWorkspaceHidden.CallUnary(ctx, req)
+}
+
+// SetWorkspaceParent calls agentrepl.v1.AgentRepl.SetWorkspaceParent.
+func (c *agentReplClient) SetWorkspaceParent(ctx context.Context, req *connect.Request[v1.SetWorkspaceParentRequest]) (*connect.Response[v1.SetWorkspaceParentResponse], error) {
+	return c.setWorkspaceParent.CallUnary(ctx, req)
 }
 
 // FoldRepository calls agentrepl.v1.AgentRepl.FoldRepository.
@@ -1569,6 +1589,10 @@ type AgentReplHandler interface {
 	// Move a workspace into the hidden section or back out; a hidden workspace
 	// is off the Emacs tab bar. See endpoint_set_workspace_hidden.proto.
 	SetWorkspaceHidden(context.Context, *connect.Request[v1.SetWorkspaceHiddenRequest]) (*connect.Response[v1.SetWorkspaceHiddenResponse], error)
+	// Retarget a workspace's merge: make it a child of another workspace of the
+	// same repository, or top-level. Its session is told in the same operation.
+	// See endpoint_set_workspace_parent.proto.
+	SetWorkspaceParent(context.Context, *connect.Request[v1.SetWorkspaceParentRequest]) (*connect.Response[v1.SetWorkspaceParentResponse], error)
 	FoldRepository(context.Context, *connect.Request[v1.FoldRepositoryRequest]) (*connect.Response[v1.FoldRepositoryResponse], error)
 	// Change one piece of the sidebar's view state (a fold, the grouping),
 	// pushed to every page on the roster stream. See
@@ -1899,6 +1923,12 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(agentReplSetWorkspaceHiddenMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	agentReplSetWorkspaceParentHandler := connect.NewUnaryHandler(
+		AgentReplSetWorkspaceParentProcedure,
+		svc.SetWorkspaceParent,
+		connect.WithSchema(agentReplSetWorkspaceParentMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	agentReplFoldRepositoryHandler := connect.NewUnaryHandler(
 		AgentReplFoldRepositoryProcedure,
 		svc.FoldRepository,
@@ -2227,6 +2257,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplSetWorkspacePriorityHandler.ServeHTTP(w, r)
 		case AgentReplSetWorkspaceHiddenProcedure:
 			agentReplSetWorkspaceHiddenHandler.ServeHTTP(w, r)
+		case AgentReplSetWorkspaceParentProcedure:
+			agentReplSetWorkspaceParentHandler.ServeHTTP(w, r)
 		case AgentReplFoldRepositoryProcedure:
 			agentReplFoldRepositoryHandler.ServeHTTP(w, r)
 		case AgentReplUpdateSidebarViewProcedure:
@@ -2446,6 +2478,10 @@ func (UnimplementedAgentReplHandler) SetWorkspacePriority(context.Context, *conn
 
 func (UnimplementedAgentReplHandler) SetWorkspaceHidden(context.Context, *connect.Request[v1.SetWorkspaceHiddenRequest]) (*connect.Response[v1.SetWorkspaceHiddenResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.SetWorkspaceHidden is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) SetWorkspaceParent(context.Context, *connect.Request[v1.SetWorkspaceParentRequest]) (*connect.Response[v1.SetWorkspaceParentResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.SetWorkspaceParent is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) FoldRepository(context.Context, *connect.Request[v1.FoldRepositoryRequest]) (*connect.Response[v1.FoldRepositoryResponse], error) {

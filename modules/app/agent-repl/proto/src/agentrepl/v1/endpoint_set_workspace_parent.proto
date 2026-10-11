@@ -1,0 +1,145 @@
+// endpoint_set_workspace_parent.proto — SetWorkspaceParent: RETARGET a
+// workspace's merge. SIDEBAR section.
+//
+// A workspace's PARENT is its merge target and its roster nesting at once: a
+// child's merge lands in its parent's checkout, and a top-level workspace's
+// lands in its repository's main checkout on the default branch
+// (CreateWorkspaceRequest.parent). Creation records that choice; this rpc is
+// the one way to change it afterwards. The roster nests the workspace under
+// its new parent, or at the top level, on its next push.
+//
+// THE RETARGET AND ITS NOTICE ARE ONE OPERATION. On success the daemon has
+// also queued a prompt into the retargeted workspace's session, through the
+// same submission path every prompt takes, stating the new merge target and
+// that its own-branch merge now lands there; a successful answer therefore
+// means the workspace's agent WILL be told. A notice that cannot be queued
+// undoes the retarget and the rpc fails, so no workspace is ever retargeted
+// without being told.
+//
+// A queued or running merge is not rewritten: a merge reads its target when
+// it is admitted, so one still waiting in line lands at the new target and
+// one already running lands where it began.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message SetWorkspaceParentRequest {
+  // The workspace being retargeted, echoed from its roster row.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // THE ARM IS THE NEW MERGE TARGET: another workspace of the same
+  // repository, or the repository's main checkout. Unset is a malformed
+  // request (Connect InvalidArgument), never "top-level": clearing a parent
+  // changes where work lands, so it is asked for by name. Asking for the
+  // parent a workspace already has is NOT refused; it re-sends the notice.
+  oneof parent {
+    SetWorkspaceParentChild child_of = 2;
+    SetWorkspaceParentTopLevel top_level = 3;
+  }
+}
+
+// Make the workspace a CHILD of another workspace: its merge lands in that
+// workspace's checkout, on that workspace's branch, and the roster nests it
+// there.
+message SetWorkspaceParentChild {
+  // The new parent, echoed from its roster row. It must be a registered
+  // workspace of the SAME repository, and neither the retargeted workspace
+  // itself nor one of its descendants.
+  workspace.v1.WorkspaceRef parent = 1;
+}
+
+// Make the workspace TOP-LEVEL: its merge lands in its repository's main
+// checkout, on the default branch, and the roster draws it at the top of its
+// section. DELIBERATELY EMPTY: the arm is the request.
+message SetWorkspaceParentTopLevel {}
+
+// THE ARM IS THE OUTCOME.
+message SetWorkspaceParentResponse {
+  oneof result {
+    SetWorkspaceParentSuccess success = 1;
+    SetWorkspaceParentError error = 2;
+  }
+}
+
+// Retargeted, and the notice is queued in the workspace's session. The new
+// nesting arrives on the roster stream. DELIBERATELY EMPTY: the request named
+// the target, so there is nothing new to say about it.
+message SetWorkspaceParentSuccess {}
+
+// The daemon's refusals. Validation failures (an unset field or arm, a blank
+// id) are Connect InvalidArgument, never an arm. Nothing is changed and no
+// notice is sent on any of them.
+message SetWorkspaceParentError {
+  oneof cause {
+    // The retargeted workspace's id is not in the daemon's registry.
+    SetWorkspaceParentUnknownWorkspace unknown_workspace = 1;
+    // The retargeted workspace's echoed dir disagrees with the registry's dir
+    // for its id.
+    SetWorkspaceParentWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    SetWorkspaceParentTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    SetWorkspaceParentNotYetAdopted not_yet_adopted = 4;
+    // The new parent's id is not in the daemon's registry.
+    SetWorkspaceParentUnknownParent unknown_parent = 5;
+    // The new parent's echoed dir disagrees with the registry's dir for its
+    // id.
+    SetWorkspaceParentParentRefMismatch parent_ref_mismatch = 6;
+    // The new parent belongs to a different repository; a merge only lands
+    // within one repository.
+    SetWorkspaceParentParentInOtherRepository parent_in_other_repository = 7;
+    // The new parent is the workspace itself or one of its descendants, so
+    // the family would become a cycle and no merge would ever reach the main
+    // branch.
+    SetWorkspaceParentCycle cycle = 8;
+    // The workspace has no merge geometry: it was registered by the editor
+    // rather than created by the daemon, so it has no merge to retarget.
+    SetWorkspaceParentNoMergeLayout no_merge_layout = 9;
+  }
+}
+
+// The workspace id is not in the daemon's registry. DELIBERATELY EMPTY.
+message SetWorkspaceParentUnknownWorkspace {}
+
+// The workspace's echoed dir disagrees with the registry's dir for its id.
+message SetWorkspaceParentWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+
+// This daemon released the workspace to a successor.
+message SetWorkspaceParentTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+
+// A joining daemon has not finished adopting this workspace yet.
+// DELIBERATELY EMPTY.
+message SetWorkspaceParentNotYetAdopted {}
+
+// The new parent's id is not in the daemon's registry. DELIBERATELY EMPTY.
+message SetWorkspaceParentUnknownParent {}
+
+// The new parent's echoed dir disagrees with the registry's dir for its id.
+message SetWorkspaceParentParentRefMismatch {
+  // The dir the registry holds for the parent's id.
+  string registry_dir = 1;
+}
+
+// The new parent is a workspace of another repository.
+message SetWorkspaceParentParentInOtherRepository {
+  // The main checkout of the repository the parent belongs to, so the
+  // refusal names where the parent actually lives.
+  string parent_repository_dir = 1;
+}
+
+// The new parent is the retargeted workspace or one of its descendants.
+// DELIBERATELY EMPTY: the request named both ends of the would-be cycle.
+message SetWorkspaceParentCycle {}
+
+// The workspace has no merge geometry to retarget. DELIBERATELY EMPTY.
+message SetWorkspaceParentNoMergeLayout {}
