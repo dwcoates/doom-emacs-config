@@ -984,6 +984,172 @@ describe("createFeedController: the walk", () => {
   });
 });
 
+// A COMPACTION ON AN OPEN FEED STARTS A NEW WALK AT ITS DIVIDER. The rows above
+// it leave the screen, and "load previous page" pages back into them from the
+// divider (owner ruling, 2026-10-10).
+describe("createFeedController: a live compaction re-anchors the walk", () => {
+  /** A newest page answered with the given edge, walking NEW_WALK when it has more. */
+  function firstPageAnswer(rows: readonly FeedRow[], hasMore: boolean) {
+    const answer = page(rows, { hasMore });
+    if (hasMore && answer.result.case === "success" && answer.result.value.edge.case === "hasMore") {
+      answer.result.value.edge.value.walk = { $typeName: "frontend.v1.FeedWalkId", value: "w-new" };
+    }
+    return create(GetFeedPageResponseSchema, { result: { case: "success", value: answer } });
+  }
+
+  it("asks for a fresh newest page once the divider is placed", async () => {
+    // Arrange
+    const h = harness({ getFeedPage: () => firstPageAnswer([separationRow("cut")], true) });
+    const { controller } = fixture(h);
+    controller.applyPage(page([responseRow("a")]), "replace");
+    // Act
+    controller.upsert(separationRow("cut"));
+    await settle();
+    // Assert
+    expect(h.calls.getFeedPage.map((ask) => ask.page.case)).toEqual(["first"]);
+  });
+
+  it("offers older pages from the divider even when the feed was at its start", async () => {
+    // Arrange: a feed at its start.
+    const h = harness({ getFeedPage: () => firstPageAnswer([separationRow("cut")], true) });
+    const { controller, host } = fixture(h);
+    controller.applyPage(page([responseRow("a")]), "replace");
+    // Act
+    controller.upsert(separationRow("cut"));
+    await settle();
+    // Assert
+    expect(controller.hasMoreHistory()).toBe(true);
+    expect(host.querySelector("[data-load-more]")).not.toBeNull();
+  });
+
+  it("continues the NEW walk when the reader then asks for an older page", async () => {
+    // Arrange: a feed whose old walk had more, re-anchored by a compaction.
+    const h = harness({
+      getFeedPage: (ask) =>
+        ask.page.case === "first"
+          ? firstPageAnswer([separationRow("cut")], true)
+          : create(GetFeedPageResponseSchema, { result: { case: "success", value: page([]) } }),
+    });
+    const { controller, host } = fixture(h);
+    controller.applyPage(page([responseRow("a")], { hasMore: true }), "replace");
+    controller.upsert(separationRow("cut"));
+    await settle();
+    // Act
+    host.querySelector<HTMLElement>("[data-load-more]")?.click();
+    await settle();
+    // Assert
+    const ask = h.calls.getFeedPage[1]?.page;
+    expect(ask?.case === "next" ? ask.value.walk?.value : undefined).toBe("w-new");
+  });
+
+  it("leaves the rows on screen as they are", async () => {
+    // Arrange: the fresh page carries a row the screen does not hold.
+    const h = harness({
+      getFeedPage: () => firstPageAnswer([separationRow("cut"), responseRow("unheld")], true),
+    });
+    const { controller, host } = fixture(h);
+    controller.applyPage(page([responseRow("a")]), "replace");
+    // Act
+    controller.upsert(separationRow("cut"));
+    await settle();
+    // Assert
+    expect(drawnIds(host)).toEqual(["cut"]);
+  });
+
+  it("takes the control away when nothing lies above the divider", async () => {
+    // Arrange: an old walk with more, and a daemon with nothing above the cut.
+    const h = harness({ getFeedPage: () => firstPageAnswer([separationRow("cut")], false) });
+    const { controller, host } = fixture(h);
+    controller.applyPage(page([responseRow("a")], { hasMore: true }), "replace");
+    // Act
+    controller.upsert(separationRow("cut"));
+    await settle();
+    // Assert
+    expect(controller.hasMoreHistory()).toBe(false);
+    expect(host.querySelector("[data-load-more]")).toBeNull();
+  });
+
+  it("runs after an older page already asked for, never beside it", async () => {
+    // Arrange: the reader asks for an older page on the old walk.
+    const h = harness({
+      getFeedPage: (ask) =>
+        ask.page.case === "first"
+          ? firstPageAnswer([separationRow("cut")], true)
+          : create(GetFeedPageResponseSchema, {
+              result: { case: "success", value: page([], { hasMore: true }) },
+            }),
+    });
+    const { controller, host } = fixture(h);
+    controller.applyPage(page([responseRow("a")], { hasMore: true }), "replace");
+    host.querySelector<HTMLElement>("[data-load-more]")?.click();
+    // Act: the compaction lands while that ask is still in the queue.
+    controller.upsert(separationRow("cut"));
+    await settle();
+    // Assert: the old walk's page landed first, and the new walk stands.
+    expect(h.calls.getFeedPage.map((ask) => ask.page.case)).toEqual(["next", "first"]);
+    host.querySelector<HTMLElement>("[data-load-more]")?.click();
+    await settle();
+    const ask = h.calls.getFeedPage[2]?.page;
+    expect(ask?.case === "next" ? ask.value.walk?.value : undefined).toBe("w-new");
+  });
+
+  it("does not re-anchor at a clear", async () => {
+    // Arrange
+    const h = harness();
+    const { controller } = fixture(h);
+    controller.applyPage(page([responseRow("a")], { hasMore: true }), "replace");
+    // Act
+    controller.upsert(separationRow("cut", "cleared"));
+    await settle();
+    // Assert
+    expect(h.calls.getFeedPage).toEqual([]);
+  });
+
+  it("does not re-anchor at a compaction that failed", async () => {
+    // Arrange
+    const h = harness();
+    const { controller } = fixture(h);
+    controller.applyPage(page([responseRow("a")], { hasMore: true }), "replace");
+    // Act
+    controller.upsert(separationRow("cut", "compactionFailed"));
+    await settle();
+    // Assert
+    expect(h.calls.getFeedPage).toEqual([]);
+  });
+
+  it("says so at the control when the daemon could not be reached", async () => {
+    // Arrange
+    const h = harness({
+      getFeedPage: () => {
+        throw new Error("gone");
+      },
+    });
+    const { controller, host } = fixture(h);
+    controller.applyPage(page([responseRow("a")], { hasMore: true }), "replace");
+    // Act
+    controller.upsert(separationRow("cut"));
+    await settle();
+    // Assert: the refusal stands and the control is usable again.
+    expect(host.querySelector(".refusal")?.getAttribute("data-arm")).toBe("transport");
+    expect(host.querySelector<HTMLButtonElement>("[data-load-more]")?.disabled).toBe(false);
+  });
+
+  it("records the re-anchor at INFO with its divider", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const h = harness({ getFeedPage: () => firstPageAnswer([separationRow("cut")], true) });
+    const { controller } = fixture(h);
+    controller.applyPage(page([responseRow("a")]), "replace");
+    // Act
+    controller.upsert(separationRow("cut"));
+    await settle();
+    // Assert
+    const record = await forwardedRecord(capture, "feed.walk-reanchored");
+    expect(record.level.case).toBe("info");
+    expect(record.context).toMatchObject({ row: "cut", edge: "hasMore" });
+  });
+});
+
 describe("createFeedController: the page error", () => {
   /** A page that could not be completed. */
   function errorPage() {
