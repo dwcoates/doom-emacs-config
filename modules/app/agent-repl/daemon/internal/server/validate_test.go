@@ -527,7 +527,7 @@ func TestEachRequestValidatorAcceptsAWellFormedRequestWithTargetsAndSources(t *t
 			name: "merge of the own branch",
 			check: func() *connect.Error {
 				return validateMergeWorkspaceRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: ref(),
-					Source: &agentreplv1.MergeWorkspaceSource{Source: &agentreplv1.MergeWorkspaceSource_OwnBranch{OwnBranch: &agentreplv1.MergeWorkspaceSourceOwnBranch{}}}})
+					Source: &agentreplv1.MergeWorkspaceSource{Source: &agentreplv1.MergeWorkspaceSource_OwnBranch{OwnBranch: &agentreplv1.MergeWorkspaceSourceOwnBranch{Run: &agentreplv1.MergeWorkspaceSourceOwnBranch_InPlace{InPlace: &agentreplv1.MergeWorkspaceSourceOwnBranchInPlace{}}}}}})
 			},
 		},
 	}
