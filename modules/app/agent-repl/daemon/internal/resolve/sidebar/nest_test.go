@@ -5,27 +5,24 @@ import (
 	"testing"
 
 	"claude-repld/internal/ids"
-	"claude-repld/internal/resolve/sidebar"
 	"claude-repld/internal/wsm"
 )
 
-func TestRosterNestsAWorkspaceUnderTheBranchItWasCutFrom(t *testing.T) {
-	// Arrange.
+func TestRosterDoesNotNestAWorkspaceUnderTheBranchItWasCutFrom(t *testing.T) {
+	// Arrange: cut from another workspace's branch, with no recorded parent,
+	// so it merges into the primary branch, not into that workspace.
 	r, _ := newResolver(t)
-	parent := workspace("w-parent", "parent")
-	child := workspace("w-child", "child")
-	child.ParentBranch = parent.Branch
+	feature := workspace("w-feature", "feature")
+	cut := workspace("w-cut", "cut")
+	cut.ParentBranch = feature.Branch
 
 	// Act.
-	r.SetRegistry(registry(parent, child))
+	r.SetRegistry(registry(feature, cut))
 
-	// Assert.
+	// Assert: a row nests only under the workspace it merges into.
 	rows := repoRows(t, latest(t, r))
-	if len(rows) != 1 {
-		t.Fatalf("the section drew %d top-level rows, want only the parent", len(rows))
-	}
-	if got := rowNames(rows[0].GetChildren()); !equal(got, []string{"child"}) {
-		t.Fatalf("children = %v, want the spawned workspace", got)
+	if got := rowNames(rows); !equal(got, []string{"feature", "cut"}) || len(rows[0].GetChildren()) != 0 {
+		t.Fatalf("rows = %v, want both at the top level", got)
 	}
 }
 
@@ -71,9 +68,9 @@ func TestRosterNestsAGrandchild(t *testing.T) {
 	r, _ := newResolver(t)
 	parent := workspace("w-parent", "parent")
 	child := workspace("w-child", "child")
-	child.ParentBranch = parent.Branch
+	child.Parent = &parent.ID
 	grandchild := workspace("w-grandchild", "grandchild")
-	grandchild.ParentBranch = child.Branch
+	grandchild.Parent = &child.ID
 
 	// Act.
 	r.SetRegistry(registry(parent, child, grandchild))
@@ -115,10 +112,10 @@ func TestRosterDrawsAWorkspaceWithNoParentBranchAtTheTopLevel(t *testing.T) {
 }
 
 func TestRosterNeverNestsAWorkspaceUnderItself(t *testing.T) {
-	// Arrange: a branch cut from itself is degenerate, not a family.
+	// Arrange: a workspace recorded as its own parent is degenerate.
 	r, _ := newResolver(t)
 	ws := workspace("w-self", "self")
-	ws.ParentBranch = ws.Branch
+	ws.Parent = &ws.ID
 
 	// Act.
 	r.SetRegistry(registry(ws))
@@ -130,13 +127,13 @@ func TestRosterNeverNestsAWorkspaceUnderItself(t *testing.T) {
 	}
 }
 
-func TestRosterRecordsACyclingLineage(t *testing.T) {
-	// Arrange: two workspaces each cut from the other's branch.
+func TestRosterRecordsACyclingParentChain(t *testing.T) {
+	// Arrange: two workspaces each recorded as the other's parent.
 	r, surfaces := newResolver(t)
 	a := workspace("w-a", "a")
 	b := workspace("w-b", "b")
-	a.ParentBranch = b.Branch
-	b.ParentBranch = a.Branch
+	a.Parent = &b.ID
+	b.Parent = &a.ID
 
 	// Act.
 	r.SetRegistry(registry(a, b))
@@ -149,73 +146,26 @@ func TestRosterRecordsACyclingLineage(t *testing.T) {
 		}
 	}
 	if !warned {
-		t.Fatal("a cycling branch lineage was not recorded")
+		t.Fatal("a cycling parent chain was not recorded")
 	}
 }
 
-func TestRosterStillDrawsACyclingLineagesRows(t *testing.T) {
+func TestRosterStillDrawsACyclingParentChainsRows(t *testing.T) {
 	// Arrange.
 	r, _ := newResolver(t)
 	a := workspace("w-a", "a")
 	b := workspace("w-b", "b")
-	a.ParentBranch = b.Branch
-	b.ParentBranch = a.Branch
+	a.Parent = &b.ID
+	b.Parent = &a.ID
 
 	// Act.
 	r.SetRegistry(registry(a, b))
 
-	// Assert: an ill-formed lineage recedes a row to the top level, never
+	// Assert: an ill-formed chain recedes a row to the top level, never
 	// drops it.
 	rows := repoRows(t, latest(t, r))
 	if rowFor(rows, "w-a") == nil || rowFor(rows, "w-b") == nil {
-		t.Fatal("a cycling lineage lost a row")
-	}
-}
-
-func TestRosterRecordsTwoWorkspacesClaimingOneBranch(t *testing.T) {
-	// Arrange.
-	r, surfaces := newResolver(t)
-	first := workspace("w-first", "first")
-	second := workspace("w-second", "second")
-	second.Branch = first.Branch
-
-	// Act.
-	r.SetRegistry(registry(first, second))
-
-	// Assert.
-	var warned bool
-	for _, rec := range surfaces.Records() {
-		if rec.Level == "warn" && rec.Context["branch"] == first.Branch {
-			warned = true
-		}
-	}
-	if !warned {
-		t.Fatal("two workspaces claiming one branch was not recorded")
-	}
-}
-
-func TestRosterNestsOnlyWithinOneRepository(t *testing.T) {
-	// Arrange: a same-named branch in another repository is another branch.
-	r, _ := newResolver(t)
-	other := wsm.Repository{ID: "repo-2", Dir: "/repos/two", Name: "beta", DefaultBranch: "main"}
-	parent := workspace("w-parent", "parent")
-	stranger := workspace("w-stranger", "stranger")
-	stranger.Repo = other.ID
-	stranger.ParentBranch = parent.Branch
-	reg := registry(parent, stranger)
-	reg.Repositories = []wsm.Repository{repo, other}
-
-	// Act.
-	r.SetRegistry(reg)
-
-	// Assert.
-	sections := latest(t, r).GetRepository().GetSections()
-	for _, section := range sections {
-		for _, row := range section.GetRows().GetRows() {
-			if len(row.GetChildren()) != 0 {
-				t.Fatal("a workspace nested under a branch in another repository")
-			}
-		}
+		t.Fatal("a cycling parent chain lost a row")
 	}
 }
 
@@ -225,7 +175,7 @@ func TestTaskViewNestsOnlyAmongTheRowsItDraws(t *testing.T) {
 	task := wsm.Task{ID: ids.TaskID("task-1"), Title: "the task", CreatedAt: epoch}
 	parent := workspace("w-parent", "parent")
 	child := workspace("w-child", "child")
-	child.ParentBranch = parent.Branch
+	child.Parent = &parent.ID
 	taskID := task.ID
 	child.Task = &taskID
 	reg := registry(parent, child)
@@ -251,7 +201,7 @@ func TestRecentlyMergedIsFlat(t *testing.T) {
 	parent := workspace("w-parent", "parent")
 	parent.MergedAt = at(0)
 	child := workspace("w-child", "child")
-	child.ParentBranch = parent.Branch
+	child.Parent = &parent.ID
 	child.MergedAt = at(0)
 
 	// Act.
@@ -311,9 +261,9 @@ func TestRosterLetsPlaceReorderTwoWorkspacesCutFromTheDefaultBranch(t *testing.T
 	}
 }
 
-// TestRosterStillNestsARecordedChildCutFromTheDefaultBranch pins that the
-// exemption is about the DERIVATION only: a fork records its parent, and a
-// recorded parent is the fact itself.
+// TestRosterStillNestsARecordedChildCutFromTheDefaultBranch pins that a
+// recorded parent nests whatever branch the child records: the parent is the
+// workspace it merges into.
 func TestRosterStillNestsARecordedChildCutFromTheDefaultBranch(t *testing.T) {
 	// Arrange.
 	r, _ := newResolver(t)
@@ -333,106 +283,5 @@ func TestRosterStillNestsARecordedChildCutFromTheDefaultBranch(t *testing.T) {
 	}
 	if got := rowNames(rows[0].GetChildren()); !equal(got, []string{"fork"}) {
 		t.Fatalf("children = %v, want the recorded child", got)
-	}
-}
-
-// TestRosterNestsUnderANonDefaultBranchOccupiedByAnotherWorkspace pins that a
-// genuine branch lineage — a workspace cut from another workspace's feature
-// branch — still nests.
-func TestRosterNestsUnderANonDefaultBranchOccupiedByAnotherWorkspace(t *testing.T) {
-	// Arrange.
-	r, _ := newResolver(t)
-	feature := workspace("w-feature", "feature")
-	child := workspace("w-child", "child")
-	child.ParentBranch = feature.Branch
-
-	// Act.
-	r.SetRegistry(registry(feature, child))
-
-	// Assert.
-	rows := repoRows(t, latest(t, r))
-	if len(rows) != 1 {
-		t.Fatalf("the section drew %d top-level rows, want only the branch's owner", len(rows))
-	}
-	if got := rowNames(rows[0].GetChildren()); !equal(got, []string{"child"}) {
-		t.Fatalf("children = %v, want the workspace cut from the feature branch", got)
-	}
-}
-
-// twoRepoRegistry is a registry carrying the fixture repository and a second
-// one, with WS registered across them.
-func twoRepoRegistry(ws ...wsm.Workspace) sidebar.Registry {
-	reg := registry(ws...)
-	reg.Repositories = []wsm.Repository{repo, otherRepo}
-	return reg
-}
-
-// otherRepo is a second repository, so a section can span two.
-var otherRepo = wsm.Repository{ID: "repo-2", Dir: "/repos/two", Name: "beta", DefaultBranch: "main"}
-
-func TestASectionSpanningRepositoriesNestsOnlyWithinOneRepository(t *testing.T) {
-	// Arrange: both in the backlog, so one maturity section carries both.
-	r, _ := newResolver(t)
-	parent := workspace("w-parent", "parent")
-	stranger := workspace("w-stranger", "stranger")
-	stranger.Repo = otherRepo.ID
-	stranger.ParentBranch = parent.Branch
-
-	// Act.
-	r.SetRegistry(twoRepoRegistry(parent, stranger))
-
-	// Assert.
-	rows := latest(t, r).GetMaturity().GetSections()[0].GetRows().GetRows()
-	if got := rowNames(rows); !equal(got, []string{"parent", "stranger"}) || len(rows[0].GetChildren()) != 0 {
-		t.Fatalf("backlog rows = %v, want both at the top level", got)
-	}
-}
-
-func TestASameNamedBranchInTwoRepositoriesIsNoClash(t *testing.T) {
-	// Arrange: one maturity section carries both, each on its own "main".
-	r, surfaces := newResolver(t)
-	first := workspace("w-first", "first")
-	first.Branch = "main"
-	second := workspace("w-second", "second")
-	second.Repo = otherRepo.ID
-	second.Branch = "main"
-
-	// Act.
-	r.SetRegistry(twoRepoRegistry(first, second))
-
-	// Assert.
-	for _, rec := range surfaces.Records() {
-		if rec.Level == "warn" && rec.Operation == "daemon.sidebar.nest" {
-			t.Fatalf("two repositories' same-named branches were recorded as a clash: %+v", rec)
-		}
-	}
-}
-
-func TestASameNamedBranchInAnotherRepositoryOwnsItsOwnFamily(t *testing.T) {
-	// Arrange: each repository has a "feature" workspace and a child cut from
-	// it, all in the backlog, so one section carries the four.
-	r, _ := newResolver(t)
-	parentOne := workspace("w-p1", "p1")
-	parentOne.Branch = "feature"
-	childOne := workspace("w-c1", "c1")
-	childOne.ParentBranch = "feature"
-	parentTwo := workspace("w-p2", "p2")
-	parentTwo.Repo = otherRepo.ID
-	parentTwo.Branch = "feature"
-	childTwo := workspace("w-c2", "c2")
-	childTwo.Repo = otherRepo.ID
-	childTwo.ParentBranch = "feature"
-
-	// Act.
-	r.SetRegistry(twoRepoRegistry(parentOne, childOne, parentTwo, childTwo))
-
-	// Assert.
-	rows := latest(t, r).GetMaturity().GetSections()[0].GetRows().GetRows()
-	families := map[string][]string{}
-	for _, row := range rows {
-		families[row.GetName().GetText()] = rowNames(row.GetChildren())
-	}
-	if len(rows) != 2 || !equal(families["p1"], []string{"c1"}) || !equal(families["p2"], []string{"c2"}) {
-		t.Fatalf("backlog families = %v, want each child under its own repository's parent", families)
 	}
 }

@@ -6,32 +6,14 @@ import (
 	"claude-repld/internal/wsm"
 )
 
-// THE SPAWNED FAMILY IS THE RECORDED PARENT, ELSE THE BRANCH LINEAGE.
-//
-// A workspace CREATED through the daemon from another one records that parent
-// workspace at creation, and the roster nests off that record: it is the fact
-// itself rather than a reconstruction of it.
-//
-// A workspace REGISTERED by Emacs was never created through the daemon and
-// carries no parent, so its family is derived — within one repository — by
-// matching its ParentBranch against another workspace's Branch, which is the
-// same fact stated in git's terms. That is also what the row detail draws
-// ("branch" over "from"), so the tree and the detail panel cannot disagree.
-//
-// A workspace with no recorded parent, cut from the repository's default
-// branch (or from any branch no workspace occupies), has no parent among the
-// rows and renders at the top level, which is the ordinary case.
-//
-// THE DEFAULT BRANCH IS NOT A FAMILY LINK, and stating that is what makes the
-// paragraph above true. A repository's own main worktree is itself a
-// registered workspace and it sits ON the default branch, so matching
-// ParentBranch against Branch made EVERY ordinary workspace in that repository
-// a child of the repository's own row. The tab bar flattens the forest
-// depth-first with a parent always ahead of its children, so a priority given
-// to such a "child" could never move it past its "parent": realtest 8 gave
-// `realtest-8-second` P1 and the repository row P3 and the drawn bar did not
-// move. A recorded parent still nests, because that is the fact itself; a
-// branch cut from the default branch is not a lineage, it is the default.
+// A ROW NESTS ONLY UNDER THE WORKSPACE IT MERGES INTO (owner ruling,
+// 2026-10-11). A workspace created through the daemon as a child records that
+// parent at creation, and a child is always cut from its parent's tip and
+// merges back into it, so the recorded parent is exactly that workspace. A
+// workspace with no recorded parent merges into its repository's primary
+// branch and renders at the section's top level, whatever branch it was cut
+// from: a branch lineage alone says where a workspace came from, not where it
+// lands, so it nests nothing.
 
 // forest arranges one section's workspaces into parent/child order and answers
 // the roots, each carrying its children in roster order.
@@ -47,42 +29,11 @@ type forest struct {
 // the section's top level, because a row can only nest under a row that is
 // drawn beside it.
 //
-// defaultBranches names each repository's default branch, which the branch
-// lineage refuses to derive a family from; a repository it does not carry has
-// no default branch to exempt and every branch is read as lineage, exactly as
-// before.
-//
-// A BRANCH IS A REPOSITORY'S: the lineage is keyed by repository and branch
-// name together, because a section can span repositories (the task and
-// maturity groupings) and a same-named branch in another repository is
-// another branch, neither a clash nor a parent.
-//
-// Every branch logs, and the two ways the lineage can be ill-formed — two
-// workspaces claiming the same branch of one repository, and a cycle — are
-// recorded loudly and resolved by leaving the row at the top level rather
-// than dropping it.
-func nest(in []wsm.Workspace, defaultBranches map[ids.RepoID]string, log dlog.Logger) forest {
+// A recorded parent that cycles is ill-formed and unreachable through ordinary
+// creation; it is recorded loudly and resolved by leaving the row at the top
+// level rather than dropping it.
+func nest(in []wsm.Workspace, log dlog.Logger) forest {
 	ordered := sortWorkspaces(in)
-
-	byBranch := map[repoBranch]wsm.Workspace{}
-	for _, ws := range ordered {
-		if ws.Branch == "" {
-			continue
-		}
-		key := repoBranch{repo: ws.Repo, branch: ws.Branch}
-		if prior, clash := byBranch[key]; clash {
-			log.Warn("daemon.sidebar.nest",
-				"two workspaces claim one branch; the first in roster order owns the family",
-				dlog.Context{
-					"repo_id":      string(ws.Repo),
-					"branch":       ws.Branch,
-					"owner":        string(prior.ID),
-					"also_claimed": string(ws.ID),
-				})
-			continue
-		}
-		byBranch[key] = ws
-	}
 
 	present := map[ids.WorkspaceID]struct{}{}
 	for _, ws := range ordered {
@@ -91,30 +42,12 @@ func nest(in []wsm.Workspace, defaultBranches map[ids.RepoID]string, log dlog.Lo
 
 	parent := map[ids.WorkspaceID]ids.WorkspaceID{}
 	for _, ws := range ordered {
-		// The RECORDED parent wins wherever there is one: the branch lineage
-		// is a derivation of the same fact, and a derivation never overrules
-		// the fact it derives.
-		if ws.Parent != nil {
-			if _, drawn := present[*ws.Parent]; drawn && *ws.Parent != ws.ID {
-				parent[ws.ID] = *ws.Parent
-			}
+		if ws.Parent == nil {
 			continue
 		}
-		if ws.ParentBranch == "" {
-			continue
+		if _, drawn := present[*ws.Parent]; drawn && *ws.Parent != ws.ID {
+			parent[ws.ID] = *ws.Parent
 		}
-		if base, known := defaultBranches[ws.Repo]; known && base != "" && ws.ParentBranch == base {
-			log.Debug("daemon.sidebar.nest",
-				"a workspace cut from its repository's default branch derives no family from it",
-				dlog.Context{"workspace_id": string(ws.ID), "repo_id": string(ws.Repo),
-					"default_branch": base})
-			continue
-		}
-		p, ok := byBranch[repoBranch{repo: ws.Repo, branch: ws.ParentBranch}]
-		if !ok || p.ID == ws.ID {
-			continue
-		}
-		parent[ws.ID] = p.ID
 	}
 
 	out := forest{children: map[ids.WorkspaceID][]wsm.Workspace{}}
@@ -123,32 +56,24 @@ func nest(in []wsm.Workspace, defaultBranches map[ids.RepoID]string, log dlog.Lo
 		switch {
 		case !nested:
 			log.Debug("daemon.sidebar.nest", "a workspace renders at the section's top level",
-				dlog.Context{"workspace_id": string(ws.ID), "parent_branch": ws.ParentBranch,
-					"recorded_parent": recordedParent(ws)})
+				dlog.Context{"workspace_id": string(ws.ID), "recorded_parent": recordedParent(ws)})
 			out.roots = append(out.roots, ws)
 		case cycles(ws.ID, parent):
 			log.Warn("daemon.sidebar.nest",
-				"a branch lineage cycles; the workspace renders at the top level rather than vanishing",
-				dlog.Context{"workspace_id": string(ws.ID), "parent_branch": ws.ParentBranch})
+				"a recorded parent chain cycles; the workspace renders at the top level rather than vanishing",
+				dlog.Context{"workspace_id": string(ws.ID), "recorded_parent": recordedParent(ws)})
 			out.roots = append(out.roots, ws)
 		default:
-			log.Debug("daemon.sidebar.nest", "a workspace nests under its parent",
-				dlog.Context{"workspace_id": string(ws.ID), "parent_id": string(p),
-					"recorded": ws.Parent != nil})
+			log.Debug("daemon.sidebar.nest", "a workspace nests under the workspace it merges into",
+				dlog.Context{"workspace_id": string(ws.ID), "parent_id": string(p)})
 			out.children[p] = append(out.children[p], ws)
 		}
 	}
 	return out
 }
 
-// repoBranch is one repository's branch: the key a branch lineage is read by.
-type repoBranch struct {
-	repo   ids.RepoID
-	branch string
-}
-
 // recordedParent spells a workspace's recorded parent for the record, empty
-// when it has none and the branch lineage is what answered.
+// when it has none.
 func recordedParent(ws wsm.Workspace) string {
 	return ids.Optional(ws.Parent)
 }
