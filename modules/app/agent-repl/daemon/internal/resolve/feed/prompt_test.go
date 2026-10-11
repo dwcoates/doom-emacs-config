@@ -57,6 +57,11 @@ func TestTheAuthorLabelComesFromTheOrigin(t *testing.T) {
 			want:   "Merge",
 		},
 		{
+			name:   "a retarget's notice of the new merge target is the merge's",
+			origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_RETARGETED,
+			want:   "Merge",
+		},
+		{
 			name:   "a restart re-drive says so rather than posing as a fresh turn",
 			origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_RESUME_AFTER_RESTART,
 			want:   "Resumed after restart",
