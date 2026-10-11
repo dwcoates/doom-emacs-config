@@ -183,6 +183,36 @@ func (q *queue) takeParked(state *wsState) []Submission {
 	return parked
 }
 
+// deferredJoin is a join a standing shim call deferred: SUB, judged to join
+// RUNNING.
+type deferredJoin struct {
+	sub     Submission
+	running ids.TurnID
+}
+
+// takeDeferredJoins answers and clears the joins deferred behind a call.
+func (q *queue) takeDeferredJoins(state *wsState) []deferredJoin {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	joins := state.deferredJoins
+	state.deferredJoins = nil
+	return joins
+}
+
+// redriveJoins takes again every join deferred behind the settled call. Each
+// is judged against the turn it was to join as at its verdict: the join goes
+// if that turn still runs and nothing else keeps it, and otherwise the prompt
+// is recorded waiting with the reason (joinLocked). The caller holds the
+// delivery lock.
+func (q *queue) redriveJoins(ctx context.Context, d *delivery, log dlog.Logger) {
+	for _, join := range q.takeDeferredJoins(d.state) {
+		log.Debug(opCall, "taking again a join deferred behind the shim call", dlog.Context{
+			"turn": string(join.sub.Turn), "running_turn": string(join.running),
+		})
+		q.joinLocked(ctx, d, join.sub, join.running, log)
+	}
+}
+
 // holdBehindCall parks a submission that arrived while CALL stands. A call
 // opening a turn is a running turn to the prompt, which is held and judged
 // behind it as it would be behind any; any other call parks the prompt as a
@@ -211,9 +241,9 @@ func (q *queue) holdBehindCall(ctx context.Context, d *delivery, sub Submission,
 }
 
 // redrive re-takes the decisions deferred while a shim call stood, in the
-// order a turn end takes them: a registered bounce first, then the prompts
-// parked behind the call, then the next held prompt. The caller holds the
-// delivery lock.
+// order a turn end takes them: a registered bounce first, then the joins
+// deferred behind the call, then the prompts parked behind it, then the next
+// held prompt. The caller holds the delivery lock.
 func (q *queue) redrive(d *delivery) {
 	ctx := context.Background()
 	parked := q.takeParked(d.state)
@@ -224,7 +254,11 @@ func (q *queue) redrive(d *delivery) {
 		return
 	}
 	log.Debug(opCall, "re-deciding what was deferred while a shim call stood", dlog.Context{"parked": len(parked)})
-	if q.decideBounceLocked(d, log) {
+	bounced := q.decideBounceLocked(d, log)
+	// A deferred join is settled either way: under a bounce it is recorded
+	// waiting for the new session (joinBlocked), so none is left standing.
+	q.redriveJoins(ctx, d, log)
+	if bounced {
 		log.Info(opCall, "a bounce deferred behind the shim call was taken; what is held waits for it", nil)
 		return
 	}

@@ -672,19 +672,62 @@ func TestAPromptParkedBehindAnActIsJudgedAgainstTheTurnThePopOpens(t *testing.T)
 	}
 }
 
-func TestAJoinIsBlockedWhileAShimCallStands(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	h.q.mu.Lock()
-	h.q.stateLocked(theWorkspace).call = &shimCall{what: "start_turn", turn: "t9", opensTurn: true}
-	h.q.mu.Unlock()
+// joinVerdictDuringStart delivers "older" with nothing running, and while its
+// StartTurn stands, makes RUNNING the session's turn and settles an
+// after_tool_call verdict about "later" against "older".
+func joinVerdictDuringStart(t *testing.T, h *harness, running ids.TurnID) {
+	t.Helper()
+	h.watcher.idle()
+	later := submission("later", "and also this")
+	h.sender.startHook = func() {
+		h.sender.startHook = nil
+		h.watcher.running(running)
+		if err := h.db.PutHeldPrompt(context.Background(), wsm.HeldPrompt{
+			Workspace: theWorkspace, Turn: "later", Said: later.Said, Origin: later.Origin.String(), QueuedAt: instant,
+		}); err != nil {
+			t.Errorf("PutHeldPrompt: %v", err)
+			return
+		}
+		log, err := h.q.logger(context.Background(), theWorkspace)
+		if err != nil {
+			t.Errorf("logger: %v", err)
+			return
+		}
+		h.q.settle(context.Background(), later, "older", h.q.contentEpoch(theWorkspace, "later"), wsm.Classification{
+			Arm: wsm.ArmAfterToolCall, Reason: "it adds", At: instant,
+		}, classifier.RouteAfterToolCall, log)
+	}
+	if _, err := h.q.Submit(context.Background(), submission("older", "an earlier question")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	h.q.waitForClassifications()
+}
 
-	// Act
-	reason, blocked := h.q.joinBlocked(theWorkspace, wsm.HeldPrompt{Turn: "t1"}, "running-turn")
+func TestAJoinVerdictReachedDuringAShimCallJoinsOnceTheCallSettles(t *testing.T) {
+	// Arrange, Act: the call standing is the StartTurn opening the very turn
+	// the prompt was judged to join.
+	h := newHarness(t)
+	joinVerdictDuringStart(t, h, "older")
 
 	// Assert
-	if !blocked || reason != "a delivery to the shim (start_turn) is in flight, so the prompt waits for the running turn to end" {
-		t.Fatalf("joinBlocked = (%q, %v), want it blocked by the call", reason, blocked)
+	if joins := h.sender.joins; len(joins) != 1 || joins[0] != "later" {
+		t.Fatalf("joins = %v, want later sent to join older once its StartTurn settled", joins)
+	}
+	if !hasRecord(h, "info", opCall, "a shim call is in flight on the workspace; the decision is taken again once it settles") {
+		t.Fatalf("records = %+v, want the deferral on disk", h.log.Records())
+	}
+}
+
+func TestAJoinDeferredBehindAShimCallWaitsWhenItsTurnNoLongerRuns(t *testing.T) {
+	// Arrange, Act: by the call's settle, another turn runs than the one the
+	// prompt was judged to join.
+	h := newHarness(t)
+	joinVerdictDuringStart(t, h, "another-turn")
+
+	// Assert
+	c := verdictOf(t, h, "later")
+	if len(h.sender.joins) != 0 || c.Reason != "the turn it was to join ended before it was sent, so it waits its turn" {
+		t.Fatalf("joins = %v, verdict = %+v; want nothing sent and the prompt waiting its turn", h.sender.joins, c)
 	}
 }
 
