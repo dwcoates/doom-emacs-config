@@ -60,7 +60,7 @@ async function draw(
       document.getElementById("ghost-switch")!.textContent = ghost ? "" : noGhost;
       const reserve = labels.map((l) => `<span class="usage-reserve-label">${l}</span>`).join("");
       const feed = document.getElementById("feed")!;
-      feed.innerHTML = `<div class="feed-item" style="content-visibility: visible">
+      feed.innerHTML = `<div class="feed-item">
         <div class="bubble md assistant${ellipsis === null ? "" : " interim-response"}" data-role="response" data-variant="response" data-cap-lines="${ellipsis === null ? cap : "1"}"${ellipsis === null ? "" : ' data-more="ellipsis"'} data-state="success">
           <div class="bubble-box${ellipsis === null ? "" : " bubble-scroll"}${ellipsis === "open" ? " expanded" : ""}"><span class="usage-corner${revealed ? " usage-corner--revealed" : ""}" data-tokens="12.3k"><span class="usage-reserve" aria-hidden="true">${reserve}</span><span class="usage-slider"><span class="usage-stamp">12.3k</span><span class="usage-ago">5m 30s ago</span></span></span><bubble-body class="bubble-body"><div class="response-prose" data-markdown><p>${text
             .split(" ")

@@ -108,17 +108,23 @@ func writeFile(t *testing.T, path, body string) {
 // buildsTheWidget installs a widget build that writes both bundle files.
 func buildsTheWidget(r *fakeRunner, cli string) {
 	r.on("npm run build", func(string, []string) (string, int, error) {
-		dist := widgetDist(cli)
-		if err := os.MkdirAll(dist, 0o755); err != nil {
+		return writeWidgetDist(cli)
+	})
+}
+
+// writeWidgetDist is a widget build's effect on disk: both output files in
+// cli's widget dist, answered as the build's output.
+func writeWidgetDist(cli string) (string, int, error) {
+	dist := widgetDist(cli)
+	if err := os.MkdirAll(dist, 0o755); err != nil {
+		return "", 0, err
+	}
+	for _, name := range []string{WidgetScript, WidgetStylesheet} {
+		if err := os.WriteFile(filepath.Join(dist, name), []byte("built"), 0o644); err != nil {
 			return "", 0, err
 		}
-		for _, name := range []string{WidgetScript, WidgetStylesheet} {
-			if err := os.WriteFile(filepath.Join(dist, name), []byte("built"), 0o644); err != nil {
-				return "", 0, err
-			}
-		}
-		return "built", 0, nil
-	})
+	}
+	return "built", 0, nil
 }
 
 // buildsTheWebapp installs a cee-webapp build that writes body to the -o path.

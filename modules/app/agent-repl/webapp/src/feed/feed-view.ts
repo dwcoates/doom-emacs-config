@@ -96,7 +96,6 @@ import type {
 import { replaceTicking, stopClocks, stopTicking } from "./ticking.js";
 import { isMergeBubble } from "./merge-bubble.js";
 import { keepScrolled } from "./keep-scroll.js";
-import type { Overscan } from "./overscan.js";
 import { drawFeedUserPrompt } from "./rows/user-prompt.js";
 import { drawFeedAgentPrompt } from "./rows/agent-prompt.js";
 import { drawFeedPeerMessage } from "./rows/peer-message.js";
@@ -176,15 +175,6 @@ export interface FeedControllerOptions {
     box: ScrollPosition & Pick<Element, "getBoundingClientRect">;
     tail: TailFollow;
   };
-  /**
-   * The overscan buffer, rooted on the page's scroll box. One instance is
-   * shared across the root feed and every sub-feed nested inside the same box,
-   * so a row's chrome is observed the moment it is held and unobserved the
-   * moment it is dropped — no matter which feed holds it. Absent where the feed
-   * has no scroll box (a fixture) or the environment ships no
-   * `IntersectionObserver`.
-   */
-  overscan?: Overscan;
   /**
    * Runs after the selection expands or collapses a governed bubble's box
    * (`applySelection`), with the box and the state it landed in, so the host
@@ -1198,10 +1188,7 @@ export function createFeedController(
     }
     const state = states.get(id);
     if (state !== undefined) {
-      state.bubble?.dispose();
-      stopTicking(state.element);
-      opts.overscan?.unobserve(state.element);
-      state.element.remove();
+      discardRow(state);
       states.delete(id);
     }
     order.splice(at, 1);
@@ -1243,10 +1230,7 @@ export function createFeedController(
     for (const gone of dropped) {
       const state = states.get(gone);
       if (state === undefined) continue;
-      state.bubble?.dispose();
-      stopTicking(state.element);
-      opts.overscan?.unobserve(state.element);
-      state.element.remove();
+      discardRow(state);
       states.delete(gone);
     }
     log.info(
@@ -1294,10 +1278,6 @@ export function createFeedController(
     };
     states.set(id, state);
     fileAt(id, index);
-    // WATCH THE NEW ROW so the overscan buffer can pre-render it before the
-    // reader reaches it. Every row born on this feed passes here exactly once,
-    // bubble or not, so this is the one place a row starts being watched.
-    opts.overscan?.observe(element);
     if (!isBubbleRow(row)) return;
     // A bubble owns its own element for its whole life: the head redraws inside
     // it and the sub-feed hangs beneath it, so the row's body is never replaced.
@@ -1320,12 +1300,7 @@ export function createFeedController(
 
   /** Drop every row: the feed is being repainted from a fresh newest page. */
   function clearRows(): void {
-    for (const state of states.values()) {
-      state.bubble?.dispose();
-      stopTicking(state.element);
-      opts.overscan?.unobserve(state.element);
-      state.element.remove();
-    }
+    for (const state of states.values()) discardRow(state);
     states.clear();
     order.length = 0;
   }
@@ -1946,6 +1921,18 @@ export function createFeedController(
  * without it, or with an empty key, is a malformed view — refused, never
  * defaulted to where it happened to arrive.
  */
+/**
+ * THE ONE WAY A ROW LEAVES THE FEED: its bubble's sub-feed is disposed, its
+ * clocks stop, and its element leaves the document. Every drop (a removal, the
+ * truncation above a separation, a repaint from a fresh page) goes through
+ * here, so none can leave a clock ticking or a sub-feed open behind it.
+ */
+export function discardRow(state: { bubble: BubbleLike | null; element: HTMLElement }): void {
+  state.bubble?.dispose();
+  stopTicking(state.element);
+  state.element.remove();
+}
+
 export function orderKeyOf(row: FeedRow): string {
   const key = requireMessage(row.order, "FeedRow.order").key;
   if (key === "")

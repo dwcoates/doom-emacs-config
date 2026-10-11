@@ -560,9 +560,10 @@ hand any more:
   test/webkit/expanded-ceiling.webkit.test.ts measures it in real WebKit. `prependCompensation` also covers
   a bubble whose sub-feed lies wholly above the viewport collapsing (a
   negative shift). THE FEED OWNS ITS SCROLL ANCHORING (2026-09-27): WebKit has
-  no native CSS scroll anchoring, and every `.feed-item` is
-  `content-visibility: auto`, so a row above the reader changes height when it
-  is first laid out. `TailFollow` holds one anchor, the first root row that
+  no native CSS scroll anchoring, so a row above the reader changing height
+  (a late render, a card settling) would move the content under them. Every
+  `.feed-item` is laid out at its real height: no `content-visibility`, so no
+  row ever stands in a guessed height (owner ruling, 2026-10-11). `TailFollow` holds one anchor, the first root row that
   starts in view (`feedAnchorRows`), at its top in content coordinates. On every
   size change and scroll event it measures that anchor BEFORE re-taking it, and
   shifts by however far it moved (`prependCompensation`). The prepend,

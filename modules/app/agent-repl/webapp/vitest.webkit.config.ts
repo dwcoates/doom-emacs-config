@@ -11,7 +11,7 @@ import { viteCacheDir } from "./vite-cache";
  *
  * These tests launch Playwright's headless WebKit -- the engine the Emacs
  * webview runs -- over the real stylesheet and real modules, for behavior
- * jsdom cannot lay out: scroll anchoring under `content-visibility: auto`
+ * jsdom cannot lay out: the feed's scroll anchoring
  * (test/webkit/anchoring.webkit.test.ts). They run in node, drive the browser
  * themselves, and take seconds rather than milliseconds, so they stay out of
  * `npm test`.

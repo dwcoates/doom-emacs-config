@@ -84,8 +84,25 @@ func TestRosterNeverPublishesReadyAfterAnAcceptedPrompt(t *testing.T) {
 	turn := SubmitPrompt(t, w, ws, "hello")
 
 	// Assert: every arm from the ack to the turn's end is a busy one.
+	//
+	// WHERE THE ACK FALLS IN THE STREAM. The daemon publishes `submitting` on
+	// receipt, BEFORE it answers SubmitPrompt (promptqueue deliver.go: "THE
+	// TURN FACT IS THE DAEMON'S OWN, AND IT IS PUBLISHED ON RECEIPT"), and the
+	// stream keeps publish order. So the first `submitting` frame marks the
+	// ack: frames ahead of it were published before the turn was set — a
+	// freshly attached shim's session updates still republish `ready` then —
+	// and every frame after it was published with the turn standing. The
+	// first busy arm must be `submitting`, which pins that ordering, and no
+	// `ready` may follow it before the turn's end.
 	walk := raWalkUntil(t, w, roster, ws, func(arm string) bool { return arm == "done" || arm == "interrupted" })
-	for _, arm := range walk[:len(walk)-1] {
+	accepted := 0
+	for accepted < len(walk) && walk[accepted] == "ready" {
+		accepted++
+	}
+	if accepted == len(walk) || walk[accepted] != "submitting" {
+		t.Fatalf("the first arm after the idle row was not submitting: %v — the daemon publishes submitting before it answers SubmitPrompt", walk)
+	}
+	for _, arm := range walk[accepted : len(walk)-1] {
 		if arm == "ready" {
 			t.Fatalf("the roster published ready between the SubmitPrompt ack and the turn's end: %v", walk)
 		}

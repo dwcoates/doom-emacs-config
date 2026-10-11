@@ -95,7 +95,6 @@ import {
   type HeldSection,
 } from "../held/section.js";
 import { tick, stopTicking } from "./ticking.js";
-import { createOverscan } from "./overscan.js";
 import { REVEAL_ATTRIBUTE, syncSelectedEntry } from "./selected-entry.js";
 
 /** How long a revealed row wears the highlight that says "here". */
@@ -190,14 +189,6 @@ export function mountFeed(
       : installIntentScroll(scrollBox, (el) =>
           expandedSectionAt(el, scrollBox),
         );
-  // THE OVERSCAN BUFFER, rooted on the same scroll box, blows the pre-render
-  // band out to ~5 viewport heights so a row within it lays out at its true
-  // height before the reader scrolls to it — the cure for the first-scroll
-  // `content-visibility: auto` jitter. `null` where there is no box (a fixture)
-  // or the environment ships no `IntersectionObserver`, in which case the feed
-  // works exactly as before, minus the pre-render. ONE instance is shared with
-  // every sub-feed, since they all scroll inside this one box.
-  const overscan = scrollBox === null ? null : createOverscan(scrollBox);
   // THE SELECTED ROW LEAVING THE VIEWPORT ENDS THE SELECTION: the daemon is
   // told (`left_view`), and its `none.stay` push drops the mark in place.
   const selectionVisibility =
@@ -295,7 +286,6 @@ export function mountFeed(
       scrollBox === null || tail === null
         ? undefined
         : { box: scrollBox, tail },
-    overscan: overscan ?? undefined,
     selectionVisibility: selectionVisibility ?? undefined,
     onSelectionExpand: afterSelectionToggle,
   });
@@ -558,7 +548,6 @@ export function mountFeed(
       bubble: bubbleFor,
       composerFactory: deps.composerFactory,
       head: bubbleHead,
-      overscan: overscan ?? undefined,
       scroll:
         scrollBox === null || tail === null
           ? undefined
@@ -1071,7 +1060,6 @@ export function mountFeed(
     host.removeEventListener(ITEM_EXPANDED_EVENT, onItemExpanded);
     held?.dispose();
     uninstallClear?.();
-    overscan?.dispose();
     selectionVisibility?.dispose();
     jumps?.dispose();
     root.dispose();
