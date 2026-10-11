@@ -8,6 +8,11 @@
      it is collapsed. */
   --repo-head-expanded: #9ca3af;
   --repo-head-collapsed: #4b5563;
+  /* The gutter bar a Recently Merged row merged TODAY carries: a slight
+     off-white beside the selection's accent bar (owner request, 2026-10-11).
+     The light theme cannot draw off-white on its white ground, so it takes a
+     pale warm grey instead. */
+  --merged-today-gutter: #d6d3cc;
   --border: #e5e7eb;
   /* ONE STEP DARKER THAN `--border`, and derived from it rather than picked:
      the rule that partitions two SECTIONS of one surface, where `--border`
@@ -402,6 +407,7 @@
     --muted: #9ca3af;
     --repo-head-expanded: #e5e7eb;
     --repo-head-collapsed: #6b7280;
+    --merged-today-gutter: #ece8df;
     --border: #2a2e37;
     --card: #16191f;
     /* The dark theme's tool card and footer dock (owner ruling, 2026-09-27):
@@ -1036,10 +1042,15 @@ body::after {
 /* A Recently Merged row's NAME is drawn in the repository section headers'
    colour (owner request, 2026-10-03); the row's timestamp keeps its grey. */
 #ws-sidebar .row .name.merged-name { color: var(--repo-head-expanded); }
-/* A merge that landed TODAY (local date) draws its name in the success green
-   instead (owner request, 2026-10-11); `merged-today` is toggled by the
-   shared ticker in src/sidebar/row.ts, so the name turns back at midnight. */
-#ws-sidebar .row .name.merged-name.merged-today { color: var(--ok); }
+/* A merge that landed TODAY (local date) keeps the name's grey and marks the
+   ROW with an off-white gutter bar shaped like the selection's (owner request,
+   2026-10-11). `merged-today` is toggled on the row by the shared ticker in
+   src/sidebar/row.ts, so the bar goes at midnight. The selector stays below
+   `.ws.current > .row`'s weight, so a current merged row shows the accent. */
+#ws-sidebar .row.merged-today {
+  border-left: 3px solid var(--merged-today-gutter);
+  padding-left: calc(0.9rem - 3px);
+}
 /* REVIVING (frontend.v1.RosterRowReviving): the daemon is bringing this
    parked workspace's session back up. A SUBTLE shimmer on the NAME alone
    (owner ruling, 2026-09-19): the text is painted through a gradient of its
