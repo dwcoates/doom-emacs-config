@@ -31,6 +31,8 @@ import {
   sidebarContext,
 } from "./harness.js";
 import { createSidebarView } from "../../src/sidebar/view.js";
+import stylesheet from "../../src/styles.css?raw";
+import { rulesOf } from "../stylesheet.js";
 
 const SELECT_OK = create(SelectWorkspaceResponseSchema, {
   result: { case: "success", value: {} },
@@ -141,6 +143,29 @@ describe("the highlight and the receded styling", () => {
   it("does not highlight a row the resolver left uncurrent", () => {
     const drawn = drawRosterRow(row({ id: "ws-1", current: false }), sidebarContext(), "R");
     expect(drawn.hasAttribute("data-current")).toBe(false);
+  });
+
+  /** The declarations of every stylesheet rule that paints a current row. */
+  const currentRowDeclarations = (): string[] =>
+    rulesOf(stylesheet)
+      .filter((rule) => rule.selectors.some((sel) => sel.includes(".ws.current")))
+      .map((rule) => rule.declarations);
+
+  it("marks the current row with the accent gutter bar", () => {
+    // Arrange / Act
+    const declarations = currentRowDeclarations();
+    // Assert
+    expect(declarations.some((d) => /border-left:\s*3px solid var\(--accent\)/.test(d))).toBe(true);
+  });
+
+  it.each([
+    { what: "tint", property: /\bbackground(-color)?\s*:/ },
+    { what: "embolden", property: /\bfont-weight\s*:/ },
+  ])("does not $what the current row: the gutter bar is its only mark", ({ property }) => {
+    // Arrange / Act
+    const declarations = currentRowDeclarations();
+    // Assert
+    expect(declarations.filter((d) => property.test(d))).toEqual([]);
   });
 
   it("recedes a closed workspace", () => {
