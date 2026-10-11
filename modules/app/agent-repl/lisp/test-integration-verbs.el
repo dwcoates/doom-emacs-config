@@ -480,6 +480,20 @@ model as the webapp."
       (let ((body (agent-repl-itest-verbs--body daemon "SetWorkspacePriority")))
         (should-not (assq 'priority body))))))
 
+(ert-deftest agent-repl-itest-verbs-hide-sends-the-hide-arm ()
+  "Hiding a workspace (`SPC TAB h') sends the `hide' arm beside the ref."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-workspace daemon ref
+      ;; Act.
+      (agent-repl-hide-workspace agent-repl-itest-verbs--ws)
+      (agent-repl-itest--await-call daemon "SetWorkspaceHidden")
+      ;; Assert.
+      (let ((body (agent-repl-itest-verbs--body daemon "SetWorkspaceHidden")))
+        (should (assq 'hide body))
+        (should-not (assq 'show body))
+        (should (equal (alist-get 'id (alist-get 'workspace body)) (plist-get ref :id)))))))
+
 ;;;; ---- Daemon-admin verbs ----
 
 (ert-deftest agent-repl-itest-verbs-shutdown-schedule-sends-a-reason ()
@@ -1684,6 +1698,9 @@ rest of this suite already asserts against."
              (expanded . ()))])))
     (task . ((sections . [])))
     (maturity . ((sections . [])))
+    (hidden . ((header . ((label . ((text . "Hidden Workspaces"))) (count . ((workspaces . 0)))))
+               (rows . ((rows . [])))
+               (expanded . ())))
     (recentlyMerged . ((header . ((label . ((text . "recently merged"))) (count . ((workspaces . 1)))))
                         (rows . ((rows . [])))
                         (collapsed . ())))
