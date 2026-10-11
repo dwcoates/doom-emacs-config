@@ -419,3 +419,56 @@ describe("renderMarkdown: bare file names", () => {
     expect(renderMarkdown("see `README.md` now")).not.toContain("<a ");
   });
 });
+
+describe("code spans that are home-relative paths", () => {
+  const anchors = (html: string): string[] => [...html.matchAll(/<a href="([^"]*)"/g)].map((m) => m[1]);
+
+  it("renderMarkdown wraps a ~/ path code span in a file link, keeping the code", () => {
+    // Act
+    const html = renderMarkdown("see `~/a/b.ts` now");
+    // Assert
+    expect(html).toContain('<a href="~/a/b.ts" target="_blank" rel="noopener noreferrer"><code>~/a/b.ts</code></a>');
+  });
+
+  it("renderMarkdown keeps a line suffix in the href", () => {
+    expect(anchors(renderMarkdown("at `~/a/b.go:193`"))).toEqual(["~/a/b.go:193"]);
+  });
+
+  it("renderMarkdown leaves a relative path code span plain", () => {
+    expect(renderMarkdown("see `lisp/status.el` now")).not.toContain("<a ");
+  });
+
+  it("renderMarkdown leaves a ~/ code span with more words plain", () => {
+    expect(renderMarkdown("run `~/bin/x --flag`")).not.toContain("<a ");
+  });
+
+  it("renderMarkdown does not nest a ~/ code span inside an explicit link", () => {
+    expect(anchors(renderMarkdown("[`~/a.ts`](~/b.ts)"))).toEqual(["~/b.ts"]);
+  });
+
+  it("renderMarkdown links a ~/ code span inside a list item", () => {
+    expect(anchors(renderMarkdown("- one `~/a.el:4`"))).toEqual(["~/a.el:4"]);
+  });
+
+  it("inline wraps a ~/ path code span in a file link, keeping the code", () => {
+    expect(inline("see `~/a/b.ts` now")).toContain(
+      '<a href="~/a/b.ts" target="_blank" rel="noopener noreferrer"><code>~/a/b.ts</code></a>',
+    );
+  });
+
+  it("inline leaves a non-path code span plain", () => {
+    expect(inline("run `agent-repl-send`")).toBe("run <code>agent-repl-send</code>");
+  });
+
+  it("inline does not nest a ~/ code span inside an explicit link", () => {
+    expect(anchors(inline("[`~/a.ts`](~/b.ts)"))).toEqual(["~/b.ts"]);
+  });
+
+  it("both renderers draw the same anchor for the same code span", () => {
+    // Arrange
+    const src = "see `~/a/b.ts:9` now";
+    const anchor = (html: string): string | undefined => /<a [^>]*><code>[^<]*<\/code><\/a>/.exec(html)?.[0];
+    // Act + Assert
+    expect(anchor(inline(src))).toBe(anchor(renderMarkdown(src)));
+  });
+});

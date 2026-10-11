@@ -31,6 +31,21 @@ export function isFileLinkHref(href: string): boolean {
   return !SCHEME.test(trimmed.replace(LINE_SUFFIX, ""));
 }
 
+/** A home-relative path with no whitespace, optionally ending in `:<line>`. */
+const HOME_PATH = /^~\/\S+$/;
+
+/**
+ * THE FILE-LINK HREF A CODE SPAN NAMES, or null (owner request, 2026-10-11).
+ * Agents write every path as inline code starting at `~/` (agent-repl
+ * AGENTS.md, "Every file path an agent writes starts at `~/`"), and a code
+ * span is never autolinked, so those paths were never clickable. A span whose
+ * WHOLE content is such a path is a file link; any other span (an identifier,
+ * a command, a bare `README.md`) stays plain code.
+ */
+export function codeSpanFileHref(code: string): string | null {
+  return HOME_PATH.test(code) && isFileLinkHref(code) ? code : null;
+}
+
 /**
  * THE EXTENSIONS A SCHEME-LESS NAME IS READ AS A FILE BY (owner request,
  * 2026-10-02). Markdown's fuzzy linkifier takes a bare `README.md` for a

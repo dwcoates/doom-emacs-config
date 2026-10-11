@@ -93,6 +93,11 @@ These clicks jump to an entry in the feed:
 
 Clicking a link to a file (not a web address) in a prompt or response bubble opens that file in Emacs, in the same popup a findings row or a plan's edit button opens.
 
+- **A path in inline code that starts at `~/` is a link.**
+  - The whole code span must be the path, with an optional `:<line>` suffix (`` `~/.config/doom/config.el:12` ``).
+  - It keeps its code styling.
+  - Any other inline code (a bare file name, a relative path, a command) stays plain code.
+
 - **The daemon decides which file a link means, trying these in order.**
   - An absolute path opens as written.
   - A path with a directory part opens relative to the workspace's worktree.
