@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 
 	"claude-repld/internal/dlog"
 )
@@ -51,10 +50,7 @@ func (s *store) ClaimUnownedServing(ctx context.Context, id WorkspaceID, daemon 
 	)
 	err := s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
 		var instance sql.NullString
-		err := tx.QueryRowContext(ctx, `SELECT serving_instance FROM workspaces WHERE id = ?`, id).Scan(&instance)
-		if errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("wsm: workspace %s: %w", id, ErrNotFound)
-		}
+		err := scanWorkspaceRow(ctx, tx, id, "serving_instance", &instance)
 		if err != nil {
 			return err
 		}
@@ -83,10 +79,7 @@ func (s *store) Serving(ctx context.Context, id WorkspaceID) (*InstanceID, error
 	var out *InstanceID
 	err := s.read(ctx, "daemon.wsm.serving", dlog.Context{"workspace": string(id)}, func(ctx context.Context) error {
 		var instance sql.NullString
-		err := s.db().QueryRowContext(ctx, `SELECT serving_instance FROM workspaces WHERE id = ?`, id).Scan(&instance)
-		if errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("wsm: workspace %s: %w", id, ErrNotFound)
-		}
+		err := scanWorkspaceRow(ctx, s.db(), id, "serving_instance", &instance)
 		if err != nil {
 			return err
 		}
@@ -105,10 +98,7 @@ func (s *store) ReleaseServing(ctx context.Context, id WorkspaceID, daemon Insta
 	fields := dlog.Context{"workspace": string(id), "instance": string(daemon)}
 	return s.write(ctx, "daemon.wsm.release_serving", fields, func(ctx context.Context, tx *sql.Tx) error {
 		var instance sql.NullString
-		err := tx.QueryRowContext(ctx, `SELECT serving_instance FROM workspaces WHERE id = ?`, id).Scan(&instance)
-		if errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("wsm: workspace %s: %w", id, ErrNotFound)
-		}
+		err := scanWorkspaceRow(ctx, tx, id, "serving_instance", &instance)
 		if err != nil {
 			return err
 		}
