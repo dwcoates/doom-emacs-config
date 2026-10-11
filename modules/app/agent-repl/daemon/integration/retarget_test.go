@@ -59,12 +59,7 @@ func newRetargetFamily(t *testing.T, opts harness.Opts, repo *harness.Repo) *ret
 
 // nested reports whether the roster draws the child under the parent.
 func (f *retargetFamily) nested(r *frontendv1.WorkspaceRoster) bool {
-	for _, c := range rosterRepoRow(r, f.parent.GetId()).GetChildren() {
-		if c.GetWorkspace().GetWorkspace().GetId() == f.child.GetId() {
-			return true
-		}
-	}
-	return false
+	return rosterNests(r, f.parent.GetId(), f.child.GetId())
 }
 
 // topLevel reports whether the roster draws the child as a row of its own.
@@ -205,5 +200,39 @@ func TestARetargetEntryRetargetsAndTellsExactlyLikeSetWorkspaceParent(t *testing
 	awaitRoster(t, f.d, f.roster, "the child at the top level", f.topLevel)
 	if notice := f.expectNotice(t); !strings.Contains(notice, "main checkout") {
 		t.Fatalf("notice = %q, want the main checkout named", notice)
+	}
+}
+
+func TestRosterNestsReadsOnlyTheParentsChildren(t *testing.T) {
+	row := func(id string, children ...*frontendv1.RosterRow) *frontendv1.RosterRow {
+		return &frontendv1.RosterRow{
+			Workspace: &frontendv1.RosterRowWorkspace{Workspace: &workspacev1.WorkspaceRef{Id: id}},
+			Children:  children,
+		}
+	}
+	roster := &frontendv1.WorkspaceRoster{Repository: &frontendv1.RosterRepositoryView{
+		Sections: []*frontendv1.RosterRepoSection{{Rows: &frontendv1.RosterRows{Rows: []*frontendv1.RosterRow{
+			row("p", row("c")), row("top"),
+		}}}},
+	}}
+	tests := []struct {
+		name          string
+		parent, child string
+		want          bool
+	}{
+		{name: "a child under its parent", parent: "p", child: "c", want: true},
+		{name: "a top-level row under no parent", parent: "p", child: "top"},
+		{name: "a parent the roster does not draw", parent: "gone", child: "c"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := rosterNests(roster, tt.parent, tt.child)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("rosterNests(%s, %s) = %v, want %v", tt.parent, tt.child, got, tt.want)
+			}
+		})
 	}
 }
