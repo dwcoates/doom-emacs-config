@@ -710,6 +710,23 @@ testing and coverage, and observability-gap reporting. Keep implementation
 mandates in the scoped `AGENTS.md` files and keep diagnostic recipes in the
 skill.
 
+## Questions about agent-repl go through one skill, and its map is kept current
+
+`SPC o h` opens a help workspace whose agent answers with `/agent-repl-help`
+(`skills/agent-repl-help/`). The skill is mostly static. `SKILL.md` holds the
+answering procedure, and `references/MAP.md` holds a short picture of the
+system and the map of where each kind of answer lives: the user guide, the
+architecture and developer documents, the contract, and the code by system.
+
+- **A change that adds an entirely new feature or documentation set updates
+  `references/MAP.md` in the same change.**
+  - That covers a new system or service, a new `AGENTS.md` or top-level
+    document, a new docs directory, and a feature with no home among the
+    map's existing entries.
+  - A change inside an area the map already points to needs no map edit.
+- A change that moves or renames a path the map names updates the map too.
+  `test-verbs.el` checks that the skill the help preamble names exists.
+
 ## A diagnosis is evidenced in the logs, end to end (owner SOP, 2026-10-06)
 
 A diagnosis states a CAUSE only when every link of the chain from trigger to
