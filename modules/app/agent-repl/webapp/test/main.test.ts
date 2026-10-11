@@ -71,11 +71,8 @@ interface BootRecord {
   /** The footer's `selectDetachedWork`, and the feed handle's it must reach. */
   footerSelectDetachedWork: ((id: unknown) => void) | null;
   feedSelectDetachedWork: Mock;
-  /** The tray's `promptHeld`, and the feed handle's it must reach. */
-  trayPromptHeld: ((turn: string) => void) | null;
-  feedPromptHeld: Mock;
-  /** The last `mountFeed` deps, for the composer-factory contract. */
-  feedDeps: { composerFactory?: unknown } | null;
+  /** The last `mountFeed` deps, for the composer-factory and held-host contracts. */
+  feedDeps: { composerFactory?: unknown; heldHost?: unknown } | null;
   /** The context the boot built, so its stream's fate can be read off it. */
   bootedContext: import("../src/rpc/context.js").AppContext | null;
   /** The element `drawCommandPanel` hands back. */
@@ -85,7 +82,6 @@ interface BootRecord {
     sidebar: Mock;
     topbar: Mock;
     feed: Mock;
-    holdTray: Mock;
     footer: Mock;
     composer: Mock;
     login: Mock;
@@ -107,8 +103,6 @@ function freshRecord(): BootRecord {
     loginOpen: vi.fn(),
     footerSelectDetachedWork: null,
     feedSelectDetachedWork: vi.fn(),
-    trayPromptHeld: null,
-    feedPromptHeld: vi.fn(),
     feedDeps: null,
     bootedContext: null,
     drawnPanel: null,
@@ -116,7 +110,6 @@ function freshRecord(): BootRecord {
       sidebar: vi.fn(),
       topbar: vi.fn(),
       feed: vi.fn(),
-      holdTray: vi.fn(),
       footer: vi.fn(),
       composer: vi.fn(),
       login: vi.fn(),
@@ -266,22 +259,12 @@ async function runBoot(rec: BootRecord): Promise<void> {
         return {
           dispose: vi.fn(),
           selectDetachedWork: rec.feedSelectDetachedWork,
-          promptHeld: rec.feedPromptHeld,
         };
       },
     ),
   }));
   vi.doMock("../src/feed/renderers.js", () => ({
     createRowRenderers: vi.fn(() => ({})),
-  }));
-  vi.doMock("../src/tray/tray.js", () => ({
-    mountHoldTray: rec.mounts.holdTray.mockImplementation(
-      (_host: HTMLElement, _ctx, deps: { promptHeld: (turn: string) => void }) => {
-        rec.order.push("holdTray");
-        rec.trayPromptHeld = deps.promptHeld;
-        return { dispose: vi.fn() };
-      },
-    ),
   }));
   vi.doMock("../src/footer/footer.js", () => ({
     mountFooter: rec.mounts.footer.mockImplementation(
@@ -427,7 +410,7 @@ describe("the boot", { timeout: BOOT_TIMEOUT_MS }, () => {
     expect(page.mounts.sidebar.mock.calls[0]?.[0]).toBe(document.getElementById("ws-sidebar"));
     expect(page.mounts.topbar.mock.calls[0]?.[0]).toBe(document.getElementById("topbar"));
     expect(page.mounts.feed.mock.calls[0]?.[0]).toBe(document.getElementById("feed"));
-    expect(page.mounts.holdTray.mock.calls[0]?.[0]).toBe(document.getElementById("hold-tray"));
+    expect(page.feedDeps?.heldHost).toBe(document.getElementById("hold-tray"));
     expect(page.mounts.footer.mock.calls[0]?.[0]).toBe(document.getElementById("footer"));
     expect(page.mounts.login.mock.calls[0]?.[0]).toBe(document.getElementById("login-overlay"));
     expect(page.mounts.newsDigest.mock.calls[0]?.[0]).toBe(document.getElementById("news-digest"));
@@ -540,14 +523,6 @@ describe("the boot", { timeout: BOOT_TIMEOUT_MS }, () => {
     page.footerSelectDetachedWork?.({ value: "row-1" });
 
     expect(page.feedSelectDetachedWork).toHaveBeenCalledWith({ value: "row-1" });
-  });
-
-  test("routes the hold tray's first-drawn held prompt to the feed it mounted", async () => {
-    await bootMain();
-
-    page.trayPromptHeld?.("turn-1");
-
-    expect(page.feedPromptHeld).toHaveBeenCalledWith("turn-1");
   });
 
   test("mints a page identity without crypto.randomUUID", async () => {

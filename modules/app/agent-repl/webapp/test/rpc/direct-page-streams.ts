@@ -32,7 +32,6 @@ const RPC_FOR_KIND = {
   daemon: "watchDaemon",
   topbar: "watchTopbar",
   footer: "watchFooter",
-  holds: "watchDaemonHolds",
   feed: "watchFeed",
   loginTerminal: "watchLoginTerminal",
 } as const satisfies Record<PageWatchKind, keyof AgentReplClient>;

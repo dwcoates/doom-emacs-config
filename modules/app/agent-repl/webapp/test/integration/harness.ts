@@ -49,7 +49,6 @@ import { createRowRenderers } from "../../src/feed/renderers";
 import { mountFooter, type FooterHandle } from "../../src/footer/footer";
 import { mountTopbar } from "../../src/topbar/topbar";
 import { mountSidebar } from "../../src/sidebar/sidebar";
-import { mountHoldTray } from "../../src/tray/tray";
 import { mountComposer, createComposerGate } from "../../src/composer/composer";
 import { drawCommandPanel } from "../../src/panels/panels";
 import { forgetOwnTurns } from "../../src/composer/own-turns";
@@ -613,6 +612,7 @@ async function mountApp(
 
   const feed = mountFeed(shell.feed, ctx, {
     renderers: createRowRenderers(ctx),
+    heldHost: shell.holdTray,
     composerFactory: composerEnabled
       ? (host, bubble) => mountComposer(host, ctx, { feed: bubble, gate, onPanel: showPanel })
       : undefined,
@@ -639,7 +639,6 @@ async function mountApp(
   handles.push(login);
   topbar.watch(ctx, { openLogin: (control) => login.open(control) });
   handles.push(mountSidebar(shell.sidebar, ctx));
-  handles.push(mountHoldTray(shell.holdTray, ctx, { promptHeld: (turn) => feed.promptHeld(turn) }));
 
   if (composerEnabled) {
     shell.composer.hidden = false;

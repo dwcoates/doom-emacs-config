@@ -28,7 +28,7 @@ import {
   type ComposerHandle,
 } from "../../src/composer/composer.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
-import { DROPPED_EVENT } from "../../src/tray/held-prompt.js";
+import { DROPPED_EVENT } from "../../src/held/held-prompt.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 
 const WORKSPACE = create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" });

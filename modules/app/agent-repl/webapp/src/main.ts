@@ -48,7 +48,6 @@ import { drawCommandPanel } from "./panels/panels.js";
 import { createPromptWaveDriver } from "./prompt-wave-driver.js";
 import { mountSidebar } from "./sidebar/sidebar.js";
 import { mountTopbar } from "./topbar/topbar.js";
-import { mountHoldTray } from "./tray/tray.js";
 import { installProseLinkRouting } from "./link.js";
 import { bootFailed } from "./failure/sink.js";
 import { createLocalFailures, type LocalFailures } from "./failure/local.js";
@@ -274,6 +273,8 @@ export async function boot(): Promise<void> {
 
     const feed = mountFeed(shell.feed, ctx, {
       renderers: createRowRenderers(ctx),
+      // The root feed's held section draws in the tail region after the rows.
+      heldHost: shell.holdTray,
       // PER-BUBBLE COMPOSERS ARE DEV-MODE ONLY (R7): production's root
       // composer is host-native, and a webview that submits nothing has no
       // business drawing a text box inside a bubble either.
@@ -288,16 +289,14 @@ export async function boot(): Promise<void> {
     // `current`, the one fact every switch path ends in.
     mountSidebar(shell.sidebar, ctx, { workspaceSelected: () => feed.workspaceSelected() });
 
-    mountHoldTray(shell.holdTray, ctx, { promptHeld: (turn) => feed.promptHeld(turn) });
-
     // A STANDING GATE DOCKS AT THE BOTTOM EDGE while Emacs hides the input
     // window over it; both read the daemon's one cold-gate standing.
     installGateDock(shell.feed, shell.gateDock);
 
     // PROSE LINKS ROUTE LIKE STRUCTURED ONES. A markdown anchor in a bubble or
-    // the hold tray would otherwise navigate the webview away from the
+    // the held section would otherwise navigate the webview away from the
     // conversation; one delegated interceptor over the whole scroll zone (feed
-    // + tray) cancels the click and hands it to OpenExternal / OpenInEditor,
+    // + held section) cancels the click and hands it to OpenExternal / OpenInEditor,
     // exactly as the structured links do. Hung here, at the feed/markdown seam,
     // once — every markdown-bearing surface lives inside `feedScroll`.
     installProseLinkRouting(ctx, shell.feedScroll);
