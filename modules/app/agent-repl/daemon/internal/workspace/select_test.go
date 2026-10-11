@@ -8,9 +8,6 @@ import (
 	"testing"
 	"time"
 
-	frontendv1 "agentrepl/proto/frontend/v1"
-	workspacev1 "agentrepl/proto/workspace/v1"
-
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/shimclient"
@@ -952,128 +949,64 @@ func TestSetHiddenSurfacesAFailedWriteAtError(t *testing.T) {
 	}
 }
 
-// swapRow is a roster row for workspace id, with nested children.
-func swapRow(id string, children ...*frontendv1.RosterRow) *frontendv1.RosterRow {
-	return &frontendv1.RosterRow{
-		Workspace: &frontendv1.RosterRowWorkspace{Workspace: &workspacev1.WorkspaceRef{Id: id}},
-		Children:  children,
-	}
-}
-
-// publishSwapRoster publishes one repository section holding w1 and w2 at the
-// top level, with w3 nested under w1, as the roster the swap judges against.
-func publishSwapRoster(f *fixture) {
-	f.sidebar.Topic().Publish(&frontendv1.WorkspaceRoster{
-		Repository: &frontendv1.RosterRepositoryView{Sections: []*frontendv1.RosterRepoSection{{
-			Rows: &frontendv1.RosterRows{Rows: []*frontendv1.RosterRow{
-				swapRow("w1", swapRow("w3")), swapRow("w2"),
-			}},
-		}}},
-	})
-}
-
-func TestSwapPlacesExchangesSiblingsAndRepublishes(t *testing.T) {
+func TestMoveMovesTheWorkspaceAndRepublishes(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
 	f.workspace("w2", t.TempDir())
-	publishSwapRoster(f)
 
 	// Act.
-	if err := f.verbs.SwapPlaces(context.Background(), "w1", "w2"); err != nil {
-		t.Fatalf("SwapPlaces: %v", err)
+	if err := f.verbs.Move(context.Background(), "w1", "w2"); err != nil {
+		t.Fatalf("Move: %v", err)
 	}
 
 	// Assert.
-	if want := [][2]ids.WorkspaceID{{"w1", "w2"}}; !slices.Equal(f.db.swaps, want) {
-		t.Fatalf("swaps = %v, want %v", f.db.swaps, want)
+	if want := [][2]ids.WorkspaceID{{"w1", "w2"}}; !slices.Equal(f.db.moves, want) {
+		t.Fatalf("moves = %v, want %v", f.db.moves, want)
 	}
 	if len(f.sidebar.registries) != 1 {
 		t.Fatalf("roster republications = %d, want exactly one", len(f.sidebar.registries))
 	}
-}
-
-func TestSwapPlacesRefusesAPairThatAreNotSiblings(t *testing.T) {
-	// Arrange: w3 is w1's child, so the two share no parent.
-	f := newFixture(t)
-	f.workspace("w1", t.TempDir())
-	f.workspace("w3", t.TempDir())
-	publishSwapRoster(f)
-
-	// Act.
-	err := f.verbs.SwapPlaces(context.Background(), "w1", "w3")
-
-	// Assert.
-	asRefusal(t, err, ArmNotSiblings)
-	if len(f.db.swaps) != 0 || len(f.sidebar.registries) != 0 {
-		t.Fatalf("a refused swap wrote %v and republished %d times", f.db.swaps, len(f.sidebar.registries))
-	}
-	if !hasRecord(f, dlog.LevelInfo, opRefusal) {
-		t.Fatal("the refusal was not recorded")
+	if !hasRecord(f, dlog.LevelInfo, opMove) {
+		t.Fatal("the move was not recorded at info")
 	}
 }
 
-func TestSwapPlacesRefusesAWorkspaceThisDaemonDoesNotServe(t *testing.T) {
+func TestMoveRefusesAWorkspaceThisDaemonDoesNotServe(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
 	f.workspace("w2", t.TempDir())
-	publishSwapRoster(f)
 	f.owner.standing = StandingTransferringAway
 
 	// Act.
-	err := f.verbs.SwapPlaces(context.Background(), "w1", "w2")
+	err := f.verbs.Move(context.Background(), "w1", "w2")
 
 	// Assert.
 	asRefusal(t, err, ArmTransferringAway)
-	if len(f.db.swaps) != 0 {
-		t.Fatalf("a refused swap wrote %v", f.db.swaps)
+	if len(f.db.moves) != 0 {
+		t.Fatalf("a refused move wrote %v", f.db.moves)
 	}
 }
 
-func TestSwapPlacesFailsLoudlyWithNoPublishedRoster(t *testing.T) {
+func TestMoveSurfacesAStoreFailure(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
 	f.workspace("w2", t.TempDir())
+	f.db.moveErr = errors.New("disk on fire")
 
 	// Act.
-	err := f.verbs.SwapPlaces(context.Background(), "w1", "w2")
+	err := f.verbs.Move(context.Background(), "w1", "w2")
 
 	// Assert.
-	if err == nil {
-		t.Fatal("SwapPlaces succeeded with no roster to judge the pair by")
-	}
-	if _, refused := AsRefusal(err); refused {
-		t.Fatalf("error = %v, want a fault rather than a refusal", err)
-	}
-	if len(f.db.swaps) != 0 {
-		t.Fatalf("SwapPlaces wrote %v", f.db.swaps)
-	}
-	if !loggedAtError(f, opSwapPlaces) {
-		t.Fatal("the missing roster was not logged at error")
-	}
-}
-
-func TestSwapPlacesSurfacesAStoreFailure(t *testing.T) {
-	// Arrange.
-	f := newFixture(t)
-	f.workspace("w1", t.TempDir())
-	f.workspace("w2", t.TempDir())
-	publishSwapRoster(f)
-	f.db.swapErr = errors.New("disk on fire")
-
-	// Act.
-	err := f.verbs.SwapPlaces(context.Background(), "w1", "w2")
-
-	// Assert.
-	if err == nil || !errors.Is(err, f.db.swapErr) {
+	if err == nil || !errors.Is(err, f.db.moveErr) {
 		t.Fatalf("error = %v, want the store's failure", err)
 	}
 	if len(f.sidebar.registries) != 0 {
-		t.Fatalf("a failed swap republished %d times", len(f.sidebar.registries))
+		t.Fatalf("a failed move republished %d times", len(f.sidebar.registries))
 	}
-	if !loggedAtError(f, opSwapPlaces) {
+	if !loggedAtError(f, opMove) {
 		t.Fatal("the store failure was not logged at error")
 	}
 }

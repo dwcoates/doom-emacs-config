@@ -35,7 +35,7 @@ const (
 	opMarkViewed     = "daemon.workspace.mark_viewed"
 	opSetPriority    = "daemon.workspace.set_priority"
 	opSetHidden      = "daemon.workspace.set_hidden"
-	opSwapPlaces     = "daemon.workspace.swap_places"
+	opMove           = "daemon.workspace.move"
 	opCreateTask     = "daemon.workspace.create_task"
 	opUpdateTask     = "daemon.workspace.update_task"
 	opAssignTask     = "daemon.workspace.assign_task"

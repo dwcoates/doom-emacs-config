@@ -247,7 +247,7 @@ func setMaturityFold(section *frontendv1.RosterMaturitySection, folded bool) {
 
 // mergedSection resolves the recently-merged section: the rows hoisted out of
 // every grouping, ONE GROUP PER REPOSITORY in the repository grouping's order,
-// each group most recently merged first. It is rendered under every grouping
+// each group in registry order like every other list of rows. It is rendered under every grouping
 // because that these workspaces are done is the interesting fact, and its rows
 // are FLAT — a settled merge has no family left to draw.
 //
@@ -269,7 +269,7 @@ func (r *resolver) mergedSection(merged []wsm.Workspace, rc rowContext, log dlog
 			continue
 		}
 		rows := &frontendv1.RosterRows{}
-		for _, ws := range sortMerged(workspaces) {
+		for _, ws := range sortWorkspaces(workspaces) {
 			rows.Rows = append(rows.Rows, r.row(ws, rc, log))
 		}
 		group := &frontendv1.RosterMergedRepoGroup{

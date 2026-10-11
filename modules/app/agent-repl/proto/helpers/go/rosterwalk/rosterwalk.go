@@ -47,34 +47,3 @@ func MergedRows(roster *frontendv1.WorkspaceRoster) []*frontendv1.RosterRow {
 	}
 	return out
 }
-
-// RepositorySiblings reports whether workspaces a and b are SIBLINGS in the
-// roster's repository view: both rows sit in one rows list, either one
-// section's top-level rows or one parent row's children. Rows of the task view
-// and the recently-merged section are never siblings by this test, since
-// neither grouping follows stored places. A workspace the repository view does
-// not draw has no siblings.
-func RepositorySiblings(roster *frontendv1.WorkspaceRoster, a, b string) bool {
-	holds := func(rows []*frontendv1.RosterRow, id string) bool {
-		for _, row := range rows {
-			if row.GetWorkspace().GetWorkspace().GetId() == id {
-				return true
-			}
-		}
-		return false
-	}
-	var lists [][]*frontendv1.RosterRow
-	for _, section := range roster.GetRepository().GetSections() {
-		top := section.GetRows().GetRows()
-		lists = append(lists, top)
-		for _, row := range FlattenRows(top) {
-			lists = append(lists, row.GetChildren())
-		}
-	}
-	for _, rows := range lists {
-		if holds(rows, a) && holds(rows, b) {
-			return true
-		}
-	}
-	return false
-}

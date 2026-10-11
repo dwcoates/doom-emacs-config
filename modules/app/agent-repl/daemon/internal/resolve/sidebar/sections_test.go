@@ -1028,17 +1028,17 @@ func TestRecentlyMergedGroupKeepsTheRepositoryDir(t *testing.T) {
 	}
 }
 
-func TestRecentlyMergedGroupOrdersItsRowsMostRecentFirst(t *testing.T) {
-	// Arrange.
+func TestRecentlyMergedGroupOrdersItsRowsByPlace(t *testing.T) {
+	// Arrange: the later merge holds the later place.
 	r, _ := newResolver(t)
 
 	// Act.
-	r.SetRegistry(registry(mergedIn("older", repo, 0), mergedIn("newer", repo, time.Minute)))
+	r.SetRegistry(registry(placed(mergedIn("older", repo, 0), 1), placed(mergedIn("newer", repo, time.Minute), 2)))
 
-	// Assert.
+	// Assert: registry order, not merge time (owner ruling, 2026-10-11).
 	got := rowNames(latest(t, r).GetRecentlyMerged().GetGroups()[0].GetRows().GetRows())
-	if !equal(got, []string{"newer", "older"}) {
-		t.Fatalf("group rows = %v, want most recent first", got)
+	if !equal(got, []string{"older", "newer"}) {
+		t.Fatalf("group rows = %v, want registry order", got)
 	}
 }
 

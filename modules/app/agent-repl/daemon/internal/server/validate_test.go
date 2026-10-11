@@ -355,10 +355,10 @@ func TestEachRequestValidatorNamesTheFieldItRefusesWithTargetsAndSources(t *test
 			field: "workspace",
 		},
 		{
-			name: "swap places with no workspace",
+			name: "move with no workspace",
 			check: func() *connect.Error {
-				return validateSwapWorkspacePlacesRequest(&agentreplv1.SwapWorkspacePlacesRequest{
-					Other: &workspacev1.WorkspaceRef{Id: "ws-2"},
+				return validateMoveWorkspaceRequest(&agentreplv1.MoveWorkspaceRequest{
+					Target: &workspacev1.WorkspaceRef{Id: "ws-2"},
 				})
 			},
 			field: "workspace",
@@ -393,20 +393,55 @@ func TestEachRequestValidatorNamesTheFieldItRefusesWithTargetsAndSources(t *test
 			field: "child_of.parent",
 		},
 		{
-			name: "swap places with no other",
+			name: "move with no target",
 			check: func() *connect.Error {
-				return validateSwapWorkspacePlacesRequest(&agentreplv1.SwapWorkspacePlacesRequest{Workspace: ref()})
+				return validateMoveWorkspaceRequest(&agentreplv1.MoveWorkspaceRequest{Workspace: ref()})
 			},
-			field: "other",
+			field: "target",
 		},
 		{
-			name: "swap places of a workspace with itself",
+			name: "move of a workspace onto itself",
 			check: func() *connect.Error {
-				return validateSwapWorkspacePlacesRequest(&agentreplv1.SwapWorkspacePlacesRequest{
-					Workspace: ref(), Other: ref(),
+				return validateMoveWorkspaceRequest(&agentreplv1.MoveWorkspaceRequest{
+					Workspace: ref(), Target: ref(),
 				})
 			},
-			field: "other",
+			field: "target",
+		},
+		{
+			name: "create of a child with a base ref",
+			check: func() *connect.Error {
+				base := "main"
+				return validateCreateWorkspaceRequest(&agentreplv1.CreateWorkspaceRequest{
+					Repository: &workspacev1.RepositoryRef{Id: "repo-1"},
+					Form:       &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{BaseRef: &base}},
+					Parent:     &agentreplv1.CreateWorkspaceParent{Workspace: ref()},
+				})
+			},
+			field: "standard.base_ref",
+		},
+		{
+			name: "create with both a parent and a fork source",
+			check: func() *connect.Error {
+				return validateCreateWorkspaceRequest(&agentreplv1.CreateWorkspaceRequest{
+					Repository: &workspacev1.RepositoryRef{Id: "repo-1"},
+					Form:       &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{}},
+					Parent:     &agentreplv1.CreateWorkspaceParent{Workspace: ref()},
+					ForkSource: &agentreplv1.CreateWorkspaceForkSource{Workspace: ref()},
+				})
+			},
+			field: "fork_source",
+		},
+		{
+			name: "create with a fork source naming no workspace",
+			check: func() *connect.Error {
+				return validateCreateWorkspaceRequest(&agentreplv1.CreateWorkspaceRequest{
+					Repository: &workspacev1.RepositoryRef{Id: "repo-1"},
+					Form:       &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{}},
+					ForkSource: &agentreplv1.CreateWorkspaceForkSource{},
+				})
+			},
+			field: "fork_source.workspace",
 		},
 		{
 			name: "set priority with no workspace",
@@ -556,10 +591,10 @@ func TestEachRequestValidatorAcceptsAWellFormedRequestWithTargetsAndSources(t *t
 			},
 		},
 		{
-			name: "swap places of two workspaces",
+			name: "move of one workspace onto another",
 			check: func() *connect.Error {
-				return validateSwapWorkspacePlacesRequest(&agentreplv1.SwapWorkspacePlacesRequest{
-					Workspace: ref(), Other: &workspacev1.WorkspaceRef{Id: "ws-2"},
+				return validateMoveWorkspaceRequest(&agentreplv1.MoveWorkspaceRequest{
+					Workspace: ref(), Target: &workspacev1.WorkspaceRef{Id: "ws-2"},
 				})
 			},
 		},

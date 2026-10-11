@@ -9,6 +9,7 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"claude-repld/integration/harness"
 
@@ -122,99 +123,124 @@ func TestRosterStatusFollowsTheSessionLifecycle(t *testing.T) {
 		statusIs(func(row *frontendv1.RosterRow) bool { return row.GetIdleAsync() != nil && row.GetViewed() == nil }))
 }
 
-func TestSettingAPriorityLeavesTheRosterOrder(t *testing.T) {
-	t.Parallel()
-	// Arrange: two workspaces landed in registration order.
-	d := newDaemon(t, harness.Opts{})
-	repo := harness.NewRepo(t)
-	roster := d.WatchRoster()
-	first := harness.Register(t, d, worktreeOf(t, repo, "first"))
-	second := harness.Register(t, d, worktreeOf(t, repo, "second"))
-
-	// Act: the later workspace takes the strongest priority.
-	setPriority(t, d, second, &agentreplv1.WorkspacePriority{
-		Level: &agentreplv1.WorkspacePriority_P05{P05: &agentreplv1.WorkspacePriorityP05{}},
-	})
-
-	// Assert: the badge arrives and the place does not move.
-	want := []string{first.GetId(), second.GetId()}
-	awaitRoster(t, d, roster, "the badge drawn with the order unchanged", func(r *frontendv1.WorkspaceRoster) bool {
-		return sameOrder(repoRowIDs(r), want) && rosterRow(r, second.GetId()).GetPriority().GetLabel() != ""
-	})
+// tabBarIDs lists the roster's tab bar, first tab first.
+func tabBarIDs(r *frontendv1.WorkspaceRoster) []string {
+	var out []string
+	for _, tab := range r.GetTabBar().GetTabs() {
+		out = append(out, tab.GetWorkspace().GetId())
+	}
+	return out
 }
 
-func TestReopeningAWorkspaceMovesItLast(t *testing.T) {
+// moveWorkspace moves ws onto target's place and requires a success.
+func moveWorkspace(t *testing.T, d *harness.Daemon, ws, target *workspacev1.WorkspaceRef) {
+	t.Helper()
+	resp, err := d.Client().MoveWorkspace(d.Ctx(), connect.NewRequest(
+		&agentreplv1.MoveWorkspaceRequest{Workspace: ws, Target: target}))
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("MoveWorkspace = (%v, %v), want success", resp, err)
+	}
+}
+
+func TestNewWorkspacesLandSecondToLastOnTheTabBar(t *testing.T) {
 	t.Parallel()
-	// Arrange: two workspaces, the first one closed.
+	// Arrange.
 	d := newDaemon(t, harness.Opts{})
 	repo := harness.NewRepo(t)
 	roster := d.WatchRoster()
-	firstDir := worktreeOf(t, repo, "first")
-	first := harness.Register(t, d, firstDir)
-	second := harness.Register(t, d, worktreeOf(t, repo, "second"))
-	if _, err := d.Client().CloseWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Workspace: first})); err != nil {
-		t.Fatalf("CloseWorkspace = error %v, want a success with nothing live", err)
-	}
 
-	// Act: announcing the closed workspace re-opens it.
-	harness.Register(t, d, firstDir)
+	// Act: the second lands after the only one, the third second-to-last.
+	a := harness.Register(t, d, worktreeOf(t, repo, "a"))
+	b := harness.Register(t, d, worktreeOf(t, repo, "b"))
+	c := harness.Register(t, d, worktreeOf(t, repo, "c"))
 
 	// Assert.
-	awaitRoster(t, d, roster, "the re-opened workspace drawn last", func(r *frontendv1.WorkspaceRoster) bool {
-		row := rosterRow(r, first.GetId())
-		return row != nil && !row.GetClosed().GetClosed() &&
-			sameOrder(repoRowIDs(r), []string{second.GetId(), first.GetId()})
+	awaitRoster(t, d, roster, "the bar a, c, b", func(r *frontendv1.WorkspaceRoster) bool {
+		return sameOrder(tabBarIDs(r), []string{a.GetId(), c.GetId(), b.GetId()})
 	})
 }
 
-func TestSwapWorkspacePlacesExchangesTwoSiblings(t *testing.T) {
+func TestSettingAPriorityMovesTheWorkspaceSecondToLast(t *testing.T) {
 	t.Parallel()
-	// Arrange: three top-level workspaces of one repository.
+	// Arrange: the bar is a, c, b.
 	d := newDaemon(t, harness.Opts{})
 	repo := harness.NewRepo(t)
 	roster := d.WatchRoster()
 	a := harness.Register(t, d, worktreeOf(t, repo, "a"))
 	b := harness.Register(t, d, worktreeOf(t, repo, "b"))
 	c := harness.Register(t, d, worktreeOf(t, repo, "c"))
-	awaitRoster(t, d, roster, "the three landed in registration order", func(r *frontendv1.WorkspaceRoster) bool {
-		return sameOrder(repoRowIDs(r), []string{a.GetId(), b.GetId(), c.GetId()})
+
+	// Act: b takes a priority nobody else has, so it lands second-to-last
+	// among the others.
+	setPriority(t, d, b, &agentreplv1.WorkspacePriority{
+		Level: &agentreplv1.WorkspacePriority_P05{P05: &agentreplv1.WorkspacePriorityP05{}},
 	})
 
-	// Act.
-	resp, err := d.Client().SwapWorkspacePlaces(d.Ctx(), connect.NewRequest(
-		&agentreplv1.SwapWorkspacePlacesRequest{Workspace: a, Other: c}))
-
 	// Assert.
-	if err != nil || resp.Msg.GetSuccess() == nil {
-		t.Fatalf("SwapWorkspacePlaces = (%v, %v), want success", resp, err)
-	}
-	awaitRoster(t, d, roster, "the first and last swapped", func(r *frontendv1.WorkspaceRoster) bool {
-		return sameOrder(repoRowIDs(r), []string{c.GetId(), b.GetId(), a.GetId()})
+	awaitRoster(t, d, roster, "the bar a, b, c with b's badge", func(r *frontendv1.WorkspaceRoster) bool {
+		return sameOrder(tabBarIDs(r), []string{a.GetId(), b.GetId(), c.GetId()}) &&
+			rosterRow(r, b.GetId()).GetPriority().GetLabel() != ""
 	})
 }
 
-func TestSwapWorkspacePlacesRefusesWorkspacesOfTwoRepositories(t *testing.T) {
+func TestReopeningAWorkspaceRestoresItsPlace(t *testing.T) {
+	t.Parallel()
+	// Arrange: the bar is a, c, b; c closes and d lands while it is away.
+	d := newDaemon(t, harness.Opts{})
+	repo := harness.NewRepo(t)
+	roster := d.WatchRoster()
+	a := harness.Register(t, d, worktreeOf(t, repo, "a"))
+	b := harness.Register(t, d, worktreeOf(t, repo, "b"))
+	cDir := worktreeOf(t, repo, "c")
+	c := harness.Register(t, d, cDir)
+	if _, err := d.Client().CloseWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Workspace: c})); err != nil {
+		t.Fatalf("CloseWorkspace = error %v, want a success with nothing live", err)
+	}
+	dd := harness.Register(t, d, worktreeOf(t, repo, "d"))
+
+	// Act: announcing the closed workspace re-opens it.
+	harness.Register(t, d, cDir)
+
+	// Assert: c is back where it was, before d.
+	awaitRoster(t, d, roster, "the bar a, c, d, b", func(r *frontendv1.WorkspaceRoster) bool {
+		return sameOrder(tabBarIDs(r), []string{a.GetId(), c.GetId(), dd.GetId(), b.GetId()})
+	})
+}
+
+func TestMoveWorkspaceTakesTheTargetsPlace(t *testing.T) {
+	t.Parallel()
+	// Arrange: the bar is a, c, b.
+	d := newDaemon(t, harness.Opts{})
+	repo := harness.NewRepo(t)
+	roster := d.WatchRoster()
+	a := harness.Register(t, d, worktreeOf(t, repo, "a"))
+	b := harness.Register(t, d, worktreeOf(t, repo, "b"))
+	c := harness.Register(t, d, worktreeOf(t, repo, "c"))
+
+	// Act: a moves right onto b's place.
+	moveWorkspace(t, d, a, b)
+
+	// Assert: the passed tabs shift left.
+	awaitRoster(t, d, roster, "the bar c, b, a", func(r *frontendv1.WorkspaceRoster) bool {
+		return sameOrder(tabBarIDs(r), []string{c.GetId(), b.GetId(), a.GetId()})
+	})
+}
+
+func TestMoveWorkspaceCrossesRepositories(t *testing.T) {
 	t.Parallel()
 	// Arrange: one workspace in each of two repositories.
 	d := newDaemon(t, harness.Opts{})
 	roster := d.WatchRoster()
 	one := harness.Register(t, d, worktreeOf(t, harness.NewRepo(t), "one"))
 	two := harness.Register(t, d, worktreeOf(t, harness.NewRepo(t), "two"))
-	awaitRoster(t, d, roster, "both workspaces drawn", func(r *frontendv1.WorkspaceRoster) bool {
-		return rosterRow(r, one.GetId()) != nil && rosterRow(r, two.GetId()) != nil
-	})
 
 	// Act.
-	resp, err := d.Client().SwapWorkspacePlaces(d.Ctx(), connect.NewRequest(
-		&agentreplv1.SwapWorkspacePlacesRequest{Workspace: one, Other: two}))
+	moveWorkspace(t, d, two, one)
 
 	// Assert.
-	if err != nil {
-		t.Fatalf("SwapWorkspacePlaces = %v, want a typed refusal", err)
-	}
-	if resp.Msg.GetError().GetNotSiblings() == nil {
-		t.Fatalf("result = %v, want not_siblings", resp.Msg.GetResult())
-	}
+	awaitRoster(t, d, roster, "the bar two, one", func(r *frontendv1.WorkspaceRoster) bool {
+		return sameOrder(tabBarIDs(r), []string{two.GetId(), one.GetId()})
+	})
 }
 
 func TestClearingAPriorityRemovesTheBadge(t *testing.T) {

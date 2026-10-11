@@ -1537,10 +1537,10 @@ func TestEveryRepositoryRPCFailsAnUnreadableRegistryAsInternal(t *testing.T) {
 	}
 }
 
-// ---- SwapWorkspacePlaces ---------------------------------------------------
+// ---- MoveWorkspace ---------------------------------------------------------
 
-// swapHarness is a harness whose registry holds a second workspace, ws-2.
-func swapHarness(t *testing.T) (*harness, *workspacev1.WorkspaceRef) {
+// moveHarness is a harness whose registry holds a second workspace, ws-2.
+func moveHarness(t *testing.T) (*harness, *workspacev1.WorkspaceRef) {
 	t.Helper()
 	h := newHarness(t)
 	other := wsm.Workspace{ID: "ws-2", Dir: "/tmp/agent-repl-test-workspace-2"}
@@ -1548,96 +1548,145 @@ func swapHarness(t *testing.T) (*harness, *workspacev1.WorkspaceRef) {
 	return h, &workspacev1.WorkspaceRef{Id: string(other.ID), Dir: other.Dir}
 }
 
-func TestSwapWorkspacePlacesHandsBothResolvedIdsToTheVerb(t *testing.T) {
+func TestMoveWorkspaceHandsBothResolvedIdsToTheVerb(t *testing.T) {
 	// Arrange.
-	h, other := swapHarness(t)
+	h, target := moveHarness(t)
 
 	// Act.
-	resp, err := h.Client.SwapWorkspacePlaces(context.Background(),
-		connect.NewRequest(&agentreplv1.SwapWorkspacePlacesRequest{Workspace: ref(), Other: other}))
+	resp, err := h.Client.MoveWorkspace(context.Background(),
+		connect.NewRequest(&agentreplv1.MoveWorkspaceRequest{Workspace: ref(), Target: target}))
 
 	// Assert.
 	if err != nil {
-		t.Fatalf("SwapWorkspacePlaces: %v", err)
+		t.Fatalf("MoveWorkspace: %v", err)
 	}
 	if resp.Msg.GetSuccess() == nil {
 		t.Fatalf("result = %v, want success", resp.Msg.GetResult())
 	}
-	if want := [][2]ids.WorkspaceID{{testWorkspaceID, "ws-2"}}; !slices.Equal(h.Verbs.swaps, want) {
-		t.Fatalf("swaps = %v, want %v", h.Verbs.swaps, want)
+	if want := [][2]ids.WorkspaceID{{testWorkspaceID, "ws-2"}}; !slices.Equal(h.Verbs.moves, want) {
+		t.Fatalf("moves = %v, want %v", h.Verbs.moves, want)
 	}
 }
 
-func TestSwapWorkspacePlacesNamesTheUnknownRef(t *testing.T) {
+func TestMoveWorkspaceNamesTheUnknownRef(t *testing.T) {
 	// Arrange.
-	h, _ := swapHarness(t)
+	h, _ := moveHarness(t)
 	missing := &workspacev1.WorkspaceRef{Id: "ws-nope"}
 
 	// Act.
-	resp, err := h.Client.SwapWorkspacePlaces(context.Background(),
-		connect.NewRequest(&agentreplv1.SwapWorkspacePlacesRequest{Workspace: ref(), Other: missing}))
+	resp, err := h.Client.MoveWorkspace(context.Background(),
+		connect.NewRequest(&agentreplv1.MoveWorkspaceRequest{Workspace: ref(), Target: missing}))
 
 	// Assert.
 	if err != nil {
-		t.Fatalf("SwapWorkspacePlaces: %v", err)
+		t.Fatalf("MoveWorkspace: %v", err)
 	}
 	got := resp.Msg.GetError().GetUnknownWorkspace()
 	if got == nil || got.GetWorkspace().GetId() != "ws-nope" {
 		t.Fatalf("result = %v, want unknown_workspace naming ws-nope", resp.Msg.GetResult())
 	}
-	if len(h.Verbs.swaps) != 0 {
-		t.Fatalf("swaps = %v, want none for an unknown workspace", h.Verbs.swaps)
+	if len(h.Verbs.moves) != 0 {
+		t.Fatalf("moves = %v, want none for an unknown workspace", h.Verbs.moves)
 	}
 }
 
-func TestSwapWorkspacePlacesNamesTheMismatchedRef(t *testing.T) {
+func TestMoveWorkspaceNamesTheMismatchedRef(t *testing.T) {
 	// Arrange.
-	h, other := swapHarness(t)
-	stale := &workspacev1.WorkspaceRef{Id: other.GetId(), Dir: "/somewhere/else"}
+	h, target := moveHarness(t)
+	stale := &workspacev1.WorkspaceRef{Id: target.GetId(), Dir: "/somewhere/else"}
 
 	// Act.
-	resp, err := h.Client.SwapWorkspacePlaces(context.Background(),
-		connect.NewRequest(&agentreplv1.SwapWorkspacePlacesRequest{Workspace: ref(), Other: stale}))
+	resp, err := h.Client.MoveWorkspace(context.Background(),
+		connect.NewRequest(&agentreplv1.MoveWorkspaceRequest{Workspace: ref(), Target: stale}))
 
 	// Assert.
 	if err != nil {
-		t.Fatalf("SwapWorkspacePlaces: %v", err)
+		t.Fatalf("MoveWorkspace: %v", err)
 	}
 	got := resp.Msg.GetError().GetWorkspaceRefMismatch()
-	if got == nil || got.GetWorkspace().GetId() != other.GetId() || got.GetRegistryDir() != other.GetDir() {
+	if got == nil || got.GetWorkspace().GetId() != target.GetId() || got.GetRegistryDir() != target.GetDir() {
 		t.Fatalf("result = %v, want workspace_ref_mismatch naming ws-2 and its registry dir", resp.Msg.GetResult())
 	}
 }
 
-func TestSwapWorkspacePlacesMapsTheNotSiblingsRefusal(t *testing.T) {
+func TestMoveWorkspaceFailsAVerbError(t *testing.T) {
 	// Arrange.
-	h, other := swapHarness(t)
-	h.Verbs.swapErr = &workspace.Refusal{Arm: workspace.ArmNotSiblings, Reason: "different parents"}
+	h, target := moveHarness(t)
+	h.Verbs.moveErr = errors.New("disk I/O error")
 
 	// Act.
-	resp, err := h.Client.SwapWorkspacePlaces(context.Background(),
-		connect.NewRequest(&agentreplv1.SwapWorkspacePlacesRequest{Workspace: ref(), Other: other}))
-
-	// Assert.
-	if err != nil {
-		t.Fatalf("SwapWorkspacePlaces: %v", err)
-	}
-	if resp.Msg.GetError().GetNotSiblings() == nil {
-		t.Fatalf("result = %v, want not_siblings", resp.Msg.GetResult())
-	}
-}
-
-func TestSwapWorkspacePlacesFailsAVerbError(t *testing.T) {
-	// Arrange.
-	h, other := swapHarness(t)
-	h.Verbs.swapErr = errors.New("disk I/O error")
-
-	// Act.
-	_, err := h.Client.SwapWorkspacePlaces(context.Background(),
-		connect.NewRequest(&agentreplv1.SwapWorkspacePlacesRequest{Workspace: ref(), Other: other}))
+	_, err := h.Client.MoveWorkspace(context.Background(),
+		connect.NewRequest(&agentreplv1.MoveWorkspaceRequest{Workspace: ref(), Target: target}))
 
 	// Assert.
 	if connect.CodeOf(err) != connect.CodeInternal {
-		t.Fatalf("SwapWorkspacePlaces = %v, want an internal failure", err)
+		t.Fatalf("MoveWorkspace = %v, want an internal failure", err)
+	}
+}
+
+// ---- CreateWorkspace: fork into the primary branch ---------------------------
+
+func TestCreateWorkspaceMapsAForkSourceToAForkIntoThePrimaryBranch(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	repoRef := registeredRepoRef(h)
+	h.Verbs.createRec = wsm.Workspace{ID: "ws-created", Dir: "/tmp/ws", Name: "minted"}
+	req := standardCreate(repoRef, "")
+	req.ForkSource = &agentreplv1.CreateWorkspaceForkSource{Workspace: ref()}
+
+	// Act.
+	resp, err := h.Client.CreateWorkspace(context.Background(), connect.NewRequest(req))
+
+	// Assert.
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("CreateWorkspace = (%v, %v), want success", resp, err)
+	}
+	spec := h.Verbs.createSpecs[0]
+	if spec.Parent != nil || !spec.ForkIntoPrimary || spec.ForkFrom == nil || *spec.ForkFrom != testWorkspaceID {
+		t.Fatalf("spec = parent %v, fork into primary %v, fork from %v; want no parent and a fork from %s",
+			spec.Parent, spec.ForkIntoPrimary, spec.ForkFrom, testWorkspaceID)
+	}
+}
+
+func TestCreateWorkspaceNamesAnUnknownForkSource(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	repoRef := registeredRepoRef(h)
+	req := standardCreate(repoRef, "")
+	req.ForkSource = &agentreplv1.CreateWorkspaceForkSource{Workspace: &workspacev1.WorkspaceRef{Id: "ws-nope"}}
+
+	// Act.
+	resp, err := h.Client.CreateWorkspace(context.Background(), connect.NewRequest(req))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	got := resp.Msg.GetError().GetUnknownForkSource()
+	if got == nil || got.GetWorkspace().GetId() != "ws-nope" {
+		t.Fatalf("result = %v, want unknown_fork_source naming ws-nope", resp.Msg.GetResult())
+	}
+	if len(h.Verbs.createSpecs) != 0 {
+		t.Fatalf("Create ran %d times, want none", len(h.Verbs.createSpecs))
+	}
+}
+
+func TestCreateWorkspaceAnswersTheBaseRefOffPrimaryBranchArm(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	repoRef := registeredRepoRef(h)
+	h.Verbs.createErr = &workspace.Refusal{Arm: workspace.ArmBaseRefOffPrimaryBranch, Reason: "off",
+		Fields: map[string]any{"ref": "feature-tip", "primary_branch": "main"}}
+
+	// Act.
+	resp, err := h.Client.CreateWorkspace(context.Background(), connect.NewRequest(standardCreate(repoRef, "")))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	got := resp.Msg.GetError().GetBaseRefOffPrimaryBranch()
+	if got.GetRef() != "feature-tip" || got.GetPrimaryBranch() != "main" {
+		t.Fatalf("result = %v, want base_ref_off_primary_branch naming the ref and the branch", resp.Msg.GetResult())
 	}
 }

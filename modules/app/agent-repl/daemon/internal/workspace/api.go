@@ -50,8 +50,10 @@ type CreateSpec struct {
 	InitialPrompt string
 	// OneShot marks the one-shot form: created, prompted, merged, closed.
 	OneShot bool
-	// BaseRef is the base to cut from, empty for the repository's default
-	// branch.
+	// BaseRef is the base to cut from. Empty is the repository's default
+	// branch for a top-level workspace and the parent's tip for a child. A
+	// top-level workspace's base must already lie on the primary branch
+	// (ArmBaseRefOffPrimaryBranch otherwise).
 	BaseRef string
 	// Parent, when set, is the workspace this create was SPAWNED FROM: the
 	// child's merge target is the parent's worktree, and the roster nests the
@@ -64,6 +66,11 @@ type CreateSpec struct {
 	// is always FROM the spawning parent, so a spec that sets it and leaves
 	// Parent unset names the same workspace for both.
 	ForkFrom *ids.WorkspaceID
+	// ForkIntoPrimary makes ForkFrom a TOP-LEVEL fork: the conversation is
+	// ForkFrom's, but the workspace has no parent, is cut from the primary
+	// branch and merges into it, and its first message opens with the
+	// fork-into-primary preamble naming ForkFrom. Parent must be unset.
+	ForkIntoPrimary bool
 	// ConsentedUngatedMode is the permission mode the user consented to at
 	// creation. An ungated mode with no consent recorded is REFUSED.
 	ConsentedUngatedMode string
@@ -79,6 +86,7 @@ type CreateSpec struct {
 	// for the vendor's default.
 	PermissionMode string
 	// Priority is the roster priority recorded at creation, nil when unset.
+	// A child with none inherits its parent's.
 	Priority *wsm.Priority
 	// Progress receives the create's stage transitions as they happen, for a
 	// caller relaying them to a client. Nil for the legacy synchronous create,
@@ -311,9 +319,8 @@ type Verbs interface {
 	SetParent(ctx context.Context, ws ids.WorkspaceID, parent *ids.WorkspaceID) (wsm.ParentChange, error)
 	// RestoreParent undoes change unless a later retarget superseded it.
 	RestoreParent(ctx context.Context, change wsm.ParentChange) error
-	// SwapPlaces exchanges two sibling workspaces' roster places; a pair that
-	// is not siblings is refused with ArmNotSiblings.
-	SwapPlaces(ctx context.Context, ws, other ids.WorkspaceID) error
+	// Move moves workspace ws onto target's place in the registry order.
+	Move(ctx context.Context, ws, target ids.WorkspaceID) error
 	// FoldRepository records whether a repository's roster section is
 	// collapsed and republishes the roster. An unknown repository is refused
 	// with ArmUnknownRepository.

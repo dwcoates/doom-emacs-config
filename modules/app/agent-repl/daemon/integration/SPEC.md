@@ -148,10 +148,11 @@ the vendor (`AGENT_REPL_FORBID_VENDOR_CALLS=1` in every process).
 - a workspace with a live session reports `ready` after readiness, `thinking`
   during a turn, `done` after the turn concludes, `permission` while a
   permission is open, `idle_async` with detached work live and no turn
-- place ordering: rows sort by stored place; SetWorkspacePriority carries the
-  badge label and moves nothing; clearing removes the badge;
-  SwapWorkspacePlaces exchanges two siblings and refuses workspaces of two
-  repositories with not_siblings
+- registry ordering: a new workspace lands second-to-last on the tab bar;
+  setting a priority moves it second-to-last among the rest; a re-opened
+  workspace keeps its place; MoveWorkspace moves any workspace onto another's
+  place, across repositories too; the roster's tab bar lists open workspaces in
+  that order; clearing a priority removes the badge
 - attention marker set on a notification push, cleared by SelectWorkspace and
   by the last open ask settling
 - closed workspace draws `closed:true`; nuked workspace leaves the roster
