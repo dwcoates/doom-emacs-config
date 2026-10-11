@@ -62,7 +62,7 @@ async function withTray(init: Parameters<typeof heldSection>[0]): Promise<Harnes
 
 describe("arm coverage", () => {
   it("covers every held item kind", () => {
-    assertCoversOneof(FeedHeldItemSchema, "item", ["prompt", "offer", "merge"]);
+    assertCoversOneof(FeedHeldItemSchema, "item", ["prompt", "offer"]);
   });
 
   it("covers every hold classification arm", () => {

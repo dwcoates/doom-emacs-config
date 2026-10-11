@@ -1,20 +1,23 @@
 // feed_held.proto — THE HELD SECTION: the part of a workspace's ROOT feed
 // that holds what has not yet settled into the conversation's history — a
-// merge still running, a prompt the daemon is holding for delivery, a question
-// waiting for the user's answer. It is drawn at the root feed's tail, after
-// every row, with no heading and no divider, so a held item reads exactly as
-// the feed's newest row does.
+// prompt the daemon is holding for delivery, a question waiting for the user's
+// answer. It is drawn at the root feed's tail, after every row, with no
+// heading and no divider, so a held item reads exactly as the feed's newest
+// row does.
 //
 //   … settled rows, in order-key order …
-//   ┌ merge bubble ─────────────────────────────────────────┐   FeedHeldItem.merge
-//   │ ● merging ABC/fix-flaky-test → master          3m 12s │
+//   ┌ merge bubble ─────────────────────────────────────────┐   FeedRowOrder.pinned
+//   │ ● merging ABC/fix-flaky-test → master          3m 12s │   (a row, not held)
 //   └───────────────────────────────────────────────────────┘
 //   "also fix the footer"        ⏳ held · merge running       FeedHeldItem.prompt
 //   ?  take this merge off the queue?      [dequeue] [keep]    FeedHeldItem.offer
 //
-// HELD, THEN SETTLED. An item that settles — a merge that ends, a prompt the
-// daemon accepts for delivery — leaves this section and becomes an ordinary
-// row of the feed, keyed at the moment it settles: the bottom. Its row carries
+// A RUNNING MERGE IS NOT HELD. Its bubble is a row of the feed pinned below
+// every settled row (FeedRowOrder.pinned), updated in place while it runs.
+//
+// HELD, THEN SETTLED. A prompt that settles — the daemon accepts it for
+// delivery — leaves this section and becomes an ordinary row of the feed,
+// keyed at the moment it settles: the bottom. Its row carries
 // the SAME FeedId its held item carried, so a client keeps one element across
 // the move, and the move reaches the client as ONE change (the root feed's
 // held-section frame carries the section and the rows that settled out of it
@@ -62,10 +65,8 @@ const (
 // the daemon is holding nothing for the user — not an absent one.
 type FeedHeld struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The held items, in display order: every held merge first, then the held
-	// prompts in queue order, then a posed offer. A prompt held while a merge
-	// runs is delivered after the merge, so the item that settles first sits
-	// nearest the settled rows.
+	// The held items, in display order: the held prompts in queue order, then a
+	// posed offer. The prompt that settles first sits nearest the settled rows.
 	Items         []*FeedHeldItem `protobuf:"bytes,1,rep,name=items,proto3" json:"items,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -112,19 +113,17 @@ func (x *FeedHeld) GetItems() []*FeedHeldItem {
 type FeedHeldItem struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The item's identity, and the reconciliation key a client keeps its element
-	// under. For a merge it is the merge head row's FeedId, and for a prompt the
-	// FeedId its prompt row will carry once it settles, so the settled row and
-	// the held item are one element to the client. An offer, which never settles,
+	// under. For a prompt it is the FeedId its prompt row will carry once it
+	// settles, so the settled row and the held item are one element to the
+	// client. An offer, which never settles,
 	// has a FeedId of its own. Opaque and daemon-minted, like every FeedId.
 	Id *FeedId `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	// What is held. THE ARM IS THE KIND, and each kind is answered differently —
-	// a merge runs to its end, a prompt is released or dropped, an offer is
-	// answered — so a consumer routes on the arm rather than on anything inside
-	// it.
+	// a prompt is released or dropped, an offer is answered — so a consumer
+	// routes on the arm rather than on anything inside it.
 	//
 	// Types that are valid to be assigned to Item:
 	//
-	//	*FeedHeldItem_Merge
 	//	*FeedHeldItem_Prompt
 	//	*FeedHeldItem_Offer
 	Item          isFeedHeldItem_Item `protobuf_oneof:"item"`
@@ -176,15 +175,6 @@ func (x *FeedHeldItem) GetItem() isFeedHeldItem_Item {
 	return nil
 }
 
-func (x *FeedHeldItem) GetMerge() *FeedMerge {
-	if x != nil {
-		if x, ok := x.Item.(*FeedHeldItem_Merge); ok {
-			return x.Merge
-		}
-	}
-	return nil
-}
-
 func (x *FeedHeldItem) GetPrompt() *HeldPrompt {
 	if x != nil {
 		if x, ok := x.Item.(*FeedHeldItem_Prompt); ok {
@@ -207,14 +197,6 @@ type isFeedHeldItem_Item interface {
 	isFeedHeldItem_Item()
 }
 
-type FeedHeldItem_Merge struct {
-	// A merge that is still queued or running. Drawn as the merge bubble it
-	// settles as: the same head, and the same sub-feed opened by `id`
-	// (OpenFeed), so its tabs and its fold carry across the settle. Its result
-	// arm is always `update` here; a terminal merge has settled.
-	Merge *FeedMerge `protobuf:"bytes,2,opt,name=merge,proto3,oneof"`
-}
-
 type FeedHeldItem_Prompt struct {
 	// A prompt the daemon is holding for delivery.
 	Prompt *HeldPrompt `protobuf:"bytes,3,opt,name=prompt,proto3,oneof"`
@@ -224,8 +206,6 @@ type FeedHeldItem_Offer struct {
 	// A question the daemon is holding for the user's answer.
 	Offer *HeldOffer `protobuf:"bytes,4,opt,name=offer,proto3,oneof"`
 }
-
-func (*FeedHeldItem_Merge) isFeedHeldItem_Item() {}
 
 func (*FeedHeldItem_Prompt) isFeedHeldItem_Item() {}
 
@@ -2732,13 +2712,12 @@ const file_frontend_v1_feed_held_proto_rawDesc = "" +
 	"\n" +
 	"\x1bfrontend/v1/feed_held.proto\x12\vfrontend.v1\x1a#conversation/v1/slash_command.proto\x1a\x1aconversation/v1/turn.proto\x1a\x1aconversation/v1/user.proto\x1a\x16frontend/v1/feed.proto\";\n" +
 	"\bFeedHeld\x12/\n" +
-	"\x05items\x18\x01 \x03(\v2\x19.frontend.v1.FeedHeldItemR\x05items\"\xce\x01\n" +
+	"\x05items\x18\x01 \x03(\v2\x19.frontend.v1.FeedHeldItemR\x05items\"\xab\x01\n" +
 	"\fFeedHeldItem\x12#\n" +
-	"\x02id\x18\x01 \x01(\v2\x13.frontend.v1.FeedIdR\x02id\x12.\n" +
-	"\x05merge\x18\x02 \x01(\v2\x16.frontend.v1.FeedMergeH\x00R\x05merge\x121\n" +
+	"\x02id\x18\x01 \x01(\v2\x13.frontend.v1.FeedIdR\x02id\x121\n" +
 	"\x06prompt\x18\x03 \x01(\v2\x17.frontend.v1.HeldPromptH\x00R\x06prompt\x12.\n" +
 	"\x05offer\x18\x04 \x01(\v2\x16.frontend.v1.HeldOfferH\x00R\x05offerB\x06\n" +
-	"\x04item\"\xb0\f\n" +
+	"\x04itemJ\x04\b\x02\x10\x03R\x05merge\"\xb0\f\n" +
 	"\n" +
 	"HeldPrompt\x12+\n" +
 	"\x04turn\x18\x01 \x01(\v2\x17.conversation.v1.TurnIdR\x04turn\x12-\n" +
@@ -2907,64 +2886,62 @@ var file_frontend_v1_feed_held_proto_goTypes = []any{
 	(*HeldOfferMergeDequeue)(nil),              // 40: frontend.v1.HeldOfferMergeDequeue
 	(*HeldOfferHeadline)(nil),                  // 41: frontend.v1.HeldOfferHeadline
 	(*FeedId)(nil),                             // 42: frontend.v1.FeedId
-	(*FeedMerge)(nil),                          // 43: frontend.v1.FeedMerge
-	(*v1.TurnId)(nil),                          // 44: conversation.v1.TurnId
-	(*v1.UserSaid)(nil),                        // 45: conversation.v1.UserSaid
-	(v1.SessionCommand)(0),                     // 46: conversation.v1.SessionCommand
+	(*v1.TurnId)(nil),                          // 43: conversation.v1.TurnId
+	(*v1.UserSaid)(nil),                        // 44: conversation.v1.UserSaid
+	(v1.SessionCommand)(0),                     // 45: conversation.v1.SessionCommand
 }
 var file_frontend_v1_feed_held_proto_depIdxs = []int32{
 	1,  // 0: frontend.v1.FeedHeld.items:type_name -> frontend.v1.FeedHeldItem
 	42, // 1: frontend.v1.FeedHeldItem.id:type_name -> frontend.v1.FeedId
-	43, // 2: frontend.v1.FeedHeldItem.merge:type_name -> frontend.v1.FeedMerge
-	2,  // 3: frontend.v1.FeedHeldItem.prompt:type_name -> frontend.v1.HeldPrompt
-	39, // 4: frontend.v1.FeedHeldItem.offer:type_name -> frontend.v1.HeldOffer
-	44, // 5: frontend.v1.HeldPrompt.turn:type_name -> conversation.v1.TurnId
-	45, // 6: frontend.v1.HeldPrompt.said:type_name -> conversation.v1.UserSaid
-	24, // 7: frontend.v1.HeldPrompt.queued_at:type_name -> frontend.v1.HeldPromptQueuedAt
-	25, // 8: frontend.v1.HeldPrompt.classifying:type_name -> frontend.v1.HeldPromptClassifying
-	26, // 9: frontend.v1.HeldPrompt.interject:type_name -> frontend.v1.HeldPromptInterject
-	28, // 10: frontend.v1.HeldPrompt.hold_for_turn_end:type_name -> frontend.v1.HeldPromptHoldForTurnEnd
-	27, // 11: frontend.v1.HeldPrompt.after_tool_call:type_name -> frontend.v1.HeldPromptAfterToolCall
-	30, // 12: frontend.v1.HeldPrompt.uninterruptible_turn:type_name -> frontend.v1.HeldPromptUninterruptibleTurn
-	31, // 13: frontend.v1.HeldPrompt.classification_error:type_name -> frontend.v1.HeldPromptClassificationError
-	35, // 14: frontend.v1.HeldPrompt.daemon_held:type_name -> frontend.v1.HeldPromptDaemonHeld
-	37, // 15: frontend.v1.HeldPrompt.awaiting_delivery:type_name -> frontend.v1.HeldPromptAwaitingDelivery
-	32, // 16: frontend.v1.HeldPrompt.shutdown:type_name -> frontend.v1.HeldPromptShutdownHold
-	33, // 17: frontend.v1.HeldPrompt.reconnect:type_name -> frontend.v1.HeldPromptReconnectHold
-	38, // 18: frontend.v1.HeldPrompt.build_refresh:type_name -> frontend.v1.HeldPromptBuildRefreshHold
-	34, // 19: frontend.v1.HeldPrompt.merge:type_name -> frontend.v1.HeldPromptMergeHold
-	36, // 20: frontend.v1.HeldPrompt.cold_gate:type_name -> frontend.v1.HeldPromptColdGateHold
-	23, // 21: frontend.v1.HeldPrompt.editing:type_name -> frontend.v1.HeldPromptEditing
-	8,  // 22: frontend.v1.HeldPrompt.badge:type_name -> frontend.v1.HeldPromptBadge
-	22, // 23: frontend.v1.HeldPrompt.notes:type_name -> frontend.v1.HeldPromptStatusNote
-	4,  // 24: frontend.v1.HeldPrompt.coalesced:type_name -> frontend.v1.HeldPromptCoalesced
-	5,  // 25: frontend.v1.HeldPrompt.act:type_name -> frontend.v1.HeldSessionAct
-	3,  // 26: frontend.v1.HeldPrompt.fold_above:type_name -> frontend.v1.HeldPromptFoldAbove
-	44, // 27: frontend.v1.HeldPromptFoldAbove.above:type_name -> conversation.v1.TurnId
-	6,  // 28: frontend.v1.HeldSessionAct.model:type_name -> frontend.v1.HeldSessionActModel
-	7,  // 29: frontend.v1.HeldSessionAct.permission_mode:type_name -> frontend.v1.HeldSessionActPermissionMode
-	9,  // 30: frontend.v1.HeldPromptBadge.classifying:type_name -> frontend.v1.HeldPromptBadgeClassifying
-	10, // 31: frontend.v1.HeldPromptBadge.interject:type_name -> frontend.v1.HeldPromptBadgeInterject
-	11, // 32: frontend.v1.HeldPromptBadge.after_tool_call:type_name -> frontend.v1.HeldPromptBadgeAfterToolCall
-	12, // 33: frontend.v1.HeldPromptBadge.hold_for_turn_end:type_name -> frontend.v1.HeldPromptBadgeHoldForTurnEnd
-	13, // 34: frontend.v1.HeldPromptBadge.uninterruptible_turn:type_name -> frontend.v1.HeldPromptBadgeUninterruptibleTurn
-	14, // 35: frontend.v1.HeldPromptBadge.classification_error:type_name -> frontend.v1.HeldPromptBadgeClassificationError
-	15, // 36: frontend.v1.HeldPromptBadge.editing:type_name -> frontend.v1.HeldPromptBadgeEditing
-	16, // 37: frontend.v1.HeldPromptBadge.shutdown:type_name -> frontend.v1.HeldPromptBadgeShutdown
-	17, // 38: frontend.v1.HeldPromptBadge.build_refresh:type_name -> frontend.v1.HeldPromptBadgeBuildRefresh
-	18, // 39: frontend.v1.HeldPromptBadge.reconnect:type_name -> frontend.v1.HeldPromptBadgeReconnect
-	19, // 40: frontend.v1.HeldPromptBadge.merge:type_name -> frontend.v1.HeldPromptBadgeMerge
-	20, // 41: frontend.v1.HeldPromptBadge.cold_gate:type_name -> frontend.v1.HeldPromptBadgeColdGate
-	21, // 42: frontend.v1.HeldPromptBadge.awaiting_delivery:type_name -> frontend.v1.HeldPromptBadgeAwaitingDelivery
-	29, // 43: frontend.v1.HeldPromptHoldForTurnEnd.accepted:type_name -> frontend.v1.HeldPromptAccepted
-	46, // 44: frontend.v1.HeldPromptUninterruptibleTurn.command:type_name -> conversation.v1.SessionCommand
-	40, // 45: frontend.v1.HeldOffer.merge_dequeue:type_name -> frontend.v1.HeldOfferMergeDequeue
-	41, // 46: frontend.v1.HeldOfferMergeDequeue.headline:type_name -> frontend.v1.HeldOfferHeadline
-	47, // [47:47] is the sub-list for method output_type
-	47, // [47:47] is the sub-list for method input_type
-	47, // [47:47] is the sub-list for extension type_name
-	47, // [47:47] is the sub-list for extension extendee
-	0,  // [0:47] is the sub-list for field type_name
+	2,  // 2: frontend.v1.FeedHeldItem.prompt:type_name -> frontend.v1.HeldPrompt
+	39, // 3: frontend.v1.FeedHeldItem.offer:type_name -> frontend.v1.HeldOffer
+	43, // 4: frontend.v1.HeldPrompt.turn:type_name -> conversation.v1.TurnId
+	44, // 5: frontend.v1.HeldPrompt.said:type_name -> conversation.v1.UserSaid
+	24, // 6: frontend.v1.HeldPrompt.queued_at:type_name -> frontend.v1.HeldPromptQueuedAt
+	25, // 7: frontend.v1.HeldPrompt.classifying:type_name -> frontend.v1.HeldPromptClassifying
+	26, // 8: frontend.v1.HeldPrompt.interject:type_name -> frontend.v1.HeldPromptInterject
+	28, // 9: frontend.v1.HeldPrompt.hold_for_turn_end:type_name -> frontend.v1.HeldPromptHoldForTurnEnd
+	27, // 10: frontend.v1.HeldPrompt.after_tool_call:type_name -> frontend.v1.HeldPromptAfterToolCall
+	30, // 11: frontend.v1.HeldPrompt.uninterruptible_turn:type_name -> frontend.v1.HeldPromptUninterruptibleTurn
+	31, // 12: frontend.v1.HeldPrompt.classification_error:type_name -> frontend.v1.HeldPromptClassificationError
+	35, // 13: frontend.v1.HeldPrompt.daemon_held:type_name -> frontend.v1.HeldPromptDaemonHeld
+	37, // 14: frontend.v1.HeldPrompt.awaiting_delivery:type_name -> frontend.v1.HeldPromptAwaitingDelivery
+	32, // 15: frontend.v1.HeldPrompt.shutdown:type_name -> frontend.v1.HeldPromptShutdownHold
+	33, // 16: frontend.v1.HeldPrompt.reconnect:type_name -> frontend.v1.HeldPromptReconnectHold
+	38, // 17: frontend.v1.HeldPrompt.build_refresh:type_name -> frontend.v1.HeldPromptBuildRefreshHold
+	34, // 18: frontend.v1.HeldPrompt.merge:type_name -> frontend.v1.HeldPromptMergeHold
+	36, // 19: frontend.v1.HeldPrompt.cold_gate:type_name -> frontend.v1.HeldPromptColdGateHold
+	23, // 20: frontend.v1.HeldPrompt.editing:type_name -> frontend.v1.HeldPromptEditing
+	8,  // 21: frontend.v1.HeldPrompt.badge:type_name -> frontend.v1.HeldPromptBadge
+	22, // 22: frontend.v1.HeldPrompt.notes:type_name -> frontend.v1.HeldPromptStatusNote
+	4,  // 23: frontend.v1.HeldPrompt.coalesced:type_name -> frontend.v1.HeldPromptCoalesced
+	5,  // 24: frontend.v1.HeldPrompt.act:type_name -> frontend.v1.HeldSessionAct
+	3,  // 25: frontend.v1.HeldPrompt.fold_above:type_name -> frontend.v1.HeldPromptFoldAbove
+	43, // 26: frontend.v1.HeldPromptFoldAbove.above:type_name -> conversation.v1.TurnId
+	6,  // 27: frontend.v1.HeldSessionAct.model:type_name -> frontend.v1.HeldSessionActModel
+	7,  // 28: frontend.v1.HeldSessionAct.permission_mode:type_name -> frontend.v1.HeldSessionActPermissionMode
+	9,  // 29: frontend.v1.HeldPromptBadge.classifying:type_name -> frontend.v1.HeldPromptBadgeClassifying
+	10, // 30: frontend.v1.HeldPromptBadge.interject:type_name -> frontend.v1.HeldPromptBadgeInterject
+	11, // 31: frontend.v1.HeldPromptBadge.after_tool_call:type_name -> frontend.v1.HeldPromptBadgeAfterToolCall
+	12, // 32: frontend.v1.HeldPromptBadge.hold_for_turn_end:type_name -> frontend.v1.HeldPromptBadgeHoldForTurnEnd
+	13, // 33: frontend.v1.HeldPromptBadge.uninterruptible_turn:type_name -> frontend.v1.HeldPromptBadgeUninterruptibleTurn
+	14, // 34: frontend.v1.HeldPromptBadge.classification_error:type_name -> frontend.v1.HeldPromptBadgeClassificationError
+	15, // 35: frontend.v1.HeldPromptBadge.editing:type_name -> frontend.v1.HeldPromptBadgeEditing
+	16, // 36: frontend.v1.HeldPromptBadge.shutdown:type_name -> frontend.v1.HeldPromptBadgeShutdown
+	17, // 37: frontend.v1.HeldPromptBadge.build_refresh:type_name -> frontend.v1.HeldPromptBadgeBuildRefresh
+	18, // 38: frontend.v1.HeldPromptBadge.reconnect:type_name -> frontend.v1.HeldPromptBadgeReconnect
+	19, // 39: frontend.v1.HeldPromptBadge.merge:type_name -> frontend.v1.HeldPromptBadgeMerge
+	20, // 40: frontend.v1.HeldPromptBadge.cold_gate:type_name -> frontend.v1.HeldPromptBadgeColdGate
+	21, // 41: frontend.v1.HeldPromptBadge.awaiting_delivery:type_name -> frontend.v1.HeldPromptBadgeAwaitingDelivery
+	29, // 42: frontend.v1.HeldPromptHoldForTurnEnd.accepted:type_name -> frontend.v1.HeldPromptAccepted
+	45, // 43: frontend.v1.HeldPromptUninterruptibleTurn.command:type_name -> conversation.v1.SessionCommand
+	40, // 44: frontend.v1.HeldOffer.merge_dequeue:type_name -> frontend.v1.HeldOfferMergeDequeue
+	41, // 45: frontend.v1.HeldOfferMergeDequeue.headline:type_name -> frontend.v1.HeldOfferHeadline
+	46, // [46:46] is the sub-list for method output_type
+	46, // [46:46] is the sub-list for method input_type
+	46, // [46:46] is the sub-list for extension type_name
+	46, // [46:46] is the sub-list for extension extendee
+	0,  // [0:46] is the sub-list for field type_name
 }
 
 func init() { file_frontend_v1_feed_held_proto_init() }
@@ -2974,7 +2951,6 @@ func file_frontend_v1_feed_held_proto_init() {
 	}
 	file_frontend_v1_feed_proto_init()
 	file_frontend_v1_feed_held_proto_msgTypes[1].OneofWrappers = []any{
-		(*FeedHeldItem_Merge)(nil),
 		(*FeedHeldItem_Prompt)(nil),
 		(*FeedHeldItem_Offer)(nil),
 	}
