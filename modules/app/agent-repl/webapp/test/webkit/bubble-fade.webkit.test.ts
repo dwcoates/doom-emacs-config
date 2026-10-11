@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url";
 import { webkit, type Browser, type Page } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { BUBBLE_EXPAND_ONLY_CLASS, BUBBLE_FOOTER_CLASS } from "../../src/bubble/draw.js";
+import { screenshotPixels } from "./pixels";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -68,38 +69,26 @@ async function paint(page: Page, footer: string): Promise<Painted> {
     if (bubble === null || box === null) throw new Error("the bubble did not draw");
     const b = bubble.getBoundingClientRect();
     const x = box.getBoundingClientRect();
-    return { left: b.left, right: b.right, bottom: b.bottom, boxLeft: x.left, boxBottom: x.bottom };
+    return { left: b.left, right: b.right, top: b.top, bottom: b.bottom, boxLeft: x.left, boxBottom: x.bottom };
   }, bubbleHtml(footer));
-  const shot = await page.screenshot();
-  return page.evaluate(
-    async ({ b64, r }) => {
-      const img = new Image();
-      img.src = `data:image/png;base64,${b64}`;
-      await img.decode();
-      const canvas = document.createElement("canvas");
-      canvas.width = img.width;
-      canvas.height = img.height;
-      const g = canvas.getContext("2d");
-      if (g === null) throw new Error("no 2d context");
-      g.drawImage(img, 0, 0);
-      const d = g.getImageData(0, 0, img.width, img.height).data;
-      const red = (px: number, py: number): boolean => {
-        const k = (Math.floor(py) * img.width + Math.floor(px)) * 4;
-        return (d[k] ?? 0) > 200 && (d[k + 1] ?? 255) < 60 && (d[k + 2] ?? 255) < 60;
-      };
-      const mid = (r.left + r.right) / 2;
-      let redBottom = 0;
-      for (let y = 0; y < img.height; y++) if (red(mid, y)) redBottom = y + 1;
-      return {
-        bubbleBottom: r.bottom,
-        boxBottom: r.boxBottom,
-        redBottom,
-        redInLeftPadding: red((r.left + r.boxLeft) / 2, redBottom - 6),
-        redInCorner: red(r.left + 0.5, r.bottom - 0.5),
-      };
-    },
-    { b64: shot.toString("base64"), r: rects },
-  );
+  // The bubble's rows and a few beyond, at deviceScaleFactor 1, so a device
+  // pixel is a CSS pixel and the shot's row y is the page's row top + y.
+  const top = Math.max(0, Math.floor(rects.top) - 4);
+  const px = await screenshotPixels(page, { x: 0, y: top, width: 800, height: Math.ceil(rects.bottom) + 4 - top });
+  const red = (x: number, y: number): boolean => {
+    const [r, g, b] = px.rgba(x, y - top);
+    return r > 200 && g < 60 && b < 60;
+  };
+  const mid = (rects.left + rects.right) / 2;
+  let redBottom = 0;
+  for (let y = top; y < top + px.height; y++) if (red(mid, y)) redBottom = y + 1;
+  return {
+    bubbleBottom: rects.bottom,
+    boxBottom: rects.boxBottom,
+    redBottom,
+    redInLeftPadding: red((rects.left + rects.boxLeft) / 2, redBottom - 6),
+    redInCorner: red(rects.left + 0.5, rects.bottom - 0.5),
+  };
 }
 
 describe("the collapsed bubble's fade in WebKit", () => {
