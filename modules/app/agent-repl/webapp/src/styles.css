@@ -1030,6 +1030,10 @@ body::after {
 /* A Recently Merged row's NAME is drawn in the repository section headers'
    colour (owner request, 2026-10-03); the row's timestamp keeps its grey. */
 #ws-sidebar .row .name.merged-name { color: var(--repo-head-expanded); }
+/* A merge that landed TODAY (local date) draws its name in the success green
+   instead (owner request, 2026-10-11); `merged-today` is toggled by the
+   shared ticker in src/sidebar/row.ts, so the name turns back at midnight. */
+#ws-sidebar .row .name.merged-name.merged-today { color: var(--ok); }
 /* REVIVING (frontend.v1.RosterRowReviving): the daemon is bringing this
    parked workspace's session back up. A SUBTLE shimmer on the NAME alone
    (owner ruling, 2026-09-19): the text is painted through a gradient of its
