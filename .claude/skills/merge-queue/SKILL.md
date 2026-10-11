@@ -1,7 +1,7 @@
 ---
 name: merge-queue
-description: Land work on master through the agent-repl merge queue — the ONLY way into master in this repository. From this workspace, request the merge of its own branch, another workspace's branch, a subagent's branch, or a branch already merged upstream, then end the turn; the merge runs in this workspace and its outcome (landed, or failed in conflicts, tests or other) and any conflict or test-failure repairs arrive in this session. Also controls the queue itself, taking this workspace's or another workspace's merge off the queue and pausing or resuming the queue for one repository or all. Use whenever work is finished and must reach master, whenever you would otherwise run git merge, git commit, git cherry-pick or git push onto master, when a subagent reports a finished branch, whenever a queued merge must be removed or the queue paused or resumed, or when invoked as /merge-queue.
-argument-hint: "own [keep-open] | workspace <worktree-dir> | branch <branch-name> | pr-merged | dequeue own | dequeue workspace <worktree-dir> | pause [<repo-dir>] | resume [<repo-dir>]"
+description: Land work on master through the agent-repl merge queue — the ONLY way into master in this repository. From this workspace, request the merge of its own branch, only some commits of its own branch (a fix made amid unfinished work), another workspace's branch, a subagent's branch, or a branch already merged upstream, then end the turn; the merge runs in this workspace and its outcome (landed, or failed in conflicts, tests or other) and any conflict or test-failure repairs arrive in this session. Also controls the queue itself, taking this workspace's or another workspace's merge off the queue and pausing or resuming the queue for one repository or all. Use whenever work is finished and must reach master, whenever you would otherwise run git merge, git commit, git cherry-pick or git push onto master, when a subagent reports a finished branch, whenever a queued merge must be removed or the queue paused or resumed, or when invoked as /merge-queue.
+argument-hint: "own [keep-open] | workspace <worktree-dir> | branch <branch-name> | commits <commit>... | pr-merged | dequeue own | dequeue workspace <worktree-dir> | pause [<repo-dir>] | resume [<repo-dir>]"
 allowed-tools: Bash(.claude/skills/merge-queue/run.sh:*)
 ---
 
@@ -17,6 +17,7 @@ Asks the merge queue, from this workspace, to land a finished branch in its merg
 | `own keep-open` | Merge the branch checked out in this workspace's worktree now, into master, or into its parent workspace when it is a child, and keep this workspace open once it lands. |
 | `workspace <worktree-dir>` | Merge the branch checked out in ANOTHER workspace's worktree (for example a one-shot a subagent ran in), into master, or into that workspace's parent when it is a child; that workspace closes once it lands. |
 | `branch <branch-name>` | Merge a branch that is no workspace (a subagent's `Agent`-tool branch). |
+| `commits <commit>...` | Merge ONLY the named commits of this workspace's branch, rebased onto master, leaving the rest of the branch unmerged; this workspace stays open. |
 | `pr-merged` | This workspace's branch already merged upstream; update master from upstream and close this workspace. |
 | `dequeue own` | Take this workspace's own merge off the queue. |
 | `dequeue workspace <worktree-dir>` | Take ANOTHER workspace's merge off the queue, by its worktree. |
@@ -46,26 +47,31 @@ Asks the merge queue, from this workspace, to land a finished branch in its merg
     - `EXIT CODE 0:` The merge is requested. Continue to step 2.
     - `EXIT CODE 2:` IMMEDIATELY terminate and surface the raw error.
     - `EXIT CODE 5:` The merge was refused. Go to step 4.
-  - d. If `pr-merged`: call `.claude/skills/merge-queue/run.sh --pr-merged`.
+  - d. If `commits <commit>...`: call `.claude/skills/merge-queue/run.sh --land-commits <commit>...`.
+    - `EXIT CODE 0:` The merge of those commits is requested. Record the printed branch name for step 3c, then continue to step 2.
+    - `EXIT CODE 2:` IMMEDIATELY terminate and surface the raw error.
+    - `EXIT CODE 5:` The merge was refused. Go to step 4.
+    - `EXIT CODE 9:` The commits do not apply on their own onto master. Report the printed line and STOP.
+  - e. If `pr-merged`: call `.claude/skills/merge-queue/run.sh --pr-merged`.
     - `EXIT CODE 0:` The update is requested. Continue to step 2.
     - `EXIT CODE 2:` IMMEDIATELY terminate and surface the raw error.
     - `EXIT CODE 5:` The update was refused. Go to step 4.
-  - e. If `dequeue own`: call `.claude/skills/merge-queue/run.sh --dequeue-own`.
+  - f. If `dequeue own`: call `.claude/skills/merge-queue/run.sh --dequeue-own`.
     - `EXIT CODE 0:` The removal is applied. Go to step 5.
     - `EXIT CODE 2:` IMMEDIATELY terminate and surface the raw error.
     - `EXIT CODE 5:` The removal was refused. Go to step 4.
     - `EXIT CODE 8:` No answer arrived in time. Go to step 6.
-  - f. If `dequeue workspace <worktree-dir>`: call `.claude/skills/merge-queue/run.sh --dequeue-workspace <worktree-dir>`.
+  - g. If `dequeue workspace <worktree-dir>`: call `.claude/skills/merge-queue/run.sh --dequeue-workspace <worktree-dir>`.
     - `EXIT CODE 0:` The removal is applied. Go to step 5.
     - `EXIT CODE 2:` IMMEDIATELY terminate and surface the raw error.
     - `EXIT CODE 5:` The removal was refused. Go to step 4.
     - `EXIT CODE 8:` No answer arrived in time. Go to step 6.
-  - g. If `pause [<repo-dir>]`: call `.claude/skills/merge-queue/run.sh --pause-queue [<repo-dir>]`.
+  - h. If `pause [<repo-dir>]`: call `.claude/skills/merge-queue/run.sh --pause-queue [<repo-dir>]`.
     - `EXIT CODE 0:` The pause is applied. Go to step 5.
     - `EXIT CODE 2:` IMMEDIATELY terminate and surface the raw error.
     - `EXIT CODE 5:` The pause was refused. Go to step 4.
     - `EXIT CODE 8:` No answer arrived in time. Go to step 6.
-  - h. If `resume [<repo-dir>]`: call `.claude/skills/merge-queue/run.sh --resume-queue [<repo-dir>]`.
+  - i. If `resume [<repo-dir>]`: call `.claude/skills/merge-queue/run.sh --resume-queue [<repo-dir>]`.
     - `EXIT CODE 0:` The resume is applied. Go to step 5.
     - `EXIT CODE 2:` IMMEDIATELY terminate and surface the raw error.
     - `EXIT CODE 5:` The resume was refused. Go to step 4.
@@ -79,7 +85,7 @@ Asks the merge queue, from this workspace, to land a finished branch in its merg
   - a. A conflict-resolution prompt: resolve the conflicted files in the worktree the prompt names and `git add` them.
     - CRITICAL: NEVER run `git rebase --continue`, `--abort` or `--skip`; the queue continues the rebase itself.
   - b. A test-failure prompt: fix the failure in the worktree the prompt names and commit the fix with its tests.
-  - c. A LANDED outcome for a `branch` merge: call `.claude/skills/merge-queue/run.sh --remove-branch <branch-name>`.
+  - c. A LANDED outcome for a `branch` or `commits` merge: call `.claude/skills/merge-queue/run.sh --remove-branch <branch-name>`.
     - `EXIT CODE 0:` The subagent's worktree and branch are gone. Report the landing and stop.
     - `EXIT CODE 2:` IMMEDIATELY terminate and surface the raw error.
   - d. A failed outcome (conflicts, tests or other): report it in one line and STOP.
@@ -100,6 +106,7 @@ Asks the merge queue, from this workspace, to land a finished branch in its merg
 - **CRITICAL: NEVER merge, commit, cherry-pick, rebase, reset or push onto master by hand.** The queue is the only path into master, and any other path is refused.
 - **CRITICAL: On a failed or refused merge, report and stop.** Never retry by hand, never work around the queue.
 - **IMPORTANT NOTE: A subagent's branch goes through `branch`, the same sequence.** Never fold it into master yourself.
+- **IMPORTANT NOTE: To land a fix without the unfinished work around it, use `commits` with only the fix's commits.** Never cherry-pick them onto master by hand.
 - **CRITICAL: NEVER request a workspace merge for a branch that is not checked out in that worktree.** Check the branch out there first, or use `branch <branch-name>` for a branch that is no workspace.
 - **CRITICAL: Removing a merge from the queue, or pausing or resuming the queue, goes through this skill, NEVER by hand.**
 - **CRITICAL NOTE: Do not self-remediate a `run.sh` failure or read its internals.** React only to the documented exit codes.
