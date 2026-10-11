@@ -190,26 +190,14 @@ func hasAnyPrefix(s string, prefixes ...string) bool {
 	return false
 }
 
-// inputBuffer answers the workspace's composer buffer name.
-func (f *emacsWorkspaceFixture) inputBuffer() string {
-	f.Emacs.t.Helper()
-	return f.Emacs.EvalString(`(buffer-name (agent-repl--input-buffer ` + elispString(f.Name) + `))`)
-}
-
 // submitFromComposer types TEXT into the composer and PRESSES RET, which is
-// how a user submits: `input.el' binds RET on `agent-repl-input-mode-map'
-// through `map!', so the press asserts the binding and the command together.
+// how a user submits. It is `emGHISubmit', so it first waits for the
+// workspace's session to be up: opening the panel does not wait for the
+// session, and the daemon refuses a submit to a workspace with none
+// (`no_session'), which left a parked turn never in flight.
 func (f *emacsWorkspaceFixture) submitFromComposer(text string) {
 	f.Emacs.t.Helper()
-	buffer := f.inputBuffer()
-	f.Emacs.Eval(`(with-current-buffer (agent-repl--input-buffer ` + elispString(f.Name) + `)
-                    (erase-buffer)
-                    (insert ` + elispString(text) + `)
-                    t)`)
-	if want, got := "agent-repl-send", f.Emacs.BindingForIn(buffer, "RET"); got != want {
-		f.Emacs.t.Fatalf("composer RET resolves to %q, want %q", got, want)
-	}
-	f.Emacs.KeysIn(buffer, "RET")
+	emGHISubmit(f.Emacs.t, f.Emacs, f.Name, text)
 }
 
 // awaitStatusArm waits for the workspace's roster arm to be one of ARMS.
