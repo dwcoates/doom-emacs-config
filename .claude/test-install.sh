@@ -45,7 +45,7 @@ fail() { echo "  FAIL: $1"; FAIL=$((FAIL + 1)); shift; if [ $# -gt 0 ]; then pri
 # Local skills install.sh expects to find under modules/app/agent-repl/skills/.
 # debug-emacs-agent-repl is deliberately absent: it is PROJECT-scoped
 # (checked-in <repo>/.claude/skills symlink), not a user-level installed skill.
-LOCAL_SKILL_NAMES=( profile runtime-eval-code workspace-close emit-workspace-commands.sh )
+LOCAL_SKILL_NAMES=( profile runtime-eval-code emit-workspace-commands.sh )
 
 # Build a synthetic repo containing a fresh copy of install.sh and the
 # requirements runner it delegates to, the pre-commit hook, and a requirements
@@ -300,6 +300,56 @@ test_install_preserves_non_symlink_file() {
     pass "non-symlink file is left untouched, and the install fails naming it"
   else
     fail "non-symlink preservation" "rc: $LAST_RC" "$(cat "$repo/.install.log")"
+  fi
+  cleanup "$repo" "$home"
+}
+
+# retire_skill REPO NAME: add a retired skill_link entry NAME to the manifest.
+retire_skill() {
+  local manifest="$1/modules/app/agent-repl/requirements.json" tmp
+  tmp="$(mktemp "${TMPDIR:-/tmp}/manifest.XXXXXX")"
+  jq --arg n "$2" '.requirements += [{"id": ("skill-" + $n), "kind": "skill_link", "why": "retired", "retired": true, "profile": "run", "name": $n, "source": {"repo": ("modules/app/agent-repl/skills/" + $n)}}]' "$manifest" >"$tmp"
+  mv "$tmp" "$manifest"
+}
+
+# --- install: a retired skill's link of ours is removed ---
+test_install_removes_a_retired_skills_link() {
+  local repo home; repo="$(mkfake_repo)"; home="$(mkfake_home)"
+  retire_skill "$repo" old-skill
+  ln -s "$(cd "$repo" && pwd -P)/modules/app/agent-repl/skills/old-skill" "$home/.claude/skills/old-skill"
+  run_install "$repo" "$home"
+  if [ "$LAST_RC" -eq 0 ] && [ ! -L "$home/.claude/skills/old-skill" ] \
+     && grep -q "skill-old-skill is outdated" "$repo/.install.log"; then
+    pass "a retired skill's dangling link of ours is removed"
+  else
+    fail "retired skill link removal" "rc: $LAST_RC" "$(cat "$repo/.install.log")"
+  fi
+  cleanup "$repo" "$home"
+}
+
+# --- install: a retired skill with no link is already met ---
+test_install_a_retired_skill_with_no_link_is_met() {
+  local repo home; repo="$(mkfake_repo)"; home="$(mkfake_home)"
+  retire_skill "$repo" old-skill
+  run_install "$repo" "$home"
+  if [ "$LAST_RC" -eq 0 ] && grep -q "old-skill is retired and not linked" "$repo/.install.log"; then
+    pass "a retired skill with no link is met"
+  else
+    fail "retired skill without link" "rc: $LAST_RC" "$(cat "$repo/.install.log")"
+  fi
+  cleanup "$repo" "$home"
+}
+
+# --- install: a file of the user's at a retired skill's name is left alone ---
+test_install_leaves_a_users_file_at_a_retired_skills_name() {
+  local repo home; repo="$(mkfake_repo)"; home="$(mkfake_home)"
+  retire_skill "$repo" old-skill
+  echo "mine" > "$home/.claude/skills/old-skill"
+  run_install "$repo" "$home"
+  if [ "$LAST_RC" -eq 0 ] && [ -f "$home/.claude/skills/old-skill" ] && [ ! -L "$home/.claude/skills/old-skill" ]; then
+    pass "a file of the user's at a retired skill's name is left alone"
+  else
+    fail "retired skill vs user file" "rc: $LAST_RC" "$(cat "$repo/.install.log")"
   fi
   cleanup "$repo" "$home"
 }
@@ -611,6 +661,9 @@ test_install_fails_hard_when_impl_missing
 test_install_rejects_nonmain_worktree_impl
 test_local_skills_link_to_main_worktree
 test_install_preserves_non_symlink_file
+test_install_removes_a_retired_skills_link
+test_install_a_retired_skill_with_no_link_is_met
+test_install_leaves_a_users_file_at_a_retired_skills_name
 test_install_installs_pre_commit_hook
 test_install_refreshes_managed_hook
 test_install_refreshes_legacy_marked_hook
