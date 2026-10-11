@@ -766,3 +766,41 @@ describe("recovering a component whose window is already closed", () => {
     expect(pushes.resolveComponent("store-writer", 0)).toBe(false);
   });
 });
+
+describe("the runtime's slash-command catalog", () => {
+  function catalog(...names: string[]): conversationv1.SessionUpdate {
+    return create(conversationv1.SessionUpdateSchema, {
+      update: {
+        case: "commandCatalog",
+        value: create(conversationv1.SessionCommandCatalogSchema, {
+          commands: names.map((name) => create(conversationv1.SessionCommandCatalogEntrySchema, { name })),
+        }),
+      },
+    });
+  }
+
+  it("is replayed to a consumer that joins after the shim read it", async () => {
+    // THE DAEMON IS ALWAYS THAT CONSUMER: the catalog is read beside the
+    // opening, before the daemon's standing WatchSession exists.
+    const pushes = new SessionPushes(() => 1, "test-build-sha");
+    pushes.push(catalog("merge-queue", "compact"));
+
+    const opening = await take(pushes.subscribe(), 2);
+
+    expect(opening[1]).toEqual(catalog("merge-queue", "compact"));
+  });
+
+  it("is dropped when a re-read found the same catalog", () => {
+    const pushes = new SessionPushes(() => 1, "test-build-sha");
+    pushes.push(catalog("compact"));
+
+    expect(pushes.push(catalog("compact"))).toBe(false);
+  });
+
+  it("goes out when a re-read found a changed catalog", () => {
+    const pushes = new SessionPushes(() => 1, "test-build-sha");
+    pushes.push(catalog("compact"));
+
+    expect(pushes.push(catalog("compact", "new-skill"))).toBe(true);
+  });
+});

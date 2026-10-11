@@ -54,6 +54,8 @@ export class ScriptedQuery implements QueryLike {
   readonly stoppedTasks: string[] = [];
   models: ModelInfoLike[] = [];
   mcp: McpServerStatusLike[] = [];
+  /** What `supportedCommands()` answers: the runtime's slash-command catalog. */
+  commands: SlashCommandLike[] = [];
   contextUsage: ContextUsageLike = emptyContextUsage();
   accountUsage: AccountUsageLike = emptyAccountUsage();
   backgroundTaskAnswer = false;
@@ -193,7 +195,7 @@ export class ScriptedQuery implements QueryLike {
     return this.models;
   }
   supportedCommands(): Promise<SlashCommandLike[]> {
-    return Promise.resolve([]);
+    return Promise.resolve(this.commands);
   }
   supportedAgents(): Promise<AgentInfoLike[]> {
     return Promise.resolve([]);
