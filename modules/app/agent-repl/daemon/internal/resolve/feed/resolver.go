@@ -1180,14 +1180,16 @@ func (r *resolver) withheldFromPush(s *wsState, f *feedState, id string) bool {
 }
 
 // pushWithheldByBound reports whether ID is hidden by the feed's newest
-// context-cutting separation and must therefore be kept off the live push. The
-// separation itself, and every row the bound does not hide, always pushes. It
-// shares the ONE rule pages.go's deliverable uses (boundHides), so the live push
-// and the page can never disagree about which rows the bound withholds — the same
-// rule that keeps a reconnect's replayed post-cut conversation on the wire
-// rather than blanking it.
+// context-cutting separation (a clear or a compaction) and must therefore be
+// kept off the live push. The separation itself, and every row the cut does
+// not hide, always pushes. A row above a compaction still reaches a reader, but
+// only through the walk (see `deliverable`): the push carries what follows
+// where the feed opens. It shares the ONE rule pages.go's deliverable uses
+// (boundHides), so the live push and the page can never disagree about which
+// side of a cut a row is on — the same rule that keeps a reconnect's replayed
+// post-cut conversation on the wire rather than blanking it.
 func (r *resolver) pushWithheldByBound(s *wsState, f *feedState, id string) bool {
-	bi := boundIndex(f, f.order)
+	bi := cutIndex(f, f.order)
 	if bi < 0 {
 		return false
 	}
