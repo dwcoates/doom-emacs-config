@@ -24,6 +24,7 @@
 #   env                      an environment variable the user sets
 #   notification_permission  macOS lets a banner program notify
 #   skill_link               a Claude Code skill linked into ~/.claude/skills
+#                            (`"retired": true`: our link is removed instead)
 #   git_hook                 a managed git hook in the repository's hooks dir
 #   launchd_service          a launchd user agent built, installed and running
 #
@@ -319,8 +320,27 @@ in_linked_worktree() {
   return 1
 }
 
+# check_retired_skill_link ENTRY: a RETIRED skill is met once no link of ours
+# stands at its name; a file of the user's there is theirs, and not ours to
+# report.
+check_retired_skill_link() {
+  local e="$1" dest src
+  dest="$SKILLS_DIR/$(field "$e" .name)"
+  src="$(skill_source "$e")"
+  FIX="rm $dest"
+  if [ -L "$dest" ] && { [ "$(readlink "$dest")" = "$src" ] || [ ! -e "$dest" ]; }; then
+    STATUS=outdated; DETAIL="$dest still links the retired skill"
+  else
+    STATUS=ok; DETAIL="$(field "$e" .name) is retired and not linked"
+  fi
+}
+
 check_skill_link() {
   local e="$1" name src dest
+  if [ "$(printf '%s\n' "$e" | jq -r '.retired // false')" = true ]; then
+    check_retired_skill_link "$e"
+    return
+  fi
   name="$(field "$e" .name)"
   dest="$SKILLS_DIR/$name"
   src="$(skill_source "$e")"
@@ -464,6 +484,10 @@ install_notification_permission() {
 
 install_skill_link() {
   local e="$1" src
+  if [ "$(printf '%s\n' "$e" | jq -r '.retired // false')" = true ]; then
+    rm -f "$SKILLS_DIR/$(field "$e" .name)"
+    return
+  fi
   src="$(skill_source "$e")"
   [ -n "$src" ] && [ -e "$src" ] || return 1
   mkdir -p "$SKILLS_DIR"

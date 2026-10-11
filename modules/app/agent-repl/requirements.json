@@ -208,7 +208,8 @@
     {
       "id": "skill-workspace-close",
       "kind": "skill_link",
-      "why": "the /workspace-close skill",
+      "why": "retired: /create-or-update-workspace close replaces it, so every machine's old link comes out",
+      "retired": true,
       "profile": "run",
       "name": "workspace-close",
       "source": {
