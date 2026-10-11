@@ -2019,8 +2019,7 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
    selection names it — ON THE CARD ITSELF, so a centered, width-capped card is
    marked where it is drawn rather than at the feed's far left edge. An INSET
    ring: an outline pulled inside the card's own border box never reflows the
-   feed, never replaces the card's own shadow, and is not clipped by the row's
-   paint containment (`content-visibility`).
+   feed, and never replaces the card's own shadow.
    A bubble is excluded: its fill is its mark (below). */
 .entry-selected:not(.bubble) {
   outline: 2px solid var(--selected-entry);
@@ -3488,44 +3487,19 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
    card) render as empty nodes: hide them so #feed's gap does not show. */
 .feed-item:empty { display: none; }
 
-/* ---- Browser-level virtualization of the feed -------------------------------
-
-   A long session's feed is a few thousand boxes, nearly all of them off
-   screen, and every one of them was being laid out and painted on every
-   reflow. `content-visibility: auto` lets the browser skip the layout and
-   paint of a box that is not near the viewport, which is the cheapest
-   virtualization there is: no windowing bookkeeping, no nodes removed from the
-   DOM, so nothing above (the search's TreeWalker, the nav cycle, the
-   reconcile's node map) has to learn about it.
-
-   `contain-intrinsic-size: auto <fallback>` is what keeps the scrollbar
-   honest while a box is skipped. The `auto` keyword makes the browser REMEMBER
-   each box's last rendered size and re-use it, so an item scrolled past twice
-   is only ever estimated once; the length is the first-time guess. A row's
-   first layout above the reader still changes its height from that guess, and
-   WebKit has no native scroll anchoring to absorb it: the feed anchors the
-   view itself (scroll.ts, `TailFollow`). */
+/* EVERY ROW IS LAID OUT AT ITS REAL HEIGHT (owner ruling, 2026-10-11). No
+   `content-visibility: auto`: a skipped row stood in a 320px guess, so a new
+   row at the tail drew one frame of blank placeholder before its real height
+   landed, the scrollbar was sized from guesses, and a far row's first layout
+   moved the content. A loaded feed is a few thousand nodes at most, which the
+   browser lays out whole without strain. */
 .feed-item {
-  content-visibility: auto;
-  contain-intrinsic-size: auto 320px;
   /* NOTHING IN THE FEED SPANS PAST THE FEED STREAM AREA (owner rule,
      2026-10-06; test/webkit/containment.webkit.test.ts). A long unbroken run
      -- a path, a url, a command -- may break anywhere rather than push its box
      past the column; `anywhere` (unlike `break-word`) also lowers the
      min-content width a flex item shrinks to, so a row's head can fit. */
   overflow-wrap: anywhere;
-}
-
-/* The overscan buffer's pre-render band (overscan.ts). A row within ~5
-   viewport heights of the scroll box is marked so its content-visibility goes
-   back to `visible`: it lays out at its real height BEFORE the reader scrolls
-   to it, so a row never changes height at the viewport's edge. Its height
-   still changes from the ~320px guess while it is above the reader, and the
-   feed's scroll anchoring (scroll.ts) keeps that from moving the content under
-   them. A row that leaves the band loses the class and is skippable again, so
-   the perf win survives for rows far from the viewport. */
-.feed-item.overscan {
-  content-visibility: visible;
 }
 
 /* ---- The login terminal ----------------------------------------------------
@@ -7539,12 +7513,9 @@ ar-button.outcome-marker-pill {
 .feed-group-tab-index { font-variant-numeric: tabular-nums; }
 /* A member fills the group rather than being capped a second time inside it: the
    group already stops at the shared card ceiling, so the inner `.feed-item >
-   .tool-card` cap is lifted here and the member spans the panel. */
-.feed-group-panel > .feed-item {
-  content-visibility: visible;
-}
-/* The member card is taller by the strip: the strip's own inset above it, the
-   strip itself, and the same gap again beneath it before the card's head. */
+   .tool-card` cap is lifted here and the member spans the panel. The member
+   card is also taller by the strip: the strip's own inset above it, the strip
+   itself, and the same gap again beneath it before the card's head. */
 .feed-group-panel > .feed-item > .tool-card {
   max-width: none;
   margin-left: 0;

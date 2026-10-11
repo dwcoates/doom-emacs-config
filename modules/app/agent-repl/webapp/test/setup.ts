@@ -15,11 +15,12 @@ installResizeObserver();
 
 /**
  * jsdom implements no `IntersectionObserver` either (it performs no layout), and
- * the feed mount subscribes one to its scroll box for the overscan pre-render
- * band (overscan.ts). Installed here, once per environment, for the same reason
- * as the `ResizeObserver` stub above — a missing CAPABILITY of the environment,
- * not a seam in the app. Without it every feed mount would take the "no
- * IntersectionObserver" no-op path and the overscan wiring would never run.
+ * the feed mount subscribes ones to its scroll box for the selection's
+ * visibility (selection-visibility.ts, left-view.ts). Installed here, once per
+ * environment, for the same reason as the `ResizeObserver` stub above — a
+ * missing CAPABILITY of the environment, not a seam in the app. Without it
+ * every feed mount would take the "no IntersectionObserver" no-op path and
+ * those watches would never run.
  */
 installIntersectionObserver();
 

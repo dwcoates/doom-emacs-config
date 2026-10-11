@@ -2,8 +2,8 @@
  * THE PAGE THE WEBKIT PINNED-TAIL TEST DRIVES (pinned-tail.webkit.test.ts).
  *
  * Bundled by that test into one script and run in headless WebKit, over the
- * REAL stylesheet and the REAL feed scroll wiring — the tail owner, the box
- * observer and the overscan band, built exactly as `mountFeed` builds them —
+ * REAL stylesheet and the REAL feed scroll wiring — the tail owner and the box
+ * observer, built exactly as `mountFeed` builds them —
  * with the page's shell column: the scroll zone holding the feed and its
  * (empty) held section, and the footer below it. The rows are synthetic blocks
  * of known height, the last of them a merge bubble's row, as the row pinned to
@@ -14,7 +14,6 @@
  * target is resized on every animation frame, so it reads the layout the
  * feed's own corrections left — the frame the reader sees.
  */
-import { createOverscan } from "../../src/feed/overscan.js";
 import { ForwardingLogger, bindLogContext, setLogger } from "../../src/log.js";
 import { TailFollow, feedAnchorRows, observeScrollBox, revealGeometry } from "../../src/scroll.js";
 import { latestEntry } from "../../src/feed/feed.js";
@@ -58,8 +57,6 @@ document.body.innerHTML = `
 const box = document.getElementById("feed-scroll") as HTMLElement;
 const rows = document.querySelector(".feed-rows") as HTMLElement;
 const foot = document.getElementById("foot") as HTMLElement;
-const overscan = createOverscan(box);
-if (overscan === null) throw new Error("this engine ships no IntersectionObserver");
 for (let i = 0; i < 40; i++) {
   const row = document.createElement("article");
   row.className = "feed-item";
@@ -69,7 +66,6 @@ for (let i = 0; i < 40; i++) {
   card.textContent = `row ${i.toString()}`;
   row.append(card);
   rows.append(row);
-  overscan.observe(row);
 }
 // The merge bubble's row, pinned below every other row.
 const pinned = document.createElement("article");
@@ -81,7 +77,6 @@ merge.style.height = "300px";
 merge.textContent = "merge";
 pinned.append(merge);
 rows.append(pinned);
-overscan.observe(pinned);
 const tail = new TailFollow(
   box,
   () => {

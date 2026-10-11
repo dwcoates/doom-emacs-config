@@ -77,7 +77,6 @@ import type {
 import { stopTicking } from "./ticking.js";
 import { MERGE_BUBBLE_ATTRIBUTE } from "./merge-bubble.js";
 import { refreshTitleFolds } from "./title-fold.js";
-import type { Overscan } from "./overscan.js";
 import type { TailFollow } from "../scroll.js";
 
 export interface BubbleOptions {
@@ -124,12 +123,6 @@ export interface BubbleOptions {
    * and its updates never move the feed's scroll.
    */
   merge?: boolean;
-  /**
-   * The overscan buffer rooted on the page's scroll box, threaded down so the
-   * rows this bubble's sub-feed holds are pre-rendered by the same instance
-   * that watches the root feed. Absent with the scroll box.
-   */
-  overscan?: Overscan;
   /**
    * The page's scroll box and its one tail owner, so a collapse whose sub-feed
    * lies wholly above the viewport keeps the reader's content where it was.
@@ -440,7 +433,6 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
       bubble: opts.bubble,
       bodyContext: opts.rc,
       composerSlot,
-      overscan: opts.overscan,
     });
     return child;
   }
