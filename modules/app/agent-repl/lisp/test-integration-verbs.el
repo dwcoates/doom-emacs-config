@@ -512,6 +512,26 @@ model as the webapp."
                                                 daemon "SelectWorkspace")))
                      (plist-get ref :id))))))
 
+;;;; ---- SwapWorkspacePlaces ----
+
+(ert-deftest agent-repl-itest-verbs-swap-places-sends-both-refs ()
+  "A place swap sends the current workspace's ref and the other's over the wire."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-workspace daemon ref
+      (let ((host-ref (symbol-function 'agent-repl-host-ref))
+            (other '(:id "ws-itest-other" :dir "/tmp/itest-other")))
+        (cl-letf (((symbol-function 'agent-repl-host-ref)
+                   (lambda (ws) (if (equal ws "itest-other") other (funcall host-ref ws))))
+                  ((symbol-function 'agent-repl--ws-require-known) (lambda (&rest _) nil)))
+          ;; Act.
+          (agent-repl-verb-swap-places agent-repl-itest-verbs--ws "itest-other")
+          (agent-repl-itest--await-call daemon "SwapWorkspacePlaces"))
+        ;; Assert.
+        (let ((body (agent-repl-itest-verbs--body daemon "SwapWorkspacePlaces")))
+          (should (equal (agent-repl-itest--body-field body 'workspace 'id) (plist-get ref :id)))
+          (should (equal (agent-repl-itest--body-field body 'other 'id) "ws-itest-other")))))))
+
 ;;;; ---- Daemon-admin verbs ----
 
 (ert-deftest agent-repl-itest-verbs-shutdown-schedule-sends-a-reason ()

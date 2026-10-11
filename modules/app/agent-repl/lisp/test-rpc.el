@@ -108,6 +108,9 @@ would abort the very branch a test is asserting."
     ("SetWorkspaceHidden" agent-repl-rpc-set-workspace-hidden
      agent-repl-wire-encode-set-workspace-hidden-request
      agent-repl-wire-decode-set-workspace-hidden-response)
+    ("SwapWorkspacePlaces" agent-repl-rpc-swap-workspace-places
+     agent-repl-wire-encode-swap-workspace-places-request
+     agent-repl-wire-decode-swap-workspace-places-response)
     ("SubmitPrompt" agent-repl-rpc-submit-prompt
      agent-repl-wire-encode-submit-prompt-request
      agent-repl-wire-decode-submit-prompt-response)
