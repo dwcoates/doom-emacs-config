@@ -891,6 +891,11 @@ func (g *fakeGit) CurrentBranch(_ context.Context, dir string) (string, error) {
 	return "master", nil
 }
 
+func (g *fakeGit) CountCommits(context.Context, string, string, string) (uint32, error) {
+	g.record("count_commits")
+	return 0, nil
+}
+
 func (g *fakeGit) CommitsBetween(_ context.Context, _, _, tip string) ([]gitclient.Commit, error) {
 	g.record("commits_between")
 	g.mu.Lock()
