@@ -158,6 +158,7 @@ func TestRosterwalkIsTheOnlyChildWalk(t *testing.T) {
 		t.Fatalf("%s is not the agent-repl root: %v", root, err)
 	}
 	generated := filepath.Join(root, "proto", "gen")
+	e2e := filepath.Join(root, "e2e") + string(filepath.Separator)
 	self, err := filepath.Abs(".")
 	if err != nil {
 		t.Fatalf("resolve this package: %v", err)
@@ -175,7 +176,9 @@ func TestRosterwalkIsTheOnlyChildWalk(t *testing.T) {
 			}
 			return nil
 		}
-		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+		// The e2e suite reads live rosters, so its tests are readers too; every
+		// other _test.go builds rows rather than walking them.
+		if !strings.HasSuffix(path, ".go") || (strings.HasSuffix(path, "_test.go") && !strings.HasPrefix(path, e2e)) {
 			return nil
 		}
 		body, err := os.ReadFile(path)
