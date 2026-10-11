@@ -1248,3 +1248,20 @@ func (s *requestLoggingServer) RefreshNewsDigest(
 	}()
 	return s.server.RefreshNewsDigest(ctx, req)
 }
+
+func (s *requestLoggingServer) ListSlashCommands(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.ListSlashCommandsRequest],
+) (resp *connect.Response[agentreplv1.ListSlashCommandsResponse], err error) {
+	boundary, err := s.server.beginRequest(ctx, "ListSlashCommands", req.Header().Get(requestIDHeader), requestMessage(req))
+	if err != nil {
+		return nil, boundaryFailure(err)
+	}
+	boundary.log.Debug("daemon.server.list_slash_commands", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
+	defer func() {
+		boundary.log.Debug("daemon.server.list_slash_commands", "completed the rpc handler", boundary.completionContext(err))
+	}()
+	return s.server.ListSlashCommands(ctx, req)
+}

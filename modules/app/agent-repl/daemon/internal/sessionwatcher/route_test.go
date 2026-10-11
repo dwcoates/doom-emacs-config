@@ -951,6 +951,12 @@ func TestRouteSessionUpdateArms(t *testing.T) {
 			want:   []string{"footer.OnSessionUpdate"},
 		},
 		{
+			// The composer's completions and no view's: nothing drawn changes.
+			name:   "the command catalog is the command catalog table's alone",
+			update: commandCatalogUpdate("merge-queue"),
+			want:   []string{"commands.OnCommandCatalog"},
+		},
+		{
 			name:   "account usage is the footer's",
 			update: accountUsageUpdate(),
 			want:   []string{"footer.OnSessionUpdate"},
@@ -3143,5 +3149,24 @@ func TestShowChessBoardToolNameMatchesTheVocabulary(t *testing.T) {
 	// Assert.
 	if qualified != ShowChessBoardToolName {
 		t.Fatalf("vocabulary names %q, the daemon %q", qualified, ShowChessBoardToolName)
+	}
+}
+
+// TestRouteCommandCatalogHandsOverTheWholeCatalog covers that the table is
+// handed the catalog the session stated, every command of it, in order.
+func TestRouteCommandCatalogHandsOverTheWholeCatalog(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act.
+	got := h.routeNow(func(w *watcher) {
+		w.routeSessionUpdateLocked(commandCatalogUpdate("merge-queue", "compact", "plugin:skill"))
+	})
+
+	// Assert.
+	e := requireEvent(t, got, "commands.OnCommandCatalog")
+	if e.detail != "merge-queue,compact,plugin:skill" {
+		t.Fatalf("the table was handed %q, want merge-queue,compact,plugin:skill", e.detail)
 	}
 }

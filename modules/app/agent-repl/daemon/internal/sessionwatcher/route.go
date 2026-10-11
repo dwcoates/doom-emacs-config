@@ -148,6 +148,15 @@ func (w *watcher) routeSessionUpdateLocked(update *conversationv1.SessionUpdate)
 		})
 		w.sinks.Footer.OnSessionUpdate(w.ws, update)
 
+	case *conversationv1.SessionUpdate_CommandCatalog:
+		// THE COMPOSER'S COMPLETIONS, and no view's: the catalog is kept whole
+		// for ListSlashCommands, and nothing drawn changes.
+		w.log.Debug("daemon.sessionwatcher.session_update", "session fact routed to the command catalog", dlog.Context{
+			"arm":      sessionArm(update),
+			"commands": len(u.CommandCatalog.GetCommands()),
+		})
+		w.sinks.Commands.OnCommandCatalog(w.ws, u.CommandCatalog)
+
 	case *conversationv1.SessionUpdate_QueryDied:
 		w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "routeSessionUpdateLocked", "branch": "case *conversationv1.SessionUpdate_QueryDied"})
 		w.routeQueryDiedLocked(update)
@@ -253,6 +262,8 @@ func sessionArm(update *conversationv1.SessionUpdate) string {
 		return "network_resume_outcome"
 	case *conversationv1.SessionUpdate_EffortChanged:
 		return "effort_changed"
+	case *conversationv1.SessionUpdate_CommandCatalog:
+		return "command_catalog"
 	default:
 		return "unset"
 	}

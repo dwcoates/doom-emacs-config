@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -970,6 +971,20 @@ func (s *sidebarSink) OnLiveWorkChanged(_ ids.WorkspaceID, live LiveWorkSet) {
 	s.rec.emit(event{sink: "sidebar", method: "OnLiveWorkChanged", live: &held})
 }
 
+// commandSink records every catalog the watcher hands the command catalog
+// table, with its command names joined into the event's detail.
+type commandSink struct {
+	rec *recorder
+}
+
+func (s *commandSink) OnCommandCatalog(_ ids.WorkspaceID, catalog *conversationv1.SessionCommandCatalog) {
+	names := make([]string, 0, len(catalog.GetCommands()))
+	for _, entry := range catalog.GetCommands() {
+		names = append(names, entry.GetName())
+	}
+	s.rec.emit(event{sink: "commands", method: "OnCommandCatalog", detail: strings.Join(names, ",")})
+}
+
 type lifecycleSink struct {
 	rec *recorder
 	// onTurnEnded, when set, runs inside OnTurnEnded: what the queue would do
@@ -1181,6 +1196,7 @@ func startHarnessSinks(t *testing.T, session Session, prep func(*fakeClient), st
 		Topbar:    &topbarSink{rec: h.rec},
 		Sidebar:   &sidebarSink{rec: h.rec},
 		Lifecycle: h.lifecycle,
+		Commands:  &commandSink{rec: h.rec},
 		Merge:     mergeSinkOf(merge, h.rec),
 		Stalls:    stalls,
 		Clock:     h.clock,
@@ -1891,6 +1907,16 @@ func effortChangedUpdate() *conversationv1.SessionUpdate {
 		EffortChanged: &conversationv1.SessionEffortChanged{
 			EffectiveEffort: conversationv1.AgentEffortLevel_AGENT_EFFORT_LEVEL_HIGH,
 		},
+	}}
+}
+
+func commandCatalogUpdate(names ...string) *conversationv1.SessionUpdate {
+	catalog := &conversationv1.SessionCommandCatalog{}
+	for _, name := range names {
+		catalog.Commands = append(catalog.Commands, &conversationv1.SessionCommandCatalogEntry{Name: name})
+	}
+	return &conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_CommandCatalog{
+		CommandCatalog: catalog,
 	}}
 }
 
