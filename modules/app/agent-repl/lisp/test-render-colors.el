@@ -147,6 +147,22 @@ them reporting nothing at all."
     (should (assoc (agent-repl-test--wire-name (car row))
                    (agent-repl-test--fixture "merge_glyphs")))))
 
+;;;; ---- gate_glyphs -----------------------------------------------------
+
+(ert-deftest agent-repl-test-colors-every-gate-arm-has-a-glyph ()
+  "Every gate arm the fixture names a glyph for draws one here."
+  ;; Act / Assert
+  (dolist (entry (agent-repl-test--fixture "gate_glyphs"))
+    (should (stringp (alist-get (agent-repl-test--arm-keyword (car entry))
+                                agent-repl-status-gate-glyphs)))))
+
+(ert-deftest agent-repl-test-colors-no-extra-gate-glyph-exists ()
+  "Only the arms the fixture names a gate glyph for have one."
+  ;; Act / Assert
+  (dolist (row agent-repl-status-gate-glyphs)
+    (should (assoc (agent-repl-test--wire-name (car row))
+                   (agent-repl-test--fixture "gate_glyphs")))))
+
 ;;;; ---- The five colors -------------------------------------------------
 
 (ert-deftest agent-repl-test-colors-the-palette-is-the-fixtures-five ()

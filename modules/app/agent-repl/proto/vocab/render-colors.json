@@ -183,6 +183,20 @@
     "merged": "check"
   },
   "feed_merge_head_glyph": "merge",
+  "_gate_glyphs_comment": [
+    "GLYPH NAMES, not characters, as 'merge_glyphs'. A gate on the user",
+    "(a pending permission or question) keeps its lifecycle color AND draws",
+    "a glyph in place of the plain status mark, so the user can tell at a",
+    "glance WHICH gate is waiting on them (owner request, 2026-10-11).",
+    "",
+    "Keyed by the gate arms of RosterRow.status. Every renderer maps",
+    "'exclaim' to an exclamation-mark emoji and 'ask' to a question-mark",
+    "emoji, so the tab bar and the sidebar draw the same mark."
+  ],
+  "gate_glyphs": {
+    "permission": "exclaim",
+    "question": "ask"
+  },
   "_footer_status_comment": [
     "Keyed by the FooterStatus.status oneof arm names in",
     "frontend/v1/footer.proto. Every footer arm makes the same coarse claim",
