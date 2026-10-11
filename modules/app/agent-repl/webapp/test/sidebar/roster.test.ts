@@ -1456,9 +1456,14 @@ describe("recently merged rows", () => {
     expect(css).toContain("#ws-sidebar .row .name.merged-name { color: var(--repo-head-expanded); }");
   });
 
-  it("styles a name merged today with the success green", async () => {
+  it("draws a row merged today with the off-white gutter bar", async () => {
     const css = (await import("../../src/styles.css?raw")).default;
-    expect(css).toContain("#ws-sidebar .row .name.merged-name.merged-today { color: var(--ok); }");
+    expect(css).toContain("#ws-sidebar .row.merged-today {\n  border-left: 3px solid var(--merged-today-gutter);");
+  });
+
+  it("no longer colours a name merged today", async () => {
+    const css = (await import("../../src/styles.css?raw")).default;
+    expect(css).not.toContain(".name.merged-name.merged-today");
   });
 
   it("keeps the merged arm on the row, the hook contract's", () => {
