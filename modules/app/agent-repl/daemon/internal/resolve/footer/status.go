@@ -5,6 +5,7 @@ import (
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/health"
+	"claude-repld/internal/protoarm"
 	"claude-repld/internal/resolve/ladder"
 	"claude-repld/internal/shimclient"
 )
@@ -828,8 +829,8 @@ func statusName(status *frontendv1.FooterStatus) string {
 // named without an edit here.
 func substatusName(status *frontendv1.FooterStatus) string {
 	m := status.ProtoReflect()
-	armField := m.WhichOneof(m.Descriptor().Oneofs().ByName("status"))
-	if armField == nil {
+	armField, ok := protoarm.Set(m, "status")
+	if !ok {
 		return "none"
 	}
 	arm := m.Get(armField).Message()
