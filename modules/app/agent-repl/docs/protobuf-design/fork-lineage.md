@@ -19,6 +19,22 @@ The owner chose the remedy: the vendor's `forkSession` writes the fork's transcr
 - **Non-additive changes**: `claude-repld.internal.account.resolver.PortTranscript()` and the transcript use of `claude-repld.internal.remint` are retired; `claude-repld.internal.workspace.verbs.forkConversation()` and the `wsm` ported-prompt table are retired, since inherited prompts come from the parent's records; the inherited-row classifier in `daemon/internal/resolve/feed/lineage.go` is retired; `agentrepl.v1.CreateWorkspaceFork` keeps its meaning while the shim does the fork.
 - **Rejected alternative**: copying the parent's store rows (prompts and turn-end rows) into the fork's book. It was first recommended on the claim that a copy keeps the fork readable once the parent is closed; that claim was wrong, because nothing deletes store rows. The pointer leaves nothing to half-copy and needs no classifier to tell inherited rows from the fork's own.
 
+## Core design principles
+
+### A fork's inherited entries read exactly as they do in the parent's feed
+
+- **In the owner's terms**: "the workspace's forked entries in the feed should look exactly as they do in the original workspace's feed." Everything reads as normal, and an inherited answer folded to one line is a defect.
+- **Consequences**: inherited rows are drawn by the same resolution as the parent's rows: same final-answer marking, same caps, same interim/answer distinction. That resolution needs the parent's prompt rows and turn-end rows, which is why the fork reads the parent's book rather than a copy of the transcript. No inherited-only drawing stance (the `inheritedStance` in `daemon/internal/resolve/feed/lineage.go`) may change how a row looks.
+- **Reopens**: nothing landed yet. It confirms the retirement of the inherited-row classifier in the scope.
+- **Does not claim**: that inherited rows behave like the fork's own in every respect. Rollback into them and file-edit checkpoints are not supported (see Owner rulings), and they arrive as loaded pages rather than live rows.
+
+## Owner rulings (2026-10-11)
+
+- The vendor's default `<parent title> (fork)` title on the forked transcript is acceptable.
+- File-edit checkpoints of pre-fork turns are not supported in a fork. The vendor's `forkSession` does not copy file-history snapshots.
+- Rolling back into inherited entries is not supported. This matches the existing rule in `daemon/internal/resolve/feed/rollback.go:89`.
+- Inherited history loads as pages on demand ("load more"), never pushed live. The owner called this "perfect".
+
 ## Verified facts
 
 - The vendor's `forkSession` (`@anthropic-ai/claude-agent-sdk` 0.3.280, `sdk.mjs`) copies each record with `{...record}`, so message content, tool_use ids and key order are untouched. It remaps only `uuid`, `parentUuid`, `logicalParentUuid` and `sessionId`, plus `deferred_tools_record` announcements and an attachment's `source_uuid`. It stamps every copied record with `forkedFrom: {sessionId, messageUuid}`, and does not copy file-history snapshots. Evidence tier: the shipped implementation, read directly.
