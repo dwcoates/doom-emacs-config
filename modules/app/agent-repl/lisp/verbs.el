@@ -1973,6 +1973,15 @@ the obvious default rather than something to retype."
                        "elisp.verbs.read-prompt prompt=%S composer=none" prompt-text))
     (read-string prompt-text initial)))
 
+(defun agent-repl-verbs--read-required-prompt (prompt-text refusal)
+  "Read a creation prompt with PROMPT-TEXT that must not be blank.
+The text is returned as read.  A blank or whitespace-only answer is
+refused with REFUSAL, before any request is built."
+  (let ((text (agent-repl-verbs--read-prompt prompt-text)))
+    (when (string-empty-p (string-trim text))
+      (user-error "agent-repl: %s" refusal))
+    text))
+
 (defconst agent-repl-verbs--create-log-scope
   '(:agent-repl-central "workspace creation and daemon administration can precede workspace ownership")
   "The central log scope every creation command records under.
@@ -2232,10 +2241,8 @@ A prefix argument PICK-MODEL asks for the model."
          (prompt (agent-repl-verbs--read-for
                   command 'prompt
                   (lambda ()
-                    (let ((text (agent-repl-verbs--read-prompt "One-shot commission: ")))
-                      (when (string-empty-p (string-trim text))
-                        (user-error "agent-repl: a one-shot IS its prompt"))
-                      text))))
+                    (agent-repl-verbs--read-required-prompt
+                     "One-shot commission: " "a one-shot IS its prompt"))))
          (model (and pick-model
                      (agent-repl-verbs--read-for
                       command 'model #'agent-repl-verbs--read-model))))
@@ -2327,11 +2334,9 @@ THE NEW WORKSPACE IS SELECTED: the user asked in order to read the answer."
            (question (agent-repl-verbs--read-for
                       command 'prompt
                       (lambda ()
-                        (let ((text (string-trim
-                                     (agent-repl-verbs--read-prompt "agent-repl question: "))))
-                          (when (string-empty-p text)
-                            (user-error "agent-repl: a help workspace IS its question"))
-                          text)))))
+                        (string-trim
+                         (agent-repl-verbs--read-required-prompt
+                          "agent-repl question: " "a help workspace IS its question"))))))
       (agent-repl--info agent-repl-verbs--create-log-scope
                         "elisp.verbs.create-help repository=%s" (plist-get repository :dir))
       (agent-repl-verb-create
