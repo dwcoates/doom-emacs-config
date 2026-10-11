@@ -1179,7 +1179,10 @@ func (f *fakeSidebar) Topic() *publish.Topic[*frontendv1.WorkspaceRoster] { retu
 
 // harness is one running surface over real Connect handlers.
 type harness struct {
-	t         *testing.T
+	t *testing.T
+	// Deps is the COMPLETE dependency set the surface was built from, so a
+	// test of one missing dependency strips exactly that one (withoutDep).
+	Deps      Deps
 	Server    Server
 	HTTP      *httptest.Server
 	Client    agentreplv1connect.AgentReplClient
@@ -1305,6 +1308,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		apply(&deps)
 	}
 
+	h.Deps = deps
 	surface, err := New(deps)
 	if err != nil {
 		t.Fatalf("build the surface: %v", err)
@@ -1574,4 +1578,13 @@ func (f *fakeEditorInstances) Connected(_ context.Context, instance string) (boo
 
 func (f *fakeNewsDigest) Topic() *publish.Topic[*agentreplv1.NewsDigestStanding] {
 	return &f.topic
+}
+
+// withoutDep answers the harness's complete Deps with ONE dependency stripped,
+// so New's refusal of that dependency is the only refusal it can make,
+// whatever order New checks its dependencies in.
+func (h *harness) withoutDep(strip func(*Deps)) Deps {
+	deps := h.Deps
+	strip(&deps)
+	return deps
 }
