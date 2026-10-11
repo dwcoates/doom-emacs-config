@@ -8,6 +8,7 @@ import {
   type UpdateSidebarViewResponse,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_sidebar_view_pb";
 import {
+  RosterLabelSchema,
   RosterMaturityKeySchema,
   RosterSectionHeaderSchema,
   RosterRepoSectionSchema,
@@ -20,8 +21,10 @@ import { repoFoldKey } from "../../src/sidebar/context.js";
 import {
   drawHeadedSection,
   drawRosterSectionFold,
+  drawSectionLabel,
   drawWorkspaceRoster,
   MERGED_TODAY_COUNT_CLASS,
+  SECTION_LABEL_CLASS,
 } from "../../src/sidebar/roster.js";
 import { cascadedValue, installStylesheet } from "../stylesheet.js";
 import {
@@ -1541,6 +1544,30 @@ describe("the open Recently Merged band's today count", () => {
     );
     // Assert
     expect(todayCount(drawn).textContent).toBe("(1)");
+  });
+});
+
+describe("drawSectionLabel", () => {
+  it("draws the label's text in the section label span", () => {
+    const label = drawSectionLabel(create(RosterLabelSchema, { text: "alpha" }), "p");
+    expect([label.tagName, label.className, label.textContent]).toEqual(["SPAN", SECTION_LABEL_CLASS, "alpha"]);
+  });
+
+  it("is the one label every section header and merged group header draws", () => {
+    // Arrange — a repository section, the merged band, and its group.
+    const drawn = drawWorkspaceRoster(
+      roster({
+        repos: [repoSection({ id: "repo-1", label: "alpha" })],
+        merged: mergedBand([mergedGroup({ id: "repo-1", label: "alpha", rows: [row({ id: "ws-m", closed: true })] })], 1, false),
+      }),
+      sidebarContext(),
+    );
+    const repository = pane(drawn, "repository");
+    const heads = [
+      ...repository.querySelectorAll(".repo-section > .repo-head, .merged-section > .repo-head, .merged-group-head"),
+    ];
+    // Assert — each header holds exactly one label span, and nothing else draws its text.
+    expect(heads.map((h) => h.querySelectorAll(`:scope > .${SECTION_LABEL_CLASS}`).length)).toEqual([1, 1, 1]);
   });
 });
 
