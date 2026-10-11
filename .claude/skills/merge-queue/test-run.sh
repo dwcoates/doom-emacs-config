@@ -435,6 +435,21 @@ test_land_commits_flattens_a_prefixed_branch_into_one_directory() {
   fi
 }
 
+test_workspace_verbs_share_one_main_worktree_refusal() {
+  local own commits
+  mkfixture
+  TOP="$FX/main" invoke --enqueue-own
+  own="$RUN_RC|$RUN_OUT"
+  TOP="$FX/main" invoke --land-commits c1
+  commits="$RUN_RC|$RUN_OUT"
+  # shellcheck disable=SC2016 # the literal call-site text is what is counted
+  if [ "$own" = "$commits" ] && [ "${own%%|*}" -eq 2 ] && [ "$(grep -c 'top="$(workspace_top)"' "$RUN")" -eq 2 ]; then
+    pass "--enqueue-own and --land-commits refuse the main worktree through the one shared check"
+  else
+    fail "--enqueue-own and --land-commits refuse the main worktree through the one shared check" "own=$own" "commits=$commits"
+  fi
+}
+
 test_enqueue_own_requests_the_own_branch
 test_enqueue_own_keep_open_keeps_the_workspace
 test_enqueue_own_refuses_an_unknown_option
@@ -468,6 +483,7 @@ test_land_commits_refuses_a_commit_already_on_master
 test_land_commits_conflict_leaves_nothing_built
 test_land_commits_refusal_leaves_nothing_built
 test_land_commits_flattens_a_prefixed_branch_into_one_directory
+test_workspace_verbs_share_one_main_worktree_refusal
 
 printf 'Passed: %d  Failed: %d\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

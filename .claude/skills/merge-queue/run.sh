@@ -73,6 +73,16 @@ main_worktree() {
   printf '%s\n' "${line#worktree }"
 }
 
+# workspace_top answers the worktree this shell is inside, refusing the
+# repository's main worktree: a merge verb acts FROM a workspace.
+workspace_top() {
+  local top main
+  top="$(git rev-parse --show-toplevel 2>/dev/null)" || die "not inside a git worktree"
+  main="$(main_worktree)" || die "not inside a git repository"
+  [ "$top" != "$main" ] || die "$top is the repository's main worktree, not a workspace; use --land-branch for a branch"
+  printf '%s\n' "$top"
+}
+
 # daemon_bin answers the claude-repld that serves this host: the override, or
 # the one built in the repository's main worktree.
 daemon_bin() {
@@ -123,9 +133,7 @@ case "${1:-}" in
       --keep-open) keep=(-keep-open) ;;
       *) die "--enqueue-own takes only --keep-open, not $2" ;;
     esac
-    top="$(git rev-parse --show-toplevel 2>/dev/null)" || die "not inside a git worktree"
-    main="$(main_worktree)" || die "not inside a git repository"
-    [ "$top" != "$main" ] || die "$top is the repository's main worktree, not a workspace; use --land-branch for a branch"
+    top="$(workspace_top)" || exit 2
     if [ -n "$(git -C "$top" status --porcelain 2>/dev/null)" ]; then
       log "$top has uncommitted work; commit it before enqueueing"
       exit 6
@@ -148,9 +156,8 @@ case "${1:-}" in
   --land-commits)
     shift
     [ "$#" -gt 0 ] || die "--land-commits needs at least one commit"
-    top="$(git rev-parse --show-toplevel 2>/dev/null)" || die "not inside a git worktree"
+    top="$(workspace_top)" || exit 2
     main="$(main_worktree)" || die "not inside a git repository"
-    [ "$top" != "$main" ] || die "$top is the repository's main worktree, not a workspace"
     target="$(git -C "$main" rev-parse --abbrev-ref HEAD)" || die "could not read the main worktree's branch"
     own="$(git -C "$top" rev-parse --abbrev-ref HEAD)" || die "could not read this workspace's branch"
     wanted=()
