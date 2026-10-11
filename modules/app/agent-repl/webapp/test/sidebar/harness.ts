@@ -5,7 +5,7 @@
  * Not a test file — the shared arrangement every sidebar suite reuses, so no
  * suite builds its own idea of what a roster looks like.
  */
-import { create, type MessageInitShape } from "@bufbuild/protobuf";
+import { clone, create, type MessageInitShape } from "@bufbuild/protobuf";
 import { createRouterTransport, type ServiceImpl } from "@connectrpc/connect";
 import { AgentRepl } from "../../../proto/gen/ts/agentrepl/v1/service_pb";
 import { UpdateSidebarViewResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_sidebar_view_pb";
@@ -16,12 +16,14 @@ import {
   RosterRowWhenSchema,
   RosterMaturitySectionSchema,
   RosterHiddenSectionSchema,
+  RosterMergedRepoGroupSchema,
   RosterMergedSectionSchema,
   RosterRepoSectionSchema,
   RosterTaskSectionSchema,
   WorkspaceRosterSchema,
   type RosterMaturitySection,
   type RosterHiddenSection,
+  type RosterMergedRepoGroup,
   type RosterMergedSection,
   type RosterRepoSection,
   type RosterRow,
@@ -269,10 +271,40 @@ export function mergedSection(
   count: number = rows.length,
   collapsed: boolean = true,
 ): RosterMergedSection {
+  return mergedBand(rows.length === 0 ? [] : [mergedGroup({ id: "repo-1", rows })], count, collapsed);
+}
+
+/** The recently-merged band carrying GROUPS, its count and its fold stated. */
+export function mergedBand(
+  groups: RosterMergedRepoGroup[],
+  count: number = groups.filter((g) => g.drawn.case === "shown").reduce((sum, g) => sum + (g.rows?.rows.length ?? 0), 0),
+  collapsed: boolean = true,
+): RosterMergedSection {
   return create(RosterMergedSectionSchema, {
     header: { label: { text: "Recently Merged" }, count: { workspaces: count } },
-    rows: { rows },
+    groups,
     fold: collapsed ? { case: "collapsed", value: {} } : { case: "expanded", value: {} },
+  });
+}
+
+/**
+ * One repository's group inside the recently-merged band, SHOWN unless its
+ * repository is said to be collapsed. A row whose `when` names no arm is
+ * stamped on the merged arm, as the daemon stamps every merged row, a minute apart and most
+ * recent first.
+ */
+export function mergedGroup(init: { id: string; label?: string; rows?: RosterRow[]; repositoryCollapsed?: boolean }): RosterMergedRepoGroup {
+  const rows = (init.rows ?? []).map((r, i) => {
+    if (r.when === undefined || r.when.shown.case !== undefined) return r;
+    const stamped = clone(RosterRowSchema, r);
+    stamped.when = create(RosterRowWhenSchema, { shown: { case: "merged", value: { atMs: BigInt(1_000_000_000 - i * 60_000) } } });
+    return stamped;
+  });
+  return create(RosterMergedRepoGroupSchema, {
+    key: { repository: { id: init.id, dir: `/r/${init.id}` } },
+    header: { label: { text: init.label ?? init.id } },
+    rows: { rows },
+    drawn: init.repositoryCollapsed === true ? { case: "repositoryCollapsed", value: {} } : { case: "shown", value: {} },
   });
 }
 
