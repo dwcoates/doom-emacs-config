@@ -89,8 +89,8 @@ func (x *WatchFeedRequest) GetWatch() *FeedWatchToken {
 // task bubble another act touched). The client upserts by FeedRow.id.
 //
 // A frame carries EXACTLY ONE of a row upsert (`row`), a response-selection
-// push (`selection`), or a feed-text-scale push (`feed_text_scale`), never more
-// than one. The selection push is the daemon's per-workspace
+// push (`selection`), a feed-text-scale push (`feed_text_scale`), or a
+// held-section change (`held`), never more than one. The selection push is the daemon's per-workspace
 // reply-to-a-past-response state (reply-to-a-past-response mode), pushed on
 // the ROOT feed's watch so the webapp recolors the selected final-response
 // bubble, center-scrolls it, and suppresses tail-follow while a selection is
@@ -111,6 +111,11 @@ type WatchFeedResponse struct {
 	// The feed text scale (zoom), whole. Set on a feed-text-scale frame; unset
 	// otherwise. Pushed on every open feed's watch, root and sub-feed alike.
 	FeedTextScale *v1.FeedTextScale `protobuf:"bytes,3,opt,name=feed_text_scale,json=feedTextScale,proto3,oneof" json:"feed_text_scale,omitempty"`
+	// The root feed's held section changed. Set on a held-section frame; unset
+	// otherwise. Carried on the ROOT feed's watch only, in publication order
+	// with its rows, so a tail opened at OpenFeed's pin misses no change of the
+	// section either.
+	Held          *WatchFeedHeldChange `protobuf:"bytes,4,opt,name=held,proto3,oneof" json:"held,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -166,20 +171,98 @@ func (x *WatchFeedResponse) GetFeedTextScale() *v1.FeedTextScale {
 	return nil
 }
 
+func (x *WatchFeedResponse) GetHeld() *WatchFeedHeldChange {
+	if x != nil {
+		return x.Held
+	}
+	return nil
+}
+
+// One change of the root feed's held section: the section as it now stands,
+// and every row that moved between the section and the rows in the same change.
+//
+// ONE FRAME, SO AN ITEM IS NEVER DRAWN TWICE OR NOT AT ALL. An item that
+// settles leaves the section and becomes a row in this one frame; a client
+// applies `rows` and `held` together, before it draws, and never draws a state
+// in which the item is in both places or in neither.
+type WatchFeedHeldChange struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The held section, whole. Replaces the section the client holds.
+	Held *v1.FeedHeld `protobuf:"bytes,1,opt,name=held,proto3" json:"held,omitempty"`
+	// The row publications made in the same change, in order: the row an item
+	// settled as (keyed at the moment it settled, the bottom of the feed, and
+	// carrying the item's own FeedId), or the removal of a row whose item
+	// returned to the section (a prompt's acceptance withdrawn when its
+	// delivery found no session). These rows ride ONLY here, never also as
+	// `row` frames. Empty when the change only reshaped the section.
+	Rows          []*v1.FeedRow `protobuf:"bytes,2,rep,name=rows,proto3" json:"rows,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WatchFeedHeldChange) Reset() {
+	*x = WatchFeedHeldChange{}
+	mi := &file_agentrepl_v1_endpoint_watch_feed_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WatchFeedHeldChange) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WatchFeedHeldChange) ProtoMessage() {}
+
+func (x *WatchFeedHeldChange) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_watch_feed_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WatchFeedHeldChange.ProtoReflect.Descriptor instead.
+func (*WatchFeedHeldChange) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_watch_feed_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *WatchFeedHeldChange) GetHeld() *v1.FeedHeld {
+	if x != nil {
+		return x.Held
+	}
+	return nil
+}
+
+func (x *WatchFeedHeldChange) GetRows() []*v1.FeedRow {
+	if x != nil {
+		return x.Rows
+	}
+	return nil
+}
+
 var File_agentrepl_v1_endpoint_watch_feed_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_watch_feed_proto_rawDesc = "" +
 	"\n" +
-	"&agentrepl/v1/endpoint_watch_feed.proto\x12\fagentrepl.v1\x1a\x16frontend/v1/feed.proto\x1a\x1dagentrepl/v1/feed_token.proto\"F\n" +
+	"&agentrepl/v1/endpoint_watch_feed.proto\x12\fagentrepl.v1\x1a\x16frontend/v1/feed.proto\x1a\x1bfrontend/v1/feed_held.proto\x1a\x1dagentrepl/v1/feed_token.proto\"F\n" +
 	"\x10WatchFeedRequest\x122\n" +
-	"\x05watch\x18\x01 \x01(\v2\x1c.agentrepl.v1.FeedWatchTokenR\x05watch\"\xe5\x01\n" +
+	"\x05watch\x18\x01 \x01(\v2\x1c.agentrepl.v1.FeedWatchTokenR\x05watch\"\xaa\x02\n" +
 	"\x11WatchFeedResponse\x12&\n" +
 	"\x03row\x18\x01 \x01(\v2\x14.frontend.v1.FeedRowR\x03row\x12=\n" +
 	"\tselection\x18\x02 \x01(\v2\x1a.frontend.v1.FeedSelectionH\x00R\tselection\x88\x01\x01\x12G\n" +
-	"\x0ffeed_text_scale\x18\x03 \x01(\v2\x1a.frontend.v1.FeedTextScaleH\x01R\rfeedTextScale\x88\x01\x01B\f\n" +
+	"\x0ffeed_text_scale\x18\x03 \x01(\v2\x1a.frontend.v1.FeedTextScaleH\x01R\rfeedTextScale\x88\x01\x01\x12:\n" +
+	"\x04held\x18\x04 \x01(\v2!.agentrepl.v1.WatchFeedHeldChangeH\x02R\x04held\x88\x01\x01B\f\n" +
 	"\n" +
 	"_selectionB\x12\n" +
-	"\x10_feed_text_scaleB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\x10_feed_text_scaleB\a\n" +
+	"\x05_held\"j\n" +
+	"\x13WatchFeedHeldChange\x12)\n" +
+	"\x04held\x18\x01 \x01(\v2\x15.frontend.v1.FeedHeldR\x04held\x12(\n" +
+	"\x04rows\x18\x02 \x03(\v2\x14.frontend.v1.FeedRowR\x04rowsB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_watch_feed_proto_rawDescOnce sync.Once
@@ -193,25 +276,30 @@ func file_agentrepl_v1_endpoint_watch_feed_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_watch_feed_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_watch_feed_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_agentrepl_v1_endpoint_watch_feed_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
 var file_agentrepl_v1_endpoint_watch_feed_proto_goTypes = []any{
-	(*WatchFeedRequest)(nil),  // 0: agentrepl.v1.WatchFeedRequest
-	(*WatchFeedResponse)(nil), // 1: agentrepl.v1.WatchFeedResponse
-	(*FeedWatchToken)(nil),    // 2: agentrepl.v1.FeedWatchToken
-	(*v1.FeedRow)(nil),        // 3: frontend.v1.FeedRow
-	(*v1.FeedSelection)(nil),  // 4: frontend.v1.FeedSelection
-	(*v1.FeedTextScale)(nil),  // 5: frontend.v1.FeedTextScale
+	(*WatchFeedRequest)(nil),    // 0: agentrepl.v1.WatchFeedRequest
+	(*WatchFeedResponse)(nil),   // 1: agentrepl.v1.WatchFeedResponse
+	(*WatchFeedHeldChange)(nil), // 2: agentrepl.v1.WatchFeedHeldChange
+	(*FeedWatchToken)(nil),      // 3: agentrepl.v1.FeedWatchToken
+	(*v1.FeedRow)(nil),          // 4: frontend.v1.FeedRow
+	(*v1.FeedSelection)(nil),    // 5: frontend.v1.FeedSelection
+	(*v1.FeedTextScale)(nil),    // 6: frontend.v1.FeedTextScale
+	(*v1.FeedHeld)(nil),         // 7: frontend.v1.FeedHeld
 }
 var file_agentrepl_v1_endpoint_watch_feed_proto_depIdxs = []int32{
-	2, // 0: agentrepl.v1.WatchFeedRequest.watch:type_name -> agentrepl.v1.FeedWatchToken
-	3, // 1: agentrepl.v1.WatchFeedResponse.row:type_name -> frontend.v1.FeedRow
-	4, // 2: agentrepl.v1.WatchFeedResponse.selection:type_name -> frontend.v1.FeedSelection
-	5, // 3: agentrepl.v1.WatchFeedResponse.feed_text_scale:type_name -> frontend.v1.FeedTextScale
-	4, // [4:4] is the sub-list for method output_type
-	4, // [4:4] is the sub-list for method input_type
-	4, // [4:4] is the sub-list for extension type_name
-	4, // [4:4] is the sub-list for extension extendee
-	0, // [0:4] is the sub-list for field type_name
+	3, // 0: agentrepl.v1.WatchFeedRequest.watch:type_name -> agentrepl.v1.FeedWatchToken
+	4, // 1: agentrepl.v1.WatchFeedResponse.row:type_name -> frontend.v1.FeedRow
+	5, // 2: agentrepl.v1.WatchFeedResponse.selection:type_name -> frontend.v1.FeedSelection
+	6, // 3: agentrepl.v1.WatchFeedResponse.feed_text_scale:type_name -> frontend.v1.FeedTextScale
+	2, // 4: agentrepl.v1.WatchFeedResponse.held:type_name -> agentrepl.v1.WatchFeedHeldChange
+	7, // 5: agentrepl.v1.WatchFeedHeldChange.held:type_name -> frontend.v1.FeedHeld
+	4, // 6: agentrepl.v1.WatchFeedHeldChange.rows:type_name -> frontend.v1.FeedRow
+	7, // [7:7] is the sub-list for method output_type
+	7, // [7:7] is the sub-list for method input_type
+	7, // [7:7] is the sub-list for extension type_name
+	7, // [7:7] is the sub-list for extension extendee
+	0, // [0:7] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_watch_feed_proto_init() }
@@ -227,7 +315,7 @@ func file_agentrepl_v1_endpoint_watch_feed_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_watch_feed_proto_rawDesc), len(file_agentrepl_v1_endpoint_watch_feed_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   2,
+			NumMessages:   3,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -219,7 +219,7 @@ export type ForgetWorkspaceBlocked = Message<"agentrepl.v1.ForgetWorkspaceBlocke
   liveWork: number;
 
   /**
-   * Held prompts in the tray — undelivered user intent.
+   * Held prompts in the held section — undelivered user intent.
    *
    * @generated from field: uint32 held_prompts = 3;
    */

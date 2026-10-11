@@ -69,7 +69,7 @@ var (
 	// ErrShimHasNoSession is the SHIM's own refusal of a delivery because it
 	// holds no session (StartTurnFailure.no_session). The sender's typed
 	// refusal answers errors.Is against it. A delivery refused so is HELD
-	// under the reconnect hold rather than lost (daemon_hold.proto,
+	// under the reconnect hold rather than lost (feed_held.proto,
 	// HeldPromptReconnectHold).
 	ErrShimHasNoSession = errors.New("promptqueue: the shim holds no session")
 	// ErrColdGate is a submission to a workspace whose session is PARKED AT
@@ -388,8 +388,9 @@ type Deps struct {
 	// daemon's acceptance of a turn — because nothing on the shim's streams
 	// states it, and a roster left to infer it reads `ready` while a turn runs.
 	Sidebar sidebar.Resolver
-	// Holds is the tray the queue publishes its holds to.
-	Holds holds.Resolver
+	// Holds is the feed's held section, which the queue states its standing
+	// holds and edit claim to.
+	Holds holds.Sink
 	// Client resolves a workspace's shim client; the queue never dials one
 	// itself.
 	Client ClientFunc

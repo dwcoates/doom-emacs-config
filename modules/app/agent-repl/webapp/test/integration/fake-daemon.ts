@@ -37,7 +37,7 @@ import type { FeedPage, FeedRow, FeedSelection } from "../../../proto/gen/ts/fro
 import type { FooterView } from "../../../proto/gen/ts/frontend/v1/footer_pb";
 import type { TopbarView } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
 import type { WorkspaceRoster } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
-import type { DaemonHoldTray } from "../../../proto/gen/ts/frontend/v1/daemon_hold_pb";
+import type { FeedHeld } from "../../../proto/gen/ts/frontend/v1/feed_held_pb";
 import type { DrainReason } from "../../../proto/gen/ts/agentrepl/v1/drain_reason_pb";
 import {
   NewsDigestStandingSchema,
@@ -65,11 +65,6 @@ import {
   type WatchWorkspaceRosterRequest,
   type WatchWorkspaceRosterResponse,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_workspace_roster_pb";
-import {
-  WatchDaemonHoldsResponseSchema,
-  type WatchDaemonHoldsRequest,
-  type WatchDaemonHoldsResponse,
-} from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_daemon_holds_pb";
 import {
   WatchWebWorkspaceResponseSchema,
   type WatchWebWorkspaceRequest,
@@ -144,7 +139,7 @@ import {
   emptyFooterView,
   emptyRoster,
   emptyTopbarView,
-  emptyTray,
+  emptyHeld,
   hostWorkspacePush,
   shutdownAnnounced,
 } from "./fixtures";
@@ -250,7 +245,12 @@ export interface FakeDaemon {
   setFooter(workspace: string, view: FooterView): void;
   setTopbar(workspace: string, view: TopbarView): void;
   setRoster(roster: WorkspaceRoster): void;
-  setTray(workspace: string, tray: DaemonHoldTray): void;
+  /**
+   * The root feed's held section: what the root feed's open states, pushed as
+   * a held-section frame (carrying ROWS, the rows that moved with it) to every
+   * live root feed tail.
+   */
+  setHeld(workspace: string, held: FeedHeld, rows?: FeedRow[]): void;
   setHostWorkspace(workspace: string, push: WatchHostWorkspaceResponse): void;
 
   // --- the feed universe --------------------------------------------------
@@ -693,7 +693,7 @@ export function createFakeDaemon(): FakeDaemon {
 
   const footers = new Map<string, FooterView>();
   const topbars = new Map<string, TopbarView>();
-  const trays = new Map<string, DaemonHoldTray>();
+  const helds = new Map<string, FeedHeld>();
   const hosts = new Map<string, WatchHostWorkspaceResponse>();
   const pages = new Map<string, FeedPage>();
   const nextPages = new Map<string, FeedPage>();
@@ -919,23 +919,6 @@ export function createFakeDaemon(): FakeDaemon {
     return iterate();
   };
 
-  const holdsSource = (
-    request: WatchDaemonHoldsRequest,
-    signal: AbortSignal,
-  ): AsyncGenerator<object> => {
-    record("watchDaemonHolds", request);
-    consumeFailure("watchDaemonHolds");
-    const workspace = request.workspace?.id ?? "";
-    const { channel, iterate } = openStream("watchDaemonHolds", workspace, signal);
-    channel.push(
-      taint(
-        "watchDaemonHolds",
-        create(WatchDaemonHoldsResponseSchema, { tray: trays.get(workspace) ?? emptyTray() }),
-      ),
-    );
-    return iterate();
-  };
-
   const feedSource = (
     request: WatchFeedRequest,
     signal: AbortSignal,
@@ -994,8 +977,6 @@ export function createFakeDaemon(): FakeDaemon {
         return topbarSource(request.value, signal);
       case "footer":
         return footerSource(request.value, signal);
-      case "holds":
-        return holdsSource(request.value, signal);
       case "feed":
         return feedSource(request.value, signal);
       case "loginTerminal":
@@ -1196,6 +1177,8 @@ export function createFakeDaemon(): FakeDaemon {
               value: {
                 page: pages.get(key(workspace, feed)) ?? emptyFeedPage(),
                 watch: create(FeedWatchTokenSchema, { value: token }),
+                // The ROOT feed's open states its held section; a sub-feed's none.
+                ...(feed === ROOT_FEED ? { held: helds.get(workspace) ?? emptyHeld() } : {}),
               },
             },
           });
@@ -1385,9 +1368,6 @@ export function createFakeDaemon(): FakeDaemon {
       },
       async *watchFooter(request, context) {
         yield* footerSource(request, context.signal) as AsyncGenerator<WatchFooterResponse>;
-      },
-      async *watchDaemonHolds(request, context) {
-        yield* holdsSource(request, context.signal) as AsyncGenerator<WatchDaemonHoldsResponse>;
       },
       updateHeldPrompt(request) {
         record("updateHeldPrompt", request);
@@ -1736,9 +1716,9 @@ export function createFakeDaemon(): FakeDaemon {
         create(WatchWorkspaceRosterResponseSchema, { push: { case: "roster", value: next } }),
       );
     },
-    setTray(workspace, tray) {
-      trays.set(workspace, tray);
-      broadcast("watchDaemonHolds", workspace, undefined, create(WatchDaemonHoldsResponseSchema, { tray }));
+    setHeld(workspace, held, rows = []) {
+      helds.set(workspace, held);
+      broadcast("watchFeed", workspace, ROOT_FEED, create(WatchFeedResponseSchema, { held: { held, rows } }));
     },
     setHostWorkspace(workspace, push) {
       hosts.set(workspace, push);

@@ -91,11 +91,11 @@ const pollInterval = 20 * time.Millisecond
 // World: one test's full stack — a real store, a real sidecar, and a real
 // daemon spawning the real shim per session. Every area test file builds one
 // with NewWorld and drives it purely through the embedded *harness.Daemon's
-// Connect client and watch streams (WatchFeed, WatchTopbar, WatchDaemonHolds,
+// Connect client and watch streams (WatchFeed, WatchTopbar, WatchHolds,
 // ...) plus this file's SubmitPrompt/driveScenarioToCompletion helpers.
 //
 // World embeds *harness.Daemon, so every exported harness.Daemon method
-// (Client, WatchFeed, WatchTopbar, WatchDaemonHolds, AwaitLogRecord, ...) is
+// (Client, WatchFeed, WatchTopbar, WatchHolds, AwaitLogRecord, ...) is
 // callable directly as a method of World; harness.Register(t, w.Daemon, dir)
 // still works by naming the embedded field explicitly where a function
 // (rather than a method) is required.

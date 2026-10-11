@@ -75,3 +75,17 @@ export function placeChildren(parent: Element, desired: readonly ChildNode[]): n
   }
   return placed;
 }
+
+/**
+ * Paint EL with CLASS_NAME and TEXT, touching neither when EL already holds
+ * it: the one in-place repaint of a small drawn mark (a state glyph).
+ *
+ * WHY NOT ASSIGN UNCONDITIONALLY. An element redrawn on every push of its
+ * state — a merge tab's or a test suite's breathing dot, re-pushed many times
+ * a second — must keep running whatever its class animates; a write that
+ * changes nothing is skipped rather than trusted to be inert.
+ */
+export function repaintMark(el: HTMLElement, className: string, text: string): void {
+  if (el.className !== className) el.className = className;
+  if (el.textContent !== text) el.textContent = text;
+}

@@ -1,7 +1,7 @@
 // endpoint_answer_held_offer.proto — AnswerHeldOffer: answering a QUESTION
-// the daemon parked in the tray. DAEMON-HOLD TRAY section. Addressed by
+// the daemon holds in the feed's held section. HELD SECTION. Addressed by
 // OFFER KIND, not an id: a workspace has at most one offer of a kind
-// standing (the tray's HeldOffer semantics), so a token would over-address.
+// standing (the held section's HeldOffer semantics), so a token would over-address.
 
 syntax = "proto3";
 
@@ -41,7 +41,7 @@ message AnswerHeldOfferResponse {
   }
 }
 
-// Done; the tray's new state arrives on its stream.
+// Done; the held section's new state arrives on the root feed's watch.
 message AnswerHeldOfferSuccess {}
 
 // Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).

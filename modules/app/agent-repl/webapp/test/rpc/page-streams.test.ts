@@ -224,10 +224,6 @@ function fakeDaemon(): { client: ReturnType<typeof createAgentReplClient>; daemo
         streamOpens.push("WatchWorkspaceRoster");
         await new Promise<void>(() => {});
       },
-      watchDaemonHolds: async function* () {
-        streamOpens.push("WatchDaemonHolds");
-        await new Promise<void>(() => {});
-      },
       watchDaemon: async function* () {
         streamOpens.push("WatchDaemon");
         await new Promise<void>(() => {});
@@ -262,9 +258,10 @@ function contextFor(
 
 describe("the page's one standing stream", () => {
   it("opens exactly one standing stream for every watch it holds", async () => {
-    // Arrange: a page holding SIX watches at once, which is what the webapp
-    // mounts and is exactly the count that exhausted the browser's per-host
-    // connection budget when each took a connection of its own.
+    // Arrange: a page holding FIVE watches at once, every standing view the
+    // webapp mounts beside its feed tail: five plus the tail is exactly the
+    // count that exhausted the browser's per-host connection budget when each
+    // took a connection of its own.
     const { client, daemon } = fakeDaemon();
     const ctx = contextFor(client, new RecordingSink());
     await settle();
@@ -278,9 +275,8 @@ describe("the page's one standing stream", () => {
       new AbortController(),
       new AbortController(),
       new AbortController(),
-      new AbortController(),
     ];
-    const kinds = ["roster", "webWorkspace", "daemon", "topbar", "footer", "holds"] as const;
+    const kinds = ["roster", "webWorkspace", "daemon", "topbar", "footer"] as const;
     for (const [index, kind] of kinds.entries()) {
       void (async () => {
         for await (const _ of ctx.streams.watch(kind, { workspace: WORKSPACE }, signals[index].signal)) {
@@ -290,9 +286,9 @@ describe("the page's one standing stream", () => {
     }
     await settle();
 
-    // Assert: one stream, six subscriptions.
+    // Assert: one stream, five subscriptions.
     expect(daemon.streamOpens).toEqual(["WatchPage"]);
-    expect(daemon.subscribes).toHaveLength(6);
+    expect(daemon.subscribes).toHaveLength(5);
     for (const controller of signals) controller.abort();
     ctx.quiesce();
   });
@@ -998,7 +994,6 @@ describe("the page's connection budget", () => {
       "watchWorkspaceRoster",
       "watchTopbar",
       "watchFooter",
-      "watchDaemonHolds",
       "watchHostWorkspace",
       "watchDaemon",
       "watchWebWorkspace",

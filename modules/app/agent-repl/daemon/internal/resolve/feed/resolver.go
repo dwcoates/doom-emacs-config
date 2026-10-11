@@ -49,6 +49,10 @@ type resolver struct {
 	// loads serializes each workspace's page loads across the read they make
 	// off mu (book.go loadMu).
 	loads map[ids.WorkspaceID]*sync.Mutex
+	// held is each workspace's held section accumulation (held.go). It lives
+	// here rather than on wsState so a bind's reset, which empties the feed,
+	// keeps what the prompt queue and the merge orchestrator still hold.
+	held map[ids.WorkspaceID]*heldState
 }
 
 // wsState is one workspace's whole feed universe plus the accumulation every
@@ -506,24 +510,18 @@ type feedState struct {
 	// value, and a watch token pins to one.
 	seq uint64
 	// log is the retained publication log, oldest first.
-	log []*loggedRow
+	log []*loggedPublication
 	// retention caps the log.
 	retention int
 	// subs are the tails following this feed.
 	subs map[*tailSub]struct{}
-	// held are the publications a history replay is holding back from subs
+	// pending are the publications a history replay is holding back from subs
 	// until its page is wholly placed (resolver.holdPushes). Empty outside a
 	// replay.
-	held []*frontendv1.FeedRow
+	pending []Publication
 	// book is the feed's loaded history when it is an agent's book (book.go):
 	// the pages a reader's request loaded, and what the next one reads.
 	book bookState
-}
-
-// loggedRow is one publication: the row as published, and the sequence it took.
-type loggedRow struct {
-	seq uint64
-	row *frontendv1.FeedRow
 }
 
 // walk is one reader's page position: the order key of the OLDEST row it has
@@ -592,6 +590,7 @@ func newResolver(deps Deps) (*resolver, error) {
 		workspaces: map[ids.WorkspaceID]*wsState{},
 		tokens:     map[string]*watchToken{},
 		loggers:    map[ids.WorkspaceID]dlog.Logger{},
+		held:       map[ids.WorkspaceID]*heldState{},
 	}
 	// ONE MUTEX FOR EVERY WORKSPACE'S FEED, so its stall is the run log's
 	// record. It lives as long as the process and is never unwatched.
@@ -1022,9 +1021,6 @@ func (r *resolver) upsert(s *wsState, at placement, row *frontendv1.FeedRow, dur
 	// is that reader's page, the page delivers it, and it is stored where it
 	// belongs without being published, so no tail inserts it ahead of the
 	// page (book.go).
-	if !quiet {
-		f.seq++
-	}
 	if seen && !quiet {
 		r.recordRepublication(s, f, id, rank)
 	}
@@ -1047,7 +1043,8 @@ func (r *resolver) upsert(s *wsState, at placement, row *frontendv1.FeedRow, dur
 				"key":   rank.key,
 				"how":   how,
 				"index": f.indexOf(id),
-				"seq":   f.seq,
+				// The sequence its publication takes, which is the next one.
+				"seq":   f.seq + 1,
 				"turn":  row.GetTurn().GetValue(),
 				"quiet": quiet,
 			})
@@ -1075,12 +1072,7 @@ func (r *resolver) upsert(s *wsState, at placement, row *frontendv1.FeedRow, dur
 	if quiet {
 		return
 	}
-	f.log = append(f.log, &loggedRow{seq: f.seq, row: snapshot})
-	if len(f.log) > f.retention {
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "len(f.log) > f.retention"})
-		f.log = f.log[len(f.log)-f.retention:]
-	}
-	r.publish(s, f, snapshot)
+	r.emitRow(s, f, snapshot)
 }
 
 // noteBook tells a feed's book of one row drawn in it, and reports whether the
@@ -1100,8 +1092,9 @@ func (r *resolver) noteBook(s *wsState, f *feedState, id, key string, fresh bool
 	return false
 }
 
-// publish hands one publication — an upsert's snapshot or a removal — to the
-// feed's tails. It is the ONE door every publication leaves by.
+// publish hands one publication — an upsert's snapshot, a removal, or a held
+// section's change — to the feed's tails. It is the ONE door every publication
+// leaves by.
 //
 // A HISTORY REPLAY HOLDS ITS PUBLICATIONS until its page is wholly placed
 // (holdPushes). A page is drawn oldest first and the delivery bound is read off
@@ -1110,25 +1103,34 @@ func (r *resolver) noteBook(s *wsState, f *feedState, id, key string, fresh bool
 // one, then took the cut and truncated them all. Held, the page is published
 // once the order holds its newest cut, and every row that cut withholds is
 // kept off the wire by the same rule a page walk reads.
-func (r *resolver) publish(s *wsState, f *feedState, row *frontendv1.FeedRow) {
+func (r *resolver) publish(s *wsState, f *feedState, pub Publication) {
 	if s.holdingPushes {
-		f.held = append(f.held, row)
+		f.pending = append(f.pending, pub)
 		return
 	}
-	r.push(s, f, row)
+	r.push(s, f, pub)
 }
 
 // push enqueues one publication on every tail following the feed, unless it
 // is an upsert the delivery rules keep off the wire (withheldFromPush). A
 // removal always goes: it retracts, and a reader that never held the row
-// drops nothing.
-func (r *resolver) push(s *wsState, f *feedState, row *frontendv1.FeedRow) {
-	if row.GetRemoved() == nil && r.withheldFromPush(s, f, row.GetId().GetValue()) {
+// drops nothing. A held section's change always goes: its rows are settled at
+// the bottom of the live conversation, which no delivery bound withholds.
+func (r *resolver) push(s *wsState, f *feedState, pub Publication) {
+	if r.withheldPublication(s, f, pub) {
 		return
 	}
 	for sub := range f.subs {
-		sub.enqueue(row)
+		sub.enqueue(pub)
 	}
+}
+
+// withheldPublication reports whether a publication is kept off the live
+// push: a row upsert the delivery rules withhold (withheldFromPush), and
+// nothing else.
+func (r *resolver) withheldPublication(s *wsState, f *feedState, pub Publication) bool {
+	row := pub.Row
+	return row != nil && row.GetRemoved() == nil && r.withheldFromPush(s, f, row.GetId().GetValue())
 }
 
 // holdPushes starts holding this workspace's publications for a history
@@ -1142,13 +1144,15 @@ func (r *resolver) holdPushes(s *wsState) func() {
 	return func() {
 		s.holdingPushes = false
 		for _, f := range s.feeds {
-			held := f.held
-			f.held = nil
-			for _, row := range held {
-				if _, stands := f.rows[row.GetId().GetValue()]; row.GetRemoved() == nil && !stands {
-					continue
+			pending := f.pending
+			f.pending = nil
+			for _, pub := range pending {
+				if row := pub.Row; row != nil {
+					if _, stands := f.rows[row.GetId().GetValue()]; row.GetRemoved() == nil && !stands {
+						continue
+					}
 				}
-				r.push(s, f, row)
+				r.push(s, f, pub)
 			}
 		}
 	}
@@ -1255,15 +1259,10 @@ func (r *resolver) retire(s *wsState, addr feedid.Feed, id string) bool {
 	// the instruction, and the client drops the row that id keys. It carries
 	// the removed row's order key, as every row does.
 	removal := removalRow(id, key)
-	f.seq++
 	r.logger(s.id).Info("daemon.feed.row_retired",
 		"a row was retired and its removal published on the feed tail",
-		dlog.Context{"feed": f.key, "row": id, "key": key, "seq": f.seq})
-	f.log = append(f.log, &loggedRow{seq: f.seq, row: removal})
-	if len(f.log) > f.retention {
-		f.log = f.log[len(f.log)-f.retention:]
-	}
-	r.publish(s, f, removal)
+		dlog.Context{"feed": f.key, "row": id, "key": key, "seq": f.seq + 1})
+	r.emitRow(s, f, removal)
 	return true
 }
 

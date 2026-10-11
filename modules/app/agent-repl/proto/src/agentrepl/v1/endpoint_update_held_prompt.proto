@@ -1,11 +1,11 @@
-// endpoint_update_held_prompt.proto — UpdateHeldPrompt: the tray's actions on
-// a held PROMPT. DAEMON-HOLD TRAY section. Doing nothing is the normal path —
+// endpoint_update_held_prompt.proto — UpdateHeldPrompt: the held card's actions on
+// a held PROMPT. HELD SECTION. Doing nothing is the normal path —
 // a held prompt delivers itself when its hold clears; these are the two ways
 // to not wait.
 //
 // The prompt is identified by its TurnId — the TYPED ECHO TOKEN loop: the
 // daemon minted it at submission (SubmitPromptSuccess.turn), served it inside
-// the tray's HeldPrompt entry, and the client hands it back unchanged.
+// the held section's HeldPrompt item, and the client hands it back unchanged.
 
 syntax = "proto3";
 
@@ -19,7 +19,7 @@ option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 message UpdateHeldPromptRequest {
   workspace.v1.WorkspaceRef workspace = 1;
   // WHICH held prompt — the daemon-minted turn it is held under, echoed from
-  // the tray entry.
+  // the held item.
   conversation.v1.TurnId turn = 2;
   // THE ARM IS THE ACTION.
   oneof action {
@@ -29,7 +29,7 @@ message UpdateHeldPromptRequest {
     // Discard it, never delivered (the composer takes the text back).
     UpdateHeldPromptDrop drop = 4;
     // Confirm the hold (view state only: HeldPromptAccepted.accepted flips
-    // and the tray re-pushes; delivery is unchanged). Legal ONLY on an
+    // and the held section re-pushes; delivery is unchanged). Legal ONLY on an
     // entry whose classification is hold_for_turn_end; refused otherwise.
     UpdateHeldPromptAccept accept = 5;
   }
@@ -46,7 +46,7 @@ message UpdateHeldPromptResponse {
   }
 }
 
-// Done; the tray's new state arrives on its stream.
+// Done; the held section's new state arrives on the root feed's watch.
 message UpdateHeldPromptSuccess {}
 
 // Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
@@ -77,7 +77,7 @@ message UpdateHeldPromptError {
     // BEING DELIVERED: the prompt's delivery call to the agent is in flight
     // right now, so it is neither held nor delivered yet. Refused rather than
     // raced. Once the call settles the prompt is either delivered, or (if the
-    // call failed) back in the tray and open to this request again.
+    // call failed) back in the held section and open to this request again.
     UpdateHeldPromptBeingDelivered being_delivered = 9;
   }
 }

@@ -315,7 +315,7 @@ func TestMergeLeaseHoldsSubmitAndKeepsTheWorkspaceOpen(t *testing.T) {
 	turn := SubmitPrompt(t, w, child, "please do something else once the merge is done")
 	holds := w.WatchHolds(child)
 	defer holds.Close()
-	harness.AwaitView(t, w.Ctx(), holds, "the prompt held by the merge, unclassified", func(tray *frontendv1.DaemonHoldTray) bool {
+	harness.AwaitView(t, w.Ctx(), holds, "the prompt held by the merge, unclassified", func(tray *frontendv1.FeedHeld) bool {
 		for _, item := range tray.GetItems() {
 			if p := item.GetPrompt(); p.GetTurn().GetValue() == turn.GetValue() {
 				return p.GetMerge() != nil && p.GetDaemonHeld() != nil

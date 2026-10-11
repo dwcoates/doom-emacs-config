@@ -30,7 +30,7 @@ func TestAFoldedHeldPromptIsDeliveredWithThePromptAheadOfIt(t *testing.T) {
 	first := f.submit("first words", "k-first", origin).GetSuccess().GetTurn().GetTurn()
 	second := f.submit("second words", "k-second", origin).GetSuccess().GetTurn().GetTurn()
 	var offered *conversationv1.TurnId
-	awaitView(t, f, holds, "the second held prompt offering a fold into the first", func(tray *frontendv1.DaemonHoldTray) bool {
+	awaitView(t, f, holds, "the second held prompt offering a fold into the first", func(tray *frontendv1.FeedHeld) bool {
 		p, q := promptHeldEntry(tray, first), promptHeldEntry(tray, second)
 		if p == nil || q == nil || p.FoldAbove != nil || q.GetFoldAbove().GetAbove().GetValue() != first.GetValue() {
 			return false
@@ -48,7 +48,7 @@ func TestAFoldedHeldPromptIsDeliveredWithThePromptAheadOfIt(t *testing.T) {
 	if err != nil || resp.Msg.GetSuccess() == nil {
 		t.Fatalf("FoldHeldPrompt = (%v, %v), want success", resp, err)
 	}
-	awaitView(t, f, holds, "the first entry alone, carrying both prompts", func(tray *frontendv1.DaemonHoldTray) bool {
+	awaitView(t, f, holds, "the first entry alone, carrying both prompts", func(tray *frontendv1.FeedHeld) bool {
 		p := promptHeldEntry(tray, first)
 		return p != nil && promptHeldEntry(tray, second) == nil && p.GetCoalesced() != nil &&
 			text(p.GetSaid()) == "first words\n\nsecond words"
@@ -79,7 +79,7 @@ func TestAFoldIntoAnEntryNoLongerAheadIsRefusedAndChangesNothing(t *testing.T) {
 	first := f.submit("first words", "k-first", origin).GetSuccess().GetTurn().GetTurn()
 	second := f.submit("second words", "k-second", origin).GetSuccess().GetTurn().GetTurn()
 	third := f.submit("third words", "k-third", origin).GetSuccess().GetTurn().GetTurn()
-	awaitView(t, f, holds, "three held prompts", func(tray *frontendv1.DaemonHoldTray) bool {
+	awaitView(t, f, holds, "three held prompts", func(tray *frontendv1.FeedHeld) bool {
 		return promptHeldEntry(tray, first) != nil && promptHeldEntry(tray, second) != nil && promptHeldEntry(tray, third) != nil
 	})
 
@@ -95,7 +95,7 @@ func TestAFoldIntoAnEntryNoLongerAheadIsRefusedAndChangesNothing(t *testing.T) {
 	if got := resp.Msg.GetError().GetAboveMoved().GetCurrentAbove().GetValue(); got != second.GetValue() {
 		t.Fatalf("FoldHeldPrompt = %v, want above_moved naming the second entry", resp.Msg)
 	}
-	awaitView(t, f, holds, "all three prompts still held with their own words", func(tray *frontendv1.DaemonHoldTray) bool {
+	awaitView(t, f, holds, "all three prompts still held with their own words", func(tray *frontendv1.FeedHeld) bool {
 		p, q, r := promptHeldEntry(tray, first), promptHeldEntry(tray, second), promptHeldEntry(tray, third)
 		return p != nil && q != nil && r != nil && text(p.GetSaid()) == "first words" && text(r.GetSaid()) == "third words" &&
 			p.GetCoalesced() == nil

@@ -170,7 +170,7 @@ func TestNonDurableRowsStillReachTheTail(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Tail: %v", err)
 	}
-	rows := tail.Rows(ctx)
+	rows := tailRows(ctx, tail)
 
 	// Act.
 	h.resolver.UpsertCommandRefused(testWorkspace, "/help", "/help is not supported here", true)
@@ -737,7 +737,7 @@ func TestALateHistoryRowAboveAClearDividerIsKeptOffThePush(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Tail: %v", err)
 	}
-	rows := tail.Rows(ctx)
+	rows := tailRows(ctx, tail)
 	h.cutPlaced("entry-1", clearedCut(), 200)
 
 	// Act: a history page replays a prompt placed before the divider AFTER
@@ -777,7 +777,7 @@ func TestADetachedShellsSpoolIsNotPushedToARootTailThatNeverOpenedTheBubble(t *t
 	if err != nil {
 		t.Fatalf("Tail: %v", err)
 	}
-	rows := tail.Rows(ctx)
+	rows := tailRows(ctx, tail)
 
 	// Act: a born-detached shell with output — HEAD on the root feed, spool
 	// BODY on the shell's own sub-feed — then a sentinel root prompt.

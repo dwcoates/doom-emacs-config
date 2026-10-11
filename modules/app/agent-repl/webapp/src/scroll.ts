@@ -204,17 +204,10 @@ export interface AnchorRows {
   viewportTop(): number;
   /** ROW's edges, or null when it draws no box (a hidden, empty row). */
   edges(row: Element): RowEdges | null;
-  /**
-   * The rows whose OWN size changes the follow never chases (a merge bubble's
-   * row: owner ruling, 2026-10-08, its updates never move the feed). Absent:
-   * no row is exempt.
-   */
-  exempt?(): readonly Element[];
 }
 
 /**
- * The root feed's rows in HOST, read off BOX's live layout. A row holding an
- * element EXEMPT matches is exempt (`AnchorRows.exempt`).
+ * The root feed's rows in HOST, read off BOX's live layout.
  *
  * HOST may be a reader of the rows' container, for a feed whose container is
  * built after the tail owner is (the root feed's body mounts its row list
@@ -223,7 +216,6 @@ export interface AnchorRows {
 export function feedAnchorRows(
   box: Element,
   host: Element | (() => Element),
-  exempt?: string,
 ): AnchorRows {
   const rowsHost = typeof host === "function" ? host : (): Element => host;
   return {
@@ -236,10 +228,6 @@ export function feedAnchorRows(
       const r = row.getBoundingClientRect();
       return { top: r.top, bottom: r.bottom };
     },
-    exempt: () =>
-      exempt === undefined
-        ? []
-        : [...rowsHost().children].filter((row) => row.querySelector(exempt) !== null),
   };
 }
 
@@ -381,16 +369,6 @@ export class TailFollow {
   private latestHidden = true;
   /** Told when the reader's own scroll returns the feed to its tail (`onTailReached`). */
   private tailReached: (() => void) | null = null;
-  /** Each exempt row's height when the follow last measured, by row. */
-  private exemptSeen = new Map<Element, number>();
-  /** The box's scroll and client heights when the follow last measured. */
-  private sizeSeen: { scroll: number; client: number } | null = null;
-  /**
-   * Whether the follow stands where an exempt change left it, off the tail by
-   * that change. A follow that then finds nothing changed keeps standing there;
-   * a park clears it.
-   */
-  private exemptHolding = false;
 
   /**
    * READLATEST is where the feed's latest entry sits; a box with no feed to
@@ -523,75 +501,19 @@ export class TailFollow {
   /**
    * Keep the tail on screen while a follow stands. Without one, a latest entry
    * the reader can see latches it where the view stands, moving nothing now.
+   *
+   * EVERY GROWTH AT THE TAIL IS FOLLOWED, whatever grew: the pinned merge
+   * bubble at the rows' bottom, or an item of the feed's held section laid out
+   * after them, pushes the rows up exactly as a new row does (owner ruling,
+   * 2026-10-10).
    */
   follow(): void {
     this.sync();
-    const change = this.measureExempt();
     if (!this.following || this.cause === null) {
       this.latchIfLatestVisible("follow");
       return;
     }
-    if (change.held) {
-      this.holdForExempt(change);
-      return;
-    }
     this.park(this.cause);
-  }
-
-  /**
-   * WHAT CHANGED SINCE THE FOLLOW LAST LOOKED, and whether it was the exempt
-   * rows alone. A change wholly the exempt rows' (the content grew or shrank by
-   * exactly their change, the viewport unchanged) is HELD: the follow does not
-   * chase it. ABOVE is the part of it made by exempt rows lying wholly above
-   * the viewport, which moves the content under the reader and is followed.
-   * An exempt row seen for the first time is new content, never a change of
-   * its own, so its height is not counted as exempt.
-   */
-  private measureExempt(): { held: boolean; delta: number; above: number } {
-    const scroll = this.box.scrollHeight;
-    const client = this.box.clientHeight;
-    const exempt = this.rows?.exempt?.() ?? [];
-    const viewTop = exempt.length === 0 || this.rows === null ? 0 : this.rows.viewportTop();
-    const seen = new Map<Element, number>();
-    let delta = 0;
-    let above = 0;
-    for (const row of exempt) {
-      const edges = this.rows?.edges(row) ?? null;
-      if (edges === null) continue;
-      const height = edges.bottom - edges.top;
-      seen.set(row, height);
-      const was = this.exemptSeen.get(row);
-      if (was === undefined || was === height) continue;
-      const grown = height - was;
-      delta += grown;
-      if (edges.bottom - grown <= viewTop) above += grown;
-    }
-    const before = this.sizeSeen;
-    this.exemptSeen = seen;
-    this.sizeSeen = { scroll, client };
-    const held =
-      before !== null &&
-      before.client === client &&
-      Math.abs(scroll - before.scroll - delta) < 0.5 &&
-      (delta !== 0 || this.exemptHolding);
-    return { held, delta, above };
-  }
-
-  /**
-   * A MERGE BUBBLE'S UPDATE NEVER MOVES THE FEED (owner ruling, 2026-10-08).
-   * The follow stands where it is for a change the exempt rows made in or
-   * below the viewport, and moves only by what they made wholly above it, so
-   * the content under the reader stays put.
-   */
-  private holdForExempt(change: { delta: number; above: number }): void {
-    if (change.delta !== 0) {
-      this.exemptHolding = true;
-      log.debug("an exempt row changed size; the follow holds the view", {
-        operation: "scroll.exempt-change-held",
-        context: { delta: change.delta, above: change.above, at: this.box.scrollTop },
-      });
-    }
-    if (change.above !== 0) this.shift("prependCompensation", change.above);
   }
 
   /**
@@ -646,7 +568,6 @@ export class TailFollow {
     this.cause = cause;
     this.anchor = null;
     this.latestHidden = false;
-    this.exemptHolding = false;
     // The reader's last input spoke about a position this park has replaced.
     this.touched = false;
     // A follow that found the box already at its tail moved nothing, and is

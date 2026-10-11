@@ -10,16 +10,16 @@ import {
   type AnswerHeldOfferRequest,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_answer_held_offer_pb";
 import { oneofArms } from "../arms.js";
-import { HeldOfferSchema, type HeldOffer } from "../../../proto/gen/ts/frontend/v1/daemon_hold_pb";
+import { HeldOfferSchema, type HeldOffer } from "../../../proto/gen/ts/frontend/v1/feed_held_pb";
 import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { createTicker } from "../../src/clock.js";
 import type { FailureSink } from "../../src/failure/sink.js";
 import { createAgentReplClient } from "../../src/rpc/client.js";
 import { testAppContext } from "../rpc/app-context.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
-import type { TrayContext } from "../../src/tray/context.js";
-import { testTrayContext } from "./tray-context.js";
-import { answerHeldOfferRefusal, drawHeldOffer } from "../../src/tray/held-offer.js";
+import type { HeldContext } from "../../src/held/context.js";
+import { testHeldContext } from "./held-context.js";
+import { answerHeldOfferRefusal, drawHeldOffer } from "../../src/held/held-offer.js";
 
 const WORKSPACE = create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" });
 const SINK: FailureSink = { report: () => undefined, retract: () => undefined };
@@ -42,7 +42,7 @@ const CAUSE_FILL: Readonly<Record<string, Record<string, unknown>>> = {
 function trayContext(
   answer: () => ReturnType<typeof successResponse> = successResponse,
   seen: AnswerHeldOfferRequest[] = [],
-): { tc: TrayContext; seen: AnswerHeldOfferRequest[] } {
+): { tc: HeldContext; seen: AnswerHeldOfferRequest[] } {
   const transport = createRouterTransport(({ service }) => {
     service(AgentRepl, {
       answerHeldOffer: (request) => {
@@ -58,7 +58,7 @@ function trayContext(
     failures: SINK,
     composerEnabled: false,
   });
-  return { tc: testTrayContext(ctx), seen };
+  return { tc: testHeldContext(ctx), seen };
 }
 
 const offer = (): HeldOffer =>

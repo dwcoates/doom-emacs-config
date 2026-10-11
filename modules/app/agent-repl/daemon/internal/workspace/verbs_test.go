@@ -32,7 +32,6 @@ func TestNewRefusesEveryMissingCollaborator(t *testing.T) {
 		{name: "no footer resolver", strip: func(d *Deps) { d.Footer = nil }},
 		{name: "no topbar resolver", strip: func(d *Deps) { d.Topbar = nil }},
 		{name: "no sidebar resolver", strip: func(d *Deps) { d.Sidebar = nil }},
-		{name: "no holds resolver", strip: func(d *Deps) { d.Holds = nil }},
 		{name: "no host relay", strip: func(d *Deps) { d.Host = nil }},
 		{name: "no session fleet", strip: func(d *Deps) { d.Sessions = nil }},
 		{name: "no shim resolver", strip: func(d *Deps) { d.Shim = nil }},

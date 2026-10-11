@@ -152,6 +152,25 @@ func runStream[Resp any, Push any](t *testing.T, ctx context.Context, open func(
 // channel at all.
 func runStreamSelecting[Resp any, Push any](t *testing.T, ctx context.Context, open func(context.Context) (*connect.ServerStreamForClient[Resp], error), pick func(*Resp) (Push, bool)) *Stream[Push] {
 	t.Helper()
+	return runStreamExpanding(t, ctx, nil, open, func(r *Resp) []Push {
+		v, ok := pick(r)
+		if !ok {
+			return nil
+		}
+		return []Push{v}
+	})
+}
+
+// runStreamExpanding is runStreamSelecting for a frame that carries SEVERAL
+// pushes of the stream's kind, delivered in the order PICK answers them, and
+// for a stream whose first pushes are SEED, which the open already answered.
+//
+// WatchFeed's held-section frame is the case that forced it: the rows a held
+// item settled as ride inside that one frame, so a stream of rows takes each
+// of them; and the held section a root feed's open serves is the section a
+// stream of sections begins with.
+func runStreamExpanding[Resp any, Push any](t *testing.T, ctx context.Context, seed []Push, open func(context.Context) (*connect.ServerStreamForClient[Resp], error), pick func(*Resp) []Push) *Stream[Push] {
+	t.Helper()
 	streamCtx, cancel := context.WithCancel(ctx)
 	t.Cleanup(cancel)
 
@@ -161,6 +180,9 @@ func runStreamSelecting[Resp any, Push any](t *testing.T, ctx context.Context, o
 		t.Fatalf("opening a stream: %v", err)
 	}
 	ch := make(chan Push, 256)
+	for _, v := range seed {
+		ch <- v
+	}
 	errCh := make(chan error, 1)
 	headers := make(chan http.Header, 1)
 	go func() {
@@ -170,15 +192,13 @@ func runStreamSelecting[Resp any, Push any](t *testing.T, ctx context.Context, o
 		// costs nothing and never depends on a push.
 		headers <- stream.ResponseHeader()
 		for stream.Receive() {
-			v, ok := pick(stream.Msg())
-			if !ok {
-				continue
-			}
-			select {
-			case ch <- v:
-			case <-streamCtx.Done():
-				errCh <- streamCtx.Err()
-				return
+			for _, v := range pick(stream.Msg()) {
+				select {
+				case ch <- v:
+				case <-streamCtx.Done():
+					errCh <- streamCtx.Err()
+					return
+				}
 			}
 		}
 		errCh <- stream.Err()
@@ -310,14 +330,29 @@ func (d *Daemon) WatchWebOn(client interface {
 		func(r *agentreplv1.WatchWebWorkspaceResponse) *agentreplv1.WatchWebWorkspaceResponse { return r })
 }
 
-// WatchHolds opens the workspace's hold-tray stream.
-func (d *Daemon) WatchHolds(ws *workspacev1.WorkspaceRef) *Stream[*frontendv1.DaemonHoldTray] {
+// WatchHolds opens the workspace's root feed and follows its held section: the
+// section the open served first, then the section of every held-section frame
+// the root feed's watch carries after it.
+func (d *Daemon) WatchHolds(ws *workspacev1.WorkspaceRef) *Stream[*frontendv1.FeedHeld] {
 	d.t.Helper()
-	return runStream(d.t, d.ctx,
-		func(ctx context.Context) (*connect.ServerStreamForClient[agentreplv1.WatchDaemonHoldsResponse], error) {
-			return d.Client().WatchDaemonHolds(ctx, connect.NewRequest(&agentreplv1.WatchDaemonHoldsRequest{Workspace: ws}))
+	resp, err := d.Client().OpenFeed(d.ctx, connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ws}))
+	if err != nil {
+		d.t.Fatalf("OpenFeed (root, for its held section): %v", err)
+	}
+	opened := resp.Msg.GetSuccess()
+	if opened == nil || opened.GetHeld() == nil {
+		d.t.Fatalf("OpenFeed (root) = %v, want a success carrying the held section", resp.Msg)
+	}
+	return runStreamExpanding(d.t, d.ctx, []*frontendv1.FeedHeld{opened.GetHeld()},
+		func(ctx context.Context) (*connect.ServerStreamForClient[agentreplv1.WatchFeedResponse], error) {
+			return d.Client().WatchFeed(ctx, connect.NewRequest(&agentreplv1.WatchFeedRequest{Watch: opened.GetWatch()}))
 		},
-		func(r *agentreplv1.WatchDaemonHoldsResponse) *frontendv1.DaemonHoldTray { return r.GetTray() })
+		func(r *agentreplv1.WatchFeedResponse) []*frontendv1.FeedHeld {
+			if held := r.GetHeld(); held != nil {
+				return []*frontendv1.FeedHeld{held.GetHeld()}
+			}
+			return nil
+		})
 }
 
 // WatchDaemonStream opens the daemon-wide announcement stream.
@@ -383,15 +418,19 @@ func (d *Daemon) WatchFeedOn(client interface {
 	WatchFeed(context.Context, *connect.Request[agentreplv1.WatchFeedRequest]) (*connect.ServerStreamForClient[agentreplv1.WatchFeedResponse], error)
 }, token *agentreplv1.FeedWatchToken) *Stream[*frontendv1.FeedRow] {
 	d.t.Helper()
-	// ROW FRAMES ONLY. The response also carries `selection` and
-	// `feed_text_scale` frames, neither of which is a row; see
-	// runStreamSelecting.
-	return runStreamSelecting(d.t, d.ctx,
+	// ROWS ONLY: a row frame's row, and each row a held-section frame moved (an
+	// item settling into the feed, or returning to the section). The response
+	// also carries `selection` and `feed_text_scale` frames, neither of which
+	// is a row; see runStreamSelecting.
+	return runStreamExpanding(d.t, d.ctx, nil,
 		func(ctx context.Context) (*connect.ServerStreamForClient[agentreplv1.WatchFeedResponse], error) {
 			return client.WatchFeed(ctx, connect.NewRequest(&agentreplv1.WatchFeedRequest{Watch: token}))
 		},
-		func(r *agentreplv1.WatchFeedResponse) (*frontendv1.FeedRow, bool) {
-			return r.GetRow(), r.GetRow() != nil
+		func(r *agentreplv1.WatchFeedResponse) []*frontendv1.FeedRow {
+			if row := r.GetRow(); row != nil {
+				return []*frontendv1.FeedRow{row}
+			}
+			return r.GetHeld().GetRows()
 		})
 }
 

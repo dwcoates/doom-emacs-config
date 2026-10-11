@@ -24,6 +24,7 @@ import (
 	"claude-repld/internal/lockwatch"
 	"claude-repld/internal/paint"
 	"claude-repld/internal/publish"
+	"claude-repld/internal/resolve/holds"
 	"claude-repld/internal/sessionwatcher"
 	"claude-repld/internal/wsm"
 )
@@ -68,13 +69,15 @@ var (
 	ErrUnknownFeed = errors.New("feed: unknown feed for this workspace")
 )
 
-// Tail is one feed's live row stream, pinned to the token OpenFeed minted. It
-// is publish's guarantee in the feed's spelling: the reader misses no row
-// between the page it was served and the first row it streams.
+// Tail is one feed's live publication stream, pinned to the token OpenFeed
+// minted. It is publish's guarantee in the feed's spelling: the reader misses
+// no publication between the page (and, on the root feed, the held section)
+// it was served and the first publication it streams.
 type Tail interface {
-	// Rows yields every row upsert for this feed from the pinned start, in
-	// order, closing only when ctx is cancelled.
-	Rows(ctx context.Context) <-chan *frontendv1.FeedRow
+	// Publications yields every publication for this feed from the pinned
+	// start, in order — row upserts and removals, and on the root feed the held
+	// section's changes — closing only when ctx is cancelled.
+	Publications(ctx context.Context) <-chan Publication
 	// Token is the watch token this tail answers to.
 	Token() *agentreplv1.FeedWatchToken
 }
@@ -83,6 +86,9 @@ type Tail interface {
 // setters, and the read side.
 type Resolver interface {
 	sessionwatcher.FeedSink
+	// The held section's setters (held.go): the prompt queue's standing holds
+	// and edit claim, and the merge orchestrator's posed offer.
+	holds.Sink
 
 	// SetAccount installs the account the workspace's session spends as: the
 	// logged-in email, "" for a logged-out root. A failed turn's outcome
@@ -94,8 +100,9 @@ type Resolver interface {
 	// by the OpenFeed that served this reader's page.
 	Tail(ctx context.Context, ws ids.WorkspaceID, feed feedid.Feed, token *agentreplv1.FeedWatchToken) (Tail, error)
 	// OpenPage answers OpenFeed: the NEWEST page of one feed, plus the watch
-	// token the tail echoes. It mints the reader's walk.
-	OpenPage(ctx context.Context, ws ids.WorkspaceID, feed feedid.Feed, reader ReaderID) (*frontendv1.FeedPage, *agentreplv1.FeedWatchToken, error)
+	// token the tail echoes, plus — for the root feed only, nil otherwise — the
+	// held section as it stands at the token's pin. It mints the reader's walk.
+	OpenPage(ctx context.Context, ws ids.WorkspaceID, feed feedid.Feed, reader ReaderID) (*frontendv1.FeedPage, *agentreplv1.FeedWatchToken, *frontendv1.FeedHeld, error)
 	// NextPage answers GetFeedPage's next arm: the page before this reader's
 	// current position. The daemon holds the walk.
 	NextPage(ctx context.Context, ws ids.WorkspaceID, feed feedid.Feed, reader ReaderID) (*frontendv1.FeedPage, error)

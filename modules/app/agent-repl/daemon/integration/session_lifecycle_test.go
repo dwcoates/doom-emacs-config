@@ -482,7 +482,7 @@ func TestAPromptHeldForARevivalThatParksAtTheColdGateWaitsThereAndTheAnswerDeliv
 	})
 
 	// Assert: the prompt waits at the gate, badged as such, and nothing was sent.
-	harness.AwaitView(t, f.d.Ctx(), holds, "the prompt held at the cold gate", func(tray *frontendv1.DaemonHoldTray) bool {
+	harness.AwaitView(t, f.d.Ctx(), holds, "the prompt held at the cold gate", func(tray *frontendv1.FeedHeld) bool {
 		p := promptHeldEntry(tray, turn)
 		return p.GetColdGate() != nil && p.GetBadge().GetColdGate() != nil
 	})

@@ -17,6 +17,8 @@ import {
   drawFeedMergeTestSpan,
   drawFeedMergeTestSuite,
   drawTestSuites,
+  updateFeedMergeTabTests,
+  updateTestSuites,
 } from "../../../src/feed/merge/tests-tab.js";
 import { oneofArms } from "../../arms.js";
 import STYLESHEET from "../../../src/styles.css?raw";
@@ -286,5 +288,115 @@ describe("drawFeedMergeTestLog", () => {
   it("refuses a log with no token", () => {
     const u = create(FeedMergeTestLogSchema, { label: { text: "~/x.log" } });
     expect(() => drawFeedMergeTestLog(u, harness().ctx, "log")).toThrow(MalformedView);
+  });
+});
+
+/** A running suite NAME whose tests have so far passed PASSED of TOTAL. */
+function countedSuite(name: string, passed: number, total: number): FeedMergeTestSuite {
+  return create(FeedMergeTestSuiteSchema, {
+    name,
+    state: { case: "running", value: { soFar: { case: "passing", value: {} } } },
+    counts: { passed, failed: 0, total },
+  });
+}
+
+/**
+ * THE SUITES ARE DRAWN IN PLACE (owner request, 2026-10-10): a push of new
+ * counts moves only the figures, and a running suite's breathing dot is never
+ * a fresh element.
+ */
+describe("updateTestSuites", () => {
+  it("keeps a suite's element and its live dot across a push of new counts", () => {
+    // Arrange
+    const el = drawTestSuites([countedSuite("unit", 1, 10)]);
+    const suiteEl = el.querySelector(".merge-suite");
+    const glyph = el.querySelector(".merge-suite-glyph");
+    // Act
+    updateTestSuites(el, [countedSuite("unit", 2, 10)]);
+    // Assert
+    expect([el.querySelector(".merge-suite"), el.querySelector(".merge-suite-glyph")]).toEqual([suiteEl, glyph]);
+  });
+
+  it("moves the counts a push carries", () => {
+    const el = drawTestSuites([countedSuite("unit", 1, 10)]);
+    updateTestSuites(el, [countedSuite("unit", 2, 10)]);
+    expect(el.querySelector(".merge-suite-counts")?.textContent).toBe("2/0/10");
+  });
+
+  it("repaints the dot in place when the suite settles", () => {
+    // Arrange
+    const el = drawTestSuites([countedSuite("unit", 10, 10)]);
+    const glyph = el.querySelector(".merge-suite-glyph");
+    // Act
+    updateTestSuites(el, [suite("unit", "passed")]);
+    // Assert
+    expect([el.querySelector(".merge-suite-glyph"), glyph?.className]).toEqual([glyph, "merge-suite-glyph is-succeeded"]);
+  });
+
+  it("draws a suite served for the first time in its place", () => {
+    const el = drawTestSuites([countedSuite("unit", 1, 10)]);
+    updateTestSuites(el, [countedSuite("unit", 1, 10), countedSuite("integration", 0, 5)]);
+    expect([...el.querySelectorAll(".merge-suite")].map((s) => s.getAttribute("data-suite"))).toEqual(["unit", "integration"]);
+  });
+
+  it("drops a suite no longer served", () => {
+    const el = drawTestSuites([countedSuite("unit", 1, 10), countedSuite("integration", 0, 5)]);
+    updateTestSuites(el, [countedSuite("unit", 1, 10)]);
+    expect(el.querySelectorAll(".merge-suite")).toHaveLength(1);
+  });
+
+  it("keeps the output box the reader may have scrolled, replacing only its spans", () => {
+    // Arrange
+    const el = drawTestSuites([suite("unit", "failed", [{ text: "FAIL a", paintClass: "" }])]);
+    const pre = el.querySelector(".merge-suite-output");
+    // Act
+    updateTestSuites(el, [suite("unit", "failed", [{ text: "FAIL b", paintClass: "" }])]);
+    // Assert
+    expect([el.querySelector(".merge-suite-output"), pre?.textContent]).toEqual([pre, "FAIL b"]);
+  });
+
+  it("leaves unchanged output's spans as they stand", () => {
+    // Arrange
+    const el = drawTestSuites([suite("unit", "failed", [{ text: "FAIL a", paintClass: "" }])]);
+    const span = el.querySelector(".merge-suite-output > *");
+    // Act
+    updateTestSuites(el, [suite("unit", "failed", [{ text: "FAIL a", paintClass: "" }])]);
+    // Assert
+    expect(el.querySelector(".merge-suite-output > *")).toBe(span);
+  });
+});
+
+describe("updateFeedMergeTabTests", () => {
+  it("keeps the log line while its link is unchanged", () => {
+    // Arrange
+    const ctx = harness().ctx;
+    const tab = create(FeedMergeTabTestsSchema, {
+      suites: [countedSuite("unit", 1, 10)],
+      log: create(FeedMergeTestLogSchema, { token: { value: "tok" }, label: { text: "the log" } }),
+    });
+    const host = document.createElement("div");
+    host.append(...drawFeedMergeTabTests(tab, ctx, "p"));
+    const logLine = host.querySelector(".merge-test-log");
+    const next = create(FeedMergeTabTestsSchema, { suites: [countedSuite("unit", 2, 10)], log: tab.log });
+    // Act
+    updateFeedMergeTabTests(host, next, tab, ctx, "p");
+    // Assert
+    expect(host.querySelector(".merge-test-log")).toBe(logLine);
+  });
+
+  it("draws the log line once the daemon has written it", () => {
+    // Arrange
+    const ctx = harness().ctx;
+    const tab = create(FeedMergeTabTestsSchema, { suites: [countedSuite("unit", 1, 10)] });
+    const host = document.createElement("div");
+    host.append(...drawFeedMergeTabTests(tab, ctx, "p"));
+    const next = create(FeedMergeTabTestsSchema, {
+      suites: [countedSuite("unit", 1, 10)],
+      log: create(FeedMergeTestLogSchema, { token: { value: "tok" }, label: { text: "the log" } }),
+    });
+    // Act
+    updateFeedMergeTabTests(host, next, tab, ctx, "p");
+    // Assert
+    expect(host.querySelector(".merge-test-log")).not.toBeNull();
   });
 });

@@ -1,0 +1,369 @@
+package feed
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	conversationv1 "agentrepl/proto/conversation/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+
+	"claude-repld/internal/feedid"
+	"claude-repld/internal/ids"
+	"claude-repld/internal/sessionwatcher"
+	"claude-repld/internal/wsm"
+)
+
+// THE HELD SECTION (held.go): what has not yet settled into the root feed's
+// history, carried on the root feed's own publication log, and settled into a
+// row in ONE publication.
+
+// heldQueuedAt is the instant held prompts are stamped with unless a test needs
+// an order.
+var heldQueuedAt = time.UnixMilli(1_700_000_000_000)
+
+// standingHold is a standing hold of TURN carrying TEXT, queued AFTER
+// milliseconds past heldQueuedAt.
+func standingHold(turn, text string, after int64) wsm.HeldPrompt {
+	return wsm.HeldPrompt{
+		Workspace: testWorkspace,
+		Turn:      ids.TurnID(turn),
+		Said: &conversationv1.UserSaid{Content: &conversationv1.UserContent{
+			Blocks: []*conversationv1.UserContentBlock{{
+				Block: &conversationv1.UserContentBlock_Text{Text: &conversationv1.TextBlock{Text: text}},
+			}},
+		}},
+		QueuedAt: heldQueuedAt.Add(time.Duration(after) * time.Millisecond),
+	}
+}
+
+// mirrorOf is the acceptance mirror the prompt queue draws for TURN.
+func mirrorOf(turn, text string) *frontendv1.FeedRow {
+	return &frontendv1.FeedRow{
+		Turn: &conversationv1.TurnId{Value: turn},
+		Row: &frontendv1.FeedRow_UserPrompt{UserPrompt: &frontendv1.FeedUserPrompt{
+			Result: &frontendv1.FeedUserPrompt_Success{Success: &frontendv1.FeedUserPromptSuccess{
+				Body: &frontendv1.FeedUserPromptBody{Blocks: []*frontendv1.FeedUserPromptBlock{{
+					Block: &frontendv1.FeedUserPromptBlock_Text{Text: &frontendv1.FeedTextBlock{Text: text}},
+				}}},
+			}},
+		}},
+	}
+}
+
+// mirror draws TURN's acceptance mirror, as the prompt queue does.
+func (h *harness) mirror(turn, text string) {
+	h.resolver.UpsertAtTurnAddress(testWorkspace, ids.TurnID(turn),
+		feedid.RowKey{Kind: feedid.KindPrompt, ID: turn}, mirrorOf(turn, text))
+}
+
+// rootPublications opens the root feed's page and its tail, answering the
+// held section the page was served with and the tail's publications.
+func (h *harness) rootPublications() (*frontendv1.FeedHeld, <-chan Publication) {
+	h.t.Helper()
+	_, token, held, err := h.resolver.OpenPage(context.Background(), testWorkspace, rootFeed(), "reader-held")
+	if err != nil {
+		h.t.Fatalf("OpenPage: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	h.t.Cleanup(cancel)
+	tail, err := h.resolver.Tail(ctx, testWorkspace, rootFeed(), token)
+	if err != nil {
+		h.t.Fatalf("Tail: %v", err)
+	}
+	return held, tail.Publications(ctx)
+}
+
+// next reads the next publication, failing when none arrives.
+func next(t *testing.T, pubs <-chan Publication) Publication {
+	t.Helper()
+	select {
+	case pub := <-pubs:
+		return pub
+	case <-time.After(2 * time.Second):
+		t.Fatal("no publication arrived")
+		return Publication{}
+	}
+}
+
+// itemIDs answers the section's item ids, in order.
+func itemIDs(held *frontendv1.FeedHeld) []string {
+	out := make([]string, 0, len(held.GetItems()))
+	for _, item := range held.GetItems() {
+		out = append(out, item.GetId().GetValue())
+	}
+	return out
+}
+
+// sameIDs reports whether two id lists are equal.
+func sameIDs(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// heldNow answers the section as last published.
+func (h *harness) heldNow() *frontendv1.FeedHeld {
+	h.resolver.mu.Lock()
+	defer h.resolver.mu.Unlock()
+	return h.resolver.currentHeld(h.resolver.state(testWorkspace))
+}
+
+func TestStandingHoldsAreHeldInQueueOrderUnderTheirPromptRowIDs(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	h.resolver.SetHeldPrompts(testWorkspace, []wsm.HeldPrompt{
+		standingHold("turn-2", "second", 10), standingHold("turn-1", "first", 0),
+	})
+
+	// Assert
+	want := []string{h.promptRowID("turn-1"), h.promptRowID("turn-2")}
+	if got := itemIDs(h.heldNow()); !sameIDs(got, want) {
+		t.Fatalf("held ids = %v, want %v", got, want)
+	}
+}
+
+func TestAHoldsChangeIsPublishedOnTheRootFeed(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	_, pubs := h.rootPublications()
+
+	// Act
+	h.resolver.SetHeldPrompts(testWorkspace, []wsm.HeldPrompt{standingHold("turn-1", "first", 0)})
+
+	// Assert
+	pub := next(t, pubs)
+	if pub.Held == nil || len(pub.Held.GetRows()) != 0 {
+		t.Fatalf("publication = %v, want a held change moving no row", pub)
+	}
+	if got := itemIDs(pub.Held.GetHeld()); !sameIDs(got, []string{h.promptRowID("turn-1")}) {
+		t.Fatalf("held ids = %v, want the one prompt", got)
+	}
+}
+
+func TestAnUnchangedSectionIsNotPublishedAgain(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	holds := []wsm.HeldPrompt{standingHold("turn-1", "first", 0)}
+	h.resolver.SetHeldPrompts(testWorkspace, holds)
+	_, pubs := h.rootPublications()
+
+	// Act: the same holds, then a marker row.
+	h.resolver.SetHeldPrompts(testWorkspace, holds)
+	h.deliverPrompt("turn-9", "a marker")
+
+	// Assert: the marker is the first publication after the pin.
+	if pub := next(t, pubs); pub.Row.GetId().GetValue() != h.promptRowID("turn-9") {
+		t.Fatalf("first publication = %v, want the marker row", pub)
+	}
+}
+
+func TestTheOpenedRootPageCarriesTheSectionAtThePin(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.resolver.SetHeldPrompts(testWorkspace, []wsm.HeldPrompt{standingHold("turn-1", "first", 0)})
+
+	// Act
+	held, _ := h.rootPublications()
+
+	// Assert
+	if got := itemIDs(held); !sameIDs(got, []string{h.promptRowID("turn-1")}) {
+		t.Fatalf("opened held ids = %v, want the one prompt", got)
+	}
+}
+
+func TestAnOpenedSubFeedCarriesNoSection(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.resolver.SetHeldPrompts(testWorkspace, []wsm.HeldPrompt{standingHold("turn-1", "first", 0)})
+	lease := ids.LeaseID("lease-7")
+
+	// Act
+	_, _, held, err := h.resolver.OpenPage(context.Background(), testWorkspace, feedid.Feed{Merge: &lease}, "reader-sub")
+
+	// Assert
+	if err != nil {
+		t.Fatalf("OpenPage: %v", err)
+	}
+	if held != nil {
+		t.Fatalf("a sub-feed was served a held section: %v", held)
+	}
+}
+
+func TestAMirroredHoldSettlesAsOnePublicationCarryingItsRow(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.resolver.SetHeldPrompts(testWorkspace, []wsm.HeldPrompt{standingHold("turn-1", "first", 0)})
+	_, pubs := h.rootPublications()
+
+	// Act
+	h.mirror("turn-1", "first")
+
+	// Assert
+	pub := next(t, pubs)
+	if pub.Held == nil {
+		t.Fatalf("publication = %v, want one held change", pub)
+	}
+	if got := itemIDs(pub.Held.GetHeld()); len(got) != 0 {
+		t.Fatalf("held ids after the settle = %v, want none", got)
+	}
+	rows := pub.Held.GetRows()
+	if len(rows) != 1 || rows[0].GetId().GetValue() != h.promptRowID("turn-1") || rows[0].GetUserPrompt() == nil {
+		t.Fatalf("settled rows = %v, want the prompt's row", rows)
+	}
+}
+
+func TestARetiredMirrorReturnsItsStandingHoldInOnePublication(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.resolver.SetHeldPrompts(testWorkspace, []wsm.HeldPrompt{standingHold("turn-1", "first", 0)})
+	h.mirror("turn-1", "first")
+	_, pubs := h.rootPublications()
+
+	// Act
+	h.resolver.OnPromptRetired(testWorkspace, &conversationv1.AgentPrompt{Id: &conversationv1.TurnId{Value: "turn-1"}})
+
+	// Assert
+	pub := next(t, pubs)
+	if pub.Held == nil {
+		t.Fatalf("publication = %v, want one held change", pub)
+	}
+	if got := itemIDs(pub.Held.GetHeld()); !sameIDs(got, []string{h.promptRowID("turn-1")}) {
+		t.Fatalf("held ids = %v, want the prompt back", got)
+	}
+	rows := pub.Held.GetRows()
+	if len(rows) != 1 || rows[0].GetRemoved() == nil {
+		t.Fatalf("moved rows = %v, want the mirror's removal", rows)
+	}
+}
+
+func TestAMirrorAtAnotherFeedLeavesTheRootSectionWithoutARow(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	lease := ids.LeaseID("lease-7")
+	h.resolver.AddressTurn(testWorkspace, "turn-1", &sessionwatcher.OutputAddress{Feed: feedid.Feed{Merge: &lease}})
+	h.resolver.SetHeldPrompts(testWorkspace, []wsm.HeldPrompt{standingHold("turn-1", "first", 0)})
+	_, pubs := h.rootPublications()
+
+	// Act
+	h.mirror("turn-1", "first")
+
+	// Assert
+	pub := next(t, pubs)
+	if pub.Held == nil || len(pub.Held.GetRows()) != 0 || len(pub.Held.GetHeld().GetItems()) != 0 {
+		t.Fatalf("root publication = %v, want an emptied section moving no row", pub)
+	}
+}
+
+func TestARetiredHoldIsNotHeld(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	retired := standingHold("turn-1", "gone", 0)
+	retired.Tombstone = &wsm.Tombstone{Kind: "delivered", At: heldQueuedAt}
+
+	// Act
+	h.resolver.SetHeldPrompts(testWorkspace, []wsm.HeldPrompt{retired})
+
+	// Assert
+	if got := itemIDs(h.heldNow()); len(got) != 0 {
+		t.Fatalf("held ids = %v, want none", got)
+	}
+}
+
+func TestTheSectionOrdersPromptsThenTheOffer(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	h.resolver.SetOffer(testWorkspace, &frontendv1.HeldOffer{Offer: &frontendv1.HeldOffer_MergeDequeue{
+		MergeDequeue: &frontendv1.HeldOfferMergeDequeue{}}})
+	h.resolver.SetHeldPrompts(testWorkspace, []wsm.HeldPrompt{standingHold("turn-1", "first", 0)})
+
+	// Assert
+	items := h.heldNow().GetItems()
+	if len(items) != 2 || items[0].GetPrompt() == nil || items[1].GetOffer() == nil {
+		t.Fatalf("held items = %v, want prompt, offer", items)
+	}
+}
+
+func TestAnOfferIsKeyedByItsKind(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	h.resolver.SetOffer(testWorkspace, &frontendv1.HeldOffer{Offer: &frontendv1.HeldOffer_MergeDequeue{
+		MergeDequeue: &frontendv1.HeldOfferMergeDequeue{}}})
+
+	// Assert
+	want := testEncode(feedid.Ref{WS: testWorkspace, Feed: rootFeed(), Row: feedid.RowKey{Kind: feedid.KindHeldOffer, ID: "merge_dequeue"}}).GetValue()
+	if got := itemIDs(h.heldNow()); !sameIDs(got, []string{want}) {
+		t.Fatalf("held ids = %v, want %q", got, want)
+	}
+}
+
+func TestAnOfferWithNoArmIsRecordedAndStillHeld(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	h.resolver.SetOffer(testWorkspace, &frontendv1.HeldOffer{})
+
+	// Assert
+	if !h.hasRecord("error", opHeld) {
+		t.Fatal("an offer with no arm was not recorded at ERROR")
+	}
+	if items := h.heldNow().GetItems(); len(items) != 1 || items[0].GetOffer() == nil {
+		t.Fatalf("held items = %v, want the offer still held", items)
+	}
+}
+
+func TestAClearedOfferLeavesTheSection(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.resolver.SetOffer(testWorkspace, &frontendv1.HeldOffer{Offer: &frontendv1.HeldOffer_MergeDequeue{
+		MergeDequeue: &frontendv1.HeldOfferMergeDequeue{}}})
+
+	// Act
+	h.resolver.SetOffer(testWorkspace, nil)
+
+	// Assert
+	if items := h.heldNow().GetItems(); len(items) != 0 {
+		t.Fatalf("held items = %v, want none", items)
+	}
+}
+
+func TestTheEditClaimMarksItsHeldPrompt(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.resolver.SetHeldPrompts(testWorkspace, []wsm.HeldPrompt{standingHold("turn-1", "first", 0)})
+
+	// Act
+	h.resolver.SetEditing(testWorkspace, "turn-1")
+
+	// Assert
+	if items := h.heldNow().GetItems(); len(items) != 1 || items[0].GetPrompt().GetEditing() == nil {
+		t.Fatalf("held items = %v, want the prompt marked as being edited", items)
+	}
+}
+
+func TestAResetKeepsTheSection(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.resolver.SetHeldPrompts(testWorkspace, []wsm.HeldPrompt{standingHold("turn-1", "first", 0)})
+
+	// Act
+	h.resolver.ResetWorkspace(testWorkspace, "a bind")
+
+	// Assert
+	if got := len(h.heldNow().GetItems()); got != 1 {
+		t.Fatalf("held items after a reset = %d, want the prompt still held", got)
+	}
+}

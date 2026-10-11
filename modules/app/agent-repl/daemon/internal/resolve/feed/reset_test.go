@@ -259,7 +259,7 @@ func TestAResetPublishesARemovalForEveryRowOnAnOpenTail(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Tail: %v", err)
 	}
-	rows := tail.Rows(ctx)
+	rows := tailRows(ctx, tail)
 	if got := <-rows; got.GetId().GetValue() != h.promptRowID("turn-1") {
 		t.Fatalf("streamed row = %q, want the prompt", got.GetId().GetValue())
 	}
@@ -288,7 +288,7 @@ func TestAResetKeepsAnOpenTailStreamingTheNewConversation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Tail: %v", err)
 	}
-	rows := tail.Rows(ctx)
+	rows := tailRows(ctx, tail)
 
 	// Act.
 	h.reset()

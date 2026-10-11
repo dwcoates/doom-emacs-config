@@ -18,7 +18,6 @@ import (
 	"claude-repld/internal/promptqueue"
 	"claude-repld/internal/publish"
 	"claude-repld/internal/resolve/footer"
-	"claude-repld/internal/resolve/holds"
 	"claude-repld/internal/resolve/sidebar"
 	"claude-repld/internal/resolve/topbar"
 	"claude-repld/internal/wsm"
@@ -133,24 +132,26 @@ func (i *Intake) DrainIntake(ctx context.Context, ws ids.WorkspaceID) error {
 }
 
 // Views republishes a workspace's whole views after adoption.
+//
+// The feed's held section is not among them: it rides the root feed, which a
+// re-attached page opens afresh, and its open serves the section whole.
 type Views struct {
 	topbar  topbar.Resolver
 	footer  footer.Resolver
-	holds   holds.Resolver
 	sidebar sidebar.Resolver
 	log     dlog.Logger
 }
 
-// NewViews builds the view half from the four resolvers that hold a
+// NewViews builds the view half from the three resolvers that hold a
 // per-workspace or editor-global publication.
-func NewViews(t topbar.Resolver, f footer.Resolver, h holds.Resolver, s sidebar.Resolver, log dlog.Logger) (*Views, error) {
+func NewViews(t topbar.Resolver, f footer.Resolver, s sidebar.Resolver, log dlog.Logger) (*Views, error) {
 	switch {
-	case t == nil || f == nil || h == nil || s == nil:
-		return nil, fmt.Errorf("handover: the view republisher needs all four view resolvers")
+	case t == nil || f == nil || s == nil:
+		return nil, fmt.Errorf("handover: the view republisher needs all three view resolvers")
 	case log == nil:
 		return nil, fmt.Errorf("handover: the view republisher needs a logger")
 	}
-	return &Views{topbar: t, footer: f, holds: h, sidebar: s, log: log}, nil
+	return &Views{topbar: t, footer: f, sidebar: s, log: log}, nil
 }
 
 // PublishViews republishes one workspace's whole views, so a client that
@@ -169,9 +170,6 @@ func (v *Views) PublishViews(_ context.Context, ws ids.WorkspaceID) error {
 	if republish(v.footer.Topic(ws)) {
 		republished++
 	}
-	if republish(v.holds.Topic(ws)) {
-		republished++
-	}
 	// The roster is EDITOR-GLOBAL: one publication for every workspace, so it
 	// is republished with each adoption and the last one leaves it current.
 	if republish(v.sidebar.Topic()) {
@@ -183,7 +181,7 @@ func (v *Views) PublishViews(_ context.Context, ws ids.WorkspaceID) error {
 }
 
 // republish hands a topic's latest value to its subscribers again, reporting
-// whether there was one. It is generic because the four topics carry four view
+// whether there was one. It is generic because the three topics carry three view
 // types and the step is identical for each.
 func republish[T any](topic *publish.Topic[T]) bool {
 	if topic == nil {

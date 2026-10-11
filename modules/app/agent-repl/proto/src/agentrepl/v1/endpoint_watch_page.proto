@@ -6,8 +6,8 @@
 // talks HTTP/1.1 — which caps a page at about SIX connections per host, and a
 // server-streaming Connect call pins one for its whole life. The webapp held
 // six (`WatchWorkspaceRoster`, `WatchWebWorkspace`, `WatchDaemon`,
-// `WatchTopbar`, `WatchFooter`, `WatchDaemonHolds`) before its feed tail was
-// even opened, and every stream after those SILENTLY QUEUED FOREVER: no
+// `WatchTopbar`, `WatchFooter`, and a held-prompt tray's own) before its feed
+// tail was even opened, and every stream after those SILENTLY QUEUED FOREVER: no
 // request on the wire, no error, no frame. The root feed's tail was the
 // seventh, so no row a workspace produced after the page loaded was ever
 // drawn. Every expanded subagent bubble opens another feed tail, so the count
@@ -45,7 +45,6 @@ import "agentrepl/v1/endpoint_watch_web_workspace.proto";
 import "agentrepl/v1/endpoint_watch_daemon.proto";
 import "agentrepl/v1/endpoint_watch_topbar.proto";
 import "agentrepl/v1/endpoint_watch_footer.proto";
-import "agentrepl/v1/endpoint_watch_daemon_holds.proto";
 import "agentrepl/v1/endpoint_watch_feed.proto";
 import "agentrepl/v1/endpoint_watch_login_terminal.proto";
 
@@ -91,10 +90,13 @@ message PageFrame {
     WatchDaemonResponse daemon = 4;
     WatchTopbarResponse topbar = 5;
     WatchFooterResponse footer = 6;
-    WatchDaemonHoldsResponse holds = 7;
     WatchFeedResponse feed = 8;
     LoginTerminalOutput login_terminal = 9;
   }
+  // Tag 7 is RETIRED: the held section rides the root feed's own frames
+  // (WatchFeedResponse.held), not a stream of its own.
+  reserved 7;
+  reserved "holds";
 }
 
 // A subscription that has ended, AND WHY.
@@ -170,10 +172,13 @@ message SubscribePageRequest {
     WatchDaemonRequest daemon = 5;
     WatchTopbarRequest topbar = 6;
     WatchFooterRequest footer = 7;
-    WatchDaemonHoldsRequest holds = 8;
     WatchFeedRequest feed = 9;
     WatchLoginTerminalRequest login_terminal = 10;
   }
+  // Tag 8 is RETIRED: the held section rides the root feed's own
+  // subscription (`feed`), not a stream of its own.
+  reserved 8;
+  reserved "holds";
 }
 
 // The subscription exists. It carries nothing: the acceptance IS the answer.

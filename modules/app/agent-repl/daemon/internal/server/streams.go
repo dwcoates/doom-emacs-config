@@ -28,13 +28,12 @@ import (
 // publish.Topic supplies the first two; acceptStream supplies the flush; the
 // pump below supplies the last two.
 
-// The view types the four resolver topics carry, aliased so the pump's wrap
+// The view types the three resolver topics carry, aliased so the pump's wrap
 // functions read as the view they send rather than as a package path.
 type (
 	frontendRoster = frontendv1.WorkspaceRoster
 	frontendFooter = frontendv1.FooterView
 	frontendTopbar = frontendv1.TopbarView
-	frontendTray   = frontendv1.DaemonHoldTray
 )
 
 // streamSink is what a standing stream's pump writes its pushes to.
@@ -290,38 +289,6 @@ func (s *server) watchTopbar(
 	return serveTopic(s, ctx, rpc, subject.Log, s.deps.Topbar.Topic(subject.Record.ID), out,
 		func(view *frontendTopbar) *agentreplv1.WatchTopbarResponse {
 			return &agentreplv1.WatchTopbarResponse{Topbar: view}
-		})
-}
-
-// WatchDaemonHolds serves one workspace's daemon-hold tray.
-func (s *server) WatchDaemonHolds(
-	ctx context.Context,
-	req *connect.Request[agentreplv1.WatchDaemonHoldsRequest],
-	out *connect.ServerStream[agentreplv1.WatchDaemonHoldsResponse],
-) error {
-	return s.watchDaemonHolds(ctx, req.Msg, out)
-}
-
-// watchDaemonHolds is the body, written to whatever sink carries it.
-func (s *server) watchDaemonHolds(
-	ctx context.Context,
-	msg *agentreplv1.WatchDaemonHoldsRequest,
-	out streamSink[agentreplv1.WatchDaemonHoldsResponse],
-) error {
-	const rpc = "WatchDaemonHolds"
-	if err := validateWorkspaceRef("workspace", msg.GetWorkspace()); err != nil {
-		return err
-	}
-	subject, r, err := s.resolveStreamRef(ctx, rpc, msg.GetWorkspace())
-	if err != nil {
-		return endStream(s.log, rpc, err)
-	}
-	if r != nil {
-		return refuseStream(s.log, rpc, *r)
-	}
-	return serveTopic(s, ctx, rpc, subject.Log, s.deps.Holds.Topic(subject.Record.ID), out,
-		func(tray *frontendTray) *agentreplv1.WatchDaemonHoldsResponse {
-			return &agentreplv1.WatchDaemonHoldsResponse{Tray: tray}
 		})
 }
 

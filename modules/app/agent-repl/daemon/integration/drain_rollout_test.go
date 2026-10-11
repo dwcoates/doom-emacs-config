@@ -525,7 +525,7 @@ func TestDuringADrainNewPromptsAreHeldWithTheShutdownHold(t *testing.T) {
 	}
 
 	// Assert
-	got := harness.AwaitView(t, f.d.Ctx(), tray, "the shutdown-held prompt", func(tr *frontendv1.DaemonHoldTray) bool {
+	got := harness.AwaitView(t, f.d.Ctx(), tray, "the shutdown-held prompt", func(tr *frontendv1.FeedHeld) bool {
 		for _, item := range tr.GetItems() {
 			if item.GetPrompt().GetShutdown() != nil {
 				return true
@@ -583,7 +583,7 @@ func TestDrainRefusalLogsAreRateLimitedWithSuppressedAndTotalCounts(t *testing.T
 	}
 	// Wait for the tray to carry all three held prompts, so every NoteRefusal
 	// call has already landed on the run log by the time it is read below.
-	harness.AwaitView(t, f.d.Ctx(), tray, "three shutdown-held prompts", func(tr *frontendv1.DaemonHoldTray) bool {
+	harness.AwaitView(t, f.d.Ctx(), tray, "three shutdown-held prompts", func(tr *frontendv1.FeedHeld) bool {
 		n := 0
 		for _, item := range tr.GetItems() {
 			if item.GetPrompt().GetShutdown() != nil {

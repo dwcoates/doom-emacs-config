@@ -1229,7 +1229,7 @@ func (f *fakeFooter) interruptions() []bool {
 
 // fakeHolds records the tray pushes.
 type fakeHolds struct {
-	holds.Resolver
+	holds.Sink
 	mu     sync.Mutex
 	pushes [][]wsm.HeldPrompt
 	// editing records every SetEditing, in order.

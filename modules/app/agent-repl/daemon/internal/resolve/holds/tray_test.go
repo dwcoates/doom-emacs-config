@@ -78,7 +78,7 @@ func TestTrayConvertsEachClassificationArm(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange.
-			r, _ := newResolver(t)
+			r, _ := newRenderer(t)
 
 			// Act.
 			r.SetHeldPrompts(testWS, []wsm.HeldPrompt{tc.held})
@@ -93,7 +93,7 @@ func TestTrayConvertsEachClassificationArm(t *testing.T) {
 
 func TestTrayCarriesTheAfterToolCallRationale(t *testing.T) {
 	// Arrange.
-	r, _ := newResolver(t)
+	r, _ := newRenderer(t)
 	held := verdict(hold("t1", "also cover the edge case"), wsm.ArmAfterToolCall, "adds to the running work")
 
 	// Act.
@@ -107,7 +107,7 @@ func TestTrayCarriesTheAfterToolCallRationale(t *testing.T) {
 
 func TestTrayCarriesTheInterjectRationale(t *testing.T) {
 	// Arrange.
-	r, _ := newResolver(t)
+	r, _ := newRenderer(t)
 	held := verdict(hold("t1", "stop"), wsm.ArmInterject, "the user said stop")
 
 	// Act.
@@ -122,7 +122,7 @@ func TestTrayCarriesTheInterjectRationale(t *testing.T) {
 
 func TestTrayCarriesTheHoldForTurnEndAcceptance(t *testing.T) {
 	// Arrange.
-	r, _ := newResolver(t)
+	r, _ := newRenderer(t)
 	held := verdict(hold("t1", "later"), wsm.ArmHoldForTurnEnd, "no urgency")
 	held.Accepted = true
 
@@ -137,7 +137,7 @@ func TestTrayCarriesTheHoldForTurnEndAcceptance(t *testing.T) {
 
 func TestTrayNamesTheUninterruptibleCommand(t *testing.T) {
 	// Arrange.
-	r, _ := newResolver(t)
+	r, _ := newRenderer(t)
 	held := uninterruptible(hold("t1", "wait"), conversationv1.SessionCommand_SESSION_COMMAND_CLEAR)
 
 	// Act.
@@ -152,7 +152,7 @@ func TestTrayNamesTheUninterruptibleCommand(t *testing.T) {
 
 func TestTrayRecordsAnUninterruptibleVerdictThatNamesNoCommand(t *testing.T) {
 	// Arrange.
-	r, surfaces := newResolver(t)
+	r, surfaces := newRenderer(t)
 	held := uninterruptible(hold("t1", "wait"), conversationv1.SessionCommand_SESSION_COMMAND_UNSPECIFIED)
 
 	// Act.
@@ -166,7 +166,7 @@ func TestTrayRecordsAnUninterruptibleVerdictThatNamesNoCommand(t *testing.T) {
 
 func TestTrayStillDrawsAnUninterruptibleVerdictThatNamesNoCommand(t *testing.T) {
 	// Arrange.
-	r, _ := newResolver(t)
+	r, _ := newRenderer(t)
 	held := uninterruptible(hold("t1", "wait"), conversationv1.SessionCommand_SESSION_COMMAND_UNSPECIFIED)
 
 	// Act.
@@ -195,7 +195,7 @@ func TestTrayConvertsEachHoldArm(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange.
-			r, _ := newResolver(t)
+			r, _ := newRenderer(t)
 			held := hold("t1", "queued")
 			held.Hold = tc.kind
 			held.ScheduleID = tc.schedule
@@ -213,7 +213,7 @@ func TestTrayConvertsEachHoldArm(t *testing.T) {
 
 func TestTrayCarriesTheShutdownSchedule(t *testing.T) {
 	// Arrange.
-	r, _ := newResolver(t)
+	r, _ := newRenderer(t)
 	held := hold("t1", "queued")
 	held.Hold = kindOf(wsm.HoldShutdown)
 	held.ScheduleID = "sched-7"
@@ -229,7 +229,7 @@ func TestTrayCarriesTheShutdownSchedule(t *testing.T) {
 
 func TestTrayRecordsAShutdownHoldThatNamesNoSchedule(t *testing.T) {
 	// Arrange.
-	r, surfaces := newResolver(t)
+	r, surfaces := newRenderer(t)
 	held := hold("t1", "queued")
 	held.Hold = kindOf(wsm.HoldShutdown)
 
@@ -244,7 +244,7 @@ func TestTrayRecordsAShutdownHoldThatNamesNoSchedule(t *testing.T) {
 
 func TestTrayCarriesTheWholeSaid(t *testing.T) {
 	// Arrange: an image block is exactly what a text-only conversion drops.
-	r, _ := newResolver(t)
+	r, _ := newRenderer(t)
 	held := hold("t1", "look at this")
 	held.Said.Content.Blocks = append(held.Said.Content.Blocks, &conversationv1.UserContentBlock{
 		Block: &conversationv1.UserContentBlock_Unsupported{
@@ -262,7 +262,7 @@ func TestTrayCarriesTheWholeSaid(t *testing.T) {
 
 func TestTrayCarriesTheMintedTurn(t *testing.T) {
 	// Arrange.
-	r, _ := newResolver(t)
+	r, _ := newRenderer(t)
 
 	// Act.
 	r.SetHeldPrompts(testWS, []wsm.HeldPrompt{hold("turn-42", "queued")})
@@ -275,7 +275,7 @@ func TestTrayCarriesTheMintedTurn(t *testing.T) {
 
 func TestTrayStampsWhenThePromptWasQueued(t *testing.T) {
 	// Arrange.
-	r, _ := newResolver(t)
+	r, _ := newRenderer(t)
 
 	// Act.
 	r.SetHeldPrompts(testWS, []wsm.HeldPrompt{hold("t1", "queued")})
@@ -288,7 +288,7 @@ func TestTrayStampsWhenThePromptWasQueued(t *testing.T) {
 
 func TestTraySkipsARetiredHold(t *testing.T) {
 	// Arrange.
-	r, _ := newResolver(t)
+	r, _ := newRenderer(t)
 	retired := hold("t1", "already delivered")
 	retired.Tombstone = &wsm.Tombstone{Kind: "delivered", At: queuedAt}
 
@@ -304,7 +304,7 @@ func TestTraySkipsARetiredHold(t *testing.T) {
 
 func TestTrayDrawsHoldsOldestFirst(t *testing.T) {
 	// Arrange.
-	r, _ := newResolver(t)
+	r, _ := newRenderer(t)
 	newer := hold("t-newer", "second")
 	newer.QueuedAt = queuedAt.Add(time.Second)
 	older := hold("t-older", "first")
@@ -321,7 +321,7 @@ func TestTrayDrawsHoldsOldestFirst(t *testing.T) {
 
 func TestTrayBreaksAnOrderTieOnTheTurnId(t *testing.T) {
 	// Arrange: two prompts queued in the same millisecond.
-	r, _ := newResolver(t)
+	r, _ := newRenderer(t)
 
 	// Act.
 	r.SetHeldPrompts(testWS, []wsm.HeldPrompt{hold("t-b", "second"), hold("t-a", "first")})
@@ -335,7 +335,7 @@ func TestTrayBreaksAnOrderTieOnTheTurnId(t *testing.T) {
 
 func TestTrayNeverReordersTheCallersSlice(t *testing.T) {
 	// Arrange.
-	r, _ := newResolver(t)
+	r, _ := newRenderer(t)
 	newer := hold("t-newer", "second")
 	newer.QueuedAt = queuedAt.Add(time.Second)
 	given := []wsm.HeldPrompt{newer, hold("t-older", "first")}
@@ -670,7 +670,7 @@ func TestHeldStatusShutdownWithNoScheduleOmitsTheId(t *testing.T) {
 
 func TestHeldStatusNeverEmitsAnEmptyLabel(t *testing.T) {
 	// Arrange.
-	r, _ := newResolver(t)
+	r, _ := newRenderer(t)
 	held := []wsm.HeldPrompt{
 		hold("t0", "a"),
 		verdict(hold("t1", "b"), wsm.ArmInterject, ""),
@@ -692,7 +692,7 @@ func TestHeldStatusNeverEmitsAnEmptyLabel(t *testing.T) {
 
 func TestTrayCarriesTheComposedBadge(t *testing.T) {
 	// Arrange.
-	r, _ := newResolver(t)
+	r, _ := newRenderer(t)
 	held := verdict(hold("t1", "then run the tests"), wsm.ArmHoldForTurnEnd, "no urgency")
 	held.Accepted = true
 	held.Hold = kindOf(wsm.HoldShutdown)
@@ -732,7 +732,7 @@ func TestTrayCarriesAHeldSessionAct(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange.
-			r, _ := newResolver(t)
+			r, _ := newRenderer(t)
 			held := hold("t1", "/model opus")
 			act := tc.act
 			held.Act = &act
@@ -750,7 +750,7 @@ func TestTrayCarriesAHeldSessionAct(t *testing.T) {
 
 func TestTrayCarriesNoActForAPrompt(t *testing.T) {
 	// Arrange.
-	r, _ := newResolver(t)
+	r, _ := newRenderer(t)
 
 	// Act.
 	r.SetHeldPrompts(testWS, []wsm.HeldPrompt{hold("t1", "fix it")})
@@ -763,7 +763,7 @@ func TestTrayCarriesNoActForAPrompt(t *testing.T) {
 
 func TestTrayRecordsAnUnknownActLoudly(t *testing.T) {
 	// Arrange.
-	r, sink := newResolver(t)
+	r, sink := newRenderer(t)
 	held := hold("t1", "theme dark")
 	held.Act = &wsm.HeldAct{Kind: "theme", Value: "dark"}
 
@@ -781,7 +781,7 @@ func TestTrayRecordsAnUnknownActLoudly(t *testing.T) {
 
 func TestTrayMarksACoalescedHold(t *testing.T) {
 	// Arrange.
-	r, _ := newResolver(t)
+	r, _ := newRenderer(t)
 	held := hold("t1", "a\nb")
 	held.Coalesced = true
 
@@ -796,7 +796,7 @@ func TestTrayMarksACoalescedHold(t *testing.T) {
 
 func TestTrayComposesTheCoalescedNote(t *testing.T) {
 	// Arrange.
-	r, _ := newResolver(t)
+	r, _ := newRenderer(t)
 	// A classifier in flight is the stamped arm: an unjudged record draws
 	// awaiting_delivery since 2026-10-10.
 	held := verdict(hold("t1", "a\nb"), wsm.ArmClassifying, "")
@@ -890,7 +890,7 @@ func TestTrayOffersFoldAbove(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange.
-			r, _ := newResolver(t)
+			r, _ := newRenderer(t)
 			r.SetEditing(testWS, tt.editing)
 
 			// Act.
