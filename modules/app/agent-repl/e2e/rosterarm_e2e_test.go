@@ -209,5 +209,7 @@ func raWalkRows(r *frontendv1.WorkspaceRoster, visit func(*frontendv1.RosterRow)
 	for _, s := range r.GetTask().GetSections() {
 		walk(s.GetRows().GetRows())
 	}
-	walk(r.GetRecentlyMerged().GetRows().GetRows())
+	for _, g := range r.GetRecentlyMerged().GetGroups() {
+		walk(g.GetRows().GetRows())
+	}
 }
