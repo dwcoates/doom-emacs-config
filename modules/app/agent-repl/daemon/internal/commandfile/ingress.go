@@ -318,7 +318,7 @@ func (i *ingress) apply(ctx context.Context, log dlog.Logger, file string, index
 		// A COMMAND-FILE MERGE IS AN AGENT'S ASK, made from inside its own
 		// turn: it is put in line once that turn ends, and never displaces
 		// the turn in flight (merge.Requester).
-		return i.deps.Merge.Enqueue(ctx, merge.Request{Workspace: ws, Source: source, By: merge.RequestedByAgent, Detached: entry.Detached})
+		return i.deps.Merge.Enqueue(ctx, merge.Request{Workspace: ws, Source: source, By: merge.RequestedByAgent, Detached: entry.Detached, OneShot: entry.OneShot})
 	case TypeMergeEvict:
 		return i.applyMergeEvict(ctx, log, entry)
 	case TypeMergePause, TypeMergeResume:

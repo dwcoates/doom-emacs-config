@@ -158,6 +158,13 @@ type Request struct {
 	// (agentrepl.v1.MergeWorkspaceSourceOwnBranchDetached). It is legal on the
 	// own-branch source alone, which never keeps the requester open.
 	Detached bool
+	// OneShot ANNOUNCES the requester a one-shot: its own branch merges in
+	// place once the requesting turn ends and the requester closes once it
+	// lands, and the request marks the requester a one-shot on its creation
+	// job (wsm.CreationJob.OneShot), the fact every surface draws a one-shot
+	// from. It is legal on an in-place own-branch source that does not keep
+	// the requester open, alone.
+	OneShot bool
 }
 
 // DetachedMerges forks the merge workspace a detached request runs in, and
