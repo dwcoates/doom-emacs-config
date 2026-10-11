@@ -2026,6 +2026,16 @@ sits behind a harness re-read."
 ;; old `:ni' entry was.
 (define-key agent-repl-input-mode-map (kbd "C-c C-k") #'agent-repl-interrupt-turn)
 
+;; SEND AND NEWLINE IN EMACS STATE.  The `:ni' entries in the `map!' form above
+;; live in evil's normal and insert auxiliary maps only, so in evil's emacs
+;; state (and in a session without evil) `RET' fell through to the global
+;; `newline', and the only chord that sent was `C-RET' -- which appends
+;; `agent-repl-send-postfix'.  The plain mode map is what emacs state reads;
+;; in normal and insert state the evil auxiliary maps still outrank it, so
+;; these change nothing there.
+(define-key agent-repl-input-mode-map (kbd "RET") #'agent-repl-send)
+(define-key agent-repl-input-mode-map (kbd "S-RET") #'newline)
+
 ;; FEED TEXT ZOOM.  Bound with `define-key' rather than through the `map!' form
 ;; above for the same reasons `C-c C-k' is: the binding is OBSERVABLE under
 ;; `emacs -Q' (where `map!' is a no-op stub) so the keybinding suite can assert
