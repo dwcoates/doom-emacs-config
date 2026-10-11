@@ -888,6 +888,12 @@ message RosterRowDetail {
   RosterRowDetailBranch branch = 1;
   RosterRowDetailParentBranch parent_branch = 2;
   RosterRowDetailSummary summary = 3;
+
+  // How many commits the workspace's branch holds beyond its merge-base with
+  // the branch it was cut from. For a merged workspace, the commits its merge
+  // brought into that branch, fixed when the merge landed. UNSET when the
+  // daemon has no count to state.
+  optional RosterRowDetailCommits commits = 4;
 }
 
 // The workspace's own git branch. Display only — the join key is the dir.
@@ -904,6 +910,13 @@ message RosterRowDetailParentBranch {
 // last prompt summary.
 message RosterRowDetailSummary {
   string text = 1;
+}
+
+// The detail panel's commit-count line.
+message RosterRowDetailCommits {
+  // The number of commits. Zero is a real count: the branch has nothing
+  // of its own yet.
+  uint32 count = 1;
 }
 
 // The row's receded styling.
