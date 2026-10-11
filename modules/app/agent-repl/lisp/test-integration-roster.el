@@ -1366,7 +1366,7 @@ SOME visual marker even though they take no lifecycle color."
                      "?")))))
 
 (ert-deftest agent-repl-itest-roster-merge-failed-arm-draws-its-glyph ()
-  "The `merge_failed' arm draws its ✗ glyph through the render path.
+  "The `merge_failed' arm draws the failure mark through the render path.
 A failed merge is turquoise AND glyphed, so the tab says both that
 something went wrong and that it was the merge."
   ;; Arrange.
@@ -1386,7 +1386,38 @@ something went wrong and that it was the merge."
       (should (equal (agent-repl-status-tab-glyph
                       "itest-glyph-failed"
                       (agent-repl-status-tab-state "itest-glyph-failed"))
-                     "✗")))))
+                     agent-repl-status-failure-glyph)))))
+
+(ert-deftest agent-repl-itest-roster-one-shot-row-draws-its-mark ()
+  "A one-shot row's outcome draws its mark through the render path: 🎯 while
+armed, the failure mark once a push says it failed."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-roster--with-subscription daemon
+      (agent-repl-itest-roster--push
+       daemon (agent-repl-itest-roster--roster
+               (list (agent-repl-itest-roster--row
+                      "itest-one-shot" "itest-one-shot" 'done
+                      '(oneShot . ((armed . ())))))))
+      (agent-repl-itest--wait-until
+       (lambda () (eq (agent-repl-roster-one-shot-for-ws "itest-one-shot") :armed))
+       nil "the armed one-shot")
+      (should (equal (agent-repl-status-tab-glyph
+                      "itest-one-shot" (agent-repl-status-tab-state "itest-one-shot"))
+                     agent-repl-status-one-shot-glyph))
+      ;; Act.
+      (agent-repl-itest-roster--push
+       daemon (agent-repl-itest-roster--roster
+               (list (agent-repl-itest-roster--row
+                      "itest-one-shot" "itest-one-shot" 'done
+                      '(oneShot . ((failed . ())))))))
+      (agent-repl-itest--wait-until
+       (lambda () (eq (agent-repl-roster-one-shot-for-ws "itest-one-shot") :failed))
+       nil "the failed one-shot")
+      ;; Assert.
+      (should (equal (agent-repl-status-tab-glyph
+                      "itest-one-shot" (agent-repl-status-tab-state "itest-one-shot"))
+                     agent-repl-status-failure-glyph)))))
 
 (ert-deftest agent-repl-itest-roster-logs-the-roster-stream-open ()
   "The roster subscription is logged through the canonical ladder."
