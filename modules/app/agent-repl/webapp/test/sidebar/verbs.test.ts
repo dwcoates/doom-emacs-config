@@ -119,9 +119,10 @@ describe("the requests each verb is", () => {
     expect(buildMergeWorkspaceRequest(TARGET_WS).source?.source.case).toBe("ownBranch");
   });
 
-  it("asks MergeWorkspace to close the workspace once its branch lands", () => {
+  it("asks MergeWorkspace to merge in place and close the workspace once its branch lands", () => {
     const source = buildMergeWorkspaceRequest(TARGET_WS).source?.source;
-    expect(source?.case === "ownBranch" ? source.value.keepOpen : "not own branch").toBe(false);
+    const run = source?.case === "ownBranch" ? source.value.run : undefined;
+    expect(run?.case === "inPlace" ? run.value.keepOpen : "not in place").toBe(false);
   });
 
   it("echoes the row's workspace on the one-mode restart request", () => {
