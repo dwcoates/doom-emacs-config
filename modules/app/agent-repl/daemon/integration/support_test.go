@@ -6,6 +6,7 @@
 package integration
 
 import (
+	"agentrepl/protohelpers/rosterwalk"
 	"errors"
 	"os"
 	"path/filepath"
@@ -480,7 +481,7 @@ func rosterRow(roster *frontendv1.WorkspaceRoster, id string) *frontendv1.Roster
 			return found
 		}
 	}
-	return walk(roster.GetRecentlyMerged().GetRows().GetRows())
+	return walk(rosterwalk.MergedRows(roster))
 }
 
 // rosterRepoRow finds a workspace's row only under the repository grouping.
