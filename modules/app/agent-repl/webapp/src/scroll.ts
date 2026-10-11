@@ -108,7 +108,9 @@ export interface ScrollPosition {
  *   Latching moves nothing; later content then keeps the tail in view, and
  *   those follow moves are recorded under this cause.
  *
- * Every move is recorded at DEBUG as `scroll.feed-moved` with its cause.
+ * Every move is recorded at INFO as `scroll.feed-moved` with its cause: a move
+ * the reader can see is one the shared log must show (`scroll.box-resized`
+ * records the size changes that drive the follow and anchoring moves).
  */
 export const SCROLL_CAUSES = [
   "promptSent",
@@ -369,6 +371,8 @@ export class TailFollow {
   private latestHidden = true;
   /** Told when the reader's own scroll returns the feed to its tail (`onTailReached`). */
   private tailReached: (() => void) | null = null;
+  /** The box's sizes the last resize pass saw, so only a real change is recorded. */
+  private seenSize: { scrollHeight: number; clientHeight: number };
 
   /**
    * READLATEST is where the feed's latest entry sits; a box with no feed to
@@ -383,6 +387,7 @@ export class TailFollow {
     private readonly rows: AnchorRows | null = null,
   ) {
     this.lastTop = box.scrollTop;
+    this.seenSize = { scrollHeight: box.scrollHeight, clientHeight: box.clientHeight };
   }
 
   /** Whether new content should pull the view. The one question, one answer. */
@@ -542,6 +547,7 @@ export class TailFollow {
    * under them where it was.
    */
   onResize(): void {
+    this.recordResize();
     this.sync();
     this.reanchor("resize");
     this.follow();
@@ -556,6 +562,31 @@ export class TailFollow {
     subscribeScroll(() => this.onScroll());
     subscribeResize(() => this.onResize());
     subscribeInput(() => this.onInput());
+  }
+
+  /**
+   * Record a change in the box's viewport height (the footer or composer taking
+   * or giving height) or its content height (a row laying out, growing or
+   * shrinking), with where the view stood and whether a follow stands: the
+   * size change any follow or anchoring move that follows is answering.
+   */
+  private recordResize(): void {
+    const seen = this.seenSize;
+    const now = { scrollHeight: this.box.scrollHeight, clientHeight: this.box.clientHeight };
+    if (now.scrollHeight === seen.scrollHeight && now.clientHeight === seen.clientHeight) return;
+    this.seenSize = now;
+    log.info("the feed's scroll box changed size", {
+      operation: "scroll.box-resized",
+      context: {
+        scroll_height: now.scrollHeight,
+        scroll_height_delta: now.scrollHeight - seen.scrollHeight,
+        client_height: now.clientHeight,
+        client_height_delta: now.clientHeight - seen.clientHeight,
+        at: this.box.scrollTop,
+        following: this.following,
+        cause: this.cause ?? "none",
+      },
+    });
   }
 
   /** Land the box at its tail and latch the follow under CAUSE. */
@@ -755,7 +786,7 @@ export class TailFollow {
     // The input that brought the entry into view has been spent on this latch.
     this.touched = false;
     this.lastTop = this.box.scrollTop;
-    log.debug("the reader can see the latest entry; the follow starts where the view stands", {
+    log.info("the reader can see the latest entry; the follow starts where the view stands", {
       operation: "scroll.follow-started",
       context: { cause: "latestVisible", at: this.lastTop, trigger, returned },
     });
@@ -790,7 +821,7 @@ export class TailFollow {
     // a few px), and so does a downward one that stops short of the tail.
     const stayed = top > this.lastTop && this.box.scrollHeight - top - this.box.clientHeight < PIN_PX;
     if (this.touched && this.following && !stayed) {
-      log.debug("the reader scrolled away from the tail; the follow ends", {
+      log.info("the reader scrolled away from the tail; the follow ends", {
         operation: "scroll.follow-ended",
         context: { cause: this.cause ?? "none", from: this.lastTop, to: top },
       });
@@ -803,7 +834,7 @@ export class TailFollow {
 
 /** One implicit move of the feed, recorded with the cause that made it. */
 function recordMove(cause: ScrollCause, from: number, to: number, follow: boolean): void {
-  log.debug(`the feed moved for ${cause}`, {
+  log.info(`the feed moved for ${cause}`, {
     operation: "scroll.feed-moved",
     context: { cause, from, to, follow },
   });
