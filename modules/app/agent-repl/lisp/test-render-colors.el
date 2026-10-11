@@ -57,6 +57,51 @@
   "Return the fixture's snake_case spelling of the elisp ARM keyword."
   (replace-regexp-in-string "-" "_" (substring (symbol-name arm) 1)))
 
+(defun agent-repl-test--glyph-table-mismatches (key table)
+  "Return where the glyph TABLE disagrees with the fixture's KEY section.
+Every fixture row must have a string glyph in TABLE, and every TABLE row
+must be named by the fixture.  The result lists each offending wire name,
+fixture rows first, so nil means the two agree row for row."
+  (let ((fixture (agent-repl-test--fixture key)))
+    (append
+     (seq-keep (lambda (entry)
+                 (unless (stringp (alist-get (agent-repl-test--arm-keyword (car entry))
+                                             table))
+                   (car entry)))
+               fixture)
+     (seq-keep (lambda (row)
+                 (let ((wire (agent-repl-test--wire-name (car row))))
+                   (unless (assoc wire fixture) wire)))
+               table))))
+
+(ert-deftest agent-repl-test-colors-glyph-mismatches-agree ()
+  "A table matching the fixture row for row has no mismatches."
+  ;; Act / Assert
+  (should (null (agent-repl-test--glyph-table-mismatches
+                 "gate_glyphs" '((:permission . "!") (:question . "?"))))))
+
+(ert-deftest agent-repl-test-colors-glyph-mismatches-a-missing-row ()
+  "A fixture row with no glyph in the table is reported."
+  ;; Act / Assert
+  (should (equal (agent-repl-test--glyph-table-mismatches
+                  "gate_glyphs" '((:permission . "!")))
+                 '("question"))))
+
+(ert-deftest agent-repl-test-colors-glyph-mismatches-a-non-string-glyph ()
+  "A table row whose glyph is not a string counts as missing."
+  ;; Act / Assert
+  (should (equal (agent-repl-test--glyph-table-mismatches
+                  "gate_glyphs" '((:permission . "!") (:question . nil)))
+                 '("question"))))
+
+(ert-deftest agent-repl-test-colors-glyph-mismatches-an-extra-row ()
+  "A table row the fixture does not name is reported."
+  ;; Act / Assert
+  (should (equal (agent-repl-test--glyph-table-mismatches
+                  "gate_glyphs"
+                  '((:permission . "!") (:question . "?") (:waiting . "~")))
+                 '("waiting"))))
+
 ;;;; ---- roster_status, row for row --------------------------------------
 
 (ert-deftest agent-repl-test-colors-every-fixture-arm-has-a-local-row ()
@@ -129,23 +174,34 @@ whole reason the escape hatch is a declaration."
   (should (equal (alist-get :thinking agent-repl-status-tab-bar-color-table)
                  (alist-get :thinking agent-repl-status-color-table))))
 
-;;;; ---- merge_glyphs ----------------------------------------------------
+;;;; ---- merge_glyphs and gate_glyphs, row for row ----------------------
 
-(ert-deftest agent-repl-test-colors-every-merge-arm-has-a-glyph ()
-  "Every merge arm the fixture names a glyph for draws one here.
-The merge arms spend no lifecycle color, so a missing glyph would leave
-them reporting nothing at all."
+(ert-deftest agent-repl-test-colors-merge-glyphs-match-the-fixture ()
+  "The merge glyph table agrees with the fixture row for row.
+The merge arms report which merge state they are by glyph, so a missing
+glyph would leave them unable to say."
   ;; Act / Assert
-  (dolist (entry (agent-repl-test--fixture "merge_glyphs"))
-    (should (stringp (alist-get (agent-repl-test--arm-keyword (car entry))
-                                agent-repl-status-merge-glyphs)))))
+  (should (null (agent-repl-test--glyph-table-mismatches
+                 "merge_glyphs" agent-repl-status-merge-glyphs))))
 
-(ert-deftest agent-repl-test-colors-no-extra-merge-glyph-exists ()
-  "Only the arms the fixture names a glyph for have one."
+(ert-deftest agent-repl-test-colors-gate-glyphs-match-the-fixture ()
+  "The gate glyph table agrees with the fixture row for row."
   ;; Act / Assert
-  (dolist (row agent-repl-status-merge-glyphs)
-    (should (assoc (agent-repl-test--wire-name (car row))
-                   (agent-repl-test--fixture "merge_glyphs")))))
+  (should (null (agent-repl-test--glyph-table-mismatches
+                 "gate_glyphs" agent-repl-status-gate-glyphs))))
+
+(ert-deftest agent-repl-test-colors-every-glyph-section-is-checked ()
+  "Every fixture section named `*_glyphs' keyed by roster arms is asserted here.
+A new glyph section checked by a hand-rolled loop instead of
+`agent-repl-test--glyph-table-mismatches' would fail this test."
+  ;; Arrange
+  (let ((checked '("merge_glyphs" "gate_glyphs"))
+        (feed-sections '("feed_outcome_marker_glyphs")))
+    ;; Act / Assert
+    (dolist (entry agent-repl-test--color-fixture)
+      (when (and (string-suffix-p "_glyphs" (car entry))
+                 (not (member (car entry) feed-sections)))
+        (should (member (car entry) checked))))))
 
 ;;;; ---- The five colors -------------------------------------------------
 

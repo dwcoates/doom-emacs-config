@@ -20,6 +20,7 @@ const SCHEMA_ARMS = RosterRowSchema.oneofs[0].fields.map((field) => field.localN
 
 const ROSTER_STATUS = renderColors.roster_status as Record<string, string>;
 const MERGE_GLYPHS = renderColors.merge_glyphs as Record<string, string>;
+const GATE_GLYPHS = renderColors.gate_glyphs as Record<string, string>;
 
 describe("the rail's arm table against the schema", () => {
   it.each(SCHEMA_ARMS)("names the schema's %s arm", (arm) => {
@@ -43,9 +44,9 @@ describe("the rail's arm table against the shared vocabulary", () => {
 });
 
 describe("the status mark", () => {
-  it.each(Object.keys(MERGE_GLYPHS))("gives the %s arm its shared glyph name", (key) => {
+  it.each(Object.entries({ ...MERGE_GLYPHS, ...GATE_GLYPHS }))("gives the %s arm its shared glyph name %s", (key, name) => {
     const arm = ROSTER_STATUS_CASES.find((c) => protoArmName(c) === key) as RosterStatusCase;
-    expect(glyphName(arm)).toBe(MERGE_GLYPHS[key]);
+    expect(glyphName(arm)).toBe(name);
   });
 
   it.each([...ROSTER_STATUS_CASES])("draws a glyph character for %s", (arm) => {
@@ -57,10 +58,19 @@ describe("the status mark", () => {
     expect(rosterArmMark("ready")).toEqual({ toneClass: "tone-green", glyph: "dot", char: "" });
   });
 
-  // A GATE IS READY FOR YOU (owner ruling, 2026-10-08): the same green dot as
-  // a finished turn, never a working red one.
-  it.each(["permission", "question"] as const)("draws a %s gate as the green dot a finished turn draws", (arm) => {
-    expect(rosterArmMark(arm)).toEqual(rosterArmMark("done"));
+  // A GATE IS READY FOR YOU (owner ruling, 2026-10-08): the green of a
+  // finished turn, with the gate's emoji in place of the dot (owner request,
+  // 2026-10-11).
+  it("draws a permission gate as a green exclamation emoji", () => {
+    expect(rosterArmMark("permission")).toEqual({ toneClass: "tone-green", glyph: "exclaim", char: "❗" });
+  });
+
+  it("draws a question gate as a green question emoji", () => {
+    expect(rosterArmMark("question")).toEqual({ toneClass: "tone-green", glyph: "ask", char: "❓" });
+  });
+
+  it("draws a waiting session as the plain green dot, since it is no gate", () => {
+    expect(rosterArmMark("waiting")).toEqual({ toneClass: "tone-green", glyph: "dot", char: "" });
   });
 
   it("draws a failed turn end as a turquoise dot", () => {

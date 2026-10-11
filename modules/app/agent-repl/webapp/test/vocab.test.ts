@@ -29,6 +29,7 @@ import {
   failureSideColor,
   footerStatusColor,
   mergeGlyph,
+  gateGlyph,
   paintClass,
   protoArmName,
   rosterStatusColor,
@@ -199,6 +200,20 @@ describe("topbarTone", () => {
 
   it("refuses an empty tone", () => {
     expect(() => topbarTone("")).toThrow(MalformedView);
+  });
+});
+
+describe("gateGlyph", () => {
+  it("names the exclaim glyph for a pending permission", () => {
+    expect(gateGlyph("permission")).toBe("exclaim");
+  });
+
+  it("names the ask glyph for a pending question", () => {
+    expect(gateGlyph("question")).toBe("ask");
+  });
+
+  it("names no glyph for an arm that is no gate", () => {
+    expect(gateGlyph("waiting")).toBeUndefined();
   });
 });
 
