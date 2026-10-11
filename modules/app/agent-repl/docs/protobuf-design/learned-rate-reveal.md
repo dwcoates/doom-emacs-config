@@ -84,3 +84,47 @@ Supersedes the pacing model of `streaming-reveal-window.md`.
     each push; the webapp keeps only per-bubble on-screen bookkeeping.
 
 ## Landed changes
+
+### 1. `frontend.v1.FeedResponseRevealPace` replaces `frontend.v1.FeedResponseRevealWindow` (2026-10-10)
+
+- **What.** `frontend.v1.FeedResponseUpdate.reveal_pace` and
+  `frontend.v1.FeedResponseSuccess.reveal_pace` (tag 3, `optional`), both the
+  new element `frontend.v1.FeedResponseRevealPace` with
+  `min_chars_per_second`, `max_chars_per_second` and `bank_limit_ms`.
+  `frontend.v1.FeedResponseRevealWindow` is deleted; tag 2 and the name
+  `reveal_window` are reserved on both arms. `frontend.v1.FeedResponseError`
+  still carries no pace: a bubble the turn's death cut short is drawn whole.
+- **Why bounds and a bank rather than a window.** A window predicts the time
+  to the next burst afresh for every burst, so its errors stay in the total;
+  one 6538 ms pause stretched thinking's window to about 5.8 s, and prose's
+  ~150 ms window typed each burst out at once. The owner's design: follow the
+  arrival speed, clamped to learned bounds, bank the overflow, accept stalls
+  during rare long pauses, and finish a little after the stream rather than
+  catching up and stalling.
+- **Why the arrival speed and the bank stay off the wire.** Only the webapp
+  sees when each push reached it and how much of the bubble is on screen;
+  this is the per-bubble bookkeeping the carried principle already allows.
+- **Why the bank limit rides the wire.** It is a pacing figure the owner set
+  (1.5 s), and pacing state is the daemon's per the carried principle; the
+  webapp holds no tuning of its own.
+- **Owner-delegated decisions (owner: "just pick your own best recommended
+  decisions", 2026-10-10).**
+  - A model or kind with too few measured blocks gets a built-in default pace
+    (seeded from the 2026-10-10 store measurement), so every live draw is
+    paced and the field is unset only on replays.
+  - A subagent's bubble gets the bounds learned for its kind across every
+    model. Why: `conversation.v1.AgentActivity` names no model, and the
+    daemon's feed resolver knows only the session's model
+    (`daemon/internal/resolve/feed/resolver.go:223`, code tier). Passing the
+    subagent's model through would need a `conversation.v1` change across the
+    shim; the kind-wide record works with what the daemon already has.
+    - Gap routed around: activities carry no producing model. When an
+      activity names its model, subagent bubbles should switch to their own
+      (model, kind) record and the kind-wide record goes away.
+- **Consequences.**
+  - Subagent bubbles type out at a learned pace instead of the 200 chars/sec
+    chase.
+  - Every live `success` carries a pace, so a block's tail always types out.
+  - The daemon's burst-gap machinery (`revealpace.Burst`, `weightedAverage`,
+    `reveal_burst_gaps`) has no remaining reader; the table is retired with a
+    later breaking step, per the wsm two-deploy rule.
