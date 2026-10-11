@@ -115,22 +115,55 @@ func (i *ingress) sourceParent(ctx context.Context, source *SourceWorkspace, rep
 	if source == nil {
 		return nil, nil
 	}
-	canonical, err := dirpath.Canonical(source.Path)
+	ws, main, err := i.parentAt(ctx, source.Path, repo)
+	var unregistered *unregisteredParentError
+	if errors.As(err, &unregistered) {
+		return nil, fmt.Errorf("source_ws.path %w", err)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("source_ws.path: %w", err)
 	}
-	if canonical == repo.Dir {
+	if main {
 		return nil, nil
-	}
-	ws, err := i.deps.DB.WorkspaceByDir(ctx, source.Path)
-	if err != nil {
-		return nil, fmt.Errorf("source_ws.path %q is neither repository %q's main checkout nor a registered workspace: %w", source.Path, repo.Dir, err)
 	}
 	if ws.Repo != repo.ID {
 		return nil, fmt.Errorf("source_ws.path %q is workspace %q of repository %q, not of the create's repository %q", source.Path, ws.ID, ws.Repo, repo.ID)
 	}
 	return &ws.ID, nil
 }
+
+// parentAt answers what a parent directory names within repo: its main
+// checkout (main is true, and no workspace), or the registered workspace whose
+// worktree it is. A directory that is neither is an unregisteredParentError.
+// The create's source_ws and the retarget's parent are both spelled this way,
+// and both read the main checkout as "no parent".
+func (i *ingress) parentAt(ctx context.Context, dir string, repo wsm.Repository) (ws wsm.Workspace, main bool, err error) {
+	canonical, err := dirpath.Canonical(dir)
+	if err != nil {
+		return wsm.Workspace{}, false, err
+	}
+	if canonical == repo.Dir {
+		return wsm.Workspace{}, true, nil
+	}
+	ws, err = i.deps.DB.WorkspaceByDir(ctx, dir)
+	if err != nil {
+		return wsm.Workspace{}, false, &unregisteredParentError{dir: dir, repoDir: repo.Dir, err: err}
+	}
+	return ws, false, nil
+}
+
+// unregisteredParentError is a parent directory that is neither the
+// repository's main checkout nor a registered workspace.
+type unregisteredParentError struct {
+	dir, repoDir string
+	err          error
+}
+
+func (e *unregisteredParentError) Error() string {
+	return fmt.Sprintf("%q is neither repository %q's main checkout nor a registered workspace: %v", e.dir, e.repoDir, e.err)
+}
+
+func (e *unregisteredParentError) Unwrap() error { return e.err }
 
 // workspaceNamed answers the ONE open workspace of repo named name. None, or
 // more than one, is refused: a fork of a guessed conversation is not a fork
