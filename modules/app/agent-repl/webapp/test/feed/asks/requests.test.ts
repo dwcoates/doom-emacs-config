@@ -6,7 +6,7 @@ import { SessionCompactScope } from "../../../../proto/gen/ts/conversation/v1/se
 import {
   buildAnswerColdGateRequest,
   buildAnswerPermissionRequest,
-  buildAnswerQuestionRequest,
+  buildUpdateQuestionDraftRequest,
 } from "../../../src/feed/asks/requests.js";
 import { feedId, WORKSPACE } from "../harness.js";
 
@@ -37,69 +37,35 @@ describe("buildAnswerPermissionRequest", () => {
     });
   }
 
-  it("carries the deny reason when the user typed one", () => {
-    const req = buildAnswerPermissionRequest(WORKSPACE, ROW, {
-      kind: "deny",
-      reason: "that path is not mine",
-    });
-    expect(req.answer.case === "deny" ? req.answer.value.reason?.text : null).toBe(
-      "that path is not mine",
-    );
-  });
-
-  it("leaves the deny reason unset when nothing was typed", () => {
+  it("leaves the deny reason unset: a reason is the editor's", () => {
     const req = buildAnswerPermissionRequest(WORKSPACE, ROW, { kind: "deny" });
     expect(req.answer.case === "deny" ? req.answer.value.reason : "set").toBeUndefined();
   });
 });
 
-describe("buildAnswerQuestionRequest", () => {
-  it("echoes the card's row", () => {
-    const req = buildAnswerQuestionRequest(WORKSPACE, ROW, []);
-    expect(req.question).toEqual(ROW);
+describe("buildUpdateQuestionDraftRequest", () => {
+  it("echoes the workspace and the card's row", () => {
+    const req = buildUpdateQuestionDraftRequest(WORKSPACE, ROW, { kind: "show", questionText: "q?" });
+    expect([req.workspace, req.question]).toEqual([WORKSPACE, ROW]);
   });
 
-  it("sends one answer per question, in the order collected", () => {
-    const req = buildAnswerQuestionRequest(WORKSPACE, ROW, [
-      { questionText: "first?", chosen: ["a"] },
-      { questionText: "second?", chosen: ["b"] },
-    ]);
-    expect(req.answers.map((a) => a.questionText)).toEqual(["first?", "second?"]);
+  it("sets the show arm, echoing the question text verbatim", () => {
+    const req = buildUpdateQuestionDraftRequest(WORKSPACE, ROW, { kind: "show", questionText: "Which  auth?" });
+    expect(req.edit).toMatchObject({ case: "show", value: { questionText: "Which  auth?" } });
   });
 
-  it("echoes each question's text verbatim", () => {
-    const req = buildAnswerQuestionRequest(WORKSPACE, ROW, [
-      { questionText: "Which  auth  method?", chosen: [] , otherText: "none" },
-    ]);
-    expect(req.answers[0]?.questionText).toBe("Which  auth  method?");
+  it("sets the pick arm, echoing the question text and the label verbatim", () => {
+    const req = buildUpdateQuestionDraftRequest(WORKSPACE, ROW, {
+      kind: "pick",
+      questionText: "Which auth?",
+      label: "OAuth 2.0",
+    });
+    expect(req.edit).toMatchObject({ case: "pick", value: { questionText: "Which auth?", label: "OAuth 2.0" } });
   });
 
-  it("echoes the chosen labels verbatim", () => {
-    const req = buildAnswerQuestionRequest(WORKSPACE, ROW, [
-      { questionText: "q", chosen: ["OAuth 2.0", "API key"] },
-    ]);
-    expect(req.answers[0]?.chosen).toEqual(["OAuth 2.0", "API key"]);
-  });
-
-  it("sends no chosen labels for a free-text-only answer", () => {
-    const req = buildAnswerQuestionRequest(WORKSPACE, ROW, [
-      { questionText: "q", chosen: [], otherText: "something else" },
-    ]);
-    expect(req.answers[0]?.chosen).toEqual([]);
-  });
-
-  it("carries the free text when the user typed any", () => {
-    const req = buildAnswerQuestionRequest(WORKSPACE, ROW, [
-      { questionText: "q", chosen: [], otherText: "something else" },
-    ]);
-    expect(req.answers[0]?.otherText?.text).toBe("something else");
-  });
-
-  it("leaves the free text unset when nothing was typed", () => {
-    const req = buildAnswerQuestionRequest(WORKSPACE, ROW, [
-      { questionText: "q", chosen: ["a"] },
-    ]);
-    expect(req.answers[0]?.otherText).toBeUndefined();
+  it("sets the confirm arm, echoing the question text verbatim", () => {
+    const req = buildUpdateQuestionDraftRequest(WORKSPACE, ROW, { kind: "confirm", questionText: "Which suites?" });
+    expect(req.edit).toMatchObject({ case: "confirm", value: { questionText: "Which suites?" } });
   });
 });
 

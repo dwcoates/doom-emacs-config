@@ -78,6 +78,7 @@ import { SubmitPromptResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/e
 import { InterruptResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_interrupt_pb";
 import { AnswerPermissionResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_answer_permission_pb";
 import { AnswerQuestionResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_answer_question_pb";
+import { UpdateQuestionDraftResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_question_draft_pb";
 import { AnswerColdGateResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_answer_cold_gate_pb";
 import { CreateWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_create_workspace_pb";
 import { OpenWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_workspace_pb";
@@ -1220,6 +1221,12 @@ export function createFakeDaemon(): FakeDaemon {
       answerQuestion(request) {
         record("answerQuestion", request);
         return answerFor("answerQuestion", AnswerQuestionResponseSchema, {
+          result: { case: "success", value: {} },
+        });
+      },
+      updateQuestionDraft(request) {
+        record("updateQuestionDraft", request);
+        return answerFor("updateQuestionDraft", UpdateQuestionDraftResponseSchema, {
           result: { case: "success", value: {} },
         });
       },
