@@ -49,7 +49,7 @@ const lineOf = (drawn: HTMLElement): HTMLElement =>
 const panelOf = (drawn: HTMLElement): HTMLElement =>
   drawn.querySelector(":scope > .detail") as HTMLElement;
 
-/** The status dot: the panel's one pointer trigger (owner request, 2026-10-02). */
+/** The status dot: a live row's pointer trigger for the panel (owner request, 2026-10-02). */
 const dotOf = (drawn: HTMLElement): HTMLElement =>
   lineOf(drawn).querySelector(".st") as HTMLElement;
 
@@ -335,6 +335,30 @@ describe("the detail panel", () => {
       "R",
     );
     expect(drawn.querySelector(".detail .summary")?.textContent).toBe("porting the rail");
+  });
+
+  it.each([
+    { name: "a count", count: 4, want: "4" },
+    { name: "a zero count", count: 0, want: "0" },
+  ])("draws the commit count when the line is present: $name", ({ count, want }) => {
+    const drawn = drawRosterRow(row({ id: "ws-1", detail: { commits: { count } } }), sidebarContext(), "R");
+    const terms = [...drawn.querySelectorAll(".detail dt")].map((dt) => dt.textContent);
+    const values = [...drawn.querySelectorAll(".detail dd")].map((dd) => dd.textContent);
+    expect([terms, values]).toEqual([["commits"], [want]]);
+  });
+
+  it("draws the commit count after the branch lines", () => {
+    const drawn = drawRosterRow(
+      row({ id: "ws-1", detail: { branch: { name: "feat/rail" }, parentBranch: { name: "master" }, commits: { count: 2 } } }),
+      sidebarContext(),
+      "R",
+    );
+    expect([...drawn.querySelectorAll(".detail dt")].map((dt) => dt.textContent)).toEqual(["branch", "from", "commits"]);
+  });
+
+  it("omits the commit count when the line is absent", () => {
+    const drawn = drawRosterRow(row({ id: "ws-1", detail: { branch: { name: "feat/rail" } } }), sidebarContext(), "R");
+    expect([...drawn.querySelectorAll(".detail dt")].map((dt) => dt.textContent)).not.toContain("commits");
   });
 
   it("omits an absent line rather than drawing it blank", () => {
@@ -933,6 +957,49 @@ describe("the detail panel opens on hover", () => {
     vi.advanceTimersByTime(HOVER_CLOSE_GRACE_MS);
     // ASSERT
     expect(drawn.classList.contains("open")).toBe(false);
+  });
+
+  describe("on a recently-merged row, whose name is the trigger", () => {
+    const mergedRow = (): HTMLElement =>
+      drawRosterRow(
+        row({ id: "ws-1", closed: true, status: { case: "merged", value: {} }, when: { case: "merged", value: { atMs: BigInt(NOW) } } }),
+        sidebarContext(),
+        "R",
+        "merged",
+      );
+    const nameOf = (drawn: HTMLElement): HTMLElement => lineOf(drawn).querySelector(".name") as HTMLElement;
+
+    it("opens once the pointer has rested on the name for the intent delay", () => {
+      // ARRANGE
+      const drawn = mergedRow();
+      // ACT
+      nameOf(drawn).dispatchEvent(new MouseEvent("mouseenter"));
+      vi.advanceTimersByTime(HOVER_OPEN_DELAY_MS);
+      // ASSERT
+      expect(drawn.classList.contains("open")).toBe(true);
+    });
+
+    it("closes once the pointer has left the name and the grace has run out", () => {
+      // ARRANGE
+      const drawn = mergedRow();
+      nameOf(drawn).dispatchEvent(new MouseEvent("mouseenter"));
+      vi.advanceTimersByTime(HOVER_OPEN_DELAY_MS);
+      // ACT
+      nameOf(drawn).dispatchEvent(new MouseEvent("mouseleave"));
+      vi.advanceTimersByTime(HOVER_CLOSE_GRACE_MS);
+      // ASSERT
+      expect(drawn.classList.contains("open")).toBe(false);
+    });
+
+    it("does not open when the pointer rests on the row line itself", () => {
+      // ARRANGE
+      const drawn = mergedRow();
+      // ACT
+      lineOf(drawn).dispatchEvent(new MouseEvent("mouseenter"));
+      vi.advanceTimersByTime(HOVER_OPEN_DELAY_MS * 10);
+      // ASSERT
+      expect(drawn.classList.contains("open")).toBe(false);
+    });
   });
 
   it("opens at once when the keyboard focus reaches the row", () => {

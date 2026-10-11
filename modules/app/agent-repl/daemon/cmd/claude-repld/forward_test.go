@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"errors"
+	"os"
 	"slices"
+	"strings"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -11,6 +13,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/promptqueue"
+	"claude-repld/internal/workspace"
 )
 
 // recordingRelay is a workspace.HostRelay that records feed tail returns.
@@ -153,5 +156,77 @@ func TestABoundMergeMoverCarriesBothMoves(t *testing.T) {
 	// Assert.
 	if errs != nil || len(target.calls) != 2 || target.calls[0] != "suspend ws-1" || target.calls[1] != "adopt ws-1" {
 		t.Fatalf("calls = %v (%v), want both moves carried", target.calls, errs)
+	}
+}
+
+// publishingVerbs is a workspace.Verbs whose only live method is the roster
+// republish.
+type publishingVerbs struct {
+	workspace.Verbs
+	calls int
+	err   error
+}
+
+func (v *publishingVerbs) PublishRegistry(context.Context) error {
+	v.calls++
+	return v.err
+}
+
+func TestVerbsForwarderPublishRegistryReachesTheBoundVerbs(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{name: "a republish that succeeds", err: nil},
+		{name: "a republish that fails", err: errors.New("roster unreadable")},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			target := &publishingVerbs{err: tc.err}
+			f := &verbsForwarder{}
+			publish := f.publishRegistry("a test ran")
+			f.bind(target)
+
+			// Act.
+			err := publish(context.Background())
+
+			// Assert.
+			if target.calls != 1 || !errors.Is(err, tc.err) {
+				t.Fatalf("calls = %d, err = %v; want one call answering %v", target.calls, err, tc.err)
+			}
+		})
+	}
+}
+
+func TestVerbsForwarderPublishRegistryBeforeTheVerbsIsAnError(t *testing.T) {
+	// Arrange.
+	f := &verbsForwarder{}
+
+	// Act.
+	err := f.publishRegistry("a merge landed")(context.Background())
+
+	// Assert.
+	if err == nil || err.Error() != "claude-repld: a merge landed before the workspace verbs existed" {
+		t.Fatalf("err = %v, want the wiring defect named", err)
+	}
+}
+
+// TestEveryEarlyRegistryRepublishGoesThroughTheForwarder pins the shared
+// shape: a component built before the verbs republishes the roster through
+// verbsForwarder.publishRegistry, never a hand-rolled closure of its own.
+func TestEveryEarlyRegistryRepublishGoesThroughTheForwarder(t *testing.T) {
+	// Arrange.
+	source, err := os.ReadFile("graph.go")
+	if err != nil {
+		t.Fatalf("read graph.go: %v", err)
+	}
+
+	// Act.
+	handRolled := strings.Count(string(source), "verbsRef.verbs()")
+
+	// Assert.
+	if handRolled != 0 {
+		t.Fatalf("graph.go reads verbsRef.verbs() %d times, want every republish through verbsRef.publishRegistry", handRolled)
 	}
 }

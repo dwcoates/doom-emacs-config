@@ -861,6 +861,24 @@ func (w *fakeWatcher) handovers() int {
 }
 
 // fakeFeed records the synthesized rows.
+// fakeRecounter records every workspace the door owed a branch recount.
+type fakeRecounter struct {
+	mu   sync.Mutex
+	owed []ids.WorkspaceID
+}
+
+func (r *fakeRecounter) TurnClosed(ws ids.WorkspaceID) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.owed = append(r.owed, ws)
+}
+
+func (r *fakeRecounter) recounts() []ids.WorkspaceID {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]ids.WorkspaceID(nil), r.owed...)
+}
+
 // fakeTurnBanners records every turn end the queue raised a banner for.
 type fakeTurnBanners struct {
 	mu    sync.Mutex
@@ -1367,6 +1385,7 @@ type harness struct {
 	judge   *scriptedJudge
 	drain   *noteRecorder
 	banners *fakeTurnBanners
+	commits *fakeRecounter
 	log     *dlog.TestSurfaces
 
 	// noSession, when set, makes the client resolver report no session.
@@ -1416,10 +1435,12 @@ func newHarness(t *testing.T) *harness {
 		judge:   &scriptedJudge{},
 		drain:   &noteRecorder{},
 		banners: &fakeTurnBanners{},
+		commits: &fakeRecounter{},
 		log:     dlog.NewTestSurfaces(),
 	}
 	q, err := newQueue(Deps{
 		TurnBanners: h.banners,
+		Commits:     h.commits,
 		// The harness's image resolver is a plain naming of the path, so a
 		// mirrored image block is legible in an assertion; every test whose
 		// SUBJECT is resolution overrides it.

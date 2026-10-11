@@ -385,6 +385,60 @@ func TestRowDetailOmitsTheParentBranchWhenThereIsNone(t *testing.T) {
 	}
 }
 
+func TestRowDetailCarriesTheCommitCount(t *testing.T) {
+	merged := time.UnixMilli(1_700_000_000_000)
+	tests := []struct {
+		name   string
+		count  uint32
+		merged bool
+	}{
+		{name: "a live workspace's count", count: 6},
+		{name: "a zero count", count: 0},
+		{name: "a merged workspace's landed count", count: 3, merged: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			r, _ := newResolver(t)
+			ws := workspace("w1", "one")
+			count := tc.count
+			ws.CommitCount = &count
+			if tc.merged {
+				ws.MergedAt, ws.Closed = &merged, true
+			}
+
+			// Act.
+			r.SetRegistry(registry(ws))
+
+			// Assert.
+			var got []*frontendv1.RosterRow
+			if tc.merged {
+				for _, group := range latest(t, r).GetRecentlyMerged().GetGroups() {
+					got = append(got, group.GetRows().GetRows()...)
+				}
+			} else {
+				got = []*frontendv1.RosterRow{onlyRow(t, r)}
+			}
+			if len(got) != 1 || got[0].GetDetail().GetCommits() == nil || got[0].GetDetail().GetCommits().GetCount() != tc.count {
+				t.Fatalf("rows = %v, want one row whose detail carries %d commits", got, tc.count)
+			}
+		})
+	}
+}
+
+func TestRowDetailOmitsTheCommitCountWhenNeverCounted(t *testing.T) {
+	// Arrange.
+	r, _ := newResolver(t)
+
+	// Act.
+	r.SetRegistry(registry(workspace("w1", "one")))
+
+	// Assert.
+	if got := onlyRow(t, r).GetDetail().GetCommits(); got != nil {
+		t.Fatalf("commits = %v, want the line omitted", got)
+	}
+}
+
 func TestRowDetailCarriesTheSummary(t *testing.T) {
 	// Arrange.
 	r, _ := newResolver(t)

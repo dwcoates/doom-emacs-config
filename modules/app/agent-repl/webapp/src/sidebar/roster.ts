@@ -595,7 +595,7 @@ export function paintMergedRepoGroup(group: HTMLElement, collapsed: boolean): vo
 export const MERGED_TODAY_COUNT_CLASS = "sb-today-count";
 
 /**
- * The open band's "(K)": how many of its merges landed TODAY (local date),
+ * The open band's "(K today)": how many of its merges landed TODAY (local date),
  * counted over every row of its SHOWN groups the daemon sent, including those
  * the fit hides (owner request, 2026-10-11). The stylesheet shows it only while
  * the band is unfolded, where the folded count is not, and the shared ticker
@@ -605,7 +605,7 @@ export function drawMergedTodayCount(mergedAt: number[], sc: SidebarContext): HT
   const count = document.createElement("span");
   count.className = MERGED_TODAY_COUNT_CLASS;
   tickPaint(sc, (nowMs) => {
-    count.textContent = `(${mergedAt.filter((atMs) => mergedToday(atMs, nowMs)).length})`;
+    count.textContent = `(${mergedAt.filter((atMs) => mergedToday(atMs, nowMs)).length} today)`;
   });
   return count;
 }
