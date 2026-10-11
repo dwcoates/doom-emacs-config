@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FILE_LINK_EXTENSIONS, hasFileExtension, isFileLinkHref, isWebHref } from "../src/href.js";
+import { codeSpanFileHref, FILE_LINK_EXTENSIONS, hasFileExtension, isFileLinkHref, isWebHref } from "../src/href.js";
 
 describe("isWebHref", () => {
   it.each([
@@ -47,5 +47,23 @@ describe("hasFileExtension", () => {
 
   it("names the extensions in one constant", () => {
     expect(FILE_LINK_EXTENSIONS).toContain("proto");
+  });
+});
+
+describe("codeSpanFileHref", () => {
+  it.each([
+    { name: "a home-relative file", code: "~/.config/doom/a.el", want: "~/.config/doom/a.el" },
+    { name: "a home-relative file with a line", code: "~/a/b.go:193", want: "~/a/b.go:193" },
+    { name: "a home-relative directory", code: "~/.config/emacs/.local/", want: "~/.config/emacs/.local/" },
+    { name: "a bare file name", code: "README.md", want: null },
+    { name: "a relative path", code: "lisp/status.el", want: null },
+    { name: "an absolute path", code: "/Users/u/a.el", want: null },
+    { name: "another user's home", code: "~user/a.el", want: null },
+    { name: "a path followed by more words", code: "~/a.el foo", want: null },
+    { name: "a bare tilde-slash", code: "~/", want: null },
+    { name: "an identifier", code: "agent-repl-send", want: null },
+  ])("answers $want for $name", ({ code, want }) => {
+    // Act + Assert
+    expect(codeSpanFileHref(code)).toBe(want);
   });
 });

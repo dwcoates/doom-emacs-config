@@ -19,6 +19,13 @@
 #                                worktree. That workspace closes once it lands.
 #   --land-branch <branch>       Merge a branch that is no workspace (a
 #                                subagent's).
+#   --land-commits <commit>...   Merge ONLY the named commits of this
+#                                workspace's branch: they are cherry-picked, in
+#                                branch order, onto a new branch off the main
+#                                worktree's branch (in a worktree of its own
+#                                beside this one), which is then requested as
+#                                --land-branch requests a branch. On a conflict
+#                                or a refusal nothing built is left behind.
 #   --pr-merged                  This workspace's branch already merged
 #                                upstream: update the default branch and close
 #                                this workspace.
@@ -41,6 +48,8 @@
 #   5  refused by the daemon; why (or how to read why) is printed
 #   6  the workspace has uncommitted work (--enqueue-own)
 #   7  --land-workspace named this shell's own workspace
+#   9  a named commit did not apply cleanly onto the main worktree's branch
+#      (--land-commits); nothing was built or requested
 #   8  the daemon did not answer a queue-control request in time; the request
 #      stays pending (queue-control verbs)
 
@@ -64,6 +73,16 @@ main_worktree() {
   printf '%s\n' "${line#worktree }"
 }
 
+# workspace_top answers the worktree this shell is inside, refusing the
+# repository's main worktree: a merge verb acts FROM a workspace.
+workspace_top() {
+  local top main
+  top="$(git rev-parse --show-toplevel 2>/dev/null)" || die "not inside a git worktree"
+  main="$(main_worktree)" || die "not inside a git repository"
+  [ "$top" != "$main" ] || die "$top is the repository's main worktree, not a workspace; use --land-branch for a branch"
+  printf '%s\n' "$top"
+}
+
 # daemon_bin answers the claude-repld that serves this host: the override, or
 # the one built in the repository's main worktree.
 daemon_bin() {
@@ -78,19 +97,32 @@ daemon_bin() {
   printf '%s\n' "$bin"
 }
 
-# run_verb runs claude-repld merge-queue, passing its output through, and maps
-# its exit onto this script's.
-run_verb() {
+# verb_status runs claude-repld merge-queue, passing its output through, and
+# answers its exit mapped onto this script's.
+verb_status() {
   local bin rc
-  bin="$(daemon_bin)" || exit 2
+  bin="$(daemon_bin)" || return 2
   "$bin" merge-queue "$@"
   rc=$?
   case "$rc" in
-    0) exit 0 ;;
-    6) exit 5 ;;
-    7) exit 8 ;;
-    *) exit 2 ;;
+    0) return 0 ;;
+    6) return 5 ;;
+    7) return 8 ;;
+    *) return 2 ;;
   esac
+}
+
+# run_verb runs claude-repld merge-queue and exits with its mapped status.
+run_verb() {
+  verb_status "$@"
+  exit $?
+}
+
+# drop_built removes a --land-commits branch and its worktree, so a conflict or
+# a refusal leaves nothing behind.
+drop_built() {
+  git -C "$1" worktree remove --force "$2" || die "could not remove the built worktree $2"
+  git -C "$1" branch -D "$3" || die "could not delete the built branch $3"
 }
 
 case "${1:-}" in
@@ -101,9 +133,7 @@ case "${1:-}" in
       --keep-open) keep=(-keep-open) ;;
       *) die "--enqueue-own takes only --keep-open, not $2" ;;
     esac
-    top="$(git rev-parse --show-toplevel 2>/dev/null)" || die "not inside a git worktree"
-    main="$(main_worktree)" || die "not inside a git repository"
-    [ "$top" != "$main" ] || die "$top is the repository's main worktree, not a workspace; use --land-branch for a branch"
+    top="$(workspace_top)" || exit 2
     if [ -n "$(git -C "$top" status --porcelain 2>/dev/null)" ]; then
       log "$top has uncommitted work; commit it before enqueueing"
       exit 6
@@ -122,6 +152,48 @@ case "${1:-}" in
   --land-branch)
     [ -n "${2:-}" ] || die "--land-branch needs a branch name"
     run_verb -branch "$2"
+    ;;
+  --land-commits)
+    shift
+    [ "$#" -gt 0 ] || die "--land-commits needs at least one commit"
+    top="$(workspace_top)" || exit 2
+    main="$(main_worktree)" || die "not inside a git repository"
+    target="$(git -C "$main" rev-parse --abbrev-ref HEAD)" || die "could not read the main worktree's branch"
+    own="$(git -C "$top" rev-parse --abbrev-ref HEAD)" || die "could not read this workspace's branch"
+    wanted=()
+    for commit in "$@"; do
+      full="$(git -C "$top" rev-parse --verify "$commit^{commit}")" || die "$commit names no commit"
+      git -C "$top" merge-base --is-ancestor "$full" HEAD || die "$commit is not on this workspace's branch $own"
+      if git -C "$top" merge-base --is-ancestor "$full" "$target"; then
+        die "$commit is already on $target"
+      fi
+      wanted+=("$full")
+    done
+    ordered=()
+    while IFS= read -r full; do
+      for w in "${wanted[@]}"; do
+        if [ "$w" = "$full" ]; then
+          ordered+=("$full")
+          break
+        fi
+      done
+    done < <(git -C "$top" rev-list --reverse "$target..HEAD")
+    [ "${#ordered[@]}" -eq "${#wanted[@]}" ] || die "could not order the named commits along $own"
+    last="${ordered[${#ordered[@]}-1]}"
+    branch="$own-partial-${last:0:9}"
+    dir="$(dirname "$top")/${branch//\//-}"
+    git -C "$main" worktree add -b "$branch" "$dir" "$target" || die "could not create $branch in $dir"
+    if ! git -C "$dir" cherry-pick "${ordered[@]}"; then
+      git -C "$dir" cherry-pick --abort || die "could not abort the cherry-pick in $dir"
+      drop_built "$main" "$dir" "$branch"
+      log "the named commits did not apply cleanly onto $target; nothing was requested"
+      exit 9
+    fi
+    log "built $branch in $dir from ${#ordered[@]} commit(s) of $own"
+    verb_status -branch "$branch"
+    rc=$?
+    [ "$rc" -eq 0 ] || drop_built "$main" "$dir" "$branch"
+    exit "$rc"
     ;;
   --pr-merged)
     run_verb -pr-merged
@@ -155,7 +227,7 @@ case "${1:-}" in
     run_verb "$control"
     ;;
   *)
-    printf 'usage: run.sh --enqueue-own [--keep-open] | --land-workspace <dir> | --land-branch <branch> | --pr-merged | --remove-branch <branch> | --dequeue-own | --dequeue-workspace <dir> | --pause-queue [<repo-dir>] | --resume-queue [<repo-dir>]\n' >&2
+    printf 'usage: run.sh --enqueue-own [--keep-open] | --land-workspace <dir> | --land-branch <branch> | --land-commits <commit>... | --pr-merged | --remove-branch <branch> | --dequeue-own | --dequeue-workspace <dir> | --pause-queue [<repo-dir>] | --resume-queue [<repo-dir>]\n' >&2
     exit 1
     ;;
 esac
