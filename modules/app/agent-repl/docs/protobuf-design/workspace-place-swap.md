@@ -57,5 +57,13 @@ so a swap needs a stored place and a daemon rpc to exchange two of them.
 - **Consequences:** the daemon needs a stored place per workspace (schema
   column + migration seeded from today's order), the resolver orders siblings
   by place, and create / re-open assign a landing place from priority.
-- **Open:** whether `SetWorkspacePriority` stops moving a workspace that
-  already has a place (recommended yes, unanswered).
+- **Settled below:** whether `SetWorkspacePriority` stops moving a workspace that
+  already has a place (yes).
+
+### SetWorkspacePriority no longer moves a placed workspace (2026-10-11)
+
+- **What:** the owner ruled that changing a workspace's priority leaves its
+  stored place alone; priority decides only the landing place at create and
+  re-open. No schema shape changes; the `SetWorkspacePriority` rpc comment
+  ("the roster orders by it") is restated to say so.
+- **Why:** a place the user chose survives a later priority change.
