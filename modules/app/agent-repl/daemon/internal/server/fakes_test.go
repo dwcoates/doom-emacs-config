@@ -24,6 +24,7 @@ import (
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"claude-repld/internal/classifierupdate"
+	"claude-repld/internal/commandcatalog"
 	"claude-repld/internal/deploy"
 	"claude-repld/internal/desktopnotify"
 	"claude-repld/internal/dlog"
@@ -1160,6 +1161,8 @@ type harness struct {
 	EditorInstances  *fakeEditorInstances
 	Startup          *fakeStartup
 	ChessBoards      *fakeChessSquares
+	// SlashCommands is the real catalog table, which a test feeds directly.
+	SlashCommands *commandcatalog.Catalogs
 	Surfaces         *fakeSurfaces
 	WebappDist       string
 }
@@ -1209,6 +1212,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		EditorInstances:  &fakeEditorInstances{},
 		Startup:          &fakeStartup{},
 		ChessBoards:      &fakeChessSquares{},
+		SlashCommands:    commandcatalog.New(),
 	}
 
 	deps := Deps{
@@ -1222,6 +1226,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		Deploy:            h.Deployer,
 		Health:            h.Health,
 		SessionFacts:      h.Facts,
+		SlashCommands:     h.SlashCommands,
 		Login:             h.Login,
 		Ownership:         h.Ownership,
 		SuccessorAddress:  func() string { return "127.0.0.1:9999" },
