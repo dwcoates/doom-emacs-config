@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -268,16 +269,15 @@ func TestRetargetReportsAFailedUndoBesideTheFailedNotice(t *testing.T) {
 	}
 }
 
-func TestRandomKeyIsFreshEachTime(t *testing.T) {
+func TestRandomKeyIsTheSharedDaemonKeyShape(t *testing.T) {
 	// Act
-	a, errA := randomKey()
-	b, errB := randomKey()
+	key, err := randomKey()
 
 	// Assert
-	if errA != nil || errB != nil {
-		t.Fatalf("randomKey: %v, %v", errA, errB)
+	if err != nil {
+		t.Fatalf("randomKey: %v", err)
 	}
-	if a == b || !strings.HasPrefix(a, "workspace-retargeted-") {
-		t.Fatalf("keys = %q, %q; want two distinct retarget keys", a, b)
+	if !regexp.MustCompile(`^workspace-retargeted-[0-9a-f]{32}$`).MatchString(key) {
+		t.Fatalf("key = %q, want prompthandler.MintKey's shape under the retarget prefix", key)
 	}
 }
