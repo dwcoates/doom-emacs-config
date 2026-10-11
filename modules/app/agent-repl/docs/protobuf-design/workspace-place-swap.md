@@ -98,3 +98,25 @@ so a swap needs a stored place and a daemon rpc to exchange two of them.
   repository section (and last under its parent when nested); the tab bar
   walks sections in repository-name order, so the workspace is the last tab
   of its own section, not of the whole bar.
+
+## Rulings that reshape the design (owner, 2026-10-11, later)
+
+These supersede "Swaps happen only between siblings, and the tab bar stays the
+sidebar's walk" and the create-landing rule above. Not yet implemented.
+
+- **The registry holds one canonical order; the sidebar and tab bar are views
+  of it.** The tab bar lists open workspaces in registry order alone, so
+  repositories may interleave and a child need not follow its parent. The
+  sidebar groups by repository and nests children, sorting each group by
+  registry order, so a child moves within its parent's list when its place
+  moves past a sibling's.
+- **Worked example (owner's):** registry A=1, B=2, C=3, D=4 with D a child of
+  B. Sidebar: A, B (D nested), C. Tab bar: | A | B | C | D |.
+- **Closed workspaces appear in a HIDDEN WORKSPACES sidebar section**, nested
+  and in registry order; Recently Merged keeps its own ordering among its
+  peers.
+- **Creation lands second-to-last on the Emacs tab bar.** With a priority, the
+  new workspace lands second-to-last within its priority bucket. Either way it
+  can be moved freely afterwards.
+- **Any two workspaces can swap**, so the `not_siblings` refusal and
+  `rosterwalk.RepositorySiblings` are obviated by these rulings.
