@@ -17,8 +17,10 @@
  *     minimum, so a slow arrival spends the bank down;
  *   - an empty bank waits for the next text;
  *   - only a bank holding more than the bank limit's worth of typing at the
- *     maximum types faster than the maximum, just fast enough to stay at that
- *     limit, so the reveal never falls further behind than that.
+ *     maximum types faster than the maximum: the excess past the limit is
+ *     caught up on the same `FOLLOW_SECONDS` time constant the arrivals are
+ *     followed on, so a whole block landing at once types out quickly rather
+ *     than leaving the reveal seconds behind, and with no jump.
  *
  * Nothing here touches the DOM or a clock: the caller hands in how long a
  * frame took, which is what lets the pacing be tested without a browser.
@@ -73,13 +75,14 @@ export function revealPaceOf(pace: FeedResponseRevealPace | undefined, path: str
 /**
  * The speed, in chars/sec, the reveal types at while BANK characters are
  * arrived but not shown: the followed arrival speed held between the bounds,
- * raised past the maximum only by a bank over its limit. Zero for an empty
- * bank.
+ * raised past the maximum only by a bank over its limit, by that excess over
+ * `FOLLOW_SECONDS`. Zero for an empty bank.
  */
 export function revealSpeed(bank: number, pace: RevealPace): number {
   if (bank <= 0) return 0;
-  const followed = Math.min(pace.maxCps, Math.max(pace.minCps, bank / FOLLOW_SECONDS));
-  return Math.max(followed, bank / pace.bankLimitSeconds);
+  const limit = pace.maxCps * pace.bankLimitSeconds;
+  if (bank > limit) return pace.maxCps + (bank - limit) / FOLLOW_SECONDS;
+  return Math.min(pace.maxCps, Math.max(pace.minCps, bank / FOLLOW_SECONDS));
 }
 
 /**
