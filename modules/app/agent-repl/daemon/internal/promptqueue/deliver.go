@@ -257,15 +257,8 @@ func (q *queue) touchEngagement(ctx context.Context, ws ids.WorkspaceID, log dlo
 // spans are STRIPPED from the drawn text; the full text stays on the record and
 // on what the shim received.
 func (q *queue) mirrorAccepted(ws ids.WorkspaceID, turn ids.TurnID, said *conversationv1.UserSaid, origin conversationv1.PromptOrigin) {
-	row := &frontendv1.FeedRow{
-		Turn: &conversationv1.TurnId{Value: string(turn)},
-		Row: &frontendv1.FeedRow_UserPrompt{UserPrompt: &frontendv1.FeedUserPrompt{
-			Author: &frontendv1.FeedUserPromptAuthor{Label: feed.AuthorLabel(origin)},
-			Result: &frontendv1.FeedUserPrompt_Success{Success: &frontendv1.FeedUserPromptSuccess{
-				Body: &frontendv1.FeedUserPromptBody{Blocks: q.mirrorBlocks(said)},
-			}},
-		}},
-	}
+	row := feed.PromptRow(origin, said, q.mirrorBlocks(said))
+	row.Turn = &conversationv1.TurnId{Value: string(turn)}
 	// THE ACCEPTED PROMPT LANDS WHERE ITS TURN DRAWS (recordTurn), never
 	// unconditionally on the root feed: a merge's own prompt belongs in its
 	// tab and the user's on the root, and the resolver's own draw of the same

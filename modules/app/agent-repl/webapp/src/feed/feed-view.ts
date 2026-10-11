@@ -101,6 +101,7 @@ import { drawFeedUserPrompt } from "./rows/user-prompt.js";
 import { drawFeedAgentPrompt } from "./rows/agent-prompt.js";
 import { drawFeedPeerMessage } from "./rows/peer-message.js";
 import { drawFeedSubagentHandback } from "./rows/subagent-handback.js";
+import { drawFeedMergeHandback } from "./rows/merge-handback.js";
 import { drawFeedTurnEnded } from "./rows/turn-ended.js";
 import {
   drawFeedSessionSeparation,
@@ -1465,6 +1466,8 @@ export function createFeedController(
         return drawFeedPeerMessage(arm.value, rc.previous);
       case "subagentHandback":
         return drawFeedSubagentHandback(arm.value);
+      case "mergeHandback":
+        return drawFeedMergeHandback(arm.value);
       case "turnEnded":
         return drawFeedTurnEnded(arm.value, rc);
       case "separation":

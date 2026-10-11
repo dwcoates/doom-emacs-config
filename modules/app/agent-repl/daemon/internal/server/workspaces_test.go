@@ -971,7 +971,7 @@ func awaitClosed(t *testing.T, ch <-chan struct{}, what string) {
 
 // ownBranchSource is the requester's own branch, closed on landing.
 func ownBranchSource() *agentreplv1.MergeWorkspaceSource {
-	return &agentreplv1.MergeWorkspaceSource{Source: &agentreplv1.MergeWorkspaceSource_OwnBranch{OwnBranch: &agentreplv1.MergeWorkspaceSourceOwnBranch{}}}
+	return &agentreplv1.MergeWorkspaceSource{Source: &agentreplv1.MergeWorkspaceSource_OwnBranch{OwnBranch: &agentreplv1.MergeWorkspaceSourceOwnBranch{Run: &agentreplv1.MergeWorkspaceSourceOwnBranch_InPlace{InPlace: &agentreplv1.MergeWorkspaceSourceOwnBranchInPlace{}}}}}
 }
 
 func TestMergeWorkspaceMapsAPreStateRefusalOntoItsArm(t *testing.T) {
@@ -1013,10 +1013,17 @@ func TestMergeWorkspaceMapsEachSourceArm(t *testing.T) {
 		name   string
 		source *agentreplv1.MergeWorkspaceSource
 		want   wsm.MergeSource
+		// detached is whether the request runs in a merge workspace.
+		detached bool
 	}{
 		{name: "own branch kept open", source: &agentreplv1.MergeWorkspaceSource{Source: &agentreplv1.MergeWorkspaceSource_OwnBranch{
-			OwnBranch: &agentreplv1.MergeWorkspaceSourceOwnBranch{KeepOpen: true}}},
+			OwnBranch: &agentreplv1.MergeWorkspaceSourceOwnBranch{Run: &agentreplv1.MergeWorkspaceSourceOwnBranch_InPlace{
+				InPlace: &agentreplv1.MergeWorkspaceSourceOwnBranchInPlace{KeepOpen: true}}}}},
 			want: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch, KeepOpen: true}},
+		{name: "own branch detached", source: &agentreplv1.MergeWorkspaceSource{Source: &agentreplv1.MergeWorkspaceSource_OwnBranch{
+			OwnBranch: &agentreplv1.MergeWorkspaceSourceOwnBranch{Run: &agentreplv1.MergeWorkspaceSourceOwnBranch_Detached{
+				Detached: &agentreplv1.MergeWorkspaceSourceOwnBranchDetached{}}}}},
+			want: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}, detached: true},
 		{name: "a branch", source: &agentreplv1.MergeWorkspaceSource{Source: &agentreplv1.MergeWorkspaceSource_Branch{
 			Branch: &agentreplv1.MergeWorkspaceSourceBranch{Name: "agent-1/fix"}}},
 			want: wsm.MergeSource{Kind: wsm.MergeSourceBranch, Branch: "agent-1/fix"}},
@@ -1039,8 +1046,8 @@ func TestMergeWorkspaceMapsEachSourceArm(t *testing.T) {
 			}
 
 			// Assert.
-			if len(h.Merge.requests) != 1 || h.Merge.requests[0].Source != tt.want {
-				t.Fatalf("requests = %+v, want source %+v", h.Merge.requests, tt.want)
+			if len(h.Merge.requests) != 1 || h.Merge.requests[0].Source != tt.want || h.Merge.requests[0].Detached != tt.detached {
+				t.Fatalf("requests = %+v, want source %+v detached %v", h.Merge.requests, tt.want, tt.detached)
 			}
 		})
 	}
@@ -1053,6 +1060,25 @@ func TestMergeWorkspaceRefusesARequestWithNoSourceAsInvalid(t *testing.T) {
 	// Act.
 	_, err := h.Client.MergeWorkspace(context.Background(),
 		connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: ref()}))
+
+	// Assert.
+	if connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("MergeWorkspace = %v, want invalid_argument", err)
+	}
+	if len(h.Merge.requests) != 0 {
+		t.Fatalf("an invalid request reached the queue: %+v", h.Merge.requests)
+	}
+}
+
+func TestMergeWorkspaceRefusesAnOwnBranchWithNoRunAsInvalid(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	source := &agentreplv1.MergeWorkspaceSource{Source: &agentreplv1.MergeWorkspaceSource_OwnBranch{
+		OwnBranch: &agentreplv1.MergeWorkspaceSourceOwnBranch{}}}
+
+	// Act.
+	_, err := h.Client.MergeWorkspace(context.Background(),
+		connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: ref(), Source: source}))
 
 	// Assert.
 	if connect.CodeOf(err) != connect.CodeInvalidArgument {

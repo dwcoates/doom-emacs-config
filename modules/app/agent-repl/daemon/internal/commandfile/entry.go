@@ -151,8 +151,12 @@ type Entry struct {
 	// worktree path (source.workspace).
 	SourceDir string `json:"source_dir,omitempty"`
 	// KeepOpen keeps the requester open once its own branch lands
-	// (source.own_branch.keep_open).
+	// (source.own_branch.in_place.keep_open). It is an in-place merge's alone.
 	KeepOpen bool `json:"keep_open,omitempty"`
+	// Detached runs the requester's own branch's merge in a merge workspace
+	// forked from it, leaving the requester free
+	// (source.own_branch.detached). Own-branch only, and never kept open.
+	Detached bool `json:"detached,omitempty"`
 	// PRWasMerged says the requester's own branch already merged upstream
 	// through its pull request (source.merged_upstream): the default branch
 	// is updated from upstream and the requester closed.
@@ -318,6 +322,7 @@ func (e Entry) mergeOnly() string {
 		{"branch", e.Branch != ""},
 		{"source_dir", e.SourceDir != ""},
 		{"keep_open", e.KeepOpen},
+		{"detached", e.Detached},
 		{"pr_was_merged", e.PRWasMerged},
 	}
 	for _, field := range fields {
@@ -342,6 +347,10 @@ func (e Entry) validateMergeSource() error {
 		return fmt.Errorf("%s: branch, source_dir and pr_was_merged each name a different merge; name one", TypeMerge)
 	case e.KeepOpen && named > 0:
 		return fmt.Errorf("%s: keep_open keeps the requester open after its OWN branch lands, and this merge lands another", TypeMerge)
+	case e.Detached && named > 0:
+		return fmt.Errorf("%s: detached runs the requester's OWN branch's merge in a merge workspace, and this merge lands another", TypeMerge)
+	case e.Detached && e.KeepOpen:
+		return fmt.Errorf("%s: a detached merge never closes the requester, so keep_open means nothing beside it", TypeMerge)
 	}
 	return nil
 }

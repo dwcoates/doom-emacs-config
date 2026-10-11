@@ -1558,13 +1558,30 @@ teardown\='s end arrives on the WatchDaemon progress channel."
   "Encode MergeWorkspaceRequest's `workspace' use site from REF."
   (agent-repl-wire-encode-workspace-ref ref))
 
-(defun agent-repl-wire-encode-merge-workspace-source-own-branch (value)
-  "Encode MergeWorkspaceSourceOwnBranch from plist VALUE (:keep-open BOOL).
+(defun agent-repl-wire-encode-merge-workspace-source-own-branch-in-place (value)
+  "Encode MergeWorkspaceSourceOwnBranchInPlace from plist VALUE (:keep-open BOOL).
 `keep_open' is spelled EXPLICITLY on the wire even when false: whether the
 requesting workspace closes once its branch lands is the request\='s own
 statement, never an omitted default."
   (list (cons 'keepOpen
               (agent-repl-wire-verbs--encode-bool (plist-get value :keep-open)))))
+
+(defun agent-repl-wire-encode-merge-workspace-source-own-branch-detached (value)
+  "Encode MergeWorkspaceSourceOwnBranchDetached from VALUE.  Empty: the
+merge runs in a merge workspace forked from the requester."
+  (agent-repl-wire--encode-empty "MergeWorkspaceSourceOwnBranchDetached" value))
+
+(defun agent-repl-wire-encode-merge-workspace-source-own-branch (value)
+  "Encode MergeWorkspaceSourceOwnBranch from plist VALUE (:run RUN).
+THE ARM IS WHERE THE MERGE RUNS: `:in-place' (:keep-open BOOL), in the
+requesting workspace, or `:detached' (nil), in a merge workspace forked
+from it.  An unset run and an unknown arm are both refused."
+  (list (agent-repl-wire-verbs--encode-oneof
+         "MergeWorkspaceSourceOwnBranch" "run" (plist-get value :run)
+         '((:in-place inPlace
+                      agent-repl-wire-encode-merge-workspace-source-own-branch-in-place)
+           (:detached detached
+                      agent-repl-wire-encode-merge-workspace-source-own-branch-detached)))))
 
 (defun agent-repl-wire-encode-merge-workspace-source-workspace (value)
   "Encode MergeWorkspaceSourceWorkspace from plist VALUE (:ref REF).
@@ -1589,7 +1606,7 @@ branch and the repository are the requester\='s own."
 
 (defun agent-repl-wire-encode-merge-workspace-source (value)
   "Encode MergeWorkspaceSource from the oneof plist VALUE (:arm ARM :value V).
-THE ARM IS THE SOURCE: `:own-branch' (:keep-open BOOL), `:workspace'
+THE ARM IS THE SOURCE: `:own-branch' (:run RUN), `:workspace'
 \(:ref REF), `:branch' (:name STRING) or `:merged-upstream' (nil).  An
 unset oneof and an unknown arm are both refused."
   (list (agent-repl-wire-verbs--encode-oneof

@@ -89,6 +89,25 @@ These clicks jump to an entry in the feed:
 - **If a subagent's feed cannot be opened, the jump still scrolls to its bubble.**
   - The failure is listed under the warning chip in the top bar.
 
+## Detached merges
+
+- **An agent's `/merge-queue own` merges in a merge workspace, so your workspace is never held.**
+  - When the turn that asked for the merge ends, a merge workspace is forked from yours: the same conversation, its own worktree on your branch as it stands then.
+  - The merge runs there, and every prompt you send to your own workspace goes straight through meanwhile.
+  - Commits you make after the merge was asked for are not part of it; they go through your next merge.
+  - `/merge-queue own in-place`, `keep-open` or `--wait` merges in your workspace instead, holding your prompts as before.
+- **The merge workspace sits under yours in the sidebar, marked with where it lands (`merge → master`).**
+  - It carries the merge's statuses; your own row keeps its own.
+- **Your feed shows the merge's bubble, with an `open merge workspace` button in its header for the bubble's whole life.**
+  - Clicking it switches to the merge workspace exactly as clicking its sidebar row does, re-opening it if it was closed.
+  - The pre-prompt, conflicts, fixes and post-prompt tabs show a button to the merge workspace in place of their conversation, which lives there.
+  - Every other tab reads as it always has.
+- **When the merge ends, a badge in your feed says how (`merge of <branch> landed`), and your agent is told.**
+  - A landed merge closes its merge workspace; its conversation stays there to read.
+  - A failed merge leaves the merge workspace open where it stopped, for you to finish.
+- **A merge workspace nobody has used for 15 calendar days is removed.**
+  - The bubble's buttons then read `merge workspace removed` and do nothing.
+
 ## File links in prompts and responses
 
 Clicking a link to a file (not a web address) in a prompt or response bubble opens that file in Emacs, in the same popup a findings row or a plan's edit button opens.

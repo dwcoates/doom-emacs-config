@@ -1,10 +1,21 @@
 // endpoint_merge_workspace.proto — MergeWorkspace. SIDEBAR section.
-// Enqueue a merge that RUNS IN the requesting workspace. Success means
-// ENQUEUED — the merge's whole life from the queue onward is the requesting
-// workspace's own: its feed's merge bubble, its footer's merging status, and
-// its own session doing any conflict resolution and test fixing. No
-// workspace is ever created for a merge. The merge targets the merged
-// branch's parent by definition, and the daemon decides everything else.
+// Enqueue a merge. Success means ENQUEUED. The merge's bubble is drawn in the
+// requesting workspace's feed either way; WHERE its agentic work runs depends
+// on the request:
+//
+//   - IN PLACE (every source but a detached own-branch merge): the merge's
+//     whole life is the requesting workspace's own — its footer's merging
+//     status, its session doing any conflict resolution and test fixing, and
+//     every prompt the user sends held until the merge ends.
+//   - DETACHED (an own-branch merge with the `detached` run): the daemon forks
+//     the requesting workspace into a MERGE WORKSPACE when the requesting turn
+//     ends — the conversation forked, a worktree of its own on the branch's
+//     tip at that moment — and the merge runs there. The requesting workspace
+//     is never held and never closed by it, and the merge's outcome comes back
+//     into its conversation as a handback.
+//
+// The merge targets the merged branch's parent by definition, and the daemon
+// decides everything else.
 
 syntax = "proto3";
 
@@ -50,11 +61,43 @@ message MergeWorkspaceSource {
 }
 // The requesting workspace's own branch.
 message MergeWorkspaceSourceOwnBranch {
+  // `keep_open` lives on the in-place run, the only run that can close the
+  // requester.
+  reserved 1;
+  reserved "keep_open";
+  // WHERE the merge's agentic work runs. Exactly one is set: a request with
+  // neither is refused as invalid. The two differ in whether the requesting
+  // workspace is held while the merge runs, so the choice is the caller's.
+  oneof run {
+    // In the requesting workspace, by its own session, holding its prompts
+    // until the merge ends.
+    MergeWorkspaceSourceOwnBranchInPlace in_place = 2;
+    // In a merge workspace forked from the requester, leaving the requester
+    // free.
+    MergeWorkspaceSourceOwnBranchDetached detached = 3;
+  }
+}
+// The merge runs in the requesting workspace.
+message MergeWorkspaceSourceOwnBranchInPlace {
   // TRUE keeps the requesting workspace open once its branch lands, so it
   // can go on to further work and further merges; FALSE closes it on
   // landing. A failed merge never closes it either way.
   bool keep_open = 1;
 }
+// The merge runs in a MERGE WORKSPACE: a forked workspace the daemon creates
+// when the requesting turn ends, so the fork holds that whole turn. Its
+// conversation is a fork of the requester's, and its worktree is checked out
+// on the requester's branch tip at that moment, so the requester's later
+// commits are not part of this merge and the rebase never touches files the
+// requester is editing. The merge workspace is shown nested under the
+// requester, lands on the requester's own target branch, and is closed (its
+// worktree and conversation kept) once its branch lands; a failed merge
+// leaves it open for the user to finish. Either way the daemon hands the
+// outcome back to the requester's conversation
+// (conversation.v1.PromptOrigin.PROMPT_ORIGIN_MERGE_HANDBACK). A merge
+// workspace idle for 15 calendar days is removed. No fields: the branch, the
+// repository and the target are the requester's own.
+message MergeWorkspaceSourceOwnBranchDetached {}
 // Another open workspace, named by its ref.
 message MergeWorkspaceSourceWorkspace {
   // The workspace whose branch is merged. It must be open, in the same

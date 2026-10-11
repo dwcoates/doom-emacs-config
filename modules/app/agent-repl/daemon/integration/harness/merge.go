@@ -8,11 +8,20 @@ import (
 // integration suite and the cross-system e2e suite share, so the two cannot
 // drift on what a merge request names or on what "the landing deployed" means.
 
-// OwnBranch is a MergeWorkspace source naming the requester's own branch. With
-// keepOpen false the workspace closes once its branch lands.
+// OwnBranch is a MergeWorkspace source naming the requester's own branch, run
+// IN PLACE. With keepOpen false the workspace closes once its branch lands.
 func OwnBranch(keepOpen bool) *agentreplv1.MergeWorkspaceSource {
 	return &agentreplv1.MergeWorkspaceSource{Source: &agentreplv1.MergeWorkspaceSource_OwnBranch{
-		OwnBranch: &agentreplv1.MergeWorkspaceSourceOwnBranch{KeepOpen: keepOpen}}}
+		OwnBranch: &agentreplv1.MergeWorkspaceSourceOwnBranch{Run: &agentreplv1.MergeWorkspaceSourceOwnBranch_InPlace{
+			InPlace: &agentreplv1.MergeWorkspaceSourceOwnBranchInPlace{KeepOpen: keepOpen}}}}}
+}
+
+// OwnBranchDetached is a MergeWorkspace source naming the requester's own
+// branch, run DETACHED in a merge workspace.
+func OwnBranchDetached() *agentreplv1.MergeWorkspaceSource {
+	return &agentreplv1.MergeWorkspaceSource{Source: &agentreplv1.MergeWorkspaceSource_OwnBranch{
+		OwnBranch: &agentreplv1.MergeWorkspaceSourceOwnBranch{Run: &agentreplv1.MergeWorkspaceSourceOwnBranch_Detached{
+			Detached: &agentreplv1.MergeWorkspaceSourceOwnBranchDetached{}}}}}
 }
 
 // BranchSource is a MergeWorkspace source naming a branch that is no

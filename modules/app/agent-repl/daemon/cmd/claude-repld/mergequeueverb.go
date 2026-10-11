@@ -222,7 +222,8 @@ func runMergeQueueVerb(ctx context.Context, args []string, dial mergeQueueDialer
 	fs := flag.NewFlagSet(mergeQueueVerb, flag.ContinueOnError)
 	fs.SetOutput(errOut)
 	own := fs.Bool("own", false, "merge the calling workspace's own branch")
-	keepOpen := fs.Bool("keep-open", false, "with -own: keep the calling workspace open once its branch lands")
+	keepOpen := fs.Bool("keep-open", false, "with -own: merge in place and keep the calling workspace open once its branch lands")
+	inPlace := fs.Bool("in-place", false, "with -own: merge in the calling workspace itself, holding its prompts until the merge ends, rather than in a merge workspace forked from it")
 	dir := fs.String("dir", "", "merge another workspace's branch, by its worktree; it closes once it lands")
 	branch := fs.String("branch", "", "merge a branch that is no workspace (a subagent's)")
 	prMerged := fs.Bool("pr-merged", false, "the calling workspace's branch already merged upstream: update the default branch and close it")
@@ -241,7 +242,7 @@ func runMergeQueueVerb(ctx context.Context, args []string, dial mergeQueueDialer
 		return fail("unexpected arguments: %s", strings.Join(fs.Args(), " "))
 	}
 	source, err := resolveMergeQueueSource(mergeQueueFlags{
-		own: *own, keepOpen: *keepOpen, dir: *dir, branch: *branch, prMerged: *prMerged,
+		own: *own, keepOpen: *keepOpen, inPlace: *inPlace, wait: *wait, dir: *dir, branch: *branch, prMerged: *prMerged,
 		evict: *evict, evictDir: *evictDir, pause: *pause, resume: *resume, repositoryDir: *repositoryDir,
 	})
 	if err != nil {
@@ -269,6 +270,11 @@ func runMergeQueueVerb(ctx context.Context, args []string, dial mergeQueueDialer
 // mergeQueueFlags are the flags that name what one invocation asks for.
 type mergeQueueFlags struct {
 	own, keepOpen bool
+	// inPlace runs an own-branch merge in the calling workspace rather than
+	// detached. keepOpen implies it, and so does wait: a caller that waits for
+	// the merge's outcome is asking for the merge that runs in it, since a
+	// detached merge reports back to the calling conversation instead.
+	inPlace, wait bool
 	dir, branch   string
 	prMerged      bool
 	evict         bool
@@ -293,6 +299,8 @@ func resolveMergeQueueSource(f mergeQueueFlags) (mergeQueueSource, error) {
 		return mergeQueueSource{}, errors.New("-own, -dir, -branch, -pr-merged, -evict, -evict-dir, -pause and -resume each name a different request; give one")
 	case f.keepOpen && !f.own:
 		return mergeQueueSource{}, errors.New("-keep-open goes with -own: only the calling workspace's own branch can keep it open")
+	case f.inPlace && !f.own:
+		return mergeQueueSource{}, errors.New("-in-place goes with -own: only the calling workspace's own branch can run detached or in place")
 	case f.repositoryDir != "" && !f.pause && !f.resume:
 		return mergeQueueSource{}, errors.New("-repository-dir goes with -pause or -resume: it names the repository whose queue they address")
 	}
@@ -332,7 +340,15 @@ func resolveMergeQueueSource(f mergeQueueFlags) (mergeQueueSource, error) {
 		}
 		return mergeQueueSource{label: label, control: true, entry: commandfile.Entry{Type: typ, RepositoryDir: repo}}, nil
 	}
-	return mergeQueueSource{label: "its own branch", entry: commandfile.Entry{Type: commandfile.TypeMerge, KeepOpen: f.keepOpen}}, nil
+	// AN OWN-BRANCH MERGE RUNS DETACHED BY DEFAULT (owner ruling, 2026-10-11):
+	// in a merge workspace forked from the calling workspace, which stays free.
+	// -in-place, -keep-open (which only an in-place merge means anything
+	// with) or -wait (which waits on the calling workspace's own merge) runs
+	// it in the calling workspace instead.
+	if f.inPlace || f.keepOpen || f.wait {
+		return mergeQueueSource{label: "its own branch, in place", entry: commandfile.Entry{Type: commandfile.TypeMerge, KeepOpen: f.keepOpen}}, nil
+	}
+	return mergeQueueSource{label: "its own branch, in a merge workspace", entry: commandfile.Entry{Type: commandfile.TypeMerge, Detached: true}}, nil
 }
 
 // existingDir resolves a flag's directory to an absolute path that is a

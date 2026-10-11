@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
@@ -11,11 +12,14 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/health"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/merge"
+	"claude-repld/internal/mergeworkspace"
 	"claude-repld/internal/promptqueue"
 	"claude-repld/internal/resolve/feed"
 	"claude-repld/internal/resolve/sidebar"
 	"claude-repld/internal/rollout"
 	"claude-repld/internal/workspace"
+	"claude-repld/internal/wsm"
 )
 
 // LATE BINDING, AND WHY THERE IS ANY.
@@ -341,3 +345,43 @@ func (f *mergeMoverForwarder) AdoptWorkspace(ctx context.Context, ws ids.Workspa
 
 // errMergeMoverUnbound is a merge move asked before the orchestrator exists.
 var errMergeMoverUnbound = errors.New("claude-repld: the merge orchestrator is not bound; a workspace's merges cannot be moved")
+
+// detachedForwarder carries the detached-merge service to the merge
+// orchestrator, which is built before the workspace verbs and the prompt
+// handler the service is made of. A detached merge reaching it before the
+// service is bound is a defect in the boot order, answered as an error.
+type detachedForwarder struct {
+	mu     sync.RWMutex
+	target *mergeworkspace.Service
+}
+
+func (f *detachedForwarder) bind(target *mergeworkspace.Service) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.target = target
+}
+
+func (f *detachedForwarder) service() (*mergeworkspace.Service, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	if f.target == nil {
+		return nil, fmt.Errorf("claude-repld: a detached merge reached the merge orchestrator before the detached-merge service existed")
+	}
+	return f.target, nil
+}
+
+func (f *detachedForwarder) Fork(ctx context.Context, requester wsm.Workspace, request wsm.DetachedMergeID, branch string) (wsm.Workspace, error) {
+	target, err := f.service()
+	if err != nil {
+		return wsm.Workspace{}, err
+	}
+	return target.Fork(ctx, requester, request, branch)
+}
+
+func (f *detachedForwarder) HandBack(ctx context.Context, requester ids.WorkspaceID, mergeWS wsm.Workspace, out merge.DetachedOutcome) error {
+	target, err := f.service()
+	if err != nil {
+		return err
+	}
+	return target.HandBack(ctx, requester, mergeWS, out)
+}

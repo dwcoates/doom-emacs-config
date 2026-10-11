@@ -848,7 +848,12 @@ func validateMergeWorkspaceRequest(req *agentreplv1.MergeWorkspaceRequest) *conn
 		return err
 	}
 	switch source := req.GetSource().GetSource().(type) {
-	case *agentreplv1.MergeWorkspaceSource_OwnBranch, *agentreplv1.MergeWorkspaceSource_MergedUpstream:
+	case *agentreplv1.MergeWorkspaceSource_OwnBranch:
+		if source.OwnBranch.GetRun() == nil {
+			return invalid("source.own_branch.run", "a run arm (in_place or detached) is required")
+		}
+		return nil
+	case *agentreplv1.MergeWorkspaceSource_MergedUpstream:
 		return nil
 	case *agentreplv1.MergeWorkspaceSource_Workspace:
 		return validateWorkspaceRef("source.workspace.ref", source.Workspace.GetRef())

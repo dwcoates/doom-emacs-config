@@ -100,6 +100,10 @@ type Workspace struct {
 	// end -- a successor after a handover, a restart -- draws the row from
 	// until a turn of its own supersedes it.
 	Result *TurnResult
+	// MergeOf is set on a MERGE WORKSPACE: one the daemon forked from another
+	// workspace to carry that workspace's detached merge. Nil for every other
+	// workspace.
+	MergeOf *MergeOrigin
 }
 
 // TurnResult is the roster's durable read of a workspace's last turn result.
@@ -195,6 +199,9 @@ type RegisterFacts struct {
 	// whatever is recorded alone, because "not looked up" is not "no default
 	// branch".
 	DefaultBranch string
+	// MergeOf marks a MERGE WORKSPACE at its creation, nil for every other
+	// workspace. Only the creation path supplies it.
+	MergeOf *MergeOrigin
 }
 
 // Priority is the roster's ordering priority, mirroring
@@ -857,6 +864,28 @@ type MergeSource struct {
 	// the branch checked out in the workspace's worktree when the request was
 	// made for every other arm (empty on a request an earlier build recorded).
 	Branch string
+	// Detach is set on an own-branch request that runs DETACHED, in a merge
+	// workspace forked from the requester
+	// (agentrepl.v1.MergeWorkspaceSourceOwnBranchDetached): the request's own
+	// identity, which the merge workspace records as its MergeOrigin.Request so
+	// a recovery finds the one workspace forked for THIS request. Empty for an
+	// in-place merge.
+	Detach DetachedMergeID
+}
+
+// DetachedMergeID is one detached merge request's identity, minted when the
+// request is recorded.
+type DetachedMergeID string
+
+// MergeOrigin is what a MERGE WORKSPACE was forked for: the workspace whose
+// detached merge it carries, and that request's identity.
+type MergeOrigin struct {
+	// Requester is the workspace that asked for the detached merge. The roster
+	// nests the merge workspace under it, and the merge's handback is
+	// delivered to its session.
+	Requester WorkspaceID
+	// Request is the detached request the merge workspace was forked for.
+	Request DetachedMergeID
 }
 
 // MergeQueueEntry is one workspace's place in its repository's merge queue. The
