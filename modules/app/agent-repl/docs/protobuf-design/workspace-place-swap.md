@@ -237,3 +237,8 @@ sidebar's walk" and the create-landing rule above. Not yet implemented.
   are the implementer's, kept additive so `parent.fork` (the child fork) is
   untouched. Flagged in the session report for the owner to revisit.
 - **Sweep:** `SwapWorkspacePlaces*` removed; nothing else obviated.
+- **Nesting follows the merge target only (owner, 2026-10-11):** a row nests
+  only under the workspace it merges into, which is its recorded parent. The
+  branch-lineage nesting (a workspace registered from Emacs nested under the
+  workspace owning the branch it was cut from) is removed, since such a
+  workspace merges into the primary branch.

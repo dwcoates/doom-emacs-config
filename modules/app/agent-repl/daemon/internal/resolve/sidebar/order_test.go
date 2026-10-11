@@ -189,9 +189,9 @@ func TestRosterOrdersChildrenTheSameWayWithinTheirParent(t *testing.T) {
 	parent := workspace("w-parent", "parent")
 	parent = placed(parent, 1)
 	childLate := placed(workspace("w-late", "aaa-child"), 3)
-	childLate.ParentBranch = parent.Branch
+	childLate.Parent = &parent.ID
 	childEarly := placed(workspace("w-early", "zzz-child"), 2)
-	childEarly.ParentBranch = parent.Branch
+	childEarly.Parent = &parent.ID
 
 	// Act.
 	r.SetRegistry(registry(parent, childLate, childEarly))

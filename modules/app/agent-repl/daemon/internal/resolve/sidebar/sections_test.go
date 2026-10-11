@@ -781,7 +781,7 @@ func TestMaturityViewNestsAFamilyWithinItsStage(t *testing.T) {
 	parent := workspace("w-parent", "parent")
 	parent.LastActivityAt = at(0)
 	child := workspace("w-child", "child")
-	child.ParentBranch = parent.Branch
+	child.Parent = &parent.ID
 	child.LastActivityAt = at(0)
 
 	// Act.
@@ -800,7 +800,7 @@ func TestMaturityViewMakesAChildWhoseParentIsInAnotherStageARoot(t *testing.T) {
 	parent := workspace("w-parent", "parent")
 	parent.LastActivityAt = at(0)
 	child := workspace("w-child", "child")
-	child.ParentBranch = parent.Branch
+	child.Parent = &parent.ID
 
 	// Act.
 	r.SetRegistry(registry(parent, child))
