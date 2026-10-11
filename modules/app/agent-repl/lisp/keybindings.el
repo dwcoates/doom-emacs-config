@@ -157,8 +157,9 @@ the module."
 ;; among them -- so `M-1' landed on the splash screen with no tab
 ;; highlighted and `M-2' on the FIRST tab.  Every chord here indexes
 ;; `agent-repl-roster-drawn-tab-order' instead, the same list the bar is drawn
-;; from, so the numerals and the picture cannot disagree.  `M-0' is left to
-;; Doom.
+;; from, so the numerals and the picture cannot disagree.  `M-0' is ours too:
+;; it runs `agent-repl-switch-to-last-workspace', the tab at the END of the
+;; drawn bar, where Doom's `+workspace/switch-to-final' took persp-mode's last.
 ;;
 ;; WHY A KEYMAP OF OUR OWN, and not a later `map!' over Doom's.  Doom's
 ;; numerals are `:g' bindings, i.e. `global-map' entries, and beating a
@@ -191,7 +192,8 @@ the module."
       (dotimes (i agent-repl-switch-numeral-count)
         (let ((n (1+ i)))
           (define-key map (kbd (format "%s-%d" modifier n))
-                      (intern (format "agent-repl-switch-to-workspace-%d" n))))))
+                      (intern (format "agent-repl-switch-to-workspace-%d" n)))))
+      (define-key map (kbd (format "%s-0" modifier)) 'agent-repl-switch-to-last-workspace))
     ;; DOOM'S OWN WORKSPACE NAVIGATION IS REMAPPED, wherever it is bound
     ;; (`SPC TAB [', `SPC TAB ]', `SPC TAB 1'..`9'): those commands switch the
     ;; frame locally over persp-mode's list, and every switch trigger must
@@ -202,10 +204,12 @@ the module."
     (dotimes (i agent-repl-switch-numeral-count)
       (define-key map (vector 'remap (intern (format "+workspace/switch-to-%d" i)))
                   (intern (format "agent-repl-switch-to-workspace-%d" (1+ i)))))
+    (define-key map [remap +workspace/switch-to-final] 'agent-repl-switch-to-last-workspace)
     ;; `evil-make-intercept-map' with no STATE, written as the data it writes.
     (define-key map [intercept-state] 'all)
     map)
-  "Keymap carrying `M-1\=' .. `M-9\=' and `s-1\=' .. `s-9\=', the slot chords.
+  "Keymap carrying `M-0\=' .. `M-9\=' and `s-0\=' .. `s-9\=', the bar chords.
+`M-1\=' .. `M-9\=' are slots, `M-0\=' the last tab on the bar.
 Built from `agent-repl-switch-numeral-count', the modifiers in
 `agent-repl-switch-numeral-modifiers' and the commands `commands.el\='
 generates from the same number, so a chord with no command behind it --
@@ -213,7 +217,7 @@ or a command with no chord -- cannot be spelled.  An evil intercept map
 for every state; see the commentary above.")
 
 (define-minor-mode agent-repl-workspace-numerals-mode
-  "Make `M-1\=' .. `M-9\=' and `s-1\=' .. `s-9\=' switch to a DRAWN TAB SLOT.
+  "Make `M-0\=' .. `M-9\=' and `s-0\=' .. `s-9\=' switch to a DRAWN TAB.
 The slot is one of the tab bar as drawn.  Global, and enabled by this
 module\='s own load, because the chords are about the tab bar rather than
 about any one buffer.  Its keymap shadows Doom\='s `global-map\=' numerals
