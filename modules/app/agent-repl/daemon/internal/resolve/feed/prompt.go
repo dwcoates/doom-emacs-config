@@ -1,6 +1,8 @@
 package feed
 
 import (
+	"strings"
+
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -198,18 +200,39 @@ func (r *resolver) userPromptRow(
 
 // PromptRow is what a delivered prompt's row DRAWS, before its identity and
 // turn are stamped on: a user-prompt bubble carrying the drawn blocks under its
-// author.
+// author, or, for a detached merge's handback (PROMPT_ORIGIN_MERGE_HANDBACK),
+// the handback badge alone.
 //
 // It is EXPORTED because the prompt queue's mirror of an accepted prompt draws
 // the same row under the same FeedId; the two draws compose the row here, so
 // they can never disagree about what a prompt is drawn as.
 func PromptRow(origin conversationv1.PromptOrigin, said *conversationv1.UserSaid, blocks []*frontendv1.FeedUserPromptBlock) *frontendv1.FeedRow {
+	if origin == conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_HANDBACK {
+		return &frontendv1.FeedRow{Row: &frontendv1.FeedRow_MergeHandback{MergeHandback: &frontendv1.FeedMergeHandbackBadge{
+			Label: &frontendv1.FeedMergeHandbackBadgeLabel{Text: MergeHandbackLabel(said)},
+		}}}
+	}
 	return &frontendv1.FeedRow{Row: &frontendv1.FeedRow_UserPrompt{UserPrompt: &frontendv1.FeedUserPrompt{
 		Author: &frontendv1.FeedUserPromptAuthor{Label: AuthorLabel(origin)},
 		Result: &frontendv1.FeedUserPrompt_Success{Success: &frontendv1.FeedUserPromptSuccess{
 			Body: &frontendv1.FeedUserPromptBody{Blocks: blocks},
 		}},
 	}}}
+}
+
+// MergeHandbackLabel is a merge handback's badge text: the FIRST LINE of the
+// handback's first text block. The handback brief
+// (prompts/merge-detached-handback.md) leads with exactly that line ("merge of
+// fix-flaky landed"), so the badge states the outcome in the daemon's words
+// and the rest of the report is the agent's to read.
+func MergeHandbackLabel(said *conversationv1.UserSaid) string {
+	for _, block := range said.GetContent().GetBlocks() {
+		if text := block.GetText().GetText(); text != "" {
+			first, _, _ := strings.Cut(text, "\n")
+			return strings.TrimSpace(first)
+		}
+	}
+	return ""
 }
 
 // ① THE PROMPT'S WORKING FLAG. FeedUserPrompt.working / FeedAgentPrompt.working
