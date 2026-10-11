@@ -3,6 +3,7 @@ package prompthandler
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -47,6 +48,8 @@ func newHandler(deps Deps) (*handler, error) {
 		return nil, fmt.Errorf("the prompt handler needs the feed resolver")
 	case deps.Panels == nil:
 		return nil, fmt.Errorf("the prompt handler needs a panel source")
+	case deps.Asks == nil:
+		return nil, fmt.Errorf("the prompt handler needs a standing-ask answerer")
 	}
 	if deps.MintTurn == nil {
 		deps.MintTurn = wsm.NewTurnID
@@ -103,6 +106,24 @@ func (h *handler) Submit(ctx context.Context, ws ids.WorkspaceID, said *conversa
 		return Outcome{}, err
 	}
 	defer c.done()
+	// A TYPED ANSWER IS DECIDED UNDER THE KEY'S CLAIM, so a retry of a send
+	// that already answered an ask answers duplicate_submission rather than
+	// typing the same text into the next question, or reaching the session as
+	// a prompt.
+	if answerable(ctx, said, origin, delivery) {
+		answered, err := h.deps.Asks.AnswerStandingAsk(ctx, ws, target, text)
+		if err != nil {
+			return Outcome{}, err
+		}
+		if answered {
+			if err := h.accept(ctx, ws, c, log); err != nil {
+				return Outcome{}, err
+			}
+			h.movedOn(ctx, ws)
+			log.Info(opSubmit, "the send was delivered as a standing ask's typed answer; no turn was minted", nil)
+			return Outcome{Recognition: RecognizedAskAnswer}, nil
+		}
+	}
 	turn := c.turn
 	disposition, err := h.deps.Queue.Submit(ctx, promptqueue.Submission{
 		WS: ws, Turn: turn, Said: said, Origin: origin, Target: target, Delivery: delivery,
@@ -298,6 +319,27 @@ func feedPanel(panel *agentreplv1.SubmitPromptCommandPanel) *frontendv1.FeedComm
 	}
 }
 
+// answerable reports whether a submission can be a typed answer to a standing
+// ask: a plain user send (TypedAnswerOrigins), with the ordinary delivery,
+// that is not a re-drive of an earlier attempt, carrying typed words and no
+// image. A deferred prompt asked to run as its own turn; a re-drive's ask may
+// be long gone; an image cannot be part of an answer.
+func answerable(ctx context.Context, said *conversationv1.UserSaid, origin conversationv1.PromptOrigin, delivery wsm.Delivery) bool {
+	if !TypedAnswerOrigins[origin] || delivery != wsm.DeliveryOrdinary || isRedrive(ctx) {
+		return false
+	}
+	words := false
+	for _, block := range said.GetContent().GetBlocks() {
+		switch b := block.GetBlock().(type) {
+		case *conversationv1.UserContentBlock_Image:
+			return false
+		case *conversationv1.UserContentBlock_Text:
+			words = words || strings.TrimSpace(b.Text.GetText()) != ""
+		}
+	}
+	return words
+}
+
 // saidText renders a submission's text: the text blocks, joined. Recognition
 // reads it and nothing else — an image carries no command, and a reply's
 // quote block is not the person's words, so a command typed as a reply is
@@ -326,6 +368,8 @@ func recognitionName(r Recognition) string {
 		return "refused"
 	case RecognizedAct:
 		return "session_act"
+	case RecognizedAskAnswer:
+		return "ask_answer"
 	default:
 		return fmt.Sprintf("recognition(%d)", r)
 	}

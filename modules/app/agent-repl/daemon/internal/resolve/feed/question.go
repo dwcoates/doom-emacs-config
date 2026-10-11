@@ -42,12 +42,25 @@ func (r *resolver) drawQuestion(s *wsState, agent *conversationv1.AgentId, q *co
 	switch frame := q.GetResult().(type) {
 	case *conversationv1.AgentQuestion_Start:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "draw", "branch": "case *conversationv1.AgentQuestion_Start"})
+		// A START RESTATED for an ask already standing (a stream re-opening
+		// with the start it announced) keeps the draft the user has built; only
+		// a first start, or one after the ask settled, begins an empty one.
+		if !served.open {
+			s.askSeq++
+			served.opened = s.askSeq
+			served.open = true
+			served.delivering = false
+			served.active = 0
+			served.drafts = emptyDrafts(frame.Start.GetBatch())
+		}
 		served.batch = frame.Start.GetBatch()
 		card.Questions = questionItems(frame.Start.GetBatch())
-		card.State = &frontendv1.FeedQuestion_Open{Open: &frontendv1.FeedQuestionOpen{}}
+		card.State = &frontendv1.FeedQuestion_Open{Open: openState(served)}
 	case *conversationv1.AgentQuestion_Success:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "draw", "branch": "case *conversationv1.AgentQuestion_Success"})
 		card.Questions = questionItems(frame.Success.GetBatch())
+		served.open = false
+		served.delivering = false
 		switch outcome := frame.Success.GetOutcome().(type) {
 		case *conversationv1.AgentQuestionSuccess_Answered:
 			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "draw", "branch": "case *conversationv1.AgentQuestionSuccess_Answered"})
@@ -69,6 +82,8 @@ func (r *resolver) drawQuestion(s *wsState, agent *conversationv1.AgentId, q *co
 		}
 	case *conversationv1.AgentQuestion_Failure:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "draw", "branch": "case *conversationv1.AgentQuestion_Failure"})
+		served.open = false
+		served.delivering = false
 		// The ask could not be put to the user at all; nothing was chosen and
 		// nothing waits.
 		card.State = &frontendv1.FeedQuestion_Expired{Expired: &frontendv1.FeedQuestionExpired{
@@ -78,11 +93,14 @@ func (r *resolver) drawQuestion(s *wsState, agent *conversationv1.AgentId, q *co
 		return
 	}
 
+	served.at = at
+	served.row = r.rowID(s.id, at.feed, feedid.RowKey{Kind: feedid.KindQuestion, ID: askID})
 	row := &frontendv1.FeedRow{
-		Id:  r.rowID(s.id, at.feed, feedid.RowKey{Kind: feedid.KindQuestion, ID: askID}),
+		Id:  served.row,
 		Row: &frontendv1.FeedRow_Question{Question: card},
 	}
 	r.stampTurn(s, row, nil)
+	served.turn = row.GetTurn()
 	log.Debug("daemon.feed.question",
 		"a question card was upserted",
 		dlog.Context{"ask": askID, "questions": len(card.GetQuestions())})

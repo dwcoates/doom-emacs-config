@@ -88,7 +88,28 @@ const (
 	// ordinary prompt, and the two context cuts DO mint a turn while a model
 	// change does not. See the report's escalation on the response arm.
 	RecognizedAct
+	// RecognizedAskAnswer is a plain user send made while an ask stands on the
+	// addressed feed: it was delivered as that ask's typed answer and minted
+	// no turn (agentrepl.v1.SubmitPromptAskAnswered).
+	RecognizedAskAnswer
 )
+
+// TypedAnswerOrigins are the send sites whose text can be a TYPED ANSWER to a
+// standing ask: the plain sends, whose text is exactly what the person typed.
+// Every other origin decorates the text (a metaprompt, a prefix, a postfix) or
+// is a program's own submission, and is never taken as an answer.
+var TypedAnswerOrigins = map[conversationv1.PromptOrigin]bool{
+	conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT:          true,
+	conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT_AND_HIDE: true,
+	conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT:   true,
+}
+
+// AskAnswerer delivers a typed send to the ask standing on the addressed feed
+// (workspace.Verbs.AnswerStandingAsk). It answers false, having done nothing,
+// when no ask stands there.
+type AskAnswerer interface {
+	AnswerStandingAsk(ctx context.Context, ws ids.WorkspaceID, target *feedid.Ref, text string) (bool, error)
+}
 
 // Outcome is SubmitPrompt's answer, before it is encoded into the response
 // oneof. Exactly one of the shapes is populated.
@@ -137,6 +158,9 @@ type Deps struct {
 	// second turn — and resolves the workspace whose log sink the handler
 	// writes to.
 	DB wsm.DB
+	// Asks takes a plain user send as the typed answer to a standing ask
+	// before it can become a turn.
+	Asks AskAnswerer
 	// Panels resolves a recognized panel command. It is a FUNCTION because the
 	// four panels are assembled from facts this package does not own (the
 	// session's status, the tracker's checklist, the MCP roster, the context

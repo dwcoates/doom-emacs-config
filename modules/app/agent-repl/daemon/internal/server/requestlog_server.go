@@ -255,6 +255,23 @@ func (s *requestLoggingServer) AnswerQuestion(
 	return s.server.AnswerQuestion(ctx, req)
 }
 
+func (s *requestLoggingServer) UpdateQuestionDraft(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.UpdateQuestionDraftRequest],
+) (resp *connect.Response[agentreplv1.UpdateQuestionDraftResponse], err error) {
+	boundary, err := s.server.beginRequest(ctx, "UpdateQuestionDraft", req.Header().Get(requestIDHeader), requestMessage(req))
+	if err != nil {
+		return nil, boundaryFailure(err)
+	}
+	boundary.log.Debug("daemon.server.update_question_draft", "entered the rpc handler", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "resolved the rpc request scope", boundary.entryContext())
+	boundary.log.Debug(boundaryOperation(boundary.rpc), "delegated the rpc request", boundary.entryContext())
+	defer func() {
+		boundary.log.Debug("daemon.server.update_question_draft", "completed the rpc handler", boundary.completionContext(err))
+	}()
+	return s.server.UpdateQuestionDraft(ctx, req)
+}
+
 func (s *requestLoggingServer) AnswerColdGate(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.AnswerColdGateRequest],

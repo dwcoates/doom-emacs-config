@@ -1005,6 +1005,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Queue:    queue,
 		Feed:     feedResolver,
 		DB:       p.DB,
+		Asks:     verbs,
 		Panels:   server.Panels(topbarResolver, deployStamp(paths.BuiltSHA), log),
 		MintTurn: wsm.NewTurnID,
 		MovedOn:  mergeOrchestrator.RetireConcluded,

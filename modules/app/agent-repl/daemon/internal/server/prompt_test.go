@@ -679,3 +679,72 @@ func TestSubmitPromptHandsTheHandlerItsDelivery(t *testing.T) {
 		})
 	}
 }
+
+// TestSubmitPromptAnswersThatASendWasATypedAnswer pins the ask-answered arm.
+func TestSubmitPromptAnswersThatASendWasATypedAnswer(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Prompts.outcome = prompthandler.Outcome{Recognition: prompthandler.RecognizedAskAnswer}
+
+	// Act.
+	resp, err := h.Client.SubmitPrompt(context.Background(), connect.NewRequest(submitRequest()))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("SubmitPrompt: %v", err)
+	}
+	if resp.Msg.GetSuccess().GetAskAnswered() == nil {
+		t.Fatalf("result = %v, want ask_answered", resp.Msg.GetResult())
+	}
+}
+
+// TestSubmitPromptNamesASettledAskByItsArm pins both spellings of "the ask
+// settled before the typed answer reached it".
+func TestSubmitPromptNamesASettledAskByItsArm(t *testing.T) {
+	for _, arm := range []string{workspace.ArmAskNotStanding, workspace.ArmShimNoOpenAsk} {
+		t.Run(arm, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.Prompts.err = &workspace.Refusal{Arm: arm, Reason: "the ask settled"}
+
+			// Act.
+			resp, err := h.Client.SubmitPrompt(context.Background(), connect.NewRequest(submitRequest()))
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("SubmitPrompt: %v", err)
+			}
+			if resp.Msg.GetError().GetAskNotStanding() == nil {
+				t.Fatalf("result = %v, want ask_not_standing", resp.Msg.GetResult())
+			}
+		})
+	}
+}
+
+// TestSubmitPromptLeavesTheSelectionStandingForATypedAnswer pins that a typed
+// answer is not the prompt the selection was chosen for.
+func TestSubmitPromptLeavesTheSelectionStandingForATypedAnswer(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Feed.finals = feedIDs("resp-old", "resp-new")
+	h.Feed.markdown = map[string]string{"resp-new": "prior answer"}
+	h.Prompts.outcome = prompthandler.Outcome{Recognition: prompthandler.RecognizedAskAnswer}
+	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(newer))); err != nil {
+		t.Fatalf("seed selection: %v", err)
+	}
+
+	// Act.
+	if _, err := h.Client.SubmitPrompt(context.Background(), connect.NewRequest(submitRequest())); err != nil {
+		t.Fatalf("SubmitPrompt: %v", err)
+	}
+
+	// Assert: a NEWER from a surviving selection at the most recent wraps to
+	// the oldest.
+	resp, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(newer)))
+	if err != nil {
+		t.Fatalf("SelectFeedRow: %v", err)
+	}
+	if got := resp.Msg.GetSuccess().GetSelected().GetSelection().GetResponse().GetRow().GetValue(); got != "resp-old" {
+		t.Fatalf("selected = %q, want resp-old (the selection survived and wrapped)", got)
+	}
+}
