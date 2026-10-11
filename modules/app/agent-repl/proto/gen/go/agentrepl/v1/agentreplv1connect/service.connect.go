@@ -79,6 +79,9 @@ const (
 	// AgentReplAnswerQuestionProcedure is the fully-qualified name of the AgentRepl's AnswerQuestion
 	// RPC.
 	AgentReplAnswerQuestionProcedure = "/agentrepl.v1.AgentRepl/AnswerQuestion"
+	// AgentReplUpdateQuestionDraftProcedure is the fully-qualified name of the AgentRepl's
+	// UpdateQuestionDraft RPC.
+	AgentReplUpdateQuestionDraftProcedure = "/agentrepl.v1.AgentRepl/UpdateQuestionDraft"
 	// AgentReplAnswerColdGateProcedure is the fully-qualified name of the AgentRepl's AnswerColdGate
 	// RPC.
 	AgentReplAnswerColdGateProcedure = "/agentrepl.v1.AgentRepl/AnswerColdGate"
@@ -255,6 +258,7 @@ var (
 	agentReplRollBackMethodDescriptor                 = agentReplServiceDescriptor.Methods().ByName("RollBack")
 	agentReplAnswerPermissionMethodDescriptor         = agentReplServiceDescriptor.Methods().ByName("AnswerPermission")
 	agentReplAnswerQuestionMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("AnswerQuestion")
+	agentReplUpdateQuestionDraftMethodDescriptor      = agentReplServiceDescriptor.Methods().ByName("UpdateQuestionDraft")
 	agentReplAnswerColdGateMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("AnswerColdGate")
 	agentReplWatchWorkspaceRosterMethodDescriptor     = agentReplServiceDescriptor.Methods().ByName("WatchWorkspaceRoster")
 	agentReplCreateWorkspaceMethodDescriptor          = agentReplServiceDescriptor.Methods().ByName("CreateWorkspace")
@@ -367,6 +371,11 @@ type AgentReplClient interface {
 	AnswerPermission(context.Context, *connect.Request[v1.AnswerPermissionRequest]) (*connect.Response[v1.AnswerPermissionResponse], error)
 	// The question card's submission — answers echo the served values.
 	AnswerQuestion(context.Context, *connect.Request[v1.AnswerQuestionRequest]) (*connect.Response[v1.AnswerQuestionResponse], error)
+	// One click on a standing question card: show a question, pick an option,
+	// or confirm a multi-select. The daemon owns the draft and delivers the
+	// batch itself once every question is answered. See
+	// endpoint_update_question_draft.proto.
+	UpdateQuestionDraft(context.Context, *connect.Request[v1.UpdateQuestionDraftRequest]) (*connect.Response[v1.UpdateQuestionDraftResponse], error)
 	// The cold-context gate's buttons — pay, clear, or compact{model, scope}.
 	AnswerColdGate(context.Context, *connect.Request[v1.AnswerColdGateRequest]) (*connect.Response[v1.AnswerColdGateResponse], error)
 	// The one global stream: the roster, whole, for every webview alike. See
@@ -644,6 +653,12 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			httpClient,
 			baseURL+AgentReplAnswerQuestionProcedure,
 			connect.WithSchema(agentReplAnswerQuestionMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		updateQuestionDraft: connect.NewClient[v1.UpdateQuestionDraftRequest, v1.UpdateQuestionDraftResponse](
+			httpClient,
+			baseURL+AgentReplUpdateQuestionDraftProcedure,
+			connect.WithSchema(agentReplUpdateQuestionDraftMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
 		answerColdGate: connect.NewClient[v1.AnswerColdGateRequest, v1.AnswerColdGateResponse](
@@ -1020,6 +1035,7 @@ type agentReplClient struct {
 	rollBack                 *connect.Client[v1.RollBackRequest, v1.RollBackResponse]
 	answerPermission         *connect.Client[v1.AnswerPermissionRequest, v1.AnswerPermissionResponse]
 	answerQuestion           *connect.Client[v1.AnswerQuestionRequest, v1.AnswerQuestionResponse]
+	updateQuestionDraft      *connect.Client[v1.UpdateQuestionDraftRequest, v1.UpdateQuestionDraftResponse]
 	answerColdGate           *connect.Client[v1.AnswerColdGateRequest, v1.AnswerColdGateResponse]
 	watchWorkspaceRoster     *connect.Client[v1.WatchWorkspaceRosterRequest, v1.WatchWorkspaceRosterResponse]
 	createWorkspace          *connect.Client[v1.CreateWorkspaceRequest, v1.CreateWorkspaceResponse]
@@ -1154,6 +1170,11 @@ func (c *agentReplClient) AnswerPermission(ctx context.Context, req *connect.Req
 // AnswerQuestion calls agentrepl.v1.AgentRepl.AnswerQuestion.
 func (c *agentReplClient) AnswerQuestion(ctx context.Context, req *connect.Request[v1.AnswerQuestionRequest]) (*connect.Response[v1.AnswerQuestionResponse], error) {
 	return c.answerQuestion.CallUnary(ctx, req)
+}
+
+// UpdateQuestionDraft calls agentrepl.v1.AgentRepl.UpdateQuestionDraft.
+func (c *agentReplClient) UpdateQuestionDraft(ctx context.Context, req *connect.Request[v1.UpdateQuestionDraftRequest]) (*connect.Response[v1.UpdateQuestionDraftResponse], error) {
+	return c.updateQuestionDraft.CallUnary(ctx, req)
 }
 
 // AnswerColdGate calls agentrepl.v1.AgentRepl.AnswerColdGate.
@@ -1502,6 +1523,11 @@ type AgentReplHandler interface {
 	AnswerPermission(context.Context, *connect.Request[v1.AnswerPermissionRequest]) (*connect.Response[v1.AnswerPermissionResponse], error)
 	// The question card's submission — answers echo the served values.
 	AnswerQuestion(context.Context, *connect.Request[v1.AnswerQuestionRequest]) (*connect.Response[v1.AnswerQuestionResponse], error)
+	// One click on a standing question card: show a question, pick an option,
+	// or confirm a multi-select. The daemon owns the draft and delivers the
+	// batch itself once every question is answered. See
+	// endpoint_update_question_draft.proto.
+	UpdateQuestionDraft(context.Context, *connect.Request[v1.UpdateQuestionDraftRequest]) (*connect.Response[v1.UpdateQuestionDraftResponse], error)
 	// The cold-context gate's buttons — pay, clear, or compact{model, scope}.
 	AnswerColdGate(context.Context, *connect.Request[v1.AnswerColdGateRequest]) (*connect.Response[v1.AnswerColdGateResponse], error)
 	// The one global stream: the roster, whole, for every webview alike. See
@@ -1775,6 +1801,12 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		AgentReplAnswerQuestionProcedure,
 		svc.AnswerQuestion,
 		connect.WithSchema(agentReplAnswerQuestionMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplUpdateQuestionDraftHandler := connect.NewUnaryHandler(
+		AgentReplUpdateQuestionDraftProcedure,
+		svc.UpdateQuestionDraft,
+		connect.WithSchema(agentReplUpdateQuestionDraftMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
 	agentReplAnswerColdGateHandler := connect.NewUnaryHandler(
@@ -2163,6 +2195,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplAnswerPermissionHandler.ServeHTTP(w, r)
 		case AgentReplAnswerQuestionProcedure:
 			agentReplAnswerQuestionHandler.ServeHTTP(w, r)
+		case AgentReplUpdateQuestionDraftProcedure:
+			agentReplUpdateQuestionDraftHandler.ServeHTTP(w, r)
 		case AgentReplAnswerColdGateProcedure:
 			agentReplAnswerColdGateHandler.ServeHTTP(w, r)
 		case AgentReplWatchWorkspaceRosterProcedure:
@@ -2348,6 +2382,10 @@ func (UnimplementedAgentReplHandler) AnswerPermission(context.Context, *connect.
 
 func (UnimplementedAgentReplHandler) AnswerQuestion(context.Context, *connect.Request[v1.AnswerQuestionRequest]) (*connect.Response[v1.AnswerQuestionResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.AnswerQuestion is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) UpdateQuestionDraft(context.Context, *connect.Request[v1.UpdateQuestionDraftRequest]) (*connect.Response[v1.UpdateQuestionDraftResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.UpdateQuestionDraft is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) AnswerColdGate(context.Context, *connect.Request[v1.AnswerColdGateRequest]) (*connect.Response[v1.AnswerColdGateResponse], error) {

@@ -22,6 +22,7 @@ import type { RowContext } from "../../../src/feed/renderers.js";
 import { MalformedView } from "../../../src/rpc/malformed.js";
 import {
   drawFeedPermission,
+  DENY_IN_EDITOR_HINT,
   PERMISSION_ANSWERED_ARMS,
   WAITING_SINCE_ATTRIBUTE,
 } from "../../../src/feed/asks/permission.js";
@@ -66,6 +67,27 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.useRealTimers();
+});
+
+describe("the card's chrome", () => {
+  it.each([
+    ["open", { case: "open", value: {} }],
+    ["abandoned", { case: "abandoned", value: { atMs: 0n } }],
+  ] as const)("wears the tool card's chrome when %s, the headline where a call names its tool", (_s, state) => {
+    const el = drawFeedPermission(permission(state), askHarness().rc);
+    expect(el.classList.contains("tool-card")).toBe(true);
+    expect(el.querySelector(".tool-head .tool-name.perm-headline")?.textContent).toBe(HEADLINE);
+  });
+
+  it("draws the waiting clock in the head, where a call's badge sits", () => {
+    const el = drawFeedPermission(permission({ case: "open", value: {} }), askHarness().rc);
+    expect(el.querySelector(".tool-head .perm-waiting")).not.toBeNull();
+  });
+
+  it("draws no editor hint once the ask is settled", () => {
+    const el = drawFeedPermission(permission({ case: "abandoned", value: { atMs: 0n } }), askHarness().rc);
+    expect(el.querySelector("[data-ask-hint]")).toBeNull();
+  });
 });
 
 describe("the standing card", () => {
@@ -194,24 +216,23 @@ describe("answering", () => {
     expect(h.calls.permission[0]?.workspace).toEqual(WORKSPACE);
   });
 
-  it("carries the deny reason the user typed", async () => {
-    const h = askHarness();
-    const el = drawFeedPermission(permission({ case: "open", value: {} }), h.rc);
-    const reason = el.querySelector<HTMLInputElement>("[data-permission-reason]");
-    if (reason !== null) reason.value = "not that path";
-    el.querySelector<Control>('[data-permission="deny"]')?.click();
-    await settle();
-    const answer = h.calls.permission[0]?.answer;
-    expect(answer?.case === "deny" ? answer.value.reason?.text : null).toBe("not that path");
-  });
-
-  it("sends no reason when the field was left blank", async () => {
+  it("denies with no reason: a reason is typed in the editor", async () => {
     const h = askHarness();
     const el = drawFeedPermission(permission({ case: "open", value: {} }), h.rc);
     el.querySelector<Control>('[data-permission="deny"]')?.click();
     await settle();
     const answer = h.calls.permission[0]?.answer;
     expect(answer?.case === "deny" ? answer.value.reason : "set").toBeUndefined();
+  });
+
+  it("has no text field of its own", () => {
+    const el = drawFeedPermission(permission({ case: "open", value: {} }), askHarness().rc);
+    expect(el.querySelector("input, textarea, [data-permission-reason]")).toBeNull();
+  });
+
+  it("says a deny's reason is typed in the editor", () => {
+    const el = drawFeedPermission(permission({ case: "open", value: {} }), askHarness().rc);
+    expect(el.querySelector("[data-ask-hint]")?.textContent).toBe(DENY_IN_EDITOR_HINT);
   });
 
   it("latches every button inert while the answer is in flight", () => {

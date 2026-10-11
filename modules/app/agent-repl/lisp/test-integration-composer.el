@@ -810,6 +810,31 @@ is to clear the input and log which arm answered."
                        daemon "elisp.input.command-answered" ":command-acted")))
           (agent-repl-itest-composer--kill-buffer agent-repl-itest-composer--ws buf))))))
 
+(ert-deftest agent-repl-itest-composer-ask-answered-is-answered-not-awaited ()
+  "`ask_answered' says the send was a standing ask's typed answer.
+No turn was minted, so Emacs clears the input and records the answer."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest--script
+     daemon "SubmitPrompt"
+     '((success . ((askAnswered . ())))))
+    (agent-repl-itest-composer--with-composer daemon 'open ref
+      (ignore ref)
+      (let ((buf (agent-repl-itest-composer--make-buffer
+                  agent-repl-itest-composer--ws "use OAuth")))
+        (unwind-protect
+            (progn
+              ;; Act.
+              (agent-repl--send :user-sent nil agent-repl-itest-composer--ws)
+              (agent-repl-itest--await-call daemon "SubmitPrompt")
+              ;; Assert.
+              (agent-repl-itest-composer--await-log daemon "elisp.input.ask-answered" "info")
+              (agent-repl-itest--wait-until
+               (lambda () (equal (with-current-buffer buf (buffer-string)) ""))
+               nil "the composer to clear")
+              (should (equal (with-current-buffer buf (buffer-string)) "")))
+          (agent-repl-itest-composer--kill-buffer agent-repl-itest-composer--ws buf))))))
+
 (ert-deftest agent-repl-itest-composer-duplicate-submission-keeps-the-text ()
   "`duplicate_submission' says the key was already accepted: nothing landed
 twice and nothing is owed a resend, so the text stays and the queue is

@@ -20,7 +20,7 @@ import (
 func TestNewRefusesEachMissingCollaborator(t *testing.T) {
 	full := func() Deps {
 		return Deps{
-			DB: newFakeDB(), Queue: &fakeQueue{}, Feed: &fakeFeed{},
+			DB: newFakeDB(), Queue: &fakeQueue{}, Feed: &fakeFeed{}, Asks: &fakeAsks{},
 			Panels: func(context.Context, ids.WorkspaceID, conversationv1.SessionCommand) (*agentreplv1.SubmitPromptCommandPanel, error) {
 				return nil, nil
 			},
@@ -36,6 +36,7 @@ func TestNewRefusesEachMissingCollaborator(t *testing.T) {
 		{"prompt queue", func(d *Deps) { d.Queue = nil }},
 		{"feed resolver", func(d *Deps) { d.Feed = nil }},
 		{"panel source", func(d *Deps) { d.Panels = nil }},
+		{"standing-ask answerer", func(d *Deps) { d.Asks = nil }},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

@@ -1786,6 +1786,38 @@ type fakeCards struct {
 	hasModels        bool
 	efforts          []conversationv1.AgentEffortLevel
 	hasEfforts       bool
+	// edits is every draft edit applied, in order; draftOutcome and draftErr
+	// are what EditQuestionDraft answers. released is every ask whose
+	// delivery claim was freed.
+	edits        []fakeDraftEdit
+	draftOutcome feed.QuestionDraftOutcome
+	draftErr     error
+	released     []string
+	// standing is the ask StandingAsk answers, when hasStanding; targets is
+	// every target it was asked about.
+	standing    feed.StandingAsk
+	hasStanding bool
+	targets     []*feedid.Ref
+}
+
+// fakeDraftEdit is one EditQuestionDraft call.
+type fakeDraftEdit struct {
+	ask  string
+	edit feed.QuestionEdit
+}
+
+func (c *fakeCards) EditQuestionDraft(_ ids.WorkspaceID, ask string, edit feed.QuestionEdit) (feed.QuestionDraftOutcome, error) {
+	c.edits = append(c.edits, fakeDraftEdit{ask: ask, edit: edit})
+	return c.draftOutcome, c.draftErr
+}
+
+func (c *fakeCards) ReleaseQuestionDelivery(_ ids.WorkspaceID, ask string) {
+	c.released = append(c.released, ask)
+}
+
+func (c *fakeCards) StandingAsk(_ ids.WorkspaceID, target *feedid.Ref) (feed.StandingAsk, bool) {
+	c.targets = append(c.targets, target)
+	return c.standing, c.hasStanding
 }
 
 func newFakeCards() *fakeCards {

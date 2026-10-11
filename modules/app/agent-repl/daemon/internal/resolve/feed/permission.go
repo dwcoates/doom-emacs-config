@@ -36,10 +36,12 @@ func (r *resolver) drawPermission(s *wsState, agent *conversationv1.AgentId, p *
 		if !ok {
 			return
 		}
+		s.askSeq++
 		state = &permissionState{
-			feed: at,
-			row:  r.rowID(s.id, at.feed, feedid.RowKey{Kind: feedid.KindPermission, ID: askID}),
-			card: &frontendv1.FeedPermission{},
+			feed:   at,
+			row:    r.rowID(s.id, at.feed, feedid.RowKey{Kind: feedid.KindPermission, ID: askID}),
+			card:   &frontendv1.FeedPermission{},
+			opened: s.askSeq,
 		}
 		s.permissionRows[askID] = state
 	}
