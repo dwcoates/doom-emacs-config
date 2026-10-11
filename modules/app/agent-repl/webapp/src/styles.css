@@ -1079,14 +1079,14 @@ body::after {
 #ws-sidebar .kids { margin-left: 1.55rem; border-left: 1px solid var(--border); }
 #ws-sidebar .kids .row { padding-left: 0.55rem; }
 
-/* The workspace Emacs is currently showing. */
+/* The workspace Emacs is currently showing. The accent gutter bar is the
+   ONLY selection mark (owner ruling, 2026-10-11): no row tint, no bolder
+   name. */
 #ws-sidebar .ws.current > .row {
   border-left: 3px solid var(--accent);
-  background: color-mix(in srgb, var(--accent) 9%, transparent);
   padding-left: calc(0.9rem - 3px);
 }
 #ws-sidebar .kids .ws.current > .row { padding-left: calc(0.55rem - 3px); }
-#ws-sidebar .ws.current > .row .name { font-weight: 600; }
 
 /* Workspaces whose agent-repl is closed (and merged ones) stay listed but
    recede. */
