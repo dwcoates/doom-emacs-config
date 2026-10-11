@@ -1,12 +1,12 @@
 /**
- * skill — THE TEAL SKILL CARD: what the agent loaded, and what the document it
+ * skill — THE SKILL CARD: what the agent loaded, and what the document it
  * brought said.
  *
- * TEAL IS THE CARD'S OWN VOCABULARY, not a state color. A skill is a whole
- * conversation of its own rather than one more file read — the same claim the
- * subagent cards make — so it wears the shared async teal (`.tool-card
- * .tool-skill`), and the ARM decides only the badge and what sits under the
- * head.
+ * IT IS AN ORDINARY TOOL CARD. The head names the tool ("Skill") with the
+ * outcome's badge beside it, exactly as a Bash card's head names "Bash"; the
+ * invocation is the line under the head, where a Bash card's command sits; and
+ * the ARM decides only the badge and what sits under the invocation. The
+ * `.tool-skill` class stays, marking the row for nested work.
  *
  * THE DOCUMENT IS THE SUBSTANCE. `running` and `denied` are empty messages
  * because there is nothing yet (or nothing ever) to show: the badge IS the
@@ -28,7 +28,7 @@
  * row's `data-unit="skill"` so a skill's nested work keeps the teal card's
  * always-open, shared-cap, scrolled-not-clipped guarantees.
  */
-import { drawToolHead, drawToolName } from "./tool-head.js";
+import { drawTitledToolHead } from "./tool-head.js";
 import type {
   FeedSkill,
   FeedSkillAllowances,
@@ -44,6 +44,9 @@ import type { RowContext } from "../renderers.js";
 import { foldTitle } from "../title-fold.js";
 
 const PATH = "FeedSkill";
+
+/** The card's head, where a tool card names its tool. */
+export const SKILL_TITLE = "Skill";
 
 /** The badge each outcome wears, and the word it says. */
 const OUTCOME_BADGES = {
@@ -68,19 +71,25 @@ export function drawFeedSkill(u: FeedSkill, _rc: RowContext): HTMLElement {
   card.className = "tool-card tool-skill";
   card.setAttribute("data-state", outcome.case);
 
-  const head = drawToolHead();
-  // THE INVOCATION IS THE CARD'S TITLE (owner ruling, 2026-09-23): the
+  // THE HEAD NAMES THE TOOL, THE INVOCATION IS THE CONTENT (owner ruling,
+  // 2026-10-11): every tool card heads with its tool's name and wears its
+  // status as a badge beside it, so a skill card heads "Skill" exactly as a
+  // Bash card heads "Bash", and the invocation sits under the head where a
+  // Bash card's command line does.
+  const head = drawTitledToolHead(SKILL_TITLE);
+  card.append(head);
+
+  // THE INVOCATION LINE IS THE CARD'S TITLE (owner ruling, 2026-09-23): the
   // one-line title fold. A LOADED card is a `.tool-fold` (below) and owns it; a
   // card in any other state has no fold of its own, so the title is its own
   // (title-fold.ts). No draw here stops the card's ticking, so folding it at
   // once keeps its measurer.
-  head.append(
+  card.append(
     foldTitle(
       drawFeedSkillInvocation(requireMessage(u.invocation, `${PATH}.invocation`), `${PATH}.invocation`),
       outcome.case === "loaded" ? "card" : "standalone",
     ),
   );
-  card.append(head);
 
   switch (outcome.case) {
     case "running":
@@ -121,7 +130,13 @@ export function drawFeedSkill(u: FeedSkill, _rc: RowContext): HTMLElement {
   }
 }
 
-/** The invocation line — the line a user would have typed, drawn verbatim. */
+/**
+ * The invocation line — the line a user would have typed, drawn verbatim.
+ *
+ * IT READS AS A BASH CARD'S COMMAND LINE: the grey monospace `.cmd` line, capped
+ * like one (`.skill-input`). It wears no "$" chrome, because the invocation is
+ * not a shell command and already leads with its own "/".
+ */
 export function drawFeedSkillInvocation(
   u: FeedSkillInvocation,
   path: string,
@@ -130,7 +145,10 @@ export function drawFeedSkillInvocation(
     operation: "feed.cards.skill.invocation",
     context: { path },
   });
-  return drawToolName(u.text);
+  const line = document.createElement("pre");
+  line.className = "cmd skill-input";
+  line.textContent = u.text;
+  return line;
 }
 
 /**

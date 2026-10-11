@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import {
   TOOL_HEAD_CLASS,
   TOOL_NAME_CLASS,
+  drawTitledToolHead,
   drawToolHead,
   drawToolName,
 } from "../../../src/feed/cards/tool-head.js";
@@ -42,6 +43,36 @@ describe("drawToolName", () => {
     expect(drawToolName("Claude wants to run ls", "perm-headline").className).toBe(
       `${TOOL_NAME_CLASS} perm-headline`,
     );
+  });
+});
+
+describe("drawTitledToolHead", () => {
+  it("draws the shared head holding only the shared name, verbatim", () => {
+    // Arrange / Act
+    const head = drawTitledToolHead("Skill");
+
+    // Assert
+    expect([head.className, head.children.length]).toEqual([TOOL_HEAD_CLASS, 1]);
+    const name = head.firstElementChild as HTMLElement;
+    expect([name.className, name.textContent]).toEqual([TOOL_NAME_CLASS, "Skill"]);
+  });
+});
+
+describe("every client-titled tool head is built by the one builder", () => {
+  it("leaves no module naming a head with a client constant by hand", () => {
+    // A hand-rolled head-plus-title drifts from the shared one; this fails it by name.
+    const own = path.join(SRC, "feed/cards/tool-head.ts");
+    const offenders = sources(SRC)
+      .filter((file) => file !== own)
+      .filter((file) => /drawToolName\([A-Z][A-Z_]*\)/.test(readFileSync(file, "utf8")));
+    expect(offenders.map((file) => path.relative(SRC, file))).toEqual([]);
+  });
+
+  it.each([
+    { file: "feed/asks/question.ts", call: "drawTitledToolHead(QUESTION_TITLE)" },
+    { file: "feed/cards/skill.ts", call: "drawTitledToolHead(SKILL_TITLE)" },
+  ])("heads $file through the shared builder", ({ file, call }) => {
+    expect(readFileSync(path.join(SRC, file), "utf8")).toContain(call);
   });
 });
 
