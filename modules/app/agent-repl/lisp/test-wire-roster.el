@@ -661,6 +661,49 @@ WatchWorkspaceRoster push and every tab falls back to a stale blue status."
                   "{\"key\":{},\"header\":{\"label\":{},\"count\":{}},\"rows\":{},\"expanded\":{}}")
                  '("RosterHiddenSection" key "unknown field"))))
 
+;;;; ---- The keyless sections: one decoder shape ----
+
+(ert-deftest agent-repl-test-wire-roster-keyless-section-decodes-through-its-hooks ()
+  "The keyless-section decoder hands each field to its hook and names the message."
+  (should (equal (agent-repl-test-wire-roster--decode
+                  (lambda (value)
+                    (agent-repl-wire--decode-keyless-section
+                     "TestBand" value
+                     (lambda (_) 'header) (lambda (_) 'rows) (lambda (_) 'fold)))
+                  "{\"header\":{},\"rows\":{},\"expanded\":{}}")
+                 '(:header header :rows rows :fold fold))))
+
+(ert-deftest agent-repl-test-wire-roster-keyless-section-refuses-a-key ()
+  "A key on a keyless section is an unknown field of that message."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  (lambda (value)
+                    (agent-repl-wire--decode-keyless-section
+                     "TestBand" value #'identity #'identity #'identity))
+                  "{\"key\":{},\"header\":{},\"rows\":{},\"expanded\":{}}")
+                 '("TestBand" key "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-roster-keyless-section-requires-its-header ()
+  "An absent header is a breach of the named message."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  (lambda (value)
+                    (agent-repl-wire--decode-keyless-section
+                     "TestBand" value #'identity #'identity #'identity))
+                  "{\"rows\":{},\"expanded\":{}}")
+                 '("TestBand" header "required message field is absent"))))
+
+(ert-deftest agent-repl-test-wire-roster-every-keyless-section-shares-one-decoder ()
+  "The merged band and the hidden section both decode through the one shape.
+A hand-rolled decoder for either would skip the shared helper and fail here."
+  (dolist (decoder '(agent-repl-wire-decode-roster-merged-section
+                     agent-repl-wire-decode-roster-hidden-section))
+    (let ((calls 0))
+      (cl-letf* ((shared (symbol-function 'agent-repl-wire--decode-keyless-section))
+                 ((symbol-function 'agent-repl-wire--decode-keyless-section)
+                  (lambda (&rest args) (cl-incf calls) (apply shared args))))
+        (agent-repl-test-wire-roster--decode
+         decoder "{\"header\":{\"label\":{},\"count\":{}},\"rows\":{},\"expanded\":{}}"))
+      (should (= calls 1)))))
+
 (ert-deftest agent-repl-test-wire-roster-refuses-an-unknown-field ()
   "An unknown key on the roster is refused at the roster."
   (should (equal (agent-repl-test-wire-roster--breach
