@@ -56,6 +56,21 @@ function taskHead(drawn: HTMLElement): HTMLElement {
   return pane(drawn, "task").querySelector(".task-head") as HTMLElement;
 }
 
+/** The rail with the real stylesheet, around one drawn roster. */
+function inRail<T>(drawn: HTMLElement, check: (rail: HTMLElement) => T): T {
+  const teardown = installStylesheet();
+  const rail = document.createElement("div");
+  rail.id = "ws-sidebar";
+  rail.appendChild(drawn);
+  document.body.appendChild(rail);
+  try {
+    return check(rail);
+  } finally {
+    rail.remove();
+    teardown();
+  }
+}
+
 describe("drawRosterSectionFold", () => {
   it.each([
     ["expanded", false],
@@ -1288,22 +1303,36 @@ describe("a recently-merged section with no rows box", () => {
   });
 });
 
-describe("a section's folded count", () => {
-  /** The rail with the real stylesheet, around one drawn roster. */
-  function inRail<T>(drawn: HTMLElement, check: (rail: HTMLElement) => T): T {
-    const teardown = installStylesheet();
-    const rail = document.createElement("div");
-    rail.id = "ws-sidebar";
-    rail.appendChild(drawn);
-    document.body.appendChild(rail);
-    try {
-      return check(rail);
-    } finally {
-      rail.remove();
-      teardown();
-    }
-  }
+describe("the bands' header color", () => {
+  it.each([
+    ["hidden", ".hidden-section", roster({ hidden: hiddenSection([HIDDEN_ROW]) })],
+    ["merged", ".merged-section", roster({ merged: mergedSection([MERGED_ROW]) })],
+  ] as const)("draws the %s band's header in the merged band's purple", (_kind, selector, made) => {
+    // Arrange
+    const drawn = drawWorkspaceRoster(made, sidebarContext());
+    const head = pane(drawn, "repository").querySelector(`${selector} > .repo-head`) as HTMLElement;
 
+    // Act
+    const color = inRail(drawn, () => cascadedValue(head, "color"));
+
+    // Assert
+    expect(color).toBe("var(--info-agents)");
+  });
+
+  it("leaves a hidden row's name out of the header's purple", () => {
+    // Arrange
+    const drawn = drawWorkspaceRoster(roster({ hidden: hiddenSection([HIDDEN_ROW]) }), sidebarContext());
+    const name = pane(drawn, "repository").querySelector(".hidden-section [data-roster-row='ws-8'] .name") as HTMLElement;
+
+    // Act
+    const color = inRail(drawn, () => cascadedValue(name, "color"));
+
+    // Assert
+    expect(color).not.toBe("var(--info-agents)");
+  });
+});
+
+describe("a section's folded count", () => {
   const countOf = (drawn: HTMLElement, selector: string): HTMLElement =>
     pane(drawn, "repository").querySelector(`${selector} .sb-count`) as HTMLElement;
 
