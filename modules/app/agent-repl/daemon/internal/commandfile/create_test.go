@@ -416,3 +416,39 @@ func TestAWorkspaceWhoseRepositoryIsUnregisteredIsRefused(t *testing.T) {
 		t.Fatalf("cause = %q, want the missing repository named", cause)
 	}
 }
+
+func TestParentAtReadsADirectoryWithinTheRepository(t *testing.T) {
+	tests := []struct {
+		name     string
+		dir      string
+		wantMain bool
+		wantWS   ids.WorkspaceID
+		wantErr  bool
+	}{
+		{name: "the main checkout is no parent", dir: "/repo", wantMain: true},
+		{name: "a registered worktree is that workspace", dir: "/worktrees/feature-one", wantWS: "w1"},
+		{name: "a directory that is neither is unregistered", dir: "/worktrees/gone", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := createFixture(t)
+			in := f.ingress.(*ingress)
+
+			// Act.
+			ws, main, err := in.parentAt(context.Background(), tt.dir, wsm.Repository{ID: "r1", Dir: "/repo"})
+
+			// Assert.
+			if tt.wantErr {
+				var unregistered *unregisteredParentError
+				if !errors.As(err, &unregistered) || !errors.Is(err, wsm.ErrNotFound) {
+					t.Fatalf("err = %v, want an unregistered parent wrapping ErrNotFound", err)
+				}
+				return
+			}
+			if err != nil || main != tt.wantMain || ws.ID != tt.wantWS {
+				t.Fatalf("parentAt = (%q, %v, %v), want (%q, %v, nil)", ws.ID, main, err, tt.wantWS, tt.wantMain)
+			}
+		})
+	}
+}
