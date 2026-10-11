@@ -47,7 +47,28 @@ case "$*" in
     [ -z "${FAKE_GIT_BRANCH_TREE:-}" ] || printf 'worktree %s\nHEAD 0001\nbranch refs/heads/feat/x\n\n' "$FAKE_GIT_BRANCH_TREE"
     ;;
   *"worktree remove "*) ;;
+  *"worktree add "*) ;;
   *"branch -d "*) exit "${FAKE_GIT_BRANCH_D_EXIT:-0}" ;;
+  *"branch -D "*) ;;
+  "-C $FAKE_GIT_MAIN rev-parse --abbrev-ref HEAD") printf 'master\n' ;;
+  *"rev-parse --abbrev-ref HEAD") printf '%s\n' "${FAKE_GIT_OWN_BRANCH:-feat/big}" ;;
+  *"rev-parse --verify "*)
+    c="${*: -1}"; c="${c%"^{commit}"}"
+    case " ${FAKE_GIT_UNKNOWN:-} " in *" $c "*) exit 128 ;; esac
+    printf 'full-%s\n' "$c"
+    ;;
+  *"merge-base --is-ancestor "*" HEAD")
+    c="${*: -2:1}"; c="${c#full-}"
+    case " ${FAKE_GIT_OFF_BRANCH:-} " in *" $c "*) exit 1 ;; esac
+    ;;
+  *"merge-base --is-ancestor "*" master")
+    c="${*: -2:1}"; c="${c#full-}"
+    case " ${FAKE_GIT_ON_TARGET:-} " in *" $c "*) exit 0 ;; esac
+    exit 1
+    ;;
+  *"rev-list --reverse master..HEAD") printf '%s\n' ${FAKE_GIT_BRANCH_COMMITS:-} ;;
+  *"cherry-pick --abort") ;;
+  *"cherry-pick "*) exit "${FAKE_GIT_PICK_EXIT:-0}" ;;
   "rev-parse --show-toplevel") printf '%s\n' "$FAKE_GIT_TOP" ;;
   *"status --porcelain") printf '%s' "${FAKE_GIT_DIRTY:-}" ;;
   *) printf 'unexpected git %s\n' "$*" >&2; exit 2 ;;
@@ -73,6 +94,12 @@ invoke() {
       FAKE_GIT_LOG="$FX/git-log" \
       FAKE_GIT_BRANCH_TREE="${BRANCH_TREE:-}" \
       FAKE_GIT_BRANCH_D_EXIT="${BRANCH_D_EXIT:-0}" \
+      FAKE_GIT_OWN_BRANCH="${OWN_BRANCH:-feat/big}" \
+      FAKE_GIT_UNKNOWN="${UNKNOWN:-}" \
+      FAKE_GIT_OFF_BRANCH="${OFF_BRANCH:-}" \
+      FAKE_GIT_ON_TARGET="${ON_TARGET:-}" \
+      FAKE_GIT_BRANCH_COMMITS="${BRANCH_COMMITS:-full-c1 full-c2 full-c3}" \
+      FAKE_GIT_PICK_EXIT="${PICK_EXIT:-0}" \
       FAKE_DAEMON_ARGS="$FX/daemon-args" \
       FAKE_DAEMON_EXIT="${DAEMON_EXIT:-0}" \
       AGENT_REPL_DAEMON_BIN="$FX/daemon" \
@@ -299,6 +326,115 @@ test_resume_queue_names_one_repository() {
   expect_args "--resume-queue <dir> resumes that repository only" "merge-queue -resume -repository-dir $FX/main"
 }
 
+# git_logged LINE — the fake git saw exactly LINE.
+git_logged() {
+  grep -qxF -- "$1" "$FX/git-log" 2>/dev/null
+}
+
+# built_nothing — no worktree was added and the daemon was never asked.
+built_nothing() {
+  ! grep -q "worktree add" "$FX/git-log" 2>/dev/null && [ -z "$(daemon_args)" ]
+}
+
+test_land_commits_builds_the_named_commits_in_branch_order() {
+  mkfixture
+  invoke --land-commits c3 c1
+  if [ "$RUN_RC" -eq 0 ] &&
+    git_logged "-C $FX/main worktree add -b feat/big-partial-full-c3 $FX/feat-big-partial-full-c3 master" &&
+    git_logged "-C $FX/feat-big-partial-full-c3 cherry-pick full-c1 full-c3" &&
+    [ "$(daemon_args)" = "merge-queue -branch feat/big-partial-full-c3" ]; then
+    pass "--land-commits cherry-picks the named commits in branch order onto master and requests that branch"
+  else
+    fail "--land-commits cherry-picks the named commits in branch order onto master and requests that branch" "exit=$RUN_RC args=$(daemon_args)" "$RUN_OUT" "$(cat "$FX/git-log")"
+  fi
+}
+
+test_land_commits_needs_a_commit() {
+  mkfixture
+  invoke --land-commits
+  if [ "$RUN_RC" -eq 2 ] && built_nothing; then
+    pass "--land-commits with no commit is an error and builds nothing"
+  else
+    fail "--land-commits with no commit is an error and builds nothing" "exit=$RUN_RC" "$RUN_OUT"
+  fi
+}
+
+test_land_commits_refuses_the_main_worktree() {
+  mkfixture
+  TOP="$FX/main" invoke --land-commits c1
+  if [ "$RUN_RC" -eq 2 ] && built_nothing && grep_in "$RUN_OUT" -q "main worktree"; then
+    pass "--land-commits refuses the repository's main worktree"
+  else
+    fail "--land-commits refuses the repository's main worktree" "exit=$RUN_RC" "$RUN_OUT"
+  fi
+}
+
+test_land_commits_refuses_an_unknown_commit() {
+  mkfixture
+  UNKNOWN=c9 invoke --land-commits c1 c9
+  if [ "$RUN_RC" -eq 2 ] && built_nothing && grep_in "$RUN_OUT" -q "c9 names no commit"; then
+    pass "--land-commits refuses a name that is no commit and builds nothing"
+  else
+    fail "--land-commits refuses a name that is no commit and builds nothing" "exit=$RUN_RC" "$RUN_OUT"
+  fi
+}
+
+test_land_commits_refuses_a_commit_off_the_branch() {
+  mkfixture
+  OFF_BRANCH=c2 invoke --land-commits c2
+  if [ "$RUN_RC" -eq 2 ] && built_nothing && grep_in "$RUN_OUT" -q "not on this workspace's branch"; then
+    pass "--land-commits refuses a commit that is not on this workspace's branch"
+  else
+    fail "--land-commits refuses a commit that is not on this workspace's branch" "exit=$RUN_RC" "$RUN_OUT"
+  fi
+}
+
+test_land_commits_refuses_a_commit_already_on_master() {
+  mkfixture
+  ON_TARGET=c1 invoke --land-commits c1
+  if [ "$RUN_RC" -eq 2 ] && built_nothing && grep_in "$RUN_OUT" -q "already on master"; then
+    pass "--land-commits refuses a commit master already has"
+  else
+    fail "--land-commits refuses a commit master already has" "exit=$RUN_RC" "$RUN_OUT"
+  fi
+}
+
+test_land_commits_conflict_leaves_nothing_built() {
+  mkfixture
+  PICK_EXIT=1 invoke --land-commits c2
+  if [ "$RUN_RC" -eq 9 ] && [ -z "$(daemon_args)" ] &&
+    git_logged "-C $FX/feat-big-partial-full-c2 cherry-pick --abort" &&
+    git_logged "-C $FX/main worktree remove --force $FX/feat-big-partial-full-c2" &&
+    git_logged "-C $FX/main branch -D feat/big-partial-full-c2"; then
+    pass "--land-commits on a conflict aborts, removes what it built and requests nothing"
+  else
+    fail "--land-commits on a conflict aborts, removes what it built and requests nothing" "exit=$RUN_RC" "$RUN_OUT" "$(cat "$FX/git-log")"
+  fi
+}
+
+test_land_commits_refusal_leaves_nothing_built() {
+  mkfixture
+  DAEMON_EXIT=6 invoke --land-commits c2
+  if [ "$RUN_RC" -eq 5 ] &&
+    git_logged "-C $FX/main worktree remove --force $FX/feat-big-partial-full-c2" &&
+    git_logged "-C $FX/main branch -D feat/big-partial-full-c2"; then
+    pass "--land-commits refused by the queue removes the branch it built"
+  else
+    fail "--land-commits refused by the queue removes the branch it built" "exit=$RUN_RC" "$RUN_OUT" "$(cat "$FX/git-log")"
+  fi
+}
+
+test_land_commits_flattens_a_prefixed_branch_into_one_directory() {
+  mkfixture
+  OWN_BRANCH=JB/big invoke --land-commits c1
+  if [ "$RUN_RC" -eq 0 ] &&
+    git_logged "-C $FX/main worktree add -b JB/big-partial-full-c1 $FX/JB-big-partial-full-c1 master"; then
+    pass "--land-commits names one directory for a prefixed branch"
+  else
+    fail "--land-commits names one directory for a prefixed branch" "exit=$RUN_RC" "$RUN_OUT" "$(cat "$FX/git-log")"
+  fi
+}
+
 test_enqueue_own_requests_the_own_branch
 test_enqueue_own_keep_open_keeps_the_workspace
 test_enqueue_own_refuses_an_unknown_option
@@ -323,6 +459,15 @@ test_pause_queue_pauses_every_repository
 test_pause_queue_names_one_repository
 test_resume_queue_resumes_every_repository
 test_resume_queue_names_one_repository
+test_land_commits_builds_the_named_commits_in_branch_order
+test_land_commits_needs_a_commit
+test_land_commits_refuses_the_main_worktree
+test_land_commits_refuses_an_unknown_commit
+test_land_commits_refuses_a_commit_off_the_branch
+test_land_commits_refuses_a_commit_already_on_master
+test_land_commits_conflict_leaves_nothing_built
+test_land_commits_refusal_leaves_nothing_built
+test_land_commits_flattens_a_prefixed_branch_into_one_directory
 
 printf 'Passed: %d  Failed: %d\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
