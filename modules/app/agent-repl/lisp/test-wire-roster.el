@@ -541,20 +541,21 @@ WatchWorkspaceRoster push and every tab falls back to a stale blue status."
   "A repo section carries its stable key, its header, its rows and its fold."
   (should (equal (agent-repl-test-wire-roster--decode
                   #'agent-repl-wire-decode-roster-repo-section
-                  (concat "{\"key\":{\"repository\":{\"id\":\"r1\",\"dir\":\"/src\"}},"
+                  (concat "{\"key\":{\"repository\":{\"id\":\"r1\",\"dir\":\"/src\"}},\"divergence\":{\"pending\":{}},"
                           "\"header\":{\"label\":{\"text\":\"doom\"},\"count\":{\"workspaces\":2}},"
                           "\"rows\":{\"rows\":[]},\"expanded\":{}}"))
                  '(:key (:repository (:id "r1" :dir "/src"))
                    :header (:label (:text "doom") :count (:workspaces 2))
                    :rows (:rows nil)
-                   :fold (:arm :expanded :value nil)))))
+                   :fold (:arm :expanded :value nil)
+                   :divergence (:state (:arm :pending :value nil))))))
 
 (ert-deftest agent-repl-test-wire-roster-repo-section-decodes-a-collapsed-fold ()
   "A collapsed section decodes its fold arm as `:collapsed'."
   (should (eq (plist-get
                (plist-get (agent-repl-test-wire-roster--decode
                            #'agent-repl-wire-decode-roster-repo-section
-                           (concat "{\"key\":{\"repository\":{\"id\":\"r1\",\"dir\":\"/src\"}},"
+                           (concat "{\"key\":{\"repository\":{\"id\":\"r1\",\"dir\":\"/src\"}},\"divergence\":{\"pending\":{}},"
                                    "\"header\":{\"label\":{\"text\":\"doom\"},\"count\":{\"workspaces\":2}},"
                                    "\"rows\":{\"rows\":[]},\"collapsed\":{}}"))
                           :fold)
@@ -565,7 +566,7 @@ WatchWorkspaceRoster push and every tab falls back to a stale blue status."
   "The fold is never unset on a wire section."
   (should (agent-repl-test-wire-roster--breach
            #'agent-repl-wire-decode-roster-repo-section
-           (concat "{\"key\":{\"repository\":{\"id\":\"r1\",\"dir\":\"/src\"}},"
+           (concat "{\"key\":{\"repository\":{\"id\":\"r1\",\"dir\":\"/src\"}},\"divergence\":{\"pending\":{}},"
                    "\"header\":{\"label\":{\"text\":\"doom\"},\"count\":{\"workspaces\":2}},"
                    "\"rows\":{\"rows\":[]}}"))))
 
@@ -573,7 +574,7 @@ WatchWorkspaceRoster push and every tab falls back to a stale blue status."
   "Expanded and collapsed at once is a malformed frame."
   (should (agent-repl-test-wire-roster--breach
            #'agent-repl-wire-decode-roster-repo-section
-           (concat "{\"key\":{\"repository\":{\"id\":\"r1\",\"dir\":\"/src\"}},"
+           (concat "{\"key\":{\"repository\":{\"id\":\"r1\",\"dir\":\"/src\"}},\"divergence\":{\"pending\":{}},"
                    "\"header\":{\"label\":{\"text\":\"doom\"},\"count\":{\"workspaces\":2}},"
                    "\"rows\":{\"rows\":[]},\"expanded\":{},\"collapsed\":{}}"))))
 
@@ -583,6 +584,56 @@ WatchWorkspaceRoster push and every tab falls back to a stale blue status."
                   #'agent-repl-wire-decode-roster-repo-section
                   "{\"header\":{\"label\":{\"text\":\"doom\"},\"count\":{\"workspaces\":2}},\"rows\":{\"rows\":[]}}")
                  '("RosterRepoSection" key "required message field is absent"))))
+
+;;;; ---- Repository divergence ----
+
+(defconst agent-repl-test-wire-roster--section-without-divergence
+  (concat "{\"key\":{\"repository\":{\"id\":\"r1\",\"dir\":\"/src\"}},"
+          "\"header\":{\"label\":{\"text\":\"doom\"},\"count\":{\"workspaces\":2}},"
+          "\"rows\":{\"rows\":[]},\"expanded\":{}}")
+  "A repository section with every field but its divergence.")
+
+(ert-deftest agent-repl-test-wire-roster-repo-section-without-a-divergence-is-a-breach ()
+  "The divergence is always set on a wire section, pending until measured."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-repo-section
+                  agent-repl-test-wire-roster--section-without-divergence)
+                 '("RosterRepoSection" divergence "required message field is absent"))))
+
+(ert-deftest agent-repl-test-wire-roster-repo-divergence-decodes-a-count ()
+  "A counted divergence carries the branch, its upstream and both counts."
+  (should (equal (agent-repl-test-wire-roster--decode
+                  #'agent-repl-wire-decode-roster-repo-divergence
+                  "{\"counted\":{\"branch\":\"master\",\"upstream\":\"origin/master\",\"ahead\":2,\"behind\":7}}")
+                 '(:state (:arm :counted
+                           :value (:branch "master" :upstream "origin/master" :ahead 2 :behind 7))))))
+
+(ert-deftest agent-repl-test-wire-roster-repo-divergence-decodes-no-upstream ()
+  "A branch tracking nothing decodes its branch under `:no-upstream'."
+  (should (equal (agent-repl-test-wire-roster--decode
+                  #'agent-repl-wire-decode-roster-repo-divergence
+                  "{\"noUpstream\":{\"branch\":\"main\"}}")
+                 '(:state (:arm :no-upstream :value (:branch "main"))))))
+
+(ert-deftest agent-repl-test-wire-roster-repo-divergence-decodes-a-failure ()
+  "A failed measurement decodes its reason."
+  (should (equal (agent-repl-test-wire-roster--decode
+                  #'agent-repl-wire-decode-roster-repo-divergence
+                  "{\"failed\":{\"reason\":\"fetching origin failed\"}}")
+                 '(:state (:arm :failed :value (:reason "fetching origin failed"))))))
+
+(ert-deftest agent-repl-test-wire-roster-repo-divergence-unset-is-a-breach ()
+  "The measurement's arm is never unset."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-repo-divergence "{}")
+                 '("RosterRepoDivergence" state "oneof is unset"))))
+
+(ert-deftest agent-repl-test-wire-roster-repo-divergence-refuses-an-unknown-field ()
+  "An unknown key on a divergence is refused at the divergence."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-repo-divergence
+                  "{\"pending\":{},\"stale\":true}")
+                 '("RosterRepoDivergence" stale "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-roster-section-header-without-a-label-is-a-breach ()
   "A header always has one author for its heading text."
@@ -637,7 +688,7 @@ WatchWorkspaceRoster push and every tab falls back to a stale blue status."
 
 (defconst agent-repl-test-wire-roster--roster-json
   (concat "{\"repository\":{\"sections\":[{"
-          "\"key\":{\"repository\":{\"id\":\"r1\",\"dir\":\"/src\"}},"
+          "\"key\":{\"repository\":{\"id\":\"r1\",\"dir\":\"/src\"}},\"divergence\":{\"pending\":{}},"
           "\"header\":{\"label\":{\"text\":\"doom\"},\"count\":{\"workspaces\":2}},"
           "\"rows\":{\"rows\":[]},\"expanded\":{}}]},"
           "\"task\":{\"sections\":[]},\"maturity\":{\"sections\":[]},"
@@ -657,7 +708,8 @@ WatchWorkspaceRoster push and every tab falls back to a stale blue status."
                  '(:repository (:sections ((:key (:repository (:id "r1" :dir "/src"))
                                             :header (:label (:text "doom") :count (:workspaces 2))
                                             :rows (:rows nil)
-                                            :fold (:arm :expanded :value nil))))
+                                            :fold (:arm :expanded :value nil)
+                                            :divergence (:state (:arm :pending :value nil)))))
                    :task (:sections nil)
                    :maturity (:sections nil)
                    :hidden (:header (:label (:text "Hidden Workspaces") :count (:workspaces 0))
