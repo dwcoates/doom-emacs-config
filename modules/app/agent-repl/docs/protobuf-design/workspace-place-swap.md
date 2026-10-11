@@ -67,3 +67,25 @@ so a swap needs a stored place and a daemon rpc to exchange two of them.
   re-open. No schema shape changes; the `SetWorkspacePriority` rpc comment
   ("the roster orders by it") is restated to say so.
 - **Why:** a place the user chose survives a later priority change.
+
+### Implementation consequences (2026-10-11)
+
+- **Storage:** `workspaces.place` (layout 32), unique, at least 1 at rest. The
+  migration seeds it from the old order (priority, name, id) so the first
+  roster after the upgrade draws what the last one before it did.
+- **The migration is additive, by a trigger.** The previous build's INSERT
+  names no place, so a row it writes during a joining handover takes the
+  default 0; `workspaces_land_unplaced` moves it after every place in the same
+  statement. A breaking step was rejected because it forces a restart deploy
+  and makes the joining-migration tests unable to run against the real list.
+- **SQLite gotcha:** a comment directly above the table's LAST column breaks
+  `ALTER TABLE ... DROP COLUMN` (the rewrite swallows the closing paren), so
+  the column's comment sits on its index. The integration fixture's layout-3
+  undo relies on that drop.
+- **Landing:** create and re-open put a workspace just before the first
+  workspace of its repository whose priority is weaker, which is the end of
+  its own priority's run; unprioritized lands last. The create path now passes
+  the priority into RegisterWorkspace, because a later SetWorkspacePriority no
+  longer moves anything.
+- **Sibling test:** the daemon judges siblings against the roster it last
+  published (`rosterwalk.RepositorySiblings`), the same tree the user sees.
