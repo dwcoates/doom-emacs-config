@@ -44,14 +44,9 @@ describe("the rail's arm table against the shared vocabulary", () => {
 });
 
 describe("the status mark", () => {
-  it.each(Object.keys(MERGE_GLYPHS))("gives the %s arm its shared glyph name", (key) => {
+  it.each(Object.entries({ ...MERGE_GLYPHS, ...GATE_GLYPHS }))("gives the %s arm its shared glyph name %s", (key, name) => {
     const arm = ROSTER_STATUS_CASES.find((c) => protoArmName(c) === key) as RosterStatusCase;
-    expect(glyphName(arm)).toBe(MERGE_GLYPHS[key]);
-  });
-
-  it.each(Object.keys(GATE_GLYPHS))("gives the %s gate arm its shared glyph name", (key) => {
-    const arm = ROSTER_STATUS_CASES.find((c) => protoArmName(c) === key) as RosterStatusCase;
-    expect(glyphName(arm)).toBe(GATE_GLYPHS[key]);
+    expect(glyphName(arm)).toBe(name);
   });
 
   it.each([...ROSTER_STATUS_CASES])("draws a glyph character for %s", (arm) => {
