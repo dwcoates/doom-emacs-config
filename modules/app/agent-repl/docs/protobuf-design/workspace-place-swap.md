@@ -178,3 +178,16 @@ sidebar's walk" and the create-landing rule above. Not yet implemented.
   prompt relies on changes from the originating workspace that are not
   present. Calling the user's expectation otherwise is operator error, not a
   defect.
+- **Fork-to-master prefix text:** approved as drafted (new template in
+  `prompts/`, origin name filled by the daemon).
+- **Named versions** start exactly as `SPC TAB N` does today: idle, no prompt.
+- **Scope:** the ordering work and the create-command rework both land in
+  this workspace.
+- **`SPC TAB p` is a move:** the current workspace takes the pressed tab's
+  number; moving right shifts the tabs it passes left (`| A | B | C | D |`,
+  A to tab 3 gives `| B | C | A | D |`), moving left shifts them right.
+- **Collapsed repositories** keep taking their workspaces off the tab bar.
+- **Hidden workspaces** keep their registry place; showing one again draws it
+  where the registry says.
+- **Repository sections** keep their current sort; only rows within a section,
+  and children under their parent, sort by registry order.
