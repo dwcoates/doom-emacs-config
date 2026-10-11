@@ -1,5 +1,9 @@
+// @vitest-environment jsdom
 import { describe, expect, it, vi } from "vitest";
-import { hasFencedTree, inline, renderMarkdown } from "../src/markdown.js";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { hasFencedTree, inline, renderMarkdown, setInlineMarkdown } from "../src/markdown.js";
 
 describe("renderMarkdown blocks", () => {
   it("renders headings at their level", () => {
@@ -237,6 +241,51 @@ describe("inline", () => {
     // Arrange + Act + Assert
     expect(inline("[x](javascript:alert(1))")).not.toContain("<a ");
   });
+});
+
+describe("setInlineMarkdown", () => {
+  it("draws inline code as code", () => {
+    // Arrange
+    const el = document.createElement("span");
+    // Act
+    setInlineMarkdown(el, "run `make test` now");
+    // Assert
+    expect(el.querySelector("code")?.textContent).toBe("make test");
+  });
+
+  it("escapes raw HTML rather than injecting it", () => {
+    // Arrange
+    const el = document.createElement("span");
+    // Act
+    setInlineMarkdown(el, "<img src=x onerror=alert(1)>");
+    // Assert
+    expect([el.querySelector("img"), el.textContent]).toEqual([null, "<img src=x onerror=alert(1)>"]);
+  });
+
+  it("replaces what the element held before", () => {
+    // Arrange
+    const el = document.createElement("span");
+    el.textContent = "old";
+    // Act
+    setInlineMarkdown(el, "**new**");
+    // Assert
+    expect(el.innerHTML).toBe("<strong>new</strong>");
+  });
+});
+
+// THE CALL SITES SHARE THE ONE DRAWER: a source scan, so a site that hand-rolls
+// `innerHTML = inline(escapeHtml(...))` again fails here rather than drifting.
+describe("setInlineMarkdown's call sites", () => {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  it.each(["src/news-digest/news-digest.ts", "src/feed/asks/question.ts", "src/feed/tabs.ts"])(
+    "%s draws inline markdown through setInlineMarkdown",
+    (file) => {
+      // Arrange
+      const source = readFileSync(path.join(here, "..", file), "utf8");
+      // Act / Assert
+      expect([source.includes("setInlineMarkdown("), /innerHTML\s*=\s*inline\(/.test(source)]).toEqual([true, false]);
+    },
+  );
 });
 
 /** A plain fence whose body is a metaprompt tree. */

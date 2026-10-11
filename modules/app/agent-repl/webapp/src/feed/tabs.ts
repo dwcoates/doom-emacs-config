@@ -14,6 +14,7 @@
  * the shown member, a question card draws its strip in flow).
  */
 import { createControl, type Control } from "../control.js";
+import { setInlineMarkdown } from "../markdown.js";
 
 /** The class every feed tab strip wears. */
 export const FEED_TAB_STRIP_CLASS = "feed-tab-strip";
@@ -27,7 +28,7 @@ export interface FeedTabSpec {
   icon: string;
   /** The tab's 1-based position in its strip. */
   index: number;
-  /** A label after the index, when the card has one to name the tab by. */
+  /** A label after the index, drawn as inline markdown, when the card has one to name the tab by. */
   label?: string;
   /** Whether this is the tab whose content is shown. */
   active: boolean;
@@ -64,7 +65,7 @@ export function drawFeedTab(spec: FeedTabSpec): Control {
   if (spec.label !== undefined) {
     const label = document.createElement("span");
     label.className = "feed-group-tab-label";
-    label.textContent = spec.label;
+    setInlineMarkdown(label, spec.label);
     tab.append(label);
   }
   tab.addEventListener("click", spec.onPick);
