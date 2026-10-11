@@ -1,0 +1,307 @@
+{
+  "system": "agent-repl",
+  "about": "What agent-repl needs on a machine to run (profile run) and to be built and tested (profile dev). bin/requirements.sh reads this file and every file it includes; see the Requirements section of AGENTS.md.",
+  "includes": [
+    "proto/requirements.json",
+    "daemon/requirements.json",
+    "agent-shim/claude/shim/requirements.json",
+    "agent-shim/shim-lock/requirements.json",
+    "agent-shim/shim-store/requirements.json",
+    "agent-shim/claude/shim-sidecar/requirements.json",
+    "webapp/requirements.json",
+    "e2e/requirements.json"
+  ],
+  "requirements": [
+    {
+      "id": "homebrew",
+      "kind": "program",
+      "why": "installs every other macOS requirement below",
+      "profile": "run",
+      "platforms": [
+        "darwin"
+      ],
+      "command": "brew",
+      "install": {
+        "manual": "Install Homebrew from https://brew.sh, then re-run bin/requirements.sh install."
+      }
+    },
+    {
+      "id": "jq",
+      "kind": "program",
+      "why": "bin/requirements.sh reads these manifests with it; macOS 15 and later ship it at /usr/bin/jq",
+      "profile": "run",
+      "platforms": [
+        "darwin",
+        "linux"
+      ],
+      "command": "jq",
+      "install": {
+        "brew": "jq"
+      }
+    },
+    {
+      "id": "git",
+      "kind": "program",
+      "why": "every workspace is a git worktree",
+      "profile": "run",
+      "platforms": [
+        "darwin",
+        "linux"
+      ],
+      "command": "git",
+      "install": {
+        "manual": "Install the Xcode Command Line Tools with `xcode-select --install`."
+      }
+    },
+    {
+      "id": "emacs",
+      "kind": "emacs",
+      "why": "agent-repl is a Doom Emacs module, and its panel is an xwidget-webkit webview",
+      "profile": "run",
+      "platforms": [
+        "darwin"
+      ],
+      "command": "emacs",
+      "min": "30.1",
+      "features": [
+        "xwidget-internal"
+      ],
+      "install": {
+        "brew": "emacs-plus@30",
+        "tap": "d12frosted/emacs-plus",
+        "options": [
+          "--with-xwidgets"
+        ]
+      }
+    },
+    {
+      "id": "doom",
+      "kind": "program",
+      "why": "agent-repl loads as a module of this Doom configuration (`doom sync`, `doom env`)",
+      "profile": "run",
+      "platforms": [
+        "darwin",
+        "linux"
+      ],
+      "command": "doom",
+      "install": {
+        "manual": "Install Doom Emacs (https://github.com/doomemacs/doomemacs#install) with this repository as ~/.config/doom, and put ~/.config/emacs/bin on PATH."
+      }
+    },
+    {
+      "id": "claude",
+      "kind": "program",
+      "why": "every workspace session runs the Claude Code CLI, and the daemon's headless calls run it too",
+      "profile": "run",
+      "platforms": [
+        "darwin",
+        "linux"
+      ],
+      "command": "claude",
+      "install": {
+        "manual": "Install Claude Code (https://docs.claude.com/en/docs/claude-code) and sign in once with `claude`."
+      }
+    },
+    {
+      "id": "terminal-notifier",
+      "kind": "program",
+      "why": "the daemon's desktop banners on macOS (daemon/internal/desktopnotify); version 3 posts through UserNotifications, which macOS 26 requires",
+      "profile": "run",
+      "platforms": [
+        "darwin"
+      ],
+      "command": "terminal-notifier",
+      "version": {
+        "args": [
+          "-version"
+        ],
+        "min": "3.0"
+      },
+      "install": {
+        "brew": "terminal-notifier"
+      }
+    },
+    {
+      "id": "terminal-notifier-permission",
+      "kind": "notification_permission",
+      "why": "macOS shows terminal-notifier's banners only once it is allowed to notify",
+      "profile": "run",
+      "platforms": [
+        "darwin"
+      ],
+      "command": "terminal-notifier"
+    },
+    {
+      "id": "notify-send",
+      "kind": "program",
+      "why": "the daemon's desktop banners on Linux (daemon/internal/desktopnotify)",
+      "profile": "run",
+      "platforms": [
+        "linux"
+      ],
+      "command": "notify-send",
+      "install": {
+        "manual": "Install libnotify's notify-send with your distribution's package manager."
+      }
+    },
+    {
+      "id": "sqlite3",
+      "kind": "program",
+      "why": "bin/logs.sh and the shim doctor read the store and the logs with it",
+      "profile": "run",
+      "platforms": [
+        "darwin",
+        "linux"
+      ],
+      "command": "sqlite3",
+      "install": {
+        "brew": "sqlite"
+      }
+    },
+    {
+      "id": "multi-repo-root",
+      "kind": "env",
+      "why": "names the directory holding the explanation-engine checkout the workspace skills link into, and the repositories worked under the work account",
+      "profile": "run",
+      "optional": true,
+      "name": "MULTI_REPO_ROOT",
+      "doc": "docs/USER-GUIDE.md#setup"
+    },
+    {
+      "id": "workspace-prefix",
+      "kind": "env",
+      "why": "prefixes new workspace branches, such as with your initials",
+      "profile": "run",
+      "optional": true,
+      "name": "AGENT_WORKSPACE_PREFIX",
+      "doc": "docs/USER-GUIDE.md#setup"
+    },
+    {
+      "id": "persistent-wifi-hotspot",
+      "kind": "env",
+      "why": "names the phone hotspot persistent-wifi mode joins",
+      "profile": "run",
+      "optional": true,
+      "name": "AGENT_REPL_PERSISTENT_WIFI_HOTSPOT",
+      "doc": "docs/USER-GUIDE.md#setup"
+    },
+    {
+      "id": "skill-profile",
+      "kind": "skill_link",
+      "why": "the /profile skill",
+      "profile": "run",
+      "name": "profile",
+      "source": {
+        "repo": "modules/app/agent-repl/skills/profile"
+      }
+    },
+    {
+      "id": "skill-runtime-eval-code",
+      "kind": "skill_link",
+      "why": "the /runtime-eval-code skill",
+      "profile": "run",
+      "name": "runtime-eval-code",
+      "source": {
+        "repo": "modules/app/agent-repl/skills/runtime-eval-code"
+      }
+    },
+    {
+      "id": "skill-workspace-close",
+      "kind": "skill_link",
+      "why": "the /workspace-close skill",
+      "profile": "run",
+      "name": "workspace-close",
+      "source": {
+        "repo": "modules/app/agent-repl/skills/workspace-close"
+      }
+    },
+    {
+      "id": "skill-emit-workspace-commands",
+      "kind": "skill_link",
+      "why": "the command-file writer the workspace skills call",
+      "profile": "run",
+      "name": "emit-workspace-commands.sh",
+      "source": {
+        "repo": "modules/app/agent-repl/skills/emit-workspace-commands.sh"
+      }
+    },
+    {
+      "id": "skill-create-or-update-workspace",
+      "kind": "skill_link",
+      "why": "the /create-or-update-workspace skill, which lives in the explanation-engine repository",
+      "profile": "run",
+      "optional": true,
+      "name": "create-or-update-workspace",
+      "source": {
+        "env": "MULTI_REPO_ROOT",
+        "path": "explanation-engine/.claude/skills/create-or-update-workspace"
+      }
+    },
+    {
+      "id": "skill-create-or-update-skill",
+      "kind": "skill_link",
+      "why": "the /create-or-update-skill skill, which lives in the explanation-engine repository",
+      "profile": "run",
+      "optional": true,
+      "name": "create-or-update-skill",
+      "source": {
+        "env": "MULTI_REPO_ROOT",
+        "path": "explanation-engine/.claude/skills/create-or-update-skill"
+      }
+    },
+    {
+      "id": "pre-commit-hook",
+      "kind": "git_hook",
+      "why": "the external-boundary lint gate every commit passes",
+      "profile": "dev",
+      "hook": "pre-commit",
+      "source": ".githooks/pre-commit",
+      "markers": [
+        "AGENT_REPL_MANAGED_HOOK: agent-repl-precommit",
+        "CLAUDE_REPL_MANAGED_HOOK: claude-repl-precommit"
+      ]
+    },
+    {
+      "id": "shellcheck",
+      "kind": "program",
+      "why": "lints every bin/ and scripts/ shell script in the shell suites",
+      "profile": "dev",
+      "platforms": [
+        "darwin",
+        "linux"
+      ],
+      "command": "shellcheck",
+      "install": {
+        "brew": "shellcheck"
+      }
+    },
+    {
+      "id": "ripgrep",
+      "kind": "program",
+      "why": "bin/report-logging-density.sh searches the sources with it",
+      "profile": "dev",
+      "platforms": [
+        "darwin",
+        "linux"
+      ],
+      "command": "rg",
+      "install": {
+        "brew": "ripgrep"
+      }
+    },
+    {
+      "id": "python3",
+      "kind": "program",
+      "why": "bin/daemon-contract-current.sh and the log-discovery and shim-doctor scripts run on it",
+      "profile": "dev",
+      "platforms": [
+        "darwin",
+        "linux"
+      ],
+      "command": "python3",
+      "install": {
+        "manual": "Install the Xcode Command Line Tools with `xcode-select --install`."
+      }
+    }
+  ]
+}
