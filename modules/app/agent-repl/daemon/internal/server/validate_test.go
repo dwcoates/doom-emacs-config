@@ -355,6 +355,15 @@ func TestEachRequestValidatorNamesTheFieldItRefusesWithTargetsAndSources(t *test
 			field: "workspace",
 		},
 		{
+			name: "swap places with no workspace",
+			check: func() *connect.Error {
+				return validateSwapWorkspacePlacesRequest(&agentreplv1.SwapWorkspacePlacesRequest{
+					Other: &workspacev1.WorkspaceRef{Id: "ws-2"},
+				})
+			},
+			field: "workspace",
+		},
+		{
 			name: "set hidden with no visibility arm",
 			check: func() *connect.Error {
 				return validateSetWorkspaceHiddenRequest(&agentreplv1.SetWorkspaceHiddenRequest{Workspace: ref()})
@@ -382,6 +391,22 @@ func TestEachRequestValidatorNamesTheFieldItRefusesWithTargetsAndSources(t *test
 					Parent: &agentreplv1.SetWorkspaceParentRequest_ChildOf{ChildOf: &agentreplv1.SetWorkspaceParentChild{}}})
 			},
 			field: "child_of.parent",
+		},
+		{
+			name: "swap places with no other",
+			check: func() *connect.Error {
+				return validateSwapWorkspacePlacesRequest(&agentreplv1.SwapWorkspacePlacesRequest{Workspace: ref()})
+			},
+			field: "other",
+		},
+		{
+			name: "swap places of a workspace with itself",
+			check: func() *connect.Error {
+				return validateSwapWorkspacePlacesRequest(&agentreplv1.SwapWorkspacePlacesRequest{
+					Workspace: ref(), Other: ref(),
+				})
+			},
+			field: "other",
 		},
 		{
 			name: "set priority with no workspace",
@@ -528,6 +553,14 @@ func TestEachRequestValidatorAcceptsAWellFormedRequestWithTargetsAndSources(t *t
 			check: func() *connect.Error {
 				return validateSetWorkspaceParentRequest(&agentreplv1.SetWorkspaceParentRequest{Workspace: ref(),
 					Parent: &agentreplv1.SetWorkspaceParentRequest_ChildOf{ChildOf: &agentreplv1.SetWorkspaceParentChild{Parent: ref()}}})
+			},
+		},
+		{
+			name: "swap places of two workspaces",
+			check: func() *connect.Error {
+				return validateSwapWorkspacePlacesRequest(&agentreplv1.SwapWorkspacePlacesRequest{
+					Workspace: ref(), Other: &workspacev1.WorkspaceRef{Id: "ws-2"},
+				})
 			},
 		},
 		{

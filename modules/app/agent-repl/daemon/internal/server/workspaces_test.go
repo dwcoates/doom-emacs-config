@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -1533,5 +1534,110 @@ func TestEveryRepositoryRPCFailsAnUnreadableRegistryAsInternal(t *testing.T) {
 				t.Fatalf("%s = %v, want an internal failure", tt.name, err)
 			}
 		})
+	}
+}
+
+// ---- SwapWorkspacePlaces ---------------------------------------------------
+
+// swapHarness is a harness whose registry holds a second workspace, ws-2.
+func swapHarness(t *testing.T) (*harness, *workspacev1.WorkspaceRef) {
+	t.Helper()
+	h := newHarness(t)
+	other := wsm.Workspace{ID: "ws-2", Dir: "/tmp/agent-repl-test-workspace-2"}
+	h.DB.workspaces[other.ID] = other
+	return h, &workspacev1.WorkspaceRef{Id: string(other.ID), Dir: other.Dir}
+}
+
+func TestSwapWorkspacePlacesHandsBothResolvedIdsToTheVerb(t *testing.T) {
+	// Arrange.
+	h, other := swapHarness(t)
+
+	// Act.
+	resp, err := h.Client.SwapWorkspacePlaces(context.Background(),
+		connect.NewRequest(&agentreplv1.SwapWorkspacePlacesRequest{Workspace: ref(), Other: other}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("SwapWorkspacePlaces: %v", err)
+	}
+	if resp.Msg.GetSuccess() == nil {
+		t.Fatalf("result = %v, want success", resp.Msg.GetResult())
+	}
+	if want := [][2]ids.WorkspaceID{{testWorkspaceID, "ws-2"}}; !slices.Equal(h.Verbs.swaps, want) {
+		t.Fatalf("swaps = %v, want %v", h.Verbs.swaps, want)
+	}
+}
+
+func TestSwapWorkspacePlacesNamesTheUnknownRef(t *testing.T) {
+	// Arrange.
+	h, _ := swapHarness(t)
+	missing := &workspacev1.WorkspaceRef{Id: "ws-nope"}
+
+	// Act.
+	resp, err := h.Client.SwapWorkspacePlaces(context.Background(),
+		connect.NewRequest(&agentreplv1.SwapWorkspacePlacesRequest{Workspace: ref(), Other: missing}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("SwapWorkspacePlaces: %v", err)
+	}
+	got := resp.Msg.GetError().GetUnknownWorkspace()
+	if got == nil || got.GetWorkspace().GetId() != "ws-nope" {
+		t.Fatalf("result = %v, want unknown_workspace naming ws-nope", resp.Msg.GetResult())
+	}
+	if len(h.Verbs.swaps) != 0 {
+		t.Fatalf("swaps = %v, want none for an unknown workspace", h.Verbs.swaps)
+	}
+}
+
+func TestSwapWorkspacePlacesNamesTheMismatchedRef(t *testing.T) {
+	// Arrange.
+	h, other := swapHarness(t)
+	stale := &workspacev1.WorkspaceRef{Id: other.GetId(), Dir: "/somewhere/else"}
+
+	// Act.
+	resp, err := h.Client.SwapWorkspacePlaces(context.Background(),
+		connect.NewRequest(&agentreplv1.SwapWorkspacePlacesRequest{Workspace: ref(), Other: stale}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("SwapWorkspacePlaces: %v", err)
+	}
+	got := resp.Msg.GetError().GetWorkspaceRefMismatch()
+	if got == nil || got.GetWorkspace().GetId() != other.GetId() || got.GetRegistryDir() != other.GetDir() {
+		t.Fatalf("result = %v, want workspace_ref_mismatch naming ws-2 and its registry dir", resp.Msg.GetResult())
+	}
+}
+
+func TestSwapWorkspacePlacesMapsTheNotSiblingsRefusal(t *testing.T) {
+	// Arrange.
+	h, other := swapHarness(t)
+	h.Verbs.swapErr = &workspace.Refusal{Arm: workspace.ArmNotSiblings, Reason: "different parents"}
+
+	// Act.
+	resp, err := h.Client.SwapWorkspacePlaces(context.Background(),
+		connect.NewRequest(&agentreplv1.SwapWorkspacePlacesRequest{Workspace: ref(), Other: other}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("SwapWorkspacePlaces: %v", err)
+	}
+	if resp.Msg.GetError().GetNotSiblings() == nil {
+		t.Fatalf("result = %v, want not_siblings", resp.Msg.GetResult())
+	}
+}
+
+func TestSwapWorkspacePlacesFailsAVerbError(t *testing.T) {
+	// Arrange.
+	h, other := swapHarness(t)
+	h.Verbs.swapErr = errors.New("disk I/O error")
+
+	// Act.
+	_, err := h.Client.SwapWorkspacePlaces(context.Background(),
+		connect.NewRequest(&agentreplv1.SwapWorkspacePlacesRequest{Workspace: ref(), Other: other}))
+
+	// Assert.
+	if connect.CodeOf(err) != connect.CodeInternal {
+		t.Fatalf("SwapWorkspacePlaces = %v, want an internal failure", err)
 	}
 }
