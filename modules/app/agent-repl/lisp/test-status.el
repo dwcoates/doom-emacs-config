@@ -3687,6 +3687,36 @@ says something is wrong, and the glyph says it is the merge."
     ;; Act / Assert
     (should (equal (agent-repl-status-tab-glyph "alpha" :merged) "✓"))))
 
+(ert-deftest agent-repl-test-status-a-permission-tab-draws-an-exclamation-emoji ()
+  "A `:permission\=' tab draws ❗ between `[N]\=' and its name."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    ;; Act / Assert
+    (should (equal (agent-repl-status-tab-glyph "alpha" :permission) "❗"))))
+
+(ert-deftest agent-repl-test-status-a-question-tab-draws-a-question-emoji ()
+  "A `:question\=' tab draws ❓ between `[N]\=' and its name."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    ;; Act / Assert
+    (should (equal (agent-repl-status-tab-glyph "alpha" :question) "❓"))))
+
+(ert-deftest agent-repl-test-status-a-gate-glyph-outranks-the-attention-marker ()
+  "A gate with an unseen notification draws its emoji, not the marker."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl-status--marker-on (make-hash-table :test 'equal)))
+      (puthash "alpha" t agent-repl-status--marker-on)
+      ;; Act / Assert
+      (should (equal (agent-repl-status-tab-glyph "alpha" :permission) "❗")))))
+
+(ert-deftest agent-repl-test-status-a-waiting-tab-draws-no-gate-glyph ()
+  "`:waiting\=' is not a gate's card, so it draws no gate emoji."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    ;; Act / Assert
+    (should (null (agent-repl-status-tab-glyph "alpha" :waiting)))))
+
 (ert-deftest agent-repl-test-status-an-inactive-row-draws-a-question-mark ()
   "A perspective-less workspace has no lifecycle a dot could report."
   ;; Arrange

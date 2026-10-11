@@ -12,13 +12,15 @@
  * arm added to the proto without a color, or a color added to the file without
  * a row here, fails loudly in the suite instead of drawing a quiet grey dot.
  *
- * GLYPHS, NOT EMOJIS. The merge arms spend no color (they are `none` in the
- * file) and report themselves with a glyph instead; `inactive` draws a plain
- * question mark, `none` and a landed merge's `check` draw nothing at all but
- * still hold the column's width so names stay aligned. Every character here is a plain text glyph —
- * no emoji presentation, no variation selectors.
+ * GLYPHS, AND TWO EMOJIS. The merge arms report themselves with a glyph beside
+ * their color; `inactive` draws a plain question mark, `none` and a landed
+ * merge's `check` draw nothing at all but still hold the column's width so
+ * names stay aligned. Every merge character is a plain text glyph. The two
+ * gate arms are the one exception: a pending permission draws ❗ and a pending
+ * question ❓ in place of the dot, the same two emoji the Emacs tab bar draws
+ * before the workspace name (owner request, 2026-10-11).
  */
-import { toneClass, rosterStatusColor, mergeGlyph } from "../vocab.js";
+import { toneClass, rosterStatusColor, mergeGlyph, gateGlyph } from "../vocab.js";
 import { MalformedView } from "../rpc/malformed.js";
 
 /**
@@ -79,7 +81,7 @@ export const ROSTER_ARM_CLASS: Readonly<Record<RosterStatusCase, string>> = Obje
 /**
  * The character each shared glyph NAME is drawn with.
  *
- * The names are the vocabulary file's (`merge_glyphs`); which mark stands for
+ * The names are the vocabulary file's (`merge_glyphs`, `gate_glyphs`); which mark stands for
  * one is this surface's own business, which is exactly why the file ships
  * names rather than characters.
  */
@@ -95,6 +97,10 @@ export const GLYPH_CHARS: Readonly<Record<string, string>> = Object.freeze({
   // surfaces may draw; here the name maps to no character, so the mark's box
   // (a `.st-glyph`, no disc) is empty yet holds the column, as `none` does.
   check: "",
+  // A GATE ON YOU (owner request, 2026-10-11): the emoji replaces the dot, and
+  // matches the one the Emacs tab bar draws for the same arm.
+  exclaim: "❗",
+  ask: "❓",
   inactive: "?",
   dot: "",
   none: "",
@@ -104,7 +110,7 @@ export const GLYPH_CHARS: Readonly<Record<string, string>> = Object.freeze({
 export interface RosterArmMark {
   /** The `.tone-<color>` class from the shared vocabulary. */
   toneClass: string;
-  /** The `data-glyph` name: a merge glyph, or `dot` / `inactive` / `none`. */
+  /** The `data-glyph` name: a merge or gate glyph, or `dot` / `inactive` / `none`. */
   glyph: string;
   /** The character drawn inside the mark; "" leaves a bare CSS disc. */
   char: string;
@@ -132,14 +138,14 @@ export function rosterArmMark(arm: string): RosterArmMark {
 /**
  * The glyph NAME an arm reports itself with.
  *
- * The merge family asks the shared vocabulary (so the rail and the tab bar
- * name the same mark); the two session-less arms have their own names, and
- * every lifecycle arm is simply the dot.
+ * The merge and gate families ask the shared vocabulary (so the rail and the
+ * tab bar name the same mark); the two session-less arms have their own names,
+ * and every other lifecycle arm is simply the dot.
  */
 export function glyphName(arm: RosterStatusCase): string {
   if (arm === "inactive" || arm === "none") return arm;
   if (arm.startsWith("merg")) return mergeGlyph(arm);
-  return "dot";
+  return gateGlyph(arm) ?? "dot";
 }
 
 /**
