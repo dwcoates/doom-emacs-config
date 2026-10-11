@@ -9,24 +9,17 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
-	conversationv1 "agentrepl/proto/conversation/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
-)
 
-func slashCatalog(names ...string) *conversationv1.SessionCommandCatalog {
-	catalog := &conversationv1.SessionCommandCatalog{}
-	for _, name := range names {
-		catalog.Commands = append(catalog.Commands, &conversationv1.SessionCommandCatalogEntry{Name: name})
-	}
-	return catalog
-}
+	"claude-repld/internal/commandcatalog/catalogtest"
+)
 
 // TestListSlashCommandsAnswersTheStandingCatalog pins that the composer is
 // served the catalog the workspace's session last stated, whole.
 func TestListSlashCommandsAnswersTheStandingCatalog(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
-	stated := slashCatalog("merge-queue", "compact")
+	stated := catalogtest.Named("merge-queue", "compact")
 	h.SlashCommands.OnCommandCatalog(testWorkspaceID, stated)
 
 	// Act.
@@ -82,7 +75,7 @@ func TestListSlashCommandsAnswersUnstatedBeforeAnyStatement(t *testing.T) {
 func TestListSlashCommandsRefusesAnUnknownWorkspace(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
-	h.SlashCommands.OnCommandCatalog(testWorkspaceID, slashCatalog("compact"))
+	h.SlashCommands.OnCommandCatalog(testWorkspaceID, catalogtest.Named("compact"))
 
 	// Act.
 	resp, err := h.Client.ListSlashCommands(context.Background(), connect.NewRequest(&agentreplv1.ListSlashCommandsRequest{

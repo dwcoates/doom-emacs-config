@@ -16,6 +16,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
 
+	"claude-repld/internal/commandcatalog/catalogtest"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
 	"claude-repld/internal/ids"
@@ -1911,12 +1912,8 @@ func effortChangedUpdate() *conversationv1.SessionUpdate {
 }
 
 func commandCatalogUpdate(names ...string) *conversationv1.SessionUpdate {
-	catalog := &conversationv1.SessionCommandCatalog{}
-	for _, name := range names {
-		catalog.Commands = append(catalog.Commands, &conversationv1.SessionCommandCatalogEntry{Name: name})
-	}
 	return &conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_CommandCatalog{
-		CommandCatalog: catalog,
+		CommandCatalog: catalogtest.Named(names...),
 	}}
 }
 
