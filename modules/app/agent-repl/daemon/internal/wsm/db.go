@@ -310,6 +310,18 @@ type DB interface {
 	// repository's durable queue, in the requested state (in nobody's line),
 	// refusing a workspace already requested, queued or admitted there.
 	RequestMerge(ctx context.Context, repo RepoKey, id WorkspaceID, source MergeSource, at time.Time) error
+	// MergeWorkspaceFor loads the merge workspace forked for one detached
+	// request; false when none is registered for it yet.
+	MergeWorkspaceFor(ctx context.Context, request DetachedMergeID) (Workspace, bool, error)
+	// HandOffDetachedMerge moves a detached request from the requester's queue
+	// row onto the merge workspace forked for it, in one transaction.
+	HandOffDetachedMerge(ctx context.Context, repo RepoKey, requester WorkspaceID, request DetachedMergeID, mergeWS WorkspaceID, branch string, at time.Time) error
+	// RecordMergeWorkspaceRemoved records that the inactivity sweep is
+	// removing a merge workspace, before its records are deleted.
+	RecordMergeWorkspaceRemoved(ctx context.Context, ws WorkspaceID, requester WorkspaceID, at time.Time) error
+	// MergeWorkspaceRemovedAt answers when the sweep removed a merge
+	// workspace; false when no removal is recorded for it.
+	MergeWorkspaceRemovedAt(ctx context.Context, ws WorkspaceID) (time.Time, bool, error)
 	// QueueMerge moves a requested merge into line, at the back, with its
 	// bubble's ledger identity, and returns its one-based place among the
 	// entries in line.
