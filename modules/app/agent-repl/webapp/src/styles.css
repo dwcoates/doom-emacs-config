@@ -1585,8 +1585,13 @@ pre {
    right gave up is handed to `.bubble-body`, the CONTENT wrapper inside the
    scroll box, so the prose keeps exactly the margin it had. */
 .bubble {
-  padding: 0.6rem var(--bubble-scroll-gap) 0.6rem 0.9rem;
-  border-radius: 8px;
+  /* The bubble's vertical padding and corner radius, named because the "more
+     below" fade (see FIX2 below) reaches through the bottom padding to the
+     bubble's own rounded bottom edge. */
+  --bubble-pad-y: 0.6rem;
+  --bubble-radius: 8px;
+  padding: var(--bubble-pad-y) var(--bubble-scroll-gap) var(--bubble-pad-y) 0.9rem;
+  border-radius: var(--bubble-radius);
   border: 0.3px solid transparent;
   /* A quiet hint of depth: a soft drop shadow lifts the bubble off the feed
      while an inset top-edge highlight catches light, so a prompt or response
@@ -2651,18 +2656,41 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
    scroll box wears it (one measurer, one rule) — never a tool-call section —
    and each fades into its OWN bubble background (`--bubble-bg`) so the last
    line dissolves rather than being hard-clipped.
-   The fade is absolutely positioned against the box, which the cap holds
-   still while collapsed (overflow-y: hidden), so bottom:0 is the visible
-   fold. `pointer-events: none` keeps a click on it falling through to
+   THE FADE ENDS AT THE BUBBLE'S BOTTOM EDGE (owner report, 2026-10-11: the
+   fade sat "offset vertically some distance from the bottom of the prompt
+   bubble"). Anchored to the box, it ended `--bubble-pad-y` above the bubble's
+   edge, leaving a band of plain fill under it. So when no footer follows the
+   box (only expand-only chrome may, and it is hidden whenever `has-more` is
+   worn), the BUBBLE is the fade's containing block: the box is unpositioned,
+   so the fade escapes the box's clip, spans the bubble's full width, and
+   reaches its rounded bottom edge. When a footer follows the box (a
+   response's cut-short marker, which wears `.bubble-footer`), the box is the
+   containing block and the fade ends at the box, above the footer. Either way the fade lays the same 1.5em over the text:
+   the bubble-anchored one is `--bubble-pad-y` taller, to cover the padding.
+   `pointer-events: none` keeps a click on it falling through to
    click-to-expand. A tool card's TITLE fold (above) never wears it: its
    ellipsis is its whole signal. An output section never does either.
    THE CLASS NEVER CHANGES LAYOUT (owner rule, 2026-09-23: the user owns the
-   scroll). The box it lands on is ALWAYS the pseudo-elements' containing block
-   (`position: relative` on the box itself, not on `.has-more`), and the fade
-   is out of flow, so the measurer toggling the class moves
-   nothing inside or around the box. */
-.bubble > .bubble-box {
+   scroll). The containing block is chosen by the bubble's STRUCTURE, never by
+   `.has-more`, and the fade is out of flow, so the measurer toggling the class
+   moves nothing inside or around the box. */
+.bubble {
   position: relative;
+}
+/* No footer follows: the box stays unpositioned, so the bubble is the
+   containing block, and the fade reaches through the bottom padding to the
+   bubble's rounded edge. */
+.bubble > .bubble-scroll {
+  --bubble-fade-reach: var(--bubble-pad-y);
+  --bubble-fade-radius: var(--bubble-radius);
+}
+/* A footer follows (`.bubble-footer`, src/bubble/draw.ts): the box is the
+   containing block, and the fade reaches no further than the box's own square
+   bottom edge. */
+.bubble > .bubble-scroll:has(~ .bubble-footer) {
+  position: relative;
+  --bubble-fade-reach: 0px;
+  --bubble-fade-radius: 0px;
 }
 /* The bottom fade, over the last ~1.5em, blending content into the bubble bg. */
 .bubble > .bubble-scroll.has-more::after {
@@ -2671,7 +2699,8 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
   left: 0;
   right: 0;
   bottom: 0;
-  height: 1.5em;
+  height: calc(1.5em + var(--bubble-fade-reach));
+  border-radius: 0 0 var(--bubble-fade-radius) var(--bubble-fade-radius);
   pointer-events: none;
 }
 .bubble > .bubble-scroll.has-more::after {
@@ -4688,9 +4717,9 @@ bubble-body.bubble-body { display: block; }
      top and the figures' em box. It is part of the top gap as drawn, so the
      right gap carries it too. */
   --usage-half-leading: calc((var(--md-line-h) - 1) / 2 * 1em);
-  /* `.bubble`'s own top padding, which the corner sits under. styles.test.ts
-     fails if the two ever disagree. */
-  --usage-bubble-pad-top: 0.6rem;
+  /* `.bubble`'s own top padding, which the corner sits under: the bubble's
+     token itself, so the two cannot disagree (styles.test.ts holds them). */
+  --usage-bubble-pad-top: var(--bubble-pad-y);
   /* THE ONE GAP TOKEN: the distance from the bubble's edge to the figure's em
      box, top and right alike. It is the top gap the corner has always had,
      and the right gap is derived from it below. */
