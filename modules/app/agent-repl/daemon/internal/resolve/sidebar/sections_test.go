@@ -375,7 +375,7 @@ func TestTheRepoGroupingDrawsEveryWorkspaceOfAGoodRegistry(t *testing.T) {
 	// Assert.
 	got := rowNames(repoRows(t, latest(t, r)))
 	// The order is the roster's own; the subject is that nothing is MISSING.
-	if !equal(got, []string{"one", "three", "two"}) {
+	if !equal(got, []string{"one", "two", "three"}) {
 		t.Fatalf("repo grouping rows = %v, want every workspace", got)
 	}
 	if hasError(surfaces.Records(), "daemon.sidebar.repository_view") {

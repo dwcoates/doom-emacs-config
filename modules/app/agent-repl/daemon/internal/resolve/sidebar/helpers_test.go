@@ -342,6 +342,12 @@ func registry(workspaces ...wsm.Workspace) sidebar.Registry {
 	}
 }
 
+// placed stamps a roster place on a workspace.
+func placed(ws wsm.Workspace, place int64) wsm.Workspace {
+	ws.Place = place
+	return ws
+}
+
 // prioritized stamps a priority on a workspace.
 func prioritized(ws wsm.Workspace, p wsm.Priority) wsm.Workspace {
 	ws.Priority = &p
