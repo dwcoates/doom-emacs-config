@@ -719,7 +719,9 @@ func TestFindRosterRowLooksInTheRecentlyMergedSection(t *testing.T) {
 	// Arrange: a landed workspace is hoisted out of its repository section.
 	dir := t.TempDir()
 	r := &frontendv1.WorkspaceRoster{RecentlyMerged: &frontendv1.RosterMergedSection{
-		Rows: &frontendv1.RosterRows{Rows: []*frontendv1.RosterRow{rosterRow(dir, statusMergedDone, 1)}},
+		Groups: []*frontendv1.RosterMergedRepoGroup{{
+			Rows: &frontendv1.RosterRows{Rows: []*frontendv1.RosterRow{rosterRow(dir, statusMergedDone, 1)}},
+		}},
 	}}
 
 	// Act.

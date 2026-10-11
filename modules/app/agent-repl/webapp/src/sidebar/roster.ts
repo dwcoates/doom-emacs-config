@@ -12,7 +12,10 @@
  * RECENTLY MERGED APPEARS UNDER EVERY GROUPING, because the interesting fact
  * about those workspaces is that they are done, which is true in any grouping
  * (under the maturity grouping it IS the done stage). It has no key of its own
- * (the roster carries exactly one), so its fold identity is fixed.
+ * (the roster carries exactly one), so its fold identity is fixed. Its merges
+ * sit in one group per repository, and a group follows its REPOSITORY'S fold:
+ * the repository grouping is the one place a repository's workspaces are
+ * collapsed, and a collapsed repository's group is not drawn here.
  *
  * THE VIEW IS THE DAEMON'S. Every section's fold and which grouping is shown
  * are drawn from the push, painted at once on a gesture and asked of the
@@ -23,7 +26,15 @@
  * highlight through `RosterRowCurrent`, deliberately, so no client can compute
  * it differently. The field is validated and logged, and that is all.
  */
-import { MERGED_ROW_PROBE_CLASS, MERGED_SECTION_CLASS } from "./merged-fit.js";
+import {
+  MERGED_AT_ATTRIBUTE,
+  MERGED_GROUP_CLASS,
+  MERGED_GROUP_HEAD_CLASS,
+  MERGED_GROUP_HEAD_PROBE_CLASS,
+  MERGED_REPOSITORY_COLLAPSED_ATTRIBUTE,
+  MERGED_ROW_PROBE_CLASS,
+  MERGED_SECTION_CLASS,
+} from "./merged-fit.js";
 import { createControl, type Control } from "../control.js";
 import type {
   RosterCurrentWorkspace,
@@ -32,6 +43,8 @@ import type {
   RosterMaturityKey,
   RosterMaturitySection,
   RosterMaturityView,
+  RosterMergedRepoGroup,
+  RosterMergedRepoGroupHeader,
   RosterMergedSection,
   RosterRepoKey,
   RosterRepoSection,
@@ -104,7 +117,7 @@ export function drawWorkspaceRoster(u: WorkspaceRoster, sc: SidebarContext): HTM
       repo_sections: repository.sections.length,
       task_sections: task.sections.length,
       maturity_sections: maturity.sections.length,
-      merged_rows: merged.rows?.rows.length ?? 0,
+      merged_groups: merged.groups.length,
       hidden_rows: hidden.rows?.rows.length ?? 0,
       current,
       grouping: drawRosterShown(u.shown, `${path}.shown`),
@@ -290,15 +303,19 @@ export function drawRosterRepoSection(
   });
 }
 
-/** What a live grouping's section shares with the others: header, rows, fold. */
-export interface HeadedSectionWire {
+/** What every headed section shares on the wire: its header and its fold. */
+export interface HeadedBoxWire {
   header?: RosterSectionHeader;
-  rows?: RosterRows;
   fold: RosterSectionFold;
 }
 
+/** What a live grouping's section shares with the others: header, rows, fold. */
+export interface HeadedSectionWire extends HeadedBoxWire {
+  rows?: RosterRows;
+}
+
 /** How one kind of headed section is identified and decorated. */
-export interface HeadedSectionShape {
+export interface HeadedBoxShape {
   /** The page key its fold is held under (`view.ts`). */
   foldKey: string;
   /** The class naming the section's kind. */
@@ -308,18 +325,21 @@ export interface HeadedSectionShape {
   /** Anything the kind adds to its header, after the folded count. */
   decorateHeader?: (header: HTMLElement, section: HTMLElement) => void;
   /**
-   * Whether closed rows are dropped (`drawRosterRows`); they are unless said.
-   * The recently-merged band keeps them: its rows are closed by design.
-   */
-  hideClosed?: boolean;
-  /** Which kind of section the rows sit in (`RowPlace`); a grouping's unless said. */
-  place?: RowPlace;
-  /**
    * A section the rail leaves out while it draws nothing: WHEN says so from the
    * wire, and ATTRIBUTE marks the undrawn box. Absent, the section always draws
    * (a repository with no rows still draws, so the grouping does not flicker).
    */
-  leftOut?: { when: (rows: RosterRows, header: RosterSectionHeader, path: string) => boolean; attribute: string };
+  leftOut?: { when: (header: RosterSectionHeader, path: string) => boolean; attribute: string };
+}
+
+/** How a rows-bodied headed section is identified, decorated and drawn. */
+export interface HeadedSectionShape extends HeadedBoxShape {
+  /**
+   * Whether closed rows are dropped (`drawRosterRows`); they are unless said.
+   */
+  hideClosed?: boolean;
+  /** Which kind of section the rows sit in (`RowPlace`); a grouping's unless said. */
+  place?: RowPlace;
 }
 
 /**
@@ -327,13 +347,10 @@ export interface HeadedSectionShape {
  * folded as the daemon says, the label-and-count header whose gesture asks
  * for the other fold, and the rows with closed workspaces dropped.
  *
- * THE ONE SHAPE every folding section but a task's draws — repository,
- * maturity stage, hidden workspaces, recently merged — so none can disagree
- * with another on how a header folds or which rows it drops.
- *
- * A LEFT-OUT SECTION IS VALIDATED WHOLE, then left undrawn: a malformed empty
- * section is still a contract breach, and skipping the checks would hide it
- * until the section next drew.
+ * THE ONE SHAPE every folding section but a task's and the merged band's
+ * draws — repository, maturity stage, hidden workspaces — through
+ * `drawHeadedBox`, which the merged band shares, so none can disagree with
+ * another on how a header folds.
  */
 export function drawHeadedSection(
   u: HeadedSectionWire,
@@ -341,23 +358,41 @@ export function drawHeadedSection(
   path: string,
   shape: HeadedSectionShape,
 ): HTMLElement {
-  const section = daemonFoldedBox(shape.foldKey, drawRosterSectionFold(u.fold, `${path}.fold`), sc);
-  section.classList.add(shape.className);
-  const header = requireMessage(u.header, `${path}.header`);
   const rows = requireMessage(u.rows, `${path}.rows`);
   const hideClosed = shape.hideClosed ?? true;
   const place = shape.place ?? "grouping";
-  if (shape.leftOut?.when(rows, header, `${path}.header`) === true) {
-    drawRosterSectionHeader(header, section, sectionFold(sc, shape.foldKey, shape.target), `${path}.header`);
-    drawRosterRows(rows, sc, `${path}.rows`, hideClosed, place);
+  return drawHeadedBox(u, sc, path, shape, () => drawRosterRows(rows, sc, `${path}.rows`, hideClosed, place));
+}
+
+/**
+ * A section box under the shared `RosterSectionHeader`, its body drawn by
+ * BODY below the header: folded as the daemon says, with the header's gesture
+ * asking for the other fold.
+ *
+ * A LEFT-OUT SECTION IS VALIDATED WHOLE, then left undrawn: a malformed empty
+ * section is still a contract breach, and skipping the checks would hide it
+ * until the section next drew.
+ */
+export function drawHeadedBox(
+  u: HeadedBoxWire,
+  sc: SidebarContext,
+  path: string,
+  shape: HeadedBoxShape,
+  body: () => HTMLElement,
+): HTMLElement {
+  const section = daemonFoldedBox(shape.foldKey, drawRosterSectionFold(u.fold, `${path}.fold`), sc);
+  section.classList.add(shape.className);
+  const header = requireMessage(u.header, `${path}.header`);
+  const head = drawRosterSectionHeader(header, section, sectionFold(sc, shape.foldKey, shape.target), `${path}.header`);
+  const drawnBody = body();
+  if (shape.leftOut?.when(header, `${path}.header`) === true) {
     section.hidden = true;
     section.setAttribute(shape.leftOut.attribute, "true");
     return section;
   }
-  const head = drawRosterSectionHeader(header, section, sectionFold(sc, shape.foldKey, shape.target), `${path}.header`);
   shape.decorateHeader?.(head, section);
   section.appendChild(head);
-  section.appendChild(drawRosterRows(rows, sc, `${path}.rows`, hideClosed, place));
+  section.appendChild(drawnBody);
   return section;
 }
 
@@ -419,44 +454,141 @@ export function drawRosterTaskKey(u: RosterTaskKey, path: string): string {
 }
 
 /**
- * The recently-merged band: settled merges, hoisted out of both groupings.
+ * The recently-merged band: settled merges, hoisted out of every grouping, in
+ * one group per repository.
  *
- * A BAND WITH NO MERGES IS NOT DRAWN. The wire always carries the section --
- * the roster's `recently_merged` is a plain field with a resolver-composed
- * heading, and its absence would be a contract breach, not an empty band -- so
- * the emptiness is answered HERE, where the box is made: a heading over no
- * rows is a fold toggle onto nothing, and it says a workspace merged when none
- * has. A REPOSITORY section still draws with no rows, because the grouping
- * would flicker as its last workspace merged; the merged band has no place to
- * keep, so it goes away entire until a merge lands.
+ * A BAND THAT SHOWS NO MERGE IS NOT DRAWN. The wire always carries the
+ * section -- the roster's `recently_merged` is a plain field with a
+ * resolver-composed heading, and its absence would be a contract breach, not
+ * an empty band -- so the emptiness is answered HERE, off the daemon's count
+ * of the rows its SHOWN groups carry: a heading over no rows is a fold toggle
+ * onto nothing, and it says a workspace merged when none has (or none of an
+ * expanded repository has). A REPOSITORY section still draws with no rows,
+ * because the grouping would flicker as its last workspace merged; the merged
+ * band has no place to keep, so it goes away entire until a merge shows.
  *
  * EVERY MERGE IS DRAWN; THE RAIL SHOWS WHAT FITS (owner request, 2026-10-08).
- * The rows are all drawn here, and the header's count is the daemon's count of
- * them; once the band is laid out, `fitMergedSection` (merged-fit.ts) hides the
- * rows past what fits and makes the count say how many it shows.
+ * The groups are all drawn here, and the header's count is the daemon's count
+ * of the shown groups' rows; once the band is laid out, `fitMergedSection`
+ * (merged-fit.ts) hides the rows (and whole groups) past what fits and makes
+ * the count say how many it shows.
  */
 export function drawRosterMergedSection(
   u: RosterMergedSection,
   sc: SidebarContext,
   path: string,
 ): HTMLElement {
-  const section = drawHeadedSection(u, sc, path, {
-    foldKey: MERGED_FOLD_KEY,
-    className: MERGED_SECTION_CLASS,
-    target: { case: "recentlyMerged", value: {} },
-    hideClosed: false,
-    place: "merged",
-    leftOut: { when: (rows) => rows.rows.length === 0, attribute: "data-merged-empty" },
-    decorateHeader: (header) => header.appendChild(drawMergedTodayCount(requireMessage(u.rows, `${path}.rows`), sc, `${path}.rows`)),
-  });
+  const groups = u.groups.map((group, index) => drawRosterMergedRepoGroup(group, sc, `${path}.groups[${index}]`));
+  const section = drawHeadedBox(
+    u,
+    sc,
+    path,
+    {
+      foldKey: MERGED_FOLD_KEY,
+      className: MERGED_SECTION_CLASS,
+      target: { case: "recentlyMerged", value: {} },
+      leftOut: {
+        when: (header, headerPath) =>
+          drawRosterSectionCount(requireMessage(header.count, `${headerPath}.count`), `${headerPath}.count`) === 0,
+        attribute: "data-merged-empty",
+      },
+      decorateHeader: (header) => header.appendChild(drawMergedTodayCount(groups.flatMap((g) => g.shownMergedAt), sc)),
+    },
+    () => {
+      const region = document.createElement("div");
+      region.className = "rows";
+      for (const group of groups) region.appendChild(group.element);
+      return region;
+    },
+  );
   if (section.hidden) return section;
-  // THE ROW UNIT the fit counts in (merged-fit.ts): an invisible, out-of-flow
-  // box exactly one merged row tall, measurable while the band is folded.
-  const probe = document.createElement("div");
-  probe.className = MERGED_ROW_PROBE_CLASS;
-  probe.setAttribute("aria-hidden", "true");
-  section.appendChild(probe);
+  // THE UNITS the fit counts in (merged-fit.ts): invisible, out-of-flow boxes
+  // exactly one merged row, and one group header, tall, measurable while the
+  // band is folded.
+  for (const className of [MERGED_ROW_PROBE_CLASS, MERGED_GROUP_HEAD_PROBE_CLASS]) {
+    const probe = document.createElement("div");
+    probe.className = className;
+    probe.setAttribute("aria-hidden", "true");
+    section.appendChild(probe);
+  }
   return section;
+}
+
+/** One drawn merged group, and the merged instants of its rows while it is shown. */
+export interface DrawnMergedRepoGroup {
+  element: HTMLElement;
+  /** Every row's merged instant when the wire shows the group; none when it does not. */
+  shownMergedAt: number[];
+}
+
+/**
+ * One repository's merged workspaces inside the band: its label header and its
+ * rows, most recently merged first.
+ *
+ * THE GROUP HAS NO FOLD OF ITS OWN. It is drawn while its repository is
+ * expanded and left out while it is collapsed, and it is tracked under the
+ * REPOSITORY SECTION'S fold key, so a fold gesture on the repository section
+ * moves the group on the same paint, not a push later.
+ *
+ * Each row carries its merged instant (`data-merged-at`), the one the row
+ * already draws, so the fit can show the most recent merges across groups. A
+ * merged row is always on the `when.merged` arm; one that is not is malformed.
+ */
+export function drawRosterMergedRepoGroup(
+  u: RosterMergedRepoGroup,
+  sc: SidebarContext,
+  path: string,
+): DrawnMergedRepoGroup {
+  const key = drawRosterRepoKey(requireMessage(u.key, `${path}.key`), `${path}.key`);
+  const rows = requireMessage(u.rows, `${path}.rows`);
+  const mergedAt = rows.rows.map((row, i) => {
+    const when = requireMessage(row.when, `${path}.rows.rows[${i}].when`);
+    const arm = requireCase(when.shown, `${path}.rows.rows[${i}].when.shown`);
+    if (arm.case !== "merged") return unreachableArm(`${path}.rows.rows[${i}].when.shown`, arm.case);
+    return drawRosterRowWhenMerged(arm.value, `${path}.rows.rows[${i}].when.merged`);
+  });
+  const wireCollapsed = drawRosterMergedRepoGroupDrawn(u.drawn, `${path}.drawn`);
+  const group = document.createElement("div");
+  group.className = MERGED_GROUP_CLASS;
+  group.setAttribute("data-repository", key.id);
+  group.appendChild(drawRosterMergedRepoGroupHeader(requireMessage(u.header, `${path}.header`), `${path}.header`));
+  const region = drawRosterRows(rows, sc, `${path}.rows`, false, "merged");
+  [...region.children].forEach((row, i) => row.setAttribute(MERGED_AT_ATTRIBUTE, String(mergedAt[i])));
+  group.appendChild(region);
+  const collapsed = sc.view.track(foldViewKey(repoFoldKey(key.id)), wireCollapsed, (folded) =>
+    paintMergedRepoGroup(group, folded),
+  );
+  paintMergedRepoGroup(group, collapsed);
+  return { element: group, shownMergedAt: wireCollapsed ? [] : mergedAt };
+}
+
+/** Whether a merged group's repository is collapsed. EVERY arm is named; unset is malformed. */
+export function drawRosterMergedRepoGroupDrawn(drawn: RosterMergedRepoGroup["drawn"], path: string): boolean {
+  const arm = requireCase(drawn, path);
+  switch (arm.case) {
+    case "shown":
+      return false;
+    case "repositoryCollapsed":
+      return true;
+    default: {
+      const other: { case: string } = arm;
+      return unreachableArm(path, other.case);
+    }
+  }
+}
+
+/** A merged group's header: the repository's label, and nothing to toggle. */
+export function drawRosterMergedRepoGroupHeader(u: RosterMergedRepoGroupHeader, path: string): HTMLElement {
+  const head = document.createElement("div");
+  head.className = MERGED_GROUP_HEAD_CLASS;
+  head.appendChild(drawSectionLabel(requireMessage(u.label, `${path}.label`), `${path}.label`));
+  return head;
+}
+
+/** Say on a merged group whether its repository is collapsed: a collapsed one is not drawn. */
+export function paintMergedRepoGroup(group: HTMLElement, collapsed: boolean): void {
+  group.hidden = collapsed;
+  group.setAttribute(MERGED_REPOSITORY_COLLAPSED_ATTRIBUTE, collapsed ? "true" : "false");
 }
 
 /** The class of the open band's merged-today count. */
@@ -464,16 +596,12 @@ export const MERGED_TODAY_COUNT_CLASS = "sb-today-count";
 
 /**
  * The open band's "(K)": how many of its merges landed TODAY (local date),
- * counted over EVERY row the daemon sent, including those the fit hides
- * (owner request, 2026-10-11). The stylesheet shows it only while the band is
- * unfolded, where the folded count is not, and the shared ticker recounts it,
- * so it drops at midnight together with the green names.
+ * counted over every row of its SHOWN groups the daemon sent, including those
+ * the fit hides (owner request, 2026-10-11). The stylesheet shows it only while
+ * the band is unfolded, where the folded count is not, and the shared ticker
+ * recounts it, so it drops at midnight together with the green names.
  */
-export function drawMergedTodayCount(rows: RosterRows, sc: SidebarContext, path: string): HTMLElement {
-  const mergedAt = rows.rows.flatMap((row, i) => {
-    const when = requireMessage(row.when, `${path}.rows[${i}].when`);
-    return when.shown.case === "merged" ? [drawRosterRowWhenMerged(when.shown.value, `${path}.rows[${i}].when.merged`)] : [];
-  });
+export function drawMergedTodayCount(mergedAt: number[], sc: SidebarContext): HTMLElement {
   const count = document.createElement("span");
   count.className = MERGED_TODAY_COUNT_CLASS;
   tickPaint(sc, (nowMs) => {
@@ -510,7 +638,7 @@ export function drawRosterHiddenSection(
     target: { case: "hidden", value: {} },
     place: "hidden",
     leftOut: {
-      when: (_rows, header, headerPath) =>
+      when: (header, headerPath) =>
         drawRosterSectionCount(requireMessage(header.count, `${headerPath}.count`), `${headerPath}.count`) === 0,
       attribute: "data-hidden-empty",
     },
@@ -527,10 +655,7 @@ export function drawRosterSectionHeader(
   const header = document.createElement("div");
   header.className = "repo-head";
   header.appendChild(drawFoldToggle(section, gesture));
-  const label = document.createElement("span");
-  label.className = "sb-label";
-  label.textContent = drawRosterLabel(requireMessage(u.label, `${path}.label`), `${path}.label`);
-  header.appendChild(label);
+  header.appendChild(drawSectionLabel(requireMessage(u.label, `${path}.label`), `${path}.label`));
   // THE FOLDED COUNT, "(N)", sits between the label and the add control the
   // repo section appends after this header. The daemon resolves N (the rows
   // the unfolded section shows, nested family rows included); the stylesheet
@@ -635,6 +760,20 @@ export function drawRosterTaskSectionHeader(
   header.appendChild(menu);
   header.addEventListener("click", () => fold(section, header));
   return header;
+}
+
+/** The class every section header's label is drawn with. */
+export const SECTION_LABEL_CLASS = "sb-label";
+
+/**
+ * A section header's label box: the label's text in the `sb-label` span every
+ * section header (and every Recently Merged group header) draws it in.
+ */
+export function drawSectionLabel(u: RosterLabel, path: string): HTMLElement {
+  const label = document.createElement("span");
+  label.className = SECTION_LABEL_CLASS;
+  label.textContent = drawRosterLabel(u, path);
+  return label;
 }
 
 /** A section's display label. DISPLAY ONLY — the key beside it is identity. */

@@ -53,6 +53,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
+	"agentrepl/protohelpers/rosterwalk"
 
 	"claude-repld/integration/harness"
 
@@ -184,12 +185,9 @@ func mqRosterRow(r *frontendv1.WorkspaceRoster, id string) *frontendv1.RosterRow
 }
 
 func mqFindRosterRow(rows []*frontendv1.RosterRow, id string) *frontendv1.RosterRow {
-	for _, row := range rows {
+	for _, row := range rosterwalk.FlattenRows(rows) {
 		if row.GetWorkspace().GetWorkspace().GetId() == id {
 			return row
-		}
-		if found := mqFindRosterRow(row.GetChildren(), id); found != nil {
-			return found
 		}
 	}
 	return nil

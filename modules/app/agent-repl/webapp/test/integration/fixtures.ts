@@ -2461,6 +2461,8 @@ export function roster(init?: {
   taskCollapsed?: boolean;
   /** The merged band's daemon-held fold; collapsed unless said, as the daemon's default is. */
   mergedCollapsed?: boolean;
+  /** Whether the merged rows' repository is collapsed, which leaves its group undrawn; expanded unless said. */
+  mergedRepositoryCollapsed?: boolean;
   /** The hidden section's rows; none unless said, so the section is not drawn. */
   hidden?: RosterRow[];
 }): WorkspaceRoster {
@@ -2506,9 +2508,19 @@ export function roster(init?: {
     recentlyMerged: {
       header: {
         label: { text: "recently merged" },
-        count: { workspaces: (init?.merged ?? [0]).length },
+        count: { workspaces: init?.mergedRepositoryCollapsed === true ? 0 : (init?.merged ?? [0]).length },
       },
-      rows: { rows: init?.merged ?? [rosterRow({ id: "ws-merged", status: "merged", when: "merged" })] },
+      groups: [
+        {
+          key: { repository: repositoryRef() },
+          header: { label: { text: "doom" } },
+          rows: { rows: init?.merged ?? [rosterRow({ id: "ws-merged", status: "merged", when: "merged" })] },
+          drawn:
+            init?.mergedRepositoryCollapsed === true
+              ? { case: "repositoryCollapsed", value: {} }
+              : { case: "shown", value: {} },
+        },
+      ],
       fold: init?.mergedCollapsed === false ? { case: "expanded", value: {} } : { case: "collapsed", value: {} },
     },
     shown:

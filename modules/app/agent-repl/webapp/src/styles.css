@@ -1033,6 +1033,25 @@ body::after {
   --merged-row-line-h: 1.15rem;
   /* One row's drawn height, and the unit the cap below counts in. */
   --merged-row-h: calc(var(--merged-row-pad-y) * 2 + var(--merged-row-line-h));
+  /* One repository group's header height, pinned for the same reason: the fit
+     spends it once per group it shows, measured off `.merged-group-head-probe`. */
+  --merged-group-head-h: 1.25rem;
+}
+/* A REPOSITORY'S GROUP inside Recently Merged: its label only, with no fold
+   toggle (the repository section above is the one place a repository folds),
+   drawn as a quieter repository header, indented to the band's label. */
+#ws-sidebar .merged-group-head {
+  height: var(--merged-group-head-h);
+  line-height: var(--merged-group-head-h);
+  padding: 0 0.7rem 0 1.75rem;
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-weight: 700;
+  color: var(--repo-head-collapsed);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 #ws-sidebar .repo.hidden-section > .repo-head,
 #ws-sidebar .repo.merged-section > .repo-head { color: var(--info-agents); }
@@ -1054,6 +1073,13 @@ body::after {
   visibility: hidden;
   width: 0;
   height: var(--merged-row-h);
+}
+/* THE GROUP HEADER UNIT, measured the same way as the row unit. */
+#ws-sidebar .repo.merged-section > .merged-group-head-probe {
+  position: absolute;
+  visibility: hidden;
+  width: 0;
+  height: var(--merged-group-head-h);
 }
 
 #ws-sidebar .row .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

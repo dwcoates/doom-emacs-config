@@ -25,17 +25,17 @@ type TabEntry struct {
 // roster has been published.
 func TabOrder(roster *frontendv1.WorkspaceRoster) []TabEntry {
 	var out []TabEntry
-	walk := func(rows []*frontendv1.RosterRow) {
-		for _, row := range rosterwalk.FlattenRows(rows) {
+	walk := func(flat []*frontendv1.RosterRow) {
+		for _, row := range flat {
 			if !row.GetClosed().GetClosed() {
 				out = append(out, TabEntry{Ref: row.GetWorkspace().GetWorkspace(), Name: row.GetName().GetText()})
 			}
 		}
 	}
 	for _, section := range roster.GetRepository().GetSections() {
-		walk(section.GetRows().GetRows())
+		walk(rosterwalk.FlattenRows(section.GetRows().GetRows()))
 	}
-	walk(roster.GetHidden().GetRows().GetRows())
-	walk(roster.GetRecentlyMerged().GetRows().GetRows())
+	walk(rosterwalk.FlattenRows(roster.GetHidden().GetRows().GetRows()))
+	walk(rosterwalk.MergedRows(roster))
 	return out
 }

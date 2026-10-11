@@ -1720,7 +1720,7 @@ rest of this suite already asserts against."
                (rows . ((rows . [])))
                (expanded . ())))
     (recentlyMerged . ((header . ((label . ((text . "recently merged"))) (count . ((workspaces . 1)))))
-                        (rows . ((rows . [])))
+                        (groups . [])
                         (collapsed . ())))
     (shownRepository . ())))
 
