@@ -99,6 +99,10 @@ message SetWorkspaceParentError {
     // The workspace has no merge geometry: it was registered by the editor
     // rather than created by the daemon, so it has no merge to retarget.
     SetWorkspaceParentNoMergeLayout no_merge_layout = 9;
+    // The workspace's session is parked at its cold gate, which takes no
+    // prompt until the gate is answered, so the notice cannot be queued and
+    // the retarget is not made. Answer the gate, then retarget.
+    SetWorkspaceParentColdGate cold_gate = 10;
   }
 }
 
@@ -143,3 +147,7 @@ message SetWorkspaceParentCycle {}
 
 // The workspace has no merge geometry to retarget. DELIBERATELY EMPTY.
 message SetWorkspaceParentNoMergeLayout {}
+
+// The workspace's session is parked at its cold gate. DELIBERATELY EMPTY: the
+// gate itself is drawn in the workspace's feed.
+message SetWorkspaceParentColdGate {}
