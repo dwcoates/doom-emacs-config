@@ -1046,9 +1046,21 @@ afterwards is a logging defect."
   ;; by the keymap `keybindings.el' builds from it, and one number has to
   ;; serve both or a tenth command appears with no chord on it.
   (defconst agent-repl-switch-numeral-count 9
-    "How many workspace numeral chords the module owns: `M-1\=' .. `M-9\='.
-`M-0\=' is left to Doom (`+workspace/switch-to-final\='), which is the one
-numeral whose meaning does not need a slot index to be right."))
+    "How many workspace SLOT chords the module owns: `M-1\=' .. `M-9\='.
+`M-0\=' is the module's too, but it names no slot: it is
+`agent-repl-switch-to-last-workspace\=', the tab at the end of the bar."))
+
+(defun agent-repl--last-tab-slot ()
+  "The 1-based slot of the LAST tab on the drawn bar, never below 1.
+An empty bar still answers 1, so the switch reports its own no-tabs miss."
+  (max 1 (length (agent-repl--drawn-tab-names))))
+
+(defun agent-repl-switch-to-last-workspace ()
+  "Switch to the LAST tab on the drawn bar, however many it draws.
+Bound to `M-0\=' and `s-0\=' in place of Doom's `+workspace/switch-to-final\=',
+which indexes persp-mode's perspective list rather than the bar."
+  (interactive)
+  (agent-repl-switch-to-workspace (agent-repl--last-tab-slot)))
 
 (defmacro agent-repl--define-switch-numerals ()
   "Define `agent-repl-switch-to-workspace-1' .. `-9'.
@@ -1073,7 +1085,7 @@ exact slots and report a miss."
        (interactive)
        (agent-repl-switch-to-workspace
         ,(if (= n agent-repl-switch-numeral-count)
-             `(max 1 (min ,n (length (agent-repl--drawn-tab-names))))
+             `(min ,n (agent-repl--last-tab-slot))
            n))))))
 
 (agent-repl--define-switch-numerals)
