@@ -143,6 +143,11 @@ var suiteRules = []suiteRule{
 	// webapp (whose build harness builds the webapp).
 	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/logging/", Suites: []string{
 		"logging", "logging-density", "daemon", "store", "sidecar", "lock", "shim", "webapp", "build-frontend-harness", testrunSuite, "e2e", "e2e-emacs", repoScans}},
+	// The TLDR-tree grammar. No program loads it yet, so its own suite is the
+	// whole blast radius, with the scans that read its Go binding's go.mod;
+	// each consumer joins this list as it starts parsing with it.
+	{Kind: matchSubtree, Path: moduleRoot + "tree-sitter-tldr/", Suites: []string{"tree-sitter-tldr", repoScans}},
+
 	// The wire contract every producer and consumer is generated from, and the
 	// Go helpers beside it: every system and suite reads it, so every suite
 	// runs.

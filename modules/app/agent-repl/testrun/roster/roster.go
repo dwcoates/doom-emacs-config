@@ -320,6 +320,9 @@ var Suites = []Suite{
 			"bin/fake-git.sh", "bin/fake-git.go",
 		}, Generated: []string{"agent-shim/claude/shim/node_modules/", "agent-shim/claude/shim/dist/"}}},
 	{Name: "proto", Kind: Script, Path: "bin/report-nonlisp-coverage.sh", Args: []string{"proto"}},
+	// The TLDR-tree grammar: its corpus, and the committed parser checked
+	// against what grammar.js generates.
+	{Name: "tree-sitter-tldr", Kind: Script, Path: "tree-sitter-tldr/test-tree-sitter-tldr.sh"},
 	{Name: "logging-density", Kind: Script, Path: "bin/report-logging-density.sh"},
 	{Name: "e2e", Kind: E2E, Path: "e2e", TestParallel: map[string]Parallel{".": {Tests: 8, Slots: 2}}, VetTags: []string{"perf", "realtest"},
 		Programs: map[string][]string{".": {"agent-repld", "fakeshim", "git", "shim-store", "shim-claude-sidecar", "shim-lock"}}},

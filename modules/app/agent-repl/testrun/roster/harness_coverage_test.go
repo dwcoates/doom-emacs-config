@@ -16,7 +16,7 @@ import (
 func harnessScripts(t *testing.T, module, repo string) []string {
 	t.Helper()
 	var found []string
-	for _, glob := range []string{"bin/test-*.sh", "scripts/test-*.sh"} {
+	for _, glob := range []string{"bin/test-*.sh", "scripts/test-*.sh", "tree-sitter-tldr/test-*.sh"} {
 		matches, err := filepath.Glob(filepath.Join(module, glob))
 		if err != nil {
 			t.Fatal(err)

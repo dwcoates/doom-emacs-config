@@ -255,6 +255,19 @@ func TestSelectSuitesMapsShimLockToItsSuiteAndTheShims(t *testing.T) {
 	}
 }
 
+// TestSelectSuitesMapsTheGrammarToItsOwnSuite covers tree-sitter-tldr/: no
+// program loads the grammar yet, so its own suite is the whole blast radius,
+// with the scans that read its Go binding's go.mod.
+func TestSelectSuitesMapsTheGrammarToItsOwnSuite(t *testing.T) {
+	// Act.
+	got := SelectSuites([]string{"modules/app/agent-repl/tree-sitter-tldr/grammar.js"})
+
+	// Assert.
+	if got.Full || strings.Join(got.Suites, ",") != "repo-scans,tree-sitter-tldr" {
+		t.Fatalf("the grammar selected %v (full=%v), want repo-scans and tree-sitter-tldr", got.Suites, got.Full)
+	}
+}
+
 // TestSelectSuitesABinScriptSelectsEveryHarness covers bin/: a change there
 // can break any of the harnesses that test the module's scripts, and the
 // repo-scans suite reads the Go sources there.
