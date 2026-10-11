@@ -11,7 +11,7 @@ import (
 )
 
 // The naming rule's constants. The rule itself — lowercase, hyphenated, at
-// most three words — is stated to the model by
+// most four words — is stated to the model by
 // prompts/workspace-name-from-prompt.md and ENFORCED here on its answer: a
 // name is validated, never repaired.
 const (
@@ -19,8 +19,10 @@ const (
 	// nor an initial prompt is given: the workspace's own minted id, prefixed
 	// so the roster reads it as an unnamed workspace rather than a hash.
 	UnnamedSlugPrefix = "workspace-"
-	// SlugWordLimit is the "3 words max" the naming briefs state.
-	SlugWordLimit = 3
+	// SlugWordLimit is the "4 words max" the naming briefs state. Raised from
+	// three (owner ruling, 2026-10-11): Haiku answered four-word names often
+	// enough that a create failed both attempts ("agent-repl-emacs-bindings").
+	SlugWordLimit = 4
 	// SlugMaxLen bounds the slug's length in characters.
 	SlugMaxLen = 40
 	// WorktreeDirSuffix is appended to a repository's own directory name to

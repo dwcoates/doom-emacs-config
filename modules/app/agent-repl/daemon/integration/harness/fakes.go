@@ -173,7 +173,7 @@ const FakeClaudeMintedName = "fake-minted-name"
 // fakeClaudeScript is the vendor stand-in for BOTH call shapes the daemon
 // has. A headless run (`-p`) drains the question off stdin and answers as the
 // requested output format: a naming call gets the JSON envelope with a legal
-// three-word slug in `result`. Anything else is the login pty: it prints the
+// slug of at most four words in `result`. Anything else is the login pty: it prints the
 // marker and echoes every keystroke back, so WatchLoginTerminal has scrollback
 // to replay and input to echo.
 const fakeClaudeScript = `#!/bin/sh
