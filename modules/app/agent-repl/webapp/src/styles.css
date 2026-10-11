@@ -1018,12 +1018,16 @@ body::after {
   padding-top: 0.4rem;
   border-top: 1px solid color-mix(in srgb, var(--muted) 30%, transparent);
 }
+/* EACH BAND'S ROWS SCROLL once the rail is out of room (owner request,
+   2026-10-11): src/sidebar/band-fit.ts caps the rows region's height at a
+   whole number of lines, and the rest scroll inside it. */
+#ws-sidebar .repo.hidden-section > .rows,
+#ws-sidebar .repo.merged-section > .rows {
+  overflow-y: auto;
+}
 #ws-sidebar .repo.merged-section {
-  /* NO FIXED CAP (owner request, 2026-10-08): every merge is drawn, and the
-     rail shows as many as fit without scrolling (src/sidebar/merged-fit.ts,
-     which measures a row through `.merged-row-probe` below).
-     .row's own vertical padding, restated here so the row unit is built out
-     of the same numbers the row is drawn from. */
+  /* .row's own vertical padding, restated here so a merged row's height is
+     built out of the same numbers the row is drawn from. */
   --merged-row-pad-y: 0.28rem;
   /* The row's line box, stated rather than left to the font: `normal`
      line-height varies with whatever font resolves, so the cap could not be
@@ -1031,10 +1035,10 @@ body::after {
      text and the 9px status disc with nothing left over — a merged row carries
      no glyph (`glyphs: false`), so the 1.3rem spinner box cannot appear here. */
   --merged-row-line-h: 1.15rem;
-  /* One row's drawn height, and the unit the cap below counts in. */
+  /* One row's drawn height. */
   --merged-row-h: calc(var(--merged-row-pad-y) * 2 + var(--merged-row-line-h));
-  /* One repository group's header height, pinned for the same reason: the fit
-     spends it once per group it shows, measured off `.merged-group-head-probe`. */
+  /* One repository group's header height, pinned for the same reason, so a
+     group header is as tall wherever it lands in the band's viewport. */
   --merged-group-head-h: 1.25rem;
 }
 /* A REPOSITORY'S GROUP inside Recently Merged: its label only, with no fold
@@ -1060,26 +1064,9 @@ body::after {
    than the entries it holds — ten merges reached about twelve rows' worth of
    rail. Pinning the line box instead makes the row's natural height EQUAL
    --merged-row-h (the tallest flex item is the line box; the 9px disc is
-   smaller), so N entries are exactly N rows tall and the fit's row unit is
-   exact. */
+   smaller), so N entries are exactly N rows tall. */
 #ws-sidebar .repo.merged-section .row {
   line-height: var(--merged-row-line-h);
-}
-/* THE ROW UNIT the fit counts in: one merged row's height, out of flow and
-   unseen, so it is measurable whether the band is folded or not and takes no
-   room either way. */
-#ws-sidebar .repo.merged-section > .merged-row-probe {
-  position: absolute;
-  visibility: hidden;
-  width: 0;
-  height: var(--merged-row-h);
-}
-/* THE GROUP HEADER UNIT, measured the same way as the row unit. */
-#ws-sidebar .repo.merged-section > .merged-group-head-probe {
-  position: absolute;
-  visibility: hidden;
-  width: 0;
-  height: var(--merged-group-head-h);
 }
 
 #ws-sidebar .row .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
