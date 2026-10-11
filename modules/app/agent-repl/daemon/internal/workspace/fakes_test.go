@@ -81,6 +81,16 @@ type fakeDB struct {
 	workspaceErr error
 	// setHiddenErr fails the hidden-flag write.
 	setHiddenErr error
+	// setParentChange is what SetParent answers on success; setParentErr
+	// fails it. parentWrites records each retarget asked for.
+	setParentChange wsm.ParentChange
+	setParentErr    error
+	parentWrites    []*ids.WorkspaceID
+	// restoreStale and restoreErr are RestoreParent's answer; restores
+	// records each change it was asked to undo.
+	restoreStale bool
+	restoreErr   error
+	restores     []wsm.ParentChange
 	current      *ids.WorkspaceID
 	sessions     map[ids.WorkspaceID]wsm.Session
 	// sessionErr makes every session read fail, which is the only way to
@@ -370,6 +380,21 @@ func (d *fakeDB) SetCurrent(_ context.Context, id ids.WorkspaceID, at time.Time)
 func (d *fakeDB) SetAttention(_ context.Context, id ids.WorkspaceID, on bool) error {
 	d.attention[id] = on
 	return nil
+}
+
+// SetParent records the retarget asked for and answers the arranged change.
+func (d *fakeDB) SetParent(_ context.Context, id ids.WorkspaceID, parent *ids.WorkspaceID) (wsm.ParentChange, error) {
+	d.parentWrites = append(d.parentWrites, parent)
+	if d.setParentErr != nil {
+		return wsm.ParentChange{}, d.setParentErr
+	}
+	return d.setParentChange, nil
+}
+
+// RestoreParent records the undo asked for and answers the arranged result.
+func (d *fakeDB) RestoreParent(_ context.Context, change wsm.ParentChange) (bool, error) {
+	d.restores = append(d.restores, change)
+	return d.restoreStale, d.restoreErr
 }
 
 // SetHidden records the hidden flag on the workspace's record, so the

@@ -33,6 +33,18 @@ const (
 	ArmTransferringAway = "transferring_away"
 	// ArmNotYetAdopted is a workspace a joining daemon has not adopted yet.
 	ArmNotYetAdopted = "not_yet_adopted"
+	// ArmUnknownParent is a retarget naming a parent the registry does not
+	// hold (SetWorkspaceParentError.unknown_parent).
+	ArmUnknownParent = "unknown_parent"
+	// ArmParentInOtherRepository is a retarget naming a parent of another
+	// repository. The arm carries `parent_repository_dir`.
+	ArmParentInOtherRepository = "parent_in_other_repository"
+	// ArmCycle is a retarget naming the workspace itself or one of its
+	// descendants as its parent.
+	ArmCycle = "cycle"
+	// ArmNoMergeLayout is a retarget of a workspace with no creation job, so
+	// no merge geometry to change.
+	ArmNoMergeLayout = "no_merge_layout"
 	// ArmNotAWorktree is a registration whose directory is not a git worktree.
 	ArmNotAWorktree = "not_a_worktree"
 	// ArmInsideTemporaryDirectory is a registration -- RegisterWorkspace,
