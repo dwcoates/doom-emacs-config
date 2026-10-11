@@ -37,6 +37,7 @@ import type {
   RosterRowDetailSummary,
   RosterRowName,
   RosterRowMergeWorkspace,
+  RosterRowOneShot,
   RosterRowPriorityBadge,
   RosterRowWhen,
   RosterRowWhenActive,
@@ -56,7 +57,7 @@ import type { SidebarContext } from "./context.js";
 import { toggleHiddenDropdown } from "./dropdowns.js";
 import { markReviving } from "./reviving.js";
 import { viewedMode } from "./viewed.js";
-import { armBreathes, armSpins, rosterArmMark, type RosterStatusCase } from "./tones.js";
+import { armBreathes, armSpins, rosterRowMark, type RosterStatusCase } from "./tones.js";
 import { guardMalformed } from "../rpc/guard.js";
 import { clampReveal } from "../topbar/clamp.js";
 import {
@@ -162,7 +163,11 @@ export function drawRosterRow(
   // the semantic color of a workspace belongs to the whole row: the hook
   // contract targets `[data-roster-row]` for `tone-<color>`, so the class is
   // set here, from the same one vocabulary table the mark reads.
-  const mark = rosterArmMark(status.case);
+  // PRESENCE IS THE FACT: only a one-shot carries the mark, and the rail draws
+  // only its `failed` outcome.
+  const oneShotFailed =
+    u.oneShot !== undefined && drawRosterRowOneShot(u.oneShot, `${path}.oneShot`);
+  const mark = rosterRowMark(status.case, oneShotFailed);
   const ws = document.createElement("div");
   ws.className = `ws ${mark.toneClass}`;
   ws.setAttribute("data-roster-row", workspace.id);
@@ -197,7 +202,7 @@ export function drawRosterRow(
   // NAME is the detail panel's pointer trigger (owner request, 2026-10-11).
   let statusMark: HTMLElement | null = null;
   if (!merged) {
-    statusMark = drawStatusMark(status.case, `${path}.status`);
+    statusMark = drawStatusMark(status.case, `${path}.status`, oneShotFailed);
     line.appendChild(statusMark);
   }
 
@@ -316,6 +321,21 @@ export function drawRosterRowReviving(u: RosterRowReviving, path: string): boole
   void u;
   void path;
   return true;
+}
+
+/**
+ * The ONE-SHOT mark: the workspace was created as a one-shot. Answers whether
+ * it ENDED WITHOUT A LIVE MERGE (`failed`), the only outcome the rail draws;
+ * `armed` draws nothing here. An unset outcome is a MalformedView.
+ */
+export function drawRosterRowOneShot(u: RosterRowOneShot, path: string): boolean {
+  const outcome = requireCase(u.outcome, `${path}.outcome`);
+  switch (outcome.case) {
+    case "armed":
+      return false;
+    case "failed":
+      return true;
+  }
 }
 
 /** The receded styling: the workspace exists, its panes are dismissed. */
@@ -513,8 +533,12 @@ export function drawRosterRowDetailSummary(u: RosterRowDetailSummary, path: stri
  * this surface's, and it says the same thing everywhere — a breath means work
  * is in flight, a spin means the merge queue is on this run.
  */
-export function drawStatusMark(arm: RosterStatusCase, path: string): HTMLElement {
-  const mark = rosterArmMark(arm);
+export function drawStatusMark(
+  arm: RosterStatusCase,
+  path: string,
+  oneShotFailed = false,
+): HTMLElement {
+  const mark = rosterRowMark(arm, oneShotFailed);
   log.debug("drawing a row's status mark", {
     operation: "sidebar.row.status",
     context: { path, arm, glyph: mark.glyph, tone: mark.toneClass },

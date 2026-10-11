@@ -12,6 +12,7 @@ import {
   armSpins,
   glyphName,
   rosterArmMark,
+  rosterRowMark,
   type RosterStatusCase,
 } from "../../src/sidebar/tones.js";
 
@@ -77,8 +78,12 @@ describe("the status mark", () => {
     expect(rosterArmMark("turnFailed")).toEqual({ toneClass: "tone-turquoise", glyph: "dot", char: "" });
   });
 
-  it("draws a failed merge as a turquoise cross", () => {
-    expect(rosterArmMark("mergeFailed")).toEqual({ toneClass: "tone-turquoise", glyph: "failed", char: "✕" });
+  it("draws a failed merge as a turquoise grey cross", () => {
+    expect(rosterArmMark("mergeFailed")).toEqual({
+      toneClass: "tone-turquoise",
+      glyph: "failed",
+      char: "\u2716\uFE0F",
+    });
   });
 
   it("draws a degraded view as a turquoise dot", () => {
@@ -135,4 +140,26 @@ describe("the rail's two animations", () => {
       expect(armSpins(arm)).toBe(false);
     },
   );
+});
+
+describe("a row's mark with its one-shot outcome", () => {
+  it("draws a failed one-shot's failure mark on the arm's own tone", () => {
+    expect(rosterRowMark("done", true)).toEqual({
+      toneClass: "tone-green",
+      glyph: "failed",
+      char: GLYPH_CHARS.failed,
+    });
+  });
+
+  it.each(["permission", "question"])("lets an open %s gate outrank a failed one-shot", (arm) => {
+    expect(rosterRowMark(arm, true)).toEqual(rosterArmMark(arm));
+  });
+
+  it("draws the arm's own mark when the one-shot has not failed", () => {
+    expect(rosterRowMark("thinking", false)).toEqual(rosterArmMark("thinking"));
+  });
+
+  it("refuses an arm the rail cannot draw even for a failed one-shot", () => {
+    expect(() => rosterRowMark("notAnArm", true)).toThrow(MalformedView);
+  });
 });
