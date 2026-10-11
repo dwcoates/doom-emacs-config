@@ -195,6 +195,20 @@ func (f *verbsForwarder) verbs() (workspace.Verbs, bool) {
 	return f.target, f.target != nil
 }
 
+// publishRegistry is the roster's durable-half republish for a component built
+// BEFORE the verbs, which own it. The republish reads the verbs out of the
+// forwarder when it runs; one asked for before they are bound is a wiring
+// defect, answered as an error naming WHAT happened that early.
+func (f *verbsForwarder) publishRegistry(what string) func(context.Context) error {
+	return func(ctx context.Context) error {
+		verbs, ok := f.verbs()
+		if !ok {
+			return fmt.Errorf("claude-repld: %s before the workspace verbs existed", what)
+		}
+		return verbs.PublishRegistry(ctx)
+	}
+}
+
 // healthForwarder carries the session watcher's diagnostics verdict to the
 // health reporter, which is built after the fleet the watchers live in.
 type healthForwarder struct {

@@ -867,13 +867,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// The verbs own the roster's durable half and are built AFTER this
 		// controller, so the republish reads them out of the forwarder --
 		// exactly as the merge orchestrator's own roster republish does.
-		PublishRegistry: func(ctx context.Context) error {
-			verbs, ok := verbsRef.verbs()
-			if !ok {
-				return fmt.Errorf("claude-repld: a session was hibernated before the workspace verbs existed")
-			}
-			return verbs.PublishRegistry(ctx)
-		},
+		PublishRegistry: verbsRef.publishRegistry("a session was hibernated"),
 		// ONE PARK, ONE CALL, BOTH SESSION-SCOPED SURFACES. The footer's strip
 		// and the topbar's indicator each draw the shim link, and the roster
 		// promises they agree with it about the same link
@@ -899,33 +893,27 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		PublishHost: relay.PublishHostWorkspace,
 		// The verbs own the roster's durable half and are built AFTER the
 		// orchestrator, so the republish reads them out of the forwarder.
-		PublishRegistry: func(ctx context.Context) error {
-			verbs, ok := verbsRef.verbs()
-			if !ok {
-				return fmt.Errorf("claude-repld: a merge landed before the workspace verbs existed")
-			}
-			return verbs.PublishRegistry(ctx)
-		},
-		Asks:         mergeAsks,
-		DB:           p.DB,
-		Git:          git,
-		Queue:        queue,
-		Feed:         feedResolver,
-		Footer:       footerResolver,
-		Sidebar:      sidebarResolver,
-		Holds:        feedResolver,
-		PromptsDir:   paths.PromptsDir,
-		CheckoutRoot: paths.Checkout,
-		Briefs:       merge.BriefsFrom(paths.PromptsDir),
-		SelfRepoDir:  paths.SelfRepo,
-		StateDir:     p.Layout.Dir(),
-		TestCommand:  merge.TestCommandFor,
-		TestRunner:   scripts,
-		Painter:      painter,
-		StartSession: fleet.Start,
-		StopSession:  fleet.KillSession,
-		Occupy:       fleet.Occupy,
-		AwaitTurnEnd: fleet.AwaitTurnEnd,
+		PublishRegistry: verbsRef.publishRegistry("a merge landed"),
+		Asks:            mergeAsks,
+		DB:              p.DB,
+		Git:             git,
+		Queue:           queue,
+		Feed:            feedResolver,
+		Footer:          footerResolver,
+		Sidebar:         sidebarResolver,
+		Holds:           feedResolver,
+		PromptsDir:      paths.PromptsDir,
+		CheckoutRoot:    paths.Checkout,
+		Briefs:          merge.BriefsFrom(paths.PromptsDir),
+		SelfRepoDir:     paths.SelfRepo,
+		StateDir:        p.Layout.Dir(),
+		TestCommand:     merge.TestCommandFor,
+		TestRunner:      scripts,
+		Painter:         painter,
+		StartSession:    fleet.Start,
+		StopSession:     fleet.KillSession,
+		Occupy:          fleet.Occupy,
+		AwaitTurnEnd:    fleet.AwaitTurnEnd,
 		CaptureDisplaced: func(ctx context.Context, ws ids.WorkspaceID) (merge.Displaced, bool, error) {
 			d, ok, err := fleet.CaptureDisplaced(ctx, ws)
 			return merge.Displaced{Turn: d.Turn, Text: d.Text}, ok, err
