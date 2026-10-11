@@ -1559,6 +1559,8 @@ type harness struct {
 	captures int
 	// freeness answers the admission's freeness wait; free by default.
 	freeness *fakeFreeness
+	// detached is the detached-merge service: the fork and the handbacks.
+	detached *fakeDetached
 	// awaitedTurns records every turn AwaitTurnEnd waited on.
 	awaitedTurns []ids.TurnID
 	// awaitGate, when set, holds every AwaitTurnEnd until it is closed or the
@@ -1706,6 +1708,7 @@ func newHarness(t *testing.T) *harness {
 		policyErr: map[string]error{},
 		freeness:  &fakeFreeness{},
 	}
+	h.detached = &fakeDetached{h: h}
 	h.queue = &fakeQueue{db: h.db}
 	h.git = newFakeGit(h.next)
 	h.feed = &fakeFeed{seq: h.next}
@@ -1824,8 +1827,9 @@ func (h *harness) deps() Deps {
 			defer h.mu.Unlock()
 			return h.inFlight, h.inFlight != ""
 		},
-		Home:    "/home/tester",
-		Rollout: h.rollout,
+		Home:     "/home/tester",
+		Detached: h.detached,
+		Rollout:  h.rollout,
 		Now:     h.clock,
 		Log:     h.logs,
 	}
