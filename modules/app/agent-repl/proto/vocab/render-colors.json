@@ -173,7 +173,12 @@
     "Keyed by the merge arms of RosterRow.status. 'feed_merge_head_glyph' is",
     "separate because it names FeedMergeGlyph.icon on the feed's merge",
     "bubble head, which reports the merge as a whole rather than one of its",
-    "states."
+    "states.",
+    "",
+    "The Emacs tab bar draws only 'merge_failed''s glyph: its purple already",
+    "says a merge is in flight, and a landed merge shows nothing (owner",
+    "ruling, 2026-10-11). It still maps every name, so the table stays",
+    "checkable row for row."
   ],
   "merge_glyphs": {
     "merge_queued": "queue",
