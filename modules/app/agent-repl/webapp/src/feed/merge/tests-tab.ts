@@ -16,7 +16,7 @@
  * token, in the response bubble's link blue (`renderMergeTestLogLink`).
  */
 import { log } from "../../log.js";
-import { placeChildren } from "../../dom.js";
+import { placeChildren, repaintMark } from "../../dom.js";
 import { requireCase } from "../../rpc/strict.js";
 import { paintSpanClass } from "../cards/paint.js";
 import { armName } from "../renderers.js";
@@ -180,16 +180,16 @@ function paintSuite(el: HTMLElement, suite: FeedMergeTestSuite): void {
       // 2026-10-08), never purple: grey before any verdict, green while every
       // verdict is a pass, red once one failed. The daemon resolved the arm.
       const soFar = requireCase(state.value.soFar, `${PATH}.state.running.so_far`);
-      paintGlyph(glyph, `merge-suite-glyph is-live is-${soFar.case}`, SUITE_GLYPHS.running);
+      repaintMark(glyph, `merge-suite-glyph is-live is-${soFar.case}`, SUITE_GLYPHS.running);
       setAttribute(el, "data-so-far", soFar.case);
       break;
     }
     case "passed":
-      paintGlyph(glyph, "merge-suite-glyph is-succeeded", SUITE_GLYPHS.passed);
+      repaintMark(glyph, "merge-suite-glyph is-succeeded", SUITE_GLYPHS.passed);
       el.removeAttribute("data-so-far");
       break;
     case "failed":
-      paintGlyph(glyph, "merge-suite-glyph is-failed", SUITE_GLYPHS.failed);
+      repaintMark(glyph, "merge-suite-glyph is-failed", SUITE_GLYPHS.failed);
       el.removeAttribute("data-so-far");
       break;
     default:
@@ -217,12 +217,6 @@ function paintSuite(el: HTMLElement, suite: FeedMergeTestSuite): void {
   const same =
     spans.length === pre.children.length && spans.every((span, i) => span.isEqualNode(pre.children[i] ?? null));
   if (!same) pre.replaceChildren(...spans);
-}
-
-/** Paint GLYPH with CLASS_NAME and TEXT, touching neither when it already holds it. */
-function paintGlyph(glyph: HTMLElement, className: string, text: string): void {
-  if (glyph.className !== className) glyph.className = className;
-  if (glyph.textContent !== text) glyph.textContent = text;
 }
 
 /** Set EL's NAME to VALUE only when it differs. */
