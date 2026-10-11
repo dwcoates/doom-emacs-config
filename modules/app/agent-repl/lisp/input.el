@@ -1612,6 +1612,16 @@ A workspace with NO SESSION AT ALL, which is the daemon's own to bring
 up.  Nothing is owed by the user and nothing is owed by this composer, so
 the sentence states the fact and the prompt is neither held nor lost.")
 
+(defun agent-repl--input-say-refusal (ws flash &optional detail)
+  "Tell the user about a refused submission of WS: FLASH in the composer,
+and FLASH in the echo area followed by \=` (DETAIL)\=' when DETAIL is a
+non-empty string.  DETAIL is the daemon's own account, echoed verbatim and
+never switched on.  The one way a refusal arm with a fixed sentence says
+itself, so no arm words its echo differently from its flash."
+  (agent-repl--input-flash ws flash)
+  (message "agent-repl: %s%s" flash
+           (if (or (null detail) (string-empty-p detail)) "" (format " (%s)" detail))))
+
 (defun agent-repl--input-on-error (ws said origin raw error key &optional snapshot delivery)
   "Handle a `SubmitPromptError' for WS.
 EVERY arm here is the daemon saying the prompt did NOT land, so the FIRST
@@ -1674,9 +1684,7 @@ arms in `agent-repl--input-deferred-held-arms' rather than refused by them."
          (let ((detail (or (plist-get (plist-get reason :value) :detail) "")))
            (agent-repl--warn ws "elisp.input.refused-cold-gate ws=%s origin=%S arm=%S detail=%s"
                              ws origin arm detail)
-           (agent-repl--input-flash ws agent-repl--input-cold-gate-flash)
-           (message "agent-repl: %s%s" agent-repl--input-cold-gate-flash
-                    (if (string-empty-p detail) "" (format " (%s)" detail)))))
+           (agent-repl--input-say-refusal ws agent-repl--input-cold-gate-flash detail)))
         ((or :model-not-in-catalog :model-refused)
          ;; A `/model' ACT WAS REFUSED: the model is not in this session's
          ;; catalog, or the vendor refused the change.  The act was not
@@ -1701,8 +1709,7 @@ arms in `agent-repl--input-deferred-held-arms' rather than refused by them."
          ;; reach the session as a prompt the user never meant), and the
          ;; text stays so the user decides what to do with it.
          (agent-repl--info ws "elisp.input.refused-ask-not-standing ws=%s origin=%S arm=%S" ws origin arm)
-         (agent-repl--input-flash ws agent-repl--input-ask-not-standing-flash)
-         (message "agent-repl: %s" agent-repl--input-ask-not-standing-flash))
+         (agent-repl--input-say-refusal ws agent-repl--input-ask-not-standing-flash))
         (:no-session
          ;; The workspace has NO SESSION AT ALL, which is the daemon's own
          ;; to bring up.  Like the cold gate this is an answer rather than a
@@ -1710,8 +1717,7 @@ arms in `agent-repl--input-deferred-held-arms' rather than refused by them."
          ;; not queued; the text stays so the user can resubmit once the
          ;; session is up.
          (agent-repl--warn ws "elisp.input.refused-no-session ws=%s origin=%S arm=%S" ws origin arm)
-         (agent-repl--input-flash ws agent-repl--input-no-session-flash)
-         (message "agent-repl: %s" agent-repl--input-no-session-flash))
+         (agent-repl--input-say-refusal ws agent-repl--input-no-session-flash))
         (:bubble-refused
          ;; The SHIM refused a bubble-addressed prompt and the daemon relayed
          ;; the refusal BY KIND.  Both kinds are the same answer to the user

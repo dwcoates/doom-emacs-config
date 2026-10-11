@@ -415,6 +415,9 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
     ("input.el" agent-repl--input-on-bubble-refusal
      "agent-repl: refused -- %s%s"
      "reports a prompt refusal requiring user action")
+    ("input.el" agent-repl--input-say-refusal
+     "agent-repl: %s%s"
+     "tells the user why their prompt was refused: the cold gate, no session yet, or an ask that settled first")
     ("input.el" agent-repl--input-on-error
      "agent-repl: refused -- a merge is in flight for this workspace"
      "reports why the user's prompt was not accepted")
@@ -422,14 +425,8 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
      "agent-repl: this submission's key was already accepted; the earlier submission stands"
      "reports idempotent acceptance to the submitting user")
     ("input.el" agent-repl--input-on-error
-     "agent-repl: %s%s"
-     "tells the user their prompt met the cold gate and where to answer it")
-    ("input.el" agent-repl--input-on-error
      "agent-repl: model change refused%s"
      "tells the user their model change was refused, in the refusal's own words")
-    ("input.el" agent-repl--input-on-error
-     "agent-repl: %s"
-     "tells the user the workspace has no session yet and the daemon is starting one")
     ("input.el" agent-repl--input-on-error
      "agent-repl: submission refused (%S)"
      "reports why the user's prompt was not accepted")

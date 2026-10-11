@@ -1665,6 +1665,26 @@ unknown arm."
       (should-not (agent-repl-test-input--rung-has-p
                    agent-repl-test-input--error "elisp.input.unknown-error-arm")))))
 
+(ert-deftest agent-repl-input-say-refusal-flashes-and-echoes-the-sentence ()
+  "The helper flashes the sentence in the composer and echoes it alone."
+  (agent-repl-test-input--with
+    (agent-repl--input-say-refusal "ws-one" "refused for a reason")
+    (should (equal (buffer-local-value 'agent-repl-input-notice agent-repl-test-input--buffer)
+                   "refused for a reason"))
+    (should (member "agent-repl: refused for a reason" agent-repl-test-input--messages))))
+
+(ert-deftest agent-repl-input-say-refusal-appends-a-detail-verbatim ()
+  "A non-empty detail rides the echo in parentheses, verbatim."
+  (agent-repl-test-input--with
+    (agent-repl--input-say-refusal "ws-one" "refused" "the daemon's words")
+    (should (member "agent-repl: refused (the daemon's words)" agent-repl-test-input--messages))))
+
+(ert-deftest agent-repl-input-say-refusal-drops-an-empty-detail ()
+  "An empty detail adds nothing, not an empty pair of parentheses."
+  (agent-repl-test-input--with
+    (agent-repl--input-say-refusal "ws-one" "refused" "")
+    (should (member "agent-repl: refused" agent-repl-test-input--messages))))
+
 (defconst agent-repl-test-input--no-session-answer
   '(:response (:arm :error :value (:reason (:arm :no-session :value nil))))
   "A scripted `no_session' refusal: a workspace with no session at all.")
