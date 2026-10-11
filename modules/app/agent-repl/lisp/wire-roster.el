@@ -877,6 +877,49 @@ It has no key of its own — the roster carries exactly one."
                   #'agent-repl-wire-decode-roster-merged-section-rows)
            :fold (agent-repl-wire-decode-roster-merged-section-fold object)))))
 
+;;;; ---- The hidden-workspaces section ----
+
+(defun agent-repl-wire-decode-roster-hidden-section-header (value)
+  "Decode `RosterHiddenSection''s `header' field VALUE."
+  (agent-repl-wire-decode-roster-section-header value))
+
+(defun agent-repl-wire-decode-roster-hidden-section-rows (value)
+  "Decode `RosterHiddenSection''s `rows' field VALUE as RosterRows."
+  (agent-repl-wire-decode-roster-rows value))
+
+(defun agent-repl-wire-decode-roster-hidden-section-expanded (value)
+  "Decode VALUE as the empty message `RosterHiddenSectionExpanded'."
+  (agent-repl-wire--decode-empty "RosterHiddenSectionExpanded" value))
+
+(defun agent-repl-wire-decode-roster-hidden-section-collapsed (value)
+  "Decode VALUE as the empty message `RosterHiddenSectionCollapsed'."
+  (agent-repl-wire--decode-empty "RosterHiddenSectionCollapsed" value))
+
+(defun agent-repl-wire-decode-roster-hidden-section-fold (object)
+  "Decode `RosterHiddenSection''s `fold' oneof from OBJECT.
+THE ARM IS THE FOLD, the daemon's view state; it is never unset.  It folds
+sidebar rows only: a hidden workspace is off the tab bar either way."
+  (agent-repl-wire--decode-oneof
+   "RosterHiddenSection" 'fold object
+   '((expanded :expanded agent-repl-wire-decode-roster-hidden-section-expanded)
+     (collapsed :collapsed agent-repl-wire-decode-roster-hidden-section-collapsed))))
+
+(defun agent-repl-wire-decode-roster-hidden-section (value)
+  "Decode VALUE as `RosterHiddenSection', a plist `(:header :rows :fold)'.
+It has no key of its own — the roster carries exactly one."
+  (let ((object (agent-repl-wire--object "RosterHiddenSection" value)))
+    (agent-repl-wire--check-keys "RosterHiddenSection" object
+                                 '(header rows expanded collapsed))
+    (agent-repl-wire--decoded
+     "RosterHiddenSection"
+     (list :header (agent-repl-wire--decode-message
+                    "RosterHiddenSection" 'header object
+                    #'agent-repl-wire-decode-roster-hidden-section-header)
+           :rows (agent-repl-wire--decode-message
+                  "RosterHiddenSection" 'rows object
+                  #'agent-repl-wire-decode-roster-hidden-section-rows)
+           :fold (agent-repl-wire-decode-roster-hidden-section-fold object)))))
+
 ;;;; ---- The views and the roster ----
 
 (defun agent-repl-wire-decode-roster-repository-view-sections (value)
@@ -955,6 +998,10 @@ name, which is not unique."
   "Decode `WorkspaceRoster''s `recently_merged' field VALUE."
   (agent-repl-wire-decode-roster-merged-section value))
 
+(defun agent-repl-wire-decode-workspace-roster-hidden (value)
+  "Decode `WorkspaceRoster''s `hidden' field VALUE."
+  (agent-repl-wire-decode-roster-hidden-section value))
+
 (defun agent-repl-wire-decode-workspace-roster-current (value)
   "Decode `WorkspaceRoster''s optional `current' field VALUE."
   (agent-repl-wire-decode-roster-current-workspace value))
@@ -982,14 +1029,14 @@ THE ARM IS THE GROUPING every page shows; it is never unset."
 
 (defun agent-repl-wire-decode-workspace-roster (value)
   "Decode VALUE as `WorkspaceRoster'.
-Returns `(:repository V :task V :maturity V :recently-merged S
+Returns `(:repository V :task V :maturity V :hidden H :recently-merged S
 :current C-or-nil :shown ARM)'.  EVERY grouping arrives fully resolved:
 which one is drawn is the daemon's view state (`shown'), a selection
 between resolved views, never a derivation."
   (let ((object (agent-repl-wire--object "WorkspaceRoster" value)))
     (agent-repl-wire--check-keys
      "WorkspaceRoster" object
-     '(repository task maturity recentlyMerged current
+     '(repository task maturity hidden recentlyMerged current
                   shownRepository shownTask shownMaturity))
     (agent-repl-wire--decoded
      "WorkspaceRoster"
@@ -1002,6 +1049,9 @@ between resolved views, never a derivation."
            :maturity (agent-repl-wire--decode-message
                       "WorkspaceRoster" 'maturity object
                       #'agent-repl-wire-decode-workspace-roster-maturity)
+           :hidden (agent-repl-wire--decode-message
+                    "WorkspaceRoster" 'hidden object
+                    #'agent-repl-wire-decode-workspace-roster-hidden)
            :recently-merged (agent-repl-wire--decode-message
                              "WorkspaceRoster" 'recentlyMerged object
                              #'agent-repl-wire-decode-workspace-roster-recently-merged)

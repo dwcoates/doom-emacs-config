@@ -62,7 +62,8 @@
                  agent-repl-fork-workspace
                  agent-repl-fork-workspace-static
                  agent-repl-register-repository
-                 agent-repl-set-priority))
+                 agent-repl-set-priority
+                 agent-repl-hide-workspace))
     (should (commandp cmd))))
 
 (ert-deftest agent-repl-test-keybindings-admin-verbs-are-defined ()
@@ -275,6 +276,11 @@ walked for KEY followed by its #\\='COMMAND."
   "`SPC TAB f\=' still runs the dynamic fork: the named one is its OWN key."
   (should (eq (agent-repl-test-keybindings--leader-prefix-binding "TAB" "f")
               'agent-repl-fork-workspace)))
+
+(ert-deftest agent-repl-test-keybindings-spc-tab-h-hides-the-workspace ()
+  "`SPC TAB h\=' hides the current workspace: off the tab bar, into the sidebar's hidden section."
+  (should (eq (agent-repl-test-keybindings--leader-prefix-binding "TAB" "h")
+              'agent-repl-hide-workspace)))
 
 (ert-deftest agent-repl-test-keybindings-leaves-m-0-to-doom ()
   "`M-0' is the one numeral the module does not claim."
