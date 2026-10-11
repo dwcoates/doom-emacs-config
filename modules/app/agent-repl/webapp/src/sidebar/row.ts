@@ -358,25 +358,13 @@ export function drawRosterRowWhen(
   when.setAttribute("data-when", shown.case);
   switch (shown.case) {
     case "active":
-      tickAge(
-        when,
-        sc,
-        drawRosterRowWhenActive(shown.value, `${path}.active`),
-        (age) => age,
-      );
+      tickAge(when, sc, drawRosterRowWhenActive(shown.value, `${path}.active`));
       return when;
     case "created":
-      tickAge(
-        when,
-        sc,
-        drawRosterRowWhenCreated(shown.value, `${path}.created`),
-        (age) => age,
-      );
+      tickAge(when, sc, drawRosterRowWhenCreated(shown.value, `${path}.created`));
       return when;
     case "merged":
-      tickAge(when, sc, drawRosterRowWhenMerged(shown.value, `${path}.merged`), (age) =>
-        `merged ${age}`,
-      );
+      tickAge(when, sc, drawRosterRowWhenMerged(shown.value, `${path}.merged`));
       return when;
     default: {
       const other: { case: string } = shown;
@@ -752,15 +740,14 @@ function appendDetailLine(list: HTMLElement, label: string, value: string): void
   list.appendChild(dd);
 }
 
-/** Paint an age now and on every tick, through the SHARED ticker. */
-function tickAge(
-  host: HTMLElement,
-  sc: SidebarContext,
-  atMs: number,
-  compose: (age: string) => string,
-): void {
+/**
+ * Paint an age now and on every tick, through the SHARED ticker. Every arm
+ * draws the bare age (owner request, 2026-10-11: no "merged " prefix), so the
+ * column's position in the band says what the age counts from.
+ */
+function tickAge(host: HTMLElement, sc: SidebarContext, atMs: number): void {
   const paint = (nowMs: number): void => {
-    host.textContent = compose(formatTickedAge(nowMs - atMs));
+    host.textContent = formatTickedAge(nowMs - atMs);
   };
   paint(sc.ctx.ticker.now());
   sc.onDispose(sc.ctx.ticker.subscribe(paint));
