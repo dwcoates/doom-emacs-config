@@ -23,6 +23,7 @@ import { TITLE_FOLD_OPEN_SELECTOR } from "../src/feed/title-fold.js";
 import {
   BUBBLE_CAP_LINES,
   BUBBLE_EXPAND_ONLY_CLASS,
+  BUBBLE_FOOTER_CLASS,
   BUBBLE_MORE_ELLIPSIS,
   BUBBLE_UNCAPPED,
   ELLIPSIS_CAP_LINES,
@@ -227,7 +228,7 @@ describe("the bubble geometry: the scrollbar on the inner edge", () => {
     const bubble = declarationsOf(".bubble");
 
     // Assert
-    expect(bubble).toMatch(/padding:\s*0\.6rem\s+var\(--bubble-scroll-gap\)\s+0\.6rem\s+0\.9rem/);
+    expect(bubble).toMatch(/padding:\s*var\(--bubble-pad-y\)\s+var\(--bubble-scroll-gap\)\s+var\(--bubble-pad-y\)\s+0\.9rem/);
   });
 
   it("keeps the gap itself hairline, so 'abuts' is a promise the token can keep", () => {
@@ -520,12 +521,13 @@ describe("the collapse/expand height model", () => {
  * bubbles — never a tool-call section — and fades into each bubble's own bg.
  */
 describe("the 'more below' affordance", () => {
-  it("draws the fade from has-more, over the last 1.5em", () => {
+  it("draws the fade from has-more, over the last 1.5em plus its reach", () => {
     // Arrange / Act
     const fade = declarationsOf(".bubble > .bubble-scroll.has-more::after");
 
     // Assert
-    expect(fade).toMatch(/height:\s*1\.5em/);
+    expect(fade).toMatch(/height:\s*calc\(1\.5em \+ var\(--bubble-fade-reach\)\)/);
+    expect(fade).toMatch(/border-radius:\s*0 0 var\(--bubble-fade-radius\) var\(--bubble-fade-radius\)/);
     expect(fade).toMatch(/bottom:\s*0/);
     expect(fade).toMatch(/pointer-events:\s*none/);
   });
@@ -587,19 +589,50 @@ describe("the 'more below' affordance", () => {
     expect(inFlow.map((rule) => rule.selectors.join(", "))).toEqual([]);
   });
 
-  it("makes the box the affordance's containing block whether or not it wears has-more", () => {
-    // Arrange
-    const boxes = [".bubble > .bubble-box"];
+  /** The position every rule naming exactly SELECTOR sets, in source order. */
+  const positionsOf = (selector: string): string[] =>
+    rulesOf(stylesheet)
+      .filter((rule) => rule.selectors.includes(selector))
+      .flatMap((rule) => [...rule.declarations.matchAll(/position:\s*([a-z]+)/g)].map((m) => m[1] ?? ""));
 
-    // Act — whether any rule on the bare box (no has-more) makes it relative.
-    const relative = boxes.map((box) =>
-      rulesOf(stylesheet).some(
-        (rule) => rule.selectors.includes(box) && /position:\s*relative/.test(rule.declarations),
-      ),
-    );
+  it("makes the bubble the affordance's containing block whether or not it wears has-more", () => {
+    // Arrange / Act — every position the bare bubble rules set.
+    const positions = positionsOf(".bubble");
 
     // Assert
-    expect(relative).toEqual([true]);
+    expect(positions).toEqual(["relative"]);
+  });
+
+  it("leaves a box no footer follows unpositioned, reaching to the bubble's rounded edge", () => {
+    // Arrange / Act — the bare scroll box rules, which a box no footer follows keeps.
+    const anchor = rulesOf(stylesheet).find(
+      (rule) => rule.selectors.includes(".bubble > .bubble-scroll") && /--bubble-fade-reach/.test(rule.declarations),
+    )?.declarations;
+    const positions = positionsOf(".bubble > .bubble-scroll");
+
+    // Assert
+    expect(anchor).toMatch(/--bubble-fade-reach:\s*var\(--bubble-pad-y\)/);
+    expect(anchor).toMatch(/--bubble-fade-radius:\s*var\(--bubble-radius\)/);
+    expect(positions).toEqual([]);
+  });
+
+  it("makes a box a footer follows the affordance's containing block, reaching no further", () => {
+    // Arrange / Act
+    const box = declarationsOf(`.bubble > .bubble-scroll:has(~ .${BUBBLE_FOOTER_CLASS})`);
+
+    // Assert
+    expect(box).toMatch(/position:\s*relative/);
+    expect(box).toMatch(/--bubble-fade-reach:\s*0px/);
+    expect(box).toMatch(/--bubble-fade-radius:\s*0px/);
+  });
+
+  it("names the bubble's radius the fade's rounding reads", () => {
+    // Arrange / Act
+    const bubble = declarationsOf(".bubble");
+
+    // Assert
+    expect(bubble).toMatch(/--bubble-radius:\s*8px/);
+    expect(bubble).toMatch(/border-radius:\s*var\(--bubble-radius\)/);
   });
 
   it("never puts the affordance on a tool-call section", () => {
