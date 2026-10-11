@@ -10,10 +10,20 @@ A second symptom has its own cause in the same design. The fork's feed draws eve
 
 The owner chose the remedy: the vendor's `forkSession` writes the fork's transcript verbatim, and the fork reads its pre-fork history from the parent's book through a lineage pointer instead of a copy.
 
+## Scope (settled 2026-10-11)
+
+- **Objective**: a fork's first request is a full cache hit, and its feed draws inherited history exactly as the parent's feed does.
+- **What is built**: the shim forks through the vendor's `forkSession`; the fork's book records a pointer to the parent's book, fixed at the fork point; the fork's feed pages from its own book into the parent's book, stopping at that fork point.
+- **Frontend**: no new component. The webapp keeps drawing whatever rows the daemon sends, so figma→idl adds nothing here.
+- **Systems**: daemon (create-workspace fork path, feed history paging, removal of the inherited-row classifier); shim (`shim.v1.StartSessionRequest` gains a fork source; it persists the fork's book together with its lineage); shim-sidecar (skips records carrying `forkedFrom`); shim-store (holds the lineage pointer, and pages across it or serves both books to the daemon); editor lisp only if `:fork-session-id` depends on the old copy.
+- **Non-additive changes**: `claude-repld.internal.account.resolver.PortTranscript()` and the transcript use of `claude-repld.internal.remint` are retired; `claude-repld.internal.workspace.verbs.forkConversation()` and the `wsm` ported-prompt table are retired, since inherited prompts come from the parent's records; the inherited-row classifier in `daemon/internal/resolve/feed/lineage.go` is retired; `agentrepl.v1.CreateWorkspaceFork` keeps its meaning while the shim does the fork.
+- **Rejected alternative**: copying the parent's store rows (prompts and turn-end rows) into the fork's book. It was first recommended on the claim that a copy keeps the fork readable once the parent is closed; that claim was wrong, because nothing deletes store rows. The pointer leaves nothing to half-copy and needs no classifier to tell inherited rows from the fork's own.
+
 ## Verified facts
 
 - The vendor's `forkSession` (`@anthropic-ai/claude-agent-sdk` 0.3.280, `sdk.mjs`) copies each record with `{...record}`, so message content, tool_use ids and key order are untouched. It remaps only `uuid`, `parentUuid`, `logicalParentUuid` and `sessionId`, plus `deferred_tools_record` announcements and an attachment's `source_uuid`. It stamps every copied record with `forkedFrom: {sessionId, messageUuid}`, and does not copy file-history snapshots. Evidence tier: the shipped implementation, read directly.
 - The comment in `agent-shim/claude/shim/src/engine/identity.ts:29` saying no transcript field links a fork to its parent is out of date for this SDK version, since `forkedFrom` now does.
+- A bounded read of another book already exists on the wire but has no daemon caller. `shim.v1.ReadHistoryRequest.target` accepts any book, and `store.v1.ReadAgentPageRequest.through` (`conversation.v1.ConversationThrough`, a millisecond instant) reads a book as it stood at that instant; both comments name a fork reading its parent as the use. The store (`shim-store/internal/server/server.go:620`) and the shim implement it, and no daemon code calls it. Evidence tier: existing code, by grep.
 - No code deletes rows from the store's `entry` or `agent` tables, so a parent's book outlives closing, nuking or forgetting the parent workspace.
 
 ## Landed changes
