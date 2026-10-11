@@ -172,7 +172,19 @@ func (v *verbs) Create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 	// naming rule never invents free text.
 	workspaceID := wsm.NewWorkspaceID()
 
-	branch, err := v.branchFor(ctx, global, spec, repoDir, workspaceID)
+	// A MERGE WORKSPACE TAKES ITS REQUESTER'S LANDING: read once, before
+	// anything is named or recorded, and used for the name, the target, the
+	// branch it lands on and the configured merge actions below.
+	var origin *mergeOrigin
+	if spec.MergeOf != nil {
+		loaded, err := v.loadMergeOrigin(ctx, global, *spec.MergeOf)
+		if err != nil {
+			return wsm.Workspace{}, err
+		}
+		origin = &loaded
+	}
+
+	branch, err := v.branchFor(ctx, global, spec, repoDir, workspaceID, origin)
 	if err != nil {
 		return wsm.Workspace{}, err
 	}
@@ -210,10 +222,15 @@ func (v *verbs) Create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 		global.Error(opCreate, "could not resolve the merge target directory", dlog.Context{"cause": err.Error()})
 		return wsm.Workspace{}, fmt.Errorf("create %q: merge target: %w", branch, err)
 	}
+	actions := spec.MergeActions
+	parentBranch := baseRef
+	if origin != nil {
+		targetDir, actions, parentBranch = origin.job.Layout.TargetDir, origin.job.Actions, origin.requester.ParentBranch
+	}
 
-	origin := OriginCreateStandard
+	jobOrigin := OriginCreateStandard
 	if spec.OneShot {
-		origin = OriginCreateOneShot
+		jobOrigin = OriginCreateOneShot
 	}
 	job := wsm.CreationJob{
 		// The pre-minted workspace id lets the geometry be recorded BEFORE
@@ -224,9 +241,9 @@ func (v *verbs) Create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 			SourceBranch: branch,
 			SourceDir:    worktreeDir,
 			TargetDir:    targetDir,
-			Origin:       origin,
+			Origin:       jobOrigin,
 		},
-		Actions:              spec.MergeActions,
+		Actions:              actions,
 		BaseRef:              baseRef,
 		Materialized:         false,
 		OneShot:              spec.OneShot,
@@ -261,10 +278,11 @@ func (v *verbs) Create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 	record, err := v.Register(ctx, worktreeDir, wsm.RegisterFacts{
 		Name:          branch,
 		Branch:        branch,
-		ParentBranch:  baseRef,
+		ParentBranch:  parentBranch,
 		Parent:        (*wsm.WorkspaceID)(parent),
 		RepoDir:       repoDir,
 		DefaultBranch: defaultBranch,
+		MergeOf:       spec.MergeOf,
 	})
 	if err != nil {
 		return wsm.Workspace{}, fmt.Errorf("create %q: register: %w", branch, err)
@@ -357,6 +375,19 @@ func mintedPermissionMode(requested string) string {
 // validateCreate refuses the forms that cannot be built, before anything is
 // minted or written.
 func (v *verbs) validateCreate(log dlog.Logger, spec CreateSpec) error {
+	// A MERGE WORKSPACE IS ONLY EVER ASKED FOR BY THE DAEMON'S OWN DETACHED
+	// MERGE, so a spec that contradicts itself is a defect in that caller, not
+	// a request to refuse.
+	if spec.MergeOf != nil && (spec.ForkFrom == nil || *spec.ForkFrom != spec.MergeOf.Requester ||
+		(spec.Parent != nil && *spec.Parent != spec.MergeOf.Requester) ||
+		spec.OneShot || strings.TrimSpace(spec.InitialPrompt) != "" || strings.TrimSpace(spec.Name) != "") {
+		log.Error(opCreate, "a merge workspace's create spec contradicts itself", dlog.Context{
+			"requester": string(spec.MergeOf.Requester), "request": string(spec.MergeOf.Request),
+			"fork_from": parentID(spec.ForkFrom), "parent": parentID(spec.Parent), "one_shot": spec.OneShot,
+			"has_prompt": strings.TrimSpace(spec.InitialPrompt) != "", "name": spec.Name,
+		})
+		return fmt.Errorf("create: a merge workspace forks from its requester %s and is named, prompted and targeted by the daemon alone", spec.MergeOf.Requester)
+	}
 	if spec.OneShot && strings.TrimSpace(spec.InitialPrompt) == "" {
 		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "spec.OneShot && strings.TrimSpace(spec.InitialPrompt) == \"\""})
 		return refuse(log, "CreateWorkspace", ArmNoSlug,
@@ -379,7 +410,13 @@ func (v *verbs) validateCreate(log dlog.Logger, spec CreateSpec) error {
 // daemon derived is also DISAMBIGUATED against existing branches and
 // workspaces, which a supplied name is not — the user typed that one and is
 // owed git's own refusal if it is taken.
-func (v *verbs) branchFor(ctx context.Context, log dlog.Logger, spec CreateSpec, repoDir string, minted wsm.WorkspaceID) (string, error) {
+func (v *verbs) branchFor(ctx context.Context, log dlog.Logger, spec CreateSpec, repoDir string, minted wsm.WorkspaceID, origin *mergeOrigin) (string, error) {
+	// A MERGE WORKSPACE IS NAMED AFTER THE BRANCH IT MERGES, with no naming
+	// call: "<branch>-merge", disambiguated like any derived name, so a second
+	// detached merge of the same branch gets "<branch>-merge-2".
+	if origin != nil {
+		return v.freeName(ctx, log, repoDir, Name(Prefix(), BareName(origin.requester.Branch)+mergeWorkspaceSuffix))
+	}
 	if supplied := strings.TrimSpace(spec.Name); supplied != "" {
 		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "supplied := strings.TrimSpace(spec.Name); supplied != \"\""})
 		if strings.Contains(supplied, "/") {
@@ -523,6 +560,40 @@ func (v *verbs) mergeTargetDir(ctx context.Context, repoDir string, parent *ids.
 		return "", fmt.Errorf("parent workspace %q: %w", *parent, err)
 	}
 	return record.Dir, nil
+}
+
+// mergeWorkspaceSuffix is what a merge workspace's name adds to the branch it
+// merges.
+const mergeWorkspaceSuffix = "-merge"
+
+// mergeOrigin is what a merge workspace's create reads off its requester: the
+// requester's record and its creation job, whose layout and actions the merge
+// workspace lands by.
+type mergeOrigin struct {
+	requester wsm.Workspace
+	job       wsm.CreationJob
+}
+
+// loadMergeOrigin reads the requester a merge workspace is forked from. A
+// requester with no creation job has no merge layout to land by, and a detached
+// merge is only ever asked for by a workspace whose merge was accepted, which
+// requires one: its absence is a defect, reported at ERROR.
+func (v *verbs) loadMergeOrigin(ctx context.Context, log dlog.Logger, of wsm.MergeOrigin) (mergeOrigin, error) {
+	requester, err := v.deps.DB.Workspace(ctx, of.Requester)
+	if err != nil {
+		log.Error(opCreate, "could not read a merge workspace's requester", dlog.Context{"requester": string(of.Requester), "cause": err.Error()})
+		return mergeOrigin{}, fmt.Errorf("create: merge workspace of %s: %w", of.Requester, err)
+	}
+	job, found, err := v.deps.DB.CreationJob(ctx, of.Requester)
+	if err != nil {
+		log.Error(opCreate, "could not read a merge workspace requester's creation job", dlog.Context{"requester": string(of.Requester), "cause": err.Error()})
+		return mergeOrigin{}, fmt.Errorf("create: merge workspace of %s: creation job: %w", of.Requester, err)
+	}
+	if !found {
+		log.Error(opCreate, "a merge workspace's requester has no creation job to land by", dlog.Context{"requester": string(of.Requester)})
+		return mergeOrigin{}, fmt.Errorf("create: merge workspace of %s: the requester has no creation job", of.Requester)
+	}
+	return mergeOrigin{requester: requester, job: job}, nil
 }
 
 // parentID spells a parent for the record, empty when the create was spawned
