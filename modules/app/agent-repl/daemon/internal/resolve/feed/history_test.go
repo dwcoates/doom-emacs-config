@@ -1,7 +1,6 @@
 package feed
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"testing"
@@ -189,53 +188,54 @@ func TestAReplayWithManyCutsServesNothingAboveItsNewestCutOnTheFirstPage(t *test
 	}
 }
 
-func TestPagingBackThroughAReplayedHistoryWalksEveryPostCutRowAndEndsAtTheCut(t *testing.T) {
-	// Arrange: one cut, then more turns than a page holds (the harness page
-	// size is 3), so reaching the cut takes a walk.
-	h := newHarness(t)
-	oldestFirst := []*conversationv1.HistoryEntry{
-		promptEntry("turn-old", "above the cut"),
-		cutEntry(compactedCut("what survived")),
+func TestPagingBackThroughAReplayedHistoryStopsOnlyAtAClear(t *testing.T) {
+	cases := []struct {
+		name string
+		cut  *conversationv1.ContextCut
+		// above is whether the walk reaches the turn above the cut.
+		above bool
+	}{
+		{name: "compacted", cut: compactedCut("what survived"), above: true},
+		{name: "cleared", cut: clearedCut(), above: false},
 	}
-	for i := 1; i <= 5; i++ {
-		oldestFirst = append(oldestFirst, promptEntry(fmt.Sprintf("turn-%d", i), "after the cut"))
-	}
-	var newestFirst []*conversationv1.HistoryEntry
-	for i := len(oldestFirst) - 1; i >= 0; i-- {
-		newestFirst = append(newestFirst, oldestFirst[i])
-	}
-	page := historyPage(&conversationv1.HistoryFloor{}, newestFirst...)
-	h.replay(page)
-	cutPointer := page.Entries[len(newestFirst)-2].GetAt().GetValue()
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: one cut, then more turns than a page holds (the harness
+			// page size is 3), so reaching the cut takes a walk.
+			h := newHarness(t)
+			oldestFirst := []*conversationv1.HistoryEntry{
+				promptEntry("turn-old", "above the cut"),
+				cutEntry(tc.cut),
+			}
+			for i := 1; i <= 5; i++ {
+				oldestFirst = append(oldestFirst, promptEntry(fmt.Sprintf("turn-%d", i), "after the cut"))
+			}
+			var newestFirst []*conversationv1.HistoryEntry
+			for i := len(oldestFirst) - 1; i >= 0; i-- {
+				newestFirst = append(newestFirst, oldestFirst[i])
+			}
+			page := historyPage(&conversationv1.HistoryFloor{}, newestFirst...)
+			h.replay(page)
+			cutPointer := page.Entries[len(newestFirst)-2].GetAt().GetValue()
+			first, _ := h.openPage(rootFeed(), "reader-1")
 
-	// Act: the first page, then every older page until the walk stands at the
-	// start.
-	first, _ := h.openPage(rootFeed(), "reader-1")
-	served := rowIDs(pageRows(t, first))
-	edge := first.GetResult().(*frontendv1.FeedPage_Success).Success.GetEdge()
-	for walks := 0; ; walks++ {
-		if _, atStart := edge.(*frontendv1.FeedPageSuccess_AtStart); atStart {
-			break
-		}
-		if walks > 3 {
-			t.Fatalf("the walk never reached the start; served %v", served)
-		}
-		older, err := h.resolver.NextPage(context.Background(), testWorkspace, rootFeed(), "reader-1")
-		if err != nil {
-			t.Fatalf("NextPage: %v", err)
-		}
-		served = append(rowIDs(pageRows(t, older)), served...)
-		edge = older.GetResult().(*frontendv1.FeedPage_Success).Success.GetEdge()
-	}
+			// Act.
+			served := h.walkToStart(t, "reader-1", first)
 
-	// Assert: the divider and every turn after it, oldest first, and nothing
-	// from above the cut.
-	want := []string{h.separationRowID(cutPointer)}
-	for i := 1; i <= 5; i++ {
-		want = append(want, h.promptRowID(fmt.Sprintf("turn-%d", i)))
-	}
-	if !equalIDs(served, want) {
-		t.Fatalf("walked rows = %v, want %v", served, want)
+			// Assert: the turn above the cut only when the cut was no clear,
+			// then the divider and every turn after it, oldest first.
+			var want []string
+			if tc.above {
+				want = append(want, h.promptRowID("turn-old"))
+			}
+			want = append(want, h.separationRowID(cutPointer))
+			for i := 1; i <= 5; i++ {
+				want = append(want, h.promptRowID(fmt.Sprintf("turn-%d", i)))
+			}
+			if !equalIDs(served, want) {
+				t.Fatalf("walked rows = %v, want %v", served, want)
+			}
+		})
 	}
 }
 
