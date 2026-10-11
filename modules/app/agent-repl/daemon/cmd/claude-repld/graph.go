@@ -16,6 +16,7 @@ import (
 	"claude-repld/internal/account"
 	"claude-repld/internal/agentreplsession"
 	"claude-repld/internal/boot"
+	"claude-repld/internal/branchcommits"
 	"claude-repld/internal/bringup"
 	"claude-repld/internal/buildid"
 	"claude-repld/internal/checkout"
@@ -694,11 +695,26 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Log: log,
 	})
 
+	// ---- the branch commit recounter ----
+	//
+	// The queue's turn-close door owes it each workspace whose turn closed;
+	// its one background loop counts them and republishes the roster.
+	commitRecounter, err := branchcommits.New(branchcommits.Deps{
+		DB:              p.DB,
+		Git:             git,
+		PublishRegistry: verbsRef.publishRegistry("a branch was recounted"),
+		Log:             p.Surfaces,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("claude-repld: build the branch commit recounter: %w", err)
+	}
+
 	// ---- the prompt queue ----
 
 	var drainController drain.Controller
 	queue, err = promptqueue.New(promptqueue.Deps{
 		TurnBanners:    turnBanners,
+		Commits:        commitRecounter,
 		StripSentinels: stripSentinels,
 		ResolveImage:   resolveImage,
 		DB:             p.DB,
@@ -867,13 +883,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// The verbs own the roster's durable half and are built AFTER this
 		// controller, so the republish reads them out of the forwarder --
 		// exactly as the merge orchestrator's own roster republish does.
-		PublishRegistry: func(ctx context.Context) error {
-			verbs, ok := verbsRef.verbs()
-			if !ok {
-				return fmt.Errorf("claude-repld: a session was hibernated before the workspace verbs existed")
-			}
-			return verbs.PublishRegistry(ctx)
-		},
+		PublishRegistry: verbsRef.publishRegistry("a session was hibernated"),
 		// ONE PARK, ONE CALL, BOTH SESSION-SCOPED SURFACES. The footer's strip
 		// and the topbar's indicator each draw the shim link, and the roster
 		// promises they agree with it about the same link
@@ -899,33 +909,27 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		PublishHost: relay.PublishHostWorkspace,
 		// The verbs own the roster's durable half and are built AFTER the
 		// orchestrator, so the republish reads them out of the forwarder.
-		PublishRegistry: func(ctx context.Context) error {
-			verbs, ok := verbsRef.verbs()
-			if !ok {
-				return fmt.Errorf("claude-repld: a merge landed before the workspace verbs existed")
-			}
-			return verbs.PublishRegistry(ctx)
-		},
-		Asks:         mergeAsks,
-		DB:           p.DB,
-		Git:          git,
-		Queue:        queue,
-		Feed:         feedResolver,
-		Footer:       footerResolver,
-		Sidebar:      sidebarResolver,
-		Holds:        feedResolver,
-		PromptsDir:   paths.PromptsDir,
-		CheckoutRoot: paths.Checkout,
-		Briefs:       merge.BriefsFrom(paths.PromptsDir),
-		SelfRepoDir:  paths.SelfRepo,
-		StateDir:     p.Layout.Dir(),
-		TestCommand:  merge.TestCommandFor,
-		TestRunner:   scripts,
-		Painter:      painter,
-		StartSession: fleet.Start,
-		StopSession:  fleet.KillSession,
-		Occupy:       fleet.Occupy,
-		AwaitTurnEnd: fleet.AwaitTurnEnd,
+		PublishRegistry: verbsRef.publishRegistry("a merge landed"),
+		Asks:            mergeAsks,
+		DB:              p.DB,
+		Git:             git,
+		Queue:           queue,
+		Feed:            feedResolver,
+		Footer:          footerResolver,
+		Sidebar:         sidebarResolver,
+		Holds:           feedResolver,
+		PromptsDir:      paths.PromptsDir,
+		CheckoutRoot:    paths.Checkout,
+		Briefs:          merge.BriefsFrom(paths.PromptsDir),
+		SelfRepoDir:     paths.SelfRepo,
+		StateDir:        p.Layout.Dir(),
+		TestCommand:     merge.TestCommandFor,
+		TestRunner:      scripts,
+		Painter:         painter,
+		StartSession:    fleet.Start,
+		StopSession:     fleet.KillSession,
+		Occupy:          fleet.Occupy,
+		AwaitTurnEnd:    fleet.AwaitTurnEnd,
 		CaptureDisplaced: func(ctx context.Context, ws ids.WorkspaceID) (merge.Displaced, bool, error) {
 			d, ok, err := fleet.CaptureDisplaced(ctx, ws)
 			return merge.Displaced{Turn: d.Turn, Text: d.Text}, ok, err
@@ -1134,6 +1138,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		}},
 		{Name: "lock_watchdog", Run: stalls.Run},
 		{Name: "persistent_wifi", Run: wifi.Run},
+		{Name: "branch_commits", Run: commitRecounter.Run},
 		{Name: "news_digest", Run: digest.Run},
 		{Name: "chess_boards", Run: func(ctx context.Context) error {
 			chessBoards.Run(ctx, feedResolver.RefreshChessBoards)

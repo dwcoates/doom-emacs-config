@@ -106,3 +106,32 @@ func TestAStoppedGateRefusesThePathScopedCommands(t *testing.T) {
 		})
 	}
 }
+
+func TestAStoppedGateCountsNoCommits(t *testing.T) {
+	// Arrange.
+	inner := newFakeGit(counter())
+	gate := newGatedGit(inner, time.Now)
+	gate.stop()
+
+	// Act.
+	_, err := gate.CountCommits(context.Background(), "/repo", "master", "feature")
+
+	// Assert.
+	if !errors.Is(err, errMergeStopping) || slices.Contains(inner.calls, "count_commits") {
+		t.Fatalf("CountCommits = %v with calls %v, want errMergeStopping and no git", err, inner.calls)
+	}
+}
+
+func TestAnOpenGatePassesCountCommitsThrough(t *testing.T) {
+	// Arrange.
+	inner := newFakeGit(counter())
+	gate := newGatedGit(inner, time.Now)
+
+	// Act.
+	_, err := gate.CountCommits(context.Background(), "/repo", "master", "feature")
+
+	// Assert.
+	if err != nil || !slices.Contains(inner.calls, "count_commits") {
+		t.Fatalf("CountCommits = %v with calls %v, want the inner git asked", err, inner.calls)
+	}
+}

@@ -327,14 +327,26 @@ merged — so the column is empty rather than \"0ms ago\"."
      (list :text (agent-repl-wire--decode-string
                   "RosterRowDetailSummary" 'text object)))))
 
+(defun agent-repl-wire-decode-roster-row-detail-commits (value)
+  "Decode VALUE as `RosterRowDetailCommits', a plist `(:count)'.
+The count is how many commits the workspace's branch holds beyond its
+merge-base with its parent branch; zero is a real count, which protojson
+omits."
+  (let ((object (agent-repl-wire--object "RosterRowDetailCommits" value)))
+    (agent-repl-wire--check-keys "RosterRowDetailCommits" object '(count))
+    (agent-repl-wire--decoded
+     "RosterRowDetailCommits"
+     (list :count (agent-repl-wire--decode-uint32
+                   "RosterRowDetailCommits" 'count object)))))
+
 (defun agent-repl-wire-decode-roster-row-detail (value)
-  "Decode VALUE as `RosterRowDetail', a plist of its three lines.
+  "Decode VALUE as `RosterRowDetail', a plist of its lines.
 Each line is PRESENT OR ABSENT BY MESSAGE PRESENCE rather than by an empty
 string — the proto says so at the message — so an absent line decodes to
 nil and is omitted, never rendered blank.  This is the one place in the
 roster where an absent message field is not a breach."
   (let ((object (agent-repl-wire--object "RosterRowDetail" value)))
-    (agent-repl-wire--check-keys "RosterRowDetail" object '(branch parentBranch summary))
+    (agent-repl-wire--check-keys "RosterRowDetail" object '(branch parentBranch summary commits))
     (agent-repl-wire--decoded
      "RosterRowDetail"
      (list :branch (agent-repl-wire--decode-optional-message
@@ -345,7 +357,10 @@ roster where an absent message field is not a breach."
                            #'agent-repl-wire-decode-roster-row-detail-parent-branch)
            :summary (agent-repl-wire--decode-optional-message
                      "RosterRowDetail" 'summary object
-                     #'agent-repl-wire-decode-roster-row-detail-summary)))))
+                     #'agent-repl-wire-decode-roster-row-detail-summary)
+           :commits (agent-repl-wire--decode-optional-message
+                     "RosterRowDetail" 'commits object
+                     #'agent-repl-wire-decode-roster-row-detail-commits)))))
 
 ;;;; ---- The 23 status arms ----
 ;;

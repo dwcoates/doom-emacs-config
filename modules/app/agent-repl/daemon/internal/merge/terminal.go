@@ -73,14 +73,15 @@ func (r *run) concludedTerminal(ctx context.Context, log dlog.Logger, op string,
 		// already. It concludes as merged, and says why there is no commit.
 		r.head(&frontendv1.FeedMergeSuccess{EndedAtMs: endedMS, Commit: out.landed})
 		r.concluded(MergeFacts{State: StateMerged, Detail: fmt.Sprintf("already on %s; nothing to merge", out.alreadyOn)})
-		r.stampClosed(ctx, log, op)
+		// Nothing landed, so the count its turns last recorded stands.
+		r.stampClosed(ctx, log, op, nil)
 		r.o.handBack(ctx, r.ws, DetachedOutcome{Kind: DetachedLanded, Summary: fmt.Sprintf("the branch was already on %s; nothing needed merging", out.alreadyOn)})
 		log.Info(op, "a merge concluded with its branch already on the target", dlog.Context{
 			"workspace": string(r.ws), "lease": string(r.lease.ID), "target": out.alreadyOn, "tip": out.landed})
 	default:
 		r.head(&frontendv1.FeedMergeSuccess{EndedAtMs: endedMS, Commit: out.landed})
 		r.concluded(MergeFacts{State: StateMerged})
-		r.stampClosed(ctx, log, op)
+		r.stampClosed(ctx, log, op, landedCount(out))
 		r.o.handBack(ctx, r.ws, DetachedOutcome{Kind: DetachedLanded, Summary: fmt.Sprintf("it landed as commit %s", out.landed)})
 		log.Info(op, "a merge landed", dlog.Context{
 			"workspace": string(r.ws), "lease": string(r.lease.ID), "commit": out.landed, "commits": len(out.commits),
@@ -149,16 +150,30 @@ func (r *run) concluded(facts MergeFacts) {
 	r.o.publish(r.ws, facts)
 }
 
+// landedCount is the commit count a landed merge brought in: the commits its
+// merge commit added, read off the commit itself. Nil when that range could not
+// be read (run.landed recorded why), so the count the workspace's turns last
+// recorded stands rather than a zero nobody counted.
+func landedCount(out outcome) *uint32 {
+	if len(out.commits) == 0 {
+		return nil
+	}
+	n := uint32(len(out.commits))
+	return &n
+}
+
 // stampClosed writes the durable half of the workspace a landed merge closes:
-// merged_at and closed, which put its roster row under `recently_merged`, and
-// the republish nothing else would make. A merge that closes nothing -- a
-// requester kept open, a branch that is no workspace -- stamps nothing.
-func (r *run) stampClosed(ctx context.Context, log dlog.Logger, op string) {
+// merged_at, the commit count the merge brought in (LANDED, nil to keep the
+// recorded one), and closed, which put its roster row under
+// `recently_merged`, and the republish nothing else would make. A merge that
+// closes nothing -- a requester kept open, a branch that is no workspace --
+// stamps nothing.
+func (r *run) stampClosed(ctx context.Context, log dlog.Logger, op string, landed *uint32) {
 	closes := r.subject.closes
 	if closes == "" {
 		return
 	}
-	if err := r.o.deps.DB.SetMergedAt(ctx, closes, r.o.deps.Now()); err != nil {
+	if err := r.o.deps.DB.SetMergedAt(ctx, closes, r.o.deps.Now(), landed); err != nil {
 		log.Error(op, "could not stamp the merge's landing", dlog.Context{"workspace": string(closes), "error": err.Error()})
 	}
 	if err := r.o.deps.DB.SetClosed(ctx, closes, true); err != nil {

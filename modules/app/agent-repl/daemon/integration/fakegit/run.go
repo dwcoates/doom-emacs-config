@@ -1058,6 +1058,9 @@ func revList(s *State, repo *Repo, subject []string) Result {
 	format := formatOf(subject)
 	rangeSpec := subject[len(subject)-1]
 	commits := s.rangeCommits(repo, rangeSpec)
+	if contains(subject, "--count") {
+		return Result{Stdout: fmt.Sprintf("%d\n", len(commits))}
+	}
 	out := ""
 	for _, c := range commits {
 		if contains(subject, "--no-merges") && len(c.Parents) > 1 {

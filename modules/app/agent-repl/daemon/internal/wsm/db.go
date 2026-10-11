@@ -80,8 +80,12 @@ type DB interface {
 	SetAttention(ctx context.Context, id WorkspaceID, on bool) error
 	// SetResult records, or clears with nil, the roster's last turn result.
 	SetResult(ctx context.Context, id WorkspaceID, result *TurnResult) error
-	// SetMergedAt records that the workspace's merge landed.
-	SetMergedAt(ctx context.Context, id WorkspaceID, at time.Time) error
+	// SetMergedAt records that the workspace's merge landed and, when commits
+	// is set, the commit count it brought in (see commitcount.go).
+	SetMergedAt(ctx context.Context, id WorkspaceID, at time.Time, commits *uint32) error
+	// SetLiveCommitCount records a live workspace's branch commit count. It
+	// answers false, writing nothing, once the workspace has merged.
+	SetLiveCommitCount(ctx context.Context, id WorkspaceID, count uint32) (bool, error)
 	// Forget deletes a workspace's every record — the nuke's durable half and
 	// the whole of the forget verb — and, when the workspace was the last one
 	// registered under its repository, that repository's record too. The
