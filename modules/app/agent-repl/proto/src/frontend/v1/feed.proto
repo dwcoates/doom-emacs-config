@@ -866,46 +866,63 @@ message FeedResponseNotice {
 message FeedResponseUpdate {
   // Markdown so far, drawn as it stands; type-out pacing is the client's.
   FeedResponseProse prose = 1;
-  // How long the client should take to reveal what it has not yet shown. SET
-  // once the daemon holds a full window of burst timings for this bubble's
-  // model and kind; UNSET otherwise (a model never seen streaming, a subagent
-  // whose model the daemon does not know, a replayed draw), and the client
-  // then paces with its own default type-out.
-  optional FeedResponseRevealWindow reveal_window = 2;
+  reserved 2;
+  reserved "reveal_window";
+  // How fast the client types out the text it has not yet shown. SET on every
+  // live draw of every response bubble (prose, interim and thinking, the main
+  // agent's and every subagent's); UNSET on a replayed draw (a reconnect, a
+  // reload, a hidden workspace's backlog), whose prose finished arriving long
+  // ago and is drawn whole at once.
+  optional FeedResponseRevealPace reveal_pace = 3;
 }
 // The settled state.
 message FeedResponseSuccess {
   // The whole markdown.
   FeedResponseProse prose = 1;
-  // How long the client should take to reveal the settled text it has not
-  // yet shown, so the last fragment types out instead of appearing at once.
-  // The same window, and the same reasons for absence, as
-  // FeedResponseUpdate.reveal_window. UNSET = the settled whole is drawn at
-  // once.
-  optional FeedResponseRevealWindow reveal_window = 2;
+  reserved 2;
+  reserved "reveal_window";
+  // How fast the client types out the settled text it has not yet shown, so
+  // the end of a block types out at the same pace as the rest of it instead of
+  // appearing at once. Set and unset exactly as FeedResponseUpdate.reveal_pace:
+  // UNSET = the settled whole is drawn at once.
+  optional FeedResponseRevealPace reveal_pace = 3;
 }
-// The reveal pacing element: the time the daemon expects to pass, from this
-// push, before the bubble's next BURST of fragments arrives.
+// The reveal pacing element: the bounds within which the client types out a
+// bubble's arriving text.
 //
-// THE DAEMON MEASURES, THE CLIENT ONLY SPREADS. The vendor's fragments arrive
-// in clumps (a burst: each within a few ms of the previous), so the daemon
-// records the gap from one burst's start to the next's within one live block,
-// per model and per kind (prose and thinking are kept apart), in a rolling
-// window of the most recent gaps that survives a restart, and averages them
-// (recency- and length-weighted). Each push states what is LEFT of that
-// expected gap, measured from the start of the burst the push belongs to, so
-// every push of one burst names the same deadline; a push that is not inside
-// a burst (a settled whole landing after a pause) states the whole expected
-// gap. The client spreads EVERYTHING it has not yet shown (this push's new
-// text plus anything still unrevealed from the previous one) across the
-// window, starting at the moment the push is drawn and finishing as it ends.
-// Only the client knows
-// how much is on screen, which is why the daemon states a duration rather
-// than a rate: a rate would assume the previous push had finished revealing.
-message FeedResponseRevealWindow {
-  // The expected time from this push until the next burst, in
-  // milliseconds. Always > 0.
-  uint32 expected_gap_ms = 1;
+// THE DAEMON MEASURES, THE CLIENT PACES. The daemon records how fast whole
+// blocks arrive (a settled block's characters over the time from its first
+// fragment to its settle), per model and per kind (prose and thinking are kept
+// apart), in a rolling record that survives a restart, and states the bounds
+// as low percentiles of those speeds, so the type-out runs a little slower
+// than text usually arrives and rarely catches up and stalls. A model or kind
+// with too few measured blocks is given a built-in default. A subagent's
+// bubble carries the bounds measured for its kind across every model, because
+// its activities do not name the model that produced them.
+//
+// THE CLIENT FOLLOWS THE ARRIVAL SPEED WITHIN THE BOUNDS. Text arriving faster
+// than `max_chars_per_second` is typed at that speed and the rest waits as a
+// BANK of arrived-but-unshown text; while text arrives slower than
+// `min_chars_per_second`, banked text is typed at that speed; an empty bank
+// waits for the next text. Only once the bank holds more than
+// `bank_limit_ms` of typing at the maximum may the client type faster than
+// the maximum, so the reveal never falls further behind than that. A block
+// that settles with text still banked keeps typing at the maximum to the end;
+// there is no final burst. Only the client knows how much is on screen and
+// when each push arrived, so the bank and the arrival speed are its own
+// per-bubble bookkeeping and never ride the wire.
+message FeedResponseRevealPace {
+  // The slowest the client types while it holds banked text, in characters
+  // per second. Always > 0 and never above `max_chars_per_second`.
+  uint32 min_chars_per_second = 1;
+  // The fastest the client types while the bank is within
+  // `bank_limit_ms`, in characters per second. Always > 0.
+  uint32 max_chars_per_second = 2;
+  // How far behind the arrived text the reveal may fall, as milliseconds of
+  // typing at `max_chars_per_second`: once the banked text would take longer
+  // than this to type at the maximum, the client speeds up past the maximum
+  // to hold the bank at this size. Always > 0.
+  uint32 bank_limit_ms = 3;
 }
 // The broken state: what landed before the death.
 message FeedResponseError {

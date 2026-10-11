@@ -4589,12 +4589,12 @@ type FeedResponseUpdate struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Markdown so far, drawn as it stands; type-out pacing is the client's.
 	Prose *FeedResponseProse `protobuf:"bytes,1,opt,name=prose,proto3" json:"prose,omitempty"`
-	// How long the client should take to reveal what it has not yet shown. SET
-	// once the daemon holds a full window of burst timings for this bubble's
-	// model and kind; UNSET otherwise (a model never seen streaming, a subagent
-	// whose model the daemon does not know, a replayed draw), and the client
-	// then paces with its own default type-out.
-	RevealWindow  *FeedResponseRevealWindow `protobuf:"bytes,2,opt,name=reveal_window,json=revealWindow,proto3,oneof" json:"reveal_window,omitempty"`
+	// How fast the client types out the text it has not yet shown. SET on every
+	// live draw of every response bubble (prose, interim and thinking, the main
+	// agent's and every subagent's); UNSET on a replayed draw (a reconnect, a
+	// reload, a hidden workspace's backlog), whose prose finished arriving long
+	// ago and is drawn whole at once.
+	RevealPace    *FeedResponseRevealPace `protobuf:"bytes,3,opt,name=reveal_pace,json=revealPace,proto3,oneof" json:"reveal_pace,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4636,9 +4636,9 @@ func (x *FeedResponseUpdate) GetProse() *FeedResponseProse {
 	return nil
 }
 
-func (x *FeedResponseUpdate) GetRevealWindow() *FeedResponseRevealWindow {
+func (x *FeedResponseUpdate) GetRevealPace() *FeedResponseRevealPace {
 	if x != nil {
-		return x.RevealWindow
+		return x.RevealPace
 	}
 	return nil
 }
@@ -4648,12 +4648,11 @@ type FeedResponseSuccess struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The whole markdown.
 	Prose *FeedResponseProse `protobuf:"bytes,1,opt,name=prose,proto3" json:"prose,omitempty"`
-	// How long the client should take to reveal the settled text it has not
-	// yet shown, so the last fragment types out instead of appearing at once.
-	// The same window, and the same reasons for absence, as
-	// FeedResponseUpdate.reveal_window. UNSET = the settled whole is drawn at
-	// once.
-	RevealWindow  *FeedResponseRevealWindow `protobuf:"bytes,2,opt,name=reveal_window,json=revealWindow,proto3,oneof" json:"reveal_window,omitempty"`
+	// How fast the client types out the settled text it has not yet shown, so
+	// the end of a block types out at the same pace as the rest of it instead of
+	// appearing at once. Set and unset exactly as FeedResponseUpdate.reveal_pace:
+	// UNSET = the settled whole is drawn at once.
+	RevealPace    *FeedResponseRevealPace `protobuf:"bytes,3,opt,name=reveal_pace,json=revealPace,proto3,oneof" json:"reveal_pace,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4695,54 +4694,68 @@ func (x *FeedResponseSuccess) GetProse() *FeedResponseProse {
 	return nil
 }
 
-func (x *FeedResponseSuccess) GetRevealWindow() *FeedResponseRevealWindow {
+func (x *FeedResponseSuccess) GetRevealPace() *FeedResponseRevealPace {
 	if x != nil {
-		return x.RevealWindow
+		return x.RevealPace
 	}
 	return nil
 }
 
-// The reveal pacing element: the time the daemon expects to pass, from this
-// push, before the bubble's next BURST of fragments arrives.
+// The reveal pacing element: the bounds within which the client types out a
+// bubble's arriving text.
 //
-// THE DAEMON MEASURES, THE CLIENT ONLY SPREADS. The vendor's fragments arrive
-// in clumps (a burst: each within a few ms of the previous), so the daemon
-// records the gap from one burst's start to the next's within one live block,
-// per model and per kind (prose and thinking are kept apart), in a rolling
-// window of the most recent gaps that survives a restart, and averages them
-// (recency- and length-weighted). Each push states what is LEFT of that
-// expected gap, measured from the start of the burst the push belongs to, so
-// every push of one burst names the same deadline; a push that is not inside
-// a burst (a settled whole landing after a pause) states the whole expected
-// gap. The client spreads EVERYTHING it has not yet shown (this push's new
-// text plus anything still unrevealed from the previous one) across the
-// window, starting at the moment the push is drawn and finishing as it ends.
-// Only the client knows
-// how much is on screen, which is why the daemon states a duration rather
-// than a rate: a rate would assume the previous push had finished revealing.
-type FeedResponseRevealWindow struct {
+// THE DAEMON MEASURES, THE CLIENT PACES. The daemon records how fast whole
+// blocks arrive (a settled block's characters over the time from its first
+// fragment to its settle), per model and per kind (prose and thinking are kept
+// apart), in a rolling record that survives a restart, and states the bounds
+// as low percentiles of those speeds, so the type-out runs a little slower
+// than text usually arrives and rarely catches up and stalls. A model or kind
+// with too few measured blocks is given a built-in default. A subagent's
+// bubble carries the bounds measured for its kind across every model, because
+// its activities do not name the model that produced them.
+//
+// THE CLIENT FOLLOWS THE ARRIVAL SPEED WITHIN THE BOUNDS. Text arriving faster
+// than `max_chars_per_second` is typed at that speed and the rest waits as a
+// BANK of arrived-but-unshown text; while text arrives slower than
+// `min_chars_per_second`, banked text is typed at that speed; an empty bank
+// waits for the next text. Only once the bank holds more than
+// `bank_limit_ms` of typing at the maximum may the client type faster than
+// the maximum, so the reveal never falls further behind than that. A block
+// that settles with text still banked keeps typing at the maximum to the end;
+// there is no final burst. Only the client knows how much is on screen and
+// when each push arrived, so the bank and the arrival speed are its own
+// per-bubble bookkeeping and never ride the wire.
+type FeedResponseRevealPace struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The expected time from this push until the next burst, in
-	// milliseconds. Always > 0.
-	ExpectedGapMs uint32 `protobuf:"varint,1,opt,name=expected_gap_ms,json=expectedGapMs,proto3" json:"expected_gap_ms,omitempty"`
+	// The slowest the client types while it holds banked text, in characters
+	// per second. Always > 0 and never above `max_chars_per_second`.
+	MinCharsPerSecond uint32 `protobuf:"varint,1,opt,name=min_chars_per_second,json=minCharsPerSecond,proto3" json:"min_chars_per_second,omitempty"`
+	// The fastest the client types while the bank is within
+	// `bank_limit_ms`, in characters per second. Always > 0.
+	MaxCharsPerSecond uint32 `protobuf:"varint,2,opt,name=max_chars_per_second,json=maxCharsPerSecond,proto3" json:"max_chars_per_second,omitempty"`
+	// How far behind the arrived text the reveal may fall, as milliseconds of
+	// typing at `max_chars_per_second`: once the banked text would take longer
+	// than this to type at the maximum, the client speeds up past the maximum
+	// to hold the bank at this size. Always > 0.
+	BankLimitMs   uint32 `protobuf:"varint,3,opt,name=bank_limit_ms,json=bankLimitMs,proto3" json:"bank_limit_ms,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *FeedResponseRevealWindow) Reset() {
-	*x = FeedResponseRevealWindow{}
+func (x *FeedResponseRevealPace) Reset() {
+	*x = FeedResponseRevealPace{}
 	mi := &file_frontend_v1_feed_proto_msgTypes[67]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *FeedResponseRevealWindow) String() string {
+func (x *FeedResponseRevealPace) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*FeedResponseRevealWindow) ProtoMessage() {}
+func (*FeedResponseRevealPace) ProtoMessage() {}
 
-func (x *FeedResponseRevealWindow) ProtoReflect() protoreflect.Message {
+func (x *FeedResponseRevealPace) ProtoReflect() protoreflect.Message {
 	mi := &file_frontend_v1_feed_proto_msgTypes[67]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -4754,14 +4767,28 @@ func (x *FeedResponseRevealWindow) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use FeedResponseRevealWindow.ProtoReflect.Descriptor instead.
-func (*FeedResponseRevealWindow) Descriptor() ([]byte, []int) {
+// Deprecated: Use FeedResponseRevealPace.ProtoReflect.Descriptor instead.
+func (*FeedResponseRevealPace) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{67}
 }
 
-func (x *FeedResponseRevealWindow) GetExpectedGapMs() uint32 {
+func (x *FeedResponseRevealPace) GetMinCharsPerSecond() uint32 {
 	if x != nil {
-		return x.ExpectedGapMs
+		return x.MinCharsPerSecond
+	}
+	return 0
+}
+
+func (x *FeedResponseRevealPace) GetMaxCharsPerSecond() uint32 {
+	if x != nil {
+		return x.MaxCharsPerSecond
+	}
+	return 0
+}
+
+func (x *FeedResponseRevealPace) GetBankLimitMs() uint32 {
+	if x != nil {
+		return x.BankLimitMs
 	}
 	return 0
 }
@@ -21063,17 +21090,21 @@ const file_frontend_v1_feed_proto_rawDesc = "" +
 	"\x06_usageB\t\n" +
 	"\a_notice\".\n" +
 	"\x12FeedResponseNotice\x12\x18\n" +
-	"\aheading\x18\x01 \x01(\tR\aheading\"\xad\x01\n" +
+	"\aheading\x18\x01 \x01(\tR\aheading\"\xba\x01\n" +
 	"\x12FeedResponseUpdate\x124\n" +
-	"\x05prose\x18\x01 \x01(\v2\x1e.frontend.v1.FeedResponseProseR\x05prose\x12O\n" +
-	"\rreveal_window\x18\x02 \x01(\v2%.frontend.v1.FeedResponseRevealWindowH\x00R\frevealWindow\x88\x01\x01B\x10\n" +
-	"\x0e_reveal_window\"\xae\x01\n" +
+	"\x05prose\x18\x01 \x01(\v2\x1e.frontend.v1.FeedResponseProseR\x05prose\x12I\n" +
+	"\vreveal_pace\x18\x03 \x01(\v2#.frontend.v1.FeedResponseRevealPaceH\x00R\n" +
+	"revealPace\x88\x01\x01B\x0e\n" +
+	"\f_reveal_paceJ\x04\b\x02\x10\x03R\rreveal_window\"\xbb\x01\n" +
 	"\x13FeedResponseSuccess\x124\n" +
-	"\x05prose\x18\x01 \x01(\v2\x1e.frontend.v1.FeedResponseProseR\x05prose\x12O\n" +
-	"\rreveal_window\x18\x02 \x01(\v2%.frontend.v1.FeedResponseRevealWindowH\x00R\frevealWindow\x88\x01\x01B\x10\n" +
-	"\x0e_reveal_window\"B\n" +
-	"\x18FeedResponseRevealWindow\x12&\n" +
-	"\x0fexpected_gap_ms\x18\x01 \x01(\rR\rexpectedGapMs\"I\n" +
+	"\x05prose\x18\x01 \x01(\v2\x1e.frontend.v1.FeedResponseProseR\x05prose\x12I\n" +
+	"\vreveal_pace\x18\x03 \x01(\v2#.frontend.v1.FeedResponseRevealPaceH\x00R\n" +
+	"revealPace\x88\x01\x01B\x0e\n" +
+	"\f_reveal_paceJ\x04\b\x02\x10\x03R\rreveal_window\"\x9e\x01\n" +
+	"\x16FeedResponseRevealPace\x12/\n" +
+	"\x14min_chars_per_second\x18\x01 \x01(\rR\x11minCharsPerSecond\x12/\n" +
+	"\x14max_chars_per_second\x18\x02 \x01(\rR\x11maxCharsPerSecond\x12\"\n" +
+	"\rbank_limit_ms\x18\x03 \x01(\rR\vbankLimitMs\"I\n" +
 	"\x11FeedResponseError\x124\n" +
 	"\x05prose\x18\x01 \x01(\v2\x1e.frontend.v1.FeedResponseProseR\x05prose\"/\n" +
 	"\x11FeedResponseProse\x12\x1a\n" +
@@ -21997,7 +22028,7 @@ var file_frontend_v1_feed_proto_goTypes = []any{
 	(*FeedResponseNotice)(nil),                   // 64: frontend.v1.FeedResponseNotice
 	(*FeedResponseUpdate)(nil),                   // 65: frontend.v1.FeedResponseUpdate
 	(*FeedResponseSuccess)(nil),                  // 66: frontend.v1.FeedResponseSuccess
-	(*FeedResponseRevealWindow)(nil),             // 67: frontend.v1.FeedResponseRevealWindow
+	(*FeedResponseRevealPace)(nil),               // 67: frontend.v1.FeedResponseRevealPace
 	(*FeedResponseError)(nil),                    // 68: frontend.v1.FeedResponseError
 	(*FeedResponseProse)(nil),                    // 69: frontend.v1.FeedResponseProse
 	(*FeedResponseUsageStamp)(nil),               // 70: frontend.v1.FeedResponseUsageStamp
@@ -22375,9 +22406,9 @@ var file_frontend_v1_feed_proto_depIdxs = []int32{
 	68,  // 93: frontend.v1.FeedResponse.error:type_name -> frontend.v1.FeedResponseError
 	64,  // 94: frontend.v1.FeedResponse.notice:type_name -> frontend.v1.FeedResponseNotice
 	69,  // 95: frontend.v1.FeedResponseUpdate.prose:type_name -> frontend.v1.FeedResponseProse
-	67,  // 96: frontend.v1.FeedResponseUpdate.reveal_window:type_name -> frontend.v1.FeedResponseRevealWindow
+	67,  // 96: frontend.v1.FeedResponseUpdate.reveal_pace:type_name -> frontend.v1.FeedResponseRevealPace
 	69,  // 97: frontend.v1.FeedResponseSuccess.prose:type_name -> frontend.v1.FeedResponseProse
-	67,  // 98: frontend.v1.FeedResponseSuccess.reveal_window:type_name -> frontend.v1.FeedResponseRevealWindow
+	67,  // 98: frontend.v1.FeedResponseSuccess.reveal_pace:type_name -> frontend.v1.FeedResponseRevealPace
 	69,  // 99: frontend.v1.FeedResponseError.prose:type_name -> frontend.v1.FeedResponseProse
 	337, // 100: frontend.v1.FeedResponseUsageStamp.heat:type_name -> frontend.v1.TokenHeat
 	72,  // 101: frontend.v1.FeedSimpleToolCall.name:type_name -> frontend.v1.FeedToolCallName
