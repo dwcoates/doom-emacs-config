@@ -1,6 +1,6 @@
 /**
- * The ask suites' shared fixtures: a scripted `AgentRepl` answering the three
- * ANSWER verbs, and a row context addressed to one card's row.
+ * The ask suites' shared fixtures: a scripted `AgentRepl` answering the verbs
+ * the ask cards send, and a row context addressed to one card's row.
  *
  * NOT A SUITE — imported by the ask suites, never run on its own. It exists so
  * every ask suite scripts its verb the same way and so the row context (whose
@@ -15,10 +15,10 @@ import {
   type AnswerPermissionResponse,
 } from "../../../../proto/gen/ts/agentrepl/v1/endpoint_answer_permission_pb";
 import {
-  AnswerQuestionResponseSchema,
-  type AnswerQuestionRequest,
-  type AnswerQuestionResponse,
-} from "../../../../proto/gen/ts/agentrepl/v1/endpoint_answer_question_pb";
+  UpdateQuestionDraftResponseSchema,
+  type UpdateQuestionDraftRequest,
+  type UpdateQuestionDraftResponse,
+} from "../../../../proto/gen/ts/agentrepl/v1/endpoint_update_question_draft_pb";
 import {
   AnswerColdGateResponseSchema,
   type AnswerColdGateRequest,
@@ -50,7 +50,7 @@ function scriptedFailure(script: AskScript): Error {
 /** What the scripted daemon answers, and what it was asked. */
 export interface AskScript {
   permission?: AnswerPermissionResponse;
-  question?: AnswerQuestionResponse;
+  draft?: UpdateQuestionDraftResponse;
   coldGate?: AnswerColdGateResponse;
   /** Throw instead of answering, standing in for a call that did not land. */
   fail?: boolean;
@@ -68,7 +68,7 @@ export interface AskScript {
 
 export interface AskCalls {
   permission: AnswerPermissionRequest[];
-  question: AnswerQuestionRequest[];
+  draft: UpdateQuestionDraftRequest[];
   coldGate: AnswerColdGateRequest[];
 }
 
@@ -77,9 +77,9 @@ export interface AskHarness {
   calls: AskCalls;
 }
 
-/** A row context on a card row, with the three ANSWER verbs scripted. */
+/** A row context on a card row, with the ask cards' verbs scripted. */
 export function askHarness(script: AskScript = {}, previous?: HTMLElement): AskHarness {
-  const calls: AskCalls = { permission: [], question: [], coldGate: [] };
+  const calls: AskCalls = { permission: [], draft: [], coldGate: [] };
   const transport = createRouterTransport(({ service }) => {
     service(AgentRepl, {
       answerPermission: (req) => {
@@ -90,12 +90,12 @@ export function askHarness(script: AskScript = {}, previous?: HTMLElement): AskH
           create(AnswerPermissionResponseSchema, { result: { case: "success", value: {} } })
         );
       },
-      answerQuestion: (req) => {
-        calls.question.push(req);
+      updateQuestionDraft: (req) => {
+        calls.draft.push(req);
         if (script.fail === true) throw scriptedFailure(script);
         return (
-          script.question ??
-          create(AnswerQuestionResponseSchema, { result: { case: "success", value: {} } })
+          script.draft ??
+          create(UpdateQuestionDraftResponseSchema, { result: { case: "success", value: {} } })
         );
       },
       answerColdGate: (req) => {

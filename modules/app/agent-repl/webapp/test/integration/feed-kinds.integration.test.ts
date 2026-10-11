@@ -1394,90 +1394,76 @@ describe("an open question", () => {
     expect(row.textContent).toContain(QUESTION_ONE.options[1]);
   });
 
-  it("always draws the free-text escape", async () => {
+  it("has no text field: a typed answer is the editor's", async () => {
     // Arrange / Act
     const row = await drawRow(questionRow("open"));
     // Assert
-    expect(row.querySelectorAll("[data-question-other]")).toHaveLength(2);
+    expect(row.querySelector("input, textarea, [data-question-other], [data-question-submit]")).toBeNull();
+    expect(row.querySelector("[data-ask-hint]")).not.toBeNull();
   });
 
-  it("submits the whole batch as one AnswerQuestion", async () => {
-    // Arrange
-    await drawRow(questionRow("open"));
-    await harness.click(`[data-question-option="${QUESTION_ONE.options[0]}"]`);
-    await harness.click(`[data-question-option="${QUESTION_TWO.options[0]}"]`);
-    // Act
-    await harness.click("[data-question-submit]");
+  it("draws one shared feed tab per question", async () => {
+    // Arrange / Act
+    const row = await drawRow(questionRow("open"));
     // Assert
-    const [request] = harness.fake.calls<{ answers: unknown[] }>("answerQuestion");
-    expect(request.answers).toHaveLength(2);
+    expect(row.querySelectorAll("[data-question-tabs] .feed-group-tab")).toHaveLength(2);
   });
 
-  it("echoes the question text on each answer", async () => {
-    // Arrange
-    await drawRow(questionRow("open"));
-    await harness.click(`[data-question-option="${QUESTION_ONE.options[0]}"]`);
-    // The batch is answered WHOLE (question.ts: an empty answer blocks submit
-    // rather than sending a partial batch), so the second question is answered
-    // too even though this case is about the first one's echoed text.
-    await harness.click(`[data-question-option="${QUESTION_TWO.options[0]}"]`);
-    // Act
-    await harness.click("[data-question-submit]");
-    // Assert
-    const [request] = harness.fake.calls<{ answers: { questionText: string }[] }>("answerQuestion");
-    expect(request.answers.map((a) => a.questionText)).toContain(QUESTION_ONE.text);
-  });
-
-  it("echoes the chosen option label verbatim", async () => {
+  it("sends an option click as one UpdateQuestionDraft pick, echoing the served values", async () => {
     // Arrange
     await drawRow(questionRow("open"));
     // Act
     await harness.click(`[data-question-option="${QUESTION_ONE.options[1]}"]`);
-    await harness.click(`[data-question-option="${QUESTION_TWO.options[0]}"]`);
-    await harness.click("[data-question-submit]");
     // Assert
-    const [request] = harness.fake.calls<{ answers: { chosen: string[] }[] }>("answerQuestion");
-    expect(request.answers[0].chosen).toEqual([QUESTION_ONE.options[1]]);
+    const requests = harness.fake.calls<{ edit: { case: string; value: { questionText: string; label: string } } }>(
+      "updateQuestionDraft",
+    );
+    expect(requests).toHaveLength(1);
+    expect(requests[0].edit).toMatchObject({
+      case: "pick",
+      value: { questionText: QUESTION_ONE.text, label: QUESTION_ONE.options[1] },
+    });
   });
 
-  it("never sends two labels for a single-select question", async () => {
-    // Arrange
-    await drawRow(questionRow("open"));
-    // Act: click both options of the SINGLE-select question.
-    await harness.click(`[data-question-option="${QUESTION_ONE.options[0]}"]`);
-    await harness.click(`[data-question-option="${QUESTION_ONE.options[1]}"]`);
-    await harness.click(`[data-question-option="${QUESTION_TWO.options[0]}"]`);
-    await harness.click("[data-question-submit]");
-    // Assert
-    const [request] = harness.fake.calls<{ answers: { chosen: string[] }[] }>("answerQuestion");
-    expect(request.answers[0].chosen).toHaveLength(1);
-  });
-
-  it("sends both labels for a multi-select question", async () => {
+  it("sends a tab click as a show of that question", async () => {
     // Arrange
     await drawRow(questionRow("open"));
     // Act
-    await harness.click(`[data-question-option="${QUESTION_ONE.options[0]}"]`);
-    await harness.click(`[data-question-option="${QUESTION_TWO.options[0]}"]`);
-    await harness.click(`[data-question-option="${QUESTION_TWO.options[1]}"]`);
-    await harness.click("[data-question-submit]");
+    await harness.click('[data-question-tab="1"]');
     // Assert
-    const [request] = harness.fake.calls<{ answers: { chosen: string[] }[] }>("answerQuestion");
-    expect(request.answers[1].chosen).toEqual([...QUESTION_TWO.options]);
+    const [request] = harness.fake.calls<{ edit: { case: string; value: { questionText: string } } }>(
+      "updateQuestionDraft",
+    );
+    expect(request.edit).toMatchObject({ case: "show", value: { questionText: QUESTION_TWO.text } });
   });
 
-  it("sends the free text for the question it was typed into", async () => {
-    // Arrange
-    await drawRow(questionRow("open"));
-    const field = harness.$$("[data-question-other]")[0] as HTMLInputElement;
-    field.value = "something else entirely";
-    field.dispatchEvent(new Event("input", { bubbles: true }));
-    await harness.click(`[data-question-option="${QUESTION_TWO.options[0]}"]`);
+  it("sends a multi-select's confirm as a confirm of that question", async () => {
+    // Arrange: the multi-select shown.
+    await drawRow(questionRow("open", undefined, { active: 1 }));
     // Act
-    await harness.click("[data-question-submit]");
+    await harness.click("[data-question-confirm]");
     // Assert
-    const [request] = harness.fake.calls<{ answers: { otherText?: { text: string } }[] }>("answerQuestion");
-    expect(request.answers[0].otherText?.text).toBe("something else entirely");
+    const [request] = harness.fake.calls<{ edit: { case: string; value: { questionText: string } } }>(
+      "updateQuestionDraft",
+    );
+    expect(request.edit).toMatchObject({ case: "confirm", value: { questionText: QUESTION_TWO.text } });
+  });
+
+  it("draws the daemon's draft: the shown question, its choices and what was typed", async () => {
+    // Arrange / Act
+    const row = await drawRow(
+      questionRow("open", undefined, {
+        active: 1,
+        drafts: [{ chosen: [QUESTION_ONE.options[0]], answered: true }, { otherText: { text: "e2e too" } }],
+      }),
+    );
+    // Assert
+    const panels = [...row.querySelectorAll<HTMLElement>("[data-question-panel]")];
+    expect(panels.map((p) => p.hidden)).toEqual([true, false]);
+    expect(panels[0]?.querySelector(".q-opt.selected")?.getAttribute("data-question-option")).toBe(
+      QUESTION_ONE.options[0],
+    );
+    expect(panels[1]?.querySelector("[data-question-typed]")?.textContent).toContain("e2e too");
   });
 });
 
@@ -1505,11 +1491,11 @@ describe("an expired question", () => {
     expect(row.dataset.state).toBe("expired");
   });
 
-  it("offers no submit control", async () => {
+  it("offers no controls", async () => {
     // Arrange / Act
     const row = await drawRow(questionRow("expired"));
     // Assert
-    expect(row.querySelector("[data-question-submit]")).toBeNull();
+    expect(row.querySelector("ar-button")).toBeNull();
   });
 });
 

@@ -285,6 +285,35 @@ export async function submit(app: MountedApp, text: string): Promise<void> {
   await send(app);
 }
 
+/**
+ * The questions still unanswered on every STANDING question card: a standing
+ * card is the one drawing its open batch (`.q-tabbed`), and each of its panels
+ * states the daemon's `answered` flag.
+ */
+function unansweredQuestions(app: MountedApp): number {
+  return app
+    .$$('[data-feed-row][data-row-kind="question"] .q-tabbed [data-question][data-answered="false"]')
+    .length;
+}
+
+/**
+ * Answer every standing question card the way a user types an answer: one
+ * plain send per unanswered question. A send made while a question card
+ * stands answers its shown question (SubmitPromptAskAnswered), the daemon
+ * shows the next unanswered one, and the send that answers the last delivers
+ * the batch. Each send waits for its own answer to be drawn before the next.
+ */
+export async function answerQuestionsByTyping(app: MountedApp, text: string): Promise<void> {
+  for (let left = unansweredQuestions(app); left > 0; left -= 1) {
+    await submit(app, text);
+    await awaitDrawn(
+      app,
+      `the typed answer to land (${String(left)} questions were unanswered)`,
+      () => unansweredQuestions(app) < left,
+    );
+  }
+}
+
 /** The selector for one drawn row kind, optionally one activity unit. */
 export function rowSelector(kind: string, unit?: string): string {
   const base = `[data-feed-row][data-row-kind="${kind}"]`;

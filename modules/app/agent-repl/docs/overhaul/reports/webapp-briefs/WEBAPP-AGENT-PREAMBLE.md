@@ -261,8 +261,8 @@ Feed and rows:
   set it — the wiring agent verifies); `[data-diff-line="<FeedDiffLine kind case>"]` per diff line.
 - `[data-finding]` per findings row, with `[data-verdict="<case>"]` and `[data-outcome="<case>"]`.
 - Permission card: `[data-permission="allowOnce|allowStanding|deny"]` buttons. Question card:
-  `[data-question-option="<option label text>"]` per option input, `[data-question-other]` the
-  free-text field per question, `[data-question-submit]`. Cold gate: `[data-cold-gate="pay|clear|compact"]`
+  `[data-question-option="<option label text>"]` per option control. (`[data-question-other]` and
+  `[data-question-submit]` are retired, 2026-10-11: see webapp/AGENTS.md's landing table.) Cold gate: `[data-cold-gate="pay|clear|compact"]`
   buttons, `[data-compact-model="<AgentModel.name>"]` and `[data-compact-scope="<SessionCompactScope enum name>"]` radios.
 - Command rows: `[data-command]` the command text, `[data-add-support]` the offer button,
   `[data-support-note]` the success note.

@@ -69,6 +69,10 @@ const actedSuccess = (): SubmitPromptResponse =>
   create(SubmitPromptResponseSchema, {
     result: { case: "success", value: { outcome: { case: "commandActed", value: {} } } },
   });
+const askAnsweredSuccess = (): SubmitPromptResponse =>
+  create(SubmitPromptResponseSchema, {
+    result: { case: "success", value: { outcome: { case: "askAnswered", value: {} } } },
+  });
 const mergingError = (): SubmitPromptResponse =>
   create(SubmitPromptResponseSchema, {
     result: { case: "error", value: { reason: { case: "merging", value: {} } } },
@@ -831,6 +835,29 @@ describe("a command the daemon acted on without minting a turn", () => {
   it("records no turn, because the act minted none", async () => {
     const h = mount(actedSuccess);
     await sendText(h, "/model opus");
+    expect(h.handle.lastTurn()).toBeUndefined();
+    h.handle.dispose();
+  });
+});
+
+describe("words that answered a standing ask", () => {
+  it("clears the box, because the words are spent", async () => {
+    const h = mount(askAnsweredSuccess);
+    await sendText(h, "use OAuth");
+    expect(h.input.value).toBe("");
+    h.handle.dispose();
+  });
+
+  it("draws no refusal, because the answer is not a failure", async () => {
+    const h = mount(askAnsweredSuccess);
+    await sendText(h, "use OAuth");
+    expect(h.host.querySelector(".composer-refusal")).toBeNull();
+    h.handle.dispose();
+  });
+
+  it("records no turn, because the answer minted none", async () => {
+    const h = mount(askAnsweredSuccess);
+    await sendText(h, "use OAuth");
     expect(h.handle.lastTurn()).toBeUndefined();
     h.handle.dispose();
   });
