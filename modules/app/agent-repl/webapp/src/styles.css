@@ -75,9 +75,14 @@
      is one small step down in lightness, not a new color, applied once since
      the two kinds already shared the one token. #e0ecff -> #ccdfff. */
   --user: #ccdfff;
-  /* Raw assistant text bubbles: purple counterpart to the user blue,
-     from the same family as --tool-title. */
-  --assistant: #ece4fa;
+  /* THE RESPONSE BUBBLE'S FILL IS THE TOOL CARD'S (owner ruling, 2026-10-11,
+     "a slightly darker background ... same color as the toolcard
+     backgrounds"): derived from --tool-card-bg rather than copied, so a
+     response and a tool card share one fill in either theme, and every state
+     a response passes through (in flight, interim, final, cut short) wears it.
+     Resolved where it is declared, on :root, so the dark theme's own
+     --tool-card-bg carries through without a dark override of this token. */
+  --assistant: var(--tool-card-bg);
   --accent: #2563eb;
   /* A link inside a blue prompt bubble. It is --accent in this theme; the dark
      theme's bright prompt blue swallows --accent, so it sets its own. */
@@ -220,12 +225,13 @@
      detached-work jump landed on. A selected BUBBLE is marked by its fill
      instead (--selected-bubble-bg, below). */
   --selected-entry: #2563eb;
-  /* THE SELECTED BUBBLE's fill (owner ruling, 2026-10-11): a moderate neutral
-     grey, a little lighter than the response bubble's own --assistant, worn
+  /* THE SELECTED BUBBLE's fill (owner ruling, 2026-10-11): a neutral grey, a
+     little lighter than the response bubble's own --assistant (the tool
+     card's #eef1f4, the same day's ruling), worn
      by the row the feed's selection names — a final response the next prompt
      replies to, or a prompt the rollback keys act on — so the one selected
      bubble is unmistakable among those around it. */
-  --selected-bubble-bg: #ebebee;
+  --selected-bubble-bg: #f5f5f7;
   /* THE EXPANDED RESPONSE's border (owner ruling, 2026-09-27): eggshell white,
      worn by every response bubble while its scroll box is open, over whatever
      the ladder would otherwise draw. A shade deeper than true eggshell here,
@@ -399,8 +405,9 @@
     --border: #2a2e37;
     --card: #16191f;
     /* The dark theme's tool card and footer dock (owner ruling, 2026-09-27):
-       a notch darker than --card, still lighter than the feed's #111318, so
-       the response grey above it reads as the lighter surface. */
+       a notch darker than --card, still lighter than the feed's #111318. The
+       response bubble's --assistant is this same fill (owner ruling,
+       2026-10-11). */
     --tool-card-bg: #14171c;
     /* Lighter than the feed's #111318, darker than --card, so the rail lifts
        off the conversation while its --card hover/detail washes still lift
@@ -436,9 +443,6 @@
     /* A dark navy, so a link stands out on the dark theme's prompt blue
        (owner ruling, 2026-09-27). */
     --prompt-link: #0a2a5e;
-    /* An iMessage-style grey (owner ruling, 2026-09-27): the old --card grey
-       lifted a notch, so a response sits lighter than the tool cards. */
-    --assistant: #1b1e25;
     --thinking: #fb923c;
     --tool-command: #9ca3af;
     --retry: #a78bfa;
@@ -467,7 +471,8 @@
     /* Brighter blue for the dark theme, as the other state borders lift, so
        the selected-entry ring still reads against the dark page. */
     --selected-entry: #60a5fa;
-    /* A moderate grey a little lighter than the dark --assistant (#1b1e25). */
+    /* A moderate grey a little lighter than the dark --assistant (the dark
+       --tool-card-bg, #14171c). */
     --selected-bubble-bg: #2c3039;
     /* True eggshell for the dark theme, as the other state borders lift. */
     --expanded-response-border: #f0ead6;
@@ -1681,7 +1686,7 @@ pre {
 /* THE ROLE: the side and the background, and nothing else (owner ruling,
    2026-09-23). A prompt hugs the RIGHT rail in blue: its right margin is half
    the column's leftover, so its right edge lands flush with the centered tool
-   cards'. A response hugs the LEFT rail in purple (grey in the dark theme), the mirror
+   cards'. A response hugs the LEFT rail in the tool card's grey, the mirror
    image. */
 .bubble[data-role="prompt"] {
   --bubble-bg: var(--user);

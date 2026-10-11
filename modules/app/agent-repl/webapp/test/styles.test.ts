@@ -1885,7 +1885,7 @@ describe("the selected-entry mark (a jump's landing, the feed selection)", () =>
     const css = block();
 
     // Act
-    const [response, selected] = [luminance(rgbOf(css, "--assistant")), luminance(rgbOf(css, "--selected-bubble-bg"))];
+    const [response, selected] = [luminance(themeRgbOf(css, "--assistant")), luminance(rgbOf(css, "--selected-bubble-bg"))];
 
     // Assert
     expect(selected).toBeGreaterThan(response);
@@ -3169,6 +3169,96 @@ describe("the uncapped bubble", () => {
   });
 });
 
+/**
+ * TOKEN's color in the theme whose token block is BLOCK, as [r, g, b], following
+ * `var()` references the way the cascade does on `:root`: a token the block does
+ * not declare is the light theme's own declaration (the dark media query only
+ * overrides), and every reference resolves against the same theme. Throws on a
+ * token neither block declares, or a value that is neither a six-digit hex nor
+ * a lone `var()`.
+ */
+function themeRgbOf(block: string, token: string): [number, number, number] {
+  const valueIn = (css: string): string | undefined =>
+    new RegExp(`(?:^|[\\s;{])${token}:\\s*([^;]+);`).exec(withoutBlockComments(css))?.[1]?.trim();
+  const value = valueIn(block) ?? valueIn(declarationsOf(":root") ?? "");
+  if (value === undefined) throw new Error(`no ${token} in either theme`);
+  const ref = /^var\((--[\w-]+)\)$/.exec(value)?.[1];
+  if (ref !== undefined) return themeRgbOf(block, ref);
+  return rgbOf(`${token}: ${value};`, token);
+}
+
+describe("themeRgbOf", () => {
+  it.each([
+    ["a hex the block declares", "--a: #010203;", "--a", [1, 2, 3]],
+    ["a var() chain inside the block", "--a: var(--b); --b: var(--c); --c: #0a0b0c;", "--a", [10, 11, 12]],
+    ["a reference the block overrides", "--card: #102030;", "--tool-card-bg", [16, 32, 48]],
+  ] as const)("resolves %s", (_case, block, token, expected) => {
+    // Arrange / Act
+    const rgb = themeRgbOf(block, token);
+
+    // Assert
+    expect(rgb).toEqual(expected);
+  });
+
+  it("falls back to the light theme for a token the block leaves alone", () => {
+    // Arrange
+    const light = themeRgbOf(declarationsOf(":root") ?? "", "--card");
+
+    // Act
+    const fallen = themeRgbOf("--unrelated: #000000;", "--card");
+
+    // Assert
+    expect(fallen).toEqual(light);
+  });
+
+  it("throws on a token neither theme declares", () => {
+    // Arrange / Act / Assert
+    expect(() => themeRgbOf("", "--no-such-token")).toThrow("no --no-such-token in either theme");
+  });
+});
+
+/**
+ * THE RESPONSE BUBBLE'S FILL IS THE TOOL CARD'S (owner ruling, 2026-10-11):
+ * `--assistant` is derived from `--tool-card-bg` once, on the light `:root`, so
+ * the dark theme's card fill carries through without a copied override.
+ */
+describe("the response bubble's fill", () => {
+  it("derives --assistant from --tool-card-bg on the light :root", () => {
+    // Arrange / Act
+    const decls = withoutBlockComments(declarationsOf(":root") ?? "");
+
+    // Assert
+    expect(decls).toMatch(/--assistant:\s*var\(--tool-card-bg\)\s*;/);
+  });
+
+  it("leaves --assistant unset in the dark theme so the derivation carries", () => {
+    // Arrange / Act
+    const decls = withoutBlockComments(darkThemeBlock());
+
+    // Assert
+    expect(decls).not.toMatch(/--assistant:/);
+  });
+
+  it.each(THEME_BLOCKS)("matches the tool card's fill in the %s theme", (_theme, block) => {
+    // Arrange
+    const css = block();
+
+    // Act
+    const [response, card] = [themeRgbOf(css, "--assistant"), themeRgbOf(css, "--tool-card-bg")];
+
+    // Assert
+    expect(response).toEqual(card);
+  });
+
+  it("is what a response bubble paints", () => {
+    // Arrange / Act
+    const decls = declarationsOf('.bubble[data-role="response"]') ?? "";
+
+    // Assert
+    expect(decls).toMatch(/--bubble-bg:\s*var\(--assistant\)/);
+  });
+});
+
 /** The six hex digits of TOKEN's declaration in BLOCK, as [r, g, b]. */
 function rgbOf(block: string, token: string): [number, number, number] {
   const hex = new RegExp(`${token}:\\s*#([0-9a-fA-F]{6})\\s*;`).exec(block)?.[1];
@@ -3245,7 +3335,7 @@ describe("the held prompt's fill: the response bubble's own token", () => {
 
   it.each(THEME_BLOCKS)("resolves to the same RGB as --assistant in the %s theme", (_theme, block) => {
     // Arrange / Act
-    const assistant = rgbOf(block(), "--assistant");
+    const assistant = themeRgbOf(block(), "--assistant");
     // Assert — the held fill IS --assistant, so they are the same color by
     // construction; this pins that --assistant itself still resolves.
     expect(assistant).toHaveLength(3);
@@ -3404,7 +3494,6 @@ describe("the dark theme's iMessage fills (owner ruling, 2026-09-27)", () => {
   it.each([
     ["the tool card sits lighter than the feed", "--bg", "--tool-card-bg"],
     ["the tool card sits darker than the old card grey", "--tool-card-bg", "--card"],
-    ["a response sits lighter than the old card grey", "--card", "--assistant"],
   ])("%s", (_name, darker, lighter) => {
     // Arrange
     const block = darkThemeBlock();
@@ -3416,7 +3505,7 @@ describe("the dark theme's iMessage fills (owner ruling, 2026-09-27)", () => {
 
   it("paints a response a neutral grey rather than a hue", () => {
     // Arrange / Act
-    const [r, g, b] = rgbOf(darkThemeBlock(), "--assistant");
+    const [r, g, b] = themeRgbOf(darkThemeBlock(), "--assistant");
     // Assert — no channel strays far from the others.
     expect(Math.max(r, g, b) - Math.min(r, g, b)).toBeLessThanOrEqual(12);
   });
