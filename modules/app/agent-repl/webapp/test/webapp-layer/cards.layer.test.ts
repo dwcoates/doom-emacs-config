@@ -229,7 +229,7 @@ it(
     expect(
       card.querySelectorAll("[data-question-option]").length,
     ).toBeGreaterThan(0);
-    expect(card.querySelector("[data-ask-hint]")).not.toBeNull();
+    expect(card.querySelector("[data-ask-hint]")).toBeNull();
     expect(card.querySelector("[data-question-other], [data-question-submit]")).toBeNull();
   },
   TURN_TEST_MS,

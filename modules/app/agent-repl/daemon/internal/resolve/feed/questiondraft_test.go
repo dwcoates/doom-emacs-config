@@ -2,6 +2,9 @@ package feed
 
 import (
 	"errors"
+	"os"
+	"slices"
+	"strings"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -578,5 +581,209 @@ func TestADeliveredDraftIsBuiltThroughQuestionSelection(t *testing.T) {
 		if !proto.Equal(got, want[i]) {
 			t.Fatalf("answer %d = %+v, want %+v", i, got, want[i])
 		}
+	}
+}
+
+func TestOptionNumbersReadsOnlyASendOfOptionNumbers(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+		want []string
+		ok   bool
+	}{
+		{"one number", "2", []string{"2"}, true},
+		{"one number with whitespace around it", "  2 \n", []string{"2"}, true},
+		{"numbers delimited by whitespace", "1 3\t2", []string{"1", "3", "2"}, true},
+		{"numbers delimited by a comma and whitespace", "1, 2", []string{"1", "2"}, true},
+		{"numbers delimited by a bare comma", "1,2", []string{"1", "2"}, true},
+		{"a number with words after it", "2 please", nil, false},
+		{"a numeral prefix as the card draws it", "2.", nil, false},
+		{"a trailing comma", "1,", nil, false},
+		{"an empty send", "   ", nil, false},
+		{"plain text", "mutual TLS", nil, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange, Act.
+			got, ok := optionNumbers(tc.text)
+
+			// Assert.
+			if ok != tc.ok || !slices.Equal(got, tc.want) {
+				t.Fatalf("optionNumbers(%q) = %v, %v, want %v, %v", tc.text, got, ok, tc.want, tc.ok)
+			}
+		})
+	}
+}
+
+func TestASendOfOneOptionNumberPicksTheShownSingleSelectsOption(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.openTwoQuestionAsk()
+
+	// Act.
+	h.edit(QuestionEdit{Kind: EditType, Text: "2"})
+
+	// Assert.
+	open := h.openDraft()
+	got := open.GetDrafts()[0]
+	if !got.GetAnswered() || !slices.Equal(got.GetChosen(), []string{"API key"}) || got.OtherText != nil {
+		t.Fatalf("draft = %+v, want API key picked, answered, nothing typed", got)
+	}
+	if open.GetActive() != 1 {
+		t.Fatalf("active = %d, want the next unanswered question", open.GetActive())
+	}
+	records := h.recordsAt("info", "daemon.feed.question_draft")
+	if len(records) != 1 || records[0].Context["by_number"] != true {
+		t.Fatalf("records = %+v, want the edit recorded as picked by number", records)
+	}
+}
+
+func TestASendOfAnOptionNumberReplacesASingleSelectsPickAndTypedText(t *testing.T) {
+	tests := []struct {
+		name  string
+		given QuestionEdit
+	}{
+		{"an earlier pick", pickAuth("OAuth")},
+		{"an earlier typed answer", QuestionEdit{Kind: EditType, Text: "mutual TLS"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: the first question answered, then shown again.
+			h := newHarness(t)
+			h.openTwoQuestionAsk()
+			h.edit(tc.given)
+			h.edit(QuestionEdit{Kind: EditShow, Question: "Which auth method?"})
+
+			// Act.
+			h.edit(QuestionEdit{Kind: EditType, Text: "2"})
+
+			// Assert.
+			got := h.openDraft().GetDrafts()[0]
+			if !slices.Equal(got.GetChosen(), []string{"API key"}) || got.OtherText != nil || !got.GetAnswered() {
+				t.Fatalf("draft = %+v, want only API key, answered", got)
+			}
+		})
+	}
+}
+
+func TestASendOfOptionNumbersSetsAMultiSelectsTicksInTheServedOrderAndAnswersIt(t *testing.T) {
+	// Arrange: the multi-select shown, with a tick and a typed note the send replaces.
+	h := newHarness(t)
+	h.openTwoQuestionAsk()
+	h.edit(QuestionEdit{Kind: EditShow, Question: "Which suites?"})
+	h.edit(QuestionEdit{Kind: EditType, Text: "and the e2e suite"})
+	h.edit(QuestionEdit{Kind: EditShow, Question: "Which suites?"})
+
+	// Act.
+	h.edit(QuestionEdit{Kind: EditType, Text: "2, 1 2"})
+
+	// Assert.
+	got := h.openDraft().GetDrafts()[1]
+	if !slices.Equal(got.GetChosen(), []string{"daemon", "webapp"}) || got.OtherText != nil || !got.GetAnswered() {
+		t.Fatalf("draft = %+v, want daemon and webapp ticked in served order, answered, nothing typed", got)
+	}
+}
+
+func TestASendOfOptionNumbersAnsweringTheLastQuestionDeliversTheBatch(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.openTwoQuestionAsk()
+	h.edit(QuestionEdit{Kind: EditType, Text: "1"})
+
+	// Act.
+	outcome := h.edit(QuestionEdit{Kind: EditType, Text: "2"})
+
+	// Assert.
+	want := []*conversationv1.AgentQuestionSelection{
+		QuestionSelection("Which auth method?", []string{"OAuth"}, nil),
+		QuestionSelection("Which suites?", []string{"webapp"}, nil),
+	}
+	got := outcome.Deliver.GetAnswers()
+	if len(got) != len(want) {
+		t.Fatalf("answers = %+v, want %+v", got, want)
+	}
+	for i := range want {
+		if !proto.Equal(got[i], want[i]) {
+			t.Fatalf("answer %d = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
+
+func TestASendOfOptionNumbersTheQuestionCannotTakeIsRefusedWithoutChangingTheDraft(t *testing.T) {
+	tests := []struct {
+		name    string
+		text    string
+		wantWhy string
+	}{
+		{"a number past the last option", "3", "the question offers no option numbered 3 of 2"},
+		{"a zero", "0", "the question offers no option numbered 0 of 2"},
+		{"a number too large to read", "99999999999999999999", "the question offers no option numbered 99999999999999999999 of 2"},
+		{"one bad number among good ones", "1 3", "the question offers no option numbered 3 of 2"},
+		{"two numbers on a single-select", "1, 2", "a single-select question takes one option number"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: the single-select shown, already picked, then shown again.
+			h := newHarness(t)
+			h.openTwoQuestionAsk()
+			h.edit(pickAuth("OAuth"))
+			h.edit(QuestionEdit{Kind: EditShow, Question: "Which auth method?"})
+			before := proto.Clone(h.openDraft())
+
+			// Act.
+			_, err := h.resolver.EditQuestionDraft(testWorkspace, "ask-1", QuestionEdit{Kind: EditType, Text: tc.text})
+
+			// Assert.
+			var unserved *UnservedQuestionValueError
+			if !errors.As(err, &unserved) || unserved.Text != tc.text || unserved.Why != tc.wantWhy {
+				t.Fatalf("err = %v, want an unserved value %q because %q", err, tc.text, tc.wantWhy)
+			}
+			if after := h.openDraft(); !proto.Equal(after, before) {
+				t.Fatalf("draft changed from %+v to %+v on a refused send", before, after)
+			}
+			if len(h.recordsAt("debug", "daemon.feed.question_draft_refused")) != 1 {
+				t.Fatal("the refused send left no record")
+			}
+		})
+	}
+}
+
+func TestInServedOrderAnswersTheHeldLabelsInTheServedOrder(t *testing.T) {
+	tests := []struct {
+		name string
+		held map[string]bool
+		want []string
+	}{
+		{"nothing held", map[string]bool{}, nil},
+		{"held out of order", map[string]bool{"c": true, "a": true}, []string{"a", "c"}},
+		{"a label held false", map[string]bool{"a": false, "b": true}, []string{"b"}},
+		{"a label never served", map[string]bool{"z": true, "b": true}, []string{"b"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange, Act.
+			got := inServedOrder([]string{"a", "b", "c"}, tc.held)
+
+			// Assert.
+			if !slices.Equal(got, tc.want) {
+				t.Fatalf("inServedOrder = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestTheChosenLabelsAreOrderedThroughInServedOrder(t *testing.T) {
+	// Arrange: a hand-rolled ordering that drifted from the helper fails here.
+	source, err := os.ReadFile("questiondraft.go")
+	if err != nil {
+		t.Fatalf("read questiondraft.go: %v", err)
+	}
+
+	// Act.
+	calls := strings.Count(string(source), "inServedOrder(")
+
+	// Assert: the definition plus toggleLabel's and pickByNumber's calls.
+	if calls != 3 {
+		t.Fatalf("inServedOrder( appears %d times, want its definition and two call sites", calls)
 	}
 }

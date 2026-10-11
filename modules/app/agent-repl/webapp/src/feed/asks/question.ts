@@ -20,18 +20,26 @@
  * A TYPED ANSWER IS THE EDITOR'S. The free-text "Other" escape is always
  * available, and it is typed in the editor's composer: a plain send made while
  * the card stands answers its shown question (agentrepl.v1.
- * SubmitPromptAskAnswered). The card draws what was typed, and says where to
- * type it; it has no text field of its own.
+ * SubmitPromptAskAnswered). The card draws what was typed; it has no text field
+ * of its own.
+ *
+ * EVERY OPTION IS NUMBERED, `1.` first in the served order, because a send of
+ * only option numbers picks by them: the daemon reads it (feed/questiondraft.go)
+ * as the shown question's choice rather than as typed text.
+ *
+ * SERVED STRINGS ARE DRAWN AS INLINE MARKDOWN (setInlineMarkdown), as a response
+ * bubble draws its prose, so a `code span` in a question reads as code.
  *
  * EVERY VALUE IS ECHOED VERBATIM — the question's own text names the question,
  * an option's own label names the choice. The daemon reconstructs the ask from
  * the values it served, so a label this end trimmed or re-cased is a label it
- * can no longer match.
+ * can no longer match. Markdown is presentation only: what a click echoes is
+ * the served string, never the drawn one.
  */
 import { drawToolHead, drawToolName } from "../cards/tool-head.js";
-import { drawAskHint } from "./hint.js";
 import { createControl, type Control } from "../../control.js";
 import { log } from "../../log.js";
+import { setInlineMarkdown } from "../../markdown.js";
 import {
   UpdateQuestionDraftResponseSchema,
   type UpdateQuestionDraftResponse,
@@ -71,9 +79,6 @@ export const QUESTION_TITLE = "Question";
 
 /** What a multi-select's confirm control says. */
 export const CONFIRM_TEXT = "done";
-
-/** Where a typed answer is entered: the card says so under the options. */
-export const TYPE_IN_EDITOR_HINT = "type a different answer in Emacs and send it";
 
 /** The label in front of an answer typed in the editor. */
 export const TYPED_LABEL = "typed:";
@@ -126,7 +131,7 @@ function drawHead(): HTMLElement {
 
 /**
  * THE OPEN BATCH: the tab strip (a batch of two or more), the shown question's
- * panel, where to type, and the slot a refused click is stated in.
+ * panel, and the slot a refused click is stated in.
  *
  * Every question is still VALIDATED up front, shown or not: a malformed
  * question in tab three refuses the card rather than waiting to be clicked.
@@ -196,7 +201,7 @@ function drawOpenBatch(u: FeedQuestion, open: FeedQuestionOpen, rc: RowContext):
   });
   wrap.append(shown);
 
-  wrap.append(drawAskHint(TYPE_IN_EDITOR_HINT), status);
+  wrap.append(status);
   return wrap;
 }
 
@@ -251,7 +256,7 @@ export function drawFeedQuestionItem(
   const chosen = new Set(ctx.draft.chosen);
   options.value.options.forEach((option, optionIndex) => {
     const optionPath = `${path}.options.options[${optionIndex}]`;
-    const drawn = drawFeedQuestionOption(option, chosen, optionPath);
+    const drawn = drawFeedQuestionOption(option, optionIndex + 1, chosen, optionPath);
     const label = requireMessage(option.label, `${optionPath}.label`).text;
     drawn.addEventListener("click", () => ctx.edit({ kind: "pick", questionText: text.text, label }));
     ctx.controls.push(drawn);
@@ -303,11 +308,11 @@ export function drawFeedQuestionHeader(
   });
   const el = document.createElement("span");
   el.className = "badge q-chip";
-  el.textContent = u.text;
+  setInlineMarkdown(el, u.text);
   return el;
 }
 
-/** The question text, drawn verbatim (and echoed verbatim by every click). */
+/** The question text, drawn as inline markdown (and echoed verbatim by every click). */
 export function drawFeedQuestionText(u: FeedQuestionText, path: string): HTMLElement {
   log.debug("drawing a question's text", {
     operation: "feed.asks.question.text",
@@ -315,19 +320,21 @@ export function drawFeedQuestionText(u: FeedQuestionText, path: string): HTMLEle
   });
   const el = document.createElement("div");
   el.className = "q-text";
-  el.textContent = u.text;
+  setInlineMarkdown(el, u.text);
   return el;
 }
 
 /**
- * One option: a control carrying its label and the description under it when
- * the agent gave one, marked `selected` when the draft holds it.
+ * One option: a control carrying its NUMBER (1-based, the one a send of option
+ * numbers picks it by), its label, and the description under it when the agent
+ * gave one, marked `selected` when the draft holds it.
  *
  * THE HOOK'S VALUE IS THE SERVED LABEL, so what a click echoes back is exactly
  * what was served rather than what was drawn.
  */
 export function drawFeedQuestionOption(
   u: FeedQuestionOption,
+  number: number,
   chosen: ReadonlySet<string>,
   path: string,
 ): Control {
@@ -343,18 +350,28 @@ export function drawFeedQuestionOption(
   el.classList.toggle("selected", selected);
   el.setAttribute("aria-pressed", selected ? "true" : "false");
 
+  const numeral = document.createElement("span");
+  numeral.className = "q-opt-number";
+  numeral.setAttribute("data-question-option-number", String(number));
+  numeral.textContent = optionNumeral(number);
+
   const text = document.createElement("span");
   text.className = "q-opt-label";
-  text.textContent = label.text;
-  el.append(text);
+  setInlineMarkdown(text, label.text);
+  el.append(numeral, text);
 
   if (u.description !== undefined) {
     const description = document.createElement("span");
     description.className = "q-opt-description";
-    description.textContent = u.description.text;
+    setInlineMarkdown(description, u.description.text);
     el.append(description);
   }
   return el;
+}
+
+/** The numeral prefix option NUMBER is drawn with, `1.` for the first. */
+export function optionNumeral(number: number): string {
+  return `${String(number)}.`;
 }
 
 /** The answered state: one verdict line per question, in the batch's order. */
@@ -393,9 +410,15 @@ export function drawFeedQuestionGivenAnswer(
   if (u.chosen.length > 0) {
     const chosen = document.createElement("span");
     chosen.className = "q-chosen";
-    // The labels as served, joined for reading. The joiner is presentation; the
-    // labels themselves are untouched.
-    chosen.textContent = u.chosen.join(", ");
+    // The labels as served, joined for reading. The joiner is presentation, and
+    // each label is drawn on its own so one label's markup cannot reach into the
+    // next.
+    u.chosen.forEach((served, index) => {
+      if (index > 0) chosen.append(", ");
+      const one = document.createElement("span");
+      setInlineMarkdown(one, served);
+      chosen.append(one);
+    });
     el.append(chosen);
   }
   if (u.otherText !== undefined) {

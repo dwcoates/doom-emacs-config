@@ -283,6 +283,14 @@
        unmistakable among the feed. */
   --q-opt-bg: color-mix(in srgb, var(--fg) 8%, var(--card));
   --q-border: #eab308;
+  /* THE TAB CORNER (owner ruling, 2026-10-11): the one radius a card's feed
+     tab wears, shared by the question card's options and a settled ask's
+     verdict badges so all three read as the same square controls. */
+  --tab-radius: 0.25rem;
+  /* THE SETTLED ANSWER'S TYPE SIZE: a question's given answers, and every
+     badge on a settled ask's verdict line, which reads at the answer's size
+     rather than larger or smaller than it. */
+  --ask-verdict-size: 0.85rem;
   /* The async teal, shared by every card that is a whole conversation or
      process of its own rather than one more file read: a skill handoff, a
      spawned subagent, and any detached background work to come. ONE hue at
@@ -3201,10 +3209,9 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
 
 /* --- AskUserQuestion picker ---------------------------------------------- */
 .q-block { margin: 0.4em 0 0.7em; }
-/* The header badge shares the option bubbles' fill and keeps its blue text, and
-   sits 50% larger than a plain .badge (0.7rem) so the abbreviated question reads
-   as the block's title rather than a footnote. */
-.q-chip { background: var(--q-opt-bg); color: var(--accent); font-size: 1.05rem; }
+/* The header badge shares the option bubbles' fill and keeps its blue text. Its
+   size and corner are the settled verdict line's (.q-verdict .badge). */
+.q-chip { background: var(--q-opt-bg); color: var(--accent); }
 .q-text { margin: 0.3em 0 0.45em; font-weight: 600; font-style: italic; }
 /* Inline code inside the italic question / bold option label reads as code
    rather than inheriting the surrounding emphasis. */
@@ -3215,7 +3222,9 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
   border: 1px solid var(--border);
   background: var(--q-opt-bg);
   color: var(--fg);
-  border-radius: 999px;
+  /* SQUARE, AS THE CARD'S TABS ARE (owner ruling, 2026-10-11): the corner the
+     `.feed-group-tab` wears, rather than a pill. */
+  border-radius: var(--tab-radius);
   padding: 0.25em 0.85em;
   cursor: pointer;
   font-size: 0.9em;
@@ -6360,6 +6369,13 @@ ar-button.outcome-marker-pill {
   gap: 0.4rem;
   margin-top: 0.4rem;
 }
+/* A SETTLED VERDICT'S BADGES ARE SQUARE AND THE ANSWER'S SIZE (owner ruling,
+   2026-10-11): the tab corner, and the given answer's type size, on the
+   question's header chips and the permission's verdict word alike. */
+.q-verdict .badge, .perm-verdict .badge {
+  border-radius: var(--tab-radius);
+  font-size: var(--ask-verdict-size);
+}
 .perm-when, .q-when, .cold-gate-when {
   color: var(--muted);
   font-size: 0.75rem;
@@ -6371,10 +6387,17 @@ ar-button.outcome-marker-pill {
 /* THE CARD IS A TOOL CARD (owner ruling, 2026-10-11): grey `.tool-card` chrome
    and, for a batch, the SAME tabs a run of tool calls wears (`.feed-tab-strip`
    + `.feed-group-tab`, src/feed/tabs.ts), here in flow under the head rather
-   than laid over the card. An option is a pill control that is `.selected`
+   than laid over the card. An option is a numbered square control that is `.selected`
    when the daemon's draft holds it; a typed answer is the editor's, drawn as a
    quiet line under the options. */
 .q-tabs { margin-bottom: 0.3rem; }
+/* The option's number, the one a send of option numbers picks it by. */
+.q-opt-number {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  margin-right: 0.35em;
+}
+.q-opt.selected .q-opt-number { color: inherit; }
 .q-opt-description {
   color: var(--muted);
   font-size: 0.85em;
@@ -6410,7 +6433,7 @@ ar-button.outcome-marker-pill {
   cursor: not-allowed;
 }
 .q-verdicts {
-  font-size: 0.85rem;
+  font-size: var(--ask-verdict-size);
 }
 .q-verdict {
   display: flex;
@@ -7181,7 +7204,7 @@ ar-button.outcome-marker-pill {
   gap: 0.3rem;
   padding: 0.15rem 0.5rem;
   border: 1px solid transparent;
-  border-radius: 0.25rem;
+  border-radius: var(--tab-radius);
   background: none;
   color: inherit;
   cursor: pointer;
@@ -7481,7 +7504,7 @@ ar-button.outcome-marker-pill {
   gap: 0.156rem;
   padding: 0.094rem 0.281rem;
   border: 1px solid transparent;
-  border-radius: 0.25rem;
+  border-radius: var(--tab-radius);
   background: none;
   color: inherit;
   cursor: pointer;
