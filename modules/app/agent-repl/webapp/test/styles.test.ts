@@ -145,6 +145,16 @@ function darkThemeBlock(): string {
 }
 
 /**
+ * Each theme's name and the raw text of its token block: the top-level `:root`
+ * for the light theme, the media query's for the dark. The one table every
+ * per-theme token test iterates, so no suite hand-rolls its own pair.
+ */
+const THEME_BLOCKS = [
+  ["light", (): string => declarationsOf(":root") ?? ""],
+  ["dark", darkThemeBlock],
+] as const;
+
+/**
  * The boxes that CLIP while collapsed (owner ruling, 2026-09-15: "remove the
  * scroll from the collapsed bubble views"). Every click-to-expand capped section
  * and the response/prompt bubble's scroll box: no inner scroll while collapsed,
@@ -1827,7 +1837,7 @@ describe("the selected-entry mark (a jump's landing, the feed selection)", () =>
     expect(css.includes(".row-revealed")).toBe(false);
   });
 
-  it("keeps the ring off a selected final response, whose own border turns blue", () => {
+  it("keeps the ring off a selected final response, whose fill turns grey", () => {
     // Arrange
     const card = document.createElement("div");
     card.className = "bubble final-response entry-selected";
@@ -1836,15 +1846,15 @@ describe("the selected-entry mark (a jump's landing, the feed selection)", () =>
     expect(card.matches(".entry-selected:not(.bubble)")).toBe(false);
   });
 
-  it("recolors every selected bubble's own border with the blue selection token", () => {
+  it("fills every selected bubble with the grey selection token, over every kind's own fill", () => {
     // Arrange / Act
     const rule = declarationsOf(".bubble.entry-selected");
 
     // Assert
-    expect(rule).toMatch(/border-color:\s*var\(--selected-entry\)\s*!important/);
+    expect(rule).toMatch(/--bubble-bg:\s*var\(--selected-bubble-bg\)\s*!important/);
   });
 
-  it("keeps the ring off a selected prompt, whose own border turns blue", () => {
+  it("keeps the ring off a selected prompt, whose fill turns grey", () => {
     // Arrange
     const card = document.createElement("div");
     card.className = "bubble user entry-selected";
@@ -1854,12 +1864,31 @@ describe("the selected-entry mark (a jump's landing, the feed selection)", () =>
     expect(card.matches(".entry-selected:not(.bubble)")).toBe(false);
   });
 
-  it("recolors only the border it reserves, so selecting never reflows a bubble", () => {
+  it("sets the fill alone, so selecting never recolors a border or reflows a bubble", () => {
     // Arrange / Act
     const rule = declarationsOf(".bubble.entry-selected") ?? "";
 
     // Assert
-    expect(rule.trim()).toBe("border-color: var(--selected-entry) !important;");
+    expect(rule.trim()).toBe("--bubble-bg: var(--selected-bubble-bg) !important;");
+  });
+
+  it.each(THEME_BLOCKS)("fills a selected bubble a neutral grey in the %s theme", (_theme, block) => {
+    // Arrange / Act
+    const [r, g, b] = rgbOf(block(), "--selected-bubble-bg");
+
+    // Assert — no channel strays far from the others.
+    expect(Math.max(r, g, b) - Math.min(r, g, b)).toBeLessThanOrEqual(16);
+  });
+
+  it.each(THEME_BLOCKS)("fills a selected bubble a little lighter than a response in the %s theme", (_theme, block) => {
+    // Arrange
+    const css = block();
+
+    // Act
+    const [response, selected] = [luminance(rgbOf(css, "--assistant")), luminance(rgbOf(css, "--selected-bubble-bg"))];
+
+    // Assert
+    expect(selected).toBeGreaterThan(response);
   });
 
   it("defines the --selected-entry token so the blue rule resolves", () => {
@@ -2740,16 +2769,16 @@ describe("the expanded response's eggshell border", () => {
     expect(rule.trim()).toBe("border-color: var(--expanded-response-border) !important;");
   });
 
-  it("shares the !important border tier only with the selection, so it outranks every other by construction", () => {
+  it("is the one !important border, so it outranks every other by construction", () => {
     // Arrange / Act
     const important = rulesOf(stylesheet)
       .filter((rule) => /(?:^|;)\s*border[\w-]*\s*:[^;]*!important/.test(rule.declarations))
       .map((rule) => rule.selectors.join(", "));
     // Assert
-    expect(important.sort()).toEqual([".bubble.entry-selected", EGGSHELL_SELECTOR].sort());
+    expect(important).toEqual([EGGSHELL_SELECTOR]);
   });
 
-  /** Every selected bubble kind: the selection's blue is what paints, open or not, never eggshell. */
+  /** Every selected bubble kind: its fill is the mark, so no border is forced on it, open or not, never eggshell. */
   const SELECTED = [
     ["a selected final response", { "data-role": "response", "data-variant": "response", "data-state": "success" }, ["final-response", "entry-selected"]],
     ["a selected interim response", { "data-role": "response", "data-variant": "response", "data-state": "success" }, ["entry-selected"]],
@@ -2758,19 +2787,16 @@ describe("the expanded response's eggshell border", () => {
     ["a selected agent prompt", { "data-role": "prompt", "data-variant": "agent" }, ["user", "prompt-agent", "entry-selected"]],
   ] as const;
 
-  it.each(SELECTED)("borders %s blue, open or not", (_label, attrs, hooks) => {
+  it.each(SELECTED)("forces no border on %s, open or not", (_label, attrs, hooks) => {
     // Arrange
     const states = [bubbleOf(attrs, hooks, true), bubbleOf(attrs, hooks, false)];
     // Act
     const borders = states.map((el) => borderOf(el));
     // Assert
-    expect(borders).toEqual(["var(--selected-entry)", "var(--selected-entry)"]);
+    expect(borders).toEqual([null, null]);
   });
 
-  it.each([
-    ["light", () => declarationsOf(":root") ?? ""],
-    ["dark", darkThemeBlock],
-  ] as const)("defines the eggshell token in the %s theme", (_theme, block) => {
+  it.each(THEME_BLOCKS)("defines the eggshell token in the %s theme", (_theme, block) => {
     // Arrange / Act
     const declared = block();
     // Assert
@@ -2997,11 +3023,13 @@ describe("the one bubble rule set", () => {
         /(?:^|;)\s*(?:margin-left|margin-right|--bubble-bg|background(?:-color)?)\s*:/.test(rule.declarations),
     );
     // Assert — the base rule paints the role's token; the roles choose it, and
-    // so do the owner-named fills: the held variant's (2026-09-23) and the
-    // page-colored thinking and interim fill (2026-10-08).
+    // so do the owner-named fills: the held variant's (2026-09-23), the
+    // page-colored thinking and interim fill (2026-10-08) and the selected
+    // bubble's grey (2026-10-11).
     expect(placing.flatMap((rule) => rule.selectors).sort()).toEqual(
       [
         ".bubble",
+        ".bubble.entry-selected",
         '.bubble[data-role="prompt"]',
         '.bubble[data-role="response"]',
         '.bubble[data-variant="held"]',
@@ -3215,10 +3243,7 @@ describe("the held prompt's fill: the response bubble's own token", () => {
     expect(stylesheet).not.toMatch(/--held-prompt-bg\s*:/);
   });
 
-  it.each([
-    ["light", () => declarationsOf(":root") ?? ""],
-    ["dark", () => darkThemeBlock()],
-  ])("resolves to the same RGB as --assistant in the %s theme", (_theme, block) => {
+  it.each(THEME_BLOCKS)("resolves to the same RGB as --assistant in the %s theme", (_theme, block) => {
     // Arrange / Act
     const assistant = rgbOf(block(), "--assistant");
     // Assert — the held fill IS --assistant, so they are the same color by
@@ -4012,5 +4037,28 @@ describe("the classic diff", () => {
 
     // Assert
     expect(got).toBeDefined();
+  });
+});
+
+describe("THEME_BLOCKS, the per-theme token table", () => {
+  it.each([
+    ["light", "#ffffff"],
+    ["dark", "#111318"],
+  ] as const)("hands the %s theme its own token block", (theme, bg) => {
+    // Arrange
+    const block = THEME_BLOCKS.find(([name]) => name === theme)?.[1];
+    // Act
+    const declared = block?.() ?? "";
+    // Assert
+    expect(declared).toMatch(new RegExp(`--bg:\\s*${bg};`));
+  });
+
+  it("is the only per-theme table in this suite", () => {
+    // Arrange
+    const source = readFileSync(fileURLToPath(import.meta.url), "utf8");
+    // Act — a hand-rolled pair repeats the light entry outside the helper.
+    const lightEntries = source.match(/\["light", \(\)(?:: string)? => declarationsOf\(":root"\)/g) ?? [];
+    // Assert
+    expect(lightEntries).toHaveLength(1);
   });
 });

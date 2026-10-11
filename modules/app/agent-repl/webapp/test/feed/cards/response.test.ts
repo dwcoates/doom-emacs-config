@@ -2730,7 +2730,7 @@ describe("the data-driven final-answer green", () => {
     expect(el.classList.contains(THINKING_BUBBLE_CLASS)).toBe(true);
   });
 
-  it("lets the BLUE selection border win over the green", () => {
+  it("keeps the green border on a selected final answer and greys its fill", () => {
     // Arrange — a green final answer that is also the selected reply target, so
     // both classes ride the same bubble.
     const el = drawFeedResponse(
@@ -2738,15 +2738,14 @@ describe("the data-driven final-answer green", () => {
       rowContext(),
     );
     el.classList.add("entry-selected");
-    // Act, Assert — the drawn bubble matches BOTH the green rule and the blue
-    // one, and the blue one forces its color (`!important`), so the cascade
-    // paints it blue while selected and falls back to green the moment the
-    // selection clears. (var()-resolved colours are not observable under jsdom;
-    // selector + the forced declaration is the deterministic proof, mirrored
+    // Act, Assert — the drawn bubble matches BOTH the green rule and the
+    // selection's, and the selection's sets the fill alone, so the green border
+    // stays while selected. (var()-resolved colours are not observable under
+    // jsdom; selector + the declaration is the deterministic proof, mirrored
     // from styles.test.ts.)
     expect(el.matches('.bubble.final-response:not([data-variant="thinking"])')).toBe(true);
     expect(el.matches(".bubble.entry-selected")).toBe(true);
-    expect(stylesheet).toMatch(/\.bubble\.entry-selected\s*\{\s*border-color:\s*var\(--selected-entry\)\s*!important;/);
+    expect(stylesheet).toMatch(/\.bubble\.entry-selected\s*\{\s*--bubble-bg:\s*var\(--selected-bubble-bg\)\s*!important;\s*\}/);
   });
 });
 
