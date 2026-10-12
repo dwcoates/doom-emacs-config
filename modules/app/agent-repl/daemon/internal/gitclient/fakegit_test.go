@@ -191,6 +191,15 @@ func newFakeGit(t *testing.T, fixtures ...gitFixture) *fakeGit {
 	t.Setenv("PATH", binDir)
 	t.Setenv(fakeGitEnabled, "1")
 	t.Setenv(fakeGitStateDir, dir)
+	// THE FAKE IS THIS TEST BINARY, so under `go test -cover` it is
+	// instrumented too, and an instrumented binary run with no GOCOVERDIR
+	// warns on its stderr at exit -- which the verbatim-stderr tests read as
+	// git's own output. The fake's counters go to a directory of its own.
+	coverDir := filepath.Join(dir, "cover")
+	if err := os.MkdirAll(coverDir, 0o755); err != nil {
+		t.Fatalf("making the fake's coverage directory: %v", err)
+	}
+	t.Setenv("GOCOVERDIR", coverDir)
 
 	return &fakeGit{t: t, dir: dir}
 }
