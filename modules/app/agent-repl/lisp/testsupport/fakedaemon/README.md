@@ -62,7 +62,9 @@ Three methods mint identity the generic rule cannot:
 **Streams** — the three Emacs holds are implemented against a subscriber
 registry: `WatchHostWorkspace` (keyed by workspace id), `WatchDaemon` and
 `WatchWorkspaceRoster`. A subscription replays any stored snapshot and then
-**stands** until the client cancels or the control plane ends it. Every other
+**stands** until the client cancels or the control plane ends it.
+`OpenTabs` is Emacs's fourth stream and the one that ends by itself: every
+workspace it names is answered `opened` `ready`, in order, then `finished`. Every other
 `agentrepl.v1` stream belongs to the webapp; the fake answers those
 `unimplemented` so a wrong caller fails loudly instead of hanging.
 
