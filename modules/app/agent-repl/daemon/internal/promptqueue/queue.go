@@ -237,6 +237,8 @@ func newQueue(deps Deps) (*queue, error) {
 		return nil, fmt.Errorf("the prompt queue needs an image resolver for the rows it mirrors")
 	case deps.PublishHost == nil:
 		return nil, fmt.Errorf("the prompt queue needs the host view's publisher for the edits it claims")
+	case deps.StandingDown == nil:
+		return nil, fmt.Errorf("the prompt queue needs to know whether the daemon is standing down")
 	}
 	if deps.Now == nil {
 		deps.Now = time.Now

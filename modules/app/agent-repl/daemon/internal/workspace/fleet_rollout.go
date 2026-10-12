@@ -250,6 +250,34 @@ func (f *Fleet) CaptureDisplaced(ctx context.Context, ws ids.WorkspaceID) (Displ
 	return Displaced{Turn: *inFlight, Text: record.Text}, true, nil
 }
 
+// oweCutTurn records the resumption a stand-down owes for the turn running on
+// ws, when this daemon's own stand-down is the one ending the session
+// (promptqueue/restartredrive.go). It is recorded HERE, before the kill, as well
+// as where the turn closes: a forced stop can take the shim down before it
+// writes the turn's interrupted terminal, and a turn with no terminal closes
+// only as orphaned at the next boot, which by itself would owe nothing. A
+// stop no stand-down ordered (the idle sweep's, a user's kill) owes nothing.
+func (f *Fleet) oweCutTurn(ctx context.Context, ws ids.WorkspaceID) {
+	if !f.deps.Supervisor.StandingDown() {
+		return
+	}
+	watcher, ok := f.sessionWatcher(ws)
+	if !ok {
+		return
+	}
+	inFlight := watcher.TurnInFlight()
+	if inFlight == nil {
+		return
+	}
+	fields := dlog.Context{"workspace": string(ws), "turn": string(*inFlight)}
+	if err := f.deps.DB.OweResumption(ctx, ws, *inFlight, f.now()); err != nil {
+		f.deps.Log.Global().Error(opFleetRollout, "could not record the resumption the stand-down owes; the cut turn will not be resumed",
+			withCause(fields, err))
+		return
+	}
+	f.deps.Log.Global().Info(opFleetRollout, "the daemon's own stand-down is ending a running turn; the next session that serves the workspace resumes it", fields)
+}
+
 // Prelaunch brings up a NEW shim for the workspace on a FRESH socket, INERT BY
 // CONSTRUCTION: the process is spawned and dialed, but no session is started
 // on it, so it coexists with the running one indefinitely. Nothing about the
@@ -849,6 +877,7 @@ func (f *Fleet) StartUnderWay(ws ids.WorkspaceID) bool {
 // answer is not a reason to leave the process running, so the stop below is
 // unconditional and the refusal is evidence.
 func (f *Fleet) KillSession(ctx context.Context, ws ids.WorkspaceID, force bool) error {
+	f.oweCutTurn(ctx, ws)
 	if shim, live := f.Shim(ws); live && f.sessionStarted(ws) {
 		// THE WATCHER IS TOLD BEFORE THE VERB GOES. The shim ends its standing
 		// streams as the session ends, and a watcher that has not been told

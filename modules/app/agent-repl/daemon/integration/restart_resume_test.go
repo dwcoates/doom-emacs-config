@@ -1,0 +1,63 @@
+//go:build integration
+
+package integration
+
+import (
+	"testing"
+
+	"connectrpc.com/connect"
+
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
+	conversationv1 "agentrepl/proto/conversation/v1"
+
+	"agent-repld/integration/harness"
+)
+
+// cutAndReopen runs a turn, stands the daemon down under it, and opens the
+// workspace on a successor daemon over the same state.
+func cutAndReopen(t *testing.T) (*fixture, *harness.ShimControl) {
+	t.Helper()
+	f := newOpened(t, harness.Opts{})
+	f.shim.ExpectStartSession()
+	f.submit("do the long thing", "k-cut", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	f.shim.ExpectStartTurn()
+	shutdownNow(t, f.d)
+	f.d = harness.StartDaemon(t, harness.Opts{StateDir: f.d.StateDir})
+	// The fake shim writes no vendor transcript, so the successor's resume
+	// finds none and says so; a real session's transcript is on disk.
+	f.d.ExpectWarnings("daemon.workspace.bring_up")
+	resp, err := f.d.Client().OpenWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: f.ws}))
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("OpenWorkspace on the successor = (%v, %v), want a success", resp, err)
+	}
+	shim := f.d.OpenedShim(f.ws)
+	shim.ExpectStartSession()
+	return f, shim
+}
+
+func TestATurnTheImmediateShutdownCutIsResumedOnTheNextSession(t *testing.T) {
+	t.Parallel()
+	// Arrange + Act
+	_, shim := cutAndReopen(t)
+
+	// Assert
+	st := shim.ExpectStartTurn()
+	if st.GetOrigin() != conversationv1.PromptOrigin_PROMPT_ORIGIN_RESUME_AFTER_RESTART {
+		t.Fatalf("the successor's first turn has origin %v, want the resumption after restart", st.GetOrigin())
+	}
+}
+
+func TestTheResumptionIsSubmittedOnce(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	_, shim := cutAndReopen(t)
+	shim.ExpectStartTurn()
+
+	// Act: the resumed turn ends.
+	shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
+
+	// Assert
+	if n := shim.Count(harness.RPCStartTurn); n != 1 {
+		t.Fatalf("the successor's shim was asked to start %d turns, want the one resumption", n)
+	}
+}

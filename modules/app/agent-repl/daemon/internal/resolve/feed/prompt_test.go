@@ -62,11 +62,6 @@ func TestTheAuthorLabelComesFromTheOrigin(t *testing.T) {
 			want:   "Merge",
 		},
 		{
-			name:   "a restart re-drive says so rather than posing as a fresh turn",
-			origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_RESUME_AFTER_RESTART,
-			want:   "Resumed after restart",
-		},
-		{
 			name:   "a workspace's initial brief is labelled as one",
 			origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_CREATED,
 			want:   "Workspace brief",
@@ -86,6 +81,24 @@ func TestTheAuthorLabelComesFromTheOrigin(t *testing.T) {
 				t.Fatalf("author = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// A RESUMPTION AFTER RESTART IS UNDER THE HOOD (owner ruling, 2026-10-12): it
+// replaces the earlier rule that it drew a row labelled "Resumed after
+// restart". Its turn runs and shows as status; no prompt row is drawn.
+func TestAResumptionAfterRestartDrawsNoPromptRow(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	h.promptWith("turn-1", conversationv1.PromptOrigin_PROMPT_ORIGIN_RESUME_AFTER_RESTART, textBlock("continue"))
+
+	// Assert.
+	for _, row := range h.rows(rootFeed()) {
+		if row.GetUserPrompt() != nil {
+			t.Fatalf("drew a user-prompt row %v for the daemon's resumption", row)
+		}
 	}
 }
 

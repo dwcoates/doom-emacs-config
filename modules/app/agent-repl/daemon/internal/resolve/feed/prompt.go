@@ -121,6 +121,16 @@ func (r *resolver) drawAgentPrompt(s *wsState, agent *conversationv1.AgentId, pr
 				dlog.Context{"turn": turn.GetValue()})
 			return
 		}
+		// A RESUMPTION AFTER RESTART IS THE DAEMON'S INSTRUCTION, NOT WORDS
+		// ANYONE SAID (promptqueue/restartredrive.go). Its turn opened above
+		// and runs as any turn; it is shown only as the status a running turn
+		// shows, so no bubble is drawn, live or on replay.
+		if PromptRowHidden(prompt.GetOrigin()) {
+			log.Debug("daemon.feed.resume_prompt_suppressed",
+				"a resumption after restart opened its turn and drew no user-prompt bubble",
+				dlog.Context{"turn": turn.GetValue()})
+			return
+		}
 		if !placed {
 			return
 		}
@@ -364,6 +374,14 @@ func AuthorLabel(origin conversationv1.PromptOrigin) string {
 		return "Vendor"
 	}
 	return "You"
+}
+
+// PromptRowHidden reports whether a prompt of origin draws no user-prompt row
+// in the feed: the daemon's resumption after restart, which is an instruction
+// the daemon gives, not words anyone said. The queue's mirror of an accepted
+// prompt reads the SAME answer, so the mirror and the replayed draw agree.
+func PromptRowHidden(origin conversationv1.PromptOrigin) bool {
+	return origin == conversationv1.PromptOrigin_PROMPT_ORIGIN_RESUME_AFTER_RESTART
 }
 
 // drawUserBlocks resolves what a person composed into drawable blocks, with

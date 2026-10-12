@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -52,7 +53,9 @@ type fakeDB struct {
 	held       map[ids.TurnID]*wsm.HeldPrompt
 	order      []ids.TurnID
 	turns      map[ids.TurnID]*wsm.Turn
-	schedule   *wsm.DrainSchedule
+	// owed is the resumptions a stand-down owes, by workspace.
+	owed     map[ids.WorkspaceID]map[ids.TurnID]bool
+	schedule *wsm.DrainSchedule
 
 	// closedTurns records every CloseTurn, and orphaned every CloseOrphans.
 	closedTurns map[ids.TurnID]wsm.TurnClose
@@ -380,6 +383,47 @@ func (d *fakeDB) Turn(_ context.Context, id ids.WorkspaceID, turn ids.TurnID) (w
 		return wsm.Turn{}, fmt.Errorf("fake turn %s of %s: %w", turn, id, wsm.ErrNotFound)
 	}
 	return *t, nil
+}
+
+// OweResumption records a stand-down's debt.
+func (d *fakeDB) OweResumption(_ context.Context, ws ids.WorkspaceID, turn ids.TurnID, _ time.Time) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.owed == nil {
+		d.owed = map[ids.WorkspaceID]map[ids.TurnID]bool{}
+	}
+	if d.owed[ws] == nil {
+		d.owed[ws] = map[ids.TurnID]bool{}
+	}
+	d.owed[ws][turn] = true
+	return nil
+}
+
+// ClaimResumptions takes every debt ws is owed.
+func (d *fakeDB) ClaimResumptions(_ context.Context, ws ids.WorkspaceID) (int, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	n := len(d.owed[ws])
+	delete(d.owed, ws)
+	return n, nil
+}
+
+// OwedTurns answers the debts ws is owed, unclaimed.
+func (d *fakeDB) OwedTurns(_ context.Context, ws ids.WorkspaceID) ([]ids.TurnID, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	var out []ids.TurnID
+	for turn := range d.owed[ws] {
+		out = append(out, turn)
+	}
+	return out, nil
+}
+
+// owedCount answers how many resumptions ws is owed.
+func (d *fakeDB) owedCount(ws ids.WorkspaceID) int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return len(d.owed[ws])
 }
 
 func (d *fakeDB) CloseTurn(_ context.Context, turn ids.TurnID, _ time.Time, how wsm.TurnClose) error {
@@ -1404,6 +1448,8 @@ func (n *noteRecorder) count() int {
 
 // harness is one wired queue and every fake behind it.
 type harness struct {
+	// standingDown is the supervisor's stand-down latch the queue reads.
+	standingDown atomic.Bool
 	// statErr is what reading any workspace directory answers.
 	statErr error
 	q       *queue
@@ -1499,6 +1545,7 @@ func newHarness(t *testing.T) *harness {
 		Watcher:        func(ids.WorkspaceID) (Watcher, bool) { return h.watcher, !h.noSession && !h.noWatcher },
 		SessionStarted: func(ids.WorkspaceID) bool { return !h.noSession && !h.notStarted },
 		SessionAbsent:  func(ids.WorkspaceID) bool { return h.sessionAbsent },
+		StandingDown:   h.standingDown.Load,
 		ColdGate: func(ids.WorkspaceID) (string, bool) {
 			return h.coldGate, h.coldGate != ""
 		},

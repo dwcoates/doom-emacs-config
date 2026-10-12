@@ -730,6 +730,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Watcher:        fleet.Watcher,
 		SessionStarted: fleet.Serving,
 		SessionAbsent:  fleet.SessionAbsent,
+		StandingDown:   supervisor.StandingDown,
 		ColdGate:       fleet.ColdGateDetail,
 		DrainRefusals:  refusalNoter{ref: &drainController},
 		// A held-prompt edit is state on the host view; the server exists only
