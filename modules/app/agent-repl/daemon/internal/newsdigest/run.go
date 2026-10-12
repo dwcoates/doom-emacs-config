@@ -170,6 +170,24 @@ func (d *Digester) run(ctx context.Context, trigger string, onlyIfDue bool) (out
 		return outcome{}, nil
 	}
 
+	latest, err := decodeStanding(state.LatestOverlay)
+	if err != nil {
+		log.Error(opIpo, "the latest news digest did not decode; its IPO outlook cannot be handed on", dlog.Context{"cause": err.Error()})
+		return outcome{}, err
+	}
+	ipo, err := d.condenser.ipoOutlook(ctx, ended, latest.GetIpo())
+	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			log.Info(opRun, "the news digest run ended with its context (the daemon stood down, or the refresh's caller left); nothing was recorded", dlog.Context{"cause": ctxErr.Error()})
+			return outcome{}, ctxErr
+		}
+		return outcome{}, d.modelFailed(ctx, log, "the model could not give the news digest's IPO outlook", newEntries, err)
+	}
+	log.Info(opIpo, "the news digest's IPO outlook", dlog.Context{
+		"anthropic": ipo.GetAnthropic().GetEstimate().GetText(), "openai": ipo.GetOpenai().GetEstimate().GetText(),
+		"had_prior": latest.GetIpo() != nil,
+	})
+
 	from := since
 	if carried != nil {
 		from = time.UnixMilli(carried.GetHeader().GetPeriod().GetFromMs())
@@ -200,6 +218,7 @@ func (d *Digester) run(ctx context.Context, trigger string, onlyIfDue bool) (out
 		Sections: sections,
 		Sources:  &frontendv1.NewsDigestSources{Sources: sources},
 		Week:     week,
+		Ipo:      ipo,
 	}
 	encoded, err := proto.Marshal(overlay)
 	if err != nil {
