@@ -11940,7 +11940,12 @@ describe("the durable log sink being poisoned", () => {
     const h = harness({ engineFactory: freshCreateEngine });
 
     expect(h.engine.pushes.faultCount).toBeGreaterThan(0);
-  });
+    // ITS OWN BOUND, NOT THE SUITE'S 2.5s. The poisoning is permanent and the
+    // suite's logger is configured once, so this test re-imports the engine's
+    // whole module graph over a fresh logger (`vi.resetModules`): 1.2s on an
+    // idle host, and past 2.5s under a loaded full run (2026-10-12). The cost
+    // is the isolation, not the engine; the bound is about 4x the idle cost.
+  }, 5000);
 });
 
 /**
