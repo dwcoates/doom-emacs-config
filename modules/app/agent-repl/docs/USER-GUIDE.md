@@ -147,6 +147,10 @@ These clicks jump to an entry in the feed:
   - A failed merge leaves the merge workspace open where it stopped, for you to finish.
 - **A merge workspace nobody has used for 15 calendar days is removed.**
   - The bubble's button then reads `merge workspace removed` and does nothing.
+- **Your own workspace is retired a day after its async merge lands, if nobody has used it since.**
+  - Its session stops, its worktree is removed, and it moves to Recently Merged, as a sync merge leaves it.
+  - Its branch is kept.
+  - It is kept while it holds commits or changes the merge did not take, while anything runs or is held in it, or while another open workspace was cut from it.
 
 ## File links in prompts and responses
 
