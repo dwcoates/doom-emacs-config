@@ -62,8 +62,11 @@ type fakeDB struct {
 	ledger        map[ids.WorkspaceID][]wsm.MergeLedgerEntry
 	queues        map[wsm.RepoKey][]wsm.MergeQueueEntry
 	paused        map[wsm.RepoKey]bool
-	repos         []wsm.Repository
-	seq           int
+	// rolloutHold is the rollout hold; rolloutHoldErr fails its read.
+	rolloutHold    wsm.RolloutHold
+	rolloutHoldErr error
+	repos          []wsm.Repository
+	seq            int
 	// onPausedRead, when set, runs at the start of every MergeQueuePaused
 	// read, outside the fake's lock, so a test can hold an admission step in
 	// flight; pausedReads counts those reads.
@@ -583,6 +586,25 @@ func (f *fakeDB) SetMergeQueuePaused(_ context.Context, repo wsm.RepoKey, paused
 	defer f.mu.Unlock()
 	f.paused[repo] = paused
 	return nil
+}
+
+func (f *fakeDB) SetMergeRolloutHold(_ context.Context, held bool, at time.Time) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !held {
+		f.rolloutHold = wsm.RolloutHold{}
+		return nil
+	}
+	if !f.rolloutHold.Held {
+		f.rolloutHold = wsm.RolloutHold{Held: true, Since: at}
+	}
+	return nil
+}
+
+func (f *fakeDB) MergeRolloutHold(context.Context) (wsm.RolloutHold, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.rolloutHold, f.rolloutHoldErr
 }
 
 func (f *fakeDB) MergeQueuePaused(_ context.Context, repo wsm.RepoKey) (bool, error) {

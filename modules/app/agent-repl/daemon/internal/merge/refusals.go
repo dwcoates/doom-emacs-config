@@ -53,6 +53,12 @@ const (
 	// ArmNotPaused refuses an unpause of a queue that is not paused
 	// (UpdateMergeQueueError.not_paused).
 	ArmNotPaused = "not_paused"
+	// ArmRolloutsAlreadyHeld refuses a hold of rollouts that are already held
+	// (UpdateMergeQueueError.rollouts_already_held).
+	ArmRolloutsAlreadyHeld = "rollouts_already_held"
+	// ArmRolloutsNotHeld refuses a release of rollouts that are not held
+	// (UpdateMergeQueueError.rollouts_not_held).
+	ArmRolloutsNotHeld = "rollouts_not_held"
 	// ArmUnknownSourceWorkspace refuses a request whose source workspace is
 	// not open, is in another repository, or is the requester itself
 	// (MergeWorkspaceError.unknown_source_workspace).
