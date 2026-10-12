@@ -107,6 +107,10 @@ func MainAt(m *testing.M, module string) int {
 		return 1
 	}
 	defer host.Close()
+	if err := useDefaultArtifacts(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
 	return WithRunRoot(func() int { return mainIn(m, module, runRoot) })
 }
 
