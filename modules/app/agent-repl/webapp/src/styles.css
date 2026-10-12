@@ -564,7 +564,7 @@
    They are drawn here to the native bezel's measured geometry and colors
    (test/webkit/control.webkit.test.ts holds the geometry to a real button's):
    the same box, a rounded fill, a hairline ring and a soft drop. */
-:where(.perm-actions ar-button, .outcome-marker-actions ar-button, .response-cut-short-actions ar-button, ar-button.composer-send, ar-button.command-refused-support, ar-button.merge-workspace-switch-button, ar-button.merge-queue-front) {
+:where(.perm-actions ar-button, .outcome-marker-actions ar-button, .response-cut-short-actions ar-button, ar-button.composer-send, ar-button.command-refused-support, ar-button.merge-workspace-switch-button) {
   min-height: 15px;
   padding: 1px 8px 2px 8px;
   border: 1px solid transparent;
@@ -575,15 +575,15 @@
   background-color: #ffffff;
   box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.14), inset 0 -0.5px 0 rgba(0, 0, 0, 0.18);
 }
-:where(.perm-actions ar-button, .outcome-marker-actions ar-button, .response-cut-short-actions ar-button, ar-button.composer-send, ar-button.command-refused-support, ar-button.merge-workspace-switch-button, ar-button.merge-queue-front)[aria-disabled="true"] {
+:where(.perm-actions ar-button, .outcome-marker-actions ar-button, .response-cut-short-actions ar-button, ar-button.composer-send, ar-button.command-refused-support, ar-button.merge-workspace-switch-button)[aria-disabled="true"] {
   box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.08), inset 0 -0.5px 0 rgba(0, 0, 0, 0.1);
 }
 @media (prefers-color-scheme: dark) {
-  :where(.perm-actions ar-button, .outcome-marker-actions ar-button, .response-cut-short-actions ar-button, ar-button.composer-send, ar-button.command-refused-support, ar-button.merge-workspace-switch-button, ar-button.merge-queue-front) {
+  :where(.perm-actions ar-button, .outcome-marker-actions ar-button, .response-cut-short-actions ar-button, ar-button.composer-send, ar-button.command-refused-support, ar-button.merge-workspace-switch-button) {
     background-color: rgb(86, 86, 86);
     box-shadow: inset 0 0.5px 0 rgba(255, 255, 255, 0.09), inset 0 0 0 0.5px rgba(0, 0, 0, 0.25);
   }
-  :where(.perm-actions ar-button, .outcome-marker-actions ar-button, .response-cut-short-actions ar-button, ar-button.composer-send, ar-button.command-refused-support, ar-button.merge-workspace-switch-button, ar-button.merge-queue-front)[aria-disabled="true"] {
+  :where(.perm-actions ar-button, .outcome-marker-actions ar-button, .response-cut-short-actions ar-button, ar-button.composer-send, ar-button.command-refused-support, ar-button.merge-workspace-switch-button)[aria-disabled="true"] {
     background-color: rgb(58, 58, 58);
   }
 }
@@ -7445,19 +7445,64 @@ ar-button.outcome-marker-pill {
 .merge-queue-entry[data-queue-place="current"] {
   background: color-mix(in srgb, var(--accent) 9%, transparent);
 }
-/* The name is the one elastic cell, so a long one ends in an ellipsis rather
-   than widening the table; it centers itself in its row like the flex cells. */
-.merge-queue-line > .merge-queue-label {
-  display: block;
-  align-self: center;
+/* The workspace cell is the move chevrons, then the name. The name is the one
+   elastic part, so a long one ends in an ellipsis rather than widening the
+   table. */
+.merge-queue-workspace { gap: 0.35em; }
+.merge-queue-workspace > .merge-queue-label {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+/* THE MOVE CHEVRONS (owner request, 2026-10-12): two small, muted chevrons
+   left of a waiting merge's name, brightening under the pointer. The slot is
+   the same width on every row, the merge running's empty, so every name
+   starts in one column. Each chevron is drawn by its borders, so up and down
+   are the same shape in every font. */
+.merge-queue-moves {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  width: 2.2em;
+}
+ar-button.merge-queue-move {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.1em;
+  height: 1.1em;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: none;
+  font: inherit;
+  color: var(--muted);
+  opacity: 0.55;
+  cursor: pointer;
+}
+ar-button.merge-queue-move::before {
+  content: "";
+  width: 0.32em;
+  height: 0.32em;
+  border-top: 1.5px solid currentColor;
+  border-left: 1.5px solid currentColor;
+}
+ar-button.merge-queue-move[data-merge-move="up"]::before { transform: translateY(0.08em) rotate(45deg); }
+ar-button.merge-queue-move[data-merge-move="down"]::before { transform: translateY(-0.08em) rotate(225deg); }
+ar-button.merge-queue-move:hover {
+  opacity: 1;
+  color: var(--fg);
+  background: rgba(128, 128, 128, 0.18);
+}
+ar-button.merge-queue-move[aria-disabled="true"] {
+  opacity: 0.18;
+  color: var(--muted);
+  background: none;
+  cursor: default;
 }
 .merge-queue-stage { color: var(--muted); }
 .merge-queue-entry > .merge-queue-refusal,
 .merge-queue-entry > .refusal { grid-column: 1 / -1; }
-/* The front control on this workspace's own waiting row, after its stage. */
-.merge-queue-stage > .merge-queue-front { margin-left: 0.5em; }
 .merge-queue-refusal { color: var(--err); font-size: 0.85em; }
 
 /* The test suites and their daemon-painted output. */
