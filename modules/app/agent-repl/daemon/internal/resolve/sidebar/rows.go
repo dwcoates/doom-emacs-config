@@ -298,4 +298,3 @@ func (r *resolver) logArmChange(ws ids.WorkspaceID, arm, previous, cause string)
 	r.logFor(ws).Info("daemon.sidebar.status_arm_changed", "the roster published a new status arm for the row",
 		dlog.Context{"arm": arm, "previous_arm": previous, "cause": cause})
 }
-
