@@ -512,6 +512,14 @@ func runWithLogger(options Options, logf *logging.Bound, stop <-chan os.Signal) 
 		return err
 	}
 	defer closePprofSurface(pprofSurface, logf)
+	// RUNTIME PROFILING is armed beside the surface: a session the collector
+	// opens (bin/profile-agent-repl.sh) starts it on SIGUSR2 without a restart.
+	stopProfiling, err := startRuntimeProfiling(logf, os.Getenv, os.UserHomeDir)
+	if err != nil {
+		logf.With(logging.Context{Operation: "profiling.arm", Level: "error"}).Log("arming the runtime profiler failed: %v", err)
+		return err
+	}
+	defer stopProfiling()
 	// THE CATCH-UP WINDOW OPENS BEFORE ANY FILE IS READ and closes when the
 	// first full poll pass has drained the corpus that was already on disk. The
 	// operations named here are the ones the boot walk restates wholesale.
