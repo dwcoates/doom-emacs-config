@@ -44,7 +44,7 @@ func TestAHandoverWithANewerShimBuildBouncesTheAdoptedShimCleanly(t *testing.T) 
 	// Arrange: a session on a first daemon, which then stands down its shim,
 	// so the cold boot below SPAWNS the session afresh -- the live
 	// incumbent's own shims were its cold boot's spawns.
-	first := newDaemon(t, harness.Opts{})
+	first := newDaemon(t, harness.Opts{DurableState: true})
 	f := drainOpenWorkspace(t, first)
 	f.shim.ExpectStartSession()
 	f.shim.ExpectWatchSession()

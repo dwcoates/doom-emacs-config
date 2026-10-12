@@ -37,7 +37,8 @@ func TestStoppingTheDaemonInsideAMergesTerminalStampsTheLandingWithNoFailedWrite
 	selfRepo := harness.NewRepo(t) // distinct identity; never a target.
 	repo := harness.NewRepo(t)
 	d := harness.StartDaemon(t, harness.Opts{
-		SelfRepo: selfRepo.Dir,
+		DurableState: true,
+		SelfRepo:     selfRepo.Dir,
 		// The daemon's own MergeTerminalPauseEnv. It is spelled here rather
 		// than imported: the knob lives in package main, which no test binary
 		// can import.
@@ -120,7 +121,7 @@ func TestAMergeStoppedInItsTestGateResumesAfterARestartAndLands(t *testing.T) {
 	repo := harness.NewRepo(t)
 	env, started := firstRunHoldsGate(t)
 	// A merge-spanning wait chains dozens of subprocesses; see harness.MergeChainTimeout.
-	d := harness.StartDaemon(t, harness.Opts{SelfRepo: repo.Dir, Timeout: harness.MergeChainTimeout, ExtraEnv: env})
+	d := harness.StartDaemon(t, harness.Opts{DurableState: true, SelfRepo: repo.Dir, Timeout: harness.MergeChainTimeout, ExtraEnv: env})
 	repoRef := mergeRepositoryRef(t, d, repo)
 	f := mergeCreateChild(t, d, repoRef, "resumed", "do the resumed thing", nil)
 	harness.CommitWork(t, f.ws.GetDir())
@@ -196,7 +197,7 @@ func TestAMergeRunningThroughAHandoverResumesInTheSuccessorAndLands(t *testing.T
 	repo := harness.NewRepo(t)
 	env, started := firstRunHoldsGate(t)
 	// The handover chains a second real daemon's boot onto this one's context.
-	d := harness.StartDaemon(t, harness.Opts{SelfRepo: repo.Dir, Timeout: harness.HandoverChainTimeout, ExtraEnv: env})
+	d := harness.StartDaemon(t, harness.Opts{DurableState: true, SelfRepo: repo.Dir, Timeout: harness.HandoverChainTimeout, ExtraEnv: env})
 	repoRef := mergeRepositoryRef(t, d, repo)
 	f := mergeCreateChild(t, d, repoRef, "handed", "do the handed thing", nil)
 	harness.CommitWork(t, f.ws.GetDir())

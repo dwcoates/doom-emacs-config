@@ -23,7 +23,7 @@ import (
 func TestASuccessorHandedNothingRecoversTheShimNobodyServes(t *testing.T) {
 	t.Parallel()
 	// Arrange: a live session, and a successor joined to its daemon.
-	f := newOpened(t, harness.Opts{})
+	f := newOpened(t, harness.Opts{DurableState: true})
 	f.shim.ExpectStartSession()
 	f.shim.ExpectWatchSession()
 	watchesBefore := f.shim.Count(harness.RPCWatchSession)

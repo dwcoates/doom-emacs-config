@@ -210,7 +210,7 @@ func TestTheStandingNewsDigestSurvivesARestart(t *testing.T) {
 	t.Parallel()
 	// Arrange.
 	env := newsDigestEnv(t)
-	d1 := newDaemon(t, harness.Opts{ExtraEnv: env})
+	d1 := newDaemon(t, harness.Opts{DurableState: true, ExtraEnv: env})
 	shown := refreshDigest(t, d1, d1.WatchWebviewDaemonStream())
 	d1.Stop()
 

@@ -995,7 +995,7 @@ func TestUpdateTaskWithABlankTitleAnswersBlankTitle(t *testing.T) {
 func TestTasksAndWorkspaceAssignmentsSurviveADaemonRestart(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newRegistered(t, harness.Opts{})
+	f := newRegistered(t, harness.Opts{DurableState: true})
 	task := createTask(t, f, "outlives the daemon")
 	assignTask(t, f, task)
 	if _, err := f.d.Client().UpdateTask(f.d.Ctx(), connect.NewRequest(&agentreplv1.UpdateTaskRequest{

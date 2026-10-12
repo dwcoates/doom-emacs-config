@@ -3,6 +3,7 @@ package harness
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -59,5 +60,53 @@ func TestInstallFakeGitInstallsAnExecutable(t *testing.T) {
 	}
 	if info.Mode().Perm()&0o111 == 0 {
 		t.Fatalf("installed git mode = %v, want it executable", info.Mode())
+	}
+}
+
+func TestFreshRootInMemory(t *testing.T) {
+	tests := []struct {
+		name string
+		opts Opts
+		want bool
+	}{
+		{name: "a plain fresh root keeps its state in memory", opts: Opts{}, want: true},
+		{name: "a root asked to be durable keeps the file", opts: Opts{DurableState: true}, want: false},
+		{name: "a joining daemon keeps the file it joins", opts: Opts{Joining: "127.0.0.1:1"}, want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := freshRootInMemory(tc.opts)
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("freshRootInMemory(%+v) = %v, want %v", tc.opts, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRefuseInMemoryReuseRefusesARootWhoseFirstDaemonRanInMemory(t *testing.T) {
+	// Arrange
+	root := filepath.Join(t.TempDir(), "state")
+	inMemoryRoots.Store(root, true)
+	t.Cleanup(func() { inMemoryRoots.Delete(root) })
+
+	// Act
+	err := refuseInMemoryReuse(root)
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "DurableState") {
+		t.Fatalf("refuseInMemoryReuse = %v, want a refusal naming DurableState", err)
+	}
+}
+
+func TestRefuseInMemoryReuseAcceptsADurableRoot(t *testing.T) {
+	// Act
+	err := refuseInMemoryReuse(filepath.Join(t.TempDir(), "state"))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("refuseInMemoryReuse = %v, want a root never run in memory accepted", err)
 	}
 }

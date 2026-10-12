@@ -58,7 +58,7 @@ func TestRegisterWorkspaceIsIdempotentAcrossSpellings(t *testing.T) {
 func TestRegisterWorkspaceAfterARestartIsIdempotent(t *testing.T) {
 	t.Parallel()
 	// Arrange: register once, then restart the daemon on the same state root.
-	f := newRegistered(t, harness.Opts{})
+	f := newRegistered(t, harness.Opts{DurableState: true})
 	firstID := f.ws.GetId()
 	f.d.Stop()
 	d2 := harness.StartDaemon(t, harness.Opts{StateDir: f.d.StateDir})
@@ -390,7 +390,7 @@ func TestRegisteringAClosedWorkspaceReopensIt(t *testing.T) {
 func TestTheRosterDropsARepositoryWhoseDirectoryIsGone(t *testing.T) {
 	t.Parallel()
 	// Arrange: a registered workspace whose whole repository is then deleted.
-	f := newRegistered(t, harness.Opts{})
+	f := newRegistered(t, harness.Opts{DurableState: true})
 	roster := f.d.WatchRoster()
 	awaitRoster(t, f.d, roster, "the registered row", func(r *frontendv1.WorkspaceRoster) bool {
 		return rosterRow(r, f.ws.GetId()) != nil
@@ -432,7 +432,7 @@ func TestRegisterWorkspaceAnswersWhileTheBootsOwnBringUpIsStuck(t *testing.T) {
 	// The workspace stays OPEN with a recorded conversation and no live shim
 	// -- exactly what the boot's own reconciliation hands BringUp as
 	// "pending bring-up" on the next boot.
-	f := newOpened(t, harness.Opts{})
+	f := newOpened(t, harness.Opts{DurableState: true})
 	f.d.ExpectWarnings("daemon.shimclient.exit", "daemon.shimclient.kill_session",
 		"daemon.sessionwatcher.link_fault", "daemon.sessionwatcher.watch_session",
 		"daemon.sessionwatcher.watch_agent", "daemon.workspace.kill",

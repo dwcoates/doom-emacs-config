@@ -47,7 +47,7 @@ func TestBootWritesAndRemovesTheAddressFile(t *testing.T) {
 func TestSecondDaemonOnTheSameStateRootRefusesToBoot(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	incumbent := newDaemon(t, harness.Opts{})
+	incumbent := newDaemon(t, harness.Opts{DurableState: true})
 	// The run log is a symlink each runtime relinks onto its own file, so this
 	// daemon's sweep reads the SUCCESSOR's records; it declares the same list.
 	incumbent.ExpectWarnings("daemon.cmd.claim")
@@ -82,7 +82,7 @@ func TestSecondDaemonOnTheSameStateRootRefusesToBoot(t *testing.T) {
 func TestJoiningDaemonDoesNotClaimTheAddressFile(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	incumbent := newDaemon(t, harness.Opts{})
+	incumbent := newDaemon(t, harness.Opts{DurableState: true})
 	before, err := os.ReadFile(incumbent.AddrFile())
 	if err != nil {
 		t.Fatalf("read the incumbent's daemon.addr: %v", err)
@@ -359,7 +359,7 @@ func TestCloseWorkspaceRemovesTheLogSinkSymlink(t *testing.T) {
 func TestDaemonRestartAppendsToTheRunLog(t *testing.T) {
 	t.Parallel()
 	// Arrange: first boot; capture its own records and pid before stopping it.
-	d1 := newDaemon(t, harness.Opts{})
+	d1 := newDaemon(t, harness.Opts{DurableState: true})
 	d1.AwaitRunLogOperation("daemon.pprof.disabled")
 	firstPID := d1.PID()
 	runLogPath := d1.RunLogPath()
@@ -414,7 +414,7 @@ func TestBootRefusesAForeignLayoutVersion(t *testing.T) {
 	// Arrange: a fresh boot stamps the layout row, then is stopped so the
 	// row can be corrupted (the daemon holds the sole writing handle while
 	// it runs).
-	d := newDaemon(t, harness.Opts{})
+	d := newDaemon(t, harness.Opts{DurableState: true})
 	// The run log is a symlink each runtime relinks onto its own file, so this
 	// daemon's sweep reads the SUCCESSOR's records; it declares the same list.
 	d.ExpectWarnings("daemon.cmd.state", "daemon.wsm.open")
@@ -455,7 +455,7 @@ func TestBootRefusesAForeignLayoutVersion(t *testing.T) {
 func TestBootRefusesACorruptTaskRow(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	d := newDaemon(t, harness.Opts{})
+	d := newDaemon(t, harness.Opts{DurableState: true})
 	// The run log is a symlink each runtime relinks onto its own file, so this
 	// daemon's sweep reads the SUCCESSOR's records; it declares the same list.
 	d.ExpectWarnings("daemon.cmd.serve", "daemon.workspace.register", "daemon.wsm.tasks")
@@ -509,7 +509,7 @@ func TestBootRefusesACorruptSessionRowOfAnAdoptedWorkspace(t *testing.T) {
 	// which SysProcAttr.Setpgid puts in its own process group) leaves the
 	// shim holding its kernel lock, which is what selects the ADOPT path on
 	// restart rather than a fresh spawn.
-	f := newOpened(t, harness.Opts{})
+	f := newOpened(t, harness.Opts{DurableState: true})
 	// The sweep covers every test; the declared records are evidence of the state row the test corrupts.
 	f.d.ExpectWarnings("daemon.boot.adopt", "daemon.wsm.session")
 	f.d.Kill()
@@ -563,7 +563,7 @@ func TestBootRefusesACorruptCreationJobOfAnAdmittedMerge(t *testing.T) {
 	// merge recovery reads both without going through the ordinary merge rpc
 	// flow, and CreationJob's own scan validates actions_before/actions_after
 	// as JSON regardless of how the row was written.
-	f := newRegistered(t, harness.Opts{})
+	f := newRegistered(t, harness.Opts{DurableState: true})
 	f.d.Stop()
 	// The run log is a symlink each runtime relinks onto its own file, so this
 	// daemon's sweep reads the SUCCESSOR's records; it declares the same list.
@@ -763,7 +763,7 @@ func TestBootServesThoughASurvivingShimIsUnreachable(t *testing.T) {
 	t.Parallel()
 	// Arrange: a live session, then the daemon alone is killed. SysProcAttr
 	// puts the shim in its own process group, so it survives holding the lock.
-	f := newOpened(t, harness.Opts{})
+	f := newOpened(t, harness.Opts{DurableState: true})
 	socket := f.d.SocketPath(f.ws)
 	f.d.Kill()
 	if err := os.Remove(socket); err != nil {
@@ -800,7 +800,7 @@ func TestBootServesThoughASurvivingShimIsUnreachable(t *testing.T) {
 func TestAnUnreachableSurvivorsAdoptionIsRecordedAtError(t *testing.T) {
 	t.Parallel()
 	// Arrange.
-	f := newOpened(t, harness.Opts{})
+	f := newOpened(t, harness.Opts{DurableState: true})
 	socket := f.d.SocketPath(f.ws)
 	f.d.Kill()
 	if err := os.Remove(socket); err != nil {
@@ -836,7 +836,7 @@ func TestAnUnreachableSurvivorsAdoptionIsRecordedAtError(t *testing.T) {
 func TestAnUnadoptedSurvivorWithNoManifestKeepsItsBounceUnknownStanding(t *testing.T) {
 	t.Parallel()
 	// Arrange: the survivor holds its lock and its socket path is gone.
-	f := newOpened(t, harness.Opts{})
+	f := newOpened(t, harness.Opts{DurableState: true})
 	socket := f.d.SocketPath(f.ws)
 	f.d.Kill()
 	if err := os.Remove(socket); err != nil {
@@ -882,7 +882,7 @@ func TestAnUnhealthySurvivorIsAdoptedWithinTheBound(t *testing.T) {
 	t.Parallel()
 	// Arrange: the shim answers every stream unhealthy, and the daemon alone
 	// is killed so the shim survives holding the workspace lock.
-	f := newRegistered(t, harness.Opts{})
+	f := newRegistered(t, harness.Opts{DurableState: true})
 	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{OpeningFault: "the store is unreachable"})
 	f.d.ExpectWarnings("daemon.shimclient.ready", "daemon.health.open_fault", "daemon.health.session")
 	f.open()
@@ -944,7 +944,7 @@ func TestAStaleAddressFileIsReportedAndOverwritten(t *testing.T) {
 	t.Parallel()
 	// Arrange: a daemon that published an address and was SIGKILLed, so it
 	// never ran its withdrawal.
-	d := newDaemon(t, harness.Opts{})
+	d := newDaemon(t, harness.Opts{DurableState: true})
 	stale, err := os.ReadFile(d.AddrFile())
 	if err != nil {
 		t.Fatalf("read the incumbent's daemon.addr: %v", err)
@@ -1001,7 +1001,7 @@ func TestARestartKeepsThePreviousInstancesWorkspaceRecordsReadable(t *testing.T)
 	t.Parallel()
 	// Arrange: an opened workspace, whose bring-up wrote workspace-bound
 	// records, and the pid that wrote them.
-	f := newOpened(t, harness.Opts{})
+	f := newOpened(t, harness.Opts{DurableState: true})
 	firstPID := f.d.PID()
 	if len(f.d.WorkspaceLog(f.repo.Dir, "daemon")) == 0 {
 		t.Fatal("the first daemon wrote no workspace records to append to")
@@ -1053,7 +1053,7 @@ func TestBootClosesAWorkspaceWhoseDirectoryAndBranchAreGone(t *testing.T) {
 	// Arrange: a registered workspace on a WORKTREE -- a workspace at the
 	// repository root is one whose removal takes the repository with it -- then
 	// the daemon is stopped and the directory and its branch removed under it.
-	d := newDaemon(t, harness.Opts{})
+	d := newDaemon(t, harness.Opts{DurableState: true})
 	repo := harness.NewRepo(t)
 	dir := worktreeOf(t, repo, "swept")
 	ws := harness.Register(t, d, dir)
@@ -1096,7 +1096,7 @@ func TestBootClosesAWorkspaceWhoseDirectoryAndBranchAreGone(t *testing.T) {
 func TestBootRecreatesAnOpenWorkspaceWhoseBranchSurvives(t *testing.T) {
 	t.Parallel()
 	// Arrange.
-	d := newDaemon(t, harness.Opts{})
+	d := newDaemon(t, harness.Opts{DurableState: true})
 	repo := harness.NewRepo(t)
 	dir := worktreeOf(t, repo, "recreated")
 	ws := harness.Register(t, d, dir)
@@ -1131,7 +1131,7 @@ func TestBootRecreatesAnOpenWorkspaceWhoseBranchSurvives(t *testing.T) {
 func TestBootNeverRecreatesAMergedWorkspace(t *testing.T) {
 	t.Parallel()
 	// Arrange.
-	d := newDaemon(t, harness.Opts{})
+	d := newDaemon(t, harness.Opts{DurableState: true})
 	repo := harness.NewRepo(t)
 	dir := worktreeOf(t, repo, "landed")
 	ws := harness.Register(t, d, dir)
@@ -1197,7 +1197,7 @@ func TestOpenWorkspaceRestoresAWorktreeGitStillRegisters(t *testing.T) {
 // over the removal.
 func vanishedWorktree(t *testing.T, repo *harness.Repo, name string) (*harness.Daemon, *workspacev1.WorkspaceRef) {
 	t.Helper()
-	d := newDaemon(t, harness.Opts{})
+	d := newDaemon(t, harness.Opts{DurableState: true})
 	dir := worktreeOf(t, repo, name)
 	ws := harness.Register(t, d, dir)
 	// CLOSED FIRST: the boot recreates an OPEN workspace's worktree itself,
@@ -1315,7 +1315,7 @@ func TestOpenWorkspaceNamesTheVanishedDirectoryAndBranchInItsRefusal(t *testing.
 func TestARequestOnAVanishedDirectoryRoutesItsRecordsCentrally(t *testing.T) {
 	t.Parallel()
 	// Arrange.
-	d := newDaemon(t, harness.Opts{})
+	d := newDaemon(t, harness.Opts{DurableState: true})
 	repo := harness.NewRepo(t)
 	dir := worktreeOf(t, repo, "routed")
 	ws := harness.Register(t, d, dir)
@@ -1347,7 +1347,7 @@ func TestARequestOnAVanishedDirectoryRoutesItsRecordsCentrally(t *testing.T) {
 func TestBootCountsTheMissingDirectoryCloseInItsReport(t *testing.T) {
 	t.Parallel()
 	// Arrange.
-	d := newDaemon(t, harness.Opts{})
+	d := newDaemon(t, harness.Opts{DurableState: true})
 	repo := harness.NewRepo(t)
 	dir := worktreeOf(t, repo, "counted")
 	harness.Register(t, d, dir)
@@ -1391,7 +1391,7 @@ const healthAnswerBound = 3 * time.Second
 func TestBootAnswersHealthWhileTheOpenWorkspacesSessionsComeUp(t *testing.T) {
 	t.Parallel()
 	// Arrange: one open workspace, then the daemon that served it stands down.
-	f := newOpened(t, harness.Opts{})
+	f := newOpened(t, harness.Opts{DurableState: true})
 	expectSessionKillRecords(f.d)
 	if _, err := f.d.Client().UpdateShutdownSchedule(f.d.Ctx(), connect.NewRequest(&agentreplv1.UpdateShutdownScheduleRequest{
 		Action: &agentreplv1.UpdateShutdownScheduleRequest_Now{Now: &agentreplv1.UpdateShutdownScheduleNow{

@@ -1133,7 +1133,8 @@ func TestARefusedMidWorkAdoptionFallsBackToFreenessAndNamesTheHoldout(t *testing
 	script.SetExitCode(0)
 	script.SetStdout("daemon: passed in 1s\n")
 	d := harness.StartDaemon(t, harness.Opts{
-		SelfRepo: selfRepo.Dir,
+		DurableState: true,
+		SelfRepo:     selfRepo.Dir,
 		ExtraEnv: []string{
 			"AGENT_REPL_TEST_ALL_SCRIPT=" + script.Path,
 			"AGENT_REPL_HOLDOUT_WARN_EVERY=25ms",
@@ -1379,7 +1380,7 @@ func TestDrainScheduleSurvivesARestartAndTheStandingBannerReappears(t *testing.T
 	t.Parallel()
 	// Arrange: schedule a drain far enough out that it never fires during this
 	// test, and confirm it is standing before the restart.
-	d1 := newDaemon(t, harness.Opts{})
+	d1 := newDaemon(t, harness.Opts{DurableState: true})
 	stream1 := d1.WatchDaemonStream()
 	if _, err := d1.Client().UpdateShutdownSchedule(d1.Ctx(), connect.NewRequest(&agentreplv1.UpdateShutdownScheduleRequest{
 		Action: &agentreplv1.UpdateShutdownScheduleRequest_Schedule{Schedule: &agentreplv1.UpdateShutdownScheduleSchedule{
@@ -1513,8 +1514,9 @@ func drainSelfRepoDaemon(t *testing.T) (*harness.Repo, *harness.Daemon) {
 	script.SetExitCode(0)
 	script.SetStdout("daemon: passed in 1s\n")
 	d := harness.StartDaemon(t, harness.Opts{
-		SelfRepo: selfRepo.Dir,
-		ExtraEnv: []string{"AGENT_REPL_TEST_ALL_SCRIPT=" + script.Path},
+		DurableState: true,
+		SelfRepo:     selfRepo.Dir,
+		ExtraEnv:     []string{"AGENT_REPL_TEST_ALL_SCRIPT=" + script.Path},
 		// Every caller of this fixture drives a real self-reload handover
 		// (drainTriggerDeploy): a second real agent-repld boots and adopts
 		// every workspace within THIS daemon's one context, never a fresh one

@@ -852,7 +852,7 @@ func TestAccountSwitchPortsTheTranscriptAcrossADaemonBoot(t *testing.T) {
 	t.Parallel()
 	// Arrange: a workspace OUTSIDE the multi-repo root, opened so it has a
 	// vendor transcript filed under the default root.
-	f := newOpened(t, harness.Opts{})
+	f := newOpened(t, harness.Opts{DurableState: true})
 	// The arrangement KILLS the session before the reboot, and that trail is
 	// evidence of the kill it asked for.
 	expectSessionKillRecords(f.d)
@@ -1343,7 +1343,7 @@ func TestBuildStalenessBounceRelaunchesAStaleShimAtFreeness(t *testing.T) {
 func TestCrashBootAdoptsARunningShimWithoutASecondSpawn(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newOpened(t, harness.Opts{DurableState: true})
 	f.shim.ExpectStartSession()
 	watchesBefore := f.shim.Count(harness.RPCWatchSession)
 	if watchesBefore == 0 {
@@ -1547,7 +1547,7 @@ func TestCrashBootWithNoManifestRecordsNoBounceUnknownForAnAdoptedWorkspace(t *t
 	t.Parallel()
 	// Arrange: an opened workspace whose shim SURVIVES the daemon's death, so
 	// the successor adopts it.
-	f := newOpened(t, harness.Opts{})
+	f := newOpened(t, harness.Opts{DurableState: true})
 	f.shim.ExpectStartSession()
 
 	// Act: kill the daemon and leave the shim (and its workspace lock) alone,
@@ -1574,7 +1574,7 @@ func TestCrashBootWithNoManifestRecordsNoBounceUnknownForAnAdoptedWorkspace(t *t
 func TestCrashBootWithADeadManifestPidTakesTheOrdinaryDeadShimPath(t *testing.T) {
 	t.Parallel()
 	// Arrange: an opened workspace whose shim will be gone before restart.
-	f := newOpened(t, harness.Opts{})
+	f := newOpened(t, harness.Opts{DurableState: true})
 	f.shim.ExpectStartSession()
 	oldPID := f.shim.Info().PID
 	vendorID := f.shim.Info().VendorSessionID
@@ -1880,7 +1880,7 @@ func TestOpenWorkspaceOnAHibernatedRowSendsStartSessionResume(t *testing.T) {
 	t.Parallel()
 	// Arrange: hibernate the session via the idle sweep, then retire the
 	// daemon that had the cutoff armed.
-	f := newOpened(t, harness.Opts{IdleCutoffMS: 50})
+	f := newOpened(t, harness.Opts{DurableState: true, IdleCutoffMS: 50})
 	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a bring-up the test blocks or kills, a session fault the test opens, the shim death the test drives, the shim link the test severs.
 	f.d.ExpectWarnings("daemon.shimclient.redial", "daemon.sessionwatcher.reopen", "daemon.health.open_fault", "daemon.sessionwatcher.link_fault",
 		"daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.watch_session",
@@ -1910,7 +1910,8 @@ func TestOpenWorkspaceOnAHibernatedRowSendsStartSessionResume(t *testing.T) {
 	// successor given new roots finds no transcript for the vendor session it
 	// is resuming, which is a different subject than this test's.
 	successor := harness.StartDaemon(t, harness.Opts{
-		StateDir: f.d.StateDir,
+		DurableState: true,
+		StateDir:     f.d.StateDir,
 		ExtraArgs: []string{
 			"--default-config-dir", f.d.DefaultConfigDir,
 			"--multi-repo-config-dir", f.d.MultiRepoConfigDir,
@@ -1949,7 +1950,7 @@ func TestOpenWorkspaceOnATerminallyDeletedSessionAnswersSessionDeleted(t *testin
 	t.Parallel()
 	// Arrange: kill to get a real, whole session-terminal row, then corrupt
 	// just its kind to "deleted" (wsm's terminalDeleted spelling).
-	f := newOpened(t, harness.Opts{})
+	f := newOpened(t, harness.Opts{DurableState: true})
 	// The sweep covers every test; the declared records are evidence of a bring-up the test blocks or kills.
 	f.d.ExpectWarnings("daemon.workspace.open")
 	// The arrangement KILLS the session to get a whole session-terminal row.

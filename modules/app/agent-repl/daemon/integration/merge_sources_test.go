@@ -593,9 +593,10 @@ func TestARelaunchedDaemonReplaysARepairTurnInItsTabAlone(t *testing.T) {
 		}),
 	})
 	d2 := harness.StartDaemon(t, harness.Opts{
-		StateDir:   s.d.StateDir,
-		ProfileDir: s.d.ProfileDir,
-		ExtraArgs:  []string{"--default-config-dir", s.d.DefaultConfigDir},
+		DurableState: true,
+		StateDir:     s.d.StateDir,
+		ProfileDir:   s.d.ProfileDir,
+		ExtraArgs:    []string{"--default-config-dir", s.d.DefaultConfigDir},
 	})
 	f2 := &fixture{d: d2, repo: s.repo, ws: s.f.ws, t: t}
 	if again := harness.Register(t, d2, s.f.ws.GetDir()); again.GetId() != s.f.ws.GetId() {
@@ -645,9 +646,10 @@ func TestARelaunchedDaemonDrawsTheLandedMergesBubbleAgain(t *testing.T) {
 	}
 	s.d.AwaitExit()
 	d2 := harness.StartDaemon(t, harness.Opts{
-		StateDir:   s.d.StateDir,
-		ProfileDir: s.d.ProfileDir,
-		ExtraArgs:  []string{"--default-config-dir", s.d.DefaultConfigDir},
+		DurableState: true,
+		StateDir:     s.d.StateDir,
+		ProfileDir:   s.d.ProfileDir,
+		ExtraArgs:    []string{"--default-config-dir", s.d.DefaultConfigDir},
 	})
 	f2 := &fixture{d: d2, repo: s.repo, ws: s.f.ws, t: t}
 	if again := harness.Register(t, d2, s.f.ws.GetDir()); again.GetId() != s.f.ws.GetId() {
