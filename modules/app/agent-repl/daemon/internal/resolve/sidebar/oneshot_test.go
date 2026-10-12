@@ -144,6 +144,55 @@ func TestOneShotOutcome(t *testing.T) {
 			want: "armed",
 		},
 		{
+			name: "a later turn ending while the detached merge stands keeps it armed",
+			ws:   oneShotWorkspace(),
+			arrange: func(r sidebarResolver) {
+				prompt(r)
+				r.SetMergeRequested(theWS, true)
+				endTurn(r)
+				prompt(r)
+				r.AckTurn(theWS)
+				endTurn(r)
+			},
+			want: "armed",
+		},
+		{
+			name: "a detached merge ending without landing fails it",
+			ws:   oneShotWorkspace(),
+			arrange: func(r sidebarResolver) {
+				prompt(r)
+				r.SetMergeRequested(theWS, true)
+				endTurn(r)
+				r.SetDetachedMergeEnded(theWS, false)
+			},
+			want: "failed",
+		},
+		{
+			name: "a detached merge landing keeps it armed",
+			ws:   oneShotWorkspace(),
+			arrange: func(r sidebarResolver) {
+				prompt(r)
+				r.SetMergeRequested(theWS, true)
+				endTurn(r)
+				r.SetDetachedMergeEnded(theWS, true)
+			},
+			want: "armed",
+		},
+		{
+			name: "a detached merge's end leaves no merge live for a later turn",
+			ws:   oneShotWorkspace(),
+			arrange: func(r sidebarResolver) {
+				prompt(r)
+				r.SetMergeRequested(theWS, true)
+				endTurn(r)
+				r.SetDetachedMergeEnded(theWS, true)
+				prompt(r)
+				r.AckTurn(theWS)
+				endTurn(r)
+			},
+			want: "failed",
+		},
+		{
 			name: "a submitted turn that has not reached thinking leaves it failed",
 			ws:   oneShotWorkspace(),
 			arrange: func(r sidebarResolver) {
@@ -314,6 +363,12 @@ func TestOneShotOutcomeChangeIsRecorded(t *testing.T) {
 			name:     "a failed merge",
 			arrange:  func(r sidebarResolver) { r.SetMerge(theWS, mergeFacts("failed")) },
 			wantEdge: "merge_failed",
+			wantFail: true,
+		},
+		{
+			name:     "a detached merge ending without landing",
+			arrange:  func(r sidebarResolver) { r.SetDetachedMergeEnded(theWS, false) },
+			wantEdge: "detached_merge_not_landed",
 			wantFail: true,
 		},
 		{
