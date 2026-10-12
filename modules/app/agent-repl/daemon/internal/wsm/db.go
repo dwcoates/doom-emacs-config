@@ -357,6 +357,9 @@ type DB interface {
 	// bubble's ledger identity, and returns its one-based place among the
 	// entries in line.
 	QueueMerge(ctx context.Context, repo RepoKey, id WorkspaceID, ledger LeaseID) (int, error)
+	// MoveMergeToFront marks a merge a front merge and moves a waiting one
+	// ahead of every ordinary merge waiting, answering whether it moved.
+	MoveMergeToFront(ctx context.Context, repo RepoKey, id WorkspaceID) (bool, error)
 	// AdmitMerge marks the entry the orchestrator is running now.
 	AdmitMerge(ctx context.Context, repo RepoKey, id WorkspaceID) error
 	// RemoveMergeQueueEntry drops one entry with the cause it was dropped for.
