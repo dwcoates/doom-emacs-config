@@ -251,57 +251,92 @@ func moveAhead(ctx context.Context, tx *sql.Tx, key RepoKey, id WorkspaceID, tar
 	return nil
 }
 
-// MoveMergeToFront marks a merge a front merge and, when it is waiting in
-// line, moves it ahead of every ordinary merge waiting, behind the admitted
-// merge and every front merge already in line. It answers whether the merge
-// moved. A merge already at the front, or already admitted, is left where it
-// is; a merge only REQUESTED is marked and takes its front place when it is
-// queued (placeInLine). A workspace with no queue entry is refused.
-func (s *store) MoveMergeToFront(ctx context.Context, repo RepoKey, id WorkspaceID) (bool, error) {
-	const op = "daemon.wsm.move_merge_to_front"
-	key, err := normalizeRepoKey(repo)
-	if err != nil {
-		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(dlog.Context{"repo": string(repo), "workspace": string(id)}, err))
+// MoveMerge moves a merge WAITING in line one place up or down its queue,
+// swapping it with the nearest waiting merge on that side. It answers whether
+// the merge moved.
+//
+// ONLY WAITING MERGES TRADE PLACES. The admitted merge holds the repository's
+// one slot and is never passed, and a merge only REQUESTED is in nobody's line
+// (it takes its place when it is queued), so neither is the neighbor a move
+// swaps with, and neither moves itself. A merge with no waiting neighbor on
+// that side, or a merge not waiting, is left where it is.
+//
+// THE MOVED MERGE TAKES THE PASSED MERGE'S FRONT MARK, so a move can never
+// put an ordinary merge ahead of a front merge or a front merge behind an
+// ordinary one: every front merge stays ahead of every ordinary merge waiting,
+// which is the order placeInLine puts a newly queued front merge into.
+//
+// A workspace with no queue entry is refused.
+func (s *store) MoveMerge(ctx context.Context, repo RepoKey, id WorkspaceID, move MergeMove) (bool, error) {
+	const op = "daemon.wsm.move_merge"
+	fields := dlog.Context{"repo": string(repo), "workspace": string(id), "move": move.String()}
+	if !move.valid() {
+		err := fmt.Errorf("wsm: undeclared merge move %d", int(move))
+		s.log.Error(op, "refused an undeclared merge move", withError(fields, err))
 		return false, err
 	}
-	fields := dlog.Context{"repo": string(key), "workspace": string(id)}
+	key, err := normalizeRepoKey(repo)
+	if err != nil {
+		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(fields, err))
+		return false, err
+	}
+	fields["repo"] = string(key)
 	var moved bool
 	err = s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
 		var state int
 		var seq int64
-		var front bool
-		err := tx.QueryRowContext(ctx, `SELECT state, seq, source_front FROM merge_queue WHERE repo_key = ? AND workspace_id = ?`, key, id).
-			Scan(&state, &seq, &front)
+		err := tx.QueryRowContext(ctx, `SELECT state, seq FROM merge_queue WHERE repo_key = ? AND workspace_id = ?`, key, id).
+			Scan(&state, &seq)
 		if errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("wsm: merge queue entry for workspace %s in repo %q: %w", id, key, ErrNotFound)
 		}
 		if err != nil {
 			return err
 		}
-		if MergeQueueState(state) == MergeAdmitted || front {
-			return nil
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE merge_queue SET source_front = 1 WHERE repo_key = ? AND workspace_id = ?`, key, id); err != nil {
-			return err
-		}
 		if MergeQueueState(state) != MergeQueued {
 			return nil
 		}
-		var waiting sql.NullInt64
-		if err := tx.QueryRowContext(ctx, `SELECT min(seq) FROM merge_queue WHERE repo_key = ? AND state = ? AND source_front = 0 AND seq < ?`,
-			key, int(MergeQueued), seq).Scan(&waiting); err != nil {
-			return err
+		query := `SELECT seq, source_front FROM merge_queue WHERE repo_key = ? AND state = ? AND seq < ? ORDER BY seq DESC LIMIT 1`
+		if move == MergeMoveDown {
+			query = `SELECT seq, source_front FROM merge_queue WHERE repo_key = ? AND state = ? AND seq > ? ORDER BY seq LIMIT 1`
 		}
-		if !waiting.Valid {
+		var neighbor int64
+		var neighborFront bool
+		err = tx.QueryRowContext(ctx, query, key, int(MergeQueued), seq).Scan(&neighbor, &neighborFront)
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
+		if err != nil {
+			return err
+		}
 		moved = true
-		return moveAhead(ctx, tx, key, id, waiting.Int64)
+		return swapPlaces(ctx, tx, key, id, seq, neighbor, neighborFront)
 	})
 	if err != nil {
 		return false, err
 	}
 	return moved, nil
+}
+
+// swapPlaces trades the places of the row for ID (at own) and the row at
+// other, giving ID's row FRONT as its front mark. The moved row parks on -1
+// first, so the unique (repo_key, seq) index never sees two rows on one place
+// (every sequence is at least 1).
+func swapPlaces(ctx context.Context, tx *sql.Tx, key RepoKey, id WorkspaceID, own, other int64, front bool) error {
+	steps := []struct {
+		query string
+		args  []any
+	}{
+		{`UPDATE merge_queue SET seq = -1 WHERE repo_key = ? AND workspace_id = ?`, []any{key, id}},
+		{`UPDATE merge_queue SET seq = ? WHERE repo_key = ? AND seq = ?`, []any{own, key, other}},
+		{`UPDATE merge_queue SET seq = ?, source_front = ? WHERE repo_key = ? AND workspace_id = ?`, []any{other, front, key, id}},
+	}
+	for _, step := range steps {
+		if _, err := tx.ExecContext(ctx, step.query, step.args...); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // nextSeq answers the sequence number one past a queue's last.
