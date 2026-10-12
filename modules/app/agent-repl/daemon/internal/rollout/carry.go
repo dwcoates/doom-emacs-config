@@ -71,6 +71,24 @@ type Carry struct {
 	// Replacements are the shim replacements the move overtook or was asked
 	// while it ran: the successor runs them after its adoption.
 	Replacements []CarriedReplacement `json:"replacements,omitempty"`
+	// Participants is who held the workspace's two streams when this move was
+	// sealed, which is who the transfer notice reaches. Absent from a carry
+	// written before it existed, which leaves the successor on the
+	// announcement's snapshot.
+	Participants *CarriedParticipants `json:"participants,omitempty"`
+}
+
+// CarriedParticipants is the stream occupancy a move was sealed with.
+//
+// THE ANNOUNCEMENT'S SNAPSHOT GOES STALE. A busy workspace is transferred at
+// its freeness, perhaps an hour after the announcement, and a refused one is
+// transferred again; by then a page may have closed or gone quiet. The
+// successor's rendezvous then waited on a participant that could never call,
+// and the adoption window expired (2026-10-12). The occupancy at the seal is
+// the one that matches the notice the participants are about to receive.
+type CarriedParticipants struct {
+	Host bool `json:"host"`
+	Web  bool `json:"web"`
 }
 
 // CarriedReplacement is one shim replacement handed to the successor.
@@ -125,6 +143,8 @@ func (c *controller) writeCarry(carry Carry) error {
 	c.log.Info(opCarry, "wrote the handover carry", merge(fields, dlog.Context{
 		"mid_work": carry.MidWork, "acts": len(carry.Queue.Acts), "running_cut": carry.Queue.Cut != nil,
 		"cold_gate": len(carry.ColdGate) > 0, "replacements": len(carry.Replacements),
+		"participants_host": carry.Participants != nil && carry.Participants.Host,
+		"participants_web":  carry.Participants != nil && carry.Participants.Web,
 	}))
 	return nil
 }
@@ -216,6 +236,8 @@ type sealedMove struct {
 	// carry a successor may refuse: only then is its consumption, and not the
 	// serving row alone, the proof the adoption landed.
 	midWork bool
+	// participants is the stream occupancy the move was sealed with.
+	participants Participants
 }
 
 // seal takes a running transfer's queue memory and writes the workspace's
@@ -227,7 +249,14 @@ func (c *controller) seal(ctx context.Context, ws ids.WorkspaceID, fields dlog.C
 		return nil, fmt.Errorf("rollout: seal %q: %w", ws, err)
 	}
 	move := &sealedMove{handoff: handoff}
-	carry := Carry{Workspace: ws, Daemon: c.deps.Instance, Queue: handoff}
+	live := c.deps.Participants.Participants(ws)
+	move.participants = live
+	carry := Carry{
+		Workspace:    ws,
+		Daemon:       c.deps.Instance,
+		Queue:        handoff,
+		Participants: &CarriedParticipants{Host: live.Host, Web: live.Web},
+	}
 	// NO FREENESS SOURCE IS READ AS WORK IN FLIGHT: the successor then
 	// waits for the adopted facts, which costs nothing when there is no work.
 	carry.MidWork = c.deps.Freeness == nil || !c.deps.Freeness.Free(ws)
