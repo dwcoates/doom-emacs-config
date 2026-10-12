@@ -17,6 +17,9 @@ import {
 import { NewsDigestOverlaySchema } from "../../../proto/gen/ts/frontend/v1/news_digest_pb";
 import {
   CLOSE_LABEL,
+  drawLinks,
+  drawProse,
+  drawSectionHeading,
   formatPeriod,
   mountNewsDigest,
   type NewsDigestHandle,
@@ -854,4 +857,53 @@ describe("mountNewsDigest: refusing a malformed IPO outlook", () => {
       expect(() => w.digest.apply(shown(init))).toThrow(MalformedView);
     });
   }
+});
+
+describe("the digest's shared builders", () => {
+  it("drawSectionHeading draws the text verbatim as the section heading", () => {
+    // ACT
+    const heading = drawSectionHeading("<b>IPO outlook</b>");
+    // ASSERT
+    expect([heading.tagName, heading.className, heading.textContent]).toEqual([
+      "H2",
+      "news-digest-section-heading",
+      "<b>IPO outlook</b>",
+    ]);
+  });
+
+  it("drawProse renders the text as markdown under the bubble's class", () => {
+    // ACT
+    const prose = drawProse("Uses `claude -p`.");
+    // ASSERT
+    expect([prose.className, prose.querySelector("code")?.textContent]).toEqual(["news-digest-summary md", "claude -p"]);
+  });
+
+  it("drawLinks draws every link in order, each opening its url", async () => {
+    // ARRANGE
+    const links = drawLinks(w.ctx, [
+      { label: "One", url: "https://press.test/1" },
+      { label: "Two", url: "https://press.test/2" },
+    ] as never);
+    document.body.append(links);
+    // ACT
+    links.querySelectorAll<HTMLElement>(".external-link")[1]?.click();
+    await flush();
+    // ASSERT
+    expect([links.className, [...links.querySelectorAll(".external-link")].map((a) => a.textContent), w.opened.map((r) => r.url)]).toEqual([
+      "news-digest-links",
+      ["One", "Two"],
+      ["https://press.test/2"],
+    ]);
+  });
+
+  it("is the only place news-digest.ts builds a heading, a prose block or a link row", async () => {
+    // ARRANGE
+    const source = (await import("../../src/news-digest/news-digest.ts?raw")).default;
+    // ACT
+    const counts = ['createElement("h2")', '"news-digest-summary md"', '"news-digest-links"', "renderMarkdown("].map(
+      (shape) => source.split(shape).length - 1,
+    );
+    // ASSERT
+    expect(counts).toEqual([1, 1, 1, 1]);
+  });
 });
