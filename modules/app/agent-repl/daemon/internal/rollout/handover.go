@@ -48,10 +48,14 @@ type handoverPlan struct {
 	// restart takes every one of them back.
 	moved map[ids.WorkspaceID]movedWorkspace
 	// reclaimed counts the workspaces this daemon took BACK after handing
-	// them toward the successor: an adoption window that expired, or a
-	// transfer that failed after its quiesce. A reclaimed workspace is served
-	// here again, so a handover with any cannot finish and does not exit.
+	// them toward the successor and will not offer again: a transfer that
+	// failed after its quiesce, or a take-back that did not finish cleanly. A
+	// reclaimed workspace is served here again, so a handover with any
+	// cannot finish and does not exit.
 	reclaimed atomic.Int32
+	// reoffers counts, per workspace, the times an expired adoption window
+	// sent it back to the successor; it paces the next offer.
+	reoffers map[ids.WorkspaceID]int
 }
 
 // ErrAlreadyRollingOut refuses a second handover while one is in flight.
@@ -739,11 +743,55 @@ func (c *controller) timeAdoption(ctx context.Context, ws wsm.Workspace, plan *h
 		return false
 	case adoptionRefused:
 		return c.fallBackToFreeness(ctx, ws, plan, windows, fields)
+	case adoptionExpired:
+		return c.reoffer(ctx, ws, plan, windows, fields)
 	case adoptionTakenBack:
 		return true
 	default:
 		return false
 	}
+}
+
+// reoffer sends a workspace whose adoption window expired back to the
+// successor, at its freeness, once its pacing delay has passed, and answers
+// whether it ends this daemon's.
+//
+// A TAKEN-BACK WORKSPACE IS OFFERED AGAIN, NOT KEPT. Keeping it was the
+// handover's end: the incumbent logged that it could not finish and served
+// the workspace alone for as long as it lived, while the successor waited on
+// its exit to take over -- nine hours on 2026-10-12, with Emacs attached to
+// the old daemon and unable to read its roster. The next offer goes out with
+// a fresh transfer notice and a fresh carry, so whatever kept the last one
+// from landing (a page sent quiet, a participant gone) is not repeated.
+//
+// THE OFFERS ARE PACED. A successor that cannot adopt the workspace at all
+// would otherwise hold it quiesced for one window in every two; the delay
+// doubles from one adoption window up to the holdout cadence, and every
+// expiry is already recorded at ERROR with the workspace's own fault.
+func (c *controller) reoffer(ctx context.Context, ws wsm.Workspace, plan *handoverPlan, windows *sync.WaitGroup, fields dlog.Context) bool {
+	plan.mu.Lock()
+	if plan.reoffers == nil {
+		plan.reoffers = map[ids.WorkspaceID]int{}
+	}
+	plan.reoffers[ws.ID]++
+	attempt := plan.reoffers[ws.ID]
+	plan.mu.Unlock()
+	delay := c.deps.AdoptionWindow
+	for i := 1; i < attempt && delay < c.deps.HoldoutWarnEvery; i++ {
+		delay *= 2
+	}
+	if delay > c.deps.HoldoutWarnEvery {
+		delay = c.deps.HoldoutWarnEvery
+	}
+	c.log.Info(opHandover, "the workspace was taken back after its adoption window expired; it is offered to the successor again",
+		merge(fields, dlog.Context{"attempt": attempt, "delay": delay.String()}))
+	select {
+	case <-ctx.Done():
+		c.log.Debug(opHandover, "the daemon's lifetime ended before the workspace was offered again", fields)
+		return false
+	case <-c.deps.Clock.After(delay):
+	}
+	return c.fallBackToFreeness(ctx, ws, plan, windows, fields)
 }
 
 // adoptionOutcome is how one transfer's adoption window ended.
@@ -756,8 +804,12 @@ const (
 	adoptionAbandoned adoptionOutcome = iota
 	// adoptionLanded is the successor owning the workspace.
 	adoptionLanded
-	// adoptionTakenBack is an expired window the workspace was taken back on.
+	// adoptionTakenBack is a take-back that did not finish cleanly: the
+	// workspace is served here and is not offered again.
 	adoptionTakenBack
+	// adoptionExpired is an expired window the workspace was cleanly taken
+	// back on; it is offered to the successor again (reoffer).
+	adoptionExpired
 	// adoptionRefused is a mid-work adoption the successor refused; the
 	// workspace was taken back to be transferred again at freeness.
 	adoptionRefused
@@ -875,7 +927,7 @@ func (c *controller) awaitAdoption(ctx context.Context, ws ids.WorkspaceID, leas
 	}
 	c.log.Error(opAdoption, "the adoption window expired; the successor never adopted the workspace, so this daemon took it back and serves it again",
 		merge(fields, window))
-	return adoptionTakenBack
+	return adoptionExpired
 }
 
 // takeBackRefused takes back a workspace whose mid-work adoption the
