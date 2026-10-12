@@ -66,43 +66,74 @@ func (s *store) PutSession(ctx context.Context, sess Session) error {
 	}
 	fields := dlog.Context{"workspace": string(sess.Workspace), "vendor_session": sess.VendorSessionID, "config_dir": sess.ConfigDir}
 	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
-		var kind sql.NullString
-		err := tx.QueryRowContext(ctx, `SELECT terminal_kind FROM sessions WHERE workspace_id = ?`, sess.Workspace).Scan(&kind)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return putSessionTx(ctx, tx, sess)
+	})
+}
+
+// BindSession records a workspace's session bound to a DIFFERENT conversation
+// (agentrepl.v1 BindWorkspaceSession) and, in the same transaction, forgets
+// the fork it was: its lineage and any fork it still owed. A lineage describes
+// the conversation a fork continues, and a workspace bound elsewhere no longer
+// continues it, so a lineage kept past the bind would draw another
+// conversation's past under the chosen one.
+func (s *store) BindSession(ctx context.Context, sess Session) error {
+	const op = "daemon.wsm.bind_session"
+	if sess.HostSessionID == "" {
+		return fmt.Errorf("wsm: workspace %s: %w", sess.Workspace, ErrSessionIdentityMissing)
+	}
+	fields := dlog.Context{"workspace": string(sess.Workspace), "vendor_session": sess.VendorSessionID, "config_dir": sess.ConfigDir}
+	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		if err := putSessionTx(ctx, tx, sess); err != nil {
 			return err
 		}
-		if kind.Valid && kind.String == terminalDeleted {
-			return fmt.Errorf("wsm: workspace %s: %w", sess.Workspace, ErrSessionDeleted)
-		}
-		var (
-			tKind, tDetail any
-			tAt            any
-			pid            any
-		)
-		if sess.Terminal != nil {
-			tKind, tDetail, tAt = sess.Terminal.Kind, sess.Terminal.Detail, nanos(sess.Terminal.At)
-		}
-		if sess.ShimPID != nil {
-			if *sess.ShimPID <= 0 {
-				return fmt.Errorf("wsm: workspace %s: a recorded shim pid is positive, got %d", sess.Workspace, *sess.ShimPID)
+		for _, table := range []string{"pending_forks", "fork_lineage", "fork_uninherited_turns"} {
+			if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE workspace_id = ?`, sess.Workspace); err != nil {
+				return err
 			}
-			pid = int64(*sess.ShimPID)
 		}
-		_, err = tx.ExecContext(ctx,
-			`INSERT INTO sessions (workspace_id, host_session_id, vendor_session_id, config_dir, selected_config_dir, model, permission_mode, started_at, last_engagement_at, shim_pid, terminal_kind, terminal_detail, terminal_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-			 ON CONFLICT(workspace_id) DO UPDATE SET
-			   host_session_id = excluded.host_session_id,
-			   vendor_session_id = excluded.vendor_session_id, config_dir = excluded.config_dir,
-			   selected_config_dir = excluded.selected_config_dir, model = excluded.model,
-			   permission_mode = excluded.permission_mode, started_at = excluded.started_at,
-			   last_engagement_at = excluded.last_engagement_at, shim_pid = excluded.shim_pid,
-			   terminal_kind = excluded.terminal_kind,
-			   terminal_detail = excluded.terminal_detail, terminal_at = excluded.terminal_at`,
-			sess.Workspace, sess.HostSessionID, sess.VendorSessionID, sess.ConfigDir, sess.SelectedConfigDir, sess.Model, sess.PermissionMode,
-			nanos(sess.StartedAt), nanos(sess.LastEngagementAt), pid, tKind, tDetail, tAt)
-		return err
+		return nil
 	})
+}
+
+// putSessionTx is the one session upsert, inside the caller's transaction:
+// PutSession's whole write and BindSession's first step.
+func putSessionTx(ctx context.Context, tx *sql.Tx, sess Session) error {
+	var kind sql.NullString
+	err := tx.QueryRowContext(ctx, `SELECT terminal_kind FROM sessions WHERE workspace_id = ?`, sess.Workspace).Scan(&kind)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if kind.Valid && kind.String == terminalDeleted {
+		return fmt.Errorf("wsm: workspace %s: %w", sess.Workspace, ErrSessionDeleted)
+	}
+	var (
+		tKind, tDetail any
+		tAt            any
+		pid            any
+	)
+	if sess.Terminal != nil {
+		tKind, tDetail, tAt = sess.Terminal.Kind, sess.Terminal.Detail, nanos(sess.Terminal.At)
+	}
+	if sess.ShimPID != nil {
+		if *sess.ShimPID <= 0 {
+			return fmt.Errorf("wsm: workspace %s: a recorded shim pid is positive, got %d", sess.Workspace, *sess.ShimPID)
+		}
+		pid = int64(*sess.ShimPID)
+	}
+	_, err = tx.ExecContext(ctx,
+		`INSERT INTO sessions (workspace_id, host_session_id, vendor_session_id, config_dir, selected_config_dir, model, permission_mode, started_at, last_engagement_at, shim_pid, terminal_kind, terminal_detail, terminal_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(workspace_id) DO UPDATE SET
+		   host_session_id = excluded.host_session_id,
+		   vendor_session_id = excluded.vendor_session_id, config_dir = excluded.config_dir,
+		   selected_config_dir = excluded.selected_config_dir, model = excluded.model,
+		   permission_mode = excluded.permission_mode, started_at = excluded.started_at,
+		   last_engagement_at = excluded.last_engagement_at, shim_pid = excluded.shim_pid,
+		   terminal_kind = excluded.terminal_kind,
+		   terminal_detail = excluded.terminal_detail, terminal_at = excluded.terminal_at`,
+		sess.Workspace, sess.HostSessionID, sess.VendorSessionID, sess.ConfigDir, sess.SelectedConfigDir, sess.Model, sess.PermissionMode,
+		nanos(sess.StartedAt), nanos(sess.LastEngagementAt), pid, tKind, tDetail, tAt)
+	return err
 }
 
 // Session loads one workspace's session; the bool reports existence.

@@ -367,3 +367,13 @@ func (f *fakeShim) GatherTitleDigest(_ context.Context, _ *connect.Request[shimv
 	f.record("GatherTitleDigest")
 	return connect.NewResponse(&shimv1.GatherTitleDigestResponse{}), nil
 }
+
+func (f *fakeShim) GetForkPoint(_ context.Context, _ *connect.Request[shimv1.GetForkPointRequest]) (*connect.Response[shimv1.GetForkPointResponse], error) {
+	f.record("GetForkPoint")
+	return connect.NewResponse(&shimv1.GetForkPointResponse{}), nil
+}
+
+func (f *fakeShim) ForkSession(_ context.Context, _ *connect.Request[shimv1.ForkSessionRequest]) (*connect.Response[shimv1.ForkSessionResponse], error) {
+	f.record("ForkSession")
+	return connect.NewResponse(&shimv1.ForkSessionResponse{}), nil
+}

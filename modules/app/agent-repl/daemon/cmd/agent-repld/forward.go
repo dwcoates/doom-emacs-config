@@ -298,6 +298,45 @@ func (h *historyForwarder) ReadHistory(ctx context.Context, ws ids.WorkspaceID, 
 	return fleet.ReadHistory(ctx, ws, target, after)
 }
 
+// ReadInherited reads a fork's inherited past through the fleet. A read before
+// the fleet exists is a boot-order defect and fails loudly.
+func (h *historyForwarder) ReadInherited(ctx context.Context, ws ids.WorkspaceID, book *conversationv1.AgentId, after *conversationv1.HistoryPointer, throughMs int64) (*conversationv1.HistoryPage, error) {
+	h.mu.RLock()
+	fleet := h.fleet
+	h.mu.RUnlock()
+	if fleet == nil {
+		return nil, errors.New("agent-repld: history was read before the session fleet was built")
+	}
+	return fleet.ReadInherited(ctx, ws, book, after, throughMs)
+}
+
+// deliveryForwarder carries the fleet's fork to the prompt queue's
+// Exclusively: the fleet is built before the queue, and a fork is made only
+// at a bring-up, after both exist. A fork asked for before the queue is bound
+// is a boot-order defect and fails loudly rather than forking a parent whose
+// deliveries nothing holds.
+type deliveryForwarder struct {
+	mu    sync.RWMutex
+	queue promptqueue.Queue
+}
+
+func (d *deliveryForwarder) bind(queue promptqueue.Queue) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.queue = queue
+}
+
+// Exclusively runs PERFORM while the queue delivers nothing to WS.
+func (d *deliveryForwarder) Exclusively(ctx context.Context, ws ids.WorkspaceID, what string, perform func(context.Context) error) error {
+	d.mu.RLock()
+	queue := d.queue
+	d.mu.RUnlock()
+	if queue == nil {
+		return errors.New("agent-repld: a fork was made before the prompt queue was built")
+	}
+	return queue.Exclusively(ctx, ws, what, perform)
+}
+
 // vendorServesForwarder carries the footer's vendor-serves edge
 // (footer.WithVendorServes) to the prompt queue, which is built after the
 // footer. An edge before the queue is bound is a wiring defect, said at ERROR:

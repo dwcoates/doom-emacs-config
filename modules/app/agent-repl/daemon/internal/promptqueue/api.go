@@ -240,6 +240,11 @@ type Queue interface {
 	// (under the delivery lock), dropping the planned held prompts only once
 	// it succeeds; ErrHoldsChanged when they are no longer the ones standing.
 	RollBack(ctx context.Context, ws ids.WorkspaceID, since time.Time, drop []ids.TurnID, perform func(context.Context) error) error
+	// Exclusively runs PERFORM as the workspace's one standing shim call: no
+	// prompt is delivered to the workspace until it returns, and a prompt
+	// submitted meanwhile is held and delivered once it has. WHAT names the
+	// call for the record.
+	Exclusively(ctx context.Context, ws ids.WorkspaceID, what string, perform func(context.Context) error) error
 	// Submit runs one submission through recognition-free delivery: the lease
 	// policy, the classifier, the hold decision, and the shim call. The
 	// disposition is the answer.

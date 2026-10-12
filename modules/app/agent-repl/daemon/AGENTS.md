@@ -971,20 +971,13 @@ reader from ever being handed a row it will withhold:
   pushed every pre-cut row and the webapp then truncated ~1,850 of them
   (ship-gns, 2026-09-27).
 - **A fork's inherited past rides `planeInherited` and is never pushed.** A
-  fork resumes a copy of its parent's transcript, which the file plane
-  ingests into the fork's book WHILE the fork runs, so the past arrives live,
-  after the fork's own prompt, and on a later replay sits around it (the book
-  orders by first insert). On a fork (a workspace with ported prompts), a
-  main-agent entry stamped with a turn the workspace recorded
-  (`wsm.RecordedTurns`, `Deps.OwnedTurns`) is its own; every other main-agent
-  entry — a turn it never opened, or unstamped — is inherited: drawn below
-  everything the fork produced, in a stance of its own (it never becomes the
-  turn in flight, its prompts are drawn settled), and served by pages only.
-  An inherited cut therefore bounds only inherited rows, and by `boundHides`
-  the fork's OWN cut hides the whole inherited and ported past. A subagent's
-  entries are never classified. Known gap: an UNSTAMPED entry the fork itself
-  produced outside an open turn (a keep-alive-era handback, a cold-gate
-  compaction) is read as inherited.
+  fork's own book holds only what the fork itself said: the sidecar stores no
+  record the vendor's fork copied (`forkedFrom`). Its inherited past is read
+  from the parent's book, bounded to the fork point (`wsm.fork_lineage`,
+  `feed.LineageSegment`), when a reader's page walk passes the fork's own
+  book; a page of it is drawn by the same functions as any other row, below
+  everything the fork produced, and served by pages only. Turns the parent had
+  open at the fork, and their heads, are left out (`inheritedEntries`).
 - **An opening page's spawns above its newest cut open no subagent watch**
   (`sessionwatcher.watchSpawnedSubagentsOnPageLocked`): their bubbles are
   withheld, so their books have no reader.

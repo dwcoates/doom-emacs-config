@@ -359,7 +359,9 @@ func (v *verbs) recordBinding(ctx context.Context, log dlog.Logger, ws ids.Works
 	}
 	session.Workspace = ws
 	session.VendorSessionID = vendorSessionID
-	if err := v.deps.DB.PutSession(ctx, session); err != nil {
+	// THE BINDING FORGETS THE FORK: a workspace bound to another conversation
+	// no longer continues the one its lineage describes.
+	if err := v.deps.DB.BindSession(ctx, session); err != nil {
 		log.Error(opBindSession, "could not record the new binding", dlog.Context{"cause": err.Error()})
 		return fmt.Errorf("bind %q: record the binding: %w", ws, err)
 	}

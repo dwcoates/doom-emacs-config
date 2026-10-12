@@ -375,6 +375,31 @@ func TestBindSessionRecordsTheChosenConversationOnTheSessionRecord(t *testing.T)
 	}
 }
 
+// TestBindSessionForgetsTheForkTheWorkspaceWas pins that a bind records the
+// chosen conversation through the one write that also drops the workspace's
+// fork lineage: a fork bound elsewhere no longer continues its parent.
+func TestBindSessionForgetsTheForkTheWorkspaceWas(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	bindTo(f, "w1", "a")
+	shimAnswers(f, transcriptSpec{id: "a"}, transcriptSpec{id: "b"})
+	f.db.lineage = map[ids.WorkspaceID][]wsm.ForkLineage{"w1": {{Workspace: "w1", Parent: "p", ParentBook: "book", ThroughMs: 1}}}
+
+	// Act.
+	if err := f.verbs.BindSession(context.Background(), "w1", "b", nil); err != nil {
+		t.Fatalf("BindSession: %v", err)
+	}
+
+	// Assert.
+	if len(f.db.bindSessionCalls) != 1 || f.db.bindSessionCalls[0].VendorSessionID != "b" {
+		t.Fatalf("bind writes = %+v, want the chosen conversation recorded through BindSession", f.db.bindSessionCalls)
+	}
+	if len(f.db.lineage["w1"]) != 0 {
+		t.Fatalf("lineage = %+v, want it forgotten by the bind", f.db.lineage["w1"])
+	}
+}
+
 func TestBindSessionStartsTHROUGHTheOrdinaryResumePath(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)

@@ -358,31 +358,6 @@ func TestAResetNeverReMintsASynthesizedIdentity(t *testing.T) {
 	}
 }
 
-func TestAResetRedrawsAForksPortedConversation(t *testing.T) {
-	// Arrange: a fork whose ported parent conversation was drawn on its
-	// opening history page.
-	h := newHarness(t)
-	h.ported = []PortedPrompt{{
-		Turn: "parent-1", Text: "what the parent was asked",
-		Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT,
-	}}
-	h.replay(&conversationv1.HistoryPage{})
-	if len(h.rows(rootFeed())) != 1 {
-		t.Fatalf("rows = %v, want the one ported prompt", rowIDs(h.rows(rootFeed())))
-	}
-
-	// Act: the reset takes the ported rows with everything else, and the next
-	// opening page replays them.
-	h.reset()
-	h.replay(&conversationv1.HistoryPage{})
-
-	// Assert: the ported conversation belongs to the WORKSPACE's origin, not
-	// to the vendor conversation it happens to run, so it comes back.
-	if got := len(h.rows(rootFeed())); got != 1 {
-		t.Fatalf("rows after the reset = %d, want the ported prompt redrawn", got)
-	}
-}
-
 func TestAResetOfAWorkspaceThatDrewNothingRecordsItAndChangesNothing(t *testing.T) {
 	// Arrange: a workspace the resolver has never seen. (The harness's own
 	// workspace is not one: its main agent was named at construction.)

@@ -103,12 +103,6 @@ type AdoptableTranscript struct {
 // way.
 var ErrNoTranscripts = errors.New("account: no transcript to adopt under the routed root")
 
-// RemintedID answers the child's identity for one of the parent's, under a
-// single fork's mapping. It is memoized by the port that produced it: the same
-// old id always answers the same new one, and an id the port never saw is
-// minted on first ask.
-type RemintedID func(old string) string
-
 // Resolver answers the account questions.
 type Resolver interface {
 	// ConfigDirFor routes a workspace directory to its config root: under
@@ -149,23 +143,6 @@ type Resolver interface {
 	// A routed root that holds no transcript is ErrNoTranscripts, which is an
 	// answer and not a failure.
 	NewestTranscript(ctx context.Context, workspaceDir string) (AdoptableTranscript, error)
-	// PortTranscript copies a parent's transcript (and its sidecar directory,
-	// when the vendor wrote one) into the child's config root project dir,
-	// which is what makes a forked workspace resumable. The daemon does this
-	// BEFORE StartSession(resume). It refuses when the destination exists:
-	// overwriting one conversation with another is never recovery.
-	// The copy is filed under childVendorSessionID, NOT the parent's id: a
-	// vendor session id is single-occupancy (the shim takes
-	// session-<id>.lock inside StartSession), so a fork of a live parent that
-	// resumed the parent's own id could never come up. The conversation's
-	// CONTENT is untouched, its original agent id included.
-	//
-	// It answers THE MAPPING it re-minted under, so the caller can carry the
-	// rest of the conversation — the daemon's own prompt rows, which the
-	// vendor transcript does not hold — under the SAME ids. Two mappings for
-	// one fork would file the child's questions under identities its ported
-	// transcript never mentions.
-	PortTranscript(ctx context.Context, transcriptPath, childConfigDir, childWorkspaceDir, childVendorSessionID string) (RemintedID, error)
 	// MoveTranscript MOVES a transcript (and its sidecar directory) into
 	// toConfigDir's project dir for the same workspace. It is the
 	// account-switch spelling: the daemon ports the vendor transcript between
