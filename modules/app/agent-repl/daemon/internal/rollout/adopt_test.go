@@ -1374,6 +1374,49 @@ func TestAFailedAdoptionMayBeRunAgainByALaterCaller(t *testing.T) {
 	}
 }
 
+// TestACallerBehindARerunAdoptionWaitsForTheRerunNotTheEarlierFailure pins the
+// 2026-10-11 adopt storm: after a failed adoption, a later caller re-ran it,
+// and every caller after THAT one waited on the FIRST run's completion channel,
+// already closed, so each was answered the first run's failure at once instead
+// of waiting for the run in flight -- and Emacs re-walked its adopt on every
+// such answer.
+func TestACallerBehindARerunAdoptionWaitsForTheRerunNotTheEarlierFailure(t *testing.T) {
+	// Arrange: the first adoption fails; the re-run is parked mid-adoption.
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	h.fleet.adoptErr[ws] = errFake
+	arm(t, h, ws, Participants{Host: true})
+	if err := h.c.AdoptHost(context.Background(), ws); err == nil {
+		t.Fatal("precondition: the first adoption succeeded")
+	}
+	h.fleet.mu.Lock()
+	delete(h.fleet.adoptErr, ws)
+	h.fleet.mu.Unlock()
+	entered := make(chan struct{}, 1)
+	release := make(chan struct{})
+	h.fleet.onAdopt = func(ids.WorkspaceID) {
+		entered <- struct{}{}
+		<-release
+	}
+	rerun := make(chan error, 1)
+	go func() { rerun <- h.c.AdoptHost(context.Background(), ws) }()
+	<-entered
+
+	// Act: a caller arrives while the re-run is in flight, then the re-run lands.
+	behind := make(chan error, 1)
+	go func() { behind <- h.c.AdoptHost(context.Background(), ws) }()
+	awaitRecord(t, h, opAdoptHost, "the rendezvous is satisfied and its adoption is already running; waiting on it")
+	close(release)
+
+	// Assert: both share the re-run's success.
+	if err := <-rerun; err != nil {
+		t.Fatalf("the re-run AdoptHost = %v, want success", err)
+	}
+	if err := <-behind; err != nil {
+		t.Fatalf("the AdoptHost behind the re-run = %v, want the re-run's success, not the earlier failure", err)
+	}
+}
+
 // TestAJoiningDaemonRetiresTheManifestItArmedFrom pins the successor's half of
 // consuming a manifest: once it has armed from it and recorded what it names,
 // no later boot of the same state root reads it again.

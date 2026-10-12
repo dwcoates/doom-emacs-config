@@ -419,7 +419,7 @@ func (c *controller) rendezvousCall(ctx context.Context, ws ids.WorkspaceID, ope
 		c.log.Debug(operation, "the rendezvous is satisfied and its adoption is already running; waiting on it", fields)
 		return c.awaitRendezvous(ctx, e, done, operation, fields)
 	}
-	e.adopting = true
+	e.beginAdoption()
 	c.mu.Unlock()
 	c.logTransition(operation, ws, "participants_called", before, after,
 		dlog.Context{"rendezvous_satisfied": true})
