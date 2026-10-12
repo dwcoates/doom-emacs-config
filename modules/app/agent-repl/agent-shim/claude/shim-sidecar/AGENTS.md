@@ -1445,9 +1445,14 @@ the suite rather than quietly shrinking what the feed can show.
   `<session>.jsonl` basename), RESOLVED THROUGH THE SHIM'S IDENTITY RECORDS.
   NEVER the per-record `sessionId`, which diverges from the runtime's answer in
   ~22% of records; that divergence never rides the wire.
-- A ROTATION DOES NOT MOVE THE BOOK. A `/clear` (and a `forkSession`) mints a
-  new vendor session id and a new transcript file, and NOTHING IN EITHER FILE
-  LINKS THEM. The shim writes the link the files lack, under `--state-dir`:
+- A FORK'S COPIED RECORDS ARE NEVER STORED. The vendor's `forkSession`
+  stamps every record it copies from the parent `forkedFrom`; those records
+  are the parent's and already in the parent's book, so `Converter.Line`
+  converts them (joins stay warm) and withholds their entries, exactly as it
+  does a keep-alive's (`internal/convert/fork.go`). The fork's file books
+  under its own id.
+- A ROTATION DOES NOT MOVE THE BOOK. A `/clear` mints a new vendor session id
+  and a new transcript file, and NOTHING IN EITHER FILE LINKS THEM. The shim writes the link the files lack, under `--state-dir`:
   `shim/<workspace-key>/agent-id.json` names the conversation's
   `original_vendor_session_id`, and `shim/<workspace-key>/vendor-id/<id>.json`
   names the original a rotated id belongs to. `internal/identity` reads them;
