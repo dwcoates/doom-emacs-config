@@ -28,7 +28,6 @@
  * turn target, so there is NO confirm step here — every error arm is an
  * ordinary call-site refusal beside the button.
  */
-import { createControl, type Control } from "../../control.js";
 import { reservedLiveElapsedClock, reservedQuietClock, reservedSettledElapsedClock } from "../../elapsed-clock.js";
 import { log } from "../../log.js";
 import type {
@@ -41,33 +40,18 @@ import type {
   FeedShellSettled,
   FeedShellSpool,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
-import {
-  InterruptResponseSchema,
-  type InterruptResponse,
-} from "../../../../proto/gen/ts/agentrepl/v1/endpoint_interrupt_pb";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import { feedShellDotColor } from "../../vocab.js";
 import { drawWorkDot } from "../work-dot.js";
-import { callUnary } from "../../rpc/unary.js";
 import { armName } from "../renderers.js";
 import type { RowContext } from "../renderers.js";
 import { buildInterruptDetachedRequest } from "../requests.js";
-import { stopTicking, tick } from "../ticking.js";
+import { stopTicking } from "../ticking.js";
 import { foldTitle } from "../title-fold.js";
 import { drawDetachedWorkId } from "../work-id.js";
-import { refusalOf, type SentenceTable } from "../../rpc/refuse.js";
-import {
-  clearRefusals,
-  drawMalformedRefusal,
-  refusal,
-  release,
-  whileInFlight,
-} from "./controls.js";
+import { drawStopControl, type StopSite } from "../stop-control.js";
 
 const PATH = "FeedShell";
-
-/** How long a stop's own answer stays on the control before it clears. */
-export const STOP_OUTCOME_MS = 4000;
 
 /** The `$` chrome the command line wears — the client's, not the wire's. */
 export const PROMPT_CHROME = "$";
@@ -150,7 +134,7 @@ export function drawFeedShellHead(u: FeedShell, rc: RowContext): HTMLElement {
       if (state.value.lastProgress !== undefined) {
         head.append(drawFeedShellLastProgress(state.value.lastProgress, rc));
       }
-      head.append(drawStopControl(rc));
+      head.append(drawStopControl(rc, SHELL_STOP, requireMessage(rc.row.id, "FeedRow.id")));
       break;
     case "settled": {
       const settled = state.value;
@@ -306,142 +290,15 @@ function drawSettledClock(
   return reservedSettledElapsedClock("shell-clock", endedMs - startedMs);
 }
 
-/** The stop control on a live shell. */
-function drawStopControl(rc: RowContext): HTMLElement {
-  const wrap = document.createElement("span");
-  wrap.className = "shell-stop";
-
-  const button = createControl();
-  button.className = "shell-stop-button";
-  button.setAttribute("data-interrupt", requireMessage(rc.row.id, "FeedRow.id").value);
-  button.textContent = "stop";
-  wrap.append(button);
-
-  button.addEventListener("click", () => {
-    void stop(rc, wrap, button);
-  });
-  return wrap;
-}
-
-/** Issue the stop and draw whatever came back beside the control. */
-async function stop(
-  rc: RowContext,
-  wrap: HTMLElement,
-  button: Control,
-): Promise<void> {
-  const id = requireMessage(rc.row.id, "FeedRow.id");
-  clearOutcome(wrap);
-  log.info("stopping a detached shell", {
-    operation: "feed.cards.shell.stop",
-    context: { row: id.value },
-  });
-  const answered = await whileInFlight([button], () =>
-    callUnary(
-      rc.ctx,
-      "Interrupt",
-      (client) => client.interrupt(buildInterruptDetachedRequest(rc.ctx.workspace, id)),
-      InterruptResponseSchema,
-    ),
-  );
-  if ("failed" in answered) {
-    // callUnary already logged the transport failure once, as its owner; what
-    // is left is telling the reader their click did not land.
-    wrap.append(refusal("transport", "the daemon could not be reached"));
-    return;
-  }
-  try {
-    drawAnswer(answered.value, rc, wrap, button);
-  } catch (err) {
-    // A refusal this build cannot read is still a failure the reader owns; it is
-    // stated at the control and reported once rather than becoming an unhandled
-    // rejection inside a click handler.
-    if (!drawMalformedRefusal(rc.ctx, wrap, "feed.cards.shell.malformed-refusal", err)) throw err;
-  }
-}
-
-/**
- * The causes only Interrupt can answer with; the four are shared.
- *
- * `confirm_required` is here because the ARM EXISTS on the wire, not because
- * this control expects it: the daemon raises the challenge only for the TURN
- * target, so on a shell it is a fact worth stating plainly rather than a
- * challenge to offer a second button for.
- */
-const OWN_CAUSES = {
-  confirmRequired: (value: { liveAgentCount: bigint }) =>
-    `stopping would also end ${value.liveAgentCount.toString()} live agent(s)`,
-  notDetachedWork: () => "this row names no detached work",
-  notMergeTab: () => "this row names no running merge tab",
-  noSession: () => "the workspace has no session to interrupt",
-  shimRefused: (value: { detail: string }) => value.detail,
-} as unknown as SentenceTable;
-
-/** The stop's answer: a success arm's word, or this click's own refusal. */
-function drawAnswer(
-  response: InterruptResponse,
-  rc: RowContext,
-  wrap: HTMLElement,
-  button: Control,
-): void {
-  const result = requireCase(response.result, "InterruptResponse.result");
-  switch (result.case) {
-    case "success": {
-      const outcome = requireCase(result.value.outcome, "InterruptSuccess.outcome");
-      const el = document.createElement("span");
-      el.className = "shell-stop-outcome";
-      el.setAttribute("data-outcome", outcome.case);
-      switch (outcome.case) {
-        case "interruptedTurn":
-          el.textContent = "turn interrupted";
-          break;
-        case "interruptedDetached":
-          el.textContent = `stopped ${outcome.value.count.toString()}`;
-          break;
-        case "nothingRunning":
-          el.textContent = "nothing was running";
-          break;
-        default:
-          unreachableArm("InterruptSuccess.outcome", armName(outcome));
-      }
-      expire(el, rc);
-      wrap.append(el);
-      return;
-    }
-    case "error": {
-      // RULED: `confirm_required` is answered only to the TURN target, so this
-      // control draws no confirm step — every arm is an ordinary refusal here,
-      // and the button comes back so the user can try again.
-      const said = refusalOf(result.value.kind, OWN_CAUSES, "InterruptError.kind");
-      wrap.append(refusal(said.arm, said.text));
-      release([button]);
-      return;
-    }
-    default:
-      unreachableArm("InterruptResponse.result", armName(result));
-  }
-}
-
-/** Drop whatever the previous click left beside the control. */
-function clearOutcome(wrap: HTMLElement): void {
-  for (const stale of wrap.querySelectorAll(".shell-stop-outcome")) stale.remove();
-  clearRefusals(wrap);
-}
-
-/**
- * Take EL off screen once the outcome has been on it long enough to read.
- *
- * Through the shared ticker rather than a timer of this module's own: there is
- * exactly one clock on the page, and a component that starts its own is the
- * thing the ticker exists to prevent.
- */
-function expire(el: HTMLElement, rc: RowContext): void {
-  const deadline = rc.ctx.ticker.now() + STOP_OUTCOME_MS;
-  tick(el, rc.ctx.ticker, (nowMs) => {
-    if (nowMs < deadline) return;
-    stopTicking(el);
-    el.remove();
-  });
-}
+/** The stop a live shell offers: its own row, stopped as detached work. */
+const SHELL_STOP: StopSite = {
+  prefix: "shell-stop",
+  operation: "feed.cards.shell.stop",
+  refusedOperation: "feed.cards.shell.stop-refused",
+  describe: "stopping a detached shell",
+  malformedOperation: "feed.cards.shell.malformed-refusal",
+  request: buildInterruptDetachedRequest,
+};
 
 /**
  * The `feed_shell_dot` key a head's state draws: `live`, or the settled

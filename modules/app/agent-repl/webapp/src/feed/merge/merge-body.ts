@@ -70,6 +70,7 @@ const MERGE_TAB_STOP: StopSite = {
   operation: "feed.merge-tab-stop",
   refusedOperation: "feed.merge-tab-stop-refused",
   describe: "stopping a merge tab's agent",
+  malformedOperation: "feed.merge-tab-stop-malformed",
   request: buildInterruptMergeTabRequest,
 };
 
