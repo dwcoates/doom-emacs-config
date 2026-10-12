@@ -13,6 +13,10 @@ RUN ONLY THE FAILING TESTS, AND KEEP FIXING UNTIL THEY PASS, BEFORE YOU END YOUR
 2. If any of them still fails, fix again and run them again. Repeat until every one of them passes.
 3. Only then commit and end your turn. The queue's own full run (after its rebase) is what checks everything else; a turn that ends with a failing test it was asked to fix spends an attempt and a whole suite run on a known failure.
 
+IF A FAILING TEST CANNOT BE RUN ON ITS OWN (its suite has no targeted invocation, or the test only fails inside the whole suite), do not stop, and do not weaken the test or the code to get around it:
+- Run the smallest invocation that does reach it (its package, its file, its suite) and keep fixing until it passes there, then commit and end your turn as above.
+- Make sure the gap gets fixed, without compromising coverage or production UI/UX: the tests should be adapted so this test can be run on its own. Use the `/create-or-update-workspace` skill: run `status` first, and if an open, non-one-shot workspace already investigates making this suite's tests runnable on their own, send it a `prompt` naming this test and why it could not be run alone. Otherwise `create` a new NON-one-shot workspace off {{target_branch}} whose task is exactly that. Then carry on with this fix; that workspace owns the gap, not you.
+
 Do NOT change the merge machinery while this merge is running: nothing under `modules/app/agent-repl/daemon/internal/merge/` or `modules/app/agent-repl/testrun/`, and not `modules/app/agent-repl/bin/test-all.sh`. The running daemon is what gates this merge, so a change there cannot fix it; a repair that makes one fails the merge. A fix to the merge or its gate lands through a branch of its own.
 
 If you conclude that a correct fix requires unforeseen non-trivial ARCHITECTURAL changes — a redesign rather than a repair — stop fixing and write the file `{{escalation_file}}` at the root of {{worktree_dir}} (do not commit it), whose FIRST line is exactly:
