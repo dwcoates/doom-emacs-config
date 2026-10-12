@@ -22,6 +22,7 @@ import {
   validateAgentEffortLevel,
   validateAgentPermissionMode,
   validateDetachedWorkId,
+  validateForkPoint,
   validateConversationThrough,
   validateHistoryPointer,
   validatePromptOrigin,
@@ -283,5 +284,28 @@ export function validateReadHistoryRequest(request: shimv1.ReadHistoryRequest): 
     }
   } catch (err) {
     refuse("ReadHistory", err);
+  }
+}
+
+/**
+ * `shim.v1.GetForkPointRequest` — the request carries no fields (the shim
+ * answers for its own session), so there is nothing to reject.
+ */
+export function validateGetForkPointRequest(_request: shimv1.GetForkPointRequest): void {
+  // Intentionally empty: an empty message has no illegal shape.
+}
+
+/** `shim.v1.ForkSessionRequest` — a parent, where it lives, and a point. */
+export function validateForkSessionRequest(request: shimv1.ForkSessionRequest): void {
+  try {
+    if (request.parentVendorSessionId === "") {
+      throw invalidArgument("fork_session.parent_vendor_session_id is empty; an identity is never the empty string");
+    }
+    if (request.parentWorkspaceDir === "") {
+      throw invalidArgument("fork_session.parent_workspace_dir is empty; the parent's transcript is filed under a directory");
+    }
+    validateForkPoint(request.point, "fork_session.point");
+  } catch (err) {
+    refuse("ForkSession", err);
   }
 }
