@@ -100,60 +100,189 @@ agent panel it is, with no special-casing left to carve out."
 ;; in it often enough to have been observed.  Two claims: the quit does not
 ;; break the mount, and it is not lost either.
 
+(defmacro agent-repl-test-frontend--with-slot-mount (slot &rest body)
+  "Run BODY with the host present and a slot creation answering SLOT.
+The host, the page call and every decoration are stubbed: what is under
+test is the mount's own binding of the slot to its workspace."
+  (declare (indent 1))
+  `(cl-letf (((symbol-function 'agent-repl-webhost-ensure) (lambda (_conn) 'host-xwidget))
+             ((symbol-function 'agent-repl-host-conn) (lambda (_ws) 'conn))
+             ((symbol-function 'agent-repl-webhost-ensure-page) (lambda (_ws) "id"))
+             ((symbol-function 'agent-repl--frontend-adopt-webview-buffer) (lambda (&rest _) nil))
+             ((symbol-function 'agent-repl-window-tell-input-background) #'ignore)
+             ((symbol-function 'agent-repl-startup-note-page-loaded) #'ignore)
+             ((symbol-function 'agent-repl--align-buffer-to-ws-dir) (lambda (&rest _) nil))
+             ((symbol-function 'agent-repl--frontend-make-slot-buffer) (lambda (_name _xw) ,slot)))
+     ,@body))
+
 (ert-deftest agent-repl-test-frontend-ensure-webview-defers-a-quit-that-lands-in-it ()
   "A C-g arriving mid-mount is held for the command loop, not taken here."
   ;; Arrange
   (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
     (let ((buf (generate-new-buffer "*fake-webview*")))
       (unwind-protect
-          (cl-letf (((symbol-function 'agent-repl--frontend-make-webview-buffer)
-                     (lambda (_url) (setq quit-flag t) buf))
-                    ((symbol-function 'agent-repl--frontend-adopt-webview-buffer)
-                     (lambda (&rest _) nil))
-                    ((symbol-function 'agent-repl--frontend-watch-load)
-                     (lambda (&rest _) nil))
-                    ((symbol-function 'agent-repl--align-buffer-to-ws-dir)
-                     (lambda (&rest _) nil)))
-            ;; Act / Assert
-            (should (agent-repl-test--quit-deferred-p
-                      (agent-repl--frontend-ensure-webview-buffer "ws1" "http://x/"))))
+          (agent-repl-test-frontend--with-slot-mount buf
+            (cl-letf (((symbol-function 'agent-repl--frontend-make-slot-buffer)
+                       (lambda (_name _xw) (setq quit-flag t) buf)))
+              ;; Act / Assert
+              (should (agent-repl-test--quit-deferred-p
+                        (agent-repl--frontend-ensure-webview-buffer "ws1")))))
         (when (buffer-live-p buf) (kill-buffer buf))))))
 
 (ert-deftest agent-repl-test-frontend-ensure-webview-binds-the-buffer-despite-a-pending-quit ()
-  "A quit already requested leaves no webview the registry does not name."
+  "A quit already requested leaves no slot the registry does not name."
   ;; Arrange
   (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
     (let ((buf (generate-new-buffer "*fake-webview*")))
       (unwind-protect
-          (cl-letf (((symbol-function 'agent-repl--frontend-make-webview-buffer)
-                     (lambda (_url) buf))
-                    ((symbol-function 'agent-repl--frontend-adopt-webview-buffer)
-                     (lambda (&rest _) nil))
-                    ((symbol-function 'agent-repl--frontend-watch-load)
-                     (lambda (&rest _) nil))
-                    ((symbol-function 'agent-repl--align-buffer-to-ws-dir)
-                     (lambda (&rest _) nil)))
+          (agent-repl-test-frontend--with-slot-mount buf
             ;; Act
             (agent-repl-test--with-pending-quit
-              (agent-repl--frontend-ensure-webview-buffer "ws1" "http://x/"))
+              (agent-repl--frontend-ensure-webview-buffer "ws1"))
             ;; Assert
             (should (eq (agent-repl--ws-get "ws1" :frontend-buffer) buf)))
         (when (buffer-live-p buf) (kill-buffer buf))))))
+
+(ert-deftest agent-repl-test-frontend-ensure-webview-holds-the-page-in-the-host ()
+  "Every ensure asks the host to hold the workspace's page."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let ((buf (generate-new-buffer "*fake-webview*"))
+          (held nil))
+      (unwind-protect
+          (agent-repl-test-frontend--with-slot-mount buf
+            (cl-letf (((symbol-function 'agent-repl-webhost-ensure-page)
+                       (lambda (ws) (push ws held))))
+              ;; Act
+              (agent-repl--frontend-ensure-webview-buffer "ws1")
+              (agent-repl--frontend-ensure-webview-buffer "ws1")
+              ;; Assert
+              (should (equal held '("ws1" "ws1")))))
+        (when (buffer-live-p buf) (kill-buffer buf))))))
+
+(ert-deftest agent-repl-test-frontend-a-fresh-slot-tells-the-startup-its-page-is-loading ()
+  "The editor's startup opens a tab only once its page drew, so it starts asking."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let ((buf (generate-new-buffer "*fake-webview*"))
+          (noted nil))
+      (unwind-protect
+          (agent-repl-test-frontend--with-slot-mount buf
+            (cl-letf (((symbol-function 'agent-repl-startup-note-page-loaded)
+                       (lambda (ws) (push ws noted))))
+              ;; Act
+              (agent-repl--frontend-ensure-webview-buffer "ws1")
+              ;; Assert
+              (should (equal noted '("ws1")))))
+        (when (buffer-live-p buf) (kill-buffer buf))))))
+
+(ert-deftest agent-repl-test-frontend-a-fresh-slot-tells-the-input-background ()
+  "The page's gate wears the input window's color from its first load."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let ((buf (generate-new-buffer "*fake-webview*"))
+          (told nil))
+      (unwind-protect
+          (agent-repl-test-frontend--with-slot-mount buf
+            (cl-letf (((symbol-function 'agent-repl-window-tell-input-background)
+                       (lambda (ws) (push ws told))))
+              ;; Act
+              (agent-repl--frontend-ensure-webview-buffer "ws1")
+              ;; Assert
+              (should (equal told '("ws1")))))
+        (when (buffer-live-p buf) (kill-buffer buf))))))
+
+(ert-deftest agent-repl-test-frontend-a-reused-slot-tells-the-startup-nothing ()
+  "Only a freshly made slot starts the startup's question."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let ((buf (generate-new-buffer "*fake-webview*"))
+          (noted nil))
+      (unwind-protect
+          (agent-repl-test-frontend--with-slot-mount buf
+            (agent-repl--ws-put "ws1" :frontend-buffer buf)
+            (cl-letf (((symbol-function 'agent-repl-startup-note-page-loaded)
+                       (lambda (ws) (push ws noted))))
+              ;; Act
+              (agent-repl--frontend-ensure-webview-buffer "ws1")
+              ;; Assert
+              (should (null noted))))
+        (when (buffer-live-p buf) (kill-buffer buf))))))
+
+;;;; ---- The slot ---------------------------------------------------------------
+
+(ert-deftest agent-repl-test-frontend-a-slot-displays-the-host ()
+  "A slot holds no web view of its own: it displays the host's xwidget."
+  ;; Act
+  (let ((slot (agent-repl--frontend-make-slot-buffer "*test-slot*" 'host-xwidget)))
+    (unwind-protect
+        ;; Assert
+        (should (equal (get-text-property 1 'display slot) '(xwidget :xwidget host-xwidget)))
+      (kill-buffer slot))))
+
+(ert-deftest agent-repl-test-frontend-a-slot-is-read-only ()
+  "Nothing types into a slot."
+  ;; Act
+  (let ((slot (agent-repl--frontend-make-slot-buffer "*test-slot*" 'host-xwidget)))
+    (unwind-protect
+        ;; Assert
+        (should (buffer-local-value 'buffer-read-only slot))
+      (kill-buffer slot))))
+
+;;;; ---- Showing the page on screen ---------------------------------------------
+
+(ert-deftest agent-repl-test-frontend-a-displayed-slot-shows-its-page ()
+  "The host shows the page of the workspace whose slot is on screen."
+  ;; Arrange
+  (let ((slot (generate-new-buffer "*test-slot*"))
+        (shown nil))
+    (unwind-protect
+        (save-window-excursion
+          (with-current-buffer slot
+            (setq-local agent-repl-frontend-webview-mode t)
+            (setq-local agent-repl--owning-workspace "alpha"))
+          (set-window-buffer (selected-window) slot)
+          (cl-letf (((symbol-function 'agent-repl-webhost-show) (lambda (ws) (push ws shown))))
+            ;; Act
+            (agent-repl--frontend-show-displayed-pages (selected-frame))
+            ;; Assert
+            (should (equal shown '("alpha")))))
+      (kill-buffer slot))))
+
+(ert-deftest agent-repl-test-frontend-a-window-of-another-buffer-shows-nothing ()
+  "A window showing anything but a slot tells the host nothing."
+  ;; Arrange
+  (let ((shown nil))
+    (with-temp-buffer
+      (save-window-excursion
+        (set-window-buffer (selected-window) (current-buffer))
+        (cl-letf (((symbol-function 'agent-repl-webhost-show) (lambda (ws) (push ws shown))))
+          ;; Act
+          (agent-repl--frontend-show-displayed-pages (selected-frame))
+          ;; Assert
+          (should (null shown)))))))
+
+(ert-deftest agent-repl-test-frontend-another-frame-shows-nothing ()
+  "Only the selected frame decides which page the one host shows."
+  ;; Arrange
+  (let ((shown nil))
+    (cl-letf (((symbol-function 'agent-repl-webhost-show) (lambda (ws) (push ws shown)))
+              ((symbol-function 'walk-windows) (lambda (&rest _) (push "walked" shown))))
+      ;; Act
+      (agent-repl--frontend-show-displayed-pages 'some-other-frame)
+      ;; Assert
+      (should (null shown)))))
+
+(ert-deftest agent-repl-test-frontend-showing-rides-the-window-buffer-change ()
+  "A switch puts the arriving slot on the frame; that change shows its page."
+  (should (memq #'agent-repl--frontend-show-displayed-pages
+                (default-value 'window-buffer-change-functions))))
 
 ;;;; ---- webview URL ------------------------------------------------------------
 
 ;;;; ---- remount-webview (bundle reload) ----------------------------------------
 
 ;;;; ---- rescue-webview (navigated away) ----------------------------------------
-
-(ert-deftest agent-repl-test-frontend-home-origin-is-the-owning-daemons-address ()
-  "Home is the origin of the connection whose daemon owns the workspace."
-  ;; Arrange
-  (agent-repl-test--with-clean-state
-    (agent-repl-test-frontend--with-ref '(:id "ws-1" :dir "/w") "127.0.0.1:7777"
-      ;; Act / Assert
-      (should (equal (agent-repl--frontend-home-origin "alpha")
-                     "http://ws-ws-1.localhost:7777")))))
 
 ;; Page hosts: one per workspace, so pages never share a connection pool.
 
@@ -172,9 +301,9 @@ agent panel it is, with no special-casing left to carve out."
   (agent-repl-test--with-clean-state
     (let (first second)
       (agent-repl-test-frontend--with-ref '(:id "aaaa" :dir "/a") "127.0.0.1:1"
-        (setq first (agent-repl--frontend-home-origin "alpha")))
+        (setq first (url-host (url-generic-parse-url (agent-repl-frontend-webview-url "alpha")))))
       (agent-repl-test-frontend--with-ref '(:id "bbbb" :dir "/b") "127.0.0.1:1"
-        (setq second (agent-repl--frontend-home-origin "alpha")))
+        (setq second (url-host (url-generic-parse-url (agent-repl-frontend-webview-url "alpha")))))
       ;; Act / Assert
       (should-not (equal first second)))))
 
@@ -195,103 +324,94 @@ agent panel it is, with no special-casing left to carve out."
       ;; Act / Assert
       (should-error (agent-repl-frontend-webview-url "alpha")))))
 
-(ert-deftest agent-repl-test-frontend-home-origin-is-nil-without-a-ref ()
-  "A workspace with no ref has no page host to be at home on."
-  ;; Arrange
-  (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'agent-repl-host-conn) (lambda (_ws) 'conn))
-              ((symbol-function 'agent-repl-host-ref) (lambda (_ws) nil)))
-      ;; Act / Assert
-      (should-not (agent-repl--frontend-home-origin "alpha")))))
-
-(ert-deftest agent-repl-test-frontend-home-origin-is-nil-without-a-connection ()
-  "A workspace whose daemon cannot be named has no home to be at."
-  ;; Arrange
-  (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'agent-repl-host-conn) (lambda (_ws) nil)))
-      ;; Act / Assert
-      (should-not (agent-repl--frontend-home-origin "alpha")))))
-
-(ert-deftest agent-repl-test-frontend-at-home-accepts-the-daemons-own-page ()
-  "The workspace's own webview URL is at home on the daemon that serves it."
+(ert-deftest agent-repl-test-frontend-host-at-home-accepts-the-host-page ()
+  "The host page on the daemon that owns the workspace is home."
   ;; Arrange
   (agent-repl-test--with-clean-state
     (agent-repl-test-frontend--with-ref '(:id "ws-1" :dir "/w") "127.0.0.1:7777"
       ;; Act / Assert
-      (should (agent-repl--frontend-webview-at-home-p
-               "alpha" (agent-repl-frontend-webview-url "alpha"))))))
+      (should (agent-repl--frontend-host-at-home-p "alpha" "http://host.localhost:7777/?host=1")))))
 
-(ert-deftest agent-repl-test-frontend-at-home-ignores-the-path-and-query ()
-  "Home is the ORIGIN: the page rewrites its own query as the user navigates."
+(ert-deftest agent-repl-test-frontend-host-at-home-ignores-the-path-and-query ()
+  "Home is the ORIGIN."
   ;; Arrange
   (agent-repl-test--with-clean-state
     (agent-repl-test-frontend--with-ref '(:id "ws-1" :dir "/w") "127.0.0.1:7777"
       ;; Act / Assert
-      (should (agent-repl--frontend-webview-at-home-p
-               "alpha" "http://ws-ws-1.localhost:7777/other?workspace=someone-else")))))
+      (should (agent-repl--frontend-host-at-home-p "alpha" "http://host.localhost:7777/elsewhere")))))
 
-(ert-deftest agent-repl-test-frontend-a-page-on-the-bare-daemon-address-is-not-home ()
-  "A page still on the daemon's bare address shares the connection pool and must move."
+(ert-deftest agent-repl-test-frontend-host-at-home-refuses-another-daemons-port ()
+  "A host page served by a DIFFERENT daemon is astray."
   ;; Arrange
   (agent-repl-test--with-clean-state
     (agent-repl-test-frontend--with-ref '(:id "ws-1" :dir "/w") "127.0.0.1:7777"
       ;; Act / Assert
-      (should-not (agent-repl--frontend-webview-at-home-p
-                   "alpha" "http://127.0.0.1:7777/?workspace=ws-1")))))
+      (should-not (agent-repl--frontend-host-at-home-p "alpha" "http://host.localhost:7778/?host=1")))))
 
-(ert-deftest agent-repl-test-frontend-at-home-refuses-another-daemons-port ()
-  "A page served by a DIFFERENT daemon is astray, however similar its host."
+(ert-deftest agent-repl-test-frontend-host-at-home-refuses-a-page-that-left-the-web ()
+  "`about:blank' -- where an external hyperlink can strand a web view -- is not home."
   ;; Arrange
   (agent-repl-test--with-clean-state
     (agent-repl-test-frontend--with-ref '(:id "ws-1" :dir "/w") "127.0.0.1:7777"
       ;; Act / Assert
-      (should-not (agent-repl--frontend-webview-at-home-p
-                   "alpha" "http://127.0.0.1:7778/?workspace=ws-1")))))
+      (should-not (agent-repl--frontend-host-at-home-p "alpha" "about:blank")))))
 
-(ert-deftest agent-repl-test-frontend-at-home-refuses-a-page-that-left-the-web ()
-  "`about:blank' — where an external hyperlink can strand a webview — is not home."
+(ert-deftest agent-repl-test-frontend-host-at-home-refuses-a-web-view-with-no-uri ()
+  "A web view that cannot say where it is has no claim on being left alone."
   ;; Arrange
   (agent-repl-test--with-clean-state
     (agent-repl-test-frontend--with-ref '(:id "ws-1" :dir "/w") "127.0.0.1:7777"
       ;; Act / Assert
-      (should-not (agent-repl--frontend-webview-at-home-p "alpha" "about:blank")))))
+      (should-not (agent-repl--frontend-host-at-home-p "alpha" "")))))
 
-(ert-deftest agent-repl-test-frontend-at-home-refuses-a-webview-with-no-uri ()
-  "A webview that cannot say where it is has no claim on being left alone."
-  ;; Arrange
-  (agent-repl-test--with-clean-state
-    (agent-repl-test-frontend--with-ref '(:id "ws-1" :dir "/w") "127.0.0.1:7777"
-      ;; Act / Assert
-      (should-not (agent-repl--frontend-webview-at-home-p "alpha" "")))))
-
-(ert-deftest agent-repl-test-frontend-at-home-refuses-when-the-daemon-is-unknown ()
+(ert-deftest agent-repl-test-frontend-host-at-home-refuses-when-the-daemon-is-unknown ()
   "With no connection there is no origin to certify a page against."
   ;; Arrange
   (agent-repl-test--with-clean-state
     (cl-letf (((symbol-function 'agent-repl-host-conn) (lambda (_ws) nil)))
       ;; Act / Assert
-      (should-not (agent-repl--frontend-webview-at-home-p
-                   "alpha" "http://127.0.0.1:7777/?workspace=ws-1")))))
+      (should-not (agent-repl--frontend-host-at-home-p "alpha" "http://host.localhost:7777/?host=1")))))
 
+(defmacro agent-repl-test--with-rescue-webview (uri effects &rest body)
+  "Run BODY with a slot open for \"ws1\" and the host at URI.
+EFFECTS collects what the rescue did: (:page WS) for a page reload and
+(:host) for a host reload."
+  (declare (indent 2))
+  `(let ((,effects nil)
+         (slot (generate-new-buffer "*fake-slot*")))
+     (unwind-protect
+         (progn
+           (agent-repl--ws-put "ws1" :frontend-buffer slot)
+           (agent-repl-test-frontend--with-ref '(:id "ws-1" :dir "/w") "127.0.0.1:7777"
+             (cl-letf (((symbol-function 'agent-repl-webhost-xwidget) (lambda () 'host-xwidget))
+                       ((symbol-function 'agent-repl--frontend-webview-uri) (lambda (_xw) ,uri))
+                       ((symbol-function 'agent-repl-webhost-reload-page)
+                        (lambda (ws) (push (list :page ws) ,effects) "ws-1"))
+                       ((symbol-function 'agent-repl-webhost-reload)
+                        (lambda (_conn) (push (list :host) ,effects)))
+                       ((symbol-function 'agent-repl--emit-message) #'ignore))
+               ,@body)))
+       (kill-buffer slot))))
 
-(defmacro agent-repl-test--with-rescue-webview (uri remounted messages &rest body)
-  "Run BODY with a mounted webview reporting URI, capturing rescue effects.
-REMOUNTED collects the workspaces `agent-repl--frontend-remount-webview'
-was asked to remount; MESSAGES collects the echoed user copy.  The
-remount itself is mocked because the rescue's own contract is that it
-DELEGATES navigation rather than implementing a second one."
-  (declare (indent 3))
-  `(let ((,remounted nil)
-         (,messages nil))
-     (cl-letf (((symbol-function 'agent-repl--frontend-webview-live-widget)
-                (lambda (_buf) 'fake-xwidget))
-               ((symbol-function 'agent-repl--frontend-webview-uri)
-                (lambda (_xw) ,uri))
-               ((symbol-function 'agent-repl--frontend-remount-webview)
-                (lambda (ws) (push ws ,remounted) :pending))
-               ((symbol-function 'agent-repl--emit-message)
-                (lambda (text &rest _) (push text ,messages))))
-       ,@body)))
+(ert-deftest agent-repl-test-frontend-rescue-reloads-the-page-when-the-host-is-home ()
+  "With the host at home, the workspace's own page is what may have strayed."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-rescue-webview "http://host.localhost:7777/?host=1" effects
+      ;; Act
+      (agent-repl-frontend-rescue-webview "ws1")
+      ;; Assert
+      (should (equal effects '((:page "ws1")))))))
+
+(ert-deftest agent-repl-test-frontend-rescue-reloads-the-host-when-it-strayed ()
+  "A host that left the host page is reloaded, bringing every page home."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-rescue-webview "https://example.com/" effects
+      ;; Act
+      (agent-repl-frontend-rescue-webview "ws1")
+      ;; Assert
+      (should (equal effects '((:host)))))))
 
 (ert-deftest agent-repl-test-frontend-rescue-webview-errors-without-webview ()
   "The rescue signals when the workspace has no webview open at all."
@@ -1351,26 +1471,46 @@ accessor would not reach the code under test."
 
 ;;;; ---- Reloading the webview -------------------------------------------
 
-(ert-deftest agent-repl-test-frontend-reload-navigates-the-live-widget ()
-  "`reload_webapp' navigates the widget to the current URL."
+(ert-deftest agent-repl-test-frontend-reload-asks-the-host-to-reload-the-page ()
+  "A reload loads the workspace's page again in the host."
   ;; Arrange
   (agent-repl-test--with-clean-state
-    (let ((navigated nil)
+    (let ((reloaded nil)
           (buf (generate-new-buffer "*fake-webview*")))
       (unwind-protect
           (progn
             (agent-repl--ws-put "alpha" :frontend-buffer buf)
-            (agent-repl-test-frontend--with-ref '(:id "ws-1" :dir "/w") "127.0.0.1:9"
-              (cl-letf (((symbol-function 'agent-repl--frontend-webview-live-widget)
-                         (lambda (_buf) 'widget))
-                        ((symbol-function 'agent-repl--frontend-webview-navigate-widget)
-                         (lambda (_w uri) (setq navigated uri))))
-                ;; Act
-                (agent-repl-frontend-reload-webview "alpha")
-                ;; Assert
-                (should (equal navigated
-                               "http://ws-ws-1.localhost:9/?workspace=ws-1&dir=%2Fw&log_level=info")))))
+            (cl-letf (((symbol-function 'agent-repl-webhost-reload-page)
+                       (lambda (ws) (setq reloaded ws) "ws-1")))
+              ;; Act
+              (agent-repl-frontend-reload-webview "alpha")
+              ;; Assert
+              (should (equal reloaded "alpha"))))
         (kill-buffer buf)))))
+
+(ert-deftest agent-repl-test-frontend-reload-without-a-slot-reloads-nothing ()
+  "A workspace with no page has nothing to reload."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((reloaded nil))
+      (cl-letf (((symbol-function 'agent-repl-webhost-reload-page)
+                 (lambda (ws) (setq reloaded ws))))
+        ;; Act
+        (agent-repl-frontend-reload-webview "alpha")
+        ;; Assert
+        (should (null reloaded))))))
+
+(ert-deftest agent-repl-test-frontend-reload-webapp-reloads-the-host ()
+  "A rollout's push reloads the one host, bringing every page onto the new build."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((reloaded nil))
+      (cl-letf (((symbol-function 'agent-repl-host-conn) (lambda (_ws) 'conn))
+                ((symbol-function 'agent-repl-webhost-reload) (lambda (conn) (setq reloaded conn))))
+        ;; Act
+        (agent-repl-frontend-reload-webapp "alpha")
+        ;; Assert
+        (should (eq reloaded 'conn))))))
 
 (ert-deftest agent-repl-test-frontend-reload-does-not-remount-the-buffer ()
   "The webview is bound to its buffer for life: the widget is navigated."
@@ -1461,128 +1601,6 @@ accessor would not reach the code under test."
         (should (eq (agent-repl--frontend-precreate-webview "alpha") :created))
         ;; Assert
         (should (equal mounted "alpha"))))))
-
-;;;; ---- The load watcher ------------------------------------------------
-
-(ert-deftest agent-repl-test-frontend-load-watcher-reports-the-load ()
-  "A load-changed event advances the open-progress ladder to `:loaded'."
-  ;; Arrange
-  (agent-repl-test--with-clean-state
-    (let ((noted nil)
-          (props nil)
-          (buf (generate-new-buffer "*fake-webview*")))
-      (unwind-protect
-          (cl-letf (((symbol-function 'agent-repl--frontend-webview-live-widget)
-                     (lambda (_buf) 'widget))
-                    ((symbol-function 'xwidget-get) (lambda (_w _p) nil))
-                    ((symbol-function 'xwidget-put)
-                     (lambda (_w _p v) (setq props v)))
-                    ((symbol-function 'agent-repl-open-progress-note-loaded)
-                     (lambda (ws) (setq noted ws))))
-            (agent-repl--frontend-watch-load "alpha" buf)
-            ;; Act
-            (funcall props 'widget 'load-changed)
-            ;; Assert
-            (should (equal noted "alpha")))
-        (kill-buffer buf)))))
-
-(ert-deftest agent-repl-test-frontend-a-load-tells-the-editor-startup-the-page-drew ()
-  "The editor's startup opens a tab only once its page drew."
-  ;; Arrange
-  (agent-repl-test--with-clean-state
-    (let ((noted nil)
-          (props nil)
-          (buf (generate-new-buffer "*fake-webview*")))
-      (unwind-protect
-          (cl-letf (((symbol-function 'agent-repl--frontend-webview-live-widget)
-                     (lambda (_buf) 'widget))
-                    ((symbol-function 'xwidget-get) (lambda (_w _p) nil))
-                    ((symbol-function 'xwidget-put)
-                     (lambda (_w _p v) (setq props v)))
-                    ((symbol-function 'agent-repl-open-progress-note-loaded) #'ignore)
-                    ((symbol-function 'agent-repl-startup-note-page-loaded)
-                     (lambda (ws) (setq noted ws))))
-            (agent-repl--frontend-watch-load "alpha" buf)
-            ;; Act
-            (funcall props 'widget 'load-changed)
-            ;; Assert
-            (should (equal noted "alpha")))
-        (kill-buffer buf)))))
-
-(ert-deftest agent-repl-test-frontend-load-watcher-defers-to-the-prior-callback ()
-  "The webkit machinery still gets every event it needs."
-  ;; Arrange
-  (agent-repl-test--with-clean-state
-    (let ((prior-called nil)
-          (props nil)
-          (buf (generate-new-buffer "*fake-webview*")))
-      (unwind-protect
-          (cl-letf (((symbol-function 'agent-repl--frontend-webview-live-widget)
-                     (lambda (_buf) 'widget))
-                    ((symbol-function 'xwidget-get)
-                     (lambda (_w _p) (lambda (_w _e) (setq prior-called t))))
-                    ((symbol-function 'xwidget-put)
-                     (lambda (_w _p v) (setq props v)))
-                    ((symbol-function 'agent-repl-open-progress-note-loaded) #'ignore))
-            (agent-repl--frontend-watch-load "alpha" buf)
-            ;; Act
-            (funcall props 'widget 'load-changed)
-            ;; Assert
-            (should prior-called))
-        (kill-buffer buf)))))
-
-(ert-deftest agent-repl-test-frontend-load-watcher-ignores-other-events ()
-  "Only a finished load is a `:loaded' report."
-  ;; Arrange
-  (agent-repl-test--with-clean-state
-    (let ((noted nil)
-          (props nil)
-          (buf (generate-new-buffer "*fake-webview*")))
-      (unwind-protect
-          (cl-letf (((symbol-function 'agent-repl--frontend-webview-live-widget)
-                     (lambda (_buf) 'widget))
-                    ((symbol-function 'xwidget-get) (lambda (_w _p) nil))
-                    ((symbol-function 'xwidget-put)
-                     (lambda (_w _p v) (setq props v)))
-                    ((symbol-function 'agent-repl-open-progress-note-loaded)
-                     (lambda (ws) (setq noted ws))))
-            (agent-repl--frontend-watch-load "alpha" buf)
-            ;; Act
-            (funcall props 'widget 'download-callback)
-            ;; Assert
-            (should (null noted)))
-        (kill-buffer buf)))))
-
-(ert-deftest agent-repl-test-frontend-load-watcher-reports-on-the-info-rung ()
-  "The load report survives the default `info' log level.
-It is the ONE marker every painted panel leaves, whatever brought the
-workspace into being; on the debug rung it never reached disk, and
-realtest 5 reported a created workspace that had painted as one that
-never did."
-  ;; Arrange
-  (agent-repl-test--with-clean-state
-    (let ((rungs nil)
-          (props nil)
-          (buf (generate-new-buffer "*fake-webview*")))
-      (unwind-protect
-          (cl-letf (((symbol-function 'agent-repl--frontend-webview-live-widget)
-                     (lambda (_buf) 'widget))
-                    ((symbol-function 'xwidget-get) (lambda (_w _p) nil))
-                    ((symbol-function 'xwidget-put)
-                     (lambda (_w _p v) (setq props v)))
-                    ((symbol-function 'agent-repl-open-progress-note-loaded) #'ignore)
-                    ((symbol-function 'agent-repl--info)
-                     (lambda (_ws fmt &rest _args)
-                       (when (string-match-p "load-changed" fmt) (push :info rungs))))
-                    ((symbol-function 'agent-repl--log)
-                     (lambda (_ws fmt &rest _args)
-                       (when (string-match-p "load-changed" fmt) (push :debug rungs)))))
-            (agent-repl--frontend-watch-load "alpha" buf)
-            ;; Act
-            (funcall props 'widget 'load-changed)
-            ;; Assert
-            (should (equal '(:info) rungs)))
-        (kill-buffer buf)))))
 
 ;;;; ---- No JavaScript surface remains -----------------------------------
 
@@ -2474,9 +2492,14 @@ Binds `resized' to the resize calls made, newest first."
   "The script names its request id in the answer it builds."
   (should (string-match-p "id:42," (agent-repl--frontend-copy-script 42))))
 
-(ert-deftest agent-repl-test-copy-script-reports-focus ()
-  "The script reports whether the page has focus."
-  (should (string-match-p "document\\.hasFocus()" (agent-repl--frontend-copy-script 1))))
+(ert-deftest agent-repl-test-copy-script-reads-the-hosts-selection ()
+  "The script answers from the host's mirror of the shown page's selection."
+  (should (string-match-p "h\\.selection()" (agent-repl--frontend-copy-script 1))))
+
+(ert-deftest agent-repl-test-copy-script-answers-an-empty-selection-without-a-host ()
+  "With no host there is nothing to copy, so the key falls through."
+  (should (string-search "if(!h){return JSON.stringify({id:1,text:'',focused:false});}"
+                         (agent-repl--frontend-copy-script 1))))
 
 (ert-deftest agent-repl-test-webview-read-channel-injects-into-a-live-webview ()
   "A read into a live webview is injected and answers non-nil."
@@ -2519,11 +2542,11 @@ Binds `resized' to the resize calls made, newest first."
 
 (defmacro agent-repl-test--with-view-presence-stubs (view &rest body)
   "Run BODY with the xwidget primitives stubbed to display VIEW.
-The current window shows the buffer, the buffer holds one xwidget, and
+The current window shows the buffer, the host web view lives, and
 `xwidget-view-lookup' answers VIEW (a symbol stands in for a view)."
   (declare (indent 1))
   `(let ((agent-repl-frontend--last-view-on-switch (make-hash-table :test #'equal)))
-     (cl-letf (((symbol-function 'get-buffer-xwidgets) (lambda (_b) '(xw)))
+     (cl-letf (((symbol-function 'agent-repl-webhost-xwidget) (lambda () 'xw))
                ((symbol-function 'xwidget-view-lookup) (lambda (_x &optional _w) ,view)))
        ,@body)))
 
@@ -2554,7 +2577,7 @@ The current window shows the buffer, the buffer holds one xwidget, and
     (set-window-buffer (selected-window) (current-buffer))
     (let ((view 'view-a)
           (agent-repl-frontend--last-view-on-switch (make-hash-table :test #'equal)))
-      (cl-letf (((symbol-function 'get-buffer-xwidgets) (lambda (_b) '(xw)))
+      (cl-letf (((symbol-function 'agent-repl-webhost-xwidget) (lambda () 'xw))
                 ((symbol-function 'xwidget-view-lookup) (lambda (_x &optional _w) view)))
         (agent-repl-frontend--view-presence "ws" (current-buffer))
         (setq view 'view-b)

@@ -37,9 +37,9 @@
 
 (declare-function agent-repl--info "core" (ws fmt &rest args))
 (declare-function agent-repl--error "core" (ws fmt &rest args))
-(declare-function agent-repl--ws-list-names "workspace" ())
 (declare-function agent-repl--ws-get "workspace" (ws key))
 (declare-function agent-repl--frontend-webview-read-script "frontend" (buf script callback))
+(declare-function agent-repl-webhost-buffer "webhost" ())
 (defvar agent-repl--global-log-scope)
 
 (defconst agent-repl-profiling-root-env "AGENT_REPL_PROFILE_ROOT"
@@ -184,13 +184,12 @@ The answer names SESSION and WS, so the callback needs no closure."
           session ws session ws))
 
 (defun agent-repl-profiling--page-buffers ()
-  "Answers (WS . BUFFER) for every agent-repl workspace with a live page."
-  (let (out)
-    (dolist (ws (agent-repl--ws-list-names))
-      (let ((buf (agent-repl--ws-get ws :frontend-buffer)))
-        (when (buffer-live-p buf)
-          (push (cons ws buf) out))))
-    (nreverse out)))
+  "Answers (NAME . BUFFER) for the web view whose main thread is sampled.
+Every workspace's page lives in the one host web view (webhost.el) and
+shares its main thread, so the host is sampled once, under the name
+\"host\"; nil when there is no host."
+  (when-let ((buf (agent-repl-webhost-buffer)))
+    (list (cons "host" buf))))
 
 (defun agent-repl-profiling--page-started (raw)
   "Records a page sampler's start answer RAW; a refusal is an error."

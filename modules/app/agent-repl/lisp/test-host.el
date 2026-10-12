@@ -284,6 +284,8 @@ unary rpc can produce, which the contract never collapses into one."
                 (lambda (ws) (push (cons :activate ws) agent-repl-test-host--effects)))
                ((symbol-function 'agent-repl-roster-apply-current)
                 (lambda () (cl-incf agent-repl-test-host--reapplied)))
+               ((symbol-function 'agent-repl-frontend-reload-webapp)
+                (lambda (ws) (push (cons :reload-webapp ws) agent-repl-test-host--effects)))
                ((symbol-function 'agent-repl-frontend-reload-webview)
                 (lambda (ws)
                   ;; The conn is captured AS THE RELOAD SEES IT: frontend.el
@@ -2177,7 +2179,7 @@ would adopt onto a connection the link has let go of."
     ;; Act
     (agent-repl-test-host--push "ws-1" (list :arm :reload-webapp :value nil))
     ;; Assert
-    (should (equal (assq :reload agent-repl-test-host--effects) '(:reload . "ws-1")))))
+    (should (equal (assq :reload-webapp agent-repl-test-host--effects) '(:reload-webapp . "ws-1")))))
 
 (ert-deftest agent-repl-test-host-open-in-editor-passes-the-line ()
   "The 1-indexed line rides through to the one shared popup subroutine."

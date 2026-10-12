@@ -173,15 +173,14 @@ Binds `root' to the root and `logged' to the (LEVEL . MESSAGE) records."
 
 ;;;; ---- the page sampler -------------------------------------------------
 
-(ert-deftest agent-repl-test-profiling-pages-start-every-live-page ()
-  "Starting a session injects the sampler into every live page, by symbol."
+(ert-deftest agent-repl-test-profiling-pages-start-the-host ()
+  "Starting a session injects the sampler into the host, which every page
+shares a main thread with, by symbol."
   (agent-repl-test-profiling--with-root
-    (let ((buf (generate-new-buffer " *page*"))
+    (let ((buf (generate-new-buffer " *host*"))
           (calls nil))
       (unwind-protect
-          (cl-letf (((symbol-function 'agent-repl--ws-list-names) (lambda () '("a" "b")))
-                    ((symbol-function 'agent-repl--ws-get)
-                     (lambda (ws _key) (and (equal ws "a") buf)))
+          (cl-letf (((symbol-function 'agent-repl-webhost-buffer) (lambda () buf))
                     ((symbol-function 'agent-repl--frontend-webview-read-script)
                      (lambda (b script cb) (push (list b script cb) calls) t)))
             (agent-repl-test-profiling--open root "s1")
@@ -190,6 +189,13 @@ Binds `root' to the root and `logged' to the (LEVEL . MESSAGE) records."
             (should (eq (nth 0 (car calls)) buf))
             (should (eq (nth 2 (car calls)) 'agent-repl-profiling--page-started)))
         (kill-buffer buf)))))
+
+(ert-deftest agent-repl-test-profiling-pages-without-a-host-reach-none ()
+  "With no host there is no page to sample."
+  (agent-repl-test-profiling--with-root
+    (cl-letf (((symbol-function 'agent-repl-webhost-buffer) (lambda () nil)))
+      (agent-repl-test-profiling--open root "s1")
+      (should (equal (agent-repl-profiling-reconcile) "started s1 pages=0")))))
 
 (ert-deftest agent-repl-test-profiling-the-stop-script-carries-its-session-and-workspace ()
   "The stop script names the session and workspace its answer belongs to."

@@ -205,6 +205,34 @@ describe("commands", () => {
   });
 });
 
+describe("digest dismissal records", () => {
+  it("records a dismissal at info", async () => {
+    // Arrange
+    const digest = pageDoc.createElement("div");
+    digest.setAttribute("data-component", "news-digest");
+    const close = pageDoc.createElement("button");
+    close.setAttribute("data-news-digest-close", "");
+    digest.append(close);
+    pageDoc.body.append(digest);
+
+    // Act
+    fromHost({ channel: HOST_CHANNEL, kind: "dismissDigest" });
+
+    // Assert
+    await operations();
+    expect(capture.sent.find((r) => r.operation === "page.host-dismissed-digest")?.level.case).toBe("info");
+  });
+
+  it("records a request with no digest standing at debug", async () => {
+    // Act
+    fromHost({ channel: HOST_CHANNEL, kind: "dismissDigest" });
+
+    // Assert
+    await operations();
+    expect(capture.sent.find((r) => r.operation === "page.host-dismiss-digest-none")?.level.case).toBe("debug");
+  });
+});
+
 describe("reported facts", () => {
   it("reports a conversation drawn after it joined", async () => {
     // Act

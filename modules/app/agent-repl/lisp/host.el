@@ -93,6 +93,7 @@
 ;; blink (whose cadence is frontend.v1 `RosterRowAttention''s), frontend.el
 ;; owns the webview, popup.el owns the one shared editor popup.
 (declare-function agent-repl-frontend-reload-webview "frontend" (ws))
+(declare-function agent-repl-frontend-reload-webapp "frontend" (ws))
 (declare-function agent-repl-popup-open "popup" (path &optional line))
 
 ;;;; ---- State ----
@@ -1618,12 +1619,14 @@ through here, so a repeated refusal cannot recurse into a loop."
 ;;;; ---- The two relayed acts ----
 
 (defun agent-repl-host--reload-webapp (ws)
-  "Reload WS's webview against the SAME daemon.
+  "Bring WS's page onto the rebuilt webapp, against the SAME daemon.
 Empty by design: no address rides the arm, because the daemon is not
 changing.  A combined daemon+webapp rollout never sends it — the
-handover's fresh attach pulls the new assets by itself."
+handover's fresh attach pulls the new assets by itself.  Every page lives
+in the one host web view, so the host reloads, once for a whole rollout
+burst (`agent-repl-frontend-reload-webapp')."
   (agent-repl--info ws "elisp.host.reload-webapp ws=%s" ws)
-  (agent-repl-frontend-reload-webview ws))
+  (agent-repl-frontend-reload-webapp ws))
 
 (defun agent-repl-host--open-in-editor (ws target)
   "Open TARGET's path through the ONE shared editor-popup subroutine.

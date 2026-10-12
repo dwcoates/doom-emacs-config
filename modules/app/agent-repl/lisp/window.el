@@ -49,7 +49,8 @@
 (declare-function agent-repl--ws-log-name "workspace")
 (declare-function agent-repl--info "core")
 (declare-function agent-repl-host-state "host")
-(declare-function agent-repl--frontend-webview-read-script "frontend" (buf script callback))
+(declare-function agent-repl-webhost-set-input-background "webhost" (ws background))
+(declare-function agent-repl-webhost-set-gate-dock "webhost" (ws pixels background))
 (declare-function agent-repl--input-buffer "input" (ws))
 (declare-function json-encode-string "json" (string))
 
@@ -679,65 +680,36 @@ frame's `default' background, (face-background \='default nil t)."
                 (cdr (assq 'default face-remapping-alist)))
                (face-background 'default nil t))))))
 
-(defun agent-repl-window--gate-dock-script (pixels background)
-  "The page script that fits the docked gate to the input's slot.
-PIXELS is its height; BACKGROUND, when non-nil, the color it paints.  The
-reply is always a string: a null reply is dropped without a callback."
-  (format "(function(){var s=document.documentElement.style;s.setProperty('--gate-dock-height','%dpx');%sreturn 'ok';})()"
-          pixels
-          (if background
-              (format "s.setProperty('--input-bg',%s);" (json-encode-string background))
-            "")))
-
-(defun agent-repl-window--input-background-script (background)
-  "The page script that tells it the input window's BACKGROUND.
-The gate wears that color in every state, docked or not.  The reply is
-always a string: a null reply is dropped without a callback."
-  (format "(function(){document.documentElement.style.setProperty('--input-bg',%s);return 'ok';})()"
-          (json-encode-string background)))
-
 (defun agent-repl-window-tell-input-background (ws)
   "Tell WS's page the background its input window paints.
-Sent on every page load, so a gate the page draws -- docked or not, and
-after a reload -- always wears the input window's color, never the card's
-old yellow (owner, 2026-10-06).  A workspace with no input buffer or no
-live webview tells nothing, and says so at DEBUG."
-  (require 'json)
-  (let ((buf (agent-repl--ws-get ws :frontend-buffer))
-        (background (agent-repl-window--input-background ws)))
+The host keeps it and hands it to the page on every load of the page
+\(webhost.el), so a gate the page draws -- docked or not, and after a
+reload -- always wears the input window's color, never the card's old
+yellow (owner, 2026-10-06).  A workspace with no input buffer or no page
+tells nothing, and says so at DEBUG."
+  (let ((background (agent-repl-window--input-background ws)))
     (cond
      ((null background)
       (agent-repl--log ws "elisp.gate.input-bg-skipped ws=%s reason=no-input-buffer" ws))
-     ((and (buffer-live-p buf)
-           (agent-repl--frontend-webview-read-script
-            buf (agent-repl-window--input-background-script background)
-            #'agent-repl-window--gate-dock-told))
+     ((agent-repl-webhost-set-input-background ws background)
       (agent-repl--log ws "elisp.gate.input-bg ws=%s background=%s" ws background))
      (t
-      (agent-repl--log ws "elisp.gate.input-bg-skipped ws=%s reason=no-webview" ws)))
+      (agent-repl--log ws "elisp.gate.input-bg-held ws=%s reason=no-host" ws)))
     background))
-
-(defun agent-repl-window--gate-dock-told (_reply)
-  "The page took the docked gate's slot; nothing is left to do."
-  nil)
 
 (defun agent-repl-window-tell-gate-dock (ws)
   "Tell WS's page the slot its docked gate takes: the input window's.
-Its pixel height and its background, in one script, sent before the
-input window hides, so the banner fills exactly the slot the input had
-and wears its color.  A workspace with no input buffer tells the height
-alone, and the page keeps the card's own background."
-  (require 'json)
-  (let ((buf (agent-repl--ws-get ws :frontend-buffer))
-        (pixels (agent-repl-window--gate-dock-pixels ws))
+Its pixel height and its background, sent before the input window hides,
+so the banner fills exactly the slot the input had and wears its color.
+A workspace with no input buffer tells the height alone, and the page
+keeps the card's own background.  The host keeps the slot for the page's
+reloads (webhost.el)."
+  (let ((pixels (agent-repl-window--gate-dock-pixels ws))
         (background (agent-repl-window--input-background ws)))
-    (if (and (buffer-live-p buf)
-             (agent-repl--frontend-webview-read-script
-              buf (agent-repl-window--gate-dock-script pixels background)
-              #'agent-repl-window--gate-dock-told))
+    (if (agent-repl-webhost-set-gate-dock ws pixels background)
         (agent-repl--info ws "elisp.gate.dock-slot ws=%s pixels=%d background=%s"
                           ws pixels (or background "untold"))
-      (agent-repl--info ws "elisp.gate.dock-slot-skipped ws=%s reason=no-webview" ws))
+      (agent-repl--info ws "elisp.gate.dock-slot-held ws=%s reason=no-host" ws))
     pixels))
 
 (defvar agent-repl-window--gates-applied (make-hash-table :test 'equal)

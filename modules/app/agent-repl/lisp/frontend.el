@@ -29,7 +29,13 @@
 ;;     header-line; the panel is chrome, not a browser, so the
 ;;     header-line is cleared on mount.
 ;;
-;; The WKWebView is external state: creation funnels through the
+;; ONE WEB VIEW, A SLOT PER WORKSPACE.  Every workspace's page lives in
+;; the one host web view (webhost.el), as an iframe.  A workspace's webview
+;; buffer is a SLOT: it holds no web view of its own, only a display of the
+;; host's xwidget, so showing the slot in a window shows the host there and
+;; the host shows that workspace's page (`agent-repl--frontend-show-displayed-pages').
+;;
+;; The WKWebView is external state: the host's creation funnels through the
 ;; boundary wrapper `agent-repl--frontend-make-webview-buffer',
 ;; registered in `agent-repl--external-boundary-functions'; batch tests
 ;; mock it (xwidgets do not exist in `emacs -batch' builds anyway).
@@ -77,7 +83,6 @@
 (declare-function agent-repl--open-progress-note "agent-repl-open-progress" (ws phase &optional detail))
 (declare-function agent-repl--open-progress-fail "agent-repl-open-progress" (ws detail))
 (declare-function agent-repl--open-progress-finish "agent-repl-open-progress" (ws))
-(declare-function agent-repl-open-progress-note-loaded "agent-repl-open-progress" (ws))
 (declare-function xwidget-get "xwidget" (xwidget propname))
 (declare-function xwidget-put "xwidget" (xwidget propname value))
 (declare-function agent-repl--read-known-workspace "agent-repl-keybindings" (prompt))
@@ -117,6 +122,19 @@
 
 (defvar xwidget-webkit-buffer-name-format)
 (defvar agent-repl--owning-workspace)
+
+;; The one web view holding every workspace's page (webhost.el).
+(declare-function agent-repl-webhost-ensure "webhost" (conn))
+(declare-function agent-repl-webhost-xwidget "webhost" ())
+(declare-function agent-repl-webhost-ensure-page "webhost" (ws))
+(declare-function agent-repl-webhost-remove "webhost" (ws))
+(declare-function agent-repl-webhost-reload-page "webhost" (ws))
+(declare-function agent-repl-webhost-show "webhost" (ws))
+(declare-function agent-repl-webhost-buffer "webhost" ())
+(declare-function agent-repl-webhost-url "webhost" (conn))
+(declare-function agent-repl-webhost-reload "webhost" (conn))
+(declare-function agent-repl--ws-resolve-persp "workspace" (ws))
+(declare-function agent-repl--ws-add-buffer "workspace" (buffer persp &optional switch))
 
 ;; W2-A's names (host.el) and the transport's connection accessor.
 (declare-function agent-repl-host-ref "host" (ws))
@@ -220,6 +238,19 @@ webview).  Body does nothing but the external calls; tests mock via
       (xwidget-webkit-goto-uri (xwidget-webkit-current-session) url))
     buf))
 
+(defun agent-repl--frontend-make-slot-buffer (name xw)
+  "Create buffer NAME as a SLOT displaying the host's xwidget XW.
+The slot holds one character whose display is XW, so a window showing the
+slot shows the host.  No native view is created: the host's one web view is
+displayed, which is what makes a workspace's buffer free to create."
+  (let ((buf (generate-new-buffer name)))
+    (with-current-buffer buf
+      (let ((inhibit-read-only t))
+        (insert (propertize "*" 'display (list 'xwidget :xwidget xw))))
+      (setq buffer-read-only t)
+      (goto-char (point-min)))
+    buf))
+
 (defun agent-repl--frontend-widget-size (xw)
   "External-boundary wrapper: XW's requested size, as (WIDTH HEIGHT).
 Registered in `agent-repl--external-boundary-functions'."
@@ -272,6 +303,31 @@ Registered on `window-size-change-functions' and
 (add-hook 'window-size-change-functions #'agent-repl--frontend-fit-webviews)
 (add-hook 'window-buffer-change-functions #'agent-repl--frontend-fit-webviews)
 
+;; THE HOST SHOWS WHATEVER PAGE IS ON SCREEN.  Every workspace's slot displays
+;; the one host web view, so which page the host shows is decided by which
+;; workspace's slot a window of the selected frame displays: a switch puts the
+;; arriving workspace's layout on the frame, its slot in its webview window,
+;; and the host shows that workspace's page in the same redisplay.  Nothing
+;; else tells the host what to show, so the page on screen and the slot on
+;; screen cannot disagree.
+
+(defun agent-repl--frontend-show-displayed-pages (&optional frame)
+  "Show, in the host, the page of the workspace whose slot FRAME displays.
+Registered on `window-buffer-change-functions', which calls it with FRAME.
+Only the selected frame decides: the host is one web view, shown in one
+window at a time."
+  (let ((frame (or frame (selected-frame))))
+    (when (eq frame (selected-frame))
+      (walk-windows
+       (lambda (window)
+         (let ((buf (window-buffer window)))
+           (when (buffer-local-value 'agent-repl-frontend-webview-mode buf)
+             (when-let ((ws (buffer-local-value 'agent-repl--owning-workspace buf)))
+               (agent-repl-webhost-show ws)))))
+       'no-minibuf frame))))
+
+(add-hook 'window-buffer-change-functions #'agent-repl--frontend-show-displayed-pages)
+
 (defun agent-repl--frontend-kill-webview (buf)
   "Kill webview BUF without the xwidget kill-query prompt.
 `xwidget-kill-buffer-query-function' (on `kill-buffer-query-functions')
@@ -283,7 +339,7 @@ place it deadlocks non-interactive callers like the kill hook."
     (kill-buffer buf)))
 
 (defun agent-repl--frontend-detach-webview (ws buf)
-  "Kill webview BUF and clear WS\='s binding to it, in that order.
+  "Kill webview slot BUF, drop WS\='s page, and clear WS\='s binding, in order.
 The two halves are ONE act: `agent-repl--frontend-ensure-webview-buffer'
 reuses whatever `:frontend-buffer' names, so a kill that left the key set
 would hand a dead buffer to the next mount, and a cleared key over a live
@@ -295,6 +351,7 @@ half can be forgotten at one of them.
 The kill path deliberately does NOT: tombstoning nils the plist keys
 itself, and the put would resurrect the record."
   (agent-repl--frontend-kill-webview buf)
+  (agent-repl-webhost-remove ws)
   (agent-repl--ws-put ws :frontend-buffer nil))
 
 ;;;; ---- Refreshing live webviews ----------------------------------------------
@@ -551,16 +608,21 @@ injecting nothing, when BUF holds no live webview."
     t))
 
 (defun agent-repl--frontend-copy-script (id)
-  "Return the JavaScript that answers request ID with the page's selection.
+  "Return the JavaScript that answers request ID with the shown page's selection.
+The selection is read from the host's mirror (webhost.el): the shown page
+reports its selection and focus to the host as they change, so the host
+answers at once.  With no page shown the answer is an empty selection
+without focus, which copies nothing and lets the key fall through.
 The answer is ALWAYS a string (a JSON object), never null or undefined:
 the NS port drops a null result without calling back, which would leave
-the waiting command waiting.  `text' is null only when the page has no
-selection object at all, an invariant violation the command reports."
-  (format (concat "(function(){var s=window.getSelection();"
-                  "return JSON.stringify({id:%d,"
-                  "text:s===null?null:s.toString(),"
-                  "focused:document.hasFocus()});})()")
-          id))
+the waiting command waiting.  `text' is null only when the shown page has
+no selection object at all, an invariant violation the command reports."
+  (format (concat "(function(){var h=window.agentReplHost;"
+                  "if(!h){return JSON.stringify({id:%d,text:'',focused:false});}"
+                  "var a=JSON.parse(h.selection());"
+                  "var shown=a.outcome==='present';"
+                  "return JSON.stringify({id:%d,text:shown?a.text:'',focused:shown&&a.focused});})()")
+          id id))
 
 (defun agent-repl--frontend-copy-parse (raw)
   "Parse the page's RAW answer into a plist (:id :text :focused).
@@ -719,112 +781,53 @@ minor-mode map, so the chords must live in this mode's own state maps."
           #'agent-repl-frontend-webview-mode)
 
 
-(defun agent-repl--frontend-watch-load (ws buf)
-  "Report BUF's load-finished events for WS to the open-progress ladder.
+(defun agent-repl--frontend-ensure-webview-buffer (ws)
+  "Return WS's live webview slot, and hold WS's page in the host.
+Reuses the recorded `:frontend-buffer' while it is live, and otherwise
+creates the slot (`agent-repl--frontend-make-slot-buffer'), creating the
+host first when there is none.  A freshly made slot is handed to
+`agent-repl--frontend-adopt-webview-buffer', which pins its name, drops the
+browser header-line, and arms the copy chords, and is told the input
+window's background its page's gate wears.
 
-The xwidget event handler calls the widget's own `callback', so the
-existing one is WRAPPED rather than replaced: the webkit machinery still
-gets every event it needs, and the ladder gets the ONE report that a
-page actually finished loading.  This is the only signal in the ladder
-that comes from the page at all, and it is a fact the widget emits —
-nothing is asked of the page, which is what makes it trustworthy for
-diagnosing a page too broken to answer a question.
+Either way the host is asked to hold WS's page
+\(`agent-repl-webhost-ensure-page'), which is idempotent: a page already
+held at WS's URL is left alone, so this is safe on every open and show.
 
-THE LOAD REPORT IS AN INFO RECORD, and that rung is load-bearing.  It is
-the ONE marker every painted panel leaves, whatever brought the workspace
-into being: every mount arrives through
-`agent-repl--frontend-ensure-webview-buffer' and every mount arms this
-watcher.  On the DEBUG rung it never reached disk at all, because the
-default `AGENT_REPL_LOG_LEVEL' is `info' — so realtest 5's created
-workspace painted its panel (`elisp.frontend.gui-open: displayed', with
-the page's own boot record beside it) while the run's harvest held no
-evidence of any load and reported a workspace the owner could not work
-in.  The pre-creation drain's `precreate-created' cannot cover for it: a
-created workspace is mounted and DISPLAYED by the open path first, so
-pre-creation refuses it `:already-mounted' and never writes a record
-naming it.  One record per mount is the whole cost.
-
-No-op when BUF holds no live widget."
-  (let ((widget (agent-repl--frontend-webview-live-widget buf)))
-    (if (not widget)
-        (agent-repl--log ws "elisp.frontend.watch-load: skipped ws=%s reason=no-widget" ws)
-      (let ((prior (xwidget-get widget 'callback)))
-        (xwidget-put
-         widget 'callback
-         (lambda (xwidget event-type)
-           (when (eq event-type 'load-changed)
-             (agent-repl--info ws "elisp.frontend.watch-load: load-changed ws=%s" ws)
-             (when (fboundp 'agent-repl-open-progress-note-loaded)
-               (agent-repl-open-progress-note-loaded ws))
-             ;; The editor's startup opens WS's tab only once its page drew.
-             (when (fboundp 'agent-repl-startup-note-page-loaded)
-               (agent-repl-startup-note-page-loaded ws))
-             ;; A (RE)LOADED PAGE HAS LOST EVERY PROPERTY EMACS SET ON IT, so
-             ;; it learns the input window's color again: the gate wears it.
-             (when (fboundp 'agent-repl-window-tell-input-background)
-               (agent-repl-window-tell-input-background ws)))
-           (when (functionp prior) (funcall prior xwidget event-type))))
-        (agent-repl--log ws "elisp.frontend.watch-load: armed ws=%s" ws)))))
-
-(defun agent-repl--frontend-ensure-webview-buffer (ws url)
-  "Return a live webview buffer for WS at URL.
-Reuses the recorded `:frontend-buffer' while it is live.  WS's webview
-URL addresses the WORKSPACE, so it names the same thing for as long as
-the workspace exists and a live buffer never needs retargeting — which
-is fortunate, because an xwidget session cannot be retargeted reliably
-from outside.  A freshly mounted buffer is handed to
-`agent-repl--frontend-adopt-webview-buffer', which pins its name, drops
-the browser header-line, and arms the copy chords.
-
-Whichever buffer is returned — reused or freshly mounted — its
-`default-directory' is realigned to WS's project root via
-`agent-repl--align-buffer-to-ws-dir', so `SPC .' from the webview window
-resolves against the worktree the REPL is attached to rather than the
-foreign directory the xwidget session inherited at creation."
-  ;; This is the one rendering choke point: every initial mount and remount
-  ;; arrives here.
-  ;;
-  ;; NO HEALTH PROBE.  A mount used to poll session health first, because the
-  ;; establishment command acked as soon as a spawn was issued and the mount
-  ;; had no other way to know the shim was up.  The daemon acks only once the
-  ;; session is ESTABLISHED — its shim answered a health probe healthy over
-  ;; the fully wired connection — so a probe here could only re-ask a question
-  ;; already answered (and lose the race it kept losing).
-  ;;
-  ;; THE MOUNT IS ONE STEP, NOT THREE.  Creating the WKWebView, adopting it
+Whichever buffer is returned, its `default-directory' is realigned to WS's
+project root via `agent-repl--align-buffer-to-ws-dir', so `SPC .' from the
+webview window resolves against the worktree the REPL is attached to."
+  ;; THE MOUNT IS ONE STEP, NOT THREE.  Creating the slot, adopting it
   ;; (name pinned, header-line dropped, chords armed) and binding it to the
-  ;; workspace are what makes a webview belong to WS.  A `C-g' landing
-  ;; between them leaves a live xwidget buffer no workspace holds — invisible
-  ;; to `gui-kill', so it is never released — or an adopted-but-unbound
-  ;; buffer the next open mounts a SECOND webview beside.  Quit is held off
-  ;; until the registry names the buffer it just created.
-  ;;
-  ;; THROUGH `agent-repl--with-deferred-quit' RATHER THAN A BARE
-  ;; `inhibit-quit', so the deferral is RECORDED and the armed flag is handed
-  ;; on rather than left to whatever checkpoint comes next.  A bare binding
-  ;; makes a quit that arrived here indistinguishable, from the log alone,
-  ;; from a quit that never arrived.
-  ;;
-  ;; It is NOT what the 2026-09-12 / 2026-09-13 "a real C-g did not dismiss
-  ;; the prompt" finding turned out to be.  That was the module's own quit
-  ;; DELIVERY timer clearing `quit-flag' and then failing to abort; the guard
-  ;; itself only ever left the flag armed, and this mount logged no deferral
-  ;; in any of those runs.  core.el's commentary carries the Emacs source
-  ;; that settles it.
+  ;; workspace are what makes a slot belong to WS.  A `C-g' landing between
+  ;; them leaves a slot no workspace holds -- invisible to `gui-kill' -- or
+  ;; an adopted-but-unbound slot the next open makes a SECOND one beside.
+  ;; Quit is held off until the registry names the buffer it just created,
+  ;; through `agent-repl--with-deferred-quit' so the deferral is recorded.
   (let* ((existing (agent-repl--ws-get ws :frontend-buffer))
-         (buf (if (buffer-live-p existing)
+         (fresh (not (buffer-live-p existing)))
+         (buf (if (not fresh)
                   (progn
                     (agent-repl--log ws "ensure-webview: outcome=reused buf=%s"
                                      (buffer-name existing))
                     existing)
                 (agent-repl--with-deferred-quit "frontend-ensure-webview"
-                  (let* ((buf (agent-repl--frontend-make-webview-buffer url))
-                         (name (agent-repl--frontend-webview-buffer-name ws)))
+                  (let* ((xw (agent-repl-webhost-ensure (agent-repl-host-conn ws)))
+                         (name (agent-repl--frontend-webview-buffer-name ws))
+                         (buf (agent-repl--frontend-make-slot-buffer name xw)))
                     (agent-repl--frontend-adopt-webview-buffer buf name ws)
                     (agent-repl--ws-put ws :frontend-buffer buf)
-                    (agent-repl--frontend-watch-load ws buf)
-                    (agent-repl--log ws "frontend webview mounted: %s -> %s" name url)
+                    (agent-repl--info ws "elisp.frontend.slot-mounted ws=%s buffer=%s" ws name)
                     buf)))))
+    (agent-repl-webhost-ensure-page ws)
+    (when fresh
+      ;; The page's gate wears the input window's color; the host keeps it
+      ;; and hands it to the page on every load of the page.
+      (when (fboundp 'agent-repl-window-tell-input-background)
+        (agent-repl-window-tell-input-background ws))
+      ;; The editor's startup opens WS's tab only once its page drew.
+      (when (fboundp 'agent-repl-startup-note-page-loaded)
+        (agent-repl-startup-note-page-loaded ws)))
     (agent-repl--align-buffer-to-ws-dir buf ws)
     buf))
 
@@ -1023,8 +1026,7 @@ workspace's layout.  The anchor is inert when WS is already current."
   (agent-repl--call-in-background-workspace
    ws
    (lambda ()
-     (let* ((url (agent-repl-frontend-webview-url ws))
-            (buf (agent-repl--frontend-ensure-webview-buffer ws url)))
+     (let ((buf (agent-repl--frontend-ensure-webview-buffer ws)))
        (agent-repl--frontend-display-webview ws buf)
        ;; The real panel is on the frame; the placeholder has nothing left
        ;; to say and goes away in the same call that replaced it.
@@ -1077,18 +1079,17 @@ to one; the refusals are preconditions, not failures (see
       :created)))
 
 (defun agent-repl--frontend-precreate-mount (ws)
-  "Mount WS's webview buffer without displaying it, returning the buffer.
-Anchored the same way the open path anchors, so the buffer is born into
-WS's perspective rather than whichever one is current when the mount
-runs.  No window is touched either way."
-  (agent-repl--call-in-background-workspace
-   ws
-   (lambda ()
-     (let ((buf (agent-repl--frontend-ensure-webview-buffer
-                 ws (agent-repl-frontend-webview-url ws))))
-       (agent-repl--log ws "elisp.frontend.precreate: mounted ws=%s buffer=%s"
-                        ws (and (buffer-live-p buf) (buffer-name buf)))
-       buf))))
+  "Make WS's webview slot and page without displaying them; return the slot.
+The slot is attached to WS's perspective directly, so it is born into WS's
+buffers rather than whichever perspective is current, and no window and no
+perspective is touched: making a slot creates no native view, so there is
+nothing to anchor."
+  (let ((buf (agent-repl--frontend-ensure-webview-buffer ws)))
+    (when-let ((persp (agent-repl--ws-resolve-persp ws)))
+      (agent-repl--ws-add-buffer buf persp nil))
+    (agent-repl--log ws "elisp.frontend.precreate: mounted ws=%s buffer=%s"
+                     ws (and (buffer-live-p buf) (buffer-name buf)))
+    buf))
 
 (defun agent-repl--frontend-precreate-refusal (ws)
   "Return the keyword naming why WS may NOT be pre-created, or nil when it may.
@@ -1220,87 +1221,56 @@ than no webview."
 ;; WORKSPACE BUFFER FOR LIFE.
 
 (defun agent-repl-frontend-reload-webview (&optional ws)
-  "Navigate WS's webview to its current URL, reloading the served webapp.
+  "Load WS's page again at its URL now, against the daemon that owns WS.
 
-The reaction to WatchHostWorkspace's `reload_webapp' push — rebuilt
-webapp assets are deployed and this workspace's xwidget must reload
-against the SAME daemon.  The reloaded webview's default first-page load
-is the whole of the recovery: the daemon serves the bundle off disk, so
-navigating the live widget to the URL again fetches the new assets
-\(their content-hashed names make it a guaranteed cache miss).
+The reaction to a workspace moving daemons (a handover re-points its
+page at the new address) and the interactive `SPC o l'.  The host
+re-points the page when its URL moved and reloads it in place otherwise
+\(`agent-repl-webhost-reload-page'); the slot is untouched.  A rollout's
+`reload_webapp' push reloads the whole host instead
+\(`agent-repl-frontend-reload-webapp').
 
-The WIDGET IS NAVIGATED, never remounted: the webview is bound to its
-buffer for life, and killing the buffer to make a new one would break
-that binding for a rollout the page can simply re-fetch.
-
-WS defaults to the current workspace, so the interactive command
-\(`SPC o l') and the push arm share one implementation.  Returns the
-xwidget on success and nil when WS has no live webview — a workspace
-with no page has nothing to reload, and its next open mounts fresh."
+WS defaults to the current workspace.  Returns WS's workspace id on
+success and nil when WS has no live slot -- a workspace with no page has
+nothing to reload, and its next open mounts fresh."
   (interactive)
   (let* ((ws (or ws (agent-repl--ws-current-name)))
-         (buf (and ws (agent-repl--ws-get ws :frontend-buffer)))
-         (widget (and (buffer-live-p buf)
-                      (agent-repl--frontend-webview-live-widget buf))))
+         (buf (and ws (agent-repl--ws-get ws :frontend-buffer))))
     (cond
      ((null ws)
       (user-error "agent-repl: no current workspace"))
-     ((null widget)
+     ((not (buffer-live-p buf))
       (agent-repl--log ws "elisp.frontend.reload-webview: skipped ws=%s reason=no-live-webview" ws)
       nil)
      (t
-      (agent-repl--frontend-webview-navigate-widget
-       widget (agent-repl-frontend-webview-url ws))
-      (agent-repl--info ws "elisp.frontend.reload-webview: navigated ws=%s" ws)
-      widget))))
+      (prog1 (agent-repl-webhost-reload-page ws)
+        (agent-repl--info ws "elisp.frontend.reload-webview: reloaded ws=%s" ws))))))
+
+(defun agent-repl-frontend-reload-webapp (ws)
+  "Bring every page onto the rebuilt webapp: the reaction to WS's `reload_webapp'.
+A rollout tells every stale workspace in one burst; the host reloads once
+for all of them (`agent-repl-webhost-reload'), which also brings the host
+page's own code onto the new build."
+  (agent-repl--info ws "elisp.frontend.reload-webapp ws=%s" ws)
+  (agent-repl-webhost-reload (agent-repl-host-conn ws)))
 
 ;;;; ---- Rescuing a webview that navigated away --------------------------------
 
-(defun agent-repl--frontend-webview-current-uri (ws)
-  "Return the URI WS's open webview is currently displaying, or nil.
-nil covers both \"no webview open\" and \"the mounted WKWebView is
-dead\": neither is a page that can be inspected, and the caller
-distinguishes them by asking for the buffer itself."
-  (let ((buf (agent-repl--ws-get ws :frontend-buffer)))
-    (when (buffer-live-p buf)
-      (when-let ((xw (agent-repl--frontend-webview-live-widget buf)))
-        (agent-repl--frontend-webview-uri xw)))))
+(defun agent-repl--frontend-host-current-uri ()
+  "Return the URI the host web view is displaying, or nil without a host."
+  (when-let ((xw (agent-repl-webhost-xwidget)))
+    (agent-repl--frontend-webview-uri xw)))
 
-(defun agent-repl--frontend-home-origin (ws)
-  "Return the origin WS's webapp is served from, or nil.
-
-The origin is the address of the connection whose daemon OWNS WS
-\(`agent-repl-host-conn'), which is the same source
-`agent-repl-frontend-webview-url' builds its URL from — so home and the
-page the rescue navigates back to can never name two different daemons.
-There is no global base URL to ask instead: a workspace handed over to
-another daemon is served by THAT daemon, and a module-wide address would
-call its perfectly-correct page stray.
-
-Nil when WS has no connection or no ref: a workspace whose daemon or
-page host cannot be named cannot certify any page as home."
-  (let ((conn (and (fboundp 'agent-repl-host-conn) (agent-repl-host-conn ws)))
-        (ref (and (fboundp 'agent-repl-host-ref) (agent-repl-host-ref ws))))
-    (when (and conn ref)
-      (agent-repl--frontend-page-origin ws conn))))
-
-(defun agent-repl--frontend-webview-at-home-p (ws uri)
-  "Return non-nil when URI is served by the daemon that owns WS.
-Home is that daemon's ORIGIN (`agent-repl--frontend-home-origin'), not
-the workspace's full webview URL: the page rewrites its own query as the
-user navigates the webapp, and the build stamp in a freshly built URL
-differs from the one a still-correct mounted page carries, so comparing
-whole URLs would call a perfectly-at-home webview stray.  What the
-rescue actually detects is the page having left the daemon entirely.
-
-An unknown or empty URI is NOT home: a webview that cannot say where it
-is has no claim on being left alone.  Neither is any URI when WS has no
-connection to be at home on."
+(defun agent-repl--frontend-host-at-home-p (ws uri)
+  "Return non-nil when URI is the host page on the daemon that owns WS.
+Home is the host page's ORIGIN on that daemon, not its full URL.  An unknown
+or empty URI is not home: a web view that cannot say where it is has no
+claim on being left alone."
   (and (stringp uri)
        (not (string-empty-p uri))
-       (when-let ((origin (agent-repl--frontend-home-origin ws)))
+       (when-let ((conn (and (fboundp 'agent-repl-host-conn) (agent-repl-host-conn ws))))
          (let ((there (url-generic-parse-url uri))
-               (home (url-generic-parse-url origin)))
+               (home (url-generic-parse-url (agent-repl-webhost-url conn))))
            (and (equal (url-type there) (url-type home))
                 (equal (url-host there) (url-host home))
                 (equal (url-port there) (url-port home))
@@ -1309,7 +1279,7 @@ connection to be at home on."
 (defun agent-repl--frontend-webview-host (uri)
   "Return a short host label for URI, for user copy.
 Falls back to the whole URI when it parses to no host, and to
-\"an unknown page\" when there is no URI at all — the echo line names
+\"an unknown page\" when there is no URI at all -- the echo line names
 where the view went, and a hole in that sentence is worse than a
 coarser answer."
   (or (and (stringp uri)
@@ -1319,23 +1289,19 @@ coarser answer."
 
 ;;;###autoload
 (defun agent-repl-frontend-rescue-webview (&optional ws)
-  "Bring a webview that navigated away from the webapp back home.
-Clicking an external hyperlink inside the webapp navigates the xwidget
-itself, so the workspace's panel ends up rendering some other site with
-no way back — the page is gone, and with it every control that could
-return it.  This is the way back: it reports WHERE the view went and
-navigates it back to its own
-workspace's URL (`agent-repl-frontend-reload-webview', the same
-operation the rollout reload uses).
+  "Bring a page that navigated away from the webapp back home.
+Clicking an external hyperlink inside the webapp can navigate the view
+itself, so the panel ends up rendering some other site with no way back.
 
-WS defaults to the current workspace.  With a prefix argument the
-target workspace is read interactively, and non-interactive callers may
-pass a name directly.
+When the HOST web view itself has left the host page, it is reloaded,
+which brings every page back with it.  Otherwise WS's own page is loaded
+again at its URL (`agent-repl-frontend-reload-webview'): a workspace page
+is an iframe of another origin, so where it went cannot be read, and
+reloading it is what brings it home.
 
-A webview that is already home is left ALONE — no remount, just a line
-saying so.  Remounting it anyway would throw away a rendered feed to
-navigate to where it already is.  Signals when the workspace has no
-webview open at all, matching `agent-repl-frontend-reload-webview'."
+WS defaults to the current workspace.  With a prefix argument the target
+workspace is read interactively, and non-interactive callers may pass a
+name directly.  Signals when the workspace has no webview open at all."
   (interactive
    (list (when current-prefix-arg
            (agent-repl--read-known-workspace "Rescue webview for workspace: "))))
@@ -1344,19 +1310,19 @@ webview open at all, matching `agent-repl-frontend-reload-webview'."
       (user-error "agent-repl: no current workspace"))
     (unless (buffer-live-p (agent-repl--ws-get ws :frontend-buffer))
       (user-error "agent-repl: no webview open for workspace %s" ws))
-    (let ((uri (agent-repl--frontend-webview-current-uri ws)))
-      (if (agent-repl--frontend-webview-at-home-p ws uri)
+    (let ((uri (agent-repl--frontend-host-current-uri)))
+      (if (agent-repl--frontend-host-at-home-p ws uri)
           (progn
-            (agent-repl--log ws "rescue-webview: outcome=already-home")
-            (agent-repl--user-message ws "webview is already home" nil
-                                      :detail (format "uri=%s" uri))
-            nil)
-        (agent-repl--log ws "rescue-webview: outcome=astray url=%s" uri)
-        (prog1 (agent-repl-frontend-reload-webview ws)
-          (agent-repl--user-message
-           ws "webview brought home from %s"
-           (list (agent-repl--frontend-webview-host uri))
-           :detail (format "stray-uri=%s" uri)))))))
+            (agent-repl--log ws "rescue-webview: outcome=page-reloaded")
+            (prog1 (agent-repl-frontend-reload-webview ws)
+              (agent-repl--user-message ws "webview reloaded" nil)))
+        (agent-repl--log ws "rescue-webview: outcome=host-astray url=%s" uri)
+        (agent-repl-webhost-reload (agent-repl-host-conn ws))
+        (agent-repl--user-message
+         ws "webview brought home from %s"
+         (list (agent-repl--frontend-webview-host uri))
+         :detail (format "stray-uri=%s" uri))
+        t))))
 
 (defun agent-repl--gui-show (ws)
   "The gui frontend's show capability (registry `:show-fn').
@@ -1552,11 +1518,12 @@ workspace kill path (`agent-repl-ws-del-hook')."
 ;;;; ---- Workspace teardown -----------------------------------------------------
 
 (defun agent-repl--frontend-release-workspace-webview (ws)
-  "Kill WS's webview buffer on kill (for `agent-repl-ws-del-hook').
-Tombstoning only nils the plist keys — without this the buffer (a live
-WKWebView holding an open WebSocket) would outlive the workspace.
+  "Drop WS's page and kill its slot on kill (for `agent-repl-ws-del-hook').
+Tombstoning only nils the plist keys — without this WS's page (a live
+iframe holding open streams) would outlive the workspace in the host.
 Runs pre-tombstone, while `:frontend-buffer' is still readable."
   (let ((buf (agent-repl--ws-get ws :frontend-buffer)))
+    (agent-repl-webhost-remove ws)
     (if (buffer-live-p buf)
         (progn
           (agent-repl--log ws "frontend webview released on kill: %s" (buffer-name buf))
@@ -1576,15 +1543,16 @@ re-attached WKWebView, which paints from blank).")
 (defun agent-repl-frontend--view-presence (ws view-buffer)
   "Return a plist describing how WS's VIEW-BUFFER is displayed right now.
 Keys: :windows (how many windows show it), :width / :height (the first
-such window's body size in pixels), :xwidgets (xwidgets in the buffer),
+such window's body size in pixels), :xwidgets (1 while the host web view
+lives, which every slot displays),
 :view (`same', `new', `none' or `first' -- the first window's xwidget view
 against the one recorded at WS's previous switch), :selected (whether
 that window is the selected one).  Records the view for the next call."
   (let* ((windows (and (buffer-live-p view-buffer)
                        (get-buffer-window-list view-buffer nil t)))
          (win (car windows))
-         (xws (and (buffer-live-p view-buffer) (fboundp 'get-buffer-xwidgets)
-                   (get-buffer-xwidgets view-buffer)))
+         (host (agent-repl-webhost-xwidget))
+         (xws (and (buffer-live-p view-buffer) host (list host)))
          (view (and win (car xws) (fboundp 'xwidget-view-lookup)
                     (xwidget-view-lookup (car xws) win)))
          (previous (gethash ws agent-repl-frontend--last-view-on-switch :unset))

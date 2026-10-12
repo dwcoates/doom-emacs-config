@@ -3191,65 +3191,42 @@ recorded; the response view is killed afterwards."
 ;;;; ---- Tests: escape closes the news digest ----
 
 (ert-deftest agent-repl-test-input-escape-asks-the-page-to-close-its-digest ()
-  "Command-state escape sends the page its digest-closing script."
+  "Command-state escape asks the host to close the workspace page's digest."
   (agent-repl-test--with-clean-state
     ;; Arrange
-    (let ((scripts nil)
-          (buf (get-buffer-create "*agent-frontend-ws*")))
-      (unwind-protect
-          (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws"))
-                    ((symbol-function 'agent-repl--frontend-webview-read-script)
-                     (lambda (b script cb) (push (list (buffer-name b) script cb) scripts) t))
-                    ((symbol-function 'agent-repl--input-selection-active-p) (lambda (_) nil))
-                    ((symbol-function 'agent-repl--input-escape-default) #'ignore))
-            ;; Act
-            (agent-repl-input-selection-escape)
-            ;; Assert
-            (should (equal scripts
-                           (list (list "*agent-frontend-ws*" agent-repl--input-digest-dismiss-script
-                                       #'agent-repl--input-digest-dismiss-reply)))))
-        (kill-buffer buf)))))
+    (let ((asked nil))
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws"))
+                ((symbol-function 'agent-repl-webhost-dismiss-digest) (lambda (ws) (push ws asked)))
+                ((symbol-function 'agent-repl--input-selection-active-p) (lambda (_) nil))
+                ((symbol-function 'agent-repl--input-escape-default) #'ignore))
+        ;; Act
+        (agent-repl-input-selection-escape)
+        ;; Assert
+        (should (equal asked '("ws")))))))
 
 (ert-deftest agent-repl-test-input-insert-escape-closes-the-digest-then-leaves-insert ()
-  "Insert-state escape sends the script, then leaves insert state as ever."
+  "Insert-state escape asks for the close, then leaves insert state as ever."
   (agent-repl-test--with-clean-state
     ;; Arrange
-    (let ((events nil)
-          (buf (get-buffer-create "*agent-frontend-ws*")))
-      (unwind-protect
-          (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws"))
-                    ((symbol-function 'agent-repl--frontend-webview-read-script)
-                     (lambda (&rest _) (push 'script events) t))
-                    ((symbol-function 'evil-normal-state) (lambda (&rest _) (push 'normal events))))
-            ;; Act
-            (agent-repl-input-insert-escape)
-            ;; Assert
-            (should (equal (reverse events) '(script normal))))
-        (kill-buffer buf)))))
-
-(ert-deftest agent-repl-test-input-escape-without-a-webview-sends-nothing ()
-  "A workspace with no page buffer is asked nothing."
-  (agent-repl-test--with-clean-state
-    ;; Arrange
-    (let ((scripts nil))
-      (cl-letf (((symbol-function 'agent-repl--frontend-webview-read-script)
-                 (lambda (&rest args) (push args scripts) t)))
+    (let ((events nil))
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws"))
+                ((symbol-function 'agent-repl-webhost-dismiss-digest) (lambda (&rest _) (push 'dismiss events)))
+                ((symbol-function 'evil-normal-state) (lambda (&rest _) (push 'normal events))))
         ;; Act
-        (agent-repl--input-dismiss-digest "no-page-ws")
+        (agent-repl-input-insert-escape)
         ;; Assert
-        (should-not scripts)))))
+        (should (equal (reverse events) '(dismiss normal)))))))
 
-(ert-deftest agent-repl-test-input-digest-escape-reply-records-only-a-dismissal ()
-  "The reply records a dismissal, and nothing when no digest stood."
+(ert-deftest agent-repl-test-input-escape-without-a-workspace-asks-nothing ()
+  "Standing in no workspace, there is no page to ask."
   (agent-repl-test--with-clean-state
     ;; Arrange
-    (let ((records nil))
-      (cl-letf (((symbol-function 'agent-repl--info) (lambda (_scope fmt &rest _) (push fmt records))))
+    (let ((asked nil))
+      (cl-letf (((symbol-function 'agent-repl-webhost-dismiss-digest) (lambda (ws) (push ws asked))))
         ;; Act
-        (agent-repl--input-digest-dismiss-reply "none")
-        (agent-repl--input-digest-dismiss-reply "dismissed")
+        (agent-repl--input-dismiss-digest nil)
         ;; Assert
-        (should (equal records '("elisp.input.escape-dismissed-news-digest")))))))
+        (should-not asked)))))
 
 (provide 'test-input)
 
