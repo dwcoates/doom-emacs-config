@@ -818,6 +818,98 @@ func TestHeadClockMSFollowsTheEntrysStanding(t *testing.T) {
 	}
 }
 
+// TestQueueSpanOfFollowsTheEntrysStanding covers the shared wait resolver:
+// queued alone while waiting, ended at the run's admission once admitted, and
+// nothing while an admission has no run registered yet.
+func TestQueueSpanOfFollowsTheEntrysStanding(t *testing.T) {
+	tests := []struct {
+		name      string
+		state     wsm.MergeQueueState
+		running   bool
+		wantDrawn bool
+		wantSpan  func(r *run) queueSpan
+	}{
+		{name: "waiting", state: wsm.MergeQueued, wantDrawn: true,
+			wantSpan: func(*run) queueSpan { return queueSpan{queuedMS: 1000} }},
+		{name: "admitted with its run", state: wsm.MergeAdmitted, running: true, wantDrawn: true,
+			wantSpan: func(r *run) queueSpan { return queueSpan{queuedMS: 1000, admitted: true, admittedMS: r.startedMS} }},
+		{name: "admitted before its run registers", state: wsm.MergeAdmitted, wantDrawn: false,
+			wantSpan: func(*run) queueSpan { return queueSpan{} }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			r := ledgeredRun(t, h)
+			if tc.running {
+				registerRunning(h, r)
+			}
+			entry := wsm.MergeQueueEntry{Workspace: theWorkspace, State: tc.state, EnqueuedAt: time.UnixMilli(1000)}
+
+			// Act.
+			span, drawn, err := h.o.queueSpanOf(entry)
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("queueSpanOf: %v", err)
+			}
+			if drawn != tc.wantDrawn || span != tc.wantSpan(r) {
+				t.Fatalf("queueSpanOf = %+v drawn %v, want %+v drawn %v", span, drawn, tc.wantSpan(r), tc.wantDrawn)
+			}
+		})
+	}
+}
+
+// TestQueueSpanOfRefusesAnEntryWithNoQueuedTime covers the invariant in the
+// shared resolver, admitted or not: no queued time is an error.
+func TestQueueSpanOfRefusesAnEntryWithNoQueuedTime(t *testing.T) {
+	for _, state := range []wsm.MergeQueueState{wsm.MergeQueued, wsm.MergeAdmitted} {
+		t.Run(state.String(), func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			registerRunning(h, ledgeredRun(t, h))
+
+			// Act.
+			_, drawn, err := h.o.queueSpanOf(wsm.MergeQueueEntry{Workspace: theWorkspace, State: state})
+
+			// Assert.
+			if err == nil || drawn {
+				t.Fatalf("queueSpanOf answered drawn %v, error %v, want an error and nothing drawn", drawn, err)
+			}
+		})
+	}
+}
+
+// TestTheQueueTabAndTheHeadClockShareOneWait asserts both drawings read the
+// one wait: a waiting head counts from the queue tab's start, an admitted one
+// from the queue tab's end.
+func TestTheQueueTabAndTheHeadClockShareOneWait(t *testing.T) {
+	for _, state := range []wsm.MergeQueueState{wsm.MergeQueued, wsm.MergeAdmitted} {
+		t.Run(state.String(), func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			registerRunning(h, ledgeredRun(t, h))
+			entry := wsm.MergeQueueEntry{Workspace: theWorkspace, State: state, EnqueuedAt: time.UnixMilli(1000)}
+
+			// Act.
+			tab, _, tabErr := h.o.queueTabState(entry)
+			clock, _, clockErr := h.o.headClockMS(entry)
+
+			// Assert.
+			if tabErr != nil || clockErr != nil {
+				t.Fatalf("queueTabState: %v, headClockMS: %v", tabErr, clockErr)
+			}
+			want := tab.startedMS
+			if tab.settled {
+				want = tab.endedMS
+			}
+			if clock != want {
+				t.Fatalf("the head clock counts from %d, want the queue tab's %+v boundary %d", clock, tab, want)
+			}
+		})
+	}
+}
+
 // TestAWaitingHeadClockWithNoQueuedTimeIsRefused covers the head's side of
 // the invariant: no queued time is an error, never a clock begun at zero.
 func TestAWaitingHeadClockWithNoQueuedTimeIsRefused(t *testing.T) {
