@@ -447,12 +447,25 @@ export function mountFeed(
     client: AgentReplClient,
     signal: AbortSignal,
   ): AsyncGenerator<WatchFeedResponse> {
+    // THE OPEN IS TIMED AT THE PAGE: what a page waits between asking for
+    // its conversation and holding the answer is the first paint's critical
+    // path, and the daemon's own record (daemon.server.open_feed) says how
+    // much of it the daemon spent.
+    const askedAt = performance.now();
+    log.info("asked for the root feed's newest page", {
+      operation: "feed.open-asked",
+      context: {},
+    });
     const response: OpenFeedResponse = await callUnary(
       ctx,
       "OpenFeed",
       (c) => c.openFeed(buildOpenFeedRequest(ctx.workspace)),
       OpenFeedResponseSchema,
     );
+    log.info("the root feed's newest page arrived", {
+      operation: "feed.open-answered",
+      context: { rpc_ms: Math.round(performance.now() - askedAt) },
+    });
     if (disposed || signal.aborted) return;
     const result = requireCase(response.result, "OpenFeedResponse.result");
     switch (result.case) {
