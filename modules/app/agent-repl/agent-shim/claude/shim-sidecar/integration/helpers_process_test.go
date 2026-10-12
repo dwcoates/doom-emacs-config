@@ -42,17 +42,26 @@ type launchedSidecar struct {
 	done   chan struct{}
 	err    error
 	waited bool
+	// lockDir is the run directory the process reports its build into.
+	lockDir string
 }
 
 // launchSidecar starts the binary with the argv and extra environment given.
 //
-// The environment is the ambient one plus the vendor-call ban plus `env`, and —
-// unlike startSidecar — NO AGENT_REPL_STORE_SOCKET is added, so a subject decides
-// for itself which spellings of the socket the process sees.
+// The environment is the ambient one plus the vendor-call ban, the test's own
+// run directory, and `env`, and — unlike startSidecar — NO
+// AGENT_REPL_STORE_SOCKET is added, so a subject decides for itself which
+// spellings of the socket the process sees.
+//
+// THE RUN DIRECTORY IS THE TEST'S OWN. A sidecar that boots writes its build
+// report there (agentrepl/logging/buildreport), and without one it wrote into
+// the owner's ~/.cache/agent-repl/run: the next daemon boot then read the live
+// sidecar as stale and restarted it (2026-10-12). `env` may still override it.
 func launchSidecar(t *testing.T, args []string, env ...string) *launchedSidecar {
 	t.Helper()
+	lockDir := t.TempDir()
 	cmd := exec.Command(sidecarBin, args...)
-	cmd.Env = append(os.Environ(), "AGENT_REPL_FORBID_VENDOR_CALLS=1")
+	cmd.Env = append(os.Environ(), "AGENT_REPL_FORBID_VENDOR_CALLS=1", "AGENT_REPL_LOCK_DIR="+lockDir)
 	cmd.Env = append(cmd.Env, env...)
 	var stderr bytes.Buffer
 	cmd.Stdout = &stderr
@@ -60,7 +69,7 @@ func launchSidecar(t *testing.T, args []string, env ...string) *launchedSidecar 
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start sidecar %v: %v", args, err)
 	}
-	p := &launchedSidecar{t: t, cmd: cmd, stderr: &stderr, done: make(chan struct{})}
+	p := &launchedSidecar{t: t, cmd: cmd, stderr: &stderr, done: make(chan struct{}), lockDir: lockDir}
 	go func() {
 		p.err = cmd.Wait()
 		close(p.done)

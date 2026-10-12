@@ -187,3 +187,31 @@ func bootstrapRecords(t *testing.T, stderr string) []logRecord {
 	}
 	return out
 }
+
+// TestALaunchedSidecarReportsItsBuildIntoItsOwnRunDirectory pins that a test's
+// sidecar never writes the owner's build report: its report lands in the run
+// directory launchSidecar gave it.
+func TestALaunchedSidecarReportsItsBuildIntoItsOwnRunDirectory(t *testing.T) {
+	t.Parallel()
+	// Arrange.
+	ctx, cancel := testContext(t)
+	defer cancel()
+	tree := newVendorTree(t)
+	store := startFakeStore(t)
+	logPath := filepath.Join(t.TempDir(), "sidecar.log")
+
+	// Act: the store's first rpc comes after the report, which is written
+	// before the discovery loop starts.
+	proc := launchSidecar(t, sidecarFlags(t, tree, logPath), "AGENT_REPL_STORE_SOCKET="+store.Socket)
+	select {
+	case <-store.callC:
+	case <-ctx.Done():
+		t.Fatal("the sidecar never called its store")
+	}
+
+	// Assert.
+	if _, err := os.Stat(filepath.Join(proc.lockDir, "shim-claude-sidecar.build.json")); err != nil {
+		entries, _ := os.ReadDir(proc.lockDir)
+		t.Fatalf("no build report in the launch's own run directory: %v (it holds %v)", err, entries)
+	}
+}
