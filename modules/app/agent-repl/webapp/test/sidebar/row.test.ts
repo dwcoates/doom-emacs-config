@@ -226,10 +226,10 @@ describe("the when-column", () => {
     expect(drawn.querySelector(".when")?.textContent).toBe("");
   });
 
-  it("reads the nearest second when an activity age is sampled just short of one", () => {
+  it("reads the nearest second when a turn-end age is sampled just short of one", () => {
     // Arrange + Act: the stamp does not share the shared ticker's phase.
     const drawn = drawRosterRow(
-      row({ id: "ws-1", when: { case: "active", value: { atMs: BigInt(NOW - 4920) } } }),
+      row({ id: "ws-1", when: { case: "turnEnded", value: { atMs: BigInt(NOW - 4920) } } }),
       sidebarContext(),
       "R",
     );
@@ -237,11 +237,11 @@ describe("the when-column", () => {
     expect(drawn.querySelector(".when")?.textContent).toBe("5s");
   });
 
-  it("ticks an activity age off the SHARED clock", () => {
+  it("ticks a turn-end age off the SHARED clock", () => {
     const ticker = fakeTicker();
     const sc = sidebarContext(appContext({}, ticker));
     const drawn = drawRosterRow(
-      row({ id: "ws-1", when: { case: "active", value: { atMs: BigInt(NOW - 60_000) } } }),
+      row({ id: "ws-1", when: { case: "turnEnded", value: { atMs: BigInt(NOW - 60_000) } } }),
       sc,
       "R",
     );
@@ -249,29 +249,29 @@ describe("the when-column", () => {
     expect(drawn.querySelector(".when")?.textContent).toBe("3m");
   });
 
-  it("registers an activity age's tick as a teardown the next push runs", () => {
+  it("registers a turn-end age's tick as a teardown the next push runs", () => {
     const ticker = fakeTicker();
     const sc = sidebarContext(appContext({}, ticker));
     drawRosterRow(
-      row({ id: "ws-1", when: { case: "active", value: { atMs: BigInt(NOW) } } }),
+      row({ id: "ws-1", when: { case: "turnEnded", value: { atMs: BigInt(NOW) } } }),
       sc,
       "R",
     );
     expect(sc.disposers.length).toBe(1);
   });
 
-  it("states the arm the daemon chose for last activity", () => {
+  it("states the arm the daemon chose for the last turn end", () => {
     const drawn = drawRosterRow(
-      row({ id: "ws-1", when: { case: "active", value: { atMs: BigInt(NOW - 180_000) } } }),
+      row({ id: "ws-1", when: { case: "turnEnded", value: { atMs: BigInt(NOW - 180_000) } } }),
       sidebarContext(),
       "R",
     );
-    expect(drawn.querySelector(".when")?.getAttribute("data-when")).toBe("active");
+    expect(drawn.querySelector(".when")?.getAttribute("data-when")).toBe("turnEnded");
   });
 
-  it("draws last activity as a relative age", () => {
+  it("draws the last turn end as a relative age", () => {
     const drawn = drawRosterRow(
-      row({ id: "ws-1", when: { case: "active", value: { atMs: BigInt(NOW - 180_000) } } }),
+      row({ id: "ws-1", when: { case: "turnEnded", value: { atMs: BigInt(NOW - 180_000) } } }),
       sidebarContext(),
       "R",
     );

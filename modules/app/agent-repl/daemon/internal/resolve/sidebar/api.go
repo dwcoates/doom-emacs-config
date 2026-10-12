@@ -13,6 +13,8 @@
 package sidebar
 
 import (
+	"time"
+
 	"strconv"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -155,6 +157,13 @@ type Resolver interface {
 	// `done`, `interrupted` and `turn_failed` apart. No agent terminal states it: a user interrupt
 	// is a DAEMON fact, so the roster is told directly.
 	SetTurnEnded(ws ids.WorkspaceID, how TurnClose)
+	// SetTurnClosedAt installs the instant one of the workspace's turns
+	// closed, which the when-column counts from. The prompt queue's turn-close
+	// door tells it on EVERY close — completed, interrupted, failed, orphaned
+	// or displaced — with the very instant it records on the turn's row, so the
+	// live instant and the durable one (wsm.Workspace.LastTurnEndedAt) are the
+	// same value. An instant older than the one held is kept out.
+	SetTurnClosedAt(ws ids.WorkspaceID, at time.Time)
 	// SetSummary installs the row detail's summary line — the workspace's last
 	// prompt, first line only. Empty omits the line rather than drawing it
 	// blank.
