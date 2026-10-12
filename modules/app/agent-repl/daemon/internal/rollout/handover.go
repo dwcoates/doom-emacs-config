@@ -304,7 +304,7 @@ func (c *controller) completeHandover(ctx context.Context, plan *handoverPlan) {
 			KeepDraining: true,
 			WaitFor:      bounce.GateDispatchQuiet,
 			Run: func(runCtx context.Context, id ids.WorkspaceID) error {
-				return c.transfer(runCtx, ws, plan, plan.snapshot[id], &windows)
+				return c.transfer(runCtx, ws, plan, &windows)
 			},
 			Done: func(err error) { outcomes <- transferOutcome{ws: ws.ID, err: err} },
 		}
@@ -429,7 +429,7 @@ func (c *controller) followHandover(ctx context.Context, plan *handoverPlan, out
 // it took is released and, if the shim was already detached, the running shim
 // is re-adopted, so a transfer that failed leaves the workspace served HERE --
 // never held by a lease nobody will release.
-func (c *controller) transfer(ctx context.Context, ws wsm.Workspace, plan *handoverPlan, expected Participants, windows *sync.WaitGroup) error {
+func (c *controller) transfer(ctx context.Context, ws wsm.Workspace, plan *handoverPlan, windows *sync.WaitGroup) error {
 	successor := plan.successor
 	fields := dlog.Context{"workspace": string(ws.ID), "successor": successor}
 	// THE WORKSPACE'S OWN LOG SAYS WHY TWO DAEMONS WRITE FOR IT. For the
@@ -513,7 +513,7 @@ func (c *controller) transfer(ctx context.Context, ws wsm.Workspace, plan *hando
 	c.recordTransfer(ws.ID, successor)
 	c.deps.Pusher.PushTransferred(ws.ID, successor)
 	c.log.Info(opTransfer, "pushed the transfer notice on the workspace's host and web streams",
-		merge(fields, dlog.Context{"expected_host": expected.Host, "expected_web": expected.Web}))
+		merge(fields, dlog.Context{"expected_host": move.participants.Host, "expected_web": move.participants.Web}))
 	wsLog.Info(opTransfer, "the workspace is the successor's now; any later record from this daemon about it is the predecessor winding down, not the workspace's status",
 		merge(plan.fields, fields))
 
@@ -913,7 +913,7 @@ func (c *controller) fallBackToFreeness(ctx context.Context, ws wsm.Workspace, p
 		KeepDraining: true,
 		WaitFor:      bounce.GateFreeness,
 		Run: func(runCtx context.Context, _ ids.WorkspaceID) error {
-			return c.transfer(runCtx, ws, plan, plan.snapshot[ws.ID], windows)
+			return c.transfer(runCtx, ws, plan, windows)
 		},
 		Done: func(err error) { outcome <- err },
 	})
