@@ -92,10 +92,11 @@ type run struct {
 	// agentic is the conflict-resolution or fixing tab standing live, which an
 	// open ask draws waiting on the user. Nil while no such tab stands.
 	agentic *agenticTab
-	// startedMS is when the run was admitted: the queue tab's end.
+	// startedMS is when the run was admitted: the queue tab's end, and the
+	// head's clock from then on (frontend.v1.FeedMergeRuntime), which counts
+	// only the time the merge has been worked on.
 	startedMS int64
-	// queuedMS is when the merge was queued: the head's running clock
-	// (frontend.v1.FeedMergeRuntime).
+	// queuedMS is when the merge was queued: the queue tab's start.
 	queuedMS int64
 	// displaced is the user turn this merge displaced, captured at admission
 	// with the text it carried.
@@ -314,12 +315,14 @@ func (r *run) upsert(round tabRound, tab *frontendv1.FeedMergeTab) {
 	r.o.publishTab(r.ws, r.lease.ID, round.kind, round.n, tab)
 }
 
-// head publishes the bubble's head row with the state arm in force.
+// head publishes the bubble's head row with the state arm in force. THE CLOCK
+// RUNS FROM THE RUN'S ADMISSION: once a merge leaves the queue, its head shows
+// only the time it has been worked on.
 func (r *run) head(result any) {
 	if r.exiting() {
 		return
 	}
-	r.o.publishHead(r.ws, r.lease.ID, r.label(), r.queuedMS, result)
+	r.o.publishHead(r.ws, r.lease.ID, r.label(), r.startedMS, result)
 }
 
 // label is the bubble's head line: what is merged, and where to.
