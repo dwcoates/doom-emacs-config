@@ -108,7 +108,7 @@ Use `/runtime-eval-code` when the needed fact exists only inside the live Emacs
 process or in third-party `*Messages*` output. For latency, stalls, or
 hitching, enter through `references/performance-investigation.md`, which
 decides between log-derived history and live sampling and hands off to
-`/profile` as the sampling authority. Neither handoff replaces the evidence
+`/profile-agent-repl` as the sampling authority. Neither handoff replaces the evidence
 already collected here.
 
 ### 5. Audit observability before concluding

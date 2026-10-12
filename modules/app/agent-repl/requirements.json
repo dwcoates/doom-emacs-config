@@ -186,13 +186,13 @@
       "doc": "docs/USER-GUIDE.md#setup"
     },
     {
-      "id": "skill-profile",
+      "id": "skill-profile-agent-repl",
       "kind": "skill_link",
-      "why": "the /profile skill",
+      "why": "the /profile-agent-repl skill",
       "profile": "run",
-      "name": "profile",
+      "name": "profile-agent-repl",
       "source": {
-        "repo": "modules/app/agent-repl/skills/profile"
+        "repo": "modules/app/agent-repl/skills/profile-agent-repl"
       }
     },
     {

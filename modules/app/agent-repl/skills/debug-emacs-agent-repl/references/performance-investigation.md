@@ -3,7 +3,7 @@
 Use this playbook to answer "where is the time going?" — latency, stalls, and
 hitching — across every agent-repl runtime. The normative record shape is
 `../../../logging-contract.md`. The resolver script owns its accepted
-arguments. `/profile` owns live Emacs sampling. This runbook owns only the
+arguments. `/profile-agent-repl` owns live sampling of every runtime. This runbook owns only the
 operator workflow that chooses and composes them.
 
 ## Choose a strategy before collecting evidence
@@ -14,7 +14,7 @@ live process to explain something that already happened.
 | Strategy | Use when | Entry point |
 |---|---|---|
 | Historical latency | The slow event already happened, is intermittent, or spans runtimes | Structured logs, via the resolver's extraction verbs |
-| Fresh sampling | The slowness reproduces on demand inside live Emacs | `/profile`, paired with `/runtime-eval-code` |
+| Fresh sampling | The slowness reproduces on demand in the live runtime | `/profile-agent-repl`, paired with `/runtime-eval-code` for one Emacs operation |
 
 Every persisted record already carries `timestamp` and, where the owning
 runtime knows it, `request_id`. Historical latency is therefore available
@@ -89,13 +89,14 @@ State the limit honestly whenever a plane cannot be measured directly.
 
 | Plane | Entry point | Current limit |
 |---|---|---|
-| Emacs | `/profile` for sampled profiles; `/runtime-eval-code` to measure one operation | None for sampling; log-derived gaps still needed for cross-runtime context |
-| Daemon | Log-derived spans and gaps only | No pprof endpoint exists yet |
-| Store | Log-derived spans and gaps only | No pprof endpoint, and no per-query timing is emitted |
-| Sidecar | Log-derived spans and gaps only | No pprof endpoint exists yet |
-| Webapp | Forwarded browser records in `webapp.log` | No performance marks or navigation timings are emitted |
+| Emacs | `/profile-agent-repl` (CPU and memory profiler); `/runtime-eval-code` to measure one operation | Log-derived gaps still needed for cross-runtime context |
+| Daemon | `/profile-agent-repl` (CPU and heap pprof); log-derived spans and gaps | None for sampling |
+| Store | `/profile-agent-repl` (CPU and heap pprof); log-derived spans and gaps | No per-query timing is emitted |
+| Sidecar | `/profile-agent-repl` (CPU and heap pprof); log-derived spans and gaps | None for sampling |
+| Shim | `/profile-agent-repl` (V8 CPU and sampling heap profiles) | A shim that exits mid-session writes no profile |
+| Webapp | `/profile-agent-repl` (main-thread stalls per visible page, WebKit process CPU and RSS); forwarded records in `webapp.log` | No JS CPU profile without the Web Inspector; hidden pages' timers are suspended |
 
-The absent Go profiling endpoints and the absent store query timing are
+The absent store query timing and the webapp's missing JS CPU profile are
 telemetry gaps, not dead ends. When either blocks a diagnosis, report it
 through `observability-gaps.md` in the standard form rather than substituting
 a guess about where a Go process spent its time.
