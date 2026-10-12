@@ -444,8 +444,9 @@ const COLD_BOOT_TIMEOUT_MS = 1_800;
 /**
  * PAY THE FILE'S COLD BOOT BEFORE ITS FIRST TEST, NOT INSIDE IT.
  *
- * The integration run is isolated, so every file evaluates the app's modules
- * afresh, and the FIRST `startHarness` in a file is the first time any of
+ * Each worker evaluates the app's modules once (the run is un-isolated; see
+ * vitest.integration.config.ts), and the FIRST `startHarness` a worker makes
+ * is the first time any of
  * that code runs: the shell's parse, the transport and the codecs on the
  * first round trip, every mount's first draw. V8 compiles all of it lazily,
  * on that call. MEASURED with a per-phase probe in `startHarness` (every
