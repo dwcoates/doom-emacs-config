@@ -30,8 +30,8 @@ import (
 //
 // WITHIN A CLAIM the roster draws the footer's step as its own arm
 // (`projectArm`), except on the idle rung, whose detail is the roster's own
-// ruling (`idleArm`): an unread turn end holds the row over detached work, and
-// a read one is drawn partial.
+// ruling (`idleArm`): live detached work draws `idle_async` over an unread
+// turn end, and a read turn end is drawn partial.
 func statusArm(s *wsState, rec wsm.Workspace, session *wsm.Session, status *frontendv1.FooterStatus, log dlog.Logger) string {
 	if s.opening {
 		return "opening"
@@ -197,23 +197,28 @@ func parked(session *wsm.Session) bool {
 
 // idleArm names the bottom rung's arm. It always answers: every path ends at
 // `ready`.
+//
+// LIVE DETACHED WORK OUTRANKS AN UNREAD TURN END: a turn that ends with
+// background work still running draws `idle_async` at once, without waiting
+// for the user to read the result first. The result stays unread under it, so
+// the row returns FULL on its turn-end arm when the work ends, unless the user
+// read it meanwhile (SetViewed).
 func idleArm(s *wsState, session *wsm.Session, log dlog.Logger) string {
 	switch {
 	case noSessionArm(s, session) != "":
 		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "no session was ever created"})
 		return "none"
-	case s.resultUnreadNow():
-		arm := s.turnEndArm()
-		if s.asyncLive() {
-			log.Debug("daemon.sidebar.unread_outranks_async",
-				"the last turn's result is unread, so the row stays on its turn-end arm over live detached work",
-				dlog.Context{"status": arm})
-		}
-		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case s.resultUnreadNow()"})
-		return arm
 	case s.asyncLive():
+		if s.resultUnreadNow() {
+			log.Debug("daemon.sidebar.async_outranks_unread",
+				"detached work runs, so the row is idle_async at once though the last turn's result is unread",
+				dlog.Context{"held": s.turnEndArm()})
+		}
 		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case s.asyncLive()"})
 		return "idle_async"
+	case s.resultUnreadNow():
+		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case s.resultUnreadNow()"})
+		return s.turnEndArm()
 	case s.turnEverRan:
 		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case s.turnEverRan", "close": int(s.lastClose)})
 		return s.turnEndArm()
