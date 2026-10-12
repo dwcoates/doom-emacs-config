@@ -75,7 +75,10 @@ func (r *run) gate(ctx context.Context, round tabRound, tip, head string) (gateV
 	if err := validateSuites(selection.Suites); err != nil {
 		return gateVerdict{}, err
 	}
-	argv = append([]string(nil), argv...)
+	// THE MERGE QUEUE'S RUN GOES FIRST at the host's suite gate
+	// (bin/suite-slot.sh): master does not move while it waits, so it is served
+	// ahead of every ad-hoc run instead of racing them for a freed slot.
+	argv = append([]string{"env", "AGENT_REPL_SUITE_PRIORITY=merge"}, argv...)
 	// The FULL selection passes no narrowing: running everything is the
 	// script's own default, and a repository whose script knows no --suites
 	// flag is never handed one.
