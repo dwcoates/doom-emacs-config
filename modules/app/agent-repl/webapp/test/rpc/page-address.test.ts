@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { pageAddress } from "../../src/rpc/page-address.js";
+import { isHostAddress, pageAddress } from "../../src/rpc/page-address.js";
 
 const BOTH = "?workspace=ws-1&dir=%2Fhome%2Fu%2Fw";
 
@@ -76,5 +76,19 @@ describe("pageAddress", () => {
 
   it("names the missing dir parameter in the refusal", () => {
     expect(() => pageAddress("?workspace=ws-1")).toThrow(/dir/);
+  });
+});
+
+describe("isHostAddress", () => {
+  it("addresses the host at ?host=1", () => {
+    expect(isHostAddress("?host=1")).toBe(true);
+  });
+
+  it("does not address the host for a workspace page", () => {
+    expect(isHostAddress("?workspace=a&dir=%2Ftmp")).toBe(false);
+  });
+
+  it("does not address the host for another value of host", () => {
+    expect(isHostAddress("?host=0")).toBe(false);
   });
 });
