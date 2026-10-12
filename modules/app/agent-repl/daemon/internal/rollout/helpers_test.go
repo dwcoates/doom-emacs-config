@@ -1076,6 +1076,8 @@ type harness struct {
 	order        *steps
 	log          *dlog.TestSurfaces
 	state        string
+	// onFile is whether db is a real wsm.db under state (newFileHarness).
+	onFile bool
 
 	mu       sync.Mutex
 	quiesced []ids.WorkspaceID
@@ -1139,13 +1141,37 @@ func (h *harness) Marker() []markerEdge {
 // the state client is the one collaborator worth exercising for real, because
 // the lease, serving ownership and the fault records are what the rollout's
 // behavior is made of.
+//
+// ITS STATE LIVES IN MEMORY (wsm.OpenInMemory): almost no rollout test needs
+// the file, and a WAL per test was ~270MB of writes per package run. A test
+// whose subject needs a second handle on the same file uses newFileHarness;
+// joiningHandle refuses a memory harness loudly.
 func newHarness(t *testing.T, adjust ...func(*Deps)) *harness {
+	t.Helper()
+	return newHarnessOn(t, false, adjust...)
+}
+
+// newFileHarness is newHarness on a real wsm.db, for a test that opens a
+// second handle on it (joiningHandle).
+func newFileHarness(t *testing.T, adjust ...func(*Deps)) *harness {
+	t.Helper()
+	return newHarnessOn(t, true, adjust...)
+}
+
+func newHarnessOn(t *testing.T, onFile bool, adjust ...func(*Deps)) *harness {
 	t.Helper()
 	log := dlog.NewTestSurfaces()
 	state := t.TempDir()
-	db, err := wsm.Open(context.Background(), filepath.Join(state, "wsm.db"), wsm.WithLogger(log.Global()), wsm.WithUnsyncedWrites(), wsm.WithTemporaryGuard(tempdirstest.Guard(t)))
+	opts := []wsm.Option{wsm.WithLogger(log.Global()), wsm.WithUnsyncedWrites(), wsm.WithTemporaryGuard(tempdirstest.Guard(t))}
+	var db wsm.DB
+	var err error
+	if onFile {
+		db, err = wsm.Open(context.Background(), filepath.Join(state, "wsm.db"), opts...)
+	} else {
+		db, err = wsm.OpenInMemory(context.Background(), opts...)
+	}
 	if err != nil {
-		t.Fatalf("wsm.Open: %v", err)
+		t.Fatalf("open the test's state client: %v", err)
 	}
 	t.Cleanup(func() {
 		if err := db.Close(); err != nil {
@@ -1174,6 +1200,7 @@ func newHarness(t *testing.T, adjust ...func(*Deps)) *harness {
 		order:        order,
 		log:          log,
 		state:        state,
+		onFile:       onFile,
 		exits:        make(chan struct{}, 4),
 		claimFree:    make(chan struct{}),
 		lockStates:   make(map[string]sessionlock.State),
@@ -1433,6 +1460,9 @@ func waitForForceKill(t *testing.T, shim *fakeShim) {
 // (wsm.OpenReadOnly): nothing may be written until the handle is promoted.
 func (h *harness) joiningHandle(t *testing.T) {
 	t.Helper()
+	if !h.onFile {
+		t.Fatal("rollout test: a joining handle opens the harness's wsm.db, and this harness's state lives in memory; build it with newFileHarness")
+	}
 	ro, err := wsm.OpenReadOnly(context.Background(), filepath.Join(h.state, "wsm.db"), wsm.WithLogger(h.log.Global()), wsm.WithUnsyncedWrites(), wsm.WithTemporaryGuard(tempdirstest.Guard(t)))
 	if err != nil {
 		t.Fatalf("wsm.OpenReadOnly: %v", err)
