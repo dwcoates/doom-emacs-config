@@ -8,6 +8,7 @@
  * failure fifty assertions later, and never as a quiet pass.
  */
 import { join } from "node:path";
+import { inject } from "vitest";
 
 import { startAppAgainst, type MountedApp, type HarnessOptions } from "../integration/harness";
 
@@ -20,6 +21,25 @@ const WORKSPACE_ID = "AGENT_REPL_E2E_WORKSPACE_ID";
 const WORKSPACE_DIR = "AGENT_REPL_E2E_WORKSPACE_DIR";
 /** The webapp build the daemon serves, which the page states as its own. */
 const WEBAPP_BUILD = "AGENT_REPL_E2E_WEBAPP_BUILD";
+
+/**
+ * The world a WARM driver (layer-server.mjs) hands this run, through vitest's
+ * provide/inject: one long-lived vitest serves every area, each against its
+ * own world, so the world cannot come from the shared environment. A cold
+ * child (one area per process) leaves it unset and reads the environment.
+ */
+export interface ProvidedWorld {
+  readonly daemonUrl: string;
+  readonly workspaceId: string;
+  readonly workspaceDir: string;
+  readonly webappBuild: string;
+}
+
+declare module "vitest" {
+  export interface ProvidedContext {
+    webappLayerWorld?: ProvidedWorld;
+  }
+}
 
 const HOW_TO_RUN =
   "the webapp e2e layer is driven by the Go cross-system world, which owns the real " +
@@ -52,6 +72,15 @@ function required(name: string): string {
 export function realDaemon(): RealDaemon {
   if (process.env[GATE] !== "1") {
     throw new Error(`${GATE} is not set: ${HOW_TO_RUN}`);
+  }
+  const provided = inject("webappLayerWorld");
+  if (provided !== undefined) {
+    return {
+      baseUrl: provided.daemonUrl,
+      workspaceId: provided.workspaceId,
+      workspaceDir: provided.workspaceDir,
+      webappBuild: provided.webappBuild,
+    };
   }
   return {
     baseUrl: required(DAEMON_URL),
