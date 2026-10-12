@@ -19,7 +19,10 @@ import (
 const MergedSectionLabel = "Recently Merged"
 
 // HiddenSectionLabel is the hidden-workspaces section's heading.
-const HiddenSectionLabel = "Hidden Workspaces"
+const HiddenSectionLabel = "Hidden"
+
+// ViewedSectionLabel is the viewed-workspaces section's heading.
+const ViewedSectionLabel = "Viewed"
 
 // repositoryView resolves the repository grouping: ONE SECTION PER REPOSITORY,
 // its rows nested by branch lineage and ordered in roster order.
@@ -68,8 +71,35 @@ func sortRepositories(in []wsm.Repository) []wsm.Repository {
 // repoKey is a repository's join key, as its section and its merged group
 // both carry it.
 func repoKey(repo wsm.Repository) *frontendv1.RosterRepoKey {
-	return &frontendv1.RosterRepoKey{
-		Repository: &workspacev1.RepositoryRef{Id: string(repo.ID), Dir: repo.Dir}}
+	return &frontendv1.RosterRepoKey{Repository: repositoryRefOf(repo)}
+}
+
+// repositoryRefOf is a repository's ONE wire identity: its section's key and
+// every one of its rows' RosterRowWorkspace.repository carry it, so a client
+// joining a row to its section compares equal refs.
+func repositoryRefOf(repo wsm.Repository) *workspacev1.RepositoryRef {
+	return &workspacev1.RepositoryRef{Id: string(repo.ID), Dir: repo.Dir}
+}
+
+// repositoryRef resolves a workspace's repository to its wire identity.
+//
+// A WORKSPACE WHOSE REPOSITORY IS UNREGISTERED IS UNREACHABLE (see
+// assertRepositoryInvariant: SQLite's foreign key, RegisterWorkspace and Create
+// each refuse it). Reaching it is recorded at error, as that assertion records
+// it, and the row carries the id it names with no directory, since the
+// directory is exactly what an unregistered repository has none of.
+func (r *resolver) repositoryRef(id ids.RepoID, log dlog.Logger) *workspacev1.RepositoryRef {
+	for _, repo := range r.state.reg.Repositories {
+		if repo.ID == id {
+			return repositoryRefOf(repo)
+		}
+	}
+	log.Error("daemon.sidebar.row_repository", "a row names a repository the registry does not hold", dlog.Context{
+		"repo_id":             string(id),
+		"invariant_violation": "every workspace's repository is registered",
+		"remediation":         "find which of the foreign key, RegisterWorkspace or Create let the workspace in",
+	})
+	return &workspacev1.RepositoryRef{Id: string(id)}
 }
 
 // setRepoFold states the repository's fold on its section: the ONE arm the
@@ -335,6 +365,32 @@ func (r *resolver) hiddenSection(hidden []wsm.Workspace, rc rowContext, log dlog
 	}
 	setHiddenFold(section, r.state.reg.View.HiddenFolded)
 	return section
+}
+
+// viewedSection resolves the viewed-workspaces section: the workspaces whose
+// row carries the viewed marker (their last result read), hoisted out of every
+// grouping. Its rows keep roster order, nested by lineage among the viewed
+// workspaces alone, exactly as the hidden section's; its count is the rows it
+// draws, closed rows left out.
+func (r *resolver) viewedSection(viewed []wsm.Workspace, rc rowContext, log dlog.Logger) *frontendv1.RosterViewedSection {
+	rows := r.sectionRows(viewed, rc, log.With(dlog.Context{"section": "viewed"}))
+	section := &frontendv1.RosterViewedSection{
+		Header: sectionHeader(ViewedSectionLabel, drawnLiveRowCount(rows)),
+		Rows:   rows,
+	}
+	setViewedFold(section, r.state.reg.View.ViewedFolded)
+	return section
+}
+
+// setViewedFold states the viewed section's fold. The fold is the daemon's so
+// every page draws the same one (UpdateSidebarView); it folds sidebar rows
+// only, never a tab.
+func setViewedFold(section *frontendv1.RosterViewedSection, folded bool) {
+	if folded {
+		section.Fold = &frontendv1.RosterViewedSection_Collapsed{Collapsed: &frontendv1.RosterViewedSectionCollapsed{}}
+		return
+	}
+	section.Fold = &frontendv1.RosterViewedSection_Expanded{Expanded: &frontendv1.RosterViewedSectionExpanded{}}
 }
 
 // setHiddenFold states the hidden section's fold. The fold is the daemon's so
