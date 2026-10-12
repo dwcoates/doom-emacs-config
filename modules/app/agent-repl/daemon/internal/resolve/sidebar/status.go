@@ -219,7 +219,7 @@ func idleArm(s *wsState, session *wsm.Session, log dlog.Logger) string {
 	case s.resultUnreadNow():
 		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case s.resultUnreadNow()"})
 		return s.turnEndArm()
-	case s.turnEverRan:
+	case s.turnEverRan && !s.endAnswered:
 		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case s.turnEverRan", "close": int(s.lastClose)})
 		return s.turnEndArm()
 	default:

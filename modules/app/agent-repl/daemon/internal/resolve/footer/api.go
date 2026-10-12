@@ -408,6 +408,10 @@ type Resolver interface {
 	// (ladder.ResolveTurnFault): `vendor_fault · vendor_error` or
 	// `agent_repl_fault · turn_died`, standing until the next turn starts.
 	SetTurnEnded(ws ids.WorkspaceID, how wsm.TurnClose)
+	// OnSignedIn takes a completed sign-in for the workspace's account root:
+	// a turn fault whose cause a sign-in cures and a standing `auth` block
+	// are lifted; every other fault stands.
+	OnSignedIn(ws ids.WorkspaceID)
 	// OpenFault installs one standing daemon fault. An EMPTY workspace is a
 	// DAEMON-SCOPED fault, which stands on every workspace's strip because it
 	// is every workspace that is owed the service the daemon cannot give.
