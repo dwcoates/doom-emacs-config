@@ -258,6 +258,8 @@ func TestTheMergeQueueVerbNamesEachSource(t *testing.T) {
 			check: func(_ *mergeFixture, e commandfile.Entry) bool { return !e.Detached && !e.KeepOpen }},
 		{name: "own branch kept open, in place", args: func(*mergeFixture) []string { return []string{"-own", "-keep-open"} },
 			check: func(_ *mergeFixture, e commandfile.Entry) bool { return e.KeepOpen && !e.Detached }},
+		{name: "own branch as a one-shot", args: func(*mergeFixture) []string { return []string{"-own", "-one-shot"} },
+			check: func(_ *mergeFixture, e commandfile.Entry) bool { return e.OneShot && !e.Detached && !e.KeepOpen }},
 		{name: "a branch", args: func(*mergeFixture) []string { return []string{"-branch", "agent-1/fix"} },
 			check: func(_ *mergeFixture, e commandfile.Entry) bool { return e.Branch == "agent-1/fix" }},
 		{name: "another workspace", args: func(f *mergeFixture) []string { return []string{"-dir", f.other} },
@@ -305,6 +307,10 @@ func TestTheMergeQueueVerbRefusesAMalformedRequest(t *testing.T) {
 		{name: "two sources", args: []string{"-own", "-branch", "b"}},
 		{name: "keep-open off the own branch", args: []string{"-branch", "b", "-keep-open"}},
 		{name: "in-place off the own branch", args: []string{"-branch", "b", "-in-place"}},
+		{name: "one-shot off the own branch", args: []string{"-branch", "b", "-one-shot"}},
+		{name: "one-shot kept open", args: []string{"-own", "-one-shot", "-keep-open"}},
+		{name: "one-shot in place", args: []string{"-own", "-one-shot", "-in-place"}},
+		{name: "one-shot waiting", args: []string{"-own", "-one-shot", "-wait"}},
 		{name: "a dir that is not there", args: []string{"-dir", "/no/such/worktree"}},
 	}
 	for _, tt := range tests {

@@ -739,3 +739,155 @@ func TestARequestedMergeCarriesNoLedger(t *testing.T) {
 		t.Fatalf("queue = %+v (%v), want a request with no ledger yet", entries, err)
 	}
 }
+
+// oneShotRequester registers a workspace with a creation job that is not yet a
+// one-shot, the state a workspace announcing a one-shot merge starts from.
+func oneShotRequester(t *testing.T, s *store) Workspace {
+	t.Helper()
+	ws := testWorkspace(t, s)
+	if err := s.PutCreationJob(context.Background(), CreationJob{Workspace: ws.ID, CreatedAt: instant}); err != nil {
+		t.Fatalf("PutCreationJob: %v", err)
+	}
+	return ws
+}
+
+// markedOneShot reads whether the workspace's creation job is a one-shot.
+func markedOneShot(t *testing.T, s *store, id WorkspaceID) bool {
+	t.Helper()
+	job, found, err := s.CreationJob(context.Background(), id)
+	if err != nil || !found {
+		t.Fatalf("CreationJob = %+v, %v, %v, want the recorded job", job, found, err)
+	}
+	return job.OneShot
+}
+
+func TestRequestOneShotMergeRecordsTheRequestAndMarksTheOneShot(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	repo := RepoKey(t.TempDir())
+	ws := oneShotRequester(t, s)
+
+	// Act
+	err := s.RequestOneShotMerge(context.Background(), repo, ws.ID, ownBranch, instant)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("RequestOneShotMerge: %v", err)
+	}
+	entries, err := s.MergeQueue(context.Background(), repo)
+	if err != nil || len(entries) != 1 || entries[0].State != MergeRequested || entries[0].Source != ownBranch {
+		t.Fatalf("MergeQueue = %+v, %v, want one requested own-branch merge", entries, err)
+	}
+	if !markedOneShot(t, s, ws.ID) {
+		t.Fatalf("the requester was not marked a one-shot")
+	}
+	if record, err := s.Workspace(context.Background(), ws.ID); err != nil || !record.OneShot {
+		t.Fatalf("Workspace = %+v, %v, want the roster's one-shot fact set", record, err)
+	}
+}
+
+func TestRequestOneShotMergeRefusesASourceThatIsNoOneShot(t *testing.T) {
+	tests := []struct {
+		name   string
+		source MergeSource
+	}{
+		{name: "kept open", source: MergeSource{Kind: MergeSourceOwnBranch, KeepOpen: true}},
+		{name: "detached", source: MergeSource{Kind: MergeSourceOwnBranch, Detach: NewDetachedMergeID()}},
+		{name: "another branch", source: MergeSource{Kind: MergeSourceBranch, Branch: "b"}},
+		{name: "merged upstream", source: MergeSource{Kind: MergeSourceMergedUpstream}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, log := testStore(t)
+			repo := RepoKey(t.TempDir())
+			ws := oneShotRequester(t, s)
+
+			// Act
+			err := s.RequestOneShotMerge(context.Background(), repo, ws.ID, tt.source, instant)
+
+			// Assert
+			if err == nil {
+				t.Fatalf("RequestOneShotMerge(%+v) succeeded, want a refusal", tt.source)
+			}
+			if !loggedOperation(log, "daemon.wsm.request_one_shot_merge", "error") {
+				t.Fatalf("the refusal was not logged at error: %v", log.Records())
+			}
+			if entries, _ := s.MergeQueue(context.Background(), repo); len(entries) != 0 {
+				t.Fatalf("MergeQueue = %+v, want nothing recorded", entries)
+			}
+			if markedOneShot(t, s, ws.ID) {
+				t.Fatalf("a refused request marked the requester a one-shot")
+			}
+		})
+	}
+}
+
+func TestRequestOneShotMergeRefusesARequesterWithNoCreationJobAndRecordsNothing(t *testing.T) {
+	// Arrange
+	s, log := testStore(t)
+	repo := RepoKey(t.TempDir())
+	ws := testWorkspace(t, s)
+
+	// Act
+	err := s.RequestOneShotMerge(context.Background(), repo, ws.ID, ownBranch, instant)
+
+	// Assert
+	if err == nil {
+		t.Fatalf("RequestOneShotMerge for a workspace with no creation job succeeded")
+	}
+	if !loggedOperation(log, "daemon.wsm.request_one_shot_merge", "error") {
+		t.Fatalf("the refusal was not logged at error: %v", log.Records())
+	}
+	if entries, _ := s.MergeQueue(context.Background(), repo); len(entries) != 0 {
+		t.Fatalf("MergeQueue = %+v, want the request rolled back", entries)
+	}
+}
+
+func TestRequestOneShotMergeRefusesADuplicateAndLeavesTheRequesterUnmarked(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	repo := RepoKey(t.TempDir())
+	ws := oneShotRequester(t, s)
+	if err := s.RequestMerge(context.Background(), repo, ws.ID, ownBranch, instant); err != nil {
+		t.Fatalf("RequestMerge: %v", err)
+	}
+
+	// Act
+	err := s.RequestOneShotMerge(context.Background(), repo, ws.ID, ownBranch, instant)
+
+	// Assert
+	var refusal *MergeQueuedError
+	if !errors.As(err, &refusal) {
+		t.Fatalf("RequestOneShotMerge = %v, want a *MergeQueuedError", err)
+	}
+	if markedOneShot(t, s, ws.ID) {
+		t.Fatalf("a refused duplicate marked the requester a one-shot")
+	}
+}
+
+func TestIsOneShotAcceptsOnlyAnInPlaceOwnBranchThatClosesTheRequester(t *testing.T) {
+	tests := []struct {
+		name   string
+		source MergeSource
+		want   bool
+	}{
+		{name: "own branch", source: ownBranch, want: true},
+		{name: "own branch kept open", source: MergeSource{Kind: MergeSourceOwnBranch, KeepOpen: true}},
+		{name: "own branch detached", source: MergeSource{Kind: MergeSourceOwnBranch, Detach: "d"}},
+		{name: "another workspace", source: MergeSource{Kind: MergeSourceWorkspace, Workspace: "w"}},
+		{name: "a branch", source: MergeSource{Kind: MergeSourceBranch, Branch: "b"}},
+		{name: "merged upstream", source: MergeSource{Kind: MergeSourceMergedUpstream}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act.
+			got := tt.source.IsOneShot()
+
+			// Assert.
+			if got != tt.want {
+				t.Fatalf("IsOneShot(%+v) = %v, want %v", tt.source, got, tt.want)
+			}
+		})
+	}
+}
