@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -269,6 +270,111 @@ func TestReadLogStillFailsOnATerminatedLineThatDoesNotParse(t *testing.T) {
 	// Assert
 	if !fake.Failed() {
 		t.Fatal("ReadLog accepted a newline-terminated line that is not JSON; a malformed record must still fail the test")
+	}
+}
+
+// appendLog appends text to the log at path.
+func appendLog(t *testing.T, path, text string) {
+	t.Helper()
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatalf("open the log: %v", err)
+	}
+	defer f.Close()
+	if _, err := f.WriteString(text); err != nil {
+		t.Fatalf("append to the log: %v", err)
+	}
+}
+
+func operations(records []LogRecord) []string {
+	var out []string
+	for _, r := range records {
+		out = append(out, r.Operation)
+	}
+	return out
+}
+
+// TestReadLogReadsWhatWasAppendedSinceItsLastRead: the decoded records are
+// kept, and a later read adds the complete lines appended after them --
+// including a record whose newline arrived only after the first read.
+func TestReadLogReadsWhatWasAppendedSinceItsLastRead(t *testing.T) {
+	// Arrange
+	path := filepath.Join(t.TempDir(), "daemon.run.log")
+	appendLog(t, path, adRecordLine("daemon.boot.run")+"\n"+`{"operation":"daemon.boot.serv`)
+	first := ReadLog(t, path)
+	appendLog(t, path, `ing"}`+"\n"+adRecordLine("daemon.boot.ready")+"\n")
+
+	// Act
+	got := ReadLog(t, path)
+
+	// Assert
+	if want := []string{"daemon.boot.run"}; !slices.Equal(operations(first), want) {
+		t.Fatalf("first ReadLog = %v, want %v", operations(first), want)
+	}
+	if want := []string{"daemon.boot.run", "daemon.boot.serving", "daemon.boot.ready"}; !slices.Equal(operations(got), want) {
+		t.Fatalf("second ReadLog = %v, want %v", operations(got), want)
+	}
+}
+
+// TestReadLogReadsAReplacedFileFromItsStart: a file renamed over the path is
+// another file, and its records are its own.
+func TestReadLogReadsAReplacedFileFromItsStart(t *testing.T) {
+	// Arrange
+	dir := t.TempDir()
+	path := filepath.Join(dir, "daemon.run.log")
+	appendLog(t, path, adRecordLine("daemon.boot.run")+"\n"+adRecordLine("daemon.boot.ready")+"\n")
+	ReadLog(t, path)
+	staged := filepath.Join(dir, "staged.log")
+	appendLog(t, staged, adRecordLine("daemon.boot.run")+"\n"+adRecordLine("daemon.boot.ready")+"\n"+adRecordLine("daemon.cmd.exit")+"\n")
+	if err := os.Rename(staged, path); err != nil {
+		t.Fatalf("replace the log: %v", err)
+	}
+
+	// Act
+	got := ReadLog(t, path)
+
+	// Assert
+	if want := []string{"daemon.boot.run", "daemon.boot.ready", "daemon.cmd.exit"}; !slices.Equal(operations(got), want) {
+		t.Fatalf("ReadLog of the replaced file = %v, want %v", operations(got), want)
+	}
+}
+
+// TestReadLogReadsATruncatedFileFromItsStart: a file now shorter than what
+// was read of it is read again whole.
+func TestReadLogReadsATruncatedFileFromItsStart(t *testing.T) {
+	// Arrange
+	path := filepath.Join(t.TempDir(), "daemon.run.log")
+	appendLog(t, path, adRecordLine("daemon.boot.run")+"\n"+adRecordLine("daemon.boot.ready")+"\n")
+	ReadLog(t, path)
+	if err := os.WriteFile(path, []byte(adRecordLine("daemon.cmd.exit")+"\n"), 0o600); err != nil {
+		t.Fatalf("truncate the log: %v", err)
+	}
+
+	// Act
+	got := ReadLog(t, path)
+
+	// Assert
+	if want := []string{"daemon.cmd.exit"}; !slices.Equal(operations(got), want) {
+		t.Fatalf("ReadLog of the truncated file = %v, want %v", operations(got), want)
+	}
+}
+
+// TestReadLogsRecordsSurviveACallersAppend: the records are shared between
+// reads, so a caller appending to what it was given must not write into them.
+func TestReadLogsRecordsSurviveACallersAppend(t *testing.T) {
+	// Arrange
+	path := filepath.Join(t.TempDir(), "daemon.run.log")
+	appendLog(t, path, adRecordLine("daemon.boot.run")+"\n")
+	mine := ReadLog(t, path)
+	_ = append(mine, LogRecord{Operation: "a caller's own record"})
+	appendLog(t, path, adRecordLine("daemon.boot.ready")+"\n")
+
+	// Act
+	got := ReadLog(t, path)
+
+	// Assert
+	if want := []string{"daemon.boot.run", "daemon.boot.ready"}; !slices.Equal(operations(got), want) {
+		t.Fatalf("ReadLog after a caller's append = %v, want %v", operations(got), want)
 	}
 }
 

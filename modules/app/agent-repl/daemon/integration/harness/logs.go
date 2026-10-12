@@ -7,11 +7,14 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -276,23 +279,53 @@ func ReadLog(t *testing.T, path string) []LogRecord { return readLog(t, path) }
 // that HAS its newline and does not parse is still a fatal defect in the log,
 // exactly as before. Only the unterminated remainder after the final newline
 // is skipped, and the next poll reads it whole.
+//
+// IT READS ONLY WHAT WAS APPENDED SINCE ITS LAST READ OF THE FILE. Every
+// await polls a growing sink, and decoding the whole file on every poll made
+// the reads quadratic: profiled across the daemon suite, readLog was a fifth
+// of the test binary's own CPU. A file's decoded records are kept with the
+// offset of the last newline they ended at, for the life of the test that
+// first read it, and a later read decodes only the complete lines after
+// that offset. A file that is replaced (another inode) or shorter than the
+// offset (truncated) is read again from its start. Callers share the decoded
+// records and only read them; the slice is clipped, so a caller's append
+// never writes into the shared one.
 func readLog(t *testing.T, path string) []LogRecord {
 	t.Helper()
-	body, err := os.ReadFile(path)
+	tail := logReaderFor(t, path)
+	tail.mu.Lock()
+	defer tail.mu.Unlock()
+
+	f, err := os.Open(path)
 	if os.IsNotExist(err) {
+		tail.reset(nil)
 		return nil
 	}
 	if err != nil {
 		t.Fatalf("harness: read %s: %v", path, err)
 	}
-	// Everything after the last newline is a record still being written.
-	if end := bytes.LastIndexByte(body, '\n'); end >= 0 {
-		body = body[:end+1]
-	} else {
-		body = nil
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		t.Fatalf("harness: stat %s: %v", path, err)
 	}
+	if tail.info == nil || !os.SameFile(tail.info, info) || info.Size() < tail.offset {
+		tail.reset(info)
+	}
+	if info.Size() == tail.offset {
+		return slices.Clip(tail.records)
+	}
+	body := make([]byte, info.Size()-tail.offset)
+	if _, err := f.ReadAt(body, tail.offset); err != nil && err != io.EOF {
+		t.Fatalf("harness: read %s: %v", path, err)
+	}
+	// Everything after the last newline is a record still being written.
+	end := bytes.LastIndexByte(body, '\n')
+	if end < 0 {
+		return slices.Clip(tail.records)
+	}
+	body = body[:end+1]
 
-	var out []LogRecord
 	scanner := bufio.NewScanner(bytes.NewReader(body))
 	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 	for scanner.Scan() {
@@ -305,12 +338,43 @@ func readLog(t *testing.T, path string) []LogRecord {
 			t.Fatalf("harness: %s holds a non-JSONL line %q: %v", path, line, err)
 		}
 		rec.Raw = line
-		out = append(out, rec)
+		tail.records = append(tail.records, rec)
 	}
 	if err := scanner.Err(); err != nil {
 		t.Fatalf("harness: scan %s: %v", path, err)
 	}
-	return out
+	tail.offset += int64(end + 1)
+	return slices.Clip(tail.records)
+}
+
+// logReader is one log file's decoded records up to offset, the byte after the
+// last newline they ended at.
+type logReader struct {
+	mu      sync.Mutex
+	info    os.FileInfo
+	offset  int64
+	records []LogRecord
+}
+
+func (l *logReader) reset(info os.FileInfo) {
+	l.info, l.offset, l.records = info, 0, nil
+}
+
+// logReaders is every log file's tail, by path, for the tests reading it.
+var logReaders sync.Map
+
+// logReaderFor answers path's tail, creating it for t: the tail is dropped when
+// t ends, so a test process holds the decoded records of its live tests'
+// files only. A later reader of the same path after that reads it afresh.
+func logReaderFor(t *testing.T, path string) *logReader {
+	if v, ok := logReaders.Load(path); ok {
+		return v.(*logReader)
+	}
+	v, loaded := logReaders.LoadOrStore(path, &logReader{})
+	if !loaded {
+		t.Cleanup(func() { logReaders.CompareAndDelete(path, v) })
+	}
+	return v.(*logReader)
 }
 
 // Warning levels the log discipline treats as failures unless expected.
