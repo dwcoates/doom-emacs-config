@@ -3,6 +3,7 @@ import { resetPageState } from "./page-state.js";
 import { resetOrderKeys } from "./feed-order.js";
 import { installResizeObserver } from "./resize-observer.js";
 import { installIntersectionObserver } from "./intersection-observer.js";
+import { installGetAnimations } from "./animations.js";
 
 /**
  * jsdom implements no `ResizeObserver` (it performs no layout), and the feed
@@ -23,6 +24,14 @@ installResizeObserver();
  * those watches would never run.
  */
 installIntersectionObserver();
+
+/**
+ * jsdom runs no CSS animations and ships no `Element.getAnimations`, which the
+ * rail reads after every draw to keep its loops on the wall clock
+ * (src/sidebar/wall-phase.ts). Installed here for the same reason as the
+ * observer stubs above: a missing CAPABILITY of the environment.
+ */
+installGetAnimations();
 
 /**
  * Every test starts on a fresh page-wide state: production's logger, no
