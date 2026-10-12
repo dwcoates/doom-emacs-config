@@ -52,9 +52,13 @@ the latest prompt. So the feature needs a contract change in `agentrepl.v1`.
   first bubble landed between the two calls, without the confirmation such a
   rollback needs. That race is impossible this way.
 - Consequence: `daemon.internal.server.rollbackPlan` carries a `requireBare`
-  flag that only interrupt-minted plans set, and `sameEffects` compares
-  bareness for them. Ordinary plans keep their existing staleness rules,
-  because streaming output during a confirmed plan must not make it stale.
+  flag that only interrupt-minted plans set, and `RollBack` refuses such a
+  plan as `plan_stale` when the re-plan finds agent output after the prompt.
+  Ordinary plans keep their existing staleness rules, because streaming
+  output during a confirmed plan must not make it stale.
+  - Correction: an earlier draft of this entry said `sameEffects` compares
+    bareness. It does not. The check is a separate step in `RollBack`, because
+    `sameEffects` is shared by every plan and must stay blind to bareness.
 
 ### 2. `agentrepl.v1.PlanRollbackRequest.prompt` and the `named` target
 
@@ -77,8 +81,15 @@ the latest prompt. So the feature needs a contract change in `agentrepl.v1`.
   transcript (no turn record).
 - `context_tokens` is every input token (cache read, cache write and
   uncached) of the main agent's last API response before the prompt. The
-  feed resolver snapshots it when the prompt row is first drawn, from a running
-  figure that a context cut resets to unknown.
+  feed resolver files a reading per main-agent usage unit, keyed by the
+  unit's conversation place (`daemon.internal.resolve.feed.contextReading`).
+  The figure is the newest reading placed before the prompt row and after the
+  newest context cut, skipping rolled-back turns.
+  - Correction: an earlier draft of this entry said the figure is snapshotted
+    when the prompt row is first drawn. That was rejected before landing:
+    history pages load newest first, so an arrival-order snapshot would take a
+    later page's reading for an earlier prompt. Ordering by place is immune to
+    load order.
 - Raw figures, not formatted text: agentrepl.v1 is the host surface, and the
   existing rollback confirmation also composes its text in Emacs from raw
   counts. The age ticks, so only the client can draw it.
