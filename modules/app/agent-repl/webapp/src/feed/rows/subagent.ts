@@ -26,17 +26,11 @@
  * to see it" is not "it failed", and drawing the two the same way would state
  * something the daemon deliberately refused to state.
  */
-import { createControl } from "../../control.js";
 import { reservedLiveElapsedClock, reservedQuietClock, reservedSettledElapsedClock } from "../../elapsed-clock.js";
 import { log } from "../../log.js";
-import { callUnary } from "../../rpc/unary.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import { feedSubagentDotColor } from "../../vocab.js";
 import { drawWorkDot } from "../work-dot.js";
-import {
-  InterruptResponseSchema,
-  type InterruptResponse,
-} from "../../../../proto/gen/ts/agentrepl/v1/endpoint_interrupt_pb";
 import type {
   FeedDetachedSubagent,
   FeedSubagent,
@@ -45,11 +39,7 @@ import type {
   FeedSubagentRuntime,
   FeedSubagentSettled,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
-import {
-  interruptErrorSentence,
-  logInterruptRefusal,
-  type InterruptErrorKind,
-} from "../../interrupt-error.js";
+import { drawStopControl, type StopSite } from "../stop-control.js";
 import { buildInterruptDetachedRequest } from "../requests.js";
 import { armName } from "../renderers.js";
 import type { RowContext } from "../renderers.js";
@@ -58,9 +48,6 @@ import { foldTitle } from "../title-fold.js";
 import { drawDetachedWorkId } from "../work-id.js";
 
 const PATH = "FeedSubagent";
-
-/** How long a stop's own answer stays on the control before it clears. */
-export const INTERRUPT_OUTCOME_MS = 4000;
 
 /** The word each settled outcome says. */
 const SETTLED_WORDS = {
@@ -176,7 +163,7 @@ export function drawFeedSubagent(msg: FeedSubagent, rc: RowContext): HTMLElement
       if (state.value.lastProgress !== undefined) {
         el.append(drawFeedSubagentLastProgress(state.value.lastProgress, rc));
       }
-      if (isDetachedRow(rc)) el.append(drawStopControl(rc));
+      if (isDetachedRow(rc)) el.append(drawStopControl(rc, SUBAGENT_STOP, requireMessage(rc.row.id, "FeedRow.id")));
       break;
     }
     case "settled": {
@@ -261,139 +248,11 @@ export function drawFeedSubagentLastProgress(
   return reservedQuietClock(rc.ctx.ticker, "subagent-quiet", atMs);
 }
 
-/**
- * The stop control on a live detached bubble.
- *
- * STOPPING IS ALWAYS AN RPC — never a stream close — and the target arm is this
- * bubble's own row id, exactly as the feed served it. The answer is drawn AT
- * THE CONTROL: every `InterruptSuccess` arm is a legitimate outcome (including
- * `nothing_running`, which is an answer and not a failure), and the
- * `InterruptError` arm is this click's own refusal, so it marks this button
- * rather than appearing anywhere else.
- */
-function drawStopControl(rc: RowContext): HTMLElement {
-  const wrap = document.createElement("span");
-  wrap.className = "subagent-stop";
-
-  const button = createControl();
-  button.className = "subagent-stop-button";
-  button.setAttribute("data-interrupt", requireMessage(rc.row.id, "FeedRow.id").value);
-  button.textContent = "stop";
-  wrap.append(button);
-
-  button.addEventListener("click", () => {
-    void stop(rc, wrap);
-  });
-  return wrap;
-}
-
-/** Issue the stop and draw whatever came back beside the control. */
-async function stop(rc: RowContext, wrap: HTMLElement): Promise<void> {
-  const id = requireMessage(rc.row.id, "FeedRow.id");
-  clearOutcome(wrap);
-  log.info("stopping a detached subagent", {
-    operation: "feed.subagent-stop",
-    context: { row: id.value },
-  });
-  let response: InterruptResponse;
-  try {
-    response = await callUnary(
-      rc.ctx,
-      "Interrupt",
-      (client) => client.interrupt(buildInterruptDetachedRequest(rc.ctx.workspace, id)),
-      InterruptResponseSchema,
-    );
-  } catch {
-    // callUnary already logged the transport failure once, as its owner; what
-    // is left is telling the reader their click did not land.
-    wrap.append(refusal("transport", "the daemon could not be reached"));
-    return;
-  }
-  const result = requireCase(response.result, "InterruptResponse.result");
-  switch (result.case) {
-    case "success":
-      wrap.append(successNote(result.value, rc));
-      return;
-    case "error":
-      wrap.append(errorNote(result.value));
-      return;
-    default:
-      unreachableArm("InterruptResponse.result", armName(result));
-  }
-}
-
-/** The stop's own answer, stated by arm and cleared after a few seconds. */
-function successNote(
-  success: { outcome: { case?: string; value?: unknown } },
-  rc: RowContext,
-): HTMLElement {
-  const outcome = requireCase(success.outcome, "InterruptSuccess.outcome");
-  const el = document.createElement("span");
-  el.className = "subagent-stop-outcome";
-  el.setAttribute("data-outcome", outcome.case);
-  switch (outcome.case) {
-    case "interruptedTurn":
-      el.textContent = "turn interrupted";
-      break;
-    case "interruptedDetached":
-      el.textContent = `stopped ${(outcome.value as { count: bigint }).count.toString()}`;
-      break;
-    case "nothingRunning":
-      el.textContent = "nothing was running";
-      break;
-    default:
-      unreachableArm("InterruptSuccess.outcome", armName(outcome));
-  }
-  expire(el, rc);
-  return el;
-}
-
-/**
- * The refusal, at the control that made the call.
- *
- * EVERY ARM DRAWS, and the wording is the shared one (`interrupt-error.ts`), so
- * a detached stop and the footer's stops read identically about the same fact.
- *
- * NO CONFIRM STEP LIVES HERE. `confirm_required` is the daemon's challenge to
- * the TURN target — interrupting a turn while detached agents are live — and
- * `confirm_agents` is meaningless on a detached target, so a detached stop that
- * receives it has been answered with an arm that cannot apply to it. It draws
- * as the ordinary refusal it is rather than offering a second click that would
- * resend the identical request and be refused again.
- */
-function errorNote(error: { kind: { case?: string; value?: unknown } }): HTMLElement {
-  const kind = requireCase(error.kind, "InterruptError.kind") as InterruptErrorKind;
-  const sentence = interruptErrorSentence(kind, "InterruptError.kind");
-  logInterruptRefusal(kind, sentence, "feed.subagent-stop-refused");
-  return refusal(kind.case, sentence);
-}
-
-/** The shared refusal element every call site draws its own error into. */
-function refusal(arm: string, text: string): HTMLElement {
-  const el = document.createElement("span");
-  el.className = "refusal";
-  el.setAttribute("data-arm", arm);
-  el.textContent = text;
-  return el;
-}
-
-/** Drop whatever the previous click left beside the control. */
-function clearOutcome(wrap: HTMLElement): void {
-  for (const stale of wrap.querySelectorAll(".subagent-stop-outcome, .refusal")) stale.remove();
-}
-
-/**
- * Take EL off screen once the outcome has been on it long enough to read.
- *
- * Through the shared ticker rather than a timer of this module's own: there is
- * exactly one clock on the page, and a component that starts its own is the
- * thing the ticker exists to prevent.
- */
-function expire(el: HTMLElement, rc: RowContext): void {
-  const deadline = rc.ctx.ticker.now() + INTERRUPT_OUTCOME_MS;
-  tick(el, rc.ctx.ticker, (nowMs) => {
-    if (nowMs < deadline) return;
-    stopTicking(el);
-    el.remove();
-  });
-}
+/** The stop a live detached bubble offers: its own row, stopped as detached work. */
+const SUBAGENT_STOP: StopSite = {
+  prefix: "subagent-stop",
+  operation: "feed.subagent-stop",
+  refusedOperation: "feed.subagent-stop-refused",
+  describe: "stopping a detached subagent",
+  request: buildInterruptDetachedRequest,
+};
