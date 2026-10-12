@@ -581,6 +581,18 @@ The fork source workspace is not in the daemon's registry."
                       message 'workspace json
                       #'agent-repl-wire-decode-create-workspace-fork-source-ref))))
 
+(defun agent-repl-wire-decode-create-workspace-name-reserved (json)
+  "Decode CreateWorkspaceNameReserved from JSON into (:branch BRANCH).
+The supplied name is reserved by a requested async merge whose merge
+workspace has not been created yet; BRANCH is what the name resolves to."
+  (let ((message "CreateWorkspaceNameReserved"))
+    (agent-repl-wire-verbs--check-keys message json '(branch))
+    (list :branch (agent-repl-wire-verbs--decode-string message 'branch json))))
+
+(defun agent-repl-wire-decode-create-workspace-error-name-reserved (json)
+  "Decode CreateWorkspaceError's `name_reserved' cause arm."
+  (agent-repl-wire-decode-create-workspace-name-reserved json))
+
 (defun agent-repl-wire-decode-create-workspace-error-base-ref-off-primary-branch (json)
   "Decode CreateWorkspaceError's `base_ref_off_primary_branch' cause arm."
   (agent-repl-wire-decode-create-workspace-base-ref-off-primary-branch json))
@@ -703,7 +715,7 @@ temporary directory; JSON carries the canonical `dir' and `temporary_root'."
 THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
 arm this codec does not know is refused as an unknown field."
   (let ((message "CreateWorkspaceError"))
-    (agent-repl-wire-verbs--check-keys message json '(ungatedWithoutConsent noSlug forkParentHasNoConversation briefMissing unknownRepository unknownParent baseRefUnresolved worktreeCreationFailed spawnFailed oneShotPolicyMissing namingFailed insideTemporaryDirectory baseRefOffPrimaryBranch unknownForkSource forkSourceHasNoConversation))
+    (agent-repl-wire-verbs--check-keys message json '(ungatedWithoutConsent noSlug forkParentHasNoConversation briefMissing unknownRepository unknownParent baseRefUnresolved worktreeCreationFailed spawnFailed oneShotPolicyMissing namingFailed insideTemporaryDirectory baseRefOffPrimaryBranch unknownForkSource forkSourceHasNoConversation nameReserved))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
            message "cause" json
@@ -721,7 +733,8 @@ arm this codec does not know is refused as an unknown field."
          (list 'insideTemporaryDirectory :inside-temporary-directory #'agent-repl-wire-decode-create-workspace-error-inside-temporary-directory)
          (list 'baseRefOffPrimaryBranch :base-ref-off-primary-branch #'agent-repl-wire-decode-create-workspace-error-base-ref-off-primary-branch)
          (list 'unknownForkSource :unknown-fork-source #'agent-repl-wire-decode-create-workspace-error-unknown-fork-source)
-         (list 'forkSourceHasNoConversation :fork-source-has-no-conversation #'agent-repl-wire-decode-create-workspace-error-fork-source-has-no-conversation))))))
+         (list 'forkSourceHasNoConversation :fork-source-has-no-conversation #'agent-repl-wire-decode-create-workspace-error-fork-source-has-no-conversation)
+         (list 'nameReserved :name-reserved #'agent-repl-wire-decode-create-workspace-error-name-reserved))))))
 
 (defun agent-repl-wire-decode-create-workspace-response-success (json)
   "Decode CreateWorkspaceResponse's `success' arm from JSON."
@@ -1633,16 +1646,42 @@ statement, never an omitted default."
   (list (cons 'keepOpen
               (agent-repl-wire-verbs--encode-bool (plist-get value :keep-open)))))
 
+(defun agent-repl-wire-encode-merge-workspace-source-own-branch-detached-whole-branch (value)
+  "Encode MergeWorkspaceSourceOwnBranchDetachedWholeBranch from VALUE.
+Empty: the requester\='s whole branch is merged."
+  (agent-repl-wire--encode-empty "MergeWorkspaceSourceOwnBranchDetachedWholeBranch" value))
+
+(defun agent-repl-wire-encode-merge-workspace-source-own-branch-detached-pick (value)
+  "Encode MergeWorkspaceSourceOwnBranchDetachedPick from plist VALUE
+\(:instruction STRING).  The instruction is required and non-blank: it is
+the merge agent\='s only account of which changes to take."
+  (list (cons 'instruction
+              (agent-repl-wire-verbs--require-string
+               "MergeWorkspaceSourceOwnBranchDetachedPick" "instruction"
+               (plist-get value :instruction)))))
+
 (defun agent-repl-wire-encode-merge-workspace-source-own-branch-detached (value)
-  "Encode MergeWorkspaceSourceOwnBranchDetached from VALUE.  Empty: the
-merge runs in a merge workspace forked from the requester."
-  (agent-repl-wire--encode-empty "MergeWorkspaceSourceOwnBranchDetached" value))
+  "Encode MergeWorkspaceSourceOwnBranchDetached from plist VALUE
+\(:name STRING :content CONTENT).  An ASYNC merge: it runs in a hidden
+merge workspace forked from the requester under NAME, which is required
+and non-blank.  CONTENT is `:whole-branch' (nil) or `:pick'
+\(:instruction STRING); an unset content and an unknown arm are refused."
+  (let ((message "MergeWorkspaceSourceOwnBranchDetached"))
+    (cons (cons 'name
+                (agent-repl-wire-verbs--require-string
+                 message "name" (plist-get value :name)))
+          (list (agent-repl-wire-verbs--encode-oneof
+                 message "content" (plist-get value :content)
+                 '((:whole-branch wholeBranch
+                                  agent-repl-wire-encode-merge-workspace-source-own-branch-detached-whole-branch)
+                   (:pick pick
+                          agent-repl-wire-encode-merge-workspace-source-own-branch-detached-pick)))))))
 
 (defun agent-repl-wire-encode-merge-workspace-source-own-branch (value)
   "Encode MergeWorkspaceSourceOwnBranch from plist VALUE (:run RUN).
-THE ARM IS WHERE THE MERGE RUNS: `:in-place' (:keep-open BOOL), in the
-requesting workspace, or `:detached' (nil), in a merge workspace forked
-from it.  An unset run and an unknown arm are both refused."
+THE ARM IS WHERE THE MERGE RUNS: `:in-place' (:keep-open BOOL), a SYNC
+merge in the requesting workspace, or `:detached' (:name STRING :content
+CONTENT), an ASYNC merge in a hidden merge workspace forked from it.  An unset run and an unknown arm are both refused."
   (list (agent-repl-wire-verbs--encode-oneof
          "MergeWorkspaceSourceOwnBranch" "run" (plist-get value :run)
          '((:in-place inPlace
@@ -1768,6 +1807,18 @@ workspace is not open, is in another repository, or is the requester itself."
 not exist in the requester's repository."
   (agent-repl-wire-verbs--decode-empty "MergeWorkspaceUnknownBranch" json))
 
+(defun agent-repl-wire-decode-merge-workspace-name-taken (json)
+  "Decode MergeWorkspaceNameTaken from JSON into (:branch BRANCH).
+An async merge\='s name is already a workspace, a branch, or another
+pending merge\='s reservation; BRANCH is what the name resolves to."
+  (let ((message "MergeWorkspaceNameTaken"))
+    (agent-repl-wire-verbs--check-keys message json '(branch))
+    (list :branch (agent-repl-wire-verbs--decode-string message 'branch json))))
+
+(defun agent-repl-wire-decode-merge-workspace-error-name-taken (json)
+  "Decode MergeWorkspaceError's `name_taken' cause arm from JSON."
+  (agent-repl-wire-decode-merge-workspace-name-taken json))
+
 (defun agent-repl-wire-decode-merge-workspace-error-unknown-workspace (json)
   "Decode MergeWorkspaceError's `unknown_workspace' cause arm from JSON."
   (agent-repl-wire-decode-merge-workspace-unknown-workspace json))
@@ -1813,7 +1864,7 @@ not exist in the requester's repository."
 THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
 arm this codec does not know is refused as an unknown field."
   (let ((message "MergeWorkspaceError"))
-    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted noLayoutFacts sessionDeleted alreadyQueued alreadyMerging unknownSourceWorkspace unknownBranch))
+    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted noLayoutFacts sessionDeleted alreadyQueued alreadyMerging unknownSourceWorkspace unknownBranch nameTaken))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
            message "cause" json
@@ -1826,7 +1877,8 @@ arm this codec does not know is refused as an unknown field."
          (list 'alreadyQueued :already-queued #'agent-repl-wire-decode-merge-workspace-error-already-queued)
          (list 'alreadyMerging :already-merging #'agent-repl-wire-decode-merge-workspace-error-already-merging)
          (list 'unknownSourceWorkspace :unknown-source-workspace #'agent-repl-wire-decode-merge-workspace-error-unknown-source-workspace)
-         (list 'unknownBranch :unknown-branch #'agent-repl-wire-decode-merge-workspace-error-unknown-branch))))))
+         (list 'unknownBranch :unknown-branch #'agent-repl-wire-decode-merge-workspace-error-unknown-branch)
+         (list 'nameTaken :name-taken #'agent-repl-wire-decode-merge-workspace-error-name-taken))))))
 
 (defun agent-repl-wire-decode-merge-workspace-response-success (json)
   "Decode MergeWorkspaceResponse's `success' arm from JSON."
@@ -3940,8 +3992,8 @@ arm this codec does not know is refused as an unknown field."
 (defun agent-repl-wire-encode-interrupt-request-target (value)
   "Encode InterruptRequest's `target' oneof from VALUE.
 VALUE is (:arm KEYWORD :value V).  Only `turn' and `all-agents' can be
-authored here; `detached' is refused as an unknown arm because Emacs holds
-no feed from which to build its FeedId."
+authored here; `detached' and `merge-tab' are refused as unknown arms
+because Emacs holds no feed from which to build their FeedId."
   (agent-repl-wire-verbs--encode-oneof
    "InterruptRequest" "target" value
    (list (list :turn 'turn #'agent-repl-wire-encode-interrupt-turn)
@@ -4036,6 +4088,11 @@ finished adopting this workspace yet."
 detached item."
   (agent-repl-wire-verbs--decode-empty "InterruptNotDetachedWork" json))
 
+(defun agent-repl-wire-decode-interrupt-not-merge-tab (json)
+  "Decode InterruptNotMergeTab from JSON.  Empty: the FeedId names no merge
+bubble tab whose agent is running."
+  (agent-repl-wire-verbs--decode-empty "InterruptNotMergeTab" json))
+
 (defun agent-repl-wire-decode-interrupt-no-session (json)
   "Decode InterruptNoSession from JSON.  Empty: the workspace has no session to
 interrupt."
@@ -4059,7 +4116,7 @@ with the same accessor every other verb's error uses."
     (agent-repl-wire-verbs--check-keys
      message json '(confirmRequired unknownWorkspace workspaceRefMismatch
                     transferringAway notYetAdopted notDetachedWork noSession
-                    shimRefused))
+                    shimRefused notMergeTab))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
            message "kind" json
@@ -4078,7 +4135,9 @@ with the same accessor every other verb's error uses."
                  (list 'noSession :no-session
                        #'agent-repl-wire-decode-interrupt-no-session)
                  (list 'shimRefused :shim-refused
-                       #'agent-repl-wire-decode-interrupt-shim-refused))))))
+                       #'agent-repl-wire-decode-interrupt-shim-refused)
+                 (list 'notMergeTab :not-merge-tab
+                       #'agent-repl-wire-decode-interrupt-not-merge-tab))))))
 
 (defun agent-repl-wire-decode-interrupt-response (json)
   "Decode InterruptResponse from JSON into (:arm ARM :value V)."

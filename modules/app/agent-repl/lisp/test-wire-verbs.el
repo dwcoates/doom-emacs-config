@@ -1732,7 +1732,7 @@ and the temporary root it carries."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_create_workspace.pb.go" "CreateWorkspaceError")
                        #'string<)
-                 (sort (list "ungatedWithoutConsent" "noSlug" "forkParentHasNoConversation" "briefMissing" "unknownRepository" "unknownParent" "baseRefUnresolved" "worktreeCreationFailed" "spawnFailed" "oneShotPolicyMissing" "namingFailed" "insideTemporaryDirectory" "baseRefOffPrimaryBranch" "unknownForkSource" "forkSourceHasNoConversation")
+                 (sort (list "ungatedWithoutConsent" "noSlug" "forkParentHasNoConversation" "briefMissing" "unknownRepository" "unknownParent" "baseRefUnresolved" "worktreeCreationFailed" "spawnFailed" "oneShotPolicyMissing" "namingFailed" "insideTemporaryDirectory" "baseRefOffPrimaryBranch" "unknownForkSource" "forkSourceHasNoConversation" "nameReserved")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-create-error-base-ref-off-primary-branch-arm ()
@@ -1763,6 +1763,13 @@ ref it names."
                      "{\"forkSourceHasNoConversation\":{\"workspace\":{\"id\":\"ws-2\",\"dir\":\"/w/two\"}}}"))
                    '(:cause (:arm :fork-source-has-no-conversation
                              :value (:workspace (:id "ws-2" :dir "/w/two"))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-create-error-name-reserved-arm ()
+  "CreateWorkspaceError's `name_reserved' arm decodes the branch the name resolves to."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-create-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"nameReserved\":{\"branch\":\"agent-1/fix\"}}"))
+                   '(:cause (:arm :name-reserved :value (:branch "agent-1/fix")))))))
 
 (ert-deftest agent-repl-test-wire-verbs-create-encodes-a-fork-source ()
   "A fork into the primary branch rides `forkSource', never beside a parent."
@@ -2144,13 +2151,51 @@ at."
                    (concat "{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"},"
                            "\"source\":{\"ownBranch\":{\"inPlace\":{\"keepOpen\":true}}}}")))))
 
-(ert-deftest agent-repl-test-wire-verbs-merge-request-own-branch-detached ()
-  "A detached own-branch merge spells its empty `detached' arm."
+(ert-deftest agent-repl-test-wire-verbs-merge-request-own-branch-detached-whole-branch ()
+  "An async whole-branch merge spells its name and its empty `wholeBranch' arm."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (agent-repl-test-wire-verbs--merge-json
-                    '(:arm :own-branch :value (:run (:arm :detached))))
+                    '(:arm :own-branch
+                      :value (:run (:arm :detached
+                                    :value (:name "reconnect-fix"
+                                            :content (:arm :whole-branch))))))
                    (concat "{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"},"
-                           "\"source\":{\"ownBranch\":{\"detached\":{}}}}")))))
+                           "\"source\":{\"ownBranch\":{\"detached\":"
+                           "{\"name\":\"reconnect-fix\",\"wholeBranch\":{}}}}}")))))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-request-own-branch-detached-pick ()
+  "An async pick merge spells its name and the pick's instruction."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-test-wire-verbs--merge-json
+                    '(:arm :own-branch
+                      :value (:run (:arm :detached
+                                    :value (:name "reconnect-fix"
+                                            :content (:arm :pick
+                                                      :value (:instruction "commit a1b2")))))))
+                   (concat "{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"},"
+                           "\"source\":{\"ownBranch\":{\"detached\":"
+                           "{\"name\":\"reconnect-fix\",\"pick\":{\"instruction\":\"commit a1b2\"}}}}}")))))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-request-own-branch-detached-with-no-name-is-refused ()
+  "An async merge that names no merge workspace is refused before it is sent."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-test-wire-verbs--merge-json
+                   '(:arm :own-branch
+                     :value (:run (:arm :detached :value (:content (:arm :whole-branch)))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-request-own-branch-detached-with-no-content-is-refused ()
+  "An async merge that says neither whole branch nor pick is refused before it is sent."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-test-wire-verbs--merge-json
+                   '(:arm :own-branch :value (:run (:arm :detached :value (:name "fix"))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-request-own-branch-detached-blank-pick-is-refused ()
+  "A pick with an empty instruction is refused before it is sent."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-test-wire-verbs--merge-json
+                   '(:arm :own-branch
+                     :value (:run (:arm :detached
+                                   :value (:name "fix" :content (:arm :pick :value (:instruction ""))))))))))
 
 (ert-deftest agent-repl-test-wire-verbs-merge-request-own-branch-with-no-run-is-refused ()
   "An own-branch merge that names no run is refused before it is sent."
@@ -2305,6 +2350,13 @@ carries."
                     (agent-repl-test-wire-verbs--parse "{\"alreadyQueued\":{}}"))
                    '(:cause (:arm :already-queued :value nil))))))
 
+(ert-deftest agent-repl-test-wire-verbs-merge-error-name-taken-arm ()
+  "MergeWorkspaceError's `name_taken' arm decodes the branch the name resolves to."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-merge-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"nameTaken\":{\"branch\":\"agent-1/fix\"}}"))
+                   '(:cause (:arm :name-taken :value (:branch "agent-1/fix")))))))
+
 (ert-deftest agent-repl-test-wire-verbs-merge-error-already-merging-arm ()
   "MergeWorkspaceError's `already_merging' arm decodes with everything it
 carries."
@@ -2349,7 +2401,7 @@ at."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_merge_workspace.pb.go" "MergeWorkspaceError")
                        #'string<)
-                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "noLayoutFacts" "sessionDeleted" "alreadyQueued" "alreadyMerging" "unknownSourceWorkspace" "unknownBranch")
+                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "noLayoutFacts" "sessionDeleted" "alreadyQueued" "alreadyMerging" "unknownSourceWorkspace" "unknownBranch" "nameTaken")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-merge-source-arms-pinned ()
@@ -3219,6 +3271,15 @@ so authoring it is refused rather than sent malformed."
                          :target '(:arm :detached :value nil)))
                   :type 'agent-repl-wire-error)))
 
+(ert-deftest agent-repl-test-wire-verbs-interrupt-merge-tab-target-refused ()
+  "The merge-tab target has no encoder here -- Emacs holds no FeedId to build --
+so authoring it is refused rather than sent malformed."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-encode-interrupt-request
+                   (list :workspace agent-repl-test-wire-verbs--ref
+                         :target '(:arm :merge-tab :value nil)))
+                  :type 'agent-repl-wire-error)))
+
 (ert-deftest agent-repl-test-wire-verbs-interrupt-response-interrupted-turn ()
   "An interrupted turn decodes to the interrupted_turn success arm."
   (agent-repl-test-wire-verbs--with-common
@@ -3305,12 +3366,13 @@ arm, never an error."
                   :type 'agent-repl-wire-error)))
 
 (ert-deftest agent-repl-test-wire-verbs-interrupt-target-arms-pinned ()
-  "InterruptRequest's target oneof has exactly the three arms the proto declares;
-Emacs encodes two of them and refuses the FeedId-bearing `detached'."
+  "InterruptRequest's target oneof has exactly the arms the proto declares;
+Emacs encodes two of them and refuses the FeedId-bearing `detached' and
+`merge_tab'."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_interrupt.pb.go" "InterruptRequest")
                        #'string<)
-                 (sort (list "turn" "detached" "allAgents") #'string<))))
+                 (sort (list "turn" "detached" "allAgents" "mergeTab") #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-interrupt-success-arms-pinned ()
   "InterruptSuccess's outcome oneof has exactly the three arms decoded here."
@@ -3321,14 +3383,21 @@ Emacs encodes two of them and refuses the FeedId-bearing `detached'."
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-interrupt-error-arms-pinned ()
-  "InterruptError's kind oneof has exactly the eight arms decoded here."
+  "InterruptError's kind oneof has exactly the arms decoded here."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_interrupt.pb.go" "InterruptError")
                        #'string<)
                  (sort (list "confirmRequired" "unknownWorkspace" "workspaceRefMismatch"
                              "transferringAway" "notYetAdopted" "notDetachedWork"
-                             "noSession" "shimRefused")
+                             "noSession" "shimRefused" "notMergeTab")
                        #'string<))))
+
+(ert-deftest agent-repl-test-wire-verbs-interrupt-error-not-merge-tab-arm ()
+  "InterruptError's `not_merge_tab' arm decodes as its empty arm."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-interrupt-error
+                    (agent-repl-test-wire-verbs--parse "{\"notMergeTab\":{}}"))
+                   '(:cause (:arm :not-merge-tab :value nil))))))
 
 ;;;; ---- SelectFeedRowRequest -------------------------------------------
 
