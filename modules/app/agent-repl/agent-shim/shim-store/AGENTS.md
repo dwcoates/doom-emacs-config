@@ -1374,3 +1374,14 @@ SQLite's forced flushes; a spawned store does so only with
 `AGENT_REPL_TEST_SQLITE_UNSYNCED=1` beside `AGENT_REPL_FORBID_VENDOR_CALLS`,
 and refuses to open its database with the flag alone. The module's
 `AGENTS.md` ("Test databases stay off the SSD") has the whole rule.
+
+## Performance lessons (living document)
+
+THIS SECTION IS A LIVING DOCUMENT. Whenever an important performance lesson
+about the store is found -- at runtime or in its tests -- add or update an entry
+here: what was slow or heavy, the evidence with numbers and the date, the fix
+and its commit (or the open item). Test-performance lessons also go into the
+`/write-tests` skill; runtime profiling and the perf-sensitive list live in
+`/profile-agent-repl`.
+
+- The store's own db tests already use the in-memory store in 357 of 394 constructions; the checkpoint tests that write ~209MB are file-subject on purpose (their subject is the WAL). The store is not mocked where it is the subject.

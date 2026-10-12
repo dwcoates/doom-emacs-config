@@ -94,3 +94,14 @@ Dependencies: the protos under `proto/src/` — `store/v1` and
 `conversation/v1` for everything at this level — with the generated Go in
 `proto/gen/go/` (module `agentrepl/proto`; the Connect handlers and clients
 live in `proto/gen/go/store/v1/storev1connect`).
+
+## Performance lessons (living document)
+
+THIS SECTION IS A LIVING DOCUMENT. Whenever an important performance lesson
+about the agent shim family is found -- at runtime or in its tests -- add or update an entry
+here: what was slow or heavy, the evidence with numbers and the date, the fix
+and its commit (or the open item). Test-performance lessons also go into the
+`/write-tests` skill; runtime profiling and the perf-sensitive list live in
+`/profile-agent-repl`.
+
+- See the per-component sections (shim, sidecar, store, lock, logging). A test that boots a real component must isolate every directory it reports into (run dir, lock dir); one that does not overwrites the live component's state (496a17d14).
