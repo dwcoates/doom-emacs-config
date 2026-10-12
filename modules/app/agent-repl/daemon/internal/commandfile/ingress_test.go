@@ -1304,3 +1304,49 @@ func TestCreateAndRetargetShareTheParentSpelling(t *testing.T) {
 		t.Fatalf("retargets = %+v, want top-level for the main checkout", f.retarget.calls)
 	}
 }
+
+// TestQueueSubjectResolvesTheRequesterAndTheWorkspaceItAddresses covers the
+// one resolution every queue control that names a workspace shares: the
+// requester's own merge when the control's directory is unset, another
+// workspace's by its worktree otherwise, and a refusal naming the control's
+// own field for a directory no workspace is registered at.
+func TestQueueSubjectResolvesTheRequesterAndTheWorkspaceItAddresses(t *testing.T) {
+	tests := []struct {
+		name          string
+		entry         Entry
+		dir           string
+		wantRequester wsm.WorkspaceID
+		wantSubject   wsm.WorkspaceID
+		wantErr       string
+	}{
+		{name: "the requester's own", entry: Entry{ProjectDir: "/tree/w1"}, wantRequester: "w1", wantSubject: "w1"},
+		{name: "another workspace's, by its worktree", entry: Entry{ProjectDir: "/tree/w1"}, dir: "/tree/w2", wantRequester: "w1", wantSubject: "w2"},
+		{name: "an unregistered directory", entry: Entry{ProjectDir: "/tree/w1"}, dir: "/tree/none",
+			wantErr: `unknown_workspace: no workspace is registered at some_dir "/tree/none"`},
+		{name: "an unregistered requester", entry: Entry{ProjectDir: "/tree/none"}, dir: "/tree/w2",
+			wantErr: `no workspace is registered at "/tree/none"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.workspace("w1", "/tree/w1")
+			f.workspace("w2", "/tree/w2")
+			in := f.ingress.(*ingress)
+
+			// Act.
+			requester, subject, err := in.queueSubject(context.Background(), tt.entry, "some_dir", tt.dir)
+
+			// Assert.
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("queueSubject = %v, want an error containing %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil || requester != tt.wantRequester || subject != tt.wantSubject {
+				t.Fatalf("queueSubject = %s, %s, %v; want %s, %s", requester, subject, err, tt.wantRequester, tt.wantSubject)
+			}
+		})
+	}
+}
