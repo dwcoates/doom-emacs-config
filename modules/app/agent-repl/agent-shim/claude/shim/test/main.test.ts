@@ -1309,9 +1309,10 @@ describe("main", () => {
     h.letServeReturn();
     await h.reached("serving");
 
-    // Assert. SIGUSR2 is the manual keep-alive reset backdoor, installed
-    // alongside the other two.
-    expect([...h.signals.keys()].sort()).toEqual(["SIGINT", "SIGTERM", "SIGUSR2"]);
+    // Assert. SIGUSR2 is the manual keep-alive reset backdoor, SIGWINCH the
+    // runtime profiling reconcile and `exit` the removal of its armed marker
+    // (src/profiling.ts), all installed alongside the other two.
+    expect([...h.signals.keys()].sort()).toEqual(["SIGINT", "SIGTERM", "SIGUSR2", "SIGWINCH", "exit"]);
   });
 
   it("refuses SIGINT through the handler it registered", async () => {
