@@ -116,19 +116,28 @@ func (r *Recorder) SetStdout(text string) {
 // recorderScript is the shell body every fake executable shares: append the
 // invocation as one JSON line, print the scripted stdout, exit with the
 // scripted status.
-const recorderScript = `#!/bin/sh
+//
+// IT SPAWNS NOTHING ON ITS COMMON PATH. Every fake host tool -- launchctl,
+// the notifier, pmset, the chime -- is this script, and the daemon suite runs
+// it ~16 times per test. Escaping each argument through `$(printf | sed)`
+// and reading the cwd through `$(pwd)` cost a subshell and a sed per
+// argument: ~8 processes for one `launchctl print`, the largest single share
+// of the ~60,000 processes the daemon suite spawned. Bash's own substitution
+// escapes in place, $PWD is the cwd, and `read` takes a scripted status; only
+// a scripted stdout still runs a cat.
+const recorderScript = `#!/bin/bash
 record="$AGENT_REPL_FAKE_RECORD"
 control="$AGENT_REPL_FAKE_CONTROL"
 argv=""
 for a in "$@"; do
-  esc=$(printf '%s' "$a" | sed 's/\\/\\\\/g; s/"/\\"/g')
+  esc=${a//\\/\\\\}
+  esc=${esc//\"/\\\"}
   if [ -z "$argv" ]; then argv="\"$esc\""; else argv="$argv,\"$esc\""; fi
 done
-cwd=$(pwd)
-printf '{"argv":[%s],"cwd":"%s","env":{"AGENT_REPL_OWNED":"%s"}}\n' "$argv" "$cwd" "$AGENT_REPL_OWNED" >> "$record"
+printf '{"argv":[%s],"cwd":"%s","env":{"AGENT_REPL_OWNED":"%s"}}\n' "$argv" "$PWD" "$AGENT_REPL_OWNED" >> "$record"
 if [ -f "$control.stdout" ]; then cat "$control.stdout"; fi
-if [ -n "$1" ] && [ -f "$control.verb.$1" ]; then exit "$(cat "$control.verb.$1")"; fi
-if [ -f "$control" ]; then exit "$(cat "$control")"; fi
+if [ -n "$1" ] && [ -f "$control.verb.$1" ]; then read -r code < "$control.verb.$1"; exit "$code"; fi
+if [ -f "$control" ]; then read -r code < "$control"; exit "$code"; fi
 exit 0
 `
 
@@ -145,11 +154,11 @@ func NewRecorderExecutable(t *testing.T, dir, name string) *Recorder {
 		Control: filepath.Join(dir, name+".control"),
 		t:       t,
 	}
-	script := "#!/bin/sh\n" +
+	script := "#!/bin/bash\n" +
 		"AGENT_REPL_FAKE_RECORD=" + shellword.Quote(r.Record) + "\n" +
 		"AGENT_REPL_FAKE_CONTROL=" + shellword.Quote(r.Control) + "\n" +
 		"export AGENT_REPL_FAKE_RECORD AGENT_REPL_FAKE_CONTROL\n" +
-		strings.TrimPrefix(recorderScript, "#!/bin/sh\n")
+		strings.TrimPrefix(recorderScript, "#!/bin/bash\n")
 	if err := os.WriteFile(r.Path, []byte(script), 0o755); err != nil {
 		t.Fatalf("harness: write %s: %v", r.Path, err)
 	}
