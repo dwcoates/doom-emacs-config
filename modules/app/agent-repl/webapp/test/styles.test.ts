@@ -25,6 +25,7 @@ import {
   BUBBLE_FOOTER_CLASS,
   BUBBLE_MORE_ELLIPSIS,
   BUBBLE_UNCAPPED,
+  BUBBLE_VARIANTS,
   ELLIPSIS_CAP_LINES,
   drawBubble,
   type BubbleCapLines,
@@ -238,6 +239,17 @@ describe("the bubble geometry: the scrollbar on the inner edge", () => {
 
     // Assert
     expect(bubble).toMatch(/padding:\s*var\(--bubble-pad-y\)\s+var\(--bubble-scroll-gap\)\s+var\(--bubble-pad-y\)\s+0\.9rem/);
+  });
+
+  it("states every bubble's unshrunk vertical padding once, as the base the padding reads", () => {
+    // Arrange / Act
+    const bubble = declarationsOf(".bubble");
+
+    // Assert
+    expect([
+      /--bubble-pad-y-base:\s*0\.6rem/.test(bubble ?? ""),
+      /--bubble-pad-y:\s*var\(--bubble-pad-y-base\)/.test(bubble ?? ""),
+    ]).toEqual([true, true]);
   });
 
   it("keeps the gap itself hairline, so 'abuts' is a promise the token can keep", () => {
@@ -1041,7 +1053,7 @@ describe("the usage corner's sizing ghost", () => {
     const tokens = cornerTokens();
 
     // Assert
-    expect(["--usage-half-leading", "--usage-bubble-pad-top", "--usage-corner-gap", "--usage-pair-gap"].filter(
+    expect(["--usage-half-leading", "--usage-bubble-pad-top", "--usage-corner-gap", "--usage-corner-gap-x", "--usage-pair-gap"].filter(
       (token) => !new RegExp(`${token}:`).test(tokens),
     )).toEqual([]);
   });
@@ -1107,7 +1119,7 @@ describe("the usage corner's sizing ghost", () => {
     const declarations = ghost();
 
     // Assert
-    expect(declarations).toMatch(/padding-right:\s*calc\(var\(--usage-corner-gap\) - var\(--bubble-scroll-gap\)\)/);
+    expect(declarations).toMatch(/padding-right:\s*calc\(var\(--usage-corner-gap-x\) - var\(--bubble-scroll-gap\)\)/);
   });
 
   it("hosts the ghost on the same rule in an open ellipsis bubble", () => {
@@ -1213,13 +1225,23 @@ describe("the cost corner", () => {
       );
     });
 
-    it("derives the right margin from the same gap token", () => {
+    it("defines the horizontal gap over the unshrunk top padding, so a tighter bubble never moves the corner sideways", () => {
+      // Arrange / Act
+      const corner = cornerTokens();
+
+      // Assert
+      expect(corner).toMatch(
+        /--usage-corner-gap-x:\s*calc\(var\(--bubble-pad-y-base\) \+ var\(--usage-half-leading\)\)/,
+      );
+    });
+
+    it("derives the right margin from the horizontal gap token", () => {
       // Arrange / Act
       const corner = declarationsOf(".usage-corner") ?? "";
 
       // Assert
       expect(corner).toMatch(
-        /margin-right:\s*calc\(\s*var\(--usage-corner-gap\)\s*-\s*var\(--bubble-scroll-gap\)\s*-\s*var\(--usage-hit-x\)\s*\)/,
+        /margin-right:\s*calc\(\s*var\(--usage-corner-gap-x\)\s*-\s*var\(--bubble-scroll-gap\)\s*-\s*var\(--usage-hit-x\)\s*\)/,
       );
     });
 
@@ -1298,7 +1320,7 @@ describe("the cost corner", () => {
       const ago = declarationsOf(".usage-ago") ?? "";
 
       // Assert
-      expect(ago).toMatch(/transform:\s*translateX\(var\(--usage-corner-gap\)\)/);
+      expect(ago).toMatch(/transform:\s*translateX\(var\(--usage-corner-gap-x\)\)/);
     });
 
     it("fades the duration out at rest", () => {
@@ -1337,7 +1359,7 @@ describe("the cost corner", () => {
 
       // Assert: a percentage, zero, or the gap token, never a length.
       for (const transform of transforms) {
-        expect(transform).toMatch(/^translateX\((?:100%|0|var\(--usage-corner-gap\))\)$/);
+        expect(transform).toMatch(/^translateX\((?:100%|0|var\(--usage-corner-gap-x\))\)$/);
       }
     });
   });
@@ -3073,6 +3095,10 @@ describe("the one bubble rule set", () => {
             !prop.startsWith("border") &&
             prop !== "--bubble-bg" &&
             !(prop === "max-width" && rule.selectors.length === 1 && rule.selectors[0] === held) &&
+            // The tighter vertical padding of a prompt or response bubble
+            // (owner request, 2026-10-12) is the one padding token a variant
+            // sets; its own suite pins it.
+            !(prop === "--bubble-pad-y" && rule.selectors.every((sel) => TIGHTER_PAD_SELECTORS.includes(sel))) &&
             // The dimmed prose of a thinking or interim bubble (owner request,
             // 2026-10-08) is the one text color a variant sets; its own suite
             // pins it.
@@ -3830,6 +3856,10 @@ describe("the tool card's command grey", () => {
  * background is not there in either theme; every other response keeps the
  * purple, and the interim keeps its pear border.
  */
+/** The prompt and response variants whose vertical padding is 30% tighter (owner request, 2026-10-12). */
+const TIGHTER_PAD_SELECTORS: readonly string[] = ["response", "user", "agent", "peer", "held"].map(
+  (variant) => `.bubble[data-variant="${variant}"]`,
+);
 /** The two bubble kinds whose prose is the dimmed `--interim-text` (half way from the command grey to the body text). */
 const DIMMED_TEXT_SELECTORS: readonly string[] = ['.bubble[data-variant="thinking"]', ".bubble.interim-response"];
 
@@ -4234,5 +4264,80 @@ describe("the stylesheet's real-height contract", () => {
 
     // Assert
     expect(selectors).toEqual([]);
+  });
+});
+
+/**
+ * PROMPT AND RESPONSE BUBBLES SIT 30% TIGHTER TOP AND BOTTOM (owner request,
+ * 2026-10-12): the vertical padding token shrinks to 0.7 of the base on the
+ * prompt and response variants only, while thinking, the agentic tool and
+ * monitor cards and the compaction summary keep the base. The horizontal
+ * padding never reads the vertical token, so it cannot move with it.
+ */
+describe("the tighter prompt and response padding", () => {
+  const SHRUNK = "calc(var(--bubble-pad-y-base)*0.7)";
+  const BASE = "var(--bubble-pad-y-base)";
+
+  /** The `--bubble-pad-y` the cascade hands a bubble of VARIANT. */
+  function padOf(variant: string): string {
+    const teardown = installStylesheet();
+    try {
+      const el = document.createElement("div");
+      el.className = "bubble";
+      el.setAttribute("data-role", BUBBLE_VARIANTS[variant as keyof typeof BUBBLE_VARIANTS]);
+      el.setAttribute("data-variant", variant);
+      document.body.append(el);
+      const got = cascadedValue(el, "--bubble-pad-y");
+      el.remove();
+      return got;
+    } finally {
+      teardown();
+    }
+  }
+
+  const cases: readonly { variant: keyof typeof BUBBLE_VARIANTS; want: string }[] = [
+    { variant: "response", want: SHRUNK },
+    { variant: "user", want: SHRUNK },
+    { variant: "agent", want: SHRUNK },
+    { variant: "peer", want: SHRUNK },
+    { variant: "held", want: SHRUNK },
+    { variant: "thinking", want: BASE },
+    { variant: "agentic", want: BASE },
+    { variant: "compaction", want: BASE },
+  ];
+
+  it("states an expectation for every bubble variant", () => {
+    // Arrange / Act
+    const stated = cases.map((c) => c.variant).sort();
+
+    // Assert
+    expect(stated).toEqual(Object.keys(BUBBLE_VARIANTS).sort());
+  });
+
+  it.each(cases)("gives a $variant bubble the expected vertical padding", ({ variant, want }) => {
+    // Arrange / Act
+    const got = padOf(variant);
+
+    // Assert
+    expect(got).toBe(want);
+  });
+
+  it("keys the tighter rule on exactly the prompt and response variants", () => {
+    // Arrange / Act
+    const rule = rulesOf(stylesheet).find((r) => /--bubble-pad-y\s*:/.test(r.declarations) && r.selectors[0] !== ".bubble");
+
+    // Assert
+    expect(rule?.selectors).toEqual(TIGHTER_PAD_SELECTORS);
+  });
+
+  it("sets nothing but the vertical token on the tighter rule, so the horizontal padding stays the base rule's", () => {
+    // Arrange / Act
+    const props = (rulesOf(stylesheet).find((r) => r.selectors.join(",") === TIGHTER_PAD_SELECTORS.join(","))?.declarations ?? "")
+      .split(";")
+      .map((decl) => decl.split(":")[0]?.trim() ?? "")
+      .filter((prop) => prop !== "");
+
+    // Assert
+    expect(props).toEqual(["--bubble-pad-y"]);
   });
 });
