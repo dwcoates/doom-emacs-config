@@ -47,3 +47,34 @@ func bootServiceStep(joining bool, ensureLoaded, ensureCurrent func(context.Cont
 	}
 	return ensureCurrent
 }
+
+// sidecarStep carries an ordinary boot's service step across its two halves
+// (deploy.Restarter.EnsureStoreCurrent): the store half runs as the boot's
+// service step, under the gate every spawn waits on, and records the sidecar
+// half it answered; the boot then runs that half beside its bring-ups, after
+// the gate has opened. A joining successor never runs the store half, so its
+// sidecar half is nothing to do.
+//
+// The two halves run one after the other on the boot's bring-up loop (the
+// second is started after the first has returned), so pending needs no lock.
+type sidecarStep struct {
+	pending func(context.Context) error
+}
+
+// storeCurrent wraps the store half so it records the sidecar half it answers.
+func (s *sidecarStep) storeCurrent(ensure func(context.Context) (func(context.Context) error, error)) func(context.Context) error {
+	return func(ctx context.Context) error {
+		next, err := ensure(ctx)
+		s.pending = next
+		return err
+	}
+}
+
+// run runs the recorded sidecar half; with none recorded (a joining
+// successor, or a store half that failed) there is nothing to do.
+func (s *sidecarStep) run(ctx context.Context) error {
+	if s.pending == nil {
+		return nil
+	}
+	return s.pending(ctx)
+}

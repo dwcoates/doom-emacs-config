@@ -321,6 +321,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// THE SERVICES' LATCH: every spawn waits until the boot's service step
 	// has made the store and the sidecar current (see serviceGate).
 	services := newServiceGate()
+	sidecar := &sidecarStep{}
 	supervisor, err := shimclient.NewSupervisor(p.Surfaces,
 		shimclient.WithServicesReady(services.Ready()),
 		shimclient.WithLockProbe(adoptedDeathWitness(func(workspaceDir string) (sessionlock.State, error) {
@@ -1248,7 +1249,8 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			Adopted:                fleet.Install,
 			SessionAdopted:         fleet.NoteAdoptedSession,
 			StartSession:           fleet.Start,
-			EnsureServices:         services.step(bootServiceStep(p.Opts.joining != "", restarter.EnsureLoaded, restarter.EnsureCurrent)),
+			EnsureServices:         services.step(bootServiceStep(p.Opts.joining != "", restarter.EnsureLoaded, sidecar.storeCurrent(restarter.EnsureStoreCurrent))),
+			EnsureSidecar:          sidecar.run,
 			Unserved:               fleet.MarkUnserved,
 			BringingUp:             bringingUp,
 			AdoptBound:             adoptBound,
