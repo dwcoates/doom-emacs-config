@@ -19,6 +19,7 @@
  * fact about the switch.
  */
 import { log } from "./log.js";
+import { pagePresence, type Presence } from "./presence.js";
 
 /** What the presence log needs from its environment, injectable for tests. */
 export interface PagePresenceEnv {
@@ -28,6 +29,9 @@ export interface PagePresenceEnv {
   readonly now: () => number;
   /** Schedules a callback for the next animation frame. */
   readonly frame: (callback: () => void) => void;
+  /** The page's presence, whose host shows are measured like a visible edge;
+   * the page's own when absent. */
+  readonly presence?: Presence;
 }
 
 /** The installed log; `stop` removes every listener. */
@@ -36,7 +40,7 @@ export interface PagePresence {
 }
 
 /** The default environment: the page itself. */
-export function pagePresenceEnv(): PagePresenceEnv {
+function pagePresenceEnv(): PagePresenceEnv {
   return {
     doc: document,
     win: window,
@@ -44,12 +48,14 @@ export function pagePresenceEnv(): PagePresenceEnv {
     frame: (callback) => {
       requestAnimationFrame(() => callback());
     },
+    presence: pagePresence(),
   };
 }
 
 /** Install the presence log on the page. */
 export function installPagePresenceLog(env: PagePresenceEnv = pagePresenceEnv()): PagePresence {
   const { doc, win, now, frame } = env;
+  const presence = env.presence ?? pagePresence();
   let lastEventAt = now();
   let size = { width: win.innerWidth, height: win.innerHeight };
   let resizePending = false;
@@ -131,12 +137,18 @@ export function installPagePresenceLog(env: PagePresenceEnv = pagePresenceEnv())
     });
   };
 
+  // A HOST SHOW IS A SWITCH LANDING ON THIS PAGE: the repaint after it is the
+  // page's end of the switch the user waits on.
+  const unsubscribe = presence.onChange((seen, cause) => {
+    if (cause === "host" && seen) measureRepaint("shown");
+  });
   doc.addEventListener("visibilitychange", onVisibility);
   win.addEventListener("focus", onFocus);
   win.addEventListener("blur", onBlur);
   win.addEventListener("resize", onResize);
   return {
     stop(): void {
+      unsubscribe();
       doc.removeEventListener("visibilitychange", onVisibility);
       win.removeEventListener("focus", onFocus);
       win.removeEventListener("blur", onBlur);

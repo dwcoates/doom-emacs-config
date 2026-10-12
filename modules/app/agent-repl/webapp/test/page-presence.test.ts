@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { captureLogRecords, type LogCapture } from "./log-capture.js";
 import { installPagePresenceLog, type PagePresence } from "../src/page-presence.js";
+import { createPresence } from "../src/presence.js";
 
 let capture: LogCapture;
 let presence: PagePresence;
@@ -73,6 +74,32 @@ describe("page presence log", () => {
     const repaint = capture.sent.find((record) => record.operation === "page.repaint");
     expect(repaint?.context?.paint_ms).toBe(120);
     expect(repaint?.context?.cause).toBe("visible");
+  });
+
+  it("measures the repaint after its host shows the page", async () => {
+    // Arrange
+    presence.stop();
+    const hosted = createPresence(document, true);
+    presence = installPagePresenceLog({
+      doc: document,
+      win: window,
+      now: () => clock,
+      frame: (callback) => {
+        frames.push(callback);
+      },
+      presence: hosted,
+    });
+    hosted.setShown(true);
+    clock = 40;
+
+    // Act
+    runFrames();
+
+    // Assert
+    await operations();
+    const repaint = capture.sent.find((record) => record.operation === "page.repaint");
+    expect(repaint?.context?.cause).toBe("shown");
+    hosted.dispose();
   });
 
   it("records focus and blur", async () => {

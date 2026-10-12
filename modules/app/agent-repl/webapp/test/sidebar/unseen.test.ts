@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
 import type { WorkspaceRoster } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
+import { createPresence } from "../../src/presence.js";
 import { createUnseenGate, type UnseenEnv } from "../../src/sidebar/unseen.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import { roster } from "./harness.js";
@@ -108,7 +109,7 @@ describe("the unseen gate", () => {
     // Assert
     const record = await forwardedRecord(capture, "sidebar.unseen-resumed");
     expect(record.level.case).toBe("info");
-    expect(record.context).toMatchObject({ cause: "visible", skipped: 2, draw_ms: 5 });
+    expect(record.context).toMatchObject({ cause: "seen", skipped: 2, draw_ms: 5 });
   });
 
   it("draws the push that makes its workspace current, skipping every held one", () => {
@@ -188,5 +189,40 @@ describe("the unseen gate", () => {
     // Assert
     expect(drawn).toEqual([]);
     expect(g.held()).toBe(0);
+  });
+
+  it("holds a push while its host does not show the page", () => {
+    // Arrange
+    const doc = document.implementation.createHTMLDocument("in-host");
+    Object.defineProperty(doc, "visibilityState", { configurable: true, get: () => "visible" });
+    const presence = createPresence(doc, true);
+    const drawn: WorkspaceRoster[] = [];
+    const g = createUnseenGate(OWN, (r) => drawn.push(r), { doc, now: () => 0, presence });
+
+    // Act
+    g.offer(roster({ current: OTHER }));
+
+    // Assert
+    expect(drawn).toEqual([]);
+    presence.dispose();
+  });
+
+  it("draws the newest held push when its host shows the page", () => {
+    // Arrange
+    const doc = document.implementation.createHTMLDocument("in-host");
+    Object.defineProperty(doc, "visibilityState", { configurable: true, get: () => "visible" });
+    const presence = createPresence(doc, true);
+    const drawn: WorkspaceRoster[] = [];
+    const g = createUnseenGate(OWN, (r) => drawn.push(r), { doc, now: () => 0, presence });
+    const newest = roster({ current: OTHER });
+    g.offer(roster({ current: OTHER }));
+    g.offer(newest);
+
+    // Act
+    presence.setShown(true);
+
+    // Assert
+    expect(drawn).toEqual([newest]);
+    presence.dispose();
   });
 });
