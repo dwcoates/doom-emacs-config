@@ -87,6 +87,28 @@ func (t *Topic[T]) Republish() bool {
 	return true
 }
 
+// ClearIf forgets the topic's latest value when stale reports it stale, so it
+// is no longer replayed to a late subscriber and an identical value published
+// later is not dropped as a duplicate of it. It reports whether it cleared.
+// Values already handed to subscribers are not recalled.
+//
+// It exists for an EVENT topic whose latest value stops being true: a
+// workspace's `transferred` notice, once the outgoing daemon has taken the
+// workspace back. Left standing, the notice was replayed to the page reloaded
+// onto the daemon that kept it, which went quiet as if the workspace had moved,
+// and the same notice published for the next transfer was dropped as a
+// repeat, so no participant ever heard of it (2026-10-12).
+func (t *Topic[T]) ClearIf(stale func(T) bool) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if !t.has || !stale(t.latest) {
+		return false
+	}
+	t.latest = *new(T)
+	t.has = false
+	return true
+}
+
 // Latest reports the most recently published value, and whether anything has
 // been published at all.
 func (t *Topic[T]) Latest() (T, bool) {

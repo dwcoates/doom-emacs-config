@@ -249,6 +249,86 @@ func TestRepublishDeliversTheLatestValueAgain(t *testing.T) {
 	}
 }
 
+// TestClearIfStopsReplayingAStaleValue covers the retraction's first half: a
+// value cleared as stale is not handed to a later subscriber.
+func TestClearIfStopsReplayingAStaleValue(t *testing.T) {
+	// Arrange.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var topic publish.Topic[int]
+	topic.Publish(7)
+
+	// Act.
+	cleared := topic.ClearIf(func(v int) bool { return v == 7 })
+	ch := topic.Subscribe(ctx)
+	topic.Publish(8)
+
+	// Assert.
+	if !cleared {
+		t.Fatal("ClearIf reported nothing cleared, want the stale value cleared")
+	}
+	if got := <-ch; got != 8 {
+		t.Fatalf("first delivery = %d, want the later value 8 and no replay of 7", got)
+	}
+}
+
+// TestClearIfKeepsAValueThatIsNotStale covers the predicate refusing: the
+// latest value stands and is still replayed.
+func TestClearIfKeepsAValueThatIsNotStale(t *testing.T) {
+	// Arrange.
+	var topic publish.Topic[int]
+	topic.Publish(7)
+
+	// Act.
+	cleared := topic.ClearIf(func(v int) bool { return v == 9 })
+
+	// Assert.
+	if cleared {
+		t.Fatal("ClearIf cleared a value its predicate did not call stale")
+	}
+	if got, ok := topic.Latest(); !ok || got != 7 {
+		t.Fatalf("Latest() = (%d, %v), want (7, true)", got, ok)
+	}
+}
+
+// TestClearIfLetsAnIdenticalValuePublishAgain covers the retraction's second
+// half: the next transfer's notice is identical to the retracted one, and it
+// must reach the wire rather than be dropped as a repeat.
+func TestClearIfLetsAnIdenticalValuePublishAgain(t *testing.T) {
+	// Arrange.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var topic publish.Topic[int]
+	topic.Publish(7)
+	ch := topic.Subscribe(ctx)
+	<-ch
+	topic.ClearIf(func(v int) bool { return v == 7 })
+
+	// Act.
+	topic.Publish(7)
+
+	// Assert.
+	if got := <-ch; got != 7 {
+		t.Fatalf("delivery = %d, want the identical value 7 published again", got)
+	}
+}
+
+// TestClearIfReportsAnEmptyTopic covers the topic nothing has published: there
+// is nothing to judge, and the predicate is never asked.
+func TestClearIfReportsAnEmptyTopic(t *testing.T) {
+	// Arrange.
+	var topic publish.Topic[int]
+	asked := false
+
+	// Act.
+	cleared := topic.ClearIf(func(int) bool { asked = true; return true })
+
+	// Assert.
+	if cleared || asked {
+		t.Fatalf("ClearIf on an empty topic: cleared=%v asked=%v, want neither", cleared, asked)
+	}
+}
+
 // TestRepublishReportsAnEmptyTopic covers the topic nothing has published: a
 // repaint with no value to draw is reported rather than sent empty.
 func TestRepublishReportsAnEmptyTopic(t *testing.T) {
