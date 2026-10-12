@@ -675,3 +675,25 @@ func TestTwoPinnedRowsStandInTheOrderTheyWerePinned(t *testing.T) {
 		t.Fatalf("rows = %v, want %v", got, want)
 	}
 }
+
+func TestARepublicationWithNoTailOpenIsRecordedWithItsSequenceAndWhatChanged(t *testing.T) {
+	// Arrange: a row is placed while no reader follows the feed.
+	h := newHarness(t)
+	h.sendAt(settledResponse("unit-1", "early words"), 200)
+
+	// Act: it changes before any tail opens.
+	h.sendAt(settledResponse("unit-1", "early words and more"), 200)
+
+	// Assert
+	for _, record := range h.log.Records() {
+		if record.Level != "debug" || record.Operation != "daemon.feed.row_republished" {
+			continue
+		}
+		changed, _ := record.Context["changed"].([]string)
+		if record.Context["seq"] == nil || len(changed) == 0 {
+			t.Fatalf("republication record = %v, want its sequence and the changed fields", record.Context)
+		}
+		return
+	}
+	t.Fatal("a republication with no tail open left no record")
+}
