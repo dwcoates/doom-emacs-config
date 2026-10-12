@@ -621,6 +621,93 @@ func TestLandingAMergeWhoseTargetIsTheSelfRepoDeploysOnce(t *testing.T) {
 	}
 }
 
+// holdRollouts asks d to hold, or (release) to release, the queue's rollouts.
+func holdRollouts(t *testing.T, d *harness.Daemon, release bool) *agentreplv1.UpdateMergeQueueResponse {
+	t.Helper()
+	req := &agentreplv1.UpdateMergeQueueRequest{
+		Action: &agentreplv1.UpdateMergeQueueRequest_HoldRollouts{HoldRollouts: &agentreplv1.UpdateMergeQueueHoldRollouts{}},
+	}
+	if release {
+		req.Action = &agentreplv1.UpdateMergeQueueRequest_ReleaseRollouts{ReleaseRollouts: &agentreplv1.UpdateMergeQueueReleaseRollouts{}}
+	}
+	resp, err := d.Client().UpdateMergeQueue(d.Ctx(), connect.NewRequest(req))
+	if err != nil {
+		t.Fatalf("UpdateMergeQueue(release=%v) = error %v, want an answer", release, err)
+	}
+	return resp.Msg
+}
+
+// TestAHoldTakenBeforeARestartKeepsTheSuccessorsLandingFromDeploying covers
+// the hold end to end: taken on one daemon, it survives that daemon's stop,
+// and the merge the next daemon lands into its own checkout lands without
+// telling the deploy.
+func TestAHoldTakenBeforeARestartKeepsTheSuccessorsLandingFromDeploying(t *testing.T) {
+	t.Parallel()
+	// Arrange: hold the rollouts, then stop the daemon that took the hold.
+	repo := harness.NewRepo(t)
+	script := harness.NewTestAllScript(t, repo.Dir)
+	script.SetExitCode(0)
+	script.SetStdout("daemon: passed in 1s\n")
+	env := []string{"AGENT_REPL_TEST_ALL_SCRIPT=" + script.Path}
+	d1 := harness.StartDaemon(t, harness.Opts{SelfRepo: repo.Dir, Timeout: harness.MergeChainTimeout, ExtraEnv: env})
+	if resp := holdRollouts(t, d1, false); resp.GetSuccess() == nil {
+		t.Fatalf("hold_rollouts = %v, want a success", resp)
+	}
+	d1.Stop()
+	d2 := harness.StartDaemon(t, harness.Opts{StateDir: d1.StateDir, SelfRepo: repo.Dir, Timeout: harness.MergeChainTimeout,
+		ExtraEnv: append(env, "AGENT_REPL_LOCK_DIR="+d1.LockDir)})
+	repoRef := mergeRepositoryRef(t, d2, repo)
+	f := mergeCreateChild(t, d2, repoRef, "held", "do the held thing", nil)
+	writeCommit(t, repo, f.ws.GetDir(), "modules/app/agent-repl/daemon/cmd/agent-repld/main.go", "landed while held\n")
+	root := f.watchRootFeed()
+
+	// Act
+	if _, err := d2.Client().MergeWorkspace(d2.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws, Source: harness.OwnBranch(false)})); err != nil {
+		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
+	}
+	awaitRow(t, f, root, "the merge's success", func(row *frontendv1.FeedRow) bool {
+		return row.GetActivity().GetMerge().GetSuccess() != nil
+	})
+
+	// Assert: the held landing is recorded, and the deploy never built.
+	d2.AwaitLogRecord(d2.RunLogPath(), "the held landing", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.merge.self_reload" &&
+			r.Message == "a merge landed in this daemon's own checkout while the rollouts are held; the deploy is not told"
+	})
+	if got := len(d2.Deploy.Invocations()); got != 0 {
+		t.Fatalf("deploy builds = %d, want none while the rollouts are held", got)
+	}
+}
+
+// TestTheRolloutHoldRefusesNoOpsAndReleases covers the arm pair on the wire:
+// a second hold is rollouts_already_held, a release succeeds, and a second
+// release is rollouts_not_held.
+func TestTheRolloutHoldRefusesNoOpsAndReleases(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	d := harness.StartDaemon(t, harness.Opts{})
+	d.ExpectWarnings("daemon.merge.hold_rollouts", "daemon.merge.release_rollouts")
+	if resp := holdRollouts(t, d, false); resp.GetSuccess() == nil {
+		t.Fatalf("hold_rollouts = %v, want a success", resp)
+	}
+
+	// Act
+	again := holdRollouts(t, d, false)
+	released := holdRollouts(t, d, true)
+	releasedAgain := holdRollouts(t, d, true)
+
+	// Assert
+	if again.GetError().GetRolloutsAlreadyHeld() == nil {
+		t.Fatalf("a second hold_rollouts = %v, want rollouts_already_held", again)
+	}
+	if released.GetSuccess() == nil {
+		t.Fatalf("release_rollouts = %v, want a success", released)
+	}
+	if releasedAgain.GetError().GetRolloutsNotHeld() == nil {
+		t.Fatalf("a second release_rollouts = %v, want rollouts_not_held", releasedAgain)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Self-reload only for the self repo: internal/merge/run.go splits on TWO
 // distinct booleans -- `emacsRepo` (SameRepo: same underlying repository,
