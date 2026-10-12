@@ -61,7 +61,7 @@
 (require 'cl-lib)
 (require 'subr-x)
 
-(declare-function agent-repl--frontend-webview-read-script "frontend" (buf script callback))
+(declare-function agent-repl-webhost-dismiss-digest "webhost" (ws))
 (declare-function agent-repl--frontend-webview-buffer-name "frontend" (ws))
 (declare-function evil-normal-state "evil-states" (&optional arg))
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
@@ -1033,28 +1033,16 @@ text — and holding the key auto-repeats the nudge for fine adjustment."
   (interactive)
   (agent-repl--feed-text-scale-adjust :decrease))
 
-(defconst agent-repl--input-digest-dismiss-script
-  "(function(){var c=document.querySelector('[data-component=\"news-digest\"]:not([hidden]) [data-news-digest-close]');if(!c){return 'none';}c.click();return 'dismissed';})()"
-  "Close the workspace page's standing news digest, as its close control does.
-Answers \"dismissed\" when one stood, \"none\" otherwise.")
-
-(defun agent-repl--input-digest-dismiss-reply (value)
-  "Record that escape closed a standing news digest (VALUE \"dismissed\").
-A named function: the webview read channel roots its callback by symbol."
-  (when (equal value "dismissed")
-    (agent-repl--info '(:agent-repl-central "the news digest stands in every webview")
-                      "elisp.input.escape-dismissed-news-digest")))
-
 (defun agent-repl--input-dismiss-digest (ws)
   "Ask WS's page to close its standing news digest, as escape there would.
 ESCAPE IN THE COMPOSER CLOSES THE DIGEST TOO (owner request, 2026-10-03):
 the page closes it on its own escape, but the composer usually holds the
 keyboard, so the key never reaches the page.  SO DOES SENDING A PROMPT
 (owner request, 2026-10-06; `agent-repl--input-submit').  Fire-and-forget
-through the page's own close control; a page with no digest does nothing."
-  (when-let ((buf (and ws (get-buffer (agent-repl--frontend-webview-buffer-name ws)))))
-    (agent-repl--frontend-webview-read-script
-     buf agent-repl--input-digest-dismiss-script #'agent-repl--input-digest-dismiss-reply)))
+through the page's own close control (webhost.el); a page with no digest
+does nothing, and records that it had none."
+  (when ws
+    (agent-repl-webhost-dismiss-digest ws)))
 
 (defun agent-repl-input-insert-escape ()
   "Insert-state escape in the composer: close a standing news digest, then

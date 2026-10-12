@@ -41,6 +41,14 @@
 (declare-function agent-repl-connect-open "connect")
 (declare-function agent-repl-connect-close "connect")
 (declare-function agent-repl-frontend-reload-webview "frontend")
+(declare-function agent-repl-frontend-reload-webapp "frontend")
+
+(defun agent-repl-itest-host--ensured-url (script)
+  "The page URL a host call SCRIPT asks the host to hold, or nil.
+Every page lives in the one host web view (webhost.el), so pointing a page
+at a URL is the host's `ensure' call, and that call is the observable."
+  (when (string-match "h\\.ensure(\"[^\"]*\",\"\\([^\"]*\\)\")" script)
+    (match-string 1 script)))
 (declare-function agent-repl-popup-open "popup")
 (declare-function agent-repl-link-successor "daemon-link")
 (declare-function agent-repl--ws-put "workspace")
@@ -630,7 +638,7 @@ It is a PUSH, never a terminal frame."
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-host--with-subscription daemon ref
       (let ((reloaded nil))
-        (cl-letf (((symbol-function 'agent-repl-frontend-reload-webview)
+        (cl-letf (((symbol-function 'agent-repl-frontend-reload-webapp)
                    (lambda (ws) (push ws reloaded))))
           ;; Act.
           (agent-repl-itest--push daemon "host" '((reloadWebapp . ()))
@@ -646,7 +654,7 @@ stream stands until the CLIENT cancels."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-host--with-subscription daemon ref
-      (cl-letf (((symbol-function 'agent-repl-frontend-reload-webview) #'ignore))
+      (cl-letf (((symbol-function 'agent-repl-frontend-reload-webapp) #'ignore))
         ;; Act.
         (agent-repl-itest--push daemon "host" '((reloadWebapp . ()))
                                 (plist-get ref :id))
@@ -718,25 +726,29 @@ standing page streams starved every later request."
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-host--with-subscription daemon ref
       (agent-repl--ws-put agent-repl-itest-host--ws :frontend 'gui)
-      (cl-letf (((symbol-function 'agent-repl--frontend-xwidget-available-p) (lambda () t))
-                ((symbol-function 'agent-repl--frontend-getenv) (lambda (_name) nil))
-                ;; The xwidget itself is an external boundary and this test is
-                ;; about the URL the mount asks for, not the widget behind it.
-                ((symbol-function 'agent-repl--frontend-webview-live-widget)
-                 (lambda (&rest _) nil))
-                ((symbol-function 'agent-repl--call-in-background-workspace)
-                 (lambda (_ws fn) (funcall fn))))
-        ;; Act.
-        (agent-repl--frontend-precreate-webview agent-repl-itest-host--ws)
-        ;; Assert.
-        (agent-repl-itest--wait-until (lambda () agent-repl-itest-webview-urls) nil
-                                      "the webview mount to record a URL")
-        (should (equal agent-repl-itest-webview-urls
-                       (list (format "http://ws-%s.localhost:%s/?workspace=%s&dir=%s&log_level=info"
-                                    (agent-repl--frontend-page-host-label (plist-get ref :id))
-                                    (car (last (split-string (agent-repl-itest-daemon-address daemon) ":")))
-                                    (url-hexify-string (plist-get ref :id))
-                                    (url-hexify-string (plist-get ref :dir))))))))))
+      (let ((held nil))
+        (cl-letf (((symbol-function 'agent-repl--frontend-xwidget-available-p) (lambda () t))
+                  ((symbol-function 'agent-repl--frontend-getenv) (lambda (_name) nil))
+                  ;; The xwidget itself is an external boundary and this test is
+                  ;; about the URL the host is asked to hold, not the widget.
+                  ((symbol-function 'agent-repl--frontend-webview-live-widget)
+                   (lambda (&rest _) 'fake-widget))
+                  ((symbol-function 'agent-repl--webhost-watch-load) #'ignore)
+                  ((symbol-function 'agent-repl--frontend-webview-execute-script-value)
+                   (lambda (_widget script _callback)
+                     (when-let ((url (agent-repl-itest-host--ensured-url script)))
+                       (push url held)))))
+          ;; Act.
+          (agent-repl--frontend-precreate-webview agent-repl-itest-host--ws)
+          ;; Assert.
+          (agent-repl-itest--wait-until (lambda () held) nil
+                                        "the host to be asked to hold the page")
+          (should (equal held
+                         (list (format "http://ws-%s.localhost:%s/?workspace=%s&dir=%s&log_level=info"
+                                      (agent-repl--frontend-page-host-label (plist-get ref :id))
+                                      (car (last (split-string (agent-repl-itest-daemon-address daemon) ":")))
+                                      (url-hexify-string (plist-get ref :id))
+                                      (url-hexify-string (plist-get ref :dir)))))))))))
 
 ;;;; ---- Scenario 5, host half: the handover ----
 
@@ -1318,13 +1330,13 @@ adopt again on every later handover."
 
 ;; audit-2 #8
 (ert-deftest agent-repl-itest-host-adoption-redials-the-webview-at-the-successor ()
-  "Adoption navigates the webview to the SUCCESSOR's address.
+  "Adoption points the workspace's page at the SUCCESSOR's address.
 fanout §7: host.el \"updates the workspace's `:conn' to the successor
 FIRST and then calls `agent-repl-frontend-reload-webview', so the webview
 navigates to `http://<successor>/?workspace=<id>&dir=<dir>'\" — on the
-workspace's own `ws-<id>.localhost' host at the successor's port.  The widget
-is NAVIGATED, never remounted, so the observable is the URL the navigate
-was asked for."
+workspace's own `ws-<id>.localhost' host at the successor's port.  The page
+lives in the one host web view and is RE-POINTED there, never remounted, so
+the observable is the URL the host is asked to hold."
   ;; Arrange: a mounted webview on the primary.
   (agent-repl-itest--with-fake-daemon primary
     (agent-repl-itest-host--with-subscription primary ref
@@ -1340,17 +1352,20 @@ was asked for."
                         ((symbol-function 'agent-repl--frontend-getenv) (lambda (_name) nil))
                         ((symbol-function 'agent-repl--frontend-webview-live-widget)
                          (lambda (&rest _) 'fake-widget))
-                        ;; The mount arms the load watcher on whatever the live
+                        ;; The host arms its load watcher on whatever the live
                         ;; widget accessor answers, and the stub widget above is
                         ;; a symbol rather than an xwidget.  The watcher is the
-                        ;; open-progress ladder, not the redial under test.
-                        ((symbol-function 'agent-repl--frontend-watch-load) #'ignore)
-                        ((symbol-function 'agent-repl--frontend-webview-navigate-widget)
-                         (lambda (_widget url) (push url navigated)))
+                        ;; host's replay, not the redial under test.
+                        ((symbol-function 'agent-repl--webhost-watch-load) #'ignore)
+                        ((symbol-function 'agent-repl--frontend-webview-execute-script-value)
+                         (lambda (_widget script _callback)
+                           (when-let ((url (agent-repl-itest-host--ensured-url script)))
+                             (push url navigated))))
                         ((symbol-function 'agent-repl--call-in-background-workspace)
                          (lambda (_ws fn) (funcall fn))))
                 (agent-repl--ws-put agent-repl-itest-host--ws :frontend 'gui)
                 (agent-repl--frontend-precreate-webview agent-repl-itest-host--ws)
+                (setq navigated nil)
                 ;; Act.
                 (agent-repl-itest--push primary "host" '((transferred . ()))
                                         (plist-get ref :id))
@@ -1512,7 +1527,7 @@ the contract, so the assertion needs a second one to leave alone."
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-host--with-two-subscriptions daemon ref-a ref-b
       (let ((reloaded nil))
-        (cl-letf (((symbol-function 'agent-repl-frontend-reload-webview)
+        (cl-letf (((symbol-function 'agent-repl-frontend-reload-webapp)
                    (lambda (ws) (push ws reloaded))))
           ;; Act: A only.  B's own stream is pushed a state afterwards and
           ;; waited for, so a broadcast reload would have been recorded by
@@ -2053,8 +2068,8 @@ daemon that had exited -- the page reported
 `failureArms=[daemonUnreachable]\=' at a url naming the dead port, and the
 only way out was the user reaching for `SPC o l\='.
 
-The observable is the URL the navigate was ASKED FOR, because the widget
-is navigated rather than remounted."
+The observable is the URL the host is asked to hold the page at, because
+the page is re-pointed in the one host web view rather than remounted."
   ;; Arrange: a mounted webview, and a SECOND daemon to come back on.
   (agent-repl-itest--with-fake-daemon primary
     (agent-repl-itest-host--with-subscription primary _ref
@@ -2067,9 +2082,11 @@ is navigated rather than remounted."
                          (lambda () t))
                         ((symbol-function 'agent-repl--frontend-webview-live-widget)
                          (lambda (&rest _) 'fake-widget))
-                        ((symbol-function 'agent-repl--frontend-watch-load) #'ignore)
-                        ((symbol-function 'agent-repl--frontend-webview-navigate-widget)
-                         (lambda (_widget url) (push url navigated)))
+                        ((symbol-function 'agent-repl--webhost-watch-load) #'ignore)
+                        ((symbol-function 'agent-repl--frontend-webview-execute-script-value)
+                         (lambda (_widget script _callback)
+                           (when-let ((url (agent-repl-itest-host--ensured-url script)))
+                             (push url navigated))))
                         ((symbol-function 'agent-repl--call-in-background-workspace)
                          (lambda (_ws fn) (funcall fn))))
                 (agent-repl--ws-put agent-repl-itest-host--ws :frontend 'gui)

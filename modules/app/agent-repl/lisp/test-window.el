@@ -1094,19 +1094,17 @@ next show reads the gate (`agent-repl--frontend-display-webview')."
 (ert-deftest agent-repl-window-test-the-dock-height-is-the-live-input-windows-pixels ()
   "A live input window's total pixel height is the height sent."
   (agent-repl-test--with-clean-state
-    (let ((scripts nil))
+    (let ((docks nil))
       (cl-letf (((symbol-function 'agent-repl-window--panel-window)
                  (lambda (_kind &optional _ws _frame) (selected-window)))
                 ((symbol-function 'window-pixel-height) (lambda (&optional _w) 137))
                 ((symbol-function 'agent-repl-window--input-background) (lambda (_ws) nil))
-                ((symbol-function 'agent-repl--ws-get)
-                 (lambda (_ws key) (and (eq key :frontend-buffer) (current-buffer))))
-                ((symbol-function 'agent-repl--frontend-webview-read-script)
-                 (lambda (_buf script _cb) (push script scripts) t)))
+                ((symbol-function 'agent-repl-webhost-set-gate-dock)
+                 (lambda (_ws pixels _bg) (push pixels docks) t)))
         ;; Act
         (agent-repl-window-tell-gate-dock "ws")
         ;; Assert
-        (should (string-match-p "--gate-dock-height','137px'" (car scripts)))))))
+        (should (equal docks '(137)))))))
 
 (ert-deftest agent-repl-window-test-the-dock-height-without-an-input-window-is-its-mount-height ()
   "With no input window on screen, the height a mount gives it is sent."
@@ -1118,96 +1116,85 @@ next show reads the gate (`agent-repl--frontend-display-webview')."
       ;; Act / Assert
       (should (= 180 (agent-repl-window--gate-dock-pixels "ws"))))))
 
-(ert-deftest agent-repl-window-test-the-dock-height-to-a-page-that-is-not-there-is-recorded ()
-  "No webview to tell is recorded, never an error."
+(ert-deftest agent-repl-window-test-the-dock-height-with-no-host-is-recorded ()
+  "No host to tell is recorded, never an error; the slot is kept for it."
   (agent-repl-test--with-clean-state
     (let ((said nil))
       (cl-letf (((symbol-function 'agent-repl-window--gate-dock-pixels) (lambda (_ws) 10))
                 ((symbol-function 'agent-repl-window--input-background) (lambda (_ws) nil))
-                ((symbol-function 'agent-repl--ws-get) (lambda (_ws _key) nil))
+                ((symbol-function 'agent-repl-webhost-set-gate-dock) (lambda (&rest _) nil))
                 ((symbol-function 'agent-repl--info)
                  (lambda (_ws fmt &rest args) (push (apply #'format fmt args) said))))
         ;; Act
         (agent-repl-window-tell-gate-dock "ws")
         ;; Assert
-        (should (equal said '("elisp.gate.dock-slot-skipped ws=ws reason=no-webview")))))))
+        (should (equal said '("elisp.gate.dock-slot-held ws=ws reason=no-host")))))))
 
-(defmacro agent-repl-window-test--with-told-scripts (background &rest body)
-  "Run BODY with the page's scripts collected in `scripts' and the INFO
-records in `said', the input painting BACKGROUND (nil: no input buffer)."
+(defmacro agent-repl-window-test--with-told-host (background &rest body)
+  "Run BODY with the host's calls collected in `told' and the INFO records
+in `said', the input painting BACKGROUND (nil: no input buffer)."
   (declare (indent 1))
   `(agent-repl-test--with-clean-state
-     (let ((scripts nil)
+     (let ((told nil)
            (said nil))
        (cl-letf (((symbol-function 'agent-repl-window--gate-dock-pixels) (lambda (_ws) 137))
                  ((symbol-function 'agent-repl-window--input-background) (lambda (_ws) ,background))
-                 ((symbol-function 'agent-repl--ws-get)
-                  (lambda (_ws key) (and (eq key :frontend-buffer) (current-buffer))))
-                 ((symbol-function 'agent-repl--frontend-webview-read-script)
-                  (lambda (_buf script _cb) (push script scripts) t))
+                 ((symbol-function 'agent-repl-webhost-set-input-background)
+                  (lambda (ws bg) (push (list :input-background ws bg) told) t))
+                 ((symbol-function 'agent-repl-webhost-set-gate-dock)
+                  (lambda (ws pixels bg) (push (list :gate-dock ws pixels bg) told) t))
                  ((symbol-function 'agent-repl--info)
                   (lambda (_ws fmt &rest args) (push (apply #'format fmt args) said))))
          ,@body))))
 
 (ert-deftest agent-repl-window-test-a-page-load-tells-the-input-background ()
   "The gate's color is told on its own, docked or not."
-  (agent-repl-window-test--with-told-scripts "#14141a"
+  (agent-repl-window-test--with-told-host "#14141a"
     ;; Act
     (agent-repl-window-tell-input-background "ws")
     ;; Assert
-    (should (equal (list "(function(){document.documentElement.style.setProperty('--input-bg',\"#14141a\");return 'ok';})()")
-                   scripts))))
+    (should (equal told '((:input-background "ws" "#14141a"))))))
 
 (ert-deftest agent-repl-window-test-a-page-load-without-an-input-buffer-tells-nothing ()
   "No input buffer, no color to tell: nothing is sent."
-  (agent-repl-window-test--with-told-scripts nil
+  (agent-repl-window-test--with-told-host nil
     ;; Act
     (agent-repl-window-tell-input-background "ws")
     ;; Assert
-    (should-not scripts)))
+    (should-not told)))
 
-(ert-deftest agent-repl-window-test-a-page-load-without-a-webview-is-skipped ()
-  "No live webview: the tell is skipped, and says so."
-  (agent-repl-window-test--with-told-scripts "#14141a"
+(ert-deftest agent-repl-window-test-an-input-background-with-no-host-is-held ()
+  "No host yet: the color is kept for it, and that is recorded."
+  (agent-repl-window-test--with-told-host "#14141a"
     ;; Arrange
     (let ((logged nil))
-      (cl-letf (((symbol-function 'agent-repl--ws-get) (lambda (_ws _key) nil))
+      (cl-letf (((symbol-function 'agent-repl-webhost-set-input-background) (lambda (&rest _) nil))
                 ((symbol-function 'agent-repl--log)
                  (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
         ;; Act
         (agent-repl-window-tell-input-background "ws"))
       ;; Assert
-      (should-not scripts)
-      (should (cl-some (lambda (m) (string-match-p "input-bg-skipped.*no-webview" m)) logged)))))
+      (should (cl-some (lambda (m) (string-match-p "input-bg-held.*no-host" m)) logged)))))
 
 (ert-deftest agent-repl-window-test-the-dock-slot-tells-the-input-background ()
-  "The input's background rides the same script as its height."
-  (agent-repl-window-test--with-told-scripts "#1d1f21"
+  "The input's background rides the same call as its height."
+  (agent-repl-window-test--with-told-host "#1d1f21"
     ;; Act
     (agent-repl-window-tell-gate-dock "ws")
     ;; Assert
-    (should (string-match-p "--input-bg',\"#1d1f21\"" (car scripts)))))
-
-(ert-deftest agent-repl-window-test-the-dock-slot-tells-the-height-in-the-same-script ()
-  "One script carries both, so the page never holds one without the other."
-  (agent-repl-window-test--with-told-scripts "#1d1f21"
-    ;; Act
-    (agent-repl-window-tell-gate-dock "ws")
-    ;; Assert
-    (should (= 1 (length scripts)))
-    (should (string-match-p "--gate-dock-height','137px'" (car scripts)))))
+    (should (equal told '((:gate-dock "ws" 137 "#1d1f21"))))))
 
 (ert-deftest agent-repl-window-test-the-dock-slot-without-an-input-buffer-tells-no-background ()
   "No input buffer to read tells the height alone; the page keeps its own."
-  (agent-repl-window-test--with-told-scripts nil
+  (agent-repl-window-test--with-told-host nil
     ;; Act
     (agent-repl-window-tell-gate-dock "ws")
     ;; Assert
-    (should-not (string-match-p "--input-bg" (car scripts)))))
+    (should (equal told '((:gate-dock "ws" 137 nil))))))
 
 (ert-deftest agent-repl-window-test-the-dock-slot-records-the-background-told ()
   "The told background is on the INFO record."
-  (agent-repl-window-test--with-told-scripts "#1d1f21"
+  (agent-repl-window-test--with-told-host "#1d1f21"
     ;; Act
     (agent-repl-window-tell-gate-dock "ws")
     ;; Assert
@@ -1215,7 +1202,7 @@ records in `said', the input painting BACKGROUND (nil: no input buffer)."
 
 (ert-deftest agent-repl-window-test-the-dock-slot-records-an-untold-background ()
   "A background it could not read is recorded as untold."
-  (agent-repl-window-test--with-told-scripts nil
+  (agent-repl-window-test--with-told-host nil
     ;; Act
     (agent-repl-window-tell-gate-dock "ws")
     ;; Assert

@@ -63,11 +63,20 @@ export function connectToHost(env: EmbedEnv): HostLink | null {
         if (message.background !== null) root.setProperty(DOCK_BACKGROUND_PROPERTY, message.background);
         return;
       case "dismissDigest": {
-        const dismissed = closeStandingNewsDigest(doc);
-        log.debug(dismissed ? "the host closed the standing news digest" : "the host asked to close a news digest none stands", {
-          operation: "page.host-dismiss-digest",
-          context: { dismissed },
-        });
+        // Escape in Emacs's composer (or a sent prompt) closing the digest is
+        // a person's action, recorded at INFO; a page with none standing has
+        // nothing to record above DEBUG.
+        if (closeStandingNewsDigest(doc)) {
+          log.info("escape in Emacs closed the standing news digest", {
+            operation: "page.host-dismissed-digest",
+            context: {},
+          });
+        } else {
+          log.debug("the host asked to close a news digest none stands", {
+            operation: "page.host-dismiss-digest-none",
+            context: {},
+          });
+        }
         return;
       }
     }

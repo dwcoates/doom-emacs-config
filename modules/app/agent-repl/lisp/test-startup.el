@@ -444,15 +444,16 @@ waits, and opens right after tab 1 does."
 ;;;; ---- The page drew its conversation ----
 
 (defmacro agent-repl-test-startup--with-page (reply &rest body)
-  "Run BODY with every page read answering REPLY (a string, or nil for no page).
-`reads' collects the scripts asked; `timers' the re-asks scheduled."
+  "Run BODY with every drawn question to the host answering REPLY.
+REPLY is the host's answer string, or nil for no host to ask.  A workspace's
+ref id is its name.  `reads' collects the questions asked as (METHOD ARGS);
+`timers' the re-asks scheduled."
   (declare (indent 1))
   `(let ((reads nil) (timers nil))
-     (cl-letf (((symbol-function 'agent-repl--ws-get)
-                (lambda (_ws key) (and (eq key :frontend-buffer) (current-buffer))))
-               ((symbol-function 'agent-repl--frontend-webview-read-script)
-                (lambda (_buf script callback)
-                  (push script reads)
+     (cl-letf (((symbol-function 'agent-repl-host-ref) (lambda (ws) (list :id ws)))
+               ((symbol-function 'agent-repl-webhost-read)
+                (lambda (method args callback)
+                  (push (list method args) reads)
                   (when ,reply (funcall callback ,reply))
                   (and ,reply t)))
                ((symbol-function 'run-at-time)
@@ -460,13 +461,13 @@ waits, and opens right after tab 1 does."
        ,@body)))
 
 (ert-deftest agent-repl-test-startup-a-loaded-page-is-asked-whether-it-drew ()
-  "The HTML loading is not the conversation drawn: the page is asked."
+  "The page loading is not the conversation drawn: the host is asked."
   (agent-repl-test-startup--with-run
     (agent-repl-test-startup--with-page nil
       ;; Act
       (agent-repl-startup-note-page-loaded "a")
       ;; Assert
-      (should (string-match-p "data-conversation-drawn" (car reads))))))
+      (should (equal reads '(("drawn" ("a"))))))))
 
 (ert-deftest agent-repl-test-startup-a-page-not-yet-drawn-is-asked-again ()
   "A page whose conversation has not drawn opens nothing and is asked again."
@@ -474,24 +475,58 @@ waits, and opens right after tab 1 does."
     (setq agent-repl-test-startup--known '("a"))
     (agent-repl-startup-handle (agent-repl-test-startup--opening 1))
     (agent-repl-startup-handle (agent-repl-test-startup--go-ahead "a"))
-    (agent-repl-test-startup--with-page "{\"ws\":\"a\",\"drawn\":false}"
+    (agent-repl-test-startup--with-page "{\"op\":\"drawn\",\"id\":\"a\",\"outcome\":\"present\",\"drawn\":null,\"notes\":[]}"
       ;; Act
       (agent-repl-startup-note-page-loaded "a")
       ;; Assert
       (should (null (agent-repl-test-startup--opened)))
       (should (equal timers '((agent-repl-startup--probe "a")))))))
 
+(ert-deftest agent-repl-test-startup-a-queued-question-is-asked-again ()
+  "A question the host queued before its code started is asked again."
+  (agent-repl-test-startup--with-run
+    (setq agent-repl-test-startup--known '("a"))
+    (agent-repl-test-startup--with-page "{\"op\":\"drawn\",\"id\":\"a\",\"outcome\":\"queued\",\"notes\":[]}"
+      ;; Act
+      (agent-repl-startup-note-page-loaded "a")
+      ;; Assert
+      (should (equal timers '((agent-repl-startup--probe "a")))))))
+
 (ert-deftest agent-repl-test-startup-a-drawn-page-opens-its-due-tab ()
-  "The page answering drawn is what opens a tab whose go-ahead is in."
+  "The host answering drawn is what opens a tab whose go-ahead is in."
   (agent-repl-test-startup--with-run
     (setq agent-repl-test-startup--known '("a"))
     (agent-repl-startup-handle (agent-repl-test-startup--opening 1))
     (agent-repl-startup-handle (agent-repl-test-startup--go-ahead "a"))
-    (agent-repl-test-startup--with-page "{\"ws\":\"a\",\"drawn\":true}"
+    (agent-repl-test-startup--with-page "{\"op\":\"drawn\",\"id\":\"a\",\"outcome\":\"present\",\"drawn\":\"page\",\"notes\":[]}"
       ;; Act
       (agent-repl-startup-note-page-loaded "a")
       ;; Assert
       (should (equal (agent-repl-test-startup--opened) '("a"))))))
+
+(ert-deftest agent-repl-test-startup-a-drawn-page-tells-its-open-the-page-is-up ()
+  "The page drawn is the honest report that the page is up."
+  (agent-repl-test-startup--with-run
+    (setq agent-repl-test-startup--known '("a"))
+    (let ((noted nil))
+      (cl-letf (((symbol-function 'agent-repl-open-progress-note-loaded) (lambda (ws) (push ws noted))))
+        (agent-repl-test-startup--with-page "{\"op\":\"drawn\",\"id\":\"a\",\"outcome\":\"present\",\"drawn\":\"page\",\"notes\":[]}"
+          ;; Act
+          (agent-repl-startup-note-page-loaded "a")))
+      ;; Assert
+      (should (equal noted '("a"))))))
+
+(ert-deftest agent-repl-test-startup-no-host-is-recorded-and-asks-nothing ()
+  "With no host yet there is no one to ask; the slot's creation asks later."
+  (agent-repl-test-startup--with-run
+    (let ((said nil))
+      (cl-letf (((symbol-function 'agent-repl--info)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) said))))
+        (agent-repl-test-startup--with-page nil
+          ;; Act
+          (agent-repl-startup-note-page-loaded "a")))
+      ;; Assert
+      (should (member "elisp.startup.probe-skipped ws=a reason=no-host" said)))))
 
 (ert-deftest agent-repl-test-startup-no-page-is-asked-once-the-startup-is-over ()
   "Outside the startup a load asks the page nothing."
