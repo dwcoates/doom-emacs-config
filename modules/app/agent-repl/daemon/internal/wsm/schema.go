@@ -251,7 +251,7 @@ CREATE TABLE drain_schedule (
   deadline INTEGER NOT NULL,
   set_at   INTEGER NOT NULL
 );
-` + feedTextScaleDDL + durableFeedRowsDDL + rolledBackTurnsDDL + newsDigestDDL + newsDigestRedisplayDDL + agentReplSessionDDL + newsDigestHistoryDDL + sidebarViewDDL + accountUsageDDL + accountUsageSeatDDL + revealGapsDDL + mergeProgressDDL + maturityFoldsDDL + revealBurstGapsDDL + revealBlockSpeedsDDL + hiddenWorkspacesDDL + mergeWorkspacesDDL + commitCountDDL + mergeQueueFrontDDL
+` + feedTextScaleDDL + durableFeedRowsDDL + rolledBackTurnsDDL + newsDigestDDL + newsDigestRedisplayDDL + agentReplSessionDDL + newsDigestHistoryDDL + sidebarViewDDL + accountUsageDDL + accountUsageSeatDDL + revealGapsDDL + mergeProgressDDL + maturityFoldsDDL + revealBurstGapsDDL + revealBlockSpeedsDDL + hiddenWorkspacesDDL + mergeWorkspacesDDL + commitCountDDL + mergeQueueFrontDDL + mergeRolloutHoldDDL
 
 // durableFeedRowsDDL is the layout-16 addition: the daemon-synthesized feed
 // rows a NEW DAEMON must draw again (a merge's bubble), each with the order key
@@ -282,6 +282,21 @@ const feedTextScaleDDL = `
 CREATE TABLE feed_text_scale (
   id    INTEGER PRIMARY KEY CHECK (id = 1),
   scale REAL NOT NULL
+);
+`
+
+// mergeRolloutHoldDDL is the layout-37 addition: the operator's daemon-wide
+// HOLD on merge-queue rollouts (UpdateMergeQueue's hold_rollouts). A SINGLETON
+// like drain_schedule, and its ROW IS THE HOLD: present means held, since
+// held_at; absent means landings tell the deploy as they always did. Durable
+// because a hold that a restart or a handover dropped would let the very next
+// landing replace the hand-deployed build the hold exists to keep. Kept apart
+// for the reason feedTextScaleDDL is: a fresh file and the 36 -> 37 migration
+// write the one text.
+const mergeRolloutHoldDDL = `
+CREATE TABLE merge_rollout_hold (
+  id      INTEGER PRIMARY KEY CHECK (id = 1),
+  held_at INTEGER NOT NULL
 );
 `
 

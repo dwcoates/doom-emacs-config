@@ -695,6 +695,25 @@ func TestTheMigrationAddsTheHeldPromptDeliveryColumn(t *testing.T) {
 	}
 }
 
+func TestTheMigrationAddsTheMergeRolloutHoldTable(t *testing.T) {
+	// Arrange -- a file written before a rollout could be held.
+	path := layout3Fixture(t)
+
+	// Act
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
+	if err != nil {
+		t.Fatalf("Open on a layout-3 database: %v", err)
+	}
+	defer handle.Close()
+
+	// Assert
+	got := scalar[int](t, handle.(*store),
+		`SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'merge_rollout_hold'`)
+	if got != 1 {
+		t.Fatalf("merge_rollout_hold exists %d times after the migration, want 1", got)
+	}
+}
+
 func TestTheMigrationAddsTheMergeQueueFrontColumn(t *testing.T) {
 	// Arrange -- a file written before a merge could ask for the front.
 	path := layout3Fixture(t)
