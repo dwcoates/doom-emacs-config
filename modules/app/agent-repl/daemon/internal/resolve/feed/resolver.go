@@ -805,8 +805,22 @@ func (r *resolver) firstRank(s *wsState, f *feedState, id string, at placement) 
 // — except the one that is the conversation happening: a live entry growing
 // its own row (a streamed response, a tool's result), which is DEBUG because
 // it is every frame of every turn.
-func (r *resolver) recordRepublication(s *wsState, f *feedState, id string, rank rowRank) {
+//
+// A REPUBLICATION WITH NO TAIL OPEN IS STILL A PUBLICATION: it takes the next
+// sequence and the retained log replays it to every tail pinned before it. It
+// is recorded at DEBUG with that sequence and the fields that changed, because
+// a reader's tail later opened against an older pin is handed it, and without
+// this record a row re-delivered across the page/tail seam had no evidence of
+// what re-rendered it (TestWatchFeedTailsExactlyAfterTheOpenedPageWithNoGapOrOverlap,
+// 2026-10-12: a tail pinned after 3 replayed a resp-1 published at 4 that no
+// record named).
+func (r *resolver) recordRepublication(s *wsState, f *feedState, id string, rank rowRank, before, after *frontendv1.FeedRow) {
+	seq := f.seq + 1
 	if len(f.subs) == 0 {
+		r.logger(s.id).Debug("daemon.feed.row_republished",
+			"a row already placed changed with no tail open; the retained log replays it to tails pinned before it",
+			dlog.Context{"feed": f.key, "row": id, "key": rank.key, "seq": seq, "plane": s.plane.String(),
+				"live_entry": s.inEntry, "changed": changedFields(before, after)})
 		return
 	}
 	reason := "daemon_restated"
@@ -816,12 +830,13 @@ func (r *resolver) recordRepublication(s *wsState, f *feedState, id string, rank
 	case s.inEntry:
 		r.logger(s.id).Debug("daemon.feed.row_republished",
 			"a live entry updated a row already placed; it was published to the feed's open tails",
-			dlog.Context{"feed": f.key, "row": id, "key": rank.key, "reason": "live_entry", "tails": len(f.subs)})
+			dlog.Context{"feed": f.key, "row": id, "key": rank.key, "seq": seq, "reason": "live_entry", "tails": len(f.subs)})
 		return
 	}
 	r.logger(s.id).Info("daemon.feed.row_republished",
 		"a row already placed was published again to the feed's open tails",
-		dlog.Context{"feed": f.key, "row": id, "key": rank.key, "reason": reason, "plane": s.plane.String(), "tails": len(f.subs)})
+		dlog.Context{"feed": f.key, "row": id, "key": rank.key, "seq": seq, "reason": reason, "plane": s.plane.String(),
+			"tails": len(f.subs), "changed": changedFields(before, after)})
 }
 
 // feedKey renders a feed address as the string this resolver keys by.
@@ -1025,7 +1040,7 @@ func (r *resolver) upsert(s *wsState, at placement, row *frontendv1.FeedRow, dur
 	// belongs without being published, so no tail inserts it ahead of the
 	// page (book.go).
 	if seen && !quiet {
-		r.recordRepublication(s, f, id, rank)
+		r.recordRepublication(s, f, id, rank, existing, snapshot)
 	}
 	if !seen {
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "!seen"})
