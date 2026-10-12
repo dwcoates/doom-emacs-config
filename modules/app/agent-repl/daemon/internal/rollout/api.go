@@ -105,6 +105,9 @@ type Controller interface {
 	// RollingOut reports whether a handover is in flight, and the workspaces it
 	// has not transferred yet.
 	RollingOut() ([]ids.WorkspaceID, bool)
+	// TookOver closes when this daemon has taken over from the daemon it
+	// joined: the edge on which a deploy refused for joining may run.
+	TookOver() <-chan struct{}
 	// ServesIntake reports whether THIS daemon takes the on-disk intakes (the
 	// command-file and held-prompt ingresses): it is not a successor still
 	// joining, and no handover or restart of its own is in flight. See
