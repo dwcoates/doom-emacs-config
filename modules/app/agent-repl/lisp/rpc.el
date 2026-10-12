@@ -67,6 +67,8 @@
 (declare-function agent-repl-wire-editor-focus "wire-host" (focused))
 (declare-function agent-repl--emacs-focused-p "notifications" (&optional ws))
 (declare-function agent-repl-wire-decode-watch-daemon-response "wire-host" (alist))
+(declare-function agent-repl-wire-encode-open-tabs-request "wire-host" (request))
+(declare-function agent-repl-wire-decode-open-tabs-response "wire-host" (alist))
 (declare-function agent-repl-wire-encode-watch-workspace-roster-request "wire-roster" (request))
 (declare-function agent-repl-wire-decode-watch-workspace-roster-response "wire-roster" (alist))
 (declare-function agent-repl-wire-encode-create-workspace-request "wire-verbs" (request))
@@ -567,6 +569,20 @@ daemon-scoped push for hours."
                                             (agent-repl--emacs-focused-p))
                                     :instance (agent-repl-editor-instance))))
    on-push on-close on-open))
+
+(defun agent-repl-rpc-open-tabs (conn workspaces on-push on-close)
+  "Ask CONN's daemon to open WORKSPACES, a list of OpenTabsWorkspace plists.
+Each is `(:workspace REF :page ONEOF)', REF echoed from the roster and the
+page arm `:loading' or `:none'.  ON-PUSH receives each decoded frame (the
+`step' / `opened' / `finished' oneof); the stream ends after `finished'.
+ON-CLOSE receives the transport's outcome, as `agent-repl-connect-stream'
+documents."
+  (agent-repl-rpc--stream
+   conn "OpenTabs"
+   #'agent-repl-wire-encode-open-tabs-request
+   #'agent-repl-wire-decode-open-tabs-response
+   (list :workspaces workspaces)
+   on-push on-close))
 
 (defun agent-repl-editor-instance ()
   "Return THIS Emacs process's identity, as `WatchDaemonEmacs.instance' states it.
