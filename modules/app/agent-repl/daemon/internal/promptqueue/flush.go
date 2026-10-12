@@ -61,7 +61,11 @@ func (q *queue) FlushHeld(ctx context.Context, ws ids.WorkspaceID) error {
 	}
 	sort.SliceStable(queued, func(i, j int) bool { return queued[i].QueuedAt.Before(queued[j].QueuedAt) })
 
-	if why, kept := q.flushKept(ctx, ws, log); kept {
+	why, kept, err := q.flushKept(ctx, ws, log)
+	if err != nil {
+		return err
+	}
+	if kept {
 		log.Info(opFlush, "the held prompts are not flushed; they wait as they would have", dlog.Context{
 			"why": why, "held": len(queued),
 		})
@@ -115,32 +119,33 @@ func (q *queue) FlushHeld(ctx context.Context, ws ids.WorkspaceID) error {
 // flushKept answers why nothing may be flushed now, if something keeps the
 // whole queue: a holding lease, a bounce draining the workspace, a session
 // act running, an interjection under way, or a shim call that opens no turn.
-// The caller holds the delivery lock.
-func (q *queue) flushKept(ctx context.Context, ws ids.WorkspaceID, log dlog.Logger) (string, bool) {
+// The caller holds the delivery lock. An unreadable lease is an error,
+// recorded here.
+func (q *queue) flushKept(ctx context.Context, ws ids.WorkspaceID, log dlog.Logger) (string, bool, error) {
 	lease, held, err := q.deps.DB.Lease(ctx, ws)
 	if err != nil {
 		log.Error(opFlush, "could not read the occupancy lease; nothing is flushed", dlog.Context{"cause": err.Error()})
-		return "the occupancy lease could not be read", true
+		return "", false, fmt.Errorf("flush the held prompts of %q: read the lease: %w", ws, err)
 	}
 	if held && lease.Policy == wsm.PolicyHold {
-		return "a " + holderName(lease.Holder) + " lease holds the workspace's prompts", true
+		return "a " + holderName(lease.Holder) + " lease holds the workspace's prompts", true, nil
 	}
 	if q.isDraining(ws) {
-		return "the workspace is draining for a bounce, so the prompts go to the new shim", true
+		return "the workspace is draining for a bounce, so the prompts go to the new shim", true, nil
 	}
 	if cut, ok := q.runningCut(ws); ok {
-		return "a session act (" + cut.command.String() + ") is the running turn", true
+		return "a session act (" + cut.command.String() + ") is the running turn", true, nil
 	}
 	q.mu.Lock()
 	interrupting := q.stateLocked(ws).interrupting
 	q.mu.Unlock()
 	if interrupting {
-		return "an interjection is interrupting the running turn, and goes first", true
+		return "an interjection is interrupting the running turn, and goes first", true, nil
 	}
 	if call, ok := q.standingCall(ws); ok && !call.opensTurn {
-		return "a shim call (" + call.what + ") that opens no turn is in flight", true
+		return "a shim call (" + call.what + ") that opens no turn is in flight", true, nil
 	}
-	return "", false
+	return "", false, nil
 }
 
 // flushable answers why HELD cannot be flushed, if it cannot.

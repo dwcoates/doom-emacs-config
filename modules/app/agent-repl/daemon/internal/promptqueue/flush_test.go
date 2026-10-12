@@ -254,6 +254,31 @@ func TestAFlushThatCannotReadTheHoldsIsAnErrorRecordedWithItsCause(t *testing.T)
 	}
 }
 
+func TestAFlushThatCannotReadTheLeaseIsAnErrorRecordedWithItsCause(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	queuedBehind(t, h, "t1")
+	h.db.leaseErr = errors.New("the lease table is gone")
+
+	// Act
+	err := h.q.FlushHeld(context.Background(), theWorkspace)
+
+	// Assert
+	if err == nil || !errors.Is(err, h.db.leaseErr) {
+		t.Fatalf("FlushHeld = %v, want the lease read's error", err)
+	}
+	if len(h.sender.joins) != 0 || !stillHeld(t, h, "t1") {
+		t.Fatalf("joins = %v, want nothing sent and t1 still held", h.sender.joins)
+	}
+	found := false
+	for _, r := range h.log.Records() {
+		found = found || (r.Level == dlog.LevelError && r.Operation == opFlush && r.Context["cause"] == "the lease table is gone")
+	}
+	if !found {
+		t.Fatalf("records = %+v, want the failed lease read at error with its cause", h.log.Records())
+	}
+}
+
 func TestAFlushSupersedesAVerdictStillBeingJudgedAboutAFlushedPrompt(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
