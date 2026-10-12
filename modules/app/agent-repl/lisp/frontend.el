@@ -112,6 +112,7 @@
 (declare-function xwidget-webkit-get-selection "xwidget" (proc))
 (declare-function xwidget-webkit-execute-script "xwidget" (xwidget script &optional callback))
 (declare-function xwidget-webkit-uri "xwidget.c" (xwidget))
+(declare-function xwidget-webkit-mode "xwidget" ())
 (declare-function xwidget-at "xwidget" (pos))
 (declare-function xwidget-live-p "xwidget" (xwidget))
 (declare-function get-buffer-xwidgets "xwidget.c" (buffer))
@@ -245,6 +246,10 @@ slot shows the host.  No native view is created: the host's one web view is
 displayed, which is what makes a workspace's buffer free to create."
   (let ((buf (generate-new-buffer name)))
     (with-current-buffer buf
+      ;; The same major mode a web view's own buffer has, so every key the
+      ;; page forwards to Emacs meets the bindings it always met there.
+      (when (agent-repl--frontend-xwidget-available-p)
+        (xwidget-webkit-mode))
       (let ((inhibit-read-only t))
         (insert (propertize "*" 'display (list 'xwidget :xwidget xw))))
       (setq buffer-read-only t)

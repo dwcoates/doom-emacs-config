@@ -220,6 +220,19 @@ test is the mount's own binding of the slot to its workspace."
         (should (equal (get-text-property 1 'display slot) '(xwidget :xwidget host-xwidget)))
       (kill-buffer slot))))
 
+(ert-deftest agent-repl-test-frontend-a-slot-takes-the-web-view-mode ()
+  "A slot meets forwarded keys with the bindings a web view's buffer had."
+  ;; Arrange
+  (let (moded)
+    (cl-letf (((symbol-function 'agent-repl--frontend-xwidget-available-p) (lambda () t))
+              ((symbol-function 'xwidget-webkit-mode) (lambda () (setq moded (current-buffer)))))
+      ;; Act
+      (let ((slot (agent-repl--frontend-make-slot-buffer "*test-slot*" 'host-xwidget)))
+        (unwind-protect
+            ;; Assert
+            (should (eq moded slot))
+          (kill-buffer slot))))))
+
 (ert-deftest agent-repl-test-frontend-a-slot-is-read-only ()
   "Nothing types into a slot."
   ;; Act
