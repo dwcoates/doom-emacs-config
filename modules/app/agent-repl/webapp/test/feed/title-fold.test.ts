@@ -25,6 +25,7 @@ import { fireResize } from "../resize-observer.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import { measureTitle } from "./title-measure.js";
 import { codeOf } from "../source-text.js";
+import { pagedRowContext } from "./harness.js";
 
 /** A connected `.tool-card.tool-fold` holding one card-owned title. */
 function toolFoldTitle(overflow: boolean): { card: HTMLElement; title: HTMLElement } {
@@ -34,7 +35,7 @@ function toolFoldTitle(overflow: boolean): { card: HTMLElement; title: HTMLEleme
   title.className = "cmd bash-input";
   card.append(title);
   document.body.append(card);
-  foldTitle(title, "card");
+  foldTitle(title, "card", pagedRowContext());
   measureTitle(title, overflow);
   return { card, title };
 }
@@ -53,7 +54,7 @@ function bubbleFoldTitle(): { bubble: HTMLElement; title: HTMLElement; panel: HT
   panel.className = "agent-panel bubble-subfeed";
   bubble.append(head, panel);
   document.body.append(bubble);
-  foldTitle(title, "card");
+  foldTitle(title, "card", pagedRowContext());
   measureTitle(title, true);
   return { bubble, title, panel };
 }
@@ -64,7 +65,7 @@ describe("foldTitle: the marking", () => {
     const title = document.createElement("span");
 
     // Act
-    foldTitle(title, "card");
+    foldTitle(title, "card", pagedRowContext());
 
     // Assert
     expect([...title.classList]).toEqual([TITLE_FOLD_CLASS]);
@@ -75,7 +76,7 @@ describe("foldTitle: the marking", () => {
     const title = document.createElement("span");
 
     // Act
-    foldTitle(title, "standalone");
+    foldTitle(title, "standalone", pagedRowContext());
 
     // Assert
     expect([...title.classList]).toEqual([TITLE_FOLD_CLASS, TITLE_FOLD_STANDALONE_CLASS]);
@@ -86,7 +87,7 @@ describe("foldTitle: the marking", () => {
     const title = document.createElement("span");
 
     // Act / Assert
-    expect(foldTitle(title, "card")).toBe(title);
+    expect(foldTitle(title, "card", pagedRowContext())).toBe(title);
   });
 
   it("makes a standalone title a click-to-expand section of expand.ts", () => {
@@ -178,7 +179,7 @@ describe("the measurement: has-more follows overflow and the owner's fold", () =
     // Arrange
     const title = document.createElement("span");
     document.body.append(title);
-    foldTitle(title, "standalone");
+    foldTitle(title, "standalone", pagedRowContext());
     measureTitle(title, true);
     fireResize(title);
     title.classList.add(EXPANDED_CLASS);
@@ -220,7 +221,7 @@ describe("refreshTitleFolds: a toggle re-measures the titles it owns", () => {
     // Arrange
     const title = document.createElement("span");
     document.body.append(title);
-    foldTitle(title, "standalone");
+    foldTitle(title, "standalone", pagedRowContext());
     measureTitle(title, true);
 
     // Act
@@ -251,7 +252,7 @@ describe("the error paths, logged through the canonical logger", () => {
     const title = orphanDoc.createElement("span");
 
     // Act
-    foldTitle(title, "card");
+    foldTitle(title, "card", pagedRowContext());
 
     // Assert
     const record = await forwardedRecord(capture, "feed.title-fold.unmeasured");
@@ -264,7 +265,7 @@ describe("the error paths, logged through the canonical logger", () => {
     const title = document.implementation.createHTMLDocument("no-view").createElement("span");
 
     // Act
-    foldTitle(title, "card");
+    foldTitle(title, "card", pagedRowContext());
 
     // Assert
     expect(title.classList.contains(TITLE_FOLD_CLASS)).toBe(true);
@@ -275,7 +276,7 @@ describe("the error paths, logged through the canonical logger", () => {
     const capture = captureLogRecords();
     const title = document.createElement("span");
     document.body.append(title);
-    foldTitle(title, "card");
+    foldTitle(title, "card", pagedRowContext());
     measureTitle(title, true);
 
     // Act
@@ -291,7 +292,7 @@ describe("the error paths, logged through the canonical logger", () => {
     const capture = captureLogRecords();
     const title = document.createElement("span");
     document.body.append(title);
-    foldTitle(title, "card");
+    foldTitle(title, "card", pagedRowContext());
     measureTitle(title, false);
 
     // Act
@@ -308,7 +309,7 @@ describe("the error paths, logged through the canonical logger", () => {
     const capture = captureLogRecords();
     const title = document.createElement("span");
     document.body.append(title);
-    foldTitle(title, "standalone");
+    foldTitle(title, "standalone", pagedRowContext());
     measureTitle(title, true);
 
     // Act

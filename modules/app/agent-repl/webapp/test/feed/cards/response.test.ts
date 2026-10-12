@@ -76,6 +76,7 @@ function rowContext(previous?: HTMLElement, seen: PageSeen = fakePageSeen()): Ro
       composerEnabled: false,
     }),
     feed: "root",
+    arrival: "page",
     row: create(FeedRowSchema, { id: create(FeedIdSchema, { value: "row-1" }), order: orderFor("row-1") }),
     revealRow: async () => true,
     previous,

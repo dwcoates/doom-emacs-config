@@ -606,6 +606,7 @@ function unalteredPermission(answer: AnswerPermissionResponse): {
         composerEnabled: false,
       }),
       feed: "root",
+      arrival: "page",
       row: create(FeedRowSchema, { id: create(FeedIdSchema, { value: ROW_ID }), order: orderFor(ROW_ID) }),
       revealRow: async () => false,
     },

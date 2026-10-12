@@ -36,6 +36,8 @@
  * as the final step of its draw.
  */
 import { log } from "../log.js";
+import type { RowContext } from "./cards/context.js";
+import { revealTitle } from "./title-reveal.js";
 import {
   TITLE_FOLD_CLASS,
   TITLE_FOLD_OPEN_SELECTOR,
@@ -60,11 +62,13 @@ const reportedOrphans = new WeakSet<Element>();
 
 /**
  * Mark TITLE as a one-line title fold owned by OWNER, arm the overflow
- * measurement that puts `has-more` on it, and hand it back.
+ * measurement that puts `has-more` on it, type it out when RC's row is new to
+ * a reader (title-reveal.ts), and hand it back.
  */
-export function foldTitle(title: HTMLElement, owner: TitleFoldOwner): HTMLElement {
+export function foldTitle(title: HTMLElement, owner: TitleFoldOwner, rc: RowContext): HTMLElement {
   title.classList.add(TITLE_FOLD_CLASS);
   if (owner === "standalone") title.classList.add(TITLE_FOLD_STANDALONE_CLASS);
+  revealTitle(title, rc);
   log.debug("folding a card title to one line", {
     operation: "feed.title-fold",
     context: { owner, element: title.className },

@@ -48,6 +48,7 @@ import {
   toolCallRow,
   userPromptRow,
   type Harness,
+  pagedRowContext,
 } from "./harness.js";
 import { fireResize } from "../resize-observer.js";
 import {
@@ -2292,7 +2293,7 @@ describe("mountFeed: a card toggle re-measures the titles it owns", () => {
     card.className = "tool-card tool-fold";
     const title = document.createElement("pre");
     title.className = "cmd bash-input";
-    card.append(foldTitle(title, "card"));
+    card.append(foldTitle(title, "card", pagedRowContext()));
     const row = document.createElement("article");
     row.setAttribute("data-feed-row", "row-1");
     row.append(card);
