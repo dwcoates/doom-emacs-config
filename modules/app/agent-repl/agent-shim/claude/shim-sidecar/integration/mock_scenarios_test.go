@@ -78,10 +78,81 @@ type mockScenario struct {
 	Blocked string
 }
 
-// TestMockScenarios drives every scenario the mocked vendor declares.
-func TestMockScenarios(t *testing.T) {
-	t.Parallel()
+// mockScenarioShards is how many top-level tests the scenario table is split
+// across. The test runner splits a package by TOP-LEVEL test and runs each
+// chunk with -test.parallel=1, so a table held in ONE top-level test runs its
+// rows one after another however they are marked parallel: 133 rows of four
+// real processes each made the single longest unit of a full run (131s alone,
+// against 29s with eight rows overlapping). Splitting the table into shards
+// hands that parallelism to the runner, which places the shards across its
+// slots. Every row still runs exactly once: row i belongs to shard i % N.
+const mockScenarioShards = 8
+
+// mockScenarioShardTests is every shard's top-level test, so
+// TestEveryMockScenarioShardIsDeclared can hold the declared shards to
+// mockScenarioShards: a shard counted but never declared would drop its rows
+// from the run without a word.
+var mockScenarioShardTests = []func(*testing.T){
+	TestMockScenariosShard0, TestMockScenariosShard1, TestMockScenariosShard2, TestMockScenariosShard3,
+	TestMockScenariosShard4, TestMockScenariosShard5, TestMockScenariosShard6, TestMockScenariosShard7,
+}
+
+// TestMockScenariosShardN each drive their share of every scenario the mocked
+// vendor declares.
+func TestMockScenariosShard0(t *testing.T) { runMockScenarioShard(t, 0) }
+func TestMockScenariosShard1(t *testing.T) { runMockScenarioShard(t, 1) }
+func TestMockScenariosShard2(t *testing.T) { runMockScenarioShard(t, 2) }
+func TestMockScenariosShard3(t *testing.T) { runMockScenarioShard(t, 3) }
+func TestMockScenariosShard4(t *testing.T) { runMockScenarioShard(t, 4) }
+func TestMockScenariosShard5(t *testing.T) { runMockScenarioShard(t, 5) }
+func TestMockScenariosShard6(t *testing.T) { runMockScenarioShard(t, 6) }
+func TestMockScenariosShard7(t *testing.T) { runMockScenarioShard(t, 7) }
+
+func TestEveryMockScenarioShardIsDeclared(t *testing.T) {
+	// Arrange, Act.
+	declared := len(mockScenarioShardTests)
+
+	// Assert.
+	if declared != mockScenarioShards {
+		t.Fatalf("%d shard tests are declared for %d shards; rows of the undeclared shards would never run", declared, mockScenarioShards)
+	}
+}
+
+// mockScenarioRowsOf is the rows shard runs: every row whose index is shard
+// modulo mockScenarioShards.
+func mockScenarioRowsOf(shard int) []mockScenario {
+	var rows []mockScenario
+	for i, tc := range mockScenarios {
+		if i%mockScenarioShards == shard {
+			rows = append(rows, tc)
+		}
+	}
+	return rows
+}
+
+func TestEveryMockScenarioRowBelongsToExactlyOneShard(t *testing.T) {
+	// Arrange.
+	seen := map[string]int{}
+
+	// Act.
+	for shard := range mockScenarioShards {
+		for _, tc := range mockScenarioRowsOf(shard) {
+			seen[tc.Prompt]++
+		}
+	}
+
+	// Assert.
 	for _, tc := range mockScenarios {
+		if seen[tc.Prompt] != 1 {
+			t.Errorf("row %s runs in %d shards, want exactly 1", tc.Prompt, seen[tc.Prompt])
+		}
+	}
+}
+
+// runMockScenarioShard drives one shard's rows.
+func runMockScenarioShard(t *testing.T, shard int) {
+	t.Parallel()
+	for _, tc := range mockScenarioRowsOf(shard) {
 		t.Run(tc.Prompt, func(t *testing.T) {
 			// EACH ROW IS ITS OWN FOUR PROCESSES OVER ITS OWN t.TempDir()
 			// trees and its own randomly-named sockets, so no row can observe
