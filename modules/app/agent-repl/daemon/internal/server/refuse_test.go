@@ -139,6 +139,7 @@ func TestAsRefusalNormalizesEveryComponentSentinel(t *testing.T) {
 		{"nothing scheduled", drain.ErrNothingScheduled, "nothing_scheduled"},
 		{"no transfer announced", rollout.ErrNoTransferAnnounced, "no_transfer_announced"},
 		{"not yet adopted", rollout.ErrNotYetAdopted, "not_yet_adopted"},
+		{"a refused mid-work adoption", fmt.Errorf("rollout: adopt %q: %w", "w1", rollout.ErrMidWorkRefused), "transfer_deferred"},
 		{"participant not expected", rollout.ErrParticipantNotExpected, "participant_not_expected"},
 		{"moved away by a sealed handover move", fmt.Errorf("restart %q: %w", "w1", bounce.ErrMovedAway), "transferring_away"},
 	}

@@ -27,7 +27,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_adopt_host_workspace.proto.
  */
 export const file_agentrepl_v1_endpoint_adopt_host_workspace: GenFile = /*@__PURE__*/
-  fileDesc("CjBhZ2VudHJlcGwvdjEvZW5kcG9pbnRfYWRvcHRfaG9zdF93b3Jrc3BhY2UucHJvdG8SDGFnZW50cmVwbC52MSJKChlBZG9wdEhvc3RXb3Jrc3BhY2VSZXF1ZXN0Ei0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYimgEKGkFkb3B0SG9zdFdvcmtzcGFjZVJlc3BvbnNlEjoKB3N1Y2Nlc3MYASABKAsyJy5hZ2VudHJlcGwudjEuQWRvcHRIb3N0V29ya3NwYWNlU3VjY2Vzc0gAEjYKBWVycm9yGAIgASgLMiUuYWdlbnRyZXBsLnYxLkFkb3B0SG9zdFdvcmtzcGFjZUVycm9ySABCCAoGcmVzdWx0IhsKGUFkb3B0SG9zdFdvcmtzcGFjZVN1Y2Nlc3MilAQKF0Fkb3B0SG9zdFdvcmtzcGFjZUVycm9yEk0KEXVua25vd25fd29ya3NwYWNlGAEgASgLMjAuYWdlbnRyZXBsLnYxLkFkb3B0SG9zdFdvcmtzcGFjZVVua25vd25Xb3Jrc3BhY2VIABJWChZ3b3Jrc3BhY2VfcmVmX21pc21hdGNoGAIgASgLMjQuYWdlbnRyZXBsLnYxLkFkb3B0SG9zdFdvcmtzcGFjZVdvcmtzcGFjZVJlZk1pc21hdGNoSAASTQoRdHJhbnNmZXJyaW5nX2F3YXkYAyABKAsyMC5hZ2VudHJlcGwudjEuQWRvcHRIb3N0V29ya3NwYWNlVHJhbnNmZXJyaW5nQXdheUgAEkgKD25vdF95ZXRfYWRvcHRlZBgEIAEoCzItLmFnZW50cmVwbC52MS5BZG9wdEhvc3RXb3Jrc3BhY2VOb3RZZXRBZG9wdGVkSAASVAoVbm9fdHJhbnNmZXJfYW5ub3VuY2VkGAUgASgLMjMuYWdlbnRyZXBsLnYxLkFkb3B0SG9zdFdvcmtzcGFjZU5vVHJhbnNmZXJBbm5vdW5jZWRIABJaChhwYXJ0aWNpcGFudF9ub3RfZXhwZWN0ZWQYBiABKAsyNi5hZ2VudHJlcGwudjEuQWRvcHRIb3N0V29ya3NwYWNlUGFydGljaXBhbnROb3RFeHBlY3RlZEgAQgcKBWNhdXNlIiQKIkFkb3B0SG9zdFdvcmtzcGFjZVVua25vd25Xb3Jrc3BhY2UiPgomQWRvcHRIb3N0V29ya3NwYWNlV29ya3NwYWNlUmVmTWlzbWF0Y2gSFAoMcmVnaXN0cnlfZGlyGAEgASgJIjUKIkFkb3B0SG9zdFdvcmtzcGFjZVRyYW5zZmVycmluZ0F3YXkSDwoHYWRkcmVzcxgBIAEoCSIhCh9BZG9wdEhvc3RXb3Jrc3BhY2VOb3RZZXRBZG9wdGVkIicKJUFkb3B0SG9zdFdvcmtzcGFjZU5vVHJhbnNmZXJBbm5vdW5jZWQiKgooQWRvcHRIb3N0V29ya3NwYWNlUGFydGljaXBhbnROb3RFeHBlY3RlZEIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_workspace_v1_workspace]);
+  fileDesc("CjBhZ2VudHJlcGwvdjEvZW5kcG9pbnRfYWRvcHRfaG9zdF93b3Jrc3BhY2UucHJvdG8SDGFnZW50cmVwbC52MSJKChlBZG9wdEhvc3RXb3Jrc3BhY2VSZXF1ZXN0Ei0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYimgEKGkFkb3B0SG9zdFdvcmtzcGFjZVJlc3BvbnNlEjoKB3N1Y2Nlc3MYASABKAsyJy5hZ2VudHJlcGwudjEuQWRvcHRIb3N0V29ya3NwYWNlU3VjY2Vzc0gAEjYKBWVycm9yGAIgASgLMiUuYWdlbnRyZXBsLnYxLkFkb3B0SG9zdFdvcmtzcGFjZUVycm9ySABCCAoGcmVzdWx0IhsKGUFkb3B0SG9zdFdvcmtzcGFjZVN1Y2Nlc3Mi4wQKF0Fkb3B0SG9zdFdvcmtzcGFjZUVycm9yEk0KEXVua25vd25fd29ya3NwYWNlGAEgASgLMjAuYWdlbnRyZXBsLnYxLkFkb3B0SG9zdFdvcmtzcGFjZVVua25vd25Xb3Jrc3BhY2VIABJWChZ3b3Jrc3BhY2VfcmVmX21pc21hdGNoGAIgASgLMjQuYWdlbnRyZXBsLnYxLkFkb3B0SG9zdFdvcmtzcGFjZVdvcmtzcGFjZVJlZk1pc21hdGNoSAASTQoRdHJhbnNmZXJyaW5nX2F3YXkYAyABKAsyMC5hZ2VudHJlcGwudjEuQWRvcHRIb3N0V29ya3NwYWNlVHJhbnNmZXJyaW5nQXdheUgAEkgKD25vdF95ZXRfYWRvcHRlZBgEIAEoCzItLmFnZW50cmVwbC52MS5BZG9wdEhvc3RXb3Jrc3BhY2VOb3RZZXRBZG9wdGVkSAASVAoVbm9fdHJhbnNmZXJfYW5ub3VuY2VkGAUgASgLMjMuYWdlbnRyZXBsLnYxLkFkb3B0SG9zdFdvcmtzcGFjZU5vVHJhbnNmZXJBbm5vdW5jZWRIABJaChhwYXJ0aWNpcGFudF9ub3RfZXhwZWN0ZWQYBiABKAsyNi5hZ2VudHJlcGwudjEuQWRvcHRIb3N0V29ya3NwYWNlUGFydGljaXBhbnROb3RFeHBlY3RlZEgAEk0KEXRyYW5zZmVyX2RlZmVycmVkGAcgASgLMjAuYWdlbnRyZXBsLnYxLkFkb3B0SG9zdFdvcmtzcGFjZVRyYW5zZmVyRGVmZXJyZWRIAEIHCgVjYXVzZSIkCiJBZG9wdEhvc3RXb3Jrc3BhY2VVbmtub3duV29ya3NwYWNlIj4KJkFkb3B0SG9zdFdvcmtzcGFjZVdvcmtzcGFjZVJlZk1pc21hdGNoEhQKDHJlZ2lzdHJ5X2RpchgBIAEoCSI1CiJBZG9wdEhvc3RXb3Jrc3BhY2VUcmFuc2ZlcnJpbmdBd2F5Eg8KB2FkZHJlc3MYASABKAkiIQofQWRvcHRIb3N0V29ya3NwYWNlTm90WWV0QWRvcHRlZCInCiVBZG9wdEhvc3RXb3Jrc3BhY2VOb1RyYW5zZmVyQW5ub3VuY2VkIioKKEFkb3B0SG9zdFdvcmtzcGFjZVBhcnRpY2lwYW50Tm90RXhwZWN0ZWQiJAoiQWRvcHRIb3N0V29ya3NwYWNlVHJhbnNmZXJEZWZlcnJlZEIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.AdoptHostWorkspaceRequest
@@ -152,6 +152,17 @@ export type AdoptHostWorkspaceError = Message<"agentrepl.v1.AdoptHostWorkspaceEr
      */
     value: AdoptHostWorkspaceParticipantNotExpected;
     case: "participantNotExpected";
+  } | {
+    /**
+     * This daemon refused to adopt the workspace mid-work, so the incumbent
+     * took it back and keeps serving it until it is free. Nothing will change
+     * here until then: the caller stays on the incumbent and adopts again
+     * only when the incumbent pushes a NEW `transferred` for this workspace.
+     *
+     * @generated from field: agentrepl.v1.AdoptHostWorkspaceTransferDeferred transfer_deferred = 7;
+     */
+    value: AdoptHostWorkspaceTransferDeferred;
+    case: "transferDeferred";
   } | { case: undefined; value?: undefined };
 };
 
@@ -251,4 +262,23 @@ export type AdoptHostWorkspaceParticipantNotExpected = Message<"agentrepl.v1.Ado
  */
 export const AdoptHostWorkspaceParticipantNotExpectedSchema: GenMessage<AdoptHostWorkspaceParticipantNotExpected> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_adopt_host_workspace, 9);
+
+/**
+ * The successor refused a mid-work adoption and the incumbent serves the
+ * workspace until it is free; it carries nothing because the incumbent's next
+ * `transferred` push, not this answer, says when and where to adopt. Distinct
+ * from `not_yet_adopted`, which means a rendezvous still under way and is
+ * retried.
+ *
+ * @generated from message agentrepl.v1.AdoptHostWorkspaceTransferDeferred
+ */
+export type AdoptHostWorkspaceTransferDeferred = Message<"agentrepl.v1.AdoptHostWorkspaceTransferDeferred"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.AdoptHostWorkspaceTransferDeferred.
+ * Use `create(AdoptHostWorkspaceTransferDeferredSchema)` to create a new message.
+ */
+export const AdoptHostWorkspaceTransferDeferredSchema: GenMessage<AdoptHostWorkspaceTransferDeferred> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_adopt_host_workspace, 10);
 

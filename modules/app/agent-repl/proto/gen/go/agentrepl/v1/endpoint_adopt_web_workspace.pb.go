@@ -206,6 +206,7 @@ type AdoptWebWorkspaceError struct {
 	//	*AdoptWebWorkspaceError_NotYetAdopted
 	//	*AdoptWebWorkspaceError_NoTransferAnnounced
 	//	*AdoptWebWorkspaceError_ParticipantNotExpected
+	//	*AdoptWebWorkspaceError_TransferDeferred
 	Cause         isAdoptWebWorkspaceError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -302,6 +303,15 @@ func (x *AdoptWebWorkspaceError) GetParticipantNotExpected() *AdoptWebWorkspaceP
 	return nil
 }
 
+func (x *AdoptWebWorkspaceError) GetTransferDeferred() *AdoptWebWorkspaceTransferDeferred {
+	if x != nil {
+		if x, ok := x.Cause.(*AdoptWebWorkspaceError_TransferDeferred); ok {
+			return x.TransferDeferred
+		}
+	}
+	return nil
+}
+
 type isAdoptWebWorkspaceError_Cause interface {
 	isAdoptWebWorkspaceError_Cause()
 }
@@ -336,6 +346,14 @@ type AdoptWebWorkspaceError_ParticipantNotExpected struct {
 	ParticipantNotExpected *AdoptWebWorkspaceParticipantNotExpected `protobuf:"bytes,6,opt,name=participant_not_expected,json=participantNotExpected,proto3,oneof"`
 }
 
+type AdoptWebWorkspaceError_TransferDeferred struct {
+	// This daemon refused to adopt the workspace mid-work, so the incumbent
+	// took it back and keeps serving it until it is free. Nothing will change
+	// here until then: the caller stays on the incumbent and adopts again
+	// only when the incumbent pushes a NEW `transferred` for this workspace.
+	TransferDeferred *AdoptWebWorkspaceTransferDeferred `protobuf:"bytes,7,opt,name=transfer_deferred,json=transferDeferred,proto3,oneof"`
+}
+
 func (*AdoptWebWorkspaceError_UnknownWorkspace) isAdoptWebWorkspaceError_Cause() {}
 
 func (*AdoptWebWorkspaceError_WorkspaceRefMismatch) isAdoptWebWorkspaceError_Cause() {}
@@ -347,6 +365,8 @@ func (*AdoptWebWorkspaceError_NotYetAdopted) isAdoptWebWorkspaceError_Cause() {}
 func (*AdoptWebWorkspaceError_NoTransferAnnounced) isAdoptWebWorkspaceError_Cause() {}
 
 func (*AdoptWebWorkspaceError_ParticipantNotExpected) isAdoptWebWorkspaceError_Cause() {}
+
+func (*AdoptWebWorkspaceError_TransferDeferred) isAdoptWebWorkspaceError_Cause() {}
 
 type AdoptWebWorkspaceUnknownWorkspace struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -582,6 +602,47 @@ func (*AdoptWebWorkspaceParticipantNotExpected) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_adopt_web_workspace_proto_rawDescGZIP(), []int{9}
 }
 
+// The successor refused a mid-work adoption and the incumbent serves the
+// workspace until it is free; it carries nothing because the incumbent's next
+// `transferred` push, not this answer, says when and where to adopt. Distinct
+// from `not_yet_adopted`, which means a rendezvous still under way and is
+// retried.
+type AdoptWebWorkspaceTransferDeferred struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AdoptWebWorkspaceTransferDeferred) Reset() {
+	*x = AdoptWebWorkspaceTransferDeferred{}
+	mi := &file_agentrepl_v1_endpoint_adopt_web_workspace_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AdoptWebWorkspaceTransferDeferred) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AdoptWebWorkspaceTransferDeferred) ProtoMessage() {}
+
+func (x *AdoptWebWorkspaceTransferDeferred) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_adopt_web_workspace_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AdoptWebWorkspaceTransferDeferred.ProtoReflect.Descriptor instead.
+func (*AdoptWebWorkspaceTransferDeferred) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_adopt_web_workspace_proto_rawDescGZIP(), []int{10}
+}
+
 var File_agentrepl_v1_endpoint_adopt_web_workspace_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_adopt_web_workspace_proto_rawDesc = "" +
@@ -593,14 +654,15 @@ const file_agentrepl_v1_endpoint_adopt_web_workspace_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\v2&.agentrepl.v1.AdoptWebWorkspaceSuccessH\x00R\asuccess\x12<\n" +
 	"\x05error\x18\x02 \x01(\v2$.agentrepl.v1.AdoptWebWorkspaceErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"\x1a\n" +
-	"\x18AdoptWebWorkspaceSuccess\"\x83\x05\n" +
+	"\x18AdoptWebWorkspaceSuccess\"\xe3\x05\n" +
 	"\x16AdoptWebWorkspaceError\x12^\n" +
 	"\x11unknown_workspace\x18\x01 \x01(\v2/.agentrepl.v1.AdoptWebWorkspaceUnknownWorkspaceH\x00R\x10unknownWorkspace\x12k\n" +
 	"\x16workspace_ref_mismatch\x18\x02 \x01(\v23.agentrepl.v1.AdoptWebWorkspaceWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12^\n" +
 	"\x11transferring_away\x18\x03 \x01(\v2/.agentrepl.v1.AdoptWebWorkspaceTransferringAwayH\x00R\x10transferringAway\x12V\n" +
 	"\x0fnot_yet_adopted\x18\x04 \x01(\v2,.agentrepl.v1.AdoptWebWorkspaceNotYetAdoptedH\x00R\rnotYetAdopted\x12h\n" +
 	"\x15no_transfer_announced\x18\x05 \x01(\v22.agentrepl.v1.AdoptWebWorkspaceNoTransferAnnouncedH\x00R\x13noTransferAnnounced\x12q\n" +
-	"\x18participant_not_expected\x18\x06 \x01(\v25.agentrepl.v1.AdoptWebWorkspaceParticipantNotExpectedH\x00R\x16participantNotExpectedB\a\n" +
+	"\x18participant_not_expected\x18\x06 \x01(\v25.agentrepl.v1.AdoptWebWorkspaceParticipantNotExpectedH\x00R\x16participantNotExpected\x12^\n" +
+	"\x11transfer_deferred\x18\a \x01(\v2/.agentrepl.v1.AdoptWebWorkspaceTransferDeferredH\x00R\x10transferDeferredB\a\n" +
 	"\x05cause\"#\n" +
 	"!AdoptWebWorkspaceUnknownWorkspace\"J\n" +
 	"%AdoptWebWorkspaceWorkspaceRefMismatch\x12!\n" +
@@ -609,7 +671,8 @@ const file_agentrepl_v1_endpoint_adopt_web_workspace_proto_rawDesc = "" +
 	"\aaddress\x18\x01 \x01(\tR\aaddress\" \n" +
 	"\x1eAdoptWebWorkspaceNotYetAdopted\"&\n" +
 	"$AdoptWebWorkspaceNoTransferAnnounced\")\n" +
-	"'AdoptWebWorkspaceParticipantNotExpectedB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"'AdoptWebWorkspaceParticipantNotExpected\"#\n" +
+	"!AdoptWebWorkspaceTransferDeferredB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_adopt_web_workspace_proto_rawDescOnce sync.Once
@@ -623,7 +686,7 @@ func file_agentrepl_v1_endpoint_adopt_web_workspace_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_adopt_web_workspace_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_adopt_web_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
+var file_agentrepl_v1_endpoint_adopt_web_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
 var file_agentrepl_v1_endpoint_adopt_web_workspace_proto_goTypes = []any{
 	(*AdoptWebWorkspaceRequest)(nil),                // 0: agentrepl.v1.AdoptWebWorkspaceRequest
 	(*AdoptWebWorkspaceResponse)(nil),               // 1: agentrepl.v1.AdoptWebWorkspaceResponse
@@ -635,10 +698,11 @@ var file_agentrepl_v1_endpoint_adopt_web_workspace_proto_goTypes = []any{
 	(*AdoptWebWorkspaceNotYetAdopted)(nil),          // 7: agentrepl.v1.AdoptWebWorkspaceNotYetAdopted
 	(*AdoptWebWorkspaceNoTransferAnnounced)(nil),    // 8: agentrepl.v1.AdoptWebWorkspaceNoTransferAnnounced
 	(*AdoptWebWorkspaceParticipantNotExpected)(nil), // 9: agentrepl.v1.AdoptWebWorkspaceParticipantNotExpected
-	(*v1.WorkspaceRef)(nil),                         // 10: workspace.v1.WorkspaceRef
+	(*AdoptWebWorkspaceTransferDeferred)(nil),       // 10: agentrepl.v1.AdoptWebWorkspaceTransferDeferred
+	(*v1.WorkspaceRef)(nil),                         // 11: workspace.v1.WorkspaceRef
 }
 var file_agentrepl_v1_endpoint_adopt_web_workspace_proto_depIdxs = []int32{
-	10, // 0: agentrepl.v1.AdoptWebWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	11, // 0: agentrepl.v1.AdoptWebWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
 	2,  // 1: agentrepl.v1.AdoptWebWorkspaceResponse.success:type_name -> agentrepl.v1.AdoptWebWorkspaceSuccess
 	3,  // 2: agentrepl.v1.AdoptWebWorkspaceResponse.error:type_name -> agentrepl.v1.AdoptWebWorkspaceError
 	4,  // 3: agentrepl.v1.AdoptWebWorkspaceError.unknown_workspace:type_name -> agentrepl.v1.AdoptWebWorkspaceUnknownWorkspace
@@ -647,11 +711,12 @@ var file_agentrepl_v1_endpoint_adopt_web_workspace_proto_depIdxs = []int32{
 	7,  // 6: agentrepl.v1.AdoptWebWorkspaceError.not_yet_adopted:type_name -> agentrepl.v1.AdoptWebWorkspaceNotYetAdopted
 	8,  // 7: agentrepl.v1.AdoptWebWorkspaceError.no_transfer_announced:type_name -> agentrepl.v1.AdoptWebWorkspaceNoTransferAnnounced
 	9,  // 8: agentrepl.v1.AdoptWebWorkspaceError.participant_not_expected:type_name -> agentrepl.v1.AdoptWebWorkspaceParticipantNotExpected
-	9,  // [9:9] is the sub-list for method output_type
-	9,  // [9:9] is the sub-list for method input_type
-	9,  // [9:9] is the sub-list for extension type_name
-	9,  // [9:9] is the sub-list for extension extendee
-	0,  // [0:9] is the sub-list for field type_name
+	10, // 9: agentrepl.v1.AdoptWebWorkspaceError.transfer_deferred:type_name -> agentrepl.v1.AdoptWebWorkspaceTransferDeferred
+	10, // [10:10] is the sub-list for method output_type
+	10, // [10:10] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_adopt_web_workspace_proto_init() }
@@ -670,6 +735,7 @@ func file_agentrepl_v1_endpoint_adopt_web_workspace_proto_init() {
 		(*AdoptWebWorkspaceError_NotYetAdopted)(nil),
 		(*AdoptWebWorkspaceError_NoTransferAnnounced)(nil),
 		(*AdoptWebWorkspaceError_ParticipantNotExpected)(nil),
+		(*AdoptWebWorkspaceError_TransferDeferred)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -677,7 +743,7 @@ func file_agentrepl_v1_endpoint_adopt_web_workspace_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_adopt_web_workspace_proto_rawDesc), len(file_agentrepl_v1_endpoint_adopt_web_workspace_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   10,
+			NumMessages:   11,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

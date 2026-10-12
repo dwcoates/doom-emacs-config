@@ -215,6 +215,7 @@ type AdoptHostWorkspaceError struct {
 	//	*AdoptHostWorkspaceError_NotYetAdopted
 	//	*AdoptHostWorkspaceError_NoTransferAnnounced
 	//	*AdoptHostWorkspaceError_ParticipantNotExpected
+	//	*AdoptHostWorkspaceError_TransferDeferred
 	Cause         isAdoptHostWorkspaceError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -311,6 +312,15 @@ func (x *AdoptHostWorkspaceError) GetParticipantNotExpected() *AdoptHostWorkspac
 	return nil
 }
 
+func (x *AdoptHostWorkspaceError) GetTransferDeferred() *AdoptHostWorkspaceTransferDeferred {
+	if x != nil {
+		if x, ok := x.Cause.(*AdoptHostWorkspaceError_TransferDeferred); ok {
+			return x.TransferDeferred
+		}
+	}
+	return nil
+}
+
 type isAdoptHostWorkspaceError_Cause interface {
 	isAdoptHostWorkspaceError_Cause()
 }
@@ -345,6 +355,14 @@ type AdoptHostWorkspaceError_ParticipantNotExpected struct {
 	ParticipantNotExpected *AdoptHostWorkspaceParticipantNotExpected `protobuf:"bytes,6,opt,name=participant_not_expected,json=participantNotExpected,proto3,oneof"`
 }
 
+type AdoptHostWorkspaceError_TransferDeferred struct {
+	// This daemon refused to adopt the workspace mid-work, so the incumbent
+	// took it back and keeps serving it until it is free. Nothing will change
+	// here until then: the caller stays on the incumbent and adopts again
+	// only when the incumbent pushes a NEW `transferred` for this workspace.
+	TransferDeferred *AdoptHostWorkspaceTransferDeferred `protobuf:"bytes,7,opt,name=transfer_deferred,json=transferDeferred,proto3,oneof"`
+}
+
 func (*AdoptHostWorkspaceError_UnknownWorkspace) isAdoptHostWorkspaceError_Cause() {}
 
 func (*AdoptHostWorkspaceError_WorkspaceRefMismatch) isAdoptHostWorkspaceError_Cause() {}
@@ -356,6 +374,8 @@ func (*AdoptHostWorkspaceError_NotYetAdopted) isAdoptHostWorkspaceError_Cause() 
 func (*AdoptHostWorkspaceError_NoTransferAnnounced) isAdoptHostWorkspaceError_Cause() {}
 
 func (*AdoptHostWorkspaceError_ParticipantNotExpected) isAdoptHostWorkspaceError_Cause() {}
+
+func (*AdoptHostWorkspaceError_TransferDeferred) isAdoptHostWorkspaceError_Cause() {}
 
 type AdoptHostWorkspaceUnknownWorkspace struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -591,6 +611,47 @@ func (*AdoptHostWorkspaceParticipantNotExpected) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_adopt_host_workspace_proto_rawDescGZIP(), []int{9}
 }
 
+// The successor refused a mid-work adoption and the incumbent serves the
+// workspace until it is free; it carries nothing because the incumbent's next
+// `transferred` push, not this answer, says when and where to adopt. Distinct
+// from `not_yet_adopted`, which means a rendezvous still under way and is
+// retried.
+type AdoptHostWorkspaceTransferDeferred struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AdoptHostWorkspaceTransferDeferred) Reset() {
+	*x = AdoptHostWorkspaceTransferDeferred{}
+	mi := &file_agentrepl_v1_endpoint_adopt_host_workspace_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AdoptHostWorkspaceTransferDeferred) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AdoptHostWorkspaceTransferDeferred) ProtoMessage() {}
+
+func (x *AdoptHostWorkspaceTransferDeferred) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_adopt_host_workspace_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AdoptHostWorkspaceTransferDeferred.ProtoReflect.Descriptor instead.
+func (*AdoptHostWorkspaceTransferDeferred) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_adopt_host_workspace_proto_rawDescGZIP(), []int{10}
+}
+
 var File_agentrepl_v1_endpoint_adopt_host_workspace_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_adopt_host_workspace_proto_rawDesc = "" +
@@ -602,14 +663,15 @@ const file_agentrepl_v1_endpoint_adopt_host_workspace_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\v2'.agentrepl.v1.AdoptHostWorkspaceSuccessH\x00R\asuccess\x12=\n" +
 	"\x05error\x18\x02 \x01(\v2%.agentrepl.v1.AdoptHostWorkspaceErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"\x1b\n" +
-	"\x19AdoptHostWorkspaceSuccess\"\x8a\x05\n" +
+	"\x19AdoptHostWorkspaceSuccess\"\xeb\x05\n" +
 	"\x17AdoptHostWorkspaceError\x12_\n" +
 	"\x11unknown_workspace\x18\x01 \x01(\v20.agentrepl.v1.AdoptHostWorkspaceUnknownWorkspaceH\x00R\x10unknownWorkspace\x12l\n" +
 	"\x16workspace_ref_mismatch\x18\x02 \x01(\v24.agentrepl.v1.AdoptHostWorkspaceWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12_\n" +
 	"\x11transferring_away\x18\x03 \x01(\v20.agentrepl.v1.AdoptHostWorkspaceTransferringAwayH\x00R\x10transferringAway\x12W\n" +
 	"\x0fnot_yet_adopted\x18\x04 \x01(\v2-.agentrepl.v1.AdoptHostWorkspaceNotYetAdoptedH\x00R\rnotYetAdopted\x12i\n" +
 	"\x15no_transfer_announced\x18\x05 \x01(\v23.agentrepl.v1.AdoptHostWorkspaceNoTransferAnnouncedH\x00R\x13noTransferAnnounced\x12r\n" +
-	"\x18participant_not_expected\x18\x06 \x01(\v26.agentrepl.v1.AdoptHostWorkspaceParticipantNotExpectedH\x00R\x16participantNotExpectedB\a\n" +
+	"\x18participant_not_expected\x18\x06 \x01(\v26.agentrepl.v1.AdoptHostWorkspaceParticipantNotExpectedH\x00R\x16participantNotExpected\x12_\n" +
+	"\x11transfer_deferred\x18\a \x01(\v20.agentrepl.v1.AdoptHostWorkspaceTransferDeferredH\x00R\x10transferDeferredB\a\n" +
 	"\x05cause\"$\n" +
 	"\"AdoptHostWorkspaceUnknownWorkspace\"K\n" +
 	"&AdoptHostWorkspaceWorkspaceRefMismatch\x12!\n" +
@@ -618,7 +680,8 @@ const file_agentrepl_v1_endpoint_adopt_host_workspace_proto_rawDesc = "" +
 	"\aaddress\x18\x01 \x01(\tR\aaddress\"!\n" +
 	"\x1fAdoptHostWorkspaceNotYetAdopted\"'\n" +
 	"%AdoptHostWorkspaceNoTransferAnnounced\"*\n" +
-	"(AdoptHostWorkspaceParticipantNotExpectedB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"(AdoptHostWorkspaceParticipantNotExpected\"$\n" +
+	"\"AdoptHostWorkspaceTransferDeferredB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_adopt_host_workspace_proto_rawDescOnce sync.Once
@@ -632,7 +695,7 @@ func file_agentrepl_v1_endpoint_adopt_host_workspace_proto_rawDescGZIP() []byte 
 	return file_agentrepl_v1_endpoint_adopt_host_workspace_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_adopt_host_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
+var file_agentrepl_v1_endpoint_adopt_host_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
 var file_agentrepl_v1_endpoint_adopt_host_workspace_proto_goTypes = []any{
 	(*AdoptHostWorkspaceRequest)(nil),                // 0: agentrepl.v1.AdoptHostWorkspaceRequest
 	(*AdoptHostWorkspaceResponse)(nil),               // 1: agentrepl.v1.AdoptHostWorkspaceResponse
@@ -644,10 +707,11 @@ var file_agentrepl_v1_endpoint_adopt_host_workspace_proto_goTypes = []any{
 	(*AdoptHostWorkspaceNotYetAdopted)(nil),          // 7: agentrepl.v1.AdoptHostWorkspaceNotYetAdopted
 	(*AdoptHostWorkspaceNoTransferAnnounced)(nil),    // 8: agentrepl.v1.AdoptHostWorkspaceNoTransferAnnounced
 	(*AdoptHostWorkspaceParticipantNotExpected)(nil), // 9: agentrepl.v1.AdoptHostWorkspaceParticipantNotExpected
-	(*v1.WorkspaceRef)(nil),                          // 10: workspace.v1.WorkspaceRef
+	(*AdoptHostWorkspaceTransferDeferred)(nil),       // 10: agentrepl.v1.AdoptHostWorkspaceTransferDeferred
+	(*v1.WorkspaceRef)(nil),                          // 11: workspace.v1.WorkspaceRef
 }
 var file_agentrepl_v1_endpoint_adopt_host_workspace_proto_depIdxs = []int32{
-	10, // 0: agentrepl.v1.AdoptHostWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	11, // 0: agentrepl.v1.AdoptHostWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
 	2,  // 1: agentrepl.v1.AdoptHostWorkspaceResponse.success:type_name -> agentrepl.v1.AdoptHostWorkspaceSuccess
 	3,  // 2: agentrepl.v1.AdoptHostWorkspaceResponse.error:type_name -> agentrepl.v1.AdoptHostWorkspaceError
 	4,  // 3: agentrepl.v1.AdoptHostWorkspaceError.unknown_workspace:type_name -> agentrepl.v1.AdoptHostWorkspaceUnknownWorkspace
@@ -656,11 +720,12 @@ var file_agentrepl_v1_endpoint_adopt_host_workspace_proto_depIdxs = []int32{
 	7,  // 6: agentrepl.v1.AdoptHostWorkspaceError.not_yet_adopted:type_name -> agentrepl.v1.AdoptHostWorkspaceNotYetAdopted
 	8,  // 7: agentrepl.v1.AdoptHostWorkspaceError.no_transfer_announced:type_name -> agentrepl.v1.AdoptHostWorkspaceNoTransferAnnounced
 	9,  // 8: agentrepl.v1.AdoptHostWorkspaceError.participant_not_expected:type_name -> agentrepl.v1.AdoptHostWorkspaceParticipantNotExpected
-	9,  // [9:9] is the sub-list for method output_type
-	9,  // [9:9] is the sub-list for method input_type
-	9,  // [9:9] is the sub-list for extension type_name
-	9,  // [9:9] is the sub-list for extension extendee
-	0,  // [0:9] is the sub-list for field type_name
+	10, // 9: agentrepl.v1.AdoptHostWorkspaceError.transfer_deferred:type_name -> agentrepl.v1.AdoptHostWorkspaceTransferDeferred
+	10, // [10:10] is the sub-list for method output_type
+	10, // [10:10] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_adopt_host_workspace_proto_init() }
@@ -679,6 +744,7 @@ func file_agentrepl_v1_endpoint_adopt_host_workspace_proto_init() {
 		(*AdoptHostWorkspaceError_NotYetAdopted)(nil),
 		(*AdoptHostWorkspaceError_NoTransferAnnounced)(nil),
 		(*AdoptHostWorkspaceError_ParticipantNotExpected)(nil),
+		(*AdoptHostWorkspaceError_TransferDeferred)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -686,7 +752,7 @@ func file_agentrepl_v1_endpoint_adopt_host_workspace_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_adopt_host_workspace_proto_rawDesc), len(file_agentrepl_v1_endpoint_adopt_host_workspace_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   10,
+			NumMessages:   11,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
