@@ -109,6 +109,19 @@ type Workspace struct {
 	// workspace to carry that workspace's detached merge. Nil for every other
 	// workspace.
 	MergeOf *MergeOrigin
+	// OneShot reports that the workspace was CREATED as a one-shot. It is
+	// READ-ONLY here: the fact is the creation job's (CreationJob.OneShot),
+	// read through the shared select list, so the record and the job can never
+	// disagree. A workspace with no creation job (one Emacs registered) is not
+	// a one-shot.
+	OneShot bool
+	// MergePending reports that a merge queue entry stands for the workspace
+	// in ANY state: recorded while its requesting turn runs, waiting in line,
+	// or admitted. READ-ONLY, from the merge queue in the same read, so a
+	// reader that has not seen the merge orchestrator's live facts yet (the
+	// roster at boot, which publishes before merges are recovered) still
+	// knows a merge stands.
+	MergePending bool
 }
 
 // TurnResult is the roster's durable read of a workspace's last turn result.

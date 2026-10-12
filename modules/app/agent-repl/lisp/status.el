@@ -38,6 +38,7 @@
 (declare-function agent-repl-roster-walk "roster")
 (declare-function agent-repl-roster-viewed-for-ws "roster" (ws))
 (declare-function agent-repl-roster-detached-live-for-ws "roster" (ws))
+(declare-function agent-repl-roster-one-shot-for-ws "roster" (ws))
 
 (defun agent-repl--status-log-scope (central-reason)
   "Return the active workspace or an explicit CENTRAL-REASON marker.
@@ -745,11 +746,24 @@ rather than written out, so the tab bar\='s table can never disagree with
 the shared one about which arms EXIST — only about the four colors it
 explicitly overrides.")
 
+(defconst agent-repl-status-failure-glyph (string #x2716 #xFE0F)
+  "The tab bar\='s ONE failure mark, ✖️: something the user asked for failed.
+Drawn for a failed merge (`:merge-failed\=') and for a one-shot that
+ended without a live merge (`RosterRowOneShot\=' `failed\=').  It is
+HEAVY MULTIPLICATION X with the emoji presentation selector, so it draws
+double-width like the gate glyphs; bare U+2716 is a narrow text glyph.
+It is deliberately not ❌, which no tab draws (owner ruling, 2026-10-11).")
+
+(defconst agent-repl-status-one-shot-glyph "🎯"
+  "The glyph a one-shot workspace\='s tab draws while it stands `armed\='.
+`RosterRowOneShot\=' says the workspace was created as a one-shot and
+has not ended without a live merge (owner ruling, 2026-10-11).")
+
 (defconst agent-repl-status-merge-glyphs
-  '((:merge-queued    . "⧖")
+  `((:merge-queued    . "⧖")
     (:merge-waiting   . "⧗")
     (:merging         . "↻")
-    (:merge-failed    . "✗")
+    (:merge-failed    . ,agent-repl-status-failure-glyph)
     (:merged          . "✓"))
   "The character each merge arm draws, keyed by the fixture\='s glyph NAMES.
 
@@ -759,10 +773,16 @@ deliberately not which character: each renderer maps those names to
 whatever its surface can draw.  This is the tab bar\='s mapping, and the
 assertion test checks that every named glyph has a character here.
 
-Every merge arm takes a color as well: the two in-flight arms purple,
-with the glyph saying which of the two it is, and `:merge-failed\=' and
-`:merged\=' their shared turquoise and green, each drawing its glyph over
-it.")
+The tab bar DRAWS only the arms in `agent-repl-status-tab-bar-merge-glyph-arms\=':
+its purple already says a merge is in flight, and a landed merge shows
+nothing.")
+
+(defconst agent-repl-status-tab-bar-merge-glyph-arms '(:merge-failed)
+  "The merge arms whose glyph the TAB BAR draws: only a FAILED merge.
+A merge in flight is already the tab\='s purple, and a landed merge draws
+nothing (owner ruling, 2026-10-11): merges are reflected by a glyph only
+when they fail.  The full name-to-character mapping stays in
+`agent-repl-status-merge-glyphs\=', asserted against the shared fixture.")
 
 (defconst agent-repl-status-gate-glyphs
   '((:permission . "❗")
@@ -1096,19 +1116,38 @@ at ERROR rather than painted."
 
 (defun agent-repl-status-tab-glyph (ws arm)
   "Return the glyph WS draws for ARM, or nil when it draws none.
-Four glyphs exist, in precedence order: the merge pipeline's (every
-merge arm draws its glyph over its color: purple in flight, turquoise
-for `:merge-failed', green for `:merged'), a gate's emoji (a pending
-permission or question), the inactive question mark, and the attention
-marker."
-  (let ((glyph (or (alist-get arm agent-repl-status-merge-glyphs)
-                   (alist-get arm agent-repl-status-gate-glyphs)
+In precedence order: a gate\='s emoji (a pending permission or question,
+drawn in place of the one-shot mark while it stands), the one-shot mark
+\(`agent-repl-status-tab-one-shot-glyph'), a failed merge\='s failure
+mark (the only merge glyph the tab bar draws), the inactive question
+mark, and the attention marker."
+  (let ((glyph (or (alist-get arm agent-repl-status-gate-glyphs)
+                   (agent-repl-status-tab-one-shot-glyph ws)
+                   (and (memq arm agent-repl-status-tab-bar-merge-glyph-arms)
+                        (alist-get arm agent-repl-status-merge-glyphs))
                    (and (eq arm :inactive) agent-repl-status-inactive-glyph)
                    (and (agent-repl-status-attention-visible-p ws)
                         agent-repl-status-attention-glyph))))
     (agent-repl--log-verbose ws "elisp.status.tab-glyph: ws=%s arm=%s glyph=%s"
                              ws arm (or glyph "none"))
     glyph))
+
+(defun agent-repl-status-tab-one-shot-glyph (ws)
+  "Return the one-shot glyph WS\='s tab draws, or nil when WS is no one-shot.
+The daemon resolves the outcome (`RosterRowOneShot'): `:armed' draws
+`agent-repl-status-one-shot-glyph', `:failed' draws
+`agent-repl-status-failure-glyph'.  An outcome this build does not know
+is a contract breach the codec already refused, so reaching here with
+one is logged at ERROR and draws nothing."
+  (let ((outcome (and (fboundp 'agent-repl-roster-one-shot-for-ws)
+                      (agent-repl-roster-one-shot-for-ws ws))))
+    (pcase outcome
+      ('nil nil)
+      (:armed agent-repl-status-one-shot-glyph)
+      (:failed agent-repl-status-failure-glyph)
+      (_
+       (agent-repl--error ws "elisp.status.tab-one-shot-glyph: unknown outcome=%S ws=%s" outcome ws)
+       nil))))
 
 ;;; The attention marker and its blink ---------------------------------------
 ;;

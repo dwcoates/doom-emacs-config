@@ -103,6 +103,10 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) error {
 	}
 	o.mu.Unlock()
 	log.Info(op, "recorded a merge request", withField(fields, "repo", string(repo)))
+	// THE ROSTER LEARNS OF THE REQUEST NOW, before the requesting turn can
+	// end, so a one-shot that asked for its merge is never read as one that
+	// ended without one. Nothing is drawn from it.
+	o.deps.Sidebar.SetMergeRequested(ws, true)
 	if req.By == RequestedByUser {
 		// THE USER'S ASK HAS NO REQUESTING TURN: it is put in line at once.
 		return o.queueRequest(ctx, ws, repo)
@@ -254,15 +258,18 @@ func (o *orchestrator) forgetWait(wait *requestWait) {
 	wait.cancel()
 }
 
-// withdrawRequest ends a request's wait and answers whether one stood.
+// withdrawRequest ends a request's wait and answers whether one stood. The
+// roster's request fact is lowered whether or not a wait stood: a request
+// whose wait already ended in error is still withdrawn.
 func (o *orchestrator) withdrawRequest(ws ids.WorkspaceID) bool {
 	o.mu.Lock()
-	defer o.mu.Unlock()
 	wait, standing := o.requested[ws]
 	if standing {
 		wait.cancel()
 		delete(o.requested, ws)
 	}
+	o.mu.Unlock()
+	o.deps.Sidebar.SetMergeRequested(ws, false)
 	return standing
 }
 
