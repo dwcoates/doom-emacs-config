@@ -555,6 +555,10 @@ type Deps struct {
 	// Ownership answers whether this daemon still serves a workspace, so a
 	// verb refuses an unowned workspace mid-handover rather than acting on it.
 	Ownership Ownership
+	// StandDowns stands down the session of a workspace the user hid or
+	// collapsed (drain.Controller.StandDownWithheld): ONLY VISIBLE
+	// WORKSPACES RUN.
+	StandDowns StandDowns
 	// Cards answers what the daemon SERVED for a permission ask, a question
 	// batch or a cold gate. Every answer verb echoes against it: an answer
 	// that does not match what was served is refused, never forwarded.
@@ -575,6 +579,12 @@ type Deps struct {
 	// Zero means DefaultRestartStopBound, where the sizing is stated; it is a
 	// field so the overrun is exercised without waiting the real bound out.
 	RestartStopBound time.Duration
+}
+
+// StandDowns stands a withheld workspace's session down as the idle sweep
+// does, never under a turn. drain.Controller is the production one.
+type StandDowns interface {
+	StandDownWithheld(ws ids.WorkspaceID)
 }
 
 // PromptLoader reads one brief by name from a prompts directory at use time.
@@ -856,6 +866,8 @@ func New(deps Deps) (Verbs, error) {
 		return nil, missing("a freeness probe")
 	case deps.Ownership == nil:
 		return nil, missing("an ownership probe")
+	case deps.StandDowns == nil:
+		return nil, missing("a withheld workspace's stand-down")
 	case deps.Cards == nil:
 		return nil, missing("a served-card store")
 	case deps.PromptsDir == "":

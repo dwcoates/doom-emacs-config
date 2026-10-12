@@ -211,8 +211,10 @@ func (v *verbs) MarkViewed(ctx context.Context, ws ids.WorkspaceID) error {
 
 // SetHidden moves a workspace into the roster's hidden section, or back out of
 // it. The roster hoists a hidden workspace's row out of every grouping, and the
-// editor's tab bar stops drawing its tab off that same push; its session and
-// tab are untouched. Asking for the place it already holds is success.
+// editor's tab bar stops drawing its tab off that same push. HIDING STANDS ITS
+// SESSION DOWN (only visible workspaces run): at once when no turn runs, once
+// the turn ends otherwise. SHOWING starts nothing; the editor asks with
+// OpenTabs. Asking for the place it already holds is success.
 func (v *verbs) SetHidden(ctx context.Context, ws ids.WorkspaceID, hidden bool) error {
 	_, log, err := v.owned(ctx, "SetWorkspaceHidden", ws)
 	if err != nil {
@@ -224,6 +226,9 @@ func (v *verbs) SetHidden(ctx context.Context, ws ids.WorkspaceID, hidden bool) 
 	}
 	log.Info(opSetHidden, "recorded whether the workspace is hidden", dlog.Context{"hidden": hidden})
 	v.republishRegistry(ctx, log, opSetHidden)
+	if hidden {
+		v.deps.StandDowns.StandDownWithheld(ws)
+	}
 	return nil
 }
 
