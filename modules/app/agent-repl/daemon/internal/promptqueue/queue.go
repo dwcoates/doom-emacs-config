@@ -66,6 +66,11 @@ type wsState struct {
 	// redrive records that a decision found a call standing and deferred to
 	// its settle (deferToCall). Guarded by q.mu; consumed by delivery.unlock.
 	redrive bool
+	// releaseOwed records that the session came up while a call stood: the
+	// release is taken again once the call settles (redrive), so a hold the
+	// call's own outcome stamps cannot miss the edge that releases it.
+	// Guarded by q.mu.
+	releaseOwed bool
 	// parked are the submissions held behind a standing call with no turn to
 	// be judged against; the call's settle delivers or judges them (redrive).
 	// Guarded by q.mu.
