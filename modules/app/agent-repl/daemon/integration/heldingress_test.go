@@ -126,7 +126,7 @@ func TestIngestedHeldPromptsWaitBehindTheRunningTurnInOrderInTheHeldTray(t *test
 func TestADaemonStartIngestsHeldPromptsWrittenWhileNoDaemonServed(t *testing.T) {
 	t.Parallel()
 	// Arrange: the daemon is gone, and the client writes two prompts.
-	f := newOpened(t, harness.Opts{})
+	f := newOpened(t, harness.Opts{DurableState: true})
 	f.d.Stop()
 	heldWrite(t, f.d.StateDir, "held_20260928T120001.000000001_aaaaaaaa_k-d1.json", f.repo.Dir, "k-d1", "written while down, first")
 	heldWrite(t, f.d.StateDir, "held_20260928T120001.000000002_aaaaaaaa_k-d2.json", f.repo.Dir, "k-d2", "written while down, second")

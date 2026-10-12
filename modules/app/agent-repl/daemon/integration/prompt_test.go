@@ -488,7 +488,7 @@ func TestARevivalTimeHeldPromptCarriesTheReconnectHoldAndRefusesRelease(t *testi
 func TestUpdateHeldPromptDropRemovesTheEntryDurablyAcrossADaemonRestart(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newOpened(t, harness.Opts{DurableState: true})
 	// The sweep covers every test; the declared records are evidence of the in-flight turn the restart orphans.
 	f.d.ExpectWarnings("daemon.promptqueue.restore_holds")
 	f.submit("start the work", "k-running", origin)
@@ -566,7 +566,7 @@ func TestUpdateHeldPromptReleaseDeliversNow(t *testing.T) {
 func TestAHeldPromptSurvivesADaemonRestart(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newOpened(t, harness.Opts{DurableState: true})
 	// The sweep covers every test; the declared records are evidence of the in-flight turn the restart orphans.
 	f.d.ExpectWarnings("daemon.promptqueue.restore_holds")
 	f.submit("start the work", "k-running", origin)
@@ -608,7 +608,7 @@ func TestAHeldPromptSurvivesADaemonRestart(t *testing.T) {
 func TestACorruptedHeldPromptRowFailsBootLoudlyWithExactlyOneRestoreError(t *testing.T) {
 	t.Parallel()
 	// Arrange: two held prompts on one workspace.
-	f := newOpened(t, harness.Opts{})
+	f := newOpened(t, harness.Opts{DurableState: true})
 	// The sweep covers every test; the declared records are evidence of the in-flight turn the restart orphans, the state row the test corrupts.
 	f.d.ExpectWarnings("daemon.boot.restore_holds", "daemon.promptqueue.restore_holds",
 		"daemon.wsm.all_held_prompts")
@@ -1147,7 +1147,7 @@ func TestStatusAnswersAStatusPanelViewInlineAndMirrorsANonDurableCommandPanelRow
 	// in the Version row.
 	// The stamp MATCHES the fake shim's own reported build, or the staleness
 	// check would bounce the shim out from under the test.
-	f := newOpened(t, harness.Opts{ExtraEnv: []string{
+	f := newOpened(t, harness.Opts{DurableState: true, ExtraEnv: []string{
 		"AGENT_REPL_DEPLOY_STAMP=" + harness.FakeShimDefaultBuildSHA}})
 	feed := f.watchRootFeed()
 
@@ -2214,7 +2214,7 @@ func TestADeferredPromptIsNeverInterjectedAndRunsAsItsOwnTurn(t *testing.T) {
 func TestADeferredHoldSurvivesADaemonRestartStillDeferred(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newOpened(t, harness.Opts{DurableState: true})
 	// The sweep covers every test; the declared records are evidence of the in-flight turn the restart orphans.
 	f.d.ExpectWarnings("daemon.promptqueue.restore_holds")
 	f.submit("start the work", "k-running", origin)

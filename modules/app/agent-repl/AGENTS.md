@@ -347,6 +347,17 @@ unreachable from a live process.
     flag and without the guard (or with any other value) they refuse to boot,
     and an honored flag is recorded at INFO. Every harness that spawns a daemon
     or store sets it.
+- A TEST DAEMON'S STATE LIVES IN MEMORY unless it must outlive the process.
+  - Separate processes: `AGENT_REPL_TEST_STATE_IN_MEMORY=1`, honored by the
+    daemon only beside `AGENT_REPL_FORBID_VENDOR_CALLS` and refused by a
+    joining daemon; recorded at INFO.
+  - The daemon integration harness sets it for every freshly minted state root
+    unless `harness.Opts{DurableState: true}`. A test that starts a successor
+    or restart on the same root, or reads `wsm.db` (`DBPath`, `WithDB`,
+    `CorruptRow`, `CountRows`, `DisplacedTurnCount`), sets `DurableState` on
+    the root's FIRST daemon; the harness refuses the reuse or the read loudly
+    when it is missing, and a daemon-spawned successor refuses to boot on the
+    inherited flag.
 - THE RUN'S ROOT IS A RAM DISK on macOS (`testrun/internal/ramdisk`).
   - Mounted at `/tmp/artr-<pid>` (APFS), so paths stay temporary to the
     registration guard and short enough for sockets; exported to units as

@@ -26,7 +26,7 @@ import (
 func restartedWith(t *testing.T, profile harness.ShimProfile) *fixture {
 	t.Helper()
 	profile.ResumeHistory = harness.EncodeHistory(t, relaunchAnswerEntry(), relaunchPromptEntry())
-	return restarted(newOpened(t, harness.Opts{}), profile)
+	return restarted(newOpened(t, harness.Opts{DurableState: true}), profile)
 }
 
 // restarted stops a fixture's daemon, writes the shim profile its successor's
@@ -245,7 +245,7 @@ func TestAnAdoptedTurnsUnresolvedAnswerIsRaisedOnceAcrossRestarts(t *testing.T) 
 	// Arrange: the first daemon to replay the book — its reader opening the
 	// newest page — judges the turn and raises its verdict.
 	profile := harness.ShimProfile{ResumeHistory: adoptedTurnBook(t)}
-	first := restarted(newOpened(t, harness.Opts{}), profile)
+	first := restarted(newOpened(t, harness.Opts{DurableState: true}), profile)
 	first.d.ExpectWarnings("daemon.feed.final_answer_unresolved")
 	first.openFeedOnceCarrying("the adopted turn's terminal", carriesAdoptedTerminal)
 	first.d.AwaitWorkspaceLogRecordInState("the first replay raising the adopted turn's verdict",
@@ -279,7 +279,7 @@ func TestAColdGatedWorkspacesWholeConversationIsWalkableBeforeTheGateIsAnswered(
 		})
 	}
 	entries = append(entries, relaunchPromptEntry())
-	f := restarted(newOpened(t, harness.Opts{}), harness.ShimProfile{
+	f := restarted(newOpened(t, harness.Opts{DurableState: true}), harness.ShimProfile{
 		HistoryPageSize: pagingStorePage,
 		ResumeHistory:   harness.EncodeHistory(t, entries...),
 		ColdOnResume: &harness.ShimColdFacts{
@@ -376,7 +376,7 @@ func TestARestartWhoseNewestPageDrawsNoRowPushesTheConversation(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			// Arrange: the reader opens while no shim is up.
-			f := restarted(newOpened(t, harness.Opts{}), harness.ShimProfile{
+			f := restarted(newOpened(t, harness.Opts{DurableState: true}), harness.ShimProfile{
 				DelayDiagnostics: true,
 				HistoryPageSize:  emptyNewestPageStore,
 				ResumeHistory:    harness.EncodeHistory(t, tt.book...),
@@ -408,7 +408,7 @@ func TestARestartedWorkspacesQuotedPromptStillDrawsItsQuoteApart(t *testing.T) {
 	prompt.Said.Content.Blocks = append([]*conversationv1.UserContentBlock{{
 		Block: &conversationv1.UserContentBlock_Quote{Quote: &conversationv1.UserQuoteBlock{Text: quote}},
 	}}, prompt.Said.Content.Blocks...)
-	f := restarted(newOpened(t, harness.Opts{}), harness.ShimProfile{
+	f := restarted(newOpened(t, harness.Opts{DurableState: true}), harness.ShimProfile{
 		ResumeHistory: harness.EncodeHistory(t, relaunchAnswerEntry(), entry),
 	})
 

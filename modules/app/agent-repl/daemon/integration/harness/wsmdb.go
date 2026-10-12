@@ -2,6 +2,7 @@ package harness
 
 import (
 	"database/sql"
+	"errors"
 	"path/filepath"
 
 	// The daemon's own sqlite driver, so a test can corrupt one row of the
@@ -10,7 +11,26 @@ import (
 )
 
 // DBPath is the workspace state database inside this daemon's state root.
-func (d *Daemon) DBPath() string { return filepath.Join(d.StateDir, "wsm.db") }
+//
+// A daemon on in-memory state has no file, and a read of one would open an
+// empty database rather than the daemon's: the test is refused, loudly, and
+// told to start its daemon with Opts.DurableState.
+func (d *Daemon) DBPath() string {
+	d.t.Helper()
+	if err := refuseInMemoryRead(d.inMemoryState); err != nil {
+		d.t.Fatal(err)
+	}
+	return filepath.Join(d.StateDir, "wsm.db")
+}
+
+// refuseInMemoryRead refuses a read of wsm.db for a daemon whose state lives
+// in memory.
+func refuseInMemoryRead(inMemory bool) error {
+	if inMemory {
+		return errors.New("harness: this daemon's state lives in memory, so there is no wsm.db to read; start it with harness.Opts{DurableState: true}")
+	}
+	return nil
+}
 
 // WithDB opens the workspace state database directly and hands it to the body.
 //

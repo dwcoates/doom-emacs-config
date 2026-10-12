@@ -216,7 +216,7 @@ func TestADeployHandoverShowsTheWaitingWorkspaceAndItsSuccessorSaysUpdated(t *te
 	t.Parallel()
 	// Arrange: a turn in flight, with both participants open so the successor
 	// adopts only when they ask it to.
-	d := harness.StartDaemon(t, harness.Opts{Timeout: harness.HandoverChainTimeout})
+	d := harness.StartDaemon(t, harness.Opts{DurableState: true, Timeout: harness.HandoverChainTimeout})
 	f := drainOpenWorkspace(t, d)
 	f.shim.ExpectStartSession()
 	host := d.WatchHost(f.ws)

@@ -161,7 +161,7 @@ func TestAFreshBootReleasesTheHoldsADeadDaemonLeft(t *testing.T) {
 	t.Parallel()
 	// Arrange: a workspace carrying a handover's quiesce hold (holder
 	// restart, policy hold) that no living process owns.
-	first := newRegistered(t, harness.Opts{})
+	first := newRegistered(t, harness.Opts{DurableState: true})
 	first.d.Kill()
 	if _, err := rawStateDB(t, first.d).ExecContext(context.Background(),
 		`INSERT INTO leases (id, workspace_id, holder, policy, acquired_at) VALUES (?, ?, ?, ?, ?)`,
