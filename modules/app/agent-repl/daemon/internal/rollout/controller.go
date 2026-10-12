@@ -201,6 +201,28 @@ func (e *entry) settle(err error) {
 	close(e.done)
 }
 
+// beginAdoption latches the entry for ONE adoption run and, when an earlier
+// run already settled it, re-arms its completion for this run.
+//
+// A RE-RUN IS A NEW COMPLETION. settle closes done once, so after a failed run
+// every caller that waited on the entry -- including the ones queued behind a
+// later re-run -- found done already closed and was answered that FIRST run's
+// failure at once, not the outcome of the run in flight (2026-10-11: Emacs's
+// adopt was answered not_yet_adopted in milliseconds, hundreds of times, while
+// the re-run sat waiting for the incumbent's release).
+func (e *entry) beginAdoption() {
+	e.adopting = true
+	if e.done == nil {
+		return
+	}
+	select {
+	case <-e.done:
+		e.done = make(chan struct{})
+		e.failed = nil
+	default:
+	}
+}
+
 // satisfied reports whether every expected participant has called.
 func (e *entry) satisfied() bool {
 	if e.expected.Host && !e.hostCalled {
