@@ -368,6 +368,9 @@ type DB interface {
 	// MoveMergeToFront marks a merge a front merge and moves a waiting one
 	// ahead of every ordinary merge waiting, answering whether it moved.
 	MoveMergeToFront(ctx context.Context, repo RepoKey, id WorkspaceID) (bool, error)
+	// YieldMergeHead records a race to land the head lost: winner takes the
+	// head's place at the front and loser waits right behind it.
+	YieldMergeHead(ctx context.Context, repo RepoKey, loser, winner WorkspaceID) error
 	// AdmitMerge marks the entry the orchestrator is running now.
 	AdmitMerge(ctx context.Context, repo RepoKey, id WorkspaceID) error
 	// RemoveMergeQueueEntry drops one entry with the cause it was dropped for.

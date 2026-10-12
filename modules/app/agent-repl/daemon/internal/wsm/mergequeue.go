@@ -366,6 +366,54 @@ func (s *store) setMergeQueueState(ctx context.Context, op string, repo RepoKey,
 	})
 }
 
+// YieldMergeHead records a race to land the head lost: winner, the merge
+// right behind the head that passed its gate on the target's tip first, takes
+// the head's place at the front of the line, and loser, the head it overtook,
+// goes back to waiting right behind it, to start over once the winner lands.
+// Both must be admitted, with loser ahead of winner; anything else is a
+// refusal, because it means the caller lost track of the queue.
+func (s *store) YieldMergeHead(ctx context.Context, repo RepoKey, loser, winner WorkspaceID) error {
+	const op = "daemon.wsm.yield_merge_head"
+	key, err := normalizeRepoKey(repo)
+	if err != nil {
+		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(dlog.Context{"repo": string(repo), "loser": string(loser), "winner": string(winner)}, err))
+		return err
+	}
+	fields := dlog.Context{"repo": string(key), "loser": string(loser), "winner": string(winner)}
+	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		seqOf := func(id WorkspaceID) (int64, error) {
+			var state int
+			var seq int64
+			err := tx.QueryRowContext(ctx, `SELECT state, seq FROM merge_queue WHERE repo_key = ? AND workspace_id = ?`, key, id).Scan(&state, &seq)
+			if errors.Is(err, sql.ErrNoRows) {
+				return 0, fmt.Errorf("wsm: merge queue entry for workspace %s in repo %q: %w", id, key, ErrNotFound)
+			}
+			if err != nil {
+				return 0, err
+			}
+			if MergeQueueState(state) != MergeAdmitted {
+				return 0, fmt.Errorf("wsm: workspace %s in repo %q yields or wins a race to land while %s, not admitted", id, key, MergeQueueState(state))
+			}
+			return seq, nil
+		}
+		loserSeq, err := seqOf(loser)
+		if err != nil {
+			return err
+		}
+		winnerSeq, err := seqOf(winner)
+		if err != nil {
+			return err
+		}
+		if loserSeq >= winnerSeq {
+			return fmt.Errorf("wsm: workspace %s in repo %q cannot overtake %s, which already stands behind it", winner, key, loser)
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE merge_queue SET state = ? WHERE repo_key = ? AND workspace_id = ?`, int(MergeQueued), key, loser); err != nil {
+			return err
+		}
+		return moveAhead(ctx, tx, key, winner, loserSeq)
+	})
+}
+
 // AdmitMerge marks the entry the orchestrator is running now.
 func (s *store) AdmitMerge(ctx context.Context, repo RepoKey, id WorkspaceID) error {
 	return s.setMergeQueueState(ctx, "daemon.wsm.admit_merge", repo, id, MergeAdmitted, dlog.Context{})

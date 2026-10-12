@@ -89,6 +89,12 @@ type orchestrator struct {
 	// publishes a new tip, so a waiter that read the chain under mu and then
 	// waits on the channel it read misses no change.
 	chainSignals map[wsm.RepoKey]chan struct{}
+	// targetTips is each repository's target tip as a run last read it: the
+	// base the merge behind the head rebases onto (race.go). Guarded by mu.
+	targetTips map[wsm.RepoKey]string
+	// overtakings are the races to land being won by the merge behind the
+	// head, by repository (race.go). Guarded by mu.
+	overtakings map[wsm.RepoKey]*overtaking
 	// repoLocks are the repositories' kernel locks this process holds: taken
 	// when a repository's first run is admitted, released when its chain and
 	// slot are both empty again.
@@ -234,6 +240,8 @@ func newOrchestrator(deps Deps) (*orchestrator, error) {
 		running:         map[wsm.RepoKey]*run{},
 		chains:          map[wsm.RepoKey][]*run{},
 		chainSignals:    map[wsm.RepoKey]chan struct{}{},
+		targetTips:      map[wsm.RepoKey]string{},
+		overtakings:     map[wsm.RepoKey]*overtaking{},
 		repoLocks:       map[wsm.RepoKey]*repoLock{},
 		kicked:          map[wsm.RepoKey]bool{},
 		displaces:       map[ids.WorkspaceID]bool{},
