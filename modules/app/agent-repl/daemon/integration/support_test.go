@@ -142,7 +142,9 @@ func (f *fixture) open() {
 	if resp.Msg.GetSuccess() == nil {
 		f.t.Fatalf("OpenWorkspace = %v, want a success", resp.Msg)
 	}
-	f.shim = f.d.Shim(f.ws)
+	// OpenedShim, not Shim: at a short idle cutoff the shim this open brought
+	// up can be hibernated and gone before the control socket is dialed.
+	f.shim = f.d.OpenedShim(f.ws)
 }
 
 // selectWorkspace makes this workspace the current one.
