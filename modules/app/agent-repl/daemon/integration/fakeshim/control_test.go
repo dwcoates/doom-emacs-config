@@ -35,6 +35,16 @@ func TestParseCommandAcceptsWellFormedOps(t *testing.T) {
 			want: Command{Op: OpPushUserPrompt, Agent: "sub-1", Payload: payload},
 		},
 		{
+			name: "file_agent_frame files into a named book with its turn",
+			line: `{"op":"file_agent_frame","agent":"book-parent","turn":"t1","payload":"` + payload + `"}`,
+			want: Command{Op: OpFileAgentFrame, Agent: "book-parent", Turn: "t1", Payload: payload},
+		},
+		{
+			name: "file_user_prompt files into a named book",
+			line: `{"op":"file_user_prompt","agent":"book-parent","payload":"` + payload + `"}`,
+			want: Command{Op: OpFileUserPrompt, Agent: "book-parent", Payload: payload},
+		},
+		{
 			name: "push_retired carries the retired entry",
 			line: `{"op":"push_retired","agent":"sub-1","payload":"` + payload + `"}`,
 			want: Command{Op: OpPushRetired, Agent: "sub-1", Payload: payload},
@@ -136,6 +146,9 @@ func TestParseCommandRejectsMalformedOps(t *testing.T) {
 		{name: "push_user_prompt without payload", line: `{"op":"push_user_prompt"}`, wantSub: "payload is required"},
 		{name: "push_retired without payload", line: `{"op":"push_retired"}`, wantSub: "payload is required"},
 		{name: "push_bash without work", line: `{"op":"push_bash","payload":"AA=="}`, wantSub: "work is required"},
+		{name: "file_agent_frame without a book", line: `{"op":"file_agent_frame","payload":"AA=="}`, wantSub: "agent is required"},
+		{name: "file_user_prompt without a book", line: `{"op":"file_user_prompt","payload":"AA=="}`, wantSub: "agent is required"},
+		{name: "file_agent_frame without payload", line: `{"op":"file_agent_frame","agent":"b"}`, wantSub: "payload is required"},
 		{name: "answer without rpc", line: `{"op":"answer","payload":"AA=="}`, wantSub: "rpc is required"},
 		{name: "answer for a stream verb", line: `{"op":"answer","rpc":"WatchSession","payload":"AA=="}`, wantSub: "takes no scripted answer"},
 		{name: "answer without a body", line: `{"op":"answer","rpc":"StartTurn"}`, wantSub: "payload or fail is required"},

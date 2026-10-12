@@ -1,39 +1,22 @@
 package feed
 
 import (
-	"errors"
+	"fmt"
+	"slices"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 
+	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
+
+	"google.golang.org/protobuf/proto"
 )
 
-// A FORK'S INHERITED PAST. The fork's book carries a copy of the parent's
-// conversation, ingested while the fork runs; on a fork every main-agent entry
-// of a turn the fork never opened (or of none) is that inherited past, drawn in
-// a plane of its own, in a stance of its own, and never pushed live.
-
-// forkTurn is the fork's own first turn in every case here.
-const forkTurn = "fork-turn"
-
-// newForkHarness is a harness for a FORK: it carries a ported conversation, and
-// the turns it recorded as its own are forkTurn and the tail sentinel.
-func newForkHarness(t *testing.T) *harness {
-	t.Helper()
-	h := newHarness(t)
-	h.ported = []PortedPrompt{{Turn: "ported-turn", Text: "the parent's question", Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT}}
-	h.owned = map[ids.TurnID]bool{forkTurn: true, "turn-sentinel": true}
-	return h
-}
-
-// openForkTurn opens the fork's own first turn the way the daemon does: the
-// turn is opened, then the queue's mirror draws its prompt.
-func (h *harness) openForkTurn() {
-	h.t.Helper()
-	h.resolver.OnTurnOpened(testWorkspace, forkTurn)
-	h.deliverPrompt(forkTurn, "the fork's own question")
-}
+// A FORK'S INHERITED PAST IS ITS PARENT'S BOOK. The root feed's walk reads the
+// fork's own book, then each generation it inherited from, bounded and without
+// the turns that were open when the fork was taken.
 
 // liveResponse sends one settled response of the main agent, stamped with
 // TURN ("" unstamped), as the watch serves a live entry.
@@ -46,276 +29,356 @@ func (h *harness) liveResponse(unit, text, turn string) {
 	h.resolver.OnActivity(testWorkspace, mainAgent(), responseSuccessActivity(unit, text), stamp, nil)
 }
 
-// liveCut sends one unstamped compaction at pointer AT, the way the file plane
-// serves an inherited one.
+// liveCut sends one unstamped compaction at pointer AT.
 func (h *harness) liveCut(at string) {
 	h.t.Helper()
 	h.cutAt(at, compactedCut("summary at "+at))
 }
 
-// delivered answers every row id an opening of the root feed serves, oldest
-// first, with the ported conversation left out: what these cases pin is the
-// store's copy and the fork's own rows.
-func (h *harness) delivered() []string {
-	h.t.Helper()
-	page, _ := h.openPage(rootFeed(), "reader-delivered")
-	h.resolver.mu.Lock()
-	defer h.resolver.mu.Unlock()
-	f := h.resolver.feed(h.resolver.state(testWorkspace), rootFeed())
-	var out []string
-	for _, id := range rowIDs(pageRows(h.t, page)) {
-		if f.rank[id].plane == planePorted {
-			continue
-		}
-		out = append(out, id)
+// root is the root feed's activity row id for UNIT.
+func root(unit string) string { return activityRowID(rootFeed(), unit) }
+
+// parentBook and grandparentBook are the books a fork's generations are read
+// from in these cases.
+var (
+	parentBook      = &conversationv1.AgentId{Value: "book-parent"}
+	grandparentBook = &conversationv1.AgentId{Value: "book-grandparent"}
+)
+
+// bookTurn is one finished turn of AGENT's book: its prompt, its answer UNIT,
+// and the terminal naming that answer, all stamped TURN.
+func bookTurn(agent *conversationv1.AgentId, turn, unit string) []bookEntry {
+	prompt := promptEntry(turn, "asked "+turn)
+	prompt.GetUserPrompt().Agent = agent
+	answer := frameEntry(agent, &conversationv1.AgentUpdate{Update: &conversationv1.AgentUpdate_Activity{Activity: responseSuccessActivity(unit, "answer "+unit)}})
+	terminal := frameEntry(agent, completedWith(unit))
+	return []bookEntry{{entry: prompt}, {turn: turn, entry: answer}, {turn: turn, entry: terminal}}
+}
+
+// forkHarness is a harness whose workspace is a fork: its own book holds OWN,
+// and LINEAGE names its generations, whose books BOOKS holds. The books are
+// placed as a conversation is: the furthest generation first, then each nearer
+// one, then the fork's own (generationStart).
+func forkHarness(t *testing.T, pageSize int, own []bookEntry, lineage []LineageSegment, books map[string][]bookEntry) (*harness, *fakeHistory) {
+	t.Helper()
+	h := newHarness(t)
+	store := h.withHistory(newFakeHistory(pageSize))
+	store.books[""] = newestFirstFrom(own, generationStart(0))
+	for i, segment := range lineage {
+		store.books[segment.Book.GetValue()] = newestFirstFrom(books[segment.Book.GetValue()], generationStart(i+1))
+	}
+	h.resolver.NoteLineage(testWorkspace, lineage)
+	return h, store
+}
+
+// generationStart is the first place, epoch ms, of generation N's entries in a
+// fork harness: 0 the fork's own book, 1 its parent's, and so on, each older
+// than the one nearer the fork.
+func generationStart(n int) int64 { return int64(10-n) * 1_000 }
+
+// newestFirstFrom renders a scripted book as the store serves it, its oldest
+// entry placed at FIRSTMS and each next one 100 ms later, its pointers unique
+// to the place.
+func newestFirstFrom(oldestFirst []bookEntry, firstMs int64) []*conversationv1.HistoryEntryAt {
+	out := newestFirst(oldestFirst)
+	for i, at := range out {
+		index := len(out) - 1 - i
+		at.Place = &conversationv1.HistoryEntryAt_RecordedPlace{RecordedPlace: placeAt(firstMs + int64(index)*100)}
+		at.At = &conversationv1.HistoryPointer{Value: fmt.Sprintf("p-%d-%d", firstMs, index)}
 	}
 	return out
 }
 
-// root is the root feed's activity row id for UNIT.
-func root(unit string) string { return activityRowID(rootFeed(), unit) }
-
-func TestAForksInheritedPastArrivingLiveStandsAboveItsOwnTurnBoundedAtItsNewestCut(t *testing.T) {
-	// Arrange: the fork's own turn opens, then the copied conversation streams
-	// in live — two compactions among it — interleaved with the fork's own
-	// responses, exactly as ship-gns received it.
-	h := newForkHarness(t)
-	h.openForkTurn()
-
-	// Act.
-	h.liveResponse("old-1", "inherited, before both cuts", "parent-turn-1")
-	h.liveCut("cut-1")
-	h.liveResponse("old-2", "inherited, between the cuts", "parent-turn-2")
-	h.liveResponse("own-1", "the fork's first answer", forkTurn)
-	h.liveCut("cut-2")
-	h.liveResponse("old-3", "inherited, after the newest cut", "parent-turn-3")
-	h.liveResponse("own-2", "the fork's second answer", forkTurn)
-
-	// Assert: the newest inherited divider, the inherited turn after it, then
-	// the fork's own prompt and its answers, contiguous.
-	want := []string{
-		h.separationRowID("cut-2"), root("old-3"),
-		h.promptRowID(forkTurn), root("own-1"), root("own-2"),
+// walkRows opens the root feed and asks for older pages until the walk
+// reports the conversation's start, answering every row it served, oldest
+// first.
+func (h *harness) walkRows(reader ReaderID) []*frontendv1.FeedRow {
+	h.t.Helper()
+	page, _ := h.openPage(rootFeed(), reader)
+	served := slices.Clone(pageRows(h.t, page))
+	for range 32 {
+		if edgeOf(h.t, page) == "at_start" {
+			return served
+		}
+		page = h.nextPage(reader)
+		served = append(slices.Clone(pageRows(h.t, page)), served...)
 	}
-	if got := h.delivered(); !equalIDs(got, want) {
-		t.Fatalf("delivered = %v, want %v", got, want)
+	h.t.Fatal("the walk never reached the conversation's start")
+	return nil
+}
+
+// segment is one generation for NoteLineage.
+func segment(ws ids.WorkspaceID, book *conversationv1.AgentId, throughMs int64, uninherited ...ids.TurnID) LineageSegment {
+	open := map[ids.TurnID]bool{}
+	for _, turn := range uninherited {
+		open[turn] = true
+	}
+	return LineageSegment{Workspace: ws, Book: book, ThroughMs: throughMs, Uninherited: open}
+}
+
+func TestAForksWalkReadsItsParentsBookOnceItsOwnBookEnds(t *testing.T) {
+	// Arrange: the fork's own turn, and a parent book of one finished turn.
+	own := bookTurn(mainAgent(), "own-1", "own-answer")
+	h, store := forkHarness(t, 10, own,
+		[]LineageSegment{segment("ws-parent", parentBook, 10_000)},
+		map[string][]bookEntry{parentBook.GetValue(): bookTurn(parentBook, "parent-1", "parent-answer")})
+
+	// Act
+	rows := h.walkRows("reader-1")
+
+	// Assert: the parent's turn above the fork's own, both on the root feed.
+	ids := rowIDs(rows)
+	if !slices.Contains(ids, root("parent-answer")) || !slices.Contains(ids, root("own-answer")) {
+		t.Fatalf("rows = %v, want the parent's answer and the fork's own", ids)
+	}
+	if slices.Index(ids, root("parent-answer")) > slices.Index(ids, root("own-answer")) {
+		t.Fatalf("rows = %v, want the inherited answer above the fork's own", ids)
+	}
+	last := store.lastRead()
+	if !last.inherited || last.target != parentBook.GetValue() || last.through != 10_000 {
+		t.Fatalf("last read = %+v, want the parent's book through the fork's bound", last)
 	}
 }
 
-func TestAForksInheritedPastReplayedAroundItsOwnPromptStandsAboveIt(t *testing.T) {
-	// Arrange: a restart replays the fork's book, which holds the fork's own
-	// prompt BEFORE most of the copy (the book orders by first insert).
-	h := newForkHarness(t)
-	page := stampedPage(historyPage(&conversationv1.HistoryFloor{},
-		frameEntry(mainAgent(), &conversationv1.AgentUpdate{Update: &conversationv1.AgentUpdate_Activity{Activity: responseSuccessActivity("own-1", "the fork's answer")}}),
-		frameEntry(mainAgent(), &conversationv1.AgentUpdate{Update: &conversationv1.AgentUpdate_Activity{Activity: responseSuccessActivity("old-2", "after the cut")}}),
-		cutEntry(compactedCut("what survived")),
-		frameEntry(mainAgent(), &conversationv1.AgentUpdate{Update: &conversationv1.AgentUpdate_Activity{Activity: responseSuccessActivity("old-1", "before the cut")}}),
-		promptEntry(forkTurn, "the fork's own question"),
-	), forkTurn, "parent-turn-2", "", "parent-turn-1", forkTurn)
-	cutPointer := page.Entries[2].GetAt().GetValue()
+func TestAForksInheritedAnswerIsDrawnAsItsParentDrawsIt(t *testing.T) {
+	// Arrange: the same finished turn, once as a workspace's own book and once
+	// as a fork's inherited past.
+	plain := newHarness(t)
+	plainStore := plain.withHistory(newFakeHistory(10))
+	plainStore.books[""] = newestFirst(bookTurn(mainAgent(), "turn-1", "unit-1"))
+	fork, _ := forkHarness(t, 10, nil,
+		[]LineageSegment{segment("ws-parent", parentBook, 10_000)},
+		map[string][]bookEntry{parentBook.GetValue(): bookTurn(parentBook, "turn-1", "unit-1")})
+	fork.resolver.NoteFreshBook(testWorkspace)
 
-	// Act.
-	h.replay(page)
+	// Act
+	parentRows := plain.walkRows("reader-1")
+	forkRows := fork.walkRows("reader-1")
 
-	// Assert.
-	want := []string{h.separationRowID(cutPointer), root("old-2"), h.promptRowID(forkTurn), root("own-1")}
-	if got := h.delivered(); !equalIDs(got, want) {
-		t.Fatalf("delivered = %v, want %v", got, want)
+	// Assert: the answer is the green final answer in both, and the drawn
+	// prompt and answer are the same rows apart from where they are keyed.
+	if len(parentRows) != len(forkRows) {
+		t.Fatalf("parent drew %v, fork drew %v", rowIDs(parentRows), rowIDs(forkRows))
+	}
+	for i := range parentRows {
+		want, got := proto.Clone(parentRows[i]).(*frontendv1.FeedRow), proto.Clone(forkRows[i]).(*frontendv1.FeedRow)
+		want.Order, got.Order = nil, nil
+		if !proto.Equal(want, got) {
+			t.Fatalf("row %d differs:\nparent %v\nfork   %v", i, want, got)
+		}
+	}
+	if answer := fork.rowByID(rootFeed(), root("unit-1")); !answer.GetActivity().GetResponse().GetFinalAnswer() {
+		t.Fatalf("the inherited answer %v is not the final answer", answer)
 	}
 }
 
-func TestAForksInheritedPastIsNeverPushedLive(t *testing.T) {
-	// Arrange: a reader following the fork's feed through its first turn.
-	h := newForkHarness(t)
-	rows := h.follow(rootFeed(), "reader-1")
-	h.openForkTurn()
+func TestAForksWalkLeavesOutTheTurnsOpenWhenItWasTaken(t *testing.T) {
+	// Arrange: the parent's second turn was in flight at the fork.
+	books := append(bookTurn(parentBook, "parent-1", "done"), bookTurn(parentBook, "parent-2", "in-flight")...)
+	h, _ := forkHarness(t, 10, nil,
+		[]LineageSegment{segment("ws-parent", parentBook, 10_000, "parent-2")},
+		map[string][]bookEntry{parentBook.GetValue(): books})
+	h.resolver.NoteFreshBook(testWorkspace)
 
-	// Act.
-	h.liveResponse("old-1", "inherited", "parent-turn-1")
-	h.liveCut("cut-1")
-	h.liveResponse("own-1", "the fork's answer", forkTurn)
-	got := pushedBefore(t, rows, h.sendSentinel())
+	// Act
+	rows := rowIDs(h.walkRows("reader-1"))
 
-	// Assert: only the fork's own rows reached the wire, so nothing the reader
-	// holds is ever truncated by an inherited divider.
-	want := []string{h.promptRowID(forkTurn), root("own-1")}
-	if !equalIDs(got, want) {
-		t.Fatalf("pushed = %v, want %v", got, want)
+	// Assert
+	if !slices.Contains(rows, root("done")) || slices.Contains(rows, root("in-flight")) {
+		t.Fatalf("rows = %v, want the finished turn and not the one in flight", rows)
+	}
+	if !h.hasRecord("debug", "daemon.feed.uninherited_entries_dropped") {
+		t.Fatalf("records = %+v, want the dropped entries recorded", h.records())
 	}
 }
 
-func TestAnInheritedPromptNeverBecomesTheForksTurnInFlight(t *testing.T) {
-	// Arrange.
-	h := newForkHarness(t)
-	h.openForkTurn()
+func TestAForksWalkReadsNothingPlacedAfterTheForkPoint(t *testing.T) {
+	// Arrange: the parent's book holds two turns, placed from its generation's
+	// start 100 ms apart; the fork was taken after the first turn's terminal.
+	books := append(bookTurn(parentBook, "parent-1", "before"), bookTurn(parentBook, "parent-2", "after")...)
+	h, _ := forkHarness(t, 10, nil,
+		[]LineageSegment{segment("ws-parent", parentBook, generationStart(1)+200)},
+		map[string][]bookEntry{parentBook.GetValue(): books})
+	h.resolver.NoteFreshBook(testWorkspace)
 
-	// Act: the copy carries one of the parent's prompts.
-	h.deliverPrompt("parent-turn-1", "the parent's old question")
+	// Act
+	rows := rowIDs(h.walkRows("reader-1"))
 
-	// Assert.
-	h.resolver.mu.Lock()
-	defer h.resolver.mu.Unlock()
-	if turn := h.resolver.state(testWorkspace).turnInFlight; turn == nil || *turn != forkTurn {
-		t.Fatalf("turn in flight = %v, want the fork's own %q", turn, forkTurn)
+	// Assert
+	if !slices.Contains(rows, root("before")) || slices.Contains(rows, root("after")) {
+		t.Fatalf("rows = %v, want only the turn before the fork point", rows)
 	}
 }
 
-func TestAnInheritedPromptIsDrawnSettled(t *testing.T) {
-	// Arrange.
-	h := newForkHarness(t)
-	h.openForkTurn()
+func TestAForksWalkCrossesEveryGenerationToTheStart(t *testing.T) {
+	// Arrange: fork -> parent -> grandparent, a page of two entries each.
+	h, store := forkHarness(t, 2, bookTurn(mainAgent(), "own-1", "own"),
+		[]LineageSegment{
+			segment("ws-parent", parentBook, 10_000),
+			segment("ws-grandparent", grandparentBook, 10_000),
+		},
+		map[string][]bookEntry{
+			parentBook.GetValue():      bookTurn(parentBook, "parent-1", "from-parent"),
+			grandparentBook.GetValue(): bookTurn(grandparentBook, "grand-1", "from-grandparent"),
+		})
 
-	// Act.
-	h.deliverPrompt("parent-turn-1", "the parent's old question")
+	// Act
+	rows := rowIDs(h.walkRows("reader-1"))
 
-	// Assert: the parent's turn ended in the parent; nothing here runs it.
-	if h.promptWorking("parent-turn-1") {
-		t.Fatal("an inherited prompt is drawn working")
+	// Assert: every generation, oldest at the top.
+	want := []string{root("from-grandparent"), root("from-parent"), root("own")}
+	var got []string
+	for _, id := range rows {
+		if slices.Contains(want, id) {
+			got = append(got, id)
+		}
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("answers in order = %v, want %v (rows %v)", got, want, rows)
+	}
+	var targets []string
+	for _, read := range store.reads {
+		if read.inherited && read.after == "" {
+			targets = append(targets, read.target)
+		}
+	}
+	if !slices.Equal(targets, []string{parentBook.GetValue(), grandparentBook.GetValue()}) {
+		t.Fatalf("generations entered = %v, want parent then grandparent", targets)
 	}
 }
 
-func TestAForksOwnCutHidesItsWholeInheritedPast(t *testing.T) {
-	// Arrange: inherited rows, then the fork's own compaction during its turn.
-	h := newForkHarness(t)
-	h.openForkTurn()
-	h.liveResponse("old-1", "inherited", "parent-turn-1")
-
-	// Act: the shim stamps the fork's own cut with the fork's turn.
-	h.resolver.OnContextCut(testWorkspace, mainAgent(), compactedCut("the fork's own"),
-		&conversationv1.HistoryPointer{Value: "own-cut"}, &conversationv1.TurnId{Value: forkTurn}, nil)
-
-	// Assert: the feed begins at the fork's own divider.
-	want := []string{h.separationRowID("own-cut")}
-	if got := h.delivered(); !equalIDs(got, want) {
-		t.Fatalf("delivered = %v, want %v", got, want)
-	}
-}
-
-func TestANonForkDrawsAnUnrecordedTurnAsItsOwn(t *testing.T) {
-	// Arrange: no ported conversation, so the workspace inherited nothing.
+func TestAWorkspaceThatIsNoForkStopsAtItsOwnStart(t *testing.T) {
+	// Arrange
 	h := newHarness(t)
-	h.owned = map[ids.TurnID]bool{}
-	rows := h.follow(rootFeed(), "reader-1")
+	store := h.mainBook(10, bookTurn(mainAgent(), "turn-1", "unit-1"))
 
-	// Act.
-	h.liveResponse("unit-1", "an adopted turn's answer", "never-recorded")
-	got := pushedBefore(t, rows, h.sendSentinel())
+	// Act
+	h.walkRows("reader-1")
 
-	// Assert: drawn live and pushed, as before forks were told apart.
-	want := []string{root("unit-1")}
-	if !equalIDs(got, want) {
-		t.Fatalf("pushed = %v, want %v", got, want)
+	// Assert
+	for _, read := range store.reads {
+		if read.inherited {
+			t.Fatalf("reads = %+v, want no inherited read", store.reads)
+		}
 	}
 }
 
-func TestAnUnreadableTurnOwnershipIsRecordedAndDrawnAsTheForksOwn(t *testing.T) {
-	// Arrange.
-	h := newForkHarness(t)
-	h.ownedErr = errors.New("the state database is unreadable")
+func TestAnInheritedPromptIsNoRollbackTarget(t *testing.T) {
+	// Arrange
+	h, _ := forkHarness(t, 10, nil,
+		[]LineageSegment{segment("ws-parent", parentBook, 10_000)},
+		map[string][]bookEntry{parentBook.GetValue(): bookTurn(parentBook, "parent-1", "unit-1")})
+	h.resolver.NoteFreshBook(testWorkspace)
+	h.walkRows("reader-1")
 
-	// Act.
-	h.liveResponse("unit-1", "an answer", "parent-turn-1")
-
-	// Assert.
-	if !h.hasRecord("error", "daemon.feed.turn_ownership_unreadable") {
-		t.Fatalf("records = %+v, want the failed ownership read at ERROR", h.records())
-	}
+	// Act
 	h.resolver.mu.Lock()
-	plane := h.resolver.feed(h.resolver.state(testWorkspace), rootFeed()).rank[root("unit-1")].plane
+	prompts := h.resolver.rollbackPrompts(h.resolver.state(testWorkspace))
 	h.resolver.mu.Unlock()
-	if plane != planeLive {
-		t.Fatalf("plane = %s, want the entry drawn as the fork's own (live)", plane)
+
+	// Assert
+	if len(prompts) != 0 {
+		t.Fatalf("rollback prompts = %+v, want none of the inherited past", prompts)
 	}
 }
 
-func TestAnUnreadableForkFactIsRecorded(t *testing.T) {
-	// Arrange.
+func TestNoteLineageRecordsTheGenerations(t *testing.T) {
+	// Arrange
 	h := newHarness(t)
-	h.portedErr = errors.New("the state database is unreadable")
 
-	// Act.
-	h.liveResponse("unit-1", "an answer", "turn-1")
+	// Act
+	h.resolver.NoteLineage(testWorkspace, []LineageSegment{segment("ws-parent", parentBook, 1)})
 
-	// Assert.
-	if !h.hasRecord("error", "daemon.feed.fork_unreadable") {
-		t.Fatalf("records = %+v, want the failed fork read at ERROR", h.records())
+	// Assert
+	if !h.hasRecordWith("info", "daemon.feed.lineage", "generations", 1) {
+		t.Fatalf("records = %+v, want the lineage recorded with its generations", h.records())
 	}
 }
 
-// inherits is the ONE classification; each case is one entry's standing.
-func TestInheritsClassifiesByForkAgentAndTurn(t *testing.T) {
+func TestAgentFeedPlacesAnInheritedBooksRowsOnTheRoot(t *testing.T) {
 	cases := []struct {
-		name  string
-		fork  bool
-		agent string
-		turn  ids.TurnID
-		want  bool
+		name string
+		id   string
+		want feedid.Feed
 	}{
-		{name: "a non-fork inherits nothing", fork: false, agent: "agent-main", turn: "parent-turn", want: false},
-		{name: "a fork's unstamped main entry is inherited", fork: true, agent: "agent-main", turn: "", want: true},
-		{name: "a fork's own turn is not inherited", fork: true, agent: "agent-main", turn: forkTurn, want: false},
-		{name: "a fork's main entry of a turn it never opened is inherited", fork: true, agent: "agent-main", turn: "parent-turn", want: true},
-		{name: "a subagent's entry is never inherited", fork: true, agent: "agent-sub", turn: "parent-turn", want: false},
+		{name: "the main agent", id: mainAgent().GetValue(), want: feedid.Feed{Root: true}},
+		{name: "an inherited book", id: parentBook.GetValue(), want: feedid.Feed{Root: true}},
+		{name: "a subagent", id: "agent-sub", want: feedid.Feed{Agent: &conversationv1.AgentId{Value: "agent-sub"}}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			// Arrange.
+			// Arrange
 			h := newHarness(t)
-			if tc.fork {
-				h = newForkHarness(t)
-			}
-			h.resolver.learnLineage(testWorkspace, tc.turn)
-
-			// Act.
+			h.resolver.NoteLineage(testWorkspace, []LineageSegment{segment("ws-parent", parentBook, 1)})
 			h.resolver.mu.Lock()
-			got := h.resolver.inherits(h.resolver.state(testWorkspace), &conversationv1.AgentId{Value: tc.agent}, tc.turn)
+			s := h.resolver.state(testWorkspace)
+
+			// Act
+			got, err := s.agentFeed(tc.id)
+			rootAgent := s.rootFeedAgent(tc.id)
 			h.resolver.mu.Unlock()
 
-			// Assert.
-			if got != tc.want {
-				t.Fatalf("inherits = %v, want %v", got, tc.want)
+			// Assert
+			if err != nil || got.Root != tc.want.Root || got.Agent.GetValue() != tc.want.Agent.GetValue() {
+				t.Fatalf("agentFeed(%q) = (%+v, %v), want %+v", tc.id, got, err, tc.want)
+			}
+			if rootAgent != tc.want.Root {
+				t.Fatalf("rootFeedAgent(%q) = %v, want %v", tc.id, rootAgent, tc.want.Root)
 			}
 		})
 	}
 }
 
-// entryClass reads the agent and turn off each arm of an entry.
-func TestEntryClassNamesEachArmsAgentAndTurn(t *testing.T) {
-	sub := &conversationv1.AgentId{Value: "agent-sub"}
-	cases := []struct {
-		name      string
-		at        *conversationv1.HistoryEntryAt
-		wantAgent string
-		wantTurn  ids.TurnID
-	}{
-		{
-			name:      "a prompt is its recipient's, under its own turn",
-			at:        &conversationv1.HistoryEntryAt{Entry: promptEntry("turn-p", "hi"), Turn: &conversationv1.TurnId{Value: "ignored"}},
-			wantAgent: "agent-main", wantTurn: "turn-p",
-		},
-		{
-			name:      "a frame is its own agent's, under its stamp",
-			at:        &conversationv1.HistoryEntryAt{Entry: frameEntry(sub, completed("")), Turn: &conversationv1.TurnId{Value: "turn-f"}},
-			wantAgent: "agent-sub", wantTurn: "turn-f",
-		},
-		{
-			name: "a peer message is its recipient's, under its stamp",
-			at: &conversationv1.HistoryEntryAt{Entry: &conversationv1.HistoryEntry{Entry: &conversationv1.HistoryEntry_PeerMessage{
-				PeerMessage: &conversationv1.PeerMessage{Agent: mainAgent(), Id: "peer-1"},
-			}}},
-			wantAgent: "agent-main", wantTurn: "",
-		},
+func TestInheritedEntriesDropsTheTurnHeadsOfUninheritedTurns(t *testing.T) {
+	// Arrange
+	keep := newestFirst(bookTurn(parentBook, "keep", "k"))
+	drop := newestFirst(bookTurn(parentBook, "drop", "d"))
+	head := func(at *conversationv1.HistoryEntryAt) *conversationv1.HistoryTurnHead {
+		return &conversationv1.HistoryTurnHead{Entry: at, Between: &conversationv1.HistoryTurnHead_Adjacent{Adjacent: &conversationv1.HistoryTurnHeadAdjacent{}}}
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Act.
-			agent, turn := entryClass(tc.at, mainAgent())
+	// newestFirst answers each turn prompt last: the head is that prompt, and
+	// the page holds the turn's other entries.
+	page := &conversationv1.HistoryPage{
+		Entries: append(append([]*conversationv1.HistoryEntryAt{}, drop[:len(drop)-1]...), keep[:len(keep)-1]...),
+		Heads:   []*conversationv1.HistoryTurnHead{head(drop[len(drop)-1]), head(keep[len(keep)-1])},
+	}
 
-			// Assert.
-			if agent.GetValue() != tc.wantAgent || turn != tc.wantTurn {
-				t.Fatalf("entryClass = (%q, %q), want (%q, %q)", agent.GetValue(), turn, tc.wantAgent, tc.wantTurn)
-			}
-		})
+	// Act
+	kept, dropped := inheritedEntries(page, map[ids.TurnID]bool{"drop": true})
+
+	// Assert
+	if len(kept.GetHeads()) != 1 || entryTurn(kept.GetHeads()[0].GetEntry()) != "keep" {
+		t.Fatalf("heads = %v, want only the inherited turn's", kept.GetHeads())
+	}
+	if want := len(drop) - 1 + 1; dropped != want {
+		t.Fatalf("dropped = %d, want %d (the turn's entries and its head)", dropped, want)
+	}
+}
+
+func TestInheritedEntriesKeepsTheBoundaryAndDropsOnlyUninheritedTurns(t *testing.T) {
+	// Arrange
+	entries := newestFirst(append(bookTurn(parentBook, "keep", "k"), bookTurn(parentBook, "drop", "d")...))
+	page := &conversationv1.HistoryPage{
+		Entries:  entries,
+		Boundary: &conversationv1.HistoryPage_More{More: &conversationv1.HistoryMore{LastEntry: entries[len(entries)-1].GetAt()}},
+	}
+
+	// Act
+	kept, dropped := inheritedEntries(page, map[ids.TurnID]bool{"drop": true})
+
+	// Assert
+	if dropped != 3 || len(kept.GetEntries()) != 3 {
+		t.Fatalf("kept %d dropped %d, want three of each", len(kept.GetEntries()), dropped)
+	}
+	for _, at := range kept.GetEntries() {
+		if entryTurn(at) != "keep" {
+			t.Fatalf("kept an entry of %q", entryTurn(at))
+		}
+	}
+	if kept.GetMore().GetLastEntry().GetValue() != page.GetMore().GetLastEntry().GetValue() {
+		t.Fatal("the page's boundary was not kept")
+	}
+	if same, n := inheritedEntries(page, nil); same != page || n != 0 {
+		t.Fatal("a page with nothing uninherited was not answered unchanged")
 	}
 }

@@ -78,10 +78,9 @@ func (r *resolver) drawAgentPrompt(s *wsState, agent *conversationv1.AgentId, pr
 				s.replayPromptDrawn = true
 			}
 			if s.plane == planeInherited {
-				// A FORK'S INHERITED TURN RAN IN ITS PARENT and ended there: no
-				// terminal of it is owed to this feed, so its prompt is drawn
-				// settled — the same as a ported prompt — and it retires no fault
-				// of the fork's own, because it starts no turn here.
+				// A FORK'S INHERITED TURN RAN IN ITS PARENT and ended there: its
+				// prompt is drawn settled, and it retires no fault of the fork's
+				// own, because it starts no turn here.
 				s.endedTurns[running] = true
 			} else {
 				// A STANDING FINAL-ANSWER FAULT IS ABOUT THE TURN THAT ENDED, and
@@ -297,34 +296,7 @@ func (r *resolver) settleTurnPrompts(s *wsState, turn ids.TurnID) {
 		dlog.Context{"turn": string(turn), "rows": settled})
 }
 
-// drawPortedPrompt draws one row of a FORK'S PORTED CONVERSATION: a question
-// the PARENT was asked, carried over under the child's own turn id.
-//
-// IT NEVER OPENS A TURN. A delivered prompt teaches the resolver which turn
-// the session is running; a ported one is history that was settled in another
-// workspace, and treating it as in flight would leave the child stamping its
-// own rows with a turn that ended before it existed.
-func (r *resolver) drawPortedPrompt(s *wsState, prompt PortedPrompt) {
-	turn := &conversationv1.TurnId{Value: prompt.Turn}
-	// A PORTED TURN ENDED IN THE PARENT, so its prompt is drawn settled: no
-	// terminal for it will ever reach this workspace to end it here.
-	if prompt.Turn != "" {
-		s.endedTurns[ids.TurnID(prompt.Turn)] = true
-		s.knowTurn(ids.TurnID(prompt.Turn))
-	}
-	at := r.outputPlacement(s, turnOf(turn))
-	said := SaidText(prompt.Text)
-	blocks := r.drawUserBlocks(s, said.GetContent())
-	row := r.userPromptRow(s, at, turn, turn, prompt.Origin, said, blocks)
-	r.logger(s.id).Debug("daemon.feed.ported_prompt",
-		"a prompt ported from the parent workspace was drawn on the fork's feed",
-		dlog.Context{"turn": prompt.Turn, "origin": prompt.Origin.String(), "blocks": len(blocks)})
-	r.upsert(s, at, row, true)
-}
-
-// SaidText composes the one canonical prompt form from plain text. A ported
-// row carries the text the parent recorded and nothing else, so the content it
-// is drawn from is built here rather than stored twice.
+// SaidText composes the one canonical prompt form from plain text.
 func SaidText(text string) *conversationv1.UserSaid {
 	return &conversationv1.UserSaid{
 		Content: &conversationv1.UserContent{

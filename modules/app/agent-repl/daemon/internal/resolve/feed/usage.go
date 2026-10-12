@@ -48,11 +48,13 @@ func (s *wsState) usageAccount(agent *conversationv1.AgentId) string {
 	return "agent\x00" + agent.GetValue()
 }
 
-// isMainAgent reports whether AGENT is the session's main agent: the one the
-// watcher named, or any agent while none is named yet, or an unnamed one.
+// isMainAgent reports whether AGENT's rows are the root feed's: the session's
+// main agent (the one the watcher named, or any agent while none is named yet,
+// or an unnamed one), or the book of a generation a fork inherited from
+// (rootFeedAgent), whose rows read exactly as they do in the parent.
 func (s *wsState) isMainAgent(agent *conversationv1.AgentId) bool {
 	id := agent.GetValue()
-	return id == "" || s.mainAgent == "" || id == s.mainAgent
+	return id == "" || s.mainAgent == "" || s.rootFeedAgent(id)
 }
 
 // recordUsage files one unit's usage in its agent's account. It reports the

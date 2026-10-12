@@ -38,7 +38,7 @@ CREATE TABLE reveal_gaps (
 // averaged into the reveal window of the build before layout 31.
 // A new table rather than a reset of reveal_gaps, so the build handing over
 // can never write a per-fragment gap where this build reads burst gaps. Kept
-// apart from the rest of the schema for the reason portedPromptsDDL is: a
+// apart from the rest of the schema for the reason forkLineageDDL is: a
 // fresh file gets it as part of schemaDDL, a layout-29 file from the 29 -> 30
 // migration.
 //
@@ -64,7 +64,7 @@ CREATE TABLE reveal_burst_gaps (
 // the daemon serves as frontend.v1.FeedResponseRevealPace (internal/revealpace).
 // A new table rather than a reuse of reveal_burst_gaps, so the build handing
 // over can never write a gap where this build reads a speed. Kept apart from
-// the rest of the schema for the reason portedPromptsDDL is: a fresh file gets
+// the rest of the schema for the reason forkLineageDDL is: a fresh file gets
 // it as part of schemaDDL, a layout-30 file from the 30 -> 31 migration.
 //
 // A window is its rows in position order, oldest first. It belongs to no

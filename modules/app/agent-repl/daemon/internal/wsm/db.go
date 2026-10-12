@@ -242,22 +242,25 @@ type DB interface {
 	// it to tell a conversation that was never engaged from one that was, and
 	// a listing would make that answer cost the whole table.
 	HasTurns(ctx context.Context, id WorkspaceID) (bool, error)
-	// PutPortedPrompts writes a fork's whole ported conversation in one
-	// transaction: the parent's prompt rows, re-minted under the child's own
-	// turn identities. All or nothing.
-	PutPortedPrompts(ctx context.Context, id WorkspaceID, rows []PortedPrompt) error
-	// PortedPrompts loads one workspace's ported conversation, oldest first.
-	PortedPrompts(ctx context.Context, id WorkspaceID) ([]PortedPrompt, error)
-	// ConversationPrompts is what a FORK of this workspace inherits: what this
-	// workspace itself inherited followed by every prompt of its own, in one
-	// order with contiguous ordinals.
-	ConversationPrompts(ctx context.Context, id WorkspaceID) ([]PortedPrompt, error)
-	// RecentConversationPrompts is a BOUNDED ConversationPrompts: the same rows,
-	// truncated to the most recent `limit`, oldest first, read with a SQL LIMIT
-	// on each table rather than a whole-history load. It is for a reader that
-	// only ever needs the newest rows, such as the fork-naming digest; it never
-	// changes what a fork inherits, which still reads ConversationPrompts.
-	RecentConversationPrompts(ctx context.Context, id WorkspaceID, limit int) ([]PortedPrompt, error)
+	// RecentConversationPrompts answers the most recent `limit` prompts of a
+	// workspace's conversation, oldest first: its own turns and, when those
+	// fall short, the turns it inherited through its fork lineage.
+	RecentConversationPrompts(ctx context.Context, id WorkspaceID, limit int) ([]ConversationPrompt, error)
+	// BindSession records a workspace's session bound to a different
+	// conversation and, in the same transaction, forgets the fork the
+	// workspace was: its lineage and any fork it still owed.
+	BindSession(ctx context.Context, sess Session) error
+	// PutPendingFork records that a workspace is to be forked from its parent
+	// at its first bring-up.
+	PutPendingFork(ctx context.Context, fork PendingFork) error
+	// PendingFork answers the fork a workspace still owes, if any.
+	PendingFork(ctx context.Context, id WorkspaceID) (PendingFork, bool, error)
+	// ResolveFork records a made fork in one transaction: the session's vendor
+	// id, the lineage, and the pending fork's retirement.
+	ResolveFork(ctx context.Context, vendorSessionID string, lineage ForkLineage) error
+	// Lineage answers where a workspace's inherited past is read from, nearest
+	// generation first; empty for a workspace never forked.
+	Lineage(ctx context.Context, id WorkspaceID) ([]ForkLineage, error)
 	// AllDisplacedTurns loads every turn still marked displaced, across every
 	// workspace and REGARDLESS of whether the turn is still open: a merge
 	// displaces a turn by ending it, so the record a boot has to put back is
