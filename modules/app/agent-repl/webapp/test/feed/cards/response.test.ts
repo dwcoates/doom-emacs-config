@@ -52,6 +52,8 @@ import {
 } from "../../../src/bubble/draw.js";
 import { BUBBLE_BOX_CLASS, BUBBLE_SCROLL_CLASS } from "../../../src/feed/bubble-scroll.js";
 import { captureLogRecords, forwardedRecord } from "../../log-capture.js";
+import { fakePageSeen } from "../../page-seen-fake.js";
+import type { PageSeen } from "../../../src/page-seen.js";
 import { orderFor } from "../../feed-order.js";
 
 const SINK: FailureSink = { report: () => {}, retract: () => {} };
@@ -59,8 +61,8 @@ const SINK: FailureSink = { report: () => {}, retract: () => {} };
 /** The reveal pace every live draw carries: the daemon's thinking default. */
 const PACE = { minCharsPerSecond: 45, maxCharsPerSecond: 55, bankLimitMs: 1500 };
 
-/** A row context; the response card calls no verb of its own. */
-function rowContext(previous?: HTMLElement): RowContext {
+/** A row context on a page SEEN says; the response card calls no verb of its own. */
+function rowContext(previous?: HTMLElement, seen: PageSeen = fakePageSeen()): RowContext {
   const transport = createRouterTransport(({ service }) => {
     service(AgentRepl, {});
   });
@@ -70,6 +72,7 @@ function rowContext(previous?: HTMLElement): RowContext {
       workspace: create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" }),
       ticker: createTicker(1000),
       failures: SINK,
+      seen,
       composerEnabled: false,
     }),
     feed: "root",
@@ -2032,6 +2035,103 @@ describe("the type-out of a collapsed bubble", () => {
       "row-1",
       RENDERED_LONG,
     ]);
+  });
+});
+
+/**
+ * AN UNSEEN PAGE DOES NOT TYPE (owner request, 2026-10-12): a draw on a page
+ * no reader can see is drawn whole, and a page turning unseen mid-reveal draws
+ * the rest whole at once.
+ */
+describe("the type-out of a page no reader can see", () => {
+  /** Enough prose that a first frame reveals only a small part of it. */
+  const LONG = "x".repeat(5000);
+  /** LONG's rendered length: markdown-it ends its paragraph with a newline. */
+  const RENDERED_LONG = LONG.length + 1;
+  /** A few animation frames of the faked clock. */
+  const FRAME_MS = 100;
+
+  /** An arriving, uncapped answer holding LONG, mounted on a page SEEN says. */
+  function arriving(seen: PageSeen): HTMLElement {
+    const el = drawFeedResponse(
+      response({ result: { case: "update", value: { prose: { markdown: LONG }, revealPace: PACE } } }),
+      rowContext(undefined, seen),
+    );
+    mount(el);
+    return el;
+  }
+
+  /** The characters ELEMENT has revealed so far. */
+  const revealed = (el: HTMLElement): number => Number(el.getAttribute(REVEALED_ATTRIBUTE));
+
+  it("draws the arriving prose whole on an unseen page", () => {
+    // Arrange
+    const el = arriving(fakePageSeen(false));
+    // Act
+    vi.advanceTimersByTime(FRAME_MS);
+    // Assert
+    expect(revealed(el)).toBe(RENDERED_LONG);
+  });
+
+  it("draws the rest whole the moment the page turns unseen mid-reveal", () => {
+    // Arrange
+    const seen = fakePageSeen(true);
+    const el = arriving(seen);
+    vi.advanceTimersByTime(FRAME_MS);
+    // Act
+    seen.set(false);
+    vi.advanceTimersByTime(FRAME_MS);
+    // Assert
+    expect(revealed(el)).toBe(RENDERED_LONG);
+  });
+
+  it("keeps typing on a page that stays seen", () => {
+    // Arrange
+    const el = arriving(fakePageSeen(true));
+    // Act
+    vi.advanceTimersByTime(FRAME_MS);
+    // Assert
+    expect([revealed(el) > 0, revealed(el) < RENDERED_LONG]).toEqual([true, true]);
+  });
+
+  it("records drawing whole on an unseen page with the row", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    // Act
+    arriving(fakePageSeen(false));
+    // Assert
+    const record = await forwardedRecord(capture, "feed.cards.response.unseen");
+    expect([record.level.case, record.context?.row]).toEqual(["debug", "row-1"]);
+  });
+
+  it("records the page turning unseen with how far the type-out had reached", async () => {
+    // Arrange
+    const seen = fakePageSeen(true);
+    arriving(seen);
+    vi.advanceTimersByTime(FRAME_MS);
+    const capture = captureLogRecords("debug");
+    // Act
+    seen.set(false);
+    // Assert
+    const record = await forwardedRecord(capture, "feed.cards.response.unseen");
+    expect([record.context?.row, Number(record.context?.shown) > 0]).toEqual(["row-1", true]);
+  });
+
+  it("leaves a finished reveal alone when the page later turns unseen", () => {
+    // Arrange: a later push owns the body, so the first loop is over.
+    const seen = fakePageSeen(true);
+    const first = arriving(seen);
+    vi.advanceTimersByTime(FRAME_MS);
+    const again = drawFeedResponse(
+      response({ result: { case: "update", value: { prose: { markdown: LONG + "y" }, revealPace: PACE } } }),
+      rowContext(first, seen),
+    );
+    vi.advanceTimersByTime(FRAME_MS);
+    const before = revealed(again);
+    seen.set(false);
+    // Act: the newer loop draws whole; the older one must not redraw over it.
+    // Assert
+    expect([before < RENDERED_LONG + 1, revealed(again)]).toEqual([true, RENDERED_LONG + 1]);
   });
 });
 

@@ -686,7 +686,14 @@ function cutShortMarker(): HTMLElement {
  * resumes from that whole and stops on its own first frame, so the bubble
  * lands as the text arrives. Until the cap is reached it types out as before,
  * and an expanded bubble (open folds never show more) or an uncapped one (the
- * final answer) types out to the end.
+ * final answer) types out to the end. *
+ * AN UNSEEN PAGE DOES NOT TYPE (owner request, 2026-10-12). The type-out is
+ * for a reader watching, and nobody watches a workspace that is not on screen
+ * (src/page-seen.ts); WebKit also suspends a hidden page's frames, so a reveal
+ * begun there would still be typing when the reader switched in. A draw on an
+ * unseen page is drawn whole, and a page turning unseen mid-reveal draws the
+ * rest whole at once, so the reader switching in finds everything that has
+ * arrived.
  */
 function animate(
   bubble: HTMLElement,
@@ -707,6 +714,17 @@ function animate(
     return;
   }
 
+  const seen = rc.ctx.seen;
+  const row = rc.row.id?.value ?? "unset";
+  if (!seen.isSeen()) {
+    log.debug("the page is unseen; drawing the arriving prose whole", {
+      operation: "feed.cards.response.unseen",
+      context: { row, resumed },
+    });
+    showWhole(bubble, body, slot);
+    return;
+  }
+
   // The first frame's step is measured from the push's draw.
   let last = rc.ctx.ticker.now();
   let shown = resumed;
@@ -718,10 +736,34 @@ function animate(
   // A later paint of this same body (an in-place update) owns it from then on,
   // so this loop never reveals the previous push's prose over it.
   const generation = paintGeneration(body);
-  const step = (): void => {
-    if (paintGeneration(body) !== generation) return;
+  let over = false;
+  const unsubscribe = seen.onChange((nowSeen) => {
+    if (nowSeen || over) return;
+    end();
+    if (superseded()) return;
+    log.debug("the page turned unseen mid-reveal; drawing the rest of the arriving prose whole", {
+      operation: "feed.cards.response.unseen",
+      context: { row, shown: Math.floor(shown) },
+    });
+    showWhole(bubble, body, slot);
+  });
+  /** This loop is over: no further frame, and no unseen turn, acts on it. */
+  function end(): void {
+    over = true;
+    unsubscribe();
+  }
+  /** Whether a later push now owns the body, or the bubble was replaced. */
+  function superseded(): boolean {
+    if (paintGeneration(body) !== generation) return true;
     if (bubble.isConnected) mounted = true;
-    else if (mounted) return;
+    return !bubble.isConnected && mounted;
+  }
+  const step = (): void => {
+    if (over) return;
+    if (superseded()) {
+      end();
+      return;
+    }
     const text = slotText(slot);
     if (text === undefined) {
       whenSlotPainted(slot, () => frame(step));
@@ -733,12 +775,16 @@ function animate(
     const done = shown >= text.length;
     revealSlot(body, slot, done ? undefined : Math.floor(shown));
     markRevealed(bubble, Math.floor(shown));
-    if (done) return;
+    if (done) {
+      end();
+      return;
+    }
     if (shouldShowMore(box)) {
       log.debug("a collapsed bubble is full; drawing the rest of the arriving prose whole", {
         operation: "feed.cards.response.collapsed-full",
-        context: { row: rc.row.id?.value ?? "unset", shown, total: text.length },
+        context: { row, shown, total: text.length },
       });
+      end();
       showWhole(bubble, body, slot);
       return;
     }
