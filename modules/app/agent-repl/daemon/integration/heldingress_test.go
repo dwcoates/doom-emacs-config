@@ -279,7 +279,7 @@ func TestAPromptHeldAcrossAShutdownIsDeliveredWhenTheNextSessionComesUp(t *testi
 	t.Parallel()
 	// Arrange: the daemon stands down with no turn running, and the client
 	// writes a prompt while none serves.
-	f := newOpened(t, harness.Opts{})
+	f := newOpened(t, harness.Opts{DurableState: true})
 	f.shim.ExpectStartSession()
 	shutdownNow(t, f.d)
 	heldWrite(t, f.d.StateDir, "held_20261012T120001.000000001_aaaaaaaa_k-across.json", f.repo.Dir, "k-across", "written across the restart")
