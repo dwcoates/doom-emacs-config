@@ -594,11 +594,7 @@ func (r *run) speculativeGate(ctx context.Context, place chainPlace, targetBranc
 			"workspace": string(r.ws), "base": place.base, "head": head, "tree": tree, "rank": place.rank})
 		return nil, r.checkpoint(ctx, TabTests, nil)
 	case r.fixesUsed >= MaxFixAttempts:
-		summary := fmt.Sprintf("the tests still fail after %d fixing attempts; the whole run is archived at %s", MaxFixAttempts, verdict.result.ArchivePath)
-		r.o.log(ctx, r.ws).Info("daemon.merge.fixes", "the last fixing attempt left suites failing; the merge fails", dlog.Context{
-			"workspace": string(r.ws), "attempts": MaxFixAttempts, "archive": verdict.result.ArchivePath, "speculative": true})
-		r.settleTesting(summary)
-		out := failedIn(footer.FailedTests, summary)
+		out := r.fixesExhausted(ctx, verdict.result.ArchivePath, dlog.Context{"speculative": true})
 		return &out, nil
 	}
 	attempt := r.fixesUsed + 1

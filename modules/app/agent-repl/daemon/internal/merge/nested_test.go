@@ -2,12 +2,16 @@ package merge
 
 import (
 	"context"
+	"os"
 	"slices"
+	"strings"
 	"testing"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/gitclient"
+	"agent-repld/internal/resolve/footer"
 )
 
 func TestSpanRelive(t *testing.T) {
@@ -468,5 +472,51 @@ func TestAMergeThatStartsOverReplaysUnderTheSameRebasingTab(t *testing.T) {
 	}
 	if runs := h.feed.labelsOfKind(rowTestsRun); !slices.Equal(runs, []string{"run 1", "run 2"}) {
 		t.Fatalf("runs = %v, want both attempts' runs", runs)
+	}
+}
+
+func TestFixesExhaustedFailsTheMergeRecordsItAndSettlesTheTestsTab(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	r := ledgeredRun(t, h)
+	r.testing.Span = span{StartedMS: 1}
+
+	// Act
+	out := r.fixesExhausted(context.Background(), "/a/log", dlog.Context{"speculative": true})
+
+	// Assert
+	want := "the tests still fail after 3 fixing attempts; the whole run is archived at /a/log"
+	if out.failed != want || out.area != footer.FailedTests {
+		t.Fatalf("outcome = %+v, want the tests failure %q", out, want)
+	}
+	record, found := h.recordFor("info", "daemon.merge.fixes")
+	if !found || record.Context["archive"] != "/a/log" || record.Context["speculative"] != true {
+		t.Fatalf("record = %+v, want the archive and the extra field", record)
+	}
+	if !r.testing.Span.settled() || r.testing.Span.Failure != want {
+		t.Fatalf("tests tab = %+v, want it settled failed with the summary", r.testing.Span)
+	}
+}
+
+// Both gates give up through fixesExhausted; a hand-rolled copy of its
+// summary anywhere else would drift from it.
+func TestEveryExhaustedGateGivesUpThroughFixesExhausted(t *testing.T) {
+	// Arrange
+	sources := []string{"process.go", "chain.go"}
+
+	// Act
+	calls, copies := 0, 0
+	for _, name := range sources {
+		body, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatalf("reading %s: %v", name, err)
+		}
+		calls += strings.Count(string(body), "r.fixesExhausted(")
+		copies += strings.Count(string(body), "fixing attempts; the whole run is archived")
+	}
+
+	// Assert: two callers, and the summary spelled once, in the helper.
+	if calls != 2 || copies != 1 {
+		t.Fatalf("fixesExhausted calls = %d, summary spellings = %d; want 2 and 1", calls, copies)
 	}
 }
