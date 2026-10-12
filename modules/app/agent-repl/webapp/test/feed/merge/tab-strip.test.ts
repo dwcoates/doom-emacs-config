@@ -65,7 +65,7 @@ describe("readMergeTab: the arms are read from the contract", () => {
     "holds to the schema: the %s tab is live or settled, since nothing parks, and an agentic step that asks can wait on the user",
     (kind, field) => {
       const message = field.fieldKind === "message" ? field.message : undefined;
-      const want = kind === "conflicts" || kind === "fixes" ? ["live", "settled", "waitingOnUser"] : ["live", "settled"];
+      const want = kind === "pick" || kind === "conflicts" || kind === "fixes" ? ["live", "settled", "waitingOnUser"] : ["live", "settled"];
       expect(message === undefined ? [] : [...oneofArms(message, "state")].sort()).toEqual(want);
     },
   );

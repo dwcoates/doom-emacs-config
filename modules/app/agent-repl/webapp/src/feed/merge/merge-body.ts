@@ -10,11 +10,14 @@
  *
  * TWO TAB SHAPES, ONE STRIP. RESOLVED tabs (queue, rebasing, tests,
  * committing, updating main) carry their content in the tab row itself,
- * replaced whole per push. AGENTIC tabs (pre-prompt, conflicts, fixes,
+ * replaced whole per push. AGENTIC tabs (pick, pre-prompt, conflicts, fixes,
  * post-prompt) are CONTAINERS: their content is the sub-feed rows parented to
  * the tab row, drawn through `view.drawRow` — the ordinary row path, chrome
  * included — which is what keeps a merge agent's conversation identical to
- * any other agent's. A fixes tab also names its attempt above its rows.
+ * any other agent's, whether it runs in this workspace (a sync merge) or in a
+ * hidden merge workspace whose turns the daemon mirrors here (an async merge).
+ * A fixes tab also names its attempt above its rows, and a LIVE agentic tab
+ * offers "stop" above them (stop-control.ts), aimed at the tab itself.
  *
  * SELECTION IS LOCAL AND THE READER'S. The auto rule (the last live tab, else
  * the last tab) decides until the reader clicks, and their choice
@@ -33,11 +36,7 @@ import { log } from "../../log.js";
 import { placeChildren } from "../../dom.js";
 import { requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import type { Handle } from "../../failure/local.js";
-import {
-  FeedRowSchema,
-  type FeedMergeTabWorkspaceSwitch,
-  type FeedRow,
-} from "../../../../proto/gen/ts/frontend/v1/feed_pb";
+import { FeedRowSchema, type FeedRow } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import {
   NEST_ATTRIBUTE,
   drawBreadcrumbTrail,
@@ -62,7 +61,17 @@ import {
   drawFeedMergeTabRebasing,
   drawFeedMergeTabUpdatingMain,
 } from "./step-tabs.js";
-import { drawMergeWorkspaceSwitch, switchFacts } from "./workspace-switch.js";
+import { buildInterruptMergeTabRequest } from "../requests.js";
+import { drawStopControl, type StopSite } from "../stop-control.js";
+
+/** The stop a live agentic tab offers: the tab's own row, stopped as a merge tab. */
+const MERGE_TAB_STOP: StopSite = {
+  prefix: "merge-tab-stop",
+  operation: "feed.merge-tab-stop",
+  refusedOperation: "feed.merge-tab-stop-refused",
+  describe: "stopping a merge tab's agent",
+  request: buildInterruptMergeTabRequest,
+};
 
 /** The merge bubble's body renderer. */
 export const mergeBubbleBody: BubbleBodyRenderer = (mount, view, rc): Handle => {
@@ -291,7 +300,7 @@ export function updateTabBody(
       updateFeedMergeTabTests(host, kind.value, before.value, rc.ctx, `${path}.tests`);
       return true;
     case "fixes": {
-      if (before.case !== "fixes") return false;
+      if (before.case !== "fixes" || stoppable(previous) !== stoppable(tab)) return false;
       const rows = host.querySelector<HTMLElement>(":scope > .merge-tab-rows");
       const attempt = host.firstElementChild;
       if (rows === null || attempt === null || attempt === rows) return false;
@@ -301,9 +310,11 @@ export function updateTabBody(
       placeChildren(rows, agenticRowsOf(tab, view));
       return true;
     }
+    case "pick":
     case "prePrompt":
     case "conflicts":
     case "postPrompt": {
+      if (stoppable(previous) !== stoppable(tab)) return false;
       const rows = host.querySelector<HTMLElement>(":scope > .merge-tab-rows");
       if (rows === null) return false;
       placeChildren(rows, agenticRowsOf(tab, view));
@@ -331,11 +342,12 @@ function drawTabContent(tab: MergeTab, view: SubfeedView, rc: RowContext): HTMLE
       return [drawFeedMergeTabUpdatingMain(kind.value, `${path}.updating_main`)];
     case "fixes":
       // AGENTIC, and it names which attempt it is above the rows it holds.
-      return [drawFeedMergeTabFixesAttempt(kind.value, `${path}.fixes`), agenticContent(tab, kind.value, view, rc, `${path}.fixes`)];
+      return [drawFeedMergeTabFixesAttempt(kind.value, `${path}.fixes`), ...agenticContent(tab, view, rc)];
+    case "pick":
     case "prePrompt":
     case "conflicts":
     case "postPrompt":
-      return [agenticContent(tab, kind.value, view, rc, `${path}.${kind.case}`)];
+      return agenticContent(tab, view, rc);
     default: {
       const other: { case: string } = kind;
       return unreachableArm(path, other.case);
@@ -344,22 +356,21 @@ function drawTabContent(tab: MergeTab, view: SubfeedView, rc: RowContext): HTMLE
 }
 
 /**
- * An agentic tab's content: its rows, or, in the requesting workspace's copy
- * of a DETACHED merge's bubble, the switch to the merge workspace those rows
- * belong to. The rows never cross workspaces, so a tab carrying the switch has
- * none to draw.
+ * An agentic tab's content: the stop control while its agent runs, then its
+ * rows. The rows are this workspace's own turns for a sync merge, or the hidden
+ * merge workspace's turns the daemon mirrors here for an async one; either way
+ * they are rows of this sub-feed parented to the tab.
  */
-function agenticContent(
-  tab: MergeTab,
-  arm: { workspaceSwitch?: FeedMergeTabWorkspaceSwitch },
-  view: SubfeedView,
-  rc: RowContext,
-  path: string,
-): HTMLElement {
-  if (arm.workspaceSwitch !== undefined) {
-    return drawMergeWorkspaceSwitch(switchFacts(arm.workspaceSwitch, `${path}.workspace_switch`), rc, "tab");
-  }
-  return drawAgenticRows(tab, view);
+function agenticContent(tab: MergeTab, view: SubfeedView, rc: RowContext): HTMLElement[] {
+  const rows = drawAgenticRows(tab, view);
+  if (!stoppable(tab)) return [rows];
+  const id = requireMessage(tab.row.id, "FeedRow.id");
+  return [drawStopControl(rc, MERGE_TAB_STOP, id), rows];
+}
+
+/** Whether a tab's agent is running, which is when the tab offers "stop". */
+export function stoppable(tab: MergeTab): boolean {
+  return AGENTIC_KINDS.includes(tab.kind) && (tab.state === "live" || tab.state === "waitingOnUser");
 }
 
 /**

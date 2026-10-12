@@ -65,7 +65,7 @@ export function drawFeedMerge(msg: FeedMerge, rc: RowContext): HTMLElement {
   // running and settled alike (workspace-switch.ts).
   if (head.workspaceSwitch !== undefined) {
     el.append(
-      drawMergeWorkspaceSwitch(switchFacts(head.workspaceSwitch, `${PATH}.head.workspace_switch`), rc, "head"),
+      drawMergeWorkspaceSwitch(switchFacts(head.workspaceSwitch, `${PATH}.head.workspace_switch`), rc),
     );
   }
 

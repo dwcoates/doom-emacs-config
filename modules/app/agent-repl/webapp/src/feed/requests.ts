@@ -112,6 +112,21 @@ export function buildInterruptDetachedRequest(
 }
 
 /**
+ * Stop the agent a live AGENTIC merge tab draws, by the tab row's own FeedId:
+ * the merge workspace's agent for an async merge (which also reveals that
+ * workspace), the workspace's own for a sync merge.
+ */
+export function buildInterruptMergeTabRequest(
+  workspace: WorkspaceRef,
+  tab: FeedId,
+): InterruptRequest {
+  return create(InterruptRequestSchema, {
+    workspace,
+    target: { case: "mergeTab", value: tab },
+  });
+}
+
+/**
  * Bring ONE root-feed row into the loaded pages, every page between included.
  * TARGET is the row's FeedId exactly as the daemon served it.
  */

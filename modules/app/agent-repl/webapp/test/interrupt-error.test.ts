@@ -32,7 +32,7 @@ describe("INTERRUPT_ERROR_ARMS: the arm set is the schema's", () => {
     expect([...INTERRUPT_ERROR_ARMS].sort()).toEqual([...SCHEMA_ARMS].sort());
   });
 
-  it("names the eight arms landing 4 derived from the daemon's refusal sites", () => {
+  it("names the daemon's refusal sites' arms, merge tabs' among them", () => {
     expect([...INTERRUPT_ERROR_ARMS].sort()).toEqual(
       [
         "confirmRequired",
@@ -41,6 +41,7 @@ describe("INTERRUPT_ERROR_ARMS: the arm set is the schema's", () => {
         "transferringAway",
         "notYetAdopted",
         "notDetachedWork",
+        "notMergeTab",
         "noSession",
         "shimRefused",
       ].sort(),

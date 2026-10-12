@@ -5,6 +5,7 @@ import { FeedWatchTokenSchema } from "../../../proto/gen/ts/agentrepl/v1/feed_to
 import {
   buildGetFeedPageRequest,
   buildInterruptDetachedRequest,
+  buildInterruptMergeTabRequest,
   buildLoadFeedThroughRequest,
   buildOpenFeedRequest,
   buildWatchFeedRequest,
@@ -63,6 +64,17 @@ describe("buildInterruptDetachedRequest", () => {
 
   it("leaves confirm_agents false, being meaningless on this target", () => {
     expect(buildInterruptDetachedRequest(WORKSPACE, feedId("b")).confirmAgents).toBe(false);
+  });
+});
+
+describe("buildInterruptMergeTabRequest", () => {
+  it("targets the merge_tab arm with the tab row's own id", () => {
+    const req = buildInterruptMergeTabRequest(WORKSPACE, feedId("tab-1"));
+    expect(req.target).toEqual({ case: "mergeTab", value: feedId("tab-1") });
+  });
+
+  it("leaves confirm_agents false, being meaningless on this target", () => {
+    expect(buildInterruptMergeTabRequest(WORKSPACE, feedId("t")).confirmAgents).toBe(false);
   });
 });
 

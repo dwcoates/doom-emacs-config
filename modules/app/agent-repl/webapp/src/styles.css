@@ -5058,7 +5058,8 @@ bubble-body.bubble-body { display: block; }
    `.tone-<color>`, its shape the glyph; a live one pulses as the old running
    dot did. */
 .work-dot-live { animation: pulse 1s infinite; }
-.subagent-stop-button {
+.subagent-stop-button,
+.merge-tab-stop-button {
   font-size: 0.7rem;
   padding: 0 0.5rem;
   border-radius: 99px;
@@ -5067,7 +5068,8 @@ bubble-body.bubble-body { display: block; }
   color: var(--muted);
   cursor: pointer;
 }
-.subagent-stop-outcome { font-size: 0.7rem; color: var(--muted); }
+.subagent-stop-outcome,
+.merge-tab-stop-outcome { font-size: 0.7rem; color: var(--muted); }
 
 /* THE ONE SEPARATION SHAPE. Same 4px bar and centered label the /clear and
    /compact dividers already drew, confined to the same central column; the arm
@@ -6246,7 +6248,8 @@ ar-button.outcome-marker-pill {
    note beside a stop button never wraps, so its arrival and its expiry change
    no line's height. */
 .shell-stop,
-.subagent-stop {
+.subagent-stop,
+.merge-tab-stop {
   white-space: nowrap;
 }
 .shell-spool {
@@ -7270,6 +7273,8 @@ ar-button.outcome-marker-pill {
   color: var(--err);
 }
 .merge-tab-panel { padding-top: 0.3rem; }
+/* A running agentic tab's stop sits on its own line above the tab's rows. */
+.merge-tab-panel > .merge-tab-stop { display: block; margin-bottom: 0.3rem; }
 
 /* The queue snapshot: a COLUMN TABLE (shared column tables, above) of
    workspace · stage · duration under a header row. Rows are delimited by the

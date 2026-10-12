@@ -729,6 +729,8 @@ export function mergeWorkspaceRefusal(cause: CauseOf<MergeWorkspaceError>): stri
       return "the workspace to merge is not open in this repository";
     case "unknownBranch":
       return "that branch does not exist in this repository";
+    case "nameTaken":
+      return `the merge workspace name ${cause.value.branch} is already taken`;
     default:
       return unreachableArm("MergeWorkspaceError.cause", cause.case);
   }
