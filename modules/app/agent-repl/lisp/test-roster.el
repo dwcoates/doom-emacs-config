@@ -1946,6 +1946,83 @@ on finishes would miss a workspace going back to work."
   (should (memq #'agent-repl-roster-on-link-promote
                 (default-value 'agent-repl-link-promote-functions))))
 
+(ert-deftest agent-repl-test-roster-handover-subscribes-on-the-successor ()
+  "An accepted successor carries the roster: the outgoing daemon may never leave."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let ((conns nil)
+          (successor (agent-repl-connect-open "127.0.0.1:9100"))
+          (old (agent-repl-connect-open "127.0.0.1:9001"))
+          (agent-repl-roster--stream nil))
+      (cl-letf (((symbol-function 'agent-repl-rpc-watch-workspace-roster)
+                 (lambda (conn _on-push _on-close &optional _on-open)
+                   (push conn conns) 'fake-stream)))
+        ;; Act
+        (agent-repl-roster-on-link-handover old successor)
+        ;; Assert
+        (should (equal conns (list successor)))))))
+
+(ert-deftest agent-repl-test-roster-handover-cancels-the-stream-on-the-old-conn ()
+  "The handover replaces the outgoing daemon\='s roster stream, never stacks one."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let ((cancelled nil)
+          (successor (agent-repl-connect-open "127.0.0.1:9100"))
+          (old (agent-repl-connect-open "127.0.0.1:9001"))
+          (agent-repl-roster--stream 'old-stream))
+      (cl-letf (((symbol-function 'agent-repl-rpc-watch-workspace-roster)
+                 (lambda (_conn _on-push _on-close &optional _on-open) 'fake-stream))
+                ((symbol-function 'agent-repl-connect-stream-cancel)
+                 (lambda (stream) (push stream cancelled))))
+        ;; Act
+        (agent-repl-roster-on-link-handover old successor)
+        ;; Assert
+        (should (equal cancelled '(old-stream)))))))
+
+(ert-deftest agent-repl-test-roster-handover-subscription-is-logged ()
+  "The move is news: it names the daemon the roster now rides."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let ((logs nil)
+          (successor (agent-repl-connect-open "127.0.0.1:9100"))
+          (old (agent-repl-connect-open "127.0.0.1:9001"))
+          (agent-repl-roster--stream nil))
+      (cl-letf (((symbol-function 'agent-repl-rpc-watch-workspace-roster)
+                 (lambda (_conn _on-push _on-close &optional _on-open) 'fake-stream))
+                ((symbol-function 'agent-repl--info)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logs))))
+        ;; Act
+        (agent-repl-roster-on-link-handover old successor)
+        ;; Assert
+        (should (seq-some (lambda (text)
+                            (string-search "elisp.roster.resubscribed-on-handover" text))
+                          logs))))))
+
+(ert-deftest agent-repl-test-roster-registers-on-the-handover-hook ()
+  "The registration IS the fix: without it a stuck handover hides every tab."
+  ;; Act / Assert
+  (should (memq #'agent-repl-roster-on-link-handover
+                (default-value 'agent-repl-link-handover-functions))))
+
+(ert-deftest agent-repl-test-roster-promotion-keeps-a-stream-already-on-the-successor ()
+  "A roster moved at the handover is not torn down and re-opened at the promotion."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let ((conns nil)
+          (successor (agent-repl-connect-open "127.0.0.1:9100"))
+          (old (agent-repl-connect-open "127.0.0.1:9001"))
+          (agent-repl-roster--stream 'successor-stream)
+          (agent-repl-roster--stream-conn nil))
+      (setq agent-repl-roster--stream-conn successor)
+      (cl-letf (((symbol-function 'agent-repl-rpc-watch-workspace-roster)
+                 (lambda (conn _on-push _on-close &optional _on-open)
+                   (push conn conns) 'fake-stream)))
+        ;; Act
+        (agent-repl-roster-on-link-promote old successor)
+        ;; Assert
+        (should (null conns))
+        (should (eq agent-repl-roster--stream 'successor-stream))))))
+
 (ert-deftest agent-repl-test-roster-link-down-keeps-the-last-view ()
   "The last view is the newest thing anyone knows; blanking it would lie."
   ;; Arrange
