@@ -15,7 +15,7 @@
 import { log } from "../log.js";
 import { inline, hasFencedTree, renderMarkdown, type TreeCols } from "../markdown.js";
 import { findTreeRegion, renderTreeHtml, type TreeIssue } from "../metaprompt-tree.js";
-import { placeChildren, scrollbarWidthPx } from "../dom.js";
+import { computedPx, placeChildren, scrollbarWidthPx } from "../dom.js";
 import { onDiscard, stopTicking } from "../feed/ticking.js";
 import { applyTextReveal, clearTextReveal, fullTextOf } from "./text-reveal.js";
 
@@ -69,13 +69,13 @@ function unmeasurable(reason: string, context: Record<string, unknown>): never {
 }
 
 /** A computed length, which a laid-out element always reports in px. */
-function computedPx(el: Element, style: CSSStyleDeclaration, property: ComputedLength): number {
+function computedLength(el: Element, style: CSSStyleDeclaration, property: ComputedLength): number {
   const value = style[property];
-  const px = /^(-?\d+(?:\.\d+)?)px$/.exec(value);
+  const px = computedPx(value);
   if (px === null) {
     unmeasurable("a computed length is not in px", { element: el.className, property, value });
   }
-  return Number.parseFloat(px[1]);
+  return px;
 }
 
 /** The computed lengths the budget reads. */
@@ -90,9 +90,9 @@ type ComputedLength =
 /** One element's horizontal padding (plus border, when BORDER), from computed styles. */
 function insetXPx(el: Element, view: Window, parts: { border: boolean; margin: boolean }): number {
   const s = view.getComputedStyle(el);
-  let px = computedPx(el, s, "paddingLeft") + computedPx(el, s, "paddingRight");
-  if (parts.border) px += computedPx(el, s, "borderLeftWidth") + computedPx(el, s, "borderRightWidth");
-  if (parts.margin) px += computedPx(el, s, "marginLeft") + computedPx(el, s, "marginRight");
+  let px = computedLength(el, s, "paddingLeft") + computedLength(el, s, "paddingRight");
+  if (parts.border) px += computedLength(el, s, "borderLeftWidth") + computedLength(el, s, "borderRightWidth");
+  if (parts.margin) px += computedLength(el, s, "marginLeft") + computedLength(el, s, "marginRight");
   return px;
 }
 
@@ -192,7 +192,7 @@ function scrollbarGutterPx(body: HTMLElement, view: Window): number {
   const scroll = body.closest<HTMLElement>(".bubble-box");
   if (scroll === null) unmeasurable("the bubble body has no scroll box", {});
   const s = view.getComputedStyle(scroll);
-  const borderPx = computedPx(scroll, s, "borderLeftWidth") + computedPx(scroll, s, "borderRightWidth");
+  const borderPx = computedLength(scroll, s, "borderLeftWidth") + computedLength(scroll, s, "borderRightWidth");
   const offsetPx = scroll.offsetWidth;
   const clientPx = scroll.clientWidth;
   const gutterPx = scrollbarWidthPx(scroll, borderPx);
@@ -222,8 +222,8 @@ function containingBlockOf(bubble: HTMLElement): HTMLElement {
  * Anything else answers `null`.
  */
 function resolveCapPx(maxWidth: string, containingPx: number): number | null {
-  const px = /^(-?[\d.]+)px$/.exec(maxWidth);
-  if (px !== null) return Number.parseFloat(px[1]);
+  const px = computedPx(maxWidth);
+  if (px !== null) return px;
   const pct = /^(?:calc\()?\s*(-?[\d.]+)%\s*\)?$/.exec(maxWidth);
   if (pct !== null) return (Number.parseFloat(pct[1]) / 100) * containingPx;
   return null;

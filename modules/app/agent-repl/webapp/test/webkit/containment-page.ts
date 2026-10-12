@@ -47,6 +47,7 @@ import {
   findingsUnit,
   hookUnit,
   mcpToolCallUnit,
+  mergeHandbackRow,
   mergeTabRow,
   mergeUnit,
   MERGE_RESULTS,
@@ -150,6 +151,7 @@ export function everyRow(): FeedRow[] {
     coldGateStandingRow(),
     ...COLD_GATE_CHOICES.map((choice) => coldGateResolvedRow(choice)),
     ...MERGE_TAB_KINDS.map((kind) => mergeTabRow(kind)),
+    mergeHandbackRow(),
     ...FEED_COMMAND_PANEL_ARMS.map((arm) => commandPanelRow(arm)),
     commandRefusedRow({ reason: `a long reason ${RUN}` }),
   ];

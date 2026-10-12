@@ -65,31 +65,48 @@ function layRegion(section: HTMLElement | null): void {
   if (section === null || section === undefined || region === null || region === undefined) return;
   const lines = [...region.querySelectorAll<HTMLElement>(".row")];
   const full = lines.length * ROW;
-  region.getBoundingClientRect = () => rect(0, region.offsetHeight);
+  const height = (): number => {
+    if (section.classList.contains("folded")) return 0;
+    return region.style.maxHeight === "" ? full : Number.parseFloat(region.style.maxHeight);
+  };
+  region.getBoundingClientRect = () => rect(0, height());
   lines.forEach((line, i) => {
     line.getBoundingClientRect = () => rect(i * ROW - region.scrollTop, ROW);
   });
   Object.defineProperty(region, "scrollHeight", { configurable: true, value: full });
-  Object.defineProperty(region, "offsetHeight", {
-    configurable: true,
-    get: () => {
-      if (section.classList.contains("folded")) return 0;
-      return region.style.maxHeight === "" ? full : Number.parseFloat(region.style.maxHeight);
-    },
-  });
 }
 
-/** State the layout: the rail's height and the pane's other content. */
-function laidOut({ scroller, pane }: { scroller: HTMLElement; pane: HTMLElement }, rail: number, others: number): void {
-  const regions = [".hidden-section", ".merged-section"].map((cls) => pane.querySelector<HTMLElement>(`:scope > ${cls}`));
-  for (const section of regions) layRegion(section);
-  Object.defineProperty(scroller, "clientHeight", { configurable: true, value: rail });
-  Object.defineProperty(pane, "offsetHeight", {
-    configurable: true,
-    get: () =>
-      others +
-      regions.reduce((sum, section) => sum + (section?.querySelector<HTMLElement>(":scope > .rows")?.offsetHeight ?? 0), 0),
-  });
+/** The drawn height of PANE's band of CLS's rows region. */
+function regionHeight(pane: HTMLElement, cls: string): number {
+  return pane.querySelector<HTMLElement>(`:scope > ${cls} > .rows`)?.getBoundingClientRect().height ?? 0;
+}
+
+/**
+ * State the rail scroller's drawn height, framed by no border or padding:
+ * declared in px, as an engine computes every length (jsdom computes an
+ * undeclared one as a keyword).
+ */
+function railHeight(scroller: HTMLElement, rail: number): void {
+  scroller.style.border = "0px none";
+  scroller.style.padding = "0px";
+  scroller.getBoundingClientRect = () => rect(0, rail);
+}
+
+/**
+ * State the layout: the rail's height and the pane's other content. OTHERS
+ * may read the bands' drawn heights, for a layout whose other content moves
+ * with the fit.
+ */
+function laidOut(
+  { scroller, pane }: { scroller: HTMLElement; pane: HTMLElement },
+  rail: number,
+  others: number | (() => number),
+): void {
+  for (const cls of [".hidden-section", ".merged-section"]) layRegion(pane.querySelector<HTMLElement>(`:scope > ${cls}`));
+  railHeight(scroller, rail);
+  const other = typeof others === "number" ? () => others : others;
+  pane.getBoundingClientRect = () =>
+    rect(0, other() + regionHeight(pane, ".hidden-section") + regionHeight(pane, ".merged-section"));
 }
 
 /** A band's section in PANE. */
@@ -243,7 +260,7 @@ describe("fitBands", () => {
     const rail = drawn(10, 10);
     laidOut(rail, 180, 100);
     fitBands(rail.scroller, rail.pane);
-    Object.defineProperty(rail.scroller, "clientHeight", { configurable: true, value: 1000 });
+    railHeight(rail.scroller, 1000);
     // Act
     const got = fitBands(rail.scroller, rail.pane);
     // Assert
@@ -287,6 +304,83 @@ describe("fitBands", () => {
     expect(() => fitBands(rail.scroller, rail.pane)).toThrow(/rows region/);
   });
 
+  it("measures fractional room, unrounded", () => {
+    // Arrange — 119.5px of room is short of six lines of 20px; rounded up it would hold them.
+    const rail = drawn(3, 6, { hidden: true });
+    laidOut(rail, 219.5, 100);
+    // Act
+    const got = fitBands(rail.scroller, rail.pane);
+    // Assert
+    expect(got).toEqual({ hidden: 0, merged: 5 });
+  });
+
+  it("takes the rail's drawn borders and padding out of the room", () => {
+    // Arrange — a 240px rail framed by 10px of border and 30px of padding leaves 100px past 100px of other content.
+    const rail = drawn(3, 6, { hidden: true });
+    laidOut(rail, 240, 100);
+    rail.scroller.style.border = "5px solid";
+    rail.scroller.style.padding = "10px 0 20px";
+    // Act
+    const got = fitBands(rail.scroller, rail.pane);
+    // Assert
+    expect(got).toEqual({ hidden: 0, merged: 5 });
+  });
+
+  it("refuses a rail whose border is not in px", () => {
+    const rail = drawn(3, 6, { hidden: true });
+    laidOut(rail, 220, 100);
+    rail.scroller.style.borderTopWidth = "medium";
+    // Act / Assert
+    expect(() => fitBands(rail.scroller, rail.pane)).toThrow(/is not in px/);
+  });
+
+  it("logs a rail whose border is not in px", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const rail = drawn(3, 6, { hidden: true });
+    laidOut(rail, 220, 100);
+    rail.scroller.style.borderTopWidth = "medium";
+    // Act
+    expect(() => fitBands(rail.scroller, rail.pane)).toThrow();
+    // Assert
+    const record = await forwardedRecord(capture, "sidebar.band-fit.unmeasurable");
+    expect([record.level.case, record.context]).toMatchObject(["error", { property: "borderTopWidth", value: "medium" }]);
+  });
+
+  it("leaves the bands unsized when the rail's border is not in px", () => {
+    // Arrange
+    const rail = drawn(3, 6, { hidden: true });
+    laidOut(rail, 220, 100);
+    rail.scroller.style.borderTopWidth = "medium";
+    // Act
+    expect(() => fitBands(rail.scroller, rail.pane)).toThrow();
+    // Assert
+    expect([maxHeight(rail.pane, "merged-section"), band(rail.pane, "merged-section").hasAttribute(BAND_LINES_ATTRIBUTE)]).toEqual(["", false]);
+  });
+
+  it("refuses a fit that moves its own room", () => {
+    // Arrange — the pane's other content grows a pixel whenever Recently Merged is capped.
+    const rail = drawn(3, 10, { hidden: true });
+    laidOut(rail, 200, () => (maxHeight(rail.pane, "merged-section") === "" ? 100 : 101));
+    // Act / Assert
+    expect(() => fitBands(rail.scroller, rail.pane)).toThrow(/moved the room/);
+  });
+
+  it("logs a fit that moves its own room", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const rail = drawn(3, 10, { hidden: true });
+    laidOut(rail, 200, () => (maxHeight(rail.pane, "merged-section") === "" ? 100 : 101));
+    // Act
+    expect(() => fitBands(rail.scroller, rail.pane)).toThrow();
+    // Assert
+    const record = await forwardedRecord(capture, "sidebar.band-fit.unsettled");
+    expect([record.level.case, record.context]).toMatchObject([
+      "error",
+      { room: 100, fitted_room: 99, merged_total: 10, merged_shown: 5 },
+    ]);
+  });
+
   it("logs a band drawn without its rows region", async () => {
     // Arrange
     const capture = captureLogRecords();
@@ -309,7 +403,7 @@ describe("installBandFit", () => {
     const fit = installBandFit(rail.scroller);
     fit.refit();
     // Act — the rail grows to hold everything.
-    Object.defineProperty(rail.scroller, "clientHeight", { configurable: true, value: 1000 });
+    railHeight(rail.scroller, 1000);
     fireResize(rail.scroller);
     // Assert
     expect([maxHeight(rail.pane, "hidden-section"), maxHeight(rail.pane, "merged-section")]).toEqual(["", ""]);
