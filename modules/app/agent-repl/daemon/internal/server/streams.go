@@ -752,8 +752,17 @@ func (s *server) holdParticipant(ws ids.WorkspaceID, host bool, delta int) {
 		s.deps.Queue.EditorGone(ws)
 	}
 
-	s.log.Debug("daemon.server.participants", "a per-workspace stream edge moved the participant set",
-		dlog.Context{"workspace": string(ws), "host_stream": hostLive, "web_stream": webLive})
+	// INFO, NOT DEBUG: the participant set is what a handover's adoption
+	// rendezvous waits on, and at DEBUG it reached no persisted log, so an
+	// adoption window that expired could not show which stream had gone
+	// (2026-10-12).
+	stream := "web"
+	if host {
+		stream = "host"
+	}
+	s.log.Info("daemon.server.participants", "a per-workspace stream edge moved the participant set",
+		dlog.Context{"workspace": string(ws), "stream": stream, "delta": delta,
+			"host_stream": hostLive, "web_stream": webLive})
 	s.deps.Footer.SetParticipants(ws, hostLive, webLive)
 	s.deps.Topbar.SetParticipants(ws, hostLive, webLive)
 }
