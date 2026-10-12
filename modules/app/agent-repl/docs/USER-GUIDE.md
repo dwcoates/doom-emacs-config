@@ -109,28 +109,43 @@ These clicks jump to an entry in the feed:
 - **If a subagent's feed cannot be opened, the jump still scrolls to its bubble.**
   - The failure is listed under the warning chip in the top bar.
 
-## Detached merges
+## Sync and async merges
 
-- **An agent's `/merge-queue own` merges in a merge workspace, so your workspace is never held.**
-  - When the turn that asked for the merge ends, a merge workspace is forked from yours: the same conversation, its own worktree on your branch as it stands then.
-  - The merge runs there, and every prompt you send to your own workspace goes straight through meanwhile.
+- **A merge is SYNC or ASYNC.**
+  - A sync merge runs in your workspace: your agent resolves its conflicts and fixes its tests in the bubble's tabs, and your prompts are held until it ends.
+  - An async merge runs in a hidden merge workspace forked from yours, and your workspace stays free.
+  - "Sync" and "in place" mean the same thing, and so do "async" and "detached".
+- **An agent's `/merge-queue own` merges sync, and your workspace closes once it lands.**
+  - `/merge-queue own keep-open` merges sync and keeps your workspace open.
+  - Agents merge async only for work that is genuinely beside the point of what remains, or when you ask for it.
+- **`/merge-queue own async <name>` forks a merge workspace named `<name>` when the turn that asked for it ends.**
+  - The agent names it; a name that is already a workspace, a branch or another merge's reservation is refused, and the agent asks again with another.
   - Commits you make after the merge was asked for are not part of it; they go through your next merge.
-  - `/merge-queue own in-place`, `keep-open` or `--wait` merges in your workspace instead, holding your prompts as before.
 - **An agent can announce a one-shot merge before its turn is over, with `/merge-queue one-shot`.**
   - The workspace is marked a one-shot at once, so its tab shows the one-shot mark while the agent keeps working.
   - When the turn ends, the workspace's branch merges in place, and the workspace closes once the merge lands.
   - Work left uncommitted when the turn ends fails the merge, and the workspace stays open.
-- **The merge workspace sits under yours in the sidebar, marked with where it lands (`merge → master`).**
-  - It carries the merge's statuses; your own row keeps its own.
-- **Your feed shows the merge's bubble, with an `open merge workspace` button in its header for the bubble's whole life.**
-  - Clicking it switches to the merge workspace exactly as clicking its sidebar row does, re-opening it if it was closed.
-  - The pre-prompt, conflicts, fixes and post-prompt tabs show a button to the merge workspace in place of their conversation, which lives there.
-  - Every other tab reads as it always has.
-- **When the merge ends, a badge in your feed says how (`merge of <branch> landed`), and your agent is told.**
+- **`/merge-queue own async <name> pick <instruction>` lands only the changes the instruction names.**
+  - The merge workspace starts on the target branch, and its agent cherry-picks those changes from your branch, resolving what it can without you.
+  - That work is the bubble's first tab, `pick`; the merge joins the queue once it ends.
+- **An async merge workspace is hidden from the tab bar and the sidebar's open rows.**
+  - It is listed among the closed workspaces, and under Recently Merged once it lands.
+  - The bubble is drawn only in your feed, placed where it was asked for rather than pinned, and its pick, conflicts and fixes tabs stream the merge workspace's agent.
+- **The merge workspace is revealed, and stays visible, when:**
+  - the merge fails;
+  - its agent asks a question or for a permission;
+  - you press a running tab's `stop`;
+  - you select it.
+- **A revealed merge workspace is an ordinary workspace.**
+  - Its feed has no merge bubble, and its footer shows its own statuses.
+  - The bubble's header then carries an `open merge workspace` button.
+- **A running agentic tab's `stop` stops only that merge's agent.**
+  - `C-c C-k` in your own workspace never stops an async merge.
+- **When an async merge ends, a badge in your feed says how (`merge of <branch> landed`), and your agent is told.**
   - A landed merge closes its merge workspace; its conversation stays there to read.
   - A failed merge leaves the merge workspace open where it stopped, for you to finish.
 - **A merge workspace nobody has used for 15 calendar days is removed.**
-  - The bubble's buttons then read `merge workspace removed` and do nothing.
+  - The bubble's button then reads `merge workspace removed` and does nothing.
 
 ## File links in prompts and responses
 
