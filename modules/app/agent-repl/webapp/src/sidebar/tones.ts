@@ -18,7 +18,9 @@
  * names stay aligned. Every merge character is a plain text glyph. The two
  * gate arms are the one exception: a pending permission draws ❗ and a pending
  * question ❓ in place of the dot, the same two emoji the Emacs tab bar draws
- * before the workspace name (owner request, 2026-10-11).
+ * before the workspace name (owner request, 2026-10-11). An armed one-shot's
+ * 🎯 is drawn in place of the dot the same way, as the tab bar draws it
+ * (owner request, 2026-10-12).
  */
 import { toneClass, rosterStatusColor, mergeGlyph, gateGlyph } from "../vocab.js";
 import { MalformedView } from "../rpc/malformed.js";
@@ -105,6 +107,9 @@ export const GLYPH_CHARS: Readonly<Record<string, string>> = Object.freeze({
   // matches the one the Emacs tab bar draws for the same arm.
   exclaim: "❗",
   ask: "❓",
+  // AN ARMED ONE-SHOT (owner request, 2026-10-12): the emoji replaces the dot,
+  // and matches the one the Emacs tab bar draws for the same outcome.
+  target: "🎯",
   inactive: "?",
   dot: "",
   none: "",
@@ -139,20 +144,22 @@ export function rosterArmMark(arm: string): RosterArmMark {
   return { toneClass: tone, glyph, char: GLYPH_CHARS[glyph] ?? "" };
 }
 
+/** The glyph NAME a one-shot's outcome (`RosterRowOneShot`) draws. */
+export type OneShotGlyph = "target" | "failed";
+
 /**
  * The mark for a row standing on ARM whose one-shot mark (`RosterRowOneShot`)
- * is ONE_SHOT_FAILED.
+ * draws ONE_SHOT, or undefined for a row that is no one-shot.
  *
- * A failed one-shot draws the failure mark in place of the arm's own, on the
- * arm's own tone; an open permission or question gate outranks it, so the
- * gate's emoji stands while the gate does. An armed one-shot draws nothing of
- * its own here: the rail never draws the one-shot mark itself (owner ruling,
- * 2026-10-11).
+ * A one-shot draws its outcome's glyph in place of the arm's own, on the
+ * arm's own tone: 🎯 while armed, the failure mark once it ended without a
+ * live merge, exactly as the Emacs tab bar draws them. An open permission or
+ * question gate outranks it, so the gate's emoji stands while the gate does.
  */
-export function rosterRowMark(arm: string, oneShotFailed: boolean): RosterArmMark {
+export function rosterRowMark(arm: string, oneShot: OneShotGlyph | undefined): RosterArmMark {
   const mark = rosterArmMark(arm);
-  if (!oneShotFailed || gateGlyph(arm) !== undefined) return mark;
-  return { toneClass: mark.toneClass, glyph: "failed", char: GLYPH_CHARS.failed ?? "" };
+  if (oneShot === undefined || gateGlyph(arm) !== undefined) return mark;
+  return { toneClass: mark.toneClass, glyph: oneShot, char: GLYPH_CHARS[oneShot] ?? "" };
 }
 
 /**
