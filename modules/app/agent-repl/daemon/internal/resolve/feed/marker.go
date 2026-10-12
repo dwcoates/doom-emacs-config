@@ -89,7 +89,7 @@ type ending struct {
 // terminal's class on — the very resolution the footer makes.
 func endingOfFailure(turn ids.TurnID, endedAtMs int64, failure *conversationv1.AgentFailure, words turnfault.Words, vendorMessage string) ending {
 	fault, _ := ladder.ResolveTurnFault(wsm.CloseFailed, ladder.ClassifyFailure(failure))
-	e := ending{turn: turn, fault: fault, words: words, endedAtMs: endedAtMs, vendorMessage: vendorMessage, signIn: curedBySignIn(failure)}
+	e := ending{turn: turn, fault: fault, words: words, endedAtMs: endedAtMs, vendorMessage: vendorMessage, signIn: ladder.FailureCuredBySignIn(failure)}
 	if wait, ok := turnfault.RetryAfter(failure); ok {
 		e.retryAfter = &wait
 	}
@@ -123,22 +123,6 @@ func processDiedWhat(words turnfault.Words) *frontendv1.FeedOutcomeWhatDied {
 	return &frontendv1.FeedOutcomeWhatDied{What: &frontendv1.FeedOutcomeWhatDied_Process{
 		Process: &frontendv1.FeedOutcomeProcessDied{Line: &frontendv1.FeedOutcomeDeathLine{Text: words.Sentence}},
 	}}
-}
-
-// curedBySignIn reports an account cause signing in again can cure: the
-// credential rejected, or the organization not allowed — the causes the
-// footer's block reads as `auth`.
-func curedBySignIn(failure *conversationv1.AgentFailure) bool {
-	api, ok := failure.GetFailure().(*conversationv1.AgentFailure_ApiRequestFailed)
-	if !ok {
-		return false
-	}
-	switch api.ApiRequestFailed.GetKind().(type) {
-	case *conversationv1.ApiRequestFailed_AuthenticationFailed,
-		*conversationv1.ApiRequestFailed_OauthOrgNotAllowed:
-		return true
-	}
-	return false
 }
 
 // endingMarker composes a turn ending's marker: neutral for an end that raises
