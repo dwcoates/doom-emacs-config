@@ -47,6 +47,7 @@ func (c *controller) Join(ctx context.Context) error {
 		lifetime = context.WithoutCancel(ctx)
 	}
 	go c.awaitIncumbentExit(lifetime)
+	go c.followCarries(lifetime)
 
 	found, err := c.joinFromManifest(ctx)
 	if err != nil {
@@ -142,6 +143,13 @@ func (c *controller) joinFromManifest(ctx context.Context) (bool, error) {
 		"headless":        len(headless),
 	})
 
+	c.adoptHeadless(ctx, headless)
+	return true, nil
+}
+
+// adoptHeadless adopts each claimed headless workspace, releasing the claim of
+// one that fails and retrying it.
+func (c *controller) adoptHeadless(ctx context.Context, headless []ids.WorkspaceID) {
 	for _, ws := range headless {
 		if err := c.adopt(ctx, ws, "headless"); err != nil {
 			// A headless workspace that will not adopt is that workspace's own
@@ -175,7 +183,6 @@ func (c *controller) joinFromManifest(ctx context.Context) (bool, error) {
 			go c.retryHeadless(ctx, ws)
 		}
 	}
-	return true, nil
 }
 
 // The headless re-adoption backoff. This is a FAILURE path, not a happy one:
@@ -360,8 +367,16 @@ func (c *controller) AdoptWeb(ctx context.Context, ws ids.WorkspaceID) error {
 func (c *controller) rendezvousCall(ctx context.Context, ws ids.WorkspaceID, operation string, fill func(*entry), expects func(*entry) bool) error {
 	fields := dlog.Context{"workspace": string(ws)}
 
+	// THE NEWEST TRANSFER'S PARTICIPANTS, not the announcement's: the carry
+	// is written before the release the notice follows, so it is already
+	// there when its participant calls (reoffer.go).
+	carried, sealedBy, carriedOK := c.carriedParticipants(ws)
+
 	c.mu.Lock()
 	e, armed := c.rendezvous[ws]
+	if armed && carriedOK {
+		c.followCarriedLocked(ws, e, carried, sealedBy)
+	}
 	if !armed && c.joiningMode {
 		// THE MANIFEST MAY NOT HAVE ARRIVED YET. The incumbent writes it only
 		// after the successor has reported its address, so a successor that
