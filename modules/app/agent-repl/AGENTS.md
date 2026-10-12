@@ -2762,3 +2762,16 @@ Every change under webapp/ runs `npm run test:integration` beside
 three topbar landings ran only the unit suite and left the integration
 suite red with 25 failures that a later agent then called "pre-existing".
 Neither the omission nor the label is acceptable.
+
+## Performance lessons (living document)
+
+THIS SECTION IS A LIVING DOCUMENT. Whenever an important performance lesson
+about agent-repl as a whole is found -- at runtime or in its tests -- add or update an entry
+here: what was slow or heavy, the evidence with numbers and the date, the fix
+and its commit (or the open item). Test-performance lessons also go into the
+`/write-tests` skill; runtime profiling and the perf-sensitive list live in
+`/profile-agent-repl`.
+
+- The host has ONE suite slot shared by every session's full runs and every merge gate. Gates waited 64-338s for it before any suite started; a load average of 25-95 turned timing-sensitive tests red across unrelated merges (docs/investigations/2026-10-12-merge-queue-latency.md). Run targeted tests while developing and one full run per complete change.
+- Direct pushes to master outside the merge queue move the target under gates that already passed, and that work is thrown away; master that is red makes every gate inherit the failure (same report). Land only what was rebased onto master and tested there.
+- Startup: a boot used to hold every workspace's bring-up behind a stale sidecar's restart (29s). Since b438e783b bring-ups run beside it: at the 15:34 hard bounce the daemon served +0.9s, every workspace had its go-ahead +1.8s, all 26 sessions were up 14.6s after the Emacs relaunch (54s at 13:39).

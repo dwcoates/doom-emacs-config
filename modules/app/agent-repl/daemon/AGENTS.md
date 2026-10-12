@@ -2759,3 +2759,18 @@ branch's own tree, that `update-ref -d <ref> <old>` refuses a moved ref, and
 real-git version compatibility (`rev-list --no-commit-header` needs
 git >= 2.33, `merge-tree --write-tree` needs git >= 2.38, `worktree list -z`
 needs git >= 2.36). Those are e2e facts now (the project lead's suite).
+
+## Performance lessons (living document)
+
+THIS SECTION IS A LIVING DOCUMENT. Whenever an important performance lesson
+about the daemon is found -- at runtime or in its tests -- add or update an entry
+here: what was slow or heavy, the evidence with numbers and the date, the fix
+and its commit (or the open item). Test-performance lessons also go into the
+`/write-tests` skill; runtime profiling and the perf-sensitive list live in
+`/profile-agent-repl`.
+
+- Debug-log volume: test daemons run at debug, ~680 records per test. The roster re-logged every workspace's unchanged row decisions on every render, in each of its three views (26% of a test daemon's records); 40482a061 logs a row's decisions only when they change and counts what it skipped.
+- Merge "tests" feed rows carry every suite's output inline: avg 1.4MB, max 9.6MB, ~300MB of wsm.db (415MB by 15:45), re-marshalled, rewritten and pushed on every counted test line and never retired; the live daemon's footprint was 551MB (peak 682MB), 547MB of it Go heap (docs/investigations/2026-10-12-first-switch-and-daemon-rss.md). Open item: keep counts and a tail in the row and read the full output from the gate's archive on demand.
+- The idle sweep could hibernate the shim an open was bringing up (it read the previous engagement before the start recorded the new one): only the sweep skips a start in flight (Fleet.StartUnderWay, dcec14621). Fixing it by changing Serving instead blocked held prompts on session-up; keep predicates narrow.
+- The merge pump read a run's lease and chain base from its own goroutine while the run wrote them (a data race the race detector caught 2 in 6 runs); they are read under the run's lock (db277cff6).
+- Tests: fake git hard-linked, not copied (~3GB per daemon suite, da3219969); test logs over the log pipe in memory (49cfaafc6); test state in memory unless a test restarts on the same root (DurableState); isZombie reads the kernel in process instead of spawning ps (409602c36).
