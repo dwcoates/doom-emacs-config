@@ -169,7 +169,8 @@ silently fall back to a different presentation."
         (scope (if ws ws '(:agent-repl-central "frontend registry lookup has no workspace subject"))))
     (if frontend
         (progn
-          (agent-repl--log-verbose scope "frontend-get: frontend=%s found=t" name)
+          (agent-repl--log-decision (list 'frontend-get scope name) t
+                                    scope "frontend-get: frontend=%s found=t" name)
           frontend)
       (agent-repl--log scope "frontend-get: frontend=%s found=nil -> error" name)
       (error "agent-repl-frontend-get: no frontend registered under `%s'" name))))
@@ -212,7 +213,9 @@ workspace has actually declared one."
                             (memq env (agent-repl-frontend-supported-envs fe))))
          (supported (and backend-supported env-supported)))
     ;; This runs once for every registry candidate during resolution.
-    (agent-repl--log-verbose
+    (agent-repl--log-decision
+     (list 'frontend-supports ws (agent-repl-frontend-name fe))
+     (list backend env supported)
      ws "frontend-supports: frontend=%s backend=%s backend-supported=%s env=%s env-unhydrated=%s env-supported=%s supported=%s"
      (agent-repl-frontend-name fe) backend backend-supported env env-unhydrated
      env-supported supported)
@@ -236,8 +239,10 @@ signals."
          (default (agent-repl-frontend-get agent-repl-default-frontend ws)))
     (if (agent-repl--frontend-supports-ws-p default backend env ws)
         (let ((resolved (agent-repl-frontend-name default)))
-          (agent-repl--log ws "default-for-ws: backend=%s env=%s default=%s default-supported=t resolved=%s"
-                           backend env agent-repl-default-frontend resolved)
+          (agent-repl--log-decision
+           (list 'default-for-ws ws) (list backend env agent-repl-default-frontend resolved)
+           ws "default-for-ws: backend=%s env=%s default=%s default-supported=t resolved=%s"
+           backend env agent-repl-default-frontend resolved)
           resolved)
       (let ((capable (seq-find (lambda (name)
                                  (agent-repl--frontend-supports-ws-p
@@ -285,7 +290,8 @@ registered."
   "Return non-nil when WS's frontend is the web GUI."
   (let* ((frontend (agent-repl--ws-frontend-name ws))
          (gui-p (eq frontend 'gui)))
-    (agent-repl--log-verbose ws "ws-gui-frontend-p: frontend=%s gui-p=%s" frontend gui-p)
+    (agent-repl--log-decision (list 'ws-gui-frontend-p ws) frontend
+                              ws "ws-gui-frontend-p: frontend=%s gui-p=%s" frontend gui-p)
     gui-p))
 
 (defun agent-repl--frontend-validate-pair (frontend-name backend-name &optional env ws)

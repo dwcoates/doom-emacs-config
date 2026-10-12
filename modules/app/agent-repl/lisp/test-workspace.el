@@ -881,6 +881,31 @@ dead shadow never counts as the owner."
     ;; Assert.
     (should (equal (agent-repl--ws-by-ref-id "id-1") "ws1"))))
 
+;;;; ---- Tests: --ws-by-ref-id records only a miss ----
+
+(ert-deftest agent-repl-test-ws-by-ref-id-records-a-miss ()
+  "A ref id no workspace answers to is recorded."
+  (agent-repl-test--with-clean-state
+    (let (logged)
+      (cl-letf (((symbol-function 'agent-repl--log-verbose)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+        ;; Act
+        (agent-repl--ws-by-ref-id "nobody")
+        ;; Assert
+        (should (equal logged '("ws-by-ref-id: id=nobody ws=nil")))))))
+
+(ert-deftest agent-repl-test-ws-by-ref-id-records-no-hit ()
+  "A lookup that finds its workspace is not an event."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :ref '(:id "id-1" :dir "/tmp/x"))
+    (let (logged)
+      (cl-letf (((symbol-function 'agent-repl--log-verbose)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+        ;; Act
+        (agent-repl--ws-by-ref-id "id-1")
+        ;; Assert
+        (should (null logged))))))
+
 ;;;; ---- Tests: --ws-hide-tombstoned-p ----
 
 ;;;; ---- Tests: --ws-hide-tombstoned-names ----

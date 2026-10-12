@@ -1437,6 +1437,44 @@ user's next sidebar click."
                (lambda (ws) (push ws ,var)))
      ,@body))
 
+(ert-deftest agent-repl-test-roster-an-unchanged-status-is-not-recorded ()
+  "Every push walks every row; a row whose arm did not move records nothing."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let ((push (lambda ()
+                  (agent-repl-roster-apply
+                   (agent-repl-test-roster--roster
+                    :sections (list (agent-repl-test-roster--section
+                                     "repo" (list (agent-repl-test-roster--row "a" "one" :thinking)))))))))
+      (funcall push)
+      (let (logged)
+        (cl-letf (((symbol-function 'agent-repl--log)
+                   (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+          ;; Act
+          (funcall push))
+        ;; Assert
+        (should-not (seq-some (lambda (text) (string-prefix-p "elisp.roster.status:" text)) logged))))))
+
+(ert-deftest agent-repl-test-roster-a-changed-status-is-recorded ()
+  "A row whose arm moved without a finish edge is recorded."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (agent-repl-roster-apply
+     (agent-repl-test-roster--roster
+      :sections (list (agent-repl-test-roster--section
+                       "repo" (list (agent-repl-test-roster--row "a" "one" :ready))))))
+    (let (logged)
+      (cl-letf (((symbol-function 'agent-repl--log)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+        ;; Act
+        (agent-repl-roster-apply
+         (agent-repl-test-roster--roster
+          :sections (list (agent-repl-test-roster--section
+                           "repo" (list (agent-repl-test-roster--row "a" "one" :thinking)))))))
+      ;; Assert
+      (should (seq-some (lambda (text) (string-prefix-p "elisp.roster.status: id=a from=:ready to=:thinking" text))
+                        logged)))))
+
 (ert-deftest agent-repl-test-roster-running-to-settled-fires-the-finish-edge ()
   "thinking -> done is the finish edge."
   ;; Arrange

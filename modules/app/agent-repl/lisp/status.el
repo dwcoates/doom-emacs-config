@@ -1097,7 +1097,8 @@ UNCOLORED rather than guessed at: a colour invented here would be a
 second answer to a question only the daemon answers."
   (let ((arm (and (fboundp 'agent-repl-roster-status-for-ws)
                   (agent-repl-roster-status-for-ws ws))))
-    (agent-repl--log-verbose ws "elisp.status.tab-state: ws=%s arm=%s" ws arm)
+    (agent-repl--log-decision (list 'tab-state ws) arm
+                              ws "elisp.status.tab-state: ws=%s arm=%s" ws arm)
     arm))
 
 (defun agent-repl-status-tab-color (arm)
@@ -1128,8 +1129,9 @@ mark, and the attention marker."
                    (and (eq arm :inactive) agent-repl-status-inactive-glyph)
                    (and (agent-repl-status-attention-visible-p ws)
                         agent-repl-status-attention-glyph))))
-    (agent-repl--log-verbose ws "elisp.status.tab-glyph: ws=%s arm=%s glyph=%s"
-                             ws arm (or glyph "none"))
+    (agent-repl--log-decision (list 'tab-glyph ws) (cons arm glyph)
+                              ws "elisp.status.tab-glyph: ws=%s arm=%s glyph=%s"
+                              ws arm (or glyph "none"))
     glyph))
 
 (defun agent-repl-status-tab-one-shot-glyph (ws)
