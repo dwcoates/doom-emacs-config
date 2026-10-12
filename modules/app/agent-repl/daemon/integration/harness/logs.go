@@ -296,6 +296,23 @@ func readLog(t *testing.T, path string) []LogRecord {
 	tail.mu.Lock()
 	defer tail.mu.Unlock()
 
+	// A file the test log pipe carries is read from memory; a tail that was
+	// reading the (empty) file before the pipe named it starts over.
+	offset := tail.offset
+	if !tail.piped {
+		offset = 0
+	}
+	if body, piped := pipedRead(t, path, offset); piped {
+		if !tail.piped {
+			tail.reset(nil)
+			tail.piped = true
+		}
+		return tail.decode(t, path, body)
+	}
+	if tail.piped {
+		tail.reset(nil)
+	}
+
 	f, err := os.Open(path)
 	if os.IsNotExist(err) {
 		tail.reset(nil)
@@ -319,6 +336,13 @@ func readLog(t *testing.T, path string) []LogRecord {
 	if _, err := f.ReadAt(body, tail.offset); err != nil && err != io.EOF {
 		t.Fatalf("harness: read %s: %v", path, err)
 	}
+	return tail.decode(t, path, body)
+}
+
+// decode appends the complete records in body, the bytes after the tail's
+// offset, and answers every record so far.
+func (tail *logReader) decode(t *testing.T, path string, body []byte) []LogRecord {
+	t.Helper()
 	// Everything after the last newline is a record still being written.
 	end := bytes.LastIndexByte(body, '\n')
 	if end < 0 {
@@ -354,10 +378,12 @@ type logReader struct {
 	info    os.FileInfo
 	offset  int64
 	records []LogRecord
+	// piped says the records come from the test log pipe, not the file.
+	piped bool
 }
 
 func (l *logReader) reset(info os.FileInfo) {
-	l.info, l.offset, l.records = info, 0, nil
+	l.info, l.offset, l.records, l.piped = info, 0, nil, false
 }
 
 // logReaders is every log file's tail, by path, for the tests reading it.
