@@ -4739,6 +4739,87 @@ Shared shape with `agent-repl-refill-keymap': a keymap built inside its
 `defvar' silently keeps the first load's bindings across every reload."
   (should-not (agent-repl-test-core--defvar-keymaps-built-inline)))
 
+;;;; ---- Tests: decisions recorded when they change ----
+
+(defmacro agent-repl-test-core--recording-debug (var &rest body)
+  "Run BODY with every DEBUG record's text collected into VAR, newest first."
+  (declare (indent 1))
+  `(let ((,var nil))
+     (cl-letf (((symbol-function 'agent-repl--log)
+                (lambda (_ws fmt &rest args) (push (apply #'format fmt args) ,var))))
+       ,@body)))
+
+(ert-deftest agent-repl-test-core-a-first-decision-is-recorded ()
+  "A decision made for the first time under its key is recorded."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-core--recording-debug logged
+      ;; Act
+      (agent-repl--log-decision '(tab a) :ready nil "decided %s" "ready")
+      ;; Assert
+      (should (equal logged '("decided ready"))))))
+
+(ert-deftest agent-repl-test-core-a-repeated-decision-is-not-recorded ()
+  "The same decision again under its key is no change."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-core--recording-debug logged
+      (agent-repl--log-decision '(tab a) :ready nil "decided %s" "ready")
+      ;; Act
+      (agent-repl--log-decision '(tab a) :ready nil "decided %s" "ready")
+      ;; Assert
+      (should (equal logged '("decided ready"))))))
+
+(ert-deftest agent-repl-test-core-a-changed-decision-is-recorded ()
+  "A decision that comes out differently is recorded."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-core--recording-debug logged
+      (agent-repl--log-decision '(tab a) :ready nil "decided %s" "ready")
+      ;; Act
+      (agent-repl--log-decision '(tab a) :thinking nil "decided %s" "thinking")
+      ;; Assert
+      (should (equal logged '("decided thinking" "decided ready"))))))
+
+(ert-deftest agent-repl-test-core-decisions-under-different-keys-are-separate ()
+  "One key's decision never silences another's."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-core--recording-debug logged
+      (agent-repl--log-decision '(tab a) :ready nil "a %s" "ready")
+      ;; Act
+      (agent-repl--log-decision '(tab b) :ready nil "b %s" "ready")
+      ;; Assert
+      (should (equal logged '("b ready" "a ready"))))))
+
+(ert-deftest agent-repl-test-core-a-recorded-decision-answers-t ()
+  "The helper answers whether it wrote the record."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-core--recording-debug _logged
+      ;; Act / Assert
+      (should (eq t (agent-repl--log-decision '(tab a) :ready nil "x")))
+      (should-not (agent-repl--log-decision '(tab a) :ready nil "x")))))
+
+;;;; ---- Tests: cancelling a keyed timer ----
+
+(ert-deftest agent-repl-test-core-a-cancel-with-nothing-to-cancel-records-nothing ()
+  "Making sure a key holds no timer is not an event."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl--keyed-timers nil))
+      (agent-repl-test-core--recording-debug logged
+        ;; Act
+        (agent-repl--cancel-timer-key 'nothing-here)
+        ;; Assert
+        (should (null logged))))))
+
+(ert-deftest agent-repl-test-core-a-cancel-that-cancels-is-recorded ()
+  "A timer actually cancelled is recorded."
+  (agent-repl-test--with-clean-state
+    (let* ((timer (timer-create))
+           (agent-repl--keyed-timers (list (cons 'k timer)))
+           (agent-repl--timers (list timer)))
+      (agent-repl-test-core--recording-debug logged
+        ;; Act
+        (agent-repl--cancel-timer-key 'k)
+        ;; Assert
+        (should (equal logged '("cancel-timer-key: key=k cancelled=t keyed-count=0")))))))
+
 (provide 'test-core)
 
 ;;; test-core.el ends here
