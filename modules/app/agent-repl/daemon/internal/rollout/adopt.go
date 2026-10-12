@@ -683,11 +683,11 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 		return err
 	}
 	// A WORKSPACE ADOPTED WITH NO SHIM BEHIND IT HAS ITS SESSION STARTED
-	// (sessionless.go). The marker is raised here, before the views are
+	// (sessionless.go), when it is visible. The marker is raised here, before the views are
 	// published, so the roster never draws the adopted row idle and usable
 	// while nothing serves it; the start itself runs once the adoption is
 	// complete and the workspace is this daemon's.
-	sessionless := !dial && !record.Closed
+	sessionless := !dial && !record.Closed && len(c.visibleOnly(ctx, []wsm.Workspace{record}, fields)) == 1
 	if sessionless {
 		c.deps.BringingUp(ws, true)
 	}

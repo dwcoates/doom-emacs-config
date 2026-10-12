@@ -11,7 +11,7 @@ import (
 // opBringUp is the operation a successor's session starts are recorded under.
 const opBringUp = "daemon.rollout.bring_up"
 
-// A SUCCESSOR NEVER SERVES AN OPEN WORKSPACE SESSION-LESS (owner ruling,
+// A SUCCESSOR NEVER SERVES AN OPEN VISIBLE WORKSPACE SESSION-LESS (owner ruling,
 // 2026-10-02: "when the daemon bounces while emacs is still live, workspaces
 // should always be started"). A fresh boot already starts every client-less
 // workspace (internal/boot's BringUp), but a JOINING daemon reconciles nothing
@@ -32,10 +32,33 @@ const opBringUp = "daemon.rollout.bring_up"
 // placed 0 rows, revived by a prompt at 17:57:06). Both paths now start the
 // session through the boot's own bring-up.
 
-// bringUpSessionless raises the bring-up marker on each pending workspace AT
-// ONCE -- before the caller publishes its views, so no surface draws it idle
-// and usable -- and starts their sessions (startSessionless).
+// ONLY VISIBLE WORKSPACES RUN (owner principle, 2026-10-12): a workspace the
+// user hid, or whose repository section is collapsed, is not started here
+// either; the editor starts it with OpenTabs when it is shown. visibleOnly is
+// the takeover's one door onto the shared filter (bringup.OnlyVisible).
+
+// visibleOnly keeps the pending workspaces the daemon runs. A fold that cannot
+// be read starts none of them, at ERROR: starting one the user hid breaks the
+// principle, and each still starts when the editor asks for it.
+func (c *controller) visibleOnly(ctx context.Context, pending []wsm.Workspace, fields dlog.Context) []wsm.Workspace {
+	run, withheld, err := bringup.OnlyVisible(ctx, c.deps.DB, pending)
+	if err != nil {
+		c.log.Error(opBringUp, "could not tell which session-less workspaces are visible; none of them is started",
+			withCause(merge(fields, dlog.Context{"workspaces": bringup.IDs(pending)}), err))
+		return nil
+	}
+	if len(withheld) > 0 {
+		c.log.Info(opBringUp, "hidden or collapsed workspaces this daemon serves are not started; each starts when shown",
+			merge(fields, dlog.Context{"workspaces": bringup.IDs(withheld)}))
+	}
+	return run
+}
+
+// bringUpSessionless raises the bring-up marker on each pending VISIBLE
+// workspace AT ONCE -- before the caller publishes its views, so no surface
+// draws it idle and usable -- and starts their sessions (startSessionless).
 func (c *controller) bringUpSessionless(pending []wsm.Workspace, fields dlog.Context) {
+	pending = c.visibleOnly(c.lifetime(context.Background()), pending, fields)
 	for _, ws := range pending {
 		c.deps.BringingUp(ws.ID, true)
 	}
