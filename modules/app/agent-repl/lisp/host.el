@@ -462,6 +462,15 @@ one place the handover walk lives."
           (run-at-time agent-repl-host-handover-retry-delay nil
                        #'agent-repl-host-handle-refusal ws arm)
         (agent-repl-host-handle-refusal ws arm)))
+     ;; THE INCUMBENT KEPT WS, and nothing changes until it is free: the
+     ;; successor refused the mid-work adoption and the incumbent took it back.
+     ;; WS stays on the incumbent (the adopt walk already put `:conn' and the
+     ;; webview back) and NOTHING is scheduled -- the incumbent's next
+     ;; `transferred' push walks the adopt again.  Retrying it as a
+     ;; `not_yet_adopted' flipped the webview between the two daemons about
+     ;; three times a second for minutes (2026-10-11).
+     ((eq keyword :transfer-deferred)
+      (agent-repl--info ws (format "elisp.host.%s-transfer-deferred ws=%%s" op) ws))
      (t
       (agent-repl--error ws (format "elisp.host.%s-refused ws=%%s error=%%S" op)
                          ws value)))))

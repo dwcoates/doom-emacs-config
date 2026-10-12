@@ -2825,6 +2825,42 @@ than being handed an arbitrary substitute."
         ;; Assert
         (should (eq (nth 1 scheduled) #'agent-repl-host-handle-refusal))))))
 
+(ert-deftest agent-repl-test-host-adopt-transfer-deferred-is-info-not-an-error ()
+  "The incumbent took the workspace back; that is news, not a failure."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (setq agent-repl-test-host--successor (agent-repl-connect-open "127.0.0.1:9100")
+          agent-repl-test-host--adopt-answer
+          (list :response
+                (list :arm :error
+                      :value (list :cause (list :arm :transfer-deferred :value nil)))))
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-test-host--push "ws-1" (list :arm :transferred :value nil))
+    ;; Assert
+    (should-not (agent-repl-test-host--logged-p :error "elisp.host.adopt-refused"))
+    (should (agent-repl-test-host--logged-p :info "elisp.host.adopt-transfer-deferred"))))
+
+(ert-deftest agent-repl-test-host-adopt-transfer-deferred-schedules-no-retry ()
+  "Nothing changes until the incumbent's next `transferred' push, so no
+retry is scheduled: retrying flipped the webview between the daemons."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (setq agent-repl-test-host--successor (agent-repl-connect-open "127.0.0.1:9100")
+          agent-repl-test-host--adopt-answer
+          (list :response
+                (list :arm :error
+                      :value (list :cause (list :arm :transfer-deferred :value nil)))))
+    (agent-repl-test-host--subscribe "ws-1")
+    (let ((scheduled nil))
+      (cl-letf (((symbol-function 'run-at-time)
+                 (lambda (delay _repeat fn &rest args)
+                   (push (cons delay (cons fn args)) scheduled))))
+        ;; Act
+        (agent-repl-test-host--push "ws-1" (list :arm :transferred :value nil))
+        ;; Assert
+        (should-not scheduled)))))
+
 (ert-deftest agent-repl-test-host-not-yet-adopted-is-info-not-an-error ()
   "The successor simply has not taken the workspace over yet."
   (agent-repl-test-host--with-harness
