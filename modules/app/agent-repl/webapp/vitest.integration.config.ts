@@ -31,8 +31,19 @@ export default defineConfig({
     // ClientLog-forwarding logger before any component draws, and `log`
     // refuses a record with no bound identity — so a suite without it fails
     // inside the logger rather than inside the code under test.
-    setupFiles: ["./test/setup.ts"],
+    setupFiles: ["./test/setup.ts", "./test/setup-shared-integration.ts"],
     include: ["test/integration/**/*.test.ts"],
+    // ONE ENVIRONMENT PER WORKER, NOT ONE PER FILE. Isolated, the run stood a
+    // fresh jsdom up and re-imported the whole app for each of its 20 files:
+    // measured at one worker, 231s of which environment was 75s and collect
+    // 53s, against 78s un-isolated (environment 0.4s, collect 6s) with all
+    // 2,115 tests unchanged and passing. Sharing is safe only because each
+    // file starts from a clean page and the real clock
+    // (test/setup-shared-integration.ts) and stops every app it mounts.
+    // `npm run test:integration -- --sequence.shuffle --sequence.seed=<n>`
+    // must stay green for any seed: a new order dependency is a bug in the
+    // file that leaks, never a reason to turn isolation back on.
+    isolate: false,
     env: { AGENT_REPL_FORBID_VENDOR_CALLS: "1" },
     css: true,
     // TIGHT ON PURPOSE. These tests boot the whole app against a real
