@@ -361,16 +361,15 @@ func (o *orchestrator) republishQueue(ctx context.Context, repo wsm.RepoKey) err
 		// waits lands above it. Its ledger identity is minted as it takes its
 		// place, so the head has its queue tab to hang on from the start.
 		if lease, ok := o.leaseOf(entry.Workspace); ok {
-			// THE HEAD'S CLOCK RUNS FROM WHEN THE MERGE WAS QUEUED
-			// (frontend.v1.FeedMergeRuntime), so a queue change never restarts
-			// it.
-			queued, err := enqueuedMS(entry)
+			clock, clocked, err := o.headClockMS(entry)
 			if err != nil {
 				o.deps.Log.Global().Error("daemon.merge.queue", "a queued merge carries no queued time; the queue is not drawn",
 					dlog.Context{"repo": string(repo), "workspace": string(entry.Workspace), "error": err.Error()})
 				return err
 			}
-			o.publishHead(entry.Workspace, lease, o.bubbleLabel(ctx, entry), queued, nil)
+			if clocked {
+				o.publishHead(entry.Workspace, lease, o.bubbleLabel(ctx, entry), clock, nil)
+			}
 			state, drawn, err := o.queueTabState(entry)
 			if err != nil {
 				o.deps.Log.Global().Error("daemon.merge.queue", "could not resolve when a queued merge's queue tab began; the queue is not drawn",
@@ -762,6 +761,26 @@ func (o *orchestrator) queueTabState(entry wsm.MergeQueueEntry) (tabState, bool,
 		return tabState{}, false, nil
 	}
 	return tabState{startedMS: queuedMS, settled: true, endedMS: r.startedMS}, true, nil
+}
+
+// headClockMS resolves the instant one in-line merge's head clock counts from
+// (frontend.v1.FeedMergeRuntime): WHEN IT WAS QUEUED while it waits, so a
+// queue change never restarts it, and WHEN ITS RUN WAS ADMITTED once it has
+// left the queue, so the head shows only the time it has been worked on.
+//
+// An ADMITTED entry whose run is not registered yet is mid-admission, as in
+// queueTabState: there is no admission instant to count from, and the head is
+// not redrawn (false); the run draws it the moment it starts.
+func (o *orchestrator) headClockMS(entry wsm.MergeQueueEntry) (int64, bool, error) {
+	if entry.State != wsm.MergeAdmitted {
+		queuedMS, err := enqueuedMS(entry)
+		return queuedMS, err == nil, err
+	}
+	r, running := o.runFor(entry.Workspace)
+	if !running {
+		return 0, false, nil
+	}
+	return r.startedMS, true, nil
 }
 
 // queueStandings resolves each in-line entry's standing for the queue

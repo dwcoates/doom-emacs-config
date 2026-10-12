@@ -846,8 +846,9 @@ func (o *orchestrator) publishAbandoned(ctx context.Context, ws ids.WorkspaceID,
 	o.deps.Log.Global().Info(op, "a merge left the queue without running",
 		dlog.Context{"workspace": string(ws), "cause": string(cause), "summary": summary})
 	if ledger != "" {
-		// THE HEAD'S CLOCK RUNS FROM WHEN THE MERGE WAS QUEUED, as every other
-		// drawing of the head; a queue entry with no queued time is a defect.
+		// THE HEAD'S CLOCK RUNS FROM WHEN THE MERGE WAS QUEUED, as every drawing
+		// of a merge still in line (headClockMS): it never ran, so the queued
+		// span is all it has. A queue entry with no queued time is a defect.
 		queued, err := enqueuedMS(entry)
 		if err != nil {
 			o.deps.Log.Global().Error(op, "an abandoned merge's queue entry carries no queued time; its bubble is not ended",
