@@ -557,6 +557,30 @@ func TestAnExpiredAdoptionWindowRecordsTheWorkspacesOwnFault(t *testing.T) {
 	}
 }
 
+// TestAnExpiredAdoptionWindowRetractsTheTransferNotice pins that a take-back
+// withdraws the notice that the workspace moved, after it was pushed: left
+// standing, it was replayed to the page reloaded back here, and it swallowed
+// the next transfer's identical notice (2026-10-12).
+func TestAnExpiredAdoptionWindowRetractsTheTransferNotice(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+
+	// Act
+	expireAdoption(t, h)
+
+	// Assert
+	var kinds []string
+	for _, call := range h.pusher.Calls() {
+		if call.WS == ws {
+			kinds = append(kinds, call.Kind)
+		}
+	}
+	if len(kinds) != 2 || kinds[0] != "transferred" || kinds[1] != "retract_transferred" {
+		t.Fatalf("pushes for the workspace = %v, want [transferred retract_transferred]", kinds)
+	}
+}
+
 func TestAHandoverWithAReclaimedWorkspaceDoesNotExit(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
@@ -573,6 +597,33 @@ func TestAHandoverWithAReclaimedWorkspaceDoesNotExit(t *testing.T) {
 	}
 	if !loggedError(h.log, opHandover, "were reclaimed and are served here again") {
 		t.Fatalf("records = %+v, want the unfinished handover at ERROR", h.log.Records())
+	}
+}
+
+// TestAWorkspaceTheSuccessorClaimedKeepsItsTransferNotice pins that a reclaim
+// the successor's claim won retracts nothing: the workspace did move.
+func TestAWorkspaceTheSuccessorClaimedKeepsItsTransferNotice(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	if _, err := h.c.HandOver(context.Background(), false); err != nil {
+		t.Fatalf("HandOver: %v", err)
+	}
+	h.clock.awaitArmed(t, adoptionWindow)
+	if err := h.db.ClaimServing(context.Background(), ws, ids.InstanceID("daemon-successor")); err != nil {
+		t.Fatalf("ClaimServing: %v", err)
+	}
+
+	// Act
+	if _, err := h.c.reclaim(context.Background(), ws, "", true, true, nil, dlog.Context{}); err != nil {
+		t.Fatalf("reclaim: %v", err)
+	}
+
+	// Assert
+	for _, call := range h.pusher.Calls() {
+		if call.WS == ws && call.Kind == "retract_transferred" {
+			t.Fatalf("pushes = %v, want no retraction of a transfer the successor won", h.pusher.Calls())
+		}
 	}
 }
 

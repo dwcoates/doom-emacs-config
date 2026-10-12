@@ -614,6 +614,26 @@ func (s *server) PushTransferred(ws ids.WorkspaceID, successorAddress string) {
 	})
 }
 
+// RetractTransferred withdraws a workspace's standing `transferred` notice from
+// its host and web topics, because the outgoing daemon took the workspace back.
+//
+// A NOTICE THAT IS NO LONGER TRUE IS NOT REPLAYED. The topics replay their
+// latest value to a late subscriber, which is right while the workspace is
+// gone and wrong once it is served here again: the page reloaded onto this
+// daemon after the take-back was handed the old notice and went quiet, and the
+// next transfer's notice, identical to it, was dropped as a repeat -- so no
+// participant heard of it and that adoption window expired too (2026-10-12).
+func (s *server) RetractTransferred(ws ids.WorkspaceID) {
+	host := s.hostTopic(ws).ClearIf(func(push *agentreplv1.WatchHostWorkspaceResponse) bool {
+		return push.GetTransferred() != nil
+	})
+	web := s.webTopic(ws).ClearIf(func(push *agentreplv1.WatchWebWorkspaceResponse) bool {
+		return push.GetTransferred() != nil
+	})
+	s.log.Info("daemon.server.transfer_retracted", "withdrew the workspace's transfer notice; it is served here again",
+		dlog.Context{"workspace": string(ws), "host_retracted": host, "web_retracted": web})
+}
+
 // Participants reports which of a workspace's two per-workspace streams are
 // held right now.
 func (s *server) Participants(ws ids.WorkspaceID) rollout.Participants {
