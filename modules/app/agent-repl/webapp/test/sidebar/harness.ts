@@ -16,6 +16,7 @@ import {
   RosterRowWhenSchema,
   RosterMaturitySectionSchema,
   RosterHiddenSectionSchema,
+  RosterViewedSectionSchema,
   RosterMergedRepoGroupSchema,
   RosterMergedSectionSchema,
   RosterRepoSectionSchema,
@@ -23,6 +24,7 @@ import {
   WorkspaceRosterSchema,
   type RosterMaturitySection,
   type RosterHiddenSection,
+  type RosterViewedSection,
   type RosterMergedRepoGroup,
   type RosterMergedSection,
   type RosterRepoSection,
@@ -322,7 +324,24 @@ export function hiddenSection(
   collapsed: boolean = false,
 ): RosterHiddenSection {
   return create(RosterHiddenSectionSchema, {
-    header: { label: { text: "Hidden Workspaces" }, count: { workspaces: count } },
+    header: { label: { text: "Hidden" }, count: { workspaces: count } },
+    rows: { rows },
+    fold: collapsed ? { case: "collapsed", value: {} } : { case: "expanded", value: {} },
+  });
+}
+
+/**
+ * The viewed-workspaces section. Its daemon-held fold is EXPANDED unless
+ * said, as the daemon draws a section nobody has folded; its count is the
+ * rows it carries unless said.
+ */
+export function viewedSection(
+  rows: RosterRow[] = [],
+  count: number = rows.length,
+  collapsed: boolean = false,
+): RosterViewedSection {
+  return create(RosterViewedSectionSchema, {
+    header: { label: { text: "Viewed" }, count: { workspaces: count } },
     rows: { rows },
     fold: collapsed ? { case: "collapsed", value: {} } : { case: "expanded", value: {} },
   });
@@ -342,6 +361,7 @@ export function roster(init: {
   maturity?: RosterMaturitySection[];
   merged?: RosterMergedSection;
   hidden?: RosterHiddenSection;
+  viewed?: RosterViewedSection;
   current?: string;
   /** The daemon-held grouping every page shows; the repository's unless said. */
   shown?: Grouping;
@@ -352,6 +372,7 @@ export function roster(init: {
     maturity: { sections: init.maturity ?? [] },
     recentlyMerged: init.merged ?? mergedSection(),
     hidden: init.hidden ?? hiddenSection(),
+    viewed: init.viewed ?? viewedSection(),
     shown: SHOWN_ARMS[init.shown ?? "repository"],
     ...(init.current === undefined
       ? {}
