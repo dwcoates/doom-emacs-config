@@ -1218,8 +1218,8 @@ forever, and the run's announcement stayed open in the record.
 
 ## A prompt may JOIN the running turn (2026-09-30)
 
-`TurnEngine.joinRunningTurn` (`src/engine/turn.ts`), the session's `joining`
-slot (`src/engine/session.ts`); the contract is the comment on
+`TurnEngine.joinRunningTurn` (`src/engine/turn.ts`), the session's `joins`
+list (`src/engine/session.ts`); the contract is the comment on
 `StartTurnRequest.join_running_turn`.
 
 - **THE PROMPT IS PUSHED AT ONCE, WITH NO INTERRUPT**, as its own stamped
@@ -1234,9 +1234,18 @@ slot (`src/engine/session.ts`); the contract is the comment on
   turn: it takes the slot in the same step and its row is written as that
   turn's first.
 - **A DEATH OR TEARDOWN ENDS IT WITH THE REST** (`turnsOwedAnEnd`): after the
-  running turn's terminal, the join is announced as its own turn and ended.
-- **ONE JOIN AT A TIME.** A second is refused `turn_already_open`; the daemon
-  holds the prompt instead.
+  running turn's terminal, each join is announced as its own turn and ended,
+  in the order they were sent.
+- **ANY NUMBER MAY WAIT TO JOIN**, in the order they were sent (the daemon
+  flushes its whole held queue at once for an in-place merge). Every one waits
+  on the send slot's turn. When that turn leaves the slot, the FIRST waiting
+  join takes it and the rest are stated to the send ledger as its PROMPT BATCH
+  (`SendLedger.batched`, `src/engine/sends.ts`): the vendor runs every prompt
+  still queued as one turn whose echo answers the LAST member, so a frame
+  answering a member beside the first send is the first send's turn, and the
+  other members are absorbed and written folded into it. A member the vendor
+  ran alone instead is its own turn; the members behind it wait to join that
+  one in turn.
 - **A `vendor_note` RIDES ONLY TO THE VENDOR** (`vendorSaid`): a closing
   `<system-reminder>` block after what was said, never on the prompt row. The
   sidecar withholds agent-repl's own prompts from the transcript plane, so the

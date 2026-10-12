@@ -87,8 +87,14 @@ type StartTurnRequest struct {
 	// then, before either fate. With no turn of the daemon's open, the flag
 	// changes nothing: the prompt starts its turn as any StartTurn does.
 	//
-	// ONE PROMPT MAY WAIT TO JOIN A TURN AT A TIME. A second, while one waits,
-	// is refused `turn_already_open`; the daemon holds it instead.
+	// ANY NUMBER OF PROMPTS MAY WAIT TO JOIN A TURN, in the order they were
+	// sent, as the vendor queues them: the daemon sends every prompt it holds
+	// at once when it flushes its queue (an in-place merge asked for by the
+	// agent's turn). The vendor folds every queued prompt at the running turn's
+	// next tool boundary; when the running turn ends with prompts still
+	// queued, the vendor runs them all as ONE turn (a prompt batch), which runs
+	// under the FIRST's id and origin, every other member written FOLDED into
+	// it.
 	JoinRunningTurn bool `protobuf:"varint,6,opt,name=join_running_turn,json=joinRunningTurn,proto3" json:"join_running_turn,omitempty"`
 	// WORDS FOR THE AGENT ALONE, pushed to the vendor after what was said and
 	// never recorded: the prompt row carries `said` exactly, and the feed draws
@@ -472,8 +478,9 @@ type StartTurnFailure_TurnAlreadyOpen struct {
 	// shim's own cache keep-alive never produces it either -- a StartTurn that
 	// arrives while a keep-alive runs waits inside the shim for the keep-alive
 	// to end and then opens its turn, so no keep-alive is ever visible on this
-	// wire. A `join_running_turn` start while another prompt still waits to
-	// join the running turn is refused under this arm too.
+	// wire. A `join_running_turn` start is never refused under this arm
+	// while a turn of the daemon's runs, however many prompts already wait to
+	// join it.
 	TurnAlreadyOpen *StartTurnTurnAlreadyOpen `protobuf:"bytes,2,opt,name=turn_already_open,json=turnAlreadyOpen,proto3,oneof"`
 }
 
