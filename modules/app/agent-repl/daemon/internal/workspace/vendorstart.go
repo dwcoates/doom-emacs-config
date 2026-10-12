@@ -195,7 +195,21 @@ func (f *Fleet) CancelVendorStart(ctx context.Context, ws ids.WorkspaceID) bool 
 // died under the call) is not retried here: the shim's death is its own edge.
 func (f *Fleet) startSession(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, client shimclient.Client, src source, session wsm.Session, configDir string) (*conversationv1.SessionStarted, error) {
 	for {
+		waitedFrom := f.now()
+		release, err := f.vendorSlots.acquire(ctx)
+		if err != nil {
+			f.closeRetrying(ctx, log, ws)
+			log.Info(opBringUp, "the vendor-start run ended with its context while it waited for a vendor-start slot", dlog.Context{"cause": err.Error()})
+			if errors.Is(err, ErrVendorStartCancelled) {
+				return nil, fmt.Errorf("start session for %q: %w", ws, ErrVendorStartCancelled)
+			}
+			return nil, fmt.Errorf("start session for %q: %w", ws, err)
+		}
+		if waited := f.now().Sub(waitedFrom); waited >= vendorSlotWaitReported {
+			log.Info(opBringUp, "the vendor start waited for a slot among the starts in flight", dlog.Context{"waited_ms": waited.Milliseconds(), "slots": cap(f.vendorSlots)})
+		}
 		started, err := f.askToStartSession(ctx, log, ws, client, src, session, configDir)
+		release()
 		if err == nil {
 			// A SESSION THAT IS SERVING is the repair of every fault whose
 			// lifetime ends at a started session -- the vendor-start faults
