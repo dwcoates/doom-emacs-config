@@ -31,6 +31,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 	"sync"
 
 	"claude-repld/internal/dlog"
@@ -60,6 +62,9 @@ type Deps struct {
 	// the recorded count reaches the detail panel.
 	PublishRegistry func(context.Context) error
 	Log             dlog.Surfaces
+	// WorktreeGone reports whether a workspace's worktree no longer exists
+	// (nil is a stat of the directory). A seam for tests.
+	WorktreeGone func(dir string) bool
 }
 
 // Recounter recounts a workspace's branch commits after each of its turns
@@ -88,6 +93,12 @@ func New(deps Deps) (*Recounter, error) {
 		return nil, errors.New("branchcommits: the recounter needs the roster republish")
 	case deps.Log == nil:
 		return nil, errors.New("branchcommits: the recounter needs log surfaces")
+	}
+	if deps.WorktreeGone == nil {
+		deps.WorktreeGone = func(dir string) bool {
+			_, err := os.Stat(dir)
+			return errors.Is(err, fs.ErrNotExist)
+		}
 	}
 	return &Recounter{deps: deps, owed: map[ids.WorkspaceID]bool{}, wake: make(chan struct{}, 1)}, nil
 }
@@ -175,6 +186,17 @@ func (r *Recounter) recount(ctx context.Context, ws ids.WorkspaceID) {
 	}
 	if err != nil {
 		fields["error"] = err.Error()
+		// A COUNT THAT RACED ITS WORKSPACE'S OWN TEARDOWN IS NO FAULT. A turn
+		// closing right as its merge lands owes a recount, and the landing
+		// closes the workspace and removes its worktree while git runs in it
+		// ("not a git repository"). The workspace is read again: one that was
+		// forgotten, merged or closed meanwhile, or whose worktree is gone,
+		// has nothing left to count. Any other failure is an error.
+		if why := r.movedOn(ctx, ws, record.Dir); why != "" {
+			fields["moved_on"] = why
+			log.Info(opRecount, "the workspace moved on while its branch was counted; there is nothing left to count", fields)
+			return
+		}
 		log.Error(opRecount, "could not count the branch's commits; the panel keeps the last count", fields)
 		return
 	}
@@ -199,4 +221,24 @@ func (r *Recounter) recount(ctx context.Context, ws ids.WorkspaceID) {
 		fields["error"] = fmt.Sprintf("republish the roster: %v", err)
 		log.Error(opRecount, "could not republish the roster after a recount", fields)
 	}
+}
+
+// movedOn answers why a workspace whose count failed has nothing left to
+// count -- forgotten, merged, closed, or its worktree removed -- or "" when it
+// is still the live workspace the count was for.
+func (r *Recounter) movedOn(ctx context.Context, ws ids.WorkspaceID, dir string) string {
+	record, err := r.deps.DB.Workspace(context.WithoutCancel(ctx), ws)
+	switch {
+	case errors.Is(err, wsm.ErrNotFound):
+		return "forgotten"
+	case err != nil:
+		return ""
+	case record.MergedAt != nil:
+		return "merged"
+	case record.Closed:
+		return "closed"
+	case r.deps.WorktreeGone(dir):
+		return "worktree removed"
+	}
+	return ""
 }
