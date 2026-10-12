@@ -544,8 +544,12 @@ func newHarness(t *testing.T, adjust ...func(*Deps)) *harness {
 		Reviving:      h.reviving.Reviving,
 		Announcer:     h.announcer,
 		Exit:          func(context.Context) error { h.exits <- struct{}{}; return nil },
-		Clock:         h.clock,
-		Log:           log,
+		// A WITHHELD STAND-DOWN RUNS IN LINE in tests, so its outcome is
+		// settled when the call returns; a test that needs it parked
+		// overrides this.
+		Detach: func(run func(context.Context)) { run(context.Background()) },
+		Clock:  h.clock,
+		Log:    log,
 	}
 	h.spawns.witness = func() int { return len(h.stand.Killed()) }
 	for _, a := range adjust {

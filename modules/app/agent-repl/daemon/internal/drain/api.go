@@ -64,6 +64,15 @@ type Controller interface {
 	// Run drives the sweep on its own cadence, and fires the standing schedule
 	// when its deadline passes, until ctx is cancelled.
 	Run(ctx context.Context) error
+	// StandDownWithheld stands the session of a workspace the user hid, or
+	// whose repository section was collapsed, down as the sweep does — never
+	// under a turn: a busy one is stood down once its turn ends (withheld.go).
+	// It returns at once.
+	StandDownWithheld(ws ids.WorkspaceID)
+	// RetryWithheld is the daemon's own edge for a workspace (the free edge
+	// a turn's end raises, a session coming up): a stand-down pending on it is
+	// asked again.
+	RetryWithheld(ws ids.WorkspaceID)
 }
 
 // Deps are the controller's collaborators.
@@ -140,6 +149,10 @@ type Deps struct {
 	// the parked workspace could not be handed the prompt that revives it.
 	// Nil means no session-scoped view is wired.
 	SetParked func(ws ids.WorkspaceID, parked bool)
+	// Detach runs a withheld workspace's stand-down off the caller's
+	// goroutine, on a lifetime the daemon's exit ends and joins
+	// (workspace.Fleet.Detach). Required.
+	Detach func(run func(context.Context))
 	// Clock is the controller's view of time, injected so a schedule's deadline
 	// and the sweep's cadence are assertable without a real one.
 	Clock Clock
@@ -318,6 +331,9 @@ func New(deps Deps) (Controller, error) {
 	}
 	if deps.Log == nil {
 		return nil, errors.New("drain: log surfaces are required")
+	}
+	if deps.Detach == nil {
+		return nil, errors.New("drain: a detached lifetime is required")
 	}
 	if deps.Clock == nil {
 		deps.Clock = SystemClock{}
