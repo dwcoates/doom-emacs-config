@@ -1883,15 +1883,13 @@ func (d *Daemon) freezeStrays() ([]int, error) {
 			return d.settleFrozen(stopped, listed), nil
 		}
 		for _, pid := range fresh {
-			if err := syscall.Kill(pid, syscall.SIGSTOP); err != nil {
-				if errors.Is(err, syscall.ESRCH) {
-					continue
-				}
-				return d.settleFrozen(stopped, nil), fmt.Errorf("SIGSTOP stray %d: %w", pid, err)
+			err := stopFrozen(pid, freezeBound, syscall.Kill)
+			if errors.Is(err, syscall.ESRCH) {
+				continue
 			}
 			stopped[pid] = true
-			if err := awaitFrozen(pid, freezeBound); err != nil {
-				return d.settleFrozen(stopped, nil), err
+			if err != nil {
+				return d.settleFrozen(stopped, nil), fmt.Errorf("stop stray %d: %w", pid, err)
 			}
 		}
 	}
