@@ -309,20 +309,30 @@ func validItem(it answerItem, allowed map[string]bool) (*frontendv1.NewsDigestIt
 		item.Effective = &frontendv1.NewsDigestItemEffective{Text: effective}
 	}
 	for _, l := range it.Links {
-		label := strings.TrimSpace(l.Label)
-		if label == "" {
-			return nil, fmt.Errorf("the link %q has no label", l.URL)
-		}
-		u, err := url.Parse(l.URL)
-		if err != nil || u.Scheme != "https" || u.Host == "" {
-			return nil, fmt.Errorf("the link %q is not an absolute https url", l.URL)
+		link, err := validLink(l)
+		if err != nil {
+			return nil, err
 		}
 		if !allowed[l.URL] {
 			return nil, fmt.Errorf("the link %q is not one of the urls the sources gave", l.URL)
 		}
-		item.Links = append(item.Links, &frontendv1.NewsDigestLink{Label: label, Url: l.URL})
+		item.Links = append(item.Links, link)
 	}
 	return item, nil
+}
+
+// validLink converts one answered link, refusing one with a blank label or a
+// url that is not absolute https. Every link the model writes passes here.
+func validLink(l answerLink) (*frontendv1.NewsDigestLink, error) {
+	label := strings.TrimSpace(l.Label)
+	if label == "" {
+		return nil, fmt.Errorf("the link %q has no label", l.URL)
+	}
+	u, err := url.Parse(l.URL)
+	if err != nil || u.Scheme != "https" || u.Host == "" {
+		return nil, fmt.Errorf("the link %q is not an absolute https url", l.URL)
+	}
+	return &frontendv1.NewsDigestLink{Label: label, Url: l.URL}, nil
 }
 
 // stripFence removes one markdown code fence enclosing the whole text.

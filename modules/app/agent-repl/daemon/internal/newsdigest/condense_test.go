@@ -3,6 +3,8 @@ package newsdigest
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -375,4 +377,69 @@ func TestKindTokenPanicsOnASectionWithNoKind(t *testing.T) {
 
 	// Act
 	kindToken(&frontendv1.NewsDigestSectionKind{})
+}
+
+func TestValidLink(t *testing.T) {
+	tests := []struct {
+		name    string
+		link    answerLink
+		want    *frontendv1.NewsDigestLink
+		wantErr string
+	}{
+		{name: "an https link keeps its url and trims its label", link: answerLink{Label: " Release ", URL: "https://fixture.test/r"},
+			want: &frontendv1.NewsDigestLink{Label: "Release", Url: "https://fixture.test/r"}},
+		{name: "a blank label", link: answerLink{Label: " ", URL: "https://fixture.test/r"}, wantErr: "has no label"},
+		{name: "an http url", link: answerLink{Label: "L", URL: "http://fixture.test/r"}, wantErr: "not an absolute https url"},
+		{name: "a relative url", link: answerLink{Label: "L", URL: "/r"}, wantErr: "not an absolute https url"},
+		{name: "an unparseable url", link: answerLink{Label: "L", URL: "https://%zz"}, wantErr: "not an absolute https url"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got, err := validLink(tt.link)
+
+			// Assert
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("validLink = %v, %v, want an error naming %q", got, err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil || got.GetLabel() != tt.want.GetLabel() || got.GetUrl() != tt.want.GetUrl() {
+				t.Fatalf("validLink = %v, %v, want %v", got, err, tt.want)
+			}
+		})
+	}
+}
+
+// TestEveryModelWrittenLinkPassesValidLink holds the package to one link
+// check: a source file checking a link's scheme on its own fails here.
+func TestEveryModelWrittenLinkPassesValidLink(t *testing.T) {
+	// Arrange
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatalf("glob: %v", err)
+	}
+
+	// Act
+	checks := 0
+	for _, f := range files {
+		if strings.HasSuffix(f, "_test.go") {
+			continue
+		}
+		src, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatalf("read %s: %v", f, err)
+		}
+		n := strings.Count(string(src), `Scheme != "https"`)
+		if n > 0 && f != "condense.go" {
+			t.Errorf("%s checks a link's scheme outside validLink", f)
+		}
+		checks += n
+	}
+
+	// Assert
+	if checks != 1 {
+		t.Fatalf("the https check appears %d times in the package, want once, in validLink", checks)
+	}
 }
