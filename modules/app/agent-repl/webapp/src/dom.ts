@@ -44,6 +44,19 @@ export function scrollbarWidthPx(box: { offsetWidth: number; clientWidth: number
 }
 
 /**
+ * A computed CSS length's pixels, or null when VALUE is not a length in px.
+ * A laid-out element reports every computed length in px, so null means the
+ * element is not laid out, or the length resolved to something else (a
+ * percentage, a keyword); what that means is the caller's to say. The one
+ * parse every computed-length read shares, so no two readers can disagree
+ * about what a px length is.
+ */
+export function computedPx(value: string): number | null {
+  const px = /^(-?\d+(?:\.\d+)?)px$/.exec(value);
+  return px === null ? null : Number.parseFloat(px[1] as string);
+}
+
+/**
  * Make PARENT's children exactly DESIRED, in order, MOVING ONLY WHAT IS OUT OF
  * PLACE. Answers how many elements it had to insert or move.
  *
