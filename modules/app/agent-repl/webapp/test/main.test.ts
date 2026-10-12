@@ -58,7 +58,7 @@ interface BootRecord {
   /** The rejection `main.ts` handed to `queueMicrotask` to re-raise. */
   rethrown: (() => void)[];
   /** What `adoptAtBoot` does when the boot reaches it. */
-  adopt: () => Promise<void>;
+  adopt: () => Promise<void | "deferred">;
   /** The composer gate the boot built, so the footer's status can be read off it. */
   gateSet: Mock;
   /** The footer's status subscriber, captured so a test can drive it. */
@@ -211,7 +211,7 @@ async function runBoot(rec: BootRecord): Promise<void> {
   vi.doMock("../src/lifecycle/lifecycle.js", () => ({
     adoptAtBoot: vi.fn(async () => {
       rec.order.push("adopt");
-      await rec.adopt();
+      return await rec.adopt();
     }),
     startLifecycle: vi.fn(() => {
       rec.order.push("lifecycle");
@@ -673,6 +673,26 @@ describe("a boot that fails", { timeout: BOOT_TIMEOUT_MS }, () => {
     await bootMain();
 
     expect(page.bootedContext?.isQuiesced()).toBe(true);
+  });
+
+  test("a deferred transfer stops the page's one stream without a boot failure", async () => {
+    // The incumbent kept the workspace and Emacs reloads the page onto it, so
+    // the page stops quietly: no failure is drawn and nothing is re-raised.
+    page.adopt = async () => "deferred";
+
+    await bootMain();
+
+    expect(page.bootedContext?.isQuiesced()).toBe(true);
+    expect(chipEvidence("bootFailed")).toEqual([]);
+    expect(page.rethrown).toHaveLength(0);
+  });
+
+  test("a deferred transfer mounts nothing after the adoption", async () => {
+    page.adopt = async () => "deferred";
+
+    await bootMain();
+
+    expect(page.order.slice(page.order.indexOf("adopt") + 1)).toEqual([]);
   });
 
   test("leaves the page's one stream running when the boot succeeds", async () => {
