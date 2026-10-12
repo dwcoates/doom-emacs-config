@@ -331,6 +331,29 @@ func TestTheFixingAttemptBriefKeepsItsPlaceholderSet(t *testing.T) {
 	}
 }
 
+func TestTheFixingAttemptBriefPrescribesRunningOnlyTheFailingTestsUntilTheyPass(t *testing.T) {
+	// Arrange.
+	want := []string{
+		"RUN ONLY THE FAILING TESTS, AND KEEP FIXING UNTIL THEY PASS, BEFORE YOU END YOUR TURN",
+		"never the whole suite and never `bin/test-all.sh`",
+		"Repeat until every one of them passes",
+		"Only then commit and end your turn",
+	}
+
+	// Act.
+	got, err := Load(repoPromptsDir, "merge-test-failure-resolve")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	for _, phrase := range want {
+		if !strings.Contains(got.Body, phrase) {
+			t.Fatalf("merge-test-failure-resolve does not say %q", phrase)
+		}
+	}
+}
+
 func TestPathNamesTheBriefsFile(t *testing.T) {
 	// Act.
 	got := Path("/p", "b")
