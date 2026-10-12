@@ -270,3 +270,46 @@ func TestDuringAHandoverOnlyTheServingDaemonIngestsAHeldPrompt(t *testing.T) {
 		t.Fatalf("the incumbent's exit code = %d, want an orderly 0", code)
 	}
 }
+
+// A PROMPT HELD ACROSS AN IMMEDIATE SHUTDOWN IS DELIVERED WHEN THE SUCCESSOR'S
+// SESSION COMES UP. The session-up release runs inside the start that brings
+// the session up, and a Serving that answered false for a start still under
+// way (2026-10-12) held it there forever.
+func TestAPromptHeldAcrossAShutdownIsDeliveredWhenTheNextSessionComesUp(t *testing.T) {
+	t.Parallel()
+	// Arrange: the daemon stands down with no turn running, and the client
+	// writes a prompt while none serves.
+	f := newOpened(t, harness.Opts{})
+	f.shim.ExpectStartSession()
+	shutdownNow(t, f.d)
+	heldWrite(t, f.d.StateDir, "held_20261012T120001.000000001_aaaaaaaa_k-across.json", f.repo.Dir, "k-across", "written across the restart")
+
+	// Act
+	f.d = harness.StartDaemon(t, harness.Opts{StateDir: f.d.StateDir})
+	resp, err := f.d.Client().OpenWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: f.ws}))
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("OpenWorkspace on the successor = (%v, %v), want a success", resp, err)
+	}
+	shim := f.d.OpenedShim(f.ws)
+	shim.ExpectStartSession()
+
+	// Assert
+	if st := shim.ExpectStartTurn(); text(st.GetSaid()) != "written across the restart" {
+		t.Fatalf("first delivered = %q, want the prompt held across the restart", text(st.GetSaid()))
+	}
+}
+
+// shutdownNow stands the daemon down the way a bounce does: every session
+// forced down, then the exit.
+func shutdownNow(t *testing.T, d *harness.Daemon) {
+	t.Helper()
+	resp, err := d.Client().UpdateShutdownSchedule(d.Ctx(), connect.NewRequest(&agentreplv1.UpdateShutdownScheduleRequest{
+		Action: &agentreplv1.UpdateShutdownScheduleRequest_Now{Now: &agentreplv1.UpdateShutdownScheduleNow{
+			Reason: drainReasonOperator("emacs"),
+		}},
+	}))
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("UpdateShutdownSchedule{now} = (%v, %v), want a success", resp, err)
+	}
+	d.AwaitExit()
+}

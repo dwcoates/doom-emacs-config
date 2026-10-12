@@ -31,6 +31,21 @@ func TestSweepHibernatesAnIdleFreeSession(t *testing.T) {
 	}
 }
 
+func TestSweepSkipsAWorkspaceWhoseStartIsUnderWay(t *testing.T) {
+	// Arrange: a reopened workspace whose row still reads idle for hours.
+	h := newHarness(t)
+	ws := h.workspace(t, instant.Add(-2*time.Hour))
+	h.stand.startUnderWay(ws)
+
+	// Act
+	hibernated, err := h.c.Sweep(context.Background(), instant)
+
+	// Assert
+	if err != nil || len(hibernated) != 0 {
+		t.Fatalf("Sweep = %v, %v; want nothing hibernated while its start is under way", hibernated, err)
+	}
+}
+
 func TestSweepSendsTheHibernateDirectiveBeforeTheStandDown(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
