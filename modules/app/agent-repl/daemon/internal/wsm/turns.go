@@ -141,6 +141,24 @@ func (s *store) CloseTurn(ctx context.Context, turn TurnID, at time.Time, how Tu
 	})
 }
 
+// Turn answers one recorded turn of a workspace whole; ErrNotFound when the
+// workspace recorded no such turn.
+func (s *store) Turn(ctx context.Context, id WorkspaceID, turn TurnID) (Turn, error) {
+	var out Turn
+	err := s.read(ctx, "daemon.wsm.turn", dlog.Context{"workspace": string(id), "turn": string(turn)}, func(ctx context.Context) error {
+		t, err := scanTurn(s.db().QueryRowContext(ctx, `SELECT `+turnColumns+` FROM turns WHERE id = ? AND workspace_id = ?`, turn, id))
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("wsm: turn %s of workspace %s: %w", turn, id, ErrNotFound)
+		}
+		if err != nil {
+			return err
+		}
+		out = t
+		return nil
+	})
+	return out, err
+}
+
 // TurnCloses answers the recorded close of each named turn of one workspace
 // that has one, all-or-nothing. An open turn, and a turn this workspace never
 // recorded, is simply absent.
