@@ -59,44 +59,23 @@ func (c *controller) Sweep(ctx context.Context, now time.Time) ([]ids.WorkspaceI
 			log.Debug(opSweep, "the session was engaged inside the cutoff", fields)
 			continue
 		}
-		if !c.deps.Freeness.Free(ws.ID) {
+		switch gate := c.gate(ws.ID); gate {
+		case gateOpen:
+		case gateBusy:
 			log.Debug(opSweep, "the idle session is not free; deferring its hibernation", fields)
 			continue
-		}
-		// A DURABLE SESSION ROW IS NOT A SHIM. Hibernation is a directive to a
-		// running shim, so a workspace whose session this daemon cannot
-		// address has nothing to stand down: its bring-up is still in flight,
-		// its close already is, or the row outlived the process that served
-		// it. That is a STATE, and the sweep skips it here rather than sending
-		// a directive whose only possible answer is a failure -- which is what
-		// a registry row left behind by a removed worktree cost in the field:
-		// the same ERROR every five minutes, forever, for a session no daemon
-		// had ever held (realtest 7, 2026-09-12).
-		if !c.deps.Stand.Serving(ws.ID) {
+		case gateNotServing:
 			log.Debug(opSweep, "the workspace has no shim to address; skipping its hibernation", fields)
 			continue
-		}
-		// A START STILL UNDER WAY HAS NOT RECORDED ITS ENGAGEMENT: the row
-		// read above carries the one from before it, so the idle measured is
-		// the workspace's time closed, not the session's time idle.
-		if c.deps.Stand.StartUnderWay(ws.ID) {
+		case gateStarting:
 			log.Debug(opSweep, "a start of the workspace's session is under way; skipping its hibernation", fields)
 			continue
-		}
-		// A SESSION A PROMPT IS REVIVING IS ENGAGED, whatever its record says.
-		// The revival's bring-up serves the session and retires its terminal
-		// before it records the session's facts, and delivers the prompt it
-		// holds only after that, so across that window the record reads live
-		// and idle since the engagement before the last hibernation. Standing
-		// it down there hibernated the shim the prompt was about to reach: the
-		// hold then met `query_dead`, or no session at all, and was dropped.
-		//
-		// THE ORDER IS WHAT MAKES THIS TOTAL. Serving was read true above, so
-		// any revival behind it had already raised its flag; a flag read false
-		// here means that revival has delivered, and the turn it started is
-		// the shim's own `turn_in_flight` refusal to the directive below.
-		if c.deps.Reviving(ws.ID) {
+		case gateReviving:
 			log.Debug(opSweep, "a prompt is reviving the session; deferring its hibernation", fields)
+			continue
+		default:
+			log.Error(opSweep, "the stand-down gate answered a value the sweep cannot read; skipping the hibernation",
+				merge(fields, dlog.Context{"gate": gate.String(), "invariant_violation": "every gate value is handled"}))
 			continue
 		}
 		if retry, backingOff := c.backingOff(ws.ID, now); backingOff {
@@ -104,7 +83,7 @@ func (c *controller) Sweep(ctx context.Context, now time.Time) ([]ids.WorkspaceI
 				merge(fields, dlog.Context{"failures": retry.failures, "next_attempt": retry.notBefore}))
 			continue
 		}
-		switch c.hibernate(ctx, log, ws.ID, fields) {
+		switch c.hibernate(ctx, log, ws.ID, fields, c.idleReason()) {
 		case hibernateDone:
 			c.clearRetry(ws.ID)
 			hibernated = append(hibernated, ws.ID)
@@ -119,6 +98,84 @@ func (c *controller) Sweep(ctx context.Context, now time.Time) ([]ids.WorkspaceI
 	c.log.Debug(opSweep, "one idle-sweep pass finished",
 		dlog.Context{"scanned": len(workspaces), "hibernated": workspaceIDs(hibernated)})
 	return hibernated, nil
+}
+
+// standGate is whether a session may be stood down right now, and if not,
+// why not. The idle sweep and a withheld workspace's stand-down ask the SAME
+// question (gate), in the same order.
+type standGate int
+
+const (
+	// gateOpen: nothing stands in the way.
+	gateOpen standGate = iota
+	// gateBusy: a turn is in flight or detached work is live. Teardown never
+	// interrupts.
+	gateBusy
+	// gateNotServing: this daemon holds no shim it can address.
+	gateNotServing
+	// gateStarting: a start of the session is still under way.
+	gateStarting
+	// gateReviving: a prompt is reviving the session.
+	gateReviving
+)
+
+// String names the gate for the records.
+func (g standGate) String() string {
+	switch g {
+	case gateOpen:
+		return "open"
+	case gateBusy:
+		return "busy"
+	case gateNotServing:
+		return "not_serving"
+	case gateStarting:
+		return "starting"
+	case gateReviving:
+		return "reviving"
+	default:
+		return "unknown"
+	}
+}
+
+// gate answers whether ws's session may be stood down right now.
+func (c *controller) gate(ws ids.WorkspaceID) standGate {
+	if !c.deps.Freeness.Free(ws) {
+		return gateBusy
+	}
+	// A DURABLE SESSION ROW IS NOT A SHIM. Hibernation is a directive to a
+	// running shim, so a workspace whose session this daemon cannot
+	// address has nothing to stand down: its bring-up is still in flight,
+	// its close already is, or the row outlived the process that served
+	// it. That is a STATE, and it is skipped here rather than sending
+	// a directive whose only possible answer is a failure -- which is what
+	// a registry row left behind by a removed worktree cost in the field:
+	// the same ERROR every five minutes, forever, for a session no daemon
+	// had ever held (realtest 7, 2026-09-12).
+	if !c.deps.Stand.Serving(ws) {
+		return gateNotServing
+	}
+	// A START STILL UNDER WAY HAS NOT RECORDED ITS ENGAGEMENT: the row
+	// read before it carries the one from before it, so the idle measured is
+	// the workspace's time closed, not the session's time idle.
+	if c.deps.Stand.StartUnderWay(ws) {
+		return gateStarting
+	}
+	// A SESSION A PROMPT IS REVIVING IS ENGAGED, whatever its record says.
+	// The revival's bring-up serves the session and retires its terminal
+	// before it records the session's facts, and delivers the prompt it
+	// holds only after that, so across that window the record reads live
+	// and idle since the engagement before the last hibernation. Standing
+	// it down there hibernated the shim the prompt was about to reach: the
+	// hold then met `query_dead`, or no session at all, and was dropped.
+	//
+	// THE ORDER IS WHAT MAKES THIS TOTAL. Serving was read true above, so
+	// any revival behind it had already raised its flag; a flag read false
+	// here means that revival has delivered, and the turn it started is
+	// the shim's own `turn_in_flight` refusal to the directive below.
+	if c.deps.Reviving(ws) {
+		return gateReviving
+	}
+	return gateOpen
 }
 
 // hibernateOutcome is what one hibernation attempt came to.
@@ -137,21 +194,40 @@ const (
 	hibernateFailed
 )
 
+// standDownReason is why a session is stood down: the records it is filed
+// under, the detail its terminal carries, and the sentence its success says.
+// The idle sweep and a withheld workspace's stand-down take the SAME steps
+// (hibernate); only these words differ.
+type standDownReason struct {
+	op     string
+	detail string
+	done   string
+}
+
+// idleReason is the idle sweep's.
+func (c *controller) idleReason() standDownReason {
+	return standDownReason{
+		op:     opSweep,
+		detail: fmt.Sprintf("idle past the %s cutoff; the transcript was left as it stood", c.deps.IdleCutoff),
+		done:   "hibernated an idle session",
+	}
+}
+
 // hibernate stands one session down: the Hibernate directive, then the ack,
 // then a GRACEFUL KillSession, then the durable stand-down record. It reports
 // what the attempt came to; every failure and every refusal DEFERS the
 // workspace rather than failing the whole pass, because one wedged session
 // must not stop the sweep reaching the rest.
-func (c *controller) hibernate(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, fields dlog.Context) hibernateOutcome {
+func (c *controller) hibernate(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, fields dlog.Context, why standDownReason) hibernateOutcome {
 	lease, err := c.deps.DB.AcquireLease(ctx, ws, wsm.HolderHibernate, wsm.PolicyHold)
 	if err != nil {
-		log.Debug(opSweep, "another holder has the lease; deferring the hibernation",
+		log.Debug(why.op, "another holder has the lease; deferring the hibernation",
 			withCause(fields, err))
 		return hibernateDeferred
 	}
 	defer func() {
 		if err := c.deps.DB.ReleaseLease(context.WithoutCancel(ctx), lease.ID); err != nil {
-			log.Warn(opSweep, "could not release the hibernation lease",
+			log.Warn(why.op, "could not release the hibernation lease",
 				withCause(merge(fields, dlog.Context{"lease": string(lease.ID)}), err))
 			return
 		}
@@ -181,11 +257,11 @@ func (c *controller) hibernate(ctx context.Context, log dlog.Logger, ws ids.Work
 		// state it is and deferred; the ERROR below still covers every
 		// directive that failed against a shim that WAS there.
 		if errors.Is(err, ErrNoLiveSession) {
-			log.Debug(opSweep, "the session went away before the hibernate directive; deferring the hibernation",
+			log.Debug(why.op, "the session went away before the hibernate directive; deferring the hibernation",
 				withCause(fields, err))
 			return hibernateDeferred
 		}
-		log.Error(opSweep, "the hibernate directive failed; deferring the hibernation",
+		log.Error(why.op, "the hibernate directive failed; deferring the hibernation",
 			withCause(fields, err))
 		return hibernateFailed
 	}
@@ -194,10 +270,10 @@ func (c *controller) hibernate(ctx context.Context, log dlog.Logger, ws ids.Work
 		// arm is worth a warning, and defers just the same.
 		refused := merge(fields, dlog.Context{"refusal": hibernateRefusal(refusal)})
 		if refusal.GetTurnInFlight() != nil {
-			log.Debug(opSweep, "a turn is in flight; deferring the hibernation", refused)
+			log.Debug(why.op, "a turn is in flight; deferring the hibernation", refused)
 			return hibernateDeferred
 		}
-		log.Warn(opSweep, "the shim refused to hibernate; deferring", refused)
+		log.Warn(why.op, "the shim refused to hibernate; deferring", refused)
 		return hibernateFailed
 	}
 	// AND EVERY OTHER ARM IS A DEFERRAL, NOT A STAND-DOWN. The arms above are
@@ -206,7 +282,7 @@ func (c *controller) hibernate(ctx context.Context, log dlog.Logger, ws ids.Work
 	// session down on an answer nobody here understood could kill a turn the
 	// shim was refusing to let go of.
 	if answer.GetSuccess() == nil {
-		log.Error(opSweep, "the shim answered the hibernate directive with an arm this daemon cannot read; deferring the hibernation", fields)
+		log.Error(why.op, "the shim answered the hibernate directive with an arm this daemon cannot read; deferring the hibernation", fields)
 		return hibernateFailed
 	}
 
@@ -214,24 +290,24 @@ func (c *controller) hibernate(ctx context.Context, log dlog.Logger, ws ids.Work
 	err = c.deps.Stand.KillSession(standDown, ws, false)
 	cancelStandDown()
 	if err != nil {
-		log.Error(opSweep, "the graceful stand-down failed after the hibernate ack; deferring",
+		log.Error(why.op, "the graceful stand-down failed after the hibernate ack; deferring",
 			withCause(fields, err))
 		return hibernateFailed
 	}
 
 	if err := c.deps.DB.SetSessionTerminal(ctx, ws, wsm.SessionTerminal{
 		Kind:   TerminalHibernated,
-		Detail: fmt.Sprintf("idle past the %s cutoff; the transcript was left as it stood", c.deps.IdleCutoff),
+		Detail: why.detail,
 		At:     c.deps.Clock.Now(),
 	}); err != nil {
-		log.Error(opSweep, "could not record the hibernation stand-down", withCause(fields, err))
+		log.Error(why.op, "could not record the hibernation stand-down", withCause(fields, err))
 		return hibernateFailed
 	}
 	// The shim is gone, so the pid the intent manifest would name is gone with
 	// it. A pid left behind would make the next reconciliation read a dead
 	// session as preserved.
 	if err := c.deps.DB.SetShimPID(ctx, ws, nil); err != nil {
-		log.Error(opSweep, "could not clear the hibernated session's shim pid", withCause(fields, err))
+		log.Error(why.op, "could not clear the hibernated session's shim pid", withCause(fields, err))
 		return hibernateFailed
 	}
 	// AND SO IS THE SPAWN THE REGISTRY RECORDS. That pid exists so a successor
@@ -239,7 +315,7 @@ func (c *controller) hibernate(ctx context.Context, log dlog.Logger, ws ids.Work
 	// second one; a hibernated workspace's shim is gone, and a pid left behind
 	// would make the next boot wait out its whole adoption bound for it.
 	if err := c.deps.DB.SetSpawnedShimPID(ctx, ws, nil); err != nil {
-		log.Error(opSweep, "could not clear the hibernated workspace's recorded spawn pid", withCause(fields, err))
+		log.Error(why.op, "could not clear the hibernated workspace's recorded spawn pid", withCause(fields, err))
 		return hibernateFailed
 	}
 	// AND SO IS THE FOOTER'S, AND THE CONNECTIVITY INDICATOR'S. Both are
@@ -269,11 +345,11 @@ func (c *controller) hibernate(ctx context.Context, log dlog.Logger, ws ids.Work
 	// record is what names it.
 	if c.deps.PublishRegistry != nil {
 		if err := c.deps.PublishRegistry(ctx); err != nil {
-			log.Error(opSweep, "could not republish the roster after the hibernation",
+			log.Error(why.op, "could not republish the roster after the hibernation",
 				withCause(fields, err))
 		}
 	}
-	log.Info(opSweep, "hibernated an idle session", fields)
+	log.Info(why.op, why.done, fields)
 	return hibernateDone
 }
 
