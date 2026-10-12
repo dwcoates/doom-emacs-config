@@ -235,6 +235,16 @@ INVALID and is rejected loudly, as for the status."
       "RosterRowAvailability" 'availability object
       agent-repl-wire-roster-row-availability-arms))))
 
+(defun agent-repl-wire-roster--decode-instant (message value)
+  "Decode VALUE as MESSAGE, an instant message whose only field is `atMs'.
+Answers the plist `(:at-ms)'.  Every roster instant (the durable last
+selection and each when-column arm) shares this one shape."
+  (let ((object (agent-repl-wire--object message value)))
+    (agent-repl-wire--check-keys message object '(atMs))
+    (agent-repl-wire--decoded
+     message
+     (list :at-ms (agent-repl-wire--decode-int64 message 'atMs object)))))
+
 (defun agent-repl-wire-decode-roster-row-last-selected (value)
   "Decode VALUE as `RosterRowLastSelected', a plist `(:at-ms)'.
 The DURABLE instant the user last selected the workspace, epoch
@@ -242,12 +252,7 @@ MILLISECONDS, read from the daemon's record so it survives an Emacs
 restart.  Emacs orders by it and never draws it
 \(`agent-repl-roster-selection-recency-order'); the when-column is
 `RosterRowWhen'."
-  (let ((object (agent-repl-wire--object "RosterRowLastSelected" value)))
-    (agent-repl-wire--check-keys "RosterRowLastSelected" object '(atMs))
-    (agent-repl-wire--decoded
-     "RosterRowLastSelected"
-     (list :at-ms (agent-repl-wire--decode-int64
-                   "RosterRowLastSelected" 'atMs object)))))
+  (agent-repl-wire-roster--decode-instant "RosterRowLastSelected" value))
 
 ;;;; ---- The when column ----
 ;;
@@ -261,32 +266,17 @@ restart.  Emacs orders by it and never draws it
 
 (defun agent-repl-wire-decode-roster-row-when-merged (value)
   "Decode VALUE as `RosterRowWhenMerged', a plist `(:at-ms)'."
-  (let ((object (agent-repl-wire--object "RosterRowWhenMerged" value)))
-    (agent-repl-wire--check-keys "RosterRowWhenMerged" object '(atMs))
-    (agent-repl-wire--decoded
-     "RosterRowWhenMerged"
-     (list :at-ms (agent-repl-wire--decode-int64
-                   "RosterRowWhenMerged" 'atMs object)))))
+  (agent-repl-wire-roster--decode-instant "RosterRowWhenMerged" value))
 
 (defun agent-repl-wire-decode-roster-row-when-turn-ended (value)
   "Decode VALUE as `RosterRowWhenTurnEnded', a plist `(:at-ms)'.
 The instant the workspace's last turn ended; the client renders the age and
 ticks."
-  (let ((object (agent-repl-wire--object "RosterRowWhenTurnEnded" value)))
-    (agent-repl-wire--check-keys "RosterRowWhenTurnEnded" object '(atMs))
-    (agent-repl-wire--decoded
-     "RosterRowWhenTurnEnded"
-     (list :at-ms (agent-repl-wire--decode-int64
-                   "RosterRowWhenTurnEnded" 'atMs object)))))
+  (agent-repl-wire-roster--decode-instant "RosterRowWhenTurnEnded" value))
 
 (defun agent-repl-wire-decode-roster-row-when-created (value)
   "Decode VALUE as `RosterRowWhenCreated', a plist `(:at-ms)'."
-  (let ((object (agent-repl-wire--object "RosterRowWhenCreated" value)))
-    (agent-repl-wire--check-keys "RosterRowWhenCreated" object '(atMs))
-    (agent-repl-wire--decoded
-     "RosterRowWhenCreated"
-     (list :at-ms (agent-repl-wire--decode-int64
-                   "RosterRowWhenCreated" 'atMs object)))))
+  (agent-repl-wire-roster--decode-instant "RosterRowWhenCreated" value))
 
 (defun agent-repl-wire-decode-roster-row-when-shown (value)
   "Decode `RosterRowWhen''s `shown' oneof from the object VALUE.
