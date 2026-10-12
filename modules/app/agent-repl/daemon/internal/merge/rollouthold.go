@@ -59,3 +59,19 @@ func (o *orchestrator) ReleaseRollouts(ctx context.Context) error {
 		dlog.Context{"asked_by": "UpdateMergeQueue.release_rollouts", "held_since": hold.Since})
 	return nil
 }
+
+// recordRolloutHold states, once per boot, a hold this daemon inherited: a
+// hold taken before a restart or a handover is otherwise invisible until the
+// next landing does not deploy. Unheld, it records nothing.
+func (o *orchestrator) recordRolloutHold(ctx context.Context) error {
+	hold, err := o.deps.DB.MergeRolloutHold(ctx)
+	if err != nil {
+		return err
+	}
+	if hold.Held {
+		o.deps.Log.Global().Info(opHoldRollouts,
+			"the merge queue's rollouts are held: merges land, but a landing in this daemon's own checkout does not tell the deploy until they are released",
+			dlog.Context{"held_since": hold.Since})
+	}
+	return nil
+}
