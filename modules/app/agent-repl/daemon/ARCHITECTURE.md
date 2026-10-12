@@ -497,7 +497,13 @@ StartSession(resume) → the queue delivers what it held), `ShimReported(ws,
 build)` / `CheckStaleness(ws, force)` (a shim's reported content hash against
 the installed bundle's; a stale shim goes to the registry), and the
 `ReloadWebapp(ws)` push. The DEPLOY (`internal/deploy`) builds, judges and
-installs, and acts through this controller; see daemon/AGENTS.md "Deploy". Asset origin:
+installs, and acts through this controller; see daemon/AGENTS.md "Deploy".
+THE SELECTION CROSSES A HANDOVER THROUGH WSM: both daemons serve a roster
+while the handover is open, and a select lands on whichever owns the
+workspace, so `internal/selectionfollow` reads the state file's
+`PRAGMA data_version` (it moves only when ANOTHER process commits) and, on a
+move, `workspace.Verbs.FollowStoredSelection` pushes the stored selection
+when the roster names anything else. Asset origin:
 `server` serves `webapp/dist` with the entry point re-stat'd per request
 and `Cache-Control: no-store` on it only. Image origin (`internal/imageorigin`,
 mounted at `/feed-images/`): a prompt's `ImageBlock{path}` names a file on

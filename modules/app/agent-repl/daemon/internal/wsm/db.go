@@ -61,6 +61,13 @@ type DB interface {
 	SetCurrent(ctx context.Context, id WorkspaceID, at time.Time) error
 	// Current reports the currently selected workspace, nil when none is.
 	Current(ctx context.Context) (*WorkspaceID, error)
+	// DataVersion answers SQLite's `PRAGMA data_version` on this handle's one
+	// connection: a number that changes exactly when ANOTHER connection --
+	// another daemon sharing the file during a handover -- commits, and never
+	// for this handle's own writes. Compare two answers for equality only;
+	// the number itself means nothing, and a promotion (which swaps the
+	// connection) may change it with no peer commit at all.
+	DataVersion(ctx context.Context) (int64, error)
 	// SetPriority sets or clears a workspace's priority; setting one moves the
 	// workspace to second-to-last within that priority.
 	SetPriority(ctx context.Context, id WorkspaceID, p *Priority) error

@@ -32,6 +32,7 @@ const (
 	opForget         = "daemon.workspace.forget"
 	opRestart        = "daemon.workspace.restart"
 	opSelect         = "daemon.workspace.select"
+	opFollowSelected = "daemon.workspace.follow_selection"
 	opMarkViewed     = "daemon.workspace.mark_viewed"
 	opSetPriority    = "daemon.workspace.set_priority"
 	opSetHidden      = "daemon.workspace.set_hidden"

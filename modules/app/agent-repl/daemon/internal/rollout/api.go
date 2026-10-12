@@ -14,7 +14,9 @@
 //
 // NO DAEMON-TO-DAEMON CHANNEL. The outgoing and incoming daemons coordinate
 // through three things only: the Emacs relay (the announcement and the adopt
-// verbs), WSM facts (serving ownership), and the shim-held kernel locks. The
+// verbs), WSM facts (serving ownership, and the user's selection, which
+// internal/selectionfollow carries to the other daemon's roster), and the
+// shim-held kernel locks. The
 // INTENT MANIFEST is a WSM-adjacent file in the shared state root, not a
 // channel: the outgoing daemon writes it and then never reads it again.
 package rollout

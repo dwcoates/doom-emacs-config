@@ -458,6 +458,58 @@ func TestARegistryWithTheSelectionMarksTheSelection(t *testing.T) {
 	}
 }
 
+func TestSelectedAnswersTheRostersSelection(t *testing.T) {
+	w1 := ids.WorkspaceID("w1")
+	cases := []struct {
+		name    string
+		arrange func(r sidebar.Resolver)
+		want    ids.WorkspaceID
+		wantOK  bool
+	}{
+		{
+			name:    "a roster that took no registry names no selection",
+			arrange: func(sidebar.Resolver) {},
+		},
+		{
+			name: "a registry carrying no durable current names no selection",
+			arrange: func(r sidebar.Resolver) {
+				r.SetRegistry(registry(workspace("w1", "one"), workspace("w2", "two")))
+			},
+		},
+		{
+			name: "a registry carrying a durable current names it",
+			arrange: func(r sidebar.Resolver) {
+				reg := registry(workspace("w1", "one"), workspace("w2", "two"))
+				reg.Current = &w1
+				r.SetRegistry(reg)
+			},
+			want: "w1", wantOK: true,
+		},
+		{
+			name: "a select names the selected workspace",
+			arrange: func(r sidebar.Resolver) {
+				r.SetRegistrySelected(registry(workspace("w1", "one"), workspace("w2", "two")), ids.WorkspaceID("w2"))
+			},
+			want: "w2", wantOK: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			r, _ := newResolver(t)
+			tc.arrange(r)
+
+			// Act.
+			got, ok := r.Selected()
+
+			// Assert.
+			if got != tc.want || ok != tc.wantOK {
+				t.Fatalf("Selected() = (%q, %v), want (%q, %v)", got, ok, tc.want, tc.wantOK)
+			}
+		})
+	}
+}
+
 func TestARegistryWithASelectionItDoesNotCarryLeavesNoCurrent(t *testing.T) {
 	// Arrange.
 	r, _ := newResolver(t)

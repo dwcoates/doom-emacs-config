@@ -300,6 +300,17 @@ func (r *resolver) SetRegistrySelected(reg Registry, ws ids.WorkspaceID) {
 		})
 }
 
+// Selected answers the roster's selection, read under the lock every mutation
+// takes, so it is never a selection half-installed.
+func (r *resolver) Selected() (ids.WorkspaceID, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.state.selected == nil {
+		return "", false
+	}
+	return *r.state.selected, true
+}
+
 // assertGrouping refuses a registry whose view names no grouping.
 func (r *resolver) assertGrouping(reg Registry) {
 	if !reg.View.Grouping.Valid() {

@@ -301,6 +301,13 @@ type Verbs interface {
 	// Select records the user's switch to this workspace and clears its
 	// attention marker. Idempotent.
 	Select(ctx context.Context, ws ids.WorkspaceID) error
+	// FollowStoredSelection brings the roster's selection in line with the one
+	// WSM stores, when ANOTHER daemon sharing the state file stamped it (a
+	// handover's predecessor and successor each serve a roster, and a select
+	// lands on whichever owns the workspace). It pushes one roster when the
+	// two disagree and nothing when they agree, under the same lock Select
+	// takes, so it can never interleave with a select's stamp and push.
+	FollowStoredSelection(ctx context.Context) error
 	// MarkViewed records that the user has SEEN this workspace: its roster row
 	// goes PARTIAL until its status changes, if and only if the row is DONE
 	// (the roster drops the report on any other status). Idempotent, and it
