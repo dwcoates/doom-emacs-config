@@ -773,9 +773,9 @@ deliberately not which character: each renderer maps those names to
 whatever its surface can draw.  This is the tab bar\='s mapping, and the
 assertion test checks that every named glyph has a character here.
 
-The tab bar DRAWS only the arms in `agent-repl-status-tab-bar-merge-glyph-arms\=':
-its purple already says a merge is in flight, and a landed merge shows
-nothing.")
+The tab bar DRAWS only the arms in
+`agent-repl-status-tab-bar-merge-glyph-arms\=': its purple already says
+a merge is in flight, and a landed merge shows nothing.")
 
 (defconst agent-repl-status-tab-bar-merge-glyph-arms '(:merge-failed)
   "The merge arms whose glyph the TAB BAR draws: only a FAILED merge.
@@ -1591,8 +1591,9 @@ Two things live there, in this order: the roster's PRIORITY BADGE label
 \(resolver-composed and drawn verbatim; ordering is already the
 resolver's and this is only the label) and the arm's glyph
 \(the merge pipeline's, a gate's emoji, the inactive question mark, or
-the attention marker).  Both are absent far more often than present, so the whole run
-is nil in the ordinary case and the tab is name and bracket alone.
+the attention marker).  Both are absent far more often than present, so
+the whole run is nil in the ordinary case and the tab is name and bracket
+alone.
 
 A BLANK PART IS NO PART.  A roster row can carry a priority label that is
 present but empty, and joining that into the run produced a run made of
