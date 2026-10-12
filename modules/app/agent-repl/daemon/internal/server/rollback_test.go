@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +14,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/replyquote"
@@ -623,5 +625,232 @@ func TestExcerptOf(t *testing.T) {
 				t.Fatalf("excerptOf(...) = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// namedPlan builds a PlanRollback request, keeping files, that names ROW.
+func namedPlan(row string) *agentreplv1.PlanRollbackRequest {
+	req := keepFilesPlan()
+	req.Prompt = feedIDs(row)[0]
+	return req
+}
+
+// turnStopNothingRunning calls a turn Interrupt the verbs answer with
+// nothing_running, and answers the offer it carried.
+func turnStopNothingRunning(t *testing.T, h *harness) *agentreplv1.InterruptNothingRunningRollback {
+	t.Helper()
+	h.Verbs.interruptOutcome = workspace.InterruptOutcome{NothingRunning: true}
+	resp, err := h.Client.Interrupt(context.Background(), connect.NewRequest(&agentreplv1.InterruptRequest{
+		Workspace: ref(),
+		Target:    &agentreplv1.InterruptRequest_Turn{Turn: &agentreplv1.InterruptTurn{}},
+	}))
+	if err != nil {
+		t.Fatalf("Interrupt: %v", err)
+	}
+	nothing := resp.Msg.GetSuccess().GetNothingRunning()
+	if nothing == nil {
+		t.Fatalf("result = %v, want nothing_running", resp.Msg.GetResult())
+	}
+	return nothing.Rollback
+}
+
+func TestPlanRollbackPlansTheNamedPromptAsNamed(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	seedPlannable(h)
+	h.Feed.prompts = feedIDs("p1", "p2")
+
+	// Act.
+	resp, err := h.Client.PlanRollback(context.Background(), connect.NewRequest(namedPlan("p1")))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("PlanRollback: %v", err)
+	}
+	if resp.Msg.GetSuccess().GetPlan().GetTarget().GetNamed() == nil {
+		t.Fatalf("target = %v, want named", resp.Msg.GetSuccess().GetPlan().GetTarget())
+	}
+	if rows := h.Feed.rollbackTargetRows; len(rows) != 1 || rows[0].GetValue() != "p1" {
+		t.Fatalf("RollbackTarget asked about %v, want only p1", rows)
+	}
+}
+
+func TestPlanRollbackRefusesANamedPromptNoLongerReachable(t *testing.T) {
+	// Arrange.
+	log := dlog.NewTestLogger()
+	h := newHarness(t)
+	h.Surfaces.workspace = log
+	h.Feed.prompts = feedIDs("p1")
+
+	// Act.
+	resp, err := h.Client.PlanRollback(context.Background(), connect.NewRequest(namedPlan("gone")))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("PlanRollback: %v", err)
+	}
+	refused := resp.Msg.GetError().GetPromptNotReachable()
+	if refused == nil || refused.GetPrompt().GetValue() != "gone" {
+		t.Fatalf("result = %v, want prompt_not_reachable echoing the row", resp.Msg.GetResult())
+	}
+	for _, record := range log.Records() {
+		if record.Operation == "PlanRollback" && record.Level == "info" && record.Context["arm"] == "prompt_not_reachable" {
+			return
+		}
+	}
+	t.Fatalf("no refusal record for the unreachable prompt: %+v", log.Records())
+}
+
+func TestInterruptNothingRunningWithNoPromptOffersNoRollback(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	offer := turnStopNothingRunning(t, h)
+
+	// Assert.
+	if offer != nil {
+		t.Fatalf("rollback = %v, want unset with no prompt to roll back", offer)
+	}
+}
+
+func TestInterruptNothingRunningOffersABarePromptImmediately(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	seedPlannable(h)
+	h.Feed.prompts = feedIDs("p1", "p2")
+
+	// Act.
+	offer := turnStopNothingRunning(t, h)
+
+	// Assert.
+	if offer.GetImmediate().GetToken().GetValue() == "" {
+		t.Fatalf("rollback = %v, want immediate with a token", offer)
+	}
+	if rows := h.Feed.rollbackTargetRows; len(rows) != 1 || rows[0].GetValue() != "p2" {
+		t.Fatalf("planned %v, want the latest prompt p2", rows)
+	}
+}
+
+func TestInterruptNothingRunningOffersAChoiceWhenOutputFollows(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	seedPlannable(h)
+	h.Feed.promptFollowed = true
+
+	// Act.
+	offer := turnStopNothingRunning(t, h)
+
+	// Assert.
+	if offer.GetChoose() == nil {
+		t.Fatalf("rollback = %v, want choose", offer)
+	}
+}
+
+func TestInterruptNothingRunningOnTheFanWideTargetOffersNoRollback(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	seedPlannable(h)
+	h.Verbs.interruptOutcome = workspace.InterruptOutcome{NothingRunning: true}
+
+	// Act.
+	resp, err := h.Client.Interrupt(context.Background(), connect.NewRequest(&agentreplv1.InterruptRequest{
+		Workspace: ref(),
+		Target:    &agentreplv1.InterruptRequest_AllAgents{AllAgents: &agentreplv1.InterruptAllAgents{}},
+	}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Interrupt: %v", err)
+	}
+	if offer := resp.Msg.GetSuccess().GetNothingRunning().Rollback; offer != nil {
+		t.Fatalf("rollback = %v, want unset on the fan-wide target", offer)
+	}
+}
+
+func TestInterruptNothingRunningSurfacesAPlanningFailure(t *testing.T) {
+	// Arrange.
+	log := dlog.NewTestLogger()
+	h := newHarness(t)
+	h.Surfaces.workspace = log
+	seedPlannable(h)
+	h.DB.turnStartedErr = errors.New("database is locked")
+	h.Verbs.interruptOutcome = workspace.InterruptOutcome{NothingRunning: true}
+
+	// Act.
+	_, err := h.Client.Interrupt(context.Background(), connect.NewRequest(&agentreplv1.InterruptRequest{
+		Workspace: ref(),
+		Target:    &agentreplv1.InterruptRequest_Turn{Turn: &agentreplv1.InterruptTurn{}},
+	}))
+
+	// Assert.
+	if code := connectCode(t, err); code != connect.CodeInternal {
+		t.Fatalf("code = %v, want Internal", code)
+	}
+	for _, record := range log.Records() {
+		if record.Level == "error" && record.Operation == "Interrupt" && record.Context["cause"] == "database is locked" {
+			return
+		}
+	}
+	t.Fatalf("no error record named the failure: %+v", log.Records())
+}
+
+func TestRollBackPerformsAnImmediateOfferWhileThePromptIsStillBare(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	seedPlannable(h)
+	token := turnStopNothingRunning(t, h).GetImmediate().GetToken().GetValue()
+
+	// Act.
+	resp, err := h.Client.RollBack(context.Background(), connect.NewRequest(rollBackRequest(token)))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("RollBack: %v", err)
+	}
+	if resp.Msg.GetSuccess() == nil || len(h.Verbs.rollBackReq) != 1 {
+		t.Fatalf("result = %v (verb calls %d), want success", resp.Msg.GetResult(), len(h.Verbs.rollBackReq))
+	}
+}
+
+func TestRollBackOfAnImmediateOfferIsStaleOnceOutputFollows(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	seedPlannable(h)
+	token := turnStopNothingRunning(t, h).GetImmediate().GetToken().GetValue()
+	h.Feed.promptFollowed = true
+
+	// Act.
+	resp, err := h.Client.RollBack(context.Background(), connect.NewRequest(rollBackRequest(token)))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("RollBack: %v", err)
+	}
+	if resp.Msg.GetError().GetPlanStale() == nil {
+		t.Fatalf("result = %v, want plan_stale", resp.Msg.GetResult())
+	}
+	if len(h.Verbs.rollBackReq) != 0 {
+		t.Fatalf("Verbs.RollBack was called %d times, want 0", len(h.Verbs.rollBackReq))
+	}
+}
+
+func TestRollBackOfAConfirmedPlanIgnoresOutputThatFollowsSince(t *testing.T) {
+	// Arrange: a confirmed plan stated its effects; streaming output does not
+	// change them.
+	h := newHarness(t)
+	seedPlannable(h)
+	token := planToken(t, h, keepFilesPlan())
+	h.Feed.promptFollowed = true
+
+	// Act.
+	resp, err := h.Client.RollBack(context.Background(), connect.NewRequest(rollBackRequest(token)))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("RollBack: %v", err)
+	}
+	if resp.Msg.GetSuccess() == nil {
+		t.Fatalf("result = %v, want success", resp.Msg.GetResult())
 	}
 }

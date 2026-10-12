@@ -956,6 +956,12 @@ type fakeFeed struct {
 	rollbackTarget     feed.RollbackTarget
 	rollbackTargetOK   bool
 	rollbackTargetRows []*frontendv1.FeedId
+	// rollbackChoices is what RollbackChoices answers.
+	rollbackChoices []feed.RollbackChoice
+	// promptFollowed is what PromptFollowed answers; promptFollowedRows
+	// records every row it was asked about.
+	promptFollowed     bool
+	promptFollowedRows []*frontendv1.FeedId
 	// liveDetached is what LiveDetachedIn answers; liveDetachedCalls counts
 	// how many times it was called, so a test can assert it was never
 	// computed when files are kept.
@@ -1058,6 +1064,18 @@ func (f *fakeFeed) SelectableText(_ ids.WorkspaceID, id *frontendv1.FeedId) (fee
 func (f *fakeFeed) RollbackTarget(_ ids.WorkspaceID, row *frontendv1.FeedId) (feed.RollbackTarget, bool) {
 	f.rollbackTargetRows = append(f.rollbackTargetRows, row)
 	return f.rollbackTarget, f.rollbackTargetOK
+}
+
+// RollbackChoices answers the seeded choices.
+func (f *fakeFeed) RollbackChoices(ids.WorkspaceID) []feed.RollbackChoice {
+	return f.rollbackChoices
+}
+
+// PromptFollowed records the row it was asked about and answers the seeded
+// verdict.
+func (f *fakeFeed) PromptFollowed(_ ids.WorkspaceID, row *frontendv1.FeedId) bool {
+	f.promptFollowedRows = append(f.promptFollowedRows, row)
+	return f.promptFollowed
 }
 
 // LiveDetachedIn records that it was called and answers the seeded count.
