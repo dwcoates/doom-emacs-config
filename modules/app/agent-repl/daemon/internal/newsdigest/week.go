@@ -2,10 +2,8 @@ package newsdigest
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"strings"
 	"time"
 
@@ -229,14 +227,9 @@ func renderWeekItems(items []riskItem) string {
 // from one of its members. The links are the members' own, composed here, so
 // the model can neither drop nor invent one.
 func parseWeekAnswer(text string, items []riskItem) ([]riskItem, error) {
-	dec := json.NewDecoder(strings.NewReader(stripFence(text)))
-	dec.DisallowUnknownFields()
 	var a weekAnswer
-	if err := dec.Decode(&a); err != nil {
-		return nil, fmt.Errorf("the json did not decode: %w", err)
-	}
-	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
-		return nil, errors.New("the answer carries data after its json object")
+	if err := decodeAnswer(text, &a); err != nil {
+		return nil, err
 	}
 	byID := map[string]int{}
 	for i := range items {

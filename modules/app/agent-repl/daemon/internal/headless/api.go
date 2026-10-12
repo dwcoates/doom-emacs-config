@@ -84,6 +84,12 @@ type Request struct {
 	Prompt string
 	// Timeout bounds the run. Zero leaves the bound to ctx alone.
 	Timeout time.Duration
+	// Tools are the built-in CLI tools the run may use ("WebSearch"): exactly
+	// these are made available (`--tools`) and pre-approved
+	// (`--allowedTools`), since a headless run has no one to ask. Empty adds
+	// neither flag, so the run keeps the CLI's own tool set, every gated tool
+	// refused.
+	Tools []string
 }
 
 // Response is one headless answer.
