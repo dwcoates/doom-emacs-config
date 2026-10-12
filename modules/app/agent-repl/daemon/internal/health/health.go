@@ -55,6 +55,16 @@ func (r *reporter) Daemon(ctx context.Context) (*agentreplv1.DaemonHealthRespons
 	// state client that will not read is the one fault the daemon can always
 	// detect about itself, and it is reported, never returned as an error.
 	open, err := r.db.OpenFaults(ctx, wsm.FaultScope{})
+	if err != nil && callerCancelled(ctx, err) {
+		// THE CALLER WITHDREW THE ASK (as OpenFaults below): no answer can
+		// reach it, and the state client did not fail, so this is neither a
+		// self-check fault nor an ERROR. Seen under load: a successor's health
+		// poll abandoned mid-handover recorded "state client refused".
+		log.Debug(opSelfCheck, "the caller cancelled the self-check's open-fault read before it finished", dlog.Context{
+			"scope": "daemon", "cause": err.Error(),
+		})
+		return nil, fmt.Errorf("health: self-check: %w", err)
+	}
 	if err != nil {
 		log.Error(opSelfCheck, "state client refused the open-fault read", dlog.Context{
 			"scope": "daemon",
@@ -117,6 +127,10 @@ func (r *reporter) Session(ctx context.Context, ws ids.WorkspaceID) (*agentreplv
 	// records opened at the reap and at the severance can, and they survive a
 	// redial that walked the link back into place.
 	open, err := r.db.OpenFaults(ctx, wsm.FaultScope{Workspace: &ws})
+	if err != nil && callerCancelled(ctx, err) {
+		wsLog.Debug(opSession, "the caller cancelled the session's open-fault read before it finished", dlog.Context{"cause": err.Error()})
+		return nil, fmt.Errorf("health: session faults: %w", err)
+	}
 	if err != nil {
 		wsLog.Error(opSession, "state client refused the open-fault read", dlog.Context{"cause": err.Error()})
 		faults = appendSessionFault(wsLog, faults, wsm.Fault{
@@ -238,7 +252,7 @@ func (r *reporter) OpenFaults(ctx context.Context, scope wsm.FaultScope) ([]wsm.
 	log := r.log.Global()
 	out, err := r.db.OpenFaults(ctx, scope)
 	if err != nil {
-		if ctx.Err() != nil && errors.Is(err, ctx.Err()) {
+		if callerCancelled(ctx, err) {
 			// THE CALLER WITHDREW THE ASK — its request ended, or the daemon is
 			// stopping — so the read was abandoned, not failed. An ordinary
 			// outcome that carries no defect; the error still reaches the
@@ -251,6 +265,13 @@ func (r *reporter) OpenFaults(ctx context.Context, scope wsm.FaultScope) ([]wsm.
 	}
 	log.Debug(opOpenFaults, "read the open faults", dlog.Context{"count": len(out)})
 	return out, nil
+}
+
+// callerCancelled reports whether err is the caller's own context ending --
+// its request finished or the daemon is stopping -- rather than the read
+// failing on its own. A cancellation the caller did not ask for is a failure.
+func callerCancelled(ctx context.Context, err error) bool {
+	return ctx.Err() != nil && errors.Is(err, ctx.Err())
 }
 
 // appendSessionFault appends one recorded fault's rendered SessionFault, or

@@ -633,3 +633,86 @@ func TestOpenFaultRecordsAnEnvironmentFaultAtInfoAndEveryOtherAtWarn(t *testing.
 		})
 	}
 }
+
+// TestDaemonSelfCheckLevelsACallerCancelledReadAtDebug: a self-check read the
+// caller cancelled is returned to it at DEBUG, never answered as the
+// state-unreadable fault; a cancellation the caller did not ask for is still
+// that fault, at ERROR.
+func TestDaemonSelfCheckLevelsACallerCancelledReadAtDebug(t *testing.T) {
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	tests := []struct {
+		name      string
+		ctx       context.Context
+		wantErr   bool
+		wantLevel string
+	}{
+		{name: "a read the caller cancelled", ctx: cancelled, wantErr: true, wantLevel: "debug"},
+		{name: "a cancellation the caller did not ask for", ctx: context.Background(), wantErr: false, wantLevel: "error"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			log := newStubSurfaces()
+			r := newReporter(t, &stubDB{faultsErr: context.Canceled}, alwaysLive, log)
+
+			// Act.
+			got, err := r.Daemon(tt.ctx)
+
+			// Assert.
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("Daemon() = %v, error %v; want error %v", got, err, tt.wantErr)
+			}
+			var level string
+			for _, record := range log.logger.Records() {
+				if record.Operation == opSelfCheck {
+					level = record.Level
+				}
+			}
+			if level != tt.wantLevel {
+				t.Fatalf("self_check record level = %q, want %q", level, tt.wantLevel)
+			}
+		})
+	}
+}
+
+// TestSessionLevelsACallerCancelledFaultReadAtDebug is the same rule for a
+// workspace's health.
+func TestSessionLevelsACallerCancelledFaultReadAtDebug(t *testing.T) {
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	tests := []struct {
+		name      string
+		ctx       context.Context
+		wantErr   bool
+		wantLevel string
+	}{
+		{name: "a read the caller cancelled", ctx: cancelled, wantErr: true, wantLevel: "debug"},
+		{name: "a cancellation the caller did not ask for", ctx: context.Background(), wantErr: false, wantLevel: "error"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			log := newStubSurfaces()
+			db := &stubDB{faultsErr: context.Canceled, workspaces: map[ids.WorkspaceID]wsm.Workspace{"w1": {ID: "w1", Dir: "/w1"}}}
+			r := newReporter(t, db, alwaysLive, log)
+
+			// Act.
+			got, err := r.Session(tt.ctx, "w1")
+
+			// Assert.
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("Session() = %v, error %v; want error %v", got, err, tt.wantErr)
+			}
+			var level string
+			for _, record := range log.logger.Records() {
+				if record.Operation == opSession && strings.Contains(record.Message, "open-fault read") {
+					level = record.Level
+				}
+			}
+			if level != tt.wantLevel {
+				t.Fatalf("session fault-read record level = %q, want %q", level, tt.wantLevel)
+			}
+		})
+	}
+}
