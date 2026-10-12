@@ -42,14 +42,30 @@ exit "\${!code_var:-0}"
 EOF
     chmod +x "$TMP/$name"
 }
-for impl in build byte-compile bounce doctor readiness logs agent-repld open contract-check; do
+for impl in build byte-compile bounce doctor readiness logs agent-repld contract-check; do
     make_impl "$impl"
 done
-
+# The open stub records itself and exits STUB_EXIT_open, but fails while a
+# quit Emacs's process still lingers, as Launch Services answers -600 then.
+cat >"$TMP/open" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "open\${*:+ \$*}" >>"$TRANSCRIPT"
+linger="\$(cat "$STATE/linger" 2>/dev/null || echo 0)"
+[ "\$linger" -gt 0 ] && exit 1
+exit "\${STUB_EXIT_open:-0}"
+EOF
+chmod +x "$TMP/open"
 cat >"$TMP/pgrep" <<EOF
 #!/usr/bin/env bash
-# pgrep stub: Emacs's process is up exactly when STUB_EMACS_PROCESS is set.
-[ -n "\${STUB_EMACS_PROCESS:-}" ]
+# pgrep stub: a quit Emacs's process lingers for \$STATE/linger more looks
+# (each look spends one); after that, Emacs's process is up exactly when
+# STUB_EMACS_PROCESS is set and the app has been launched.
+linger="\$(cat "$STATE/linger" 2>/dev/null || echo 0)"
+if [ "\$linger" -gt 0 ]; then
+    echo \$((linger - 1)) >"$STATE/linger"
+    exit 0
+fi
+[ -n "\${STUB_EMACS_PROCESS:-}" ] && grep -q '^open' "$TRANSCRIPT"
 EOF
 chmod +x "$TMP/pgrep"
 
@@ -92,6 +108,7 @@ export AGENT_REPL_RUNTIME_PGREP="$TMP/pgrep"
 reset() {
     : >"$TRANSCRIPT"
     touch "$STATE/running"
+    rm -f "$STATE/linger"
     unset STUB_RELOAD STUB_UNSAVED STUB_NEVER_EXITS STUB_EXIT_byte_compile STUB_EXIT_bounce STUB_EXIT_open STUB_EMACS_PROCESS STUB_EXIT_contract_check
 }
 
@@ -235,6 +252,25 @@ bounce
 emacsclient kill-emacs
 open -a /Applications/Emacs.app
 open -a /Applications/Emacs.app"
+
+reset
+echo 2 >"$STATE/linger"
+if "$RUNTIME" bounce --hard >/dev/null 2>&1; then pass "a hard bounce relaunches once the quit Emacs's process has left"; else fail "a hard bounce relaunches once the quit Emacs's process has left"; fi
+expect_transcript "a launch waits out the quit Emacs's lingering process instead of retrying into it" "byte-compile
+contract-check
+$RELOAD
+bounce
+emacsclient kill-emacs
+open -a /Applications/Emacs.app"
+
+reset
+echo 99 >"$STATE/linger"
+if "$RUNTIME" bounce --hard >/dev/null 2>&1; then fail "an Emacs process that never leaves fails the hard bounce"; else pass "an Emacs process that never leaves fails the hard bounce"; fi
+expect_transcript "an Emacs process that never leaves is not relaunched beside itself" "byte-compile
+contract-check
+$RELOAD
+bounce
+emacsclient kill-emacs"
 
 echo "agent-repl-runtime: deploy and hot-reload"
 reset
