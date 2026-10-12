@@ -14,6 +14,7 @@ afterEach(() => {
   document.documentElement.classList.remove(HOST_ROOT_CLASS);
   delete window.agentReplHost;
   delete window.xwHasFocus;
+  delete window.__agentReplHostPending;
   document.body.replaceChildren();
 });
 
@@ -71,5 +72,31 @@ describe("startHost", () => {
 
     // Assert
     expect(window.xwHasFocus()).toBe(true);
+  });
+
+  it("runs the calls Emacs queued before it started, in order", () => {
+    // Arrange
+    const order: string[] = [];
+    window.__agentReplHostPending = [
+      (host) => order.push(host.ensure("a", "http://ws-a.localhost:1/")),
+      (host) => order.push(host.show("a")),
+    ];
+
+    // Act
+    started = startHost(document, window);
+
+    // Assert
+    expect(order.map((answer) => (JSON.parse(answer) as { outcome: string }).outcome)).toEqual(["created", "shown"]);
+  });
+
+  it("leaves no queue behind once it has run it", () => {
+    // Arrange
+    window.__agentReplHostPending = [];
+
+    // Act
+    started = startHost(document, window);
+
+    // Assert
+    expect(window.__agentReplHostPending).toBeUndefined();
   });
 });

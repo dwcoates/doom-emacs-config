@@ -6,7 +6,10 @@
  * marks the root, which is what its stylesheet keys on.
  *
  * Emacs reaches the host through `window.agentReplHost` (lisp/webhost.el), the
- * one global this page defines besides `xwHasFocus`.
+ * one global this page defines besides `xwHasFocus`. A call Emacs makes before
+ * the host has started is queued on `window.__agentReplHostPending` by the
+ * call's own script, and run here, in order, the moment the host starts: the
+ * host's code arrives by a dynamic import, so no call may depend on timing.
  *
  * `xwHasFocus` IS EMACS'S OWN QUESTION, ANSWERED FOR THE SHOWN PAGE. On the NS
  * port the web view asks the page `xwHasFocus()` on every key and forwards the
@@ -20,10 +23,14 @@
 import { createHost, hostHasFocus, type Host } from "./host.js";
 import "./host.css";
 
+/** A call Emacs made before the host started, queued on the page. */
+type PendingCall = (host: Host) => unknown;
+
 declare global {
   interface Window {
     agentReplHost?: Host;
     xwHasFocus?: () => boolean;
+    __agentReplHostPending?: PendingCall[];
   }
 }
 
@@ -36,6 +43,9 @@ export function startHost(doc: Document, win: Window): Host {
   doc.documentElement.classList.add(HOST_ROOT_CLASS);
   const host = createHost({ doc, win });
   win.agentReplHost = host;
+  const pending = win.__agentReplHostPending ?? [];
+  delete win.__agentReplHostPending;
+  for (const call of pending) call(host);
   const answerFocus = (): boolean => hostHasFocus(doc, host);
   win.xwHasFocus = answerFocus;
   // Emacs injects its own definition as a user script, which can run after
