@@ -1883,15 +1883,13 @@ func (d *Daemon) freezeStrays() ([]int, error) {
 			return d.settleFrozen(stopped, listed), nil
 		}
 		for _, pid := range fresh {
-			if err := syscall.Kill(pid, syscall.SIGSTOP); err != nil {
-				if errors.Is(err, syscall.ESRCH) {
-					continue
-				}
-				return d.settleFrozen(stopped, nil), fmt.Errorf("SIGSTOP stray %d: %w", pid, err)
+			err := stopFrozen(pid, freezeBound, syscall.Kill)
+			if errors.Is(err, syscall.ESRCH) {
+				continue
 			}
 			stopped[pid] = true
-			if err := awaitFrozen(pid, freezeBound); err != nil {
-				return d.settleFrozen(stopped, nil), err
+			if err != nil {
+				return d.settleFrozen(stopped, nil), fmt.Errorf("stop stray %d: %w", pid, err)
 			}
 		}
 	}
@@ -1971,26 +1969,17 @@ func (d *Daemon) listStrays() ([]stray, error) {
 	if d.StateDir == "" {
 		return nil, nil
 	}
-	out, err := exec.Command("ps", "-Ao", "pid=,args=").Output()
+	table, err := processTable()
 	if err != nil {
-		return nil, fmt.Errorf("ps: %w", err)
+		return nil, err
 	}
 	self := os.Getpid()
 	var strays []stray
-	for _, line := range strings.Split(string(out), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || !namesPath(line, d.StateDir) {
+	for _, p := range table {
+		if !namesPath(p.args, d.StateDir) || p.pid == self || SparedFromStrayReaping(p.pid) {
 			continue
 		}
-		pidField, args, _ := strings.Cut(line, " ")
-		pid, err := strconv.Atoi(pidField)
-		if err != nil {
-			return nil, fmt.Errorf("ps line %q has no pid: %w", line, err)
-		}
-		if pid == self || SparedFromStrayReaping(pid) {
-			continue
-		}
-		strays = append(strays, stray{pid: pid, args: strings.TrimSpace(args)})
+		strays = append(strays, stray{pid: p.pid, args: strings.TrimSpace(p.args)})
 	}
 	return strays, nil
 }

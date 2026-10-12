@@ -144,7 +144,11 @@ func runIn(log *run.Log, args cli.Args, self, histPath, root string, prefix []st
 		log.Errorf("create the run's scratch directory: %v", err)
 		return 1
 	}
-	slots := cli.SlotsForHost(runtime.NumCPU())
+	slots, err := cli.Slots(runtime.NumCPU(), os.Getenv(cli.CPUBudgetEnv))
+	if err != nil {
+		log.Errorf("size the run: %v", err)
+		return 1
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	return cli.Run(ctx, cli.Deps{

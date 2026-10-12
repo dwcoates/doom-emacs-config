@@ -73,7 +73,14 @@ func runSuite(m *testing.M) int {
 		return harness.MainAt(m, l.daemonDir)
 	}
 
+	// The warm webapp-layer driver keeps its temp files OUTSIDE the run root
+	// MainAt makes and removes, because the driver outlives MainAt's tests by
+	// the moment it takes to stop (webapplayer_server_test.go).
+	wlOuterTempDir = os.TempDir()
 	code := harness.MainAt(m, l.daemonDir)
+	// The warm webapp-layer driver, if an area started one, ends with the
+	// tests that used it (webapplayer_server_test.go).
+	wlStopLayerServer()
 	// The perf phase's final summary block (PERF-SPEC.md §D4), after every
 	// test has reported. A no-op in the default build, where the perf files
 	// are not compiled at all.

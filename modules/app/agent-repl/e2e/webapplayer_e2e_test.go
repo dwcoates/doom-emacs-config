@@ -502,8 +502,7 @@ func TestWebappLayerMergeTabs(t *testing.T) {
 	host := w.Daemon.WatchHost(ws)
 	defer host.Close()
 
-	if err := wlRunVitest(t, npm, webappDir, "merge-tabs.layer.test.ts",
-		wlChildEnv(t, w, ws)); err != nil {
+	if err := wlRunLayerFile(t, npm, webappDir, "merge-tabs.layer.test.ts", w, ws); err != nil {
 		t.Fatalf("e2e/webapp-layer: merge-tabs.layer.test.ts failed: %v", err)
 	}
 
@@ -808,9 +807,7 @@ func wlDriveAreaWorld(t *testing.T, vitestFile string, expectWarnings ...string)
 		t.Fatal("e2e/webapp-layer: the daemon published no address to hand the webapp")
 	}
 
-	env := wlChildEnv(t, w, ws)
-
-	if err := wlRunVitest(t, npm, webappDir, vitestFile, env); err != nil {
+	if err := wlRunLayerFile(t, npm, webappDir, vitestFile, w, ws); err != nil {
 		t.Fatalf("e2e/webapp-layer: %s failed: %v", vitestFile, err)
 	}
 
