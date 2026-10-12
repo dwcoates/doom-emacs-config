@@ -36,8 +36,10 @@
 #
 # Every process it signals is matched by THIS checkout's own paths, by the
 # lock helper's cache-bin path, or by the state root it serves (the daemon its
-# daemon.addr names, a shim listening under its sock/), so a daemon or shim of
-# another checkout serving another state root is left alone.
+# daemon.addr names, EVERY daemon holding its database or lock open, a shim
+# listening under its sock/), so a daemon or shim of another checkout serving
+# another state root is left alone, and no second daemon of this state root
+# outlives the bounce.
 #
 # Usage:
 #   scripts/bounce-agent-repl-forcefully.sh
@@ -106,6 +108,22 @@ advertised_daemon() {
     local pid
     pid="$(sed -n 's/^pid=\([0-9][0-9]*\)$/\1/p' "$STATE_ROOT/daemon.addr" 2>/dev/null | sed -n 1p)"
     [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && echo "$pid"
+    return 0
+}
+
+# state_root_holders -- every claude-repld holding this state root's database
+# or daemon lock open, whatever build it runs. A daemon serving the state root
+# holds both; one the advertisement no longer names (an incumbent or successor
+# a handover left behind, or a daemon started from another build path) is
+# found by them. A daemon of another state root holds that root's files, never
+# these, so it is left alone.
+state_root_holders() {
+    local pid
+    for pid in $(lsof -t -- "$STATE_ROOT/wsm.db" "$STATE_ROOT/daemon.lock" 2>/dev/null | sort -un); do
+        case "$(ps -o command= -p "$pid" 2>/dev/null)" in
+            *claude-repld*) echo "$pid" ;;
+        esac
+    done
     return 0
 }
 
@@ -184,7 +202,10 @@ stop_pids() {
 # state root's daemon.addr names, and a shim is also any process listening
 # under the state root's sock/ directory, whichever build it runs.
 # shellcheck disable=SC2207
-daemons=($( { pids_of "$DAEMON_BIN"; advertised_daemon; } | sort -un))
+daemons=($( { pids_of "$DAEMON_BIN"; advertised_daemon; state_root_holders; } | sort -un))
+# The one daemon the stand-down request reaches: the one daemon.addr names.
+# shellcheck disable=SC2207
+asked=($(advertised_daemon))
 # shellcheck disable=SC2207
 shims=($( { pids_of "$SHIM_MAIN"; pids_of "--listen $STATE_ROOT/sock/"; } | sort -un))
 # shellcheck disable=SC2207
@@ -205,9 +226,18 @@ stand_down_daemon() {
     if answer="$("$DAEMON_BIN" call -state-dir "$STATE_ROOT" UpdateShutdownSchedule \
         '{"now":{"reason":{"operator":{"note":"bounce-agent-repl-forcefully"}}}}' 2>&1)"; then
         log "daemon: the stand-down was accepted; waiting for it to leave"
-        await_exit "daemon" "${daemons[@]}"
+        # ONLY THE DAEMON THE REQUEST REACHED IS WAITED FOR. Every other daemon
+        # of the state root never heard it, so waiting the grace out on it
+        # would only delay its signal.
+        if [ "${#asked[@]}" -gt 0 ]; then
+            await_exit "daemon" "${asked[@]}"
+        else
+            await_exit "daemon" "${daemons[@]}"
+        fi
+        local left
+        left="$(alive "${daemons[@]}")"
         # shellcheck disable=SC2086
-        [ -z "$OUTLIVED" ] || stop_pids "daemon" $OUTLIVED
+        [ -z "$left" ] || stop_pids "daemon" $left
     else
         log "daemon: the stand-down was not accepted (${answer//$'\n'/ }); stopping it by signal"
         stop_pids "daemon" "${daemons[@]}"
