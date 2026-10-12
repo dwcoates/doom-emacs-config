@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"net"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -135,4 +136,40 @@ type unexpectedControlOperation struct{ got string }
 
 func (e *unexpectedControlOperation) Error() string {
 	return "unexpected control operation " + e.got
+}
+
+func TestAnOpenedShimThatHangsUpBeforeItsFirstReplyIsADepartedShim(t *testing.T) {
+	// Arrange: a control socket that accepts and hangs up without answering,
+	// for a shim process that has already exited -- the idle sweep stopping
+	// the shim between the harness's connect and its opening info.
+	socket := filepath.Join(ShortTempDir(t), "s.ctl")
+	ln, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			_ = c.Close()
+		}
+	}()
+	exited := exec.Command("true")
+	if err := exited.Run(); err != nil {
+		t.Fatalf("run a process to exit: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	t.Cleanup(cancel)
+	s := &ShimControl{Socket: socket, t: t, d: &Daemon{t: t, ctx: ctx}}
+
+	// Act
+	s.connectOrDeparted(exited.Process.Pid)
+
+	// Assert
+	if !s.departed || s.pid != exited.Process.Pid {
+		t.Fatalf("departed = %v, pid = %d; want the departed shim %d", s.departed, s.pid, exited.Process.Pid)
+	}
 }

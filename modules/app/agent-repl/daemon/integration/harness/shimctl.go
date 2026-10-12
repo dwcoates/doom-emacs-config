@@ -323,7 +323,7 @@ func (s *ShimControl) connectOrDeparted(pid int) {
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 	for {
-		if s.dial() {
+		if s.dialOpened() {
 			return
 		}
 		if err := syscall.Kill(pid, 0); errors.Is(err, syscall.ESRCH) || isZombie(pid) {
@@ -378,6 +378,35 @@ func (s *ShimControl) dial() bool {
 	s.dec.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 	s.enc = json.NewEncoder(conn)
 	reply := s.send(controlCommand{Op: "info"})
+	if reply.Info == nil || reply.Info.PID == 0 {
+		s.t.Fatalf("fake shim control %s: opening info carried no process identity", s.Socket)
+	}
+	s.pid = reply.Info.PID
+	return true
+}
+
+// dialOpened is dial for the shim an open brought up, which the idle sweep may
+// stop at any moment: a shim that accepted the connection and then exited
+// before it answered the opening info is not a failure here but a shim that
+// is leaving, and connectOrDeparted's next pass finds it gone. Every other
+// caller keeps dial, where a silent shim is a failure.
+func (s *ShimControl) dialOpened() bool {
+	s.t.Helper()
+	conn, err := net.Dial("unix", s.Socket)
+	if err != nil {
+		return false
+	}
+	s.mu.Lock()
+	s.c = conn
+	s.dec = bufio.NewScanner(conn)
+	s.dec.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
+	s.enc = json.NewEncoder(conn)
+	s.mu.Unlock()
+	reply, ok := s.sendAllowingRefusal(controlCommand{Op: "info"})
+	if !ok {
+		s.close()
+		return false
+	}
 	if reply.Info == nil || reply.Info.PID == 0 {
 		s.t.Fatalf("fake shim control %s: opening info carried no process identity", s.Socket)
 	}
