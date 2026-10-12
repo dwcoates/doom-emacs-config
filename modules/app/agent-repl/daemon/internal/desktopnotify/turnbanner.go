@@ -96,7 +96,13 @@ func (t *TurnBanners) OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how wsm.T
 // workspace's name, what happened, and the local time the turn ended.
 func TurnTitle(end ladder.TurnEnd, name string, at time.Time) string {
 	if end == ladder.TurnEndFailed {
-		return fmt.Sprintf("❌ %s turn errored %s", name, at.Format("15:04"))
+		return eventTitle("❌", name, "turn errored", at)
 	}
-	return fmt.Sprintf("✅ %s turn completed %s", name, at.Format("15:04"))
+	return eventTitle("✅", name, "turn completed", at)
+}
+
+// eventTitle is every event banner's first line: its mark, the workspace's
+// name, what happened, and the local time it happened.
+func eventTitle(mark, name, what string, at time.Time) string {
+	return fmt.Sprintf("%s %s %s %s", mark, name, what, at.Format("15:04"))
 }

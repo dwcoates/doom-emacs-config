@@ -78,13 +78,13 @@ func (m *MergeBanners) Resolved(ws ids.WorkspaceID, end MergeEnd, summary string
 	at := m.now()
 	mark, what := mergeEndWords(end)
 	m.poster.Post(ws, KindMergeResolved, func(_ context.Context, name string) Banner {
-		return Banner{Title: fmt.Sprintf("%s %s %s %s", mark, name, what, at.Format("15:04")), Body: summary}
+		return Banner{Title: eventTitle(mark, name, what, at), Body: summary}
 	})
 }
 
 // MergeQueuedTitle is a queued merge's banner title.
 func MergeQueuedTitle(name string, at time.Time) string {
-	return fmt.Sprintf("🔀 %s merge queued %s", name, at.Format("15:04"))
+	return eventTitle("🔀", name, "merge queued", at)
 }
 
 // mergeEndWords is a resolved merge's mark and what happened to it. An end
