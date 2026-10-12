@@ -60,6 +60,29 @@ F. Measure every interaction again with /profile-agent-repl; remediate what is
 Then: rebase onto master, full tests, fix, cherry-pick onto master (owner
 instruction 2026-10-12: bypass the merge queue for this work).
 
+## Related work on master (folded in, 2026-10-12 afternoon)
+
+From the perf program plan (PLAN-perf-program.md, D5-D7) and
+investigations/2026-10-12-first-switch-and-daemon-rss.md:
+
+- D5, hidden page replays its backlog: the roster part landed (55a22a48e,
+  hidden pages hold the newest roster). With the host, iframes are never
+  suspended, so no stream queues a backlog at all; the roster hold stays, now
+  keyed on presence (shown by the host AND document visible).
+- D6, a live page per workspace (32 processes, 2.85GB): the host replaces the
+  proposed LRU of live pages. Every page lives in the host's one WebContent
+  process; the host's resident size is measured live in phase F.
+- D7, 80-180ms of Emacs elisp before every webview swap, ~118ms unrecorded
+  between `maybe-autoselect-input' and `switch-activation-won': the same gap
+  measured here (~270ms under load). Phase F records what fills it (a profile
+  of the live switch) and cuts it; the roster-push logging volume that ran in
+  that window is already cut (log-on-change commits).
+- Merge `tests' rows average 1.4MB (max 9.6MB): page bytes on a cold load. A
+  host reload (rollout) loads every page at once, so bounding that row matters
+  more under the host. Daemon-side; not in this branch.
+- "Load only the most recent feed page": already bounded by row count (p50 34
+  rows); only row size is unbounded (above).
+
 ## Not doing
 
 - The daemon's selection-only roster delta: the roster is "always whole, never
