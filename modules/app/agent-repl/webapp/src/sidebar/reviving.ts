@@ -15,17 +15,10 @@
  *
  * PHASE CONTINUITY. The sidebar redraws every row on every roster push, and a
  * fresh element restarts its animation at 0%, which mid-pass reads as the band
- * jumping back. So the same {@link AnimationEpoch} the footer and the prompt
- * bubble use: one start time, and every draw emits a negative
- * `animation-delay` seeking the new name to where the band already was.
+ * jumping back. The rail's wall-clock seek (`wall-phase.ts`) carries every
+ * looping rail animation across a redraw, this one included, so nothing here
+ * keeps a clock of its own.
  */
-import { AnimationEpoch } from "../breathing.js";
-
-/**
- * One full pass of the shimmer. Must match the `ws-revive-shimmer` duration in
- * styles.css, or a redrawn name seeks to the wrong phase.
- */
-export const REVIVE_SHIMMER_PERIOD_MS = 2400;
 
 /** The class the name wears while reviving; the shimmer rule keys on it. */
 export const REVIVING_CLASS = "reviving";
@@ -33,30 +26,11 @@ export const REVIVING_CLASS = "reviving";
 /** The row-level hook attribute, and the one value it takes. */
 export const REVIVING_ATTRIBUTE = "data-reviving";
 
-/** The page-global shimmer phase, so every reviving row ripples in unison. */
-export class ReviveShimmer {
-  private epoch = new AnimationEpoch();
-
-  /** How far into the current pass, in `[0, REVIVE_SHIMMER_PERIOD_MS)`. */
-  delayMs(nowMs: number): number {
-    return this.epoch.elapsedMs(nowMs) % REVIVE_SHIMMER_PERIOD_MS;
-  }
-}
-
-/** The one shimmer every sidebar row draws against. */
-export const reviveShimmer = new ReviveShimmer();
-
 /**
- * Mark ROW's NAME as reviving: the class the shimmer keys on, the negative
- * delay that continues the page's pass, and the row's hook attribute.
+ * Mark ROW's NAME as reviving: the class the shimmer keys on, and the row's
+ * hook attribute.
  */
-export function markReviving(
-  row: HTMLElement,
-  name: HTMLElement,
-  shimmer: ReviveShimmer = reviveShimmer,
-  nowMs: number = Date.now(),
-): void {
+export function markReviving(row: HTMLElement, name: HTMLElement): void {
   name.classList.add(REVIVING_CLASS);
-  name.style.animationDelay = `-${Math.round(shimmer.delayMs(nowMs))}ms`;
   row.setAttribute(REVIVING_ATTRIBUTE, "true");
 }
