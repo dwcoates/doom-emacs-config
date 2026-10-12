@@ -899,6 +899,11 @@ type MergeSource struct {
 	// a recovery finds the one workspace forked for THIS request. Empty for an
 	// in-place merge.
 	Detach DetachedMergeID
+	// Front puts the merge at the FRONT of its queue when it is put in line
+	// (QueueMerge): ahead of every merge still waiting, never ahead of the one
+	// already running. Any arm may ask for it; a hotfix that must land before
+	// the work already waiting is what it is for.
+	Front bool
 }
 
 // DetachedMergeID is one detached merge request's identity, minted when the

@@ -695,6 +695,25 @@ func TestTheMigrationAddsTheHeldPromptDeliveryColumn(t *testing.T) {
 	}
 }
 
+func TestTheMigrationAddsTheMergeQueueFrontColumn(t *testing.T) {
+	// Arrange -- a file written before a merge could ask for the front.
+	path := layout3Fixture(t)
+
+	// Act
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
+	if err != nil {
+		t.Fatalf("Open on a layout-3 database: %v", err)
+	}
+	defer handle.Close()
+
+	// Assert
+	got := scalar[int](t, handle.(*store),
+		`SELECT count(*) FROM pragma_table_info('merge_queue') WHERE name = 'source_front'`)
+	if got != 1 {
+		t.Fatalf("merge_queue.source_front exists %d times after the migration, want 1", got)
+	}
+}
+
 // TestTheMigratedHeldPromptsAreOrdinary pins the layout-12 default: no build
 // before it could hold a prompt any other way, so every migrated row reads as
 // the ordinary delivery.

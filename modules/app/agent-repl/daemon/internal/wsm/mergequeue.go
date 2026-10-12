@@ -69,10 +69,10 @@ func insertRequest(ctx context.Context, tx *sql.Tx, key RepoKey, id WorkspaceID,
 		return err
 	}
 	_, err = tx.ExecContext(ctx,
-		`INSERT INTO merge_queue (repo_key, workspace_id, seq, state, enqueued_at, source_kind, source_keep_open, source_workspace, source_branch, source_detach_id)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO merge_queue (repo_key, workspace_id, seq, state, enqueued_at, source_kind, source_keep_open, source_workspace, source_branch, source_detach_id, source_front)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		key, id, next, int(MergeRequested), nanos(at),
-		int(source.Kind), source.KeepOpen, nullableText(string(source.Workspace)), nullableText(source.Branch), nullableText(string(source.Detach)))
+		int(source.Kind), source.KeepOpen, nullableText(string(source.Workspace)), nullableText(source.Branch), nullableText(string(source.Detach)), source.Front)
 	return err
 }
 
@@ -100,7 +100,7 @@ func (s *store) QueueMerge(ctx context.Context, repo RepoKey, id WorkspaceID, le
 	}
 	var position int
 	err = s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
-		next, err := nextSeq(ctx, tx, key)
+		next, err := placeInLine(ctx, tx, key, id)
 		if err != nil {
 			return err
 		}
@@ -120,6 +120,54 @@ func (s *store) QueueMerge(ctx context.Context, repo RepoKey, id WorkspaceID, le
 		return 0, err
 	}
 	return position, nil
+}
+
+// placeInLine answers the sequence number a requested merge takes as it is put
+// in line: one past the queue's last, or -- for a merge that asked for the
+// FRONT (MergeSource.Front) -- the place of the first ORDINARY merge still
+// WAITING, with that merge and every row behind it moved back one. So front
+// merges keep their own arrival order ahead of every ordinary waiting merge,
+// and a merge already ADMITTED is never passed: it holds the repository's one
+// slot. A queue with no ordinary merge waiting puts a front merge at the back,
+// which is behind every earlier front merge and ahead of nothing it should
+// pass.
+//
+// THE SHIFT GOES THROUGH NEGATIVE SEQUENCES, so the unique (repo_key, seq)
+// index never sees two rows on one place mid-statement: every row from the
+// target on moves to -(seq+1), the requested row parks on -1 (no shifted row
+// can land there, since every sequence is at least 1), and the shifted rows
+// then come back positive, one place later.
+func placeInLine(ctx context.Context, tx *sql.Tx, key RepoKey, id WorkspaceID) (int64, error) {
+	var front bool
+	if err := tx.QueryRowContext(ctx, `SELECT source_front FROM merge_queue WHERE repo_key = ? AND workspace_id = ? AND state = ?`,
+		key, id, int(MergeRequested)).Scan(&front); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return 0, err
+	}
+	var waiting sql.NullInt64
+	if front {
+		if err := tx.QueryRowContext(ctx, `SELECT min(seq) FROM merge_queue WHERE repo_key = ? AND state = ? AND source_front = 0`,
+			key, int(MergeQueued)).Scan(&waiting); err != nil {
+			return 0, err
+		}
+	}
+	if !waiting.Valid {
+		return nextSeq(ctx, tx, key)
+	}
+	target := waiting.Int64
+	steps := []struct {
+		query string
+		args  []any
+	}{
+		{`UPDATE merge_queue SET seq = -1 WHERE repo_key = ? AND workspace_id = ?`, []any{key, id}},
+		{`UPDATE merge_queue SET seq = -(seq + 1) WHERE repo_key = ? AND seq >= ?`, []any{key, target}},
+		{`UPDATE merge_queue SET seq = -seq WHERE repo_key = ? AND seq < -1`, []any{key}},
+	}
+	for _, step := range steps {
+		if _, err := tx.ExecContext(ctx, step.query, step.args...); err != nil {
+			return 0, err
+		}
+	}
+	return target, nil
 }
 
 // nextSeq answers the sequence number one past a queue's last.
@@ -221,7 +269,7 @@ func (s *store) MergeQueue(ctx context.Context, repo RepoKey) ([]MergeQueueEntry
 	var out []MergeQueueEntry
 	err = s.read(ctx, op, dlog.Context{"repo": string(key)}, func(ctx context.Context) error {
 		loaded, err := s.scanMergeQueue(ctx,
-			`SELECT repo_key, workspace_id, state, enqueued_at, source_kind, source_keep_open, source_workspace, source_branch, source_detach_id, ledger_id FROM merge_queue WHERE repo_key = ? ORDER BY seq`, key)
+			`SELECT repo_key, workspace_id, state, enqueued_at, source_kind, source_keep_open, source_workspace, source_branch, source_detach_id, ledger_id, source_front FROM merge_queue WHERE repo_key = ? ORDER BY seq`, key)
 		if err != nil {
 			return err
 		}
@@ -239,7 +287,7 @@ func (s *store) MergeQueue(ctx context.Context, repo RepoKey) ([]MergeQueueEntry
 func (s *store) AllMergeQueues(ctx context.Context) (map[RepoKey][]MergeQueueEntry, error) {
 	var out map[RepoKey][]MergeQueueEntry
 	err := s.read(ctx, "daemon.wsm.all_merge_queues", dlog.Context{}, func(ctx context.Context) error {
-		loaded, err := s.scanMergeQueue(ctx, `SELECT repo_key, workspace_id, state, enqueued_at, source_kind, source_keep_open, source_workspace, source_branch, source_detach_id, ledger_id FROM merge_queue ORDER BY repo_key, seq`)
+		loaded, err := s.scanMergeQueue(ctx, `SELECT repo_key, workspace_id, state, enqueued_at, source_kind, source_keep_open, source_workspace, source_branch, source_detach_id, ledger_id, source_front FROM merge_queue ORDER BY repo_key, seq`)
 		if err != nil {
 			return err
 		}
@@ -273,8 +321,9 @@ func (s *store) scanMergeQueue(ctx context.Context, query string, args ...any) (
 			sourceRef sql.NullString
 			detach    sql.NullString
 			ledger    sql.NullString
+			front     bool
 		)
-		if err := rows.Scan(&entry.Repo, &entry.Workspace, &state, &enqueued, &kind, &keepOpen, &sourceWS, &sourceRef, &detach, &ledger); err != nil {
+		if err := rows.Scan(&entry.Repo, &entry.Workspace, &state, &enqueued, &kind, &keepOpen, &sourceWS, &sourceRef, &detach, &ledger, &front); err != nil {
 			return nil, err
 		}
 		row := fmt.Sprintf("%s/%s", entry.Repo, entry.Workspace)
@@ -282,7 +331,7 @@ func (s *store) scanMergeQueue(ctx context.Context, query string, args ...any) (
 		if !entry.State.valid() {
 			return nil, &DecodeError{Table: "merge_queue", Row: row, Field: "state", Err: fmt.Errorf("unknown merge queue state %d", state)}
 		}
-		entry.Source = MergeSource{Kind: MergeSourceKind(kind), KeepOpen: keepOpen, Workspace: WorkspaceID(sourceWS.String), Branch: sourceRef.String, Detach: DetachedMergeID(detach.String)}
+		entry.Source = MergeSource{Kind: MergeSourceKind(kind), KeepOpen: keepOpen, Workspace: WorkspaceID(sourceWS.String), Branch: sourceRef.String, Detach: DetachedMergeID(detach.String), Front: front}
 		if err := entry.Source.validate(); err != nil {
 			return nil, &DecodeError{Table: "merge_queue", Row: row, Field: "source", Err: err}
 		}

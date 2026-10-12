@@ -459,6 +459,8 @@ func TestTheMigrationSeedsAChildRightAfterItsParent(t *testing.T) {
 	execRaw(t, path, `DROP TRIGGER workspaces_land_unplaced`)
 	execRaw(t, path, `DROP INDEX workspaces_by_place`)
 	execRaw(t, path, `ALTER TABLE workspaces DROP COLUMN place`)
+	// Layout 36's column goes too: a file at layout 34 has neither.
+	execRaw(t, path, `ALTER TABLE merge_queue DROP COLUMN source_front`)
 	execRaw(t, path, `UPDATE workspaces SET parent_id = 'ws-b' WHERE id = 'ws-z'`)
 	handle, err = Open(context.Background(), path, WithUnsyncedWrites())
 	if err != nil {
