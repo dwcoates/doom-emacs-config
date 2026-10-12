@@ -148,10 +148,12 @@ type wsState struct {
 
 	// merge is what the merge orchestrator last told the roster.
 	merge footer.MergeFacts
-	// mergeRequested reports a merge RECORDED for this workspace that is not
-	// yet in line: its requesting turn has not ended (SetMergeRequested). It
-	// is never drawn; it feeds only the one-shot outcome (oneshot.go), and the
-	// merge's own facts supersede it once the merge is in line.
+	// mergeRequested reports a merge RECORDED for this workspace that has no
+	// facts of its own on this row: its requesting turn has not ended
+	// (SetMergeRequested), or it was handed to a DETACHED merge workspace
+	// whose merge has not ended yet (SetDetachedMergeEnded lowers it). It is
+	// never drawn; it feeds only the one-shot outcome (oneshot.go), and the
+	// merge's own facts supersede it once the merge is in line here.
 	mergeRequested bool
 	// oneShotFailed is the one-shot outcome: the workspace ended without a
 	// live merge behind it (oneshot.go). Tracked for every workspace and drawn

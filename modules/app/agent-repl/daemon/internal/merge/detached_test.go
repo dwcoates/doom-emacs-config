@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -453,5 +454,110 @@ func TestEveryMergeTabIsPublishedThroughPublishTab(t *testing.T) {
 		if strings.Contains(string(file.Source), "tabRow(") {
 			t.Errorf("%s composes a tab row itself, want every tab published through publishTab", file.Name)
 		}
+	}
+}
+
+func TestADetachedMergesEndReachesTheRequestersRoster(t *testing.T) {
+	cases := []struct {
+		name string
+		act  func(t *testing.T, h *harness)
+		want []detachedEnd
+	}{
+		{
+			name: "a landed merge",
+			act: func(t *testing.T, h *harness) {
+				h.emacsRepo()
+				h.landsCleanly("abc123def4567")
+				h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
+				h.gatePasses("daemon")
+				if err := requestDetached(t, h, RequestedByUser); err != nil {
+					t.Fatalf("Enqueue: %v", err)
+				}
+				if err := h.admit(context.Background()); err != nil {
+					t.Fatalf("the merge failed: %v", err)
+				}
+			},
+			want: []detachedEnd{{ws: theWorkspace, landed: true}},
+		},
+		{
+			name: "a failed merge",
+			act: func(t *testing.T, h *harness) {
+				h.registerMergeWorkspace(theWorkspace, "request-1", "feature")
+				h.o.handBack(context.Background(), theMergeWorkspace, DetachedOutcome{Kind: DetachedFailed, Summary: "tests failed"})
+			},
+			want: []detachedEnd{{ws: theWorkspace, landed: false}},
+		},
+		{
+			name: "an evicted merge",
+			act: func(t *testing.T, h *harness) {
+				if err := requestDetached(t, h, RequestedByUser); err != nil {
+					t.Fatalf("Enqueue: %v", err)
+				}
+				if err := h.o.Evict(context.Background(), theMergeWorkspace); err != nil {
+					t.Fatalf("Evict: %v", err)
+				}
+			},
+			want: []detachedEnd{{ws: theWorkspace, landed: false}},
+		},
+		{
+			name: "a merge whose fork failed",
+			act: func(t *testing.T, h *harness) {
+				h.detached.forkErr = errors.New("the worktree could not be made")
+				if err := requestDetached(t, h, RequestedByUser); err != nil {
+					t.Fatalf("Enqueue: %v", err)
+				}
+			},
+			want: []detachedEnd{{ws: theWorkspace, landed: false}},
+		},
+		{
+			name: "a merge workspace whose creation job is gone",
+			act: func(t *testing.T, h *harness) {
+				h.registerMergeWorkspace(theWorkspace, "request-1", "feature")
+				h.db.mu.Lock()
+				delete(h.db.jobs, theMergeWorkspace)
+				h.db.mu.Unlock()
+				h.o.handBack(context.Background(), theMergeWorkspace, DetachedOutcome{Kind: DetachedFailed, Summary: "tests failed"})
+			},
+			want: []detachedEnd{{ws: theWorkspace, landed: false}},
+		},
+		{
+			name: "an in-place merge",
+			act: func(t *testing.T, h *harness) {
+				h.o.handBack(context.Background(), theWorkspace, DetachedOutcome{Kind: DetachedFailed, Summary: "tests failed"})
+			},
+			want: nil,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act.
+			tc.act(t, h)
+
+			// Assert.
+			if got := h.sidebar.detachedEndsSeen(); !slices.Equal(got, tc.want) {
+				t.Fatalf("detached ends = %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAHandedOffDetachedMergeKeepsTheRequestersRequestFactRaised(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act: the user's ask is put in line at once, which hands it off.
+	if err := requestDetached(t, h, RequestedByUser); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+
+	// Assert: raised at the request and again at the hand-off, never lowered.
+	if got, want := h.sidebar.requestedSeenFor(theWorkspace), []bool{true, true}; !slices.Equal(got, want) {
+		t.Fatalf("requester's request facts = %v, want %v", got, want)
+	}
+	if ends := h.sidebar.detachedEndsSeen(); len(ends) != 0 {
+		t.Fatalf("detached ends = %+v, want none while the merge stands", ends)
 	}
 }

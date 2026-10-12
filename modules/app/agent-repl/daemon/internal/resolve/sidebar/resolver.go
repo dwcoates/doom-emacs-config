@@ -395,6 +395,14 @@ func (r *resolver) SetMergeRequested(ws ids.WorkspaceID, requested bool) {
 		})
 }
 
+// SetDetachedMergeEnded reports how the workspace's detached merge ended.
+func (r *resolver) SetDetachedMergeEnded(ws ids.WorkspaceID, landed bool) {
+	r.mutateWorkspaceLogged(ws, "daemon.sidebar.set_detached_merge_ended", "the roster took how the workspace's detached merge ended",
+		dlog.Context{"landed": landed}, func(s *wsState, log dlog.Logger) {
+			s.noteDetachedMergeEndedForOneShot(landed, log)
+		})
+}
+
 // SetRepoDivergence installs a repository's latest ahead/behind measure.
 func (r *resolver) SetRepoDivergence(repo ids.RepoID, measure repodivergence.Measure) {
 	if measure == nil {

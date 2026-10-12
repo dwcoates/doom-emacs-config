@@ -122,7 +122,9 @@ type Workspace struct {
 	OneShot bool
 	// MergePending reports that a merge queue entry stands for the workspace
 	// in ANY state: recorded while its requesting turn runs, waiting in line,
-	// or admitted. READ-ONLY, from the merge queue in the same read, so a
+	// or admitted. A DETACHED merge counts too: once handed off, its entry is
+	// the merge workspace's (the one whose MergeOf names this workspace), and
+	// it still stands for this workspace's merge. READ-ONLY, from the merge queue in the same read, so a
 	// reader that has not seen the merge orchestrator's live facts yet (the
 	// roster at boot, which publishes before merges are recovered) still
 	// knows a merge stands.
