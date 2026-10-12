@@ -156,18 +156,22 @@ function agenticPanel(
     update(next: MergeTab): boolean {
       // THE STOP COMES AND GOES WITH THE AGENT: a change of it draws afresh.
       if (stoppable(next) !== stoppable(shown)) return false;
-      if (!equals(FeedRowSchema, shown.row, next.row) && head !== null) {
-        const nextHead = heading(next);
-        if (nextHead !== null) {
-          head.replaceWith(nextHead);
-          head = nextHead;
-        }
-      }
+      if (!equals(FeedRowSchema, shown.row, next.row)) head = swapHeading(head, heading(next));
       placeChildren(stream.rows, agenticRowsOf(next, view));
       shown = next;
       return true;
     },
   };
+}
+
+/**
+ * Put NEXT in HEAD's place and answer the heading that now stands. A panel
+ * with no heading has none to swap, and keeps none.
+ */
+export function swapHeading(head: HTMLElement | null, next: HTMLElement | null): HTMLElement | null {
+  if (head === null || next === null) return head;
+  head.replaceWith(next);
+  return next;
 }
 
 /** Whether an agentic tab's agent is running, which is when it offers "stop". */
@@ -303,13 +307,7 @@ function parentPanel(
   return {
     nodes: head === null ? [host] : [head, host],
     update(next: MergeTab): boolean {
-      if (head !== null && !equals(FeedRowSchema, shown.row, next.row)) {
-        const nextHead = heading(next);
-        if (nextHead !== null) {
-          head.replaceWith(nextHead);
-          head = nextHead;
-        }
-      }
+      if (!equals(FeedRowSchema, shown.row, next.row)) head = swapHeading(head, heading(next));
       set.draw(children(next));
       shown = next;
       return true;
