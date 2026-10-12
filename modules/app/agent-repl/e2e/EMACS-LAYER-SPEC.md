@@ -1030,12 +1030,20 @@ layer at each setting:
 | 3 | 81s | 1.58 GiB | 1.78s | rejected: under sustained load (`-count=2`) three Emacsen on four CPUs pushed Doom's boot past 3.5s and failed three unrelated scenarios |
 | 4 | 90s | 1.81 GiB | 2.94s | slower *and* visibly contended |
 
+Re-measured 2026-10-12 with the container's width instead of the Emacsen
+varied (two Emacsen throughout, the 16-CPU Docker VM, `docker run --cpus`):
+
+| CPUs | Wall alone | Worst Doom boot (bound 3.5s) | Slot-seconds | Verdict |
+| --- | --- | --- | --- | --- |
+| 4 | 66s | 0.36s | 264 | |
+| **2** | **82s** | **0.88s** | **164** | **chosen**: a fifth of a full run's held slots, for 16s of this suite's own wall, which a full run hides |
+
 The bound is not the number that goes fastest on one lucky pass; it is the
 largest number whose worst measured boot still fits the budget the product is
 held to.
 
 The container is held to that VM by construction: `e2e-sandbox.sh` caps it to
-`AGENT_REPL_SANDBOX_CPUS` (default 4) with `docker run --cpus` and sets
+`AGENT_REPL_SANDBOX_CPUS` (default 4; 2 under testrun, the unit's width) with `docker run --cpus` and sets
 `GOMAXPROCS` to the same number, and under testrun the `e2e-emacs` unit holds
 exactly that many core slots. A Docker VM with more CPUs no longer lets the
 layer spread past the slots the scheduler reserved for it.

@@ -83,8 +83,8 @@ func TestTheSandboxSuiteHoldsTheCoresItsContainerUses(t *testing.T) {
 	s, ok := Lookup("e2e-emacs")
 
 	// Assert
-	if !ok || s.Slots != 4 {
-		t.Fatalf("e2e-emacs = %+v, want a width of 4: the VM its parallelism bound was measured on", s)
+	if !ok || s.Slots != 2 {
+		t.Fatalf("e2e-emacs = %+v, want a width of 2: the CPUs its two Emacsen were re-measured on (EMACS-LAYER-SPEC.md)", s)
 	}
 }
 
