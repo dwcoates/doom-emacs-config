@@ -20,6 +20,5 @@ package convert
 // inheritedByFork reports whether `record` is one the vendor's fork copied
 // from the parent conversation.
 func inheritedByFork(record map[string]any) bool {
-	stamp, ok := record["forkedFrom"].(map[string]any)
-	return ok && stamp != nil
+	return obj(record["forkedFrom"]) != nil
 }
