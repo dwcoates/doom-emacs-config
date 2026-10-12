@@ -585,11 +585,13 @@ func (c *controller) reclaim(ctx context.Context, ws ids.WorkspaceID, lease ids.
 			merge(fields, dlog.Context{"owner": string(holder)}))
 		return false, nil
 	}
-	c.untransfer(ws)
-	// THE NOTICE THAT IT MOVED IS WITHDRAWN with the move. Left standing, it
-	// was replayed to the page reloaded back onto this daemon, which went
-	// quiet, and it swallowed the next transfer's identical notice.
-	c.deps.Pusher.RetractTransferred(ws)
+	// THE NOTICE THAT IT MOVED IS WITHDRAWN with the move, when one went
+	// out. Left standing, it was replayed to the page reloaded back onto this
+	// daemon, which went quiet, and it swallowed the next transfer's
+	// identical notice.
+	if c.untransfer(ws) {
+		c.deps.Pusher.RetractTransferred(ws)
+	}
 	c.deps.Shims.Reclaimed(ws)
 	var failures []error
 	if _, live := c.deps.Shims.Client(ws); reattach && !live {
