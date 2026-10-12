@@ -16,9 +16,6 @@ const RunLogBackups = logging.DefaultBackups
 type runLog struct {
 	path string
 	file *logging.RotatingFile
-	// pipe, when the test log pipe is on, carries every record instead of
-	// the file, which stays open and empty (see EnvTestLogPipe).
-	pipe *logPipe
 }
 
 func openRunLog(path string, backups int) (*runLog, error) {
@@ -36,12 +33,6 @@ func openRunLogSized(path string, capBytes int64, backups int) (*runLog, error) 
 }
 
 func (r *runLog) write(line []byte) error {
-	if r.pipe != nil {
-		if err := r.pipe.send(PipeRecord, r.path, line); err != nil {
-			return fmt.Errorf("%w: append to run log %q: %w", ErrPoisoned, r.path, err)
-		}
-		return nil
-	}
 	n, err := r.file.Write(line)
 	if err != nil {
 		return fmt.Errorf("%w: append to run log %q: %w", ErrPoisoned, r.path, err)
