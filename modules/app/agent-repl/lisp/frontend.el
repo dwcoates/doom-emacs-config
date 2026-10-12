@@ -248,7 +248,9 @@ displayed, which is what makes a workspace's buffer free to create."
     (with-current-buffer buf
       ;; The same major mode a web view's own buffer has, so every key the
       ;; page forwards to Emacs meets the bindings it always met there.
-      (when (agent-repl--frontend-xwidget-available-p)
+      ;; An Emacs without xwidget support has no such mode, and no slot
+      ;; displays anything there either.
+      (when (fboundp 'xwidget-webkit-mode)
         (xwidget-webkit-mode))
       (let ((inhibit-read-only t))
         (insert (propertize "*" 'display (list 'xwidget :xwidget xw))))

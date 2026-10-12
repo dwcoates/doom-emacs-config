@@ -224,8 +224,7 @@ test is the mount's own binding of the slot to its workspace."
   "A slot meets forwarded keys with the bindings a web view's buffer had."
   ;; Arrange
   (let (moded)
-    (cl-letf (((symbol-function 'agent-repl--frontend-xwidget-available-p) (lambda () t))
-              ((symbol-function 'xwidget-webkit-mode) (lambda () (setq moded (current-buffer)))))
+    (cl-letf (((symbol-function 'xwidget-webkit-mode) (lambda () (setq moded (current-buffer)))))
       ;; Act
       (let ((slot (agent-repl--frontend-make-slot-buffer "*test-slot*" 'host-xwidget)))
         (unwind-protect
