@@ -134,10 +134,10 @@ func TestAGateWhoseCostWouldPassTheCeilingIsDeferredBelowTheBand(t *testing.T) {
 }
 
 func TestAJustStartedGatesShareIsCountedBeforeTheLoadShowsIt(t *testing.T) {
-	// Arrange: three head gates just started, not yet in the load average.
+	// Arrange: two head gates just started, not yet in the load average.
 	r := newRig(t)
-	r.g.Observe(at(0.25))
-	for i := 0; i < 3; i++ {
+	r.g.Observe(at(0.35))
+	for i := 0; i < 2; i++ {
 		r.g.enqueue(Request{Workspace: "head", Rank: 0, Head: true})
 	}
 
@@ -154,14 +154,14 @@ func TestAJustStartedGatesShareIsCountedBeforeTheLoadShowsIt(t *testing.T) {
 }
 
 func TestASettledGatesShareIsReadOutOfTheSample(t *testing.T) {
-	// Arrange: the same three gates, long enough ago that the load average
+	// Arrange: the same two gates, long enough ago that the load average
 	// holds their whole share.
 	r := newRig(t)
-	for i := 0; i < 3; i++ {
+	for i := 0; i < 2; i++ {
 		r.g.enqueue(Request{Workspace: "head", Rank: 0, Head: true})
 	}
 	r.clock.advance(10 * time.Minute)
-	r.g.Observe(at(0.25))
+	r.g.Observe(at(0.35))
 
 	// Act.
 	w := r.g.enqueue(speculative(1))
@@ -170,6 +170,28 @@ func TestASettledGatesShareIsReadOutOfTheSample(t *testing.T) {
 	if !ready(w) {
 		_, reason := lastDecision(r.log)
 		t.Fatalf("deferred (%s); want the settled gates' share read out of the sample, not counted twice", reason)
+	}
+}
+
+func TestNoGateIsAdmittedPastTheConcurrentGateBound(t *testing.T) {
+	// Arrange: an idle host already running the bound's worth of gates,
+	// long enough ago that the load holds them.
+	r := newRig(t)
+	for i := 0; i < QueueWindow; i++ {
+		r.g.enqueue(Request{Workspace: "head", Head: true})
+	}
+	r.clock.advance(10 * time.Minute)
+	r.g.Observe(at(0))
+
+	// Act.
+	w := r.g.enqueue(speculative(1))
+
+	// Assert.
+	if ready(w) {
+		t.Fatal("a gate was admitted past the concurrent gate bound")
+	}
+	if _, reason := lastDecision(r.log); reason != "gate_limit" {
+		t.Fatalf("decision reason = %q, want gate_limit", reason)
 	}
 }
 
@@ -256,11 +278,11 @@ func TestAWaitingGateIsAdmittedWhenTheLoadFalls(t *testing.T) {
 }
 
 func TestAReleasedGateMakesRoomForTheNext(t *testing.T) {
-	// Arrange: three head gates leave no room.
+	// Arrange: two head gates leave no room.
 	r := newRig(t)
-	r.g.Observe(at(0.25))
+	r.g.Observe(at(0.35))
 	var heads []*waiter
-	for i := 0; i < 3; i++ {
+	for i := 0; i < 2; i++ {
 		heads = append(heads, r.g.enqueue(Request{Workspace: "head", Head: true}))
 	}
 	w := r.g.enqueue(speculative(1))

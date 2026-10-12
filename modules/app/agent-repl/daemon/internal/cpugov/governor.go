@@ -66,6 +66,13 @@ const (
 	// SampleEvery is the production sampling cadence: the kernel itself
 	// recomputes the load average every five seconds.
 	SampleEvery = 5 * time.Second
+	// QueueWindow is THE ONE SETTING for the merge queue's working window
+	// (owner rulings, 2026-10-11): the head and the merges right behind it, up
+	// to this many in all. It bounds both how many merges rebase in a chain and
+	// how many test gates run at once; an entry beyond it waits untouched. The
+	// band still decides whether a gate behind the head starts; the head's
+	// always does.
+	QueueWindow = 3
 )
 
 // Sample is one reading of the host's load.
@@ -116,13 +123,15 @@ type Config struct {
 	LearnRate   float64
 	Tau         time.Duration
 	MinLearnRun time.Duration
+	// MaxGates bounds the gates running at once, the head's included.
+	MaxGates int
 }
 
 // DefaultConfig is the production band and the measured cost seeds.
 func DefaultConfig() Config {
 	return Config{
 		Low: DefaultLow, High: DefaultHigh, MeanCores: DefaultMeanCores,
-		LearnRate: DefaultLearnRate, Tau: LoadTau, MinLearnRun: MinLearnWall,
+		LearnRate: DefaultLearnRate, Tau: LoadTau, MinLearnRun: MinLearnWall, MaxGates: QueueWindow,
 	}
 }
 
@@ -158,7 +167,7 @@ func New(cfg Config, sampler Sampler, now func() time.Time, log dlog.Logger) (*G
 		return nil, errors.New("cpugov: a sampler, a clock and a logger are required")
 	}
 	if !(cfg.Low > 0 && cfg.Low < cfg.High && cfg.High <= 1) || cfg.MeanCores <= 0 ||
-		cfg.LearnRate <= 0 || cfg.LearnRate > 1 || cfg.Tau <= 0 {
+		cfg.LearnRate <= 0 || cfg.LearnRate > 1 || cfg.Tau <= 0 || cfg.MaxGates < 1 {
 		return nil, fmt.Errorf("cpugov: the configuration %+v is not a band and a cost model", cfg)
 	}
 	return &Governor{cfg: cfg, sampler: sampler, now: now, log: log, mean: cfg.MeanCores, active: map[*Permit]struct{}{}}, nil
@@ -351,6 +360,8 @@ func (g *Governor) decideLocked() {
 		default:
 			pr = g.projectLocked()
 			switch {
+			case len(g.active) >= g.cfg.MaxGates:
+				reason = "gate_limit"
 			case pr.settled >= g.cfg.Low:
 				reason = "load_in_or_above_band"
 			case pr.projected > g.cfg.High:
