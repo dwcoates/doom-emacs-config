@@ -204,6 +204,8 @@ const (
 	AgentReplWatchHostWorkspaceProcedure = "/agentrepl.v1.AgentRepl/WatchHostWorkspace"
 	// AgentReplWatchDaemonProcedure is the fully-qualified name of the AgentRepl's WatchDaemon RPC.
 	AgentReplWatchDaemonProcedure = "/agentrepl.v1.AgentRepl/WatchDaemon"
+	// AgentReplOpenTabsProcedure is the fully-qualified name of the AgentRepl's OpenTabs RPC.
+	AgentReplOpenTabsProcedure = "/agentrepl.v1.AgentRepl/OpenTabs"
 	// AgentReplAdoptHostWorkspaceProcedure is the fully-qualified name of the AgentRepl's
 	// AdoptHostWorkspace RPC.
 	AgentReplAdoptHostWorkspaceProcedure = "/agentrepl.v1.AgentRepl/AdoptHostWorkspace"
@@ -237,6 +239,9 @@ const (
 	// AgentReplUnsubscribePageProcedure is the fully-qualified name of the AgentRepl's UnsubscribePage
 	// RPC.
 	AgentReplUnsubscribePageProcedure = "/agentrepl.v1.AgentRepl/UnsubscribePage"
+	// AgentReplReportPageDrawnProcedure is the fully-qualified name of the AgentRepl's ReportPageDrawn
+	// RPC.
+	AgentReplReportPageDrawnProcedure = "/agentrepl.v1.AgentRepl/ReportPageDrawn"
 	// AgentReplDismissNewsDigestProcedure is the fully-qualified name of the AgentRepl's
 	// DismissNewsDigest RPC.
 	AgentReplDismissNewsDigestProcedure = "/agentrepl.v1.AgentRepl/DismissNewsDigest"
@@ -310,6 +315,7 @@ var (
 	agentReplReportEditorFocusMethodDescriptor        = agentReplServiceDescriptor.Methods().ByName("ReportEditorFocus")
 	agentReplWatchHostWorkspaceMethodDescriptor       = agentReplServiceDescriptor.Methods().ByName("WatchHostWorkspace")
 	agentReplWatchDaemonMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("WatchDaemon")
+	agentReplOpenTabsMethodDescriptor                 = agentReplServiceDescriptor.Methods().ByName("OpenTabs")
 	agentReplAdoptHostWorkspaceMethodDescriptor       = agentReplServiceDescriptor.Methods().ByName("AdoptHostWorkspace")
 	agentReplListSlashCommandsMethodDescriptor        = agentReplServiceDescriptor.Methods().ByName("ListSlashCommands")
 	agentReplWatchWebWorkspaceMethodDescriptor        = agentReplServiceDescriptor.Methods().ByName("WatchWebWorkspace")
@@ -323,6 +329,7 @@ var (
 	agentReplWatchPageMethodDescriptor                = agentReplServiceDescriptor.Methods().ByName("WatchPage")
 	agentReplSubscribePageMethodDescriptor            = agentReplServiceDescriptor.Methods().ByName("SubscribePage")
 	agentReplUnsubscribePageMethodDescriptor          = agentReplServiceDescriptor.Methods().ByName("UnsubscribePage")
+	agentReplReportPageDrawnMethodDescriptor          = agentReplServiceDescriptor.Methods().ByName("ReportPageDrawn")
 	agentReplDismissNewsDigestMethodDescriptor        = agentReplServiceDescriptor.Methods().ByName("DismissNewsDigest")
 	agentReplRefreshNewsDigestMethodDescriptor        = agentReplServiceDescriptor.Methods().ByName("RefreshNewsDigest")
 )
@@ -521,6 +528,11 @@ type AgentReplClient interface {
 	// The daemon-level host stream — daemon-scoped facts only (the graceful
 	// rollout's shutdown announcement). See endpoint_watch_daemon.proto.
 	WatchDaemon(context.Context, *connect.Request[v1.WatchDaemonRequest]) (*connect.ServerStreamForClient[v1.WatchDaemonResponse], error)
+	// Open the workspaces the editor names: each is brought up (when visible)
+	// and answered `opened` once it is served and its page has drawn, with every
+	// step on the way as a frame. The editor shows a tab only on its `opened`.
+	// See endpoint_open_tabs.proto.
+	OpenTabs(context.Context, *connect.Request[v1.OpenTabsRequest]) (*connect.ServerStreamForClient[v1.OpenTabsResponse], error)
 	// Emacs's half of the handover rendezvous, called on the NEW daemon. See
 	// endpoint_adopt_host_workspace.proto.
 	AdoptHostWorkspace(context.Context, *connect.Request[v1.AdoptHostWorkspaceRequest]) (*connect.Response[v1.AdoptHostWorkspaceResponse], error)
@@ -561,6 +573,10 @@ type AgentReplClient interface {
 	SubscribePage(context.Context, *connect.Request[v1.SubscribePageRequest]) (*connect.Response[v1.SubscribePageResponse], error)
 	// End one subscription, leaving the page's others alone.
 	UnsubscribePage(context.Context, *connect.Request[v1.UnsubscribePageRequest]) (*connect.Response[v1.UnsubscribePageResponse], error)
+	// A workspace's page drew its conversation (again on every re-attach while
+	// drawn); an OpenTabs waiting on it may answer `opened`. See
+	// endpoint_report_page_drawn.proto.
+	ReportPageDrawn(context.Context, *connect.Request[v1.ReportPageDrawnRequest]) (*connect.Response[v1.ReportPageDrawnResponse], error)
 	// ---- News digest: the daily Claude news overlay ----
 	// Takes the standing digest down in every webview. See
 	// endpoint_dismiss_news_digest.proto.
@@ -952,6 +968,12 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(agentReplWatchDaemonMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		openTabs: connect.NewClient[v1.OpenTabsRequest, v1.OpenTabsResponse](
+			httpClient,
+			baseURL+AgentReplOpenTabsProcedure,
+			connect.WithSchema(agentReplOpenTabsMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 		adoptHostWorkspace: connect.NewClient[v1.AdoptHostWorkspaceRequest, v1.AdoptHostWorkspaceResponse](
 			httpClient,
 			baseURL+AgentReplAdoptHostWorkspaceProcedure,
@@ -1028,6 +1050,12 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			httpClient,
 			baseURL+AgentReplUnsubscribePageProcedure,
 			connect.WithSchema(agentReplUnsubscribePageMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		reportPageDrawn: connect.NewClient[v1.ReportPageDrawnRequest, v1.ReportPageDrawnResponse](
+			httpClient,
+			baseURL+AgentReplReportPageDrawnProcedure,
+			connect.WithSchema(agentReplReportPageDrawnMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
 		dismissNewsDigest: connect.NewClient[v1.DismissNewsDigestRequest, v1.DismissNewsDigestResponse](
@@ -1109,6 +1137,7 @@ type agentReplClient struct {
 	reportEditorFocus        *connect.Client[v1.ReportEditorFocusRequest, v1.ReportEditorFocusResponse]
 	watchHostWorkspace       *connect.Client[v1.WatchHostWorkspaceRequest, v1.WatchHostWorkspaceResponse]
 	watchDaemon              *connect.Client[v1.WatchDaemonRequest, v1.WatchDaemonResponse]
+	openTabs                 *connect.Client[v1.OpenTabsRequest, v1.OpenTabsResponse]
 	adoptHostWorkspace       *connect.Client[v1.AdoptHostWorkspaceRequest, v1.AdoptHostWorkspaceResponse]
 	listSlashCommands        *connect.Client[v1.ListSlashCommandsRequest, v1.ListSlashCommandsResponse]
 	watchWebWorkspace        *connect.Client[v1.WatchWebWorkspaceRequest, v1.WatchWebWorkspaceResponse]
@@ -1122,6 +1151,7 @@ type agentReplClient struct {
 	watchPage                *connect.Client[v1.WatchPageRequest, v1.WatchPageResponse]
 	subscribePage            *connect.Client[v1.SubscribePageRequest, v1.SubscribePageResponse]
 	unsubscribePage          *connect.Client[v1.UnsubscribePageRequest, v1.UnsubscribePageResponse]
+	reportPageDrawn          *connect.Client[v1.ReportPageDrawnRequest, v1.ReportPageDrawnResponse]
 	dismissNewsDigest        *connect.Client[v1.DismissNewsDigestRequest, v1.DismissNewsDigestResponse]
 	refreshNewsDigest        *connect.Client[v1.RefreshNewsDigestRequest, v1.RefreshNewsDigestResponse]
 }
@@ -1436,6 +1466,11 @@ func (c *agentReplClient) WatchDaemon(ctx context.Context, req *connect.Request[
 	return c.watchDaemon.CallServerStream(ctx, req)
 }
 
+// OpenTabs calls agentrepl.v1.AgentRepl.OpenTabs.
+func (c *agentReplClient) OpenTabs(ctx context.Context, req *connect.Request[v1.OpenTabsRequest]) (*connect.ServerStreamForClient[v1.OpenTabsResponse], error) {
+	return c.openTabs.CallServerStream(ctx, req)
+}
+
 // AdoptHostWorkspace calls agentrepl.v1.AgentRepl.AdoptHostWorkspace.
 func (c *agentReplClient) AdoptHostWorkspace(ctx context.Context, req *connect.Request[v1.AdoptHostWorkspaceRequest]) (*connect.Response[v1.AdoptHostWorkspaceResponse], error) {
 	return c.adoptHostWorkspace.CallUnary(ctx, req)
@@ -1499,6 +1534,11 @@ func (c *agentReplClient) SubscribePage(ctx context.Context, req *connect.Reques
 // UnsubscribePage calls agentrepl.v1.AgentRepl.UnsubscribePage.
 func (c *agentReplClient) UnsubscribePage(ctx context.Context, req *connect.Request[v1.UnsubscribePageRequest]) (*connect.Response[v1.UnsubscribePageResponse], error) {
 	return c.unsubscribePage.CallUnary(ctx, req)
+}
+
+// ReportPageDrawn calls agentrepl.v1.AgentRepl.ReportPageDrawn.
+func (c *agentReplClient) ReportPageDrawn(ctx context.Context, req *connect.Request[v1.ReportPageDrawnRequest]) (*connect.Response[v1.ReportPageDrawnResponse], error) {
+	return c.reportPageDrawn.CallUnary(ctx, req)
 }
 
 // DismissNewsDigest calls agentrepl.v1.AgentRepl.DismissNewsDigest.
@@ -1705,6 +1745,11 @@ type AgentReplHandler interface {
 	// The daemon-level host stream — daemon-scoped facts only (the graceful
 	// rollout's shutdown announcement). See endpoint_watch_daemon.proto.
 	WatchDaemon(context.Context, *connect.Request[v1.WatchDaemonRequest], *connect.ServerStream[v1.WatchDaemonResponse]) error
+	// Open the workspaces the editor names: each is brought up (when visible)
+	// and answered `opened` once it is served and its page has drawn, with every
+	// step on the way as a frame. The editor shows a tab only on its `opened`.
+	// See endpoint_open_tabs.proto.
+	OpenTabs(context.Context, *connect.Request[v1.OpenTabsRequest], *connect.ServerStream[v1.OpenTabsResponse]) error
 	// Emacs's half of the handover rendezvous, called on the NEW daemon. See
 	// endpoint_adopt_host_workspace.proto.
 	AdoptHostWorkspace(context.Context, *connect.Request[v1.AdoptHostWorkspaceRequest]) (*connect.Response[v1.AdoptHostWorkspaceResponse], error)
@@ -1745,6 +1790,10 @@ type AgentReplHandler interface {
 	SubscribePage(context.Context, *connect.Request[v1.SubscribePageRequest]) (*connect.Response[v1.SubscribePageResponse], error)
 	// End one subscription, leaving the page's others alone.
 	UnsubscribePage(context.Context, *connect.Request[v1.UnsubscribePageRequest]) (*connect.Response[v1.UnsubscribePageResponse], error)
+	// A workspace's page drew its conversation (again on every re-attach while
+	// drawn); an OpenTabs waiting on it may answer `opened`. See
+	// endpoint_report_page_drawn.proto.
+	ReportPageDrawn(context.Context, *connect.Request[v1.ReportPageDrawnRequest]) (*connect.Response[v1.ReportPageDrawnResponse], error)
 	// ---- News digest: the daily Claude news overlay ----
 	// Takes the standing digest down in every webview. See
 	// endpoint_dismiss_news_digest.proto.
@@ -2132,6 +2181,12 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(agentReplWatchDaemonMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	agentReplOpenTabsHandler := connect.NewServerStreamHandler(
+		AgentReplOpenTabsProcedure,
+		svc.OpenTabs,
+		connect.WithSchema(agentReplOpenTabsMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	agentReplAdoptHostWorkspaceHandler := connect.NewUnaryHandler(
 		AgentReplAdoptHostWorkspaceProcedure,
 		svc.AdoptHostWorkspace,
@@ -2208,6 +2263,12 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		AgentReplUnsubscribePageProcedure,
 		svc.UnsubscribePage,
 		connect.WithSchema(agentReplUnsubscribePageMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplReportPageDrawnHandler := connect.NewUnaryHandler(
+		AgentReplReportPageDrawnProcedure,
+		svc.ReportPageDrawn,
+		connect.WithSchema(agentReplReportPageDrawnMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
 	agentReplDismissNewsDigestHandler := connect.NewUnaryHandler(
@@ -2348,6 +2409,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplWatchHostWorkspaceHandler.ServeHTTP(w, r)
 		case AgentReplWatchDaemonProcedure:
 			agentReplWatchDaemonHandler.ServeHTTP(w, r)
+		case AgentReplOpenTabsProcedure:
+			agentReplOpenTabsHandler.ServeHTTP(w, r)
 		case AgentReplAdoptHostWorkspaceProcedure:
 			agentReplAdoptHostWorkspaceHandler.ServeHTTP(w, r)
 		case AgentReplListSlashCommandsProcedure:
@@ -2374,6 +2437,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplSubscribePageHandler.ServeHTTP(w, r)
 		case AgentReplUnsubscribePageProcedure:
 			agentReplUnsubscribePageHandler.ServeHTTP(w, r)
+		case AgentReplReportPageDrawnProcedure:
+			agentReplReportPageDrawnHandler.ServeHTTP(w, r)
 		case AgentReplDismissNewsDigestProcedure:
 			agentReplDismissNewsDigestHandler.ServeHTTP(w, r)
 		case AgentReplRefreshNewsDigestProcedure:
@@ -2635,6 +2700,10 @@ func (UnimplementedAgentReplHandler) WatchDaemon(context.Context, *connect.Reque
 	return connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.WatchDaemon is not implemented"))
 }
 
+func (UnimplementedAgentReplHandler) OpenTabs(context.Context, *connect.Request[v1.OpenTabsRequest], *connect.ServerStream[v1.OpenTabsResponse]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.OpenTabs is not implemented"))
+}
+
 func (UnimplementedAgentReplHandler) AdoptHostWorkspace(context.Context, *connect.Request[v1.AdoptHostWorkspaceRequest]) (*connect.Response[v1.AdoptHostWorkspaceResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.AdoptHostWorkspace is not implemented"))
 }
@@ -2685,6 +2754,10 @@ func (UnimplementedAgentReplHandler) SubscribePage(context.Context, *connect.Req
 
 func (UnimplementedAgentReplHandler) UnsubscribePage(context.Context, *connect.Request[v1.UnsubscribePageRequest]) (*connect.Response[v1.UnsubscribePageResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.UnsubscribePage is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) ReportPageDrawn(context.Context, *connect.Request[v1.ReportPageDrawnRequest]) (*connect.Response[v1.ReportPageDrawnResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.ReportPageDrawn is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) DismissNewsDigest(context.Context, *connect.Request[v1.DismissNewsDigestRequest]) (*connect.Response[v1.DismissNewsDigestResponse], error) {

@@ -1,0 +1,232 @@
+// endpoint_open_tabs.proto — OpenTabs. HOST section.
+//
+// THE EDITOR ASKS, THE DAEMON OPENS, THE EDITOR SHOWS. Emacs never shows a
+// workspace's tab until the daemon says everything the workspace needs is
+// loaded: its session is served by agent-repl's services (daemon, shim,
+// store, sidecar) and its web page has drawn its conversation. Emacs asks for
+// the workspaces it wants open with this call, loads each visible
+// workspace's page at the same moment (the page reports itself drawn with
+// ReportPageDrawn), and shows each tab when its `opened` frame arrives, at its
+// place in the registry's tab order, never waiting on any other workspace.
+//
+// The same call serves every open: the editor's startup (every registered
+// open workspace at once), and any later one (a workspace created, reopened,
+// unhidden, or whose repository section was expanded).
+//
+// ONLY VISIBLE WORKSPACES ARE BROUGHT UP. A workspace the user hid, or whose
+// repository section is collapsed, is answered `opened` at once with its
+// `hidden` arm and nothing is started for it; its session starts when it is
+// shown again, which the editor asks for with another OpenTabs.
+//
+// Every step of every workspace's open is a typed frame on this stream, so the
+// editor reports progress as one minibuffer line per step.
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// The workspaces the editor wants open.
+message OpenTabsRequest {
+  // Each workspace once, in any order: the daemon answers each as it is
+  // ready, and the editor places tabs by the registry's order, never by this
+  // list's. An empty list is a malformed request (Connect InvalidArgument).
+  repeated OpenTabsWorkspace workspaces = 1;
+}
+
+// One workspace the editor wants open.
+message OpenTabsWorkspace {
+  // The workspace, echoed from its roster row.
+  workspace.v1.WorkspaceRef workspace = 1;
+}
+
+// One frame of an open. The stream ends after `finished`.
+message OpenTabsResponse {
+  // THE ARM IS THE FRAME; exactly one is set.
+  oneof frame {
+    // One workspace moved one step along its open.
+    OpenTabsStep step = 1;
+    // One workspace is open: the editor shows its tab now.
+    OpenTabsOpened opened = 2;
+    // Every workspace of the request has had its `opened`; the last frame.
+    OpenTabsFinished finished = 3;
+  }
+}
+
+// ---- Steps: one workspace's progress, one minibuffer line each ----
+
+// One workspace's step, in the order it happened.
+message OpenTabsStep {
+  // The workspace.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // When the step happened, epoch milliseconds.
+  int64 at_ms = 2;
+  // THE ARM IS THE STEP; exactly one is set.
+  oneof step {
+    // Its shim is being started or adopted ("starting session…").
+    OpenTabsStepStartingSession starting_session = 3;
+    // It was asleep and is being woken ("waking from sleep…").
+    OpenTabsStepWaking waking = 4;
+    // Its conversation is being resumed ("resuming the conversation…").
+    OpenTabsStepResuming resuming = 5;
+    // A vendor start attempt failed and is retried ("Claude did not start,
+    // retrying (attempt N)…").
+    OpenTabsStepVendorRetrying vendor_retrying = 6;
+    // The vendor refused to start ("Claude refused to start: <cause>.").
+    OpenTabsStepVendorRejected vendor_rejected = 7;
+    // The vendor kept failing for the whole retry window ("Claude failed to
+    // start after 10 minutes.").
+    OpenTabsStepVendorFailed vendor_failed = 8;
+    // Resuming waits on the user's answer to the cold gate ("needs your
+    // answer to resume (large context).").
+    OpenTabsStepColdGate cold_gate = 9;
+    // The network is unreachable, so the vendor cannot start yet ("offline,
+    // waiting for the network…").
+    OpenTabsStepOffline offline = 10;
+    // Its session is served by agent-repl's services ("session up, waiting
+    // for its page…"). The vendor's and the network's state never gate this:
+    // a workspace whose vendor is down is served and shows its fault.
+    OpenTabsStepServed served = 11;
+    // Its web page has attached to the daemon and is loading its
+    // conversation ("page connected, drawing the conversation…").
+    OpenTabsStepPageConnected page_connected = 12;
+    // Its web page has drawn its conversation ("page drawn.").
+    OpenTabsStepPageDrawn page_drawn = 13;
+  }
+}
+
+// The shim is being started or adopted.
+message OpenTabsStepStartingSession {}
+
+// The workspace is being woken from sleep.
+message OpenTabsStepWaking {}
+
+// The conversation is being resumed.
+message OpenTabsStepResuming {}
+
+// A vendor start attempt failed and is retried.
+message OpenTabsStepVendorRetrying {
+  // The failed attempt's number, counting from 1.
+  uint32 attempt = 1;
+}
+
+// The vendor refused to start.
+message OpenTabsStepVendorRejected {
+  // Why, in the shim's words. Printed verbatim.
+  string cause = 1;
+}
+
+// The vendor failed for the whole retry window.
+message OpenTabsStepVendorFailed {}
+
+// The cold gate awaits the user's answer.
+message OpenTabsStepColdGate {}
+
+// The network is unreachable.
+message OpenTabsStepOffline {}
+
+// The session is served by agent-repl's services.
+message OpenTabsStepServed {}
+
+// The workspace's web page attached to the daemon.
+message OpenTabsStepPageConnected {}
+
+// The workspace's web page drew its conversation.
+message OpenTabsStepPageDrawn {}
+
+// ---- Opened: the go-ahead to show one tab ----
+
+// One workspace is open.
+//
+// Sent ONCE per workspace of the request, as soon as that workspace is open,
+// in whatever order they open: one workspace's slow start never holds back
+// another's tab. A workspace's tab is placed by the registry's tab order, so
+// the order these arrive in decides only when a tab appears, never where.
+message OpenTabsOpened {
+  // The workspace.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // When it opened, epoch milliseconds.
+  int64 at_ms = 2;
+  // THE ARM IS HOW IT OPENED; exactly one is set.
+  oneof outcome {
+    // Served and drawn: show the tab ("<name>: ready.").
+    OpenTabsOpenedReady ready = 3;
+    // Its service-level start failed; show the tab, which draws the fault
+    // ("<name>: session failed to start: <reason>.").
+    OpenTabsOpenedFailed failed = 4;
+    // Hidden, or in a collapsed repository section: nothing was started, and
+    // its tab stays withheld until it is shown again.
+    OpenTabsOpenedHidden hidden = 5;
+    // The daemon refused to open it; the editor shows no tab and records why.
+    OpenTabsOpenedRefused refused = 6;
+  }
+}
+
+// Served and drawn. DELIBERATELY EMPTY: the arm is the outcome.
+message OpenTabsOpenedReady {}
+
+// The service-level start failed.
+message OpenTabsOpenedFailed {
+  // Why, in the daemon's words. Printed verbatim.
+  string reason = 1;
+}
+
+// Not visible, so nothing was started. DELIBERATELY EMPTY.
+message OpenTabsOpenedHidden {}
+
+// The daemon refused to open the workspace.
+message OpenTabsOpenedRefused {
+  // THE ARM IS THE CAUSE; exactly one is set.
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    OpenTabsRefusedUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    OpenTabsRefusedWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    OpenTabsRefusedTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    OpenTabsRefusedNotYetAdopted not_yet_adopted = 4;
+  }
+}
+
+// The workspace id is not in the daemon's registry. DELIBERATELY EMPTY.
+message OpenTabsRefusedUnknownWorkspace {}
+
+// The echoed dir disagrees with the registry's dir for this id.
+message OpenTabsRefusedWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+
+// This daemon released the workspace to a successor.
+message OpenTabsRefusedTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+
+// A joining daemon has not finished adopting this workspace yet.
+// DELIBERATELY EMPTY.
+message OpenTabsRefusedNotYetAdopted {}
+
+// ---- Finished: the summary line ----
+
+// Every workspace of the request has had its `opened`.
+message OpenTabsFinished {
+  // How many opened `ready`.
+  uint32 ready = 1;
+  // How many workspaces the request named.
+  uint32 total = 2;
+  // The workspaces that opened `failed`, in the request's order ("4 of 5
+  // workspaces ready; ship-gns failed to start.").
+  repeated OpenTabsFailedWorkspace failed = 3;
+}
+
+// A workspace that opened with a service-level failure.
+message OpenTabsFailedWorkspace {
+  // The workspace.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // Its display name, printed verbatim.
+  string name = 2;
+}

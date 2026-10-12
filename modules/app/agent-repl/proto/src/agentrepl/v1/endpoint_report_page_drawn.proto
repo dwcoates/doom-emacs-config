@@ -1,0 +1,66 @@
+// endpoint_report_page_drawn.proto — ReportPageDrawn. PAGE section.
+//
+// A WORKSPACE'S WEB PAGE SAYS ITS CONVERSATION IS ON SCREEN. A workspace is
+// open (OpenTabs) only once its session is served AND its page has drawn its
+// conversation, and only the page knows when it has drawn. The page calls this
+// once its conversation is drawn (the root feed's opening page applied and
+// painted, or a refused open drawn in its place), and AGAIN every time its
+// page stream re-attaches while drawn: a daemon that restarted after the page
+// drew has no other way to learn it, and an open waiting on a page that drew
+// before the daemon came up would otherwise wait forever.
+//
+// The fact belongs to the PAGE (its WatchPage connection): it stands while that
+// connection stands, and the daemon forgets it when the connection ends.
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message ReportPageDrawnRequest {
+  // The workspace the page shows, echoed from its address.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // The page's connection id, as it opened its WatchPage stream with
+  // (WatchPageRequest.page). A blank id is a malformed request (Connect
+  // InvalidArgument).
+  string page = 2;
+}
+
+// THE ARM IS THE OUTCOME.
+message ReportPageDrawnResponse {
+  oneof result {
+    ReportPageDrawnSuccess success = 1;
+    ReportPageDrawnError error = 2;
+  }
+}
+
+// Recorded. DELIBERATELY EMPTY.
+message ReportPageDrawnSuccess {}
+
+// The daemon's refusals. Validation failures (an unset field, a blank id) are
+// Connect InvalidArgument, never an arm.
+message ReportPageDrawnError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    ReportPageDrawnUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    ReportPageDrawnWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // No page stream with this id is attached to this daemon: the report
+    // raced its stream's end, or names a page this daemon never served.
+    ReportPageDrawnUnknownPage unknown_page = 3;
+  }
+}
+
+// The workspace id is not in the daemon's registry. DELIBERATELY EMPTY.
+message ReportPageDrawnUnknownWorkspace {}
+
+// The echoed dir disagrees with the registry's dir for this id.
+message ReportPageDrawnWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+
+// No attached page stream has this id. DELIBERATELY EMPTY.
+message ReportPageDrawnUnknownPage {}
