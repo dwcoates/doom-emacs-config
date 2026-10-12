@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 func newScriptBuilder(t *testing.T, answers map[string]runAnswer) (*ScriptBuilder, *scriptedRunner, *dlog.TestLogger) {
@@ -120,7 +120,7 @@ func TestStagedNamesTheBuildFrontendLayout(t *testing.T) {
 	for got, want := range map[string]string{
 		s.ShimMain():            "/s/agent-shim/claude/shim/dist/main.js",
 		s.WebappDist():          "/s/webapp/dist",
-		s.DaemonBin():           "/s/daemon/bin/claude-repld",
+		s.DaemonBin():           "/s/daemon/bin/agent-repld",
 		s.CacheBin("shim-lock"): "/s/cache-bin/shim-lock",
 	} {
 		if got != want {

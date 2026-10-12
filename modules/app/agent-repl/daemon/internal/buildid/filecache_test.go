@@ -9,7 +9,7 @@ import (
 
 func writeBinary(t *testing.T, dir, body string) string {
 	t.Helper()
-	p := filepath.Join(dir, "claude-repld")
+	p := filepath.Join(dir, "agent-repld")
 	if err := os.WriteFile(p, []byte(body), 0o755); err != nil {
 		t.Fatalf("write %s: %v", p, err)
 	}

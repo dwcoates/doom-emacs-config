@@ -3,10 +3,10 @@ package workspace
 import (
 	"context"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/sessionwatcher"
-	"claude-repld/internal/shimclient"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/sessionwatcher"
+	"agent-repld/internal/shimclient"
 )
 
 // HISTORY IS REPLAYED ONLY WHEN A WORKSPACE IS OPENED OR A TRANSCRIPT IS

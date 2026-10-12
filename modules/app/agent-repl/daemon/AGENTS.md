@@ -84,13 +84,13 @@ Read `ARCHITECTURE.md` first: the package map, the seams, the conventions.
   | --- | --- | --- | --- |
   | `harness.DefaultTimeout` | 5s | ONE wait's failure bound: every `Daemon.waitCtx` child, `harness.AwaitView`, and the per-call contexts the e2e suite derives for a single rpc | ~3x run 8's observed 1.7s max. RE-MEASURED at `-parallel 8`: the suite's slowest test is 2.84s and its p99 leaf is under 1s, so 5s is still ~1.8x the observed max under the concurrency the suite now runs at |
   | the `harness.Daemon` context (`DefaultTimeout * runBudgetWaits`) | 35s | the WHOLE-RUN budget one daemon process's test shares, and the lifetime of every watch stream held across it | **it used to be `DefaultTimeout` itself**, so a test's whole run was as short as its single longest permitted wait, and the LAST call in a test answered `deadline_exceeded` for budget the earlier ones had spent. That is what made `TestHostRequestedStopLeavesNoProcessBehind` fail ~1 in 20 at ~5.09s on the stop -- a step measured at 9ms p50 and 15ms max across 104 runs. Sized as five `DefaultTimeout` waits (25s) plus one `drain.DefaultStandBound` stand-down (6s, now 7s) = 31s (32s), rounded up to the next whole multiple (7 x 5s = 35s); it is a MULTIPLE so an `Opts.Timeout` override widens the run in the same proportion it widens the wait |
-  | `harness.HandoverChainTimeout` (`Opts.Timeout`) | 15s wait bound (3x default), 90s run budget | the handful of tests whose ONE daemon context must span an entire self-reload handover — a merge landing, the rollout trigger, a SECOND real `claude-repld`'s full boot and adoption, and the incumbent's orderly exit, all on the incumbent's own budget rather than a fresh one | structurally two real process lifecycles sharing one budget, not one; run 8 already saw this chain finish inside 1.7s, so 15s is headroom, not a measured need |
+  | `harness.HandoverChainTimeout` (`Opts.Timeout`) | 15s wait bound (3x default), 90s run budget | the handful of tests whose ONE daemon context must span an entire self-reload handover — a merge landing, the rollout trigger, a SECOND real `agent-repld`'s full boot and adoption, and the incumbent's orderly exit, all on the incumbent's own budget rather than a fresh one | structurally two real process lifecycles sharing one budget, not one; run 8 already saw this chain finish inside 1.7s, so 15s is headroom, not a measured need |
   | `harness.MergeChainTimeout` (`Opts.Timeout`) | 15s wait bound (3x default), 105s run budget | every daemon that runs a merge's test gate (`AGENT_REPL_TEST_ALL_SCRIPT`) outside a handover: `mergeCleanRepo` and its siblings in `merge_test.go`, and `create_test.go`'s parent-target merge | one wait spans the WHOLE merge, a sequential chain of 36-52 subprocesses (fake git per call, plus the gate script), so its cost scales with process-spawn latency. MEASURED 2026-10-06 from the daemon logs, `-test.parallel=1 GOMAXPROCS=2` chunks: ~0.1s unloaded; 2.82s max under 24 chunks + `with-cpu-load.sh 24`; 4.22s passing max under 48 chunks + `with-cpu-load.sh 32`, where 16 runs were cut at 5s while still advancing (no record gap over 1.54s, target fast-forwarded at +3.9-4.95s). A bound under the healthy chain, not a stall; 15s is ~3.5x the passing max |
   | `harness.ClaimRefusalTimeout` (`Opts.Timeout`) | `daemonaddr.ClaimWaitBound` + 5s (17.32s) | a second daemon that refuses to boot beside a SERVING incumbent (`TestSecondDaemonOnTheSameStateRootRefusesToBoot`) | the refusal is decided only once the claim wait expires, and that wait (12.32s) must outlast the incumbent's merge drain including its wait for a merge's git in flight (`merge.MergeGitStopBound`), so the exit lands one DefaultTimeout after it |
   | `harness.ProbeWindow` | 500ms | `harness.ExpectNoPush`, `harness.Daemon.ExpectFileUnchanged` | negative assertions that must wait out a bound rather than an event, so unlike every other row here it is paid IN FULL on a green run, at 27 sites. MEASURED BASIS (`AwaitView` arrival times over the whole suite at `-parallel 8`, 472 samples): p50 0.4ms, p90 5.8ms, p95 47ms, p97 99ms, max 294ms. The 294ms is `commandfile_test.go`'s ingress, which the daemon polls every 250ms and which is itself one of the negative-probe sites; the only slower arrivals in the run were the two gated by the footer's own 1.5s dwell. 500ms is ~1.7x that measured maximum, so it is NOT shrinkable on this evidence — shortening it would make the command-file and handover probes report "nothing came" about a push that was still on its way |
   | `shortTimeout` (integration/support_session_test.go) | 200ms | `TestSessionSurvivesADaemonRestart`-style old-PID-gone probes | a structural "is it already true" check that should fail fast rather than ride the whole test's deadline |
   | inline `context.WithTimeout` (drain_rollout_test.go, the drain-schedule-survives-a-restart test) | 2s | asserting the drain banner does NOT reappear after a restart | an expected-to-time-out negative probe, deliberately tighter than `DefaultTimeout` |
-  | `loopJoinBound` (cmd/claude-repld/run.go) | 2s | the orderly exit's wait for the background loops, and for the prompt queue's own goroutines, to leave their cancelled serving context | NOT a shutdown budget: every loop is a ticker whose iteration is itself bounded, so this covers one in-flight iteration finishing. An overrun is reported at ERROR and the teardown proceeds, because an unbounded wait is a daemon that does not exit |
+  | `loopJoinBound` (cmd/agent-repld/run.go) | 2s | the orderly exit's wait for the background loops, and for the prompt queue's own goroutines, to leave their cancelled serving context | NOT a shutdown budget: every loop is a ticker whose iteration is itself bounded, so this covers one in-flight iteration finishing. An overrun is reported at ERROR and the teardown proceeds, because an unbounded wait is a daemon that does not exit |
 
   A wait that needs longer than `DefaultTimeout` gets one of the rows above —
   never a bigger default. And a wait's bound is never the run's: `Daemon.Ctx()`
@@ -106,12 +106,12 @@ Read `ARCHITECTURE.md` first: the package map, the seams, the conventions.
   | --- | --- | --- | --- |
   | `footer.DefaultMomentaryDwell` | 1500ms | `--footer-momentary-dwell`, `AGENT_REPL_FOOTER_MOMENTARY_DWELL` (the environment beats the flag; a malformed or non-positive value is REFUSED, never ignored), `harness.Opts.FooterMomentaryDwell` | the window is sized for a PERSON to read a momentary status, so it is a real product window and not a bound to be tightened. The two tests whose subject is its RETIREMENT read no clock, so they run the daemon at 150ms — ~25x the measured p90 push arrival, wide enough that the status and its successor stay two separately observed pushes — and cost 0.39s each instead of 1.74s |
   | `boot.DefaultAdoptBound` | 10s | `AGENT_REPL_BOOT_ADOPT_BOUND` (malformed or non-positive is REFUSED, never ignored), the suite runs it at 300ms | THE BOUND THAT KEEPS THE DAEMON SERVING AT ALL. The listener is bound and daemon.addr published at boot steps 5 and 6 and `http.Server.Serve` is not reached until the reconciliation has finished, so every instant one workspace's adoption spends is an instant the kernel is queueing connections onto a socket nobody accepts on. `shimclient.bringUp` redials a shim whose lock reads HELD forever — correctly, a held flock is a living process — so a survivor whose socket path is gone never resolves: pid 31984 listened for TEN HOURS with its accept queue at 128/128. A healthy adoption is a local AF_UNIX connect (itself bounded by `shimsocket.DialTimeout`, 2s) plus the shim's first pushed diagnostics frame, so 10s is ~5x one bounded connect. An overrun is ERROR and the workspace is UNDETERMINED — neither adopted nor orphan-closed — and the boot goes on |
-  | `bootStallBound` (cmd/claude-repld/run.go) | 90s | `hooks.BootStall` | the LAST RESORT on the WHOLE reconciliation, for a step whose own bound somebody forgot. Its expiry dumps every goroutine into the run log at ERROR and ends the process, because Emacs respawns a daemon that exited and cannot tell one that is listening and dead from a healthy one. Sized above the worst LEGITIMATE boot: a handful of workspaces adopted serially at `boot.DefaultAdoptBound` apiece plus the manifest, the holds, the orphan closes and the merge recovery, all local sqlite work in milliseconds. Never paid on a healthy boot |
+  | `bootStallBound` (cmd/agent-repld/run.go) | 90s | `hooks.BootStall` | the LAST RESORT on the WHOLE reconciliation, for a step whose own bound somebody forgot. Its expiry dumps every goroutine into the run log at ERROR and ends the process, because Emacs respawns a daemon that exited and cannot tell one that is listening and dead from a healthy one. Sized above the worst LEGITIMATE boot: a handful of workspaces adopted serially at `boot.DefaultAdoptBound` apiece plus the manifest, the holds, the orphan closes and the merge recovery, all local sqlite work in milliseconds. Never paid on a healthy boot |
   | `workspace.DefaultStartSessionBound` | 60s | `AGENT_REPL_START_SESSION_BOUND` (malformed or non-positive is REFUSED, never ignored), the integration suite runs it short | ONE `StartSession` call, and the LAST step of the bring-up that had no bound at all: the dial ladder is bounded, an adoption is bounded by `boot.DefaultAdoptBound`, and then the rpc that actually starts the session could take forever -- holding the workspace's START GATE, and so every other route to starting that workspace, with it. MEASURED, realtest run 2026-09-13T16:20:34: workspace `2b81f45a724642ef`'s shim accepted the start, logged `shim.convert.hooks: a hook blocked the gated action` on `SessionStart:resume`, and never answered; three daemon generations sat in that call for 35s, 3m30s and 8m30s, each ended only by the NEXT deploy's SIGTERM. It is a PRODUCT window, not a bound on the daemon's own work -- what it covers is the shim's vendor resume plus whatever `SessionStart` hooks the user configured, which are arbitrary commands -- so it is sized the way the adopt bound is: every healthy bring-up in that same run (spawn, ready, StartSession and the watcher, end to end) ran 116ms, 245ms and 254ms, and 60s is ~240x the slowest of them. An overrun is ERROR naming the unanswered call, and the bring-up fails rather than waiting |
   | `server.acceptBackoffFloor` / `acceptBackoffCeiling` | 5ms doubling to 1s | none | how long `server.RetryAccept` waits between retries of a TRANSIENT accept failure (EMFILE, ENFILE, ENOBUFS, ENOMEM, ECONNABORTED, ECONNRESET, EINTR, EAGAIN — named explicitly, never read off the deprecated `net.Error.Temporary`). Nothing waits here unless Accept actually failed; what the ceiling covers is descriptor exhaustion, where retrying at full speed spins a core and writes a record per attempt without making a descriptor available. `net.ErrClosed` is the daemon's OWN shutdown closing the listener: DEBUG and returned, never an ERROR against a clean exit |
 | `drain.HibernateRetryCeiling` | one sweep cadence doubling per consecutive failure, capped at 1h | none | how long the idle sweep waits before asking a workspace whose hibernation FAILED (a failed or unreadable directive, a warned refusal, a failed stand-down or record) again. An ordinary deferral (lease held, turn in flight, session gone) is not backed off and resets it. Before it, a failure was retried on every pass forever, and the pass cadence is the idle cutoff when that is shorter than 5m: an orphaned integration daemon at a 50ms cutoff re-ran the directive, the lease round trip, the host republish and an ERROR twenty times a second |
-| `stateRootCheckEvery` / `stateRootCheckCeiling` (cmd/claude-repld/rootwatch.go) | 1s; a check that cannot tell backs off doubling to 1m | `hooks.StateCheckEvery` | how often a SERVING daemon verifies what it owns on disk (`daemonaddr.Claim.Verify`): the state root is the directory it bound in, `daemon.lock` is the inode its flock holds, and `daemon.addr` (while published) names its address. A loss is ERROR `daemon.cmd.state_root` naming what vanished, the serving lifetime ends, and the process exits non-zero with `stood down: <loss>`. A daemon whose root is deleted otherwise serves on forever, and a second daemon booting on a recreated root takes a `daemon.lock` inode the first one's flock does not conflict with. The integration suite measures the exit at ~1.1s |
-| `rootLossShimStopBound` (cmd/claude-repld/shimstop.go) | `drain.DefaultStandBound`, per forced stop | none | on a STATE-ROOT-LOSS stand-down ONLY (`standDownReason` `standDownStateRootLost`), the daemon force-stops every shim it supervises before exiting: each held session through `Fleet.KillSession(force)` (walked from `Fleet.Workspaces`, the in-memory map, never the store), then `Supervisor.StandDownEverySpawn` for spawns still in flight, the latch raised first; each stop gets this bound. Nothing can adopt a shim whose root is gone, because adoption goes through the store and state under that root. The outcome is INFO `daemon.cmd.state_root` with `stopped`, or ERROR naming every shim that would not stop. An orderly exit (`standDownOrderly`: drain deadline, signal) and a handover (`standDownHandover`) leave the shims for adoption, unchanged. The integration suite holds the fakeshim's kernel exit event inside 200ms of the daemon's exit |
+| `stateRootCheckEvery` / `stateRootCheckCeiling` (cmd/agent-repld/rootwatch.go) | 1s; a check that cannot tell backs off doubling to 1m | `hooks.StateCheckEvery` | how often a SERVING daemon verifies what it owns on disk (`daemonaddr.Claim.Verify`): the state root is the directory it bound in, `daemon.lock` is the inode its flock holds, and `daemon.addr` (while published) names its address. A loss is ERROR `daemon.cmd.state_root` naming what vanished, the serving lifetime ends, and the process exits non-zero with `stood down: <loss>`. A daemon whose root is deleted otherwise serves on forever, and a second daemon booting on a recreated root takes a `daemon.lock` inode the first one's flock does not conflict with. The integration suite measures the exit at ~1.1s |
+| `rootLossShimStopBound` (cmd/agent-repld/shimstop.go) | `drain.DefaultStandBound`, per forced stop | none | on a STATE-ROOT-LOSS stand-down ONLY (`standDownReason` `standDownStateRootLost`), the daemon force-stops every shim it supervises before exiting: each held session through `Fleet.KillSession(force)` (walked from `Fleet.Workspaces`, the in-memory map, never the store), then `Supervisor.StandDownEverySpawn` for spawns still in flight, the latch raised first; each stop gets this bound. Nothing can adopt a shim whose root is gone, because adoption goes through the store and state under that root. The outcome is INFO `daemon.cmd.state_root` with `stopped`, or ERROR naming every shim that would not stop. An orderly exit (`standDownOrderly`: drain deadline, signal) and a handover (`standDownHandover`) leave the shims for adoption, unchanged. The integration suite holds the fakeshim's kernel exit event inside 200ms of the daemon's exit |
 | `rollout.advertiseRefusedBound` | ERROR once after 30s | none | a SUCCESSOR waits for the boot claim in the KERNEL (`daemonaddr.Claim.AwaitBootClaim`, a blocking flock), never on a poll, and writes `daemon.addr` the moment the incumbent's exit releases it; a claim still held after the bound is said once at ERROR and the wait goes on. A failed wait or a failed write under the held claim is ERROR and is not retried; the wait ends with the serving lifetime |
 | takeover-settled latch (`rollout.awaitTakeoverSettled`) | none: a latch, never a delay | the caller's | a HANDOVER waits before it plans anything until this daemon's own takeover has settled: `becomeIncumbent` ran and every adoption and session bring-up it started finished. A daemon that never joined is born settled. Planned beside a takeover bring-up, a handover moved a workspace the bring-up then claimed, and two daemons served it |
 
@@ -130,7 +130,7 @@ final frames. Both beliefs have been in this tree and both cost a run.
 | `server.barrierSettle` | 1ms | how long the barrier lets pass with no write completing before it calls a connection quiet. NOT a delay: the loop ends on the condition and the ordinary case spends two of these. What it covers is one `write(2)` of a few dozen bytes onto a unix or loopback socket by an already-runnable goroutine — microseconds — so it is three orders of magnitude over the work |
 | `server.answerWriteBound` | 250ms | how long ONE answer has to reach the socket after its handler's goroutine has finished with it. A last resort, deliberately well under the exit's own 2s grace so a single stuck answer cannot spend all of it |
 | `fakeshim.killAnswerWriteBound` | 250ms | the same last resort on the fake's `KillSession` exit, far under the daemon's stand-down window so an overrun reads as a fake that took a moment rather than one that hung |
-| `writesQuietBound` (cmd/claude-repld/run.go) | 250ms | how long the exit gives the CONNECTIONS to stop writing once every counted call has been answered. `Serving.counted` skips `standingStreamPaths` on purpose, so `AwaitQuiet` sees nothing in flight while the daemon's LAST PUSH — `DaemonShutdownAnnounced`, sent on every WatchDaemon stream one line before `drain.fire` calls Exit — is still on its way to the socket. Same sizing and same last-resort role as `answerWriteBound`: the barrier ends on quiescence, so the ordinary exit spends about two `barrierSettle` ticks here |
+| `writesQuietBound` (cmd/agent-repld/run.go) | 250ms | how long the exit gives the CONNECTIONS to stop writing once every counted call has been answered. `Serving.counted` skips `standingStreamPaths` on purpose, so `AwaitQuiet` sees nothing in flight while the daemon's LAST PUSH — `DaemonShutdownAnnounced`, sent on every WatchDaemon stream one line before `drain.fire` calls Exit — is still on its way to the socket. Same sizing and same last-resort role as `answerWriteBound`: the barrier ends on quiescence, so the ordinary exit spends about two `barrierSettle` ticks here |
 
 The barrier settles true on quiet OR on a connection that is still writing past
 the mark — one h2 connection multiplexes the standing pushes with the unary
@@ -142,7 +142,7 @@ all was written since the mark.
 
 No client stream ends without an end frame, on ANY exit path: a handover's
 last transfer, a layout restart's stand-down, a drain, a signal, a state-root
-loss. `serve` (cmd/claude-repld/run.go), once the owed answers
+loss. `serve` (cmd/agent-repld/run.go), once the owed answers
 (`AwaitQuiet`) and the last pushes (`AwaitWritesQuiet`) have left, calls
 `Serving.EndStreams` with the surface's `Close` (idempotent), which ends every
 `WatchHostWorkspace`, `WatchWorkspaceRoster`, `WatchDaemon`, `WatchPage` and
@@ -162,7 +162,7 @@ and h2c through a real exit.
 
 | window | value | why |
 | --- | --- | --- |
-| `streamsEndBound` (cmd/claude-repld/run.go) | 500ms | contains one `server.answerWriteBound` (250ms, one end frame's write) plus as much again for the handlers to leave, each of which selects on the lifetime `Close` cancels. An overrun is ERROR `daemon.server.await_streams_ended` naming how many streams were left open |
+| `streamsEndBound` (cmd/agent-repld/run.go) | 500ms | contains one `server.answerWriteBound` (250ms, one end frame's write) plus as much again for the handlers to leave, each of which selects on the lifetime `Close` cancels. An overrun is ERROR `daemon.server.await_streams_ended` naming how many streams were left open |
 
 The end frame is Connect's plain end-of-stream. `WatchHostWorkspace`,
 `WatchDaemon` and `WatchWorkspaceRoster` carry one more frame BEFORE it: the
@@ -196,7 +196,7 @@ length must not be sent at all.
 
 ## Command line (binding spellings; Go's flag package accepts one or two dashes)
 
-Emacs launches `daemon/bin/claude-repld` with NO argv — state comes from the
+Emacs launches `daemon/bin/agent-repld` with NO argv — state comes from the
 environment. Every flag is optional.
 
 | flag | meaning | default |
@@ -221,7 +221,7 @@ environment. Every flag is optional.
 | `--migration-kind-from=N` | print whether the migration steps from layout N to this binary's own are `additive` or `breaking` (`wsm.ChainKind`) and exit, opening nothing; exit 1 with the reason on stderr when no chain reaches this layout; a deploy asks it of the STAGED binary | unset |
 | `--replacing` | this daemon replaces an incumbent restarting across a state layout change: it waits `rollout.ReplacementClaimWait` (1m) for the boot claim instead of `daemonaddr.ClaimWaitBound`; exclusive with `--joining` | off |
 
-## Run and boot order (binding; `cmd/claude-repld`)
+## Run and boot order (binding; `cmd/agent-repld`)
 
 `run` performs exactly this sequence, and every step's failure is fatal:
 
@@ -535,7 +535,7 @@ held-prompt ingress: ARCHITECTURE.md "heldingress"), `merge-logs/`.
 
 ## Wiring (wave 3: the graph is complete)
 
-`cmd/claude-repld`'s `buildGraph` builds every component and returns the
+`cmd/agent-repld`'s `buildGraph` builds every component and returns the
 server's and the boot sequence's dependencies, the LATE BINDINGS and the
 background loops. `graph.go`'s `unwired` list is EMPTY: every Deps field has a
 landed producer. The list stays so a future dependency with no producer is
@@ -543,7 +543,7 @@ declared there and fails the boot loudly, naming it, rather than being filled
 with a stand-in at the composition root.
 
 Two edges point backwards and are closed with FORWARDERS in
-`cmd/claude-repld/forward.go`, bound by `run` immediately after `server.New`
+`cmd/agent-repld/forward.go`, bound by `run` immediately after `server.New`
 and before anything is served: the rollout's and the drain's pushes
 (`WorkspacePusher`, `ParticipantSource`, the announcers) and the workspace
 verbs' `HostRelay` (`srv.Relay()`). The background loops — the drain sweep and the command-file ingress —
@@ -974,7 +974,7 @@ stamped frame keeps the WARN `daemon.feed.subagent_without_start`.
 ## Deploy (`internal/deploy`, `internal/buildid`)
 
 THE DAEMON OWNS DEPLOYS; there is no deploy script. `Deploy{force}` (and the
-`claude-repld deploy [-force]` verb and Emacs's `agent-repl-deploy`, both thin
+`agent-repld deploy [-force]` verb and Emacs's `agent-repl-deploy`, both thin
 callers of it) and a self-merge landing (`merge.Trigger.Landed`, ONCE per
 landing however many commits it carries) run `deploy.Deployer.Deploy`:
 
@@ -1251,9 +1251,9 @@ Owner rulings, 2026-10-11 (`internal/merge/chain.go`, `internal/cpugov`).
   resume, a speculative step (`progressDoc.Speculative`) finished as such
   whatever the merge's place now is.
 
-## `claude-repld merge-queue` is how an agent asks for a merge
+## `agent-repld merge-queue` is how an agent asks for a merge
 
-`cmd/claude-repld/mergequeueverb.go`, the merge-queue skill's one tool
+`cmd/agent-repld/mergequeueverb.go`, the merge-queue skill's one tool
 (`.claude/skills/merge-queue/SKILL.md`). It decides nothing and never runs git.
 
 - The REQUESTER is the calling workspace: the roster row whose worktree holds
@@ -1575,9 +1575,9 @@ whenever it can be: an additive step that adds the new shape beside the old
 (the code writes both and reads the new), then, once no running build reads the
 old shape, the breaking step that drops it. Only the second is a restart.
 
-The deploy asks the STAGED daemon binary its layout (`claude-repld
+The deploy asks the STAGED daemon binary its layout (`agent-repld
 -layout-version`, `deploy.BinaryLayout`), and when it differs from the running
-one, what the steps between them are (`claude-repld -migration-kind-from=N`,
+one, what the steps between them are (`agent-repld -migration-kind-from=N`,
 `deploy.BinaryMigrationKind`, answering `additive` or `breaking` from
 `wsm.ChainKind`). A binary that cannot answer either question is refused at
 ERROR: nothing is handed over or restarted on a guess.
@@ -1631,7 +1631,7 @@ The `Deploy` rpc answers this decision with the daemon's
 `DeployComponentOutcome.restarting` arm (`DeployRestarting`: the running and
 fresh state layouts, the workspaces standing down, how many were busy, and
 whether it is forced); equal or negative layouts are refused as a decision the
-arm cannot state. `claude-repld deploy` prints it as
+arm cannot state. `agent-repld deploy` prints it as
 `daemon build=… restarting layout=N→M workspaces=W busy=B forced=F`.
 
 OPEN CONTRACT QUESTION: the announcement reuses `self_merge_rollout` with the
@@ -2291,7 +2291,7 @@ Owner ruling, 2026-10-06 (`internal/promptqueue/vendorblock.go`,
   `SubmitSessionAct` are not held by it.
 - **THE RELEASE EDGE** is the footer mutation in which the block stops
   standing (`footer.WithVendorServes`, bound through
-  `cmd/claude-repld`'s `vendorServesForwarder` to `Queue.OnVendorServes`,
+  `cmd/agent-repld`'s `vendorServesForwarder` to `Queue.OnVendorServes`,
   which runs off the caller's goroutine and is joined by `Drain`): a session
   (re)start, a rate-limit verdict that is not rejected, a new turn opening, the
   retried call answered, the retried turn ending. A session coming up

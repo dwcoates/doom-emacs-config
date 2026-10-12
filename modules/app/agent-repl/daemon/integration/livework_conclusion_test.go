@@ -7,7 +7,7 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"claude-repld/integration/harness"
+	"agent-repld/integration/harness"
 )
 
 // TestAHungShellsConclusionFreesTheWorkspace is the 2026-09-27 wedge

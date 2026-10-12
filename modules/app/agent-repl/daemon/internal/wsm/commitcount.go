@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // THE BRANCH'S COMMIT COUNT, as the roster's detail panel states it

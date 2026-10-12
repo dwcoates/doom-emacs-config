@@ -7,7 +7,7 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // replayedPage is a resumed session's opening catch-up page carrying one prior

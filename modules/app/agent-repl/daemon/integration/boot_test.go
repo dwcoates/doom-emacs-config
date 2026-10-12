@@ -17,8 +17,8 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
-	"claude-repld/integration/harness"
-	"claude-repld/internal/rollout"
+	"agent-repld/integration/harness"
+	"agent-repld/internal/rollout"
 
 	"connectrpc.com/connect"
 )
@@ -445,7 +445,7 @@ func TestBootRefusesAForeignLayoutVersion(t *testing.T) {
 }
 
 // TestBootRefusesACorruptTaskRow pins that a corrupt row of `tasks` fails the
-// boot, not just an rpc: cmd/claude-repld/run.go's Prime step runs
+// boot, not just an rpc: cmd/agent-repld/run.go's Prime step runs
 // verbs.PublishRegistry BEFORE the server ever serves (internal/workspace/
 // register.go: "a daemon that has just booted... would leave
 // WatchWorkspaceRoster with no value to deliver"), and PublishRegistry reads
@@ -606,7 +606,7 @@ func TestBootRefusesACorruptCreationJobOfAnAdmittedMerge(t *testing.T) {
 
 // TestBootRefusesAStateRootTooLongForShimSockets pins
 // internal/stateroot/stateroot.go's CheckSocketPathBudget, invoked at boot
-// (cmd/claude-repld/run.go) before any dependency is built. The harness's
+// (cmd/agent-repld/run.go) before any dependency is built. The harness's
 // own requireSocketPathBudget would fatal the TEST (not just the daemon)
 // before ever spawning it if the state root named by Opts.StateDir were the
 // long one, so the long path is smuggled in as a SECOND --state-dir via

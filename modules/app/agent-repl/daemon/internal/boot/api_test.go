@@ -5,9 +5,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/sessionlock"
-	"claude-repld/internal/shimsocket"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/sessionlock"
+	"agent-repld/internal/shimsocket"
 )
 
 // TestProbeWorkspaceLockRecordsAnOrdinaryProbe pins that the production probe

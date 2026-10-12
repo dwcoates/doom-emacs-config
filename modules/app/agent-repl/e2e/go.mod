@@ -7,7 +7,7 @@ require (
 	agentrepl/proto v0.0.0
 	agentrepl/protohelpers v0.0.0
 	agentrepl/testrun v0.0.0
-	claude-repld v0.0.0-00010101000000-000000000000
+	agent-repld v0.0.0-00010101000000-000000000000
 	connectrpc.com/connect v1.17.0
 	golang.org/x/net v0.43.0
 	google.golang.org/protobuf v1.36.11
@@ -28,7 +28,7 @@ require (
 	modernc.org/memory v1.11.0 // indirect
 )
 
-replace claude-repld => ../daemon
+replace agent-repld => ../daemon
 
 replace agentrepl/proto => ../proto/gen/go
 

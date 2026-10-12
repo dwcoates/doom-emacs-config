@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/wsm"
 )
 
 // TestARestartOverASuspendedMergesLeaseRelaunches pins the 2026-10-08 fix: a

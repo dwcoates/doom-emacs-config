@@ -45,7 +45,7 @@ import (
 
 	"connectrpc.com/connect"
 
-	"claude-repld/integration/harness"
+	"agent-repld/integration/harness"
 )
 
 // expectedSkillDocument reproduces, byte for byte, the DOCUMENT body the real
@@ -142,7 +142,7 @@ func runSkillScenarioCase(t *testing.T, tc skillScenarioCase) {
 
 	// Arrange: one real daemon+store+sidecar+shim world, one fake-git
 	// repository registered as the workspace. Only the systems this suite
-	// owns (claude-repld, the shim, shim-store, shim-sidecar) run for real;
+	// owns (agent-repld, the shim, shim-store, shim-sidecar) run for real;
 	// git is an external dependency and stays mocked via the daemon
 	// harness's own scripted fakegit world, exactly as daemon/integration's
 	// own tests register a workspace (harness.NewRepo + harness.Register).

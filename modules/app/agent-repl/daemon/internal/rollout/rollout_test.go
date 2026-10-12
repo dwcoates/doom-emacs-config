@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"claude-repld/internal/ids"
-	"claude-repld/internal/sessionlock"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/sessionlock"
 )
 
 func TestHandOverIsRefusedOnASuccessorThatIsStillJoining(t *testing.T) {

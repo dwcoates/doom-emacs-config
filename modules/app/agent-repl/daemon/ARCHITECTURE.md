@@ -16,7 +16,7 @@ reference only: `internal/workspace/merge/` (git edge cases),
 
 ## Module and toolchain
 
-- Module `claude-repld` at `daemon/`, Go 1.24 toolchain (`go 1.23` in
+- Module `agent-repld` at `daemon/`, Go 1.24 toolchain (`go 1.23` in
   go.mod is fine). Dependencies: `connectrpc.com/connect`,
   `golang.org/x/net/http2` (+ `h2c`), `modernc.org/sqlite`,
   `github.com/google/uuid`, `github.com/creack/pty` (login pty),
@@ -35,7 +35,7 @@ reference only: `internal/workspace/merge/` (git edge cases),
 
 ```
 daemon/
-  cmd/claude-repld/main.go        boot only: flags, env contracts, pprof (before deps), log
+  cmd/agent-repld/main.go        boot only: flags, env contracts, pprof (before deps), log
                                   surfaces, state root, addr claim + daemon.addr, WSM open,
                                   joining mode, wire the graph, serve, orderly exit
   internal/
@@ -604,7 +604,7 @@ UpdateAgent.stop / StopBash; all_agents → fan-wide), `AnswerPermission`,
   FeedIds from (workspace, a per-workspace monotonically increasing
   synthesized sequence) so re-pushes upsert. Roster `closed = true` on
   merged, closed AND killed rows; a nuked row leaves the roster. Emacs
-  launches `daemon/bin/claude-repld` with NO argv (state via env); the
+  launches `daemon/bin/agent-repld` with NO argv (state via env); the
   joining successor is spawned with `-joining <incumbent address>`
   (documented in daemon/AGENTS.md).
 - RULINGS (project lead landing, 2026-08-29):
@@ -697,8 +697,8 @@ generated arms when the landing merges (one place each):
   `bin/build-frontend.sh --out`, judges staleness by content hash, installs,
   and restarts what is out of date (`internal/deploy`; daemon/AGENTS.md
   "Deploy").
-- `build-frontend.sh` without `--out` builds `daemon/bin/claude-repld` from
-  `./cmd/claude-repld` for Emacs's cold start.
+- `build-frontend.sh` without `--out` builds `daemon/bin/agent-repld` from
+  `./cmd/agent-repld` for Emacs's cold start.
 - `agent-shim/wire` is deleted with the rewrite (nothing in the daemon
   imports it) and its `bin/test-all.sh` roster entry dropped.
 

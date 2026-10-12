@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"claude-repld/internal/gitclient"
+	"agent-repld/internal/gitclient"
 )
 
 // TestLandedCount covers the count a landed merge stamps: the commits its

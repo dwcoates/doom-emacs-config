@@ -6,8 +6,8 @@ import (
 	"sync"
 	"testing"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
 )
 
 // fakeBackend records each posted banner and its target, and answers a

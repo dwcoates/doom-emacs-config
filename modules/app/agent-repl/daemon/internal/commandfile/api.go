@@ -13,13 +13,13 @@ import (
 	"path/filepath"
 	"time"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/intakegate"
-	"claude-repld/internal/merge"
-	"claude-repld/internal/prompthandler"
-	"claude-repld/internal/retarget"
-	"claude-repld/internal/workspace"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/intakegate"
+	"agent-repld/internal/merge"
+	"agent-repld/internal/prompthandler"
+	"agent-repld/internal/retarget"
+	"agent-repld/internal/workspace"
+	"agent-repld/internal/wsm"
 )
 
 // Ingress watches the output directory and applies what it finds.

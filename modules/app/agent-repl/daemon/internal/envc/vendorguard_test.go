@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"claude-repld/internal/envc"
+	"agent-repld/internal/envc"
 )
 
 func TestVendorGuardCheckPermitted(t *testing.T) {

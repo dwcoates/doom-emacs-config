@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"claude-repld/internal/headless"
+	"agent-repld/internal/headless"
 )
 
 // TestNewBuildsTheVendorJudge pins that the production constructor hands back

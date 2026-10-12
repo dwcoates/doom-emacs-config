@@ -9,7 +9,7 @@ import (
 	"syscall"
 	"testing"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // TestResolveRunDirHonorsEnvOverride asserts the test override wins over the

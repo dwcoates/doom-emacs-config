@@ -456,7 +456,7 @@ These are not host-natured; elisp is the plumbing that reaches them.
   merged); the daemon sets `closed = true` on merged/closed/killed rows.
 - Cold start (ruled): Emacs adopts any daemon that answers DaemonHealth
   (healthy or unhealthy), never kills one, and only builds + starts
-  `daemon/bin/claude-repld` (no required argv; state root via the env) when
+  `daemon/bin/agent-repld` (no required argv; state root via the env) when
   daemon.addr is absent or answers nothing. Everything after boot is the
   daemon's own blue-green.
 - No permission-answering surface in Emacs (permission.el dies; the

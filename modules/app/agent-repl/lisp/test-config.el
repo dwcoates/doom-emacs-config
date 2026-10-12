@@ -31,7 +31,7 @@
 ;; test-helpers.el had installed — for the rest of the batch session, and
 ;; therefore for every test file the aggregate loads after this one.  That is
 ;; how `agent-repl-test-daemon-stop-deletes-and-clears' came to HTTP-GET the
-;; developer's real `claude-repld'.  The guards are re-armed below regardless,
+;; developer's real `agent-repld'.  The guards are re-armed below regardless,
 ;; since `config.el' itself defines the `--early-git-string' wrapper.
 ;;
 ;; The elisp build record is BOUND around the load: config.el resets it (as

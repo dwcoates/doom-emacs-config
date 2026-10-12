@@ -7,10 +7,10 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"claude-repld/internal/bounce"
-	"claude-repld/internal/classifier"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/bounce"
+	"agent-repld/internal/classifier"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
 )
 
 // sealedBusyMove starts a dispatch-quiet move over a running turn and

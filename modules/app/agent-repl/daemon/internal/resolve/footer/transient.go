@@ -8,9 +8,9 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/protoarm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/protoarm"
 )
 
 // THE TRANSIENT TIER (owner rulings, 2026-09-28 and 2026-09-30; footer.proto

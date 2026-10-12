@@ -3,10 +3,10 @@ package sidebar
 import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/protoarm"
-	"claude-repld/internal/resolve/ladder"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/protoarm"
+	"agent-repld/internal/resolve/ladder"
+	"agent-repld/internal/wsm"
 )
 
 // statusArm resolves the row's status arm by PROJECTING THE FOOTER'S STATUS.

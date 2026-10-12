@@ -21,7 +21,7 @@ so a swap needs a stored place and a daemon rpc to exchange two of them.
   among siblings is place order; creating a workspace assigns a place derived
   from its priority, and re-opening one moves it after every other place; setting a priority later does not move the
   workspace.
-- **Reopens:** `claude-repld.internal.resolve.sidebar.lessWorkspace()`'s
+- **Reopens:** `agent-repld.internal.resolve.sidebar.lessWorkspace()`'s
   priority-then-name order, and the `SetWorkspacePriority` comment "the roster
   orders by it".
 - **Does not claim:** that priority is retired; it still draws its badge and

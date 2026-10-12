@@ -8,7 +8,7 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"claude-repld/integration/harness"
+	"agent-repld/integration/harness"
 )
 
 // TestARefusedMidWorkAdoptionAnswersTheHostTransferDeferred pins the wire half

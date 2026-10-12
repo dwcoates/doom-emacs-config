@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"strings"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/health"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/health"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
 )
 
 // RequestCommandSupport answers the add-support offer on an unsupported slash

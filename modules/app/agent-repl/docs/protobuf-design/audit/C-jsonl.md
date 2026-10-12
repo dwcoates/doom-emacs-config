@@ -177,7 +177,7 @@ Distinct collapsed key paths (dynamic map keys folded to `{file}`/`{question}`):
 | `attachment.skills[].content` | 317 | str | Base directory for this skill: /Users/dodgecoates/.claude/skills/structural-inva… / Base directory for this sk |
 | `attachment.skills[].name` | 317 | str | structural-invariants / debug-emacs-agent-repl |
 | `attachment.skills[].path` | 317 | str | userSettings:structural-invariants / userSettings:debug-emacs-agent-repl |
-| `attachment.snippet` | 825 | str | 1	;;; frontend-client.el --- HTTP session client for the claude-repld daemon -*-… / 1	# Agents \n2	\n3	Always  |
+| `attachment.snippet` | 825 | str | 1	;;; frontend-client.el --- HTTP session client for the agent-repld daemon -*-… / 1	# Agents \n2	\n3	Always  |
 | `attachment.source_uuid` | 28 | str | ebe707f6-d286-4c8c-b5c7-a1e9fe674f60 / f7c156e3-395a-421d-a37b-65bcc209e48d |
 | `attachment.status` | 48 | str | running / failed |
 | `attachment.stderr` | 148108 | str |  / Failed to run: Hook "powershell -NoProfile -ExecutionPolicy Bypass -File ${CLAUD… |

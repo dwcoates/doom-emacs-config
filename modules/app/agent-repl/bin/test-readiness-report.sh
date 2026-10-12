@@ -398,10 +398,10 @@ t_proto_review_artifact_commit_stales_nothing() {
 t_daemon_binary_newer_than_process_is_stale() {
     local root; root="$(new_root)"
     stamp "$root/daemon/bin/.built-sha" "$(head_sha "$root")"
-    echo binary > "$root/daemon/bin/claude-repld"   # written just now
+    echo binary > "$root/daemon/bin/agent-repld"   # written just now
     set +e
     HOME="$root/home" PATH="$root/stubs:$PATH" \
-        FAKE_PROC_MATCH="claude-repld" FAKE_PROC_PID=999 FAKE_PROC_ETIME="10:00" \
+        FAKE_PROC_MATCH="agent-repld" FAKE_PROC_PID=999 FAKE_PROC_ETIME="10:00" \
         bash "$root/bin/readiness-report.sh" >"$root/out.json" 2>"$root/err.txt"
     RC=$?
     set -e
@@ -422,11 +422,11 @@ t_daemon_started_after_binary_is_fresh() {
     local root; root="$(new_root)"
     stamp "$root/daemon/bin/.built-sha" "$(head_sha "$root")"
     stamp_tree "$root" daemon
-    echo binary > "$root/daemon/bin/claude-repld"
-    touch -t 202001010000 "$root/daemon/bin/claude-repld"
+    echo binary > "$root/daemon/bin/agent-repld"
+    touch -t 202001010000 "$root/daemon/bin/agent-repld"
     set +e
     HOME="$root/home" PATH="$root/stubs:$PATH" \
-        FAKE_PROC_MATCH="claude-repld" FAKE_PROC_PID=1001 FAKE_PROC_ETIME="00:05" \
+        FAKE_PROC_MATCH="agent-repld" FAKE_PROC_PID=1001 FAKE_PROC_ETIME="00:05" \
         bash "$root/bin/readiness-report.sh" >"$root/out.json" 2>"$root/err.txt"
     RC=$?
     set -e

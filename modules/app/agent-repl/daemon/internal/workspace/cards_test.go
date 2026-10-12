@@ -5,9 +5,9 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"claude-repld/internal/ids"
-	"claude-repld/internal/resolve/feed"
-	"claude-repld/internal/resolve/topbar"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/resolve/feed"
+	"agent-repld/internal/resolve/topbar"
 )
 
 // fakeServedFeed is a feed.Resolver that answers only the served-ask reads.

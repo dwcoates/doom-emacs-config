@@ -3,7 +3,7 @@ package ladder
 import (
 	"testing"
 
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/wsm"
 )
 
 func TestResolveTurnEndReadsEveryCloseAndClass(t *testing.T) {

@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"io"
 
-	"claude-repld/internal/dirpath"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dirpath"
+	"agent-repld/internal/wsm"
 )
 
 // The entry types the ingress accepts. They are the shapes the managed

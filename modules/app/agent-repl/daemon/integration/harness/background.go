@@ -5,7 +5,7 @@ import "errors"
 // EVERY RUN OF THIS HARNESS HAPPENS AT BACKGROUND PRIORITY.
 //
 // A run built on this harness is the heaviest thing a test can do on the
-// host: at `-parallel 8` each test owns a real claude-repld plus a fake shim,
+// host: at `-parallel 8` each test owns a real agent-repld plus a fake shim,
 // and the e2e suite (which runs through MainAt too) owns a whole quartet per
 // test. Several of those at normal priority took the host to a load average
 // of 281 while the owner's live shim fell four minutes behind and a store

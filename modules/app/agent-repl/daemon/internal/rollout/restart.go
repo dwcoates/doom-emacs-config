@@ -9,8 +9,8 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
 )
 
 // A BUILD WHOSE STATE LAYOUT DIFFERS IS ROLLED OUT STOP-THEN-START, NEVER
@@ -36,10 +36,10 @@ import (
 // The replacement's command line and its claim wait.
 const (
 	// LayoutVersionFlagName asks a binary for the state layout it writes
-	// (`claude-repld -layout-version`), and starts nothing.
+	// (`agent-repld -layout-version`), and starts nothing.
 	LayoutVersionFlagName = "layout-version"
 	// MigrationKindFromFlagName asks a binary what its migration steps from a
-	// running layout mean (`claude-repld -migration-kind-from N`): additive or
+	// running layout mean (`agent-repld -migration-kind-from N`): additive or
 	// breaking. It starts nothing.
 	MigrationKindFromFlagName = "migration-kind-from"
 	// ReplacingFlagName marks the daemon an incumbent restarting across a

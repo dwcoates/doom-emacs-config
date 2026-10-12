@@ -3,7 +3,7 @@ package rollout
 import (
 	"testing"
 
-	"claude-repld/internal/ids"
+	"agent-repld/internal/ids"
 )
 
 // TestStandingIsOwnedBeforeAnyHandover covers the ordinary case: a daemon that

@@ -1,8 +1,8 @@
 package rollout
 
 import (
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
 )
 
 // THE SERVING STANDING.

@@ -12,7 +12,7 @@ import (
 // once, no matter what `-parallel` or `-p` the run was invoked with.
 //
 // WHY THE HARNESS OWNS THIS AND NOT THE MAKEFILE. Every test in this suite
-// owns a real claude-repld process plus a fake shim, and every wait it makes
+// owns a real agent-repld process plus a fake shim, and every wait it makes
 // is bounded by DefaultTimeout — a failure bound sized at ~1.8x the slowest
 // ordinary test measured at eight concurrent daemons. `make integration`
 // passes `-parallel 8` for exactly that reason, but a flag is not a

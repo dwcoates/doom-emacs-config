@@ -9,7 +9,7 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"claude-repld/internal/workspace"
+	"agent-repld/internal/workspace"
 )
 
 // setEffortRequest picks LEVEL for the fixture workspace.

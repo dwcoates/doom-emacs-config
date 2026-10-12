@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // encodeActions renders a merge action list as the JSON array the column holds.

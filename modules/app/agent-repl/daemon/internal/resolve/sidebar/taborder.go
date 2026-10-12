@@ -5,7 +5,7 @@ import (
 	workspacev1 "agentrepl/proto/workspace/v1"
 	"agentrepl/protohelpers/rosterwalk"
 
-	"claude-repld/internal/ids"
+	"agent-repld/internal/ids"
 )
 
 // tabBar resolves the editor's tab bar: every open workspace in REGISTRY

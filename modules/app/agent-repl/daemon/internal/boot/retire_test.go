@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"claude-repld/internal/sessionlock"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/sessionlock"
+	"agent-repld/internal/wsm"
 )
 
 const opRetire = "daemon.boot.retire_gone_repository"

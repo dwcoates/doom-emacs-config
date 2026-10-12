@@ -13,12 +13,12 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
-	"claude-repld/internal/ids"
-	"claude-repld/internal/promptqueue"
-	"claude-repld/internal/replyquote"
-	"claude-repld/internal/resolve/feed"
-	"claude-repld/internal/workspace"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/promptqueue"
+	"agent-repld/internal/replyquote"
+	"agent-repld/internal/resolve/feed"
+	"agent-repld/internal/workspace"
+	"agent-repld/internal/wsm"
 )
 
 // keepFilesPlan builds a PlanRollback request that keeps files.

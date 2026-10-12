@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // agentReplSessionDDL is agent-repl's SESSION (owner ruling, 2026-10-06) as

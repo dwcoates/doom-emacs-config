@@ -3,7 +3,7 @@ package drain
 import (
 	"time"
 
-	"claude-repld/internal/ids"
+	"agent-repld/internal/ids"
 )
 
 // HibernateRetryCeiling caps the idle sweep's backoff for a workspace whose

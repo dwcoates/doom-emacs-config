@@ -20,7 +20,7 @@ import (
 	"strings"
 	"time"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // fieldSep separates the fields of one commit in a --format template. It is

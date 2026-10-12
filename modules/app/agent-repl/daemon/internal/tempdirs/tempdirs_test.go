@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"claude-repld/internal/dirpath"
-	"claude-repld/internal/envc"
+	"agent-repld/internal/dirpath"
+	"agent-repld/internal/envc"
 )
 
 // canon is dirpath.Canonical for a test, failing it on error.

@@ -7,7 +7,7 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"claude-repld/internal/feedid"
+	"agent-repld/internal/feedid"
 )
 
 func TestToStoredFeedRefusesAFeedWithNoArm(t *testing.T) {

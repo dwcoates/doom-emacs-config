@@ -5,7 +5,7 @@ import (
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/internal/shimclient"
+	"agent-repld/internal/shimclient"
 )
 
 // The link states the render-colors topbar_connectivity table is keyed by.

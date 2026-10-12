@@ -8,9 +8,9 @@ import (
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/health"
-	"claude-repld/internal/protoarm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/health"
+	"agent-repld/internal/protoarm"
 )
 
 // THE ACTIVITY CELL is the strip's finest cell, and every status arm ALWAYS

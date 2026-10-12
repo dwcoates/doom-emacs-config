@@ -260,7 +260,7 @@ Daemon lifecycle
     and selection survive.
 18. Schedule a drain; shut down now. The banner, the held prompts, the
     handover to a new daemon.
-19. Deploy from master while Emacs runs (`daemon/bin/claude-repld deploy`, or
+19. Deploy from master while Emacs runs (`daemon/bin/agent-repld deploy`, or
     `M-x agent-repl-deploy`). What the user sees during the bounce.
 
 Failure

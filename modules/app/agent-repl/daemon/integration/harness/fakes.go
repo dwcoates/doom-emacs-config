@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"claude-repld/internal/shellword"
+	"agent-repld/internal/shellword"
 )
 
 // Recorder is a fake executable that appends its argv to a record file, so a

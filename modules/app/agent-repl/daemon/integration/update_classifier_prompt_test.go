@@ -11,9 +11,9 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
-	"claude-repld/integration/harness"
-	"claude-repld/internal/classifier"
-	"claude-repld/internal/prompts"
+	"agent-repld/integration/harness"
+	"agent-repld/internal/classifier"
+	"agent-repld/internal/prompts"
 )
 
 // rewriteLine is the rule the fake rewrite adds to the routing brief.

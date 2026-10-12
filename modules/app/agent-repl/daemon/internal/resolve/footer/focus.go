@@ -1,9 +1,9 @@
 package footer
 
 import (
+	"agent-repld/internal/sessionwatcher"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
-	"claude-repld/internal/sessionwatcher"
 )
 
 // focusPanel is the expanded panel a focus names. The zero value is no focus

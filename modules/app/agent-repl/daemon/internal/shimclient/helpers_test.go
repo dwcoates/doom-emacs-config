@@ -1,8 +1,8 @@
 package shimclient
 
 import (
+	"agent-repld/internal/tempdirs/tempdirstest"
 	"bufio"
-	"claude-repld/internal/tempdirs/tempdirstest"
 	"context"
 	"encoding/json"
 	"errors"
@@ -17,8 +17,8 @@ import (
 	"testing"
 	"time"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
 )
 
 // The helper-process switches. A test spawns THIS test binary as the shim, so

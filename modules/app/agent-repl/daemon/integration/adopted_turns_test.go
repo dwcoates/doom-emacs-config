@@ -10,9 +10,9 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/integration/harness"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/rollout"
+	"agent-repld/integration/harness"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/rollout"
 
 	"connectrpc.com/connect"
 )

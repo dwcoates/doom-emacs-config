@@ -8,8 +8,8 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/internal/ids"
-	"claude-repld/internal/resolve/topbar"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/resolve/topbar"
 )
 
 // panelTopbar answers a context panel and the status facts on demand.

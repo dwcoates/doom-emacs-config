@@ -14,7 +14,7 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/internal/chessboard"
+	"agent-repld/internal/chessboard"
 )
 
 // fakeChessSquares answers square clicks from a fixed answer or error, and

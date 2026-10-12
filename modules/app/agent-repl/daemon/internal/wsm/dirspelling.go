@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // A WORKSPACE ROW WHOSE `dir` IS NOT THE DIRECTORY'S ON-DISK SPELLING is left

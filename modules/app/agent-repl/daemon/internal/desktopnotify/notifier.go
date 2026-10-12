@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"sync"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/standdown"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/standdown"
 )
 
 // opPost is the operation a banner's records carry.

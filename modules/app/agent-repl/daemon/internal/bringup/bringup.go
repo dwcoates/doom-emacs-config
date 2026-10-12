@@ -21,10 +21,10 @@ import (
 	"fmt"
 	"sync"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/shimclient"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/shimclient"
+	"agent-repld/internal/wsm"
 )
 
 // StartFunc brings ONE workspace's session up. workspace.Fleet.Start is the

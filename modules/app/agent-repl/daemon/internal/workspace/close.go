@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
 )
 
 // Close tears a workspace's editor state down. It REQUIRES QUIET — no turn in

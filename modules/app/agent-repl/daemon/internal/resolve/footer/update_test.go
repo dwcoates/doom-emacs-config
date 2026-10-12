@@ -5,9 +5,9 @@ import (
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/internal/deployprogress"
-	"claude-repld/internal/health"
-	"claude-repld/internal/ids"
+	"agent-repld/internal/deployprogress"
+	"agent-repld/internal/health"
+	"agent-repld/internal/ids"
 )
 
 // updateOf reads the update line whatever status arm carries it, nil when the

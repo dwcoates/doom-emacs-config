@@ -3,7 +3,7 @@ package footer
 import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/wsm"
 )
 
 // THE ENDURING TIER: facts that are always true, drawn beneath every other

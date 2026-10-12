@@ -3,12 +3,12 @@ package sidebar
 import (
 	"time"
 
-	"claude-repld/internal/ids"
-	"claude-repld/internal/repodivergence"
-	"claude-repld/internal/resolve/footer"
-	"claude-repld/internal/resolve/ladder"
-	"claude-repld/internal/shimclient"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/repodivergence"
+	"agent-repld/internal/resolve/footer"
+	"agent-repld/internal/resolve/ladder"
+	"agent-repld/internal/shimclient"
+	"agent-repld/internal/wsm"
 )
 
 // The roster's status arm names, exactly the RosterRow.status oneof and

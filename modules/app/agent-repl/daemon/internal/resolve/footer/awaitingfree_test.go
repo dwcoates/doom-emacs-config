@@ -3,7 +3,7 @@ package footer
 import (
 	"testing"
 
-	"claude-repld/internal/ids"
+	"agent-repld/internal/ids"
 )
 
 // awaiting is a merge that holds the workspace and waits for it to fall free.

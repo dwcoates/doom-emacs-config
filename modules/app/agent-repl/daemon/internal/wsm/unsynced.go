@@ -3,7 +3,7 @@ package wsm
 import (
 	"fmt"
 
-	"claude-repld/internal/envc"
+	"agent-repld/internal/envc"
 )
 
 // EnvTestUnsyncedWrites asks a TEST RUN's daemon to open its state database

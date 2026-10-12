@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"claude-repld/internal/ids"
+	"agent-repld/internal/ids"
 )
 
 // outgoingPrevious is the incumbent writeHandoverManifest names.

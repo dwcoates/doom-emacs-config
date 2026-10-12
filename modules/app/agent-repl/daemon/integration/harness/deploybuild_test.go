@@ -35,7 +35,7 @@ func TestFakeDeployBuilderStagesTheServicesTheWorldRuns(t *testing.T) {
 			// Arrange: stand-ins for every artifact the staging copies.
 			dir := t.TempDir()
 			previous := daemonBinary
-			daemonBinary = writeStandIn(t, dir, "claude-repld", "a daemon\n")
+			daemonBinary = writeStandIn(t, dir, "agent-repld", "a daemon\n")
 			t.Cleanup(func() { daemonBinary = previous })
 			dist := filepath.Join(dir, "dist")
 			if err := os.MkdirAll(dist, 0o755); err != nil {

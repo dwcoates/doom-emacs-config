@@ -5,11 +5,11 @@ import (
 	"errors"
 	"testing"
 
-	"claude-repld/internal/classifier"
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/resolve/footer"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/classifier"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/resolve/footer"
+	"agent-repld/internal/wsm"
 )
 
 // A PROMPT THAT ADDS TO THE RUNNING WORK JOINS THE RUNNING TURN (owner ruling,

@@ -6,7 +6,7 @@ import (
 	"syscall"
 	"time"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // acceptBackoffFloor and acceptBackoffCeiling bound the wait between retries of

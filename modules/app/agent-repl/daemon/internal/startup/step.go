@@ -25,7 +25,7 @@ package startup
 import (
 	"fmt"
 
-	"claude-repld/internal/ids"
+	"agent-repld/internal/ids"
 )
 
 // StepKind is one step of one workspace's bring-up, as the fleet reports it.

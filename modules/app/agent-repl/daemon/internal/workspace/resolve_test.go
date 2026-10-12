@@ -9,8 +9,8 @@ import (
 
 	workspacev1 "agentrepl/proto/workspace/v1"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/wsm"
 )
 
 func TestResolveKeysOnTheId(t *testing.T) {

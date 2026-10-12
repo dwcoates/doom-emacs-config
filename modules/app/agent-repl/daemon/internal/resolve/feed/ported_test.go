@@ -6,7 +6,7 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"claude-repld/internal/feedid"
+	"agent-repld/internal/feedid"
 )
 
 // A FORK'S PORTED CONVERSATION. The child's feed is the parent's conversation

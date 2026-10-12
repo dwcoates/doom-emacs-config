@@ -3,7 +3,7 @@ package repodivergence
 import (
 	"testing"
 
-	"claude-repld/internal/sourcescan"
+	"agent-repld/internal/sourcescan"
 )
 
 // TestTheScheduleIsClockRepeat pins this package's periodic loop to the one

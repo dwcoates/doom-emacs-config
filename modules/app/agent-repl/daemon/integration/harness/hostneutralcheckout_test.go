@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"claude-repld/internal/chessboard"
+	"agent-repld/internal/chessboard"
 )
 
 func TestHostNeutralCheckoutEnvClearsTheEngineDir(t *testing.T) {

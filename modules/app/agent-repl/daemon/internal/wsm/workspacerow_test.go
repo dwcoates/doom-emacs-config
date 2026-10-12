@@ -6,7 +6,7 @@ import (
 	"regexp"
 	"testing"
 
-	"claude-repld/internal/sourcescan"
+	"agent-repld/internal/sourcescan"
 )
 
 func TestScanWorkspaceRowReadsTheNamedColumns(t *testing.T) {

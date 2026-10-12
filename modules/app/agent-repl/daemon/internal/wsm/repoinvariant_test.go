@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // orphanFixture writes a database whose single workspace names a repository

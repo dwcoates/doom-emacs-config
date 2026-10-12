@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 func TestIsRedriveReadsTheMark(t *testing.T) {

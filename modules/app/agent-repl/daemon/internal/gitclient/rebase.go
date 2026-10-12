@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/shellword"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/shellword"
 )
 
 // This file holds the merge queue's REBASE and the two other gits the queue's

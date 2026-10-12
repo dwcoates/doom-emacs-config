@@ -4,10 +4,10 @@ import (
 	"context"
 	"testing"
 
-	"claude-repld/internal/deployprogress"
-	"claude-repld/internal/health"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/deployprogress"
+	"agent-repld/internal/health"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
 )
 
 // successorFaults answers the standing daemon-scoped successor faults.

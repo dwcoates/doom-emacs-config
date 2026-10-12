@@ -15,7 +15,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
-	"claude-repld/integration/harness"
+	"agent-repld/integration/harness"
 )
 
 // A FORK PORTS THE WHOLE CONVERSATION. The child's feed is the parent's

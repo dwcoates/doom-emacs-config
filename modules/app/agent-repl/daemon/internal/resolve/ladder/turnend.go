@@ -1,6 +1,6 @@
 package ladder
 
-import "claude-repld/internal/wsm"
+import "agent-repld/internal/wsm"
 
 // TurnEnd is how a turn's end reads: the roster's turn-end arm, and the
 // desktop banner a turn end raises. Both read it from ResolveTurnEnd, so the

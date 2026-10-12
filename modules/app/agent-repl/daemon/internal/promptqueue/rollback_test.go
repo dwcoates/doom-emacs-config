@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"claude-repld/internal/ids"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
 )
 
 // since is the fixed instant every TestHeldSince case measures against.

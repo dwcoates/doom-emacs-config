@@ -7,11 +7,11 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/figures"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/resolve/ladder"
-	"claude-repld/internal/resolve/turnfault"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/figures"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/resolve/ladder"
+	"agent-repld/internal/resolve/turnfault"
 )
 
 // OnActivity advances the status tree, the token accounting, the live-work

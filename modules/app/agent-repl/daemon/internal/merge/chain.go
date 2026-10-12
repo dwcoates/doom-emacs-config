@@ -5,11 +5,11 @@ import (
 	"errors"
 	"fmt"
 
-	"claude-repld/internal/cpugov"
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/resolve/footer"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/cpugov"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/resolve/footer"
+	"agent-repld/internal/wsm"
 )
 
 // This file is a repository's CHAIN: the merges at the front of its queue,

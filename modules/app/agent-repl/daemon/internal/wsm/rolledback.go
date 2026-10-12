@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"errors"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // rolledBackTurnsDDL is the layout-17 addition, kept apart from the rest of the

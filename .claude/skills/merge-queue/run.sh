@@ -106,7 +106,7 @@ workspace_top() {
   printf '%s\n' "$top"
 }
 
-# daemon_bin answers the claude-repld that serves this host: the override, or
+# daemon_bin answers the agent-repld that serves this host: the override, or
 # the one built in the repository's main worktree.
 daemon_bin() {
   local bin main
@@ -114,7 +114,7 @@ daemon_bin() {
     bin="$AGENT_REPL_DAEMON_BIN"
   else
     main="$(repo_main_worktree)" || die "not inside a git repository"
-    bin="$main/modules/app/agent-repl/daemon/bin/claude-repld"
+    bin="$main/modules/app/agent-repl/daemon/bin/agent-repld"
   fi
   [ -x "$bin" ] || die "the daemon binary $bin is missing or not executable"
   printf '%s\n' "$bin"
@@ -138,7 +138,7 @@ no_front() {
   [ "${#FRONT[@]}" -eq 0 ] || die "--front goes with a merge verb; $1 requests no merge"
 }
 
-# verb_status runs claude-repld merge-queue, passing its output through, and
+# verb_status runs agent-repld merge-queue, passing its output through, and
 # answers its exit mapped onto this script's. A merge request carries -front
 # when --front was given.
 verb_status() {
@@ -154,7 +154,7 @@ verb_status() {
   esac
 }
 
-# run_verb runs claude-repld merge-queue and exits with its mapped status.
+# run_verb runs agent-repld merge-queue and exits with its mapped status.
 run_verb() {
   verb_status "$@"
   exit $?

@@ -11,9 +11,9 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	"claude-repld/internal/headless"
-	"claude-repld/internal/prompts"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/headless"
+	"agent-repld/internal/prompts"
+	"agent-repld/internal/wsm"
 )
 
 // newsItem is a digest item titled title linking url, with an effective date

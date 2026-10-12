@@ -1290,7 +1290,7 @@ its own file only when >1 endpoint needs it.
 - The daemon keys every WorkspaceRef on `id` and REFUSES a ref whose `dir`
   disagrees with the registry. A merged, closed or killed workspace's roster
   row carries `closed = true` (Emacs derives its tab set from it); a nuked
-  workspace leaves the roster. Emacs launches `daemon/bin/claude-repld` with
+  workspace leaves the roster. Emacs launches `daemon/bin/agent-repld` with
   no required argv (state via the env); a successor is spawned with the
   daemon's own joining argument. agent-shim/wire is deleted by the daemon
   rewrite once nothing imports it.

@@ -11,9 +11,9 @@ import (
 	"syscall"
 	"time"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/envc"
-	"claude-repld/internal/ids"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/envc"
+	"agent-repld/internal/ids"
 )
 
 // The spawn environment's own names, beside envc's four contracts. They are

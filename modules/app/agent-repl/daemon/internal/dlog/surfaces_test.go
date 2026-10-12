@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"claude-repld/internal/dirpath"
+	"agent-repld/internal/dirpath"
 )
 
 // mintedIDWidth is wsm.IDLength. It is spelled out rather than imported: wsm

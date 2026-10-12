@@ -21,7 +21,7 @@ import (
 	"syscall"
 	"time"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // terminatingSignal reports the signal that killed the process, when one did.

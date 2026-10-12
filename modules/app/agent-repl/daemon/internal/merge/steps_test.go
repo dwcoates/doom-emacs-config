@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"claude-repld/internal/resolve/footer"
+	"agent-repld/internal/resolve/footer"
 )
 
 // steppedRun is a run of the harness workspace that publishes facts.

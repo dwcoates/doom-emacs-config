@@ -695,7 +695,7 @@ Go layer, N=20, budget PROVISIONAL 500/1500 ms, reusing
 
 - **17b daemon start → first roster push. BUILD, but expect a near-zero
   number, and know why.** The roster is published BEFORE anything is served:
-  `daemon/cmd/claude-repld/graph.go`'s `Prime` hook calls
+  `daemon/cmd/agent-repld/graph.go`'s `Prime` hook calls
   `workspace/register.go:(*verbs).PublishRegistry` ("published the opening
   roster") ahead of the listener, and `publish.Topic.Subscribe` **replays the
   latest value to a new subscriber**. So a client subscribing after boot gets

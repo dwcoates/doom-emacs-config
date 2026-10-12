@@ -8,8 +8,8 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
-	"claude-repld/internal/desktopnotify"
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/desktopnotify"
+	"agent-repld/internal/dlog"
 )
 
 // opEditorFocus is the operation ReportEditorFocus's records carry.

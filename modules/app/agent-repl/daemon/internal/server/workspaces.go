@@ -13,11 +13,11 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/merge"
-	"claude-repld/internal/workspace"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/merge"
+	"agent-repld/internal/workspace"
+	"agent-repld/internal/wsm"
 )
 
 // The workspace lifecycle verbs. Every one of them resolves the echoed ref,

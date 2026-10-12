@@ -7,7 +7,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/internal/chessboard"
+	"agent-repld/internal/chessboard"
 )
 
 // fakeChessBoards answers each session's bubble from a table the test sets,

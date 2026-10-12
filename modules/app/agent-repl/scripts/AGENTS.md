@@ -70,7 +70,7 @@ checkout (protobufs, shim, webapp, daemon, store, sidecar, lock; the service
 binaries are installed into `~/.cache/agent-repl/bin`), then stands the daemon
 and its shims down so every one of them comes back on the fresh build:
 
-1. the daemon is asked to stand down now (`claude-repld call
+1. the daemon is asked to stand down now (`agent-repld call
    UpdateShutdownSchedule {"now":...}`), which announces its ending to every
    client and stands each of its shims down itself before it exits -- so the
    daemon reads every shim exit as one it ordered, and every shim concludes

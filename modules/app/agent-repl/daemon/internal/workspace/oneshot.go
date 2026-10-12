@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"strings"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/prompts"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/prompts"
+	"agent-repld/internal/wsm"
 )
 
 // The brief names the one-shot decoration reads from the prompts directory AT

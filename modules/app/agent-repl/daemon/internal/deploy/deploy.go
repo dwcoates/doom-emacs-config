@@ -1,6 +1,6 @@
 // Package deploy is how the DAEMON deploys (owner design, 2026-09-23). There
 // is no deploy script: a caller asks (the Deploy rpc, which the
-// `claude-repld deploy` verb and Emacs's `agent-repl-deploy` both call), or a
+// `agent-repld deploy` verb and Emacs's `agent-repl-deploy` both call), or a
 // complete change lands on master through the daemon's own merge, and the
 // daemon
 //
@@ -32,16 +32,16 @@ import (
 	"agentrepl/logging/buildreport"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
-	"claude-repld/internal/bounce"
-	"claude-repld/internal/buildid"
-	"claude-repld/internal/deployprogress"
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/gitclient"
-	"claude-repld/internal/health"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/rollout"
-	"claude-repld/internal/sessionlock"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/bounce"
+	"agent-repld/internal/buildid"
+	"agent-repld/internal/deployprogress"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/gitclient"
+	"agent-repld/internal/health"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/rollout"
+	"agent-repld/internal/sessionlock"
+	"agent-repld/internal/wsm"
 )
 
 // The deploy's operations. Every decision — built, stale, bounced now,

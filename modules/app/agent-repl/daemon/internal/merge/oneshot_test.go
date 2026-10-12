@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/wsm"
 )
 
 func TestAOneShotRequestMarksTheRequesterAndRepublishesTheRoster(t *testing.T) {

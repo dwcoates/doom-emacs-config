@@ -1,7 +1,7 @@
 // Package roster is THE list of agent-repl test suites: the names
 // bin/test-all.sh's --suites accepts and the merge gate selects from. It is
 // the one place the list lives; the runner (agentrepl/testrun) and the merge
-// gate (claude-repld's internal/merge) both import it, so the two can no
+// gate (agent-repld's internal/merge) both import it, so the two can no
 // longer drift apart the way a hand-copied list did.
 package roster
 

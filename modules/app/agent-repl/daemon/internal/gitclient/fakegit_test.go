@@ -29,7 +29,7 @@ import (
 	"syscall"
 	"testing"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // The fake's channel to itself. None of these names is repository-selecting,

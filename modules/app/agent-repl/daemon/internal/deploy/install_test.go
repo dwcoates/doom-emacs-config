@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 func TestInstallingAFileReplacesItWithItsStamps(t *testing.T) {
@@ -43,12 +43,12 @@ func TestInstallingAFileReplacesItWithItsStamps(t *testing.T) {
 func TestAMissingStampIsWarnedNotFatal(t *testing.T) {
 	// Arrange: the build wrote no source-tree stamp.
 	staged, live := t.TempDir(), t.TempDir()
-	writeFile(t, filepath.Join(staged, "claude-repld"), "new")
+	writeFile(t, filepath.Join(staged, "agent-repld"), "new")
 	log := dlog.NewTestLogger()
 	in := installer{nonce: "n1", log: log}
 
 	// Act
-	err := in.file(filepath.Join(staged, "claude-repld"), filepath.Join(live, "claude-repld"), stampsBeside(staged, live, ""))
+	err := in.file(filepath.Join(staged, "agent-repld"), filepath.Join(live, "agent-repld"), stampsBeside(staged, live, ""))
 
 	// Assert
 	if err != nil {

@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"time"
 
-	"claude-repld/internal/bounce"
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/rollout"
+	"agent-repld/internal/bounce"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/rollout"
 )
 
 // DefaultRestartStopBound bounds the ONE stop a restart asks of the shim before

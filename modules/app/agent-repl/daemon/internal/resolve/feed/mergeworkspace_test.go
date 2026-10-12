@@ -10,8 +10,8 @@ import (
 	workspacev1 "agentrepl/proto/workspace/v1"
 	"google.golang.org/protobuf/proto"
 
-	"claude-repld/internal/feedid"
-	"claude-repld/internal/ids"
+	"agent-repld/internal/feedid"
+	"agent-repld/internal/ids"
 )
 
 // theMergeWorkspace is the merge workspace the switches below name.

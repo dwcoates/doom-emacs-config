@@ -8,9 +8,9 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
-	"claude-repld/internal/classifier"
-	"claude-repld/internal/classifierupdate"
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/classifier"
+	"agent-repld/internal/classifierupdate"
+	"agent-repld/internal/dlog"
 )
 
 // ClassifierPrompt is the server's view of the routing brief's updater

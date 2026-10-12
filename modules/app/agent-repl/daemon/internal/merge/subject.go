@@ -6,9 +6,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
 )
 
 // This file resolves a request's SOURCE into what the merge works on: the

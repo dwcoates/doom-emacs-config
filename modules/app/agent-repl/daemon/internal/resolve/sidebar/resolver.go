@@ -10,16 +10,16 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/publish"
-	"claude-repld/internal/repodivergence"
-	"claude-repld/internal/resolve/footer"
-	"claude-repld/internal/resolve/ladder"
-	"claude-repld/internal/sessionwatcher"
-	"claude-repld/internal/shimclient"
-	"claude-repld/internal/vocab"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/publish"
+	"agent-repld/internal/repodivergence"
+	"agent-repld/internal/resolve/footer"
+	"agent-repld/internal/resolve/ladder"
+	"agent-repld/internal/sessionwatcher"
+	"agent-repld/internal/shimclient"
+	"agent-repld/internal/vocab"
+	"agent-repld/internal/wsm"
 )
 
 // resolver is the roster resolver. ONE accumulation and ONE topic serve every

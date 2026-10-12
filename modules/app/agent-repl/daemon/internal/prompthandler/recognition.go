@@ -3,8 +3,8 @@ package prompthandler
 import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"claude-repld/internal/promptqueue"
-	"claude-repld/internal/sessioncommand"
+	"agent-repld/internal/promptqueue"
+	"agent-repld/internal/sessioncommand"
 )
 
 // PanelCommands are the four commands the daemon answers ITSELF with a panel.

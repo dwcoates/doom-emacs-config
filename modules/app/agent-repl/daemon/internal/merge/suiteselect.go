@@ -83,7 +83,7 @@ var suiteRules = []suiteRule{
 	{Kind: matchSubtree, Path: moduleRoot + "webapp/", Suites: []string{"webapp", "build-frontend-harness"}},
 	// daemon/integration lives inside the daemon module, so the daemon suite
 	// carries the end-to-end tests with it. The cross-system suites RUN a real
-	// claude-repld, so a daemon change can break them too — blast radius, not
+	// agent-repld, so a daemon change can break them too — blast radius, not
 	// name. `e2e-emacs` rides along because the daemon is what Emacs's own
 	// launcher spawns, which is the seam only that suite covers.
 	{Kind: matchSubtree, Path: moduleRoot + "daemon/", Suites: []string{"daemon", "e2e", "e2e-emacs"}},

@@ -11,7 +11,7 @@
  *   - agent-shim/claude/shim/dist/main.js
  *                              (cd ../agent-shim/claude/shim && npm run build)
  *   - webapp/dist              (npm run build in webapp/)
- *   - a claude-repld binary    (cd ../daemon && go build ./cmd/claude-repld)
+ *   - a agent-repld binary    (cd ../daemon && go build ./cmd/agent-repld)
  *   - Playwright Chromium      (npx playwright install chromium)
  *
  * Usage:

@@ -15,10 +15,10 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
-	"claude-repld/integration/harness"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/rollout"
-	"claude-repld/internal/stateroot"
+	"agent-repld/integration/harness"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/rollout"
+	"agent-repld/internal/stateroot"
 )
 
 // prelaunchControlSocket names the control socket a relaunch's Nth prelaunch

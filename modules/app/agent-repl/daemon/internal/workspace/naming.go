@@ -7,7 +7,7 @@ import (
 	"regexp"
 	"strings"
 
-	"claude-repld/internal/dirpath"
+	"agent-repld/internal/dirpath"
 )
 
 // The naming rule's constants. The rule itself — lowercase, hyphenated, at

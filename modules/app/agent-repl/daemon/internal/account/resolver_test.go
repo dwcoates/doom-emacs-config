@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"claude-repld/internal/account"
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/account"
+	"agent-repld/internal/dlog"
 )
 
 // newResolver builds a resolver over the two roots for a test.

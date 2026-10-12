@@ -11,10 +11,10 @@ engine or to regression-check the feed's look.
 # from webapp/, after building shim + webapp + the daemon binary:
 #   (cd ../agent-shim/claude/shim && npm run build)
 #   npm run build
-#   (cd ../daemon && go build -o /tmp/claude-repld ./cmd/claude-repld)
+#   (cd ../daemon && go build -o /tmp/agent-repld ./cmd/agent-repld)
 
 PLAYWRIGHT_CHROMIUM=$(node -e "process.stdout.write(require('playwright').chromium.executablePath())") \
-  node bin/screenshot.mjs --theme dark --daemon-bin /tmp/claude-repld --out feed-dark.png
+  node bin/screenshot.mjs --theme dark --daemon-bin /tmp/agent-repld --out feed-dark.png
 ```
 
 Flags: `--theme light|dark`, `--out FILE`, `--daemon HOST:PORT`,

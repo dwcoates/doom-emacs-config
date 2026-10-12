@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"claude-repld/internal/remint"
+	"agent-repld/internal/remint"
 )
 
 // prefixMint is a readable stand-in for the production minter: a test about the

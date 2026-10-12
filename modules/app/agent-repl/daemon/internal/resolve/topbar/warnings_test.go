@@ -10,7 +10,7 @@ import (
 
 	"google.golang.org/protobuf/types/known/structpb"
 
-	"claude-repld/internal/ids"
+	"agent-repld/internal/ids"
 )
 
 // unmodeledStart is an unmodeled tool call as issued.

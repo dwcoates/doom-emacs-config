@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"claude-repld/internal/account"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/account"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
 )
 
 // mergeRequester arranges a requester a merge workspace can be forked from: a

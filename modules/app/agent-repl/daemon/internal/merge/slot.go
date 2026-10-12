@@ -3,8 +3,8 @@ package merge
 import (
 	"context"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/wsm"
 )
 
 // This file is a repository's SLOT and its KERNEL LOCK.

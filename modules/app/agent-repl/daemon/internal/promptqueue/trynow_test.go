@@ -6,8 +6,8 @@ import (
 	"slices"
 	"testing"
 
-	"claude-repld/internal/ids"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
 )
 
 // heldOnReconnect reports a standing entry on the after-reconnect hold.

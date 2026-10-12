@@ -23,7 +23,7 @@ import (
 	"syscall"
 	"time"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // gitEnvKeys are the repository-selecting variables that must never be

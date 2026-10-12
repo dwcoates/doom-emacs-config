@@ -8,7 +8,7 @@ package pprofsurface
 import (
 	"context"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // Surface is a running profiling listener.

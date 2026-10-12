@@ -12,10 +12,10 @@ import (
 
 	"google.golang.org/protobuf/encoding/protojson"
 
-	"claude-repld/internal/bounce"
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/bounce"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
 )
 
 // previousDaemon is the outgoing daemon writeHandoverManifest names, and so

@@ -6,9 +6,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"claude-repld/internal/dirpath"
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dirpath"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/wsm"
 )
 
 // opRegisterRepository is the operation every record this verb writes is filed

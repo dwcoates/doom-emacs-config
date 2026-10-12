@@ -6,7 +6,7 @@ import (
 	"slices"
 	"testing"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 func TestTheRosterIsToldOfTheRequestFact(t *testing.T) {

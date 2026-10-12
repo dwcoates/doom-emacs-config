@@ -221,7 +221,7 @@ system_paths() { deploy_stamp_system_paths "$1" "$REL_ROOT"; }
 # runs, or nothing when NAME has no single long-lived process.
 system_process_match() {
     case "$1" in
-        daemon)              printf '%s' "$ROOT/daemon/bin/claude-repld" ;;
+        daemon)              printf '%s' "$ROOT/daemon/bin/agent-repld" ;;
         shim-store)          printf '%s' "$CACHE_BIN/shim-store" ;;
         shim-claude-sidecar) printf '%s' "$CACHE_BIN/shim-claude-sidecar" ;;
         *) printf '' ;;

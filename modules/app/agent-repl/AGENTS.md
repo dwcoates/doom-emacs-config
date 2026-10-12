@@ -776,14 +776,14 @@ symptom is visible in the logs. Inference is not a diagnosis.
 Building, bouncing, hard bouncing, deploying, hot-reloading, health checks,
 logs and one-off daemon requests all go through `bin/agent-repl-runtime <verb>`
 (`help` lists the verbs; `call METHOD` reaches any unary AgentRepl rpc through
-`claude-repld call`), and agents operate it through `/manage-agent-repl-runtime`
+`agent-repld call`), and agents operate it through `/manage-agent-repl-runtime`
 (`skills/manage-agent-repl-runtime/`), whose terminology table fixes what
 "hard bounce", "bounce", "deploy", "workspace restart" and "hot reload" mean.
 The scripts behind the verbs stay where their other callers reach them, but a
 person or an agent uses the door.
 
 A bounce (and so a hard bounce) stands down EVERY daemon serving the live state
-root, not only the one `daemon.addr` names: any `claude-repld` holding the
+root, not only the one `daemon.addr` names: any `agent-repld` holding the
 state root's `wsm.db` or `daemon.lock` open is stopped, whatever build path it
 runs from, so a handover's leftover incumbent or successor never outlives it.
 
@@ -798,7 +798,7 @@ Owner plan, 2026-09-28 (`docs/investigations/2026-09-28-merge-queue-plan.md`,
 fixes 6-8). Every agent merges into master ONLY through the merge-queue skill
 (`.claude/skills/merge-queue/SKILL.md`): its own workspace's branch, another
 workspace, and every subagent's branch alike. The skill enqueues through the
-daemon (`claude-repld merge-queue`) and reports landed, parked or failed; on a
+daemon (`agent-repld merge-queue`) and reports landed, parked or failed; on a
 park, failure or refusal it reports and stops, and never merges by hand.
 
 - The metaprompt carries the same rule, so every session has it loaded.
@@ -848,7 +848,7 @@ out of date, and restarts what is, WHEN it may.
     landed, and never waits on the build.
   - A change merged onto master by hand is followed by ONE deploy, in the same
     breath and never behind a question:
-    `modules/app/agent-repl/daemon/bin/claude-repld deploy` (or
+    `modules/app/agent-repl/daemon/bin/agent-repld deploy` (or
     `M-x agent-repl-deploy` in Emacs).
 - A change whose tests are red is not landed, so it is not deployed.
 - The deploy's answer is its DECISIONS, one per component; what follows
@@ -1441,12 +1441,12 @@ sinks can be read.
 |---|---|---|---|---|---|---|
 | Emacs echo-area history | `*Messages*`; this is a live buffer, not a log and has no rotation files | Emacs | Emacs buffer text | read the live buffer, then delimit the relevant timestamps manually | buffer and message text only | none; this is not the durable logger |
 | workspace Emacs | `<workspace>/.claude/emacs/emacs.log`; canonical symlink to its runtime-owned target, with `.1` through `.5` beside that target | Emacs | contract JSONL | `bin/logs.sh --workspace <id\|dir\|name> --runtime emacs --since <RFC3339\|duration> --until <RFC3339>` | `workspace_id`, `workspace_dir`, session and request fields when known | `AGENT_REPL_LOG_LEVEL` |
-| workspace daemon | `<workspace>/.claude/emacs/daemon.log`; canonical symlink to its daemon-owned target, with target `.1` through `.5` | `claude-repld` | contract JSONL | the workspace recipe above with `--runtime daemon` | `workspace_id`, `workspace_dir`, session and request fields when known | `AGENT_REPL_LOG_LEVEL` |
+| workspace daemon | `<workspace>/.claude/emacs/daemon.log`; canonical symlink to its daemon-owned target, with target `.1` through `.5` | `agent-repld` | contract JSONL | the workspace recipe above with `--runtime daemon` | `workspace_id`, `workspace_dir`, session and request fields when known | `AGENT_REPL_LOG_LEVEL` |
 | workspace shim | `<workspace>/.claude/emacs/shim.log`; canonical symlink to the daemon-owned target written through inherited file descriptor `3`, with target `.1` through `.5` | `claude-shim` | contract JSONL | the workspace recipe above with `--runtime shim` | `workspace_id`, `workspace_dir`, `agent_repl_session_id`, `claude_session_id`, `pid`, and `request_id` when known | `AGENT_REPL_LOG_LEVEL` |
-| workspace webapp | `<workspace>/.claude/emacs/webapp.log`; canonical symlink to its daemon-owned target, with target `.1` through `.5` | browser forwards; `claude-repld` persists | contract JSONL | the workspace recipe above with `--runtime webapp` | `workspace_id`, `workspace_dir`, `connection_id`, and session/request fields when known | `AGENT_REPL_LOG_LEVEL` |
-| workspace sidecar | `<workspace>/.claude/emacs/sidecar.log`; canonical symlink to its daemon-owned target, with target `.1` through `.5` | `shim-claude-sidecar` forwards; `claude-repld` persists | contract JSONL | the workspace recipe above with `--runtime sidecar` | `workspace_id`, `workspace_dir`, `claude_session_id`, `pid`, and file context | `AGENT_REPL_LOG_LEVEL` |
+| workspace webapp | `<workspace>/.claude/emacs/webapp.log`; canonical symlink to its daemon-owned target, with target `.1` through `.5` | browser forwards; `agent-repld` persists | contract JSONL | the workspace recipe above with `--runtime webapp` | `workspace_id`, `workspace_dir`, `connection_id`, and session/request fields when known | `AGENT_REPL_LOG_LEVEL` |
+| workspace sidecar | `<workspace>/.claude/emacs/sidecar.log`; canonical symlink to its daemon-owned target, with target `.1` through `.5` | `shim-claude-sidecar` forwards; `agent-repld` persists | contract JSONL | the workspace recipe above with `--runtime sidecar` | `workspace_id`, `workspace_dir`, `claude_session_id`, `pid`, and file context | `AGENT_REPL_LOG_LEVEL` |
 | central Emacs | `~/.claude-emacs/logs/emacs.central.log` and `.1` through `.5`; `AGENT_REPL_EMACS_GLOBAL_LOG` names a customized live path | Emacs | contract JSONL | `bin/logs.sh --central --runtime emacs --since <RFC3339\|duration> --until <RFC3339>` | genuine global records have no workspace; `pid` and known session/request fields remain | `AGENT_REPL_LOG_LEVEL` |
-| central daemon run | `~/.claude-emacs/logs/daemon.run.log` and `.1` through `.5`; `$AGENT_REPL_STATE_DIR/logs/` replaces the default root | `claude-repld` | contract JSONL | the central recipe above with `--runtime daemon` | genuine global records have no workspace; `pid` and `request_id` remain when known | `AGENT_REPL_LOG_LEVEL` |
+| central daemon run | `~/.claude-emacs/logs/daemon.run.log` and `.1` through `.5`; `$AGENT_REPL_STATE_DIR/logs/` replaces the default root | `agent-repld` | contract JSONL | the central recipe above with `--runtime daemon` | genuine global records have no workspace; `pid` and `request_id` remain when known | `AGENT_REPL_LOG_LEVEL` |
 | central store | `~/.cache/agent-repl/log/shim-store.log` and `.1` through `.5`; `$XDG_CACHE_HOME/agent-repl/log/` replaces the default root | `shim-store` | contract JSONL | the central recipe above with `--runtime store` | `pid`, `request_id`, `agent_id`, and book keys when known | `AGENT_REPL_LOG_LEVEL` |
 | central sidecar | `~/.cache/agent-repl/log/shim-claude-sidecar.log` and `.1` through `.5`; `$XDG_CACHE_HOME/agent-repl/log/` replaces the default root | `shim-claude-sidecar` | contract JSONL | the central recipe above with `--runtime sidecar` | genuine global records have no workspace; `pid`, agent, and file keys remain when known | `AGENT_REPL_LOG_LEVEL` |
 
@@ -2493,7 +2493,7 @@ so the fresh-input rate is a SHARE and the expensive share is fresh + write.
 ## `conversation.v1` is what a producer saw, and the daemon only ever adds its own bookkeeping
 
 `conversation.v1` is designed to be rendered DIRECTLY by a frontend. A
-conversation record reaches the GUI as itself: `claude-repld` never synthesizes
+conversation record reaches the GUI as itself: `agent-repld` never synthesizes
 one, and never re-encodes one on its way out. The only thing the daemon
 contributes is its own bookkeeping — facts it worked out that no producer ever
 observed.
@@ -2502,7 +2502,7 @@ observed.
 record states something a PRODUCER observed, and there are exactly two
 producers: `claude-shim`, per session, watching the vendor SDK live — the
 stream plane — and `shim-claude-sidecar`, reading the vendor's on-disk
-transcripts — the file plane. `claude-repld` produces nothing here; it consumes
+transcripts — the file plane. `agent-repld` produces nothing here; it consumes
 what those two wrote. A daemon-minted `conversation.v1` record asserts an
 observation nobody made.
 
@@ -2527,8 +2527,8 @@ code rides in `conversation.v1`, the verdict rides in `frontend.v1`, and
 neither restates the other.
 
 THIS IS A TARGET, NOT A DESCRIPTION OF THE TREE. The first half holds today:
-`claude-repld` constructs `conversation.v1` messages at exactly three sites,
-all inside `claude-repld.internal.tokenusage.fromCounters()`, and both of its
+`agent-repld` constructs `conversation.v1` messages at exactly three sites,
+all inside `agent-repld.internal.tokenusage.fromCounters()`, and both of its
 callers are converting the daemon's OWN durable records
 (`state.v1.VendorTokenUsage`, `state.v1.TokenUsageTotals`) into the canonical
 shape for display — the daemon reading its own bookkeeping, per the section
@@ -2632,8 +2632,8 @@ the staleness judgement and the recorded safe order, and they are how a
 service ends up running a binary no build report accounts for.
 
 ```sh
-modules/app/agent-repl/daemon/bin/claude-repld deploy          # decisions, one line per component
-modules/app/agent-repl/daemon/bin/claude-repld deploy -force   # ENDS RUNNING TURNS
+modules/app/agent-repl/daemon/bin/agent-repld deploy          # decisions, one line per component
+modules/app/agent-repl/daemon/bin/agent-repld deploy -force   # ENDS RUNNING TURNS
 ```
 
 `bin/build-frontend.sh` (no `--out`) is still how Emacs's cold start builds a

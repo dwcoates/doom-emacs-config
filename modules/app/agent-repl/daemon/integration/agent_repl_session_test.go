@@ -8,7 +8,7 @@ import (
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/integration/harness"
+	"agent-repld/integration/harness"
 )
 
 // hasSession reports whether a topbar's connectivity indicator carries

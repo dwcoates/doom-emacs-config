@@ -11,10 +11,10 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
-	"claude-repld/internal/deploy"
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/rollout"
+	"agent-repld/internal/deploy"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/rollout"
 )
 
 // Deployer is the daemon's deploy, as the Deploy rpc asks it.

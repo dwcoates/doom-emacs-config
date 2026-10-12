@@ -3,7 +3,7 @@ package wsm
 import (
 	"context"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // DataVersion answers `PRAGMA data_version` on the handle's one connection.

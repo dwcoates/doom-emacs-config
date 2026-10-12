@@ -44,10 +44,10 @@ TIMEOUT="${E2E_COVERAGE_TIMEOUT:-45m}"
 # creates (harness.CoverageDir).
 # `go tool cover -func` resolves a profile's packages through the MODULE it
 # reports on, so each report runs from that module's own directory.
-GO_BINARIES=(claude-repld shim-store shim-claude-sidecar)
+GO_BINARIES=(agent-repld shim-store shim-claude-sidecar)
 go_module_dir() {
     case "$1" in
-        claude-repld)         printf '%s' "$ROOT/daemon" ;;
+        agent-repld)         printf '%s' "$ROOT/daemon" ;;
         shim-store)           printf '%s' "$ROOT/agent-shim/shim-store" ;;
         shim-claude-sidecar)  printf '%s' "$ROOT/agent-shim/claude/shim-sidecar" ;;
         *) die "no module directory is declared for '$1'" ;;

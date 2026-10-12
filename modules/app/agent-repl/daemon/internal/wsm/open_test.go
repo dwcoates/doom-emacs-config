@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/sourcescan"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/sourcescan"
 )
 
 func TestOpenRefusesUnusablePaths(t *testing.T) {

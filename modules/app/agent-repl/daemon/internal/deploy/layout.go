@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"claude-repld/internal/rollout"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/rollout"
+	"agent-repld/internal/wsm"
 )
 
 // layoutProbeBound bounds one `-layout-version` question. The binary answers

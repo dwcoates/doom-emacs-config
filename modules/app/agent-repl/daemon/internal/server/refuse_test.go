@@ -18,14 +18,14 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	"claude-repld/internal/bounce"
-	"claude-repld/internal/drain"
-	"claude-repld/internal/merge"
-	"claude-repld/internal/prompthandler"
-	"claude-repld/internal/promptqueue"
-	"claude-repld/internal/resolve/feed"
-	"claude-repld/internal/rollout"
-	"claude-repld/internal/workspace"
+	"agent-repld/internal/bounce"
+	"agent-repld/internal/drain"
+	"agent-repld/internal/merge"
+	"agent-repld/internal/prompthandler"
+	"agent-repld/internal/promptqueue"
+	"agent-repld/internal/resolve/feed"
+	"agent-repld/internal/rollout"
+	"agent-repld/internal/workspace"
 )
 
 // TestSetResponseErrorSetsTheNamedArm pins the mapping's core: an arm the rpc's

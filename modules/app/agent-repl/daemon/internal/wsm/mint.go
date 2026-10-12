@@ -5,7 +5,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"claude-repld/internal/ids"
+	"agent-repld/internal/ids"
 )
 
 // IDLength is how many characters every minted identifier has.

@@ -32,7 +32,7 @@ import (
 	"golang.org/x/net/http2/h2c"
 	"google.golang.org/protobuf/proto"
 
-	daemonserver "claude-repld/internal/server"
+	daemonserver "agent-repld/internal/server"
 )
 
 // killAnswerWriteBound is how long the KillSession answer has to reach the

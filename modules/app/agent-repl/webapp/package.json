@@ -2,7 +2,7 @@
   "name": "claude-repl-webapp",
   "version": "0.1.0",
   "private": true,
-  "description": "Connect (protobuf-es) SPA client for claude-repld",
+  "description": "Connect (protobuf-es) SPA client for agent-repld",
   "type": "module",
   "scripts": {
     "ensure-deps": "../bin/ensure-deps.sh",

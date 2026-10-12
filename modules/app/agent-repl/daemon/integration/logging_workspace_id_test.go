@@ -5,7 +5,7 @@ package integration
 import (
 	"testing"
 
-	"claude-repld/integration/harness"
+	"agent-repld/integration/harness"
 )
 
 // logging_workspace_id_test.go pins the owner's ruling of 2026-09-11: the

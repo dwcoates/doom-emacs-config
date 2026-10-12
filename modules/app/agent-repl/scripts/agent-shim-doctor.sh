@@ -358,7 +358,7 @@ check_frontend_socket_present() {
     record "daemon-frontend-socket-present" "PASS" "socket exists at $FRONTEND_SOCK"
   else
     record "daemon-frontend-socket-present" "FAIL" "no socket at $FRONTEND_SOCK" \
-      "the daemon (claude-repld) is not serving its frontend UDS; check the daemon is running"
+      "the daemon (agent-repld) is not serving its frontend UDS; check the daemon is running"
   fi
 }
 

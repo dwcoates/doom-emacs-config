@@ -14,7 +14,7 @@ what the `Dockerfile` says, not an observation. See
 ## Why it exists
 
 The e2e suite composes the four systems exactly as production wires them: a
-real `claude-repld`, a real `shim-store`, a real `shim-claude-sidecar`, and
+real `agent-repld`, a real `shim-store`, a real `shim-claude-sidecar`, and
 the real TypeScript shim. The Emacs-side integration suites additionally need
 a real Emacs with the module loaded through Doom. Run on the host, that means:
 

@@ -13,8 +13,8 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
-	"claude-repld/internal/feedid"
-	"claude-repld/internal/resolve/feed"
+	"agent-repld/internal/feedid"
+	"agent-repld/internal/resolve/feed"
 )
 
 // loadThrough calls LoadFeedThrough for TARGET and answers every frame.

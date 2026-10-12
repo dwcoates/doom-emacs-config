@@ -1,9 +1,9 @@
 package footer
 
 import (
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/health"
-	"claude-repld/internal/ids"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/health"
+	"agent-repld/internal/ids"
 )
 
 // THE FOOTER'S FAULT CELL. The owner's ruling of 2026-09-13 is that every

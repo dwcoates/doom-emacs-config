@@ -1,7 +1,7 @@
 // Package goroutinedump renders every goroutine's stack for a durable record.
 //
 // It is the daemon's ONE rendering of a goroutine dump: the SIGQUIT handler and
-// the wedged-boot bound (cmd/claude-repld/diagnose.go) and the lock stall
+// the wedged-boot bound (cmd/agent-repld/diagnose.go) and the lock stall
 // watchdog (internal/lockwatch) all put this text into a record, so a reader
 // sees the same shape whichever of them wrote it.
 package goroutinedump

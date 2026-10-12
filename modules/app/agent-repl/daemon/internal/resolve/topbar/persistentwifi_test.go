@@ -5,7 +5,7 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
-	"claude-repld/internal/ids"
+	"agent-repld/internal/ids"
 )
 
 func wifiState(wifi, mode string, name *string) *agentreplv1.PersistentWifiState {

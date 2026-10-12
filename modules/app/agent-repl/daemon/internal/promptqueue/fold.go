@@ -7,10 +7,10 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/holdfold"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/holdfold"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
 )
 
 // FOLDING A HELD PROMPT INTO THE ONE AHEAD (owner request, 2026-09-30;

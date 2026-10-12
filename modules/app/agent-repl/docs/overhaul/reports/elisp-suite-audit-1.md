@@ -202,7 +202,7 @@ Audit complete. Sanity check: I re-read the ask (holes relative to specs, tagged
 
 89. MISSING — fanout §11 stale addr "treated as absent" — the stale test asserts only the WARNING and the build; also assert the start stub ran (absent means build AND start).
 
-90. MISSING — fanout §11 "`agent-repl-daemon-command` (default the module's `daemon/bin/claude-repld`, no argv)" — assert the default value's path and that the spawn passes no arguments (record `$#` in the stub).
+90. MISSING — fanout §11 "`agent-repl-daemon-command` (default the module's `daemon/bin/agent-repld`, no argv)" — assert the default value's path and that the spawn passes no arguments (record `$#` in the stub).
 
 **Cross-suite**
 

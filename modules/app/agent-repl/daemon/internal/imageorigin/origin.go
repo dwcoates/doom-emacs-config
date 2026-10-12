@@ -27,7 +27,7 @@ import (
 	"strings"
 	"sync"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // Route is the origin's mount point on the daemon's own mux. It ends in a

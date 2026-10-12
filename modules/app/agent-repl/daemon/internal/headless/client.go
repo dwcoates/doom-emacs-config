@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"claude-repld/internal/envc"
+	"agent-repld/internal/envc"
 )
 
 // execFunc is the one exec site, as a seam so the client's own tests never

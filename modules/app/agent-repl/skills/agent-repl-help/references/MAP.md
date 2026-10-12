@@ -16,7 +16,7 @@ read and written. Finished work lands on master through a **merge queue**.
 | Part | Where | What it does |
 |---|---|---|
 | Emacs frontend | `lisp/*.el`, loaded by `config.el` | Keys and commands, tabs, panels, the composer, the editor popup. It asks the daemon for everything and holds no workspace state of its own. |
-| Daemon (`claude-repld`) | `daemon/` (Go) | The resident service and the source of truth. It creates, names, merges and restarts workspaces, runs the merge queue, and composes every view the webapp draws. It outlives Emacs. |
+| Daemon (`agent-repld`) | `daemon/` (Go) | The resident service and the source of truth. It creates, names, merges and restarts workspaces, runs the merge queue, and composes every view the webapp draws. It outlives Emacs. |
 | Shim | `agent-shim/claude/shim/` (TypeScript) | One process per workspace session. It drives the Claude SDK and reports what the agent does. |
 | Sidecar | `agent-shim/claude/shim-sidecar/` (Go) | Reads Claude's own transcripts on disk. |
 | Store | `agent-shim/shim-store/` (Go) | The durable record of every conversation. The shim and the sidecar write to it. |

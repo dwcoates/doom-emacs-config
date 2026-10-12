@@ -5,7 +5,7 @@ package integration
 import (
 	"testing"
 
-	"claude-repld/integration/harness"
+	"agent-repld/integration/harness"
 )
 
 // support_drain_test.go holds the drain/rollout suite's own small helpers,

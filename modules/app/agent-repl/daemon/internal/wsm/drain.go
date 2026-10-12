@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // PutDrainSchedule puts a drain schedule in force, replacing any current one. At

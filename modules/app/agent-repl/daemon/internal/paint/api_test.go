@@ -3,7 +3,7 @@ package paint
 import (
 	"testing"
 
-	"claude-repld/internal/vocab"
+	"agent-repld/internal/vocab"
 )
 
 // repoVocabDir is the checked-in vocabulary, which is the inventory every

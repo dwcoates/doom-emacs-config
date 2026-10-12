@@ -5,7 +5,7 @@ import (
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // SetAgentReplSession states agent-repl's session on every strip, present and

@@ -1,8 +1,8 @@
 package footer
 
 import (
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
 )
 
 // A MID-SESSION VENDOR BLOCK is the vendor or the account refusing a session

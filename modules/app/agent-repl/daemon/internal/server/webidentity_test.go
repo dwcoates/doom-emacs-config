@@ -9,8 +9,8 @@ import (
 
 	"connectrpc.com/connect"
 
-	"claude-repld/internal/ids"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
 )
 
 // receiveWebIdentity reads the web stream up to its next `session_identity`

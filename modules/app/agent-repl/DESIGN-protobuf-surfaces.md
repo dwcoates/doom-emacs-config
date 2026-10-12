@@ -9,13 +9,13 @@ facts it worked out that no producer observed.
 PRODUCER OBSERVE it, or did the DAEMON WORK IT OUT? Observed goes in
 `conversation.v1` and travels unchanged; worked out goes in `frontend.v1` and
 rides alongside. The producers are `claude-shim` (stream plane) and
-`shim-claude-sidecar` (file plane); `claude-repld` produces nothing.
+`shim-claude-sidecar` (file plane); `agent-repld` produces nothing.
 
 **Verified state at the time of the decision.**
 
 - The daemon does NOT synthesize conversation records. It constructs
   `conversation.v1` messages at exactly three sites, all in
-  `claude-repld.internal.tokenusage.fromCounters()`, and both callers convert
+  `agent-repld.internal.tokenusage.fromCounters()`, and both callers convert
   the daemon's OWN durable records — `state.v1.VendorTokenUsage` and
   `state.v1.TokenUsageTotals` — into the canonical display shape. That is the
   daemon reading its own bookkeeping.
@@ -46,6 +46,6 @@ restates the other.
 **A correction this forces.** `GAPS-wave-two.md` §D records
 `conversation.v1.DetachedWorkKind` and `conversation.v1.DetachedWorkEnded` as a
 "strictly richer" replacement for `protocol.v1.TaskKind`/`TerminalStatus`. They
-are not: the exit status was dropped, and `claude-repld` still reaches for
+are not: the exit status was dropped, and `agent-repld` still reaches for
 `protocolv1.TerminalStatus` at the settle site. `frontend.v1.DetachedWorkShellExit`
 should not exist; the exit status belongs on `conversation.v1.DetachedWorkEnded`.

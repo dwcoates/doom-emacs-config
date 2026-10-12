@@ -3,9 +3,9 @@ package rollout
 import (
 	"context"
 
-	"claude-repld/internal/bringup"
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/bringup"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/wsm"
 )
 
 // opBringUp is the operation a successor's session starts are recorded under.

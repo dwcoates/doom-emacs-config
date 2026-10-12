@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"claude-repld/internal/account"
+	"agent-repld/internal/account"
 )
 
 // rootWithIdentity makes a config root whose identity file holds body.

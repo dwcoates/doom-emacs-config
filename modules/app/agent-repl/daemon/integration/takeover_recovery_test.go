@@ -5,7 +5,7 @@ package integration
 import (
 	"testing"
 
-	"claude-repld/integration/harness"
+	"agent-repld/integration/harness"
 )
 
 // TestASuccessorHandedNothingRecoversTheShimNobodyServes is the live deploy of

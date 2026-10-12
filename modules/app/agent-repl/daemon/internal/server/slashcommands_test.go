@@ -11,7 +11,7 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
-	"claude-repld/internal/commandcatalog/catalogtest"
+	"agent-repld/internal/commandcatalog/catalogtest"
 )
 
 // TestListSlashCommandsAnswersTheStandingCatalog pins that the composer is

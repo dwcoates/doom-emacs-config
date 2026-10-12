@@ -13,7 +13,7 @@ import (
 	"strconv"
 	"strings"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // THE WIDGET BUILD. cee-webapp and this daemon both serve the widget from the

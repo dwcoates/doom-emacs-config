@@ -5,7 +5,7 @@ import (
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/wsm"
 )
 
 // priorityLabel is the badge's drawn label, and the empty string when the

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/headless"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/headless"
 )
 
 // EVERY DYNAMICALLY CREATED WORKSPACE IS NAMED BY THE MODEL (owner ruling,

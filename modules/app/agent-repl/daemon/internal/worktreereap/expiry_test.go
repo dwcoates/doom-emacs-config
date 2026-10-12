@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"claude-repld/internal/ids"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
 )
 
 // hoursAgo is an instant that many hours before now.

@@ -18,7 +18,7 @@ func TestRootEnvironmentOverrideWins(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(moduleRoot, "daemon"), 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
-	exePath := filepath.Join(moduleRoot, "daemon", "claude-repld")
+	exePath := filepath.Join(moduleRoot, "daemon", "agent-repld")
 	t.Setenv(Env, filepath.Join(tmp, "elsewhere", "..", "elsewhere-override"))
 
 	// Act.
@@ -37,14 +37,14 @@ func TestRootEnvironmentOverrideWins(t *testing.T) {
 // TestRootModuleRootAncestor verifies that when the executable lives beneath
 // a "modules/app/agent-repl" directory, that directory itself is the root.
 func TestRootModuleRootAncestor(t *testing.T) {
-	// Arrange: <tmp>/modules/app/agent-repl/daemon/claude-repld.
+	// Arrange: <tmp>/modules/app/agent-repl/daemon/agent-repld.
 	tmp := t.TempDir()
 	moduleRoot := filepath.Join(tmp, "modules", "app", "agent-repl")
 	daemonDir := filepath.Join(moduleRoot, "daemon")
 	if err := os.MkdirAll(daemonDir, 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
-	exePath := filepath.Join(daemonDir, "claude-repld")
+	exePath := filepath.Join(daemonDir, "agent-repld")
 
 	// Act.
 	got, err := Root(exePath)
@@ -63,7 +63,7 @@ func TestRootModuleRootAncestor(t *testing.T) {
 // than being that directory itself), the root is that subdirectory.
 func TestRootRepositoryRootAncestor(t *testing.T) {
 	// Arrange: <tmp>/repo/modules/app/agent-repl exists, and the executable
-	// lives at <tmp>/repo/some/other/deploy/claude-repld, well outside it.
+	// lives at <tmp>/repo/some/other/deploy/agent-repld, well outside it.
 	tmp := t.TempDir()
 	repoRoot := filepath.Join(tmp, "repo")
 	moduleRoot := filepath.Join(repoRoot, "modules", "app", "agent-repl")
@@ -74,7 +74,7 @@ func TestRootRepositoryRootAncestor(t *testing.T) {
 	if err := os.MkdirAll(deployDir, 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
-	exePath := filepath.Join(deployDir, "claude-repld")
+	exePath := filepath.Join(deployDir, "agent-repld")
 
 	// Act.
 	got, err := Root(exePath)
@@ -95,7 +95,7 @@ func TestRootRepositoryRootAncestor(t *testing.T) {
 func TestRootWithNoMarkerNearTheExecutableFallsBack(t *testing.T) {
 	// Arrange: a bare directory tree with no "modules/app/agent-repl" in it.
 	tmp := t.TempDir()
-	exePath := filepath.Join(tmp, "bin", "claude-repld")
+	exePath := filepath.Join(tmp, "bin", "agent-repld")
 	if err := os.MkdirAll(filepath.Dir(exePath), 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
@@ -174,7 +174,7 @@ func TestShimBuildStampIsBesideTheCompiledEntryPoint(t *testing.T) {
 func TestResolveRootRefusesWhenNothingNamesACheckout(t *testing.T) {
 	// Arrange.
 	unsetEnv(t)
-	exePath := filepath.Join(t.TempDir(), "bin", "claude-repld")
+	exePath := filepath.Join(t.TempDir(), "bin", "agent-repld")
 
 	// Act.
 	got, err := resolveRoot(exePath, func() (string, bool) { return "", false })
@@ -196,7 +196,7 @@ func TestResolveRootRefusesWhenNothingNamesACheckout(t *testing.T) {
 func TestResolveRootTakesTheCompiledFallbackOverTheRefusal(t *testing.T) {
 	// Arrange.
 	unsetEnv(t)
-	exePath := filepath.Join(t.TempDir(), "bin", "claude-repld")
+	exePath := filepath.Join(t.TempDir(), "bin", "agent-repld")
 
 	// Act.
 	got, err := resolveRoot(exePath, func() (string, bool) { return "/built/from/here", true })

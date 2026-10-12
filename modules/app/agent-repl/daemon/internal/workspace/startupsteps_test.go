@@ -8,13 +8,13 @@ import (
 
 	shimv1 "agentrepl/proto/shim/v1"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/health"
-	"claude-repld/internal/sessionlock"
-	"claude-repld/internal/shimclient"
-	"claude-repld/internal/shimsocket"
-	"claude-repld/internal/startup"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/health"
+	"agent-repld/internal/sessionlock"
+	"agent-repld/internal/shimclient"
+	"agent-repld/internal/shimsocket"
+	"agent-repld/internal/startup"
+	"agent-repld/internal/wsm"
 )
 
 // stepNames is the fixture's reported steps by name, with a vendor retry's

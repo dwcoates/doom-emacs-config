@@ -50,7 +50,7 @@ export const TURN_TEST_MS = TURN_BUDGET_MS + BOOT_BUDGET_MS;
  *
  * ITS OWN CONSTANT, because the chain it bounds is not a turn: a merge
  * landing, the rollout trigger, the incumbent re-execing itself, a SECOND real
- * claude-repld's full boot, the adoption rendezvous, and only then the
+ * agent-repld's full boot, the adoption rendezvous, and only then the
  * `transferred` push this end waits on. That is structurally two real process
  * lifecycles, so a turn's 5s would bound the wrong thing.
  *

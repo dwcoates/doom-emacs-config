@@ -13,8 +13,8 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/internal/revealpace"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/revealpace"
+	"agent-repld/internal/wsm"
 )
 
 // fakePacing records what the resolver measures and persists, and answers

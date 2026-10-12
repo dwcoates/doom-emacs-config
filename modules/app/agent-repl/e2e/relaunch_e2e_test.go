@@ -28,7 +28,7 @@ import (
 
 	"connectrpc.com/connect"
 
-	"claude-repld/integration/harness"
+	"agent-repld/integration/harness"
 )
 
 // rlStopAndRelaunch performs the host's own stop and boots the daemon that

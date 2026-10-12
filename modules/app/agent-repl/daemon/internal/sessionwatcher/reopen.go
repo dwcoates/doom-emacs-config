@@ -3,7 +3,7 @@ package sessionwatcher
 import (
 	"time"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // A REFUSED WATCH ON EXPECTED WORK IS RE-OPENED ON A TIMER (owner ruling,

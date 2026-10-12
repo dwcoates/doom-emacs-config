@@ -5,12 +5,12 @@ import (
 	"strings"
 	"time"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/headless"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/prompts"
-	"claude-repld/internal/runecap"
-	"claude-repld/internal/standdown"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/headless"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/prompts"
+	"agent-repld/internal/runecap"
+	"agent-repld/internal/standdown"
 )
 
 // opSummary is the operation the turn summary's records carry.

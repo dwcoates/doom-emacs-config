@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // THE REGISTRY ORDER is one order of every workspace, held as each row's

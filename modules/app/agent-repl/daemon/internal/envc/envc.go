@@ -1,6 +1,6 @@
 // Package envc is the daemon's four environment contracts, typed.
 //
-// The contracts are read once at boot (cmd/claude-repld) and passed down as a
+// The contracts are read once at boot (cmd/agent-repld) and passed down as a
 // value; nothing below boot reads os.Getenv for them. See
 // docs/overhaul/daemon.md "Contract context (for implementers)" and the
 // ARCHITECTURE.md shim-spawn contract, which reproduces the same four names on

@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"claude-repld/internal/ids"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
 )
 
 // THE EXPIRY RULE. A linked worktree that survived every safety gate but is

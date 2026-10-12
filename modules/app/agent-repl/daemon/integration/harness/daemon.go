@@ -22,13 +22,13 @@ import (
 	"agentrepl/proto/agentrepl/v1/agentreplv1connect"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
-	"claude-repld/integration/fakegit"
-	"claude-repld/internal/chessboard"
-	"claude-repld/internal/daemonaddr"
-	"claude-repld/internal/stateroot"
-	"claude-repld/internal/tempdirs"
-	"claude-repld/internal/workspace"
-	"claude-repld/internal/wsm"
+	"agent-repld/integration/fakegit"
+	"agent-repld/internal/chessboard"
+	"agent-repld/internal/daemonaddr"
+	"agent-repld/internal/stateroot"
+	"agent-repld/internal/tempdirs"
+	"agent-repld/internal/workspace"
+	"agent-repld/internal/wsm"
 
 	"connectrpc.com/connect"
 	"golang.org/x/net/http2"
@@ -80,7 +80,7 @@ const runBudgetWaits = 7
 
 // HandoverChainTimeout bounds the few tests whose single Daemon context must
 // span an entire self-reload handover: a merge landing, the rollout trigger,
-// a SECOND real claude-repld's full boot and workspace adoption, and the
+// a SECOND real agent-repld's full boot and workspace adoption, and the
 // incumbent's own orderly exit — all chained on the ONE budget that started
 // ticking at the incumbent's own process start, never a fresh context of its
 // own. That is structurally two real process lifecycles, not one, so it gets
@@ -368,7 +368,7 @@ type Opts struct {
 	StoreSocket string
 }
 
-// Daemon is one running claude-repld process and the client dialed to it.
+// Daemon is one running agent-repld process and the client dialed to it.
 type Daemon struct {
 	// StateDir is the daemon's state root.
 	StateDir string
@@ -767,7 +767,7 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 	// forward verbatim outside its fixed override set). Both are absent
 	// entirely on an ordinary run.
 	if root := CoverageRoot(); root != "" {
-		daemonCov, err := CoverageEnv(root, "claude-repld")
+		daemonCov, err := CoverageEnv(root, "agent-repld")
 		if err != nil {
 			t.Fatalf("harness: %v", err)
 		}

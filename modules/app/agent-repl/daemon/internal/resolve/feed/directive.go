@@ -5,7 +5,7 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"claude-repld/internal/sessioncommand"
+	"agent-repld/internal/sessioncommand"
 )
 
 // A CONTEXT-CUT DIRECTIVE IS RECOGNISED FROM ITS OWN PROMPT TEXT, so the

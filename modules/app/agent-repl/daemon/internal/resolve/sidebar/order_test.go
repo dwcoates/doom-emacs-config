@@ -7,9 +7,9 @@ import (
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/internal/ids"
-	"claude-repld/internal/resolve/sidebar"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/resolve/sidebar"
+	"agent-repld/internal/wsm"
 )
 
 func TestRosterOrdersByPlace(t *testing.T) {

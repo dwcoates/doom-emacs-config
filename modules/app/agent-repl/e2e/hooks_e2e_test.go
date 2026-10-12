@@ -48,7 +48,7 @@ import (
 
 	"connectrpc.com/connect"
 
-	"claude-repld/integration/harness"
+	"agent-repld/integration/harness"
 )
 
 // newHookWorld builds one test's World plus one repository (fake-git backed)

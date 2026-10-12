@@ -13,10 +13,10 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 	"google.golang.org/protobuf/encoding/prototext"
 
-	"claude-repld/internal/feedid"
-	"claude-repld/internal/gitclient"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/feedid"
+	"agent-repld/internal/gitclient"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
 )
 
 // The resumed merge's fixtures: the lease the dead run held, the tip it

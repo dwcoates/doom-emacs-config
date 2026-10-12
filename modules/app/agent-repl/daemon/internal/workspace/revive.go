@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"sync"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/shimclient"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/shimclient"
 )
 
 // A HIBERNATED WORKSPACE IS REVIVED BY BEING LOOKED AT, not only by being

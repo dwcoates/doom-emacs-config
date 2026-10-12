@@ -20,8 +20,8 @@ import (
 
 	"connectrpc.com/connect"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
 )
 
 // HealthyStandDownExit is the MEASURED time a healthy shim takes to leave on

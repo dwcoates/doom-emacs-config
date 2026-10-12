@@ -7,8 +7,8 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"claude-repld/internal/classifier"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/classifier"
+	"agent-repld/internal/wsm"
 )
 
 // heldPrompt parks one prompt behind a running turn and returns the harness.

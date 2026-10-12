@@ -24,17 +24,17 @@ import (
 	"fmt"
 	"time"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/merge"
-	"claude-repld/internal/promptqueue"
-	"claude-repld/internal/rollout"
-	"claude-repld/internal/sessionlock"
-	"claude-repld/internal/shimclient"
-	"claude-repld/internal/shimsocket"
-	"claude-repld/internal/startingshim"
-	"claude-repld/internal/stateroot"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/merge"
+	"agent-repld/internal/promptqueue"
+	"agent-repld/internal/rollout"
+	"agent-repld/internal/sessionlock"
+	"agent-repld/internal/shimclient"
+	"agent-repld/internal/shimsocket"
+	"agent-repld/internal/startingshim"
+	"agent-repld/internal/stateroot"
+	"agent-repld/internal/wsm"
 )
 
 // DefaultAdoptBound is how long a surviving shim's adoption may take before
@@ -42,7 +42,7 @@ import (
 // bound is paid once for a whole boot rather than once per workspace.
 //
 // IT IS WHY THE DAEMON SERVES AT ALL. The listener is bound and daemon.addr is
-// published BEFORE this reconciliation runs (cmd/claude-repld/run.go steps 5
+// published BEFORE this reconciliation runs (cmd/agent-repld/run.go steps 5
 // and 6) and `http.Server.Serve` is not reached until after it, so every
 // instant this step spends is an instant the kernel is queueing client
 // connections onto a socket nobody is accepting. An unbounded adoption is

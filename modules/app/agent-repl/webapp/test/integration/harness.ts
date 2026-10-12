@@ -168,7 +168,7 @@ function fetchAcceptingJsdomSignals(
  * THE MOUNTED APP: every query and control that is about the PAGE.
  *
  * Split out of `Harness` so the identical mount can be driven against a
- * daemon this harness did not start — the real `claude-repld` the Go e2e
+ * daemon this harness did not start — the real `agent-repld` the Go e2e
  * world spawns (see `e2e/WEBAPP-LAYER-SPEC.md`). Everything a test asserts on
  * lives here; only the three fake-daemon-scripting members `Harness` adds do
  * not, so no existing integration file changes.

@@ -7,8 +7,8 @@ import (
 	"reflect"
 	"testing"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/wsm"
 )
 
 // fakeStore is the durable record, in memory, with injectable failures.

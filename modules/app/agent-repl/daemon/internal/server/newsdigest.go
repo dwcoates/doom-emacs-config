@@ -7,8 +7,8 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/publish"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/publish"
 )
 
 // NewsDigest is the server's view of the daily news digest

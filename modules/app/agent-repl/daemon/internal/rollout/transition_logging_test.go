@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"claude-repld/internal/ids"
+	"agent-repld/internal/ids"
 )
 
 func TestRolloutStateTransitionsRecordTheirBeforeAndAfter(t *testing.T) {

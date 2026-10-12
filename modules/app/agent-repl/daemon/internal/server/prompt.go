@@ -11,12 +11,12 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/feedid"
-	"claude-repld/internal/prompthandler"
-	"claude-repld/internal/replyquote"
-	"claude-repld/internal/workspace"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/feedid"
+	"agent-repld/internal/prompthandler"
+	"agent-repld/internal/replyquote"
+	"agent-repld/internal/workspace"
+	"agent-repld/internal/wsm"
 )
 
 // SubmitPrompt is the composer's submission, whole. The handler validates,

@@ -10,7 +10,7 @@ import (
 
 	"github.com/creack/pty"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // Default geometry for a freshly spawned login terminal.

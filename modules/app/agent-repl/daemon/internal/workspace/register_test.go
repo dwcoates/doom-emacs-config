@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"claude-repld/internal/shimclient"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/shimclient"
+	"agent-repld/internal/wsm"
 )
 
 // worktreeDir makes a directory that looks like a git worktree to the

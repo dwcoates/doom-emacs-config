@@ -1,8 +1,8 @@
 package workspace
 
 import (
-	"claude-repld/internal/account"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/account"
+	"agent-repld/internal/wsm"
 )
 
 // accountRootFor answers the account root a workspace's session spends from.

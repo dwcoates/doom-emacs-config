@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 func TestRefusalRendersTheLedgerMessage(t *testing.T) {

@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 func TestFocusReadsUnfocusedBeforeAnyStreamAttaches(t *testing.T) {

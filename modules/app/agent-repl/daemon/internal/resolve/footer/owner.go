@@ -7,8 +7,8 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/feedid"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/feedid"
 )
 
 // THE FOOTER DRAWS ONLY THE MAIN AGENT'S WORK (owner ruling, 2026-09-30:

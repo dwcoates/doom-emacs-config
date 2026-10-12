@@ -27,7 +27,7 @@ import (
 	"testing"
 	"time"
 
-	"claude-repld/integration/harness"
+	"agent-repld/integration/harness"
 )
 
 // WebappLayerPerfTimeout bounds the perf area's vitest child.

@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	"claude-repld/internal/health"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/prompts"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/health"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/prompts"
+	"agent-repld/internal/wsm"
 )
 
 // addSupportBrief arranges the brief RequestCommandSupport composes from.

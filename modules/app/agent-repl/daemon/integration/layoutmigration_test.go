@@ -8,8 +8,8 @@ import (
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/integration/harness"
-	"claude-repld/internal/wsm"
+	"agent-repld/integration/harness"
+	"agent-repld/internal/wsm"
 )
 
 // TestBootServesAWorkspaceRegisteredUnderTheOlderLayout is the defect this

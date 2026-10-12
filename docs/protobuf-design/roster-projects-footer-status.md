@@ -47,7 +47,7 @@ roster arm to project onto, so the roster's status `oneof` needs new arms.
     shim's turn ack (`footer.Resolver.AckTurn`, told beside the roster's from
     the prompt queue's one `ackTurn`) ends `working · submitting`, and the
     bring-up under way (`footer.Resolver.SetBringingUp`, told beside the
-    roster's from one closure in `cmd/claude-repld/graph.go`) is the
+    roster's from one closure in `cmd/agent-repld/graph.go`) is the
     bring-up window of a route never seen (`ladder.AwaitingBringUp`). The
     roster's old `init` window read from the durable session record alone is
     gone: a record with no bring-up running reads idle.

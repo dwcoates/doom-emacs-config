@@ -703,9 +703,9 @@ func verifyVendorGuard(ctx context.Context, t *testing.T, client *Client, run in
 	}
 	var daemonPID int
 	if err := json.Unmarshal(raw, &daemonPID); err != nil || daemonPID == 0 {
-		found, findErr := pgrepOne(ctx, "claude-repld")
+		found, findErr := pgrepOne(ctx, "agent-repld")
 		if findErr != nil {
-			t.Errorf("cold start %d: Emacs holds no daemon process and no `claude-repld` could be found, "+
+			t.Errorf("cold start %d: Emacs holds no daemon process and no `agent-repld` could be found, "+
 				"so the vendor guard could not be verified on the daemon: %v", run, findErr)
 			return
 		}

@@ -7,9 +7,9 @@ import (
 	"sort"
 	"time"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
 )
 
 // This file is a merge MOVING WITH ITS WORKSPACE across a blue-green handover.
