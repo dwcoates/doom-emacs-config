@@ -44,6 +44,7 @@ import (
 	"agent-repld/internal/login"
 	"agent-repld/internal/merge"
 	"agent-repld/internal/mergeworkspace"
+	"agent-repld/internal/opentabs"
 	"agent-repld/internal/paint"
 	"agent-repld/internal/persistentwifi"
 	"agent-repld/internal/prompthandler"
@@ -63,7 +64,6 @@ import (
 	"agent-repld/internal/sessionlock"
 	"agent-repld/internal/sessionwatcher"
 	"agent-repld/internal/shimclient"
-	"agent-repld/internal/startup"
 	"agent-repld/internal/titlesynth"
 	"agent-repld/internal/vocab"
 	"agent-repld/internal/workspace"
@@ -319,8 +319,8 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// it needs this supervisor. By the time a shim's link can break, the fleet
 	// exists; before then the witness refuses rather than concluding anything.
 	var fleet *workspace.Fleet
-	// The editor startup's bring-up reads ownership at run time; it is built
-	// with the merge orchestrator, below the startup.
+	// The editor's opens' bring-up reads ownership at run time; it is built
+	// with the merge orchestrator, below the opens.
 	var ownership workspace.Ownership
 	// THE SERVICES' LATCH: every spawn waits until the boot's service step
 	// has made the store and the sidecar current (see serviceGate).
@@ -602,23 +602,20 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Log:        log,
 	})
 
-	// THE EDITOR'S STARTUP (internal/startup) is told every bring-up step the
-	// fleet takes, so it is built first; it reaches the fleet only once the
-	// daemon serves, by which time the fleet below exists.
-	startupRuns, err := startup.New(startup.Deps{
-		Order: func() []sidebar.TabEntry {
-			roster, _ := sidebarResolver.Topic().Latest()
-			return sidebar.TabOrder(roster)
-		},
+	// THE EDITOR'S OPENS (internal/opentabs) are told every bring-up step the
+	// fleet takes, so they are built first; an open reaches the fleet only
+	// once the daemon serves, by which time the fleet below exists.
+	opens, err := opentabs.New(opentabs.Deps{
 		Live: func(ws ids.WorkspaceID) bool { return fleet.Live(ws) },
 		BringUp: func(pending []ids.WorkspaceID, done func(ids.WorkspaceID, error)) {
 			editorBringUp(fleet, p.DB, ownership, bringingUp, log, pending, done)
 		},
-		Now: time.Now,
-		Log: log,
+		Opening: sidebarResolver.SetOpening,
+		Now:     time.Now,
+		Log:     log,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("agent-repld: build the editor startup: %w", err)
+		return nil, fmt.Errorf("agent-repld: build the editor's opens: %w", err)
 	}
 
 	// THE SESSIONS' OPEN ASKS, as the merge queue reads them. Built before the
@@ -654,7 +651,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Topbar:       topbarResolver,
 		BringUps:     bringingUp,
 		VendorStarts: sidebarResolver.SetVendorStart,
-		Steps:        startupRuns.Step,
+		Steps:        opens.Step,
 		SessionsUp:   lifecycle.SessionUp,
 		SocketPath:   func(ws ids.WorkspaceID) string { return p.Layout.ShimSocket(string(ws)) },
 		StoreSocket:  p.Opts.storeSocket,
@@ -903,11 +900,17 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			topbarResolver.SetParked(ws, parked)
 		},
 		Exit: orderlyExit(func() { p.Exit(standDownOrderly) }),
-		Log:  p.Surfaces,
+		// A WITHHELD WORKSPACE'S STAND-DOWN runs on the fleet's detached
+		// lifetime, which the exit ends and joins.
+		Detach: fleet.Detach,
+		Log:    p.Surfaces,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the drain controller: %w", err)
 	}
+	// THE TURN-END EDGE RETRIES A DEFERRED STAND-DOWN: the lifecycle sink is
+	// told the free edge and a session coming up, and hands both on.
+	lifecycle.standDowns = drainController
 
 	// ---- the merge orchestrator ----
 
@@ -1016,6 +1019,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Shim:         fleet.Shim,
 		Freeness:     fleet.Running,
 		Ownership:    ownership,
+		StandDowns:   drainController,
 		Cards:        workspace.NewCards(feedResolver, topbarResolver, fleet),
 		LoadPrompt:   prompts.Load,
 		SplicePrompt: func(prompt prompts.Prompt, values map[string]string) (string, error) { return prompt.Splice(values) },
@@ -1235,7 +1239,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			NewsDigest:        digest,
 			ClassifierPrompt:  classifierPrompt,
 			EditorInstances:   editors,
-			Startup:           startupRuns,
+			Opens:             opens,
 			WebappDist:        paths.WebappDist,
 			ImageOrigin:       images.Handler(),
 			ChessBoards:       chessBoards,
@@ -1789,10 +1793,10 @@ func (f *faultSurfaces) FaultClosed(ws ids.WorkspaceID, id ids.FaultID) {
 	}
 }
 
-// opEditorBringUp names the editor startup's own bring-up records.
-const opEditorBringUp = "daemon.startup.bring_up"
+// opEditorBringUp names the editor's opens' own bring-up records.
+const opEditorBringUp = "daemon.opentabs.bring_up"
 
-// editorBringUp starts the named workspaces' sessions for the editor's startup
+// editorBringUp starts the named workspaces' sessions for an editor's open
 // through THE ONE BRING-UP (bringup.Run, and through it Fleet.Start), on the
 // fleet's own detached lifetime so the exit drains and joins it. Each
 // workspace's bring-up marker is raised before any start, as the boot and the
@@ -1838,7 +1842,7 @@ func editorBringUp(fleet editorFleet, db editorRecords, ownership workspace.Owne
 		}
 		record, err := db.Workspace(context.Background(), ws)
 		if err != nil {
-			log.Error(opEditorBringUp, "a workspace the editor's startup names could not be read; it is not brought up", dlog.Context{
+			log.Error(opEditorBringUp, "a workspace an editor's open names could not be read; it is not brought up", dlog.Context{
 				dlog.KeyWorkspaceID: string(ws), "error": err.Error(),
 			})
 			done(ws, fmt.Errorf("read the workspace record of %q: %w", ws, err))
