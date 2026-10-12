@@ -12,6 +12,11 @@ import {
   type SelectWorkspaceResponse,
 } from "../../../../proto/gen/ts/agentrepl/v1/endpoint_select_workspace_pb";
 import {
+  UpdateMergeQueueResponseSchema,
+  type UpdateMergeQueueRequest,
+  type UpdateMergeQueueResponse,
+} from "../../../../proto/gen/ts/agentrepl/v1/endpoint_update_merge_queue_pb";
+import {
   FeedMergeQueueSchema,
   FeedMergeQueueEntrySchema,
   type FeedMergeQueue,
@@ -25,8 +30,10 @@ import { testAppContext } from "../../rpc/app-context.js";
 import {
   drawFeedMergeQueue,
   drawFeedMergeQueueEntry,
+  FRONT_LABEL,
   selectQueueEntryWorkspace,
 } from "../../../src/feed/merge/queue.js";
+import type { Control } from "../../../src/control.js";
 import { RecordingSink, WORKSPACE, mergeRow, rowContext } from "../harness.js";
 import { oneofArms } from "../../arms.js";
 
@@ -430,5 +437,137 @@ describe("a daemon that cannot be reached answers at the clicked row", () => {
     const refusal = row.querySelector(".merge-queue-refusal");
     expect(refusal?.getAttribute("data-arm")).toBe("transport");
     expect(refusal?.textContent).toBe("the daemon could not be reached");
+  });
+});
+
+/** Every request a front-scripted daemon received, by endpoint. */
+interface FrontScripted {
+  ctx: AppContext;
+  fronts: UpdateMergeQueueRequest[];
+  selects: SelectWorkspaceRequest[];
+}
+
+/** A context whose UpdateMergeQueue runs ANSWER, and whose SelectWorkspace succeeds. */
+function frontScripted(answer: () => UpdateMergeQueueResponse): FrontScripted {
+  const fronts: UpdateMergeQueueRequest[] = [];
+  const selects: SelectWorkspaceRequest[] = [];
+  const transport = createRouterTransport(({ service }) => {
+    service(AgentRepl, {
+      updateMergeQueue: (req) => {
+        fronts.push(req);
+        return answer();
+      },
+      selectWorkspace: (req) => {
+        selects.push(req);
+        return SELECTED;
+      },
+    });
+  });
+  const ctx = testAppContext({
+    client: createAgentReplClient(transport),
+    workspace: WORKSPACE,
+    ticker: createTicker(1000),
+    failures: new RecordingSink(),
+    composerEnabled: false,
+  });
+  return { ctx, fronts, selects };
+}
+
+/** An UpdateMergeQueue success. */
+const FRONTED = create(UpdateMergeQueueResponseSchema, { result: { case: "success", value: {} } });
+
+/** An UpdateMergeQueue refusal answering no_such_queued_merge. */
+const NOTHING_QUEUED = create(UpdateMergeQueueResponseSchema, {
+  result: { case: "error", value: { cause: { case: "noSuchQueuedMerge", value: {} } } },
+});
+
+/** Draw a snapshot against a front-scripted daemon. */
+function drawFront(
+  answer: () => UpdateMergeQueueResponse = () => FRONTED,
+  queue: FeedMergeQueue = snapshot(),
+): { el: HTMLElement; s: FrontScripted } {
+  const s = frontScripted(answer);
+  return { el: drawFeedMergeQueue(queue, rowContext(s.ctx, mergeRow("m1"))), s };
+}
+
+/** The front control on the row at PLACE, if it has one. */
+function frontControl(el: HTMLElement, place: string): HTMLElement | null {
+  return el.querySelector<HTMLElement>(`[data-queue-place="${place}"] [data-merge-front]`);
+}
+
+describe("this workspace's own waiting row carries a front control", () => {
+  it("draws the control on this workspace's own waiting row", () => {
+    const { el } = drawFront();
+    expect(frontControl(el, "current")?.textContent).toBe(FRONT_LABEL);
+  });
+
+  it("draws no control on another workspace's waiting row", () => {
+    const { el } = drawFront();
+    expect(frontControl(el, "behind")).toBeNull();
+  });
+
+  it("draws no control on this workspace's own row while it merges", () => {
+    const queue = create(FeedMergeQueueSchema, {
+      ahead: [],
+      current: entry("mine", { case: "merging", activeTab: { text: "tests", round: 1 } }),
+      behind: [],
+    });
+    const { el } = drawFront(() => FRONTED, queue);
+    expect(frontControl(el, "current")).toBeNull();
+  });
+
+  it("asks UpdateMergeQueue to move the ref the queue served, verbatim", async () => {
+    const { el, s } = drawFront();
+    frontControl(el, "current")?.click();
+    await settle();
+    expect(
+      s.fronts.map((r) =>
+        r.action.case === "front"
+          ? [r.action.value.workspace?.id, r.action.value.workspace?.dir]
+          : r.action.case,
+      ),
+    ).toEqual([["mine", "/w/mine"]]);
+  });
+
+  it("does not jump to the row's workspace", async () => {
+    const { el, s } = drawFront();
+    frontControl(el, "current")?.click();
+    await settle();
+    expect(s.selects).toEqual([]);
+  });
+
+  it("draws NOTHING on success — the snapshot is republished in its new order", async () => {
+    const { el } = drawFront();
+    frontControl(el, "current")?.click();
+    await settle();
+    expect(el.querySelector(".refusal")).toBeNull();
+  });
+
+  it("draws a refusal at the row when nothing of this workspace is queued", async () => {
+    const { el } = drawFront(() => NOTHING_QUEUED);
+    frontControl(el, "current")?.click();
+    await settle();
+    const refusal = el.querySelector('[data-queue-place="current"] .refusal');
+    expect([refusal?.getAttribute("data-arm"), refusal?.textContent]).toEqual([
+      "noSuchQueuedMerge",
+      "this merge is no longer waiting on the queue",
+    ]);
+  });
+
+  it("gives the control back after a refusal", async () => {
+    const { el } = drawFront(() => NOTHING_QUEUED);
+    const control = frontControl(el, "current") as Control | null;
+    control?.click();
+    await settle();
+    expect(control?.disabled).toBe(false);
+  });
+
+  it("draws the transport refusal at the row when the daemon cannot be reached", async () => {
+    const { el } = drawFront(() => {
+      throw new ConnectError("socket is gone", Code.Unavailable);
+    });
+    frontControl(el, "current")?.click();
+    await settle();
+    expect(el.querySelector('[data-queue-place="current"] .refusal')?.getAttribute("data-arm")).toBe("transport");
   });
 });
