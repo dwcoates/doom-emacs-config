@@ -74,11 +74,25 @@ type orchestrator struct {
 	// facts is every workspace's last published merge facts, which is what
 	// Facts answers from without re-deriving anything.
 	facts map[ids.WorkspaceID]MergeFacts
-	// running is the run HOLDING each repository's slot: the one merge that
-	// may rebase, run the gate and move the target. A second admission for one
-	// repository is impossible in this process as well as across processes
-	// (the slot's run also holds the repository's kernel lock).
+	// running is the run HOLDING each repository's slot: the HEAD, the one
+	// merge that may move the target. A second admission for one repository
+	// is impossible in this process as well as across processes (the
+	// repository's kernel lock is held while any run of its chain stands).
 	running map[wsm.RepoKey]*run
+	// chains are each repository's runs IN QUEUE ORDER (chain.go): the head
+	// first, when it stands, then the merges rebased and tested ahead of their
+	// turn behind it, never more than cpugov.QueueWindow in all. A run joins
+	// it before it starts and leaves it at its one release (releaseSlot).
+	chains map[wsm.RepoKey][]*run
+	// chainSignals are each repository's chain-change broadcast: closed and
+	// replaced, under mu, whenever a member joins, leaves, is promoted or
+	// publishes a new tip, so a waiter that read the chain under mu and then
+	// waits on the channel it read misses no change.
+	chainSignals map[wsm.RepoKey]chan struct{}
+	// repoLocks are the repositories' kernel locks this process holds: taken
+	// when a repository's first run is admitted, released when its chain and
+	// slot are both empty again.
+	repoLocks map[wsm.RepoKey]*repoLock
 	// kicked records a kick that arrived while the repository's pump was
 	// running. The pump reads it under the same lock before it goes idle, so
 	// a kick is never lost between the pump's last look and its exit.
@@ -157,6 +171,14 @@ type orchestrator struct {
 	drainBound time.Duration
 	// gitBound overrides MergeGitStopBound, TEST-ONLY as drainBound is.
 	gitBound time.Duration
+	// window overrides cpugov.QueueWindow, TEST-ONLY as drainBound is: the
+	// package's tests of one merge at a time run with a window of one, so no
+	// merge behind the head starts; zero means the production window.
+	window int
+	// onChainIdle, when set, is called each time a merge behind its head goes
+	// idle between steps, waiting for its chain to change. Nil in production;
+	// a test reads where the chain stands from it.
+	onChainIdle func(ws ids.WorkspaceID)
 	// onGitStopWait, when set, is called once the drain has stopped every
 	// suspended run's git gate, immediately before it waits for the commands
 	// in flight: a test releases a held command from inside that wait.
@@ -210,6 +232,9 @@ func newOrchestrator(deps Deps) (*orchestrator, error) {
 		lockDir:         filepath.Join(deps.StateDir, "merge-locks"),
 		facts:           map[ids.WorkspaceID]MergeFacts{},
 		running:         map[wsm.RepoKey]*run{},
+		chains:          map[wsm.RepoKey][]*run{},
+		chainSignals:    map[wsm.RepoKey]chan struct{}{},
+		repoLocks:       map[wsm.RepoKey]*repoLock{},
 		kicked:          map[wsm.RepoKey]bool{},
 		displaces:       map[ids.WorkspaceID]bool{},
 		runsByWorkspace: map[ids.WorkspaceID]*run{},
@@ -259,6 +284,7 @@ func (d Deps) validate() error {
 	check(d.Briefs != nil, "Briefs")
 	check(d.Painter != nil, "Painter")
 	check(d.TestRunner != nil, "TestRunner")
+	check(d.Governor != nil, "Governor")
 	check(d.AwaitTurnEnd != nil, "AwaitTurnEnd")
 	check(d.Occupy != nil, "Occupy")
 	check(d.StartSession != nil, "StartSession")

@@ -288,7 +288,9 @@ func (r *run) teardown(ctx context.Context, out outcome, terminal func()) {
 			"workspace": string(r.ws), "repo": string(r.repo), "error": err.Error()})
 	}
 	r.o.mu.Lock()
-	delete(r.o.running, r.repo)
+	if r.o.running[r.repo] == r {
+		delete(r.o.running, r.repo)
+	}
 	delete(r.o.runsByWorkspace, r.ws)
 	delete(r.o.repoOf, r.ws)
 	// The bubble's ledger identity retires with the merge it addressed; a
@@ -499,7 +501,9 @@ func (r *run) releaseInProcess(ctx context.Context) {
 		r.releaseOccupancy()
 	}
 	r.o.mu.Lock()
-	delete(r.o.running, r.repo)
+	if r.o.running[r.repo] == r {
+		delete(r.o.running, r.repo)
+	}
 	delete(r.o.runsByWorkspace, r.ws)
 	delete(r.o.repoOf, r.ws)
 	delete(r.o.ledgerOf, r.ws)
