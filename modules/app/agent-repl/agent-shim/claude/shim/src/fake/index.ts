@@ -86,7 +86,7 @@ import type {
   ToolResultOptions,
 } from "./scenario.js";
 import { fakeRewindFiles, judgeTruncatingResume } from "./rollback.js";
-import { FAKE_CLI_VERSION, FAKE_REASONING_SIGNATURE, transcriptPath, VendorFiles } from "./vendor-files.js";
+import { FAKE_CLI_VERSION, FAKE_REASONING_SIGNATURE, VendorFiles } from "./vendor-files.js";
 
 /**
  * IS THIS TASK A SHELL RUN? The vendor's own distinction, read off the id.
@@ -110,6 +110,7 @@ export {
   FAKE_MCP_SERVERS,
   FAKE_MODELS,
 } from "./catalogs.js";
+import { transcriptPath } from "../engine/vendor-paths.js";
 export { FAIL_TURN_MARKER } from "./registry.js";
 
 /**

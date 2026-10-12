@@ -41,6 +41,7 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
+import { cwdSlug, projectDir, transcriptPath } from "../engine/vendor-paths.js";
 import { bindLog } from "../log.js";
 
 const LOGGER = bindLog({ component: "shim-fake", operation: "shim.fake.vendor-files" });
@@ -75,28 +76,6 @@ const FAKE_ENTRYPOINT = "sdk-cli";
 /** The `userType` every record reports. The corpus has exactly one value. */
 const FAKE_USER_TYPE = "external";
 
-/**
- * Slugify an absolute directory the way the vendor names its project folder.
- *
- * EVERY byte that is not `[A-Za-z0-9]` becomes `-`; case is preserved and
- * existing dashes are untouched. This is stronger than "replace `/` and `.`":
- * an underscore is replaced too, which matters because macOS temp directories
- * (`/private/var/folders/_m/...`) are full of them and a test that guessed the
- * weaker rule would look for a directory the vendor never created.
- *
- * Verified against the live `~/.claude/projects` tree:
- * - `/Users/x/.config/y`      → `-Users-x--config-y`
- * - `/private/var/folders/_m/x` → `-private-var-folders--m-x`
- */
-export function cwdSlug(absoluteDir: string): string {
-  return absoluteDir.replace(/[^A-Za-z0-9]/g, "-");
-}
-
-/** Where one vendor session's transcript file lives. */
-export function transcriptPath(configDir: string, cwd: string, sessionId: string): string {
-  return join(configDir, "projects", cwdSlug(cwd), `${sessionId}.jsonl`);
-}
-
 /** Where one subagent's transcript lives, beside its sibling `.meta.json`. */
 export function subagentTranscriptPath(
   configDir: string,
@@ -104,7 +83,7 @@ export function subagentTranscriptPath(
   sessionId: string,
   agentId: string,
 ): string {
-  return join(configDir, "projects", cwdSlug(cwd), sessionId, "subagents", `agent-${agentId}.jsonl`);
+  return join(projectDir(configDir, cwd), sessionId, "subagents", `agent-${agentId}.jsonl`);
 }
 
 /** Where one subagent's metadata sidecar lives. */
@@ -114,7 +93,7 @@ export function subagentMetaPath(
   sessionId: string,
   agentId: string,
 ): string {
-  return join(configDir, "projects", cwdSlug(cwd), sessionId, "subagents", `agent-${agentId}.meta.json`);
+  return join(projectDir(configDir, cwd), sessionId, "subagents", `agent-${agentId}.meta.json`);
 }
 
 /** Where one detached task's output spool lives. */
