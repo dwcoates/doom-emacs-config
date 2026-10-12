@@ -919,3 +919,44 @@ func TestALinkedAgentSpoolIsDiscoveredOnceAsItsTranscript(t *testing.T) {
 		t.Fatalf("target = %+v, want the transcript under its config-root path", matches[0])
 	}
 }
+
+func TestScanNeverLooksBelowTheSpoolRootsOtherEntries(t *testing.T) {
+	// Arrange: production's root is /tmp, which holds far more than the uid
+	// dir; a spool-shaped file under any other entry is not the vendor's.
+	d, _, _, _ := fixture(t,
+		"spool/claude-501/-Users-me-work/sess-1/tasks/a2c.output",
+		"spool/artr-1234/sess-9/tasks/zz9.output",
+	)
+
+	// Act.
+	targets := d.Scan()
+
+	// Assert.
+	for _, target := range targets {
+		if strings.Contains(target.Path, "artr-1234") {
+			t.Fatalf("discovered %s, under a spool-root entry that is not a uid dir", target.Path)
+		}
+	}
+}
+
+func TestSpoolPatternsGlobBelowTheRootWhenItIsTheUIDDir(t *testing.T) {
+	tests := []struct {
+		name string
+		root string
+		want []string
+	}{
+		{name: "the uid dir itself", root: "/tmp/claude-501", want: []string{"/tmp/claude-501/*/*/tasks/*.output"}},
+		{name: "the uid dir's parent", root: "/tmp", want: []string{"/tmp/claude-*/*/*/tasks/*.output"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := spoolPatterns(tt.root)
+
+			// Assert
+			if fmt.Sprint(got) != fmt.Sprint(tt.want) {
+				t.Fatalf("spoolPatterns(%q) = %v, want %v", tt.root, got, tt.want)
+			}
+		})
+	}
+}
