@@ -294,6 +294,9 @@ type Fleet struct {
 	// its shim is up. The map is guarded by mu; each gate is held ACROSS a
 	// whole start, which is why it is not mu itself.
 	startGates map[ids.WorkspaceID]*sync.Mutex
+	// startsUnderWay names the workspaces whose start is under way, from the gate's
+	// liveness check until the start returns. Guarded by mu. See Serving.
+	startsUnderWay map[ids.WorkspaceID]bool
 	// watched is the LAST watcher this process started per workspace, kept
 	// after it closes: its pointers are what its successor resumes from, so a
 	// restart, a revival or a relaunch never replays history. See opening.go.
@@ -503,16 +506,17 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 			Clock: deps.Clock,
 		},
 
-		sessions:      map[ids.WorkspaceID]*live{},
-		sessionsMoved: make(chan struct{}),
-		coldGates:     map[ids.WorkspaceID]coldGate{},
-		handedOver:    map[ids.WorkspaceID]bool{},
-		lastCold:      map[ids.WorkspaceID]*conversationv1.SessionCold{},
-		reapedAt:      map[ids.WorkspaceID]time.Time{},
-		generation:    map[ids.WorkspaceID]int{},
-		startGates:    map[ids.WorkspaceID]*sync.Mutex{},
-		watched:       map[ids.WorkspaceID]sessionwatcher.Watcher{},
-		selected:      map[ids.WorkspaceID]bool{},
+		sessions:       map[ids.WorkspaceID]*live{},
+		sessionsMoved:  make(chan struct{}),
+		coldGates:      map[ids.WorkspaceID]coldGate{},
+		handedOver:     map[ids.WorkspaceID]bool{},
+		lastCold:       map[ids.WorkspaceID]*conversationv1.SessionCold{},
+		reapedAt:       map[ids.WorkspaceID]time.Time{},
+		generation:     map[ids.WorkspaceID]int{},
+		startGates:     map[ids.WorkspaceID]*sync.Mutex{},
+		startsUnderWay: map[ids.WorkspaceID]bool{},
+		watched:        map[ids.WorkspaceID]sessionwatcher.Watcher{},
+		selected:       map[ids.WorkspaceID]bool{},
 	}, nil
 }
 
@@ -1115,9 +1119,22 @@ func (f *Fleet) start(ctx context.Context, ws ids.WorkspaceID, rebind bool) erro
 	// between for want of either.
 	f.deps.BringUps(ws, true)
 	defer f.deps.BringUps(ws, false)
+	f.markStarting(ws, true)
+	defer f.markStarting(ws, false)
 	err := f.startUp(ctx, ws, rebind)
 	f.noteStartEnded(ws, err)
 	return err
+}
+
+// markStarting raises or lowers the workspace's start-under-way mark.
+func (f *Fleet) markStarting(ws ids.WorkspaceID, on bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if on {
+		f.startsUnderWay[ws] = true
+		return
+	}
+	delete(f.startsUnderWay, ws)
 }
 
 // noteStartEnded tells the startup a bring-up's service-level failure. A
