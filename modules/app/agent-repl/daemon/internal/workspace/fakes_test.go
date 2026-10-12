@@ -63,6 +63,13 @@ type fakeDB struct {
 
 	workspaces map[ids.WorkspaceID]wsm.Workspace
 	byDir      map[string]wsm.Workspace
+	// reserved are the merge names standing async requests reserved, by
+	// name; reservedErr fails their read.
+	reserved    map[string]ids.WorkspaceID
+	reservedErr error
+	// revealErr fails RevealMergeWorkspace; reveals records each reveal.
+	revealErr error
+	reveals   []ids.WorkspaceID
 	// listWorkspacesErr fails the roster read, for the tests about what a
 	// republish does with a state client that would not answer.
 	listWorkspacesErr error
@@ -294,6 +301,39 @@ func newFakeDB() *fakeDB {
 }
 
 // with records one workspace in the fake registry, keyed both ways.
+func (d *fakeDB) ReservedMergeNames(context.Context) (map[string]ids.WorkspaceID, error) {
+	if d.reservedErr != nil {
+		return nil, d.reservedErr
+	}
+	out := map[string]ids.WorkspaceID{}
+	for name, ws := range d.reserved {
+		out[name] = ws
+	}
+	return out, nil
+}
+
+// RevealMergeWorkspace stands for the durable reveal: a merge workspace's
+// flag is set once, and any other workspace is refused.
+func (d *fakeDB) RevealMergeWorkspace(_ context.Context, id ids.WorkspaceID) (bool, error) {
+	if d.revealErr != nil {
+		return false, d.revealErr
+	}
+	ws, ok := d.workspaces[id]
+	if !ok {
+		return false, wsm.ErrNotFound
+	}
+	if ws.MergeOf == nil {
+		return false, errors.New("fakeDB: the workspace is no merge workspace")
+	}
+	d.reveals = append(d.reveals, id)
+	if ws.MergeRevealed {
+		return false, nil
+	}
+	ws.MergeRevealed = true
+	d.with(ws)
+	return true, nil
+}
+
 func (d *fakeDB) with(ws wsm.Workspace) *fakeDB {
 	d.workspaces[ws.ID] = ws
 	d.byDir[ws.Dir] = ws

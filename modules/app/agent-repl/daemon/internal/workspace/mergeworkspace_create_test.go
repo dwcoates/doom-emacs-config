@@ -29,18 +29,20 @@ func mergeRequester(t *testing.T, f *fixture) (wsm.Workspace, string) {
 	return requester, targetDir
 }
 
-// mergeWorkspaceSpec is the spec a detached merge asks Create for.
+// mergeWorkspaceSpec is the spec an async merge asks Create for, named
+// "reconnect-fix".
 func mergeWorkspaceSpec(t *testing.T, f *fixture, requester ids.WorkspaceID) CreateSpec {
 	t.Helper()
 	return CreateSpec{
-		RepoDir:  mainWorktree(t, f),
-		BaseRef:  "ABC/sample",
-		ForkFrom: &requester,
-		MergeOf:  &wsm.MergeOrigin{Requester: requester, Request: "request-1"},
+		RepoDir:   mainWorktree(t, f),
+		BaseRef:   "ABC/sample",
+		ForkFrom:  &requester,
+		MergeOf:   &wsm.MergeOrigin{Requester: requester, Request: "request-1"},
+		MergeName: "reconnect-fix",
 	}
 }
 
-func TestCreateNamesAMergeWorkspaceAfterTheBranchItMergesWithNoNamingCall(t *testing.T) {
+func TestCreateNamesAMergeWorkspaceAsItsRequestNamedItWithNoNamingCall(t *testing.T) {
 	// Arrange
 	f := newFixture(t)
 	t.Setenv(PrefixEnv, "ABC")
@@ -53,30 +55,47 @@ func TestCreateNamesAMergeWorkspaceAfterTheBranchItMergesWithNoNamingCall(t *tes
 	}
 
 	// Assert
-	if len(f.git.created) != 1 || f.git.created[0].Branch != "ABC/sample-merge" {
-		t.Fatalf("created = %+v, want branch ABC/sample-merge", f.git.created)
+	if len(f.git.created) != 1 || f.git.created[0].Branch != "ABC/reconnect-fix" {
+		t.Fatalf("created = %+v, want branch ABC/reconnect-fix", f.git.created)
 	}
 	if len(f.headless.calls) != 0 {
 		t.Fatalf("naming calls = %d, want none", len(f.headless.calls))
 	}
 }
 
-func TestCreateDisambiguatesASecondMergeWorkspaceOfTheSameBranch(t *testing.T) {
-	// Arrange: an earlier merge workspace's branch still stands.
+func TestCreateTakesTheNameAMergeWorkspacesOwnRequestReserved(t *testing.T) {
+	// Arrange: the requester's request still holds the reservation.
 	f := newFixture(t)
 	t.Setenv(PrefixEnv, "ABC")
 	t.Setenv(LegacyPrefixEnv, "")
 	requester, _ := mergeRequester(t, f)
-	f.git.existingBranches = map[string]bool{"ABC/sample-merge": true}
+	f.db.reserved = map[string]ids.WorkspaceID{"reconnect-fix": requester.ID}
 
 	// Act
-	if _, err := f.verbs.Create(context.Background(), mergeWorkspaceSpec(t, f, requester.ID)); err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	_, err := f.verbs.Create(context.Background(), mergeWorkspaceSpec(t, f, requester.ID))
 
 	// Assert
-	if len(f.git.created) != 1 || f.git.created[0].Branch != "ABC/sample-merge-2" {
-		t.Fatalf("created = %+v, want branch ABC/sample-merge-2", f.git.created)
+	if err != nil || len(f.git.created) != 1 || f.git.created[0].Branch != "ABC/reconnect-fix" {
+		t.Fatalf("Create = %v, created %+v; want the reserved name taken by its own fork", err, f.git.created)
+	}
+}
+
+func TestCreateFailsAMergeWorkspaceWithNoNameWithNothingBuilt(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	requester, _ := mergeRequester(t, f)
+	spec := mergeWorkspaceSpec(t, f, requester.ID)
+	spec.MergeName = ""
+
+	// Act
+	_, err := f.verbs.Create(context.Background(), spec)
+
+	// Assert
+	if err == nil || len(f.git.created) != 0 {
+		t.Fatalf("Create = %v with %d worktrees, want an error with nothing built", err, len(f.git.created))
+	}
+	if !loggedAtError(f, opCreate) {
+		t.Fatal("the nameless merge workspace was not recorded at ERROR")
 	}
 }
 
@@ -163,12 +182,12 @@ func TestCreateMergeWorkspaceForksInTheRequestersRepository(t *testing.T) {
 	origin := wsm.MergeOrigin{Requester: requester.ID, Request: "request-1"}
 
 	// Act
-	if _, err := f.verbs.CreateMergeWorkspace(context.Background(), requester, origin, "ABC/sample"); err != nil {
+	if _, err := f.verbs.CreateMergeWorkspace(context.Background(), requester, origin, "reconnect-fix", "ABC/sample"); err != nil {
 		t.Fatalf("CreateMergeWorkspace: %v", err)
 	}
 
-	// Assert: forked from the requester, cut from its branch, recorded as its
-	// merge workspace.
+	// Assert: forked from the requester under the name its request reserved,
+	// cut from its branch, recorded as its merge workspace.
 	facts := f.db.registered[len(f.db.registered)-1]
 	if facts.MergeOf == nil || *facts.MergeOf != origin || len(f.account.ported) != 1 {
 		t.Fatalf("registered %+v with %d ported transcripts, want the requester's fork", facts, len(f.account.ported))
@@ -188,7 +207,7 @@ func TestCreateMergeWorkspaceFailsLoudlyForARequesterWithNoRepository(t *testing
 	requester.Repo = "repo-unregistered"
 
 	// Act
-	_, err := f.verbs.CreateMergeWorkspace(context.Background(), requester, wsm.MergeOrigin{Requester: requester.ID, Request: "request-1"}, "ABC/sample")
+	_, err := f.verbs.CreateMergeWorkspace(context.Background(), requester, wsm.MergeOrigin{Requester: requester.ID, Request: "request-1"}, "reconnect-fix", "ABC/sample")
 
 	// Assert
 	if err == nil || len(f.git.created) != 0 {

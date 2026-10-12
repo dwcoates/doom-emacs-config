@@ -84,6 +84,10 @@ const (
 	// ArmNamingFailed is a creation that supplied no name and whose headless
 	// naming call could not mint one.
 	ArmNamingFailed = "naming_failed"
+	// ArmNameReserved refuses a supplied name a pending async merge reserved,
+	// or one another allocation is claiming (CreateWorkspaceError
+	// .name_reserved). Its `branch` field names the branch.
+	ArmNameReserved = "name_reserved"
 	// ArmForkParentHasNoConversation is a fork whose parent never had one.
 	ArmForkParentHasNoConversation = "fork_parent_has_no_conversation"
 	// ArmForkSourceHasNoConversation is a fork into the primary branch whose

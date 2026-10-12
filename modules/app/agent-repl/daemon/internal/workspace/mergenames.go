@@ -1,0 +1,110 @@
+package workspace
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"sync"
+
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+)
+
+// This file is the ONE place a workspace name is HANDED OUT, so a name an async
+// merge reserves can never be taken before its merge workspace is created
+// under it (docs/protobuf-design/sync-async-merges.md).
+//
+// A name is taken when it is a registered workspace's, a branch of the
+// repository, a standing async request's reservation (durable, on its queue
+// row), or CLAIMED in this process: a create holds a claim on the name it
+// chose from the moment it chose it until it is registered or failed, and an
+// async request holds one from its check until its reservation is written.
+// Choosing and claiming happen under one lock, so two allocations can never
+// both hand out one name.
+
+// nameClaims is the process's claimed names, by branch.
+type nameClaims struct {
+	mu      sync.Mutex
+	claimed map[string]bool
+}
+
+// suppliedBranch is the branch a SUPPLIED name resolves to: taken as it stands
+// when it already carries a prefix component, prefixed otherwise. A create's
+// supplied name and an async merge's name resolve alike.
+func suppliedBranch(name string) string {
+	if strings.Contains(name, "/") {
+		return name
+	}
+	return Name(Prefix(), name)
+}
+
+// claim marks BRANCH claimed and answers its release, which is idempotent.
+// The caller holds v.names.mu.
+func (v *verbs) claimLocked(branch string) func() {
+	if v.names.claimed == nil {
+		v.names.claimed = map[string]bool{}
+	}
+	v.names.claimed[branch] = true
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			v.names.mu.Lock()
+			delete(v.names.claimed, branch)
+			v.names.mu.Unlock()
+		})
+	}
+}
+
+// takenLocked answers every branch name that is taken without asking git: the
+// registered workspaces' names, the standing reservations, and the claims.
+// EXCEPT names a reservation the given workspace itself holds, which is free
+// to the fork that reservation was made for. The caller holds v.names.mu.
+func (v *verbs) takenLocked(ctx context.Context, except ids.WorkspaceID) (map[string]bool, error) {
+	taken, err := v.takenNames(ctx)
+	if err != nil {
+		return nil, err
+	}
+	reserved, err := v.deps.DB.ReservedMergeNames(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("read the reserved merge names: %w", err)
+	}
+	for name, holder := range reserved {
+		if except != "" && holder == except {
+			continue
+		}
+		taken[suppliedBranch(name)] = true
+	}
+	for branch := range v.names.claimed {
+		taken[branch] = true
+	}
+	return taken, nil
+}
+
+// ClaimMergeName checks an async merge's name and claims it (merge.Names).
+func (v *verbs) ClaimMergeName(ctx context.Context, repoDir, name string) (string, func(), bool, error) {
+	log := v.deps.Log.Global()
+	branch := suppliedBranch(name)
+	fields := dlog.Context{"name": name, "branch": branch, "repo_dir": repoDir}
+	v.names.mu.Lock()
+	defer v.names.mu.Unlock()
+	taken, err := v.takenLocked(ctx, "")
+	if err != nil {
+		log.Error(opNaming, "could not read the names already taken; the async merge's name is not checked", withCause(fields, err))
+		return "", nil, false, err
+	}
+	if taken[branch] {
+		log.Info(opNaming, "an async merge's name is already taken", fields)
+		return branch, nil, true, nil
+	}
+	exists, err := v.deps.Git.BranchExists(ctx, repoDir, branch)
+	if err != nil {
+		log.Error(opNaming, "could not ask whether the async merge's branch exists", withCause(fields, err))
+		return "", nil, false, fmt.Errorf("probe the branch %q: %w", branch, err)
+	}
+	if exists {
+		log.Info(opNaming, "an async merge's name is already a branch", fields)
+		return branch, nil, true, nil
+	}
+	log.Debug(opNaming, "claimed an async merge's name until its request is recorded", fields)
+	return branch, v.claimLocked(branch), false, nil
+}
