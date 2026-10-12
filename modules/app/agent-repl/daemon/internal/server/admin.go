@@ -105,6 +105,22 @@ func (s *server) UpdateMergeQueue(
 		return connect.NewResponse(resp), nil
 	}
 
+	if req.Msg.GetHoldRollouts() != nil || req.Msg.GetReleaseRollouts() != nil {
+		action, apply := "hold_rollouts", s.deps.Merge.HoldRollouts
+		if req.Msg.GetReleaseRollouts() != nil {
+			action, apply = "release_rollouts", s.deps.Merge.ReleaseRollouts
+		}
+		if err := apply(ctx); err != nil {
+			return answer(resp, s.answerRefusal(s.log, rpc, resp, err, nil))
+		}
+		s.log.Info("daemon.server.update_merge_queue", "applied the merge-queue action",
+			dlog.Context{"action": action})
+		resp.Result = &agentreplv1.UpdateMergeQueueResponse_Success{
+			Success: &agentreplv1.UpdateMergeQueueSuccess{},
+		}
+		return connect.NewResponse(resp), nil
+	}
+
 	var scope *merge.RepositoryScope
 	var err error
 	if pause := req.Msg.GetPause(); pause != nil {
