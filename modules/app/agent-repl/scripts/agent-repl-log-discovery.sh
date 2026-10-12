@@ -224,7 +224,7 @@ runtime_path() {
   fi
   case "$runtime" in
     emacs) printf '%s' "$emacs_global_log" ;;
-    daemon) printf '%s/agent-repld.log' "$state_root" ;;
+    daemon) printf '%s/logs/daemon.run.log' "$state_root" ;;
     store) printf '%s/log/shim-store.log' "$cache_root" ;;
     sidecar) printf '%s/log/shim-claude-sidecar.log' "$cache_root" ;;
   esac
