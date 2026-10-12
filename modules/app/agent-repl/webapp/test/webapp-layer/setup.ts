@@ -1,32 +1,15 @@
 import { beforeAll } from "vitest";
 import { ForwardingLogger, bindLogContext, resetLoggingForTests, setLogger } from "../../src/log.js";
-import { installResizeObserver } from "../resize-observer.js";
-import { installIntersectionObserver } from "../intersection-observer.js";
-import { installGetAnimations } from "../animations.js";
+import { installJsdomCapabilities } from "../jsdom-capabilities.js";
 import { installTreeLayout } from "../tree-layout.js";
 
 /**
- * jsdom implements no `ResizeObserver` (it performs no layout), and the feed
- * mount subscribes one to its scroll box so a footer settling after a render
- * cannot leave the tail below the fold. This project does not load
- * `test/setup.ts`, so it installs the same environment substitution itself.
+ * jsdom performs no layout and runs no animations, so the observers and
+ * `Element.getAnimations` the app reaches for are substituted
+ * (jsdom-capabilities.ts). This project does not load `test/setup.ts`, so it
+ * installs the same set itself.
  */
-installResizeObserver();
-
-/**
- * jsdom implements no `IntersectionObserver` either, and the feed mount
- * subscribes ones for the selection's visibility (selection-visibility.ts). This project
- * does not load `test/setup.ts`, so it installs the same substitution itself.
- */
-installIntersectionObserver();
-
-/**
- * jsdom runs no CSS animations and ships no `Element.getAnimations`, which the
- * rail reads after every draw to keep its loops on the wall clock
- * (src/sidebar/wall-phase.ts). This project does not load `test/setup.ts`, so
- * it installs the same substitution itself.
- */
-installGetAnimations();
+installJsdomCapabilities();
 
 /**
  * jsdom lays nothing out, and a response bubble that draws a metaprompt tree
