@@ -594,22 +594,22 @@ func (v *verbs) forkNamingConversation(ctx context.Context, log dlog.Logger, spe
 }
 
 // forkableParentSession answers the parent's session when it holds a
-// conversation to fork, and the refusal ARM names (forkRefusalArm) when it
-// does not. It is the ONE statement of "this workspace can be forked", read by
-// the naming step (before a model call is paid for) and by the create itself.
+// conversation to fork (recordedSession.hasConversation), and the refusal ARM
+// names (forkRefusalArm) when it does not. Read by the naming step (before a
+// model call is paid for) and by the create itself.
 func (v *verbs) forkableParentSession(ctx context.Context, log dlog.Logger, parent ids.WorkspaceID, arm string) (wsm.Session, error) {
-	parentSession, ok, err := v.deps.DB.Session(ctx, parent)
+	parentConv, err := readRecordedSession(ctx, v.deps.DB, parent)
 	if err != nil {
 		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "err != nil"})
 		return wsm.Session{}, fmt.Errorf("fork from %q: read the parent session: %w", parent, err)
 	}
-	if !ok || parentSession.VendorSessionID == "" {
-		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "!ok || parentSession.VendorSessionID == \"\""})
+	if !parentConv.hasConversation() {
+		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "!parentConv.hasConversation()"})
 		return wsm.Session{}, refuseWith(log, "CreateWorkspace", arm,
 			fmt.Sprintf("workspace %q has no conversation to fork", parent), false,
 			map[string]any{"workspace": &workspacev1.WorkspaceRef{Id: string(parent)}})
 	}
-	return parentSession, nil
+	return parentConv.session, nil
 }
 
 // mergeTargetDir answers where this workspace's merge will land: the PARENT
