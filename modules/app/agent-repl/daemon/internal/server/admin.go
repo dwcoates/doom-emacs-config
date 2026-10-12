@@ -78,31 +78,16 @@ func (s *server) UpdateMergeQueue(
 	resp := &agentreplv1.UpdateMergeQueueResponse{}
 
 	if evict := req.Msg.GetEvict(); evict != nil {
-		subject, cerr, done := s.subjectFor(ctx, rpc, evict.GetWorkspace(), resp)
-		if done {
-			return answer(resp, cerr)
-		}
-		if err := s.deps.Merge.Evict(ctx, subject.Record.ID); err != nil {
-			return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
-		}
-		resp.Result = &agentreplv1.UpdateMergeQueueResponse_Success{
-			Success: &agentreplv1.UpdateMergeQueueSuccess{},
-		}
-		return connect.NewResponse(resp), nil
+		return s.actOnQueuedMerge(ctx, rpc, evict.GetWorkspace(), resp, func(ws ids.WorkspaceID) error {
+			return s.deps.Merge.Evict(ctx, ws)
+		})
 	}
 
 	if ref, move, ok := mergeMoveOf(req.Msg); ok {
-		subject, cerr, done := s.subjectFor(ctx, rpc, ref, resp)
-		if done {
-			return answer(resp, cerr)
-		}
-		if _, err := s.deps.Merge.Move(ctx, subject.Record.ID, move); err != nil {
-			return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
-		}
-		resp.Result = &agentreplv1.UpdateMergeQueueResponse_Success{
-			Success: &agentreplv1.UpdateMergeQueueSuccess{},
-		}
-		return connect.NewResponse(resp), nil
+		return s.actOnQueuedMerge(ctx, rpc, ref, resp, func(ws ids.WorkspaceID) error {
+			_, err := s.deps.Merge.Move(ctx, ws, move)
+			return err
+		})
 	}
 
 	if req.Msg.GetHoldRollouts() != nil || req.Msg.GetReleaseRollouts() != nil {
@@ -135,6 +120,29 @@ func (s *server) UpdateMergeQueue(
 	}
 	s.log.Info("daemon.server.update_merge_queue", "applied the merge-queue action",
 		dlog.Context{"scoped": scope != nil})
+	resp.Result = &agentreplv1.UpdateMergeQueueResponse_Success{
+		Success: &agentreplv1.UpdateMergeQueueSuccess{},
+	}
+	return connect.NewResponse(resp), nil
+}
+
+// actOnQueuedMerge is the one body of every UpdateMergeQueue arm that acts on
+// ONE workspace's queued merge: the ref resolved to a registered workspace,
+// ACT run on it, a refusal answered as its typed arm, and success otherwise.
+func (s *server) actOnQueuedMerge(
+	ctx context.Context,
+	rpc string,
+	ref *workspacev1.WorkspaceRef,
+	resp *agentreplv1.UpdateMergeQueueResponse,
+	act func(ids.WorkspaceID) error,
+) (*connect.Response[agentreplv1.UpdateMergeQueueResponse], error) {
+	subject, cerr, done := s.subjectFor(ctx, rpc, ref, resp)
+	if done {
+		return answer(resp, cerr)
+	}
+	if err := act(subject.Record.ID); err != nil {
+		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
+	}
 	resp.Result = &agentreplv1.UpdateMergeQueueResponse_Success{
 		Success: &agentreplv1.UpdateMergeQueueSuccess{},
 	}
