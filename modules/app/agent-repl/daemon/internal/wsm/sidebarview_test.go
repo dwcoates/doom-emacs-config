@@ -7,6 +7,14 @@ import (
 	"testing"
 )
 
+// undoLayout40 strips layout 40's additions (viewedWorkspacesDDL) from a
+// migrated file, leaving its stamp alone.
+func undoLayout40(t *testing.T, path string) {
+	t.Helper()
+	execRaw(t, path, `ALTER TABLE workspaces DROP COLUMN result_read_at`)
+	execRaw(t, path, `ALTER TABLE sidebar_view DROP COLUMN viewed_folded`)
+}
+
 func TestSetTaskFoldedIsReadBack(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -132,6 +140,21 @@ func TestSidebarViewWritesAreReadBack(t *testing.T) {
 					return err
 				}
 				return s.SetHiddenSectionFolded(context.Background(), false)
+			},
+			want: SidebarView{Grouping: GroupingRepository},
+		},
+		{
+			name:  "folding the viewed section keeps the other folds and the grouping",
+			write: func(s *store) error { return s.SetViewedSectionFolded(context.Background(), true) },
+			want:  SidebarView{ViewedFolded: true, Grouping: GroupingRepository},
+		},
+		{
+			name: "unfolding the viewed section again replaces its fold",
+			write: func(s *store) error {
+				if err := s.SetViewedSectionFolded(context.Background(), true); err != nil {
+					return err
+				}
+				return s.SetViewedSectionFolded(context.Background(), false)
 			},
 			want: SidebarView{Grouping: GroupingRepository},
 		},
