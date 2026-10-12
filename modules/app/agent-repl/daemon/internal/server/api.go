@@ -137,9 +137,10 @@ type Deps struct {
 	// EditorInstances judges each Emacs WatchDaemon's process identity, so a
 	// full Emacs restart is told apart from a reconnect.
 	EditorInstances EditorInstances
-	// Startup is the bring-up a new Emacs process is owed, its events told on
-	// that Emacs's WatchDaemon stream alone.
-	Startup Startup
+	// Opens serves OpenTabs and holds the page facts it waits on: which
+	// attached page stream serves which workspace, and which has drawn
+	// (internal/opentabs).
+	Opens Opens
 
 	// WebappDist is the webapp's dist directory, served on the same origin.
 	// Its entry point is re-stat'd per request and answered with
@@ -412,8 +413,8 @@ func New(deps Deps) (Server, error) {
 		return nil, missing("the classifier prompt updater")
 	case deps.EditorInstances == nil:
 		return nil, missing("the editor instance tracker")
-	case deps.Startup == nil:
-		return nil, missing("the editor startup")
+	case deps.Opens == nil:
+		return nil, missing("the editor's opens")
 	case deps.WebappDist == "":
 		return nil, missing("the webapp dist directory")
 	case deps.ImageOrigin == nil:
