@@ -48,6 +48,10 @@ var errFake = errors.New("workspace test: arranged failure")
 type fakeDB struct {
 	wsm.DB
 
+	// owedMu guards owed, the resumptions a stand-down recorded.
+	owedMu sync.Mutex
+	owed   map[ids.WorkspaceID][]ids.TurnID
+
 	// moves is every MovePlace call, in order; moveErr fails it.
 	moves   [][2]ids.WorkspaceID
 	moveErr error
@@ -253,6 +257,24 @@ func (d *fakeDB) RolledBackTurns(_ context.Context, ws ids.WorkspaceID) ([]ids.T
 		return nil, d.rolledBackErr
 	}
 	return d.rolledBack[ws], nil
+}
+
+// OweResumption records a stand-down's debt.
+func (d *fakeDB) OweResumption(_ context.Context, ws ids.WorkspaceID, turn ids.TurnID, _ time.Time) error {
+	d.owedMu.Lock()
+	defer d.owedMu.Unlock()
+	if d.owed == nil {
+		d.owed = map[ids.WorkspaceID][]ids.TurnID{}
+	}
+	d.owed[ws] = append(d.owed[ws], turn)
+	return nil
+}
+
+// owedTurns answers the turns a stand-down owed on ws.
+func (d *fakeDB) owedTurns(ws ids.WorkspaceID) []ids.TurnID {
+	d.owedMu.Lock()
+	defer d.owedMu.Unlock()
+	return append([]ids.TurnID(nil), d.owed[ws]...)
 }
 
 func newFakeDB() *fakeDB {

@@ -257,6 +257,9 @@ func (q *queue) touchEngagement(ctx context.Context, ws ids.WorkspaceID, log dlo
 // spans are STRIPPED from the drawn text; the full text stays on the record and
 // on what the shim received.
 func (q *queue) mirrorAccepted(ws ids.WorkspaceID, turn ids.TurnID, said *conversationv1.UserSaid, origin conversationv1.PromptOrigin) {
+	if feed.PromptRowHidden(origin) {
+		return
+	}
 	row := feed.PromptRow(origin, said, q.mirrorBlocks(said))
 	row.Turn = &conversationv1.TurnId{Value: string(turn)}
 	// THE ACCEPTED PROMPT LANDS WHERE ITS TURN DRAWS (recordTurn), never

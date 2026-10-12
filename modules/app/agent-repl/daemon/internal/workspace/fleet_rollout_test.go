@@ -1645,6 +1645,61 @@ func TestAwaitFreeAnswersAWatchersOwnError(t *testing.T) {
 	}
 }
 
+func TestKillSessionDuringAStandDownOwesTheRunningTurn(t *testing.T) {
+	// Arrange
+	f := newFleetFixture(t)
+	ws := f.workspace("w1").ID
+	turn := ids.TurnID("t-running")
+	f.watcher.turn = &turn
+	f.fleet.remember(ws, &live{client: f.client, watcher: f.watcher, sessionStarted: true})
+	f.supervisor.mu.Lock()
+	f.supervisor.standingDown = true
+	f.supervisor.mu.Unlock()
+
+	// Act
+	_ = f.fleet.KillSession(context.Background(), ws, true)
+
+	// Assert
+	if got := f.db.owedTurns(ws); len(got) != 1 || got[0] != turn {
+		t.Fatalf("owed = %v, want the running turn %q owed", got, turn)
+	}
+}
+
+func TestKillSessionNoStandDownOrderedOwesNothing(t *testing.T) {
+	// Arrange: the idle sweep's or a user's kill.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1").ID
+	turn := ids.TurnID("t-running")
+	f.watcher.turn = &turn
+	f.fleet.remember(ws, &live{client: f.client, watcher: f.watcher, sessionStarted: true})
+
+	// Act
+	_ = f.fleet.KillSession(context.Background(), ws, true)
+
+	// Assert
+	if got := f.db.owedTurns(ws); len(got) != 0 {
+		t.Fatalf("owed = %v, want nothing owed for a kill no stand-down ordered", got)
+	}
+}
+
+func TestKillSessionDuringAStandDownWithNoTurnRunningOwesNothing(t *testing.T) {
+	// Arrange
+	f := newFleetFixture(t)
+	ws := f.workspace("w1").ID
+	f.fleet.remember(ws, &live{client: f.client, watcher: f.watcher, sessionStarted: true})
+	f.supervisor.mu.Lock()
+	f.supervisor.standingDown = true
+	f.supervisor.mu.Unlock()
+
+	// Act
+	_ = f.fleet.KillSession(context.Background(), ws, true)
+
+	// Assert
+	if got := f.db.owedTurns(ws); len(got) != 0 {
+		t.Fatalf("owed = %v, want nothing owed for an idle session", got)
+	}
+}
+
 func TestStartUnderWayAnswersTheStartsInFlight(t *testing.T) {
 	tests := []struct {
 		name    string

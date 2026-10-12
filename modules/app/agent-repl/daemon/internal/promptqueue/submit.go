@@ -561,6 +561,10 @@ func (q *queue) releaseReconnectHoldsLocked(ctx context.Context, d *delivery, lo
 	if q.factsPending(ws, "the session-up release", log, q.releaseReconnectHoldsLocked) {
 		return
 	}
+	// WHAT A STAND-DOWN CUT RUNS FIRST (restartredrive.go): the prompts that
+	// waited out the restart are released below and judged against it, as any
+	// prompt that arrives while a turn runs.
+	q.redriveOwedLocked(ctx, d, log)
 
 	standing, err := q.deps.DB.HeldPrompts(ctx, ws)
 	if err != nil {
