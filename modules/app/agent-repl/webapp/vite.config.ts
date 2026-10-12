@@ -1,6 +1,7 @@
 import { defineConfig } from "vite";
 import { protobufRuntimeAliases } from "./protobuf-runtime-aliases";
 import { viteCacheDir } from "./vite-cache";
+import { viteRegistryGuard } from "../proto/ts/registry-guard.mjs";
 
 /**
  * Production build config. Tests read vitest.config.ts (which wins when both
@@ -29,6 +30,10 @@ export default defineConfig({
   // config in this package on it.
   cacheDir: viteCacheDir,
   resolve: { alias: protobufRuntimeAliases },
+  // protobuf-es re-walks every booted dependency's closure for each file it
+  // boots; the guard cuts the page's proto boot from ~0.20s to ~0.13s of CPU
+  // (proto/ts/registry-guard.mjs).
+  plugins: [viteRegistryGuard()],
   build: {
     rollupOptions: {
       output: {
