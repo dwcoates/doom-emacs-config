@@ -1416,21 +1416,46 @@ the tab bar on a reconnect would be a worse lie than a stale paint."
                     "elisp.roster.link-down: stream forgotten view-kept=%s"
                     (if agent-repl-roster-view "t" "nil")))
 
+(defun agent-repl-roster-on-link-handover (_old new)
+  "Move the roster onto NEW, the successor daemon, the moment it is ACCEPTED.
+Registered on `agent-repl-link-handover-functions'.
+
+THE ROSTER IS DAEMON-WIDE, SO IT FOLLOWS THE NEWEST DAEMON, NOT THE LAST
+ONE TO EXIT.  Per-workspace streams stay on whichever daemon still serves
+each workspace, but the roster rides one connection, and it used to stay
+on the outgoing daemon until that daemon dropped its stream.  A handover
+that never finished never dropped it: on 2026-10-12 the outgoing daemon
+kept one workspace for nine hours, a relaunched Emacs attached to it, and
+every roster it pushed carried a field the deploy\='s own elisp had
+retired -- each push was refused whole, and no workspace loaded.  The
+successor is the daemon the deploy reloaded this Emacs for, and both
+read the one registry, so its roster is the one this Emacs can read."
+  (agent-repl--info '(:agent-repl-central "the roster stream spans workspaces")
+                    "elisp.roster.resubscribed-on-handover address=%S"
+                    (agent-repl-connect-connection-address new))
+  (agent-repl-roster-subscribe new))
+
 (defun agent-repl-roster-on-link-promote (_old new)
   "Re-subscribe the roster on NEW when the successor is PROMOTED to primary.
 A promotion fires no up hooks -- by design, because every workspace was
 already adopted onto the successor and re-registering the fleet would be
-a lie.  The ROSTER is not adopted, though: its stream rode the OLD
-connection and dies with it, so without this re-subscription Emacs comes
-out of every blue-green rollout with no roster stream at all and the tabs
-stop reconciling."
-  (agent-repl--info '(:agent-repl-central "the roster stream spans workspaces")
-                    "elisp.roster.resubscribed-on-promotion address=%S"
-                    (agent-repl-connect-connection-address new))
-  (agent-repl-roster-subscribe new))
+a lie.  The ROSTER is not adopted, though: a stream that rode the OLD
+connection dies with it, so without this re-subscription Emacs comes out
+of every blue-green rollout with no roster stream at all and the tabs stop
+reconciling.  A roster already moved onto NEW at the handover
+\=(`agent-repl-roster-on-link-handover') is left standing."
+  (if (and agent-repl-roster--stream (eq agent-repl-roster--stream-conn new))
+      (agent-repl--info '(:agent-repl-central "the roster stream spans workspaces")
+                        "elisp.roster.promotion-kept-stream address=%S"
+                        (agent-repl-connect-connection-address new))
+    (agent-repl--info '(:agent-repl-central "the roster stream spans workspaces")
+                      "elisp.roster.resubscribed-on-promotion address=%S"
+                      (agent-repl-connect-connection-address new))
+    (agent-repl-roster-subscribe new)))
 
 (add-hook 'agent-repl-link-up-functions #'agent-repl-roster-on-link-up)
 (add-hook 'agent-repl-link-promote-functions #'agent-repl-roster-on-link-promote)
+(add-hook 'agent-repl-link-handover-functions #'agent-repl-roster-on-link-handover)
 (add-hook 'agent-repl-link-down-functions #'agent-repl-roster-on-link-down)
 
 (provide 'agent-repl-roster)
