@@ -7,10 +7,7 @@ import {
   SelectWorkspaceResponseSchema,
   type SelectWorkspaceRequest,
 } from "../../../../proto/gen/ts/agentrepl/v1/endpoint_select_workspace_pb";
-import {
-  FeedMergeTabWorkspaceSwitchSchema,
-  FeedMergeWorkspaceSwitchSchema,
-} from "../../../../proto/gen/ts/frontend/v1/feed_pb";
+import { FeedMergeWorkspaceSwitchSchema } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { WorkspaceRefSchema } from "../../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { createTicker } from "../../../src/clock.js";
 import { createAgentReplClient } from "../../../src/rpc/client.js";
@@ -62,13 +59,13 @@ describe("switchFacts", () => {
     expect([facts.label, facts.target?.id]).toEqual(["open merge workspace", "ws-merge"]);
   });
 
-  it("reads a removed tab switch to no target", () => {
+  it("reads a removed head switch to no target", () => {
     const facts = switchFacts(
-      create(FeedMergeTabWorkspaceSwitchSchema, {
+      create(FeedMergeWorkspaceSwitchSchema, {
         label: { text: "merge workspace removed" },
         availability: { case: "removed", value: { removedAtMs: 5n } },
       }),
-      "tab",
+      "head",
     );
     expect([facts.label, facts.target]).toEqual(["merge workspace removed", null]);
   });
@@ -92,21 +89,21 @@ describe("switchFacts", () => {
 describe("drawMergeWorkspaceSwitch", () => {
   it("selects the merge workspace when clicked", async () => {
     const s = selecting();
-    const el = drawMergeWorkspaceSwitch({ label: "open merge workspace", target: TARGET }, s.rc, "head");
+    const el = drawMergeWorkspaceSwitch({ label: "open merge workspace", target: TARGET }, s.rc);
     el.querySelector<HTMLElement>(".merge-workspace-switch-button")?.click();
     await vi.advanceTimersByTimeAsync(0);
     expect(s.calls.map((c) => c.workspace?.id)).toEqual(["ws-merge"]);
   });
 
   it("draws the label verbatim on an enabled button", () => {
-    const el = drawMergeWorkspaceSwitch({ label: "open merge workspace", target: TARGET }, selecting().rc, "head");
+    const el = drawMergeWorkspaceSwitch({ label: "open merge workspace", target: TARGET }, selecting().rc);
     const button = el.querySelector(".merge-workspace-switch-button");
     expect([button?.textContent, button?.getAttribute("aria-disabled")]).toEqual(["open merge workspace", null]);
   });
 
   it("draws a removed workspace's switch disabled, and a click selects nothing", async () => {
     const s = selecting();
-    const el = drawMergeWorkspaceSwitch({ label: "merge workspace removed", target: null }, s.rc, "tab");
+    const el = drawMergeWorkspaceSwitch({ label: "merge workspace removed", target: null }, s.rc);
     el.querySelector<HTMLElement>(".merge-workspace-switch-button")?.click();
     await vi.advanceTimersByTimeAsync(0);
     expect([el.hasAttribute("data-removed"), el.querySelector(".merge-workspace-switch-button")?.getAttribute("aria-disabled"), s.calls.length]).toEqual([
@@ -116,8 +113,8 @@ describe("drawMergeWorkspaceSwitch", () => {
     ]);
   });
 
-  it("names its placement in its class", () => {
-    const el = drawMergeWorkspaceSwitch({ label: "x", target: TARGET }, selecting().rc, "tab");
-    expect(el.classList.contains("merge-workspace-switch-tab")).toBe(true);
+  it("is drawn as the head's switch", () => {
+    const el = drawMergeWorkspaceSwitch({ label: "x", target: TARGET }, selecting().rc);
+    expect(el.classList.contains("merge-workspace-switch-head")).toBe(true);
   });
 });

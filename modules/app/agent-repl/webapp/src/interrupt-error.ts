@@ -71,6 +71,8 @@ export function interruptErrorSentence(kind: InterruptErrorKind, path: string): 
     }
     case "notDetachedWork":
       return "this row names no detached work to stop";
+    case "notMergeTab":
+      return "this tab's agent is no longer running";
     case "noSession":
       return "this workspace has no session to interrupt";
     case "shimRefused":

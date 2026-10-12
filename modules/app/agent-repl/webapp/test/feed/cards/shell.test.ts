@@ -605,6 +605,11 @@ describe("the stop's typed refusals", () => {
       text: "this row names no detached work",
     },
     {
+      arm: "notMergeTab",
+      kind: { case: "notMergeTab", value: {} },
+      text: "this row names no running merge tab",
+    },
+    {
       arm: "noSession",
       kind: { case: "noSession", value: {} },
       text: "the workspace has no session to interrupt",

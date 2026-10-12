@@ -1,14 +1,12 @@
 /**
- * workspace-switch — the button that takes the reader to the MERGE WORKSPACE a
- * detached merge runs in.
- *
- * Two elements of the requesting workspace's bubble carry it: the head
- * (`FeedMergeHead.workspace_switch`, for the bubble's whole life) and each
- * agentic tab (`FeedMergeTab*.workspace_switch`, in place of the rows that tab
- * never streams across workspaces). They are two components and two wire
- * messages, drawn by this one function from the same two facts: the label the
- * daemon composed, and the workspace to switch to, absent once the daemon
- * removed it after 15 calendar days idle, when the button is drawn disabled.
+ * workspace-switch — the button on an async merge bubble's head that takes the
+ * reader to the MERGE WORKSPACE the merge runs in
+ * (`FeedMergeHead.workspace_switch`). The daemon sets it once that workspace is
+ * visible (revealed, or landed) and leaves it unset while the workspace is
+ * hidden; the agentic tabs stream the merge workspace's turns, so they carry no
+ * switch of their own. It draws two facts: the label the daemon composed, and
+ * the workspace to switch to, absent once the daemon removed it after 15
+ * calendar days idle, when the button is drawn disabled.
  *
  * THE CLICK IS AN ORDINARY WORKSPACE SWITCH: `SelectWorkspace`, through the
  * merge bubble's one jump (`jumpToWorkspace`), which revives a closed merge
@@ -18,10 +16,7 @@
 import { createControl } from "../../control.js";
 import { guardMalformed } from "../../rpc/guard.js";
 import { requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
-import type {
-  FeedMergeTabWorkspaceSwitch,
-  FeedMergeWorkspaceSwitch,
-} from "../../../../proto/gen/ts/frontend/v1/feed_pb";
+import type { FeedMergeWorkspaceSwitch } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import type { WorkspaceRef } from "../../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { armName } from "../renderers.js";
 import type { RowContext } from "../renderers.js";
@@ -34,17 +29,14 @@ const SWITCH_JUMP: JumpSite = {
   refusalClass: "merge-workspace-switch-refusal",
 };
 
-/** What either switch element draws: its label, and its target (null once removed). */
+/** What the switch draws: its label, and its target (null once removed). */
 export interface SwitchFacts {
   readonly label: string;
   readonly target: WorkspaceRef | null;
 }
 
-/**
- * Either switch element, read to its facts. The head's and a tab's switch are
- * two messages of one shape, so they are read by one function.
- */
-export function switchFacts(sw: FeedMergeWorkspaceSwitch | FeedMergeTabWorkspaceSwitch, path: string): SwitchFacts {
+/** The head's switch, read to its facts. */
+export function switchFacts(sw: FeedMergeWorkspaceSwitch, path: string): SwitchFacts {
   const label = requireMessage(sw.label, `${path}.label`).text;
   const availability = requireCase(sw.availability, `${path}.availability`);
   switch (availability.case) {
@@ -58,9 +50,9 @@ export function switchFacts(sw: FeedMergeWorkspaceSwitch | FeedMergeTabWorkspace
 }
 
 /** The switch: a button that selects the merge workspace, disabled once it is gone. */
-export function drawMergeWorkspaceSwitch(facts: SwitchFacts, rc: RowContext, placement: "head" | "tab"): HTMLElement {
+export function drawMergeWorkspaceSwitch(facts: SwitchFacts, rc: RowContext): HTMLElement {
   const el = document.createElement("span");
-  el.className = `merge-workspace-switch merge-workspace-switch-${placement}`;
+  el.className = "merge-workspace-switch merge-workspace-switch-head";
   const button = createControl();
   button.className = "merge-workspace-switch-button";
   button.textContent = facts.label;

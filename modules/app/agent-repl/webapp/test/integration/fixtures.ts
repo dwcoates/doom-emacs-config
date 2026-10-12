@@ -1275,6 +1275,7 @@ export const commandRefusedRow = (
 // ---- FeedMerge and FeedMergeTab -------------------------------------------
 
 export const MERGE_TAB_KINDS = [
+  "pick",
   "queue",
   "prePrompt",
   "rebasing",
@@ -1290,7 +1291,7 @@ export type MergeTabKind = (typeof MERGE_TAB_KINDS)[number];
 /** The state arms every tab kind carries: nothing parks, so live or settled. */
 export const MERGE_TAB_STATES = ["live", "settled"] as const;
 /** The agentic kinds whose tab can also wait on the user. */
-export const MERGE_TAB_WAITING_KINDS = ["conflicts", "fixes"] as const;
+export const MERGE_TAB_WAITING_KINDS = ["pick", "conflicts", "fixes"] as const;
 export type MergeTabState = (typeof MERGE_TAB_STATES)[number] | "waitingOnUser";
 
 /** When every fixture tab's work began, and each queue entry its stage. */
@@ -1305,13 +1306,13 @@ const settledState = () => ({
   },
 });
 
-/** The state arm a tab carries. Only conflicts and fixes wait on the user. */
+/** The state arm a tab carries. Only pick, conflicts and fixes wait on the user. */
 const plainState = (state: MergeTabState) => {
-  if (state === "waitingOnUser") throw new Error("only the conflicts and fixes tabs wait on the user");
+  if (state === "waitingOnUser") throw new Error("only the pick, conflicts and fixes tabs wait on the user");
   return state === "settled" ? settledState() : liveState();
 };
 
-/** The state arm a conflicts or fixes tab carries: also waiting on the user. */
+/** The state arm a pick, conflicts or fixes tab carries: also waiting on the user. */
 const agenticState = (state: MergeTabState) =>
   state === "waitingOnUser"
     ? { case: "waitingOnUser" as const, value: { startedAtMs: MERGE_TAB_STARTED_AT_MS } }
@@ -1413,6 +1414,8 @@ const mergeTabKindValue = (
           log: { token: { value: MERGE_TEST_LOG.token }, label: { text: MERGE_TEST_LOG.label } },
         },
       };
+    case "pick":
+      return { case: "pick", value: { state: agenticState(state) } };
     case "conflicts":
       return { case: "conflicts", value: { state: agenticState(state) } };
     case "fixes":
