@@ -3,7 +3,7 @@
 // visible. See src/presence.ts.
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createPresence, pageIsEmbedded, type PresenceCause, type PresenceSource } from "../src/presence.js";
+import { createPresence, pageIsEmbedded, pagePresence, type PresenceCause, type PresenceSource } from "../src/presence.js";
 
 let presence: PresenceSource | null = null;
 
@@ -119,5 +119,26 @@ describe("pageIsEmbedded", () => {
 
   it("is true for a window whose parent is another", () => {
     expect(pageIsEmbedded({ parent: window } as unknown as Window)).toBe(true);
+  });
+});
+
+describe("pagePresence", () => {
+  it("answers the same presence for the same page", () => {
+    expect(pagePresence()).toBe(pagePresence());
+  });
+
+  it("answers a page's own presence for each document", () => {
+    // Arrange
+    const first = pagePresence();
+    const other = document.implementation.createHTMLDocument("other page");
+    const real = globalThis.document;
+    Object.defineProperty(globalThis, "document", { configurable: true, value: other });
+
+    // Act
+    const second = pagePresence();
+    Object.defineProperty(globalThis, "document", { configurable: true, value: real });
+
+    // Assert
+    expect(second).not.toBe(first);
   });
 });
