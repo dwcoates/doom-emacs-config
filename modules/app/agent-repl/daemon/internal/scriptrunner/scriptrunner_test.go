@@ -475,3 +475,59 @@ func TestKillGroupWithSignalsTheWholeGroup(t *testing.T) {
 		t.Fatalf("kill(%d, %v), want kill(-4242, SIGKILL): the group, not the leader alone", pid, sig)
 	}
 }
+
+func TestRunLinesMeasuredCountsTheProcessorTimeOfTheScriptsChildren(t *testing.T) {
+	// Arrange: the script itself only waits; its child does the work.
+	dir := t.TempDir()
+	script := writeScript(t, dir, "child.sh", "sh -c 'i=0; while [ $i -lt 100000 ]; do i=$((i+1)); done'\n")
+	r := newRunner(t)
+
+	// Act.
+	run, err := r.RunLinesMeasured(context.Background(), dir, []string{script}, nil)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("RunLinesMeasured: %v", err)
+	}
+	if run.CPU <= 0 || run.Wall <= 0 {
+		t.Fatalf("measured cpu %v over wall %v, want both counted, the child's work included", run.CPU, run.Wall)
+	}
+}
+
+func TestRunLinesMeasuredAnswersTheExitCodeAndOutput(t *testing.T) {
+	// Arrange.
+	dir := t.TempDir()
+	script := writeScript(t, dir, "fail.sh", "echo said\nexit 3\n")
+	r := newRunner(t)
+
+	// Act.
+	run, err := r.RunLinesMeasured(context.Background(), dir, []string{script}, nil)
+
+	// Assert.
+	if err != nil || run.ExitCode != 3 || !strings.Contains(run.Output, "said") {
+		t.Fatalf("run = %+v, %v; want exit 3 with its output", run, err)
+	}
+}
+
+func TestRunCores(t *testing.T) {
+	tests := []struct {
+		name string
+		run  Run
+		want float64
+	}{
+		{name: "two cores", run: Run{CPU: 4 * time.Second, Wall: 2 * time.Second}, want: 2},
+		{name: "a fraction of one", run: Run{CPU: time.Second, Wall: 4 * time.Second}, want: 0.25},
+		{name: "no time taken", run: Run{CPU: time.Second}, want: 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act.
+			got := tt.run.Cores()
+
+			// Assert.
+			if got != tt.want {
+				t.Fatalf("Cores = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

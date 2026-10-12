@@ -1205,6 +1205,52 @@ Owner rulings, 2026-09-30 (`internal/merge`; the contract is
   (`harness.CommitWork`); a rebase conflict is scripted per commit
   (`harness.ScriptRebaseConflict`) and stands until `harness.ResolveConflicts`.
 
+## The queue's window rebases in a chain and tests ahead of its turn
+
+Owner rulings, 2026-10-11 (`internal/merge/chain.go`, `internal/cpugov`).
+
+- **THE WINDOW** is `cpugov.QueueWindow` (3): the head and the two merges
+  behind it. It is the one setting bounding both chained rebasing and
+  concurrent test gates; an entry beyond it waits untouched until a merge
+  ahead lands or drops out.
+- **CHAINED REBASING.** The head rebases onto the target's tip; the moment its
+  rebase settles it publishes its tip (`run.publishTip`), and the merge behind
+  it is admitted into the chain (lease, admission, bubble -- the same run a
+  head gets) and rebases ITS OWN commits onto that tip, conflicts resolved by
+  its OWN session through the same prompts. A chain member is
+  `wsm.MergeAdmitted` while it is behind the head; only the pump promotes it
+  into the slot, once its entry stands first in line.
+- **RESTACKS.** A new tip (a fixing commit, a rebase onto a moved target) and
+  a member leaving the chain without landing both close the repository's chain
+  signal; the merge behind restacks onto the tip now ahead of it. Every queue
+  rebase runs with rerere on (`gitclient`), and a stop rerere resolved
+  (`RebaseStep.Resolved`) is continued with no prompt.
+- **A MERGE ONLY CARRIES ITS OWN COMMITS.** A rebase replays exactly
+  `chainBase..branch` (`run.chainBase`, recorded in the progress document), so
+  a merge ahead that does not land leaves nothing behind; at the head, a
+  branch standing on a chain base that is not on the target is rebased, never
+  read as already on the tip. Landing order is strictly head-first.
+- **SPECULATIVE GATES.** A member whose rebase settled runs its gate (and its
+  fixing attempts, under the merge's one `MaxFixAttempts` bound) against its
+  chained base once the governor admits it, niced (`SpeculativeNice`). A base
+  that moves under it cuts it (`errBaseMoved`) and it runs again. Its pass
+  (`testedDoc`) is valid only for the tree it tested: at the head a rebased
+  tree equal to it lands without testing again (INFO
+  `daemon.merge.speculative`), any other is tested again and the invalidation
+  is recorded.
+- **THE GOVERNOR** (`cpugov`) samples the host's own processor ticks (user,
+  nice and system; `host_statistics` on macOS, `/proc/stat` on Linux), smooths
+  them over 30s, and admits a speculative gate only while the smoothed load --
+  counting the share the gates it admitted have not shown yet -- stands below
+  50% and the gate's learned mean cost keeps it at or under 70%, closest to
+  the head first, at most `QueueWindow` gates. The head's gate is never
+  governed. Every admission and every change of a deferral's reason is INFO
+  `daemon.cpugov.admit` with the arithmetic.
+- **A RESTART MID-CHAIN** resumes every member at its recorded step: the head
+  through the pump, the members behind it through `extendChain` from its
+  resume, a speculative step (`progressDoc.Speculative`) finished as such
+  whatever the merge's place now is.
+
 ## `claude-repld merge-queue` is how an agent asks for a merge
 
 `cmd/claude-repld/mergequeueverb.go`, the merge-queue skill's one tool

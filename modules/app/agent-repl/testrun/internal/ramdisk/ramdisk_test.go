@@ -273,6 +273,75 @@ func deadRecord(t *testing.T, m Manager, pid, device, mount string) string {
 	return path
 }
 
+func TestReclaimIgnoresTheRegistryLock(t *testing.T) {
+	// Arrange: a live run made the registry lock and holds its record.
+	h := &fakeHost{}
+	m := newManager(t, h)
+	v, err := m.Acquire(16)
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	t.Cleanup(func() { v.Release() })
+	other := m
+	other.Pid = 5151
+
+	// Act
+	done, err := other.Reclaim()
+
+	// Assert
+	if err != nil || len(done) != 0 {
+		t.Fatalf("Reclaim = %+v, %v; want the registry lock read as no record at all", done, err)
+	}
+}
+
+func TestReclaimLeavesARecordWhoseRunIsMidCreation(t *testing.T) {
+	// Arrange: a run holds the registry lock, its record written and not
+	// flocked yet -- the instant between Acquire's open and its flock.
+	h := &fakeHost{info: attachedInfo}
+	m := newManager(t, h)
+	if err := os.MkdirAll(m.Registry, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	unlock, err := m.lockRegistry()
+	if err != nil {
+		t.Fatalf("lockRegistry: %v", err)
+	}
+	record := filepath.Join(m.Registry, "7.lock")
+	creating, err := os.OpenFile(record, os.O_CREATE|os.O_RDWR|os.O_TRUNC, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer creating.Close()
+	reclaimer := m
+	reclaimer.Pid = 5151
+	type answer struct {
+		done []Reclaimed
+		err  error
+	}
+	answered := make(chan answer, 1)
+	go func() {
+		done, err := reclaimer.Reclaim()
+		answered <- answer{done, err}
+	}()
+
+	// Act: the run takes its record's flock, then lets go of the registry.
+	if err := syscall.Flock(int(creating.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Fatal(err)
+	}
+	if err := unlock(); err != nil {
+		t.Fatal(err)
+	}
+	got := <-answered
+
+	// Assert
+	if got.err != nil || len(got.done) != 0 {
+		t.Fatalf("Reclaim = %+v, %v; want the run mid-creation left alone", got.done, got.err)
+	}
+	if _, err := os.Stat(record); err != nil {
+		t.Fatalf("the live run's record is gone: %v", err)
+	}
+}
+
 func TestReclaimTakesDownADeadRunsRAMDisk(t *testing.T) {
 	// Arrange
 	h := &fakeHost{info: attachedInfo}

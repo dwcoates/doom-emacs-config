@@ -473,11 +473,16 @@ func (o *orchestrator) kick(repo wsm.RepoKey) {
 	if o.pumping[repo] {
 		o.kicked[repo] = true
 		o.mu.Unlock()
+		// THE CHAIN GROWS BEHIND A RUNNING HEAD: the pump is busy with the
+		// head, so the merge put in line (or taken back) behind it is offered
+		// to the chain here.
+		o.extendChainAsync(repo)
 		return
 	}
 	o.pumping[repo] = true
 	o.kicked[repo] = false
 	o.mu.Unlock()
+	o.extendChainAsync(repo)
 	o.live.Add(1)
 	go func() {
 		defer o.live.Done()
@@ -529,11 +534,17 @@ func (o *orchestrator) kick(repo wsm.RepoKey) {
 // its end: a merge that gives up fails, leaves the queue at once, and gives the
 // slot back through the one release path.
 func (o *orchestrator) pumpOnce(ctx context.Context, repo wsm.RepoKey) (bool, error) {
-	front, lock, admitted, err := o.admitFront(ctx, repo)
+	front, promoted, admitted, err := o.admitFront(ctx, repo)
 	if err != nil || !admitted {
 		return false, err
 	}
-	if err := o.runAdmitted(ctx, repo, front, lock); err != nil {
+	if promoted != nil {
+		// A MERGE PROMOTED FROM BEHIND THE HEAD RUNS ON ITS OWN GOROUTINE,
+		// already started; the pump holds the slot for it until it ends.
+		<-promoted.finished
+		return true, nil
+	}
+	if err := o.runAdmitted(ctx, repo, front); err != nil {
 		// ONE MERGE'S FAILURE IS NOT THE QUEUE'S. A run that reached its own
 		// terminal has already recorded the failure at ERROR, published the
 		// bubble's terminal and left the queue -- so the pump goes on to the
@@ -606,10 +617,12 @@ func (o *orchestrator) leaveAdmission() {
 
 // admitFront admits the repository's queue front, as ONE admission step the
 // shutdown drain waits for: every store read and the admission write happen
-// inside it. It answers the admitted workspace and the queue lock the run
-// holds, or admitted=false when there is nothing to admit (a draining daemon,
-// a paused or empty queue, a run already in flight, another daemon's lock).
-func (o *orchestrator) admitFront(ctx context.Context, repo wsm.RepoKey) (ids.WorkspaceID, *repoLock, bool, error) {
+// inside it. It answers the admitted workspace, or the speculative run it
+// promoted into the slot, or admitted=false when there is nothing to admit (a
+// draining daemon, a paused or empty queue, a run already in flight, another
+// daemon's lock). The repository's kernel lock is held from here
+// (holdRepoLock) for as long as any run of its chain stands.
+func (o *orchestrator) admitFront(ctx context.Context, repo wsm.RepoKey) (ids.WorkspaceID, *run, bool, error) {
 	const op = "daemon.merge.admit"
 	// The pump loop re-enters this every iteration: a drain that began while a
 	// burst was mid-flight stops the burst here rather than after it has taken
@@ -626,9 +639,12 @@ func (o *orchestrator) admitFront(ctx context.Context, repo wsm.RepoKey) (ids.Wo
 	}
 	// A MERGE A RESTART INTERRUPTED GOES FIRST, paused queue or not: it was
 	// already running, and a pause stops only new admissions. Its entry is
-	// admitted already.
-	if ws, resuming := o.resumeIn(repo); resuming {
-		lock, taken, err := acquireRepoLock(o.lockDir, string(repo))
+	// admitted already. Of several, the first in line is the head; the others
+	// resume behind it in its chain (extendChain).
+	if ws, resuming, err := o.resumeIn(ctx, repo); err != nil {
+		return "", nil, false, err
+	} else if resuming {
+		taken, err := o.holdRepoLock(repo)
 		if err != nil {
 			return "", nil, false, err
 		}
@@ -636,7 +652,17 @@ func (o *orchestrator) admitFront(ctx context.Context, repo wsm.RepoKey) (ids.Wo
 			o.deps.Log.Global().Warn(op, "another daemon holds this repository's merge queue", dlog.Context{"repo": string(repo)})
 			return "", nil, false, nil
 		}
-		return ws, lock, true, nil
+		return ws, nil, true, nil
+	}
+	entries, err := o.deps.DB.MergeQueue(ctx, repo)
+	if err != nil {
+		return "", nil, false, err
+	}
+	// THE MERGE RIGHT BEHIND A HEAD THAT ENDED IS PROMOTED, paused queue or
+	// not: it was admitted when it began rebasing behind the head, and a pause
+	// stops only new admissions.
+	if r, promoted := o.promote(repo, entries); promoted {
+		return r.ws, r, true, nil
 	}
 	paused, err := o.deps.DB.MergeQueuePaused(ctx, repo)
 	if err != nil {
@@ -644,10 +670,6 @@ func (o *orchestrator) admitFront(ctx context.Context, repo wsm.RepoKey) (ids.Wo
 	}
 	if paused {
 		return "", nil, false, nil
-	}
-	entries, err := o.deps.DB.MergeQueue(ctx, repo)
-	if err != nil {
-		return "", nil, false, err
 	}
 	// ONE MERGE PER REPOSITORY AT A TIME, ACROSS DAEMONS. An entry admitted
 	// with no run here is a merge another daemon is driving, or one a
@@ -670,7 +692,14 @@ func (o *orchestrator) admitFront(ctx context.Context, repo wsm.RepoKey) (ids.Wo
 			dlog.Context{"repo": string(repo), "workspace": string(front.Workspace)})
 		return "", nil, false, nil
 	}
-	lock, taken, err := acquireRepoLock(o.lockDir, string(repo))
+	// A FRONT ALREADY STARTING BEHIND THE HEAD is its chain's: it is promoted
+	// once its admission is written, never started a second time here.
+	if o.inChain(repo, front.Workspace) {
+		o.deps.Log.Global().Debug(op, "the queue front is starting in its chain; it is promoted once admitted",
+			dlog.Context{"repo": string(repo), "workspace": string(front.Workspace)})
+		return "", nil, false, nil
+	}
+	taken, err := o.holdRepoLock(repo)
 	if err != nil {
 		return "", nil, false, err
 	}
@@ -679,23 +708,46 @@ func (o *orchestrator) admitFront(ctx context.Context, repo wsm.RepoKey) (ids.Wo
 		return "", nil, false, nil
 	}
 	if err := o.deps.DB.AdmitMerge(ctx, repo, front.Workspace); err != nil {
-		lock.Release()
+		o.releaseRepoLockIfIdle(ctx, repo)
 		return "", nil, false, err
 	}
-	return front.Workspace, lock, true, nil
+	return front.Workspace, nil, true, nil
 }
 
 // resumeIn answers the merge of one repository the boot recovery handed the
-// pump to resume, if any.
-func (o *orchestrator) resumeIn(repo wsm.RepoKey) (ids.WorkspaceID, bool) {
+// pump to resume as its head: of several, the first in the queue's order.
+func (o *orchestrator) resumeIn(ctx context.Context, repo wsm.RepoKey) (ids.WorkspaceID, bool, error) {
 	o.mu.Lock()
-	defer o.mu.Unlock()
-	for ws, doc := range o.resumes {
+	any := false
+	for _, doc := range o.resumes {
 		if doc.Repo == string(repo) {
-			return ws, true
+			any = true
+			break
 		}
 	}
-	return "", false
+	o.mu.Unlock()
+	if !any {
+		return "", false, nil
+	}
+	entries, err := o.deps.DB.MergeQueue(ctx, repo)
+	if err != nil {
+		return "", false, err
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	for _, entry := range entries {
+		if doc, ok := o.resumes[entry.Workspace]; ok && doc.Repo == string(repo) {
+			return entry.Workspace, true, nil
+		}
+	}
+	// A RESUME WITH NO QUEUE ENTRY is answered as before: its run reads the
+	// entry it lands and ends on the missing one, loudly.
+	for ws, doc := range o.resumes {
+		if doc.Repo == string(repo) {
+			return ws, true, nil
+		}
+	}
+	return "", false, nil
 }
 
 // nextInLine answers the first entry of a queue that is waiting in line: a

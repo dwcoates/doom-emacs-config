@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"time"
 
+	"claude-repld/internal/cpugov"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/gitclient"
 	"claude-repld/internal/ids"
@@ -33,6 +34,7 @@ import (
 	"claude-repld/internal/resolve/footer"
 	"claude-repld/internal/resolve/holds"
 	"claude-repld/internal/resolve/sidebar"
+	"claude-repld/internal/scriptrunner"
 	"claude-repld/internal/wsm"
 )
 
@@ -324,6 +326,10 @@ type Deps struct {
 	// a scripted script rather than the repository's real suite: GIT IS NEVER
 	// CALLED DURING TESTING and neither is the real roster.
 	TestRunner ScriptRunner
+	// Governor admits the test gates: the head's at once, a speculative one
+	// (a merge behind the head, tested against its chained base) by the
+	// host's processor load and the queue window (cpugov).
+	Governor *cpugov.Governor
 	// Painter turns the gate's ANSI output into paint spans. The client never
 	// parses an escape.
 	Painter paint.Painter
@@ -410,10 +416,11 @@ func BriefsFrom(dir string) BriefLoader {
 // could not be spawned); a suite that ran and failed is a non-zero code and a
 // nil error, because a failing suite is an answer.
 type ScriptRunner interface {
-	// RunLines executes argv in dir and returns the combined stdout and stderr
-	// with the process's exit code, handing each line to onLine as it is
-	// written, so the gate follows its suites live.
-	RunLines(ctx context.Context, dir string, argv []string, onLine func(string)) (output string, exitCode int, err error)
+	// RunLinesMeasured executes argv in dir and answers the combined stdout
+	// and stderr with the process's exit code and what the run cost, handing
+	// each line to onLine as it is written, so the gate follows its suites
+	// live and the governor learns a gate's processor cost.
+	RunLinesMeasured(ctx context.Context, dir string, argv []string, onLine func(string)) (scriptrunner.Run, error)
 }
 
 // StartSessionFunc starts a workspace's session under the merge lease, for a

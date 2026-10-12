@@ -107,7 +107,9 @@ func (o *orchestrator) suspendFor(ctx context.Context, ws ids.WorkspaceID, why s
 	atBoundary := running && !terminal && why.stepBoundary
 	if atBoundary {
 		r.stopAtBoundary = true
-		atBoundary = r.executing
+		// A RUN IDLING BETWEEN STEPS in its chain stands at a boundary now:
+		// it is suspended at once rather than waited for.
+		atBoundary = r.executing && !r.idling
 	}
 	if running && !terminal && !atBoundary {
 		r.suspending = true

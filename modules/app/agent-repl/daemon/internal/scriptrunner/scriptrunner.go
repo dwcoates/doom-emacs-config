@@ -21,6 +21,7 @@ import (
 	"os/exec"
 	"strings"
 	"syscall"
+	"time"
 
 	"claude-repld/internal/dlog"
 )
@@ -118,15 +119,45 @@ func (r *Runner) Run(ctx context.Context, dir string, argv []string) (string, in
 // run's own non-zero code, per the package doc's RAN-AND-FAILED-versus
 // COULD-NOT-BE-CLASSIFIED distinction.
 func (r *Runner) RunLines(ctx context.Context, dir string, argv []string, onLine func(string)) (string, int, error) {
+	run, err := r.RunLinesMeasured(ctx, dir, argv, onLine)
+	return run.Output, run.ExitCode, err
+}
+
+// Run is one script run's answer, measured: its combined output, its exit
+// code, and what it cost.
+type Run struct {
+	Output   string
+	ExitCode int
+	// CPU is the processor time the script and every descendant it waited for
+	// spent, user and system together, as the kernel's wait accounting reports
+	// it; zero when nothing was spawned.
+	CPU time.Duration
+	// Wall is how long the run took, spawn to exit.
+	Wall time.Duration
+}
+
+// Cores is the run's average processor use, in cores: its CPU time over its
+// wall time. Zero for a run that took no time.
+func (r Run) Cores() float64 {
+	if r.Wall <= 0 {
+		return 0
+	}
+	return r.CPU.Seconds() / r.Wall.Seconds()
+}
+
+// RunLinesMeasured is RunLines answering the run's cost along with its output
+// and exit code: what a caller that schedules runs by the processor they take
+// learns that cost from.
+func (r *Runner) RunLinesMeasured(ctx context.Context, dir string, argv []string, onLine func(string)) (Run, error) {
 	if len(argv) == 0 {
 		err := fmt.Errorf("scriptrunner: argv is empty")
 		r.log.Error("daemon.scriptrunner.run", "refused an empty argv", dlog.Context{"dir": dir})
-		return "", 0, err
+		return Run{}, err
 	}
 	if strings.TrimSpace(dir) == "" {
 		err := fmt.Errorf("scriptrunner: dir is empty")
 		r.log.Error("daemon.scriptrunner.run", "refused an empty dir", dlog.Context{"script": argv[0]})
-		return "", 0, err
+		return Run{}, err
 	}
 
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
@@ -148,9 +179,15 @@ func (r *Runner) RunLines(ctx context.Context, dir string, argv []string, onLine
 	cmd.Stdout = out
 	cmd.Stderr = out
 
+	began := time.Now()
 	err := cmd.Run()
+	measured := Run{Wall: time.Since(began)}
+	if cmd.ProcessState != nil {
+		measured.CPU = cmd.ProcessState.UserTime() + cmd.ProcessState.SystemTime()
+	}
 	out.flush()
 	output := out.buf.String()
+	measured.Output = output
 
 	// A SCRIPT THE CONTEXT KILLED DID NOT ANSWER. exec reports the kill as an
 	// *ExitError (signal: killed, exit code -1), which read below as a script
@@ -164,7 +201,7 @@ func (r *Runner) RunLines(ctx context.Context, dir string, argv []string, onLine
 		r.log.Debug("daemon.scriptrunner.run", "script ran to completion", dlog.Context{
 			"script": argv[0], "dir": dir, "exit_code": 0,
 		})
-		return output, 0, nil
+		return measured, nil
 	}
 	if errors.As(err, &exitErr) {
 		// The process ran and answered with a non-zero code: that is a
@@ -183,7 +220,8 @@ func (r *Runner) RunLines(ctx context.Context, dir string, argv []string, onLine
 		r.log.Debug("daemon.scriptrunner.run", "script exited non-zero; its caller judges the exit", dlog.Context{
 			"script": argv[0], "dir": dir, "exit_code": code,
 		})
-		return output, code, nil
+		measured.ExitCode = code
+		return measured, nil
 	}
 
 	// THE CALLER CANCELLED IT. A context the caller cancelled (a daemon
@@ -196,7 +234,7 @@ func (r *Runner) RunLines(ctx context.Context, dir string, argv []string, onLine
 		r.log.Info("daemon.scriptrunner.run", "the caller cancelled the script before it finished", dlog.Context{
 			"script": argv[0], "dir": dir, "cause": err.Error(),
 		})
-		return output, 0, fmt.Errorf("scriptrunner: run %s: %w", argv[0], err)
+		return measured, fmt.Errorf("scriptrunner: run %s: %w", argv[0], err)
 	}
 
 	// The process never produced an exit code at all: it could not be
@@ -206,7 +244,7 @@ func (r *Runner) RunLines(ctx context.Context, dir string, argv []string, onLine
 	r.log.Error("daemon.scriptrunner.run", "script could not be run", dlog.Context{
 		"script": argv[0], "dir": dir, "cause": err.Error(),
 	})
-	return output, 0, fmt.Errorf("scriptrunner: run %s: %w", argv[0], err)
+	return measured, fmt.Errorf("scriptrunner: run %s: %w", argv[0], err)
 }
 
 // lineWriter keeps everything written to it and hands each complete line to

@@ -59,9 +59,33 @@ type run struct {
 	repo wsm.RepoKey
 	// lease is the occupancy lease held for the merge's whole duration.
 	lease wsm.Lease
-	// lock is the repository's queue lock, held while the run holds its
-	// repository's slot. It is guarded by the orchestrator's mutex; see slot.go.
-	lock *repoLock
+	// joined reports that the run is a member of its repository's chain
+	// (chain.go), which its one release (releaseSlot) ends. speculative
+	// reports that it stands BEHIND the head: it rebases onto the merge ahead
+	// of it and tests ahead of its turn, and never moves the target until the
+	// pump promotes it. tip is the branch's tip as this run last settled it in
+	// the chain, empty until its first rebase settles: what the merge behind it
+	// rebases onto. All three are guarded by the orchestrator's mutex.
+	joined      bool
+	speculative bool
+	tip         string
+	// chainBase is the commit the branch's OWN commits stand on: the tip its
+	// last rebase replayed them onto, empty before its first. A rebase replays
+	// exactly chainBase..branch, so a merge never carries the commits of a
+	// merge ahead of it that did not land. tested is the speculative gate's
+	// pass, valid only for the exact tree it passed. fixesUsed counts the
+	// fixing attempts the merge made, ahead of its turn or at the head. All
+	// three are the run goroutine's own and are recorded in its progress.
+	chainBase string
+	tested    *testedDoc
+	fixesUsed int
+	// briefAhead is the workspace of the merge ahead that a speculative step's
+	// brief names, the run goroutine's own.
+	briefAhead ids.WorkspaceID
+	// idling reports the run waits, between steps, for its chain to change:
+	// a restart's stop at the next boundary takes it at once. Guarded by the
+	// orchestrator's mutex.
+	idling bool
 	// ctx is the run's own context. An ABANDON cancels it with the cause, so
 	// whatever step the run is in stops, and the run ends on the abandoned
 	// terminal. cancel is its cancel.
@@ -327,6 +351,8 @@ func (r *run) head(result any) {
 
 // label is the bubble's head line: what is merged, and where to.
 func (r *run) label() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	return branchLabel(r.subject.branch, r.subject.targetLabel())
 }
 
@@ -336,8 +362,8 @@ func (r *run) label() string {
 // A RUN THE DAEMON'S EXIT SUSPENDED DID NOT FAIL: its step's error is the exit
 // taking it away, which its suspension already recorded, so the pump is told
 // nothing went wrong.
-func (o *orchestrator) runAdmitted(ctx context.Context, repo wsm.RepoKey, ws ids.WorkspaceID, lock *repoLock) error {
-	r, err := o.start(ctx, repo, ws, lock)
+func (o *orchestrator) runAdmitted(ctx context.Context, repo wsm.RepoKey, ws ids.WorkspaceID) error {
+	r, err := o.start(ctx, repo, ws)
 	if r == nil {
 		return err
 	}
@@ -352,14 +378,14 @@ func (o *orchestrator) runAdmitted(ctx context.Context, repo wsm.RepoKey, ws ids
 // opens the ledger, captures the displaced turn when the user asked for the
 // merge, resolves what is merged, and runs the method the target selects. It
 // answers the run, nil when it failed before one existed.
-func (o *orchestrator) start(ctx context.Context, repo wsm.RepoKey, ws ids.WorkspaceID, lock *repoLock) (*run, error) {
+func (o *orchestrator) start(ctx context.Context, repo wsm.RepoKey, ws ids.WorkspaceID) (*run, error) {
 	const op = "daemon.merge.start"
 	o.mu.Lock()
 	doc, resuming := o.resumes[ws]
 	delete(o.resumes, ws)
 	o.mu.Unlock()
 	if resuming {
-		return o.startResumed(ctx, repo, ws, lock, doc)
+		return o.startResumed(ctx, repo, ws, doc)
 	}
 	log := o.log(ctx, ws)
 	entry, err := o.entryOf(ctx, repo, ws)
@@ -370,17 +396,13 @@ func (o *orchestrator) start(ctx context.Context, repo wsm.RepoKey, ws ids.Works
 		_, err = enqueuedMS(entry)
 	}
 	if err != nil {
-		if releaseErr := lock.Release(); releaseErr != nil {
-			log.Error(op, "could not release the repository lock of a merge that could not start", dlog.Context{"workspace": string(ws), "error": releaseErr.Error()})
-		}
+		o.releaseRepoLockIfIdle(ctx, repo)
 		log.Error(op, "could not read what the merge lands", dlog.Context{"workspace": string(ws), "error": err.Error()})
 		return nil, err
 	}
 	job, _, err := o.deps.DB.CreationJob(ctx, ws)
 	if err != nil {
-		if releaseErr := lock.Release(); releaseErr != nil {
-			log.Error(op, "could not release the repository lock of a merge that could not start", dlog.Context{"workspace": string(ws), "error": releaseErr.Error()})
-		}
+		o.releaseRepoLockIfIdle(ctx, repo)
 		log.Error(op, "could not read the requester's creation job", dlog.Context{"workspace": string(ws), "error": err.Error()})
 		return nil, err
 	}
@@ -392,9 +414,7 @@ func (o *orchestrator) start(ctx context.Context, repo wsm.RepoKey, ws ids.Works
 	// (wsm.bindMergeHold, readKeepOpen).
 	lease, err := o.deps.DB.AcquireLeaseAs(ctx, ws, ledger, wsm.HolderMerge, wsm.PolicyHold)
 	if err != nil {
-		if releaseErr := lock.Release(); releaseErr != nil {
-			log.Error(op, "could not release the repository lock of a merge that could not start", dlog.Context{"workspace": string(ws), "error": releaseErr.Error()})
-		}
+		o.releaseRepoLockIfIdle(ctx, repo)
 		log.Error(op, "could not take the merge lease", dlog.Context{"workspace": string(ws), "error": err.Error()})
 		return nil, err
 	}
@@ -407,16 +427,22 @@ func (o *orchestrator) start(ctx context.Context, repo wsm.RepoKey, ws ids.Works
 	displaces := o.displaces[ws]
 	delete(o.displaces, ws)
 	o.mu.Unlock()
-	r := &run{
-		o: o, ws: ws, source: entry.Source, job: job, repo: repo, lease: lease, lock: lock,
-		ctx: runCtx, cancel: cancel, finished: make(chan struct{}), atBoundary: make(chan struct{}), displaces: displaces,
-		startedMS:  o.deps.Now().UnixMilli(),
-		queuedMS:   entry.EnqueuedAt.UnixMilli(),
+	r := o.newRun(runCtx, cancel, repo, ws)
+	r.source, r.job, r.lease, r.displaces = entry.Source, job, lease, displaces
+	r.startedMS, r.queuedMS = o.deps.Now().UnixMilli(), entry.EnqueuedAt.UnixMilli()
+	return r, r.admit(runCtx)
+}
+
+// newRun builds one run of a workspace's merge, with nothing about it read
+// yet: the shape a fresh admission, a resume and a speculative start share.
+func (o *orchestrator) newRun(ctx context.Context, cancel context.CancelCauseFunc, repo wsm.RepoKey, ws ids.WorkspaceID) *run {
+	return &run{
+		o: o, ws: ws, repo: repo,
+		ctx: ctx, cancel: cancel, finished: make(chan struct{}), atBoundary: make(chan struct{}),
 		rounds:     map[string]int{},
 		openRounds: map[string]tabRound{},
 		git:        newGatedGit(o.deps.Git, o.deps.Now),
 	}
-	return r, r.admit(runCtx)
 }
 
 // entryOf reads a queued merge's queue entry: what it lands, and when it was
@@ -447,7 +473,9 @@ func (r *run) admit(ctx context.Context) error {
 		r.end(ctx, fmt.Errorf("could not resolve what the merge lands: %w", err))
 		return err
 	}
+	r.mu.Lock()
 	r.subject = subject
+	r.mu.Unlock()
 	same, err := r.git.SameRepo(ctx, subject.targetDir, o.deps.SelfRepoDir)
 	if err != nil {
 		r.end(ctx, fmt.Errorf("could not identify the target repository: %w", err))

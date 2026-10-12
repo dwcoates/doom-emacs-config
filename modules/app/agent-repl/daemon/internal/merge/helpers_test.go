@@ -18,6 +18,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/bounce"
+	"claude-repld/internal/cpugov"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
 	"claude-repld/internal/gitclient"
@@ -29,6 +30,7 @@ import (
 	"claude-repld/internal/resolve/footer"
 	"claude-repld/internal/resolve/holds"
 	"claude-repld/internal/resolve/sidebar"
+	"claude-repld/internal/scriptrunner"
 	"claude-repld/internal/sessionwatcher"
 	"claude-repld/internal/wsm"
 )
@@ -613,9 +615,12 @@ type fakeGit struct {
 	rebaseTotal     int
 	rebaseReplayed  int
 	rebaseConflicts map[int][]string
-	rebaseMet       map[int]bool
-	rebaseErr       error
-	rebaseCommands  []string
+	// rebaseResolved names the replays (1-based) whose conflict rerere resolved
+	// from a recorded resolution, answered once.
+	rebaseResolved map[int][]string
+	rebaseMet      map[int]bool
+	rebaseErr      error
+	rebaseCommands []string
 	// worktrees answers ListWorktrees; addedWorktrees records AddWorktree.
 	worktrees      []gitclient.Worktree
 	addedWorktrees []string
@@ -647,6 +652,7 @@ func newFakeGit(seq func() int) *fakeGit {
 		ancestry:        map[string]bool{},
 		branches:        map[string]string{},
 		rebaseConflicts: map[int][]string{},
+		rebaseResolved:  map[int][]string{},
 		rebaseMet:       map[int]bool{},
 	}
 }
@@ -937,6 +943,10 @@ func (g *fakeGit) replayLocked() (gitclient.RebaseStep, error) {
 	if files, scripted := g.rebaseConflicts[k]; scripted && !g.rebaseMet[k] {
 		g.rebaseMet[k] = true
 		return gitclient.RebaseStep{Conflicted: files}, nil
+	}
+	if files, scripted := g.rebaseResolved[k]; scripted && !g.rebaseMet[-k] {
+		g.rebaseMet[-k] = true
+		return gitclient.RebaseStep{Resolved: files}, nil
 	}
 	g.rebaseReplayed = k
 	return gitclient.RebaseStep{Done: g.rebaseReplayed >= g.rebaseTotal}, nil
@@ -1533,7 +1543,12 @@ type scriptedRun struct {
 	Err    error
 }
 
-func (r *fakeRunner) RunLines(ctx context.Context, dir string, argv []string, onLine func(string)) (string, int, error) {
+func (r *fakeRunner) RunLinesMeasured(ctx context.Context, dir string, argv []string, onLine func(string)) (scriptrunner.Run, error) {
+	output, code, err := r.runLines(ctx, dir, argv, onLine)
+	return scriptrunner.Run{Output: output, ExitCode: code}, err
+}
+
+func (r *fakeRunner) runLines(ctx context.Context, dir string, argv []string, onLine func(string)) (string, int, error) {
 	r.mu.Lock()
 	before := r.before
 	r.mu.Unlock()
@@ -1569,6 +1584,26 @@ func (r *fakeRunner) RunLines(ctx context.Context, dir string, argv []string, on
 		}
 	}
 	return run.Output, run.Code, run.Err
+}
+
+// fakeLoad is the host's load, as the gate governor samples it.
+type fakeLoad struct {
+	mu     sync.Mutex
+	sample cpugov.Sample
+}
+
+func (f *fakeLoad) Ticks() (cpugov.Ticks, error) {
+	return cpugov.Ticks{CPUs: 16}, nil
+}
+
+// load stands the host at a fraction of its 16 processors and has the
+// governor decide on it.
+func (h *harness) load(fraction float64) {
+	h.sampler.mu.Lock()
+	h.sampler.sample = cpugov.Sample{Utilization: fraction, CPUs: 16}
+	sample := h.sampler.sample
+	h.sampler.mu.Unlock()
+	h.governor.Observe(sample)
 }
 
 // harness is one orchestrator with every fake it was built from.
@@ -1642,6 +1677,10 @@ type harness struct {
 	// it; gateTrees records the tree each gate command was resolved for.
 	script    string
 	gateTrees []string
+	// governor is the gate governor, sampling an idle host unless a test says
+	// otherwise (h.load).
+	governor *cpugov.Governor
+	sampler  *fakeLoad
 	// seq is the shared monotonic sequence both the feed and the git fakes
 	// stamp their calls with, so an ordering between two subsystems is asserted
 	// on the real order.
@@ -1788,6 +1827,13 @@ func newHarness(t *testing.T) *harness {
 	h.briefs[BriefConflictResolve] = []string{"conflict_commit", "source_branch", "worktree_dir", "target_branch", "conflicted_files"}
 	h.briefs[BriefTestFailureResolve] = []string{"source_branch", "worktree_dir", "target_branch", "failing_suites", "archive_path", "failure_tail", "attempt", "max_attempts", "escalation_file", "escalation_marker"}
 
+	h.sampler = &fakeLoad{sample: cpugov.Sample{Utilization: 0, CPUs: 16}}
+	governor, err := cpugov.New(cpugov.DefaultConfig(), h.sampler, h.clock, h.logs.Global())
+	if err != nil {
+		t.Fatalf("building the gate governor: %v", err)
+	}
+	h.governor = governor
+	h.governor.Observe(h.sampler.sample)
 	h.repoRoot = t.TempDir()
 	h.script = filepath.Join(h.stateDir, "test-all.sh")
 	if err := os.WriteFile(h.script, []byte("#!/usr/bin/env bash\n"), 0o644); err != nil {
@@ -1800,6 +1846,8 @@ func newHarness(t *testing.T) *harness {
 		t.Fatalf("building the orchestrator: %v", err)
 	}
 	h.o = o
+	// ONE MERGE AT A TIME unless a test builds a chain (chain_test.go).
+	o.window = 1
 	// NOTHING THE ORCHESTRATOR STARTED OUTLIVES ITS TEST; this waits, bounded,
 	// for every goroutine it counted to be gone.
 	t.Cleanup(func() {
@@ -1830,6 +1878,7 @@ func (h *harness) deps() Deps {
 			return []string{"bash", h.script}
 		},
 		TestRunner: h.runner,
+		Governor:   h.governor,
 		Painter:    fakePainter{},
 		StartSession: func(_ context.Context, ws ids.WorkspaceID) error {
 			h.mu.Lock()

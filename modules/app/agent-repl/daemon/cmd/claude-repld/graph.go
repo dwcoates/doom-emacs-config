@@ -26,6 +26,7 @@ import (
 	"claude-repld/internal/clock"
 	"claude-repld/internal/commandcatalog"
 	"claude-repld/internal/commandfile"
+	"claude-repld/internal/cpugov"
 	"claude-repld/internal/desktopnotify"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/drain"
@@ -905,6 +906,12 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 
 	ownership = workspace.NewOwnership(rolloutController)
 	detachedRef := &detachedForwarder{}
+	// THE GATE GOVERNOR admits the merge queue's speculative test gates by the
+	// host's load; its sampling loop is a background loop below.
+	gateGovernor, err := cpugov.New(cpugov.DefaultConfig(), &cpugov.Host{}, time.Now, p.Surfaces.Global())
+	if err != nil {
+		return nil, fmt.Errorf("claude-repld: build the gate governor: %w", err)
+	}
 	mergeOrchestrator, err := merge.New(merge.Deps{
 		Detached:    detachedRef,
 		PublishHost: relay.PublishHostWorkspace,
@@ -926,6 +933,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		StateDir:        p.Layout.Dir(),
 		TestCommand:     merge.TestCommandFor,
 		TestRunner:      scripts,
+		Governor:        gateGovernor,
 		Painter:         painter,
 		StartSession:    fleet.Start,
 		StopSession:     fleet.KillSession,
@@ -1156,6 +1164,10 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 
 	background := []backgroundLoop{
 		{Name: "drain", Run: drainController.Run},
+		{Name: "gate_governor", Run: func(ctx context.Context) error {
+			gateGovernor.Run(ctx)
+			return nil
+		}},
 		{Name: "command_file_ingress", Run: ingress.Run},
 		{Name: "held_prompt_ingress", Run: held.Run},
 		{Name: "shim_log_roll", Run: func(ctx context.Context) error {

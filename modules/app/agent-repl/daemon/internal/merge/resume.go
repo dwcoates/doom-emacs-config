@@ -29,7 +29,18 @@ import (
 func (o *orchestrator) register(r *run) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	o.running[r.repo] = r
+	if !r.speculative {
+		o.running[r.repo] = r
+	}
+	// THE HEAD STANDS FIRST IN ITS CHAIN. A speculative run joined its chain
+	// when the chain made it (extendChain); a head admitted fresh or resumed
+	// joins at the chain's front, ahead of any speculative run a restart put
+	// behind it.
+	if !r.joined {
+		r.joined = true
+		o.chains[r.repo] = append([]*run{r}, o.chains[r.repo]...)
+		o.signalChainLocked(r.repo)
+	}
 	o.runsByWorkspace[r.ws] = r
 	if o.draining {
 		r.suspending = true
@@ -44,31 +55,31 @@ func (o *orchestrator) register(r *run) {
 // The lease is still held from before the restart, so a resumed merge that
 // failed to come back before it had a run would refuse its workspace's every
 // prompt with nothing to release it.
-func (o *orchestrator) startResumed(ctx context.Context, repo wsm.RepoKey, ws ids.WorkspaceID, lock *repoLock, doc progressDoc) (*run, error) {
-	lease, held, leaseErr := o.deps.DB.Lease(ctx, ws)
+func (o *orchestrator) startResumed(ctx context.Context, repo wsm.RepoKey, ws ids.WorkspaceID, doc progressDoc) (*run, error) {
 	runCtx, cancel := context.WithCancelCause(ctx)
-	r := &run{
-		o: o, ws: ws, repo: repo, lease: lease, lock: lock,
-		ctx: runCtx, cancel: cancel, finished: make(chan struct{}), atBoundary: make(chan struct{}),
-		startedMS: doc.StartedMS, queuedMS: doc.QueuedMS,
-		rounds:     map[string]int{},
-		openRounds: map[string]tabRound{},
-		git:        newGatedGit(o.deps.Git, o.deps.Now),
-		resume:     &doc,
-	}
+	r := o.newRun(runCtx, cancel, repo, ws)
+	return r, o.resumeInto(runCtx, r, doc)
+}
+
+// resumeInto rebuilds the run r from its progress record and runs it on: the
+// one resume a head and a speculative run share.
+func (o *orchestrator) resumeInto(runCtx context.Context, r *run, doc progressDoc) error {
+	lease, held, leaseErr := o.deps.DB.Lease(runCtx, r.ws)
+	r.lease, r.resume = lease, &doc
+	r.startedMS, r.queuedMS = doc.StartedMS, doc.QueuedMS
 	r.restoreFrom(doc)
 	o.register(r)
 	switch {
 	case leaseErr != nil:
 		err := fmt.Errorf("could not read the lease the merge resumes under: %w", leaseErr)
 		r.end(runCtx, err)
-		return r, err
+		return err
 	case !held || lease.Holder != wsm.HolderMerge:
 		err := fmt.Errorf("the merge lease it was recorded under is no longer held")
 		r.end(runCtx, err)
-		return r, err
+		return err
 	}
-	return r, r.resumeRun(runCtx)
+	return r.resumeRun(runCtx)
 }
 
 // resumeRun is startResumed's body once the run exists.
@@ -91,6 +102,8 @@ func (r *run) resumeRun(ctx context.Context) error {
 		r.end(ctx, err)
 		return err
 	}
+	// THE MERGES A RESTART LEFT BEHIND THIS ONE resume behind it in its chain.
+	o.extendChain(context.WithoutCancel(ctx), r.repo)
 	// THE BUBBLE IS THE ONE THE MERGE ALREADY HAD, drawn live again and still
 	// pinned, and the footer shows the step the merge stands on before that
 	// step speaks.
