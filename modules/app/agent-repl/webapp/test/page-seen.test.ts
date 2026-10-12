@@ -2,23 +2,13 @@
 import { describe, expect, it } from "vitest";
 import { createPageSeen, type SeenCause } from "../src/page-seen.js";
 import { createPresence } from "../src/presence.js";
+import { visibilityDoc } from "./visibility-doc.js";
 
 const OWN = "ws-self";
 const OTHER = "ws-other";
 
 /** A document whose visibility the test sets, firing the platform's event. */
-function page(initial: DocumentVisibilityState): { doc: Document; set(state: DocumentVisibilityState): void } {
-  const doc = document.implementation.createHTMLDocument("seen");
-  let state = initial;
-  Object.defineProperty(doc, "visibilityState", { configurable: true, get: () => state });
-  return {
-    doc,
-    set: (next) => {
-      state = next;
-      doc.dispatchEvent(new Event("visibilitychange"));
-    },
-  };
-}
+const page = visibilityDoc;
 
 describe("whether a reader can see the page", () => {
   it.each<{ name: string; visibility: DocumentVisibilityState; current: string | null; seen: boolean }>([

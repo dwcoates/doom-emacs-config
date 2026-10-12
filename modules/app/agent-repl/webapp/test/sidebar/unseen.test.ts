@@ -4,6 +4,7 @@ import type { WorkspaceRoster } from "../../../proto/gen/ts/frontend/v1/sidebar_
 import { createPresence } from "../../src/presence.js";
 import { createUnseenGate, type UnseenEnv } from "../../src/sidebar/unseen.js";
 import { createPageSeen } from "../../src/page-seen.js";
+import { visibilityDoc } from "../visibility-doc.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import { roster } from "./harness.js";
 
@@ -12,21 +13,13 @@ const OTHER = "ws-other";
 
 /** A document whose visibility the test sets, and a clock the test reads. */
 function env(initial: DocumentVisibilityState): UnseenEnv & { show(): void; hide(): void } {
-  const doc = document.implementation.createHTMLDocument("unseen");
-  let state = initial;
-  Object.defineProperty(doc, "visibilityState", { configurable: true, get: () => state });
+  const v = visibilityDoc(initial);
   let clock = 0;
   return {
-    seen: createPageSeen(OWN, createPresence(doc, false)),
+    seen: createPageSeen(OWN, createPresence(v.doc, false)),
     now: () => (clock += 5),
-    show: () => {
-      state = "visible";
-      doc.dispatchEvent(new Event("visibilitychange"));
-    },
-    hide: () => {
-      state = "hidden";
-      doc.dispatchEvent(new Event("visibilitychange"));
-    },
+    show: () => v.set("visible"),
+    hide: () => v.set("hidden"),
   };
 }
 
@@ -194,9 +187,7 @@ describe("the unseen gate", () => {
 
   it("holds a push while its host does not show the page", () => {
     // Arrange
-    const doc = document.implementation.createHTMLDocument("in-host");
-    Object.defineProperty(doc, "visibilityState", { configurable: true, get: () => "visible" });
-    const presence = createPresence(doc, true);
+    const presence = createPresence(visibilityDoc("visible").doc, true);
     const drawn: WorkspaceRoster[] = [];
     const g = createUnseenGate(OWN, (r) => drawn.push(r), { seen: createPageSeen(OWN, presence), now: () => 0 });
 
@@ -210,9 +201,7 @@ describe("the unseen gate", () => {
 
   it("draws the newest held push when its host shows the page", () => {
     // Arrange
-    const doc = document.implementation.createHTMLDocument("in-host");
-    Object.defineProperty(doc, "visibilityState", { configurable: true, get: () => "visible" });
-    const presence = createPresence(doc, true);
+    const presence = createPresence(visibilityDoc("visible").doc, true);
     const drawn: WorkspaceRoster[] = [];
     const g = createUnseenGate(OWN, (r) => drawn.push(r), { seen: createPageSeen(OWN, presence), now: () => 0 });
     const newest = roster({ current: OTHER });
