@@ -310,6 +310,42 @@ else
     fail "a finished run leaves no ticket in the queue" "queue: $(ls -A "$d/slots.queue")"
 fi
 
+# --- 13/14. a signalled waiter stops: it never runs its command --------------
+# A waiter told to stop must not go on to take the next slot. The holder is
+# released only AFTER the waiter has been signalled and reaped, so a waiter
+# that survived its signal would find the slot free and write the marker.
+stop_waiter_case() {
+    local sig=$1 want=$2 label=$3 d holder waiter rc
+    d="$TMP/stop-$sig"; mkdir -p "$d/slots/slot-1"
+    sleep 60 &
+    holder=$!
+    printf '%s\n' "$holder" > "$d/slots/slot-1/pid"
+    printf '%s\n' "a suite that is already running" > "$d/slots/slot-1/cmd"
+    set +e
+    # Job control on for the launch, as in case 4: without it bash starts a
+    # background job with INT ignored, and a signal ignored on entry cannot be
+    # trapped -- unlike the terminal's Ctrl-C, which reaches a foreground job.
+    set -m
+    AGENT_REPL_SUITE_SLOT_DIR="$d/slots" bash "$SCRIPT_UNDER_TEST" \
+        bash -c 'echo ran > "$0"' "$d/marker" 2>"$d/err" &
+    waiter=$!
+    set +m
+    await_file "$d/err" "WAITING"
+    kill "-$sig" "$waiter" 2>/dev/null
+    wait "$waiter" 2>/dev/null
+    rc=$?
+    kill "$holder" 2>/dev/null
+    wait "$holder" 2>/dev/null
+    set -e
+    if [ "$rc" -eq "$want" ] && [ ! -f "$d/marker" ] && [ -z "$(ls -A "$d/slots.queue" 2>/dev/null)" ]; then
+        pass "$label"
+    else
+        fail "$label" "rc=$rc (want $want) marker=$([ -f "$d/marker" ] && echo present || echo absent) queue=$(ls -A "$d/slots.queue" 2>/dev/null) err: $(cat "$d/err")"
+    fi
+}
+stop_waiter_case TERM 143 "a waiter stopped by TERM exits without running its command"
+stop_waiter_case INT 130 "a waiter interrupted by INT exits without running its command"
+
 echo
 echo "passed $PASS, failed $FAIL"
 [ "$FAIL" -eq 0 ]
