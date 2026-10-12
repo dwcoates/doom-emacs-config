@@ -12,13 +12,15 @@ import type { WorkspaceRef } from "../../workspace/v1/workspace_pb";
 import { file_workspace_v1_workspace } from "../../workspace/v1/workspace_pb";
 import type { FeedId } from "../../frontend/v1/feed_pb";
 import { file_frontend_v1_feed } from "../../frontend/v1/feed_pb";
+import type { RollbackToken } from "./rollback_pb";
+import { file_agentrepl_v1_rollback } from "./rollback_pb";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file agentrepl/v1/endpoint_interrupt.proto.
  */
 export const file_agentrepl_v1_endpoint_interrupt: GenFile = /*@__PURE__*/
-  fileDesc("CiVhZ2VudHJlcGwvdjEvZW5kcG9pbnRfaW50ZXJydXB0LnByb3RvEgxhZ2VudHJlcGwudjEimwIKEEludGVycnVwdFJlcXVlc3QSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhIrCgR0dXJuGAIgASgLMhsuYWdlbnRyZXBsLnYxLkludGVycnVwdFR1cm5IABInCghkZXRhY2hlZBgDIAEoCzITLmZyb250ZW5kLnYxLkZlZWRJZEgAEjYKCmFsbF9hZ2VudHMYBCABKAsyIC5hZ2VudHJlcGwudjEuSW50ZXJydXB0QWxsQWdlbnRzSAASKAoJbWVyZ2VfdGFiGAYgASgLMhMuZnJvbnRlbmQudjEuRmVlZElkSAASFgoOY29uZmlybV9hZ2VudHMYBSABKAhCCAoGdGFyZ2V0Ig8KDUludGVycnVwdFR1cm4iFAoSSW50ZXJydXB0QWxsQWdlbnRzIn8KEUludGVycnVwdFJlc3BvbnNlEjEKB3N1Y2Nlc3MYASABKAsyHi5hZ2VudHJlcGwudjEuSW50ZXJydXB0U3VjY2Vzc0gAEi0KBWVycm9yGAIgASgLMhwuYWdlbnRyZXBsLnYxLkludGVycnVwdEVycm9ySABCCAoGcmVzdWx0It0BChBJbnRlcnJ1cHRTdWNjZXNzEjkKEGludGVycnVwdGVkX3R1cm4YASABKAsyHS5hZ2VudHJlcGwudjEuSW50ZXJydXB0ZWRUdXJuSAASQQoUaW50ZXJydXB0ZWRfZGV0YWNoZWQYAiABKAsyIS5hZ2VudHJlcGwudjEuSW50ZXJydXB0ZWREZXRhY2hlZEgAEkAKD25vdGhpbmdfcnVubmluZxgDIAEoCzIlLmFnZW50cmVwbC52MS5JbnRlcnJ1cHROb3RoaW5nUnVubmluZ0gAQgkKB291dGNvbWUiEQoPSW50ZXJydXB0ZWRUdXJuIiQKE0ludGVycnVwdGVkRGV0YWNoZWQSDQoFY291bnQYASABKAMiGQoXSW50ZXJydXB0Tm90aGluZ1J1bm5pbmci7gQKDkludGVycnVwdEVycm9yEkIKEGNvbmZpcm1fcmVxdWlyZWQYASABKAsyJi5hZ2VudHJlcGwudjEuSW50ZXJydXB0Q29uZmlybVJlcXVpcmVkSAASRAoRdW5rbm93bl93b3Jrc3BhY2UYAiABKAsyJy5hZ2VudHJlcGwudjEuSW50ZXJydXB0VW5rbm93bldvcmtzcGFjZUgAEk0KFndvcmtzcGFjZV9yZWZfbWlzbWF0Y2gYAyABKAsyKy5hZ2VudHJlcGwudjEuSW50ZXJydXB0V29ya3NwYWNlUmVmTWlzbWF0Y2hIABJEChF0cmFuc2ZlcnJpbmdfYXdheRgEIAEoCzInLmFnZW50cmVwbC52MS5JbnRlcnJ1cHRUcmFuc2ZlcnJpbmdBd2F5SAASPwoPbm90X3lldF9hZG9wdGVkGAUgASgLMiQuYWdlbnRyZXBsLnYxLkludGVycnVwdE5vdFlldEFkb3B0ZWRIABJDChFub3RfZGV0YWNoZWRfd29yaxgGIAEoCzImLmFnZW50cmVwbC52MS5JbnRlcnJ1cHROb3REZXRhY2hlZFdvcmtIABI2Cgpub19zZXNzaW9uGAcgASgLMiAuYWdlbnRyZXBsLnYxLkludGVycnVwdE5vU2Vzc2lvbkgAEjoKDHNoaW1fcmVmdXNlZBgIIAEoCzIiLmFnZW50cmVwbC52MS5JbnRlcnJ1cHRTaGltUmVmdXNlZEgAEjsKDW5vdF9tZXJnZV90YWIYCSABKAsyIi5hZ2VudHJlcGwudjEuSW50ZXJydXB0Tm90TWVyZ2VUYWJIAEIGCgRraW5kIjQKGEludGVycnVwdENvbmZpcm1SZXF1aXJlZBIYChBsaXZlX2FnZW50X2NvdW50GAEgASgDIhsKGUludGVycnVwdFVua25vd25Xb3Jrc3BhY2UiNQodSW50ZXJydXB0V29ya3NwYWNlUmVmTWlzbWF0Y2gSFAoMcmVnaXN0cnlfZGlyGAEgASgJIiwKGUludGVycnVwdFRyYW5zZmVycmluZ0F3YXkSDwoHYWRkcmVzcxgBIAEoCSIYChZJbnRlcnJ1cHROb3RZZXRBZG9wdGVkIhoKGEludGVycnVwdE5vdERldGFjaGVkV29yayIUChJJbnRlcnJ1cHROb1Nlc3Npb24iFgoUSW50ZXJydXB0Tm90TWVyZ2VUYWIiJgoUSW50ZXJydXB0U2hpbVJlZnVzZWQSDgoGZGV0YWlsGAEgASgJQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_workspace_v1_workspace, file_frontend_v1_feed]);
+  fileDesc("CiVhZ2VudHJlcGwvdjEvZW5kcG9pbnRfaW50ZXJydXB0LnByb3RvEgxhZ2VudHJlcGwudjEimwIKEEludGVycnVwdFJlcXVlc3QSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhIrCgR0dXJuGAIgASgLMhsuYWdlbnRyZXBsLnYxLkludGVycnVwdFR1cm5IABInCghkZXRhY2hlZBgDIAEoCzITLmZyb250ZW5kLnYxLkZlZWRJZEgAEjYKCmFsbF9hZ2VudHMYBCABKAsyIC5hZ2VudHJlcGwudjEuSW50ZXJydXB0QWxsQWdlbnRzSAASKAoJbWVyZ2VfdGFiGAYgASgLMhMuZnJvbnRlbmQudjEuRmVlZElkSAASFgoOY29uZmlybV9hZ2VudHMYBSABKAhCCAoGdGFyZ2V0Ig8KDUludGVycnVwdFR1cm4iFAoSSW50ZXJydXB0QWxsQWdlbnRzIn8KEUludGVycnVwdFJlc3BvbnNlEjEKB3N1Y2Nlc3MYASABKAsyHi5hZ2VudHJlcGwudjEuSW50ZXJydXB0U3VjY2Vzc0gAEi0KBWVycm9yGAIgASgLMhwuYWdlbnRyZXBsLnYxLkludGVycnVwdEVycm9ySABCCAoGcmVzdWx0It0BChBJbnRlcnJ1cHRTdWNjZXNzEjkKEGludGVycnVwdGVkX3R1cm4YASABKAsyHS5hZ2VudHJlcGwudjEuSW50ZXJydXB0ZWRUdXJuSAASQQoUaW50ZXJydXB0ZWRfZGV0YWNoZWQYAiABKAsyIS5hZ2VudHJlcGwudjEuSW50ZXJydXB0ZWREZXRhY2hlZEgAEkAKD25vdGhpbmdfcnVubmluZxgDIAEoCzIlLmFnZW50cmVwbC52MS5JbnRlcnJ1cHROb3RoaW5nUnVubmluZ0gAQgkKB291dGNvbWUiEQoPSW50ZXJydXB0ZWRUdXJuIiQKE0ludGVycnVwdGVkRGV0YWNoZWQSDQoFY291bnQYASABKAMibAoXSW50ZXJydXB0Tm90aGluZ1J1bm5pbmcSRAoIcm9sbGJhY2sYASABKAsyLS5hZ2VudHJlcGwudjEuSW50ZXJydXB0Tm90aGluZ1J1bm5pbmdSb2xsYmFja0gAiAEBQgsKCV9yb2xsYmFjayK+AQofSW50ZXJydXB0Tm90aGluZ1J1bm5pbmdSb2xsYmFjaxJLCglpbW1lZGlhdGUYASABKAsyNi5hZ2VudHJlcGwudjEuSW50ZXJydXB0Tm90aGluZ1J1bm5pbmdSb2xsYmFja0ltbWVkaWF0ZUgAEkUKBmNob29zZRgCIAEoCzIzLmFnZW50cmVwbC52MS5JbnRlcnJ1cHROb3RoaW5nUnVubmluZ1JvbGxiYWNrQ2hvb3NlSABCBwoFb2ZmZXIiVgooSW50ZXJydXB0Tm90aGluZ1J1bm5pbmdSb2xsYmFja0ltbWVkaWF0ZRIqCgV0b2tlbhgBIAEoCzIbLmFnZW50cmVwbC52MS5Sb2xsYmFja1Rva2VuIicKJUludGVycnVwdE5vdGhpbmdSdW5uaW5nUm9sbGJhY2tDaG9vc2Ui7gQKDkludGVycnVwdEVycm9yEkIKEGNvbmZpcm1fcmVxdWlyZWQYASABKAsyJi5hZ2VudHJlcGwudjEuSW50ZXJydXB0Q29uZmlybVJlcXVpcmVkSAASRAoRdW5rbm93bl93b3Jrc3BhY2UYAiABKAsyJy5hZ2VudHJlcGwudjEuSW50ZXJydXB0VW5rbm93bldvcmtzcGFjZUgAEk0KFndvcmtzcGFjZV9yZWZfbWlzbWF0Y2gYAyABKAsyKy5hZ2VudHJlcGwudjEuSW50ZXJydXB0V29ya3NwYWNlUmVmTWlzbWF0Y2hIABJEChF0cmFuc2ZlcnJpbmdfYXdheRgEIAEoCzInLmFnZW50cmVwbC52MS5JbnRlcnJ1cHRUcmFuc2ZlcnJpbmdBd2F5SAASPwoPbm90X3lldF9hZG9wdGVkGAUgASgLMiQuYWdlbnRyZXBsLnYxLkludGVycnVwdE5vdFlldEFkb3B0ZWRIABJDChFub3RfZGV0YWNoZWRfd29yaxgGIAEoCzImLmFnZW50cmVwbC52MS5JbnRlcnJ1cHROb3REZXRhY2hlZFdvcmtIABI2Cgpub19zZXNzaW9uGAcgASgLMiAuYWdlbnRyZXBsLnYxLkludGVycnVwdE5vU2Vzc2lvbkgAEjoKDHNoaW1fcmVmdXNlZBgIIAEoCzIiLmFnZW50cmVwbC52MS5JbnRlcnJ1cHRTaGltUmVmdXNlZEgAEjsKDW5vdF9tZXJnZV90YWIYCSABKAsyIi5hZ2VudHJlcGwudjEuSW50ZXJydXB0Tm90TWVyZ2VUYWJIAEIGCgRraW5kIjQKGEludGVycnVwdENvbmZpcm1SZXF1aXJlZBIYChBsaXZlX2FnZW50X2NvdW50GAEgASgDIhsKGUludGVycnVwdFVua25vd25Xb3Jrc3BhY2UiNQodSW50ZXJydXB0V29ya3NwYWNlUmVmTWlzbWF0Y2gSFAoMcmVnaXN0cnlfZGlyGAEgASgJIiwKGUludGVycnVwdFRyYW5zZmVycmluZ0F3YXkSDwoHYWRkcmVzcxgBIAEoCSIYChZJbnRlcnJ1cHROb3RZZXRBZG9wdGVkIhoKGEludGVycnVwdE5vdERldGFjaGVkV29yayIUChJJbnRlcnJ1cHROb1Nlc3Npb24iFgoUSW50ZXJydXB0Tm90TWVyZ2VUYWIiJgoUSW50ZXJydXB0U2hpbVJlZnVzZWQSDgoGZGV0YWlsGAEgASgJQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_workspace_v1_workspace, file_frontend_v1_feed, file_agentrepl_v1_rollback]);
 
 /**
  * @generated from message agentrepl.v1.InterruptRequest
@@ -230,9 +232,22 @@ export const InterruptedDetachedSchema: GenMessage<InterruptedDetached> = /*@__P
   messageDesc(file_agentrepl_v1_endpoint_interrupt, 6);
 
 /**
+ * The stop found the session quiet. A turn stop that finds nothing running is
+ * the SECOND PRESS of the stop key: the turn it would stop already ended (the
+ * first press stopped it, or it concluded on its own), so the key moves on to
+ * rolling the latest prompt back.
+ *
  * @generated from message agentrepl.v1.InterruptNothingRunning
  */
 export type InterruptNothingRunning = Message<"agentrepl.v1.InterruptNothingRunning"> & {
+  /**
+   * What rolling back offers now, for a turn stop. UNSET when no prompt can be
+   * rolled back (none since the last clear or compaction), and always UNSET on
+   * the detached and all_agents targets, which roll nothing back.
+   *
+   * @generated from field: optional agentrepl.v1.InterruptNothingRunningRollback rollback = 1;
+   */
+  rollback?: InterruptNothingRunningRollback | undefined;
 };
 
 /**
@@ -241,6 +256,93 @@ export type InterruptNothingRunning = Message<"agentrepl.v1.InterruptNothingRunn
  */
 export const InterruptNothingRunningSchema: GenMessage<InterruptNothingRunning> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_interrupt, 7);
+
+/**
+ * How the latest prompt can be rolled back, decided by whether anything the
+ * agent produced has landed in the root feed after it.
+ *
+ * @generated from message agentrepl.v1.InterruptNothingRunningRollback
+ */
+export type InterruptNothingRunningRollback = Message<"agentrepl.v1.InterruptNothingRunningRollback"> & {
+  /**
+   * The set arm IS the way: a prompt nothing has answered yet is cancelled
+   * outright, while a prompt with output after it is one a reader must choose
+   * to give up, so the frontend offers every reachable prompt instead.
+   *
+   * @generated from oneof agentrepl.v1.InterruptNothingRunningRollback.offer
+   */
+  offer: {
+    /**
+     * Nothing the agent produced follows the latest prompt.
+     *
+     * @generated from field: agentrepl.v1.InterruptNothingRunningRollbackImmediate immediate = 1;
+     */
+    value: InterruptNothingRunningRollbackImmediate;
+    case: "immediate";
+  } | {
+    /**
+     * Agent output follows the latest prompt.
+     *
+     * @generated from field: agentrepl.v1.InterruptNothingRunningRollbackChoose choose = 2;
+     */
+    value: InterruptNothingRunningRollbackChoose;
+    case: "choose";
+  } | { case: undefined; value?: undefined };
+};
+
+/**
+ * Describes the message agentrepl.v1.InterruptNothingRunningRollback.
+ * Use `create(InterruptNothingRunningRollbackSchema)` to create a new message.
+ */
+export const InterruptNothingRunningRollbackSchema: GenMessage<InterruptNothingRunningRollback> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_interrupt, 8);
+
+/**
+ * THE LATEST PROMPT HAS NOTHING AFTER IT: no response bubble, tool card,
+ * subagent or shell bubble, permission or question card has landed in the root
+ * feed since it was sent. Rolling it back drops nothing a reader has seen
+ * besides the prompt itself, so the frontend rolls back at once, with no
+ * confirmation, by handing `token` to RollBack. The daemon refuses that
+ * RollBack as `plan_stale` if agent output has landed after the prompt since,
+ * so a token minted here never drops a bubble the reader did not have in front
+ * of them when they pressed the key.
+ *
+ * @generated from message agentrepl.v1.InterruptNothingRunningRollbackImmediate
+ */
+export type InterruptNothingRunningRollbackImmediate = Message<"agentrepl.v1.InterruptNothingRunningRollbackImmediate"> & {
+  /**
+   * A rollback plan to just before the latest prompt, keeping files, minted
+   * exactly as PlanRollback mints one.
+   *
+   * @generated from field: agentrepl.v1.RollbackToken token = 1;
+   */
+  token?: RollbackToken | undefined;
+};
+
+/**
+ * Describes the message agentrepl.v1.InterruptNothingRunningRollbackImmediate.
+ * Use `create(InterruptNothingRunningRollbackImmediateSchema)` to create a new message.
+ */
+export const InterruptNothingRunningRollbackImmediateSchema: GenMessage<InterruptNothingRunningRollbackImmediate> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_interrupt, 9);
+
+/**
+ * AGENT OUTPUT FOLLOWS THE LATEST PROMPT, so rolling back is a choice with a
+ * cost. The frontend lists the reachable prompts (ListRollbackPrompts), lets
+ * the reader pick one, and plans that rollback by naming it
+ * (PlanRollbackRequest.prompt), confirming as for any other rollback.
+ *
+ * @generated from message agentrepl.v1.InterruptNothingRunningRollbackChoose
+ */
+export type InterruptNothingRunningRollbackChoose = Message<"agentrepl.v1.InterruptNothingRunningRollbackChoose"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.InterruptNothingRunningRollbackChoose.
+ * Use `create(InterruptNothingRunningRollbackChooseSchema)` to create a new message.
+ */
+export const InterruptNothingRunningRollbackChooseSchema: GenMessage<InterruptNothingRunningRollbackChoose> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_interrupt, 10);
 
 /**
  * Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
@@ -334,7 +436,7 @@ export type InterruptError = Message<"agentrepl.v1.InterruptError"> & {
  * Use `create(InterruptErrorSchema)` to create a new message.
  */
 export const InterruptErrorSchema: GenMessage<InterruptError> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_interrupt, 8);
+  messageDesc(file_agentrepl_v1_endpoint_interrupt, 11);
 
 /**
  * The are-you-sure challenge for a turn stop with live agents.
@@ -355,7 +457,7 @@ export type InterruptConfirmRequired = Message<"agentrepl.v1.InterruptConfirmReq
  * Use `create(InterruptConfirmRequiredSchema)` to create a new message.
  */
 export const InterruptConfirmRequiredSchema: GenMessage<InterruptConfirmRequired> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_interrupt, 9);
+  messageDesc(file_agentrepl_v1_endpoint_interrupt, 12);
 
 /**
  * @generated from message agentrepl.v1.InterruptUnknownWorkspace
@@ -368,7 +470,7 @@ export type InterruptUnknownWorkspace = Message<"agentrepl.v1.InterruptUnknownWo
  * Use `create(InterruptUnknownWorkspaceSchema)` to create a new message.
  */
 export const InterruptUnknownWorkspaceSchema: GenMessage<InterruptUnknownWorkspace> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_interrupt, 10);
+  messageDesc(file_agentrepl_v1_endpoint_interrupt, 13);
 
 /**
  * @generated from message agentrepl.v1.InterruptWorkspaceRefMismatch
@@ -387,7 +489,7 @@ export type InterruptWorkspaceRefMismatch = Message<"agentrepl.v1.InterruptWorks
  * Use `create(InterruptWorkspaceRefMismatchSchema)` to create a new message.
  */
 export const InterruptWorkspaceRefMismatchSchema: GenMessage<InterruptWorkspaceRefMismatch> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_interrupt, 11);
+  messageDesc(file_agentrepl_v1_endpoint_interrupt, 14);
 
 /**
  * @generated from message agentrepl.v1.InterruptTransferringAway
@@ -406,7 +508,7 @@ export type InterruptTransferringAway = Message<"agentrepl.v1.InterruptTransferr
  * Use `create(InterruptTransferringAwaySchema)` to create a new message.
  */
 export const InterruptTransferringAwaySchema: GenMessage<InterruptTransferringAway> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_interrupt, 12);
+  messageDesc(file_agentrepl_v1_endpoint_interrupt, 15);
 
 /**
  * @generated from message agentrepl.v1.InterruptNotYetAdopted
@@ -419,7 +521,7 @@ export type InterruptNotYetAdopted = Message<"agentrepl.v1.InterruptNotYetAdopte
  * Use `create(InterruptNotYetAdoptedSchema)` to create a new message.
  */
 export const InterruptNotYetAdoptedSchema: GenMessage<InterruptNotYetAdopted> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_interrupt, 13);
+  messageDesc(file_agentrepl_v1_endpoint_interrupt, 16);
 
 /**
  * @generated from message agentrepl.v1.InterruptNotDetachedWork
@@ -432,7 +534,7 @@ export type InterruptNotDetachedWork = Message<"agentrepl.v1.InterruptNotDetache
  * Use `create(InterruptNotDetachedWorkSchema)` to create a new message.
  */
 export const InterruptNotDetachedWorkSchema: GenMessage<InterruptNotDetachedWork> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_interrupt, 14);
+  messageDesc(file_agentrepl_v1_endpoint_interrupt, 17);
 
 /**
  * @generated from message agentrepl.v1.InterruptNoSession
@@ -445,7 +547,7 @@ export type InterruptNoSession = Message<"agentrepl.v1.InterruptNoSession"> & {
  * Use `create(InterruptNoSessionSchema)` to create a new message.
  */
 export const InterruptNoSessionSchema: GenMessage<InterruptNoSession> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_interrupt, 15);
+  messageDesc(file_agentrepl_v1_endpoint_interrupt, 18);
 
 /**
  * The merge_tab target named a row that is not a live agentic merge tab:
@@ -461,7 +563,7 @@ export type InterruptNotMergeTab = Message<"agentrepl.v1.InterruptNotMergeTab"> 
  * Use `create(InterruptNotMergeTabSchema)` to create a new message.
  */
 export const InterruptNotMergeTabSchema: GenMessage<InterruptNotMergeTab> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_interrupt, 16);
+  messageDesc(file_agentrepl_v1_endpoint_interrupt, 19);
 
 /**
  * @generated from message agentrepl.v1.InterruptShimRefused
@@ -480,5 +582,5 @@ export type InterruptShimRefused = Message<"agentrepl.v1.InterruptShimRefused"> 
  * Use `create(InterruptShimRefusedSchema)` to create a new message.
  */
 export const InterruptShimRefusedSchema: GenMessage<InterruptShimRefused> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_interrupt, 17);
+  messageDesc(file_agentrepl_v1_endpoint_interrupt, 20);
 

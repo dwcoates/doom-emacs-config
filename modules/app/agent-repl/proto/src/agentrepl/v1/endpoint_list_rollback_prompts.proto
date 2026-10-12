@@ -1,0 +1,85 @@
+// endpoint_list_rollback_prompts.proto — ListRollbackPrompts: the prompts a
+// rollback can reach, for a frontend to offer as a choice. ROLLBACK section.
+//
+// Emacs asks for it when the stop key is pressed with nothing running and
+// agent output already follows the latest prompt
+// (InterruptNothingRunningRollbackChoose): it draws the list as a completion
+// prompt, and the reader's pick is planned by naming it
+// (PlanRollbackRequest.prompt). Listing changes nothing.
+syntax = "proto3";
+package agentrepl.v1;
+import "workspace/v1/workspace.proto";
+import "frontend/v1/feed.proto";
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message ListRollbackPromptsRequest {
+  // The workspace whose prompts to list.
+  workspace.v1.WorkspaceRef workspace = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message ListRollbackPromptsResponse {
+  oneof result {
+    ListRollbackPromptsSuccess success = 1;
+    ListRollbackPromptsError error = 2;
+  }
+}
+
+// Every prompt a rollback can reach, NEWEST FIRST. Empty when none is: the
+// conversation has no prompt of the main agent's own since its last clear or
+// compaction, which is an answer, not a failure.
+message ListRollbackPromptsSuccess {
+  // Newest first, so the prompt a reader most likely wants is the first one
+  // offered.
+  repeated RollbackPromptEntry prompts = 1;
+}
+
+// One prompt a rollback can reach, with what a reader needs to tell it apart
+// from the others.
+message RollbackPromptEntry {
+  // The prompt's root-feed row: handed back verbatim as
+  // PlanRollbackRequest.prompt to roll back to just before it.
+  frontend.v1.FeedId prompt = 1;
+  // The prompt's opening words, cut to the same length the rollback
+  // confirmation names a prompt by.
+  string excerpt = 2;
+  // When the prompt was sent, epoch ms: the start of the turn it opened. The
+  // frontend draws the time since then, ticking it itself. UNSET for a prompt
+  // the workspace never recorded sending (one the vendor's transcript holds
+  // from before the workspace adopted it).
+  optional int64 sent_at_ms = 3;
+  // How full the context was just before the prompt was sent: every input
+  // token (cache reads, cache writes and uncached input) of the main agent's
+  // last API response before it. UNSET when no response has reported usage
+  // since the conversation's last clear or compaction, so no honest figure
+  // exists; never a zero standing in for one.
+  optional uint64 context_tokens = 4;
+}
+
+// Arms derived from the daemon's refusal sites, mirroring PlanRollback.
+message ListRollbackPromptsError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    ListRollbackPromptsUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    ListRollbackPromptsWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    ListRollbackPromptsTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    ListRollbackPromptsNotYetAdopted not_yet_adopted = 4;
+  }
+}
+// The workspace id is not in the daemon's registry.
+message ListRollbackPromptsUnknownWorkspace {}
+// The echoed dir disagrees with the registry's dir for this id.
+message ListRollbackPromptsWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+// This daemon released the workspace to a successor.
+message ListRollbackPromptsTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+// A joining daemon has not finished adopting this workspace yet.
+message ListRollbackPromptsNotYetAdopted {}
