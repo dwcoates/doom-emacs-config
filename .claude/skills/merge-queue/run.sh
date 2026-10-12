@@ -20,6 +20,13 @@
 #                                this workspace, which closes once it lands;
 #                                --keep-open runs it in place and keeps this
 #                                workspace open.
+#   --announce-one-shot          Announce, from inside the current turn, that
+#                                this workspace one-shot merges once the turn
+#                                ends: its own branch in place, this workspace
+#                                closed once it lands, and this workspace
+#                                marked a one-shot now. Uncommitted work is not
+#                                refused here: the turn goes on, and the merge
+#                                itself refuses a dirty tree when it starts.
 #   --land-workspace <dir>       Merge ANOTHER workspace's branch, named by its
 #                                worktree. That workspace closes once it lands.
 #   --land-branch <branch>       Merge a branch that is no workspace (a
@@ -47,8 +54,9 @@
 #
 # Modifier:
 #   --front                      With any merge verb (--enqueue-own,
-#                                --land-workspace, --land-branch,
-#                                --land-commits, --pr-merged), anywhere among
+#                                --announce-one-shot, --land-workspace,
+#                                --land-branch, --land-commits, --pr-merged),
+#                                anywhere among
 #                                its arguments: the merge goes to the FRONT of
 #                                its queue once it is put in line, ahead of
 #                                every ordinary merge waiting, never ahead of
@@ -56,6 +64,7 @@
 #
 # Exit codes (every verb):
 #   0  requested (end the turn; the outcome reports into this session),
+#      announced (--announce-one-shot; the turn goes on),
 #      removed (--remove-branch), or applied (queue-control verbs; the printed
 #      outcome line is evicted, not_queued, paused or resumed, or unread)
 #   2  script/usage error, or the merge or control could not be requested
@@ -174,6 +183,11 @@ case "${1:-}" in
     fi
     run_verb -own "${keep[@]+"${keep[@]}"}"
     ;;
+  --announce-one-shot)
+    [ -z "${2:-}" ] || die "--announce-one-shot takes no argument, not $2"
+    top="$(workspace_top)" || exit 2
+    run_verb -own -one-shot
+    ;;
   --land-workspace)
     [ -n "${2:-}" ] || die "--land-workspace needs the workspace's worktree directory"
     top="$(git rev-parse --show-toplevel 2>/dev/null || true)"
@@ -265,7 +279,7 @@ case "${1:-}" in
     run_verb "$control"
     ;;
   *)
-    printf 'usage: run.sh --enqueue-own [--in-place | --keep-open] | --land-workspace <dir> | --land-branch <branch> | --land-commits <commit>... | --pr-merged | --remove-branch <branch> | --dequeue-own | --dequeue-workspace <dir> | --pause-queue [<repo-dir>] | --resume-queue [<repo-dir>]  (any merge verb also takes --front)\n' >&2
+    printf 'usage: run.sh --enqueue-own [--in-place | --keep-open] | --announce-one-shot | --land-workspace <dir> | --land-branch <branch> | --land-commits <commit>... | --pr-merged | --remove-branch <branch> | --dequeue-own | --dequeue-workspace <dir> | --pause-queue [<repo-dir>] | --resume-queue [<repo-dir>]  (any merge verb also takes --front)\n' >&2
     exit 1
     ;;
 esac

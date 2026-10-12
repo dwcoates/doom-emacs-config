@@ -32,7 +32,16 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) error {
 	const op = "daemon.merge.enqueue"
 	ws := req.Workspace
 	log := o.log(ctx, ws)
-	fields := dlog.Context{"workspace": string(ws), "source": req.Source.Kind.String(), "requested_by": req.By.String()}
+	fields := dlog.Context{"workspace": string(ws), "source": req.Source.Kind.String(), "requested_by": req.By.String(), "one_shot": req.OneShot}
+	// A ONE-SHOT IS AN IN-PLACE OWN-BRANCH MERGE THAT CLOSES ITS REQUESTER:
+	// the boundary that builds the request guarantees it, so a request that
+	// breaks it is a defect in that caller.
+	if req.OneShot && (req.Detached || !req.Source.IsOneShot()) {
+		err := fmt.Errorf("merge: a one-shot merge of %s must be an in-place own-branch merge that closes the requester, not %s (keep_open %v, detached %v)",
+			ws, req.Source.Kind, req.Source.KeepOpen, req.Detached)
+		log.Error(op, "a one-shot merge request contradicts itself", withField(fields, "error", err.Error()))
+		return err
+	}
 	record, err := o.deps.DB.Workspace(ctx, ws)
 	if err != nil {
 		log.Error(op, "could not read the requesting workspace", withField(fields, "error", err.Error()))
@@ -78,7 +87,11 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) error {
 		log.Warn(op, "refused a merge request while the workspace's merge runs", withField(fields, "error", err.Error()))
 		return err
 	}
-	if err := o.deps.DB.RequestMerge(ctx, repo, ws, source, o.deps.Now()); err != nil {
+	requestMerge := o.deps.DB.RequestMerge
+	if req.OneShot {
+		requestMerge = o.deps.DB.RequestOneShotMerge
+	}
+	if err := requestMerge(ctx, repo, ws, source, o.deps.Now()); err != nil {
 		var queued *wsm.MergeQueuedError
 		if errors.As(err, &queued) {
 			arm := ArmAlreadyQueued
@@ -107,6 +120,11 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) error {
 	// end, so a one-shot that asked for its merge is never read as one that
 	// ended without one. Nothing is drawn from it.
 	o.deps.Sidebar.SetMergeRequested(ws, true)
+	// AN ANNOUNCED ONE-SHOT is republished after the request is raised, so the
+	// push that first draws its one-shot mark draws it armed.
+	if req.OneShot {
+		o.publishOneShot(ctx, log, ws)
+	}
 	if req.By == RequestedByUser {
 		// THE USER'S ASK HAS NO REQUESTING TURN: it is put in line at once.
 		return o.queueRequest(ctx, ws, repo)
@@ -376,4 +394,20 @@ func (o *orchestrator) handOffDetached(ctx context.Context, requester ids.Worksp
 	// the merge workspace's merge ends (handBack lowers it).
 	o.deps.Sidebar.SetMergeRequested(requester, true)
 	return o.queueRequest(ctx, forked.ID, repo)
+}
+
+// publishOneShot republishes the roster's DURABLE half once a one-shot merge
+// request has marked its requester a one-shot, so every surface drawing the
+// one-shot mark draws it from the announcement on rather than from whatever
+// next refreshes the registry. The request already stands, so a failed
+// republish is recorded and the request is not undone.
+func (o *orchestrator) publishOneShot(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID) {
+	const op = "daemon.merge.enqueue"
+	if o.deps.PublishRegistry == nil {
+		return
+	}
+	if err := o.deps.PublishRegistry(ctx); err != nil {
+		log.Error(op, "could not republish the roster after marking the requester a one-shot",
+			dlog.Context{"workspace": string(ws), "error": err.Error()})
+	}
 }

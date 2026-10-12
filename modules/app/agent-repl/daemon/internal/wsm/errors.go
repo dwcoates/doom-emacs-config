@@ -327,6 +327,12 @@ func (k MergeSourceKind) valid() bool {
 	return k >= MergeSourceOwnBranch && k <= MergeSourceMergedUpstream
 }
 
+// IsOneShot reports whether the source is a ONE-SHOT merge's: the requester's
+// own branch, merged in place, closing the requester once it lands.
+func (m MergeSource) IsOneShot() bool {
+	return m.Kind == MergeSourceOwnBranch && !m.KeepOpen && m.Detach == ""
+}
+
 // validate refuses a source whose fields contradict its arm: each arm carries
 // exactly its own field, so a stored row cannot name a merge nobody asked for.
 func (m MergeSource) validate() error {
