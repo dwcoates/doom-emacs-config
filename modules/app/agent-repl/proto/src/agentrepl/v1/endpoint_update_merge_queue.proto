@@ -25,6 +25,16 @@ message UpdateMergeQueueRequest {
     // every ordinary merge waiting, behind the merge running and behind every
     // merge already put at the front (as a merge requested with front is).
     UpdateMergeQueueFront front = 4;
+    // HOLD THE ROLLOUTS, daemon-wide: merges keep running and landing exactly
+    // as they do, but a landing in the daemon's own checkout no longer tells
+    // the deploy, so nothing redeploys, hot-reloads or bounces the running
+    // runtime. For an operator running a hand-deployed build (a profiling
+    // build) that a landing would otherwise replace. DURABLE: it survives a
+    // daemon restart and a handover until released. (Added 2026-10-12.)
+    UpdateMergeQueueHoldRollouts hold_rollouts = 5;
+    // End the hold. Nothing is deployed retroactively: the next landing, or a
+    // deploy by hand, rolls out everything that landed meanwhile.
+    UpdateMergeQueueReleaseRollouts release_rollouts = 6;
   }
 }
 message UpdateMergeQueuePause {
@@ -43,6 +53,10 @@ message UpdateMergeQueueEvict {
   // Whose merge to evict.
   workspace.v1.WorkspaceRef workspace = 1;
 }
+// Daemon-wide: one hold covers every repository's queue, since the deploy it
+// stops is the daemon's own.
+message UpdateMergeQueueHoldRollouts {}
+message UpdateMergeQueueReleaseRollouts {}
 // A merge already at the front, or already running, is answered with success
 // and left where it is: it is where the request asks it to be. A workspace
 // with no merge on any queue is `no_such_queued_merge`.
@@ -82,6 +96,10 @@ message UpdateMergeQueueError {
     // (pause/resume are per-repository when the ref is set). Empty: the
     // echoed ref is the only identity involved. (Landing 6, 2026-09-01.)
     UpdateMergeQueueUnknownRepository unknown_repository = 8;
+    // `hold_rollouts` while the rollouts are already held. (2026-10-12.)
+    UpdateMergeQueueRolloutsAlreadyHeld rollouts_already_held = 9;
+    // `release_rollouts` while the rollouts are not held. (2026-10-12.)
+    UpdateMergeQueueRolloutsNotHeld rollouts_not_held = 10;
   }
 }
 message UpdateMergeQueueUnknownWorkspace {}
@@ -99,3 +117,5 @@ message UpdateMergeQueueNotPaused {}
 message UpdateMergeQueueNoSuchQueuedMerge {}
 // The unknown-repository refusal. Empty on purpose (see the arm).
 message UpdateMergeQueueUnknownRepository {}
+message UpdateMergeQueueRolloutsAlreadyHeld {}
+message UpdateMergeQueueRolloutsNotHeld {}
