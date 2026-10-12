@@ -516,8 +516,16 @@ func (x *InterruptedDetached) GetCount() int64 {
 	return 0
 }
 
+// The stop found the session quiet. A turn stop that finds nothing running is
+// the SECOND PRESS of the stop key: the turn it would stop already ended (the
+// first press stopped it, or it concluded on its own), so the key moves on to
+// rolling the latest prompt back.
 type InterruptNothingRunning struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// What rolling back offers now, for a turn stop. UNSET when no prompt can be
+	// rolled back (none since the last clear or compaction), and always UNSET on
+	// the detached and all_agents targets, which roll nothing back.
+	Rollback      *InterruptNothingRunningRollback `protobuf:"bytes,1,opt,name=rollback,proto3,oneof" json:"rollback,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -552,6 +560,197 @@ func (*InterruptNothingRunning) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_interrupt_proto_rawDescGZIP(), []int{7}
 }
 
+func (x *InterruptNothingRunning) GetRollback() *InterruptNothingRunningRollback {
+	if x != nil {
+		return x.Rollback
+	}
+	return nil
+}
+
+// How the latest prompt can be rolled back, decided by whether anything the
+// agent produced has landed in the root feed after it.
+type InterruptNothingRunningRollback struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The set arm IS the way: a prompt nothing has answered yet is cancelled
+	// outright, while a prompt with output after it is one a reader must choose
+	// to give up, so the frontend offers every reachable prompt instead.
+	//
+	// Types that are valid to be assigned to Offer:
+	//
+	//	*InterruptNothingRunningRollback_Immediate
+	//	*InterruptNothingRunningRollback_Choose
+	Offer         isInterruptNothingRunningRollback_Offer `protobuf_oneof:"offer"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InterruptNothingRunningRollback) Reset() {
+	*x = InterruptNothingRunningRollback{}
+	mi := &file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InterruptNothingRunningRollback) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InterruptNothingRunningRollback) ProtoMessage() {}
+
+func (x *InterruptNothingRunningRollback) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InterruptNothingRunningRollback.ProtoReflect.Descriptor instead.
+func (*InterruptNothingRunningRollback) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_interrupt_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *InterruptNothingRunningRollback) GetOffer() isInterruptNothingRunningRollback_Offer {
+	if x != nil {
+		return x.Offer
+	}
+	return nil
+}
+
+func (x *InterruptNothingRunningRollback) GetImmediate() *InterruptNothingRunningRollbackImmediate {
+	if x != nil {
+		if x, ok := x.Offer.(*InterruptNothingRunningRollback_Immediate); ok {
+			return x.Immediate
+		}
+	}
+	return nil
+}
+
+func (x *InterruptNothingRunningRollback) GetChoose() *InterruptNothingRunningRollbackChoose {
+	if x != nil {
+		if x, ok := x.Offer.(*InterruptNothingRunningRollback_Choose); ok {
+			return x.Choose
+		}
+	}
+	return nil
+}
+
+type isInterruptNothingRunningRollback_Offer interface {
+	isInterruptNothingRunningRollback_Offer()
+}
+
+type InterruptNothingRunningRollback_Immediate struct {
+	// Nothing the agent produced follows the latest prompt.
+	Immediate *InterruptNothingRunningRollbackImmediate `protobuf:"bytes,1,opt,name=immediate,proto3,oneof"`
+}
+
+type InterruptNothingRunningRollback_Choose struct {
+	// Agent output follows the latest prompt.
+	Choose *InterruptNothingRunningRollbackChoose `protobuf:"bytes,2,opt,name=choose,proto3,oneof"`
+}
+
+func (*InterruptNothingRunningRollback_Immediate) isInterruptNothingRunningRollback_Offer() {}
+
+func (*InterruptNothingRunningRollback_Choose) isInterruptNothingRunningRollback_Offer() {}
+
+// THE LATEST PROMPT HAS NOTHING AFTER IT: no response bubble, tool card,
+// subagent or shell bubble, permission or question card has landed in the root
+// feed since it was sent. Rolling it back drops nothing a reader has seen
+// besides the prompt itself, so the frontend rolls back at once, with no
+// confirmation, by handing `token` to RollBack. The daemon refuses that
+// RollBack as `plan_stale` if agent output has landed after the prompt since,
+// so a token minted here never drops a bubble the reader did not have in front
+// of them when they pressed the key.
+type InterruptNothingRunningRollbackImmediate struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// A rollback plan to just before the latest prompt, keeping files, minted
+	// exactly as PlanRollback mints one.
+	Token         *RollbackToken `protobuf:"bytes,1,opt,name=token,proto3" json:"token,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InterruptNothingRunningRollbackImmediate) Reset() {
+	*x = InterruptNothingRunningRollbackImmediate{}
+	mi := &file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InterruptNothingRunningRollbackImmediate) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InterruptNothingRunningRollbackImmediate) ProtoMessage() {}
+
+func (x *InterruptNothingRunningRollbackImmediate) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InterruptNothingRunningRollbackImmediate.ProtoReflect.Descriptor instead.
+func (*InterruptNothingRunningRollbackImmediate) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_interrupt_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *InterruptNothingRunningRollbackImmediate) GetToken() *RollbackToken {
+	if x != nil {
+		return x.Token
+	}
+	return nil
+}
+
+// AGENT OUTPUT FOLLOWS THE LATEST PROMPT, so rolling back is a choice with a
+// cost. The frontend lists the reachable prompts (ListRollbackPrompts), lets
+// the reader pick one, and plans that rollback by naming it
+// (PlanRollbackRequest.prompt), confirming as for any other rollback.
+type InterruptNothingRunningRollbackChoose struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InterruptNothingRunningRollbackChoose) Reset() {
+	*x = InterruptNothingRunningRollbackChoose{}
+	mi := &file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InterruptNothingRunningRollbackChoose) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InterruptNothingRunningRollbackChoose) ProtoMessage() {}
+
+func (x *InterruptNothingRunningRollbackChoose) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InterruptNothingRunningRollbackChoose.ProtoReflect.Descriptor instead.
+func (*InterruptNothingRunningRollbackChoose) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_interrupt_proto_rawDescGZIP(), []int{10}
+}
+
 // Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
 // Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
 type InterruptError struct {
@@ -574,7 +773,7 @@ type InterruptError struct {
 
 func (x *InterruptError) Reset() {
 	*x = InterruptError{}
-	mi := &file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[8]
+	mi := &file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -586,7 +785,7 @@ func (x *InterruptError) String() string {
 func (*InterruptError) ProtoMessage() {}
 
 func (x *InterruptError) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[8]
+	mi := &file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -599,7 +798,7 @@ func (x *InterruptError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InterruptError.ProtoReflect.Descriptor instead.
 func (*InterruptError) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_interrupt_proto_rawDescGZIP(), []int{8}
+	return file_agentrepl_v1_endpoint_interrupt_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *InterruptError) GetKind() isInterruptError_Kind {
@@ -770,7 +969,7 @@ type InterruptConfirmRequired struct {
 
 func (x *InterruptConfirmRequired) Reset() {
 	*x = InterruptConfirmRequired{}
-	mi := &file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[9]
+	mi := &file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -782,7 +981,7 @@ func (x *InterruptConfirmRequired) String() string {
 func (*InterruptConfirmRequired) ProtoMessage() {}
 
 func (x *InterruptConfirmRequired) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[9]
+	mi := &file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -795,7 +994,7 @@ func (x *InterruptConfirmRequired) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InterruptConfirmRequired.ProtoReflect.Descriptor instead.
 func (*InterruptConfirmRequired) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_interrupt_proto_rawDescGZIP(), []int{9}
+	return file_agentrepl_v1_endpoint_interrupt_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *InterruptConfirmRequired) GetLiveAgentCount() int64 {
@@ -813,7 +1012,7 @@ type InterruptUnknownWorkspace struct {
 
 func (x *InterruptUnknownWorkspace) Reset() {
 	*x = InterruptUnknownWorkspace{}
-	mi := &file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[10]
+	mi := &file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -825,7 +1024,7 @@ func (x *InterruptUnknownWorkspace) String() string {
 func (*InterruptUnknownWorkspace) ProtoMessage() {}
 
 func (x *InterruptUnknownWorkspace) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[10]
+	mi := &file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -838,7 +1037,7 @@ func (x *InterruptUnknownWorkspace) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InterruptUnknownWorkspace.ProtoReflect.Descriptor instead.
 func (*InterruptUnknownWorkspace) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_interrupt_proto_rawDescGZIP(), []int{10}
+	return file_agentrepl_v1_endpoint_interrupt_proto_rawDescGZIP(), []int{13}
 }
 
 type InterruptWorkspaceRefMismatch struct {
@@ -851,7 +1050,7 @@ type InterruptWorkspaceRefMismatch struct {
 
 func (x *InterruptWorkspaceRefMismatch) Reset() {
 	*x = InterruptWorkspaceRefMismatch{}
-	mi := &file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -863,7 +1062,7 @@ func (x *InterruptWorkspaceRefMismatch) String() string {
 func (*InterruptWorkspaceRefMismatch) ProtoMessage() {}
 
 func (x *InterruptWorkspaceRefMismatch) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -876,7 +1075,7 @@ func (x *InterruptWorkspaceRefMismatch) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InterruptWorkspaceRefMismatch.ProtoReflect.Descriptor instead.
 func (*InterruptWorkspaceRefMismatch) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_interrupt_proto_rawDescGZIP(), []int{11}
+	return file_agentrepl_v1_endpoint_interrupt_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *InterruptWorkspaceRefMismatch) GetRegistryDir() string {
@@ -896,7 +1095,7 @@ type InterruptTransferringAway struct {
 
 func (x *InterruptTransferringAway) Reset() {
 	*x = InterruptTransferringAway{}
-	mi := &file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[12]
+	mi := &file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -908,7 +1107,7 @@ func (x *InterruptTransferringAway) String() string {
 func (*InterruptTransferringAway) ProtoMessage() {}
 
 func (x *InterruptTransferringAway) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[12]
+	mi := &file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -921,7 +1120,7 @@ func (x *InterruptTransferringAway) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InterruptTransferringAway.ProtoReflect.Descriptor instead.
 func (*InterruptTransferringAway) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_interrupt_proto_rawDescGZIP(), []int{12}
+	return file_agentrepl_v1_endpoint_interrupt_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *InterruptTransferringAway) GetAddress() string {
@@ -939,7 +1138,7 @@ type InterruptNotYetAdopted struct {
 
 func (x *InterruptNotYetAdopted) Reset() {
 	*x = InterruptNotYetAdopted{}
-	mi := &file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[13]
+	mi := &file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -951,7 +1150,7 @@ func (x *InterruptNotYetAdopted) String() string {
 func (*InterruptNotYetAdopted) ProtoMessage() {}
 
 func (x *InterruptNotYetAdopted) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[13]
+	mi := &file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -964,7 +1163,7 @@ func (x *InterruptNotYetAdopted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InterruptNotYetAdopted.ProtoReflect.Descriptor instead.
 func (*InterruptNotYetAdopted) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_interrupt_proto_rawDescGZIP(), []int{13}
+	return file_agentrepl_v1_endpoint_interrupt_proto_rawDescGZIP(), []int{16}
 }
 
 type InterruptNotDetachedWork struct {
@@ -975,7 +1174,7 @@ type InterruptNotDetachedWork struct {
 
 func (x *InterruptNotDetachedWork) Reset() {
 	*x = InterruptNotDetachedWork{}
-	mi := &file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[14]
+	mi := &file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -987,7 +1186,7 @@ func (x *InterruptNotDetachedWork) String() string {
 func (*InterruptNotDetachedWork) ProtoMessage() {}
 
 func (x *InterruptNotDetachedWork) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[14]
+	mi := &file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1000,7 +1199,7 @@ func (x *InterruptNotDetachedWork) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InterruptNotDetachedWork.ProtoReflect.Descriptor instead.
 func (*InterruptNotDetachedWork) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_interrupt_proto_rawDescGZIP(), []int{14}
+	return file_agentrepl_v1_endpoint_interrupt_proto_rawDescGZIP(), []int{17}
 }
 
 type InterruptNoSession struct {
@@ -1011,7 +1210,7 @@ type InterruptNoSession struct {
 
 func (x *InterruptNoSession) Reset() {
 	*x = InterruptNoSession{}
-	mi := &file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[15]
+	mi := &file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1023,7 +1222,7 @@ func (x *InterruptNoSession) String() string {
 func (*InterruptNoSession) ProtoMessage() {}
 
 func (x *InterruptNoSession) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[15]
+	mi := &file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1036,7 +1235,7 @@ func (x *InterruptNoSession) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InterruptNoSession.ProtoReflect.Descriptor instead.
 func (*InterruptNoSession) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_interrupt_proto_rawDescGZIP(), []int{15}
+	return file_agentrepl_v1_endpoint_interrupt_proto_rawDescGZIP(), []int{18}
 }
 
 // The merge_tab target named a row that is not a live agentic merge tab:
@@ -1049,7 +1248,7 @@ type InterruptNotMergeTab struct {
 
 func (x *InterruptNotMergeTab) Reset() {
 	*x = InterruptNotMergeTab{}
-	mi := &file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[16]
+	mi := &file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1061,7 +1260,7 @@ func (x *InterruptNotMergeTab) String() string {
 func (*InterruptNotMergeTab) ProtoMessage() {}
 
 func (x *InterruptNotMergeTab) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[16]
+	mi := &file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1074,7 +1273,7 @@ func (x *InterruptNotMergeTab) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InterruptNotMergeTab.ProtoReflect.Descriptor instead.
 func (*InterruptNotMergeTab) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_interrupt_proto_rawDescGZIP(), []int{16}
+	return file_agentrepl_v1_endpoint_interrupt_proto_rawDescGZIP(), []int{19}
 }
 
 type InterruptShimRefused struct {
@@ -1087,7 +1286,7 @@ type InterruptShimRefused struct {
 
 func (x *InterruptShimRefused) Reset() {
 	*x = InterruptShimRefused{}
-	mi := &file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[17]
+	mi := &file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1099,7 +1298,7 @@ func (x *InterruptShimRefused) String() string {
 func (*InterruptShimRefused) ProtoMessage() {}
 
 func (x *InterruptShimRefused) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[17]
+	mi := &file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1112,7 +1311,7 @@ func (x *InterruptShimRefused) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InterruptShimRefused.ProtoReflect.Descriptor instead.
 func (*InterruptShimRefused) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_interrupt_proto_rawDescGZIP(), []int{17}
+	return file_agentrepl_v1_endpoint_interrupt_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *InterruptShimRefused) GetDetail() string {
@@ -1126,7 +1325,7 @@ var File_agentrepl_v1_endpoint_interrupt_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_interrupt_proto_rawDesc = "" +
 	"\n" +
-	"%agentrepl/v1/endpoint_interrupt.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\x1a\x16frontend/v1/feed.proto\"\xda\x02\n" +
+	"%agentrepl/v1/endpoint_interrupt.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\x1a\x16frontend/v1/feed.proto\x1a\x1bagentrepl/v1/rollback.proto\"\xda\x02\n" +
 	"\x10InterruptRequest\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x121\n" +
 	"\x04turn\x18\x02 \x01(\v2\x1b.agentrepl.v1.InterruptTurnH\x00R\x04turn\x121\n" +
@@ -1149,8 +1348,17 @@ const file_agentrepl_v1_endpoint_interrupt_proto_rawDesc = "" +
 	"\aoutcome\"\x11\n" +
 	"\x0fInterruptedTurn\"+\n" +
 	"\x13InterruptedDetached\x12\x14\n" +
-	"\x05count\x18\x01 \x01(\x03R\x05count\"\x19\n" +
-	"\x17InterruptNothingRunning\"\xfe\x05\n" +
+	"\x05count\x18\x01 \x01(\x03R\x05count\"v\n" +
+	"\x17InterruptNothingRunning\x12N\n" +
+	"\brollback\x18\x01 \x01(\v2-.agentrepl.v1.InterruptNothingRunningRollbackH\x00R\brollback\x88\x01\x01B\v\n" +
+	"\t_rollback\"\xd1\x01\n" +
+	"\x1fInterruptNothingRunningRollback\x12V\n" +
+	"\timmediate\x18\x01 \x01(\v26.agentrepl.v1.InterruptNothingRunningRollbackImmediateH\x00R\timmediate\x12M\n" +
+	"\x06choose\x18\x02 \x01(\v23.agentrepl.v1.InterruptNothingRunningRollbackChooseH\x00R\x06chooseB\a\n" +
+	"\x05offer\"]\n" +
+	"(InterruptNothingRunningRollbackImmediate\x121\n" +
+	"\x05token\x18\x01 \x01(\v2\x1b.agentrepl.v1.RollbackTokenR\x05token\"'\n" +
+	"%InterruptNothingRunningRollbackChoose\"\xfe\x05\n" +
 	"\x0eInterruptError\x12S\n" +
 	"\x10confirm_required\x18\x01 \x01(\v2&.agentrepl.v1.InterruptConfirmRequiredH\x00R\x0fconfirmRequired\x12V\n" +
 	"\x11unknown_workspace\x18\x02 \x01(\v2'.agentrepl.v1.InterruptUnknownWorkspaceH\x00R\x10unknownWorkspace\x12c\n" +
@@ -1189,54 +1397,62 @@ func file_agentrepl_v1_endpoint_interrupt_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_interrupt_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_interrupt_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
+var file_agentrepl_v1_endpoint_interrupt_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
 var file_agentrepl_v1_endpoint_interrupt_proto_goTypes = []any{
-	(*InterruptRequest)(nil),              // 0: agentrepl.v1.InterruptRequest
-	(*InterruptTurn)(nil),                 // 1: agentrepl.v1.InterruptTurn
-	(*InterruptAllAgents)(nil),            // 2: agentrepl.v1.InterruptAllAgents
-	(*InterruptResponse)(nil),             // 3: agentrepl.v1.InterruptResponse
-	(*InterruptSuccess)(nil),              // 4: agentrepl.v1.InterruptSuccess
-	(*InterruptedTurn)(nil),               // 5: agentrepl.v1.InterruptedTurn
-	(*InterruptedDetached)(nil),           // 6: agentrepl.v1.InterruptedDetached
-	(*InterruptNothingRunning)(nil),       // 7: agentrepl.v1.InterruptNothingRunning
-	(*InterruptError)(nil),                // 8: agentrepl.v1.InterruptError
-	(*InterruptConfirmRequired)(nil),      // 9: agentrepl.v1.InterruptConfirmRequired
-	(*InterruptUnknownWorkspace)(nil),     // 10: agentrepl.v1.InterruptUnknownWorkspace
-	(*InterruptWorkspaceRefMismatch)(nil), // 11: agentrepl.v1.InterruptWorkspaceRefMismatch
-	(*InterruptTransferringAway)(nil),     // 12: agentrepl.v1.InterruptTransferringAway
-	(*InterruptNotYetAdopted)(nil),        // 13: agentrepl.v1.InterruptNotYetAdopted
-	(*InterruptNotDetachedWork)(nil),      // 14: agentrepl.v1.InterruptNotDetachedWork
-	(*InterruptNoSession)(nil),            // 15: agentrepl.v1.InterruptNoSession
-	(*InterruptNotMergeTab)(nil),          // 16: agentrepl.v1.InterruptNotMergeTab
-	(*InterruptShimRefused)(nil),          // 17: agentrepl.v1.InterruptShimRefused
-	(*v1.WorkspaceRef)(nil),               // 18: workspace.v1.WorkspaceRef
-	(*v11.FeedId)(nil),                    // 19: frontend.v1.FeedId
+	(*InterruptRequest)(nil),                         // 0: agentrepl.v1.InterruptRequest
+	(*InterruptTurn)(nil),                            // 1: agentrepl.v1.InterruptTurn
+	(*InterruptAllAgents)(nil),                       // 2: agentrepl.v1.InterruptAllAgents
+	(*InterruptResponse)(nil),                        // 3: agentrepl.v1.InterruptResponse
+	(*InterruptSuccess)(nil),                         // 4: agentrepl.v1.InterruptSuccess
+	(*InterruptedTurn)(nil),                          // 5: agentrepl.v1.InterruptedTurn
+	(*InterruptedDetached)(nil),                      // 6: agentrepl.v1.InterruptedDetached
+	(*InterruptNothingRunning)(nil),                  // 7: agentrepl.v1.InterruptNothingRunning
+	(*InterruptNothingRunningRollback)(nil),          // 8: agentrepl.v1.InterruptNothingRunningRollback
+	(*InterruptNothingRunningRollbackImmediate)(nil), // 9: agentrepl.v1.InterruptNothingRunningRollbackImmediate
+	(*InterruptNothingRunningRollbackChoose)(nil),    // 10: agentrepl.v1.InterruptNothingRunningRollbackChoose
+	(*InterruptError)(nil),                           // 11: agentrepl.v1.InterruptError
+	(*InterruptConfirmRequired)(nil),                 // 12: agentrepl.v1.InterruptConfirmRequired
+	(*InterruptUnknownWorkspace)(nil),                // 13: agentrepl.v1.InterruptUnknownWorkspace
+	(*InterruptWorkspaceRefMismatch)(nil),            // 14: agentrepl.v1.InterruptWorkspaceRefMismatch
+	(*InterruptTransferringAway)(nil),                // 15: agentrepl.v1.InterruptTransferringAway
+	(*InterruptNotYetAdopted)(nil),                   // 16: agentrepl.v1.InterruptNotYetAdopted
+	(*InterruptNotDetachedWork)(nil),                 // 17: agentrepl.v1.InterruptNotDetachedWork
+	(*InterruptNoSession)(nil),                       // 18: agentrepl.v1.InterruptNoSession
+	(*InterruptNotMergeTab)(nil),                     // 19: agentrepl.v1.InterruptNotMergeTab
+	(*InterruptShimRefused)(nil),                     // 20: agentrepl.v1.InterruptShimRefused
+	(*v1.WorkspaceRef)(nil),                          // 21: workspace.v1.WorkspaceRef
+	(*v11.FeedId)(nil),                               // 22: frontend.v1.FeedId
+	(*RollbackToken)(nil),                            // 23: agentrepl.v1.RollbackToken
 }
 var file_agentrepl_v1_endpoint_interrupt_proto_depIdxs = []int32{
-	18, // 0: agentrepl.v1.InterruptRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	21, // 0: agentrepl.v1.InterruptRequest.workspace:type_name -> workspace.v1.WorkspaceRef
 	1,  // 1: agentrepl.v1.InterruptRequest.turn:type_name -> agentrepl.v1.InterruptTurn
-	19, // 2: agentrepl.v1.InterruptRequest.detached:type_name -> frontend.v1.FeedId
+	22, // 2: agentrepl.v1.InterruptRequest.detached:type_name -> frontend.v1.FeedId
 	2,  // 3: agentrepl.v1.InterruptRequest.all_agents:type_name -> agentrepl.v1.InterruptAllAgents
-	19, // 4: agentrepl.v1.InterruptRequest.merge_tab:type_name -> frontend.v1.FeedId
+	22, // 4: agentrepl.v1.InterruptRequest.merge_tab:type_name -> frontend.v1.FeedId
 	4,  // 5: agentrepl.v1.InterruptResponse.success:type_name -> agentrepl.v1.InterruptSuccess
-	8,  // 6: agentrepl.v1.InterruptResponse.error:type_name -> agentrepl.v1.InterruptError
+	11, // 6: agentrepl.v1.InterruptResponse.error:type_name -> agentrepl.v1.InterruptError
 	5,  // 7: agentrepl.v1.InterruptSuccess.interrupted_turn:type_name -> agentrepl.v1.InterruptedTurn
 	6,  // 8: agentrepl.v1.InterruptSuccess.interrupted_detached:type_name -> agentrepl.v1.InterruptedDetached
 	7,  // 9: agentrepl.v1.InterruptSuccess.nothing_running:type_name -> agentrepl.v1.InterruptNothingRunning
-	9,  // 10: agentrepl.v1.InterruptError.confirm_required:type_name -> agentrepl.v1.InterruptConfirmRequired
-	10, // 11: agentrepl.v1.InterruptError.unknown_workspace:type_name -> agentrepl.v1.InterruptUnknownWorkspace
-	11, // 12: agentrepl.v1.InterruptError.workspace_ref_mismatch:type_name -> agentrepl.v1.InterruptWorkspaceRefMismatch
-	12, // 13: agentrepl.v1.InterruptError.transferring_away:type_name -> agentrepl.v1.InterruptTransferringAway
-	13, // 14: agentrepl.v1.InterruptError.not_yet_adopted:type_name -> agentrepl.v1.InterruptNotYetAdopted
-	14, // 15: agentrepl.v1.InterruptError.not_detached_work:type_name -> agentrepl.v1.InterruptNotDetachedWork
-	15, // 16: agentrepl.v1.InterruptError.no_session:type_name -> agentrepl.v1.InterruptNoSession
-	17, // 17: agentrepl.v1.InterruptError.shim_refused:type_name -> agentrepl.v1.InterruptShimRefused
-	16, // 18: agentrepl.v1.InterruptError.not_merge_tab:type_name -> agentrepl.v1.InterruptNotMergeTab
-	19, // [19:19] is the sub-list for method output_type
-	19, // [19:19] is the sub-list for method input_type
-	19, // [19:19] is the sub-list for extension type_name
-	19, // [19:19] is the sub-list for extension extendee
-	0,  // [0:19] is the sub-list for field type_name
+	8,  // 10: agentrepl.v1.InterruptNothingRunning.rollback:type_name -> agentrepl.v1.InterruptNothingRunningRollback
+	9,  // 11: agentrepl.v1.InterruptNothingRunningRollback.immediate:type_name -> agentrepl.v1.InterruptNothingRunningRollbackImmediate
+	10, // 12: agentrepl.v1.InterruptNothingRunningRollback.choose:type_name -> agentrepl.v1.InterruptNothingRunningRollbackChoose
+	23, // 13: agentrepl.v1.InterruptNothingRunningRollbackImmediate.token:type_name -> agentrepl.v1.RollbackToken
+	12, // 14: agentrepl.v1.InterruptError.confirm_required:type_name -> agentrepl.v1.InterruptConfirmRequired
+	13, // 15: agentrepl.v1.InterruptError.unknown_workspace:type_name -> agentrepl.v1.InterruptUnknownWorkspace
+	14, // 16: agentrepl.v1.InterruptError.workspace_ref_mismatch:type_name -> agentrepl.v1.InterruptWorkspaceRefMismatch
+	15, // 17: agentrepl.v1.InterruptError.transferring_away:type_name -> agentrepl.v1.InterruptTransferringAway
+	16, // 18: agentrepl.v1.InterruptError.not_yet_adopted:type_name -> agentrepl.v1.InterruptNotYetAdopted
+	17, // 19: agentrepl.v1.InterruptError.not_detached_work:type_name -> agentrepl.v1.InterruptNotDetachedWork
+	18, // 20: agentrepl.v1.InterruptError.no_session:type_name -> agentrepl.v1.InterruptNoSession
+	20, // 21: agentrepl.v1.InterruptError.shim_refused:type_name -> agentrepl.v1.InterruptShimRefused
+	19, // 22: agentrepl.v1.InterruptError.not_merge_tab:type_name -> agentrepl.v1.InterruptNotMergeTab
+	23, // [23:23] is the sub-list for method output_type
+	23, // [23:23] is the sub-list for method input_type
+	23, // [23:23] is the sub-list for extension type_name
+	23, // [23:23] is the sub-list for extension extendee
+	0,  // [0:23] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_interrupt_proto_init() }
@@ -1244,6 +1460,7 @@ func file_agentrepl_v1_endpoint_interrupt_proto_init() {
 	if File_agentrepl_v1_endpoint_interrupt_proto != nil {
 		return
 	}
+	file_agentrepl_v1_rollback_proto_init()
 	file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[0].OneofWrappers = []any{
 		(*InterruptRequest_Turn)(nil),
 		(*InterruptRequest_Detached)(nil),
@@ -1259,7 +1476,12 @@ func file_agentrepl_v1_endpoint_interrupt_proto_init() {
 		(*InterruptSuccess_InterruptedDetached)(nil),
 		(*InterruptSuccess_NothingRunning)(nil),
 	}
+	file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[7].OneofWrappers = []any{}
 	file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[8].OneofWrappers = []any{
+		(*InterruptNothingRunningRollback_Immediate)(nil),
+		(*InterruptNothingRunningRollback_Choose)(nil),
+	}
+	file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[11].OneofWrappers = []any{
 		(*InterruptError_ConfirmRequired)(nil),
 		(*InterruptError_UnknownWorkspace)(nil),
 		(*InterruptError_WorkspaceRefMismatch)(nil),
@@ -1276,7 +1498,7 @@ func file_agentrepl_v1_endpoint_interrupt_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_interrupt_proto_rawDesc), len(file_agentrepl_v1_endpoint_interrupt_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   18,
+			NumMessages:   21,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

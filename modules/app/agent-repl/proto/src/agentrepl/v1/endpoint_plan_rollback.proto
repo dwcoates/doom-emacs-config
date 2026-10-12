@@ -2,8 +2,9 @@
 // for the user to confirm. ROLLBACK section.
 //
 // A rollback returns the main agent's conversation to just before one of its
-// prompts: the selected prompt (frontend.v1.FeedSelectionPrompt) when one is
-// selected, else the latest prompt — which is cancelling it. Emacs asks for a
+// prompts: the prompt the request names, else the selected prompt
+// (frontend.v1.FeedSelectionPrompt) when one is selected, else the latest
+// prompt — which is cancelling it. Emacs asks for a
 // plan with the user's key (`C-c C-RET` keeps files, `C-c M-RET` restores
 // them), shows its effects in the minibuffer, and on a yes sends the plan's
 // token to RollBack. Planning changes nothing.
@@ -11,6 +12,7 @@ syntax = "proto3";
 package agentrepl.v1;
 import "workspace/v1/workspace.proto";
 import "agentrepl/v1/rollback.proto";
+import "frontend/v1/feed.proto";
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
 message PlanRollbackRequest {
@@ -25,6 +27,12 @@ message PlanRollbackRequest {
     // files the agent's edit tools changed.
     PlanRollbackRestoreFiles restore_files = 3;
   }
+  // The prompt to roll back to just before, by its root-feed row exactly as
+  // ListRollbackPrompts served it. UNSET means the selected prompt, else the
+  // latest. A named prompt a rollback can no longer reach (rolled back since,
+  // or cut off by a clear or compaction) is refused as `prompt_not_reachable`,
+  // never quietly replaced by another prompt.
+  optional frontend.v1.FeedId prompt = 4;
 }
 // Roll back the conversation only.
 message PlanRollbackKeepFiles {}
@@ -75,6 +83,8 @@ message RollbackPlanTarget {
     RollbackPlanTargetSelected selected = 1;
     // No prompt was selected, so the latest: this rollback cancels it.
     RollbackPlanTargetLatest latest = 2;
+    // The prompt the request named (PlanRollbackRequest.prompt).
+    RollbackPlanTargetNamed named = 5;
   }
   // The prompt's opening words, for the confirmation to name it.
   string excerpt = 3;
@@ -85,6 +95,8 @@ message RollbackPlanTarget {
 message RollbackPlanTargetSelected {}
 // The latest prompt.
 message RollbackPlanTargetLatest {}
+// The prompt the request named, whether or not anything is selected.
+message RollbackPlanTargetNamed {}
 
 // What happens to files and detached work. Exactly one is set.
 message RollbackPlanFiles {
@@ -130,6 +142,8 @@ message PlanRollbackError {
     PlanRollbackTransferringAway transferring_away = 3;
     // A joining daemon has not finished adopting this workspace yet.
     PlanRollbackNotYetAdopted not_yet_adopted = 4;
+    // The request named a prompt a rollback cannot reach.
+    PlanRollbackPromptNotReachable prompt_not_reachable = 5;
   }
 }
 // The workspace id is not in the daemon's registry.
@@ -146,3 +160,10 @@ message PlanRollbackTransferringAway {
 }
 // A joining daemon has not finished adopting this workspace yet.
 message PlanRollbackNotYetAdopted {}
+// The named prompt is not one a rollback can reach: it was rolled back
+// already, a clear or compaction now stands after it, or it was never a prompt
+// of the main agent's own. The frontend asks for the list again.
+message PlanRollbackPromptNotReachable {
+  // The row the request named, echoed.
+  frontend.v1.FeedId prompt = 1;
+}
