@@ -16,14 +16,13 @@ import { existsSync, readdirSync, readFileSync, realpathSync, watch } from "node
 import path from "node:path";
 import { ReDrain } from "./redrain.js";
 import {
-  cwdSlug,
   spoolPath,
   subagentMetaPath,
   subagentTranscriptPath,
-  transcriptPath,
   type TranscriptRecord,
 } from "../../src/fake/vendor-files.js";
 import type { ShimDirectories } from "./harness.js";
+import { projectDir as vendorProjectDir, transcriptPath } from "../../src/engine/vendor-paths.js";
 
 /**
  * The workspace as the CHILD sees it.
@@ -44,7 +43,7 @@ export function sessionTranscriptPath(dirs: ShimDirectories, vendorSessionId: st
 
 /** The directory every one of this session's vendor files lives under. */
 export function projectDir(dirs: ShimDirectories): string {
-  return path.join(dirs.configDir, "projects", cwdSlug(workspaceRealPath(dirs)));
+  return vendorProjectDir(dirs.configDir, workspaceRealPath(dirs));
 }
 
 /** Parse a JSONL vendor file into records; a missing file is an empty read. */

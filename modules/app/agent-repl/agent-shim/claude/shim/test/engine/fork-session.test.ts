@@ -2,7 +2,7 @@ import { create } from "@bufbuild/protobuf";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { transcriptPath } from "../../src/engine/cold.js";
+
 import {
   forkableRecordUuids,
   forkSession,
@@ -15,6 +15,7 @@ import { workspaceLockKey } from "../../src/locks.js";
 import { shimv1 } from "../../src/proto.js";
 import { logRecordsSince, logSinkMark } from "../log-records.js";
 import { testTempDir } from "../temp-dir.js";
+import { transcriptPath } from "../../src/engine/vendor-paths.js";
 
 const PARENT_ID = "11111111-1111-4111-8111-111111111111";
 const PARENT_DIR = "/repo/parent";

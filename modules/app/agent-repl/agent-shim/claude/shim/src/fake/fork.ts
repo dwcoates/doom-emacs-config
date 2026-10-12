@@ -15,7 +15,7 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import type { VendorForkSpec } from "../engine/fork-session.js";
-import { transcriptPath } from "./vendor-files.js";
+import { transcriptPath } from "../engine/vendor-paths.js";
 
 /** The record types the vendor's fork reads as transcript messages. */
 const MESSAGE_TYPES: ReadonlySet<string> = new Set(["user", "assistant", "attachment", "system", "progress"]);

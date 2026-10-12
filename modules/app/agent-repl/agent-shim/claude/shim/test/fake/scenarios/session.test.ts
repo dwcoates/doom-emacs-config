@@ -4,8 +4,9 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { COLD_GATE_FLOOR_TOKENS, readTranscriptFacts, transcriptPath } from "../../../src/engine/cold.js";
+import { COLD_GATE_FLOOR_TOKENS, readTranscriptFacts } from "../../../src/engine/cold.js";
 import { HARNESS_NOW_MS, driveScenario, ofType, recordsOfType, theResult } from "../harness.js";
+import { transcriptPath } from "../../../src/engine/vendor-paths.js";
 
 describe("identity rotation", () => {
   /** Every message, as plain records, in arrival order. */

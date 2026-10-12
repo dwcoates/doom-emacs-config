@@ -17,7 +17,7 @@ import { create } from "@bufbuild/protobuf";
 import { Code } from "@connectrpc/connect";
 import { conversationv1, shimv1, storev1 } from "../../src/proto.js";
 import { recordAgentBinaryVersion, resetAgentBinaryVersionForTest } from "../../src/build-identity.js";
-import { CACHE_TTL_1H_MS, CACHE_TTL_5M_MS, cwdSlug, transcriptPath } from "../../src/engine/cold.js";
+import { CACHE_TTL_1H_MS, CACHE_TTL_5M_MS } from "../../src/engine/cold.js";
 import { bindLog, clearRequestId } from "../../src/log.js";
 import { createEngine, type QuerySpec, type SessionEngine } from "../../src/engine/session.js";
 import { agentIdPath } from "../../src/engine/identity.js";
@@ -48,6 +48,7 @@ import { isNetworkResumePrompt, resumePromptTargets } from "../../src/engine/net
 import { rollBackSessionRequestFor } from "../service/requests.js";
 import type { ForkVendorSession } from "../../src/engine/fork-session.js";
 import { ManualScheduler, RecordingFold, RecordingPersistence, ScriptedProbe, ScriptedQuery, errorResultMessage, hookResponse, initMessage, resultMessage, unexpectedVendorFork } from "./fakes.js";
+import { projectDir, transcriptPath } from "../../src/engine/vendor-paths.js";
 
 interface Harness {
   readonly engine: SessionEngine;
@@ -82,7 +83,7 @@ function scratch(): string {
 
 /** Write a transcript for `sessionId` where the vendor would have written it. */
 function writeTranscript(configDir: string, cwd: string, sessionId: string, lines: unknown[]): void {
-  const dir = path.join(configDir, "projects", cwdSlug(cwd));
+  const dir = projectDir(configDir, cwd);
   mkdirSync(dir, { recursive: true });
   writeFileSync(
     path.join(dir, `${sessionId}.jsonl`),
@@ -2872,7 +2873,6 @@ describe("the keep-alive turn serves nothing", () => {
       uuid,
       session_id: "s",
     }) as never;
-
 
   it("sends the keep-alive with a client uuid of its own", async () => {
     // Arrange
@@ -7153,7 +7153,6 @@ describe("a foreground unit whose item has no lifecycle", () => {
     ).toBe("alreadyConcluded");
   });
 });
-
 
 /**
  * The IDE-diagnostics adjacency join (engine/session.ts's `lastChange`).

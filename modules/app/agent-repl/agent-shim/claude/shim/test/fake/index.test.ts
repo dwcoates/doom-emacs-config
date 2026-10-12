@@ -26,7 +26,7 @@ import {
   TURN_GATE_TEXT_ENV,
 } from "../../src/fake/index.js";
 import type { CanUseToolLike, QueryLike, SdkMessage, SdkUserMessage } from "../../src/sdk/types.js";
-import { transcriptPath } from "../../src/fake/vendor-files.js";
+
 import { RESUME_DROPS_TURN_REFUSAL_PREFIX } from "../../src/engine/rollback.js";
 import {
   FAKE_DEFAULT_EFFORT,
@@ -34,6 +34,7 @@ import {
   FAKE_WEEKLY_WINDOW_RESETS_IN_MS,
 } from "../../src/fake/catalogs.js";
 import { HARNESS_NOW_MS, driveScenario, ofType, recordsOfType, theResult } from "./harness.js";
+import { transcriptPath } from "../../src/engine/vendor-paths.js";
 
 const ALLOW: CanUseToolLike = async (_n, input) =>
   ({ behavior: "allow", updatedInput: input });
