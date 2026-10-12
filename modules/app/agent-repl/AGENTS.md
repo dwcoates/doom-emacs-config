@@ -1845,20 +1845,19 @@ the dwell clock, since the tab already draws full from the row.
 All three names mean Emacs's `WatchDaemon` subscription
 (`agentrepl.v1.WatchDaemon` with the `WatchDaemonEmacs` client arm): the one
 long-lived daemon stream an Emacs process holds, carrying the roster, the
-elisp reload, persistent Wi-Fi, the daemon's standing faults and the startup's
-`DaemonStartupEvent`s. Use any of the three; never use them for the per-workspace
+elisp reload, persistent Wi-Fi and the daemon's standing faults. Use any of
+the three; never use them for the per-workspace
 `WatchHostWorkspace` stream, which is "the host stream".
 
 - **`WatchDaemonEmacs.instance` is required.** Emacs mints one `EditorInstance`
   per process (`agent-repl-editor-instance`), and the daemon refuses a watch
   without it.
-- **A NEW instance runs the editor's startup; a reconnecting one does not.** The
-  daemon brings every registered workspace up (hibernated ones too) and emits,
-  on that stream only and never replayed, `opening`, each workspace's steps,
-  one `workspace_open` go-ahead per workspace strictly in registry order, and
-  `finished`. Emacs pre-creates every workspace's input buffer and webview,
-  opens a tab only once its go-ahead arrived and its page drew
-  (`lisp/startup.el`), and echoes each step as one minibuffer line.
+- **The editor's opens are NOT on this stream.** Emacs asks for its
+  workspaces with `OpenTabs` (`lisp/open-tabs.el`,
+  `docs/protobuf-design/open-tabs.md`): every roster row is asked for with its
+  page loaded at once, each tab shows when the daemon answers it `opened`, and
+  each step is one minibuffer line. A hidden workspace is answered at once and
+  runs nothing.
 - **A new instance also re-stands today's dismissed news digest** without a new
   run.
 
