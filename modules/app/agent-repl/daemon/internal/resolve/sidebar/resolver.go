@@ -482,6 +482,14 @@ func (r *resolver) SetBringingUp(ws ids.WorkspaceID, bringingUp bool) {
 		dlog.Context{"bringing_up": bringingUp}, func(s *wsState) { s.bringingUp = bringingUp })
 }
 
+// SetOpening raises or lowers the workspace's open-in-flight fact, which
+// draws the `opening` arm over every other.
+func (r *resolver) SetOpening(ws ids.WorkspaceID, opening bool) {
+	r.mutateWorkspace(ws, "daemon.sidebar.set_opening",
+		"the roster took whether an open of the workspace is in flight",
+		dlog.Context{"opening": opening}, func(s *wsState) { s.opening = opening })
+}
+
 // SetVendorStart installs where the vendor-start run stands.
 func (r *resolver) SetVendorStart(ws ids.WorkspaceID, state VendorStart) {
 	r.mutateWorkspace(ws, "daemon.sidebar.set_vendor_start",

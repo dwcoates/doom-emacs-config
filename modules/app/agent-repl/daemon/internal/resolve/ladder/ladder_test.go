@@ -135,7 +135,7 @@ func TestEveryRosterArmIsPlacedOnALadderRung(t *testing.T) {
 			claim, _ := RosterArmClaim(arm)
 
 			// Assert
-			if claim != Inactive && !slices.Contains(Order, claim) {
+			if claim != Inactive && claim != Opening && !slices.Contains(Order, claim) {
 				t.Fatalf("roster arm %q projects onto %q, which is not a rung", arm, claim)
 			}
 		})

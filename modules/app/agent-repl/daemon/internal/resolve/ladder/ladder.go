@@ -137,6 +137,13 @@ const (
 // with no perspective has no strip to disagree with.
 const Inactive Claim = "inactive"
 
+// Opening is NOT a rung either. It is the roster's `opening` row — an OpenTabs
+// names the workspace and has not answered it `opened` yet — which dominates
+// the whole ladder on the roster, `inactive` included, for as long as the open
+// is in flight: the row is grey and not selectable until the workspace is
+// open, whatever its session is doing meanwhile. No footer is drawn for it.
+const Opening Claim = "opening"
+
 // Order is the ladder, strongest claim first. It is the ONE statement of the
 // precedence; the package comment explains every position.
 var Order = []Claim{

@@ -81,7 +81,7 @@ func testColors() vocab.RenderColors {
 		"interrupted", "turn_failed", "ready", "idle_async", "vendor_blocked", "vendor_fault", "network_fault", "api_retrying", "init", "severed",
 		"start_failed", "degraded", "dead", "turn_died", "merging",
 		"merge_queued", "merge_waiting", "merge_failed", "merged", "none",
-		"inactive", "closing", "daemon_impaired", "waiting", "question",
+		"inactive", "closing", "daemon_impaired", "waiting", "question", "opening",
 	} {
 		status[arm] = "grey"
 	}
@@ -454,6 +454,8 @@ func statusName(row *frontendv1.RosterRow) string {
 		return "none"
 	case *frontendv1.RosterRow_Inactive:
 		return "inactive"
+	case *frontendv1.RosterRow_Opening:
+		return "opening"
 	case *frontendv1.RosterRow_Closing:
 		return "closing"
 	case *frontendv1.RosterRow_DaemonImpaired:
