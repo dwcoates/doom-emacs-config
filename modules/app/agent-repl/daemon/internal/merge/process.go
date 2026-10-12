@@ -849,11 +849,7 @@ func (r *run) testAndFix(ctx context.Context, tip, targetBranch string, fromAtte
 			r.tested = &testedDoc{Base: tip, Head: head, Tree: tree, Own: true}
 			return head, nil, nil
 		case attempt == MaxFixAttempts:
-			summary := fmt.Sprintf("the tests still fail after %d fixing attempts; the whole run is archived at %s", MaxFixAttempts, verdict.result.ArchivePath)
-			r.o.log(ctx, r.ws).Info("daemon.merge.fixes", "the last fixing attempt left suites failing; the merge fails", dlog.Context{
-				"workspace": string(r.ws), "attempts": MaxFixAttempts, "archive": verdict.result.ArchivePath})
-			r.settleTesting(summary)
-			out := failedIn(footer.FailedTests, summary)
+			out := r.fixesExhausted(ctx, verdict.result.ArchivePath, nil)
 			return "", &out, nil
 		}
 		if gaveUp, err := r.fix(ctx, attempt+1, verdict.result, targetBranch); err != nil || gaveUp != nil {
@@ -861,6 +857,20 @@ func (r *run) testAndFix(ctx context.Context, tip, targetBranch string, fromAtte
 		}
 		r.fixesUsed = attempt + 1
 	}
+}
+
+// fixesExhausted fails a merge whose last fixing attempt left suites failing:
+// the outcome, the record at INFO (with EXTRA's fields), and the tests tab
+// settled failed, all with the one summary.
+func (r *run) fixesExhausted(ctx context.Context, archive string, extra dlog.Context) outcome {
+	summary := fmt.Sprintf("the tests still fail after %d fixing attempts; the whole run is archived at %s", MaxFixAttempts, archive)
+	fields := dlog.Context{"workspace": string(r.ws), "attempts": MaxFixAttempts, "archive": archive}
+	for k, v := range extra {
+		fields[k] = v
+	}
+	r.o.log(ctx, r.ws).Info("daemon.merge.fixes", "the last fixing attempt left suites failing; the merge fails", fields)
+	r.settleTesting(summary)
+	return failedIn(footer.FailedTests, summary)
 }
 
 // fix hands one failing run to the requester's session, which repairs the
