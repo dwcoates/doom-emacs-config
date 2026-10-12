@@ -2,10 +2,7 @@ package newsdigest
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"strings"
 	"time"
 
@@ -107,14 +104,9 @@ func renderPriorIpo(prior *frontendv1.NewsDigestIpoOutlook) string {
 // shape, not against a set. The one leniency is a single enclosing markdown
 // code fence.
 func parseIpoAnswer(text string) (*frontendv1.NewsDigestIpoOutlook, error) {
-	dec := json.NewDecoder(strings.NewReader(stripFence(text)))
-	dec.DisallowUnknownFields()
 	var a ipoAnswer
-	if err := dec.Decode(&a); err != nil {
-		return nil, fmt.Errorf("the json did not decode: %w", err)
-	}
-	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
-		return nil, errors.New("the answer carries data after its json object")
+	if err := decodeAnswer(text, &a); err != nil {
+		return nil, err
 	}
 	anthropic, err := validIpoGuess(ipoAnthropic, a.Anthropic)
 	if err != nil {
