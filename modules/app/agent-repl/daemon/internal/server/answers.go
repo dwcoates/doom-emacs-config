@@ -16,6 +16,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/merge"
 	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/workspace"
 )
@@ -43,6 +44,44 @@ func askIDFrom(rpc string, ws ids.WorkspaceID, id *frontendv1.FeedId) (feedid.Re
 		}
 	}
 	return ref, nil
+}
+
+// interruptRow decodes the row an Interrupt targets, answering a row that does
+// not decode or belongs to another workspace as ARM, the target's own refusal:
+// Interrupt has no feed arms of its own.
+func (s *server) interruptRow(rpc string, ws ids.WorkspaceID, id *frontendv1.FeedId, arm string) (feedid.Ref, *refusal) {
+	ref, refused := askIDFrom(rpc, ws, id)
+	if refused != nil {
+		filled := s.fill(refusal{Arm: arm, Reason: refused.Reason})
+		return feedid.Ref{}, &filled
+	}
+	return ref, nil
+}
+
+// interruptMergeTab answers an Interrupt aimed at an agentic merge tab
+// (InterruptRequest.merge_tab): a row that does not decode, belongs to another
+// workspace, or is no live agentic tab is the `not_merge_tab` refusal.
+func (s *server) interruptMergeTab(ctx context.Context, rpc string, subject resolved, tab *frontendv1.FeedId, resp *agentreplv1.InterruptResponse) (*connect.Response[agentreplv1.InterruptResponse], error) {
+	ref, refused := s.interruptRow(rpc, subject.Record.ID, tab, merge.ArmNotMergeTab)
+	if refused != nil {
+		return answer(resp, s.refuse(subject.Log, rpc, resp, *refused))
+	}
+	running, err := s.deps.Merge.InterruptTab(ctx, subject.Record.ID, ref)
+	if err != nil {
+		if refused, ok := s.asRefusal(err); ok {
+			return answer(resp, s.refuse(subject.Log, rpc, resp, refused))
+		}
+		return nil, fail(subject.Log, rpc, err)
+	}
+	success := &agentreplv1.InterruptSuccess{}
+	if running {
+		success.Outcome = &agentreplv1.InterruptSuccess_InterruptedTurn{InterruptedTurn: &agentreplv1.InterruptedTurn{}}
+	} else {
+		success.Outcome = &agentreplv1.InterruptSuccess_NothingRunning{NothingRunning: &agentreplv1.InterruptNothingRunning{}}
+	}
+	subject.Log.Debug("daemon.server.interrupt", "answered what the merge-tab interrupt stopped", dlog.Context{"running": running})
+	resp.Result = &agentreplv1.InterruptResponse_Success{Success: success}
+	return connect.NewResponse(resp), nil
 }
 
 // askRow is the card verbs' shared prologue: resolve the request's workspace
@@ -94,6 +133,12 @@ func (s *server) Interrupt(
 		return answer(resp, s.refuse(s.log, rpc, resp, *r))
 	}
 
+	// A MERGE TAB'S AGENT is the merge orchestrator's to stop: it knows which
+	// workspace's turn the tab draws, and an async merge's workspace is
+	// revealed by the stop.
+	if tab := req.Msg.GetMergeTab(); tab != nil {
+		return s.interruptMergeTab(ctx, rpc, subject, tab, resp)
+	}
 	var target workspace.InterruptTarget
 	switch {
 	case req.Msg.GetTurn() != nil:
@@ -101,14 +146,11 @@ func (s *server) Interrupt(
 	case req.Msg.GetAllAgents() != nil:
 		target.AllAgents = true
 	default:
-		ref, refused := askIDFrom(rpc, subject.Record.ID, req.Msg.GetDetached())
+		// Interrupt has no feed arms; `not_detached_work` is the arm the
+		// contract carries for a target that is not detached work.
+		ref, refused := s.interruptRow(rpc, subject.Record.ID, req.Msg.GetDetached(), workspace.ArmNotDetachedWork)
 		if refused != nil {
-			// Interrupt has no feed arms; `not_detached_work` is the arm the
-			// contract carries for a target that is not detached work.
-			return answer(resp, s.refuse(subject.Log, rpc, resp, s.fill(refusal{
-				Arm:    workspace.ArmNotDetachedWork,
-				Reason: refused.Reason,
-			})))
+			return answer(resp, s.refuse(subject.Log, rpc, resp, *refused))
 		}
 		target.Detached = &ref
 	}

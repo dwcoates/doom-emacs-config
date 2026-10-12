@@ -168,7 +168,7 @@ func TestEveryCardVerbDecodesItsRowThroughAskRow(t *testing.T) {
 	src := string(raw)
 
 	// Act / Assert: each card verb calls askRow, and askIDFrom is called only
-	// by askRow and by Interrupt, whose refusal arm is its own.
+	// by askRow and by interruptRow, whose refusal arm is the target's own.
 	for _, rpc := range []string{"AnswerPermission", "AnswerQuestion", "UpdateQuestionDraft"} {
 		body := funcBody(t, src, "func (s *server) "+rpc+"(")
 		if !strings.Contains(body, "s.askRow(") || strings.Contains(body, "askIDFrom(") {
@@ -176,7 +176,7 @@ func TestEveryCardVerbDecodesItsRowThroughAskRow(t *testing.T) {
 		}
 	}
 	if n := strings.Count(src, ":= askIDFrom(rpc"); n != 2 {
-		t.Errorf("askIDFrom is called %d times, want 2 (askRow and Interrupt)", n)
+		t.Errorf("askIDFrom is called %d times, want 2 (askRow and interruptRow)", n)
 	}
 }
 

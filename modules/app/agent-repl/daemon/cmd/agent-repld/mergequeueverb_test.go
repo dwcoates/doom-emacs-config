@@ -246,16 +246,28 @@ func TestTheMergeQueueVerbNamesEachSource(t *testing.T) {
 		args  func(f *mergeFixture) []string
 		check func(f *mergeFixture, e commandfile.Entry) bool
 	}{
-		{name: "own branch, detached by default", args: func(*mergeFixture) []string { return []string{"-own"} },
+		{name: "own branch, sync by default", args: func(*mergeFixture) []string { return []string{"-own"} },
 			check: func(_ *mergeFixture, e commandfile.Entry) bool {
-				return e.Detached && !e.KeepOpen && e.Branch == "" && e.SourceDir == "" && !e.PRWasMerged && !e.Front
+				return !e.Detached && !e.KeepOpen && e.Branch == "" && e.SourceDir == "" && !e.PRWasMerged && !e.Front
 			}},
 		{name: "own branch to the front", args: func(*mergeFixture) []string { return []string{"-own", "-front"} },
-			check: func(_ *mergeFixture, e commandfile.Entry) bool { return e.Detached && e.Front }},
+			check: func(_ *mergeFixture, e commandfile.Entry) bool { return !e.Detached && e.Front }},
 		{name: "a branch to the front", args: func(*mergeFixture) []string { return []string{"-branch", "agent-1/fix", "-front"} },
 			check: func(_ *mergeFixture, e commandfile.Entry) bool { return e.Branch == "agent-1/fix" && e.Front }},
 		{name: "own branch in place", args: func(*mergeFixture) []string { return []string{"-own", "-in-place"} },
 			check: func(_ *mergeFixture, e commandfile.Entry) bool { return !e.Detached && !e.KeepOpen }},
+		{name: "own branch sync", args: func(*mergeFixture) []string { return []string{"-own", "-sync"} },
+			check: func(_ *mergeFixture, e commandfile.Entry) bool { return !e.Detached && !e.KeepOpen }},
+		{name: "own branch async", args: func(*mergeFixture) []string { return []string{"-own", "-async", "-name", "reconnect-fix"} },
+			check: func(_ *mergeFixture, e commandfile.Entry) bool {
+				return e.Detached && e.DetachedName == "reconnect-fix" && e.Pick == "" && !e.KeepOpen
+			}},
+		{name: "own branch async pick", args: func(*mergeFixture) []string {
+			return []string{"-own", "-async", "-name", "reconnect-fix", "-pick", "the reconnect fix"}
+		},
+			check: func(_ *mergeFixture, e commandfile.Entry) bool {
+				return e.Detached && e.DetachedName == "reconnect-fix" && e.Pick == "the reconnect fix"
+			}},
 		{name: "own branch kept open, in place", args: func(*mergeFixture) []string { return []string{"-own", "-keep-open"} },
 			check: func(_ *mergeFixture, e commandfile.Entry) bool { return e.KeepOpen && !e.Detached }},
 		{name: "own branch as a one-shot", args: func(*mergeFixture) []string { return []string{"-own", "-one-shot"} },
@@ -311,6 +323,15 @@ func TestTheMergeQueueVerbRefusesAMalformedRequest(t *testing.T) {
 		{name: "one-shot kept open", args: []string{"-own", "-one-shot", "-keep-open"}},
 		{name: "one-shot in place", args: []string{"-own", "-one-shot", "-in-place"}},
 		{name: "one-shot waiting", args: []string{"-own", "-one-shot", "-wait"}},
+		{name: "one-shot async", args: []string{"-own", "-one-shot", "-async", "-name", "n"}},
+		{name: "async off the own branch", args: []string{"-branch", "b", "-async", "-name", "n"}},
+		{name: "async with no name", args: []string{"-own", "-async"}},
+		{name: "async kept open", args: []string{"-own", "-async", "-name", "n", "-keep-open"}},
+		{name: "async in place", args: []string{"-own", "-async", "-name", "n", "-in-place"}},
+		{name: "async waited on", args: []string{"-own", "-async", "-name", "n", "-wait"}},
+		{name: "a name with no async", args: []string{"-own", "-name", "n"}},
+		{name: "a pick with no async", args: []string{"-own", "-pick", "the fix"}},
+		{name: "a blank pick", args: []string{"-own", "-async", "-name", "n", "-pick", " "}},
 		{name: "a dir that is not there", args: []string{"-dir", "/no/such/worktree"}},
 	}
 	for _, tt := range tests {

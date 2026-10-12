@@ -316,6 +316,9 @@ func validateInterruptRequest(req *agentreplv1.InterruptRequest) *connect.Error 
 	if detached := req.GetDetached(); detached != nil {
 		return validateFeedID("detached", detached)
 	}
+	if tab := req.GetMergeTab(); tab != nil {
+		return validateFeedID("merge_tab", tab)
+	}
 	return nil
 }
 
@@ -898,6 +901,20 @@ func validateMergeWorkspaceRequest(req *agentreplv1.MergeWorkspaceRequest) *conn
 	case *agentreplv1.MergeWorkspaceSource_OwnBranch:
 		if source.OwnBranch.GetRun() == nil {
 			return invalid("source.own_branch.run", "a run arm (in_place or detached) is required")
+		}
+		if detached := source.OwnBranch.GetDetached(); detached != nil {
+			if strings.TrimSpace(detached.GetName()) == "" {
+				return invalid("source.own_branch.detached.name", "an async merge names its merge workspace")
+			}
+			switch content := detached.GetContent().(type) {
+			case *agentreplv1.MergeWorkspaceSourceOwnBranchDetached_WholeBranch:
+			case *agentreplv1.MergeWorkspaceSourceOwnBranchDetached_Pick:
+				if strings.TrimSpace(content.Pick.GetInstruction()) == "" {
+					return invalid("source.own_branch.detached.pick.instruction", "a pick names the changes it lands")
+				}
+			default:
+				return invalid("source.own_branch.detached.content", "a content arm (whole_branch or pick) is required")
+			}
 		}
 		return nil
 	case *agentreplv1.MergeWorkspaceSource_MergedUpstream:

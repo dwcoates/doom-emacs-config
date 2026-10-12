@@ -31,6 +31,7 @@ import (
 // THE `merge-queue` VERB:
 //
 //	agent-repld merge-queue -own [-keep-open | -one-shot] [-front] [-wait] [-state-dir DIR]
+//	agent-repld merge-queue -own -async -name NAME [-pick INSTRUCTION] [-front] [-state-dir DIR]
 //	agent-repld merge-queue -dir WORKTREE [-front] [-wait] [-state-dir DIR]
 //	agent-repld merge-queue -branch BRANCH [-front] [-wait] [-state-dir DIR]
 //	agent-repld merge-queue -pr-merged [-front] [-wait] [-state-dir DIR]
@@ -45,11 +46,14 @@ import (
 // (merge.RequestedByAgent) the merge-queue skill's agents use -- naming what
 // the calling workspace merges:
 //
-//   - `-own` its own branch, closed once it lands unless `-keep-open`;
-//     `-one-shot` ANNOUNCES it a one-shot: merged in place once the turn
-//     ends and closed once it lands, and marked a one-shot from the moment
-//     the daemon applies the request, so its tab draws the one-shot mark
-//     while the announcing turn still runs;
+//   - `-own` its own branch, SYNC by default: in the calling workspace, closed
+//     once it lands unless `-keep-open`; with `-async -name NAME` ASYNC
+//     instead, in a hidden merge workspace named NAME, and with `-pick
+//     INSTRUCTION` only the changes the instruction names; `-one-shot`
+//     ANNOUNCES it a one-shot: merged in place once the turn ends and closed
+//     once it lands, and marked a one-shot from the moment the daemon applies
+//     the request, so its tab draws the one-shot mark while the announcing
+//     turn still runs;
 //   - `-dir` another workspace's branch, by that workspace's worktree, which
 //     closes once it lands;
 //   - `-branch` a branch that is no workspace (a subagent's);
@@ -236,7 +240,11 @@ func runMergeQueueVerb(ctx context.Context, args []string, dial mergeQueueDialer
 	own := fs.Bool("own", false, "merge the calling workspace's own branch")
 	keepOpen := fs.Bool("keep-open", false, "with -own: merge in place and keep the calling workspace open once its branch lands")
 	oneShot := fs.Bool("one-shot", false, "with -own: announce a one-shot merge -- in place once the calling turn ends, closing the calling workspace once it lands, and marking it a one-shot now")
-	inPlace := fs.Bool("in-place", false, "with -own: merge in the calling workspace itself, holding its prompts until the merge ends, rather than in a merge workspace forked from it")
+	inPlace := fs.Bool("in-place", false, "with -own: merge sync, in the calling workspace itself, holding its prompts until the merge ends (the default; also spelled -sync)")
+	syncRun := fs.Bool("sync", false, "with -own: the same as -in-place")
+	async := fs.Bool("async", false, "with -own and -name: merge async, in a hidden merge workspace forked from the calling workspace, which stays free")
+	name := fs.String("name", "", "with -async: the merge workspace's name, a short slug naming what is merged")
+	pick := fs.String("pick", "", "with -async: land only the changes this instruction names, which the merge agent cherry-picks onto the target branch")
 	dir := fs.String("dir", "", "merge another workspace's branch, by its worktree; it closes once it lands")
 	branch := fs.String("branch", "", "merge a branch that is no workspace (a subagent's)")
 	prMerged := fs.Bool("pr-merged", false, "the calling workspace's branch already merged upstream: update the default branch and close it")
@@ -258,7 +266,8 @@ func runMergeQueueVerb(ctx context.Context, args []string, dial mergeQueueDialer
 		return fail("unexpected arguments: %s", strings.Join(fs.Args(), " "))
 	}
 	source, err := resolveMergeQueueSource(mergeQueueFlags{
-		own: *own, keepOpen: *keepOpen, oneShot: *oneShot, inPlace: *inPlace, wait: *wait, dir: *dir, branch: *branch, prMerged: *prMerged, front: *front,
+		own: *own, keepOpen: *keepOpen, oneShot: *oneShot, inPlace: *inPlace || *syncRun, async: *async, name: *name, pick: *pick,
+		wait: *wait, dir: *dir, branch: *branch, prMerged: *prMerged, front: *front,
 		evict: *evict, evictDir: *evictDir, pause: *pause, resume: *resume, repositoryDir: *repositoryDir,
 		holdRollouts: *holdRollouts, releaseRollouts: *releaseRollouts,
 	})
@@ -287,14 +296,16 @@ func runMergeQueueVerb(ctx context.Context, args []string, dial mergeQueueDialer
 // mergeQueueFlags are the flags that name what one invocation asks for.
 type mergeQueueFlags struct {
 	own, keepOpen bool
-	// inPlace runs an own-branch merge in the calling workspace rather than
-	// detached. keepOpen implies it, and so does wait: a caller that waits for
-	// the merge's outcome is asking for the merge that runs in it, since a
-	// detached merge reports back to the calling conversation instead.
+	// inPlace asks for an own-branch merge SYNC, in the calling workspace,
+	// which is also what an own-branch merge does when async is not asked.
 	inPlace, wait bool
 	// oneShot announces an own-branch merge a one-shot: in place, closing the
 	// calling workspace once it lands, and marking it a one-shot at once.
-	oneShot     bool
+	oneShot bool
+	// async asks for an own-branch merge ASYNC, in a hidden merge workspace
+	// named name; pick, when set, lands only the changes it names.
+	async       bool
+	name, pick  string
 	dir, branch string
 	prMerged    bool
 	// front puts the merge at the front of its queue (commandfile.Entry.Front).
@@ -339,11 +350,23 @@ func resolveMergeQueueRequest(f mergeQueueFlags) (mergeQueueSource, error) {
 	case f.keepOpen && !f.own:
 		return mergeQueueSource{}, errors.New("-keep-open goes with -own: only the calling workspace's own branch can keep it open")
 	case f.inPlace && !f.own:
-		return mergeQueueSource{}, errors.New("-in-place goes with -own: only the calling workspace's own branch can run detached or in place")
+		return mergeQueueSource{}, errors.New("-in-place goes with -own: only the calling workspace's own branch can run sync or async")
 	case f.oneShot && !f.own:
 		return mergeQueueSource{}, errors.New("-one-shot goes with -own: only the calling workspace's own branch is announced a one-shot")
-	case f.oneShot && (f.keepOpen || f.inPlace || f.wait):
-		return mergeQueueSource{}, errors.New("-one-shot is its own in-place merge that closes the calling workspace, announced from inside the turn it waits on: it takes none of -keep-open, -in-place or -wait")
+	case f.oneShot && (f.keepOpen || f.inPlace || f.async || f.wait):
+		return mergeQueueSource{}, errors.New("-one-shot is its own in-place merge that closes the calling workspace, announced from inside the turn it waits on: it takes none of -keep-open, -in-place, -async or -wait")
+	case f.async && !f.own:
+		return mergeQueueSource{}, errors.New("-async goes with -own: only the calling workspace's own branch can run async")
+	case f.async && (f.inPlace || f.keepOpen):
+		return mergeQueueSource{}, errors.New("-async runs the merge in a merge workspace; -in-place and -keep-open are a sync merge's")
+	case f.async && f.wait:
+		return mergeQueueSource{}, errors.New("-wait waits on a merge in the calling workspace; an async merge reports back to its conversation instead")
+	case f.async && strings.TrimSpace(f.name) == "":
+		return mergeQueueSource{}, errors.New("-async names its merge workspace: give -name NAME")
+	case !f.async && (f.name != "" || f.pick != ""):
+		return mergeQueueSource{}, errors.New("-name and -pick go with -async")
+	case f.pick != "" && strings.TrimSpace(f.pick) == "":
+		return mergeQueueSource{}, errors.New("-pick names the changes it lands")
 	case f.repositoryDir != "" && !f.pause && !f.resume:
 		return mergeQueueSource{}, errors.New("-repository-dir goes with -pause or -resume: it names the repository whose queue they address")
 	}
@@ -387,20 +410,23 @@ func resolveMergeQueueRequest(f mergeQueueFlags) (mergeQueueSource, error) {
 		}
 		return mergeQueueSource{label: label, control: true, entry: commandfile.Entry{Type: typ, RepositoryDir: repo}}, nil
 	}
-	// AN OWN-BRANCH MERGE RUNS DETACHED BY DEFAULT (owner ruling, 2026-10-11):
-	// in a merge workspace forked from the calling workspace, which stays free.
-	// -in-place, -keep-open (which only an in-place merge means anything
-	// with) or -wait (which waits on the calling workspace's own merge) runs
-	// it in the calling workspace instead.
+	// AN OWN-BRANCH MERGE RUNS SYNC BY DEFAULT (owner ruling, 2026-10-11): in
+	// the calling workspace, which closes once it lands unless -keep-open.
+	// -async runs it in a hidden merge workspace named -name instead.
 	// A ONE-SHOT is announced from inside the turn it follows: it runs in
 	// place and closes the calling workspace once it lands.
 	if f.oneShot {
 		return mergeQueueSource{label: "its own branch, as a one-shot", entry: commandfile.Entry{Type: commandfile.TypeMerge, OneShot: true}}, nil
 	}
-	if f.inPlace || f.keepOpen || f.wait {
-		return mergeQueueSource{label: "its own branch, in place", entry: commandfile.Entry{Type: commandfile.TypeMerge, KeepOpen: f.keepOpen}}, nil
+	if f.async {
+		name, pick := strings.TrimSpace(f.name), strings.TrimSpace(f.pick)
+		label := "its own branch, async, in merge workspace " + name
+		if pick != "" {
+			label = "a pick of its own branch, async, in merge workspace " + name
+		}
+		return mergeQueueSource{label: label, entry: commandfile.Entry{Type: commandfile.TypeMerge, Detached: true, DetachedName: name, Pick: pick}}, nil
 	}
-	return mergeQueueSource{label: "its own branch, in a merge workspace", entry: commandfile.Entry{Type: commandfile.TypeMerge, Detached: true}}, nil
+	return mergeQueueSource{label: "its own branch, in place", entry: commandfile.Entry{Type: commandfile.TypeMerge, KeepOpen: f.keepOpen}}, nil
 }
 
 // existingDir resolves a flag's directory to an absolute path that is a

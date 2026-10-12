@@ -523,6 +523,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// durable close, the record the prompt queue's door wrote.
 		TurnCloses:    p.DB.TurnCloses,
 		TurnAddresses: p.DB.TurnAddresses,
+		TurnMirrors:   p.DB.TurnMirrors,
 		// A FORK'S OWN TURNS are the ones its workspace recorded; every other
 		// main-agent entry of its book is the conversation it inherited.
 		OwnedTurns: p.DB.RecordedTurns,
@@ -915,8 +916,10 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		return nil, fmt.Errorf("agent-repld: build the gate governor: %w", err)
 	}
 	mergeOrchestrator, err := merge.New(merge.Deps{
-		Detached:    detachedRef,
-		PublishHost: relay.PublishHostWorkspace,
+		Detached:      detachedRef,
+		Names:         verbsRef,
+		InterruptTurn: verbsRef.interruptTurn,
+		PublishHost:   relay.PublishHostWorkspace,
 		// The verbs own the roster's durable half and are built AFTER the
 		// orchestrator, so the republish reads them out of the forwarder.
 		PublishRegistry: verbsRef.publishRegistry("a merge landed"),
