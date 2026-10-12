@@ -36,6 +36,14 @@ unset AGENT_REPL_SUITE_SLOT_HELD
 THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_UNDER_TEST="$THIS_DIR/suite-slot.sh"
 
+# The merge queue's gate runs the whole suite under
+# AGENT_REPL_SUITE_PRIORITY=merge, so every subject below would inherit the
+# merge priority and stand ahead of the ordinary tickets the ordering rows
+# stage. A subject's priority is fixture state: the rows that are about
+# priority set it on their own command line, and every other row is an
+# ordinary waiter.
+unset AGENT_REPL_SUITE_PRIORITY
+
 # The unified suite is itself expected to hold the host slot. Its exported
 # re-entrancy marker is not fixture state: each case below constructs its own
 # process tree and private slot directory, including the nested case that
