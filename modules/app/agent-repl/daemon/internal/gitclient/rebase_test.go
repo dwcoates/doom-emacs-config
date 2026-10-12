@@ -215,7 +215,7 @@ func TestContinueRebaseContinuesWithNoEditor(t *testing.T) {
 func TestARebaseFailureWithoutConflictsIsAFailure(t *testing.T) {
 	// Arrange.
 	git, surfaces := newTestClient(t)
-	newFakeGit(t, fails(1, "error: cannot rebase: You have unstaged changes.\n", "rebase"), ok("", "diff"))
+	newFakeGit(t, fails(1, "error: cannot rebase: You have unstaged changes.\n", "rebase"), ok("", "diff"), rebaseDirFixture(t, false))
 
 	// Act.
 	_, err := git.ContinueRebase(context.Background(), "/wt")
@@ -227,6 +227,81 @@ func TestARebaseFailureWithoutConflictsIsAFailure(t *testing.T) {
 	}
 	if _, found := recordFor(surfaces.records(), "error", "daemon.gitclient.continue_rebase"); !found {
 		t.Fatalf("the failure was not logged at ERROR: %+v", surfaces.records())
+	}
+}
+
+func TestARebaseStopThatRerereTracksNothingIsAFailure(t *testing.T) {
+	// Arrange: the rebase stands stopped with nothing unmerged, and rerere
+	// resolved nothing -- an untracked file the pick would overwrite.
+	git, _ := newTestClient(t)
+	newFakeGit(t, fails(1, "error: The following untracked working tree files would be overwritten\n", "rebase"),
+		ok("", "diff"), rebaseDirFixture(t, true), ok("", "rerere", "status"))
+
+	// Act.
+	_, err := git.ContinueRebase(context.Background(), "/wt")
+
+	// Assert.
+	var failure *Error
+	if !errors.As(err, &failure) || !strings.Contains(failure.Stderr, "untracked working tree files") {
+		t.Fatalf("ContinueRebase error = %v, want git's own evidence", err)
+	}
+}
+
+func TestARebaseStopRerereResolvedAnswersTheResolvedPaths(t *testing.T) {
+	// Arrange: the commit conflicted, and rerere staged its recorded
+	// resolution of both paths.
+	git, _ := newTestClient(t)
+	newFakeGit(t, fails(1, "Staged 'a.go' using previous resolution.\n", "rebase"),
+		ok("", "diff"), rebaseDirFixture(t, true), ok("a.go\nb.go\n", "rerere", "status"))
+
+	// Act.
+	got, err := git.ContinueRebase(context.Background(), "/wt")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ContinueRebase: %v", err)
+	}
+	if want := (RebaseStep{Resolved: []string{"a.go", "b.go"}}); !reflect.DeepEqual(got, want) {
+		t.Fatalf("ContinueRebase = %+v, want %+v", got, want)
+	}
+}
+
+func TestEveryRebaseCommandReusesRecordedResolutions(t *testing.T) {
+	tests := []struct {
+		name string
+		act  func(Git) error
+	}{
+		{name: "start", act: func(g Git) error {
+			_, err := g.StartRebase(context.Background(), "/wt", "tip", []string{"aaa"})
+			return err
+		}},
+		{name: "continue", act: func(g Git) error {
+			_, err := g.ContinueRebase(context.Background(), "/wt")
+			return err
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			git, _ := newTestClient(t)
+			fake := newFakeGit(t, ok("", "rebase"), rebaseDirFixture(t, true))
+
+			// Act.
+			if err := tt.act(git); err != nil {
+				t.Fatalf("rebase command: %v", err)
+			}
+
+			// Assert.
+			env := fake.call(0).Env
+			want := []string{"GIT_CONFIG_COUNT=2", "GIT_CONFIG_KEY_0=rerere.enabled", "GIT_CONFIG_VALUE_0=true",
+				"GIT_CONFIG_KEY_1=rerere.autoUpdate", "GIT_CONFIG_VALUE_1=true"}
+			for _, binding := range want {
+				name, _, _ := strings.Cut(binding, "=")
+				if got := envValues(env, name); !reflect.DeepEqual(got, []string{binding}) {
+					t.Fatalf("%s bindings = %v, want exactly [%s]", name, got, binding)
+				}
+			}
+		})
 	}
 }
 
