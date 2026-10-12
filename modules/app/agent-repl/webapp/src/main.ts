@@ -54,10 +54,12 @@ import { createLocalFailures, type LocalFailures } from "./failure/local.js";
 import { ForwardingLogger, LEVEL_WINDOW_OPERATION, bindLogContext, log, setLogger, type ClientLogSink } from "./log.js";
 import { LevelWindow, selectionContext, selectionNote, selectLevel } from "../../agent-shim/logging/ts/level-window.js";
 import { installPagePresenceLog } from "./page-presence.js";
+import { connectToHost } from "./host/embed.js";
+import { pagePresence } from "./presence.js";
 import { createAgentReplClient, type AgentReplClient } from "./rpc/client.js";
 import { createAppContext, type AppContext } from "./rpc/context.js";
 import { reportClientFailure } from "./rpc/link.js";
-import { pageAddress } from "./rpc/page-address.js";
+import { isHostAddress, pageAddress } from "./rpc/page-address.js";
 import { createDaemonTransport } from "./rpc/transport.js";
 import { workspaceRef } from "./rpc/workspace-ref.js";
 import type { SubmitPromptCommandPanel } from "../../proto/gen/ts/agentrepl/v1/endpoint_submit_prompt_pb";
@@ -185,6 +187,10 @@ export async function boot(): Promise<void> {
     // warning chip to draw on -- but it is at least LOGGED now rather than
     // thrown past the reporter.
     const shell = shellElements(document);
+
+    // Joined before anything draws, so the host's first word (shown or not)
+    // reaches the page before the rail decides what it can skip.
+    connectToHost({ doc: document, win: window, presence: pagePresence() });
 
     // The page's presence — hidden/shown, focused/blurred, resized, and the
     // repaint after each — is recorded from here on (src/page-presence.ts).
@@ -375,7 +381,17 @@ function reportBootFailure(err: unknown, failures: LocalFailures | null): void {
 // the time it rejects; rethrowing from a microtask re-raises it as the uncaught
 // error the browser reports, which is exactly the loudness the synchronous
 // throw used to have — and is not the same thing as swallowing it.
-void boot().catch((err: unknown) => {
+//
+// THE HOST PAGE IS THIS SAME BUNDLE AT `?host=1` (src/host/host.ts), loaded
+// through a dynamic import so it reaches nothing of the workspace page it does
+// not need, while staying reachable from this one entry: the entry's hash is
+// the build's identity (bin/build-frontend.sh), and it covers the host too.
+const started = isHostAddress(window.location.search)
+  ? import("./host/main.js").then((host) => {
+      host.startHost(document, window);
+    })
+  : boot();
+started.catch((err: unknown) => {
   queueMicrotask(() => {
     throw err;
   });

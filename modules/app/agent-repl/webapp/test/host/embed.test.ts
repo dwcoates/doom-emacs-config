@@ -1,0 +1,296 @@
+// @vitest-environment jsdom
+// A workspace page's side of the host protocol. See src/host/embed.ts.
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+
+import { CONVERSATION_DRAWN_ATTRIBUTE } from "../../src/feed/conversation-drawn.js";
+import { DOCK_BACKGROUND_PROPERTY, DOCK_HEIGHT_PROPERTY } from "../../src/feed/gate-dock.js";
+import { connectToHost, type HostLink } from "../../src/host/embed.js";
+import { HOST_CHANNEL, type PageToHost } from "../../src/host/protocol.js";
+import { createPresence, type PresenceSource } from "../../src/presence.js";
+import { captureLogRecords, type LogCapture } from "../log-capture.js";
+
+let pageWin: Window;
+let pageDoc: Document;
+let hostWin: Window;
+let presence: PresenceSource;
+let link: HostLink | null;
+let received: PageToHost[];
+let capture: LogCapture;
+
+/**
+ * A stand-in for the page's own window inside the host's iframe: jsdom gives a
+ * real iframe a `parent` that is not the test's window and delivers its posts
+ * with no source, so the page's window and its host are modeled directly. The
+ * page's DOCUMENT is the test's real one.
+ */
+function pageWindow(host: Window): Window {
+  const target = new EventTarget();
+  return Object.assign(target, {
+    parent: host,
+    getSelection: () => window.getSelection(),
+  }) as unknown as Window;
+}
+
+/** A stand-in for the host's window: it records what the page posts to it. */
+function hostWindow(): Window {
+  return {
+    postMessage: (message: unknown) => {
+      received.push(message as PageToHost);
+    },
+  } as unknown as Window;
+}
+
+/** Posts are recorded synchronously by the stand-in host. */
+async function delivered(): Promise<void> {
+  await Promise.resolve();
+}
+
+/** Deliver DATA to the page as though SOURCE (by default its host) posted it. */
+function fromHost(data: unknown, source: Window = hostWin): void {
+  const event = new MessageEvent("message", { data });
+  Object.defineProperty(event, "source", { value: source });
+  pageWin.dispatchEvent(event);
+}
+
+async function operations(): Promise<string[]> {
+  capture.logger.flush();
+  await Promise.resolve();
+  return capture.sent.map((record) => record.operation);
+}
+
+beforeEach(() => {
+  capture = captureLogRecords("debug");
+  received = [];
+  hostWin = hostWindow();
+  pageWin = pageWindow(hostWin);
+  pageDoc = document;
+  presence = createPresence(pageDoc, true);
+  link = connectToHost({ doc: pageDoc, win: pageWin, presence });
+});
+
+afterEach(() => {
+  link?.dispose();
+  presence.dispose();
+  pageDoc.documentElement.removeAttribute(CONVERSATION_DRAWN_ATTRIBUTE);
+  pageDoc.documentElement.removeAttribute("style");
+  pageDoc.body.replaceChildren();
+});
+
+describe("joining", () => {
+  it("answers no link for a page in no host", () => {
+    // Arrange
+    const alone = createPresence(document, false);
+
+    // Act
+    const none = connectToHost({ doc: document, win: window, presence: alone });
+
+
+    // Assert
+    expect(none).toBeNull();
+    alone.dispose();
+  });
+
+  it("says hello to its host", async () => {
+    // Act
+    await delivered();
+
+    // Assert
+    expect(received).toContainEqual({ channel: HOST_CHANNEL, kind: "hello" });
+  });
+
+  it("records that it joined its host", async () => {
+    expect(await operations()).toContain("page.host-joined");
+  });
+});
+
+describe("presence", () => {
+  it("takes the host showing it", () => {
+    // Act
+    fromHost({ channel: HOST_CHANNEL, kind: "presence", shown: true });
+
+    // Assert
+    expect(presence.shown()).toBe(true);
+  });
+
+  it("records the host showing it at info", async () => {
+    // Act
+    fromHost({ channel: HOST_CHANNEL, kind: "presence", shown: true });
+
+    // Assert
+    await operations();
+    expect(capture.sent.find((r) => r.operation === "page.host-presence")?.level.case).toBe("info");
+  });
+
+  it("records nothing when the host repeats what it said", async () => {
+    // Arrange
+    fromHost({ channel: HOST_CHANNEL, kind: "presence", shown: false });
+
+    // Act / Assert
+    expect(await operations()).not.toContain("page.host-presence");
+  });
+
+  it("ignores a message from a window other than its host", () => {
+    // Act
+    fromHost({ channel: HOST_CHANNEL, kind: "presence", shown: true }, pageWin);
+
+    // Assert
+    expect(presence.shown()).toBe(false);
+  });
+
+  it("records a host message it cannot read at warn", async () => {
+    // Act
+    fromHost({ channel: HOST_CHANNEL, kind: "teleport" });
+
+    // Assert
+    await operations();
+    const record = capture.sent.find((r) => r.operation === "page.host-message-unreadable");
+    expect(record?.level.case).toBe("warn");
+  });
+});
+
+describe("commands", () => {
+  it("paints the input window's background where the gate reads it", () => {
+    // Act
+    fromHost({ channel: HOST_CHANNEL, kind: "inputBackground", background: "#123456" });
+
+    // Assert
+    expect(pageDoc.documentElement.style.getPropertyValue(DOCK_BACKGROUND_PROPERTY)).toBe("#123456");
+  });
+
+  it("sizes the docked gate's slot", () => {
+    // Act
+    fromHost({ channel: HOST_CHANNEL, kind: "gateDock", pixels: 132, background: null });
+
+    // Assert
+    expect(pageDoc.documentElement.style.getPropertyValue(DOCK_HEIGHT_PROPERTY)).toBe("132px");
+  });
+
+  it("paints the docked gate's background when one is given", () => {
+    // Act
+    fromHost({ channel: HOST_CHANNEL, kind: "gateDock", pixels: 132, background: "#222222" });
+
+    // Assert
+    expect(pageDoc.documentElement.style.getPropertyValue(DOCK_BACKGROUND_PROPERTY)).toBe("#222222");
+  });
+
+  it("leaves the background alone for a docked gate given none", () => {
+    // Arrange
+    fromHost({ channel: HOST_CHANNEL, kind: "inputBackground", background: "#111111" });
+
+    // Act
+    fromHost({ channel: HOST_CHANNEL, kind: "gateDock", pixels: 132, background: null });
+
+    // Assert
+    expect(pageDoc.documentElement.style.getPropertyValue(DOCK_BACKGROUND_PROPERTY)).toBe("#111111");
+  });
+
+  it("closes a standing news digest", () => {
+    // Arrange
+    const digest = pageDoc.createElement("div");
+    digest.setAttribute("data-component", "news-digest");
+    const close = pageDoc.createElement("button");
+    close.setAttribute("data-news-digest-close", "");
+    let clicked = false;
+    close.addEventListener("click", () => {
+      clicked = true;
+    });
+    digest.append(close);
+    pageDoc.body.append(digest);
+
+    // Act
+    fromHost({ channel: HOST_CHANNEL, kind: "dismissDigest" });
+
+    // Assert
+    expect(clicked).toBe(true);
+  });
+});
+
+describe("reported facts", () => {
+  it("reports a conversation drawn after it joined", async () => {
+    // Act
+    pageDoc.documentElement.setAttribute(CONVERSATION_DRAWN_ATTRIBUTE, "page");
+
+    // Assert
+    await delivered();
+    expect(received).toContainEqual({ channel: HOST_CHANNEL, kind: "drawn", what: "page" });
+  });
+
+  it("reports a conversation already drawn when it joins", async () => {
+    // Arrange
+    link?.dispose();
+    pageDoc.documentElement.setAttribute(CONVERSATION_DRAWN_ATTRIBUTE, "refused");
+    received = [];
+
+    // Act
+    link = connectToHost({ doc: pageDoc, win: pageWin, presence });
+
+    // Assert
+    await delivered();
+    expect(received).toContainEqual({ channel: HOST_CHANNEL, kind: "drawn", what: "refused" });
+  });
+
+  it("reports its selection when it changes", async () => {
+    // Act
+    pageDoc.dispatchEvent(new Event("selectionchange"));
+
+    // Assert
+    await delivered();
+    expect(received.some((m) => m.kind === "selection")).toBe(true);
+  });
+
+  it("reports a text field taking the keyboard", async () => {
+    // Arrange
+    const input = pageDoc.createElement("input");
+    pageDoc.body.append(input);
+
+    // Act
+    input.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+
+    // Assert
+    await delivered();
+    expect(received).toContainEqual({ channel: HOST_CHANNEL, kind: "editing", editing: true });
+  });
+
+  it("reports the keyboard leaving its text fields", async () => {
+    // Arrange
+    const input = pageDoc.createElement("input");
+    const button = pageDoc.createElement("button");
+    pageDoc.body.append(input, button);
+    input.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+
+    // Act
+    input.dispatchEvent(new FocusEvent("focusout", { bubbles: true, relatedTarget: button }));
+
+    // Assert
+    await delivered();
+    expect(received).toContainEqual({ channel: HOST_CHANNEL, kind: "editing", editing: false });
+  });
+
+  it("reports nothing about the keyboard while it stays out of text fields", async () => {
+    // Arrange
+    const button = pageDoc.createElement("button");
+    pageDoc.body.append(button);
+
+    // Act
+    button.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+
+    // Assert
+    await delivered();
+    expect(received.some((m) => m.kind === "editing")).toBe(false);
+  });
+
+  it("reports nothing once disposed", async () => {
+    // Arrange
+    await delivered();
+    link?.dispose();
+    link = null;
+    received = [];
+
+    // Act
+    pageDoc.dispatchEvent(new Event("selectionchange"));
+
+    // Assert
+    await delivered();
+    expect(received).toEqual([]);
+  });
+});

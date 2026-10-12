@@ -22,6 +22,10 @@
  * composer-less: the root composer is host-native (Emacs), and this flag
  * exists for developing the composer surface in an ordinary browser tab.
  *
+ * `?host=1` is a different page altogether: Emacs's one web view, which holds
+ * every workspace's page as an iframe (src/host/host.ts). It carries no
+ * workspace and is read by {@link isHostAddress}, before any of the above.
+ *
  * Any other query parameter is IGNORED, not refused: the address is what this
  * page reads out of the URL, and an unrecognized parameter is somebody else's
  * (a cache buster, a host's own bookkeeping), never a view instruction.
@@ -59,4 +63,9 @@ export function pageAddress(search: string): PageAddress {
     logLevel: parseClientLogLevel(params.get("log_level")),
     logLevelUntil: params.get("log_level_until") ?? undefined,
   };
+}
+
+/** Whether a `location.search` string addresses the host page (`?host=1`). */
+export function isHostAddress(search: string): boolean {
+  return new URLSearchParams(search).get("host") === "1";
 }
