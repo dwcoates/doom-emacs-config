@@ -59,6 +59,7 @@ export const ROSTER_STATUS_CASES = [
   "merged",
   "none",
   "inactive",
+  "opening",
 ] as const;
 
 /** One arm of the status oneof, as the generated code spells it. */
