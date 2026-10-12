@@ -3,6 +3,7 @@ package feed
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -113,6 +114,91 @@ func (r *resolver) RollbackPrompts(ws ids.WorkspaceID) []*frontendv1.FeedId {
 		out = append(out, prompt.row)
 	}
 	return out
+}
+
+// RollbackChoice is one prompt a rollback can reach, with what tells it apart
+// from the others in a reader's choice.
+type RollbackChoice struct {
+	// Row is the prompt's root-feed row.
+	Row *frontendv1.FeedId
+	// Turn is the turn the prompt opened.
+	Turn ids.TurnID
+	// Said is the prompt as the user said it.
+	Said *conversationv1.UserSaid
+	// ContextTokens is how full the main agent's context was just before the
+	// prompt (context.go); nil when no reading stands between the newest
+	// context cut and the prompt.
+	ContextTokens *uint64
+}
+
+// RollbackChoices answers the prompts a rollback can reach, oldest first, each
+// with the context figure that stood before it.
+func (r *resolver) RollbackChoices(ws ids.WorkspaceID) []RollbackChoice {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s, ok := r.workspaces[ws]
+	if !ok {
+		return nil
+	}
+	f, ok := s.feeds[r.feedKey(s.id, feedid.Feed{Root: true})]
+	if !ok {
+		return nil
+	}
+	cut := ""
+	if i := cutIndex(f, f.order); i >= 0 {
+		cut = f.rank[f.order[i]].key
+	}
+	prompts := r.rollbackPrompts(s)
+	out := make([]RollbackChoice, 0, len(prompts))
+	for _, prompt := range prompts {
+		choice := RollbackChoice{Row: prompt.row, Turn: prompt.turn, Said: s.promptSaid[prompt.turn]}
+		if tokens, ok := contextBefore(s, cut, f.rank[prompt.row.GetValue()].key); ok {
+			choice.ContextTokens = &tokens
+		}
+		out = append(out, choice)
+	}
+	return out
+}
+
+// PromptFollowed reports whether agent output is drawn after the prompt ROW
+// in the root feed: a response, thinking or tool card (an activity row), a
+// detached subagent or shell bubble, a permission or a question card. A
+// turn's end marker, a divider, a badge, a peer message and a command panel
+// are not the agent answering the prompt, and a pinned row stands at the
+// feed's bottom whatever it belongs to, so none of those counts. False when
+// ROW is not on the root feed.
+func (r *resolver) PromptFollowed(ws ids.WorkspaceID, row *frontendv1.FeedId) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s, ok := r.workspaces[ws]
+	if !ok {
+		return false
+	}
+	f, ok := s.feeds[r.feedKey(s.id, feedid.Feed{Root: true})]
+	if !ok {
+		return false
+	}
+	at := slices.Index(f.order, row.GetValue())
+	if at < 0 {
+		return false
+	}
+	for _, id := range f.order[at+1:] {
+		if !isPinKey(f.rank[id].key) && answersPrompt(f.rows[id]) {
+			return true
+		}
+	}
+	return false
+}
+
+// answersPrompt reports whether ROW is agent output a reader sees as the
+// agent answering: a response bubble or a purple-titled card.
+func answersPrompt(row *frontendv1.FeedRow) bool {
+	switch row.GetRow().(type) {
+	case *frontendv1.FeedRow_Activity, *frontendv1.FeedRow_DetachedSubagent, *frontendv1.FeedRow_ShellHead,
+		*frontendv1.FeedRow_Permission, *frontendv1.FeedRow_Question:
+		return true
+	}
+	return false
 }
 
 // RollBackTurns removes TURNS from the feed for good: every row of one is
