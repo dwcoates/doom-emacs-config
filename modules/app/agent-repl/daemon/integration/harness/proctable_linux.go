@@ -1,9 +1,7 @@
 package harness
 
 import (
-	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"strconv"
 )
@@ -24,7 +22,7 @@ func processTable() ([]procEntry, error) {
 		}
 		raw, err := os.ReadFile("/proc/" + d.Name() + "/cmdline")
 		switch {
-		case errors.Is(err, fs.ErrNotExist), errors.Is(err, os.ErrProcessDone):
+		case exitedMidRead(err):
 			continue
 		case err != nil:
 			return nil, fmt.Errorf("read the argv of pid %d: %w", pid, err)
