@@ -65,7 +65,9 @@ func (o *orchestrator) startResumed(ctx context.Context, repo wsm.RepoKey, ws id
 // one resume a head and a speculative run share.
 func (o *orchestrator) resumeInto(runCtx context.Context, r *run, doc progressDoc) error {
 	lease, held, leaseErr := o.deps.DB.Lease(runCtx, r.ws)
+	r.mu.Lock()
 	r.lease, r.resume = lease, &doc
+	r.mu.Unlock()
 	r.startedMS, r.queuedMS = doc.StartedMS, doc.QueuedMS
 	r.restoreFrom(doc)
 	o.register(r)
