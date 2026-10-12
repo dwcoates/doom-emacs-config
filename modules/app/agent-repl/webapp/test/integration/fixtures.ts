@@ -2522,8 +2522,13 @@ export function roster(init?: {
         maturityStageSection("merging", "Merging", [], false),
       ],
     },
+    viewed: {
+      header: { label: { text: "Viewed" }, count: { workspaces: 0 } },
+      rows: { rows: [] },
+      fold: { case: "expanded", value: {} },
+    },
     hidden: {
-      header: { label: { text: "Hidden Workspaces" }, count: { workspaces: (init?.hidden ?? []).length } },
+      header: { label: { text: "Hidden" }, count: { workspaces: (init?.hidden ?? []).length } },
       rows: { rows: init?.hidden ?? [] },
       fold: { case: "expanded", value: {} },
     },
