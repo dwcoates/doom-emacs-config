@@ -140,13 +140,53 @@ test_enqueue_own_in_place_runs_in_this_workspace() {
   expect_args "--enqueue-own --in-place asks for the merge to run in this workspace" "merge-queue -own -in-place"
 }
 
+test_enqueue_own_sync_is_in_place() {
+  mkfixture
+  invoke --enqueue-own --sync
+  expect_args "--enqueue-own --sync asks for the merge to run in this workspace" "merge-queue -own -in-place"
+}
+
+test_enqueue_own_async_names_its_merge_workspace() {
+  mkfixture
+  invoke --enqueue-own --async reconnect-fix
+  expect_args "--enqueue-own --async asks for an async merge under its name" "merge-queue -own -async -name reconnect-fix"
+}
+
+test_enqueue_own_async_pick_carries_the_instruction() {
+  mkfixture
+  invoke --enqueue-own --async reconnect-fix --pick "the reconnect fix"
+  expect_args "--enqueue-own --async --pick carries the pick instruction" "merge-queue -own -async -name reconnect-fix -pick the reconnect fix"
+}
+
+# expect_refused NAME ARGS... — the run exits 2 and requests nothing.
+expect_refused() {
+  local name="$1"
+  shift
+  mkfixture
+  invoke "$@"
+  if [ "$RUN_RC" -eq 2 ] && [ -z "$(daemon_args)" ]; then
+    pass "$name"
+  else
+    fail "$name" "exit=$RUN_RC args=$(daemon_args)" "$RUN_OUT"
+  fi
+}
+
+test_enqueue_own_refuses_malformed_forms() {
+  expect_refused "--enqueue-own --async refuses a missing name" --enqueue-own --async
+  expect_refused "--enqueue-own --async refuses a missing pick instruction" --enqueue-own --async n --pick
+  expect_refused "--enqueue-own --async refuses an option other than --pick" --enqueue-own --async n --keep-open
+  expect_refused "--enqueue-own --pick refuses more than one instruction" --enqueue-own --async n --pick a b
+  expect_refused "--enqueue-own --keep-open refuses anything after it" --enqueue-own --keep-open --async n
+  expect_refused "--enqueue-own --sync refuses anything after it" --enqueue-own --sync --keep-open
+}
+
 test_enqueue_own_refuses_an_unknown_option() {
   mkfixture
   invoke --enqueue-own --bogus
   if [ "$RUN_RC" -eq 2 ] && [ -z "$(daemon_args)" ]; then
-    pass "--enqueue-own refuses an option other than --in-place or --keep-open"
+    pass "--enqueue-own refuses an option it does not take"
   else
-    fail "--enqueue-own refuses an option other than --in-place or --keep-open" "exit=$RUN_RC" "$RUN_OUT"
+    fail "--enqueue-own refuses an option it does not take" "exit=$RUN_RC" "$RUN_OUT"
   fi
 }
 
@@ -600,6 +640,10 @@ test_announce_one_shot_front_goes_to_the_front
 test_announce_one_shot_allows_uncommitted_work
 test_announce_one_shot_refuses_an_argument
 test_announce_one_shot_refusal_is_exit_5
+test_enqueue_own_sync_is_in_place
+test_enqueue_own_async_names_its_merge_workspace
+test_enqueue_own_async_pick_carries_the_instruction
+test_enqueue_own_refuses_malformed_forms
 test_land_workspace_requests_without_waiting
 test_land_workspace_refuses_its_own
 test_land_branch_requests_the_branch

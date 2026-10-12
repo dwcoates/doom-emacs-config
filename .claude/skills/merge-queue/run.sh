@@ -2,9 +2,11 @@
 # run.sh — the merge-queue skill's driver.
 #
 # Every merge verb asks for a merge FROM the workspace this shell is inside.
-# The merge is put in line once the caller's current turn ends, runs in that
-# workspace, and reports its outcome into that workspace's session; no merge
-# verb waits for the outcome.
+# The merge is put in line once the caller's current turn ends and reports its
+# outcome into that workspace's session; no merge verb waits for the outcome.
+# A merge is SYNC (it runs in the requesting workspace itself) unless asked
+# ASYNC (it runs in a hidden merge workspace forked from it, named by the
+# caller, and the requesting workspace stays free).
 #
 # The queue-control verbs (--dequeue-*, --pause-queue, --resume-queue,
 # --hold-rollouts, --release-rollouts) ask,
@@ -13,14 +15,19 @@
 # refusal's cause when refused.
 #
 # Verbs:
-#   --enqueue-own [--in-place | --keep-open]
+#   --enqueue-own [--in-place | --sync | --keep-open |
+#                  --async <name> [--pick <instruction>]]
 #                                Merge this workspace's own branch. By
-#                                default it runs detached, in a merge
-#                                workspace forked from this one, and this
-#                                workspace stays free. --in-place runs it in
-#                                this workspace, which closes once it lands;
-#                                --keep-open runs it in place and keeps this
-#                                workspace open.
+#                                default it runs SYNC, in this workspace,
+#                                which closes once it lands; --in-place and
+#                                --sync say the same explicitly. --keep-open
+#                                runs it sync and keeps this workspace open.
+#                                --async <name> runs it ASYNC, in a hidden
+#                                merge workspace named <name>, leaving this
+#                                workspace free; with --pick <instruction>
+#                                only the changes the instruction names land,
+#                                cherry-picked onto the target by the merge
+#                                workspace's agent.
 #   --announce-one-shot          Announce, from inside the current turn, that
 #                                this workspace one-shot merges once the turn
 #                                ends: its own branch in place, this workspace
@@ -75,7 +82,8 @@
 #      outcome line is evicted, not_queued, paused, resumed, held or
 #      released, or unread)
 #   2  script/usage error, or the merge or control could not be requested
-#   5  refused by the daemon; why (or how to read why) is printed
+#   5  refused by the daemon; why (or how to read why) is printed (an async
+#      merge's name already taken is refused here: pick another name)
 #   6  the workspace has uncommitted work (--enqueue-own)
 #   7  --land-workspace named this shell's own workspace
 #   9  a named commit did not apply cleanly onto the main worktree's branch
@@ -176,19 +184,35 @@ drop_built() {
 
 case "${1:-}" in
   --enqueue-own)
-    keep=()
-    case "${2:-}" in
+    shift
+    mode=()
+    case "${1:-}" in
       "") ;;
-      --keep-open) keep=(-keep-open) ;;
-      --in-place) keep=(-in-place) ;;
-      *) die "--enqueue-own takes only --in-place or --keep-open, not $2" ;;
+      --keep-open)
+        [ "$#" -eq 1 ] || die "--enqueue-own --keep-open takes nothing after it, not ${2}"
+        mode=(-keep-open) ;;
+      --in-place | --sync)
+        [ "$#" -eq 1 ] || die "--enqueue-own $1 takes nothing after it, not ${2}"
+        mode=(-in-place) ;;
+      --async)
+        [ -n "${2:-}" ] || die "--enqueue-own --async needs the merge workspace's name"
+        mode=(-async -name "$2")
+        case "${3:-}" in
+          "") [ "$#" -eq 2 ] || die "--enqueue-own --async takes only a name and --pick" ;;
+          --pick)
+            [ -n "${4:-}" ] || die "--pick needs the instruction naming the changes to land"
+            [ "$#" -eq 4 ] || die "--pick takes one instruction; quote it"
+            mode+=(-pick "$4") ;;
+          *) die "--enqueue-own --async <name> takes only --pick, not $3" ;;
+        esac ;;
+      *) die "--enqueue-own takes only --in-place, --sync, --keep-open or --async <name> [--pick <instruction>], not $1" ;;
     esac
     top="$(workspace_top)" || exit 2
     if [ -n "$(git -C "$top" status --porcelain 2>/dev/null)" ]; then
       log "$top has uncommitted work; commit it before enqueueing"
       exit 6
     fi
-    run_verb -own "${keep[@]+"${keep[@]}"}"
+    run_verb -own "${mode[@]+"${mode[@]}"}"
     ;;
   --announce-one-shot)
     [ -z "${2:-}" ] || die "--announce-one-shot takes no argument, not $2"
@@ -293,7 +317,7 @@ case "${1:-}" in
     run_verb "$control"
     ;;
   *)
-    printf 'usage: run.sh --enqueue-own [--in-place | --keep-open] | --announce-one-shot | --land-workspace <dir> | --land-branch <branch> | --land-commits <commit>... | --pr-merged | --remove-branch <branch> | --dequeue-own | --dequeue-workspace <dir> | --pause-queue [<repo-dir>] | --resume-queue [<repo-dir>] | --hold-rollouts | --release-rollouts  (any merge verb also takes --front)\n' >&2
+    printf 'usage: run.sh --enqueue-own [--in-place | --sync | --keep-open | --async <name> [--pick <instruction>]] | --announce-one-shot | --land-workspace <dir> | --land-branch <branch> | --land-commits <commit>... | --pr-merged | --remove-branch <branch> | --dequeue-own | --dequeue-workspace <dir> | --pause-queue [<repo-dir>] | --resume-queue [<repo-dir>] | --hold-rollouts | --release-rollouts  (any merge verb also takes --front)\n' >&2
     exit 1
     ;;
 esac
