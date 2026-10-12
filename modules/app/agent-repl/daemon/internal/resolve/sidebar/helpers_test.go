@@ -386,12 +386,15 @@ func rowFor(rows []*frontendv1.RosterRow, id string) *frontendv1.RosterRow {
 	return nil
 }
 
-// onlyRow reads the repository grouping's single row.
+// onlyRow reads the single workspace's row from the live list: the repository
+// grouping's section, or the viewed band a PARTIAL row is filed under. The
+// workspace is drawn in exactly one of the two.
 func onlyRow(t *testing.T, r sidebar.Resolver) *frontendv1.RosterRow {
 	t.Helper()
-	rows := repoRows(t, latest(t, r))
+	roster := latest(t, r)
+	rows := append(repoRows(t, roster), roster.GetViewed().GetRows().GetRows()...)
 	if len(rows) != 1 {
-		t.Fatalf("the section carried %d rows, want exactly 1", len(rows))
+		t.Fatalf("the repository section and the viewed band carried %d rows, want exactly 1", len(rows))
 	}
 	return rows[0]
 }

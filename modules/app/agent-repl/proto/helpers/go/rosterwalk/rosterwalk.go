@@ -22,8 +22,8 @@ func FlattenRows(rows []*frontendv1.RosterRow) []*frontendv1.RosterRow {
 }
 
 // AllRows lists every row of every grouping the roster carries -- the
-// repository sections, the task sections, the hidden section, then the
-// recently-merged section -- each flattened. The task view regroups the same workspaces the repository
+// repository sections, the task sections, the viewed section, the hidden
+// section, then the recently-merged section -- each flattened. The task view regroups the same workspaces the repository
 // view holds, so a workspace can appear more than once.
 func AllRows(roster *frontendv1.WorkspaceRoster) []*frontendv1.RosterRow {
 	var out []*frontendv1.RosterRow
@@ -33,6 +33,7 @@ func AllRows(roster *frontendv1.WorkspaceRoster) []*frontendv1.RosterRow {
 	for _, section := range roster.GetTask().GetSections() {
 		out = append(out, FlattenRows(section.GetRows().GetRows())...)
 	}
+	out = append(out, FlattenRows(roster.GetViewed().GetRows().GetRows())...)
 	out = append(out, FlattenRows(roster.GetHidden().GetRows().GetRows())...)
 	return append(out, MergedRows(roster)...)
 }
