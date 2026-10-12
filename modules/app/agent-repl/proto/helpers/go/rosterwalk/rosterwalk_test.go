@@ -75,16 +75,17 @@ func TestAllRows(t *testing.T) {
 		want   []string
 	}{
 		{name: "a nil roster lists nothing", roster: nil, want: nil},
-		{name: "repository sections, then task sections, then hidden, then recently merged, in that order",
+		{name: "repository sections, then task sections, then viewed, then hidden, then recently merged, in that order",
 			roster: &frontendv1.WorkspaceRoster{
 				RecentlyMerged: mergedOf(rowsOf(row("m"))),
 				Hidden:         &frontendv1.RosterHiddenSection{Rows: rowsOf(row("h", row("h1")))},
+				Viewed:         &frontendv1.RosterViewedSection{Rows: rowsOf(row("v", row("v1")))},
 				Task: &frontendv1.RosterTaskView{Sections: []*frontendv1.RosterTaskSection{
 					{Rows: rowsOf(row("t"))}}},
 				Repository: &frontendv1.RosterRepositoryView{Sections: []*frontendv1.RosterRepoSection{
 					{Rows: rowsOf(row("r1"))}, {Rows: rowsOf(row("r2"))}}},
 			},
-			want: []string{"r1", "r2", "t", "h", "h1", "m"}},
+			want: []string{"r1", "r2", "t", "v", "v1", "h", "h1", "m"}},
 		{name: "nested rows are flattened in every grouping",
 			roster: &frontendv1.WorkspaceRoster{
 				Repository: &frontendv1.RosterRepositoryView{Sections: []*frontendv1.RosterRepoSection{
