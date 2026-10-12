@@ -97,8 +97,11 @@ Status values: queued, running, landed (commit), blocked (reason).
 
 ### B. Test-run write volume (measured: a full run on the disk writes 25-34GB)
 - B1 fake git hard-linked, not copied — landed (da3219969): ~3GB per daemon suite.
-- B2 daemon test logs over a pipe to the harness, in memory; written to disk
-  only for a failed test — running (branch `perf-logpipe`).
+- B2 daemon test logs over a pipe to the harness — REJECTED and reverted
+  (4e5d4c563): the one collector in the test process is the bottleneck
+  under load, even with non-blocking daemon writes (logpipe-v2: 5-8 failures
+  per copy against master's 1 in three under three-copy load). Recorded in
+  /write-tests pitfall 2 (abbddd6e9). Cut record volume instead.
 - B3 in-memory SQLite for test daemons that never restart on the same state;
   restart/handover tests keep the file, enforced at runtime — done on
   `perf-memstate` (570 of 790 integration daemon starts on memory; rollout
@@ -216,6 +219,10 @@ Status values: queued, running, landed (commit), blocked (reason).
 | 2026-10-12 | 02afdccf7 (5 picks) | boot bring-ups beside the sidecar restart; sidecar spool glob; test build reports isolated |
 | 2026-10-12 | 5620e6c75 | the top two race to land |
 | 2026-10-12 | 40482a061 | sidebar logs a row's decisions only when they change |
+| 2026-10-12 | 4e5d4c563 (4 reverts) | test log pipe reverted (stalled test daemons under load) |
+| 2026-10-12 | 5ced835a4 | the shutdown tests' held gate is released when the test ends |
+| 2026-10-12 | 64a42cf32 | race tests drain the queue instead of fixed pump counts (flake) |
+| 2026-10-12 | abbddd6e9 | the log pipe recorded as a rejected approach |
 
 ## Bounce checkpoints
 
