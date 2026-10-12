@@ -3247,6 +3247,25 @@ same as on the pause arm."
                (agent-repl-wire-verbs--require "UpdateMergeQueueEvict" "workspace"
                                                 (plist-get value :workspace))))))
 
+(defun agent-repl-wire-encode-update-merge-queue-front-workspace (ref)
+  "Encode UpdateMergeQueueFront's `workspace' use site from REF."
+  (agent-repl-wire-encode-workspace-ref ref))
+
+(defun agent-repl-wire-encode-update-merge-queue-front (value)
+  "Encode UpdateMergeQueueFront from plist VALUE (:workspace REF)."
+  (list (cons 'workspace
+              (agent-repl-wire-encode-update-merge-queue-front-workspace
+               (agent-repl-wire-verbs--require "UpdateMergeQueueFront" "workspace"
+                                                (plist-get value :workspace))))))
+
+(defun agent-repl-wire-encode-update-merge-queue-hold-rollouts (_value)
+  "Encode UpdateMergeQueueHoldRollouts.  Empty: the hold is daemon-wide."
+  nil)
+
+(defun agent-repl-wire-encode-update-merge-queue-release-rollouts (_value)
+  "Encode UpdateMergeQueueReleaseRollouts.  Empty: the hold is daemon-wide."
+  nil)
+
 (defun agent-repl-wire-encode-update-merge-queue-request-pause (value)
   "Encode UpdateMergeQueueRequest's `pause' action arm from VALUE."
   (agent-repl-wire-encode-update-merge-queue-pause value))
@@ -3259,13 +3278,28 @@ same as on the pause arm."
   "Encode UpdateMergeQueueRequest's `evict' action arm from VALUE."
   (agent-repl-wire-encode-update-merge-queue-evict value))
 
+(defun agent-repl-wire-encode-update-merge-queue-request-front (value)
+  "Encode UpdateMergeQueueRequest's `front' action arm from VALUE."
+  (agent-repl-wire-encode-update-merge-queue-front value))
+
+(defun agent-repl-wire-encode-update-merge-queue-request-hold-rollouts (value)
+  "Encode UpdateMergeQueueRequest's `hold_rollouts' action arm from VALUE."
+  (agent-repl-wire-encode-update-merge-queue-hold-rollouts value))
+
+(defun agent-repl-wire-encode-update-merge-queue-request-release-rollouts (value)
+  "Encode UpdateMergeQueueRequest's `release_rollouts' action arm from VALUE."
+  (agent-repl-wire-encode-update-merge-queue-release-rollouts value))
+
 (defun agent-repl-wire-encode-update-merge-queue-request (request)
   "Encode UpdateMergeQueueRequest from plist REQUEST (:action ONEOF)."
   (list (agent-repl-wire-verbs--encode-oneof
          "UpdateMergeQueueRequest" "action" (plist-get request :action)
          (list (list :pause 'pause #'agent-repl-wire-encode-update-merge-queue-request-pause)
                (list :resume 'resume #'agent-repl-wire-encode-update-merge-queue-request-resume)
-               (list :evict 'evict #'agent-repl-wire-encode-update-merge-queue-request-evict)))))
+               (list :evict 'evict #'agent-repl-wire-encode-update-merge-queue-request-evict)
+               (list :front 'front #'agent-repl-wire-encode-update-merge-queue-request-front)
+               (list :hold-rollouts 'holdRollouts #'agent-repl-wire-encode-update-merge-queue-request-hold-rollouts)
+               (list :release-rollouts 'releaseRollouts #'agent-repl-wire-encode-update-merge-queue-request-release-rollouts)))))
 
 (defun agent-repl-wire-decode-update-merge-queue-success (json)
   "Decode UpdateMergeQueueSuccess from JSON.  Empty: the bubbles reflect it."
@@ -3317,6 +3351,16 @@ for that workspace."
 named a RepositoryRef the daemon's registry does not hold."
   (agent-repl-wire-verbs--decode-empty "UpdateMergeQueueUnknownRepository" json))
 
+(defun agent-repl-wire-decode-update-merge-queue-rollouts-already-held (json)
+  "Decode UpdateMergeQueueRolloutsAlreadyHeld from JSON.  Empty: the rollouts
+are already held."
+  (agent-repl-wire-verbs--decode-empty "UpdateMergeQueueRolloutsAlreadyHeld" json))
+
+(defun agent-repl-wire-decode-update-merge-queue-rollouts-not-held (json)
+  "Decode UpdateMergeQueueRolloutsNotHeld from JSON.  Empty: the rollouts are
+not held."
+  (agent-repl-wire-verbs--decode-empty "UpdateMergeQueueRolloutsNotHeld" json))
+
 (defun agent-repl-wire-decode-update-merge-queue-error-unknown-workspace (json)
   "Decode UpdateMergeQueueError's `unknown_workspace' cause arm from JSON."
   (agent-repl-wire-decode-update-merge-queue-unknown-workspace json))
@@ -3349,12 +3393,20 @@ named a RepositoryRef the daemon's registry does not hold."
   "Decode UpdateMergeQueueError's `unknown_repository' cause arm from JSON."
   (agent-repl-wire-decode-update-merge-queue-unknown-repository json))
 
+(defun agent-repl-wire-decode-update-merge-queue-error-rollouts-already-held (json)
+  "Decode UpdateMergeQueueError's `rollouts_already_held' cause arm from JSON."
+  (agent-repl-wire-decode-update-merge-queue-rollouts-already-held json))
+
+(defun agent-repl-wire-decode-update-merge-queue-error-rollouts-not-held (json)
+  "Decode UpdateMergeQueueError's `rollouts_not_held' cause arm from JSON."
+  (agent-repl-wire-decode-update-merge-queue-rollouts-not-held json))
+
 (defun agent-repl-wire-decode-update-merge-queue-error (json)
   "Decode UpdateMergeQueueError from JSON into (:cause (:arm ARM :value V)).
 THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
 arm this codec does not know is refused as an unknown field."
   (let ((message "UpdateMergeQueueError"))
-    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted alreadyPaused notPaused noSuchQueuedMerge unknownRepository))
+    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted alreadyPaused notPaused noSuchQueuedMerge unknownRepository rolloutsAlreadyHeld rolloutsNotHeld))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
            message "cause" json
@@ -3365,7 +3417,9 @@ arm this codec does not know is refused as an unknown field."
          (list 'alreadyPaused :already-paused #'agent-repl-wire-decode-update-merge-queue-error-already-paused)
          (list 'notPaused :not-paused #'agent-repl-wire-decode-update-merge-queue-error-not-paused)
          (list 'noSuchQueuedMerge :no-such-queued-merge #'agent-repl-wire-decode-update-merge-queue-error-no-such-queued-merge)
-         (list 'unknownRepository :unknown-repository #'agent-repl-wire-decode-update-merge-queue-error-unknown-repository))))))
+         (list 'unknownRepository :unknown-repository #'agent-repl-wire-decode-update-merge-queue-error-unknown-repository)
+         (list 'rolloutsAlreadyHeld :rollouts-already-held #'agent-repl-wire-decode-update-merge-queue-error-rollouts-already-held)
+         (list 'rolloutsNotHeld :rollouts-not-held #'agent-repl-wire-decode-update-merge-queue-error-rollouts-not-held))))))
 
 (defun agent-repl-wire-decode-update-merge-queue-response-success (json)
   "Decode UpdateMergeQueueResponse's `success' arm from JSON."

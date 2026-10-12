@@ -1277,6 +1277,37 @@ never sent as an empty ref, because unset is what means every queue."
                    '(:action (:arm :evict :value nil)))
                   :type 'agent-repl-wire-error)))
 
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-front ()
+  "A front request names whose merge to move to the front of its queue."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (json-serialize
+                    (agent-repl-wire-encode-update-merge-queue-request
+                     (list :action (list :arm :front
+                                         :value (list :workspace
+                                                      agent-repl-test-wire-verbs--ref)))))
+                   "{\"front\":{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"}}}"))))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-front-without-workspace ()
+  "A front request with no workspace is incomplete and errors before send."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-encode-update-merge-queue-request
+                   '(:action (:arm :front :value nil)))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-hold-rollouts ()
+  "A hold of the rollouts is daemon-wide, so its message is empty."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (json-serialize (agent-repl-wire-encode-update-merge-queue-request
+                                    '(:action (:arm :hold-rollouts :value nil))))
+                   "{\"holdRollouts\":{}}"))))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-release-rollouts ()
+  "A release of the rollouts is daemon-wide, so its message is empty."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (json-serialize (agent-repl-wire-encode-update-merge-queue-request
+                                    '(:action (:arm :release-rollouts :value nil))))
+                   "{\"releaseRollouts\":{}}"))))
+
 (ert-deftest agent-repl-test-wire-verbs-merge-queue-action-unset ()
   "The arm IS the action, so a request without one is refused."
   (agent-repl-test-wire-verbs--with-common
@@ -1528,13 +1559,13 @@ encoded here."
                  '("cancel" "now" "schedule"))))
 
 (ert-deftest agent-repl-test-wire-verbs-merge-queue-action-arms-pinned ()
-  "UpdateMergeQueueRequest's action oneof has exactly the three arms encoded
+  "UpdateMergeQueueRequest's action oneof has exactly the six arms encoded
 here."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_update_merge_queue.pb.go"
                         "UpdateMergeQueueRequest")
                        #'string<)
-                 '("evict" "pause" "resume"))))
+                 '("evict" "front" "holdRollouts" "pause" "releaseRollouts" "resume"))))
 
 (ert-deftest agent-repl-test-wire-verbs-daemon-health-arms-pinned ()
   "DaemonHealthSuccess's health oneof has exactly the two verdict arms decoded
@@ -2770,6 +2801,22 @@ it carries."
                     (agent-repl-test-wire-verbs--parse "{\"noSuchQueuedMerge\":{}}"))
                    '(:cause (:arm :no-such-queued-merge :value nil))))))
 
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-error-rollouts-already-held-arm ()
+  "UpdateMergeQueueError's `rollouts_already_held' arm decodes with everything
+it carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-update-merge-queue-error
+                    (agent-repl-test-wire-verbs--parse "{\"rolloutsAlreadyHeld\":{}}"))
+                   '(:cause (:arm :rollouts-already-held :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-error-rollouts-not-held-arm ()
+  "UpdateMergeQueueError's `rollouts_not_held' arm decodes with everything it
+carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-update-merge-queue-error
+                    (agent-repl-test-wire-verbs--parse "{\"rolloutsNotHeld\":{}}"))
+                   '(:cause (:arm :rollouts-not-held :value nil))))))
+
 (ert-deftest agent-repl-test-wire-verbs-merge-queue-error-unset-cause-is-a-breach ()
   "UpdateMergeQueueError with no arm set says nothing actionable, so it is a
 breach."
@@ -2790,7 +2837,7 @@ at."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_update_merge_queue.pb.go" "UpdateMergeQueueError")
                        #'string<)
-                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "alreadyPaused" "notPaused" "noSuchQueuedMerge" "unknownRepository")
+                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "alreadyPaused" "notPaused" "noSuchQueuedMerge" "unknownRepository" "rolloutsAlreadyHeld" "rolloutsNotHeld")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-session-health-error-unknown-workspace-arm ()
