@@ -84,6 +84,14 @@ func (o *orchestrator) Recover(ctx context.Context) error {
 // per-entry recovery and a handover adoption's alike.
 func (o *orchestrator) recoverEntry(ctx context.Context, repo wsm.RepoKey, entry wsm.MergeQueueEntry) error {
 	const op = "daemon.merge.recover"
+	// A MERGE WORKSPACE'S ENTRY IS ITS REQUESTER'S MERGE TOO: the requester
+	// holds no entry of its own once its detached merge is handed off, so its
+	// request fact is raised here, before the entry's recovery can end it.
+	if places := o.placements(entry.Workspace); len(places) > 1 {
+		o.deps.Log.Global().Info(op, "re-raised the request fact of a recovered detached merge's requester", dlog.Context{
+			"workspace": string(entry.Workspace), "requester": string(places[1].ws), "repo": string(repo)})
+		o.deps.Sidebar.SetMergeRequested(places[1].ws, true)
+	}
 	switch entry.State {
 	case wsm.MergeRequested:
 		// A REQUEST STILL WAITING FOR ITS TURN'S END is re-armed: it is put in
