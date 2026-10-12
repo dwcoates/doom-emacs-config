@@ -1681,7 +1681,8 @@ and non-blank.  CONTENT is `:whole-branch' (nil) or `:pick'
   "Encode MergeWorkspaceSourceOwnBranch from plist VALUE (:run RUN).
 THE ARM IS WHERE THE MERGE RUNS: `:in-place' (:keep-open BOOL), a SYNC
 merge in the requesting workspace, or `:detached' (:name STRING :content
-CONTENT), an ASYNC merge in a hidden merge workspace forked from it.  An unset run and an unknown arm are both refused."
+CONTENT), an ASYNC merge in a hidden merge workspace forked from it.
+An unset run and an unknown arm are both refused."
   (list (agent-repl-wire-verbs--encode-oneof
          "MergeWorkspaceSourceOwnBranch" "run" (plist-get value :run)
          '((:in-place inPlace
