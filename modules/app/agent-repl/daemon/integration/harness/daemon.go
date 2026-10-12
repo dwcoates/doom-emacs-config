@@ -1583,16 +1583,17 @@ func (d *Daemon) Exited() bool {
 	return isZombie(d.cmd.Process.Pid)
 }
 
-// isZombie reports whether a pid names a process that has exited and is
-// waiting to be reaped. An unreadable state is NOT read as exited: the caller
-// already has the signal probe's answer, and guessing here would turn a `ps`
-// failure into a false exit report.
+// isZombie reports whether a pid names a process that has exited -- a zombie
+// waiting to be reaped, or one whose exit is under way. An unreadable state is NOT read as exited: the caller
+// already has the signal probe's answer, and guessing here would turn a
+// failed read into a false exit report. The state is the kernel's, read in
+// process (procstate) rather than by a `ps` per probe.
 func isZombie(pid int) bool {
-	out, err := exec.Command("ps", "-o", "state=", "-p", strconv.Itoa(pid)).Output()
+	st, err := readProcessState(pid)
 	if err != nil {
 		return false
 	}
-	return strings.HasPrefix(strings.TrimSpace(string(out)), "Z")
+	return st.exited
 }
 
 // AwaitExit waits for the process to leave and answers its exit status,
