@@ -25,7 +25,8 @@ func TestARefusedMidWorkAdoptionAnswersTheHostTransferDeferred(t *testing.T) {
 	script.SetExitCode(0)
 	script.SetStdout("daemon: passed in 1s\n")
 	d := harness.StartDaemon(t, harness.Opts{
-		SelfRepo: selfRepo.Dir,
+		DurableState: true,
+		SelfRepo:     selfRepo.Dir,
 		ExtraEnv: []string{
 			"AGENT_REPL_TEST_ALL_SCRIPT=" + script.Path,
 			"AGENT_REPL_HANDOVER_FACTS_BOUND=300ms",

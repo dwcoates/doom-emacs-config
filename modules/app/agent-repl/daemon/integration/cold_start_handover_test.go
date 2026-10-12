@@ -65,7 +65,7 @@ func TestAColdStartedDaemonHandsOverTheSessionsItBroughtUp(t *testing.T) {
 			// cold daemon serves: the spawn starts it, the survivor already had.
 			const startSessions = 1
 			// Arrange: a session on a first daemon, which then goes away.
-			first := newDaemon(t, harness.Opts{})
+			first := newDaemon(t, harness.Opts{DurableState: true})
 			f := drainOpenWorkspace(t, first)
 			f.shim.ExpectStartSession()
 			f.shim.ExpectWatchSession()

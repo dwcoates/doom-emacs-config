@@ -21,7 +21,7 @@ func TestBootServesAWorkspaceRegisteredUnderTheOlderLayout(t *testing.T) {
 	t.Parallel()
 	// Arrange: a registered workspace, then the state file taken back to the
 	// layout the build before `ported_prompts` wrote.
-	f := newRegistered(t, harness.Opts{})
+	f := newRegistered(t, harness.Opts{DurableState: true})
 	id := f.ws.GetId()
 	f.d.Stop()
 	demoteToLayout3(t, f.d)
@@ -42,7 +42,7 @@ func TestBootServesAWorkspaceRegisteredUnderTheOlderLayout(t *testing.T) {
 func TestBootStampsTheMigratedLayoutOnTheStateDatabase(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newRegistered(t, harness.Opts{})
+	f := newRegistered(t, harness.Opts{DurableState: true})
 	f.d.Stop()
 	demoteToLayout3(t, f.d)
 

@@ -82,7 +82,7 @@ func pagePrompt(page *frontendv1.FeedPage, turn string) bool {
 func TestARelaunchedDaemonRehydratesAnAnnouncedWorkspacesConversation(t *testing.T) {
 	t.Parallel()
 	// Arrange: one turn run to its terminal on the first daemon.
-	f := newOpened(t, harness.Opts{})
+	f := newOpened(t, harness.Opts{DurableState: true})
 	footer := f.d.WatchFooter(f.ws)
 	f.submit(relaunchPrompt, "k-relaunch", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	f.shim.PushAgentFrame(mainAgent, feedResponseFrames("resp-relaunch", relaunchAnswer)[1])

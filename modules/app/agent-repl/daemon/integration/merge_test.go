@@ -73,7 +73,7 @@ func TestMergeWorkspaceOnAWorkspaceWithoutLayoutFactsIsRefused(t *testing.T) {
 func mergeBlockedQueueFixture(t *testing.T) (front, behind *fixture, repo *harness.Repo, d *harness.Daemon) {
 	t.Helper()
 	repo = harness.NewRepo(t)
-	d = harness.StartDaemon(t, harness.Opts{SelfRepo: repo.Dir})
+	d = harness.StartDaemon(t, harness.Opts{DurableState: true, SelfRepo: repo.Dir})
 	repoRef := mergeRepositoryRef(t, d, repo)
 
 	front = mergeCreateChild(t, d, repoRef, "front", "front work",
@@ -434,7 +434,7 @@ func mergeCleanRepo(t *testing.T) (f *fixture, d *harness.Daemon, repo *harness.
 	repo = harness.NewRepo(t)
 	script = harness.NewTestAllScript(t, repo.Dir)
 	// A merge-spanning wait chains dozens of subprocesses; see harness.MergeChainTimeout.
-	d = harness.StartDaemon(t, harness.Opts{SelfRepo: repo.Dir, Timeout: harness.MergeChainTimeout, ExtraEnv: []string{"AGENT_REPL_TEST_ALL_SCRIPT=" + script.Path}})
+	d = harness.StartDaemon(t, harness.Opts{DurableState: true, SelfRepo: repo.Dir, Timeout: harness.MergeChainTimeout, ExtraEnv: []string{"AGENT_REPL_TEST_ALL_SCRIPT=" + script.Path}})
 	repoRef := mergeRepositoryRef(t, d, repo)
 	f = mergeCreateChild(t, d, repoRef, "clean", "do the clean thing", nil)
 	return f, d, repo, script
@@ -991,7 +991,7 @@ func TestASecondDaemonBounceDoesNotResubmitTheDisplacedTurnAgain(t *testing.T) {
 	d2.Kill()
 
 	// Act: a second fresh daemon on the same state root.
-	d3 := harness.StartDaemon(t, harness.Opts{StateDir: d2.StateDir,
+	d3 := harness.StartDaemon(t, harness.Opts{DurableState: true, StateDir: d2.StateDir,
 		ExtraEnv: []string{"AGENT_REPL_LOCK_DIR=" + d2.LockDir}})
 	displacedBounceWarnings(d3)
 	// The recovery's own record is the rendezvous: it is logged AFTER the
@@ -1031,7 +1031,7 @@ func displacedTurnAcrossABounce(t *testing.T) (*fixture, *harness.Daemon, *shimv
 	script.SetStdout("daemon: passed in 1s\n")
 	rendezvous := filepath.Join(t.TempDir(), "capture.rendezvous")
 	// A merge-spanning wait chains dozens of subprocesses; see harness.MergeChainTimeout.
-	d := harness.StartDaemon(t, harness.Opts{SelfRepo: repo.Dir, Timeout: harness.MergeChainTimeout, ExtraEnv: []string{
+	d := harness.StartDaemon(t, harness.Opts{DurableState: true, SelfRepo: repo.Dir, Timeout: harness.MergeChainTimeout, ExtraEnv: []string{
 		"AGENT_REPL_TEST_ALL_SCRIPT=" + script.Path,
 		"AGENT_REPL_MERGE_PAUSE_AFTER_CAPTURE=" + rendezvous,
 	}})

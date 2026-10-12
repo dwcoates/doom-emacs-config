@@ -248,7 +248,7 @@ func TestAShimThatDiesMidTurnLeavesTheRevivedRowOnTurnDied(t *testing.T) {
 func TestAShimThatDiesAgainBeforeAnyTurnEndsIsLeftDownUntilTheNextPrompt(t *testing.T) {
 	t.Parallel()
 	// Arrange: the first death was brought back, and nothing has run since.
-	f := newOpened(t, harness.Opts{})
+	f := newOpened(t, harness.Opts{DurableState: true})
 	// The second death is a shim that cannot hold a session: loud by design.
 	f.d.RequireWarnings(append([]string{"daemon.promptqueue.revive"}, deadShimRecords...)...)
 	f.shim.ExpectStartSession()
@@ -286,7 +286,7 @@ func TestAShimThatDiesAgainBeforeAnyTurnEndsIsLeftDownUntilTheNextPrompt(t *test
 // locks -- with the host and web streams a running Emacs and page hold.
 func bootAfterADeadShim(t *testing.T) (*fixture, *harness.Daemon, string) {
 	t.Helper()
-	f := newOpened(t, harness.Opts{})
+	f := newOpened(t, harness.Opts{DurableState: true})
 	f.shim.ExpectStartSession()
 	concludeFirstTurn(t, f)
 	vendor := f.shim.Info().VendorSessionID
@@ -358,7 +358,7 @@ func TestAPromptSentRightAfterABootOverADeadShimIsDelivered(t *testing.T) {
 func TestATurnCutBeforeABootReplaysAsEnded(t *testing.T) {
 	t.Parallel()
 	// Arrange: a turn running when the daemon and its shim both die.
-	f := newOpened(t, harness.Opts{})
+	f := newOpened(t, harness.Opts{DurableState: true})
 	f.shim.ExpectStartSession()
 	const cutText = "the turn nobody saw end"
 	resp := f.submit(cutText, "k-dead-shim-replay", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)

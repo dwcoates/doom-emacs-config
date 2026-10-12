@@ -44,7 +44,7 @@ func TestDaemonHealthOnAFreshDaemonIsHealthy(t *testing.T) {
 func TestDaemonHealthIdentityChangesAfterAProcessRestart(t *testing.T) {
 	t.Parallel()
 	// Arrange.
-	first := newDaemon(t, harness.Opts{})
+	first := newDaemon(t, harness.Opts{DurableState: true})
 	firstResponse, err := first.Client().DaemonHealth(first.Ctx(), healthRequest())
 	if err != nil {
 		t.Fatalf("first DaemonHealth = error %v, want a success", err)
@@ -182,7 +182,7 @@ func TestADaemonRestartDoesNotReopenAClosedPromptsDirFault(t *testing.T) {
 	t.Parallel()
 	// Arrange: open then close the prompts-dir fault, on a state root a
 	// restart will reuse.
-	d := newDaemon(t, harness.Opts{})
+	d := newDaemon(t, harness.Opts{DurableState: true})
 	// The support workspaces created below have in-flight turns and no session,
 	// and closing them is a warning by design.
 	d.ExpectWarnings("daemon.workspace.request_command_support",

@@ -102,7 +102,7 @@ func TestTheBootAdoptionOfASurvivorReconcilesItsOpenTurn(t *testing.T) {
 			t.Parallel()
 			// Arrange: a turn in flight, then the daemon dies and the shim
 			// survives it, as a crash leaves them.
-			f := newOpened(t, harness.Opts{})
+			f := newOpened(t, harness.Opts{DurableState: true})
 			f.shim.ExpectStartSession()
 			turn := openTurnOn(t, f, "k-boot-adopt")
 			info := f.shim.Info()
@@ -171,7 +171,7 @@ func TestTheBootAdoptionStandsTheGateTheSurvivorHoldsOpen(t *testing.T) {
 			t.Parallel()
 			// Arrange: a turn in flight waits on the user, then the daemon
 			// dies and the shim survives it.
-			f := newOpened(t, harness.Opts{})
+			f := newOpened(t, harness.Opts{DurableState: true})
 			f.shim.ExpectStartSession()
 			openTurnOn(t, f, "k-gate-adopt")
 			footer := f.d.WatchFooter(f.ws)
@@ -214,7 +214,7 @@ func TestTheTakeoversOrphanRecoveryReconcilesItsOpenTurn(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			// Arrange: a turn in flight on an incumbent a successor joined.
-			f := newOpened(t, harness.Opts{})
+			f := newOpened(t, harness.Opts{DurableState: true})
 			f.shim.ExpectStartSession()
 			turn := openTurnOn(t, f, "k-takeover")
 			successor := harness.StartDaemon(t, harness.Opts{
@@ -248,7 +248,7 @@ func TestAForcedHandoversAdoptionReconcilesItsOpenTurn(t *testing.T) {
 			t.Parallel()
 			// Arrange: a turn in flight, with both participants open so the
 			// successor adopts only when they ask it to.
-			d := harness.StartDaemon(t, harness.Opts{Timeout: harness.HandoverChainTimeout})
+			d := harness.StartDaemon(t, harness.Opts{DurableState: true, Timeout: harness.HandoverChainTimeout})
 			f := drainOpenWorkspace(t, d)
 			f.shim.ExpectStartSession()
 			host := d.WatchHost(f.ws)
@@ -312,7 +312,7 @@ func TestTheBootAdoptionKeepsATurnWaitingBehindAVendorStartedTurn(t *testing.T) 
 	t.Parallel()
 	// Arrange: the daemon's turn is accepted, the vendor starts one ahead of
 	// it, and the daemon dies with the shim running both.
-	f := newOpened(t, harness.Opts{})
+	f := newOpened(t, harness.Opts{DurableState: true})
 	f.shim.ExpectStartSession()
 	waiting := openTurnOn(t, f, "k-waiting-behind-vendor")
 	const vendorTurn = "turn-vendor-ahead"
@@ -366,7 +366,7 @@ func TestTheBootAdoptionKeepsATurnWaitingBehindAVendorStartedTurn(t *testing.T) 
 func TestAnAdoptedSurvivorReadInertIsNotStartedAgainByItsAnnouncement(t *testing.T) {
 	t.Parallel()
 	// Arrange: a session up, then the daemon dies and the shim survives it.
-	f := newOpened(t, harness.Opts{})
+	f := newOpened(t, harness.Opts{DurableState: true})
 	f.shim.ExpectStartSession()
 	info := f.shim.Info()
 	f.d.Kill()

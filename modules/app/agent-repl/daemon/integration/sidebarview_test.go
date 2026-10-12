@@ -128,7 +128,7 @@ func TestUpdateSidebarViewWithABogusTaskRefAnswersUnknownTask(t *testing.T) {
 func TestTheSidebarViewSurvivesADaemonRestart(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newRegistered(t, harness.Opts{})
+	f := newRegistered(t, harness.Opts{DurableState: true})
 	task := createTask(t, f, "stays folded")
 	roster := f.d.WatchRoster()
 	updateSidebarView(t, f, collapseTaskSection(task))

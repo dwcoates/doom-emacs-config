@@ -53,7 +53,7 @@ func TestANewEmacsBeginsAgentReplsSessionOnTheTopbar(t *testing.T) {
 func TestAgentReplsSessionSurvivesADaemonRestart(t *testing.T) {
 	t.Parallel()
 	// Arrange: a new Emacs began a session on the first daemon.
-	f := newOpened(t, harness.Opts{})
+	f := newOpened(t, harness.Opts{DurableState: true})
 	topbar := f.d.WatchTopbar(f.ws)
 	f.d.WatchDaemonStream()
 	began := awaitTopbar(t, f, topbar, "the session a new Emacs began", hasSession).GetConnectivity().GetSession()

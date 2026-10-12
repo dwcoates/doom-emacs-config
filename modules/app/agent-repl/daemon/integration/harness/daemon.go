@@ -253,8 +253,21 @@ func LockDirFor(stateDir string) string {
 
 // Opts configures one daemon process.
 type Opts struct {
-	// StateDir overrides the state root; empty mints a fresh temp one.
+	// StateDir overrides the state root; empty mints a fresh temp one. A root
+	// given here keeps its state in wsm.db, and a root whose first daemon ran
+	// on in-memory state is refused (see DurableState).
 	StateDir string
+	// DurableState keeps a freshly minted state root's database in wsm.db.
+	//
+	// WITHOUT IT A FRESH ROOT'S STATE LIVES IN MEMORY (wsm.EnvTestStateInMemory,
+	// owner ruling 2026-10-12): most tests never start a second daemon on their
+	// root, and the file was ~350KB of writes per daemon. A test whose state
+	// must outlive the process -- a successor or restart on the same root, a
+	// read of wsm.db through DBPath, WithDB, CorruptRow, CountRows or
+	// DisplacedTurnCount -- sets it on the root's FIRST daemon, and the harness
+	// refuses loudly at the reuse or the read when it is missing, so a test
+	// can never pass against state that was never written.
+	DurableState bool
 	// ProfileDir overrides where the fake shim reads its per-workspace startup
 	// profiles from; empty mints a fresh one under this start's own root.
 	//
@@ -455,6 +468,9 @@ type Daemon struct {
 	// produced (RequireWarnings): the sweep fails on one that never was.
 	required map[string]bool
 	shims    map[string]*ShimControl
+	// inMemoryState is whether this daemon's state lives in memory (see
+	// Opts.DurableState).
+	inMemoryState bool
 }
 
 // InstallFakeGit installs the scripted `git` into dir, the directory that
@@ -481,6 +497,27 @@ func InstallFakeGit(t *testing.T, dir string) {
 // gitEnvKeys are the repository-selecting variables that must never be
 // inherited by a git child: a hook-leaked GIT_DIR is a real, previously
 // observed source of bogus work-tree errors.
+// inMemoryRoots names every state root this suite process started on
+// in-memory state, so a later daemon on the same root is refused rather than
+// booted onto an empty database.
+var inMemoryRoots sync.Map
+
+// freshRootInMemory decides whether a freshly minted state root keeps its
+// state in memory: unless the test asked for the file, and never for a joining
+// daemon, which reads its incumbent's file.
+func freshRootInMemory(opts Opts) bool {
+	return !opts.DurableState && opts.Joining == ""
+}
+
+// refuseInMemoryReuse refuses a daemon on a state root whose first daemon ran
+// on in-memory state: nothing of that state outlived its process.
+func refuseInMemoryReuse(stateDir string) error {
+	if _, wasMemory := inMemoryRoots.Load(stateDir); wasMemory {
+		return fmt.Errorf("harness: %s was started on in-memory state, so nothing of it outlived its daemon; start that root's first daemon with harness.Opts{DurableState: true}", stateDir)
+	}
+	return nil
+}
+
 var gitEnvKeys = []string{
 	"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR",
 	"GIT_PREFIX", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES",
@@ -571,6 +608,12 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 		if err := os.MkdirAll(d.StateDir, 0o755); err != nil {
 			t.Fatalf("harness: mkdir state root: %v", err)
 		}
+		d.inMemoryState = freshRootInMemory(opts)
+		if d.inMemoryState {
+			inMemoryRoots.Store(d.StateDir, true)
+		}
+	} else if err := refuseInMemoryReuse(d.StateDir); err != nil {
+		t.Fatal(err)
 	}
 	if d.StoreSocket == "" {
 		d.StoreSocket = filepath.Join(sockRoot, "store.sock")
@@ -735,6 +778,9 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 		"HOME="+root,
 		"PATH="+fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"),
 	)
+	if d.inMemoryState {
+		env = append(env, wsm.EnvTestStateInMemory+"=1")
+	}
 	env = append(env, BuildIdentityEnv(PinnedCheckout(t))...)
 	env = append(env, HostNeutralNamingEnv()...)
 	env = append(env, HostNeutralCheckoutEnv()...)
