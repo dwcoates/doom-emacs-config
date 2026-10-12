@@ -39,6 +39,7 @@
  * as drawn, every line shown, and fitted the moment they lay out (the rail
  * observes its scroller and its panes).
  */
+import { computedPx } from "../dom.js";
 import { log } from "../log.js";
 
 /** The classes the two bands' sections are drawn with. */
@@ -108,7 +109,7 @@ export function allocateBandLines(room: number, hidden: BandStops, merged: BandS
 /** A computed length, which a laid-out element always reports in px. */
 function computedLength(style: CSSStyleDeclaration, property: FrameLength): number {
   const value = style[property];
-  const px = /^(-?\d+(?:\.\d+)?)px$/.exec(value);
+  const px = computedPx(value);
   if (px === null) {
     log.error("a sidebar band cannot be fitted: the rail's computed box is not in px", {
       operation: "sidebar.band-fit.unmeasurable",
@@ -116,7 +117,7 @@ function computedLength(style: CSSStyleDeclaration, property: FrameLength): numb
     });
     throw new RangeError(`band fit: computed ${property} '${value}' is not in px`);
   }
-  return Number.parseFloat(px[1] as string);
+  return px;
 }
 
 /** The computed lengths that frame a box vertically. */
