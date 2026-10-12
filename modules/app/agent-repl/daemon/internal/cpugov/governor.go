@@ -74,7 +74,7 @@ const (
 	// how many test gates run at once; an entry beyond it waits untouched. The
 	// band still decides whether a gate behind the head starts; the head's
 	// always does.
-	QueueWindow = 3
+	QueueWindow = 2
 )
 
 // Sample is the host's SMOOTHED load: the fraction of its processors busy,
