@@ -219,14 +219,9 @@ func allowedLinks(material []sourceNews, carried []*frontendv1.NewsDigestSection
 // set each refuse the whole answer. The one leniency is a single enclosing
 // markdown code fence, which carries no meaning of its own.
 func parseAnswer(text string, allowed map[string]bool) ([]*frontendv1.NewsDigestSection, risks, error) {
-	dec := json.NewDecoder(strings.NewReader(stripFence(text)))
-	dec.DisallowUnknownFields()
 	var a answer
-	if err := dec.Decode(&a); err != nil {
-		return nil, nil, fmt.Errorf("the json did not decode: %w", err)
-	}
-	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
-		return nil, nil, errors.New("the answer carries data after its json object")
+	if err := decodeAnswer(text, &a); err != nil {
+		return nil, nil, err
 	}
 	if a.Sections == nil {
 		return nil, nil, errors.New("the answer carries no sections list")
@@ -271,6 +266,22 @@ func parseAnswer(text string, allowed map[string]bool) ([]*frontendv1.NewsDigest
 		}
 	}
 	return out, marked, nil
+}
+
+// decodeAnswer decodes a model's JSON answer into a STRICTLY: an unknown
+// field or data after the object refuses it. The one leniency is a single
+// enclosing markdown code fence, which carries no meaning of its own. Every
+// model answer this package reads is decoded here.
+func decodeAnswer(text string, a any) error {
+	dec := json.NewDecoder(strings.NewReader(stripFence(text)))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(a); err != nil {
+		return fmt.Errorf("the json did not decode: %w", err)
+	}
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		return errors.New("the answer carries data after its json object")
+	}
+	return nil
 }
 
 // oneLine trims a one-line text the model wrote, refusing one that is blank
