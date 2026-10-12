@@ -2340,10 +2340,25 @@ Owner rulings, 2026-09-30 (`internal/promptqueue/acts.go`, `ahead.go`,
   its prompt row names that turn (`conversation.v1.AgentPrompt.folded_into`)
   and its own turn closes unrun as `wsm.CloseFolded`, with no ending drawn and
   no banner; NOT FOLDED, it stands in flight the moment the running turn ends,
-  so that end pops nothing into it. One prompt joins at a time: while it
-  waits, a prompt behind it waits unjudged. A join that cannot go (the running
-  turn ended first, a vendor-started turn runs, the shim refuses) leaves the
-  prompt held for the turn's end, with the reason on its verdict.
+  so that end pops nothing into it. One prompt is JUDGED to join at a time:
+  while it waits, a prompt behind it waits unjudged. A join that cannot go
+  (the running turn ended first, a vendor-started turn runs, the shim
+  refuses) leaves the prompt held for the turn's end, with the reason on its
+  verdict.
+- **AN IN-PLACE MERGE THE AGENT'S TURN ASKS FOR FLUSHES THE HELD QUEUE**
+  (`promptqueue.FlushHeld`, `internal/promptqueue/flush.go`, called from
+  `merge.orchestrator.Enqueue`; owner ruling 2026-10-12): every held prompt is
+  sent at once, in order, to join the running turn, nothing interrupted, so
+  the user's prompts are answered before the merge drives the session (it
+  waits for the turn that answers them, `awaitFree`). With no turn running the
+  first starts one and the rest join it. The flush stops at the first prompt
+  that cannot join (a daemon hold, an edit, a session act, a subagent prompt)
+  and leaves it and everything behind it held; a holding lease, a draining
+  bounce, a running session act or an interjection keeps the whole queue. When
+  the turn several joins wait on ends with them unfolded, the OLDEST stands in
+  flight (`standJoinsLocked`, the watcher's `standNextWaitingLocked`) and the
+  rest join it, as the vendor runs them all as one prompt batch. The user's
+  own ask and a detached merge never flush.
 - **A PROMPT THAT INTERRUPTED THE RUNNING TURN CARRIES A NOTE FOR THE AGENT**
   (`interruptionNote`, `shim.v1.StartTurnRequest.vendor_note`): the vendor
   records the cut as the user rejecting the work, and the note says the work

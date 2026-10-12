@@ -3,8 +3,10 @@ package merge
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 
+	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
 )
 
@@ -441,4 +443,52 @@ func cancelled() context.Context {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	return ctx
+}
+
+func TestOnlyAnAgentsInPlaceRequestFlushesTheHeldPrompts(t *testing.T) {
+	tests := []struct {
+		name string
+		req  Request
+		want []ids.WorkspaceID
+	}{
+		{name: "an agent's in-place request", req: Request{Workspace: theWorkspace, Source: ownBranch, By: RequestedByAgent}, want: []ids.WorkspaceID{theWorkspace}},
+		{name: "an agent's one-shot", req: Request{Workspace: theWorkspace, Source: ownBranch, By: RequestedByAgent, OneShot: true}, want: []ids.WorkspaceID{theWorkspace}},
+		{name: "an agent's detached request", req: Request{Workspace: theWorkspace, Source: ownBranch, By: RequestedByAgent, Detached: true}, want: nil},
+		{name: "the user's request", req: Request{Workspace: theWorkspace, Source: ownBranch, By: RequestedByUser}, want: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.inFlight = "turn-asking"
+
+			// Act.
+			if err := h.o.Enqueue(context.Background(), tt.req); err != nil {
+				t.Fatalf("Enqueue: %v", err)
+			}
+
+			// Assert.
+			if got := h.queue.flushes(); !slices.Equal(got, tt.want) {
+				t.Fatalf("flushed = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestARequestWhoseFlushFailsIsRefusedWithNothingRecorded(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.inFlight = "turn-asking"
+	h.queue.flushErr = errors.New("the holds could not be read")
+
+	// Act.
+	err := h.request(t, ownBranch, RequestedByAgent)
+
+	// Assert.
+	if err == nil || !errors.Is(err, h.queue.flushErr) {
+		t.Fatalf("Enqueue = %v, want the flush's error", err)
+	}
+	if _, ok := h.entryState(); ok {
+		t.Fatal("a request whose flush failed was recorded")
+	}
 }

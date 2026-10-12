@@ -72,12 +72,10 @@ func (q *queue) OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how sessionwatc
 		// A TURN ENDED, so whatever serves the workspace held a session long
 		// enough to finish one: a later death is not a crash loop.
 		state.unattendedRevival = false
-		// THE TURN A PROMPT WAS SENT TO JOIN ENDED WITHOUT FOLDING IT IN, so
-		// that prompt now runs as its own turn: its join is over.
-		if state.joining != nil && state.joining.into == turn {
-			joined, joinStood = *state.joining, true
-			state.joining = nil
-		}
+		// THE TURN PROMPTS WERE SENT TO JOIN ENDED WITHOUT FOLDING THEM IN, so
+		// the oldest now runs as its own turn: its join is over, and the rest
+		// now join it.
+		joined, joinStood = state.standJoinsLocked(turn)
 	}
 	q.mu.Unlock()
 	q.deps.Footer.SetInterrupting(ws, false)
