@@ -354,6 +354,9 @@ func (o *orchestrator) handOffDetached(ctx context.Context, requester ids.Worksp
 		o.mu.Lock()
 		delete(o.repoOf, requester)
 		o.mu.Unlock()
+		// A MERGE NEVER FORKED HAS ENDED WITHOUT LANDING: there is no merge
+		// workspace whose terminal would tell the requester's roster (handBack).
+		o.deps.Sidebar.SetDetachedMergeEnded(requester, false)
 		return o.deps.Detached.HandBack(ctx, requester, wsm.Workspace{}, DetachedOutcome{
 			Kind: DetachedAbandoned, Summary: fmt.Sprintf("the merge workspace could not be created: %v", err), Branch: source.Branch,
 		})
@@ -368,5 +371,9 @@ func (o *orchestrator) handOffDetached(ctx context.Context, requester ids.Worksp
 	o.repoOf[forked.ID] = repo
 	o.mu.Unlock()
 	log.Info(op, "handed a detached merge to its merge workspace", fields)
+	// THE REQUESTER'S MERGE STAYS LIVE UNDER ANOTHER ID: from here its facts
+	// are the merge workspace's, so the requester's request fact stands until
+	// the merge workspace's merge ends (handBack lowers it).
+	o.deps.Sidebar.SetMergeRequested(requester, true)
 	return o.queueRequest(ctx, forked.ID, repo)
 }
