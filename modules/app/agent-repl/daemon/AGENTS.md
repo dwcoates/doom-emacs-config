@@ -395,6 +395,21 @@ concluded its own shim for the workspace gone (`Fleet.noteReap`, stamped from
 `shimclient.ExitInfo.At` on a stop, a relaunch's install, or a death found at
 the next bring-up). A never-engaged workspace still comes up fresh quietly.
 
+### Only visible workspaces run; the editor opens them with OpenTabs
+
+There is no startup run on a new Emacs's WatchDaemon stream any more: the
+editor asks with `OpenTabs`, and each workspace is answered `opened` as soon as
+it opens, never in registry order (`ARCHITECTURE.md`, "The editor opens
+workspaces with OpenTabs"). Every bring-up (the boot's, a takeover's, an
+open's) starts only workspaces `bringup.OnlyVisible` keeps: never one the user
+hid or whose repository section is collapsed. Hiding or collapsing stands the
+session down through the idle sweep's own gate and hibernation
+(`drain/withheld.go`); a turn in flight defers it to the free edge that turn's
+end raises, and a workspace shown again meanwhile is not stood down. Records:
+`daemon.opentabs.open` (INFO per answered workspace), `daemon.opentabs.page`
+(DEBUG page facts), `daemon.drain.withheld` (INFO when a stand-down waits on a
+turn, is taken, or is dropped because the workspace was shown again).
+
 ### The boot makes the services current before any shim starts
 
 An ordinary boot's service step (`boot.Deps.EnsureServices`, the first thing
@@ -409,7 +424,7 @@ the incumbent's shims write into the store throughout a rollout.
 
 NO SHIM STARTS BEFORE THAT STEP HAS RETURNED. Every `Supervisor.Spawn` waits
 on a latch (`serviceGate`, `shimclient.WithServicesReady`) the step opens,
-whether it succeeded or failed, because the editor's startup, OpenWorkspace
+whether it succeeded or failed, because the editor's OpenTabs, OpenWorkspace
 and revivals start sessions concurrently with the boot's own bring-up.
 
 This is what a bounce relies on: `scripts/bounce-agent-repl-forcefully.sh`
