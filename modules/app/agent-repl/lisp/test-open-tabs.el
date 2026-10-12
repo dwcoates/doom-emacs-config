@@ -98,7 +98,9 @@ A ref id names the workspace of the same name."
                      ((symbol-function 'agent-repl-startup-first-hooks-arm)
                       (lambda () (cl-incf agent-repl-test-open-tabs--armed)))
                      ((symbol-function 'agent-repl-open-progress-note-loaded)
-                      (lambda (ws) (push ws agent-repl-test-open-tabs--noted))))
+                      (lambda (ws) (push ws agent-repl-test-open-tabs--noted)))
+                     ;; No host unless a test stages one.
+                     ((symbol-function 'agent-repl-webhost-xwidget) #'ignore))
              ,@body)
          (kill-buffer agent-repl-test-open-tabs--buffer)))))
 
@@ -794,6 +796,76 @@ leaves the tab open."
         (agent-repl-test-open-tabs--frame '(:arm :mystery :value nil)))
       ;; Assert
       (should (equal errors '("elisp.open-tabs.unknown-frame arm=:mystery"))))))
+
+;;;; ---- The host on screen while the startup chooses ----
+
+(defmacro agent-repl-test-open-tabs--with-startup-view (current &rest body)
+  "Run BODY with a host, the frame standing on CURRENT (a placeholder when it
+starts with \"pseudo\"), and the selected window's buffer recorded in `shown'."
+  (declare (indent 1))
+  `(let ((shown nil))
+     (cl-letf (((symbol-function 'agent-repl-webhost-xwidget) (lambda () 'host-xw))
+               ((symbol-function 'agent-repl--ws-current-name) (lambda () ,current))
+               ((symbol-function 'agent-repl--pseudo-workspace-name-p)
+                (lambda (ws) (and ws (string-prefix-p "pseudo" ws))))
+               ((symbol-function 'agent-repl--frontend-make-slot-buffer)
+                (lambda (name _xw) (get-buffer-create name)))
+               ((symbol-function 'set-window-buffer)
+                (lambda (_w buf &rest _) (setq shown (buffer-name buf)))))
+       (unwind-protect
+           (progn ,@body)
+         (when-let ((b (get-buffer agent-repl-open-tabs--startup-view-name)))
+           (kill-buffer b))))))
+
+(ert-deftest agent-repl-test-open-tabs-the-startup-shows-the-host-on-the-placeholder ()
+  "While the frame stands on the placeholder, the startup puts the host on screen."
+  (agent-repl-test-open-tabs--with
+    (agent-repl-test-open-tabs--with-startup-view "pseudo-main"
+      ;; Act
+      (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
+      ;; Assert
+      (should (equal shown agent-repl-open-tabs--startup-view-name)))))
+
+(ert-deftest agent-repl-test-open-tabs-the-startup-leaves-a-users-workspace-alone ()
+  "A frame already on a workspace of the user's keeps what it shows."
+  (agent-repl-test-open-tabs--with
+    (agent-repl-test-open-tabs--with-startup-view "a"
+      ;; Act
+      (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
+      ;; Assert
+      (should (null shown)))))
+
+(ert-deftest agent-repl-test-open-tabs-the-startup-shows-nothing-without-a-host ()
+  "With no host (no page was loaded) the placeholder keeps what it shows."
+  (agent-repl-test-open-tabs--with
+    (agent-repl-test-open-tabs--with-startup-view "pseudo-main"
+      (cl-letf (((symbol-function 'agent-repl-webhost-xwidget) #'ignore))
+        ;; Act
+        (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a")))
+      ;; Assert
+      (should (null shown)))))
+
+(ert-deftest agent-repl-test-open-tabs-a-later-open-shows-no-host ()
+  "Only the startup puts the host on screen."
+  (agent-repl-test-open-tabs--with
+    (agent-repl-test-open-tabs--with-startup-view "pseudo-main"
+      ;; Arrange
+      (setq agent-repl-open-tabs--startup 'done)
+      ;; Act
+      (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
+      ;; Assert
+      (should (null shown)))))
+
+(ert-deftest agent-repl-test-open-tabs-the-startups-end-drops-its-view ()
+  "The view that held the host on screen is dropped when the startup ends."
+  (agent-repl-test-open-tabs--with
+    (agent-repl-test-open-tabs--with-startup-view "pseudo-main"
+      ;; Arrange
+      (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
+      ;; Act
+      (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--finished 1 1))
+      ;; Assert
+      (should-not (get-buffer agent-repl-open-tabs--startup-view-name)))))
 
 (provide 'test-open-tabs)
 ;;; test-open-tabs.el ends here

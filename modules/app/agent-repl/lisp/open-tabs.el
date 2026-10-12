@@ -52,6 +52,10 @@
 (declare-function agent-repl-link-primary "daemon-link" ())
 (declare-function agent-repl-connect-stream-conn "connect" (stream))
 (declare-function agent-repl-startup-first-hooks-arm "startup" ())
+(declare-function agent-repl-webhost-xwidget "webhost" ())
+(declare-function agent-repl--frontend-make-slot-buffer "frontend" (name xw))
+(declare-function agent-repl--pseudo-workspace-name-p "core" (ws))
+(declare-function agent-repl--ws-current-name "workspace" ())
 
 (defvar agent-repl-roster--stream)
 (defvar agent-repl-roster--walking)
@@ -206,7 +210,8 @@ left unasked, and the next link-up or roster walk asks again."
                                  rows workspaces))
     (when startup
       (setq agent-repl-open-tabs--startup 'running)
-      (agent-repl-open-tabs--say "opening %d workspaces…" (length rows)))
+      (agent-repl-open-tabs--say "opening %d workspaces…" (length rows))
+      (agent-repl-open-tabs--show-host-while-starting))
     (unless (funcall agent-repl-open-tabs-sender workspaces
                      (lambda (frame) (agent-repl-open-tabs--on-frame frame startup))
                      (lambda (outcome) (agent-repl-open-tabs--on-close ids outcome startup)))
@@ -215,6 +220,46 @@ left unasked, and the next link-up or roster walk asks again."
       (agent-repl--info agent-repl-open-tabs--central
                         "elisp.open-tabs.unsent workspaces=%d reason=no-connection"
                         (length rows)))))
+
+;;;; ---- The host on screen while the startup chooses -------------------------
+
+;; A PAGE RUNS ONLY WHILE THE HOST IS ON SCREEN.  WebKit stops running a web
+;; view that no window displays, shortly after it was made (2026-10-12: the
+;; daemon answered the startup's first pages within 45ms, and the pages heard
+;; the answers 194s later, once a tab put the host on screen).  The startup's
+;; tabs wait for their pages to draw, so with nothing displaying the host the
+;; startup could wait on itself.  While the frame stands on the startup's
+;; placeholder, its window displays the host -- empty until a page is shown
+;; -- so every page runs from the moment it is asked for.  The startup's
+;; first opened tab then takes the frame, and the view is dropped when the
+;; startup ends.
+
+(defconst agent-repl-open-tabs--startup-view-name " *agent-repl-opening*"
+  "The buffer that displays the host while the startup chooses.")
+
+(defun agent-repl-open-tabs--show-host-while-starting ()
+  "Display the web view host in the selected window, while on the placeholder.
+Nothing happens when there is no host (no page was loaded), or when the
+frame already stands on a workspace of the user's."
+  (let ((xw (agent-repl-webhost-xwidget))
+        (current (agent-repl--ws-current-name)))
+    (if (not (and xw current (agent-repl--pseudo-workspace-name-p current)))
+        (agent-repl--log agent-repl-open-tabs--central
+                         "elisp.open-tabs.startup-view-skipped host=%s current=%s"
+                         (and xw t) current)
+      (let ((buf (or (get-buffer agent-repl-open-tabs--startup-view-name)
+                     (agent-repl--frontend-make-slot-buffer
+                      agent-repl-open-tabs--startup-view-name xw))))
+        (set-window-buffer (selected-window) buf)
+        (agent-repl--info agent-repl-open-tabs--central
+                          "elisp.open-tabs.startup-view-shown current=%s" current)))))
+
+(defun agent-repl-open-tabs--drop-startup-view ()
+  "Drop the buffer that displayed the host while the startup chose."
+  (when-let ((buf (get-buffer agent-repl-open-tabs--startup-view-name)))
+    (let ((kill-buffer-query-functions nil))
+      (kill-buffer buf))
+    (agent-repl--info agent-repl-open-tabs--central "elisp.open-tabs.startup-view-dropped")))
 
 (defun agent-repl-open-tabs--owed-p (row)
   "Return non-nil when ROW must be asked for now."
@@ -384,6 +429,7 @@ dialed in a loop."
   "End this process's first open, for WHY, and arm Doom's one-time setup."
   (setq agent-repl-open-tabs--startup 'done)
   (agent-repl--info agent-repl-open-tabs--central "elisp.open-tabs.startup-ended why=%s" why)
+  (agent-repl-open-tabs--drop-startup-view)
   (agent-repl-roster-apply-current)
   (agent-repl-startup-first-hooks-arm))
 
