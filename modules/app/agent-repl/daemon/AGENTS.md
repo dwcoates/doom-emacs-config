@@ -235,6 +235,10 @@ environment. Every flag is optional.
    wrong;
 4. `--pprof`, BEFORE any dependency, so a boot wedged on one is still
    diagnosable through it;
+   beside it, RUNTIME profiling is armed (`cmd/agent-repld/profiling.go`,
+   `agentrepl/logging/profiling`): a session `bin/profile-agent-repl.sh`
+   opens starts and stops CPU and heap profiling on SIGWINCH without a
+   restart (`/profile-agent-repl`);
 5. the ONE loopback listener, bound FIRST as the boot-exclusivity claim (an
    exclusive kernel lock on `daemon.lock` beside `daemon.addr`); an UNFLAGGED
    second daemon loses there and exits without touching the incumbent's
