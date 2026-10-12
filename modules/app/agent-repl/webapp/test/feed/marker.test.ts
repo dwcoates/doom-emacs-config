@@ -14,7 +14,13 @@ import {
   drawOutcomeMarker,
   formatMarkerTime,
 } from "../../src/feed/marker.js";
-import { LOGIN_REQUESTED_EVENT, type LoginRequestedDetail } from "../../src/login/request.js";
+import {
+  LOGIN_REQUESTED_EVENT,
+  SIGN_IN_ACTION,
+  SIGN_IN_ACTION_ATTRIBUTE,
+  drawSignInAction,
+  type LoginRequestedDetail,
+} from "../../src/login/request.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import { CONTROL_TAG } from "../../src/control.js";
 import { countingTicker, harness, settle, type FeedScript } from "./harness.js";
@@ -321,6 +327,13 @@ describe("drawOutcomeMarker: the actions", () => {
     button.click();
     document.removeEventListener(LOGIN_REQUESTED_EVENT, onRequest);
     expect(asked).toEqual([button]);
+  });
+
+  it("draws the shared sign-in action, in the marker's action class", () => {
+    const { el } = draw(vendor({ errorType: { text: "authentication_failed" }, signIn: {} }));
+    const button = el.querySelector(`[${SIGN_IN_ACTION_ATTRIBUTE}="${SIGN_IN_ACTION}"]`) as HTMLElement;
+    const shared = drawSignInAction("outcome-marker-action", "x");
+    expect([button.localName, button.className, button.textContent]).toEqual([shared.localName, shared.className, shared.textContent]);
   });
 
   it("resends the prompt as said through SubmitPrompt, as a card action", async () => {
