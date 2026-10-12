@@ -12,20 +12,22 @@
 // speculative gates' low scheduling priority (merge's gate runs them niced),
 // not processor share held free.
 //
-// WHAT IS MEASURED. The host's one-minute load average (sysctl vm.loadavg)
-// over its logical processors: the count of runnable threads, host-wide and
-// not just this daemon's tree, exponentially smoothed by the kernel over a
-// one-minute time constant. That smoothing rides over a test run's bursts (a
-// merge run measured at 147% average, p90 241%, peak 607% of one processor,
-// sampled every 5s), and its lag is modelled rather than ignored: a gate
-// admitted t seconds ago has reached only 1-exp(-t/60s) of its eventual share
-// of the average, so the share still to come is counted against the band
-// before anything else is admitted.
+// WHAT IS MEASURED. The host's own processor ticks (host_statistics'
+// HOST_CPU_LOAD_INFO on macOS, /proc/stat on Linux): every tick of every
+// processor spent in user, nice or system time is busy, host-wide and not just
+// this daemon's tree, and per-process %cpu is never summed (it undercounts the
+// host by about a third, measured against top). Each SampleEvery interval's
+// busy fraction is folded into an exponential moving average over Tau (30s),
+// which rides over a test run's bursts. Its lag is modelled rather than
+// ignored: a gate admitted t seconds ago has reached only 1-exp(-t/Tau) of its
+// eventual share of the average, so the share still to come is counted
+// against the band before anything else is admitted.
 //
 // WHAT A GATE COSTS. A gate's mean cost in processors is LEARNED from the
-// gates that ran to an exit (their CPU time over their wall time, the kernel's
-// wait accounting of the script and every descendant), seeded with the
-// measured 1.47.
+// gates that ran to an exit (their CPU time, user and system, over their wall
+// time: the kernel's wait accounting of the script and every descendant),
+// seeded with 2.2: the measured 147% average scaled by the third summed
+// per-process %cpu was found to undercount.
 //
 // PRIORITY IS HEAD-FIRST. A gate of the merge at its queue's head is never
 // governed: it is granted at once and only counted. Waiting speculative gates
@@ -53,18 +55,18 @@ const (
 	DefaultLow = 0.50
 	// DefaultHigh is the ceiling no admission is projected to exceed.
 	DefaultHigh = 0.70
-	// DefaultMeanCores is a merge test run's measured mean cost, the seed the
-	// learned mean starts from: 147% of one processor over a 6m48s run.
-	DefaultMeanCores = 1.47
-	// LoadTau is the kernel's time constant for the one-minute load average.
-	LoadTau = time.Minute
+	// DefaultMeanCores is a merge test run's mean cost, the seed the learned
+	// mean starts from: 147% of one processor over a 6m48s run as summed
+	// per-process %cpu, which undercounts the host by about a third.
+	DefaultMeanCores = 2.2
+	// LoadTau is the smoothing's time constant.
+	LoadTau = 30 * time.Second
 	// DefaultLearnRate is how far one observed run moves the learned mean.
 	DefaultLearnRate = 0.3
 	// MinLearnWall is the shortest run the mean is learned from: a run that
 	// short is a gate that found little to do, and says nothing about a run.
 	MinLearnWall = 10 * time.Second
-	// SampleEvery is the production sampling cadence: the kernel itself
-	// recomputes the load average every five seconds.
+	// SampleEvery is the production sampling cadence.
 	SampleEvery = 5 * time.Second
 	// QueueWindow is THE ONE SETTING for the merge queue's working window
 	// (owner rulings, 2026-10-11): the head and the merges right behind it, up
@@ -75,25 +77,23 @@ const (
 	QueueWindow = 3
 )
 
-// Sample is one reading of the host's load.
+// Sample is the host's SMOOTHED load: the fraction of its processors busy,
+// and how many it has.
 type Sample struct {
-	// Load1 is the one-minute load average.
-	Load1 float64
-	// CPUs is the host's logical processor count.
-	CPUs int
+	Utilization float64
+	CPUs        int
 }
 
-// Utilization is the sample as a fraction of the machine, at most 1.
-func (s Sample) Utilization() float64 {
-	if s.CPUs <= 0 {
-		return 1
-	}
-	return math.Min(1, s.Load1/float64(s.CPUs))
+// Ticks are the host's processor ticks since boot, summed over every
+// processor: those spent busy (user, nice and system) and in all.
+type Ticks struct {
+	Busy, Total uint64
+	CPUs        int
 }
 
-// Sampler reads the host's load.
+// Sampler reads the host's processor ticks.
 type Sampler interface {
-	Sample() (Sample, error)
+	Ticks() (Ticks, error)
 }
 
 // Request is one gate asking to run.
@@ -155,10 +155,15 @@ type Governor struct {
 	sample    Sample
 	sampled   bool
 	sampleErr string
-	mean      float64
-	active    map[*Permit]struct{}
-	waiting   []*waiter
-	arrivals  uint64
+	// last is the previous tick reading and when it was taken; primed says
+	// one stands.
+	last     Ticks
+	lastAt   time.Time
+	primed   bool
+	mean     float64
+	active   map[*Permit]struct{}
+	waiting  []*waiter
+	arrivals uint64
 }
 
 // New builds a governor. Every collaborator is required.
@@ -190,11 +195,19 @@ func (g *Governor) Run(ctx context.Context) {
 	}
 }
 
-// observe takes one sample and re-decides the waiting gates.
+// observe reads the host's ticks, folds the interval since the last reading
+// into the smoothed load, and re-decides the waiting gates.
 func (g *Governor) observe() {
-	s, err := g.sampler.Sample()
+	t, err := g.sampler.Ticks()
+	now := g.now()
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	if err == nil && t.CPUs <= 0 {
+		err = fmt.Errorf("cpugov: the host reports %d processors", t.CPUs)
+	}
+	if err == nil && g.primed && (t.Total < g.last.Total || t.Busy < g.last.Busy) {
+		err = fmt.Errorf("cpugov: the host's processor ticks went backwards (busy %d->%d, total %d->%d)", g.last.Busy, t.Busy, g.last.Total, t.Total)
+	}
 	if err != nil {
 		// NO SAMPLE, NO ADMISSION. A speculative gate admitted blind could
 		// push the host past the ceiling; the head's gate is never governed,
@@ -204,14 +217,26 @@ func (g *Governor) observe() {
 			g.sampleErr = err.Error()
 			g.log.Error("daemon.cpugov.sample", "could not read the host's load; no speculative gate is admitted until it reads", dlog.Context{"error": err.Error()})
 		}
-		g.sampled = false
+		g.sampled, g.primed = false, false
 		return
 	}
 	if g.sampleErr != "" {
-		g.log.Info("daemon.cpugov.sample", "the host's load reads again", dlog.Context{"load1": s.Load1, "cpus": s.CPUs})
+		g.log.Info("daemon.cpugov.sample", "the host's load reads again", dlog.Context{"cpus": t.CPUs})
 		g.sampleErr = ""
 	}
-	g.sample, g.sampled = s, true
+	if !g.primed || t.Total == g.last.Total {
+		// THE FIRST READING ONLY PRIMES: a load is a difference of two.
+		g.last, g.lastAt, g.primed = t, now, true
+		return
+	}
+	interval := float64(t.Busy-g.last.Busy) / float64(t.Total-g.last.Total)
+	weight := 1.0
+	if g.sampled {
+		weight = 1 - math.Exp(-now.Sub(g.lastAt).Seconds()/g.cfg.Tau.Seconds())
+	}
+	g.sample = Sample{Utilization: g.sample.Utilization + weight*(interval-g.sample.Utilization), CPUs: t.CPUs}
+	g.sampled = true
+	g.last, g.lastAt = t, now
 	g.decideLocked()
 }
 
@@ -337,7 +362,7 @@ func (g *Governor) projectLocked() projection {
 		absorbed += g.mean * (1 - math.Exp(-age.Seconds()/g.cfg.Tau.Seconds())) / cpus
 		settledShare += g.mean / cpus
 	}
-	u := g.sample.Utilization()
+	u := math.Min(1, g.sample.Utilization)
 	background := math.Max(0, u-absorbed)
 	return projection{
 		utilization: u,
@@ -390,6 +415,6 @@ func (g *Governor) fieldsLocked(req Request, decision, reason string, pr project
 		"workspace": string(req.Workspace), "repo": req.Repo, "rank": req.Rank, "decision": decision, "reason": reason,
 		"utilization": pr.utilization, "background": pr.background, "settled": pr.settled, "projected": pr.projected,
 		"band_low": g.cfg.Low, "band_high": g.cfg.High, "mean_cores": g.mean,
-		"active": len(g.active), "waiting": len(g.waiting), "load1": g.sample.Load1, "cpus": g.sample.CPUs,
+		"active": len(g.active), "waiting": len(g.waiting), "cpus": g.sample.CPUs,
 	}
 }

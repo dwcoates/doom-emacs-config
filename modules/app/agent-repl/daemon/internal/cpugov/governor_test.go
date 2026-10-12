@@ -11,17 +11,27 @@ import (
 	"claude-repld/internal/dlog"
 )
 
-// fakeSampler answers a scripted sample or failure.
+// fakeSampler answers scripted ticks or a failure.
 type fakeSampler struct {
-	mu     sync.Mutex
-	sample Sample
-	err    error
+	mu    sync.Mutex
+	ticks Ticks
+	err   error
 }
 
-func (f *fakeSampler) Sample() (Sample, error) {
+func (f *fakeSampler) Ticks() (Ticks, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.sample, f.err
+	return f.ticks, f.err
+}
+
+// tick advances the scripted counters by an interval busy for fraction of its
+// ticks.
+func (f *fakeSampler) tick(fraction float64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.ticks.Busy += uint64(fraction * 1000)
+	f.ticks.Total += 1000
+	f.ticks.CPUs = 16
 }
 
 // fakeClock is a settable clock.
@@ -61,7 +71,7 @@ func newRig(t *testing.T) *rig {
 }
 
 // at is a 16-processor host at a fraction of its processors.
-func at(fraction float64) Sample { return Sample{Load1: fraction * 16, CPUs: 16} }
+func at(fraction float64) Sample { return Sample{Utilization: fraction, CPUs: 16} }
 
 func ready(w *waiter) bool {
 	select {
@@ -73,6 +83,15 @@ func ready(w *waiter) bool {
 }
 
 func speculative(rank int) Request { return Request{Workspace: "ws", Repo: "/repo/.git", Rank: rank} }
+
+func (r *rig) recordAt(level, op string) (dlog.Record, bool) {
+	for _, rec := range r.log.Records() {
+		if rec.Level == level && rec.Operation == op {
+			return rec, true
+		}
+	}
+	return dlog.Record{}, false
+}
 
 func lastDecision(log *dlog.TestLogger) (string, string) {
 	records := log.Records()
@@ -369,26 +388,58 @@ func TestASamplerFailureAdmitsNothingAndIsRecordedOnce(t *testing.T) {
 	}
 }
 
-func TestSampleUtilization(t *testing.T) {
+func TestTheLoadIsTheSmoothedBusyShareOfTheHostsTicks(t *testing.T) {
 	tests := []struct {
-		name   string
-		sample Sample
-		want   float64
+		name      string
+		intervals []float64
+		want      float64
 	}{
-		{name: "a fraction", sample: Sample{Load1: 4, CPUs: 16}, want: 0.25},
-		{name: "saturated is capped", sample: Sample{Load1: 40, CPUs: 16}, want: 1},
-		{name: "no processors reads as saturated", sample: Sample{Load1: 1}, want: 1},
+		{name: "the first interval stands whole", intervals: []float64{0.4}, want: 0.4},
+		{name: "a later interval moves it by its weight", intervals: []float64{0.4, 1.0}, want: 0.4 + (1-math.Exp(-5.0/30))*0.6},
+		{name: "no interval yet reads nothing", intervals: nil, want: 0},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the first reading primes.
+			r := newRig(t)
+			r.sampler.tick(0)
+			r.g.observe()
+
 			// Act.
-			got := tt.sample.Utilization()
+			for _, fraction := range tt.intervals {
+				r.clock.advance(5 * time.Second)
+				r.sampler.tick(fraction)
+				r.g.observe()
+			}
 
 			// Assert.
-			if got != tt.want {
-				t.Fatalf("Utilization = %v, want %v", got, tt.want)
+			if got := r.g.sample.Utilization; math.Abs(got-tt.want) > 1e-9 {
+				t.Fatalf("smoothed load = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestTicksThatGoBackwardsAdmitNothing(t *testing.T) {
+	// Arrange: a primed governor whose host reports fewer ticks than before.
+	r := newRig(t)
+	r.sampler.tick(0)
+	r.g.observe()
+	r.sampler.tick(0.1)
+	r.g.observe()
+	r.sampler.ticks.Total = 500
+
+	// Act.
+	r.g.observe()
+	r.g.observe()
+	w := r.g.enqueue(speculative(1))
+
+	// Assert.
+	if r.g.sampled {
+		t.Fatal("the governor kept a load across ticks that went backwards")
+	}
+	if _, found := r.recordAt("error", "daemon.cpugov.sample"); !found || ready(w) {
+		t.Fatalf("recorded=%v admitted=%v, want an error and no admission", found, ready(w))
 	}
 }
 
