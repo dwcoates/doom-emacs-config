@@ -15,14 +15,24 @@ BACKGROUND := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))../bin/background.sh)
 
 .PHONY: test coverage perf perf-only perf-enforce perf-baseline
 
+# THE SHIM'S NODE DEPS ARE BOOTSTRAPPED BY THE RUNNER, as the webapp's are by
+# its `pretest` hook: a fresh worktree has none, and the suite's harness only
+# refuses without them (main_test.go: it never installs them itself). The
+# stamp is npm's own lockfile copy, so a lockfile change reinstalls too.
+SHIM_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))../agent-shim/claude/shim)
+SHIM_DEPS := $(SHIM_DIR)/node_modules/.package-lock.json
+
+$(SHIM_DEPS): $(SHIM_DIR)/package-lock.json
+	cd $(SHIM_DIR) && $(BACKGROUND) npm ci
+
 # TMPDIR=/tmp IS REQUIRED on macOS -- the suite's unix socket paths do not fit
 # the 103-byte cap beneath the default per-user temp root.
-test:
+test: $(SHIM_DEPS)
 	TMPDIR=/tmp $(BACKGROUND) go test ./... -count=1 -timeout $(GOTEST_TIMEOUT) -parallel $(GOTEST_PARALLEL)
 
 # The same run with coverage collection for the SPAWNED systems, merged and
 # reported per module. See ../bin/e2e-coverage.sh.
-coverage:
+coverage: $(SHIM_DEPS)
 	E2E_COVERAGE_PARALLEL=$(GOTEST_PARALLEL) E2E_COVERAGE_TIMEOUT=$(GOTEST_TIMEOUT) \
 		$(BACKGROUND) ../bin/e2e-coverage.sh
 
@@ -50,7 +60,7 @@ perf: test perf-only
 # The baseline drift check REPORTS here rather than failing; see PERF-SPEC.md
 # section I5 finding 17 for the measurement that settled that, and use
 # `perf-enforce` on a host quiet enough to hold it.
-perf-only:
+perf-only: $(SHIM_DEPS)
 	TMPDIR=/tmp AGENT_REPL_E2E_PERF=1 $(BACKGROUND) go test ./... -tags perf -run 'TestPerf' -count=1 \
 		-timeout $(GOTEST_TIMEOUT) -parallel 1 -v
 
@@ -66,7 +76,7 @@ perf-only:
 # p95 at 1.539ms and the very next run measured 2.036ms, a false 32%
 # regression against a row whose real spread is 1.4-2.0ms. See PERF-SPEC.md
 # section I5 finding 17.
-perf-baseline:
+perf-baseline: $(SHIM_DEPS)
 	TMPDIR=/tmp AGENT_REPL_E2E_PERF=1 AGENT_REPL_E2E_PERF_BASELINE=write \
 		$(BACKGROUND) go test ./... -tags perf -run 'TestPerf' -count=5 \
 		-timeout $(GOTEST_TIMEOUT) -parallel 1 -v
@@ -74,7 +84,7 @@ perf-baseline:
 # The perf phase with the >20% baseline regression check FAILING rather than
 # reporting. For a quiet or dedicated host; on a box shared with other suites
 # it fails on load, not on regressions.
-perf-enforce:
+perf-enforce: $(SHIM_DEPS)
 	TMPDIR=/tmp AGENT_REPL_E2E_PERF=1 AGENT_REPL_E2E_PERF_BASELINE=enforce \
 		$(BACKGROUND) go test ./... -tags perf -run 'TestPerf' -count=1 \
 		-timeout $(GOTEST_TIMEOUT) -parallel 1 -v
