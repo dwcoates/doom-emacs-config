@@ -134,13 +134,9 @@ func (m Manager) Acquire(sizeMiB int) (_ *Volume, err error) {
 		return nil, fmt.Errorf("make the RAM disk registry %s: %w", m.Registry, err)
 	}
 	recordPath := m.recordPath(m.Pid)
-	lock, err := os.OpenFile(recordPath, os.O_CREATE|os.O_RDWR|os.O_TRUNC, 0o644)
+	lock, err := m.createRecord(recordPath)
 	if err != nil {
-		return nil, fmt.Errorf("open the RAM disk record %s: %w", recordPath, err)
-	}
-	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		lock.Close()
-		return nil, fmt.Errorf("take the RAM disk record %s: %w", recordPath, err)
+		return nil, err
 	}
 	v := &Volume{m: m, lock: lock, Mount: filepath.Join(m.MountParent, fmt.Sprintf("artr-%d", m.Pid))}
 	defer func() {
@@ -311,20 +307,11 @@ func (m Manager) reclaimOne(path string) (Reclaimed, bool, error) {
 	if pid == m.Pid {
 		return Reclaimed{}, false, nil
 	}
-	f, err := os.OpenFile(path, os.O_RDWR, 0)
-	if errors.Is(err, os.ErrNotExist) {
-		return Reclaimed{}, false, nil
-	}
-	if err != nil {
-		return Reclaimed{}, false, fmt.Errorf("open the RAM disk record %s: %w", path, err)
+	f, dead, err := m.probeRecord(path)
+	if err != nil || !dead {
+		return Reclaimed{}, false, err
 	}
 	defer f.Close()
-	switch err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); {
-	case errors.Is(err, syscall.EWOULDBLOCK):
-		return Reclaimed{}, false, nil
-	case err != nil:
-		return Reclaimed{}, false, fmt.Errorf("probe the RAM disk record %s: %w", path, err)
-	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return Reclaimed{}, false, fmt.Errorf("read the RAM disk record %s: %w", path, err)
@@ -368,6 +355,105 @@ func (m Manager) reclaimOne(path string) (Reclaimed, bool, error) {
 		return r, false, fmt.Errorf("remove the dead run's RAM disk record %s: %w", path, err)
 	}
 	return r, true, nil
+}
+
+// registryLockName is the registry's own lock: the one a record's creation and
+// a reclaim's probe of a record both hold. It does not end in ".lock", so it is
+// never read as a run's record.
+const registryLockName = "registry.mutex"
+
+// lockRegistry takes the registry's lock, blocking until it is free, and
+// answers its release.
+//
+// IT CLOSES THE WINDOW BETWEEN A RECORD'S CREATION AND ITS FLOCK. Acquire
+// opens its record and only then flocks it; a concurrent run's Reclaim that
+// opened the record in between found its flock free, read it empty, and
+// removed it from under the live run, whose RAM disk then had no record a
+// later Reclaim could find. Under the registry lock a record is never seen
+// unlocked between its creation and its owner's flock.
+func (m Manager) lockRegistry() (func() error, error) {
+	path := filepath.Join(m.Registry, registryLockName)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return nil, fmt.Errorf("open the RAM disk registry lock %s: %w", path, err)
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		f.Close()
+		return nil, fmt.Errorf("take the RAM disk registry lock %s: %w", path, err)
+	}
+	return f.Close, nil
+}
+
+// createRecord creates this run's record and takes its flock, as one step
+// under the registry lock.
+func (m Manager) createRecord(recordPath string) (_ *os.File, err error) {
+	unlock, err := m.lockRegistry()
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if closeErr := unlock(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("release the RAM disk registry lock: %w", closeErr))
+		}
+	}()
+	lock, err := os.OpenFile(recordPath, os.O_CREATE|os.O_RDWR|os.O_TRUNC, 0o644)
+	if err != nil {
+		return nil, fmt.Errorf("open the RAM disk record %s: %w", recordPath, err)
+	}
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		lock.Close()
+		return nil, fmt.Errorf("take the RAM disk record %s: %w", recordPath, err)
+	}
+	return lock, nil
+}
+
+// probeRecord opens one record and takes its flock without blocking, under the
+// registry lock. dead is false when a live run holds it, or when the path no
+// longer names the file whose flock was taken (its run released it between the
+// open and the flock). The caller closes the file it answers.
+func (m Manager) probeRecord(path string) (_ *os.File, dead bool, err error) {
+	unlock, err := m.lockRegistry()
+	if err != nil {
+		return nil, false, err
+	}
+	defer func() {
+		if closeErr := unlock(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("release the RAM disk registry lock: %w", closeErr))
+		}
+	}()
+	f, err := os.OpenFile(path, os.O_RDWR, 0)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("open the RAM disk record %s: %w", path, err)
+	}
+	switch err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); {
+	case errors.Is(err, syscall.EWOULDBLOCK):
+		f.Close()
+		return nil, false, nil
+	case err != nil:
+		f.Close()
+		return nil, false, fmt.Errorf("probe the RAM disk record %s: %w", path, err)
+	}
+	// A RECORD ITS LIVE RUN RELEASED between the open and the flock is no
+	// longer at the path: the flock was taken on an unlinked file, which says
+	// nothing about a dead run.
+	held, err := f.Stat()
+	if err != nil {
+		f.Close()
+		return nil, false, fmt.Errorf("stat the RAM disk record %s: %w", path, err)
+	}
+	named, err := os.Stat(path)
+	if errors.Is(err, os.ErrNotExist) || (err == nil && !os.SameFile(held, named)) {
+		f.Close()
+		return nil, false, nil
+	}
+	if err != nil {
+		f.Close()
+		return nil, false, fmt.Errorf("stat the RAM disk record %s: %w", path, err)
+	}
+	return f, true, nil
 }
 
 func (m Manager) recordPath(pid int) string {
