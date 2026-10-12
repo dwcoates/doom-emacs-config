@@ -6,7 +6,12 @@ Failing output (tail; the whole run is archived at {{archive_path}}):
 {{failure_tail}}
 ---
 
-This is fixing attempt {{attempt}} of {{max_attempts}}. Fix it in {{worktree_dir}}: change the tests or the code so the suite passes, and COMMIT the fix to {{source_branch}} there. When your turn ends the queue runs the suite again on the branch. If the last attempt still fails, the merge fails and the workspace is handed back to the user.
+This is fixing attempt {{attempt}} of {{max_attempts}}. Fix it in {{worktree_dir}}: change the tests or the code so the suite passes, and COMMIT the fix to {{source_branch}} there. When your turn ends the queue rebases the branch onto {{target_branch}}'s tip and runs the whole suite again. If the last attempt still fails, the merge fails and the workspace is handed back to the user.
+
+RUN ONLY THE FAILING TESTS, AND KEEP FIXING UNTIL THEY PASS, BEFORE YOU END YOUR TURN. As the final stage of every fix:
+1. Run exactly the tests that failed above -- each by name, with its suite's own targeted invocation (the module's AGENTS.md lists them: e.g. `go test -run '^TestName$' ./pkg/...` through `bin/background.sh`, `npm test -- -t "name"`, one ERT file through batch Emacs), never the whole suite and never `bin/test-all.sh`.
+2. If any of them still fails, fix again and run them again. Repeat until every one of them passes.
+3. Only then commit and end your turn. The queue's own full run (after its rebase) is what checks everything else; a turn that ends with a failing test it was asked to fix spends an attempt and a whole suite run on a known failure.
 
 Do NOT change the merge machinery while this merge is running: nothing under `modules/app/agent-repl/daemon/internal/merge/` or `modules/app/agent-repl/testrun/`, and not `modules/app/agent-repl/bin/test-all.sh`. The running daemon is what gates this merge, so a change there cannot fix it; a repair that makes one fails the merge. A fix to the merge or its gate lands through a branch of its own.
 
