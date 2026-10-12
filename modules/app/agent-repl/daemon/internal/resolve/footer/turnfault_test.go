@@ -411,3 +411,59 @@ func TestAMidTurnApiFailureIsRecordedByTheSharedCauseWord(t *testing.T) {
 		})
 	}
 }
+
+// authFailed is the vendor rejecting the credential: an account cause a
+// sign-in cures.
+func authFailed() *conversationv1.AgentFailure {
+	return &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ApiRequestFailed{
+		ApiRequestFailed: &conversationv1.ApiRequestFailed{Kind: &conversationv1.ApiRequestFailed_AuthenticationFailed{AuthenticationFailed: &conversationv1.ApiAuthenticationFailed{}}},
+	}}
+}
+
+func TestASignInLiftsAnAccountFailureAndNoOther(t *testing.T) {
+	cases := []struct {
+		name    string
+		failure *conversationv1.AgentFailure
+		want    string
+	}{
+		{name: "a rejected credential returns the strip to idle", failure: authFailed(), want: "idle"},
+		{name: "an overload stands", failure: overloaded(0), want: "vendor_fault"},
+		{name: "a dead query stands", failure: queryDiedFailure(), want: "agent_repl_fault"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+			h.r.SetTurn(testWS, &TurnStarted{At: instant})
+			failTurn(h, tc.failure)
+
+			// Act
+			h.r.OnSignedIn(testWS)
+
+			// Assert
+			if got := h.status(t); got != tc.want {
+				t.Fatalf("status = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestASignInIsRecordedWithWhatItLifted(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+	failTurn(h, authFailed())
+
+	// Act
+	h.r.OnSignedIn(testWS)
+
+	// Assert
+	for _, rec := range recordsOf(h.log.Records(), "daemon.footer.signed_in") {
+		if rec.Level == "info" && rec.Context["turn_fault_lifted"] == true {
+			return
+		}
+	}
+	t.Fatalf("no INFO record naming the lifted turn fault in %+v", h.log.Records())
+}

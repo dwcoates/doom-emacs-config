@@ -64,6 +64,13 @@ type wsState struct {
 	// (ladder.ClassifyFailure). It refines a FAILED close: an expected stop —
 	// a Stop hook, a deferred tool — closes as failed but reads as `done`.
 	lastFailure ladder.FailureClass
+	// lastFailureSignInCures reports that the last turn's own terminal failed
+	// on an account cause signing in again cures (ladder.FailureCuredBySignIn).
+	lastFailureSignInCures bool
+	// endAnswered reports that a completed sign-in answered the last turn's
+	// failure (OnSignedIn): the row has no turn end left to report and draws
+	// `ready`. A new turn's start or close retires it.
+	endAnswered bool
 	// turnFault is the TURN FAULT the last turn's close raised
 	// (ladder.ResolveTurnFault): `vendor_blocked` on the vendor rung, or
 	// `turn_died` on the agent-repl rung. It stands until the next turn
@@ -238,6 +245,8 @@ func (s *wsState) startTurn(turn *footer.TurnStarted) {
 	// working until the API fails again.
 	s.retrying = ""
 	s.lastFailure = ladder.NoFailure
+	s.lastFailureSignInCures = false
+	s.endAnswered = false
 	// A NEW TURN ENDS THE LAST ONE'S FAULT (owner ruling, 2026-10-06).
 	s.turnFault = ladder.NoTurnFault
 	s.compacting = turn.Act == footer.ActCompact

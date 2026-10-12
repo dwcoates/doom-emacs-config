@@ -15,15 +15,16 @@ import (
 	"agent-repld/internal/ids"
 )
 
-// fakeRolledBack is an in-memory RolledBackTurnStore.
-type fakeRolledBack struct {
+// fakeTurnSet is an in-memory durable turn set: a RolledBackTurnStore and a
+// SignedInTurnStore alike.
+type fakeTurnSet struct {
 	mu      sync.Mutex
 	turns   []ids.TurnID
 	putErr  error
 	loadErr error
 }
 
-func (f *fakeRolledBack) RecordRolledBackTurns(_ context.Context, _ ids.WorkspaceID, turns []ids.TurnID) error {
+func (f *fakeTurnSet) RecordRolledBackTurns(_ context.Context, _ ids.WorkspaceID, turns []ids.TurnID) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.putErr != nil {
@@ -33,7 +34,15 @@ func (f *fakeRolledBack) RecordRolledBackTurns(_ context.Context, _ ids.Workspac
 	return nil
 }
 
-func (f *fakeRolledBack) RolledBackTurns(context.Context, ids.WorkspaceID) ([]ids.TurnID, error) {
+func (f *fakeTurnSet) RecordSignedInTurns(ctx context.Context, ws ids.WorkspaceID, turns []ids.TurnID) error {
+	return f.RecordRolledBackTurns(ctx, ws, turns)
+}
+
+func (f *fakeTurnSet) SignedInTurns(ctx context.Context, ws ids.WorkspaceID) ([]ids.TurnID, error) {
+	return f.RolledBackTurns(ctx, ws)
+}
+
+func (f *fakeTurnSet) RolledBackTurns(context.Context, ids.WorkspaceID) ([]ids.TurnID, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.loadErr != nil {
@@ -212,7 +221,7 @@ func TestARowOfARolledBackTurnArrivingLaterIsNotDrawn(t *testing.T) {
 
 func TestARolledBackTurnStaysRolledBackAfterARestart(t *testing.T) {
 	// Arrange
-	store := &fakeRolledBack{}
+	store := &fakeTurnSet{}
 	before := newStoredHarness(t, store)
 	threeTurns(before)
 	if err := before.resolver.RollBackTurns(testWorkspace, []ids.TurnID{"t3"}); err != nil {
@@ -236,7 +245,7 @@ func TestARolledBackTurnStaysRolledBackAfterARestart(t *testing.T) {
 
 func TestAFailedRollbackRecordStillRemovesTheRowsAndIsRaised(t *testing.T) {
 	// Arrange
-	store := &fakeRolledBack{putErr: errors.New("disk full")}
+	store := &fakeTurnSet{putErr: errors.New("disk full")}
 	h := newStoredHarness(t, store)
 	threeTurns(h)
 
@@ -257,7 +266,7 @@ func TestAFailedRollbackRecordStillRemovesTheRowsAndIsRaised(t *testing.T) {
 
 func TestAFailedRollbackLoadIsLoggedAndRaised(t *testing.T) {
 	// Arrange
-	store := &fakeRolledBack{loadErr: errors.New("corrupt page")}
+	store := &fakeTurnSet{loadErr: errors.New("corrupt page")}
 
 	// Act
 	h := newStoredHarness(t, store)
