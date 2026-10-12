@@ -2273,7 +2273,7 @@ func TestNewRefusesASequenceWithNoMissingWorktreeRestorer(t *testing.T) {
 // survived a fresh boot and refused every prompt of their workspaces.
 func TestTheBootReleasesALeaseItsOwnerLeftBehind(t *testing.T) {
 	// Arrange
-	h := newHarness(t)
+	h := newFileHarness(t)
 	ws := h.register(t, t.TempDir(), sessionlock.StateFree)
 	orphan := h.previousProcessLease(t, ws.ID, wsm.HolderRestart)
 
@@ -2330,7 +2330,7 @@ func TestTheBootKeepsALeaseItsOwnLiveOperationHolds(t *testing.T) {
 // the incumbent that spawned it is alive and owns its leases.
 func TestAJoiningBootReleasesNoLease(t *testing.T) {
 	// Arrange
-	h := newHarness(t, func(d *Deps, _ *harness) { d.JoiningAddress = "127.0.0.1:41111" })
+	h := newFileHarness(t, func(d *Deps, _ *harness) { d.JoiningAddress = "127.0.0.1:41111" })
 	ws := h.register(t, t.TempDir(), sessionlock.StateFree)
 	incumbents := h.previousProcessLease(t, ws.ID, wsm.HolderRestart)
 
@@ -2352,7 +2352,7 @@ func TestAJoiningBootReleasesNoLease(t *testing.T) {
 
 func TestTheBootFailsWhenAnOrphanLeaseCannotBeReleased(t *testing.T) {
 	// Arrange
-	h := newHarness(t, func(d *Deps, _ *harness) { d.DB = failingRelease{DB: d.DB, err: errBoom} })
+	h := newFileHarness(t, func(d *Deps, _ *harness) { d.DB = failingRelease{DB: d.DB, err: errBoom} })
 	ws := h.register(t, t.TempDir(), sessionlock.StateFree)
 	h.previousProcessLease(t, ws.ID, wsm.HolderRestart)
 
@@ -2384,7 +2384,7 @@ func TestTheBootFailsWhenTheLeasesCannotBeRead(t *testing.T) {
 // it.
 func TestTheBootTakesUpTheCarriesBeforeReleasingTheOutgoingDaemonsHolds(t *testing.T) {
 	// Arrange
-	h := newHarness(t)
+	h := newFileHarness(t)
 	ws := h.register(t, t.TempDir(), sessionlock.StateFree)
 	h.previousProcessLease(t, ws.ID, wsm.HolderRestart)
 	releasedAtTakeUp, releasedAtFinish := -1, -1
