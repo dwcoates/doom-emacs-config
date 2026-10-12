@@ -434,8 +434,19 @@ func TestIngestionIsAtomicAHalfWrittenFileIsNotClaimedUntilComplete(t *testing.T
 		t.Fatalf("after a sweep left it, %s = (%q, %v), want it unchanged at %q", path, body, err, partial)
 	}
 
-	// Act: complete the write before the file ages out.
-	if err := os.WriteFile(path, []byte(`[{"type":"task-create","title":"atomic-cmdfile-task"}]`), 0o644); err != nil {
+	// Act: complete the write before the file ages out, ATOMICALLY, as every
+	// producer does (commandfile/write.go, emit-workspace-commands.sh): the
+	// whole document is written under a name the glob does not match and
+	// renamed over the partial. An in-place os.WriteFile truncated the file
+	// first, and a writer descheduled between the truncation and the write
+	// left an EMPTY file whose fresh mtime aged past one poll interval on a
+	// loaded run, which the ingress then rightly claimed by age and
+	// quarantined: a race of this test's own making, not of the producers'.
+	staged := filepath.Join(filepath.Dir(path), ".workspace_commands_atomic.json")
+	if err := os.WriteFile(staged, []byte(`[{"type":"task-create","title":"atomic-cmdfile-task"}]`), 0o644); err != nil {
+		t.Fatalf("stage the completed command file: %v", err)
+	}
+	if err := os.Rename(staged, path); err != nil {
 		t.Fatalf("complete the command file: %v", err)
 	}
 
