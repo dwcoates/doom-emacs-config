@@ -150,7 +150,7 @@ func fingerprint(group []pendingRecord) string {
 		}
 		sort.Strings(keys)
 		for _, k := range keys {
-			fmt.Fprintf(&sb, "\x00%s=%v", k, rec.ctx[k])
+			sb.WriteString("\x00" + k + "=" + fmt.Sprint(rec.ctx[k]))
 		}
 		sb.WriteByte('\n')
 	}
