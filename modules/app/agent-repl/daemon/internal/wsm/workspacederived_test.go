@@ -109,6 +109,33 @@ func TestWorkspaceReadsMergePendingOffTheMergeQueue(t *testing.T) {
 			want: true,
 		},
 		{
+			name: "a merge workspace's entry for its detached merge",
+			arrange: func(t *testing.T, s *store, repo RepoKey, id WorkspaceID) {
+				forked := registerMergeWorkspace(t, s, id, NewDetachedMergeID())
+				queued(t, s, repo, forked.ID, instant)
+			},
+			want: true,
+		},
+		{
+			name: "a merge workspace's removed entry",
+			arrange: func(t *testing.T, s *store, repo RepoKey, id WorkspaceID) {
+				forked := registerMergeWorkspace(t, s, id, NewDetachedMergeID())
+				queued(t, s, repo, forked.ID, instant)
+				if err := s.RemoveMergeQueueEntry(context.Background(), repo, forked.ID, "failed"); err != nil {
+					t.Fatalf("RemoveMergeQueueEntry: %v", err)
+				}
+			},
+			want: false,
+		},
+		{
+			name: "another workspace's entry",
+			arrange: func(t *testing.T, s *store, repo RepoKey, _ WorkspaceID) {
+				other := testWorkspaceNamed(t, s, "other")
+				queued(t, s, repo, other.ID, instant)
+			},
+			want: false,
+		},
+		{
 			name: "a removed entry",
 			arrange: func(t *testing.T, s *store, repo RepoKey, id WorkspaceID) {
 				queued(t, s, repo, id, instant)
