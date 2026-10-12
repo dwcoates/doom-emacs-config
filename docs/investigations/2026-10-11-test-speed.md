@@ -78,6 +78,15 @@ Remaining candidates:
 - Tried and dropped: skipping the stray sweep's argv reads of processes older than the test process. Daemon suite 535 -> ~500 slot-s, but 4 of 6 runs then failed in four different session-lifecycle tests against 0 of 5 without it; the faster teardown exposes timing races that are not yet understood.
 - Open: TestSessionHealthAfterTheShimExitsReportsShimDied reports link_severed instead of shim_died under load (seen twice).
 
+## Fourth round (2026-10-12): the RAM disk's I/O tier is the slowdown
+
+- Wait-bound tests run 5-7x slower inside a full run than alone (ERT integration files 3.4s -> 28s, build-frontend-harness 17s -> 130s). Ruled out: CPU priority (a pipe ping-pong is identical at nice 0 and 19), process spawns (halved, no change), the stray sweep's argv reads, fseventsd's log (`.fseventsd/no_log` changed nothing).
+- Cause, measured with a 4KB write+fsync probe: units run at `taskpolicy -d utility` (testrun/internal/ramdisk UnitIOTier). On the run's RAM disk a utility-tier fsync takes p50 0.1ms but p90 166ms, p99 328ms during a run; at the default tier it takes p90 0.5ms. On a scratch RAM disk, utility-tier I/O is 0.2ms alone and 86ms per fsync while any default-tier I/O touches the same volume; default-tier I/O on the SSD does not affect it. The SSD shows no such effect at either tier.
+- Experiment, daemon suite only, units at the default tier: 495 -> 310 slot-seconds (-37%), 62s -> 57s wall, RAM-disk fsync p90 175ms -> 0.5ms. Pending the owner's ruling (tests run at background priority; CPU stays at nice 19).
+- A faster suite exposes timing races: the opened fixture's control-socket dial lost to a 50ms idle cutoff's hibernate (fixed on test-speed: OpenedShim, not landed until a full run passes); a merge drain over its 2s bound; the fake git answering no default branch; a handover await past its deadline.
+- Landed: e2e-emacs holds 2 slots (264 -> 164 slot-s); the incremental log reader (daemon suite CPU -30s).
+- Incident: the experiments' scratch RAM disks wedged diskarbitrationd (`diskutil list` and `hdiutil attach` time out), which blocks every test run on the host until `sudo killall diskarbitrationd` or a reboot.
+
 ## Targets (owner, 2026-10-11)
 
 - Minimize BOTH wall-clock time and CPU, aiming at 90%; coverage loss at most 2-3%.
