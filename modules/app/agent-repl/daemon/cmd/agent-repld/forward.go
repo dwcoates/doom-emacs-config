@@ -221,7 +221,7 @@ func (f *verbsForwarder) publishRegistry(what string) func(context.Context) erro
 func (f *verbsForwarder) ClaimMergeName(ctx context.Context, repoDir, name string) (string, func(), bool, error) {
 	verbs, ok := f.verbs()
 	if !ok {
-		return "", nil, false, fmt.Errorf("claude-repld: an async merge's name was checked before the workspace verbs existed")
+		return "", nil, false, fmt.Errorf("agent-repld: an async merge's name was checked before the workspace verbs existed")
 	}
 	return verbs.ClaimMergeName(ctx, repoDir, name)
 }
@@ -232,7 +232,7 @@ func (f *verbsForwarder) ClaimMergeName(ctx context.Context, repoDir, name strin
 func (f *verbsForwarder) interruptTurn(ctx context.Context, ws ids.WorkspaceID) (bool, error) {
 	verbs, ok := f.verbs()
 	if !ok {
-		return false, fmt.Errorf("claude-repld: a merge tab's agent was interrupted before the workspace verbs existed")
+		return false, fmt.Errorf("agent-repld: a merge tab's agent was interrupted before the workspace verbs existed")
 	}
 	out, err := verbs.Interrupt(ctx, ws, workspace.InterruptTarget{Turn: true}, true)
 	if err != nil {
