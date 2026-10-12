@@ -123,6 +123,9 @@ would abort the very branch a test is asserting."
     ("PlanRollback" agent-repl-rpc-plan-rollback
      agent-repl-wire-encode-plan-rollback-request
      agent-repl-wire-decode-plan-rollback-response)
+    ("ListRollbackPrompts" agent-repl-rpc-list-rollback-prompts
+     agent-repl-wire-encode-list-rollback-prompts-request
+     agent-repl-wire-decode-list-rollback-prompts-response)
     ("RollBack" agent-repl-rpc-roll-back
      agent-repl-wire-encode-roll-back-request
      agent-repl-wire-decode-roll-back-response)

@@ -67,6 +67,9 @@
 (declare-function agent-repl-wire--decode-bool "agent-repl-wire-common" (message-name field object))
 (declare-function agent-repl-wire--decode-int64 "agent-repl-wire-common" (message-name field object))
 (declare-function agent-repl-wire--decode-uint32 "agent-repl-wire-common" (message-name field object))
+(declare-function agent-repl-wire--decode-optional-int64 "agent-repl-wire-common" (message-name field object))
+(declare-function agent-repl-wire--decode-optional-uint64 "agent-repl-wire-common" (message-name field object))
+(declare-function agent-repl-wire--decode-repeated "agent-repl-wire-common" (message-name field object decoder))
 (declare-function agent-repl-wire--decode-optional-string "agent-repl-wire-common" (message-name field object))
 (declare-function agent-repl-wire--decode-optional-message "agent-repl-wire-common" (message-name field object decoder))
 (declare-function agent-repl-wire--decode-message "agent-repl-wire-common" (message-name field object decoder))
@@ -4029,10 +4032,36 @@ COUNT is how many detached agents the stop reached."
     (agent-repl-wire-verbs--check-keys message json '(count))
     (list :count (agent-repl-wire--decode-int64 message 'count json))))
 
+(defun agent-repl-wire-decode-interrupt-nothing-running-rollback-immediate (json)
+  "Decode InterruptNothingRunningRollbackImmediate from JSON into (:token TOKEN).
+TOKEN is a rollback plan's opaque token, handed to RollBack unchanged."
+  (let ((message "InterruptNothingRunningRollbackImmediate"))
+    (agent-repl-wire-verbs--check-keys message json '(token))
+    (list :token (agent-repl-wire-verbs--decode-required-message
+                  message 'token json #'agent-repl-wire-decode-rollback-token))))
+
+(defun agent-repl-wire-decode-interrupt-nothing-running-rollback (json)
+  "Decode InterruptNothingRunningRollback from JSON into (:arm ARM :value V).
+ARM is `:immediate' (V the token plist) or `:choose' (V nil)."
+  (let ((message "InterruptNothingRunningRollback"))
+    (agent-repl-wire-verbs--check-keys message json '(immediate choose))
+    (agent-repl-wire-verbs--decode-oneof
+     message "offer" json
+     (list (list 'immediate :immediate
+                 #'agent-repl-wire-decode-interrupt-nothing-running-rollback-immediate)
+           (list 'choose :choose
+                 (agent-repl-wire-verbs--empty-arm "InterruptNothingRunningRollbackChoose"))))))
+
 (defun agent-repl-wire-decode-interrupt-nothing-running (json)
-  "Decode InterruptNothingRunning from JSON.  Empty: nothing was running -- an
-ANSWER (a stop that found the session already quiet), never a failure."
-  (agent-repl-wire-verbs--decode-empty "InterruptNothingRunning" json))
+  "Decode InterruptNothingRunning from JSON into (:rollback OFFER-or-nil).
+Nothing was running -- an ANSWER (a stop that found the session already
+quiet), never a failure.  OFFER is what rolling the latest prompt back
+offers (the stop key's second press), nil when no prompt can be."
+  (let ((message "InterruptNothingRunning"))
+    (agent-repl-wire-verbs--check-keys message json '(rollback))
+    (list :rollback (agent-repl-wire-verbs--decode-optional-message
+                     message 'rollback json
+                     #'agent-repl-wire-decode-interrupt-nothing-running-rollback))))
 
 (defun agent-repl-wire-decode-interrupt-success (json)
   "Decode InterruptSuccess from JSON into (:arm ARM :value V).
@@ -4351,23 +4380,30 @@ VALUE is (:arm KEYWORD :value nil), KEYWORD `:keep-files' or
          (list :restore-files 'restoreFiles #'agent-repl-wire-encode-plan-rollback-empty-files))))
 
 (defun agent-repl-wire-encode-plan-rollback-request (request)
-  "Encode PlanRollbackRequest from plist REQUEST (:workspace REF :files FILES).
-Both are required; an incomplete request errors here rather than reaching
-the wire."
-  (let ((message "PlanRollbackRequest"))
-    (list (cons 'workspace
-                (agent-repl-wire-encode-workspace-ref
-                 (agent-repl-wire-verbs--require message "workspace"
-                                                  (plist-get request :workspace))))
-          (agent-repl-wire-encode-plan-rollback-request-files
-           (agent-repl-wire-verbs--require message "files" (plist-get request :files))))))
+  "Encode PlanRollbackRequest from plist REQUEST.
+\(:workspace REF :files FILES :prompt FEEDID-or-nil).  REF and FILES are
+required; an incomplete request errors here rather than reaching the wire.
+PROMPT names the prompt to roll back to, echoed exactly as
+ListRollbackPrompts served it; nil leaves it unset (the selected prompt,
+else the latest)."
+  (let ((message "PlanRollbackRequest")
+        (prompt (plist-get request :prompt)))
+    (append
+     (list (cons 'workspace
+                 (agent-repl-wire-encode-workspace-ref
+                  (agent-repl-wire-verbs--require message "workspace"
+                                                   (plist-get request :workspace))))
+           (agent-repl-wire-encode-plan-rollback-request-files
+            (agent-repl-wire-verbs--require message "files" (plist-get request :files))))
+     (when prompt
+       (list (cons 'prompt (agent-repl-wire-encode-feed-id prompt)))))))
 
 (defun agent-repl-wire-decode-rollback-plan-target (json)
   "Decode RollbackPlanTarget from JSON into a plist.
-\(:chosen ARM :excerpt STRING :prompts-dropped N), ARM `:selected' or
-`:latest'; exactly one is set."
+\(:chosen ARM :excerpt STRING :prompts-dropped N), ARM `:selected',
+`:latest' or `:named'; exactly one is set."
   (let ((message "RollbackPlanTarget"))
-    (agent-repl-wire-verbs--check-keys message json '(selected latest excerpt promptsDropped))
+    (agent-repl-wire-verbs--check-keys message json '(selected latest named excerpt promptsDropped))
     (list :chosen (plist-get
                    (agent-repl-wire-verbs--decode-oneof
                     message "chosen" json
@@ -4376,7 +4412,10 @@ the wire."
                                              "RollbackPlanTargetSelected" v)))
                           (list 'latest :latest
                                 (lambda (v) (agent-repl-wire-verbs--decode-empty
-                                             "RollbackPlanTargetLatest" v)))))
+                                             "RollbackPlanTargetLatest" v)))
+                          (list 'named :named
+                                (lambda (v) (agent-repl-wire-verbs--decode-empty
+                                             "RollbackPlanTargetNamed" v)))))
                    :arm)
           :excerpt (agent-repl-wire-verbs--decode-string message 'excerpt json)
           :prompts-dropped (agent-repl-wire--decode-uint32 message 'promptsDropped json))))
@@ -4485,14 +4524,26 @@ ARM is `:plan' (V the plan plist) or `:nothing-to-roll-back' (V nil)."
         (list 'notYetAdopted :not-yet-adopted
               (agent-repl-wire-verbs--empty-arm (concat prefix "NotYetAdopted")))))
 
+(defun agent-repl-wire-decode-plan-rollback-prompt-not-reachable (json)
+  "Decode PlanRollbackPromptNotReachable from JSON into (:prompt FEEDID).
+The prompt the request named, which a rollback can no longer reach."
+  (let ((message "PlanRollbackPromptNotReachable"))
+    (agent-repl-wire-verbs--check-keys message json '(prompt))
+    (list :prompt (agent-repl-wire-verbs--decode-required-message
+                   message 'prompt json #'agent-repl-wire-decode-feed-id))))
+
 (defun agent-repl-wire-decode-plan-rollback-error (json)
   "Decode PlanRollbackError from JSON into (:cause (:arm ARM :value V))."
   (let ((message "PlanRollbackError"))
     (agent-repl-wire-verbs--check-keys
-     message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted))
+     message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted
+                    promptNotReachable))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
-           message "cause" json (agent-repl-wire-verbs--handover-arms "PlanRollback")))))
+           message "cause" json
+           (append (agent-repl-wire-verbs--handover-arms "PlanRollback")
+                   (list (list 'promptNotReachable :prompt-not-reachable
+                               #'agent-repl-wire-decode-plan-rollback-prompt-not-reachable)))))))
 
 (defun agent-repl-wire-decode-plan-rollback-response (json)
   "Decode PlanRollbackResponse from JSON into (:arm ARM :value V)."
@@ -4500,6 +4551,56 @@ ARM is `:plan' (V the plan plist) or `:nothing-to-roll-back' (V nil)."
    "PlanRollbackResponse" json
    #'agent-repl-wire-decode-plan-rollback-success
    #'agent-repl-wire-decode-plan-rollback-error))
+
+;;;; ---- ListRollbackPrompts --------------------------------------------
+;;
+;; The prompts a rollback can reach, newest first, for the reader to choose
+;; among.  See endpoint_list_rollback_prompts.proto.
+
+(defun agent-repl-wire-encode-list-rollback-prompts-request (request)
+  "Encode ListRollbackPromptsRequest from plist REQUEST (:workspace REF).
+REF is required."
+  (list (cons 'workspace
+              (agent-repl-wire-encode-workspace-ref
+               (agent-repl-wire-verbs--require "ListRollbackPromptsRequest" "workspace"
+                                                (plist-get request :workspace))))))
+
+(defun agent-repl-wire-decode-rollback-prompt-entry (json)
+  "Decode RollbackPromptEntry from JSON into a plist.
+\(:prompt FEEDID :excerpt STRING :sent-at-ms MS-or-nil
+:context-tokens N-or-nil).  PROMPT is required: it is what a pick hands
+back to PlanRollback.  The two figures are nil when unset, never zero."
+  (let ((message "RollbackPromptEntry"))
+    (agent-repl-wire-verbs--check-keys message json '(prompt excerpt sentAtMs contextTokens))
+    (list :prompt (agent-repl-wire-verbs--decode-required-message
+                   message 'prompt json #'agent-repl-wire-decode-feed-id)
+          :excerpt (agent-repl-wire-verbs--decode-string message 'excerpt json)
+          :sent-at-ms (agent-repl-wire--decode-optional-int64 message 'sentAtMs json)
+          :context-tokens (agent-repl-wire--decode-optional-uint64 message 'contextTokens json))))
+
+(defun agent-repl-wire-decode-list-rollback-prompts-success (json)
+  "Decode ListRollbackPromptsSuccess from JSON into (:prompts ENTRIES).
+ENTRIES are newest first, possibly none."
+  (let ((message "ListRollbackPromptsSuccess"))
+    (agent-repl-wire-verbs--check-keys message json '(prompts))
+    (list :prompts (agent-repl-wire--decode-repeated
+                    message 'prompts json #'agent-repl-wire-decode-rollback-prompt-entry))))
+
+(defun agent-repl-wire-decode-list-rollback-prompts-error (json)
+  "Decode ListRollbackPromptsError from JSON into (:cause (:arm ARM :value V))."
+  (let ((message "ListRollbackPromptsError"))
+    (agent-repl-wire-verbs--check-keys
+     message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted))
+    (list :cause
+          (agent-repl-wire-verbs--decode-oneof
+           message "cause" json (agent-repl-wire-verbs--handover-arms "ListRollbackPrompts")))))
+
+(defun agent-repl-wire-decode-list-rollback-prompts-response (json)
+  "Decode ListRollbackPromptsResponse from JSON into (:arm ARM :value V)."
+  (agent-repl-wire-verbs--decode-result
+   "ListRollbackPromptsResponse" json
+   #'agent-repl-wire-decode-list-rollback-prompts-success
+   #'agent-repl-wire-decode-list-rollback-prompts-error))
 
 ;;;; ---- RollBack -------------------------------------------------------
 ;;

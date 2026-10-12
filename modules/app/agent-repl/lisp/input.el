@@ -113,6 +113,8 @@
 (declare-function agent-repl-rpc-select-feed-row "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-plan-rollback-sync "agent-repl-rpc" (conn request &optional timeout))
 (declare-function agent-repl-rpc-roll-back "agent-repl-rpc" (conn request &rest keys))
+(declare-function agent-repl-rpc-list-rollback-prompts-sync "agent-repl-rpc" (conn request &optional timeout))
+(declare-function agent-repl--format-summary-relative-time "agent-repl-prompt-summary" (sent-at &optional now))
 (declare-function agent-repl--image-insert-marker "clipboard-image" (path &optional ws))
 (declare-function agent-repl-held-edit-active-p "held-edit" (ws))
 (declare-function agent-repl-held-edit-commit "held-edit" (ws said snapshot))
@@ -803,12 +805,13 @@ newest it wraps to the oldest."
     (:not-yet-adopted . "the daemon is still taking this workspace over; press the key again")
     (:plan-stale . "the conversation changed; press the key again")
     (:no-session . "there is no running session to roll back")
+    (:prompt-not-reachable . "that prompt can no longer be rolled back to; press the key again")
     (:prompt-not-recorded . "the conversation holds no record of that prompt")
     (:first-prompt . "the first prompt can't be rolled back; /clear starts over")
     (:unseen-prompt . "a later prompt the feed never showed would be dropped")
     (:vendor-refused . "the vendor refused")
     (:files-not-restorable . "files can't be restored to that prompt"))
-  "Each PlanRollback / RollBack refusal arm, in plain words.")
+  "Each PlanRollback / RollBack / ListRollbackPrompts refusal arm, in plain words.")
 
 (defun agent-repl--input-rollback-refusal-text (cause)
   "Return the composer flash for the refusal CAUSE, `(:arm ARM :value V)'.
@@ -850,9 +853,10 @@ They come in the order the confirmation lists them."
   (let* ((target (plist-get plan :target))
          (dropped (plist-get target :prompts-dropped))
          (head (format "%s \"%s\"%s."
-                       (if (eq (plist-get target :chosen) :selected)
-                           "Roll back to before the selected prompt"
-                         "Cancel the latest prompt")
+                       (pcase (plist-get target :chosen)
+                         (:selected "Roll back to before the selected prompt")
+                         (:named "Roll back to before the chosen prompt")
+                         (_ "Cancel the latest prompt"))
                        (plist-get target :excerpt)
                        (if (> dropped 1)
                            (format " (%d prompts are dropped)" dropped)
@@ -866,7 +870,7 @@ They come in the order the confirmation lists them."
             " Roll back? ")))
 
 (defun agent-repl--input-rollback-refused (ws verb cause)
-  "Log and flash WS's VERB (`plan' or `roll-back') refusal CAUSE.
+  "Log and flash WS's VERB (`plan', `roll-back' or `list') refusal CAUSE.
 A handover arm is routed to host.el's handover walk (logged at INFO there)
 instead of logged as a refusal; the flash stands either way, because the
 rollback did not happen and the key must be pressed again."
@@ -911,11 +915,10 @@ WARN and flashed, never silently lost."
                                (plist-get restored :files) "file" "files"))
                     "rollback: done"))))
 
-(defun agent-repl--input-rollback-perform (ws conn ref plan)
-  "Send RollBack for WS on CONN with PLAN's token, echoed verbatim."
-  (agent-repl--info ws "elisp.input.rollback-confirmed ws=%s" ws)
+(defun agent-repl--input-rollback-perform (ws conn ref token)
+  "Send RollBack for WS on CONN with the plan TOKEN, echoed verbatim."
   (agent-repl-rpc-roll-back
-   conn (list :workspace ref :token (plist-get plan :token))
+   conn (list :workspace ref :token token)
    :on-response
    (lambda (response)
      (pcase (plist-get response :arm)
@@ -927,26 +930,42 @@ WARN and flashed, never silently lost."
    :on-failure
    (lambda (detail) (agent-repl--input-rollback-failed ws "roll-back" detail))))
 
-(defun agent-repl--input-rollback (ws files)
-  "Plan a rollback of WS's conversation, confirm it, and perform it.
-FILES is `:keep-files' or `:restore-files'.  The plan is asked for
-synchronously, so the confirmation is read in the command loop of the key
-that asked for it."
+(defun agent-repl--input-rollback-endpoints (ws context)
+  "Return WS's (REF . CONN) for a rollback rpc, or nil after saying why not.
+CONTEXT is the request's own fields, logged when the workspace is not
+ready or no daemon connection stands; the composer flashes either way.
+The one guard every rollback rpc sends behind."
   (let ((ref (agent-repl-host-ref ws))
         (conn (agent-repl-host-conn-or-primary ws)))
     (cond
      ((null ref)
-      (agent-repl--warn ws "elisp.input.rollback-no-ref ws=%s files=%S" ws files)
-      (agent-repl--input-flash ws "rollback: workspace not ready"))
+      (agent-repl--warn ws "elisp.input.rollback-no-ref ws=%s context=%S" ws context)
+      (agent-repl--input-flash ws "rollback: workspace not ready")
+      nil)
      ((null conn)
-      (agent-repl--warn ws "elisp.input.rollback-no-conn ws=%s files=%S" ws files)
-      (agent-repl--input-flash ws "rollback: no daemon connection"))
-     (t
-      (agent-repl--info ws "elisp.input.rollback-plan ws=%s files=%S" ws files)
+      (agent-repl--warn ws "elisp.input.rollback-no-conn ws=%s context=%S" ws context)
+      (agent-repl--input-flash ws "rollback: no daemon connection")
+      nil)
+     (t (cons ref conn)))))
+
+(defun agent-repl--input-rollback (ws files &optional prompt)
+  "Plan a rollback of WS's conversation, confirm it, and perform it.
+FILES is `:keep-files' or `:restore-files'.  PROMPT, a FeedId plist as
+ListRollbackPrompts served it, names the prompt to roll back to; nil
+plans the selected prompt, else the latest.  The plan is asked for
+synchronously, so the confirmation is read in the command loop of the key
+that asked for it."
+  (when-let* ((endpoints (agent-repl--input-rollback-endpoints
+                          ws (list :files files :prompt prompt))))
+    (let ((ref (car endpoints))
+          (conn (cdr endpoints)))
+      (agent-repl--info ws "elisp.input.rollback-plan ws=%s files=%S prompt=%S"
+                        ws files (plist-get prompt :value))
       (let ((response
              (condition-case err
                  (agent-repl-rpc-plan-rollback-sync
-                  conn (list :workspace ref :files (list :arm files :value nil)))
+                  conn (append (list :workspace ref :files (list :arm files :value nil))
+                               (when prompt (list :prompt prompt))))
                (agent-repl-connect-error
                 (agent-repl--input-rollback-failed ws "plan" (cdr err))
                 nil))))
@@ -961,7 +980,9 @@ that asked for it."
                  (:plan
                   (let ((plan (plist-get outcome :value)))
                     (if (y-or-n-p (agent-repl--input-rollback-confirmation plan))
-                        (agent-repl--input-rollback-perform ws conn ref plan)
+                        (progn
+                          (agent-repl--info ws "elisp.input.rollback-confirmed ws=%s" ws)
+                          (agent-repl--input-rollback-perform ws conn ref (plist-get plan :token)))
                       (agent-repl--info ws "elisp.input.rollback-declined ws=%s" ws)
                       (message "rollback: cancelled"))))
                  (other
@@ -970,7 +991,101 @@ that asked for it."
             (:error (agent-repl--input-rollback-refused
                      ws "plan" (plist-get (plist-get response :value) :cause)))
             (other (agent-repl--error ws "elisp.input.rollback-unknown-arm ws=%s verb=plan arm=%S"
-                                      ws other)))))))))
+                                      ws other))))))))
+
+;;;; ---- The stop key's second press (`C-c C-k' with nothing running) -----
+;;
+;; A turn stop that finds nothing running is the stop key pressed AGAIN: the
+;; daemon's `nothing_running' answer carries what rolling the latest prompt
+;; back offers.  With nothing after the prompt in the feed, the prompt is
+;; rolled back AT ONCE, with no confirmation: nothing a reader has seen is
+;; dropped, and the daemon minted the plan's token itself, refusing it as
+;; stale if a bubble lands first.  With a response bubble or a card after
+;; it, the reader picks which prompt to roll back to from a completion list,
+;; newest first, and that rollback is confirmed as any other.
+
+(defun agent-repl--input-rollback-offer (ws offer)
+  "Act on the stop key's rollback OFFER for WS, `(:arm ARM :value V)'.
+ARM `:immediate' rolls the latest prompt back with V's token, at once;
+`:choose' opens the picker."
+  (pcase (plist-get offer :arm)
+    (:immediate
+     (when-let* ((endpoints (agent-repl--input-rollback-endpoints ws (list :offer :immediate))))
+       (agent-repl--info ws "elisp.input.rollback-immediate ws=%s" ws)
+       (agent-repl--input-rollback-perform
+        ws (cdr endpoints) (car endpoints) (plist-get (plist-get offer :value) :token))))
+    (:choose
+     (agent-repl--info ws "elisp.input.rollback-choose ws=%s" ws)
+     (agent-repl--input-rollback-choose ws))
+    (other
+     (agent-repl--error ws "elisp.input.rollback-unknown-offer ws=%s offer=%S" ws other))))
+
+(defun agent-repl--input-rollback-tokens-text (tokens)
+  "Return TOKENS, a context size, as the picker's short column text.
+nil (no figure stands) is a dash, never a zero."
+  (cond
+   ((null tokens) "-")
+   ((< tokens 1000) (format "%d" tokens))
+   ((< tokens 1000000) (format "%dk" (round tokens 1000.0)))
+   (t (format "%.1fM" (/ tokens 1000000.0)))))
+
+(defun agent-repl--input-rollback-candidate (index entry now)
+  "Return the picker line for ENTRY, the INDEXth prompt (1 is the newest).
+Columns: the index (keeping lines distinct), time since the prompt was
+sent (as of NOW, a float time), the context size before it, and its
+opening words."
+  (let ((sent (plist-get entry :sent-at-ms)))
+    (format "%2d  %-12s  %6s  %s"
+            index
+            (or (and sent (agent-repl--format-summary-relative-time (/ sent 1000.0) now)) "-")
+            (agent-repl--input-rollback-tokens-text (plist-get entry :context-tokens))
+            (plist-get entry :excerpt))))
+
+(defun agent-repl--input-rollback-read-entry (entries)
+  "Read one of ENTRIES (newest first) with `completing-read'; return it.
+The list keeps the daemon's order, newest at the top, whatever sorting the
+completion backend would otherwise apply."
+  (let* ((now (float-time))
+         (index 0)
+         (lines (mapcar (lambda (entry)
+                          (cons (agent-repl--input-rollback-candidate (cl-incf index) entry now)
+                                entry))
+                        entries))
+         (table (lambda (string predicate action)
+                  (if (eq action 'metadata)
+                      '(metadata (display-sort-function . identity)
+                                 (cycle-sort-function . identity))
+                    (complete-with-action action (mapcar #'car lines) string predicate))))
+         (choice (completing-read "Roll back to before (sent, context): " table nil t)))
+    (cdr (assoc choice lines))))
+
+(defun agent-repl--input-rollback-choose (ws)
+  "List the prompts a rollback of WS can reach, read one, and roll back to it.
+The list is asked for synchronously, so the pick is read in the command
+loop of the key that asked for it; the rollback is then planned by naming
+the pick and confirmed as any other."
+  (when-let* ((endpoints (agent-repl--input-rollback-endpoints ws (list :offer :choose))))
+    (let ((response
+           (condition-case err
+               (agent-repl-rpc-list-rollback-prompts-sync (cdr endpoints) (list :workspace (car endpoints)))
+             (agent-repl-connect-error
+              (agent-repl--input-rollback-failed ws "list" (cdr err))
+              nil))))
+      (when response
+        (pcase (plist-get response :arm)
+          (:success
+           (let ((entries (plist-get (plist-get response :value) :prompts)))
+             (agent-repl--info ws "elisp.input.rollback-listed ws=%s prompts=%d" ws (length entries))
+             (if (null entries)
+                 (agent-repl--input-flash ws "rollback: no prompt to roll back to")
+               (let ((entry (agent-repl--input-rollback-read-entry entries)))
+                 (agent-repl--info ws "elisp.input.rollback-chosen ws=%s prompt=%S"
+                                   ws (plist-get (plist-get entry :prompt) :value))
+                 (agent-repl--input-rollback ws :keep-files (plist-get entry :prompt))))))
+          (:error (agent-repl--input-rollback-refused
+                   ws "list" (plist-get (plist-get response :value) :cause)))
+          (other (agent-repl--error ws "elisp.input.rollback-unknown-arm ws=%s verb=list arm=%S"
+                                    ws other)))))))
 
 (defun agent-repl-rollback-keep-files ()
   "Roll the conversation back to before the selected prompt, keeping files.
