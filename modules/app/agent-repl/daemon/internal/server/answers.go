@@ -165,9 +165,17 @@ func (s *server) Interrupt(
 	success := &agentreplv1.InterruptSuccess{}
 	switch {
 	case outcome.NothingRunning:
-		success.Outcome = &agentreplv1.InterruptSuccess_NothingRunning{
-			NothingRunning: &agentreplv1.InterruptNothingRunning{},
+		nothing := &agentreplv1.InterruptNothingRunning{}
+		if target.Turn {
+			// A TURN STOP WITH NOTHING RUNNING IS THE STOP KEY'S SECOND PRESS:
+			// it offers rolling the latest prompt back.
+			offer, err := s.interruptRollbackOffer(ctx, subject.Record.ID, subject.Log)
+			if err != nil {
+				return nil, fail(subject.Log, rpc, err)
+			}
+			nothing.Rollback = offer
 		}
+		success.Outcome = &agentreplv1.InterruptSuccess_NothingRunning{NothingRunning: nothing}
 	case outcome.Turn:
 		success.Outcome = &agentreplv1.InterruptSuccess_InterruptedTurn{
 			InterruptedTurn: &agentreplv1.InterruptedTurn{},
