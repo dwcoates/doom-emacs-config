@@ -1,0 +1,610 @@
+// profile-report.go summarizes one runtime profiling session for
+// bin/profile-agent-repl.sh: per-process CPU and memory from the sampler, the
+// hottest frames of every runtime's profile, and the user-visible latencies
+// read off real INFO log edges, ranked by how far each is over the budget a
+// user perceives for that interaction.
+//
+// Usage:
+//
+//	profile-report --session DIR [--logs FILE] [--startup SINCE]
+//
+// --logs is the JSONL `bin/logs.sh --all --json` printed for the session's
+// window ("-" is stdin; absent is no latency table). --startup adds the
+// startup assessment: launch to every workspace loaded, then every switch.
+package main
+
+import (
+	"bufio"
+	"encoding/json"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+)
+
+// budget is how long a user can wait on an interaction before it is felt.
+type budget struct {
+	name   string
+	limit  time.Duration
+	reason string
+}
+
+// The perceptibility budgets, one per interaction the latency table measures.
+var budgets = map[string]budget{
+	"prompt_echo":         {"prompt echo (submit to the prompt drawn)", 100 * time.Millisecond, "a keystroke's echo; anything past ~100ms reads as lag"},
+	"switch_repeat":       {"switch to a shown workspace (keystroke to view visible)", 100 * time.Millisecond, "a navigation the user is waiting on"},
+	"switch_first":        {"first switch to a never-shown workspace (keystroke to page painted)", 100 * time.Millisecond, "the same navigation; a blank page is the worst case of it"},
+	"page_boot":           {"page boot to first feed paint", 300 * time.Millisecond, "the page is on screen and empty meanwhile"},
+	"workspace_open":      {"workspace open (tab opened to session up)", 300 * time.Millisecond, "the workspace is visible but not usable meanwhile"},
+	"prompt_first_output": {"prompt to first response text (vendor-bound)", time.Second, "the vendor's first token dominates; our share is the rest"},
+}
+
+// record is the part of a log record the latency table reads.
+type record struct {
+	Timestamp   string         `json:"timestamp"`
+	Runtime     string         `json:"runtime"`
+	Operation   string         `json:"operation"`
+	Message     string         `json:"message"`
+	WorkspaceID string         `json:"workspace_id"`
+	Context     map[string]any `json:"context"`
+	at          time.Time
+}
+
+// sample is one sampler tick for one process.
+type sample struct {
+	T     float64 `json:"t"`
+	PID   int     `json:"pid"`
+	CPU   float64 `json:"cpu_s"`
+	RSSKB int64   `json:"rss_kb"`
+	Name  string  `json:"name"`
+}
+
+func main() {
+	session := flag.String("session", "", "the session directory")
+	logs := flag.String("logs", "", "the session's logs as JSONL (- is stdin)")
+	startup := flag.String("startup", "", "RFC3339 instant the editor was launched at: add the startup assessment")
+	flag.Parse()
+	if *session == "" {
+		fail(errors.New("--session is required"))
+	}
+	out := bufio.NewWriter(os.Stdout)
+	defer out.Flush()
+	if err := report(out, *session, *logs, *startup); err != nil {
+		out.Flush()
+		fail(err)
+	}
+}
+
+func fail(err error) {
+	fmt.Fprintln(os.Stderr, "profile-report:", err)
+	os.Exit(1)
+}
+
+func report(w io.Writer, session, logs, startup string) error {
+	fmt.Fprintf(w, "# Profile session %s\n\n", filepath.Base(session))
+	if err := processTable(w, session); err != nil {
+		return err
+	}
+	if err := frames(w, session); err != nil {
+		return err
+	}
+	if logs == "" {
+		return nil
+	}
+	records, err := readRecords(logs)
+	if err != nil {
+		return err
+	}
+	latencyTable(w, records)
+	if startup != "" {
+		since, err := time.Parse(time.RFC3339, startup)
+		if err != nil {
+			return fmt.Errorf("--startup: %w", err)
+		}
+		startupTable(w, records, since)
+	}
+	return nil
+}
+
+// processTable prints CPU-seconds and RSS per sampled process.
+func processTable(w io.Writer, session string) error {
+	f, err := os.Open(filepath.Join(session, "samples.jsonl"))
+	if errors.Is(err, os.ErrNotExist) {
+		fmt.Fprintln(w, "## Processes\n\nNo samples were recorded.")
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("open the samples: %w", err)
+	}
+	defer f.Close()
+	type acc struct {
+		name               string
+		first, last        float64
+		seen               int
+		rssSum, rssPeak    int64
+		firstT, lastT      float64
+		bornDuringSampling bool
+	}
+	byPID := map[int]*acc{}
+	var firstTick float64
+	scanner := bufio.NewScanner(f)
+	line := 0
+	for scanner.Scan() {
+		line++
+		var s sample
+		if err := json.Unmarshal(scanner.Bytes(), &s); err != nil {
+			return fmt.Errorf("samples.jsonl line %d: %w", line, err)
+		}
+		if firstTick == 0 {
+			firstTick = s.T
+		}
+		a, ok := byPID[s.PID]
+		if !ok {
+			a = &acc{name: s.Name, first: s.CPU, firstT: s.T, bornDuringSampling: s.T > firstTick}
+			byPID[s.PID] = a
+		}
+		a.last, a.lastT = s.CPU, s.T
+		a.seen++
+		a.rssSum += s.RSSKB
+		if s.RSSKB > a.rssPeak {
+			a.rssPeak = s.RSSKB
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("read the samples: %w", err)
+	}
+	type row struct {
+		name          string
+		pid           int
+		cpu           float64
+		avgMB, peakMB float64
+		seconds       float64
+	}
+	var rows []row
+	byName := map[string]float64{}
+	for pid, a := range byPID {
+		cpu := a.last - a.first
+		if a.bornDuringSampling {
+			cpu = a.last
+		}
+		r := row{a.name, pid, cpu, float64(a.rssSum) / float64(a.seen) / 1024, float64(a.rssPeak) / 1024, a.lastT - a.firstT}
+		rows = append(rows, r)
+		byName[a.name] += cpu
+	}
+	sort.Slice(rows, func(i, j int) bool { return rows[i].cpu > rows[j].cpu })
+	fmt.Fprintln(w, "## Processes (by CPU-seconds in the session)")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "| process | pid | CPU-s | avg RSS MB | peak RSS MB | seen s |")
+	fmt.Fprintln(w, "|---|---|---|---|---|---|")
+	for _, r := range rows {
+		fmt.Fprintf(w, "| %s | %d | %.2f | %.0f | %.0f | %.0f |\n", r.name, r.pid, r.cpu, r.avgMB, r.peakMB, r.seconds)
+	}
+	names := make([]string, 0, len(byName))
+	for n := range byName {
+		names = append(names, n)
+	}
+	sort.Slice(names, func(i, j int) bool { return byName[names[i]] > byName[names[j]] })
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "| runtime | CPU-s |")
+	fmt.Fprintln(w, "|---|---|")
+	for _, n := range names {
+		fmt.Fprintf(w, "| %s | %.2f |\n", n, byName[n])
+	}
+	fmt.Fprintln(w)
+	return nil
+}
+
+// frames prints the hottest frames of every profile in the session.
+func frames(w io.Writer, session string) error {
+	entries, err := os.ReadDir(session)
+	if err != nil {
+		return fmt.Errorf("read the session: %w", err)
+	}
+	fmt.Fprintln(w, "## Hottest frames per runtime")
+	fmt.Fprintln(w)
+	for _, e := range entries {
+		path := filepath.Join(session, e.Name())
+		var text string
+		switch {
+		case strings.HasSuffix(e.Name(), ".pprof"):
+			out, err := exec.Command("go", "tool", "pprof", "-top", "-nodecount=12", path).CombinedOutput()
+			if err != nil {
+				return fmt.Errorf("go tool pprof %s: %w: %s", e.Name(), err, out)
+			}
+			text = string(out)
+		case strings.HasSuffix(e.Name(), ".cpuprofile"):
+			text, err = cpuprofileTop(path, 12)
+		case strings.HasSuffix(e.Name(), ".heapprofile"):
+			text, err = heapprofileTop(path, 12)
+		case strings.HasSuffix(e.Name(), ".txt"):
+			text, err = head(path, 15)
+		default:
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(w, "### %s\n\n```\n%s\n```\n\n", e.Name(), strings.TrimRight(text, "\n"))
+	}
+	return nil
+}
+
+func head(path string, n int) (string, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", path, err)
+	}
+	lines := strings.SplitN(string(raw), "\n", n+1)
+	if len(lines) > n {
+		lines = lines[:n]
+	}
+	return strings.Join(lines, "\n"), nil
+}
+
+type callFrame struct {
+	FunctionName string `json:"functionName"`
+	URL          string `json:"url"`
+	LineNumber   int    `json:"lineNumber"`
+}
+
+func (c callFrame) label() string {
+	name := c.FunctionName
+	if name == "" {
+		name = "(anonymous)"
+	}
+	return fmt.Sprintf("%s %s:%d", name, filepath.Base(c.URL), c.LineNumber+1)
+}
+
+// cpuprofileTop answers a V8 CPU profile's functions by self samples.
+func cpuprofileTop(path string, n int) (string, error) {
+	var p struct {
+		Nodes []struct {
+			CallFrame callFrame `json:"callFrame"`
+			HitCount  int       `json:"hitCount"`
+		} `json:"nodes"`
+	}
+	if err := readJSON(path, &p); err != nil {
+		return "", err
+	}
+	self := map[string]int{}
+	total := 0
+	for _, node := range p.Nodes {
+		self[node.CallFrame.label()] += node.HitCount
+		total += node.HitCount
+	}
+	return topLines(self, total, n, "samples"), nil
+}
+
+// heapprofileTop answers a V8 sampling heap profile's functions by self size.
+func heapprofileTop(path string, n int) (string, error) {
+	type heapNode struct {
+		CallFrame callFrame  `json:"callFrame"`
+		SelfSize  int        `json:"selfSize"`
+		Children  []heapNode `json:"children"`
+	}
+	var p struct {
+		Head heapNode `json:"head"`
+	}
+	if err := readJSON(path, &p); err != nil {
+		return "", err
+	}
+	self := map[string]int{}
+	total := 0
+	var walk func(heapNode)
+	walk = func(h heapNode) {
+		self[h.CallFrame.label()] += h.SelfSize
+		total += h.SelfSize
+		for _, c := range h.Children {
+			walk(c)
+		}
+	}
+	walk(p.Head)
+	return topLines(self, total, n, "bytes"), nil
+}
+
+func topLines(self map[string]int, total, n int, unit string) string {
+	keys := make([]string, 0, len(self))
+	for k, v := range self {
+		if v > 0 {
+			keys = append(keys, k)
+		}
+	}
+	sort.Slice(keys, func(i, j int) bool { return self[keys[i]] > self[keys[j]] })
+	if len(keys) > n {
+		keys = keys[:n]
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "total %d %s\n", total, unit)
+	for _, k := range keys {
+		pct := 0.0
+		if total > 0 {
+			pct = 100 * float64(self[k]) / float64(total)
+		}
+		fmt.Fprintf(&b, "%6.1f%%  %d  %s\n", pct, self[k], k)
+	}
+	return b.String()
+}
+
+func readJSON(path string, v any) error {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", path, err)
+	}
+	if err := json.Unmarshal(raw, v); err != nil {
+		return fmt.Errorf("parse %s: %w", path, err)
+	}
+	return nil
+}
+
+// readRecords reads the session's JSONL log records, in time order.
+func readRecords(path string) ([]record, error) {
+	var r io.Reader = os.Stdin
+	if path != "-" {
+		f, err := os.Open(path)
+		if err != nil {
+			return nil, fmt.Errorf("open the logs: %w", err)
+		}
+		defer f.Close()
+		r = f
+	}
+	var out []record
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 1<<20), 16<<20)
+	line := 0
+	for scanner.Scan() {
+		line++
+		var rec record
+		if err := json.Unmarshal(scanner.Bytes(), &rec); err != nil {
+			return nil, fmt.Errorf("logs line %d: %w", line, err)
+		}
+		at, err := time.Parse(time.RFC3339Nano, rec.Timestamp)
+		if err != nil {
+			return nil, fmt.Errorf("logs line %d: timestamp %q: %w", line, rec.Timestamp, err)
+		}
+		rec.at = at
+		out = append(out, rec)
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("read the logs: %w", err)
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].at.Before(out[j].at) })
+	return out, nil
+}
+
+// The edges the latency table pairs, by operation (or message prefix for
+// Emacs, whose operation is derived from its format string).
+func isEditorSwitch(r record) bool {
+	return r.Runtime == "emacs" && strings.HasPrefix(r.Message, "elisp.host.editor-switch ")
+}
+func isWebviewOnSwitch(r record) bool {
+	return r.Runtime == "emacs" && strings.HasPrefix(r.Message, "elisp.panels.webview-on-switch: ")
+}
+func isFeedPainted(r record) bool { return r.Runtime == "webapp" && r.Operation == "feed.page-placed" }
+func isPageBoot(r record) bool    { return r.Runtime == "webapp" && r.Operation == "main.boot" }
+func isTabOpen(r record) bool {
+	return r.Runtime == "emacs" && strings.HasPrefix(r.Message, "elisp.roster.tab-open: ")
+}
+func isSessionUp(r record) bool {
+	return r.Runtime == "daemon" && r.Operation == "daemon.workspace.bring_up" && r.Message == "the session is up"
+}
+func isSubmit(r record) bool {
+	return r.Runtime == "emacs" && strings.HasPrefix(r.Message, "elisp.input.submit ")
+}
+func isPromptDrawn(r record) bool {
+	return r.Runtime == "webapp" && r.Operation == "feed.draw-user-prompt"
+}
+func isFirstOutput(r record) bool {
+	return r.Runtime == "webapp" && (r.Operation == "feed.draw-text-block" || r.Operation == "feed.draw-response")
+}
+
+func connection(r record) string {
+	s, _ := r.Context["connection_id"].(string)
+	return s
+}
+
+// within bounds how far after its start an edge's end may be and still pair.
+const within = 30 * time.Second
+
+// nextFor answers the first record at or after index i satisfying match for
+// workspace ws inside the pairing window of start.
+func nextFor(records []record, i int, ws string, start time.Time, match func(record) bool) (record, bool) {
+	for j := i; j < len(records); j++ {
+		r := records[j]
+		if r.at.Sub(start) > within {
+			break
+		}
+		if r.WorkspaceID == ws && match(r) {
+			return r, true
+		}
+	}
+	return record{}, false
+}
+
+type latency struct {
+	kind      string
+	workspace string
+	at        time.Time
+	took      time.Duration
+}
+
+// pairLatencies pairs every interaction's start with its end edge.
+func pairLatencies(records []record) []latency {
+	var out []latency
+	for i, r := range records {
+		switch {
+		case isEditorSwitch(r):
+			shown, ok := nextFor(records, i+1, r.WorkspaceID, r.at, isWebviewOnSwitch)
+			if !ok {
+				continue
+			}
+			if strings.Contains(shown.Message, " view=first ") {
+				end := shown.at
+				if painted, ok := nextFor(records, i+1, r.WorkspaceID, r.at, isFeedPainted); ok && painted.at.After(end) {
+					end = painted.at
+				}
+				out = append(out, latency{"switch_first", r.WorkspaceID, r.at, end.Sub(r.at)})
+			} else {
+				out = append(out, latency{"switch_repeat", r.WorkspaceID, r.at, shown.at.Sub(r.at)})
+			}
+		case isPageBoot(r):
+			conn := connection(r)
+			for j := i + 1; j < len(records); j++ {
+				p := records[j]
+				if p.at.Sub(r.at) > within {
+					break
+				}
+				if isFeedPainted(p) && connection(p) == conn {
+					out = append(out, latency{"page_boot", r.WorkspaceID, r.at, p.at.Sub(r.at)})
+					break
+				}
+			}
+		case isTabOpen(r):
+			if up, ok := nextFor(records, i+1, r.WorkspaceID, r.at, isSessionUp); ok {
+				out = append(out, latency{"workspace_open", r.WorkspaceID, r.at, up.at.Sub(r.at)})
+			}
+		case isSubmit(r):
+			if drawn, ok := nextFor(records, i+1, r.WorkspaceID, r.at, isPromptDrawn); ok {
+				out = append(out, latency{"prompt_echo", r.WorkspaceID, r.at, drawn.at.Sub(r.at)})
+			}
+			if first, ok := nextFor(records, i+1, r.WorkspaceID, r.at, isFirstOutput); ok {
+				out = append(out, latency{"prompt_first_output", r.WorkspaceID, r.at, first.at.Sub(r.at)})
+			}
+		}
+	}
+	return out
+}
+
+func percentile(sorted []time.Duration, p float64) time.Duration {
+	if len(sorted) == 0 {
+		return 0
+	}
+	idx := int(p * float64(len(sorted)-1))
+	return sorted[idx]
+}
+
+// latencyTable prints each interaction's latencies ranked by how far its p90
+// is over budget.
+func latencyTable(w io.Writer, records []record) {
+	byKind := map[string][]time.Duration{}
+	for _, l := range pairLatencies(records) {
+		byKind[l.kind] = append(byKind[l.kind], l.took)
+	}
+	type row struct {
+		kind          string
+		n             int
+		p50, p90, max time.Duration
+		over          float64
+	}
+	var rows []row
+	for kind, ds := range byKind {
+		sort.Slice(ds, func(i, j int) bool { return ds[i] < ds[j] })
+		p90 := percentile(ds, 0.9)
+		rows = append(rows, row{kind, len(ds), percentile(ds, 0.5), p90, ds[len(ds)-1], float64(p90) / float64(budgets[kind].limit)})
+	}
+	sort.Slice(rows, func(i, j int) bool { return rows[i].over > rows[j].over })
+	fmt.Fprintln(w, "## User-visible latency (real log edges), worst over budget first")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "| interaction | budget | n | p50 | p90 | max | p90 / budget |")
+	fmt.Fprintln(w, "|---|---|---|---|---|---|---|")
+	for _, r := range rows {
+		b := budgets[r.kind]
+		fmt.Fprintf(w, "| %s | %s | %d | %s | %s | %s | %.1fx |\n", b.name, b.limit, r.n, ms(r.p50), ms(r.p90), ms(r.max), r.over)
+	}
+	var missing []string
+	for kind := range budgets {
+		if _, ok := byKind[kind]; !ok {
+			missing = append(missing, budgets[kind].name)
+		}
+	}
+	sort.Strings(missing)
+	if len(missing) > 0 {
+		fmt.Fprintf(w, "\nNot exercised in this session: %s.\n", strings.Join(missing, "; "))
+	}
+	fmt.Fprintln(w)
+}
+
+// startupTable prints the startup assessment: launch to each workspace's
+// session up and page painted, and every switch after.
+func startupTable(w io.Writer, records []record, since time.Time) {
+	fmt.Fprintf(w, "## Startup assessment from %s\n\n", since.Format(time.RFC3339))
+	var firstDaemon time.Time
+	up := map[string]time.Time{}
+	painted := map[string]time.Time{}
+	for _, r := range records {
+		if r.at.Before(since) {
+			continue
+		}
+		if r.Runtime == "daemon" && firstDaemon.IsZero() {
+			firstDaemon = r.at
+		}
+		if isSessionUp(r) {
+			if _, ok := up[r.WorkspaceID]; !ok {
+				up[r.WorkspaceID] = r.at
+			}
+		}
+		if isFeedPainted(r) {
+			if _, ok := painted[r.WorkspaceID]; !ok {
+				painted[r.WorkspaceID] = r.at
+			}
+		}
+	}
+	if firstDaemon.IsZero() {
+		fmt.Fprintln(w, "No daemon record after the launch instant.")
+	} else {
+		fmt.Fprintf(w, "Daemon's first record: +%s\n\n", ms(firstDaemon.Sub(since)))
+	}
+	workspaces := map[string]struct{}{}
+	for ws := range up {
+		workspaces[ws] = struct{}{}
+	}
+	for ws := range painted {
+		workspaces[ws] = struct{}{}
+	}
+	ids := make([]string, 0, len(workspaces))
+	for ws := range workspaces {
+		ids = append(ids, ws)
+	}
+	sort.Slice(ids, func(i, j int) bool {
+		return latest(up[ids[i]], painted[ids[i]]).Before(latest(up[ids[j]], painted[ids[j]]))
+	})
+	fmt.Fprintln(w, "| workspace | session up | page painted |")
+	fmt.Fprintln(w, "|---|---|---|")
+	var allLoaded time.Time
+	for _, ws := range ids {
+		fmt.Fprintf(w, "| %s | %s | %s |\n", ws, since0(up[ws], since), since0(painted[ws], since))
+		allLoaded = latest(allLoaded, latest(up[ws], painted[ws]))
+	}
+	if !allLoaded.IsZero() {
+		fmt.Fprintf(w, "\nEvery workspace loaded: +%s after launch.\n", ms(allLoaded.Sub(since)))
+	}
+	fmt.Fprintln(w, "\n| switch | workspace | took |")
+	fmt.Fprintln(w, "|---|---|---|")
+	for _, l := range pairLatencies(records) {
+		if (l.kind == "switch_first" || l.kind == "switch_repeat") && !l.at.Before(since) {
+			fmt.Fprintf(w, "| %s | %s | %s |\n", strings.TrimPrefix(l.kind, "switch_"), l.workspace, ms(l.took))
+		}
+	}
+	fmt.Fprintln(w)
+}
+
+func latest(a, b time.Time) time.Time {
+	if a.After(b) {
+		return a
+	}
+	return b
+}
+
+func since0(t, since time.Time) string {
+	if t.IsZero() {
+		return "never"
+	}
+	return "+" + ms(t.Sub(since))
+}
+
+func ms(d time.Duration) string { return fmt.Sprintf("%dms", d.Milliseconds()) }
