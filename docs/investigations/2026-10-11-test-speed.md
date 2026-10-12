@@ -68,6 +68,16 @@ Remaining candidates:
 - ERT: 275 tests over 100ms carry 134s; first-use loads (org, gnus) are real dependencies.
 - Load balancing (owner, 2026-10-12): even out the run's parallel parts so the tail is not one long unit.
 
+## Third round (2026-10-12, after a5170948c)
+
+- Full run, 8 slots: 229s (all7) -> 207s (all9, with the suite-slot signal fix: its harness 61s -> 5s); 1,420 slot-s, 1,082 CPU-s.
+- Full run, 12 slots (all8): 187s, 1,963 slot-s, 1,179 CPU-s -- 18% faster at the same CPU. Pending the owner's ruling on run sizing.
+- Coverage: no test removed. The green runs execute 13,540 tests against the baseline's 13,160; of the 12 baseline names missing, TestMockScenarios became TestMockScenariosShard0-7 and the other 11 were retired by other sessions' feature commits.
+- Load-only failures found and fixed: the e2e shim killer matched a forked-not-exec'd daemon child; linux ESRCH on a mid-read exit; darwin half-written procargs2.
+- Latency probe (pipe ping-pong): idle p99 0.5ms; during the daemon suite 6-9ms; during a full run 20-25ms, identical at nice 0 and nice 19, so priority is not the cause. Wait-bound tests inflate 5-7x in a full run (ERT integration files 3.4s alone -> 28s; e2e TestASuccessorThatFinishedJoiningAcceptsADeploy 1.7s -> 10.5s, past its 5s bound).
+- Tried and dropped: skipping the stray sweep's argv reads of processes older than the test process. Daemon suite 535 -> ~500 slot-s, but 4 of 6 runs then failed in four different session-lifecycle tests against 0 of 5 without it; the faster teardown exposes timing races that are not yet understood.
+- Open: TestSessionHealthAfterTheShimExitsReportsShimDied reports link_severed instead of shim_died under load (seen twice).
+
 ## Targets (owner, 2026-10-11)
 
 - Minimize BOTH wall-clock time and CPU, aiming at 90%; coverage loss at most 2-3%.
