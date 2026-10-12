@@ -144,13 +144,29 @@ func (s *sequence) Run(ctx context.Context) (Report, error) {
 		// before those would answer for state this boot had not finished
 		// reading. It does not run here because it must not gate the
 		// listener; see BringUp.
-		report.PendingBringUp = clientless
+		//
+		// ONLY THE VISIBLE ONES ARE NAMED (bringup.OnlyVisible, the one
+		// filter every bring-up shares): a hidden or collapsed workspace runs
+		// nothing until the editor shows it and asks with OpenTabs.
+		visible, withheld, err := bringup.OnlyVisible(ctx, s.deps.DB, clientless)
+		if err != nil {
+			log.Error("daemon.boot.run", "could not tell which client-less workspaces are visible; the boot stops", dlog.Context{
+				"workspaces": bringup.IDs(clientless), "error": err.Error(),
+			})
+			return Report{}, fmt.Errorf("boot: decide the bring-up: %w", err)
+		}
+		report.PendingBringUp, report.WithheldBringUp = visible, withheld
+		if len(withheld) > 0 {
+			log.Info("daemon.boot.run", "hidden or collapsed workspaces are not brought up; each starts when shown", dlog.Context{
+				"workspaces": bringup.IDs(withheld),
+			})
+		}
 		// THE BRING-UP IS STATED BEFORE THE DAEMON SERVES. The starts run
 		// after the listener is up, so without this an editor that connected
 		// in between would read these rows as having nothing under way, open
 		// them, and draw a workspace no session is behind yet. BringUp lowers
 		// it for each one on every path.
-		for _, ws := range clientless {
+		for _, ws := range report.PendingBringUp {
 			s.deps.BringingUp(ws.ID, true)
 		}
 		// AN UNDETERMINED WORKSPACE IS SERVED BY NO SESSION OF THIS DAEMON,
@@ -168,6 +184,7 @@ func (s *sequence) Run(ctx context.Context) (Report, error) {
 	log.Debug("daemon.boot.run", "the boot reconciliation is complete", dlog.Context{
 		"adopted":              len(report.Adopted),
 		"pending_bring_up":     len(report.PendingBringUp),
+		"withheld_bring_up":    len(report.WithheldBringUp),
 		"orphan_leases":        len(report.OrphanLeases),
 		"undetermined":         len(report.Undetermined),
 		"orphans_closed":       len(report.Orphaned),
@@ -812,8 +829,9 @@ var _ = []rollout.DispositionKind{
 	rollout.DispositionUnknown,
 }
 
-// BringUp starts the session of every open, client-less workspace the
-// reconciliation named, the hibernated ones included.
+// BringUp starts the session of every open, VISIBLE, client-less workspace
+// the reconciliation named, the hibernated ones included. A hidden or
+// collapsed workspace was never named (Report.WithheldBringUp).
 //
 // IT RUNS AFTER THE DAEMON ANSWERS, NOT INSIDE THE RECONCILIATION. The boot
 // claim and daemon.addr are published before the reconciliation and nothing is
@@ -825,7 +843,8 @@ var _ = []rollout.DispositionKind{
 // its own goroutine once the listener is accepting, and readiness never waits
 // on a shim spawn.
 //
-// AN OPEN WORKSPACE IS NEVER SESSION-LESS (owner ruling, 2026-09-13). A
+// AN OPEN VISIBLE WORKSPACE IS NEVER SESSION-LESS (owner ruling, 2026-09-13,
+// narrowed to visible workspaces 2026-10-12). A
 // daemon that outlived its shims came back with rows the user had left open
 // and nothing behind them: the tab was there, the topbar was blank, and the
 // session only appeared once something submitted a prompt. The start goes
