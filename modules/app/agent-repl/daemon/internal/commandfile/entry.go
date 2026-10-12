@@ -110,7 +110,10 @@ type Entry struct {
 	Title string `json:"title"`
 	// Done is a task's done flag, nil when the entry does not set it.
 	Done *bool `json:"done"`
-	// OneShot marks a create as the one-shot form.
+	// OneShot marks a create as the one-shot form, and a merge as a ONE-SHOT
+	// MERGE: the requester's own branch, merged in place once the requesting
+	// turn ends, closing the requester once it lands, and the requester marked
+	// a one-shot from the moment the merge is announced (merge.Request.OneShot).
 	OneShot bool `json:"one_shot"`
 	// BaseRef is a create's base.
 	BaseRef string `json:"base_ref"`
@@ -262,6 +265,9 @@ func (e Entry) Validate() error {
 			return fmt.Errorf("%s: %s is a merge's field, and no %s reads it", e.Type, field, e.Type)
 		}
 	}
+	if e.Type != TypeCreate && e.Type != TypeMerge && e.OneShot && e.Type != "" {
+		return fmt.Errorf("%s: one_shot is a %s's or a %s's field, and no %s reads it", e.Type, TypeCreate, TypeMerge, e.Type)
+	}
 	if e.Type != TypeMergeEvict && e.EvictDir != "" && e.Type != "" {
 		return fmt.Errorf("%s: evict_dir is a %s's field, and no %s reads it", e.Type, TypeMergeEvict, e.Type)
 	}
@@ -361,7 +367,6 @@ func (e Entry) createOnly() string {
 	}{
 		{"git_root", e.GitRoot != ""},
 		{"name", e.Name != ""},
-		{"one_shot", e.OneShot},
 		{"base_ref", e.BaseRef != ""},
 		{"source_ws", e.SourceWS != nil},
 		{"base_commit", e.BaseCommit != ""},
@@ -419,6 +424,12 @@ func (e Entry) validateMergeSource() error {
 		return fmt.Errorf("%s: detached runs the requester's OWN branch's merge in a merge workspace, and this merge lands another", TypeMerge)
 	case e.Detached && e.KeepOpen:
 		return fmt.Errorf("%s: a detached merge never closes the requester, so keep_open means nothing beside it", TypeMerge)
+	case e.OneShot && named > 0:
+		return fmt.Errorf("%s: one_shot merges the requester's OWN branch, and this merge lands another", TypeMerge)
+	case e.OneShot && e.KeepOpen:
+		return fmt.Errorf("%s: a one_shot merge closes the requester once it lands, so it cannot keep_open", TypeMerge)
+	case e.OneShot && e.Detached:
+		return fmt.Errorf("%s: a one_shot merge runs in the requester, which it closes once it lands, so it cannot run detached", TypeMerge)
 	}
 	return nil
 }

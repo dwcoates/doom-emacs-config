@@ -35,7 +35,10 @@ case "$*" in
     "rev-parse --show-toplevel") printf '%s\n' "$FAKE_GIT_TOPLEVEL" ;;
     "rev-parse HEAD") cat "$S/head" ;;
     "rev-parse --abbrev-ref HEAD") cat "$S/branch" ;;
-    "worktree list --porcelain") printf 'worktree %s\nbranch refs/heads/%s\n' "$FAKE_GIT_TOPLEVEL" "$(cat "$S/branch")" ;;
+    "worktree list --porcelain")
+        printf 'worktree %s\nbranch refs/heads/%s\n' "$FAKE_GIT_TOPLEVEL" "$(cat "$S/branch")"
+        [ ! -f "$S/siblings" ] || cat "$S/siblings"
+        ;;
     "for-each-ref --format=%(refname) %(objectname) refs/heads/ refs/tags/") cat "$S/refs" ;;
     "status --porcelain") cat "$S/status" ;;
     "tag -d "*) grep -v "^refs/tags/$3 " "$S/refs" >"$S/refs.new" || true; mv "$S/refs.new" "$S/refs" ;;
@@ -140,7 +143,68 @@ t_failure_outranks_drift() {
     fi
 }
 
+# sibling_rebasing NAME — a sibling worktree whose rebase of refs/heads/NAME is
+# in progress, so it stands on a detached HEAD; its porcelain lines go into
+# NEXT, which the wrapped command installs as the sibling list mid-run.
+sibling_rebasing() {
+    local wt="$CASE/$1" gitdir="$CASE/gitdirs/$1"
+    mkdir -p "$wt" "$gitdir/rebase-merge"
+    printf 'gitdir: %s\n' "$gitdir" >"$wt/.git"
+    printf 'refs/heads/%s\n' "$1" >"$gitdir/rebase-merge/head-name"
+    printf '\nworktree %s\nHEAD 3333333333333333333333333333333333333333\ndetached\n' "$wt"
+}
+
+# sibling_on NAME — a sibling worktree with refs/heads/NAME checked out.
+sibling_on() {
+    mkdir -p "$CASE/$1"
+    printf '\nworktree %s\nHEAD 3333333333333333333333333333333333333333\nbranch refs/heads/%s\n' "$CASE/$1" "$1"
+}
+
+t_a_sibling_starting_a_rebase_is_not_drift() {
+    new_case
+    echo "refs/heads/sib 4444444444444444444444444444444444444444" >>"$STATE/refs"
+    sibling_on sib >"$STATE/siblings"
+    sibling_rebasing sib >"$CASE/next"
+    run_net -- sh -c 'cp "$0" "$1"; sed -i.bak "s/^refs\/heads\/sib .*/refs\/heads\/sib 5555555555555555555555555555555555555555/" "$2"' \
+        "$CASE/next" "$STATE/siblings" "$STATE/refs"
+    if [ "$RC" -eq 0 ] && [[ "$OUT" == *"zero git-state drift"* ]]; then
+        pass "a sibling worktree that starts a rebase mid-run is not drift"
+    else
+        fail "a sibling worktree that starts a rebase mid-run is not drift" "rc=$RC out=$OUT"
+    fi
+}
+
+t_a_sibling_finishing_a_rebase_is_not_drift() {
+    new_case
+    echo "refs/heads/sib 4444444444444444444444444444444444444444" >>"$STATE/refs"
+    sibling_rebasing sib >"$STATE/siblings"
+    sibling_on sib >"$CASE/next"
+    run_net -- sh -c 'cp "$0" "$1"; sed -i.bak "s/^refs\/heads\/sib .*/refs\/heads\/sib 5555555555555555555555555555555555555555/" "$2"' \
+        "$CASE/next" "$STATE/siblings" "$STATE/refs"
+    if [ "$RC" -eq 0 ] && [[ "$OUT" == *"zero git-state drift"* ]]; then
+        pass "a sibling worktree that finishes a rebase mid-run is not drift"
+    else
+        fail "a sibling worktree that finishes a rebase mid-run is not drift" "rc=$RC out=$OUT"
+    fi
+}
+
+t_a_detached_sibling_with_no_rebase_owns_nothing() {
+    new_case
+    echo "refs/heads/loose 4444444444444444444444444444444444444444" >>"$STATE/refs"
+    mkdir -p "$CASE/idle"
+    printf '\nworktree %s\nHEAD 3333333333333333333333333333333333333333\ndetached\n' "$CASE/idle" >"$STATE/siblings"
+    run_net -- sh -c 'sed -i.bak "s/^refs\/heads\/loose .*/refs\/heads\/loose 5555555555555555555555555555555555555555/" "$0"' "$STATE/refs"
+    if [ "$RC" -eq 2 ] && [[ "$OUT" == *"refs/heads/loose"* ]]; then
+        pass "a detached sibling with no rebase in progress vouches for no branch"
+    else
+        fail "a detached sibling with no rebase in progress vouches for no branch" "rc=$RC out=$OUT"
+    fi
+}
+
 t_dashdash_without_a_command_is_refused
+t_a_sibling_starting_a_rebase_is_not_drift
+t_a_sibling_finishing_a_rebase_is_not_drift
+t_a_detached_sibling_with_no_rebase_owns_nothing
 t_clean_wrapped_run_passes_and_removes_its_checkpoint
 t_wrapped_exit_status_passes_through
 t_wrapped_arguments_arrive_intact
