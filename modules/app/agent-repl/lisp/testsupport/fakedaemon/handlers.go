@@ -28,6 +28,10 @@ func (s *fakeServer) PlanRollback(ctx context.Context, req *connect.Request[v1.P
 	return handleUnary[v1.PlanRollbackRequest, v1.PlanRollbackResponse](ctx, s, "PlanRollback", req.Msg)
 }
 
+func (s *fakeServer) ListRollbackPrompts(ctx context.Context, req *connect.Request[v1.ListRollbackPromptsRequest]) (*connect.Response[v1.ListRollbackPromptsResponse], error) {
+	return handleUnary[v1.ListRollbackPromptsRequest, v1.ListRollbackPromptsResponse](ctx, s, "ListRollbackPrompts", req.Msg)
+}
+
 func (s *fakeServer) RollBack(ctx context.Context, req *connect.Request[v1.RollBackRequest]) (*connect.Response[v1.RollBackResponse], error) {
 	return handleUnary[v1.RollBackRequest, v1.RollBackResponse](ctx, s, "RollBack", req.Msg)
 }
