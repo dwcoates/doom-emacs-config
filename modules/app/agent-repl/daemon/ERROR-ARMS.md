@@ -66,6 +66,7 @@ here as the mapping the server handlers switch on, not as arms still owed:
 | UpdateShutdownSchedule | `nothing_scheduled` | `drain.ErrNothingScheduled` — Cancel with nothing in force | drain |
 | AdoptHostWorkspace / AdoptWebWorkspace | `no_transfer_announced` | `rollout.ErrNoTransferAnnounced`. On the WEB side this is the ORDINARY page boot (the web side never redials, so every non-handover boot makes the call) and is recorded at INFO, never WARN and never a fault. On a JOINING successor the call is first HELD for the intent manifest, bounded by `AdoptionWindow` (`rollout.awaitArm`), because the announcement precedes the manifest write | rollout |
 | AdoptHostWorkspace / AdoptWebWorkspace | `not_yet_adopted` | `rollout.ErrNotYetAdopted` — an expected participant has not called yet; the caller retries with backoff | rollout |
+| AdoptHostWorkspace / AdoptWebWorkspace | `transfer_deferred` | `rollout.ErrMidWorkRefused` — this successor refused the workspace's mid-work adoption, the incumbent took it back and serves it until it is free; the caller stays on the incumbent and adopts again only on the incumbent's NEW `transferred` push, never on a timer | rollout |
 | AdoptHostWorkspace / AdoptWebWorkspace | `participant_not_expected` | `rollout.ErrParticipantNotExpected` — the caller's stream was not open at announcement | rollout |
 
 NOTHING NEW IS OWED by drain or rollout: no refusal either makes lacks an arm.

@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"errors"
 
 	"connectrpc.com/connect"
 
@@ -10,8 +9,6 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
-
-	"claude-repld/internal/rollout"
 )
 
 // The handover rendezvous, called ON THE NEW DAEMON by each participant.
@@ -39,6 +36,10 @@ func (s *server) AdoptHostWorkspace(
 		if !ok {
 			return nil, fail(subject.Log, rpc, err)
 		}
+		// AT INFO, as every adoption refusal is (subjectForAdoption): at DEBUG
+		// the host's adopt answers left no trace, and on 2026-10-11 hundreds of
+		// them in a row were invisible in every log.
+		refused.Info = true
 		return answer(resp, s.refuse(subject.Log, rpc, resp, refused))
 	}
 	subject.Log.Info("daemon.server.adopt_host", "the host adopted the workspace", nil)
@@ -65,9 +66,10 @@ func (s *server) AdoptWebWorkspace(
 		if !ok {
 			return nil, fail(subject.Log, rpc, err)
 		}
-		// The ORDINARY page boot: no handover was announced, so there is
-		// nothing to adopt. It is an answer, recorded at INFO.
-		refused.Info = errors.Is(err, rollout.ErrNoTransferAnnounced)
+		// AT INFO, as every adoption refusal is (subjectForAdoption) -- the
+		// ordinary page boot's no_transfer_announced above all, which is an
+		// answer, not a failure.
+		refused.Info = true
 		return answer(resp, s.refuse(subject.Log, rpc, resp, refused))
 	}
 	subject.Log.Info("daemon.server.adopt_web", "the webview adopted the workspace", nil)

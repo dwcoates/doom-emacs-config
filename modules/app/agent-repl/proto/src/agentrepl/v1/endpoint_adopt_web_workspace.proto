@@ -45,6 +45,11 @@ message AdoptWebWorkspaceError {
     AdoptWebWorkspaceNoTransferAnnounced no_transfer_announced = 5;
     // The caller's stream was not open at announcement.
     AdoptWebWorkspaceParticipantNotExpected participant_not_expected = 6;
+    // This daemon refused to adopt the workspace mid-work, so the incumbent
+    // took it back and keeps serving it until it is free. Nothing will change
+    // here until then: the caller stays on the incumbent and adopts again
+    // only when the incumbent pushes a NEW `transferred` for this workspace.
+    AdoptWebWorkspaceTransferDeferred transfer_deferred = 7;
   }
 }
 message AdoptWebWorkspaceUnknownWorkspace {}
@@ -59,3 +64,9 @@ message AdoptWebWorkspaceTransferringAway {
 message AdoptWebWorkspaceNotYetAdopted {}
 message AdoptWebWorkspaceNoTransferAnnounced {}
 message AdoptWebWorkspaceParticipantNotExpected {}
+// The successor refused a mid-work adoption and the incumbent serves the
+// workspace until it is free; it carries nothing because the incumbent's next
+// `transferred` push, not this answer, says when and where to adopt. Distinct
+// from `not_yet_adopted`, which means a rendezvous still under way and is
+// retried.
+message AdoptWebWorkspaceTransferDeferred {}
