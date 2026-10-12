@@ -48,6 +48,7 @@
 (require 'cl-lib)
 
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
+(declare-function agent-repl-refill-keymap "agent-repl-core" (map fill))
 (declare-function agent-repl--save-pre-panel-layout "agent-repl-panels" (ws site))
 (declare-function agent-repl--log-verbose "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--warn "agent-repl-core" (ws fmt &rest args))
