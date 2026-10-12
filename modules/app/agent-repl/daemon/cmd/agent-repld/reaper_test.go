@@ -137,3 +137,13 @@ func TestARefusedReaperKnobIsABootFatalRecordedAtError(t *testing.T) {
 		t.Fatalf("records = %v, want the refusal at ERROR", log.Records())
 	}
 }
+
+func TestTheWorktreeLockIsTheReapLockInTheRunDir(t *testing.T) {
+	// Act
+	got := worktreeLockPath("/run/agent-repl")
+
+	// Assert
+	if got != "/run/agent-repl/worktree-reap.lock" {
+		t.Fatalf("worktreeLockPath = %q, want the reap lock in the run dir", got)
+	}
+}
