@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { installAnimationFrames, type AnimationFrames } from "./animation-frames.js";
 import { readFileSync } from "node:fs";
 import { createTicker } from "../src/clock.js";
 import type { RevealPace } from "../src/reveal-pace.js";
@@ -10,8 +11,6 @@ import { fakePageSeen, type FakePageSeen } from "./page-seen-fake.js";
 /** A pace slow enough that one frame shows only part of TOTAL. */
 const PACE: RevealPace = { minCps: 10, maxCps: 20, bankLimitSeconds: 100 };
 const TOTAL = 400;
-/** One faked animation frame. */
-const FRAME_MS = 17;
 
 /** What the loop did to a surface, in order. */
 interface Recorded {
@@ -48,27 +47,16 @@ function surface(
   };
 }
 
-/** The animation frames queued and not yet run. */
-let queued: (() => void)[] = [];
+/** The page's frames, run by hand. */
+let animation: AnimationFrames;
 
-/** Run COUNT animation frames, FRAME_MS of the clock apart. */
+/** Run COUNT animation frames. */
 function frames(count: number): void {
-  for (let i = 0; i < count; i += 1) {
-    vi.advanceTimersByTime(FRAME_MS);
-    const due = queued;
-    queued = [];
-    for (const fn of due) fn();
-  }
+  animation.run(count);
 }
 
 beforeEach(() => {
-  vi.useFakeTimers({ toFake: ["Date"] });
-  vi.setSystemTime(0);
-  queued = [];
-  vi.stubGlobal("requestAnimationFrame", (fn: () => void) => {
-    queued.push(fn);
-    return queued.length;
-  });
+  animation = installAnimationFrames();
 });
 afterEach(() => {
   vi.useRealTimers();

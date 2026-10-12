@@ -5,6 +5,7 @@
  * row drawn from a page, a full collapsed title, or an unseen page.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { installAnimationFrames, type AnimationFrames } from "../animation-frames.js";
 import { create } from "@bufbuild/protobuf";
 import { FeedIdSchema, FeedRowSchema } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import type { RowArrival, RowContext } from "../../src/feed/cards/context.js";
@@ -17,30 +18,17 @@ import { harness, rowContext } from "./harness.js";
 import { measureTitle } from "./title-measure.js";
 
 const COMMAND = "$ go test ./... && npm run typecheck";
-/** One faked animation frame. */
-const FRAME_MS = 17;
 
-/** The animation frames queued and not yet run. */
-let queued: (() => void)[] = [];
+/** The page's frames, run by hand. */
+let animation: AnimationFrames;
 
-/** Run COUNT animation frames, FRAME_MS of the clock apart. */
+/** Run COUNT animation frames. */
 function frames(count: number): void {
-  for (let i = 0; i < count; i += 1) {
-    vi.advanceTimersByTime(FRAME_MS);
-    const due = queued;
-    queued = [];
-    for (const fn of due) fn();
-  }
+  animation.run(count);
 }
 
 beforeEach(() => {
-  vi.useFakeTimers({ toFake: ["Date"] });
-  vi.setSystemTime(0);
-  queued = [];
-  vi.stubGlobal("requestAnimationFrame", (fn: () => void) => {
-    queued.push(fn);
-    return queued.length;
-  });
+  animation = installAnimationFrames();
 });
 afterEach(() => {
   vi.useRealTimers();
