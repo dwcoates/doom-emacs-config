@@ -227,6 +227,24 @@ func (v *verbs) SetHidden(ctx context.Context, ws ids.WorkspaceID, hidden bool) 
 	return nil
 }
 
+// RevealMergeWorkspace draws a hidden merge workspace in the tab bar and the
+// sidebar from now on (Verbs). It answers whether this call revealed it; a
+// merge workspace already revealed is no change.
+func (v *verbs) RevealMergeWorkspace(ctx context.Context, ws ids.WorkspaceID) (bool, error) {
+	log := v.deps.Log.Global().With(dlog.Context{"workspace": string(ws)})
+	revealed, err := v.deps.DB.RevealMergeWorkspace(ctx, ws)
+	if err != nil {
+		log.Error(opRevealMergeWorkspace, "could not record that the merge workspace is revealed", dlog.Context{"cause": err.Error()})
+		return false, fmt.Errorf("reveal merge workspace %q: %w", ws, err)
+	}
+	if !revealed {
+		return false, nil
+	}
+	log.Info(opRevealMergeWorkspace, "revealed the merge workspace: it is drawn in the tab bar and the sidebar from now on", nil)
+	v.republishRegistry(ctx, log, opRevealMergeWorkspace)
+	return true, nil
+}
+
 // SetPriority sets or clears the roster's priority. Setting one moves the
 // workspace to second-to-last within that priority (wsm's place.go).
 func (v *verbs) SetPriority(ctx context.Context, ws ids.WorkspaceID, p *wsm.Priority) error {

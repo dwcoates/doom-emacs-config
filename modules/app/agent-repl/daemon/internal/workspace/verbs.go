@@ -20,36 +20,37 @@ import (
 
 // The operation names this package's records carry, one per verb.
 const (
-	opResolve        = "daemon.workspace.resolve"
-	opRoster         = "daemon.workspace.roster"
-	opRegister       = "daemon.workspace.register"
-	opCreate         = "daemon.workspace.create"
-	opCommandSupport = "daemon.workspace.request_command_support"
-	opOpen           = "daemon.workspace.open"
-	opClose          = "daemon.workspace.close"
-	opKill           = "daemon.workspace.kill"
-	opNuke           = "daemon.workspace.nuke"
-	opForget         = "daemon.workspace.forget"
-	opRestart        = "daemon.workspace.restart"
-	opSelect         = "daemon.workspace.select"
-	opFollowSelected = "daemon.workspace.follow_selection"
-	opMarkViewed     = "daemon.workspace.mark_viewed"
-	opSetPriority    = "daemon.workspace.set_priority"
-	opSetHidden      = "daemon.workspace.set_hidden"
-	opMove           = "daemon.workspace.move"
-	opCreateTask     = "daemon.workspace.create_task"
-	opUpdateTask     = "daemon.workspace.update_task"
-	opAssignTask     = "daemon.workspace.assign_task"
-	opColdGate       = "daemon.workspace.answer_cold_gate"
-	opSetModel       = "daemon.workspace.set_model"
-	opSetMode        = "daemon.workspace.set_permission_mode"
-	opInterrupt      = "daemon.workspace.interrupt"
-	opAnswerPerm     = "daemon.workspace.answer_permission"
-	opAnswerQuestion = "daemon.workspace.answer_question"
-	opOpenExternal   = "daemon.workspace.open_external"
-	opOpenInEditor   = "daemon.workspace.open_in_editor"
-	opBringUp        = "daemon.workspace.bring_up"
-	opSelectAccount  = "daemon.workspace.select_account"
+	opResolve              = "daemon.workspace.resolve"
+	opRoster               = "daemon.workspace.roster"
+	opRegister             = "daemon.workspace.register"
+	opCreate               = "daemon.workspace.create"
+	opCommandSupport       = "daemon.workspace.request_command_support"
+	opOpen                 = "daemon.workspace.open"
+	opClose                = "daemon.workspace.close"
+	opKill                 = "daemon.workspace.kill"
+	opNuke                 = "daemon.workspace.nuke"
+	opForget               = "daemon.workspace.forget"
+	opRestart              = "daemon.workspace.restart"
+	opSelect               = "daemon.workspace.select"
+	opFollowSelected       = "daemon.workspace.follow_selection"
+	opMarkViewed           = "daemon.workspace.mark_viewed"
+	opSetPriority          = "daemon.workspace.set_priority"
+	opSetHidden            = "daemon.workspace.set_hidden"
+	opRevealMergeWorkspace = "daemon.workspace.reveal_merge_workspace"
+	opMove                 = "daemon.workspace.move"
+	opCreateTask           = "daemon.workspace.create_task"
+	opUpdateTask           = "daemon.workspace.update_task"
+	opAssignTask           = "daemon.workspace.assign_task"
+	opColdGate             = "daemon.workspace.answer_cold_gate"
+	opSetModel             = "daemon.workspace.set_model"
+	opSetMode              = "daemon.workspace.set_permission_mode"
+	opInterrupt            = "daemon.workspace.interrupt"
+	opAnswerPerm           = "daemon.workspace.answer_permission"
+	opAnswerQuestion       = "daemon.workspace.answer_question"
+	opOpenExternal         = "daemon.workspace.open_external"
+	opOpenInEditor         = "daemon.workspace.open_in_editor"
+	opBringUp              = "daemon.workspace.bring_up"
+	opSelectAccount        = "daemon.workspace.select_account"
 )
 
 // verbs is the whole verb surface. It holds no FACTS: every fact it reads is
@@ -72,6 +73,8 @@ type verbs struct {
 	selection sync.Mutex
 	// revivals holds at most one revival in flight per workspace.
 	revivals revivalFlights
+	// names are the workspace names claimed in this process (mergenames.go).
+	names nameClaims
 }
 
 // load resolves one workspace's durable record and its own logger. A REGISTERED
