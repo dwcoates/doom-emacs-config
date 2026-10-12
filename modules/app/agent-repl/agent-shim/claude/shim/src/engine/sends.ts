@@ -50,9 +50,19 @@
  * frame is `unstated`, and the session charges it by its own slot rather than
  * by any send: that is not a reply's attribution.
  *
+ * A PROMPT BATCH RUNS UNDER ITS FIRST MEMBER'S TURN. Prompts sent to join a
+ * running turn that ended before folding them are still queued in the vendor,
+ * and the vendor runs every queued prompt as ONE turn whose echo answers the
+ * batch's LAST member (sdk.d.ts `user_message_uuids`). The session opens the
+ * FIRST of them as the turn that runs and states the rest as its batch
+ * ({@link SendLedger.batched}); a frame answering a member is then attributed
+ * to the batch's first send while that send is named beside it, and every
+ * other member the frame names is ABSORBED, as a fold is.
+ *
  * CONSTANT SIZE. The open sends are bounded by the session's own turn slots
- * (one daemon or network-resume turn, or one keep-alive), enforced here as an
- * invariant ({@link OPEN_SENDS_BOUND}); the retired ring is bounded by
+ * (one daemon or network-resume turn, or one keep-alive) and the prompts
+ * waiting to join it, enforced here as an invariant
+ * ({@link OPEN_SENDS_BOUND}); the retired ring is bounded by
  * {@link RETIRED_SENDS_REMEMBERED}.
  */
 import { bindLog } from "../log.js";
@@ -63,12 +73,14 @@ const LOGGER = bindLog({ component: "shim-engine-sends", operation: "shim.engine
 /**
  * How many sends may be open at once before the ledger refuses another.
  *
- * The session's slots allow at most one open send (a daemon turn, a
- * network-resume turn or a keep-alive, each waiting for the last to be
- * answered); the bound is looser only so a defect is caught as a throw rather
- * than as an unbounded map.
+ * The session's slots allow one open send (a daemon turn, a network-resume
+ * turn or a keep-alive, each waiting for the last to be answered) and the
+ * prompts sent to join it, which the daemon sends all at once when it flushes
+ * its held queue. The bound is the vendor's own: an echo lists at most 64
+ * sends a turn consumed (sdk.d.ts `user_message_uuids`), so a send past it
+ * could never be attributed. It is a throw rather than an unbounded map.
  */
-export const OPEN_SENDS_BOUND = 4;
+export const OPEN_SENDS_BOUND = 64;
 
 /**
  * How many answered or forgotten sends are still recognized by their echo.
@@ -182,6 +194,8 @@ export class SendLedger {
   private readonly open = new Map<string, Send>();
   /** Answered or forgotten sends, oldest first, bounded by {@link RETIRED_SENDS_REMEMBERED}. */
   private readonly retired = new Map<string, Send>();
+  /** A batch member's uuid -> the uuid of the batch's first send ({@link batched}). */
+  private readonly batchedUnder = new Map<string, string>();
   private running: VendorTurn = UNSTATED;
 
   /**
@@ -225,6 +239,34 @@ export class SendLedger {
         "a send was retired without its answer; a late echo of it is still recognized",
       );
     }
+  }
+
+  /**
+   * The open sends of `members` are queued in the vendor behind the open send
+   * of `firstTurnId`, and the vendor runs them all as one prompt batch: a
+   * frame answering a member is the first send's turn while the first send is
+   * named beside it (see the file comment). A member re-batched under a later
+   * first send is moved there.
+   *
+   * A turn with no open send is a defect in the caller's bookkeeping, and
+   * throws.
+   */
+  batched(firstTurnId: string, members: readonly string[]): void {
+    const first = this.openSendOf(firstTurnId);
+    if (first === undefined) {
+      throw new Error(`send ledger: turn ${firstTurnId} heads a prompt batch with no open send`);
+    }
+    for (const member of members) {
+      const send = this.openSendOf(member);
+      if (send === undefined) {
+        throw new Error(`send ledger: turn ${member} is batched behind ${firstTurnId} with no open send`);
+      }
+      this.batchedUnder.set(send.uuid, first.uuid);
+    }
+    LOGGER.debug(
+      { first_turn_id: firstTurnId, members: members.join(","), client_uuid: first.uuid },
+      "prompts queued behind a send run as one prompt batch under that send's turn",
+    );
   }
 
   /** The open send of `turnId`, if the ledger holds one. */
@@ -335,8 +377,11 @@ export class SendLedger {
       );
     }
     const ours = all.filter((uuid) => this.open.has(uuid) || this.retired.has(uuid));
-    const chosen = ours.includes(answers) ? answers : ours.at(-1);
-    if (chosen === undefined) return { kind: "unknown", uuids: unknown };
+    const stated = ours.includes(answers) ? answers : ours.at(-1);
+    if (stated === undefined) return { kind: "unknown", uuids: unknown };
+    // A BATCH MEMBER ANSWERED BESIDE ITS FIRST SEND IS THE FIRST SEND'S TURN.
+    const first = this.batchedUnder.get(stated);
+    const chosen = first !== undefined && ours.includes(first) ? first : stated;
     const open = this.open.get(chosen);
     if (open !== undefined) return { kind: "send", send: open, retired: false };
     const retired = this.retired.get(chosen) as Send;
@@ -350,7 +395,14 @@ export class SendLedger {
       const oldest = this.retired.keys().next();
       if (oldest.done === true) break;
       this.retired.delete(oldest.value);
+      this.forgetBatch(oldest.value);
     }
+  }
+
+  /** A send no echo can name any more leaves every batch it was in. */
+  private forgetBatch(uuid: string): void {
+    this.batchedUnder.delete(uuid);
+    for (const [member, first] of this.batchedUnder) if (first === uuid) this.batchedUnder.delete(member);
   }
 }
 
