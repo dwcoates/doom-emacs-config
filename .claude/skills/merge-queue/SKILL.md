@@ -24,7 +24,7 @@ Asks the merge queue, from this workspace, to land a finished branch in its merg
 | `front` | Added to any merge argument above (`own`, `one-shot`, `workspace`, `branch`, `commits`, `pr-merged`): the merge goes to the FRONT of its queue once it is put in line, ahead of every ordinary merge waiting and behind any earlier front merge, never ahead of the merge already running. |
 | `dequeue own` | Take this workspace's own merge off the queue. |
 | `dequeue workspace <worktree-dir>` | Take ANOTHER workspace's merge off the queue, by its worktree. |
-| `pause [<repo-dir>]` | Pause the queue of the repository whose main checkout is `<repo-dir>`, else of every repository. |
+| `pause [<repo-dir>]` | Pause the queue of the repository whose main checkout is `<repo-dir>`, else of every repository. A paused queue advances nothing: merges still enqueue, but every merge running in it is suspended at once (it resumes at the step it recorded), and nothing is admitted, promoted or resumed until `resume`. |
 | `resume [<repo-dir>]` | Resume a paused queue, scoped as `pause` is. |
 | `hold-rollouts` | Hold the queue's ROLLOUTS, daemon-wide and durably: merges keep landing, but a landing in the daemon's own checkout no longer redeploys, hot-reloads or bounces the running runtime. |
 | `release-rollouts` | End the hold; the next landing redeploys. Nothing that landed while held is deployed until then. |

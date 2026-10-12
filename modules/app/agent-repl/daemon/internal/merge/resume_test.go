@@ -600,8 +600,8 @@ func TestAMergeResumedAtAPrePromptReattachesToItsTurn(t *testing.T) {
 	}
 }
 
-func TestAResumedMergeOnAPausedQueueStillRuns(t *testing.T) {
-	// Arrange: a pause stops only NEW admissions.
+func TestAResumedMergeOnAPausedQueueWaitsForTheQueueToResume(t *testing.T) {
+	// Arrange: a paused queue advances nothing (owner ruling, 2026-10-12).
 	h := newHarness(t)
 	interruptedAt(t, h, atStep(TabTests, 1))
 	landsAfterResume(h)
@@ -611,8 +611,28 @@ func TestAResumedMergeOnAPausedQueueStillRuns(t *testing.T) {
 	resume(t, h)
 
 	// Assert.
+	if len(h.runner.argv) != 0 {
+		t.Fatalf("the gate ran %d times on a paused queue, want the resumed merge to wait", len(h.runner.argv))
+	}
+}
+
+func TestAResumedMergeRunsOnceItsPausedQueueIsResumed(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	interruptedAt(t, h, atStep(TabTests, 1))
+	landsAfterResume(h)
+	h.db.paused[h.repoKey()] = true
+	resume(t, h)
+
+	// Act.
+	h.db.paused[h.repoKey()] = false
+	if err := h.admit(context.Background()); err != nil {
+		t.Fatalf("the resumed merge ended on: %v", err)
+	}
+
+	// Assert.
 	if len(h.runner.argv) != 1 {
-		t.Fatalf("the gate ran %d times on a paused queue, want the resumed merge run once", len(h.runner.argv))
+		t.Fatalf("the gate ran %d times once the queue resumed, want the resumed merge run once", len(h.runner.argv))
 	}
 }
 

@@ -72,10 +72,11 @@ func (o *orchestrator) setPaused(ctx context.Context, scope *RepositoryScope, pa
 		return &RefusalError{Arm: arm, Reason: reason}
 	}
 	o.deps.Log.Global().Debug(op, "changed the merge queue's pause state", dlog.Context{"paused": paused, "repos": changed, "scoped": scope != nil})
-	if !paused {
-		for _, repo := range repos {
-			o.kick(repo)
-		}
+	if paused {
+		return o.suspendForPause(ctx, repos)
+	}
+	for _, repo := range repos {
+		o.kick(repo)
 	}
 	return nil
 }
@@ -659,10 +660,21 @@ func (o *orchestrator) admitFront(ctx context.Context, repo wsm.RepoKey) (ids.Wo
 	if busy {
 		return "", nil, false, nil
 	}
-	// A MERGE A RESTART INTERRUPTED GOES FIRST, paused queue or not: it was
-	// already running, and a pause stops only new admissions. Its entry is
-	// admitted already. Of several, the first in line is the head; the others
-	// resume behind it in its chain (extendChain).
+	// A PAUSED QUEUE ADVANCES NOTHING (owner ruling, 2026-10-12): merges
+	// still enqueue, but nothing near its head runs -- no admission, no
+	// promotion of the merge behind a head that ended, and no resume of a
+	// merge a restart or the pause itself suspended; those wait, recorded,
+	// until the queue is resumed.
+	paused, err := o.deps.DB.MergeQueuePaused(ctx, repo)
+	if err != nil {
+		return "", nil, false, err
+	}
+	if paused {
+		return "", nil, false, nil
+	}
+	// A MERGE A RESTART INTERRUPTED GOES FIRST: it was already running, and
+	// its entry is admitted already. Of several, the first in line is the
+	// head; the others resume behind it in its chain (extendChain).
 	if ws, resuming, err := o.resumeIn(ctx, repo); err != nil {
 		return "", nil, false, err
 	} else if resuming {
@@ -680,18 +692,10 @@ func (o *orchestrator) admitFront(ctx context.Context, repo wsm.RepoKey) (ids.Wo
 	if err != nil {
 		return "", nil, false, err
 	}
-	// THE MERGE RIGHT BEHIND A HEAD THAT ENDED IS PROMOTED, paused queue or
-	// not: it was admitted when it began rebasing behind the head, and a pause
-	// stops only new admissions.
+	// THE MERGE RIGHT BEHIND A HEAD THAT ENDED IS PROMOTED: it was admitted
+	// when it began rebasing behind the head.
 	if r, promoted := o.promote(repo, entries); promoted {
 		return r.ws, r, true, nil
-	}
-	paused, err := o.deps.DB.MergeQueuePaused(ctx, repo)
-	if err != nil {
-		return "", nil, false, err
-	}
-	if paused {
-		return "", nil, false, nil
 	}
 	// ONE MERGE PER REPOSITORY AT A TIME, ACROSS DAEMONS. An entry admitted
 	// with no run here is a merge another daemon is driving, or one a
