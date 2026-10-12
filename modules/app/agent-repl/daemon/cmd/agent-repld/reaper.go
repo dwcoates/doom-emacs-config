@@ -35,6 +35,13 @@ const (
 // directory: an incumbent and its handover successor never sweep at once.
 const worktreeReapLockName = "worktree-reap.lock"
 
+// worktreeLockPath is the ONE path of the worktree lock: the reaper sweeps
+// under it, and the merge workspace sweep retires landed requesters under it,
+// so neither removes a worktree the other is judging.
+func worktreeLockPath(runDir string) string {
+	return filepath.Join(runDir, worktreeReapLockName)
+}
+
 // resolveWorktreeReapIdle reads the idle threshold's override. Empty is the
 // default; a malformed or non-positive value is a REFUSAL.
 func resolveWorktreeReapIdle(value string) (time.Duration, error) {
@@ -80,7 +87,7 @@ func buildWorktreeReaper(git worktreereap.Git, registry worktreereap.Registry, l
 		Registry:     registry,
 		LiveSessions: live,
 		Clock:        clock.System{},
-		LockPath:     filepath.Join(runDir, worktreeReapLockName),
+		LockPath:     worktreeLockPath(runDir),
 		IdleAfter:    idle,
 		ExpireAfter:  expire,
 		StartDelay:   start,
