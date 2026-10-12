@@ -246,6 +246,10 @@ type DetachedOutcome struct {
 	Kind    DetachedOutcomeKind
 	Summary string
 	Branch  string
+	// Requested marks an abandonment somebody asked for (AbandonCause's
+	// releases): the requester's roster is told the merge ended, and its
+	// conversation is not handed the end back, since nothing failed.
+	Requested bool
 }
 
 // DetachedOutcomeKind names how a detached merge ended.
