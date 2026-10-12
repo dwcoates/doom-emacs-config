@@ -9,16 +9,20 @@
  * (lisp/startup.el). The mark is set once per page and never cleared.
  *
  * PAINTED means two animation frames after the page was applied: the first
- * runs before the frame that shows the rows, the second after it. A HIDDEN
- * document paints nothing and WebKit suspends its animation frames, so there
- * the applied page is the whole truth and the mark is set at once; a held
- * startup tab is exactly such a hidden page.
+ * runs before the frame that shows the rows, the second after it. A page NOT
+ * SEEN (its document hidden, or the host holding it behind another page:
+ * `pagePresence().seen()`) paints nothing, and WebKit throttles its animation
+ * frames into bursts many seconds apart (2026-10-12: pages applied by +13s
+ * were marked at +15s and +27s), so there the applied page is the whole truth
+ * and the mark is set at once. Every page loaded for a workspace being opened
+ * is exactly such a page.
  *
  * A refused open marks the page too (`refused`): the refusal is what the
  * conversation slot shows, and a tab held for a page that will never draw
  * would never open.
  */
 import { log } from "../log.js";
+import { pagePresence } from "../presence.js";
 
 /** The attribute Emacs reads. */
 export const CONVERSATION_DRAWN_ATTRIBUTE = "data-conversation-drawn";
@@ -30,6 +34,8 @@ export type ConversationDrawn = "page" | "refused";
 export interface ConversationDrawnEnv {
   readonly doc: Document;
   readonly frame: (callback: () => void) => void;
+  /** Whether the page is seen: shown by its host and its document visible. */
+  readonly seen: () => boolean;
 }
 
 /** The page itself. */
@@ -39,6 +45,7 @@ export function conversationDrawnEnv(): ConversationDrawnEnv {
     frame: (callback) => {
       requestAnimationFrame(() => callback());
     },
+    seen: () => pagePresence().seen(),
   };
 }
 
@@ -54,10 +61,11 @@ export function markConversationDrawn(
     root.setAttribute(CONVERSATION_DRAWN_ATTRIBUTE, what);
     log.info("the conversation is on screen", {
       operation: "feed.conversation-drawn",
-      context: { what, hidden: env.doc.hidden },
+      context: { what, seen },
     });
   };
-  if (env.doc.hidden) {
+  const seen = env.seen();
+  if (!seen) {
     mark();
     return;
   }
