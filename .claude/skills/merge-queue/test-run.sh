@@ -370,6 +370,38 @@ test_resume_queue_names_one_repository() {
   expect_args "--resume-queue <dir> resumes that repository only" "merge-queue -resume -repository-dir $FX/main"
 }
 
+test_hold_rollouts_holds_the_rollouts() {
+  mkfixture
+  invoke --hold-rollouts
+  expect_args "--hold-rollouts asks the daemon to hold the rollouts" "merge-queue -hold-rollouts"
+}
+
+test_release_rollouts_releases_the_rollouts() {
+  mkfixture
+  invoke --release-rollouts
+  expect_args "--release-rollouts asks the daemon to release the rollouts" "merge-queue -release-rollouts"
+}
+
+test_hold_rollouts_refuses_an_argument() {
+  mkfixture
+  invoke --hold-rollouts "$FX/main"
+  if [ "$RUN_RC" -eq 2 ] && [ -z "$(daemon_args)" ] && grep_in "$RUN_OUT" -q "daemon-wide"; then
+    pass "--hold-rollouts with an argument is an error and requests nothing"
+  else
+    fail "--hold-rollouts with an argument is an error and requests nothing" "exit=$RUN_RC args=$(daemon_args)" "$RUN_OUT"
+  fi
+}
+
+test_hold_rollouts_refuses_front() {
+  mkfixture
+  invoke --hold-rollouts --front
+  if [ "$RUN_RC" -eq 2 ] && [ -z "$(daemon_args)" ] && grep_in "$RUN_OUT" -q "goes with a merge verb"; then
+    pass "--front is refused on --hold-rollouts and nothing is asked"
+  else
+    fail "--front is refused on --hold-rollouts and nothing is asked" "exit=$RUN_RC args=$(daemon_args)" "$RUN_OUT"
+  fi
+}
+
 # git_logged LINE — the fake git saw exactly LINE.
 git_logged() {
   grep -qxF -- "$1" "$FX/git-log" 2>/dev/null
@@ -587,6 +619,10 @@ test_pause_queue_pauses_every_repository
 test_pause_queue_names_one_repository
 test_resume_queue_resumes_every_repository
 test_resume_queue_names_one_repository
+test_hold_rollouts_holds_the_rollouts
+test_release_rollouts_releases_the_rollouts
+test_hold_rollouts_refuses_an_argument
+test_hold_rollouts_refuses_front
 test_land_commits_builds_the_named_commits_in_branch_order
 test_land_commits_needs_a_commit
 test_land_commits_refuses_the_main_worktree

@@ -6,7 +6,8 @@
 # workspace, and reports its outcome into that workspace's session; no merge
 # verb waits for the outcome.
 #
-# The queue-control verbs (--dequeue-*, --pause-queue, --resume-queue) ask,
+# The queue-control verbs (--dequeue-*, --pause-queue, --resume-queue,
+# --hold-rollouts, --release-rollouts) ask,
 # from the workspace this shell is inside, for the queue itself to change, and
 # wait (bounded) for the answer, which they print: the outcome when applied, the
 # refusal's cause when refused.
@@ -51,6 +52,11 @@
 #                                checkout is <repo-dir>, else of every
 #                                repository.
 #   --resume-queue [<repo-dir>]  Resume a paused queue, scoped as a pause is.
+#   --hold-rollouts              Hold the queue's ROLLOUTS, daemon-wide: merges
+#                                still land, but a landing in the daemon's own
+#                                checkout no longer redeploys, hot-reloads or
+#                                bounces the runtime. Durable until released.
+#   --release-rollouts           End the hold; the next landing redeploys.
 #
 # Modifier:
 #   --front                      With any merge verb (--enqueue-own,
@@ -66,7 +72,8 @@
 #   0  requested (end the turn; the outcome reports into this session),
 #      announced (--announce-one-shot; the turn goes on),
 #      removed (--remove-branch), or applied (queue-control verbs; the printed
-#      outcome line is evicted, not_queued, paused or resumed, or unread)
+#      outcome line is evicted, not_queued, paused, resumed, held or
+#      released, or unread)
 #   2  script/usage error, or the merge or control could not be requested
 #   5  refused by the daemon; why (or how to read why) is printed
 #   6  the workspace has uncommitted work (--enqueue-own)
@@ -278,8 +285,15 @@ case "${1:-}" in
     fi
     run_verb "$control"
     ;;
+  --hold-rollouts | --release-rollouts)
+    no_front "$1"
+    [ -z "${2:-}" ] || die "$1 takes no argument, not $2: the hold is daemon-wide"
+    control=-hold-rollouts
+    [ "$1" = --hold-rollouts ] || control=-release-rollouts
+    run_verb "$control"
+    ;;
   *)
-    printf 'usage: run.sh --enqueue-own [--in-place | --keep-open] | --announce-one-shot | --land-workspace <dir> | --land-branch <branch> | --land-commits <commit>... | --pr-merged | --remove-branch <branch> | --dequeue-own | --dequeue-workspace <dir> | --pause-queue [<repo-dir>] | --resume-queue [<repo-dir>]  (any merge verb also takes --front)\n' >&2
+    printf 'usage: run.sh --enqueue-own [--in-place | --keep-open] | --announce-one-shot | --land-workspace <dir> | --land-branch <branch> | --land-commits <commit>... | --pr-merged | --remove-branch <branch> | --dequeue-own | --dequeue-workspace <dir> | --pause-queue [<repo-dir>] | --resume-queue [<repo-dir>] | --hold-rollouts | --release-rollouts  (any merge verb also takes --front)\n' >&2
     exit 1
     ;;
 esac
