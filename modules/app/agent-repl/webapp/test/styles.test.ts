@@ -18,7 +18,6 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import stylesheet from "../src/styles.css?raw";
-import { REVIVE_SHIMMER_PERIOD_MS } from "../src/sidebar/reviving.js";
 import { TITLE_FOLD_OPEN_SELECTOR } from "../src/feed/title-fold.js";
 import {
   BUBBLE_CAP_LINES,
@@ -2211,8 +2210,8 @@ describe("regression: the response/prompt bubble collapse model", () => {
 });
 
 /**
- * THE REVIVING SHIMMER'S STYLESHEET CONTRACT. The period the inline delays
- * seek against, the pan range that keeps the text filled, and the
+ * THE REVIVING SHIMMER'S STYLESHEET CONTRACT. The endless loop the rail's
+ * wall-clock seek keeps in phase, the pan range that keeps the text filled, and the
  * reduced-motion stop all live only in the file.
  */
 describe("the reviving shimmer's stylesheet contract", () => {
@@ -2225,12 +2224,12 @@ describe("the reviving shimmer's stylesheet contract", () => {
       .map((rule) => rule.declarations);
   }
 
-  it("runs at the period the inline delays are computed against", () => {
+  it("loops endlessly, so the rail's wall-clock seek keeps it in phase", () => {
     // Arrange / Act
     const [base] = shimmerRules();
 
     // Assert
-    expect(base).toContain(`ws-revive-shimmer ${REVIVE_SHIMMER_PERIOD_MS / 1000}s`);
+    expect(base).toContain("ws-revive-shimmer 2.4s ease-in-out infinite");
   });
 
   it("pans only between 0% and 100%, so the gradient always covers the text", () => {
