@@ -272,7 +272,10 @@ type isSidebarViewFoldSection_Section interface {
 type SidebarViewFoldSection_Repository struct {
 	// A repository's section, echoed from RosterRepoKey. Its fold has a
 	// second reader: the Emacs tab bar hides a collapsed repository's
-	// workspaces.
+	// workspaces. COLLAPSING STANDS THEIR SESSIONS DOWN, as hiding one
+	// workspace does (endpoint_set_workspace_hidden.proto): at once when no
+	// turn runs, once the running turn ends otherwise. EXPANDING starts
+	// nothing by itself: the editor asks for the workspaces with OpenTabs.
 	Repository *v1.RepositoryRef `protobuf:"bytes,1,opt,name=repository,proto3,oneof"`
 }
 

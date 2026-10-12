@@ -92,7 +92,10 @@ export type SidebarViewFoldSection = Message<"agentrepl.v1.SidebarViewFoldSectio
     /**
      * A repository's section, echoed from RosterRepoKey. Its fold has a
      * second reader: the Emacs tab bar hides a collapsed repository's
-     * workspaces.
+     * workspaces. COLLAPSING STANDS THEIR SESSIONS DOWN, as hiding one
+     * workspace does (endpoint_set_workspace_hidden.proto): at once when no
+     * turn runs, once the running turn ends otherwise. EXPANDING starts
+     * nothing by itself: the editor asks for the workspaces with OpenTabs.
      *
      * @generated from field: workspace.v1.RepositoryRef repository = 1;
      */

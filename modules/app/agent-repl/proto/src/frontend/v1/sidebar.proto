@@ -811,6 +811,13 @@ message RosterRow {
     RosterRowStatusNetworkFault network_fault = 51;
     // Starting up; the route is not yet proven.
     RosterRowStatusInit init = 13;
+    // THE EDITOR IS OPENING IT: an OpenTabs names this workspace and has not
+    // answered it `opened` yet. GREY, and NOT SELECTABLE: a click on the row
+    // does nothing until the workspace is open, when the row draws its real
+    // status. Only an open in flight draws this; a workspace whose open
+    // finished, or that no OpenTabs names, never does, so a daemon that
+    // restarted under open tabs draws them as they are.
+    RosterRowStatusOpening opening = 60;
     // The session's backing process is gone but the workspace is recoverable.
     RosterRowStatusSevered severed = 14;
     // Startup failed outright.
@@ -1096,6 +1103,10 @@ message RosterRowStatusDaemonImpaired {}
 message RosterRowStatusWaiting {}
 
 message RosterRowStatusInit {}
+
+// The editor is opening the workspace. DELIBERATELY EMPTY: the arm is the
+// status, grey and not selectable.
+message RosterRowStatusOpening {}
 
 message RosterRowStatusSevered {}
 
