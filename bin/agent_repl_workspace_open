@@ -26,11 +26,11 @@
 #
 # What it does, in order:
 #   1. Resolve the repository's main worktree from $PWD.
-#   2. Locate this checkout's claude-repld binary (daemon/bin/claude-repld, the
+#   2. Locate this checkout's agent-repld binary (daemon/bin/agent-repld, the
 #      artifact path build-frontend.sh owns), building it if it is missing.
-#   3. `claude-repld list-workspaces --git-root <main worktree>` and either
+#   3. `agent-repld list-workspaces --git-root <main worktree>` and either
 #      match the named workspace or prompt with a numbered menu.
-#   4. `claude-repld list-transcripts --workspace <path>` and prompt with a
+#   4. `agent-repld list-transcripts --workspace <path>` and prompt with a
 #      numbered menu of resumable conversations plus a "new conversation" entry.
 #   5. cd into the workspace and exec `claude --permission-mode auto`, adding
 #      `--resume <uuid>` when a conversation was picked.
@@ -44,8 +44,8 @@
 #
 # Environment:
 #   AGENT_REPL_CLAUDE_BIN            the claude CLI to exec (default `claude`).
-#   AGENT_REPL_DAEMON_BIN            the claude-repld to run (default this
-#                                    checkout's daemon/bin/claude-repld).
+#   AGENT_REPL_DAEMON_BIN            the agent-repld to run (default this
+#                                    checkout's daemon/bin/agent-repld).
 #   AGENT_REPL_WORKSPACE_STATE_DB    state database holding the merge geometry
 #                                    (default the daemon's own).
 #   AGENT_REPL_INCLUDE_UNMANAGED     set to 1 to also list linked worktrees with
@@ -86,12 +86,12 @@ THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_REPO="$(cd "$THIS_DIR/.." && pwd)"
 AGENT_REPL_DIR="$SCRIPT_REPO/modules/app/agent-repl"
 DAEMON_DIR="$AGENT_REPL_DIR/daemon"
-DAEMON_BIN="${AGENT_REPL_DAEMON_BIN:-$DAEMON_DIR/bin/claude-repld}"
+DAEMON_BIN="${AGENT_REPL_DAEMON_BIN:-$DAEMON_DIR/bin/agent-repld}"
 
 if [ ! -x "$DAEMON_BIN" ]; then
     [ -x "$AGENT_REPL_DIR/bin/build-frontend.sh" ] ||
-        die "no claude-repld at $DAEMON_BIN and no build-frontend.sh at $AGENT_REPL_DIR/bin"
-    echo "agent_repl_workspace_open: building claude-repld (missing at $DAEMON_BIN)" >&2
+        die "no agent-repld at $DAEMON_BIN and no build-frontend.sh at $AGENT_REPL_DIR/bin"
+    echo "agent_repl_workspace_open: building agent-repld (missing at $DAEMON_BIN)" >&2
     "$AGENT_REPL_DIR/bin/build-frontend.sh" daemon >&2
     [ -x "$DAEMON_BIN" ] || die "build-frontend.sh daemon did not produce $DAEMON_BIN"
 fi

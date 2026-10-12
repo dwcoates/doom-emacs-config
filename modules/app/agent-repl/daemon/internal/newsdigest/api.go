@@ -36,11 +36,11 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
-	"claude-repld/internal/clock"
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/headless"
-	"claude-repld/internal/publish"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/clock"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/headless"
+	"agent-repld/internal/publish"
+	"agent-repld/internal/wsm"
 )
 
 // The records this package writes.

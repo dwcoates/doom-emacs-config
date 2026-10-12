@@ -7,7 +7,7 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // pathBlock is an ImageBlock naming a host file.

@@ -8,7 +8,7 @@ WAIT for the owner's go-ahead before starting.
 - Both earlier workstreams are on local `master` (tip `c5598cdb6`):
   daemon-owned desktop notifications, and the footer `working` status with the
   quiet-stretch line. Full `bin/test-all.sh` was green (26 suites, `e2e` and
-  `e2e-emacs` included). Deployed with `daemon/bin/claude-repld deploy`
+  `e2e-emacs` included). Deployed with `daemon/bin/agent-repld deploy`
   (unforced; 7 workspaces handed over to successor pid 54811; sidecar
   restarted; elisp reload pushed). Emacs restarted (pid 55349), linked, and
   reporting focus.
@@ -27,7 +27,7 @@ WAIT for the owner's go-ahead before starting.
   `e2e-emacs` included), PROCEED AUTOMATICALLY: cherry-pick the branch's
   commits onto local `master` (`git -C ~/.config/doom cherry-pick
   master..workspace-turn-notifications`; the merge queue stays bypassed), then
-  deploy (`~/.config/doom/modules/app/agent-repl/daemon/bin/claude-repld
+  deploy (`~/.config/doom/modules/app/agent-repl/daemon/bin/agent-repld
   deploy`, unforced) and restart Emacs (check for unsaved file buffers first;
   `emacsclient --eval '(kill-emacs)'`, then `open -a Emacs`; emacsclient is
   `/Applications/Emacs.app/Contents/MacOS/bin/emacsclient`). Then read the

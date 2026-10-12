@@ -3,8 +3,8 @@ package drain
 import (
 	"time"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
 )
 
 // refusalWindow is the rate-limited refusal record's state: one WARN per

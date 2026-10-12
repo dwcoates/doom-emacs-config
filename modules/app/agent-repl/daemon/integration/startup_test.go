@@ -9,7 +9,7 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/integration/harness"
+	"agent-repld/integration/harness"
 )
 
 // startupLog reads a new Emacs's startup off its daemon stream until the

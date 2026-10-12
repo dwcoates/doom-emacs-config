@@ -10,7 +10,7 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/internal/workspace"
+	"agent-repld/internal/workspace"
 )
 
 // footerView is one complete footer view, distinguished by the clock's instant

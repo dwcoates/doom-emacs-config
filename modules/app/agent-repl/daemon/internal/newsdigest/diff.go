@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"claude-repld/internal/runecap"
+	"agent-repld/internal/runecap"
 )
 
 // The bounds on what one source hands the model, so one source that changed

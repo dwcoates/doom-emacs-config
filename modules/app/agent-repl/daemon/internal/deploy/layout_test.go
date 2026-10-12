@@ -7,14 +7,14 @@ import (
 	"strings"
 	"testing"
 
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/wsm"
 )
 
 // standInDaemon writes a stand-in daemon binary whose body is script, so the
 // question is asked of a real process without building the daemon.
 func standInDaemon(t *testing.T, script string) string {
 	t.Helper()
-	bin := filepath.Join(t.TempDir(), "claude-repld")
+	bin := filepath.Join(t.TempDir(), "agent-repld")
 	if err := os.WriteFile(bin, []byte("#!/bin/sh\n"+script), 0o755); err != nil {
 		t.Fatalf("write the stand-in: %v", err)
 	}

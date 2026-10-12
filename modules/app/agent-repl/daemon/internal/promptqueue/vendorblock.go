@@ -4,9 +4,9 @@ import (
 	"context"
 	"sort"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
 )
 
 // A MID-SESSION VENDOR BLOCK HOLDS EVERY PROMPT AFTER RECONNECT, UNCLASSIFIED

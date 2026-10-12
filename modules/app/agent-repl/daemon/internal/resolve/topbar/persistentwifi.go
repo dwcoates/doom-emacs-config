@@ -6,7 +6,7 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // SetPersistentWifi states the machine's persistent-wifi standing on every

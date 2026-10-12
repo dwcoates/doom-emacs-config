@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"claude-repld/internal/prompts"
+	"agent-repld/internal/prompts"
 )
 
 // testPolicy is the policy source the decoration unit tests read from. The

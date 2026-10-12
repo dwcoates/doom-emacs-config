@@ -11,7 +11,7 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/integration/harness"
+	"agent-repld/integration/harness"
 )
 
 // TestARestartOverAMergeWaitingForItsWorkspaceRestartsAndTheMergeLands

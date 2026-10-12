@@ -30,7 +30,7 @@
 #   1. shim    — TypeScript, built with `npm run build` ->
 #               agent-shim/claude/shim/dist/main.js
 #   2. webapp  — TypeScript + Vite, built with `npm run build` -> webapp/dist/index.html
-#   3. daemon  — Go, built with `go build` -> daemon/bin/claude-repld
+#   3. daemon  — Go, built with `go build` -> daemon/bin/agent-repld
 #   4. store   — Go, built with `go build` -> ~/.cache/agent-repl/bin/shim-store
 #   5. sidecar — Go, built with `go build` ->
 #               ~/.cache/agent-repl/bin/shim-claude-sidecar
@@ -74,7 +74,7 @@
 #              (+ .built-sha, .source-tree in that dist dir)
 #   webapp  -> DIR/webapp/dist/  (the whole Vite dist)
 #              (+ .built-sha, .source-tree, .build-id in it)
-#   daemon  -> DIR/daemon/bin/claude-repld  (+ .built-sha, .source-tree beside it)
+#   daemon  -> DIR/daemon/bin/agent-repld  (+ .built-sha, .source-tree beside it)
 #   store   -> DIR/cache-bin/shim-store
 #   sidecar -> DIR/cache-bin/shim-claude-sidecar
 #   lock    -> DIR/cache-bin/shim-lock
@@ -257,7 +257,7 @@ else
 fi
 SHIM_ARTIFACT="$SHIM_DIST/main.js"
 WEBAPP_ARTIFACT="$WEBAPP_DIST/index.html"
-DAEMON_ARTIFACT="$DAEMON_BIN/claude-repld"
+DAEMON_ARTIFACT="$DAEMON_BIN/agent-repld"
 STORE_ARTIFACT="$CACHE_BIN/shim-store"
 SIDECAR_ARTIFACT="$CACHE_BIN/shim-claude-sidecar"
 LOCK_ARTIFACT="$CACHE_BIN/shim-lock"
@@ -639,7 +639,7 @@ build_daemon() {
     require_bin go "install the Go toolchain"
     echo "[build-frontend] daemon: building..."
     mkdir -p "$DAEMON_BIN"
-    ( cd "$DAEMON_DIR" && go build "${GO_BUILD_FLAGS[@]}" -o "$DAEMON_ARTIFACT" ./cmd/claude-repld )
+    ( cd "$DAEMON_DIR" && go build "${GO_BUILD_FLAGS[@]}" -o "$DAEMON_ARTIFACT" ./cmd/agent-repld )
     write_built_sha "$DAEMON_SHA_STAMP" "$ROOT"
     stamp_source_tree daemon "$DAEMON_TREE_STAMP"
     echo "[build-frontend] daemon: done"

@@ -98,7 +98,7 @@ gone() { ! kill -0 "$1" 2>/dev/null; }
 # ---- a whole bounce --------------------------------------------------------
 
 world; w="$W"
-backend "$w/checkout/daemon/bin/claude-repld" obeys; daemon="$PID"
+backend "$w/checkout/daemon/bin/agent-repld" obeys; daemon="$PID"
 backend "$w/checkout/agent-shim/claude/shim/dist/main.js" ignores; shim="$PID"
 backend "$w/cache/agent-repl/bin/shim-lock" obeys; lock="$PID"
 run "$w"; status=$?
@@ -110,7 +110,7 @@ gone "$lock" && pass "the shim locks are stopped" || fail "a shim lock survived"
 # ---- the services are the next daemon's to restart, never the bounce's -------
 
 world; w="$W"
-backend "$w/checkout/daemon/bin/claude-repld" obeys; daemon="$PID"
+backend "$w/checkout/daemon/bin/agent-repld" obeys; daemon="$PID"
 backend "$w/cache/agent-repl/bin/shim-store" ignores; store="$PID"
 backend "$w/cache/agent-repl/bin/shim-claude-sidecar" ignores; sidecar="$PID"
 run "$w"; status=$?
@@ -134,7 +134,7 @@ line_of() { grep -nE -- "$2" "$1/out" | sed -n 1p | cut -d: -f1; }
 # ---- the daemon stands itself and its shims down first ----------------------
 
 world; w="$W"
-backend "$w/checkout/daemon/bin/claude-repld" ignores; daemon="$PID"
+backend "$w/checkout/daemon/bin/agent-repld" ignores; daemon="$PID"
 backend "$w/checkout/agent-shim/claude/shim/dist/main.js" ignores; shim="$PID"
 backend "$w/cache/agent-repl/bin/shim-lock" ignores; lock="$PID"
 on_call "$w" "kill -KILL $shim $lock; kill -KILL $daemon"
@@ -149,7 +149,7 @@ grep -qE "(daemon|shims|shim locks): asking pid.* to shut down" "$w/out" &&
     pass "nothing the daemon stood down is signalled"
 
 world; w="$W"
-backend "$w/checkout/daemon/bin/claude-repld" obeys; daemon="$PID"
+backend "$w/checkout/daemon/bin/agent-repld" obeys; daemon="$PID"
 backend "$w/checkout/agent-shim/claude/shim/dist/main.js" ignores; shim="$PID"
 on_call "$w" "kill -KILL $shim; kill -KILL $daemon"
 run "$w"
@@ -163,12 +163,12 @@ $(cat "$w/out")"
 # ---- the fresh runtime Emacs starts meanwhile is left alone ----------------
 
 world; w="$W"
-backend "$w/checkout/daemon/bin/claude-repld" ignores; daemon="$PID"
+backend "$w/checkout/daemon/bin/agent-repld" ignores; daemon="$PID"
 backend "$w/checkout/agent-shim/claude/shim/dist/main.js" ignores; shim="$PID"
 # The stand-down's answer also starts what Emacs's relaunched daemon would:
 # a fresh daemon and a fresh shim on the same paths.
 on_call "$w" "kill -KILL $shim $daemon
-bash -c '\"\$0\" </dev/null >/dev/null 2>&1 & echo \$! >\"\$1\"' $w/checkout/daemon/bin/claude-repld $w/fresh-daemon
+bash -c '\"\$0\" </dev/null >/dev/null 2>&1 & echo \$! >\"\$1\"' $w/checkout/daemon/bin/agent-repld $w/fresh-daemon
 bash -c '\"\$0\" </dev/null >/dev/null 2>&1 & echo \$! >\"\$1\"' $w/checkout/agent-shim/claude/shim/dist/main.js $w/fresh-shim"
 run "$w"; status=$?
 fresh_daemon="$(cat "$w/fresh-daemon" 2>/dev/null)"; STARTED+=("$fresh_daemon")
@@ -181,7 +181,7 @@ fresh_shim="$(cat "$w/fresh-shim" 2>/dev/null)"; STARTED+=("$fresh_shim")
 # ---- a stand-down the daemon refuses falls back to its signal --------------
 
 world; w="$W"
-backend "$w/checkout/daemon/bin/claude-repld" obeys; daemon="$PID"
+backend "$w/checkout/daemon/bin/agent-repld" obeys; daemon="$PID"
 run "$w"; status=$?
 [ "$status" -eq 0 ] && gone "$daemon" &&
     pass "a daemon that refuses the stand-down is stopped by its SIGTERM" || fail "a refusing daemon survived (exit $status): $(cat "$w/out")"
@@ -191,7 +191,7 @@ grep -q "the stand-down was not accepted" "$w/out" &&
 # ---- a stand-down accepted and never carried out is enforced ---------------
 
 world; w="$W"
-backend "$w/checkout/daemon/bin/claude-repld" ignores; daemon="$PID"
+backend "$w/checkout/daemon/bin/agent-repld" ignores; daemon="$PID"
 on_call "$w" ":"
 run "$w"; status=$?
 [ "$status" -eq 0 ] && gone "$daemon" &&
@@ -201,7 +201,7 @@ run "$w"; status=$?
 # ---- another checkout's processes are left alone ---------------------------
 
 world; w="$W"
-backend "$w/elsewhere/daemon/bin/claude-repld" obeys; other="$PID"
+backend "$w/elsewhere/daemon/bin/agent-repld" obeys; other="$PID"
 run "$w"
 kill -0 "$other" 2>/dev/null && pass "a daemon from another checkout keeps running" || fail "another checkout's daemon was stopped"
 
@@ -224,7 +224,7 @@ kill -0 "$other_shim" 2>/dev/null && pass "a shim of another checkout serving an
 # ---- the daemon the state root advertises goes, whichever build it runs ----
 
 world; w="$W"
-backend "$w/deployed/daemon/bin/claude-repld" obeys; advertised="$PID"
+backend "$w/deployed/daemon/bin/agent-repld" obeys; advertised="$PID"
 printf '127.0.0.1:9\npid=%s\n' "$advertised" >"$w/state/daemon.addr"
 run "$w"; status=$?
 [ "$status" -eq 0 ] && gone "$advertised" &&
@@ -234,11 +234,11 @@ run "$w"; status=$?
 # ---- every daemon of the state root goes, advertised or not ---------------
 
 world; w="$W"
-backend "$w/checkout/daemon/bin/claude-repld" ignores; advertised="$PID"
+backend "$w/checkout/daemon/bin/agent-repld" ignores; advertised="$PID"
 printf '127.0.0.1:9\npid=%s\n' "$advertised" >"$w/state/daemon.addr"
 # A second daemon of this state root from another build path, which no
 # advertisement names: a handover's leftover.
-HOLD="$w/state/daemon.lock" backend "$w/deployed/daemon/bin/claude-repld" obeys; extra="$PID"
+HOLD="$w/state/daemon.lock" backend "$w/deployed/daemon/bin/agent-repld" obeys; extra="$PID"
 on_call "$w" "kill -KILL $advertised"
 run "$w"; status=$?
 [ "$status" -eq 0 ] && gone "$extra" &&
@@ -246,7 +246,7 @@ run "$w"; status=$?
     fail "a second daemon of the state root survived (exit $status): $(cat "$w/out")"
 
 world; w="$W"
-HOLD="$w/state/wsm.db" backend "$w/deployed/daemon/bin/claude-repld" obeys; extra="$PID"
+HOLD="$w/state/wsm.db" backend "$w/deployed/daemon/bin/agent-repld" obeys; extra="$PID"
 run "$w"; status=$?
 [ "$status" -eq 0 ] && gone "$extra" &&
     pass "a daemon holding the state root's database is stopped from any build path" ||
@@ -254,7 +254,7 @@ run "$w"; status=$?
 
 world; w="$W"
 mkdir -p "$w/other-state"
-HOLD="$w/other-state/daemon.lock" backend "$w/elsewhere/daemon/bin/claude-repld" obeys; other="$PID"
+HOLD="$w/other-state/daemon.lock" backend "$w/elsewhere/daemon/bin/agent-repld" obeys; other="$PID"
 run "$w"
 kill -0 "$other" 2>/dev/null && pass "a daemon holding another state root's lock keeps running" ||
     fail "another state root's daemon was stopped"
@@ -268,7 +268,7 @@ kill -0 "$other" 2>/dev/null && pass "a process that is no daemon keeps running 
 # ---- a failed build stops nothing ------------------------------------------
 
 world; w="$W"
-backend "$w/checkout/daemon/bin/claude-repld" obeys; daemon="$PID"
+backend "$w/checkout/daemon/bin/agent-repld" obeys; daemon="$PID"
 printf '#!/bin/sh\nexit 3\n' >"$w/failing-builder"; chmod +x "$w/failing-builder"
 BUILDER="$w/failing-builder" run "$w"; status=$?
 [ "$status" -eq 1 ] && pass "a failed build exits 1" || fail "a failed build exited $status"

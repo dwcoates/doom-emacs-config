@@ -1,4 +1,4 @@
-module claude-repld
+module agent-repld
 
 go 1.24.0
 

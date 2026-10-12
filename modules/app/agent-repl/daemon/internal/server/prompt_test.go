@@ -12,11 +12,11 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/internal/prompthandler"
-	"claude-repld/internal/promptqueue"
-	"claude-repld/internal/replyquote"
-	"claude-repld/internal/workspace"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/prompthandler"
+	"agent-repld/internal/promptqueue"
+	"agent-repld/internal/replyquote"
+	"agent-repld/internal/workspace"
+	"agent-repld/internal/wsm"
 )
 
 // submitRequest is one well-formed submission.

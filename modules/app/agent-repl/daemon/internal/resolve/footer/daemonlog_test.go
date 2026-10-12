@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
 )
 
 // feedbackBound is how long the footer's own teed record may take to return.

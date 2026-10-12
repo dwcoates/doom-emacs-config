@@ -6,8 +6,8 @@ import (
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/internal/resolve/footer"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/resolve/footer"
+	"agent-repld/internal/wsm"
 )
 
 // oneShotWorkspace is the test workspace, created as a one-shot.

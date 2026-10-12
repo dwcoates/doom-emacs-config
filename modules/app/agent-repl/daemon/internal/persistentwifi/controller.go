@@ -11,10 +11,10 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	"claude-repld/internal/clock"
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/protoarm"
-	"claude-repld/internal/publish"
+	"agent-repld/internal/clock"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/protoarm"
+	"agent-repld/internal/publish"
 )
 
 // Operations every record of this package carries.

@@ -3,7 +3,7 @@ package worktreereap
 import (
 	"fmt"
 
-	"claude-repld/internal/flock"
+	"agent-repld/internal/flock"
 )
 
 // acquireLock takes the cross-process sweep lock without blocking. The bool

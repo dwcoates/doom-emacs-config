@@ -8,7 +8,7 @@ import (
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/wsm"
 )
 
 // TestEvictRefusesAWorkspaceWithNothingQueued covers the refusal an operator

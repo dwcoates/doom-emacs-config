@@ -11,9 +11,9 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 	"google.golang.org/protobuf/proto"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/flock"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/flock"
+	"agent-repld/internal/wsm"
 )
 
 // The triggers a run records.

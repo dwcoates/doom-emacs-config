@@ -7,12 +7,12 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
 
-	"claude-repld/internal/bounce"
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/holdfold"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/resolve/footer"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/bounce"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/holdfold"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/resolve/footer"
+	"agent-repld/internal/wsm"
 )
 
 // SubmitSessionAct sends a session act down the ONE delivery path, so it cannot

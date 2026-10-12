@@ -10,13 +10,13 @@ import (
 	"sync"
 	"time"
 
-	"claude-repld/internal/bounce"
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/flock"
-	"claude-repld/internal/intakegate"
-	"claude-repld/internal/prompthandler"
-	"claude-repld/internal/promptqueue"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/bounce"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/flock"
+	"agent-repld/internal/intakegate"
+	"agent-repld/internal/prompthandler"
+	"agent-repld/internal/promptqueue"
+	"agent-repld/internal/wsm"
 )
 
 // The operation names this package's records carry.

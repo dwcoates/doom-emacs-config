@@ -1,6 +1,6 @@
 package drain
 
-import "claude-repld/internal/clock"
+import "agent-repld/internal/clock"
 
 // Clock is the controller's view of time; see internal/clock.
 type Clock = clock.Clock

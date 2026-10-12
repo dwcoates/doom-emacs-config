@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"claude-repld/internal/ids"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
 )
 
 func TestCreateTaskRecordsTheTask(t *testing.T) {

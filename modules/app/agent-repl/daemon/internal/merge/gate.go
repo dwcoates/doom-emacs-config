@@ -13,9 +13,9 @@ import (
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/internal/cpugov"
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/resolve/footer"
+	"agent-repld/internal/cpugov"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/resolve/footer"
 )
 
 // This file is the gate's RUN: the selected suites run on the rebased branch

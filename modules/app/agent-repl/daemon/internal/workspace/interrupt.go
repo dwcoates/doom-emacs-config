@@ -6,10 +6,10 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/feedid"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/shimclient"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/feedid"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/shimclient"
 )
 
 // InterruptOutcome is what an interrupt did, which is an ANSWER in every case —

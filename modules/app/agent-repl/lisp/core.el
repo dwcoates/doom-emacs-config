@@ -3254,7 +3254,7 @@ workspace, global otherwise.  Returns the echoed text."
 A hard bound on the work the helper can be ASKED to do, not a tuning
 preference.  `split-string' with a trim regexp indexes a multibyte
 string once per field and each index costs a scan, so splitting a
-multi-megabyte capture is effectively quadratic: a `*claude-repld*'
+multi-megabyte capture is effectively quadratic: a `*agent-repld*'
 capture grown to tens of megabytes pinned Emacs at 99% CPU for over ten
 minutes inside a server-filter eval, where quit is inhibited and the
 whole frame therefore froze.

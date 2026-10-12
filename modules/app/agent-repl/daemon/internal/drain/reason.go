@@ -9,8 +9,8 @@ import (
 
 	"google.golang.org/protobuf/encoding/protojson"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/wsm"
 )
 
 // EncodeReason renders a typed DrainReason for the WSM row. The reason is

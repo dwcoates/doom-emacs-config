@@ -3,7 +3,7 @@
 # test-e2e-emacs.sh — the SANDBOXED Emacs client layer.
 #
 # The `e2e-emacs` gate suite. It drives a real Emacs, which spawns a real
-# claude-repld through the module's own launcher, and asserts on Emacs's own
+# agent-repld through the module's own launcher, and asserts on Emacs's own
 # buffers, windows, tab-bar, modeline and roster. See e2e/EMACS-LAYER-SPEC.md.
 #
 # THE CONTAINER IS A PRECONDITION, NOT A FAILURE. The layer must never run

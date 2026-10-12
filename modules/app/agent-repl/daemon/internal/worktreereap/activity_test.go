@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"claude-repld/internal/gitclient"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/gitclient"
+	"agent-repld/internal/wsm"
 )
 
 // activityOf reads one worktree's last activity out of the world.

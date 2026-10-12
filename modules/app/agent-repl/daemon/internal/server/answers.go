@@ -13,11 +13,11 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/feedid"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/resolve/feed"
-	"claude-repld/internal/workspace"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/feedid"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/resolve/feed"
+	"agent-repld/internal/workspace"
 )
 
 // The four "act on what is on screen" verbs. Each one decodes the clicked row's

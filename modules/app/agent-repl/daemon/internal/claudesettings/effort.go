@@ -28,7 +28,7 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"claude-repld/internal/effortlevel"
+	"agent-repld/internal/effortlevel"
 )
 
 // FileName is the settings file inside a config root.

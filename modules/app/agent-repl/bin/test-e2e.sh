@@ -3,7 +3,7 @@
 # test-e2e.sh — the cross-system e2e suite, WITHOUT a container.
 #
 # This is the `e2e` gate suite: the Go tests in modules/app/agent-repl/e2e
-# that dial the daemon's Connect API directly. They run a real claude-repld,
+# that dial the daemon's Connect API directly. They run a real agent-repld,
 # a real shim, a real shim-store and a real shim-claude-sidecar against the
 # FAKE SDK and the SCRIPTED FAKE GIT, so they need no container and no
 # network, and they belong in the gate like every other suite.

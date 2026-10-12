@@ -12,10 +12,10 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/gitclient"
-	"claude-repld/internal/prompts"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/gitclient"
+	"agent-repld/internal/prompts"
+	"agent-repld/internal/wsm"
 )
 
 // TestOtherRepoTabSequence covers the other method: landing, tests and PR work

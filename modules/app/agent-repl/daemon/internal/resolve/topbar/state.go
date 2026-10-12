@@ -4,10 +4,10 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/internal/apiresponses"
-	"claude-repld/internal/claudesettings"
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/shimclient"
+	"agent-repld/internal/apiresponses"
+	"agent-repld/internal/claudesettings"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/shimclient"
 )
 
 // usageFingerprint is one unit's reported usage, kept so a re-report can be

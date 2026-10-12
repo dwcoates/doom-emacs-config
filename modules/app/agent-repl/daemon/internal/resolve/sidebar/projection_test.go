@@ -5,8 +5,8 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"claude-repld/internal/health"
-	"claude-repld/internal/resolve/footer"
+	"agent-repld/internal/health"
+	"agent-repld/internal/resolve/footer"
 )
 
 // footerOf answers the footer the fanned resolver projects, so a test can

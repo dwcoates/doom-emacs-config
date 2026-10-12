@@ -23,7 +23,7 @@ import (
 	"fmt"
 	"time"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // Roots are the two config roots the daemon routes between.

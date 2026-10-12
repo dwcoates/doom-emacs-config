@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/wsm"
 )
 
 func TestKillForcesTheSessionDeath(t *testing.T) {

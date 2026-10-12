@@ -4,9 +4,9 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/feedid"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/feedid"
+	"agent-repld/internal/wsm"
 )
 
 // THINKING IS THE AGENT'S INTERMEDIATE REASONING drawn as its own bubble, one

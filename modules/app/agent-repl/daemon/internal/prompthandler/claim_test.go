@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"claude-repld/internal/ids"
+	"agent-repld/internal/ids"
 )
 
 // TestInflightAcquireTakesAFreeKeyAtOnce pins the ordinary case: nothing else

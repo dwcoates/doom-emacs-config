@@ -6,8 +6,8 @@ import (
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/internal/resolve/sidebar"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/resolve/sidebar"
+	"agent-repld/internal/wsm"
 )
 
 // mergedRows is every row of the Recently Merged band, across its repository

@@ -77,10 +77,10 @@ jq -c '{timestamp,runtime,workspace_dir,workspace_id,agent_repl_session_id,claud
 ## Cross-check the daemon registry
 
 The daemon registry is
-`~/.claude-emacs/claude-repld-sessions.json`. Inspect it read-only:
+`~/.claude-emacs/agent-repld-sessions.json`. Inspect it read-only:
 
 ```sh
-jq '.' ~/.claude-emacs/claude-repld-sessions.json
+jq '.' ~/.claude-emacs/agent-repld-sessions.json
 ```
 
 Registry records carry:
@@ -95,7 +95,7 @@ Filter by workspace:
 ```sh
 jq --arg ws "/absolute/workspace" \
   '.sessions[] | select(.cwd == $ws)' \
-  ~/.claude-emacs/claude-repld-sessions.json
+  ~/.claude-emacs/agent-repld-sessions.json
 ```
 
 Several records can share one workspace. Do not select the first record

@@ -8,8 +8,8 @@ import (
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
 )
 
 // THE STATUS-INDEPENDENT SALIENT LINES (owner ruling, 2026-09-30; agent-repl

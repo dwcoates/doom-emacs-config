@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"claude-repld/internal/clock/clocktest"
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/clock/clocktest"
+	"agent-repld/internal/dlog"
 )
 
 var errScripted = errors.New("scripted failure")

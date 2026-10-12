@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // ErrNotLocal reports a refused bind: the profiling surface exposes goroutine

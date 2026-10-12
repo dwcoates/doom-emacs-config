@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // THE WORKSPACE STATE DATABASE IS THE USER'S DATA, and it is carried FORWARD,

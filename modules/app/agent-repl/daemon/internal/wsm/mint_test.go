@@ -3,7 +3,7 @@ package wsm_test
 import (
 	"testing"
 
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/wsm"
 )
 
 func TestMintedIDsHaveTheSocketBudgetLength(t *testing.T) {

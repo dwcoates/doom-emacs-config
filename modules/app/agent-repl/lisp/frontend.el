@@ -2,7 +2,7 @@
 
 ;;; Commentary:
 
-;; Mounts the claude-repld webapp inside Emacs as an xwidget-webkit
+;; Mounts the agent-repld webapp inside Emacs as an xwidget-webkit
 ;; buffer placed in the workspace's agent output window — the in-Emacs
 ;; browser rendering of the session.
 ;;

@@ -10,11 +10,11 @@ import (
 
 	shimv1 "agentrepl/proto/shim/v1"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/headless"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/prompts"
-	"claude-repld/internal/runecap"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/headless"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/prompts"
+	"agent-repld/internal/runecap"
 )
 
 // opSynth is the operation the synthesizer's records carry.

@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"time"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/holdfold"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/holdfold"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
 )
 
 const opRollBack = "daemon.promptqueue.roll_back"

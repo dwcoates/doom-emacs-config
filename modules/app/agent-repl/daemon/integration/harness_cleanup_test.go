@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"agent-repld/integration/harness"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	shimv1 "agentrepl/proto/shim/v1"
-	"claude-repld/integration/harness"
 
 	"connectrpc.com/connect"
 )

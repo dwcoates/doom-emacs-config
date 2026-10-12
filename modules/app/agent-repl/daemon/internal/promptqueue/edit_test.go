@@ -9,10 +9,10 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"claude-repld/internal/classifier"
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/replyquote"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/classifier"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/replyquote"
+	"agent-repld/internal/wsm"
 )
 
 // editorUp is the probe of a workspace whose editor's host stream stands.

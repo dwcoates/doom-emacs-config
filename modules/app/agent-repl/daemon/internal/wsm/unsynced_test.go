@@ -3,7 +3,7 @@ package wsm
 import (
 	"testing"
 
-	"claude-repld/internal/envc"
+	"agent-repld/internal/envc"
 )
 
 func TestUnsyncedFromEnv(t *testing.T) {

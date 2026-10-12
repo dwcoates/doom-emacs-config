@@ -5,9 +5,9 @@ import (
 	"errors"
 	"testing"
 
-	"claude-repld/internal/merge"
-	"claude-repld/internal/promptqueue"
-	"claude-repld/internal/workspace"
+	"agent-repld/internal/merge"
+	"agent-repld/internal/promptqueue"
+	"agent-repld/internal/workspace"
 )
 
 // TestARefusedEntryIsAnAnswerAndAFailedOneIsAFault pins the level a refused

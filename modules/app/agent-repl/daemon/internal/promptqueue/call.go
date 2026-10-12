@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"slices"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
 )
 
 // NO QUEUE LOCK IS EVER HELD ACROSS A CALL TO THE SHIM.

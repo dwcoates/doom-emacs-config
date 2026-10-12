@@ -3,7 +3,7 @@ package footer
 import (
 	"testing"
 
-	"claude-repld/internal/shimclient"
+	"agent-repld/internal/shimclient"
 )
 
 func TestABringUpOnARouteNeverSeenIsStarting(t *testing.T) {

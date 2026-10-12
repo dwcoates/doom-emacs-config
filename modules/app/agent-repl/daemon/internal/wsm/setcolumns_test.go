@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 func TestSetWorkspaceColumnsAssignsEveryColumnTogether(t *testing.T) {

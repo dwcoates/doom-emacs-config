@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"claude-repld/internal/externalbrowser"
+	"agent-repld/internal/externalbrowser"
 )
 
 // twoProfiles is a Chrome Local State document with a personal and a work

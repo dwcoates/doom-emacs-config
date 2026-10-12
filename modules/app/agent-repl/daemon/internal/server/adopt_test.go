@@ -11,8 +11,8 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
-	"claude-repld/internal/rollout"
-	"claude-repld/internal/workspace"
+	"agent-repld/internal/rollout"
+	"agent-repld/internal/workspace"
 )
 
 // TestAdoptWebAnswersNoTransferAnnouncedOnAnOrdinaryBoot pins the project-lead

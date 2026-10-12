@@ -7,7 +7,7 @@ import (
 	"syscall"
 	"testing"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // scriptedListener answers Accept from a script, one entry per call.

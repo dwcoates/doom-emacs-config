@@ -37,7 +37,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"claude-repld/integration/harness"
+	"agent-repld/integration/harness"
 )
 
 // emacsFindFileBound bounds one routed visit: the advice, the verb it may

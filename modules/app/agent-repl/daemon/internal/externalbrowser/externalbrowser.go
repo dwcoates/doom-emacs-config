@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/usersetup"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/usersetup"
 )
 
 const (

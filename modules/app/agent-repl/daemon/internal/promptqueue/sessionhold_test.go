@@ -7,10 +7,10 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"claude-repld/internal/classifier"
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/classifier"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
 )
 
 // THE 2026-10-10 INCIDENT, deterministically: a prompt is held for the revival

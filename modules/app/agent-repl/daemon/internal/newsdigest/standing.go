@@ -10,7 +10,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 	"google.golang.org/protobuf/proto"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // Republish reads the standing digest from the store and publishes it (or

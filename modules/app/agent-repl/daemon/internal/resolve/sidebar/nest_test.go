@@ -4,8 +4,8 @@ import (
 	"agentrepl/protohelpers/rosterwalk"
 	"testing"
 
-	"claude-repld/internal/ids"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
 )
 
 func TestRosterDoesNotNestAWorkspaceUnderTheBranchItWasCutFrom(t *testing.T) {

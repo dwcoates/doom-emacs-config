@@ -2264,7 +2264,7 @@ export function topbarView(init?: TopbarInit): TopbarView {
     connectivity: {
       tone: init?.tone ?? "green",
       glyph: init?.glyph ?? "dot",
-      title: init?.connectivityTitle ?? "connected to claude-repld",
+      title: init?.connectivityTitle ?? "connected to agent-repld",
       session:
         init?.agentReplSession === undefined
           ? undefined

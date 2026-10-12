@@ -1,6 +1,6 @@
 //go:build integration
 
-// Package integration exercises a real claude-repld process against fakes of
+// Package integration exercises a real agent-repld process against fakes of
 // every neighbor. Build tag `integration`; run it with
 // `go test -tags integration ./integration/...`.
 package integration
@@ -19,7 +19,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
-	"claude-repld/integration/harness"
+	"agent-repld/integration/harness"
 
 	"connectrpc.com/connect"
 )

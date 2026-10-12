@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"claude-repld/internal/ids"
-	"claude-repld/internal/rollout"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/rollout"
 )
 
 // fakeRolloutStanding is a rollout.Controller answering only the standing.

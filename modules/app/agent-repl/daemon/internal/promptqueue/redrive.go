@@ -3,7 +3,7 @@ package promptqueue
 import (
 	"context"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // redriveKey marks a context whose submission RE-DRIVES an earlier attempt.

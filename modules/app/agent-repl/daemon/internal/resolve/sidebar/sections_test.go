@@ -7,12 +7,12 @@ import (
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/repodivergence"
-	"claude-repld/internal/resolve/footer"
-	"claude-repld/internal/resolve/sidebar"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/repodivergence"
+	"agent-repld/internal/resolve/footer"
+	"agent-repld/internal/resolve/sidebar"
+	"agent-repld/internal/wsm"
 
 	"google.golang.org/protobuf/proto"
 )

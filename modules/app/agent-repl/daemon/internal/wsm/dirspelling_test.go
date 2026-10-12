@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // withCanonicalDir replaces the open's canonicalizer, so a test models a

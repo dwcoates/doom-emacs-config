@@ -83,7 +83,7 @@ func TestMessagesAttributesByTheWorkspaceNameInTheLine(t *testing.T) {
 
 func TestMessagesAttributesALineNamingNothingToGlobal(t *testing.T) {
 	// Arrange.
-	text := "ERROR: elisp.daemon.binary-missing binary=\"claude-repld\"\n"
+	text := "ERROR: elisp.daemon.binary-missing binary=\"agent-repld\"\n"
 
 	// Act.
 	findings := HarvestMessages(text, 0, nil)

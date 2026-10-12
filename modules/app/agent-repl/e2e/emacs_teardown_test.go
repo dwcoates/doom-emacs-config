@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"claude-repld/integration/harness"
+	"agent-repld/integration/harness"
 )
 
 // TEARDOWN'S OWN TESTS.

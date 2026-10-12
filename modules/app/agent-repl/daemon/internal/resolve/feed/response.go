@@ -6,10 +6,10 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/feedid"
-	"claude-repld/internal/resolve/turnfault"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/feedid"
+	"agent-repld/internal/resolve/turnfault"
+	"agent-repld/internal/wsm"
 )
 
 // THE PROSE FOLD. The shim forwards each fragment as the vendor emits it and

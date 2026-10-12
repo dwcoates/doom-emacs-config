@@ -10,7 +10,7 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/internal/resolve/feed"
+	"agent-repld/internal/resolve/feed"
 )
 
 // page is one answered feed page.

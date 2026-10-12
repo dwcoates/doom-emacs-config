@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"claude-repld/integration/harness"
+	"agent-repld/integration/harness"
 )
 
 // reaperEnv runs the landed-worktree reaper's schedule fast enough to observe:

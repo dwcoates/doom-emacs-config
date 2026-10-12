@@ -9,8 +9,8 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/internal/resolve/turnfault"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/resolve/turnfault"
+	"agent-repld/internal/wsm"
 )
 
 // THE OUTCOME MARKER (owner ruling, 2026-10-06): each ending's marker family

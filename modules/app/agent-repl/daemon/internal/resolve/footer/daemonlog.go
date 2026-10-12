@@ -5,8 +5,8 @@ import (
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
 )
 
 // THE DAEMON'S OWN WARNINGS AND ERRORS about a workspace reach its strip as the

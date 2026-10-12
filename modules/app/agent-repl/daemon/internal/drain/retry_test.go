@@ -7,7 +7,7 @@ import (
 
 	shimv1 "agentrepl/proto/shim/v1"
 
-	"claude-repld/internal/ids"
+	"agent-repld/internal/ids"
 )
 
 func TestHibernateRetryDelay(t *testing.T) {

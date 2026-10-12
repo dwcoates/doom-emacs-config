@@ -10,7 +10,7 @@ import (
 	"strings"
 	"syscall"
 
-	"claude-repld/internal/tempdirs/tempdirstest"
+	"agent-repld/internal/tempdirs/tempdirstest"
 )
 
 // A RUN ROOT IS ONE `go test` PROCESS'S WHOLE FOOTPRINT ON DISK, AND ITS

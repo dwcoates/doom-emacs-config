@@ -662,7 +662,7 @@ independently, in any order among themselves.
    seq-holder inventory, `session-rebase.ts`'s header.
 
 Deploy per `modules/app/agent-repl/AGENTS.md`: `bin/build-frontend.sh` then
-bounce `claude-repld` for every step; the store and sidecar are untouched, so
+bounce `agent-repld` for every step; the store and sidecar are untouched, so
 their hand-deploy path is not involved.
 
 ### Risk register

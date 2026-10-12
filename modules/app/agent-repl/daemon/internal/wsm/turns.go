@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // turnColumns is the one select list every turn read shares.

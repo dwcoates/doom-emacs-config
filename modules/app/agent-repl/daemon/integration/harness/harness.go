@@ -1,4 +1,4 @@
-// Package harness runs a REAL claude-repld process against FAKES of every
+// Package harness runs a REAL agent-repld process against FAKES of every
 // neighbor: a fake shim.v1 server, fake git repositories, a temp state root, a
 // fake store socket path nothing listens on, and a fake webapp dist. It never
 // runs the real shim, the real store, Emacs or the webapp, and never calls the
@@ -96,7 +96,7 @@ func Main(m *testing.M) int {
 
 // MainAt is Main, except the daemon module root is given explicitly instead
 // of discovered by walking up from the working directory. A suite outside the
-// claude-repld module (agentrepl/e2e) cannot use the cwd-walk — its own
+// agent-repld module (agentrepl/e2e) cannot use the cwd-walk — its own
 // go.mod would be found first, since the walk stops at the nearest one — so
 // it resolves its own relative path to daemon/ and calls this instead of
 // Main.
@@ -160,7 +160,7 @@ func mainIn(m *testing.M, module, root string) int {
 		for _, b := range []struct {
 			path *string
 			name string
-		}{{&daemonBinary, "claude-repld"}, {&fakeshimBinary, "fakeshim"}, {&gitBinary, "git"}} {
+		}{{&daemonBinary, "agent-repld"}, {&fakeshimBinary, "fakeshim"}, {&gitBinary, "git"}} {
 			if *b.path, err = testenv.SharedBinary(shared, prebuiltSub, b.name); err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				return 1
@@ -180,7 +180,7 @@ func mainIn(m *testing.M, module, root string) int {
 		return 1
 	}
 
-	daemonBinary = filepath.Join(dir, "claude-repld")
+	daemonBinary = filepath.Join(dir, "agent-repld")
 	fakeshimBinary = filepath.Join(dir, "fakeshim")
 	// The scripted `git`. It is built under its real name because it is placed
 	// first on the daemon's PATH: nothing in a test ever reaches the real
@@ -195,7 +195,7 @@ func mainIn(m *testing.M, module, root string) int {
 		// daemon's environment when they run — an instrumented fake would
 		// write its counters into the daemon's own GOCOVERDIR and appear in
 		// the daemon's profile as covered "production" code.
-		{daemonBinary, "./cmd/claude-repld", true},
+		{daemonBinary, "./cmd/agent-repld", true},
 		{fakeshimBinary, "./integration/fakeshim", false},
 		{gitBinary, "./integration/fakegit/git", false},
 	} {

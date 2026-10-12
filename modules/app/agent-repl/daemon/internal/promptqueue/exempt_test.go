@@ -5,7 +5,7 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/wsm"
 )
 
 // TestExemptFromLeaseIsTheMergesOwnOrigins covers the one rule both the

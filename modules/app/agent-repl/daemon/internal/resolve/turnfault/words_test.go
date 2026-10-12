@@ -7,7 +7,7 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/wsm"
 )
 
 func failureOf(arm any) *conversationv1.AgentFailure {

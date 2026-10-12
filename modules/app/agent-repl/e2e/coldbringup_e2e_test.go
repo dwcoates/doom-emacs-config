@@ -28,7 +28,7 @@ import (
 	"strings"
 	"testing"
 
-	"claude-repld/integration/harness"
+	"agent-repld/integration/harness"
 )
 
 // cbuStoreOpenRefusals is every `unknown_agent` refusal the REAL store logged

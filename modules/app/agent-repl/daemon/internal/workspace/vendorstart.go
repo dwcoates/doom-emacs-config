@@ -10,14 +10,14 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/health"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/resolve/sidebar"
-	"claude-repld/internal/rollout"
-	"claude-repld/internal/shimclient"
-	"claude-repld/internal/startup"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/health"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/resolve/sidebar"
+	"agent-repld/internal/rollout"
+	"agent-repld/internal/shimclient"
+	"agent-repld/internal/startup"
+	"agent-repld/internal/wsm"
 )
 
 // THE VENDOR-START RETRY RUN (docs/protobuf-design/vendor-start-resilience.md,

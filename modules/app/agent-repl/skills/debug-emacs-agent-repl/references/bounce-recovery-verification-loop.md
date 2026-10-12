@@ -84,7 +84,7 @@ for.
 ## 2. Deploy
 
 ```sh
-modules/app/agent-repl/daemon/bin/claude-repld deploy
+modules/app/agent-repl/daemon/bin/agent-repld deploy
 ```
 
 THE DAEMON OWNS THE DEPLOY: it builds into staging, judges every component by
@@ -125,7 +125,7 @@ Name the reason for what provoked it; it lands in the sweep's own records.
    before it. Resolve the paths through
    `modules/app/agent-repl/scripts/agent-repl-log-discovery.sh` per
    `structured-logs.md` rather than hardcoding them; today they resolve to the
-   daemon's `~/.claude-emacs/claude-repld.log` and the Emacs-side central
+   daemon's `~/.claude-emacs/agent-repld.log` and the Emacs-side central
    sink `~/.claude-emacs/logs/emacs.central.log`.
 
    ```sh
@@ -152,7 +152,7 @@ Name the reason for what provoked it; it lands in the sweep's own records.
    first stage that failed; wait on that record, never on elapsed time. The
    daemon's stop is `UpdateShutdownSchedule{now}`, so this ENDS RUNNING
    TURNS: it is the forced bounce this loop is about, never a deploy (a
-   deploy is `daemon/bin/claude-repld deploy`, which bounces nothing that is
+   deploy is `daemon/bin/agent-repld deploy`, which bounces nothing that is
    current). Never kickstart the store and the sidecar back to back by hand:
    the sidecar's cursor recovery then fails against a socket not yet
    listening and re-reads every transcript from offset zero.

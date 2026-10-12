@@ -31,11 +31,11 @@ import (
 	"sync"
 	"time"
 
-	"claude-repld/internal/atomicfile"
-	"claude-repld/internal/classifier"
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/headless"
-	"claude-repld/internal/prompts"
+	"agent-repld/internal/atomicfile"
+	"agent-repld/internal/classifier"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/headless"
+	"agent-repld/internal/prompts"
 )
 
 // The rewrite call.

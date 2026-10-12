@@ -31,7 +31,7 @@ describe("parseUnifiedDiff: what is a diff", () => {
   });
 
   it.each([
-    ["ordinary command output", "ok  \tclaude-repld/internal/feed\t0.12s\n"],
+    ["ordinary command output", "ok  \tagent-repld/internal/feed\t0.12s\n"],
     ["a markdown list of changes", "- removed the old path\n+ added a new one\n"],
     ["a hunk with no file header before it", "@@ -1 +1 @@\n-x\n+y\n"],
     ["file headers with no hunk", "--- a\n+++ b\n"],

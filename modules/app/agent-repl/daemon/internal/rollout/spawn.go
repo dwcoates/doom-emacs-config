@@ -12,7 +12,7 @@ import (
 	"syscall"
 	"time"
 
-	"claude-repld/internal/atomicfile"
+	"agent-repld/internal/atomicfile"
 )
 
 // JoiningFlag is the successor's binding argv spelling. Go's flag package
@@ -100,7 +100,7 @@ type ProcessSpawner struct {
 	StateDir string
 	// Argv is the incumbent's CONFIGURATION argv: the flags every daemon it
 	// spawns inherits, and none of the flags that said how it booted. The
-	// daemon's own flag parse builds it (claude-repld's parseFlags), so a
+	// daemon's own flag parse builds it (agent-repld's parseFlags), so a
 	// boot flag is excluded by where it is declared, not by a strip list.
 	Argv []string
 	// Poll is how often the report file is checked. It is a field so a test

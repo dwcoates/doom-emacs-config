@@ -7,8 +7,8 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/internal/deployprogress"
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/deployprogress"
+	"agent-repld/internal/dlog"
 )
 
 // resumeWaitOf is one standing wait for a piece of work.

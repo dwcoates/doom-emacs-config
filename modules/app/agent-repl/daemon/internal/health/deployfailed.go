@@ -5,8 +5,8 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
-	"claude-repld/internal/outputtext"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/outputtext"
+	"agent-repld/internal/wsm"
 )
 
 // The steps a `deploy_failed` fault names, spelled as DaemonFaultDeployFailed's

@@ -5,7 +5,7 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/wsm"
 )
 
 // DeliveryOf maps agentrepl.v1 SubmitPromptRequest.delivery onto the queue's

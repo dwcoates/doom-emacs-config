@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // The static asset origin. The webapp's dist directory is served BENEATH the

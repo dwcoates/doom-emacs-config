@@ -7,9 +7,9 @@ import (
 
 	shimv1 "agentrepl/proto/shim/v1"
 
-	"claude-repld/internal/ids"
-	"claude-repld/internal/sessionlock"
-	"claude-repld/internal/shimsocket"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/sessionlock"
+	"agent-repld/internal/shimsocket"
 )
 
 // vendorStartFailed is the shim's own refusal of the start, which is the shape

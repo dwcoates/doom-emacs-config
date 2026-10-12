@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/prompts"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/prompts"
 )
 
 func TestOpenExternalOpensAnAbsoluteUrl(t *testing.T) {

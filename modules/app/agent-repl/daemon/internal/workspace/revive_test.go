@@ -7,9 +7,9 @@ import (
 	"slices"
 	"testing"
 
-	"claude-repld/internal/ids"
-	"claude-repld/internal/shimclient"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/shimclient"
+	"agent-repld/internal/wsm"
 )
 
 func TestParkedReadsTheHibernationTerminal(t *testing.T) {

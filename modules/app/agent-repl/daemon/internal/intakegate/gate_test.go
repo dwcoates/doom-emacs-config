@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 func TestAdmitsAnswersWhetherThisDaemonServes(t *testing.T) {

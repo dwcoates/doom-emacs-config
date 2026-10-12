@@ -7,7 +7,7 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 func wrapWifi(v *agentreplv1.PersistentWifiState) *agentreplv1.WatchDaemonResponse {

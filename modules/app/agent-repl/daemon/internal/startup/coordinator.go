@@ -9,9 +9,9 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/resolve/sidebar"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/resolve/sidebar"
 )
 
 // op is the operation every record of a run is written under.

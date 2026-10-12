@@ -5,10 +5,10 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/sessionwatcher"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/sessionwatcher"
+	"agent-repld/internal/wsm"
 )
 
 // HISTORY REPLAY. Rows are built from replayed entries by THE SAME per-family

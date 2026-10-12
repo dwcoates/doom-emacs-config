@@ -11,12 +11,12 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/drain"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/merge"
-	"claude-repld/internal/workspace"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/drain"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/merge"
+	"agent-repld/internal/workspace"
+	"agent-repld/internal/wsm"
 )
 
 // The daemon-admin verbs: the drain schedule, the merge queue, the two health

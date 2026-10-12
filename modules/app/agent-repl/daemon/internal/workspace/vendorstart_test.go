@@ -10,11 +10,11 @@ import (
 
 	shimv1 "agentrepl/proto/shim/v1"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/health"
-	"claude-repld/internal/resolve/sidebar"
-	"claude-repld/internal/rollout"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/health"
+	"agent-repld/internal/resolve/sidebar"
+	"agent-repld/internal/rollout"
+	"agent-repld/internal/wsm"
 )
 
 func TestVendorRetryDelayFollowsTheOwnersSchedule(t *testing.T) {

@@ -13,7 +13,7 @@
 #      so every webview opened from now on loads the new one. A FAILED BUILD
 #      STOPS HERE, with nothing stopped.
 #   2. STANDS THE DAEMON DOWN, and its shims with it:
-#        a. the daemon is ASKED to stand down now (`claude-repld call
+#        a. the daemon is ASKED to stand down now (`agent-repld call
 #           UpdateShutdownSchedule {now}`). That is its own ordered stand-down:
 #           it announces its ending to every client, stands each of its shims
 #           down itself (so it reads each exit as one it ordered, and each shim
@@ -66,7 +66,7 @@ GRACE="${AGENT_REPL_BOUNCE_GRACE:-20}"
 CACHE_HOME="${XDG_CACHE_HOME:-$HOME/.cache}"
 CACHE_BIN="$CACHE_HOME/agent-repl/bin"
 
-DAEMON_BIN="$ROOT/daemon/bin/claude-repld"
+DAEMON_BIN="$ROOT/daemon/bin/agent-repld"
 SHIM_MAIN="$ROOT/agent-shim/claude/shim/dist/main.js"
 # The state root whose daemon is stood down: the daemon's own default, which is
 # the one Emacs runs it with.
@@ -111,7 +111,7 @@ advertised_daemon() {
     return 0
 }
 
-# state_root_holders -- every claude-repld holding this state root's database
+# state_root_holders -- every agent-repld holding this state root's database
 # or daemon lock open, whatever build it runs. A daemon serving the state root
 # holds both; one the advertisement no longer names (an incumbent or successor
 # a handover left behind, or a daemon started from another build path) is
@@ -121,7 +121,7 @@ state_root_holders() {
     local pid
     for pid in $(lsof -t -- "$STATE_ROOT/wsm.db" "$STATE_ROOT/daemon.lock" 2>/dev/null | sort -un); do
         case "$(ps -o command= -p "$pid" 2>/dev/null)" in
-            *claude-repld*) echo "$pid" ;;
+            *agent-repld*) echo "$pid" ;;
         esac
     done
     return 0

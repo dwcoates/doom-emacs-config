@@ -9,16 +9,16 @@ import (
 	"sync"
 	"time"
 
-	"claude-repld/internal/bringup"
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/health"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/rollout"
-	"claude-repld/internal/sessionlock"
-	"claude-repld/internal/shimclient"
-	"claude-repld/internal/shimsocket"
-	"claude-repld/internal/startingshim"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/bringup"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/health"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/rollout"
+	"agent-repld/internal/sessionlock"
+	"agent-repld/internal/shimclient"
+	"agent-repld/internal/shimsocket"
+	"agent-repld/internal/startingshim"
+	"agent-repld/internal/wsm"
 )
 
 // sequence is the boot sequence.

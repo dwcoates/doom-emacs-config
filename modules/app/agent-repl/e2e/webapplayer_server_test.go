@@ -27,8 +27,8 @@ import (
 	"testing"
 	"time"
 
+	"agent-repld/integration/harness"
 	workspacev1 "agentrepl/proto/workspace/v1"
-	"claude-repld/integration/harness"
 )
 
 // wlResultPrefix marks the driver's one answer line per run (RESULT_PREFIX in

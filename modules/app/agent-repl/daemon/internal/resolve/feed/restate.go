@@ -3,7 +3,7 @@ package feed
 import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 
 	"google.golang.org/protobuf/proto"
 )

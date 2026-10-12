@@ -11,7 +11,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
-	"claude-repld/internal/prompthandler"
+	"agent-repld/internal/prompthandler"
 )
 
 // THE VALIDATION INVARIANT (ARCHITECTURE.md "Cross-cutting conventions"): one

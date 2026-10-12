@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"claude-repld/internal/clock"
-	"claude-repld/internal/clock/clocktest"
+	"agent-repld/internal/clock"
+	"agent-repld/internal/clock/clocktest"
 )
 
 // repeatKey keys the value a test hands Repeat through its context.

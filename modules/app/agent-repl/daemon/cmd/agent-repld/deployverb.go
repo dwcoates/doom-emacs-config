@@ -1,0 +1,157 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"strings"
+
+	"connectrpc.com/connect"
+
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
+
+	"agent-repld/internal/envc"
+	"agent-repld/internal/stateroot"
+)
+
+// THE `deploy` VERB: `agent-repld deploy [-force] [-state-dir DIR]`.
+//
+// It is a THIN CALLER of the serving daemon's Deploy rpc and decides nothing:
+// the daemon builds, judges staleness and restarts what is out of date (see
+// internal/deploy). The verb prints one line per component decision and exits
+// non-zero on any refusal or failure, with the daemon's own words.
+
+// deployVerb is the verb's name on the command line.
+const deployVerb = "deploy"
+
+// deployCaller is the slice of the daemon's client the verb uses.
+type deployCaller interface {
+	Deploy(ctx context.Context, req *connect.Request[agentreplv1.DeployRequest]) (*connect.Response[agentreplv1.DeployResponse], error)
+}
+
+// deployDialer builds a client for the daemon at a loopback address.
+type deployDialer func(address string) deployCaller
+
+// dialDaemon is the production dialer.
+func dialDaemon(address string) deployCaller {
+	return newDaemonClient(address)
+}
+
+// runDeployVerb runs the verb and answers the process's exit status.
+func runDeployVerb(ctx context.Context, args []string, dial deployDialer, out, errOut io.Writer) int {
+	fs := flag.NewFlagSet(deployVerb, flag.ContinueOnError)
+	fs.SetOutput(errOut)
+	force := fs.Bool("force", false, "do not wait for in-flight work: bounce every stale shim and hand the daemon over at once (ENDS RUNNING TURNS)")
+	stateDir := fs.String("state-dir", "", "state root, overriding $AGENT_REPL_STATE_DIR")
+	if err := fs.Parse(args); err != nil {
+		return exitFailure
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintf(errOut, "agent-repld deploy: unexpected arguments: %s\n", strings.Join(fs.Args(), " "))
+		return exitFailure
+	}
+	layout, err := stateroot.Root(*stateDir, envc.Load().WithStateDir(*stateDir).StateDir())
+	if err != nil {
+		fmt.Fprintf(errOut, "agent-repld deploy: resolve the state root: %v\n", err)
+		return exitFailure
+	}
+	address, err := servingAddress(layout)
+	if err != nil {
+		fmt.Fprintf(errOut, "agent-repld deploy: %v\n", err)
+		return exitFailure
+	}
+	resp, err := dial(address).Deploy(ctx, connect.NewRequest(&agentreplv1.DeployRequest{Force: *force}))
+	if err != nil {
+		fmt.Fprintf(errOut, "agent-repld deploy: the daemon at %s failed the deploy: %v\n", address, err)
+		return exitFailure
+	}
+	switch result := resp.Msg.GetResult().(type) {
+	case *agentreplv1.DeployResponse_Success:
+		for _, component := range result.Success.GetComponents() {
+			line, err := describeOutcome(component)
+			if err != nil {
+				fmt.Fprintf(errOut, "agent-repld deploy: %v\n", err)
+				return exitFailure
+			}
+			fmt.Fprintln(out, line)
+		}
+		return exitSuccess
+	case *agentreplv1.DeployResponse_Error:
+		fmt.Fprintf(errOut, "agent-repld deploy: NOT DEPLOYED: %s\n", describeRefusal(result.Error))
+		return exitFailure
+	default:
+		fmt.Fprintf(errOut, "agent-repld deploy: the daemon answered with no result arm\n")
+		return exitFailure
+	}
+}
+
+// componentName is a component's name on the verb's output.
+func componentName(c agentreplv1.DeployComponent) string {
+	return strings.ToLower(strings.TrimPrefix(c.String(), "DEPLOY_COMPONENT_"))
+}
+
+// errUnnamedOutcome is an outcome whose arm this verb cannot name.
+var errUnnamedOutcome = errors.New("the daemon answered an outcome with no arm")
+
+// describeOutcome renders one component's decision as one line.
+func describeOutcome(o *agentreplv1.DeployComponentOutcome) (string, error) {
+	head := fmt.Sprintf("%s build=%s", componentName(o.GetComponent()), o.GetBuild())
+	switch arm := o.GetOutcome().(type) {
+	case *agentreplv1.DeployComponentOutcome_UpToDate:
+		return head + " up-to-date", nil
+	case *agentreplv1.DeployComponentOutcome_Restarted:
+		return head + " restarted", nil
+	case *agentreplv1.DeployComponentOutcome_HandingOver:
+		h := arm.HandingOver
+		return fmt.Sprintf("%s handing-over workspaces=%d busy=%d forced=%t", head, h.GetWorkspaces(), h.GetBusy(), h.GetForced()), nil
+	case *agentreplv1.DeployComponentOutcome_Restarting:
+		r := arm.Restarting
+		return fmt.Sprintf("%s restarting layout=%d→%d workspaces=%d busy=%d forced=%t", head,
+			r.GetRunningStateLayout(), r.GetFreshStateLayout(), r.GetWorkspaces(), r.GetBusy(), r.GetForced()), nil
+	case *agentreplv1.DeployComponentOutcome_Shims:
+		parts := make([]string, 0, len(arm.Shims.GetBounces()))
+		for _, b := range arm.Shims.GetBounces() {
+			switch when := b.GetWhen().(type) {
+			case *agentreplv1.DeployShimBounce_BouncedNow:
+				parts = append(parts, fmt.Sprintf("%s:bounced-now(forced=%t)", b.GetWorkspace(), when.BouncedNow.GetForced()))
+			case *agentreplv1.DeployShimBounce_Registered:
+				parts = append(parts, fmt.Sprintf("%s:registered(turn=%t,detached=%d)", b.GetWorkspace(),
+					when.Registered.GetTurnInFlight(), when.Registered.GetDetachedWork()))
+			default:
+				return "", fmt.Errorf("%w: a shim bounce for %s names no when", errUnnamedOutcome, b.GetWorkspace())
+			}
+		}
+		return head + " shims " + strings.Join(parts, " "), nil
+	case *agentreplv1.DeployComponentOutcome_ReloadPushed:
+		return fmt.Sprintf("%s reload-pushed recipients=%d", head, arm.ReloadPushed.GetRecipients()), nil
+	case *agentreplv1.DeployComponentOutcome_DeferredToSuccessor:
+		return head + " deferred-to-successor", nil
+	default:
+		return "", fmt.Errorf("%w: %s", errUnnamedOutcome, componentName(o.GetComponent()))
+	}
+}
+
+// describeRefusal renders the daemon's typed refusal in its own words.
+func describeRefusal(e *agentreplv1.DeployError) string {
+	switch cause := e.GetCause().(type) {
+	case *agentreplv1.DeployError_BuildFailed:
+		b := cause.BuildFailed
+		return fmt.Sprintf("the %s build failed (output in %s):\n%s", b.GetStep(), b.GetLog(), b.GetDetail())
+	case *agentreplv1.DeployError_AlreadyDeploying:
+		return "a deploy is already running; ask again when it ends"
+	case *agentreplv1.DeployError_AlreadyRollingOut:
+		return "a handover is already in flight, waiting on " + strings.Join(cause.AlreadyRollingOut.GetWaitingOn(), ", ")
+	case *agentreplv1.DeployError_Joining:
+		return "the daemon is a successor still joining a handover"
+	case *agentreplv1.DeployError_ServiceRestartFailed:
+		s := cause.ServiceRestartFailed
+		return fmt.Sprintf("the %s did not come back onto the fresh build: %s", componentName(s.GetComponent()), s.GetDetail())
+	case *agentreplv1.DeployError_InstallFailed:
+		i := cause.InstallFailed
+		return fmt.Sprintf("the %s build could not be installed: %s", componentName(i.GetComponent()), i.GetDetail())
+	default:
+		return "the daemon refused with no cause arm"
+	}
+}

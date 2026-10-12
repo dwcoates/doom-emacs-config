@@ -8,10 +8,10 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/resolve/feed"
-	"claude-repld/internal/sessionwatcher"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/resolve/feed"
+	"agent-repld/internal/sessionwatcher"
 )
 
 // THE FEED'S HISTORY SOURCE (feed.HistorySource). History is loaded only on a

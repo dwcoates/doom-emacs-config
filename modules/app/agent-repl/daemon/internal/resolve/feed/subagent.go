@@ -5,9 +5,9 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 	"fmt"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/feedid"
-	"claude-repld/internal/sessionwatcher"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/feedid"
+	"agent-repld/internal/sessionwatcher"
 )
 
 // THE SUBAGENT BUBBLE — sync or detached, ONE component. The bubble IS a feed:

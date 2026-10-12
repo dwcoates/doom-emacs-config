@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/startingshim"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/startingshim"
 )
 
 // recordSpawnedShimPID makes a spawn DURABLE at the instant of the fork.

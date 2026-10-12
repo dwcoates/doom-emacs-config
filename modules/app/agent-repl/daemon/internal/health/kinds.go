@@ -7,8 +7,8 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
-	"claude-repld/internal/outputtext"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/outputtext"
+	"agent-repld/internal/wsm"
 )
 
 // The DAEMON-scope fault kinds, spelled exactly as DaemonFault's kind oneof

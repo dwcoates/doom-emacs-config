@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // fakeStore answers scripted verdicts and records what it was told.

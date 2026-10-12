@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"claude-repld/internal/clock"
+	"agent-repld/internal/clock"
 )
 
 // Scripted is a clock.Clock the test drives.

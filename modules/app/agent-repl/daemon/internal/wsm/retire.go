@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // RetireRepository deletes a repository's record and every workspace record

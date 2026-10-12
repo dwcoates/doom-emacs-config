@@ -11,9 +11,9 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/integration/harness"
-	"claude-repld/internal/feedid"
-	"claude-repld/internal/ids"
+	"agent-repld/integration/harness"
+	"agent-repld/internal/feedid"
+	"agent-repld/internal/ids"
 )
 
 // FEED PAGING ON DEMAND (docs/protobuf-design/feed-paging-on-demand.md): a

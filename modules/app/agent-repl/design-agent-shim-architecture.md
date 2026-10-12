@@ -52,7 +52,7 @@ Non-goals:
 | `claude-shim` | one per session, spawned by daemon | TypeScript (Node) | Drive the Claude Agent SDK; convert SDK stream ↔ protobuf; forward file-plane events; delta bypass |
 | `shim-claude-sidecar` | singleton, launchd-managed | Go | Read/parse harness JSONL + spool files into protobuf events; write them to the `shim-store` |
 | `shim-store` | singleton, launchd-managed | Go | Sole owner of the event DB (SQLite); assign per-session seq; merge+dedup producers; serve subscriptions |
-| daemon (`claude-repld`) | singleton (existing) | Go | Fleet supervision; consume shim streams; session-state manager; merge execution; frontend serving |
+| daemon (`agent-repld`) | singleton (existing) | Go | Fleet supervision; consume shim streams; session-state manager; merge execution; frontend serving |
 | Emacs elisp | in-editor (existing) | elisp | Dumb frontend: render daemon-pushed state; workspace UX |
 | webapp | per-workspace webview (existing) | TypeScript | Dumb frontend: render daemon-pushed conversation + state |
 

@@ -13,12 +13,12 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
 
-	"claude-repld/internal/clock"
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/lockwatch"
-	"claude-repld/internal/shimclient"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/clock"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/lockwatch"
+	"agent-repld/internal/shimclient"
+	"agent-repld/internal/wsm"
 )
 
 // mainWatchKey is the known_through map's key for the MAIN agent's watch,

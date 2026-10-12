@@ -12,12 +12,12 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"claude-repld/internal/bounce"
-	"claude-repld/internal/classifier"
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/sessionwatcher"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/bounce"
+	"agent-repld/internal/classifier"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/sessionwatcher"
+	"agent-repld/internal/wsm"
 )
 
 // gate is a bounce action a test drives: it reports that it STARTED, then

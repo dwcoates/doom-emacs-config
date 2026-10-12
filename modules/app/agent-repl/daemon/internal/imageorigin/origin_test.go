@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // pngBytes is a one-pixel PNG, so a served body is a real image rather than a

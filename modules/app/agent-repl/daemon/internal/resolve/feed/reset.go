@@ -3,9 +3,9 @@ package feed
 import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/health"
-	"claude-repld/internal/ids"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/health"
+	"agent-repld/internal/ids"
 )
 
 // The operation this file's records carry.

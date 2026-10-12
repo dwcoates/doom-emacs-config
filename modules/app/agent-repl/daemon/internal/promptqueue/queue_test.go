@@ -10,11 +10,11 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/lockwatch"
-	"claude-repld/internal/sourcescan"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/lockwatch"
+	"agent-repld/internal/sourcescan"
+	"agent-repld/internal/wsm"
 )
 
 func TestNewRefusesEachMissingCollaborator(t *testing.T) {

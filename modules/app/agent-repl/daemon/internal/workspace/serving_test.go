@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"claude-repld/internal/ids"
-	"claude-repld/internal/sessionlock"
-	"claude-repld/internal/shimsocket"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/sessionlock"
+	"agent-repld/internal/shimsocket"
 )
 
 // THE SERVING CLAIM IS MADE WHERE THE FLEET BEGINS HOLDING A CLIENT, so every

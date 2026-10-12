@@ -16,7 +16,7 @@ package harness
 //
 // COUNTERS ONLY LAND ON A GRACEFUL EXIT. The Go runtime writes a binary's
 // counters when main returns or os.Exit is called; a SIGKILLed process writes
-// nothing at all. claude-repld, shim-store and shim-claude-sidecar each
+// nothing at all. agent-repld, shim-store and shim-claude-sidecar each
 // install a SIGTERM handler and leave through their own main, so the bounded
 // SIGTERM-first Stop paths (Daemon.Stop, the e2e Store/Sidecar stops) are the
 // ones that produce data. Daemon.Kill deliberately does not, which is why

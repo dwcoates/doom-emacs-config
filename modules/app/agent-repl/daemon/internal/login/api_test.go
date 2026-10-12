@@ -3,10 +3,10 @@ package login_test
 import (
 	"testing"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/envc"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/login"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/envc"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/login"
 )
 
 func TestNewRejectsAMissingConfigDirResolver(t *testing.T) {

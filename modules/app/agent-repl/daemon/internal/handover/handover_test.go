@@ -1,7 +1,7 @@
 package handover
 
 import (
-	"claude-repld/internal/tempdirs/tempdirstest"
+	"agent-repld/internal/tempdirs/tempdirstest"
 	"context"
 	"path/filepath"
 	"sync"
@@ -10,15 +10,15 @@ import (
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/promptqueue"
-	"claude-repld/internal/publish"
-	"claude-repld/internal/resolve/footer"
-	"claude-repld/internal/resolve/sidebar"
-	"claude-repld/internal/resolve/topbar"
-	"claude-repld/internal/vocab"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/promptqueue"
+	"agent-repld/internal/publish"
+	"agent-repld/internal/resolve/footer"
+	"agent-repld/internal/resolve/sidebar"
+	"agent-repld/internal/resolve/topbar"
+	"agent-repld/internal/vocab"
+	"agent-repld/internal/wsm"
 )
 
 // fakeQueue records the lease re-evaluations the intake asked for.

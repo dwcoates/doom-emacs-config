@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"claude-repld/integration/fakegit"
+	"agent-repld/integration/fakegit"
 )
 
 // GIT IS NEVER CALLED DURING TESTING. A `Repo` here is a FAKE repository: a

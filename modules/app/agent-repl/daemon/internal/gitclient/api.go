@@ -18,7 +18,7 @@ import (
 	"strings"
 	"time"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // Git is the leaf's whole surface.

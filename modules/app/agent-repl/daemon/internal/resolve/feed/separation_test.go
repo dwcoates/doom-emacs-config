@@ -7,8 +7,8 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/internal/contextcut"
-	"claude-repld/internal/ids"
+	"agent-repld/internal/contextcut"
+	"agent-repld/internal/ids"
 )
 
 // THE DRAWN DIVIDER BOUNDS EXACTLY WHEN ITS CUT DOES: the feed reads the bound

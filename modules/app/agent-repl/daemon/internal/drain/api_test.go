@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"claude-repld/internal/shimclient"
+	"agent-repld/internal/shimclient"
 )
 
 // TestTheSweepCadenceIsClampedToTheIdleCutoff pins that a cutoff shorter than

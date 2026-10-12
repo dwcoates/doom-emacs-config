@@ -29,7 +29,7 @@ import (
 
 	"connectrpc.com/connect"
 
-	"claude-repld/integration/harness"
+	"agent-repld/integration/harness"
 )
 
 // ===========================================================================
@@ -56,7 +56,7 @@ const HandoverChainTimeout = harness.HandoverChainTimeout
 
 // AdoptionChainTimeout is HandoverChainTimeout under the name the adoption
 // area uses at its call sites: a restart/adoption test chains a second real
-// claude-repld boot onto the same context, exactly the shape
+// agent-repld boot onto the same context, exactly the shape
 // HandoverChainTimeout's doc comment describes. Kept as a distinct name (not
 // a re-mint of the value) so an adoption test reads self-documenting at the
 // call site without the reader having to know the handover family shares its

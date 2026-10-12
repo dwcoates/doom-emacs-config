@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"claude-repld/internal/daemonaddr"
-	"claude-repld/internal/health"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/sessionlock"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/daemonaddr"
+	"agent-repld/internal/health"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/sessionlock"
+	"agent-repld/internal/wsm"
 )
 
 // writeHandoverManifest writes the incumbent's intent manifest naming one

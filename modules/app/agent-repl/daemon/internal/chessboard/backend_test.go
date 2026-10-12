@@ -8,7 +8,7 @@ import (
 	"sync"
 	"testing"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // readyBackend builds a backend over a fake checkout and plugin directory,

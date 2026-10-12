@@ -12,8 +12,8 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"claude-repld/internal/feedid"
-	"claude-repld/internal/ids"
+	"agent-repld/internal/feedid"
+	"agent-repld/internal/ids"
 )
 
 // The identity newtypes are aliases of internal/ids, the leaf that holds one

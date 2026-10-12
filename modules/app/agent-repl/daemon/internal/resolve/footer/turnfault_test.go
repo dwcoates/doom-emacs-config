@@ -7,9 +7,9 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/internal/resolve/turnfault"
-	"claude-repld/internal/shimclient"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/resolve/turnfault"
+	"agent-repld/internal/shimclient"
+	"agent-repld/internal/wsm"
 )
 
 // THE TURN FAULT (owner ruling, 2026-10-06): a failed turn's cause puts its

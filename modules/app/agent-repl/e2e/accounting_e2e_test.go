@@ -89,7 +89,7 @@ import (
 
 	"connectrpc.com/connect"
 
-	"claude-repld/integration/harness"
+	"agent-repld/integration/harness"
 )
 
 // submitCommand submits a daemon-recognized slash command (never a plain

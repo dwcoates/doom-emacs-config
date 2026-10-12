@@ -5,9 +5,9 @@ import (
 	"errors"
 	"fmt"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
 )
 
 // opFoldRepository is the operation FoldRepository's records carry.

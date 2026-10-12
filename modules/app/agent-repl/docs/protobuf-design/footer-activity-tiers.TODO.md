@@ -97,7 +97,7 @@ not "stop".
 6. **Land through the merge queue** (`/merge-queue`,
    `.claude/skills/merge-queue/SKILL.md`), NOT cherry-pick (owner,
    2026-09-30). On park/fail/refusal report and stop.
-7. **Bounce all systems**: `bin/build-frontend.sh` + restart claude-repld;
+7. **Bounce all systems**: `bin/build-frontend.sh` + restart agent-repld;
    build shim-store and shim-claude-sidecar into `~/.cache/agent-repl/bin` +
    `launchctl kickstart`; verify `bin/readiness-report.sh` and
    `scripts/agent-shim-doctor.sh`; hot-load `lisp/panels.el` into the main

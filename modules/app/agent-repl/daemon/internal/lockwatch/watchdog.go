@@ -7,9 +7,9 @@ import (
 	"sync"
 	"time"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/goroutinedump"
-	"claude-repld/internal/ids"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/goroutinedump"
+	"agent-repld/internal/ids"
 )
 
 // DefaultThreshold is how long one hold of a watched lock may last before the

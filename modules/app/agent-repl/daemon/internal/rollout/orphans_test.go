@@ -6,10 +6,10 @@ import (
 	"slices"
 	"testing"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/sessionlock"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/sessionlock"
+	"agent-repld/internal/wsm"
 )
 
 // THE TAKEOVER RECOVERS WHAT NOTHING ADOPTED. A cold-started daemon's handover

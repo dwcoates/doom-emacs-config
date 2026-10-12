@@ -90,7 +90,7 @@ make_tree() {
              "$root/proto/gen/go" \
              "$root/proto/helpers/go" \
              "$root/webapp/src" "$root/webapp/dist" \
-             "$root/daemon/cmd/claude-repld" "$root/daemon/bin"
+             "$root/daemon/cmd/agent-repld" "$root/daemon/bin"
     cp "$SCRIPT_UNDER_TEST" "$root/bin/build-frontend.sh"
     cp "$THIS_DIR/lib-deploy-stamp.sh" "$root/bin/lib-deploy-stamp.sh"
     cp "$THIS_DIR/lib-node-store.sh" "$root/bin/lib-node-store.sh"
@@ -99,7 +99,7 @@ make_tree() {
     # Sources.
     echo "export const x = 1" > "$root/agent-shim/claude/shim/src/main.ts"
     echo "export const y = 1" > "$root/webapp/src/main.ts"
-    echo "package main" > "$root/daemon/cmd/claude-repld/main.go"
+    echo "package main" > "$root/daemon/cmd/agent-repld/main.go"
     echo "package main" > "$root/agent-shim/shim-store/main.go"
     echo "package main" > "$root/agent-shim/claude/shim-sidecar/main.go"
     echo "package main" > "$root/agent-shim/shim-lock/main.go"
@@ -206,7 +206,7 @@ make_fresh_artifacts_files() {
     local root="$1"
     echo built > "$root/agent-shim/claude/shim/dist/main.js"
     write_webapp_index "$root/webapp/dist/index.html"
-    echo built > "$root/daemon/bin/claude-repld"
+    echo built > "$root/daemon/bin/agent-repld"
     mkdir -p "$root/home/.cache/agent-repl/bin"
     echo built > "$root/home/.cache/agent-repl/bin/shim-store"
     echo built > "$root/home/.cache/agent-repl/bin/shim-claude-sidecar"
@@ -347,7 +347,7 @@ t_missing_artifact() {
     local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
     : > "$root/stub.log"
-    rm -f "$root/daemon/bin/claude-repld"   # daemon artifact gone
+    rm -f "$root/daemon/bin/agent-repld"   # daemon artifact gone
     run_script "$root" daemon >/dev/null
     if grep -q "^go build" "$root/stub.log"; then
         pass "missing-artifact: absent daemon binary triggers go build"
@@ -645,7 +645,7 @@ t_stamp_written_on_build() {
 t_stamp_marks_a_dirty_tree() {
     local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     make_tree "$root"; make_stubs "$root/stubs"
-    echo "package main // edited" > "$root/daemon/cmd/claude-repld/main.go"
+    echo "package main // edited" > "$root/daemon/cmd/agent-repld/main.go"
     run_script "$root" daemon >/dev/null
     if grep -q -- '-dirty$' "$root/daemon/bin/.built-sha"; then
         pass "stamp: a build off a dirty tree carries the -dirty marker"
@@ -804,7 +804,7 @@ t_services_missing_shared_source_fails_loudly() {
 }
 
 # The daemon compiles against the generated proto module, so a regenerated
-# binding must stale daemon/bin/claude-repld even though it lives outside
+# binding must stale daemon/bin/agent-repld even though it lives outside
 # daemon/.
 t_daemon_shared_proto_edit_rebuilds() {
     local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
@@ -1021,12 +1021,12 @@ t_older_mtime_source_change_still_rebuilds() {
     local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
     : > "$root/stub.log"
-    commit_change "$root" daemon/cmd/claude-repld/main.go \
+    commit_change "$root" daemon/cmd/agent-repld/main.go \
                   "// changed" "fix(daemon): a real change"
     # Backdate the changed source far behind the artifact. Under the old rule
     # this made the daemon read as fresh; under a revision comparison the
     # timestamp is not consulted at all.
-    touch -t 200001010000 "$root/daemon/cmd/claude-repld/main.go"
+    touch -t 200001010000 "$root/daemon/cmd/agent-repld/main.go"
     run_script "$root" daemon >/dev/null
     if grep -q "^go build" "$root/stub.log"; then
         pass "staleness: a source change with an OLDER mtime than the artifact still rebuilds"
@@ -1046,7 +1046,7 @@ t_unchanged_tree_skips_even_with_an_older_artifact() {
     # An artifact older than every source: stale under the mtime rule, fresh
     # under a revision comparison, and fresh is the honest answer — nothing
     # about the source has changed.
-    touch -t 200001010000 "$root/daemon/bin/claude-repld"
+    touch -t 200001010000 "$root/daemon/bin/agent-repld"
     run_script "$root" daemon >/dev/null
     if [ ! -s "$root/stub.log" ]; then
         pass "staleness: an unchanged source revision skips the build"
@@ -1064,7 +1064,7 @@ t_dirty_tree_always_rebuilds() {
     local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
     : > "$root/stub.log"
-    printf '// uncommitted\n' >> "$root/daemon/cmd/claude-repld/main.go"
+    printf '// uncommitted\n' >> "$root/daemon/cmd/agent-repld/main.go"
     run_script "$root" daemon >/dev/null
     if grep -q "^go build" "$root/stub.log"; then
         pass "staleness: an uncommitted edit under the system's sources rebuilds"
@@ -1216,12 +1216,12 @@ t_out_stages_the_daemon() {
     local root out bin; root="$(new_staging_root)"; STAGING_ROOT="$root"
     out="$root/staging"; bin="$out/daemon/bin"
     run_script "$root" --out "$out" daemon >/dev/null
-    if [ -f "$bin/claude-repld" ] &&
+    if [ -f "$bin/agent-repld" ] &&
            [ "$(cat "$bin/.built-sha" 2>/dev/null)" = "$(staging_head "$root")" ] &&
            [ "$(cat "$bin/.source-tree" 2>/dev/null)" = "$(fake_source_tree daemon)" ]; then
-        pass "staging: daemon -> DIR/daemon/bin/claude-repld with its stamps"
+        pass "staging: daemon -> DIR/daemon/bin/agent-repld with its stamps"
     else
-        fail "staging: daemon -> DIR/daemon/bin/claude-repld with its stamps" \
+        fail "staging: daemon -> DIR/daemon/bin/agent-repld with its stamps" \
              "staged: $(find "$out" -type f 2>/dev/null)"
     fi
     rm -rf "$root"

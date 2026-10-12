@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"claude-repld/internal/gitclient"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/gitclient"
+	"agent-repld/internal/wsm"
 )
 
 // subjectOf resolves the harness workspace's subject for one source.

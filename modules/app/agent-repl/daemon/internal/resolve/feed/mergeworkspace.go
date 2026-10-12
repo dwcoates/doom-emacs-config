@@ -5,9 +5,9 @@ import (
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/mergetab"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/mergetab"
 )
 
 // removedSwitchLabel is a merge-workspace switch's text once the workspace it

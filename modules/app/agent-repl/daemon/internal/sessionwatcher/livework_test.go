@@ -9,7 +9,7 @@ import (
 
 	"connectrpc.com/connect"
 
-	"claude-repld/internal/shimclient"
+	"agent-repld/internal/shimclient"
 )
 
 // The live-work ledger's invariant: an item leaves the live set exactly when

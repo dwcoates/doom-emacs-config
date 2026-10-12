@@ -11,8 +11,8 @@ import (
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
 )
 
 // This file is a merge's TEST LOG as a link: the token the tests tab serves,

@@ -26,7 +26,7 @@ package intakegate
 import (
 	"sync"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // Gate answers, before each sweep, whether this daemon takes intake now, and

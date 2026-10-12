@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"time"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
 )
 
 // THE FORK'S PORTED CONVERSATION. A fork ports the WHOLE conversation under

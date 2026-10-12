@@ -10,18 +10,18 @@
 package sessionwatcher
 
 import (
-	"claude-repld/internal/clock"
+	"agent-repld/internal/clock"
 	"context"
 	"sort"
 	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/lockwatch"
-	"claude-repld/internal/shimclient"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/lockwatch"
+	"agent-repld/internal/shimclient"
+	"agent-repld/internal/wsm"
 )
 
 // LinkState is the daemon-to-shim hop of connectivity truth, as the watcher

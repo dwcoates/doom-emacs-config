@@ -16,8 +16,8 @@ import (
 	"testing"
 	"time"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
 )
 
 // A shim this daemon ADOPTED is not its child, so none of the in-process fakes

@@ -7,7 +7,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/internal/feedid"
+	"agent-repld/internal/feedid"
 )
 
 // A THINKING BUBBLE IS SUPERSEDED ONCE A LATER AGENT RESPONSE LANDS IN ITS FEED

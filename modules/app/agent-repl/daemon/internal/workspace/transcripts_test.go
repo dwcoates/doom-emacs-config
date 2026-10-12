@@ -7,8 +7,8 @@ import (
 
 	shimv1 "agentrepl/proto/shim/v1"
 
-	"claude-repld/internal/ids"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
 )
 
 // transcript builds one shim-side transcript with the fields a case cares

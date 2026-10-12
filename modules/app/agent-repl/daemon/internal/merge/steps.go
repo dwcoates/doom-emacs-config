@@ -7,8 +7,8 @@ import (
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/resolve/footer"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/resolve/footer"
 )
 
 // This file is a running merge's FOOTER FACTS: the step it is on (the merging

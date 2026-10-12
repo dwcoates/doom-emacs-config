@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"claude-repld/internal/usersetup"
+	"agent-repld/internal/usersetup"
 )
 
 func TestErrorf(t *testing.T) {

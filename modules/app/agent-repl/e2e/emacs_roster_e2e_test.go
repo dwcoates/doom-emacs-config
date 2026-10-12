@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"claude-repld/integration/harness"
+	"agent-repld/integration/harness"
 )
 
 // AREA E of EMACS-LAYER-SPEC.md: ROSTER PAINT, MODELINE AND ATTENTION.

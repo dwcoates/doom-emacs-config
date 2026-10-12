@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // Upstream is the remote branch a local branch tracks.

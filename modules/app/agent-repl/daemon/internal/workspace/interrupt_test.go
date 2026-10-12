@@ -10,9 +10,9 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"claude-repld/internal/feedid"
-	"claude-repld/internal/sessionwatcher"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/feedid"
+	"agent-repld/internal/sessionwatcher"
+	"agent-repld/internal/wsm"
 )
 
 // runningTurn arranges an open turn with the given number of live detached

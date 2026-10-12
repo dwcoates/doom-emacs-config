@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"claude-repld/internal/account"
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/account"
+	"agent-repld/internal/dlog"
 )
 
 // fakeLogins records every session a completed login began.

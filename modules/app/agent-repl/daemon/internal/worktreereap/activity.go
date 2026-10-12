@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"claude-repld/internal/gitclient"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/gitclient"
+	"agent-repld/internal/wsm"
 )
 
 // activity is a worktree's most recent sign of life and where it was read.

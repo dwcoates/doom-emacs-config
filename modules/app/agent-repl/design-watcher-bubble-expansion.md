@@ -141,7 +141,7 @@ hits that assignment every tick.
 
 ### 5.1 The two options against the retention model
 
-- The WS ring is a fixed **frame count** (default 4096, `daemon/cmd/claude-repld/main.go:41,146`, applied `daemon/internal/session/session.go:284-286`), truncated per frame (`daemon/internal/session/session.go:1091-1094`), replayed to every fresh join and gap-fill reconnect (`daemon/internal/session/session.go:696-725,1038-1050`; store side `webapp/src/store.ts:435-498`). There is no ephemeral/non-retained frame class.
+- The WS ring is a fixed **frame count** (default 4096, `daemon/cmd/agent-repld/main.go:41,146`, applied `daemon/internal/session/session.go:284-286`), truncated per frame (`daemon/internal/session/session.go:1091-1094`), replayed to every fresh join and gap-fill reconnect (`daemon/internal/session/session.go:696-725,1038-1050`; store side `webapp/src/store.ts:435-498`). There is no ephemeral/non-retained frame class.
 - **Option A — poll a new HTTP endpoint only while expanded.** Cost is one round trip per poll to a `resolveForAttach`-based handler (the `handleCommands` template: pollable, never resurrects a session, serializes `[]` when nothing is resolved yet — `daemon/internal/server/server.go:545-563,1386`). It never touches the ring, never replays, never revives a hibernated session. Client plumbing already exists: base URL at `webapp/src/main.ts:59-62`, plain `fetch` with the session id in the path (`webapp/src/account.ts:36`, `webapp/src/ws.ts:148`), and the expand state that scopes polling (`webapp/src/expand.ts`).
 - **Option B — push a new high-frequency WS frame.** Every such frame enters the ring and replays on reconnect; a 1s-cadence uncoalesced tail fills the entire 4096-window in ~68 minutes and thereafter evicts real conversation frames (`daemon/internal/session/session.go:1091-1094`). This is the exact failure the tailer's discipline was built to prevent (`daemon/internal/session/tailer.go:12-15`, caps at `:31-39`).
 
@@ -163,7 +163,7 @@ hits that assignment every tick.
 Correction to the task premise: **there is no chess-game HTTP file route** and
 no cwd-prefix file validator in the server (routes registered at
 `daemon/internal/server/server.go:362-382`; the only file server is the static
-webapp bundle `daemon/cmd/claude-repld/main.go:165`). The genuine
+webapp bundle `daemon/cmd/agent-repld/main.go:165`). The genuine
 confinement precedent is the tailer's own predicates.
 
 ### 6.1 Reusable as-is
@@ -171,7 +171,7 @@ confinement precedent is the tailer's own predicates.
 - `allowedTaskOutputPath(path)` — `filepath.Clean` + spool-shape match + must contain `/tasks/` + end `.output` (`daemon/internal/session/tailer.go:110-115`).
 - `allowedJournalPath(path, configRoot)` — `filepath.Clean` + config-root prefix + workflow-journal shape (`daemon/internal/session/tailer.go:97-105`).
 - `readTailChunk(path, offset)` — bounded, UTF-8-safe chunked reader (`daemon/internal/session/tailer.go:198-222`) under existing budgets (`daemon/internal/session/tailer.go:35,38`).
-- Session resolution + two-segment path shape precedent (`{id}/{taskId}`): `r.PathValue("id")` + `resolveForAttach` (`daemon/internal/server/server.go:545,1386`), mirroring `/sessions/{id}/queue/{queueId}/...` (`daemon/internal/server/server.go:372-373`). `main.go` needs no change (`daemon/cmd/claude-repld/main.go:161`).
+- Session resolution + two-segment path shape precedent (`{id}/{taskId}`): `r.PathValue("id")` + `resolveForAttach` (`daemon/internal/server/server.go:545,1386`), mirroring `/sessions/{id}/queue/{queueId}/...` (`daemon/internal/server/server.go:372-373`). `main.go` needs no change (`daemon/cmd/agent-repld/main.go:161`).
 
 ### 6.2 The one genuinely missing daemon piece
 

@@ -11,7 +11,7 @@ import (
 
 	"agentrepl/logging/buildreport"
 
-	"claude-repld/internal/ids"
+	"agent-repld/internal/ids"
 )
 
 // liveTree answers every file under the harness's live locations — the

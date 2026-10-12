@@ -1,9 +1,9 @@
 package sidebar
 
 import (
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
 )
 
 // A ROW NESTS ONLY UNDER THE WORKSPACE IT MERGES INTO (owner ruling,

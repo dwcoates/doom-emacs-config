@@ -5,9 +5,9 @@ import (
 	"errors"
 	"testing"
 
-	"claude-repld/internal/account"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/account"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
 )
 
 // forkFixture arranges a parent with a conversation to fork and answers the

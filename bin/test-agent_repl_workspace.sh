@@ -39,10 +39,10 @@ trap 'rm -rf "$WORK"' EXIT
 # --- stubs ------------------------------------------------------------------
 # The daemon stub writes its argv to $RECORD_ARGS, creates the worktree it
 # claims, and prints that path as its last stdout line, exactly as
-# `claude-repld create-workspace` does.
+# `agent-repld create-workspace` does.
 STUB_BIN="$WORK/stubs"
 mkdir -p "$STUB_BIN"
-cat > "$STUB_BIN/claude-repld" <<'STUB'
+cat > "$STUB_BIN/agent-repld" <<'STUB'
 #!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$@" > "$RECORD_ARGS"
@@ -63,9 +63,9 @@ set -euo pipefail
 pwd -P > "$RECORD_CWD"
 printf '%s\n' "$@" >> "$RECORD_CWD"
 STUB
-chmod +x "$STUB_BIN/claude-repld" "$STUB_BIN/claude"
+chmod +x "$STUB_BIN/agent-repld" "$STUB_BIN/claude"
 
-export AGENT_REPL_DAEMON_BIN="$STUB_BIN/claude-repld"
+export AGENT_REPL_DAEMON_BIN="$STUB_BIN/agent-repld"
 export AGENT_REPL_CLAUDE_BIN="$STUB_BIN/claude"
 export STUB_WORKTREE="$WORK/created"
 

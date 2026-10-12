@@ -11,9 +11,9 @@ import (
 	"agentrepl/logging/buildreport"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
-	"claude-repld/internal/health"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/health"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
 )
 
 // failInstall makes the fresh daemon uninstallable: its live directory is

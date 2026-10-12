@@ -5,11 +5,11 @@ import (
 	"testing"
 	"time"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/resolve/feed"
-	"claude-repld/internal/resolve/ladder"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/resolve/feed"
+	"agent-repld/internal/resolve/ladder"
+	"agent-repld/internal/wsm"
 )
 
 // fakeEndings answers one filed ending per turn.

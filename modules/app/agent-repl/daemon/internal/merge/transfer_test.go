@@ -8,7 +8,7 @@ import (
 
 	"google.golang.org/protobuf/encoding/prototext"
 
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/wsm"
 )
 
 // heldInGateForTransfer runs the harness's merge into its test gate and

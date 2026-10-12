@@ -5,9 +5,9 @@ import (
 	"errors"
 	"fmt"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
 )
 
 // Teardown is the SLOW HALF of a kill or a nuke: the session's death, and for

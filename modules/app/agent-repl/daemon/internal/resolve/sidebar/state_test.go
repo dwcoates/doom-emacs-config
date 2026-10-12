@@ -3,8 +3,8 @@ package sidebar
 import (
 	"testing"
 
-	"claude-repld/internal/resolve/ladder"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/resolve/ladder"
+	"agent-repld/internal/wsm"
 )
 
 // The roster's three turn-end arms ARE ladder.TurnEnd's names: the row's arm

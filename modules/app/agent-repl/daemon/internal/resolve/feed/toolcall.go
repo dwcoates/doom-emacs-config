@@ -11,8 +11,8 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 	"google.golang.org/protobuf/types/known/structpb"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/feedid"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/feedid"
 )
 
 // ② THE GREY TOOL-CALL BUBBLE. ONE shared shell — head, input line, output by

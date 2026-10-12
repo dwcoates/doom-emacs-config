@@ -16,12 +16,12 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
 
-	"claude-repld/internal/commandcatalog/catalogtest"
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/feedid"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/lockwatch"
-	"claude-repld/internal/shimclient"
+	"agent-repld/internal/commandcatalog/catalogtest"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/feedid"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/lockwatch"
+	"agent-repld/internal/shimclient"
 )
 
 // waitDeadline is how long a test waits for a frame to reach a sink before it

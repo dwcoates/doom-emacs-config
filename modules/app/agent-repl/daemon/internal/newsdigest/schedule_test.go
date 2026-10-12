@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"claude-repld/internal/flock"
+	"agent-repld/internal/flock"
 )
 
 // scheduled is one schedule run on its own goroutine.

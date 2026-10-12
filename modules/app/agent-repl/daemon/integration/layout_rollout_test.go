@@ -16,9 +16,9 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"claude-repld/integration/harness"
-	"claude-repld/internal/stateroot"
-	"claude-repld/internal/wsm"
+	"agent-repld/integration/harness"
+	"agent-repld/internal/stateroot"
+	"agent-repld/internal/wsm"
 )
 
 // THE 2026-09-27 INCIDENT, END TO END.
@@ -30,7 +30,7 @@ import (
 // address, and their quiesce holds outlived every daemon after it: the
 // composer drew `restarting` and Emacs refused every prompt.
 //
-// These tests stage that world for real -- a real claude-repld successor,
+// These tests stage that world for real -- a real agent-repld successor,
 // really spawned, really dying on a state database stamped one layout older
 // -- and pin each invariant the fix stands on.
 

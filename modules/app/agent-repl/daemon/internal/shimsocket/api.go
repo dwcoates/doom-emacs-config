@@ -29,7 +29,7 @@ import (
 	"strings"
 	"time"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // DialTimeout is how long a liveness probe waits for a connect. It is a

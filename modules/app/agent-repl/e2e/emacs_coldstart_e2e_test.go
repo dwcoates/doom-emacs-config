@@ -14,7 +14,7 @@ import (
 // scenarios, all Emacs-only.
 //
 // The whole area exists because EMACS composes the daemon's argv. A test
-// that starts `claude-repld` from Go writes a SECOND spelling of the launch
+// that starts `agent-repld` from Go writes a SECOND spelling of the launch
 // contract and can never disagree with the launcher — which is exactly how
 // the missing account flags survived every direct test. Here the launcher
 // performs the launch and the assertions read the OS's view of what it did.

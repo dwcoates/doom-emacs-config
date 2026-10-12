@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 
-	"claude-repld/internal/account"
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/account"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
 )
 
 // forkConversation ports the half of the conversation the VENDOR TRANSCRIPT

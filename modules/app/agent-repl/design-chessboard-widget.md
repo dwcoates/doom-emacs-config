@@ -8,12 +8,12 @@ Status: research complete, no implementation. Comparison of three candidate appr
 
 ## 0. Architectural ground truth (reframes the whole question)
 
-- The agent-repl "GUI" is not an Emacs-rendered transcript. It is a TypeScript SPA (`webapp/src/`) served by the Go daemon (`claude-repld`) and displayed inside a single `xwidget-webkit` buffer (`frontend.el`, `frontends.el:6-12`).
+- The agent-repl "GUI" is not an Emacs-rendered transcript. It is a TypeScript SPA (`webapp/src/`) served by the Go daemon (`agent-repld`) and displayed inside a single `xwidget-webkit` buffer (`frontend.el`, `frontends.el:6-12`).
 - Response bubbles are DOM nodes built by `TextStream()` (`webapp/src/render.ts:315-340`) via `renderMarkdown()` (`webapp/src/markdown.ts:51-162`). Elisp renders no bubble content at all.
 - Consequence: "a board inside the Emacs response bubble" necessarily means "a board component in `webapp/src/`". There is no elisp/SVG-in-buffer rendering path to attach to, and conversely a DOM board adds **zero new xwidget surface** — it rides the one webview the GUI already is.
 
 ```
-Emacs (xwidget WS host)  ⇄  Go daemon (claude-repld)   [Layer 2: WebSocket]
+Emacs (xwidget WS host)  ⇄  Go daemon (agent-repld)   [Layer 2: WebSocket]
 Go daemon                ⇄  TS shim (per session)       [Layer 1: stdio NDJSON]
 TS shim → Agent SDK → Claude
 ```
@@ -129,7 +129,7 @@ Widget code is plain TS in `webapp/src/` (flat, matching the existing layout), e
 
 1. Verify the wrapper's generated client exposes the widget-essential features; regenerate (`npm run generate:types`) or fall back to the generic transport for any missing ones:
    - `get_ergonomic_game` (PGN → `chess.Game` tree, comments/NAGs preserved), `get_ergonomic_position`/`get_fen`, `legal_moves`, `make_moves`/`unmake_moves`, `validate_pgn`.
-2. Confirm the wasm artifact + worker JS build outputs and their load config (`createWasmClient(config)` asset URLs) work when served by `claude-repld`'s static file server.
+2. Confirm the wasm artifact + worker JS build outputs and their load config (`createWasmClient(config)` asset URLs) work when served by `agent-repld`'s static file server.
 
 ### Phase 1 — CEE client integration
 
@@ -146,7 +146,7 @@ The shipped integration is the **marker channel**, not the ```` ```pgn ```` fenc
 - The `/show-chess-game` skill (home skills dir) writes the payload command-side to `<worktree>/.claude/emacs/cee-web-widget/chess-game-<hash>.{pgn,fen,session}` and the response carries only `---> agent-repl-chess-game-file: <path> <---`.
 - `renderMarkdown` (`webapp/src/markdown.ts`) suppresses marker lines via a line-start string match and emits a `chess-game` container (processing indicator until hydration); text flows around it in the same bubble; a trailing partial marker is withheld while streaming.
 - `webapp/src/chess-game.ts` hydrates containers: dynamic import of `/widget-assets/chess-widget.js`, payload fetch via `GET /sessions/{id}/chess-game?path=…` (daemon-validated to the session worktree's game dir), kind by extension, per-item serialized state across `innerHTML` rewrites, in-frame errors.
-- `claude-repld` serves the widget dist **in place** via `-widget-assets` (env `AGENT_REPL_WIDGET_ASSETS`; elisp `agent-repl-frontend-widget-assets-dir`) — nothing is copied into this repo.
+- `agent-repld` serves the widget dist **in place** via `-widget-assets` (env `AGENT_REPL_WIDGET_ASSETS`; elisp `agent-repl-frontend-widget-assets-dir`) — nothing is copied into this repo.
 - `.session` payloads mirror a live engine daemon session (backend URL line 1, session id line 2).
 
 ### Phase 2 — rendering (historical plan)

@@ -6,7 +6,7 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"claude-repld/internal/ids"
+	"agent-repld/internal/ids"
 )
 
 // A FORK'S INHERITED PAST. The fork's book carries a copy of the parent's

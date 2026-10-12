@@ -4,8 +4,8 @@ import (
 	"errors"
 	"fmt"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/tempdirs"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/tempdirs"
 )
 
 // opRefusal is the operation a verb's typed refusal is logged under. A refusal

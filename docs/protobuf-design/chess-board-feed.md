@@ -117,7 +117,7 @@ then `frontend.v1`, then the square-click endpoint, then the skill text.
   where the agent asked for it, replayed on every page, and survives a daemon
   restart with no daemon-side storage.
 - **Why the alternatives lost:** a daemon rpc the skill calls through
-  `claude-repld call` would have needed a synthesized feed row (non-durable,
+  `agent-repld call` would have needed a synthesized feed row (non-durable,
   like `FeedCommandPanel`) or a new durable-row store and an ordering rule for
   rows nobody's conversation contains. A marker line in the response text
   would carry an untyped payload inside prose.

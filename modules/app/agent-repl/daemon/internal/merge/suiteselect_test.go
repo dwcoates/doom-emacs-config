@@ -69,7 +69,7 @@ func TestSelectSuitesNarrowsByBlastRadius(t *testing.T) {
 		},
 		{
 			// Blast radius, not name: the cross-system suites RUN a real
-			// claude-repld, so a daemon change can break them.
+			// agent-repld, so a daemon change can break them.
 			name:  "a daemon change reaches the cross-system suites",
 			paths: []string{"modules/app/agent-repl/daemon/main.go"},
 			want:  []string{"daemon", "e2e", "e2e-emacs"},

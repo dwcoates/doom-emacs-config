@@ -9,10 +9,10 @@ import (
 	"sync"
 	"testing"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/shimclient"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/shimclient"
+	"agent-repld/internal/wsm"
 )
 
 const testOp = "daemon.test.bring_up"

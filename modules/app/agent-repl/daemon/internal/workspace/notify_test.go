@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"claude-repld/internal/sessionwatcher"
+	"agent-repld/internal/sessionwatcher"
 )
 
 func TestNotifyRaisesADesktopBanner(t *testing.T) {

@@ -32,9 +32,9 @@ import (
 
 	"github.com/creack/pty"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/envc"
-	"claude-repld/internal/ids"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/envc"
+	"agent-repld/internal/ids"
 )
 
 // EnvClaudeBin names the vendor binary the login pty runs. AGENTS.md pins it

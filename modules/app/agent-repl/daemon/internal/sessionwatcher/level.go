@@ -3,8 +3,8 @@ package sessionwatcher
 import (
 	"sort"
 
+	"agent-repld/internal/dlog"
 	conversationv1 "agentrepl/proto/conversation/v1"
-	"claude-repld/internal/dlog"
 )
 
 // THE LIVE-WORK LEVEL (owner ruling, 2026-10-07; conversation.v1

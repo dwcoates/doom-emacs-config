@@ -207,7 +207,7 @@ Work uninterrupted, no questions, in-session (no implementation subagents).
    `.claude/skills/merge-queue/SKILL.md`), NOT by cherry-pick. Run the final
    consolidation sweep first. On a parked, failed or refused merge, report
    the reason and stop.
-9. Bounce all systems: `bin/build-frontend.sh` + restart claude-repld; build
+9. Bounce all systems: `bin/build-frontend.sh` + restart agent-repld; build
    shim-store and shim-claude-sidecar into `~/.cache/agent-repl/bin` and
    `launchctl kickstart`; verify `bin/readiness-report.sh` and
    `scripts/agent-shim-doctor.sh`; hot-load touched `.el` (lisp/panels.el) into

@@ -9,7 +9,7 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // HOW AN IMAGE REFERENCE BECOMES A `src`.

@@ -17,7 +17,7 @@ import (
 	"os"
 	"testing"
 
-	"claude-repld/internal/tempdirs"
+	"agent-repld/internal/tempdirs"
 )
 
 // guard is the run's guard, built by Main before any test runs and only read

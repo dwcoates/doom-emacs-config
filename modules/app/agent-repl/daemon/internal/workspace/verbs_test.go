@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/wsm"
 )
 
 func TestNewRefusesEveryMissingCollaborator(t *testing.T) {

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"claude-repld/internal/stateroot"
+	"agent-repld/internal/stateroot"
 )
 
 // TestShortTempDirYieldsASocketPathBudgetEvenUnderARidiculouslyLongTestNameThatWouldOtherwiseOverflowTheUnixDomainSocketLimit

@@ -19,9 +19,9 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
-	"claude-repld/internal/workspace"
+	"agent-repld/internal/workspace"
 
-	"claude-repld/integration/harness"
+	"agent-repld/integration/harness"
 
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/proto"
@@ -332,7 +332,7 @@ func TestFlushOnAcceptAcrossWatchKinds(t *testing.T) {
 					t.Fatalf("%s on a workspace with no session = model_selector %v, want absent", k.Name, view.GetModelSelector())
 				}
 			case "WatchDaemon":
-				// THE BOOT READS THE PERSISTENT-WIFI STANDING: cmd/claude-repld's
+				// THE BOOT READS THE PERSISTENT-WIFI STANDING: cmd/agent-repld's
 				// Prime step refreshes it before anything is served, and an
 				// Emacs stream (which this one is) is told it as standing state,
 				// so even a daemon that never scheduled a drain opens with it.
@@ -341,7 +341,7 @@ func TestFlushOnAcceptAcrossWatchKinds(t *testing.T) {
 					t.Fatalf("%s first frame = %v, want persistent_wifi (read before anything is served)", k.Name, push)
 				}
 			case "WatchWorkspaceRoster":
-				// The BOOT publishes the roster: cmd/claude-repld's Prime step
+				// The BOOT publishes the roster: cmd/agent-repld's Prime step
 				// runs verbs.PublishRegistry after the push surface is bound
 				// and before anything is served, so every subscriber — first or
 				// late — always has a complete roster to receive.

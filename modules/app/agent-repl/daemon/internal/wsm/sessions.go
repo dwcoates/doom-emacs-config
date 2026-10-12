@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // scanSession decodes one session row all-or-nothing. The terminal is a whole:

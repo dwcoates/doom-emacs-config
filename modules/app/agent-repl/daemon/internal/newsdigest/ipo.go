@@ -8,8 +8,8 @@ import (
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/internal/headless"
-	"claude-repld/internal/prompts"
+	"agent-repld/internal/headless"
+	"agent-repld/internal/prompts"
 )
 
 // "IPO outlook": the best guess at when Anthropic and OpenAI go public, drawn

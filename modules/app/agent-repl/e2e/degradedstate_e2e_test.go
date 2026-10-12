@@ -52,12 +52,12 @@ import (
 
 	"connectrpc.com/connect"
 
-	"claude-repld/integration/harness"
+	"agent-repld/integration/harness"
 )
 
 // openWorkspace registers a fresh repository (harness.NewRepo, the scripted
 // fake-git world — this suite mocks every external dependency except
-// claude-repld, the shim, shim-store and shim-sidecar) and opens it on the daemon,
+// agent-repld, the shim, shim-store and shim-sidecar) and opens it on the daemon,
 // spawning the real session the degraded-state tests observe. Modeled on
 // daemon/integration/support_test.go's fixture.open(): SubmitPrompt refuses
 // with SubmitPromptNoSession (endpoint_submit_prompt.proto) until the

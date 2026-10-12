@@ -7,8 +7,8 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"claude-repld/internal/feedid"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/feedid"
+	"agent-repld/internal/wsm"
 )
 
 // A PLAIN USER SEND MADE WHILE AN ASK STANDS IS THAT ASK'S TYPED ANSWER: it is

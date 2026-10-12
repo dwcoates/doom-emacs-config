@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"claude-repld/integration/harness"
+	"agent-repld/integration/harness"
 )
 
 // AREA C of EMACS-LAYER-SPEC.md: panel and window lifecycle, six scenarios,

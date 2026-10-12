@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 
-	"claude-repld/internal/ids"
+	"agent-repld/internal/ids"
 )
 
 // This file holds the merge orchestrator's PRE-STATE refusals.

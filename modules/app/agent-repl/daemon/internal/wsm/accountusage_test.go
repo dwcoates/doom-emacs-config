@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // fullUsage is an account with every window figured.

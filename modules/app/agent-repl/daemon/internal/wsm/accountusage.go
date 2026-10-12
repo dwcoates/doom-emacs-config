@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // accountUsageDDL is the layout-24 addition: the last usage figures the daemon

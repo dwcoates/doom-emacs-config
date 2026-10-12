@@ -12,13 +12,13 @@ import (
 	"testing"
 	"time"
 
-	"claude-repld/internal/health"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/rollout"
-	"claude-repld/internal/sessionlock"
-	"claude-repld/internal/shimclient"
-	"claude-repld/internal/shimsocket"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/health"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/rollout"
+	"agent-repld/internal/sessionlock"
+	"agent-repld/internal/shimclient"
+	"agent-repld/internal/shimsocket"
+	"agent-repld/internal/wsm"
 )
 
 // TestAdoptsASurvivingShimRatherThanRespawningIt pins the adoption path: a held

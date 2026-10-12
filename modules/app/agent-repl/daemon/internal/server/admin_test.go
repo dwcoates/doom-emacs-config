@@ -11,10 +11,10 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/drain"
-	"claude-repld/internal/merge"
-	"claude-repld/internal/workspace"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/drain"
+	"agent-repld/internal/merge"
+	"agent-repld/internal/workspace"
 )
 
 // TestScheduleEncodesTheReasonBeforeItIsDurable pins that the drain reason is

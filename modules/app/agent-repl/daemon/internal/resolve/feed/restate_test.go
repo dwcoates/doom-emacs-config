@@ -6,9 +6,9 @@ import (
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/feedid"
-	"claude-repld/internal/sourcescan"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/feedid"
+	"agent-repld/internal/sourcescan"
 )
 
 func TestRestateRowPublishesTheEditedSnapshotAndLeavesTheStoredRowAlone(t *testing.T) {

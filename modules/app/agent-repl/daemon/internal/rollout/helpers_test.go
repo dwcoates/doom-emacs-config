@@ -1,7 +1,7 @@
 package rollout
 
 import (
-	"claude-repld/internal/tempdirs/tempdirstest"
+	"agent-repld/internal/tempdirs/tempdirstest"
 	"context"
 	"errors"
 	"fmt"
@@ -15,13 +15,13 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
 
-	"claude-repld/internal/bounce"
-	"claude-repld/internal/deployprogress"
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/sessionlock"
-	"claude-repld/internal/shimclient"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/bounce"
+	"agent-repld/internal/deployprogress"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/sessionlock"
+	"agent-repld/internal/shimclient"
+	"agent-repld/internal/wsm"
 )
 
 // instant is the fixed instant every test's arithmetic starts from: no test in
@@ -1185,7 +1185,7 @@ func newHarness(t *testing.T, adjust ...func(*Deps)) *harness {
 	}
 	deps := Deps{
 		Merges:         h.merges,
-		SelfExe:        filepath.Join(state, "claude-repld"),
+		SelfExe:        filepath.Join(state, "agent-repld"),
 		SelfAddress:    "127.0.0.1:7777",
 		Instance:       selfInstance,
 		StateDir:       state,

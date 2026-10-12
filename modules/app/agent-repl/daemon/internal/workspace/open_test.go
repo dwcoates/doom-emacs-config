@@ -11,12 +11,12 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/gitclient"
-	"claude-repld/internal/resolve/footer"
-	"claude-repld/internal/rollout"
-	"claude-repld/internal/sessionwatcher"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/gitclient"
+	"agent-repld/internal/resolve/footer"
+	"agent-repld/internal/rollout"
+	"agent-repld/internal/sessionwatcher"
+	"agent-repld/internal/wsm"
 )
 
 func TestOpenStartsTheSession(t *testing.T) {

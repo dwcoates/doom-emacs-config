@@ -8,7 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"claude-repld/internal/atomicfile"
+	"agent-repld/internal/atomicfile"
 )
 
 // Write drops one command file into the ingress directory dir, as every

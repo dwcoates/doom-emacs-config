@@ -31,7 +31,7 @@ all. Paths are relative to `modules/app/agent-repl/`.
   `daemon/internal/server/server.go:883` (`handleLogin`), `:905`
   (`handleLoginTerminal`, duplex + resize control frames), `:975`
   (`handleLoginClose`), `:226-228`; pty at `daemon/internal/pty/pty.go:45`,
-  `:112` (`Setsize`); wiring at `daemon/cmd/claude-repld/main.go:589`,
+  `:112` (`Setsize`); wiring at `daemon/cmd/agent-repld/main.go:589`,
   `:1355-1358`.
 - WHY UNACCOUNTED: the plan's only account clauses are the topbar's
   ("logged-out is a drawn state, never blank", daemon.md:473-475) and the
@@ -70,7 +70,7 @@ all. Paths are relative to `modules/app/agent-repl/`.
 - EVIDENCE: `daemon/internal/server/transcriptbackup.go:1-30` (rationale
   verbatim), `:153` (`Capture`), `:170` (`CaptureConversation`), `:209`
   (`prune`), `:346` (`newestBackupConversation`); registrar wiring at
-  `daemon/cmd/claude-repld/main.go:778-786` ("the registrar is the first
+  `daemon/cmd/agent-repld/main.go:778-786` ("the registrar is the first
   thing to hear both boundaries worth copying at").
 - WHY UNACCOUNTED: WSM's durable-fact inventory (daemon.md:78-105) and the
   git client (daemon.md:593-624) name no one who protects the one artifact
@@ -192,7 +192,7 @@ all. Paths are relative to `modules/app/agent-repl/`.
   restart; `Cache-Control: no-store` on the HTML entry point ONLY (the fix
   for webviews pinning a deleted bundle); a 503 diagnostic body naming cause
   and fix instead of a bare 404.
-- EVIDENCE: `daemon/cmd/claude-repld/main.go:96-125`, `:137-157`, `:1300-1307`.
+- EVIDENCE: `daemon/cmd/agent-repld/main.go:96-125`, `:137-157`, `:1300-1307`.
 - WHY UNACCOUNTED: the rollout controller prescribes "webapp → hot asset
   swap" and the `reload_webapp` push (daemon.md:326, 384-389) without ever
   saying the daemon is where the assets come from, and the entry-point
@@ -241,7 +241,7 @@ all. Paths are relative to `modules/app/agent-repl/`.
   verbatim), `daemon/internal/inflight/manifest.go:1-20`, `:127`
   (`Reconcile`), `:184` (`Tally`), `:213` (`Append`), `:252` (`Read`),
   `daemon/internal/inflight/nofollow_unix.go:1-14`; wiring at
-  `daemon/cmd/claude-repld/main.go:678-700`, `:1212-1246` (manifest written
+  `daemon/cmd/agent-repld/main.go:678-700`, `:1212-1246` (manifest written
   BEFORE the ledger so a mid-write death cannot read as "interrupted
   nothing").
 - WHY UNACCOUNTED: the plan's handover is graceful, freeness-gated, and
@@ -275,8 +275,8 @@ all. Paths are relative to `modules/app/agent-repl/`.
 - FEATURE: a claim taken on the TCP address before any unix socket is
   touched, so an accidental second daemon exits (code 3) with the
   incumbent's sockets untouched rather than unlinking them.
-- EVIDENCE: `daemon/cmd/claude-repld/bootclaim.go:40-61`
-  (`errIncumbentDaemon`), `daemon/cmd/claude-repld/main.go:379-397`
+- EVIDENCE: `daemon/cmd/agent-repld/bootclaim.go:40-61`
+  (`errIncumbentDaemon`), `daemon/cmd/agent-repld/main.go:379-397`
   (distinct exit codes 1/2/3).
 - WHY UNACCOUNTED: the plan DELIBERATELY runs two daemons at once
   (daemon.md:330-355) with per-workspace kernel locks, and never says how an
@@ -294,8 +294,8 @@ all. Paths are relative to `modules/app/agent-repl/`.
   severed-link banner every time.
 - EVIDENCE: `daemon/internal/restartannounce/restartannounce.go:1-27`
   (rationale verbatim), `:48`, `:50-53` (`ErrNoSinks`), `:55-77`; emission
-  `daemon/cmd/claude-repld/restartannouncement.go:24-44`,
-  `daemon/cmd/claude-repld/main.go:1349`.
+  `daemon/cmd/agent-repld/restartannouncement.go:24-44`,
+  `daemon/cmd/agent-repld/main.go:1349`.
 - WHY UNACCOUNTED: the plan's wire is `shutdown_announced { address }` on
   `WatchDaemon` (daemon.md:356-358) — address only. No cause, no bound, no
   stop-shims flag, no loud no-sinks failure, and no arm at all for a PLAIN
@@ -381,7 +381,7 @@ all. Paths are relative to `modules/app/agent-repl/`.
   (`MaintainSizeCaps`), `:1012` (`EvictWorkspace`);
   `daemon/internal/dlog/logtarget.go:9-33`;
   `daemon/internal/replog/replog.go:1-15`, `:31-39`, `:45`, `:84`;
-  `daemon/cmd/claude-repld/main.go:296-306`, `:339-343`, `:1560-1578`;
+  `daemon/cmd/agent-repld/main.go:296-306`, `:339-343`, `:1560-1578`;
   client-log landing `daemon/internal/server/frontendcmd.go:1897`, `:1910`,
   `:1979`, `:2006`, `:2016`, `:1415`.
 - WHY UNACCOUNTED: the plan's only logging clauses are an EMISSION policy —
@@ -395,7 +395,7 @@ all. Paths are relative to `modules/app/agent-repl/`.
 - FEATURE: one shared terminal sink keeping a single FIFO order with a
   flushing Close, so a pty Emacs that stops draining cannot block every
   emitter behind one held mutex.
-- EVIDENCE: `daemon/cmd/claude-repld/main.go:307-330`,
+- EVIDENCE: `daemon/cmd/agent-repld/main.go:307-330`,
   `daemon/internal/dlog/terminal.go`.
 - WHY UNACCOUNTED: a latency-CORRECTNESS property of daemon logging sitting
   on the command critical path, with no clause anywhere in the plan.
@@ -462,7 +462,7 @@ all. Paths are relative to `modules/app/agent-repl/`.
   A LOG LINE" — so a row is not left on the anonymous `daemon_restart` cause.
 - EVIDENCE: `daemon/internal/server/bootsweep.go:1-30`,
   `daemon/internal/server/bootsweepverdict.go:1-12`;
-  `daemon/cmd/claude-repld/main.go:1428-1470`.
+  `daemon/cmd/agent-repld/main.go:1428-1470`.
 - WHY UNACCOUNTED: the CRASH BOOT clause (daemon.md:56-58) covers ADOPTING
   survivors. It says nothing about the sessions the sweep finishes and
   cannot wire, nor about telling the user why.
@@ -474,7 +474,7 @@ all. Paths are relative to `modules/app/agent-repl/`.
   dependency boot so a WEDGED boot is still profilable, with both on and off
   states recorded and a configured-but-unbindable surface fatal.
 - EVIDENCE: `daemon/internal/pprofsurface/pprofsurface.go:1-33`;
-  `daemon/cmd/claude-repld/main.go:369`, `:436-441`, `:1483-1512`.
+  `daemon/cmd/agent-repld/main.go:369`, `:436-441`, `:1483-1512`.
 - WHY UNACCOUNTED: the plan carries a `DaemonHealth` wedged-publisher
   watchdog (daemon.md:961) and no debug or profiling surface anywhere — the
   wedge is detectable but not diagnosable.
@@ -484,10 +484,10 @@ all. Paths are relative to `modules/app/agent-repl/`.
 - FEATURE: `create-workspace`, `list-workspaces`, `list-transcripts`,
   dispatched before any daemon bootstrap, with their own flags and a stated
   safety argument for bypassing job persistence.
-- EVIDENCE: `daemon/cmd/claude-repld/workspace_create_cli.go:30`, `:68-85`,
-  `:216`; `daemon/cmd/claude-repld/workspace_list_cli.go:43`;
-  `daemon/cmd/claude-repld/workspace_transcripts_cli.go:51`;
-  `daemon/cmd/claude-repld/main.go:277`.
+- EVIDENCE: `daemon/cmd/agent-repld/workspace_create_cli.go:30`, `:68-85`,
+  `:216`; `daemon/cmd/agent-repld/workspace_list_cli.go:43`;
+  `daemon/cmd/agent-repld/workspace_transcripts_cli.go:51`;
+  `daemon/cmd/agent-repld/main.go:277`.
 - WHY UNACCOUNTED: the plan describes the daemon PROCESS and its rpc surface
   and never mentions that the binary has a command-line surface at all.
 - CONFIDENCE: **med**
@@ -700,8 +700,8 @@ all. Paths are relative to `modules/app/agent-repl/`.
   staleness reported from a boot-time mtime snapshot; the
   `token-utilization-audit` audit/quarantine/delete tool with its
   `-apply` gate and `OpenExisting` write-mode boundary.
-- EVIDENCE: `daemon/cmd/claude-repld/main.go:62-84`, `:1288`, `:1428-1434`;
-  `daemon/cmd/claude-repld/bootphase.go` and the `phases.Mark` chain at
+- EVIDENCE: `daemon/cmd/agent-repld/main.go:62-84`, `:1288`, `:1428-1434`;
+  `daemon/cmd/agent-repld/bootphase.go` and the `phases.Mark` chain at
   `main.go:398-401,434,517,553,921,1023,1191,1327`, `:1401,1422,1452`;
   `main.go:404-435`, `:1315-1326`; `main.go:159-175`, `:357`, `:1184`;
   `daemon/cmd/token-utilization-audit/main.go:1-3`, `:26-31`, `:53-59`;
@@ -722,7 +722,7 @@ all. Paths are relative to `modules/app/agent-repl/`.
   drops messages SILENTLY); and the `AGENT_REPL_OWNED` marker propagated
   through the shim spawn env so vendor hook scripts can recognize
   agent-repl-owned processes.
-- EVIDENCE: `daemon/cmd/claude-repld/main.go:364`, `:855-857`, `:1186`
+- EVIDENCE: `daemon/cmd/agent-repld/main.go:364`, `:855-857`, `:1186`
   (`-fake`); `daemon/internal/vendorguard/vendorguard.go:21-25` and its use
   at `daemon/internal/login/login.go:346-356`;
   `daemon/internal/stateroot/stateroot.go:1-13`, `:22-26` with
@@ -786,7 +786,7 @@ all. Paths are relative to `modules/app/agent-repl/`.
   env-configured warn threshold, armed at boot and fatal on a bad knob — the
   instrumentation that found finding 23; (b) a boot sweep of stale merge
   rebase worktrees (~190 leftover dirs observed).
-- EVIDENCE: `daemon/cmd/claude-repld/main.go:1033-1053`
+- EVIDENCE: `daemon/cmd/agent-repld/main.go:1033-1053`
   (`frontend.AckWarnFromEnv`, `CommandAckDeadline`);
   `daemon/internal/workspace/merge/rebasesweep.go:119-147`
   (`SweepOrphanRebaseWorktrees`), `daemon/internal/workspace/merge/merge.go:574`.

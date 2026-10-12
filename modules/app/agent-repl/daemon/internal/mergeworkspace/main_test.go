@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"claude-repld/internal/tempdirs/tempdirstest"
+	"agent-repld/internal/tempdirs/tempdirstest"
 )
 
 // TestMain installs the temporary-directory guard the registry's tests

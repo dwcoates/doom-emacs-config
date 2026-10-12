@@ -19,8 +19,8 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
-	"claude-repld/integration/harness"
-	"claude-repld/internal/rollout"
+	"agent-repld/integration/harness"
+	"agent-repld/internal/rollout"
 
 	"connectrpc.com/connect"
 	"golang.org/x/net/http2"
@@ -182,7 +182,7 @@ func TestUpdateShutdownScheduleNowAnnouncesImmediateShutdownWithNoAddress(t *tes
 
 // TestUpdateShutdownScheduleNowLeavesNoShimBehindEvenAtAPermissionGate is the
 // process-tree half of the host's stop, and the defect it pins was MEASURED:
-// over one 24-scenario Emacs e2e run the reaper found 17 leaked `claude-repld`
+// over one 24-scenario Emacs e2e run the reaper found 17 leaked `agent-repld`
 // processes, 24 leaked shims and 48 leaked `shim-lock` holders, and the
 // container's memory climbed from 0.5 GiB to 3.1 GiB across a full run.
 //
@@ -1370,7 +1370,7 @@ func TestAdoptWebWorkspaceRefusesNoTransferAnnouncedOnAPlainBootLoggedAtInfo(t *
 // only its own process's latest value to new subscribers) is therefore EMPTY
 // on a fresh process until something re-announces — and nothing does: there is
 // no boot caller of DrainSchedule()/Current() anywhere in
-// cmd/claude-repld/graph.go (where drainController is built, ~line 385) or
+// cmd/agent-repld/graph.go (where drainController is built, ~line 385) or
 // internal/boot/sequence.go (which never mentions drain at all). The missing
 // call site is exactly there: after drain.New in graph.go, nothing reads the
 // persisted schedule and forwards it to the Announcer before the server starts
@@ -1516,7 +1516,7 @@ func drainSelfRepoDaemon(t *testing.T) (*harness.Repo, *harness.Daemon) {
 		SelfRepo: selfRepo.Dir,
 		ExtraEnv: []string{"AGENT_REPL_TEST_ALL_SCRIPT=" + script.Path},
 		// Every caller of this fixture drives a real self-reload handover
-		// (drainTriggerDeploy): a second real claude-repld boots and adopts
+		// (drainTriggerDeploy): a second real agent-repld boots and adopts
 		// every workspace within THIS daemon's one context, never a fresh one
 		// of its own, so it gets HandoverChainTimeout rather than the tighter
 		// single-boot default.
@@ -1531,7 +1531,7 @@ func drainSelfRepoDaemon(t *testing.T) (*harness.Repo, *harness.Daemon) {
 func drainTriggerDeploy(t *testing.T, d *harness.Daemon, selfRepo *harness.Repo, build harness.DeployBuild) {
 	t.Helper()
 	d.StageDeployBuild(build)
-	path := "modules/app/agent-repl/daemon/cmd/claude-repld/main.go"
+	path := "modules/app/agent-repl/daemon/cmd/agent-repld/main.go"
 	// The trigger workspace is CREATED, never merely registered: a merge runs
 	// off the creation job's recorded geometry, and a registered worktree has
 	// none, so a registered one is refused with no_layout_facts and no merge

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"claude-repld/internal/ids"
+	"agent-repld/internal/ids"
 )
 
 // parentFamily is one repository with a main checkout and the workspaces a

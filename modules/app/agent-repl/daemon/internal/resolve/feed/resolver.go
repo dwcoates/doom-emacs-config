@@ -12,13 +12,13 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/feedid"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/lockwatch"
-	"claude-repld/internal/paint"
-	"claude-repld/internal/sessionwatcher"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/feedid"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/lockwatch"
+	"agent-repld/internal/paint"
+	"agent-repld/internal/sessionwatcher"
+	"agent-repld/internal/wsm"
 )
 
 // errNotARow is what a family function answers for a frame that DRAWS NOTHING

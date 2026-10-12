@@ -19,7 +19,7 @@ import (
 	"os"
 	"time"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // EnvBrowserCmd overrides the launcher command. It is the operator/test knob

@@ -27,8 +27,8 @@ import (
 	"syscall"
 	"time"
 
-	"claude-repld/internal/clock"
-	"claude-repld/internal/shimsocket"
+	"agent-repld/internal/clock"
+	"agent-repld/internal/shimsocket"
 )
 
 // Clock is this package's view of time; see internal/clock.

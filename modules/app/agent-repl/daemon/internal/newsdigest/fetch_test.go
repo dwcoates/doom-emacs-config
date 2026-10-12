@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"claude-repld/internal/envc"
+	"agent-repld/internal/envc"
 )
 
 // serve answers every request with handler, for the test's lifetime.

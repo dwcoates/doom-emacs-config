@@ -44,8 +44,8 @@ import (
 	"sort"
 	"strings"
 
-	"claude-repld/internal/dirpath"
-	"claude-repld/internal/envc"
+	"agent-repld/internal/dirpath"
+	"agent-repld/internal/envc"
 )
 
 // FixedRoots are the temporary roots every host is checked against, in the

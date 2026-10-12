@@ -8,8 +8,8 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
-	"claude-repld/internal/workspace"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/workspace"
+	"agent-repld/internal/wsm"
 )
 
 // TestCreateTaskAnswersTheMintedRef pins the ordinary path.

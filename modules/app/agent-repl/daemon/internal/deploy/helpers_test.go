@@ -12,13 +12,13 @@ import (
 
 	"agentrepl/logging/buildreport"
 
-	"claude-repld/internal/bounce"
-	"claude-repld/internal/buildid"
-	"claude-repld/internal/deployprogress"
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/rollout"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/bounce"
+	"agent-repld/internal/buildid"
+	"agent-repld/internal/deployprogress"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/rollout"
+	"agent-repld/internal/wsm"
 )
 
 // instant is the fixed instant every test's arithmetic starts from.

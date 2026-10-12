@@ -3,8 +3,8 @@ package feed
 import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/feedid"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/feedid"
 )
 
 // A THINKING BUBBLE IS SUPERSEDED ONCE A LATER AGENT RESPONSE LANDS IN ITS FEED

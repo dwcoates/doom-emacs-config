@@ -47,7 +47,7 @@ CHESSCOM_CONFIG="$WORK/.claude-chesscom"
 # stderr first, so a script reading anything but stdout would pick up the log.
 STUB_BIN="$WORK/stubs"
 mkdir -p "$STUB_BIN"
-cat > "$STUB_BIN/claude-repld" <<STUB
+cat > "$STUB_BIN/agent-repld" <<STUB
 #!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "\$@" >> "\$RECORD_ARGS"
@@ -71,9 +71,9 @@ pwd -P > "$RECORD_CWD"
 printf '%s\n' "$@" >> "$RECORD_CWD"
 echo "CLAUDE_CONFIG_DIR=${CLAUDE_CONFIG_DIR:-}" >> "$RECORD_CWD"
 STUB
-chmod +x "$STUB_BIN/claude-repld" "$STUB_BIN/claude"
+chmod +x "$STUB_BIN/agent-repld" "$STUB_BIN/claude"
 
-export AGENT_REPL_DAEMON_BIN="$STUB_BIN/claude-repld"
+export AGENT_REPL_DAEMON_BIN="$STUB_BIN/agent-repld"
 export AGENT_REPL_CLAUDE_BIN="$STUB_BIN/claude"
 
 # --- fixture repository -----------------------------------------------------
@@ -238,13 +238,13 @@ fi
 # An empty listing is a hard failure, not a menu with nothing in it.
 EMPTY_STUB="$WORK/stubs-empty"
 mkdir -p "$EMPTY_STUB"
-cat > "$EMPTY_STUB/claude-repld" <<'STUB'
+cat > "$EMPTY_STUB/agent-repld" <<'STUB'
 #!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$@" >> "$RECORD_ARGS"
 STUB
-chmod +x "$EMPTY_STUB/claude-repld"
-if AGENT_REPL_DAEMON_BIN="$EMPTY_STUB/claude-repld" run_from "$REPO" $'1\n1\n' >/dev/null 2>&1; then
+chmod +x "$EMPTY_STUB/agent-repld"
+if AGENT_REPL_DAEMON_BIN="$EMPTY_STUB/agent-repld" run_from "$REPO" $'1\n1\n' >/dev/null 2>&1; then
     fail "a repository with no workspaces fails loudly" "the script succeeded"
 else
     pass "a repository with no workspaces fails loudly"

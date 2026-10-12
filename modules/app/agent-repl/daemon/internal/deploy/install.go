@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 const opInstall = "daemon.deploy.install"
@@ -46,7 +46,7 @@ func (l Live) WebappDist() string {
 }
 
 // DaemonBin is the installed daemon binary a successor is spawned from.
-func (l Live) DaemonBin() string { return filepath.Join(l.ModuleRoot, "daemon", "bin", "claude-repld") }
+func (l Live) DaemonBin() string { return filepath.Join(l.ModuleRoot, "daemon", "bin", "agent-repld") }
 
 // CacheBinPath is an installed cache-bin artifact.
 func (l Live) CacheBinPath(name string) string { return filepath.Join(l.CacheBin, name) }

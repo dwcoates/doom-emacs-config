@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"claude-repld/internal/ids"
+	"agent-repld/internal/ids"
 )
 
 // EnvNotifierCmd overrides the banner program's binary. The platform's argv

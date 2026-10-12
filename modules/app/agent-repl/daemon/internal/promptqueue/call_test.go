@@ -8,12 +8,12 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"claude-repld/internal/bounce"
-	"claude-repld/internal/classifier"
-	"claude-repld/internal/feedid"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/sourcescan"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/bounce"
+	"agent-repld/internal/classifier"
+	"agent-repld/internal/feedid"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/sourcescan"
+	"agent-repld/internal/wsm"
 )
 
 // The tests of call.go: no queue lock is held across a call to the shim, and

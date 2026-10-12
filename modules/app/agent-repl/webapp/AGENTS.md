@@ -1,6 +1,6 @@
 # Webapp
 
-The webview claude-repld serves: a TypeScript SPA that speaks generated Connect
+The webview agent-repld serves: a TypeScript SPA that speaks generated Connect
 clients to the daemon and renders server-resolved views. It derives nothing.
 Where the daemon composed a sentence, the webapp draws the sentence.
 

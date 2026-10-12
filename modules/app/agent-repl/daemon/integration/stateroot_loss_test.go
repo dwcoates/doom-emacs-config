@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"claude-repld/integration/harness"
+	"agent-repld/integration/harness"
 )
 
 // TestADaemonStandsDownWhenWhatItOwnsOnDiskVanishes removes, from under a

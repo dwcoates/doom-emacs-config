@@ -10,13 +10,13 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/feedid"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/merge"
-	"claude-repld/internal/prompthandler"
-	"claude-repld/internal/promptqueue"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/feedid"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/merge"
+	"agent-repld/internal/prompthandler"
+	"agent-repld/internal/promptqueue"
+	"agent-repld/internal/wsm"
 )
 
 // fakeVerbs records the retarget and the undo asked of it.

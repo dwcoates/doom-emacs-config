@@ -9,12 +9,12 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 	shimv1 "agentrepl/proto/shim/v1"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/feedid"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/resolve/feed"
-	"claude-repld/internal/resolve/footer"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/feedid"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/resolve/feed"
+	"agent-repld/internal/resolve/footer"
+	"agent-repld/internal/wsm"
 )
 
 // deliver sends a submission to the shim as the session's turn: the durable

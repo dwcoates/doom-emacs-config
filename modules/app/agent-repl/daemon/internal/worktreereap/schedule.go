@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 
-	"claude-repld/internal/clock"
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/clock"
+	"agent-repld/internal/dlog"
 )
 
 // Run drives the schedule for the daemon's whole serving lifetime: one sweep

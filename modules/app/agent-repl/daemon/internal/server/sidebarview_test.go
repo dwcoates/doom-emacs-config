@@ -10,8 +10,8 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
-	"claude-repld/internal/workspace"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/workspace"
+	"agent-repld/internal/wsm"
 )
 
 func foldChange(section *agentreplv1.SidebarViewFoldSection) *agentreplv1.UpdateSidebarViewRequest {

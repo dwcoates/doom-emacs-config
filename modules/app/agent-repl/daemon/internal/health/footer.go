@@ -5,9 +5,9 @@ import (
 	"sync"
 	"time"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
 )
 
 // THE FAULT PARTITION — where every recorded fault kind lands on the footer.

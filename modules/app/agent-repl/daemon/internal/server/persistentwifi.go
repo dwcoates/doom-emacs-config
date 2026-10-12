@@ -7,7 +7,7 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
-	"claude-repld/internal/publish"
+	"agent-repld/internal/publish"
 )
 
 // PersistentWifi is the server's view of the persistent-wifi controller

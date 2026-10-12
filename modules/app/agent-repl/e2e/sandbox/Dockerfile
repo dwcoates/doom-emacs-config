@@ -2,7 +2,7 @@
 #
 # The agent-repl cross-system e2e sandbox image.
 #
-# WHY THIS EXISTS: the e2e suite runs a real claude-repld, a real
+# WHY THIS EXISTS: the e2e suite runs a real agent-repld, a real
 # shim-store, a real shim-claude-sidecar, the real TypeScript shim, and (for
 # the Emacs-side integration suites) a real Emacs + Doom. On the host that
 # means writing to ~/.claude, ~/.emacs.d, the Doom cache, the user's git

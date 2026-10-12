@@ -12,12 +12,12 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"claude-repld/internal/cpugov"
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/gitclient"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/promptqueue"
-	"claude-repld/internal/scriptrunner"
+	"agent-repld/internal/cpugov"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/gitclient"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/promptqueue"
+	"agent-repld/internal/scriptrunner"
 )
 
 // This file tests the chain: chained rebasing, restacks, speculative gates and

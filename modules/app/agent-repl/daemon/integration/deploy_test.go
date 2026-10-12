@@ -17,7 +17,7 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/integration/harness"
+	"agent-repld/integration/harness"
 
 	"connectrpc.com/connect"
 )
@@ -509,7 +509,7 @@ func TestACLIStartedDeployWhoseBuildFailsReachesEmacs(t *testing.T) {
 	// Assert: the verb failed with the daemon's words, and Emacs was told.
 	var exit *exec.ExitError
 	if !errors.As(err, &exit) || !strings.Contains(string(out), harness.FakeDeployBuildRefusal) {
-		t.Fatalf("claude-repld deploy = (%v, %q), want a non-zero exit carrying the build's words", err, out)
+		t.Fatalf("agent-repld deploy = (%v, %q), want a non-zero exit carrying the build's words", err, out)
 	}
 	faults := awaitStanding(t, d, emacs, "the failed deploy on the Emacs stream", func(f []*agentreplv1.DaemonStandingFault) bool {
 		return standsLine(f, buildFailedTopbarLine)

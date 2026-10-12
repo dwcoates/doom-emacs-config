@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"claude-repld/internal/workspace"
+	"agent-repld/internal/workspace"
 )
 
 func TestHostNeutralNamingEnvClearsThePrefix(t *testing.T) {

@@ -18,7 +18,7 @@ import (
 	"os"
 	"time"
 
-	"claude-repld/internal/envc"
+	"agent-repld/internal/envc"
 )
 
 // EnvClaudeBin names the vendor binary every headless run execs. AGENTS.md

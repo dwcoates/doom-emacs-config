@@ -3,10 +3,10 @@ package sidebar
 import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/resolve/footer"
-	"claude-repld/internal/resolve/ladder"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/resolve/footer"
+	"agent-repld/internal/resolve/ladder"
+	"agent-repld/internal/wsm"
 )
 
 // THE ONE-SHOT OUTCOME (frontend.v1.RosterRowOneShot): whether a one-shot

@@ -12,7 +12,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 	shimv1 "agentrepl/proto/shim/v1"
 
-	"claude-repld/integration/harness"
+	"agent-repld/integration/harness"
 
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/proto"
@@ -649,7 +649,7 @@ func TestACorruptedHeldPromptRowFailsBootLoudlyWithExactlyOneRestoreError(t *tes
 	// THE FAILED BOOT TEARS DOWN IN THE ORDERLY EXIT'S ORDER. This boot
 	// ADOPTED the surviving shim before the restore step failed it, so a
 	// watcher's frame pump is live when run() returns. The watcher close is
-	// armed BEFORE the boot sequence runs (cmd/claude-repld/run.go) precisely
+	// armed BEFORE the boot sequence runs (cmd/agent-repld/run.go) precisely
 	// so it still happens on this path; armed after it, the state client
 	// closed under those in-flight frames and the next resolver lookup read a
 	// closed database.

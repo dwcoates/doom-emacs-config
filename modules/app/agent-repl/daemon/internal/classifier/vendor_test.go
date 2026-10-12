@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"claude-repld/internal/envc"
-	"claude-repld/internal/headless"
-	"claude-repld/internal/prompts"
+	"agent-repld/internal/envc"
+	"agent-repld/internal/headless"
+	"agent-repld/internal/prompts"
 )
 
 func TestVendorJudgeTakesTheFastPathWithoutAskingTheGuard(t *testing.T) {

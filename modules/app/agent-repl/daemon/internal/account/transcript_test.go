@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"claude-repld/internal/account"
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/account"
+	"agent-repld/internal/dlog"
 )
 
 // recordAt is a well-formed vendor record carrying one RFC3339 timestamp, so a

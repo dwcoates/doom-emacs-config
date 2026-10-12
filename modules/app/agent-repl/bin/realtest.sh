@@ -437,7 +437,7 @@ for system in report["systems"]:
 if [ -n "$NOT_READY" ]; then
     printf '[realtest] DECLINED: a realtest measures the DEPLOYED stack, and these systems are not at this checkout:\n' >&2
     printf '%s\n' "$NOT_READY" >&2
-    printf '[realtest] run daemon/bin/claude-repld deploy, then try again.\n' >&2
+    printf '[realtest] run daemon/bin/agent-repld deploy, then try again.\n' >&2
     exit "$EXIT_DECLINED"
 fi
 note "every deployed system is at this checkout's revision"
@@ -703,7 +703,7 @@ process_carries_guard() {
 # refusal below and the world realtest 3 demands must not disagree about what
 # counts as a running daemon.
 daemon_pids() {
-    pgrep -f "$MODULE_ROOT/daemon/bin/claude-repld" 2>/dev/null || true
+    pgrep -f "$MODULE_ROOT/daemon/bin/agent-repld" 2>/dev/null || true
 }
 
 # standing_emacs_pid — the pid of the editor answering the socket, and nothing

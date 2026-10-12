@@ -14,10 +14,10 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"claude-repld/internal/feedid"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/sessioncommand"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/feedid"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/sessioncommand"
+	"agent-repld/internal/wsm"
 )
 
 // SaidText renders a submission's text: the text blocks, joined by a newline.

@@ -1,7 +1,7 @@
 /**
  * PROOF OF LIFE (§F1) — the whole chain, end to end, through the real webapp.
  *
- *   fake SDK -> real shim -> real store + real sidecar -> real claude-repld
+ *   fake SDK -> real shim -> real store + real sidecar -> real agent-repld
  *            -> real webapp (this file, in jsdom)
  *
  * One scenario: a prompt typed into the webapp's OWN composer and sent, and

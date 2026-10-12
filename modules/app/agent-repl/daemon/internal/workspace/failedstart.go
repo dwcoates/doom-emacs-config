@@ -5,9 +5,9 @@ import (
 	"errors"
 	"fmt"
 
-	"claude-repld/internal/bringup"
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
+	"agent-repld/internal/bringup"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
 )
 
 // ErrAdoptOwnSpawn is the refusal of an adoption whose target is a shim THIS

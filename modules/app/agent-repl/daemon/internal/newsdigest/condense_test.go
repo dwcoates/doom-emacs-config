@@ -8,9 +8,9 @@ import (
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/internal/headless"
-	"claude-repld/internal/prompts"
-	"claude-repld/internal/sourcescan"
+	"agent-repld/internal/headless"
+	"agent-repld/internal/prompts"
+	"agent-repld/internal/sourcescan"
 )
 
 // allowedFixture is the link set the answer tests validate against.
