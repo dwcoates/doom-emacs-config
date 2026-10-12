@@ -134,7 +134,7 @@ type fakeDB struct {
 	// workspaceErr fails every registry read, standing in for the closed
 	// state client an exiting daemon leaves behind.
 	workspaceErr error
-	// turnStarted answers TurnStartedAt by turn; turnStartedErr fails every
+	// turnStarted answers Turn's start by turn; turnStartedErr fails every
 	// read instead (wsm.ErrNotFound for a turn the workspace never recorded).
 	turnStarted    map[ids.TurnID]time.Time
 	turnStartedErr error
@@ -187,13 +187,13 @@ func (f *fakeDB) ListRepositories(context.Context) ([]wsm.Repository, error) {
 	return f.repositories, nil
 }
 
-// TurnStartedAt answers the seeded start time, or turnStartedErr when set
-// (e.g. wsm.ErrNotFound for a turn the workspace never recorded).
-func (f *fakeDB) TurnStartedAt(_ context.Context, _ ids.WorkspaceID, turn ids.TurnID) (time.Time, error) {
+// Turn answers the turn with its seeded start time, or turnStartedErr when
+// set (e.g. wsm.ErrNotFound for a turn the workspace never recorded).
+func (f *fakeDB) Turn(_ context.Context, ws ids.WorkspaceID, turn ids.TurnID) (wsm.Turn, error) {
 	if f.turnStartedErr != nil {
-		return time.Time{}, f.turnStartedErr
+		return wsm.Turn{}, f.turnStartedErr
 	}
-	return f.turnStarted[turn], nil
+	return wsm.Turn{ID: turn, Workspace: ws, StartedAt: f.turnStarted[turn]}, nil
 }
 
 // OpenTurns answers the seeded open turns, or openTurnsErr when set.
