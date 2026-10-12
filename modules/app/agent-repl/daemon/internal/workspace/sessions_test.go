@@ -24,13 +24,13 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/opentabs"
 	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/resolve/topbar"
 	"agent-repld/internal/sessionlock"
 	"agent-repld/internal/sessionwatcher"
 	"agent-repld/internal/shimclient"
 	"agent-repld/internal/shimsocket"
-	"agent-repld/internal/startup"
 	"agent-repld/internal/wsm"
 )
 
@@ -537,7 +537,7 @@ type fleetFixture struct {
 	// vendorStarts is every vendor-start state the roster was told, in order.
 	vendorStarts []sidebar.VendorStart
 	// steps are the bring-up steps the fleet reported, in order.
-	steps []startup.Step
+	steps []opentabs.Step
 	// sessionsUp is every workspace the session-up hook was told about.
 	sessionsUp []ids.WorkspaceID
 	// bringUps records every BringUps edge, in order.
@@ -716,7 +716,7 @@ func newFleetFixtureBoundedAt(t *testing.T, adoptBound time.Duration) *fleetFixt
 		VendorStarts: func(_ ids.WorkspaceID, state sidebar.VendorStart) {
 			f.vendorStarts = append(f.vendorStarts, state)
 		},
-		Steps: func(ws ids.WorkspaceID, step startup.Step) {
+		Steps: func(ws ids.WorkspaceID, step opentabs.Step) {
 			f.steps = append(f.steps, step)
 		},
 		SessionsUp: func(ws ids.WorkspaceID) { f.sessionsUp = append(f.sessionsUp, ws) },

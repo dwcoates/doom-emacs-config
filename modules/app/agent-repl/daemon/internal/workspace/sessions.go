@@ -22,6 +22,7 @@ import (
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/opentabs"
 	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/resolve/sidebar"
@@ -31,7 +32,6 @@ import (
 	"agent-repld/internal/shimclient"
 	"agent-repld/internal/shimsocket"
 	"agent-repld/internal/startingshim"
-	"agent-repld/internal/startup"
 	"agent-repld/internal/wsm"
 )
 
@@ -188,7 +188,7 @@ type FleetDeps struct {
 	// Steps is told every step of every bring-up this fleet runs, whoever
 	// asked for it: the editor's startup (internal/startup) prints them and
 	// gates each tab's go-ahead on them.
-	Steps startup.StepSink
+	Steps opentabs.StepSink
 	// SessionsUp is told that a session has come up on a workspace, however
 	// it came up -- a start, a retried vendor start, a relaunch's resume, a
 	// cold-gate re-open, an adoption -- so the prompts held until it
@@ -1153,7 +1153,7 @@ func (f *Fleet) noteStartEnded(ws ids.WorkspaceID, err error) {
 	if errors.As(err, &label) && (label.vendor || label.network) {
 		return
 	}
-	f.deps.Steps(ws, startup.Step{Kind: startup.StepFailed, Text: err.Error()})
+	f.deps.Steps(ws, opentabs.Step{Kind: opentabs.StepFailed, Text: err.Error()})
 }
 
 // startUp is start's body, under the start gate, with the bring-up marker
@@ -1181,9 +1181,9 @@ func (f *Fleet) startUp(ctx context.Context, ws ids.WorkspaceID, rebind bool) er
 		return fmt.Errorf("start session for %q: read the session record: %w", ws, err)
 	}
 	if exists && session.Hibernated() {
-		f.deps.Steps(ws, startup.Step{Kind: startup.StepWaking})
+		f.deps.Steps(ws, opentabs.Step{Kind: opentabs.StepWaking})
 	} else {
-		f.deps.Steps(ws, startup.Step{Kind: startup.StepStartingSession})
+		f.deps.Steps(ws, opentabs.Step{Kind: opentabs.StepStartingSession})
 	}
 
 	src, err := f.classifySource(ctx, log, ws, record.Dir, session, exists)
@@ -1264,7 +1264,7 @@ func (f *Fleet) startUp(ctx context.Context, ws ids.WorkspaceID, rebind bool) er
 	f.closeOnEdge(ctx, log, ws, health.EdgeHealthyAttach)
 	// AGENT-REPL'S OWN SERVICES SERVE THE WORKSPACE from here, whatever the
 	// vendor goes on to do: this is the moment the editor's tab may open.
-	f.deps.Steps(ws, startup.Step{Kind: startup.StepServing})
+	f.deps.Steps(ws, opentabs.Step{Kind: opentabs.StepServing})
 
 	// AN ADOPTED SHIM IS ATTACHED TO, NEVER STARTED. The lock probe selected
 	// the adopt path precisely because a shim is still alive on this
@@ -1291,7 +1291,7 @@ func (f *Fleet) startUp(ctx context.Context, ws ids.WorkspaceID, rebind bool) er
 			"adopted": true, "shim_pid": client.PID(),
 		})
 		f.deps.SessionsUp(ws)
-		f.deps.Steps(ws, startup.Step{Kind: startup.StepUp})
+		f.deps.Steps(ws, opentabs.Step{Kind: opentabs.StepUp})
 		return nil
 	}
 
@@ -1299,7 +1299,7 @@ func (f *Fleet) startUp(ctx context.Context, ws ids.WorkspaceID, rebind bool) er
 	// finished with it.
 	runCtx, finishRun := f.beginVendorStart(ctx, ws)
 	if !src.Fresh {
-		f.deps.Steps(ws, startup.Step{Kind: startup.StepResuming})
+		f.deps.Steps(ws, opentabs.Step{Kind: opentabs.StepResuming})
 	}
 	started, err := f.startSession(runCtx, log, ws, client, src, session, configDir)
 	if errors.Is(err, errSessionAlreadyRunning) {
@@ -1353,14 +1353,14 @@ func (f *Fleet) startUp(ctx context.Context, ws ids.WorkspaceID, rebind bool) er
 		log.Info(opBringUp, "the session is parked at its cold gate", dlog.Context{
 			"shim_pid": client.PID(), "host_session_id": hostSessionID,
 		})
-		f.deps.Steps(ws, startup.Step{Kind: startup.StepColdGate})
+		f.deps.Steps(ws, opentabs.Step{Kind: opentabs.StepColdGate})
 		return nil
 	}
 
 	if err := f.sessionUp(ctx, log, ws, client, started, session, configDir, hostSessionID); err != nil {
 		return err
 	}
-	f.deps.Steps(ws, startup.Step{Kind: startup.StepUp})
+	f.deps.Steps(ws, opentabs.Step{Kind: opentabs.StepUp})
 	return nil
 }
 
@@ -1653,7 +1653,7 @@ func (f *Fleet) takeRunningSession(ctx context.Context, log dlog.Logger, ws ids.
 	})
 	f.publishHost(ws)
 	f.deps.SessionsUp(ws)
-	f.deps.Steps(ws, startup.Step{Kind: startup.StepUp})
+	f.deps.Steps(ws, opentabs.Step{Kind: opentabs.StepUp})
 	return nil
 }
 
