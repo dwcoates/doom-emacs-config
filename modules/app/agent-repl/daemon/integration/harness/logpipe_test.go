@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -276,5 +277,51 @@ func TestAConnectionThatEndsInsideAFrameFailsTheNextDrain(t *testing.T) {
 	// Assert
 	if err == nil {
 		t.Fatal("a connection that ended inside a frame drained clean; want the truncation reported")
+	}
+}
+
+func TestADrainOfAConnectionItsReaderAlreadyClosedWaitsForTheReaderToFinish(t *testing.T) {
+	// Arrange: the reader has closed the connection (finish's first step) but
+	// not yet said so.
+	dir, err := os.MkdirTemp("", "lp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	ln, err := net.ListenUnix("unix", &net.UnixAddr{Name: filepath.Join(dir, "s"), Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	dialed, err := net.DialUnix("unix", nil, ln.Addr().(*net.UnixAddr))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = dialed.Close() })
+	served, err := ln.AcceptUnix()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pc := &pipeConn{c: served}
+	pc.cond = sync.NewCond(&pc.mu)
+	_ = served.Close()
+	drained := make(chan error, 1)
+	go func() { drained <- pc.drain() }()
+	for {
+		pc.mu.Lock()
+		waiting := pc.requested == 1
+		pc.mu.Unlock()
+		if waiting {
+			break
+		}
+		runtime.Gosched()
+	}
+
+	// Act.
+	pc.finish(io.EOF)
+
+	// Assert.
+	if err := <-drained; err != nil {
+		t.Fatalf("drain = %v, want nil: the reader read the connection to its end", err)
 	}
 }
