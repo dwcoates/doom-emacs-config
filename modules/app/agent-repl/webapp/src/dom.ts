@@ -53,7 +53,7 @@ export function scrollbarWidthPx(box: { offsetWidth: number; clientWidth: number
  */
 export function computedPx(value: string): number | null {
   const px = /^(-?\d+(?:\.\d+)?)px$/.exec(value);
-  return px === null ? null : Number.parseFloat(px[1] as string);
+  return px === null ? null : Number.parseFloat(px[1]);
 }
 
 /**

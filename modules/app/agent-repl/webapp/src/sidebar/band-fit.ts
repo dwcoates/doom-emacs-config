@@ -70,7 +70,7 @@ export type BandStops = readonly number[];
 
 /** Refuse stops that do not describe a band (see `BandStops`). */
 function assertStops(stops: BandStops, band: string): void {
-  if (stops.length === 0 || stops[0] !== 0 || stops.some((h, i) => i > 0 && h < (stops[i - 1] as number))) {
+  if (stops.length === 0 || stops[0] !== 0 || stops.some((h, i) => i > 0 && h < stops[i - 1])) {
     throw new RangeError(`band fit: ${band} stops ${JSON.stringify(stops)} do not start at 0 and grow`);
   }
 }
@@ -84,7 +84,7 @@ export function allocateBandLines(room: number, hidden: BandStops, merged: BandS
   assertStops(merged, "merged");
   const totalH = hidden.length - 1;
   const totalM = merged.length - 1;
-  const height = (h: number, m: number): number => (hidden[h] as number) + (merged[m] as number);
+  const height = (h: number, m: number): number => hidden[h] + merged[m];
   if (height(totalH, totalM) <= room) return { hidden: totalH, merged: totalM };
   let h = Math.min(totalH, BAND_CAP);
   let m = Math.min(totalM, BAND_CAP);

@@ -222,4 +222,12 @@ export default tseslint.config(
     files: ["bin/**/*.mjs"],
     languageOptions: { globals: { ...globals.node, ...globals.browser } },
   },
+
+  // ---- the webapp layer's node-side server ----------------------------
+  {
+    // test/webapp-layer/layer-server.mjs is started by the Go e2e world as a
+    // node process; it never runs in the page.
+    files: ["test/webapp-layer/**/*.mjs"],
+    languageOptions: { globals: globals.node },
+  },
 );

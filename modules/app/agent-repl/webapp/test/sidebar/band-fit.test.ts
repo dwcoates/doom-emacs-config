@@ -56,7 +56,7 @@ function drawn(
 
 /** A DOMRect at TOP, HEIGHT tall. */
 function rect(top: number, height: number): DOMRect {
-  return { top, height, bottom: top + height, left: 0, right: 0, width: 0, x: 0, y: top, toJSON: () => ({}) } as DOMRect;
+  return { top, height, bottom: top + height, left: 0, right: 0, width: 0, x: 0, y: top, toJSON: () => ({}) };
 }
 
 /** Lay one band's rows region out: its lines ROW px each, capped by its max-height. */
@@ -194,7 +194,7 @@ describe("regionStops", () => {
     for (const [top, height] of [[0, ROW], [0, 0], [20, ROW]]) {
       const line = document.createElement("div");
       line.className = "row";
-      line.getBoundingClientRect = () => rect(top as number, height as number);
+      line.getBoundingClientRect = () => rect(top, height);
       region.appendChild(line);
     }
     region.getBoundingClientRect = () => rect(0, 40);
