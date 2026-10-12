@@ -112,3 +112,34 @@ Decisions:
   session starts (`SessionDiagnostics` carries only `shim_build`), so a daemon
   that has started no session since it came up answers `unknown`, never a
   guess.
+
+## Addendum: the IPO outlook (owner, 2026-10-11)
+
+Problem: the digest leads, first and foremost, with the current best guess at
+when Anthropic and OpenAI go public, prominently at the top of the content in
+a dedicated color and an extra large (not comically large) font.
+
+Landed contract (`news_digest.proto`):
+
+- `NewsDigestOverlay.ipo = 6` → `NewsDigestIpoOutlook { heading, anthropic,
+  openai }`: the pair is two fields, not a list, so both are always present
+  and Anthropic is always first.
+- `NewsDigestIpoGuess { company, estimate, basis, repeated links }`: the
+  estimate is the short phrase drawn large ("Q2 2027"), the basis one or two
+  sentences on the reporting it rests on, the links where it was read.
+- `ipo` is set on every digest the daemon makes; it is unset only on a digest
+  made before the field existed and still standing across the deploy, which
+  draws no outlook.
+
+Decisions:
+
+- Source: the watched sources do not carry IPO reporting, so a dedicated
+  Sonnet call (`prompts/news-digest-ipo-outlook.md`, site `news_digest_ipo`)
+  researches it with the CLI's `WebSearch` tool, the only tool it is allowed,
+  on every run that makes a digest. Its links come from that search, so they
+  are validated as absolute https URLs rather than against the sources' set.
+- The call is told the standing digest's outlook, when one is still unread,
+  so a guess moves only when the reporting moves.
+- A failed or malformed answer fails the run as `model_failed`, as the
+  condensing and week merge calls do; there is never a guessed outlook.
+- The webview draws it first in the body, above "Since last week".

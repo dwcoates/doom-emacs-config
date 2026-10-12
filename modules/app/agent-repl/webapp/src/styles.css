@@ -286,6 +286,10 @@
        unmistakable among the feed. */
   --q-opt-bg: color-mix(in srgb, var(--fg) 8%, var(--card));
   --q-border: #eab308;
+  /* THE IPO OUTLOOK'S OWN COLOR (owner, 2026-10-11): Anthropic's clay, used
+     by nothing else, so the digest's lead section is told apart at a glance
+     from the backend warning's red and every chip's hue. */
+  --news-digest-ipo: #b5532f;
   /* THE TAB CORNER (owner ruling, 2026-10-11): the one radius a card's feed
      tab wears, shared by the question card's options and a settled ask's
      verdict badges so all three read as the same square controls. */
@@ -515,6 +519,7 @@
     --revival-gate-border: #f97316;
     --blocked: #e879f9;
     --q-border: #facc15;
+    --news-digest-ipo: #e8916f;
     --async-card: #09433b;
     --async-border: #4fc4b0;
     --merge-card: #3a2e0a;
@@ -7733,6 +7738,37 @@ ar-button.outcome-marker-pill {
 }
 .news-digest-section[data-kind="backend"] .news-digest-section-heading {
   color: var(--err);
+}
+
+/* THE IPO OUTLOOK LEADS THE DIGEST (owner, 2026-10-11): first in the body,
+   in its own color, each company's guess set large (not comically so) beside
+   the other's, with the basis and links at the body's size beneath. */
+.news-digest-ipo {
+  --news-digest-accent: var(--news-digest-ipo);
+  margin-bottom: 0.4rem;
+}
+.news-digest-ipo .news-digest-section-heading {
+  color: var(--news-digest-ipo);
+}
+.news-digest-ipo-guesses {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 0.6rem 1.25rem;
+}
+.news-digest-ipo-guess {
+  padding: 0.3rem 0 0.4rem 0.75rem;
+  border-left: 3px solid var(--news-digest-accent);
+}
+.news-digest-ipo-company {
+  color: var(--news-digest-ipo);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.news-digest-ipo-estimate {
+  color: var(--news-digest-ipo);
+  font-size: 1.6rem;
+  font-weight: 700;
+  line-height: 1.2;
 }
 
 .news-digest-item {

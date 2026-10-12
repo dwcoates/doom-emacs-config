@@ -10,6 +10,7 @@ import (
 
 	"claude-repld/internal/headless"
 	"claude-repld/internal/prompts"
+	"claude-repld/internal/sourcescan"
 )
 
 // allowedFixture is the link set the answer tests validate against.
@@ -375,4 +376,98 @@ func TestKindTokenPanicsOnASectionWithNoKind(t *testing.T) {
 
 	// Act
 	kindToken(&frontendv1.NewsDigestSectionKind{})
+}
+
+func TestValidLink(t *testing.T) {
+	tests := []struct {
+		name    string
+		link    answerLink
+		want    *frontendv1.NewsDigestLink
+		wantErr string
+	}{
+		{name: "an https link keeps its url and trims its label", link: answerLink{Label: " Release ", URL: "https://fixture.test/r"},
+			want: &frontendv1.NewsDigestLink{Label: "Release", Url: "https://fixture.test/r"}},
+		{name: "a blank label", link: answerLink{Label: " ", URL: "https://fixture.test/r"}, wantErr: "has no label"},
+		{name: "an http url", link: answerLink{Label: "L", URL: "http://fixture.test/r"}, wantErr: "not an absolute https url"},
+		{name: "a relative url", link: answerLink{Label: "L", URL: "/r"}, wantErr: "not an absolute https url"},
+		{name: "an unparseable url", link: answerLink{Label: "L", URL: "https://%zz"}, wantErr: "not an absolute https url"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got, err := validLink(tt.link)
+
+			// Assert
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("validLink = %v, %v, want an error naming %q", got, err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil || got.GetLabel() != tt.want.GetLabel() || got.GetUrl() != tt.want.GetUrl() {
+				t.Fatalf("validLink = %v, %v, want %v", got, err, tt.want)
+			}
+		})
+	}
+}
+
+// TestEveryModelWrittenLinkPassesValidLink holds the package to one link
+// check: a source file checking a link's scheme on its own fails here.
+func TestEveryModelWrittenLinkPassesValidLink(t *testing.T) {
+	// Act
+	checks := sourcescan.Count(t, `Scheme != "https"`)
+
+	// Assert
+	if checks != 1 {
+		t.Fatalf("the https check appears %d times in the package, want once, in validLink", checks)
+	}
+}
+
+func TestDecodeAnswer(t *testing.T) {
+	tests := []struct {
+		name    string
+		text    string
+		want    string
+		wantErr string
+	}{
+		{name: "a json object", text: `{"title":"T"}`, want: "T"},
+		{name: "one enclosing code fence", text: "```json\n{\"title\":\"T\"}\n```", want: "T"},
+		{name: "prose", text: "Here it is.", wantErr: "did not decode"},
+		{name: "an unknown field", text: `{"title":"T","note":"x"}`, wantErr: "did not decode"},
+		{name: "trailing data", text: `{"title":"T"} more`, wantErr: "after its json object"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			var a struct {
+				Title string `json:"title"`
+			}
+
+			// Act
+			err := decodeAnswer(tt.text, &a)
+
+			// Assert
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("decodeAnswer = %v, want an error naming %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil || a.Title != tt.want {
+				t.Fatalf("decodeAnswer = %v with %+v, want %q", err, a, tt.want)
+			}
+		})
+	}
+}
+
+// TestEveryModelAnswerIsDecodedByDecodeAnswer holds the package's parsers to
+// one strict decode: a parser building its own decoder fails here.
+func TestEveryModelAnswerIsDecodedByDecodeAnswer(t *testing.T) {
+	// Act
+	counts := []int{sourcescan.Count(t, "stripFence(text)"), sourcescan.Count(t, "decodeAnswer(text, &a)")}
+
+	// Assert
+	if counts[0] != 1 || counts[1] != 3 {
+		t.Fatalf("strict decoders = %d and decodeAnswer calls = %d, want one decoder in decodeAnswer called by the three parsers", counts[0], counts[1])
+	}
 }

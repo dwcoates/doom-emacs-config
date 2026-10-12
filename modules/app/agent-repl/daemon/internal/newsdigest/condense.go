@@ -219,14 +219,9 @@ func allowedLinks(material []sourceNews, carried []*frontendv1.NewsDigestSection
 // set each refuse the whole answer. The one leniency is a single enclosing
 // markdown code fence, which carries no meaning of its own.
 func parseAnswer(text string, allowed map[string]bool) ([]*frontendv1.NewsDigestSection, risks, error) {
-	dec := json.NewDecoder(strings.NewReader(stripFence(text)))
-	dec.DisallowUnknownFields()
 	var a answer
-	if err := dec.Decode(&a); err != nil {
-		return nil, nil, fmt.Errorf("the json did not decode: %w", err)
-	}
-	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
-		return nil, nil, errors.New("the answer carries data after its json object")
+	if err := decodeAnswer(text, &a); err != nil {
+		return nil, nil, err
 	}
 	if a.Sections == nil {
 		return nil, nil, errors.New("the answer carries no sections list")
@@ -273,6 +268,22 @@ func parseAnswer(text string, allowed map[string]bool) ([]*frontendv1.NewsDigest
 	return out, marked, nil
 }
 
+// decodeAnswer decodes a model's JSON answer into a STRICTLY: an unknown
+// field or data after the object refuses it. The one leniency is a single
+// enclosing markdown code fence, which carries no meaning of its own. Every
+// model answer this package reads is decoded here.
+func decodeAnswer(text string, a any) error {
+	dec := json.NewDecoder(strings.NewReader(stripFence(text)))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(a); err != nil {
+		return fmt.Errorf("the json did not decode: %w", err)
+	}
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		return errors.New("the answer carries data after its json object")
+	}
+	return nil
+}
+
 // oneLine trims a one-line text the model wrote, refusing one that is blank
 // or runs over more than one line. what names it in the refusal.
 func oneLine(text, what string) (string, error) {
@@ -309,20 +320,30 @@ func validItem(it answerItem, allowed map[string]bool) (*frontendv1.NewsDigestIt
 		item.Effective = &frontendv1.NewsDigestItemEffective{Text: effective}
 	}
 	for _, l := range it.Links {
-		label := strings.TrimSpace(l.Label)
-		if label == "" {
-			return nil, fmt.Errorf("the link %q has no label", l.URL)
-		}
-		u, err := url.Parse(l.URL)
-		if err != nil || u.Scheme != "https" || u.Host == "" {
-			return nil, fmt.Errorf("the link %q is not an absolute https url", l.URL)
+		link, err := validLink(l)
+		if err != nil {
+			return nil, err
 		}
 		if !allowed[l.URL] {
 			return nil, fmt.Errorf("the link %q is not one of the urls the sources gave", l.URL)
 		}
-		item.Links = append(item.Links, &frontendv1.NewsDigestLink{Label: label, Url: l.URL})
+		item.Links = append(item.Links, link)
 	}
 	return item, nil
+}
+
+// validLink converts one answered link, refusing one with a blank label or a
+// url that is not absolute https. Every link the model writes passes here.
+func validLink(l answerLink) (*frontendv1.NewsDigestLink, error) {
+	label := strings.TrimSpace(l.Label)
+	if label == "" {
+		return nil, fmt.Errorf("the link %q has no label", l.URL)
+	}
+	u, err := url.Parse(l.URL)
+	if err != nil || u.Scheme != "https" || u.Host == "" {
+		return nil, fmt.Errorf("the link %q is not an absolute https url", l.URL)
+	}
+	return &frontendv1.NewsDigestLink{Label: label, Url: l.URL}, nil
 }
 
 // stripFence removes one markdown code fence enclosing the whole text.
