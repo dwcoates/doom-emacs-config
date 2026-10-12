@@ -20,6 +20,8 @@
  * otherwise never complete; `settle()` is how a test waits for the DOM instead
  * of sleeping.
  */
+import { createPageSeen } from "../../src/page-seen.js";
+import { pagePresence } from "../../src/presence.js";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { transferableAbortController } from "node:util";
@@ -538,11 +540,14 @@ async function mountApp(
   // which is the only place in the suites where the multiplexing itself is
   // exercised end to end. Each mounted app takes its own page id, so two
   // harnesses in one file cannot collide on the daemon's page registry.
+  const workspace = workspaceRef(options.workspaceId ?? WORKSPACE_ID, options.workspaceDir ?? WORKSPACE_DIR);
   const ctx = createAppContext({
     client,
-    workspace: workspaceRef(options.workspaceId ?? WORKSPACE_ID, options.workspaceDir ?? WORKSPACE_DIR),
+    workspace,
     ticker,
     failures,
+    // MAIN.TS'S OWN SEEN STATE, over the harness's own document.
+    seen: createPageSeen(workspace.id, pagePresence()),
     composerEnabled,
     page: `harness-page-${(pageSerial += 1)}`,
   });
