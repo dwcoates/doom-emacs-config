@@ -16,6 +16,7 @@
 (declare-function agent-repl--info "core")
 (declare-function agent-repl--log "core")
 (declare-function agent-repl--log-verbose "core")
+(declare-function agent-repl--log-decision "core" (key decision ws fmt &rest args))
 (declare-function agent-repl--register-timer "core")
 (declare-function agent-repl--ws-add-activated-hook "workspace")
 (declare-function agent-repl--ws-after-system-load "workspace")

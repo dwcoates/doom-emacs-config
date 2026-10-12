@@ -43,6 +43,7 @@
 (require 'cl-lib)
 
 (declare-function agent-repl--log "core" (ws format-string &rest args))
+(declare-function agent-repl--log-decision "core" (key decision ws fmt &rest args))
 (declare-function agent-repl--info "core" (ws format-string &rest args))
 (declare-function agent-repl--warn "core" (ws format-string &rest args))
 (declare-function agent-repl--error "core" (ws format-string &rest args))
