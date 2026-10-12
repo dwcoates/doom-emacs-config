@@ -25,8 +25,9 @@ import (
 // back. doorguard_test.go fails any other production site that closes a turn.
 //
 // EVERY CLOSE ALSO OWES THE BRANCH A RECOUNT: the turn may have committed, and
-// the roster's detail panel states the count as of the last turn. turnClosed is
-// the one place all three paths say so, beside the feed's ending.
+// the roster's detail panel states the count as of the last turn. EVERY CLOSE
+// ALSO MOVES THE ROSTER'S WHEN-COLUMN, which counts from the last turn end.
+// turnClosed is the one place all three paths say so, beside the feed's ending.
 
 // closeTurn closes one turn's row with HOW and draws its ending.
 func (q *queue) closeTurn(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID, how wsm.TurnClose, log dlog.Logger) error {
@@ -50,10 +51,11 @@ func (q *queue) closeTurn(ctx context.Context, ws ids.WorkspaceID, turn ids.Turn
 }
 
 // turnClosed is what every close of a turn's row is followed by: the feed
-// draws its ending, a context cut riding the turn retires, and the branch is
-// owed a recount.
+// draws its ending, the roster's when-column counts from the close's instant,
+// a context cut riding the turn retires, and the branch is owed a recount.
 func (q *queue) turnClosed(ws ids.WorkspaceID, turn ids.TurnID, close wsm.RecordedClose, log func() (dlog.Logger, bool)) {
 	q.deps.Feed.OnTurnClosed(ws, turn, close)
+	q.deps.Sidebar.SetTurnClosedAt(ws, close.At)
 	q.retireCutIf(ws, turn, log)
 	q.deps.Commits.TurnClosed(ws)
 }

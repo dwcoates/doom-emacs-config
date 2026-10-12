@@ -1,6 +1,8 @@
 package sidebar
 
 import (
+	"time"
+
 	"claude-repld/internal/ids"
 	"claude-repld/internal/repodivergence"
 	"claude-repld/internal/resolve/footer"
@@ -164,6 +166,12 @@ type wsState struct {
 	oneShotSettled bool
 	// summary is the row detail's summary line, empty when none is set.
 	summary string
+	// turnEndedAt is the latest turn close the prompt queue's door told this
+	// daemon of, nil when it has told none. The when-column draws the later of
+	// it and the record's durable LastTurnEndedAt (lastTurnEnded): the door
+	// tells the roster at the close itself, so the age resets the moment a
+	// turn ends rather than at the next registry republish.
+	turnEndedAt *time.Time
 }
 
 // resultState is the read state of the last turn's result.

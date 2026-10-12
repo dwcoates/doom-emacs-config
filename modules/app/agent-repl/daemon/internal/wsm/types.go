@@ -79,11 +79,17 @@ type Workspace struct {
 	// LastActivityAt is when the workspace LAST DID REAL WORK: the most recent
 	// turn start or turn close, stamped at the genuine activity edge inside the
 	// turn writes (PutTurn/CloseTurn), never at compose or select time. Nil
-	// when the workspace has never taken a turn. It is the roster when-column's
-	// source — distinct from LastSelectedAt, which times VIEWING recency and
-	// must never drive that column — so the column stays stable across mere
-	// selection and navigation.
+	// when the workspace has never taken a turn.
 	LastActivityAt *time.Time
+	// LastTurnEndedAt is when the workspace's most recent turn CLOSED, of any
+	// close kind: derived on read from the turns' closed_at, never stored on
+	// the row. Nil when no turn of the workspace has closed yet, including
+	// while its first turn is still running. It is the roster when-column's
+	// source — distinct from LastSelectedAt, which times VIEWING recency, and
+	// from LastActivityAt, which a turn START also moves — so the column
+	// counts the idle time since work last finished and stays stable across
+	// mere selection, navigation, and the start of the next turn.
+	LastTurnEndedAt *time.Time
 	// MergedAt is when the workspace's merge landed, nil when it has not.
 	MergedAt *time.Time
 	// CommitCount is how many commits the workspace's branch holds beyond its

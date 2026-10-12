@@ -17,12 +17,13 @@
  * user picked, and the roster's new `current` arrives on the stream.
  *
  * WHAT TICKS AND WHAT DOES NOT. Every when-column arm ships an INSTANT
- * (`active` = last activity, `created` = the never-active fallback, and
- * `merged`), so the age beside a row is animated here
+ * (`turn_ended` = the last turn's end, `created` = the fallback before any
+ * turn has ended, and `merged`), so the age beside a row is animated here
  * off the shared ticker — never a `setInterval` of this module's own. An unset
  * `shown` oneof means there is nothing to show: the column is empty, not
- * "0ms ago". The column reflects last ACTIVITY, never last VIEWING, so it does
- * not jump when the user selects the workspace.
+ * "0ms ago". The column counts from the last turn END, never from last
+ * VIEWING or a turn's start, so it does not jump when the user selects the
+ * workspace or when the next turn begins.
  */
 import { createControl } from "../control.js";
 import type {
@@ -39,9 +40,9 @@ import type {
   RosterRowOneShot,
   RosterRowPriorityBadge,
   RosterRowWhen,
-  RosterRowWhenActive,
   RosterRowWhenCreated,
   RosterRowWhenMerged,
+  RosterRowWhenTurnEnded,
   RosterRowReviving,
   RosterRowViewed,
   RosterRowWorkspace,
@@ -400,8 +401,8 @@ export function drawRosterRowWhen(
   const shown = requireCase(u.shown, `${path}.shown`);
   when.setAttribute("data-when", shown.case);
   switch (shown.case) {
-    case "active":
-      tickAge(when, sc, drawRosterRowWhenActive(shown.value, `${path}.active`));
+    case "turnEnded":
+      tickAge(when, sc, drawRosterRowWhenTurnEnded(shown.value, `${path}.turn_ended`));
       return when;
     case "created":
       tickAge(when, sc, drawRosterRowWhenCreated(shown.value, `${path}.created`));
@@ -416,12 +417,12 @@ export function drawRosterRowWhen(
   }
 }
 
-/** When the workspace last did real work, as an epoch instant. */
-export function drawRosterRowWhenActive(u: RosterRowWhenActive, path: string): number {
+/** When the workspace's last turn ended, as an epoch instant. */
+export function drawRosterRowWhenTurnEnded(u: RosterRowWhenTurnEnded, path: string): number {
   return msOf(u.atMs, `${path}.at_ms`);
 }
 
-/** When the workspace was created — the never-active fallback — as an instant. */
+/** When the workspace was created — the fallback before any turn ended — as an instant. */
 export function drawRosterRowWhenCreated(u: RosterRowWhenCreated, path: string): number {
   return msOf(u.atMs, `${path}.at_ms`);
 }
