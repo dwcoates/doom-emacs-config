@@ -25,18 +25,19 @@
  *      `logicalParentUuid`. THEREFORE: when `agent-id.json` is ABSENT on a
  *      resume, the resume id is adopted as the original id — that is a
  *      derivation, not a guess, and it is logged as one.
- *   3. ROTATION AND FORK. A `/clear` (`conversation_reset`) and a
- *      `forkSession` mint a NEW vendor session id and a new transcript file,
- *      and NOTHING IN EITHER FILE LINKS THEM: the union of every key seen
- *      across those 1,107 transcripts contains no `forkedFrom`,
- *      `parentSessionId`, `resumedFrom` or equivalent, and the SDK's own
- *      `ForkSessionResult` is `{ sessionId }` alone while `SDKSessionInfo`
- *      carries no lineage field. The link exists ONLY at runtime, on
- *      `SDKConversationResetMessage { session_id, new_conversation_id }`.
- *      So the shim WRITES the link the files do not carry: one tiny pointer
- *      file per rotated id, {@link vendorLinkPath}, naming the original. A
- *      file-plane reader resolves any transcript to its book with one stat
- *      instead of a scan, and the AgentId never moves.
+ *   3. ROTATION. A `/clear` (`conversation_reset`) mints a NEW vendor
+ *      session id and a new transcript file, and NOTHING IN EITHER FILE LINKS
+ *      THEM: the union of every key seen across those 1,107 transcripts
+ *      contains no `parentSessionId`, `resumedFrom` or equivalent. The link
+ *      exists ONLY at runtime, on `SDKConversationResetMessage { session_id,
+ *      new_conversation_id }`. So the shim WRITES the link the files do not
+ *      carry: one tiny pointer file per rotated id, {@link vendorLinkPath},
+ *      naming the original. A file-plane reader resolves any transcript to its
+ *      book with one stat instead of a scan, and the AgentId never moves.
+ *      A FORK IS NOT A ROTATION: the vendor's `forkSession` (ForkSession,
+ *      engine/fork-session.ts) mints the fork's own id, which is the fork's
+ *      own book, and stamps each copied record `forkedFrom`; the copies stay
+ *      the parent's (the file plane never stores them), so nothing is linked.
  *   4. REBIND. The ONE resume that replaces the persisted id, and only when
  *      the daemon marks it (`shim.v1.StartSessionResume.rebind`): the user
  *      chose a DIFFERENT conversation for this workspace, so the workspace's
