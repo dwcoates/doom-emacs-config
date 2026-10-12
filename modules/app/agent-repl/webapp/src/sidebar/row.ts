@@ -36,7 +36,6 @@ import type {
   RosterRowDetailParentBranch,
   RosterRowDetailSummary,
   RosterRowName,
-  RosterRowMergeWorkspace,
   RosterRowOneShot,
   RosterRowPriorityBadge,
   RosterRowWhen,
@@ -240,9 +239,6 @@ export function drawRosterRow(
     // cadence paints, which is the one the hook contract points at.
     sc.attention.mark(workspace.id, marker);
   }
-  if (u.mergeWorkspace !== undefined) {
-    line.appendChild(drawRosterRowMergeWorkspace(u.mergeWorkspace, `${path}.merge_workspace`));
-  }
   if (u.priority !== undefined) {
     line.appendChild(drawRosterRowPriorityBadge(u.priority, `${path}.priority`));
   }
@@ -361,23 +357,6 @@ export function drawRosterRowAttention(u: RosterRowAttention, path: string): HTM
   marker.className = "sb-attn";
   marker.setAttribute("data-attention", "");
   marker.title = "unseen notification";
-  return marker;
-}
-
-/**
- * A merge workspace's marker: it nests under the workspace it was forked from
- * like a child, and this says where it lands instead ("merge → master"), drawn
- * verbatim in the rail's quiet pill.
- */
-export function drawRosterRowMergeWorkspace(u: RosterRowMergeWorkspace, path: string): HTMLElement {
-  const label = requireMessage(u.label, `${path}.label`).text;
-  log.debug("drawing a merge workspace marker", {
-    operation: "sidebar.row.merge-workspace",
-    context: { path, label },
-  });
-  const marker = document.createElement("span");
-  marker.className = "sb-merge-workspace";
-  marker.textContent = label;
   return marker;
 }
 
