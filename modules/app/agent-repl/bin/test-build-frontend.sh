@@ -1418,6 +1418,51 @@ t_ensure_deps_installs_an_absent_tree() {
     rm -rf "$root"
 }
 
+t_ensure_deps_installs_nothing_a_lock_holder_already_installed() {
+    local root; root="$(ed_fixture)"
+    # Arrange: another installer holds the package's install lock, alive.
+    mkdir "$root/pkg/.node_modules.lock" && echo "$$" > "$root/pkg/.node_modules.lock/pid"
+    ED_LOG="$root/npm.log" PATH="$root/bin:$PATH" bash "$ENSURE_DEPS" "$root/pkg" 2>"$root/stderr" &
+    local waiter=$!
+    # Act: once the waiter has seen the deps unsatisfied, the holder finishes
+    # its install and releases the lock.
+    until grep -q '^npm ls' "$root/npm.log" 2>/dev/null; do :; done
+    mkdir -p "$root/pkg/node_modules" && echo ok > "$root/pkg/node_modules/.ok"
+    rm -rf "$root/pkg/.node_modules.lock"
+    local rc=0
+    wait "$waiter" || rc=$?
+    # Assert
+    if [ "$rc" -eq 0 ] && ! grep -q '^npm ci' "$root/npm.log"; then
+        pass "ensure-deps: a caller waiting on the install lock installs nothing the holder installed"
+    else
+        fail "ensure-deps: a caller waiting on the install lock installs nothing the holder installed" "rc=$rc $(cat "$root/npm.log")"
+    fi
+    rm -rf "$root"
+}
+
+t_ensure_deps_releases_the_install_lock() {
+    local root; root="$(ed_fixture)"
+    ed_run "$root"
+    if [ -f "$root/pkg/node_modules/.ok" ] && [ ! -e "$root/pkg/.node_modules.lock" ]; then
+        pass "ensure-deps: the install lock is released once the install ends"
+    else
+        fail "ensure-deps: the install lock is released once the install ends" "$(ls -a "$root/pkg")"
+    fi
+    rm -rf "$root"
+}
+
+t_ensure_deps_releases_the_install_lock_when_the_install_fails() {
+    local root; root="$(ed_fixture)"
+    printf '#!/usr/bin/env bash\necho "npm $*" >> "$ED_LOG"\n[ "${1:-}" = ci ] && exit 7\nexit 1\n' > "$root/bin/npm"
+    ed_run "$root" || true
+    if [ ! -e "$root/pkg/.node_modules.lock" ]; then
+        pass "ensure-deps: a failed install releases the install lock"
+    else
+        fail "ensure-deps: a failed install releases the install lock" "$(ls -a "$root/pkg")"
+    fi
+    rm -rf "$root"
+}
+
 t_ensure_deps_fails_when_the_install_fails() {
     local root; root="$(ed_fixture)"
     printf '#!/usr/bin/env bash\necho "npm $*" >> "$ED_LOG"\n[ "${1:-}" = ci ] && exit 7\nexit 1\n' > "$root/bin/npm"
@@ -1874,6 +1919,9 @@ build_group_dependencies() {
     t_ensure_deps_installs_privately_in_place_of_an_unsatisfied_link
     t_ensure_deps_installs_an_absent_tree
     t_ensure_deps_fails_when_the_install_fails
+    t_ensure_deps_installs_nothing_a_lock_holder_already_installed
+    t_ensure_deps_releases_the_install_lock
+    t_ensure_deps_releases_the_install_lock_when_the_install_fails
     t_ensure_e2e_deps_ensures_every_e2e_package
     t_ensure_e2e_deps_fails_naming_the_package
     t_test_e2e_ensures_deps_before_the_suite
