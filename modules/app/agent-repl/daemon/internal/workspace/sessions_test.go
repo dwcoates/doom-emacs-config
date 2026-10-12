@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"agent-repld/internal/clock"
+	"agent-repld/internal/sourcescan"
 	"context"
 	"errors"
 	"fmt"
@@ -5152,24 +5153,13 @@ func TestReadRecordedSessionSurfacesTheReadError(t *testing.T) {
 // session row and its vendor id by hand instead of through hasConversation.
 func TestHasConversationHasOneStatement(t *testing.T) {
 	// Arrange
-	sources, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatal(err)
-	}
 	handRolled := regexp.MustCompile(`!\w+ \|\| \w+\.VendorSessionID == ""`)
 
 	// Act
 	var found []string
-	for _, file := range sources {
-		if strings.HasSuffix(file, "_test.go") {
-			continue
-		}
-		source, err := os.ReadFile(file)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if handRolled.Match(source) {
-			found = append(found, file)
+	for _, file := range sourcescan.Production(t) {
+		if handRolled.Match(file.Source) {
+			found = append(found, file.Name)
 		}
 	}
 
