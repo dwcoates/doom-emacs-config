@@ -2534,3 +2534,107 @@ func TestTheBootFailsWhenTheCarriesCannotBeTakenUp(t *testing.T) {
 		t.Fatalf("the failed take-up was not stated at ERROR: %v", h.log.Records())
 	}
 }
+
+func TestTheBringUpWithholdsAWorkspaceTheUserCannotSee(t *testing.T) {
+	cases := []struct {
+		name    string
+		arrange func(t *testing.T, h *harness, ws wsm.Workspace)
+	}{
+		{name: "a hidden workspace", arrange: func(t *testing.T, h *harness, ws wsm.Workspace) {
+			if err := h.db.SetHidden(context.Background(), ws.ID, true); err != nil {
+				t.Fatalf("SetHidden: %v", err)
+			}
+		}},
+		{name: "a workspace in a collapsed repository section", arrange: func(t *testing.T, h *harness, ws wsm.Workspace) {
+			if err := h.db.SetRepositoryFolded(context.Background(), ws.Repo, true); err != nil {
+				t.Fatalf("SetRepositoryFolded: %v", err)
+			}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			ws := h.register(t, t.TempDir(), sessionlock.StateFree)
+			tc.arrange(t, h, ws)
+
+			// Act.
+			report, err := h.seq.Run(context.Background())
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+			if len(report.PendingBringUp) != 0 {
+				t.Fatalf("PendingBringUp = %v, want none", report.PendingBringUp)
+			}
+			if len(report.WithheldBringUp) != 1 || report.WithheldBringUp[0].ID != ws.ID {
+				t.Fatalf("WithheldBringUp = %v, want %v", report.WithheldBringUp, ws.ID)
+			}
+		})
+	}
+}
+
+func TestAWithheldWorkspaceIsNeverMarkedBringingUp(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	ws := h.register(t, t.TempDir(), sessionlock.StateFree)
+	if err := h.db.SetHidden(context.Background(), ws.ID, true); err != nil {
+		t.Fatalf("SetHidden: %v", err)
+	}
+
+	// Act.
+	if _, err := h.seq.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Assert.
+	h.bringingMu.Lock()
+	defer h.bringingMu.Unlock()
+	if len(h.bringing) != 0 {
+		t.Fatalf("bring-up marker edges = %v, want none for a hidden workspace", h.bringing)
+	}
+}
+
+func TestTheWithheldWorkspacesAreStatedAtInfo(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	ws := h.register(t, t.TempDir(), sessionlock.StateFree)
+	if err := h.db.SetHidden(context.Background(), ws.ID, true); err != nil {
+		t.Fatalf("SetHidden: %v", err)
+	}
+
+	// Act.
+	if _, err := h.seq.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Assert.
+	for _, r := range h.log.Records() {
+		if r.Level == "info" && r.Operation == "daemon.boot.run" && strings.Contains(r.Message, "hidden or collapsed") {
+			return
+		}
+	}
+	t.Fatalf("records = %+v, want an info record naming the withheld workspaces", h.log.Records())
+}
+
+func TestAVisibleWorkspaceBesideAHiddenOneIsStillBroughtUp(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	hidden := h.register(t, t.TempDir(), sessionlock.StateFree)
+	shown := h.register(t, t.TempDir(), sessionlock.StateFree)
+	if err := h.db.SetHidden(context.Background(), hidden.ID, true); err != nil {
+		t.Fatalf("SetHidden: %v", err)
+	}
+
+	// Act.
+	report, err := h.seq.Run(context.Background())
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(report.PendingBringUp) != 1 || report.PendingBringUp[0].ID != shown.ID {
+		t.Fatalf("PendingBringUp = %v, want only %v", report.PendingBringUp, shown.ID)
+	}
+}
