@@ -80,7 +80,16 @@ daemon/
                    the classifier's routing question and the workspace naming
                    call. Guard, binary resolution, stdin discipline, deadline
     merge/         merge orchestrator (per-repo queue, two methods, tabs, lease, test gate, briefs, ledger)
-    drain/         shutdown schedule + idle sweep (hibernation policy incl. Hibernate directive)
+    drain/         shutdown schedule + idle sweep (hibernation policy incl. Hibernate directive);
+                   the SAME stand-down for a workspace the user hid or collapsed (withheld.go),
+                   deferred to its turn's end, never under it
+    bringup/       the one session bring-up a boot, a takeover and an open share, and the ONE
+                   visibility filter (visible.go) every bring-up reads: only open, visible
+                   workspaces run
+    opentabs/      OpenTabs: one open per request, each workspace answered `opened` as soon as it
+                   is served (and its page drawn when one is loading), never in registry order; the
+                   page facts it waits on (which attached page serves, and has drawn, which
+                   workspace); the roster's `opening` arm
     worktreereap/  the landed-worktree reaper: a daily low-priority sweep that removes linked
                    worktrees whose changes landed on the default branch (see AGENTS.md)
     newsdigest/    the daily Claude news digest: reads the watched sources, keeps what is new, has
@@ -117,7 +126,7 @@ daemon/
 Package dependency direction (a package may import only what is at or
 below it in this list): proto gen, dlog, envc, stateroot, vocab, paint,
 feedid, prompts, publish, apiresponses, flock, clock, sessioncommand, runecap  <  wsm, sessionlock, shimclient, gitclient,
-account, externalbrowser, login  <  sessionwatcher, resolve/*  <
+account, externalbrowser, login  <  sessionwatcher, resolve/*, bringup, opentabs  <
 prompthandler, promptqueue, classifier, merge, drain, rollout, workspace,
 health, intakegate  <  commandfile, heldingress, worktreereap, newsdigest, agentreplsession  <  server, boot  <  cmd. The shim client and git
 client know no other daemon package. The prompt queue, merge orchestrator
@@ -1055,3 +1064,55 @@ entry submitted by both before either accepted its key would be delivered
 twice. The command-file ingress takes the same gate; its per-file exclusivity is
 the claim rename, and a claim lost to the other daemon is DEBUG, never an
 ERROR.
+
+## The editor opens workspaces with OpenTabs; only visible ones run
+
+Design record: `../docs/protobuf-design/open-tabs.md`. The implicit startup
+run a new Emacs used to trigger on its WatchDaemon stream is gone; the editor
+asks for the workspaces it wants open with the `OpenTabs` server stream.
+
+- **One open per request** (`internal/opentabs.Coordinator.Run`). Each
+  workspace is resolved first (`server.resolveOpens`): a refusal
+  (`unknown_workspace`, `workspace_ref_mismatch`, `transferring_away`,
+  `not_yet_adopted`, the same checks every per-workspace rpc takes) or a
+  workspace that is not visible (`hidden`) is answered at once and nothing is
+  started for it. A visible one that is not live is brought up through the
+  shared bring-up (`editorBringUp` -> `bringup.Run` -> `Fleet.Start`); one
+  another bring-up is already starting is followed, not restarted.
+- **Steps** are the fleet's own bring-up steps (`opentabs.Step`, reported by
+  `Fleet` for EVERY bring-up) relayed as `OpenTabsStep` arms, plus `served`
+  once agent-repl's services serve it, `page_connected` the first time an
+  attached page stream's accepted subscription names the workspace (web
+  workspace, topbar or footer: `server.pageSubscriptionWorkspace`, hooked at
+  `SubscribePage`'s acceptance), and `page_drawn` when `ReportPageDrawn` says
+  an attached page of it drew.
+- **`opened`** is `ready` once served, and drawn when the request's `page` arm
+  is `loading` (`none`: served alone); `failed` on a service-level failure.
+  Vendor and network state never gate it. Each workspace is answered as soon
+  as it opens: no registry-order gating. `finished` is last.
+- **A client that goes away** ends the stream; the bring-ups carry on (they
+  run on the fleet's detached lifetime).
+- **Page facts live with the page stream**: `attachPage`/`detachPage` tell the
+  coordinator under the server's own lock, and a drawn report is forgotten
+  when its page's stream ends. `ReportPageDrawn` naming no attached page is
+  `unknown_page`.
+- **The roster's `opening` arm** stands while an open in flight names the
+  workspace and has not answered it (`sidebar.Resolver.SetOpening`, reference
+  counted across concurrent opens). It sits ABOVE the footer projection, over
+  `inactive` too: nothing else a row can say outranks an open in flight. It
+  comes only from in-flight requests, so a daemon that restarted under open
+  tabs draws them as they are.
+- **Only visible workspaces run** (`wsm.Workspace.Runs`, read through
+  `bringup.OnlyVisible`/`bringup.Visible`): the boot's bring-up, the
+  takeover's session-less starts and every open skip a workspace the user hid
+  or whose repository section is collapsed. A hidden MERGE workspace still
+  runs: its async merge withholds it, not the user.
+- **Hide and collapse stand the session down** (`drain.StandDownWithheld`,
+  called by `SetHidden(hide)` and `FoldRepository(collapse)`, which both
+  `SetWorkspaceHidden` and `UpdateSidebarView`'s repository fold reach): the
+  idle sweep's own gate and hibernation, on the fleet's detached lifetime. A
+  busy workspace stays pending and is retried on the daemon's own edges, the
+  free edge a turn's end raises (`lifecycleSink.OnFree`) and a session coming
+  up (`lifecycleSink.SessionUp`), never by polling; every attempt re-reads
+  the visibility, so one shown again meanwhile is dropped. Show and expand
+  start nothing.
