@@ -16,7 +16,7 @@ import (
 // current workspace still knows its neighbours. A merged workspace files under
 // recently merged whatever its hidden flag, so only its repository's fold can
 // withhold its tab, exactly as its merged group follows that fold. A hidden
-// merge workspace has no tab at all until it is revealed (concealed).
+// merge workspace has no tab at all until it is revealed (wsm.Workspace.MergeHidden).
 func (r *resolver) tabBar() *frontendv1.RosterTabBar {
 	folded := map[ids.RepoID]bool{}
 	for _, repo := range r.state.reg.Repositories {
@@ -24,7 +24,7 @@ func (r *resolver) tabBar() *frontendv1.RosterTabBar {
 	}
 	out := &frontendv1.RosterTabBar{}
 	for _, ws := range sortWorkspaces(r.state.reg.Workspaces) {
-		if ws.Closed || concealed(ws) {
+		if ws.Closed || ws.MergeHidden() {
 			continue
 		}
 		tab := &frontendv1.RosterTab{Workspace: &workspacev1.WorkspaceRef{Id: string(ws.ID), Dir: ws.Dir}}

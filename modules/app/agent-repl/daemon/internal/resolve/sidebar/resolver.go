@@ -231,7 +231,7 @@ func (r *resolver) render(log dlog.Logger, cause string) *frontendv1.WorkspaceRo
 	var settled []wsm.Workspace
 	for _, ws := range r.state.reg.Workspaces {
 		switch {
-		case concealed(ws):
+		case ws.MergeHidden():
 			// A HIDDEN MERGE WORKSPACE IS DRAWN NOWHERE until it needs the user
 			// (owner ruling, 2026-10-11): not even in the hidden section.
 		case ws.MergedAt != nil:
@@ -258,14 +258,6 @@ func (r *resolver) render(log dlog.Logger, cause string) *frontendv1.WorkspaceRo
 		out.Current = cur
 	}
 	return out
-}
-
-// concealed reports whether WS is an async merge's merge workspace that has
-// not been revealed and has not landed: it is drawn in no section and given no
-// tab. A landed merge workspace is an ordinary closed workspace, drawn under
-// Recently Merged whatever its revealed flag.
-func concealed(ws wsm.Workspace) bool {
-	return ws.MergeOf != nil && !ws.MergeRevealed && ws.MergedAt == nil
 }
 
 // currentWorkspace resolves the roster's selection, or nil when nothing is

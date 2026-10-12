@@ -48,6 +48,15 @@ UPDATE workspaces SET merge_revealed = 1 WHERE merge_of IS NOT NULL;
 ALTER TABLE turns ADD COLUMN mirror TEXT;
 `
 
+// MergeHidden reports whether the workspace is a HIDDEN merge workspace: an
+// async merge's workspace that has been neither revealed nor landed. It is
+// drawn in no tab bar and no sidebar section, and selecting it reveals it. A
+// landed merge workspace is an ordinary closed workspace whatever its revealed
+// flag, and every other workspace is never hidden.
+func (ws Workspace) MergeHidden() bool {
+	return ws.MergeOf != nil && !ws.MergeRevealed && ws.MergedAt == nil
+}
+
 // RevealMergeWorkspace records that merge workspace ID has been revealed, and
 // answers whether this call revealed it (false when it already was). Revealing
 // is one-way. A workspace that is no merge workspace is refused: only a merge
