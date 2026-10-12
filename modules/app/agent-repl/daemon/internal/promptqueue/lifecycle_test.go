@@ -617,6 +617,100 @@ func TestOnTurnEndedForAnUnresolvableWorkspaceStillRaisesItsBanner(t *testing.T)
 	}
 }
 
+// runningFrom stands a turn of origin running in the workspace.
+func runningFrom(t *testing.T, h *harness, turn string, origin conversationv1.PromptOrigin) {
+	t.Helper()
+	if err := h.db.PutTurn(context.Background(), wsm.Turn{
+		ID: idsTurn(turn), Workspace: theWorkspace, Text: "the work", Origin: origin.String(), StartedAt: instant,
+	}); err != nil {
+		t.Fatalf("PutTurn: %v", err)
+	}
+	h.watcher.running(idsTurn(turn))
+}
+
+func TestOnTurnEndedRaisesNoBannerForAMergesOwnTurn(t *testing.T) {
+	cases := []conversationv1.PromptOrigin{
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_TEST_REPAIR,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_BEFORE_ACTION,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_AFTER_ACTION,
+	}
+	for _, origin := range cases {
+		t.Run(origin.String(), func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			runningFrom(t, h, "merge-turn", origin)
+			h.watcher.idle()
+			// Act
+			h.q.OnTurnEnded(theWorkspace, "merge-turn", wsm.CloseCompleted)
+			// Assert
+			if got := h.banners.raised(); len(got) != 0 {
+				t.Fatalf("banners = %+v, want none for a merge's own turn", got)
+			}
+			if got, closed := h.db.closedTurns["merge-turn"]; !closed || got != wsm.CloseCompleted {
+				t.Fatalf("close = (%s, closed %v), want the merge's turn closed all the same", got.String(), closed)
+			}
+			for _, r := range h.log.Records() {
+				if r.Level == "info" && r.Operation == opTurnEnded && r.Message == "a merge's own turn ended; no desktop banner" &&
+					r.Context["turn"] == "merge-turn" && r.Context["origin"] == origin.String() {
+					return
+				}
+			}
+			t.Fatalf("the withheld banner was not recorded with its turn and origin: %v", h.log.Records())
+		})
+	}
+}
+
+func TestOnTurnEndedRaisesTheBannerForADisplacedTurnResumedAfterAMerge(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	runningFrom(t, h, "resumed-turn", conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME)
+	h.watcher.idle()
+	// Act
+	h.q.OnTurnEnded(theWorkspace, "resumed-turn", wsm.CloseCompleted)
+	// Assert
+	if got := h.banners.raised(); len(got) != 1 || got[0].Turn != "resumed-turn" {
+		t.Fatalf("banners = %+v, want the resumed turn's", got)
+	}
+}
+
+func TestOnTurnEndedRaisesTheBannerForATurnTheWorkspaceNeverRecorded(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.watcher.running("unrecorded-turn")
+	h.watcher.idle()
+	// Act
+	h.q.OnTurnEnded(theWorkspace, "unrecorded-turn", wsm.CloseCompleted)
+	// Assert
+	if got := h.banners.raised(); len(got) != 1 || got[0].Turn != "unrecorded-turn" {
+		t.Fatalf("banners = %+v, want the unrecorded turn's", got)
+	}
+}
+
+func TestOnTurnEndedRaisesNoBannerWhenTheTurnCannotBeRead(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	h.watcher.idle()
+	h.db.turnErr = errors.New("the store is gone")
+	// Act
+	h.q.OnTurnEnded(theWorkspace, "running-turn", wsm.CloseCompleted)
+	// Assert
+	if got := h.banners.raised(); len(got) != 0 {
+		t.Fatalf("banners = %+v, want none for an unreadable turn", got)
+	}
+	if got, closed := h.db.closedTurns["running-turn"]; !closed || got != wsm.CloseCompleted {
+		t.Fatalf("close = (%s, closed %v), want the turn closed all the same", got.String(), closed)
+	}
+	for _, r := range h.log.Records() {
+		if r.Level == "error" && r.Operation == opTurnEnded && r.Message == "could not read the turn's origin; no desktop banner" &&
+			r.Context["turn"] == "running-turn" && r.Context["cause"] == "the store is gone" {
+			return
+		}
+	}
+	t.Fatalf("the unreadable turn was not recorded at error with its cause: %v", h.log.Records())
+}
+
 func TestOnTurnEndedRaisesTheBannerAfterTheDoorClosedTheTurn(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

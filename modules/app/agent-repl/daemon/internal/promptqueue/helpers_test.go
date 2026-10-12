@@ -70,8 +70,9 @@ type fakeDB struct {
 	openTurnsErr error
 	// closeTurnErrs fails one turn's close each.
 	closeTurnErrs map[ids.TurnID]error
-	// putTurnErr fails every turn-row write.
+	// putTurnErr fails every turn-row write, and turnErr every one-turn read.
 	putTurnErr error
+	turnErr    error
 	// orphansErr fails CloseOrphans, and claimErr ClaimDisplacedTurn.
 	orphansErr error
 	claimErr   error
@@ -366,6 +367,19 @@ func (d *fakeDB) PutTurn(_ context.Context, t wsm.Turn) error {
 	copied := t
 	d.turns[t.ID] = &copied
 	return nil
+}
+
+func (d *fakeDB) Turn(_ context.Context, id ids.WorkspaceID, turn ids.TurnID) (wsm.Turn, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.turnErr != nil {
+		return wsm.Turn{}, d.turnErr
+	}
+	t, ok := d.turns[turn]
+	if !ok || t.Workspace != id {
+		return wsm.Turn{}, fmt.Errorf("fake turn %s of %s: %w", turn, id, wsm.ErrNotFound)
+	}
+	return *t, nil
 }
 
 func (d *fakeDB) CloseTurn(_ context.Context, turn ids.TurnID, _ time.Time, how wsm.TurnClose) error {
