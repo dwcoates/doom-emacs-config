@@ -13,6 +13,15 @@ and the installer (`bin/requirements.sh`, `rendered_plist`) rewrites every leadi
 `~/Library/LaunchAgents/`. launchd does not expand `~` itself, so neither
 template is ever loaded directly.
 
+## Priority: Standard, never Background
+
+Both services declare `ProcessType` `Standard`. The live editor waits on
+them, so they must never rank below a test suite: launchd's `Background` is
+darwinbg (efficiency cores, throttled disk I/O), and suites run at `nice 19`
+with normal disk I/O, so a `Background` store lost every I/O contention to
+them and logged thousands of slow-query warnings while suites ran.
+`bin/test-requirements.sh` holds every `launchd_service` to `Standard`.
+
 ## The flag contracts
 
 Each plist's `ProgramArguments` is a contract with that service's `main.go`,
