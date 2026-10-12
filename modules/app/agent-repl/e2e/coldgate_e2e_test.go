@@ -403,7 +403,12 @@ func killShimProcesses(t *testing.T, d *harness.Daemon) []int {
 		if err != nil {
 			continue
 		}
-		if !strings.Contains(string(args), "main.js") {
+		// ONLY AN EXEC'D SHIM'S OWN COMMAND LINE: the bundle followed by its
+		// `--listen`. A child the daemon has forked but not yet exec'd -- a
+		// desktop banner, a git call -- still carries the daemon's argv, whose
+		// `--shim-main` names the bundle too, and killing it fails that child
+		// under the daemon (seen: the turn-ended banner, "signal: killed").
+		if !strings.Contains(string(args), "main.js --listen ") {
 			continue
 		}
 		if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
