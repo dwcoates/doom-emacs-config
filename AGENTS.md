@@ -133,6 +133,14 @@ The installer (`.claude/install.sh`, which runs `modules/app/agent-repl/bin/requ
 
 The workspace-command skills (`workspace-merge`, `workspace-status`, `workspace-update`, `generate-workspace`) were folded into the single `/workspace` skill — manage `workspace`, not the removed per-command names.
 
+## Never publish this repository's skills to GNS
+
+**No skill created or kept for this repository is ever published to GNS**, at any scope (personal, team, org or public). The repository is the only home of its skills.
+
+- Do not offer a GNS publish after creating or updating such a skill, and decline the publish step of `/create-or-update-skill` for it.
+- Do not run `gns skills publish` or `--promote-to-gns` on such a skill.
+- Make the skill reachable through a `skill_link` entry (see above) instead.
+
 ## Debugging skills: when to use each
 
 The complete agent-repl investigation workflow lives in
