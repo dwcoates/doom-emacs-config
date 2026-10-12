@@ -261,6 +261,17 @@ The top bar's effort selector sits between the model selector and the permission
   - It is saved on each step, so it holds after Emacs or the daemon restarts.
   - The size stops at a smallest and a largest step.
 
+## Searching the sidebar
+
+- **The magnifier left of "Workspaces" opens a search bar under the sidebar's header.**
+  - The bar slides down over the top of the list rather than pushing it down.
+- **Typing narrows every section to the workspaces whose names match.**
+  - The repository, task and stage groupings, Hidden Workspaces and Recently Merged are all narrowed.
+  - A space matches anything, so `fix side` finds `fix-the-sidebar`.
+  - The words must appear in the order typed, and case does not matter.
+  - A section left with no match is hidden until the search changes.
+- **Pressing the magnifier again, or `Escape` in the bar, closes it and shows everything again.**
+
 ## When Claude does not start
 
 The footer's `disconnected` status has three vendor substatuses for a Claude SDK that did not start. They are blue: the workspace is unusable until it is up.
