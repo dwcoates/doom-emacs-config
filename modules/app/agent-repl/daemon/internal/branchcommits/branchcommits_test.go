@@ -100,12 +100,14 @@ func (g *fakeGit) CountCommits(ctx context.Context, dir, base, tip string) (uint
 }
 
 type harness struct {
-	db        *fakeDB
-	git       *fakeGit
-	log       *dlog.TestSurfaces
-	published chan struct{}
-	publishOK error
-	r         *Recounter
+	// worktreeGone is what the WorktreeGone seam answers.
+	worktreeGone bool
+	db           *fakeDB
+	git          *fakeGit
+	log          *dlog.TestSurfaces
+	published    chan struct{}
+	publishOK    error
+	r            *Recounter
 }
 
 func live() wsm.Workspace {
@@ -130,7 +132,8 @@ func newHarness(t *testing.T, rec wsm.Workspace) *harness {
 			h.published <- struct{}{}
 			return h.publishOK
 		},
-		Log: h.log,
+		Log:          h.log,
+		WorktreeGone: func(string) bool { return h.worktreeGone },
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -331,6 +334,62 @@ func TestRecountErrors(t *testing.T) {
 			}
 			if got := len(h.published); got != tc.publish {
 				t.Fatalf("republishes = %d, want %d", got, tc.publish)
+			}
+		})
+	}
+}
+
+// TestARecountThatRacedItsTeardownIsNotAFault covers a count whose git fails
+// because the workspace moved on while it ran: a landing closes the workspace
+// and removes its worktree under the count.
+func TestARecountThatRacedItsTeardownIsNotAFault(t *testing.T) {
+	tests := []struct {
+		name    string
+		moveOn  func(*harness)
+		movedOn string
+	}{
+		{name: "merged meanwhile", movedOn: "merged", moveOn: func(h *harness) {
+			rec := h.db.records[theWorkspace]
+			now := time.Now()
+			rec.MergedAt = &now
+			h.db.records[theWorkspace] = rec
+		}},
+		{name: "closed meanwhile", movedOn: "closed", moveOn: func(h *harness) {
+			rec := h.db.records[theWorkspace]
+			rec.Closed = true
+			h.db.records[theWorkspace] = rec
+		}},
+		{name: "forgotten meanwhile", movedOn: "forgotten", moveOn: func(h *harness) {
+			delete(h.db.records, theWorkspace)
+		}},
+		{name: "worktree removed meanwhile", movedOn: "worktree removed", moveOn: func(h *harness) {
+			h.worktreeGone = true
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: git fails, and the workspace moves on as it runs.
+			h := newHarness(t, live())
+			h.git.err = errors.New("fatal: not a git repository")
+			h.git.during = func() {
+				h.db.mu.Lock()
+				defer h.db.mu.Unlock()
+				tc.moveOn(h)
+			}
+
+			// Act
+			h.r.recount(context.Background(), theWorkspace)
+
+			// Assert
+			if _, ok := h.record("error", "could not count the branch's commits; the panel keeps the last count"); ok {
+				t.Fatalf("a count that raced its workspace's teardown was logged as an error: %v", h.log.Records())
+			}
+			rec, ok := h.record("info", "the workspace moved on while its branch was counted; there is nothing left to count")
+			if !ok || rec.Context["moved_on"] != tc.movedOn {
+				t.Fatalf("info record = %v (found %v), want moved_on=%q", rec.Context, ok, tc.movedOn)
+			}
+			if got := len(h.db.written()); got != 0 {
+				t.Fatalf("writes = %d, want none", got)
 			}
 		})
 	}
