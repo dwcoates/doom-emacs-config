@@ -1115,6 +1115,24 @@ type fakeSidebar struct {
 	mu    sync.Mutex
 	turns []*footer.TurnStarted
 	ends  []sessionwatcher.TurnClose
+	// closedAt are the turn-close instants the door told, by workspace.
+	closedAt map[ids.WorkspaceID][]time.Time
+}
+
+func (f *fakeSidebar) SetTurnClosedAt(ws ids.WorkspaceID, at time.Time) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.closedAt == nil {
+		f.closedAt = map[ids.WorkspaceID][]time.Time{}
+	}
+	f.closedAt[ws] = append(f.closedAt[ws], at)
+}
+
+// turnClosedAts answers the turn-close instants the door told for WS.
+func (f *fakeSidebar) turnClosedAts(ws ids.WorkspaceID) []time.Time {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]time.Time(nil), f.closedAt[ws]...)
 }
 
 func (f *fakeSidebar) SetTurn(_ ids.WorkspaceID, turn *footer.TurnStarted) {

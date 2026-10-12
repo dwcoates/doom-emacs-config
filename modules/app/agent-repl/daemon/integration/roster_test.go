@@ -1117,3 +1117,42 @@ func TestRosterBringUpWalkIsMonotoneFromAColdSubmit(t *testing.T) {
 		}
 	}
 }
+
+// THE WHEN-COLUMN COUNTS FROM THE LAST TURN END: a running first turn has no
+// end yet and shows the creation instant, the close moves the column to
+// `turn_ended`, and the NEXT turn's start leaves that instant where it stood.
+func TestRosterWhenColumnCountsFromTheLastTurnEnd(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	roster := f.d.WatchRoster()
+	rowWhere := func(pred func(*frontendv1.RosterRow) bool) func(*frontendv1.WorkspaceRoster) bool {
+		return func(r *frontendv1.WorkspaceRoster) bool {
+			row := rosterRow(r, f.ws.GetId())
+			return row != nil && pred(row)
+		}
+	}
+	awaitRoster(t, f.d, roster, "ready after readiness", rowWhere(func(row *frontendv1.RosterRow) bool { return row.GetReady() != nil }))
+
+	// Act / Assert: the first turn runs, and nothing has ended yet.
+	f.submit("first", "k-when-first", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	running := awaitRoster(t, f.d, roster, "thinking during the first turn", rowWhere(func(row *frontendv1.RosterRow) bool { return row.GetThinking() != nil }))
+	if when := rosterRow(running, f.ws.GetId()).GetWhen(); when.GetCreated() == nil {
+		t.Fatalf("when during the first turn = %v, want the creation instant", when)
+	}
+
+	// Act / Assert: the first turn ends.
+	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
+	ended := awaitRoster(t, f.d, roster, "the when-column on the first turn's end", rowWhere(func(row *frontendv1.RosterRow) bool { return row.GetWhen().GetTurnEnded() != nil }))
+	endedAt := rosterRow(ended, f.ws.GetId()).GetWhen().GetTurnEnded().GetAtMs()
+	if endedAt == 0 {
+		t.Fatalf("when.turn_ended = %v, want the close instant", rosterRow(ended, f.ws.GetId()).GetWhen())
+	}
+
+	// Act / Assert: the second turn's start does not move the column.
+	f.submit("second", "k-when-second", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	second := awaitRoster(t, f.d, roster, "thinking during the second turn", rowWhere(func(row *frontendv1.RosterRow) bool { return row.GetThinking() != nil }))
+	if got := rosterRow(second, f.ws.GetId()).GetWhen().GetTurnEnded().GetAtMs(); got != endedAt {
+		t.Fatalf("when.turn_ended during the second turn = %d, want the first turn's end %d", got, endedAt)
+	}
+}

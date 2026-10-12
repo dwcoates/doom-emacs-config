@@ -21,9 +21,9 @@ func TestNewRefusesEachMissingCollaborator(t *testing.T) {
 	// Arrange: one complete set of dependencies, then each one blanked.
 	full := func() Deps {
 		h := &harness{db: newFakeDB(), sender: newFakeSender(), watcher: &fakeWatcher{},
-			feed: &fakeFeed{}, footer: &fakeFooter{}, holds: &fakeHolds{}, judge: &scriptedJudge{}}
+			feed: &fakeFeed{}, footer: &fakeFooter{}, sidebar: &fakeSidebar{}, holds: &fakeHolds{}, judge: &scriptedJudge{}}
 		return Deps{
-			DB: h.db, Judge: h.judge, Feed: h.feed, Footer: h.footer, Holds: h.holds,
+			DB: h.db, Judge: h.judge, Feed: h.feed, Footer: h.footer, Sidebar: h.sidebar, Holds: h.holds,
 			TurnBanners: &fakeTurnBanners{},
 			Commits:     &fakeRecounter{},
 			Client:      func(ids.WorkspaceID) (Sender, bool) { return h.sender, true },
@@ -45,6 +45,7 @@ func TestNewRefusesEachMissingCollaborator(t *testing.T) {
 		{"turn banners", func(d *Deps) { d.TurnBanners = nil }},
 		{"commit recounter", func(d *Deps) { d.Commits = nil }},
 		{"footer resolver", func(d *Deps) { d.Footer = nil }},
+		{"roster resolver", func(d *Deps) { d.Sidebar = nil }},
 		{"holds resolver", func(d *Deps) { d.Holds = nil }},
 		{"client resolver", func(d *Deps) { d.Client = nil }},
 		{"watcher resolver", func(d *Deps) { d.Watcher = nil }},
