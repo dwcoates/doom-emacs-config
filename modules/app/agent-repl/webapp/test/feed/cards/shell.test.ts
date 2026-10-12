@@ -21,6 +21,8 @@ import {
 import { createTicker } from "../../../src/clock.js";
 import { testAppContext } from "../../rpc/app-context.js";
 import { MalformedView } from "../../../src/rpc/malformed.js";
+import { INTERRUPT_OUTCOME_MS } from "../../../src/feed/stop-control.js";
+import { interruptErrorSentence, type InterruptErrorKind } from "../../../src/interrupt-error.js";
 import {
   drawFeedShellBody,
   drawFeedShellHead,
@@ -28,7 +30,6 @@ import {
   SHELL_LOST_CAUSE_ARMS,
   SHELL_SETTLED_ARMS,
   shellDotState,
-  STOP_OUTCOME_MS,
 } from "../../../src/feed/cards/shell.js";
 import { TICKING_ATTRIBUTE } from "../../../src/feed/ticking.js";
 import type { RowContext } from "../../../src/feed/renderers.js";
@@ -519,7 +520,7 @@ describe("the stop control", () => {
     document.body.append(el);
     el.querySelector<Control>("[data-interrupt]")?.click();
     await settle();
-    await vi.advanceTimersByTimeAsync(STOP_OUTCOME_MS + 1000);
+    await vi.advanceTimersByTimeAsync(INTERRUPT_OUTCOME_MS + 1000);
     expect(el.querySelector(".shell-stop-outcome")).toBeNull();
   });
 
@@ -577,67 +578,40 @@ describe("the stop control", () => {
 });
 
 describe("the stop's typed refusals", () => {
-  const causes = [
-    {
-      arm: "confirmRequired",
-      kind: { case: "confirmRequired", value: { liveAgentCount: 3n } },
-      text: "stopping would also end 3 live agent(s)",
-    },
-    { arm: "unknownWorkspace", kind: { case: "unknownWorkspace", value: {} }, text: "the daemon does not know this workspace" },
-    {
-      arm: "workspaceRefMismatch",
-      kind: { case: "workspaceRefMismatch", value: { registryDir: "/elsewhere" } },
-      text: "this workspace's directory disagrees with the registry's: /elsewhere",
-    },
-    {
-      arm: "transferringAway",
-      kind: { case: "transferringAway", value: { address: "127.0.0.1:9931" } },
-      text: "this workspace moved to another daemon at 127.0.0.1:9931",
-    },
-    {
-      arm: "notYetAdopted",
-      kind: { case: "notYetAdopted", value: {} },
-      text: "the daemon has not finished adopting this workspace yet",
-    },
-    {
-      arm: "notDetachedWork",
-      kind: { case: "notDetachedWork", value: {} },
-      text: "this row names no detached work",
-    },
-    {
-      arm: "notMergeTab",
-      kind: { case: "notMergeTab", value: {} },
-      text: "this row names no running merge tab",
-    },
-    {
-      arm: "noSession",
-      kind: { case: "noSession", value: {} },
-      text: "the workspace has no session to interrupt",
-    },
-    {
-      arm: "shimRefused",
-      kind: { case: "shimRefused", value: { detail: "the shim says nothing is running" } },
-      text: "the shim says nothing is running",
-    },
+  const kinds = [
+    { case: "confirmRequired", value: { liveAgentCount: 3n } },
+    { case: "unknownWorkspace", value: {} },
+    { case: "workspaceRefMismatch", value: { registryDir: "/elsewhere" } },
+    { case: "transferringAway", value: { address: "127.0.0.1:9931" } },
+    { case: "notYetAdopted", value: {} },
+    { case: "notDetachedWork", value: {} },
+    { case: "notMergeTab", value: {} },
+    { case: "noSession", value: {} },
+    { case: "shimRefused", value: { detail: "the shim says nothing is running" } },
   ] as const;
 
-  for (const c of causes) {
-    it(`says what ${c.arm} means, beside the control`, async () => {
+  // THE SHELL'S STOP SPEAKS THE SHARED WORDING (owner ruling, 2026-10-12): a
+  // refusal reads exactly as the footer's and the subagent head's stops say it.
+  for (const kind of kinds) {
+    it(`says what ${kind.case} means, beside the control, in the shared wording`, async () => {
       const { rc } = ctxFor(
         create(InterruptResponseSchema, {
-          result: { case: "error", value: { kind: c.kind as never } },
+          result: { case: "error", value: { kind: kind as never } },
         }),
       );
       const el = drawFeedShellHead(shell(), rc);
       el.querySelector<Control>("[data-interrupt]")?.click();
       await settle();
       const drawn = el.querySelector(".shell-stop .refusal");
-      expect([drawn?.getAttribute("data-arm"), drawn?.textContent]).toEqual([c.arm, c.text]);
+      expect([drawn?.getAttribute("data-arm"), drawn?.textContent]).toEqual([
+        kind.case,
+        interruptErrorSentence(kind as unknown as InterruptErrorKind, "InterruptError.kind"),
+      ]);
     });
   }
 
   it("words every cause the schema declares", () => {
-    expect(causes.map((c) => c.arm).sort()).toEqual(
+    expect(kinds.map((k) => k.case).sort()).toEqual(
       armsOf(InterruptErrorSchema.oneofs, "kind").sort(),
     );
   });
