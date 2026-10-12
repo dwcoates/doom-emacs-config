@@ -12,6 +12,7 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/merge"
 	"agent-repld/internal/promptqueue"
@@ -1453,6 +1454,75 @@ func TestQueueSubjectResolvesTheRequesterAndTheWorkspaceItAddresses(t *testing.T
 			}
 			if err != nil || requester != tt.wantRequester || subject != tt.wantSubject {
 				t.Fatalf("queueSubject = %s, %s, %v; want %s, %s", requester, subject, err, tt.wantRequester, tt.wantSubject)
+			}
+		})
+	}
+}
+
+// TestAnsweredNotQueuedRecordsOnlyTheNotQueuedRefusal covers the one place a
+// queue control's "nothing is queued" refusal becomes an ordinary outcome:
+// that refusal is recorded as not_queued, and every other error (or none) is
+// left to the caller with nothing recorded.
+func TestAnsweredNotQueuedRecordsOnlyTheNotQueuedRefusal(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		answered bool
+	}{
+		{name: "the not-queued refusal", err: &merge.RefusalError{Arm: merge.ArmNoSuchQueuedMerge, Reason: "none"}, answered: true},
+		{name: "another refusal", err: &merge.RefusalError{Arm: merge.ArmAlreadyPaused, Reason: "paused"}},
+		{name: "a plain failure", err: errFake},
+		{name: "no error", err: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			log := dlog.NewTestLogger()
+			outcome := dlog.Context{"workspace": "w1"}
+
+			// Act.
+			answered := answeredNotQueued(log, tt.err, outcome, "nothing there")
+
+			// Assert.
+			if answered != tt.answered {
+				t.Fatalf("answered = %v, want %v", answered, tt.answered)
+			}
+			records := log.Records()
+			if !tt.answered {
+				if len(records) != 0 || outcome["outcome"] != nil {
+					t.Fatalf("records %v, outcome %v; want nothing recorded", records, outcome)
+				}
+				return
+			}
+			if len(records) != 1 || records[0].Operation != opMergeQueue || records[0].Level != "info" || records[0].Context["outcome"] != "not_queued" {
+				t.Fatalf("records = %+v, want one info not_queued record", records)
+			}
+		})
+	}
+}
+
+// TestEveryQueueControlAnswersNothingQueuedAlike pins that evict and both
+// moves answer a merge that is not there through the one shared outcome.
+func TestEveryQueueControlAnswersNothingQueuedAlike(t *testing.T) {
+	for _, typ := range []string{TypeMergeEvict, TypeMergeMoveUp, TypeMergeMoveDown} {
+		t.Run(typ, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.workspace("w1", "/tree/w1")
+			refusal := &merge.RefusalError{Arm: merge.ArmNoSuchQueuedMerge, Workspace: "w1", Reason: "none"}
+			f.merge.evictErr, f.merge.moveErr = refusal, refusal
+			path := f.write(t, "workspace_commands_control.json", `[{"type":"`+typ+`","project_dir":"/tree/w1"}]`)
+
+			// Act.
+			err := f.ingress.ApplyFile(context.Background(), path)
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("ApplyFile = %v, want the file applied", err)
+			}
+			record := f.record(t, opMergeQueue, "info")
+			if record.Context["outcome"] != "not_queued" || record.Context["type"] != typ {
+				t.Fatalf("record context %v, want outcome=not_queued for %s", record.Context, typ)
 			}
 		})
 	}

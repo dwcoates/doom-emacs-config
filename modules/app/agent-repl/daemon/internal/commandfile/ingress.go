@@ -434,9 +434,7 @@ func (i *ingress) applyMergeEvict(ctx context.Context, log dlog.Logger, entry En
 		"own": evicted == requester,
 	}
 	err = i.deps.Merge.Evict(ctx, evicted)
-	if refusal, ok := merge.Refused(err); ok && refusal.Arm == merge.ArmNoSuchQueuedMerge {
-		outcome["outcome"] = "not_queued"
-		log.Info(opMergeQueue, "nothing to evict: the workspace has no merge on the queue", outcome)
+	if answeredNotQueued(log, err, outcome, "nothing to evict: the workspace has no merge on the queue") {
 		return nil
 	}
 	if err != nil {
@@ -468,6 +466,20 @@ func (i *ingress) queueSubject(ctx context.Context, entry Entry, field, dir stri
 	return requester, record.ID, nil
 }
 
+// answeredNotQueued records ERR as the `not_queued` outcome when it is the
+// orchestrator's no_such_queued_merge refusal, answering whether it was: a
+// queue control addressing a merge that is not there is satisfied, not
+// failed. Any other ERR is left to the caller.
+func answeredNotQueued(log dlog.Logger, err error, outcome dlog.Context, message string) bool {
+	refusal, ok := merge.Refused(err)
+	if !ok || refusal.Arm != merge.ArmNoSuchQueuedMerge {
+		return false
+	}
+	outcome["outcome"] = "not_queued"
+	log.Info(opMergeQueue, message, outcome)
+	return true
+}
+
 // applyMergeMove maps a merge_move_up or merge_move_down entry onto the
 // orchestrator's Move, the entry point UpdateMergeQueue's move arms call. The
 // requester's own merge moves unless move_dir names another workspace's.
@@ -490,9 +502,7 @@ func (i *ingress) applyMergeMove(ctx context.Context, log dlog.Logger, entry Ent
 		"own": subject == requester, "move": move.String(),
 	}
 	moved, err := i.deps.Merge.Move(ctx, subject, move)
-	if refusal, ok := merge.Refused(err); ok && refusal.Arm == merge.ArmNoSuchQueuedMerge {
-		outcome["outcome"] = "not_queued"
-		log.Info(opMergeQueue, "nothing to move: the workspace has no merge on the queue", outcome)
+	if answeredNotQueued(log, err, outcome, "nothing to move: the workspace has no merge on the queue") {
 		return nil
 	}
 	if err != nil {
