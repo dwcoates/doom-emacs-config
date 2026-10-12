@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"google.golang.org/protobuf/proto"
@@ -13,6 +14,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/sessionwatcher"
+	"agent-repld/internal/shimclient"
 )
 
 // fakeSenderClient answers each shim verb with whatever a test arranged.
@@ -29,6 +31,7 @@ type fakeSenderClient struct {
 	killTurnErr    error
 	rollBack       *shimv1.RollBackSessionResponse
 	rollBackReq    *shimv1.RollBackSessionRequest
+	startTurnErr   error
 }
 
 func (c *fakeSenderClient) RollBackSession(_ context.Context, req *shimv1.RollBackSessionRequest) (*shimv1.RollBackSessionResponse, error) {
@@ -38,6 +41,9 @@ func (c *fakeSenderClient) RollBackSession(_ context.Context, req *shimv1.RollBa
 
 func (c *fakeSenderClient) StartTurn(_ context.Context, req *shimv1.StartTurnRequest) (*shimv1.StartTurnResponse, error) {
 	c.startTurnReq = req
+	if c.startTurnErr != nil {
+		return nil, c.startTurnErr
+	}
 	return c.startTurn, nil
 }
 
@@ -178,6 +184,20 @@ func TestSenderStartTurnCarriesTheRefusalArm(t *testing.T) {
 	}
 	if refusal.Arm != "query_dead" {
 		t.Fatalf("refusal arm = %q, want query_dead", refusal.Arm)
+	}
+}
+
+func TestSenderStartTurnMarksAShimThatDiedUnderTheCallForTheQueue(t *testing.T) {
+	// Arrange
+	died := fmt.Errorf("%w: unavailable: dial unix /s.sock: connect: connection refused", shimclient.ErrShimDied)
+	s := &sender{client: &fakeSenderClient{startTurnErr: died}}
+
+	// Act
+	_, err := s.StartTurn(context.Background(), "turn-1", nil, conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
+
+	// Assert
+	if !errors.Is(err, promptqueue.ErrShimDied) || !errors.Is(err, shimclient.ErrShimDied) {
+		t.Fatalf("StartTurn = %v, want the queue's shim-died error with the shim client's in its chain", err)
 	}
 }
 
