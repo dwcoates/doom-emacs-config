@@ -591,6 +591,40 @@ describe("the row click", () => {
     expect(calls).toEqual(["ws-1"]);
   });
 
+  it("selects nothing while the workspace is still opening", async () => {
+    // Arrange
+    const calls: string[] = [];
+    const sc = sidebarContext(
+      appContext({
+        selectWorkspace: (request) => {
+          calls.push(request.workspace?.id ?? "");
+          return SELECT_OK;
+        },
+      }),
+    );
+    const drawn = drawRosterRow(row({ id: "ws-1", status: { case: "opening", value: {} } }), sc, "R");
+
+    // Act
+    await click(drawn.querySelector(".row") as Element);
+
+    // Assert
+    expect(calls).toEqual([]);
+  });
+
+  it("offers no select target while the workspace is still opening", () => {
+    // Arrange
+    const sc = sidebarContext(appContext({}));
+
+    // Act
+    const drawn = drawRosterRow(row({ id: "ws-1", status: { case: "opening", value: {} } }), sc, "R");
+
+    // Assert
+    expect([drawn.querySelector("[data-select]"), drawn.querySelector(".row")?.getAttribute("aria-disabled")]).toEqual([
+      null,
+      "true",
+    ]);
+  });
+
   it("echoes the served ref rather than rebuilding one", async () => {
     let dir = "";
     const sc = sidebarContext(

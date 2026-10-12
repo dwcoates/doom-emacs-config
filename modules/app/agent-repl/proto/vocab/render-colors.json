@@ -100,6 +100,9 @@
     "TURQUOISE. All keep their glyphs. A merge never parks and no merge fact",
     "is shown before the requesting turn ends (merge-landing.md, Landed",
     "change 1), so there is no conflict arm and no enqueuing arm.",
+    "'none', 'inactive' and 'opening' take 'none' because a workspace with no",
+    "session, or one the editor is still opening, has no lifecycle to report.",
+    "'opening' is GREY and NOT SELECTABLE until the workspace is open.",
     "'none' and 'inactive' take 'none' because a workspace with no session",
     "has no lifecycle to report at all.",
     "",
@@ -121,6 +124,7 @@
   "roster_status": {
     "none": "none",
     "inactive": "none",
+    "opening": "none",
     "init": "blue",
     "severed": "blue",
     "dead": "blue",

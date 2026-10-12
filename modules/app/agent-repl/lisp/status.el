@@ -631,6 +631,7 @@ sits flush on the bar with no ground of its own.  See
 (defconst agent-repl-status-color-table
   '((:none            . "none")
     (:inactive        . "none")
+    (:opening         . "none")
 
     (:init            . "blue")
     (:severed         . "blue")

@@ -5485,6 +5485,10 @@ ar-button.outcome-marker-pill {
    one color here and another in the footer or the Emacs tab bar. `currentColor`
    is what makes one fill rule serve every tone. */
 #ws-sidebar .st[data-glyph="dot"] { background: currentColor; }
+/* A WORKSPACE BEING OPENED (owner ruling, 2026-10-12): a grey dot, and the
+   row offers no click until the daemon answers it open. */
+#ws-sidebar .ws[data-arm="opening"] .st { color: var(--muted); }
+#ws-sidebar .ws[data-arm="opening"] > .row { cursor: default; }
 /* The glyph statuses are not discs: a box that centers a single character, so
    the recycle mark turns on its own axis rather than orbiting. The box is the
    DOT'S width, not the character's (owner request, 2026-10-08: a 1em box,

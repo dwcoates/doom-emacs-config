@@ -106,6 +106,10 @@ describe("the status mark", () => {
     });
   });
 
+  it("draws a grey dot for a workspace still opening", () => {
+    expect(rosterArmMark("opening")).toEqual({ toneClass: "tone-none", glyph: "dot", char: "" });
+  });
+
   it("draws nothing at all for a workspace with no session", () => {
     expect(rosterArmMark("none")).toEqual({ toneClass: "tone-none", glyph: "none", char: "" });
   });
