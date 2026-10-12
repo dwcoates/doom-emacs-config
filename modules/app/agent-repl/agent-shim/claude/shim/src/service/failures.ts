@@ -31,6 +31,9 @@ import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { conversationv1, shimv1 } from "../proto.js";
 import type { TitleDigest } from "../convert/title-digest.js";
+import { mainAgentId } from "../convert/ids.js";
+import type { ForkPointAnswer } from "../engine/fork-point.js";
+import type { ForkSessionOutcome } from "../engine/fork-session.js";
 import type { LockHolderHow } from "../locks.js";
 import {
   TRANSCRIPT_QUIET_AFTER_MS,
@@ -997,4 +1000,105 @@ export function internalFromUnknown(rpc: string, error: unknown): ConnectError {
   if (error instanceof ConnectError) return error;
   const detail = error instanceof Error ? error.message : String(error);
   return new ConnectError(`shim.v1.${rpc}: ${detail}`, Code.Internal);
+}
+
+// ---------------------------------------------------------------------------
+// GetForkPoint / ForkSession
+// ---------------------------------------------------------------------------
+
+/** A record token as the wire carries it. */
+function forkRecordToken(uuid: string): shimv1.ForkRecordToken {
+  return create(shimv1.ForkRecordTokenSchema, { value: uuid });
+}
+
+/** The fork point the engine named, or why it could not name one. */
+export function forkPointAnswered(answer: ForkPointAnswer): shimv1.GetForkPointResponse {
+  if (answer.kind === "unresolved") {
+    return create(shimv1.GetForkPointResponseSchema, {
+      result: {
+        case: "failure",
+        value: create(shimv1.GetForkPointFailureSchema, {
+          detail: answer.detail,
+          cause: { case: "unresolved", value: create(shimv1.GetForkPointUnresolvedSchema, {}) },
+        }),
+      },
+    });
+  }
+  let extent: shimv1.ForkPoint["extent"];
+  switch (answer.kind) {
+    case "whole":
+      extent = { case: "whole", value: create(shimv1.ForkPointWholeSchema, {}) };
+      break;
+    case "through_record":
+      extent = {
+        case: "throughRecord",
+        value: create(shimv1.ForkPointThroughRecordSchema, { record: forkRecordToken(answer.recordUuid) }),
+      };
+      break;
+    case "before_record":
+      extent = {
+        case: "beforeRecord",
+        value: create(shimv1.ForkPointBeforeRecordSchema, { record: forkRecordToken(answer.recordUuid) }),
+      };
+      break;
+  }
+  return create(shimv1.GetForkPointResponseSchema, {
+    result: {
+      case: "success",
+      value: create(shimv1.GetForkPointSuccessSchema, {
+        point: create(shimv1.ForkPointSchema, { extent }),
+        through: create(conversationv1.ConversationThroughSchema, { atMs: BigInt(answer.throughMs) }),
+        uninheritedTurns: answer.uninherited.map((turn) => create(conversationv1.TurnIdSchema, { value: turn })),
+      }),
+    },
+  });
+}
+
+/** What became of a fork, as ForkSession answers it. */
+export function forkSessionAnswered(outcome: ForkSessionOutcome): shimv1.ForkSessionResponse {
+  if (outcome.kind === "forked") {
+    return create(shimv1.ForkSessionResponseSchema, {
+      result: {
+        case: "success",
+        value: create(shimv1.ForkSessionSuccessSchema, {
+          vendorSessionId: outcome.vendorSessionId,
+          parentBook: mainAgentId(outcome.parentBook),
+        }),
+      },
+    });
+  }
+  return forkSessionRefused(outcome.kind, outcome.detail);
+}
+
+/** The causes a fork is refused for. */
+export type ForkSessionRefusal =
+  | "unknown_session"
+  | "record_absent"
+  | "parent_book_unknown"
+  | "already_started"
+  | "vendor_failed";
+
+/** A refused fork: nothing was written. */
+export function forkSessionRefused(cause: ForkSessionRefusal, detail: string): shimv1.ForkSessionResponse {
+  let arm: shimv1.ForkSessionFailure["cause"];
+  switch (cause) {
+    case "unknown_session":
+      arm = { case: "unknownSession", value: create(shimv1.ForkSessionUnknownSessionSchema, {}) };
+      break;
+    case "record_absent":
+      arm = { case: "recordAbsent", value: create(shimv1.ForkSessionRecordAbsentSchema, {}) };
+      break;
+    case "parent_book_unknown":
+      arm = { case: "parentBookUnknown", value: create(shimv1.ForkSessionParentBookUnknownSchema, {}) };
+      break;
+    case "already_started":
+      arm = { case: "alreadyStarted", value: create(shimv1.ForkSessionAlreadyStartedSchema, {}) };
+      break;
+    case "vendor_failed":
+      arm = { case: "vendorFailed", value: create(shimv1.ForkSessionVendorFailedSchema, {}) };
+      break;
+  }
+  return create(shimv1.ForkSessionResponseSchema, {
+    result: { case: "failure", value: create(shimv1.ForkSessionFailureSchema, { detail, cause: arm }) },
+  });
 }

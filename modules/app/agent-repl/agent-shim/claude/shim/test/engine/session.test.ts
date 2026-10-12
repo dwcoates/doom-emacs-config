@@ -46,7 +46,8 @@ import {
 } from "../../src/engine/network-resume.js";
 import { isNetworkResumePrompt, resumePromptTargets } from "../../src/engine/network-resume-prompt.js";
 import { rollBackSessionRequestFor } from "../service/requests.js";
-import { ManualScheduler, RecordingFold, RecordingPersistence, ScriptedProbe, ScriptedQuery, errorResultMessage, hookResponse, initMessage, resultMessage } from "./fakes.js";
+import type { ForkVendorSession } from "../../src/engine/fork-session.js";
+import { ManualScheduler, RecordingFold, RecordingPersistence, ScriptedProbe, ScriptedQuery, errorResultMessage, hookResponse, initMessage, resultMessage, unexpectedVendorFork } from "./fakes.js";
 
 interface Harness {
   readonly engine: SessionEngine;
@@ -242,6 +243,8 @@ function harness(
      * from the same graph. Everything else gets this file's own engine.
      */
     engineFactory?: typeof createEngine;
+    /** The vendor's session fork; absent: a fork no test asked for fails the test. */
+    forkVendorSession?: ForkVendorSession;
     /**
      * Build over an EXISTING pair of directories, the way a restarted shim
      * comes back over the state its predecessor left.
@@ -269,6 +272,7 @@ function harness(
     ...(options.withoutEndProcess === true ? {} : { endProcess: (code: number) => exits.push(code) }),
     persistence,
     fold,
+    forkVendorSession: options.forkVendorSession ?? unexpectedVendorFork,
     createQuery: (spec) => {
       if (options.createQueryRejection !== undefined) return Promise.reject(options.createQueryRejection);
       if (options.createQueryFailsFrom !== undefined && queries.length >= options.createQueryFailsFrom) {
@@ -774,6 +778,7 @@ describe("StartSession, fresh", () => {
       probeApiReachable: new ScriptedProbe().probe,
       persistence: h.persistence,
       fold: h.fold,
+      forkVendorSession: unexpectedVendorFork,
       createQuery: () => Promise.reject(new Error("the mocked vendor is not implemented")),
       runtime: { shimBuildSha: "sha", sdkVersion: "0.3.220" },
       env: { stateDir: h.stateDir, configDir: h.configDir, cwd: h.cwd },
@@ -792,6 +797,7 @@ describe("StartSession, fresh", () => {
       probeApiReachable: new ScriptedProbe().probe,
       persistence: h.persistence,
       fold: h.fold,
+      forkVendorSession: unexpectedVendorFork,
       createQuery: () => Promise.reject(new Error("no")),
       runtime: { shimBuildSha: "sha", sdkVersion: "0.3.220" },
       env: { stateDir: h.stateDir, configDir: h.configDir, cwd: h.cwd },
@@ -826,6 +832,7 @@ describe("StartSession, fresh", () => {
       probeApiReachable: new ScriptedProbe().probe,
       persistence: h.persistence,
       fold: h.fold,
+      forkVendorSession: unexpectedVendorFork,
       createQuery: () => Promise.reject(new Error("no")),
       runtime: { shimBuildSha: "sha", sdkVersion: "0.3.220" },
       env: { stateDir: h.stateDir, configDir: h.configDir, cwd: h.cwd },
@@ -851,6 +858,7 @@ describe("StartSession, fresh", () => {
       probeApiReachable: new ScriptedProbe().probe,
       persistence: h.persistence,
       fold: h.fold,
+      forkVendorSession: unexpectedVendorFork,
       createQuery: () => Promise.reject(new Error("no")),
       runtime: { shimBuildSha: "sha", sdkVersion: "0.3.220" },
       env: { stateDir: h.stateDir, configDir: h.configDir, cwd: h.cwd },
@@ -887,6 +895,7 @@ describe("StartSession, fresh", () => {
       probeApiReachable: new ScriptedProbe().probe,
       persistence: h.persistence,
       fold: h.fold,
+      forkVendorSession: unexpectedVendorFork,
       createQuery: () => Promise.reject(new Error("no")),
       runtime: { shimBuildSha: "sha", sdkVersion: "0.3.220" },
       env: { stateDir: h.stateDir, configDir: h.configDir, cwd: h.cwd },
@@ -910,6 +919,7 @@ describe("StartSession, fresh", () => {
       probeApiReachable: new ScriptedProbe().probe,
       persistence: h.persistence,
       fold: h.fold,
+      forkVendorSession: unexpectedVendorFork,
       createQuery: (spec) => {
         starts += 1;
         if (starts === 1) return Promise.reject(new Error("the vendor was not startable yet"));
@@ -15282,5 +15292,141 @@ describe("the slash-command catalog", () => {
     await vi.waitFor(() => {
       expect(faultComponents(h)).not.toContain("vendor-command-catalog");
     });
+  });
+});
+
+describe("GetForkPoint and ForkSession", () => {
+  /** Start turn `turnId` and answer it with one assistant record, leaving it open. */
+  async function turnWithReply(h: Harness, turnId: string, replyUuid: string): Promise<string> {
+    await h.engine.startTurn(
+      create(shimv1.StartTurnRequestSchema, {
+        turn: create(conversationv1.TurnIdSchema, { value: turnId }),
+        said: textSaid("go"),
+        origin: conversationv1.PromptOrigin.USER_SENT,
+      }),
+    );
+    const send = h.minted.at(-1) ?? "";
+    await h.engine.onSdkMessage(answering(h, assistantMessage(replyUuid)));
+    return send;
+  }
+
+  /** Conclude the open turn with its result. */
+  async function conclude(h: Harness): Promise<void> {
+    h.queries[0]?.query.emit(answering(h, resultMessage()));
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+
+  function success(response: shimv1.GetForkPointResponse): shimv1.GetForkPointSuccess {
+    if (response.result.case !== "success") throw new Error(`expected a fork point, got ${response.result.case ?? "nothing"}`);
+    return response.result.value;
+  }
+
+  it("answers the whole transcript from a shim with no session", async () => {
+    // Arrange
+    const h = harness();
+
+    // Act
+    const point = success(await h.engine.getForkPoint(create(shimv1.GetForkPointRequestSchema, {})));
+
+    // Assert
+    expect(point.point?.extent.case).toBe("whole");
+    expect(point.uninheritedTurns).toEqual([]);
+  });
+
+  it("answers the concluded turn's last record once a turn ends", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await turnWithReply(h, "turn-1", "00000000-0000-4000-8000-0000000000a1");
+    await conclude(h);
+
+    // Act
+    const point = success(await h.engine.getForkPoint(create(shimv1.GetForkPointRequestSchema, {})));
+
+    // Assert
+    expect(point.point?.extent).toMatchObject({
+      case: "throughRecord",
+      value: { record: { value: "00000000-0000-4000-8000-0000000000a1" } },
+    });
+  });
+
+  it("names a turn in flight as uninherited and cuts before its prompt when none concluded", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    const send = await turnWithReply(h, "turn-1", "00000000-0000-4000-8000-0000000000a1");
+
+    // Act
+    const point = success(await h.engine.getForkPoint(create(shimv1.GetForkPointRequestSchema, {})));
+
+    // Assert
+    expect(point.point?.extent).toMatchObject({ case: "beforeRecord", value: { record: { value: send } } });
+    expect(point.uninheritedTurns.map((turn) => turn.value)).toEqual(["turn-1"]);
+  });
+
+  it("forgets the fork point when the conversation rotates to a new transcript", async () => {
+    // Arrange
+    const h = harness();
+    const response = await started(h);
+    const original = response.result.case === "success" ? (response.result.value.session?.vendorSessionId ?? "") : "";
+    await turnWithReply(h, "turn-1", "00000000-0000-4000-8000-0000000000a1");
+    await conclude(h);
+    await h.engine.onSdkMessage({
+      type: "conversation_reset",
+      new_conversation_id: "an-id-nothing-uses",
+      uuid: "00000000-0000-4000-8000-000000000009",
+      session_id: original,
+    } as never);
+    await h.engine.onSdkMessage(initMessage({ sessionId: "the-id-the-session-moved-to" }));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    // Act
+    const point = success(await h.engine.getForkPoint(create(shimv1.GetForkPointRequestSchema, {})));
+
+    // Assert
+    expect(point.point?.extent.case).toBe("whole");
+  });
+
+  it("refuses a fork once the session has started", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+
+    // Act
+    const response = await h.engine.forkSession(
+      create(shimv1.ForkSessionRequestSchema, {
+        parentVendorSessionId: "parent",
+        parentWorkspaceDir: "/parent",
+        point: create(shimv1.ForkPointSchema, { extent: { case: "whole", value: create(shimv1.ForkPointWholeSchema, {}) } }),
+      }),
+    );
+
+    // Assert
+    expect(response.result.case === "failure" ? response.result.value.cause.case : "").toBe("alreadyStarted");
+  });
+
+  it("forks before any session starts, through the installed vendor fork", async () => {
+    // Arrange
+    const forks: string[] = [];
+    const h = harness({
+      forkVendorSession: (spec) => {
+        forks.push(spec.parentSessionId);
+        return Promise.reject(new Error("the parent is not under this root"));
+      },
+    });
+
+    // Act
+    const response = await h.engine.forkSession(
+      create(shimv1.ForkSessionRequestSchema, {
+        parentVendorSessionId: "parent",
+        parentWorkspaceDir: "/parent",
+        point: create(shimv1.ForkPointSchema, { extent: { case: "whole", value: create(shimv1.ForkPointWholeSchema, {}) } }),
+      }),
+    );
+
+    // Assert: no parent transcript exists in the harness root, so the fork is
+    // refused before the vendor is asked.
+    expect(response.result.case === "failure" ? response.result.value.cause.case : "").toBe("unknownSession");
+    expect(forks).toEqual([]);
   });
 });

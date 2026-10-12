@@ -160,3 +160,15 @@ export function stopWorkflowRequest(): shimv1.StopWorkflowRequest {
     work: create(conversationv1.DetachedWorkIdSchema, { value: "w1" }),
   });
 }
+
+export function getForkPointRequest(): shimv1.GetForkPointRequest {
+  return create(shimv1.GetForkPointRequestSchema, {});
+}
+
+export function forkSessionRequest(): shimv1.ForkSessionRequest {
+  return create(shimv1.ForkSessionRequestSchema, {
+    parentVendorSessionId: "parent-session",
+    parentWorkspaceDir: "/repo/parent",
+    point: create(shimv1.ForkPointSchema, { extent: { case: "whole", value: create(shimv1.ForkPointWholeSchema, {}) } }),
+  });
+}
