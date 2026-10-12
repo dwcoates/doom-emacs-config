@@ -20,11 +20,19 @@ import (
 // before the requesting turn ends: by the time SetTurnEnded asks whether a
 // merge is live, the answer is already true.
 //
-// The outcome is a fact kept per workspace and moved by four edges:
+// The outcome is a fact kept per workspace and moved by five edges:
 //   - a turn ENDING with no merge live sets it failed;
 //   - a merge FAILING sets it failed;
+//   - a DETACHED merge ending without landing sets it failed;
 //   - a merge being REQUESTED, QUEUED or RUNNING clears it;
 //   - a turn reaching THINKING clears it (owner ruling, 2026-10-11).
+//
+// A DETACHED MERGE RUNS UNDER ANOTHER WORKSPACE'S ID. Once handed off, its
+// facts are published for the merge workspace, never for the requester, so
+// the requester's merge is live through its request fact: raised when the
+// request is recorded, again at the hand-off and on recovery, and lowered
+// only by the request's withdrawal or the detached merge's end
+// (SetDetachedMergeEnded), which every end of a detached merge reports.
 //
 // A daemon that saw none of those edges (a restart, a handover's successor)
 // seeds it ONCE from the durable record (seedOneShot).
@@ -79,6 +87,17 @@ func (s *wsState) noteMergeForOneShot(facts footer.MergeFacts, log dlog.Logger) 
 	}
 }
 
+// noteDetachedMergeEndedForOneShot is the detached-merge edge: the request
+// handed to the merge workspace stands no longer, and a merge that did not
+// land -- failed, abandoned, or never forked -- sets the one-shot failed. A
+// landed merge closes the requester, so it moves nothing.
+func (s *wsState) noteDetachedMergeEndedForOneShot(landed bool, log dlog.Logger) {
+	s.mergeRequested = false
+	if !landed {
+		s.setOneShotFailed(true, "detached_merge_not_landed", log)
+	}
+}
+
 // noteRenderForOneShot is the thinking edge, taken at every render: a turn
 // that has reached `thinking` clears a failed one-shot.
 func (s *wsState) noteRenderForOneShot(log dlog.Logger) {
@@ -89,7 +108,8 @@ func (s *wsState) noteRenderForOneShot(log dlog.Logger) {
 
 // seedOneShot settles the outcome ONCE from the durable record, while no live
 // edge has decided it: a workspace whose last turn's result stands, with no
-// merge queue entry and no landed merge, ended without a live merge. The
+// merge queue entry (its own, or its detached merge's merge workspace's) and
+// no landed merge, ended without a live merge. The
 // record's MergePending is read in the same read as the result, which is what
 // makes the seed right at boot, where the roster is published BEFORE the merge
 // orchestrator recovers its queue and so before any live merge fact arrives.
