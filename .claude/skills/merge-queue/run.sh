@@ -45,6 +45,15 @@
 #                                repository.
 #   --resume-queue [<repo-dir>]  Resume a paused queue, scoped as a pause is.
 #
+# Modifier:
+#   --front                      With any merge verb (--enqueue-own,
+#                                --land-workspace, --land-branch,
+#                                --land-commits, --pr-merged), anywhere among
+#                                its arguments: the merge goes to the FRONT of
+#                                its queue once it is put in line, ahead of
+#                                every ordinary merge waiting, never ahead of
+#                                the one running. Refused on any other verb.
+#
 # Exit codes (every verb):
 #   0  requested (end the turn; the outcome reports into this session),
 #      removed (--remove-branch), or applied (queue-control verbs; the printed
@@ -102,12 +111,31 @@ daemon_bin() {
   printf '%s\n' "$bin"
 }
 
+# FRONT is the merge-queue verb's -front, set when --front is among the
+# arguments; it rides every merge request this script makes.
+FRONT=()
+ARGS=()
+for arg in "$@"; do
+  if [ "$arg" = --front ]; then
+    FRONT=(-front)
+  else
+    ARGS+=("$arg")
+  fi
+done
+set -- "${ARGS[@]+"${ARGS[@]}"}"
+
+# no_front refuses --front on a verb that requests no merge.
+no_front() {
+  [ "${#FRONT[@]}" -eq 0 ] || die "--front goes with a merge verb; $1 requests no merge"
+}
+
 # verb_status runs claude-repld merge-queue, passing its output through, and
-# answers its exit mapped onto this script's.
+# answers its exit mapped onto this script's. A merge request carries -front
+# when --front was given.
 verb_status() {
   local bin rc
   bin="$(daemon_bin)" || return 2
-  "$bin" merge-queue "$@"
+  "$bin" merge-queue "$@" "${FRONT[@]+"${FRONT[@]}"}"
   rc=$?
   case "$rc" in
     0) return 0 ;;
@@ -205,6 +233,7 @@ case "${1:-}" in
     run_verb -pr-merged
     ;;
   --remove-branch)
+    no_front "$1"
     [ -n "${2:-}" ] || die "--remove-branch needs a branch name"
     main="$(repo_main_worktree)" || die "not inside a git repository"
     wt="$(git -C "$main" worktree list --porcelain 2>/dev/null |
@@ -217,14 +246,17 @@ case "${1:-}" in
     log "deleted the branch $2"
     ;;
   --dequeue-own)
+    no_front "$1"
     [ -z "${2:-}" ] || die "--dequeue-own takes no argument, not $2"
     run_verb -evict
     ;;
   --dequeue-workspace)
+    no_front "$1"
     [ -n "${2:-}" ] || die "--dequeue-workspace needs the workspace's worktree directory"
     run_verb -evict-dir "$2"
     ;;
   --pause-queue | --resume-queue)
+    no_front "$1"
     control=-pause
     [ "$1" = --pause-queue ] || control=-resume
     if [ -n "${2:-}" ]; then
@@ -233,7 +265,7 @@ case "${1:-}" in
     run_verb "$control"
     ;;
   *)
-    printf 'usage: run.sh --enqueue-own [--in-place | --keep-open] | --land-workspace <dir> | --land-branch <branch> | --land-commits <commit>... | --pr-merged | --remove-branch <branch> | --dequeue-own | --dequeue-workspace <dir> | --pause-queue [<repo-dir>] | --resume-queue [<repo-dir>]\n' >&2
+    printf 'usage: run.sh --enqueue-own [--in-place | --keep-open] | --land-workspace <dir> | --land-branch <branch> | --land-commits <commit>... | --pr-merged | --remove-branch <branch> | --dequeue-own | --dequeue-workspace <dir> | --pause-queue [<repo-dir>] | --resume-queue [<repo-dir>]  (any merge verb also takes --front)\n' >&2
     exit 1
     ;;
 esac

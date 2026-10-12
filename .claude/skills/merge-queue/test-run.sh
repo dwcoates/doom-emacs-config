@@ -456,6 +456,67 @@ test_workspace_verbs_share_one_main_worktree_refusal() {
   fi
 }
 
+test_front_rides_the_own_branch_request() {
+  mkfixture
+  invoke --enqueue-own --front
+  expect_args "--enqueue-own --front asks for the front of the queue" "merge-queue -own -front"
+}
+
+test_front_rides_an_in_place_request_wherever_it_is_given() {
+  mkfixture
+  invoke --front --enqueue-own --in-place
+  expect_args "--front before the verb still rides --enqueue-own --in-place" "merge-queue -own -in-place -front"
+}
+
+test_front_rides_a_branch_request() {
+  mkfixture
+  invoke --land-branch feat/x --front
+  expect_args "--land-branch --front asks for the front of the queue" "merge-queue -branch feat/x -front"
+}
+
+test_front_rides_a_workspace_request() {
+  mkfixture
+  invoke --land-workspace "$FX/other" --front
+  expect_args "--land-workspace --front asks for the front of the queue" "merge-queue -dir $FX/other -front"
+}
+
+test_front_rides_the_upstream_update() {
+  mkfixture
+  invoke --pr-merged --front
+  expect_args "--pr-merged --front asks for the front of the queue" "merge-queue -pr-merged -front"
+}
+
+test_front_rides_a_commits_request() {
+  mkfixture
+  invoke --land-commits c1 --front
+  if [ "$RUN_RC" -eq 0 ] && [ "$(daemon_args)" = "merge-queue -branch feat/big-partial-full-c1 -front" ] &&
+    git_logged "-C $FX/feat-big-partial-full-c1 cherry-pick full-c1"; then
+    pass "--land-commits --front builds only the named commits and asks for the front of the queue"
+  else
+    fail "--land-commits --front builds only the named commits and asks for the front of the queue" "exit=$RUN_RC args=$(daemon_args)" "$RUN_OUT"
+  fi
+}
+
+test_front_is_refused_on_a_queue_control() {
+  mkfixture
+  invoke --pause-queue --front
+  if [ "$RUN_RC" -eq 2 ] && [ -z "$(daemon_args)" ] && grep_in "$RUN_OUT" -q "goes with a merge verb"; then
+    pass "--front is refused on a queue control and nothing is asked"
+  else
+    fail "--front is refused on a queue control and nothing is asked" "exit=$RUN_RC args=$(daemon_args)" "$RUN_OUT"
+  fi
+}
+
+test_front_is_refused_on_remove_branch() {
+  mkfixture
+  invoke --remove-branch feat/x --front
+  if [ "$RUN_RC" -eq 2 ] && [ ! -s "$FX/git-log" ]; then
+    pass "--front is refused on --remove-branch before anything is removed"
+  else
+    fail "--front is refused on --remove-branch before anything is removed" "exit=$RUN_RC" "$RUN_OUT"
+  fi
+}
+
 test_enqueue_own_requests_the_own_branch
 test_enqueue_own_keep_open_keeps_the_workspace
 test_enqueue_own_in_place_runs_in_this_workspace
@@ -491,6 +552,14 @@ test_land_commits_conflict_leaves_nothing_built
 test_land_commits_refusal_leaves_nothing_built
 test_land_commits_flattens_a_prefixed_branch_into_one_directory
 test_workspace_verbs_share_one_main_worktree_refusal
+test_front_rides_the_own_branch_request
+test_front_rides_an_in_place_request_wherever_it_is_given
+test_front_rides_a_branch_request
+test_front_rides_a_workspace_request
+test_front_rides_the_upstream_update
+test_front_rides_a_commits_request
+test_front_is_refused_on_a_queue_control
+test_front_is_refused_on_remove_branch
 
 printf 'Passed: %d  Failed: %d\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

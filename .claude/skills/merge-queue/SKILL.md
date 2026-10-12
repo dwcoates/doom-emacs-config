@@ -1,7 +1,7 @@
 ---
 name: merge-queue
-description: Land work on master through the agent-repl merge queue — the ONLY way into master in this repository. From this workspace, request the merge of its own branch, only some commits of its own branch (a fix made amid unfinished work), another workspace's branch, a subagent's branch, or a branch already merged upstream, then end the turn. Its own branch merges detached by default, in a merge workspace forked from this one, so this workspace stays free and the outcome arrives here as a report; every other merge runs in this workspace, and its outcome (landed, or failed in conflicts, tests or other) and any conflict or test-failure repairs arrive in this session. Also controls the queue itself, taking this workspace's or another workspace's merge off the queue and pausing or resuming the queue for one repository or all. Use whenever work is finished and must reach master, whenever you would otherwise run git merge, git commit, git cherry-pick or git push onto master, when a subagent reports a finished branch, whenever a queued merge must be removed or the queue paused or resumed, or when invoked as /merge-queue.
-argument-hint: "own [in-place | keep-open] | workspace <worktree-dir> | branch <branch-name> | commits <commit>... | pr-merged | dequeue own | dequeue workspace <worktree-dir> | pause [<repo-dir>] | resume [<repo-dir>]"
+description: Land work on master through the agent-repl merge queue — the ONLY way into master in this repository. From this workspace, request the merge of its own branch, only some commits of its own branch (a fix made amid unfinished work), another workspace's branch, a subagent's branch, or a branch already merged upstream, then end the turn. Its own branch merges detached by default, in a merge workspace forked from this one, so this workspace stays free and the outcome arrives here as a report; every other merge runs in this workspace, and its outcome (landed, or failed in conflicts, tests or other) and any conflict or test-failure repairs arrive in this session. Any merge may be asked for at the FRONT of the queue, ahead of every ordinary merge waiting (a hotfix). Also controls the queue itself, taking this workspace's or another workspace's merge off the queue and pausing or resuming the queue for one repository or all. Use whenever work is finished and must reach master, whenever you would otherwise run git merge, git commit, git cherry-pick or git push onto master, when a subagent reports a finished branch, whenever a queued merge must be removed or the queue paused or resumed, or when invoked as /merge-queue.
+argument-hint: "own [in-place | keep-open] [front] | workspace <worktree-dir> [front] | branch <branch-name> [front] | commits <commit>... [front] | pr-merged [front] | dequeue own | dequeue workspace <worktree-dir> | pause [<repo-dir>] | resume [<repo-dir>]"
 allowed-tools: Bash(.claude/skills/merge-queue/run.sh:*)
 ---
 
@@ -20,6 +20,7 @@ Asks the merge queue, from this workspace, to land a finished branch in its merg
 | `branch <branch-name>` | Merge a branch that is no workspace (a subagent's `Agent`-tool branch). |
 | `commits <commit>...` | Merge ONLY the named commits of this workspace's branch, rebased onto master, leaving the rest of the branch unmerged; this workspace stays open. |
 | `pr-merged` | This workspace's branch already merged upstream; update master from upstream and close this workspace. |
+| `front` | Added to any merge argument above (`own`, `workspace`, `branch`, `commits`, `pr-merged`): the merge goes to the FRONT of its queue once it is put in line, ahead of every ordinary merge waiting and behind any earlier front merge, never ahead of the merge already running. |
 | `dequeue own` | Take this workspace's own merge off the queue. |
 | `dequeue workspace <worktree-dir>` | Take ANOTHER workspace's merge off the queue, by its worktree. |
 | `pause [<repo-dir>]` | Pause the queue of the repository whose main checkout is `<repo-dir>`, else of every repository. |
@@ -33,6 +34,7 @@ Asks the merge queue, from this workspace, to land a finished branch in its merg
   - **Why this lives here**: the queue lands exactly what is committed, and a red test gate comes back as a repair prompt in the session the merge runs in.
 
 1. Dispatch on the argument.
+  - *NOTE*: when `front` was given with a merge argument (steps 1a–1e), append `--front` to that step's `run.sh` call; the exit codes are unchanged.
   - a. If `own`: call `.claude/skills/merge-queue/run.sh --enqueue-own`.
     - *NOTE*: with `own in-place`, call `.claude/skills/merge-queue/run.sh --enqueue-own --in-place` instead.
     - *NOTE*: with `own keep-open`, call `.claude/skills/merge-queue/run.sh --enqueue-own --keep-open` instead.
@@ -110,6 +112,7 @@ Asks the merge queue, from this workspace, to land a finished branch in its merg
 - **CRITICAL: On a failed or refused merge, report and stop.** Never retry by hand, never work around the queue.
 - **IMPORTANT NOTE: A subagent's branch goes through `branch`, the same sequence.** Never fold it into master yourself.
 - **IMPORTANT NOTE: To land a fix without the unfinished work around it, use `commits` with only the fix's commits.** Never cherry-pick them onto master by hand.
+- **IMPORTANT NOTE: A merge that must land before the work already waiting is asked for with `front`.** Never pause, dequeue or reorder other merges by hand to get ahead of them.
 - **CRITICAL: NEVER request a workspace merge for a branch that is not checked out in that worktree.** Check the branch out there first, or use `branch <branch-name>` for a branch that is no workspace.
 - **CRITICAL: Removing a merge from the queue, or pausing or resuming the queue, goes through this skill, NEVER by hand.**
 - **CRITICAL NOTE: Do not self-remediate a `run.sh` failure or read its internals.** React only to the documented exit codes.
