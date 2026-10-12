@@ -99,3 +99,26 @@ ended without a live merge.
     `thinking`, when a merge is requested, or when one is queued or running.
   - The tab bar stops drawing the in-flight and landed merge glyphs; a failed
     merge on any workspace draws ✖️ (the same mark as a failed one-shot).
+
+### 2. The one-shot outcome follows a detached merge (2026-10-11)
+
+- **What:** no wire change. A detached merge (master's default for a
+  workspace's own merge) runs under its merge workspace's id once handed
+  off, so the requester's request fact now stays raised through the
+  hand-off and recovery, and a new sidebar edge,
+  `SetDetachedMergeEnded(ws, landed)`, ends it: a merge that did not land
+  (failed, abandoned, or never forked) fails the one-shot; a landed one
+  closes the requester and moves nothing. `wsm.Workspace.MergePending` also
+  counts a `merge_queue` row standing for a workspace whose `merge_of` is
+  this one, so the restart seed reads a handed-off merge as live.
+- **Why:** owner approved the follow-up (2026-10-11) after the rebase onto
+  master showed both gaps: a failed detached merge never reached the
+  requester's outcome, and a restart mid-merge seeded it failed.
+- **Consequences:**
+  - Copying the merge workspace's facts onto the requester was rejected: an
+    abandoned merge publishes only `none`, and a fork that failed publishes
+    nothing, so neither would ever reach `failed`.
+  - Every terminal of a merge workspace already funnels through the handback
+    (`daemon/internal/merge/terminal.go`), which now reports the end; the one
+    remaining unreported path is a `placements` read failure, logged at
+    ERROR as `daemon.merge.placement`.
