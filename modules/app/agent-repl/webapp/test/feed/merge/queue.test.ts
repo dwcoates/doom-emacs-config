@@ -30,7 +30,7 @@ import { testAppContext } from "../../rpc/app-context.js";
 import {
   drawFeedMergeQueue,
   drawFeedMergeQueueEntry,
-  FRONT_LABEL,
+  MOVE_LABELS,
   selectQueueEntryWorkspace,
 } from "../../../src/feed/merge/queue.js";
 import type { Control } from "../../../src/control.js";
@@ -83,6 +83,9 @@ function refusedWith(cause: { case: string; value: unknown }): SelectWorkspaceRe
     result: { case: "error", value: { cause } as never },
   });
 }
+
+/** An entry with no waiting merge to pass on either side. */
+const NO_MOVES = { up: false, down: false };
 
 /** The instant the page's clock reads when a snapshot is drawn. */
 const NOW_MS = 1_000_000;
@@ -180,7 +183,7 @@ describe("drawFeedMergeQueue: a table of workspace, stage and duration", () => {
       ),
     ).toEqual(
       Array.from({ length: 3 }, () => [
-        "merge-queue-label",
+        "merge-queue-workspace",
         "merge-queue-stage",
         "footer-row-clock merge-queue-duration",
       ]),
@@ -248,7 +251,7 @@ describe("drawFeedMergeQueueEntry: the front's progress", () => {
       label: { text: "x" },
     });
     expect(() =>
-      drawFeedMergeQueueEntry(bare, rowContext(s.ctx, mergeRow("m1")), "behind"),
+      drawFeedMergeQueueEntry(bare, rowContext(s.ctx, mergeRow("m1")), "behind", NO_MOVES),
     ).toThrow(MalformedView);
   });
 
@@ -259,7 +262,7 @@ describe("drawFeedMergeQueueEntry: the front's progress", () => {
       status: { case: "waiting", value: {} },
     });
     expect(() =>
-      drawFeedMergeQueueEntry(bare, rowContext(s.ctx, mergeRow("m1")), "behind"),
+      drawFeedMergeQueueEntry(bare, rowContext(s.ctx, mergeRow("m1")), "behind", NO_MOVES),
     ).toThrow(MalformedView);
   });
 });
@@ -366,7 +369,7 @@ describe("an arm this build cannot draw is a refusal, never a default", () => {
 
     let thrown: unknown;
     try {
-      drawFeedMergeQueueEntry(newer, rowContext(s.ctx, mergeRow("m1")), "behind");
+      drawFeedMergeQueueEntry(newer, rowContext(s.ctx, mergeRow("m1")), "behind", NO_MOVES);
     } catch (err) {
       thrown = err;
     }
@@ -440,21 +443,21 @@ describe("a daemon that cannot be reached answers at the clicked row", () => {
   });
 });
 
-/** Every request a front-scripted daemon received, by endpoint. */
-interface FrontScripted {
+/** Every request a move-scripted daemon received, by endpoint. */
+interface MoveScripted {
   ctx: AppContext;
-  fronts: UpdateMergeQueueRequest[];
+  moves: UpdateMergeQueueRequest[];
   selects: SelectWorkspaceRequest[];
 }
 
 /** A context whose UpdateMergeQueue runs ANSWER, and whose SelectWorkspace succeeds. */
-function frontScripted(answer: () => UpdateMergeQueueResponse): FrontScripted {
-  const fronts: UpdateMergeQueueRequest[] = [];
+function moveScripted(answer: () => UpdateMergeQueueResponse): MoveScripted {
+  const moves: UpdateMergeQueueRequest[] = [];
   const selects: SelectWorkspaceRequest[] = [];
   const transport = createRouterTransport(({ service }) => {
     service(AgentRepl, {
       updateMergeQueue: (req) => {
-        fronts.push(req);
+        moves.push(req);
         return answer();
       },
       selectWorkspace: (req) => {
@@ -470,82 +473,171 @@ function frontScripted(answer: () => UpdateMergeQueueResponse): FrontScripted {
     failures: new RecordingSink(),
     composerEnabled: false,
   });
-  return { ctx, fronts, selects };
+  return { ctx, moves, selects };
 }
 
 /** An UpdateMergeQueue success. */
-const FRONTED = create(UpdateMergeQueueResponseSchema, { result: { case: "success", value: {} } });
+const MOVED = create(UpdateMergeQueueResponseSchema, { result: { case: "success", value: {} } });
 
 /** An UpdateMergeQueue refusal answering no_such_queued_merge. */
 const NOTHING_QUEUED = create(UpdateMergeQueueResponseSchema, {
   result: { case: "error", value: { cause: { case: "noSuchQueuedMerge", value: {} } } },
 });
 
-/** Draw a snapshot against a front-scripted daemon. */
-function drawFront(
-  answer: () => UpdateMergeQueueResponse = () => FRONTED,
+/** Draw a snapshot against a move-scripted daemon. */
+function drawMove(
+  answer: () => UpdateMergeQueueResponse = () => MOVED,
   queue: FeedMergeQueue = snapshot(),
-): { el: HTMLElement; s: FrontScripted } {
-  const s = frontScripted(answer);
+): { el: HTMLElement; s: MoveScripted } {
+  const s = moveScripted(answer);
   return { el: drawFeedMergeQueue(queue, rowContext(s.ctx, mergeRow("m1"))), s };
 }
 
-/** The front control on the row at PLACE, if it has one. */
-function frontControl(el: HTMLElement, place: string): HTMLElement | null {
-  return el.querySelector<HTMLElement>(`[data-queue-place="${place}"] [data-merge-front]`);
+/** The move control pointing MOVE on the row at PLACE, if it has one. */
+function moveControl(el: HTMLElement, place: string, move: "up" | "down"): Control | null {
+  return el.querySelector<Control>(`[data-queue-place="${place}"] [data-merge-move="${move}"]`);
 }
 
-describe("this workspace's own waiting row carries a front control", () => {
-  it("draws the control on this workspace's own waiting row", () => {
-    const { el } = drawFront();
-    expect(frontControl(el, "current")?.textContent).toBe(FRONT_LABEL);
-  });
+/** Each request's action arm and the ref it names. */
+function movesOf(s: MoveScripted): unknown[] {
+  return s.moves.map((r) =>
+    r.action.case === "moveUp" || r.action.case === "moveDown"
+      ? [r.action.case, r.action.value.workspace?.id, r.action.value.workspace?.dir]
+      : r.action.case,
+  );
+}
 
-  it("draws no control on another workspace's waiting row", () => {
-    const { el } = drawFront();
-    expect(frontControl(el, "behind")).toBeNull();
+/** A queue of a merge running, then three waiting: this workspace in the middle. */
+function longQueue(): FeedMergeQueue {
+  return create(FeedMergeQueueSchema, {
+    ahead: [
+      entry("front", { case: "merging", activeTab: { text: "tests", round: 1 } }),
+      entry("next", { case: "waiting" }),
+    ],
+    current: entry("mine", { case: "waiting" }),
+    behind: [entry("after", { case: "waiting" })],
   });
+}
 
-  it("draws no control on this workspace's own row while it merges", () => {
-    const queue = create(FeedMergeQueueSchema, {
-      ahead: [],
-      current: entry("mine", { case: "merging", activeTab: { text: "tests", round: 1 } }),
-      behind: [],
-    });
-    const { el } = drawFront(() => FRONTED, queue);
-    expect(frontControl(el, "current")).toBeNull();
-  });
-
-  it("asks UpdateMergeQueue to move the ref the queue served, verbatim", async () => {
-    const { el, s } = drawFront();
-    frontControl(el, "current")?.click();
-    await settle();
+describe("every waiting row carries up and down chevrons left of its name", () => {
+  it("draws both chevrons in the workspace cell, before the name", () => {
+    const { el } = drawMove();
+    const cell = el.querySelector('[data-queue-place="current"] .merge-queue-workspace');
+    expect([...(cell?.children ?? [])].map((c) => c.className)).toEqual(["merge-queue-moves", "merge-queue-label"]);
     expect(
-      s.fronts.map((r) =>
-        r.action.case === "front"
-          ? [r.action.value.workspace?.id, r.action.value.workspace?.dir]
-          : r.action.case,
-      ),
-    ).toEqual([["mine", "/w/mine"]]);
+      [...(cell?.querySelectorAll("[data-merge-move]") ?? [])].map((c) => c.getAttribute("data-merge-move")),
+    ).toEqual(["up", "down"]);
+  });
+
+  it("draws the chevrons on another workspace's waiting row too", () => {
+    const { el } = drawMove();
+    expect([moveControl(el, "behind", "up"), moveControl(el, "behind", "down")].every((c) => c !== null)).toBe(true);
+  });
+
+  it("draws an empty chevron slot on the row of the merge running", () => {
+    const { el } = drawMove();
+    const slot = el.querySelector('[data-queue-place="ahead"] .merge-queue-moves');
+    expect([slot !== null, slot?.children.length]).toEqual([true, 0]);
+  });
+
+  it("names each chevron for screen readers and hover", () => {
+    const { el } = drawMove();
+    const up = moveControl(el, "current", "up");
+    const down = moveControl(el, "current", "down");
+    expect([up?.getAttribute("aria-label"), up?.title, down?.getAttribute("aria-label"), down?.title]).toEqual([
+      MOVE_LABELS.up,
+      MOVE_LABELS.up,
+      MOVE_LABELS.down,
+      MOVE_LABELS.down,
+    ]);
+  });
+
+  it("draws no text in a chevron, so the row's text is its name", () => {
+    const { el } = drawMove();
+    expect(el.querySelector('[data-queue-place="current"] .merge-queue-workspace')?.textContent).toBe("mine");
+  });
+});
+
+describe("a chevron with no waiting merge on its side is disabled", () => {
+  const cases: { place: string; move: "up" | "down"; disabled: boolean; why: string }[] = [
+    { place: "ahead", move: "up", disabled: true, why: "the first waiting row's neighbor above is the merge running" },
+    { place: "ahead", move: "down", disabled: false, why: "a waiting row sits below the first waiting row" },
+    { place: "current", move: "up", disabled: false, why: "a waiting row sits above the middle row" },
+    { place: "current", move: "down", disabled: false, why: "a waiting row sits below the middle row" },
+    { place: "behind", move: "up", disabled: false, why: "a waiting row sits above the last row" },
+    { place: "behind", move: "down", disabled: true, why: "nothing sits below the last row" },
+  ];
+
+  it.each(cases)("$place's $move chevron: $why", ({ place, move, disabled }) => {
+    const { el } = drawMove(() => MOVED, longQueue());
+    const control = [...el.querySelectorAll<Control>(`[data-queue-place="${place}"] [data-merge-move="${move}"]`)].at(-1);
+    expect(control?.disabled).toBe(disabled);
+  });
+
+  it("disables both chevrons of a lone waiting merge", () => {
+    const queue = create(FeedMergeQueueSchema, { ahead: [], current: entry("mine", { case: "waiting" }), behind: [] });
+    const { el } = drawMove(() => MOVED, queue);
+    expect([moveControl(el, "current", "up")?.disabled, moveControl(el, "current", "down")?.disabled]).toEqual([true, true]);
+  });
+
+  it("sends nothing when a disabled chevron is clicked", async () => {
+    const { el, s } = drawMove();
+    moveControl(el, "behind", "down")?.click();
+    await settle();
+    expect(s.moves).toEqual([]);
+  });
+});
+
+describe("a chevron asks UpdateMergeQueue to move its row's merge one place", () => {
+  it("asks move_up for the ref the queue served, verbatim", async () => {
+    const { el, s } = drawMove();
+    moveControl(el, "behind", "up")?.click();
+    await settle();
+    expect(movesOf(s)).toEqual([["moveUp", "after", "/w/after"]]);
+  });
+
+  it("asks move_down for the ref the queue served, verbatim", async () => {
+    const { el, s } = drawMove();
+    moveControl(el, "current", "down")?.click();
+    await settle();
+    expect(movesOf(s)).toEqual([["moveDown", "mine", "/w/mine"]]);
   });
 
   it("does not jump to the row's workspace", async () => {
-    const { el, s } = drawFront();
-    frontControl(el, "current")?.click();
+    const { el, s } = drawMove();
+    moveControl(el, "behind", "up")?.click();
     await settle();
     expect(s.selects).toEqual([]);
   });
 
+  it("disables the chevron while the call is out", () => {
+    const { el } = drawMove();
+    const control = moveControl(el, "behind", "up");
+    control?.click();
+    expect(control?.disabled).toBe(true);
+  });
+
   it("draws NOTHING on success — the snapshot is republished in its new order", async () => {
-    const { el } = drawFront();
-    frontControl(el, "current")?.click();
+    const { el } = drawMove();
+    moveControl(el, "behind", "up")?.click();
     await settle();
     expect(el.querySelector(".refusal")).toBeNull();
   });
 
-  it("draws a refusal at the row when nothing of this workspace is queued", async () => {
-    const { el } = drawFront(() => NOTHING_QUEUED);
-    frontControl(el, "current")?.click();
+  it("records the move at INFO with its workspace and direction", async () => {
+    const capture = captureLogRecords();
+    const { el } = drawMove();
+    moveControl(el, "behind", "up")?.click();
+    await settle();
+    const record = await forwardedRecord(capture, "merge.queue-move");
+    expect([record.level.case, record.context?.workspace, record.context?.move]).toEqual(["info", "after", "up"]);
+  });
+});
+
+describe("a refused or failed move answers at its row", () => {
+  it("draws a refusal at the row when the merge is no longer queued", async () => {
+    const { el } = drawMove(() => NOTHING_QUEUED);
+    moveControl(el, "current", "down")?.click();
     await settle();
     const refusal = el.querySelector('[data-queue-place="current"] .refusal');
     expect([refusal?.getAttribute("data-arm"), refusal?.textContent]).toEqual([
@@ -554,20 +646,55 @@ describe("this workspace's own waiting row carries a front control", () => {
     ]);
   });
 
-  it("gives the control back after a refusal", async () => {
-    const { el } = drawFront(() => NOTHING_QUEUED);
-    const control = frontControl(el, "current") as Control | null;
+  it("records the refusal at WARN with its arm, workspace and direction", async () => {
+    const capture = captureLogRecords();
+    const { el } = drawMove(() => NOTHING_QUEUED);
+    moveControl(el, "current", "down")?.click();
+    await settle();
+    const record = await forwardedRecord(capture, "merge.queue-move-refused");
+    expect([record.level.case, record.context?.arm, record.context?.workspace, record.context?.move]).toEqual([
+      "warn",
+      "noSuchQueuedMerge",
+      "mine",
+      "down",
+    ]);
+  });
+
+  it("gives the chevron back after a refusal", async () => {
+    const { el } = drawMove(() => NOTHING_QUEUED);
+    const control = moveControl(el, "current", "down");
     control?.click();
     await settle();
     expect(control?.disabled).toBe(false);
   });
 
   it("draws the transport refusal at the row when the daemon cannot be reached", async () => {
-    const { el } = drawFront(() => {
+    const { el } = drawMove(() => {
       throw new ConnectError("socket is gone", Code.Unavailable);
     });
-    frontControl(el, "current")?.click();
+    moveControl(el, "behind", "up")?.click();
     await settle();
-    expect(el.querySelector('[data-queue-place="current"] .refusal')?.getAttribute("data-arm")).toBe("transport");
+    expect(el.querySelector('[data-queue-place="behind"] .refusal')?.getAttribute("data-arm")).toBe("transport");
+  });
+
+  it("records the transport failure at ERROR with its workspace and direction", async () => {
+    const capture = captureLogRecords();
+    const { el } = drawMove(() => {
+      throw new ConnectError("socket is gone", Code.Unavailable);
+    });
+    moveControl(el, "behind", "up")?.click();
+    await settle();
+    const record = await forwardedRecord(capture, "merge.queue-move-failed");
+    expect([record.level.case, record.context?.workspace, record.context?.move]).toEqual(["error", "after", "up"]);
+  });
+
+  it("gives the chevron back after a transport failure", async () => {
+    const { el } = drawMove(() => {
+      throw new ConnectError("socket is gone", Code.Unavailable);
+    });
+    const control = moveControl(el, "behind", "up");
+    control?.click();
+    await settle();
+    expect(control?.disabled).toBe(false);
   });
 });

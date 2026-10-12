@@ -29,10 +29,15 @@
  * its own bubble draws — imported, never respelled — so a waiting user watches
  * real progress instead of a spinner.
  *
- * THIS WORKSPACE'S OWN WAITING ROW CARRIES A FRONT CONTROL, which asks
- * `UpdateMergeQueue` to move this merge ahead of every ordinary merge waiting.
- * Success draws nothing: the daemon republishes the snapshot in its new order.
- * A refusal lands at the row, as the jump's does.
+ * EVERY WAITING ROW CARRIES TWO MOVE CONTROLS (owner request, 2026-10-12), a
+ * subtle up chevron and down chevron left of the workspace's name, which ask
+ * `UpdateMergeQueue` to move that merge one place up or down. The merge
+ * running carries none, and an empty slot of the same width keeps every name
+ * in one column. A chevron with no waiting merge on its side is disabled: the
+ * snapshot's order is read, the first waiting row's neighbor above it is the
+ * merge running, and the last row has nothing below it. Success draws nothing:
+ * the daemon republishes the snapshot in its new order. A refusal lands at the
+ * row, as the jump's does.
  */
 import { createControl, labelledControl, type Control } from "../../control.js";
 import { columnHeader, COLUMNS_ROW_CLASS } from "../../columns.js";
@@ -69,8 +74,20 @@ export const QUEUE_COLUMNS = ["workspace", "stage", "duration"] as const;
 /** A waiting entry's stage, drawn in the stage column. */
 export const WAITING_STAGE = "waiting";
 
-/** The words on this workspace's own waiting row's front control. */
-export const FRONT_LABEL = "move to front";
+/** Which way a move control moves its row's merge. */
+export type QueueMove = "up" | "down";
+
+/** Each move control's accessible name, by its direction. */
+export const MOVE_LABELS: Readonly<Record<QueueMove, string>> = {
+  up: "move up the merge queue",
+  down: "move down the merge queue",
+};
+
+/** Whether a row's merge has a waiting merge to pass above it and below it. */
+export interface QueueMoves {
+  up: boolean;
+  down: boolean;
+}
 
 /** The whole snapshot: ahead front-first, this workspace, behind nearest-first. */
 export function drawFeedMergeQueue(queue: FeedMergeQueue, rc: RowContext): HTMLElement {
@@ -81,11 +98,19 @@ export function drawFeedMergeQueue(queue: FeedMergeQueue, rc: RowContext): HTMLE
   const el = document.createElement("div");
   el.className = "merge-queue list-rows";
   el.append(drawQueueHeader());
-  for (const entry of queue.ahead) el.append(drawFeedMergeQueueEntry(entry, rc, "ahead"));
-  el.append(
-    drawFeedMergeQueueEntry(requireMessage(queue.current, `${PATH}.current`), rc, "current"),
-  );
-  for (const entry of queue.behind) el.append(drawFeedMergeQueueEntry(entry, rc, "behind"));
+  const rows: { entry: FeedMergeQueueEntry; place: QueuePlace }[] = [
+    ...queue.ahead.map((entry) => ({ entry, place: "ahead" as const })),
+    { entry: requireMessage(queue.current, `${PATH}.current`), place: "current" },
+    ...queue.behind.map((entry) => ({ entry, place: "behind" as const })),
+  ];
+  const waiting = rows.map(({ entry }) => entry.status.case === "waiting");
+  rows.forEach(({ entry, place }, i) => {
+    const moves: QueueMoves = {
+      up: waiting[i] && i > 0 && waiting[i - 1],
+      down: waiting[i] && i < rows.length - 1 && waiting[i + 1],
+    };
+    el.append(drawFeedMergeQueueEntry(entry, rc, place, moves));
+  });
   return el;
 }
 
@@ -97,11 +122,16 @@ function drawQueueHeader(): HTMLElement {
   return header;
 }
 
-/** One entry: its name, its stage and how long it has been in it, and its jump. */
+/**
+ * One entry: its move controls and name, its stage and how long it has been in
+ * it, and its jump. MOVES says which of a waiting entry's chevrons have a
+ * waiting merge to pass.
+ */
 export function drawFeedMergeQueueEntry(
   entry: FeedMergeQueueEntry,
   rc: RowContext,
   place: QueuePlace,
+  moves: QueueMoves,
 ): HTMLElement {
   const status = requireCase(entry.status, `${PATH}Entry.status`);
   const ref = requireMessage(
@@ -119,10 +149,15 @@ export function drawFeedMergeQueueEntry(
   line.setAttribute("data-select", "");
   el.append(line);
 
+  const workspace = document.createElement("span");
+  workspace.className = "merge-queue-workspace";
+  const moveSlot = document.createElement("span");
+  moveSlot.className = "merge-queue-moves";
   const label = document.createElement("span");
   label.className = "merge-queue-label";
   label.textContent = requireMessage(entry.label, `${PATH}Entry.label`).text;
-  line.append(label);
+  workspace.append(moveSlot, label);
+  line.append(workspace);
 
   const stage = document.createElement("span");
   stage.className = "merge-queue-stage";
@@ -138,7 +173,7 @@ export function drawFeedMergeQueueEntry(
       break;
     case "waiting":
       stage.textContent = WAITING_STAGE;
-      if (place === "current") stage.append(drawFrontControl(el, rc, ref));
+      moveSlot.append(drawMoveControl(el, rc, ref, "up", moves.up), drawMoveControl(el, rc, ref, "down", moves.down));
       enteredMs = msOf(status.value.stageEnteredAtMs, `${PATH}Waiting.stage_entered_at_ms`);
       break;
     default:
@@ -177,49 +212,68 @@ export function selectQueueEntryWorkspace(
   return jumpToWorkspace(entry, rc, workspace, QUEUE_JUMP);
 }
 
-/** The refusals of a front request that are this endpoint's own. */
-const FRONT_SENTENCES: SentenceTable = {
+/** The refusals of a move request that are this endpoint's own. */
+const MOVE_SENTENCES: SentenceTable = {
   noSuchQueuedMerge: () => "this merge is no longer waiting on the queue",
 };
 
 /**
- * The front control. It sits inside the row's jump, so its click is kept from
+ * One move control: a chevron pointing MOVE's way, named for screen readers
+ * and hover by its label, disabled when there is no waiting merge to pass
+ * (ENABLED false). It sits inside the row's jump, so its click is kept from
  * reaching the jump.
  */
-function drawFrontControl(entry: HTMLElement, rc: RowContext, workspace: WorkspaceRef): Control {
+function drawMoveControl(
+  entry: HTMLElement,
+  rc: RowContext,
+  workspace: WorkspaceRef,
+  move: QueueMove,
+  enabled: boolean,
+): Control {
   const control = labelledControl({
-    className: "merge-queue-front",
-    hook: ["data-merge-front", ""],
-    label: FRONT_LABEL,
+    className: "merge-queue-move",
+    hook: ["data-merge-move", move],
+    label: "",
     onClick: (clicked) => {
-      void guardMalformed(rc.ctx, "feed.merge.queue.front", moveToFront(entry, rc, workspace, clicked));
+      void guardMalformed(rc.ctx, "feed.merge.queue.move", moveInQueue(entry, rc, workspace, move, clicked));
     },
   });
+  control.setAttribute("aria-label", MOVE_LABELS[move]);
+  control.title = MOVE_LABELS[move];
+  control.disabled = !enabled;
   control.addEventListener("click", (event: MouseEvent) => event.stopPropagation());
   return control;
 }
 
+/** The `UpdateMergeQueue` action that moves WORKSPACE's merge MOVE's way. */
+function moveAction(workspace: WorkspaceRef, move: QueueMove) {
+  return move === "up"
+    ? { case: "moveUp" as const, value: { workspace } }
+    : { case: "moveDown" as const, value: { workspace } };
+}
+
 /**
- * Ask the daemon to move WORKSPACE's merge to the front, drawing a refusal at
- * ENTRY. The control is disabled while the call is out, and given back when it
- * was refused.
+ * Ask the daemon to move WORKSPACE's merge one place MOVE's way, drawing a
+ * refusal at ENTRY. The control is disabled while the call is out, and given
+ * back when it was refused.
  */
-export async function moveToFront(
+export async function moveInQueue(
   entry: HTMLElement,
   rc: RowContext,
   workspace: WorkspaceRef,
+  move: QueueMove,
   control: Control,
 ): Promise<void> {
-  log.info("moving a merge to the front of its queue", {
-    operation: "merge.queue-front",
-    context: { workspace: workspace.id },
+  log.info("moving a merge one place in its queue", {
+    operation: "merge.queue-move",
+    context: { workspace: workspace.id, move },
   });
   control.disabled = true;
   try {
     const response = await callUnary(
       rc.ctx,
       "UpdateMergeQueue",
-      (client) => client.updateMergeQueue({ action: { case: "front", value: { workspace } } }),
+      (client) => client.updateMergeQueue({ action: moveAction(workspace, move) }),
       UpdateMergeQueueResponseSchema,
     );
     const result = requireCase(response.result, "UpdateMergeQueueResponse.result");
@@ -233,11 +287,11 @@ export async function moveToFront(
           "UpdateMergeQueueError.cause",
           "UpdateMergeQueue",
           result.value.cause,
-          FRONT_SENTENCES,
+          MOVE_SENTENCES,
         );
-        log.warn(`UpdateMergeQueue refused a front request: ${arm}`, {
-          operation: "merge.queue-front-refused",
-          context: { arm, workspace: workspace.id },
+        log.warn(`UpdateMergeQueue refused a move request: ${arm}`, {
+          operation: "merge.queue-move-refused",
+          context: { arm, workspace: workspace.id, move },
         });
         control.disabled = false;
         return;
@@ -246,11 +300,11 @@ export async function moveToFront(
         return unreachableArm("UpdateMergeQueueResponse.result", armName(result));
     }
   } catch (err) {
-    if (drawMalformedRefusal(rc.ctx, entry, "merge.queue-front-unreadable", err)) return;
+    if (drawMalformedRefusal(rc.ctx, entry, "merge.queue-move-unreadable", err)) return;
     drawTransportRefusal(entry, err);
-    log.error(`UpdateMergeQueue failed for a front request: ${String(err)}`, {
-      operation: "merge.queue-front-failed",
-      context: { workspace: workspace.id, cause: err },
+    log.error(`UpdateMergeQueue failed for a move request: ${String(err)}`, {
+      operation: "merge.queue-move-failed",
+      context: { workspace: workspace.id, move, cause: err },
     });
     control.disabled = false;
   }
