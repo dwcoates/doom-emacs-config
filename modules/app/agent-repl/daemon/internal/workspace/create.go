@@ -185,10 +185,13 @@ func (v *verbs) Create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 		origin = &loaded
 	}
 
-	branch, err := v.branchFor(ctx, global, spec, repoDir, workspaceID, origin)
+	branch, release, err := v.branchFor(ctx, global, spec, repoDir, workspaceID, origin)
 	if err != nil {
 		return wsm.Workspace{}, err
 	}
+	// THE NAME IS CLAIMED UNTIL THE CREATE IS OVER: registered (the registry
+	// holds it from then on) or failed (it is free again). See mergenames.go.
+	defer release()
 	worktreeDir, err := WorktreeDir(repoDir, branch)
 	if err != nil {
 		global.Error(opCreate, "could not derive the worktree directory", dlog.Context{
@@ -429,27 +432,23 @@ func (v *verbs) validateCreate(log dlog.Logger, spec CreateSpec) error {
 // daemon derived is also DISAMBIGUATED against existing branches and
 // workspaces, which a supplied name is not — the user typed that one and is
 // owed git's own refusal if it is taken.
-func (v *verbs) branchFor(ctx context.Context, log dlog.Logger, spec CreateSpec, repoDir string, minted wsm.WorkspaceID, origin *mergeOrigin) (string, error) {
-	// A MERGE WORKSPACE IS NAMED AFTER THE BRANCH IT MERGES, with no naming
-	// call: "<branch>-merge", disambiguated like any derived name, so a second
-	// detached merge of the same branch gets "<branch>-merge-2".
+func (v *verbs) branchFor(ctx context.Context, log dlog.Logger, spec CreateSpec, repoDir string, minted wsm.WorkspaceID, origin *mergeOrigin) (string, func(), error) {
+	// A MERGE WORKSPACE IS NAMED BY ITS REQUESTING AGENT, with no naming call
+	// and no disambiguation: its request checked the name and reserved it, so
+	// it is free to this fork and to nothing else.
 	if origin != nil {
-		return v.freeName(ctx, log, repoDir, Name(Prefix(), BareName(origin.requester.Branch)+mergeWorkspaceSuffix))
+		return v.claimSupplied(ctx, log, repoDir, spec.MergeName, origin.requester.ID)
 	}
 	if supplied := strings.TrimSpace(spec.Name); supplied != "" {
 		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "supplied := strings.TrimSpace(spec.Name); supplied != \"\""})
-		if strings.Contains(supplied, "/") {
-			log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "strings.Contains(supplied, \"/\")"})
-			return supplied, nil
-		}
-		return Name(Prefix(), supplied), nil
+		return v.claimSupplied(ctx, log, repoDir, supplied, "")
 	}
 	// A FORK IS NAMED FROM ITS PROMPT PLUS THE CONVERSATION IT CONTINUES (owner
 	// ruling, 2026-09-27), through the same naming call, so a fork whose prompt
 	// is blank still gets a name that says what it carries on with.
 	conversation, err := v.forkNamingConversation(ctx, log, spec)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	// An initial prompt is OPTIONAL on the standard form: an unset one is an
 	// empty workspace, which is a legal create. With no prompt and no
@@ -459,7 +458,7 @@ func (v *verbs) branchFor(ctx context.Context, log dlog.Logger, spec CreateSpec,
 	if strings.TrimSpace(spec.InitialPrompt) == "" && conversation == "" {
 		branch := Name(Prefix(), UnnamedSlugPrefix+string(minted))
 		log.Debug(opCreate, "named the branch after the minted workspace id", dlog.Context{"branch": branch})
-		return branch, nil
+		return branch, func() {}, nil
 	}
 	// A NAMING CALL IS ABOUT TO RUN — the slow, model-backed step. Reported
 	// before it starts so a watching client shows "deriving name" while it
@@ -474,7 +473,7 @@ func (v *verbs) branchFor(ctx context.Context, log dlog.Logger, spec CreateSpec,
 			// THE REFUSAL AND THE ERROR RECORD ARE ONE. mintName already wrote
 			// the ERROR line; this states the same failure as the contract's
 			// own arm, with the fields a client renders.
-			return "", refuseWith(log, "CreateWorkspace", ArmNamingFailed,
+			return "", nil, refuseWith(log, "CreateWorkspace", ArmNamingFailed,
 				fmt.Sprintf("no name was supplied and the naming call could not mint one: %s", failure.Detail), false,
 				map[string]any{
 					"model":    headless.ModelHaiku,
@@ -483,19 +482,52 @@ func (v *verbs) branchFor(ctx context.Context, log dlog.Logger, spec CreateSpec,
 					"answer":   failure.Answer,
 				})
 		}
-		return "", err
+		return "", nil, err
 	}
-	branch, err := v.freeName(ctx, log, repoDir, Name(Prefix(), slug))
+	branch, release, err := v.freeName(ctx, log, repoDir, Name(Prefix(), slug))
 	if err != nil {
 		log.Error(opCreate, "could not find a free name for the minted workspace name", dlog.Context{
 			"slug": slug, "cause": err.Error(),
 		})
-		return "", fmt.Errorf("create: name %q: %w", slug, err)
+		return "", nil, fmt.Errorf("create: name %q: %w", slug, err)
 	}
 	log.Debug(opCreate, "the model named the workspace", dlog.Context{
 		"branch": branch, "fork": spec.ForkFrom != nil,
 	})
-	return branch, nil
+	return branch, release, nil
+}
+
+// claimSupplied resolves a SUPPLIED name to its branch and claims it. A name a
+// standing async merge reserved is refused (ArmNameReserved), unless the
+// reservation is HOLDER's own (the fork it was made for); a name another
+// allocation claims is refused the same way. A supplied name is otherwise not
+// disambiguated: the user typed it, and is owed git's own refusal if it is
+// already a branch.
+func (v *verbs) claimSupplied(ctx context.Context, log dlog.Logger, repoDir, name string, holder wsm.WorkspaceID) (string, func(), error) {
+	if strings.TrimSpace(name) == "" {
+		err := errors.New("create: a merge workspace is named by the request it was forked for, and this one carries no name")
+		log.Error(opCreate, "a merge workspace's create carries no name", dlog.Context{"holder": string(holder)})
+		return "", nil, err
+	}
+	branch := suppliedBranch(strings.TrimSpace(name))
+	v.names.mu.Lock()
+	defer v.names.mu.Unlock()
+	reserved, err := v.deps.DB.ReservedMergeNames(ctx)
+	if err != nil {
+		log.Error(opCreate, "could not read the reserved merge names", dlog.Context{"branch": branch, "cause": err.Error()})
+		return "", nil, fmt.Errorf("create %q: %w", branch, err)
+	}
+	for reservedName, reservedBy := range reserved {
+		if suppliedBranch(reservedName) == branch && reservedBy != holder {
+			return "", nil, refuseWith(log, "CreateWorkspace", ArmNameReserved,
+				fmt.Sprintf("the name %q is reserved by a pending async merge", branch), false, map[string]any{"branch": branch})
+		}
+	}
+	if v.names.claimed[branch] {
+		return "", nil, refuseWith(log, "CreateWorkspace", ArmNameReserved,
+			fmt.Sprintf("the name %q is being claimed by another create or async merge", branch), false, map[string]any{"branch": branch})
+	}
+	return branch, v.claimLocked(branch), nil
 }
 
 // forkNamingConversation answers the summary of the conversation a FORK
@@ -581,10 +613,6 @@ func (v *verbs) mergeTargetDir(ctx context.Context, repoDir string, parent *ids.
 	}
 	return record.Dir, nil
 }
-
-// mergeWorkspaceSuffix is what a merge workspace's name adds to the branch it
-// merges.
-const mergeWorkspaceSuffix = "-merge"
 
 // mergeOrigin is what a merge workspace's create reads off its requester: the
 // requester's record and its creation job, whose layout and actions the merge
@@ -748,7 +776,7 @@ func SaidText(text string) *conversationv1.UserSaid { return feed.SaidText(text)
 
 // CreateMergeWorkspace creates the merge workspace a detached merge runs in
 // (CreateSpec.MergeOf), in the requester's own repository.
-func (v *verbs) CreateMergeWorkspace(ctx context.Context, requester wsm.Workspace, origin wsm.MergeOrigin, branch string) (wsm.Workspace, error) {
+func (v *verbs) CreateMergeWorkspace(ctx context.Context, requester wsm.Workspace, origin wsm.MergeOrigin, name, base string) (wsm.Workspace, error) {
 	repoDir, err := v.repoDirOf(ctx, requester)
 	if err != nil {
 		v.deps.Log.Global().Error(opCreate, "could not resolve the repository a merge workspace is forked in", dlog.Context{
@@ -758,10 +786,11 @@ func (v *verbs) CreateMergeWorkspace(ctx context.Context, requester wsm.Workspac
 	}
 	from := requester.ID
 	return v.Create(ctx, CreateSpec{
-		RepoDir:  repoDir,
-		BaseRef:  branch,
-		ForkFrom: &from,
-		MergeOf:  &origin,
+		RepoDir:   repoDir,
+		BaseRef:   base,
+		ForkFrom:  &from,
+		MergeOf:   &origin,
+		MergeName: name,
 	})
 }
 

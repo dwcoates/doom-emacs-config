@@ -180,16 +180,20 @@ func namingCorrection(answer string, reason error) string {
 }
 
 // freeName disambiguates a MINTED name against what already exists: an
-// existing branch, or a registered workspace of that name, takes the next
-// "-2", "-3", … suffix until one is free (owner ruling, 2026-09-12).
+// existing branch, a registered workspace of that name, a standing async
+// merge's reservation or another allocation's claim takes the next "-2", "-3",
+// … suffix until one is free (owner ruling, 2026-09-12). The chosen name is
+// CLAIMED until the returned release is called (mergenames.go).
 //
 // The old system appended a random three-letter suffix to EVERY name so this
 // could not arise; the roster reads these names, so the suffix is now paid
 // only by the names that actually collide.
-func (v *verbs) freeName(ctx context.Context, log dlog.Logger, repoDir, branch string) (string, error) {
-	taken, err := v.takenNames(ctx)
+func (v *verbs) freeName(ctx context.Context, log dlog.Logger, repoDir, branch string) (string, func(), error) {
+	v.names.mu.Lock()
+	defer v.names.mu.Unlock()
+	taken, err := v.takenLocked(ctx, "")
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	for suffix := 1; suffix <= CollisionSuffixLimit; suffix++ {
 		candidate := branch
@@ -203,7 +207,7 @@ func (v *verbs) freeName(ctx context.Context, log dlog.Logger, repoDir, branch s
 		// stale branch left by a nuked workspace collides just as hard.
 		exists, err := v.deps.Git.BranchExists(ctx, repoDir, candidate)
 		if err != nil {
-			return "", fmt.Errorf("probe the branch %q: %w", candidate, err)
+			return "", nil, fmt.Errorf("probe the branch %q: %w", candidate, err)
 		}
 		if exists {
 			continue
@@ -213,9 +217,9 @@ func (v *verbs) freeName(ctx context.Context, log dlog.Logger, repoDir, branch s
 				"minted": branch, "chosen": candidate, "suffix": suffix,
 			})
 		}
-		return candidate, nil
+		return candidate, v.claimLocked(candidate), nil
 	}
-	return "", fmt.Errorf("no free workspace name after %d attempts at %q", CollisionSuffixLimit, branch)
+	return "", nil, fmt.Errorf("no free workspace name after %d attempts at %q", CollisionSuffixLimit, branch)
 }
 
 // takenNames answers the workspace names the registry already holds.

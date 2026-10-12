@@ -92,15 +92,19 @@ type CreateSpec struct {
 	// caller relaying them to a client. Nil for the legacy synchronous create,
 	// which emits nothing; the verb never assumes it is set.
 	Progress CreateProgress
-	// MergeOf, when set, makes this create a MERGE WORKSPACE: a fork of
-	// MergeOf.Requester made to carry that workspace's detached merge. The spec
+	// MergeOf, when set, makes this create a MERGE WORKSPACE: a hidden fork of
+	// MergeOf.Requester made to carry that workspace's async merge. The spec
 	// must then fork from the requester (ForkFrom) and name nothing else the
-	// daemon derives here: the name is the requester's branch with a "-merge"
-	// suffix, disambiguated; the merge target, the branch it lands on and the
-	// configured merge actions are the REQUESTER's own, so the merge workspace
-	// lands where the requester would have; and the roster nests it under the
-	// requester.
+	// daemon derives here: the name is MergeName, which the request reserved;
+	// the merge target, the branch it lands on and the configured merge
+	// actions are the REQUESTER's own, so the merge workspace lands where the
+	// requester would have; and the roster nests it under the requester once
+	// it is revealed.
 	MergeOf *wsm.MergeOrigin
+	// MergeName is a merge workspace's name as its requesting agent chose it,
+	// unprefixed, set exactly when MergeOf is. It was checked and reserved when
+	// the request was recorded, so it is taken as it stands.
+	MergeName string
 }
 
 // CreateStage is one stage a Create passes through between acceptance and its
@@ -256,10 +260,17 @@ type Verbs interface {
 	// naming rule, branch, worktree, layout facts recorded, and REGISTRATION
 	// ONLY AFTER MATERIALIZATION.
 	Create(ctx context.Context, spec CreateSpec) (wsm.Workspace, error)
-	// CreateMergeWorkspace creates the MERGE WORKSPACE a detached merge runs
-	// in: a fork of REQUESTER's conversation in a worktree of its own on BRANCH
-	// as it stands now, recorded as forked for ORIGIN's request.
-	CreateMergeWorkspace(ctx context.Context, requester wsm.Workspace, origin wsm.MergeOrigin, branch string) (wsm.Workspace, error)
+	// CreateMergeWorkspace creates the hidden MERGE WORKSPACE an async merge
+	// runs in: a fork of REQUESTER's conversation named NAME, in a worktree of
+	// its own on BASE as it stands now, recorded as forked for ORIGIN's
+	// request.
+	CreateMergeWorkspace(ctx context.Context, requester wsm.Workspace, origin wsm.MergeOrigin, name, base string) (wsm.Workspace, error)
+	// RevealMergeWorkspace draws a hidden merge workspace in the tab bar and
+	// the sidebar from now on, answering whether this call revealed it.
+	RevealMergeWorkspace(ctx context.Context, ws ids.WorkspaceID) (bool, error)
+	// ClaimMergeName checks an async merge's name and claims it until the
+	// request carrying it is recorded (merge.Names).
+	ClaimMergeName(ctx context.Context, repoDir, name string) (branch string, release func(), taken bool, err error)
 	// RequestCommandSupport composes the add-support brief from
 	// prompts/add-support-slash-command.md — LOUD when the brief is absent —
 	// and creates a support workspace through the ordinary standard form with
