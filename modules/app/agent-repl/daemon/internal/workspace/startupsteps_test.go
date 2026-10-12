@@ -10,10 +10,10 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/health"
+	"agent-repld/internal/opentabs"
 	"agent-repld/internal/sessionlock"
 	"agent-repld/internal/shimclient"
 	"agent-repld/internal/shimsocket"
-	"agent-repld/internal/startup"
 	"agent-repld/internal/wsm"
 )
 
@@ -23,10 +23,10 @@ func stepNames(f *fleetFixture) []string {
 	out := []string{}
 	for _, s := range f.steps {
 		name := s.Kind.String()
-		if s.Kind == startup.StepVendorRetrying {
+		if s.Kind == opentabs.StepVendorRetrying {
 			name += "#" + string(rune('0'+s.Attempt))
 		}
-		if s.Text != "" && s.Kind != startup.StepFailed {
+		if s.Text != "" && s.Kind != opentabs.StepFailed {
 			name += ":" + s.Text
 		}
 		out = append(out, name)
@@ -113,7 +113,7 @@ func TestAFailedBringUpNamesItsReason(t *testing.T) {
 
 	// Assert.
 	last := f.steps[len(f.steps)-1]
-	if last.Kind != startup.StepFailed || last.Text != err.Error() {
+	if last.Kind != opentabs.StepFailed || last.Text != err.Error() {
 		t.Fatalf("last step = %+v, want failed with the start's own error %q", last, err)
 	}
 }
