@@ -777,6 +777,32 @@ func TestJoinQueueWorkReportsWorkThatOutlivesTheBound(t *testing.T) {
 	}
 }
 
+func TestJoinLandingDeploysReturnsWhenEveryLandingsDeployHasEnded(t *testing.T) {
+	// Arrange.
+	log := dlog.NewTestLogger()
+
+	// Act.
+	joinLandingDeploys(func(time.Duration) bool { return true }, loopJoinBound, log)
+
+	// Assert.
+	if !holdsRecord(log.Records(), "debug", "every landing's deploy recorded its end before the teardown") {
+		t.Fatalf("records = %+v, want the landings' deploys joined", log.Records())
+	}
+}
+
+func TestJoinLandingDeploysReportsADeployThatOutlivesTheBound(t *testing.T) {
+	// Arrange.
+	log := dlog.NewTestLogger()
+
+	// Act.
+	joinLandingDeploys(func(time.Duration) bool { return false }, loopJoinBound, log)
+
+	// Assert: reported, never waited on forever.
+	if !holdsRecord(log.Records(), "error", "a landing's deploy outlived its serving context; tearing down under it") {
+		t.Fatalf("records = %+v, want the overrun reported", log.Records())
+	}
+}
+
 // recordingGate is a server.RequestGate that records the order of the waits the
 // exit performs, so a test can assert what the exit waited for and in which
 // order without standing a real daemon up.

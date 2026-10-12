@@ -155,6 +155,10 @@ type graph struct {
 	// DrainQueue is called there: a start reads and writes that client from
 	// its own goroutine.
 	DrainStarts func(bound time.Duration) bool
+	// DrainLandings is the BOUNDED wait for the deploys merge landings
+	// started (deploy.Deployer.DrainLandings): `run` calls it before the log
+	// surfaces close, so a landing's deploy always records how it ended.
+	DrainLandings func(bound time.Duration) bool
 	// DrainMerges is the BOUNDED wait for merge runs that have reached their
 	// terminal. `run` calls it BEFORE the watchers close and before the state
 	// client does: a SIGTERM landing mid-terminal used to close the store
@@ -1301,6 +1305,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		CloseBanners:  notifier.Close,
 		DrainQueue:    queue.Drain,
 		DrainStarts:   fleet.DrainStarts,
+		DrainLandings: deployer.DrainLandings,
 		DrainMerges:   mergeOrchestrator.Drain,
 		StopShims:     stopEveryShim(fleet, supervisor, rootLossShimStopBound),
 	}, nil

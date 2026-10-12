@@ -555,6 +555,12 @@ func run(ctx context.Context, opts options, h hooks) error {
 	if built.DrainStarts != nil {
 		defer teardown.step("join_starts", func() { joinDetachedStarts(built.DrainStarts, loopJoinBound, log) })
 	}
+	// AND THE DEPLOYS MERGE LANDINGS STARTED, on the same bound: each records
+	// how it ended only once its Deploy returns, which a handover makes
+	// happen while this daemon stands down.
+	if built.DrainLandings != nil {
+		defer teardown.step("join_landings", func() { joinLandingDeploys(built.DrainLandings, loopJoinBound, log) })
+	}
 
 	log.Info("daemon.cmd.serve", "serving", dlog.Context{
 		"address": claim.Address(),
@@ -997,6 +1003,18 @@ func joinQueueWork(drain func(time.Duration) bool, bound time.Duration, log dlog
 		return
 	}
 	log.Error("daemon.cmd.serve", "the prompt queue's background work outlived its serving context; tearing down under it", dlog.Context{
+		"bound_ms": bound.Milliseconds(),
+	})
+}
+
+// joinLandingDeploys waits, bounded, for the deploys merge landings started,
+// saying so loudly when one does not leave.
+func joinLandingDeploys(drain func(time.Duration) bool, bound time.Duration, log dlog.Logger) {
+	if drain(bound) {
+		log.Debug("daemon.cmd.serve", "every landing's deploy recorded its end before the teardown", nil)
+		return
+	}
+	log.Error("daemon.cmd.serve", "a landing's deploy outlived its serving context; tearing down under it", dlog.Context{
 		"bound_ms": bound.Milliseconds(),
 	})
 }
