@@ -130,12 +130,16 @@ afterEach(async () => {
   await harness?.stop();
 });
 
-/** Boot with one row on the tail and hand back its element. */
+/**
+ * Boot with one row on the tail and hand back its element, its title typed
+ * out whole: the cases read what the row says, not how it arrived.
+ */
 async function drawRow(row: FeedRow): Promise<HTMLElement> {
   harness = await startHarness();
   await harness.fake.awaitStream("watchFeed");
   harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, row);
   await harness.settle();
+  await harness.finishTypeOuts();
   const id = row.id?.value ?? "row-1";
   const element = harness.row(id);
   if (!element) throw new Error(`the feed drew no row for ${id}`);

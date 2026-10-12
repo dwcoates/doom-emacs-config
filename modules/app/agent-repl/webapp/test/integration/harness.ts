@@ -22,6 +22,12 @@
  */
 import { createPageSeen } from "../../src/page-seen.js";
 import { pagePresence } from "../../src/presence.js";
+import { TITLE_REVEALED_ATTRIBUTE } from "../../src/feed/title-reveal.js";
+
+/** One animation frame of fake time, as `finishTypeOuts` steps it. */
+const TYPE_OUT_FRAME_MS = 16;
+/** The most frames a title type-out may take: 10 s of fake time. */
+const TYPE_OUT_FRAME_CAP = 625;
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { transferableAbortController } from "node:util";
@@ -188,6 +194,13 @@ export interface MountedApp {
   settle(): Promise<void>;
   /** Advance fake time by `ms` and settle. */
   tick(ms: number): Promise<void>;
+  /**
+   * Run every title type-out on the page to its end (title-reveal.ts), one
+   * animation frame of fake time at a time, and settle. A row a live push
+   * drew types its title out; a case about what the title SAYS reads it once
+   * it is whole.
+   */
+  finishTypeOuts(): Promise<void>;
   /**
    * Dispose every mount while LEAVING the daemon up, so a test can observe
    * what the app's own cancellation does to the server's live streams.
@@ -504,7 +517,24 @@ async function mountApp(
   // the page's clock is put ten seconds after the epoch rather than at the
   // real wall clock, where those same timestamps would read as fifty years
   // ago and every countdown would already have expired.
-  vi.useFakeTimers({ shouldAdvanceTime: true, now: HARNESS_EPOCH_MS });
+  // ANIMATION FRAMES ARE FAKED WITH THE REST, so a type-out runs on the same
+  // clock as everything else and a case can run one to its end without
+  // waiting real time (`finishTypeOuts`).
+  vi.useFakeTimers({
+    shouldAdvanceTime: true,
+    now: HARNESS_EPOCH_MS,
+    toFake: [
+      "setTimeout",
+      "clearTimeout",
+      "setImmediate",
+      "clearImmediate",
+      "setInterval",
+      "clearInterval",
+      "Date",
+      "requestAnimationFrame",
+      "cancelAnimationFrame",
+    ],
+  });
 
   const { baseUrl, socketPath } = endpoint;
   const dispatcher = socketPath === undefined ? undefined : new Agent({ connect: { socketPath } });
@@ -778,6 +808,17 @@ async function mountApp(
     installClientLogSink,
     async tick(ms) {
       await vi.advanceTimersByTimeAsync(ms);
+      await settle();
+    },
+    async finishTypeOuts() {
+      for (let frame = 0; document.querySelector(`[${TITLE_REVEALED_ATTRIBUTE}]`) !== null; frame += 1) {
+        // A title types at no less than its pace's minimum, so a bound past
+        // any title's length at that speed means the loop has stopped.
+        if (frame >= TYPE_OUT_FRAME_CAP) {
+          throw new Error(`a title type-out never ended within ${TYPE_OUT_FRAME_CAP} frames`);
+        }
+        await vi.advanceTimersByTimeAsync(TYPE_OUT_FRAME_MS);
+      }
       await settle();
     },
     async disposeMounts() {
