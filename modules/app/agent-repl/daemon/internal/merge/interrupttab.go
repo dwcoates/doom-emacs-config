@@ -2,7 +2,6 @@ package merge
 
 import (
 	"context"
-	"strconv"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
@@ -17,15 +16,17 @@ import (
 // its step decides on a turn that ended interrupted — which, for every agentic
 // step, fails the merge and hands the workspace to the user.
 
-// agenticTabs are the tab kinds whose content is a session's turns: the kinds
-// a merge-tab interrupt may name. Each kind's tab is the agentic arm
-// mergetab.Agentic names, which interrupttab_test.go holds them to.
+// agenticTabs are the row ids of the tabs whose content is a session's
+// turns: the rows a merge-tab interrupt may name. A conflict resolution is
+// drawn in its commit's subtab and a fixing attempt in its run's fixing
+// sub-subtab. Each row's tab is an agentic arm mergetab.Agentic names, which
+// interrupttab_test.go holds them to.
 var agenticTabs = map[string]bool{
-	TabPick:       true,
-	TabPrePrompt:  true,
-	TabConflicts:  true,
-	TabFixes:      true,
-	TabPostPrompt: true,
+	TabPick:           true,
+	TabPrePrompt:      true,
+	rowRebaseCommit:   true,
+	rowTestsRunFixing: true,
+	TabPostPrompt:     true,
 }
 
 // InterruptTab stops the turn a live agentic tab of REQUESTER's feed draws
@@ -55,14 +56,10 @@ func (o *orchestrator) InterruptTab(ctx context.Context, requester ids.Workspace
 
 // liveAgenticTab answers the merging workspace whose live agentic tab TAB names
 // in REQUESTER's feed, and false when it names none: another kind of row, a
-// tab of a merge drawn in another feed, a resolved tab, or a round that is not
-// the one standing live.
+// tab of a merge drawn in another feed, a resolved tab, or a row other than
+// the one the live agentic round is drawn in.
 func (o *orchestrator) liveAgenticTab(requester ids.WorkspaceID, tab feedid.Ref) (ids.WorkspaceID, bool) {
 	if tab.WS != requester || tab.Feed.Merge == nil || tab.Row.Kind != feedid.KindMergeTab || !agenticTabs[tab.Row.ID] {
-		return "", false
-	}
-	round, err := strconv.Atoi(tab.Row.Sub)
-	if err != nil {
 		return "", false
 	}
 	lease := *tab.Feed.Merge
@@ -80,12 +77,13 @@ func (o *orchestrator) liveAgenticTab(requester ids.WorkspaceID, tab feedid.Ref)
 		return "", false
 	}
 	if picking {
-		return ws, tab.Row.ID == TabPick && round == 1 && p.ledger == lease
+		pickKey := roundTabKey(TabPick, 1)
+		return ws, tab.Row.ID == pickKey.id && tab.Row.Sub == pickKey.sub && p.ledger == lease
 	}
 	r, running := o.runFor(ws)
 	if !running {
 		return "", false
 	}
-	active := r.activeRound()
-	return ws, active.kind == tab.Row.ID && active.n == round
+	at, live := r.liveAgentic()
+	return ws, live && at.id == tab.Row.ID && at.sub == tab.Row.Sub
 }

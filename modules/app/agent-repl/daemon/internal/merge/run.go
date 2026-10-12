@@ -126,9 +126,18 @@ type run struct {
 	// ask's change of the waiting state never interleave, so a settled tab is
 	// never drawn live again behind it.
 	agenticMu sync.Mutex
-	// agentic is the conflict-resolution or fixing tab standing live, which an
-	// open ask draws waiting on the user. Nil while no such tab stands.
+	// agentic is the conflict-resolution or fixing round standing live, which
+	// an open ask draws waiting on the user. Nil while no such round stands.
 	agentic *agenticTab
+	// agenticAt is the row the agentic round drawLive last stood is drawn in,
+	// guarded by mu; nil before the first.
+	agenticAt *agenticRow
+	// rebasing and testing are the bubble's one rebasing tab and one tests tab
+	// as last drawn (nested.go), recorded in the progress record. The run's
+	// own goroutine mutates them; an ask's redraw reads them only while the
+	// agentic round stands, under agenticMu, while the run waits on its turn.
+	rebasing rebaseView
+	testing  testsView
 	// startedMS is when the run was admitted: the queue tab's end, and the
 	// head's clock from then on (frontend.v1.FeedMergeRuntime), which counts
 	// only the time the merge has been worked on.
@@ -196,11 +205,31 @@ type run struct {
 	machinery map[string]bool
 }
 
-// agenticTab is a live conflict-resolution or fixing tab: its round, and how
-// its row is drawn at a badge.
-type agenticTab struct {
+// agenticRow is the row an agentic round is drawn in, kept so a merge-tab
+// interrupt names it: the round's own tab, a commit's subtab, or a run's
+// fixing sub-subtab.
+type agenticRow struct {
+	key   tabKey
 	round tabRound
-	draw  func(tabState) *frontendv1.FeedMergeTab
+}
+
+// liveAgentic answers the row the live agentic round is drawn in, and false
+// when no agentic round stands live: the active round is not the one drawLive
+// last stood.
+func (r *run) liveAgentic() (tabKey, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.agenticAt == nil || r.agenticAt.round.key() != r.active.key() {
+		return tabKey{}, false
+	}
+	return r.agenticAt.key, true
+}
+
+// agenticTab is a live conflict-resolution or fixing round: the round, and
+// how its rows are published with the session waiting on the user or not.
+type agenticTab struct {
+	round   tabRound
+	publish func(waiting bool)
 }
 
 // settleAgentic lets go of the live agentic tab before its settled row is
@@ -229,9 +258,7 @@ func (r *run) setWaitingOnUser(waiting bool) {
 // with agenticMu held, so the draws are made in order and each reads the asks
 // afresh: the last row drawn always says what the last ask edge left.
 func (r *run) redrawAgentic() {
-	state := r.agentic.round.live()
-	state.waiting = r.o.deps.Asks.Waiting(r.ws)
-	r.upsert(r.agentic.round, r.agentic.draw(state))
+	r.agentic.publish(r.o.deps.Asks.Waiting(r.ws))
 }
 
 // tabRound is one opened round of one tab kind, carrying the instant its
@@ -325,27 +352,29 @@ func (r *run) closeTab(ctx context.Context, round tabRound, outcome string) {
 	}
 }
 
-// address stands one tab as where the merge's OWN turns draw: the prompt
+// address stands one tab row as where the merge's OWN turns draw: the prompt
 // queue records it on each turn the merge submits (a merge origin), so that
-// turn's rows land on the merge sub-feed, parented to the tab's row, and
-// NOWHERE ELSE (owner ruling, 2026-10-01). A turn the user sends while the
-// merge runs is not the merge's and draws on the main feed. The feed resolver
-// is merge-agnostic and applies the address without knowing what a merge is.
+// turn's rows land on the merge sub-feed, parented to that row, and NOWHERE
+// ELSE (owner ruling, 2026-10-01). A configured prompt's turn draws in its
+// tab, a conflict resolution's in its commit's subtab, and a fixing attempt's
+// in its sub-subtab. A turn the user sends while the merge runs is not the
+// merge's and draws on the main feed. The feed resolver is merge-agnostic and
+// applies the address without knowing what a merge is.
 //
 // AN ASYNC MERGE'S WORKSPACE DRAWS NO BUBBLE (owner ruling, 2026-10-11): its
 // merge turns draw in its own feed as ordinary turns, and are MIRRORED into
-// the tab in the requester's bubble instead.
-func (r *run) address(round tabRound) {
+// the same row of the requester's bubble instead.
+func (r *run) address(key tabKey) {
 	if r.exiting() {
 		return
 	}
 	if requester, async := r.o.requesterOf(r.ws); async {
 		r.o.deps.Feed.SetOutputMirror(r.ws, &wsm.MirrorAddress{
-			Workspace: requester, Feed: mergeFeed(r.lease.ID), Parent: tabRef(requester, r.lease.ID, round.kind, round.n),
+			Workspace: requester, Feed: mergeFeed(r.lease.ID), Parent: tabRef(requester, r.lease.ID, key),
 		})
 		return
 	}
-	ref := tabRef(r.ws, r.lease.ID, round.kind, round.n)
+	ref := tabRef(r.ws, r.lease.ID, key)
 	r.o.deps.Feed.SetOutputAddress(r.ws, &wsm.OutputAddress{Feed: mergeFeed(r.lease.ID), Parent: &ref})
 }
 
@@ -356,17 +385,27 @@ func (r *run) withdrawOutput() {
 	r.o.deps.Feed.SetOutputMirror(r.ws, nil)
 }
 
-// upsert publishes one tab row.
+// upsert publishes one top-level tab round's row, labelled for its round.
+//
+// A SUSPENDED RUN DRAWS NOTHING, as publish says.
+func (r *run) upsert(round tabRound, tab *frontendv1.FeedMergeTab) {
+	if r.exiting() {
+		return
+	}
+	r.o.publishRoundTab(r.ws, r.lease.ID, round.kind, round.n, tab)
+}
+
+// publish publishes one labelled tab row under KEY.
 //
 // A SUSPENDED RUN DRAWS NOTHING. Whatever its step does on the way out -- a
 // git the gate refused, a wait the exit cut -- is no outcome of the merge, so
 // the bubble stays exactly as it stood at the run's last stopping point, and
 // the resumed run carries on drawing it from there.
-func (r *run) upsert(round tabRound, tab *frontendv1.FeedMergeTab) {
+func (r *run) publish(key tabKey, tab *frontendv1.FeedMergeTab) {
 	if r.exiting() {
 		return
 	}
-	r.o.publishTab(r.ws, r.lease.ID, round.kind, round.n, tab)
+	r.o.publishTab(r.ws, r.lease.ID, key, tab)
 }
 
 // head publishes the bubble's head row with the state arm in force. THE CLOCK
@@ -960,12 +999,12 @@ func (r *run) configuredPrompt(ctx context.Context, kind string, step footer.Mer
 		}
 		r.doneResuming()
 		round := r.activeRound()
-		r.drawLive(ctx, round, step, promptLine(step, text), nil, func(st tabState) *frontendv1.FeedMergeTab { return promptTab(kind, st) })
+		r.drawPrompt(ctx, round, kind, step, text)
 		close, err := r.reattachTurn(ctx, ids.TurnID(res.Turn), text, origin)
 		return round, close, err
 	}
 	round := r.openTab(ctx, kind)
-	r.drawLive(ctx, round, step, promptLine(step, text), nil, func(st tabState) *frontendv1.FeedMergeTab { return promptTab(kind, st) })
+	r.drawPrompt(ctx, round, kind, step, text)
 	turn := wsm.NewTurnID()
 	if err := r.checkpoint(ctx, kind, func(d *progressDoc) {
 		d.PromptIndex, d.Turn, d.Outcome = i, string(turn), landed
@@ -1030,9 +1069,16 @@ func (o *orchestrator) submit(ctx context.Context, ws ids.WorkspaceID, turn ids.
 	return o.deps.AwaitTurnEnd(ctx, ws, turn)
 }
 
+// drawPrompt stands a configured prompt's round live, in its own tab.
+func (r *run) drawPrompt(ctx context.Context, round tabRound, kind string, step footer.MergeStep, text string) {
+	r.drawLive(ctx, round, step, promptLine(step, text), nil, roundTabKey(kind, round.n), func(bool) {
+		r.upsert(round, promptTab(kind, round.live()))
+	})
+}
+
 // drawLive stands an AGENTIC step's round live: the merge's own turns are
-// addressed to it, the footer moves onto the step with its line (and apply's
-// own facts), and the tab is drawn at the round's live badge. It is the one
+// addressed to the row AT, the footer moves onto the step with its line (and
+// apply's own facts), and publish draws the step's rows live. It is the one
 // shape every agentic round -- a configured prompt, a conflict resolution, a
 // fixing attempt -- opens with, fresh or resumed.
 //
@@ -1040,8 +1086,11 @@ func (o *orchestrator) submit(ctx context.Context, ws ids.WorkspaceID, turn ids.
 // asks redraws it, and is drawn waiting on the user while one is open: the
 // same steps, and the same asks, the footer's "waiting on user" reads.
 func (r *run) drawLive(ctx context.Context, round tabRound, step footer.MergeStep,
-	line *frontendv1.FooterStatusActivityMergeStep, apply func(*footer.MergeFacts), draw func(tabState) *frontendv1.FeedMergeTab) {
-	r.address(round)
+	line *frontendv1.FooterStatusActivityMergeStep, apply func(*footer.MergeFacts), at tabKey, publish func(waiting bool)) {
+	r.address(at)
+	r.mu.Lock()
+	r.agenticAt = &agenticRow{key: at, round: round}
+	r.mu.Unlock()
 	r.setStep(ctx, step, func(f *footer.MergeFacts) {
 		if apply != nil {
 			apply(f)
@@ -1049,12 +1098,12 @@ func (r *run) drawLive(ctx context.Context, round tabRound, step footer.MergeSte
 		f.Line = line
 	})
 	if step != footer.StepConflictResolution && step != footer.StepFixing {
-		r.upsert(round, draw(round.live()))
+		publish(false)
 		return
 	}
 	r.agenticMu.Lock()
 	defer r.agenticMu.Unlock()
-	r.agentic = &agenticTab{round: round, draw: draw}
+	r.agentic = &agenticTab{round: round, publish: publish}
 	r.redrawAgentic()
 }
 

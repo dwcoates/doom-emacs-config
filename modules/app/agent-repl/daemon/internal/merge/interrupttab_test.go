@@ -64,7 +64,7 @@ func TestAMergeTabInterruptStopsAnAsyncMergesAgentAndRevealsItsWorkspace(t *test
 	defer release()
 
 	// Act
-	running, err := h.o.InterruptTab(context.Background(), theWorkspace, tabRef(theWorkspace, lease, TabConflicts, 1))
+	running, err := h.o.InterruptTab(context.Background(), theWorkspace, tabRef(theWorkspace, lease, commitKey(1, 0)))
 
 	// Assert
 	if err != nil || !running {
@@ -89,7 +89,7 @@ func TestAMergeTabInterruptStopsASyncMergesOwnAgentAndRevealsNothing(t *testing.
 	defer release()
 
 	// Act
-	running, err := h.o.InterruptTab(context.Background(), theWorkspace, tabRef(theWorkspace, lease, TabConflicts, 1))
+	running, err := h.o.InterruptTab(context.Background(), theWorkspace, tabRef(theWorkspace, lease, commitKey(1, 0)))
 
 	// Assert
 	if err != nil || !running {
@@ -114,7 +114,7 @@ func TestAMergeTabInterruptThatCannotStopTheTurnIsAnError(t *testing.T) {
 	defer release()
 
 	// Act
-	_, err := h.o.InterruptTab(context.Background(), theWorkspace, tabRef(theWorkspace, lease, TabConflicts, 1))
+	_, err := h.o.InterruptTab(context.Background(), theWorkspace, tabRef(theWorkspace, lease, commitKey(1, 0)))
 
 	// Assert
 	if err == nil {
@@ -135,7 +135,7 @@ func TestAMergeTabInterruptOfALivePickStopsTheMergeWorkspacesTurn(t *testing.T) 
 	lease, _ := h.o.leaseOf(theMergeWorkspace)
 
 	// Act
-	_, err := h.o.InterruptTab(context.Background(), theWorkspace, tabRef(theWorkspace, lease, TabPick, 1))
+	_, err := h.o.InterruptTab(context.Background(), theWorkspace, tabRef(theWorkspace, lease, roundTabKey(TabPick, 1)))
 
 	// Assert
 	h.mu.Lock()
@@ -151,10 +151,11 @@ func TestAMergeTabInterruptNamingNoLiveAgenticTabIsRefused(t *testing.T) {
 		name string
 		tab  func(lease ids.LeaseID) feedid.Ref
 	}{
-		{name: "a resolved tab", tab: func(lease ids.LeaseID) feedid.Ref { return tabRef(theWorkspace, lease, TabRebasing, 1) }},
-		{name: "a round that is not live", tab: func(lease ids.LeaseID) feedid.Ref { return tabRef(theWorkspace, lease, TabConflicts, 2) }},
-		{name: "another feed's tab", tab: func(lease ids.LeaseID) feedid.Ref { return tabRef(theMergeWorkspace, lease, TabConflicts, 1) }},
-		{name: "an unknown bubble", tab: func(ids.LeaseID) feedid.Ref { return tabRef(theWorkspace, "lease-unknown", TabConflicts, 1) }},
+		{name: "a resolved tab", tab: func(lease ids.LeaseID) feedid.Ref { return tabRef(theWorkspace, lease, rebasingKey()) }},
+		{name: "a commit whose conflict is not the live one", tab: func(lease ids.LeaseID) feedid.Ref { return tabRef(theWorkspace, lease, commitKey(1, 1)) }},
+		{name: "a fixing row with no fixing live", tab: func(lease ids.LeaseID) feedid.Ref { return tabRef(theWorkspace, lease, fixingKey(1)) }},
+		{name: "another feed's tab", tab: func(lease ids.LeaseID) feedid.Ref { return tabRef(theMergeWorkspace, lease, commitKey(1, 0)) }},
+		{name: "an unknown bubble", tab: func(ids.LeaseID) feedid.Ref { return tabRef(theWorkspace, "lease-unknown", commitKey(1, 0)) }},
 		{name: "a head", tab: func(lease ids.LeaseID) feedid.Ref { return headRef(theWorkspace, lease) }},
 	}
 	for _, tt := range tests {
@@ -191,16 +192,17 @@ func TestAnAsyncMergesRepairTurnStandsAMirrorIntoTheRequestersTab(t *testing.T) 
 	defer release()
 
 	// Act / Assert: the merge workspace's repair is mirrored into the
-	// requester's conflicts tab, and no address draws it in a bubble of its own.
+	// requester's subtab of the conflicted commit, and no address draws it in a
+	// bubble of its own.
 	var mirrored *wsm.MirrorAddress
 	for _, call := range h.feed.mirrorsStood() {
 		if call.ws == theMergeWorkspace && call.mirror != nil {
 			mirrored = call.mirror
 		}
 	}
-	want := tabRef(theWorkspace, lease, TabConflicts, 1)
+	want := tabRef(theWorkspace, lease, commitKey(1, 0))
 	if mirrored == nil || mirrored.Workspace != theWorkspace || mirrored.Parent.WS != want.WS || mirrored.Parent.Row != want.Row {
-		t.Fatalf("mirror = %+v, want the requester's conflicts tab", mirrored)
+		t.Fatalf("mirror = %+v, want the requester's subtab of the conflicted commit", mirrored)
 	}
 	for _, addr := range h.feed.installed() {
 		if addr != nil {
@@ -212,14 +214,16 @@ func TestAnAsyncMergesRepairTurnStandsAMirrorIntoTheRequestersTab(t *testing.T) 
 func TestTheAgenticTabKindsAreTheAgenticArms(t *testing.T) {
 	// Arrange: every tab kind, built by its own builder.
 	built := map[string]*frontendv1.FeedMergeTab{
-		TabPick:       pickTab(tabState{}),
-		TabConflicts:  conflictsTab(tabState{}),
-		TabQueue:      {Kind: &frontendv1.FeedMergeTab_Queue{Queue: &frontendv1.FeedMergeTabQueue{}}},
-		TabPrePrompt:  {Kind: &frontendv1.FeedMergeTab_PrePrompt{PrePrompt: &frontendv1.FeedMergeTabPrePrompt{}}},
-		TabRebasing:   {Kind: &frontendv1.FeedMergeTab_Rebasing{Rebasing: &frontendv1.FeedMergeTabRebasing{}}},
-		TabTests:      {Kind: &frontendv1.FeedMergeTab_Tests{Tests: &frontendv1.FeedMergeTabTests{}}},
-		TabFixes:      {Kind: &frontendv1.FeedMergeTab_Fixes{Fixes: &frontendv1.FeedMergeTabFixes{}}},
-		TabCommitting: {Kind: &frontendv1.FeedMergeTab_Committing{Committing: &frontendv1.FeedMergeTabCommitting{}}},
+		TabPick: pickTab(tabState{}),
+		rowRebaseCommit: {Kind: &frontendv1.FeedMergeTab_RebaseCommit{RebaseCommit: &frontendv1.FeedMergeTabRebaseCommit{
+			Conflict: &frontendv1.FeedMergeRebaseCommitConflict{}}}},
+		rowTestsRun:       runTab(1, tabState{}, nil, nil),
+		rowTestsRunFixing: fixingTab(tabState{}, 1),
+		TabQueue:          {Kind: &frontendv1.FeedMergeTab_Queue{Queue: &frontendv1.FeedMergeTabQueue{}}},
+		TabPrePrompt:      {Kind: &frontendv1.FeedMergeTab_PrePrompt{PrePrompt: &frontendv1.FeedMergeTabPrePrompt{}}},
+		TabRebasing:       {Kind: &frontendv1.FeedMergeTab_Rebasing{Rebasing: &frontendv1.FeedMergeTabRebasing{}}},
+		TabTests:          {Kind: &frontendv1.FeedMergeTab_Tests{Tests: &frontendv1.FeedMergeTabTests{}}},
+		TabCommitting:     {Kind: &frontendv1.FeedMergeTab_Committing{Committing: &frontendv1.FeedMergeTabCommitting{}}},
 		TabUpdatingMain: {Kind: &frontendv1.FeedMergeTab_UpdatingMain{
 			UpdatingMain: &frontendv1.FeedMergeTabUpdatingMain{}}},
 		TabPostPrompt: {Kind: &frontendv1.FeedMergeTab_PostPrompt{PostPrompt: &frontendv1.FeedMergeTabPostPrompt{}}},

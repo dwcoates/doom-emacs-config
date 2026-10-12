@@ -26,16 +26,17 @@ func tabsOfEveryArm() map[protoreflect.Name]*frontendv1.FeedMergeTab {
 // session's conversation. An arm missing here fails the test below, so a new
 // arm is classified the moment it lands.
 var classified = map[protoreflect.Name]bool{
-	"queue":         false,
-	"pick":          true,
-	"pre_prompt":    true,
-	"rebasing":      false,
-	"conflicts":     true,
-	"tests":         false,
-	"fixes":         true,
-	"committing":    false,
-	"updating_main": false,
-	"post_prompt":   true,
+	"queue":            false,
+	"pick":             true,
+	"pre_prompt":       true,
+	"rebasing":         false,
+	"rebase_commit":    false,
+	"tests":            false,
+	"tests_run":        false,
+	"tests_run_fixing": true,
+	"committing":       false,
+	"updating_main":    false,
+	"post_prompt":      true,
 }
 
 func TestAgenticClassifiesEveryArm(t *testing.T) {
@@ -65,5 +66,32 @@ func TestAgenticIsFalseForATabWithNoArm(t *testing.T) {
 	// Act / Assert
 	if Agentic(tab) {
 		t.Fatal("Agentic answered true for a tab with no arm set")
+	}
+}
+
+func TestACommitSubtabIsAgenticOnlyWithItsConflictSection(t *testing.T) {
+	tests := []struct {
+		name     string
+		conflict *frontendv1.FeedMergeRebaseCommitConflict
+		want     bool
+	}{
+		{name: "a commit that replayed cleanly holds no agent stream", conflict: nil, want: false},
+		{name: "a commit handed to the session holds its resolution", conflict: &frontendv1.FeedMergeRebaseCommitConflict{}, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			tab := &frontendv1.FeedMergeTab{Kind: &frontendv1.FeedMergeTab_RebaseCommit{
+				RebaseCommit: &frontendv1.FeedMergeTabRebaseCommit{Conflict: tt.conflict},
+			}}
+
+			// Act
+			got := Agentic(tab)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("Agentic = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

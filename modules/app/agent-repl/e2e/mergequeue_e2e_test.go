@@ -501,7 +501,7 @@ func TestARebaseConflictDrivesARepairPromptInTheRequestingWorkspace(t *testing.T
 	m := mqStartConflictedMerge(t, "mq-conflict-prompt")
 
 	// Assert: the conflict brief is a turn of the requesting workspace's own
-	// session, drawn ONLY in the merge bubble, under its conflicts tab, and
+	// session, drawn ONLY in the merge bubble, under its conflicted commit's subtab, and
 	// naming the worktree the rebase stopped in. A merge-started turn never
 	// draws on the main feed.
 	head := m.root.AwaitRow("the merge bubble's head", func(row *frontendv1.FeedRow) bool {
@@ -514,17 +514,17 @@ func TestARebaseConflictDrivesARepairPromptInTheRequestingWorkspace(t *testing.T
 	}
 	prompt := bubble.AwaitRow("the conflict-resolution prompt in the merge bubble", isBrief)
 	m.root.AwaitRow("the merge bubble's terminal", mqConcluded)
-	conflictsTab := ""
+	conflictedCommit := ""
 	for _, row := range bubble.Rows() {
-		if row.GetMergeTab().GetConflicts() != nil {
-			conflictsTab = row.GetId().GetValue()
+		if row.GetMergeTab().GetRebaseCommit().GetConflict() != nil {
+			conflictedCommit = row.GetId().GetValue()
 		}
 	}
-	if conflictsTab == "" {
-		t.Fatal("the merge bubble carried no conflicts tab, want the repair drawn in it")
+	if conflictedCommit == "" {
+		t.Fatal("the merge bubble carried no commit subtab with a conflict section, want the repair drawn in it")
 	}
-	if prompt.GetParent().GetRow().GetValue() != conflictsTab {
-		t.Fatalf("the repair prompt's parent = %v, want the conflicts tab %s", prompt.GetParent(), conflictsTab)
+	if prompt.GetParent().GetRow().GetValue() != conflictedCommit {
+		t.Fatalf("the repair prompt's parent = %v, want the conflicted commit's subtab %s", prompt.GetParent(), conflictedCommit)
 	}
 	for _, row := range m.root.Rows() {
 		if isBrief(row) {

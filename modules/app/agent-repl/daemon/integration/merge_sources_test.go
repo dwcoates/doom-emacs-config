@@ -397,10 +397,10 @@ func TestTheTestLogOpensThroughOpenInEditorByItsToken(t *testing.T) {
 		return row.GetActivity().GetMerge().GetSuccess() != nil
 	})
 	s.d.AwaitLandingDeployed()
-	tests := s.f.awaitRowInFeed(merge.GetId(), "the tests tab with its log", func(row *frontendv1.FeedRow) bool {
-		return row.GetMergeTab().GetTests().GetLog() != nil
+	run := s.f.awaitRowInFeed(merge.GetId(), "the run with its log", func(row *frontendv1.FeedRow) bool {
+		return row.GetMergeTab().GetTestsRun().GetOutput().GetLog() != nil
 	})
-	link := tests.GetMergeTab().GetTests().GetLog()
+	link := run.GetMergeTab().GetTestsRun().GetOutput().GetLog()
 
 	// Act.
 	resp, err := s.d.Client().OpenInEditor(s.d.Ctx(), connect.NewRequest(&agentreplv1.OpenInEditorRequest{
@@ -546,7 +546,7 @@ func TestALandedMergesLedgerRecordsEachStepsInterval(t *testing.T) {
 }
 
 // A LATE READER SEES THE FEED A LIVE ONE SAW. The repair turn's rows are drawn
-// in the merge's conflicts tab, and nowhere else, live; a daemon relaunched
+// in the conflicted commit's subtab, and nowhere else, live; a daemon relaunched
 // afterwards rebuilds the feed from the store's book alone, and its replay
 // must draw them in the same tab and nowhere else, because the turn's record
 // carries the address it ran at.

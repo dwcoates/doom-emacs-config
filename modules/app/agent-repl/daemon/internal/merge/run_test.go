@@ -516,21 +516,39 @@ func TestEveryPublishedTabCarriesItsRoundsLedgerStart(t *testing.T) {
 	checked := 0
 	for _, row := range h.feed.rows {
 		tab := row.Row.GetMergeTab()
-		if tab == nil || tabKindOf(tab) == TabQueue {
+		// The queue's start is its entry's; a commit's is when git reached it.
+		if tab == nil || tabKindOf(tab) == TabQueue || tabKindOf(tab) == rowRebaseCommit {
 			continue
 		}
-		kind := tabKindOf(tab)
+		kind, round := tabKindOf(tab), int(tab.GetLabel().GetRound())
+		switch kind {
+		case rowTestsRun:
+			// Run n is tests round n.
+			kind, round = TabTests, runNumber(t, tab)
+		case rowTestsRunFixing:
+			kind, round = TabFixes, int(tab.GetTestsRunFixing().GetAttempt().GetAttempt())
+		}
 		live, settled := tabBadgeOf(t, tab)
 		got := live.GetStartedAtMs() + settled.GetStartedAtMs()
-		want, ok := starts[roundKey(kind, int(tab.GetLabel().GetRound()))]
+		want, ok := starts[roundKey(kind, round)]
 		if !ok || got != want {
-			t.Fatalf("the %s round %d tab began at %d, want its ledger start %d", kind, tab.GetLabel().GetRound(), got, want)
+			t.Fatalf("the %s round %d tab began at %d, want its ledger start %d", kind, round, got, want)
 		}
 		checked++
 	}
 	if checked == 0 {
 		t.Fatal("the run published no tab to check")
 	}
+}
+
+// runNumber reads n off a run subtab's "run n" label.
+func runNumber(t *testing.T, tab *frontendv1.FeedMergeTab) int {
+	t.Helper()
+	var n int
+	if _, err := fmt.Sscanf(tab.GetLabel().GetText(), "run %d", &n); err != nil {
+		t.Fatalf("run label %q: %v", tab.GetLabel().GetText(), err)
+	}
+	return n
 }
 
 func TestDrawLiveStandsAnAgenticRoundLive(t *testing.T) {
@@ -541,7 +559,11 @@ func TestDrawLiveStandsAnAgenticRoundLive(t *testing.T) {
 
 	// Act.
 	r.drawLive(context.Background(), round, footer.StepFixing, fixingLine([]string{"daemon"}),
-		func(f *footer.MergeFacts) { f.Attempt = 2 }, func(st tabState) *frontendv1.FeedMergeTab { return fixesTab(st, 2) })
+		func(f *footer.MergeFacts) { f.Attempt = 2 }, fixingKey(1), func(waiting bool) {
+			st := round.live()
+			st.waiting = waiting
+			r.publish(fixingKey(1), fixingTab(st, 2))
+		})
 
 	// Assert: the turns are addressed, the footer is on the step with its
 	// line and facts, and the tab is drawn.
@@ -552,7 +574,7 @@ func TestDrawLiveStandsAnAgenticRoundLive(t *testing.T) {
 	if facts.Step != footer.StepFixing || facts.Attempt != 2 || facts.Line.GetFixing() == nil {
 		t.Fatalf("facts = %+v, want the fixing step with its attempt and line", facts)
 	}
-	if h.feed.lastTabOfKind(TabFixes) == nil {
+	if h.feed.lastTabOfKind(rowTestsRunFixing) == nil {
 		t.Fatal("the round's tab was not drawn")
 	}
 }
@@ -570,12 +592,12 @@ func TestEveryAgenticRoundOpensThroughDrawLive(t *testing.T) {
 		if err != nil {
 			t.Fatalf("reading %s: %v", name, err)
 		}
-		sites += strings.Count(string(body), "r.address(round)")
+		sites += strings.Count(string(body), "r.address(")
 	}
 
 	// Assert.
 	if sites != 1 {
-		t.Fatalf("r.address(round) appears %d times, want once (inside drawLive)", sites)
+		t.Fatalf("r.address( appears %d times, want once (inside drawLive)", sites)
 	}
 }
 
