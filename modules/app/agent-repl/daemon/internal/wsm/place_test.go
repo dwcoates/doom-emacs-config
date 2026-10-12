@@ -462,6 +462,8 @@ func TestTheMigrationSeedsAChildRightAfterItsParent(t *testing.T) {
 	// Layouts 36 and 37 go too: a file at layout 34 has neither.
 	execRaw(t, path, `ALTER TABLE merge_queue DROP COLUMN source_front`)
 	execRaw(t, path, `DROP TABLE merge_rollout_hold`)
+	// Layout 38's table goes too.
+	execRaw(t, path, `DROP TABLE owed_resumptions`)
 	execRaw(t, path, `UPDATE workspaces SET parent_id = 'ws-b' WHERE id = 'ws-z'`)
 	handle, err = Open(context.Background(), path, WithUnsyncedWrites())
 	if err != nil {

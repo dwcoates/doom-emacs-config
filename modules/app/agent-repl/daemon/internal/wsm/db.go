@@ -259,6 +259,14 @@ type DB interface {
 	// turn back. It is what makes the resubmission exactly-once with two
 	// possible owners (the merge's own release and the boot recovery).
 	ClaimDisplacedTurn(ctx context.Context, turn TurnID, at time.Time) (DisplacedClaim, error)
+	// OweResumption records that a stand-down this daemon ordered cut turn on
+	// ws, so the next session that serves ws resumes it (owedresumptions.go).
+	OweResumption(ctx context.Context, ws WorkspaceID, turn TurnID, at time.Time) error
+	// ClaimResumptions takes every resumption ws is owed and answers how many,
+	// exactly once across every boot and session-up edge.
+	ClaimResumptions(ctx context.Context, ws WorkspaceID) (int, error)
+	// OwedTurns answers the turns ws is owed a resumption for, unclaimed.
+	OwedTurns(ctx context.Context, ws WorkspaceID) ([]TurnID, error)
 	// ClaimIdempotencyKey binds a client's key to a turn. A key whose
 	// submission the queue ACCEPTED answers ClaimAccepted with that turn and
 	// binds nothing; a key claimed for a submission that never reached

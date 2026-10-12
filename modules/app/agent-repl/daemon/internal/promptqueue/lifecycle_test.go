@@ -3,6 +3,7 @@ package promptqueue
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -752,5 +753,62 @@ func TestOnTurnEndedTellsTheFooterTheTurnsClose(t *testing.T) {
 				t.Fatalf("footer closes = %v, want exactly [%s]", got, tc.how)
 			}
 		})
+	}
+}
+
+// orphanRecordLevel answers the level of the boot's orphan-close record.
+func orphanRecordLevel(t *testing.T, h *harness) string {
+	t.Helper()
+	for _, r := range h.log.Records() {
+		if r.Operation == opRestore && strings.HasPrefix(r.Message, "closed the in-flight turns") {
+			return r.Level
+		}
+	}
+	t.Fatal("the boot wrote no orphan-close record")
+	return ""
+}
+
+func TestRestoreHoldsRecordsAnOrphanTheStandDownOwedAtInfo(t *testing.T) {
+	// Arrange: the stand-down cut the turn before its terminal could arrive.
+	h := newHarness(t)
+	if err := h.db.PutTurn(context.Background(), wsm.Turn{
+		ID: "running-turn", Workspace: theWorkspace, Text: "work", StartedAt: instant,
+	}); err != nil {
+		t.Fatalf("PutTurn: %v", err)
+	}
+	if err := h.db.OweResumption(context.Background(), theWorkspace, "running-turn", instant); err != nil {
+		t.Fatalf("OweResumption: %v", err)
+	}
+	h.noSession = true
+
+	// Act
+	if err := h.q.RestoreHolds(context.Background()); err != nil {
+		t.Fatalf("RestoreHolds: %v", err)
+	}
+
+	// Assert
+	if level := orphanRecordLevel(t, h); level != "info" {
+		t.Fatalf("orphan-close level = %q, want info for an ordered cut", level)
+	}
+}
+
+func TestRestoreHoldsRecordsAnOrphanNobodyOwesAtWarn(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	if err := h.db.PutTurn(context.Background(), wsm.Turn{
+		ID: "running-turn", Workspace: theWorkspace, Text: "work", StartedAt: instant,
+	}); err != nil {
+		t.Fatalf("PutTurn: %v", err)
+	}
+	h.noSession = true
+
+	// Act
+	if err := h.q.RestoreHolds(context.Background()); err != nil {
+		t.Fatalf("RestoreHolds: %v", err)
+	}
+
+	// Assert
+	if level := orphanRecordLevel(t, h); level != "warn" {
+		t.Fatalf("orphan-close level = %q, want warn for a turn nobody owes", level)
 	}
 }

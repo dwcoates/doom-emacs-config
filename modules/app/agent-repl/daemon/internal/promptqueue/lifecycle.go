@@ -91,6 +91,7 @@ func (q *queue) OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how sessionwatc
 	if watcher, ok := q.deps.Watcher(ws); ok {
 		if running := watcher.TurnInFlight(); running != nil && *running != turn {
 			q.endTurn(ctx, ws, turn, how, log)
+			q.oweResumption(ctx, ws, turn, how, log)
 			q.forgetTry(ws, turn, log)
 			log.Info(opTurnEnded, "the turn ended while another turn already runs; what is held waits for that one", dlog.Context{
 				"turn_in_flight": string(*running),
@@ -119,6 +120,7 @@ func (q *queue) OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how sessionwatc
 	// THE DOOR: the row closes and the feed draws the ending together. A
 	// failed write is recorded there, and the queue goes on to deliver.
 	q.endTurn(ctx, ws, turn, how, log)
+	q.oweResumption(ctx, ws, turn, how, log)
 
 	// A TRY-NOW THE VENDOR TOOK AND THEN BLOCKED goes back on the hold, in its
 	// place, before anything queued is decided (rehold.go).
@@ -132,6 +134,16 @@ func (q *queue) OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how sessionwatc
 	// "a queued prompt starts a turn between is-free and bounce" impossible.
 	if q.checkRegistryLocked(d, log) {
 		log.Info(opTurnEnded, "the turn ended into a bounce; what is queued waits for the new shim", nil)
+		return
+	}
+
+	// A STAND-DOWN STARTS NOTHING. The shim is about to go with the daemon,
+	// and a held prompt delivered now would open a turn the same stand-down
+	// cuts in its first instant (the queued turn of the 2026-10-12 hard
+	// bounce). It stays held, and the next session that serves the workspace
+	// delivers it after the resumption it is owed.
+	if q.deps.StandingDown() {
+		log.Info(opTurnEnded, "the daemon is standing down; what is held waits for the next session", nil)
 		return
 	}
 
@@ -652,9 +664,42 @@ func (q *queue) reconcileTurns(ctx context.Context, ws ids.WorkspaceID, global d
 		})
 		return
 	}
+	// A TURN THE DAEMON'S OWN STAND-DOWN CUT IS NO CASUALTY. A forced stop can
+	// take a shim down before it writes the turn's terminal, so the turn ends
+	// here as an orphan; when the stand-down recorded it as owed, the cut was
+	// ordered and the work is resumed when the session serves
+	// (restartredrive.go). Only an orphan nobody owes is a turn lost.
+	if q.allOwed(ctx, ws, report.Turns, global) {
+		global.Info(opRestore, "closed the in-flight turns the daemon's own stand-down cut; their work is resumed when the session serves", dlog.Context{
+			"workspace": string(ws), "orphans": len(report.Turns),
+		})
+		return
+	}
 	global.Warn(opRestore, "closed the in-flight turns of a workspace with no session", dlog.Context{
 		"workspace": string(ws), "orphans": len(report.Turns),
 	})
+}
+
+// allOwed reports whether every turn in turns is owed a resumption. A read that
+// fails answers false, so the orphans are reported as the casualties they may be.
+func (q *queue) allOwed(ctx context.Context, ws ids.WorkspaceID, turns []ids.TurnID, global dlog.Logger) bool {
+	owed, err := q.deps.DB.OwedTurns(ctx, ws)
+	if err != nil {
+		global.Error(opRestore, "could not read the resumptions the workspace is owed", dlog.Context{
+			"workspace": string(ws), "cause": err.Error(),
+		})
+		return false
+	}
+	set := make(map[ids.TurnID]bool, len(owed))
+	for _, turn := range owed {
+		set[turn] = true
+	}
+	for _, turn := range turns {
+		if !set[turn] {
+			return false
+		}
+	}
+	return len(turns) > 0
 }
 
 // joinNotStood records, at ERROR, a prompt sent to join a turn that ended

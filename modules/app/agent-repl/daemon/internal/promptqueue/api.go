@@ -426,6 +426,12 @@ type Deps struct {
 	// DrainRefusals records each submission the drain lease refused or held.
 	// The controller rate-limits its own record; the queue only reports.
 	DrainRefusals RefusalNoter
+	// StandingDown answers whether this daemon's own stand-down is under way
+	// (the shim supervisor's latch, which never clears). A turn that closes
+	// interrupted while it stands is a cut the daemon ordered and is owed a
+	// resumption, and nothing held is delivered into a shim about to go
+	// (restartredrive.go). REQUIRED.
+	StandingDown func() bool
 	// StripSentinels removes the host's metaprompt sentinel spans from the
 	// MIRRORED text; the full text stays on the durable record and on the
 	// prompt the shim receives. nil is the identity.
