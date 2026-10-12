@@ -22,11 +22,17 @@ type fakeBackend struct {
 	err     error
 	// block, when set, holds Post until closed or ctx ends.
 	block chan struct{}
+	// onPost, when set, runs as Post is called, which is where a test reads
+	// what the notifier had already done when it handed the banner over.
+	onPost func()
 }
 
 func (b *fakeBackend) Program() string { return "fake-banner" }
 
 func (b *fakeBackend) Post(ctx context.Context, target Target, banner Banner) (Outcome, error) {
+	if b.onPost != nil {
+		b.onPost()
+	}
 	b.mu.Lock()
 	b.posted = append(b.posted, banner)
 	b.targets = append(b.targets, target)
@@ -296,7 +302,7 @@ func TestNotifierPanicsOnAnUnknownOutcome(t *testing.T) {
 	}()
 
 	// Act
-	f.notifier.show("ws1", f.log, titledBy)
+	f.notifier.show("ws1", f.log, titledBy, false, func() {})
 }
 
 func TestNotifierRelaysNoClickForADismissal(t *testing.T) {
@@ -437,18 +443,30 @@ func TestNotifierPostsNothingAfterClose(t *testing.T) {
 	}
 }
 
-func TestNotifierRingsWhenEmacsIsFocused(t *testing.T) {
+// silentlyTitled composes a banner that asks for the platform's sound.
+func silentlyTitled(_ context.Context, name string) Banner {
+	return Banner{Title: "title " + name, Body: "body", Silent: false}
+}
+
+func TestNotifierAnnounceRingsWithoutComposingWhenEmacsIsFocused(t *testing.T) {
 	// Arrange
 	f := newNotifierFixture(t, named)
 	f.focus.Attach(true)
+	composed := false
 
 	// Act
-	f.notifier.Ring("ws1", KindTurnEnded)
+	f.notifier.Announce("ws1", KindTurnEnded, func(context.Context, string) Banner {
+		composed = true
+		return Banner{}
+	})
 	f.notifier.wg.Wait()
 
 	// Assert
 	if got := f.chime.played(); got != 1 {
 		t.Fatalf("played %d chimes while Emacs was focused, want 1", got)
+	}
+	if got := f.backend.banners(); len(got) != 0 || composed {
+		t.Fatalf("posted %d banners (composed=%v) while Emacs was focused, want none", len(got), composed)
 	}
 	r, ok := hasRecord(f.log, "info", "playing the chime")
 	if !ok || r.Context["workspace"] != "ws1" || r.Context["kind"] != KindTurnEnded || r.Context["program"] != "fake-chime" {
@@ -459,28 +477,152 @@ func TestNotifierRingsWhenEmacsIsFocused(t *testing.T) {
 	}
 }
 
-func TestNotifierRingsWhenEmacsIsUnfocused(t *testing.T) {
+func TestNotifierAnnounceRingsOnlyOnceTheBannerIsComposed(t *testing.T) {
+	// Arrange
+	f := newNotifierFixture(t, named)
+	f.focus.Attach(false)
+	rungWhileComposing := false
+
+	// Act
+	f.notifier.Announce("ws1", KindTurnEnded, func(ctx context.Context, name string) Banner {
+		_, rungWhileComposing = hasRecord(f.log, "debug", "ringing the chime")
+		return titledBy(ctx, name)
+	})
+	f.notifier.wg.Wait()
+
+	// Assert
+	if rungWhileComposing {
+		t.Fatal("the chime rang before the banner was composed")
+	}
+	if got := f.chime.played(); got != 1 {
+		t.Fatalf("played %d chimes, want 1", got)
+	}
+}
+
+func TestNotifierAnnounceRingsAsTheBannerIsHandedOver(t *testing.T) {
+	// Arrange
+	f := newNotifierFixture(t, named)
+	f.focus.Attach(false)
+	rungByPost := false
+	f.backend.onPost = func() { _, rungByPost = hasRecord(f.log, "debug", "ringing the chime") }
+
+	// Act
+	f.notifier.Announce("ws1", KindTurnEnded, titledBy)
+	f.notifier.wg.Wait()
+
+	// Assert
+	if !rungByPost {
+		t.Fatal("the chime had not rung when the banner was handed to the platform")
+	}
+	if got := f.backend.banners(); len(got) != 1 {
+		t.Fatalf("posted %d banners, want 1", len(got))
+	}
+}
+
+func TestNotifierAnnouncePostsTheBannerSilent(t *testing.T) {
 	// Arrange
 	f := newNotifierFixture(t, named)
 	f.focus.Attach(false)
 
 	// Act
-	f.notifier.Ring("ws1", KindTurnEnded)
+	f.notifier.Announce("ws1", KindTurnEnded, silentlyTitled)
+	f.notifier.wg.Wait()
+
+	// Assert
+	if got := f.backend.banners(); len(got) != 1 || !got[0].Silent {
+		t.Fatalf("banners = %+v, want one silent banner", got)
+	}
+}
+
+func TestNotifierPostRingsNothingAndKeepsTheBannersSound(t *testing.T) {
+	// Arrange
+	f := newNotifierFixture(t, named)
+	f.focus.Attach(false)
+
+	// Act
+	f.notifier.Post("ws1", "permission", silentlyTitled)
+	f.notifier.wg.Wait()
+
+	// Assert
+	if got := f.chime.played(); got != 0 {
+		t.Fatalf("played %d chimes for a plain banner, want none", got)
+	}
+	if got := f.backend.banners(); len(got) != 1 || got[0].Silent {
+		t.Fatalf("banners = %+v, want one banner with its sound", got)
+	}
+}
+
+func TestNotifierAnnounceRingsWhenFocusCameWhileComposing(t *testing.T) {
+	// Arrange
+	f := newNotifierFixture(t, named)
+	f.focus.Attach(false)
+
+	// Act
+	f.notifier.Announce("ws1", KindTurnEnded, func(ctx context.Context, name string) Banner {
+		if err := f.focus.Report(true); err != nil {
+			t.Errorf("Report: %v", err)
+		}
+		return titledBy(ctx, name)
+	})
+	f.notifier.wg.Wait()
+
+	// Assert
+	if got := f.backend.banners(); len(got) != 0 {
+		t.Fatalf("posted %d banners after Emacs gained focus, want none", len(got))
+	}
+	if got := f.chime.played(); got != 1 {
+		t.Fatalf("played %d chimes, want 1", got)
+	}
+}
+
+func TestNotifierAnnounceRingsForAnUnnameableWorkspace(t *testing.T) {
+	// Arrange
+	f := newNotifierFixture(t, fakeWorkspaces{err: errors.New("no such workspace")})
+	f.focus.Attach(false)
+
+	// Act
+	f.notifier.Announce("ws1", KindTurnEnded, titledBy)
 	f.notifier.wg.Wait()
 
 	// Assert
 	if got := f.chime.played(); got != 1 {
 		t.Fatalf("played %d chimes, want 1", got)
 	}
+	if _, ok := hasRecord(f.log, "error", "could not name the workspace; no desktop banner"); !ok {
+		t.Fatal("the unnameable workspace left no record")
+	}
+}
+
+func TestNotifierAnnounceRingsWithNoBannerProgram(t *testing.T) {
+	// Arrange
+	log := dlog.NewTestLogger()
+	chime := &fakeChime{}
+	n := New(Deps{
+		Focus: NewFocus(log), BackendErr: errors.New("terminal-notifier is not installed"), Chime: chime,
+		Clicks: &fakeClicks{}, Workspaces: named, Log: log,
+	})
+
+	// Act
+	n.Announce("ws1", KindTurnEnded, titledBy)
+	n.wg.Wait()
+
+	// Assert
+	if got := chime.played(); got != 1 {
+		t.Fatalf("played %d chimes, want 1", got)
+	}
+	if _, ok := hasRecord(log, "error", "no desktop banner program; the banner was not posted"); !ok {
+		t.Fatal("the missing banner program left no record")
+	}
 }
 
 func TestNotifierRecordsAFailedChime(t *testing.T) {
 	// Arrange
 	f := newNotifierFixture(t, named)
+	f.focus.Attach(true)
 	f.chime.err = errors.New("exit status 1")
 
 	// Act
-	f.notifier.Ring("ws1", KindTurnEnded)
+	f.notifier.Announce("ws1", KindTurnEnded, titledBy)
 	f.notifier.wg.Wait()
 
 	// Assert
@@ -493,13 +635,15 @@ func TestNotifierRecordsAFailedChime(t *testing.T) {
 func TestNotifierRecordsAMissingChime(t *testing.T) {
 	// Arrange
 	log := dlog.NewTestLogger()
+	focus := NewFocus(log)
+	focus.Attach(true)
 	n := New(Deps{
-		Focus: NewFocus(log), Backend: &fakeBackend{}, ChimeErr: errors.New("afplay is not installed"),
+		Focus: focus, Backend: &fakeBackend{}, ChimeErr: errors.New("afplay is not installed"),
 		Clicks: &fakeClicks{}, Workspaces: named, Log: log,
 	})
 
 	// Act
-	n.Ring("ws1", KindTurnEnded)
+	n.Announce("ws1", KindTurnEnded, titledBy)
 	n.wg.Wait()
 
 	// Assert
@@ -512,8 +656,9 @@ func TestNotifierRecordsAMissingChime(t *testing.T) {
 func TestNotifierCloseEndsAPlayingChime(t *testing.T) {
 	// Arrange
 	f := newNotifierFixture(t, named)
+	f.focus.Attach(true)
 	f.chime.block = make(chan struct{})
-	f.notifier.Ring("ws1", KindTurnEnded)
+	f.notifier.Announce("ws1", KindTurnEnded, titledBy)
 
 	// Act
 	f.notifier.Close()
@@ -530,10 +675,11 @@ func TestNotifierCloseEndsAPlayingChime(t *testing.T) {
 func TestNotifierRingsNothingAfterClose(t *testing.T) {
 	// Arrange
 	f := newNotifierFixture(t, named)
+	f.focus.Attach(true)
 	f.notifier.Close()
 
 	// Act
-	f.notifier.Ring("ws1", KindTurnEnded)
+	f.notifier.Announce("ws1", KindTurnEnded, titledBy)
 	f.notifier.wg.Wait()
 
 	// Assert
