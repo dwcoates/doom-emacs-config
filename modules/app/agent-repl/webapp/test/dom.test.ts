@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
-import { ancestorMatching, placeChildren, repaintMark, scrollbarWidthPx } from "../src/dom.js";
+import { ancestorMatching, computedPx, placeChildren, repaintMark, scrollbarWidthPx } from "../src/dom.js";
 import { codeOf } from "./source-text.js";
 
 describe("scrollbarWidthPx", () => {
@@ -38,6 +38,45 @@ describe("scrollbarWidthPx", () => {
     const rolled = [...code].filter(([, text]) => /offsetWidth\s*-[^;]*clientWidth/.test(text)).map(([p]) => p);
     // Assert
     expect([callers, rolled]).toEqual([["bubble/body.ts", "dom.ts"], ["dom.ts"]]);
+  });
+});
+
+describe("computedPx", () => {
+  it.each([
+    ["a whole px length", "12px", 12],
+    ["a fractional px length", "5.6px", 5.6],
+    ["a negative px length", "-3.5px", -3.5],
+    ["zero in px", "0px", 0],
+  ])("answers %s", (_label, value, want) => {
+    expect(computedPx(value)).toBe(want);
+  });
+
+  it.each([
+    ["a keyword", "medium"],
+    ["a unitless zero", "0"],
+    ["a percentage", "50%"],
+    ["an empty value", ""],
+    ["a calc", "calc(10px + 2%)"],
+    ["a malformed number", "1.2.3px"],
+  ])("answers null for %s", (_label, value) => {
+    expect(computedPx(value)).toBeNull();
+  });
+
+  it("is the one parse of a computed px length in the webapp", () => {
+    // Arrange
+    const src = join(process.cwd(), "src");
+    const walk = (dir: string): string[] =>
+      readdirSync(dir).flatMap((name) => {
+        const path = join(dir, name);
+        if (statSync(path).isDirectory()) return walk(path);
+        return path.endsWith(".ts") ? [path] : [];
+      });
+    const code = new Map(walk(src).map((path) => [relative(src, path), readFileSync(path, "utf8")]));
+    // Act
+    const callers = [...code].filter(([, text]) => /\bcomputedPx\(/.test(text)).map(([p]) => p).sort();
+    const rolled = [...code].filter(([, text]) => /px\$\//.test(text)).map(([p]) => p);
+    // Assert
+    expect([callers, rolled]).toEqual([["bubble/body.ts", "dom.ts", "sidebar/band-fit.ts"], ["dom.ts"]]);
   });
 });
 
