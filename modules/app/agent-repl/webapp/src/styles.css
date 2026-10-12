@@ -1113,10 +1113,9 @@ body::after {
    and 100%, which keeps the image covering the text at every frame: a
    position outside that range would leave glyphs with no fill at all.
 
-   The 2.4s period is duplicated in `REVIVE_SHIMMER_PERIOD_MS` (reviving.ts),
-   which every draw uses for a negative `animation-delay`, so a roster push
-   that rebuilds the row continues the pass rather than restarting it. The two
-   MUST stay equal. Reduced motion drops the shimmer entirely (see the
+   The rail's wall-clock seek (src/sidebar/wall-phase.ts) reads the 2.4s
+   period from here, so a roster push that rebuilds the row continues the pass
+   rather than restarting it. Reduced motion drops the shimmer entirely (see the
    `prefers-reduced-motion` block). */
 #ws-sidebar .row .name.reviving {
   background-image: linear-gradient(90deg,
