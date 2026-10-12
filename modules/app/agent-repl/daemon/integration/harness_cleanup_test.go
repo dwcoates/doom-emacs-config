@@ -175,8 +175,12 @@ func TestOpenedShimAnswersTheShimAnOpenBroughtUpEvenOnceItHasLeft(t *testing.T) 
 		t.Fatalf("OpenWorkspace = %v, %v; want a success", resp, err)
 	}
 	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCKillSession, &shimv1.KillSessionRequest{})
+	// Either orderly stop: the daemon's kill lands ("supervised shim stopped
+	// as asked"), or the shim ends itself on KillSession first ("the shim left
+	// after the stand-down it was asked for"), which a loaded host chooses.
+	// A death is ERROR and never matches.
 	f.d.AwaitWorkspaceLogRecord(f.repo.Dir, "the hibernated shim's stop", func(r harness.LogRecord) bool {
-		return r.Operation == "daemon.shimclient.exit" && r.Message == "supervised shim stopped as asked"
+		return r.Operation == "daemon.shimclient.exit" && r.Level == "info"
 	})
 
 	// Act
