@@ -485,9 +485,12 @@ func TestWebappLayerMergeTabs(t *testing.T) {
 	script.SetExitCode(0)
 	script.SetStdout("webapp layer: passed in 1s\n")
 
+	// The layer's own vitest process reads the daemon's sink files itself
+	// (test/webapp-layer/real-daemon.ts), so the logs stay on disk.
 	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{
 		SelfRepo: repo.Dir,
 		ExtraEnv: []string{"AGENT_REPL_TEST_ALL_SCRIPT=" + script.Path},
+		FileLogs: true,
 	}})
 	repoRef := wlRepositoryRef(t, w, repo)
 	ws := wlCreateChild(t, w, repoRef, "wl-merge")
@@ -762,7 +765,9 @@ func wlDriveAreaWorld(t *testing.T, vitestFile string, expectWarnings ...string)
 	npm := wlRequireNPM(t)
 	webappDir := wlRequireWebappDeps(t)
 
-	w := NewWorld(t, WorldOpts{})
+	// The layer's own vitest process reads the daemon's sink files itself
+	// (test/webapp-layer/real-daemon.ts), so the logs stay on disk.
+	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{FileLogs: true}})
 	if len(expectWarnings) > 0 {
 		w.ExpectWarnings(expectWarnings...)
 	}
