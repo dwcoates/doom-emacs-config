@@ -14,6 +14,7 @@ import { GROUPINGS } from "../../src/sidebar/context.js";
 import { GROUPING_VIEW_KEY } from "../../src/sidebar/view.js";
 import { captureLogRecords, type LogCapture } from "../log-capture.js";
 import type { PhasedAnimation } from "../../src/sidebar/wall-phase.js";
+import type { UnseenEnv } from "../../src/sidebar/unseen.js";
 import { fireResize } from "../resize-observer.js";
 import {
   NOW,
@@ -903,5 +904,83 @@ describe("an open row's detail panel, placed by the rail", () => {
     window.dispatchEvent(new Event("resize"));
     // ASSERT: the panel the disposed rail drew is nobody's to move any more.
     expect(detail.style.top).toBe("144px");
+  });
+});
+
+/** An unseen-gate environment whose visibility the test sets and changes. */
+function unseenDoc(initial: DocumentVisibilityState): { env: UnseenEnv; show(): void } {
+  const doc = document.implementation.createHTMLDocument("unseen");
+  let state = initial;
+  Object.defineProperty(doc, "visibilityState", { configurable: true, get: () => state });
+  return {
+    env: { doc, now: () => 0 },
+    show: () => {
+      state = "visible";
+      doc.dispatchEvent(new Event("visibilitychange"));
+    },
+  };
+}
+
+describe("mounting the rail: a page no one can see", () => {
+  it("leaves the rail undrawn while hidden and another workspace is current", async () => {
+    // Arrange
+    const host = document.createElement("nav");
+    const unseen = unseenDoc("hidden");
+
+    // Act
+    mountSidebar(
+      host,
+      ctxFor([roster({ current: "ws-other", repos: [repoSection({ id: "repo-1", rows: [row({ id: "ws-1" })] })] })]),
+      { storage: null, timers: fakeTimers(), unseen: unseen.env },
+    );
+    await settle();
+
+    // Assert
+    expect(host.querySelector("[data-roster-row='ws-1']")).toBeNull();
+  });
+
+  it("draws the newest roster it held once the page turns visible", async () => {
+    // Arrange
+    const host = document.createElement("nav");
+    const unseen = unseenDoc("hidden");
+    mountSidebar(
+      host,
+      ctxFor([
+        roster({ current: "ws-other", repos: [repoSection({ id: "repo-1", rows: [row({ id: "ws-1" })] })] }),
+        roster({ current: "ws-other", repos: [repoSection({ id: "repo-1", rows: [row({ id: "ws-2" })] })] }),
+      ]),
+      { storage: null, timers: fakeTimers(), unseen: unseen.env },
+    );
+    await settle();
+
+    // Act
+    unseen.show();
+
+    // Assert
+    expect([
+      host.querySelector("[data-roster-row='ws-1']"),
+      host.querySelector("[data-roster-row='ws-2']") === null,
+    ]).toEqual([null, false]);
+  });
+
+  it("still returns the feed to its tail on the first switch of a page hidden since its first push", async () => {
+    // Arrange
+    const host = document.createElement("nav");
+    const unseen = unseenDoc("hidden");
+    let arrived = 0;
+
+    // Act
+    mountSidebar(host, ctxFor([roster({ current: "ws-other" }), roster({ current: WORKSPACE.id })]), {
+      storage: null,
+      timers: fakeTimers(),
+      unseen: unseen.env,
+      workspaceSelected: () => {
+        arrived += 1;
+      },
+    });
+    await settle();
+
+    // Assert
+    expect(arrived).toBe(1);
   });
 });

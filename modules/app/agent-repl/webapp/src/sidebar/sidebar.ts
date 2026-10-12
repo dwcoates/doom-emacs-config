@@ -36,6 +36,8 @@ import { placeOpenRowDetails } from "./row.js";
 import { installBandFit } from "./band-fit.js";
 import { createSelectionEdge } from "./selection-edge.js";
 import { installWallPhase, type WallPhaseEnv } from "./wall-phase.js";
+import { createUnseenGate, type UnseenEnv } from "./unseen.js";
+import type { WorkspaceRoster } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 
 /** What every mount answers with. */
 export interface Handle {
@@ -68,6 +70,8 @@ export interface SidebarDeps {
    * (`wall-phase.ts`). Defaults to the page.
    */
   wallPhase?: WallPhaseEnv;
+  /** What the unseen gate reads (`unseen.ts`). Defaults to the page. */
+  unseen?: UnseenEnv;
 }
 
 /**
@@ -179,6 +183,7 @@ export function mountSidebar(host: HTMLElement, ctx: AppContext, deps: SidebarDe
   };
   host.addEventListener("click", dismiss);
 
+  const unseen = createUnseenGate(ctx.workspace.id, drawRoster, deps.unseen);
   const stream = watchStream(ctx, {
     name: "WatchWorkspaceRoster",
     schema: WatchWorkspaceRosterResponseSchema,
@@ -196,35 +201,45 @@ export function mountSidebar(host: HTMLElement, ctx: AppContext, deps: SidebarDe
         return unreachablePushArm("WatchWorkspaceRosterResponse.push", push.case);
       }
       const roster = requireMessage(push.value, "WatchWorkspaceRosterResponse.roster");
-      // The teardowns come down BEFORE the draw, so a ticking age about to be
-      // replaced cannot paint a node already detached.
-      clear();
-      // The blink pass brackets the draw: markers are re-attached to the phases
-      // already running, and any marker the daemon cleared is forgotten.
-      attention.beginPass();
-      const drawn = drawWorkspaceRoster(roster, sc);
-      attention.endPass();
-      body.replaceChildren(drawn);
-      // The picker is a copy of the grouping too, drawn once at mount.
-      head.paintGrouping(sc.view.track(GROUPING_VIEW_KEY, drawRosterShown(roster.shown, "WorkspaceRoster.shown"), head.paintGrouping));
-      // A detail panel is fixed-positioned so it can leave the rail, which
-      // means it can only be measured once it is ON the page: a row drawn
-      // already-expanded is placed here, after the draw is in the document.
-      placeOpenRowDetails(body);
-      // THE FIRST PUSH REVEALS THE RAIL, and nothing else ever does.
-      host.hidden = false;
-      // Fitted once the rail is shown, so the band measures the rail it is in.
-      bandFit.refit();
-      // Seeked once the draw is in the document, where its animations run.
-      wallPhase.seek();
+      // ONLY A SEEN PAGE DRAWS (unseen.ts): an unseen one keeps the newest
+      // roster and draws it once when it is seen again.
+      unseen.offer(roster);
+      // EVERY push moves the selection edge, drawn or held, so the edge's
+      // baseline is the roster the daemon last stated, not the last one drawn.
       selectionEdge?.observe(roster);
     },
   });
+
+  /** Draw one whole roster into the rail. */
+  function drawRoster(roster: WorkspaceRoster): void {
+    // The teardowns come down BEFORE the draw, so a ticking age about to be
+    // replaced cannot paint a node already detached.
+    clear();
+    // The blink pass brackets the draw: markers are re-attached to the phases
+    // already running, and any marker the daemon cleared is forgotten.
+    attention.beginPass();
+    const drawn = drawWorkspaceRoster(roster, sc);
+    attention.endPass();
+    body.replaceChildren(drawn);
+    // The picker is a copy of the grouping too, drawn once at mount.
+    head.paintGrouping(sc.view.track(GROUPING_VIEW_KEY, drawRosterShown(roster.shown, "WorkspaceRoster.shown"), head.paintGrouping));
+    // A detail panel is fixed-positioned so it can leave the rail, which
+    // means it can only be measured once it is ON the page: a row drawn
+    // already-expanded is placed here, after the draw is in the document.
+    placeOpenRowDetails(body);
+    // THE FIRST PUSH REVEALS THE RAIL, and nothing else ever does.
+    host.hidden = false;
+    // Fitted once the rail is shown, so the band measures the rail it is in.
+    bandFit.refit();
+    // Seeked once the draw is in the document, where its animations run.
+    wallPhase.seek();
+  }
 
   return {
     dispose(): void {
       log.debug("disposing the workspaces rail", { operation: "sidebar.dispose" });
       stream.cancel();
+      unseen.dispose();
       bandFit.dispose();
       wallPhase.dispose();
       window.removeEventListener("resize", replace);
