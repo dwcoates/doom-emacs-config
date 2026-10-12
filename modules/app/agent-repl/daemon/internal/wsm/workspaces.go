@@ -32,16 +32,23 @@ func normalizeDir(dir string) (string, error) {
 // workspaceColumns is the one select list every workspace read shares, so a
 // column added to the row can never be decoded by only some of them.
 //
-// The last two columns are DERIVED, not stored on the row: whether the
-// workspace's creation job asked for the one-shot form, and whether a merge
+// The last three columns are DERIVED, not stored on the row: whether the
+// workspace's creation job asked for the one-shot form, whether a merge
 // queue entry stands for it -- its own, or that of a merge workspace forked
 // for its detached merge (`merge_of` names it), which is where its merge
-// stands once handed off. Every read selects FROM workspaces unaliased, so
-// the correlated subqueries name `workspaces.id`.
+// stands once handed off -- and when its last turn ended. Every read selects
+// FROM workspaces unaliased, so the correlated subqueries name
+// `workspaces.id`.
+//
+// THE LAST TURN END IS READ OFF THE TURNS THEMSELVES rather than stamped on
+// the row, so it cannot drift from the closes it summarizes: CloseTurn's one
+// write of closed_at is the only edge, and turns_by_workspace keeps the MAX an
+// index range.
 const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, last_selected_at, last_activity_at, merged_at, spawned_shim_pid, created_at, result_end, result_read, hidden, merge_of, merge_request_id, commit_count, place, ` +
 	`EXISTS (SELECT 1 FROM creation_jobs WHERE creation_jobs.workspace_id = workspaces.id AND creation_jobs.one_shot = 1), ` +
 	`EXISTS (SELECT 1 FROM merge_queue WHERE merge_queue.workspace_id = workspaces.id ` +
-	`OR merge_queue.workspace_id IN (SELECT merge_ws.id FROM workspaces AS merge_ws WHERE merge_ws.merge_of = workspaces.id))`
+	`OR merge_queue.workspace_id IN (SELECT merge_ws.id FROM workspaces AS merge_ws WHERE merge_ws.merge_of = workspaces.id)), ` +
+	`(SELECT MAX(turns.closed_at) FROM turns WHERE turns.workspace_id = workspaces.id)`
 
 // scanWorkspace decodes one workspace row all-or-nothing: an out-of-range
 // priority is a decode failure, never a silently substituted default.
@@ -61,8 +68,9 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 		mergeOf  sql.NullString
 		request  sql.NullString
 		commits  sql.NullInt64
+		ended    sql.NullInt64
 	)
-	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &created, &end, &read, &ws.Hidden, &mergeOf, &request, &commits, &ws.Place, &ws.OneShot, &ws.MergePending); err != nil {
+	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &created, &end, &read, &ws.Hidden, &mergeOf, &request, &commits, &ws.Place, &ws.OneShot, &ws.MergePending, &ended); err != nil {
 		return Workspace{}, err
 	}
 	if mergeOf.Valid != request.Valid {
@@ -106,6 +114,7 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 	}
 	ws.LastSelectedAt = optTime(selected)
 	ws.LastActivityAt = optTime(activity)
+	ws.LastTurnEndedAt = optTime(ended)
 	ws.MergedAt = optTime(merged)
 	ws.CreatedAt = fromNanos(created)
 	count, err := decodeCommitCount(ws.ID, commits)

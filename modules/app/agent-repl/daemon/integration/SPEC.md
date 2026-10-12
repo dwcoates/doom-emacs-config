@@ -130,7 +130,7 @@ the vendor (`AGENT_REPL_FORBID_VENDOR_CALLS=1` in every process).
   intended-arm refusal (Connect error naming `RegisterWorkspaceError.<arm>`)
   and logs the arm at WARNING
 - SelectWorkspace stamps `current` on the roster push, and does NOT drive the
-  when-column (which shows last activity, not last viewing): a never-active
+  when-column (which shows the last turn end, not last viewing): a never-active
   selected workspace's when falls back to `created`, never `last_selected`;
   re-selecting is success and produces no duplicate push
 - a per-workspace rpc with an unknown WorkspaceRef answers NotFound naming
@@ -140,6 +140,8 @@ the vendor (`AGENT_REPL_FORBID_VENDOR_CALLS=1` in every process).
   the field (SubmitPrompt without `said`)
 
 ### roster_test.go
+- the when-column counts from the last turn END: `created` while the first
+  turn runs, `turn_ended` at its close, and the next turn's start leaves it
 - WatchWorkspaceRoster delivers the latest roster first to a late
   subscriber (subscription invariant)
 - two subscribers receive identical sequences
