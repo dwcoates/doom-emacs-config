@@ -89,7 +89,7 @@ run_helper() {
     mkdir -p "$dir"
     : >"$dir/log"
     set +e
-    env -u AGENT_REPL_BACKGROUND_PRIORITY \
+    env -u AGENT_REPL_BACKGROUND_PRIORITY -u AGENT_REPL_PROFILE_ROOT \
         PATH="$STUBS:/usr/bin:/bin" \
         STUB_LOG="$dir/log" \
         "${env_args[@]}" \
@@ -187,6 +187,24 @@ if [ "$RC" -eq 78 ] && [ ! -e "$d/ran" ] && grep -q "platform 'FreeBSD'" "$d/err
     pass "an unknown platform refuses the run loudly, naming the platform"
 else
     fail "an unknown platform refuses the run loudly, naming the platform" "rc=$RC err: $(cat "$d/err")"
+fi
+
+# --- 1j. a test's runtimes profile into the test's own tree -----------------
+d="$TMP/h1j"
+run_helper "$d" STUB_UNAME=Darwin STUB_NICENESS=19 TMPDIR="$d/tmp" -- bash -c 'printf "root=%s\n" "$AGENT_REPL_PROFILE_ROOT"'
+if [ "$RC" -eq 0 ] && [ "$(cat "$d/out")" = "root=$d/tmp/agent-repl-test-profiles" ]; then
+    pass "an unset profiles root points under the run's TMPDIR"
+else
+    fail "an unset profiles root points under the run's TMPDIR" "rc=$RC out: $(cat "$d/out")"
+fi
+
+# --- 1k. an explicit profiles root is kept ------------------------------------
+d="$TMP/h1k"
+run_helper "$d" STUB_UNAME=Darwin STUB_NICENESS=19 AGENT_REPL_PROFILE_ROOT=/explicit -- bash -c 'printf "root=%s\n" "$AGENT_REPL_PROFILE_ROOT"'
+if [ "$RC" -eq 0 ] && [ "$(cat "$d/out")" = "root=/explicit" ]; then
+    pass "an explicit profiles root is kept"
+else
+    fail "an explicit profiles root is kept" "rc=$RC out: $(cat "$d/out")"
 fi
 
 # --- 1h. no command: refused -------------------------------------------------
