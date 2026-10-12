@@ -60,6 +60,7 @@ import { realpathSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { configureLog } from "./log.js";
+import { armRuntimeProfiling } from "./profiling.js";
 import { MAIN_LIFECYCLE_LOGGER, reportFatal } from "./fatal.js";
 import { SPAWN_GATE_FD, awaitSpawnGate } from "./spawn-gate.js";
 import { lockBinaryPath, lockDir, LOCK_DIR_ENV } from "./locks.js";
@@ -1053,6 +1054,15 @@ export async function main(): Promise<void> {
   process.on("SIGINT", handlers.onSigint);
   const keepaliveResetHandlers = keepaliveResetSignalHandler(engine);
   process.on("SIGUSR2", keepaliveResetHandlers.onSigusr2);
+  // RUNTIME PROFILING: bin/profile-agent-repl.sh opens a session and sends
+  // SIGWINCH, and the shim profiles itself into it (src/profiling.ts).
+  armRuntimeProfiling(MAIN_LIFECYCLE_LOGGER, {
+    env: process.env,
+    home: os.homedir(),
+    pid: process.pid,
+    onSignal: (signal, handler) => process.on(signal, handler),
+    onExit: (handler) => process.on("exit", handler),
+  });
 
   MAIN_LIFECYCLE_LOGGER.info(
     { listen_socket: args.listen, outcome: "serving" },
