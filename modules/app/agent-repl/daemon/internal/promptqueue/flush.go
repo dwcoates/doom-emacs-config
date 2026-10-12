@@ -164,15 +164,7 @@ func (q *queue) flushTarget(ws ids.WorkspaceID) (ids.TurnID, bool) {
 	if call, ok := q.standingCall(ws); ok && call.opensTurn {
 		return call.turn, true
 	}
-	watcher, ok := q.deps.Watcher(ws)
-	if !ok {
-		return "", false
-	}
-	running := watcher.TurnInFlight()
-	if running == nil {
-		return "", false
-	}
-	return *running, true
+	return q.turnInFlight(ws)
 }
 
 // supersede discards every verdict still being judged about TURN's content.

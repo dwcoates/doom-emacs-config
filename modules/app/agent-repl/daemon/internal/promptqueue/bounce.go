@@ -964,7 +964,7 @@ func (q *queue) resumeDispatchLocked(ctx context.Context, d *delivery, log dlog.
 	if !q.releaseDrainHoldsLocked(ctx, ws, log) {
 		return
 	}
-	if watcher, ok := q.deps.Watcher(ws); ok && watcher.TurnInFlight() != nil {
+	if _, running := q.turnInFlight(ws); running {
 		log.Debug(opBounce, "a turn is already in flight on the new shim; the held prompts wait for its end", nil)
 		return
 	}
