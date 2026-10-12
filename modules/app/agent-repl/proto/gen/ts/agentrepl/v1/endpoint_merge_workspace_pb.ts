@@ -3,16 +3,18 @@
 // requesting workspace's feed either way; WHERE its agentic work runs depends
 // on the request:
 //
-//   - IN PLACE (every source but a detached own-branch merge): the merge's
-//     whole life is the requesting workspace's own — its footer's merging
-//     status, its session doing any conflict resolution and test fixing, and
-//     every prompt the user sends held until the merge ends.
-//   - DETACHED (an own-branch merge with the `detached` run): the daemon forks
-//     the requesting workspace into a MERGE WORKSPACE when the requesting turn
-//     ends — the conversation forked, a worktree of its own on the branch's
-//     tip at that moment — and the merge runs there. The requesting workspace
-//     is never held and never closed by it, and the merge's outcome comes back
-//     into its conversation as a handback.
+//   - SYNC, the IN PLACE run (every source but a detached own-branch merge):
+//     the merge's whole life is the requesting workspace's own — its footer's
+//     merging status, its session doing any conflict resolution and test
+//     fixing, and every prompt the user sends held until the merge ends. One
+//     workspace and one session are involved.
+//   - ASYNC, the DETACHED run (an own-branch merge with the `detached` run):
+//     the daemon forks the requesting workspace into a HIDDEN MERGE WORKSPACE
+//     when the requesting turn ends — the conversation forked, a worktree of
+//     its own — and the merge runs there. The requesting workspace is never
+//     held and never closed by it; the merge workspace's turns stream into the
+//     bubble's agentic tabs in the requester's feed; and the merge's outcome
+//     comes back into the requester's conversation as a handback.
 //
 // The merge targets the merged branch's parent by definition, and the daemon
 // decides everything else.
@@ -31,7 +33,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_merge_workspace.proto.
  */
 export const file_agentrepl_v1_endpoint_merge_workspace: GenFile = /*@__PURE__*/
-  fileDesc("CithZ2VudHJlcGwvdjEvZW5kcG9pbnRfbWVyZ2Vfd29ya3NwYWNlLnByb3RvEgxhZ2VudHJlcGwudjEiegoVTWVyZ2VXb3Jrc3BhY2VSZXF1ZXN0Ei0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSMgoGc291cmNlGAIgASgLMiIuYWdlbnRyZXBsLnYxLk1lcmdlV29ya3NwYWNlU291cmNlIq4CChRNZXJnZVdvcmtzcGFjZVNvdXJjZRJBCgpvd25fYnJhbmNoGAEgASgLMisuYWdlbnRyZXBsLnYxLk1lcmdlV29ya3NwYWNlU291cmNlT3duQnJhbmNoSAASQAoJd29ya3NwYWNlGAIgASgLMisuYWdlbnRyZXBsLnYxLk1lcmdlV29ya3NwYWNlU291cmNlV29ya3NwYWNlSAASOgoGYnJhbmNoGAMgASgLMiguYWdlbnRyZXBsLnYxLk1lcmdlV29ya3NwYWNlU291cmNlQnJhbmNoSAASSwoPbWVyZ2VkX3Vwc3RyZWFtGAQgASgLMjAuYWdlbnRyZXBsLnYxLk1lcmdlV29ya3NwYWNlU291cmNlTWVyZ2VkVXBzdHJlYW1IAEIICgZzb3VyY2UiyAEKHU1lcmdlV29ya3NwYWNlU291cmNlT3duQnJhbmNoEkYKCGluX3BsYWNlGAIgASgLMjIuYWdlbnRyZXBsLnYxLk1lcmdlV29ya3NwYWNlU291cmNlT3duQnJhbmNoSW5QbGFjZUgAEkcKCGRldGFjaGVkGAMgASgLMjMuYWdlbnRyZXBsLnYxLk1lcmdlV29ya3NwYWNlU291cmNlT3duQnJhbmNoRGV0YWNoZWRIAEIFCgNydW5KBAgBEAJSCWtlZXBfb3BlbiI5CiRNZXJnZVdvcmtzcGFjZVNvdXJjZU93bkJyYW5jaEluUGxhY2USEQoJa2VlcF9vcGVuGAEgASgIIicKJU1lcmdlV29ya3NwYWNlU291cmNlT3duQnJhbmNoRGV0YWNoZWQiSAodTWVyZ2VXb3Jrc3BhY2VTb3VyY2VXb3Jrc3BhY2USJwoDcmVmGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZiIqChpNZXJnZVdvcmtzcGFjZVNvdXJjZUJyYW5jaBIMCgRuYW1lGAEgASgJIiQKIk1lcmdlV29ya3NwYWNlU291cmNlTWVyZ2VkVXBzdHJlYW0ijgEKFk1lcmdlV29ya3NwYWNlUmVzcG9uc2USNgoHc3VjY2VzcxgBIAEoCzIjLmFnZW50cmVwbC52MS5NZXJnZVdvcmtzcGFjZVN1Y2Nlc3NIABIyCgVlcnJvchgCIAEoCzIhLmFnZW50cmVwbC52MS5NZXJnZVdvcmtzcGFjZUVycm9ySABCCAoGcmVzdWx0IhcKFU1lcmdlV29ya3NwYWNlU3VjY2VzcyKEBgoTTWVyZ2VXb3Jrc3BhY2VFcnJvchJJChF1bmtub3duX3dvcmtzcGFjZRgBIAEoCzIsLmFnZW50cmVwbC52MS5NZXJnZVdvcmtzcGFjZVVua25vd25Xb3Jrc3BhY2VIABJSChZ3b3Jrc3BhY2VfcmVmX21pc21hdGNoGAIgASgLMjAuYWdlbnRyZXBsLnYxLk1lcmdlV29ya3NwYWNlV29ya3NwYWNlUmVmTWlzbWF0Y2hIABJJChF0cmFuc2ZlcnJpbmdfYXdheRgDIAEoCzIsLmFnZW50cmVwbC52MS5NZXJnZVdvcmtzcGFjZVRyYW5zZmVycmluZ0F3YXlIABJECg9ub3RfeWV0X2Fkb3B0ZWQYBCABKAsyKS5hZ2VudHJlcGwudjEuTWVyZ2VXb3Jrc3BhY2VOb3RZZXRBZG9wdGVkSAASRAoPbm9fbGF5b3V0X2ZhY3RzGAUgASgLMikuYWdlbnRyZXBsLnYxLk1lcmdlV29ya3NwYWNlTm9MYXlvdXRGYWN0c0gAEkUKD3Nlc3Npb25fZGVsZXRlZBgGIAEoCzIqLmFnZW50cmVwbC52MS5NZXJnZVdvcmtzcGFjZVNlc3Npb25EZWxldGVkSAASQwoOYWxyZWFkeV9xdWV1ZWQYByABKAsyKS5hZ2VudHJlcGwudjEuTWVyZ2VXb3Jrc3BhY2VBbHJlYWR5UXVldWVkSAASRQoPYWxyZWFkeV9tZXJnaW5nGAggASgLMiouYWdlbnRyZXBsLnYxLk1lcmdlV29ya3NwYWNlQWxyZWFkeU1lcmdpbmdIABJWChh1bmtub3duX3NvdXJjZV93b3Jrc3BhY2UYCSABKAsyMi5hZ2VudHJlcGwudjEuTWVyZ2VXb3Jrc3BhY2VVbmtub3duU291cmNlV29ya3NwYWNlSAASQwoOdW5rbm93bl9icmFuY2gYCiABKAsyKS5hZ2VudHJlcGwudjEuTWVyZ2VXb3Jrc3BhY2VVbmtub3duQnJhbmNoSABCBwoFY2F1c2UiIAoeTWVyZ2VXb3Jrc3BhY2VVbmtub3duV29ya3NwYWNlIjoKIk1lcmdlV29ya3NwYWNlV29ya3NwYWNlUmVmTWlzbWF0Y2gSFAoMcmVnaXN0cnlfZGlyGAEgASgJIjEKHk1lcmdlV29ya3NwYWNlVHJhbnNmZXJyaW5nQXdheRIPCgdhZGRyZXNzGAEgASgJIh0KG01lcmdlV29ya3NwYWNlTm90WWV0QWRvcHRlZCIdChtNZXJnZVdvcmtzcGFjZU5vTGF5b3V0RmFjdHMiHgocTWVyZ2VXb3Jrc3BhY2VTZXNzaW9uRGVsZXRlZCIdChtNZXJnZVdvcmtzcGFjZUFscmVhZHlRdWV1ZWQiHgocTWVyZ2VXb3Jrc3BhY2VBbHJlYWR5TWVyZ2luZyImCiRNZXJnZVdvcmtzcGFjZVVua25vd25Tb3VyY2VXb3Jrc3BhY2UiHQobTWVyZ2VXb3Jrc3BhY2VVbmtub3duQnJhbmNoQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_workspace_v1_workspace]);
+  fileDesc("CithZ2VudHJlcGwvdjEvZW5kcG9pbnRfbWVyZ2Vfd29ya3NwYWNlLnByb3RvEgxhZ2VudHJlcGwudjEiegoVTWVyZ2VXb3Jrc3BhY2VSZXF1ZXN0Ei0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSMgoGc291cmNlGAIgASgLMiIuYWdlbnRyZXBsLnYxLk1lcmdlV29ya3NwYWNlU291cmNlIq4CChRNZXJnZVdvcmtzcGFjZVNvdXJjZRJBCgpvd25fYnJhbmNoGAEgASgLMisuYWdlbnRyZXBsLnYxLk1lcmdlV29ya3NwYWNlU291cmNlT3duQnJhbmNoSAASQAoJd29ya3NwYWNlGAIgASgLMisuYWdlbnRyZXBsLnYxLk1lcmdlV29ya3NwYWNlU291cmNlV29ya3NwYWNlSAASOgoGYnJhbmNoGAMgASgLMiguYWdlbnRyZXBsLnYxLk1lcmdlV29ya3NwYWNlU291cmNlQnJhbmNoSAASSwoPbWVyZ2VkX3Vwc3RyZWFtGAQgASgLMjAuYWdlbnRyZXBsLnYxLk1lcmdlV29ya3NwYWNlU291cmNlTWVyZ2VkVXBzdHJlYW1IAEIICgZzb3VyY2UiyAEKHU1lcmdlV29ya3NwYWNlU291cmNlT3duQnJhbmNoEkYKCGluX3BsYWNlGAIgASgLMjIuYWdlbnRyZXBsLnYxLk1lcmdlV29ya3NwYWNlU291cmNlT3duQnJhbmNoSW5QbGFjZUgAEkcKCGRldGFjaGVkGAMgASgLMjMuYWdlbnRyZXBsLnYxLk1lcmdlV29ya3NwYWNlU291cmNlT3duQnJhbmNoRGV0YWNoZWRIAEIFCgNydW5KBAgBEAJSCWtlZXBfb3BlbiI5CiRNZXJnZVdvcmtzcGFjZVNvdXJjZU93bkJyYW5jaEluUGxhY2USEQoJa2VlcF9vcGVuGAEgASgIIuEBCiVNZXJnZVdvcmtzcGFjZVNvdXJjZU93bkJyYW5jaERldGFjaGVkEgwKBG5hbWUYASABKAkSVgoMd2hvbGVfYnJhbmNoGAIgASgLMj4uYWdlbnRyZXBsLnYxLk1lcmdlV29ya3NwYWNlU291cmNlT3duQnJhbmNoRGV0YWNoZWRXaG9sZUJyYW5jaEgAEkcKBHBpY2sYAyABKAsyNy5hZ2VudHJlcGwudjEuTWVyZ2VXb3Jrc3BhY2VTb3VyY2VPd25CcmFuY2hEZXRhY2hlZFBpY2tIAEIJCgdjb250ZW50IjIKME1lcmdlV29ya3NwYWNlU291cmNlT3duQnJhbmNoRGV0YWNoZWRXaG9sZUJyYW5jaCJACilNZXJnZVdvcmtzcGFjZVNvdXJjZU93bkJyYW5jaERldGFjaGVkUGljaxITCgtpbnN0cnVjdGlvbhgBIAEoCSJICh1NZXJnZVdvcmtzcGFjZVNvdXJjZVdvcmtzcGFjZRInCgNyZWYYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmIioKGk1lcmdlV29ya3NwYWNlU291cmNlQnJhbmNoEgwKBG5hbWUYASABKAkiJAoiTWVyZ2VXb3Jrc3BhY2VTb3VyY2VNZXJnZWRVcHN0cmVhbSKOAQoWTWVyZ2VXb3Jrc3BhY2VSZXNwb25zZRI2CgdzdWNjZXNzGAEgASgLMiMuYWdlbnRyZXBsLnYxLk1lcmdlV29ya3NwYWNlU3VjY2Vzc0gAEjIKBWVycm9yGAIgASgLMiEuYWdlbnRyZXBsLnYxLk1lcmdlV29ya3NwYWNlRXJyb3JIAEIICgZyZXN1bHQiFwoVTWVyZ2VXb3Jrc3BhY2VTdWNjZXNzIsEGChNNZXJnZVdvcmtzcGFjZUVycm9yEkkKEXVua25vd25fd29ya3NwYWNlGAEgASgLMiwuYWdlbnRyZXBsLnYxLk1lcmdlV29ya3NwYWNlVW5rbm93bldvcmtzcGFjZUgAElIKFndvcmtzcGFjZV9yZWZfbWlzbWF0Y2gYAiABKAsyMC5hZ2VudHJlcGwudjEuTWVyZ2VXb3Jrc3BhY2VXb3Jrc3BhY2VSZWZNaXNtYXRjaEgAEkkKEXRyYW5zZmVycmluZ19hd2F5GAMgASgLMiwuYWdlbnRyZXBsLnYxLk1lcmdlV29ya3NwYWNlVHJhbnNmZXJyaW5nQXdheUgAEkQKD25vdF95ZXRfYWRvcHRlZBgEIAEoCzIpLmFnZW50cmVwbC52MS5NZXJnZVdvcmtzcGFjZU5vdFlldEFkb3B0ZWRIABJECg9ub19sYXlvdXRfZmFjdHMYBSABKAsyKS5hZ2VudHJlcGwudjEuTWVyZ2VXb3Jrc3BhY2VOb0xheW91dEZhY3RzSAASRQoPc2Vzc2lvbl9kZWxldGVkGAYgASgLMiouYWdlbnRyZXBsLnYxLk1lcmdlV29ya3NwYWNlU2Vzc2lvbkRlbGV0ZWRIABJDCg5hbHJlYWR5X3F1ZXVlZBgHIAEoCzIpLmFnZW50cmVwbC52MS5NZXJnZVdvcmtzcGFjZUFscmVhZHlRdWV1ZWRIABJFCg9hbHJlYWR5X21lcmdpbmcYCCABKAsyKi5hZ2VudHJlcGwudjEuTWVyZ2VXb3Jrc3BhY2VBbHJlYWR5TWVyZ2luZ0gAElYKGHVua25vd25fc291cmNlX3dvcmtzcGFjZRgJIAEoCzIyLmFnZW50cmVwbC52MS5NZXJnZVdvcmtzcGFjZVVua25vd25Tb3VyY2VXb3Jrc3BhY2VIABJDCg51bmtub3duX2JyYW5jaBgKIAEoCzIpLmFnZW50cmVwbC52MS5NZXJnZVdvcmtzcGFjZVVua25vd25CcmFuY2hIABI7CgpuYW1lX3Rha2VuGAsgASgLMiUuYWdlbnRyZXBsLnYxLk1lcmdlV29ya3NwYWNlTmFtZVRha2VuSABCBwoFY2F1c2UiIAoeTWVyZ2VXb3Jrc3BhY2VVbmtub3duV29ya3NwYWNlIjoKIk1lcmdlV29ya3NwYWNlV29ya3NwYWNlUmVmTWlzbWF0Y2gSFAoMcmVnaXN0cnlfZGlyGAEgASgJIjEKHk1lcmdlV29ya3NwYWNlVHJhbnNmZXJyaW5nQXdheRIPCgdhZGRyZXNzGAEgASgJIh0KG01lcmdlV29ya3NwYWNlTm90WWV0QWRvcHRlZCIdChtNZXJnZVdvcmtzcGFjZU5vTGF5b3V0RmFjdHMiHgocTWVyZ2VXb3Jrc3BhY2VTZXNzaW9uRGVsZXRlZCIdChtNZXJnZVdvcmtzcGFjZUFscmVhZHlRdWV1ZWQiHgocTWVyZ2VXb3Jrc3BhY2VBbHJlYWR5TWVyZ2luZyImCiRNZXJnZVdvcmtzcGFjZVVua25vd25Tb3VyY2VXb3Jrc3BhY2UiHQobTWVyZ2VXb3Jrc3BhY2VVbmtub3duQnJhbmNoIikKF01lcmdlV29ya3NwYWNlTmFtZVRha2VuEg4KBmJyYW5jaBgBIAEoCUIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.MergeWorkspaceRequest
@@ -140,8 +142,8 @@ export type MergeWorkspaceSourceOwnBranch = Message<"agentrepl.v1.MergeWorkspace
    */
   run: {
     /**
-     * In the requesting workspace, by its own session, holding its prompts
-     * until the merge ends.
+     * SYNC: in the requesting workspace, by its own session, holding its
+     * prompts until the merge ends.
      *
      * @generated from field: agentrepl.v1.MergeWorkspaceSourceOwnBranchInPlace in_place = 2;
      */
@@ -149,8 +151,8 @@ export type MergeWorkspaceSourceOwnBranch = Message<"agentrepl.v1.MergeWorkspace
     case: "inPlace";
   } | {
     /**
-     * In a merge workspace forked from the requester, leaving the requester
-     * free.
+     * ASYNC: in a hidden merge workspace forked from the requester, leaving
+     * the requester free.
      *
      * @generated from field: agentrepl.v1.MergeWorkspaceSourceOwnBranchDetached detached = 3;
      */
@@ -190,23 +192,73 @@ export const MergeWorkspaceSourceOwnBranchInPlaceSchema: GenMessage<MergeWorkspa
   messageDesc(file_agentrepl_v1_endpoint_merge_workspace, 3);
 
 /**
- * The merge runs in a MERGE WORKSPACE: a forked workspace the daemon creates
- * when the requesting turn ends, so the fork holds that whole turn. Its
- * conversation is a fork of the requester's, and its worktree is checked out
- * on the requester's branch tip at that moment, so the requester's later
- * commits are not part of this merge and the rebase never touches files the
- * requester is editing. The merge workspace is shown nested under the
- * requester, lands on the requester's own target branch, and is closed (its
- * worktree and conversation kept) once its branch lands; a failed merge
- * leaves it open for the user to finish. Either way the daemon hands the
- * outcome back to the requester's conversation
+ * The merge runs ASYNC, in a MERGE WORKSPACE: a forked workspace the daemon
+ * creates when the requesting turn ends, so the fork holds that whole turn. Its
+ * conversation is a fork of the requester's, so its agent knows the work.
+ *
+ * THE MERGE WORKSPACE IS HIDDEN until it needs the user: it is in no tab bar
+ * and no sidebar section while it runs, and it is revealed — drawn like any
+ * workspace from then on — when its merge fails, when its agent asks for
+ * permission or asks a question, when the user interrupts its agent from the
+ * bubble (agentrepl.v1.InterruptRequest.merge_tab), or when the user selects
+ * it. Its feed is its own ordinary feed with no merge bubble; its turns are
+ * also streamed into the bubble's agentic tabs in the requester's feed, which
+ * is the only place the bubble is drawn, PLACED rather than pinned. It lands
+ * on the requester's own target branch and is closed (its worktree and
+ * conversation kept, drawn under Recently Merged) once its branch lands; a
+ * failed merge leaves it open and revealed for the user to finish. Either way
+ * the daemon hands the outcome back to the requester's conversation
  * (conversation.v1.PromptOrigin.PROMPT_ORIGIN_MERGE_HANDBACK). A merge
- * workspace idle for 15 calendar days is removed. No fields: the branch, the
- * repository and the target are the requester's own.
+ * workspace idle for 15 calendar days is removed. The repository and the
+ * target are the requester's own.
  *
  * @generated from message agentrepl.v1.MergeWorkspaceSourceOwnBranchDetached
  */
 export type MergeWorkspaceSourceOwnBranchDetached = Message<"agentrepl.v1.MergeWorkspaceSourceOwnBranchDetached"> & {
+  /**
+   * The merge workspace's name, chosen by the calling agent: a short slug
+   * naming what is being merged ("reconnect-fix"), with no decoration. It is
+   * prefixed and validated exactly as a supplied workspace name is, and it is
+   * RESERVED from the moment the request is accepted until the merge
+   * workspace exists, so nothing else can take it in between. A name that is
+   * already a workspace, a branch, or another pending merge's reservation is
+   * refused as `name_taken`, while the calling agent's turn still runs, so it
+   * can retry with another. REQUIRED: a blank name is refused as invalid.
+   *
+   * @generated from field: string name = 1;
+   */
+  name: string;
+
+  /**
+   * WHAT the merge workspace lands. REQUIRED: a request with neither is
+   * refused as invalid.
+   *
+   * @generated from oneof agentrepl.v1.MergeWorkspaceSourceOwnBranchDetached.content
+   */
+  content: {
+    /**
+     * The requester's whole branch, as its tip stands when the requesting
+     * turn ends: the merge workspace's worktree is checked out there, so the
+     * requester's later commits are not part of this merge and the rebase
+     * never touches files the requester is editing.
+     *
+     * @generated from field: agentrepl.v1.MergeWorkspaceSourceOwnBranchDetachedWholeBranch whole_branch = 2;
+     */
+    value: MergeWorkspaceSourceOwnBranchDetachedWholeBranch;
+    case: "wholeBranch";
+  } | {
+    /**
+     * Only the changes the instruction names: the merge workspace's worktree
+     * starts on the target branch's tip, and its first turn is the merge
+     * agent cherry-picking those changes from the requester's branch, drawn
+     * as the bubble's pick tab (frontend.v1.FeedMergeTabPick). The merge
+     * joins the queue only once that turn ends.
+     *
+     * @generated from field: agentrepl.v1.MergeWorkspaceSourceOwnBranchDetachedPick pick = 3;
+     */
+    value: MergeWorkspaceSourceOwnBranchDetachedPick;
+    case: "pick";
+  } | { case: undefined; value?: undefined };
 };
 
 /**
@@ -215,6 +267,50 @@ export type MergeWorkspaceSourceOwnBranchDetached = Message<"agentrepl.v1.MergeW
  */
 export const MergeWorkspaceSourceOwnBranchDetachedSchema: GenMessage<MergeWorkspaceSourceOwnBranchDetached> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_merge_workspace, 4);
+
+/**
+ * The whole requester branch is merged. No fields: the branch is the
+ * requester's own.
+ *
+ * @generated from message agentrepl.v1.MergeWorkspaceSourceOwnBranchDetachedWholeBranch
+ */
+export type MergeWorkspaceSourceOwnBranchDetachedWholeBranch = Message<"agentrepl.v1.MergeWorkspaceSourceOwnBranchDetachedWholeBranch"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.MergeWorkspaceSourceOwnBranchDetachedWholeBranch.
+ * Use `create(MergeWorkspaceSourceOwnBranchDetachedWholeBranchSchema)` to create a new message.
+ */
+export const MergeWorkspaceSourceOwnBranchDetachedWholeBranchSchema: GenMessage<MergeWorkspaceSourceOwnBranchDetachedWholeBranch> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_merge_workspace, 5);
+
+/**
+ * Only some changes of the requester's branch are merged.
+ *
+ * @generated from message agentrepl.v1.MergeWorkspaceSourceOwnBranchDetachedPick
+ */
+export type MergeWorkspaceSourceOwnBranchDetachedPick = Message<"agentrepl.v1.MergeWorkspaceSourceOwnBranchDetachedPick"> & {
+  /**
+   * The calling agent's instruction to the merge agent, in free text: which
+   * changes to take ("the reconnect fix: commits a1b2 and c3d4, plus the test
+   * hunk in e5f6"). Free text rather than a commit list, because the merge
+   * agent may take only some hunks of a commit. The daemon wraps it in its
+   * pick brief, which tells the merge agent its worktree is on the target
+   * branch, names the requester's branch, has it cherry-pick and commit, and
+   * forbids the rebase the queue does itself. REQUIRED: a blank instruction
+   * is refused as invalid.
+   *
+   * @generated from field: string instruction = 1;
+   */
+  instruction: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.MergeWorkspaceSourceOwnBranchDetachedPick.
+ * Use `create(MergeWorkspaceSourceOwnBranchDetachedPickSchema)` to create a new message.
+ */
+export const MergeWorkspaceSourceOwnBranchDetachedPickSchema: GenMessage<MergeWorkspaceSourceOwnBranchDetachedPick> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_merge_workspace, 6);
 
 /**
  * Another open workspace, named by its ref.
@@ -236,7 +332,7 @@ export type MergeWorkspaceSourceWorkspace = Message<"agentrepl.v1.MergeWorkspace
  * Use `create(MergeWorkspaceSourceWorkspaceSchema)` to create a new message.
  */
 export const MergeWorkspaceSourceWorkspaceSchema: GenMessage<MergeWorkspaceSourceWorkspace> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_merge_workspace, 5);
+  messageDesc(file_agentrepl_v1_endpoint_merge_workspace, 7);
 
 /**
  * A branch that is no workspace.
@@ -258,7 +354,7 @@ export type MergeWorkspaceSourceBranch = Message<"agentrepl.v1.MergeWorkspaceSou
  * Use `create(MergeWorkspaceSourceBranchSchema)` to create a new message.
  */
 export const MergeWorkspaceSourceBranchSchema: GenMessage<MergeWorkspaceSourceBranch> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_merge_workspace, 6);
+  messageDesc(file_agentrepl_v1_endpoint_merge_workspace, 8);
 
 /**
  * The requesting workspace's own branch, already merged upstream. No
@@ -274,7 +370,7 @@ export type MergeWorkspaceSourceMergedUpstream = Message<"agentrepl.v1.MergeWork
  * Use `create(MergeWorkspaceSourceMergedUpstreamSchema)` to create a new message.
  */
 export const MergeWorkspaceSourceMergedUpstreamSchema: GenMessage<MergeWorkspaceSourceMergedUpstream> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_merge_workspace, 7);
+  messageDesc(file_agentrepl_v1_endpoint_merge_workspace, 9);
 
 /**
  * THE ARM IS THE OUTCOME.
@@ -305,7 +401,7 @@ export type MergeWorkspaceResponse = Message<"agentrepl.v1.MergeWorkspaceRespons
  * Use `create(MergeWorkspaceResponseSchema)` to create a new message.
  */
 export const MergeWorkspaceResponseSchema: GenMessage<MergeWorkspaceResponse> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_merge_workspace, 8);
+  messageDesc(file_agentrepl_v1_endpoint_merge_workspace, 10);
 
 /**
  * Done; every visible effect arrives on the streams.
@@ -320,7 +416,7 @@ export type MergeWorkspaceSuccess = Message<"agentrepl.v1.MergeWorkspaceSuccess"
  * Use `create(MergeWorkspaceSuccessSchema)` to create a new message.
  */
 export const MergeWorkspaceSuccessSchema: GenMessage<MergeWorkspaceSuccess> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_merge_workspace, 9);
+  messageDesc(file_agentrepl_v1_endpoint_merge_workspace, 11);
 
 /**
  * Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
@@ -413,6 +509,16 @@ export type MergeWorkspaceError = Message<"agentrepl.v1.MergeWorkspaceError"> & 
      */
     value: MergeWorkspaceUnknownBranch;
     case: "unknownBranch";
+  } | {
+    /**
+     * The async merge's name is already a workspace, a branch, or another
+     * pending async merge's reservation. Nothing was recorded; the caller
+     * retries with another name.
+     *
+     * @generated from field: agentrepl.v1.MergeWorkspaceNameTaken name_taken = 11;
+     */
+    value: MergeWorkspaceNameTaken;
+    case: "nameTaken";
   } | { case: undefined; value?: undefined };
 };
 
@@ -421,7 +527,7 @@ export type MergeWorkspaceError = Message<"agentrepl.v1.MergeWorkspaceError"> & 
  * Use `create(MergeWorkspaceErrorSchema)` to create a new message.
  */
 export const MergeWorkspaceErrorSchema: GenMessage<MergeWorkspaceError> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_merge_workspace, 10);
+  messageDesc(file_agentrepl_v1_endpoint_merge_workspace, 12);
 
 /**
  * @generated from message agentrepl.v1.MergeWorkspaceUnknownWorkspace
@@ -434,7 +540,7 @@ export type MergeWorkspaceUnknownWorkspace = Message<"agentrepl.v1.MergeWorkspac
  * Use `create(MergeWorkspaceUnknownWorkspaceSchema)` to create a new message.
  */
 export const MergeWorkspaceUnknownWorkspaceSchema: GenMessage<MergeWorkspaceUnknownWorkspace> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_merge_workspace, 11);
+  messageDesc(file_agentrepl_v1_endpoint_merge_workspace, 13);
 
 /**
  * @generated from message agentrepl.v1.MergeWorkspaceWorkspaceRefMismatch
@@ -453,7 +559,7 @@ export type MergeWorkspaceWorkspaceRefMismatch = Message<"agentrepl.v1.MergeWork
  * Use `create(MergeWorkspaceWorkspaceRefMismatchSchema)` to create a new message.
  */
 export const MergeWorkspaceWorkspaceRefMismatchSchema: GenMessage<MergeWorkspaceWorkspaceRefMismatch> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_merge_workspace, 12);
+  messageDesc(file_agentrepl_v1_endpoint_merge_workspace, 14);
 
 /**
  * @generated from message agentrepl.v1.MergeWorkspaceTransferringAway
@@ -472,7 +578,7 @@ export type MergeWorkspaceTransferringAway = Message<"agentrepl.v1.MergeWorkspac
  * Use `create(MergeWorkspaceTransferringAwaySchema)` to create a new message.
  */
 export const MergeWorkspaceTransferringAwaySchema: GenMessage<MergeWorkspaceTransferringAway> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_merge_workspace, 13);
+  messageDesc(file_agentrepl_v1_endpoint_merge_workspace, 15);
 
 /**
  * @generated from message agentrepl.v1.MergeWorkspaceNotYetAdopted
@@ -485,7 +591,7 @@ export type MergeWorkspaceNotYetAdopted = Message<"agentrepl.v1.MergeWorkspaceNo
  * Use `create(MergeWorkspaceNotYetAdoptedSchema)` to create a new message.
  */
 export const MergeWorkspaceNotYetAdoptedSchema: GenMessage<MergeWorkspaceNotYetAdopted> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_merge_workspace, 14);
+  messageDesc(file_agentrepl_v1_endpoint_merge_workspace, 16);
 
 /**
  * @generated from message agentrepl.v1.MergeWorkspaceNoLayoutFacts
@@ -498,7 +604,7 @@ export type MergeWorkspaceNoLayoutFacts = Message<"agentrepl.v1.MergeWorkspaceNo
  * Use `create(MergeWorkspaceNoLayoutFactsSchema)` to create a new message.
  */
 export const MergeWorkspaceNoLayoutFactsSchema: GenMessage<MergeWorkspaceNoLayoutFacts> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_merge_workspace, 15);
+  messageDesc(file_agentrepl_v1_endpoint_merge_workspace, 17);
 
 /**
  * @generated from message agentrepl.v1.MergeWorkspaceSessionDeleted
@@ -511,7 +617,7 @@ export type MergeWorkspaceSessionDeleted = Message<"agentrepl.v1.MergeWorkspaceS
  * Use `create(MergeWorkspaceSessionDeletedSchema)` to create a new message.
  */
 export const MergeWorkspaceSessionDeletedSchema: GenMessage<MergeWorkspaceSessionDeleted> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_merge_workspace, 16);
+  messageDesc(file_agentrepl_v1_endpoint_merge_workspace, 18);
 
 /**
  * @generated from message agentrepl.v1.MergeWorkspaceAlreadyQueued
@@ -524,7 +630,7 @@ export type MergeWorkspaceAlreadyQueued = Message<"agentrepl.v1.MergeWorkspaceAl
  * Use `create(MergeWorkspaceAlreadyQueuedSchema)` to create a new message.
  */
 export const MergeWorkspaceAlreadyQueuedSchema: GenMessage<MergeWorkspaceAlreadyQueued> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_merge_workspace, 17);
+  messageDesc(file_agentrepl_v1_endpoint_merge_workspace, 19);
 
 /**
  * @generated from message agentrepl.v1.MergeWorkspaceAlreadyMerging
@@ -537,7 +643,7 @@ export type MergeWorkspaceAlreadyMerging = Message<"agentrepl.v1.MergeWorkspaceA
  * Use `create(MergeWorkspaceAlreadyMergingSchema)` to create a new message.
  */
 export const MergeWorkspaceAlreadyMergingSchema: GenMessage<MergeWorkspaceAlreadyMerging> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_merge_workspace, 18);
+  messageDesc(file_agentrepl_v1_endpoint_merge_workspace, 20);
 
 /**
  * @generated from message agentrepl.v1.MergeWorkspaceUnknownSourceWorkspace
@@ -550,7 +656,7 @@ export type MergeWorkspaceUnknownSourceWorkspace = Message<"agentrepl.v1.MergeWo
  * Use `create(MergeWorkspaceUnknownSourceWorkspaceSchema)` to create a new message.
  */
 export const MergeWorkspaceUnknownSourceWorkspaceSchema: GenMessage<MergeWorkspaceUnknownSourceWorkspace> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_merge_workspace, 19);
+  messageDesc(file_agentrepl_v1_endpoint_merge_workspace, 21);
 
 /**
  * @generated from message agentrepl.v1.MergeWorkspaceUnknownBranch
@@ -563,5 +669,26 @@ export type MergeWorkspaceUnknownBranch = Message<"agentrepl.v1.MergeWorkspaceUn
  * Use `create(MergeWorkspaceUnknownBranchSchema)` to create a new message.
  */
 export const MergeWorkspaceUnknownBranchSchema: GenMessage<MergeWorkspaceUnknownBranch> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_merge_workspace, 20);
+  messageDesc(file_agentrepl_v1_endpoint_merge_workspace, 22);
+
+/**
+ * The refused name, as the branch it resolves to once prefixed.
+ *
+ * @generated from message agentrepl.v1.MergeWorkspaceNameTaken
+ */
+export type MergeWorkspaceNameTaken = Message<"agentrepl.v1.MergeWorkspaceNameTaken"> & {
+  /**
+   * The branch the name resolves to ("agent-1a2b/reconnect-fix").
+   *
+   * @generated from field: string branch = 1;
+   */
+  branch: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.MergeWorkspaceNameTaken.
+ * Use `create(MergeWorkspaceNameTakenSchema)` to create a new message.
+ */
+export const MergeWorkspaceNameTakenSchema: GenMessage<MergeWorkspaceNameTaken> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_merge_workspace, 23);
 
