@@ -555,6 +555,21 @@ func (s *requestLoggingServer) WatchPage(
 	return serveStream(s, ctx, "WatchPage", req, stream, s.server.WatchPage)
 }
 
+func (s *requestLoggingServer) OpenTabs(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.OpenTabsRequest],
+	stream *connect.ServerStream[agentreplv1.OpenTabsResponse],
+) error {
+	return serveStream(s, ctx, "OpenTabs", req, stream, s.server.OpenTabs)
+}
+
+func (s *requestLoggingServer) ReportPageDrawn(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.ReportPageDrawnRequest],
+) (*connect.Response[agentreplv1.ReportPageDrawnResponse], error) {
+	return serveUnary(s, ctx, "ReportPageDrawn", req, s.server.ReportPageDrawn)
+}
+
 func (s *requestLoggingServer) SubscribePage(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.SubscribePageRequest],

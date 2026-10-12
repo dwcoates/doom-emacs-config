@@ -34,6 +34,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/login"
 	"agent-repld/internal/merge"
+	"agent-repld/internal/opentabs"
 	"agent-repld/internal/prompthandler"
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/publish"
@@ -1261,8 +1262,10 @@ type harness struct {
 	// ClassifierPrompt is the routing brief's updater the rpc delegates to.
 	ClassifierPrompt *fakeClassifierPrompt
 	EditorInstances  *fakeEditorInstances
-	Startup          *fakeStartup
-	ChessBoards      *fakeChessSquares
+	// Opens is the REAL OpenTabs coordinator over the fakes in OpenWorld.
+	Opens       *opentabs.Coordinator
+	OpenWorld   *fakeOpenWorld
+	ChessBoards *fakeChessSquares
 	// SlashCommands is the real catalog table, which a test feeds directly.
 	SlashCommands *commandcatalog.Catalogs
 	Surfaces      *fakeSurfaces
@@ -1313,10 +1316,16 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		NewsDigest:       &fakeNewsDigest{},
 		ClassifierPrompt: &fakeClassifierPrompt{},
 		EditorInstances:  &fakeEditorInstances{},
-		Startup:          &fakeStartup{},
+		OpenWorld:        newFakeOpenWorld(),
 		ChessBoards:      &fakeChessSquares{},
 		SlashCommands:    commandcatalog.New(),
 	}
+
+	opens, err := opentabs.New(h.OpenWorld.deps())
+	if err != nil {
+		t.Fatalf("opentabs.New: %v", err)
+	}
+	h.Opens = opens
 
 	deps := Deps{
 		DB:                h.DB,
@@ -1344,7 +1353,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		NewsDigest:        h.NewsDigest,
 		ClassifierPrompt:  h.ClassifierPrompt,
 		EditorInstances:   h.EditorInstances,
-		Startup:           h.Startup,
+		Opens:             h.Opens,
 		WebappDist:        dist,
 		ImageOrigin:       http.NotFoundHandler(),
 		ChessBoards:       h.ChessBoards,
@@ -1600,22 +1609,42 @@ func (f *fakeClassifierPrompt) Update(_ context.Context, req classifierupdate.Re
 	return f.result, f.err
 }
 
-// fakeStartup emits its scripted events, in order, to every run, and counts
-// the runs.
-type fakeStartup struct {
-	mu     sync.Mutex
-	events []*agentreplv1.DaemonStartupEvent
-	runs   int
+// fakeOpenWorld is the OpenTabs coordinator's collaborators: which
+// workspaces are live, the bring-ups it asked for, and the roster's opening
+// edges.
+type fakeOpenWorld struct {
+	mu       sync.Mutex
+	live     map[ids.WorkspaceID]bool
+	bringUps chan []ids.WorkspaceID
+	opening  []string
 }
 
-func (f *fakeStartup) Run(_ context.Context, emit func(*agentreplv1.DaemonStartupEvent)) {
-	f.mu.Lock()
-	f.runs++
-	events := f.events
-	f.mu.Unlock()
-	for _, e := range events {
-		emit(e)
+func newFakeOpenWorld() *fakeOpenWorld {
+	return &fakeOpenWorld{live: map[ids.WorkspaceID]bool{}, bringUps: make(chan []ids.WorkspaceID, 8)}
+}
+
+func (f *fakeOpenWorld) deps() opentabs.Deps {
+	return opentabs.Deps{
+		Live: func(ws ids.WorkspaceID) bool {
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			return f.live[ws]
+		},
+		BringUp: func(pending []ids.WorkspaceID, _ func(ids.WorkspaceID, error)) { f.bringUps <- pending },
+		Opening: func(ws ids.WorkspaceID, opening bool) {
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			f.opening = append(f.opening, fmt.Sprintf("%s:%v", ws, opening))
+		},
+		Now: time.Now,
+		Log: dlog.NewTestLogger(),
 	}
+}
+
+func (f *fakeOpenWorld) setLive(ws ids.WorkspaceID) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.live[ws] = true
 }
 
 // fakeEditorInstances answers a scripted verdict on every Emacs instance and

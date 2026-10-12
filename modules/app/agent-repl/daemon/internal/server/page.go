@@ -126,6 +126,9 @@ func (s *server) attachPage(id string, ctx context.Context) (*pageStream, error)
 		subs: make(map[string]*pageSubscription),
 	}
 	s.pages[id] = p
+	// THE OPENS LEARN OF THE PAGE UNDER THE SAME LOCK, so the attach and the
+	// detach of one page id reach them in the order the map changed.
+	s.deps.Opens.PageAttached(id)
 	return p, nil
 }
 
@@ -136,6 +139,9 @@ func (s *server) detachPage(p *pageStream) {
 	defer s.mu.Unlock()
 	if held, ok := s.pages[p.id]; ok && held == p {
 		delete(s.pages, p.id)
+		// Every fact the page held (what it serves, what it drew) ends
+		// with its stream.
+		s.deps.Opens.PageDetached(p.id)
 	}
 }
 
@@ -261,11 +267,19 @@ func (s *server) SubscribePage(
 	// `acceptStream` means for the dedicated rpc.
 	accepted := make(chan struct{})
 	var once sync.Once
+	served, servesWorkspace := pageSubscriptionWorkspace(req.Msg)
 	subCtx = withAcceptNotifier(subCtx, func() {
 		once.Do(func() {
 			page.mu.Lock()
 			record.accepted = true
 			page.mu.Unlock()
+			// THE PAGE SERVES ITS WORKSPACE FROM ITS FIRST ACCEPTED
+			// SUBSCRIPTION ON IT: the moment the page's watch of that
+			// workspace exists, which is what an open's `page_connected`
+			// means.
+			if servesWorkspace {
+				s.deps.Opens.PageServes(page.id, served)
+			}
 			close(accepted)
 		})
 	})

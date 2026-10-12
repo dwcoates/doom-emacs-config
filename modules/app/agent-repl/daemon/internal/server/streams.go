@@ -550,17 +550,10 @@ func (s *server) watchDaemon(
 	if msg.GetWebview() != nil {
 		digest = s.deps.NewsDigest.Topic().Subscribe(streamCtx)
 	}
-	// THE STARTUP'S EVENTS ARE THIS STREAM'S ALONE, and only a NEW Emacs
-	// process's stream has any: a reconnect reads the roster instead. A nil
-	// channel is never ready.
-	var startup <-chan *agentreplv1.WatchDaemonResponse
-	newEditor := false
 	if emacs := msg.GetEmacs(); emacs != nil {
-		isNew, err := s.editorConnected(ctx, emacs)
-		if err != nil {
+		if err := s.editorConnected(ctx, emacs); err != nil {
 			return err
 		}
-		newEditor = isNew
 		w.emacs, w.elispBuild = true, emacs.GetElispBuild()
 		faults = s.deps.LoudFaults.Subscribe(streamCtx)
 		wifi = s.deps.PersistentWifi.Topic().Subscribe(streamCtx)
@@ -583,9 +576,6 @@ func (s *server) watchDaemon(
 	s.log.Debug("WatchDaemon", "accepted a standing stream", dlog.Context{
 		"stream": w.id, "emacs": w.emacs, "elisp_build": reported,
 	})
-	if newEditor {
-		startup = s.runStartup(streamCtx)
-	}
 
 	for {
 		var push *agentreplv1.WatchDaemonResponse
@@ -616,8 +606,6 @@ func (s *server) watchDaemon(
 			push, fromState = event, false
 		case addressed := <-w.elisp:
 			push, fromState = addressed, false
-		case event := <-startup:
-			push, fromState = event, false
 		case standing, ok := <-faults:
 			wrapped, ended := standingPush(s.log, standing, ok, "fault set",
 				func(v *agentreplv1.DaemonFaultsStanding) *agentreplv1.WatchDaemonResponse {
@@ -673,20 +661,6 @@ func (s *server) watchDaemon(
 			w.done()
 		}
 	}
-}
-
-// runStartup runs the editor's startup on its own goroutine, AFTER the stream
-// was accepted, and answers the channel its events arrive on, in order. The
-// run ends with the stream.
-func (s *server) runStartup(streamCtx context.Context) <-chan *agentreplv1.WatchDaemonResponse {
-	events := make(chan *agentreplv1.WatchDaemonResponse)
-	go s.deps.Startup.Run(streamCtx, func(e *agentreplv1.DaemonStartupEvent) {
-		select {
-		case events <- &agentreplv1.WatchDaemonResponse{Push: &agentreplv1.WatchDaemonResponse_Startup{Startup: e}}:
-		case <-streamCtx.Done():
-		}
-	})
-	return events
 }
 
 // standingPush turns one receive from a standing topic only one kind of
