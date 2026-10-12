@@ -69,7 +69,7 @@ const MARKER = new RegExp(
 );
 
 module.exports = grammar({
-  name: 'tldr',
+  name: 'tldr_prompt',
 
   extras: _ => [],
 

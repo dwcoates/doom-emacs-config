@@ -1,0 +1,541 @@
+[
+  {
+    "type": "after",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "blank_line",
+          "named": true
+        },
+        {
+          "type": "connector_line",
+          "named": true
+        },
+        {
+          "type": "fence",
+          "named": true
+        },
+        {
+          "type": "header_line",
+          "named": true
+        },
+        {
+          "type": "label_line",
+          "named": true
+        },
+        {
+          "type": "other_line",
+          "named": true
+        },
+        {
+          "type": "root_line",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "before",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "blank_line",
+          "named": true
+        },
+        {
+          "type": "fence",
+          "named": true
+        },
+        {
+          "type": "header_line",
+          "named": true
+        },
+        {
+          "type": "label_line",
+          "named": true
+        },
+        {
+          "type": "other_line",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "blank_line",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "branch",
+          "named": true
+        },
+        {
+          "type": "continuation",
+          "named": true
+        },
+        {
+          "type": "raw",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "branch",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "indent",
+          "named": true
+        },
+        {
+          "type": "label",
+          "named": true
+        },
+        {
+          "type": "prefix",
+          "named": true
+        },
+        {
+          "type": "text",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "connector_line",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "branch",
+          "named": true
+        },
+        {
+          "type": "continuation",
+          "named": true
+        },
+        {
+          "type": "raw",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "continuation",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "indent",
+          "named": true
+        },
+        {
+          "type": "padding",
+          "named": true
+        },
+        {
+          "type": "prefix",
+          "named": true
+        },
+        {
+          "type": "text",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "document",
+    "named": true,
+    "root": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "after",
+          "named": true
+        },
+        {
+          "type": "before",
+          "named": true
+        },
+        {
+          "type": "blank_line",
+          "named": true
+        },
+        {
+          "type": "connector_line",
+          "named": true
+        },
+        {
+          "type": "header_line",
+          "named": true
+        },
+        {
+          "type": "root_line",
+          "named": true
+        },
+        {
+          "type": "tree",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "fence",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "fence_close",
+          "named": true
+        },
+        {
+          "type": "fence_line",
+          "named": true
+        },
+        {
+          "type": "fence_open",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "fence_close",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "info",
+          "named": true
+        },
+        {
+          "type": "language",
+          "named": true
+        },
+        {
+          "type": "rails",
+          "named": true
+        },
+        {
+          "type": "ticks",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "fence_line",
+    "named": true,
+    "fields": {
+      "class": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "blank",
+            "named": true
+          },
+          {
+            "type": "connector",
+            "named": true
+          },
+          {
+            "type": "dotted",
+            "named": true
+          },
+          {
+            "type": "header",
+            "named": true
+          },
+          {
+            "type": "other",
+            "named": true
+          },
+          {
+            "type": "root",
+            "named": true
+          }
+        ]
+      }
+    },
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "dedent",
+          "named": true
+        },
+        {
+          "type": "text",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "fence_open",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "info",
+          "named": true
+        },
+        {
+          "type": "language",
+          "named": true
+        },
+        {
+          "type": "rails",
+          "named": true
+        },
+        {
+          "type": "ticks",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "header_line",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "branch",
+          "named": true
+        },
+        {
+          "type": "continuation",
+          "named": true
+        },
+        {
+          "type": "raw",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "label_line",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "branch",
+          "named": true
+        },
+        {
+          "type": "continuation",
+          "named": true
+        },
+        {
+          "type": "raw",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "other_line",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "branch",
+          "named": true
+        },
+        {
+          "type": "continuation",
+          "named": true
+        },
+        {
+          "type": "raw",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "raw",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": false,
+      "types": [
+        {
+          "type": "text",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "root_line",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "branch",
+          "named": true
+        },
+        {
+          "type": "continuation",
+          "named": true
+        },
+        {
+          "type": "raw",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "tree",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "blank_line",
+          "named": true
+        },
+        {
+          "type": "connector_line",
+          "named": true
+        },
+        {
+          "type": "fence",
+          "named": true
+        },
+        {
+          "type": "header_line",
+          "named": true
+        },
+        {
+          "type": "root_line",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "blank",
+    "named": true
+  },
+  {
+    "type": "connector",
+    "named": true
+  },
+  {
+    "type": "dedent",
+    "named": true
+  },
+  {
+    "type": "dotted",
+    "named": true
+  },
+  {
+    "type": "header",
+    "named": true
+  },
+  {
+    "type": "indent",
+    "named": true
+  },
+  {
+    "type": "info",
+    "named": true
+  },
+  {
+    "type": "label",
+    "named": true
+  },
+  {
+    "type": "language",
+    "named": true
+  },
+  {
+    "type": "other",
+    "named": true
+  },
+  {
+    "type": "padding",
+    "named": true
+  },
+  {
+    "type": "prefix",
+    "named": true
+  },
+  {
+    "type": "rails",
+    "named": true
+  },
+  {
+    "type": "root",
+    "named": true
+  },
+  {
+    "type": "text",
+    "named": true
+  },
+  {
+    "type": "ticks",
+    "named": true
+  }
+]

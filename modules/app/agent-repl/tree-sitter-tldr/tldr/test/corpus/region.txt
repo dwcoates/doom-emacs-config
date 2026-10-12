@@ -1,0 +1,347 @@
+========================================================================
+A header, a blank line and two core lines are one tree
+========================================================================
+Response (👀 no changes made)
+
+1 🔧 Root
+└── 1.1 Child
+
+------------------------------------------------------------------------
+
+(document
+  (tree
+    (header_line
+      (continuation
+        (text)))
+    (blank_line
+      (raw))
+    (root_line
+      (branch
+        (label)
+        (text)))
+    (connector_line
+      (branch
+        (prefix)
+        (label)
+        (text)))))
+
+========================================================================
+Prose before the tree is before
+========================================================================
+Some preamble.
+
+1 🔧 Root
+└── 1.1 Child
+
+------------------------------------------------------------------------
+
+(document
+  (before
+    (other_line
+      (continuation
+        (text)))
+    (blank_line
+      (raw)))
+  (tree
+    (root_line
+      (branch
+        (label)
+        (text)))
+    (connector_line
+      (branch
+        (prefix)
+        (label)
+        (text)))))
+
+========================================================================
+Prose after the tree is after
+========================================================================
+1 🔧 Root
+└── 1.1 Child
+
+A closing note.
+
+------------------------------------------------------------------------
+
+(document
+  (tree
+    (root_line
+      (branch
+        (label)
+        (text)))
+    (connector_line
+      (branch
+        (prefix)
+        (label)
+        (text))))
+  (after
+    (blank_line
+      (raw))
+    (other_line
+      (continuation
+        (text)))))
+
+========================================================================
+A lone core line is no tree
+========================================================================
+p1
+├── 1.1 stray
+p2
+
+------------------------------------------------------------------------
+
+(document
+  (before
+    (other_line
+      (continuation
+        (text))))
+  (connector_line
+    (branch
+      (prefix)
+      (label)
+      (text)))
+  (after
+    (other_line
+      (continuation
+        (text)))))
+
+========================================================================
+A first run of one core line leaves the text with no tree
+========================================================================
+1 🔧 Root
+prose
+├── 1.1 a
+└── 1.2 b
+
+------------------------------------------------------------------------
+
+(document
+  (root_line
+    (branch
+      (label)
+      (text)))
+  (after
+    (other_line
+      (continuation
+        (text)))
+    (connector_line
+      (branch
+        (prefix)
+        (label)
+        (text)))
+    (connector_line
+      (branch
+        (prefix)
+        (label)
+        (text)))))
+
+========================================================================
+A closed fence a core line follows is inside the tree
+========================================================================
+1 🔧 Root
+├── 1.1 Code
+│   ```go
+│   x := 1
+│   ```
+└── 1.2 After
+
+------------------------------------------------------------------------
+
+(document
+  (tree
+    (root_line
+      (branch
+        (label)
+        (text)))
+    (connector_line
+      (branch
+        (prefix)
+        (label)
+        (text)))
+    (fence
+      (fence_open
+        (rails)
+        (ticks)
+        (language))
+      (fence_line
+        (other)
+        (dedent)
+        (text))
+      (fence_close
+        (rails)
+        (ticks)))
+    (connector_line
+      (branch
+        (prefix)
+        (label)
+        (text)))))
+
+========================================================================
+A closed fence no core line follows is after
+========================================================================
+1 🔧 Root
+└── 1.1 Child
+```go
+x := 1
+```
+prose
+
+------------------------------------------------------------------------
+
+(document
+  (tree
+    (root_line
+      (branch
+        (label)
+        (text)))
+    (connector_line
+      (branch
+        (prefix)
+        (label)
+        (text))))
+  (after
+    (fence
+      (fence_open
+        (ticks)
+        (language))
+      (fence_line
+        (other)
+        (text))
+      (fence_close
+        (ticks)))
+    (other_line
+      (continuation
+        (text)))))
+
+========================================================================
+An unclosed fence after the tree is after
+========================================================================
+1 🔧 Root
+└── 1.1 Child
+```go
+x := 1
+
+------------------------------------------------------------------------
+
+(document
+  (tree
+    (root_line
+      (branch
+        (label)
+        (text)))
+    (connector_line
+      (branch
+        (prefix)
+        (label)
+        (text))))
+  (after
+    (fence
+      (fence_open
+        (ticks)
+        (language))
+      (fence_line
+        (other)
+        (text)))))
+
+========================================================================
+Core lines inside a fence are never a tree
+========================================================================
+```
+1 🔧 Root
+└── 1.1 Child
+```
+
+------------------------------------------------------------------------
+
+(document
+  (before
+    (fence
+      (fence_open
+        (ticks))
+      (fence_line
+        (root)
+        (text))
+      (fence_line
+        (connector)
+        (text))
+      (fence_close
+        (ticks)))))
+
+========================================================================
+A header nearest the tree across blank lines heads it
+========================================================================
+Response (a)
+
+Response (b)
+1 🔧 Root
+└── 1.1 Child
+
+------------------------------------------------------------------------
+
+(document
+  (before
+    (header_line
+      (continuation
+        (text)))
+    (blank_line
+      (raw)))
+  (tree
+    (header_line
+      (continuation
+        (text)))
+    (root_line
+      (branch
+        (label)
+        (text)))
+    (connector_line
+      (branch
+        (prefix)
+        (label)
+        (text)))))
+
+========================================================================
+A branch line's body is its indent, prefix, label and text
+========================================================================
+1 🔧 Root
+  ├── 1.1 Child
+
+------------------------------------------------------------------------
+
+(document
+  (tree
+    (root_line
+      (branch
+        (label)
+        (text)))
+    (connector_line
+      (branch
+        (indent)
+        (prefix)
+        (label)
+        (text)))))
+
+========================================================================
+A line no branch begins is a continuation
+========================================================================
+1 🔧 Root
+└── 1.1 Child
+        wrapped text
+
+------------------------------------------------------------------------
+
+(document
+  (tree
+    (root_line
+      (branch
+        (label)
+        (text)))
+    (connector_line
+      (branch
+        (prefix)
+        (label)
+        (text))))
+  (after
+    (other_line
+      (continuation
+        (prefix)
+        (text)))))

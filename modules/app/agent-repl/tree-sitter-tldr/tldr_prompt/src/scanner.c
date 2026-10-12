@@ -97,20 +97,20 @@ static bool scan_line_end(TSLexer *lexer) {
   return true;
 }
 
-void *tree_sitter_tldr_external_scanner_create(void) { return NULL; }
-void tree_sitter_tldr_external_scanner_destroy(void *payload) { (void)payload; }
-unsigned tree_sitter_tldr_external_scanner_serialize(void *payload, char *buffer) {
+void *tree_sitter_tldr_prompt_external_scanner_create(void) { return NULL; }
+void tree_sitter_tldr_prompt_external_scanner_destroy(void *payload) { (void)payload; }
+unsigned tree_sitter_tldr_prompt_external_scanner_serialize(void *payload, char *buffer) {
   (void)payload;
   (void)buffer;
   return 0;
 }
-void tree_sitter_tldr_external_scanner_deserialize(void *payload, const char *buffer, unsigned length) {
+void tree_sitter_tldr_prompt_external_scanner_deserialize(void *payload, const char *buffer, unsigned length) {
   (void)payload;
   (void)buffer;
   (void)length;
 }
 
-bool tree_sitter_tldr_external_scanner_scan(void *payload, TSLexer *lexer, const bool *valid_symbols) {
+bool tree_sitter_tldr_prompt_external_scanner_scan(void *payload, TSLexer *lexer, const bool *valid_symbols) {
   (void)payload;
   /* Error recovery marks every symbol valid; no token here is a recovery aid. */
   if (valid_symbols[ERROR_SENTINEL]) return false;
