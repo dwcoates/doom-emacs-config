@@ -2810,38 +2810,6 @@ saying the roster had been asked for one and declined."
   (agent-repl-test-roster--roster
    :sections (list (agent-repl-test-roster--section "repo" rows))))
 
-(ert-deftest agent-repl-test-roster-a-pending-row-gets-no-tab ()
-  "The daemon has no session to offer yet, so there is nothing to open."
-  (agent-repl-test-roster--with-editor
-    ;; Act
-    (agent-repl-roster-apply
-     (agent-repl-test-roster--one-section
-      (agent-repl-test-roster--row "a" "one" :init :availability :pending)))
-    ;; Assert
-    (should-not (agent-repl--ws-by-ref-id "a"))))
-
-(ert-deftest agent-repl-test-roster-a-pending-row-holds-every-later-row ()
-  "Registry order: a ready row after a pending one waits for it."
-  (agent-repl-test-roster--with-editor
-    ;; Act
-    (agent-repl-roster-apply
-     (agent-repl-test-roster--one-section
-      (agent-repl-test-roster--row "a" "one" :init :availability :pending)
-      (agent-repl-test-roster--row "b" "two" :ready)))
-    ;; Assert
-    (should-not (agent-repl--ws-by-ref-id "b"))))
-
-(ert-deftest agent-repl-test-roster-rows-before-a-pending-row-open ()
-  "Only the rows AFTER the first pending row are held."
-  (agent-repl-test-roster--with-editor
-    ;; Act
-    (agent-repl-roster-apply
-     (agent-repl-test-roster--one-section
-      (agent-repl-test-roster--row "a" "one" :ready)
-      (agent-repl-test-roster--row "b" "two" :init :availability :pending)))
-    ;; Assert
-    (should (equal agent-repl-roster--tab-order '("one")))))
-
 (ert-deftest agent-repl-test-roster-an-unavailable-row-opens ()
   "A failed bring-up still opens; its status arm draws the failure."
   (agent-repl-test-roster--with-editor
@@ -2896,64 +2864,6 @@ saying the roster had been asked for one and declined."
       (agent-repl-test-roster--row "b" "two" :ready)))
     ;; Assert
     (should (equal agent-repl-roster--tab-order '("one" "two")))))
-
-(ert-deftest agent-repl-test-roster-a-held-pass-does-not-finish-the-bringup ()
-  "A held row is a bring-up still under way, so no FINISHED publication."
-  (agent-repl-test-roster--with-editor
-    (let (seen)
-      (agent-repl-test-roster--recording-bringup seen
-        ;; Act
-        (agent-repl-roster-apply
-         (agent-repl-test-roster--one-section
-          (agent-repl-test-roster--row "a" "one" :ready)
-          (agent-repl-test-roster--row "b" "two" :init :availability :pending))))
-      ;; Assert
-      (should-not (seq-filter (lambda (step) (nth 2 step)) seen)))))
-
-(ert-deftest agent-repl-test-roster-a-held-bringup-keeps-its-count-across-passes ()
-  "The pass that opens the held rows goes on counting the same bring-up."
-  (agent-repl-test-roster--with-editor
-    (let (seen)
-      ;; Arrange
-      (agent-repl-roster-apply
-       (agent-repl-test-roster--one-section
-        (agent-repl-test-roster--row "a" "one" :ready)
-        (agent-repl-test-roster--row "b" "two" :init :availability :pending)))
-      (agent-repl-test-roster--recording-bringup seen
-        ;; Act
-        (agent-repl-roster-apply
-         (agent-repl-test-roster--one-section
-          (agent-repl-test-roster--row "a" "one" :ready)
-          (agent-repl-test-roster--row "b" "two" :ready))))
-      ;; Assert
-      (should (equal seen '((2 2 nil) (2 2 t)))))))
-
-(ert-deftest agent-repl-test-roster-a-held-startup-leaves-the-arrival-gate-unarmed ()
-  "Rows still arriving pass by pass keep the startup's panel exemption."
-  (agent-repl-test-roster--with-editor
-    (let ((agent-repl--panels-arrivals-armed nil))
-      ;; Act
-      (agent-repl-roster-apply
-       (agent-repl-test-roster--one-section
-        (agent-repl-test-roster--row "a" "one" :init :availability :pending)))
-      ;; Assert
-      (should-not agent-repl--panels-arrivals-armed))))
-
-(ert-deftest agent-repl-test-roster-a-hold-is-recorded-once-per-row ()
-  "A bring-up pushes the roster many times; the hold is stated once."
-  (agent-repl-test-roster--with-editor
-    (let (logs)
-      (cl-letf (((symbol-function 'agent-repl--info)
-                 (lambda (_ws fmt &rest args)
-                   (push (apply #'format fmt args) logs))))
-        ;; Act
-        (dotimes (_ 2)
-          (agent-repl-roster-apply
-           (agent-repl-test-roster--one-section
-            (agent-repl-test-roster--row "a" "one" :init :availability :pending)))))
-      ;; Assert
-      (should (= 1 (seq-count (lambda (text) (string-search "elisp.roster.held:" text))
-                              logs))))))
 
 ;;;; ---- A collapsed repository's tabs are off the bar ----
 
@@ -3045,76 +2955,60 @@ Its own fold is EXPANDED here: that fold is the sidebar's, never the bar's."
         :sections (list (agent-repl-test-roster--section "repo" (list one two)))))
       (should (equal (agent-repl-roster-drawn-tab-order) '("one" "two"))))))
 
-;;;; ---- The editor's startup holds every fresh tab out of the bar ----
+;;;; ---- A fresh tab is held until the daemon answers it open ----
 
-(defmacro agent-repl-test-roster--during-startup (&rest body)
-  "Run BODY inside `agent-repl-test-roster--with-editor' with a startup under way.
-Pre-creating the input buffer is recorded in `precreated' rather than performed."
+(defmacro agent-repl-test-roster--opens-unanswered (&rest body)
+  "Run BODY inside `agent-repl-test-roster--with-editor' with opens left unanswered.
+Every request is recorded in `asked' as its list of ref ids."
   (declare (indent 0))
   `(agent-repl-test-roster--with-editor
-     (let ((agent-repl-startup--phase 'running)
-           (precreated nil))
-       (ignore precreated)
-       (cl-letf (((symbol-function 'agent-repl--ensure-input-buffer)
-                  (lambda (ws) (push ws precreated))))
-         ,@body))))
+     (let* ((asked nil)
+            (agent-repl-open-tabs-sender
+             (lambda (workspaces _on-frame _on-close)
+               (push (mapcar (lambda (w) (plist-get (plist-get w :workspace) :id)) workspaces)
+                     asked)
+               t)))
+       (ignore asked)
+       ,@body)))
 
-(ert-deftest agent-repl-test-roster-a-startup-pre-creates-a-held-row ()
-  "During the startup a fresh row's workspace is created and its input
-buffer made, but its tab is not drawn."
-  (agent-repl-test-roster--during-startup
+(ert-deftest agent-repl-test-roster-a-fresh-row-is-made-but-its-tab-held ()
+  "A fresh row's workspace is created at once, but its tab is not drawn."
+  (agent-repl-test-roster--opens-unanswered
     ;; Act
     (agent-repl-roster-apply
      (agent-repl-test-roster--one-section (agent-repl-test-roster--row "a" "one" :ready)))
     ;; Assert
-    (should (equal (agent-repl--ws-by-ref-id "a") "one"))
-    (should (equal precreated '("one")))
-    (should (null agent-repl-roster--tab-order))))
+    (should (equal (list (agent-repl--ws-by-ref-id "a") agent-repl-roster--tab-order)
+                   '("one" nil)))))
 
-(ert-deftest agent-repl-test-roster-a-startup-does-not-hold-on-a-pending-row ()
-  "During the startup the daemon's go-ahead decides, so a pending row is
-pre-created rather than held untabbed."
-  (agent-repl-test-roster--during-startup
+(ert-deftest agent-repl-test-roster-a-walk-asks-for-every-fresh-row-at-once ()
+  "Every fresh row is asked open in one request, a pending one included."
+  (agent-repl-test-roster--opens-unanswered
     ;; Act
     (agent-repl-roster-apply
      (agent-repl-test-roster--one-section
       (agent-repl-test-roster--row "a" "one" :init :availability :pending)
       (agent-repl-test-roster--row "b" "two" :ready)))
     ;; Assert
-    (should (agent-repl--ws-by-ref-id "a"))
-    (should (agent-repl--ws-by-ref-id "b"))))
+    (should (equal asked '(("a" "b"))))))
 
-(ert-deftest agent-repl-test-roster-a-tab-the-startup-opened-is-drawn ()
-  "Releasing a held tab and re-deriving the order draws it."
-  (agent-repl-test-roster--during-startup
+(ert-deftest agent-repl-test-roster-a-tab-answered-open-is-drawn ()
+  "A tab answered open is drawn once the order is re-derived."
+  (agent-repl-test-roster--opens-unanswered
     ;; Arrange
     (agent-repl-roster-apply
      (agent-repl-test-roster--one-section
       (agent-repl-test-roster--row "a" "one" :ready)
       (agent-repl-test-roster--row "b" "two" :ready)))
     ;; Act
-    (puthash "a" t agent-repl-startup--released)
+    (puthash "a" 'open agent-repl-open-tabs--state)
     (agent-repl-roster-refresh-order)
     ;; Assert
     (should (equal agent-repl-roster--tab-order '("one")))))
 
-(ert-deftest agent-repl-test-roster-the-end-of-a-startup-draws-every-tab-in-order ()
-  "Once the startup is over every tab is drawn, in walk order."
-  (agent-repl-test-roster--during-startup
-    ;; Arrange
-    (agent-repl-roster-apply
-     (agent-repl-test-roster--one-section
-      (agent-repl-test-roster--row "a" "one" :ready)
-      (agent-repl-test-roster--row "b" "two" :ready)))
-    ;; Act
-    (setq agent-repl-startup--phase 'done)
-    (agent-repl-roster-refresh-order)
-    ;; Assert
-    (should (equal agent-repl-roster--tab-order '("one" "two")))))
-
 (ert-deftest agent-repl-test-roster-a-current-naming-a-held-tab-switches-nowhere ()
-  "The selection cannot land on a tab the startup has not opened."
-  (agent-repl-test-roster--during-startup
+  "The selection cannot land on a tab not yet answered open."
+  (agent-repl-test-roster--opens-unanswered
     ;; Act
     (agent-repl-roster-apply
      (agent-repl-test-roster--roster
@@ -3125,15 +3019,15 @@ pre-created rather than held untabbed."
     (should (null agent-repl-test-roster--switched))))
 
 (ert-deftest agent-repl-test-roster-a-current-naming-an-opened-tab-is-followed ()
-  "Once the startup opened it, the same current is followed."
-  (agent-repl-test-roster--during-startup
+  "Once the tab is answered open, the same current is followed."
+  (agent-repl-test-roster--opens-unanswered
     ;; Arrange
     (agent-repl-roster-apply
      (agent-repl-test-roster--roster
       :sections (list (agent-repl-test-roster--section
                        "r" (list (agent-repl-test-roster--row "a" "one" :ready))))
       :current "a"))
-    (puthash "a" t agent-repl-startup--released)
+    (puthash "a" 'open agent-repl-open-tabs--state)
     ;; Act
     (agent-repl-roster-apply-current)
     ;; Assert

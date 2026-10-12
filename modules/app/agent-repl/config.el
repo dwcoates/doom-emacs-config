@@ -309,10 +309,12 @@ returning the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; It loads after host.el so the host accessors and hooks it reacts through
 ;; are defined before its own hook registrations run.
 (agent-repl--load-module "roster")
-;; WHY: startup.el is the editor's half of the startup bring-up: it holds
-;; the tabs roster.el reconciles until the daemon's go-ahead and each page
-;; are in.  roster.el and daemon-link.el call it at runtime only.
+;; WHY: open-tabs.el asks the daemon to open every workspace roster.el
+;; reconciles, and holds each tab until it is answered open.  roster.el calls
+;; it at runtime only.  startup.el is Doom's one-time setup its first open
+;; arms.
 (agent-repl--load-module "startup")
+(agent-repl--load-module "open-tabs")
 ;; WHY: frontends.el defines the presentation-frontend registry that
 ;; frontend.el (gui) registers into at load time.
 (agent-repl--load-module "frontends")

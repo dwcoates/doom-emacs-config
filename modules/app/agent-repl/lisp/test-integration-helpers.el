@@ -1051,15 +1051,20 @@ signals."
                 (agent-repl--webhost-input-backgrounds (make-hash-table :test 'equal))
                 (agent-repl--webhost-gate-docks (make-hash-table :test 'equal))
                 (agent-repl--webhost-reload-timer nil)
-                ;; The editor's startup is process-wide (startup.el): each
-                ;; scenario runs with it over unless it stages one itself.
-                (agent-repl-startup--phase 'done)
-                (agent-repl-startup--go-aheads nil)
-                (agent-repl-startup--next 0)
-                (agent-repl-startup--finished nil)
-                (agent-repl-startup--released (make-hash-table :test 'equal))
-                (agent-repl-startup--loaded (make-hash-table :test 'equal))
-                (agent-repl-startup--loading-said (make-hash-table :test 'equal))
+                ;; The opens are process-wide (open-tabs.el): each scenario
+                ;; runs with the startup over, its opens asked of its own
+                ;; daemon, unless it stages its own.
+                (agent-repl-open-tabs--state (make-hash-table :test 'equal))
+                (agent-repl-open-tabs--rows nil)
+                (agent-repl-open-tabs--startup 'done)
+                (agent-repl-open-tabs--startup-selected nil)
+                (agent-repl-open-tabs-sender #'agent-repl-open-tabs--send-to-daemon)
+                ;; The roster's tab order is process-wide too: a scenario's
+                ;; order must not be read by the next one.
+                (agent-repl-roster--tab-order nil)
+                (agent-repl-roster--hidden-tabs nil)
+                (agent-repl-roster--walked nil)
+                (agent-repl-roster--walked-hidden nil)
                 (agent-repl-itest--real-ws-put
                  (symbol-function 'agent-repl--ws-put))
                 (process-environment
@@ -1086,7 +1091,13 @@ signals."
                           (agent-repl-itest--note-orphaned-log-targets ws)
                           (funcall real ws reason))))
                      ((symbol-function 'agent-repl--frontend-make-webview-buffer)
-                      (agent-repl-test--fake-webview-factory 'agent-repl-itest-webview-urls)))
+                      (agent-repl-test--fake-webview-factory 'agent-repl-itest-webview-urls))
+                     ;; NO WEB VIEW unless a scenario stages one: the batch
+                     ;; Emacs may be an xwidget build, and a page made for real
+                     ;; would reach the host's native view, which no scenario
+                     ;; mocks unless it asks for one.
+                     ((symbol-function 'agent-repl--frontend-xwidget-available-p)
+                      (lambda () nil)))
          (unwind-protect
              (progn ,@body)
            ;; A verb may STAND THE LINK on its own (a daemon-admin verb can be

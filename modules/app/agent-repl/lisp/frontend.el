@@ -129,6 +129,7 @@
 (declare-function agent-repl-webhost-xwidget "webhost" ())
 (declare-function agent-repl-webhost-ensure-page "webhost" (ws))
 (declare-function agent-repl-webhost-remove "webhost" (ws))
+(declare-function agent-repl-open-tabs-hidden-p "open-tabs" (ws))
 (declare-function agent-repl-webhost-reload-page "webhost" (ws))
 (declare-function agent-repl-webhost-show "webhost" (ws))
 (declare-function agent-repl-webhost-buffer "webhost" ())
@@ -831,10 +832,7 @@ webview window resolves against the worktree the REPL is attached to."
       ;; The page's gate wears the input window's color; the host keeps it
       ;; and hands it to the page on every load of the page.
       (when (fboundp 'agent-repl-window-tell-input-background)
-        (agent-repl-window-tell-input-background ws))
-      ;; The editor's startup opens WS's tab only once its page drew.
-      (when (fboundp 'agent-repl-startup-note-page-loaded)
-        (agent-repl-startup-note-page-loaded ws)))
+        (agent-repl-window-tell-input-background ws)))
     (agent-repl--align-buffer-to-ws-dir buf ws)
     buf))
 
@@ -1113,6 +1111,8 @@ Refusals, all preconditions rather than failures:
   - `:no-ref'            no `WorkspaceRef' yet, so no URL exists to
                          mount — the roster has not reached this
                          workspace, and a guessed URL is not an option;
+  - `:hidden'            the user hid it, or its repository section is
+                         collapsed: it runs nothing (open-tabs.el);
   - `:already-mounted'   a live webview buffer already exists (this is
                          what makes pre-creation idempotent);
   - `:no-xwidget'        an Emacs with no xwidget support has no webview
@@ -1121,6 +1121,7 @@ Refusals, all preconditions rather than failures:
    ((not (agent-repl--ws-live-p ws)) :not-live)
    ((not (agent-repl--ws-gui-frontend-p ws)) :not-gui)
    ((null (and (fboundp 'agent-repl-host-ref) (agent-repl-host-ref ws))) :no-ref)
+   ((and (fboundp 'agent-repl-open-tabs-hidden-p) (agent-repl-open-tabs-hidden-p ws)) :hidden)
    ((buffer-live-p (agent-repl--ws-get ws :frontend-buffer)) :already-mounted)
    ((not (agent-repl--frontend-xwidget-available-p)) :no-xwidget)))
 

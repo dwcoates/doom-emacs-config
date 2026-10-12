@@ -838,16 +838,16 @@ re-routes their frontend resolution instead."
          ;; whether a LATER test's arrival opens panels at all.
          (agent-repl--panels-arrivals-armed nil)
          (agent-repl--panels-arrival-reasons (make-hash-table :test 'equal))
-         ;; The editor's startup (startup.el) is process-wide and holds every
-         ;; tab from process start: a test reconciling a roster runs with the
-         ;; startup OVER unless it stages one itself.
-         (agent-repl-startup--phase 'done)
-         (agent-repl-startup--go-aheads nil)
-         (agent-repl-startup--next 0)
-         (agent-repl-startup--finished nil)
-         (agent-repl-startup--released (make-hash-table :test 'equal))
-         (agent-repl-startup--loaded (make-hash-table :test 'equal))
-         (agent-repl-startup--loading-said (make-hash-table :test 'equal))
+         ;; The opens (open-tabs.el) are process-wide and hold every tab
+         ;; until the daemon answers it open: a test reconciling a roster
+         ;; runs with the startup OVER and every open answered ready at once
+         ;; (`agent-repl-test--open-tabs-answer-ready'), unless it stages
+         ;; its own.
+         (agent-repl-open-tabs--state (make-hash-table :test 'equal))
+         (agent-repl-open-tabs--rows nil)
+         (agent-repl-open-tabs--startup 'done)
+         (agent-repl-open-tabs--startup-selected nil)
+         (agent-repl-open-tabs-sender #'agent-repl-test--open-tabs-answer-ready)
          (agent-repl-roster--walked nil)
          (agent-repl-roster--walked-hidden nil))
      (unwind-protect
@@ -859,6 +859,16 @@ re-routes their frontend resolution instead."
                     (when (buffer-live-p buf) (kill-buffer buf))))
                 agent-repl--open-progress)
        nil)))
+
+(defun agent-repl-test--open-tabs-answer-ready (workspaces on-frame _on-close)
+  "Stand in for the daemon: answer every one of WORKSPACES open, at once.
+ON-FRAME takes each `opened' frame, as the daemon's stream would hand it."
+  (dolist (workspace workspaces)
+    (funcall on-frame (list :arm :opened
+                            :value (list :workspace (plist-get workspace :workspace)
+                                         :at-ms 0
+                                         :outcome (list :arm :ready :value nil)))))
+  t)
 
 (defmacro agent-repl-test--with-mocked-git-probes (&rest body)
   "Execute BODY with the git-probe external-boundary wrappers stubbed.

@@ -2160,8 +2160,8 @@ is moved to a real workspace first so the kill does not strand it."
        ;; and selected it on the daemon.  The pass after the startup's
        ;; selection lands deletes the pseudos with the frame already off them.
        ((and (agent-repl--pseudo-workspace-name-p (agent-repl--ws-current-name))
-             (fboundp 'agent-repl-startup-choosing-p)
-             (agent-repl-startup-choosing-p))
+             (fboundp 'agent-repl-open-tabs-choosing-p)
+             (agent-repl-open-tabs-choosing-p))
         (setq agent-repl--pseudo-perspectives-deferred t)
         (agent-repl--info
          '(:agent-repl-central "workspace numbering spans the whole session")
@@ -2190,7 +2190,7 @@ is moved to a real workspace first so the kill does not strand it."
              "elisp.workspace.pseudo-delete-skip-nil ws=%s (persp-nil is not killable)"
              pseudo))))))))
 
-(declare-function agent-repl-startup-choosing-p "startup" ())
+(declare-function agent-repl-open-tabs-choosing-p "open-tabs" ())
 
 (defun agent-repl--delete-pseudos-on-activation (&rest _)
   "Run a deferred pseudo deletion once the frame stands on a real workspace.
