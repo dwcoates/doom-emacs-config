@@ -1,7 +1,6 @@
 package dlog
 
 import (
-	"agent-repld/internal/envc"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -30,8 +29,6 @@ type surfaces struct {
 	// where every workspace sink's daemon-owned target is minted.
 	logsDir string
 	mirror  *mirror
-	// pipe is the test log pipe, nil unless EnvTestLogPipe is set.
-	pipe *logPipe
 	// window is the process's live level: a level other than info reverts to
 	// info by itself when its window ends (see admits).
 	window *logging.Window
@@ -131,21 +128,8 @@ func OpenSurfaces(runLog string) (Surfaces, error) {
 	if err != nil {
 		return nil, err
 	}
-	sock, err := testLogPipeFromEnv(envc.Load(), os.Getenv)
+	s, err := openSurfacesWindow(runLog, logging.NewWindow(sel, time.Now), os.Stderr)
 	if err != nil {
-		return nil, err
-	}
-	var pipe *logPipe
-	if sock != "" {
-		if pipe, err = dialLogPipe(sock, filepath.Dir(runLog), os.Getpid()); err != nil {
-			return nil, err
-		}
-	}
-	s, err := openSurfacesPiped(runLog, logging.NewWindow(sel, time.Now), os.Stderr, pipe)
-	if err != nil {
-		if pipe != nil {
-			_ = pipe.close()
-		}
 		return nil, err
 	}
 	if message, ok := sel.Note(); ok {
@@ -166,13 +150,6 @@ func openSurfaces(runLogPath, configuredLevel string, terminal interface{ Write(
 
 // openSurfacesWindow opens the surfaces on a live level window.
 func openSurfacesWindow(runLogPath string, window *logging.Window, terminal interface{ Write([]byte) (int, error) }) (*surfaces, error) {
-	return openSurfacesPiped(runLogPath, window, terminal, nil)
-}
-
-// openSurfacesPiped opens the surfaces with the test log pipe, which carries
-// the run log's and the routed sinks' records and the terminal mirror when it
-// is not nil.
-func openSurfacesPiped(runLogPath string, window *logging.Window, terminal interface{ Write([]byte) (int, error) }, pipe *logPipe) (*surfaces, error) {
 	if window == nil {
 		panic("dlog: nil level window")
 	}
@@ -180,18 +157,9 @@ func openSurfacesPiped(runLogPath string, window *logging.Window, terminal inter
 	if err != nil {
 		return nil, fmt.Errorf("open the daemon run log (boot fatal): %w", err)
 	}
-	if pipe != nil {
-		if err := pipe.send(PipeOpen, runLogPath, nil); err != nil {
-			_ = rl.close()
-			return nil, fmt.Errorf("route the daemon run log (boot fatal): %w", err)
-		}
-		rl.pipe = pipe
-		terminal = pipeTerminal{p: pipe}
-	}
 	s := &surfaces{
 		runLog:     rl,
 		logsDir:    filepath.Dir(runLogPath),
-		pipe:       pipe,
 		mirror:     newMirror(terminal, mirrorDepth),
 		window:     window,
 		pid:        os.Getpid(),
@@ -663,11 +631,6 @@ func (s *surfaces) Close() error {
 		firstErr = err
 	}
 	s.mirror.close()
-	if s.pipe != nil {
-		if err := s.pipe.close(); err != nil && firstErr == nil {
-			firstErr = err
-		}
-	}
 	return firstErr
 }
 
@@ -740,13 +703,6 @@ func (s *surfaces) resolve(dir, name string) (*workspaceSinks, *sink, error) {
 	sk, err := openSink(s.logsDir, ws.dir, ws.id, name, s.targets[key], !ws.detached)
 	if err != nil {
 		return nil, nil, fmt.Errorf("open %s.log for workspace %s: %w", name, ws.id, err)
-	}
-	if s.pipe != nil && name != "shim" {
-		if err := s.pipe.send(PipeOpen, sk.target, nil); err != nil {
-			_ = sk.close()
-			return nil, nil, fmt.Errorf("route %s.log for workspace %s: %w", name, ws.id, err)
-		}
-		sk.pipe = s.pipe
 	}
 	s.targets[key] = sk.target
 	ws.sinks[name] = sk
