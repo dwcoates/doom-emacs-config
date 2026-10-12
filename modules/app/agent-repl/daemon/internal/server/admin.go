@@ -65,8 +65,8 @@ func (s *server) UpdateShutdownSchedule(
 }
 
 // UpdateMergeQueue is the operator's control of the merge queue: pause or
-// resume (daemon-wide when the repository ref is UNSET), or evict one
-// workspace's queued merge.
+// resume (daemon-wide when the repository ref is UNSET), evict one
+// workspace's queued merge, or move one to the front of its queue.
 func (s *server) UpdateMergeQueue(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.UpdateMergeQueueRequest],
@@ -83,6 +83,20 @@ func (s *server) UpdateMergeQueue(
 			return answer(resp, cerr)
 		}
 		if err := s.deps.Merge.Evict(ctx, subject.Record.ID); err != nil {
+			return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
+		}
+		resp.Result = &agentreplv1.UpdateMergeQueueResponse_Success{
+			Success: &agentreplv1.UpdateMergeQueueSuccess{},
+		}
+		return connect.NewResponse(resp), nil
+	}
+
+	if front := req.Msg.GetFront(); front != nil {
+		subject, cerr, done := s.subjectFor(ctx, rpc, front.GetWorkspace(), resp)
+		if done {
+			return answer(resp, cerr)
+		}
+		if err := s.deps.Merge.Front(ctx, subject.Record.ID); err != nil {
 			return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
 		}
 		resp.Result = &agentreplv1.UpdateMergeQueueResponse_Success{
