@@ -939,24 +939,53 @@ func TestScanNeverLooksBelowTheSpoolRootsOtherEntries(t *testing.T) {
 	}
 }
 
-func TestSpoolPatternsGlobBelowTheRootWhenItIsTheUIDDir(t *testing.T) {
+func TestSpoolPatternsChooseOneSpellingPerRoot(t *testing.T) {
 	tests := []struct {
-		name string
-		root string
-		want []string
+		name       string
+		root       string
+		hasUIDDirs bool
+		want       []string
 	}{
-		{name: "the uid dir itself", root: "/tmp/claude-501", want: []string{"/tmp/claude-501/*/*/tasks/*.output"}},
-		{name: "the uid dir's parent", root: "/tmp", want: []string{"/tmp/claude-*/*/*/tasks/*.output"}},
+		{name: "a parent holding uid dirs", root: "/scratch/spool", hasUIDDirs: true, want: []string{"/scratch/spool/claude-*/*/*/tasks/*.output"}},
+		{name: "the uid dir itself, named claude-<uid>", root: "/tmp/claude-501", want: []string{"/tmp/claude-501/*/*/tasks/*.output"}},
+		{name: "the uid dir itself, under any name", root: "/scratch/001", want: []string{"/scratch/001/*/*/tasks/*.output"}},
+		{name: "the system temp dir before any uid dir exists", root: "/tmp", want: []string{"/tmp/claude-*/*/*/tasks/*.output"}},
+		{name: "the system temp dir by its real path", root: "/private/tmp", want: []string{"/private/tmp/claude-*/*/*/tasks/*.output"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Act
-			got := spoolPatterns(tt.root)
+			got := spoolPatternsFor(tt.root, tt.hasUIDDirs)
 
 			// Assert
 			if fmt.Sprint(got) != fmt.Sprint(tt.want) {
-				t.Fatalf("spoolPatterns(%q) = %v, want %v", tt.root, got, tt.want)
+				t.Fatalf("spoolPatternsFor(%q, %t) = %v, want %v", tt.root, tt.hasUIDDirs, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestScanFindsASpoolWhenTheRootIsAnUnnamedUIDDir(t *testing.T) {
+	// Arrange: the e2e harness points --spool-root at a temp dir its vendor
+	// writes into directly, named nothing like claude-<uid>.
+	base := t.TempDir()
+	root := filepath.Join(base, "config-a")
+	spool := filepath.Join(base, "001")
+	for _, dir := range []string{root, spool} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("creating %s: %v", dir, err)
+		}
+	}
+	write(t, filepath.Join(spool, "-Users-me-work", "sess-1", "tasks", "b1f.output"))
+	var logs []string
+	log := logging.New(sliceWriter{lines: &logs}, io.Discard).With(logging.Context{Component: "discover-test"})
+	d := New([]string{root}, spool, log)
+
+	// Act.
+	got := find(t, d.Scan(), "b1f.output")
+
+	// Assert.
+	if got.Kind != tail.KindShellSpool || got.TaskID != "b1f" {
+		t.Fatalf("target = %+v, want the shell spool b1f", got)
 	}
 }
