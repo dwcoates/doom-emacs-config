@@ -1,8 +1,9 @@
-// Package mergeworkspace runs the parts of a DETACHED MERGE that are not the
-// merge itself (agentrepl.v1.MergeWorkspaceSourceOwnBranchDetached): forking
-// the merge workspace the merge runs in, handing the merge's outcome back to
-// the conversation that asked for it, and removing merge workspaces nobody has
-// used for 15 calendar days. The merge package reaches it only through
+// Package mergeworkspace runs the parts of an ASYNC (detached) MERGE that are
+// not the merge itself (agentrepl.v1.MergeWorkspaceSourceOwnBranchDetached):
+// forking the hidden merge workspace the merge runs in, revealing it when it
+// needs the user, handing the merge's outcome back to the conversation that
+// asked for it, and removing merge workspaces nobody has used for 15 calendar
+// days. The merge package reaches it only through
 // merge.DetachedMerges, so nothing about detached merges leaks into the merge
 // run.
 package mergeworkspace
@@ -38,8 +39,12 @@ const IdleLimit = 15 * 24 * time.Hour
 
 // Workspaces is the workspace verbs this package uses.
 type Workspaces interface {
-	// CreateMergeWorkspace creates a detached merge's merge workspace.
-	CreateMergeWorkspace(ctx context.Context, requester wsm.Workspace, origin wsm.MergeOrigin, branch string) (wsm.Workspace, error)
+	// CreateMergeWorkspace creates an async merge's hidden merge workspace,
+	// named NAME (the name its request reserved) and checked out on BASE.
+	CreateMergeWorkspace(ctx context.Context, requester wsm.Workspace, origin wsm.MergeOrigin, name, base string) (wsm.Workspace, error)
+	// RevealMergeWorkspace draws a hidden merge workspace in the tab bar and
+	// the sidebar from now on, answering whether this call revealed it.
+	RevealMergeWorkspace(ctx context.Context, ws ids.WorkspaceID) (bool, error)
 	// Nuke destroys a workspace: its session, worktree, branch and records.
 	Nuke(ctx context.Context, ws ids.WorkspaceID) error
 }
@@ -80,9 +85,9 @@ func New(deps Deps) *Service {
 
 // Fork answers the merge workspace forked for REQUEST, creating it when none is
 // registered: a restart that cut a hand-off short finds the one it forked.
-func (s *Service) Fork(ctx context.Context, requester wsm.Workspace, request wsm.DetachedMergeID, branch string) (wsm.Workspace, error) {
+func (s *Service) Fork(ctx context.Context, requester wsm.Workspace, request wsm.DetachedMergeID, name, base string) (wsm.Workspace, error) {
 	log := s.deps.Log.Global()
-	fields := dlog.Context{"requester": string(requester.ID), "request": string(request), "branch": branch}
+	fields := dlog.Context{"requester": string(requester.ID), "request": string(request), "name": name, "base": base}
 	existing, found, err := s.deps.DB.MergeWorkspaceFor(ctx, request)
 	if err != nil {
 		log.Error(op, "could not read whether a detached merge's workspace was already forked", withCause(fields, err))
@@ -94,13 +99,19 @@ func (s *Service) Fork(ctx context.Context, requester wsm.Workspace, request wsm
 		return existing, nil
 	}
 	// Create records its own failures at their site.
-	created, err := s.deps.Workspaces.CreateMergeWorkspace(ctx, requester, wsm.MergeOrigin{Requester: requester.ID, Request: request}, branch)
+	created, err := s.deps.Workspaces.CreateMergeWorkspace(ctx, requester, wsm.MergeOrigin{Requester: requester.ID, Request: request}, name, base)
 	if err != nil {
 		return wsm.Workspace{}, err
 	}
 	fields["merge_workspace"] = string(created.ID)
-	log.Info(op, "forked the merge workspace a detached merge runs in", fields)
+	log.Info(op, "forked the hidden merge workspace an async merge runs in", fields)
 	return created, nil
+}
+
+// Reveal draws hidden merge workspace MERGEWS in the tab bar and the sidebar
+// from now on. The workspace verb records its own failures at their site.
+func (s *Service) Reveal(ctx context.Context, mergeWS ids.WorkspaceID) (bool, error) {
+	return s.deps.Workspaces.RevealMergeWorkspace(ctx, mergeWS)
 }
 
 // HandBack reports how a detached merge ended to REQUESTER's conversation: a
@@ -141,10 +152,10 @@ func handbackText(mergeWS wsm.Workspace, out merge.DetachedOutcome) (string, str
 	switch out.Kind {
 	case merge.DetachedLanded:
 		return fmt.Sprintf("merge of %s landed", out.Branch),
-			fmt.Sprintf("%s. Its merge workspace `%s` is closed now; the user can still open it to read the merge's own conversation.", out.Summary, mergeWS.Name), nil
+			fmt.Sprintf("%s. Its merge workspace `%s` is closed now and listed under Recently Merged; the user can still open it to read the merge's own conversation.", out.Summary, mergeWS.Name), nil
 	case merge.DetachedFailed:
 		return fmt.Sprintf("merge of %s failed", out.Branch),
-			fmt.Sprintf("It failed: %s. Its merge workspace `%s` is still open, at %s, exactly where the merge stopped; the user can switch to it to finish the merge.", out.Summary, mergeWS.Name, mergeWS.Dir), nil
+			fmt.Sprintf("It failed: %s. Its merge workspace `%s` is now shown in the tab bar and the sidebar, at %s, exactly where the merge stopped; the user can switch to it to finish the merge.", out.Summary, mergeWS.Name, mergeWS.Dir), nil
 	case merge.DetachedAbandoned:
 		return fmt.Sprintf("merge of %s did not run", out.Branch),
 			fmt.Sprintf("It did not run: %s.", out.Summary), nil

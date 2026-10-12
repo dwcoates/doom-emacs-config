@@ -1,10 +1,6 @@
 package mergetab
 
 import (
-	"os"
-	"path/filepath"
-	"regexp"
-	"strings"
 	"testing"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -26,70 +22,48 @@ func tabsOfEveryArm() map[protoreflect.Name]*frontendv1.FeedMergeTab {
 	return out
 }
 
-func TestEveryArmCarryingASwitchIsAgentic(t *testing.T) {
+// classified is every arm of FeedMergeTab.kind and whether its content is a
+// session's conversation. An arm missing here fails the test below, so a new
+// arm is classified the moment it lands.
+var classified = map[protoreflect.Name]bool{
+	"queue":         false,
+	"pick":          true,
+	"pre_prompt":    true,
+	"rebasing":      false,
+	"conflicts":     true,
+	"tests":         false,
+	"fixes":         true,
+	"committing":    false,
+	"updating_main": false,
+	"post_prompt":   true,
+}
+
+func TestAgenticClassifiesEveryArm(t *testing.T) {
 	for name, tab := range tabsOfEveryArm() {
 		t.Run(string(name), func(t *testing.T) {
-			// Arrange: whether the arm's message declares a workspace switch.
-			oneof := tab.ProtoReflect().Descriptor().Oneofs().ByName("kind")
-			arm := oneof.Fields().ByName(name).Message()
-			declares := arm.Fields().ByName("workspace_switch") != nil
+			// Arrange
+			want, known := classified[name]
+			if !known {
+				t.Fatalf("arm %q is not classified as agentic or resolved", name)
+			}
 
 			// Act
-			set := SetSwitch(tab, &frontendv1.FeedMergeTabWorkspaceSwitch{})
+			got := Agentic(tab)
 
-			// Assert: exactly the arms that declare a switch are agentic, and a
-			// switch set is the switch read back.
-			if set != declares {
-				t.Fatalf("SetSwitch = %v, want %v for an arm that declares a switch: %v", set, declares, declares)
-			}
-			if (Switch(tab) != nil) != declares {
-				t.Fatalf("Switch = %v, want one exactly when the arm declares it", Switch(tab))
+			// Assert
+			if got != want {
+				t.Fatalf("Agentic(%s) = %v, want %v", name, got, want)
 			}
 		})
 	}
 }
 
-func TestSwitchIsNilOnAnAgenticTabThatCarriesNone(t *testing.T) {
+func TestAgenticIsFalseForATabWithNoArm(t *testing.T) {
 	// Arrange
-	tab := &frontendv1.FeedMergeTab{Kind: &frontendv1.FeedMergeTab_Conflicts{Conflicts: &frontendv1.FeedMergeTabConflicts{}}}
+	tab := &frontendv1.FeedMergeTab{}
 
 	// Act / Assert
-	if Switch(tab) != nil {
-		t.Fatal("Switch answered a switch the tab does not carry")
-	}
-}
-
-// agenticArmSwitch matches a read or a write of one agentic arm's switch.
-var agenticArmSwitch = regexp.MustCompile(`\.(PrePrompt|Conflicts|Fixes|PostPrompt)\.(Get)?WorkspaceSwitch`)
-
-func TestTheAgenticArmsAreSpelledOnlyHere(t *testing.T) {
-	// Arrange: every daemon source outside this package and the generated code.
-	root := filepath.Join("..", "..")
-	var offenders []string
-
-	// Act
-	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") || strings.Contains(path, string(filepath.Separator)+"mergetab"+string(filepath.Separator)) {
-			return nil
-		}
-		source, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		if agenticArmSwitch.Match(source) {
-			offenders = append(offenders, path)
-		}
-		return nil
-	})
-
-	// Assert: no other file reaches an agentic tab's switch arm by arm.
-	if err != nil {
-		t.Fatalf("WalkDir: %v", err)
-	}
-	if len(offenders) != 0 {
-		t.Fatalf("%v set an agentic tab's switch themselves, want mergetab.SetSwitch", offenders)
+	if Agentic(tab) {
+		t.Fatal("Agentic answered true for a tab with no arm set")
 	}
 }

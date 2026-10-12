@@ -31,14 +31,26 @@ type fakeWorkspaces struct {
 	onNuke  func()
 	created []string
 	nuked   []ids.WorkspaceID
+	// revealErr fails every reveal; revealed is each reveal's answer.
+	revealErr error
+	revealed  bool
+	reveals   []ids.WorkspaceID
 }
 
-func (f *fakeWorkspaces) CreateMergeWorkspace(ctx context.Context, requester wsm.Workspace, origin wsm.MergeOrigin, branch string) (wsm.Workspace, error) {
-	f.created = append(f.created, string(requester.ID)+":"+branch)
+func (f *fakeWorkspaces) CreateMergeWorkspace(ctx context.Context, requester wsm.Workspace, origin wsm.MergeOrigin, name, base string) (wsm.Workspace, error) {
+	f.created = append(f.created, string(requester.ID)+":"+name+":"+base)
 	if f.createErr != nil {
 		return wsm.Workspace{}, f.createErr
 	}
 	return register(f.t, f.db, "sample-merge", &origin), nil
+}
+
+func (f *fakeWorkspaces) RevealMergeWorkspace(_ context.Context, ws ids.WorkspaceID) (bool, error) {
+	if f.revealErr != nil {
+		return false, f.revealErr
+	}
+	f.reveals = append(f.reveals, ws)
+	return f.revealed, nil
 }
 
 // Nuke records the nuke and, as a real nuke does, removes the workspace from
@@ -165,14 +177,14 @@ func TestForkCreatesTheMergeWorkspace(t *testing.T) {
 	requester := register(t, f.db, "sample", nil)
 
 	// Act
-	ws, err := f.svc.Fork(context.Background(), requester, "request-1", "sample")
+	ws, err := f.svc.Fork(context.Background(), requester, "request-1", "reconnect-fix", "sample")
 
 	// Assert
 	if err != nil || ws.MergeOf == nil || ws.MergeOf.Request != "request-1" {
 		t.Fatalf("Fork = %+v, %v; want the merge workspace forked for the request", ws, err)
 	}
-	if len(f.workspaces.created) != 1 || f.workspaces.created[0] != string(requester.ID)+":sample" {
-		t.Fatalf("created = %v, want one of the requester's branch", f.workspaces.created)
+	if len(f.workspaces.created) != 1 || f.workspaces.created[0] != string(requester.ID)+":reconnect-fix:sample" {
+		t.Fatalf("created = %v, want one named reconnect-fix on the requester's branch", f.workspaces.created)
 	}
 }
 
@@ -183,7 +195,7 @@ func TestForkFindsTheWorkspaceARestartLeftForked(t *testing.T) {
 	forked := register(t, f.db, "sample-merge", &wsm.MergeOrigin{Requester: requester.ID, Request: "request-1"})
 
 	// Act
-	ws, err := f.svc.Fork(context.Background(), requester, "request-1", "sample")
+	ws, err := f.svc.Fork(context.Background(), requester, "request-1", "reconnect-fix", "sample")
 
 	// Assert
 	if err != nil || ws.ID != forked.ID || len(f.workspaces.created) != 0 {
@@ -198,11 +210,39 @@ func TestForkAnswersTheCreatesFailure(t *testing.T) {
 	f.workspaces.createErr = errors.New("no worktree")
 
 	// Act
-	_, err := f.svc.Fork(context.Background(), requester, "request-1", "sample")
+	_, err := f.svc.Fork(context.Background(), requester, "request-1", "reconnect-fix", "sample")
 
 	// Assert
 	if !errors.Is(err, f.workspaces.createErr) {
 		t.Fatalf("Fork = %v, want the create's failure", err)
+	}
+}
+
+func TestRevealRevealsThroughTheWorkspaceVerb(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.workspaces.revealed = true
+
+	// Act
+	revealed, err := f.svc.Reveal(context.Background(), "ws-merge")
+
+	// Assert
+	if err != nil || !revealed || len(f.workspaces.reveals) != 1 || f.workspaces.reveals[0] != "ws-merge" {
+		t.Fatalf("Reveal = %v, %v, reveals %v; want the verb's answer", revealed, err, f.workspaces.reveals)
+	}
+}
+
+func TestRevealAnswersTheVerbsFailure(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.workspaces.revealErr = errors.New("the registry could not be written")
+
+	// Act
+	_, err := f.svc.Reveal(context.Background(), "ws-merge")
+
+	// Assert
+	if !errors.Is(err, f.workspaces.revealErr) {
+		t.Fatalf("Reveal = %v, want the verb's failure", err)
 	}
 }
 
@@ -215,9 +255,9 @@ func TestHandBackSubmitsADeferredReportLedByItsLabel(t *testing.T) {
 		wantText  string
 	}{
 		{name: "landed", outcome: merge.DetachedOutcome{Kind: merge.DetachedLanded, Summary: "it landed as commit abc", Branch: "sample"},
-			wantLabel: "merge of sample landed", wantText: "is closed now"},
+			wantLabel: "merge of sample landed", wantText: "Recently Merged"},
 		{name: "failed", outcome: merge.DetachedOutcome{Kind: merge.DetachedFailed, Summary: "tests failed", Branch: "sample"},
-			wantLabel: "merge of sample failed", wantText: "/w/sample-merge"},
+			wantLabel: "merge of sample failed", wantText: "now shown in the tab bar and the sidebar, at /w/sample-merge"},
 		{name: "abandoned", outcome: merge.DetachedOutcome{Kind: merge.DetachedAbandoned, Summary: "the fork failed", Branch: "sample"},
 			wantLabel: "merge of sample did not run", wantText: "the fork failed"},
 	}
