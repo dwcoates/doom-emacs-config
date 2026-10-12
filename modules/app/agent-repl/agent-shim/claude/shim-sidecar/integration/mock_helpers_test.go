@@ -126,11 +126,26 @@ func takeMockDriveSlot(t *testing.T) {
 }
 
 // mockShimDir is the shim package's root — READ-ONLY to this suite. Nothing
-// here ever writes under it except the `npm ci` / `npm run build` the shim's
-// own AGENTS.md documents.
+// here ever writes under it except the `npm ci` its own AGENTS.md documents:
+// the bundle is built into mockShimRoot, never into the package's dist/.
 func mockShimDir() string {
 	return filepath.Join(repo.agentShimDir, "claude", "shim")
 }
+
+// mockShimRoot is this test binary's private directory for the mocked
+// vendor's bundle, made by the first build and removed by
+// removeMockShimRoot when the suite ends. Empty until a build makes it.
+var mockShimRoot string
+
+// THE BUNDLE IS PRIVATE, NEVER THE PACKAGE'S OWN dist/main.js. The shim
+// suite's integration files spawn dist/main.js from the same checkout, and
+// the full run schedules the two suites side by side: a `npm run build` here
+// rewrote that file while the shim suite was starting a process from it, so
+// node read a half-written bundle and died on "Unexpected end of input".
+// Building through build.mjs's SHIM_BUILD_OUTFILE into a directory only this
+// binary knows makes that collision impossible rather than unlikely — the
+// same way the e2e suite stages its own bundle (e2e/main_test.go
+// buildShimBundle).
 
 // mockShimEntry builds the shim once per test binary and answers the bundle's
 // path. A machine without node or npm SKIPS the whole mock package loudly: the
@@ -154,25 +169,76 @@ func mockShimEntry(t *testing.T) string {
 func buildMockShim() (string, error) {
 	dir := mockShimDir()
 	if _, err := os.Stat(filepath.Join(dir, "node_modules")); errors.Is(err, fs.ErrNotExist) {
-		if out, err := runIn(dir, "npm", "ci", "--no-audit", "--no-fund"); err != nil {
+		if out, err := runIn(dir, nil, "npm", "ci", "--no-audit", "--no-fund"); err != nil {
 			return "", fmt.Errorf("npm ci in %s: %v\n%s", dir, err, out)
 		}
 	} else if err != nil {
 		return "", fmt.Errorf("stat %s/node_modules: %w", dir, err)
 	}
-	if out, err := runIn(dir, "npm", "run", "build"); err != nil {
-		return "", fmt.Errorf("npm run build in %s: %v\n%s", dir, err, out)
+	root, err := os.MkdirTemp("", "agent-repl-mock-shim-")
+	if err != nil {
+		return "", fmt.Errorf("make the mocked vendor's bundle dir: %w", err)
 	}
-	entry := filepath.Join(dir, "dist", "main.js")
+	mockShimRoot = root
+	entry := filepath.Join(root, "dist", "main.js")
+	if err := stageMockShimSiblings(dir, filepath.Dir(entry)); err != nil {
+		return "", err
+	}
+	if out, err := runIn(dir, []string{"SHIM_BUILD_OUTFILE=" + entry}, "node", "build.mjs"); err != nil {
+		return "", fmt.Errorf("build the mocked vendor's bundle into %s: %v\n%s", entry, err, out)
+	}
 	if _, err := os.Stat(entry); err != nil {
 		return "", fmt.Errorf("the build produced no bundle at %s: %w", entry, err)
 	}
-	return entry, nil
+	// Node resolves a module's own URL to its REAL path, and the shim's argv[1]
+	// self-check compares the two, so a symlinked temp root (macOS:
+	// /var/folders -> /private/var/folders) must be resolved here.
+	real, err := filepath.EvalSymlinks(entry)
+	if err != nil {
+		return "", fmt.Errorf("resolve the mocked vendor's bundle path: %w", err)
+	}
+	return real, nil
 }
 
-func runIn(dir, name string, args ...string) (string, error) {
+// stageMockShimSiblings gives the private bundle in OUTDIR the siblings it
+// resolves at runtime from beside itself: the package's node_modules (the
+// vendor SDK is kept external, agent-shim/claude/shim/build.mjs) and its
+// package.json (src/main.ts reads "../package.json"). Both are staged beside
+// the bundle and one level up, so neither lookup depends on the depth.
+func stageMockShimSiblings(shimDir, outDir string) error {
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		return fmt.Errorf("make %s: %w", outDir, err)
+	}
+	pkg, err := os.ReadFile(filepath.Join(shimDir, "package.json"))
+	if err != nil {
+		return fmt.Errorf("read the shim's package.json: %w", err)
+	}
+	for _, at := range []string{outDir, filepath.Dir(outDir)} {
+		if err := os.WriteFile(filepath.Join(at, "package.json"), pkg, 0o644); err != nil {
+			return fmt.Errorf("stage package.json in %s: %w", at, err)
+		}
+		if err := os.Symlink(filepath.Join(shimDir, "node_modules"), filepath.Join(at, "node_modules")); err != nil {
+			return fmt.Errorf("link the shim's node_modules into %s: %w", at, err)
+		}
+	}
+	return nil
+}
+
+// removeMockShimRoot removes the private bundle directory, if a build made
+// one. The suite's teardown; a failure is said, since it leaks a temp tree.
+func removeMockShimRoot() {
+	if mockShimRoot == "" {
+		return
+	}
+	if err := os.RemoveAll(mockShimRoot); err != nil {
+		fmt.Fprintf(os.Stderr, "integration: removing the mocked vendor's bundle dir %s: %v\n", mockShimRoot, err)
+	}
+}
+
+func runIn(dir string, env []string, name string, args ...string) (string, error) {
 	cmd := exec.Command(name, args...)
 	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), env...)
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }
