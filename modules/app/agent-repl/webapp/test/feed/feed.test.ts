@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { pagePresence } from "../../src/presence.js";
 import { CONVERSATION_DRAWN_ATTRIBUTE } from "../../src/feed/conversation-drawn.js";
 import { announceItemExpanded } from "../../src/expand.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -228,14 +229,14 @@ describe("mountFeed: opening the root feed", () => {
 });
 
 describe("mountFeed: telling Emacs the conversation is on screen", () => {
-  /** Run with a hidden document, the state of a held startup page. */
+  /** Run as a page the host holds unshown: the state of every page loaded for an open. */
   function hiddenPage(): () => void {
     // Another mount in this file may have marked the shared document already.
     document.documentElement.removeAttribute(CONVERSATION_DRAWN_ATTRIBUTE);
-    Object.defineProperty(document, "hidden", { configurable: true, get: () => true });
+    pagePresence().setShown(false);
     return () => {
       document.documentElement.removeAttribute(CONVERSATION_DRAWN_ATTRIBUTE);
-      delete (document as { hidden?: boolean }).hidden;
+      pagePresence().setShown(true);
     };
   }
 
