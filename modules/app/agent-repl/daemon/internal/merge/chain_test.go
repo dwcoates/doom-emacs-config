@@ -474,19 +474,32 @@ type chain struct {
 // carrying patch a1.
 func newChain(t *testing.T) *chain {
 	t.Helper()
+	return newChainOfWidth(t, 0)
+}
+
+// newChainOfWidth is newChain with a window of width (0 is the default,
+// cpugov.QueueWindow), for a test of a mechanism that needs more merges in
+// the chain than the default window holds.
+func newChainOfWidth(t *testing.T, width int) *chain {
+	t.Helper()
 	h := newHarness(t)
 	h.emacsRepo()
 	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
 	c := &chain{h: h, git: newChainGit(h.git), runner: newChainRunner(),
 		idle: make(chan ids.WorkspaceID, 1024), decisions: make(chan dlog.Context, 1024),
 		dirs: map[ids.WorkspaceID]string{theWorkspace: h.sourceD}, branches: map[ids.WorkspaceID]string{theWorkspace: "feature"}}
-	gov, err := cpugov.New(cpugov.DefaultConfig(), h.sampler, h.clock, &decisionLog{Logger: h.logs.Global(), decisions: c.decisions})
+	cfg := cpugov.DefaultConfig()
+	if width > 0 {
+		cfg.MaxGates = width
+	}
+	gov, err := cpugov.New(cfg, h.sampler, h.clock, &decisionLog{Logger: h.logs.Global(), decisions: c.decisions})
 	if err != nil {
 		t.Fatalf("building the governor: %v", err)
 	}
 	gov.Observe(cpugov.Sample{Utilization: 0, CPUs: 16})
 	h.governor = gov
 	c.wire(h.o)
+	h.o.window = width
 	c.git.branch("feature", "a1")
 	return c
 }
@@ -710,7 +723,7 @@ func TestAMergeWhoseHeadDroppedOutLandsWithoutTheHeadsCommits(t *testing.T) {
 func TestAMergeRestacksWhenTheMergeAheadDropsOut(t *testing.T) {
 	// Arrange: A holds in its gate; B's speculative gate breaks, with C behind
 	// it.
-	c := newChain(t)
+	c := newChainOfWidth(t, 3)
 	inGate, release := c.runner.hold(c.dirs[theWorkspace])
 	enqueue(t, c.h)
 	c.queue(t, "ws-b", "b1")
@@ -938,7 +951,7 @@ func TestAGateClaimsTheHostBudgetAtItsClassAndASpeculativeOneRunsNiced(t *testin
 
 func TestNoEntryBeyondTheWindowJoinsTheChain(t *testing.T) {
 	// Arrange: four merges, a window of three.
-	c := newChain(t)
+	c := newChainOfWidth(t, 3)
 	inGate, release := c.runner.hold(c.dirs[theWorkspace])
 	enqueue(t, c.h)
 	c.queue(t, "ws-b", "b1")
@@ -962,6 +975,38 @@ func TestNoEntryBeyondTheWindowJoinsTheChain(t *testing.T) {
 	// Assert.
 	if dRuns || dTree != "base+d1" {
 		t.Fatalf("D ran=%v holding %s while beyond the window, want it untouched", dRuns, dTree)
+	}
+}
+
+func TestTheDefaultWindowHoldsTheHeadAndOneMergeBehindIt(t *testing.T) {
+	// Arrange: three merges at the default window (owner ruling, 2026-10-12:
+	// the top two only).
+	c := newChain(t)
+	inGate, release := c.runner.hold(c.dirs[theWorkspace])
+	enqueue(t, c.h)
+	c.queue(t, "ws-b", "b1")
+	c.queue(t, "ws-c", "c1")
+	done := admitAsync(c.h, context.Background())
+	<-inGate
+	c.awaitIdle(t, "ws-b", c.onTip("ws-b", theWorkspace))
+
+	// Act.
+	_, cRuns := c.h.o.runFor("ws-c")
+	cRuns = cRuns || c.h.o.inChain(c.h.repoKey(), "ws-c")
+	cTree := c.git.tree("b-ws-c")
+	close(release)
+	<-done
+	for _, ws := range []ids.WorkspaceID{"ws-b", "ws-c"} {
+		c.awaitIdle(t, ws, func() bool { return true })
+		c.promote(t)
+	}
+
+	// Assert.
+	if cpugov.QueueWindow != 2 {
+		t.Fatalf("cpugov.QueueWindow = %d, want 2", cpugov.QueueWindow)
+	}
+	if cRuns || cTree != "base+c1" {
+		t.Fatalf("C ran=%v holding %s while third in line, want it untouched", cRuns, cTree)
 	}
 }
 
