@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -251,6 +252,23 @@ var mergeStartedOrigins = map[string]bool{
 // orchestrator starts its own turns with.
 func startedByMerge(origin string) bool {
 	return mergeStartedOrigins[origin]
+}
+
+// mergeQueueOrigins are the origins of EVERY turn the merge queue causes: the
+// turns it starts in its own tabs (mergeStartedOrigins), and the handback that
+// tells a detached merge's requester how its merge ended. The merge queue's
+// own two banners -- put in line, and resolved (merge.Banners) -- are all it
+// raises, so none of these turns raises a banner at its end.
+var mergeQueueOrigins = func() map[string]bool {
+	origins := maps.Clone(mergeStartedOrigins)
+	origins[conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_HANDBACK.String()] = true
+	return origins
+}()
+
+// causedByMergeQueue reports whether a recorded origin is one of a turn the
+// merge queue caused.
+func causedByMergeQueue(origin string) bool {
+	return mergeQueueOrigins[origin]
 }
 
 // touchEngagement records that the user just engaged this session. IT IS WHAT
