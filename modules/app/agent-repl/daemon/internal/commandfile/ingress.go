@@ -31,8 +31,8 @@ const (
 	opEntry      = "daemon.commandfile.entry"
 	opGate       = "daemon.commandfile.gate"
 	// opMergeQueue is the outcome record of a merge-queue control entry
-	// (merge_evict, merge_pause, merge_resume, merge_hold_rollouts,
-	// merge_release_rollouts): the answer the requesting
+	// (merge_evict, merge_move_up, merge_move_down, merge_pause, merge_resume,
+	// merge_hold_rollouts, merge_release_rollouts): the answer the requesting
 	// agent reads back, keyed by the file's path like every other record here.
 	opMergeQueue = "daemon.commandfile.merge_queue"
 )
@@ -327,6 +327,8 @@ func (i *ingress) apply(ctx context.Context, log dlog.Logger, file string, index
 		return i.deps.Merge.Enqueue(ctx, merge.Request{Workspace: ws, Source: source, By: merge.RequestedByAgent, Detached: detached, OneShot: entry.OneShot})
 	case TypeMergeEvict:
 		return i.applyMergeEvict(ctx, log, entry)
+	case TypeMergeMoveUp, TypeMergeMoveDown:
+		return i.applyMergeMove(ctx, log, entry)
 	case TypeMergePause, TypeMergeResume:
 		return i.applyMergePause(ctx, log, entry)
 	case TypeMergeHoldRollouts, TypeMergeReleaseRollouts:
@@ -464,6 +466,46 @@ func (i *ingress) queueSubject(ctx context.Context, entry Entry, field, dir stri
 		return "", "", fmt.Errorf("unknown_workspace: no workspace is registered at %s %q: %w", field, dir, err)
 	}
 	return requester, record.ID, nil
+}
+
+// applyMergeMove maps a merge_move_up or merge_move_down entry onto the
+// orchestrator's Move, the entry point UpdateMergeQueue's move arms call. The
+// requester's own merge moves unless move_dir names another workspace's.
+//
+// A MERGE THAT DOES NOT MOVE IS AN ANSWER, NOT A FAILURE, exactly as an evict
+// of nothing is: a merge with no waiting merge to pass is applied with the
+// outcome `unmoved`, and a workspace with nothing on the queue with
+// `not_queued`.
+func (i *ingress) applyMergeMove(ctx context.Context, log dlog.Logger, entry Entry) error {
+	requester, subject, err := i.queueSubject(ctx, entry, "move_dir", entry.MoveDir)
+	if err != nil {
+		return err
+	}
+	move := wsm.MergeMoveUp
+	if entry.Type == TypeMergeMoveDown {
+		move = wsm.MergeMoveDown
+	}
+	outcome := dlog.Context{
+		"type": entry.Type, "requester": string(requester), "workspace": string(subject),
+		"own": subject == requester, "move": move.String(),
+	}
+	moved, err := i.deps.Merge.Move(ctx, subject, move)
+	if refusal, ok := merge.Refused(err); ok && refusal.Arm == merge.ArmNoSuchQueuedMerge {
+		outcome["outcome"] = "not_queued"
+		log.Info(opMergeQueue, "nothing to move: the workspace has no merge on the queue", outcome)
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !moved {
+		outcome["outcome"] = "unmoved"
+		log.Info(opMergeQueue, "the merge has no waiting merge to pass that way, and stays where it is", outcome)
+		return nil
+	}
+	outcome["outcome"] = "moved_" + move.String()
+	log.Info(opMergeQueue, "moved the workspace's merge one place in its queue", outcome)
+	return nil
 }
 
 // applyMergePause maps a merge_pause or merge_resume entry onto the
