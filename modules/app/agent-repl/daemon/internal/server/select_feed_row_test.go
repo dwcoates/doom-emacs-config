@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 
@@ -512,10 +513,7 @@ func TestSelectFeedRowBubbleRefusesAnUnselectableRow(t *testing.T) {
 // workspace log with its arm and a reason naming the row.
 func TestSelectFeedRowBubbleLogsTheRefusal(t *testing.T) {
 	// Arrange.
-	log := &recordingLogger{}
-	h := newHarness(t, func(deps *Deps) {
-		deps.Log = &fakeSurfaces{workspace: log, global: log}
-	})
+	h, log := newLoggedHarness(t)
 
 	// Act.
 	clickRow(t, h, "streaming-1")
@@ -640,10 +638,7 @@ func TestSelectFeedRowNewerAfterRunningPastTheNewestRollsRoundToTheOldest(t *tes
 // visible action in the workspace's log, naming the kind and the row it left.
 func TestSelectFeedRowNewerPastTheNewestIsRecordedAtInfo(t *testing.T) {
 	// Arrange.
-	log := &recordingLogger{}
-	h := newHarness(t, func(deps *Deps) {
-		deps.Log = &fakeSurfaces{workspace: log, global: log}
-	})
+	h, log := newLoggedHarness(t)
 	h.Feed.prompts = feedIDs("p1")
 	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(promptStep(older))); err != nil {
 		t.Fatalf("seed: %v", err)
@@ -733,10 +728,7 @@ func TestSelectFeedRowBubbleOnAnotherRowMovesTheSelection(t *testing.T) {
 // enters the workspace log under the shared end record, naming why.
 func TestSelectFeedRowBubbleDeselectIsRecordedAtInfo(t *testing.T) {
 	// Arrange.
-	log := &recordingLogger{}
-	h := newHarness(t, func(deps *Deps) {
-		deps.Log = &fakeSurfaces{workspace: log, global: log}
-	})
+	h, log := newLoggedHarness(t)
 	h.Feed.finals = feedIDs("final-1")
 	clickRow(t, h, "final-1")
 
@@ -760,10 +752,7 @@ func TestSelectFeedRowBubbleDeselectIsRecordedAtInfo(t *testing.T) {
 // at ERROR, and nothing is selected or published.
 func TestSelectFeedRowStepFailsOnAnUnreadableFinal(t *testing.T) {
 	// Arrange.
-	log := &recordingLogger{}
-	h := newHarness(t, func(deps *Deps) {
-		deps.Log = &fakeSurfaces{workspace: log, global: log}
-	})
+	h, log := newLoggedHarness(t)
 	h.Feed.finals = feedIDs("final-1")
 	h.Feed.unreadable = map[string]bool{"final-1": true}
 
@@ -1056,5 +1045,57 @@ func (h *harness) selectResponse(t *testing.T, row string) {
 		}},
 	})); err != nil {
 		t.Fatalf("select %q: %v", row, err)
+	}
+}
+
+// newLoggedHarness is a harness whose workspace and global logs both record
+// into the answered logger, for tests asserting what a move logged.
+func newLoggedHarness(t *testing.T) (*harness, *recordingLogger) {
+	t.Helper()
+	log := &recordingLogger{}
+	h := newHarness(t, func(deps *Deps) {
+		deps.Log = &fakeSurfaces{workspace: log, global: log}
+	})
+	return h, log
+}
+
+// TestNewLoggedHarnessRecordsTheWorkspaceLog pins the helper's guarantee: a
+// move's workspace log record reaches the answered logger.
+func TestNewLoggedHarnessRecordsTheWorkspaceLog(t *testing.T) {
+	// Arrange.
+	h, log := newLoggedHarness(t)
+	h.Feed.finals = feedIDs("a")
+
+	// Act.
+	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(older))); err != nil {
+		t.Fatalf("SelectFeedRow: %v", err)
+	}
+
+	// Assert.
+	for _, rec := range log.at("INFO") {
+		if rec.Operation == opSelectFeedRow {
+			return
+		}
+	}
+	t.Fatalf("records = %v, want the move under %q", log.records, opSelectFeedRow)
+}
+
+// TestSelectFeedRowTestsBuildTheirLoggedHarnessThroughTheHelper pins that the
+// recording-logger wiring lives only in newLoggedHarness, so no test in this
+// file hand-rolls a variant that drifts from it.
+func TestSelectFeedRowTestsBuildTheirLoggedHarnessThroughTheHelper(t *testing.T) {
+	// Arrange.
+	src, err := os.ReadFile("select_feed_row_test.go")
+	if err != nil {
+		t.Fatalf("read the test source: %v", err)
+	}
+
+	// Act.
+	// The needle is split so this line is not itself counted.
+	got := strings.Count(string(src), "deps.Log = &fakeSurfaces"+"{workspace: log, global: log}")
+
+	// Assert.
+	if got != 1 {
+		t.Fatalf("hand-rolled logged harnesses = %d, want only newLoggedHarness's own", got)
 	}
 }
