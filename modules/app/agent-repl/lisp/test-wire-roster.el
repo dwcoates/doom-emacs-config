@@ -374,6 +374,35 @@ reserved."
                   "{\"lastSelected\":{\"atMs\":\"1756400000000\"}}")
                  '("RosterRowWhen" lastSelected "unknown field"))))
 
+;;;; ---- The shared instant decoder ----
+
+(ert-deftest agent-repl-test-wire-roster-decode-instant-reads-at-ms ()
+  "The instant decoder answers the plist `(:at-ms)' from a decimal string."
+  (should (equal (agent-repl-test-wire-roster--decode
+                  (lambda (v) (agent-repl-wire-roster--decode-instant "Some" v))
+                  "{\"atMs\":\"1756400000000\"}")
+                 '(:at-ms 1756400000000))))
+
+(ert-deftest agent-repl-test-wire-roster-decode-instant-refuses-an-extra-key ()
+  "An unknown field is a breach naming the MESSAGE the caller passed."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  (lambda (v) (agent-repl-wire-roster--decode-instant "Some" v))
+                  "{\"atMs\":\"1\",\"extra\":1}")
+                 '("Some" extra "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-roster-instant-decoders-share-the-helper ()
+  "Every roster instant decoder is the shared helper under its own message
+name: each one's breach names that message exactly as the helper's does."
+  (dolist (pair '((agent-repl-wire-decode-roster-row-last-selected . "RosterRowLastSelected")
+                  (agent-repl-wire-decode-roster-row-when-merged . "RosterRowWhenMerged")
+                  (agent-repl-wire-decode-roster-row-when-turn-ended . "RosterRowWhenTurnEnded")
+                  (agent-repl-wire-decode-roster-row-when-created . "RosterRowWhenCreated")))
+    (let ((json "{\"atMs\":\"1\",\"extra\":1}"))
+      (should (equal (agent-repl-test-wire-roster--breach (car pair) json)
+                     (agent-repl-test-wire-roster--breach
+                      (lambda (v) (agent-repl-wire-roster--decode-instant (cdr pair) v))
+                      json))))))
+
 (ert-deftest agent-repl-test-wire-roster-when-turn-ended-carries-its-instant ()
   "Regression: the daemon's when column counts from the last turn end, the
 `turnEnded' arm (2026-10-11); the strict decoder must accept it or it rejects
