@@ -1,0 +1,123 @@
+// @vitest-environment jsdom
+// Whether a reader can see the page: shown by its host AND its document
+// visible. See src/presence.ts.
+import { afterEach, describe, expect, it } from "vitest";
+
+import { createPresence, pageIsEmbedded, type PresenceCause, type PresenceSource } from "../src/presence.js";
+
+let presence: PresenceSource | null = null;
+
+function setVisibility(state: "visible" | "hidden"): void {
+  Object.defineProperty(document, "visibilityState", { configurable: true, get: () => state });
+  document.dispatchEvent(new Event("visibilitychange"));
+}
+
+afterEach(() => {
+  presence?.dispose();
+  presence = null;
+  setVisibility("visible");
+});
+
+describe("presence", () => {
+  it("is not seen in a host until the host shows it", () => {
+    // Arrange / Act
+    presence = createPresence(document, true);
+
+    // Assert
+    expect(presence.seen()).toBe(false);
+  });
+
+  it("is seen in no host while the document is visible", () => {
+    // Arrange / Act
+    presence = createPresence(document, false);
+
+    // Assert
+    expect(presence.seen()).toBe(true);
+  });
+
+  it("is seen once the host shows it", () => {
+    // Arrange
+    presence = createPresence(document, true);
+
+    // Act
+    presence.setShown(true);
+
+    // Assert
+    expect(presence.seen()).toBe(true);
+  });
+
+  it("is not seen while the document is hidden, shown or not", () => {
+    // Arrange
+    presence = createPresence(document, true);
+    presence.setShown(true);
+
+    // Act
+    setVisibility("hidden");
+
+    // Assert
+    expect(presence.seen()).toBe(false);
+  });
+
+  it("tells a listener the host showed it", () => {
+    // Arrange
+    presence = createPresence(document, true);
+    const told: [boolean, PresenceCause][] = [];
+    presence.onChange((seen, cause) => told.push([seen, cause]));
+
+    // Act
+    presence.setShown(true);
+
+    // Assert
+    expect(told).toEqual([[true, "host"]]);
+  });
+
+  it("tells a listener the document's visibility changed", () => {
+    // Arrange
+    presence = createPresence(document, false);
+    const told: [boolean, PresenceCause][] = [];
+    presence.onChange((seen, cause) => told.push([seen, cause]));
+
+    // Act
+    setVisibility("hidden");
+
+    // Assert
+    expect(told).toEqual([[false, "visibility"]]);
+  });
+
+  it("tells nobody when the host repeats itself", () => {
+    // Arrange
+    presence = createPresence(document, true);
+    const told: boolean[] = [];
+    presence.onChange((seen) => told.push(seen));
+
+    // Act
+    presence.setShown(false);
+
+    // Assert
+    expect(told).toEqual([]);
+  });
+
+  it("stops telling a listener that unsubscribed", () => {
+    // Arrange
+    presence = createPresence(document, true);
+    const told: boolean[] = [];
+    const unsubscribe = presence.onChange((seen) => told.push(seen));
+
+    // Act
+    unsubscribe();
+    presence.setShown(true);
+
+    // Assert
+    expect(told).toEqual([]);
+  });
+});
+
+describe("pageIsEmbedded", () => {
+  it("is false for a top-level window", () => {
+    expect(pageIsEmbedded(window)).toBe(false);
+  });
+
+  it("is true for a window whose parent is another", () => {
+    expect(pageIsEmbedded({ parent: window } as unknown as Window)).toBe(true);
+  });
+});

@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { pagePresence } from "../src/presence.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   BUBBLE_STRIP_CLASS,
@@ -996,6 +997,19 @@ describe("AutoCollapse", () => {
     Object.defineProperty(document, "visibilityState", { configurable: true, get: () => state });
     document.dispatchEvent(new Event("visibilitychange"));
   }
+
+  it("closes every open section when its host stops showing the page", () => {
+    // Arrange
+    const { first } = armed();
+    first.click();
+
+    // Act
+    pagePresence().setShown(false);
+
+    // Assert
+    expect(first.classList.contains(EXPANDED_CLASS)).toBe(false);
+    pagePresence().setShown(true);
+  });
 
   it("keeps a section the reader opened open under a wheel outside it (owner ruling, 2026-10-01)", () => {
     // Arrange
