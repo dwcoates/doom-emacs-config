@@ -48,6 +48,30 @@ type ProbeFunc func(runDir, workspaceDir string) (sessionlock.State, error)
 // owned, and only the socket says the owner is reachable.
 type SocketProbeFunc func(socketPath string) (shimsocket.State, error)
 
+// recordedSession is a workspace's session as recorded.
+type recordedSession struct {
+	session wsm.Session
+	// recorded is whether the workspace has a session row at all.
+	recorded bool
+}
+
+// hasConversation is the ONE statement of "this workspace holds a
+// conversation": a recorded session with a vendor id. A fork's parent must
+// have one, and only a workspace with one has transcripts to watch, revive or
+// claim.
+func (r recordedSession) hasConversation() bool {
+	return r.recorded && r.session.VendorSessionID != ""
+}
+
+// readRecordedSession reads WS's session for hasConversation.
+func readRecordedSession(ctx context.Context, db wsm.DB, ws ids.WorkspaceID) (recordedSession, error) {
+	session, recorded, err := db.Session(ctx, ws)
+	if err != nil {
+		return recordedSession{}, err
+	}
+	return recordedSession{session: session, recorded: recorded}, nil
+}
+
 // probeShimSocket builds the production socket probe over log.
 func probeShimSocket(log dlog.Logger) SocketProbeFunc {
 	log = log.With(dlog.Context{"component": "daemon.workspace.probe_shim_socket"})

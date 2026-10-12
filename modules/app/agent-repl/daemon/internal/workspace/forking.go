@@ -60,13 +60,13 @@ func (f *Fleet) makeFork(ctx context.Context, log dlog.Logger, ws ids.WorkspaceI
 		log.Error(opBringUp, "the fork's parent workspace could not be read", dlog.Context{"cause": err.Error()})
 		return "", fmt.Errorf("%w: read the parent %q: %w", ErrForkRefused, pending.Parent, err)
 	}
-	parentSession, exists, err := f.deps.DB.Session(ctx, pending.Parent)
+	parentConv, err := readRecordedSession(ctx, f.deps.DB, pending.Parent)
 	if err != nil {
 		log.Error(opBringUp, "the fork's parent session could not be read", dlog.Context{"cause": err.Error()})
 		return "", fmt.Errorf("%w: read the parent's session: %w", ErrForkRefused, err)
 	}
-	if !exists || parentSession.VendorSessionID == "" {
-		log.Error(opBringUp, "the fork's parent has no conversation to fork", dlog.Context{"parent_session_recorded": exists})
+	if !parentConv.hasConversation() {
+		log.Error(opBringUp, "the fork's parent has no conversation to fork", dlog.Context{"parent_session_recorded": parentConv.recorded})
 		return "", fmt.Errorf("%w: workspace %q has no conversation to fork", ErrForkRefused, pending.Parent)
 	}
 	if f.deps.Deliveries == nil {
@@ -83,7 +83,7 @@ func (f *Fleet) makeFork(ctx context.Context, log dlog.Logger, ws ids.WorkspaceI
 		if err != nil {
 			return err
 		}
-		made, err = forkThrough(ctx, log, client, ws, pending.Parent, parentRecord.Dir, parentSession.VendorSessionID, point)
+		made, err = forkThrough(ctx, log, client, ws, pending.Parent, parentRecord.Dir, parentConv.session.VendorSessionID, point)
 		return err
 	})
 	if err != nil {

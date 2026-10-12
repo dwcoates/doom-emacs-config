@@ -649,11 +649,11 @@ func (f *Fleet) watchInstalled(ctx context.Context, ws ids.WorkspaceID, c shimcl
 	}
 	log = log.With(dlog.Context{"workspace": string(ws)})
 
-	session, exists, err := f.deps.DB.Session(ctx, ws)
+	recorded, err := readRecordedSession(ctx, f.deps.DB, ws)
 	if err != nil {
 		return fmt.Errorf("workspace: install a shim for %q: read the session record: %w", ws, err)
 	}
-	if !exists || session.VendorSessionID == "" {
+	if !recorded.hasConversation() {
 		log.Debug(opFleetRollout, "the installed shim has no recorded conversation to watch", nil)
 		return nil
 	}
@@ -683,7 +683,7 @@ func (f *Fleet) watchInstalled(ctx context.Context, ws ids.WorkspaceID, c shimcl
 	f.logTransition(ws, "watcher_attached", attached, true,
 		dlog.Context{"shim_pid": c.PID()})
 	log.Info(opFleetRollout, "opened the adopted session's watches", dlog.Context{
-		"vendor_session_id": session.VendorSessionID, "shim_pid": c.PID(),
+		"vendor_session_id": recorded.session.VendorSessionID, "shim_pid": c.PID(),
 	})
 	return nil
 }
