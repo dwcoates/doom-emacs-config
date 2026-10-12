@@ -457,18 +457,23 @@ type Daemon struct {
 	shims    map[string]*ShimControl
 }
 
-// installFakeGit copies the scripted `git` into the directory that leads the
-// daemon's PATH.
-func installFakeGit(t *testing.T, dir string) {
+// InstallFakeGit installs the scripted `git` into dir, the directory that
+// leads a daemon's PATH, as a HARD LINK to the suite's one built binary.
+//
+// WHY A LINK, NOT A COPY. Every daemon a test starts gets its own fakebin,
+// and a 3.3MB copy for each of the suite's ~1,000 daemon starts was ~3GB of
+// writes per daemon suite, the largest single writer in the run. A link
+// writes no data, and what runs is the same file: the stray sweep matches a
+// process by its argv, which names the link's path inside the test's own
+// tree exactly as the copy's did. The suite's binaries and every fakebin sit
+// under the one run root, so the link never crosses a file system; one that
+// would is a failed test, never a silent copy.
+func InstallFakeGit(t *testing.T, dir string) {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("harness: mkdir %s: %v", dir, err)
 	}
-	body, err := os.ReadFile(FakeGitBinary(t))
-	if err != nil {
-		t.Fatalf("harness: read the fake git: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "git"), body, 0o755); err != nil {
+	if err := os.Link(FakeGitBinary(t), filepath.Join(dir, "git")); err != nil {
 		t.Fatalf("harness: install the fake git: %v", err)
 	}
 }
@@ -641,7 +646,7 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 	// daemon reads comes out of this test's fixture file and the real binary is
 	// never reached.
 	d.Git = World(t)
-	installFakeGit(t, fakeBin)
+	InstallFakeGit(t, fakeBin)
 
 	multiRoot := opts.MultiRepoRoot
 	if multiRoot == "" {
