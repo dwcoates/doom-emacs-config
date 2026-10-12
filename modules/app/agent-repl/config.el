@@ -356,10 +356,13 @@ returning the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; changing any process.
 (agent-repl--load-module "services")
 (agent-repl--load-module "frontend")
-;; WHY: webview-recovery.el drives the webapp's recovery hook through
-;; frontend.el's execute-script chokepoint, so it must load after it.  It
-;; exists because a hidden xwidget webview's own timers are suspended by the
-;; embedder — see the file's commentary.
+;; WHY: webhost.el is the one web view every workspace's page lives in; it
+;; creates the host through frontend.el's webview boundary and talks to it
+;; through frontend.el's execute-script chokepoint, so it loads after it.
+(agent-repl--load-module "webhost")
+;; WHY: webview-recovery.el makes every workspace's slot and page ahead of
+;; the look through frontend.el's mount and webhost.el's host, so it loads
+;; after both.
 (agent-repl--load-module "webview-recovery")
 ;; WHY: notes.el owns the per-workspace org notes file, all that survives
 ;; of tasks.el.  It reads core.el's state-dir resolver, workspace.el's
