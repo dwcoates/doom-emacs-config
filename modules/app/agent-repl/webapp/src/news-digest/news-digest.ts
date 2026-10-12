@@ -30,6 +30,7 @@ import type {
   NewsDigestIpoGuess,
   NewsDigestIpoOutlook,
   NewsDigestItem,
+  NewsDigestLink,
   NewsDigestOverlay,
   NewsDigestSdkVersion,
   NewsDigestSection,
@@ -357,10 +358,7 @@ export function drawSection(ctx: AppContext, section: NewsDigestSection, path: s
   const element = document.createElement("section");
   element.className = "news-digest-section";
   element.setAttribute("data-kind", kind.case);
-  const headingElement = document.createElement("h2");
-  headingElement.className = "news-digest-section-heading";
-  headingElement.textContent = heading.text;
-  element.append(headingElement);
+  element.append(drawSectionHeading(heading.text));
   section.items.forEach((item, i) => element.append(drawItem(ctx, item, `${path}.items[${i}]`)));
   return element;
 }
@@ -377,10 +375,7 @@ export function drawWeek(ctx: AppContext, week: NewsDigestWeek, path: string): H
   const element = document.createElement("section");
   element.className = "news-digest-section";
   element.setAttribute("data-week", outcome.case);
-  const headingElement = document.createElement("h2");
-  headingElement.className = "news-digest-section-heading";
-  headingElement.textContent = heading.text;
-  element.append(headingElement);
+  element.append(drawSectionHeading(heading.text));
   switch (outcome.case) {
     case "risks": {
       const items = outcome.value.items;
@@ -418,16 +413,13 @@ export function drawIpo(ctx: AppContext, ipo: NewsDigestIpoOutlook, path: string
   const element = document.createElement("section");
   element.className = "news-digest-section news-digest-ipo";
   element.setAttribute("data-ipo", "");
-  const headingElement = document.createElement("h2");
-  headingElement.className = "news-digest-section-heading";
-  headingElement.textContent = heading.text;
   const guesses = document.createElement("div");
   guesses.className = "news-digest-ipo-guesses";
   guesses.append(
     drawIpoGuess(ctx, requireMessage(ipo.anthropic, `${path}.anthropic`), `${path}.anthropic`),
     drawIpoGuess(ctx, requireMessage(ipo.openai, `${path}.openai`), `${path}.openai`),
   );
-  element.append(headingElement, guesses);
+  element.append(drawSectionHeading(heading.text), guesses);
   return element;
 }
 
@@ -446,12 +438,8 @@ export function drawIpoGuess(ctx: AppContext, guess: NewsDigestIpoGuess, path: s
   const estimateElement = document.createElement("div");
   estimateElement.className = "news-digest-ipo-estimate";
   estimateElement.textContent = estimate.text;
-  const basisElement = document.createElement("div");
-  basisElement.className = "news-digest-summary md";
-  basisElement.innerHTML = renderMarkdown(basis.text);
-  const links = document.createElement("div");
-  links.className = "news-digest-links";
-  for (const link of guess.links) links.append(renderExternalLink(ctx, { text: link.label, url: link.url }));
+  const basisElement = drawProse(basis.text);
+  const links = drawLinks(ctx, guess.links);
   element.append(companyElement, estimateElement, basisElement, links);
   return element;
 }
@@ -482,21 +470,39 @@ export function drawItem(ctx: AppContext, item: NewsDigestItem, path: string, re
     effective.textContent = `effective ${item.effective.text}`;
     head.append(effective);
   }
-  const summaryElement = document.createElement("div");
-  summaryElement.className = "news-digest-summary md";
-  summaryElement.innerHTML = renderMarkdown(summary.text);
-  const links = document.createElement("div");
-  links.className = "news-digest-links";
-  for (const link of item.links) links.append(renderExternalLink(ctx, { text: link.label, url: link.url }));
+  const summaryElement = drawProse(summary.text);
+  const links = drawLinks(ctx, item.links);
   element.append(head, summaryElement);
   if (reason !== undefined) {
-    const reasonElement = document.createElement("div");
-    reasonElement.className = "news-digest-summary md";
+    const reasonElement = drawProse(reason);
     reasonElement.setAttribute("data-risk-reason", "");
-    reasonElement.innerHTML = renderMarkdown(reason);
     element.append(reasonElement);
   }
   element.append(links);
+  return element;
+}
+
+/** A section's heading, drawn verbatim: every section's, the week's and the outlook's alike. */
+export function drawSectionHeading(text: string): HTMLElement {
+  const element = document.createElement("h2");
+  element.className = "news-digest-section-heading";
+  element.textContent = text;
+  return element;
+}
+
+/** The daemon's prose (a summary, a risk reason, a guess's basis) as markdown, the response bubble's way. */
+export function drawProse(text: string): HTMLElement {
+  const element = document.createElement("div");
+  element.className = "news-digest-summary md";
+  element.innerHTML = renderMarkdown(text);
+  return element;
+}
+
+/** A row of source links, each opened in the system browser. */
+export function drawLinks(ctx: AppContext, links: readonly NewsDigestLink[]): HTMLElement {
+  const element = document.createElement("div");
+  element.className = "news-digest-links";
+  for (const link of links) element.append(renderExternalLink(ctx, { text: link.label, url: link.url }));
   return element;
 }
 
