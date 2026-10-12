@@ -30,3 +30,26 @@ func (s *surfaces) admits(severity string) bool {
 	}
 	return allowed
 }
+
+// levelReporter is a Logger that can say whether it would persist a record of
+// a level: the daemon's own loggers can, a test's capture cannot (it keeps
+// everything).
+type levelReporter interface {
+	Enabled(level string) bool
+}
+
+// Enabled reports whether l would persist a record at level. A Logger that
+// cannot say answers true, so a caller that skips work for a dropped level
+// never skips it for a logger that keeps every record.
+func Enabled(l Logger, level string) bool {
+	if lr, ok := l.(levelReporter); ok {
+		return lr.Enabled(level)
+	}
+	return true
+}
+
+// Enabled implements levelReporter: the level window decides, as it does for
+// every record this logger emits.
+func (l *logger) Enabled(level string) bool {
+	return l.s.admits(level)
+}

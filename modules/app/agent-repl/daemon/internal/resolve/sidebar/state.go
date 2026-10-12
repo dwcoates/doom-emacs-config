@@ -416,6 +416,9 @@ type rosterState struct {
 	// divergence is each repository's last ahead/behind measure
 	// (SetRepoDivergence). A repository with none is drawn pending.
 	divergence map[ids.RepoID]repodivergence.Measure
+	// renderLogs are the decision records each workspace's row last logged,
+	// fingerprinted, so a render logs only the rows that changed (repeats.go).
+	renderLogs map[string]string
 }
 
 // newRosterState builds an empty roster accumulation.
