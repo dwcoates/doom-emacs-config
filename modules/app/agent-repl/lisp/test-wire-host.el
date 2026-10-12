@@ -1275,6 +1275,14 @@ everything it carries."
                   "{\"participantNotExpected\":{}}")
                  '(:cause (:arm :participant-not-expected :value nil)))))
 
+(ert-deftest agent-repl-test-wire-host-adopt-error-transfer-deferred-arm ()
+  "AdoptHostWorkspaceError's `transfer_deferred' arm decodes with
+everything it carries."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-adopt-host-workspace-error
+                  "{\"transferDeferred\":{}}")
+                 '(:cause (:arm :transfer-deferred :value nil)))))
+
 (ert-deftest agent-repl-test-wire-host-adopt-error-unset-cause-is-a-breach ()
   "AdoptHostWorkspaceError with no arm set says nothing actionable, so it is a
 breach."
@@ -1294,7 +1302,7 @@ declares."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_adopt_host_workspace.pb.go" "AdoptHostWorkspaceError")
                        #'string<)
-                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "noTransferAnnounced" "participantNotExpected")
+                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "noTransferAnnounced" "participantNotExpected" "transferDeferred")
                        #'string<))))
 
 ;;;; ---- HostFault kinds (landing 4) --------------------------------------
