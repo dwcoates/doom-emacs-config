@@ -5539,9 +5539,7 @@ ar-button.outcome-marker-pill {
 #ws-sidebar .ws[data-blink="steady"] .sb-attn { opacity: 1; }
 
 /* The priority badge: the resolver's own label, drawn verbatim, in the quiet
-   pill treatment the rail already uses for its counts. A merge workspace's
-   marker ("merge → master") wears the same pill. */
-#ws-sidebar .sb-merge-workspace,
+   pill treatment the rail already uses for its counts. */
 #ws-sidebar .sb-prio {
   flex: 0 0 auto;
   font-size: 0.62rem;
