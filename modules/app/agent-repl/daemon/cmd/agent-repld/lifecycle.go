@@ -36,7 +36,29 @@ type lifecycleSink struct {
 	// sessions records the vendor session id in force, which is what a later
 	// resume names.
 	sessions vendorSessionRecorder
-	log      dlog.Logger
+	// standDowns is the drain controller's withheld stand-downs, bound once
+	// it exists (graph.go): the free edge and a session coming up retry a
+	// stand-down a turn deferred.
+	standDowns withheldRetrier
+	log        dlog.Logger
+}
+
+// withheldRetrier is the slice of the drain controller the sink retries a
+// deferred stand-down through.
+type withheldRetrier interface {
+	RetryWithheld(ws ids.WorkspaceID)
+}
+
+// retryWithheld hands a daemon edge for ws on to the withheld stand-downs. An
+// edge before they are wired is a wiring defect, said at ERROR.
+func (s *lifecycleSink) retryWithheld(ws ids.WorkspaceID, edge string) {
+	if s.standDowns == nil {
+		s.log.Error("daemon.cmd.lifecycle", "an edge arrived before the withheld stand-downs were wired; a deferred stand-down was not retried", dlog.Context{
+			"workspace": string(ws), "edge": edge, "invariant_violation": "the drain controller is bound before any session starts",
+		})
+		return
+	}
+	s.standDowns.RetryWithheld(ws)
 }
 
 // vendorSessionRecorder is the slice of the state client the sink records the
@@ -50,6 +72,9 @@ type vendorSessionRecorder interface {
 // the fleet that calls this (graph.go); a session coming up before it is a
 // wiring defect, said at ERROR.
 func (s *lifecycleSink) SessionUp(ws ids.WorkspaceID) {
+	// A SESSION THAT CAME UP WHILE ITS WORKSPACE WAS WITHHELD is stood down
+	// now, if a hide or a collapse is waiting on its start.
+	s.retryWithheld(ws, "session_up")
 	if s.queue == nil {
 		s.log.Error("daemon.cmd.lifecycle", "a session came up before the prompt queue was wired; its reconnect holds were not released", dlog.Context{
 			"workspace": string(ws), "invariant_violation": "the queue is bound before any session starts",
@@ -280,9 +305,12 @@ func (s *lifecycleSink) OnQueryDied(ws ids.WorkspaceID) {
 	s.log.Info("daemon.cmd.lifecycle", "the session's vendor query died; its shim is replaced through the bounce registry", fields)
 }
 
-// OnFree is the freeness edge: the queue bounces a shim registered for it.
+// OnFree is the freeness edge, which a turn's end raises: the queue bounces a
+// shim registered for it, and a withheld workspace's stand-down the turn
+// deferred is taken.
 func (s *lifecycleSink) OnFree(ws ids.WorkspaceID) {
 	s.queue.OnFree(ws)
+	s.retryWithheld(ws, "free")
 }
 
 // OnDeparted is the departure edge: a dead shim's registered bounce is decided

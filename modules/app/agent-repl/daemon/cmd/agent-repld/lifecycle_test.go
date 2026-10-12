@@ -698,3 +698,53 @@ func TestSessionUpBeforeTheQueueIsWiredIsRecordedAtError(t *testing.T) {
 	}
 	t.Fatalf("records = %+v, want the unwired queue at ERROR", log.Records())
 }
+
+// fakeRetrier records every workspace a deferred stand-down was retried for.
+type fakeRetrier struct{ retried []ids.WorkspaceID }
+
+func (f *fakeRetrier) RetryWithheld(ws ids.WorkspaceID) { f.retried = append(f.retried, ws) }
+
+func TestTheFreenessEdgeRetriesADeferredStandDown(t *testing.T) {
+	// Arrange
+	retrier := &fakeRetrier{}
+	sink := &lifecycleSink{queue: &fakeFreeQueue{}, standDowns: retrier, log: dlog.NewTestLogger()}
+
+	// Act
+	sink.OnFree("ws-1")
+
+	// Assert
+	if len(retrier.retried) != 1 || retrier.retried[0] != "ws-1" {
+		t.Fatalf("retried = %v, want [ws-1]", retrier.retried)
+	}
+}
+
+func TestASessionComingUpRetriesADeferredStandDown(t *testing.T) {
+	// Arrange
+	retrier := &fakeRetrier{}
+	sink := &lifecycleSink{queue: &fakeFreeQueue{}, standDowns: retrier, log: dlog.NewTestLogger()}
+
+	// Act
+	sink.SessionUp("ws-1")
+
+	// Assert
+	if len(retrier.retried) != 1 || retrier.retried[0] != "ws-1" {
+		t.Fatalf("retried = %v, want [ws-1]", retrier.retried)
+	}
+}
+
+func TestAnEdgeBeforeTheStandDownsAreWiredIsAnError(t *testing.T) {
+	// Arrange
+	log := dlog.NewTestLogger()
+	sink := &lifecycleSink{queue: &fakeFreeQueue{}, log: log}
+
+	// Act
+	sink.OnFree("ws-1")
+
+	// Assert
+	for _, r := range log.Records() {
+		if r.Level == dlog.LevelError && r.Context["edge"] == "free" {
+			return
+		}
+	}
+	t.Fatalf("records = %+v, want the unwired edge at ERROR", log.Records())
+}
