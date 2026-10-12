@@ -236,3 +236,40 @@ func TestStopFrozenAnswersTheSendErrorForAGoneProcess(t *testing.T) {
 		t.Fatalf("stopFrozen = %v for a reaped process, want ESRCH", err)
 	}
 }
+
+func TestIsZombie(t *testing.T) {
+	cases := []struct {
+		name    string
+		prepare func(t *testing.T, cmd *exec.Cmd)
+		want    bool
+	}{
+		{name: "a running process has not exited", prepare: func(*testing.T, *exec.Cmd) {}, want: false},
+		{
+			name: "a killed, unreaped process has exited",
+			prepare: func(t *testing.T, cmd *exec.Cmd) {
+				if err := cmd.Process.Signal(syscall.SIGKILL); err != nil {
+					t.Fatalf("SIGKILL: %v", err)
+				}
+				if err := awaitFrozen(cmd.Process.Pid, DefaultTimeout); err != nil {
+					t.Fatalf("await the exit: %v", err)
+				}
+			},
+			want: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			cmd := startIdle(t)
+			tc.prepare(t, cmd)
+
+			// Act
+			got := isZombie(cmd.Process.Pid)
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("isZombie = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
