@@ -301,9 +301,6 @@ func (s *Service) retireLanded(ctx context.Context, landed []wsm.Workspace, now 
 	}()
 	retired := 0
 	for _, ws := range landed {
-		if ctx.Err() != nil {
-			break
-		}
 		last := lastLanded(ws)
 		fields := dlog.Context{"requester": string(ws.ID), "landed_head": ws.Landed.Head, "last_active": last,
 			"idle_for": now.Sub(last).Round(time.Second).String(), "idle_limit": LandedIdleLimit.String()}
