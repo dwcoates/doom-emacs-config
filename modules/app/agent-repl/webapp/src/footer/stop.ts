@@ -42,7 +42,7 @@ import { guardMalformed } from "../rpc/guard.js";
 import { isMalformedView } from "../rpc/malformed.js";
 import { requireCase, unreachableArm } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
-import { INTERRUPT_OUTCOME_MS } from "../feed/rows/subagent.js";
+import { INTERRUPT_OUTCOME_MS } from "../feed/stop-control.js";
 import { stopTicking, tick } from "../feed/ticking.js";
 
 /** The stop glyph: a filled square, the one shape a stop control has. */
