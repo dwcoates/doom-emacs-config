@@ -116,6 +116,13 @@ func runWithLogger(socketPath, dbPath, pprofAddr string, watchBuffer int, log *l
 			log.Log(logging.Fields{Operation: "store.pprof.close", Level: "error"}, "closing pprof surface failed: %v", closeErr)
 		}
 	}()
+	// RUNTIME PROFILING is armed beside the surface: a session the collector
+	// opens (bin/profile-agent-repl.sh) starts it on SIGUSR2 without a restart.
+	stopProfiling, err := startRuntimeProfiling(log, os.Getenv, os.UserHomeDir)
+	if err != nil {
+		return err
+	}
+	defer stopProfiling()
 	// Registered AFTER the close above, so it runs BEFORE it: the surface is
 	// still listening while a failed boot is held open to be profiled.
 	defer func() {
