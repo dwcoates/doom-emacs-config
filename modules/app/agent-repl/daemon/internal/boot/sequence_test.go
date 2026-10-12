@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1372,6 +1373,98 @@ func TestABringUpEnsuresTheServicesBeforeItsFirstStart(t *testing.T) {
 	// Assert.
 	if ensuredBeforeStart != 1 {
 		t.Fatalf("ensures before the first start = %d, want 1", ensuredBeforeStart)
+	}
+}
+
+// TestABringUpStartsItsSessionsWhileTheSidecarRestarts pins that the
+// sidecar's half of the service step runs BESIDE the starts: it is held until
+// a start has begun, so a bring-up that waited on it would never start one.
+func TestABringUpStartsItsSessionsWhileTheSidecarRestarts(t *testing.T) {
+	// Arrange.
+	started := make(chan struct{})
+	var once sync.Once
+	var sidecarSawAStart bool
+	h := newHarness(t, func(deps *Deps, h *harness) {
+		deps.StartSession = func(_ context.Context, ws ids.WorkspaceID) error {
+			once.Do(func() { close(started) })
+			h.noteStarted(ws)
+			return nil
+		}
+		deps.EnsureSidecar = func(context.Context) error {
+			select {
+			case <-started:
+				sidecarSawAStart = true
+			case <-time.After(bringUpBound):
+			}
+			return nil
+		}
+	})
+	h.register(t, t.TempDir(), sessionlock.StateFree)
+
+	// Act.
+	h.runAndBringUp(t)
+
+	// Assert.
+	if !sidecarSawAStart {
+		t.Fatal("no start began while the sidecar's half ran; the bring-up waited on the sidecar")
+	}
+}
+
+// TestABringUpReturnsOnlyOnceTheSidecarsHalfHas pins the join: the half runs
+// on the bring-up's own loop, so the exit's join covers it.
+func TestABringUpReturnsOnlyOnceTheSidecarsHalfHas(t *testing.T) {
+	// Arrange.
+	var finished atomic.Bool
+	h := newHarness(t, func(deps *Deps, _ *harness) {
+		deps.EnsureSidecar = func(context.Context) error {
+			finished.Store(true)
+			return nil
+		}
+	})
+
+	// Act.
+	h.seq.BringUp(context.Background(), nil)
+
+	// Assert.
+	if !finished.Load() {
+		t.Fatal("BringUp returned before the sidecar's half finished")
+	}
+}
+
+// TestAFailedSidecarHalfIsRecordedAsAnError pins that a sidecar the boot
+// could not make current is a fault, stated at ERROR.
+func TestAFailedSidecarHalfIsRecordedAsAnError(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, func(deps *Deps, _ *harness) {
+		deps.EnsureSidecar = func(context.Context) error { return errBoom }
+	})
+
+	// Act.
+	h.seq.BringUp(context.Background(), nil)
+
+	// Assert.
+	if !h.hasRecord("error", "daemon.boot.bring_up") {
+		t.Fatalf("no error record under daemon.boot.bring_up: %v", h.log.Records())
+	}
+}
+
+// TestASidecarHalfTheExitCutIsNotAnError pins that the exit cutting the
+// sidecar's restart is this daemon's own decision, recorded at INFO.
+func TestASidecarHalfTheExitCutIsNotAnError(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, func(deps *Deps, _ *harness) {
+		deps.EnsureServices = func(context.Context) error { return nil }
+		deps.EnsureSidecar = func(ctx context.Context) error { return ctx.Err() }
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act.
+	h.seq.BringUp(ctx, nil)
+
+	// Assert.
+	if h.hasRecord("error", "daemon.boot.bring_up") || !h.hasRecord("info", "daemon.boot.bring_up") {
+		t.Fatalf("records = %v; want the cut at INFO and no ERROR", h.log.Records())
 	}
 }
 

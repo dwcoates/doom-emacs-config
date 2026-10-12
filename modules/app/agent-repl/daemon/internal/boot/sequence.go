@@ -877,6 +877,13 @@ func (s *sequence) BringUp(ctx context.Context, pending []wsm.Workspace) BringUp
 			})
 		}
 	}
+	// THE SIDECAR BESIDE THE STARTS, NOT BEFORE THEM. Its restart waited out
+	// a 29s launchd stop on 2026-10-12 with every workspace's tab held behind
+	// it; only the store has to lead the shims. Joined before the bring-up
+	// returns, under the same serving lifetime, so the exit cuts it as it
+	// cuts the step above.
+	sidecar := make(chan error, 1)
+	go func() { sidecar <- s.deps.EnsureSidecar(ctx) }()
 	brought := bringup.Run(ctx, bringup.Deps{
 		DB:           s.deps.DB,
 		StartSession: bringup.StartFunc(s.deps.StartSession),
@@ -884,6 +891,17 @@ func (s *sequence) BringUp(ctx context.Context, pending []wsm.Workspace) BringUp
 		Log:          log,
 		Operation:    "daemon.boot.bring_up",
 	}, pending)
+	if err := <-sidecar; err != nil {
+		if ctx.Err() != nil {
+			log.Info("daemon.boot.bring_up", "the daemon's exit cut the sidecar's restart short; the next boot's service step completes it", dlog.Context{
+				"error": err.Error(),
+			})
+		} else {
+			log.Error("daemon.boot.bring_up", "the sidecar could not be made current; the sessions run beside the build it has", dlog.Context{
+				"error": err.Error(),
+			})
+		}
+	}
 	return BringUpReport{
 		BroughtUp:     brought.Started,
 		Woken:         brought.Woken,
