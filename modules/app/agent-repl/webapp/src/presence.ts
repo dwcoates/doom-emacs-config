@@ -79,15 +79,20 @@ export function createPresence(doc: Document, embedded: boolean): PresenceSource
   };
 }
 
-let pageSource: PresenceSource | null = null;
+/** The presence of each page, keyed by its document: one per page. */
+const pageSources = new WeakMap<Document, PresenceSource>();
 
 /** Whether this page runs inside another page's iframe (the host's). */
 export function pageIsEmbedded(win: Window): boolean {
   return win.parent !== win;
 }
 
-/** The presence of this page: one per page, made on first use. */
+/** The presence of this page: one per page (per document), made on first use. */
 export function pagePresence(): PresenceSource {
-  pageSource ??= createPresence(document, pageIsEmbedded(window));
-  return pageSource;
+  let source = pageSources.get(document);
+  if (source === undefined) {
+    source = createPresence(document, pageIsEmbedded(window));
+    pageSources.set(document, source);
+  }
+  return source;
 }
