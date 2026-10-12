@@ -6,9 +6,12 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net"
 	"path/filepath"
+	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -235,6 +238,9 @@ type ShimControl struct {
 	dec *bufio.Scanner
 	enc *json.Encoder
 	pid int
+	// departed is a shim that exited before the harness connected
+	// (OpenedShim): the pid is known, and no command can reach it.
+	departed bool
 }
 
 // Shim answers the control client for a workspace's fake shim, waiting for the
@@ -260,6 +266,78 @@ func (d *Daemon) Shim(ws *workspacev1.WorkspaceRef) *ShimControl {
 	return s
 }
 
+// OpenedShim answers the control client of the shim an OpenWorkspace that has
+// just succeeded brought up for ws: connected while it lives, or -- when it has
+// ALREADY EXITED -- a client holding only its pid, whose every command fails
+// loudly as a departed shim.
+//
+// WHY. A workspace opened with a short idle cutoff (IdleCutoffMS: 50) can be
+// hibernated, and its shim stopped, before the harness dials the control
+// socket; Shim then waited the whole test context for a socket that would
+// never come back (seen once the RAM disk's I/O stopped stalling the
+// daemon's own hibernate: "waiting for the fake shim's control socket ...
+// context deadline exceeded"). The bring-up records the shim's pid before it
+// answers the open, so the shim this open spawned is known exactly: the
+// latest spawn record for this socket. Every other caller still waits for a
+// shim to appear, as a revival's next shim on the same socket does.
+func (d *Daemon) OpenedShim(ws *workspacev1.WorkspaceRef) *ShimControl {
+	d.t.Helper()
+	socket := d.SocketPath(ws) + ".ctl"
+	pid := d.latestShimSpawn(ws.GetDir(), strings.TrimSuffix(socket, ".ctl"))
+	if pid == 0 {
+		return d.Shim(ws)
+	}
+	s := &ShimControl{Socket: socket, t: d.t, d: d}
+	s.connectOrDeparted(pid)
+	d.t.Cleanup(s.close)
+	d.mu.Lock()
+	d.shims[socket] = s
+	d.mu.Unlock()
+	return s
+}
+
+// latestShimSpawn answers the pid of the latest shim this daemon spawned on
+// the uds, read off the workspace's own daemon sink, or 0 when it has spawned
+// none there.
+func (d *Daemon) latestShimSpawn(workspaceDir, uds string) int {
+	d.t.Helper()
+	pid := 0
+	for _, r := range readLog(d.t, WorkspaceLogPath(workspaceDir, "daemon")) {
+		if r.PID != d.PID() {
+			continue
+		}
+		if r.Operation != "daemon.shimclient.spawn" || r.Message != "shim spawned" || r.Context["uds"] != uds {
+			continue
+		}
+		if p, ok := r.Context["pid"].(float64); ok {
+			pid = int(p)
+		}
+	}
+	return pid
+}
+
+// connectOrDeparted is connect for the shim with pid: it stops polling, with
+// the pid and no connection, once that shim has exited.
+func (s *ShimControl) connectOrDeparted(pid int) {
+	s.t.Helper()
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+	for {
+		if s.dial() {
+			return
+		}
+		if err := syscall.Kill(pid, 0); errors.Is(err, syscall.ESRCH) || isZombie(pid) {
+			s.pid, s.departed = pid, true
+			return
+		}
+		select {
+		case <-ticker.C:
+		case <-s.d.Ctx().Done():
+			s.t.Fatalf("waiting for the fake shim's control socket %s (pid %d, alive): %v\ndaemon stderr:\n%s", s.Socket, pid, s.d.Ctx().Err(), s.d.Stderr())
+		}
+	}
+}
+
 // ShimAt answers a control client for an explicit control socket path, for the
 // tests that address a prelaunched or adopted shim by path.
 func (d *Daemon) ShimAt(socket string) *ShimControl {
@@ -276,17 +354,7 @@ func (s *ShimControl) connect() {
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 	for {
-		conn, err := net.Dial("unix", s.Socket)
-		if err == nil {
-			s.c = conn
-			s.dec = bufio.NewScanner(conn)
-			s.dec.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
-			s.enc = json.NewEncoder(conn)
-			reply := s.send(controlCommand{Op: "info"})
-			if reply.Info == nil || reply.Info.PID == 0 {
-				s.t.Fatalf("fake shim control %s: opening info carried no process identity", s.Socket)
-			}
-			s.pid = reply.Info.PID
+		if s.dial() {
 			return
 		}
 		select {
@@ -295,6 +363,26 @@ func (s *ShimControl) connect() {
 			s.t.Fatalf("waiting for the fake shim's control socket %s: %v\ndaemon stderr:\n%s", s.Socket, s.d.Ctx().Err(), s.d.Stderr())
 		}
 	}
+}
+
+// dial connects to the control socket once and reads the shim's identity,
+// answering false when the socket does not answer yet.
+func (s *ShimControl) dial() bool {
+	s.t.Helper()
+	conn, err := net.Dial("unix", s.Socket)
+	if err != nil {
+		return false
+	}
+	s.c = conn
+	s.dec = bufio.NewScanner(conn)
+	s.dec.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
+	s.enc = json.NewEncoder(conn)
+	reply := s.send(controlCommand{Op: "info"})
+	if reply.Info == nil || reply.Info.PID == 0 {
+		s.t.Fatalf("fake shim control %s: opening info carried no process identity", s.Socket)
+	}
+	s.pid = reply.Info.PID
+	return true
 }
 
 func (s *ShimControl) close() {
@@ -316,6 +404,9 @@ func (s *ShimControl) send(cmd controlCommand) controlReply {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.c == nil && s.departed {
+		s.t.Fatalf("fake shim control %s: the shim (pid %d) exited before the harness connected, so it cannot take %s", s.Socket, s.pid, cmd.Op)
+	}
 	if s.c == nil {
 		s.t.Fatalf("fake shim control %s is closed", s.Socket)
 	}
