@@ -203,8 +203,35 @@ func Save(path string, s *State) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("fakegit: mkdir %s: %w", filepath.Dir(path), err)
 	}
-	if err := os.WriteFile(path, body, 0o644); err != nil {
-		return fmt.Errorf("fakegit: write %s: %w", path, err)
+	// THE FILE IS REPLACED WHOLE, never rewritten in place. os.WriteFile
+	// truncates and then writes, and a fake git the harness SIGKILLs with its
+	// daemon's group between the two left an EMPTY fixture: every later git
+	// (a successor daemon's) read an empty world and answered "not a git
+	// repository" (TestAPromptSentRightAfterABootOverADeadShimIsDelivered,
+	// "no default branch could be determined", 2026-10-12). A temp file in the
+	// same directory renamed over it is either the old world or the new one.
+	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return fmt.Errorf("fakegit: create a temp file beside %s: %w", path, err)
+	}
+	name := tmp.Name()
+	if _, err := tmp.Write(body); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(name)
+		return fmt.Errorf("fakegit: write %s: %w", name, err)
+	}
+	if err := tmp.Chmod(0o644); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(name)
+		return fmt.Errorf("fakegit: chmod %s: %w", name, err)
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(name)
+		return fmt.Errorf("fakegit: close %s: %w", name, err)
+	}
+	if err := os.Rename(name, path); err != nil {
+		_ = os.Remove(name)
+		return fmt.Errorf("fakegit: replace %s: %w", path, err)
 	}
 	return nil
 }
