@@ -4,12 +4,11 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"agent-repld/internal/ids"
+	"agent-repld/internal/sourcescan"
 )
 
 func TestTurnInFlightAnswersTheWatchersTurnInFlight(t *testing.T) {
@@ -46,25 +45,14 @@ func TestTurnInFlightAnswersTheWatchersTurnInFlight(t *testing.T) {
 // hand-rolled shape turnInFlight replaced.
 func TestNoSiteHandRollsTheTurnInFlightLookup(t *testing.T) {
 	// Arrange
-	sources, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatalf("Glob: %v", err)
-	}
 	fset := token.NewFileSet()
 	var violations []string
 
 	// Act
-	for _, path := range sources {
-		if strings.HasSuffix(path, "_test.go") {
-			continue
-		}
-		src, err := os.ReadFile(path)
+	for _, source := range sourcescan.Production(t) {
+		file, err := parser.ParseFile(fset, source.Name, source.Source, 0)
 		if err != nil {
-			t.Fatalf("ReadFile(%s): %v", path, err)
-		}
-		file, err := parser.ParseFile(fset, path, src, 0)
-		if err != nil {
-			t.Fatalf("ParseFile(%s): %v", path, err)
+			t.Fatalf("ParseFile(%s): %v", source.Name, err)
 		}
 		ast.Inspect(file, func(n ast.Node) bool {
 			stmt, ok := n.(*ast.IfStmt)
