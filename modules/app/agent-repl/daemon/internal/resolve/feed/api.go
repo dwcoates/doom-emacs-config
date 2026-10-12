@@ -148,6 +148,20 @@ type Resolver interface {
 	// (wsm.Turn.Address), handed over as it is recorded, so the live draw and
 	// every replay (TurnAddresses) place the turn from one fact.
 	AddressTurn(ws ids.WorkspaceID, turn ids.TurnID, addr *sessionwatcher.OutputAddress)
+	// SetOutputMirror installs the mirror a lease holder wants the turns IT
+	// starts drawn at TOO, in another workspace's feed (an async merge
+	// workspace's merge turns, in the requester's bubble); nil withdraws it.
+	// Like SetOutputAddress it moves no row (turnmirror.go).
+	SetOutputMirror(ws ids.WorkspaceID, m *wsm.MirrorAddress)
+	// OutputMirror answers a copy of the mirror standing for one workspace,
+	// nil when none stands. The prompt queue reads it as it records a turn
+	// the lease holder started.
+	OutputMirror(ws ids.WorkspaceID) *wsm.MirrorAddress
+	// MirrorTurn records the mirror one turn is also drawn at, nil for none:
+	// the mirror the prompt queue recorded on the turn (wsm.Turn.Mirror),
+	// handed over as it is recorded, so the live draw and every replay
+	// (TurnMirrors) mirror the turn from one fact.
+	MirrorTurn(ws ids.WorkspaceID, turn ids.TurnID, m *wsm.MirrorAddress)
 
 	// ResetWorkspace empties one workspace's feed whole: every row of every
 	// feed is retired on the wire and every accumulation is dropped, so the
@@ -387,6 +401,13 @@ type Deps struct {
 	// nil adds no address, which is what a test that is not about addressed
 	// turns wants.
 	TurnAddresses func(context.Context, ids.WorkspaceID, []ids.TurnID) (map[ids.TurnID]*wsm.OutputAddress, error)
+	// TurnMirrors answers the mirror each named turn was recorded with
+	// (wsm.DB.TurnMirrors), for the turns that have one. A replay takes each
+	// into the table the live draw mirrors by (turnmirror.go).
+	//
+	// nil adds no mirror, which is what a test that is not about mirrored
+	// turns wants.
+	TurnMirrors func(context.Context, ids.WorkspaceID, []ids.TurnID) (map[ids.TurnID]*wsm.MirrorAddress, error)
 	// OwnedTurns answers which of the named turns the workspace recorded as
 	// its own (wsm.DB.RecordedTurns). On a FORK it is what tells the
 	// conversation the fork inherited from the turns it ran itself: a

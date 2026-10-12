@@ -7,7 +7,6 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
-	"agent-repld/internal/mergetab"
 )
 
 // removedSwitchLabel is a merge-workspace switch's text once the workspace it
@@ -15,8 +14,7 @@ import (
 const removedSwitchLabel = "merge workspace removed"
 
 // MarkMergeWorkspaceRemoved restates every switch in WS's feeds that takes the
-// user to MERGEWS -- a detached merge bubble head's and its agentic tabs' --
-// as removed at REMOVEDATMS, and answers how many rows it restated. The
+// user to MERGEWS -- an async merge bubble head's -- as removed at REMOVEDATMS, and answers how many rows it restated. The
 // requester's bubble outlives the merge workspace it names, so its switches
 // say the workspace is gone rather than offer a switch that would be refused.
 //
@@ -61,16 +59,11 @@ func (r *resolver) MarkMergeWorkspaceRemoved(ws, mergeWS ids.WorkspaceID, remove
 	return marked
 }
 
-// switchesTo reports whether ROW carries an available switch to MERGEWS: a
-// merge head's, or an agentic merge tab's.
+// switchesTo reports whether ROW is a merge head carrying an available switch
+// to MERGEWS.
 func switchesTo(row *frontendv1.FeedRow, mergeWS ids.WorkspaceID) bool {
-	if target := row.GetActivity().GetMerge().GetHead().GetWorkspaceSwitch().GetAvailable().GetTarget(); target != nil {
-		return target.GetId() == string(mergeWS)
-	}
-	if sw := mergetab.Switch(row.GetMergeTab()); sw != nil {
-		return sw.GetAvailable().GetTarget().GetId() == string(mergeWS)
-	}
-	return false
+	target := row.GetActivity().GetMerge().GetHead().GetWorkspaceSwitch().GetAvailable().GetTarget()
+	return target != nil && target.GetId() == string(mergeWS)
 }
 
 // markSwitchRemoved turns ROW's switch to its removed arm.
@@ -81,13 +74,6 @@ func markSwitchRemoved(row *frontendv1.FeedRow, removedAtMS int64) {
 			Availability: &frontendv1.FeedMergeWorkspaceSwitch_Removed{
 				Removed: &frontendv1.FeedMergeWorkspaceSwitchRemoved{RemovedAtMs: removedAtMS},
 			},
-		}
-		return
-	}
-	if sw := mergetab.Switch(row.GetMergeTab()); sw != nil {
-		sw.Label = &frontendv1.FeedMergeTabWorkspaceSwitchLabel{Text: removedSwitchLabel}
-		sw.Availability = &frontendv1.FeedMergeTabWorkspaceSwitch_Removed{
-			Removed: &frontendv1.FeedMergeTabWorkspaceSwitchRemoved{RemovedAtMs: removedAtMS},
 		}
 	}
 }

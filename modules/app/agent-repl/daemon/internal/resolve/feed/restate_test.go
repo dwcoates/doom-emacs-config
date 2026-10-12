@@ -63,3 +63,24 @@ func TestEveryStoredRowRestatementGoesThroughRestateRow(t *testing.T) {
 		t.Fatalf("hand-rolled row restatements (use restateRow): %s", strings.Join(offenders, ", "))
 	}
 }
+
+func TestSnapshotRowAnswersACopyAnEditLeavesTheStoredRowAlone(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	stored := &frontendv1.FeedRow{Id: &frontendv1.FeedId{Value: "row-1"}}
+	h.resolver.mu.Lock()
+	s := h.resolver.state(testWorkspace)
+
+	// Act
+	snapshot, ok := h.resolver.snapshotRow(s, stored, unclonable{operation: "test.unclonable", message: "unused", context: dlog.Context{}})
+	h.resolver.mu.Unlock()
+	snapshot.Id = &frontendv1.FeedId{Value: "edited"}
+
+	// Assert
+	if !ok {
+		t.Fatal("snapshotRow = false, want a copy")
+	}
+	if stored.GetId().GetValue() != "row-1" {
+		t.Fatalf("the stored row changed to %q, want it untouched", stored.GetId().GetValue())
+	}
+}

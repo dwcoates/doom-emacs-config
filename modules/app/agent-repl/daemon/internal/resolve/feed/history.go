@@ -37,6 +37,7 @@ func (r *resolver) replayPage(ws ids.WorkspaceID, agent *conversationv1.AgentId,
 	closes := r.recordedCloses(ws, page)
 	turns := entryTurns(page)
 	addresses := r.recordedAddresses(ws, turns)
+	mirrors := r.recordedMirrors(ws, turns)
 	r.learnLineage(ws, turns...)
 
 	r.mu.Lock()
@@ -89,6 +90,9 @@ func (r *resolver) replayPage(ws ids.WorkspaceID, agent *conversationv1.AgentId,
 	s.replayCloses = closes
 	for turn, addr := range addresses {
 		s.addressTurn(turn, addr)
+	}
+	for turn, m := range mirrors {
+		s.mirrorTurn(turn, m)
 	}
 	var withheld []*conversationv1.HistoryEntryAt
 	for i := len(entries) - 1; i >= 0; i-- {
