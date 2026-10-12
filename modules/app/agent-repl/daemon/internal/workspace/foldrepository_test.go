@@ -3,9 +3,12 @@ package workspace
 import (
 	"context"
 	"errors"
+	"slices"
+	"strings"
 	"testing"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
 )
 
@@ -78,5 +81,108 @@ func TestFoldRepositorySurfacesAFailedWriteAtError(t *testing.T) {
 	}
 	if len(f.sidebar.registries) != 0 {
 		t.Fatalf("roster republications = %d, want none for a failed fold", len(f.sidebar.registries))
+	}
+}
+
+// inRepo files a fixture workspace under a repository.
+func inRepo(f *fixture, ws ids.WorkspaceID, repo ids.RepoID, closed bool) {
+	record := f.db.workspaces[ws]
+	record.Repo, record.Closed = repo, closed
+	f.db.workspaces[ws] = record
+}
+
+func TestCollapsingARepositoryStandsItsOpenWorkspacesDown(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.db.repositories = append(f.db.repositories, wsm.Repository{ID: "repo-1"})
+	f.workspace("w1", t.TempDir())
+	inRepo(f, "w1", "repo-1", false)
+
+	// Act
+	if err := f.verbs.FoldRepository(context.Background(), "repo-1", true); err != nil {
+		t.Fatalf("FoldRepository: %v", err)
+	}
+
+	// Assert
+	if !slices.Equal(f.standDowns, []ids.WorkspaceID{"w1"}) {
+		t.Fatalf("stand-downs = %v, want the section's workspace", f.standDowns)
+	}
+}
+
+func TestCollapsingARepositoryLeavesAnotherRepositorysWorkspaces(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.db.repositories = append(f.db.repositories, wsm.Repository{ID: "repo-1"})
+	f.workspace("w1", t.TempDir())
+	inRepo(f, "w1", "repo-2", false)
+
+	// Act
+	if err := f.verbs.FoldRepository(context.Background(), "repo-1", true); err != nil {
+		t.Fatalf("FoldRepository: %v", err)
+	}
+
+	// Assert
+	if len(f.standDowns) != 0 {
+		t.Fatalf("stand-downs = %v, want none outside the section", f.standDowns)
+	}
+}
+
+func TestCollapsingARepositoryLeavesItsClosedWorkspaces(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.db.repositories = append(f.db.repositories, wsm.Repository{ID: "repo-1"})
+	f.workspace("w1", t.TempDir())
+	inRepo(f, "w1", "repo-1", true)
+
+	// Act
+	if err := f.verbs.FoldRepository(context.Background(), "repo-1", true); err != nil {
+		t.Fatalf("FoldRepository: %v", err)
+	}
+
+	// Assert
+	if len(f.standDowns) != 0 {
+		t.Fatalf("stand-downs = %v, want none for a closed workspace", f.standDowns)
+	}
+}
+
+func TestExpandingARepositoryStandsNothingDown(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.db.repositories = append(f.db.repositories, wsm.Repository{ID: "repo-1", Folded: true})
+	f.workspace("w1", t.TempDir())
+	inRepo(f, "w1", "repo-1", false)
+
+	// Act
+	if err := f.verbs.FoldRepository(context.Background(), "repo-1", false); err != nil {
+		t.Fatalf("FoldRepository: %v", err)
+	}
+
+	// Assert
+	if len(f.standDowns) != 0 {
+		t.Fatalf("stand-downs = %v, want none for an expand", f.standDowns)
+	}
+}
+
+func TestCollapsingARepositoryWhoseWorkspacesCannotBeListedFailsLoudly(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.db.repositories = append(f.db.repositories, wsm.Repository{ID: "repo-1"})
+	f.db.listWorkspacesErr = errors.New("disk I/O error")
+
+	// Act
+	err := f.verbs.FoldRepository(context.Background(), "repo-1", true)
+
+	// Assert
+	if err == nil {
+		t.Fatal("a collapse whose workspaces could not be listed was answered as success")
+	}
+	found := false
+	for _, r := range f.log.logger.Records() {
+		if r.Level == dlog.LevelError && r.Operation == opFoldRepository && strings.Contains(r.Message, "could not list the collapsed") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("the failed listing was not recorded at error")
 	}
 }

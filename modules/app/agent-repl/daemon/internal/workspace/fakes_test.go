@@ -2164,6 +2164,8 @@ type fixture struct {
 	cards    *fakeCards
 	log      *fakeSurfaces
 	headless *fakeHeadless
+	// standDowns is every withheld workspace whose stand-down was asked for.
+	standDowns []ids.WorkspaceID
 	// topbarParked is every park state the topbar seam was handed, in order.
 	topbarParked []bool
 	// topbarColdGates is every cold-gate state the topbar seam was handed, in
@@ -2251,7 +2253,10 @@ func newFixture(t *testing.T) *fixture {
 			return f.running, f.hasSession
 		},
 		Ownership: f.owner,
-		Cards:     f.cards,
+		StandDowns: standDownsFunc(func(ws ids.WorkspaceID) {
+			f.standDowns = append(f.standDowns, ws)
+		}),
+		Cards: f.cards,
 		ReadEffortSettings: func(configDir string) (claudesettings.Effort, error) {
 			f.effortReads = append(f.effortReads, configDir)
 			return f.effortSettings, f.effortErr
@@ -2659,3 +2664,8 @@ func (d *fakeDB) SetVendorSessionID(_ context.Context, id ids.WorkspaceID, vendo
 
 // SetAccount takes the session's account; the fake feed draws nothing from it.
 func (f *fakeFeed) SetAccount(ids.WorkspaceID, string) {}
+
+// standDownsFunc adapts a function to StandDowns.
+type standDownsFunc func(ws ids.WorkspaceID)
+
+func (f standDownsFunc) StandDownWithheld(ws ids.WorkspaceID) { f(ws) }
