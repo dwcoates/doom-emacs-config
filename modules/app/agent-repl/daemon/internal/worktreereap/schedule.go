@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"claude-repld/internal/clock"
 	"claude-repld/internal/dlog"
 )
 
@@ -16,19 +17,11 @@ func (r *Reaper) Run(ctx context.Context) error {
 	r.deps.Log.Debug(opRun, "the landed-worktree reaper is scheduled", dlog.Context{
 		"start_delay": r.deps.StartDelay.String(), "every": r.deps.Every.String(),
 	})
-	wait := r.deps.StartDelay
-	for {
-		select {
-		case <-ctx.Done():
-			r.deps.Log.Debug(opRun, "the landed-worktree reaper stopped with its context", nil)
-			return ctx.Err()
-		case <-r.deps.Clock.After(wait):
-		}
-		if _, err := r.Sweep(ctx); err != nil && ctx.Err() != nil {
-			return ctx.Err()
-		} else if errors.Is(err, ErrSweepRunning) {
+	err := clock.Repeat(ctx, r.deps.Clock, r.deps.StartDelay, r.deps.Every, func(ctx context.Context) {
+		if _, err := r.Sweep(ctx); errors.Is(err, ErrSweepRunning) {
 			r.deps.Log.Debug(opRun, "the scheduled sweep found one already running", nil)
 		}
-		wait = r.deps.Every
-	}
+	})
+	r.deps.Log.Debug(opRun, "the landed-worktree reaper stopped with its context", nil)
+	return err
 }

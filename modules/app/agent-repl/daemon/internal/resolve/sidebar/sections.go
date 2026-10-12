@@ -10,6 +10,7 @@ import (
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/repodivergence"
 	"claude-repld/internal/wsm"
 )
 
@@ -37,9 +38,10 @@ func (r *resolver) repositoryView(live []wsm.Workspace, rc rowContext, log dlog.
 		rows := r.sectionRows(byRepo[repo.ID], rc, log.With(dlog.Context{"repo_id": string(repo.ID)}))
 		delete(byRepo, repo.ID)
 		section := &frontendv1.RosterRepoSection{
-			Key:    repoKey(repo),
-			Header: sectionHeader(repo.Name, drawnLiveRowCount(rows)),
-			Rows:   rows,
+			Key:        repoKey(repo),
+			Header:     sectionHeader(repo.Name, drawnLiveRowCount(rows)),
+			Rows:       rows,
+			Divergence: repoDivergence(r.state.divergence[repo.ID]),
 		}
 		setRepoFold(section, repo.Folded)
 		out.Sections = append(out.Sections, section)
@@ -78,6 +80,26 @@ func setRepoFold(section *frontendv1.RosterRepoSection, folded bool) {
 		return
 	}
 	section.Fold = &frontendv1.RosterRepoSection_Expanded{Expanded: &frontendv1.RosterRepoSectionExpanded{}}
+}
+
+// repoDivergence projects a repository's measure onto its section's label
+// hover: no measure yet is pending. Every Measure is one of the three arms.
+func repoDivergence(measure repodivergence.Measure) *frontendv1.RosterRepoDivergence {
+	out := &frontendv1.RosterRepoDivergence{}
+	switch m := measure.(type) {
+	case nil:
+		out.State = &frontendv1.RosterRepoDivergence_Pending{Pending: &frontendv1.RosterRepoDivergencePending{}}
+	case repodivergence.Counted:
+		out.State = &frontendv1.RosterRepoDivergence_Counted{Counted: &frontendv1.RosterRepoDivergenceCounted{
+			Branch: m.Branch, Upstream: m.Upstream, Ahead: uint32(m.Ahead), Behind: uint32(m.Behind)}}
+	case repodivergence.NoUpstream:
+		out.State = &frontendv1.RosterRepoDivergence_NoUpstream{NoUpstream: &frontendv1.RosterRepoDivergenceNoUpstream{Branch: m.Branch}}
+	case repodivergence.Failed:
+		out.State = &frontendv1.RosterRepoDivergence_Failed{Failed: &frontendv1.RosterRepoDivergenceFailed{Reason: m.Reason}}
+	default:
+		panic(fmt.Sprintf("sidebar: repository divergence measure %T has no arm", measure))
+	}
+	return out
 }
 
 // assertRepositoryInvariant records a workspace whose `Repo` names no

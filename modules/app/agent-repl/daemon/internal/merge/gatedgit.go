@@ -450,3 +450,19 @@ func (g *gatedGit) Fetch(ctx context.Context, dir, remote string) error {
 	defer g.leave()
 	return g.inner.Fetch(ctx, dir, remote)
 }
+
+func (g *gatedGit) Upstream(ctx context.Context, repoDir, branch string) (gitclient.Upstream, bool, error) {
+	if err := g.enter("Upstream"); err != nil {
+		return gitclient.Upstream{}, false, err
+	}
+	defer g.leave()
+	return g.inner.Upstream(ctx, repoDir, branch)
+}
+
+func (g *gatedGit) AheadBehind(ctx context.Context, dir, local, upstream string) (int, int, error) {
+	if err := g.enter("AheadBehind"); err != nil {
+		return 0, 0, err
+	}
+	defer g.leave()
+	return g.inner.AheadBehind(ctx, dir, local, upstream)
+}

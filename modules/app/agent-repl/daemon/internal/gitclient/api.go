@@ -153,6 +153,13 @@ type Git interface {
 	AddWorktree(ctx context.Context, repoDir, worktreeDir, branch string) error
 	// Fetch fetches remote into dir's repository.
 	Fetch(ctx context.Context, dir, remote string) error
+	// Upstream reports the remote branch a local branch tracks. It is a
+	// PROBE: a branch that tracks nothing is an ordinary answer (false, nil
+	// error); a branch that does not exist is a failure.
+	Upstream(ctx context.Context, repoDir, branch string) (Upstream, bool, error)
+	// AheadBehind counts the commits on local that upstream lacks (ahead) and
+	// on upstream that local lacks (behind).
+	AheadBehind(ctx context.Context, dir, local, upstream string) (ahead, behind int, err error)
 }
 
 // Worktree is one entry of `git worktree list --porcelain`.

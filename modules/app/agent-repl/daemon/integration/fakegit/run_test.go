@@ -1925,3 +1925,41 @@ func TestOnlyTheModeledSnapshotFormsAreAnswered(t *testing.T) {
 		})
 	}
 }
+
+func TestForEachRefAnswersABranchWithNoUpstream(t *testing.T) {
+	tests := []struct {
+		name   string
+		branch string
+		want   string
+	}{
+		{name: "an existing branch tracks nothing", branch: "main", want: "refs/heads/main\x00\x00\n"},
+		{name: "a missing branch answers no line", branch: "gone", want: ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			s, _, dir := world(t)
+
+			// Act.
+			got := Run(s, "/", []string{"-C", dir, "for-each-ref", "--format=%(refname)", "refs/heads/" + tc.branch})
+
+			// Assert.
+			if got.Exit != 0 || got.Stdout != tc.want {
+				t.Fatalf("for-each-ref = %+v, want exit 0 and %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestForEachRefRefusesAnUnmodeledQuery(t *testing.T) {
+	// Arrange.
+	s, _, dir := world(t)
+
+	// Act.
+	got := Run(s, "/", []string{"-C", dir, "for-each-ref", "refs/tags"})
+
+	// Assert.
+	if got.Exit != 128 {
+		t.Fatalf("for-each-ref = %+v, want the unmodeled refusal", got)
+	}
+}
