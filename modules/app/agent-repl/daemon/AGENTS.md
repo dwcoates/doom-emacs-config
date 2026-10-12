@@ -1279,11 +1279,14 @@ Owner rulings, 2026-10-11 (`internal/merge/chain.go`, `internal/cpugov`).
   only when that turn ends, and that turn is the one that would wait.
 - The queue's controls go through the same writer: `-evict` (the requester's
   own merge) or `-evict-dir WORKTREE` (merge_evict), `-pause` / `-resume`
-  with an optional `-repository-dir DIR` (merge_pause, merge_resume). A
-  control is answered at once, so `-wait` is refused with one; the verb waits
+  with an optional `-repository-dir DIR` (merge_pause, merge_resume),
+  `-hold-rollouts` / `-release-rollouts` (merge_hold_rollouts,
+  merge_release_rollouts: daemon-wide, durable; while held a landing in the
+  daemon's own checkout does not tell the deploy). A control is answered at
+  once, so `-wait` is refused with one; the verb waits
   at most `-answer-timeout` (15s) for the file's fate and prints the answer
   the ingress keyed by the file's path in the run log (or its `.1`
-  generation): `merge-queue: outcome: <evicted|not_queued|paused|resumed>`
+  generation): `merge-queue: outcome: <evicted|not_queued|paused|resumed|held|released>`
   when applied, the refusal's `cause` when quarantined. An answer the run log
   does not carry is printed `unread` on stderr; the fate still decides the
   exit.
@@ -1293,13 +1296,14 @@ Owner rulings, 2026-10-11 (`internal/merge/chain.go`, `internal/cpugov`).
 
 ## An agent controls the merge queue through command files
 
-`merge_evict`, `merge_pause` and `merge_resume` entries
-(`internal/commandfile`, ARCHITECTURE.md "The merge queue's controls") are
-`UpdateMergeQueue`'s evict, pause and resume for an agent: the same
+`merge_evict`, `merge_pause`, `merge_resume`, `merge_hold_rollouts` and
+`merge_release_rollouts` entries (`internal/commandfile`, ARCHITECTURE.md "The
+merge queue's controls") are `UpdateMergeQueue`'s evict, pause, resume,
+hold_rollouts and release_rollouts for an agent: the same
 orchestrator calls, the requester named by `project_dir`. The answer is the
 file's fate (`applied/` or `quarantine/`) and the record keyed by its path:
 INFO `daemon.commandfile.merge_queue` (`outcome` `evicted`, `not_queued`,
-`paused`, `resumed`) or WARN `daemon.commandfile.entry` (the refusal in
+`paused`, `resumed`, `held`, `released`) or WARN `daemon.commandfile.entry` (the refusal in
 `cause`). Evicting what is not queued is `not_queued`, never a refusal.
 
 ## A retarget always tells the workspace
