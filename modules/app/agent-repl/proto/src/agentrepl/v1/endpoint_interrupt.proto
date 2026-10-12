@@ -1,5 +1,5 @@
 // endpoint_interrupt.proto — Interrupt: "stop that". FEED section. One user
-// intent, three targets; THE ARM IS THE TARGET. (CancelDetachedAgents does
+// intent, four targets; THE ARM IS THE TARGET. (CancelDetachedAgents does
 // not return as a verb; the all_agents target is its fan-wide successor.)
 
 syntax = "proto3";
@@ -21,6 +21,14 @@ message InterruptRequest {
     frontend.v1.FeedId detached = 3;
     // EVERY live detached agent at once — the fan-wide stop.
     InterruptAllAgents all_agents = 4;
+    // An AGENTIC merge tab's work (pick, pre-prompt, conflicts, fixes,
+    // post-prompt), by the tab row's FeedId exactly as the feed served it. It
+    // stops the turn that tab draws: for an ASYNC merge the merge workspace's
+    // turn, which also reveals the merge workspace in the tab bar and the
+    // sidebar; for a SYNC merge the requesting workspace's own turn. The
+    // merge then goes on as its step decides, exactly as if the agent's turn
+    // had ended on its own.
+    frontend.v1.FeedId merge_tab = 6;
   }
   // Answers the confirm_required challenge: interrupting a TURN while
   // detached agents are live is refused once, naming the count; resending
@@ -85,6 +93,8 @@ message InterruptError {
     InterruptNoSession no_session = 7;
     // A typed shim refusal relayed (e.g. UpdateAgent nothing_running).
     InterruptShimRefused shim_refused = 8;
+    // The FeedId names no agentic tab of a merge this workspace's feed draws.
+    InterruptNotMergeTab not_merge_tab = 9;
   }
 }
 
@@ -105,6 +115,9 @@ message InterruptTransferringAway {
 message InterruptNotYetAdopted {}
 message InterruptNotDetachedWork {}
 message InterruptNoSession {}
+// The merge_tab target named a row that is not a live agentic merge tab:
+// another kind of row, a resolved tab, or a tab of a merge that has ended.
+message InterruptNotMergeTab {}
 message InterruptShimRefused {
   // The shim's own account of the refusal.
   string detail = 1;

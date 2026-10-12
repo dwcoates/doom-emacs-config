@@ -111,4 +111,13 @@ enum PromptOrigin {
   // through the prompt queue as a deferred prompt, so it waits behind a
   // running turn and wakes an idle agent. Drawn as an ordinary prompt bubble.
   PROMPT_ORIGIN_WORKSPACE_RETARGETED = 32;
+  // The daemon's pick brief: the first turn of an ASYNC merge workspace forked
+  // to land only some changes of its requester's branch
+  // (agentrepl.v1.MergeWorkspaceSourceOwnBranchDetachedPick). It carries the
+  // requesting agent's instruction, wrapped in the brief that tells the merge
+  // agent its worktree is on the target branch and has it cherry-pick and
+  // commit those changes. The turn is the merge's own: its rows draw under the
+  // bubble's pick tab (frontend.v1.FeedMergeTabPick), and the merge joins the
+  // queue once it ends.
+  PROMPT_ORIGIN_MERGE_PICK = 33;
 }
