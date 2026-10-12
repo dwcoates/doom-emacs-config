@@ -181,6 +181,15 @@ func run(ctx context.Context, opts options, h hooks) error {
 		defer profiling.Close()
 	}
 
+	// RUNTIME PROFILING is armed beside the surface: a session the collector
+	// opens (bin/profile-agent-repl.sh) starts it on SIGUSR2 without a restart.
+	stopProfiling, err := startRuntimeProfiling(log, os.Getenv, os.UserHomeDir)
+	if err != nil {
+		log.Error("daemon.cmd.profiling", "the runtime profiler could not be armed", dlog.Context{"error": err.Error()})
+		return err
+	}
+	defer stopProfiling()
+
 	// THE ADDRESS CLAIM IS THE EXCLUSIVITY CLAIM, and it is taken before any
 	// socket is touched. A successor is distinguishable because it was SPAWNED
 	// with -joining, never because it raced and won -- and so it does NOT take
