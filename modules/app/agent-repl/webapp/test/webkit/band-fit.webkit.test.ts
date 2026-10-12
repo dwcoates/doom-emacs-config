@@ -38,10 +38,10 @@ function mergedGroups(merged: number, groups: number): string {
   }).join("");
 }
 
-/** A rail HEIGHT px tall: LIVE live rows above HIDDEN hidden and MERGED merged rows in GROUPS repository groups. */
+/** A rail HEIGHT px tall, under the rail's head: LIVE live rows above HIDDEN hidden and MERGED merged rows in GROUPS repository groups. */
 function rail(height: number, live: number, hidden: number, merged: number, groups = 1): string {
   const ids = (prefix: string, n: number): string[] => Array.from({ length: n }, (_, i) => `${prefix}-${i}`);
-  return `<nav id="ws-sidebar" style="height:${height}px"><div class="sb-scroll"><div class="sb-roster">
+  return `<nav id="ws-sidebar" style="height:${height}px"><div class="sb-head"><span class="sb-title">Workspaces</span></div><div class="sb-scroll"><div class="sb-roster">
 <div class="sb-pane" data-grouping="repository"><div class="sb-sections"><div class="repo"><div class="repo-head"><span class="sb-label">alpha</span></div><div class="rows">${ids("live", live).map((id) => wsRow(id, false)).join("")}</div></div></div>
 ${bandSection("hidden-section", "Hidden Workspaces", hidden, ids("hidden", hidden).map((id) => wsRow(id, false)).join(""))}
 ${bandSection("merged-section", "Recently Merged", merged, mergedGroups(merged, groups))}
@@ -100,6 +100,50 @@ async function fit(page: Page, markup: string): Promise<Fitted> {
   }, markup);
 }
 
+/** The lines each band shows after a first fit and after a second, and whether either fit refused. */
+interface Refit {
+  height: number;
+  first: string;
+  second: string;
+  refused: string | null;
+}
+
+/**
+ * Fit the bands of a rail of every height in HEIGHTS, twice each, and report
+ * every height whose second fit drew other lines than its first or refused.
+ */
+async function unsettled(page: Page, heights: number[], live: number, hidden: number, merged: number): Promise<Refit[]> {
+  const markups = heights.map((h) => [h, rail(h, live, hidden, merged)] as const);
+  return page.evaluate((cases) => {
+    const api = (window as unknown as { BandFit: { fitBands: (s: HTMLElement, p: HTMLElement) => unknown } }).BandFit;
+    const out: Refit[] = [];
+    for (const [height, html] of cases) {
+      document.body.innerHTML = html;
+      const scroller = document.querySelector(".sb-scroll") as HTMLElement;
+      const pane = document.querySelector(".sb-pane") as HTMLElement;
+      try {
+        const first = JSON.stringify(api.fitBands(scroller, pane));
+        const second = JSON.stringify(api.fitBands(scroller, pane));
+        if (first !== second) out.push({ height, first, second, refused: null });
+      } catch (err) {
+        out.push({ height, first: "", second: "", refused: String(err) });
+      }
+    }
+    return out;
+  }, markups);
+}
+
+/** The drawn heights of the rail's head and scroller with its rows drawn as MARKUP. */
+async function railBoxes(page: Page, markup: string): Promise<{ head: number; scroller: number }> {
+  return page.evaluate((html) => {
+    document.body.innerHTML = html;
+    return {
+      head: (document.querySelector(".sb-head") as HTMLElement).getBoundingClientRect().height,
+      scroller: (document.querySelector(".sb-scroll") as HTMLElement).getBoundingClientRect().height,
+    };
+  }, markup);
+}
+
 describe("the band fit in WebKit", () => {
   let browser: Browser;
   let page: Page;
@@ -146,6 +190,25 @@ describe("the band fit in WebKit", () => {
   it("shows every line of both bands, unscrolled, in a rail that holds them", async () => {
     const got = await fit(page, rail(880, 2, 4, 5));
     expect([got.hidden.whole, got.hidden.scrolls, got.merged.whole, got.merged.scrolls]).toEqual([4, false, 5, false]);
+  });
+
+  it("keeps the rail's head its own height when the rows overflow", async () => {
+    const short = await railBoxes(page, rail(400, 1, 1, 1));
+    const overflowing = await railBoxes(page, rail(400, 40, 20, 20));
+    expect(overflowing.head).toBe(short.head);
+  });
+
+  it("gives the rail's scroller the same height however many rows it holds", async () => {
+    const short = await railBoxes(page, rail(400, 1, 1, 1));
+    const overflowing = await railBoxes(page, rail(400, 40, 20, 20));
+    expect(overflowing.scroller).toBe(short.scroller);
+  });
+
+  it("draws the same lines when a rail of any height is fitted again", async () => {
+    // Every pixel of rail height crosses every line boundary of both bands,
+    // the rail overflowing below the capped viewports and fitting above them.
+    const heights = Array.from({ length: 601 }, (_, i) => 200 + i);
+    expect(await unsettled(page, heights, 2, 9, 9)).toEqual([]);
   });
 
   it("grows the bands into a tall rail's spare room without scrolling it", async () => {

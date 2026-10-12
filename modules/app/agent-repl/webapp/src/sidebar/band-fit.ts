@@ -25,6 +25,15 @@
  * THE COUNT IS THE DAEMON'S. Every row is reachable by scrolling, so the
  * folded "(N)" stays the number of rows the band holds.
  *
+ * THE FIT NEVER MOVES ITS OWN ROOM. The room is measured from layout the
+ * fit does not size (the rail's height under its head, the pane's content
+ * other than the bands' rows regions), in the engine's fractional pixels
+ * rather than rounded whole ones, so fitting again finds the same room and
+ * draws the same lines. A content-sized rail scroller once broke this: each
+ * fit moved the room by a pixel and the observer re-fitted between two
+ * answers many times a second (2026-10-11). A fit that moves its room is an
+ * error and refuses.
+ *
  * AN UNLAID PANE KEEPS ITS DRAWN STATE. A pane that is not shown (the other
  * grouping) or a rail not yet on the page cannot be fitted; its bands are left
  * as drawn, every line shown, and fitted the moment they lay out (the rail
@@ -96,11 +105,34 @@ export function allocateBandLines(room: number, hidden: BandStops, merged: BandS
   return { hidden: h, merged: m };
 }
 
-/** A box's declared vertical padding, in pixels; an undeclared one is zero. */
-function verticalPadding(el: HTMLElement): number {
+/** A computed length, which a laid-out element always reports in px. */
+function computedLength(style: CSSStyleDeclaration, property: FrameLength): number {
+  const value = style[property];
+  const px = /^(-?\d+(?:\.\d+)?)px$/.exec(value);
+  if (px === null) {
+    log.error("a sidebar band cannot be fitted: the rail's computed box is not in px", {
+      operation: "sidebar.band-fit.unmeasurable",
+      context: { property, value },
+    });
+    throw new RangeError(`band fit: computed ${property} '${value}' is not in px`);
+  }
+  return Number.parseFloat(px[1] as string);
+}
+
+/** The computed lengths that frame a box vertically. */
+type FrameLength = "borderTopWidth" | "borderBottomWidth" | "paddingTop" | "paddingBottom";
+
+/**
+ * A box's content height, in fractional pixels: its drawn height less its
+ * vertical borders and padding.
+ */
+function contentHeight(el: HTMLElement): number {
   const style = getComputedStyle(el);
-  const px = (value: string): number => (value === "" ? 0 : Number.parseFloat(value));
-  return px(style.paddingTop) + px(style.paddingBottom);
+  const frame = (["borderTopWidth", "borderBottomWidth", "paddingTop", "paddingBottom"] as const).reduce(
+    (sum, property) => sum + computedLength(style, property),
+    0,
+  );
+  return el.getBoundingClientRect().height - frame;
 }
 
 /**
@@ -142,6 +174,16 @@ function openBand(pane: HTMLElement, className: string): Band | null {
   return { section, region };
 }
 
+/**
+ * The pixels SCROLLER's PANE leaves its open BANDS' rows regions: the
+ * scroller's content height less everything else the pane draws. Measured in
+ * fractional pixels, so no rounding moves it between two fits.
+ */
+function measureRoom(scroller: HTMLElement, pane: HTMLElement, bands: readonly Band[]): number {
+  const regions = bands.reduce((sum, band) => sum + band.region.getBoundingClientRect().height, 0);
+  return contentHeight(scroller) - (pane.getBoundingClientRect().height - regions);
+}
+
 /** Size BAND's viewport to LINES of its STOPS, and state LINES on it. */
 function sizeBand(band: Band, stops: BandStops, lines: number): void {
   band.region.style.maxHeight = lines < stops.length - 1 ? `${stops[lines]}px` : "";
@@ -157,22 +199,37 @@ export function fitBands(scroller: HTMLElement, pane: HTMLElement): BandLines | 
   const hidden = openBand(pane, HIDDEN_SECTION_CLASS);
   const merged = openBand(pane, MERGED_SECTION_CLASS);
   if (hidden === null && merged === null) return null;
-  const paneHeight = pane.offsetHeight;
-  if (paneHeight <= 0 || scroller.clientHeight <= 0) {
+  const paneHeight = pane.getBoundingClientRect().height;
+  const scrollerHeight = scroller.getBoundingClientRect().height;
+  if (paneHeight <= 0 || scrollerHeight <= 0) {
     log.debug("left the sidebar bands as drawn: the pane is not laid out", {
       operation: "sidebar.band-fit.unlaid",
-      context: { pane_height: paneHeight, scroller_height: scroller.clientHeight },
+      context: { pane_height: paneHeight, scroller_height: scrollerHeight },
     });
     return null;
   }
   const bands = [hidden, merged].filter((band): band is Band => band !== null);
-  const others = paneHeight - bands.reduce((sum, band) => sum + band.region.offsetHeight, 0);
-  const room = scroller.clientHeight - verticalPadding(scroller) - others;
+  const room = measureRoom(scroller, pane, bands);
   const hiddenStops = hidden === null ? [0] : regionStops(hidden.region);
   const mergedStops = merged === null ? [0] : regionStops(merged.region);
   const lines = allocateBandLines(room, hiddenStops, mergedStops);
   if (hidden !== null) sizeBand(hidden, hiddenStops, lines.hidden);
   if (merged !== null) sizeBand(merged, mergedStops, lines.merged);
+  const fittedRoom = measureRoom(scroller, pane, bands);
+  if (fittedRoom !== room) {
+    log.error("the sidebar band fit moved its own room: fitting again would draw other lines", {
+      operation: "sidebar.band-fit.unsettled",
+      context: {
+        room,
+        fitted_room: fittedRoom,
+        hidden_total: hiddenStops.length - 1,
+        hidden_shown: lines.hidden,
+        merged_total: mergedStops.length - 1,
+        merged_shown: lines.merged,
+      },
+    });
+    throw new Error(`band fit: fitting moved the room from ${room}px to ${fittedRoom}px`);
+  }
   log.debug("fitted the sidebar bands", {
     operation: "sidebar.band-fit",
     context: {
@@ -201,9 +258,9 @@ export interface BandFit {
 /**
  * Keep SCROLLER's bands fitted: a resize of the rail (the window, the editor
  * pane) or of a pane (a section folded or unfolded, the grouping switched)
- * re-fits, because the split is a function of exactly that layout. A fit that
- * settles resizes the pane to the size it fitted for, so the re-fit it
- * provokes changes nothing.
+ * re-fits, because the split is a function of exactly that layout. The fit
+ * never moves its own room (see the module note), so the re-fit its own
+ * resize of the pane provokes draws the same lines and stops there.
  */
 export function installBandFit(scroller: HTMLElement): BandFit {
   const observer = new ResizeObserver(() => fitAllBands(scroller));
