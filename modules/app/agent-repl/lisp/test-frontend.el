@@ -110,7 +110,6 @@ test is the mount's own binding of the slot to its workspace."
              ((symbol-function 'agent-repl-webhost-ensure-page) (lambda (_ws) "id"))
              ((symbol-function 'agent-repl--frontend-adopt-webview-buffer) (lambda (&rest _) nil))
              ((symbol-function 'agent-repl-window-tell-input-background) #'ignore)
-             ((symbol-function 'agent-repl-startup-note-page-loaded) #'ignore)
              ((symbol-function 'agent-repl--align-buffer-to-ws-dir) (lambda (&rest _) nil))
              ((symbol-function 'agent-repl--frontend-make-slot-buffer) (lambda (_name _xw) ,slot)))
      ,@body))
@@ -160,22 +159,6 @@ test is the mount's own binding of the slot to its workspace."
               (should (equal held '("ws1" "ws1")))))
         (when (buffer-live-p buf) (kill-buffer buf))))))
 
-(ert-deftest agent-repl-test-frontend-a-fresh-slot-tells-the-startup-its-page-is-loading ()
-  "The editor's startup opens a tab only once its page drew, so it starts asking."
-  ;; Arrange
-  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-    (let ((buf (generate-new-buffer "*fake-webview*"))
-          (noted nil))
-      (unwind-protect
-          (agent-repl-test-frontend--with-slot-mount buf
-            (cl-letf (((symbol-function 'agent-repl-startup-note-page-loaded)
-                       (lambda (ws) (push ws noted))))
-              ;; Act
-              (agent-repl--frontend-ensure-webview-buffer "ws1")
-              ;; Assert
-              (should (equal noted '("ws1")))))
-        (when (buffer-live-p buf) (kill-buffer buf))))))
-
 (ert-deftest agent-repl-test-frontend-a-fresh-slot-tells-the-input-background ()
   "The page's gate wears the input window's color from its first load."
   ;; Arrange
@@ -190,23 +173,6 @@ test is the mount's own binding of the slot to its workspace."
               (agent-repl--frontend-ensure-webview-buffer "ws1")
               ;; Assert
               (should (equal told '("ws1")))))
-        (when (buffer-live-p buf) (kill-buffer buf))))))
-
-(ert-deftest agent-repl-test-frontend-a-reused-slot-tells-the-startup-nothing ()
-  "Only a freshly made slot starts the startup's question."
-  ;; Arrange
-  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-    (let ((buf (generate-new-buffer "*fake-webview*"))
-          (noted nil))
-      (unwind-protect
-          (agent-repl-test-frontend--with-slot-mount buf
-            (agent-repl--ws-put "ws1" :frontend-buffer buf)
-            (cl-letf (((symbol-function 'agent-repl-startup-note-page-loaded)
-                       (lambda (ws) (push ws noted))))
-              ;; Act
-              (agent-repl--frontend-ensure-webview-buffer "ws1")
-              ;; Assert
-              (should (null noted))))
         (when (buffer-live-p buf) (kill-buffer buf))))))
 
 ;;;; ---- The slot ---------------------------------------------------------------
@@ -1578,6 +1544,18 @@ accessor would not reach the code under test."
               (should (eq (agent-repl--frontend-precreate-refusal "alpha")
                           :already-mounted))))
         (kill-buffer buf)))))
+
+(ert-deftest agent-repl-test-frontend-precreate-refuses-a-hidden-workspace ()
+  "A hidden workspace runs nothing, so it is owed no page."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'agent-repl--ws-live-p) (lambda (_ws) t))
+              ((symbol-function 'agent-repl--ws-gui-frontend-p) (lambda (_ws) t))
+              ((symbol-function 'agent-repl-host-ref)
+               (lambda (_ws) '(:id "ws-1" :dir "/w")))
+              ((symbol-function 'agent-repl-open-tabs-hidden-p) (lambda (_ws) t)))
+      ;; Act / Assert
+      (should (eq (agent-repl--frontend-precreate-refusal "alpha") :hidden)))))
 
 (ert-deftest agent-repl-test-frontend-precreate-refuses-a-dead-workspace ()
   "A workspace that is gone gets no page."

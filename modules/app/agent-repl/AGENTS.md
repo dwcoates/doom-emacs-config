@@ -712,6 +712,20 @@ stop ahead of a fresh ensure. Neither ever signalled the process object,
 so neither lost anything to the detach. Only the implicit death-on-exit is
 gone.
 
+## A daemon-only restart never closes a tab (core hot-reload principle)
+
+Owner ruling, 2026-10-12. Bouncing, deploying or restarting the daemon
+alone keeps every open Emacs tab standing: sessions and pages reconnect
+beneath them.
+
+- Emacs, not the daemon, records which tabs are open
+  (`lisp/open-tabs.el`).
+- A daemon that comes back never makes Emacs re-ask for an open tab.
+- Only an open still in flight when its stream ends is asked for again, on
+  the next link-up.
+- Nothing may tear down, grey out or re-hold a tab because the daemon went
+  away and came back.
+
 ## SIGUSR2 to a shim resets its keep-alives (a backdoor, not a wire verb)
 
 Each shim (`agent-shim/claude/shim/src/main.ts`) answers SIGTERM (graceful

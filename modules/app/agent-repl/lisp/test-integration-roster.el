@@ -677,6 +677,10 @@ follow sends no SelectWorkspace of its own."
                    `(current . ((workspace . ((id . "itest-own")
                                               (dir . ,(agent-repl-itest--fixture-dir "itest-own"))))))))
           (agent-repl-itest-roster--await-view daemon)
+          ;; The frame follows once the tab is answered open (open-tabs.el),
+          ;; which is after the view.
+          (agent-repl-itest--wait-until (lambda () (member "itest-own" switched))
+                                        nil "the frame to follow the opened tab")
           ;; Assert: the frame followed, and no SelectWorkspace of our own.
           (should (member "itest-own" switched))
           (should (null (agent-repl-itest--calls daemon "SelectWorkspace"))))))))
