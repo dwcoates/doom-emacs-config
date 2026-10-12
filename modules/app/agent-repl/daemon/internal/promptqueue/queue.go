@@ -100,12 +100,13 @@ type wsState struct {
 	head         *ids.TurnID
 	interrupting bool
 
-	// joining is the prompt the queue sent to join the running turn after
-	// its current tool call (join.go), nil when none waits. While it stands,
-	// the vendor has not yet folded it in nor run it as its own turn, and no
-	// prompt behind it is classified. Guarded by q.mu; set under drain,
-	// cleared by the prompt's own turn ending, folded or run.
-	joining *joiningPrompt
+	// joins are the prompts the queue sent to join the running turn after
+	// its current tool call (join.go), oldest first, empty when none waits.
+	// While one stands, the vendor has not yet folded it in nor run it, and no
+	// prompt behind it is classified. Every one joins the same turn. Guarded
+	// by q.mu; added under drain, each cleared by its own turn ending, folded
+	// or run.
+	joins []joiningPrompt
 	// folded are the prompts the vendor folded into a running turn, by the
 	// turn they joined, kept until that turn ends (join.go). Guarded by q.mu.
 	folded map[ids.TurnID][]joiningPrompt
