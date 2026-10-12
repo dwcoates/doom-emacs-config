@@ -83,7 +83,7 @@ const (
 	// the budget has that margin over every individual wait several times over.
 	//
 	// It was 50s, on a stated basis of a ~16.6s healthy max for
-	// TestMockScenarios/!subagent. That scenario measures 0.33s and no subtest
+	// TestMockScenariosShardN/!subagent. That scenario measures 0.33s and no subtest
 	// in the package exceeds 0.87s, so the number was ~50x its own premise and
 	// a single red burned 50s of the suite's wall time proving nothing.
 	waitBudget = 10 * time.Second
