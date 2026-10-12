@@ -16,6 +16,7 @@ type sessionFixture struct {
 	RootEnv     string `json:"root_env"`
 	DefaultRoot string `json:"default_root"`
 	ActiveFile  string `json:"active_file"`
+	ArmedDir    string `json:"armed_dir"`
 	Signal      string `json:"signal"`
 	MaxSeconds  int    `json:"max_seconds"`
 	Sessions    []struct {
@@ -114,6 +115,9 @@ func TestTheContractMatchesTheSharedFixture(t *testing.T) {
 	// Assert
 	if f.RootEnv != RootEnvironment || f.ActiveFile != ActiveFile || f.MaxSeconds != int(MaxDuration/time.Second) {
 		t.Fatalf("constants = %q %q %v, fixture %q %q %ds", RootEnvironment, ActiveFile, MaxDuration, f.RootEnv, f.ActiveFile, f.MaxSeconds)
+	}
+	if f.ArmedDir != ArmedDir {
+		t.Fatalf("ArmedDir = %q, fixture %q", ArmedDir, f.ArmedDir)
 	}
 	if f.DefaultRoot != "~/"+DefaultRoot {
 		t.Fatalf("DefaultRoot = %q, fixture %q", DefaultRoot, f.DefaultRoot)
@@ -385,5 +389,65 @@ func TestWatchStopsTheProfileWhenDone(t *testing.T) {
 	stop := h.events[len(h.events)-1]
 	if stop.Kind != Stopped || stop.Reason != "exit" {
 		t.Fatalf("last event = %+v, want an exit stop", stop)
+	}
+}
+
+func TestWatchHoldsTheArmedMarkerWhileItListens(t *testing.T) {
+	// Arrange
+	root := t.TempDir()
+	p, err := New(Options{Runtime: "store", Root: root, Events: func(Event) {}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	marker, err := p.arm()
+
+	// Act
+	_, statErr := os.Stat(marker)
+
+	// Assert
+	if err != nil || statErr != nil || marker != filepath.Join(root, ArmedDir, "store-"+strconv.Itoa(os.Getpid())) {
+		t.Fatalf("arm = %q, %v; stat %v; want the runtime's marker on disk", marker, err, statErr)
+	}
+}
+
+func TestWatchRemovesTheArmedMarkerWhenItStops(t *testing.T) {
+	// Arrange
+	root := t.TempDir()
+	p, err := New(Options{Runtime: "store", Root: root, Events: func(Event) {}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	close(done)
+
+	// Act
+	Watch(p, done)
+
+	// Assert
+	entries, err := os.ReadDir(filepath.Join(root, ArmedDir))
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("armed directory = %v, %v; want it empty once Watch returned", entries, err)
+	}
+}
+
+func TestDisarmRecordsAFailedRemoval(t *testing.T) {
+	// Arrange: a marker path that is a non-empty directory cannot be removed.
+	root := t.TempDir()
+	var got []Event
+	p, err := New(Options{Runtime: "store", Root: root, Events: func(e Event) { got = append(got, e) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(root, "stuck")
+	if err := os.MkdirAll(filepath.Join(marker, "inside"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	p.disarm(marker)
+
+	// Assert
+	if len(got) != 1 || got[0].Kind != Failed {
+		t.Fatalf("events = %+v, want the failed removal recorded", got)
 	}
 }

@@ -33,6 +33,11 @@ const DefaultRoot = ".cache/agent-repl/profiles"
 // ActiveFile is the file under the root that names the open session.
 const ActiveFile = "active"
 
+// ArmedDir holds one marker per runtime that is listening for Signal:
+// <root>/armed/<runtime>-<pid>. Go and node terminate on an unhandled SIGUSR2,
+// so the collector signals only a marked, live pid.
+const ArmedDir = "armed"
+
 // Signal is the signal every Go and node runtime reconciles its profiling on.
 // SIGUSR1 is node's inspector signal, so both use SIGUSR2.
 var Signal os.Signal = syscall.SIGUSR2
@@ -271,13 +276,41 @@ func writeHeap(path string) error {
 }
 
 // Watch reconciles p on every Signal until done closes, then stops any
-// running profile with reason "exit". It returns once it has stopped
-// listening; run it on its own goroutine.
+// running profile with reason "exit". While it listens it holds the
+// runtime's armed marker, and it removes the marker before it returns. It
+// returns once it has stopped listening; run it on its own goroutine.
 func Watch(p *Profiler, done <-chan struct{}) {
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, Signal)
 	defer signal.Stop(ch)
+	marker, err := p.arm()
+	if err != nil {
+		p.opts.Events(Event{Kind: Failed, Err: err})
+	} else {
+		defer p.disarm(marker)
+	}
 	watch(p, done, ch)
+}
+
+// arm writes the runtime's armed marker, AFTER the signal is subscribed, so a
+// marker on disk always means a signal reaches the handler.
+func (p *Profiler) arm() (string, error) {
+	dir := filepath.Join(p.opts.Root, ArmedDir)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("profiling: create the armed directory: %w", err)
+	}
+	marker := filepath.Join(dir, fmt.Sprintf("%s-%d", p.opts.Runtime, p.pid))
+	if err := os.WriteFile(marker, []byte(p.opts.Runtime+"\n"), 0o644); err != nil {
+		return "", fmt.Errorf("profiling: write the armed marker: %w", err)
+	}
+	return marker, nil
+}
+
+// disarm removes the armed marker; a failure is recorded, never dropped.
+func (p *Profiler) disarm(marker string) {
+	if err := os.Remove(marker); err != nil && !errors.Is(err, os.ErrNotExist) {
+		p.opts.Events(Event{Kind: Failed, Err: fmt.Errorf("profiling: remove the armed marker: %w", err)})
+	}
 }
 
 // watch is Watch's loop over an already-subscribed signal channel.

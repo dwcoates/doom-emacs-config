@@ -21,21 +21,52 @@
     "",
     "An active file that names no valid session is a FAILED reconcile, recorded",
     "at error, and starts nothing. sessions lists ids each runtime must judge",
-    "the same way."
+    "the same way.",
+    "",
+    "A RUNTIME THAT CAN BE SIGNALED SAYS SO. Go and node terminate on an",
+    "unhandled SIGUSR2, so a runtime that is listening writes",
+    "<root>/<armed_dir>/<runtime>-<pid> while it listens and removes it when it",
+    "stops; the collector signals only a live pid with that marker, so it never",
+    "kills a process from a build that predates profiling."
   ],
   "root_env": "AGENT_REPL_PROFILE_ROOT",
   "default_root": "~/.cache/agent-repl/profiles",
   "active_file": "active",
+  "armed_dir": "armed",
   "signal": "SIGUSR2",
   "max_seconds": 1800,
   "sessions": [
-    {"id": "20261012T170000Z", "valid": true},
-    {"id": "run-1.a_b", "valid": true},
-    {"id": "", "valid": false},
-    {"id": ".hidden", "valid": false},
-    {"id": "../escape", "valid": false},
-    {"id": "a/b", "valid": false},
-    {"id": "has space", "valid": false},
-    {"id": "x0123456789012345678901234567890123456789012345678901234567890123", "valid": false}
+    {
+      "id": "20261012T170000Z",
+      "valid": true
+    },
+    {
+      "id": "run-1.a_b",
+      "valid": true
+    },
+    {
+      "id": "",
+      "valid": false
+    },
+    {
+      "id": ".hidden",
+      "valid": false
+    },
+    {
+      "id": "../escape",
+      "valid": false
+    },
+    {
+      "id": "a/b",
+      "valid": false
+    },
+    {
+      "id": "has space",
+      "valid": false
+    },
+    {
+      "id": "x0123456789012345678901234567890123456789012345678901234567890123",
+      "valid": false
+    }
   ]
 }
