@@ -93,6 +93,12 @@ func (f *serverForwarder) PushTransferred(ws ids.WorkspaceID, successorAddress s
 	}
 }
 
+func (f *serverForwarder) RetractTransferred(ws ids.WorkspaceID) {
+	if target, ok := f.bound(); ok {
+		target.RetractTransferred(ws)
+	}
+}
+
 func (f *serverForwarder) PushReloadWebapp(ws ids.WorkspaceID) {
 	if target, ok := f.bound(); ok {
 		target.PushReloadWebapp(ws)

@@ -352,6 +352,12 @@ func (p *fakePusher) PushTransferred(ws ids.WorkspaceID, address string) {
 	p.calls = append(p.calls, pushCall{WS: ws, Kind: "transferred", Address: address})
 }
 
+func (p *fakePusher) RetractTransferred(ws ids.WorkspaceID) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.calls = append(p.calls, pushCall{WS: ws, Kind: "retract_transferred"})
+}
+
 func (p *fakePusher) PushReloadWebapp(ws ids.WorkspaceID) {
 	p.mu.Lock()
 	defer p.mu.Unlock()

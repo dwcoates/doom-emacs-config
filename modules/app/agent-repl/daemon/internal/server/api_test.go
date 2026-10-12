@@ -206,6 +206,86 @@ func TestPushTransferredReachesTheWebStreamWithTheAddress(t *testing.T) {
 	}
 }
 
+// TestRetractTransferredStopsReplayingTheNoticeToALateWebStream pins the
+// take-back's first half: a page attaching after the workspace came back is
+// not handed the notice that it moved.
+func TestRetractTransferredStopsReplayingTheNoticeToALateWebStream(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	h.Server.PushTransferred(testWorkspaceID, "127.0.0.1:4242")
+	h.Server.RetractTransferred(testWorkspaceID)
+	stream, err := h.Client.WatchWebWorkspace(ctx,
+		connect.NewRequest(&agentreplv1.WatchWebWorkspaceRequest{Workspace: ref(), WebappBuild: "webapp-test"}))
+	if err != nil {
+		t.Fatalf("open the web stream: %v", err)
+	}
+
+	// Act.
+	h.Server.PushTransferred(testWorkspaceID, "127.0.0.1:5353")
+	push := receiveWebEvent(t, stream)
+
+	// Assert.
+	if got := push.GetTransferred().GetAddress(); got != "127.0.0.1:5353" {
+		t.Fatalf("first event's address = %q, want the later transfer's and no replay of the retracted one", got)
+	}
+}
+
+// TestRetractTransferredLetsTheNextIdenticalNoticeReachTheHostStream pins the
+// take-back's second half: the next transfer's notice is identical to the
+// retracted one, and a host stream that heard the first must hear it too.
+func TestRetractTransferredLetsTheNextIdenticalNoticeReachTheHostStream(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream, err := h.Client.WatchHostWorkspace(ctx,
+		connect.NewRequest(&agentreplv1.WatchHostWorkspaceRequest{Workspace: ref()}))
+	if err != nil {
+		t.Fatalf("open the host stream: %v", err)
+	}
+	h.Server.PushTransferred(testWorkspaceID, "127.0.0.1:4242")
+	if receiveHostEvent(t, stream).GetTransferred() == nil {
+		t.Fatal("the first transfer notice did not arrive")
+	}
+	h.Server.RetractTransferred(testWorkspaceID)
+
+	// Act.
+	h.Server.PushTransferred(testWorkspaceID, "127.0.0.1:4242")
+	push := receiveHostEvent(t, stream)
+
+	// Assert.
+	if push.GetTransferred() == nil {
+		t.Fatalf("event = %v, want the second transfer notice", push)
+	}
+}
+
+// TestRetractTransferredLeavesAnotherStandingEvent pins that only the
+// transfer notice is withdrawn: a host topic whose latest event is something
+// else keeps replaying it.
+func TestRetractTransferredLeavesAnotherStandingEvent(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	h.Server.PushReloadWebapp(testWorkspaceID)
+
+	// Act.
+	h.Server.RetractTransferred(testWorkspaceID)
+	stream, err := h.Client.WatchHostWorkspace(ctx,
+		connect.NewRequest(&agentreplv1.WatchHostWorkspaceRequest{Workspace: ref()}))
+	if err != nil {
+		t.Fatalf("open the host stream: %v", err)
+	}
+	push := receiveHostEvent(t, stream)
+
+	// Assert.
+	if push.GetReloadWebapp() == nil {
+		t.Fatalf("replayed event = %v, want the standing reload_webapp", push)
+	}
+}
+
 // TestTransportClosedRecordsTheInfoShape pins the record a refused stream open
 // makes: INFO, operation daemon.refusal.transport_closed, structured rpc and
 // cause.

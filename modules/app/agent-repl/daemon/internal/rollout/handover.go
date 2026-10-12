@@ -586,6 +586,10 @@ func (c *controller) reclaim(ctx context.Context, ws ids.WorkspaceID, lease ids.
 		return false, nil
 	}
 	c.untransfer(ws)
+	// THE NOTICE THAT IT MOVED IS WITHDRAWN with the move. Left standing, it
+	// was replayed to the page reloaded back onto this daemon, which went
+	// quiet, and it swallowed the next transfer's identical notice.
+	c.deps.Pusher.RetractTransferred(ws)
 	c.deps.Shims.Reclaimed(ws)
 	var failures []error
 	if _, live := c.deps.Shims.Client(ws); reattach && !live {
