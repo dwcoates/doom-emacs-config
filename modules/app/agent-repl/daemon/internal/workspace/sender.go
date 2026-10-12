@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 
@@ -11,6 +12,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/sessionwatcher"
+	"agent-repld/internal/shimclient"
 )
 
 // THE QUEUE'S DELIVERY SURFACE.
@@ -156,6 +158,14 @@ func (s *sender) startTurn(ctx context.Context, turn ids.TurnID, said *conversat
 	}
 	response, err := s.client.StartTurn(ctx, req)
 	if err != nil {
+		// A SHIM THAT DIED UNDER THE CALL is the queue's to hold, not to
+		// refuse (promptqueue.ErrShimDied): the session read live when the
+		// prompt arrived (seen under load: "the shim refused the turn ...
+		// the shim died: unavailable: dial unix ...: connection refused",
+		// TestAPromptSentRightAfterAShimDiesIsDelivered).
+		if errors.Is(err, shimclient.ErrShimDied) {
+			return nil, fmt.Errorf("%w: %w", promptqueue.ErrShimDied, err)
+		}
 		return nil, err
 	}
 	if failure := response.GetFailure(); failure != nil {
