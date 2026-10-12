@@ -1,0 +1,41 @@
+{
+  "_comment": [
+    "THE cross-runtime profiling session contract. Go (agent-shim/logging/go/profiling,",
+    "imported by the daemon, the store and the sidecar), TypeScript",
+    "(agent-shim/logging/ts/profile-session.ts, imported by the shim) and elisp",
+    "(profiling.el) each assert their own reading against this file, so every",
+    "runtime writes into the one session the collector opened and none of them",
+    "can be left profiling.",
+    "",
+    "A SESSION IS ONE DIRECTORY UNDER THE ROOT. The root is root_env when set,",
+    "else default_root (~ is the user's home). bin/profile-agent-repl.sh opens a",
+    "session by writing its id, one line, into <root>/<active_file>, and closes",
+    "it by removing that file. Each runtime RECONCILES on signal (Go and node)",
+    "or on a call (Emacs): an active file naming a valid session starts",
+    "profiling into <root>/<id>/ (a different session than the running one is",
+    "stopped first); no active file stops it. Reconciling is idempotent.",
+    "",
+    "PROFILING IS A WINDOW, NEVER A STANDING SETTING. A runtime stops by itself",
+    "max_seconds after it started, and records why, so a collector that died",
+    "never leaves a runtime paying for a profile nobody will read.",
+    "",
+    "An active file that names no valid session is a FAILED reconcile, recorded",
+    "at error, and starts nothing. sessions lists ids each runtime must judge",
+    "the same way."
+  ],
+  "root_env": "AGENT_REPL_PROFILE_ROOT",
+  "default_root": "~/.cache/agent-repl/profiles",
+  "active_file": "active",
+  "signal": "SIGUSR2",
+  "max_seconds": 1800,
+  "sessions": [
+    {"id": "20261012T170000Z", "valid": true},
+    {"id": "run-1.a_b", "valid": true},
+    {"id": "", "valid": false},
+    {"id": ".hidden", "valid": false},
+    {"id": "../escape", "valid": false},
+    {"id": "a/b", "valid": false},
+    {"id": "has space", "valid": false},
+    {"id": "x0123456789012345678901234567890123456789012345678901234567890123", "valid": false}
+  ]
+}
