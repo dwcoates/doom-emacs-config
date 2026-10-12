@@ -110,40 +110,38 @@ func (r *run) failedTerminal(ctx context.Context, summary string, area footer.Me
 	r.o.handBack(ctx, r.ws, DetachedOutcome{Kind: DetachedFailed, Summary: summary})
 }
 
-// handBack reports how a merge ended to the requester of a DETACHED merge, the
-// workspace whose feed carries the bubble's second placement. A merge that ran
-// in place has no requester to tell and sends nothing.
+// handBack reports how a merge ended to the requester of an ASYNC merge, the
+// workspace whose feed carries the bubble. A sync merge has no requester to
+// tell and sends nothing. A merge that FAILED or was ABANDONED also reveals the
+// merge workspace: it needs the user now.
 //
 // THE HANDBACK'S OWN FAILURE IS RECORDED BY ITS OWNER (DetachedMerges.HandBack);
 // the merge's terminal stands either way, so it is only noted here.
 func (o *orchestrator) handBack(ctx context.Context, ws ids.WorkspaceID, out DetachedOutcome) {
-	places := o.placements(ws)
-	if len(places) < 2 {
+	requester, async := o.requesterOf(ws)
+	if !async {
 		return
 	}
 	// THE REQUESTER'S ROSTER IS TOLD FIRST, and whatever the reads below
 	// answer: the merge has ended either way, and the merge workspace's facts
 	// are published for the merge workspace alone, so this is the only word
 	// of the end the requester's one-shot outcome gets.
-	o.deps.Sidebar.SetDetachedMergeEnded(places[1].ws, out.Kind == DetachedLanded)
+	o.deps.Sidebar.SetDetachedMergeEnded(requester, out.Kind == DetachedLanded)
+	if out.Kind != DetachedLanded {
+		o.reveal(ctx, ws, "its merge "+out.Kind.String())
+	}
 	record, err := o.deps.DB.Workspace(ctx, ws)
 	if err != nil {
 		o.log(ctx, ws).Error("daemon.merge.detached", "could not read the merge workspace whose merge ended; its requester is not told", dlog.Context{
-			"workspace": string(ws), "requester": string(places[1].ws), "outcome": out.Kind.String(), "error": err.Error()})
+			"workspace": string(ws), "requester": string(requester), "outcome": out.Kind.String(), "error": err.Error()})
 		return
 	}
-	// THE BRANCH ASKED FOR is the one the merge workspace was cut from: its
-	// creation job's base.
-	job, err := o.layoutFor(ctx, ws)
-	if err != nil {
-		o.log(ctx, ws).Error("daemon.merge.detached", "could not read the merge workspace's creation job; its requester is not told", dlog.Context{
-			"workspace": string(ws), "requester": string(places[1].ws), "outcome": out.Kind.String(), "error": err.Error()})
-		return
-	}
-	out.Branch = job.BaseRef
-	if err := o.deps.Detached.HandBack(ctx, places[1].ws, record, out); err != nil {
-		o.log(ctx, ws).Debug("daemon.merge.detached", "the handback of a detached merge failed; its owner recorded why", dlog.Context{
-			"workspace": string(ws), "requester": string(places[1].ws), "outcome": out.Kind.String(), "error": err.Error()})
+	// THE MERGE IS NAMED BY ITS MERGE WORKSPACE, whose name the requesting
+	// agent chose for what it merges.
+	out.Branch = record.Name
+	if err := o.deps.Detached.HandBack(ctx, requester, record, out); err != nil {
+		o.log(ctx, ws).Debug("daemon.merge.detached", "the handback of an async merge failed; its owner recorded why", dlog.Context{
+			"workspace": string(ws), "requester": string(requester), "outcome": out.Kind.String(), "error": err.Error()})
 	}
 }
 
@@ -268,7 +266,7 @@ func (r *run) teardown(ctx context.Context, out outcome, terminal func()) {
 	// No turn opened from here on is the merge's: the standing address is
 	// withdrawn the moment the bubble stops being where the merge's output
 	// belongs.
-	r.o.deps.Feed.SetOutputAddress(r.ws, nil)
+	r.withdrawOutput()
 	if r.releaseOccupancy != nil {
 		r.releaseOccupancy()
 	}
@@ -501,7 +499,7 @@ func (r *run) abandonToRecovery(ctx context.Context, owed string) {
 // queue lock -- and touches the state client, the git and the shim not at
 // all.
 func (r *run) releaseInProcess(ctx context.Context) {
-	r.o.deps.Feed.SetOutputAddress(r.ws, nil)
+	r.withdrawOutput()
 	if r.releaseOccupancy != nil {
 		r.releaseOccupancy()
 	}

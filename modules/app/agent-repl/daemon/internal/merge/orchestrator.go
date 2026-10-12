@@ -45,6 +45,7 @@ const (
 // kinds, so a replayed ledger names the same step a live bubble drew.
 const (
 	TabQueue        = "queue"
+	TabPick         = "pick"
 	TabPrePrompt    = "pre_prompt"
 	TabRebasing     = "rebasing"
 	TabConflicts    = "conflicts"
@@ -125,11 +126,17 @@ type orchestrator struct {
 	// later acquired under, so the queued bubble and the admitted one are one
 	// bubble.
 	ledgerOf map[ids.WorkspaceID]ids.LeaseID
-	// mirrorOf caches, per merging workspace, its bubble's SECOND placement:
-	// set (non-nil) for a merge workspace, nil for every other. A workspace's
+	// originsOf caches, per merging workspace, its merge origin: set
+	// (non-nil) for a merge workspace, nil for every other. A workspace's
 	// merge origin and dir are fixed at its registration, so the answer never
 	// changes once read.
-	mirrorOf map[ids.WorkspaceID]*mirror
+	originsOf map[ids.WorkspaceID]*mergeOrigin
+	// heads is the head each merging workspace's bubble last drew, so a
+	// reveal of its merge workspace can restate it with its switch.
+	heads map[ids.WorkspaceID]headArgs
+	// picks are the async picks running now, keyed by merge workspace, so an
+	// ask change redraws the live pick tab.
+	picks map[ids.WorkspaceID]*pick
 	// resumes are the merges the boot recovery found a progress record for,
 	// keyed by workspace: the admission pump runs each from its record, ahead
 	// of anything waiting in its repository's line (Recover, startResumed).
@@ -248,7 +255,9 @@ func newOrchestrator(deps Deps) (*orchestrator, error) {
 		runsByWorkspace: map[ids.WorkspaceID]*run{},
 		requested:       map[ids.WorkspaceID]*requestWait{},
 		ledgerOf:        map[ids.WorkspaceID]ids.LeaseID{},
-		mirrorOf:        map[ids.WorkspaceID]*mirror{},
+		originsOf:       map[ids.WorkspaceID]*mergeOrigin{},
+		heads:           map[ids.WorkspaceID]headArgs{},
+		picks:           map[ids.WorkspaceID]*pick{},
 		resumes:         map[ids.WorkspaceID]progressDoc{},
 		transferred:     map[ids.WorkspaceID]bool{},
 		offers:          map[ids.WorkspaceID]bool{},
@@ -260,10 +269,23 @@ func newOrchestrator(deps Deps) (*orchestrator, error) {
 }
 
 // askChanged hands a workspace's change of open asks to its run in flight, if
-// any: a conflict-resolution or fixing tab standing live is redrawn waiting on
-// the user, or live again. A workspace with no run in flight has no tab to
-// draw it on; the ask set keeps the fact for a run that reaches such a tab.
+// any: a pick, conflict-resolution or fixing tab standing live is redrawn
+// waiting on the user, or live again. A workspace with no run in flight has no
+// tab to draw it on; the ask set keeps the fact for a run that reaches such a
+// tab.
+//
+// AN ASK OPENED IN A HIDDEN MERGE WORKSPACE REVEALS IT (owner ruling,
+// 2026-10-11): the agent needs the user, so its workspace is drawn from now
+// on.
 func (o *orchestrator) askChanged(ws ids.WorkspaceID, waiting bool) {
+	if waiting {
+		if _, async := o.requesterOf(ws); async {
+			o.reveal(context.Background(), ws, "its agent asked the user something")
+		}
+	}
+	if o.redrawPick(ws, waiting) {
+		return
+	}
 	r, ok := o.runFor(ws)
 	if !ok {
 		return
@@ -289,6 +311,8 @@ func (d Deps) validate() error {
 	check(d.Sidebar != nil, "Sidebar")
 	check(d.Holds != nil, "Holds")
 	check(d.Asks != nil, "Asks")
+	check(d.Names != nil, "Names")
+	check(d.InterruptTurn != nil, "InterruptTurn")
 	check(d.Briefs != nil, "Briefs")
 	check(d.Painter != nil, "Painter")
 	check(d.TestRunner != nil, "TestRunner")
@@ -339,7 +363,7 @@ func (o *orchestrator) publish(ws ids.WorkspaceID, facts MergeFacts) {
 	o.mu.Lock()
 	o.facts[ws] = facts
 	o.mu.Unlock()
-	o.deps.Footer.SetMerge(ws, facts)
+	o.footerSetMerge(ws, facts)
 	o.deps.Sidebar.SetMerge(ws, facts)
 	o.publishHost(ws)
 }
@@ -363,9 +387,47 @@ func (o *orchestrator) forget(ws ids.WorkspaceID) {
 	// bubble its ledger identity addressed.
 	delete(o.ledgerOf, ws)
 	o.mu.Unlock()
-	o.deps.Footer.SetMerge(ws, MergeFacts{State: "none"})
+	o.footerSetMerge(ws, MergeFacts{State: "none"})
 	o.deps.Sidebar.SetMerge(ws, MergeFacts{State: "none"})
 	o.publishHost(ws)
+}
+
+// footerSetMerge hands a merge's facts to WS's footer, except a merge
+// workspace's: its footer shows the ordinary statuses of a workspace (owner
+// ruling, 2026-10-11), and the merge is read in the requester's bubble.
+func (o *orchestrator) footerSetMerge(ws ids.WorkspaceID, facts MergeFacts) {
+	if _, async := o.requesterOf(ws); async {
+		return
+	}
+	o.deps.Footer.SetMerge(ws, facts)
+}
+
+// reveal draws hidden merge workspace WS in the tab bar and the sidebar from
+// now on, CAUSE naming why, and restates its bubble's head with the switch to
+// it. A reveal that fails is recorded at ERROR: the merge goes on, and the
+// workspace stays hidden until a later reveal succeeds.
+func (o *orchestrator) reveal(ctx context.Context, ws ids.WorkspaceID, cause string) {
+	const op = "daemon.merge.reveal"
+	revealed, err := o.deps.Detached.Reveal(ctx, ws)
+	if err != nil {
+		o.log(ctx, ws).Error(op, "could not reveal the merge workspace; it stays hidden", dlog.Context{
+			"workspace": string(ws), "cause": cause, "error": err.Error()})
+		return
+	}
+	if !revealed {
+		return
+	}
+	o.log(ctx, ws).Info(op, "revealed the merge workspace: it needs the user", dlog.Context{"workspace": string(ws), "cause": cause})
+	o.restateHead(ws)
+}
+
+// RevealMergeWorkspace reveals hidden merge workspace WS (Orchestrator).
+func (o *orchestrator) RevealMergeWorkspace(ctx context.Context, ws ids.WorkspaceID, cause string) error {
+	if _, async := o.requesterOf(ws); !async {
+		return nil
+	}
+	o.reveal(ctx, ws, cause)
+	return nil
 }
 
 // runFor addresses one workspace's in-flight run.

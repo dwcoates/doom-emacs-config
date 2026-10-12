@@ -66,6 +66,14 @@ const (
 	// ArmUnknownBranch refuses a request whose source branch does not exist
 	// (MergeWorkspaceError.unknown_branch).
 	ArmUnknownBranch = "unknown_branch"
+	// ArmNameTaken refuses an async request whose merge workspace name is
+	// already a workspace, a branch, or another pending async merge's
+	// reservation (MergeWorkspaceError.name_taken). Its `branch` field names
+	// the branch the name resolves to.
+	ArmNameTaken = "name_taken"
+	// ArmNotMergeTab refuses a merge-tab interrupt whose row is no live agentic
+	// merge tab (InterruptError.not_merge_tab).
+	ArmNotMergeTab = "not_merge_tab"
 	// ArmUnknownMergeTestLog refuses a test log token that names no log this
 	// daemon holds for the workspace (OpenInEditorError.unknown_merge_test_log).
 	ArmUnknownMergeTestLog = "unknown_merge_test_log"
@@ -80,6 +88,10 @@ type RefusalError struct {
 	Workspace ids.WorkspaceID
 	// Reason is the sentence explaining the refusal, kept as evidence.
 	Reason string
+	// Fields are the arm's own field values, keyed by their proto names: the
+	// evidence an arm carries (name_taken's `branch`), set from what the
+	// refusal stated. Nil for an arm that carries none.
+	Fields map[string]any
 }
 
 // Error spells the refusal the way the transport answers it, so the arm travels

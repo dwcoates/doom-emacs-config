@@ -14,7 +14,6 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
-	"agent-repld/internal/mergetab"
 	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
@@ -32,6 +31,13 @@ type fakeDetached struct {
 	forkErr   error
 	forks     []string
 	handbacks []handback
+	// revealErr fails every reveal; reveals records each merge workspace a
+	// reveal named.
+	revealErr error
+	reveals   []ids.WorkspaceID
+	// claimsAtFork is how many name claims still stood, unreleased, when
+	// each fork ran.
+	claimsAtFork []int
 }
 
 // handback is one HandBack the fake was handed.
@@ -41,15 +47,47 @@ type handback struct {
 	outcome   DetachedOutcome
 }
 
-func (d *fakeDetached) Fork(_ context.Context, requester wsm.Workspace, request wsm.DetachedMergeID, branch string) (wsm.Workspace, error) {
+func (d *fakeDetached) Fork(_ context.Context, requester wsm.Workspace, request wsm.DetachedMergeID, name, base string) (wsm.Workspace, error) {
+	d.h.names.mu.Lock()
+	standing := len(d.h.names.claims) - d.h.names.releases
+	d.h.names.mu.Unlock()
 	d.mu.Lock()
-	d.forks = append(d.forks, fmt.Sprintf("%s:%s", requester.ID, branch))
+	d.claimsAtFork = append(d.claimsAtFork, standing)
+	d.forks = append(d.forks, fmt.Sprintf("%s:%s:%s", requester.ID, name, base))
 	err := d.forkErr
 	d.mu.Unlock()
 	if err != nil {
 		return wsm.Workspace{}, err
 	}
-	return d.h.registerMergeWorkspace(requester.ID, request, branch), nil
+	return d.h.registerMergeWorkspace(requester.ID, request, base), nil
+}
+
+func (d *fakeDetached) Reveal(_ context.Context, mergeWS ids.WorkspaceID) (bool, error) {
+	d.mu.Lock()
+	err := d.revealErr
+	if err == nil {
+		d.reveals = append(d.reveals, mergeWS)
+	}
+	d.mu.Unlock()
+	if err != nil {
+		return false, err
+	}
+	d.h.db.mu.Lock()
+	defer d.h.db.mu.Unlock()
+	ws := d.h.db.workspaces[mergeWS]
+	if ws.MergeRevealed {
+		return false, nil
+	}
+	ws.MergeRevealed = true
+	d.h.db.workspaces[mergeWS] = ws
+	return true, nil
+}
+
+// revealed answers every merge workspace a reveal named, in order.
+func (d *fakeDetached) revealed() []ids.WorkspaceID {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return append([]ids.WorkspaceID(nil), d.reveals...)
 }
 
 func (d *fakeDetached) HandBack(_ context.Context, requester ids.WorkspaceID, mergeWS wsm.Workspace, out DetachedOutcome) error {
@@ -87,7 +125,7 @@ func (h *harness) registerMergeWorkspace(requester ids.WorkspaceID, request wsm.
 
 // HandOffDetachedMerge stands for the durable hand-off: the requester's
 // detached request is replaced by the merge workspace's own, still requested.
-func (f *fakeDB) HandOffDetachedMerge(_ context.Context, repo wsm.RepoKey, requester ids.WorkspaceID, request wsm.DetachedMergeID, mergeWS ids.WorkspaceID, branch string, at time.Time) error {
+func (f *fakeDB) HandOffDetachedMerge(_ context.Context, repo wsm.RepoKey, requester ids.WorkspaceID, request wsm.DetachedMergeID, mergeWS ids.WorkspaceID, branch, pick string, at time.Time) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	for i, entry := range f.queues[repo] {
@@ -100,7 +138,7 @@ func (f *fakeDB) HandOffDetachedMerge(_ context.Context, repo wsm.RepoKey, reque
 		f.queues[repo] = append(f.queues[repo][:i], f.queues[repo][i+1:]...)
 		f.queues[repo] = append(f.queues[repo], wsm.MergeQueueEntry{
 			Repo: repo, Workspace: mergeWS, State: wsm.MergeRequested,
-			Source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch, Branch: branch}, EnqueuedAt: at,
+			Source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch, Branch: branch, Pick: pick}, EnqueuedAt: at,
 		})
 		f.renumber(repo)
 		return nil
@@ -109,10 +147,10 @@ func (f *fakeDB) HandOffDetachedMerge(_ context.Context, repo wsm.RepoKey, reque
 }
 
 // requestDetached asks for the harness workspace's own branch to be merged
-// detached, as BY asks.
+// async, as BY asks, under the name "reconnect-fix".
 func requestDetached(t *testing.T, h *harness, by Requester) error {
 	t.Helper()
-	return h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}, By: by, Detached: true})
+	return h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}, By: by, Detached: &DetachedRun{Name: "reconnect-fix"}})
 }
 
 // entryOf answers ws's queue entry, false when it has none.
@@ -154,7 +192,7 @@ func (f *fakeFeed) tabsOn(ws ids.WorkspaceID) []*frontendv1.FeedMergeTab {
 	return out
 }
 
-func TestADetachedRequestMintsItsOwnIdentity(t *testing.T) {
+func TestAnAsyncRequestMintsItsOwnIdentityAndCarriesItsName(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	h.mu.Lock()
@@ -168,18 +206,20 @@ func TestADetachedRequestMintsItsOwnIdentity(t *testing.T) {
 
 	// Assert
 	entry, ok := h.entryOf(theWorkspace)
-	if !ok || entry.Source.Detach == "" || entry.State != wsm.MergeRequested {
-		t.Fatalf("entry = %+v, %v; want a requested detached request with its identity", entry, ok)
+	if !ok || entry.Source.Detach == "" || entry.Source.DetachName != "reconnect-fix" || entry.State != wsm.MergeRequested {
+		t.Fatalf("entry = %+v, %v; want a requested async request with its identity and its name", entry, ok)
 	}
 }
 
-func TestADetachedRequestThatIsNotAnOwnBranchMergeIsAnErrorWithNothingRecorded(t *testing.T) {
+func TestAnAsyncRequestThatContradictsItselfIsAnErrorWithNothingRecorded(t *testing.T) {
 	tests := []struct {
 		name   string
 		source wsm.MergeSource
+		run    *DetachedRun
 	}{
-		{name: "kept open", source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch, KeepOpen: true}},
-		{name: "merged upstream", source: wsm.MergeSource{Kind: wsm.MergeSourceMergedUpstream}},
+		{name: "kept open", source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch, KeepOpen: true}, run: &DetachedRun{Name: "n"}},
+		{name: "merged upstream", source: wsm.MergeSource{Kind: wsm.MergeSourceMergedUpstream}, run: &DetachedRun{Name: "n"}},
+		{name: "no name", source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}, run: &DetachedRun{}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -187,14 +227,14 @@ func TestADetachedRequestThatIsNotAnOwnBranchMergeIsAnErrorWithNothingRecorded(t
 			h := newHarness(t)
 
 			// Act
-			err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: tt.source, By: RequestedByUser, Detached: true})
+			err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: tt.source, By: RequestedByUser, Detached: tt.run})
 
 			// Assert
 			if err == nil {
 				t.Fatal("Enqueue = nil, want the contradiction refused")
 			}
 			if _, ok := h.entryOf(theWorkspace); ok {
-				t.Fatal("a contradictory detached request was recorded")
+				t.Fatal("a contradictory async request was recorded")
 			}
 			if _, ok := h.recordFor(dlog.LevelError, "daemon.merge.enqueue"); !ok {
 				t.Fatal("the contradiction was not recorded at ERROR")
@@ -203,7 +243,83 @@ func TestADetachedRequestThatIsNotAnOwnBranchMergeIsAnErrorWithNothingRecorded(t
 	}
 }
 
-func TestAUsersDetachedRequestDisplacesNothing(t *testing.T) {
+func TestAnAsyncRequestWhoseNameIsTakenIsRefusedWithTheBranch(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.names.taken = map[string]bool{"reconnect-fix": true}
+
+	// Act
+	err := requestDetached(t, h, RequestedByAgent)
+
+	// Assert
+	refusal, ok := Refused(err)
+	if !ok || refusal.Arm != ArmNameTaken || refusal.Fields["branch"] != "agent/reconnect-fix" {
+		t.Fatalf("Enqueue = %v, want the name_taken refusal naming the branch", err)
+	}
+	if _, ok := h.entryOf(theWorkspace); ok {
+		t.Fatal("a request whose name is taken was recorded")
+	}
+	if _, ok := h.recordFor(dlog.LevelWarn, "daemon.merge.enqueue"); !ok {
+		t.Fatal("the refusal was not recorded")
+	}
+}
+
+func TestAnAsyncRequestsNameCheckThatFailsIsAnErrorWithNothingRecorded(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.names.err = errors.New("the registry could not be read")
+
+	// Act
+	err := requestDetached(t, h, RequestedByAgent)
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "the registry could not be read") {
+		t.Fatalf("Enqueue = %v, want the check's failure", err)
+	}
+	if _, ok := h.entryOf(theWorkspace); ok {
+		t.Fatal("a request whose name could not be checked was recorded")
+	}
+	if _, ok := h.recordFor(dlog.LevelError, "daemon.merge.enqueue"); !ok {
+		t.Fatal("the failed check was not recorded at ERROR")
+	}
+}
+
+func TestAnAsyncRequestLetsGoOfItsNameClaimOnceRecorded(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.mu.Lock()
+	h.inFlight = "turn-asking"
+	h.mu.Unlock()
+
+	// Act
+	if err := requestDetached(t, h, RequestedByAgent); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+
+	// Assert: the record is the reservation from here, so the claim is gone.
+	h.names.mu.Lock()
+	defer h.names.mu.Unlock()
+	if len(h.names.claims) != 1 || h.names.releases != 1 {
+		t.Fatalf("claims = %v, releases = %d; want one claim, released", h.names.claims, h.names.releases)
+	}
+}
+
+func TestAnAsyncRequestLetsGoOfItsNameBeforeItsMergeWorkspaceIsForked(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act: the user's ask forks at once, inside the request.
+	if err := requestDetached(t, h, RequestedByUser); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+
+	// Assert: the fork takes the reserved name, so no claim may stand.
+	if got := h.detached.claimsAtFork; len(got) != 1 || got[0] != 0 {
+		t.Fatalf("claims standing at the fork = %v, want none", got)
+	}
+}
+
+func TestAUsersAsyncRequestDisplacesNothing(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 
@@ -217,11 +333,11 @@ func TestAUsersDetachedRequestDisplacesNothing(t *testing.T) {
 	displaces := h.o.displaces[theWorkspace] || h.o.displaces[theMergeWorkspace]
 	h.o.mu.Unlock()
 	if displaces {
-		t.Fatal("a detached merge was marked to displace a turn")
+		t.Fatal("an async merge was marked to displace a turn")
 	}
 }
 
-func TestADetachedRequestIsHandedToTheMergeWorkspaceForkedForIt(t *testing.T) {
+func TestAnAsyncRequestIsHandedToTheMergeWorkspaceForkedUnderItsName(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 
@@ -230,10 +346,11 @@ func TestADetachedRequestIsHandedToTheMergeWorkspaceForkedForIt(t *testing.T) {
 		t.Fatalf("Enqueue: %v", err)
 	}
 
-	// Assert: the fork was of the requester's branch, the requester holds no
-	// entry, and the merge workspace's own in-place merge is in line.
-	if forks := h.detached.forks; len(forks) != 1 || forks[0] != string(theWorkspace)+":feature" {
-		t.Fatalf("forks = %v, want one of the requester's branch", forks)
+	// Assert: the fork was named as asked and cut from the requester's branch,
+	// the requester holds no entry, and the merge workspace's own in-place
+	// merge is in line.
+	if forks := h.detached.forks; len(forks) != 1 || forks[0] != string(theWorkspace)+":reconnect-fix:feature" {
+		t.Fatalf("forks = %v, want one named reconnect-fix of the requester's branch", forks)
 	}
 	if _, ok := h.entryOf(theWorkspace); ok {
 		t.Fatal("the requester still holds a queue entry after the hand-off")
@@ -261,7 +378,7 @@ func TestAForkThatFailsDropsTheRequestAndTellsTheRequester(t *testing.T) {
 	}
 	sent := h.detached.sent()
 	if len(sent) != 1 || sent[0].requester != theWorkspace || sent[0].outcome.Kind != DetachedAbandoned ||
-		!strings.Contains(sent[0].outcome.Summary, "the worktree could not be made") || sent[0].outcome.Branch != "feature" {
+		!strings.Contains(sent[0].outcome.Summary, "the worktree could not be made") || sent[0].outcome.Branch != "reconnect-fix" {
 		t.Fatalf("handbacks = %+v, want one abandoned handback naming the fork's failure", sent)
 	}
 	if _, ok := h.recordFor(dlog.LevelError, "daemon.merge.detached"); !ok {
@@ -269,7 +386,7 @@ func TestAForkThatFailsDropsTheRequestAndTellsTheRequester(t *testing.T) {
 	}
 }
 
-func TestADetachedMergesBubbleIsDrawnInTheRequestersFeedWithTheSwitch(t *testing.T) {
+func TestAnAsyncMergesBubbleIsDrawnInTheRequestersFeedAlone(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 
@@ -278,65 +395,35 @@ func TestADetachedMergesBubbleIsDrawnInTheRequestersFeedWithTheSwitch(t *testing
 		t.Fatalf("Enqueue: %v", err)
 	}
 
-	// Assert: both feeds carry the head; only the requester's has the switch,
-	// naming the merge workspace.
-	own, mirrored := h.feed.headsOn(theMergeWorkspace), h.feed.headsOn(theWorkspace)
-	if len(own) == 0 || len(mirrored) == 0 {
-		t.Fatalf("heads: merge workspace %d, requester %d; want the bubble in both", len(own), len(mirrored))
+	// Assert
+	if own := h.feed.headsOn(theMergeWorkspace); len(own) != 0 {
+		t.Fatalf("the merge workspace's feed drew %d heads, want none", len(own))
 	}
-	if own[len(own)-1].GetHead().GetWorkspaceSwitch() != nil {
-		t.Fatal("the merge workspace's own bubble carries a switch to itself")
+	if tabs := h.feed.tabsOn(theMergeWorkspace); len(tabs) != 0 {
+		t.Fatalf("the merge workspace's feed drew %d tabs, want none", len(tabs))
 	}
-	target := mirrored[len(mirrored)-1].GetHead().GetWorkspaceSwitch().GetAvailable().GetTarget()
-	if target.GetId() != string(theMergeWorkspace) || target.GetDir() == "" {
-		t.Fatalf("requester's switch target = %+v, want the merge workspace's ref", target)
+	if mirrored := h.feed.headsOn(theWorkspace); len(mirrored) == 0 {
+		t.Fatal("the requester's feed drew no head")
 	}
 }
 
-func TestAnAgenticTabCarriesTheSwitchInTheRequestersPlacementOnly(t *testing.T) {
-	tests := []struct {
-		name    string
-		kind    string
-		tab     *frontendv1.FeedMergeTab
-		agentic bool
-	}{
-		{name: "conflicts", kind: TabConflicts, agentic: true, tab: &frontendv1.FeedMergeTab{Kind: &frontendv1.FeedMergeTab_Conflicts{Conflicts: &frontendv1.FeedMergeTabConflicts{}}}},
-		{name: "fixes", kind: TabFixes, agentic: true, tab: &frontendv1.FeedMergeTab{Kind: &frontendv1.FeedMergeTab_Fixes{Fixes: &frontendv1.FeedMergeTabFixes{}}}},
-		{name: "pre-prompt", kind: TabPrePrompt, agentic: true, tab: &frontendv1.FeedMergeTab{Kind: &frontendv1.FeedMergeTab_PrePrompt{PrePrompt: &frontendv1.FeedMergeTabPrePrompt{}}}},
-		{name: "post-prompt", kind: TabPostPrompt, agentic: true, tab: &frontendv1.FeedMergeTab{Kind: &frontendv1.FeedMergeTab_PostPrompt{PostPrompt: &frontendv1.FeedMergeTabPostPrompt{}}}},
-		{name: "rebasing", kind: TabRebasing, agentic: false, tab: &frontendv1.FeedMergeTab{Kind: &frontendv1.FeedMergeTab_Rebasing{Rebasing: &frontendv1.FeedMergeTabRebasing{}}}},
-		{name: "tests", kind: TabTests, agentic: false, tab: &frontendv1.FeedMergeTab{Kind: &frontendv1.FeedMergeTab_Tests{Tests: &frontendv1.FeedMergeTabTests{}}}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange
-			h := newHarness(t)
-			h.registerMergeWorkspace(theWorkspace, "request-1", "feature")
+func TestAnAsyncMergesHeadIsNeverPinned(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.registerMergeWorkspace(theWorkspace, "request-1", "feature")
 
-			// Act
-			h.o.publishTab(theMergeWorkspace, "lease-1", tt.kind, 1, tt.tab)
+	// Act: a live head, the one a sync merge would pin.
+	h.o.publishHead(theMergeWorkspace, "lease-1", "reconnect-fix → master", 1, nil)
 
-			// Assert: the merge workspace's tab is as composed, and the
-			// requester's carries the switch exactly when the tab is agentic.
-			own, mirrored := h.feed.tabsOn(theMergeWorkspace), h.feed.tabsOn(theWorkspace)
-			if len(own) != 1 || len(mirrored) != 1 {
-				t.Fatalf("tabs: merge workspace %d, requester %d; want one in each", len(own), len(mirrored))
-			}
-			if mergetab.Switch(own[0]) != nil {
-				t.Fatal("the merge workspace's own tab carries a switch")
-			}
-			got := mergetab.Switch(mirrored[0])
-			if (got != nil) != tt.agentic {
-				t.Fatalf("requester's tab switch = %+v, want present = %v", got, tt.agentic)
-			}
-			if tt.agentic && got.GetAvailable().GetTarget().GetId() != string(theMergeWorkspace) {
-				t.Fatalf("switch target = %+v, want the merge workspace", got.GetAvailable().GetTarget())
-			}
-		})
+	// Assert
+	h.feed.mu.Lock()
+	defer h.feed.mu.Unlock()
+	if len(h.feed.rows) != 1 || h.feed.rows[0].WS != theWorkspace || h.feed.rows[0].Pinned {
+		t.Fatalf("rows = %+v, want one placed head in the requester's feed", h.feed.rows)
 	}
 }
 
-func TestAnInPlaceMergesBubbleIsDrawnInItsOwnFeedAlone(t *testing.T) {
+func TestASyncMergesLiveHeadIsPinnedInItsOwnFeed(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 
@@ -346,27 +433,181 @@ func TestAnInPlaceMergesBubbleIsDrawnInItsOwnFeedAlone(t *testing.T) {
 	// Assert
 	h.feed.mu.Lock()
 	defer h.feed.mu.Unlock()
-	if len(h.feed.rows) != 1 || h.feed.rows[0].WS != theWorkspace || h.feed.rows[0].Row.GetActivity().GetMerge().GetHead().GetWorkspaceSwitch() != nil {
-		t.Fatalf("rows = %+v, want one head on the workspace's own feed with no switch", h.feed.rows)
+	if len(h.feed.rows) != 1 || h.feed.rows[0].WS != theWorkspace || !h.feed.rows[0].Pinned ||
+		h.feed.rows[0].Row.GetActivity().GetMerge().GetHead().GetWorkspaceSwitch() != nil {
+		t.Fatalf("rows = %+v, want one pinned head on the workspace's own feed with no switch", h.feed.rows)
 	}
 }
 
-func TestHandBackTellsTheRequesterOfADetachedMerge(t *testing.T) {
+func TestAnAsyncHeadCarriesNoSwitchWhileItsWorkspaceIsHidden(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	h.registerMergeWorkspace(theWorkspace, "request-1", "feature")
 
 	// Act
-	h.o.handBack(context.Background(), theMergeWorkspace, DetachedOutcome{Kind: DetachedFailed, Summary: "tests failed"})
+	h.o.publishHead(theMergeWorkspace, "lease-1", "reconnect-fix → master", 1, nil)
 
-	// Assert: told to the requester, with the branch the merge was asked for.
-	sent := h.detached.sent()
-	if len(sent) != 1 || sent[0].requester != theWorkspace || sent[0].mergeWS != theMergeWorkspace || sent[0].outcome.Branch != "feature" || sent[0].outcome.Kind != DetachedFailed {
-		t.Fatalf("handbacks = %+v, want the failure told to the requester", sent)
+	// Assert
+	heads := h.feed.headsOn(theWorkspace)
+	if len(heads) != 1 || heads[0].GetHead().GetWorkspaceSwitch() != nil {
+		t.Fatalf("heads = %+v, want one with no switch to a hidden workspace", heads)
 	}
 }
 
-func TestHandBackSendsNothingForAnInPlaceMerge(t *testing.T) {
+func TestARevealRestatesTheAsyncHeadWithTheSwitch(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.registerMergeWorkspace(theWorkspace, "request-1", "feature")
+	h.o.publishHead(theMergeWorkspace, "lease-1", "reconnect-fix → master", 1, nil)
+
+	// Act
+	if err := h.o.RevealMergeWorkspace(context.Background(), theMergeWorkspace, "the user selected it"); err != nil {
+		t.Fatalf("RevealMergeWorkspace: %v", err)
+	}
+
+	// Assert
+	heads := h.feed.headsOn(theWorkspace)
+	target := heads[len(heads)-1].GetHead().GetWorkspaceSwitch().GetAvailable().GetTarget()
+	if len(heads) != 2 || target.GetId() != string(theMergeWorkspace) || target.GetDir() == "" {
+		t.Fatalf("heads = %+v, want the head restated with the switch to the merge workspace", heads)
+	}
+}
+
+func TestRevealMergeWorkspaceIsANoOpForAnOrdinaryWorkspace(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	err := h.o.RevealMergeWorkspace(context.Background(), theWorkspace, "the user selected it")
+
+	// Assert
+	if err != nil || len(h.detached.revealed()) != 0 {
+		t.Fatalf("RevealMergeWorkspace = %v, reveals = %v; want nothing done", err, h.detached.revealed())
+	}
+}
+
+func TestARevealThatFailsIsAnErrorAndTheWorkspaceStaysHidden(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.registerMergeWorkspace(theWorkspace, "request-1", "feature")
+	h.detached.revealErr = errors.New("the registry could not be written")
+
+	// Act
+	err := h.o.RevealMergeWorkspace(context.Background(), theMergeWorkspace, "the user selected it")
+
+	// Assert
+	if err != nil {
+		t.Fatalf("RevealMergeWorkspace = %v, want the failure recorded, not raised", err)
+	}
+	if _, ok := h.recordFor(dlog.LevelError, "daemon.merge.reveal"); !ok {
+		t.Fatal("the failed reveal was not recorded at ERROR")
+	}
+	if h.db.workspaces[theMergeWorkspace].MergeRevealed {
+		t.Fatal("the merge workspace was revealed despite the failure")
+	}
+}
+
+func TestATabOfAnAsyncMergeIsPublishedInTheRequestersFeedAsComposed(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.registerMergeWorkspace(theWorkspace, "request-1", "feature")
+	tab := &frontendv1.FeedMergeTab{Kind: &frontendv1.FeedMergeTab_Conflicts{Conflicts: &frontendv1.FeedMergeTabConflicts{}}}
+
+	// Act
+	h.o.publishTab(theMergeWorkspace, "lease-1", TabConflicts, 1, tab)
+
+	// Assert
+	if own := h.feed.tabsOn(theMergeWorkspace); len(own) != 0 {
+		t.Fatalf("the merge workspace drew %d tabs, want none", len(own))
+	}
+	if mirrored := h.feed.tabsOn(theWorkspace); len(mirrored) != 1 || mirrored[0].GetConflicts() == nil {
+		t.Fatalf("requester tabs = %+v, want the conflicts tab", mirrored)
+	}
+}
+
+func TestAMergeWorkspacesFactsNeverReachItsFooter(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.registerMergeWorkspace(theWorkspace, "request-1", "feature")
+
+	// Act
+	h.o.publish(theMergeWorkspace, MergeFacts{State: StateMerged})
+	h.o.forget(theMergeWorkspace)
+
+	// Assert
+	if h.footer.toldTo(theMergeWorkspace) {
+		t.Fatal("a merge workspace's footer was told its merge's facts")
+	}
+}
+
+func TestASyncMergesFactsReachItsFooter(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	h.o.publish(theWorkspace, MergeFacts{State: StateMerged})
+
+	// Assert
+	if !h.footer.toldTo(theWorkspace) {
+		t.Fatal("a sync merge's footer was not told its facts")
+	}
+}
+
+func TestHandBackTellsTheRequesterUnderTheMergeWorkspacesName(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.registerMergeWorkspace(theWorkspace, "request-1", "feature")
+
+	// Act
+	h.o.handBack(context.Background(), theMergeWorkspace, DetachedOutcome{Kind: DetachedLanded, Summary: "it landed"})
+
+	// Assert
+	sent := h.detached.sent()
+	if len(sent) != 1 || sent[0].requester != theWorkspace || sent[0].mergeWS != theMergeWorkspace || sent[0].outcome.Branch != "feature-merge" {
+		t.Fatalf("handbacks = %+v, want the landing told under the merge workspace's name", sent)
+	}
+}
+
+func TestALandedHandBackLeavesTheMergeWorkspaceHidden(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.registerMergeWorkspace(theWorkspace, "request-1", "feature")
+
+	// Act
+	h.o.handBack(context.Background(), theMergeWorkspace, DetachedOutcome{Kind: DetachedLanded, Summary: "it landed"})
+
+	// Assert
+	if revealed := h.detached.revealed(); len(revealed) != 0 {
+		t.Fatalf("reveals = %v, want none for a landing", revealed)
+	}
+}
+
+func TestAFailedOrAbandonedHandBackRevealsTheMergeWorkspace(t *testing.T) {
+	tests := []struct {
+		name string
+		kind DetachedOutcomeKind
+	}{
+		{name: "failed", kind: DetachedFailed},
+		{name: "abandoned", kind: DetachedAbandoned},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.registerMergeWorkspace(theWorkspace, "request-1", "feature")
+
+			// Act
+			h.o.handBack(context.Background(), theMergeWorkspace, DetachedOutcome{Kind: tt.kind, Summary: "it stopped"})
+
+			// Assert
+			if revealed := h.detached.revealed(); len(revealed) != 1 || revealed[0] != theMergeWorkspace {
+				t.Fatalf("reveals = %v, want the merge workspace revealed", revealed)
+			}
+		})
+	}
+}
+
+func TestHandBackSendsNothingForASyncMerge(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 
@@ -375,16 +616,17 @@ func TestHandBackSendsNothingForAnInPlaceMerge(t *testing.T) {
 
 	// Assert
 	if sent := h.detached.sent(); len(sent) != 0 {
-		t.Fatalf("handbacks = %+v, want none for an in-place merge", sent)
+		t.Fatalf("handbacks = %+v, want none for a sync merge", sent)
 	}
 }
 
-func TestHandBackOfAMergeWorkspaceWithNoCreationJobIsAnError(t *testing.T) {
-	// Arrange
+func TestHandBackOfAMergeWorkspaceWhoseRecordWillNotReadIsAnError(t *testing.T) {
+	// Arrange: the origin is read, then the record goes.
 	h := newHarness(t)
 	h.registerMergeWorkspace(theWorkspace, "request-1", "feature")
+	h.o.originOf(theMergeWorkspace)
 	h.db.mu.Lock()
-	delete(h.db.jobs, theMergeWorkspace)
+	delete(h.db.workspaces, theMergeWorkspace)
 	h.db.mu.Unlock()
 
 	// Act
@@ -392,15 +634,15 @@ func TestHandBackOfAMergeWorkspaceWithNoCreationJobIsAnError(t *testing.T) {
 
 	// Assert
 	if sent := h.detached.sent(); len(sent) != 0 {
-		t.Fatalf("handbacks = %+v, want none without the branch it was asked for", sent)
+		t.Fatalf("handbacks = %+v, want none without the merge workspace's record", sent)
 	}
 	if _, ok := h.recordFor(dlog.LevelError, "daemon.merge.detached"); !ok {
-		t.Fatal("the missing creation job was not recorded at ERROR")
+		t.Fatal("the unreadable record was not recorded at ERROR")
 	}
 }
 
-func TestALandedDetachedMergeIsHandedBackAsLanded(t *testing.T) {
-	// Arrange: a detached request handed off and in line.
+func TestALandedAsyncMergeIsHandedBackAsLanded(t *testing.T) {
+	// Arrange: an async request handed off and in line.
 	h := newHarness(t)
 	h.emacsRepo()
 	h.landsCleanly("abc123def4567")
@@ -417,13 +659,13 @@ func TestALandedDetachedMergeIsHandedBackAsLanded(t *testing.T) {
 
 	// Assert
 	sent := h.detached.sent()
-	if len(sent) != 1 || sent[0].outcome.Kind != DetachedLanded || sent[0].requester != theWorkspace || sent[0].outcome.Branch != "feature" {
+	if len(sent) != 1 || sent[0].outcome.Kind != DetachedLanded || sent[0].requester != theWorkspace {
 		t.Fatalf("handbacks = %+v, want the landing told to the requester", sent)
 	}
 }
 
-func TestAnEvictedDetachedMergeIsHandedBackAsAbandoned(t *testing.T) {
-	// Arrange: a detached request handed off and waiting in line.
+func TestAnEvictedAsyncMergeIsHandedBackAsAbandoned(t *testing.T) {
+	// Arrange: an async request handed off and waiting in line.
 	h := newHarness(t)
 	if err := requestDetached(t, h, RequestedByUser); err != nil {
 		t.Fatalf("Enqueue: %v", err)
@@ -441,12 +683,39 @@ func TestAnEvictedDetachedMergeIsHandedBackAsAbandoned(t *testing.T) {
 	}
 }
 
+func TestAnAskOpenedInAHiddenMergeWorkspaceRevealsIt(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.registerMergeWorkspace(theWorkspace, "request-1", "feature")
+
+	// Act
+	h.asks.OnPermission(theMergeWorkspace, nil, permissionEdge("perm-1", true))
+
+	// Assert
+	if revealed := h.detached.revealed(); len(revealed) != 1 || revealed[0] != theMergeWorkspace {
+		t.Fatalf("reveals = %v, want the merge workspace revealed", revealed)
+	}
+}
+
+func TestAnAskOpenedInAnOrdinaryWorkspaceRevealsNothing(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	h.asks.OnPermission(theWorkspace, nil, permissionEdge("perm-1", true))
+
+	// Assert
+	if revealed := h.detached.revealed(); len(revealed) != 0 {
+		t.Fatalf("reveals = %v, want none", revealed)
+	}
+}
+
 func TestEveryMergeTabIsPublishedThroughPublishTab(t *testing.T) {
 	// Arrange / Act: the package's own production sources.
 	files := sourcescan.Production(t)
 
-	// Assert: tabRow is composed only inside publishTab, so no tab can reach
-	// one placement and miss the other.
+	// Assert: tabRow is composed only inside publishTab, so no tab reaches a
+	// feed other than its bubble's.
 	for _, file := range files {
 		if file.Name == "tabs.go" {
 			continue

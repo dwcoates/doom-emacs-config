@@ -90,19 +90,30 @@ func (o *orchestrator) recoverEntry(ctx context.Context, repo wsm.RepoKey, entry
 	// A MERGE WORKSPACE'S ENTRY IS ITS REQUESTER'S MERGE TOO: the requester
 	// holds no entry of its own once its detached merge is handed off, so its
 	// request fact is raised here, before the entry's recovery can end it.
-	if places := o.placements(entry.Workspace); len(places) > 1 {
+	if requester, async := o.requesterOf(entry.Workspace); async {
 		o.deps.Log.Global().Info(op, "re-raised the request fact of a recovered detached merge's requester", dlog.Context{
-			"workspace": string(entry.Workspace), "requester": string(places[1].ws), "repo": string(repo)})
-		o.deps.Sidebar.SetMergeRequested(places[1].ws, true)
+			"workspace": string(entry.Workspace), "requester": string(requester), "repo": string(repo)})
+		o.deps.Sidebar.SetMergeRequested(requester, true)
 	}
 	switch entry.State {
 	case wsm.MergeRequested:
-		// A REQUEST STILL WAITING FOR ITS TURN'S END is re-armed: it is put in
-		// line once the requester's turn in flight -- if one survived the
-		// restart -- has ended.
 		o.mu.Lock()
 		o.repoOf[entry.Workspace] = repo
 		o.mu.Unlock()
+		// A MERGE WORKSPACE'S PICK is begun, or taken back where the restart
+		// left it, before its merge joins the queue.
+		if entry.Source.Pick != "" {
+			o.deps.Sidebar.SetMergeRequested(entry.Workspace, true)
+			if entry.Source.PickStartedAt == nil {
+				o.deps.Log.Global().Info(op, "begins an async merge's pick the restart cut short before it began", dlog.Context{
+					"workspace": string(entry.Workspace), "repo": string(repo)})
+				return o.startPick(ctx, entry.Workspace, repo, entry)
+			}
+			return o.resumePick(ctx, repo, entry)
+		}
+		// A REQUEST STILL WAITING FOR ITS TURN'S END is re-armed: it is put in
+		// line once the requester's turn in flight -- if one survived the
+		// restart -- has ended.
 		o.deps.Log.Global().Info(op, "re-armed a merge request still waiting for its turn to end", dlog.Context{
 			"workspace": string(entry.Workspace), "repo": string(repo)})
 		o.deps.Sidebar.SetMergeRequested(entry.Workspace, true)

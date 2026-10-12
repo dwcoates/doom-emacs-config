@@ -25,6 +25,7 @@ import (
 
 	"agent-repld/internal/cpugov"
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/feedid"
 	"agent-repld/internal/gitclient"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/paint"
@@ -110,6 +111,18 @@ type Orchestrator interface {
 	// running one is ended through the one release path. It is a no-op for a
 	// workspace with no merge.
 	OnWorkspaceClosed(ctx context.Context, ws ids.WorkspaceID)
+	// RevealMergeWorkspace draws a hidden async merge workspace in the tab bar
+	// and the sidebar from now on, naming CAUSE in its record, and restates the
+	// requester's bubble head with its switch. It is a no-op for a workspace
+	// that is no merge workspace or is already revealed.
+	RevealMergeWorkspace(ctx context.Context, ws ids.WorkspaceID, cause string) error
+	// InterruptTab stops the turn an AGENTIC merge tab of REQUESTER's feed
+	// draws (agentrepl.v1.InterruptRequest.merge_tab): the merge workspace's
+	// turn for an async merge, which also reveals that workspace, or the
+	// requester's own for a sync merge. It answers whether a turn was running.
+	// A ref that names no live agentic tab of a merge drawn in REQUESTER's
+	// feed is refused (not_merge_tab).
+	InterruptTab(ctx context.Context, requester ids.WorkspaceID, tab feedid.Ref) (bool, error)
 	// Facts reports a workspace's merge facts for the footer and the roster;
 	// the bool is false when the workspace has no merge.
 	Facts(ws ids.WorkspaceID) (MergeFacts, bool)
@@ -166,11 +179,12 @@ type Request struct {
 	// By says who asked, which decides whether the admission may displace the
 	// requester's turn in flight (see Requester).
 	By Requester
-	// Detached runs an own-branch merge in a MERGE WORKSPACE forked from the
-	// requester instead of in the requester
-	// (agentrepl.v1.MergeWorkspaceSourceOwnBranchDetached). It is legal on the
-	// own-branch source alone, which never keeps the requester open.
-	Detached bool
+	// Detached runs an own-branch merge ASYNC, in a hidden MERGE WORKSPACE
+	// forked from the requester instead of in the requester
+	// (agentrepl.v1.MergeWorkspaceSourceOwnBranchDetached); nil runs it SYNC,
+	// in place. It is legal on the own-branch source alone, which never keeps
+	// the requester open.
+	Detached *DetachedRun
 	// OneShot ANNOUNCES the requester a one-shot: its own branch merges in
 	// place once the requesting turn ends and the requester closes once it
 	// lands, and the request marks the requester a one-shot on its creation
@@ -180,20 +194,49 @@ type Request struct {
 	OneShot bool
 }
 
+// DetachedRun is what an async request says about its merge workspace.
+type DetachedRun struct {
+	// Name is the merge workspace's name as the requesting agent chose it,
+	// unprefixed. It is checked and reserved when the request is recorded.
+	Name string
+	// Pick is the instruction naming which changes of the requester's branch
+	// the merge lands, empty when the whole branch is merged.
+	Pick string
+}
+
 // DetachedMerges forks the merge workspace a detached request runs in, and
 // hands a detached merge's outcome back to the workspace that asked for it.
 // The merge package never creates a workspace or submits to another
 // workspace's session itself: this seam is the one way it does either.
 type DetachedMerges interface {
 	// Fork answers the merge workspace forked for REQUEST, creating it when
-	// none is registered yet: a fork of the requester's conversation, its own
-	// worktree on BRANCH as it stands now, landing where the requester would.
-	// It is idempotent per request, so a hand-off a restart cut short finds
-	// the workspace already forked.
-	Fork(ctx context.Context, requester wsm.Workspace, request wsm.DetachedMergeID, branch string) (wsm.Workspace, error)
+	// none is registered yet: a fork of the requester's conversation named
+	// NAME (the name the request reserved), its own worktree on BASE as it
+	// stands now — the requester's branch for a whole-branch merge, the
+	// target branch for a pick — landing where the requester would. It is
+	// idempotent per request, so a hand-off a restart cut short finds the
+	// workspace already forked.
+	Fork(ctx context.Context, requester wsm.Workspace, request wsm.DetachedMergeID, name, base string) (wsm.Workspace, error)
 	// HandBack reports how a detached merge ended to the conversation of the
 	// workspace that asked for it.
 	HandBack(ctx context.Context, requester ids.WorkspaceID, mergeWS wsm.Workspace, outcome DetachedOutcome) error
+	// Reveal draws a hidden merge workspace in the tab bar and the sidebar
+	// from now on, and answers whether this call revealed it (false when it
+	// already was).
+	Reveal(ctx context.Context, mergeWS ids.WorkspaceID) (bool, error)
+}
+
+// Names is the slice of workspace naming an async request needs: its merge
+// workspace's name is checked and reserved when the request is recorded, so
+// the fork can never collide.
+type Names interface {
+	// ClaimMergeName resolves NAME (unprefixed) to the branch a merge workspace
+	// of the repository at REPODIR would be created under, and claims it until
+	// RELEASE is called: no other name allocation hands it out meanwhile. The
+	// caller releases once the request carrying the name is recorded (which
+	// reserves it durably) or refused. A name that is already a workspace, a
+	// branch, a reservation or a claim answers TAKEN with no claim.
+	ClaimMergeName(ctx context.Context, repoDir, name string) (branch string, release func(), taken bool, err error)
 }
 
 // DetachedOutcome is how a detached merge ended, for its handback. THE KIND IS
@@ -297,6 +340,8 @@ type Deps struct {
 	// Detached forks a detached request's merge workspace and hands its
 	// outcome back to the requester.
 	Detached DetachedMerges
+	// Names checks and claims an async request's merge workspace name.
+	Names Names
 	// Footer and Sidebar receive the merge facts.
 	Footer  footer.Resolver
 	Sidebar sidebar.Resolver
@@ -377,6 +422,10 @@ type Deps struct {
 	// AwaitTurnEnd blocks until one submitted turn ends, reporting how. The
 	// orchestrator continues a phase only on a real turn end, never a timer.
 	AwaitTurnEnd TurnWaiter
+	// InterruptTurn stops a workspace's running turn, as the user's turn
+	// interrupt does, answering whether one was running. A merge-tab
+	// interrupt reaches the session through it.
+	InterruptTurn InterruptTurnFunc
 	// CaptureDisplaced durably captures the user turn a merge displaces, at
 	// admission, so it is resubmitted EXACTLY ONCE at lease release even across
 	// a daemon bounce. It reports false when nothing was in flight.
@@ -455,6 +504,10 @@ type StopSessionFunc func(ctx context.Context, ws ids.WorkspaceID, force bool) e
 // returning the release. It reports false when the workspace has no live shim,
 // which is the sessionless merge's legal answer rather than a failure.
 type OccupancyFunc func(ws ids.WorkspaceID, holder string) (release func(), ok bool, err error)
+
+// InterruptTurnFunc stops one workspace's running turn and reports whether a
+// turn was running.
+type InterruptTurnFunc func(ctx context.Context, ws ids.WorkspaceID) (bool, error)
 
 // TurnWaiter blocks until one turn ends and reports how it ended.
 type TurnWaiter func(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID) (wsm.TurnClose, error)
