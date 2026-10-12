@@ -32,6 +32,36 @@ function stripKinds(host: HTMLElement): string[] {
   );
 }
 
+/** The tabs the bubble's OWN strip drew, by kind, in order. */
+function topKinds(host: HTMLElement): string[] {
+  return [...host.querySelectorAll(".merge-strip:not(.is-nested) > .merge-tab")].map(
+    (e) => e.getAttribute("data-merge-tab") ?? "",
+  );
+}
+
+/** The tabs every nested strip drew, by kind, in document order. */
+function nestedKinds(host: HTMLElement): string[] {
+  return [...host.querySelectorAll(".merge-strip.is-nested > .merge-tab")].map(
+    (e) => e.getAttribute("data-merge-tab") ?? "",
+  );
+}
+
+/** The kinds every strip marks active, outermost first. */
+function activeKinds(host: HTMLElement): string[] {
+  return [...host.querySelectorAll(".merge-tab.is-active")].map((e) => e.getAttribute("data-merge-tab") ?? "");
+}
+
+/** A tests tab holding one run whose output carries PAYLOAD. */
+function testsWithRun(
+  output: Record<string, unknown>,
+  run: { state: "live" | "settled"; outcome?: "succeeded" | "failed" } = { state: "live" },
+) {
+  return [
+    tabRow("t-tests", { kind: "tests", state: "live" }),
+    tabRow("t-run", { kind: "testsRun", ...run, parent: "t-tests", payload: { output } }),
+  ];
+}
+
 /** The kind of the tab the strip marks active. */
 function activeKind(host: HTMLElement): string | null {
   return host.querySelector(".merge-tab.is-active")?.getAttribute("data-merge-tab") ?? null;
@@ -51,19 +81,28 @@ describe("the tab strip is the sub-feed's tab rows", () => {
 
   it("draws no tab for an ordinary row of the sub-feed", () => {
     const view = new FakeSubfeed([
-      tabRow("t1", { kind: "conflicts", state: "live" }),
+      tabRow("t1", { kind: "prePrompt", state: "live" }),
       childRow("r1", "t1"),
     ]);
     const { host } = mount(view);
-    expect(stripKinds(host)).toEqual(["conflicts"]);
+    expect(stripKinds(host)).toEqual(["prePrompt"]);
   });
 
   it("decorates a second round on the strip", () => {
     const view = new FakeSubfeed([
-      tabRow("t1", { kind: "tests", state: "live", label: "tests", round: 2 }),
+      tabRow("t1", { kind: "committing", state: "live", label: "committing", round: 2 }),
     ]);
     const { host } = mount(view);
-    expect(host.querySelector(".merge-tab-label")?.textContent).toBe("tests (2)");
+    expect(host.querySelector(".merge-tab-label")?.textContent).toBe("committing (2)");
+  });
+
+  it("draws a subtab in its parent tab's strip, never in the bubble's own", () => {
+    const view = new FakeSubfeed([
+      tabRow("t-rebase", { kind: "rebasing", state: "live" }),
+      tabRow("c1", { kind: "rebaseCommit", state: "live", parent: "t-rebase" }),
+    ]);
+    const { host } = mount(view);
+    expect([topKinds(host), nestedKinds(host)]).toEqual([["rebasing"], ["rebaseCommit"]]);
   });
 });
 
@@ -119,10 +158,150 @@ describe("which tab is active", () => {
     host.querySelector<HTMLElement>('[data-merge-tab="queue"]')?.click();
     view.push([
       tabRow("t1", { kind: "queue", state: "settled", outcome: "succeeded" }),
-      tabRow("t2", { kind: "tests", state: "settled", outcome: "failed" }),
-      tabRow("t3", { kind: "fixes", state: "live" }),
+      tabRow("t2", { kind: "tests", state: "settled", outcome: "succeeded" }),
+      tabRow("t3", { kind: "committing", state: "live" }),
     ]);
-    expect(activeKind(host)).toBe("fixes");
+    expect(activeKind(host)).toBe("committing");
+  });
+
+  it("follows the run down every strip to its live tab", () => {
+    const view = new FakeSubfeed([
+      ...testsWithRun({ suites: [] }, { state: "settled", outcome: "failed" }),
+      tabRow("t-fix", { kind: "testsRunFixing", state: "live", parent: "t-run" }),
+    ]);
+    const { host } = mount(view);
+    expect(activeKinds(host)).toEqual(["tests", "testsRun", "testsRunFixing"]);
+  });
+
+  it("keeps each strip's own pick: a commit picked in the rebasing tab survives a push", () => {
+    const rows = (second: "live" | "settled") => [
+      tabRow("t-rebase", { kind: "rebasing", state: "live" }),
+      tabRow("c1", { kind: "rebaseCommit", state: "settled", outcome: "succeeded", parent: "t-rebase" }),
+      tabRow("c2", { kind: "rebaseCommit", state: second, outcome: "succeeded", parent: "t-rebase" }),
+    ];
+    const view = new FakeSubfeed(rows("live"));
+    const { host } = mount(view);
+    host.querySelectorAll<HTMLElement>('.merge-strip.is-nested [data-merge-tab="rebaseCommit"]')[0]?.click();
+    view.push(rows("settled"));
+    const active = host.querySelector('.merge-strip.is-nested .merge-tab.is-active');
+    expect(active).toBe(host.querySelectorAll('.merge-strip.is-nested [data-merge-tab="rebaseCommit"]')[0]);
+  });
+});
+
+describe("a rebasing tab is a strip of its commits", () => {
+  it("draws its own progress above the commits' strip", () => {
+    const view = new FakeSubfeed([
+      tabRow("t-rebase", { kind: "rebasing", state: "live", payload: { progress: { replayed: 1, total: 2 } } }),
+      tabRow("c1", { kind: "rebaseCommit", state: "live", parent: "t-rebase" }),
+    ]);
+    const { host } = mount(view);
+    const progress = host.querySelector("[data-merge-progress]");
+    const nested = host.querySelector(".merge-strip.is-nested");
+    expect([progress?.textContent, progress !== null && nested !== null && Boolean(progress.compareDocumentPosition(nested) & Node.DOCUMENT_POSITION_FOLLOWING)]).toEqual(["1/2", true]);
+  });
+
+  it("selects the commit the replay is on, ahead of the pending ones", () => {
+    const view = new FakeSubfeed([
+      tabRow("t-rebase", { kind: "rebasing", state: "live" }),
+      tabRow("c1", { kind: "rebaseCommit", state: "live", parent: "t-rebase", label: "c1" }),
+      tabRow("c2", { kind: "rebaseCommit", state: "pending", parent: "t-rebase", label: "c2" }),
+    ]);
+    const { host } = mount(view);
+    expect(host.querySelector(".merge-strip.is-nested .merge-tab.is-active .merge-tab-label")?.textContent).toBe("c1");
+  });
+
+  it("draws a pending commit with no glyph and no clock", () => {
+    const view = new FakeSubfeed([
+      tabRow("t-rebase", { kind: "rebasing", state: "live" }),
+      tabRow("c1", { kind: "rebaseCommit", state: "pending", parent: "t-rebase" }),
+    ]);
+    const { host } = mount(view);
+    const pending = host.querySelector('[data-merge-tab="rebaseCommit"]');
+    expect([pending?.querySelector(".merge-tab-glyph")?.textContent, pending?.querySelector(".merge-tab-duration")?.textContent]).toEqual(["", ""]);
+  });
+
+  it("draws a commit's narration lines", () => {
+    const view = new FakeSubfeed([
+      tabRow("t-rebase", { kind: "rebasing", state: "live" }),
+      tabRow("c1", { kind: "rebaseCommit", state: "live", parent: "t-rebase", payload: { lines: [{ text: "replayed 1/2" }] } }),
+    ]);
+    const { host } = mount(view);
+    expect(host.querySelector(".merge-rebase-commit .merge-line")?.textContent).toBe("replayed 1/2");
+  });
+
+  it("draws a conflicted commit's files over its resolution's rows", () => {
+    const view = new FakeSubfeed([
+      tabRow("t-rebase", { kind: "rebasing", state: "live" }),
+      tabRow("c1", {
+        kind: "rebaseCommit",
+        state: "live",
+        parent: "t-rebase",
+        payload: { conflict: { state: { case: "live", value: { startedAtMs: 1n } }, files: [{ path: "a.go" }] } },
+      }),
+      childRow("r1", "c1"),
+    ]);
+    const { host } = mount(view);
+    const section = host.querySelector(".merge-conflict");
+    expect([section?.querySelector(".merge-conflict-file")?.textContent, section?.querySelector("[data-nest] [data-feed-row]")?.getAttribute("data-feed-row")]).toEqual(["a.go", "r1"]);
+  });
+
+  it("draws no conflict section on a commit that replayed cleanly", () => {
+    const view = new FakeSubfeed([
+      tabRow("t-rebase", { kind: "rebasing", state: "live" }),
+      tabRow("c1", { kind: "rebaseCommit", state: "live", parent: "t-rebase" }),
+    ]);
+    const { host } = mount(view);
+    expect(host.querySelector(".merge-conflict")).toBeNull();
+  });
+
+  it("draws the conflict section once a push hands the commit to the session", () => {
+    const commit = (conflict: boolean) =>
+      tabRow("c1", {
+        kind: "rebaseCommit",
+        state: "live",
+        parent: "t-rebase",
+        payload: conflict ? { conflict: { state: { case: "live", value: { startedAtMs: 1n } }, files: [{ path: "a.go" }] } } : {},
+      });
+    const view = new FakeSubfeed([tabRow("t-rebase", { kind: "rebasing", state: "live" }), commit(false)]);
+    const { host } = mount(view);
+    view.push([tabRow("t-rebase", { kind: "rebasing", state: "live" }), commit(true), childRow("r1", "c1")]);
+    expect(host.querySelector(".merge-conflict [data-feed-row]")?.getAttribute("data-feed-row")).toBe("r1");
+  });
+});
+
+describe("a tests tab is a strip of its runs", () => {
+  it("draws each run as a subtab", () => {
+    const view = new FakeSubfeed([
+      tabRow("t-tests", { kind: "tests", state: "live" }),
+      tabRow("t-run1", { kind: "testsRun", state: "settled", outcome: "failed", parent: "t-tests", label: "run 1" }),
+      tabRow("t-run2", { kind: "testsRun", state: "live", parent: "t-tests", label: "run 2" }),
+    ]);
+    const { host } = mount(view);
+    const runs = [...host.querySelectorAll('.merge-strip.is-nested > [data-merge-tab="testsRun"] .merge-tab-label')];
+    expect(runs.map((e) => e.textContent)).toEqual(["run 1", "run 2"]);
+  });
+
+  it("opens a run's strip with its output, badged with the run's own state", () => {
+    const view = new FakeSubfeed(testsWithRun({ suites: [] }, { state: "settled", outcome: "failed" }));
+    const { host } = mount(view);
+    const output = host.querySelector('[data-merge-tab="testsRunOutput"]');
+    expect([output?.querySelector(".merge-tab-label")?.textContent, output?.getAttribute("data-tab-outcome")]).toEqual(["output", "failed"]);
+  });
+
+  it("draws a run's fixing attempt beside its output", () => {
+    const view = new FakeSubfeed([
+      ...testsWithRun({ suites: [] }, { state: "settled", outcome: "failed" }),
+      tabRow("t-fix", { kind: "testsRunFixing", state: "live", parent: "t-run" }),
+    ]);
+    const { host } = mount(view);
+    const runStrip = host.querySelector('[data-merge-tab-body="testsRun"] .merge-strip.is-nested');
+    expect([...(runStrip?.children ?? [])].map((e) => e.getAttribute("data-merge-tab"))).toEqual(["testsRunOutput", "testsRunFixing"]);
+  });
+
+  it("draws no fixing sub-subtab for a run that passed", () => {
+    const view = new FakeSubfeed(testsWithRun({ suites: [] }, { state: "settled", outcome: "succeeded" }));
+    const { host } = mount(view);
+    expect(host.querySelector('[data-merge-tab="testsRunFixing"]')).toBeNull();
   });
 });
 
@@ -217,35 +396,26 @@ describe("resolved tabs draw the tab row's own content", () => {
     expect(() => mount(view)).toThrow(MalformedView);
   });
 
-  it("draws the tests tab's log link with the daemon's label", () => {
-    const view = new FakeSubfeed([
-      tabRow("t1", {
-        kind: "tests",
-        state: "settled",
-        outcome: "failed",
-        payload: { log: { token: { value: "tok-1" }, label: { text: "~/logs/ws-tests-1.log" } } },
-      }),
-    ]);
+  it("draws a run's log link with the daemon's label", () => {
+    const view = new FakeSubfeed(
+      testsWithRun({ suites: [], log: { token: { value: "tok-1" }, label: { text: "~/logs/ws-tests-1.log" } } }),
+    );
     const { host } = mount(view);
     expect(host.querySelector(".merge-test-log [data-merge-test-log]")?.textContent).toBe("~/logs/ws-tests-1.log");
   });
 
-  it("draws no log line on a tests tab whose log is not written yet", () => {
-    const view = new FakeSubfeed([tabRow("t1", { kind: "tests", state: "live" })]);
+  it("draws no log line on a run whose log is not written yet", () => {
+    const view = new FakeSubfeed(testsWithRun({ suites: [] }));
     const { host } = mount(view);
     expect(host.querySelector(".merge-test-log")).toBeNull();
   });
 
-  it("draws the suites on the tests tab", () => {
-    const view = new FakeSubfeed([
-      tabRow("t1", {
-        kind: "tests",
-        state: "live",
-        payload: {
-          suites: [{ name: "unit", state: { case: "running", value: { soFar: { case: "unreported", value: {} } } }, output: [] }],
-        },
+  it("draws the suites on a run's output", () => {
+    const view = new FakeSubfeed(
+      testsWithRun({
+        suites: [{ name: "unit", state: { case: "running", value: { soFar: { case: "unreported", value: {} } } }, output: [] }],
       }),
-    ]);
+    );
     const { host } = mount(view);
     expect(host.querySelector(".merge-suite-name")?.textContent).toBe("unit");
   });
@@ -254,13 +424,13 @@ describe("resolved tabs draw the tab row's own content", () => {
 describe("agentic tabs draw the sub-feed rows parented to them", () => {
   it("draws only the rows naming THIS tab as their container", () => {
     const view = new FakeSubfeed([
-      tabRow("t1", { kind: "conflicts", state: "live" }),
-      tabRow("t2", { kind: "fixes", state: "live" }),
+      tabRow("t1", { kind: "prePrompt", state: "live" }),
+      tabRow("t2", { kind: "postPrompt", state: "live" }),
       childRow("r1", "t1"),
       childRow("r2", "t2"),
     ]);
     const { host } = mount(view);
-    host.querySelector<HTMLElement>('[data-merge-tab="conflicts"]')?.click();
+    host.querySelector<HTMLElement>('[data-merge-tab="prePrompt"]')?.click();
     expect(
       [...host.querySelectorAll("[data-nest] [data-feed-row]")].map((e) =>
         e.getAttribute("data-feed-row"),
@@ -293,42 +463,53 @@ describe("agentic tabs draw the sub-feed rows parented to them", () => {
 
   it("draws no row of a tab the reader is not on", () => {
     const view = new FakeSubfeed([
-      tabRow("t1", { kind: "conflicts", state: "settled", outcome: "succeeded" }),
+      tabRow("t1", { kind: "prePrompt", state: "settled", outcome: "succeeded" }),
       childRow("r1", "t1"),
-      tabRow("t2", { kind: "fixes", state: "live" }),
+      tabRow("t2", { kind: "postPrompt", state: "live" }),
     ]);
     const { host } = mount(view);
     expect(host.querySelectorAll("[data-nest] [data-feed-row]").length).toBe(0);
   });
 });
 
-describe("a fixes tab names its attempt above its rows", () => {
+/** A failed run with a fixing attempt FIXING under it, and the rows given. */
+function fixingRun(fixing: Parameters<typeof tabRow>[1], ...rows: ReturnType<typeof childRow>[]) {
+  return [
+    ...testsWithRun({ suites: [] }, { state: "settled", outcome: "failed" }),
+    tabRow("t-fix", { ...fixing, parent: "t-run" }),
+    ...rows,
+  ];
+}
+
+describe("a fixing attempt names its attempt above its rows", () => {
   it("draws the attempt as 'attempt 2/3'", () => {
-    const view = new FakeSubfeed([
-      tabRow("t1", { kind: "fixes", state: "live", payload: { attempt: { attempt: 2, maxAttempts: 3 } } }),
-    ]);
+    const view = new FakeSubfeed(
+      fixingRun({ kind: "testsRunFixing", state: "live", payload: { attempt: { attempt: 2, maxAttempts: 3 } } }),
+    );
     const { host } = mount(view);
     expect(host.querySelector("[data-merge-attempt]")?.textContent).toBe("attempt 2/3");
   });
 
   it("still draws the rows parented to it under the attempt", () => {
-    const view = new FakeSubfeed([tabRow("t1", { kind: "fixes", state: "live" }), childRow("r1", "t1")]);
+    const view = new FakeSubfeed(fixingRun({ kind: "testsRunFixing", state: "live" }, childRow("r1", "t-fix")));
     const { host } = mount(view);
     expect(host.querySelector("[data-merge-attempt] ~ [data-nest] [data-feed-row]")?.getAttribute("data-feed-row")).toBe(
       "r1",
     );
   });
 
-  it("refuses a fixes tab with no attempt", () => {
-    const row = tabRow("t1", { kind: "fixes", state: "live" });
-    (row.row.value as { kind: { value: { attempt?: unknown } } }).kind.value.attempt = undefined;
-    expect(() => mount(new FakeSubfeed([row]))).toThrow(MalformedView);
+  it("refuses a fixing attempt with no attempt", () => {
+    const rows = fixingRun({ kind: "testsRunFixing", state: "live" });
+    const fixing = rows[rows.length - 1];
+    if (fixing === undefined) throw new Error("fixture drew no fixing row");
+    (fixing.row.value as { kind: { value: { attempt?: unknown } } }).kind.value.attempt = undefined;
+    expect(() => mount(new FakeSubfeed(rows))).toThrow(MalformedView);
   });
 });
 
 describe("nothing parks, so no tab hosts a composer", () => {
   it("leaves the bubble's composer slot out of the merge body", () => {
-    const view = new FakeSubfeed([tabRow("t1", { kind: "conflicts", state: "live" })]);
+    const view = new FakeSubfeed([tabRow("t1", { kind: "prePrompt", state: "live" })]);
     view.composerSlot = document.createElement("div");
     view.composerSlot.className = "bubble-composer";
     const { host } = mount(view);
@@ -439,6 +620,31 @@ describe("drawLooseRows: a row that belongs to no drawn tab", () => {
     expect(ticks).toBe(1);
   });
 
+  it("draws a subtab whose parent tab is not in the sub-feed beneath the strip", () => {
+    const view = new FakeSubfeed([
+      tabRow("t1", { kind: "queue", state: "live" }),
+      tabRow("c1", { kind: "rebaseCommit", state: "live", parent: "gone" }),
+    ]);
+    const { host, dispose } = mount(view);
+
+    const loose = host.querySelector(".merge-loose-rows");
+
+    expect([...(loose?.children ?? [])].map((e) => e.getAttribute("data-feed-row"))).toEqual(["c1"]);
+    dispose();
+  });
+
+  it("leaves a row parented to a nested tab out of the loose host", () => {
+    const view = new FakeSubfeed([
+      tabRow("t-rebase", { kind: "rebasing", state: "live" }),
+      tabRow("c1", { kind: "rebaseCommit", state: "live", parent: "t-rebase" }),
+      childRow("r1", "c1", "placed"),
+    ]);
+    const { host, dispose } = mount(view);
+
+    expect(host.querySelector(".merge-loose-rows")?.children.length).toBe(0);
+    dispose();
+  });
+
   it("leaves a row parented to a drawn tab out of the loose host", () => {
     const view = new FakeSubfeed([
       tabRow("t1", { kind: "tests", state: "live" }),
@@ -469,12 +675,12 @@ describe("a redraw of the tab's content", () => {
         return super.drawRow(row);
       }
     }
-    const view = new Watching([tabRow("t1", { kind: "conflicts", state: "live" }), childRow("r1", "t1")]);
+    const view = new Watching([tabRow("t1", { kind: "prePrompt", state: "live" }), childRow("r1", "t1")]);
     host = mount(view).host;
     const standing = host.querySelector(".merge-tab-panel")?.childElementCount;
     seen.length = 0;
     // Act
-    view.push([tabRow("t1", { kind: "conflicts", state: "live" }), childRow("r1", "t1"), childRow("r2", "t1")]);
+    view.push([tabRow("t1", { kind: "prePrompt", state: "live" }), childRow("r1", "t1"), childRow("r2", "t1")]);
     // Assert
     expect(seen).toEqual([standing, standing]);
   });
@@ -496,16 +702,12 @@ class CachingSubfeed extends FakeSubfeed {
   }
 }
 
-/** A tests tab row carrying one running suite at PASSED of 10. */
+/** A tests tab whose one run carries one running suite at PASSED of 10. */
 const testsTab = (passed: number) =>
-  tabRow("t-tests", {
-    kind: "tests",
-    state: "live",
-    payload: {
-      suites: [
-        { name: "unit", state: { case: "running", value: { soFar: { case: "passing", value: {} } } }, counts: { passed, failed: 0, total: 10 } },
-      ],
-    },
+  testsWithRun({
+    suites: [
+      { name: "unit", state: { case: "running", value: { soFar: { case: "passing", value: {} } } }, counts: { passed, failed: 0, total: 10 } },
+    ],
   });
 
 /**
@@ -516,23 +718,23 @@ const testsTab = (passed: number) =>
 describe("the body redraws in place", () => {
   it("keeps a tab's element and its live dot across a push that moved only the tab's content", () => {
     // Arrange
-    const view = new FakeSubfeed([testsTab(1)]);
+    const view = new FakeSubfeed(testsTab(1));
     const { host } = mount(view);
     const tab = host.querySelector(".merge-tab");
     const glyph = host.querySelector(".merge-tab-glyph");
     // Act
-    view.push([testsTab(2)]);
+    view.push(testsTab(2));
     // Assert
     expect([host.querySelector(".merge-tab"), host.querySelector(".merge-tab-glyph")]).toEqual([tab, glyph]);
   });
 
   it("keeps the shown suite's element and its live dot across a push of new counts", () => {
     // Arrange
-    const view = new FakeSubfeed([testsTab(1)]);
+    const view = new FakeSubfeed(testsTab(1));
     const { host } = mount(view);
     const glyph = host.querySelector(".merge-suite-glyph");
     // Act
-    view.push([testsTab(2)]);
+    view.push(testsTab(2));
     // Assert
     expect([host.querySelector(".merge-suite-glyph"), host.querySelector(".merge-suite-counts")?.textContent]).toEqual([
       glyph,
@@ -564,12 +766,12 @@ describe("the body redraws in place", () => {
 
   it("keeps an agentic tab's rows container, and a row that stays is never moved", () => {
     // Arrange
-    const view = new CachingSubfeed([tabRow("t1", { kind: "conflicts", state: "live" }), childRow("r1", "t1")]);
+    const view = new CachingSubfeed([tabRow("t1", { kind: "prePrompt", state: "live" }), childRow("r1", "t1")]);
     const { host } = mount(view);
     const container = host.querySelector(".merge-tab-rows");
     const row = host.querySelector('[data-feed-row="r1"]');
     // Act
-    view.push([tabRow("t1", { kind: "conflicts", state: "live" }), childRow("r1", "t1"), childRow("r2", "t1")]);
+    view.push([tabRow("t1", { kind: "prePrompt", state: "live" }), childRow("r1", "t1"), childRow("r2", "t1")]);
     // Assert
     expect([host.querySelector(".merge-tab-rows"), host.querySelector('[data-feed-row="r1"]'), host.querySelectorAll(".merge-tab-rows > *").length]).toEqual([
       container,
@@ -583,19 +785,19 @@ describe("the body redraws in place", () => {
     const view = new FakeSubfeed([tabRow("t-rebase", { kind: "rebasing", state: "live" })]);
     const { host } = mount(view);
     // Act
-    view.push([tabRow("t-rebase", { kind: "rebasing", state: "settled" }), testsTab(1)]);
+    view.push([tabRow("t-rebase", { kind: "rebasing", state: "settled" }), ...testsTab(1)]);
     // Assert
     expect(host.querySelector(".merge-tab-panel")?.getAttribute("data-merge-tab-body")).toBe("tests");
   });
 
   it("stops the clock of a tab no longer served", () => {
     // Arrange
-    const view = new FakeSubfeed([tabRow("t-rebase", { kind: "rebasing", state: "live" }), testsTab(1)]);
+    const view = new FakeSubfeed([tabRow("t-rebase", { kind: "rebasing", state: "live" }), ...testsTab(1)]);
     const { host } = mount(view);
     // Act
-    view.push([testsTab(1)]);
+    view.push(testsTab(1));
     // Assert
-    expect(host.querySelectorAll(".merge-tab")).toHaveLength(1);
+    expect(topKinds(host)).toEqual(["tests"]);
   });
 });
 
@@ -619,27 +821,57 @@ describe("a pick tab", () => {
   });
 });
 
-describe("an agentic tab's stop control", () => {
+/** A rebasing tab whose one commit has its conflict section in STATE. */
+function conflictedCommit(state: "live" | "waitingOnUser" | "settled") {
+  const conflictState =
+    state === "settled"
+      ? { case: "settled", value: { startedAtMs: 1n, endedAtMs: 2n, outcome: { case: "succeeded", value: {} } } }
+      : { case: state, value: { startedAtMs: 1n } };
+  return [
+    tabRow("t-rebase", { kind: "rebasing", state: "live" }),
+    tabRow("c1", {
+      kind: "rebaseCommit",
+      state: "live",
+      parent: "t-rebase",
+      payload: { conflict: { state: conflictState, files: [{ path: "a.go" }] } },
+    }),
+  ];
+}
+
+describe("an agent stream's stop control", () => {
   it.each([
-    ["a live conflicts tab", "conflicts", "live", true],
-    ["a conflicts tab waiting on the user", "conflicts", "waitingOnUser", true],
-    ["a live pick tab", "pick", "live", true],
-    ["a live fixes tab", "fixes", "live", true],
-    ["a settled conflicts tab", "conflicts", "settled", false],
-    ["a settled pick tab", "pick", "settled", false],
-    ["a live rebasing tab", "rebasing", "live", false],
-  ] as const)("is offered on %s: %s", (_name, kind, state, offered) => {
+    ["a live conflict section", () => conflictedCommit("live"), true],
+    ["a conflict section waiting on the user", () => conflictedCommit("waitingOnUser"), true],
+    ["a settled conflict section", () => conflictedCommit("settled"), false],
+    ["a live pick tab", () => [tabRow("t1", { kind: "pick", state: "live" })], true],
+    ["a settled pick tab", () => [tabRow("t1", { kind: "pick", state: "settled" })], false],
+    ["a live fixing attempt", () => fixingRun({ kind: "testsRunFixing", state: "live" }), true],
+    ["a live rebasing tab with no conflict", () => [tabRow("t-rebase", { kind: "rebasing", state: "live" })], false],
+  ] as const)("is offered on %s: %s", (_name, rows, offered) => {
     // Arrange
-    const view = new FakeSubfeed([tabRow("t1", { kind, state })]);
+    const view = new FakeSubfeed(rows());
     // Act
     const { host } = mountWith(view);
     // Assert
     expect(host.querySelector(".merge-tab-panel .merge-tab-stop [data-interrupt]") !== null).toBe(offered);
   });
 
+  it("stops a conflict by its commit's row id, sent as a merge tab", async () => {
+    // Arrange
+    const { host, h } = mountWith(new FakeSubfeed(conflictedCommit("live")));
+    // Act
+    host.querySelector<HTMLElement>(".merge-conflict .merge-tab-stop [data-interrupt]")?.click();
+    await settle();
+    // Assert
+    expect(h.calls.interrupt[0]?.target).toEqual({
+      case: "mergeTab",
+      value: { $typeName: "frontend.v1.FeedId", value: "c1" },
+    });
+  });
+
   it("stops the tab by its own row id, sent as a merge tab", async () => {
     // Arrange
-    const { host, h } = mountWith(new FakeSubfeed([tabRow("t1", { kind: "conflicts", state: "live" })]));
+    const { host, h } = mountWith(new FakeSubfeed([tabRow("t1", { kind: "pick", state: "live" })]));
     // Act
     host.querySelector<HTMLElement>(".merge-tab-stop [data-interrupt]")?.click();
     await settle();
@@ -658,7 +890,7 @@ describe("an agentic tab's stop control", () => {
           result: { case: "error", value: { kind: { case: "notMergeTab", value: {} } } },
         }),
     });
-    const { host } = mountWith(new FakeSubfeed([tabRow("t1", { kind: "conflicts", state: "live" })]), h);
+    const { host } = mountWith(new FakeSubfeed([tabRow("t1", { kind: "pick", state: "live" })]), h);
     // Act
     host.querySelector<HTMLElement>(".merge-tab-stop [data-interrupt]")?.click();
     await settle();
@@ -668,10 +900,10 @@ describe("an agentic tab's stop control", () => {
 
   it("is taken down when the tab settles", () => {
     // Arrange
-    const view = new FakeSubfeed([tabRow("t1", { kind: "conflicts", state: "live" })]);
+    const view = new FakeSubfeed([tabRow("t1", { kind: "pick", state: "live" })]);
     const { host } = mountWith(view);
     // Act
-    view.push([tabRow("t1", { kind: "conflicts", state: "settled" })]);
+    view.push([tabRow("t1", { kind: "pick", state: "settled" })]);
     // Assert
     expect(host.querySelector(".merge-tab-stop")).toBeNull();
   });
