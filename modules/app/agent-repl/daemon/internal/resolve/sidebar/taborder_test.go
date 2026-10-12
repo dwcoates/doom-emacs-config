@@ -28,48 +28,42 @@ func tabIDs(order []TabEntry) []string {
 }
 
 func TestTabOrder(t *testing.T) {
-	section := func(rows ...*frontendv1.RosterRow) *frontendv1.RosterRepoSection {
-		return &frontendv1.RosterRepoSection{Rows: &frontendv1.RosterRows{Rows: rows}}
+	tab := func(id string) *frontendv1.RosterTab {
+		return &frontendv1.RosterTab{Workspace: &workspacev1.WorkspaceRef{Id: id}}
 	}
 	tests := []struct {
-		name   string
-		roster *frontendv1.WorkspaceRoster
-		want   []string
+		name      string
+		roster    *frontendv1.WorkspaceRoster
+		wantIDs   []string
+		wantNames []string
 	}{
-		{name: "no roster has no order", roster: nil, want: []string{}},
-		{name: "sections in order, rows in order", roster: &frontendv1.WorkspaceRoster{
+		{name: "no roster has no order", roster: nil, wantIDs: []string{}, wantNames: []string{}},
+		{name: "the published tab bar's order, not the sections' walk", roster: &frontendv1.WorkspaceRoster{
 			Repository: &frontendv1.RosterRepositoryView{Sections: []*frontendv1.RosterRepoSection{
-				section(tabRow("a", false), tabRow("b", false)), section(tabRow("c", false))}},
-		}, want: []string{"a", "b", "c"}},
-		{name: "children follow their parent depth-first", roster: &frontendv1.WorkspaceRoster{
-			Repository: &frontendv1.RosterRepositoryView{Sections: []*frontendv1.RosterRepoSection{
-				section(tabRow("a", false, tabRow("a1", false, tabRow("a11", false))), tabRow("b", false))}},
-		}, want: []string{"a", "a1", "a11", "b"}},
-		{name: "a closed row takes no tab but its open children do", roster: &frontendv1.WorkspaceRoster{
-			Repository: &frontendv1.RosterRepositoryView{Sections: []*frontendv1.RosterRepoSection{
-				section(tabRow("a", true, tabRow("a1", false)), tabRow("b", false))}},
-		}, want: []string{"a1", "b"}},
-		{name: "the hidden section's open rows keep their tabs, before recently merged", roster: &frontendv1.WorkspaceRoster{
-			Repository:     &frontendv1.RosterRepositoryView{Sections: []*frontendv1.RosterRepoSection{section(tabRow("a", false))}},
-			Hidden:         &frontendv1.RosterHiddenSection{Rows: &frontendv1.RosterRows{Rows: []*frontendv1.RosterRow{tabRow("h", false, tabRow("h1", false)), tabRow("hc", true)}}},
+				{Rows: &frontendv1.RosterRows{Rows: []*frontendv1.RosterRow{tabRow("a", false, tabRow("a1", false)), tabRow("b", false)}}}}},
+			TabBar: &frontendv1.RosterTabBar{Tabs: []*frontendv1.RosterTab{tab("b"), tab("a1"), tab("a")}},
+		}, wantIDs: []string{"b", "a1", "a"}, wantNames: []string{"name-b", "name-a1", "name-a"}},
+		{name: "a tab is named from its row in any grouping", roster: &frontendv1.WorkspaceRoster{
+			Hidden:         &frontendv1.RosterHiddenSection{Rows: &frontendv1.RosterRows{Rows: []*frontendv1.RosterRow{tabRow("h", false)}}},
 			RecentlyMerged: mergedBand([]*frontendv1.RosterRow{tabRow("m", false)}),
-		}, want: []string{"a", "h", "h1", "m"}},
-		{name: "recently merged comes last", roster: &frontendv1.WorkspaceRoster{
-			Repository:     &frontendv1.RosterRepositoryView{Sections: []*frontendv1.RosterRepoSection{section(tabRow("a", false))}},
-			RecentlyMerged: mergedBand([]*frontendv1.RosterRow{tabRow("m", false), tabRow("gone", true)}),
-		}, want: []string{"a", "m"}},
-		{name: "recently merged groups are walked in the band's order", roster: &frontendv1.WorkspaceRoster{
-			RecentlyMerged: mergedBand([]*frontendv1.RosterRow{tabRow("m1", false)}, []*frontendv1.RosterRow{tabRow("m2", false)}),
-		}, want: []string{"m1", "m2"}},
+			TabBar:         &frontendv1.RosterTabBar{Tabs: []*frontendv1.RosterTab{tab("m"), tab("h")}},
+		}, wantIDs: []string{"m", "h"}, wantNames: []string{"name-m", "name-h"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Act
-			got := tabIDs(TabOrder(tt.roster))
+			order := TabOrder(tt.roster)
 
 			// Assert
-			if !slices.Equal(got, tt.want) {
-				t.Fatalf("TabOrder = %v, want %v", got, tt.want)
+			if got := tabIDs(order); !slices.Equal(got, tt.wantIDs) {
+				t.Fatalf("TabOrder ids = %v, want %v", got, tt.wantIDs)
+			}
+			names := []string{}
+			for _, e := range order {
+				names = append(names, e.Name)
+			}
+			if !slices.Equal(names, tt.wantNames) {
+				t.Fatalf("TabOrder names = %v, want %v", names, tt.wantNames)
 			}
 		})
 	}

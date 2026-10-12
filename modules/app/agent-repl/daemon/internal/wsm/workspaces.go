@@ -36,7 +36,7 @@ func normalizeDir(dir string) (string, error) {
 // workspace's creation job asked for the one-shot form, and whether a merge
 // queue entry stands for it. Every read selects FROM workspaces unaliased, so
 // the correlated subqueries name `workspaces.id`.
-const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, last_selected_at, last_activity_at, merged_at, spawned_shim_pid, created_at, result_end, result_read, hidden, merge_of, merge_request_id, commit_count, ` +
+const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, last_selected_at, last_activity_at, merged_at, spawned_shim_pid, created_at, result_end, result_read, hidden, merge_of, merge_request_id, commit_count, place, ` +
 	`EXISTS (SELECT 1 FROM creation_jobs WHERE creation_jobs.workspace_id = workspaces.id AND creation_jobs.one_shot = 1), ` +
 	`EXISTS (SELECT 1 FROM merge_queue WHERE merge_queue.workspace_id = workspaces.id)`
 
@@ -59,7 +59,7 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 		request  sql.NullString
 		commits  sql.NullInt64
 	)
-	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &created, &end, &read, &ws.Hidden, &mergeOf, &request, &commits, &ws.OneShot, &ws.MergePending); err != nil {
+	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &created, &end, &read, &ws.Hidden, &mergeOf, &request, &commits, &ws.Place, &ws.OneShot, &ws.MergePending); err != nil {
 		return Workspace{}, err
 	}
 	if mergeOf.Valid != request.Valid {
@@ -159,6 +159,13 @@ func (s *store) RegisterWorkspace(ctx context.Context, dir string, facts Registe
 		if err != nil {
 			return err
 		}
+		var priority any
+		if facts.Priority != nil {
+			if !facts.Priority.valid() {
+				return fmt.Errorf("wsm: unknown priority %d", int(*facts.Priority))
+			}
+			priority = int(*facts.Priority)
+		}
 		name := facts.Name
 		if name == "" {
 			name = filepath.Base(normalized)
@@ -171,6 +178,7 @@ func (s *store) RegisterWorkspace(ctx context.Context, dir string, facts Registe
 			Branch:       facts.Branch,
 			ParentBranch: facts.ParentBranch,
 			Parent:       facts.Parent,
+			Priority:     facts.Priority,
 			CreatedAt:    time.Now().UTC(),
 			MergeOf:      facts.MergeOf,
 		}
@@ -178,10 +186,14 @@ func (s *store) RegisterWorkspace(ctx context.Context, dir string, facts Registe
 		if out.MergeOf != nil {
 			mergeOf, request = string(out.MergeOf.Requester), string(out.MergeOf.Request)
 		}
+		out.Place, err = landingPlace(ctx, tx, out.Priority, out.ID)
+		if err != nil {
+			return err
+		}
 		_, err = tx.ExecContext(ctx,
-			`INSERT INTO workspaces (id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, is_current, last_selected_at, merged_at, serving_instance, created_at, merge_of, merge_request_id)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, NULL, NULL, 0, NULL, NULL, NULL, ?, ?, ?)`,
-			out.ID, out.Repo, out.Dir, out.Name, out.Branch, out.ParentBranch, nullWorkspace(out.Parent), nanos(out.CreatedAt), mergeOf, request)
+			`INSERT INTO workspaces (id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, is_current, last_selected_at, merged_at, serving_instance, created_at, merge_of, merge_request_id, place)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, NULL, 0, NULL, NULL, NULL, ?, ?, ?, ?)`,
+			out.ID, out.Repo, out.Dir, out.Name, out.Branch, out.ParentBranch, nullWorkspace(out.Parent), priority, nanos(out.CreatedAt), mergeOf, request, out.Place)
 		if err != nil {
 			return err
 		}
@@ -477,21 +489,20 @@ func requireOneRow(res sql.Result, what string) error {
 // ownership and clears the recorded spawned shim pid IN THE SAME UPDATE that
 // sets closed, so no close path (kill, close, teardown, merge terminal, boot's
 // missing-directory close) can leave a closed row a later handover transfers.
-// This is the one helper every close goes through; reopening touches only
-// the flag, because the bring-up claims serving itself.
+// This is the one helper every close goes through.
+//
+// A RE-OPEN MOVES NOTHING: the workspace returns to the place it held in the
+// registry when it was closed (place.go). Re-opening touches only the flag,
+// because the bring-up claims serving itself.
 func (s *store) SetClosed(ctx context.Context, id WorkspaceID, closed bool) error {
 	const op = "daemon.wsm.set_closed"
-	fields := dlog.Context{"closed": closed}
+	fields := dlog.Context{"closed": closed, "workspace": string(id)}
 	if !closed {
-		return s.setWorkspaceField(ctx, op, "closed", id, false, fields)
+		return s.setWorkspaceColumns(ctx, op, id, fields, workspaceColumn{name: "closed", value: false})
 	}
-	fields["workspace"] = string(id)
 	var released sql.NullString
 	err := s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
-		err := tx.QueryRowContext(ctx, `SELECT serving_instance FROM workspaces WHERE id = ?`, id).Scan(&released)
-		if errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("wsm: workspace %s: %w", id, ErrNotFound)
-		}
+		err := scanWorkspaceRow(ctx, tx, id, "serving_instance", &released)
 		if err != nil {
 			return err
 		}
@@ -590,7 +601,9 @@ func (s *store) SetMergedAt(ctx context.Context, id WorkspaceID, at time.Time, c
 		workspaceColumn{name: "commit_count", value: int64(*commits)})
 }
 
-// SetPriority sets or clears a workspace's roster priority. An undeclared
+// SetPriority sets or clears a workspace's priority. SETTING one moves the
+// workspace to second-to-last among the open workspaces of that priority, in
+// the same transaction (place.go); CLEARING one moves nothing. An undeclared
 // priority is refused rather than stored for a later read to trip over.
 func (s *store) SetPriority(ctx context.Context, id WorkspaceID, p *Priority) error {
 	const op = "daemon.wsm.set_priority"
@@ -605,7 +618,19 @@ func (s *store) SetPriority(ctx context.Context, id WorkspaceID, p *Priority) er
 		return err
 	}
 	fields["priority"] = int(*p)
-	return s.setWorkspaceField(ctx, op, "priority", id, int(*p), fields)
+	fields["workspace"] = string(id)
+	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `UPDATE workspaces SET priority = ? WHERE id = ?`, int(*p), id)
+		if err != nil {
+			return err
+		}
+		if err := requireOneRow(res, fmt.Sprintf("wsm: workspace %s", id)); err != nil {
+			return err
+		}
+		at, err := reland(ctx, tx, id, p)
+		fields["place"] = at
+		return err
+	})
 }
 
 // SetHidden records whether a workspace sits in the roster's hidden section.

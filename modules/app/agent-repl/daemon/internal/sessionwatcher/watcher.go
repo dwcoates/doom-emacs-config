@@ -902,6 +902,15 @@ func (w *watcher) OnTurnOpened(ws ids.WorkspaceID, prompt *conversationv1.AgentP
 		return
 	}
 
+	// THE HAND-OVER IS RECORDED BEFORE ANY BRANCH, so every accepted turn has
+	// its turn_opened record: a turn whose terminal beat StartTurn's response
+	// back, or one waiting behind an adopted turn, was handed over all the same,
+	// and the record (with its opening page's size) is how that is read back.
+	w.log.Info("daemon.sessionwatcher.turn_opened", "the queue opened a turn", dlog.Context{
+		"turn_id":  prompt.GetId().GetValue(),
+		"agent_id": prompt.GetAgent().GetValue(),
+		"entries":  len(page.GetEntries()),
+	})
 	w.adoptMainAgentLocked(prompt.GetAgent(), "start_turn")
 	if turnID := prompt.GetId().GetValue(); turnID != "" {
 		turn := ids.TurnID(turnID)
@@ -933,11 +942,6 @@ func (w *watcher) OnTurnOpened(ws ids.WorkspaceID, prompt *conversationv1.AgentP
 			"agent_id": prompt.GetAgent().GetValue(),
 		})
 	}
-	w.log.Info("daemon.sessionwatcher.turn_opened", "the queue opened a turn", dlog.Context{
-		"turn_id":  prompt.GetId().GetValue(),
-		"agent_id": prompt.GetAgent().GetValue(),
-		"entries":  len(page.GetEntries()),
-	})
 	if page != nil {
 		w.routeOpeningPageLocked(w.main, page, pageTurnAccepted)
 	}

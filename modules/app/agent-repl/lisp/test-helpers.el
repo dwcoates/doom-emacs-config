@@ -1114,6 +1114,40 @@ quit survived the section."
            (when ,err (signal (car ,err) (cdr ,err)))
            ,value)))))
 
+;;;; ---- Roster tab bars ----
+
+(defun agent-repl-test--tab-bar-of (sections hidden merged &optional merged-groups)
+  "Return a decoded `RosterTabBar' for a fixture roster's SECTIONS, HIDDEN and MERGED.
+MERGED-GROUPS are recently-merged groups walked after MERGED; a group on its
+`repository_collapsed' arm has its tabs withheld, as the daemon withholds
+them.
+The tabs are the open rows in the order the fixture lists them -- each
+section's rows depth-first, then the hidden rows, then the merged rows --
+which is the order a fixture states its registry in.  A collapsed section's
+tabs and every hidden row's are withheld, as the daemon withholds them.
+Fixtures that test an order of their own pass an explicit tab bar instead."
+  (let (tabs)
+    (cl-labels ((walk (rows arm)
+                  (dolist (row rows)
+                    (unless (eq (plist-get (plist-get row :closed) :closed) t)
+                      (push (list :workspace (plist-get (plist-get row :workspace) :workspace)
+                                  :visibility (list :arm arm :value nil))
+                            tabs))
+                    (walk (plist-get row :children) arm))))
+      (dolist (section sections)
+        (walk (plist-get (plist-get section :rows) :rows)
+              (if (eq (plist-get (plist-get section :fold) :arm) :collapsed)
+                  :withheld-collapsed
+                :drawn)))
+      (walk hidden :withheld-hidden)
+      (walk merged :drawn)
+      (dolist (group merged-groups)
+        (walk (plist-get (plist-get group :rows) :rows)
+              (if (eq (plist-get (plist-get group :drawn) :arm) :repository-collapsed)
+                  :withheld-collapsed
+                :drawn))))
+    (list :tabs (nreverse tabs))))
+
 (provide 'test-helpers)
 
 ;;; test-helpers.el ends here

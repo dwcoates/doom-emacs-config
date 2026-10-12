@@ -383,7 +383,10 @@ the sink interfaces above plus daemon-fact setters:
   (accounting, unmodeled, detached unmodeled, session faults, degraded
   windows), context chip from `context_usage`, account from the config
   root's `.claude.json`.
-- sidebar: both groupings, priority order, attention marker (set on
+- sidebar: every grouping sorted by the registry order (a new workspace lands
+  second-to-last, within its priority when it has one; MoveWorkspace moves any
+  workspace onto another's place), the tab bar as its own list in that order,
+  attention marker (set on
   notification, cleared on SelectWorkspace), recently merged, `current`,
   status arm from session/merge/link facts; `SetMerge(ws, MergeFacts)`,
   `SetSelected(ws)`, `SetRegistry(...)` on any WSM change.

@@ -48,6 +48,10 @@ var errFake = errors.New("workspace test: arranged failure")
 type fakeDB struct {
 	wsm.DB
 
+	// moves is every MovePlace call, in order; moveErr fails it.
+	moves   [][2]ids.WorkspaceID
+	moveErr error
+
 	// rolledBack is each workspace's rolled-back turns; rolledBackErr fails
 	// the read.
 	rolledBack    map[ids.WorkspaceID][]ids.TurnID
@@ -304,7 +308,7 @@ func (d *fakeDB) RegisterWorkspace(_ context.Context, dir string, facts wsm.Regi
 	ws := wsm.Workspace{
 		ID: ids.WorkspaceID("ws-" + filepath.Base(dir)), Dir: dir, Repo: "repo-1",
 		Name: facts.Name, Branch: facts.Branch, ParentBranch: facts.ParentBranch,
-		Parent: facts.Parent,
+		Parent: facts.Parent, Priority: facts.Priority,
 	}
 	d.with(ws)
 	d.createdNew = true
@@ -356,6 +360,14 @@ func (d *fakeDB) ListRepositories(context.Context) ([]wsm.Repository, error) {
 func (d *fakeDB) Tasks(context.Context) ([]wsm.Task, error) { return d.tasks, nil }
 
 func (d *fakeDB) Current(context.Context) (*ids.WorkspaceID, error) { return d.current, nil }
+
+func (d *fakeDB) MovePlace(_ context.Context, ws, target ids.WorkspaceID) error {
+	if d.moveErr != nil {
+		return d.moveErr
+	}
+	d.moves = append(d.moves, [2]ids.WorkspaceID{ws, target})
+	return nil
+}
 
 func (d *fakeDB) SetClosed(_ context.Context, id ids.WorkspaceID, closed bool) error {
 	if d.setClosedErr != nil {
@@ -621,6 +633,12 @@ type fakeGit struct {
 	defaultErr      error
 
 	resolveErr error
+	// offPrimary are the base refs IsAncestor answers NOT on the primary
+	// branch; every other ref is on it. ancestorErr fails the check itself.
+	offPrimary  map[string]bool
+	ancestorErr error
+	// ancestorChecks records each IsAncestor call as "ancestor..descendant".
+	ancestorChecks []string
 	// existingBranches are the branches this repository already holds, which
 	// is what the naming call's collision probe asks for.
 	existingBranches map[string]bool
@@ -654,6 +672,14 @@ func (g *fakeGit) ResolveRef(_ context.Context, _, ref string) (string, error) {
 		return "", g.resolveErr
 	}
 	return "sha-of-" + ref, nil
+}
+
+func (g *fakeGit) IsAncestor(_ context.Context, _, ancestor, descendant string) (bool, error) {
+	g.ancestorChecks = append(g.ancestorChecks, ancestor+".."+descendant)
+	if g.ancestorErr != nil {
+		return false, g.ancestorErr
+	}
+	return !g.offPrimary[ancestor], nil
 }
 
 func (g *fakeGit) BranchExists(_ context.Context, _, branch string) (bool, error) {

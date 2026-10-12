@@ -440,6 +440,18 @@ func validateCreateWorkspaceRequest(req *agentreplv1.CreateWorkspaceRequest) *co
 		if err := validateWorkspaceRef("parent.workspace", parent.GetWorkspace()); err != nil {
 			return err
 		}
+		// A child always starts from its parent's tip.
+		if standard := req.GetStandard(); standard != nil && standard.BaseRef != nil {
+			return invalid("standard.base_ref", "a child is cut from its parent's tip, so it takes no base ref")
+		}
+	}
+	if source := req.GetForkSource(); source != nil {
+		if req.GetParent() != nil {
+			return invalid("fork_source", "a fork into the primary branch has no parent; a child fork is parent.fork")
+		}
+		if err := validateWorkspaceRef("fork_source.workspace", source.GetWorkspace()); err != nil {
+			return err
+		}
 	}
 	if req.Priority != nil {
 		if err := validateWorkspacePriority("priority", req.GetPriority()); err != nil {
@@ -596,6 +608,21 @@ func validateSetWorkspaceParentRequest(req *agentreplv1.SetWorkspaceParentReques
 	default:
 		return invalid("parent", "a parent arm is required")
 	}
+}
+
+// validateMoveWorkspaceRequest is MoveWorkspaceRequest's base function: two
+// refs naming two different workspaces.
+func validateMoveWorkspaceRequest(req *agentreplv1.MoveWorkspaceRequest) *connect.Error {
+	if err := validateWorkspaceRef("workspace", req.GetWorkspace()); err != nil {
+		return err
+	}
+	if err := validateWorkspaceRef("target", req.GetTarget()); err != nil {
+		return err
+	}
+	if req.GetWorkspace().GetId() == req.GetTarget().GetId() {
+		return invalid("target", "a workspace cannot move onto itself")
+	}
+	return nil
 }
 
 // validateFoldRepositoryRequest is FoldRepositoryRequest's base function.

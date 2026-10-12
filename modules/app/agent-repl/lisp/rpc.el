@@ -93,6 +93,8 @@
 (declare-function agent-repl-wire-encode-set-workspace-hidden-request "wire-verbs" (request))
 (declare-function agent-repl-wire-decode-set-workspace-hidden-response "wire-verbs" (json))
 (declare-function agent-repl-wire-decode-set-workspace-priority-response "wire-verbs" (alist))
+(declare-function agent-repl-wire-encode-move-workspace-request "wire-verbs" (request))
+(declare-function agent-repl-wire-decode-move-workspace-response "wire-verbs" (alist))
 (declare-function agent-repl-wire-encode-submit-prompt-request "wire-verbs" (request))
 (declare-function agent-repl-wire-decode-submit-prompt-response "wire-verbs" (alist))
 (declare-function agent-repl-wire-encode-select-feed-row-request "wire-verbs" (request))
@@ -384,6 +386,12 @@ Clearing is the ABSENCE of the priority field, never a sentinel value.")
   "Move a workspace into the sidebar's hidden section, or back out of it.
 A hidden workspace keeps its session and its tab; the roster push that
 follows takes its tab off the bar's drawing, numbering and navigation.")
+
+(agent-repl-rpc--defverb agent-repl-rpc-move-workspace
+  "MoveWorkspace"
+  agent-repl-wire-encode-move-workspace-request
+  agent-repl-wire-decode-move-workspace-response
+  "Move one workspace onto another's place in the registry order.")
 
 (agent-repl-rpc--defverb agent-repl-rpc-submit-prompt
   "SubmitPrompt"

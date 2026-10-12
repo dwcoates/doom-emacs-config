@@ -132,6 +132,18 @@ func (s *server) CreateWorkspace(
 			spec.ForkFrom = &id
 		}
 	}
+	if source := req.Msg.GetForkSource(); source != nil {
+		// The source must be a registered workspace this daemon serves; a
+		// refusal names it on the create's own arm.
+		subject, refused, done := s.resolveNaming(ctx, rpc, resp, source.GetWorkspace(),
+			map[string]string{workspace.ArmUnknownWorkspace: "unknown_fork_source"})
+		if done {
+			return answer(resp, refused)
+		}
+		id := subject.Record.ID
+		spec.ForkFrom = &id
+		spec.ForkIntoPrimary = true
+	}
 	if req.Msg.Model != nil {
 		spec.Model = req.Msg.GetModel()
 	}
@@ -878,12 +890,70 @@ func (s *server) SetWorkspaceParent(
 	return connect.NewResponse(resp), nil
 }
 
+// MoveWorkspace moves one workspace onto another's place in the registry
+// order. Both refs resolve as any workspace ref does, and a refusal of either
+// names the ref it refused; the new order arrives on the roster stream.
+func (s *server) MoveWorkspace(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.MoveWorkspaceRequest],
+) (*connect.Response[agentreplv1.MoveWorkspaceResponse], error) {
+	const rpc = "MoveWorkspace"
+	if err := validateMoveWorkspaceRequest(req.Msg); err != nil {
+		return nil, err
+	}
+	resp := &agentreplv1.MoveWorkspaceResponse{}
+	var subjects []resolved
+	for _, ref := range []*workspacev1.WorkspaceRef{req.Msg.GetWorkspace(), req.Msg.GetTarget()} {
+		subject, refused, done := s.resolveNaming(ctx, rpc, resp, ref, nil)
+		if done {
+			return answer(resp, refused)
+		}
+		subjects = append(subjects, subject)
+	}
+	if err := s.deps.Verbs.Move(ctx, subjects[0].Record.ID, subjects[1].Record.ID); err != nil {
+		return answer(resp, s.answerRefusal(subjects[0].Log, rpc, resp, err, nil))
+	}
+	resp.Result = &agentreplv1.MoveWorkspaceResponse_Success{
+		Success: &agentreplv1.MoveWorkspaceSuccess{},
+	}
+	return connect.NewResponse(resp), nil
+}
+
 // parentArms renames the parent ref's resolution refusals onto
 // SetWorkspaceParentError's parent arms. A resolution answers exactly these
 // two, so any other arm is a defect, failed at ERROR rather than renamed.
 var parentArms = map[string]string{
 	workspace.ArmUnknownWorkspace:     workspace.ArmUnknownParent,
 	workspace.ArmWorkspaceRefMismatch: "parent_ref_mismatch",
+}
+
+// resolveNaming resolves one of a request's workspace refs, and on a refusal
+// encodes it onto resp with the refused ref on the arm's `workspace` field,
+// the arm renamed through rename when the request spells it differently.
+// `done` reports that the caller must answer at once with the returned error.
+func (s *server) resolveNaming(
+	ctx context.Context,
+	rpc string,
+	resp proto.Message,
+	ref *workspacev1.WorkspaceRef,
+	rename map[string]string,
+) (resolved, *connect.Error, bool) {
+	subject, r, err := s.resolveRef(ctx, rpc, ref)
+	if err != nil {
+		return resolved{}, failResolution(s.log, rpc, err), true
+	}
+	if r == nil {
+		return subject, nil, false
+	}
+	named := *r
+	if to, renamed := rename[named.Arm]; renamed {
+		named.Arm = to
+	}
+	named.Fields = map[string]any{"workspace": ref}
+	for field, value := range r.Fields {
+		named.Fields[field] = value
+	}
+	return resolved{}, s.refuse(s.log, rpc, resp, named), true
 }
 
 // FoldRepository expands or collapses one repository's roster section. The

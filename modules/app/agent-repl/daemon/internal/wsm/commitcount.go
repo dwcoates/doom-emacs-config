@@ -3,7 +3,6 @@ package wsm
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 
 	"claude-repld/internal/dlog"
@@ -39,11 +38,7 @@ func (s *store) SetLiveCommitCount(ctx context.Context, id WorkspaceID, count ui
 	applied := false
 	err := s.write(ctx, "daemon.wsm.set_live_commit_count", fields, func(ctx context.Context, tx *sql.Tx) error {
 		var merged sql.NullInt64
-		err := tx.QueryRowContext(ctx, `SELECT merged_at FROM workspaces WHERE id = ?`, id).Scan(&merged)
-		if errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("wsm: workspace %s: %w", id, ErrNotFound)
-		}
-		if err != nil {
+		if err := scanWorkspaceRow(ctx, tx, id, "merged_at", &merged); err != nil {
 			return err
 		}
 		if merged.Valid {
