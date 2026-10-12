@@ -1,0 +1,181 @@
+package drain
+
+import (
+	"context"
+	"errors"
+
+	"agent-repld/internal/bringup"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
+)
+
+// opWithheld is the operation a withheld workspace's stand-down records under.
+const opWithheld = "daemon.drain.withheld"
+
+// A WORKSPACE THE USER WITHHELD RUNS NOTHING (owner principle 1,
+// docs/protobuf-design/open-tabs.md). Hiding a workspace (SetWorkspaceHidden)
+// or collapsing its repository's section stands its session down exactly as
+// the idle sweep does — the same gate, the same hibernate directive, graceful
+// KillSession, hibernated terminal and cleared pids (hibernate) — with its own
+// reason on the records and the terminal.
+//
+// IT NEVER INTERRUPTS A TURN. A workspace the gate holds back (a turn in
+// flight, live detached work, a start or a revival under way, the shim's own
+// turn_in_flight refusal) stays PENDING, and is asked again on the daemon's
+// own edges, never by a poll or a timer: the free edge a turn's end raises
+// (the session watcher's OnFree) and a session coming up (SessionUp). Every
+// attempt first re-reads the workspace's visibility, so one the user showed
+// again in the meantime is dropped, not stood down.
+
+// withheldState is one pending stand-down's bookkeeping, under c.mu.
+type withheldState struct {
+	// running is an attempt in flight on the detached lifetime.
+	running bool
+	// again is an edge that arrived while an attempt ran: one more attempt
+	// follows it, so no edge is lost.
+	again bool
+}
+
+// withheldOutcome is what one attempt came to.
+type withheldOutcome int
+
+const (
+	// withheldSettled: stood down, or nothing left to stand down (shown
+	// again, no session, a failure already recorded). Forgotten.
+	withheldSettled withheldOutcome = iota
+	// withheldPending: held back; asked again on the next edge.
+	withheldPending
+)
+
+// StandDownWithheld asks for the stand-down of a workspace the user hid or
+// collapsed. It returns at once; the attempt runs on the detached lifetime.
+func (c *controller) StandDownWithheld(ws ids.WorkspaceID) {
+	c.mu.Lock()
+	if c.withheld == nil {
+		c.withheld = map[ids.WorkspaceID]*withheldState{}
+	}
+	st := c.withheld[ws]
+	if st == nil {
+		st = &withheldState{}
+		c.withheld[ws] = st
+	}
+	c.mu.Unlock()
+	c.log.Debug(opWithheld, "a withheld workspace's stand-down was asked for", dlog.Context{"workspace": string(ws)})
+	c.kick(ws, st)
+}
+
+// RetryWithheld is a daemon edge for ws (the free edge a turn's end raises, or
+// a session coming up): a stand-down pending on ws is asked again. A
+// workspace with none pending is no change.
+func (c *controller) RetryWithheld(ws ids.WorkspaceID) {
+	c.mu.Lock()
+	st := c.withheld[ws]
+	c.mu.Unlock()
+	if st == nil {
+		return
+	}
+	c.log.Debug(opWithheld, "an edge arrived for a pending stand-down; asking again", dlog.Context{"workspace": string(ws)})
+	c.kick(ws, st)
+}
+
+// kick runs an attempt for ws unless one is running, in which case that one
+// runs once more when it ends.
+func (c *controller) kick(ws ids.WorkspaceID, st *withheldState) {
+	c.mu.Lock()
+	if st.running {
+		st.again = true
+		c.mu.Unlock()
+		return
+	}
+	st.running = true
+	c.mu.Unlock()
+	c.deps.Detach(func(ctx context.Context) {
+		for {
+			outcome := c.standDownWithheld(ctx, ws)
+			c.mu.Lock()
+			if st.again && ctx.Err() == nil {
+				st.again = false
+				c.mu.Unlock()
+				continue
+			}
+			st.running, st.again = false, false
+			if outcome == withheldSettled && c.withheld[ws] == st {
+				delete(c.withheld, ws)
+			}
+			c.mu.Unlock()
+			return
+		}
+	})
+}
+
+// withheldReason is a withheld workspace's stand-down reason.
+var withheldReason = standDownReason{
+	op:     opWithheld,
+	detail: "hidden or collapsed by the user; the transcript was left as it stood",
+	done:   "stood a withheld workspace's session down",
+}
+
+// standDownWithheld is one attempt.
+func (c *controller) standDownWithheld(ctx context.Context, ws ids.WorkspaceID) withheldOutcome {
+	fields := dlog.Context{"workspace": string(ws)}
+	if err := ctx.Err(); err != nil {
+		c.log.Info(opWithheld, "the daemon is leaving; a withheld workspace's stand-down is not taken", withCause(fields, err))
+		return withheldPending
+	}
+	record, err := c.deps.DB.Workspace(ctx, ws)
+	if err != nil {
+		if errors.Is(err, wsm.ErrNotFound) {
+			c.log.Info(opWithheld, "a withheld workspace is no longer registered; nothing is stood down", fields)
+			return withheldSettled
+		}
+		c.log.Error(opWithheld, "could not read a withheld workspace's record; its stand-down is dropped", withCause(fields, err))
+		return withheldSettled
+	}
+	log := c.workspaceLog(record)
+	// SHOWN AGAIN MEANWHILE IS NOT STOOD DOWN: the visibility is read afresh
+	// on every attempt.
+	visible, err := bringup.Visible(ctx, c.deps.DB, ws)
+	if err != nil {
+		log.Error(opWithheld, "could not read whether the workspace is still withheld; its stand-down is dropped", withCause(fields, err))
+		return withheldSettled
+	}
+	if visible {
+		log.Info(opWithheld, "the workspace was shown again before its session was stood down; it keeps running", fields)
+		return withheldSettled
+	}
+	session, found, err := c.deps.DB.Session(ctx, ws)
+	if err != nil {
+		log.Error(opWithheld, "could not read a withheld workspace's session; its stand-down is dropped", withCause(fields, err))
+		return withheldSettled
+	}
+	if !found || session.Terminal != nil {
+		log.Debug(opWithheld, "a withheld workspace has no live session; nothing to stand down", fields)
+		return withheldSettled
+	}
+	switch gate := c.gate(ws); gate {
+	case gateOpen:
+	case gateNotServing:
+		log.Debug(opWithheld, "a withheld workspace has no shim to address; nothing to stand down", fields)
+		return withheldSettled
+	case gateBusy, gateStarting, gateReviving:
+		log.Info(opWithheld, "a withheld workspace's session is busy; its stand-down waits for the turn to end",
+			merge(fields, dlog.Context{"gate": gate.String()}))
+		return withheldPending
+	default:
+		log.Error(opWithheld, "the stand-down gate answered a value this stand-down cannot read; it is dropped",
+			merge(fields, dlog.Context{"gate": gate.String(), "invariant_violation": "every gate value is handled"}))
+		return withheldSettled
+	}
+	switch c.hibernate(ctx, log, ws, fields, withheldReason) {
+	case hibernateDone:
+		return withheldSettled
+	case hibernateDeferred:
+		log.Info(opWithheld, "a withheld workspace's stand-down was deferred; it is taken on the next turn end", fields)
+		return withheldPending
+	default:
+		// hibernate recorded the failure at its own level; the idle sweep's
+		// backoff is not this path's, and the next hide asks afresh.
+		return withheldSettled
+	}
+}
