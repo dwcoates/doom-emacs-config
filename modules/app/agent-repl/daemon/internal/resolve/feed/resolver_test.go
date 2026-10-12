@@ -122,10 +122,6 @@ type harness struct {
 	// that does not name one, so two ordinary cuts in one test are two
 	// entries rather than the same entry twice.
 	cutSeq int
-	// ported is the fork's ported parent conversation the resolver reads at
-	// the opening history page; portedErr fails that read.
-	ported    []PortedPrompt
-	portedErr error
 	// closes are the durable turn closes the resolver reads at a history page;
 	// closesErr fails that read.
 	closes    map[ids.TurnID]wsm.RecordedClose
@@ -139,11 +135,6 @@ type harness struct {
 	// replay; mirrorsErr fails that read.
 	mirrors    map[ids.TurnID]*wsm.MirrorAddress
 	mirrorsErr error
-	// owned is the set of turns the workspace recorded as its own; nil
-	// answers every turn owned (a test that is not about a fork's lineage).
-	// ownedErr fails the read.
-	owned    map[ids.TurnID]bool
-	ownedErr error
 	// faults is the fake fault record every raise in this resolver lands in.
 	faults *fakeFaults
 	// clock is the fake AfterFunc: stall windows are armed into it and fired
@@ -225,9 +216,6 @@ func newDurableHarness(t *testing.T, rolledBack RolledBackTurnStore, signedIn Si
 		ResolveImage: func(block *conversationv1.ImageBlock) (string, string, error) {
 			return "https://host/img", "screenshot.png", nil
 		},
-		PortedPrompts: func(context.Context, ids.WorkspaceID) ([]PortedPrompt, error) {
-			return h.ported, h.portedErr
-		},
 		TurnCloses: func(_ context.Context, _ ids.WorkspaceID, turns []ids.TurnID) (map[ids.TurnID]wsm.RecordedClose, error) {
 			out := map[ids.TurnID]wsm.RecordedClose{}
 			for _, turn := range turns {
@@ -258,16 +246,6 @@ func newDurableHarness(t *testing.T, rolledBack RolledBackTurnStore, signedIn Si
 				if m, ok := h.mirrors[turn]; ok {
 					out[turn] = m
 				}
-			}
-			return out, nil
-		},
-		OwnedTurns: func(_ context.Context, _ ids.WorkspaceID, turns []ids.TurnID) (map[ids.TurnID]bool, error) {
-			if h.ownedErr != nil {
-				return nil, h.ownedErr
-			}
-			out := map[ids.TurnID]bool{}
-			for _, turn := range turns {
-				out[turn] = h.owned == nil || h.owned[turn]
 			}
 			return out, nil
 		},
@@ -1197,7 +1175,6 @@ func TestRowPlaneNames(t *testing.T) {
 		plane rowPlane
 		want  string
 	}{
-		{planePorted, "ported"},
 		{planeInherited, "inherited"},
 		{planeHistory, "history"},
 		{planeLive, "live"},

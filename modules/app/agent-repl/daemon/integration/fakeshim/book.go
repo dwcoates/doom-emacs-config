@@ -190,6 +190,30 @@ func (b *book) page(agent string, after *conversationv1.HistoryPointer, size int
 	return page, true
 }
 
+// pageThrough answers one ReadHistory page of AGENT's book read THROUGH an
+// instant: the newest entries placed at or before THROUGHMS, as the store's
+// bounded read serves a fork's inherited past. An entry the serving side
+// placed nowhere counts as placed at the conversation's start.
+func (b *book) pageThrough(agent string, throughMs int64, size int) *conversationv1.HistoryPage {
+	b.mu.Lock()
+	entries := b.entries[bookAgent(agent)]
+	end := len(entries)
+	for end > 0 && entries[end-1].GetRecordedPlace().GetAtMs() > throughMs {
+		end--
+	}
+	var after *conversationv1.HistoryPointer
+	if end < len(entries) {
+		after = entries[end].GetAt()
+	}
+	b.mu.Unlock()
+	if after == nil {
+		page, _ := b.page(agent, nil, size)
+		return page
+	}
+	page, _ := b.page(agent, after, size)
+	return page
+}
+
 // since answers AGENT's entries written after the one KNOWN names, newest
 // first: a known_through catch-up. A pointer the book never served answers
 // nothing.

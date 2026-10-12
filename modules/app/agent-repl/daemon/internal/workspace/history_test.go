@@ -108,8 +108,9 @@ func TestReadHistoryAnswerWithNoArmIsAnError(t *testing.T) {
 }
 
 // ReadHistory answers the scripted page and counts the read.
-func (c *fakeClient) ReadHistory(context.Context, *shimv1.ReadHistoryRequest) (*shimv1.ReadHistoryResponse, error) {
+func (c *fakeClient) ReadHistory(_ context.Context, req *shimv1.ReadHistoryRequest) (*shimv1.ReadHistoryResponse, error) {
 	c.historyReads++
+	c.historyRequests = append(c.historyRequests, req)
 	if c.history != nil {
 		return c.history, nil
 	}

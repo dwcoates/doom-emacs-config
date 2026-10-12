@@ -390,15 +390,7 @@ func (r *resolver) deliverable(s *wsState, f *feedState, action string) ([]strin
 // which is a reconnect's replayed post-cut conversation, kept so the bound
 // never blanks the feed. The past a fork inherited sorts before every cut the
 // fork makes by its class, so the fork's cut hides it.
-//
-// THE ONE EXCEPTION: a fork's PORTED conversation is never hidden by a cut in
-// its INHERITED past. The ported prompts are drawn once, above the store's copy
-// of the parent's conversation, and a cut inside that copy is a statement
-// about the copy.
 func boundHides(row, bound rowRank) bool {
-	if row.plane == planePorted && bound.plane == planeInherited {
-		return false
-	}
 	return row.before(bound)
 }
 

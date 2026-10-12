@@ -50,6 +50,10 @@ func (f fixedHistory) ReadHistory(context.Context, ids.WorkspaceID, *conversatio
 	return f.page, nil
 }
 
+func (f fixedHistory) ReadInherited(context.Context, ids.WorkspaceID, *conversationv1.AgentId, *conversationv1.HistoryPointer, int64) (*conversationv1.HistoryPage, error) {
+	return f.page, nil
+}
+
 func TestHistoryForwarderReadsThroughTheBoundFleet(t *testing.T) {
 	// Arrange.
 	want := &conversationv1.HistoryPage{}
@@ -75,6 +79,75 @@ func TestHistoryForwarderBeforeTheFleetIsAnError(t *testing.T) {
 	// Assert.
 	if err == nil {
 		t.Fatal("ReadHistory before the fleet was bound answered no error")
+	}
+}
+
+func TestHistoryForwarderReadsInheritedThroughTheBoundFleet(t *testing.T) {
+	// Arrange.
+	want := &conversationv1.HistoryPage{}
+	var f historyForwarder
+	f.bind(fixedHistory{page: want})
+
+	// Act.
+	got, err := f.ReadInherited(context.Background(), "w1", &conversationv1.AgentId{Value: "book"}, nil, 1)
+
+	// Assert.
+	if err != nil || got != want {
+		t.Fatalf("ReadInherited = %v, %v; want the fleet's page", got, err)
+	}
+}
+
+func TestHistoryForwarderReadsNoInheritedPageBeforeTheFleet(t *testing.T) {
+	// Arrange.
+	var f historyForwarder
+
+	// Act.
+	_, err := f.ReadInherited(context.Background(), "w1", &conversationv1.AgentId{Value: "book"}, nil, 1)
+
+	// Assert.
+	if err == nil {
+		t.Fatal("ReadInherited before the fleet was bound answered no error")
+	}
+}
+
+// exclusiveQueue records the holds the delivery forwarder carried.
+type exclusiveQueue struct {
+	promptqueue.Queue
+	held []ids.WorkspaceID
+}
+
+func (q *exclusiveQueue) Exclusively(ctx context.Context, ws ids.WorkspaceID, _ string, perform func(context.Context) error) error {
+	q.held = append(q.held, ws)
+	return perform(ctx)
+}
+
+func TestDeliveryForwarderHoldsThroughTheBoundQueue(t *testing.T) {
+	// Arrange.
+	queue := &exclusiveQueue{}
+	var d deliveryForwarder
+	d.bind(queue)
+	ran := false
+
+	// Act.
+	err := d.Exclusively(context.Background(), "w1", "fork", func(context.Context) error { ran = true; return nil })
+
+	// Assert.
+	if err != nil || !ran || len(queue.held) != 1 || queue.held[0] != "w1" {
+		t.Fatalf("Exclusively = %v, ran %v, held %v; want the work run under the queue's hold", err, ran, queue.held)
+	}
+}
+
+func TestDeliveryForwarderBeforeTheQueueRunsNothing(t *testing.T) {
+	// Arrange.
+	var d deliveryForwarder
+	ran := false
+
+	// Act.
+	err := d.Exclusively(context.Background(), "w1", "fork", func(context.Context) error { ran = true; return nil })
+
+	// Assert.
+	if err == nil || ran {
+		t.Fatalf("Exclusively = %v, ran %v; want an error and nothing run", err, ran)
 	}
 }
 

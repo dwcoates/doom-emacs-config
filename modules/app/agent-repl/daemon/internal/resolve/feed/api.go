@@ -138,6 +138,10 @@ type Resolver interface {
 	// book that does not exist yet. The first live entry makes the next open
 	// read the newest page as usual (book.go).
 	NoteFreshBook(ws ids.WorkspaceID)
+	// NoteLineage tells the resolver where a fork's inherited past is read
+	// from, nearest generation first; nil for a workspace that is no fork.
+	// The fleet states it at every bring-up (lineage.go).
+	NoteLineage(ws ids.WorkspaceID, segments []LineageSegment)
 
 	// SetOutputAddress installs the address a lease holder wants the turns
 	// IT starts drawn at; nil withdraws it. It redirects no other turn and
@@ -346,21 +350,6 @@ type Resolver interface {
 	MintSubFeedHead(ws ids.WorkspaceID, head *frontendv1.FeedId, headFeed feedid.Feed, sub feedid.Feed, label string)
 }
 
-// PortedPrompt is one prompt a FORK carried over from its parent: a question
-// the parent was asked, under the child's own turn identity.
-//
-// It carries the text rather than composed content because that is what the
-// daemon's own record holds; the row is drawn through the same functions a
-// delivered prompt is drawn through.
-type PortedPrompt struct {
-	// Turn is the turn identity the row carries in the CHILD.
-	Turn string
-	// Text is the prompt's full text, as the parent recorded it.
-	Text string
-	// Origin is who the row is drawn as being from.
-	Origin conversationv1.PromptOrigin
-}
-
 // ImageResolver turns a record's image reference — a host path or a URL — into
 // a `src` a webview can load, plus the alt text. That resolution is the
 // daemon's and never the client's, and it is injected because how a host path
@@ -400,14 +389,6 @@ type Deps struct {
 	// ResolveImage turns an image reference into a drawable src. Required for
 	// prompt rows carrying images.
 	ResolveImage ImageResolver
-	// PortedPrompts answers the conversation a FORK carried over from its
-	// parent, oldest first. It is read at the opening history page and drawn
-	// ABOVE everything the workspace has of its own, which is what makes a
-	// forked feed the parent's conversation followed by the fork's.
-	//
-	// nil means no workspace ever carries a ported conversation, which is
-	// what a test that is not about forking wants.
-	PortedPrompts func(context.Context, ids.WorkspaceID) ([]PortedPrompt, error)
 	// TurnCloses answers the durable close of each named turn that has one
 	// (wsm.DB.TurnCloses). A replay reads it for the turns its page opens, and
 	// ends a turn whose page carries no terminal from its recorded close.
@@ -431,15 +412,6 @@ type Deps struct {
 	// nil adds no mirror, which is what a test that is not about mirrored
 	// turns wants.
 	TurnMirrors func(context.Context, ids.WorkspaceID, []ids.TurnID) (map[ids.TurnID]*wsm.MirrorAddress, error)
-	// OwnedTurns answers which of the named turns the workspace recorded as
-	// its own (wsm.DB.RecordedTurns). On a FORK it is what tells the
-	// conversation the fork inherited from the turns it ran itself: a
-	// main-agent entry of any other turn, or of none, is the inherited past
-	// and is drawn in the inherited plane (lineage.go).
-	//
-	// nil treats every entry as the workspace's own, which is what a test
-	// that is not about forking wants.
-	OwnedTurns func(context.Context, ids.WorkspaceID, []ids.TurnID) (map[ids.TurnID]bool, error)
 	// DurableRows records the rows UpsertDurable publishes and answers them
 	// again to a new daemon (wsm.DB's durable feed rows).
 	//

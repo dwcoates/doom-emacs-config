@@ -28,6 +28,8 @@ const (
 	RPCReadHistory              = "ReadHistory"
 	RPCGatherTitleDigest        = "GatherTitleDigest"
 	RPCReadTranscripts          = "ReadTranscripts"
+	RPCGetForkPoint             = "GetForkPoint"
+	RPCForkSession              = "ForkSession"
 )
 
 // newResponse mints the empty response message for one verb, so `answer`
@@ -64,6 +66,10 @@ func newResponse(rpc string) proto.Message {
 		return &shimv1.GatherTitleDigestResponse{}
 	case RPCReadTranscripts:
 		return &shimv1.ReadTranscriptsResponse{}
+	case RPCGetForkPoint:
+		return &shimv1.GetForkPointResponse{}
+	case RPCForkSession:
+		return &shimv1.ForkSessionResponse{}
 	default:
 		return nil
 	}

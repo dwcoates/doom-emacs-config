@@ -3,267 +3,161 @@
 package integration
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
-
-	"connectrpc.com/connect"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	shimv1 "agentrepl/proto/shim/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
+
+	"connectrpc.com/connect"
 
 	"agent-repld/integration/harness"
 )
 
-// A FORK PORTS THE WHOLE CONVERSATION. The child's feed is the parent's
-// conversation up to the fork point followed by the child's own turns, in one
-// order — the parent's QUESTION included, which used to reach the child
-// nowhere at all: the ported artifact was the vendor transcript, whose
-// assistant lines reach a feed through the store, while the prompt bubbles
-// come from the daemon's own per-workspace conversation rows.
+// A FORK READS ITS INHERITED PAST FROM ITS PARENT'S BOOK. The child's own book
+// holds only what the fork itself said; its feed walks that book to its start
+// and then the parent's, bounded to the fork point and without the parent's
+// turns that were open when the fork was taken. The fake store keeps one book
+// per fake shim, so each case files the parent's book on the CHILD's shim,
+// which is where a real store serves it from too.
 
-// TestForkedWorkspaceFeedCarriesTheParentsQuestionAndAnswerBeforeItsOwn is the
-// defect (a headless run's section 2, A.6) as an assertion.
-func TestForkedWorkspaceFeedCarriesTheParentsQuestionAndAnswerBeforeItsOwn(t *testing.T) {
-	t.Parallel()
-	// Arrange: a parent that was asked something and answered it, with the
-	// vendor transcript on disk that a real session would have left behind.
-	f := newOpened(t, harness.Opts{})
-	if req := f.shim.ExpectStartSession(); req.GetFresh() == nil {
-		t.Fatalf("the parent's StartSession = %v, want fresh", req)
-	}
-	vendorID := f.shim.Info().VendorSessionID
-	if vendorID == "" {
-		t.Fatal("the fake shim reports no vendor session id after StartSession(fresh)")
-	}
-	f.submit(forkParentQuestion, "fork-parent-turn", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
-
-	parentProject := createProjectDir(f.d.DefaultConfigDir, f.ws.GetDir())
-	if err := os.MkdirAll(parentProject, 0o755); err != nil {
-		t.Fatalf("mkdir the parent's project dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(parentProject, vendorID+".jsonl"),
-		[]byte(`{"type":"summary"}`+"\n"), 0o644); err != nil {
-		t.Fatalf("seed the parent's transcript: %v", err)
-	}
-
-	// Act: fork it, then let the ported conversation's ANSWER arrive on the
-	// child's own watch — the route the ported transcript's assistant lines
-	// take — and only then ask the fork its own first question.
-	child := forkOf(t, f)
-	childShim := f.d.Shim(child)
-	if resume := childShim.ExpectStartSession().GetResume(); resume == nil {
-		t.Fatal("the forked child's StartSession carries no resume")
-	}
-	kid := &fixture{d: f.d, repo: f.repo, ws: child, shim: childShim, t: t}
-	childShim.PushAgentFrame(mainAgent, feedResponseFrames("fork-parent-answer", forkParentAnswer)[0])
-	childShim.PushAgentFrame(mainAgent, feedResponseFrames("fork-parent-answer", forkParentAnswer)[1])
-	kid.submit(forkOwnQuestion, "fork-child-turn", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
-
-	// Assert: all three, in one order, with the parent's turn whole and above
-	// the fork's own.
-	page, _ := kid.openFeedOnceCarrying("the parent's turn and the fork's own",
-		func(p *frontendv1.FeedPage) bool {
-			texts := forkFeedTexts(p)
-			return forkIndexOf(texts, forkParentQuestion) >= 0 &&
-				forkIndexOf(texts, forkParentAnswer) >= 0 &&
-				forkIndexOf(texts, forkOwnQuestion) >= 0
-		})
-	texts := forkFeedTexts(page)
-	question, answer, own := forkIndexOf(texts, forkParentQuestion), forkIndexOf(texts, forkParentAnswer), forkIndexOf(texts, forkOwnQuestion)
-	if !(question < answer && answer < own) {
-		t.Fatalf("the fork's feed reads %v: the parent's question is at %d, its answer at %d and the fork's own question at %d, "+
-			"want the parent's whole turn above the fork's own", texts, question, answer, own)
-	}
-}
-
-// TestForkedWorkspaceFeedDrawsTheParentsQuestionUnderItsOwnTurnId covers the
-// identity half: the ported row carries the CHILD's turn, never the parent's,
-// because the same mapping that re-minted the transcript re-minted it.
-func TestForkedWorkspaceFeedDrawsTheParentsQuestionUnderItsOwnTurnId(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	f := newOpened(t, harness.Opts{})
-	if req := f.shim.ExpectStartSession(); req.GetFresh() == nil {
-		t.Fatalf("the parent's StartSession = %v, want fresh", req)
-	}
-	vendorID := f.shim.Info().VendorSessionID
-	f.submit(forkParentQuestion, "fork-id-turn", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
-	parentTurn := forkTurnOf(t, f, forkParentQuestion)
-
-	parentProject := createProjectDir(f.d.DefaultConfigDir, f.ws.GetDir())
-	if err := os.MkdirAll(parentProject, 0o755); err != nil {
-		t.Fatalf("mkdir the parent's project dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(parentProject, vendorID+".jsonl"),
-		[]byte(`{"type":"summary"}`+"\n"), 0o644); err != nil {
-		t.Fatalf("seed the parent's transcript: %v", err)
-	}
-
-	// Act
-	child := forkOf(t, f)
-	childShim := f.d.Shim(child)
-	if resume := childShim.ExpectStartSession().GetResume(); resume == nil {
-		t.Fatal("the forked child's StartSession carries no resume")
-	}
-	kid := &fixture{d: f.d, repo: f.repo, ws: child, shim: childShim, t: t}
-
-	// Assert
-	page, _ := kid.openFeedOnceCarrying("the parent's ported question", func(p *frontendv1.FeedPage) bool {
-		return forkIndexOf(forkFeedTexts(p), forkParentQuestion) >= 0
-	})
-	ported := forkTurnIDOf(page, forkParentQuestion)
-	if ported == "" || ported == parentTurn {
-		t.Fatalf("the ported question's turn = %q, want the child's own re-minted id and never the parent's %q", ported, parentTurn)
-	}
-}
-
-// A FORK'S INHERITED PAST ARRIVES LATE, AND IT NEVER BOUNDS THE FORK'S OWN TURN.
-// The fork resumes a copy of its parent's transcript, and the file plane
-// ingests that copy into the fork's book while the fork's first turn runs: the
-// parent's long conversation — sixteen compactions in it — reaches the fork's
-// watch as live entries, interleaved with the fork's own answers (ship-gns,
-// 2026-09-27). The fork's feed must read: the newest inherited divider, what
-// followed it, then the fork's own question and its answers, contiguous; and a
-// reader following the feed must be pushed only the fork's own rows, so
-// nothing on its screen is ever truncated by an inherited divider.
-func TestAForksLongInheritedHistoryArrivingLiveNeverDisplacesItsOwnTurn(t *testing.T) {
-	t.Parallel()
-	// Arrange: a parent with a recorded conversation and a transcript on disk,
-	// forked; a reader following the child's feed from its first moment.
-	f := newOpened(t, harness.Opts{})
-	if req := f.shim.ExpectStartSession(); req.GetFresh() == nil {
-		t.Fatalf("the parent's StartSession = %v, want fresh", req)
-	}
-	vendorID := f.shim.Info().VendorSessionID
-	f.submit(forkParentQuestion, "fork-long-parent-turn", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
-	parentProject := createProjectDir(f.d.DefaultConfigDir, f.ws.GetDir())
-	if err := os.MkdirAll(parentProject, 0o755); err != nil {
-		t.Fatalf("mkdir the parent's project dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(parentProject, vendorID+".jsonl"),
-		[]byte(`{"type":"summary"}`+"\n"), 0o644); err != nil {
-		t.Fatalf("seed the parent's transcript: %v", err)
-	}
-	child := forkOf(t, f)
-	childShim := f.d.Shim(child)
-	if resume := childShim.ExpectStartSession().GetResume(); resume == nil {
-		t.Fatal("the forked child's StartSession carries no resume")
-	}
-	kid := &fixture{d: f.d, repo: f.repo, ws: child, shim: childShim, t: t}
-	tail := kid.watchRootFeed()
-	own := kid.submit(forkOwnQuestion, "fork-long-child-turn", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT).
-		GetSuccess().GetTurn().GetTurn().GetValue()
-	if own == "" {
-		t.Fatal("the fork's own SubmitPrompt minted no turn")
-	}
-
-	// Act: the copied conversation streams in — sixteen compactions, each with
-	// the parent's work around it — and the fork answers in the middle of it.
-	const cuts = 16
-	for i := 0; i < cuts; i++ {
-		childShim.PushAgentFrameIn(mainAgent, "parent-turn-"+itoa(i), feedResponseFrames("inherited-"+itoa(i), inheritedText(i))[1])
-		childShim.PushAgentFrameAt(mainAgent, "inherited-cut-"+itoa(i), updateFrame(mainAgent, &conversationv1.AgentUpdate{
-			Update: &conversationv1.AgentUpdate_ContextCut{ContextCut: &conversationv1.ContextCut{
-				Cut: &conversationv1.ContextCut_Compacted{Compacted: &conversationv1.ContextCompacted{
-					Summary: &conversationv1.AgentResponseProse{Markdown: "inherited summary " + itoa(i)},
-				}},
-			}},
-		}))
-		if i == cuts/2 {
-			childShim.PushAgentFrameIn(mainAgent, own, feedResponseFrames("own-first", forkOwnFirstAnswer)[1])
-		}
-	}
-	childShim.PushAgentFrameIn(mainAgent, "parent-turn-last", feedResponseFrames("inherited-last", inheritedText(cuts))[1])
-	childShim.PushAgentFrameIn(mainAgent, own, feedResponseFrames("own-last", forkOwnLastAnswer)[1])
-
-	// Assert (the push): everything the reader was pushed up to the fork's
-	// last answer is the fork's own.
-	var pushed []*frontendv1.FeedRow
-	awaitRow(t, kid, tail, "the fork's last answer on the push", func(r *frontendv1.FeedRow) bool {
-		pushed = append(pushed, r)
-		return r.GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown() == forkOwnLastAnswer
-	})
-	for _, r := range pushed {
-		prose := r.GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown()
-		if r.GetSeparation() != nil || strings.HasPrefix(prose, inheritedPrefix) {
-			t.Fatalf("the reader was pushed an inherited row %q: the inherited past is served by pages only", r.GetId().GetValue())
-		}
-	}
-
-	// Assert (the page): the newest inherited divider, the inherited turn
-	// after it, then the fork's question and both its answers, contiguous.
-	page, _ := kid.openFeedOnceCarrying("the inherited turn after the newest cut", func(p *frontendv1.FeedPage) bool {
-		return forkIndexOf(forkFeedTexts(p), inheritedText(cuts)) >= 0
-	})
-	var got []string
-	for _, r := range page.GetSuccess().GetRows() {
-		switch {
-		case r.GetSeparation() != nil:
-			got = append(got, "divider: "+r.GetSeparation().GetCompacted().GetSummary().GetMarkdown())
-		case r.GetUserPrompt() != nil && promptText(r) == forkParentQuestion:
-			// The ported question stands above the store's copy by the ported
-			// plane's own rule; it is not what this case is about.
-		case r.GetUserPrompt() != nil:
-			got = append(got, promptText(r))
-		case r.GetActivity().GetResponse() != nil:
-			got = append(got, r.GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown())
-		}
-	}
-	want := []string{
-		"divider: inherited summary " + itoa(cuts-1), inheritedText(cuts),
-		forkOwnQuestion, forkOwnFirstAnswer, forkOwnLastAnswer,
-	}
-	if strings.Join(got, " | ") != strings.Join(want, " | ") {
-		t.Fatalf("the fork's feed reads %v, want %v", got, want)
-	}
-}
-
-// inheritedPrefix marks every sentence of the fork's inherited past.
-const inheritedPrefix = "inherited work "
-
-// inheritedText is the Ith inherited response's sentence.
-func inheritedText(i int) string { return inheritedPrefix + itoa(i) }
-
-// The fork's own two answers in the long-history case.
-const (
-	forkOwnFirstAnswer = "the fork's first answer"
-	forkOwnLastAnswer  = "the fork's last answer"
-)
-
-// The three sentences the fork tests read back off the feed. They are
-// distinctive so a substring match cannot confuse one for another.
+// The sentences the fork tests read back off the feed. They are distinctive so
+// a substring match cannot confuse one for another.
 const (
 	forkParentQuestion = "what did the parent ask"
 	forkParentAnswer   = "what the parent was told"
+	forkInFlight       = "what the parent was still doing"
 	forkOwnQuestion    = "what the fork asks for itself"
 )
 
-// forkOf forks the fixture's workspace and answers the child.
-func forkOf(t *testing.T, f *fixture) *workspacev1.WorkspaceRef {
-	t.Helper()
-	resp, err := f.d.Client().CreateWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
-		Repository: createRepositoryRef(t, f.d, f.repo),
-		Form:       &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{}},
-		Parent: &agentreplv1.CreateWorkspaceParent{
-			Workspace: f.ws,
-			Fork:      &agentreplv1.CreateWorkspaceFork{},
-		},
-	}))
-	if err != nil || resp.Msg.GetSuccess() == nil {
-		t.Fatalf("CreateWorkspace(fork) = (%v, %v), want a success", resp, err)
+// TestAForksFeedReadsItsParentsTurnAboveItsOwn is the owner's principle as an
+// assertion: the fork's feed carries the parent's question and its answer,
+// the answer as the parent's feed draws it, above the fork's own question.
+func TestAForksFeedReadsItsParentsTurnAboveItsOwn(t *testing.T) {
+	t.Parallel()
+	// Arrange: a parent asked something, then forked.
+	f := newOpened(t, harness.Opts{})
+	if req := f.shim.ExpectStartSession(); req.GetFresh() == nil {
+		t.Fatalf("the parent's StartSession = %v, want fresh", req)
 	}
-	return resp.Msg.GetSuccess().GetWorkspace()
+	parentTurn := f.submit(forkParentQuestion, "fork-parent-turn", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT).
+		GetSuccess().GetTurn().GetTurn().GetValue()
+	kid, book := forkedChild(t, f)
+	fileInheritedTurn(kid, book, parentTurn, forkParentQuestion, "parent-answer", forkParentAnswer)
+
+	// Act
+	kid.submit(forkOwnQuestion, "fork-child-turn", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	rows := walkFeedToStart(kid)
+
+	// Assert
+	texts := forkRowTexts(rows)
+	question, answer, own := forkIndexOf(texts, forkParentQuestion), forkIndexOf(texts, forkParentAnswer), forkIndexOf(texts, forkOwnQuestion)
+	if question < 0 || answer < 0 || own < 0 || !(question < answer && answer < own) {
+		t.Fatalf("the fork's feed reads %v: want the parent's question, then its answer, then the fork's own question", texts)
+	}
+	for _, row := range rows {
+		if response := row.GetActivity().GetResponse(); response != nil && strings.Contains(response.GetSuccess().GetProse().GetMarkdown(), forkParentAnswer) && !response.GetFinalAnswer() {
+			t.Fatalf("the inherited answer %v is not drawn as its turn's final answer", row.GetId())
+		}
+	}
 }
 
-// forkFeedTexts renders a page's rows as the sentences a reader would see, in
-// the page's own order.
-func forkFeedTexts(page *frontendv1.FeedPage) []string {
+// TestAForkLeavesOutTheTurnItsParentWasRunning covers the cut: a turn the
+// parent was running when the fork was taken is not the fork's, though its
+// rows sit in the parent's book before the fork point.
+func TestAForkLeavesOutTheTurnItsParentWasRunning(t *testing.T) {
+	t.Parallel()
+	// Arrange: the parent's shim names its running turn as uninherited.
+	f := newOpened(t, harness.Opts{})
+	if req := f.shim.ExpectStartSession(); req.GetFresh() == nil {
+		t.Fatalf("the parent's StartSession = %v, want fresh", req)
+	}
+	done := f.submit(forkParentQuestion, "fork-done-turn", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT).
+		GetSuccess().GetTurn().GetTurn().GetValue()
+	f.shim.Answer(harness.RPCGetForkPoint, &shimv1.GetForkPointResponse{Result: &shimv1.GetForkPointResponse_Success{Success: &shimv1.GetForkPointSuccess{
+		Point:            &shimv1.ForkPoint{Extent: &shimv1.ForkPoint_Whole{Whole: &shimv1.ForkPointWhole{}}},
+		Through:          &conversationv1.ConversationThrough{AtMs: 1 << 62},
+		UninheritedTurns: []*conversationv1.TurnId{{Value: "running-turn"}},
+	}}})
+	kid, book := forkedChild(t, f)
+	fileInheritedTurn(kid, book, done, forkParentQuestion, "done-answer", forkParentAnswer)
+	fileInheritedTurn(kid, book, "running-turn", forkInFlight, "running-answer", forkInFlight+" (answer)")
+
+	// Act
+	kid.submit(forkOwnQuestion, "fork-own-turn", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	texts := forkRowTexts(walkFeedToStart(kid))
+
+	// Assert
+	if forkIndexOf(texts, forkParentAnswer) < 0 || forkIndexOf(texts, forkInFlight) >= 0 {
+		t.Fatalf("the fork's feed reads %v: want the finished turn and nothing of the running one", texts)
+	}
+}
+
+// forkedChild forks the fixture's workspace, brings the child up on the fork
+// its shim made, and answers the child's fixture and the parent's book.
+func forkedChild(t *testing.T, f *fixture) (*fixture, string) {
+	t.Helper()
+	parentVendorID := f.shim.Info().VendorSessionID
+	child := forkOf(t, f)
+	childShim := f.d.Shim(child)
+	if childShim.ExpectForkSession().GetParentVendorSessionId() != parentVendorID {
+		t.Fatal("the child's shim was asked for a fork of another conversation")
+	}
+	if resume := childShim.ExpectStartSession().GetResume(); resume == nil {
+		t.Fatal("the forked child's StartSession carries no resume")
+	}
+	// The fake shim's fork names the parent's book after the parent's vendor
+	// session (fakeshim ForkSession).
+	return &fixture{d: f.d, repo: f.repo, ws: child, shim: childShim, t: t}, parentVendorID
+}
+
+// fileInheritedTurn files one finished turn of BOOK on the child's fake store:
+// its prompt, its answer UNIT and the terminal naming that answer, all of TURN.
+func fileInheritedTurn(kid *fixture, book, turn, question, unit, answer string) {
+	kid.t.Helper()
+	kid.shim.FileUserPrompt(book, &conversationv1.AgentPrompt{
+		Id:     &conversationv1.TurnId{Value: turn},
+		Agent:  &conversationv1.AgentId{Value: book},
+		Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT,
+		Said:   said(question),
+	})
+	kid.shim.FileAgentFrame(book, turn, activityFrame(book, &conversationv1.AgentActivity{
+		ActivityId: activityID(unit),
+		Item: &conversationv1.AgentActivity_Response{Response: &conversationv1.AgentResponse{Result: &conversationv1.AgentResponse_Success{
+			Success: &conversationv1.AgentResponseSuccess{Prose: &conversationv1.AgentResponseProse{Markdown: answer}},
+		}}},
+	}))
+	kid.shim.FileAgentFrame(book, turn, &conversationv1.AgentFrame{
+		AgentId: &conversationv1.AgentId{Value: book},
+		Result: &conversationv1.AgentFrame_Success{Success: &conversationv1.AgentSuccess{
+			Outcome: &conversationv1.AgentSuccess_Completed{Completed: &conversationv1.AgentCompleted{Answer: activityID(unit)}},
+		}},
+	})
+}
+
+// walkFeedToStart serves the root feed's newest page and every older one to
+// the conversation's start, answering every row served, oldest first.
+func walkFeedToStart(f *fixture) []*frontendv1.FeedRow {
+	f.t.Helper()
+	page := f.feedPage(true)
+	rows := page.GetSuccess().GetRows()
+	for walks := 0; page.GetSuccess().GetHasMore() != nil; walks++ {
+		if walks > 16 {
+			f.t.Fatal("the walk never reached the conversation's start")
+		}
+		page = f.feedPage(false)
+		rows = append(append([]*frontendv1.FeedRow{}, page.GetSuccess().GetRows()...), rows...)
+	}
+	return rows
+}
+
+// forkRowTexts renders rows as the sentences a reader would see, in order.
+func forkRowTexts(rows []*frontendv1.FeedRow) []string {
 	var out []string
-	for _, row := range page.GetSuccess().GetRows() {
+	for _, row := range rows {
 		switch {
 		case row.GetUserPrompt() != nil:
 			for _, block := range row.GetUserPrompt().GetSuccess().GetBody().GetBlocks() {
@@ -287,23 +181,19 @@ func forkIndexOf(texts []string, want string) int {
 	return -1
 }
 
-// forkTurnIDOf answers the turn a page's row carrying want is stamped with.
-func forkTurnIDOf(page *frontendv1.FeedPage, want string) string {
-	for _, row := range page.GetSuccess().GetRows() {
-		for _, block := range row.GetUserPrompt().GetSuccess().GetBody().GetBlocks() {
-			if strings.Contains(block.GetText().GetText(), want) {
-				return row.GetTurn().GetValue()
-			}
-		}
-	}
-	return ""
-}
-
-// forkTurnOf answers the turn the fixture's own feed stamped a prompt with.
-func forkTurnOf(t *testing.T, f *fixture, want string) string {
+// forkOf forks the fixture's workspace and answers the child.
+func forkOf(t *testing.T, f *fixture) *workspacev1.WorkspaceRef {
 	t.Helper()
-	page, _ := f.openFeedOnceCarrying("the workspace's own prompt row", func(p *frontendv1.FeedPage) bool {
-		return forkTurnIDOf(p, want) != ""
-	})
-	return forkTurnIDOf(page, want)
+	resp, err := f.d.Client().CreateWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
+		Repository: createRepositoryRef(t, f.d, f.repo),
+		Form:       &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{}},
+		Parent: &agentreplv1.CreateWorkspaceParent{
+			Workspace: f.ws,
+			Fork:      &agentreplv1.CreateWorkspaceFork{},
+		},
+	}))
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("CreateWorkspace(fork) = (%v, %v), want a success", resp, err)
+	}
+	return resp.Msg.GetSuccess().GetWorkspace()
 }

@@ -41,10 +41,14 @@ type fakeHistory struct {
 	heads bool
 }
 
-// historyRead is one read the resolver made.
+// historyRead is one read the resolver made: its book, the pointer it read
+// after, and — for a read of a fork's inherited past — the bound it read
+// through and that it was one.
 type historyRead struct {
-	target string
-	after  string
+	target    string
+	after     string
+	through   int64
+	inherited bool
 }
 
 func newFakeHistory(pageSize int) *fakeHistory {
@@ -130,6 +134,49 @@ func historyHead(prompt *conversationv1.HistoryEntryAt, between bool) *conversat
 		head.Between = &conversationv1.HistoryTurnHead_Adjacent{Adjacent: &conversationv1.HistoryTurnHeadAdjacent{}}
 	}
 	return head
+}
+
+// ReadInherited serves one page of a generation of a fork's inherited past:
+// BOOK's entries placed at or before THROUGHMS when AFTER is nil, and the page
+// after AFTER otherwise, exactly as the store's bounded read serves them.
+func (f *fakeHistory) ReadInherited(_ context.Context, _ ids.WorkspaceID, book *conversationv1.AgentId, after *conversationv1.HistoryPointer, throughMs int64) (*conversationv1.HistoryPage, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.readDone != nil {
+		defer func() { f.readDone <- struct{}{} }()
+	}
+	f.reads = append(f.reads, historyRead{target: book.GetValue(), after: after.GetValue(), through: throughMs, inherited: true})
+	if f.noSource {
+		return nil, ErrNoHistorySource
+	}
+	if f.failFrom > 0 && len(f.reads) >= f.failFrom {
+		return nil, errors.New("store unreachable")
+	}
+	entries := f.books[book.GetValue()]
+	start := 0
+	if after == nil {
+		for start < len(entries) && entries[start].GetRecordedPlace().GetAtMs() > throughMs {
+			start++
+		}
+	} else {
+		start = -1
+		for i, at := range entries {
+			if at.GetAt().GetValue() == after.GetValue() {
+				start = i + 1
+			}
+		}
+		if start < 0 {
+			return nil, fmt.Errorf("stale pointer %q", after.GetValue())
+		}
+	}
+	end := min(start+f.pageSize, len(entries))
+	page := &conversationv1.HistoryPage{Entries: entries[start:end]}
+	if end == len(entries) {
+		page.Boundary = &conversationv1.HistoryPage_Floor{Floor: &conversationv1.HistoryFloor{}}
+	} else {
+		page.Boundary = &conversationv1.HistoryPage_More{More: &conversationv1.HistoryMore{LastEntry: entries[end-1].GetAt()}}
+	}
+	return page, nil
 }
 
 // readCount answers how many reads were made.
@@ -522,6 +569,12 @@ func (f historyFunc) ReadHistory(ctx context.Context, ws ids.WorkspaceID, target
 	return f(ctx, ws, target, after)
 }
 
+// ReadInherited is never asked of a historyFunc: no test that adapts one is
+// about a fork.
+func (f historyFunc) ReadInherited(context.Context, ids.WorkspaceID, *conversationv1.AgentId, *conversationv1.HistoryPointer, int64) (*conversationv1.HistoryPage, error) {
+	return nil, errors.New("historyFunc: no inherited past is scripted")
+}
+
 // ---- a row split across pages ----
 
 // splitTurnBook is turn-1's prompt on one page and its answer on the next
@@ -772,23 +825,6 @@ func TestAWatchOpeningLoadsNothingWithoutAWaitingReader(t *testing.T) {
 	// Assert: only the reader's own open read.
 	if got := store.readCount(); got != 1 {
 		t.Fatalf("reads = %d, want the reader's open alone", got)
-	}
-}
-
-func TestTheOldestPageAtTheStartCarriesRowsKeyedAboveTheHistory(t *testing.T) {
-	// Arrange: a fork's ported question was drawn when its watch opened,
-	// above the history the reader's open then loads.
-	h := newHarness(t)
-	h.mainBook(3, promptsBook(2))
-	h.ported = []PortedPrompt{{Turn: "parent-1", Text: "the parent asked", Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT}}
-	h.resolver.OnHistoryPage(testWorkspace, mainAgent(), &conversationv1.HistoryPage{})
-
-	// Act.
-	page, _ := h.openPage(rootFeed(), "reader-1")
-
-	// Assert: the conversation's start is one page, from the very top.
-	if got := len(pageRows(t, page)); got != 3 {
-		t.Fatalf("page rows = %v, want the ported question and both prompts", rowIDs(pageRows(t, page)))
 	}
 }
 

@@ -15,6 +15,12 @@ const (
 	OpPushSessionUpdate = "push_session_update"
 	OpPushAgentFrame    = "push_agent_frame"
 	OpPushUserPrompt    = "push_user_prompt"
+	// OpFileAgentFrame and OpFileUserPrompt file one entry into an agent's
+	// book WITHOUT delivering it on any stream: a row the store holds in a
+	// book this session never watches, such as a fork's parent's. Agent is
+	// required, Turn and PlaceMs stamp it as on a push.
+	OpFileAgentFrame = "file_agent_frame"
+	OpFileUserPrompt = "file_user_prompt"
 	// OpPushRetired delivers WatchAgentResponse.retired: its payload is the
 	// conversation.v1 HistoryEntryAt as last served, at its own pointer.
 	OpPushRetired = "push_retired"
@@ -147,6 +153,13 @@ func ParseCommand(line []byte) (Command, error) {
 			return Command{}, fmt.Errorf("%s: payload is required", c.Op)
 		}
 	case OpPushAgentFrame:
+		if c.Payload == "" {
+			return Command{}, fmt.Errorf("%s: payload is required", c.Op)
+		}
+	case OpFileAgentFrame, OpFileUserPrompt:
+		if c.Agent == "" {
+			return Command{}, fmt.Errorf("%s: agent is required", c.Op)
+		}
 		if c.Payload == "" {
 			return Command{}, fmt.Errorf("%s: payload is required", c.Op)
 		}

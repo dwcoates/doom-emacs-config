@@ -67,7 +67,8 @@ const (
 //     evidence of what was being built rather than an unexplained worktree;
 //  4. materialize the worktree through git;
 //  5. REGISTER only once the worktree exists;
-//  6. bring the session up, forking the parent's transcript first when asked;
+//  6. bring the session up — for a fork, recording the fork it owes first, which
+//     the bring-up makes through the vendor before the session resumes;
 //  7. submit the initial prompt through the QUEUE, with origin
 //     WORKSPACE_CREATED, only after the session is up.
 //
@@ -305,7 +306,7 @@ func (v *verbs) Create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 	}
 
 	// THE WORKTREE EXISTS; everything from here to the terminal outcome —
-	// registration, a fork's transcript copy, the session bring-up and the
+	// registration, a fork's record, the session bring-up and the
 	// initial prompt's submission (steps 5-7) — is the session stage. Reported
 	// before registration so a watching client stops showing the worktree line
 	// the moment git is done.
@@ -363,16 +364,25 @@ func (v *verbs) Create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 		StartedAt:      v.now(),
 	}
 	if spec.ForkFrom != nil {
-		vendorSessionID, err := v.forkTranscript(ctx, log, *spec.ForkFrom, record, session.ConfigDir, spec.forkRefusalArm())
-		if err != nil {
+		// A FORK IS REFUSED HERE, before anything else is written for it, when
+		// its parent holds no conversation.
+		if _, err := v.forkableParentSession(ctx, log, *spec.ForkFrom, spec.forkRefusalArm()); err != nil {
 			return wsm.Workspace{}, err
 		}
-		// A fork RESUMES the ported conversation; it never starts a fresh one.
-		session.VendorSessionID = vendorSessionID
 	}
 	if err := v.deps.DB.PutSession(ctx, session); err != nil {
 		log.Error(opCreate, "could not record the spawn facts", dlog.Context{"cause": err.Error()})
 		return wsm.Workspace{}, fmt.Errorf("create %q: record the spawn facts: %w", branch, err)
+	}
+	if spec.ForkFrom != nil {
+		// THE FORK IS OWED, NOT MADE: the bring-up makes it through the
+		// vendor, while the parent starts no turn, and resumes it (forking.go).
+		if err := v.deps.DB.PutPendingFork(ctx, wsm.PendingFork{Workspace: record.ID, Parent: *spec.ForkFrom}); err != nil {
+			log.Error(opCreate, "could not record the fork the workspace owes", dlog.Context{
+				"parent": string(*spec.ForkFrom), "cause": err.Error(),
+			})
+			return wsm.Workspace{}, fmt.Errorf("create %q: record the fork: %w", branch, err)
+		}
 	}
 
 	if err := v.deps.Sessions.Start(ctx, record.ID); err != nil {
@@ -543,23 +553,16 @@ func (v *verbs) claimSupplied(ctx context.Context, log dlog.Logger, repoDir, nam
 // continues, for the naming call; empty for a create that forks nothing.
 //
 // THE SOURCE IS THE DAEMON'S OWN RECORD OF THE PARENT CONVERSATION: the
-// prompt rows ConversationPrompts would answer — the parent's own turns and
-// every row IT inherited from a fork of its own — which is exactly what the
-// fork ports to the child. It needs no live parent shim, so a hibernated
-// parent is named from as readily as a running one. It is composed by the
-// title synthesizer's one digest composition (the most recent requests, each
-// bounded), so "what this conversation is about" has one spelling.
-//
-// It reads RecentConversationPrompts, not ConversationPrompts: the digest
-// never quotes more than titlesynth.MaxPrompts requests, so naming a fork
-// reads only that bounded tail rather than the parent's whole history — a
-// parent forked many generations deep, or with a long conversation of its
-// own, costs this call the same either way. THE FORK'S OWN PORTED COPY is
-// unaffected: it is written from ConversationPrompts, in forkconversation.go,
-// which this function never touches.
+// parent's own turns and, through its fork lineage, the turns it inherited
+// (wsm.RecentConversationPrompts). It needs no live parent shim, so a
+// hibernated parent is named from as readily as a running one. It is composed
+// by the title synthesizer's one digest composition (the most recent requests,
+// each bounded), so "what this conversation is about" has one spelling. The
+// digest never quotes more than titlesynth.MaxPrompts requests, so only that
+// bounded tail is read, however deep the lineage.
 //
 // A parent with no conversation is REFUSED HERE, before the naming call is
-// paid for, on the same arm the transcript port refuses it with.
+// paid for, on the same arm the create refuses it with.
 func (v *verbs) forkNamingConversation(ctx context.Context, log dlog.Logger, spec CreateSpec) (string, error) {
 	if spec.ForkFrom == nil {
 		return "", nil
@@ -593,7 +596,7 @@ func (v *verbs) forkNamingConversation(ctx context.Context, log dlog.Logger, spe
 // forkableParentSession answers the parent's session when it holds a
 // conversation to fork, and the refusal ARM names (forkRefusalArm) when it
 // does not. It is the ONE statement of "this workspace can be forked", read by
-// the naming step (before a model call is paid for) and by the transcript port.
+// the naming step (before a model call is paid for) and by the create itself.
 func (v *verbs) forkableParentSession(ctx context.Context, log dlog.Logger, parent ids.WorkspaceID, arm string) (wsm.Session, error) {
 	parentSession, ok, err := v.deps.DB.Session(ctx, parent)
 	if err != nil {
@@ -674,55 +677,6 @@ func (s CreateSpec) parentWorkspace() *ids.WorkspaceID {
 		return nil
 	}
 	return s.ForkFrom
-}
-
-// forkTranscript ports the parent's conversation into the CHILD's config root
-// before any session starts, which is what makes the forked workspace
-// resumable. It answers the vendor session id the child resumes.
-//
-// THE CHILD NEVER RESUMES THE PARENT'S OWN ID. shim.v1 StartSession has no
-// fork arm, and a vendor session id is single-occupancy: the shim takes
-// session-<vendor session id>.lock inside StartSession, so a child resuming a
-// live parent's id would block on that lock forever. The daemon mints a fresh
-// id, files the copy under it, and resumes that. The conversation's CONTENT is
-// untouched -- its original main-agent id included -- and the parent keeps its
-// own conversation, which is the whole point of a fork.
-func (v *verbs) forkTranscript(ctx context.Context, log dlog.Logger, parent ids.WorkspaceID, child wsm.Workspace, childConfigDir, arm string) (string, error) {
-	parentRecord, err := v.deps.DB.Workspace(ctx, parent)
-	if err != nil {
-		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "err != nil"})
-		return "", fmt.Errorf("fork from %q: %w", parent, err)
-	}
-	parentSession, err := v.forkableParentSession(ctx, log, parent, arm)
-	if err != nil {
-		return "", err
-	}
-	transcript, err := v.deps.Accounts.FindTranscript(ctx, parentRecord.Dir, parentSession.VendorSessionID)
-	if err != nil {
-		log.Error(opCreate, "could not locate the parent transcript", dlog.Context{
-			"parent": string(parent), "cause": err.Error(),
-		})
-		return "", fmt.Errorf("fork from %q: locate the transcript: %w", parent, err)
-	}
-	forked := wsm.NewVendorSessionID()
-	minted, err := v.deps.Accounts.PortTranscript(ctx, transcript.Path, childConfigDir, child.Dir, forked)
-	if err != nil {
-		log.Error(opCreate, "could not port the parent transcript", dlog.Context{
-			"parent": string(parent), "transcript": transcript.Path,
-			"from_config_dir": transcript.ConfigDir, "cause": err.Error(),
-		})
-		return "", fmt.Errorf("fork from %q: port the transcript: %w", parent, err)
-	}
-	log.Debug(opCreate, "ported the parent transcript into the child config root under a fresh vendor session id", dlog.Context{
-		"parent": string(parent), "config_dir": childConfigDir,
-		"parent_vendor_session_id": parentSession.VendorSessionID,
-		"child_vendor_session_id":  forked,
-	})
-	if err := v.forkConversation(ctx, log, parent, child.ID, minted); err != nil {
-		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "err := v.forkConversation(ctx, log, parent, child.ID, minted); err != nil"})
-		return "", err
-	}
-	return forked, nil
 }
 
 // submitInitialPrompt sends the workspace's first message down the ONE delivery

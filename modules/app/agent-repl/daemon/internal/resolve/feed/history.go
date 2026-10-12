@@ -30,20 +30,30 @@ func (r *resolver) OnHistoryPage(ws ids.WorkspaceID, agent *conversationv1.Agent
 // reader's request loaded into its feed (book.go), whose entries a turn older
 // than every loaded page are withheld until that turn's page is loaded.
 func (r *resolver) replayPage(ws ids.WorkspaceID, agent *conversationv1.AgentId, page *conversationv1.HistoryPage, load *pageLoad) {
-	// A FORK'S PORTED CONVERSATION IS READ BEFORE THE LOCK IS TAKEN: it comes
-	// from the daemon's durable record, and no read of a database belongs
-	// inside the resolver's mutex.
-	ported := r.portedPrompts(ws)
-	// A READER'S LOAD DRAWS THE PAGE'S TURN HEADS FIRST (heads.go): they are
-	// part of what the page draws, so every read taken before the lock knows
-	// their turns too.
+	// THE DURABLE TURN RECORDS ARE READ BEFORE THE LOCK IS TAKEN, from the
+	// workspace that recorded the page's turns: this one, or — for a page of
+	// a fork's inherited past — the ancestor it was inherited from. An
+	// inherited page draws on the root feed, so it reads no output addresses
+	// or mirrors: they name tabs of the ancestor, which this workspace does
+	// not hold. A READER'S LOAD DRAWS THE PAGE'S TURN HEADS FIRST (heads.go):
+	// they are part of what the page draws, so every read taken before the
+	// lock knows their turns too.
+	records, plane := ws, planeHistory
+	if load != nil && load.inherited != nil {
+		records, plane = load.inherited.Workspace, planeInherited
+	}
 	all, own := withHeads(page, load)
 	whole := headsPage(page, all)
-	closes := r.recordedCloses(ws, whole)
-	turns := entryTurns(whole)
-	addresses := r.recordedAddresses(ws, turns)
-	mirrors := r.recordedMirrors(ws, turns)
-	r.learnLineage(ws, turns...)
+	closes := r.recordedCloses(records, whole)
+	var (
+		addresses map[ids.TurnID]*wsm.OutputAddress
+		mirrors   map[ids.TurnID]*wsm.MirrorAddress
+	)
+	if plane == planeHistory {
+		turns := entryTurns(whole)
+		addresses = r.recordedAddresses(ws, turns)
+		mirrors = r.recordedMirrors(ws, turns)
+	}
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -72,17 +82,12 @@ func (r *resolver) replayPage(ws ids.WorkspaceID, agent *conversationv1.AgentId,
 		r.judgeHistoryBubbles(s)
 	}()
 
-	// A FORK'S PORTED CONVERSATION IS PART OF WHAT ITS FIRST LOAD DRAWS: it
-	// stands above the page's own rows, so the page's bound reaches it.
-	s.load = load
-	r.replayPorted(s, ported)
-
 	// The page is served NEWEST FIRST; the feed's order is oldest → newest, so
-	// the replay walks it backwards. IT IS REPLAYED IN THE HISTORY PLANE, so
-	// what the store carries stands below a fork's ported conversation and
-	// above the rows this workspace draws live, whichever arrived first.
+	// the replay walks it backwards. IT IS REPLAYED IN A HISTORY PLANE — the
+	// inherited one for a fork's inherited past — so what the store carries
+	// stands below the rows this workspace draws live, whichever arrived first.
 	entries := page.GetEntries()
-	s.plane = planeHistory
+	s.plane = plane
 	s.load = load
 	// A REPLAY'S OWN ROWS FOLLOW WHAT THE REPLAY DREW, never what an earlier
 	// replay or the live plane left behind (order.go).
@@ -184,57 +189,9 @@ func (r *resolver) replayLoadedEntry(s *wsState, agent *conversationv1.AgentId, 
 	load.outcomes.note(at, outcomeNoRow)
 }
 
-// replayPageEntry draws one page entry in the plane its lineage names.
-//
-// A FORK'S BOOK HOLDS ITS INHERITED PAST AROUND ITS OWN TURNS (the book orders
-// by first insert, and the copy was ingested while the fork ran): each entry
-// is drawn in the plane its lineage names.
+// replayPageEntry draws one page entry, in the plane its page is replayed in.
 func (r *resolver) replayPageEntry(s *wsState, agent *conversationv1.AgentId, at *conversationv1.HistoryEntryAt) {
-	if classAgent, turn := entryClass(at, agent); r.inherits(s, classAgent, turn) {
-		r.drawInherited(s, func() { r.replayStamped(s, agent, at) })
-		return
-	}
 	r.replayStamped(s, agent, at)
-}
-
-// portedPrompts reads the conversation a fork carried over from its parent.
-//
-// A FAILED READ IS RECORDED, NEVER SWALLOWED, and the page still draws: the
-// history the store carries is served either way, and refusing to draw it
-// because the ported half could not be read would hide the whole conversation
-// instead of half of it.
-func (r *resolver) portedPrompts(ws ids.WorkspaceID) []PortedPrompt {
-	if r.deps.PortedPrompts == nil {
-		r.logger(ws).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "r.deps.PortedPrompts == nil"})
-		return nil
-	}
-	ported, err := r.deps.PortedPrompts(context.Background(), ws)
-	if err != nil {
-		r.logger(ws).Error("daemon.feed.ported_prompts_unreadable",
-			"a fork's ported conversation could not be read; the page is drawn without the parent's questions",
-			dlog.Context{"cause": err.Error()})
-		return nil
-	}
-	return ported
-}
-
-// replayPorted draws a fork's ported conversation ONCE per workspace, in the
-// plane that stands above everything else on the feed.
-func (r *resolver) replayPorted(s *wsState, ported []PortedPrompt) {
-	if s.portedDrawn || len(ported) == 0 {
-		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "s.portedDrawn || len(ported) == 0"})
-		return
-	}
-	s.portedDrawn = true
-	s.plane = planePorted
-	clear(s.replayTail)
-	for _, prompt := range ported {
-		r.drawPortedPrompt(s, prompt)
-	}
-	s.plane = planeLive
-	r.logger(s.id).Debug("daemon.feed.ported_conversation",
-		"a fork's ported parent conversation was drawn above the workspace's own rows",
-		dlog.Context{"rows": len(ported)})
 }
 
 // replayStamped replays one entry under its own turn stamp (entryturn.go).
@@ -385,7 +342,7 @@ func (r *resolver) replayStampedTerminal(s *wsState, agent *conversationv1.Agent
 	turn := *s.entryTurn
 	// An unnamed main agent can only be the main watch's own unnamed page:
 	// a child's book is watched only once its agent is known.
-	if s.mainAgent != "" && agent.GetValue() != s.mainAgent {
+	if s.mainAgent != "" && !s.rootFeedAgent(agent.GetValue()) {
 		r.drawTerminal(s, agent, nil, success, failure)
 		return
 	}
