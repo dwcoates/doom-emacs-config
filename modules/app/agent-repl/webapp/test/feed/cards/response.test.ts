@@ -19,6 +19,7 @@ import { tokenHeatColor } from "../../../src/token-heat.js";
 import type { RowContext } from "../../../src/feed/cards/context.js";
 import {
   REVEALED_ATTRIBUTE,
+  RESPONSE_CUT_SHORT_ACTIONS_CLASS,
   RESPONSE_PROSE_CLASS,
   THINKING_BUBBLE_CLASS,
   USAGE_AGE_RESERVE_LABELS,
@@ -35,6 +36,11 @@ import {
   usageReserveLabelsCss,
 } from "../../../src/feed/cards/response.js";
 import { proseHtml } from "../../../src/bubble/body.js";
+import {
+  SIGN_IN_ACTION,
+  SIGN_IN_ACTION_ATTRIBUTE,
+  answerLoginRequests,
+} from "../../../src/login/request.js";
 import { visibleWidth } from "../../../src/metaprompt-tree.js";
 import { installTreeLayout, stagedCols, useTreeLayout } from "../../tree-layout.js";
 import { TICKING_ATTRIBUTE, stopClocks, stopTicking } from "../../../src/feed/ticking.js";
@@ -205,6 +211,38 @@ describe("the broken state", () => {
       rowContext(),
     );
     expect(el.querySelector(".response-cut-short-marker")?.textContent).toBe("cut short");
+  });
+
+  it("offers the sign-in action inside the bubble when the daemon set it", () => {
+    const el = drawFeedResponse(
+      response({ result: { case: "error", value: { prose: { markdown: "Failed to authenticate." }, signIn: {} } } }),
+      rowContext(),
+    );
+    const action = el.querySelector(`.${RESPONSE_CUT_SHORT_ACTIONS_CLASS} [${SIGN_IN_ACTION_ATTRIBUTE}="${SIGN_IN_ACTION}"]`);
+    expect([action?.localName, action?.textContent]).toEqual(["ar-button", "sign in"]);
+  });
+
+  it("offers no sign-in action when the daemon did not set it", () => {
+    const el = drawFeedResponse(
+      response({ result: { case: "error", value: { prose: { markdown: "half" } } } }),
+      rowContext(),
+    );
+    expect(el.querySelector(`.${RESPONSE_CUT_SHORT_ACTIONS_CLASS}`)).toBeNull();
+  });
+
+  it("opens the login overlay from the bubble's sign-in without the bubble taking the click", () => {
+    const el = drawFeedResponse(
+      response({ result: { case: "error", value: { prose: { markdown: "Failed to authenticate." }, signIn: {} } } }),
+      rowContext(),
+    );
+    const opened: HTMLElement[] = [];
+    const stop = answerLoginRequests((control) => opened.push(control));
+    let bubbleClicks = 0;
+    el.addEventListener("click", () => bubbleClicks++);
+    const action = el.querySelector(`[${SIGN_IN_ACTION_ATTRIBUTE}="${SIGN_IN_ACTION}"]`) as HTMLElement;
+    action.click();
+    stop();
+    expect([opened, bubbleClicks]).toEqual([[action], 0]);
   });
 });
 

@@ -59,7 +59,8 @@ export const SIGN_IN_ACTION = "sign-in";
  * draws (an outcome marker's expansion, a broken response bubble), so they
  * cannot drift apart. CLASSNAME is the surface's own class for it; OPERATION
  * is the record its click is logged under. Its click asks the page's one login
- * overlay to open (`requestLogin`).
+ * overlay to open (`requestLogin`) and goes no further: the bubble or row it
+ * sits inside never takes the click as its own (a bubble's click selects it).
  */
 export function drawSignInAction(className: string, operation: string): HTMLElement {
   const button = createControl();
@@ -68,6 +69,7 @@ export function drawSignInAction(className: string, operation: string): HTMLElem
   button.textContent = "sign in";
   button.addEventListener("click", (event) => {
     event.preventDefault();
+    event.stopPropagation();
     log.info("the reader asked to sign in from the feed", { operation });
     requestLogin(button);
   });
