@@ -649,7 +649,7 @@ func TestAHoldTakenBeforeARestartKeepsTheSuccessorsLandingFromDeploying(t *testi
 	script.SetExitCode(0)
 	script.SetStdout("daemon: passed in 1s\n")
 	env := []string{"AGENT_REPL_TEST_ALL_SCRIPT=" + script.Path}
-	d1 := harness.StartDaemon(t, harness.Opts{SelfRepo: repo.Dir, Timeout: harness.MergeChainTimeout, ExtraEnv: env})
+	d1 := harness.StartDaemon(t, harness.Opts{DurableState: true, SelfRepo: repo.Dir, Timeout: harness.MergeChainTimeout, ExtraEnv: env})
 	if resp := holdRollouts(t, d1, false); resp.GetSuccess() == nil {
 		t.Fatalf("hold_rollouts = %v, want a success", resp)
 	}

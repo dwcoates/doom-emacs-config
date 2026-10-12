@@ -17,7 +17,7 @@ import (
 // workspace on a successor daemon over the same state.
 func cutAndReopen(t *testing.T) (*fixture, *harness.ShimControl) {
 	t.Helper()
-	f := newOpened(t, harness.Opts{})
+	f := newOpened(t, harness.Opts{DurableState: true})
 	f.shim.ExpectStartSession()
 	f.submit("do the long thing", "k-cut", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	f.shim.ExpectStartTurn()
