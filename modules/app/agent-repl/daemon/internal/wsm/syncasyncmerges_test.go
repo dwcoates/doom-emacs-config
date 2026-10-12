@@ -3,6 +3,9 @@ package wsm
 import (
 	"context"
 	"errors"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -457,5 +460,69 @@ func TestMergeSourceValidateRefusesInconsistentAsyncAndPickFields(t *testing.T) 
 				t.Fatalf("validate accepted %+v", tc.source)
 			}
 		})
+	}
+}
+
+func TestMergeHidden(t *testing.T) {
+	landed := time.Unix(100, 0)
+	origin := &MergeOrigin{Requester: "ws-r", Request: "req-1"}
+	tests := []struct {
+		name string
+		ws   Workspace
+		want bool
+	}{
+		{name: "an unrevealed, unmerged merge workspace", ws: Workspace{MergeOf: origin}, want: true},
+		{name: "a revealed merge workspace", ws: Workspace{MergeOf: origin, MergeRevealed: true}, want: false},
+		{name: "a landed merge workspace never revealed", ws: Workspace{MergeOf: origin, MergedAt: &landed}, want: false},
+		{name: "an ordinary workspace", ws: Workspace{}, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := tt.ws.MergeHidden()
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("MergeHidden() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestNoCallSiteSpellsOutMergeHidden holds every reader of a merge workspace's
+// visibility to MergeHidden: a site that tests MergeRevealed by hand would drift
+// from it (the landed case is the one a hand-rolled test forgets).
+func TestNoCallSiteSpellsOutMergeHidden(t *testing.T) {
+	// Arrange
+	root := filepath.Join("..", "..")
+	var offenders []string
+
+	// Act
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		if strings.HasSuffix(path, filepath.Join("wsm", "syncasyncmerges.go")) || strings.HasSuffix(path, filepath.Join("wsm", "workspaces.go")) {
+			return nil
+		}
+		src, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if strings.Contains(string(src), ".MergeRevealed") {
+			offenders = append(offenders, path)
+		}
+		return nil
+	})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("walk: %v", err)
+	}
+	if len(offenders) != 0 {
+		t.Fatalf("these files read MergeRevealed by hand instead of MergeHidden: %v", offenders)
 	}
 }

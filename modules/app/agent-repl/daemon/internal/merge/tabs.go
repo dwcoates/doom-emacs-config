@@ -252,7 +252,7 @@ func (o *orchestrator) mergeWorkspaceVisible(ws ids.WorkspaceID) bool {
 			dlog.Context{"workspace": string(ws), "error": err.Error()})
 		return false
 	}
-	return record.MergeRevealed || record.MergedAt != nil
+	return !record.MergeHidden()
 }
 
 // publishHead publishes the bubble's head with RESULT, the arm in force.
