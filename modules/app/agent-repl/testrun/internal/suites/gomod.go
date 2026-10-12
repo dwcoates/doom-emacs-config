@@ -106,7 +106,7 @@ func goIntegrationUnitsForPackages(l Layout, s roster.Suite, dir string, pkgs []
 	prebuildConfigured := false
 	for i, rel := range pkgs {
 		p := goPkg{
-			Suite: s.Name, Module: dir, Rel: rel, Tags: tag,
+			Suite: s.Name, Module: dir, Rel: rel, Tags: tag, Parallel: s.TestParallel[rel],
 			Bin: filepath.Join(l.Work, "bin", s.Name+"-"+tag, fmt.Sprintf("%03d.test", i)),
 		}
 		if rel == s.IntegrationPrebuildPackage && s.IntegrationPrebuildPackage != "" {
@@ -139,7 +139,7 @@ func goModuleUnitsForPackages(l Layout, s roster.Suite, dir string, pkgs []strin
 	prebuildConfigured := false
 	for i, rel := range pkgs {
 		p := goPkg{
-			Suite: s.Name, Module: dir, Rel: rel,
+			Suite: s.Name, Module: dir, Rel: rel, Parallel: s.TestParallel[rel],
 			Bin: filepath.Join(l.Work, "bin", s.Name, fmt.Sprintf("%03d.test", i)),
 		}
 		if l.Coverage {

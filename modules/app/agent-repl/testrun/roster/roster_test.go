@@ -87,3 +87,31 @@ func TestTheSandboxSuiteHoldsTheCoresItsContainerUses(t *testing.T) {
 		t.Fatalf("e2e-emacs = %+v, want a width of 4: the VM its parallelism bound was measured on", s)
 	}
 }
+
+func TestTestParallelNamesOnlyGoSuitesAtMoreThanOne(t *testing.T) {
+	for _, s := range Suites {
+		for pkg, n := range s.TestParallel {
+			// Assert
+			if s.Kind != GoModule && s.Kind != E2E {
+				t.Errorf("%s names package %q in TestParallel, but only Go suites run -test.parallel", s.Name, pkg)
+			}
+			if n < 2 {
+				t.Errorf("%s TestParallel[%q] = %d; a package overlaps at least two tests or is not named", s.Name, pkg, n)
+			}
+		}
+	}
+}
+
+func TestTheWaitBoundPackagesOverlapTheirTests(t *testing.T) {
+	want := map[string]string{"daemon": "integration", "sidecar": "integration", "store": "integration", "e2e": "."}
+	for _, s := range Suites {
+		pkg, named := want[s.Name]
+		if !named {
+			continue
+		}
+		// Assert
+		if s.TestParallel[pkg] < 2 {
+			t.Errorf("%s TestParallel[%q] = %d, want its wait-bound tests overlapped", s.Name, pkg, s.TestParallel[pkg])
+		}
+	}
+}
