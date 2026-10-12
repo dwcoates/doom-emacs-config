@@ -72,3 +72,21 @@ The owner answered "continue" to the proposed layout and questions
     not draw them on restore (it records each at INFO), so an old merge
     bubble opens without those tabs, and that old resolution's agent rows
     draw as loose rows beneath its strip.
+
+### 2. A fixing attempt is its own row (feed.proto)
+
+- **What**: the fixing sub-subtab is the `tests_run_fixing` arm
+  (`FeedMergeTabTestsRunFixing`), a row parented to its run's row, instead of
+  an optional field on `FeedMergeTabTestsRun`. A fixing attempt's agent rows
+  are parented to the fixing row.
+- **Why**: a row is replaced whole on every push. With the fixing on the run's
+  row, every change of the fixing's state (live, waiting on the user,
+  settled) had to republish the run's suites and their output. The daemon
+  would then have had to keep that output in memory, and keep it in its
+  progress record so a resumed fixing attempt could redraw the run. As its
+  own row, the fixing is published alone, and the run's row is written only
+  by the run.
+- **Consequences**: the run's subtab draws its output from its own row and
+  its fixing sub-subtab from its child row. A commit's conflict resolution
+  stays on the commit's row, because the owner asked for it as a section of
+  the commit's tab rather than a tab of its own.
