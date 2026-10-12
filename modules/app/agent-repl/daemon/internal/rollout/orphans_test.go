@@ -179,7 +179,7 @@ func TestTheTakeoverClaimsAnOrphanOnTheJoiningReadOnlyHandle(t *testing.T) {
 	// Arrange: a successor handed NOTHING never promoted its handle inside
 	// an adoption, so the takeover is the first writer it has (live deploy
 	// 2026-09-24 15:07, `wsm: handle is read-only` x3).
-	h := newHarness(t)
+	h := newFileHarness(t)
 	ws := orphan(t, h)
 	h.joiningHandle(t)
 
