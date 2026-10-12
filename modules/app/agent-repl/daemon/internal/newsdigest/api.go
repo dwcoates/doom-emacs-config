@@ -53,6 +53,7 @@ const (
 	opStanding = "daemon.newsdigest.standing"
 	opRestand  = "daemon.newsdigest.restand"
 	opWeek     = "daemon.newsdigest.week"
+	opIpo      = "daemon.newsdigest.ipo"
 )
 
 // Production windows.

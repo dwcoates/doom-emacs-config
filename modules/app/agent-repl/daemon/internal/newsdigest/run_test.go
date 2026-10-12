@@ -562,3 +562,104 @@ func TestADigestsHeaderCarriesTheSDKVersion(t *testing.T) {
 		})
 	}
 }
+
+func TestADigestLeadsWithTheIpoOutlook(t *testing.T) {
+	// Arrange
+	w := newWorld(t)
+	w.withNewFeedEntry()
+	w.runner.text = answerJSON
+	d := w.digester()
+
+	// Act
+	if _, err := d.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+
+	// Assert
+	ipo := latestStanding(t, d).GetShown().GetIpo()
+	if ipo.GetAnthropic().GetEstimate().GetText() != "Q2 2027" || ipo.GetOpenai().GetEstimate().GetText() != "late 2027" {
+		t.Fatalf("ipo = %v, want the model's guess for each company", ipo)
+	}
+	logged := records(w.log, "info", opIpo)
+	if len(logged) != 1 || logged[0].Context["anthropic"] != "Q2 2027" || logged[0].Context["openai"] != "late 2027" {
+		t.Fatalf("records = %v, want the outlook logged once with both estimates", logged)
+	}
+}
+
+func TestTheNextDigestHandsTheModelTheLatestOutlookEvenOnceDismissed(t *testing.T) {
+	// Arrange
+	w := newWorld(t)
+	w.withNewFeedEntry()
+	w.runner.text = answerJSON
+	w.store.state.LatestID = "digest-old"
+	w.store.state.LatestOverlay = overlayWithIpo(t, wholeIpo("H2 2028"))
+	d := w.digester()
+
+	// Act
+	if _, err := d.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+
+	// Assert
+	for _, req := range w.runner.asked() {
+		if req.Site == IpoSite {
+			if !strings.Contains(req.Prompt, "estimate: H2 2028") {
+				t.Fatalf("the outlook prompt lacks the prior guess:\n%s", req.Prompt)
+			}
+			return
+		}
+	}
+	t.Fatal("no outlook call was made")
+}
+
+func TestAFailedIpoOutlookIsAModelFailureAndNoDigest(t *testing.T) {
+	// Arrange
+	w := newWorld(t)
+	w.withNewFeedEntry()
+	w.runner.text = answerJSON
+	w.runner.ipoErr = &headless.Error{Cause: headless.CauseTimeout, Detail: "5m"}
+	d := w.digester()
+
+	// Act
+	resp, err := d.Refresh(context.Background())
+
+	// Assert
+	if err != nil || !strings.Contains(resp.GetError().GetModelFailed().GetReason(), "the IPO outlook: timeout") {
+		t.Fatalf("Refresh = (%v, %v), want model_failed naming the outlook's cause", resp, err)
+	}
+	if runs := w.store.recorded(); len(runs) != 1 || runs[0].Recorded || runs[0].Digest != nil || runs[0].History != nil {
+		t.Fatalf("runs = %+v, want one unrecorded run keeping nothing", runs)
+	}
+	if _, published := d.Topic().Latest(); published {
+		t.Fatal("a digest whose outlook failed was published")
+	}
+	logged := records(w.log, "error", opModel)
+	if len(logged) != 1 || !strings.Contains(logged[0].Context["cause"].(string), "IPO outlook") || logged[0].Context["new_entries"] != 1 {
+		t.Fatalf("records = %v, want the outlook failure at ERROR with its cause", w.log.Records())
+	}
+}
+
+func TestAnUndecodableLatestDigestFailsTheRefresh(t *testing.T) {
+	// Arrange
+	w := newWorld(t)
+	w.withNewFeedEntry()
+	w.runner.text = answerJSON
+	w.store.state.LatestOverlay = []byte{0xff}
+	d := w.digester()
+
+	// Act
+	_, err := d.Refresh(context.Background())
+
+	// Assert
+	if err == nil {
+		t.Fatal("Refresh = nil, want the decode failure")
+	}
+	if len(records(w.log, "error", opIpo)) != 1 || len(w.store.recorded()) != 0 {
+		t.Fatalf("records = %v, runs = %v, want one ERROR and nothing recorded", w.log.Records(), w.store.recorded())
+	}
+	for _, req := range w.runner.asked() {
+		if req.Site == IpoSite {
+			t.Fatal("an outlook call was made with no readable prior")
+		}
+	}
+}

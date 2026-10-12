@@ -24,8 +24,14 @@ import (
 // backend item linking the fixture feed's entry, marked as a regression risk.
 const newsDigestAnswer = `{\"sections\":[{\"kind\":\"backend\",\"items\":[{\"title\":\"SDK drops subscription billing\",\"summary\":\"The SDK now needs an API key.\",\"effective\":\"2026-11-01\",\"risk\":\"Subscription sign-in in the shim stops working.\",\"links\":[{\"label\":\"Release v9\",\"url\":\"https://fixture.test/releases/v9\"}]}]}]}`
 
+// newsDigestIpoAnswer is the IPO outlook call's answer the fake claude gives.
+const newsDigestIpoAnswer = `{\"anthropic\":{\"estimate\":\"Q2 2027\",\"basis\":\"Banks were hired.\",\"links\":[{\"label\":\"Report\",\"url\":\"https://press.test/anthropic\"}]},` +
+	`\"openai\":{\"estimate\":\"late 2027\",\"basis\":\"The restructuring closed.\",\"links\":[{\"label\":\"Report\",\"url\":\"https://press.test/openai\"}]}}`
+
 // newsDigestEnv serves one Atom source from a loopback fixture server and
-// names a fake claude that answers the condensing call with newsDigestAnswer.
+// names a fake claude that answers the condensing call with newsDigestAnswer
+// and the IPO outlook call (the one run allowed WebSearch) with
+// newsDigestIpoAnswer.
 // The schedule is held off (a day's start delay), so only RefreshNewsDigest
 // runs a digest.
 func newsDigestEnv(t *testing.T) []string {
@@ -42,7 +48,10 @@ func newsDigestEnv(t *testing.T) []string {
 	sources := filepath.Join(dir, "sources.json")
 	writeTestFile(t, sources, fmt.Sprintf(
 		`[{"key":"sdk","name":"Agent SDK releases","url":%q,"home":"https://fixture.test/releases","format":"atom"}]`, srv.URL))
-	script := "#!/bin/sh\ncat > /dev/null\nprintf '%s' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"" + newsDigestAnswer + "\"}'\n"
+	envelope := func(answer string) string {
+		return "printf '%s' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"" + answer + "\"}'"
+	}
+	script := "#!/bin/sh\ncat > /dev/null\ncase \"$*\" in\n*WebSearch*) " + envelope(newsDigestIpoAnswer) + " ;;\n*) " + envelope(newsDigestAnswer) + " ;;\nesac\n"
 	return []string{
 		"AGENT_REPL_NEWS_DIGEST_SOURCES=" + sources,
 		"AGENT_REPL_NEWS_DIGEST_START_DELAY=24h",
@@ -120,6 +129,23 @@ func TestARefreshedNewsDigestCarriesItsRiskSinceLastWeek(t *testing.T) {
 		items[0].GetReason().GetText() != "Subscription sign-in in the shim stops working." ||
 		items[0].GetItem().GetEffective().GetText() != "2026-11-01" {
 		t.Fatalf("week = %v, want the marked item with its reason and date", week)
+	}
+}
+
+func TestARefreshedNewsDigestLeadsWithTheIpoOutlook(t *testing.T) {
+	t.Parallel()
+	// Arrange.
+	d := newDaemon(t, harness.Opts{ExtraEnv: newsDigestEnv(t)})
+
+	// Act.
+	shown := refreshDigest(t, d, d.WatchWebviewDaemonStream())
+
+	// Assert.
+	ipo := shown.GetIpo()
+	if ipo.GetHeading().GetText() != "IPO outlook" ||
+		ipo.GetAnthropic().GetCompany().GetText() != "Anthropic" || ipo.GetAnthropic().GetEstimate().GetText() != "Q2 2027" ||
+		ipo.GetOpenai().GetCompany().GetText() != "OpenAI" || ipo.GetOpenai().GetLinks()[0].GetUrl() != "https://press.test/openai" {
+		t.Fatalf("ipo = %v, want each company's guess from the outlook call", ipo)
 	}
 }
 
