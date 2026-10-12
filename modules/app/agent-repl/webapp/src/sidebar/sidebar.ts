@@ -35,6 +35,7 @@ import { drawRosterShown, drawWorkspaceRoster } from "./roster.js";
 import { placeOpenRowDetails } from "./row.js";
 import { installBandFit } from "./band-fit.js";
 import { createSelectionEdge } from "./selection-edge.js";
+import { installWallPhase, type WallPhaseEnv } from "./wall-phase.js";
 
 /** What every mount answers with. */
 export interface Handle {
@@ -62,6 +63,11 @@ export interface SidebarDeps {
    * with no feed to move.
    */
   workspaceSelected?: () => void;
+  /**
+   * What the wall-clock seek of the rail's looping animations reads
+   * (`wall-phase.ts`). Defaults to the page.
+   */
+  wallPhase?: WallPhaseEnv;
 }
 
 /**
@@ -152,6 +158,9 @@ export function mountSidebar(host: HTMLElement, ctx: AppContext, deps: SidebarDe
   // viewports, re-fitted after every draw and on every resize of the rail or
   // a pane.
   const bandFit = installBandFit(body);
+  // THE RAIL'S LOOPS RUN ON THE WALL CLOCK (wall-phase.ts), so neither a
+  // redraw nor a switch to another workspace's page restarts one.
+  const wallPhase = installWallPhase(host, deps.wallPhase);
 
   // A FIXED PANEL DOES NOT TRAVEL WITH ITS ROW. It is anchored to the row's
   // rectangle at the moment it was placed, so anything that moves that
@@ -206,6 +215,8 @@ export function mountSidebar(host: HTMLElement, ctx: AppContext, deps: SidebarDe
       host.hidden = false;
       // Fitted once the rail is shown, so the band measures the rail it is in.
       bandFit.refit();
+      // Seeked once the draw is in the document, where its animations run.
+      wallPhase.seek();
       selectionEdge?.observe(roster);
     },
   });
@@ -215,6 +226,7 @@ export function mountSidebar(host: HTMLElement, ctx: AppContext, deps: SidebarDe
       log.debug("disposing the workspaces rail", { operation: "sidebar.dispose" });
       stream.cancel();
       bandFit.dispose();
+      wallPhase.dispose();
       window.removeEventListener("resize", replace);
       window.removeEventListener("scroll", replace, true);
       host.removeEventListener("click", dismiss);

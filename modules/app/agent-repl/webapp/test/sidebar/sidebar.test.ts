@@ -13,6 +13,7 @@ import { GROUPING_PICK_LABELS, PREFS_KEY, drawRailHead, mountSidebar, retireStor
 import { GROUPINGS } from "../../src/sidebar/context.js";
 import { GROUPING_VIEW_KEY } from "../../src/sidebar/view.js";
 import { captureLogRecords, type LogCapture } from "../log-capture.js";
+import type { PhasedAnimation } from "../../src/sidebar/wall-phase.js";
 import { fireResize } from "../resize-observer.js";
 import {
   NOW,
@@ -307,6 +308,78 @@ describe("mounting the rail: the Recently Merged fit", () => {
     await settle();
     // Act / Assert
     expect(() => fireResize(host.querySelector('.sb-pane[data-grouping="task"]') as Element)).not.toThrow();
+  });
+});
+
+/** An endless loop of DURATION milliseconds, at no phase until sought. */
+function loopAnimation(duration: number): PhasedAnimation {
+  return {
+    currentTime: null,
+    effect: { getTiming: () => ({ duration, iterations: Infinity, delay: 0, direction: "normal" }) },
+  };
+}
+
+describe("mounting the rail: its looping animations", () => {
+  it("seeks the drawn rail's loops to the wall clock after every push", async () => {
+    // Arrange: each push draws a fresh dot, whose animation starts at 0%.
+    const drawn: PhasedAnimation[] = [];
+    const host = document.createElement("nav");
+
+    // Act
+    mountSidebar(host, ctxFor([roster({ current: "ws-other" }), roster({ current: WORKSPACE.id })]), {
+      storage: null,
+      timers: fakeTimers(),
+      wallPhase: {
+        animations: () => {
+          const dot = loopAnimation(1300);
+          drawn.push(dot);
+          return [dot];
+        },
+        now: () => 2900,
+      },
+    });
+    await settle();
+
+    // Assert
+    expect(drawn.map((dot) => dot.currentTime)).toEqual([300, 300]);
+  });
+
+  it("puts two workspaces' pages at one phase at the same instant", async () => {
+    // Arrange: one webview per workspace, each drawing its own dot.
+    const one = loopAnimation(1300);
+    const two = loopAnimation(1300);
+    const mount = (dot: PhasedAnimation): void => {
+      mountSidebar(document.createElement("nav"), ctxFor([roster()]), {
+        storage: null,
+        timers: fakeTimers(),
+        wallPhase: { animations: () => [dot], now: () => NOW },
+      });
+    };
+
+    // Act
+    mount(one);
+    mount(two);
+    await settle();
+
+    // Assert
+    expect(one.currentTime).toBe(two.currentTime);
+  });
+
+  it("stops re-seeking on a page shown again once disposed", async () => {
+    // Arrange
+    const frames: Array<() => void> = [];
+    const handle = mountSidebar(document.createElement("nav"), ctxFor([]), {
+      storage: null,
+      timers: fakeTimers(),
+      wallPhase: { animations: () => [], now: () => NOW, frame: (callback) => void frames.push(callback) },
+    });
+
+    // Act
+    handle.dispose();
+    document.dispatchEvent(new Event("visibilitychange"));
+
+    // Assert
+    expect(frames).toEqual([]);
   });
 });
 
