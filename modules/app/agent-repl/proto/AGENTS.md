@@ -211,3 +211,14 @@ and rejects stale committed or untracked stubs. Every downstream Go and
 TypeScript coverage suite follows. The command must pass. Generated `gen/go` and `gen/ts` files are contract artifacts,
 never coverage subjects or threshold inputs; coverage applies only to
 handwritten downstream Go and TypeScript source.
+
+## Performance lessons (living document)
+
+THIS SECTION IS A LIVING DOCUMENT. Whenever an important performance lesson
+about the protos and their generated code is found -- at runtime or in its tests -- add or update an entry
+here: what was slow or heavy, the evidence with numbers and the date, the fix
+and its commit (or the open item). Test-performance lessons also go into the
+`/write-tests` skill; runtime profiling and the perf-sensitive list live in
+`/profile-agent-repl`.
+
+- protobuf-es re-walks every booted dependency's closure for each file it boots; the build-time registry guard (proto/ts/registry-guard.mjs, 2ab3f843f) cut the shim's start from ~108ms to ~70ms and the webapp's 153-file boot from 0.20s to 0.13s of CPU.
