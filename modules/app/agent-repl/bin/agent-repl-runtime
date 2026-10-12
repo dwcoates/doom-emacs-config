@@ -10,7 +10,8 @@
 #   byte-compile                    byte-compile the elisp as a warning gate
 #                                   (bin/byte-compile.sh)
 #   bounce                          rebuild everything and stand the daemon
-#                                   and its shims down; Emacs starts the fresh
+#                                   down, with every other daemon serving the
+#                                   state root and every shim; Emacs starts the fresh
 #                                   daemon on its next link, and its boot
 #                                   restarts the store and sidecar onto the
 #                                   fresh build before any shim starts

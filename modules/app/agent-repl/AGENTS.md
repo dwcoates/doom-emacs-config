@@ -782,6 +782,11 @@ logs and one-off daemon requests all go through `bin/agent-repl-runtime <verb>`
 The scripts behind the verbs stay where their other callers reach them, but a
 person or an agent uses the door.
 
+A bounce (and so a hard bounce) stands down EVERY daemon serving the live state
+root, not only the one `daemon.addr` names: any `claude-repld` holding the
+state root's `wsm.db` or `daemon.lock` open is stopped, whatever build path it
+runs from, so a handover's leftover incumbent or successor never outlives it.
+
 **Any change to build, deploy, bounce or daemon-request infrastructure updates
 `bin/agent-repl-runtime`, its harness (`bin/test-agent-repl-runtime.sh`), the
 `/manage-agent-repl-runtime` skill and this section in the same commit.** Only

@@ -55,7 +55,8 @@ world() {
 }
 
 # backend PATH TRAPS [ARG...] -- start a stand-in process whose command line
-# names PATH (and ARGs), its pid left in PID; TRAPS "obeys" exits on SIGTERM,
+# names PATH (and ARGs), holding $HOLD open when that is set, its pid left in
+# PID; TRAPS "obeys" exits on SIGTERM,
 # "ignores" outlives it. Its output is closed, so the substitution that reads its pid
 # never waits on it.
 #
@@ -78,7 +79,9 @@ backend() {
     chmod +x "$path"
     # AN ORPHAN, so a stopped stand-in is reaped at once rather than lingering
     # as this shell's zombie, which `kill -0` would still call alive.
-    PID="$(bash -c '"$0" "$@" </dev/null >/dev/null 2>&1 & echo $!' "$path" "$@")"
+    # With HOLD set, the stand-in holds that file open, as a daemon holds its
+    # state root's database and lock.
+    PID="$(HOLD="${HOLD:-}" bash -c '[ -z "$HOLD" ] || exec 3>>"$HOLD"; "$0" "$@" </dev/null >/dev/null 2>&1 & echo $!' "$path" "$@")"
     STARTED+=("$PID")
 }
 
@@ -227,6 +230,40 @@ run "$w"; status=$?
 [ "$status" -eq 0 ] && gone "$advertised" &&
     pass "the daemon daemon.addr names is stopped from any build path" ||
     fail "the advertised daemon survived (exit $status): $(cat "$w/out")"
+
+# ---- every daemon of the state root goes, advertised or not ---------------
+
+world; w="$W"
+backend "$w/checkout/daemon/bin/claude-repld" ignores; advertised="$PID"
+printf '127.0.0.1:9\npid=%s\n' "$advertised" >"$w/state/daemon.addr"
+# A second daemon of this state root from another build path, which no
+# advertisement names: a handover's leftover.
+HOLD="$w/state/daemon.lock" backend "$w/deployed/daemon/bin/claude-repld" obeys; extra="$PID"
+on_call "$w" "kill -KILL $advertised"
+run "$w"; status=$?
+[ "$status" -eq 0 ] && gone "$extra" &&
+    pass "a daemon holding the state root's lock is stopped from any build path" ||
+    fail "a second daemon of the state root survived (exit $status): $(cat "$w/out")"
+
+world; w="$W"
+HOLD="$w/state/wsm.db" backend "$w/deployed/daemon/bin/claude-repld" obeys; extra="$PID"
+run "$w"; status=$?
+[ "$status" -eq 0 ] && gone "$extra" &&
+    pass "a daemon holding the state root's database is stopped from any build path" ||
+    fail "a daemon holding the database survived (exit $status): $(cat "$w/out")"
+
+world; w="$W"
+mkdir -p "$w/other-state"
+HOLD="$w/other-state/daemon.lock" backend "$w/elsewhere/daemon/bin/claude-repld" obeys; other="$PID"
+run "$w"
+kill -0 "$other" 2>/dev/null && pass "a daemon holding another state root's lock keeps running" ||
+    fail "another state root's daemon was stopped"
+
+world; w="$W"
+HOLD="$w/state/daemon.lock" backend "$w/elsewhere/bin/not-a-daemon" obeys; other="$PID"
+run "$w"
+kill -0 "$other" 2>/dev/null && pass "a process that is no daemon keeps running though it holds the lock" ||
+    fail "a process that is no daemon was stopped"
 
 # ---- a failed build stops nothing ------------------------------------------
 
