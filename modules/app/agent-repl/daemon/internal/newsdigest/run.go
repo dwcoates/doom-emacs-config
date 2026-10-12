@@ -128,8 +128,7 @@ func (d *Digester) run(ctx context.Context, trigger string, onlyIfDue bool) (out
 
 	results := d.readAll(ctx, state, since, log)
 	if err := ctx.Err(); err != nil {
-		log.Info(opRun, "the news digest run ended with its context (the daemon stood down, or the refresh's caller left); nothing was recorded", dlog.Context{"cause": err.Error()})
-		return outcome{}, err
+		return outcome{}, contextEnded(log, err)
 	}
 	sources, snapshots, material, newEntries, failed := tally(results)
 	if failed == len(results) {
@@ -156,8 +155,7 @@ func (d *Digester) run(ctx context.Context, trigger string, onlyIfDue bool) (out
 	sections, marked, err := d.condenser.condense(ctx, period, material, carried.GetSections())
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			log.Info(opRun, "the news digest run ended with its context (the daemon stood down, or the refresh's caller left); nothing was recorded", dlog.Context{"cause": ctxErr.Error()})
-			return outcome{}, ctxErr
+			return outcome{}, contextEnded(log, ctxErr)
 		}
 		return outcome{}, d.modelFailed(ctx, log, "the model could not condense the news digest", newEntries, err)
 	}
@@ -178,8 +176,7 @@ func (d *Digester) run(ctx context.Context, trigger string, onlyIfDue bool) (out
 	ipo, err := d.condenser.ipoOutlook(ctx, ended, latest.GetIpo())
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			log.Info(opRun, "the news digest run ended with its context (the daemon stood down, or the refresh's caller left); nothing was recorded", dlog.Context{"cause": ctxErr.Error()})
-			return outcome{}, ctxErr
+			return outcome{}, contextEnded(log, ctxErr)
 		}
 		return outcome{}, d.modelFailed(ctx, log, "the model could not give the news digest's IPO outlook", newEntries, err)
 	}
@@ -238,6 +235,14 @@ func (d *Digester) run(ctx context.Context, trigger string, onlyIfDue bool) (out
 		"sources_failed": failed, "carried": carried != nil, "marked": len(marked), "duration_ms": ended.Sub(started).Milliseconds(),
 	})
 	return outcome{items: items}, nil
+}
+
+// contextEnded records a run whose context ended (the daemon stood down, or
+// the refresh's caller left) before it recorded anything, and answers err.
+// Every such exit of a run is recorded here.
+func contextEnded(log dlog.Logger, err error) error {
+	log.Info(opRun, "the news digest run ended with its context (the daemon stood down, or the refresh's caller left); nothing was recorded", dlog.Context{"cause": err.Error()})
+	return err
 }
 
 // sdkVersion is the header's Agent SDK version: the one the shim last

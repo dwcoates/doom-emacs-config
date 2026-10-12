@@ -11,6 +11,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	"claude-repld/internal/dlog"
 	"claude-repld/internal/flock"
 	"claude-repld/internal/headless"
 	"claude-repld/internal/wsm"
@@ -661,5 +662,31 @@ func TestAnUndecodableLatestDigestFailsTheRefresh(t *testing.T) {
 		if req.Site == IpoSite {
 			t.Fatal("an outlook call was made with no readable prior")
 		}
+	}
+}
+
+func TestContextEndedRecordsTheRunsEndAndAnswersItsCause(t *testing.T) {
+	// Arrange
+	log := dlog.NewTestLogger()
+
+	// Act
+	err := contextEnded(log, context.Canceled)
+
+	// Assert
+	logged := records(log, "info", opRun)
+	if !errors.Is(err, context.Canceled) || len(logged) != 1 || logged[0].Context["cause"] != context.Canceled.Error() {
+		t.Fatalf("contextEnded = %v with records %v, want the cause answered and logged once", err, log.Records())
+	}
+}
+
+// TestEveryContextEndOfARunIsRecordedByContextEnded holds run to one record
+// of a run its context ended.
+func TestEveryContextEndOfARunIsRecordedByContextEnded(t *testing.T) {
+	// Act
+	counts := countInSources(t, "ended with its context", "contextEnded(log, ")
+
+	// Assert
+	if counts[0] != 1 || counts[1] != 3 {
+		t.Fatalf("records = %d and calls = %d, want one record in contextEnded and three exits through it", counts[0], counts[1])
 	}
 }

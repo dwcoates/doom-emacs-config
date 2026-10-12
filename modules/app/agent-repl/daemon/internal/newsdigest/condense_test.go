@@ -415,14 +415,72 @@ func TestValidLink(t *testing.T) {
 // TestEveryModelWrittenLinkPassesValidLink holds the package to one link
 // check: a source file checking a link's scheme on its own fails here.
 func TestEveryModelWrittenLinkPassesValidLink(t *testing.T) {
-	// Arrange
+	// Act
+	counts := countInSources(t, `Scheme != "https"`)
+
+	// Assert
+	if counts[0] != 1 {
+		t.Fatalf("the https check appears %d times in the package, want once, in validLink", counts[0])
+	}
+}
+
+func TestDecodeAnswer(t *testing.T) {
+	tests := []struct {
+		name    string
+		text    string
+		want    string
+		wantErr string
+	}{
+		{name: "a json object", text: `{"title":"T"}`, want: "T"},
+		{name: "one enclosing code fence", text: "```json\n{\"title\":\"T\"}\n```", want: "T"},
+		{name: "prose", text: "Here it is.", wantErr: "did not decode"},
+		{name: "an unknown field", text: `{"title":"T","note":"x"}`, wantErr: "did not decode"},
+		{name: "trailing data", text: `{"title":"T"} more`, wantErr: "after its json object"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			var a struct {
+				Title string `json:"title"`
+			}
+
+			// Act
+			err := decodeAnswer(tt.text, &a)
+
+			// Assert
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("decodeAnswer = %v, want an error naming %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil || a.Title != tt.want {
+				t.Fatalf("decodeAnswer = %v with %+v, want %q", err, a, tt.want)
+			}
+		})
+	}
+}
+
+// TestEveryModelAnswerIsDecodedByDecodeAnswer holds the package's parsers to
+// one strict decode: a parser building its own decoder fails here.
+func TestEveryModelAnswerIsDecodedByDecodeAnswer(t *testing.T) {
+	// Act
+	counts := countInSources(t, "stripFence(text)", "decodeAnswer(text, &a)")
+
+	// Assert
+	if counts[0] != 1 || counts[1] != 3 {
+		t.Fatalf("strict decoders = %d and decodeAnswer calls = %d, want one decoder in decodeAnswer called by the three parsers", counts[0], counts[1])
+	}
+}
+
+// countInSources counts each shape across the package's non-test sources.
+func countInSources(t *testing.T, shapes ...string) []int {
+	t.Helper()
 	files, err := filepath.Glob("*.go")
 	if err != nil {
 		t.Fatalf("glob: %v", err)
 	}
-
-	// Act
-	checks := 0
+	counts := make([]int, len(shapes))
 	for _, f := range files {
 		if strings.HasSuffix(f, "_test.go") {
 			continue
@@ -431,15 +489,9 @@ func TestEveryModelWrittenLinkPassesValidLink(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read %s: %v", f, err)
 		}
-		n := strings.Count(string(src), `Scheme != "https"`)
-		if n > 0 && f != "condense.go" {
-			t.Errorf("%s checks a link's scheme outside validLink", f)
+		for i, shape := range shapes {
+			counts[i] += strings.Count(string(src), shape)
 		}
-		checks += n
 	}
-
-	// Assert
-	if checks != 1 {
-		t.Fatalf("the https check appears %d times in the package, want once, in validLink", checks)
-	}
+	return counts
 }
