@@ -8,7 +8,7 @@ import {
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { MalformedView } from "../../../src/rpc/malformed.js";
 import { drawFeedMerge, drawFeedMergeGlyph } from "../../../src/feed/merge/merge.js";
-import { countingTicker, harness, mergeRow, rowContext } from "../harness.js";
+import { countingTicker, drawnBefore, harness, mergeRow, rowContext } from "../harness.js";
 import { oneofArms } from "../../arms.js";
 import { mergeHead } from "./fixtures.js";
 
@@ -234,5 +234,21 @@ describe("drawFeedMerge: a detached merge's switch", () => {
 
   it("draws no switch for an in-place merge", () => {
     expect(draw(mergeHead({ case: "update" })).querySelector(".merge-workspace-switch")).toBeNull();
+  });
+});
+
+// THE BADGE COMES BEFORE THE CLOCK (owner ruling, 2026-10-11).
+describe("drawFeedMerge: the badge before the clock", () => {
+  it.each([
+    ["a running merge", { case: "update" } as const],
+    ["a landed merge", { case: "success", endedAtMs: 12_000n, commit: "abc1234" } as const],
+    ["a failed merge", { case: "failed", endedAtMs: 12_000n, summary: "tests never passed" } as const],
+  ])("draws %s's badge before its clock", (_name, result) => {
+    // Arrange
+    const h = harness();
+    // Act
+    const el = drawFeedMerge(mergeHead(result), rowContext(h.ctx, mergeRow("m1")));
+    // Assert
+    expect(drawnBefore(el.querySelector(".merge-badge"), el.querySelector(".merge-clock"))).toBe(true);
   });
 });

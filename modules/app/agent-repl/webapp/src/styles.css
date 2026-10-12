@@ -6195,18 +6195,9 @@ ar-button.outcome-marker-pill {
   font-family: ui-monospace, monospace;
   overflow-wrap: anywhere;
 }
-/* THE SHELL HEAD'S TWO CLOCKS HOLD A FIXED FOOTPRINT (owner rule, 2026-09-23:
-   the user owns the scroll). The head wraps (`flex-wrap`), and a clock label
-   repainted every second that grew by a unit ("59s" -> "1m 0s") could push
-   its neighbor onto a new line and move everything under the reader. Each is
-   one unbreakable, tabular run with room reserved for its longest usual
-   label ("59m 59s"; "quiet for 59m 59s"). */
+/* The shell head's clock. Its fixed footprint is `.reserved-clock`'s. */
 .shell-clock {
   color: var(--info-time);
-  font-variant-numeric: tabular-nums;
-  display: inline-block;
-  white-space: nowrap;
-  min-width: 7ch;
 }
 /* "quiet for 12s": the client's clock over the daemon's last observed append.
    Muted and italic like every other aside, NOT an alarm hue — quietness is a
@@ -6214,10 +6205,37 @@ ar-button.outcome-marker-pill {
 .shell-quiet {
   color: var(--muted);
   font-style: italic;
-  font-variant-numeric: tabular-nums;
+}
+
+/* A CARD HEAD'S CLOCK HOLDS ITS WIDTH (owner rulings, 2026-09-23 and
+   2026-10-11; src/elapsed-clock.ts). A head wraps, and a clock repainted every
+   second that grew ("59s" -> "1m 0s") slid what follows it, or pushed it onto
+   a new line and moved everything under the reader. A reserved clock is one
+   unbreakable, tabular run as wide as the widest reading it can tick to: a
+   zero-height ghost above the reading draws every reserved label, one per
+   line (`--clock-reserve-labels`, from the formatter itself), so the box is
+   the widest of them and never changes width. The ghost is generated content,
+   so it is never selected or copied. */
+.reserved-clock {
   display: inline-block;
   white-space: nowrap;
-  min-width: 17ch;
+  font-variant-numeric: tabular-nums;
+}
+.reserved-clock::before {
+  content: var(--clock-reserve-labels);
+  display: block;
+  height: 0;
+  overflow: hidden;
+  visibility: hidden;
+  white-space: pre;
+}
+
+/* A STOP'S ANSWER STAYS ON THE CONTROL'S LINE (owner ruling, 2026-10-11): the
+   note beside a stop button never wraps, so its arrival and its expiry change
+   no line's height. */
+.shell-stop,
+.subagent-stop {
+  white-space: nowrap;
 }
 .shell-spool {
   margin-top: 0.3rem;
