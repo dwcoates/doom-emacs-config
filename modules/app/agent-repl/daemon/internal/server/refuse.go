@@ -167,6 +167,12 @@ func (s *server) asRefusal(err error) (refusal, bool) {
 	// refusal arms".
 	case errors.Is(err, rollout.ErrNoTransferAnnounced):
 		return s.fill(refusal{Arm: "no_transfer_announced", Reason: err.Error()}), true
+	// BEFORE not_yet_adopted, which it wraps: a refused mid-work adoption is
+	// not a rendezvous still under way, and a caller that retries it as one
+	// only flips its webview between the two daemons until the incumbent's
+	// next transfer.
+	case errors.Is(err, rollout.ErrMidWorkRefused):
+		return s.fill(refusal{Arm: "transfer_deferred", Reason: err.Error()}), true
 	case errors.Is(err, rollout.ErrNotYetAdopted):
 		return s.fill(refusal{Arm: "not_yet_adopted", Reason: err.Error()}), true
 	case errors.Is(err, rollout.ErrJoining):

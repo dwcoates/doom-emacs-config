@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"connectrpc.com/connect"
@@ -216,6 +217,87 @@ func TestAnAdoptionOfAnUnknownWorkspaceIsRecordedAtInfo(t *testing.T) {
 			}
 			if !seen {
 				t.Fatalf("%s(ws-nope) recorded %+v, want an INFO naming the unknown_workspace arm", tc.rpc, log.records)
+			}
+		})
+	}
+}
+
+// TestAdoptHostAnswersTransferDeferredForARefusedMidWorkAdoption pins that a
+// refused mid-work adoption reaches Emacs as its own arm rather than as the
+// not_yet_adopted it wraps, which Emacs retries on a timer.
+func TestAdoptHostAnswersTransferDeferredForARefusedMidWorkAdoption(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Rollout.adoptHostErr = fmt.Errorf("rollout: adopt %q: %w", "w1", rollout.ErrMidWorkRefused)
+
+	// Act.
+	resp, err := h.Client.AdoptHostWorkspace(context.Background(),
+		connect.NewRequest(&agentreplv1.AdoptHostWorkspaceRequest{Workspace: ref()}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("AdoptHostWorkspace: %v", err)
+	}
+	if resp.Msg.GetError().GetTransferDeferred() == nil {
+		t.Fatalf("result = %v, want transfer_deferred", resp.Msg.GetResult())
+	}
+}
+
+// TestAdoptWebAnswersTransferDeferredForARefusedMidWorkAdoption is the page's
+// half of the same arm.
+func TestAdoptWebAnswersTransferDeferredForARefusedMidWorkAdoption(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Rollout.adoptWebErr = fmt.Errorf("rollout: adopt %q: %w", "w1", rollout.ErrMidWorkRefused)
+
+	// Act.
+	resp, err := h.Client.AdoptWebWorkspace(context.Background(),
+		connect.NewRequest(&agentreplv1.AdoptWebWorkspaceRequest{Workspace: ref()}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("AdoptWebWorkspace: %v", err)
+	}
+	if resp.Msg.GetError().GetTransferDeferred() == nil {
+		t.Fatalf("result = %v, want transfer_deferred", resp.Msg.GetResult())
+	}
+}
+
+// TestARolloutRefusalOfAnAdoptionIsRecordedAtInfo pins that the rollout's own
+// refusals of an adopt call leave a line at the default verbosity: on
+// 2026-10-11 hundreds of the host's not_yet_adopted answers were recorded only
+// at DEBUG, so no log said what Emacs kept being told.
+func TestARolloutRefusalOfAnAdoptionIsRecordedAtInfo(t *testing.T) {
+	tests := []struct {
+		name string
+		web  bool
+		rpc  string
+	}{
+		{name: "the page's adoption", web: true, rpc: "AdoptWebWorkspace"},
+		{name: "the host's adoption", web: false, rpc: "AdoptHostWorkspace"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			log := &recordingLogger{}
+			h := newHarness(t, func(deps *Deps) { deps.Log = &fakeSurfaces{global: log, workspace: log} })
+			h.Rollout.adoptHostErr = rollout.ErrNotYetAdopted
+			h.Rollout.adoptWebErr = rollout.ErrNotYetAdopted
+
+			// Act.
+			if _, err := adoptBoth(h, tc.web, ref()); err != nil {
+				t.Fatalf("%s: %v", tc.rpc, err)
+			}
+
+			// Assert.
+			var seen bool
+			for _, rec := range log.at("INFO") {
+				if rec.Operation == tc.rpc && rec.Context["arm"] == "not_yet_adopted" {
+					seen = true
+				}
+			}
+			if !seen {
+				t.Fatalf("%s recorded %+v, want an INFO naming the not_yet_adopted arm", tc.rpc, log.records)
 			}
 		})
 	}
