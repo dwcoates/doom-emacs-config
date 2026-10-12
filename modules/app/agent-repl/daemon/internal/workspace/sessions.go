@@ -186,8 +186,8 @@ type FleetDeps struct {
 	// waiting ten minutes.
 	VendorRetryWindow time.Duration
 	// Steps is told every step of every bring-up this fleet runs, whoever
-	// asked for it: the editor's startup (internal/startup) prints them and
-	// gates each tab's go-ahead on them.
+	// asked for it: the editor's opens (internal/opentabs) relay them and
+	// answer each workspace `opened` on them.
 	Steps opentabs.StepSink
 	// SessionsUp is told that a session has come up on a workspace, however
 	// it came up -- a start, a retried vendor start, a relaunch's resume, a
@@ -378,7 +378,8 @@ func (f *Fleet) ResumeColdDetached(ws ids.WorkspaceID, resume ColdResume, done f
 // context the work ran under.
 // Detach runs work no request waits on under the fleet's own lifetime, joined
 // by DrainStarts at the daemon's exit exactly as StartDetached's starts are.
-// The editor's startup runs its bring-up here.
+// The editor's opens run their bring-ups here, and a withheld workspace's
+// stand-down runs here too.
 func (f *Fleet) Detach(run func(context.Context)) {
 	f.runDetached(func(ctx context.Context) error { run(ctx); return nil }, nil)
 }
