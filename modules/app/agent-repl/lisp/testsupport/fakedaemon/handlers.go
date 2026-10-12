@@ -392,3 +392,54 @@ func (s *fakeServer) DismissNewsDigest(ctx context.Context, req *connect.Request
 func (s *fakeServer) RefreshNewsDigest(ctx context.Context, req *connect.Request[v1.RefreshNewsDigestRequest]) (*connect.Response[v1.RefreshNewsDigestResponse], error) {
 	return handleUnary[v1.RefreshNewsDigestRequest, v1.RefreshNewsDigestResponse](ctx, s, "RefreshNewsDigest", req.Msg)
 }
+
+// OpenTabs is Emacs's ask to open its workspaces (endpoint_open_tabs.proto).
+// It is the one Emacs stream that ENDS by itself: the fake answers every
+// workspace of the request `opened` with its `ready` arm, in the request's
+// order, then sends `finished`, as a daemon whose every workspace is served at
+// once and whose pages have drawn would. A request breaching the validation
+// invariant (no workspaces, an unset page arm) is refused before anything is
+// sent.
+func (s *fakeServer) OpenTabs(ctx context.Context, req *connect.Request[v1.OpenTabsRequest], stream *connect.ServerStream[v1.OpenTabsResponse]) error {
+	s.record(ctx, "OpenTabs", req.Msg)
+	err := validateRequest(req.Msg)
+	if err == nil && len(req.Msg.GetWorkspaces()) == 0 {
+		err = fmt.Errorf("workspaces: an OpenTabs request names at least one workspace")
+	}
+	// The generic invariant does not descend into repeated fields, so each
+	// workspace (its ref, its REQUIRED page arm) is held to it here.
+	for i, w := range req.Msg.GetWorkspaces() {
+		if err != nil {
+			break
+		}
+		err = validateMessage(w.ProtoReflect(), fmt.Sprintf("OpenTabsRequest.workspaces[%d]", i), 1)
+	}
+	if err != nil {
+		logError("fakedaemon.stream.invalid-request", "refused a stream request that breaches the validation invariant",
+			map[string]any{"method": "OpenTabs", "error": err.Error()})
+		return connect.NewError(connect.CodeInvalidArgument, err)
+	}
+	for _, w := range req.Msg.GetWorkspaces() {
+		opened := &v1.OpenTabsResponse{Frame: &v1.OpenTabsResponse_Opened{Opened: &v1.OpenTabsOpened{
+			Workspace: w.GetWorkspace(),
+			Outcome:   &v1.OpenTabsOpened_Ready{Ready: &v1.OpenTabsOpenedReady{}},
+		}}}
+		if err := stream.Send(opened); err != nil {
+			return err
+		}
+	}
+	total := uint32(len(req.Msg.GetWorkspaces()))
+	return stream.Send(&v1.OpenTabsResponse{Frame: &v1.OpenTabsResponse_Finished{
+		Finished: &v1.OpenTabsFinished{Ready: total, Total: total},
+	}})
+}
+
+// ReportPageDrawn is a web page's report (endpoint_report_page_drawn.proto);
+// Emacs never sends it, so the fake refuses it loudly like the page mux.
+func (s *fakeServer) ReportPageDrawn(ctx context.Context, req *connect.Request[v1.ReportPageDrawnRequest]) (*connect.Response[v1.ReportPageDrawnResponse], error) {
+	s.record(ctx, "ReportPageDrawn", req.Msg)
+	logWarn("fakedaemon.stream.not-mocked", "a page verb this fake does not mock was called",
+		map[string]any{"method": "ReportPageDrawn"})
+	return nil, connect.NewError(connect.CodeUnimplemented,
+		fmt.Errorf("fakedaemon mocks only Emacs's calls; ReportPageDrawn is a web page's"))
+}
