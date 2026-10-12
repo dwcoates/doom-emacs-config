@@ -35,6 +35,7 @@ import { GROUPINGS, type Grouping, type SidebarContext } from "./context.js";
 import { drawRosterShown, drawWorkspaceRoster } from "./roster.js";
 import { placeOpenRowDetails } from "./row.js";
 import { installBandFit } from "./band-fit.js";
+import { applySearch, createRailSearch, type RailSearch } from "./search.js";
 import { createSelectionEdge } from "./selection-edge.js";
 import { installWallPhase, type WallPhaseEnv } from "./wall-phase.js";
 import { createUnseenGate, unseenEnv, type UnseenEnv } from "./unseen.js";
@@ -157,12 +158,22 @@ export function mountSidebar(host: HTMLElement, ctx: AppContext, deps: SidebarDe
 
   const body = document.createElement("div");
   body.className = "sb-scroll";
-  const head = drawRailHead(sc);
-  host.replaceChildren(head.element, body);
   // THE BAND FIT (band-fit.ts): the Hidden Workspaces and Recently Merged
   // viewports, re-fitted after every draw and on every resize of the rail or
   // a pane.
   const bandFit = installBandFit(body);
+  // THE SEARCH NARROWS THE DRAWN ROWS (search.ts): on every keystroke, and
+  // again after every push, since a push throws the narrowed drawing away.
+  const search = createRailSearch((query) => {
+    const outcome = applySearch(body, query);
+    log.debug("narrowed the rail to the search", {
+      operation: "sidebar.search",
+      context: { query, ...outcome },
+    });
+    bandFit.refit();
+  });
+  const head = drawRailHead(sc, search);
+  host.replaceChildren(head.element, search.bar, body);
   // THE RAIL'S LOOPS RUN ON THE WALL CLOCK (wall-phase.ts), so neither a
   // redraw nor a switch to another workspace's page restarts one.
   const wallPhase = installWallPhase(host, deps.wallPhase);
@@ -226,6 +237,7 @@ export function mountSidebar(host: HTMLElement, ctx: AppContext, deps: SidebarDe
     const drawn = drawWorkspaceRoster(roster, sc);
     attention.endPass();
     body.replaceChildren(drawn);
+    applySearch(body, search.query());
     // The picker is a copy of the grouping too, drawn once at mount.
     head.paintGrouping(sc.view.track(GROUPING_VIEW_KEY, drawRosterShown(roster.shown, "WorkspaceRoster.shown"), head.paintGrouping));
     // A detail panel is fixed-positioned so it can leave the rail, which
@@ -273,7 +285,7 @@ export interface RailHead {
 }
 
 /**
- * The rail's header: its title and the grouping picker.
+ * The rail's header: the search toggle, its title and the grouping picker.
  *
  * The picker SELECTS between resolved views — it shows one pane and hides
  * the others — so switching costs no round trip to draw and derives nothing.
@@ -282,9 +294,10 @@ export interface RailHead {
  * is drawn once at mount, outside what a push replaces, so each push paints
  * it again.
  */
-export function drawRailHead(sc: SidebarContext): RailHead {
+export function drawRailHead(sc: SidebarContext, search: RailSearch): RailHead {
   const head = document.createElement("div");
   head.className = "sb-head";
+  head.appendChild(search.toggle);
 
   const title = document.createElement("span");
   title.className = "sb-title";
