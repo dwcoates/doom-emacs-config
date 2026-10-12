@@ -21,6 +21,7 @@ var statusArms = []string{
 	"start_failed", "degraded", "dead", "turn_died", "merging",
 	"merge_queued", "merge_waiting", "merge_failed", "merged", "none",
 	"inactive", "closing", "daemon_impaired", "waiting", "question",
+	"opening",
 }
 
 // The merge arms of RosterRow.status — the ones that render a RECYCLE GLYPH
@@ -132,6 +133,10 @@ type wsState struct {
 	// bringingUp reports a bring-up of this workspace's session under way
 	// (SetBringingUp). It is what holds the row's availability at `pending`.
 	bringingUp bool
+	// opening reports an OpenTabs in flight that names this workspace and has
+	// not answered it `opened` yet (SetOpening). It draws the `opening` arm
+	// over every other.
+	opening bool
 	// vendorStart is where the vendor-start run stands (SetVendorStart): the
 	// vendor rung draws it, and while it stands the link's own account of a
 	// dead route is not agent-repl's fault.

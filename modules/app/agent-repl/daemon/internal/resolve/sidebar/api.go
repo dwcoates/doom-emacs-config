@@ -130,6 +130,11 @@ type Resolver interface {
 	// raises it for its own duration. While it stands, and no shim link has
 	// connected yet, the row's availability is `pending`.
 	SetBringingUp(ws ids.WorkspaceID, bringingUp bool)
+	// SetOpening raises (true) or lowers (false) the fact that an OpenTabs in
+	// flight names the workspace and has not answered it `opened` yet. While
+	// it stands the row draws `opening`, over every other arm. The OpenTabs
+	// coordinator is the one caller.
+	SetOpening(ws ids.WorkspaceID, opening bool)
 	// SetVendorStart installs where the workspace's vendor-start run stands
 	// (the fleet's vendor-start faults). Any run standing draws `vendor_fault`
 	// (turquoise); the footer carries which of the three steps it is (owner

@@ -19,15 +19,23 @@ import (
 // only one resolver therefore cannot split the surfaces: the roster has no
 // claim to make that the footer did not make first.
 //
-// ONE ARM SITS ABOVE THE PROJECTION: `inactive`, a registered workspace with
-// no open perspective and nothing live behind it. It dominates every session
-// state, and no footer is ever drawn for it.
+// TWO ARMS SIT ABOVE THE PROJECTION. `opening` FIRST: an OpenTabs names the
+// workspace and has not answered it `opened` yet, so the row is grey and not
+// selectable whatever its session or its registry record says, `inactive`
+// included (a closed workspace the editor is reopening is opening, not
+// inactive). Only an open in flight draws it, so a daemon that restarted under
+// open tabs draws them as they are. Then `inactive`, a registered workspace
+// with no open perspective and nothing live behind it. Each dominates every
+// session state, and no footer is ever drawn for either.
 //
 // WITHIN A CLAIM the roster draws the footer's step as its own arm
 // (`projectArm`), except on the idle rung, whose detail is the roster's own
 // ruling (`idleArm`): an unread turn end holds the row over detached work, and
 // a read one is drawn partial.
 func statusArm(s *wsState, rec wsm.Workspace, session *wsm.Session, status *frontendv1.FooterStatus, log dlog.Logger) string {
+	if s.opening {
+		return "opening"
+	}
 	if !s.live(session) && rec.Closed {
 		return "inactive"
 	}
@@ -314,6 +322,9 @@ func setStatus(row *frontendv1.RosterRow, arm string, log dlog.Logger) {
 	case "waiting":
 		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"waiting\""})
 		row.Status = &frontendv1.RosterRow_Waiting{Waiting: &frontendv1.RosterRowStatusWaiting{}}
+	case "opening":
+		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"opening\""})
+		row.Status = &frontendv1.RosterRow_Opening{Opening: &frontendv1.RosterRowStatusOpening{}}
 	case "inactive":
 		log.Debug("daemon.sidebar.status_decision", "selected a roster status branch", dlog.Context{"function": "status", "branch": "case \"inactive\""})
 		row.Status = &frontendv1.RosterRow_Inactive{Inactive: &frontendv1.RosterRowStatusInactive{}}
