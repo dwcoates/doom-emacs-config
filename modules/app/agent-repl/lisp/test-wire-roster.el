@@ -374,17 +374,25 @@ reserved."
                   "{\"lastSelected\":{\"atMs\":\"1756400000000\"}}")
                  '("RosterRowWhen" lastSelected "unknown field"))))
 
-(ert-deftest agent-repl-test-wire-roster-when-active-carries-its-instant ()
-  "Regression: the daemon added a `active' (last-activity) arm to the when
-column (2026-09-15); the strict decoder must accept it or it rejects the whole
-WatchWorkspaceRoster push and every tab falls back to a stale blue status."
+(ert-deftest agent-repl-test-wire-roster-when-turn-ended-carries-its-instant ()
+  "Regression: the daemon's when column counts from the last turn end, the
+`turnEnded' arm (2026-10-11); the strict decoder must accept it or it rejects
+the whole WatchWorkspaceRoster push and every tab falls back to a stale blue
+status."
   (should (equal (agent-repl-test-wire-roster--decode
                   #'agent-repl-wire-decode-roster-row-when
+                  "{\"turnEnded\":{\"atMs\":\"1756400000000\"}}")
+                 '(:arm :turn-ended :value (:at-ms 1756400000000)))))
+
+(ert-deftest agent-repl-test-wire-roster-when-retired-active-is-refused ()
+  "The retired `active' arm (field 3, reserved) is an unknown field now."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-row-when
                   "{\"active\":{\"atMs\":\"1756400000000\"}}")
-                 '(:arm :active :value (:at-ms 1756400000000)))))
+                 '("RosterRowWhen" active "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-roster-when-created-carries-its-instant ()
-  "Regression: the `created' fallback arm must decode too (see `active')."
+  "Regression: the `created' fallback arm must decode too (see `turnEnded')."
   (should (equal (agent-repl-test-wire-roster--decode
                   #'agent-repl-wire-decode-roster-row-when
                   "{\"created\":{\"atMs\":\"1756400000000\"}}")
@@ -401,7 +409,7 @@ WatchWorkspaceRoster push and every tab falls back to a stale blue status."
   "The daemon chooses ONE value for the column; two is a breach."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-roster-row-when
-                  "{\"active\":{\"atMs\":\"1\"},\"merged\":{\"atMs\":\"2\"}}")
+                  "{\"turnEnded\":{\"atMs\":\"1\"},\"merged\":{\"atMs\":\"2\"}}")
                  '("RosterRowWhen" shown "oneof has more than one arm set"))))
 
 (ert-deftest agent-repl-test-wire-roster-row-without-when-is-a-breach ()
