@@ -311,13 +311,34 @@ func (d *Discoverer) Scan() []Target {
 	return out
 }
 
-// spoolPatterns answers the globs that find spools under root: below root
-// itself when root IS a uid dir (claude-<uid>), else below root's uid dirs.
+// spoolPatterns answers the globs that find spools under root, choosing ONE
+// spelling so a parent's other entries are never read.
+//
+// ROOT IS THE UID DIR'S PARENT when it holds a claude-* entry, and always when
+// it is the system temp dir (production's /tmp is never itself a uid dir, even
+// before the vendor has made one); then only its claude-* entries are globbed.
+// Otherwise root IS the uid dir (a mock harness points the flag straight at
+// the directory its vendor writes into, whatever it is named), and it is
+// globbed below itself. Telling the two apart lists root's names only: no
+// entry of it is stat'ed or opened.
 func spoolPatterns(root string) []string {
-	if uidDir, _ := filepath.Match("claude-*", filepath.Base(root)); uidDir {
-		return []string{filepath.Join(root, "*", "*", "tasks", "*.output")}
+	uidDirs, _ := filepath.Glob(filepath.Join(root, "claude-*"))
+	return spoolPatternsFor(root, len(uidDirs) > 0)
+}
+
+// spoolPatternsFor is spoolPatterns with root's claude-* children counted.
+func spoolPatternsFor(root string, hasUIDDirs bool) []string {
+	if hasUIDDirs || isSystemTemp(root) {
+		return []string{filepath.Join(root, "claude-*", "*", "*", "tasks", "*.output")}
 	}
-	return []string{filepath.Join(root, "claude-*", "*", "*", "tasks", "*.output")}
+	return []string{filepath.Join(root, "*", "*", "tasks", "*.output")}
+}
+
+// isSystemTemp reports whether root is the system temp dir, which holds every
+// process's scratch and is never a vendor uid dir.
+func isSystemTemp(root string) bool {
+	clean := filepath.Clean(root)
+	return clean == "/tmp" || clean == "/private/tmp"
 }
 
 // Classify maps one path to a Target. ok is false only for a path that matches
