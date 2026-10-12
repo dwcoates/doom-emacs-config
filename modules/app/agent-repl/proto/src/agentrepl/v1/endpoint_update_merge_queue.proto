@@ -21,10 +21,6 @@ message UpdateMergeQueueRequest {
     UpdateMergeQueueResume resume = 2;
     // Take ONE workspace's merge off the queue.
     UpdateMergeQueueEvict evict = 3;
-    // Move ONE workspace's waiting merge to the front of its queue: ahead of
-    // every ordinary merge waiting, behind the merge running and behind every
-    // merge already put at the front (as a merge requested with front is).
-    UpdateMergeQueueFront front = 4;
     // HOLD THE ROLLOUTS, daemon-wide: merges keep running and landing exactly
     // as they do, but a landing in the daemon's own checkout no longer tells
     // the deploy, so nothing redeploys, hot-reloads or bounces the running
@@ -35,7 +31,16 @@ message UpdateMergeQueueRequest {
     // End the hold. Nothing is deployed retroactively: the next landing, or a
     // deploy by hand, rolls out everything that landed meanwhile.
     UpdateMergeQueueReleaseRollouts release_rollouts = 6;
+    // Move ONE workspace's waiting merge one place UP its queue, swapping it
+    // with the waiting merge directly ahead of it.
+    UpdateMergeQueueMoveUp move_up = 7;
+    // Move ONE workspace's waiting merge one place DOWN its queue, swapping it
+    // with the waiting merge directly behind it.
+    UpdateMergeQueueMoveDown move_down = 8;
   }
+  // The retired move-to-front action (2026-10-12): one-place moves replaced it.
+  reserved 4;
+  reserved "front";
 }
 message UpdateMergeQueuePause {
   // WHICH repository's queue. UNSET = every repository that has a queue
@@ -57,11 +62,20 @@ message UpdateMergeQueueEvict {
 // stops is the daemon's own.
 message UpdateMergeQueueHoldRollouts {}
 message UpdateMergeQueueReleaseRollouts {}
-// A merge already at the front, or already running, is answered with success
-// and left where it is: it is where the request asks it to be. A workspace
-// with no merge on any queue is `no_such_queued_merge`.
-message UpdateMergeQueueFront {
-  // Whose merge to move.
+// A ONE-PLACE MOVE passes exactly one WAITING merge: never the merge running,
+// and never a merge only requested (in nobody's line yet). The moved merge
+// takes the passed merge's front mark, so every merge put at the front still
+// stands ahead of every ordinary merge waiting. A merge with no waiting merge
+// on that side of it, or a merge not waiting (running, or only requested), is
+// answered with success and left where it is. A workspace with no merge on
+// any queue is `no_such_queued_merge`.
+message UpdateMergeQueueMoveUp {
+  // Whose merge to move one place toward the front.
+  workspace.v1.WorkspaceRef workspace = 1;
+}
+// One place toward the back; see UpdateMergeQueueMoveUp.
+message UpdateMergeQueueMoveDown {
+  // Whose merge to move one place toward the back.
   workspace.v1.WorkspaceRef workspace = 1;
 }
 
