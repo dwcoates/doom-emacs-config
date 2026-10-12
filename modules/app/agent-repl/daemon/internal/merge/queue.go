@@ -410,8 +410,7 @@ func (o *orchestrator) republishQueue(ctx context.Context, repo wsm.RepoKey) err
 				return err
 			}
 			if shown {
-				o.publishTab(entry.Workspace, lease, TabQueue, 1,
-					queueTab(view.snapshot(entries, entry.Workspace), state))
+				o.publishRoundTab(entry.Workspace, lease, TabQueue, 1, queueTab(view.snapshot(entries, entry.Workspace), state))
 				drawn = append(drawn, string(entry.Workspace))
 			} else {
 				o.log(ctx, entry.Workspace).Debug("daemon.merge.queue", "an admitted merge's run is not registered yet; its admission draws its queue tab",
@@ -519,7 +518,7 @@ func (o *orchestrator) settleLeavingQueueTab(ctx context.Context, repo wsm.RepoK
 			state.startedMS = queued
 		}
 	}
-	o.publishTab(ws, ledger, TabQueue, 1, queueTab(view.snapshot(entries, ws), state))
+	o.publishRoundTab(ws, ledger, TabQueue, 1, queueTab(view.snapshot(entries, ws), state))
 	o.log(ctx, ws).Info(op, "settled the leaving merge's queue tab on the queue as it stood when it left", dlog.Context{
 		"workspace": string(ws), "repo": string(repo), "ledger": string(ledger), "why": why, "in_line": len(entries)})
 	return nil
@@ -1022,7 +1021,7 @@ func (o *orchestrator) queueStandings(entries []wsm.MergeQueueEntry) ([]*fronten
 		if r, running := o.runFor(entry.Workspace); running {
 			if active := r.activeRound(); active.kind != "" && active.kind != TabQueue {
 				merging = &frontendv1.FeedMergeQueueMerging{
-					ActiveTab:        tabLabel(active.kind, active.n),
+					ActiveTab:        frontTabLabel(active),
 					StageEnteredAtMs: active.started.UnixMilli(),
 				}
 			}

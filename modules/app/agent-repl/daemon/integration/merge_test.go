@@ -417,12 +417,12 @@ func TestKillingAWorkspaceAbandonsItsQueuedMergeWithTheCloseAsTheCause(t *testin
 }
 
 // ---------------------------------------------------------------------------
-// The Emacs-repo method: a conflicting branch opens the conflicts tab, briefs
+// The Emacs-repo method: a conflicting branch opens a conflict section on its commit, briefs
 // the agent once with the spliced brief, then parks.
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// The test gate: pass settles the run; failure opens the fixes tab with the
+// The test gate: pass settles the run; failure opens a fixing attempt with the
 // brief and parks on escalation; no automatic re-run.
 // ---------------------------------------------------------------------------
 
@@ -492,7 +492,7 @@ func TestATestGateFailureIsNeverAutomaticallyRerun(t *testing.T) {
 	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws, Source: harness.OwnBranch(false)})); err != nil {
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
-	// The fixes tab opening and briefing the agent is proof the gate ran once
+	// The fixing attempt opening and briefing the agent is proof the gate ran once
 	// and reached the fixes step, without yet answering the brief.
 	f.shim.ExpectStartTurn()
 
@@ -843,7 +843,7 @@ func TestAOneShotMergeOnANonSelfRepoNeverTriggersTheDeploy(t *testing.T) {
 
 // ---------------------------------------------------------------------------
 // The non-Emacs-repo method: only pre/post prompts, never the Emacs-only
-// merge/conflicts/tests/fixes tabs.
+// rebasing and tests tabs.
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
@@ -1159,7 +1159,7 @@ func displacedTurnAcrossABounce(t *testing.T) (*fixture, *harness.Daemon, *shimv
 
 // ---------------------------------------------------------------------------
 // Conflicts: briefed exactly once per conflict commit; parked guidance lands
-// on the conflicts tab, never as a root-feed row.
+// on the conflicted commit's subtab, never as a root-feed row.
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
@@ -1303,10 +1303,10 @@ func TestTheTestsTabPaintsANSISpansFromTheScriptedOutput(t *testing.T) {
 	// this test's concern, only that the ANSI escape was parsed into a span
 	// wherever it landed, and that no raw escape reached the wire on any of
 	// them.
-	testsRow := f.awaitRowInFeed(mergeRow.GetId(), "the settled tests tab", func(row *frontendv1.FeedRow) bool {
-		return row.GetMergeTab().GetTests().GetSettled() != nil
+	runRow := f.awaitRowInFeed(mergeRow.GetId(), "the settled run", func(row *frontendv1.FeedRow) bool {
+		return row.GetMergeTab().GetTestsRun().GetSettled() != nil
 	})
-	suites := testsRow.GetMergeTab().GetTests().GetSuites()
+	suites := runRow.GetMergeTab().GetTestsRun().GetOutput().GetSuites()
 	var found bool
 	for _, suite := range suites {
 		for _, span := range suite.GetOutput() {
