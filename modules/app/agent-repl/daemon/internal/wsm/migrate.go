@@ -126,7 +126,16 @@ var migrations = []migration{
 	{To: 33, Name: "merge_workspaces", Kind: MigrationAdditive, DDL: mergeWorkspacesDDL},
 	{To: 34, Name: "commit_count", Kind: MigrationAdditive, DDL: commitCountDDL},
 	{To: 35, Name: "workspaces_place", Kind: MigrationAdditive, DDL: workspacePlaceDDL},
+	{To: 36, Name: "merge_queue_front", Kind: MigrationAdditive, DDL: mergeQueueFrontDDL},
 }
+
+// mergeQueueFrontDDL records whether a merge asked to go to the FRONT of its
+// queue (MergeSource.Front). IT IS ADDITIVE: the previous build's INSERT names
+// no such column, so a row it writes takes the default 0 -- an ordinary merge,
+// which is exactly what that build asked for.
+const mergeQueueFrontDDL = `
+ALTER TABLE merge_queue ADD COLUMN source_front INTEGER NOT NULL DEFAULT 0;
+`
 
 // workspacePlaceDDL adds the registry order (schema.go's `place`) and seeds it
 // from the tab order the bar drew before places existed, so the first bar

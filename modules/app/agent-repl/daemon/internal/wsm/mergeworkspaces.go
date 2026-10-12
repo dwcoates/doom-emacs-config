@@ -94,8 +94,9 @@ func (s *store) HandOffDetachedMerge(ctx context.Context, repo RepoKey, requeste
 		var (
 			state  int64
 			detach sql.NullString
+			front  bool
 		)
-		err := tx.QueryRowContext(ctx, `SELECT state, source_detach_id FROM merge_queue WHERE repo_key = ? AND workspace_id = ?`, key, requester).Scan(&state, &detach)
+		err := tx.QueryRowContext(ctx, `SELECT state, source_detach_id, source_front FROM merge_queue WHERE repo_key = ? AND workspace_id = ?`, key, requester).Scan(&state, &detach, &front)
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
 			return fmt.Errorf("wsm: hand-off of detached merge %s: workspace %s has no merge request: %w", request, requester, ErrNotFound)
@@ -113,7 +114,9 @@ func (s *store) HandOffDetachedMerge(ctx context.Context, repo RepoKey, requeste
 		if err := requireOneRow(res, fmt.Sprintf("wsm: merge request of workspace %s", requester)); err != nil {
 			return err
 		}
-		return insertRequest(ctx, tx, key, mergeWS, MergeSource{Kind: MergeSourceOwnBranch, Branch: branch}, at)
+		// THE MERGE WORKSPACE CARRIES THE REQUEST'S PLACE IN LINE: a detached
+		// merge asked for the front still goes to the front.
+		return insertRequest(ctx, tx, key, mergeWS, MergeSource{Kind: MergeSourceOwnBranch, Branch: branch, Front: front}, at)
 	})
 }
 

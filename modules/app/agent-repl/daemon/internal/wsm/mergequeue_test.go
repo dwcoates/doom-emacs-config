@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 )
@@ -184,6 +185,156 @@ func TestQueueMergeCountsNoRequestInLine(t *testing.T) {
 	// Assert
 	if position != 1 {
 		t.Fatalf("position = %d, want 1: a request is not in line", position)
+	}
+}
+
+// frontQueued requests a FRONT merge and moves it into line, answering its
+// place.
+func frontQueued(t *testing.T, s *store, repo RepoKey, id WorkspaceID, at time.Time) int {
+	t.Helper()
+	if err := s.RequestMerge(context.Background(), repo, id, MergeSource{Kind: MergeSourceOwnBranch, Front: true}, at); err != nil {
+		t.Fatalf("RequestMerge(front): %v", err)
+	}
+	position, err := s.QueueMerge(context.Background(), repo, id, NewLeaseID())
+	if err != nil {
+		t.Fatalf("QueueMerge(front): %v", err)
+	}
+	return position
+}
+
+// queueOrder answers a repository's queue as its workspaces, in line order.
+func queueOrder(t *testing.T, s *store, repo RepoKey) []WorkspaceID {
+	t.Helper()
+	entries, err := s.MergeQueue(context.Background(), repo)
+	if err != nil {
+		t.Fatalf("MergeQueue: %v", err)
+	}
+	out := make([]WorkspaceID, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, e.Workspace)
+	}
+	return out
+}
+
+func TestQueueMergePutsAFrontMergeAheadOfEveryWaitingMerge(t *testing.T) {
+	// Arrange: two ordinary merges wait.
+	s, _ := testStore(t)
+	repo := RepoKey(t.TempDir())
+	a, b, f := testWorkspace(t, s), testWorkspace(t, s), testWorkspace(t, s)
+	queued(t, s, repo, a.ID, instant)
+	queued(t, s, repo, b.ID, instant.Add(time.Minute))
+
+	// Act
+	position := frontQueued(t, s, repo, f.ID, instant.Add(2*time.Minute))
+
+	// Assert
+	if got, want := queueOrder(t, s, repo), []WorkspaceID{f.ID, a.ID, b.ID}; !slices.Equal(got, want) {
+		t.Fatalf("queue = %v, want %v", got, want)
+	}
+	if position != 1 {
+		t.Fatalf("position = %d, want 1", position)
+	}
+}
+
+func TestQueueMergeNeverPutsAFrontMergeAheadOfTheAdmittedMerge(t *testing.T) {
+	// Arrange: one merge runs and one waits.
+	s, _ := testStore(t)
+	repo := RepoKey(t.TempDir())
+	running, waiting, f := testWorkspace(t, s), testWorkspace(t, s), testWorkspace(t, s)
+	queued(t, s, repo, running.ID, instant)
+	if err := s.AdmitMerge(context.Background(), repo, running.ID); err != nil {
+		t.Fatalf("AdmitMerge: %v", err)
+	}
+	queued(t, s, repo, waiting.ID, instant.Add(time.Minute))
+
+	// Act
+	frontQueued(t, s, repo, f.ID, instant.Add(2*time.Minute))
+
+	// Assert
+	if got, want := queueOrder(t, s, repo), []WorkspaceID{running.ID, f.ID, waiting.ID}; !slices.Equal(got, want) {
+		t.Fatalf("queue = %v, want %v", got, want)
+	}
+}
+
+func TestQueueMergeKeepsFrontMergesInArrivalOrder(t *testing.T) {
+	// Arrange: an ordinary merge waits behind an earlier front merge.
+	s, _ := testStore(t)
+	repo := RepoKey(t.TempDir())
+	ordinary, first, second := testWorkspace(t, s), testWorkspace(t, s), testWorkspace(t, s)
+	queued(t, s, repo, ordinary.ID, instant)
+	frontQueued(t, s, repo, first.ID, instant.Add(time.Minute))
+
+	// Act
+	frontQueued(t, s, repo, second.ID, instant.Add(2*time.Minute))
+
+	// Assert
+	if got, want := queueOrder(t, s, repo), []WorkspaceID{first.ID, second.ID, ordinary.ID}; !slices.Equal(got, want) {
+		t.Fatalf("queue = %v, want %v", got, want)
+	}
+}
+
+func TestQueueMergePutsAFrontMergeAtTheBackWhenNoOrdinaryMergeWaits(t *testing.T) {
+	// Arrange: the only merge is running.
+	s, _ := testStore(t)
+	repo := RepoKey(t.TempDir())
+	running, f := testWorkspace(t, s), testWorkspace(t, s)
+	queued(t, s, repo, running.ID, instant)
+	if err := s.AdmitMerge(context.Background(), repo, running.ID); err != nil {
+		t.Fatalf("AdmitMerge: %v", err)
+	}
+
+	// Act
+	frontQueued(t, s, repo, f.ID, instant.Add(time.Minute))
+
+	// Assert
+	if got, want := queueOrder(t, s, repo), []WorkspaceID{running.ID, f.ID}; !slices.Equal(got, want) {
+		t.Fatalf("queue = %v, want %v", got, want)
+	}
+}
+
+func TestQueueMergeLeavesARequestBehindAFrontMergeOutOfLine(t *testing.T) {
+	// Arrange: a request sits behind the waiting merge the front merge passes.
+	s, _ := testStore(t)
+	repo := RepoKey(t.TempDir())
+	waiting, pending, f := testWorkspace(t, s), testWorkspace(t, s), testWorkspace(t, s)
+	queued(t, s, repo, waiting.ID, instant)
+	if err := s.RequestMerge(context.Background(), repo, pending.ID, ownBranch, instant.Add(time.Minute)); err != nil {
+		t.Fatalf("RequestMerge: %v", err)
+	}
+
+	// Act
+	frontQueued(t, s, repo, f.ID, instant.Add(2*time.Minute))
+
+	// Assert: the shift moved the request's place, never its state.
+	entries, err := s.MergeQueue(context.Background(), repo)
+	if err != nil {
+		t.Fatalf("MergeQueue: %v", err)
+	}
+	for _, e := range entries {
+		if e.Workspace == pending.ID && e.State != MergeRequested {
+			t.Fatalf("the request behind the shift is %s, want still requested", e.State)
+		}
+	}
+}
+
+func TestMergeQueueCarriesAFrontRequest(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	repo := RepoKey(t.TempDir())
+	ws := testWorkspace(t, s)
+
+	// Act
+	if err := s.RequestMerge(context.Background(), repo, ws.ID, MergeSource{Kind: MergeSourceOwnBranch, Front: true}, instant); err != nil {
+		t.Fatalf("RequestMerge: %v", err)
+	}
+
+	// Assert
+	entries, err := s.MergeQueue(context.Background(), repo)
+	if err != nil {
+		t.Fatalf("MergeQueue: %v", err)
+	}
+	if len(entries) != 1 || !entries[0].Source.Front {
+		t.Fatalf("queue = %+v, want one entry carrying Front", entries)
 	}
 }
 
