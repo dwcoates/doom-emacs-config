@@ -671,3 +671,187 @@ describe("mountNewsDigest: links", () => {
     expect(w.opened.map((req) => req.url)).toEqual(["https://fixture.test/releases"]);
   });
 });
+
+/** An overlay leading with the IPO outlook, and a quiet week after it. */
+function ipoInit(): OverlayInit {
+  const init = quietInit();
+  init.ipo = {
+    heading: { text: "IPO outlook" },
+    anthropic: {
+      company: { text: "Anthropic" },
+      estimate: { text: "Q2 2027" },
+      basis: { text: "Banks were hired in `September`." },
+      links: [
+        { label: "Report", url: "https://press.test/anthropic" },
+        { label: "Filing", url: "https://press.test/anthropic-filing" },
+      ],
+    },
+    openai: {
+      company: { text: "OpenAI" },
+      estimate: { text: "late 2027" },
+      basis: { text: "The restructuring closed." },
+      links: [{ label: "Report", url: "https://press.test/openai" }],
+    },
+  };
+  return init;
+}
+
+describe("mountNewsDigest: the IPO outlook", () => {
+  it("draws the outlook first, before the week and the run's sections", () => {
+    // ACT
+    w.digest.apply(shown(ipoInit()));
+    // ASSERT
+    const sections = [
+      ...w.host.querySelectorAll<HTMLElement>(
+        ".news-digest-body > .news-digest-section",
+      ),
+    ];
+    expect(
+      sections.map((s) =>
+        s.hasAttribute("data-ipo")
+          ? "ipo"
+          : (s.getAttribute("data-week") ?? s.getAttribute("data-kind")),
+      ),
+    ).toEqual(["ipo", "quiet", "backend", "feature"]);
+  });
+
+  it("titles the outlook with the daemon's heading", () => {
+    // ACT
+    w.digest.apply(shown(ipoInit()));
+    // ASSERT
+    expect(
+      w.host.querySelector("[data-ipo] .news-digest-section-heading")
+        ?.textContent,
+    ).toBe("IPO outlook");
+  });
+
+  it("draws Anthropic's guess, then OpenAI's, each company and estimate verbatim", () => {
+    // ACT
+    w.digest.apply(shown(ipoInit()));
+    // ASSERT
+    const guesses = [...w.host.querySelectorAll(".news-digest-ipo-guess")].map(
+      (g) => [
+        g.querySelector(".news-digest-ipo-company")?.textContent,
+        g.querySelector(".news-digest-ipo-estimate")?.textContent,
+      ],
+    );
+    expect(guesses).toEqual([
+      ["Anthropic", "Q2 2027"],
+      ["OpenAI", "late 2027"],
+    ]);
+  });
+
+  it("draws a guess's basis as markdown", () => {
+    // ACT
+    w.digest.apply(shown(ipoInit()));
+    // ASSERT
+    const basis = w.host.querySelector(
+      ".news-digest-ipo-guess .news-digest-summary.md",
+    );
+    expect(basis?.querySelector("code")?.textContent).toBe("September");
+  });
+
+  it("draws every link of a guess", () => {
+    // ACT
+    w.digest.apply(shown(ipoInit()));
+    // ASSERT
+    const links = [...w.host.querySelectorAll(".news-digest-ipo-guess")].map(
+      (g) => g.querySelectorAll(".news-digest-links .external-link").length,
+    );
+    expect(links).toEqual([2, 1]);
+  });
+
+  it("sets the estimate large in the outlook's own color", () => {
+    // ARRANGE
+    const removeStylesheet = installStylesheet();
+    w.digest.apply(shown(ipoInit()));
+    const estimate = w.host.querySelector(".news-digest-ipo-estimate");
+    const heading = w.host.querySelector(
+      "[data-ipo] .news-digest-section-heading",
+    );
+    if (estimate === null || heading === null)
+      throw new Error("no outlook is drawn");
+    // ACT
+    const drawn = [
+      cascadedValue(estimate, "color"),
+      cascadedValue(estimate, "font-size"),
+      cascadedValue(heading, "color"),
+    ];
+    removeStylesheet();
+    // ASSERT
+    expect(drawn).toEqual([
+      "var(--news-digest-ipo)",
+      "1.6rem",
+      "var(--news-digest-ipo)",
+    ]);
+  });
+
+  it("draws no outlook for a digest made before the outlook existed", () => {
+    // ACT
+    w.digest.apply(shown());
+    // ASSERT
+    expect(w.host.querySelector("[data-ipo]")).toBeNull();
+  });
+});
+
+describe("mountNewsDigest: refusing a malformed IPO outlook", () => {
+  const cases: [string, (init: OverlayInit) => void][] = [
+    [
+      "no heading",
+      (init) => {
+        if (init.ipo) init.ipo.heading = undefined;
+      },
+    ],
+    [
+      "no Anthropic guess",
+      (init) => {
+        if (init.ipo) init.ipo.anthropic = undefined;
+      },
+    ],
+    [
+      "no OpenAI guess",
+      (init) => {
+        if (init.ipo) init.ipo.openai = undefined;
+      },
+    ],
+    [
+      "a guess with no company",
+      (init) => {
+        if (init.ipo?.anthropic) init.ipo.anthropic.company = undefined;
+      },
+    ],
+    [
+      "a guess with no estimate",
+      (init) => {
+        if (init.ipo?.openai) init.ipo.openai.estimate = undefined;
+      },
+    ],
+    [
+      "a guess with a blank estimate",
+      (init) => {
+        if (init.ipo?.openai) init.ipo.openai.estimate = { text: "" };
+      },
+    ],
+    [
+      "a guess with no basis",
+      (init) => {
+        if (init.ipo?.anthropic) init.ipo.anthropic.basis = undefined;
+      },
+    ],
+    [
+      "a guess with no links",
+      (init) => {
+        if (init.ipo?.anthropic) init.ipo.anthropic.links = [];
+      },
+    ],
+  ];
+  for (const [name, mutate] of cases) {
+    it(`refuses ${name}`, () => {
+      // ARRANGE
+      const init = ipoInit();
+      mutate(init);
+      // ACT + ASSERT
+      expect(() => w.digest.apply(shown(init))).toThrow(MalformedView);
+    });
+  }
+});

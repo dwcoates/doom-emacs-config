@@ -27,6 +27,8 @@ import {
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_dismiss_news_digest_pb";
 import type { NewsDigestStanding } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_daemon_pb";
 import type {
+  NewsDigestIpoGuess,
+  NewsDigestIpoOutlook,
   NewsDigestItem,
   NewsDigestOverlay,
   NewsDigestSdkVersion,
@@ -284,7 +286,10 @@ export function drawOverlay(
 
   const body = document.createElement("div");
   body.className = "news-digest-body";
-  // "Since last week" leads, before the run's own sections. A digest made
+  // THE IPO OUTLOOK LEADS, above everything else (owner, 2026-10-11). A digest
+  // made before the outlook existed carries none and draws none.
+  if (overlay.ipo !== undefined) body.append(drawIpo(ctx, overlay.ipo, "NewsDigestOverlay.ipo"));
+  // "Since last week" follows, before the run's own sections. A digest made
   // before the weekly section existed carries none and draws none.
   if (overlay.week !== undefined) body.append(drawWeek(ctx, overlay.week, "NewsDigestOverlay.week"));
   overlay.sections.forEach((section, i) => body.append(drawSection(ctx, section, `NewsDigestOverlay.sections[${i}]`)));
@@ -400,6 +405,54 @@ export function drawWeek(ctx: AppContext, week: NewsDigestWeek, path: string): H
       return unreachableArm(`${path}.outcome`, other.case);
     }
   }
+  return element;
+}
+
+/**
+ * "IPO outlook": its heading, then Anthropic's guess and OpenAI's, in that
+ * order, each its company, its estimate drawn large in the outlook's own
+ * color, its basis (as markdown, the summary's way) and its links.
+ */
+export function drawIpo(ctx: AppContext, ipo: NewsDigestIpoOutlook, path: string): HTMLElement {
+  const heading = requireMessage(ipo.heading, `${path}.heading`);
+  const element = document.createElement("section");
+  element.className = "news-digest-section news-digest-ipo";
+  element.setAttribute("data-ipo", "");
+  const headingElement = document.createElement("h2");
+  headingElement.className = "news-digest-section-heading";
+  headingElement.textContent = heading.text;
+  const guesses = document.createElement("div");
+  guesses.className = "news-digest-ipo-guesses";
+  guesses.append(
+    drawIpoGuess(ctx, requireMessage(ipo.anthropic, `${path}.anthropic`), `${path}.anthropic`),
+    drawIpoGuess(ctx, requireMessage(ipo.openai, `${path}.openai`), `${path}.openai`),
+  );
+  element.append(headingElement, guesses);
+  return element;
+}
+
+/** One company's guess. Throws `MalformedView` for a blank estimate or no links. */
+export function drawIpoGuess(ctx: AppContext, guess: NewsDigestIpoGuess, path: string): HTMLElement {
+  const company = requireMessage(guess.company, `${path}.company`);
+  const estimate = requireMessage(guess.estimate, `${path}.estimate`);
+  const basis = requireMessage(guess.basis, `${path}.basis`);
+  if (estimate.text === "") throw new MalformedView(`${path}.estimate.text`, "a guess always states its estimate");
+  if (guess.links.length === 0) throw new MalformedView(`${path}.links`, "a guess always links to its reporting");
+  const element = document.createElement("article");
+  element.className = "news-digest-ipo-guess";
+  const companyElement = document.createElement("div");
+  companyElement.className = "news-digest-ipo-company";
+  companyElement.textContent = company.text;
+  const estimateElement = document.createElement("div");
+  estimateElement.className = "news-digest-ipo-estimate";
+  estimateElement.textContent = estimate.text;
+  const basisElement = document.createElement("div");
+  basisElement.className = "news-digest-summary md";
+  basisElement.innerHTML = renderMarkdown(basis.text);
+  const links = document.createElement("div");
+  links.className = "news-digest-links";
+  for (const link of guess.links) links.append(renderExternalLink(ctx, { text: link.label, url: link.url }));
+  element.append(companyElement, estimateElement, basisElement, links);
   return element;
 }
 
