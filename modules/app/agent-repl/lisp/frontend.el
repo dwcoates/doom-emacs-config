@@ -44,6 +44,7 @@
 (declare-function agent-repl-window-tell-gate-dock "window" (ws))
 (declare-function agent-repl-window-tell-input-background "window" (ws))
 (declare-function agent-repl--fatal "core")
+(declare-function agent-repl-refill-keymap "core" (map fill))
 (declare-function agent-repl--log-level-window "core" (level until now))
 (defvar agent-repl--log-level-clock)
 (declare-function agent-repl--info "core")
