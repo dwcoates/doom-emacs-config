@@ -89,6 +89,9 @@ type controller struct {
 	// retries is the idle sweep's backoff for workspaces whose hibernation
 	// FAILED, by workspace. See hibernateRetryDelay.
 	retries map[ids.WorkspaceID]hibernateRetry
+	// withheld are the stand-downs of withheld workspaces, pending or
+	// running, by workspace (withheld.go).
+	withheld map[ids.WorkspaceID]*withheldState
 }
 
 // Schedule puts a schedule in force and announces it. The persisted row and
