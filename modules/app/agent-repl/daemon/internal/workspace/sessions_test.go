@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -5092,5 +5093,88 @@ func TestAHeldCountChangeWithNoGatePublishesNoRow(t *testing.T) {
 	// Assert.
 	if len(f.feed.synthesized) != 0 {
 		t.Fatalf("rows = %v, want none with no gate standing", f.feed.synthesized)
+	}
+}
+
+func TestReadRecordedSession(t *testing.T) {
+	cases := []struct {
+		name            string
+		session         *wsm.Session
+		hasConversation bool
+	}{
+		{name: "no session row", hasConversation: false},
+		{name: "a row with no vendor id", session: &wsm.Session{Workspace: "ws-1"}, hasConversation: false},
+		{name: "a row with a vendor id", session: &wsm.Session{Workspace: "ws-1", VendorSessionID: "v-1"}, hasConversation: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			db := newFakeDB()
+			if tc.session != nil {
+				db.sessions["ws-1"] = *tc.session
+			}
+
+			// Act
+			recorded, err := readRecordedSession(context.Background(), db, "ws-1")
+
+			// Assert
+			if err != nil {
+				t.Fatalf("readRecordedSession: %v", err)
+			}
+			if recorded.recorded != (tc.session != nil) {
+				t.Errorf("recorded = %v, want %v", recorded.recorded, tc.session != nil)
+			}
+			if got := recorded.hasConversation(); got != tc.hasConversation {
+				t.Errorf("hasConversation() = %v, want %v", got, tc.hasConversation)
+			}
+		})
+	}
+}
+
+func TestReadRecordedSessionSurfacesTheReadError(t *testing.T) {
+	// Arrange
+	db := newFakeDB()
+	db.sessionErr = errors.New("disk gone")
+
+	// Act
+	recorded, err := readRecordedSession(context.Background(), db, "ws-1")
+
+	// Assert
+	if !errors.Is(err, db.sessionErr) {
+		t.Fatalf("err = %v, want the read's error", err)
+	}
+	if recorded.hasConversation() {
+		t.Error("a failed read answered a conversation")
+	}
+}
+
+// TestHasConversationHasOneStatement fails when a site in the package checks a
+// session row and its vendor id by hand instead of through hasConversation.
+func TestHasConversationHasOneStatement(t *testing.T) {
+	// Arrange
+	sources, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	handRolled := regexp.MustCompile(`!\w+ \|\| \w+\.VendorSessionID == ""`)
+
+	// Act
+	var found []string
+	for _, file := range sources {
+		if strings.HasSuffix(file, "_test.go") {
+			continue
+		}
+		source, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if handRolled.Match(source) {
+			found = append(found, file)
+		}
+	}
+
+	// Assert
+	if len(found) != 0 {
+		t.Errorf("hand-rolled conversation checks in %v; use readRecordedSession and hasConversation", found)
 	}
 }

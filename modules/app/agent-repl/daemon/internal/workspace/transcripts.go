@@ -161,13 +161,14 @@ func (v *verbs) transcriptHolders(ctx context.Context, ws ids.WorkspaceID) (map[
 		if record.ID == ws {
 			continue
 		}
-		session, found, err := v.deps.DB.Session(ctx, record.ID)
+		recorded, err := readRecordedSession(ctx, v.deps.DB, record.ID)
 		if err != nil {
 			return nil, fmt.Errorf("read workspace %q's session record: %w", record.ID, err)
 		}
-		if !found || session.VendorSessionID == "" {
+		if !recorded.hasConversation() {
 			continue
 		}
+		session := recorded.session
 		holders[session.VendorSessionID] = &workspacev1.WorkspaceRef{
 			Id:  string(record.ID),
 			Dir: record.Dir,
