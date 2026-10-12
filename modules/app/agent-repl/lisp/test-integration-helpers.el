@@ -556,12 +556,35 @@ every scenario that pushes after subscribing must pass through here."
              (if workspace-id (format " for %s" workspace-id) "")))))
 
 (defun agent-repl-itest--await-call (daemon method &optional count)
-  "Block until DAEMON has recorded COUNT (default 1) calls of METHOD."
+  "Block until DAEMON has recorded COUNT (default 1) calls of METHOD.
+A wait that times out says WHERE Emacs's own call stood when it gave up
+(`agent-repl-itest--call-state'): a call that never reaches the daemon was
+either never sent or is queued behind another, and the bare timeout cannot
+tell which (2026-10-12: `SelectWorkspace' after a show, unrecorded for 14s
+under a loaded full run, with nothing left to read once the scenario's state
+dir was removed)."
   (let ((wanted (or count 1)))
-    (agent-repl-itest--wait-until
-     (lambda () (>= (length (agent-repl-itest--calls daemon method)) wanted))
-     agent-repl-itest-default-timeout
-     (format "%s recorded %s call(s)" wanted method))))
+    (condition-case err
+        (agent-repl-itest--wait-until
+         (lambda () (>= (length (agent-repl-itest--calls daemon method)) wanted))
+         agent-repl-itest-default-timeout
+         (format "%s recorded %s call(s)" wanted method))
+      (error
+       (error "%s; %s" (error-message-string err)
+              (agent-repl-itest--call-state daemon method))))))
+
+(defun agent-repl-itest--call-state (daemon method)
+  "Describe where Emacs's side of METHOD stood, for a timed-out wait.
+It names how many calls DAEMON did record, and for `SelectWorkspace' the
+host's selection slot: the selection in flight, the one queued behind it,
+and the last switch requested."
+  (concat
+   (format "%d %s call(s) recorded" (length (agent-repl-itest--calls daemon method)) method)
+   (when (equal method "SelectWorkspace")
+     (format "; host select in-flight=%S queued=%S last-request=%S"
+             (bound-and-true-p agent-repl-host--select-in-flight)
+             (car-safe (bound-and-true-p agent-repl-host--select-queued))
+             (car-safe (bound-and-true-p agent-repl-host-last-request))))))
 
 ;;;; ---- Production logs ----
 ;;
@@ -580,6 +603,8 @@ every scenario that pushes after subscribing must pass through here."
 ;; lexical shadows this file alone would see.
 (defvar agent-repl-host--by-name)
 (defvar agent-repl--prompt-queue)
+(defvar agent-repl-host--select-in-flight)
+(defvar agent-repl-host--select-queued)
 
 (defvar agent-repl-itest--orphaned-log-targets nil
   "Durable workspace log targets production has stopped owning this scenario.
@@ -975,6 +1000,13 @@ signals."
                 (agent-repl--workspaces (make-hash-table :test 'equal))
                 (agent-repl-host--by-name (make-hash-table :test 'equal))
                 (agent-repl--prompt-queue (make-hash-table :test 'equal))
+                ;; THE SELECTION SLOT is process-global production state too:
+                ;; a selection still in flight when a scenario's daemon stops
+                ;; holds it until its own timeout settles it, and every
+                ;; selection the NEXT scenario makes would queue behind that
+                ;; ghost (`agent-repl-host-select').
+                (agent-repl-host--select-in-flight nil)
+                (agent-repl-host--select-queued nil)
                 ;; Real blink-cadence scenarios arm keyed timers.  Give the
                 ;; scenario its own registry and marker table so their later
                 ;; steps cannot fire after the workspace registry unwinds.

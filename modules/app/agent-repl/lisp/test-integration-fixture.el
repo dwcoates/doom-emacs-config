@@ -55,6 +55,31 @@ That is the whole saving: a scenario pays a reset, not a process boot."
 
 ;;;; ---- What the reset must throw away ----
 
+(ert-deftest agent-repl-itest-fixture-a-selection-in-flight-does-not-cross-scenarios ()
+  "A selection a scenario left in flight is not the next scenario\='s.
+The next scenario\='s own selections would otherwise queue behind it."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon _daemon
+    (setq agent-repl-host--select-in-flight "left-over")
+    (setq agent-repl-host--select-queued (cons "also-left-over" nil)))
+  ;; Act / Assert.
+  (agent-repl-itest--with-fake-daemon _daemon
+    (should-not agent-repl-host--select-in-flight)
+    (should-not agent-repl-host--select-queued)))
+
+(ert-deftest agent-repl-itest-fixture-a-timed-out-select-wait-names-the-selection-slot ()
+  "A wait for `SelectWorkspace\=' that times out says where the selection stood."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (setq agent-repl-host--select-in-flight "ghost")
+    (let ((agent-repl-itest-default-timeout 0.05))
+      ;; Act.
+      (let ((message (condition-case err
+                         (progn (agent-repl-itest--await-call daemon "SelectWorkspace") nil)
+                       (error (error-message-string err)))))
+        ;; Assert.
+        (should (string-match-p "host select in-flight=\"ghost\"" message))))))
+
 (ert-deftest agent-repl-itest-fixture-recorded-calls-do-not-cross-scenarios ()
   "A scenario sees NO call the previous scenario made.
 `agent-repl-itest--calls' is how nearly every assertion in the suite reads
