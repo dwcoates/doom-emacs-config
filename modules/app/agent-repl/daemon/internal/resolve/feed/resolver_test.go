@@ -198,6 +198,14 @@ func newHarness(t *testing.T) *harness {
 // two harnesses sharing it are a daemon and its restarted successor.
 func newStoredHarness(t *testing.T, rolledBack RolledBackTurnStore) *harness {
 	t.Helper()
+	return newDurableHarness(t, rolledBack, nil)
+}
+
+// newDurableHarness is newHarness whose rolled-back turns live in ROLLEDBACK
+// and whose sign-in-answered turns live in SIGNEDIN; two harnesses sharing
+// them are a daemon and its restarted successor.
+func newDurableHarness(t *testing.T, rolledBack RolledBackTurnStore, signedIn SignedInTurnStore) *harness {
+	t.Helper()
 	log := dlog.NewTestLogger()
 	painter := &fakePainter{}
 	h := &harness{
@@ -267,6 +275,7 @@ func newStoredHarness(t *testing.T, rolledBack RolledBackTurnStore) *harness {
 		Faults:      h.faults,
 		Warnings:    h.warnings,
 		RolledBack:  rolledBack,
+		SignedIn:    signedIn,
 		ChessBoards: h.boards,
 		EntryPlaced: func(_ ids.WorkspaceID, unit string, row *frontendv1.FeedId) {
 			h.placed = append(h.placed, placedEntry{unit: unit, row: row.GetValue()})

@@ -8,6 +8,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
+	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/turnfault"
 	"agent-repld/internal/wsm"
 )
@@ -195,9 +196,16 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 		fold.notice = false
 		r.stampSettled(fold, state.Failure.GetSettledAt().GetAtMs())
 		resetPacing(fold)
-		bubble.Result = &frontendv1.FeedResponse_Error{Error: &frontendv1.FeedResponseError{
+		broken := &frontendv1.FeedResponseError{
 			Prose: &frontendv1.FeedResponseProse{Markdown: fold.markdown},
-		}}
+		}
+		// A TURN WHOSE ENDING OFFERS THE SIGN-IN ACTION offers it inside its
+		// broken bubble too (signin.go). A bubble drawn before that ending is
+		// stamped by the ending itself; this carries it on every later draw.
+		if s.signInTurns[ids.TurnID(fold.turn)] {
+			broken.SignIn = &frontendv1.FeedOutcomeSignIn{}
+		}
+		bubble.Result = &frontendv1.FeedResponse_Error{Error: broken}
 	default:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawResponse", "branch": "default"})
 		return nil, errNotARow

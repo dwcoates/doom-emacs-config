@@ -132,6 +132,7 @@ var migrations = []migration{
 	{To: 39, Name: "sync_async_merges", Kind: MigrationAdditive, DDL: syncAsyncMergesDDL},
 	{To: 40, Name: "viewed_workspaces", Kind: MigrationAdditive, DDL: viewedWorkspacesDDL},
 	{To: 41, Name: "detached_landings", Kind: MigrationAdditive, DDL: landedDDL},
+	{To: 42, Name: "signed_in_turns", Kind: MigrationAdditive, DDL: signedInTurnsDDL},
 }
 
 // mergeQueueFrontDDL records whether a merge asked to go to the FRONT of its
