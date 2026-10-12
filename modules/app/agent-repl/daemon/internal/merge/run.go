@@ -324,12 +324,29 @@ func (r *run) closeTab(ctx context.Context, round tabRound, outcome string) {
 // NOWHERE ELSE (owner ruling, 2026-10-01). A turn the user sends while the
 // merge runs is not the merge's and draws on the main feed. The feed resolver
 // is merge-agnostic and applies the address without knowing what a merge is.
+//
+// AN ASYNC MERGE'S WORKSPACE DRAWS NO BUBBLE (owner ruling, 2026-10-11): its
+// merge turns draw in its own feed as ordinary turns, and are MIRRORED into
+// the tab in the requester's bubble instead.
 func (r *run) address(round tabRound) {
 	if r.exiting() {
 		return
 	}
+	if requester, async := r.o.requesterOf(r.ws); async {
+		r.o.deps.Feed.SetOutputMirror(r.ws, &wsm.MirrorAddress{
+			Workspace: requester, Feed: mergeFeed(r.lease.ID), Parent: tabRef(requester, r.lease.ID, round.kind, round.n),
+		})
+		return
+	}
 	ref := tabRef(r.ws, r.lease.ID, round.kind, round.n)
 	r.o.deps.Feed.SetOutputAddress(r.ws, &wsm.OutputAddress{Feed: mergeFeed(r.lease.ID), Parent: &ref})
+}
+
+// withdrawOutput withdraws the standing output address and mirror: no turn
+// opened from here on is the merge's.
+func (r *run) withdrawOutput() {
+	r.o.deps.Feed.SetOutputAddress(r.ws, nil)
+	r.o.deps.Feed.SetOutputMirror(r.ws, nil)
 }
 
 // upsert publishes one tab row.
