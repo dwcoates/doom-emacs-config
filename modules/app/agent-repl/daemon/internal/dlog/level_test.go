@@ -217,3 +217,46 @@ func TestOpenSurfacesRefusesAMalformedLevelWindow(t *testing.T) {
 		t.Fatal("OpenSurfaces accepted a malformed level window")
 	}
 }
+
+func TestEnabledAnswersTrueForALoggerThatCannotSay(t *testing.T) {
+	// Arrange.
+	l := NewTestLogger()
+
+	// Act.
+	got := Enabled(l, LevelDebug)
+
+	// Assert.
+	if !got {
+		t.Fatal("Enabled(TestLogger, debug) = false, want true: a capture keeps every record")
+	}
+}
+
+func TestEnabledFollowsTheDaemonLoggersLevel(t *testing.T) {
+	tests := []struct {
+		name  string
+		level string
+		want  bool
+	}{
+		{name: "debug at an info surface", level: LevelDebug, want: false},
+		{name: "info at an info surface", level: LevelInfo, want: true},
+		{name: "error at an info surface", level: LevelError, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			s, err := openSurfaces(filepath.Join(t.TempDir(), "logs", "daemon.run.log"), LevelInfo, io.Discard)
+			if err != nil {
+				t.Fatalf("openSurfaces: %v", err)
+			}
+			t.Cleanup(func() { s.Close() })
+
+			// Act.
+			got := Enabled(s.Global(), tt.level)
+
+			// Assert.
+			if got != tt.want {
+				t.Fatalf("Enabled(%s) = %v, want %v", tt.level, got, tt.want)
+			}
+		})
+	}
+}
