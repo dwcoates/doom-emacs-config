@@ -275,6 +275,11 @@ ticks."
   "Decode VALUE as `RosterRowWhenCreated', a plist `(:at-ms)'."
   (agent-repl-wire-roster--decode-instant "RosterRowWhenCreated" value))
 
+(defun agent-repl-wire-decode-roster-row-when-viewed (value)
+  "Decode VALUE as `RosterRowWhenViewed', a plist `(:at-ms)'.
+When the user last viewed a viewed row's workspace."
+  (agent-repl-wire-roster--decode-instant "RosterRowWhenViewed" value))
+
 (defun agent-repl-wire-decode-roster-row-when-shown (value)
   "Decode `RosterRowWhen''s `shown' oneof from the object VALUE.
 UNSET IS LEGAL and means nothing to show — no turn ended, not created, not
@@ -283,14 +288,15 @@ merged — so the column is empty rather than \"0ms ago\"."
    "RosterRowWhen" 'shown value
    '((turnEnded :turn-ended agent-repl-wire-decode-roster-row-when-turn-ended)
      (created :created agent-repl-wire-decode-roster-row-when-created)
-     (merged :merged agent-repl-wire-decode-roster-row-when-merged))
+     (merged :merged agent-repl-wire-decode-roster-row-when-merged)
+     (viewed :viewed agent-repl-wire-decode-roster-row-when-viewed))
    t))
 
 (defun agent-repl-wire-decode-roster-row-when (value)
   "Decode VALUE as `RosterRowWhen': the oneof plist, or nil when unset."
   (let ((object (agent-repl-wire--object "RosterRowWhen" value)))
     (agent-repl-wire--check-keys "RosterRowWhen" object
-                                 '(turnEnded created merged))
+                                 '(turnEnded created merged viewed))
     (agent-repl-wire--decoded
      "RosterRowWhen" (agent-repl-wire-decode-roster-row-when-shown object))))
 
@@ -560,16 +566,26 @@ status.el's color table is asserted row for row against this list.")
   "Decode `RosterRowWorkspace''s `workspace' field VALUE as a WorkspaceRef."
   (agent-repl-wire-decode-workspace-ref value))
 
+(defun agent-repl-wire-decode-roster-row-workspace-repository (value)
+  "Decode `RosterRowWorkspace''s `repository' field VALUE as a RepositoryRef."
+  (agent-repl-wire-decode-repository-ref value))
+
 (defun agent-repl-wire-decode-roster-row-workspace (value)
-  "Decode VALUE as `RosterRowWorkspace', a plist `(:workspace REF)'.
-The join key every gesture on the row travels back with."
+  "Decode VALUE as `RosterRowWorkspace', a `(:workspace REF :repository REPO)'.
+The join key every gesture on the row travels back with, and the
+repository the workspace belongs to -- stated on the row because the
+viewed, hidden and recently-merged bands hold rows outside their
+repository's section."
   (let ((object (agent-repl-wire--object "RosterRowWorkspace" value)))
-    (agent-repl-wire--check-keys "RosterRowWorkspace" object '(workspace))
+    (agent-repl-wire--check-keys "RosterRowWorkspace" object '(workspace repository))
     (agent-repl-wire--decoded
      "RosterRowWorkspace"
      (list :workspace (agent-repl-wire--decode-message
                        "RosterRowWorkspace" 'workspace object
-                       #'agent-repl-wire-decode-roster-row-workspace-workspace)))))
+                       #'agent-repl-wire-decode-roster-row-workspace-workspace)
+           :repository (agent-repl-wire--decode-message
+                        "RosterRowWorkspace" 'repository object
+                        #'agent-repl-wire-decode-roster-row-workspace-repository)))))
 
 (defun agent-repl-wire-decode-roster-row-status (value)
   "Decode `RosterRow''s `status' oneof from the object VALUE.
@@ -1091,6 +1107,43 @@ It has no key of its own — the roster carries exactly one."
    #'agent-repl-wire-decode-roster-hidden-section-rows
    #'agent-repl-wire-decode-roster-hidden-section-fold))
 
+;;;; ---- The viewed-workspaces section ----
+
+(defun agent-repl-wire-decode-roster-viewed-section-header (value)
+  "Decode `RosterViewedSection''s `header' field VALUE."
+  (agent-repl-wire-decode-roster-section-header value))
+
+(defun agent-repl-wire-decode-roster-viewed-section-rows (value)
+  "Decode `RosterViewedSection''s `rows' field VALUE as RosterRows."
+  (agent-repl-wire-decode-roster-rows value))
+
+(defun agent-repl-wire-decode-roster-viewed-section-expanded (value)
+  "Decode VALUE as the empty message `RosterViewedSectionExpanded'."
+  (agent-repl-wire--decode-empty "RosterViewedSectionExpanded" value))
+
+(defun agent-repl-wire-decode-roster-viewed-section-collapsed (value)
+  "Decode VALUE as the empty message `RosterViewedSectionCollapsed'."
+  (agent-repl-wire--decode-empty "RosterViewedSectionCollapsed" value))
+
+(defun agent-repl-wire-decode-roster-viewed-section-fold (object)
+  "Decode `RosterViewedSection''s `fold' oneof from OBJECT.
+THE ARM IS THE FOLD, the daemon's view state; it is never unset.  It folds
+sidebar rows only: a viewed workspace's tab is drawn or withheld as it
+would be in a grouping."
+  (agent-repl-wire--decode-oneof
+   "RosterViewedSection" 'fold object
+   '((expanded :expanded agent-repl-wire-decode-roster-viewed-section-expanded)
+     (collapsed :collapsed agent-repl-wire-decode-roster-viewed-section-collapsed))))
+
+(defun agent-repl-wire-decode-roster-viewed-section (value)
+  "Decode VALUE as `RosterViewedSection', a plist `(:header :rows :fold)'.
+It has no key of its own — the roster carries exactly one."
+  (agent-repl-wire--decode-keyless-section
+   "RosterViewedSection" value
+   #'agent-repl-wire-decode-roster-viewed-section-header
+   #'agent-repl-wire-decode-roster-viewed-section-rows
+   #'agent-repl-wire-decode-roster-viewed-section-fold))
+
 ;;;; ---- The views and the roster ----
 
 (defun agent-repl-wire-decode-roster-repository-view-sections (value)
@@ -1173,6 +1226,10 @@ name, which is not unique."
   "Decode `WorkspaceRoster''s `hidden' field VALUE."
   (agent-repl-wire-decode-roster-hidden-section value))
 
+(defun agent-repl-wire-decode-workspace-roster-viewed (value)
+  "Decode `WorkspaceRoster''s `viewed' field VALUE."
+  (agent-repl-wire-decode-roster-viewed-section value))
+
 (defun agent-repl-wire-decode-roster-tab-drawn (value)
   "Decode VALUE as the empty message `RosterTabDrawn'."
   (agent-repl-wire--decode-empty "RosterTabDrawn" value))
@@ -1254,15 +1311,15 @@ THE ARM IS THE GROUPING every page shows; it is never unset."
 
 (defun agent-repl-wire-decode-workspace-roster (value)
   "Decode VALUE as `WorkspaceRoster'.
-Returns `(:repository V :task V :maturity V :hidden H :recently-merged S
-:tab-bar B :current C-or-nil :shown ARM :revision N)'.  EVERY grouping
-arrives fully resolved:
-which one is drawn is the daemon's view state (`shown'), a selection
-between resolved views, never a derivation."
+Returns `(:repository V :task V :maturity V :viewed W :hidden H
+:recently-merged S :tab-bar B :current C-or-nil :shown ARM :revision N)'.
+EVERY grouping arrives fully resolved: which one is drawn is the
+daemon's view state (`shown'), a selection between resolved views,
+never a derivation."
   (let ((object (agent-repl-wire--object "WorkspaceRoster" value)))
     (agent-repl-wire--check-keys
      "WorkspaceRoster" object
-     '(repository task maturity hidden recentlyMerged tabBar current
+     '(repository task maturity viewed hidden recentlyMerged tabBar current
                   shownRepository shownTask shownMaturity revision))
     (agent-repl-wire--decoded
      "WorkspaceRoster"
@@ -1275,6 +1332,9 @@ between resolved views, never a derivation."
            :maturity (agent-repl-wire--decode-message
                       "WorkspaceRoster" 'maturity object
                       #'agent-repl-wire-decode-workspace-roster-maturity)
+           :viewed (agent-repl-wire--decode-message
+                    "WorkspaceRoster" 'viewed object
+                    #'agent-repl-wire-decode-workspace-roster-viewed)
            :hidden (agent-repl-wire--decode-message
                     "WorkspaceRoster" 'hidden object
                     #'agent-repl-wire-decode-workspace-roster-hidden)
