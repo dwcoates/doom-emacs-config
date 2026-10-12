@@ -2,6 +2,7 @@ package desktopnotify
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -9,6 +10,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/resolve/ladder"
+	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -145,5 +147,48 @@ func TestTurnBannerRefusesAnUnknownClose(t *testing.T) {
 	r, ok := hasRecord(f.log, "error", "a turn close has no turn end; no banner")
 	if !ok || r.Context["close"] != 99 || r.Context["turn"] != "turn-1" {
 		t.Fatalf("record = %+v (found %v), want the close and turn", r, ok)
+	}
+}
+
+func TestEventTitle(t *testing.T) {
+	cases := []struct {
+		name string
+		mark string
+		ws   string
+		what string
+		at   time.Time
+		want string
+	}{
+		{name: "an afternoon event", mark: "✅", ws: "my-ws", what: "turn completed", at: turnEndedAt, want: "✅ my-ws turn completed 14:07"},
+		{name: "a morning hour is zero-padded", mark: "🔀", ws: "w", what: "merge queued", at: time.Date(2026, 1, 2, 3, 4, 0, 0, time.Local), want: "🔀 w merge queued 03:04"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := eventTitle(tc.mark, tc.ws, tc.what, tc.at)
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("eventTitle = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestEveryEventTitleIsComposedByEventTitle pins the shared shape: no banner
+// title in the package formats its own clock.
+func TestEveryEventTitleIsComposedByEventTitle(t *testing.T) {
+	// Arrange / Act
+	for _, file := range sourcescan.Production(t) {
+		count := strings.Count(string(file.Source), `"15:04"`)
+
+		// Assert
+		want := 0
+		if file.Name == "turnbanner.go" {
+			want = 1
+		}
+		if count != want {
+			t.Errorf("%s formats a banner clock %d times, want %d: compose titles through eventTitle", file.Name, count, want)
+		}
 	}
 }
