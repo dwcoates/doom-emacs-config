@@ -208,9 +208,9 @@ func awaitChimePlayed(t *testing.T, f *fixture, what string) [][]string {
 	return argvs
 }
 
-// TestATurnEndRingsTheChimeInAFocusedEmacs pins that the turn-end chime is not
-// decided on focus: a focused Emacs gets no banner but still hears the turn end.
-func TestATurnEndRingsTheChimeInAFocusedEmacs(t *testing.T) {
+// TestAFocusedEmacsHearsNoChime pins that a sound is only ever a banner's: a
+// focused Emacs gets no banner for a turn's end, and so no chime either.
+func TestAFocusedEmacsHearsNoChime(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
@@ -221,14 +221,18 @@ func TestATurnEndRingsTheChimeInAFocusedEmacs(t *testing.T) {
 	pushConcludedTurn(f.shim, mainAgent, "answer-1")
 
 	// Assert
-	if argvs := awaitChimePlayed(t, f, "the focused turn's chime"); len(argvs) != 1 {
-		t.Fatalf("chimes %q, want exactly one", argvs)
+	f.d.AwaitLogRecord(f.d.RunLogPath(), "the suppressed banner", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.desktopnotify.post" && r.Message == "Emacs is focused; no desktop banner"
+	})
+	if got := f.d.Chime.Invocations(); len(got) != 0 {
+		t.Fatalf("chimes %q in a focused Emacs, want none: no banner was made", got)
 	}
 }
 
-// TestATurnEndBannerIsSilentBesideItsChime pins that an unfocused Emacs hears a
-// turn end once: the chime rings and the banner carries no sound of its own.
-func TestATurnEndBannerIsSilentBesideItsChime(t *testing.T) {
+// TestABannerRingsOneChimeAndCarriesNoSoundOfItsOwn pins that an unfocused
+// Emacs hears a turn end once: its banner is made silent, and the chime rings
+// as it is made.
+func TestABannerRingsOneChimeAndCarriesNoSoundOfItsOwn(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
@@ -238,12 +242,12 @@ func TestATurnEndBannerIsSilentBesideItsChime(t *testing.T) {
 	pushConcludedTurn(f.shim, mainAgent, "answer-1")
 
 	// Assert
-	if argvs := awaitChimePlayed(t, f, "the unfocused turn's chime"); len(argvs) != 1 {
+	if argvs := awaitChimePlayed(t, f, "the turn banner's chime"); len(argvs) != 1 {
 		t.Fatalf("chimes %q, want exactly one", argvs)
 	}
 	argvs := awaitBannerSettled(t, f, "the silent turn banner")
 	if !bannerCarrying(argvs, "turn completed") || slices.ContainsFunc(argvs, func(argv []string) bool {
-		return slices.Contains(argv, "-sound") || slices.Contains(argv, "--sound")
+		return slices.Contains(argv, "-sound") || slices.ContainsFunc(argv, func(arg string) bool { return strings.HasPrefix(arg, "--sound") })
 	}) {
 		t.Fatalf("banners %q, want the turn's banner with no sound flag", argvs)
 	}

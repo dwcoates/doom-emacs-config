@@ -23,10 +23,10 @@ type Endings interface {
 	TakeTurnEnding(ws ids.WorkspaceID, turn ids.TurnID) (feed.TurnEnding, bool)
 }
 
-// Announcer raises one banner with the chime that sounds as it surfaces
-// (Notifier.Announce).
-type Announcer interface {
-	Announce(ws ids.WorkspaceID, kind string, compose Compose)
+// Poster raises one banner, which rings its chime the instant it is made
+// (Notifier.Post).
+type Poster interface {
+	Post(ws ids.WorkspaceID, kind string, compose Compose)
 }
 
 // Summaries writes a completed turn's body (Summarizer.Summarize).
@@ -37,7 +37,7 @@ type Summaries interface {
 // TurnDeps are the turn banner's collaborators.
 type TurnDeps struct {
 	Endings   Endings
-	Announcer Announcer
+	Poster    Poster
 	Summaries Summaries
 	// Now stamps the banner with the turn's end.
 	Now func() time.Time
@@ -54,21 +54,20 @@ type TurnBanners struct {
 
 // NewTurnBanners builds the turn banner. It panics on a missing collaborator.
 func NewTurnBanners(deps TurnDeps) *TurnBanners {
-	if deps.Endings == nil || deps.Announcer == nil || deps.Summaries == nil || deps.Now == nil || deps.Log == nil {
-		panic("desktopnotify: NewTurnBanners requires Endings, Announcer, Summaries, Now and Log")
+	if deps.Endings == nil || deps.Poster == nil || deps.Summaries == nil || deps.Now == nil || deps.Log == nil {
+		panic("desktopnotify: NewTurnBanners requires Endings, Poster, Summaries, Now and Log")
 	}
 	return &TurnBanners{deps: deps}
 }
 
-// OnTurnEnded announces the banner, and its chime, for a turn that ended with
-// how. It reads the turn's end through ladder.ResolveTurnEnd, the table the
+// OnTurnEnded posts the banner for a turn that ended with how. It reads the turn's end through ladder.ResolveTurnEnd, the table the
 // roster's colour is drawn from: `done` and `interrupted` (green) raise ✅ with
 // a summary of the final answer, `turn_failed` (turquoise, or blue once the
 // vendor blocks) raises ❌ with the errored ending's line.
 //
-// THE CHIME IS THE TURN'S ONE SOUND, and the Announcer rings it as the banner
-// surfaces (after its summary is composed), or as the banner is given up when
-// Emacs is focused.
+// THE BANNER'S CHIME IS THE TURN'S ONE SOUND, rung the instant the banner is
+// made (after its summary is composed); a turn whose banner is not made, such
+// as one ending while Emacs is focused, makes no sound.
 func (t *TurnBanners) OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how wsm.TurnClose) {
 	log := t.deps.Log.With(dlog.Context{"workspace": string(ws), "turn": string(turn)})
 	ending, ok := t.deps.Endings.TakeTurnEnding(ws, turn)
@@ -84,8 +83,8 @@ func (t *TurnBanners) OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how wsm.T
 		return
 	}
 	at := t.deps.Now()
-	log.Debug(opTurn, "announcing the turn's banner and chime", dlog.Context{"turn_end": end.String()})
-	t.deps.Announcer.Announce(ws, KindTurnEnded, func(ctx context.Context, name string) Banner {
+	log.Debug(opTurn, "posting the turn's banner", dlog.Context{"turn_end": end.String()})
+	t.deps.Poster.Post(ws, KindTurnEnded, func(ctx context.Context, name string) Banner {
 		if end == ladder.TurnEndFailed {
 			return Banner{Title: TurnTitle(end, name, at), Body: ending.Error}
 		}

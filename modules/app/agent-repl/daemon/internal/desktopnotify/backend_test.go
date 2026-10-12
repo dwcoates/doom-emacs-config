@@ -3,7 +3,11 @@ package desktopnotify
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -13,13 +17,25 @@ type fakeRunner struct {
 	err    error
 	bin    string
 	args   []string
+	// startErr, when set, is a program that never started: Run answers it
+	// without calling started.
+	startErr error
+	// exited is set once Run has answered.
+	exited bool
 	// block, when set, is waited on before answering (a banner awaiting a
 	// click), and ctx's end answers ctx.Err().
 	block chan struct{}
 }
 
-func (r *fakeRunner) Run(ctx context.Context, bin string, args []string) (string, error) {
+func (r *fakeRunner) Run(ctx context.Context, bin string, args []string, started func()) (string, error) {
 	r.bin, r.args = bin, args
+	defer func() { r.exited = true }()
+	if r.startErr != nil {
+		return "", r.startErr
+	}
+	if started != nil {
+		started()
+	}
 	if r.block != nil {
 		select {
 		case <-r.block:
@@ -197,13 +213,10 @@ func TestTerminalNotifierBackendSpeaksTerminalNotifiersArgv(t *testing.T) {
 		banner Banner
 		want   []string
 	}{
-		{name: "a sounding banner", banner: Banner{Title: "T", Body: "B"}, want: []string{
-			"-title", `\T`, "-message", `\B`, "-sound", "default",
-			"-group", `\agent-repl:ws1`, "-activate", EmacsBundleID, "-execute", `\select ws1 in /work/ws1`}},
-		{name: "a silent banner carries no sound", banner: Banner{Title: "T", Body: "B", Silent: true}, want: []string{
+		{name: "a banner carries no sound of its own", banner: Banner{Title: "T", Body: "B"}, want: []string{
 			"-title", `\T`, "-message", `\B`,
 			"-group", `\agent-repl:ws1`, "-activate", EmacsBundleID, "-execute", `\select ws1 in /work/ws1`}},
-		{name: "a value NSUserDefaults would parse stays text", banner: Banner{Title: "[ws] {x}", Body: `"quoted" (y)`, Silent: true}, want: []string{
+		{name: "a value NSUserDefaults would parse stays text", banner: Banner{Title: "[ws] {x}", Body: `"quoted" (y)`}, want: []string{
 			"-title", `\[ws] {x}`, "-message", `\"quoted" (y)`,
 			"-group", `\agent-repl:ws1`, "-activate", EmacsBundleID, "-execute", `\select ws1 in /work/ws1`}},
 	}
@@ -217,7 +230,7 @@ func TestTerminalNotifierBackendSpeaksTerminalNotifiersArgv(t *testing.T) {
 			}
 
 			// Act
-			_, err = b.Post(context.Background(), target, tc.banner)
+			_, err = b.Post(context.Background(), target, tc.banner, func() {})
 
 			// Assert
 			if err != nil {
@@ -236,13 +249,13 @@ func TestNotifySendBackendSpeaksNotifySendsArgv(t *testing.T) {
 	b, _ := NewBackend(context.Background(), mustPlatform(t, "linux"), "", onPath, runner)
 
 	// Act
-	_, err := b.Post(context.Background(), target, Banner{Title: "T", Body: "B"})
+	_, err := b.Post(context.Background(), target, Banner{Title: "T", Body: "B"}, func() {})
 
 	// Assert
 	if err != nil {
 		t.Fatalf("Post: %v", err)
 	}
-	want := []string{"--app-name=Emacs", "--action=default=Open", "--wait", "--expire-time=60000", "T", "B"}
+	want := []string{"--app-name=Emacs", "--hint=boolean:suppress-sound:true", "--action=default=Open", "--wait", "--expire-time=60000", "T", "B"}
 	if !reflect.DeepEqual(runner.args, want) {
 		t.Fatalf("argv = %q, want %q", runner.args, want)
 	}
@@ -271,7 +284,7 @@ func TestBackendReadsTheOutcome(t *testing.T) {
 			runner.stdout = tc.stdout
 
 			// Act
-			outcome, err := b.Post(context.Background(), target, Banner{Title: "T", Body: "B"})
+			outcome, err := b.Post(context.Background(), target, Banner{Title: "T", Body: "B"}, func() {})
 
 			// Assert
 			if err != nil {
@@ -295,11 +308,61 @@ func TestBackendSurfacesAFailedProgram(t *testing.T) {
 	runner.err = cause
 
 	// Act
-	outcome, err := b.Post(context.Background(), target, Banner{Title: "T", Body: "B"})
+	outcome, err := b.Post(context.Background(), target, Banner{Title: "T", Body: "B"}, func() {})
 
 	// Assert
 	if !errors.Is(err, cause) || outcome != Unclicked {
 		t.Fatalf("Post = (%v, %v), want (Unclicked, the program's failure)", outcome, err)
+	}
+}
+
+// TestBackendReportsTheBannerMadeExactlyWhenItIsMade pins the made edge the
+// chime rings from: a handed banner is made once its program exits cleanly, a
+// read-back banner once its program is up showing it, and a banner whose
+// program failed or never started is never made.
+func TestBackendReportsTheBannerMadeExactlyWhenItIsMade(t *testing.T) {
+	cases := []struct {
+		name      string
+		goos      string
+		err       error
+		startErr  error
+		wantMade  bool
+		wantAfter bool
+	}{
+		{name: "a handed banner is made once its program exits", goos: "darwin", wantMade: true, wantAfter: true},
+		{name: "a handed banner whose program failed is not made", goos: "darwin", err: errors.New("exit status 1")},
+		{name: "a read-back banner is made once its program is up", goos: "linux", wantMade: true, wantAfter: false},
+		{name: "a read-back banner whose program never started is not made", goos: "linux", startErr: errors.New("exec: no such file")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			runner := &fakeRunner{stdout: version3}
+			b, err := NewBackend(context.Background(), mustPlatform(t, tc.goos), "", onPath, runner)
+			if err != nil {
+				t.Fatalf("NewBackend: %v", err)
+			}
+			runner.stdout, runner.err, runner.startErr, runner.exited = "", tc.err, tc.startErr, false
+			made, madeAfterExit := 0, false
+
+			// Act
+			_, _ = b.Post(context.Background(), target, Banner{Title: "T", Body: "B"}, func() {
+				made++
+				madeAfterExit = runner.exited
+			})
+
+			// Assert
+			wantCount := 0
+			if tc.wantMade {
+				wantCount = 1
+			}
+			if made != wantCount {
+				t.Fatalf("made called %d times, want %d", made, wantCount)
+			}
+			if tc.wantMade && madeAfterExit != tc.wantAfter {
+				t.Fatalf("made after the program exited = %v, want %v", madeAfterExit, tc.wantAfter)
+			}
+		})
 	}
 }
 
@@ -459,5 +522,67 @@ func TestChimeSurfacesAFailedPlayer(t *testing.T) {
 	// Assert
 	if !errors.Is(err, cause) {
 		t.Fatalf("Play = %v, want the player's failure", err)
+	}
+}
+
+// TestExecRunnerHelperProcess is the program TestExecRunner runs: this test
+// binary re-executed, so no real banner program or player is ever started.
+func TestExecRunnerHelperProcess(t *testing.T) {
+	switch os.Getenv("DESKTOPNOTIFY_HELPER") {
+	case "":
+		return
+	case "ok":
+		fmt.Print("default")
+		os.Exit(0)
+	default:
+		fmt.Fprint(os.Stderr, "refused")
+		os.Exit(3)
+	}
+}
+
+func TestExecRunner(t *testing.T) {
+	cases := []struct {
+		name        string
+		mode        string
+		wantStdout  string
+		wantErr     string
+		wantStarted int
+	}{
+		{name: "a program that runs calls started once and answers its stdout", mode: "ok", wantStdout: "default", wantStarted: 1},
+		{name: "a program that exits non-zero answers its stderr", mode: "fail", wantErr: "refused", wantStarted: 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			t.Setenv("DESKTOPNOTIFY_HELPER", tc.mode)
+			started := 0
+
+			// Act
+			out, err := ExecRunner{}.Run(context.Background(), os.Args[0], []string{"-test.run=^TestExecRunnerHelperProcess$"}, func() { started++ })
+
+			// Assert
+			if started != tc.wantStarted {
+				t.Fatalf("started called %d times, want %d", started, tc.wantStarted)
+			}
+			if tc.wantErr == "" && (err != nil || out != tc.wantStdout) {
+				t.Fatalf("Run = (%q, %v), want (%q, nil)", out, err, tc.wantStdout)
+			}
+			if tc.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tc.wantErr)) {
+				t.Fatalf("Run err = %v, want one carrying %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestExecRunnerCallsNoStartedForAProgramThatNeverStarted(t *testing.T) {
+	// Arrange
+	started := 0
+
+	// Act
+	_, err := ExecRunner{}.Run(context.Background(), filepath.Join(t.TempDir(), "absent"), nil, func() { started++ })
+
+	// Assert
+	if err == nil || started != 0 {
+		t.Fatalf("Run = %v with started called %d times, want an error and no start", err, started)
 	}
 }
