@@ -66,34 +66,40 @@ func leftViewMove(row *frontendv1.FeedId) *agentreplv1.SelectFeedRowRequest {
 	}
 }
 
-// TestStepIndex is the pure index arithmetic every step rides on: the newest
-// row from nothing selected regardless of direction, wrapping at each end,
-// and a single row wrapping to itself.
+// TestStepIndex is the pure index arithmetic every step rides on: OLDER
+// starts at the newest and NEWER at the oldest from nothing selected, either
+// starts at the newest from a row of another kind, OLDER wraps past the
+// oldest, and NEWER past the newest ends the selection.
 func TestStepIndex(t *testing.T) {
 	tests := []struct {
 		name      string
 		at        int
 		n         int
+		held      bool
 		direction agentreplv1.SelectFeedRowDirection
 		want      int
+		wantEnded bool
 	}{
 		{name: "from nothing, OLDER starts at the newest", at: -1, n: 3, direction: older, want: 2},
-		{name: "from nothing, NEWER starts at the newest", at: -1, n: 3, direction: newer, want: 2},
-		{name: "OLDER walks older", at: 2, n: 3, direction: older, want: 1},
-		{name: "NEWER walks newer", at: 0, n: 3, direction: newer, want: 1},
-		{name: "OLDER wraps past the oldest to the newest", at: 0, n: 3, direction: older, want: 2},
-		{name: "NEWER wraps past the newest to the oldest", at: 2, n: 3, direction: newer, want: 0},
-		{name: "single row OLDER wraps to itself", at: 0, n: 1, direction: older, want: 0},
-		{name: "single row NEWER wraps to itself", at: 0, n: 1, direction: newer, want: 0},
+		{name: "from nothing, NEWER starts at the oldest", at: -1, n: 3, direction: newer, want: 0},
+		{name: "from another kind, OLDER starts at the newest", at: -1, n: 3, held: true, direction: older, want: 2},
+		{name: "from another kind, NEWER starts at the newest", at: -1, n: 3, held: true, direction: newer, want: 2},
+		{name: "OLDER walks older", at: 2, n: 3, held: true, direction: older, want: 1},
+		{name: "NEWER walks newer", at: 0, n: 3, held: true, direction: newer, want: 1},
+		{name: "OLDER wraps past the oldest to the newest", at: 0, n: 3, held: true, direction: older, want: 2},
+		{name: "NEWER past the newest ends the selection", at: 2, n: 3, held: true, direction: newer, wantEnded: true},
+		{name: "single row OLDER wraps to itself", at: 0, n: 1, held: true, direction: older, want: 0},
+		{name: "single row NEWER ends the selection", at: 0, n: 1, held: true, direction: newer, wantEnded: true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Act.
-			got := stepIndex(tc.at, tc.n, tc.direction)
+			got, ended := stepIndex(tc.at, tc.n, tc.held, tc.direction)
 
 			// Assert.
-			if got != tc.want {
-				t.Fatalf("stepIndex(%d, %d, %v) = %d, want %d", tc.at, tc.n, tc.direction, got, tc.want)
+			if ended != tc.wantEnded || (!ended && got != tc.want) {
+				t.Fatalf("stepIndex(%d, %d, %v, %v) = (%d, %v), want (%d, %v)",
+					tc.at, tc.n, tc.held, tc.direction, got, ended, tc.want, tc.wantEnded)
 			}
 		})
 	}
@@ -107,7 +113,7 @@ func TestSelectFeedRowResponseStepAcksTheNewest(t *testing.T) {
 	h.Feed.finals = feedIDs("a", "b", "c")
 
 	// Act.
-	resp, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(newer)))
+	resp, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(older)))
 
 	// Assert.
 	if err != nil {
@@ -127,7 +133,7 @@ func TestSelectFeedRowPromptStepWalksRollbackPrompts(t *testing.T) {
 	h.Feed.prompts = feedIDs("p1", "p2")
 
 	// Act.
-	resp, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(promptStep(newer)))
+	resp, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(promptStep(older)))
 
 	// Assert.
 	if err != nil {
@@ -146,7 +152,7 @@ func TestSelectFeedRowPromptStepReplacesASelectedResponse(t *testing.T) {
 	h := newHarness(t)
 	h.Feed.finals = feedIDs("a", "b", "c")
 	h.Feed.prompts = feedIDs("p1", "p2")
-	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(newer))); err != nil {
+	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(older))); err != nil {
 		t.Fatalf("seed a response selection: %v", err)
 	}
 
@@ -176,7 +182,7 @@ func TestSelectFeedRowEmptySetEndsAHeldSelectionWithReturnToTail(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	stream := openRootWatch(t, h, ctx)
-	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(newer))); err != nil {
+	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(older))); err != nil {
 		t.Fatalf("seed a selection: %v", err)
 	}
 	if got := receiveSelection(t, stream).GetResponse().GetRow().GetValue(); got != "c" {
@@ -210,7 +216,7 @@ func TestSelectFeedRowClearPushesReturnToTail(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	stream := openRootWatch(t, h, ctx)
-	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(newer))); err != nil {
+	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(older))); err != nil {
 		t.Fatalf("seed a selection: %v", err)
 	}
 	receiveSelection(t, stream)
@@ -241,7 +247,7 @@ func TestSelectFeedRowLeftViewOfTheSelectedRowPushesStay(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	stream := openRootWatch(t, h, ctx)
-	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(newer))); err != nil {
+	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(older))); err != nil {
 		t.Fatalf("seed a selection: %v", err)
 	}
 	receiveSelection(t, stream)
@@ -268,7 +274,7 @@ func TestSelectFeedRowLeftViewOfTheSelectedRowPushesStay(t *testing.T) {
 // changes nothing: no push fires, and the held selection stands for the next
 // step to continue from. Steeping OLDER after a held "c" lands on "b"; a
 // cleared selection would instead restart at the newest, "c" (stepIndex treats
-// -1 as "start at the newest" for either direction).
+// -1 with nothing held as "start at the newest" for OLDER).
 func TestSelectFeedRowLeftViewOfANonSelectedRowKeepsTheSelection(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
@@ -276,7 +282,7 @@ func TestSelectFeedRowLeftViewOfANonSelectedRowKeepsTheSelection(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	stream := openRootWatch(t, h, ctx)
-	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(newer))); err != nil {
+	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(older))); err != nil {
 		t.Fatalf("seed a selection: %v", err)
 	}
 	receiveSelection(t, stream)
@@ -362,7 +368,7 @@ func TestSelectFeedRowMoveIsRecordedAtInfo(t *testing.T) {
 	h.Surfaces.workspace = log
 
 	// Act.
-	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(newer))); err != nil {
+	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(older))); err != nil {
 		t.Fatalf("SelectFeedRow: %v", err)
 	}
 
@@ -389,7 +395,7 @@ func TestSelectFeedRowChangesReachTheWatchInTheOrderMade(t *testing.T) {
 	defer cancel()
 	stream := openRootWatch(t, h, ctx)
 
-	// Act: newer from none lands on c, then wraps to a, then b.
+	// Act: newer from none lands on the oldest, a, then walks to b and c.
 	for range 3 {
 		if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(newer))); err != nil {
 			t.Fatalf("SelectFeedRow: %v", err)
@@ -401,8 +407,8 @@ func TestSelectFeedRowChangesReachTheWatchInTheOrderMade(t *testing.T) {
 	}
 
 	// Assert.
-	if strings.Join(got, ",") != "c,a,b" {
-		t.Fatalf("pushed rows = %v, want c,a,b", got)
+	if strings.Join(got, ",") != "a,b,c" {
+		t.Fatalf("pushed rows = %v, want a,b,c", got)
 	}
 }
 
@@ -412,7 +418,7 @@ func TestSelectFeedRowEndStoresNoneAsAbsence(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	h.Feed.finals = feedIDs("a")
-	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(newer))); err != nil {
+	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(older))); err != nil {
 		t.Fatalf("seed a selection: %v", err)
 	}
 
@@ -526,6 +532,229 @@ func TestSelectFeedRowBubbleLogsTheRefusal(t *testing.T) {
 	t.Fatalf("records = %v, want the not_selectable refusal", log.records)
 }
 
+// TestSelectFeedRowNewerFromNothingLandsOnTheOldest pins that a NEWER step
+// with nothing selected lands on the oldest loaded row of its kind, for
+// responses and prompts alike.
+func TestSelectFeedRowNewerFromNothingLandsOnTheOldest(t *testing.T) {
+	tests := []struct {
+		name string
+		req  *agentreplv1.SelectFeedRowRequest
+		want string
+	}{
+		{name: "a response step", req: responseStep(newer), want: "a"},
+		{name: "a prompt step", req: promptStep(newer), want: "p1"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.Feed.finals = feedIDs("a", "b", "c")
+			h.Feed.prompts = feedIDs("p1", "p2")
+
+			// Act.
+			resp, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(tc.req))
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("SelectFeedRow: %v", err)
+			}
+			row, _, held := selectedRow(resp.Msg.GetSuccess().GetSelected().GetSelection())
+			if !held || row.GetValue() != tc.want {
+				t.Fatalf("selected = %v, want the oldest %s", resp.Msg.GetSuccess().GetOutcome(), tc.want)
+			}
+		})
+	}
+}
+
+// TestSelectFeedRowNewerPastTheNewestEndsWithReturnToTail pins that a NEWER
+// step from the newest row of its kind ends the selection, acks none and
+// pushes none{return_to_tail}, so the feed scrolls to its bottom.
+func TestSelectFeedRowNewerPastTheNewestEndsWithReturnToTail(t *testing.T) {
+	tests := []struct {
+		name string
+		step func(agentreplv1.SelectFeedRowDirection) *agentreplv1.SelectFeedRowRequest
+	}{
+		{name: "a response step", step: responseStep},
+		{name: "a prompt step", step: promptStep},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.Feed.finals = feedIDs("a", "b")
+			h.Feed.prompts = feedIDs("p1", "p2")
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			stream := openRootWatch(t, h, ctx)
+			if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(tc.step(older))); err != nil {
+				t.Fatalf("seed the newest: %v", err)
+			}
+			receiveSelection(t, stream)
+
+			// Act.
+			resp, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(tc.step(newer)))
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("SelectFeedRow: %v", err)
+			}
+			if resp.Msg.GetSuccess().GetNone() == nil {
+				t.Fatalf("outcome = %v, want none", resp.Msg.GetSuccess().GetOutcome())
+			}
+			if sel := receiveSelection(t, stream); sel.GetNone().GetReturnToTail() == nil {
+				t.Fatalf("selection = %v, want none{return_to_tail}", sel)
+			}
+			if _, _, held := h.Server.(*server).currentSelection(testWorkspaceID); held {
+				t.Fatalf("a selection is still stored after the step ran past the newest")
+			}
+		})
+	}
+}
+
+// TestSelectFeedRowNewerAfterRunningPastTheNewestRollsRoundToTheOldest pins
+// the round trip: newest, NEWER (ended, at the tail), NEWER again lands on
+// the oldest prompt.
+func TestSelectFeedRowNewerAfterRunningPastTheNewestRollsRoundToTheOldest(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Feed.prompts = feedIDs("p1", "p2", "p3")
+	for _, dir := range []agentreplv1.SelectFeedRowDirection{older, newer} {
+		if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(promptStep(dir))); err != nil {
+			t.Fatalf("SelectFeedRow %v: %v", dir, err)
+		}
+	}
+
+	// Act.
+	resp, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(promptStep(newer)))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("SelectFeedRow: %v", err)
+	}
+	if got := resp.Msg.GetSuccess().GetSelected().GetSelection().GetPrompt().GetRow().GetValue(); got != "p1" {
+		t.Fatalf("selected prompt = %q, want the oldest p1", got)
+	}
+}
+
+// TestSelectFeedRowNewerPastTheNewestIsRecordedAtInfo pins that the end is a
+// visible action in the workspace's log, naming the kind and the row it left.
+func TestSelectFeedRowNewerPastTheNewestIsRecordedAtInfo(t *testing.T) {
+	// Arrange.
+	log := &recordingLogger{}
+	h := newHarness(t, func(deps *Deps) {
+		deps.Log = &fakeSurfaces{workspace: log, global: log}
+	})
+	h.Feed.prompts = feedIDs("p1")
+	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(promptStep(older))); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	// Act.
+	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(promptStep(newer))); err != nil {
+		t.Fatalf("SelectFeedRow: %v", err)
+	}
+
+	// Assert.
+	for _, rec := range log.at("INFO") {
+		if strings.Contains(rec.Message, "ran past the newest") {
+			if rec.Context["kind"] != "prompt" || rec.Context["row"] != "p1" {
+				t.Fatalf("context = %v, want kind prompt and row p1", rec.Context)
+			}
+			return
+		}
+	}
+	t.Fatalf("records = %v, want the end at INFO", log.records)
+}
+
+// TestSelectFeedRowBubbleOnTheSelectedRowDeselectsWithStay pins the click
+// toggle: a click naming the selected row ends the selection, acks none and
+// pushes none{stay}, so the feed does not scroll, whichever arm the row was
+// selected as.
+func TestSelectFeedRowBubbleOnTheSelectedRowDeselectsWithStay(t *testing.T) {
+	tests := []struct {
+		name string
+		seed *agentreplv1.SelectFeedRowRequest
+		row  string
+	}{
+		{name: "a response selected by a step", seed: responseStep(older), row: "final-1"},
+		{name: "a prompt selected by a step", seed: promptStep(older), row: "prompt-1"},
+		{name: "a bubble selected by a click", seed: bubbleMove(&frontendv1.FeedId{Value: "interim-1"}), row: "interim-1"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.Feed.finals = feedIDs("final-1")
+			h.Feed.prompts = feedIDs("prompt-1")
+			h.Feed.markdown = map[string]string{"interim-1": "meanwhile"}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			stream := openRootWatch(t, h, ctx)
+			if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(tc.seed)); err != nil {
+				t.Fatalf("seed: %v", err)
+			}
+			receiveSelection(t, stream)
+
+			// Act.
+			resp := clickRow(t, h, tc.row)
+
+			// Assert.
+			if resp.Msg.GetSuccess().GetNone() == nil {
+				t.Fatalf("outcome = %v, want none", resp.Msg.GetSuccess().GetOutcome())
+			}
+			if sel := receiveSelection(t, stream); sel.GetNone().GetStay() == nil {
+				t.Fatalf("selection = %v, want none{stay}", sel)
+			}
+			if _, _, held := h.Server.(*server).currentSelection(testWorkspaceID); held {
+				t.Fatalf("a selection is still stored after the click on the selected row")
+			}
+		})
+	}
+}
+
+// TestSelectFeedRowBubbleOnAnotherRowMovesTheSelection pins that the toggle is
+// only for the selected row: a click on another selectable row selects it.
+func TestSelectFeedRowBubbleOnAnotherRowMovesTheSelection(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Feed.finals = feedIDs("final-1", "final-2")
+	clickRow(t, h, "final-1")
+
+	// Act.
+	resp := clickRow(t, h, "final-2")
+
+	// Assert.
+	if got := resp.Msg.GetSuccess().GetSelected().GetSelection().GetResponse().GetRow().GetValue(); got != "final-2" {
+		t.Fatalf("selected = %q, want final-2", got)
+	}
+}
+
+// TestSelectFeedRowBubbleDeselectIsRecordedAtInfo pins that the click toggle
+// enters the workspace log under the shared end record, naming why.
+func TestSelectFeedRowBubbleDeselectIsRecordedAtInfo(t *testing.T) {
+	// Arrange.
+	log := &recordingLogger{}
+	h := newHarness(t, func(deps *Deps) {
+		deps.Log = &fakeSurfaces{workspace: log, global: log}
+	})
+	h.Feed.finals = feedIDs("final-1")
+	clickRow(t, h, "final-1")
+
+	// Act.
+	clickRow(t, h, "final-1")
+
+	// Assert.
+	for _, rec := range log.at("INFO") {
+		if rec.Context["because"] == "clicked_selected" {
+			if rec.Context["row"] != "final-1" {
+				t.Fatalf("context = %v, want row final-1", rec.Context)
+			}
+			return
+		}
+	}
+	t.Fatalf("records = %v, want the deselect at INFO", log.records)
+}
+
 // TestSelectFeedRowStepFailsOnAnUnreadableFinal pins the invariant: a final
 // response the resolver cannot read is a defect, answered Internal and logged
 // at ERROR, and nothing is selected or published.
@@ -539,7 +768,7 @@ func TestSelectFeedRowStepFailsOnAnUnreadableFinal(t *testing.T) {
 	h.Feed.unreadable = map[string]bool{"final-1": true}
 
 	// Act.
-	_, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(newer)))
+	_, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(older)))
 
 	// Assert.
 	if connectCode(t, err) != connect.CodeInternal {
@@ -623,7 +852,7 @@ func TestReturnFeedToTailEndsAHeldSelectionWithReturnToTail(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	stream := openRootWatch(t, h, ctx)
-	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(newer))); err != nil {
+	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(older))); err != nil {
 		t.Fatalf("seed a selection: %v", err)
 	}
 	receiveSelection(t, stream)
@@ -644,7 +873,7 @@ func TestReturnFeedToTailLeavesNothingSelected(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	h.Feed.finals = feedIDs("a")
-	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(newer))); err != nil {
+	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(older))); err != nil {
 		t.Fatalf("seed a selection: %v", err)
 	}
 
@@ -680,7 +909,7 @@ func TestReturnFeedToTailIsRecordedAtInfo(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	h.Feed.finals = feedIDs("a")
-	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(newer))); err != nil {
+	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(older))); err != nil {
 		t.Fatalf("seed a selection: %v", err)
 	}
 	log := dlog.NewTestLogger()

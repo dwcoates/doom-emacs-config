@@ -3967,16 +3967,6 @@ describe("createFeedController: selected and expanded are one state", () => {
     ]);
   });
 
-  it("answers the selected row", () => {
-    // Arrange
-    const { controller } = governing();
-    controller.upsert(selectableRow("r1"));
-    // Act
-    controller.applySelection(bubbleSelection("r1"));
-    // Assert
-    expect(controller.selectedRow()).toBe("r1");
-  });
-
   it("reports a bubble arm with no row as malformed", () => {
     // Arrange
     const { controller } = governing();

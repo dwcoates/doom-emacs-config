@@ -10,7 +10,6 @@ import { SelectFeedRowResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/
 import { FeedRowSchema, type FeedRow } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import type { FailureKind } from "../../../proto/gen/ts/frontend/v1/failure_pb";
 import {
-  DESELECT_REQUEST,
   SELECTABLE_ATTRIBUTE,
   SELECTION_GOVERNED_ATTRIBUTE,
   SELECT_REQUEST,
@@ -126,34 +125,33 @@ describe("governedRowAt", () => {
 
 describe("bubbleClick", () => {
   it.each([
-    ["a link inside the bubble", "#link", "", null, { case: "ignore", reason: "interactive" }],
-    ["a click that ends a text highlight", "#prose", "words", null, { case: "ignore", reason: "text-selection" }],
-    ["a bubble that has not landed", "#streaming", "", null, { case: "ignore", reason: "not-landed" }],
-    ["an unselected bubble", "#prose", "", null, { case: "select", row: "r1" }],
-    ["the selected bubble", "#prose", "", "r1", { case: "clear" }],
-  ] as const)("decides %s", (_name, selector, selectedText, selectedRow, want) => {
+    ["a link inside the bubble", "#link", "", { case: "ignore", reason: "interactive" }],
+    ["a click that ends a text highlight", "#prose", "words", { case: "ignore", reason: "text-selection" }],
+    ["a bubble that has not landed", "#streaming", "", { case: "ignore", reason: "not-landed" }],
+    ["a selectable bubble", "#prose", "", { case: "select", row: "r1" }],
+  ] as const)("decides %s", (_name, selector, selectedText, want) => {
     // Arrange
     const f = feed();
     const target = f.at(selector);
     const row = governedRowAt(target, f.host);
     if (row === null) throw new Error("the fixture's target is in no governed row");
     // Act
-    const click = bubbleClick({ row, target, selectedRow, selectedText });
+    const click = bubbleClick({ row, target, selectedText });
     // Assert
     expect(click).toEqual(want);
   });
 });
 
 describe("installBubbleSelect", () => {
-  /** A feed with click-to-select armed, the daemon's last selection SELECTED. */
-  function armed(script: FeedScript = {}, selected: string | null = null) {
+  /** A feed with click-to-select armed. */
+  function armed(script: FeedScript = {}) {
     const f = feed();
     const h = harness(script);
     const reported: FailureKind[] = [];
     vi.spyOn(h.sink, "report").mockImplementation((kind) => {
       reported.push(kind);
     });
-    const uninstall = installBubbleSelect(f.host, h.ctx, () => selected, () => "");
+    const uninstall = installBubbleSelect(f.host, h.ctx, () => "");
     return { ...f, h, reported, uninstall };
   }
 
@@ -173,14 +171,17 @@ describe("installBubbleSelect", () => {
     ).toEqual(["r1"]);
   });
 
-  it("asks the daemon to clear when the selected bubble is clicked", async () => {
-    // Arrange
-    const a = armed({}, "r1");
+  it("asks the daemon for the bubble again when it is clicked twice, never a clear", async () => {
+    // Arrange: the daemon, not the webapp, toggles the selected bubble off.
+    const a = armed();
     // Act
+    click(a.at("#prose"));
     click(a.at("#prose"));
     await settle();
     // Assert
-    expect(a.h.calls.selectFeedRow.map((r) => r.move.case)).toEqual(["clear"]);
+    expect(
+      a.h.calls.selectFeedRow.map((r) => (r.move.case === "bubble" ? r.move.value.row?.value : r.move.case)),
+    ).toEqual(["r1", "r1"]);
   });
 
   it("asks nothing for a bubble that has not landed", async () => {
@@ -244,21 +245,18 @@ describe("installBubbleSelect", () => {
     ]);
   });
 
-  it("files a clear that failed at the transport on the warning chip", async () => {
+  it("files a click that failed at the transport on the warning chip", async () => {
     // Arrange
-    const a = armed(
-      {
-        selectFeedRow: () => {
-          throw new ConnectError("connection refused", Code.Unavailable);
-        },
+    const a = armed({
+      selectFeedRow: () => {
+        throw new ConnectError("connection refused", Code.Unavailable);
       },
-      "r1",
-    );
+    });
     // Act
     click(a.at("#prose"));
     await settle();
     // Assert
     const kind = a.reported[0]?.kind;
-    expect(kind?.case === "controlPlaneFailed" ? kind.value.what : kind?.case).toBe(DESELECT_REQUEST);
+    expect(kind?.case === "controlPlaneFailed" ? kind.value.what : kind?.case).toBe(SELECT_REQUEST);
   });
 });

@@ -241,7 +241,7 @@ func TestWatchFeedPushesTheSelectionOnTheRootFeed(t *testing.T) {
 	stream := openRootWatch(t, h, ctx)
 
 	// Act.
-	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(newer))); err != nil {
+	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(older))); err != nil {
 		t.Fatalf("SelectFeedRow: %v", err)
 	}
 	sel := receiveSelection(t, stream)
@@ -262,7 +262,7 @@ func TestWatchFeedPushesTheClearedSelection(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	stream := openRootWatch(t, h, ctx)
-	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(newer))); err != nil {
+	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(older))); err != nil {
 		t.Fatalf("seed selection: %v", err)
 	}
 	if got := receiveSelection(t, stream).GetResponse().GetRow().GetValue(); got != "c" {
