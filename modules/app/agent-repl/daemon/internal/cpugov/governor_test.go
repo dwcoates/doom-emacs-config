@@ -61,8 +61,16 @@ type rig struct {
 
 func newRig(t *testing.T) *rig {
 	t.Helper()
+	return newRigWith(t, DefaultConfig())
+}
+
+// newRigWith is newRig under cfg, for a test whose subject is not the
+// default bounds (a share-accounting test needs room for more gates than the
+// queue window holds).
+func newRigWith(t *testing.T, cfg Config) *rig {
+	t.Helper()
 	r := &rig{sampler: &fakeSampler{}, clock: &fakeClock{now: time.Unix(1700000000, 0)}, log: dlog.NewTestLogger()}
-	g, err := New(DefaultConfig(), r.sampler, r.clock.Now, r.log)
+	g, err := New(cfg, r.sampler, r.clock.Now, r.log)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -72,6 +80,13 @@ func newRig(t *testing.T) *rig {
 
 // at is a 16-processor host at a fraction of its processors.
 func at(fraction float64) Sample { return Sample{Utilization: fraction, CPUs: 16} }
+
+// roomFor is the default config with room for n concurrent gates.
+func roomFor(n int) Config {
+	cfg := DefaultConfig()
+	cfg.MaxGates = n
+	return cfg
+}
 
 func ready(w *waiter) bool {
 	select {
@@ -154,7 +169,7 @@ func TestAGateWhoseCostWouldPassTheCeilingIsDeferredBelowTheBand(t *testing.T) {
 
 func TestAJustStartedGatesShareIsCountedBeforeTheLoadShowsIt(t *testing.T) {
 	// Arrange: two head gates just started, not yet in the load average.
-	r := newRig(t)
+	r := newRigWith(t, roomFor(3))
 	r.g.Observe(at(0.35))
 	for i := 0; i < 2; i++ {
 		r.g.enqueue(Request{Workspace: "head", Rank: 0, Head: true})
@@ -175,7 +190,7 @@ func TestAJustStartedGatesShareIsCountedBeforeTheLoadShowsIt(t *testing.T) {
 func TestASettledGatesShareIsReadOutOfTheSample(t *testing.T) {
 	// Arrange: the same two gates, long enough ago that the load average
 	// holds their whole share.
-	r := newRig(t)
+	r := newRigWith(t, roomFor(3))
 	for i := 0; i < 2; i++ {
 		r.g.enqueue(Request{Workspace: "head", Rank: 0, Head: true})
 	}
