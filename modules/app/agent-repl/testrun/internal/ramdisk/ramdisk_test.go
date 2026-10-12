@@ -7,6 +7,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 )
 
 // fakeHost is a scripted hdiutil/diskutil: it records every call and answers
@@ -522,5 +523,41 @@ func TestUnitPrefixRunsUnitsAtTheUtilityTier(t *testing.T) {
 	// Assert
 	if got != "/usr/sbin/taskpolicy -d utility" {
 		t.Fatalf("UnitPrefix = %q", got)
+	}
+}
+
+func TestRunBoundedFailsACommandThatOutlivesItsBound(t *testing.T) {
+	// Arrange
+	start := time.Now()
+
+	// Act
+	_, err := runBounded(100*time.Millisecond, "sleep", "10")
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "did not answer within") {
+		t.Fatalf("runBounded(sleep 10) = %v, want the bound's failure", err)
+	}
+	if took := time.Since(start); took > 5*time.Second {
+		t.Fatalf("runBounded took %s for a 100ms bound, want the command killed at the bound", took)
+	}
+}
+
+func TestRunBoundedAnswersACommandThatFinishesInTime(t *testing.T) {
+	// Act
+	out, err := runBounded(10*time.Second, "echo", "attached")
+
+	// Assert
+	if err != nil || strings.TrimSpace(out) != "attached" {
+		t.Fatalf("runBounded(echo attached) = %q, %v; want its output", out, err)
+	}
+}
+
+func TestRunBoundedReportsAFailingCommandsOutput(t *testing.T) {
+	// Act
+	_, err := runBounded(10*time.Second, "sh", "-c", "echo refused >&2; exit 3")
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "refused") || strings.Contains(err.Error(), "did not answer") {
+		t.Fatalf("runBounded(exit 3) = %v, want the command's own failure with its output", err)
 	}
 }
