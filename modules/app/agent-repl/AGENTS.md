@@ -222,6 +222,15 @@ The gate counts what is actually running, claiming slots as directories via
 pid is gone. It is the same mechanism as the sandbox's container gate in
 `e2e/sandbox/bin/e2e-sandbox.sh`, for the same reason.
 
+**WAITERS ARE SERVED IN ORDER, MERGE QUEUE FIRST.** Each waiter takes a ticket
+in `$SLOT_DIR.queue` named `<priority>-<epoch seconds>-<pid>` and claims a
+freed slot only when it is at the front of the line. The merge queue's gate
+runs with `AGENT_REPL_SUITE_PRIORITY=merge` (priority 0), so it goes ahead of
+every ad-hoc run; everything else is first come, first served. Before this, a
+freed slot went to whichever 2-second poller woke first, and a merge's gate sat
+behind six ad-hoc runs from one agent session while master stood still. A dead
+waiter's ticket is reaped by its pid, like a dead holder's slot.
+
 **IT NESTS.** A slot is held by a process TREE, so wrapping a script that
 wraps its own children is safe: the holder exports
 `AGENT_REPL_SUITE_SLOT_HELD`, and an inner invocation that sees it runs
