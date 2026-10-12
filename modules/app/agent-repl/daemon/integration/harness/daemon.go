@@ -355,10 +355,6 @@ type Opts struct {
 	// ExpectEarlyExit stops the harness from failing when the daemon exits on
 	// its own, for the tests whose subject is a refusal to boot.
 	ExpectEarlyExit bool
-	// FileLogs runs the daemon with its logs on disk, as a live daemon writes
-	// them, instead of over the test log pipe (logpipe.go). Every reader works
-	// either way; it is for a test whose subject is the files' own bytes.
-	FileLogs bool
 	// ExtraArgs and ExtraEnv are appended verbatim.
 	ExtraArgs []string
 	ExtraEnv  []string
@@ -442,9 +438,6 @@ type Daemon struct {
 	waitBound  time.Duration
 	cmd        *exec.Cmd
 	stderrPath string
-	// pipe is the test log pipe this daemon's logs go over, nil under
-	// Opts.FileLogs.
-	pipe *logPipe
 	// afterGroupStopped, when set, runs inside Kill between the group's
 	// SIGSTOP and the leader's SIGKILL: the instant at which the harness's own
 	// tests can undo the stop, as the kernel does for a member inside execve.
@@ -640,13 +633,6 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 	if d.StoreSocket == "" {
 		d.StoreSocket = filepath.Join(sockRoot, "store.sock")
 	}
-	// THE PIPE'S RELEASE IS REGISTERED BEFORE EVERYTHING BELOW, SO IT RUNS
-	// AFTER ALL OF IT: the sweeps and a failed test's preserved logs read the
-	// records it holds.
-	if !opts.FileLogs {
-		d.pipe = testLogPipe(t)
-		t.Cleanup(d.pipe.route(filepath.Join(d.StateDir, "logs")))
-	}
 	// THE COVERAGE TEARDOWN IS REGISTERED FIRST, SO IT RUNS LAST. A coverage
 	// run has to let the daemon leave through SIGTERM — a SIGKILLed process
 	// writes no counters — and a graceful shutdown emits records an abruptly
@@ -679,11 +665,6 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 		dest := ""
 		if root := os.Getenv(ArtifactsEnv); root != "" {
 			dest = filepath.Join(root, artifactDirName(t.Name()))
-		}
-		if d.pipe != nil {
-			if err := materializePipedLogs(filepath.Join(d.StateDir, "logs")); err != nil {
-				t.Errorf("harness: the failed test's piped logs could not all be written out: %v", err)
-			}
 		}
 		preserveFailureLogs(t.Logf, filepath.Join(d.StateDir, "logs"), dest)
 	})
@@ -862,9 +843,6 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 		}
 		env = append(env, daemonCov...)
 		env = append(env, nodeCov...)
-	}
-	if d.pipe != nil {
-		env = append(env, pipeEnv(d.pipe))
 	}
 	env = append(env, opts.ExtraEnv...)
 
@@ -1701,22 +1679,13 @@ func (d *Daemon) AwaitExit() int {
 	}
 }
 
-// Stderr is everything the daemon wrote to its stderr: what it wrote there
-// itself, then its terminal mirror when the mirror went over the test log
-// pipe.
+// Stderr is everything the daemon wrote to its terminal mirror.
 func (d *Daemon) Stderr() string {
 	raw, err := os.ReadFile(d.stderrPath)
 	if err != nil {
 		return ""
 	}
-	if d.pipe == nil {
-		return string(raw)
-	}
-	mirror, err := pipedTerminal(d.PID(), filepath.Join(d.StateDir, "logs"))
-	if err != nil {
-		d.t.Errorf("harness: read the daemon's piped terminal mirror: %v", err)
-	}
-	return string(raw) + string(mirror)
+	return string(raw)
 }
 
 // Register registers a repository's worktree and answers the minted ref.
