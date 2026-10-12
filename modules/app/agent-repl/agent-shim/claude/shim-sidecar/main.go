@@ -513,7 +513,7 @@ func runWithLogger(options Options, logf *logging.Bound, stop <-chan os.Signal) 
 	}
 	defer closePprofSurface(pprofSurface, logf)
 	// RUNTIME PROFILING is armed beside the surface: a session the collector
-	// opens (bin/profile-agent-repl.sh) starts it on SIGUSR2 without a restart.
+	// opens (bin/profile-agent-repl.sh) starts it on SIGWINCH without a restart.
 	stopProfiling, err := startRuntimeProfiling(logf, os.Getenv, os.UserHomeDir)
 	if err != nil {
 		logf.With(logging.Context{Operation: "profiling.arm", Level: "error"}).Log("arming the runtime profiler failed: %v", err)

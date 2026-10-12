@@ -182,7 +182,7 @@ func run(ctx context.Context, opts options, h hooks) error {
 	}
 
 	// RUNTIME PROFILING is armed beside the surface: a session the collector
-	// opens (bin/profile-agent-repl.sh) starts it on SIGUSR2 without a restart.
+	// opens (bin/profile-agent-repl.sh) starts it on SIGWINCH without a restart.
 	stopProfiling, err := startRuntimeProfiling(log, os.Getenv, os.UserHomeDir)
 	if err != nil {
 		log.Error("daemon.cmd.profiling", "the runtime profiler could not be armed", dlog.Context{"error": err.Error()})

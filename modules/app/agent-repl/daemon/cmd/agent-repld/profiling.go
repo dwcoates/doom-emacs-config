@@ -8,7 +8,7 @@ import (
 )
 
 // startRuntimeProfiling arms the daemon's RUNTIME profiling: bin/profile-agent-repl.sh
-// opens a session and signals SIGUSR2, and the daemon starts (or stops) a CPU
+// opens a session and signals SIGWINCH, and the daemon starts (or stops) a CPU
 // profile into it and writes its heap profile beside it on the stop
 // (agentrepl/logging/profiling). Off, it costs one parked goroutine. The
 // returned stop ends any running profile and waits for the watcher to leave.

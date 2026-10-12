@@ -23,17 +23,21 @@
     "at error, and starts nothing. sessions lists ids each runtime must judge",
     "the same way.",
     "",
-    "A RUNTIME THAT CAN BE SIGNALED SAYS SO. Go and node terminate on an",
-    "unhandled SIGUSR2, so a runtime that is listening writes",
+    "A RUNTIME THAT CAN BE SIGNALED SAYS SO. SIGWINCH's default action is to ignore, so",
+    "no build is ever killed by it; a runtime that is listening still writes",
     "<root>/<armed_dir>/<runtime>-<pid> while it listens and removes it when it",
-    "stops; the collector signals only a live pid with that marker, so it never",
-    "kills a process from a build that predates profiling."
+    "stops, so the collector signals exactly the runtimes that will answer and",
+    "reports the ones that cannot.",
+    "",
+    "SIGWINCH, NOT SIGUSR1 OR SIGUSR2: node's SIGUSR1 opens its inspector and",
+    "the shim's SIGUSR2 is its keep-alive reset; none of these runtimes has a",
+    "terminal that would send SIGWINCH for its own reason."
   ],
   "root_env": "AGENT_REPL_PROFILE_ROOT",
   "default_root": "~/.cache/agent-repl/profiles",
   "active_file": "active",
   "armed_dir": "armed",
-  "signal": "SIGUSR2",
+  "signal": "SIGWINCH",
   "max_seconds": 1800,
   "sessions": [
     {
