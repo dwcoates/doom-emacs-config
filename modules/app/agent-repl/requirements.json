@@ -196,6 +196,16 @@
       }
     },
     {
+      "id": "skill-write-tests",
+      "kind": "skill_link",
+      "why": "the /write-tests skill",
+      "profile": "run",
+      "name": "write-tests",
+      "source": {
+        "repo": "modules/app/agent-repl/skills/write-tests"
+      }
+    },
+    {
       "id": "skill-runtime-eval-code",
       "kind": "skill_link",
       "why": "the /runtime-eval-code skill",
