@@ -4,9 +4,14 @@
  * A TAB IS A ROW of the bubble's own sub-feed, not a field of the head. That is
  * the whole reason the merge bubble can be LAZY: a collapsed bubble transfers
  * its head and nothing else, and the tabs arrive with the sub-feed when the
- * reader opens it. It is also why the strip is APPEND-ONLY in served order —
- * a second round of a phase is a SECOND TAB ("tests (2)"), never a reopened
- * one — so the strip is a history of the run, read left to right.
+ * reader opens it. It is also why a strip is APPEND-ONLY in served order —
+ * a second round of a phase is a SECOND TAB ("committing (2)"), never a
+ * reopened one — so a strip is a history of the run, read left to right.
+ *
+ * STRIPS NEST BY THE ROW'S PARENT. A tab row with no parent is in the bubble's
+ * own strip; a subtab names the tab row it is drawn in (a commit under the
+ * rebasing tab, a run under the tests tab, a fixing attempt under its run), so
+ * `childTabsOf` is the one way a strip finds its tabs, at every level.
  *
  * EACH KIND OWNS ITS STATE ONEOF, and since nothing parks every one of them is
  * live or settled, conflict resolution and fixing also waiting on the user
@@ -43,8 +48,6 @@ const PATH = "FeedMergeTab";
 /** The kinds whose content the row itself carries. */
 export const RESOLVED_KINDS: readonly string[] = [
   "queue",
-  "rebasing",
-  "tests",
   "committing",
   "updatingMain",
 ];
@@ -53,15 +56,31 @@ export const RESOLVED_KINDS: readonly string[] = [
 export const AGENTIC_KINDS: readonly string[] = [
   "pick",
   "prePrompt",
-  "conflicts",
-  "fixes",
+  "testsRunFixing",
   "postPrompt",
 ];
 
 /**
+ * The kinds whose content is a strip of their own: the tabs parented to them.
+ * A run's strip opens with its own output, ahead of its child tabs.
+ */
+export const PARENT_KINDS: readonly string[] = [
+  "rebasing",
+  "tests",
+  "testsRun",
+];
+
+/**
+ * The kinds that carry content of their own AND hold agent rows: a commit,
+ * whose conflict resolution's rows are parented to it.
+ */
+export const SECTIONED_KINDS: readonly string[] = ["rebaseCommit"];
+
+/**
  * The glyph each tab state reports itself with. Glyphs, never emojis, with one
  * exception the owner asked for by name (2026-10-08): a tab whose agent waits
- * on the user wears the question mark emoji.
+ * on the user wears the question mark emoji. A commit the replay has not
+ * reached yet (`pending`) wears no glyph and no clock.
  */
 const STATE_GLYPHS = {
   live: "●",
@@ -74,31 +93,46 @@ const STATE_GLYPHS = {
 export interface MergeTab {
   /** The sub-feed row carrying this tab (its id is what rows parent to). */
   row: FeedRow;
-  /** The row's id value, verbatim — an address, never parsed. */
+  /** The strip entry's id: the row's id value, verbatim — an address, never parsed. */
   id: string;
   tab: FeedMergeTab;
+  /** The label the badge draws: the row's own, unless the strip names it. */
+  label: FeedMergeTabLabel;
   /** The `kind` oneof arm ("queue", "prePrompt", …). */
   kind: string;
-  /** The `state` oneof arm within that kind ("live", "waitingOnUser", "settled"). */
+  /** The `state` oneof arm within that kind ("pending", "live", "waitingOnUser", "settled"). */
   state: string;
   /** For a settled tab, the `outcome` arm ("succeeded" | "failed"). */
   outcome?: string;
-  /** When the tab's work began, epoch ms. */
-  startedMs: number;
+  /** When the tab's work began, epoch ms; unset for a pending tab. */
+  startedMs?: number;
   /** For a settled tab, when it settled, epoch ms. */
   endedMs?: number;
   /** The kind arm's own message, for the body renderer to read content off. */
   value: Record<string, unknown>;
 }
 
-/** Every merge tab of a sub-feed, in served order. */
-export function mergeTabsOf(rows: readonly FeedRow[]): MergeTab[] {
+/**
+ * The merge tabs of one strip, in served order: the tab rows parented to
+ * PARENT, or, with no parent, the bubble's own top-level strip.
+ */
+export function childTabsOf(rows: readonly FeedRow[], parent: string | undefined): MergeTab[] {
   const tabs: MergeTab[] = [];
   for (const row of rows) {
     if (row.row.case !== "mergeTab") continue;
+    if (row.parent?.row?.value !== parent) continue;
     tabs.push(readMergeTab(row, row.row.value));
   }
   return tabs;
+}
+
+/** Every merge tab row's id in a sub-feed, at every level. */
+export function mergeTabIdsOf(rows: readonly FeedRow[]): Set<string> {
+  const ids = new Set<string>();
+  for (const row of rows) {
+    if (row.row.case === "mergeTab") ids.add(requireMessage(row.id, "FeedRow.id").value);
+  }
+  return ids;
 }
 
 /** One tab row, validated into the shape the strip and the body both read. */
@@ -117,17 +151,18 @@ export function readMergeTab(row: FeedRow, tab: FeedMergeTab): MergeTab {
         )
       : undefined;
   // Every kind's state arms are the SHARED leaves, so the instants read the
-  // same off whichever kind this is.
+  // same off whichever kind this is; a pending commit has begun nothing.
   const leaf = state.value as FeedMergeTabLive | FeedMergeTabSettled;
   const statePath = `${PATH}.${kind.case}.${state.case}`;
   return {
     row,
     id: requireMessage(row.id, "FeedRow.id").value,
     tab,
+    label: requireMessage(tab.label, `${PATH}.label`),
     kind: kind.case,
     state: state.case,
     outcome: settled?.case,
-    startedMs: msOf(leaf.startedAtMs, `${statePath}.started_at_ms`),
+    startedMs: state.case === "pending" ? undefined : msOf(leaf.startedAtMs, `${statePath}.started_at_ms`),
     endedMs:
       state.case === "settled"
         ? msOf((leaf as FeedMergeTabSettled).endedAtMs, `${statePath}.ended_at_ms`)
@@ -154,7 +189,7 @@ export function drawFeedMergeTab(
   if (tab.outcome !== undefined) el.setAttribute("data-tab-outcome", tab.outcome);
   el.setAttribute("aria-selected", opts.active ? "true" : "false");
   el.classList.toggle("is-active", opts.active);
-  el.append(drawFeedMergeTabLabel(requireMessage(tab.tab.label, `${PATH}.label`)));
+  el.append(drawFeedMergeTabLabel(tab.label));
   el.append(drawTabDuration(tab, opts.ticker));
   el.append(drawTabStateGlyph(tab));
   return el;
@@ -183,7 +218,7 @@ export function updateFeedMergeTab(
   el.setAttribute("aria-selected", opts.active ? "true" : "false");
   el.classList.toggle("is-active", opts.active);
   const label = el.querySelector(":scope > .merge-tab-label");
-  const nextLabel = drawFeedMergeTabLabel(requireMessage(tab.tab.label, `${PATH}.label`));
+  const nextLabel = drawFeedMergeTabLabel(tab.label);
   if (label === null) el.prepend(nextLabel);
   else if (label.textContent !== nextLabel.textContent) label.replaceWith(nextLabel);
   const duration = el.querySelector(`:scope > .${TAB_DURATION_CLASS}`);
@@ -205,9 +240,15 @@ export const TAB_DURATION_CLASS = "merge-tab-duration";
 
 /**
  * How long the tab has been in its state: a live tab ticks from when its work
- * began; a settled one shows how long it ran, fixed.
+ * began; a settled one shows how long it ran, fixed; a pending one has no
+ * time yet and draws an empty slot.
  */
 export function drawTabDuration(tab: MergeTab, ticker: Ticker): HTMLElement {
+  if (tab.startedMs === undefined) {
+    const el = document.createElement("span");
+    el.className = TAB_DURATION_CLASS;
+    return el;
+  }
   return tab.endedMs === undefined
     ? reservedLiveElapsedClock(ticker, TAB_DURATION_CLASS, tab.startedMs)
     : reservedSettledElapsedClock(TAB_DURATION_CLASS, tab.endedMs - tab.startedMs);
@@ -246,6 +287,8 @@ export function paintTabStateGlyph(el: HTMLElement, tab: MergeTab): void {
 /** TAB's glyph modifier class and its glyph, by its state. */
 function tabGlyphOf(tab: MergeTab): [string | null, string] {
   switch (tab.state) {
+    case "pending":
+      return ["is-pending", ""];
     case "live":
       return ["is-live", STATE_GLYPHS.live];
     case "waitingOnUser":

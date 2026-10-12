@@ -1287,9 +1287,10 @@ export const MERGE_TAB_KINDS = [
   "queue",
   "prePrompt",
   "rebasing",
-  "conflicts",
+  "rebaseCommit",
   "tests",
-  "fixes",
+  "testsRun",
+  "testsRunFixing",
   "committing",
   "updatingMain",
   "postPrompt",
@@ -1298,8 +1299,11 @@ export type MergeTabKind = (typeof MERGE_TAB_KINDS)[number];
 
 /** The state arms every tab kind carries: nothing parks, so live or settled. */
 export const MERGE_TAB_STATES = ["live", "settled"] as const;
-/** The agentic kinds whose tab can also wait on the user. */
-export const MERGE_TAB_WAITING_KINDS = ["pick", "conflicts", "fixes"] as const;
+/**
+ * The kinds that can also wait on the user: the pick, a commit and a fixing
+ * attempt, whose agent asks, and the rebasing and tests tabs they are drawn in.
+ */
+export const MERGE_TAB_WAITING_KINDS = ["pick", "rebasing", "rebaseCommit", "tests", "testsRunFixing"] as const;
 export type MergeTabState = (typeof MERGE_TAB_STATES)[number] | "waitingOnUser";
 
 /** When every fixture tab's work began, and each queue entry its stage. */
@@ -1314,13 +1318,13 @@ const settledState = () => ({
   },
 });
 
-/** The state arm a tab carries. Only pick, conflicts and fixes wait on the user. */
+/** The state arm a tab carries. Only the MERGE_TAB_WAITING_KINDS wait on the user. */
 const plainState = (state: MergeTabState) => {
-  if (state === "waitingOnUser") throw new Error("only the pick, conflicts and fixes tabs wait on the user");
+  if (state === "waitingOnUser") throw new Error("only the MERGE_TAB_WAITING_KINDS wait on the user");
   return state === "settled" ? settledState() : liveState();
 };
 
-/** The state arm a pick, conflicts or fixes tab carries: also waiting on the user. */
+/** The state arm of a tab that can also wait on the user. */
 const agenticState = (state: MergeTabState) =>
   state === "waitingOnUser"
     ? { case: "waitingOnUser" as const, value: { startedAtMs: MERGE_TAB_STARTED_AT_MS } }
@@ -1361,7 +1365,7 @@ const mergeTabKindValue = (
               label: { text: "ws-1" },
               status: {
                 case: "merging",
-                value: { activeTab: { text: "tests", round: 2 }, stageEnteredAtMs: MERGE_TAB_STARTED_AT_MS },
+                value: { activeTab: { text: "tests", round: 1 }, stageEnteredAtMs: MERGE_TAB_STARTED_AT_MS },
               },
             },
             behind: [
@@ -1378,7 +1382,7 @@ const mergeTabKindValue = (
       return {
         case: "rebasing",
         value: {
-          state: plainState(state),
+          state: agenticState(state),
           progress: { replayed: 3, total: 7 },
           lines: [{ text: "replaying 2/7 · tidy the queue" }, { text: "replaying 3/7 · fix the reconnect loop" }],
         },
@@ -1396,39 +1400,54 @@ const mergeTabKindValue = (
           step: { step: { case: "fastForwarding", value: { commit: "4f2a1c9" } } },
         },
       };
-    case "tests":
+    case "rebaseCommit":
       return {
-        case: "tests",
+        case: "rebaseCommit",
         value: {
-          state: plainState(state),
-          suites: [
-            {
-              name: "vitest",
-              state: { case: "passed", value: {} },
-              output: MERGE_TEST_SPANS.map((s) => ({ ...s })),
-            },
-            {
-              name: "ert",
-              state: { case: "failed", value: {} },
-              output: [{ text: "FAIL ", paintClass: "ansi-fg-red" }],
-            },
-            {
-              name: "go",
-              state: { case: "running", value: { soFar: { case: "passing", value: {} } } },
-              counts: { passed: 3, failed: 0, total: 5 },
-              output: [{ text: "running", paintClass: "ansi-dim" }],
-            },
-          ],
-          log: { token: { value: MERGE_TEST_LOG.token }, label: { text: MERGE_TEST_LOG.label } },
+          state: agenticState(state),
+          commit: { shortSha: "a1b2c3d4e5f6", subject: "fix the reconnect loop" },
+          lines: [{ text: "conflicted in 2 file(s)" }],
+          conflict: {
+            state: agenticState(state),
+            files: [{ path: "daemon/x.go" }, { path: "webapp/y.ts" }],
+          },
         },
       };
     case "pick":
       return { case: "pick", value: { state: agenticState(state) } };
-    case "conflicts":
-      return { case: "conflicts", value: { state: agenticState(state) } };
-    case "fixes":
+    case "tests":
+      return { case: "tests", value: { state: agenticState(state) } };
+    case "testsRun":
       return {
-        case: "fixes",
+        case: "testsRun",
+        value: {
+          state: plainState(state),
+          output: {
+            suites: [
+              {
+                name: "vitest",
+                state: { case: "passed", value: {} },
+                output: MERGE_TEST_SPANS.map((s) => ({ ...s })),
+              },
+              {
+                name: "ert",
+                state: { case: "failed", value: {} },
+                output: [{ text: "FAIL ", paintClass: "ansi-fg-red" }],
+              },
+              {
+                name: "go",
+                state: { case: "running", value: { soFar: { case: "passing", value: {} } } },
+                counts: { passed: 3, failed: 0, total: 5 },
+                output: [{ text: "running", paintClass: "ansi-dim" }],
+              },
+            ],
+            log: { token: { value: MERGE_TEST_LOG.token }, label: { text: MERGE_TEST_LOG.label } },
+          },
+        },
+      };
+    case "testsRunFixing":
+      return {
+        case: "testsRunFixing",
         value: { state: agenticState(state), attempt: { attempt: 2, maxAttempts: 3 } },
       };
     case "prePrompt":
@@ -1447,7 +1466,7 @@ export const mergeTabRow = (
     {
       case: "mergeTab",
       value: {
-        label: { text: kind, round: kind === "tests" ? 2 : 1 },
+        label: { text: kind, round: kind === "committing" ? 2 : 1 },
         kind: mergeTabKindValue(kind, state),
       },
     },

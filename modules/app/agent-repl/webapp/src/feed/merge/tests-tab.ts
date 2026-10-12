@@ -1,5 +1,6 @@
 /**
- * tests-tab — the merge run's test suites, and their COLORED output.
+ * tests-tab — one run's output sub-subtab: its test suites, and their COLORED
+ * output.
  *
  * THE DAEMON PARSED THE TERMINAL, NOT THE CLIENT. Each span arrives with a
  * paint-class name out of the shared inventory and the client turns it into a
@@ -11,7 +12,7 @@
  * THE OUTPUT IS ALREADY CAPPED by the daemon; the client scrolls what it was
  * given inside the block rather than growing the bubble without bound.
  *
- * THE ROUND'S FULL LOG IS A LINK (owner, 2026-09-30), drawn under the suites
+ * THE RUN'S FULL LOG IS A LINK (owner, 2026-09-30), drawn under the suites
  * once the daemon has written it: the shared editor-link verb with the log's
  * token, in the response bubble's link blue (`renderMergeTestLogLink`).
  */
@@ -24,7 +25,7 @@ import { unreachableArm } from "../../rpc/strict.js";
 import { equals } from "@bufbuild/protobuf";
 import {
   FeedMergeTestLogSchema,
-  type FeedMergeTabTests,
+  type FeedMergeTestsRunOutput,
   type FeedMergeTestCounts,
   type FeedMergeTestLog,
   type FeedMergeTestSpan,
@@ -42,9 +43,9 @@ const SUITE_GLYPHS = {
   failed: "✗",
 } as const satisfies Record<string, string>;
 
-/** A tests tab: its suites, then its log link once the daemon has written it. */
-export function drawFeedMergeTabTests(
-  u: FeedMergeTabTests,
+/** A run's output: its suites, then its log link once the daemon has written it. */
+export function drawFeedMergeTestsRunOutput(
+  u: FeedMergeTestsRunOutput,
   ctx: AppContext,
   path: string,
 ): HTMLElement[] {
@@ -54,19 +55,19 @@ export function drawFeedMergeTabTests(
 }
 
 /**
- * Bring HOST, a tests tab's content as `drawFeedMergeTabTests` drew it from
+ * Bring HOST, a run's output as `drawFeedMergeTestsRunOutput` drew it from
  * PREVIOUS, to U IN PLACE: the suites updated where they stand
  * (`updateTestSuites`), and the log line redrawn only when it changed.
  */
-export function updateFeedMergeTabTests(
+export function updateFeedMergeTestsRunOutput(
   host: HTMLElement,
-  u: FeedMergeTabTests,
-  previous: FeedMergeTabTests,
+  u: FeedMergeTestsRunOutput,
+  previous: FeedMergeTestsRunOutput,
   ctx: AppContext,
   path: string,
 ): void {
   const suites = host.querySelector<HTMLElement>(":scope > .merge-suites");
-  if (suites === null) throw new Error("merge: a drawn tests tab lost its suites");
+  if (suites === null) throw new Error("merge: a drawn run's output lost its suites");
   updateTestSuites(suites, u.suites);
   const logLine = host.querySelector(":scope > .merge-test-log");
   if (u.log === undefined) {
@@ -87,7 +88,7 @@ export function drawFeedMergeTestLog(u: FeedMergeTestLog, ctx: AppContext, path:
   return el;
 }
 
-/** Every suite of a tests tab, in served order. */
+/** Every suite of a run, in served order. */
 export function drawTestSuites(suites: readonly FeedMergeTestSuite[]): HTMLElement {
   const el = document.createElement("div");
   el.className = "merge-suites list-rows";
@@ -96,7 +97,7 @@ export function drawTestSuites(suites: readonly FeedMergeTestSuite[]): HTMLEleme
 }
 
 /**
- * Bring EL, a tests tab's suites as `drawTestSuites` drew them, to SUITES IN
+ * Bring EL, a run's suites as `drawTestSuites` drew them, to SUITES IN
  * PLACE: each suite keeps its element, keyed by its name, and is repainted
  * where it changed (`updateFeedMergeTestSuite`); a new suite is drawn into its
  * place, and one no longer served is dropped. A push that only moved a running

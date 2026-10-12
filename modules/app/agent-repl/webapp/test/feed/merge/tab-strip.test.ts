@@ -10,12 +10,15 @@ import { createTicker } from "../../../src/clock.js";
 import { MalformedView } from "../../../src/rpc/malformed.js";
 import {
   AGENTIC_KINDS,
+  PARENT_KINDS,
   RESOLVED_KINDS,
+  SECTIONED_KINDS,
   autoSelectedTab,
+  childTabsOf,
   drawFeedMergeTab,
   drawFeedMergeTabLabel,
   drawTabDuration,
-  mergeTabsOf,
+  mergeTabIdsOf,
   readMergeTab,
   updateFeedMergeTab,
 } from "../../../src/feed/merge/tab-strip.js";
@@ -36,36 +39,74 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe("mergeTabsOf: the strip is the sub-feed's tab rows, in served order", () => {
+describe("childTabsOf: a strip is the sub-feed's tab rows it holds, in served order", () => {
+  it("takes only the tabs parented to the strip's tab", () => {
+    const tabs = childTabsOf(
+      [
+        tabRow("t-rebase", { kind: "rebasing", state: "live" }),
+        tabRow("c1", { kind: "rebaseCommit", state: "live", parent: "t-rebase" }),
+        tabRow("t-run", { kind: "testsRun", state: "live", parent: "t-tests" }),
+      ],
+      "t-rebase",
+    );
+    expect(tabs.map((t) => t.id)).toEqual(["c1"]);
+  });
+
+  it("takes only the unparented tabs for the bubble's own strip", () => {
+    const tabs = childTabsOf(
+      [
+        tabRow("t-rebase", { kind: "rebasing", state: "live" }),
+        tabRow("c1", { kind: "rebaseCommit", state: "live", parent: "t-rebase" }),
+      ],
+      undefined,
+    );
+    expect(tabs.map((t) => t.id)).toEqual(["t-rebase"]);
+  });
+
+  it("names every tab row at every level in mergeTabIdsOf", () => {
+    const ids = mergeTabIdsOf([
+      tabRow("t-rebase", { kind: "rebasing", state: "live" }),
+      tabRow("c1", { kind: "rebaseCommit", state: "live", parent: "t-rebase" }),
+      create(FeedRowSchema, { id: id("r1"), order: orderFor("r1"), row: { case: "userPrompt", value: {} } }),
+    ]);
+    expect([...ids].sort()).toEqual(["c1", "t-rebase"]);
+  });
+
   it("keeps the served order rather than sorting by kind", () => {
-    const tabs = mergeTabsOf([
+    const tabs = childTabsOf([
       tabRow("t1", { kind: "tests", state: "settled", outcome: "failed" }),
       tabRow("t2", { kind: "rebasing", state: "live" }),
-    ]);
+    ], undefined);
     expect(tabs.map((t) => t.kind)).toEqual(["tests", "rebasing"]);
   });
 
   it("ignores every row that is not a tab", () => {
-    const tabs = mergeTabsOf([
+    const tabs = childTabsOf([
       create(FeedRowSchema, { id: id("r1"), order: orderFor("r1"), row: { case: "userPrompt", value: {} } }),
       tabRow("t1", { kind: "tests", state: "live" }),
-    ]);
+    ], undefined);
     expect(tabs.map((t) => t.id)).toEqual(["t1"]);
   });
 });
 
 describe("readMergeTab: the arms are read from the contract", () => {
-  it("holds to the schema: every kind is either resolved or agentic", () => {
-    expect([...RESOLVED_KINDS, ...AGENTIC_KINDS].sort()).toEqual(
+  it("holds to the schema: every kind is resolved, agentic, a parent, or sectioned", () => {
+    expect([...RESOLVED_KINDS, ...AGENTIC_KINDS, ...PARENT_KINDS, ...SECTIONED_KINDS].sort()).toEqual(
       [...oneofArms(FeedMergeTabSchema, "kind")].sort(),
     );
   });
 
   it.each(FeedMergeTabSchema.oneofs.find((o) => o.name === "kind")?.fields.map((f) => [f.localName, f]) ?? [])(
-    "holds to the schema: the %s tab is live or settled, since nothing parks, and an agentic step that asks can wait on the user",
+    "holds to the schema: the %s tab is live or settled, since nothing parks, a tab an asking agent works in can wait on the user, and a commit can be pending",
     (kind, field) => {
       const message = field.fieldKind === "message" ? field.message : undefined;
-      const want = kind === "pick" || kind === "conflicts" || kind === "fixes" ? ["live", "settled", "waitingOnUser"] : ["live", "settled"];
+      const waits = ["pick", "rebasing", "tests", "testsRunFixing"].includes(kind);
+      const want =
+        kind === "rebaseCommit"
+          ? ["live", "pending", "settled", "waitingOnUser"]
+          : waits
+            ? ["live", "settled", "waitingOnUser"]
+            : ["live", "settled"];
       expect(message === undefined ? [] : [...oneofArms(message, "state")].sort()).toEqual(want);
     },
   );
@@ -83,7 +124,7 @@ describe("readMergeTab: the arms are read from the contract", () => {
       order: orderFor("t1"),
       row: { case: "mergeTab", value: create(FeedMergeTabSchema, { label: { text: "x" } }) },
     });
-    expect(() => mergeTabsOf([row])).toThrow(MalformedView);
+    expect(() => childTabsOf([row], undefined)).toThrow(MalformedView);
   });
 
   it("refuses a tab whose state oneof is unset", () => {
@@ -98,7 +139,7 @@ describe("readMergeTab: the arms are read from the contract", () => {
         }),
       },
     });
-    expect(() => mergeTabsOf([row])).toThrow(MalformedView);
+    expect(() => childTabsOf([row], undefined)).toThrow(MalformedView);
   });
 
   it("refuses a settled tab whose outcome oneof is unset", () => {
@@ -113,7 +154,7 @@ describe("readMergeTab: the arms are read from the contract", () => {
         }),
       },
     });
-    expect(() => mergeTabsOf([row])).toThrow(MalformedView);
+    expect(() => childTabsOf([row], undefined)).toThrow(MalformedView);
   });
 });
 
@@ -151,59 +192,59 @@ describe("drawFeedMergeTab: the badge says label, round and state — no counts 
   });
 
   it("carries no count of any kind in its text", () => {
-    const [tab] = mergeTabsOf([tabRow("t1", { kind: "tests", state: "live", label: "tests" })]);
+    const [tab] = childTabsOf([tabRow("t1", { kind: "tests", state: "live", label: "tests" })], undefined);
     const el = drawFeedMergeTab(tab, { active: false, ticker: TICKER });
     expect(el.textContent).toBe("tests4s●");
   });
 
   it("marks a settled tab with its outcome", () => {
-    const [tab] = mergeTabsOf([
+    const [tab] = childTabsOf([
       tabRow("t1", { kind: "tests", state: "settled", outcome: "failed" }),
-    ]);
+    ], undefined);
     const el = drawFeedMergeTab(tab, { active: false, ticker: TICKER });
     expect(el.getAttribute("data-tab-outcome")).toBe("failed");
     expect(el.querySelector(".merge-tab-glyph")?.textContent).toBe("✗");
   });
 
   it("marks the active tab so the strip shows where the reader is", () => {
-    const [tab] = mergeTabsOf([tabRow("t1", { kind: "queue", state: "live" })]);
+    const [tab] = childTabsOf([tabRow("t1", { kind: "queue", state: "live" })], undefined);
     expect(drawFeedMergeTab(tab, { active: true, ticker: TICKER }).getAttribute("aria-selected")).toBe("true");
   });
 });
 
 describe("readMergeTab: the instants the tab's duration reads", () => {
   it("reads a live tab's start", () => {
-    const [tab] = mergeTabsOf([tabRow("t1", { kind: "tests", state: "live", startedAtMs: 2_000n })]);
+    const [tab] = childTabsOf([tabRow("t1", { kind: "tests", state: "live", startedAtMs: 2_000n })], undefined);
     expect([tab.startedMs, tab.endedMs]).toEqual([2_000, undefined]);
   });
 
   it("reads a settled tab's start and end", () => {
-    const [tab] = mergeTabsOf([
+    const [tab] = childTabsOf([
       tabRow("t1", { kind: "tests", state: "settled", startedAtMs: 2_000n, endedAtMs: 9_000n }),
-    ]);
+    ], undefined);
     expect([tab.startedMs, tab.endedMs]).toEqual([2_000, 9_000]);
   });
 });
 
 describe("drawTabDuration: how long the tab has been in its state", () => {
   it("ticks a live tab from when its work began", () => {
-    const [tab] = mergeTabsOf([tabRow("t1", { kind: "tests", state: "live" })]);
+    const [tab] = childTabsOf([tabRow("t1", { kind: "tests", state: "live" })], undefined);
     const el = drawTabDuration(tab, TICKER);
     vi.advanceTimersByTime(2_000);
     expect(el.textContent).toBe("6s");
   });
 
   it("shows a settled tab's run time, ended less started, and never ticks it", () => {
-    const [tab] = mergeTabsOf([
+    const [tab] = childTabsOf([
       tabRow("t1", { kind: "tests", state: "settled", startedAtMs: 1_000n, endedAtMs: 91_000n }),
-    ]);
+    ], undefined);
     const el = drawTabDuration(tab, TICKER);
     vi.advanceTimersByTime(5_000);
     expect(el.textContent).toBe("1m 30s");
   });
 
   it("sits beside the tab's label, ahead of its state glyph", () => {
-    const [tab] = mergeTabsOf([tabRow("t1", { kind: "tests", state: "live" })]);
+    const [tab] = childTabsOf([tabRow("t1", { kind: "tests", state: "live" })], undefined);
     const el = drawFeedMergeTab(tab, { active: false, ticker: TICKER });
     expect([...el.children].map((c) => c.className)).toEqual([
       "merge-tab-label",
@@ -216,55 +257,79 @@ describe("drawTabDuration: how long the tab has been in its state", () => {
 // A MERGE WAITING ON THE USER (owner request, 2026-10-08): the agentic tab
 // whose agent has an ask open wears a question mark emoji while it stands.
 describe("a tab waiting on the user", () => {
-  it.each(["conflicts", "fixes"] as const)("draws the %s tab's glyph as ❓", (kind) => {
-    const [tab] = mergeTabsOf([tabRow("t1", { kind, state: "waitingOnUser", payload: kind === "fixes" ? { attempt: { attempt: 1, maxAttempts: 3 } } : {} })]);
+  it.each(["rebasing", "rebaseCommit", "tests", "testsRunFixing"] as const)("draws the %s tab's glyph as ❓", (kind) => {
+    const [tab] = childTabsOf([tabRow("t1", { kind, state: "waitingOnUser" })], undefined);
     const glyph = drawFeedMergeTab(tab, { active: false, ticker: TICKER }).querySelector(".merge-tab-glyph");
     expect(glyph?.textContent).toBe("❓");
   });
 
   it("marks the state as the hook the suite targets", () => {
-    const [tab] = mergeTabsOf([tabRow("t1", { kind: "conflicts", state: "waitingOnUser" })]);
+    const [tab] = childTabsOf([tabRow("t1", { kind: "rebaseCommit", state: "waitingOnUser" })], undefined);
     expect(drawFeedMergeTab(tab, { active: false, ticker: TICKER }).getAttribute("data-tab-state")).toBe(
       "waitingOnUser",
     );
   });
 
   it("keeps ticking from when the tab's work began", () => {
-    const [tab] = mergeTabsOf([tabRow("t1", { kind: "conflicts", state: "waitingOnUser" })]);
+    const [tab] = childTabsOf([tabRow("t1", { kind: "rebaseCommit", state: "waitingOnUser" })], undefined);
     expect(drawTabDuration(tab, TICKER).textContent).toBe("4s");
   });
 
   it("is still where the merge is when the reader has chosen nothing", () => {
-    const tabs = mergeTabsOf([
-      tabRow("t1", { kind: "conflicts", state: "waitingOnUser" }),
+    const tabs = childTabsOf([
+      tabRow("t1", { kind: "rebaseCommit", state: "waitingOnUser" }),
       tabRow("t2", { kind: "queue", state: "settled", outcome: "succeeded" }),
-    ]);
+    ], undefined);
     expect(autoSelectedTab(tabs)?.id).toBe("t1");
+  });
+});
+
+describe("a commit the replay has not reached", () => {
+  it("draws no clock", () => {
+    const [tab] = childTabsOf([tabRow("c1", { kind: "rebaseCommit", state: "pending" })], undefined);
+    expect([tab?.startedMs, drawTabDuration(tab, TICKER).textContent]).toEqual([undefined, ""]);
+  });
+
+  it("draws no glyph", () => {
+    const [tab] = childTabsOf([tabRow("c1", { kind: "rebaseCommit", state: "pending" })], undefined);
+    const glyph = drawFeedMergeTab(tab, { active: false, ticker: TICKER }).querySelector(".merge-tab-glyph");
+    expect([glyph?.textContent, glyph?.classList.contains("is-pending")]).toEqual(["", true]);
+  });
+
+  it("is never where the merge is while a commit is live", () => {
+    const tabs = childTabsOf(
+      [
+        tabRow("c1", { kind: "rebaseCommit", state: "live" }),
+        tabRow("c2", { kind: "rebaseCommit", state: "pending" }),
+      ],
+      undefined,
+    );
+    expect(autoSelectedTab(tabs)?.id).toBe("c1");
   });
 });
 
 describe("autoSelectedTab: the last live tab, else the last tab", () => {
   it("picks the live tab even when a settled one follows nothing", () => {
-    const tabs = mergeTabsOf([
+    const tabs = childTabsOf([
       tabRow("t1", { kind: "queue", state: "settled", outcome: "succeeded" }),
       tabRow("t2", { kind: "rebasing", state: "live" }),
-    ]);
+    ], undefined);
     expect(autoSelectedTab(tabs)?.id).toBe("t2");
   });
 
   it("picks the LAST live tab when several are live", () => {
-    const tabs = mergeTabsOf([
+    const tabs = childTabsOf([
       tabRow("t1", { kind: "queue", state: "live" }),
       tabRow("t2", { kind: "tests", state: "live" }),
-    ]);
+    ], undefined);
     expect(autoSelectedTab(tabs)?.id).toBe("t2");
   });
 
   it("falls back to the last tab on a wholly settled run", () => {
-    const tabs = mergeTabsOf([
+    const tabs = childTabsOf([
       tabRow("t1", { kind: "queue", state: "settled", outcome: "succeeded" }),
       tabRow("t2", { kind: "committing", state: "settled", outcome: "succeeded" }),
-    ]);
+    ], undefined);
     expect(autoSelectedTab(tabs)?.id).toBe("t2");
   });
 
