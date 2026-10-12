@@ -524,11 +524,7 @@ export function drawRosterMergedSection(
       foldKey: MERGED_FOLD_KEY,
       className: MERGED_SECTION_CLASS,
       target: { case: "recentlyMerged", value: {} },
-      leftOut: {
-        when: (header, headerPath) =>
-          drawRosterSectionCount(requireMessage(header.count, `${headerPath}.count`), `${headerPath}.count`) === 0,
-        attribute: "data-merged-empty",
-      },
+      leftOut: leftOutWhenEmpty("data-merged-empty"),
       decorateHeader: (header) => header.appendChild(drawMergedTodayCount(groups.flatMap((g) => g.shownMergedAt), sc)),
     },
     () => {
@@ -674,11 +670,7 @@ export function drawRosterViewedSection(
     foldKey: VIEWED_FOLD_KEY,
     className: VIEWED_SECTION_CLASS,
     target: { case: "viewed", value: {} },
-    leftOut: {
-      when: (header, headerPath) =>
-        drawRosterSectionCount(requireMessage(header.count, `${headerPath}.count`), `${headerPath}.count`) === 0,
-      attribute: "data-viewed-empty",
-    },
+    leftOut: leftOutWhenEmpty("data-viewed-empty"),
   });
 }
 
@@ -709,12 +701,21 @@ export function drawRosterHiddenSection(
     className: HIDDEN_SECTION_CLASS,
     target: { case: "hidden", value: {} },
     place: "hidden",
-    leftOut: {
-      when: (header, headerPath) =>
-        drawRosterSectionCount(requireMessage(header.count, `${headerPath}.count`), `${headerPath}.count`) === 0,
-      attribute: "data-hidden-empty",
-    },
+    leftOut: leftOutWhenEmpty("data-hidden-empty"),
   });
+}
+
+/**
+ * The rule every band shares for leaving itself out of the rail: the daemon's
+ * count of the rows it shows is zero, so its heading would be a fold toggle
+ * onto nothing. ATTRIBUTE marks the left-out box for the record and the tests.
+ */
+export function leftOutWhenEmpty(attribute: string): NonNullable<HeadedBoxShape["leftOut"]> {
+  return {
+    when: (header, headerPath) =>
+      drawRosterSectionCount(requireMessage(header.count, `${headerPath}.count`), `${headerPath}.count`) === 0,
+    attribute,
+  };
 }
 
 /** The header repos and the merged band share: a label and a fold toggle. */
