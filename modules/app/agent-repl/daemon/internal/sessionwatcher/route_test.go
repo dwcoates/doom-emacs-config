@@ -2923,6 +2923,42 @@ func TestAnUnfoldedJoiningTurnStandsInFlightWhenTheTurnAheadEnds(t *testing.T) {
 	}
 }
 
+func TestTheOldestOfSeveralJoiningTurnsStandsInFlightWhenTheTurnAheadEnds(t *testing.T) {
+	// Arrange: the shim runs the joins in the order they were sent.
+	h, _ := joiningHarness(t)
+	h.w.OnTurnJoining("ws-1", "turn-3")
+	var running *ids.TurnID
+	h.lifecycle.onTurnEnded = func() { running = h.w.TurnInFlight() }
+
+	// Act.
+	endTurn1(h)
+
+	// Assert.
+	if running == nil || *running != "turn-2" {
+		t.Fatalf("turn in flight when turn-1's end was handed over = %v, want turn-2", running)
+	}
+}
+
+func TestAJoinFoldedIntoTheOldestJoinAsItsBatchEndsUnrun(t *testing.T) {
+	// Arrange: turn-2 ran as its own turn, and the vendor ran turn-3 with it
+	// as one prompt batch.
+	h, _ := joiningHarness(t)
+	h.w.OnTurnJoining("ws-1", "turn-3")
+	endTurn1(h)
+
+	// Act.
+	got := h.route(h.main, entryFoldedPrompt("turn-3", "turn-2", "main-1"))
+
+	// Assert.
+	ended := requireEvent(t, got, "lifecycle.OnTurnEnded")
+	if ended.turn == nil || *ended.turn != "turn-3" || ended.close != wsm.CloseFolded {
+		t.Fatalf("turn ended = (%v, %v), want turn-3 folded", ended.turn, ended.close)
+	}
+	if turn := h.w.TurnInFlight(); turn == nil || *turn != "turn-2" {
+		t.Fatalf("turn in flight = %v, want turn-2 still running", turn)
+	}
+}
+
 func TestAFoldedPromptRowServedAgainEndsNothingMore(t *testing.T) {
 	// Arrange.
 	h, _ := joiningHarness(t)
