@@ -307,3 +307,29 @@ func TestEveryClosePathOwesTheBranchARecount(t *testing.T) {
 		})
 	}
 }
+
+func TestEveryClosePathTellsTheRosterTheDurableCloseInstant(t *testing.T) {
+	for _, path := range closePaths {
+		t.Run(path.name, func(t *testing.T) {
+			// Arrange
+			w := newDoorWorld(t)
+
+			// Act
+			path.live(t, w)
+
+			// Assert: the roster was told once, at the very instant the row
+			// recorded, so its live when-column and the durable one agree.
+			record, err := w.db.Workspace(context.Background(), w.ws)
+			if err != nil {
+				t.Fatalf("Workspace: %v", err)
+			}
+			if record.LastTurnEndedAt == nil {
+				t.Fatal("the durable record carries no last turn end after the close")
+			}
+			got := w.h.sidebar.turnClosedAts(w.ws)
+			if len(got) != 1 || !got[0].Equal(*record.LastTurnEndedAt) {
+				t.Fatalf("roster told %v, want exactly [%v]", got, *record.LastTurnEndedAt)
+			}
+		})
+	}
+}

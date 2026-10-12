@@ -191,8 +191,99 @@ func TestSelectingAWorkspaceLeavesAnotherRowsAttentionMarker(t *testing.T) {
 	}
 }
 
-func TestRowShowsWhenItWasLastActive(t *testing.T) {
+func TestTheWhenColumnCountsFromTheLastTurnEnd(t *testing.T) {
+	tests := []struct {
+		name string
+		// record shapes the durable record; told, when set, is the close the
+		// door tells the roster live.
+		record func(*wsm.Workspace)
+		told   *time.Time
+		want   time.Time
+	}{
+		{
+			name:   "the durable last turn end",
+			record: func(ws *wsm.Workspace) { ws.LastTurnEndedAt = at(time.Hour) },
+			want:   epoch.Add(time.Hour),
+		},
+		{
+			name:   "a live close the record has not caught up to",
+			record: func(ws *wsm.Workspace) { ws.LastTurnEndedAt = at(time.Hour) },
+			told:   at(2 * time.Hour),
+			want:   epoch.Add(2 * time.Hour),
+		},
+		{
+			name:   "a live close on a record that has never seen one",
+			record: func(*wsm.Workspace) {},
+			told:   at(time.Hour),
+			want:   epoch.Add(time.Hour),
+		},
+		{
+			name:   "a durable close newer than the live one",
+			record: func(ws *wsm.Workspace) { ws.LastTurnEndedAt = at(2 * time.Hour) },
+			told:   at(time.Hour),
+			want:   epoch.Add(2 * time.Hour),
+		},
+		{
+			// REGRESSION LOCK: a turn START moves LastActivityAt, and the
+			// column once reset to zero the moment work began.
+			name: "a later turn start",
+			record: func(ws *wsm.Workspace) {
+				ws.LastTurnEndedAt = at(time.Hour)
+				ws.LastActivityAt = at(2 * time.Hour)
+			},
+			want: epoch.Add(time.Hour),
+		},
+		{
+			// REGRESSION LOCK: the column once showed LastSelectedAt, which
+			// reset on every SelectWorkspace and made the age jump on mere
+			// navigation.
+			name: "a later selection",
+			record: func(ws *wsm.Workspace) {
+				ws.LastTurnEndedAt = at(time.Hour)
+				ws.LastSelectedAt = at(2 * time.Hour)
+			},
+			want: epoch.Add(time.Hour),
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			r, _ := newResolver(t)
+			ws := workspace("w1", "one")
+			tc.record(&ws)
+
+			// Act.
+			r.SetRegistry(registry(ws))
+			if tc.told != nil {
+				r.SetTurnClosedAt(theWS, *tc.told)
+			}
+
+			// Assert.
+			when := onlyRow(t, r).GetWhen()
+			if when.GetTurnEnded() == nil || when.GetTurnEnded().GetAtMs() != tc.want.UnixMilli() {
+				t.Fatalf("when = %v, want the turn_ended arm at %d", when, tc.want.UnixMilli())
+			}
+		})
+	}
+}
+
+func TestTheRosterKeepsTheLatestLiveTurnClose(t *testing.T) {
 	// Arrange.
+	r, _ := newResolver(t)
+	r.SetRegistry(registry(workspace("w1", "one")))
+	r.SetTurnClosedAt(theWS, *at(2 * time.Hour))
+
+	// Act — an older close told after a newer one.
+	r.SetTurnClosedAt(theWS, *at(time.Hour))
+
+	// Assert.
+	if got := onlyRow(t, r).GetWhen().GetTurnEnded().GetAtMs(); got != epoch.Add(2*time.Hour).UnixMilli() {
+		t.Fatalf("when = %d, want the newer close kept", got)
+	}
+}
+
+func TestATurnStartWithNoTurnEndFallsBackToCreated(t *testing.T) {
+	// Arrange — the first turn is running: activity, but no close yet.
 	r, _ := newResolver(t)
 	ws := workspace("w1", "one")
 	ws.LastActivityAt = at(time.Hour)
@@ -201,32 +292,8 @@ func TestRowShowsWhenItWasLastActive(t *testing.T) {
 	r.SetRegistry(registry(ws))
 
 	// Assert.
-	got := onlyRow(t, r).GetWhen().GetActive().GetAtMs()
-	if got != epoch.Add(time.Hour).UnixMilli() {
-		t.Fatalf("when = %d, want the last-activity instant in millis", got)
-	}
-}
-
-// TestTheWhenColumnIgnoresLastSelected is the REGRESSION LOCK: the column once
-// showed LastSelectedAt, which reset on every SelectWorkspace and made the age
-// jump on mere navigation. A row that was selected AFTER its last activity must
-// still show the activity instant, never the (later) selection instant.
-func TestTheWhenColumnIgnoresLastSelected(t *testing.T) {
-	// Arrange — activity an hour in, then a LATER selection.
-	r, _ := newResolver(t)
-	ws := workspace("w1", "one")
-	ws.LastActivityAt = at(time.Hour)
-	ws.LastSelectedAt = at(2 * time.Hour)
-
-	// Act.
-	r.SetRegistry(registry(ws))
-
-	// Assert — the active arm, at the activity instant, not the selection one.
-	// The when column has no selection arm at all any more (field 1 is
-	// reserved), so only the instant it shows can regress.
-	row := onlyRow(t, r)
-	if got := row.GetWhen().GetActive().GetAtMs(); got != epoch.Add(time.Hour).UnixMilli() {
-		t.Fatalf("when = %d, want the last-activity instant, never the later selection", got)
+	if got := onlyRow(t, r).GetWhen().GetCreated().GetAtMs(); got != epoch.UnixMilli() {
+		t.Fatalf("when = %v, want the creation instant", onlyRow(t, r).GetWhen())
 	}
 }
 
@@ -291,11 +358,11 @@ func millis(t *time.Time) *int64 {
 	return &ms
 }
 
-func TestMergedBeatsLastActiveInTheWhenColumn(t *testing.T) {
+func TestMergedBeatsTheLastTurnEndInTheWhenColumn(t *testing.T) {
 	// Arrange.
 	r, _ := newResolver(t)
 	ws := workspace("w1", "one")
-	ws.LastActivityAt = at(0)
+	ws.LastTurnEndedAt = at(0)
 	ws.MergedAt = at(time.Hour)
 
 	// Act.

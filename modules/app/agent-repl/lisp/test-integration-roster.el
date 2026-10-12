@@ -1764,8 +1764,8 @@ the host re-key bug above and already holds independently of it.)"
       (should (equal (agent-repl--ws-by-ref-id "itest-collide-live") "live")))))
 
 ;; audit-3 #34
-(ert-deftest agent-repl-itest-roster-when-active-at-ms-decodes-from-a-decimal-string ()
-  "`when.active.atMs' rides the wire as a STRING and still decodes.
+(ert-deftest agent-repl-itest-roster-when-turn-ended-at-ms-decodes-from-a-decimal-string ()
+  "`when.turnEnded.atMs' rides the wire as a STRING and still decodes.
 fanout §2: Go emits int64 as a decimal string; a decoder mis-typing
 `atMs' as a bare number would refuse every real push while a fixture
 that always sends unset `when' stays green."
@@ -1776,19 +1776,19 @@ that always sends unset `when' stays green."
        daemon (agent-repl-itest-roster--roster
                (list (agent-repl-itest-roster--row
                       "itest-when-ac" "itest-when-ac" 'ready
-                      '(when . ((active . ((atMs . "1700000000000")))))))))
+                      '(when . ((turnEnded . ((atMs . "1700000000000")))))))))
       (agent-repl-itest--wait-until
        (lambda () (agent-repl-roster-row-for-ws "itest-when-ac")) nil "the row to be indexed")
       ;; Assert.
       (should-not (agent-repl-itest--logged-p daemon "elisp.rpc.push-invalid" "error"))
       (let ((when-value (plist-get (agent-repl-roster-row-for-ws "itest-when-ac") :when)))
-        (should (eq (plist-get when-value :arm) :active))
+        (should (eq (plist-get when-value :arm) :turn-ended))
         (should (= (plist-get (plist-get when-value :value) :at-ms) 1700000000000))))))
 
 ;; audit-3 #34
 (ert-deftest agent-repl-itest-roster-when-merged-at-ms-decodes-from-a-decimal-string ()
   "`when.merged.atMs' rides the wire as a STRING and still decodes.
-The `merged' arm of the same oneof, pinned separately from `active'."
+The `merged' arm of the same oneof, pinned separately from `turnEnded'."
   ;; Arrange / Act.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-roster--with-subscription daemon

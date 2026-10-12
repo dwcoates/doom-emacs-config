@@ -1,6 +1,8 @@
 package sidebar
 
 import (
+	"time"
+
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
@@ -82,7 +84,7 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 			Workspace: &workspacev1.WorkspaceRef{Id: string(rec.ID), Dir: rec.Dir}},
 		Name:    &frontendv1.RosterRowName{Text: rec.Name},
 		Current: &frontendv1.RosterRowCurrent{Current: current},
-		When:    when(rec),
+		When:    when(rec, s),
 		Detail:  detail(rec, s.summary),
 		Closed:  &frontendv1.RosterRowClosed{Closed: closed},
 		// ALWAYS SET: an editor opens the workspace only once this leaves
@@ -187,35 +189,52 @@ func recedes(rec wsm.Workspace, session *wsm.Session) bool {
 
 // when resolves the when-column's ONE value.
 //
-// THE COLUMN IS LAST-ACTIVITY, NOT LAST-VIEWED — and that distinction is the
-// whole point of this function. It once showed LastSelectedAt, which the daemon
-// stamps on EVERY SelectWorkspace, so the column was really a viewing-recency
-// timer that reset whenever the user switched to the workspace: the age beside
-// a row jumped on mere navigation and read as broken. The column must reflect
-// when the workspace last DID REAL WORK, which is stable across selection, so
-// this reads LastActivityAt (stamped at the turn edge in wsm) and NEVER
-// LastSelectedAt. LastSelectedAt lives on for ordering and attention-clear; it
-// just must not drive this column again — reintroducing it here is the exact
-// regression the sidebar tests lock.
+// THE COLUMN IS TIME SINCE THE LAST TURN ENDED — not last-viewed, and not
+// last-activity. It once showed LastSelectedAt, which the daemon stamps on
+// EVERY SelectWorkspace, so the age jumped on mere navigation and read as
+// broken; it then showed LastActivityAt, which a turn START also moves, so the
+// age reset to zero the moment work began. The column counts how long the
+// workspace has sat since it last FINISHED work, so it reads the turn closes
+// alone (lastTurnEnded) and NEVER LastSelectedAt or LastActivityAt —
+// reintroducing either here is the exact regression the sidebar tests lock.
 //
 // Precedence: MERGED WINS (that the workspace is done is the more interesting
-// fact), else the last activity, else the creation time. The last arm never
+// fact), else the last turn end, else the creation time. The last arm never
 // leaves the oneof unset for a registered workspace — every one has a creation
-// time — so the column falls back to "created" rather than drawing empty.
-func when(rec wsm.Workspace) *frontendv1.RosterRowWhen {
+// time — so a workspace whose first turn is still running falls back to
+// "created" rather than drawing empty.
+func when(rec wsm.Workspace, s *wsState) *frontendv1.RosterRowWhen {
 	out := &frontendv1.RosterRowWhen{}
+	ended := lastTurnEnded(rec, s)
 	switch {
 	case rec.MergedAt != nil:
 		out.Shown = &frontendv1.RosterRowWhen_Merged{
 			Merged: &frontendv1.RosterRowWhenMerged{AtMs: rec.MergedAt.UnixMilli()}}
-	case rec.LastActivityAt != nil:
-		out.Shown = &frontendv1.RosterRowWhen_Active{
-			Active: &frontendv1.RosterRowWhenActive{AtMs: rec.LastActivityAt.UnixMilli()}}
+	case ended != nil:
+		out.Shown = &frontendv1.RosterRowWhen_TurnEnded{
+			TurnEnded: &frontendv1.RosterRowWhenTurnEnded{AtMs: ended.UnixMilli()}}
 	case !rec.CreatedAt.IsZero():
 		out.Shown = &frontendv1.RosterRowWhen_Created{
 			Created: &frontendv1.RosterRowWhenCreated{AtMs: rec.CreatedAt.UnixMilli()}}
 	}
 	return out
+}
+
+// lastTurnEnded is the later of the record's durable last turn close and the
+// one the door told this daemon of live, nil when neither stands. The durable
+// one is what a daemon that did not see the close draws; the live one is what
+// moves the column at the close itself, before any registry republish.
+func lastTurnEnded(rec wsm.Workspace, s *wsState) *time.Time {
+	return laterInstant(rec.LastTurnEndedAt, s.turnEndedAt)
+}
+
+// laterInstant is the later of two instants either of which may be absent: nil
+// only when both are, and A on a tie.
+func laterInstant(a, b *time.Time) *time.Time {
+	if a == nil || (b != nil && b.After(*a)) {
+		return b
+	}
+	return a
 }
 
 // detail composes the expanded panel. Each line is OMITTED when there is
