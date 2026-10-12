@@ -41,6 +41,14 @@ type resolver struct {
 	// pendingResults are the changes a render found, reported after the lock
 	// is released.
 	pendingResults []resultChange
+
+	// now is the clock the Recently Merged window is measured against, and
+	// after arms the re-render that drops a merge the moment it ages out of
+	// that window (WithClock). agingOut stops the one armed re-render, nil
+	// when none is armed.
+	now      func() time.Time
+	after    AfterFunc
+	agingOut func() bool
 }
 
 // resultChange is one workspace's changed last turn result.
@@ -63,7 +71,10 @@ func newResolver(colors vocab.RenderColors, log dlog.Surfaces, footer FooterStat
 	if err := assertTables(colors); err != nil {
 		return nil, fmt.Errorf("sidebar resolver refuses to serve an unpainted state: %w", err)
 	}
-	return &resolver{colors: colors, log: log, footer: footer, state: newRosterState()}, nil
+	return &resolver{
+		colors: colors, log: log, footer: footer, state: newRosterState(),
+		now: time.Now, after: timerAfter,
+	}, nil
 }
 
 // assertTables checks the roster_status table row for row against statusArms,
@@ -205,17 +216,22 @@ func (r *resolver) render(log dlog.Logger, cause string) *frontendv1.WorkspaceRo
 
 	// A MERGED workspace files under recently_merged whatever its hidden flag:
 	// it has no tab to hide, and that it is done is the more useful fact.
+	// A merge older than the Recently Merged window is drawn NOWHERE: it is
+	// not live, and the band holds a week's worth (owner request, 2026-10-11).
 	var live, hidden, merged []wsm.Workspace
+	var settled []wsm.Workspace
 	for _, ws := range r.state.reg.Workspaces {
 		switch {
 		case ws.MergedAt != nil:
-			merged = append(merged, ws)
+			settled = append(settled, ws)
 		case ws.Hidden:
 			hidden = append(hidden, ws)
 		default:
 			live = append(live, ws)
 		}
 	}
+	merged, agesOut := recentMerges(settled, r.now())
+	r.armAgingOut(agesOut, log)
 
 	out := &frontendv1.WorkspaceRoster{
 		Repository:     r.repositoryView(live, rc, log),
