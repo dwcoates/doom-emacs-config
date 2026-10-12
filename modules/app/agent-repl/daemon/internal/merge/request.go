@@ -347,9 +347,17 @@ func (o *orchestrator) queueRequest(ctx context.Context, ws ids.WorkspaceID, rep
 	// A DETACHED REQUEST IS HANDED TO ITS MERGE WORKSPACE HERE, at the moment
 	// it would have been put in line: the requesting turn has ended, so the
 	// fork holds that whole turn.
-	if entry, found, err := o.requestOf(ctx, repo, ws); err != nil {
+	entry, found, err := o.requestOf(ctx, repo, ws)
+	if err != nil {
 		return err
-	} else if found && entry.Source.Detach != "" {
+	}
+	if !found {
+		err := fmt.Errorf("merge: %s has no recorded request to put in line", ws)
+		o.log(ctx, ws).Error(op, "a merge to put in line has no recorded request", dlog.Context{
+			"workspace": string(ws), "repo": string(repo), "error": err.Error()})
+		return err
+	}
+	if entry.Source.Detach != "" {
 		return o.handOffDetached(ctx, ws, repo, entry.Source)
 	}
 	// THE BUBBLE EXISTS FROM HERE: the ledger identity it is addressed by is
@@ -366,6 +374,9 @@ func (o *orchestrator) queueRequest(ctx context.Context, ws ids.WorkspaceID, rep
 	}
 	o.log(ctx, ws).Info(op, "put a merge in line; it is reported from here", dlog.Context{
 		"workspace": string(ws), "repo": string(repo), "position": position})
+	// THE FIRST OF THE MERGE'S TWO BANNERS: it is in line. The second is its
+	// resolution (ended); nothing between raises one.
+	o.deps.Banners.Queued(ws, o.bubbleLabel(ctx, entry))
 	if err := o.republishQueue(ctx, repo); err != nil {
 		return err
 	}
@@ -464,11 +475,12 @@ func (o *orchestrator) dropDetached(ctx context.Context, requester ids.Workspace
 	delete(o.repoOf, requester)
 	o.mu.Unlock()
 	// A MERGE NEVER FORKED HAS ENDED WITHOUT LANDING: there is no merge
-	// workspace whose terminal would tell the requester's roster (handBack).
+	// workspace whose terminal would tell the requester's roster (handBack),
+	// or raise its resolved banner (ended), so both are done here.
 	o.deps.Sidebar.SetDetachedMergeEnded(requester, false)
-	return o.deps.Detached.HandBack(ctx, requester, wsm.Workspace{}, DetachedOutcome{
-		Kind: DetachedAbandoned, Summary: summary, Branch: source.DetachName,
-	})
+	out := DetachedOutcome{Kind: DetachedAbandoned, Summary: summary, Branch: source.DetachName}
+	o.deps.Banners.Resolved(requester, out.Kind.mergeEnd(), out.Summary)
+	return o.deps.Detached.HandBack(ctx, requester, wsm.Workspace{}, out)
 }
 
 // publishOneShot republishes the roster's DURABLE half once a one-shot merge
