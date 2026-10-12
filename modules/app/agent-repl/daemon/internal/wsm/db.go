@@ -373,6 +373,11 @@ type DB interface {
 	SetMergeQueuePaused(ctx context.Context, repo RepoKey, paused bool) error
 	// MergeQueuePaused reports whether one repository's queue is paused.
 	MergeQueuePaused(ctx context.Context, repo RepoKey) (bool, error)
+	// SetMergeRolloutHold holds the merge queue's rollouts daemon-wide from
+	// at, or (held false) ends the hold.
+	SetMergeRolloutHold(ctx context.Context, held bool, at time.Time) error
+	// MergeRolloutHold reports the daemon-wide rollout hold.
+	MergeRolloutHold(ctx context.Context) (RolloutHold, error)
 
 	// OpenFault records a fault and returns its id.
 	OpenFault(ctx context.Context, f Fault) (FaultID, error)

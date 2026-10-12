@@ -127,6 +127,7 @@ var migrations = []migration{
 	{To: 34, Name: "commit_count", Kind: MigrationAdditive, DDL: commitCountDDL},
 	{To: 35, Name: "workspaces_place", Kind: MigrationAdditive, DDL: workspacePlaceDDL},
 	{To: 36, Name: "merge_queue_front", Kind: MigrationAdditive, DDL: mergeQueueFrontDDL},
+	{To: 37, Name: "merge_rollout_hold", Kind: MigrationAdditive, DDL: mergeRolloutHoldDDL},
 }
 
 // mergeQueueFrontDDL records whether a merge asked to go to the FRONT of its
