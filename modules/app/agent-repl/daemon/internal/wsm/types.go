@@ -887,6 +887,35 @@ const (
 	MergeRequested
 )
 
+// MergeMove is which way a one-place move takes a waiting merge in its queue
+// (agentrepl.v1.UpdateMergeQueueRequest's move_up and move_down arms).
+type MergeMove int
+
+// The one-place moves. The zero value is no move, so a move left unset is
+// refused rather than read as one of them.
+const (
+	// MergeMoveUp moves a waiting merge one place toward the front.
+	MergeMoveUp MergeMove = iota + 1
+	// MergeMoveDown moves a waiting merge one place toward the back.
+	MergeMoveDown
+)
+
+// String names the move in log records.
+func (m MergeMove) String() string {
+	switch m {
+	case MergeMoveUp:
+		return "up"
+	case MergeMoveDown:
+		return "down"
+	}
+	return fmt.Sprintf("MergeMove(%d)", int(m))
+}
+
+// valid reports whether the move is one of the declared moves.
+func (m MergeMove) valid() bool {
+	return m == MergeMoveUp || m == MergeMoveDown
+}
+
 // MergeSourceKind is WHAT a merge lands (agentrepl.v1.MergeWorkspaceSource's
 // arm): the requesting workspace's own branch, another workspace's, a branch
 // that is no workspace, or the requester's own branch already merged
