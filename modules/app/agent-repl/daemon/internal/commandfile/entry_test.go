@@ -32,6 +32,8 @@ func TestValidateAcceptsEveryAcceptedShape(t *testing.T) {
 		{name: "merge pause of one repository", entry: Entry{Type: TypeMergePause, ProjectDir: "/tree", RepositoryDir: "/repo"}},
 		{name: "merge resume of every repository", entry: Entry{Type: TypeMergeResume, ProjectDir: "/tree"}},
 		{name: "merge resume of one repository", entry: Entry{Type: TypeMergeResume, ProjectDir: "/tree", RepositoryDir: "/repo"}},
+		{name: "merge hold rollouts", entry: Entry{Type: TypeMergeHoldRollouts, ProjectDir: "/tree"}},
+		{name: "merge release rollouts", entry: Entry{Type: TypeMergeReleaseRollouts, ProjectDir: "/tree"}},
 		{name: "retarget to a parent", entry: Entry{Type: TypeRetarget, ProjectDir: "/tree", Parent: PresentDir{Present: true, Dir: "/tree2"}}},
 		{name: "retarget to top-level", entry: Entry{Type: TypeRetarget, ProjectDir: "/tree", Parent: PresentDir{Present: true}}},
 	}
@@ -68,6 +70,9 @@ func TestValidateRefusesEveryIncompleteShape(t *testing.T) {
 		{name: "merge evict with no requester", entry: Entry{Type: TypeMergeEvict}},
 		{name: "merge pause with no requester", entry: Entry{Type: TypeMergePause}},
 		{name: "merge resume with no requester", entry: Entry{Type: TypeMergeResume}},
+		{name: "merge hold rollouts with no requester", entry: Entry{Type: TypeMergeHoldRollouts}},
+		{name: "merge release rollouts with no requester", entry: Entry{Type: TypeMergeReleaseRollouts}},
+		{name: "repository_dir on a rollout hold", entry: Entry{Type: TypeMergeHoldRollouts, ProjectDir: "/tree", RepositoryDir: "/repo"}},
 		{name: "evict_dir on a close", entry: Entry{Type: TypeClose, Dir: "/tree", EvictDir: "/tree2"}},
 		{name: "repository_dir on a merge", entry: Entry{Type: TypeMerge, Dir: "/tree", RepositoryDir: "/repo"}},
 		{name: "retarget with no target", entry: Entry{Type: TypeRetarget, Parent: PresentDir{Present: true}}},

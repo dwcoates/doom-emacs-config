@@ -64,6 +64,12 @@ const (
 	// TypeMergeResume resumes admitting merges (UpdateMergeQueueResume),
 	// scoped exactly as TypeMergePause is.
 	TypeMergeResume = "merge_resume"
+	// TypeMergeHoldRollouts holds the queue's rollouts daemon-wide
+	// (UpdateMergeQueueHoldRollouts): merges still land, but a landing in the
+	// daemon's own checkout no longer tells the deploy.
+	TypeMergeHoldRollouts = "merge_hold_rollouts"
+	// TypeMergeReleaseRollouts ends the hold (UpdateMergeQueueReleaseRollouts).
+	TypeMergeReleaseRollouts = "merge_release_rollouts"
 )
 
 // Entry is one decoded command-file entry. Every field the accepted types use
@@ -303,7 +309,8 @@ func (e Entry) Validate() error {
 			return fmt.Errorf("%s: parent is required: a workspace's directory, or null for top-level", TypeRetarget)
 		}
 		return nil
-	case TypeClose, TypeForget, TypeOpen, TypeSwitch, TypeMergeEvict, TypeMergePause, TypeMergeResume:
+	case TypeClose, TypeForget, TypeOpen, TypeSwitch, TypeMergeEvict, TypeMergePause, TypeMergeResume,
+		TypeMergeHoldRollouts, TypeMergeReleaseRollouts:
 		return e.requireTarget()
 	case TypeTaskCreate:
 		if e.Title == "" {
