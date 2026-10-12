@@ -8610,7 +8610,11 @@ export const FeedMergeLabelSchema: GenMessage<FeedMergeLabel> = /*@__PURE__*/
   messageDesc(file_frontend_v1_feed, 285);
 
 /**
- * When the merge was enqueued — the head's running clock while live.
+ * The instant the head's clock counts from, resolved by the daemon: when the
+ * merge was enqueued while it waits in the queue, then when its run was
+ * admitted (popped off the queue) once it is being worked on, so a running or
+ * settled merge shows only the time it ran and never its wait. A merge
+ * abandoned from the queue never ran and keeps its enqueue instant.
  *
  * @generated from message frontend.v1.FeedMergeRuntime
  */

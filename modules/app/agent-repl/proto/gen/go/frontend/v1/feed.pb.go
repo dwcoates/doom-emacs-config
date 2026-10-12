@@ -17882,7 +17882,11 @@ func (x *FeedMergeLabel) GetText() string {
 	return ""
 }
 
-// When the merge was enqueued — the head's running clock while live.
+// The instant the head's clock counts from, resolved by the daemon: when the
+// merge was enqueued while it waits in the queue, then when its run was
+// admitted (popped off the queue) once it is being worked on, so a running or
+// settled merge shows only the time it ran and never its wait. A merge
+// abandoned from the queue never ran and keeps its enqueue instant.
 type FeedMergeRuntime struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	StartedAtMs   int64                  `protobuf:"varint,1,opt,name=started_at_ms,json=startedAtMs,proto3" json:"started_at_ms,omitempty"`

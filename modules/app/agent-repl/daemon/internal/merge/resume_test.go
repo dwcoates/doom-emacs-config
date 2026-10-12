@@ -196,6 +196,24 @@ func TestRecoverDrawsTheResumedMergesBubbleAtOnce(t *testing.T) {
 	}
 }
 
+func TestRecoverDrawsTheResumedMergesHeadClockFromItsAdmission(t *testing.T) {
+	// Arrange: a merge a restart interrupted in its tests, admitted one
+	// millisecond after it was queued.
+	h := newHarness(t)
+	interruptedAt(t, h, atStep(TabTests, 1))
+	queued := queuedAtMS(t, h, theWorkspace)
+
+	// Act.
+	if err := h.o.Recover(context.Background()); err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+
+	// Assert.
+	if got := lastHeadOf(t, h, theWorkspace).GetRuntime().GetStartedAtMs(); got != queued+1 {
+		t.Fatalf("the resumed head's clock starts at %d, want the admission %d", got, queued+1)
+	}
+}
+
 func TestRecoverAdoptsTheResumedMergesLease(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
