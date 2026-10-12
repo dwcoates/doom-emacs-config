@@ -14,6 +14,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/flock"
 	"claude-repld/internal/headless"
+	"claude-repld/internal/sourcescan"
 	"claude-repld/internal/wsm"
 )
 
@@ -683,7 +684,7 @@ func TestContextEndedRecordsTheRunsEndAndAnswersItsCause(t *testing.T) {
 // of a run its context ended.
 func TestEveryContextEndOfARunIsRecordedByContextEnded(t *testing.T) {
 	// Act
-	counts := countInSources(t, "ended with its context", "contextEnded(log, ")
+	counts := []int{sourcescan.Count(t, "ended with its context"), sourcescan.Count(t, "contextEnded(log, ")}
 
 	// Assert
 	if counts[0] != 1 || counts[1] != 3 {
