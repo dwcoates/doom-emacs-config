@@ -69,6 +69,16 @@ case "$out" in
   *) fail "global Emacs query output: $out" ;;
 esac
 
+# The global daemon log is the state root's logs/daemon.run.log, where the
+# daemon writes its run log.
+mkdir -p "$state/logs"
+printf '%s\n' '{"timestamp":"2026-07-28T12:00:05Z","runtime":"daemon","pid":505,"level":"info","verbosity":"normal","operation":"daemon.test","message":"global-daemon","context":{}}' >"$state/logs/daemon.run.log"
+out="$(HOME="$TMP/home" AGENT_REPL_STATE_DIR="$state" XDG_CACHE_HOME="$cache" "$DISCOVER" --global --runtime daemon --pid 505)"
+case "$out" in
+  *'"message":"global-daemon"'*) ;;
+  *) fail "global daemon query output: $out" ;;
+esac
+
 # The durable central Emacs sink is found with no override: it is the state
 # root's logs/emacs.central.log, where Emacs writes it by default.
 mkdir -p "$state/logs"
