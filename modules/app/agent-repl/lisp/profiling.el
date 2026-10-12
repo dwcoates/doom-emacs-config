@@ -40,6 +40,7 @@
 (declare-function agent-repl--ws-list-names "workspace" ())
 (declare-function agent-repl--ws-get "workspace" (ws key))
 (declare-function agent-repl--frontend-webview-read-script "frontend" (buf script callback))
+(defvar agent-repl--global-log-scope)
 
 (defconst agent-repl-profiling-root-env "AGENT_REPL_PROFILE_ROOT"
   "Environment variable overriding the profiles root.")
@@ -107,7 +108,7 @@ Signals an error when the file names no valid session."
           (run-at-time agent-repl-profiling-max-seconds nil
                        #'agent-repl-profiling--expire armed)))
   (let ((pages (agent-repl-profiling--pages 'start session)))
-    (agent-repl--info nil "profiling: started into session %s (%d pages sampled)" session pages)
+    (agent-repl--info agent-repl--global-log-scope "profiling: started into session %s (%d pages sampled)" session pages)
     (format "started %s pages=%d" session pages)))
 
 (defun agent-repl-profiling--expire (armed)
@@ -120,9 +121,10 @@ Signals an error when the file names no valid session."
   "Write PROFILE's reversed call tree as text to FILE."
   (let ((buf (profiler-report-setup-buffer-1 profile)))
     (unwind-protect
-        (with-current-buffer buf
-          (profiler-report-render-reversed-calltree)
-          (write-region (point-min) (point-max) file nil 'silent))
+        (let ((text (with-current-buffer buf
+                      (profiler-report-render-reversed-calltree)
+                      (buffer-string))))
+          (with-temp-file file (insert text)))
       (kill-buffer buf))))
 
 (defun agent-repl-profiling--stop (reason)
@@ -148,16 +150,15 @@ Answers the files written."
         (let ((profile (funcall (nth 2 spec)))
               (data (expand-file-name (format "%s.%s.elprof" base (car spec)) dir))
               (text (expand-file-name (format "%s.%s.txt" base (car spec)) dir)))
-          (with-temp-buffer
+          (with-temp-file data
             (let (print-level print-length)
-              (print (profiler-fixup-profile profile) (current-buffer)))
-            (write-region (point-min) (point-max) data nil 'silent))
+              (print (profiler-fixup-profile profile) (current-buffer))))
           (agent-repl-profiling--write-report profile text)
           (push data files)
           (push text files))))
     (setq files (nreverse files))
     (let ((pages (agent-repl-profiling--pages 'stop session)))
-      (agent-repl--info nil "profiling: stopped session %s (%s), wrote %s; %d pages answering"
+      (agent-repl--info agent-repl--global-log-scope "profiling: stopped session %s (%s), wrote %s; %d pages answering"
                         session reason (string-join files ", ") pages)
       (format "stopped %s pages=%d %s" session pages (string-join files " ")))))
 
@@ -195,7 +196,7 @@ The answer names SESSION and WS, so the callback needs no closure."
   "Records a page sampler's start answer RAW; a refusal is an error."
   (let ((answer (ignore-errors (json-parse-string raw :object-type 'alist))))
     (unless (eq (alist-get 'ok answer) t)
-      (agent-repl--error nil "profiling: a page sampler did not start: %s" raw))))
+      (agent-repl--error agent-repl--global-log-scope "profiling: a page sampler did not start: %s" raw))))
 
 (defun agent-repl-profiling--page-file-name (ws)
   "The lag file name for workspace WS, safe as one path component."
@@ -207,12 +208,12 @@ The answer names SESSION and WS, so the callback needs no closure."
          (session (alist-get 'session answer))
          (ws (alist-get 'ws answer)))
     (if (not (and (stringp session) (agent-repl-profiling-valid-session-p session) (stringp ws)))
-        (agent-repl--error nil "profiling: a page sampler answered no session: %s" raw)
+        (agent-repl--error agent-repl--global-log-scope "profiling: a page sampler answered no session: %s" raw)
       (let ((file (expand-file-name (agent-repl-profiling--page-file-name ws)
                                     (expand-file-name session (agent-repl-profiling-root)))))
-        (write-region raw nil file nil 'silent)
+        (with-temp-file file (insert raw))
         (unless (eq (alist-get 'ok answer) t)
-          (agent-repl--error nil "profiling: the page sampler of %s answered %s" ws raw))))))
+          (agent-repl--error agent-repl--global-log-scope "profiling: the page sampler of %s answered %s" ws raw))))))
 
 (defun agent-repl-profiling--pages (action session)
   "Starts (ACTION `start') or stops (`stop') every live page's sampler for SESSION.
@@ -251,7 +252,7 @@ profile.  Answers what it did as a string for the collector:
               stopped)))))
     (error
      (let ((why (error-message-string err)))
-       (agent-repl--error nil "profiling: the reconcile failed: %s" why)
+       (agent-repl--error agent-repl--global-log-scope "profiling: the reconcile failed: %s" why)
        (concat "failed: " why)))))
 
 (provide 'agent-repl-profiling)
