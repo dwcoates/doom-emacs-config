@@ -21,6 +21,7 @@ import { MalformedView } from "../../src/rpc/malformed.js";
 import { repoFoldKey } from "../../src/sidebar/context.js";
 import {
   drawHeadedSection,
+  leftOutWhenEmpty,
   drawRosterRepoDivergence,
   drawRosterSectionFold,
   drawSectionLabel,
@@ -901,6 +902,38 @@ describe("hidden workspaces", () => {
     const section = hiddenSection();
     section.fold = { case: undefined };
     expect(() => drawWorkspaceRoster(roster({ hidden: section }), sidebarContext())).toThrow(MalformedView);
+  });
+});
+
+describe("leftOutWhenEmpty", () => {
+  it.each([
+    [0, true],
+    [1, false],
+    [7, false],
+  ] as const)("leaves a band whose daemon count is %d out: %s", (count, want) => {
+    const header = create(RosterSectionHeaderSchema, { label: { text: "Band" }, count: { workspaces: count } });
+    expect(leftOutWhenEmpty("data-band-empty").when(header, "p.header")).toBe(want);
+  });
+
+  it("marks the left-out box with the attribute it is given", () => {
+    expect(leftOutWhenEmpty("data-band-empty").attribute).toBe("data-band-empty");
+  });
+
+  it("refuses a header with no count as a malformed view", () => {
+    const header = create(RosterSectionHeaderSchema, { label: { text: "Band" } });
+    expect(() => leftOutWhenEmpty("data-band-empty").when(header, "p.header")).toThrow(MalformedView);
+  });
+
+  // EVERY BAND LEAVES ITSELF OUT BY THE ONE RULE: an empty band is hidden and
+  // marked with its own attribute, which a hand-rolled rule would not share.
+  it.each([
+    ["viewed", ".viewed-section", "data-viewed-empty"],
+    ["hidden", ".hidden-section", "data-hidden-empty"],
+    ["merged", ".merged-section", "data-merged-empty"],
+  ] as const)("leaves the empty %s band out through the shared rule", (_kind, selector, attribute) => {
+    const drawn = drawWorkspaceRoster(roster({ merged: mergedSection([], 0) }), sidebarContext());
+    const section = pane(drawn, "repository").querySelector(selector) as HTMLElement;
+    expect([section.hidden, section.getAttribute(attribute)]).toEqual([true, "true"]);
   });
 });
 
