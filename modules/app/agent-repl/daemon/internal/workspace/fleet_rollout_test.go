@@ -886,19 +886,12 @@ func TestFleetServingAnswersWhatTheDirectiveCanReach(t *testing.T) {
 			want: false,
 		},
 		{
+			// THE SESSION-UP RELEASE RUNS INSIDE THE START and reads Serving:
+			// a started session serves while its start is still under way.
 			name: "a started session whose start has not returned yet",
 			install: func(f *fleetFixture, ws ids.WorkspaceID) {
 				f.fleet.remember(ws, &live{client: f.client, sessionStarted: true})
 				f.fleet.markStarting(ws, true)
-			},
-			want: false,
-		},
-		{
-			name: "a started session whose start has returned",
-			install: func(f *fleetFixture, ws ids.WorkspaceID) {
-				f.fleet.remember(ws, &live{client: f.client, sessionStarted: true})
-				f.fleet.markStarting(ws, true)
-				f.fleet.markStarting(ws, false)
 			},
 			want: true,
 		},
@@ -1649,5 +1642,44 @@ func TestAwaitFreeAnswersAWatchersOwnError(t *testing.T) {
 	// Assert
 	if !errors.Is(err, boom) {
 		t.Fatalf("AwaitFree = %v, want %v", err, boom)
+	}
+}
+
+func TestStartUnderWayAnswersTheStartsInFlight(t *testing.T) {
+	tests := []struct {
+		name    string
+		install func(*fleetFixture, ids.WorkspaceID)
+		want    bool
+	}{
+		{name: "no start was ever made", install: func(*fleetFixture, ids.WorkspaceID) {}, want: false},
+		{
+			name:    "a start that has not returned",
+			install: func(f *fleetFixture, ws ids.WorkspaceID) { f.fleet.markStarting(ws, true) },
+			want:    true,
+		},
+		{
+			name: "a start that returned",
+			install: func(f *fleetFixture, ws ids.WorkspaceID) {
+				f.fleet.markStarting(ws, true)
+				f.fleet.markStarting(ws, false)
+			},
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFleetFixture(t)
+			ws := f.workspace("w1").ID
+			tt.install(f, ws)
+
+			// Act.
+			got := f.fleet.StartUnderWay(ws)
+
+			// Assert.
+			if got != tt.want {
+				t.Fatalf("StartUnderWay(%q) = %v, want %v", ws, got, tt.want)
+			}
+		})
 	}
 }

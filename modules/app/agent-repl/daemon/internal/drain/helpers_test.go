@@ -227,6 +227,8 @@ type fakeStand struct {
 	// wedgeKillOnWS wedges the stand-down of NAMED workspaces only.
 	wedgeKillOnWS map[ids.WorkspaceID]bool
 	// notServing names the workspaces this stand holds no addressable shim
+	// starting names the workspaces whose start is under way.
+	starting map[ids.WorkspaceID]bool
 	// for. The zero value serves every workspace, so a test states the
 	// absence rather than every presence.
 	notServing map[ids.WorkspaceID]bool
@@ -259,8 +261,22 @@ func newFakeStand() *fakeStand {
 		killErr:       make(map[ids.WorkspaceID]error),
 		wedgeKillOnWS: make(map[ids.WorkspaceID]bool),
 		notServing:    make(map[ids.WorkspaceID]bool),
+		starting:      make(map[ids.WorkspaceID]bool),
 		kills:         make(chan killCall, 16),
 	}
+}
+
+func (s *fakeStand) StartUnderWay(ws ids.WorkspaceID) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.starting[ws]
+}
+
+// startUnderWay marks a start of ws as under way.
+func (s *fakeStand) startUnderWay(ws ids.WorkspaceID) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.starting[ws] = true
 }
 
 func (s *fakeStand) Serving(ws ids.WorkspaceID) bool {

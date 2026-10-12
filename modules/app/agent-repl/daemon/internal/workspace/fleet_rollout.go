@@ -816,24 +816,28 @@ func (f *Fleet) Hibernate(ctx context.Context, ws ids.WorkspaceID) (*shimv1.Hibe
 // for a workspace whose session had never begun. The predicate's own contract
 // already said a workspace "whose session is not up" is skipped; this is what
 // makes that true.
-//
-// A START STILL UNDER WAY IS NOT SERVING YET. Its session reads started once
-// the shim answers StartSession, but the start goes on to record the session's
-// facts -- the engagement stamp among them -- and an idle sweep that reached
-// it in between read the PREVIOUS engagement, found a reopened workspace idle
-// for hours, and hibernated the shim the open was bringing up: the open then
-// failed with ErrShimTaken. Until the start returns, the sweep skips it.
 func (f *Fleet) Serving(ws ids.WorkspaceID) bool {
 	if _, ok := f.Client(ws); !ok {
 		return false
 	}
-	f.mu.RLock()
-	starting := f.startsUnderWay[ws]
-	f.mu.RUnlock()
-	if starting {
-		return false
-	}
 	return f.sessionStarted(ws)
+}
+
+// StartUnderWay reports whether a start of the workspace's session is under
+// way: from the start gate's liveness check until the start returns.
+//
+// THE IDLE SWEEP SKIPS SUCH A WORKSPACE, AND ONLY THE SWEEP ASKS. A session
+// reads started once the shim answers StartSession, but the start goes on to
+// record the session's facts -- the engagement stamp among them -- and a sweep
+// that reached it in between read the PREVIOUS engagement, found a reopened
+// workspace idle for hours, and hibernated the shim the open was bringing up.
+// It is NOT folded into Serving: the session-up edge that releases the held
+// prompts is raised INSIDE the start, and a Serving that answered false there
+// held every prompt that waited out a restart (2026-10-12).
+func (f *Fleet) StartUnderWay(ws ids.WorkspaceID) bool {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.startsUnderWay[ws]
 }
 
 // KillSession ends a workspace's session: it ASKS THE SHIM to end the session
