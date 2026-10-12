@@ -443,6 +443,11 @@ type WorkspacePusher interface {
 	// `transferred{address}` on its WEB stream. The address rides the web arm
 	// because a webview has no daemon-level stream to have learned it from.
 	PushTransferred(ws ids.WorkspaceID, successorAddress string)
+	// RetractTransferred withdraws the standing `transferred` notice once the
+	// workspace is taken back, so it is neither replayed to a participant
+	// that attaches here again nor left to swallow the next transfer's
+	// identical notice.
+	RetractTransferred(ws ids.WorkspaceID)
 	// PushReloadWebapp pushes the EMPTY reload_webapp arm on the workspace's
 	// host stream: no address rides it, because the daemon is not changing.
 	PushReloadWebapp(ws ids.WorkspaceID)
