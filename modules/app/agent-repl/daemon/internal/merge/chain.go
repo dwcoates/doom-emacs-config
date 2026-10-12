@@ -311,7 +311,9 @@ func (o *orchestrator) startSpeculative(ctx context.Context, r *run) {
 	r.displaces = o.displaces[ws]
 	delete(o.displaces, ws)
 	o.mu.Unlock()
+	r.mu.Lock()
 	r.source, r.job, r.lease = entry.Source, job, lease
+	r.mu.Unlock()
 	r.startedMS, r.queuedMS = o.deps.Now().UnixMilli(), entry.EnqueuedAt.UnixMilli()
 	log.Info(op, "admitted a merge behind its queue's head; it rebases onto the merge ahead and tests ahead of its turn", dlog.Context{
 		"workspace": string(ws), "repo": string(r.repo), "lease": string(lease.ID)})
@@ -371,9 +373,19 @@ func (o *orchestrator) promote(repo wsm.RepoKey, entries []wsm.MergeQueueEntry) 
 	o.running[repo] = r
 	o.signalChainLocked(repo)
 	o.mu.Unlock()
+	lease, base := r.leaseAndBase()
 	o.log(context.Background(), r.ws).Info("daemon.merge.chain", "the merge reached its queue's head; it lands from here", dlog.Context{
-		"workspace": string(r.ws), "repo": string(repo), "lease": string(r.lease.ID), "chain_base": r.chainBase})
+		"workspace": string(r.ws), "repo": string(repo), "lease": string(lease), "chain_base": base})
 	return r, true
+}
+
+// leaseAndBase reads the run's lease and chain base under the run's lock: the
+// pump reads them from its own goroutine while the run's goroutine (its
+// resume, its admission, its rebase) writes them.
+func (r *run) leaseAndBase() (ids.LeaseID, string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.lease.ID, r.chainBase
 }
 
 // briefTarget is what a step's brief names as the branch the merge lands on:
@@ -490,7 +502,9 @@ func (r *run) chainRebase(ctx context.Context, place chainPlace, targetBranch st
 // settledOn records the branch's own commits as standing on onto, once a
 // rebase onto it settled, and publishes the branch's tip to its chain.
 func (r *run) settledOn(ctx context.Context, onto string) error {
+	r.mu.Lock()
 	r.chainBase = onto
+	r.mu.Unlock()
 	head, err := r.git.ResolveRef(ctx, r.subject.dir, r.subject.branch)
 	if err != nil {
 		return fmt.Errorf("merge: resolving %s after its rebase: %w", r.subject.branch, err)
