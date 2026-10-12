@@ -2975,7 +2975,7 @@ describe("a card head's clock holds a fixed footprint", () => {
     expect(decls).not.toMatch(/min-width/);
   });
 
-  it.each([".shell-stop", ".subagent-stop"])("keeps %s and its answer on one line", (selector) => {
+  it.each([".shell-stop", ".subagent-stop", ".merge-tab-stop"])("keeps %s and its answer on one line", (selector) => {
     // Arrange / Act
     const decls = declarationsOf(selector) ?? "";
     // Assert

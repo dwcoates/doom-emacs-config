@@ -8,6 +8,7 @@ import { createTicker } from "../../../src/clock.js";
 import { tick } from "../../../src/feed/ticking.js";
 import { FakeSubfeed, childRow, id, tabRow } from "./fixtures.js";
 import { MalformedView } from "../../../src/rpc/malformed.js";
+import { InterruptResponseSchema } from "../../../../proto/gen/ts/agentrepl/v1/endpoint_interrupt_pb";
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -313,7 +314,7 @@ describe("a fixes tab names its attempt above its rows", () => {
   it("still draws the rows parented to it under the attempt", () => {
     const view = new FakeSubfeed([tabRow("t1", { kind: "fixes", state: "live" }), childRow("r1", "t1")]);
     const { host } = mount(view);
-    expect(host.querySelector("[data-merge-attempt] + [data-nest] [data-feed-row]")?.getAttribute("data-feed-row")).toBe(
+    expect(host.querySelector("[data-merge-attempt] ~ [data-nest] [data-feed-row]")?.getAttribute("data-feed-row")).toBe(
       "r1",
     );
   });
@@ -470,11 +471,12 @@ describe("a redraw of the tab's content", () => {
     }
     const view = new Watching([tabRow("t1", { kind: "conflicts", state: "live" }), childRow("r1", "t1")]);
     host = mount(view).host;
+    const standing = host.querySelector(".merge-tab-panel")?.childElementCount;
     seen.length = 0;
     // Act
     view.push([tabRow("t1", { kind: "conflicts", state: "live" }), childRow("r1", "t1"), childRow("r2", "t1")]);
     // Assert
-    expect(seen).toEqual([1, 1]);
+    expect(seen).toEqual([standing, standing]);
   });
 
 });
@@ -597,37 +599,80 @@ describe("the body redraws in place", () => {
   });
 });
 
-describe("an agentic tab in the requester's copy of a detached merge", () => {
-  /** A switch payload naming the merge workspace. */
-  const SWITCH = {
-    workspaceSwitch: {
-      label: { text: "resolving conflicts in the merge workspace" },
-      availability: { case: "available", value: { target: { id: "ws-merge", dir: "/w/merge" } } },
-    },
-  };
+/** Mount the body over VIEW with harness H, answering both. */
+function mountWith(view: FakeSubfeed, h = harness()): { host: HTMLElement; h: ReturnType<typeof harness> } {
+  const host = document.createElement("div");
+  mergeBubbleBody(host, view, rowContext(h.ctx, mergeRow("m1")));
+  return { host, h };
+}
 
-  it("draws the switch in place of its rows", () => {
-    const view = new FakeSubfeed([tabRow("t1", { kind: "conflicts", state: "live", payload: SWITCH })]);
-    const { host } = mount(view);
-    const panel = host.querySelector(".merge-tab-panel");
-    expect([
-      panel?.querySelector(".merge-workspace-switch-tab .merge-workspace-switch-button")?.textContent,
-      panel?.querySelector(".merge-tab-rows"),
-    ]).toEqual(["resolving conflicts in the merge workspace", null]);
+/** Let a scripted RPC answer land. */
+async function settle(): Promise<void> {
+  for (let i = 0; i < 30; i += 1) await vi.advanceTimersByTimeAsync(0);
+}
+
+describe("a pick tab", () => {
+  it("draws its rows like any agentic tab", () => {
+    const view = new FakeSubfeed([tabRow("t1", { kind: "pick", state: "live" }), childRow("r1", "t1")]);
+    const { host } = mountWith(view);
+    expect(host.querySelector(".merge-tab-panel .merge-tab-rows [data-feed-row]")?.getAttribute("data-feed-row")).toBe("r1");
+  });
+});
+
+describe("an agentic tab's stop control", () => {
+  it.each([
+    ["a live conflicts tab", "conflicts", "live", true],
+    ["a conflicts tab waiting on the user", "conflicts", "waitingOnUser", true],
+    ["a live pick tab", "pick", "live", true],
+    ["a live fixes tab", "fixes", "live", true],
+    ["a settled conflicts tab", "conflicts", "settled", false],
+    ["a settled pick tab", "pick", "settled", false],
+    ["a live rebasing tab", "rebasing", "live", false],
+  ] as const)("is offered on %s: %s", (_name, kind, state, offered) => {
+    // Arrange
+    const view = new FakeSubfeed([tabRow("t1", { kind, state })]);
+    // Act
+    const { host } = mountWith(view);
+    // Assert
+    expect(host.querySelector(".merge-tab-panel .merge-tab-stop [data-interrupt]") !== null).toBe(offered);
   });
 
-  it("draws a fixes tab's attempt above its switch", () => {
-    const view = new FakeSubfeed([
-      tabRow("t1", { kind: "fixes", state: "live", payload: { ...SWITCH, attempt: { attempt: 1, maxAttempts: 3 } } }),
-    ]);
-    const { host } = mount(view);
-    const panel = host.querySelector(".merge-tab-panel");
-    expect(panel?.lastElementChild?.classList.contains("merge-workspace-switch-tab")).toBe(true);
+  it("stops the tab by its own row id, sent as a merge tab", async () => {
+    // Arrange
+    const { host, h } = mountWith(new FakeSubfeed([tabRow("t1", { kind: "conflicts", state: "live" })]));
+    // Act
+    host.querySelector<HTMLElement>(".merge-tab-stop [data-interrupt]")?.click();
+    await settle();
+    // Assert
+    expect(h.calls.interrupt[0]?.target).toEqual({
+      case: "mergeTab",
+      value: { $typeName: "frontend.v1.FeedId", value: "t1" },
+    });
   });
 
-  it("draws its rows as before when it carries no switch", () => {
+  it("draws the refusal at the control", async () => {
+    // Arrange
+    const h = harness({
+      interrupt: () =>
+        create(InterruptResponseSchema, {
+          result: { case: "error", value: { kind: { case: "notMergeTab", value: {} } } },
+        }),
+    });
+    const { host } = mountWith(new FakeSubfeed([tabRow("t1", { kind: "conflicts", state: "live" })]), h);
+    // Act
+    host.querySelector<HTMLElement>(".merge-tab-stop [data-interrupt]")?.click();
+    await settle();
+    // Assert
+    expect(host.querySelector(".merge-tab-stop .refusal")?.getAttribute("data-arm")).toBe("notMergeTab");
+  });
+
+  it("is taken down when the tab settles", () => {
+    // Arrange
     const view = new FakeSubfeed([tabRow("t1", { kind: "conflicts", state: "live" })]);
-    const { host } = mount(view);
-    expect(host.querySelector(".merge-tab-panel .merge-tab-rows")).not.toBeNull();
+    const { host } = mountWith(view);
+    // Act
+    view.push([tabRow("t1", { kind: "conflicts", state: "settled" })]);
+    // Assert
+    expect(host.querySelector(".merge-tab-stop")).toBeNull();
   });
 });

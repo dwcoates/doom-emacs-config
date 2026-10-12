@@ -99,16 +99,16 @@ describe("drawStopControl", () => {
   });
 
   it("draws a refusal at the control by its arm", async () => {
-    const { el } = draw("r1", refusing("notDetachedWork"));
+    const { el } = draw("r1", refusing("notMergeTab"));
     el.querySelector<HTMLElement>("[data-interrupt]")?.click();
     await settle();
-    expect(el.querySelector(".refusal")?.getAttribute("data-arm")).toBe("notDetachedWork");
+    expect(el.querySelector(".refusal")?.getAttribute("data-arm")).toBe("notMergeTab");
   });
 
   it("records a refusal at WARN under the site's refused operation", async () => {
     // Arrange
     const capture = captureLogRecords();
-    const { el } = draw("r1", refusing("notDetachedWork"));
+    const { el } = draw("r1", refusing("notMergeTab"));
     // Act
     el.querySelector<HTMLElement>("[data-interrupt]")?.click();
     await settle();
@@ -130,7 +130,7 @@ describe("drawStopControl", () => {
 
   it("drops the previous click's answer when clicked again", async () => {
     // Arrange
-    const { el } = draw("r1", refusing("notDetachedWork"));
+    const { el } = draw("r1", refusing("notMergeTab"));
     el.querySelector<HTMLElement>("[data-interrupt]")?.click();
     await settle();
     // Act
@@ -142,7 +142,7 @@ describe("drawStopControl", () => {
 });
 
 describe("the stop control's call sites", () => {
-  it.each(["src/feed/rows/subagent.ts"])(
+  it.each(["src/feed/rows/subagent.ts", "src/feed/merge/merge-body.ts"])(
     "%s draws its stop through drawStopControl rather than a control of its own",
     (file) => {
       const source = readFileSync(join(process.cwd(), file), "utf8");

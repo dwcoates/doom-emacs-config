@@ -371,6 +371,7 @@ const OWN_CAUSES = {
   confirmRequired: (value: { liveAgentCount: bigint }) =>
     `stopping would also end ${value.liveAgentCount.toString()} live agent(s)`,
   notDetachedWork: () => "this row names no detached work",
+  notMergeTab: () => "this row names no running merge tab",
   noSession: () => "the workspace has no session to interrupt",
   shimRefused: (value: { detail: string }) => value.detail,
 } as unknown as SentenceTable;
