@@ -613,9 +613,12 @@ type fakeGit struct {
 	rebaseTotal     int
 	rebaseReplayed  int
 	rebaseConflicts map[int][]string
-	rebaseMet       map[int]bool
-	rebaseErr       error
-	rebaseCommands  []string
+	// rebaseResolved names the replays (1-based) whose conflict rerere resolved
+	// from a recorded resolution, answered once.
+	rebaseResolved map[int][]string
+	rebaseMet      map[int]bool
+	rebaseErr      error
+	rebaseCommands []string
 	// worktrees answers ListWorktrees; addedWorktrees records AddWorktree.
 	worktrees      []gitclient.Worktree
 	addedWorktrees []string
@@ -647,6 +650,7 @@ func newFakeGit(seq func() int) *fakeGit {
 		ancestry:        map[string]bool{},
 		branches:        map[string]string{},
 		rebaseConflicts: map[int][]string{},
+		rebaseResolved:  map[int][]string{},
 		rebaseMet:       map[int]bool{},
 	}
 }
@@ -937,6 +941,10 @@ func (g *fakeGit) replayLocked() (gitclient.RebaseStep, error) {
 	if files, scripted := g.rebaseConflicts[k]; scripted && !g.rebaseMet[k] {
 		g.rebaseMet[k] = true
 		return gitclient.RebaseStep{Conflicted: files}, nil
+	}
+	if files, scripted := g.rebaseResolved[k]; scripted && !g.rebaseMet[-k] {
+		g.rebaseMet[-k] = true
+		return gitclient.RebaseStep{Resolved: files}, nil
 	}
 	g.rebaseReplayed = k
 	return gitclient.RebaseStep{Done: g.rebaseReplayed >= g.rebaseTotal}, nil

@@ -1186,6 +1186,31 @@ func TestAConflictIsResolvedByTheRequestersSessionAndTheRebaseContinues(t *testi
 	}
 }
 
+func TestAConflictRerereResolvedPromptsNothingAndTheRebaseContinues(t *testing.T) {
+	// Arrange: the second commit meets a conflict whose resolution was
+	// recorded, and rerere staged it.
+	h := newHarness(t)
+	landing(h, 2)
+	h.git.rebaseResolved[2] = []string{"a.go"}
+
+	// Act.
+	admitted(t, h)
+
+	// Assert.
+	if got := h.queue.countOrigin(conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR); got != 0 {
+		t.Fatalf("conflict briefs = %d, want none for a conflict rerere resolved", got)
+	}
+	if got := h.footer.last().State; got != StateMerged {
+		t.Fatalf("state = %q, want merged", got)
+	}
+	if rounds := h.feed.roundsOfKind(TabConflicts); len(rounds) != 0 {
+		t.Fatalf("conflicts rounds = %v, want none", rounds)
+	}
+	if _, found := h.recordFor("info", "daemon.merge.rerere"); !found {
+		t.Fatal("the reused resolution was not recorded")
+	}
+}
+
 func TestTheConflictResolutionsLineNamesTheCommitAndTheFileCount(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
