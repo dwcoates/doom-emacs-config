@@ -40,7 +40,24 @@ message OpenTabsRequest {
 message OpenTabsWorkspace {
   // The workspace, echoed from its roster row.
   workspace.v1.WorkspaceRef workspace = 1;
+  // WHETHER THE EDITOR DRAWS A WEB PAGE FOR IT, which decides what `ready`
+  // waits for. THE ARM IS THE ANSWER; unset is a malformed request (Connect
+  // InvalidArgument).
+  oneof page {
+    // The editor is loading the workspace's web page now: it opens once its
+    // session is served AND the page reports itself drawn (ReportPageDrawn).
+    OpenTabsPageLoading loading = 2;
+    // The editor draws no web page for it (its frontend is not the web page,
+    // or the editor has no webview): it opens once its session is served.
+    OpenTabsPageNone none = 3;
+  }
 }
+
+// The editor is loading the workspace's web page. DELIBERATELY EMPTY.
+message OpenTabsPageLoading {}
+
+// The editor draws no web page for the workspace. DELIBERATELY EMPTY.
+message OpenTabsPageNone {}
 
 // One frame of an open. The stream ends after `finished`.
 message OpenTabsResponse {
@@ -151,7 +168,8 @@ message OpenTabsOpened {
   int64 at_ms = 2;
   // THE ARM IS HOW IT OPENED; exactly one is set.
   oneof outcome {
-    // Served and drawn: show the tab ("<name>: ready.").
+    // Served, and its page drawn when one was loading: show the tab
+    // ("<name>: ready.").
     OpenTabsOpenedReady ready = 3;
     // Its service-level start failed; show the tab, which draws the fault
     // ("<name>: session failed to start: <reason>.").
@@ -164,7 +182,7 @@ message OpenTabsOpened {
   }
 }
 
-// Served and drawn. DELIBERATELY EMPTY: the arm is the outcome.
+// Served (and drawn). DELIBERATELY EMPTY: the arm is the outcome.
 message OpenTabsOpenedReady {}
 
 // The service-level start failed.
