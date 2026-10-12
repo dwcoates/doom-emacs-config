@@ -48,7 +48,8 @@ Binds `root' to the root and `logged' to the (LEVEL . MESSAGE) records."
                    ((symbol-function 'agent-repl--error)
                     (lambda (_ws fmt &rest args) (push (cons 'error (apply #'format fmt args)) logged)))
                    ((symbol-function 'run-at-time)
-                    (lambda (_secs _repeat fn &rest args) (push (cons fn args) armed) (timer-create))))
+                    (lambda (_secs _repeat fn &rest args) (push (cons fn args) armed) (timer-create)))
+                   ((symbol-function 'agent-repl--ws-list-names) (lambda () nil)))
            ,@body)
        (when (profiler-running-p)
          (when (fboundp 'profiler-cpu-stop) (profiler-cpu-stop))
@@ -99,7 +100,7 @@ Binds `root' to the root and `logged' to the (LEVEL . MESSAGE) records."
   "An open session starts the profiler and records it at info."
   (agent-repl-test-profiling--with-root
     (agent-repl-test-profiling--open root "s1")
-    (should (equal (agent-repl-profiling-reconcile) "started s1"))
+    (should (equal (agent-repl-profiling-reconcile) "started s1 pages=0"))
     (should (profiler-running-p))
     (should (equal (car (car logged)) 'info))))
 
@@ -111,9 +112,9 @@ Binds `root' to the root and `logged' to the (LEVEL . MESSAGE) records."
     (dotimes (_ 20000) (make-string 64 ?x))
     (agent-repl-test-profiling--close root)
     (let ((answer (agent-repl-profiling-reconcile)))
-      (should (string-prefix-p "stopped s1 " answer))
+      (should (string-prefix-p "stopped s1 pages=0 " answer))
       (should-not (profiler-running-p))
-      (dolist (file (cddr (split-string answer " ")))
+      (dolist (file (nthcdr 3 (split-string answer " ")))
         (should (file-exists-p file))))))
 
 (ert-deftest agent-repl-test-profiling-a-changed-session-moves-the-profile ()
@@ -123,7 +124,7 @@ Binds `root' to the root and `logged' to the (LEVEL . MESSAGE) records."
     (agent-repl-profiling-reconcile)
     (agent-repl-test-profiling--open root "s2")
     (let ((answer (agent-repl-profiling-reconcile)))
-      (should (string-match-p "\\`stopped s1 .*; started s2\\'" answer))
+      (should (string-match-p "\\`stopped s1 .*; started s2 pages=0\\'" answer))
       (should (equal agent-repl-profiling--session "s2")))))
 
 (ert-deftest agent-repl-test-profiling-reconcile-is-idempotent ()
@@ -169,6 +170,59 @@ Binds `root' to the root and `logged' to the (LEVEL . MESSAGE) records."
     (let ((first (car (last armed))))
       (apply (car first) (cdr first)))
     (should (equal agent-repl-profiling--session "s2"))))
+
+;;;; ---- the page sampler -------------------------------------------------
+
+(ert-deftest agent-repl-test-profiling-pages-start-every-live-page ()
+  "Starting a session injects the sampler into every live page, by symbol."
+  (agent-repl-test-profiling--with-root
+    (let ((buf (generate-new-buffer " *page*"))
+          (calls nil))
+      (unwind-protect
+          (cl-letf (((symbol-function 'agent-repl--ws-list-names) (lambda () '("a" "b")))
+                    ((symbol-function 'agent-repl--ws-get)
+                     (lambda (ws _key) (and (equal ws "a") buf)))
+                    ((symbol-function 'agent-repl--frontend-webview-read-script)
+                     (lambda (b script cb) (push (list b script cb) calls) t)))
+            (agent-repl-test-profiling--open root "s1")
+            (should (equal (agent-repl-profiling-reconcile) "started s1 pages=1"))
+            (should (equal (length calls) 1))
+            (should (eq (nth 0 (car calls)) buf))
+            (should (eq (nth 2 (car calls)) 'agent-repl-profiling--page-started)))
+        (kill-buffer buf)))))
+
+(ert-deftest agent-repl-test-profiling-the-stop-script-carries-its-session-and-workspace ()
+  "The stop script names the session and workspace its answer belongs to."
+  (let ((script (agent-repl-profiling--page-stop-script "s1" "my ws")))
+    (should (string-match-p "session:\"s1\"" script))
+    (should (string-match-p "ws:\"my ws\"" script))))
+
+(ert-deftest agent-repl-test-profiling-a-page-answer-is-written-into-its-session ()
+  "A page's stop answer lands as webapp-<ws>.lag.json in its session."
+  (agent-repl-test-profiling--with-root
+    (make-directory (expand-file-name "s1" root))
+    (agent-repl-profiling--page-stopped
+     "{\"session\":\"s1\",\"ws\":\"my/ws\",\"ok\":true,\"stalls\":[[10,40]]}")
+    (should (file-exists-p (expand-file-name "s1/webapp-my_ws.lag.json" root)))
+    (should-not logged)))
+
+(ert-deftest agent-repl-test-profiling-a-page-answer-naming-no-session-is-an-error ()
+  "A page answer without a valid session writes nothing and is recorded."
+  (agent-repl-test-profiling--with-root
+    (agent-repl-profiling--page-stopped "{\"session\":\"../x\",\"ws\":\"a\"}")
+    (should (equal (car (car logged)) 'error))))
+
+(ert-deftest agent-repl-test-profiling-a-page-that-would-not-sample-is-an-error ()
+  "A page whose sampler answered no is recorded at error."
+  (agent-repl-test-profiling--with-root
+    (agent-repl-profiling--page-started "{\"ok\":false,\"why\":\"already sampling\"}")
+    (should (equal (car (car logged)) 'error))))
+
+(ert-deftest agent-repl-test-profiling-a-started-page-records-nothing ()
+  "A page whose sampler started records nothing."
+  (agent-repl-test-profiling--with-root
+    (agent-repl-profiling--page-started "{\"ok\":true}")
+    (should-not logged)))
 
 (provide 'test-profiling)
 ;;; test-profiling.el ends here
