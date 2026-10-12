@@ -16,12 +16,25 @@ func OwnBranch(keepOpen bool) *agentreplv1.MergeWorkspaceSource {
 			InPlace: &agentreplv1.MergeWorkspaceSourceOwnBranchInPlace{KeepOpen: keepOpen}}}}}
 }
 
-// OwnBranchDetached is a MergeWorkspace source naming the requester's own
-// branch, run DETACHED in a merge workspace.
-func OwnBranchDetached() *agentreplv1.MergeWorkspaceSource {
+// OwnBranchAsync is a MergeWorkspace source naming the requester's whole own
+// branch, run ASYNC in a hidden merge workspace named NAME.
+func OwnBranchAsync(name string) *agentreplv1.MergeWorkspaceSource {
+	return ownBranchDetached(&agentreplv1.MergeWorkspaceSourceOwnBranchDetached{Name: name,
+		Content: &agentreplv1.MergeWorkspaceSourceOwnBranchDetached_WholeBranch{WholeBranch: &agentreplv1.MergeWorkspaceSourceOwnBranchDetachedWholeBranch{}}})
+}
+
+// OwnBranchPick is a MergeWorkspace source naming only the changes of the
+// requester's own branch INSTRUCTION names, run ASYNC in a hidden merge
+// workspace named NAME.
+func OwnBranchPick(name, instruction string) *agentreplv1.MergeWorkspaceSource {
+	return ownBranchDetached(&agentreplv1.MergeWorkspaceSourceOwnBranchDetached{Name: name,
+		Content: &agentreplv1.MergeWorkspaceSourceOwnBranchDetached_Pick{Pick: &agentreplv1.MergeWorkspaceSourceOwnBranchDetachedPick{Instruction: instruction}}})
+}
+
+// ownBranchDetached wraps an async run as an own-branch source.
+func ownBranchDetached(run *agentreplv1.MergeWorkspaceSourceOwnBranchDetached) *agentreplv1.MergeWorkspaceSource {
 	return &agentreplv1.MergeWorkspaceSource{Source: &agentreplv1.MergeWorkspaceSource_OwnBranch{
-		OwnBranch: &agentreplv1.MergeWorkspaceSourceOwnBranch{Run: &agentreplv1.MergeWorkspaceSourceOwnBranch_Detached{
-			Detached: &agentreplv1.MergeWorkspaceSourceOwnBranchDetached{}}}}}
+		OwnBranch: &agentreplv1.MergeWorkspaceSourceOwnBranch{Run: &agentreplv1.MergeWorkspaceSourceOwnBranch_Detached{Detached: run}}}}
 }
 
 // BranchSource is a MergeWorkspace source naming a branch that is no

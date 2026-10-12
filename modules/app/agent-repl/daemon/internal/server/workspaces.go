@@ -667,7 +667,10 @@ func (s *server) MergeWorkspace(
 	if err != nil {
 		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
 	}
-	detached := req.Msg.GetSource().GetOwnBranch().GetDetached() != nil
+	var detached *merge.DetachedRun
+	if run := req.Msg.GetSource().GetOwnBranch().GetDetached(); run != nil {
+		detached = &merge.DetachedRun{Name: strings.TrimSpace(run.GetName()), Pick: strings.TrimSpace(run.GetPick().GetInstruction())}
+	}
 	if err := s.deps.Merge.Enqueue(ctx, merge.Request{Workspace: subject.Record.ID, Source: source, By: merge.RequestedByUser, Detached: detached}); err != nil {
 		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
 	}
@@ -748,6 +751,13 @@ func (s *server) SelectWorkspace(
 	subject, cerr, done := s.subjectFor(ctx, rpc, req.Msg.GetWorkspace(), resp)
 	if done {
 		return answer(resp, cerr)
+	}
+	// SELECTING A HIDDEN MERGE WORKSPACE REVEALS IT, before the selection, so
+	// the roster draws the workspace it names as current.
+	if subject.Record.MergeOf != nil && !subject.Record.MergeRevealed {
+		if err := s.deps.Merge.RevealMergeWorkspace(ctx, subject.Record.ID, "the user selected it"); err != nil {
+			return nil, fail(subject.Log, rpc, err)
+		}
 	}
 	if err := s.deps.Verbs.Select(ctx, subject.Record.ID); err != nil {
 		// A CALLER THAT LEFT IS NOT A FAILURE. A user switching workspaces

@@ -716,6 +716,24 @@ type fakeMerge struct {
 	// logPaths answers TestLogPath by token; logErr refuses every one.
 	logPaths map[string]string
 	logErr   error
+	// reveals records every RevealMergeWorkspace; revealErr fails it.
+	reveals   []ids.WorkspaceID
+	revealErr error
+	// tabInterrupts records every InterruptTab's tab; tabRunning and tabErr
+	// answer it.
+	tabInterrupts []feedid.Ref
+	tabRunning    bool
+	tabErr        error
+}
+
+func (f *fakeMerge) RevealMergeWorkspace(_ context.Context, ws ids.WorkspaceID, _ string) error {
+	f.reveals = append(f.reveals, ws)
+	return f.revealErr
+}
+
+func (f *fakeMerge) InterruptTab(_ context.Context, _ ids.WorkspaceID, tab feedid.Ref) (bool, error) {
+	f.tabInterrupts = append(f.tabInterrupts, tab)
+	return f.tabRunning, f.tabErr
 }
 
 func (f *fakeMerge) Enqueue(_ context.Context, req merge.Request) error {

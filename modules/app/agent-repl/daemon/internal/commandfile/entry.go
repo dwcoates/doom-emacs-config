@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 
 	"agent-repld/internal/dirpath"
 	"agent-repld/internal/wsm"
@@ -166,10 +167,20 @@ type Entry struct {
 	// KeepOpen keeps the requester open once its own branch lands
 	// (source.own_branch.in_place.keep_open). It is an in-place merge's alone.
 	KeepOpen bool `json:"keep_open,omitempty"`
-	// Detached runs the requester's own branch's merge in a merge workspace
-	// forked from it, leaving the requester free
-	// (source.own_branch.detached). Own-branch only, and never kept open.
+	// Detached runs the requester's own branch's merge ASYNC, in a hidden
+	// merge workspace forked from it, leaving the requester free
+	// (source.own_branch.detached). Own-branch only, never kept open, and
+	// always named (DetachedName).
 	Detached bool `json:"detached,omitempty"`
+	// DetachedName is an async merge's merge workspace name, as the requesting
+	// agent chose it (source.own_branch.detached.name). Required beside
+	// Detached, and meaningless without it.
+	DetachedName string `json:"detached_name,omitempty"`
+	// Pick lands only the changes this instruction names, the merge agent
+	// cherry-picking them onto the target branch
+	// (source.own_branch.detached.pick.instruction); empty merges the whole
+	// branch. Async only.
+	Pick string `json:"pick,omitempty"`
 	// PRWasMerged says the requester's own branch already merged upstream
 	// through its pull request (source.merged_upstream): the default branch
 	// is updated from upstream and the requester closed.
@@ -402,6 +413,8 @@ func (e Entry) mergeOnly() string {
 		{"source_dir", e.SourceDir != ""},
 		{"keep_open", e.KeepOpen},
 		{"detached", e.Detached},
+		{"detached_name", e.DetachedName != ""},
+		{"pick", e.Pick != ""},
 		{"pr_was_merged", e.PRWasMerged},
 		{"front", e.Front},
 	}
@@ -437,6 +450,12 @@ func (e Entry) validateMergeSource() error {
 		return fmt.Errorf("%s: a one_shot merge closes the requester once it lands, so it cannot keep_open", TypeMerge)
 	case e.OneShot && e.Detached:
 		return fmt.Errorf("%s: a one_shot merge runs in the requester, which it closes once it lands, so it cannot run detached", TypeMerge)
+	case e.Detached && strings.TrimSpace(e.DetachedName) == "":
+		return fmt.Errorf("%s: a detached merge names its merge workspace (detached_name)", TypeMerge)
+	case !e.Detached && (e.DetachedName != "" || e.Pick != ""):
+		return fmt.Errorf("%s: detached_name and pick belong to a detached merge", TypeMerge)
+	case e.Pick != "" && strings.TrimSpace(e.Pick) == "":
+		return fmt.Errorf("%s: a pick names the changes it lands", TypeMerge)
 	}
 	return nil
 }

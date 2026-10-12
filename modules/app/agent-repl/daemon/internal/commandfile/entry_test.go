@@ -415,7 +415,8 @@ func TestAMergeEntryNamingOneSourceValidates(t *testing.T) {
 	}{
 		{name: "own branch", entry: Entry{Type: TypeMerge, Workspace: "w1"}},
 		{name: "own branch kept open", entry: Entry{Type: TypeMerge, Workspace: "w1", KeepOpen: true}},
-		{name: "own branch detached", entry: Entry{Type: TypeMerge, Workspace: "w1", Detached: true}},
+		{name: "own branch async", entry: Entry{Type: TypeMerge, Workspace: "w1", Detached: true, DetachedName: "reconnect-fix"}},
+		{name: "own branch async pick", entry: Entry{Type: TypeMerge, Workspace: "w1", Detached: true, DetachedName: "reconnect-fix", Pick: "the fix"}},
 		{name: "own branch one-shot", entry: Entry{Type: TypeMerge, Workspace: "w1", OneShot: true}},
 		{name: "a branch", entry: Entry{Type: TypeMerge, Workspace: "w1", Branch: "agent-1/fix"}},
 		{name: "another workspace", entry: Entry{Type: TypeMerge, Workspace: "w1", SourceDir: "/wt/two"}},
@@ -443,8 +444,12 @@ func TestAMergeEntryNamingTwoSourcesIsRefused(t *testing.T) {
 		{name: "a branch already merged upstream", entry: Entry{Type: TypeMerge, Workspace: "w1", Branch: "b", PRWasMerged: true}},
 		{name: "keep_open on a branch", entry: Entry{Type: TypeMerge, Workspace: "w1", Branch: "b", KeepOpen: true}},
 		{name: "keep_open on merged upstream", entry: Entry{Type: TypeMerge, Workspace: "w1", PRWasMerged: true, KeepOpen: true}},
-		{name: "detached on a branch", entry: Entry{Type: TypeMerge, Workspace: "w1", Branch: "b", Detached: true}},
-		{name: "detached and kept open", entry: Entry{Type: TypeMerge, Workspace: "w1", Detached: true, KeepOpen: true}},
+		{name: "detached on a branch", entry: Entry{Type: TypeMerge, Workspace: "w1", Branch: "b", Detached: true, DetachedName: "n"}},
+		{name: "detached and kept open", entry: Entry{Type: TypeMerge, Workspace: "w1", Detached: true, DetachedName: "n", KeepOpen: true}},
+		{name: "detached with no name", entry: Entry{Type: TypeMerge, Workspace: "w1", Detached: true}},
+		{name: "a name with no detach", entry: Entry{Type: TypeMerge, Workspace: "w1", DetachedName: "n"}},
+		{name: "a pick with no detach", entry: Entry{Type: TypeMerge, Workspace: "w1", Pick: "the fix"}},
+		{name: "a blank pick", entry: Entry{Type: TypeMerge, Workspace: "w1", Detached: true, DetachedName: "n", Pick: "   "}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

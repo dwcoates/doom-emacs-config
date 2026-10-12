@@ -215,6 +215,32 @@ func (f *verbsForwarder) publishRegistry(what string) func(context.Context) erro
 	}
 }
 
+// ClaimMergeName is the merge orchestrator's name check (merge.Names), read
+// out of the verbs, which are built after the orchestrator. One asked for
+// before they are bound is a wiring defect, answered as an error.
+func (f *verbsForwarder) ClaimMergeName(ctx context.Context, repoDir, name string) (string, func(), bool, error) {
+	verbs, ok := f.verbs()
+	if !ok {
+		return "", nil, false, fmt.Errorf("claude-repld: an async merge's name was checked before the workspace verbs existed")
+	}
+	return verbs.ClaimMergeName(ctx, repoDir, name)
+}
+
+// interruptTurn is the merge orchestrator's turn stop (merge.InterruptTurnFunc):
+// the user's own turn interrupt, confirmed, so the agent's detached work stops
+// with it. It reads the verbs out of the forwarder when it runs.
+func (f *verbsForwarder) interruptTurn(ctx context.Context, ws ids.WorkspaceID) (bool, error) {
+	verbs, ok := f.verbs()
+	if !ok {
+		return false, fmt.Errorf("claude-repld: a merge tab's agent was interrupted before the workspace verbs existed")
+	}
+	out, err := verbs.Interrupt(ctx, ws, workspace.InterruptTarget{Turn: true}, true)
+	if err != nil {
+		return false, err
+	}
+	return out.Turn, nil
+}
+
 // healthForwarder carries the session watcher's diagnostics verdict to the
 // health reporter, which is built after the fleet the watchers live in.
 type healthForwarder struct {
@@ -390,12 +416,20 @@ func (f *detachedForwarder) service() (*mergeworkspace.Service, error) {
 	return f.target, nil
 }
 
-func (f *detachedForwarder) Fork(ctx context.Context, requester wsm.Workspace, request wsm.DetachedMergeID, branch string) (wsm.Workspace, error) {
+func (f *detachedForwarder) Fork(ctx context.Context, requester wsm.Workspace, request wsm.DetachedMergeID, name, base string) (wsm.Workspace, error) {
 	target, err := f.service()
 	if err != nil {
 		return wsm.Workspace{}, err
 	}
-	return target.Fork(ctx, requester, request, branch)
+	return target.Fork(ctx, requester, request, name, base)
+}
+
+func (f *detachedForwarder) Reveal(ctx context.Context, mergeWS ids.WorkspaceID) (bool, error) {
+	target, err := f.service()
+	if err != nil {
+		return false, err
+	}
+	return target.Reveal(ctx, mergeWS)
 }
 
 func (f *detachedForwarder) HandBack(ctx context.Context, requester ids.WorkspaceID, mergeWS wsm.Workspace, out merge.DetachedOutcome) error {
