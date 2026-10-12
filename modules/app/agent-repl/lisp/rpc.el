@@ -426,9 +426,11 @@ webapp tray card's own; the resulting state arrives on the host stream.")
 The request carries the workspace ref and a MOVE: a step through the final
 responses or through the prompts a rollback can reach (each `:older' or
 `:newer'), or a clear.  The daemon owns the ordered rows and the selection,
-so it computes where a step lands (both directions start at the newest row
-and wrap at each end), pushes the result to the webapp and to the host
-watch, and acks the outcome here.")
+so it computes where a step lands (from no selection `:older' starts at
+the newest row and `:newer' at the oldest; `:older' wraps past the oldest,
+and `:newer' past the newest ends the selection at the feed's tail),
+pushes the result to the webapp and to the host watch, and acks the
+outcome here.")
 
 (agent-repl-rpc--defverb agent-repl-rpc-plan-rollback
   "PlanRollback"

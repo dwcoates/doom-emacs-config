@@ -49,11 +49,12 @@ response, and the other way round.
 
 | Key (input window) | What it does |
 | --- | --- |
-| `C-p` / `C-n` (command mode) | Select the previous / next final response. From no selection, both start at the newest. Both wrap at the ends. |
-| `C-S-p` / `C-S-n` | Select the previous / next prompt you can roll back to. From no selection, both start at the newest. Both wrap at the ends. |
+| `C-p` / `C-n` (command mode) | Select the previous / next final response. From no selection, `C-p` starts at the newest and `C-n` at the oldest. `C-p` wraps past the oldest. `C-n` past the newest clears the selection and returns the feed to the newest row. |
+| `C-S-p` / `C-S-n` | Select the previous / next prompt you can roll back to. From no selection, `C-S-p` starts at the newest and `C-S-n` at the oldest. `C-S-p` wraps past the oldest. `C-S-n` past the newest clears the selection and returns the feed to the newest row. |
 | `ESC` `ESC` (command mode) | Clear the selection. The first escape only warns. The feed returns to the newest row. |
 
 - Clicking the feed's background also clears the selection.
+- Clicking the selected bubble clears the selection too, and the feed stays where it is.
 - **A selection ends when its bubble scrolls out of view.**
   - This applies once the bubble is entirely outside the feed, whether you scrolled or new output pushed it away.
   - The feed stays where you left it.

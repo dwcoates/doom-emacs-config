@@ -569,8 +569,10 @@ on a refusal would be silently lost user intent."
 ;; sent replies to the selected one -- and `C-S-p'/`C-S-n' (normal and insert
 ;; state) step through the prompts a rollback can reach; escape-twice clears
 ;; it.  The DAEMON owns the selection per workspace: it knows the ordered
-;; rows, so it COMPUTES where a step lands (both directions start at the
-;; newest row and wrap at each end), pushes the result to the webapp and to
+;; rows, so it COMPUTES where a step lands (from no selection an older step
+;; starts at the newest row and a newer one at the oldest; older wraps past
+;; the oldest, and newer past the newest ends the selection, returning the
+;; feed to its tail, so the next newer rolls round to the oldest), pushes the result to the webapp and to
 ;; the host watch, and applies its own selection when a prompt is sent.
 ;; Emacs sends only the MOVE, and reads which KIND of row is selected off the
 ;; host watch (`agent-repl-host-selection') for the escape state machine.
@@ -760,31 +762,33 @@ KIND is `:response' or `:prompt'; DIRECTION is `:older' or `:newer'."
 
 (defun agent-repl-response-select-prev ()
   "Select the PREVIOUS (older) final response, to reply to.
-Composer command mode only.  From no selected response it starts at the
-newest final response; past the oldest it wraps to the newest -- the
-daemon owns the order and computes the row, Emacs sends the step."
+Composer command mode only.  From no selection it starts at the newest
+final response; past the oldest it wraps to the newest -- the daemon owns
+the order and computes the row, Emacs sends the step."
   (interactive)
   (agent-repl--input-select-step :response :older))
 
 (defun agent-repl-response-select-next ()
   "Select the NEXT (newer) final response, to reply to.
-Composer command mode only.  From no selected response it starts at the
-newest final response; past the newest it wraps to the oldest."
+Composer command mode only.  From no selection it starts at the oldest
+final response; past the newest it ends the selection and the feed
+returns to its tail, so the next step rolls round to the oldest."
   (interactive)
   (agent-repl--input-select-step :response :newer))
 
 (defun agent-repl-prompt-select-prev ()
   "Select the PREVIOUS (older) prompt a rollback can reach.
-From no selected prompt it starts at the newest such prompt; past the
-oldest it wraps to the newest -- the daemon owns which prompts a rollback
+From no selection it starts at the newest such prompt; past the oldest
+it wraps to the newest -- the daemon owns which prompts a rollback
 can reach and computes the row, Emacs sends the step."
   (interactive)
   (agent-repl--input-select-step :prompt :older))
 
 (defun agent-repl-prompt-select-next ()
   "Select the NEXT (newer) prompt a rollback can reach.
-From no selected prompt it starts at the newest such prompt; past the
-newest it wraps to the oldest."
+From no selection it starts at the oldest such prompt; past the newest
+it ends the selection and the feed returns to its tail, so the next step
+rolls round to the oldest."
   (interactive)
   (agent-repl--input-select-step :prompt :newer))
 

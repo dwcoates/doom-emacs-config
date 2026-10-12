@@ -2,8 +2,9 @@
  * select-feed-row — THE WEBAPP'S ONE CALL OF `SelectFeedRow`.
  *
  * The daemon owns the feed's selection (endpoint_select_feed_row.proto). The
- * webapp moves it in four ways: a click on a bubble (`bubble`, or `clear` when
- * it is the selected one, bubble-selection.ts), a click on the feed's
+ * webapp moves it in three ways: a click on a bubble (`bubble`, which the
+ * daemon answers by deselecting when it names the selected one,
+ * bubble-selection.ts), a click on the feed's
  * background (`clear`, background-click.ts), and the selected row leaving the
  * viewport entirely (`left_view`, selection-visibility.ts). None acts on the
  * answer: the daemon's selection push on the feed's watch is what changes the

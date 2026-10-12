@@ -90,7 +90,7 @@ func TestSubmitPromptPrependsTheReferencedResponse(t *testing.T) {
 		Turn:        "turn-9",
 		Disposition: promptqueue.Disposition{Delivered: true},
 	}
-	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(newer))); err != nil {
+	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(older))); err != nil {
 		t.Fatalf("select the response: %v", err)
 	}
 	req := submitRequest()
@@ -120,7 +120,7 @@ func TestSubmitPromptRefusesAnUnresolvableReference(t *testing.T) {
 	h.Feed.finals = feedIDs("resp-older", "resp-gone")
 	// The resolver could read the row when it was selected, and no longer can.
 	h.Feed.unreadable = map[string]bool{}
-	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(newer))); err != nil {
+	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(older))); err != nil {
 		t.Fatalf("select the response: %v", err)
 	}
 	h.Feed.unreadable["resp-gone"] = true
@@ -166,7 +166,7 @@ func TestSubmitPromptEndsTheSelectionAfterConsumingTheReference(t *testing.T) {
 		Disposition: promptqueue.Disposition{Delivered: true},
 	}
 	// Seed the selection at the most recent (NEWER from none).
-	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(newer))); err != nil {
+	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(older))); err != nil {
 		t.Fatalf("seed selection: %v", err)
 	}
 
@@ -175,9 +175,9 @@ func TestSubmitPromptEndsTheSelectionAfterConsumingTheReference(t *testing.T) {
 		t.Fatalf("SubmitPrompt: %v", err)
 	}
 
-	// Assert: a NEWER now restarts at the most recent (ended), rather than
-	// wrapping to the oldest (which a surviving selection would do).
-	resp, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(newer)))
+	// Assert: an OLDER now restarts at the most recent (ended), rather than
+	// stepping to the oldest (which a surviving selection would do).
+	resp, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(older)))
 	if err != nil {
 		t.Fatalf("SelectFeedRow: %v", err)
 	}
@@ -200,7 +200,7 @@ func TestSubmitPromptWithASelectedPromptQuotesItAsAPromptAndEndsIt(t *testing.T)
 		Turn:        "turn-11",
 		Disposition: promptqueue.Disposition{Delivered: true},
 	}
-	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(promptStep(newer))); err != nil {
+	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(promptStep(older))); err != nil {
 		t.Fatalf("seed a prompt selection: %v", err)
 	}
 	req := submitRequest()
@@ -216,9 +216,9 @@ func TestSubmitPromptWithASelectedPromptQuotesItAsAPromptAndEndsIt(t *testing.T)
 	if !proto.Equal(h.Prompts.lastSaid, want) {
 		t.Fatalf("delivered prompt = %v, want %v", h.Prompts.lastSaid, want)
 	}
-	// Assert: the prompt selection ended (NEWER restarts at the most recent
-	// rather than wrapping past it).
-	resp, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(promptStep(newer)))
+	// Assert: the prompt selection ended (OLDER restarts at the most recent
+	// rather than stepping older from it).
+	resp, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(promptStep(older)))
 	if err != nil {
 		t.Fatalf("SelectFeedRow: %v", err)
 	}
@@ -729,7 +729,7 @@ func TestSubmitPromptLeavesTheSelectionStandingForATypedAnswer(t *testing.T) {
 	h.Feed.finals = feedIDs("resp-old", "resp-new")
 	h.Feed.markdown = map[string]string{"resp-new": "prior answer"}
 	h.Prompts.outcome = prompthandler.Outcome{Recognition: prompthandler.RecognizedAskAnswer}
-	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(newer))); err != nil {
+	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(older))); err != nil {
 		t.Fatalf("seed selection: %v", err)
 	}
 
@@ -738,13 +738,13 @@ func TestSubmitPromptLeavesTheSelectionStandingForATypedAnswer(t *testing.T) {
 		t.Fatalf("SubmitPrompt: %v", err)
 	}
 
-	// Assert: a NEWER from a surviving selection at the most recent wraps to
-	// the oldest.
-	resp, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(newer)))
+	// Assert: an OLDER from a surviving selection at the most recent steps to
+	// the oldest (from nothing it would restart at the most recent).
+	resp, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(responseStep(older)))
 	if err != nil {
 		t.Fatalf("SelectFeedRow: %v", err)
 	}
 	if got := resp.Msg.GetSuccess().GetSelected().GetSelection().GetResponse().GetRow().GetValue(); got != "resp-old" {
-		t.Fatalf("selected = %q, want resp-old (the selection survived and wrapped)", got)
+		t.Fatalf("selected = %q, want resp-old (the selection survived and stepped older)", got)
 	}
 }
