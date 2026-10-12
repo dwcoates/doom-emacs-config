@@ -48,6 +48,12 @@ workspace's web page was checked by Emacs alone, never by the daemon.
   - Vendor and network state never gate `opened` (unchanged from the go-ahead).
   - A hidden or collapsed workspace is answered `hidden` at once.
 
+### OpenTabsWorkspace.page: loading or none
+- WHAT: each requested workspace says whether the editor loads a web page
+  for it; `none` (a frontend other than the web page, or an editor with no
+  webview) opens once served, `loading` once served and drawn.
+- WHY: without it the daemon would wait forever on a page that never comes.
+
 ### ReportPageDrawn (endpoint_report_page_drawn.proto), unary
 - WHAT: the page reports its conversation drawn, and again on every page
   stream re-attach while drawn; the fact lives with the page connection.
