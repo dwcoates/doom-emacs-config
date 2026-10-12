@@ -1271,6 +1271,25 @@ type fakeQueue struct {
 	// leaseEvents records, per OnLeaseChanged, whether the workspace's merge
 	// lease stood when the queue was told.
 	leaseEvents []bool
+	// flushed records every workspace whose held prompts were flushed, and
+	// flushErr is what FlushHeld answers.
+	flushed  []ids.WorkspaceID
+	flushErr error
+}
+
+// FlushHeld records the flush and answers flushErr.
+func (q *fakeQueue) FlushHeld(_ context.Context, ws ids.WorkspaceID) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.flushed = append(q.flushed, ws)
+	return q.flushErr
+}
+
+// flushes answers every workspace whose held prompts were flushed.
+func (q *fakeQueue) flushes() []ids.WorkspaceID {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return slices.Clone(q.flushed)
 }
 
 // ReleaseReconnectHolds is a no-op: no merge scenario brings a session up.

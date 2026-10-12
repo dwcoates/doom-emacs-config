@@ -347,6 +347,12 @@ type Queue interface {
 	// RejudgeHeld re-judges, against the adopted shim's running turn, every
 	// held prompt whose verdict the previous daemon's seal superseded.
 	RejudgeHeld(ctx context.Context, ws ids.WorkspaceID) error
+	// FlushHeld sends every held prompt to the shim at once, in order, to join
+	// the running turn with nothing interrupted (flush.go): what an in-place
+	// merge the agent's turn asked for does, so the user's prompts are
+	// answered before the merge drives the session. It answers an error only
+	// when the queue's state could not be read.
+	FlushHeld(ctx context.Context, ws ids.WorkspaceID) error
 	// OnFree is the watcher's freeness edge: the last turn or detached item
 	// ended. It takes a registered bounce.
 	OnFree(ws ids.WorkspaceID)
