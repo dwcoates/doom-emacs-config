@@ -26,7 +26,7 @@ func registerMergeWorkspace(t *testing.T, s *store, requester WorkspaceID, reque
 // requestDetached records a detached own-branch request for ws in repo.
 func requestDetached(t *testing.T, s *store, repo RepoKey, ws WorkspaceID, request DetachedMergeID) {
 	t.Helper()
-	source := MergeSource{Kind: MergeSourceOwnBranch, Branch: "feature", Detach: request}
+	source := MergeSource{Kind: MergeSourceOwnBranch, Branch: "feature", Detach: request, DetachName: "sample"}
 	if err := s.RequestMerge(context.Background(), repo, ws, source, time.Unix(100, 0)); err != nil {
 		t.Fatalf("RequestMerge: %v", err)
 	}
@@ -137,9 +137,9 @@ func TestADetachedSourceMustBeAnOwnBranchThatNeverKeepsTheRequesterOpen(t *testi
 		name   string
 		source MergeSource
 	}{
-		{name: "keep open", source: MergeSource{Kind: MergeSourceOwnBranch, KeepOpen: true, Detach: "d"}},
-		{name: "a branch source", source: MergeSource{Kind: MergeSourceBranch, Branch: "b", Detach: "d"}},
-		{name: "merged upstream", source: MergeSource{Kind: MergeSourceMergedUpstream, Detach: "d"}},
+		{name: "keep open", source: MergeSource{Kind: MergeSourceOwnBranch, KeepOpen: true, Detach: "d", DetachName: "n"}},
+		{name: "a branch source", source: MergeSource{Kind: MergeSourceBranch, Branch: "b", Detach: "d", DetachName: "n"}},
+		{name: "merged upstream", source: MergeSource{Kind: MergeSourceMergedUpstream, Detach: "d", DetachName: "n"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -163,7 +163,7 @@ func TestHandOffDetachedMergeMovesTheRequestOntoTheMergeWorkspace(t *testing.T) 
 	forked := registerMergeWorkspace(t, s, requester.ID, request)
 
 	// Act
-	err := s.HandOffDetachedMerge(context.Background(), repo, requester.ID, request, forked.ID, "sample-merge", time.Unix(200, 0))
+	err := s.HandOffDetachedMerge(context.Background(), repo, requester.ID, request, forked.ID, "sample-merge", "", time.Unix(200, 0))
 
 	// Assert: one row, the merge workspace's, an in-place own-branch merge that
 	// closes on landing, still requested.
@@ -239,7 +239,7 @@ func TestHandOffDetachedMergeRefusesWithNothingChanged(t *testing.T) {
 			}
 
 			// Act
-			err = s.HandOffDetachedMerge(context.Background(), repo, requester.ID, request, forked.ID, "sample-merge", time.Unix(200, 0))
+			err = s.HandOffDetachedMerge(context.Background(), repo, requester.ID, request, forked.ID, "sample-merge", "", time.Unix(200, 0))
 
 			// Assert: refused, and the queue is as it was.
 			if err == nil || (tt.wantErr != nil && !errors.Is(err, tt.wantErr)) {

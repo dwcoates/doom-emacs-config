@@ -44,7 +44,7 @@ func normalizeDir(dir string) (string, error) {
 // the row, so it cannot drift from the closes it summarizes: CloseTurn's one
 // write of closed_at is the only edge, and turns_by_workspace keeps the MAX an
 // index range.
-const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, last_selected_at, last_activity_at, merged_at, spawned_shim_pid, created_at, result_end, result_read, hidden, merge_of, merge_request_id, commit_count, place, ` +
+const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, last_selected_at, last_activity_at, merged_at, spawned_shim_pid, created_at, result_end, result_read, hidden, merge_of, merge_request_id, commit_count, place, merge_revealed, ` +
 	`EXISTS (SELECT 1 FROM creation_jobs WHERE creation_jobs.workspace_id = workspaces.id AND creation_jobs.one_shot = 1), ` +
 	`EXISTS (SELECT 1 FROM merge_queue WHERE merge_queue.workspace_id = workspaces.id ` +
 	`OR merge_queue.workspace_id IN (SELECT merge_ws.id FROM workspaces AS merge_ws WHERE merge_ws.merge_of = workspaces.id)), ` +
@@ -70,7 +70,7 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 		commits  sql.NullInt64
 		ended    sql.NullInt64
 	)
-	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &created, &end, &read, &ws.Hidden, &mergeOf, &request, &commits, &ws.Place, &ws.OneShot, &ws.MergePending, &ended); err != nil {
+	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &created, &end, &read, &ws.Hidden, &mergeOf, &request, &commits, &ws.Place, &ws.MergeRevealed, &ws.OneShot, &ws.MergePending, &ended); err != nil {
 		return Workspace{}, err
 	}
 	if mergeOf.Valid != request.Valid {

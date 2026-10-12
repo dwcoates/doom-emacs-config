@@ -11,7 +11,7 @@ import (
 )
 
 // turnColumns is the one select list every turn read shares.
-const turnColumns = `id, workspace_id, text, origin, address, displaced, started_at, closed_at, close_kind`
+const turnColumns = `id, workspace_id, text, origin, address, mirror, displaced, started_at, closed_at, close_kind`
 
 // scanTurn decodes one turn all-or-nothing. A turn's close is a whole: a close
 // kind without an instant (or the reverse) is corruption, and an undeclared
@@ -20,11 +20,12 @@ func scanTurn(row interface{ Scan(...any) error }) (Turn, error) {
 	var (
 		t       Turn
 		address sql.NullString
+		mirror  sql.NullString
 		started int64
 		closed  sql.NullInt64
 		kind    sql.NullInt64
 	)
-	if err := row.Scan(&t.ID, &t.Workspace, &t.Text, &t.Origin, &address, &t.Displaced, &started, &closed, &kind); err != nil {
+	if err := row.Scan(&t.ID, &t.Workspace, &t.Text, &t.Origin, &address, &mirror, &t.Displaced, &started, &closed, &kind); err != nil {
 		return Turn{}, err
 	}
 	id := string(t.ID)
@@ -34,6 +35,13 @@ func scanTurn(row interface{ Scan(...any) error }) (Turn, error) {
 			return Turn{}, err
 		}
 		t.Address = addr
+	}
+	if mirror.Valid {
+		m, err := decodeMirror("turns", id, mirror.String)
+		if err != nil {
+			return Turn{}, err
+		}
+		t.Mirror = m
 	}
 	t.StartedAt = fromNanos(started)
 	switch {
@@ -82,6 +90,11 @@ func (s *store) PutTurn(ctx context.Context, t Turn) error {
 		s.log.Error(op, "refused an unencodable turn address", withError(fields, err))
 		return err
 	}
+	mirror, err := encodeMirror(t.Mirror)
+	if err != nil {
+		s.log.Error(op, "refused an unencodable turn mirror", withError(fields, err))
+		return err
+	}
 	// A TURN CLOSES ONLY THROUGH THE PROMPT QUEUE'S DOOR, which draws the
 	// turn's ending in the feed with the close. A record carrying a close is
 	// refused, and the upsert below never touches the close columns, so a
@@ -94,12 +107,12 @@ func (s *store) PutTurn(ctx context.Context, t Turn) error {
 	}
 	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx,
-			`INSERT INTO turns (id, workspace_id, text, origin, address, displaced, started_at, closed_at, close_kind)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL)
+			`INSERT INTO turns (id, workspace_id, text, origin, address, mirror, displaced, started_at, closed_at, close_kind)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)
 			 ON CONFLICT(id) DO UPDATE SET
 			   workspace_id = excluded.workspace_id, text = excluded.text, origin = excluded.origin,
-			   address = excluded.address, displaced = excluded.displaced, started_at = excluded.started_at`,
-			t.ID, t.Workspace, t.Text, t.Origin, address, t.Displaced, nanos(t.StartedAt))
+			   address = excluded.address, mirror = excluded.mirror, displaced = excluded.displaced, started_at = excluded.started_at`,
+			t.ID, t.Workspace, t.Text, t.Origin, address, mirror, t.Displaced, nanos(t.StartedAt))
 		if err != nil {
 			return err
 		}
