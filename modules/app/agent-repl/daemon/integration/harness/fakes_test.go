@@ -79,3 +79,31 @@ func TestInvocationsExceptSetsTheNamedVerbsAside(t *testing.T) {
 		t.Fatalf("invocations = %+v, want only the kickstart", got)
 	}
 }
+
+func TestRecorderRecordsEveryArgumentVerbatim(t *testing.T) {
+	cases := []struct {
+		name string
+		arg  string
+	}{
+		{"a double quote", `say "hi"`},
+		{"a backslash", `C:\path\to`},
+		{"a backslash before a quote", `end\"`},
+		{"spaces", "print gui/501/com.example"},
+		{"an empty argument", ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			// Arrange
+			r := NewRecorderExecutable(t, t.TempDir(), "launchctl")
+
+			// Act
+			runRecorder(t, r, "print", c.arg)
+
+			// Assert
+			got := r.Invocations()
+			if len(got) != 1 || len(got[0].Argv) != 2 || got[0].Argv[1] != c.arg {
+				t.Fatalf("recorded %+v, want one invocation whose second argument is %q", got, c.arg)
+			}
+		})
+	}
+}
