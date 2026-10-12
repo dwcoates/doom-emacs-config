@@ -573,6 +573,36 @@ never signalled as an error."
     (agent-repl-verb-interrupt "ws-one")
     (should (agent-repl-test-verbs--messaged-p "nothing to interrupt"))))
 
+(ert-deftest agent-repl-verbs-interrupt-nothing-running-hands-the-offer-to-the-composer ()
+  "A rollback offer on `nothing_running' is the stop key's second press:
+the offer goes to input.el, and nothing claims there was nothing to do."
+  (agent-repl-test-verbs--with
+      '((:interrupt . (:response (:arm :success :value
+                                  (:arm :nothing-running
+                                   :value (:rollback (:arm :choose :value nil)))))))
+    (let ((offered nil))
+      (cl-letf (((symbol-function 'agent-repl--input-rollback-offer)
+                 (lambda (ws offer) (push (list ws offer) offered))))
+        ;; Act
+        (agent-repl-verb-interrupt "ws-one"))
+      ;; Assert
+      (should (equal offered '(("ws-one" (:arm :choose :value nil)))))
+      (should-not (agent-repl-test-verbs--messaged-p "nothing to interrupt")))))
+
+(ert-deftest agent-repl-verbs-interrupt-nothing-running-without-an-offer-rolls-nothing-back ()
+  "With no prompt to roll back, nothing is offered to the composer."
+  (agent-repl-test-verbs--with
+      '((:interrupt . (:response (:arm :success :value
+                                  (:arm :nothing-running :value (:rollback nil))))))
+    (let ((offered nil))
+      (cl-letf (((symbol-function 'agent-repl--input-rollback-offer)
+                 (lambda (&rest args) (push args offered))))
+        ;; Act
+        (agent-repl-verb-interrupt "ws-one"))
+      ;; Assert
+      (should-not offered)
+      (should (agent-repl-test-verbs--messaged-p "nothing to interrupt")))))
+
 (ert-deftest agent-repl-verbs-interrupt-detached-count-is-stated ()
   "A confirmed stop that also ended agents states the count."
   (agent-repl-test-verbs--with
