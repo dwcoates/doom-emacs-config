@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime/pprof"
 	"slices"
 	"sort"
 	"strings"
@@ -2063,7 +2064,13 @@ func newHarness(t *testing.T) *harness {
 		select {
 		case <-gone:
 		case <-time.After(5 * time.Second):
-			t.Error("a merge run outlived its test")
+			// THE STACKS ARE THE EVIDENCE: which run, parked where.
+			var stacks strings.Builder
+			if err := pprof.Lookup("goroutine").WriteTo(&stacks, 1); err != nil {
+				t.Errorf("a merge run outlived its test (its stacks could not be read: %v)", err)
+				return
+			}
+			t.Errorf("a merge run outlived its test; the goroutines still running:\n%s", stacks.String())
 		}
 	})
 	return h
