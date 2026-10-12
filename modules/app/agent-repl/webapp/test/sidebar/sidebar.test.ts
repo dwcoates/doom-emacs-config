@@ -17,6 +17,7 @@ import type { PhasedAnimation } from "../../src/sidebar/wall-phase.js";
 import type { UnseenEnv } from "../../src/sidebar/unseen.js";
 import { createPageSeen } from "../../src/page-seen.js";
 import { createPresence } from "../../src/presence.js";
+import { visibilityDoc } from "../visibility-doc.js";
 import { fireResize } from "../resize-observer.js";
 import {
   NOW,
@@ -911,15 +912,10 @@ describe("an open row's detail panel, placed by the rail", () => {
 
 /** An unseen-gate environment whose visibility the test sets and changes. */
 function unseenDoc(initial: DocumentVisibilityState): { env: UnseenEnv; show(): void } {
-  const doc = document.implementation.createHTMLDocument("unseen");
-  let state = initial;
-  Object.defineProperty(doc, "visibilityState", { configurable: true, get: () => state });
+  const v = visibilityDoc(initial);
   return {
-    env: { seen: createPageSeen(WORKSPACE.id, createPresence(doc, false)), now: () => 0 },
-    show: () => {
-      state = "visible";
-      doc.dispatchEvent(new Event("visibilitychange"));
-    },
+    env: { seen: createPageSeen(WORKSPACE.id, createPresence(v.doc, false)), now: () => 0 },
+    show: () => v.set("visible"),
   };
 }
 
