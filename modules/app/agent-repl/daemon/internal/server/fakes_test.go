@@ -708,6 +708,8 @@ type fakeMerge struct {
 	// holds and releases count the rollout-hold verbs.
 	holds, releases int
 	moveErr         error
+	// evicted records every workspace Evict was asked to take off the queue.
+	evicted []ids.WorkspaceID
 	// moves records every move Move was asked for.
 	moves []fakeMove
 	// enqueuedBy records who each enqueue said asked for the merge, and
@@ -772,7 +774,10 @@ func (f *fakeMerge) AnswerDequeue(context.Context, ids.WorkspaceID, bool) error 
 	return f.answerDequeueErr
 }
 
-func (f *fakeMerge) Evict(context.Context, ids.WorkspaceID) error { return f.evictErr }
+func (f *fakeMerge) Evict(_ context.Context, ws ids.WorkspaceID) error {
+	f.evicted = append(f.evicted, ws)
+	return f.evictErr
+}
 
 // fakeMove is one move fakeMerge was asked for.
 type fakeMove struct {
