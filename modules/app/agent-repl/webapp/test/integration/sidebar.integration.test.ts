@@ -64,6 +64,7 @@ describe("arm coverage", () => {
       "created",
       "merged",
       "turnEnded",
+      "viewed",
     ]);
   });
 
@@ -533,6 +534,25 @@ describe("the when column", () => {
     await withRoster({ rows: [rosterRow({ when: "merged", whenAtMs: 0n })] });
     // Assert
     expect(harness.$(`[data-roster-row="${WORKSPACE_ID}"] [data-when]`)?.dataset.when).toBe("merged");
+  });
+
+  it("draws a relative age from the viewed arm", async () => {
+    // Arrange / Act
+    await withRoster({ rows: [], viewed: [rosterRow({ when: "viewed", whenAtMs: 0n })] });
+    // Assert
+    expect(harness.$(`[data-roster-row="${WORKSPACE_ID}"] [data-when]`)?.dataset.when).toBe("viewed");
+  });
+
+  it("draws a viewed row in the Viewed band under the grouping", async () => {
+    // Arrange / Act
+    await withRoster({ rows: [], viewed: [rosterRow({ when: "viewed", whenAtMs: 0n })] });
+    // Assert
+    const band = harness.$(`.sb-pane:not([hidden]) .viewed-section`);
+    expect([band?.hidden, band?.querySelector(".sb-label")?.textContent, band?.querySelector(`[data-roster-row="${WORKSPACE_ID}"]`) !== null]).toEqual([
+      false,
+      "Viewed",
+      true,
+    ]);
   });
 
   it("ages a turn-end figure as time passes", async () => {
