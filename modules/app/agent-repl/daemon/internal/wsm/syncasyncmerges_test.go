@@ -24,9 +24,9 @@ func loggedAt(log *dlog.TestLogger, operation string) bool {
 	return false
 }
 
-// undoLayout36 strips layout 36's additions from a migrated file, leaving its
+// undoLayout37 strips layout 37's additions from a migrated file, leaving its
 // stamp alone.
-func undoLayout36(t *testing.T, path string) {
+func undoLayout37(t *testing.T, path string) {
 	t.Helper()
 	for _, column := range []string{"merge_queue DROP COLUMN source_detach_name", "merge_queue DROP COLUMN source_pick",
 		"merge_queue DROP COLUMN pick_started_at", "merge_queue DROP COLUMN pick_turn", "workspaces DROP COLUMN merge_revealed",
@@ -35,17 +35,17 @@ func undoLayout36(t *testing.T, path string) {
 	}
 }
 
-// rewindTo35 strips layout 36's additions from a migrated file and stamps it
-// 35, so the next open runs the sync_async_merges migration over rows a
-// layout-35 build wrote.
-func rewindTo35(t *testing.T, path string) {
+// rewindTo36 strips layout 37's additions from a migrated file and stamps it
+// 36, so the next open runs the sync_async_merges migration over rows a
+// layout-36 build wrote.
+func rewindTo36(t *testing.T, path string) {
 	t.Helper()
-	undoLayout36(t, path)
-	stampRaw(t, path, 35)
+	undoLayout37(t, path)
+	stampRaw(t, path, 36)
 }
 
 func TestTheMigrationRevealsEveryExistingMergeWorkspace(t *testing.T) {
-	// Arrange: a layout-35 file holding a merge workspace forked from the
+	// Arrange: a layout-36 file holding a merge workspace forked from the
 	// fixture's workspace.
 	path := layout3Fixture(t)
 	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
@@ -53,7 +53,7 @@ func TestTheMigrationRevealsEveryExistingMergeWorkspace(t *testing.T) {
 		t.Fatalf("Open: %v", err)
 	}
 	handle.Close()
-	rewindTo35(t, path)
+	rewindTo36(t, path)
 	execRaw(t, path, `INSERT INTO workspaces (id, repo_id, dir, name, branch, parent_branch, closed, attention, is_current, created_at, place, merge_of, merge_request_id)
 		VALUES ('ws-m', 'repo-1', '/tmp/ws-m', 'feature-merge', 'feature-merge', 'master', 0, 0, 0, 1, 50, ?, 'req-1')`, string(fixtureWorkspaceID))
 
@@ -79,7 +79,7 @@ func TestTheMigrationRevealsEveryExistingMergeWorkspace(t *testing.T) {
 }
 
 func TestTheMigrationNamesAnAsyncRequestAnEarlierBuildRecorded(t *testing.T) {
-	// Arrange: a layout-35 file holding a detached request of the fixture's
+	// Arrange: a layout-36 file holding a detached request of the fixture's
 	// workspace.
 	path := layout3Fixture(t)
 	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
@@ -87,7 +87,7 @@ func TestTheMigrationNamesAnAsyncRequestAnEarlierBuildRecorded(t *testing.T) {
 		t.Fatalf("Open: %v", err)
 	}
 	handle.Close()
-	rewindTo35(t, path)
+	rewindTo36(t, path)
 	execRaw(t, path, `INSERT INTO merge_queue (repo_key, workspace_id, seq, state, enqueued_at, source_kind, source_keep_open, source_branch, source_detach_id)
 		VALUES ('/tmp/repo-1', ?, 1, ?, 1, ?, 0, 'feature', 'req-1')`, string(fixtureWorkspaceID), int(MergeRequested), int(MergeSourceOwnBranch))
 
