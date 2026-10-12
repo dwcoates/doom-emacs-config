@@ -26,6 +26,7 @@ const SITE: StopSite = {
   operation: "feed.test-stop",
   refusedOperation: "feed.test-stop-refused",
   describe: "stopping the test's work",
+  malformedOperation: "feed.test-stop-malformed",
   request: (workspace, target) =>
     create(InterruptRequestSchema, { workspace, target: { case: "detached", value: target } }),
 };
@@ -128,6 +129,59 @@ describe("drawStopControl", () => {
     expect(el.querySelector(".refusal")?.getAttribute("data-arm")).toBe("transport");
   });
 
+  it("latches the button inert while the stop is in flight", () => {
+    const { el } = draw();
+    const button = el.querySelector<HTMLButtonElement>("[data-interrupt]");
+    button?.click();
+    expect(button?.disabled).toBe(true);
+  });
+
+  it("keeps the button inert after a stop that landed", async () => {
+    const { el } = draw();
+    const button = el.querySelector<HTMLButtonElement>("[data-interrupt]");
+    button?.click();
+    await settle();
+    expect(button?.disabled).toBe(true);
+  });
+
+  it("gives the button back after a refusal", async () => {
+    const { el } = draw("r1", refusing("notMergeTab"));
+    const button = el.querySelector<HTMLButtonElement>("[data-interrupt]");
+    button?.click();
+    await settle();
+    expect(button?.disabled).toBe(false);
+  });
+
+  it("gives the button back after a click that never reached the daemon", async () => {
+    const h = harness({
+      interrupt: () => {
+        throw new Error("gone");
+      },
+    });
+    const { el } = draw("r1", h);
+    const button = el.querySelector<HTMLButtonElement>("[data-interrupt]");
+    button?.click();
+    await settle();
+    expect(button?.disabled).toBe(false);
+  });
+
+  it("reports an unreadable answer once, under the site's operation, and draws no refusal", async () => {
+    // Arrange: an error with no cause set, a frame this build cannot read.
+    const capture = captureLogRecords();
+    const h = harness({
+      interrupt: () => create(InterruptResponseSchema, { result: { case: "error", value: {} } }),
+    });
+    const { el } = draw("r1", h);
+    // Act
+    el.querySelector<HTMLElement>("[data-interrupt]")?.click();
+    await settle();
+    // Assert
+    expect([
+      (await forwardedRecord(capture, "feed.test-stop-malformed")).level.case,
+      el.querySelector(".refusal"),
+    ]).toEqual(["error", null]);
+  });
+
   it("drops the previous click's answer when clicked again", async () => {
     // Arrange
     const { el } = draw("r1", refusing("notMergeTab"));
@@ -142,7 +196,7 @@ describe("drawStopControl", () => {
 });
 
 describe("the stop control's call sites", () => {
-  it.each(["src/feed/rows/subagent.ts", "src/feed/merge/merge-body.ts"])(
+  it.each(["src/feed/rows/subagent.ts", "src/feed/merge/merge-body.ts", "src/feed/cards/shell.ts"])(
     "%s draws its stop through drawStopControl rather than a control of its own",
     (file) => {
       const source = readFileSync(join(process.cwd(), file), "utf8");

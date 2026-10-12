@@ -1,6 +1,7 @@
 /**
  * stop-control — the "stop" control a feed element offers on work it can stop:
- * a live detached subagent's head, and a live agentic merge tab.
+ * a live detached subagent's head, a live detached shell's head, and a live
+ * agentic merge tab.
  *
  * STOPPING IS ALWAYS AN RPC — never a stream close — and its target is the
  * element's own row id, exactly as the feed served it; the SITE says which
@@ -15,8 +16,16 @@
  * neither target here can receive it legitimately. It draws as the ordinary
  * refusal it is rather than offering a second click that would resend the
  * identical request and be refused again.
+ *
+ * THE BUTTON IS LATCHED INERT WHILE ITS STOP IS IN FLIGHT (`whileInFlight`): a
+ * second click would be a second stop. It comes back after a refusal or a
+ * click that never landed, which the user may retry; after a landed stop it
+ * stays inert until the row's own re-push replaces it.
+ *
+ * AN ANSWER THIS BUILD CANNOT READ is reported once through the failure sink
+ * (`drawMalformedRefusal`) and no word is invented at the control.
  */
-import { createControl } from "../control.js";
+import { createControl, type Control } from "../control.js";
 import { log } from "../log.js";
 import { callUnary } from "../rpc/unary.js";
 import { requireCase, unreachableArm } from "../rpc/strict.js";
@@ -28,6 +37,8 @@ import {
 import type { FeedId } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import type { WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { interruptErrorSentence, logInterruptRefusal, type InterruptErrorKind } from "../interrupt-error.js";
+import { clearRefusals, drawMalformedRefusal, refusal } from "../rpc/refuse.js";
+import { release, whileInFlight } from "./cards/controls.js";
 import { armName } from "./renderers.js";
 import type { RowContext } from "./renderers.js";
 import { stopTicking, tick } from "./ticking.js";
@@ -45,6 +56,8 @@ export interface StopSite {
   readonly refusedOperation: string;
   /** What a click does, as the click's record says it. */
   readonly describe: string;
+  /** The operation an unreadable answer's record carries. */
+  readonly malformedOperation: string;
   /** The `Interrupt` request that stops TARGET in WORKSPACE. */
   readonly request: (workspace: WorkspaceRef, target: FeedId) => InterruptRequest;
 }
@@ -61,32 +74,44 @@ export function drawStopControl(rc: RowContext, site: StopSite, target: FeedId):
   wrap.append(button);
 
   button.addEventListener("click", () => {
-    void stop(rc, site, target, wrap);
+    void stop(rc, site, target, wrap, button);
   });
   return wrap;
 }
 
 /** Issue the stop and draw whatever came back beside the control. */
-async function stop(rc: RowContext, site: StopSite, target: FeedId, wrap: HTMLElement): Promise<void> {
+async function stop(rc: RowContext, site: StopSite, target: FeedId, wrap: HTMLElement, button: Control): Promise<void> {
   clearOutcome(wrap, site);
   log.info(site.describe, {
     operation: site.operation,
     context: { row: target.value },
   });
-  let response: InterruptResponse;
-  try {
-    response = await callUnary(
+  const answered = await whileInFlight([button], () =>
+    callUnary(
       rc.ctx,
       "Interrupt",
       (client) => client.interrupt(site.request(rc.ctx.workspace, target)),
       InterruptResponseSchema,
-    );
-  } catch {
+    ),
+  );
+  if ("failed" in answered) {
     // callUnary already logged the transport failure once, as its owner; what
     // is left is telling the reader their click did not land.
     wrap.append(refusal("transport", "the daemon could not be reached"));
     return;
   }
+  try {
+    drawAnswer(answered.value, rc, site, wrap, button);
+  } catch (err) {
+    // An answer this build cannot read is still a failure the reader owns; it
+    // is reported once rather than becoming an unhandled rejection inside a
+    // click handler.
+    if (!drawMalformedRefusal(rc.ctx, wrap, site.malformedOperation, err)) throw err;
+  }
+}
+
+/** The stop's answer: a success arm's word, or this click's own refusal. */
+function drawAnswer(response: InterruptResponse, rc: RowContext, site: StopSite, wrap: HTMLElement, button: Control): void {
   const result = requireCase(response.result, "InterruptResponse.result");
   switch (result.case) {
     case "success":
@@ -94,6 +119,7 @@ async function stop(rc: RowContext, site: StopSite, target: FeedId, wrap: HTMLEl
       return;
     case "error":
       wrap.append(errorNote(result.value, site));
+      release([button]);
       return;
     default:
       unreachableArm("InterruptResponse.result", armName(result));
@@ -139,18 +165,10 @@ function errorNote(error: { kind: { case?: string; value?: unknown } }, site: St
   return refusal(kind.case, sentence);
 }
 
-/** The shared refusal element every call site draws its own error into. */
-function refusal(arm: string, text: string): HTMLElement {
-  const el = document.createElement("span");
-  el.className = "refusal";
-  el.setAttribute("data-arm", arm);
-  el.textContent = text;
-  return el;
-}
-
 /** Drop whatever the previous click left beside the control. */
 function clearOutcome(wrap: HTMLElement, site: StopSite): void {
-  for (const stale of wrap.querySelectorAll(`.${site.prefix}-outcome, .refusal`)) stale.remove();
+  for (const stale of wrap.querySelectorAll(`.${site.prefix}-outcome`)) stale.remove();
+  clearRefusals(wrap);
 }
 
 /**

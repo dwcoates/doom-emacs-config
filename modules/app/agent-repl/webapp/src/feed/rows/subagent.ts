@@ -43,7 +43,7 @@ import { drawStopControl, type StopSite } from "../stop-control.js";
 import { buildInterruptDetachedRequest } from "../requests.js";
 import { armName } from "../renderers.js";
 import type { RowContext } from "../renderers.js";
-import { stopTicking, tick } from "../ticking.js";
+import { stopTicking } from "../ticking.js";
 import { foldTitle } from "../title-fold.js";
 import { drawDetachedWorkId } from "../work-id.js";
 
@@ -254,5 +254,6 @@ const SUBAGENT_STOP: StopSite = {
   operation: "feed.subagent-stop",
   refusedOperation: "feed.subagent-stop-refused",
   describe: "stopping a detached subagent",
+  malformedOperation: "feed.subagent-stop-malformed",
   request: buildInterruptDetachedRequest,
 };
