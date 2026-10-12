@@ -121,6 +121,11 @@ func (o *orchestrator) handBack(ctx context.Context, ws ids.WorkspaceID, out Det
 	if len(places) < 2 {
 		return
 	}
+	// THE REQUESTER'S ROSTER IS TOLD FIRST, and whatever the reads below
+	// answer: the merge has ended either way, and the merge workspace's facts
+	// are published for the merge workspace alone, so this is the only word
+	// of the end the requester's one-shot outcome gets.
+	o.deps.Sidebar.SetDetachedMergeEnded(places[1].ws, out.Kind == DetachedLanded)
 	record, err := o.deps.DB.Workspace(ctx, ws)
 	if err != nil {
 		o.log(ctx, ws).Error("daemon.merge.detached", "could not read the merge workspace whose merge ended; its requester is not told", dlog.Context{
