@@ -186,14 +186,14 @@ func TestHandOffDetachedMergeCarriesAFrontRequestToTheMergeWorkspace(t *testing.
 	requester := testWorkspace(t, s)
 	repo := RepoKey(t.TempDir())
 	request := NewDetachedMergeID()
-	source := MergeSource{Kind: MergeSourceOwnBranch, Branch: "feature", Detach: request, Front: true}
+	source := MergeSource{Kind: MergeSourceOwnBranch, Branch: "feature", Detach: request, DetachName: "sample-merge", Front: true}
 	if err := s.RequestMerge(context.Background(), repo, requester.ID, source, time.Unix(100, 0)); err != nil {
 		t.Fatalf("RequestMerge: %v", err)
 	}
 	forked := registerMergeWorkspace(t, s, requester.ID, request)
 
 	// Act
-	err := s.HandOffDetachedMerge(context.Background(), repo, requester.ID, request, forked.ID, "sample-merge", time.Unix(200, 0))
+	err := s.HandOffDetachedMerge(context.Background(), repo, requester.ID, request, forked.ID, "sample-merge", "", time.Unix(200, 0))
 
 	// Assert
 	if err != nil {
