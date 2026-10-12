@@ -599,9 +599,21 @@ func (s *server) NotificationClicked(ws ids.WorkspaceID) {
 
 // PushTransferred pushes `transferred` on the host stream and
 // `transferred{address}` on the web stream.
+//
+// THE RECORD NAMES WHO WAS THERE TO HEAR IT. The notice is what the
+// successor's adoption rendezvous waits on, and a notice no participant
+// received is an adoption that cannot land; without the live holders on the
+// record, a window that expired could not say whether anyone was told
+// (2026-10-12).
 func (s *server) PushTransferred(ws ids.WorkspaceID, successorAddress string) {
+	live := s.Participants(ws)
 	s.log.Info("daemon.server.transferred", "announced the workspace's transfer",
-		dlog.Context{"workspace": string(ws), "successor": successorAddress})
+		dlog.Context{
+			"workspace":   string(ws),
+			"successor":   successorAddress,
+			"host_stream": live.Host,
+			"web_stream":  live.Web,
+		})
 	s.hostTopic(ws).Publish(&agentreplv1.WatchHostWorkspaceResponse{
 		Push: &agentreplv1.WatchHostWorkspaceResponse_Transferred{
 			Transferred: &agentreplv1.HostWorkspaceTransferred{},

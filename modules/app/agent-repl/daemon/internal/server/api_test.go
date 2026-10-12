@@ -206,6 +206,32 @@ func TestPushTransferredReachesTheWebStreamWithTheAddress(t *testing.T) {
 	}
 }
 
+// TestPushTransferredRecordsWhoHeldTheStreams pins that the transfer notice's
+// record names the live holders of both streams, the only evidence of whether
+// any participant was there to be told.
+func TestPushTransferredRecordsWhoHeldTheStreams(t *testing.T) {
+	// Arrange.
+	log := &recordingLogger{}
+	h := newHarness(t, func(deps *Deps) {
+		deps.Log = &fakeSurfaces{global: log}
+	})
+
+	// Act.
+	h.Server.PushTransferred(testWorkspaceID, "127.0.0.1:4242")
+
+	// Assert.
+	for _, rec := range log.at("INFO") {
+		if rec.Operation != "daemon.server.transferred" {
+			continue
+		}
+		if rec.Context["host_stream"] != false || rec.Context["web_stream"] != false {
+			t.Fatalf("context = %v, want host_stream and web_stream both false with no stream held", rec.Context)
+		}
+		return
+	}
+	t.Fatalf("no daemon.server.transferred record among %v", log.records)
+}
+
 // TestRetractTransferredStopsReplayingTheNoticeToALateWebStream pins the
 // take-back's first half: a page attaching after the workspace came back is
 // not handed the notice that it moved.
