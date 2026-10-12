@@ -3,11 +3,11 @@ package feed
 import (
 	"context"
 	"fmt"
-	"sort"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
 )
 
@@ -55,27 +55,23 @@ func offersSignIn(row *frontendv1.FeedRow) bool {
 // already drawn. A bubble the turn draws later carries it from drawResponse.
 func (r *resolver) noteSignInEnding(s *wsState, turn ids.TurnID) {
 	s.signInTurns[turn] = true
-	for _, key := range sortedFeedKeys(s) {
-		f := s.feeds[key]
-		for _, id := range append([]string(nil), f.order...) {
-			row := f.rows[id]
-			broken := row.GetActivity().GetResponse().GetError()
-			if broken == nil || row.GetTurn().GetValue() != string(turn) || broken.GetSignIn() != nil {
-				continue
-			}
-			why := unclonable{
-				operation: opSignedIn,
-				message:   "a broken bubble could not be copied to carry the sign-in action",
-				context:   dlog.Context{"turn": string(turn), "row": id},
-			}
-			if r.restateRow(s, placement{feed: s.feedAddrs[key]}, row, true, why, func(stamped *frontendv1.FeedRow) {
-				stamped.GetActivity().GetResponse().GetError().SignIn = &frontendv1.FeedOutcomeSignIn{}
-			}) {
-				r.logger(s.id).Info(opSignedIn, "the turn ended on an account cause; its broken bubble now offers the sign-in action",
-					dlog.Context{"turn": string(turn), "row": id})
-			}
+	r.eachStoredRow(s, func(addr feedid.Feed, f *feedState, id string, row *frontendv1.FeedRow) {
+		broken := row.GetActivity().GetResponse().GetError()
+		if broken == nil || row.GetTurn().GetValue() != string(turn) || broken.GetSignIn() != nil {
+			return
 		}
-	}
+		why := unclonable{
+			operation: opSignedIn,
+			message:   "a broken bubble could not be copied to carry the sign-in action",
+			context:   dlog.Context{"turn": string(turn), "row": id},
+		}
+		if r.restateRow(s, placement{feed: addr}, row, !f.nonDurable[id], why, func(stamped *frontendv1.FeedRow) {
+			stamped.GetActivity().GetResponse().GetError().SignIn = &frontendv1.FeedOutcomeSignIn{}
+		}) {
+			r.logger(s.id).Info(opSignedIn, "the turn ended on an account cause; its broken bubble now offers the sign-in action",
+				dlog.Context{"turn": string(turn), "row": id})
+		}
+	})
 }
 
 // signedInRow reports whether ROW is a failure row of a turn a sign-in
@@ -103,14 +99,11 @@ func (r *resolver) OnSignedIn(ws ids.WorkspaceID) error {
 	s := r.state(ws)
 	log := r.logger(ws)
 	var turns []ids.TurnID
-	for _, key := range sortedFeedKeys(s) {
-		f := s.feeds[key]
-		for _, id := range f.order {
-			if row := f.rows[id]; offersSignIn(row) && row.GetTurn().GetValue() != "" {
-				turns = append(turns, ids.TurnID(row.GetTurn().GetValue()))
-			}
+	r.eachStoredRow(s, func(_ feedid.Feed, _ *feedState, _ string, row *frontendv1.FeedRow) {
+		if offersSignIn(row) && row.GetTurn().GetValue() != "" {
+			turns = append(turns, ids.TurnID(row.GetTurn().GetValue()))
 		}
-	}
+	})
 	if len(turns) == 0 {
 		log.Debug(opSignedIn, "a sign-in completed and no drawn turn ending offered it; nothing was retired", nil)
 		return nil
@@ -119,15 +112,11 @@ func (r *resolver) OnSignedIn(ws ids.WorkspaceID) error {
 		s.signedIn[turn] = true
 	}
 	retired := 0
-	for _, key := range sortedFeedKeys(s) {
-		f := s.feeds[key]
-		for _, id := range append([]string(nil), f.order...) {
-			row := f.rows[id]
-			if s.signedIn[ids.TurnID(row.GetTurn().GetValue())] && isFailureRow(row) && r.retire(s, s.feedAddrs[key], id) {
-				retired++
-			}
+	r.eachStoredRow(s, func(addr feedid.Feed, _ *feedState, id string, row *frontendv1.FeedRow) {
+		if s.signedIn[ids.TurnID(row.GetTurn().GetValue())] && isFailureRow(row) && r.retire(s, addr, id) {
+			retired++
 		}
-	}
+	})
 	fields := dlog.Context{"turns": len(turns), "first": firstTurn(turns), "retired": retired}
 	if r.deps.SignedIn != nil {
 		if err := r.deps.SignedIn.RecordSignedInTurns(context.Background(), ws, turns); err != nil {
@@ -164,15 +153,4 @@ func (r *resolver) restoreSignedIn(s *wsState) {
 		r.logger(s.id).Info(opSignedInRestore, "the workspace's sign-in-answered turns were loaded; their failures are not drawn",
 			dlog.Context{"turns": len(turns)})
 	}
-}
-
-// sortedFeedKeys answers the workspace's feed keys in order, so a sweep over
-// every feed publishes in the same order on every run.
-func sortedFeedKeys(s *wsState) []string {
-	keys := make([]string, 0, len(s.feeds))
-	for key := range s.feeds {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	return keys
 }
