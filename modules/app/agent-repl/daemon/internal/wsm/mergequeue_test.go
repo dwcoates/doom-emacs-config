@@ -3,8 +3,10 @@ package wsm
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -1077,5 +1079,43 @@ func TestIsOneShotAcceptsOnlyAnInPlaceOwnBranchThatClosesTheRequester(t *testing
 				t.Fatalf("IsOneShot(%+v) = %v, want %v", tt.source, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestMergeQueueColumnsNameEveryColumnTheScanReads(t *testing.T) {
+	// Arrange: a queue holding one request.
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	repo := RepoKey(t.TempDir())
+	if err := s.RequestMerge(context.Background(), repo, ws.ID, MergeSource{Kind: MergeSourceOwnBranch, Branch: "feature"}, time.Unix(100, 0)); err != nil {
+		t.Fatalf("RequestMerge: %v", err)
+	}
+
+	// Act: both readers select mergeQueueColumns and scan them.
+	one, errOne := s.MergeQueue(context.Background(), repo)
+	all, errAll := s.AllMergeQueues(context.Background())
+
+	// Assert
+	if errOne != nil || errAll != nil || len(one) != 1 || len(all[one[0].Repo]) != 1 {
+		t.Fatalf("MergeQueue = %v, %v; AllMergeQueues = %v, %v; want the one request from each", one, errOne, all, errAll)
+	}
+}
+
+// TestNoQueueReadSpellsOutItsColumns holds every merge_queue read to
+// mergeQueueColumns: a read that lists its columns by hand can drift from the
+// scan's order.
+func TestNoQueueReadSpellsOutItsColumns(t *testing.T) {
+	// Arrange
+	src, err := os.ReadFile("mergequeue.go")
+	if err != nil {
+		t.Fatalf("read mergequeue.go: %v", err)
+	}
+
+	// Act
+	spelled := strings.Count(string(src), "source_detach_id, ledger_id")
+
+	// Assert
+	if spelled != 1 {
+		t.Fatalf("the queue's column list is spelled %d times in mergequeue.go, want once (mergeQueueColumns)", spelled)
 	}
 }

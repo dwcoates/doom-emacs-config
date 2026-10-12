@@ -450,8 +450,7 @@ func (s *store) MergeQueue(ctx context.Context, repo RepoKey) ([]MergeQueueEntry
 	}
 	var out []MergeQueueEntry
 	err = s.read(ctx, op, dlog.Context{"repo": string(key)}, func(ctx context.Context) error {
-		loaded, err := s.scanMergeQueue(ctx,
-			`SELECT repo_key, workspace_id, state, enqueued_at, source_kind, source_keep_open, source_workspace, source_branch, source_detach_id, ledger_id, source_front, source_detach_name, source_pick, pick_started_at, pick_turn FROM merge_queue WHERE repo_key = ? ORDER BY seq`, key)
+		loaded, err := s.scanMergeQueue(ctx, `WHERE repo_key = ? ORDER BY seq`, key)
 		if err != nil {
 			return err
 		}
@@ -469,7 +468,7 @@ func (s *store) MergeQueue(ctx context.Context, repo RepoKey) ([]MergeQueueEntry
 func (s *store) AllMergeQueues(ctx context.Context) (map[RepoKey][]MergeQueueEntry, error) {
 	var out map[RepoKey][]MergeQueueEntry
 	err := s.read(ctx, "daemon.wsm.all_merge_queues", dlog.Context{}, func(ctx context.Context) error {
-		loaded, err := s.scanMergeQueue(ctx, `SELECT repo_key, workspace_id, state, enqueued_at, source_kind, source_keep_open, source_workspace, source_branch, source_detach_id, ledger_id, source_front, source_detach_name, source_pick, pick_started_at, pick_turn FROM merge_queue ORDER BY repo_key, seq`)
+		loaded, err := s.scanMergeQueue(ctx, `ORDER BY repo_key, seq`)
 		if err != nil {
 			return err
 		}
@@ -482,11 +481,17 @@ func (s *store) AllMergeQueues(ctx context.Context) (map[RepoKey][]MergeQueueEnt
 	return out, nil
 }
 
+// mergeQueueColumns are the merge_queue columns every queue read selects, in
+// the order scanMergeQueue scans them: the one list, so a read cannot select
+// columns its scan does not expect.
+const mergeQueueColumns = `repo_key, workspace_id, state, enqueued_at, source_kind, source_keep_open, source_workspace, source_branch, source_detach_id, ledger_id, source_front, source_detach_name, source_pick, pick_started_at, pick_turn`
+
 // scanMergeQueue is the one queue-decoding path, so both readers reject an
-// undeclared state identically and number positions the same way. The rows
+// undeclared state identically and number positions the same way. TAIL is the
+// read's own WHERE and ORDER BY; the columns are always mergeQueueColumns. The rows
 // arrive in sequence order, so the position is the index within its repository.
-func (s *store) scanMergeQueue(ctx context.Context, query string, args ...any) (map[RepoKey][]MergeQueueEntry, error) {
-	rows, err := s.db().QueryContext(ctx, query, args...)
+func (s *store) scanMergeQueue(ctx context.Context, tail string, args ...any) (map[RepoKey][]MergeQueueEntry, error) {
+	rows, err := s.db().QueryContext(ctx, `SELECT `+mergeQueueColumns+` FROM merge_queue `+tail, args...)
 	if err != nil {
 		return nil, err
 	}
