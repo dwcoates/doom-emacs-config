@@ -185,6 +185,28 @@ func runSuite(m *testing.M) int {
 	}
 	repo = l
 
+	// NO SIDECAR THIS SUITE STARTS REPORTS INTO THE OWNER'S RUN DIRECTORY. Every
+	// launcher passes its own AGENT_REPL_LOCK_DIR, and this is the floor under
+	// one that forgets: the ambient environment every launcher inherits names
+	// a throwaway directory, never ~/.cache/agent-repl/run, where a test's
+	// build report made the next daemon boot restart the live sidecar.
+	if os.Getenv("AGENT_REPL_LOCK_DIR") == "" {
+		runDir, err := os.MkdirTemp("", "agent-repl-itest-run-")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "integration: temp run dir: %v\n", err)
+			return 1
+		}
+		defer func() {
+			if err := os.RemoveAll(runDir); err != nil {
+				fmt.Fprintf(os.Stderr, "integration: removing temp run dir %s: %v\n", runDir, err)
+			}
+		}()
+		if err := os.Setenv("AGENT_REPL_LOCK_DIR", runDir); err != nil {
+			fmt.Fprintf(os.Stderr, "integration: isolate the run dir: %v\n", err)
+			return 1
+		}
+	}
+
 	mode, shared, err := testenv.BinaryMode(os.Getenv)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "integration: binary mode: %v\n", err)
