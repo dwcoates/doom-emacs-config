@@ -1123,6 +1123,13 @@ func (c *controller) tookOverSignalLocked() chan struct{} {
 	return c.tookOver
 }
 
+// TookOver answers the channel that closes when this daemon has taken over
+// from the daemon it joined (becomeIncumbent). A daemon that never joined
+// is not waiting on a takeover, and callers ask only after Joining.
+func (c *controller) TookOver() <-chan struct{} {
+	return c.tookOverSignal()
+}
+
 // tookOverSignal is tookOverSignalLocked for a caller that does not hold c.mu.
 func (c *controller) tookOverSignal() <-chan struct{} {
 	c.mu.Lock()
