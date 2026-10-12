@@ -157,12 +157,8 @@ unknown fields, and refusing this one would drop every roster push."
   "Decode VALUE as `RosterRowDetachedLive' and return t.
 The DETACHED-WORK marker: detached (background) work runs in this
 workspace right now, on whatever status arm the row stands.  EMPTY, and
-PRESENCE IS THE FACT, as for the markers above.
-
-Emacs reads it for ONE decision: the view dwell's threshold
-\(`agent-repl--tab-dwell-seconds'), because an unread `done' outranks
-`idle_async' and so the status alone cannot say that background work runs
-beside it."
+PRESENCE IS THE FACT, as for the markers above.  Emacs draws nothing
+from it: it is decoded because the codec refuses unknown fields."
   (agent-repl-wire--decode-empty "RosterRowDetachedLive" value)
   t)
 
