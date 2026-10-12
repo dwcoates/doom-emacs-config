@@ -504,6 +504,10 @@ an assertion, where an unset oneof is the absence of one."
   "Decode VALUE as the empty `RosterRowStatusInactive'."
   (agent-repl-wire--decode-empty "RosterRowStatusInactive" value))
 
+(defun agent-repl-wire-decode-roster-row-status-opening (value)
+  "Decode VALUE as the empty `RosterRowStatusOpening'."
+  (agent-repl-wire--decode-empty "RosterRowStatusOpening" value))
+
 (defconst agent-repl-wire-roster-row-status-arms
   '((submitting :submitting agent-repl-wire-decode-roster-row-status-submitting)
     (thinking :thinking agent-repl-wire-decode-roster-row-status-thinking)
@@ -540,7 +544,8 @@ an assertion, where an unset oneof is the absence of one."
     (mergeFailed :merge-failed agent-repl-wire-decode-roster-row-status-merge-failed)
     (merged :merged agent-repl-wire-decode-roster-row-status-merged)
     (none :none agent-repl-wire-decode-roster-row-status-none)
-    (inactive :inactive agent-repl-wire-decode-roster-row-status-inactive))
+    (inactive :inactive agent-repl-wire-decode-roster-row-status-inactive)
+    (opening :opening agent-repl-wire-decode-roster-row-status-opening))
   "`RosterRow.status''s arm table: (WIRE-KEY ARM-KEYWORD DECODER).
 The whole declared vocabulary, in the proto's own order.  A test pins it
 against the checked-in Go bindings, so an arm landed in the contract
