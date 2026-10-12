@@ -922,6 +922,13 @@ Cancelled when a newer activation supersedes it, so the timer list holds
 at most one pass; the generation check is what guarantees a superseded
 pass does nothing even if it was already dequeued to run.")
 
+(defvar agent-repl--switch-activation-scheduled-at nil
+  "When the newest switch pass was scheduled (`float-time'), or nil.
+The pass runs on a zero-delay timer, so everything between scheduling and
+running is the command loop's own work after the switch: its post-command
+hooks and its redisplay.  The pass records that wait (`waited-ms'), which
+is otherwise a silent gap in every switch's records.")
+
 (defun agent-repl--schedule-switch-activation (ws)
   "Supersede every pending switch pass and schedule WS\='s under a new generation.
 Returns the generation WS\='s pass carries."
@@ -929,6 +936,7 @@ Returns the generation WS\='s pass carries."
                           (1+ agent-repl--switch-activation-generation))))
     (when (timerp agent-repl--switch-activation-timer)
       (cancel-timer agent-repl--switch-activation-timer))
+    (setq agent-repl--switch-activation-scheduled-at (float-time))
     (setq agent-repl--switch-activation-timer
           (run-at-time 0 nil #'agent-repl--run-switch-activation ws generation))
     (agent-repl--log-verbose (agent-repl--ws-log-scope ws)
@@ -964,8 +972,11 @@ which activation it was."
                           "elisp.panels.switch-activation-superseded ws=%s generation=%d newest=%d"
                           ws generation newest)
       (setq agent-repl--switch-activation-timer nil)
-      (agent-repl--info log-ws "elisp.panels.switch-activation-won ws=%s generation=%d"
-                        ws generation)
+      (agent-repl--info log-ws "elisp.panels.switch-activation-won ws=%s generation=%d waited-ms=%s"
+                        ws generation
+                        (if agent-repl--switch-activation-scheduled-at
+                            (round (* 1000 (- (float-time) agent-repl--switch-activation-scheduled-at)))
+                          "unknown"))
       (agent-repl--on-workspace-switch ws))))
 
 (defun agent-repl--capture-switch-trigger ()
