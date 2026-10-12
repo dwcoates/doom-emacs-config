@@ -754,7 +754,7 @@ func (s *server) SelectWorkspace(
 	}
 	// SELECTING A HIDDEN MERGE WORKSPACE REVEALS IT, before the selection, so
 	// the roster draws the workspace it names as current.
-	if subject.Record.MergeOf != nil && !subject.Record.MergeRevealed {
+	if subject.Record.MergeHidden() {
 		if err := s.deps.Merge.RevealMergeWorkspace(ctx, subject.Record.ID, "the user selected it"); err != nil {
 			return nil, fail(subject.Log, rpc, err)
 		}
