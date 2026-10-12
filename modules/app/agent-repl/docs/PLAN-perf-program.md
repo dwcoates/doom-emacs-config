@@ -227,11 +227,14 @@ Status values: queued, running, landed (commit), blocked (reason).
 | 2026-10-12 | 5ced835a4 | the shutdown tests' held gate is released when the test ends |
 | 2026-10-12 | 64a42cf32 | race tests drain the queue instead of fixed pump counts (flake) |
 | 2026-10-12 | abbddd6e9 | the log pipe recorded as a rejected approach |
+| 2026-10-12 | 056137c2c (5 picks) | flake fixes: fake git atomic save; exit waits for landing deploys; opened-shim hang-up; adopted-shim stop race; prompt held across a shim death |
+| 2026-10-12 | fd33737d7 | vendor starts capped daemon-wide (max(2, NumCPU/4)) |
 
 ## Bounce checkpoints
 
 | When | Recovery | Startup | Notes |
 |---|---|---|---|
+| 2026-10-12 19:07 (after fd33737d7) | the turn the 18:52 bounce cut (daemon-run-tests-skill) RESUMED under the hood at 19:08:13; owed debt paid | 17 sessions up 25s after the bounce, 1 vendor retry | the 18:52 bounce had failed every session: a network outage (owner) plus every vendor starting at once kept load at 160 for the 10-min retry window; the cap now bounds it |
 | 2026-10-12 15:34 (after 02afdccf7) | paused queue: 2 in-progress merges recovered as pending resumes, none started | daemon serving +0.9s; every workspace's go-ahead +1.8s (was ~30s); first session +3.5s; all 26 up 14.6s after the Emacs relaunch (was 54s) | -600 relaunch persists; sidecar kickstart still 29s (dead /tmp/artr mount) but no longer blocking |
 | 2026-10-12 14:27 (after 8e28c0471) | 4 interrupted merges resumed at their steps (recovery resumed 3 in-progress merges although the window is now 2: resumed runs bypass the window); 4 agents interrupted mid-turn were NOT resumed with "continue" -> fix dispatched (branch `bounce-continue`) | daemon served 1.3s after boot; sidecar kickstart 29s again; first tabs +30s | Emacs relaunch -600 again |
 | 2026-10-12 13:39 (after 839a72d9f) | 3 merges suspended at `tests`, all resumed at their step; requesters re-raised; chain rebuilt; no turns in flight | daemon served 1.6s after boot; first session +33s (29s sidecar kickstart); 26 sessions up 54s after Emacs relaunch | Emacs relaunch first attempt failed (-600), second succeeded |
