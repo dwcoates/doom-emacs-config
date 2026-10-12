@@ -1666,6 +1666,23 @@ func TestCountCommitsSurfacesGitsFailure(t *testing.T) {
 	}
 }
 
+func TestCountCommitsLeavesGitsFailureToTheCallerToJudge(t *testing.T) {
+	// Arrange: git fails as it does in a worktree a landing just removed.
+	git, surfaces := newTestClient(t)
+	newFakeGit(t, fails(128, "fatal: not a git repository\n"))
+
+	// Act.
+	_, err := git.CountCommits(context.Background(), "/repo", "master", "feature")
+
+	// Assert: the failure is answered, and not recorded here as an error.
+	if err == nil {
+		t.Fatal("CountCommits answered a count git failed to give")
+	}
+	if record, ok := recordFor(surfaces.records(), "error", "daemon.gitclient.count_commits"); ok {
+		t.Fatalf("CountCommits recorded the failure as an error itself: %+v", record)
+	}
+}
+
 func TestLandedRangeWalksTheSecondParentHistory(t *testing.T) {
 	// Arrange: reading the range off the COMMIT means the answer survives the
 	// source branch being deleted, moved or merged again later.
