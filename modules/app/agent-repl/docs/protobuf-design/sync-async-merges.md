@@ -152,7 +152,7 @@ contract rather than per-increment agreement.
 
 ## Daemon-internal consequences (no contract text)
 
-- `wsm`: layout 36 adds `merge_queue.source_detach_name`,
+- `wsm`: layout 39 adds `merge_queue.source_detach_name`,
   `merge_queue.source_pick`, `workspaces.merge_revealed` (existing merge
   workspaces migrate as revealed, since they were visible), and a turn mirror
   column beside the turn address.
