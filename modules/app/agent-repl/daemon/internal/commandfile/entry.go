@@ -165,6 +165,10 @@ type Entry struct {
 	// through its pull request (source.merged_upstream): the default branch
 	// is updated from upstream and the requester closed.
 	PRWasMerged bool `json:"pr_was_merged,omitempty"`
+	// Front puts the merge at the FRONT of its queue once it is put in line:
+	// ahead of every ordinary merge still waiting, never ahead of the one
+	// running (wsm.MergeSource.Front). Any merge source may ask for it.
+	Front bool `json:"front,omitempty"`
 
 	// THE MERGE QUEUE CONTROLS' FIELDS.
 
@@ -387,6 +391,7 @@ func (e Entry) mergeOnly() string {
 		{"keep_open", e.KeepOpen},
 		{"detached", e.Detached},
 		{"pr_was_merged", e.PRWasMerged},
+		{"front", e.Front},
 	}
 	for _, field := range fields {
 		if field.set {
