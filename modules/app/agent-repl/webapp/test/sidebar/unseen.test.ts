@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { WorkspaceRoster } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { createPresence } from "../../src/presence.js";
 import { createUnseenGate, type UnseenEnv } from "../../src/sidebar/unseen.js";
+import { createPageSeen } from "../../src/page-seen.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import { roster } from "./harness.js";
 
@@ -16,7 +17,7 @@ function env(initial: DocumentVisibilityState): UnseenEnv & { show(): void; hide
   Object.defineProperty(doc, "visibilityState", { configurable: true, get: () => state });
   let clock = 0;
   return {
-    doc,
+    seen: createPageSeen(OWN, createPresence(doc, false)),
     now: () => (clock += 5),
     show: () => {
       state = "visible";
@@ -197,7 +198,7 @@ describe("the unseen gate", () => {
     Object.defineProperty(doc, "visibilityState", { configurable: true, get: () => "visible" });
     const presence = createPresence(doc, true);
     const drawn: WorkspaceRoster[] = [];
-    const g = createUnseenGate(OWN, (r) => drawn.push(r), { doc, now: () => 0, presence });
+    const g = createUnseenGate(OWN, (r) => drawn.push(r), { seen: createPageSeen(OWN, presence), now: () => 0 });
 
     // Act
     g.offer(roster({ current: OTHER }));
@@ -213,7 +214,7 @@ describe("the unseen gate", () => {
     Object.defineProperty(doc, "visibilityState", { configurable: true, get: () => "visible" });
     const presence = createPresence(doc, true);
     const drawn: WorkspaceRoster[] = [];
-    const g = createUnseenGate(OWN, (r) => drawn.push(r), { doc, now: () => 0, presence });
+    const g = createUnseenGate(OWN, (r) => drawn.push(r), { seen: createPageSeen(OWN, presence), now: () => 0 });
     const newest = roster({ current: OTHER });
     g.offer(roster({ current: OTHER }));
     g.offer(newest);

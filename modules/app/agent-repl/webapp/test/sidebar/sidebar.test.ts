@@ -15,6 +15,8 @@ import { GROUPING_VIEW_KEY } from "../../src/sidebar/view.js";
 import { captureLogRecords, type LogCapture } from "../log-capture.js";
 import type { PhasedAnimation } from "../../src/sidebar/wall-phase.js";
 import type { UnseenEnv } from "../../src/sidebar/unseen.js";
+import { createPageSeen } from "../../src/page-seen.js";
+import { createPresence } from "../../src/presence.js";
 import { fireResize } from "../resize-observer.js";
 import {
   NOW,
@@ -913,7 +915,7 @@ function unseenDoc(initial: DocumentVisibilityState): { env: UnseenEnv; show(): 
   let state = initial;
   Object.defineProperty(doc, "visibilityState", { configurable: true, get: () => state });
   return {
-    env: { doc, now: () => 0 },
+    env: { seen: createPageSeen(WORKSPACE.id, createPresence(doc, false)), now: () => 0 },
     show: () => {
       state = "visible";
       doc.dispatchEvent(new Event("visibilitychange"));
