@@ -161,6 +161,9 @@ type Rollout interface {
 	CheckStaleness(ctx context.Context, ws ids.WorkspaceID, force bool) (rollout.StaleCheck, error)
 	Joining() bool
 	RollingOut() ([]ids.WorkspaceID, bool)
+	// TookOver closes when a successor has taken over from the daemon it
+	// joined: the edge on which a deploy refused for joining may run.
+	TookOver() <-chan struct{}
 }
 
 // EmacsClient is one open Emacs WatchDaemon stream and the elisp it reported.
@@ -255,6 +258,10 @@ type Deployer struct {
 	// deploy was running and none could start, or while one was already past
 	// its start.
 	landed bool
+	// awaitingTakeover is true while a landing's deploy, refused because this
+	// successor is still joining, waits for the takeover: a landing that
+	// arrives meanwhile is covered by that deploy rather than starting another.
+	awaitingTakeover bool
 	// landings joins the deploys landings started.
 	landings sync.WaitGroup
 }
@@ -311,7 +318,8 @@ func (d *Deployer) Deploy(ctx context.Context, force bool) (result Result, err e
 		d.log.Info(opDeploy, "refused a deploy while one is running", fields)
 		return Result{}, ErrAlreadyDeploying
 	}
-	defer d.end()
+	committed := false
+	defer func() { d.end(committed) }()
 
 	if d.deps.Rollout.Joining() {
 		d.log.Info(opDeploy, "refused a deploy asked of a successor still joining", fields)
@@ -321,6 +329,12 @@ func (d *Deployer) Deploy(ctx context.Context, force bool) (result Result, err e
 		d.log.Info(opDeploy, "refused a deploy while a handover is in flight", merge(fields, dlog.Context{"waiting_on": wsNames(waiting)}))
 		return Result{}, &rollout.ErrAlreadyRollingOut{WaitingOn: waiting}
 	}
+
+	// THE DEPLOY IS COMMITTED: it builds the checkout as it stands, so it
+	// covers every landing before this instant. A deploy refused above covered
+	// none, so a landing it was asked for stays owed.
+	d.commit()
+	committed = true
 
 	// FROM HERE THE LINE IS THIS DEPLOY'S. A deploy that stops short of the
 	// phase that ends it (updated here, or a handover whose successor says it)
@@ -462,10 +476,14 @@ func (d *Deployer) Landed(ctx context.Context, commits []gitclient.Commit) {
 	}
 	d.mu.Lock()
 	d.landed = true
-	running := d.running
+	running, awaiting := d.running, d.awaitingTakeover
 	d.mu.Unlock()
 	if running {
 		d.log.Info(opLanding, "a change landed while a deploy runs; one deploy follows it", fields)
+		return
+	}
+	if awaiting {
+		d.log.Info(opLanding, "a change landed while a landing's deploy waits for the takeover; that deploy covers it", fields)
 		return
 	}
 	d.log.Info(opLanding, "a change landed; deploying it once", fields)
@@ -482,7 +500,12 @@ func (d *Deployer) deployLanding(ctx context.Context) {
 	go func() {
 		defer d.landings.Done()
 		result, err := d.Deploy(lifetime, false)
+		if errors.Is(err, rollout.ErrJoining) {
+			result, err = d.deployAfterTakeover(lifetime)
+		}
 		switch {
+		case errors.Is(err, errLifetimeEnded):
+			d.log.Info(opLanding, "the daemon stopped before it took over; the landing is deployed by whichever daemon serves next", nil)
 		case errors.Is(err, ErrAlreadyDeploying):
 			// THE LANDING IS NOT LOST: it is still marked, and the deploy
 			// holding the slot starts one more when it ends.
@@ -493,6 +516,35 @@ func (d *Deployer) deployLanding(ctx context.Context) {
 			d.log.Info(opLanding, "the landing is deployed", dlog.Context{"decisions": summarize(result)})
 		}
 	}()
+}
+
+// errLifetimeEnded is a landing's deploy abandoned because the daemon's
+// lifetime ended while it waited for the takeover.
+var errLifetimeEnded = errors.New("deploy: the daemon's lifetime ended before the takeover")
+
+// deployAfterTakeover runs a landing's deploy that was refused because this
+// successor is still joining: it waits for the takeover -- the one edge on
+// which the refusal stops holding -- and deploys then. It never retries on a
+// clock; the wait is the rollout's own latch.
+func (d *Deployer) deployAfterTakeover(lifetime context.Context) (Result, error) {
+	d.mu.Lock()
+	d.awaitingTakeover = true
+	d.mu.Unlock()
+	defer func() {
+		d.mu.Lock()
+		d.awaitingTakeover = false
+		d.mu.Unlock()
+	}()
+	d.log.Info(opLanding, "this daemon is still taking over from the one it joined; the landing deploys once it has", nil)
+	select {
+	case <-d.deps.Rollout.TookOver():
+	case <-lifetime.Done():
+		return Result{}, errLifetimeEnded
+	}
+	d.mu.Lock()
+	d.awaitingTakeover = false
+	d.mu.Unlock()
+	return d.Deploy(lifetime, false)
 }
 
 // WaitLandings joins every deploy a landing started.
@@ -526,8 +578,7 @@ func (d *Deployer) DrainLandings(bound time.Duration) bool {
 	}
 }
 
-// begin takes the one deploy slot. A deploy that starts COVERS every landing
-// before it: it builds the checkout as it stands.
+// begin takes the one deploy slot.
 func (d *Deployer) begin() bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -535,16 +586,28 @@ func (d *Deployer) begin() bool {
 		return false
 	}
 	d.running = true
-	d.landed = false
 	return true
+}
+
+// commit marks the slot's deploy as one that BUILDS: it covers every landing
+// before it, because it builds the checkout as it stands.
+func (d *Deployer) commit() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.landed = false
 }
 
 // end releases the slot, and starts the one deploy owed to landings that
 // arrived while this one ran.
-func (d *Deployer) end() {
+//
+// ONLY A COMMITTED DEPLOY OWES ONE: a deploy refused before it built covered
+// nothing, and starting another from its end would meet the same refusal.
+// The landing it leaves owed is driven by the refusal's own edge
+// (deployAfterTakeover) or by the next deploy that does build.
+func (d *Deployer) end(committed bool) {
 	d.mu.Lock()
 	d.running = false
-	again := d.landed
+	again := committed && d.landed
 	d.mu.Unlock()
 	if again {
 		d.log.Info(opLanding, "changes landed during the deploy that just ended; deploying them once", nil)
