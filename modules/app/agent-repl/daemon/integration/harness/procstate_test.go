@@ -2,6 +2,7 @@ package harness
 
 import (
 	"context"
+	"errors"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -170,5 +171,68 @@ func TestLiveGroupMembers(t *testing.T) {
 				t.Fatalf("liveGroupMembers(%d) = %+v, want the leader listed = %v and nothing else", cmd.Process.Pid, got, tc.wantLeader)
 			}
 		})
+	}
+}
+
+func TestStopFrozenStopsARunningProcess(t *testing.T) {
+	// Arrange
+	cmd := startIdle(t)
+
+	// Act
+	err := stopFrozen(cmd.Process.Pid, DefaultTimeout, syscall.Kill)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("stopFrozen = %v, want the process stopped", err)
+	}
+	state, err := readProcessState(cmd.Process.Pid)
+	if err != nil || !state.frozen {
+		t.Fatalf("after stopFrozen the process is %+v (%v), want frozen", state, err)
+	}
+}
+
+// TestStopFrozenResendsAStopTheProcessDiscarded stands in for a stop that
+// reached a process inside execve, which Darwin discards: the first send is
+// undone at once, and stopFrozen must still leave the process frozen.
+func TestStopFrozenResendsAStopTheProcessDiscarded(t *testing.T) {
+	// Arrange: the first stop is "discarded" by an immediate continue.
+	cmd := startIdle(t)
+	sends := 0
+	discardFirst := func(pid int, sig syscall.Signal) error {
+		sends++
+		if err := syscall.Kill(pid, sig); err != nil {
+			return err
+		}
+		if sends == 1 {
+			return syscall.Kill(pid, syscall.SIGCONT)
+		}
+		return nil
+	}
+
+	// Act
+	err := stopFrozen(cmd.Process.Pid, DefaultTimeout, discardFirst)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("stopFrozen = %v after a discarded first stop, want the process stopped", err)
+	}
+	if sends < 2 {
+		t.Fatalf("stopFrozen sent %d stop(s), want the discarded one re-sent", sends)
+	}
+}
+
+func TestStopFrozenAnswersTheSendErrorForAGoneProcess(t *testing.T) {
+	// Arrange: a process that has exited and been reaped.
+	cmd := exec.Command("/usr/bin/true")
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("run /usr/bin/true: %v", err)
+	}
+
+	// Act
+	err := stopFrozen(cmd.Process.Pid, DefaultTimeout, syscall.Kill)
+
+	// Assert
+	if !errors.Is(err, syscall.ESRCH) {
+		t.Fatalf("stopFrozen = %v for a reaped process, want ESRCH", err)
 	}
 }
