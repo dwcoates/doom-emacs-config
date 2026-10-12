@@ -283,6 +283,37 @@ func TestHostStreamCountsItsParticipant(t *testing.T) {
 	}
 }
 
+// TestAHostStreamOpenIsRecordedAtInfo pins that a participant edge reaches
+// the persisted log: at DEBUG it did not, and an expired adoption window could
+// not show which stream had gone.
+func TestAHostStreamOpenIsRecordedAtInfo(t *testing.T) {
+	// Arrange.
+	log := &recordingLogger{}
+	h := newHarness(t, func(deps *Deps) {
+		deps.Log = &fakeSurfaces{global: log}
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Act.
+	stream, dialErr := h.Client.WatchHostWorkspace(ctx, connect.NewRequest(&agentreplv1.WatchHostWorkspaceRequest{
+		Workspace: ref(),
+	}))
+	if dialErr != nil {
+		t.Fatalf("open the stream: %v", dialErr)
+	}
+	h.Server.Relay().ReloadWebapp(testWorkspaceID)
+	receiveHostEvent(t, stream)
+
+	// Assert.
+	for _, rec := range log.at("INFO") {
+		if rec.Operation == "daemon.server.participants" && rec.Context["stream"] == "host" && rec.Context["host_stream"] == true {
+			return
+		}
+	}
+	t.Fatalf("no INFO participant record for the host stream's open among %v", log.at("INFO"))
+}
+
 // TestAHostStreamOpenStatesTheHopToTheResolvers pins that the host stream's
 // open edge publishes the participant liveness the connectivity truth needs.
 func TestAHostStreamOpenStatesTheHopToTheResolvers(t *testing.T) {
