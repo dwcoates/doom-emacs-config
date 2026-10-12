@@ -784,3 +784,9 @@ export function rowContext(ctx: AppContext, row: FeedRow, extra: Partial<RowCont
 export async function settle(advance: (ms: number) => Promise<unknown>): Promise<void> {
   for (let i = 0; i < 30; i += 1) await advance(0);
 }
+
+/** Whether A is drawn before B in the document; throws when either is missing. */
+export function drawnBefore(a: Element | null, b: Element | null): boolean {
+  if (a === null || b === null) throw new Error("the drawing lacks an element the order is about");
+  return (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+}

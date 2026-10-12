@@ -29,8 +29,7 @@
  * ordinary call-site refusal beside the button.
  */
 import { createControl, type Control } from "../../control.js";
-import { formatTickedElapsed } from "../../duration.js";
-import { liveElapsedClock, settledElapsedClock } from "../../elapsed-clock.js";
+import { reservedLiveElapsedClock, reservedQuietClock, reservedSettledElapsedClock } from "../../elapsed-clock.js";
 import { log } from "../../log.js";
 import type {
   FeedShell,
@@ -160,7 +159,6 @@ export function drawFeedShellHead(u: FeedShell, rc: RowContext): HTMLElement {
         return unreachableArm(`${PATH}.settled.outcome`, armName(outcome));
       }
       el.setAttribute("data-state", outcome.case);
-      head.append(drawSettledClock(runtime, settled));
       if (settled.exit !== undefined) {
         head.append(drawFeedShellExit(settled.exit, `${PATH}.settled.exit`));
       }
@@ -170,7 +168,9 @@ export function drawFeedShellHead(u: FeedShell, rc: RowContext): HTMLElement {
         outcome.case === "lost"
           ? `${SETTLED_WORDS.lost}${lostCauseClause(outcome.value)}`
           : SETTLED_WORDS[outcome.case];
-      head.append(word);
+      // THE BADGES COME BEFORE THE CLOCK (owner ruling, 2026-10-11): the head
+      // reads title, exit and outcome, then how long it ran.
+      head.append(word, drawSettledClock(runtime, settled));
       // A CARD'S TIMER STOPS THE MOMENT ITS UNIT SETTLES. The settled clock is
       // frozen at the span the MESSAGE reports (ended - started), never at the
       // wall clock, and this element holds no live subscription from here on —
@@ -287,18 +287,13 @@ export function drawFeedShellLastProgress(
   rc: RowContext,
 ): HTMLElement {
   const atMs = msOf(u.atMs, `${PATH}.live.last_progress.at_ms`);
-  const el = document.createElement("span");
-  el.className = "shell-quiet";
-  tick(el, rc.ctx.ticker, (nowMs) => {
-    el.textContent = `quiet for ${formatTickedElapsed(nowMs - atMs)}`;
-  });
-  return el;
+  return reservedQuietClock(rc.ctx.ticker, "shell-quiet", atMs);
 }
 
 /** The live clock, counting up from the original start. */
 function drawLiveClock(runtime: FeedShellRuntime, rc: RowContext): HTMLElement {
   const startedMs = msOf(runtime.startedAtMs, `${PATH}.runtime.started_at_ms`);
-  return liveElapsedClock(rc.ctx.ticker, "shell-clock", startedMs);
+  return reservedLiveElapsedClock(rc.ctx.ticker, "shell-clock", startedMs);
 }
 
 /** The settled clock: the span that ran, stopped where the command stopped. */
@@ -308,7 +303,7 @@ function drawSettledClock(
 ): HTMLElement {
   const startedMs = msOf(runtime.startedAtMs, `${PATH}.runtime.started_at_ms`);
   const endedMs = msOf(settled.endedAtMs, `${PATH}.settled.ended_at_ms`);
-  return settledElapsedClock("shell-clock", endedMs - startedMs);
+  return reservedSettledElapsedClock("shell-clock", endedMs - startedMs);
 }
 
 /** The stop control on a live shell. */

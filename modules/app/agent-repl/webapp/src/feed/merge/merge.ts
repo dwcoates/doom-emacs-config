@@ -23,7 +23,7 @@
  * the generic merge glyph with a warning rather than failing the row: the head
  * is the only thing standing between the reader and a merge they cannot see.
  */
-import { liveElapsedClock, settledElapsedClock } from "../../elapsed-clock.js";
+import { reservedLiveElapsedClock, reservedSettledElapsedClock } from "../../elapsed-clock.js";
 import { log } from "../../log.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import { FEED_MERGE_HEAD_GLYPH } from "../../vocab.js";
@@ -72,15 +72,15 @@ export function drawFeedMerge(msg: FeedMerge, rc: RowContext): HTMLElement {
   switch (result.case) {
     case "update":
       el.setAttribute("data-state", "update");
-      el.append(drawLiveClock(runtime, rc));
-      el.append(badge("merging", "is-live"));
+      // THE BADGE COMES BEFORE THE CLOCK (owner ruling, 2026-10-11).
+      el.append(badge("merging", "is-live"), drawLiveClock(runtime, rc));
       return el;
     case "success": {
       el.setAttribute("data-state", "success");
       el.append(
+        badge("merged", "is-succeeded"),
         settledClock(runtime, msOf(result.value.endedAtMs, `${PATH}.success.ended_at_ms`)),
       );
-      el.append(badge("merged", "is-succeeded"));
       const commit = document.createElement("span");
       commit.className = "merge-commit";
       commit.textContent = result.value.commit;
@@ -155,16 +155,16 @@ export function drawFeedMergeError(
   const reason = requireCase(error.reason, `${PATH}.error.reason`);
   const el = document.createElement("span");
   el.className = "merge-error";
-  el.append(settledClock(runtime, msOf(error.endedAtMs, `${PATH}.error.ended_at_ms`)));
+  const clock = settledClock(runtime, msOf(error.endedAtMs, `${PATH}.error.ended_at_ms`));
   switch (reason.case) {
     case "failed":
-      el.append(badge("failed", "is-failed"), summaryOf(reason.value.summary));
+      el.append(badge("failed", "is-failed"), clock, summaryOf(reason.value.summary));
       return el;
     case "abandoned":
       // Landing 7: `abandoned` carries the daemon's resolved sentence too (the
       // cause — a user drop, a closed workspace, a shutdown — otherwise lives
       // only in the daemon's log), and it is drawn exactly as `failed`'s is.
-      el.append(badge("abandoned", "is-abandoned"), summaryOf(reason.value.summary));
+      el.append(badge("abandoned", "is-abandoned"), clock, summaryOf(reason.value.summary));
       return el;
     default:
       return unreachableArm(`${PATH}.error.reason`, armName(reason));
@@ -190,11 +190,11 @@ function badge(word: string, tone: string): HTMLElement {
 /** The live clock, counting up from the enqueue instant. */
 function drawLiveClock(runtime: FeedMergeRuntime, rc: RowContext): HTMLElement {
   const startedMs = msOf(runtime.startedAtMs, `${PATH}.head.runtime.started_at_ms`);
-  return liveElapsedClock(rc.ctx.ticker, "merge-clock", startedMs);
+  return reservedLiveElapsedClock(rc.ctx.ticker, "merge-clock", startedMs);
 }
 
 /** The settled clock: the span that ran, stopped where it stopped. */
 function settledClock(runtime: FeedMergeRuntime, endedMs: number): HTMLElement {
   const startedMs = msOf(runtime.startedAtMs, `${PATH}.head.runtime.started_at_ms`);
-  return settledElapsedClock("merge-clock", endedMs - startedMs);
+  return reservedSettledElapsedClock("merge-clock", endedMs - startedMs);
 }

@@ -10,7 +10,7 @@
  * its column. The test then reads, in real WebKit layout, whether any row
  * spills past the feed's stream area.
  */
-import type { DescMessage, Message } from "@bufbuild/protobuf";
+import { create, type DescMessage, type Message } from "@bufbuild/protobuf";
 import { FeedRowSchema, type FeedRow } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { mountFeed } from "../../src/feed/feed.js";
 import { createRowRenderers } from "../../src/feed/renderers.js";
@@ -135,6 +135,7 @@ export function everyRow(): FeedRow[] {
     agentPromptRow(`a long agent prompt ${RUN}`),
     peerMessageRow(),
     subagentHandbackRow(),
+    create(FeedRowSchema, { row: { case: "mergeHandback", value: { label: { text: `merge of a long branch landed ${RUN}` } } } }),
     ...units.map((unit) => activityRow(unit)),
     turnEndedConcludedRow(feedId("nowhere")),
     ...TURN_ERROR_ARMS.map((arm) => turnEndedErroredRow(arm, { message: `the vendor's long account ${RUN}` })),
@@ -195,6 +196,14 @@ bindLogContext({ connection_id: "webkit-containment-page" });
 
 let served: FeedRow[] = [];
 
+/**
+ * THE PAGE'S CLOCK STANDS AN HOUR AFTER THE FIXTURES' INSTANTS. The rows stamp
+ * their starts near the epoch, as the harness's fixtures do, so a real-time
+ * clock would read every live clock as half a century and outgrow the heads'
+ * reserved widths. Held still: the layout is measured once, with no tick.
+ */
+const FIXTURE_TICKER = { now: (): number => 3_600_000, subscribe: (): (() => void) => () => {} };
+
 /** The outermost element under ROOT whose box reaches past AREA, as its class path. */
 function culprit(root: HTMLElement, area: DOMRect): string {
   for (const el of root.querySelectorAll<HTMLElement>("*")) {
@@ -226,6 +235,7 @@ window.containment = {
     // by default (owner ruling, 2026-10-08), so it opens its sub-feed at mount;
     // serving it the root page too would nest every merge inside itself forever.
     const h = harness({
+      ticker: FIXTURE_TICKER,
       openFeed: (req) =>
         req.feed === undefined ? openSuccess(page(served), "tok:root") : openSuccess(page([]), `tok:${req.feed.value}`),
     });
@@ -233,8 +243,6 @@ window.containment = {
     for (let i = 0; i < 200 && host.querySelectorAll("[data-feed-row]").length < served.length; i++) {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
-    // Every row laid out, as a reader scrolling the whole feed would see it.
-    for (const item of host.querySelectorAll<HTMLElement>(".feed-item")) item.style.contentVisibility = "visible";
     // Every outcome marker OPEN: its expansion must stay inside the column too.
     for (const pill of host.querySelectorAll<HTMLElement>('.outcome-marker-pill[aria-expanded="false"]')) pill.click();
     await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
