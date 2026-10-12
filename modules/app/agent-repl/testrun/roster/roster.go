@@ -63,6 +63,16 @@ type Suite struct {
 	// Zero is one slot. A wider suite is told its width in
 	// AGENT_REPL_UNIT_SLOTS and must cap itself to exactly that many cores.
 	Slots int
+	// TestParallel names the Go packages (by path relative to Path, "." for
+	// the root) whose chunks overlap that many of their top-level tests
+	// (-test.parallel). A package not named runs its tests one at a time.
+	//
+	// ONLY WAIT-BOUND PACKAGES ARE NAMED: tests that spend most of their wall
+	// waiting on the processes they boot (a daemon, a store, a shim). MEASURED
+	// on a full run (2026-10-11): those chunks held their slot at ~35% CPU one
+	// test at a time, and four at a time cut their wall 1.5-2.6x while using
+	// ~0.8-1.2 cores on average, about the one slot they hold.
+	TestParallel map[string]int
 }
 
 // Suites is the roster. Order is report order only; the scheduler decides run
@@ -108,9 +118,10 @@ var Suites = []Suite{
 	// (`make integration`, `npm run test:integration`), and so outside the
 	// host slot too.
 	{Name: "daemon", Kind: GoModule, Path: "daemon",
-		IntegrationTags: "integration", IntegrationPackages: "./integration", IntegrationPrebuildPackage: "integration"},
-	{Name: "sidecar", Kind: GoModule, Path: "agent-shim/claude/shim-sidecar", PrebuildPackage: "integration"},
-	{Name: "store", Kind: GoModule, Path: "agent-shim/shim-store"},
+		IntegrationTags: "integration", IntegrationPackages: "./integration", IntegrationPrebuildPackage: "integration",
+		TestParallel: map[string]int{"integration": 4}},
+	{Name: "sidecar", Kind: GoModule, Path: "agent-shim/claude/shim-sidecar", PrebuildPackage: "integration", TestParallel: map[string]int{"integration": 4}},
+	{Name: "store", Kind: GoModule, Path: "agent-shim/shim-store", TestParallel: map[string]int{"integration": 4}},
 	{Name: "lock", Kind: GoModule, Path: "agent-shim/shim-lock"},
 	{Name: "logging", Kind: GoModule, Path: "agent-shim/logging/go"},
 	{Name: "protohelpers", Kind: GoModule, Path: "proto/helpers/go"},
@@ -122,7 +133,7 @@ var Suites = []Suite{
 		IntegrationBuild: []string{"npm", "run", "pretest:integration"}},
 	{Name: "proto", Kind: Script, Path: "bin/report-nonlisp-coverage.sh", Args: []string{"proto"}},
 	{Name: "logging-density", Kind: Script, Path: "bin/report-logging-density.sh"},
-	{Name: "e2e", Kind: E2E, Path: "e2e"},
+	{Name: "e2e", Kind: E2E, Path: "e2e", TestParallel: map[string]int{".": 4}},
 	// Four slots: the sandbox container is capped to the width it is given
 	// (docker --cpus, GOMAXPROCS), and four CPUs is the VM the Emacs layer's
 	// own parallelism bound of two Emacsen was measured on

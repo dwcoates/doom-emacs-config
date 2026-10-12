@@ -60,6 +60,9 @@ type goPkg struct {
 	Timeout string
 	// Tags are the build tags the package's tests compile under; "" is none.
 	Tags string
+	// Parallel is how many of its top-level tests a chunk overlaps
+	// (roster.Suite.TestParallel); zero is one at a time.
+	Parallel int
 }
 
 // sharePrebuilt makes this package's build process compile its test binary,
@@ -121,7 +124,7 @@ func (p goPkg) units() (run.Spec, *Split, error) {
 		timeout = "10m"
 	}
 	chunk := func(id string, items []string) run.Spec {
-		argv := []string{p.Bin, "-test.count=1", "-test.v", "-test.parallel=1",
+		argv := []string{p.Bin, "-test.count=1", "-test.v", "-test.parallel=" + strconv.Itoa(max(p.Parallel, 1)),
 			"-test.timeout=" + timeout, "-test.run=" + runPattern(items)}
 		if p.CovDir != "" {
 			argv = append(argv, "-test.gocoverdir="+p.CovDir)

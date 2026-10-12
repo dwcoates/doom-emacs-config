@@ -17,7 +17,7 @@ package integration
 // blind to a join the converter had stopped performing.
 //
 // WHERE THE SUBJECT IS ASSERTED. It is asserted for EVERY scenario the mocked
-// vendor declares — the blocked rows included — inside `TestMockScenarios`
+// vendor declares — the blocked rows included — inside the `TestMockScenariosShardN` tests
 // (`mock_scenarios_test.go`), on the tree that test already generated and
 // ingested. It used to live in a second test function of its own, and that
 // function re-ran the whole mocked vendor over all 133 rows — four real
