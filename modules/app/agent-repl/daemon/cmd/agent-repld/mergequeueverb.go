@@ -36,6 +36,7 @@ import (
 //	agent-repld merge-queue -pr-merged [-front] [-wait] [-state-dir DIR]
 //	agent-repld merge-queue -evict | -evict-dir WORKTREE [-answer-timeout D] [-state-dir DIR]
 //	agent-repld merge-queue -pause | -resume [-repository-dir DIR] [-answer-timeout D] [-state-dir DIR]
+//	agent-repld merge-queue -hold-rollouts | -release-rollouts [-answer-timeout D] [-state-dir DIR]
 //
 // A MERGE RUNS IN THE WORKSPACE THAT ASKED FOR IT, and the verb asks FROM THE
 // CALLING WORKSPACE: the workspace whose worktree contains the caller's working
@@ -75,12 +76,16 @@ import (
 //     another workspace's (merge_evict);
 //   - `-pause` / `-resume` pause or resume the queue of the repository whose
 //     main checkout is `-repository-dir`, else of every repository
-//     (merge_pause, merge_resume).
+//     (merge_pause, merge_resume);
+//   - `-hold-rollouts` / `-release-rollouts` hold or release the queue's
+//     ROLLOUTS, daemon-wide: while held, merges still land, but a landing in
+//     the daemon's own checkout no longer redeploys, hot-reloads or bounces
+//     the runtime (merge_hold_rollouts, merge_release_rollouts).
 //
 // A control is answered AT ONCE, so the verb waits (at most -answer-timeout)
 // for the file's fate and prints the daemon's own answer, read off the record
 // the ingress keys by the file's path in the run log: `outcome: <outcome>`
-// (evicted, not_queued, paused, resumed) when applied, or the refusal's cause
+// (evicted, not_queued, paused, resumed, held, released) when applied, or the refusal's cause
 // when quarantined. An answer the run log does not carry is printed as unread,
 // on stderr, and the file's fate still decides the exit.
 
@@ -240,6 +245,8 @@ func runMergeQueueVerb(ctx context.Context, args []string, dial mergeQueueDialer
 	evictDir := fs.String("evict-dir", "", "take another workspace's merge off the queue, by its worktree")
 	pause := fs.Bool("pause", false, "pause the merge queue (every repository's, or -repository-dir's)")
 	resume := fs.Bool("resume", false, "resume the merge queue (every repository's, or -repository-dir's)")
+	holdRollouts := fs.Bool("hold-rollouts", false, "hold the merge queue's rollouts: merges still land, but a landing no longer redeploys")
+	releaseRollouts := fs.Bool("release-rollouts", false, "release the merge queue's rollouts: the next landing redeploys")
 	repositoryDir := fs.String("repository-dir", "", "with -pause or -resume: the repository's main checkout")
 	answerTimeout := fs.Duration("answer-timeout", defaultAnswerTimeout, "with a queue control: how long to wait for the daemon's answer")
 	wait := fs.Bool("wait", false, "wait for the outcome: landed (0) or failed (5)")
@@ -253,6 +260,7 @@ func runMergeQueueVerb(ctx context.Context, args []string, dial mergeQueueDialer
 	source, err := resolveMergeQueueSource(mergeQueueFlags{
 		own: *own, keepOpen: *keepOpen, oneShot: *oneShot, inPlace: *inPlace, wait: *wait, dir: *dir, branch: *branch, prMerged: *prMerged, front: *front,
 		evict: *evict, evictDir: *evictDir, pause: *pause, resume: *resume, repositoryDir: *repositoryDir,
+		holdRollouts: *holdRollouts, releaseRollouts: *releaseRollouts,
 	})
 	if err != nil {
 		return fail("%v", err)
@@ -295,6 +303,8 @@ type mergeQueueFlags struct {
 	evictDir      string
 	pause, resume bool
 	repositoryDir string
+	// holdRollouts and releaseRollouts hold or release the queue's rollouts.
+	holdRollouts, releaseRollouts bool
 }
 
 // resolveMergeQueueSource turns the flags into what the calling workspace
@@ -316,16 +326,16 @@ func resolveMergeQueueSource(f mergeQueueFlags) (mergeQueueSource, error) {
 // name.
 func resolveMergeQueueRequest(f mergeQueueFlags) (mergeQueueSource, error) {
 	named := 0
-	for _, set := range []bool{f.own, f.dir != "", f.branch != "", f.prMerged, f.evict, f.evictDir != "", f.pause, f.resume} {
+	for _, set := range []bool{f.own, f.dir != "", f.branch != "", f.prMerged, f.evict, f.evictDir != "", f.pause, f.resume, f.holdRollouts, f.releaseRollouts} {
 		if set {
 			named++
 		}
 	}
 	switch {
 	case named == 0:
-		return mergeQueueSource{}, errors.New("name the merge or control: -own, -dir WORKTREE, -branch BRANCH, -pr-merged, -evict, -evict-dir WORKTREE, -pause or -resume")
+		return mergeQueueSource{}, errors.New("name the merge or control: -own, -dir WORKTREE, -branch BRANCH, -pr-merged, -evict, -evict-dir WORKTREE, -pause, -resume, -hold-rollouts or -release-rollouts")
 	case named > 1:
-		return mergeQueueSource{}, errors.New("-own, -dir, -branch, -pr-merged, -evict, -evict-dir, -pause and -resume each name a different request; give one")
+		return mergeQueueSource{}, errors.New("-own, -dir, -branch, -pr-merged, -evict, -evict-dir, -pause, -resume, -hold-rollouts and -release-rollouts each name a different request; give one")
 	case f.keepOpen && !f.own:
 		return mergeQueueSource{}, errors.New("-keep-open goes with -own: only the calling workspace's own branch can keep it open")
 	case f.inPlace && !f.own:
@@ -357,6 +367,10 @@ func resolveMergeQueueRequest(f mergeQueueFlags) (mergeQueueSource, error) {
 		}
 		return mergeQueueSource{label: filepath.Base(abs) + "'s merge off the queue", control: true,
 			entry: commandfile.Entry{Type: commandfile.TypeMergeEvict, EvictDir: abs}}, nil
+	case f.holdRollouts:
+		return mergeQueueSource{label: "a hold of the merge queue's rollouts", control: true, entry: commandfile.Entry{Type: commandfile.TypeMergeHoldRollouts}}, nil
+	case f.releaseRollouts:
+		return mergeQueueSource{label: "a release of the merge queue's rollouts", control: true, entry: commandfile.Entry{Type: commandfile.TypeMergeReleaseRollouts}}, nil
 	case f.pause, f.resume:
 		typ, verb := commandfile.TypeMergePause, "a pause"
 		if f.resume {
