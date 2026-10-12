@@ -58,6 +58,14 @@ function recordingEngine(): { engine: Engine; calls: Array<{ verb: string; reque
       record("killSession")(request);
       return create(shimv1.KillSessionResponseSchema, {});
     },
+    async getForkPoint(request) {
+      record("getForkPoint")(request);
+      return create(shimv1.GetForkPointResponseSchema, {});
+    },
+    async forkSession(request) {
+      record("forkSession")(request);
+      return create(shimv1.ForkSessionResponseSchema, {});
+    },
     async startTurn(request) {
       record("startTurn")(request);
       return create(shimv1.StartTurnResponseSchema, {});
@@ -140,6 +148,8 @@ describe("shimRoutes unary delegation", () => {
     ["detachForeground", requests.detachForegroundRequest],
     ["readHistory", requests.readHistoryRequest],
     ["gatherTitleDigest", requests.gatherTitleDigestRequest],
+    ["getForkPoint", requests.getForkPointRequest],
+    ["forkSession", requests.forkSessionRequest],
   ] as const)("routes %s to its own engine method", async (verb, build) => {
     // Arrange.
     const { engine, calls } = recordingEngine();

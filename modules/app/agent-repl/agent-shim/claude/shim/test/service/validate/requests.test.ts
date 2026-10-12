@@ -602,3 +602,78 @@ describe("validateReadHistoryRequest target", () => {
     expect(codeOf(() => validate.validateReadHistoryRequest(request))).toBeUndefined();
   });
 });
+
+describe("validateGetForkPointRequest", () => {
+  it("accepts the empty request", () => {
+    // Arrange, Act, Assert.
+    expect(codeOf(() => validate.validateGetForkPointRequest(requests.getForkPointRequest()))).toBeUndefined();
+  });
+});
+
+describe("validateForkSessionRequest", () => {
+  /** A fork request with `edit` applied to an otherwise legal one. */
+  function forkRequest(edit: (request: shimv1.ForkSessionRequest) => void): shimv1.ForkSessionRequest {
+    const request = requests.forkSessionRequest();
+    edit(request);
+    return request;
+  }
+
+  function record(value: string): shimv1.ForkRecordToken {
+    return create(shimv1.ForkRecordTokenSchema, { value });
+  }
+
+  it.each([
+    { name: "a whole fork", edit: (_r: shimv1.ForkSessionRequest): void => undefined },
+    {
+      name: "a fork through a record",
+      edit: (r: shimv1.ForkSessionRequest): void => {
+        r.point = create(shimv1.ForkPointSchema, {
+          extent: { case: "throughRecord", value: create(shimv1.ForkPointThroughRecordSchema, { record: record("u1") }) },
+        });
+      },
+    },
+    {
+      name: "a fork before a record",
+      edit: (r: shimv1.ForkSessionRequest): void => {
+        r.point = create(shimv1.ForkPointSchema, {
+          extent: { case: "beforeRecord", value: create(shimv1.ForkPointBeforeRecordSchema, { record: record("u1") }) },
+        });
+      },
+    },
+  ])("accepts $name", ({ edit }) => {
+    // Arrange.
+    const request = forkRequest(edit);
+
+    // Act, Assert.
+    expect(codeOf(() => validate.validateForkSessionRequest(request))).toBeUndefined();
+  });
+
+  it.each([
+    { name: "an empty parent session id", edit: (r: shimv1.ForkSessionRequest): void => void (r.parentVendorSessionId = "") },
+    { name: "an empty parent directory", edit: (r: shimv1.ForkSessionRequest): void => void (r.parentWorkspaceDir = "") },
+    { name: "no point", edit: (r: shimv1.ForkSessionRequest): void => void (r.point = undefined) },
+    { name: "a point with no extent", edit: (r: shimv1.ForkSessionRequest): void => void (r.point = create(shimv1.ForkPointSchema, {})) },
+    {
+      name: "a cut with no record",
+      edit: (r: shimv1.ForkSessionRequest): void => {
+        r.point = create(shimv1.ForkPointSchema, {
+          extent: { case: "throughRecord", value: create(shimv1.ForkPointThroughRecordSchema, {}) },
+        });
+      },
+    },
+    {
+      name: "a cut at an empty record",
+      edit: (r: shimv1.ForkSessionRequest): void => {
+        r.point = create(shimv1.ForkPointSchema, {
+          extent: { case: "beforeRecord", value: create(shimv1.ForkPointBeforeRecordSchema, { record: record("") }) },
+        });
+      },
+    },
+  ])("refuses $name", ({ edit }) => {
+    // Arrange.
+    const request = forkRequest(edit);
+
+    // Act, Assert.
+    expect(codeOf(() => validate.validateForkSessionRequest(request))).toBe(Code.InvalidArgument);
+  });
+});

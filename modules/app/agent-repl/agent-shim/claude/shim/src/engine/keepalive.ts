@@ -236,6 +236,28 @@ function spanContext(turn: SpanTurn): Record<string, unknown> {
 }
 
 /**
+ * The uuid of the main-conversation transcript record `message` is, or absence
+ * when it is none: the one test the rewind's anchor and the fork point
+ * (engine/fork-point.ts) both take a record by.
+ *
+ * Only a conversation record: an `assistant` or `user` message. The
+ * `system:init`, `result`, stream events, hooks and control messages all carry
+ * uuids that name no transcript record -- the vendor will not resume at one,
+ * cut a fork at one, or discard one by a rewind.
+ *
+ * Only a MAIN-THREAD record. A subagent's message carries a
+ * `parent_tool_use_id` and lives in that subagent's own transcript, so the main
+ * conversation holds no record under its uuid.
+ */
+export function conversationRecordUuid(message: SdkMessage): string | undefined {
+  if (message.type !== "assistant" && message.type !== "user") return undefined;
+  if (!isMainThread(message)) return undefined;
+  const uuid = (message as { uuid?: unknown }).uuid;
+  if (typeof uuid !== "string" || uuid === "") return undefined;
+  return uuid;
+}
+
+/**
  * The yield obligation's bookkeeping: one remembered uuid and one counter.
  *
  * Deliberately not a history. The rewind needs exactly one anchor — the last
@@ -263,18 +285,8 @@ export class KeepaliveRewind {
    * then enforced here rather than trusted to every call site.
    */
   noteRecord(message: SdkMessage, turn: RecordTurn | undefined): void {
-    // Only a conversation record: an `assistant` or `user` message. The
-    // `system:init`, `result`, stream events, hooks and control messages all
-    // carry uuids that name no transcript record -- the vendor will not resume
-    // at one, and a rewind discards none of them.
-    if (message.type !== "assistant" && message.type !== "user") return;
-    // Only a MAIN-THREAD record. A subagent's message carries a
-    // `parent_tool_use_id` and lives in that subagent's own transcript, so the
-    // main conversation holds no record under its uuid to resume at, and a
-    // rewind of the main conversation discards nothing of it.
-    if (!isMainThread(message)) return;
-    const uuid = (message as { uuid?: unknown }).uuid;
-    if (typeof uuid !== "string" || uuid === "") return;
+    const uuid = conversationRecordUuid(message);
+    if (uuid === undefined) return;
     // A RECORD OF REAL CONVERSATION ADVANCES THE ANCHOR, a `user` record as
     // much as an assistant one (ruled 2026-10-06). An interrupted turn's own
     // tool result lands after its last assistant record; anchoring only on

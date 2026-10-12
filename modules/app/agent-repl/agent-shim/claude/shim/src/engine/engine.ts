@@ -144,6 +144,20 @@ export interface Engine {
     request: shimv1.GatherTitleDigestRequest,
   ): Promise<shimv1.GatherTitleDigestResponse>;
 
+  // ---- Fork ----
+
+  /**
+   * Where a fork of this shim's conversation would end if taken now, and how
+   * the parent's stored rows are bounded to it. Spends nothing.
+   */
+  getForkPoint(request: shimv1.GetForkPointRequest): Promise<shimv1.GetForkPointResponse>;
+
+  /**
+   * Make this shim's conversation a vendor fork of another, before any
+   * session starts. Refused once a session has started.
+   */
+  forkSession(request: shimv1.ForkSessionRequest): Promise<shimv1.ForkSessionResponse>;
+
   // ---- Process lifecycle ----
 
   /**
@@ -244,6 +258,14 @@ export class NotImplementedEngine implements Engine {
 
   gatherTitleDigest(): Promise<shimv1.GatherTitleDigestResponse> {
     return Promise.reject(unimplemented("GatherTitleDigest"));
+  }
+
+  getForkPoint(): Promise<shimv1.GetForkPointResponse> {
+    return Promise.reject(unimplemented("GetForkPoint"));
+  }
+
+  forkSession(): Promise<shimv1.ForkSessionResponse> {
+    return Promise.reject(unimplemented("ForkSession"));
   }
 
   /**
