@@ -46,6 +46,18 @@ import (
 // process runs the Emacs-repo method, starting over for as long as the target
 // moves under it.
 func (r *run) process(ctx context.Context) (outcome, error) {
+	// A MERGE BEHIND ITS HEAD TAKES ITS STEPS AHEAD OF ITS TURN (chain.go)
+	// until the pump promotes it; a speculative step a restart interrupted is
+	// finished first, whatever the merge's place is now.
+	if r.isSpeculative() || (r.resume != nil && r.resume.Speculative) {
+		gaveUp, err := r.speculate(ctx)
+		if err != nil {
+			return outcome{}, err
+		}
+		if gaveUp != nil {
+			return *gaveUp, nil
+		}
+	}
 	for {
 		out, again, err := r.attempt(ctx)
 		if err != nil || !again {
@@ -97,7 +109,10 @@ func (r *run) attempt(ctx context.Context) (outcome, bool, error) {
 		}
 		return outcome{}, false, err
 	}
-	return r.afterRebase(ctx, tip, targetBranch, 0, false)
+	if err := r.settledOn(ctx, tip); err != nil {
+		return outcome{}, false, err
+	}
+	return r.afterRebase(ctx, tip, targetBranch, r.fixesUsed, false)
 }
 
 // afterRebase is the attempt once its branch stands on tip: the gate (with its
@@ -137,12 +152,18 @@ func (r *run) resumeAttempt(ctx context.Context, res *progressDoc) (outcome, boo
 		if out, again, err, done := finish(r.resumeRebase(ctx, p, tip, targetBranch, res.BranchHead)); done {
 			return out, again, err
 		}
-		return r.afterRebase(ctx, tip, targetBranch, 0, false)
+		if err := r.settledOn(ctx, tip); err != nil {
+			return outcome{}, false, err
+		}
+		return r.afterRebase(ctx, tip, targetBranch, r.fixesUsed, false)
 	case TabConflicts:
 		if out, again, err, done := finish(r.resumeConflict(ctx, p, tip, targetBranch, res)); done {
 			return out, again, err
 		}
-		return r.afterRebase(ctx, tip, targetBranch, 0, false)
+		if err := r.settledOn(ctx, tip); err != nil {
+			return outcome{}, false, err
+		}
+		return r.afterRebase(ctx, tip, targetBranch, r.fixesUsed, false)
 	case TabTests:
 		if gaveUp, err := r.rebaseSettled(ctx, tip, targetBranch); err != nil || gaveUp != nil {
 			out, again, err, _ := finish(gaveUp, err)
@@ -208,7 +229,10 @@ func (r *run) rebase(ctx context.Context, tip, targetBranch string) (*outcome, e
 	if checkedOut != branch {
 		return nil, fmt.Errorf("merge: the worktree %s has %q checked out, not %s", dir, checkedOut, branch)
 	}
-	commits, err := r.git.CommitsBetween(ctx, dir, tip, branch)
+	// ONLY THE BRANCH'S OWN COMMITS ARE REPLAYED: those since its chain base,
+	// so a merge ahead of it that did not land leaves nothing of its own
+	// behind in this branch.
+	commits, err := r.git.CommitsBetween(ctx, dir, r.ownBase(tip), branch)
 	if err != nil {
 		return nil, fmt.Errorf("merge: listing what %s replays onto %s: %w", branch, short(tip), err)
 	}
@@ -216,6 +240,15 @@ func (r *run) rebase(ctx context.Context, tip, targetBranch string) (*outcome, e
 	based, err := r.git.IsAncestor(ctx, dir, tip, branch)
 	if err != nil {
 		return nil, fmt.Errorf("merge: asking whether %s is already on %s's tip: %w", branch, targetBranch, err)
+	}
+	if based && r.chainBase != "" && r.chainBase != tip {
+		// A BRANCH STANDING ON A MERGE AHEAD that is not on tip is not on tip,
+		// whatever tip it also descends from: that merge's commits must go.
+		onTip, err := r.git.IsAncestor(ctx, dir, r.chainBase, tip)
+		if err != nil {
+			return nil, fmt.Errorf("merge: asking whether %s's chain base %s is on %s: %w", branch, short(r.chainBase), short(tip), err)
+		}
+		based = onTip
 	}
 	if based {
 		// ALREADY ON THE TIP: the branch was rebased before (a start-over whose
@@ -480,7 +513,7 @@ func (r *run) conflictBrief(commit gitclient.Commit, files []string, targetBranc
 		"conflict_commit":  commitLine(commit.SHA, commit.Subject),
 		"source_branch":    r.subject.branch,
 		"worktree_dir":     r.subject.dir,
-		"target_branch":    targetBranch,
+		"target_branch":    r.briefTarget(targetBranch),
 		"conflicted_files": strings.Join(files, ", "),
 	})
 	if err != nil {
@@ -586,6 +619,18 @@ func (r *run) testAndFix(ctx context.Context, tip, targetBranch string, fromAtte
 		if err != nil {
 			return "", nil, fmt.Errorf("merge: resolving %s: %w", r.subject.branch, err)
 		}
+		// THE MERGE BEHIND THIS ONE STANDS ON THIS TIP: a fixing commit moves
+		// it, and the chain restacks.
+		r.publishTip(ctx, head)
+		if attempt == fromAttempt && !resumeTests {
+			reused, err := r.reuseTested(ctx, tip, head)
+			if err != nil {
+				return "", nil, err
+			}
+			if reused {
+				return head, nil, nil
+			}
+		}
 		var round tabRound
 		if resumeTests && attempt == fromAttempt {
 			round = r.activeRound()
@@ -600,7 +645,7 @@ func (r *run) testAndFix(ctx context.Context, tip, targetBranch string, fromAtte
 		}); err != nil {
 			return "", nil, err
 		}
-		verdict, err := r.gate(ctx, round, tip, head)
+		verdict, err := r.gate(ctx, round, tip, head, nil)
 		if err == nil {
 			err = stillWanted(ctx)
 		}
@@ -623,6 +668,7 @@ func (r *run) testAndFix(ctx context.Context, tip, targetBranch string, fromAtte
 		if gaveUp, err := r.fix(ctx, attempt+1, verdict.result, targetBranch); err != nil || gaveUp != nil {
 			return "", gaveUp, err
 		}
+		r.fixesUsed = attempt + 1
 	}
 }
 
@@ -668,7 +714,7 @@ func (r *run) fixBrief(attempt int, suites []string, archive, tail, targetBranch
 	text, err := r.o.deps.Briefs(BriefTestFailureResolve, map[string]string{
 		"source_branch":     r.subject.branch,
 		"worktree_dir":      r.subject.dir,
-		"target_branch":     targetBranch,
+		"target_branch":     r.briefTarget(targetBranch),
 		"failing_suites":    strings.Join(suites, ", "),
 		"archive_path":      archive,
 		"failure_tail":      tail,
