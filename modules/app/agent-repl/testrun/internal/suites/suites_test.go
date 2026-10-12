@@ -516,6 +516,7 @@ func TestGoPkgUnits(t *testing.T) {
 	tests := []struct {
 		name      string
 		covDir    bool
+		parallel  int
 		wantBuild []string
 		wantChunk []string
 	}{
@@ -530,6 +531,12 @@ func TestGoPkgUnits(t *testing.T) {
 			wantBuild: []string{"go", "test", "-c", "-o", "BIN", "./p"},
 			wantChunk: []string{"BIN", "-test.count=1", "-test.v", "-test.parallel=1", "-test.timeout=10m", "-test.run=^(TestA)$"},
 		},
+		{
+			name:      "a wait-bound package overlaps its tests in a chunk",
+			parallel:  4,
+			wantBuild: []string{"go", "test", "-c", "-o", "BIN", "./p"},
+			wantChunk: []string{"BIN", "-test.count=1", "-test.v", "-test.parallel=4", "-test.timeout=10m", "-test.run=^(TestA)$"},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -540,7 +547,7 @@ func TestGoPkgUnits(t *testing.T) {
 			if tt.covDir {
 				cov = filepath.Join(t.TempDir(), "cov")
 			}
-			p := goPkg{Suite: "m", Module: module, Rel: "p", Bin: bin, CovDir: cov}
+			p := goPkg{Suite: "m", Module: module, Rel: "p", Bin: bin, CovDir: cov, Parallel: tt.parallel}
 
 			// Act
 			build, split, err := p.units()
