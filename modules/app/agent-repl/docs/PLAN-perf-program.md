@@ -57,15 +57,34 @@ Status values: queued, running, landed (commit), blocked (reason).
 - After landing: hard bounce, then HOLD rollouts for the profiling program.
 - The queue's existing `pause` / `resume` stay as they are (kept, unused).
 
+### A2. Merge queue: top two race to land (owner, 2026-10-12) — lead implementing
+- Window 3 -> 2 landed (8e28c0471).
+- Next: both of the top two rebase onto the TARGET (not chained), both run the
+  full sequence; whichever passes first lands; before the post-landing
+  restart the other is stopped, the queue advances, and the loser (now first)
+  and the new second both restart from a rebase onto the target.
+- Recovery must respect the window (resumed runs currently bypass it).
+- Recovery must resume agents interrupted mid-turn with "continue" (broken at
+  the hard bounce; branch `bounce-continue`).
+
+### H. Test-writing guidance (owner, 2026-10-12) — queued after A2
+- `/write-tests` skill: test-perf pitfalls and how to avoid them without any
+  coverage loss; a living document updated at every important perf finding.
+- A performance-lessons section in each agent-repl system's AGENTS.md, also a
+  living document.
+
 ### B. Test-run write volume (measured: a full run on the disk writes 25-34GB)
 - B1 fake git hard-linked, not copied — landed (da3219969): ~3GB per daemon suite.
 - B2 daemon test logs over a pipe to the harness, in memory; written to disk
   only for a failed test — running (branch `perf-logpipe`).
 - B3 in-memory SQLite for test daemons that never restart on the same state;
-  restart/handover tests keep the file, decided mechanically — running
-  (branch `perf-memstate`).
-- B4 store mock built once per suite where the store is a dependency —
-  running (branch `perf-memstate`).
+  restart/handover tests keep the file, enforced at runtime — done on
+  `perf-memstate` (570 of 790 integration daemon starts on memory; rollout
+  and boot unit suites ~0 writes), landing next.
+- B4 store mock: measured, nothing heavy left (store is already faked
+  in-process where it is a dependency). Next lever found: integration.test
+  itself writes ~550MB per run (per-daemon copies of the fake webapp dist and
+  prompts dir: share or hard-link them).
 - B5 attribute the remaining ~half of writes my sampler cannot see (root,
   kernel, short-lived processes): needs a root `fs_usage` capture (owner runs
   the prepared script).
@@ -160,9 +179,13 @@ Status values: queued, running, landed (commit), blocked (reason).
 | 2026-10-12 | da3219969 | fake git hard-linked into each daemon's PATH |
 | 2026-10-12 | 839a72d9f | idle sweep cannot hibernate a shim whose start is under way |
 | 2026-10-12 | e3436892c | investigation: first switch and daemon memory |
+| 2026-10-12 | db277cff6 | merge pump reads a run's lease/chain base under the run's lock (data race) |
+| 2026-10-12 | 8e28c0471 | merge queue window 3 -> 2 (head + one behind) |
+| 2026-10-12 | 55a22a48e | hidden pages hold the newest roster instead of redrawing per push |
 
 ## Bounce checkpoints
 
 | When | Recovery | Startup | Notes |
 |---|---|---|---|
+| 2026-10-12 14:27 (after 8e28c0471) | 4 interrupted merges resumed at their steps (recovery resumed 3 in-progress merges although the window is now 2: resumed runs bypass the window); 4 agents interrupted mid-turn were NOT resumed with "continue" -> fix dispatched (branch `bounce-continue`) | daemon served 1.3s after boot; sidecar kickstart 29s again; first tabs +30s | Emacs relaunch -600 again |
 | 2026-10-12 13:39 (after 839a72d9f) | 3 merges suspended at `tests`, all resumed at their step; requesters re-raised; chain rebuilt; no turns in flight | daemon served 1.6s after boot; first session +33s (29s sidecar kickstart); 26 sessions up 54s after Emacs relaunch | Emacs relaunch first attempt failed (-600), second succeeded |
