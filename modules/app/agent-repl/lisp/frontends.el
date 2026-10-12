@@ -48,6 +48,7 @@
 
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--log-verbose "agent-repl-core" (ws fmt &rest args))
+(declare-function agent-repl--log-decision "agent-repl-core" (key decision ws fmt &rest args))
 (declare-function agent-repl--ws-get "agent-repl-workspace" (ws key))
 (declare-function agent-repl--ws-put "agent-repl-workspace" (ws key val))
 (declare-function agent-repl--note-panels-shown "agent-repl-panels" (ws))
