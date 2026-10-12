@@ -14,8 +14,8 @@ import (
 // SECOND tab, so two rounds must not upsert one another.
 func TestTabRoundIsPartOfTheRowKey(t *testing.T) {
 	// Arrange: one tab kind at two rounds.
-	first := tabRef(theWorkspace, "lease-1", TabTests, 1)
-	second := tabRef(theWorkspace, "lease-1", TabTests, 2)
+	first := tabRef(theWorkspace, "lease-1", roundTabKey(TabCommitting, 1))
+	second := tabRef(theWorkspace, "lease-1", roundTabKey(TabCommitting, 2))
 
 	// Act.
 	same := first.Row == second.Row
@@ -220,15 +220,25 @@ func tabBadgeOf(t *testing.T, tab *frontendv1.FeedMergeTab) (*frontendv1.FeedMer
 // settled, so no kind can drop the instant its round began.
 func TestEveryTabBuilderShipsTheBadgeItWasGiven(t *testing.T) {
 	builders := map[string]func(tabState) *frontendv1.FeedMergeTab{
-		TabQueue:        func(s tabState) *frontendv1.FeedMergeTab { return queueTab(&frontendv1.FeedMergeQueue{}, s) },
-		TabPrePrompt:    func(s tabState) *frontendv1.FeedMergeTab { return promptTab(TabPrePrompt, s) },
-		TabRebasing:     func(s tabState) *frontendv1.FeedMergeTab { return rebasingTab(s, 0, 0, nil) },
-		TabConflicts:    conflictsTab,
-		TabTests:        func(s tabState) *frontendv1.FeedMergeTab { return testsTab(s, nil, nil) },
-		TabFixes:        func(s tabState) *frontendv1.FeedMergeTab { return fixesTab(s, 1) },
-		TabCommitting:   func(s tabState) *frontendv1.FeedMergeTab { return committingTab(s, "x") },
-		TabUpdatingMain: func(s tabState) *frontendv1.FeedMergeTab { return updatingMainTab(s, "") },
-		TabPostPrompt:   func(s tabState) *frontendv1.FeedMergeTab { return promptTab(TabPostPrompt, s) },
+		TabQueue:     func(s tabState) *frontendv1.FeedMergeTab { return queueTab(&frontendv1.FeedMergeQueue{}, s) },
+		TabPrePrompt: func(s tabState) *frontendv1.FeedMergeTab { return promptTab(TabPrePrompt, s) },
+		TabRebasing: func(s tabState) *frontendv1.FeedMergeTab {
+			v := rebaseView{Span: spanOf(s)}
+			return v.rebasingTab(false)
+		},
+		rowRebaseCommit: func(s tabState) *frontendv1.FeedMergeTab {
+			v := rebaseView{Replay: 1, Commits: []commitView{{SHA: "a1b2c3d4e5", Subject: "x", Span: spanOf(s)}}}
+			return v.commitTab(0, false)
+		},
+		TabTests: func(s tabState) *frontendv1.FeedMergeTab {
+			v := testsView{Span: spanOf(s)}
+			return v.testsTab(false)
+		},
+		rowTestsRun:       func(s tabState) *frontendv1.FeedMergeTab { return runTab(1, s, nil, nil) },
+		rowTestsRunFixing: func(s tabState) *frontendv1.FeedMergeTab { return fixingTab(s, 1) },
+		TabCommitting:     func(s tabState) *frontendv1.FeedMergeTab { return committingTab(s, "x") },
+		TabUpdatingMain:   func(s tabState) *frontendv1.FeedMergeTab { return updatingMainTab(s, "") },
+		TabPostPrompt:     func(s tabState) *frontendv1.FeedMergeTab { return promptTab(TabPostPrompt, s) },
 	}
 	for kind, build := range builders {
 		t.Run(kind, func(t *testing.T) {
@@ -290,15 +300,12 @@ func TestTheNewTabsDrawTheirWords(t *testing.T) {
 	}
 }
 
-func TestTheRebasingTabCarriesItsProgressAndLines(t *testing.T) {
-	// Act.
-	tab := rebasingTab(tabState{startedMS: 1}, 2, 5, []string{"replayed 2/5 · x"})
-
-	// Assert.
-	r := tab.GetRebasing()
-	if r.GetProgress().GetReplayed() != 2 || r.GetProgress().GetTotal() != 5 || len(r.GetLines()) != 1 || r.GetLive() == nil {
-		t.Fatalf("rebasing tab = %+v", r)
+// spanOf is the view span a badge state was drawn from.
+func spanOf(s tabState) span {
+	if s.settled {
+		return span{StartedMS: s.startedMS, EndedMS: s.endedMS, Failure: s.failure}
 	}
+	return span{StartedMS: s.startedMS}
 }
 
 func TestTheUpdatingMainTabMovesFromFetchingToFastForwarding(t *testing.T) {

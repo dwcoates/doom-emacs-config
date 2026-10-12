@@ -3,7 +3,6 @@ package merge
 import (
 	"context"
 	"fmt"
-	"strconv"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -18,10 +17,12 @@ import (
 // This file synthesizes the merge bubble: the head row on the root feed, and
 // the tab rows on the bubble's own sub-feed.
 //
-// Tabs are APPEND-ONLY and ROUND-NUMBERED. A tab never reopens — a second pass
-// is a SECOND TAB carrying the round in its label ("tests (2)") — so the row
-// key carries the round and a re-push of the same round upserts that tab in
-// place rather than growing a third.
+// Top-level tabs are APPEND-ONLY and ROUND-NUMBERED. A tab never reopens — a
+// second pass is a SECOND TAB carrying the round in its label ("committing
+// (2)") — so the row key carries the round and a re-push of the same round
+// upserts that tab in place rather than growing a third. The rebasing and the
+// tests tab are the exception: ONE each, whose subtabs are keyed by what they
+// are (nested.go).
 
 // mergeFeed addresses one merge bubble's sub-feed.
 func mergeFeed(lease ids.LeaseID) feedid.Feed {
@@ -40,13 +41,13 @@ func headRef(ws ids.WorkspaceID, lease ids.LeaseID) feedid.Ref {
 	}
 }
 
-// tabRef addresses one tab row of a merge bubble's sub-feed. The round is part
-// of the key, which is what makes a second round a second tab.
-func tabRef(ws ids.WorkspaceID, lease ids.LeaseID, kind string, round int) feedid.Ref {
+// tabRef addresses one tab row of a merge bubble's sub-feed in WS's
+// placement.
+func tabRef(ws ids.WorkspaceID, lease ids.LeaseID, key tabKey) feedid.Ref {
 	return feedid.Ref{
 		WS:   ws,
 		Feed: mergeFeed(lease),
-		Row:  feedid.RowKey{Kind: feedid.KindMergeTab, ID: kind, Sub: strconv.Itoa(round)},
+		Row:  feedid.RowKey{Kind: feedid.KindMergeTab, ID: key.id, Sub: key.sub},
 	}
 }
 
@@ -68,12 +69,8 @@ func tabWord(kind string) string {
 		return "pre-prompt"
 	case TabRebasing:
 		return "rebasing"
-	case TabConflicts:
-		return "conflicts"
 	case TabTests:
 		return "tests"
-	case TabFixes:
-		return "fixes"
 	case TabCommitting:
 		return "committing"
 	case TabUpdatingMain:
@@ -126,13 +123,31 @@ func (s tabState) waitingOnUser() *frontendv1.FeedMergeTabWaitingOnUser {
 	return &frontendv1.FeedMergeTabWaitingOnUser{StartedAtMs: s.startedMS}
 }
 
-// tabRow wraps one tab's kind arm into the feed row that carries it.
-func tabRow(ws ids.WorkspaceID, lease ids.LeaseID, kind string, round int, tab *frontendv1.FeedMergeTab) *frontendv1.FeedRow {
-	tab.Label = tabLabel(kind, round)
-	return &frontendv1.FeedRow{
-		Id:  feedid.Encode(tabRef(ws, lease, kind, round)),
+// tabRow wraps one labelled tab into the feed row that carries it, parented
+// to the tab it is drawn in when it is a subtab.
+func tabRow(ws ids.WorkspaceID, lease ids.LeaseID, key tabKey, tab *frontendv1.FeedMergeTab) *frontendv1.FeedRow {
+	row := &frontendv1.FeedRow{
+		Id:  feedid.Encode(tabRef(ws, lease, key)),
 		Row: &frontendv1.FeedRow_MergeTab{MergeTab: tab},
 	}
+	if key.parent != nil {
+		row.Parent = &frontendv1.FeedRowParent{Row: feedid.Encode(tabRef(ws, lease, *key.parent))}
+	}
+	return row
+}
+
+// frontTabLabel is the label of the TOP-LEVEL tab a round is drawn under,
+// which the queue shows for the merge at its front: a conflict resolution is
+// drawn under the rebasing tab and a fixing attempt under the tests tab, so
+// those rounds read as the tab the reader would find them in.
+func frontTabLabel(round tabRound) *frontendv1.FeedMergeTabLabel {
+	switch round.kind {
+	case TabRebasing, TabConflicts:
+		return tabLabel(TabRebasing, 1)
+	case TabTests, TabFixes:
+		return tabLabel(TabTests, 1)
+	}
+	return tabLabel(round.kind, round.n)
 }
 
 // headRow builds the bubble's collapsed head: the branch line, the clock, and
@@ -310,10 +325,17 @@ func (o *orchestrator) restateHead(ws ids.WorkspaceID) {
 	o.publishHead(ws, head.lease, head.label, head.startedMS, head.result)
 }
 
-// publishTab publishes one tab round in the bubble's feed.
-func (o *orchestrator) publishTab(ws ids.WorkspaceID, lease ids.LeaseID, kind string, round int, tab *frontendv1.FeedMergeTab) {
+// publishRoundTab publishes one top-level tab round in the bubble's feed,
+// labelled for its round.
+func (o *orchestrator) publishRoundTab(ws ids.WorkspaceID, lease ids.LeaseID, kind string, round int, tab *frontendv1.FeedMergeTab) {
+	tab.Label = tabLabel(kind, round)
+	o.publishTab(ws, lease, roundTabKey(kind, round), tab)
+}
+
+// publishTab publishes one labelled tab row, under KEY, in the bubble's feed.
+func (o *orchestrator) publishTab(ws ids.WorkspaceID, lease ids.LeaseID, key tabKey, tab *frontendv1.FeedMergeTab) {
 	at := o.bubbleOf(ws)
-	o.deps.Feed.UpsertDurable(at.ws, mergeFeed(lease), tabRow(at.ws, lease, kind, round, tab))
+	o.deps.Feed.UpsertDurable(at.ws, mergeFeed(lease), tabRow(at.ws, lease, key, tab))
 }
 
 // branchLabel resolves the head's branch line ("ABC/fix-flaky → master").
@@ -377,62 +399,6 @@ func saidText(text string) *conversationv1.UserSaid {
 			Block: &conversationv1.UserContentBlock_Text{Text: &conversationv1.TextBlock{Text: text}},
 		}},
 	}}
-}
-
-// rebasingTab builds a rebasing round's tab: the replay's progress and its
-// narration, replaced whole per push.
-func rebasingTab(st tabState, replayed, total int, lines []string) *frontendv1.FeedMergeTab {
-	inner := &frontendv1.FeedMergeTabRebasing{Progress: &frontendv1.FeedMergeRebaseProgress{Replayed: uint32(replayed), Total: uint32(total)}}
-	for _, line := range lines {
-		inner.Lines = append(inner.Lines, &frontendv1.FeedMergeRebaseLine{Text: line})
-	}
-	if live, settled := st.badge(); live != nil {
-		inner.State = &frontendv1.FeedMergeTabRebasing_Live{Live: live}
-	} else {
-		inner.State = &frontendv1.FeedMergeTabRebasing_Settled{Settled: settled}
-	}
-	return &frontendv1.FeedMergeTab{Kind: &frontendv1.FeedMergeTab_Rebasing{Rebasing: inner}}
-}
-
-// conflictsTab builds the conflicts tab, whose content is the sub-feed rows
-// parented to it: the requester's own session resolving the conflict.
-func conflictsTab(st tabState) *frontendv1.FeedMergeTab {
-	inner := &frontendv1.FeedMergeTabConflicts{}
-	if waiting := st.waitingOnUser(); waiting != nil {
-		inner.State = &frontendv1.FeedMergeTabConflicts_WaitingOnUser{WaitingOnUser: waiting}
-	} else if live, settled := st.badge(); live != nil {
-		inner.State = &frontendv1.FeedMergeTabConflicts_Live{Live: live}
-	} else {
-		inner.State = &frontendv1.FeedMergeTabConflicts_Settled{Settled: settled}
-	}
-	return &frontendv1.FeedMergeTab{Kind: &frontendv1.FeedMergeTab_Conflicts{Conflicts: inner}}
-}
-
-// testsTab builds a tests round's tab: the per-suite rows with their painted
-// output, and the round's log link once the run has written it, replaced whole
-// per push.
-func testsTab(st tabState, suites []*frontendv1.FeedMergeTestSuite, log *frontendv1.FeedMergeTestLog) *frontendv1.FeedMergeTab {
-	inner := &frontendv1.FeedMergeTabTests{Suites: suites, Log: log}
-	if live, settled := st.badge(); live != nil {
-		inner.State = &frontendv1.FeedMergeTabTests_Live{Live: live}
-	} else {
-		inner.State = &frontendv1.FeedMergeTabTests_Settled{Settled: settled}
-	}
-	return &frontendv1.FeedMergeTab{Kind: &frontendv1.FeedMergeTab_Tests{Tests: inner}}
-}
-
-// fixesTab builds a fixing attempt's tab, carrying the attempt and the ONE
-// bound; its content is the sub-feed rows parented to it.
-func fixesTab(st tabState, attempt int) *frontendv1.FeedMergeTab {
-	inner := &frontendv1.FeedMergeTabFixes{Attempt: &frontendv1.FeedMergeFixAttempt{Attempt: uint32(attempt), MaxAttempts: MaxFixAttempts}}
-	if waiting := st.waitingOnUser(); waiting != nil {
-		inner.State = &frontendv1.FeedMergeTabFixes_WaitingOnUser{WaitingOnUser: waiting}
-	} else if live, settled := st.badge(); live != nil {
-		inner.State = &frontendv1.FeedMergeTabFixes_Live{Live: live}
-	} else {
-		inner.State = &frontendv1.FeedMergeTabFixes_Settled{Settled: settled}
-	}
-	return &frontendv1.FeedMergeTab{Kind: &frontendv1.FeedMergeTab_Fixes{Fixes: inner}}
 }
 
 // committingTab builds the committing tab: the merge commit's subject.

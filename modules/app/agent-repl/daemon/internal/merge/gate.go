@@ -99,7 +99,9 @@ func (r *run) gate(ctx context.Context, round tabRound, tip, head string, permit
 	g := &gateRun{r: r, round: round, log: r.o.testLog(r.lease.ID, round.n),
 		states: map[string]suiteState{}, counts: newSuiteCounts(), release: release, begun: begun}
 	r.setStep(ctx, footer.StepTesting, nil)
-	r.upsert(round, testsTab(round.live(), nil, nil))
+	// THE RUN IS A SUBTAB OF THE ONE TESTS TAB, which stands live again for it.
+	r.openTesting(round)
+	r.publishRun(round, round.live(), nil, nil)
 
 	argv := r.o.deps.TestCommand(dir)
 	if len(argv) == 0 {
@@ -136,14 +138,18 @@ func (r *run) gate(ctx context.Context, round tabRound, tip, head string, permit
 		// again on the new base, and says so.
 		if errors.Is(context.Cause(ctx), errBaseMoved) {
 			g.cut(ctx, "the merge ahead moved")
-			r.upsert(round, testsTab(round.settled(r.o.nowMS(), "the merge ahead moved; the tests run again on its new tip"), nil, g.link()))
+			const moved = "the merge ahead moved; the tests run again on its new tip"
+			r.publishRun(round, round.settled(r.o.nowMS(), moved), nil, g.link())
+			r.settleTesting(moved)
 			r.closeTab(ctx, round, "restarted")
 			return gateVerdict{}, err
 		}
 		if ctx.Err() != nil || r.o.isDraining() {
 			g.cut(ctx, "the daemon's exit, a restart or a transfer")
 		}
-		r.upsert(round, testsTab(round.settled(r.o.nowMS(), "the test gate could not run"), nil, g.link()))
+		const unrun = "the test gate could not run"
+		r.publishRun(round, round.settled(r.o.nowMS(), unrun), nil, g.link())
+		r.settleTesting(unrun)
 		r.closeTab(ctx, round, "failed")
 		return gateVerdict{}, err
 	}
@@ -151,15 +157,18 @@ func (r *run) gate(ctx context.Context, round tabRound, tip, head string, permit
 		return g.brokenGate(ctx, result, fmt.Sprintf("%s; the whole run is archived at %s", why, result.ArchivePath)), nil
 	}
 	if result.Passed {
-		r.upsert(round, testsTab(round.settled(r.o.nowMS(), ""), result.Suites, g.link()))
+		r.publishRun(round, round.settled(r.o.nowMS(), ""), result.Suites, g.link())
+		r.settleTesting("")
 		r.closeTab(ctx, round, "succeeded")
 		r.o.log(ctx, r.ws).Info(op, "the merge's suites passed", dlog.Context{
 			"workspace": string(r.ws), "round": round.n, "archive": result.ArchivePath, "verdict": "passed",
 			"total_seconds": g.since()})
 		return gateVerdict{result: result, round: round.n}, nil
 	}
+	// A FAILED RUN LEAVES THE TESTS TAB LIVE: a fixing attempt follows it, or
+	// the caller settles the tab as given up.
 	summary := fmt.Sprintf("the test suite failed (exit %d); the whole run is archived at %s", result.ExitCode, result.ArchivePath)
-	r.upsert(round, testsTab(round.settled(r.o.nowMS(), summary), result.Suites, g.link()))
+	r.publishRun(round, round.settled(r.o.nowMS(), summary), result.Suites, g.link())
 	r.closeTab(ctx, round, "failed")
 	r.o.log(ctx, r.ws).Info(op, "the merge's suites failed", dlog.Context{
 		"workspace": string(r.ws), "round": round.n, "exit_code": result.ExitCode, "archive": result.ArchivePath,
@@ -186,6 +195,8 @@ func gateDidNotRun(code int) (string, bool) {
 func (r *run) gateNothing(ctx context.Context, round tabRound, paths []string, selection SuiteSelection, begun time.Time) (gateVerdict, error) {
 	log := r.o.testLog(r.lease.ID, round.n)
 	r.setStep(ctx, footer.StepTesting, nil)
+	// THE RUN IS A SUBTAB OF THE ONE TESTS TAB, which stands live again for it.
+	r.openTesting(round)
 	if err := os.MkdirAll(filepath.Dir(log.path), 0o755); err != nil {
 		return gateVerdict{}, fmt.Errorf("merge: creating the test log directory %s: %w", filepath.Dir(log.path), err)
 	}
@@ -197,7 +208,8 @@ func (r *run) gateNothing(ctx context.Context, round tabRound, paths []string, s
 	if err := os.WriteFile(log.path, []byte(body), 0o644); err != nil {
 		return gateVerdict{}, fmt.Errorf("merge: writing the test log %s: %w", log.path, err)
 	}
-	r.upsert(round, testsTab(round.settled(r.o.nowMS(), ""), nil, r.o.testLogLink(log)))
+	r.publishRun(round, round.settled(r.o.nowMS(), ""), nil, r.o.testLogLink(log))
+	r.settleTesting("")
 	r.closeTab(ctx, round, "succeeded")
 	r.o.log(ctx, r.ws).Info("daemon.merge.tests", "no suite is selected for the merge's change; the gate passes without starting the runner", dlog.Context{
 		"workspace": string(r.ws), "round": round.n, "paths": strings.Join(paths, ","), "reason": selection.Reason, "archive": log.path,
@@ -252,7 +264,7 @@ func (g *gateRun) run(ctx context.Context, dir string, argv, selected []string) 
 	g.written = true
 	writer := bufio.NewWriter(file)
 	var writeErr error
-	g.r.upsert(g.round, testsTab(g.round.live(), nil, g.link()))
+	g.r.publishRun(g.round, g.round.live(), nil, g.link())
 	measured, runErr := g.r.o.deps.TestRunner.RunLinesMeasured(ctx, dir, argv, func(line string) {
 		if _, err := writer.WriteString(line + "\n"); err != nil && writeErr == nil {
 			writeErr = err
@@ -307,7 +319,7 @@ func (g *gateRun) edge(line string) {
 		suites := append([]*frontendv1.FeedMergeTestSuite(nil), g.suites...)
 		g.mu.Unlock()
 		if started {
-			g.r.upsert(g.round, testsTab(g.round.live(), suites, g.link()))
+			g.r.publishRun(g.round, g.round.live(), suites, g.link())
 		}
 		return
 	}
@@ -323,7 +335,7 @@ func (g *gateRun) edge(line string) {
 	g.r.updateFacts(func(f *footer.MergeFacts) {
 		f.Line = suiteLine(name, state)
 	})
-	g.r.upsert(g.round, testsTab(g.round.live(), suites, g.link()))
+	g.r.publishRun(g.round, g.round.live(), suites, g.link())
 }
 
 // slotLine is bin/suite-slot.sh's line once a run waited for the host's suite
@@ -416,7 +428,8 @@ func suiteEdge(line string) (string, suiteState, bool) {
 // the failure line it names.
 func (g *gateRun) brokenGate(ctx context.Context, result GateResult, why string) gateVerdict {
 	line := "the test gate itself failed to run: " + why
-	g.r.upsert(g.round, testsTab(g.round.settled(g.r.o.nowMS(), line), result.Suites, g.link()))
+	g.r.publishRun(g.round, g.round.settled(g.r.o.nowMS(), line), result.Suites, g.link())
+	g.r.settleTesting(line)
 	g.r.closeTab(ctx, g.round, "gate_broken")
 	g.r.o.log(ctx, g.r.ws).Warn("daemon.merge.tests", "the test gate itself failed to run; the merge fails with no fixing attempt", dlog.Context{
 		"workspace": string(g.r.ws), "round": g.round.n, "why": why, "exit_code": result.ExitCode, "archive": result.ArchivePath,

@@ -383,14 +383,16 @@ the vendor (`AGENT_REPL_FORBID_VENDOR_CALLS=1` in every process).
 - the emacs-repo method: pre-prompt tab (when configured) runs the session
   under the lease with origin MERGE_BEFORE_ACTION and its rows parented to
   the tab (output address); merge tab narrates the no-ff commit; a
-  conflicting branch opens the conflicts tab, the agent is prompted once
+  conflicting branch opens a conflict section on its commit's subtab of the
+  rebasing tab, the agent is prompted once
   with the brief from prompts/ (assert the placeholders were spliced),
   then parked: host composer `merge_parked`, footer `merging.parked`, a
-  SubmitPrompt while parked lands in the conflicts tab (not refused, not a
+  SubmitPrompt while parked lands in that commit's subtab (not refused, not a
   session turn)
 - tests tab runs `bin/test-all.sh --suites …` (a fake test-all.sh in the
   repo records its args and exits per a control file): pass → settled; fail
-  → fixes tab with the brief, then parked on escalation; no re-run on flake
+  → a fixing sub-subtab under the failed run's subtab with the brief, then
+  parked on escalation; no re-run on flake
 - post-prompt failure never fails the run (rides the terminal)
 - landed: FeedMergeSuccess{commit}, footer `merging.merged`, roster `merged`,
   recently_merged, worktree removed only after the terminal push; the
