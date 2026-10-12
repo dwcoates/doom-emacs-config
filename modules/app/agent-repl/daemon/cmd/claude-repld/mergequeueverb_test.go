@@ -248,8 +248,12 @@ func TestTheMergeQueueVerbNamesEachSource(t *testing.T) {
 	}{
 		{name: "own branch, detached by default", args: func(*mergeFixture) []string { return []string{"-own"} },
 			check: func(_ *mergeFixture, e commandfile.Entry) bool {
-				return e.Detached && !e.KeepOpen && e.Branch == "" && e.SourceDir == "" && !e.PRWasMerged
+				return e.Detached && !e.KeepOpen && e.Branch == "" && e.SourceDir == "" && !e.PRWasMerged && !e.Front
 			}},
+		{name: "own branch to the front", args: func(*mergeFixture) []string { return []string{"-own", "-front"} },
+			check: func(_ *mergeFixture, e commandfile.Entry) bool { return e.Detached && e.Front }},
+		{name: "a branch to the front", args: func(*mergeFixture) []string { return []string{"-branch", "agent-1/fix", "-front"} },
+			check: func(_ *mergeFixture, e commandfile.Entry) bool { return e.Branch == "agent-1/fix" && e.Front }},
 		{name: "own branch in place", args: func(*mergeFixture) []string { return []string{"-own", "-in-place"} },
 			check: func(_ *mergeFixture, e commandfile.Entry) bool { return !e.Detached && !e.KeepOpen }},
 		{name: "own branch kept open, in place", args: func(*mergeFixture) []string { return []string{"-own", "-keep-open"} },
@@ -1033,6 +1037,7 @@ func TestTheMergeQueueVerbRefusesAMalformedControl(t *testing.T) {
 		{name: "an evict-dir that is not there", args: func(*mergeFixture) []string { return []string{"-evict-dir", "/no/such/worktree"} }},
 		{name: "a repository-dir that is not there", args: func(*mergeFixture) []string { return []string{"-pause", "-repository-dir", "/no/such/repo"} }},
 		{name: "a non-positive answer timeout", args: func(*mergeFixture) []string { return []string{"-evict", "-answer-timeout", "0s"} }},
+		{name: "a control to the front", args: func(*mergeFixture) []string { return []string{"-pause", "-front"} }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

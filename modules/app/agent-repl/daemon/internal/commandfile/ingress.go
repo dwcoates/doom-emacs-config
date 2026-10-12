@@ -372,10 +372,21 @@ func (i *ingress) apply(ctx context.Context, log dlog.Logger, file string, index
 	}
 }
 
-// mergeSource reads a merge entry's source. Another workspace is keyed by its
-// worktree path, and a path no workspace is registered at is the contract's
-// unknown_source_workspace refusal.
+// mergeSource reads a merge entry's source, and whether it asked for the
+// front of its queue, which any source may.
 func (i *ingress) mergeSource(ctx context.Context, requester ids.WorkspaceID, entry Entry) (wsm.MergeSource, error) {
+	source, err := i.mergeSourceArm(ctx, requester, entry)
+	if err != nil {
+		return wsm.MergeSource{}, err
+	}
+	source.Front = entry.Front
+	return source, nil
+}
+
+// mergeSourceArm reads a merge entry's source arm. Another workspace is keyed
+// by its worktree path, and a path no workspace is registered at is the
+// contract's unknown_source_workspace refusal.
+func (i *ingress) mergeSourceArm(ctx context.Context, requester ids.WorkspaceID, entry Entry) (wsm.MergeSource, error) {
 	switch {
 	case entry.Branch != "":
 		return wsm.MergeSource{Kind: wsm.MergeSourceBranch, Branch: entry.Branch}, nil

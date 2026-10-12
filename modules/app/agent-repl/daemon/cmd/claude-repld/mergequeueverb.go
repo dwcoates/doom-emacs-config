@@ -30,10 +30,10 @@ import (
 
 // THE `merge-queue` VERB:
 //
-//	claude-repld merge-queue -own [-keep-open] [-wait] [-state-dir DIR]
-//	claude-repld merge-queue -dir WORKTREE [-wait] [-state-dir DIR]
-//	claude-repld merge-queue -branch BRANCH [-wait] [-state-dir DIR]
-//	claude-repld merge-queue -pr-merged [-wait] [-state-dir DIR]
+//	claude-repld merge-queue -own [-keep-open] [-front] [-wait] [-state-dir DIR]
+//	claude-repld merge-queue -dir WORKTREE [-front] [-wait] [-state-dir DIR]
+//	claude-repld merge-queue -branch BRANCH [-front] [-wait] [-state-dir DIR]
+//	claude-repld merge-queue -pr-merged [-front] [-wait] [-state-dir DIR]
 //	claude-repld merge-queue -evict | -evict-dir WORKTREE [-answer-timeout D] [-state-dir DIR]
 //	claude-repld merge-queue -pause | -resume [-repository-dir DIR] [-answer-timeout D] [-state-dir DIR]
 //
@@ -49,6 +49,9 @@ import (
 //     closes once it lands;
 //   - `-branch` a branch that is no workspace (a subagent's);
 //   - `-pr-merged` its own branch, already merged upstream.
+//
+// `-front` puts any of them at the FRONT of its queue once it is put in line:
+// ahead of every ordinary merge still waiting, never ahead of the one running.
 //
 // No workspace is ever created for a merge. The verb decides nothing and never
 // touches git.
@@ -227,6 +230,7 @@ func runMergeQueueVerb(ctx context.Context, args []string, dial mergeQueueDialer
 	dir := fs.String("dir", "", "merge another workspace's branch, by its worktree; it closes once it lands")
 	branch := fs.String("branch", "", "merge a branch that is no workspace (a subagent's)")
 	prMerged := fs.Bool("pr-merged", false, "the calling workspace's branch already merged upstream: update the default branch and close it")
+	front := fs.Bool("front", false, "with a merge: put it at the front of its queue, ahead of every ordinary merge waiting, never ahead of the one running")
 	evict := fs.Bool("evict", false, "take the calling workspace's merge off the queue")
 	evictDir := fs.String("evict-dir", "", "take another workspace's merge off the queue, by its worktree")
 	pause := fs.Bool("pause", false, "pause the merge queue (every repository's, or -repository-dir's)")
@@ -242,7 +246,7 @@ func runMergeQueueVerb(ctx context.Context, args []string, dial mergeQueueDialer
 		return fail("unexpected arguments: %s", strings.Join(fs.Args(), " "))
 	}
 	source, err := resolveMergeQueueSource(mergeQueueFlags{
-		own: *own, keepOpen: *keepOpen, inPlace: *inPlace, wait: *wait, dir: *dir, branch: *branch, prMerged: *prMerged,
+		own: *own, keepOpen: *keepOpen, inPlace: *inPlace, wait: *wait, dir: *dir, branch: *branch, prMerged: *prMerged, front: *front,
 		evict: *evict, evictDir: *evictDir, pause: *pause, resume: *resume, repositoryDir: *repositoryDir,
 	})
 	if err != nil {
@@ -277,6 +281,8 @@ type mergeQueueFlags struct {
 	inPlace, wait bool
 	dir, branch   string
 	prMerged      bool
+	// front puts the merge at the front of its queue (commandfile.Entry.Front).
+	front         bool
 	evict         bool
 	evictDir      string
 	pause, resume bool
@@ -284,8 +290,23 @@ type mergeQueueFlags struct {
 }
 
 // resolveMergeQueueSource turns the flags into what the calling workspace
-// asks for. Exactly one merge or control is named.
+// asks for, and puts a merge asked for with -front at the front of its queue.
 func resolveMergeQueueSource(f mergeQueueFlags) (mergeQueueSource, error) {
+	source, err := resolveMergeQueueRequest(f)
+	if err != nil || !f.front {
+		return source, err
+	}
+	if source.control {
+		return mergeQueueSource{}, errors.New("-front goes with a merge: it places the merge in its queue, and a queue control places nothing")
+	}
+	source.entry.Front = true
+	source.label += ", to the front of the queue"
+	return source, nil
+}
+
+// resolveMergeQueueRequest turns the flags into the one merge or control they
+// name.
+func resolveMergeQueueRequest(f mergeQueueFlags) (mergeQueueSource, error) {
 	named := 0
 	for _, set := range []bool{f.own, f.dir != "", f.branch != "", f.prMerged, f.evict, f.evictDir != "", f.pause, f.resume} {
 		if set {

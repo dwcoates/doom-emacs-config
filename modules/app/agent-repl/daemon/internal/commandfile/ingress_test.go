@@ -812,6 +812,8 @@ func TestApplyFileMapsEachMergeSourceOntoTheRequest(t *testing.T) {
 		{name: "a branch", body: `[{"type":"merge","workspace":"w1","branch":"agent-1/fix"}]`, want: wsm.MergeSource{Kind: wsm.MergeSourceBranch, Branch: "agent-1/fix"}},
 		{name: "another workspace", body: `[{"type":"merge","workspace":"w1","source_dir":"/tree/w2"}]`, want: wsm.MergeSource{Kind: wsm.MergeSourceWorkspace, Workspace: "w2"}},
 		{name: "merged upstream", body: `[{"type":"merge","workspace":"w1","pr_was_merged":true}]`, want: wsm.MergeSource{Kind: wsm.MergeSourceMergedUpstream}},
+		{name: "own branch to the front", body: `[{"type":"merge","workspace":"w1","front":true}]`, want: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch, Front: true}},
+		{name: "a branch to the front", body: `[{"type":"merge","workspace":"w1","branch":"agent-1/fix","front":true}]`, want: wsm.MergeSource{Kind: wsm.MergeSourceBranch, Branch: "agent-1/fix", Front: true}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
