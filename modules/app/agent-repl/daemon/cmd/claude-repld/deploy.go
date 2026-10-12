@@ -98,7 +98,7 @@ func resolveDeployPaths(getenv func(string) string) (deployPaths, error) {
 // ensures the launchd services with.
 func buildDeployer(ctx context.Context, p deployerParams) (*deploy.Deployer, *deploy.Restarter, error) {
 	log := p.Surfaces.Global()
-	selfBuild, err := buildid.File(p.SelfExe)
+	selfBuild, err := buildid.FileCached(p.SelfExe)
 	if err != nil {
 		return nil, nil, fmt.Errorf("claude-repld: hash this daemon's own binary %s: %w", p.SelfExe, err)
 	}
