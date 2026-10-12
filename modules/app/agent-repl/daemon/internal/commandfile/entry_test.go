@@ -467,6 +467,19 @@ func TestAMergeFieldOnAnotherEntryIsRefused(t *testing.T) {
 	}
 }
 
+func TestFrontOnAnotherEntryIsRefused(t *testing.T) {
+	// Arrange.
+	entry := Entry{Type: TypeMergeEvict, Workspace: "w1", Front: true}
+
+	// Act.
+	err := entry.Validate()
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "front is a merge's field") {
+		t.Fatalf("Validate() = %v, want the merge-only field refused", err)
+	}
+}
+
 func TestParseReadsTheSkillsPRMergedEntry(t *testing.T) {
 	// Act.
 	entries, err := parse([]byte(`[{"type":"merge","project_dir":"/wt/one","workspace":"one","pr_was_merged":true}]`))
