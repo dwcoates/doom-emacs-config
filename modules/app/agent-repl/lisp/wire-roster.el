@@ -191,6 +191,39 @@ stopped following the roster's `current' (2026-10-11)."
                    "RosterRowMergeWorkspace" 'label object
                    #'agent-repl-wire-decode-roster-row-merge-workspace-label)))))
 
+(defun agent-repl-wire-decode-roster-row-one-shot-armed (value)
+  "Decode VALUE as the empty `RosterRowOneShotArmed'.
+The one-shot has not ended without a live merge: the tab draws the
+one-shot glyph."
+  (agent-repl-wire--decode-empty "RosterRowOneShotArmed" value))
+
+(defun agent-repl-wire-decode-roster-row-one-shot-failed (value)
+  "Decode VALUE as the empty `RosterRowOneShotFailed'.
+The one-shot's last turn ended with no merge asked for, or its merge
+failed: the tab draws the failure glyph."
+  (agent-repl-wire--decode-empty "RosterRowOneShotFailed" value))
+
+(defconst agent-repl-wire-roster-row-one-shot-arms
+  '((armed :armed agent-repl-wire-decode-roster-row-one-shot-armed)
+    (failed :failed agent-repl-wire-decode-roster-row-one-shot-failed))
+  "`RosterRowOneShot.outcome''s arm table.
+Each entry is (WIRE-KEY ARM-KEYWORD DECODER).")
+
+(defun agent-repl-wire-decode-roster-row-one-shot (value)
+  "Decode VALUE as `RosterRowOneShot', a plist `(:arm ARM :value nil)'.
+The ONE-SHOT mark: the workspace was created as a one-shot, and ARM says
+whether it ended without a live merge (`:failed') or not (`:armed').  The
+row carries it only for a one-shot.  AN UNSET ONEOF IS INVALID and is
+rejected loudly, as for the status."
+  (let ((object (agent-repl-wire--object "RosterRowOneShot" value)))
+    (agent-repl-wire--check-keys "RosterRowOneShot" object
+                                 (mapcar #'car agent-repl-wire-roster-row-one-shot-arms))
+    (agent-repl-wire--decoded
+     "RosterRowOneShot"
+     (agent-repl-wire--decode-oneof
+      "RosterRowOneShot" 'outcome object
+      agent-repl-wire-roster-row-one-shot-arms))))
+
 (defun agent-repl-wire-decode-roster-row-availability-pending (value)
   "Decode VALUE as the empty `RosterRowAvailabilityPending'.
 The daemon is still bringing the session up: the workspace is not opened."
@@ -585,14 +618,14 @@ Nested workspaces — a spawned family under its parent — in render order."
   (agent-repl-wire-decode-roster-row value))
 
 (defconst agent-repl-wire--roster-row-keys
-  (append '(workspace attention priority viewed reviving detachedLive lastSelected availability name current children when detail closed mergeWorkspace)
+  (append '(workspace attention priority viewed reviving detachedLive oneShot lastSelected availability name current children when detail closed mergeWorkspace)
           (mapcar #'car agent-repl-wire-roster-row-status-arms))
   "Every key `RosterRow' may carry: its own fields plus the 22 status arms.")
 
 (defun agent-repl-wire-decode-roster-row (value)
   "Decode VALUE as `RosterRow'.
 Returns `(:workspace W :attention A :priority P :viewed V :reviving R
-:detached-live DL :last-selected L :availability AV :name N :status
+:detached-live DL :one-shot OS :last-selected L :availability AV :name N :status
 S :current C :children ROWS :when WHEN :detail D :closed CLOSED
 :merge-workspace MW)', with
 the message tree preserved as the contract spells it."
@@ -618,6 +651,9 @@ the message tree preserved as the contract spells it."
            :detached-live (agent-repl-wire--decode-optional-message
                            "RosterRow" 'detachedLive object
                            #'agent-repl-wire-decode-roster-row-detached-live)
+           :one-shot (agent-repl-wire--decode-optional-message
+                      "RosterRow" 'oneShot object
+                      #'agent-repl-wire-decode-roster-row-one-shot)
            :last-selected (agent-repl-wire--decode-optional-message
                            "RosterRow" 'lastSelected object
                            #'agent-repl-wire-decode-roster-row-last-selected)

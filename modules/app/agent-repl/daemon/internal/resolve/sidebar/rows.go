@@ -35,6 +35,8 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 				"end": s.restoredEnd, "result": s.result.String(),
 			})
 	}
+	s.seedOneShot(rec, rowLog)
+	s.noteRenderForOneShot(rowLog)
 	armName := statusArm(s, rec, session, r.footer.Status(rec.ID), rowLog)
 	r.noteResult(rec.ID, s, rowLog)
 	// THE MARKER IS DERIVED FROM THE READ FACT, in the same breath as the
@@ -113,6 +115,9 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 	if detachedLive {
 		out.DetachedLive = &frontendv1.RosterRowDetachedLive{}
 	}
+	// PRESENCE IS THE FACT, as `frontend.v1.RosterRowOneShot` states it: set
+	// for a workspace created as a one-shot, for its whole life.
+	out.OneShot = oneShot(rec, s)
 	// THE DURABLE SELECTION INSTANT, for ordering only: clients order
 	// most-recently-selected first by it (the landing after a close, the
 	// editor's jump to the most recent workspace), and it survives a restart

@@ -75,6 +75,13 @@ type Resolver interface {
 	// SetMerge installs one workspace's merge facts, which drive its merge
 	// status arm and its glyph.
 	SetMerge(ws ids.WorkspaceID, facts footer.MergeFacts)
+	// SetMergeRequested raises (true) or lowers (false) the fact that a merge
+	// is RECORDED for the workspace and waiting for its requesting turn to
+	// end. The merge orchestrator raises it the moment the request is
+	// recorded -- always before that turn ends -- and lowers it when the
+	// request is withdrawn. It is never drawn: it decides only the one-shot
+	// outcome, so no client learns of the merge before the turn ends.
+	SetMergeRequested(ws ids.WorkspaceID, requested bool)
 	// SetSelected records the user's selection, which also clears that
 	// workspace's attention marker.
 	SetSelected(ws ids.WorkspaceID)

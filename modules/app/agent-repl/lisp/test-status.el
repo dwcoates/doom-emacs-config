@@ -3658,34 +3658,131 @@ reaching the palette with one paints nothing rather than guessing."
 
 ;;;; ---- Glyphs ----------------------------------------------------------
 
-(ert-deftest agent-repl-test-status-a-queued-merge-tab-draws-its-hourglass ()
-  "A `:merge-queued\=' tab draws its ⧖ glyph over its purple."
+(ert-deftest agent-repl-test-status-a-merge-in-flight-or-landed-draws-no-glyph ()
+  "A queued, waiting, running or landed merge draws no glyph on the tab: the
+purple already says a merge is in flight, and a landed merge shows nothing
+\(owner ruling, 2026-10-11)."
   ;; Arrange
   (agent-repl-test--with-clean-state
-    ;; Act / Assert
-    (should (equal (agent-repl-status-tab-glyph "alpha" :merge-queued) "⧖"))))
+    (dolist (arm '(:merge-queued :merge-waiting :merging :merged))
+      ;; Act / Assert
+      (should (null (agent-repl-status-tab-glyph "alpha" arm))))))
 
-(ert-deftest agent-repl-test-status-a-running-merge-tab-draws-its-cycle ()
-  "A `:merging\=' tab draws its ↻ glyph over its purple."
+(ert-deftest agent-repl-test-status-a-merge-failed-tab-draws-the-failure-mark ()
+  "A `:merge-failed\=' tab draws the failure mark as well as its turquoise."
   ;; Arrange
   (agent-repl-test--with-clean-state
     ;; Act / Assert
-    (should (equal (agent-repl-status-tab-glyph "alpha" :merging) "↻"))))
+    (should (equal (agent-repl-status-tab-glyph "alpha" :merge-failed)
+                   agent-repl-status-failure-glyph))))
 
-(ert-deftest agent-repl-test-status-a-merge-failed-tab-draws-its-cross ()
-  "A `:merge-failed\=' tab draws its ✗ glyph as well as its turquoise: the color
-says something is wrong, and the glyph says it is the merge."
-  ;; Arrange
-  (agent-repl-test--with-clean-state
-    ;; Act / Assert
-    (should (equal (agent-repl-status-tab-glyph "alpha" :merge-failed) "✗"))))
+(ert-deftest agent-repl-test-status-the-failure-mark-is-the-emoji-cross ()
+  "The failure mark is ✖ with the emoji presentation selector, so it draws
+double-width like the gate glyphs."
+  ;; Act / Assert
+  (should (equal agent-repl-status-failure-glyph (string #x2716 #xFE0F))))
 
-(ert-deftest agent-repl-test-status-a-merged-tab-draws-its-check ()
-  "A `:merged\=' tab draws its ✓ glyph as well as its green."
+(ert-deftest agent-repl-test-status-every-drawn-merge-arm-has-a-glyph ()
+  "Every merge arm the tab bar draws takes its character from the one
+merge glyph table, so a drawn arm cannot carry a hand-rolled character."
+  ;; Act / Assert
+  (dolist (arm agent-repl-status-tab-bar-merge-glyph-arms)
+    (should (stringp (alist-get arm agent-repl-status-merge-glyphs)))))
+
+(ert-deftest agent-repl-test-status-a-failed-merge-and-a-failed-one-shot-share-the-mark ()
+  "A failed merge and a failed one-shot draw the same failure mark."
+  ;; Act / Assert
+  (should (eq (alist-get :merge-failed agent-repl-status-merge-glyphs)
+              agent-repl-status-failure-glyph)))
+
+(defmacro agent-repl-test-status--with-one-shot (outcome &rest body)
+  "Run BODY with every workspace's roster one-shot outcome stubbed to OUTCOME."
+  (declare (indent 1))
+  `(cl-letf (((symbol-function 'agent-repl-roster-one-shot-for-ws)
+              (lambda (_ws) ,outcome)))
+     ,@body))
+
+(ert-deftest agent-repl-test-status-an-armed-one-shot-draws-the-target ()
+  "An armed one-shot draws 🎯 on any non-gate arm."
   ;; Arrange
   (agent-repl-test--with-clean-state
-    ;; Act / Assert
-    (should (equal (agent-repl-status-tab-glyph "alpha" :merged) "✓"))))
+    (agent-repl-test-status--with-one-shot :armed
+      ;; Act / Assert
+      (should (equal (agent-repl-status-tab-glyph "alpha" :thinking)
+                     agent-repl-status-one-shot-glyph)))))
+
+(ert-deftest agent-repl-test-status-a-failed-one-shot-draws-the-failure-mark ()
+  "A one-shot that ended without a live merge draws the failure mark."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-status--with-one-shot :failed
+      ;; Act / Assert
+      (should (equal (agent-repl-status-tab-glyph "alpha" :done)
+                     agent-repl-status-failure-glyph)))))
+
+(ert-deftest agent-repl-test-status-a-gate-replaces-the-one-shot-mark ()
+  "An open permission or question gate draws its emoji in place of the
+one-shot mark."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-status--with-one-shot :armed
+      ;; Act / Assert
+      (should (equal (agent-repl-status-tab-glyph "alpha" :permission) "❗"))
+      (should (equal (agent-repl-status-tab-glyph "alpha" :question) "❓")))))
+
+(ert-deftest agent-repl-test-status-an-armed-one-shot-in-a-merge-draws-the-target ()
+  "A one-shot whose merge is in line keeps its 🎯."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-status--with-one-shot :armed
+      ;; Act / Assert
+      (should (equal (agent-repl-status-tab-glyph "alpha" :merge-queued)
+                     agent-repl-status-one-shot-glyph)))))
+
+(ert-deftest agent-repl-test-status-the-one-shot-mark-outranks-the-attention-marker ()
+  "A one-shot with an unseen notification draws its mark, not the marker."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-status--with-one-shot :armed
+      (let ((agent-repl-status--marker-on (make-hash-table :test 'equal)))
+        (puthash "alpha" t agent-repl-status--marker-on)
+        ;; Act / Assert
+        (should (equal (agent-repl-status-tab-glyph "alpha" :done)
+                       agent-repl-status-one-shot-glyph))))))
+
+(ert-deftest agent-repl-test-status-an-unknown-one-shot-outcome-draws-nothing ()
+  "An outcome this build does not know draws no one-shot mark."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-status--with-one-shot :exploded
+      (cl-letf (((symbol-function 'agent-repl--error) #'ignore))
+        ;; Act / Assert
+        (should (null (agent-repl-status-tab-one-shot-glyph "alpha")))))))
+
+(ert-deftest agent-repl-test-status-an-unknown-one-shot-outcome-is-logged ()
+  "An outcome this build does not know is recorded at ERROR with the outcome."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let (logged)
+      (agent-repl-test-status--with-one-shot :exploded
+        (cl-letf (((symbol-function 'agent-repl--error)
+                   (lambda (ws fmt &rest args)
+                     (push (list ws (apply #'format fmt args)) logged))))
+          ;; Act
+          (agent-repl-status-tab-one-shot-glyph "alpha")))
+      ;; Assert
+      (should (equal (length logged) 1))
+      (should (equal (car (car logged)) "alpha"))
+      (should (string-match-p "elisp.status.tab-one-shot-glyph: unknown outcome=:exploded"
+                              (cadr (car logged)))))))
+
+(ert-deftest agent-repl-test-status-a-workspace-that-is-no-one-shot-draws-no-mark ()
+  "A workspace with no one-shot outcome draws no one-shot mark."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-status--with-one-shot nil
+      ;; Act / Assert
+      (should (null (agent-repl-status-tab-one-shot-glyph "alpha"))))))
 
 (ert-deftest agent-repl-test-status-a-permission-tab-draws-an-exclamation-emoji ()
   "A `:permission\=' tab draws ❗ between `[N]\=' and its name."
@@ -3990,8 +4087,8 @@ bracket-only paint, which is the blessed treatment."
               ((symbol-function 'agent-repl-roster-row-priority-label)
                (lambda (row) (plist-get (plist-get row :priority) :label))))
       ;; Act / Assert
-      (should (equal (agent-repl--tab-badge-str "alpha" :merging)
-                     (concat "P1 " (alist-get :merging agent-repl-status-merge-glyphs)))))))
+      (should (equal (agent-repl--tab-badge-str "alpha" :merge-failed)
+                     (concat "P1 " agent-repl-status-failure-glyph))))))
 
 (ert-deftest agent-repl-test-status-an-unprioritized-plain-row-draws-no-badge ()
   "The ordinary case is name and bracket alone."

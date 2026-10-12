@@ -94,6 +94,7 @@ func (o *orchestrator) recoverEntry(ctx context.Context, repo wsm.RepoKey, entry
 		o.mu.Unlock()
 		o.deps.Log.Global().Info(op, "re-armed a merge request still waiting for its turn to end", dlog.Context{
 			"workspace": string(entry.Workspace), "repo": string(repo)})
+		o.deps.Sidebar.SetMergeRequested(entry.Workspace, true)
 		o.awaitRequestingTurn(entry.Workspace, repo)
 		return nil
 	case wsm.MergeAdmitted:
