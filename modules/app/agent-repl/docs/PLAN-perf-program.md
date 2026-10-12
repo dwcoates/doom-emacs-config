@@ -96,8 +96,39 @@ Status values: queued, running, landed (commit), blocked (reason).
 - D3 workspace open, switch, submit-to-first-output: measured at every
   checkpoint from the collector's table; worst-over-budget first.
 
+- D4 startup: after the 13:40 hard bounce the daemon served in 1.6s, but no
+  workspace got its go-ahead for 29s: the stale-sidecar restart's launchd
+  kickstart took 29s (13:40:43.18 -> 13:41:12.20) with the sidecar itself
+  silent; all 26 sessions were up 54s after Emacs relaunched. Fix running
+  (branch `startup-sidecar`): kickstart cost, whether bring-ups must wait,
+  why the sidecar reads stale on every bounce, the Emacs relaunch -600.
+- D5 first show of a hidden page (diagnosis, e3436892c): switch -> painted
+  p50 679ms / p90 1,477ms / max 2,619ms because the hidden page replays its
+  push backlog (p50 23, max 153 records, ~27ms each) before it shows. Fix
+  running (branch `hidden-page-coalesce`): hidden pages coalesce pushes per
+  key and draw the latest state once on show; INFO records for resume,
+  coalesced count, draw cost, page bytes. No visible change.
+- D6 every opened workspace keeps a live hidden page: 32 WebKit processes,
+  2.85GB RSS, 28.5% CPU in one snapshot (~89MB per page). Proposal: a small
+  LRU of live pages (current + 2-3 likely next) warmed one at a time in idle
+  time; parked pages load cold. OWNER RULING NEEDED (visible: a parked
+  workspace's first switch is a cold load).
+- D7 Emacs spends 80-180ms of elisp before each webview swap; ~118ms of it in
+  the slowest case is unrecorded: add records, then cut it.
+
 ### E. CPU and memory (battery)
-- E1 live daemon RSS ~509MB: attribution running (branch `perf-diagnosis`).
+- E1 live daemon memory (diagnosis, e3436892c): footprint 551MB, peak 682MB,
+  547MB Go heap. Retained by durable feed rows: wsm.db 332MB, 1,001 rows,
+  ~327MB, of which 219 merge "tests" rows hold ~300MB (every suite's output
+  inline, avg 1.4MB, max 9.6MB, re-marshalled and pushed to every reader on
+  every counted test line, never retired). Fix candidates, ranked: (1) move
+  suite output out of the row into the archive the gate already writes (row
+  keeps counts, a tail and a link) — OWNER RULING NEEDED if the bubble shows
+  the full output today; (2) retire durable rows of settled merge bubbles;
+  (3) restore a workspace's durable rows only when a reader opens its feed;
+  (4) cap Go heap headroom (SetMemoryLimit/GOGC) once the live set is small;
+  (5) Go memory stats in daemon health at INFO. Also: logs dir 5.8GB with no
+  seen retention policy; layout backups beside wsm.db ~1GB.
 - E2 sidebar re-render logs every row on every render (26% of daemon records
   in tests; noise in debug windows): log a row's decisions only when they
   change; same for the feed's per-row decisions (11%) — proposed, owner
@@ -128,3 +159,10 @@ Status values: queued, running, landed (commit), blocked (reason).
 |---|---|---|
 | 2026-10-12 | da3219969 | fake git hard-linked into each daemon's PATH |
 | 2026-10-12 | 839a72d9f | idle sweep cannot hibernate a shim whose start is under way |
+| 2026-10-12 | e3436892c | investigation: first switch and daemon memory |
+
+## Bounce checkpoints
+
+| When | Recovery | Startup | Notes |
+|---|---|---|---|
+| 2026-10-12 13:39 (after 839a72d9f) | 3 merges suspended at `tests`, all resumed at their step; requesters re-raised; chain rebuilt; no turns in flight | daemon served 1.6s after boot; first session +33s (29s sidecar kickstart); 26 sessions up 54s after Emacs relaunch | Emacs relaunch first attempt failed (-600), second succeeded |
