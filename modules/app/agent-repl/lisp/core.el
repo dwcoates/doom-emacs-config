@@ -132,9 +132,12 @@ Returns non-nil when a timer was actually cancelled."
       (setq agent-repl--timers (delq timer agent-repl--timers)))
     (when cell
       (setq agent-repl--keyed-timers (delq cell agent-repl--keyed-timers)))
-    (when (fboundp 'agent-repl--log)
-      (agent-repl--log '(:agent-repl-central "process-wide logging and utility state") "cancel-timer-key: key=%s cancelled=%s keyed-count=%d"
-                       key (if cancelled "t" "nil") (length agent-repl--keyed-timers)))
+    ;; Only a cancel that cancelled something is an event: asking to cancel a
+    ;; key that holds no timer is how every caller makes sure, and recording
+    ;; each of those asks was hundreds of records a switch.
+    (when (and cancelled (fboundp 'agent-repl--log))
+      (agent-repl--log '(:agent-repl-central "process-wide logging and utility state") "cancel-timer-key: key=%s cancelled=t keyed-count=%d"
+                       key (length agent-repl--keyed-timers)))
     cancelled))
 
 (defun agent-repl--cancel-all-timers ()
@@ -2709,6 +2712,29 @@ switch admits debug records."
   (agent-repl--emit-log-record ws "debug" "verbose" fmt args
                                :message-mode (and (eq agent-repl-debug 'verbose)
                                                   'quiet)))
+
+;;;; Decisions, recorded when they change.
+;;
+;; A HOT PATH RE-DECIDES THE SAME THING ON EVERY PASS: every roster push walks
+;; every row, every redisplay resolves every tab's state, every pass asks the
+;; frontend registry about every workspace.  Recording each re-decision made
+;; logging the bulk of a workspace switch's cost (3,437 records for two
+;; switches, measured 2026-10-12), almost all of them repeating the record
+;; before.  A decision is recorded when it CHANGES: the first time it is made
+;; under its key, and whenever it comes out differently.  Nothing is lost: the
+;; log still holds every distinct decision, in order, per key.
+
+(defvar agent-repl--log-decisions (make-hash-table :test 'equal)
+  "KEY -> the decision last recorded under KEY (`agent-repl--log-decision').")
+
+(defun agent-repl--log-decision (key decision ws fmt &rest args)
+  "Record FMT and ARGS for WS at DEBUG when DECISION differs from KEY's last.
+KEY names what is decided (a symbol and its subject, compared with `equal');
+DECISION is the outcome.  Answers non-nil when the record was written."
+  (unless (equal (gethash key agent-repl--log-decisions :undecided) decision)
+    (puthash key decision agent-repl--log-decisions)
+    (apply #'agent-repl--log ws fmt args)
+    t))
 
 (defun agent-repl--info (ws fmt &rest args)
   "Log an informational line for WS to the QUIET sink, ungated by debug.

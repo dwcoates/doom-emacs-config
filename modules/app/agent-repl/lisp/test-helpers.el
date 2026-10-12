@@ -783,6 +783,9 @@ re-routes their frontend resolution instead."
          (agent-repl--log-dir-truenames (make-hash-table :test 'equal))
          ;; The web view host's desired state (webhost.el): a page a test
          ;; asked the host to hold must not be held into the next test.
+         ;; Decisions recorded on change (core.el): a decision one test made
+         ;; must not silence the same record in the next.
+         (agent-repl--log-decisions (make-hash-table :test 'equal))
          (agent-repl--webhost-buffer nil)
          (agent-repl--webhost-pages (make-hash-table :test 'equal))
          (agent-repl--webhost-shown nil)

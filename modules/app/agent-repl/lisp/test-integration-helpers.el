@@ -1042,6 +1042,9 @@ signals."
                 ;; The web view host (webhost.el) is process-wide: a host a
                 ;; scenario creates, and every page it was told to hold, must
                 ;; not reach the next scenario, nor any later unit test.
+                ;; Decisions recorded on change (core.el) are process-wide:
+                ;; one scenario's decision must not silence another's record.
+                (agent-repl--log-decisions (make-hash-table :test 'equal))
                 (agent-repl--webhost-buffer nil)
                 (agent-repl--webhost-pages (make-hash-table :test 'equal))
                 (agent-repl--webhost-shown nil)
