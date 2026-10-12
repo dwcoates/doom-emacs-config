@@ -190,3 +190,41 @@ func TestMintSHAScramblesTheSequenceIntoTheLeadingDigits(t *testing.T) {
 		t.Fatalf("minted %q and %q, want shas that differ inside real git's seven-character abbreviation", first, second)
 	}
 }
+
+func TestALoadNeverSeesASaveHalfWritten(t *testing.T) {
+	// Arrange: a world with a repository, saved over and over while another
+	// reader loads it without the lock -- as a successor's git reads the file
+	// a SIGKILLed predecessor's git may have been writing.
+	path := filepath.Join(t.TempDir(), "fakegit.json")
+	world := NewState()
+	world.Repos = []*Repo{{Dir: "/repo", Worktrees: []*Worktree{{Dir: "/repo"}}}}
+	if err := Save(path, world); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 2000; i++ {
+			if err := Save(path, world); err != nil {
+				t.Errorf("Save: %v", err)
+				return
+			}
+		}
+	}()
+
+	// Act, Assert: every load reads a whole world.
+	for {
+		select {
+		case <-done:
+			return
+		default:
+		}
+		s, err := Load(path)
+		if err != nil {
+			t.Fatalf("Load during a save: %v", err)
+		}
+		if len(s.Repos) != 1 {
+			t.Fatalf("Load during a save read %d repositories, want the 1 saved: a reader saw the file emptied", len(s.Repos))
+		}
+	}
+}
