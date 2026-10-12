@@ -700,7 +700,7 @@ func lastHeadOf(t *testing.T, h *harness, ws wsm.WorkspaceID) *frontendv1.FeedMe
 	return found
 }
 
-func TestAStartedMergesHeadClockRunsFromItsQueuedTimeAcrossQueueChanges(t *testing.T) {
+func TestAStartedMergesHeadClockRunsFromItsAdmissionAcrossQueueChanges(t *testing.T) {
 	// Arrange: the harness clock moves on every read, so a head re-stamped
 	// with the current time would show a later start. The merge started and
 	// is held inside its gate.
@@ -709,9 +709,12 @@ func TestAStartedMergesHeadClockRunsFromItsQueuedTimeAcrossQueueChanges(t *testi
 	h.landsCleanly("abc123def4567")
 	inGate, release := holdTheGate(h)
 	enqueue(t, h)
-	want := queuedAtMS(t, h, theWorkspace)
 	done := admitAsync(h, context.Background())
 	<-inGate
+	r, running := h.o.runFor(theWorkspace)
+	if !running {
+		t.Fatal("the merge held in its gate has no run registered")
+	}
 
 	// Act.
 	queueAnother(t, h, "ws-2", "two")
@@ -720,12 +723,12 @@ func TestAStartedMergesHeadClockRunsFromItsQueuedTimeAcrossQueueChanges(t *testi
 	<-done
 
 	// Assert.
-	if got != want {
-		t.Fatalf("the head's clock starts at %d after another merge queued, want the queued time %d", got, want)
+	if got != r.startedMS {
+		t.Fatalf("the head's clock starts at %d after another merge queued, want the admission %d", got, r.startedMS)
 	}
 }
 
-func TestARunningMergesHeadClockRunsFromItsQueuedTime(t *testing.T) {
+func TestARunningMergesHeadClockRunsFromItsAdmissionNotItsQueuedTime(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	h.emacsRepo()
@@ -739,8 +742,185 @@ func TestARunningMergesHeadClockRunsFromItsQueuedTime(t *testing.T) {
 		t.Fatalf("admit: %v", err)
 	}
 
+	// Assert: the admission is the queue tab's end, which the harness clock
+	// puts strictly after the queued time.
+	admitted := lastQueueTabOf(t, h, theWorkspace).GetSettled().GetEndedAtMs()
+	if admitted <= queued {
+		t.Fatalf("the queue tab ended at %d, want after the queued time %d", admitted, queued)
+	}
+	if got := lastHeadOf(t, h, theWorkspace).GetRuntime().GetStartedAtMs(); got != admitted {
+		t.Fatalf("the running head's clock starts at %d, want the admission %d", got, admitted)
+	}
+}
+
+func TestAWaitingMergesHeadClockRunsFromItsQueuedTime(t *testing.T) {
+	// Arrange: a merge stands behind another, so it is never admitted.
+	h := newHarness(t)
+	h.emacsRepo()
+	h.landsCleanly("abc123def4567")
+	inGate, release := holdTheGate(h)
+	enqueue(t, h)
+	done := admitAsync(h, context.Background())
+	<-inGate
+
+	// Act.
+	queueAnother(t, h, "ws-2", "two")
+	got := lastHeadOf(t, h, "ws-2").GetRuntime().GetStartedAtMs()
+	want := queuedAtMS(t, h, "ws-2")
+	close(release)
+	<-done
+
 	// Assert.
-	if got := lastHeadOf(t, h, theWorkspace).GetRuntime().GetStartedAtMs(); got != queued {
-		t.Fatalf("the running head's clock starts at %d, want the queued time %d", got, queued)
+	if got != want {
+		t.Fatalf("the waiting head's clock starts at %d, want the queued time %d", got, want)
+	}
+}
+
+// TestHeadClockMSFollowsTheEntrysStanding covers the head clock's origin per
+// standing: queued while waiting, the run's admission once admitted, and no
+// redraw while an admission has no run registered yet.
+func TestHeadClockMSFollowsTheEntrysStanding(t *testing.T) {
+	tests := []struct {
+		name        string
+		state       wsm.MergeQueueState
+		running     bool
+		wantClocked bool
+		wantMS      func(r *run) int64
+	}{
+		{name: "waiting", state: wsm.MergeQueued, wantClocked: true,
+			wantMS: func(*run) int64 { return 1000 }},
+		{name: "admitted with its run", state: wsm.MergeAdmitted, running: true, wantClocked: true,
+			wantMS: func(r *run) int64 { return r.startedMS }},
+		{name: "admitted before its run registers", state: wsm.MergeAdmitted, wantClocked: false,
+			wantMS: func(*run) int64 { return 0 }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			r := ledgeredRun(t, h)
+			if tc.running {
+				registerRunning(h, r)
+			}
+			entry := wsm.MergeQueueEntry{Workspace: theWorkspace, State: tc.state, EnqueuedAt: time.UnixMilli(1000)}
+
+			// Act.
+			ms, clocked, err := h.o.headClockMS(entry)
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("headClockMS: %v", err)
+			}
+			if clocked != tc.wantClocked || ms != tc.wantMS(r) {
+				t.Fatalf("headClockMS = %d clocked %v, want %d clocked %v", ms, clocked, tc.wantMS(r), tc.wantClocked)
+			}
+		})
+	}
+}
+
+// TestQueueSpanOfFollowsTheEntrysStanding covers the shared wait resolver:
+// queued alone while waiting, ended at the run's admission once admitted, and
+// nothing while an admission has no run registered yet.
+func TestQueueSpanOfFollowsTheEntrysStanding(t *testing.T) {
+	tests := []struct {
+		name      string
+		state     wsm.MergeQueueState
+		running   bool
+		wantDrawn bool
+		wantSpan  func(r *run) queueSpan
+	}{
+		{name: "waiting", state: wsm.MergeQueued, wantDrawn: true,
+			wantSpan: func(*run) queueSpan { return queueSpan{queuedMS: 1000} }},
+		{name: "admitted with its run", state: wsm.MergeAdmitted, running: true, wantDrawn: true,
+			wantSpan: func(r *run) queueSpan { return queueSpan{queuedMS: 1000, admitted: true, admittedMS: r.startedMS} }},
+		{name: "admitted before its run registers", state: wsm.MergeAdmitted, wantDrawn: false,
+			wantSpan: func(*run) queueSpan { return queueSpan{} }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			r := ledgeredRun(t, h)
+			if tc.running {
+				registerRunning(h, r)
+			}
+			entry := wsm.MergeQueueEntry{Workspace: theWorkspace, State: tc.state, EnqueuedAt: time.UnixMilli(1000)}
+
+			// Act.
+			span, drawn, err := h.o.queueSpanOf(entry)
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("queueSpanOf: %v", err)
+			}
+			if drawn != tc.wantDrawn || span != tc.wantSpan(r) {
+				t.Fatalf("queueSpanOf = %+v drawn %v, want %+v drawn %v", span, drawn, tc.wantSpan(r), tc.wantDrawn)
+			}
+		})
+	}
+}
+
+// TestQueueSpanOfRefusesAnEntryWithNoQueuedTime covers the invariant in the
+// shared resolver, admitted or not: no queued time is an error.
+func TestQueueSpanOfRefusesAnEntryWithNoQueuedTime(t *testing.T) {
+	for _, state := range []wsm.MergeQueueState{wsm.MergeQueued, wsm.MergeAdmitted} {
+		t.Run(state.String(), func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			registerRunning(h, ledgeredRun(t, h))
+
+			// Act.
+			_, drawn, err := h.o.queueSpanOf(wsm.MergeQueueEntry{Workspace: theWorkspace, State: state})
+
+			// Assert.
+			if err == nil || drawn {
+				t.Fatalf("queueSpanOf answered drawn %v, error %v, want an error and nothing drawn", drawn, err)
+			}
+		})
+	}
+}
+
+// TestTheQueueTabAndTheHeadClockShareOneWait asserts both drawings read the
+// one wait: a waiting head counts from the queue tab's start, an admitted one
+// from the queue tab's end.
+func TestTheQueueTabAndTheHeadClockShareOneWait(t *testing.T) {
+	for _, state := range []wsm.MergeQueueState{wsm.MergeQueued, wsm.MergeAdmitted} {
+		t.Run(state.String(), func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			registerRunning(h, ledgeredRun(t, h))
+			entry := wsm.MergeQueueEntry{Workspace: theWorkspace, State: state, EnqueuedAt: time.UnixMilli(1000)}
+
+			// Act.
+			tab, _, tabErr := h.o.queueTabState(entry)
+			clock, _, clockErr := h.o.headClockMS(entry)
+
+			// Assert.
+			if tabErr != nil || clockErr != nil {
+				t.Fatalf("queueTabState: %v, headClockMS: %v", tabErr, clockErr)
+			}
+			want := tab.startedMS
+			if tab.settled {
+				want = tab.endedMS
+			}
+			if clock != want {
+				t.Fatalf("the head clock counts from %d, want the queue tab's %+v boundary %d", clock, tab, want)
+			}
+		})
+	}
+}
+
+// TestAWaitingHeadClockWithNoQueuedTimeIsRefused covers the head's side of
+// the invariant: no queued time is an error, never a clock begun at zero.
+func TestAWaitingHeadClockWithNoQueuedTimeIsRefused(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	_, clocked, err := h.o.headClockMS(wsm.MergeQueueEntry{Workspace: theWorkspace, State: wsm.MergeQueued})
+
+	// Assert.
+	if err == nil || clocked {
+		t.Fatalf("headClockMS answered clocked %v, error %v, want an error and no clock", clocked, err)
 	}
 }

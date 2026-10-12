@@ -361,16 +361,15 @@ func (o *orchestrator) republishQueue(ctx context.Context, repo wsm.RepoKey) err
 		// waits lands above it. Its ledger identity is minted as it takes its
 		// place, so the head has its queue tab to hang on from the start.
 		if lease, ok := o.leaseOf(entry.Workspace); ok {
-			// THE HEAD'S CLOCK RUNS FROM WHEN THE MERGE WAS QUEUED
-			// (frontend.v1.FeedMergeRuntime), so a queue change never restarts
-			// it.
-			queued, err := enqueuedMS(entry)
+			clock, clocked, err := o.headClockMS(entry)
 			if err != nil {
 				o.deps.Log.Global().Error("daemon.merge.queue", "a queued merge carries no queued time; the queue is not drawn",
 					dlog.Context{"repo": string(repo), "workspace": string(entry.Workspace), "error": err.Error()})
 				return err
 			}
-			o.publishHead(entry.Workspace, lease, o.bubbleLabel(ctx, entry), queued, nil)
+			if clocked {
+				o.publishHead(entry.Workspace, lease, o.bubbleLabel(ctx, entry), clock, nil)
+			}
 			state, drawn, err := o.queueTabState(entry)
 			if err != nil {
 				o.deps.Log.Global().Error("daemon.merge.queue", "could not resolve when a queued merge's queue tab began; the queue is not drawn",
@@ -739,29 +738,66 @@ func queueTab(snapshot *frontendv1.FeedMergeQueue, st tabState) *frontendv1.Feed
 	return &frontendv1.FeedMergeTab{Kind: &frontendv1.FeedMergeTab_Queue{Queue: inner}}
 }
 
+// queueSpan is one in-line merge's wait: when it was queued and, once its run
+// was admitted, when that run began. Every drawing of an in-line merge's
+// times (its queue tab, its head's clock) reads it, so they agree on when the
+// wait ended.
+type queueSpan struct {
+	queuedMS   int64
+	admitted   bool
+	admittedMS int64
+}
+
+// queueSpanOf resolves one in-line merge's wait. A zero queued time is an
+// invariant violation (enqueuedMS).
+//
+// An ADMITTED entry whose run is not registered yet is mid-admission (the
+// pump admitted it and the run has not taken its slot): there is no start to
+// end the wait at, and nothing is drawn from it (false); the admission's own
+// drawing follows the moment the run exists.
+func (o *orchestrator) queueSpanOf(entry wsm.MergeQueueEntry) (queueSpan, bool, error) {
+	queuedMS, err := enqueuedMS(entry)
+	if err != nil {
+		return queueSpan{}, false, err
+	}
+	if entry.State != wsm.MergeAdmitted {
+		return queueSpan{queuedMS: queuedMS}, true, nil
+	}
+	r, running := o.runFor(entry.Workspace)
+	if !running {
+		return queueSpan{}, false, nil
+	}
+	return queueSpan{queuedMS: queuedMS, admitted: true, admittedMS: r.startedMS}, true, nil
+}
+
 // queueTabState resolves one queued merge's queue tab badge. THE WAIT BEGAN
 // WHEN THE MERGE WAS QUEUED, so the tab starts at the entry's queued time, and
 // it ends the moment the merge reached the front: its run's start, which
 // admission stamps. The end is that one instant on every republish, so a
 // settled queue tab's drawn run time stays fixed while the run moves on.
-//
-// An ADMITTED entry whose run is not registered yet is mid-admission (the
-// pump admitted it and the run has not taken its slot): there is no start to
-// end the wait at, and it is not drawn (false); the admission's own republish
-// draws it the moment the run exists.
 func (o *orchestrator) queueTabState(entry wsm.MergeQueueEntry) (tabState, bool, error) {
-	queuedMS, err := enqueuedMS(entry)
-	if err != nil {
-		return tabState{}, false, err
+	span, drawn, err := o.queueSpanOf(entry)
+	if err != nil || !drawn {
+		return tabState{}, drawn, err
 	}
-	if entry.State != wsm.MergeAdmitted {
-		return tabState{startedMS: queuedMS}, true, nil
+	return tabState{startedMS: span.queuedMS, settled: span.admitted, endedMS: span.admittedMS}, true, nil
+}
+
+// headClockMS resolves the instant one in-line merge's head clock counts from
+// (frontend.v1.FeedMergeRuntime): WHEN IT WAS QUEUED while it waits, so a
+// queue change never restarts it, and WHEN ITS RUN WAS ADMITTED once it has
+// left the queue, so the head shows only the time it has been worked on. A
+// mid-admission entry's head is not redrawn (false); the run draws it the
+// moment it starts.
+func (o *orchestrator) headClockMS(entry wsm.MergeQueueEntry) (int64, bool, error) {
+	span, clocked, err := o.queueSpanOf(entry)
+	if err != nil || !clocked {
+		return 0, clocked, err
 	}
-	r, running := o.runFor(entry.Workspace)
-	if !running {
-		return tabState{}, false, nil
+	if span.admitted {
+		return span.admittedMS, true, nil
 	}
-	return tabState{startedMS: queuedMS, settled: true, endedMS: r.startedMS}, true, nil
+	return span.queuedMS, true, nil
 }
 
 // queueStandings resolves each in-line entry's standing for the queue
