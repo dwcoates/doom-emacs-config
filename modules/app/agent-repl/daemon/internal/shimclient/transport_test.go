@@ -41,6 +41,31 @@ func TestBackoffGrowsAndCaps(t *testing.T) {
 	}
 }
 
+// TestDefaultBackoffRedialsSoonAfterASpawn asserts the production schedule's
+// first delay is short: the first dial of every spawn fails because the shim
+// has not bound its socket, so the first delay is paid by every spawn.
+func TestDefaultBackoffRedialsSoonAfterASpawn(t *testing.T) {
+	// Arrange, Act.
+	first := defaultBackoff.delay(0)
+
+	// Assert.
+	if first > 10*time.Millisecond {
+		t.Fatalf("the first redial waits %v; every spawn pays it, so it must stay at or under 10ms", first)
+	}
+}
+
+// TestDefaultBackoffStillReachesItsCap asserts the short start does not
+// change where the schedule ends.
+func TestDefaultBackoffStillReachesItsCap(t *testing.T) {
+	// Arrange, Act.
+	last := defaultBackoff.delay(20)
+
+	// Assert.
+	if last != 5*time.Second {
+		t.Fatalf("delay(20) = %v, want the 5s cap", last)
+	}
+}
+
 // TestBackoffWaitStopsOnDeath asserts a wait ends the moment the process is
 // known dead, rather than sitting out the delay.
 func TestBackoffWaitStopsOnDeath(t *testing.T) {

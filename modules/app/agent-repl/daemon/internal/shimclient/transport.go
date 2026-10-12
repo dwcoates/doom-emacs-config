@@ -130,7 +130,16 @@ type backoff struct {
 }
 
 // defaultBackoff is the schedule a production supervisor redials on.
-var defaultBackoff = backoff{Initial: 100 * time.Millisecond, Max: 5 * time.Second, Factor: 2}
+//
+// IT STARTS SMALL BECAUSE THE FIRST DIAL OF EVERY SPAWN FAILS: the shim has
+// not bound its socket yet (afterFailedDial). A 100ms first delay made every
+// spawn wait at least 100ms past the shim's own readiness; measured on a
+// daemon-integration fixture, the gap from spawn to session_live was 103ms of
+// a 205ms boot against a fake shim that listens in single-digit
+// milliseconds. Doubling from 10ms reaches the same 5s cap within ten
+// attempts, so a shim that is genuinely slow or gone costs a handful of
+// extra cheap dial attempts, never a different outcome.
+var defaultBackoff = backoff{Initial: 10 * time.Millisecond, Max: 5 * time.Second, Factor: 2}
 
 // delay is the wait before attempt n, counting from zero.
 func (b backoff) delay(attempt int) time.Duration {
