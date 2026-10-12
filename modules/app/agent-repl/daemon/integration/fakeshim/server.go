@@ -672,19 +672,27 @@ var nonAlphanumeric = regexp.MustCompile(`[^A-Za-z0-9]`)
 // resume guard refuses a resume whose transcript is gone, so a fake that starts
 // sessions without laying one down makes every re-open unresumable.
 func (s *server) writeTranscript(vendorSessionID string) {
+	_ = appendTranscriptLine(vendorSessionID, `{"type":"session_started","sessionId":"`+vendorSessionID+`"}`)
+}
+
+// appendTranscriptLine appends LINE to the conversation's transcript where the
+// vendor CLI files it, creating the file and its directory. Nothing is written
+// when no config dir is set, as for every fake transcript.
+func appendTranscriptLine(vendorSessionID, line string) error {
 	path := transcriptPath(vendorSessionID)
 	if path == "" {
-		return
+		return nil
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return
+		return err
 	}
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
-		return
+		return err
 	}
 	defer f.Close()
-	_, _ = f.WriteString(`{"type":"session_started","sessionId":"` + vendorSessionID + `"}` + "\n")
+	_, err = f.WriteString(line + "\n")
+	return err
 }
 
 // transcriptPath renders where the vendor CLI files one conversation, empty
@@ -1250,13 +1258,8 @@ func (s *server) ForkSession(ctx context.Context, req *connect.Request[shimv1.Fo
 		return resp, err
 	}
 	forked := "fork-of-" + req.Msg.GetParentVendorSessionId()
-	if path := transcriptPath(forked); path != "" {
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			return nil, connect.NewError(connect.CodeInternal, err)
-		}
-		if err := os.WriteFile(path, []byte(`{"type":"custom-title","customTitle":"fork"}`+"\n"), 0o644); err != nil {
-			return nil, connect.NewError(connect.CodeInternal, err)
-		}
+	if err := appendTranscriptLine(forked, `{"type":"custom-title","customTitle":"fork"}`); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	return connect.NewResponse(&shimv1.ForkSessionResponse{
 		Result: &shimv1.ForkSessionResponse_Success{Success: &shimv1.ForkSessionSuccess{
