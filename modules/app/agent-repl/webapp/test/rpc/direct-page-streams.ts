@@ -51,5 +51,7 @@ export function directPageStreams(client: AgentReplClient, page = "test-page"): 
       ) => AsyncIterable<PageWatchResponse<K>>;
       return method.call(client, request, { signal });
     },
+    // A direct stream is attached from the start and never re-attaches.
+    onAttached: () => () => undefined,
   };
 }
