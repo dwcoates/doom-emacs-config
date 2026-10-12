@@ -506,3 +506,14 @@ func hasError(records []dlog.Record, operation string) bool {
 	}
 	return false
 }
+
+// twoRepoRegistry is a registry carrying the fixture repository and a second
+// one, with WS registered across them.
+func twoRepoRegistry(ws ...wsm.Workspace) sidebar.Registry {
+	reg := registry(ws...)
+	reg.Repositories = []wsm.Repository{repo, otherRepo}
+	return reg
+}
+
+// otherRepo is a second repository, so a section or the merged band can span two.
+var otherRepo = wsm.Repository{ID: "repo-2", Dir: "/repos/two", Name: "beta", DefaultBranch: "main"}
