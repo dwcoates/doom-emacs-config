@@ -1,6 +1,6 @@
 ---
 name: runtime-eval-code
-description: Send elisp to the running Emacs at runtime — evaluate snippets, dump live buffer state, capture *Messages* output, or run a measured snippet inside a profiling session — and receive the result back as a follow-up message. The skill scopes every dispatch to the current workspace so operations like "create a buffer" or "evaluate a file" land in the workspace the agent is running in. Use when you need to inspect or mutate live editor state without rewriting source, when the bug is signaled by 3rd-party output the agent-repl log does not carry, or when pairing with /workspace-profile or /profile to measure exactly one operation.
+description: Send elisp to the running Emacs at runtime — evaluate snippets, dump live buffer state, capture *Messages* output, or run a measured snippet inside a profiling session — and receive the result back as a follow-up message. The skill scopes every dispatch to the current workspace so operations like "create a buffer" or "evaluate a file" land in the workspace the agent is running in. Use when you need to inspect or mutate live editor state without rewriting source, when the bug is signaled by 3rd-party output the agent-repl log does not carry, or when pairing with /workspace-profile or /profile-agent-repl to measure exactly one operation.
 argument-hint: "[free-form intent describing what should happen inside the editor]"
 ---
 
@@ -156,7 +156,7 @@ This skill is the canonical way to drive the Emacs profiler — there is no sepa
   ```
   It stops the profiler, writes the FULL expanded report to `agent-repl-profile-report-file` (`~/.claude-emacs/profiler-report.txt`), and returns that path as the eval result. Then **`Read` the returned file** for the report body — do NOT read the report out of the inline eval result, which `agent-repl-eval-output-max-chars` would clip on a large calltree. A nil result means the profiler was not running or produced no report.
 
-To measure exactly one operation: start, dispatch the snippet under measurement (label it via `note`), then stop. The eval snippet is identical across runs (deterministic) and can wrap `princ` calls to roundtrip before/after state. For a hands-off "start, wait N, auto-stop, analyze" flow, use `/profile`, which orchestrates these same two dispatches with a scheduled auto-stop.
+To measure exactly one operation: start, dispatch the snippet under measurement (label it via `note`), then stop. The eval snippet is identical across runs (deterministic) and can wrap `princ` calls to roundtrip before/after state. For a session that profiles every runtime at once (Emacs among them) and reports CPU, memory and user-visible latency, use `/profile-agent-repl`.
 
 ## Cheatsheet
 

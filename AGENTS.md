@@ -154,9 +154,9 @@ duplicate its paths or procedures here and do not replace them with ad hoc
 `grep`, `cat`, `sqlite3`, or `emacsclient` probes.
 
 Use `/runtime-eval-code` when the debug skill routes the investigation to live
-Emacs state or third-party `*Messages*` output. Use `/profile` for time-boxed
-performance capture and `/workspace-profile` when the user needs manual
-profiler control.
+Emacs state or third-party `*Messages*` output. Use `/profile-agent-repl` for
+CPU, memory and user-visible latency across every runtime, and
+`/workspace-profile` when the user needs manual Emacs profiler control.
 
 ## No Silent Fallbacks — Fail Hard on Invariant Violations
 
