@@ -242,6 +242,103 @@ func TestFrontWithNoWorkspaceIsInvalid(t *testing.T) {
 	}
 }
 
+// rolloutHoldRequest asks UpdateMergeQueue to hold, or (release) to release,
+// the merge queue's rollouts.
+func rolloutHoldRequest(release bool) *connect.Request[agentreplv1.UpdateMergeQueueRequest] {
+	if release {
+		return connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{
+			Action: &agentreplv1.UpdateMergeQueueRequest_ReleaseRollouts{ReleaseRollouts: &agentreplv1.UpdateMergeQueueReleaseRollouts{}},
+		})
+	}
+	return connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{
+		Action: &agentreplv1.UpdateMergeQueueRequest_HoldRollouts{HoldRollouts: &agentreplv1.UpdateMergeQueueHoldRollouts{}},
+	})
+}
+
+// TestTheRolloutHoldArmsReachTheOrchestrator pins that each arm reaches its
+// own verb and answers success.
+func TestTheRolloutHoldArmsReachTheOrchestrator(t *testing.T) {
+	tests := []struct {
+		name                    string
+		release                 bool
+		wantHolds, wantReleases int
+	}{
+		{name: "hold_rollouts holds", release: false, wantHolds: 1},
+		{name: "release_rollouts releases", release: true, wantReleases: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act.
+			resp, err := h.Client.UpdateMergeQueue(context.Background(), rolloutHoldRequest(tt.release))
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("UpdateMergeQueue: %v", err)
+			}
+			if resp.Msg.GetSuccess() == nil {
+				t.Fatalf("result = %v, want success", resp.Msg.GetResult())
+			}
+			if h.Merge.holds != tt.wantHolds || h.Merge.releases != tt.wantReleases {
+				t.Fatalf("holds, releases = %d, %d; want %d, %d", h.Merge.holds, h.Merge.releases, tt.wantHolds, tt.wantReleases)
+			}
+		})
+	}
+}
+
+// TestTheRolloutHoldRefusalsAreAnswers pins that each no-op refusal is its
+// own UpdateMergeQueueError arm.
+func TestTheRolloutHoldRefusalsAreAnswers(t *testing.T) {
+	tests := []struct {
+		name    string
+		release bool
+		arm     string
+		got     func(*agentreplv1.UpdateMergeQueueError) bool
+	}{
+		{name: "a hold of held rollouts", release: false, arm: merge.ArmRolloutsAlreadyHeld,
+			got: func(e *agentreplv1.UpdateMergeQueueError) bool { return e.GetRolloutsAlreadyHeld() != nil }},
+		{name: "a release of rollouts not held", release: true, arm: merge.ArmRolloutsNotHeld,
+			got: func(e *agentreplv1.UpdateMergeQueueError) bool { return e.GetRolloutsNotHeld() != nil }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			refusal := &merge.RefusalError{Arm: tt.arm, Reason: "nothing to change"}
+			h.Merge.holdErr, h.Merge.releaseErr = refusal, refusal
+
+			// Act.
+			resp, err := h.Client.UpdateMergeQueue(context.Background(), rolloutHoldRequest(tt.release))
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("UpdateMergeQueue: %v", err)
+			}
+			if !tt.got(resp.Msg.GetError()) {
+				t.Fatalf("result = %v, want the %s arm", resp.Msg.GetResult(), tt.arm)
+			}
+		})
+	}
+}
+
+// TestARolloutHoldFailureIsATransportError pins that a failure that is not a
+// refusal (an unreadable hold) stays an error, never a success.
+func TestARolloutHoldFailureIsATransportError(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Merge.holdErr = errors.New("state database unreadable")
+
+	// Act.
+	_, err := h.Client.UpdateMergeQueue(context.Background(), rolloutHoldRequest(false))
+
+	// Assert.
+	if err == nil {
+		t.Fatal("UpdateMergeQueue answered a failed hold without an error")
+	}
+}
+
 // TestUnhealthyDaemonIsAnAnswer pins that unhealthy is an ANSWER, never a
 // transport error.
 func TestUnhealthyDaemonIsAnAnswer(t *testing.T) {
