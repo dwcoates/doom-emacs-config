@@ -615,7 +615,7 @@ func TestSubagentBubbleIsDrawnOnceAndAddressesItsSubFeed(t *testing.T) {
 func TestSubagentBubbleFromAReplayIsStillAddressable(t *testing.T) {
 	t.Parallel()
 	// Arrange: a real spawn, driven to completion so the store holds it.
-	w := NewWorld(t, WorldOpts{})
+	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{DurableState: true}})
 	w.ExpectWarnings("daemon.rollout.reconcile")
 	repo := harness.NewRepo(t)
 	ws := harness.Register(t, w.Daemon, repo.Dir)
@@ -807,7 +807,7 @@ func TestSubagentInterleavedResponsesStayOnTheirOwnFeeds(t *testing.T) {
 func TestADetachedSubagentWhoseProcessDiedIsNotLiveAfterAColdBoot(t *testing.T) {
 	t.Parallel()
 	// Arrange.
-	first := NewWorld(t, WorldOpts{})
+	first := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{DurableState: true}})
 	first.ExpectWarnings("daemon.rollout.reconcile")
 	repo := harness.NewRepo(t)
 	ws := harness.Register(t, first.Daemon, repo.Dir)

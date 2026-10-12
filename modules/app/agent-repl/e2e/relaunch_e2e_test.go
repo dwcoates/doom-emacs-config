@@ -106,7 +106,7 @@ func TestARelaunchedDaemonKeepsTheConversationItStoodDown(t *testing.T) {
 	t.Parallel()
 	// Arrange: a real turn run to its terminal, so the store durably holds
 	// the conversation's own rows.
-	w := NewWorld(t, WorldOpts{})
+	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{DurableState: true}})
 	w.ExpectWarnings("daemon.rollout.reconcile")
 	repo := harness.NewRepo(t)
 	ws := harness.Register(t, w.Daemon, repo.Dir)

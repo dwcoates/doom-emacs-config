@@ -268,6 +268,11 @@ type Opts struct {
 	// refuses loudly at the reuse or the read when it is missing, so a test
 	// can never pass against state that was never written.
 	DurableState bool
+	// FreshStateDir says StateDir was minted for this daemon by its caller
+	// (the e2e world mints the root because its store starts first), so the
+	// root is treated exactly as one StartDaemon minted: in memory unless
+	// DurableState.
+	FreshStateDir bool
 	// ProfileDir overrides where the fake shim reads its per-workspace startup
 	// profiles from; empty mints a fresh one under this start's own root.
 	//
@@ -502,6 +507,12 @@ func InstallFakeGit(t *testing.T, dir string) {
 // booted onto an empty database.
 var inMemoryRoots sync.Map
 
+// rootIsFresh reports whether this daemon's state root is new: minted by
+// StartDaemon, or minted by its caller and declared so (Opts.FreshStateDir).
+func rootIsFresh(opts Opts) bool {
+	return opts.StateDir == "" || opts.FreshStateDir
+}
+
 // freshRootInMemory decides whether a freshly minted state root keeps its
 // state in memory: unless the test asked for the file, and never for a joining
 // daemon, which reads its incumbent's file.
@@ -603,17 +614,21 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 	if d.ProfileDir == "" {
 		d.ProfileDir = filepath.Join(root, "shim-profiles")
 	}
+	fresh := rootIsFresh(opts)
 	if d.StateDir == "" {
 		d.StateDir = filepath.Join(sockRoot, "state")
 		if err := os.MkdirAll(d.StateDir, 0o755); err != nil {
 			t.Fatalf("harness: mkdir state root: %v", err)
 		}
+	}
+	if err := refuseInMemoryReuse(d.StateDir); err != nil {
+		t.Fatal(err)
+	}
+	if fresh {
 		d.inMemoryState = freshRootInMemory(opts)
 		if d.inMemoryState {
 			inMemoryRoots.Store(d.StateDir, true)
 		}
-	} else if err := refuseInMemoryReuse(d.StateDir); err != nil {
-		t.Fatal(err)
 	}
 	if d.StoreSocket == "" {
 		d.StoreSocket = filepath.Join(sockRoot, "store.sock")
