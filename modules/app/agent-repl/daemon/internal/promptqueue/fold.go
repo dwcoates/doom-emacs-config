@@ -202,7 +202,7 @@ func (q *queue) foldLocked(ctx context.Context, ws ids.WorkspaceID, from, into i
 }
 
 // foldedSaid is INTO's content followed by FROM's, every block of both in
-// order, with the two prompts' words separated by a blank line: where INTO
+// order, as the fold and the classifier's coalesce both merge it, with the two prompts' words separated by a blank line: where INTO
 // ends in text and FROM begins with text, the two blocks become one text block
 // joined by "\n\n". Where either side of the seam is not text (an image), the
 // blocks are appended as they are.
