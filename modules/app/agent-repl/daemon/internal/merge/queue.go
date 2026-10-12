@@ -201,6 +201,28 @@ func (o *orchestrator) Evict(ctx context.Context, ws ids.WorkspaceID) error {
 	return o.dequeue(ctx, ws, CauseUserDrop)
 }
 
+// Front moves a workspace's waiting merge to the front of its queue, and
+// redraws every bubble on that queue when the order changed.
+func (o *orchestrator) Front(ctx context.Context, ws ids.WorkspaceID) error {
+	const op = "daemon.merge.front"
+	log := o.log(ctx, ws)
+	repo, err := o.queueOf(ctx, ws)
+	if err != nil {
+		return err
+	}
+	moved, err := o.deps.DB.MoveMergeToFront(ctx, repo, ws)
+	if err != nil {
+		log.Error(op, "could not move a merge to the front of its queue", dlog.Context{"workspace": string(ws), "repo": string(repo), "error": err.Error()})
+		return err
+	}
+	if !moved {
+		log.Info(op, "a merge asked to the front already stands where the front puts it", dlog.Context{"workspace": string(ws), "repo": string(repo)})
+		return nil
+	}
+	log.Info(op, "moved a merge to the front of its queue", dlog.Context{"workspace": string(ws), "repo": string(repo)})
+	return o.republishQueue(ctx, repo)
+}
+
 // dequeue takes one workspace's merge out, whatever it is doing. A merge still
 // WAITING (or only requested) leaves its queue; a merge that is RUNNING is
 // ABANDONED through the one release path. Before this a dequeue only ever dropped the queue

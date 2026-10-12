@@ -489,6 +489,39 @@ func (f *fakeDB) QueueMerge(_ context.Context, repo wsm.RepoKey, id ids.Workspac
 	return 0, fmt.Errorf("no queue entry for %s", id)
 }
 
+// MoveMergeToFront marks an entry a front merge and moves a waiting one ahead
+// of the first ordinary waiting entry before it, exactly as the durable queue
+// re-sequences it.
+func (f *fakeDB) MoveMergeToFront(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	queue := f.queues[repo]
+	for i, entry := range queue {
+		if entry.Workspace != id {
+			continue
+		}
+		if entry.State == wsm.MergeAdmitted || entry.Source.Front {
+			return false, nil
+		}
+		queue[i].Source.Front = true
+		if entry.State != wsm.MergeQueued {
+			return false, nil
+		}
+		for j := 0; j < i; j++ {
+			if queue[j].State != wsm.MergeQueued || queue[j].Source.Front {
+				continue
+			}
+			moving := queue[i]
+			copy(queue[j+1:i+1], queue[j:i])
+			queue[j] = moving
+			f.renumber(repo)
+			return true, nil
+		}
+		return false, nil
+	}
+	return false, fmt.Errorf("no queue entry for %s: %w", id, wsm.ErrNotFound)
+}
+
 // renumber restates the positions, which are derived from order rather than
 // stored — exactly as the durable queue derives them.
 func (f *fakeDB) renumber(repo wsm.RepoKey) {
