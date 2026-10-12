@@ -41,7 +41,7 @@ import {
 import { fireResize } from "../../resize-observer.js";
 import { cascadedValue, installStylesheet } from "../../stylesheet.js";
 import { inBubbleFold, measureTitle } from "../title-measure.js";
-import { countingTicker, feedId, harness, rowContext, WORKSPACE } from "../harness.js";
+import { countingTicker, drawnBefore, feedId, harness, rowContext, WORKSPACE } from "../harness.js";
 import { orderFor } from "../../feed-order.js";
 
 const ROW = "shell-1";
@@ -915,3 +915,17 @@ function settledCompleted(judgment: "failed" | "succeeded" | undefined): FeedShe
   if (judgment === "succeeded") completed.judgment = { case: "succeeded", value: create(FeedShellCompletedSucceededSchema, {}) };
   return { case: "settled", value: create(FeedShellSettledSchema, { outcome: { case: "completed", value: completed } }) };
 }
+
+// THE BADGES COME BEFORE THE CLOCK (owner ruling, 2026-10-11): the head reads
+// title, exit and outcome, then how long it ran.
+describe("drawFeedShellHead: the badges before the clock", () => {
+  it.each([".shell-exit", ".shell-outcome"])("draws %s before the settled clock", (badge) => {
+    // Arrange / Act
+    const el = drawFeedShellHead(
+      shell({ startedAtMs: 0n, settled: { endedAtMs: 12_000n, outcome: "completed", exit: 0 } }),
+      ctxFor().rc,
+    );
+    // Assert
+    expect(drawnBefore(el.querySelector(badge), el.querySelector(".shell-clock"))).toBe(true);
+  });
+});
