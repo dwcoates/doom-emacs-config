@@ -36,6 +36,14 @@ never outlives it. Go asserts from `go/window_test.go`, TypeScript from
 `test-log-timestamp.el`. This mirrors `proto/vocab/render-colors.json`, which
 does the same job for the six-color contract.
 
+`proto/vocab/profile-session.json` does the same for runtime profiling
+(`go/profiling`, `ts/profile-session.ts` and `profiling.el`): one profiles
+root, the `active` file naming the open session, the `armed/` marker of each
+signaled runtime, SIGWINCH, and the 30-minute window after which a runtime
+stops by itself. Go asserts from `go/profiling/profiling_test.go`,
+TypeScript from `agent-shim/claude/shim/test/profile-session.test.ts`, and
+elisp from `test-profiling.el`; `bin/profile-agent-repl.sh` is the collector.
+
 Changing the representation means changing the fixture and all three corners
 together. Changing one corner alone fails that corner's test rather than
 producing a log nobody can interleave.
