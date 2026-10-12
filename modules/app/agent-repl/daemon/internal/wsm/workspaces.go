@@ -34,11 +34,14 @@ func normalizeDir(dir string) (string, error) {
 //
 // The last two columns are DERIVED, not stored on the row: whether the
 // workspace's creation job asked for the one-shot form, and whether a merge
-// queue entry stands for it. Every read selects FROM workspaces unaliased, so
+// queue entry stands for it -- its own, or that of a merge workspace forked
+// for its detached merge (`merge_of` names it), which is where its merge
+// stands once handed off. Every read selects FROM workspaces unaliased, so
 // the correlated subqueries name `workspaces.id`.
 const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, last_selected_at, last_activity_at, merged_at, spawned_shim_pid, created_at, result_end, result_read, hidden, merge_of, merge_request_id, commit_count, place, ` +
 	`EXISTS (SELECT 1 FROM creation_jobs WHERE creation_jobs.workspace_id = workspaces.id AND creation_jobs.one_shot = 1), ` +
-	`EXISTS (SELECT 1 FROM merge_queue WHERE merge_queue.workspace_id = workspaces.id)`
+	`EXISTS (SELECT 1 FROM merge_queue WHERE merge_queue.workspace_id = workspaces.id ` +
+	`OR merge_queue.workspace_id IN (SELECT merge_ws.id FROM workspaces AS merge_ws WHERE merge_ws.merge_of = workspaces.id))`
 
 // scanWorkspace decodes one workspace row all-or-nothing: an out-of-range
 // priority is a decode failure, never a silently substituted default.

@@ -1402,9 +1402,22 @@ func (f *fakeFooter) last() footer.MergeFacts {
 
 type fakeSidebar struct {
 	sidebar.Resolver
-	mu        sync.Mutex
-	facts     []footer.MergeFacts
-	requested []bool
+	mu           sync.Mutex
+	facts        []footer.MergeFacts
+	requested    []requestFact
+	detachedEnds []detachedEnd
+}
+
+// requestFact is one request fact the roster was told.
+type requestFact struct {
+	ws        ids.WorkspaceID
+	requested bool
+}
+
+// detachedEnd is one detached merge's end the roster was told.
+type detachedEnd struct {
+	ws     ids.WorkspaceID
+	landed bool
 }
 
 func (s *fakeSidebar) SetMerge(_ ids.WorkspaceID, facts footer.MergeFacts) {
@@ -1413,17 +1426,50 @@ func (s *fakeSidebar) SetMerge(_ ids.WorkspaceID, facts footer.MergeFacts) {
 	s.mu.Unlock()
 }
 
-func (s *fakeSidebar) SetMergeRequested(_ ids.WorkspaceID, requested bool) {
+func (s *fakeSidebar) SetMergeRequested(ws ids.WorkspaceID, requested bool) {
 	s.mu.Lock()
-	s.requested = append(s.requested, requested)
+	s.requested = append(s.requested, requestFact{ws: ws, requested: requested})
 	s.mu.Unlock()
 }
 
-// requestedSeen answers every request fact the roster was told, in order.
+func (s *fakeSidebar) SetDetachedMergeEnded(ws ids.WorkspaceID, landed bool) {
+	s.mu.Lock()
+	s.detachedEnds = append(s.detachedEnds, detachedEnd{ws: ws, landed: landed})
+	s.mu.Unlock()
+}
+
+// requestedSeen answers every request fact the roster was told, in order,
+// whatever workspace it was told for.
 func (s *fakeSidebar) requestedSeen() []bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return append([]bool(nil), s.requested...)
+	var out []bool
+	for _, fact := range s.requested {
+		out = append(out, fact.requested)
+	}
+	return out
+}
+
+// requestedSeenFor answers every request fact the roster was told for ws, in
+// order.
+func (s *fakeSidebar) requestedSeenFor(ws ids.WorkspaceID) []bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []bool
+	for _, fact := range s.requested {
+		if fact.ws == ws {
+			out = append(out, fact.requested)
+		}
+	}
+	return out
+}
+
+// detachedEndsSeen answers every detached merge's end the roster was told,
+// in order.
+func (s *fakeSidebar) detachedEndsSeen() []detachedEnd {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]detachedEnd(nil), s.detachedEnds...)
 }
 
 // fakeHolds records the tray's offers.
