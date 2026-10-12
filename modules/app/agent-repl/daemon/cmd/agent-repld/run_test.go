@@ -180,6 +180,65 @@ func TestTheUnsyncedFlagWithoutTheVendorGuardRefusesToBoot(t *testing.T) {
 	}
 }
 
+// TestAnInMemoryStateDatabaseIsRecordedAtBootAndLeavesNoFile pins that a test
+// run's daemon handed the in-memory seam says so at INFO and never creates
+// wsm.db.
+func TestAnInMemoryStateDatabaseIsRecordedAtBootAndLeavesNoFile(t *testing.T) {
+	// Arrange.
+	root := shortRoot(t)
+	t.Setenv(wsm.EnvTestStateInMemory, "1")
+
+	// Act.
+	_ = runIn(t, root)
+
+	// Assert.
+	raw, err := os.ReadFile(filepath.Join(root, "logs", "daemon.run.log"))
+	if err != nil {
+		t.Fatalf("ReadFile daemon.run.log: %v", err)
+	}
+	if !strings.Contains(string(raw), "the state database lives in memory") {
+		t.Fatalf("daemon.run.log = %q, want the in-memory state database recorded", string(raw))
+	}
+	if _, err := os.Stat(filepath.Join(root, "wsm.db")); !os.IsNotExist(err) {
+		t.Fatalf("an in-memory boot created wsm.db (stat err = %v)", err)
+	}
+}
+
+// TestTheInMemoryFlagWithoutTheVendorGuardRefusesToBoot pins that a live
+// daemon handed the in-memory seam refuses to boot rather than run on state it
+// would lose.
+func TestTheInMemoryFlagWithoutTheVendorGuardRefusesToBoot(t *testing.T) {
+	// Arrange.
+	root := shortRoot(t)
+	t.Setenv("AGENT_REPL_FORBID_VENDOR_CALLS", "")
+	t.Setenv(wsm.EnvTestStateInMemory, "1")
+	t.Setenv(dlog.LevelEnvironment, "info")
+
+	// Act.
+	got := run(context.Background(), options{stateDir: root}, newTestHooks().hooks)
+
+	// Assert.
+	if got == nil || !strings.Contains(got.Error(), wsm.EnvTestStateInMemory) {
+		t.Fatalf("run error = %v, want a refusal naming %s", got, wsm.EnvTestStateInMemory)
+	}
+}
+
+// TestAJoiningDaemonRefusesTheInMemoryFlag pins that a successor cannot keep
+// its state in memory: joining reads the incumbent's state file.
+func TestAJoiningDaemonRefusesTheInMemoryFlag(t *testing.T) {
+	// Arrange.
+	root := shortRoot(t)
+	t.Setenv(wsm.EnvTestStateInMemory, "1")
+
+	// Act.
+	got := runIn(t, root, func(o *options) { o.joining = "127.0.0.1:41111" })
+
+	// Assert.
+	if got == nil || !strings.Contains(got.Error(), "joining daemon") {
+		t.Fatalf("run error = %v, want the joining refusal", got)
+	}
+}
+
 // TestTheSecondDaemonLosesTheExclusivityClaim pins the boot-exclusivity ruling:
 // the address is bound FIRST, and an unflagged second daemon loses there,
 // before it has bound a socket or written anything.

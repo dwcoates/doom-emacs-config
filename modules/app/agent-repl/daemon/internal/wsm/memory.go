@@ -56,6 +56,12 @@ func OpenInMemory(ctx context.Context, opts ...Option) (DB, error) {
 	if !isTestBinary() {
 		return nil, errNotATest
 	}
+	return openInMemory(ctx, opts)
+}
+
+// openInMemory is the in-memory open behind both proofs: OpenInMemory's test
+// binary and OpenForTestRun's vendor-guarded seam.
+func openInMemory(ctx context.Context, opts []Option) (DB, error) {
 	if err := memoryTemplate(ctx); err != nil {
 		return nil, err
 	}

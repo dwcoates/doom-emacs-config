@@ -326,7 +326,26 @@ func run(ctx context.Context, opts options, h hooks) error {
 		})
 	}
 
-	db, err := openState(ctx, layout, log, joining, temporary, unsynced)
+	// A TEST RUN'S STATE CAN LIVE IN MEMORY (owner ruling, 2026-10-12): the
+	// same vendor guard, and a JOINING daemon refuses it, because joining is
+	// reading the incumbent's file and there is no file to read.
+	memory, err := wsm.InMemoryFromEnv(contracts, os.Getenv)
+	if err == nil && memory.Enabled() && joining {
+		err = fmt.Errorf("wsm: %s=1 cannot hold for a joining daemon: it joins the incumbent's state file", wsm.EnvTestStateInMemory)
+	}
+	if err != nil {
+		log.Error("daemon.cmd.state", "where the state database lives could not be settled", dlog.Context{
+			"error": err.Error(),
+		})
+		return fmt.Errorf("agent-repld: settle where the state database lives: %w", err)
+	}
+	if memory.Enabled() {
+		log.Info("daemon.cmd.state", "test run: the state database lives in memory", dlog.Context{
+			"env": wsm.EnvTestStateInMemory,
+		})
+	}
+
+	db, err := openState(ctx, layout, log, joining, temporary, unsynced, memory)
 	if err != nil {
 		return err
 	}
@@ -627,7 +646,10 @@ func reconcile(ctx context.Context, log dlog.Logger, sequence boot.Sequence, bou
 //
 // unsynced is the test run's seam (wsm.UnsyncedFromEnv), already proved by the
 // boot; a live daemon always passes false.
-func openState(ctx context.Context, layout stateroot.Layout, log dlog.Logger, joining bool, temporary tempdirs.Guard, unsynced bool) (wsm.DB, error) {
+//
+// memory is the test run's in-memory seam (wsm.InMemoryFromEnv), already
+// proved by the boot and refused for a joining daemon.
+func openState(ctx context.Context, layout stateroot.Layout, log dlog.Logger, joining bool, temporary tempdirs.Guard, unsynced bool, memory wsm.InMemoryTestRun) (wsm.DB, error) {
 	open := wsm.Open
 	if joining {
 		open = wsm.OpenJoining
@@ -635,6 +657,11 @@ func openState(ctx context.Context, layout stateroot.Layout, log dlog.Logger, jo
 	opts := []wsm.Option{wsm.WithLogger(log), wsm.WithTemporaryGuard(temporary)}
 	if unsynced {
 		opts = append(opts, wsm.WithUnsyncedWrites())
+	}
+	if memory.Enabled() {
+		open = func(ctx context.Context, _ string, opts ...wsm.Option) (wsm.DB, error) {
+			return wsm.OpenForTestRun(ctx, memory, opts...)
+		}
 	}
 	db, err := open(ctx, layout.DB(), opts...)
 	if err != nil {
