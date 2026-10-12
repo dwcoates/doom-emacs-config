@@ -90,9 +90,6 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 		Availability: availability(s),
 	}
 	setStatus(out, armName, rowLog)
-	if marker := mergeWorkspaceMarker(rec); marker != nil {
-		out.MergeWorkspace = marker
-	}
 	if badge := priorityBadge(rec.Priority); badge != nil {
 		out.Priority = badge
 	}
@@ -283,17 +280,3 @@ func (r *resolver) logArmChange(ws ids.WorkspaceID, arm, previous, cause string)
 		dlog.Context{"arm": arm, "previous_arm": previous, "cause": cause})
 }
 
-// mergeWorkspaceMarker is the marker a MERGE WORKSPACE's row wears
-// (frontend.v1.RosterRowMergeWorkspace): it nests under the workspace it was
-// forked from like a child, and this says it lands on that workspace's own
-// target instead. Nil for every other workspace, and nil once the merge
-// workspace has itself merged: a recently-merged row draws only its name and
-// its merge age (owner request, 2026-10-11).
-func mergeWorkspaceMarker(rec wsm.Workspace) *frontendv1.RosterRowMergeWorkspace {
-	if rec.MergeOf == nil || rec.MergedAt != nil {
-		return nil
-	}
-	return &frontendv1.RosterRowMergeWorkspace{
-		Label: &frontendv1.RosterRowMergeWorkspaceLabel{Text: "merge → " + rec.ParentBranch},
-	}
-}

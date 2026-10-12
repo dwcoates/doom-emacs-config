@@ -918,29 +918,11 @@ message RosterRow {
   // still has one.
   RosterRowClosed closed = 31;
 
-  // PRESENT iff this workspace is an UNMERGED MERGE WORKSPACE: one the daemon forked
-  // from another to carry a detached merge
-  // (agentrepl.v1.MergeWorkspaceSourceOwnBranchDetached). Such a row is
-  // nested under the workspace it was forked from, like a child, but it
-  // lands on that workspace's own target branch rather than into it; this
-  // marker is what says so, so the nesting is not read as "merges into its
-  // parent". UNSET for every other workspace, and UNSET once the merge
-  // workspace has merged: a recently-merged row draws only its name and its
-  // merge age.
-  optional RosterRowMergeWorkspace merge_workspace = 58;
-}
-
-// The merge-workspace marker on a row.
-message RosterRowMergeWorkspace {
-  // The marker's text, daemon-composed and drawn verbatim (e.g.
-  // "merge → master").
-  RosterRowMergeWorkspaceLabel label = 1;
-}
-
-// The merge-workspace marker's text element.
-message RosterRowMergeWorkspaceLabel {
-  // Drawn verbatim.
-  string text = 1;
+  // Tag 58 (`merge_workspace`) is RETIRED: a merge workspace's row no longer
+  // wears a "merge → <target>" marker between its name and its when-column
+  // (owner request, 2026-10-11).
+  reserved 58;
+  reserved "merge_workspace";
 }
 
 // The workspace a row is — the imported join key every workspace-addressed
