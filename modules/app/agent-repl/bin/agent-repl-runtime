@@ -110,6 +110,18 @@ restart_emacs() {
             sleep 1
             waited=$((waited + 1))
         done
+        # THE SERVER GOES QUIET BEFORE THE PROCESS IS GONE. A launch in that
+        # gap reaches Launch Services while the old instance is still
+        # terminating, and it answers -600: the 2026-10-12 hard bounce's first
+        # `open` failed exactly so. The launch waits for the process itself,
+        # on the same budget.
+        while emacs_process_up; do
+            if [ "$waited" -ge "$QUIT_WAIT" ]; then
+                die "emacs's process did not leave within ${QUIT_WAIT}s of its server going quiet; it was not relaunched"
+            fi
+            sleep 1
+            waited=$((waited + 1))
+        done
         say "emacs: exited"
     else
         say "emacs: not running"
