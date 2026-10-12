@@ -1368,6 +1368,8 @@ type logRecord struct {
 // recordingLogger captures every record so a test can assert BOTH the shape of
 // what was logged and that nothing was logged at a level it forbids.
 type recordingLogger struct {
+	// mu guards records: a stream handler records on its own goroutine.
+	mu      sync.Mutex
 	records []logRecord
 }
 
@@ -1378,11 +1380,15 @@ func (l *recordingLogger) Error(op, msg string, c dlog.Context) { l.record("ERRO
 func (l *recordingLogger) With(dlog.Context) dlog.Logger        { return l }
 
 func (l *recordingLogger) record(level, op, msg string, c dlog.Context) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	l.records = append(l.records, logRecord{Level: level, Operation: op, Message: msg, Context: c})
 }
 
 // at answers the records captured at one level.
 func (l *recordingLogger) at(level string) []logRecord {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	var out []logRecord
 	for _, rec := range l.records {
 		if rec.Level == level {
