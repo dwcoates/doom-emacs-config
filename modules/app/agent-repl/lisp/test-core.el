@@ -1373,6 +1373,105 @@ one to its caller.  A caller that must abort signals for itself."
     (should (equal (agent-repl--global-state-file "")
                    (expand-file-name "/tmp/statetest")))))
 
+;;;; ---- Tests: atomic file writes ----
+
+(defconst agent-repl-test-core--lisp-dir
+  (file-name-directory (or load-file-name buffer-file-name))
+  "The directory this suite and the sources it reads live in.")
+
+(defmacro agent-repl-test--with-atomic-dir (var &rest body)
+  "Run BODY with VAR naming a fresh temporary directory, removed afterwards."
+  (declare (indent 1))
+  `(let ((,var (make-temp-file "atomic-write-" t)))
+     (unwind-protect (progn ,@body)
+       (delete-directory ,var t))))
+
+(defun agent-repl-test--atomic-dir-files (dir)
+  "Return every entry of DIR but `.' and `..', hidden ones included."
+  (directory-files dir nil directory-files-no-dot-files-regexp))
+
+(ert-deftest agent-repl-test-write-file-atomically-writes-and-returns-the-file ()
+  "The text lands in FILE, whose absolute path is returned."
+  (agent-repl-test--with-atomic-dir dir
+    ;; Arrange.
+    (let ((file (expand-file-name "f.txt" dir)))
+      ;; Act.
+      (let ((returned (agent-repl--write-file-atomically file "body")))
+        ;; Assert.
+        (should (equal returned file))
+        (should (equal (with-temp-buffer (insert-file-contents file) (buffer-string)) "body"))))))
+
+(ert-deftest agent-repl-test-write-file-atomically-creates-the-parent-directory ()
+  "A missing parent directory is created."
+  (agent-repl-test--with-atomic-dir dir
+    ;; Arrange.
+    (let ((file (expand-file-name "a/b/f.txt" dir)))
+      ;; Act.
+      (agent-repl--write-file-atomically file "body")
+      ;; Assert.
+      (should (file-exists-p file)))))
+
+(ert-deftest agent-repl-test-write-file-atomically-replaces-an-existing-file ()
+  "An existing FILE is replaced whole."
+  (agent-repl-test--with-atomic-dir dir
+    ;; Arrange.
+    (let ((file (expand-file-name "f.txt" dir)))
+      (agent-repl--write-file-atomically file "a much longer first body")
+      ;; Act.
+      (agent-repl--write-file-atomically file "short")
+      ;; Assert.
+      (should (equal (with-temp-buffer (insert-file-contents file) (buffer-string)) "short")))))
+
+(ert-deftest agent-repl-test-write-file-atomically-leaves-no-temporary ()
+  "A successful write leaves FILE alone in its directory."
+  (agent-repl-test--with-atomic-dir dir
+    ;; Act.
+    (agent-repl--write-file-atomically (expand-file-name "f.txt" dir) "body")
+    ;; Assert.
+    (should (equal (agent-repl-test--atomic-dir-files dir) '("f.txt")))))
+
+(ert-deftest agent-repl-test-write-file-atomically-writes-utf-8 ()
+  "Non-ASCII text is written as UTF-8 bytes."
+  (agent-repl-test--with-atomic-dir dir
+    ;; Arrange.
+    (let ((file (expand-file-name "f.txt" dir)))
+      ;; Act.
+      (agent-repl--write-file-atomically file "caf\u00e9")
+      ;; Assert.
+      (should (equal (with-temp-buffer
+                       (set-buffer-multibyte nil)
+                       (insert-file-contents-literally file)
+                       (buffer-string))
+                     (encode-coding-string "caf\u00e9" 'utf-8))))))
+
+(ert-deftest agent-repl-test-write-file-atomically-failure-keeps-previous-contents ()
+  "A write failing before its rename keeps FILE whole, removes the temporary, and re-signals."
+  (agent-repl-test--with-atomic-dir dir
+    ;; Arrange.
+    (let ((file (expand-file-name "f.txt" dir)))
+      (agent-repl--write-file-atomically file "before")
+      (cl-letf (((symbol-function 'rename-file)
+                 (lambda (&rest _) (signal 'file-error '("rename refused")))))
+        ;; Act.
+        (should-error (agent-repl--write-file-atomically file "after") :type 'file-error))
+      ;; Assert.
+      (should (equal (with-temp-buffer (insert-file-contents file) (buffer-string)) "before"))
+      (should (equal (agent-repl-test--atomic-dir-files dir) '("f.txt"))))))
+
+(ert-deftest agent-repl-test-write-file-atomically-is-the-shared-write-path ()
+  "Every atomic writer goes through the shared helper, never a hand-rolled rename."
+  ;; Arrange.
+  (let ((sources (mapcar (lambda (name)
+                           (with-temp-buffer
+                             (insert-file-contents
+                              (expand-file-name name agent-repl-test-core--lisp-dir))
+                             (buffer-string)))
+                         '("history.el" "held-ingress.el"))))
+    ;; Assert.
+    (dolist (source sources)
+      (should (string-match-p "(agent-repl--write-file-atomically" source))
+      (should-not (string-match-p "(rename-file" source)))))
+
 ;;;; ---- Tests: legacy-state migration ----
 
 (ert-deftest agent-repl-test-migrate-moves-legacy-when-new-absent ()
