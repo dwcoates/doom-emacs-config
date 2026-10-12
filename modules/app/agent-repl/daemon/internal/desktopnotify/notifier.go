@@ -7,6 +7,7 @@ import (
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/standdown"
 )
 
 // opPost is the operation a banner's records carry.
@@ -171,7 +172,7 @@ func (n *Notifier) play(log dlog.Logger) {
 	log.Info(opChime, "playing the chime", dlog.Context{"program": n.deps.Chime.Program()})
 	err := n.deps.Chime.Play(n.ctx)
 	switch {
-	case stoodDown(n.ctx, err):
+	case standdown.CutShort(n.ctx, err):
 		log.Info(opChime, "the daemon stood down while the chime played", dlog.Context{"cause": err.Error()})
 	case err != nil:
 		log.Error(opChime, "the chime program failed", dlog.Context{
@@ -198,7 +199,7 @@ func (n *Notifier) Raise(ws ids.WorkspaceID, kind, text string) {
 func (n *Notifier) show(ws ids.WorkspaceID, log dlog.Logger, compose Compose, chimed bool, ring func()) {
 	workspace, err := n.deps.Workspaces.Workspace(n.ctx, ws)
 	switch {
-	case stoodDown(n.ctx, err):
+	case standdown.CutShort(n.ctx, err):
 		log.Info(opPost, "the daemon stood down while the workspace was named; no desktop banner", dlog.Context{"cause": err.Error()})
 		return
 	case err != nil:
@@ -228,7 +229,7 @@ func (n *Notifier) show(ws ids.WorkspaceID, log dlog.Logger, compose Compose, ch
 	ring()
 	outcome, err := n.deps.Backend.Post(n.ctx, Target{ID: ws, Dir: workspace.Dir}, banner)
 	switch {
-	case stoodDown(n.ctx, err):
+	case standdown.CutShort(n.ctx, err):
 		log.Info(opPost, "the daemon stood down while a banner awaited its click", dlog.Context{"cause": err.Error()})
 	case err != nil:
 		log.Error(opPost, "the desktop banner program failed", dlog.Context{
@@ -254,10 +255,4 @@ func (n *Notifier) Close() {
 	n.mu.Unlock()
 	n.cancel()
 	n.wg.Wait()
-}
-
-// stoodDown reports whether err is a call the daemon's stand-down cut short:
-// the call failed under a ctx (the notifier's lifetime) that has ended.
-func stoodDown(ctx context.Context, err error) bool {
-	return err != nil && ctx.Err() != nil
 }

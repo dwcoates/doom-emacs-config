@@ -21,6 +21,7 @@ import (
 	"claude-repld/internal/merge"
 	"claude-repld/internal/prompthandler"
 	"claude-repld/internal/resolve/feed"
+	"claude-repld/internal/standdown"
 	"claude-repld/internal/wsm"
 )
 
@@ -273,7 +274,7 @@ func lastActive(ws wsm.Workspace) time.Time {
 // its end cut short is the orderly exit it is, recorded at INFO with what it
 // left undone.
 func sweepFailed(ctx context.Context, log dlog.Logger, level func(operation, message string, ctx dlog.Context), message string, fields dlog.Context, err error) {
-	if ctx.Err() != nil {
+	if standdown.CutShort(ctx, err) {
 		stood := withCause(fields, err)
 		stood["left_undone"] = message
 		log.Info(op, "the daemon stood down mid-sweep", stood)
