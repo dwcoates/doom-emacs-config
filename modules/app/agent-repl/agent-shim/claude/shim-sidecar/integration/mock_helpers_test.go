@@ -126,7 +126,7 @@ func takeMockDriveSlot(t *testing.T) {
 }
 
 // mockShimDir is the shim package's root — READ-ONLY to this suite. Nothing
-// here ever writes under it except the `npm ci` its own AGENTS.md documents:
+// here ever writes under it except its deps, through bin/ensure-deps.sh:
 // the bundle is built into mockShimRoot, never into the package's dist/.
 func mockShimDir() string {
 	return filepath.Join(repo.agentShimDir, "claude", "shim")
@@ -168,12 +168,12 @@ func mockShimEntry(t *testing.T) string {
 
 func buildMockShim() (string, error) {
 	dir := mockShimDir()
-	if _, err := os.Stat(filepath.Join(dir, "node_modules")); errors.Is(err, fs.ErrNotExist) {
-		if out, err := runIn(dir, nil, "npm", "ci", "--no-audit", "--no-fund"); err != nil {
-			return "", fmt.Errorf("npm ci in %s: %v\n%s", dir, err, out)
-		}
-	} else if err != nil {
-		return "", fmt.Errorf("stat %s/node_modules: %w", dir, err)
+	// THE PACKAGE'S DEPS COME FROM bin/ensure-deps.sh, the one install path,
+	// which installs under the package's lock: this suite runs as several
+	// processes at once, and each installing into one node_modules side by
+	// side once left a build spawning a half-extracted esbuild.
+	if out, err := runIn(dir, nil, "npm", "run", "ensure-deps"); err != nil {
+		return "", fmt.Errorf("ensure the shim's deps in %s: %v\n%s", dir, err, out)
 	}
 	root, err := os.MkdirTemp("", "agent-repl-mock-shim-")
 	if err != nil {
