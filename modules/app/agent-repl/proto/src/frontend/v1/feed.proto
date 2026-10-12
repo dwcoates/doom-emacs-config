@@ -2935,11 +2935,13 @@ message FeedMergeFoldByReader {}
 // NESTING IS THE ROW'S PARENT. A row with no FeedRow.parent is a TOP-LEVEL
 // tab of the bubble's strip. A `rebase_commit` row is parented to the
 // rebasing tab's row, and a `tests_run` row to the tests tab's row: each is a
-// SUBTAB, drawn in its parent tab's own strip, in served order. Ordinary rows
-// parented to a `rebase_commit` row are its conflict resolution's agent
-// stream; ordinary rows parented to a `tests_run` row are the agent stream of
-// the fixing that followed that run. The client groups nothing itself: every
-// subtab and every agent row names its container.
+// SUBTAB, drawn in its parent tab's own strip, in served order. A
+// `tests_run_fixing` row is parented to its run's row: a SUB-SUBTAB beside
+// that run's output. Ordinary rows parented to a `rebase_commit` row are its
+// conflict resolution's agent stream; ordinary rows parented to a
+// `tests_run_fixing` row are that fixing attempt's agent stream. The client
+// groups nothing itself: every subtab and every agent row names its
+// container.
 //
 // THREE TAB SHAPES. RESOLVED tabs (queue, committing, updating main) carry
 // their content in the row, replaced whole per push. AGENTIC tabs
@@ -2950,8 +2952,9 @@ message FeedMergeFoldByReader {}
 // feed. The same holds for a commit's conflict resolution and a run's fixing
 // attempt. PARENT tabs (rebasing, tests) carry their
 // own state and narration, and their content is the subtab rows parented to
-// them; a subtab carries its resolved content AND is the container of the
-// agent rows its agentic part produced.
+// them; a commit subtab carries its resolved content AND is the container of
+// its conflict resolution's agent rows, and a fixing sub-subtab is the
+// container of its attempt's agent rows.
 //
 // Top-level tabs are APPEND-ONLY and CONDITIONAL: a tab appears BECAUSE that
 // work began — an unconfigured prompt means no prompt tab — and a top-level
@@ -2986,6 +2989,7 @@ message FeedMergeTab {
     FeedMergeTabRebaseCommit rebase_commit = 13;
     FeedMergeTabTests tests = 6;
     FeedMergeTabTestsRun tests_run = 14;
+    FeedMergeTabTestsRunFixing tests_run_fixing = 15;
     FeedMergeTabCommitting committing = 10;
     FeedMergeTabUpdatingMain updating_main = 11;
     FeedMergeTabPostPrompt post_prompt = 8;
@@ -2995,7 +2999,7 @@ message FeedMergeTab {
   // branch is rebased first and the merge commit is made only after the gate
   // passes, as the committing tab. Tags 5 (`conflicts`) and 7 (`fixes`) are
   // RETIRED: a conflict resolution is part of its commit's subtab, and a
-  // fixing attempt part of its run's subtab.
+  // fixing attempt is a sub-subtab of its run's subtab.
   reserved 4, 5, 7;
   reserved "merge", "conflicts", "fixes";
 }
@@ -3224,11 +3228,11 @@ message FeedMergeTabTests {
   reserved "suites", "log";
 }
 
-// SUBTAB of the tests tab: one full run of the suites. Its own content is
-// two SUB-SUBTABS: the run's output, and — once a fixing attempt follows a
-// failed run — that attempt's agent stream, which is the sub-feed rows
-// parented to THIS row. When the last attempt fails, the merge FAILS and the
-// workspace is handed back.
+// SUBTAB of the tests tab: one full run of the suites. Its own content is a
+// strip of SUB-SUBTABS: the run's output, which is this row's own `output`,
+// then — once a fixing attempt follows the failed run — that attempt, which is
+// the `tests_run_fixing` row parented to THIS row. When the last attempt
+// fails, the merge FAILS and the workspace is handed back.
 message FeedMergeTabTestsRun {
   // The run of the suites itself, NOT the fixing after it.
   oneof state {
@@ -3237,12 +3241,9 @@ message FeedMergeTabTestsRun {
     // The run ended: every suite passed (succeeded), or one failed (failed).
     FeedMergeTabSettled settled = 2;
   }
-  // The output sub-subtab: the suites and the log.
+  // The output sub-subtab: the suites and the log. Its badge is this run's
+  // own state.
   FeedMergeTestsRunOutput output = 3;
-  // The fixing sub-subtab. PRESENT once a fixing attempt follows this run;
-  // UNSET for a run that passed, for a failed run the merge gave up on with
-  // no attempt left, and while the attempt has not begun.
-  optional FeedMergeTestsRunFixing fixing = 4;
 }
 
 // The output sub-subtab of a run: the programmatic test run — suites,
@@ -3254,11 +3255,13 @@ message FeedMergeTestsRunOutput {
   optional FeedMergeTestLog log = 2;
 }
 
-// The fixing sub-subtab of a run: the requesting workspace's session fixing
-// the suites that run failed. Its content is the sub-feed rows parented to
-// the run's row, below the attempt it names. A fixing that succeeds is
-// followed by the NEXT run's subtab, never by a reopened run.
-message FeedMergeTestsRunFixing {
+// SUB-SUBTAB of a run: the requesting workspace's session fixing the suites
+// that run failed, parented to the run's row. Absent for a run that passed and
+// for a failed run the merge gave up on with no attempt left. Its content is
+// the sub-feed rows parented to THIS row, below the attempt it names. A fixing
+// attempt that succeeds is followed by the NEXT run's subtab, never by a
+// reopened run.
+message FeedMergeTabTestsRunFixing {
   // The attempt's progress.
   oneof state {
     // The session is fixing.
