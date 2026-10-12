@@ -898,3 +898,25 @@ func TestSweepThatCannotTakeTheWorktreeLockIsAnError(t *testing.T) {
 		t.Fatalf("no ERROR lock record with its path and cause: %+v", f.logs.Records())
 	}
 }
+
+func TestSweepWhoseRetirementTheStandDownCutShortRecordsItAtInfo(t *testing.T) {
+	// Arrange: the daemon stands down while the verb runs.
+	f := newFixture(t)
+	landedRequester(t, f, time.Now())
+	f.now = time.Now().Add(LandedIdleLimit + time.Hour)
+	ctx, cancel := context.WithCancel(context.Background())
+	f.workspaces.onRetire = cancel
+	f.workspaces.retireErr = context.Canceled
+
+	// Act
+	report := f.svc.Sweep(ctx)
+
+	// Assert
+	if report.Retired != 0 {
+		t.Fatalf("report %+v, want nothing retired", report)
+	}
+	r, ok := f.recordWith(dlog.LevelInfo, "the daemon stood down mid-sweep")
+	if !ok || r.Context["left_undone"] != "an idle landed requester was not retired; the next sweep tries again" || r.Context["requester"] == nil {
+		t.Fatalf("the cut-short retirement was not recorded with its requester: %+v", f.logs.Records())
+	}
+}
