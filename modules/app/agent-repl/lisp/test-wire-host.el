@@ -831,41 +831,47 @@ composer and vendor_info arms together."
   "The daemon stream's push arms are exactly what the frozen schema declares.
 `newsDigest' is a webview stream's alone: the daemon never sends it to an
 Emacs stream, so Emacs's decoder does not accept it and would report one
-as a contract breach."
+as a contract breach.  The retired `startup' arm is gone: the editor's
+opens are OpenTabs streams."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_watch_daemon.pb.go" "WatchDaemonResponse")
                        #'string<)
                  (sort (list "shutdownAnnounced" "drainScheduled" "drainCancelled"
                              "mutationProgress" "reloadElisp" "ending" "faultsStanding"
-                             "persistentWifi" "newsDigest" "startup")
+                             "persistentWifi" "newsDigest")
                        #'string<))))
 
-;;;; ---- DaemonStartupEvent ----
+;;;; ---- OpenTabs ----
 
 (defconst agent-repl-test-wire-host--ref-json "{\"id\":\"w1\",\"dir\":\"/t/w1\"}"
   "One workspace ref.")
 
-(ert-deftest agent-repl-test-wire-host-startup-decodes-each-event ()
-  "Every startup event arm decodes to its keyword and payload."
-  (dolist (case
-           `(("{\"opening\":{\"workspaces\":3}}" :opening (:workspaces 3))
-             (,(format "{\"workspaceOpen\":{\"workspace\":%s}}" agent-repl-test-wire-host--ref-json)
-              :workspace-open (:workspace (:id "w1" :dir "/t/w1")))
-             (,(format "{\"finished\":{\"ready\":1,\"total\":2,\"failed\":[{\"workspace\":%s,\"name\":\"one\"}]}}"
-                       agent-repl-test-wire-host--ref-json)
-              :finished (:ready 1 :total 2 :failed ((:workspace (:id "w1" :dir "/t/w1") :name "one"))))))
-    (let ((event (agent-repl-test-wire-host--decode
-                  #'agent-repl-wire-decode-watch-daemon-response
-                  (format "{\"startup\":{\"atMs\":\"5\",%s}" (substring (nth 0 case) 1)))))
-      (should (equal (plist-get event :arm) :startup))
-      (should (equal (plist-get (plist-get event :value) :at-ms) 5))
-      (should (equal (plist-get (plist-get event :value) :event)
-                     (list :arm (nth 1 case) :value (nth 2 case)))))))
+(ert-deftest agent-repl-test-wire-host-open-tabs-encodes-each-page-arm ()
+  "Each workspace of the request carries its ref and its page arm."
+  (should (equal (agent-repl-test-wire-host--quiet
+                   (agent-repl-wire-encode-open-tabs-request
+                    '(:workspaces ((:workspace (:id "w1" :dir "/t/w1") :page (:arm :loading :value nil))
+                                   (:workspace (:id "w2" :dir "/t/w2") :page (:arm :none :value nil))))))
+                 '((workspaces . [((workspace (id . "w1") (dir . "/t/w1")) (loading))
+                                  ((workspace (id . "w2") (dir . "/t/w2")) (none))])))))
 
-(ert-deftest agent-repl-test-wire-host-startup-decodes-each-workspace-step ()
-  "Every workspace step arm decodes to its keyword and payload."
+(ert-deftest agent-repl-test-wire-host-open-tabs-refuses-an-empty-request ()
+  "A request naming no workspace is refused before it is sent."
+  (should (equal (agent-repl-test-wire-host--encode-breach
+                  #'agent-repl-wire-encode-open-tabs-request '(:workspaces nil))
+                 '("OpenTabsRequest" workspaces "expected a non-empty list"))))
+
+(ert-deftest agent-repl-test-wire-host-open-tabs-refuses-a-workspace-with-no-page-arm ()
+  "A workspace whose page arm is unset is refused before it is sent."
+  (should (equal (agent-repl-test-wire-host--encode-breach
+                  #'agent-repl-wire-encode-open-tabs-request
+                  '(:workspaces ((:workspace (:id "w1" :dir "/t/w1")))))
+                 '("OpenTabsWorkspace" page "oneof is unset"))))
+
+(ert-deftest agent-repl-test-wire-host-open-tabs-decodes-each-step ()
+  "Every step arm decodes to its keyword and payload."
   (dolist (case
-           `(("startingSession" "{}" :starting-session nil)
+           '(("startingSession" "{}" :starting-session nil)
              ("waking" "{}" :waking nil)
              ("resuming" "{}" :resuming nil)
              ("vendorRetrying" "{\"attempt\":2}" :vendor-retrying (:attempt 2))
@@ -873,29 +879,76 @@ as a contract breach."
              ("vendorFailed" "{}" :vendor-failed nil)
              ("coldGate" "{}" :cold-gate nil)
              ("offline" "{}" :offline nil)
-             ("waitingFor" ,(format "{\"ahead\":%s}" agent-repl-test-wire-host--ref-json)
-              :waiting-for (:ahead (:id "w1" :dir "/t/w1")))
-             ("failed" "{\"reason\":\"spawn refused\"}" :failed (:reason "spawn refused"))))
-    (let ((step (agent-repl-test-wire-host--decode
-                 #'agent-repl-wire-decode-daemon-startup-workspace-step
-                 (format "{\"workspace\":%s,\"%s\":%s}"
-                         agent-repl-test-wire-host--ref-json (nth 0 case) (nth 1 case)))))
-      (should (equal (plist-get step :workspace) '(:id "w1" :dir "/t/w1")))
-      (should (equal (plist-get step :step) (list :arm (nth 2 case) :value (nth 3 case)))))))
+             ("served" "{}" :served nil)
+             ("pageConnected" "{}" :page-connected nil)
+             ("pageDrawn" "{}" :page-drawn nil)))
+    (let ((frame (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-open-tabs-response
+                  (format "{\"step\":{\"workspace\":%s,\"atMs\":\"5\",\"%s\":%s}}"
+                          agent-repl-test-wire-host--ref-json (nth 0 case) (nth 1 case)))))
+      (should (equal frame (list :arm :step
+                                 :value (list :workspace '(:id "w1" :dir "/t/w1") :at-ms 5
+                                              :step (list :arm (nth 2 case) :value (nth 3 case)))))))))
 
-(ert-deftest agent-repl-test-wire-host-startup-unset-event-is-a-breach ()
-  "A startup event naming no step is a contract breach."
+(ert-deftest agent-repl-test-wire-host-open-tabs-decodes-each-opened-outcome ()
+  "Every opened outcome arm decodes to its keyword and payload."
+  (dolist (case
+           '(("ready" "{}" :ready nil)
+             ("failed" "{\"reason\":\"spawn refused\"}" :failed (:reason "spawn refused"))
+             ("hidden" "{}" :hidden nil)
+             ("refused" "{\"unknownWorkspace\":{}}" :refused (:cause (:arm :unknown-workspace :value nil)))
+             ("refused" "{\"workspaceRefMismatch\":{\"registryDir\":\"/r\"}}"
+              :refused (:cause (:arm :workspace-ref-mismatch :value (:registry-dir "/r"))))
+             ("refused" "{\"transferringAway\":{\"address\":\"127.0.0.1:9\"}}"
+              :refused (:cause (:arm :transferring-away :value (:address "127.0.0.1:9"))))
+             ("refused" "{\"notYetAdopted\":{}}" :refused (:cause (:arm :not-yet-adopted :value nil)))))
+    (let ((frame (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-open-tabs-response
+                  (format "{\"opened\":{\"workspace\":%s,\"atMs\":\"5\",\"%s\":%s}}"
+                          agent-repl-test-wire-host--ref-json (nth 0 case) (nth 1 case)))))
+      (should (equal (plist-get (plist-get frame :value) :outcome)
+                     (list :arm (nth 2 case) :value (nth 3 case)))))))
+
+(ert-deftest agent-repl-test-wire-host-open-tabs-decodes-the-finish ()
+  "The finish decodes its counts and its failed workspaces."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-open-tabs-response
+                  (format "{\"finished\":{\"ready\":1,\"total\":2,\"failed\":[{\"workspace\":%s,\"name\":\"one\"}]}}"
+                          agent-repl-test-wire-host--ref-json))
+                 '(:arm :finished
+                   :value (:ready 1 :total 2 :failed ((:workspace (:id "w1" :dir "/t/w1") :name "one")))))))
+
+(ert-deftest agent-repl-test-wire-host-open-tabs-an-unset-frame-is-a-breach ()
+  "A frame naming no arm is a contract breach."
   (should (equal (agent-repl-test-wire-host--breach
-                  #'agent-repl-wire-decode-daemon-startup-event "{\"atMs\":\"5\"}")
-                 '("DaemonStartupEvent" event "oneof is unset"))))
+                  #'agent-repl-wire-decode-open-tabs-response "{}")
+                 '("OpenTabsResponse" frame "oneof is unset"))))
 
-(ert-deftest agent-repl-test-wire-host-startup-step-arms-pinned ()
-  "The workspace step arms are exactly the frozen schema's."
+(ert-deftest agent-repl-test-wire-host-open-tabs-step-arms-pinned ()
+  "The step arms are exactly the frozen schema's."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
-                        "agentrepl/v1/endpoint_watch_daemon.pb.go" "DaemonStartupWorkspaceStep")
+                        "agentrepl/v1/endpoint_open_tabs.pb.go" "OpenTabsStep")
                        #'string<)
                  (sort (mapcar (lambda (arm) (symbol-name (car arm)))
-                               agent-repl-wire-daemon-startup-step-arms)
+                               agent-repl-wire-open-tabs-step-arms)
+                       #'string<))))
+
+(ert-deftest agent-repl-test-wire-host-open-tabs-outcome-arms-pinned ()
+  "The opened outcome arms are exactly the frozen schema's."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_open_tabs.pb.go" "OpenTabsOpened")
+                       #'string<)
+                 (sort (mapcar (lambda (arm) (symbol-name (car arm)))
+                               agent-repl-wire-open-tabs-opened-arms)
+                       #'string<))))
+
+(ert-deftest agent-repl-test-wire-host-open-tabs-refusal-arms-pinned ()
+  "The refusal cause arms are exactly the frozen schema's."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_open_tabs.pb.go" "OpenTabsOpenedRefused")
+                       #'string<)
+                 (sort (mapcar (lambda (arm) (symbol-name (car arm)))
+                               agent-repl-wire-open-tabs-refused-arms)
                        #'string<))))
 
 (defconst agent-repl-test-wire-host--standing-fault-json

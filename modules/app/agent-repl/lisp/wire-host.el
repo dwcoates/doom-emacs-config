@@ -41,6 +41,7 @@
 (declare-function agent-repl-wire--decoded "wire-common")
 (declare-function agent-repl-wire--encode-empty "wire-common")
 (declare-function agent-repl-wire--encode-oneof "wire-common")
+(declare-function agent-repl-wire--encode-repeated "wire-common")
 (declare-function agent-repl-wire--encode-string "wire-common")
 (declare-function agent-repl-wire--encoded "wire-common")
 (declare-function agent-repl-wire--fail "wire-common")
@@ -1614,148 +1615,217 @@ list is the daemon saying none stands."
   "Decode `WatchDaemonResponse''s `faults_standing' push arm VALUE."
   (agent-repl-wire-decode-daemon-faults-standing value))
 
-;;;; ---- DaemonStartupEvent ----
+;;;; ---- OpenTabs (endpoint_open_tabs.proto) ----
 
-(defun agent-repl-wire--decode-startup-ref (message-name field object)
-  "Decode OBJECT's REQUIRED WorkspaceRef FIELD of MESSAGE-NAME."
-  (agent-repl-wire--decode-message message-name field object
+(defun agent-repl-wire--decode-open-tabs-ref (message-name object)
+  "Decode OBJECT's REQUIRED `workspace' WorkspaceRef of MESSAGE-NAME."
+  (agent-repl-wire--decode-message message-name 'workspace object
                                    #'agent-repl-wire-decode-workspace-ref))
 
-(defun agent-repl-wire-decode-daemon-startup-opening (value)
-  "Decode VALUE as `DaemonStartupOpening', a plist `(:workspaces N)'."
-  (let ((object (agent-repl-wire--object "DaemonStartupOpening" value)))
-    (agent-repl-wire--check-keys "DaemonStartupOpening" object '(workspaces))
-    (agent-repl-wire--decoded
-     "DaemonStartupOpening"
-     (list :workspaces (agent-repl-wire--decode-uint32
-                        "DaemonStartupOpening" 'workspaces object)))))
+(defun agent-repl-wire-encode-open-tabs-page-loading (value)
+  "Encode VALUE as the empty `OpenTabsPageLoading'."
+  (agent-repl-wire--encode-empty "OpenTabsPageLoading" value))
 
-(defun agent-repl-wire-decode-daemon-startup-step-vendor-retrying (value)
-  "Decode VALUE as `DaemonStartupStepVendorRetrying', a plist `(:attempt N)'."
-  (let ((object (agent-repl-wire--object "DaemonStartupStepVendorRetrying" value)))
-    (agent-repl-wire--check-keys "DaemonStartupStepVendorRetrying" object '(attempt))
+(defun agent-repl-wire-encode-open-tabs-page-none (value)
+  "Encode VALUE as the empty `OpenTabsPageNone'."
+  (agent-repl-wire--encode-empty "OpenTabsPageNone" value))
+
+(defun agent-repl-wire-encode-open-tabs-workspace (value)
+  "Encode the OpenTabsWorkspace plist VALUE `(:workspace REF :page ONEOF)'.
+THE PAGE ARM IS REQUIRED: `:loading' when this Emacs is loading the
+workspace's web page, `:none' when it draws none."
+  (unless (plist-member value :workspace)
+    (agent-repl-wire--fail "OpenTabsWorkspace" 'workspace "required message field is absent"))
+  (agent-repl-wire--encoded
+   "OpenTabsWorkspace"
+   (cons (cons 'workspace (agent-repl-wire-encode-workspace-ref (plist-get value :workspace)))
+         (agent-repl-wire--encode-oneof
+          "OpenTabsWorkspace" 'page (plist-get value :page)
+          '((:loading loading agent-repl-wire-encode-open-tabs-page-loading)
+            (:none none agent-repl-wire-encode-open-tabs-page-none))))))
+
+(defun agent-repl-wire-encode-open-tabs-request (value)
+  "Encode the OpenTabsRequest plist VALUE `(:workspaces LIST)'.
+An empty list is refused here: the daemon would refuse it as malformed."
+  (let ((workspaces (plist-get value :workspaces)))
+    (unless (and (listp workspaces) workspaces)
+      (agent-repl-wire--fail "OpenTabsRequest" 'workspaces "expected a non-empty list"))
+    (agent-repl-wire--encoded
+     "OpenTabsRequest"
+     (list (cons 'workspaces
+                 (agent-repl-wire--encode-repeated
+                  "OpenTabsRequest" 'workspaces workspaces
+                  #'agent-repl-wire-encode-open-tabs-workspace))))))
+
+(defun agent-repl-wire-decode-open-tabs-step-vendor-retrying (value)
+  "Decode VALUE as `OpenTabsStepVendorRetrying', a plist `(:attempt N)'."
+  (let ((object (agent-repl-wire--object "OpenTabsStepVendorRetrying" value)))
+    (agent-repl-wire--check-keys "OpenTabsStepVendorRetrying" object '(attempt))
     (list :attempt (agent-repl-wire--decode-uint32
-                    "DaemonStartupStepVendorRetrying" 'attempt object))))
+                    "OpenTabsStepVendorRetrying" 'attempt object))))
 
-(defun agent-repl-wire-decode-daemon-startup-step-vendor-rejected (value)
-  "Decode VALUE as `DaemonStartupStepVendorRejected', a plist `(:cause S)'."
-  (let ((object (agent-repl-wire--object "DaemonStartupStepVendorRejected" value)))
-    (agent-repl-wire--check-keys "DaemonStartupStepVendorRejected" object '(cause))
+(defun agent-repl-wire-decode-open-tabs-step-vendor-rejected (value)
+  "Decode VALUE as `OpenTabsStepVendorRejected', a plist `(:cause S)'."
+  (let ((object (agent-repl-wire--object "OpenTabsStepVendorRejected" value)))
+    (agent-repl-wire--check-keys "OpenTabsStepVendorRejected" object '(cause))
     (list :cause (agent-repl-wire--decode-string
-                  "DaemonStartupStepVendorRejected" 'cause object))))
+                  "OpenTabsStepVendorRejected" 'cause object))))
 
-(defun agent-repl-wire-decode-daemon-startup-step-waiting-for (value)
-  "Decode VALUE as `DaemonStartupStepWaitingFor', a plist `(:ahead REF)'."
-  (let ((object (agent-repl-wire--object "DaemonStartupStepWaitingFor" value)))
-    (agent-repl-wire--check-keys "DaemonStartupStepWaitingFor" object '(ahead))
-    (list :ahead (agent-repl-wire--decode-startup-ref
-                  "DaemonStartupStepWaitingFor" 'ahead object))))
-
-(defun agent-repl-wire-decode-daemon-startup-step-failed (value)
-  "Decode VALUE as `DaemonStartupStepFailed', a plist `(:reason S)'."
-  (let ((object (agent-repl-wire--object "DaemonStartupStepFailed" value)))
-    (agent-repl-wire--check-keys "DaemonStartupStepFailed" object '(reason))
-    (list :reason (agent-repl-wire--decode-string
-                   "DaemonStartupStepFailed" 'reason object))))
-
-(defmacro agent-repl-wire--define-empty-startup-step (name message)
-  "Define NAME decoding the empty startup step MESSAGE."
+(defmacro agent-repl-wire--define-empty-decoder (name message)
+  "Define NAME decoding the empty MESSAGE."
   `(defun ,name (value)
      ,(format "Decode VALUE as the empty `%s'." message)
      (agent-repl-wire--decode-empty ,message value)))
 
-(agent-repl-wire--define-empty-startup-step
- agent-repl-wire-decode-daemon-startup-step-starting-session "DaemonStartupStepStartingSession")
-(agent-repl-wire--define-empty-startup-step
- agent-repl-wire-decode-daemon-startup-step-waking "DaemonStartupStepWaking")
-(agent-repl-wire--define-empty-startup-step
- agent-repl-wire-decode-daemon-startup-step-resuming "DaemonStartupStepResuming")
-(agent-repl-wire--define-empty-startup-step
- agent-repl-wire-decode-daemon-startup-step-vendor-failed "DaemonStartupStepVendorFailed")
-(agent-repl-wire--define-empty-startup-step
- agent-repl-wire-decode-daemon-startup-step-cold-gate "DaemonStartupStepColdGate")
-(agent-repl-wire--define-empty-startup-step
- agent-repl-wire-decode-daemon-startup-step-offline "DaemonStartupStepOffline")
+(agent-repl-wire--define-empty-decoder
+ agent-repl-wire-decode-open-tabs-step-starting-session "OpenTabsStepStartingSession")
+(agent-repl-wire--define-empty-decoder
+ agent-repl-wire-decode-open-tabs-step-waking "OpenTabsStepWaking")
+(agent-repl-wire--define-empty-decoder
+ agent-repl-wire-decode-open-tabs-step-resuming "OpenTabsStepResuming")
+(agent-repl-wire--define-empty-decoder
+ agent-repl-wire-decode-open-tabs-step-vendor-failed "OpenTabsStepVendorFailed")
+(agent-repl-wire--define-empty-decoder
+ agent-repl-wire-decode-open-tabs-step-cold-gate "OpenTabsStepColdGate")
+(agent-repl-wire--define-empty-decoder
+ agent-repl-wire-decode-open-tabs-step-offline "OpenTabsStepOffline")
+(agent-repl-wire--define-empty-decoder
+ agent-repl-wire-decode-open-tabs-step-served "OpenTabsStepServed")
+(agent-repl-wire--define-empty-decoder
+ agent-repl-wire-decode-open-tabs-step-page-connected "OpenTabsStepPageConnected")
+(agent-repl-wire--define-empty-decoder
+ agent-repl-wire-decode-open-tabs-step-page-drawn "OpenTabsStepPageDrawn")
 
-(defconst agent-repl-wire-daemon-startup-step-arms
-  '((startingSession :starting-session agent-repl-wire-decode-daemon-startup-step-starting-session)
-    (waking :waking agent-repl-wire-decode-daemon-startup-step-waking)
-    (resuming :resuming agent-repl-wire-decode-daemon-startup-step-resuming)
-    (vendorRetrying :vendor-retrying agent-repl-wire-decode-daemon-startup-step-vendor-retrying)
-    (vendorRejected :vendor-rejected agent-repl-wire-decode-daemon-startup-step-vendor-rejected)
-    (vendorFailed :vendor-failed agent-repl-wire-decode-daemon-startup-step-vendor-failed)
-    (coldGate :cold-gate agent-repl-wire-decode-daemon-startup-step-cold-gate)
-    (offline :offline agent-repl-wire-decode-daemon-startup-step-offline)
-    (waitingFor :waiting-for agent-repl-wire-decode-daemon-startup-step-waiting-for)
-    (failed :failed agent-repl-wire-decode-daemon-startup-step-failed))
-  "`DaemonStartupWorkspaceStep.step''s arms: (WIRE-KEY ARM-KEYWORD DECODER).")
+(defconst agent-repl-wire-open-tabs-step-arms
+  '((startingSession :starting-session agent-repl-wire-decode-open-tabs-step-starting-session)
+    (waking :waking agent-repl-wire-decode-open-tabs-step-waking)
+    (resuming :resuming agent-repl-wire-decode-open-tabs-step-resuming)
+    (vendorRetrying :vendor-retrying agent-repl-wire-decode-open-tabs-step-vendor-retrying)
+    (vendorRejected :vendor-rejected agent-repl-wire-decode-open-tabs-step-vendor-rejected)
+    (vendorFailed :vendor-failed agent-repl-wire-decode-open-tabs-step-vendor-failed)
+    (coldGate :cold-gate agent-repl-wire-decode-open-tabs-step-cold-gate)
+    (offline :offline agent-repl-wire-decode-open-tabs-step-offline)
+    (served :served agent-repl-wire-decode-open-tabs-step-served)
+    (pageConnected :page-connected agent-repl-wire-decode-open-tabs-step-page-connected)
+    (pageDrawn :page-drawn agent-repl-wire-decode-open-tabs-step-page-drawn))
+  "`OpenTabsStep.step''s arms: (WIRE-KEY ARM-KEYWORD DECODER).")
 
-(defun agent-repl-wire-decode-daemon-startup-workspace-step (value)
-  "Decode VALUE as `DaemonStartupWorkspaceStep'.
-Returns the plist `(:workspace REF :step ONEOF)'."
-  (let ((object (agent-repl-wire--object "DaemonStartupWorkspaceStep" value)))
+(defun agent-repl-wire-decode-open-tabs-step (value)
+  "Decode VALUE as `OpenTabsStep', a plist `(:workspace REF :at-ms N :step ONEOF)'."
+  (let ((object (agent-repl-wire--object "OpenTabsStep" value)))
     (agent-repl-wire--check-keys
-     "DaemonStartupWorkspaceStep" object
-     (cons 'workspace (mapcar #'car agent-repl-wire-daemon-startup-step-arms)))
+     "OpenTabsStep" object
+     (append '(workspace atMs) (mapcar #'car agent-repl-wire-open-tabs-step-arms)))
     (agent-repl-wire--decoded
-     "DaemonStartupWorkspaceStep"
-     (list :workspace (agent-repl-wire--decode-startup-ref
-                       "DaemonStartupWorkspaceStep" 'workspace object)
+     "OpenTabsStep"
+     (list :workspace (agent-repl-wire--decode-open-tabs-ref "OpenTabsStep" object)
+           :at-ms (agent-repl-wire--decode-int64 "OpenTabsStep" 'atMs object)
            :step (agent-repl-wire--decode-oneof
-                  "DaemonStartupWorkspaceStep" 'step object
-                  agent-repl-wire-daemon-startup-step-arms)))))
+                  "OpenTabsStep" 'step object agent-repl-wire-open-tabs-step-arms)))))
 
-(defun agent-repl-wire-decode-daemon-startup-workspace-open (value)
-  "Decode VALUE as `DaemonStartupWorkspaceOpen', a plist `(:workspace REF)'."
-  (let ((object (agent-repl-wire--object "DaemonStartupWorkspaceOpen" value)))
-    (agent-repl-wire--check-keys "DaemonStartupWorkspaceOpen" object '(workspace))
-    (agent-repl-wire--decoded
-     "DaemonStartupWorkspaceOpen"
-     (list :workspace (agent-repl-wire--decode-startup-ref
-                       "DaemonStartupWorkspaceOpen" 'workspace object)))))
+(agent-repl-wire--define-empty-decoder
+ agent-repl-wire-decode-open-tabs-opened-ready "OpenTabsOpenedReady")
+(agent-repl-wire--define-empty-decoder
+ agent-repl-wire-decode-open-tabs-opened-hidden "OpenTabsOpenedHidden")
 
-(defun agent-repl-wire-decode-daemon-startup-failed-workspace (value)
-  "Decode VALUE as `DaemonStartupFailedWorkspace'.
-Returns the plist `(:workspace REF :name S)'."
-  (let ((object (agent-repl-wire--object "DaemonStartupFailedWorkspace" value)))
-    (agent-repl-wire--check-keys "DaemonStartupFailedWorkspace" object '(workspace name))
-    (list :workspace (agent-repl-wire--decode-startup-ref
-                      "DaemonStartupFailedWorkspace" 'workspace object)
-          :name (agent-repl-wire--decode-string "DaemonStartupFailedWorkspace" 'name object))))
+(defun agent-repl-wire-decode-open-tabs-opened-failed (value)
+  "Decode VALUE as `OpenTabsOpenedFailed', a plist `(:reason S)'."
+  (let ((object (agent-repl-wire--object "OpenTabsOpenedFailed" value)))
+    (agent-repl-wire--check-keys "OpenTabsOpenedFailed" object '(reason))
+    (list :reason (agent-repl-wire--decode-string "OpenTabsOpenedFailed" 'reason object))))
 
-(defun agent-repl-wire-decode-daemon-startup-finished (value)
-  "Decode VALUE as `DaemonStartupFinished'.
-Returns the plist `(:ready N :total N :failed LIST)'."
-  (let ((object (agent-repl-wire--object "DaemonStartupFinished" value)))
-    (agent-repl-wire--check-keys "DaemonStartupFinished" object '(ready total failed))
-    (agent-repl-wire--decoded
-     "DaemonStartupFinished"
-     (list :ready (agent-repl-wire--decode-uint32 "DaemonStartupFinished" 'ready object)
-           :total (agent-repl-wire--decode-uint32 "DaemonStartupFinished" 'total object)
-           :failed (agent-repl-wire--decode-repeated
-                    "DaemonStartupFinished" 'failed object
-                    #'agent-repl-wire-decode-daemon-startup-failed-workspace)))))
+(agent-repl-wire--define-empty-decoder
+ agent-repl-wire-decode-open-tabs-refused-unknown-workspace "OpenTabsRefusedUnknownWorkspace")
+(agent-repl-wire--define-empty-decoder
+ agent-repl-wire-decode-open-tabs-refused-not-yet-adopted "OpenTabsRefusedNotYetAdopted")
 
-(defconst agent-repl-wire-daemon-startup-event-arms
-  '((opening :opening agent-repl-wire-decode-daemon-startup-opening)
-    (workspaceStep :workspace-step agent-repl-wire-decode-daemon-startup-workspace-step)
-    (workspaceOpen :workspace-open agent-repl-wire-decode-daemon-startup-workspace-open)
-    (finished :finished agent-repl-wire-decode-daemon-startup-finished))
-  "`DaemonStartupEvent.event''s arms: (WIRE-KEY ARM-KEYWORD DECODER).")
+(defun agent-repl-wire-decode-open-tabs-refused-workspace-ref-mismatch (value)
+  "Decode VALUE as `OpenTabsRefusedWorkspaceRefMismatch', `(:registry-dir S)'."
+  (let ((object (agent-repl-wire--object "OpenTabsRefusedWorkspaceRefMismatch" value)))
+    (agent-repl-wire--check-keys "OpenTabsRefusedWorkspaceRefMismatch" object '(registryDir))
+    (list :registry-dir (agent-repl-wire--decode-string
+                         "OpenTabsRefusedWorkspaceRefMismatch" 'registryDir object))))
 
-(defun agent-repl-wire-decode-daemon-startup-event (value)
-  "Decode VALUE as `DaemonStartupEvent', a plist `(:at-ms N :event ONEOF)'.
-THE ARM IS THE STEP; an unset one is a contract breach."
-  (let ((object (agent-repl-wire--object "DaemonStartupEvent" value)))
+(defun agent-repl-wire-decode-open-tabs-refused-transferring-away (value)
+  "Decode VALUE as `OpenTabsRefusedTransferringAway', `(:address S)'."
+  (let ((object (agent-repl-wire--object "OpenTabsRefusedTransferringAway" value)))
+    (agent-repl-wire--check-keys "OpenTabsRefusedTransferringAway" object '(address))
+    (list :address (agent-repl-wire--decode-string
+                    "OpenTabsRefusedTransferringAway" 'address object))))
+
+(defconst agent-repl-wire-open-tabs-refused-arms
+  '((unknownWorkspace :unknown-workspace agent-repl-wire-decode-open-tabs-refused-unknown-workspace)
+    (workspaceRefMismatch :workspace-ref-mismatch
+                          agent-repl-wire-decode-open-tabs-refused-workspace-ref-mismatch)
+    (transferringAway :transferring-away agent-repl-wire-decode-open-tabs-refused-transferring-away)
+    (notYetAdopted :not-yet-adopted agent-repl-wire-decode-open-tabs-refused-not-yet-adopted))
+  "`OpenTabsOpenedRefused.cause''s arms: (WIRE-KEY ARM-KEYWORD DECODER).")
+
+(defun agent-repl-wire-decode-open-tabs-opened-refused (value)
+  "Decode VALUE as `OpenTabsOpenedRefused', a plist `(:cause ONEOF)'."
+  (let ((object (agent-repl-wire--object "OpenTabsOpenedRefused" value)))
     (agent-repl-wire--check-keys
-     "DaemonStartupEvent" object
-     (cons 'atMs (mapcar #'car agent-repl-wire-daemon-startup-event-arms)))
+     "OpenTabsOpenedRefused" object (mapcar #'car agent-repl-wire-open-tabs-refused-arms))
+    (list :cause (agent-repl-wire--decode-oneof
+                  "OpenTabsOpenedRefused" 'cause object
+                  agent-repl-wire-open-tabs-refused-arms))))
+
+(defconst agent-repl-wire-open-tabs-opened-arms
+  '((ready :ready agent-repl-wire-decode-open-tabs-opened-ready)
+    (failed :failed agent-repl-wire-decode-open-tabs-opened-failed)
+    (hidden :hidden agent-repl-wire-decode-open-tabs-opened-hidden)
+    (refused :refused agent-repl-wire-decode-open-tabs-opened-refused))
+  "`OpenTabsOpened.outcome''s arms: (WIRE-KEY ARM-KEYWORD DECODER).")
+
+(defun agent-repl-wire-decode-open-tabs-opened (value)
+  "Decode VALUE as `OpenTabsOpened', `(:workspace REF :at-ms N :outcome ONEOF)'."
+  (let ((object (agent-repl-wire--object "OpenTabsOpened" value)))
+    (agent-repl-wire--check-keys
+     "OpenTabsOpened" object
+     (append '(workspace atMs) (mapcar #'car agent-repl-wire-open-tabs-opened-arms)))
     (agent-repl-wire--decoded
-     "DaemonStartupEvent"
-     (list :at-ms (agent-repl-wire--decode-int64 "DaemonStartupEvent" 'atMs object)
-           :event (agent-repl-wire--decode-oneof
-                   "DaemonStartupEvent" 'event object
-                   agent-repl-wire-daemon-startup-event-arms)))))
+     "OpenTabsOpened"
+     (list :workspace (agent-repl-wire--decode-open-tabs-ref "OpenTabsOpened" object)
+           :at-ms (agent-repl-wire--decode-int64 "OpenTabsOpened" 'atMs object)
+           :outcome (agent-repl-wire--decode-oneof
+                     "OpenTabsOpened" 'outcome object
+                     agent-repl-wire-open-tabs-opened-arms)))))
+
+(defun agent-repl-wire-decode-open-tabs-failed-workspace (value)
+  "Decode VALUE as `OpenTabsFailedWorkspace', a plist `(:workspace REF :name S)'."
+  (let ((object (agent-repl-wire--object "OpenTabsFailedWorkspace" value)))
+    (agent-repl-wire--check-keys "OpenTabsFailedWorkspace" object '(workspace name))
+    (list :workspace (agent-repl-wire--decode-open-tabs-ref "OpenTabsFailedWorkspace" object)
+          :name (agent-repl-wire--decode-string "OpenTabsFailedWorkspace" 'name object))))
+
+(defun agent-repl-wire-decode-open-tabs-finished (value)
+  "Decode VALUE as `OpenTabsFinished', a plist `(:ready N :total N :failed LIST)'."
+  (let ((object (agent-repl-wire--object "OpenTabsFinished" value)))
+    (agent-repl-wire--check-keys "OpenTabsFinished" object '(ready total failed))
+    (agent-repl-wire--decoded
+     "OpenTabsFinished"
+     (list :ready (agent-repl-wire--decode-uint32 "OpenTabsFinished" 'ready object)
+           :total (agent-repl-wire--decode-uint32 "OpenTabsFinished" 'total object)
+           :failed (agent-repl-wire--decode-repeated
+                    "OpenTabsFinished" 'failed object
+                    #'agent-repl-wire-decode-open-tabs-failed-workspace)))))
+
+(defconst agent-repl-wire-open-tabs-frame-arms
+  '((step :step agent-repl-wire-decode-open-tabs-step)
+    (opened :opened agent-repl-wire-decode-open-tabs-opened)
+    (finished :finished agent-repl-wire-decode-open-tabs-finished))
+  "`OpenTabsResponse.frame''s arms: (WIRE-KEY ARM-KEYWORD DECODER).")
+
+(defun agent-repl-wire-decode-open-tabs-response (value)
+  "Decode VALUE as `OpenTabsResponse', the frame oneof plist.
+THE ARM IS THE FRAME; an unset one is a contract breach."
+  (let ((object (agent-repl-wire--object "OpenTabsResponse" value)))
+    (agent-repl-wire--check-keys
+     "OpenTabsResponse" object (mapcar #'car agent-repl-wire-open-tabs-frame-arms))
+    (agent-repl-wire--decoded
+     "OpenTabsResponse"
+     (agent-repl-wire--decode-oneof
+      "OpenTabsResponse" 'frame object agent-repl-wire-open-tabs-frame-arms))))
 
 (defun agent-repl-wire-decode-watch-daemon-response-push (value)
   "Decode `WatchDaemonResponse''s `push' oneof from the object VALUE."
@@ -1772,8 +1842,7 @@ THE ARM IS THE STEP; an unset one is a contract breach."
      (faultsStanding :faults-standing
                      agent-repl-wire-decode-watch-daemon-response-faults-standing)
      (persistentWifi :persistent-wifi
-                     agent-repl-wire-decode-watch-daemon-response-persistent-wifi)
-     (startup :startup agent-repl-wire-decode-daemon-startup-event))))
+                     agent-repl-wire-decode-watch-daemon-response-persistent-wifi))))
 
 (defun agent-repl-wire-decode-watch-daemon-response-persistent-wifi (value)
   "Decode `WatchDaemonResponse''s `persistent_wifi' push arm VALUE.
@@ -1795,7 +1864,7 @@ UpdatePersistentWifiMode's success)."
     (agent-repl-wire--check-keys
      "WatchDaemonResponse" object
      '(shutdownAnnounced drainScheduled drainCancelled mutationProgress reloadElisp
-       ending faultsStanding persistentWifi startup))
+       ending faultsStanding persistentWifi))
     (agent-repl-wire--decoded
      "WatchDaemonResponse"
      (agent-repl-wire-decode-watch-daemon-response-push object))))
