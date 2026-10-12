@@ -227,6 +227,16 @@
       }
     },
     {
+      "id": "skill-merge-queue",
+      "kind": "skill_link",
+      "why": "the /merge-queue skill, the only path into master",
+      "profile": "run",
+      "name": "merge-queue",
+      "source": {
+        "repo": ".claude/skills/merge-queue"
+      }
+    },
+    {
       "id": "skill-emit-workspace-commands",
       "kind": "skill_link",
       "why": "the command-file writer the workspace skills call",
