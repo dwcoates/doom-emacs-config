@@ -4,6 +4,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/freshinput"
 	"agent-repld/internal/ids"
 )
 
@@ -31,9 +32,10 @@ type contextReading struct {
 	tokens uint64
 }
 
-// contextTokensOf is every input token USAGE carried.
+// contextTokensOf is every input token USAGE carried: the cache reads plus the
+// fresh input (freshinput.Of), which is the rest of the request's context.
 func contextTokensOf(usage *conversationv1.TokenUsage) uint64 {
-	return usage.GetInputHits().GetRead() + usage.GetInputMisses().GetWritten() + usage.GetInputMisses().GetUnwritten()
+	return usage.GetInputHits().GetRead() + freshinput.Of(usage)
 }
 
 // recordContextReading files UNIT's reading when AGENT is the main agent. A
