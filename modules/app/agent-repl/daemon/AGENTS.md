@@ -1154,8 +1154,11 @@ Owner rulings, 2026-09-30 (`internal/merge`; the contract is
   the target's working tree to decide a merge's fate -- content the merge never
   wrote (an untracked file, the owner's edits) is no evidence. It ADOPTS the
   lease (`wsm.AdoptMergeLease`, so the orphan sweep leaves it), redraws the same
-  bubble live at once, and the pump resumes the run first (a pause stops only
-  new admissions). Each step reads from git only what it can have left: a
+  bubble live at once, and the pump resumes the run first -- unless its queue
+  is paused: a paused queue advances nothing (owner ruling, 2026-10-12), so a
+  pause suspends every merge running in it (each resumes at its recorded step)
+  and nothing is admitted, promoted or resumed until the queue is resumed;
+  merges still enqueue. Each step reads from git only what it can have left: a
   rebase standing (continued, or its conflict handed to the session), the
   branch on the tip (go to tests), the branch at its pre-rebase head (begin the
   rebase), the target at the recorded merge commit (landed) or at the tip

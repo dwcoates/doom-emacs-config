@@ -82,9 +82,51 @@ type suspension struct {
 var (
 	suspendTransfer = suspension{op: "daemon.merge.transfer", cause: errHandedOver,
 		moved: "a merge is suspended at a stopping point for its workspace's transfer; the successor resumes it at the step it recorded"}
+	suspendPause = suspension{op: "daemon.merge.pause", cause: errPaused,
+		moved: "a merge is suspended for its queue's pause; it resumes at the step it recorded once the queue is resumed"}
 	suspendRestart = suspension{op: "daemon.merge.restart", cause: errRestarting, stepBoundary: true,
 		moved: "a merge is suspended at a stopping point for its workspace's restart; it resumes at the step it recorded once the restart finished"}
 )
+
+// errPaused is the cause a pause cuts a running merge with.
+var errPaused = errors.New("merge: the queue was paused; the merge is suspended until the queue is resumed")
+
+// suspendForPause brings every merge running in the paused queues to a
+// stopping point, at once, and takes each straight back from its durable
+// rows: it then waits, recorded, as a resume the paused pump does not start,
+// and the next resume of the queue (or the next boot, under no pause) goes
+// on with it at the step it recorded. Every merge is attempted; the first
+// failure is answered.
+func (o *orchestrator) suspendForPause(ctx context.Context, repos []wsm.RepoKey) error {
+	paused := map[wsm.RepoKey]bool{}
+	for _, repo := range repos {
+		paused[repo] = true
+	}
+	o.mu.Lock()
+	var running []ids.WorkspaceID
+	for ws, r := range o.runsByWorkspace {
+		if paused[r.repo] {
+			running = append(running, ws)
+		}
+	}
+	o.mu.Unlock()
+	sort.Slice(running, func(i, j int) bool { return running[i] < running[j] })
+	var first error
+	for _, ws := range running {
+		if err := o.suspendFor(ctx, ws, suspendPause); err != nil {
+			o.deps.Log.Global().Error("daemon.merge.pause", "could not suspend a running merge for its queue's pause", dlog.Context{
+				"workspace": string(ws), "error": err.Error()})
+			if first == nil {
+				first = err
+			}
+			continue
+		}
+		if err := o.AdoptWorkspace(ctx, ws); err != nil && first == nil {
+			first = err
+		}
+	}
+	return first
+}
 
 // errRestarting is the cause a restart cuts a suspended run's waits with.
 var errRestarting = errors.New("merge: the workspace is restarting; the merge is suspended until the restart finished")
