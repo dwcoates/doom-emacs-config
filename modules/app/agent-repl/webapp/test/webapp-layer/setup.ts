@@ -2,6 +2,7 @@ import { beforeAll } from "vitest";
 import { ForwardingLogger, bindLogContext, resetLoggingForTests, setLogger } from "../../src/log.js";
 import { installResizeObserver } from "../resize-observer.js";
 import { installIntersectionObserver } from "../intersection-observer.js";
+import { installGetAnimations } from "../animations.js";
 import { installTreeLayout } from "../tree-layout.js";
 
 /**
@@ -18,6 +19,14 @@ installResizeObserver();
  * does not load `test/setup.ts`, so it installs the same substitution itself.
  */
 installIntersectionObserver();
+
+/**
+ * jsdom runs no CSS animations and ships no `Element.getAnimations`, which the
+ * rail reads after every draw to keep its loops on the wall clock
+ * (src/sidebar/wall-phase.ts). This project does not load `test/setup.ts`, so
+ * it installs the same substitution itself.
+ */
+installGetAnimations();
 
 /**
  * jsdom lays nothing out, and a response bubble that draws a metaprompt tree
