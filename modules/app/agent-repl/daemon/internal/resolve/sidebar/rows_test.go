@@ -413,9 +413,7 @@ func TestRowDetailCarriesTheCommitCount(t *testing.T) {
 			// Assert.
 			var got []*frontendv1.RosterRow
 			if tc.merged {
-				for _, group := range latest(t, r).GetRecentlyMerged().GetGroups() {
-					got = append(got, group.GetRows().GetRows()...)
-				}
+				got = mergedRows(latest(t, r))
 			} else {
 				got = []*frontendv1.RosterRow{onlyRow(t, r)}
 			}

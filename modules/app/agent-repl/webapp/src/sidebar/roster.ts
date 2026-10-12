@@ -26,15 +26,7 @@
  * highlight through `RosterRowCurrent`, deliberately, so no client can compute
  * it differently. The field is validated and logged, and that is all.
  */
-import {
-  MERGED_AT_ATTRIBUTE,
-  MERGED_GROUP_CLASS,
-  MERGED_GROUP_HEAD_CLASS,
-  MERGED_GROUP_HEAD_PROBE_CLASS,
-  MERGED_REPOSITORY_COLLAPSED_ATTRIBUTE,
-  MERGED_ROW_PROBE_CLASS,
-  MERGED_SECTION_CLASS,
-} from "./merged-fit.js";
+import { HIDDEN_SECTION_CLASS, MERGED_SECTION_CLASS } from "./band-fit.js";
 import { createControl, type Control } from "../control.js";
 import type {
   RosterCurrentWorkspace,
@@ -467,11 +459,10 @@ export function drawRosterTaskKey(u: RosterTaskKey, path: string): string {
  * because the grouping would flicker as its last workspace merged; the merged
  * band has no place to keep, so it goes away entire until a merge shows.
  *
- * EVERY MERGE IS DRAWN; THE RAIL SHOWS WHAT FITS (owner request, 2026-10-08).
- * The groups are all drawn here, and the header's count is the daemon's count
- * of the shown groups' rows; once the band is laid out, `fitMergedSection`
- * (merged-fit.ts) hides the rows (and whole groups) past what fits and makes
- * the count say how many it shows.
+ * EVERY MERGE THE DAEMON SENDS IS DRAWN (a week of them), under the daemon's
+ * count of the shown groups' rows; once the band is laid out, `fitBands`
+ * (band-fit.ts) sizes its scrolling viewport against the Hidden Workspaces
+ * band's.
  */
 export function drawRosterMergedSection(
   u: RosterMergedSection,
@@ -501,18 +492,18 @@ export function drawRosterMergedSection(
       return region;
     },
   );
-  if (section.hidden) return section;
-  // THE UNITS the fit counts in (merged-fit.ts): invisible, out-of-flow boxes
-  // exactly one merged row, and one group header, tall, measurable while the
-  // band is folded.
-  for (const className of [MERGED_ROW_PROBE_CLASS, MERGED_GROUP_HEAD_PROBE_CLASS]) {
-    const probe = document.createElement("div");
-    probe.className = className;
-    probe.setAttribute("aria-hidden", "true");
-    section.appendChild(probe);
-  }
   return section;
 }
+
+/** The class of one repository's group inside the band, and of its header. */
+export const MERGED_GROUP_CLASS = "merged-group";
+export const MERGED_GROUP_HEAD_CLASS = "merged-group-head";
+
+/** The attribute a merged row states its merged instant (epoch ms) on. */
+export const MERGED_AT_ATTRIBUTE = "data-merged-at";
+
+/** The attribute a group states whether its repository is collapsed on. */
+export const MERGED_REPOSITORY_COLLAPSED_ATTRIBUTE = "data-repository-collapsed";
 
 /** One drawn merged group, and the merged instants of its rows while it is shown. */
 export interface DrawnMergedRepoGroup {
@@ -531,8 +522,8 @@ export interface DrawnMergedRepoGroup {
  * moves the group on the same paint, not a push later.
  *
  * Each row carries its merged instant (`data-merged-at`), the one the row
- * already draws, so the fit can show the most recent merges across groups. A
- * merged row is always on the `when.merged` arm; one that is not is malformed.
+ * already draws. A merged row is always on the `when.merged` arm; one that is
+ * not is malformed.
  */
 export function drawRosterMergedRepoGroup(
   u: RosterMergedRepoGroup,
@@ -597,9 +588,10 @@ export const MERGED_TODAY_COUNT_CLASS = "sb-today-count";
 /**
  * The open band's "(K today)": how many of its merges landed TODAY (local date),
  * counted over every row of its SHOWN groups the daemon sent, including those
- * the fit hides (owner request, 2026-10-11). The stylesheet shows it only while
- * the band is unfolded, where the folded count is not, and the shared ticker
- * recounts it, so it drops at midnight together with the green names.
+ * scrolled out of view (owner request, 2026-10-11). The stylesheet shows it
+ * only while the band is unfolded, where the folded count is not, and the
+ * shared ticker recounts it, so it drops at midnight together with the green
+ * names.
  */
 export function drawMergedTodayCount(mergedAt: number[], sc: SidebarContext): HTMLElement {
   const count = document.createElement("span");
@@ -610,9 +602,6 @@ export function drawMergedTodayCount(mergedAt: number[], sc: SidebarContext): HT
   return count;
 }
 
-/** The class the hidden-workspaces section is drawn with. */
-export const HIDDEN_SECTION_CLASS = "hidden-section";
-
 /**
  * The hidden-workspaces section: the workspaces the user hid, hoisted out of
  * every grouping. They keep their sessions and their editor tabs; the Emacs
@@ -622,6 +611,9 @@ export const HIDDEN_SECTION_CLASS = "hidden-section";
  * the emptiness is answered here, off the daemon's own count of the rows it
  * shows (closed rows ride the wire but are never drawn): a heading over
  * nothing is a fold toggle onto nothing.
+ *
+ * ITS ROWS SCROLL once the rail is out of room: `fitBands` (band-fit.ts)
+ * sizes its viewport against the Recently Merged band's.
  *
  * CLICKING A ROW SHOWS THE WORKSPACE AGAIN (`SetWorkspaceHidden`), rather
  * than selecting it: the push that follows moves it back into its groupings
@@ -660,8 +652,7 @@ export function drawRosterSectionHeader(
   // repo section appends after this header. The daemon resolves N (the rows
   // the unfolded section shows, nested family rows included); the stylesheet
   // shows the count under the section's `.folded` only, and nothing here
-  // counts or hides it. The Recently Merged band's count is then rewritten by
-  // its fit (merged-fit.ts) to the number of merges the rail shows.
+  // counts or hides it.
   const count = document.createElement("span");
   count.className = "sb-count";
   count.setAttribute("data-section-count", "");
