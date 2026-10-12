@@ -97,7 +97,16 @@ func (x *OpenTabsRequest) GetWorkspaces() []*OpenTabsWorkspace {
 type OpenTabsWorkspace struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The workspace, echoed from its roster row.
-	Workspace     *v1.WorkspaceRef `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	Workspace *v1.WorkspaceRef `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	// WHETHER THE EDITOR DRAWS A WEB PAGE FOR IT, which decides what `ready`
+	// waits for. THE ARM IS THE ANSWER; unset is a malformed request (Connect
+	// InvalidArgument).
+	//
+	// Types that are valid to be assigned to Page:
+	//
+	//	*OpenTabsWorkspace_Loading
+	//	*OpenTabsWorkspace_None
+	Page          isOpenTabsWorkspace_Page `protobuf_oneof:"page"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -139,6 +148,125 @@ func (x *OpenTabsWorkspace) GetWorkspace() *v1.WorkspaceRef {
 	return nil
 }
 
+func (x *OpenTabsWorkspace) GetPage() isOpenTabsWorkspace_Page {
+	if x != nil {
+		return x.Page
+	}
+	return nil
+}
+
+func (x *OpenTabsWorkspace) GetLoading() *OpenTabsPageLoading {
+	if x != nil {
+		if x, ok := x.Page.(*OpenTabsWorkspace_Loading); ok {
+			return x.Loading
+		}
+	}
+	return nil
+}
+
+func (x *OpenTabsWorkspace) GetNone() *OpenTabsPageNone {
+	if x != nil {
+		if x, ok := x.Page.(*OpenTabsWorkspace_None); ok {
+			return x.None
+		}
+	}
+	return nil
+}
+
+type isOpenTabsWorkspace_Page interface {
+	isOpenTabsWorkspace_Page()
+}
+
+type OpenTabsWorkspace_Loading struct {
+	// The editor is loading the workspace's web page now: it opens once its
+	// session is served AND the page reports itself drawn (ReportPageDrawn).
+	Loading *OpenTabsPageLoading `protobuf:"bytes,2,opt,name=loading,proto3,oneof"`
+}
+
+type OpenTabsWorkspace_None struct {
+	// The editor draws no web page for it (its frontend is not the web page,
+	// or the editor has no webview): it opens once its session is served.
+	None *OpenTabsPageNone `protobuf:"bytes,3,opt,name=none,proto3,oneof"`
+}
+
+func (*OpenTabsWorkspace_Loading) isOpenTabsWorkspace_Page() {}
+
+func (*OpenTabsWorkspace_None) isOpenTabsWorkspace_Page() {}
+
+// The editor is loading the workspace's web page. DELIBERATELY EMPTY.
+type OpenTabsPageLoading struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OpenTabsPageLoading) Reset() {
+	*x = OpenTabsPageLoading{}
+	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OpenTabsPageLoading) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OpenTabsPageLoading) ProtoMessage() {}
+
+func (x *OpenTabsPageLoading) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OpenTabsPageLoading.ProtoReflect.Descriptor instead.
+func (*OpenTabsPageLoading) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_open_tabs_proto_rawDescGZIP(), []int{2}
+}
+
+// The editor draws no web page for the workspace. DELIBERATELY EMPTY.
+type OpenTabsPageNone struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OpenTabsPageNone) Reset() {
+	*x = OpenTabsPageNone{}
+	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OpenTabsPageNone) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OpenTabsPageNone) ProtoMessage() {}
+
+func (x *OpenTabsPageNone) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OpenTabsPageNone.ProtoReflect.Descriptor instead.
+func (*OpenTabsPageNone) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_open_tabs_proto_rawDescGZIP(), []int{3}
+}
+
 // One frame of an open. The stream ends after `finished`.
 type OpenTabsResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -156,7 +284,7 @@ type OpenTabsResponse struct {
 
 func (x *OpenTabsResponse) Reset() {
 	*x = OpenTabsResponse{}
-	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[2]
+	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -168,7 +296,7 @@ func (x *OpenTabsResponse) String() string {
 func (*OpenTabsResponse) ProtoMessage() {}
 
 func (x *OpenTabsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[2]
+	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -181,7 +309,7 @@ func (x *OpenTabsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenTabsResponse.ProtoReflect.Descriptor instead.
 func (*OpenTabsResponse) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_open_tabs_proto_rawDescGZIP(), []int{2}
+	return file_agentrepl_v1_endpoint_open_tabs_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *OpenTabsResponse) GetFrame() isOpenTabsResponse_Frame {
@@ -272,7 +400,7 @@ type OpenTabsStep struct {
 
 func (x *OpenTabsStep) Reset() {
 	*x = OpenTabsStep{}
-	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[3]
+	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -284,7 +412,7 @@ func (x *OpenTabsStep) String() string {
 func (*OpenTabsStep) ProtoMessage() {}
 
 func (x *OpenTabsStep) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[3]
+	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -297,7 +425,7 @@ func (x *OpenTabsStep) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenTabsStep.ProtoReflect.Descriptor instead.
 func (*OpenTabsStep) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_open_tabs_proto_rawDescGZIP(), []int{3}
+	return file_agentrepl_v1_endpoint_open_tabs_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *OpenTabsStep) GetWorkspace() *v1.WorkspaceRef {
@@ -517,7 +645,7 @@ type OpenTabsStepStartingSession struct {
 
 func (x *OpenTabsStepStartingSession) Reset() {
 	*x = OpenTabsStepStartingSession{}
-	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[4]
+	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -529,7 +657,7 @@ func (x *OpenTabsStepStartingSession) String() string {
 func (*OpenTabsStepStartingSession) ProtoMessage() {}
 
 func (x *OpenTabsStepStartingSession) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[4]
+	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -542,7 +670,7 @@ func (x *OpenTabsStepStartingSession) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenTabsStepStartingSession.ProtoReflect.Descriptor instead.
 func (*OpenTabsStepStartingSession) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_open_tabs_proto_rawDescGZIP(), []int{4}
+	return file_agentrepl_v1_endpoint_open_tabs_proto_rawDescGZIP(), []int{6}
 }
 
 // The workspace is being woken from sleep.
@@ -554,7 +682,7 @@ type OpenTabsStepWaking struct {
 
 func (x *OpenTabsStepWaking) Reset() {
 	*x = OpenTabsStepWaking{}
-	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[5]
+	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -566,7 +694,7 @@ func (x *OpenTabsStepWaking) String() string {
 func (*OpenTabsStepWaking) ProtoMessage() {}
 
 func (x *OpenTabsStepWaking) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[5]
+	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -579,7 +707,7 @@ func (x *OpenTabsStepWaking) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenTabsStepWaking.ProtoReflect.Descriptor instead.
 func (*OpenTabsStepWaking) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_open_tabs_proto_rawDescGZIP(), []int{5}
+	return file_agentrepl_v1_endpoint_open_tabs_proto_rawDescGZIP(), []int{7}
 }
 
 // The conversation is being resumed.
@@ -591,7 +719,7 @@ type OpenTabsStepResuming struct {
 
 func (x *OpenTabsStepResuming) Reset() {
 	*x = OpenTabsStepResuming{}
-	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[6]
+	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -603,7 +731,7 @@ func (x *OpenTabsStepResuming) String() string {
 func (*OpenTabsStepResuming) ProtoMessage() {}
 
 func (x *OpenTabsStepResuming) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[6]
+	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -616,7 +744,7 @@ func (x *OpenTabsStepResuming) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenTabsStepResuming.ProtoReflect.Descriptor instead.
 func (*OpenTabsStepResuming) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_open_tabs_proto_rawDescGZIP(), []int{6}
+	return file_agentrepl_v1_endpoint_open_tabs_proto_rawDescGZIP(), []int{8}
 }
 
 // A vendor start attempt failed and is retried.
@@ -630,7 +758,7 @@ type OpenTabsStepVendorRetrying struct {
 
 func (x *OpenTabsStepVendorRetrying) Reset() {
 	*x = OpenTabsStepVendorRetrying{}
-	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[7]
+	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -642,7 +770,7 @@ func (x *OpenTabsStepVendorRetrying) String() string {
 func (*OpenTabsStepVendorRetrying) ProtoMessage() {}
 
 func (x *OpenTabsStepVendorRetrying) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[7]
+	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -655,7 +783,7 @@ func (x *OpenTabsStepVendorRetrying) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenTabsStepVendorRetrying.ProtoReflect.Descriptor instead.
 func (*OpenTabsStepVendorRetrying) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_open_tabs_proto_rawDescGZIP(), []int{7}
+	return file_agentrepl_v1_endpoint_open_tabs_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *OpenTabsStepVendorRetrying) GetAttempt() uint32 {
@@ -676,7 +804,7 @@ type OpenTabsStepVendorRejected struct {
 
 func (x *OpenTabsStepVendorRejected) Reset() {
 	*x = OpenTabsStepVendorRejected{}
-	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[8]
+	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -688,7 +816,7 @@ func (x *OpenTabsStepVendorRejected) String() string {
 func (*OpenTabsStepVendorRejected) ProtoMessage() {}
 
 func (x *OpenTabsStepVendorRejected) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[8]
+	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -701,7 +829,7 @@ func (x *OpenTabsStepVendorRejected) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenTabsStepVendorRejected.ProtoReflect.Descriptor instead.
 func (*OpenTabsStepVendorRejected) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_open_tabs_proto_rawDescGZIP(), []int{8}
+	return file_agentrepl_v1_endpoint_open_tabs_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *OpenTabsStepVendorRejected) GetCause() string {
@@ -720,7 +848,7 @@ type OpenTabsStepVendorFailed struct {
 
 func (x *OpenTabsStepVendorFailed) Reset() {
 	*x = OpenTabsStepVendorFailed{}
-	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[9]
+	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -732,7 +860,7 @@ func (x *OpenTabsStepVendorFailed) String() string {
 func (*OpenTabsStepVendorFailed) ProtoMessage() {}
 
 func (x *OpenTabsStepVendorFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[9]
+	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -745,7 +873,7 @@ func (x *OpenTabsStepVendorFailed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenTabsStepVendorFailed.ProtoReflect.Descriptor instead.
 func (*OpenTabsStepVendorFailed) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_open_tabs_proto_rawDescGZIP(), []int{9}
+	return file_agentrepl_v1_endpoint_open_tabs_proto_rawDescGZIP(), []int{11}
 }
 
 // The cold gate awaits the user's answer.
@@ -757,7 +885,7 @@ type OpenTabsStepColdGate struct {
 
 func (x *OpenTabsStepColdGate) Reset() {
 	*x = OpenTabsStepColdGate{}
-	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[10]
+	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -769,7 +897,7 @@ func (x *OpenTabsStepColdGate) String() string {
 func (*OpenTabsStepColdGate) ProtoMessage() {}
 
 func (x *OpenTabsStepColdGate) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[10]
+	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -782,7 +910,7 @@ func (x *OpenTabsStepColdGate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenTabsStepColdGate.ProtoReflect.Descriptor instead.
 func (*OpenTabsStepColdGate) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_open_tabs_proto_rawDescGZIP(), []int{10}
+	return file_agentrepl_v1_endpoint_open_tabs_proto_rawDescGZIP(), []int{12}
 }
 
 // The network is unreachable.
@@ -794,7 +922,7 @@ type OpenTabsStepOffline struct {
 
 func (x *OpenTabsStepOffline) Reset() {
 	*x = OpenTabsStepOffline{}
-	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -806,7 +934,7 @@ func (x *OpenTabsStepOffline) String() string {
 func (*OpenTabsStepOffline) ProtoMessage() {}
 
 func (x *OpenTabsStepOffline) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -819,7 +947,7 @@ func (x *OpenTabsStepOffline) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenTabsStepOffline.ProtoReflect.Descriptor instead.
 func (*OpenTabsStepOffline) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_open_tabs_proto_rawDescGZIP(), []int{11}
+	return file_agentrepl_v1_endpoint_open_tabs_proto_rawDescGZIP(), []int{13}
 }
 
 // The session is served by agent-repl's services.
@@ -831,7 +959,7 @@ type OpenTabsStepServed struct {
 
 func (x *OpenTabsStepServed) Reset() {
 	*x = OpenTabsStepServed{}
-	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[12]
+	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -843,7 +971,7 @@ func (x *OpenTabsStepServed) String() string {
 func (*OpenTabsStepServed) ProtoMessage() {}
 
 func (x *OpenTabsStepServed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[12]
+	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -856,7 +984,7 @@ func (x *OpenTabsStepServed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenTabsStepServed.ProtoReflect.Descriptor instead.
 func (*OpenTabsStepServed) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_open_tabs_proto_rawDescGZIP(), []int{12}
+	return file_agentrepl_v1_endpoint_open_tabs_proto_rawDescGZIP(), []int{14}
 }
 
 // The workspace's web page attached to the daemon.
@@ -868,7 +996,7 @@ type OpenTabsStepPageConnected struct {
 
 func (x *OpenTabsStepPageConnected) Reset() {
 	*x = OpenTabsStepPageConnected{}
-	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[13]
+	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -880,7 +1008,7 @@ func (x *OpenTabsStepPageConnected) String() string {
 func (*OpenTabsStepPageConnected) ProtoMessage() {}
 
 func (x *OpenTabsStepPageConnected) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[13]
+	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -893,7 +1021,7 @@ func (x *OpenTabsStepPageConnected) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenTabsStepPageConnected.ProtoReflect.Descriptor instead.
 func (*OpenTabsStepPageConnected) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_open_tabs_proto_rawDescGZIP(), []int{13}
+	return file_agentrepl_v1_endpoint_open_tabs_proto_rawDescGZIP(), []int{15}
 }
 
 // The workspace's web page drew its conversation.
@@ -905,7 +1033,7 @@ type OpenTabsStepPageDrawn struct {
 
 func (x *OpenTabsStepPageDrawn) Reset() {
 	*x = OpenTabsStepPageDrawn{}
-	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[14]
+	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -917,7 +1045,7 @@ func (x *OpenTabsStepPageDrawn) String() string {
 func (*OpenTabsStepPageDrawn) ProtoMessage() {}
 
 func (x *OpenTabsStepPageDrawn) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[14]
+	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -930,7 +1058,7 @@ func (x *OpenTabsStepPageDrawn) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenTabsStepPageDrawn.ProtoReflect.Descriptor instead.
 func (*OpenTabsStepPageDrawn) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_open_tabs_proto_rawDescGZIP(), []int{14}
+	return file_agentrepl_v1_endpoint_open_tabs_proto_rawDescGZIP(), []int{16}
 }
 
 // One workspace is open.
@@ -960,7 +1088,7 @@ type OpenTabsOpened struct {
 
 func (x *OpenTabsOpened) Reset() {
 	*x = OpenTabsOpened{}
-	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[15]
+	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -972,7 +1100,7 @@ func (x *OpenTabsOpened) String() string {
 func (*OpenTabsOpened) ProtoMessage() {}
 
 func (x *OpenTabsOpened) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[15]
+	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -985,7 +1113,7 @@ func (x *OpenTabsOpened) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenTabsOpened.ProtoReflect.Descriptor instead.
 func (*OpenTabsOpened) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_open_tabs_proto_rawDescGZIP(), []int{15}
+	return file_agentrepl_v1_endpoint_open_tabs_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *OpenTabsOpened) GetWorkspace() *v1.WorkspaceRef {
@@ -1050,7 +1178,8 @@ type isOpenTabsOpened_Outcome interface {
 }
 
 type OpenTabsOpened_Ready struct {
-	// Served and drawn: show the tab ("<name>: ready.").
+	// Served, and its page drawn when one was loading: show the tab
+	// ("<name>: ready.").
 	Ready *OpenTabsOpenedReady `protobuf:"bytes,3,opt,name=ready,proto3,oneof"`
 }
 
@@ -1079,7 +1208,7 @@ func (*OpenTabsOpened_Hidden) isOpenTabsOpened_Outcome() {}
 
 func (*OpenTabsOpened_Refused) isOpenTabsOpened_Outcome() {}
 
-// Served and drawn. DELIBERATELY EMPTY: the arm is the outcome.
+// Served (and drawn). DELIBERATELY EMPTY: the arm is the outcome.
 type OpenTabsOpenedReady struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -1088,7 +1217,7 @@ type OpenTabsOpenedReady struct {
 
 func (x *OpenTabsOpenedReady) Reset() {
 	*x = OpenTabsOpenedReady{}
-	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[16]
+	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1100,7 +1229,7 @@ func (x *OpenTabsOpenedReady) String() string {
 func (*OpenTabsOpenedReady) ProtoMessage() {}
 
 func (x *OpenTabsOpenedReady) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[16]
+	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1113,7 +1242,7 @@ func (x *OpenTabsOpenedReady) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenTabsOpenedReady.ProtoReflect.Descriptor instead.
 func (*OpenTabsOpenedReady) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_open_tabs_proto_rawDescGZIP(), []int{16}
+	return file_agentrepl_v1_endpoint_open_tabs_proto_rawDescGZIP(), []int{18}
 }
 
 // The service-level start failed.
@@ -1127,7 +1256,7 @@ type OpenTabsOpenedFailed struct {
 
 func (x *OpenTabsOpenedFailed) Reset() {
 	*x = OpenTabsOpenedFailed{}
-	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[17]
+	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1139,7 +1268,7 @@ func (x *OpenTabsOpenedFailed) String() string {
 func (*OpenTabsOpenedFailed) ProtoMessage() {}
 
 func (x *OpenTabsOpenedFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[17]
+	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1152,7 +1281,7 @@ func (x *OpenTabsOpenedFailed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenTabsOpenedFailed.ProtoReflect.Descriptor instead.
 func (*OpenTabsOpenedFailed) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_open_tabs_proto_rawDescGZIP(), []int{17}
+	return file_agentrepl_v1_endpoint_open_tabs_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *OpenTabsOpenedFailed) GetReason() string {
@@ -1171,7 +1300,7 @@ type OpenTabsOpenedHidden struct {
 
 func (x *OpenTabsOpenedHidden) Reset() {
 	*x = OpenTabsOpenedHidden{}
-	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[18]
+	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1183,7 +1312,7 @@ func (x *OpenTabsOpenedHidden) String() string {
 func (*OpenTabsOpenedHidden) ProtoMessage() {}
 
 func (x *OpenTabsOpenedHidden) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[18]
+	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1196,7 +1325,7 @@ func (x *OpenTabsOpenedHidden) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenTabsOpenedHidden.ProtoReflect.Descriptor instead.
 func (*OpenTabsOpenedHidden) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_open_tabs_proto_rawDescGZIP(), []int{18}
+	return file_agentrepl_v1_endpoint_open_tabs_proto_rawDescGZIP(), []int{20}
 }
 
 // The daemon refused to open the workspace.
@@ -1217,7 +1346,7 @@ type OpenTabsOpenedRefused struct {
 
 func (x *OpenTabsOpenedRefused) Reset() {
 	*x = OpenTabsOpenedRefused{}
-	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[19]
+	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1229,7 +1358,7 @@ func (x *OpenTabsOpenedRefused) String() string {
 func (*OpenTabsOpenedRefused) ProtoMessage() {}
 
 func (x *OpenTabsOpenedRefused) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[19]
+	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1242,7 +1371,7 @@ func (x *OpenTabsOpenedRefused) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenTabsOpenedRefused.ProtoReflect.Descriptor instead.
 func (*OpenTabsOpenedRefused) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_open_tabs_proto_rawDescGZIP(), []int{19}
+	return file_agentrepl_v1_endpoint_open_tabs_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *OpenTabsOpenedRefused) GetCause() isOpenTabsOpenedRefused_Cause {
@@ -1329,7 +1458,7 @@ type OpenTabsRefusedUnknownWorkspace struct {
 
 func (x *OpenTabsRefusedUnknownWorkspace) Reset() {
 	*x = OpenTabsRefusedUnknownWorkspace{}
-	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[20]
+	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1341,7 +1470,7 @@ func (x *OpenTabsRefusedUnknownWorkspace) String() string {
 func (*OpenTabsRefusedUnknownWorkspace) ProtoMessage() {}
 
 func (x *OpenTabsRefusedUnknownWorkspace) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[20]
+	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1354,7 +1483,7 @@ func (x *OpenTabsRefusedUnknownWorkspace) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenTabsRefusedUnknownWorkspace.ProtoReflect.Descriptor instead.
 func (*OpenTabsRefusedUnknownWorkspace) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_open_tabs_proto_rawDescGZIP(), []int{20}
+	return file_agentrepl_v1_endpoint_open_tabs_proto_rawDescGZIP(), []int{22}
 }
 
 // The echoed dir disagrees with the registry's dir for this id.
@@ -1368,7 +1497,7 @@ type OpenTabsRefusedWorkspaceRefMismatch struct {
 
 func (x *OpenTabsRefusedWorkspaceRefMismatch) Reset() {
 	*x = OpenTabsRefusedWorkspaceRefMismatch{}
-	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[21]
+	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1380,7 +1509,7 @@ func (x *OpenTabsRefusedWorkspaceRefMismatch) String() string {
 func (*OpenTabsRefusedWorkspaceRefMismatch) ProtoMessage() {}
 
 func (x *OpenTabsRefusedWorkspaceRefMismatch) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[21]
+	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1393,7 +1522,7 @@ func (x *OpenTabsRefusedWorkspaceRefMismatch) ProtoReflect() protoreflect.Messag
 
 // Deprecated: Use OpenTabsRefusedWorkspaceRefMismatch.ProtoReflect.Descriptor instead.
 func (*OpenTabsRefusedWorkspaceRefMismatch) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_open_tabs_proto_rawDescGZIP(), []int{21}
+	return file_agentrepl_v1_endpoint_open_tabs_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *OpenTabsRefusedWorkspaceRefMismatch) GetRegistryDir() string {
@@ -1414,7 +1543,7 @@ type OpenTabsRefusedTransferringAway struct {
 
 func (x *OpenTabsRefusedTransferringAway) Reset() {
 	*x = OpenTabsRefusedTransferringAway{}
-	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[22]
+	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1426,7 +1555,7 @@ func (x *OpenTabsRefusedTransferringAway) String() string {
 func (*OpenTabsRefusedTransferringAway) ProtoMessage() {}
 
 func (x *OpenTabsRefusedTransferringAway) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[22]
+	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1439,7 +1568,7 @@ func (x *OpenTabsRefusedTransferringAway) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenTabsRefusedTransferringAway.ProtoReflect.Descriptor instead.
 func (*OpenTabsRefusedTransferringAway) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_open_tabs_proto_rawDescGZIP(), []int{22}
+	return file_agentrepl_v1_endpoint_open_tabs_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *OpenTabsRefusedTransferringAway) GetAddress() string {
@@ -1459,7 +1588,7 @@ type OpenTabsRefusedNotYetAdopted struct {
 
 func (x *OpenTabsRefusedNotYetAdopted) Reset() {
 	*x = OpenTabsRefusedNotYetAdopted{}
-	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[23]
+	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1471,7 +1600,7 @@ func (x *OpenTabsRefusedNotYetAdopted) String() string {
 func (*OpenTabsRefusedNotYetAdopted) ProtoMessage() {}
 
 func (x *OpenTabsRefusedNotYetAdopted) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[23]
+	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1484,7 +1613,7 @@ func (x *OpenTabsRefusedNotYetAdopted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenTabsRefusedNotYetAdopted.ProtoReflect.Descriptor instead.
 func (*OpenTabsRefusedNotYetAdopted) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_open_tabs_proto_rawDescGZIP(), []int{23}
+	return file_agentrepl_v1_endpoint_open_tabs_proto_rawDescGZIP(), []int{25}
 }
 
 // Every workspace of the request has had its `opened`.
@@ -1503,7 +1632,7 @@ type OpenTabsFinished struct {
 
 func (x *OpenTabsFinished) Reset() {
 	*x = OpenTabsFinished{}
-	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[24]
+	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1515,7 +1644,7 @@ func (x *OpenTabsFinished) String() string {
 func (*OpenTabsFinished) ProtoMessage() {}
 
 func (x *OpenTabsFinished) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[24]
+	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1528,7 +1657,7 @@ func (x *OpenTabsFinished) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenTabsFinished.ProtoReflect.Descriptor instead.
 func (*OpenTabsFinished) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_open_tabs_proto_rawDescGZIP(), []int{24}
+	return file_agentrepl_v1_endpoint_open_tabs_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *OpenTabsFinished) GetReady() uint32 {
@@ -1565,7 +1694,7 @@ type OpenTabsFailedWorkspace struct {
 
 func (x *OpenTabsFailedWorkspace) Reset() {
 	*x = OpenTabsFailedWorkspace{}
-	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[25]
+	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1577,7 +1706,7 @@ func (x *OpenTabsFailedWorkspace) String() string {
 func (*OpenTabsFailedWorkspace) ProtoMessage() {}
 
 func (x *OpenTabsFailedWorkspace) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[25]
+	mi := &file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1590,7 +1719,7 @@ func (x *OpenTabsFailedWorkspace) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenTabsFailedWorkspace.ProtoReflect.Descriptor instead.
 func (*OpenTabsFailedWorkspace) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_open_tabs_proto_rawDescGZIP(), []int{25}
+	return file_agentrepl_v1_endpoint_open_tabs_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *OpenTabsFailedWorkspace) GetWorkspace() *v1.WorkspaceRef {
@@ -1615,9 +1744,14 @@ const file_agentrepl_v1_endpoint_open_tabs_proto_rawDesc = "" +
 	"\x0fOpenTabsRequest\x12?\n" +
 	"\n" +
 	"workspaces\x18\x01 \x03(\v2\x1f.agentrepl.v1.OpenTabsWorkspaceR\n" +
-	"workspaces\"M\n" +
+	"workspaces\"\xca\x01\n" +
 	"\x11OpenTabsWorkspace\x128\n" +
-	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\"\xc3\x01\n" +
+	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12=\n" +
+	"\aloading\x18\x02 \x01(\v2!.agentrepl.v1.OpenTabsPageLoadingH\x00R\aloading\x124\n" +
+	"\x04none\x18\x03 \x01(\v2\x1e.agentrepl.v1.OpenTabsPageNoneH\x00R\x04noneB\x06\n" +
+	"\x04page\"\x15\n" +
+	"\x13OpenTabsPageLoading\"\x12\n" +
+	"\x10OpenTabsPageNone\"\xc3\x01\n" +
 	"\x10OpenTabsResponse\x120\n" +
 	"\x04step\x18\x01 \x01(\v2\x1a.agentrepl.v1.OpenTabsStepH\x00R\x04step\x126\n" +
 	"\x06opened\x18\x02 \x01(\v2\x1c.agentrepl.v1.OpenTabsOpenedH\x00R\x06opened\x12<\n" +
@@ -1697,70 +1831,74 @@ func file_agentrepl_v1_endpoint_open_tabs_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_open_tabs_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes = make([]protoimpl.MessageInfo, 26)
+var file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes = make([]protoimpl.MessageInfo, 28)
 var file_agentrepl_v1_endpoint_open_tabs_proto_goTypes = []any{
 	(*OpenTabsRequest)(nil),                     // 0: agentrepl.v1.OpenTabsRequest
 	(*OpenTabsWorkspace)(nil),                   // 1: agentrepl.v1.OpenTabsWorkspace
-	(*OpenTabsResponse)(nil),                    // 2: agentrepl.v1.OpenTabsResponse
-	(*OpenTabsStep)(nil),                        // 3: agentrepl.v1.OpenTabsStep
-	(*OpenTabsStepStartingSession)(nil),         // 4: agentrepl.v1.OpenTabsStepStartingSession
-	(*OpenTabsStepWaking)(nil),                  // 5: agentrepl.v1.OpenTabsStepWaking
-	(*OpenTabsStepResuming)(nil),                // 6: agentrepl.v1.OpenTabsStepResuming
-	(*OpenTabsStepVendorRetrying)(nil),          // 7: agentrepl.v1.OpenTabsStepVendorRetrying
-	(*OpenTabsStepVendorRejected)(nil),          // 8: agentrepl.v1.OpenTabsStepVendorRejected
-	(*OpenTabsStepVendorFailed)(nil),            // 9: agentrepl.v1.OpenTabsStepVendorFailed
-	(*OpenTabsStepColdGate)(nil),                // 10: agentrepl.v1.OpenTabsStepColdGate
-	(*OpenTabsStepOffline)(nil),                 // 11: agentrepl.v1.OpenTabsStepOffline
-	(*OpenTabsStepServed)(nil),                  // 12: agentrepl.v1.OpenTabsStepServed
-	(*OpenTabsStepPageConnected)(nil),           // 13: agentrepl.v1.OpenTabsStepPageConnected
-	(*OpenTabsStepPageDrawn)(nil),               // 14: agentrepl.v1.OpenTabsStepPageDrawn
-	(*OpenTabsOpened)(nil),                      // 15: agentrepl.v1.OpenTabsOpened
-	(*OpenTabsOpenedReady)(nil),                 // 16: agentrepl.v1.OpenTabsOpenedReady
-	(*OpenTabsOpenedFailed)(nil),                // 17: agentrepl.v1.OpenTabsOpenedFailed
-	(*OpenTabsOpenedHidden)(nil),                // 18: agentrepl.v1.OpenTabsOpenedHidden
-	(*OpenTabsOpenedRefused)(nil),               // 19: agentrepl.v1.OpenTabsOpenedRefused
-	(*OpenTabsRefusedUnknownWorkspace)(nil),     // 20: agentrepl.v1.OpenTabsRefusedUnknownWorkspace
-	(*OpenTabsRefusedWorkspaceRefMismatch)(nil), // 21: agentrepl.v1.OpenTabsRefusedWorkspaceRefMismatch
-	(*OpenTabsRefusedTransferringAway)(nil),     // 22: agentrepl.v1.OpenTabsRefusedTransferringAway
-	(*OpenTabsRefusedNotYetAdopted)(nil),        // 23: agentrepl.v1.OpenTabsRefusedNotYetAdopted
-	(*OpenTabsFinished)(nil),                    // 24: agentrepl.v1.OpenTabsFinished
-	(*OpenTabsFailedWorkspace)(nil),             // 25: agentrepl.v1.OpenTabsFailedWorkspace
-	(*v1.WorkspaceRef)(nil),                     // 26: workspace.v1.WorkspaceRef
+	(*OpenTabsPageLoading)(nil),                 // 2: agentrepl.v1.OpenTabsPageLoading
+	(*OpenTabsPageNone)(nil),                    // 3: agentrepl.v1.OpenTabsPageNone
+	(*OpenTabsResponse)(nil),                    // 4: agentrepl.v1.OpenTabsResponse
+	(*OpenTabsStep)(nil),                        // 5: agentrepl.v1.OpenTabsStep
+	(*OpenTabsStepStartingSession)(nil),         // 6: agentrepl.v1.OpenTabsStepStartingSession
+	(*OpenTabsStepWaking)(nil),                  // 7: agentrepl.v1.OpenTabsStepWaking
+	(*OpenTabsStepResuming)(nil),                // 8: agentrepl.v1.OpenTabsStepResuming
+	(*OpenTabsStepVendorRetrying)(nil),          // 9: agentrepl.v1.OpenTabsStepVendorRetrying
+	(*OpenTabsStepVendorRejected)(nil),          // 10: agentrepl.v1.OpenTabsStepVendorRejected
+	(*OpenTabsStepVendorFailed)(nil),            // 11: agentrepl.v1.OpenTabsStepVendorFailed
+	(*OpenTabsStepColdGate)(nil),                // 12: agentrepl.v1.OpenTabsStepColdGate
+	(*OpenTabsStepOffline)(nil),                 // 13: agentrepl.v1.OpenTabsStepOffline
+	(*OpenTabsStepServed)(nil),                  // 14: agentrepl.v1.OpenTabsStepServed
+	(*OpenTabsStepPageConnected)(nil),           // 15: agentrepl.v1.OpenTabsStepPageConnected
+	(*OpenTabsStepPageDrawn)(nil),               // 16: agentrepl.v1.OpenTabsStepPageDrawn
+	(*OpenTabsOpened)(nil),                      // 17: agentrepl.v1.OpenTabsOpened
+	(*OpenTabsOpenedReady)(nil),                 // 18: agentrepl.v1.OpenTabsOpenedReady
+	(*OpenTabsOpenedFailed)(nil),                // 19: agentrepl.v1.OpenTabsOpenedFailed
+	(*OpenTabsOpenedHidden)(nil),                // 20: agentrepl.v1.OpenTabsOpenedHidden
+	(*OpenTabsOpenedRefused)(nil),               // 21: agentrepl.v1.OpenTabsOpenedRefused
+	(*OpenTabsRefusedUnknownWorkspace)(nil),     // 22: agentrepl.v1.OpenTabsRefusedUnknownWorkspace
+	(*OpenTabsRefusedWorkspaceRefMismatch)(nil), // 23: agentrepl.v1.OpenTabsRefusedWorkspaceRefMismatch
+	(*OpenTabsRefusedTransferringAway)(nil),     // 24: agentrepl.v1.OpenTabsRefusedTransferringAway
+	(*OpenTabsRefusedNotYetAdopted)(nil),        // 25: agentrepl.v1.OpenTabsRefusedNotYetAdopted
+	(*OpenTabsFinished)(nil),                    // 26: agentrepl.v1.OpenTabsFinished
+	(*OpenTabsFailedWorkspace)(nil),             // 27: agentrepl.v1.OpenTabsFailedWorkspace
+	(*v1.WorkspaceRef)(nil),                     // 28: workspace.v1.WorkspaceRef
 }
 var file_agentrepl_v1_endpoint_open_tabs_proto_depIdxs = []int32{
 	1,  // 0: agentrepl.v1.OpenTabsRequest.workspaces:type_name -> agentrepl.v1.OpenTabsWorkspace
-	26, // 1: agentrepl.v1.OpenTabsWorkspace.workspace:type_name -> workspace.v1.WorkspaceRef
-	3,  // 2: agentrepl.v1.OpenTabsResponse.step:type_name -> agentrepl.v1.OpenTabsStep
-	15, // 3: agentrepl.v1.OpenTabsResponse.opened:type_name -> agentrepl.v1.OpenTabsOpened
-	24, // 4: agentrepl.v1.OpenTabsResponse.finished:type_name -> agentrepl.v1.OpenTabsFinished
-	26, // 5: agentrepl.v1.OpenTabsStep.workspace:type_name -> workspace.v1.WorkspaceRef
-	4,  // 6: agentrepl.v1.OpenTabsStep.starting_session:type_name -> agentrepl.v1.OpenTabsStepStartingSession
-	5,  // 7: agentrepl.v1.OpenTabsStep.waking:type_name -> agentrepl.v1.OpenTabsStepWaking
-	6,  // 8: agentrepl.v1.OpenTabsStep.resuming:type_name -> agentrepl.v1.OpenTabsStepResuming
-	7,  // 9: agentrepl.v1.OpenTabsStep.vendor_retrying:type_name -> agentrepl.v1.OpenTabsStepVendorRetrying
-	8,  // 10: agentrepl.v1.OpenTabsStep.vendor_rejected:type_name -> agentrepl.v1.OpenTabsStepVendorRejected
-	9,  // 11: agentrepl.v1.OpenTabsStep.vendor_failed:type_name -> agentrepl.v1.OpenTabsStepVendorFailed
-	10, // 12: agentrepl.v1.OpenTabsStep.cold_gate:type_name -> agentrepl.v1.OpenTabsStepColdGate
-	11, // 13: agentrepl.v1.OpenTabsStep.offline:type_name -> agentrepl.v1.OpenTabsStepOffline
-	12, // 14: agentrepl.v1.OpenTabsStep.served:type_name -> agentrepl.v1.OpenTabsStepServed
-	13, // 15: agentrepl.v1.OpenTabsStep.page_connected:type_name -> agentrepl.v1.OpenTabsStepPageConnected
-	14, // 16: agentrepl.v1.OpenTabsStep.page_drawn:type_name -> agentrepl.v1.OpenTabsStepPageDrawn
-	26, // 17: agentrepl.v1.OpenTabsOpened.workspace:type_name -> workspace.v1.WorkspaceRef
-	16, // 18: agentrepl.v1.OpenTabsOpened.ready:type_name -> agentrepl.v1.OpenTabsOpenedReady
-	17, // 19: agentrepl.v1.OpenTabsOpened.failed:type_name -> agentrepl.v1.OpenTabsOpenedFailed
-	18, // 20: agentrepl.v1.OpenTabsOpened.hidden:type_name -> agentrepl.v1.OpenTabsOpenedHidden
-	19, // 21: agentrepl.v1.OpenTabsOpened.refused:type_name -> agentrepl.v1.OpenTabsOpenedRefused
-	20, // 22: agentrepl.v1.OpenTabsOpenedRefused.unknown_workspace:type_name -> agentrepl.v1.OpenTabsRefusedUnknownWorkspace
-	21, // 23: agentrepl.v1.OpenTabsOpenedRefused.workspace_ref_mismatch:type_name -> agentrepl.v1.OpenTabsRefusedWorkspaceRefMismatch
-	22, // 24: agentrepl.v1.OpenTabsOpenedRefused.transferring_away:type_name -> agentrepl.v1.OpenTabsRefusedTransferringAway
-	23, // 25: agentrepl.v1.OpenTabsOpenedRefused.not_yet_adopted:type_name -> agentrepl.v1.OpenTabsRefusedNotYetAdopted
-	25, // 26: agentrepl.v1.OpenTabsFinished.failed:type_name -> agentrepl.v1.OpenTabsFailedWorkspace
-	26, // 27: agentrepl.v1.OpenTabsFailedWorkspace.workspace:type_name -> workspace.v1.WorkspaceRef
-	28, // [28:28] is the sub-list for method output_type
-	28, // [28:28] is the sub-list for method input_type
-	28, // [28:28] is the sub-list for extension type_name
-	28, // [28:28] is the sub-list for extension extendee
-	0,  // [0:28] is the sub-list for field type_name
+	28, // 1: agentrepl.v1.OpenTabsWorkspace.workspace:type_name -> workspace.v1.WorkspaceRef
+	2,  // 2: agentrepl.v1.OpenTabsWorkspace.loading:type_name -> agentrepl.v1.OpenTabsPageLoading
+	3,  // 3: agentrepl.v1.OpenTabsWorkspace.none:type_name -> agentrepl.v1.OpenTabsPageNone
+	5,  // 4: agentrepl.v1.OpenTabsResponse.step:type_name -> agentrepl.v1.OpenTabsStep
+	17, // 5: agentrepl.v1.OpenTabsResponse.opened:type_name -> agentrepl.v1.OpenTabsOpened
+	26, // 6: agentrepl.v1.OpenTabsResponse.finished:type_name -> agentrepl.v1.OpenTabsFinished
+	28, // 7: agentrepl.v1.OpenTabsStep.workspace:type_name -> workspace.v1.WorkspaceRef
+	6,  // 8: agentrepl.v1.OpenTabsStep.starting_session:type_name -> agentrepl.v1.OpenTabsStepStartingSession
+	7,  // 9: agentrepl.v1.OpenTabsStep.waking:type_name -> agentrepl.v1.OpenTabsStepWaking
+	8,  // 10: agentrepl.v1.OpenTabsStep.resuming:type_name -> agentrepl.v1.OpenTabsStepResuming
+	9,  // 11: agentrepl.v1.OpenTabsStep.vendor_retrying:type_name -> agentrepl.v1.OpenTabsStepVendorRetrying
+	10, // 12: agentrepl.v1.OpenTabsStep.vendor_rejected:type_name -> agentrepl.v1.OpenTabsStepVendorRejected
+	11, // 13: agentrepl.v1.OpenTabsStep.vendor_failed:type_name -> agentrepl.v1.OpenTabsStepVendorFailed
+	12, // 14: agentrepl.v1.OpenTabsStep.cold_gate:type_name -> agentrepl.v1.OpenTabsStepColdGate
+	13, // 15: agentrepl.v1.OpenTabsStep.offline:type_name -> agentrepl.v1.OpenTabsStepOffline
+	14, // 16: agentrepl.v1.OpenTabsStep.served:type_name -> agentrepl.v1.OpenTabsStepServed
+	15, // 17: agentrepl.v1.OpenTabsStep.page_connected:type_name -> agentrepl.v1.OpenTabsStepPageConnected
+	16, // 18: agentrepl.v1.OpenTabsStep.page_drawn:type_name -> agentrepl.v1.OpenTabsStepPageDrawn
+	28, // 19: agentrepl.v1.OpenTabsOpened.workspace:type_name -> workspace.v1.WorkspaceRef
+	18, // 20: agentrepl.v1.OpenTabsOpened.ready:type_name -> agentrepl.v1.OpenTabsOpenedReady
+	19, // 21: agentrepl.v1.OpenTabsOpened.failed:type_name -> agentrepl.v1.OpenTabsOpenedFailed
+	20, // 22: agentrepl.v1.OpenTabsOpened.hidden:type_name -> agentrepl.v1.OpenTabsOpenedHidden
+	21, // 23: agentrepl.v1.OpenTabsOpened.refused:type_name -> agentrepl.v1.OpenTabsOpenedRefused
+	22, // 24: agentrepl.v1.OpenTabsOpenedRefused.unknown_workspace:type_name -> agentrepl.v1.OpenTabsRefusedUnknownWorkspace
+	23, // 25: agentrepl.v1.OpenTabsOpenedRefused.workspace_ref_mismatch:type_name -> agentrepl.v1.OpenTabsRefusedWorkspaceRefMismatch
+	24, // 26: agentrepl.v1.OpenTabsOpenedRefused.transferring_away:type_name -> agentrepl.v1.OpenTabsRefusedTransferringAway
+	25, // 27: agentrepl.v1.OpenTabsOpenedRefused.not_yet_adopted:type_name -> agentrepl.v1.OpenTabsRefusedNotYetAdopted
+	27, // 28: agentrepl.v1.OpenTabsFinished.failed:type_name -> agentrepl.v1.OpenTabsFailedWorkspace
+	28, // 29: agentrepl.v1.OpenTabsFailedWorkspace.workspace:type_name -> workspace.v1.WorkspaceRef
+	30, // [30:30] is the sub-list for method output_type
+	30, // [30:30] is the sub-list for method input_type
+	30, // [30:30] is the sub-list for extension type_name
+	30, // [30:30] is the sub-list for extension extendee
+	0,  // [0:30] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_open_tabs_proto_init() }
@@ -1768,12 +1906,16 @@ func file_agentrepl_v1_endpoint_open_tabs_proto_init() {
 	if File_agentrepl_v1_endpoint_open_tabs_proto != nil {
 		return
 	}
-	file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[2].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[1].OneofWrappers = []any{
+		(*OpenTabsWorkspace_Loading)(nil),
+		(*OpenTabsWorkspace_None)(nil),
+	}
+	file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[4].OneofWrappers = []any{
 		(*OpenTabsResponse_Step)(nil),
 		(*OpenTabsResponse_Opened)(nil),
 		(*OpenTabsResponse_Finished)(nil),
 	}
-	file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[3].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[5].OneofWrappers = []any{
 		(*OpenTabsStep_StartingSession)(nil),
 		(*OpenTabsStep_Waking)(nil),
 		(*OpenTabsStep_Resuming)(nil),
@@ -1786,13 +1928,13 @@ func file_agentrepl_v1_endpoint_open_tabs_proto_init() {
 		(*OpenTabsStep_PageConnected)(nil),
 		(*OpenTabsStep_PageDrawn)(nil),
 	}
-	file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[15].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[17].OneofWrappers = []any{
 		(*OpenTabsOpened_Ready)(nil),
 		(*OpenTabsOpened_Failed)(nil),
 		(*OpenTabsOpened_Hidden)(nil),
 		(*OpenTabsOpened_Refused)(nil),
 	}
-	file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[19].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[21].OneofWrappers = []any{
 		(*OpenTabsOpenedRefused_UnknownWorkspace)(nil),
 		(*OpenTabsOpenedRefused_WorkspaceRefMismatch)(nil),
 		(*OpenTabsOpenedRefused_TransferringAway)(nil),
@@ -1804,7 +1946,7 @@ func file_agentrepl_v1_endpoint_open_tabs_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_open_tabs_proto_rawDesc), len(file_agentrepl_v1_endpoint_open_tabs_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   26,
+			NumMessages:   28,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

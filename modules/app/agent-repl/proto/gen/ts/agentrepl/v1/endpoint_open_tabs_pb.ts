@@ -35,7 +35,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_open_tabs.proto.
  */
 export const file_agentrepl_v1_endpoint_open_tabs: GenFile = /*@__PURE__*/
-  fileDesc("CiVhZ2VudHJlcGwvdjEvZW5kcG9pbnRfb3Blbl90YWJzLnByb3RvEgxhZ2VudHJlcGwudjEiRgoPT3BlblRhYnNSZXF1ZXN0EjMKCndvcmtzcGFjZXMYASADKAsyHy5hZ2VudHJlcGwudjEuT3BlblRhYnNXb3Jrc3BhY2UiQgoRT3BlblRhYnNXb3Jrc3BhY2USLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZiKrAQoQT3BlblRhYnNSZXNwb25zZRIqCgRzdGVwGAEgASgLMhouYWdlbnRyZXBsLnYxLk9wZW5UYWJzU3RlcEgAEi4KBm9wZW5lZBgCIAEoCzIcLmFnZW50cmVwbC52MS5PcGVuVGFic09wZW5lZEgAEjIKCGZpbmlzaGVkGAMgASgLMh4uYWdlbnRyZXBsLnYxLk9wZW5UYWJzRmluaXNoZWRIAEIHCgVmcmFtZSLzBQoMT3BlblRhYnNTdGVwEi0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSDQoFYXRfbXMYAiABKAMSRQoQc3RhcnRpbmdfc2Vzc2lvbhgDIAEoCzIpLmFnZW50cmVwbC52MS5PcGVuVGFic1N0ZXBTdGFydGluZ1Nlc3Npb25IABIyCgZ3YWtpbmcYBCABKAsyIC5hZ2VudHJlcGwudjEuT3BlblRhYnNTdGVwV2FraW5nSAASNgoIcmVzdW1pbmcYBSABKAsyIi5hZ2VudHJlcGwudjEuT3BlblRhYnNTdGVwUmVzdW1pbmdIABJDCg92ZW5kb3JfcmV0cnlpbmcYBiABKAsyKC5hZ2VudHJlcGwudjEuT3BlblRhYnNTdGVwVmVuZG9yUmV0cnlpbmdIABJDCg92ZW5kb3JfcmVqZWN0ZWQYByABKAsyKC5hZ2VudHJlcGwudjEuT3BlblRhYnNTdGVwVmVuZG9yUmVqZWN0ZWRIABI/Cg12ZW5kb3JfZmFpbGVkGAggASgLMiYuYWdlbnRyZXBsLnYxLk9wZW5UYWJzU3RlcFZlbmRvckZhaWxlZEgAEjcKCWNvbGRfZ2F0ZRgJIAEoCzIiLmFnZW50cmVwbC52MS5PcGVuVGFic1N0ZXBDb2xkR2F0ZUgAEjQKB29mZmxpbmUYCiABKAsyIS5hZ2VudHJlcGwudjEuT3BlblRhYnNTdGVwT2ZmbGluZUgAEjIKBnNlcnZlZBgLIAEoCzIgLmFnZW50cmVwbC52MS5PcGVuVGFic1N0ZXBTZXJ2ZWRIABJBCg5wYWdlX2Nvbm5lY3RlZBgMIAEoCzInLmFnZW50cmVwbC52MS5PcGVuVGFic1N0ZXBQYWdlQ29ubmVjdGVkSAASOQoKcGFnZV9kcmF3bhgNIAEoCzIjLmFnZW50cmVwbC52MS5PcGVuVGFic1N0ZXBQYWdlRHJhd25IAEIGCgRzdGVwIh0KG09wZW5UYWJzU3RlcFN0YXJ0aW5nU2Vzc2lvbiIUChJPcGVuVGFic1N0ZXBXYWtpbmciFgoUT3BlblRhYnNTdGVwUmVzdW1pbmciLQoaT3BlblRhYnNTdGVwVmVuZG9yUmV0cnlpbmcSDwoHYXR0ZW1wdBgBIAEoDSIrChpPcGVuVGFic1N0ZXBWZW5kb3JSZWplY3RlZBINCgVjYXVzZRgBIAEoCSIaChhPcGVuVGFic1N0ZXBWZW5kb3JGYWlsZWQiFgoUT3BlblRhYnNTdGVwQ29sZEdhdGUiFQoTT3BlblRhYnNTdGVwT2ZmbGluZSIUChJPcGVuVGFic1N0ZXBTZXJ2ZWQiGwoZT3BlblRhYnNTdGVwUGFnZUNvbm5lY3RlZCIXChVPcGVuVGFic1N0ZXBQYWdlRHJhd24isQIKDk9wZW5UYWJzT3BlbmVkEi0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSDQoFYXRfbXMYAiABKAMSMgoFcmVhZHkYAyABKAsyIS5hZ2VudHJlcGwudjEuT3BlblRhYnNPcGVuZWRSZWFkeUgAEjQKBmZhaWxlZBgEIAEoCzIiLmFnZW50cmVwbC52MS5PcGVuVGFic09wZW5lZEZhaWxlZEgAEjQKBmhpZGRlbhgFIAEoCzIiLmFnZW50cmVwbC52MS5PcGVuVGFic09wZW5lZEhpZGRlbkgAEjYKB3JlZnVzZWQYBiABKAsyIy5hZ2VudHJlcGwudjEuT3BlblRhYnNPcGVuZWRSZWZ1c2VkSABCCQoHb3V0Y29tZSIVChNPcGVuVGFic09wZW5lZFJlYWR5IiYKFE9wZW5UYWJzT3BlbmVkRmFpbGVkEg4KBnJlYXNvbhgBIAEoCSIWChRPcGVuVGFic09wZW5lZEhpZGRlbiLUAgoVT3BlblRhYnNPcGVuZWRSZWZ1c2VkEkoKEXVua25vd25fd29ya3NwYWNlGAEgASgLMi0uYWdlbnRyZXBsLnYxLk9wZW5UYWJzUmVmdXNlZFVua25vd25Xb3Jrc3BhY2VIABJTChZ3b3Jrc3BhY2VfcmVmX21pc21hdGNoGAIgASgLMjEuYWdlbnRyZXBsLnYxLk9wZW5UYWJzUmVmdXNlZFdvcmtzcGFjZVJlZk1pc21hdGNoSAASSgoRdHJhbnNmZXJyaW5nX2F3YXkYAyABKAsyLS5hZ2VudHJlcGwudjEuT3BlblRhYnNSZWZ1c2VkVHJhbnNmZXJyaW5nQXdheUgAEkUKD25vdF95ZXRfYWRvcHRlZBgEIAEoCzIqLmFnZW50cmVwbC52MS5PcGVuVGFic1JlZnVzZWROb3RZZXRBZG9wdGVkSABCBwoFY2F1c2UiIQofT3BlblRhYnNSZWZ1c2VkVW5rbm93bldvcmtzcGFjZSI7CiNPcGVuVGFic1JlZnVzZWRXb3Jrc3BhY2VSZWZNaXNtYXRjaBIUCgxyZWdpc3RyeV9kaXIYASABKAkiMgofT3BlblRhYnNSZWZ1c2VkVHJhbnNmZXJyaW5nQXdheRIPCgdhZGRyZXNzGAEgASgJIh4KHE9wZW5UYWJzUmVmdXNlZE5vdFlldEFkb3B0ZWQiZwoQT3BlblRhYnNGaW5pc2hlZBINCgVyZWFkeRgBIAEoDRINCgV0b3RhbBgCIAEoDRI1CgZmYWlsZWQYAyADKAsyJS5hZ2VudHJlcGwudjEuT3BlblRhYnNGYWlsZWRXb3Jrc3BhY2UiVgoXT3BlblRhYnNGYWlsZWRXb3Jrc3BhY2USLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhIMCgRuYW1lGAIgASgJQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_workspace_v1_workspace]);
+  fileDesc("CiVhZ2VudHJlcGwvdjEvZW5kcG9pbnRfb3Blbl90YWJzLnByb3RvEgxhZ2VudHJlcGwudjEiRgoPT3BlblRhYnNSZXF1ZXN0EjMKCndvcmtzcGFjZXMYASADKAsyHy5hZ2VudHJlcGwudjEuT3BlblRhYnNXb3Jrc3BhY2UisAEKEU9wZW5UYWJzV29ya3NwYWNlEi0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSNAoHbG9hZGluZxgCIAEoCzIhLmFnZW50cmVwbC52MS5PcGVuVGFic1BhZ2VMb2FkaW5nSAASLgoEbm9uZRgDIAEoCzIeLmFnZW50cmVwbC52MS5PcGVuVGFic1BhZ2VOb25lSABCBgoEcGFnZSIVChNPcGVuVGFic1BhZ2VMb2FkaW5nIhIKEE9wZW5UYWJzUGFnZU5vbmUiqwEKEE9wZW5UYWJzUmVzcG9uc2USKgoEc3RlcBgBIAEoCzIaLmFnZW50cmVwbC52MS5PcGVuVGFic1N0ZXBIABIuCgZvcGVuZWQYAiABKAsyHC5hZ2VudHJlcGwudjEuT3BlblRhYnNPcGVuZWRIABIyCghmaW5pc2hlZBgDIAEoCzIeLmFnZW50cmVwbC52MS5PcGVuVGFic0ZpbmlzaGVkSABCBwoFZnJhbWUi8wUKDE9wZW5UYWJzU3RlcBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEg0KBWF0X21zGAIgASgDEkUKEHN0YXJ0aW5nX3Nlc3Npb24YAyABKAsyKS5hZ2VudHJlcGwudjEuT3BlblRhYnNTdGVwU3RhcnRpbmdTZXNzaW9uSAASMgoGd2FraW5nGAQgASgLMiAuYWdlbnRyZXBsLnYxLk9wZW5UYWJzU3RlcFdha2luZ0gAEjYKCHJlc3VtaW5nGAUgASgLMiIuYWdlbnRyZXBsLnYxLk9wZW5UYWJzU3RlcFJlc3VtaW5nSAASQwoPdmVuZG9yX3JldHJ5aW5nGAYgASgLMiguYWdlbnRyZXBsLnYxLk9wZW5UYWJzU3RlcFZlbmRvclJldHJ5aW5nSAASQwoPdmVuZG9yX3JlamVjdGVkGAcgASgLMiguYWdlbnRyZXBsLnYxLk9wZW5UYWJzU3RlcFZlbmRvclJlamVjdGVkSAASPwoNdmVuZG9yX2ZhaWxlZBgIIAEoCzImLmFnZW50cmVwbC52MS5PcGVuVGFic1N0ZXBWZW5kb3JGYWlsZWRIABI3Cgljb2xkX2dhdGUYCSABKAsyIi5hZ2VudHJlcGwudjEuT3BlblRhYnNTdGVwQ29sZEdhdGVIABI0CgdvZmZsaW5lGAogASgLMiEuYWdlbnRyZXBsLnYxLk9wZW5UYWJzU3RlcE9mZmxpbmVIABIyCgZzZXJ2ZWQYCyABKAsyIC5hZ2VudHJlcGwudjEuT3BlblRhYnNTdGVwU2VydmVkSAASQQoOcGFnZV9jb25uZWN0ZWQYDCABKAsyJy5hZ2VudHJlcGwudjEuT3BlblRhYnNTdGVwUGFnZUNvbm5lY3RlZEgAEjkKCnBhZ2VfZHJhd24YDSABKAsyIy5hZ2VudHJlcGwudjEuT3BlblRhYnNTdGVwUGFnZURyYXduSABCBgoEc3RlcCIdChtPcGVuVGFic1N0ZXBTdGFydGluZ1Nlc3Npb24iFAoST3BlblRhYnNTdGVwV2FraW5nIhYKFE9wZW5UYWJzU3RlcFJlc3VtaW5nIi0KGk9wZW5UYWJzU3RlcFZlbmRvclJldHJ5aW5nEg8KB2F0dGVtcHQYASABKA0iKwoaT3BlblRhYnNTdGVwVmVuZG9yUmVqZWN0ZWQSDQoFY2F1c2UYASABKAkiGgoYT3BlblRhYnNTdGVwVmVuZG9yRmFpbGVkIhYKFE9wZW5UYWJzU3RlcENvbGRHYXRlIhUKE09wZW5UYWJzU3RlcE9mZmxpbmUiFAoST3BlblRhYnNTdGVwU2VydmVkIhsKGU9wZW5UYWJzU3RlcFBhZ2VDb25uZWN0ZWQiFwoVT3BlblRhYnNTdGVwUGFnZURyYXduIrECCg5PcGVuVGFic09wZW5lZBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEg0KBWF0X21zGAIgASgDEjIKBXJlYWR5GAMgASgLMiEuYWdlbnRyZXBsLnYxLk9wZW5UYWJzT3BlbmVkUmVhZHlIABI0CgZmYWlsZWQYBCABKAsyIi5hZ2VudHJlcGwudjEuT3BlblRhYnNPcGVuZWRGYWlsZWRIABI0CgZoaWRkZW4YBSABKAsyIi5hZ2VudHJlcGwudjEuT3BlblRhYnNPcGVuZWRIaWRkZW5IABI2CgdyZWZ1c2VkGAYgASgLMiMuYWdlbnRyZXBsLnYxLk9wZW5UYWJzT3BlbmVkUmVmdXNlZEgAQgkKB291dGNvbWUiFQoTT3BlblRhYnNPcGVuZWRSZWFkeSImChRPcGVuVGFic09wZW5lZEZhaWxlZBIOCgZyZWFzb24YASABKAkiFgoUT3BlblRhYnNPcGVuZWRIaWRkZW4i1AIKFU9wZW5UYWJzT3BlbmVkUmVmdXNlZBJKChF1bmtub3duX3dvcmtzcGFjZRgBIAEoCzItLmFnZW50cmVwbC52MS5PcGVuVGFic1JlZnVzZWRVbmtub3duV29ya3NwYWNlSAASUwoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzIxLmFnZW50cmVwbC52MS5PcGVuVGFic1JlZnVzZWRXb3Jrc3BhY2VSZWZNaXNtYXRjaEgAEkoKEXRyYW5zZmVycmluZ19hd2F5GAMgASgLMi0uYWdlbnRyZXBsLnYxLk9wZW5UYWJzUmVmdXNlZFRyYW5zZmVycmluZ0F3YXlIABJFCg9ub3RfeWV0X2Fkb3B0ZWQYBCABKAsyKi5hZ2VudHJlcGwudjEuT3BlblRhYnNSZWZ1c2VkTm90WWV0QWRvcHRlZEgAQgcKBWNhdXNlIiEKH09wZW5UYWJzUmVmdXNlZFVua25vd25Xb3Jrc3BhY2UiOwojT3BlblRhYnNSZWZ1c2VkV29ya3NwYWNlUmVmTWlzbWF0Y2gSFAoMcmVnaXN0cnlfZGlyGAEgASgJIjIKH09wZW5UYWJzUmVmdXNlZFRyYW5zZmVycmluZ0F3YXkSDwoHYWRkcmVzcxgBIAEoCSIeChxPcGVuVGFic1JlZnVzZWROb3RZZXRBZG9wdGVkImcKEE9wZW5UYWJzRmluaXNoZWQSDQoFcmVhZHkYASABKA0SDQoFdG90YWwYAiABKA0SNQoGZmFpbGVkGAMgAygLMiUuYWdlbnRyZXBsLnYxLk9wZW5UYWJzRmFpbGVkV29ya3NwYWNlIlYKF09wZW5UYWJzRmFpbGVkV29ya3NwYWNlEi0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSDAoEbmFtZRgCIAEoCUIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_workspace_v1_workspace]);
 
 /**
  * The workspaces the editor wants open.
@@ -72,6 +72,33 @@ export type OpenTabsWorkspace = Message<"agentrepl.v1.OpenTabsWorkspace"> & {
    * @generated from field: workspace.v1.WorkspaceRef workspace = 1;
    */
   workspace?: WorkspaceRef | undefined;
+
+  /**
+   * WHETHER THE EDITOR DRAWS A WEB PAGE FOR IT, which decides what `ready`
+   * waits for. THE ARM IS THE ANSWER; unset is a malformed request (Connect
+   * InvalidArgument).
+   *
+   * @generated from oneof agentrepl.v1.OpenTabsWorkspace.page
+   */
+  page: {
+    /**
+     * The editor is loading the workspace's web page now: it opens once its
+     * session is served AND the page reports itself drawn (ReportPageDrawn).
+     *
+     * @generated from field: agentrepl.v1.OpenTabsPageLoading loading = 2;
+     */
+    value: OpenTabsPageLoading;
+    case: "loading";
+  } | {
+    /**
+     * The editor draws no web page for it (its frontend is not the web page,
+     * or the editor has no webview): it opens once its session is served.
+     *
+     * @generated from field: agentrepl.v1.OpenTabsPageNone none = 3;
+     */
+    value: OpenTabsPageNone;
+    case: "none";
+  } | { case: undefined; value?: undefined };
 };
 
 /**
@@ -80,6 +107,36 @@ export type OpenTabsWorkspace = Message<"agentrepl.v1.OpenTabsWorkspace"> & {
  */
 export const OpenTabsWorkspaceSchema: GenMessage<OpenTabsWorkspace> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_open_tabs, 1);
+
+/**
+ * The editor is loading the workspace's web page. DELIBERATELY EMPTY.
+ *
+ * @generated from message agentrepl.v1.OpenTabsPageLoading
+ */
+export type OpenTabsPageLoading = Message<"agentrepl.v1.OpenTabsPageLoading"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.OpenTabsPageLoading.
+ * Use `create(OpenTabsPageLoadingSchema)` to create a new message.
+ */
+export const OpenTabsPageLoadingSchema: GenMessage<OpenTabsPageLoading> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 2);
+
+/**
+ * The editor draws no web page for the workspace. DELIBERATELY EMPTY.
+ *
+ * @generated from message agentrepl.v1.OpenTabsPageNone
+ */
+export type OpenTabsPageNone = Message<"agentrepl.v1.OpenTabsPageNone"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.OpenTabsPageNone.
+ * Use `create(OpenTabsPageNoneSchema)` to create a new message.
+ */
+export const OpenTabsPageNoneSchema: GenMessage<OpenTabsPageNone> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 3);
 
 /**
  * One frame of an open. The stream ends after `finished`.
@@ -124,7 +181,7 @@ export type OpenTabsResponse = Message<"agentrepl.v1.OpenTabsResponse"> & {
  * Use `create(OpenTabsResponseSchema)` to create a new message.
  */
 export const OpenTabsResponseSchema: GenMessage<OpenTabsResponse> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 2);
+  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 4);
 
 /**
  * One workspace's step, in the order it happened.
@@ -254,7 +311,7 @@ export type OpenTabsStep = Message<"agentrepl.v1.OpenTabsStep"> & {
  * Use `create(OpenTabsStepSchema)` to create a new message.
  */
 export const OpenTabsStepSchema: GenMessage<OpenTabsStep> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 3);
+  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 5);
 
 /**
  * The shim is being started or adopted.
@@ -269,7 +326,7 @@ export type OpenTabsStepStartingSession = Message<"agentrepl.v1.OpenTabsStepStar
  * Use `create(OpenTabsStepStartingSessionSchema)` to create a new message.
  */
 export const OpenTabsStepStartingSessionSchema: GenMessage<OpenTabsStepStartingSession> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 4);
+  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 6);
 
 /**
  * The workspace is being woken from sleep.
@@ -284,7 +341,7 @@ export type OpenTabsStepWaking = Message<"agentrepl.v1.OpenTabsStepWaking"> & {
  * Use `create(OpenTabsStepWakingSchema)` to create a new message.
  */
 export const OpenTabsStepWakingSchema: GenMessage<OpenTabsStepWaking> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 5);
+  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 7);
 
 /**
  * The conversation is being resumed.
@@ -299,7 +356,7 @@ export type OpenTabsStepResuming = Message<"agentrepl.v1.OpenTabsStepResuming"> 
  * Use `create(OpenTabsStepResumingSchema)` to create a new message.
  */
 export const OpenTabsStepResumingSchema: GenMessage<OpenTabsStepResuming> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 6);
+  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 8);
 
 /**
  * A vendor start attempt failed and is retried.
@@ -320,7 +377,7 @@ export type OpenTabsStepVendorRetrying = Message<"agentrepl.v1.OpenTabsStepVendo
  * Use `create(OpenTabsStepVendorRetryingSchema)` to create a new message.
  */
 export const OpenTabsStepVendorRetryingSchema: GenMessage<OpenTabsStepVendorRetrying> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 7);
+  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 9);
 
 /**
  * The vendor refused to start.
@@ -341,7 +398,7 @@ export type OpenTabsStepVendorRejected = Message<"agentrepl.v1.OpenTabsStepVendo
  * Use `create(OpenTabsStepVendorRejectedSchema)` to create a new message.
  */
 export const OpenTabsStepVendorRejectedSchema: GenMessage<OpenTabsStepVendorRejected> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 8);
+  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 10);
 
 /**
  * The vendor failed for the whole retry window.
@@ -356,7 +413,7 @@ export type OpenTabsStepVendorFailed = Message<"agentrepl.v1.OpenTabsStepVendorF
  * Use `create(OpenTabsStepVendorFailedSchema)` to create a new message.
  */
 export const OpenTabsStepVendorFailedSchema: GenMessage<OpenTabsStepVendorFailed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 9);
+  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 11);
 
 /**
  * The cold gate awaits the user's answer.
@@ -371,7 +428,7 @@ export type OpenTabsStepColdGate = Message<"agentrepl.v1.OpenTabsStepColdGate"> 
  * Use `create(OpenTabsStepColdGateSchema)` to create a new message.
  */
 export const OpenTabsStepColdGateSchema: GenMessage<OpenTabsStepColdGate> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 10);
+  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 12);
 
 /**
  * The network is unreachable.
@@ -386,7 +443,7 @@ export type OpenTabsStepOffline = Message<"agentrepl.v1.OpenTabsStepOffline"> & 
  * Use `create(OpenTabsStepOfflineSchema)` to create a new message.
  */
 export const OpenTabsStepOfflineSchema: GenMessage<OpenTabsStepOffline> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 11);
+  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 13);
 
 /**
  * The session is served by agent-repl's services.
@@ -401,7 +458,7 @@ export type OpenTabsStepServed = Message<"agentrepl.v1.OpenTabsStepServed"> & {
  * Use `create(OpenTabsStepServedSchema)` to create a new message.
  */
 export const OpenTabsStepServedSchema: GenMessage<OpenTabsStepServed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 12);
+  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 14);
 
 /**
  * The workspace's web page attached to the daemon.
@@ -416,7 +473,7 @@ export type OpenTabsStepPageConnected = Message<"agentrepl.v1.OpenTabsStepPageCo
  * Use `create(OpenTabsStepPageConnectedSchema)` to create a new message.
  */
 export const OpenTabsStepPageConnectedSchema: GenMessage<OpenTabsStepPageConnected> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 13);
+  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 15);
 
 /**
  * The workspace's web page drew its conversation.
@@ -431,7 +488,7 @@ export type OpenTabsStepPageDrawn = Message<"agentrepl.v1.OpenTabsStepPageDrawn"
  * Use `create(OpenTabsStepPageDrawnSchema)` to create a new message.
  */
 export const OpenTabsStepPageDrawnSchema: GenMessage<OpenTabsStepPageDrawn> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 14);
+  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 16);
 
 /**
  * One workspace is open.
@@ -465,7 +522,8 @@ export type OpenTabsOpened = Message<"agentrepl.v1.OpenTabsOpened"> & {
    */
   outcome: {
     /**
-     * Served and drawn: show the tab ("<name>: ready.").
+     * Served, and its page drawn when one was loading: show the tab
+     * ("<name>: ready.").
      *
      * @generated from field: agentrepl.v1.OpenTabsOpenedReady ready = 3;
      */
@@ -505,10 +563,10 @@ export type OpenTabsOpened = Message<"agentrepl.v1.OpenTabsOpened"> & {
  * Use `create(OpenTabsOpenedSchema)` to create a new message.
  */
 export const OpenTabsOpenedSchema: GenMessage<OpenTabsOpened> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 15);
+  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 17);
 
 /**
- * Served and drawn. DELIBERATELY EMPTY: the arm is the outcome.
+ * Served (and drawn). DELIBERATELY EMPTY: the arm is the outcome.
  *
  * @generated from message agentrepl.v1.OpenTabsOpenedReady
  */
@@ -520,7 +578,7 @@ export type OpenTabsOpenedReady = Message<"agentrepl.v1.OpenTabsOpenedReady"> & 
  * Use `create(OpenTabsOpenedReadySchema)` to create a new message.
  */
 export const OpenTabsOpenedReadySchema: GenMessage<OpenTabsOpenedReady> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 16);
+  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 18);
 
 /**
  * The service-level start failed.
@@ -541,7 +599,7 @@ export type OpenTabsOpenedFailed = Message<"agentrepl.v1.OpenTabsOpenedFailed"> 
  * Use `create(OpenTabsOpenedFailedSchema)` to create a new message.
  */
 export const OpenTabsOpenedFailedSchema: GenMessage<OpenTabsOpenedFailed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 17);
+  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 19);
 
 /**
  * Not visible, so nothing was started. DELIBERATELY EMPTY.
@@ -556,7 +614,7 @@ export type OpenTabsOpenedHidden = Message<"agentrepl.v1.OpenTabsOpenedHidden"> 
  * Use `create(OpenTabsOpenedHiddenSchema)` to create a new message.
  */
 export const OpenTabsOpenedHiddenSchema: GenMessage<OpenTabsOpenedHidden> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 18);
+  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 20);
 
 /**
  * The daemon refused to open the workspace.
@@ -609,7 +667,7 @@ export type OpenTabsOpenedRefused = Message<"agentrepl.v1.OpenTabsOpenedRefused"
  * Use `create(OpenTabsOpenedRefusedSchema)` to create a new message.
  */
 export const OpenTabsOpenedRefusedSchema: GenMessage<OpenTabsOpenedRefused> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 19);
+  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 21);
 
 /**
  * The workspace id is not in the daemon's registry. DELIBERATELY EMPTY.
@@ -624,7 +682,7 @@ export type OpenTabsRefusedUnknownWorkspace = Message<"agentrepl.v1.OpenTabsRefu
  * Use `create(OpenTabsRefusedUnknownWorkspaceSchema)` to create a new message.
  */
 export const OpenTabsRefusedUnknownWorkspaceSchema: GenMessage<OpenTabsRefusedUnknownWorkspace> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 20);
+  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 22);
 
 /**
  * The echoed dir disagrees with the registry's dir for this id.
@@ -645,7 +703,7 @@ export type OpenTabsRefusedWorkspaceRefMismatch = Message<"agentrepl.v1.OpenTabs
  * Use `create(OpenTabsRefusedWorkspaceRefMismatchSchema)` to create a new message.
  */
 export const OpenTabsRefusedWorkspaceRefMismatchSchema: GenMessage<OpenTabsRefusedWorkspaceRefMismatch> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 21);
+  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 23);
 
 /**
  * This daemon released the workspace to a successor.
@@ -666,7 +724,7 @@ export type OpenTabsRefusedTransferringAway = Message<"agentrepl.v1.OpenTabsRefu
  * Use `create(OpenTabsRefusedTransferringAwaySchema)` to create a new message.
  */
 export const OpenTabsRefusedTransferringAwaySchema: GenMessage<OpenTabsRefusedTransferringAway> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 22);
+  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 24);
 
 /**
  * A joining daemon has not finished adopting this workspace yet.
@@ -682,7 +740,7 @@ export type OpenTabsRefusedNotYetAdopted = Message<"agentrepl.v1.OpenTabsRefused
  * Use `create(OpenTabsRefusedNotYetAdoptedSchema)` to create a new message.
  */
 export const OpenTabsRefusedNotYetAdoptedSchema: GenMessage<OpenTabsRefusedNotYetAdopted> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 23);
+  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 25);
 
 /**
  * Every workspace of the request has had its `opened`.
@@ -718,7 +776,7 @@ export type OpenTabsFinished = Message<"agentrepl.v1.OpenTabsFinished"> & {
  * Use `create(OpenTabsFinishedSchema)` to create a new message.
  */
 export const OpenTabsFinishedSchema: GenMessage<OpenTabsFinished> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 24);
+  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 26);
 
 /**
  * A workspace that opened with a service-level failure.
@@ -746,5 +804,5 @@ export type OpenTabsFailedWorkspace = Message<"agentrepl.v1.OpenTabsFailedWorksp
  * Use `create(OpenTabsFailedWorkspaceSchema)` to create a new message.
  */
 export const OpenTabsFailedWorkspaceSchema: GenMessage<OpenTabsFailedWorkspace> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 25);
+  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 27);
 
