@@ -247,7 +247,7 @@ func raiseColdGate(t *testing.T) *coldGate {
 
 	// Arrange: a workspace whose one real turn leaves a context above the
 	// cold-gate floor behind.
-	first := NewWorld(t, WorldOpts{})
+	first := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{DurableState: true}})
 	first.ExpectWarnings(coldGateWarnings...)
 	repo := harness.NewRepo(t)
 	ws := harness.Register(t, first.Daemon, repo.Dir)
