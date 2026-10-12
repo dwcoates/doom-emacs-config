@@ -9,9 +9,11 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	"claude-repld/internal/cpugov"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/resolve/footer"
 )
@@ -41,8 +43,28 @@ type gateVerdict struct {
 // gate runs the test gate on the rebased branch at head, rebased onto tip, in
 // the tests round the caller opened (or, on a resume, the round the restart
 // left live: the gate runs again from its start in it).
-func (r *run) gate(ctx context.Context, round tabRound, tip, head string) (gateVerdict, error) {
+//
+// THE GOVERNOR COUNTS EVERY GATE. A speculative gate comes with the permit
+// the governor admitted it under; a head's gate (permit nil) takes its permit
+// here, at once. The permit is released when the gate's script ends, with the
+// run's measured cost, which the governor learns from.
+func (r *run) gate(ctx context.Context, round tabRound, tip, head string, permit *cpugov.Permit) (gateVerdict, error) {
 	const op = "daemon.merge.tests"
+	if permit == nil {
+		var err error
+		permit, err = r.o.deps.Governor.Acquire(ctx, cpugov.Request{Workspace: r.ws, Repo: string(r.repo), Head: true})
+		if err != nil {
+			return gateVerdict{}, fmt.Errorf("merge: admitting the head's gate: %w", err)
+		}
+	}
+	released := false
+	release := func(cores float64, wall time.Duration, measured bool) {
+		if !released {
+			released = true
+			permit.Release(cores, wall, measured)
+		}
+	}
+	defer release(0, 0, false)
 	dir := r.subject.dir
 	rangeSpec := tip + ".." + head
 	paths, err := r.git.ChangedPaths(ctx, dir, rangeSpec)
@@ -60,7 +82,7 @@ func (r *run) gate(ctx context.Context, round tabRound, tip, head string) (gateV
 		"full": selection.Full, "reason": selection.Reason})
 
 	g := &gateRun{r: r, round: round, log: r.o.testLog(r.lease.ID, round.n),
-		states: map[string]suiteState{}, counts: newSuiteCounts()}
+		states: map[string]suiteState{}, counts: newSuiteCounts(), release: release}
 	r.setStep(ctx, footer.StepTesting, nil)
 	r.upsert(round, testsTab(round.live(), nil, nil))
 
@@ -77,8 +99,9 @@ func (r *run) gate(ctx context.Context, round tabRound, tip, head string) (gateV
 	}
 	// THE MERGE QUEUE'S RUN GOES FIRST at the host's suite gate
 	// (bin/suite-slot.sh): master does not move while it waits, so it is served
-	// ahead of every ad-hoc run instead of racing them for a freed slot.
-	argv = append([]string{"env", "AGENT_REPL_SUITE_PRIORITY=merge"}, argv...)
+	// ahead of every ad-hoc run instead of racing them for a freed slot. A
+	// speculative gate (one behind the head) runs niced; see gateArgv.
+	argv = gateArgv(append([]string(nil), argv...), r.isSpeculative())
 	// The FULL selection passes no narrowing: running everything is the
 	// script's own default, and a repository whose script knows no --suites
 	// flag is never handed one.
@@ -93,6 +116,13 @@ func (r *run) gate(ctx context.Context, round tabRound, tip, head string) (gateV
 		var unstarted *gateUnstartedError
 		if errors.As(err, &unstarted) && ctx.Err() == nil && !r.o.isDraining() {
 			return g.brokenGate(ctx, GateResult{}, fmt.Sprintf("it could not be started (%v)", unstarted.err)), nil
+		}
+		// A SPECULATIVE GATE WHOSE BASE MOVED was cut on purpose: it runs
+		// again on the new base, and says so.
+		if errors.Is(context.Cause(ctx), errBaseMoved) {
+			r.upsert(round, testsTab(round.settled(r.o.nowMS(), "the merge ahead moved; the tests run again on its new tip"), nil, g.link()))
+			r.closeTab(ctx, round, "restarted")
+			return gateVerdict{}, err
 		}
 		r.upsert(round, testsTab(round.settled(r.o.nowMS(), "the test gate could not run"), nil, g.link()))
 		r.closeTab(ctx, round, "failed")
@@ -136,6 +166,9 @@ type gateRun struct {
 	// written reports that the log file exists, so the tab may link it.
 	written bool
 
+	// release gives the governor's permit back with the run's measured cost.
+	release func(cores float64, wall time.Duration, measured bool)
+
 	mu sync.Mutex
 	// suites are the tab's live rows, in the order the suites started.
 	suites []*frontendv1.FeedMergeTestSuite
@@ -169,12 +202,14 @@ func (g *gateRun) run(ctx context.Context, dir string, argv, selected []string) 
 	writer := bufio.NewWriter(file)
 	var writeErr error
 	g.r.upsert(g.round, testsTab(g.round.live(), nil, g.link()))
-	output, code, runErr := g.r.o.deps.TestRunner.RunLines(ctx, dir, argv, func(line string) {
+	measured, runErr := g.r.o.deps.TestRunner.RunLinesMeasured(ctx, dir, argv, func(line string) {
 		if _, err := writer.WriteString(line + "\n"); err != nil && writeErr == nil {
 			writeErr = err
 		}
 		g.edge(line)
 	})
+	g.release(measured.Cores(), measured.Wall, runErr == nil)
+	output, code := measured.Output, measured.ExitCode
 	if err := writer.Flush(); err != nil && writeErr == nil {
 		writeErr = err
 	}
