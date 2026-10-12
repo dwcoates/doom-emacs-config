@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { childTabsOf, readMergeTab, type MergeTab } from "../../../src/feed/merge/tab-strip.js";
-import { RUN_OUTPUT_KIND, mergeTabPanel, runOutputEntry } from "../../../src/feed/merge/tab-panels.js";
+import { RUN_OUTPUT_KIND, mergeTabPanel, runOutputEntry, swapHeading } from "../../../src/feed/merge/tab-panels.js";
 import { harness, mergeRow, rowContext } from "../harness.js";
 import { FakeSubfeed, childRow, tabRow } from "./fixtures.js";
+import TAB_PANELS from "../../../src/feed/merge/tab-panels.ts?raw";
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -120,5 +121,28 @@ describe("mergeTabPanel", () => {
     view.push([parent, tabRow("t-run", { kind: "testsRun", state: "live", parent: "t-tests" })]);
     panel.update(tabOf(parent));
     expect(host.querySelector('[data-merge-tab="testsRun"]')).not.toBeNull();
+  });
+});
+
+describe("swapHeading", () => {
+  it("puts the next heading in the old one's place", () => {
+    const host = document.createElement("div");
+    const head = document.createElement("p");
+    const next = document.createElement("p");
+    host.append(head);
+    expect([swapHeading(head, next), host.firstElementChild]).toEqual([next, next]);
+  });
+
+  it("keeps no heading on a panel that has none", () => {
+    expect(swapHeading(null, document.createElement("p"))).toBeNull();
+  });
+
+  it("keeps the old heading when no next one is drawn", () => {
+    const head = document.createElement("p");
+    expect(swapHeading(head, null)).toBe(head);
+  });
+
+  it("is the one way a panel's heading is swapped", () => {
+    expect([TAB_PANELS.split("swapHeading(").length - 1, TAB_PANELS.split(".replaceWith(next)").length - 1]).toEqual([3, 1]);
   });
 });
