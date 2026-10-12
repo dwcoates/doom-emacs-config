@@ -3,7 +3,7 @@ package topbar
 import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // sourceEdge is one record of where a drawn fact now comes from.

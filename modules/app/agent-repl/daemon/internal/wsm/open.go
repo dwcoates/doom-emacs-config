@@ -12,9 +12,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"claude-repld/internal/dirpath"
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/tempdirs"
+	"agent-repld/internal/dirpath"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/tempdirs"
 )
 
 // LayoutVersion is the schema version this build writes. The file carries its

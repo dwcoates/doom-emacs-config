@@ -13,14 +13,14 @@ import (
 	"context"
 	"fmt"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/promptqueue"
-	"claude-repld/internal/publish"
-	"claude-repld/internal/resolve/footer"
-	"claude-repld/internal/resolve/sidebar"
-	"claude-repld/internal/resolve/topbar"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/promptqueue"
+	"agent-repld/internal/publish"
+	"agent-repld/internal/resolve/footer"
+	"agent-repld/internal/resolve/sidebar"
+	"agent-repld/internal/resolve/topbar"
+	"agent-repld/internal/wsm"
 )
 
 // The operation names this package logs under.

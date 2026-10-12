@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"claude-repld/internal/bounce"
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/rollout"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/bounce"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/rollout"
+	"agent-repld/internal/wsm"
 )
 
 func TestRestartDelegatesToTheRelaunchEngine(t *testing.T) {

@@ -3,10 +3,10 @@ package workspace
 import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"claude-repld/internal/feedid"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/resolve/feed"
-	"claude-repld/internal/resolve/topbar"
+	"agent-repld/internal/feedid"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/resolve/feed"
+	"agent-repld/internal/resolve/topbar"
 )
 
 // THE SERVED-CARD RECORD.

@@ -3,7 +3,7 @@ package topbar
 import (
 	"fmt"
 
-	"claude-repld/internal/ids"
+	"agent-repld/internal/ids"
 )
 
 // THE CONTEXT CHIP'S WINDOW FILL (topbar.proto TopbarContextChip.window_fill;

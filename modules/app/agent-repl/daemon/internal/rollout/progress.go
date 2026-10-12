@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 
-	"claude-repld/internal/deployprogress"
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/health"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/deployprogress"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/health"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
 )
 
 // THE ROLLOUT'S SHARE OF THE UPDATE LINE (owner request, 2026-09-27). The

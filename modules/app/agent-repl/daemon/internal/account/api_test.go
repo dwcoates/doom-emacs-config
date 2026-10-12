@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"claude-repld/internal/account"
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/account"
+	"agent-repld/internal/dlog"
 )
 
 func TestNewRejectsMissingRoots(t *testing.T) {

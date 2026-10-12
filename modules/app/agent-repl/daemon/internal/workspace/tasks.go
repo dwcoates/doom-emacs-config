@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
 )
 
 // CreateTask records a new user task. A BLANK TITLE IS REFUSED: an untitled row

@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
 )
 
 // THE SUCCESSOR FOLLOWS EACH TRANSFER, NOT ONLY THE ANNOUNCEMENT. The intent

@@ -5,8 +5,8 @@ import (
 	"errors"
 	"time"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/intakegate"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/intakegate"
 )
 
 // Run drives the schedule for the daemon's whole serving lifetime. It first

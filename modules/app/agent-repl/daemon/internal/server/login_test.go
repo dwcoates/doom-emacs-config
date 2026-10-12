@@ -10,8 +10,8 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/internal/login"
-	"claude-repld/internal/merge"
+	"agent-repld/internal/login"
+	"agent-repld/internal/merge"
 )
 
 // TestOpenLoginAnswersTheConfigDir pins that the caller learns which account

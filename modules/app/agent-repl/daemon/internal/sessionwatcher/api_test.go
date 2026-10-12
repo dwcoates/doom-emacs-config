@@ -10,7 +10,7 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"claude-repld/internal/sourcescan"
+	"agent-repld/internal/sourcescan"
 )
 
 // TestLiveWorkSetEmpty covers the freeness half the watcher answers with: an

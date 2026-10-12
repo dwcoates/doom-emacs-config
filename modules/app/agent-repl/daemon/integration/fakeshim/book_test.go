@@ -5,7 +5,7 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"claude-repld/integration/harness"
+	"agent-repld/integration/harness"
 )
 
 // pushed files N prompts on the main agent's book.

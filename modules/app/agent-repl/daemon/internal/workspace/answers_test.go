@@ -9,9 +9,9 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/internal/health"
-	"claude-repld/internal/resolve/footer"
-	"claude-repld/internal/resolve/topbar"
+	"agent-repld/internal/health"
+	"agent-repld/internal/resolve/footer"
+	"agent-repld/internal/resolve/topbar"
 )
 
 // permissionAnswer composes one permission answer around a built decision.

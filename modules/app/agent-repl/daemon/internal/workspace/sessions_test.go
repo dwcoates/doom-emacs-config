@@ -1,7 +1,7 @@
 package workspace
 
 import (
-	"claude-repld/internal/clock"
+	"agent-repld/internal/clock"
 	"context"
 	"errors"
 	"fmt"
@@ -20,18 +20,18 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	"claude-repld/internal/account"
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/health"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/resolve/sidebar"
-	"claude-repld/internal/resolve/topbar"
-	"claude-repld/internal/sessionlock"
-	"claude-repld/internal/sessionwatcher"
-	"claude-repld/internal/shimclient"
-	"claude-repld/internal/shimsocket"
-	"claude-repld/internal/startup"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/account"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/health"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/resolve/sidebar"
+	"agent-repld/internal/resolve/topbar"
+	"agent-repld/internal/sessionlock"
+	"agent-repld/internal/sessionwatcher"
+	"agent-repld/internal/shimclient"
+	"agent-repld/internal/shimsocket"
+	"agent-repld/internal/startup"
+	"agent-repld/internal/wsm"
 )
 
 // fakeClient is a shimclient.Client whose StartSession answer the test

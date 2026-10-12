@@ -22,7 +22,7 @@ deploys, no restarts of any running system: land nothing until the owner says.
 ## The defect
 
 When a workspace comes up and its session record names a conversation whose
-transcript is not on disk, `claude-repld.internal.workspace.Fleet.classifySource()`
+transcript is not on disk, `agent-repld.internal.workspace.Fleet.classifySource()`
 (`daemon/internal/workspace/sessions.go`, the "the recorded conversation has no
 transcript on disk; the session comes up FRESH" branch) starts a FRESH session.
 On 2026-09-30 that lost the master workspace's whole conversation after a

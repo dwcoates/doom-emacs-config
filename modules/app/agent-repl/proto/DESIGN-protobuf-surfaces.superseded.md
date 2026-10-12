@@ -852,7 +852,7 @@ wanted and will not be reviewed. The absence of a migration is a DECISION, not
 an oversight to be helpfully corrected.
 
 **Sequencing.** The column and index are part of the implementation fan-out, not
-of this schema wave. They are inert until `claude-repld` can serve a scoped page.
+of this schema wave. They are inert until `agent-repld` can serve a scoped page.
 
 ## `frontend.v1.TypingDelta` is deleted; live typing is a `conversation.v1` record
 
@@ -863,7 +863,7 @@ straight to the daemon without touching the store.
 
 **Why it costs nothing today.** `TypingDelta` currently carries NO CONTENT. Its
 `delta` field is reserved with "NOTHING REPLACES IT", so the message is an
-envelope around nothing. `claude-repld.internal.frontend.translate.go:119` still
+envelope around nothing. `agent-repld.internal.frontend.translate.go:119` still
 sets `TypingDelta.Delta` — a field that does not exist — which is the daemon
 being written against a pre-reshape schema rather than a working path.
 

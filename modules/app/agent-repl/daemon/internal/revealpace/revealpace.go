@@ -30,8 +30,8 @@ import (
 	"sync"
 	"time"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/wsm"
 )
 
 // WindowSize is how many of the most recent block speeds a window holds.

@@ -9,10 +9,10 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/descriptorpb"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/holdfold"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/holdfold"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
 )
 
 // orderedHolds is the tray's display order: OLDEST FIRST, because the tray

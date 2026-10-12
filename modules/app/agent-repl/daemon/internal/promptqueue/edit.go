@@ -8,10 +8,10 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/replyquote"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/replyquote"
+	"agent-repld/internal/wsm"
 )
 
 // EDITING A HELD PROMPT (owner spec, 2026-09-23; EditHeldPrompt).

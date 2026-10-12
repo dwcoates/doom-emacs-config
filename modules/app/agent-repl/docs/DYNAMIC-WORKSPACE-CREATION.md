@@ -154,7 +154,7 @@ Two facts this design leans on:
 | `agent-shim/claude/shim-sidecar/` | reads the vendor's on-disk transcripts (`boottime_*.go`, `cycle.go`) | no; it makes no vendor calls at all |
 | `daemon/internal/account/` | `ConfigDirFor(dir)` routes a workspace path to its config root, `Read` reports the signed-in email, `FindTranscript`/`PortTranscript` locate and copy transcripts | supplies the account, not the call |
 
-Note a live gap: `buildJudge` (`daemon/cmd/claude-repld/graph.go:1000`) calls
+Note a live gap: `buildJudge` (`daemon/cmd/agent-repld/graph.go:1000`) calls
 `classifier.New(guard, "", promptsDir)` with an **empty** vendor binary, and
 `vendorJudge.Judge` refuses on `j.bin == ""`. In production today the
 classifier's headless run cannot fire. Whatever the naming call uses must

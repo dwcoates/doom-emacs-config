@@ -12,8 +12,8 @@ import (
 	"context"
 	"fmt"
 
-	"claude-repld/internal/envc"
-	"claude-repld/internal/headless"
+	"agent-repld/internal/envc"
+	"agent-repld/internal/headless"
 )
 
 // ExplicitInterrupts is the fast path: a prompt whose FIRST WORD is one of

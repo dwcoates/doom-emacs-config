@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"claude-repld/internal/shimclient"
+	"agent-repld/internal/shimclient"
 )
 
 // The bring-up on a daemon that has begun standing down. Measured at realtest

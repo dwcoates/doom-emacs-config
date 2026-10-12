@@ -44,8 +44,8 @@ import (
 	"sync"
 	"time"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
 )
 
 // The band and the measured cost model's seeds.

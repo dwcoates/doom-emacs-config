@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"claude-repld/internal/sourcescan"
+	"agent-repld/internal/sourcescan"
 )
 
 // daemonRoot is the daemon module's root, relative to this package.

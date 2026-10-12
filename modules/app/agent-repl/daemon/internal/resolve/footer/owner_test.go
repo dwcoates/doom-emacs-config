@@ -5,10 +5,10 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"claude-repld/internal/deployprogress"
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/feedid"
-	"claude-repld/internal/shimclient"
+	"agent-repld/internal/deployprogress"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/feedid"
+	"agent-repld/internal/shimclient"
 )
 
 // productionSubagent is the subagent whose own monitor and shell the owner saw

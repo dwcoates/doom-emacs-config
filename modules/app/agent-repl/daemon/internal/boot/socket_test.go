@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"claude-repld/internal/sessionlock"
-	"claude-repld/internal/shimsocket"
+	"agent-repld/internal/sessionlock"
+	"agent-repld/internal/shimsocket"
 )
 
 // TestAdoptsASurvivorTheLockDoesNotClaimButTheSocketReaches pins the run-9

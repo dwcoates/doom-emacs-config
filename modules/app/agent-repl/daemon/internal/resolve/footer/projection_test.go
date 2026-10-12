@@ -4,9 +4,9 @@ import (
 	"sync"
 	"testing"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/health"
-	"claude-repld/internal/ids"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/health"
+	"agent-repld/internal/ids"
 )
 
 // statusEdges records every workspace the status edge was told, in order.

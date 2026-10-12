@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"claude-repld/internal/tempdirs/tempdirstest"
+	"agent-repld/internal/tempdirs/tempdirstest"
 )
 
 // TestMain runs this package's tests under ONE exempt temporary root, so the

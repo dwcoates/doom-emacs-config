@@ -2,7 +2,7 @@
  * THE PERF AREA — `e2e/PERF-SPEC.md` §F, the rows the WEBAPP layer hosts.
  *
  * Five assertions, all against the real chain (real store, real sidecar, real
- * claude-repld, real shim over the fake SDK, the real webapp in jsdom):
+ * agent-repld, real shim over the fake SDK, the real webapp in jsdom):
  *
  *   perf-prompt-bubble    row 1b  — send click -> the prompt bubble is drawn
  *   perf-response-bubble  row 3a  — response frame -> the response bubble

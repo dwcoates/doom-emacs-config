@@ -38,9 +38,9 @@ import (
 
 	shimv1 "agentrepl/proto/shim/v1"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/headless"
-	"claude-repld/internal/ids"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/headless"
+	"agent-repld/internal/ids"
 )
 
 // Digester gathers one workspace's title digest from its shim.

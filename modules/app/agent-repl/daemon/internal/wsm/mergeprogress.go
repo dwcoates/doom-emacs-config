@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // mergeProgressDDL is the layout-28 addition: an ADMITTED merge's progress,

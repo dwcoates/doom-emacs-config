@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"math"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // revealGapsDDL is the layout-27 addition (docs/protobuf-design/

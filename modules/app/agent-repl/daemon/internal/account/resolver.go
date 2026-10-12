@@ -12,7 +12,7 @@ import (
 
 	"golang.org/x/text/unicode/norm"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // identityFile is the vendor CLI's own name for the file that records the

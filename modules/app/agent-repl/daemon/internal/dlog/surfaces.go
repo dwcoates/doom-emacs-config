@@ -10,8 +10,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"agent-repld/internal/dirpath"
 	"agentrepl/logging"
-	"claude-repld/internal/dirpath"
 )
 
 // scanInterval is how often the periodic cap scan runs. The daemon's own

@@ -20,13 +20,13 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/internal/deployprogress"
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/publish"
-	"claude-repld/internal/sessionwatcher"
-	"claude-repld/internal/vocab"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/deployprogress"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/publish"
+	"agent-repld/internal/sessionwatcher"
+	"agent-repld/internal/vocab"
+	"agent-repld/internal/wsm"
 )
 
 // MergeFacts is what the merge orchestrator tells the footer and the sidebar

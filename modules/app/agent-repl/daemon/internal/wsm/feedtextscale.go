@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"math"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // DefaultFeedTextScale is the feed text zoom multiplier when no preference has

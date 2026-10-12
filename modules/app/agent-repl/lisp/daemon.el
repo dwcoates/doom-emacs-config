@@ -144,7 +144,7 @@ The daemon serves these assets itself, on its own one origin; this
 constant exists for the build-artifact identity frontend.el reads, not
 for any flag — no webapp path rides the daemon's argv any more.")
 
-(defconst agent-repl--frontend-daemon-buffer "*claude-repld*"
+(defconst agent-repl--frontend-daemon-buffer "*agent-repld*"
   "Buffer the detacher's own stdout and stderr are captured into.
 
 THE DAEMON\='S OWN OUTPUT DOES NOT LAND HERE ANY MORE, and it must not: a
@@ -205,7 +205,7 @@ point — the frame paints before the stack build is even considered."
   :group 'agent-repl)
 
 (defcustom agent-repl-daemon-command
-  (list (expand-file-name "daemon/bin/claude-repld" agent-repl--frontend-root))
+  (list (expand-file-name "daemon/bin/agent-repld" agent-repl--frontend-root))
   "The BASE argv used to start the daemon: the binary and any overrides.
 The two account-root flags the daemon requires are appended by
 `agent-repl-daemon--argv\='; the state root travels in
@@ -467,7 +467,7 @@ ENVIRONMENT is a complete `process-environment' value, which is how
 `AGENT_REPL_STATE_DIR' is exported EXPLICITLY rather than inherited."
   (let ((process-environment environment))
     (make-process ;; ALLOW-EXTERNAL-BOUNDARY
-     :name "claude-repld"
+     :name "agent-repld"
      :buffer agent-repl--frontend-daemon-buffer
      :command argv
      :noquery t
@@ -511,7 +511,7 @@ caller a blank where the reason belongs."
 THE OTHER HALF OF THE DIAGNOSIS.  The run log is the daemon\='s own
 contract JSONL, so a daemon that died before its logger stood up writes
 nothing to it; whatever it did say went to stderr, and since the spawn is
-detached that stderr is a FILE rather than the `*claude-repld*' buffer.
+detached that stderr is a FILE rather than the `*agent-repld*' buffer.
 Answers a DESCRIPTION rather than nil for the same reason the run-log
 tail does: an absent or empty file is itself part of the answer."
   (let ((path (agent-repl-daemon--stdio-log-path)))
@@ -689,7 +689,7 @@ is worth starting at all.")
                           (at "webapp/tsconfig.json")
                           (at "webapp/vite.config.ts")))
        (list "daemon"
-             :artifact (at "daemon/bin/claude-repld")
+             :artifact (at "daemon/bin/agent-repld")
              :sources (list (at "daemon") (at "agent-shim/logging/go")
                             (at "proto/gen/go") (at "proto/helpers/go"))
              :match agent-repl-daemon--go-source-regexp)

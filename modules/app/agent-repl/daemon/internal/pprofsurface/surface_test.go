@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // socketPath is a unix socket path short enough for sockaddr_un. t.TempDir()

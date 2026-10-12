@@ -6,7 +6,7 @@ import (
 
 	workspacev1 "agentrepl/proto/workspace/v1"
 
-	"claude-repld/internal/publish"
+	"agent-repld/internal/publish"
 )
 
 func TestLatestBeforeAnyPublish(t *testing.T) {

@@ -13,8 +13,8 @@ import (
 	"strings"
 	"sync"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/outputtext"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/outputtext"
 )
 
 // The operations this package's records carry.

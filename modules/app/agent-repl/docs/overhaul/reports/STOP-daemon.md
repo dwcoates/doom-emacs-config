@@ -62,7 +62,7 @@ harness + fakeshim + fakegit + 14 suites.
    engine is FLIPPED BACK to the prescribed prelaunch-then-wait and the
    fakeshim locks at StartSession. daemon.md "Ruling relay: shim relaunch vs
    the workspace lock".
-3. `server.Deps.SessionFacts` is REQUIRED in `cmd/claude-repld/graph.go`
+3. `server.Deps.SessionFacts` is REQUIRED in `cmd/agent-repld/graph.go`
    (buildGraph refuses when unwired) and produced by
    `workspace.Fleet.HostSessionFacts` (host_session_id minted at session
    creation, persisted in wsm.Session; generation = fleet spawn count). The
@@ -112,13 +112,13 @@ harness + fakeshim + fakegit + 14 suites.
 Three tools, run by a sonnet-medium agent in its own worktree: `staticcheck`
 (U1000, both tag sets), `go test -coverprofile` across unit and integration,
 and `golang.org/x/tools/cmd/deadcode` whole-program reachability from
-`./cmd/claude-repld`.
+`./cmd/agent-repld`.
 
 METHODOLOGY FINDING, binding on anyone who repeats this: the coverprofile is
 NOT a dead-code oracle for this daemon. The integration tests exec the real
-`claude-repld`, the fakeshim and the fakegit as separate OS subprocesses, and
+`agent-repld`, the fakeshim and the fakegit as separate OS subprocesses, and
 `go test -coverprofile` only instruments in-process code, so nearly all of
-`cmd/claude-repld` and `internal/*` reads as a flat 0% no matter how
+`cmd/agent-repld` and `internal/*` reads as a flat 0% no matter how
 thoroughly the 534 integration tests drive it (only 7 functions in the whole
 `internal/` tree show a nonzero integration hit, all harness-called setup
 helpers). Whole-program reachability (`deadcode`) is the oracle that works
@@ -245,7 +245,7 @@ The dead-code pass's live-code/dead-code pairs, resolved:
   through `sessionlock.ProbeWithLog`: held/free at DEBUG, could-not-tell at
   ERROR, an underivable lock path at ERROR (it previously returned silently).
   No `ExpectWarnings` list changed.
-- `shimclient.WithLockProbe` is WIRED in `cmd/claude-repld/graph.go`. It was a
+- `shimclient.WithLockProbe` is WIRED in `cmd/agent-repld/graph.go`. It was a
   real defect: `witnessAdoptedDeath` returned early on a nil probe, so an
   adopted shim whose socket was gone was redialed forever, no `ExitInfo` was
   ever published and the workspace stayed wedged on a process that was not

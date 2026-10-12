@@ -7,8 +7,8 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/wsm"
 )
 
 func TestEncodeReasonRoundTripsTheOperatorNote(t *testing.T) {

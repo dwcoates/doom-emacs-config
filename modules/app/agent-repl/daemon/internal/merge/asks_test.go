@@ -7,8 +7,8 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/internal/ids"
-	"claude-repld/internal/promptqueue"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/promptqueue"
 )
 
 // permissionEdge is a consent ask's edge: open, or decided.

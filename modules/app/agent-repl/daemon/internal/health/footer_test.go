@@ -8,8 +8,8 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
-	"claude-repld/internal/ids"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
 )
 
 // TestFaultFooterCellPartitionsEverySessionKind is the partition itself, one

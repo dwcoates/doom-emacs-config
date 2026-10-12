@@ -26,11 +26,11 @@ import (
 	"path/filepath"
 	"time"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/intakegate"
-	"claude-repld/internal/prompthandler"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/intakegate"
+	"agent-repld/internal/prompthandler"
+	"agent-repld/internal/wsm"
 )
 
 // Ingress watches the held-prompt directory and ingests what it finds.

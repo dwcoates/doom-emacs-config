@@ -10,13 +10,13 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/headless"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/prompts"
-	"claude-repld/internal/resolve/feed"
-	"claude-repld/internal/titlesynth"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/headless"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/prompts"
+	"agent-repld/internal/resolve/feed"
+	"agent-repld/internal/titlesynth"
+	"agent-repld/internal/wsm"
 )
 
 // UngatedPermissionModes are the permission modes that DISABLE the consent

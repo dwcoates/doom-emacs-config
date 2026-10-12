@@ -7,13 +7,13 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/resolve/footer"
-	"claude-repld/internal/resolve/sidebar"
-	"claude-repld/internal/shimclient"
-	"claude-repld/internal/vocab"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/resolve/footer"
+	"agent-repld/internal/resolve/sidebar"
+	"agent-repld/internal/shimclient"
+	"agent-repld/internal/vocab"
+	"agent-repld/internal/wsm"
 )
 
 // theWS is the workspace every status test drives facts into.

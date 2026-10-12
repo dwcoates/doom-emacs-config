@@ -5,9 +5,9 @@ import (
 	"slices"
 	"testing"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
 )
 
 // sessionlessRecord reads a registered workspace's record for a direct call.

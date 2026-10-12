@@ -8,7 +8,7 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	"google.golang.org/protobuf/proto"
 
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/wsm"
 )
 
 func TestDaemonFaultFillsEveryTypedArm(t *testing.T) {

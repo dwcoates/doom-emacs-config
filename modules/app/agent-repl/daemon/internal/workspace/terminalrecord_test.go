@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
 )
 
 // retireFixture is one fake store plus the logger the retirement records into.

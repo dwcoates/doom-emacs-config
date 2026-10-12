@@ -393,11 +393,11 @@ When you wrap a new external binary `X`:
 
 5. Re-run the agent audit step (mandatory step 1 above) on the final diff before committing, including the new files you just wrote.
 
-## Daemon bounce policy (claude-repld)
+## Daemon bounce policy (agent-repld)
 
-Agents may bounce the resident claude-repld to deploy a rebuilt binary — clients are expected to reconnect — under these rules:
+Agents may bounce the resident agent-repld to deploy a rebuilt binary — clients are expected to reconnect — under these rules:
 
-- **ALWAYS bounce claude-repld after finalizing changes on master. Never ask whether to, never weigh whether it is worth it.** Committing is not deploying — the resident daemon keeps serving the binary it started with — so the bounce is part of finishing the work, not a separate decision. The mid-turn rule above gates WHEN it happens, never WHETHER.
+- **ALWAYS bounce agent-repld after finalizing changes on master. Never ask whether to, never weigh whether it is worth it.** Committing is not deploying — the resident daemon keeps serving the binary it started with — so the bounce is part of finishing the work, not a separate decision. The mid-turn rule above gates WHEN it happens, never WHETHER.
 
 - **The shim-ecosystem launchd services are the opposite: leave shim-store and shim-claude-sidecar in flight.** Bounce them only when the user asks. After landing an important change to either, ASK — otherwise the user never sees it. (The per-session claude shim needs no bounce; it respawns per session.)
 

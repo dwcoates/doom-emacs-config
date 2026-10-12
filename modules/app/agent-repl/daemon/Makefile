@@ -3,7 +3,7 @@
 # MEASURED BASIS (16-core host, `-count=3`, all green): the integration suite
 # runs 118.3s at -parallel 1, 32.5s at 4, 18.4s at 8, 13.8s at 12 and 13.3s at
 # 16. The curve is flat past 8 while the per-test load keeps climbing: every
-# test owns a real claude-repld process plus a fake shim, and at 16 that load
+# test owns a real agent-repld process plus a fake shim, and at 16 that load
 # pushed ordinary daemon steps past harness.DefaultTimeout in two tests that are
 # green at 8. Eight is the last value that buys most of the speed and none of
 # the oversubscription. Override it on the command line for a bigger host.

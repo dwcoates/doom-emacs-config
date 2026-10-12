@@ -13,13 +13,13 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/drain"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/sessionwatcher"
-	"claude-repld/internal/shimclient"
-	"claude-repld/internal/shimsocket"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/drain"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/sessionwatcher"
+	"agent-repld/internal/shimclient"
+	"agent-repld/internal/shimsocket"
+	"agent-repld/internal/wsm"
 	"fmt"
 )
 

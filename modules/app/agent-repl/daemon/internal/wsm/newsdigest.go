@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // newsDigestDDL is the layout-19 addition: the daily news digest's durable

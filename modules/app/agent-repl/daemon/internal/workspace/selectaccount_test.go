@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"claude-repld/internal/account"
-	"claude-repld/internal/rollout"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/account"
+	"agent-repld/internal/rollout"
+	"agent-repld/internal/wsm"
 )
 
 // twoRoots is the fixture arrangement the account cell's dropdown exists for:

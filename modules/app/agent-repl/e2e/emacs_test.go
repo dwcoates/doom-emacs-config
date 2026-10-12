@@ -18,7 +18,7 @@ import (
 	"testing"
 	"time"
 
-	"claude-repld/integration/harness"
+	"agent-repld/integration/harness"
 )
 
 // THE EMACS CLIENT LAYER.
@@ -137,7 +137,7 @@ const evalBound = 2600 * time.Millisecond
 // that exchange down with it — so the request the daemon never received could not
 // possibly have made it exit, and the reaper found the whole tree standing with
 // nothing to blame. Measured over one 24-scenario run: 17 surviving
-// `claude-repld` processes, 24 shims and 48 `shim-lock` holders.
+// `agent-repld` processes, 24 shims and 48 `shim-lock` holders.
 //
 // So the form BLOCKS on the command's own on-done callback and reports what it
 // carried. It waits through `accept-process-output`, never `sleep-for`, because
@@ -225,7 +225,7 @@ const heartbeatInterval = 250 * time.Millisecond
 const emacsBootBound = 500 * time.Millisecond
 
 // daemonLinkBound is how long EnsureDaemon may take: the launcher spawning
-// `claude-repld`, the daemon binding its address, and Emacs dialling it.
+// `agent-repld`, the daemon binding its address, and Emacs dialling it.
 //
 // It used to be emacsBootBound, which was wrong in kind rather than in size:
 // one name covered two unrelated events, so neither could ever be measured
@@ -441,7 +441,7 @@ type DoomReady struct {
 
 // EmacsOpts configures one Emacs.
 type EmacsOpts struct {
-	// DaemonBinary is the `claude-repld` the launcher will spawn. It is the
+	// DaemonBinary is the `agent-repld` the launcher will spawn. It is the
 	// binary the Go side already built; Emacs composes the argv around it.
 	DaemonBinary string
 	// DaemonArgs are stated on `agent-repl-daemon-command` after the binary,

@@ -10,12 +10,12 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/feedid"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/promptqueue"
-	"claude-repld/internal/resolve/feed"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/feedid"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/promptqueue"
+	"agent-repld/internal/resolve/feed"
+	"agent-repld/internal/wsm"
 )
 
 // This file holds the prompt handler's fakes. Nothing here reaches a database,

@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"claude-repld/internal/envc"
+	"agent-repld/internal/envc"
 )
 
 // permissiveGuard permits the vendor call, which is what every subject

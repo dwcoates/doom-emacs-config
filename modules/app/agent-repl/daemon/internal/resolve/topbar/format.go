@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"claude-repld/internal/figures"
+	"agent-repld/internal/figures"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 

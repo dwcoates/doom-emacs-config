@@ -3,7 +3,7 @@
 // Every test here drives a REAL daemon, a REAL shim-store, a REAL sidecar,
 // and the REAL shim (its `--fake` scripted vendor), per world_test.go and
 // main_test.go. Git is the harness's scripted fake-git world
-// (claude-repld/integration/harness.NewRepo) — never a real git process —
+// (agent-repld/integration/harness.NewRepo) — never a real git process —
 // exactly like every other daemon/integration test; only the daemon, store,
 // sidecar, and shim are real. No test seeds the store with hand-written
 // rows: #47 and #48 use driveScenarioToCompletion (world_test.go) to drive a
@@ -81,7 +81,7 @@ import (
 	"connectrpc.com/connect"
 	"golang.org/x/net/http2"
 
-	"claude-repld/integration/harness"
+	"agent-repld/integration/harness"
 )
 
 // ===========================================================================
@@ -480,7 +480,7 @@ func adAwaitAddrFileChange(t *testing.T, d *harness.Daemon, want string) {
 // own checkout, the same one daemon/integration/drain_rollout_test.go's
 // drainTriggerDeploy commits. What the landing's deploy changes is the staged
 // build's, never the path's.
-const adSelfMergeTriggerPath = "modules/app/agent-repl/daemon/cmd/claude-repld/main.go"
+const adSelfMergeTriggerPath = "modules/app/agent-repl/daemon/cmd/agent-repld/main.go"
 
 func TestHandoverTransfersAtFreeness(t *testing.T) {
 	t.Parallel()

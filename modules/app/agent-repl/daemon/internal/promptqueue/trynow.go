@@ -6,8 +6,8 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/wsm"
 )
 
 // A SUBMISSION WHILE PROMPTS ARE HELD AND NOTHING RUNS IS THE USER'S "TRY NOW"

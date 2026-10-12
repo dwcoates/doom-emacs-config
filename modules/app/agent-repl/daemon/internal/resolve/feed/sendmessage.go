@@ -4,8 +4,8 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/feedid"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/feedid"
 )
 
 // ①c THE OUTGOING SEND. A SendMessage is a prompt one agent addressed to

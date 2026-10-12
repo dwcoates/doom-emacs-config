@@ -18,8 +18,8 @@ import (
 	"strings"
 	"syscall"
 
-	"claude-repld/internal/dirpath"
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dirpath"
+	"agent-repld/internal/dlog"
 )
 
 // HolderBinary is the name of the binary the shim spawns to hold each kernel

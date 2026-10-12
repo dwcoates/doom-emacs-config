@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 func TestAcquireLeaseRoundTripsThePolicyMetadata(t *testing.T) {

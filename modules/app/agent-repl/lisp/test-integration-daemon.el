@@ -286,7 +286,7 @@ it."
 
 (ert-deftest agent-repl-itest-daemon-absent-addr-starts-the-daemon-command ()
   "After a successful build, cold start runs the daemon command.
-`daemon/bin/claude-repld' with NO required argv (E3): the state root
+`daemon/bin/agent-repld' with NO required argv (E3): the state root
 travels in the environment, never on the command line."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
@@ -490,9 +490,9 @@ spawn without the roots exits 2 before the daemon ever serves."
   ;; file lives in the same `lisp/' directory as daemon.el, so the module
   ;; root is derived the same way daemon.el derives it, without depending
   ;; on the harness's own notion of that path.
-  (let* ((expected (expand-file-name "daemon/bin/claude-repld"
+  (let* ((expected (expand-file-name "daemon/bin/agent-repld"
                                      agent-repl-itest-daemon--module-root)))
-    ;; Assert: "the default the module's `daemon/bin/claude-repld', no argv".
+    ;; Assert: "the default the module's `daemon/bin/agent-repld', no argv".
     (should (equal (default-value 'agent-repl-daemon-command) (list expected))))
   ;; Arrange: a cold start whose start stub records its own argument count.
   (agent-repl-itest--with-fake-daemon daemon

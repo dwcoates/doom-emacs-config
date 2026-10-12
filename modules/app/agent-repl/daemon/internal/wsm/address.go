@@ -7,7 +7,7 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"claude-repld/internal/feedid"
+	"agent-repld/internal/feedid"
 )
 
 // Feed addresses are persisted as their STRUCTURE, not as an encoded FeedId.

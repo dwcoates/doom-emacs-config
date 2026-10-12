@@ -11,7 +11,7 @@ import { viteCacheDir } from "./vite-cache";
  * The third and last vitest project in this package, and the only one that
  * does not start its own server. The Go cross-system e2e world
  * (`e2e/webapplayer_e2e_test.go`) owns the whole quartet's lifecycle — real
- * store, real sidecar, real `claude-repld`, real shim over the fake SDK — and
+ * store, real sidecar, real `agent-repld`, real shim over the fake SDK — and
  * launches this project as a child process with the daemon's loopback address
  * in the environment. See `e2e/WEBAPP-LAYER-SPEC.md` for why lifecycle lives
  * there and not here (there is exactly ONE bring-up definition, and it is

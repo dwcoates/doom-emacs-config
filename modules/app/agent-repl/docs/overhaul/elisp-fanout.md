@@ -911,7 +911,7 @@ are deleted by the verbs agent once verbs.el replaces them.
   `elisp.daemon.stale-addr`, treated as absent. Absent → build via
   `agent-repl-daemon-build-script` (bin/build-frontend.sh, its own
   build-if-stale) → start `agent-repl-daemon-command` (default the module's
-  `daemon/bin/claude-repld`, no argv) with `AGENT_REPL_STATE_DIR` exported
+  `daemon/bin/agent-repld`, no argv) with `AGENT_REPL_STATE_DIR` exported
   explicitly → wait for daemon.addr up to `agent-repl-daemon-boot-timeout-
   seconds` (30) polling with a timer, no sleeps → `agent-repl-link-connect`.
   Build failure → `*agent-repl-build-frontend*` shown, WARNING, `message`,
@@ -1135,7 +1135,7 @@ names; each brief owns every file listed for its constituent rows.
 - E1 RESOLVED: SubmitPromptRequest.origin landed, REQUIRED.
 - E2 RESOLVED: the trimmed vocabulary landed (cherry-pick of 24740ae4f);
   §8 keys from it.
-- E3 RULED as the default: `daemon/bin/claude-repld`, no required argv,
+- E3 RULED as the default: `daemon/bin/agent-repld`, no required argv,
   state root via env; adopt any answering daemon; never kill one.
 - E4 CONFIRMED: permission.el dies; the notification policy is the whole
   reaction.

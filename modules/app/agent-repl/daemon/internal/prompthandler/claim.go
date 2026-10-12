@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync"
 
-	"claude-repld/internal/ids"
+	"agent-repld/internal/ids"
 )
 
 // A DUPLICATE IS ONLY EVER A SUBMISSION THE QUEUE ACCEPTED.

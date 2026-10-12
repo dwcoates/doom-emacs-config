@@ -8,10 +8,10 @@ import (
 	workspacev1 "agentrepl/proto/workspace/v1"
 	"agentrepl/protohelpers/rosterwalk"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/repodivergence"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/repodivergence"
+	"agent-repld/internal/wsm"
 )
 
 // MergedSectionLabel is the recently-merged section's heading. It has one

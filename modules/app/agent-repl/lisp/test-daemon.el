@@ -325,7 +325,7 @@ a scenario names which pids are alive rather than depending on the host.")
                    (list agent-repl-daemon-build-script)))))
 
 (ert-deftest agent-repl-test-daemon-command-defaults-to-the-module-binary ()
-  "The base argv defaults to the module's own `daemon/bin/claude-repld'.
+  "The base argv defaults to the module's own `daemon/bin/agent-repld'.
 A wrong default path would point cold start at nothing.  The account-root
 flags are NOT part of it: `agent-repl-daemon--argv' appends them, so the
 binary stays overridable on its own."
@@ -333,7 +333,7 @@ binary stays overridable on its own."
   (let ((default (default-value 'agent-repl-daemon-command)))
     ;; Assert
     (should (equal default
-                   (list (expand-file-name "daemon/bin/claude-repld"
+                   (list (expand-file-name "daemon/bin/agent-repld"
                                            agent-repl--frontend-root))))))
 
 (ert-deftest agent-repl-test-daemon-argv-carries-the-default-config-dir ()
@@ -341,7 +341,7 @@ binary stays overridable on its own."
 The daemon's account resolver refuses to build without it and the process
 exits 2 before it serves, so an argv missing it never boots at all."
   ;; Arrange
-  (let ((agent-repl-daemon-command '("/bin/claude-repld"))
+  (let ((agent-repl-daemon-command '("/bin/agent-repld"))
         (agent-repl-daemon-default-config-dir "~/.claude")
         (agent-repl-daemon-multi-repo-config-dir "~/.claude-chesscom"))
     ;; Act
@@ -355,7 +355,7 @@ exits 2 before it serves, so an argv missing it never boots at all."
 The resolver requires BOTH roots: the account is determined by the
 workspace's path, so every path must have an answer."
   ;; Arrange
-  (let ((agent-repl-daemon-command '("/bin/claude-repld"))
+  (let ((agent-repl-daemon-command '("/bin/agent-repld"))
         (agent-repl-daemon-default-config-dir "~/.claude")
         (agent-repl-daemon-multi-repo-config-dir "~/.claude-chesscom"))
     ;; Act
@@ -367,13 +367,13 @@ workspace's path, so every path must have an answer."
 (ert-deftest agent-repl-test-daemon-argv-keeps-the-binary-first ()
   "The base argv leads: the flags are APPENDED, never interleaved."
   ;; Arrange
-  (let ((agent-repl-daemon-command '("/bin/claude-repld"))
+  (let ((agent-repl-daemon-command '("/bin/agent-repld"))
         (agent-repl-daemon-default-config-dir "/a")
         (agent-repl-daemon-multi-repo-config-dir "/b"))
     ;; Act
     (let ((argv (agent-repl-daemon--argv)))
       ;; Assert
-      (should (equal (car argv) "/bin/claude-repld")))))
+      (should (equal (car argv) "/bin/agent-repld")))))
 
 (ert-deftest agent-repl-test-daemon-default-config-dir-defaults-to-claude ()
   "The default account root is the vendor's own `~/.claude'."
@@ -2483,7 +2483,7 @@ free, and the stale address it left behind is what the boot overwrites."
 A plain `make-process' child takes Emacs's exit-time SIGHUP and dies with
 the editor, which is what made the adopt-on-restart path unreachable."
   ;; Arrange
-  (let ((agent-repl-daemon-command '("/bin/claude-repld"))
+  (let ((agent-repl-daemon-command '("/bin/agent-repld"))
         (agent-repl-daemon-default-config-dir "/a")
         (agent-repl-daemon-multi-repo-config-dir "/b"))
     ;; Act
@@ -2496,7 +2496,7 @@ the editor, which is what made the adopt-on-restart path unreachable."
 An ignored disposition survives `exec', and the daemon asks the kernel
 for SIGINT/SIGTERM/SIGQUIT and no others, so it stays ignored."
   ;; Arrange
-  (let ((agent-repl-daemon-command '("/bin/claude-repld"))
+  (let ((agent-repl-daemon-command '("/bin/agent-repld"))
         (agent-repl-daemon-default-config-dir "/a")
         (agent-repl-daemon-multi-repo-config-dir "/b"))
     ;; Act
@@ -2509,7 +2509,7 @@ for SIGINT/SIGTERM/SIGQUIT and no others, so it stays ignored."
 Without the exec the process object would name a shell that exits at
 once, and the boot wait would call every cold start a dead daemon."
   ;; Arrange
-  (let ((agent-repl-daemon-command '("/bin/claude-repld"))
+  (let ((agent-repl-daemon-command '("/bin/agent-repld"))
         (agent-repl-daemon-default-config-dir "/a")
         (agent-repl-daemon-multi-repo-config-dir "/b"))
     ;; Act
@@ -2522,7 +2522,7 @@ once, and the boot wait would call every cold start a dead daemon."
 It is what the daemon reads as its `argv' after the exec, so every flag
 the account resolver requires has to survive the wrapping."
   ;; Arrange
-  (let ((agent-repl-daemon-command '("/bin/claude-repld"))
+  (let ((agent-repl-daemon-command '("/bin/agent-repld"))
         (agent-repl-daemon-default-config-dir "/a")
         (agent-repl-daemon-multi-repo-config-dir "/b"))
     ;; Act
@@ -2537,7 +2537,7 @@ Left on Emacs's pipe, the daemon's first line after the editor exits
 would meet a closed read end and take it down with SIGPIPE — a detach
 that only held until the daemon next spoke."
   ;; Arrange
-  (let ((agent-repl-daemon-command '("/bin/claude-repld"))
+  (let ((agent-repl-daemon-command '("/bin/agent-repld"))
         (agent-repl-daemon-default-config-dir "/a")
         (agent-repl-daemon-multi-repo-config-dir "/b"))
     ;; Act
@@ -2549,7 +2549,7 @@ that only held until the daemon next spoke."
   "A first-ever cold start has no `logs/' yet, and a redirection into a
 missing directory would fail the spawn outright."
   ;; Arrange
-  (let ((agent-repl-daemon-command '("/bin/claude-repld"))
+  (let ((agent-repl-daemon-command '("/bin/agent-repld"))
         (agent-repl-daemon-default-config-dir "/a")
         (agent-repl-daemon-multi-repo-config-dir "/b"))
     ;; Act

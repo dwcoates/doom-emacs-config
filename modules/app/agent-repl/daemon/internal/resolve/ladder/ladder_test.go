@@ -7,7 +7,7 @@ import (
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/internal/vocab"
+	"agent-repld/internal/vocab"
 )
 
 // probeOf answers every claim in claims and declines every other one, drawing

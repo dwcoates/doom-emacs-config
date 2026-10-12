@@ -11,10 +11,10 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
-	"claude-repld/internal/bounce"
-	"claude-repld/internal/deploy"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/rollout"
+	"agent-repld/internal/bounce"
+	"agent-repld/internal/deploy"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/rollout"
 )
 
 func TestDeployPassesTheForceThrough(t *testing.T) {

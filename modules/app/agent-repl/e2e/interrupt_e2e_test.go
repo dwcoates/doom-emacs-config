@@ -70,7 +70,7 @@ import (
 
 	"connectrpc.com/connect"
 
-	"claude-repld/integration/harness"
+	"agent-repld/integration/harness"
 )
 
 // TestInterruptAfterTextDelta drives the `interrupt` golden (#18): a real
@@ -81,7 +81,7 @@ import (
 func TestInterruptAfterTextDelta(t *testing.T) {
 	t.Parallel()
 	// Arrange: a world with a scripted-fake-git workspace (a later user
-	// ruling reversed real git: only claude-repld, the shim, shim-store, and
+	// ruling reversed real git: only agent-repld, the shim, shim-store, and
 	// shim-sidecar run for real), and a feed watch opened BEFORE the prompt
 	// is submitted, so no push in between can be missed.
 	w := NewWorld(t, WorldOpts{})

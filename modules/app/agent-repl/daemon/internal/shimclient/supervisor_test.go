@@ -14,9 +14,9 @@ import (
 	"testing"
 	"time"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/envc"
-	"claude-repld/internal/ids"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/envc"
+	"agent-repld/internal/ids"
 )
 
 // TestSpawnArgvIsTheContractVerbatim asserts the shim's argv is exactly the

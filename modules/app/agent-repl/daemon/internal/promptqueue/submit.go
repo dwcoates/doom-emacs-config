@@ -7,11 +7,11 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/drain"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/resolve/footer"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/drain"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/resolve/footer"
+	"agent-repld/internal/wsm"
 )
 
 // ArmMerging is the refusal arm a submission under a merge lease answers with.

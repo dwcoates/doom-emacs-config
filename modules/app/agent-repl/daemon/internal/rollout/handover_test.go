@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"claude-repld/internal/bounce"
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/bounce"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
 )
 
 // runHandover starts an unforced HandOver, waits for every workspace's

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // bareSession builds a session with no child attached. Every method under test

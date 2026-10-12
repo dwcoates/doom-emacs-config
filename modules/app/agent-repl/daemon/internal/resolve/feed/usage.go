@@ -4,9 +4,9 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/figures"
-	"claude-repld/internal/freshinput"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/figures"
+	"agent-repld/internal/freshinput"
 )
 
 // THE FEED'S TOKEN FIGURES ARE FRESH INPUT, ONE AGENT AT A TIME.

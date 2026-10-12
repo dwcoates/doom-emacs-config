@@ -14,7 +14,7 @@ import (
 	"errors"
 	"sync"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // opFocus is the operation Emacs's focus records carry.

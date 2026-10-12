@@ -10,7 +10,7 @@
  * The chain here is entirely real:
  *
  *   log.error() in the page -> ForwardingLogger -> ClientLog over the real transport
- *     -> real claude-repld -> dlog -> <workspace>/.claude/emacs/webapp.log
+ *     -> real agent-repld -> dlog -> <workspace>/.claude/emacs/webapp.log
  *
  * This file therefore mounts with production's own sink
  * (`bootLayer({ clientLog: true })`, the per-file opt-in whose cost is

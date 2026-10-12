@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"errors"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // ClaimServing records this daemon instance as the workspace's serving owner —

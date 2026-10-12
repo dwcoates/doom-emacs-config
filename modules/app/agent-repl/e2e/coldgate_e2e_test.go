@@ -142,7 +142,7 @@ import (
 
 	"connectrpc.com/connect"
 
-	"claude-repld/integration/harness"
+	"agent-repld/integration/harness"
 )
 
 // coldGateChainTimeout bounds every wait in this file. Reused verbatim from

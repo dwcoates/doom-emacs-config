@@ -3,8 +3,8 @@ package sidebar
 import (
 	"time"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/wsm"
 )
 
 // MergedWindow is how far back the Recently Merged section reaches: a week's

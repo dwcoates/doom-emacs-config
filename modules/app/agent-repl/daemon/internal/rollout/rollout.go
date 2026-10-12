@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
 )
 
 const opRollOut = "daemon.rollout.roll_out"

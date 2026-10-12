@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/promptqueue"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/promptqueue"
 )
 
 // The session-act kinds, as the queue's one delivery path names them. They

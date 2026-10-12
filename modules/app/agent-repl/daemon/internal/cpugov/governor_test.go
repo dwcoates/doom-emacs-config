@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // fakeSampler answers scripted ticks or a failure.

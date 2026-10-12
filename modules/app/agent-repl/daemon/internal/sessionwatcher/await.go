@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
 )
 
 // ErrWatcherClosed is what a wait answers when the watcher was torn down under

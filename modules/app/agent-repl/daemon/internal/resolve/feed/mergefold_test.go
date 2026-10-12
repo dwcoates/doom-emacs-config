@@ -6,7 +6,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 	"google.golang.org/protobuf/proto"
 
-	"claude-repld/internal/feedid"
+	"agent-repld/internal/feedid"
 )
 
 // A MERGE BUBBLE IS OPEN BY DEFAULT AND NEVER COLLAPSES AUTOMATICALLY, save a

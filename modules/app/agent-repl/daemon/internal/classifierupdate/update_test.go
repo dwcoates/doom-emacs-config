@@ -8,10 +8,10 @@ import (
 	"strings"
 	"testing"
 
-	"claude-repld/internal/classifier"
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/headless"
-	"claude-repld/internal/prompts"
+	"agent-repld/internal/classifier"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/headless"
+	"agent-repld/internal/prompts"
 )
 
 // repoPromptsDir is the checked-in prompts directory: the rewrite brief every

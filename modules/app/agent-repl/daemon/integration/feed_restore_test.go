@@ -11,7 +11,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/integration/harness"
+	"agent-repld/integration/harness"
 )
 
 // FEED RESTORATION AFTER A RESTART (owner principle, 2026-10-02: the vendor

@@ -19,8 +19,8 @@ import (
 	"fmt"
 	"time"
 
-	"claude-repld/internal/clock"
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/clock"
+	"agent-repld/internal/dlog"
 )
 
 const (

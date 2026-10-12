@@ -8,11 +8,11 @@ import (
 	"os"
 	"path/filepath"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/resolve/footer"
-	"claude-repld/internal/shimclient"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/resolve/footer"
+	"agent-repld/internal/shimclient"
+	"agent-repld/internal/wsm"
 )
 
 // Open brings a registered workspace's session up. MOUNTING A PARKED

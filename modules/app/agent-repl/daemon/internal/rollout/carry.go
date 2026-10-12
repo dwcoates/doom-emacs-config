@@ -14,10 +14,10 @@ import (
 
 	"google.golang.org/protobuf/encoding/protojson"
 
-	"claude-repld/internal/atomicfile"
-	"claude-repld/internal/bounce"
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
+	"agent-repld/internal/atomicfile"
+	"agent-repld/internal/bounce"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
 )
 
 // opCarry is the operation the handover carry records under.

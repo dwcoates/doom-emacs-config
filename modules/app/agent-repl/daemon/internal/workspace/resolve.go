@@ -9,10 +9,10 @@ import (
 
 	workspacev1 "agentrepl/proto/workspace/v1"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/resolve/sidebar"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/resolve/sidebar"
+	"agent-repld/internal/wsm"
 )
 
 // Resolve turns a client's echoed WorkspaceRef into a workspace. It keys on

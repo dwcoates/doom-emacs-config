@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
 )
 
 // t0 is the instant every test's first tick lands at.

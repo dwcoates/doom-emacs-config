@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // widgetBackend builds a backend over r with no step listener interest.

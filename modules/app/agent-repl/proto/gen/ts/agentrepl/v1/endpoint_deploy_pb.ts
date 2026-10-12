@@ -2,7 +2,7 @@
 // service. DAEMON ADMIN section.
 //
 // THE DAEMON OWNS DEPLOYS (owner design, 2026-09-23). There is no deploy
-// script. A caller asks — the `claude-repld deploy` CLI verb, Emacs's
+// script. A caller asks — the `agent-repld deploy` CLI verb, Emacs's
 // `agent-repl-deploy`, or the daemon itself once per COMPLETE change landing on
 // master through its own merge (one landing, one deploy, never one per
 // commit) — and the daemon does the rest:

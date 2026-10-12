@@ -14,10 +14,10 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	"claude-repld/internal/clock/clocktest"
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/headless"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/clock/clocktest"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/headless"
+	"agent-repld/internal/wsm"
 )
 
 // repoPromptsDir is the checked-in prompts directory: the brief the

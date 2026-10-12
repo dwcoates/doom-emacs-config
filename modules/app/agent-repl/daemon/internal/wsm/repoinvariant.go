@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // A WORKSPACE WHOSE `repo_id` NAMES NO REPOSITORY ROW IS AN INVARIANT

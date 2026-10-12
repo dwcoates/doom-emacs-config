@@ -8,8 +8,8 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/login"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/login"
 )
 
 // The login flow and the two link verbs. The login pty's output is a SERVER

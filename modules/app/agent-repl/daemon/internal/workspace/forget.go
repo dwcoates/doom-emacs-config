@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
 )
 
 // Forget removes a workspace from the REGISTRY and touches nothing else. It is

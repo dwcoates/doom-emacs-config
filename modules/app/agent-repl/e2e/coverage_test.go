@@ -23,7 +23,7 @@ package e2e
 import (
 	"testing"
 
-	"claude-repld/integration/harness"
+	"agent-repld/integration/harness"
 )
 
 // coverageEnv answers the GOCOVERDIR assignment one spawned Go binary must

@@ -11,9 +11,9 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
 
-	"claude-repld/internal/ids"
-	"claude-repld/internal/shimclient"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/shimclient"
+	"agent-repld/internal/wsm"
 )
 
 // TestRouteActivityGoesToTheFourSinksThatDrawFromIt covers the ordinary

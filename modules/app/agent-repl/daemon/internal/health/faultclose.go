@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
 )
 
 // THE ONE DOOR A STANDING FAULT LEAVES BY. Every recovery edge closes through

@@ -6,13 +6,13 @@ import (
 	"strings"
 	"time"
 
+	"agent-repld/internal/apiresponses"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/figures"
+	"agent-repld/internal/freshinput"
+	"agent-repld/internal/ids"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
-	"claude-repld/internal/apiresponses"
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/figures"
-	"claude-repld/internal/freshinput"
-	"claude-repld/internal/ids"
 )
 
 // idleFigure is the cell's figure with no turn in flight. The daemon states it

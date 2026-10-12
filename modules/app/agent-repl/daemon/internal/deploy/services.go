@@ -11,8 +11,8 @@ import (
 
 	"agentrepl/logging/buildreport"
 
-	"claude-repld/internal/buildid"
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/buildid"
+	"agent-repld/internal/dlog"
 )
 
 // The launchd labels of the two services a deploy restarts.

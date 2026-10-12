@@ -7,9 +7,9 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"claude-repld/internal/classifier"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/classifier"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
 )
 
 // queuedPrompts parks each TURN with its TEXT, in order, behind a running

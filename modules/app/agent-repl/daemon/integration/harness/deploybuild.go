@@ -11,9 +11,9 @@ import (
 
 	"agentrepl/logging/buildreport"
 
-	"claude-repld/internal/buildid"
-	"claude-repld/internal/shellword"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/buildid"
+	"agent-repld/internal/shellword"
+	"agent-repld/internal/wsm"
 )
 
 // THE DEPLOY'S FAKE BUILD.
@@ -132,16 +132,16 @@ func NewFakeDeployBuilder(t *testing.T, dir string, src DeploySources) *DeployBu
   cp ` + shellword.Quote(src.ShimMain) + ` "$out/agent-shim/claude/shim/dist/main.js"
   cp -R ` + shellword.Quote(src.WebappDist) + `/. "$out/webapp/dist/"
   if [ "$mode" = "` + string(DeployStaleDaemon) + `" ]; then
-    printf '#!/bin/sh\n# a harness daemon build\necho ` + strconv.Itoa(wsm.LayoutVersion) + `\n' > "$out/daemon/bin/claude-repld"
-    chmod +x "$out/daemon/bin/claude-repld"
+    printf '#!/bin/sh\n# a harness daemon build\necho ` + strconv.Itoa(wsm.LayoutVersion) + `\n' > "$out/daemon/bin/agent-repld"
+    chmod +x "$out/daemon/bin/agent-repld"
   elif [ "$mode" = "` + string(DeployStaleDaemonNewLayout) + `" ]; then
-    printf '#!/bin/sh\n# a harness daemon build on the next layout, by a breaking step\ncase "$1" in -migration-kind-from=*) echo breaking ;; *) echo ` + strconv.Itoa(wsm.LayoutVersion+1) + ` ;; esac\n' > "$out/daemon/bin/claude-repld"
-    chmod +x "$out/daemon/bin/claude-repld"
+    printf '#!/bin/sh\n# a harness daemon build on the next layout, by a breaking step\ncase "$1" in -migration-kind-from=*) echo breaking ;; *) echo ` + strconv.Itoa(wsm.LayoutVersion+1) + ` ;; esac\n' > "$out/daemon/bin/agent-repld"
+    chmod +x "$out/daemon/bin/agent-repld"
   elif [ "$mode" = "` + string(DeployStaleDaemonAdditiveLayout) + `" ]; then
-    printf '#!/bin/sh\n# a harness daemon build on the next layout, by additive steps\ncase "$1" in -migration-kind-from=*) echo additive ;; *) echo ` + strconv.Itoa(wsm.LayoutVersion+1) + ` ;; esac\n' > "$out/daemon/bin/claude-repld"
-    chmod +x "$out/daemon/bin/claude-repld"
+    printf '#!/bin/sh\n# a harness daemon build on the next layout, by additive steps\ncase "$1" in -migration-kind-from=*) echo additive ;; *) echo ` + strconv.Itoa(wsm.LayoutVersion+1) + ` ;; esac\n' > "$out/daemon/bin/agent-repld"
+    chmod +x "$out/daemon/bin/agent-repld"
   else
-    cp ` + shellword.Quote(daemonBinary) + ` "$out/daemon/bin/claude-repld"
+    cp ` + shellword.Quote(daemonBinary) + ` "$out/daemon/bin/agent-repld"
   fi
   if [ "$mode" = "` + string(DeployStaleWebapp) + `" ]; then
     printf '<script src="/assets/index-` + stagedWebappEntry + `.js"></script>' > "$out/webapp/dist/index.html"

@@ -42,7 +42,7 @@ exit "\${!code_var:-0}"
 EOF
     chmod +x "$TMP/$name"
 }
-for impl in build byte-compile bounce doctor readiness logs claude-repld open contract-check; do
+for impl in build byte-compile bounce doctor readiness logs agent-repld open contract-check; do
     make_impl "$impl"
 done
 
@@ -80,7 +80,7 @@ export AGENT_REPL_RUNTIME_DOCTOR="$TMP/doctor"
 export AGENT_REPL_RUNTIME_READINESS="$TMP/readiness"
 export AGENT_REPL_RUNTIME_CONTRACT_CHECK="$TMP/contract-check"
 export AGENT_REPL_RUNTIME_LOGS="$TMP/logs"
-export AGENT_REPL_RUNTIME_CLAUDE_REPLD="$TMP/claude-repld"
+export AGENT_REPL_RUNTIME_AGENT_REPLD="$TMP/agent-repld"
 export AGENT_REPL_RUNTIME_EMACSCLIENT="$TMP/emacsclient"
 export AGENT_REPL_RUNTIME_OPEN="$TMP/open"
 export AGENT_REPL_RUNTIME_EMACS_APP="/Applications/Emacs.app"
@@ -104,7 +104,7 @@ expect_transcript() {
 
 echo "agent-repl-runtime: pass-through verbs"
 for pair in "build:build --force daemon" "byte-compile:byte-compile" "doctor:doctor --json" \
-            "readiness:readiness" "logs:logs --tally" "call:claude-repld call DaemonHealth"; do
+            "readiness:readiness" "logs:logs --tally" "call:agent-repld call DaemonHealth"; do
     reset
     verb="${pair%%:*}"
     want="${pair#*:}"
@@ -239,7 +239,7 @@ open -a /Applications/Emacs.app"
 echo "agent-repl-runtime: deploy and hot-reload"
 reset
 "$RUNTIME" deploy -force >/dev/null 2>&1
-expect_transcript "deploy dispatches to the daemon's deploy verb" "claude-repld deploy -force"
+expect_transcript "deploy dispatches to the daemon's deploy verb" "agent-repld deploy -force"
 
 reset
 mkdir -p "$TMP/lisp"
@@ -268,7 +268,7 @@ reset
 if "$RUNTIME" no-such-verb >/dev/null 2>&1; then fail "an unknown verb is refused"; else pass "an unknown verb is refused"; fi
 
 reset
-if AGENT_REPL_RUNTIME_CLAUDE_REPLD="$TMP/missing" "$RUNTIME" call DaemonHealth >/dev/null 2>&1; then
+if AGENT_REPL_RUNTIME_AGENT_REPLD="$TMP/missing" "$RUNTIME" call DaemonHealth >/dev/null 2>&1; then
     fail "call without a daemon binary is refused"
 else
     pass "call without a daemon binary is refused"

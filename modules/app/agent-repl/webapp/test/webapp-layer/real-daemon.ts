@@ -94,7 +94,7 @@ export function realDaemon(): RealDaemon {
  * Mount the real app against the real daemon, addressed to the real
  * workspace, through the SAME mount path the fake-daemon integration suite
  * uses (`startAppAgainst`). Nothing is stubbed between a component and the
- * wire; the wire's far end is a live `claude-repld`.
+ * wire; the wire's far end is a live `agent-repld`.
  */
 export async function startAgainstRealDaemon(
   options: Omit<HarnessOptions, "workspaceId" | "workspaceDir" | "webappBuild" | "arrange"> = {},

@@ -29,7 +29,7 @@ structurally invisible to a Connect-dialing test:
 
 - **The missing account flags.** Emacs spawns the daemon through its own
   launcher, and the launcher composes the daemon's argv. A test that starts
-  `claude-repld` from a Go harness composes that argv ITSELF, so it can
+  `agent-repld` from a Go harness composes that argv ITSELF, so it can
   never disagree with the launcher -- and the launcher's omission of the
   per-account config-dir flags survived every direct test. Only a test where
   EMACS spawns the daemon compares the two.
@@ -258,7 +258,7 @@ exposes the full pushed state as data, so this is nearly always possible:
 | workspace registry | `agent-repl--workspaces` | buffer names |
 | host state / session ids | `agent-repl-host--by-name` | anything rendered |
 | panels + layout | `window-list` + `window-buffer` + `window-parameter` | `format-mode-line` |
-| daemon launch | `agent-repl--frontend-daemon-process`, `agent-repl-daemon-launch-failure`, `agent-repl-daemon-build-failure` | the `*claude-repld*` buffer text |
+| daemon launch | `agent-repl--frontend-daemon-process`, `agent-repl-daemon-launch-failure`, `agent-repl-daemon-build-failure` | the `*agent-repld*` buffer text |
 | attention marker | `agent-repl-status--marker-on` | the `●` glyph |
 | held prompts (Emacs side) | `agent-repl-held-ingress-waiting` (the on-disk ingress; Emacs holds no prompt in memory) | the tray, the composer's waiting line |
 | submissions (what left Emacs) | an observer on `agent-repl-rpc-submit-prompt` (text, `:origin`, `:delivery`, the answer arm) | the feed row |
@@ -442,7 +442,7 @@ So the Go side does NOT call `harness.StartDaemon` for this layer:
 
   | variable | value |
   |---|---|
-  | `agent-repl-daemon-command` | the `claude-repld` the Go side built |
+  | `agent-repl-daemon-command` | the `agent-repld` the Go side built |
   | `agent-repl-daemon-default-config-dir` | a scratch account root |
   | `agent-repl-daemon-multi-repo-config-dir` | a second scratch account root |
   | `agent-repl-daemon-multi-repo-root` | a scratch multi-repo tree |
@@ -475,7 +475,7 @@ Teardown order, registered so it runs in reverse of start: heartbeat
 disarmed -> `agent-repl-frontend-daemon-stop` (Emacs ASKS the daemon to
 exit; per `daemon.el`, "EMACS NEVER KILLS A DAEMON") -> `(kill-emacs)` via
 emacsclient -> sidecar -> store. A hard `SIGKILL` on the Emacs pty process
-and a sweep for an orphaned `claude-repld` under the scratch state root
+and a sweep for an orphaned `agent-repld` under the scratch state root
 follow unconditionally, so a wedged Emacs cannot leak a daemon into the next
 test.
 
@@ -1115,7 +1115,7 @@ Every step is now waited on:
    standing streams of the very Emacs step 4 has just killed: the slower Emacs
    was to go, the more of that grace was still running when the reaper looked.
    Observed on a loaded host with Emacs's own exit escalating (1.06s against
-   the 500ms bound), the reaper reported a `claude-repld` that was exiting
+   the 500ms bound), the reaper reported a `agent-repld` that was exiting
    exactly as designed. `go test -v` prints `emacs phase daemon-exit` for every
    scenario; on a quiet box it is one poll interval.
 

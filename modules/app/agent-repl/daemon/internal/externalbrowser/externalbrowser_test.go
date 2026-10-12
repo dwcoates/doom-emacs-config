@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/externalbrowser"
-	"claude-repld/internal/usersetup"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/externalbrowser"
+	"agent-repld/internal/usersetup"
 )
 
 func TestValidate(t *testing.T) {

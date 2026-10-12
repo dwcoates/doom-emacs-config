@@ -16,9 +16,9 @@ import (
 
 	"connectrpc.com/connect"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/sourcescan"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/sourcescan"
 )
 
 // newBareClient builds a client with no process and no connection, for the

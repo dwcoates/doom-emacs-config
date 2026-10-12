@@ -9,8 +9,8 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
-	"claude-repld/internal/chessboard"
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/chessboard"
+	"agent-repld/internal/dlog"
 )
 
 // ChessSquares answers a feed chess board's square clicks

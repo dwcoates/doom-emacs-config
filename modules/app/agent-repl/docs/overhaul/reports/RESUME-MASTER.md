@@ -114,7 +114,7 @@ indicator, composer merge-parked badge).
 ## USER RULING 2026-09-02: only OUR systems run for real; e2e mocks git and the SDK
 
 Reverses the project lead's same-day ruling that e2e merge tests use real
-git. In every suite, including e2e, only claude-repld, the shim, shim-store,
+git. In every suite, including e2e, only agent-repld, the shim, shim-store,
 shim-sidecar (and the frontends where applicable) run for real; git is the
 scripted fake git, the SDK is the fake SDK, nothing external executes. Tests
 must be fast. After each suite run the worst offenders by duration get an
@@ -127,7 +127,7 @@ modules/app/agent-repl/e2e: own Go module importing the daemon integration
 harness (three additive seams: MainAt, Opts.ShimNode/ShimMain/StoreSocket).
 20 area files, 98 tests, 69/69 goldens mapped (67 assert, 2 ctrl-b skips
 ruled out of scope, 1 KillTurn-not-open skip lacking a black-box trigger).
-Real claude-repld + shim + shim-store + shim-sidecar per test; fake SDK and
+Real agent-repld + shim + shim-store + shim-sidecar per test; fake SDK and
 scripted fake git only; tests write nothing; grep gate in TestMain. NEVER
 RUN YET (compile gate only) — step 7 is the first execution. SPEC.md in the
 package; coverage table in reports/E2E-SCENARIO-COVERAGE.md (with a
@@ -161,7 +161,7 @@ behavior"). Only after that are failures dispatched to opus-low implementers
 
 Approved ("go for it"). New top-level package modules/app/agent-repl/e2e,
 owned by the project lead (only the project lead runs it). Basis: the daemon
-integration harness (real claude-repld binary), with the REAL shim, store and
+integration harness (real agent-repld binary), with the REAL shim, store and
 sidecar in place of its fakes; the fake SDK is the only mock and the only
 writer of vendor files; tests write nothing. Spec inputs: E2E-EVENT-INVENTORY
 (what the old suite asserted), the 69 goldens and E2E-SCENARIO-COVERAGE gaps,

@@ -8,7 +8,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
 
-	"claude-repld/internal/promptqueue"
+	"agent-repld/internal/promptqueue"
 )
 
 func TestUpdateAgentArmNamesEveryLandedKind(t *testing.T) {

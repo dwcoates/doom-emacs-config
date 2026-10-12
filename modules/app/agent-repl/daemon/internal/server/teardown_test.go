@@ -10,8 +10,8 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/workspace"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/workspace"
 )
 
 // ---- kill and nuke acknowledge at once when the request carries an op_id ----

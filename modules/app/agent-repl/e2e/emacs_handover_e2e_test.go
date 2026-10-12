@@ -21,7 +21,7 @@ import (
 	"testing"
 	"time"
 
-	"claude-repld/integration/harness"
+	"agent-repld/integration/harness"
 )
 
 // daemonStopBound is how long the LINK may take to go down after the daemon
@@ -326,7 +326,7 @@ func TestEmacsDaemonDownSurfacesAndReconnects(t *testing.T) {
 // same path `adoption_e2e_test.go` commits for the Go layer's own handover
 // tests. What the landing's deploy changes is the staged build's
 // (`EmacsWorld.Deploy`), never the path's.
-const emHO40SelfMergeTriggerPath = "modules/app/agent-repl/daemon/cmd/claude-repld/main.go"
+const emHO40SelfMergeTriggerPath = "modules/app/agent-repl/daemon/cmd/agent-repld/main.go"
 
 // emHO40TriggerName is the name given to the trigger workspace at creation.
 const emHO40TriggerName = "trigger"

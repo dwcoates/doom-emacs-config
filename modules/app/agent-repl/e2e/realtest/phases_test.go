@@ -113,7 +113,7 @@ func TestPhasesReadTheDaemonSpawnPath(t *testing.T) {
 	// Arrange: a spawned daemon is different work from an adopted one, and
 	// comparing their times would be comparing different things.
 	src, snap, spawned := phaseFixture(t,
-		elisp("2026-09-10T12:00:09.000000-04:00", "info", `elisp.daemon.started argv=("claude-repld") state-dir="/s"`, ""))
+		elisp("2026-09-10T12:00:09.000000-04:00", "info", `elisp.daemon.started argv=("agent-repld") state-dir="/s"`, ""))
 
 	// Act.
 	phases, err := ReadPhases([]Source{src}, snap, spawned)

@@ -7,9 +7,9 @@ import (
 
 	shimv1 "agentrepl/proto/shim/v1"
 
-	"claude-repld/internal/ids"
-	"claude-repld/internal/promptqueue"
-	"claude-repld/internal/shimclient"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/promptqueue"
+	"agent-repld/internal/shimclient"
 )
 
 // TestRollBackNoSessionRefuses covers the gate that stops a rollback cold

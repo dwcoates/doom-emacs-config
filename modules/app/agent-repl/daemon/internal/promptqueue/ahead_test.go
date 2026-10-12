@@ -5,9 +5,9 @@ import (
 	"errors"
 	"testing"
 
-	"claude-repld/internal/classifier"
-	"claude-repld/internal/holdfold"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/classifier"
+	"agent-repld/internal/holdfold"
+	"agent-repld/internal/wsm"
 )
 
 // olderQueued holds "older" behind the running turn with a waiting verdict.

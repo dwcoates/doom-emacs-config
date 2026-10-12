@@ -8,10 +8,10 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"claude-repld/internal/classifier"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/resolve/footer"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/classifier"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/resolve/footer"
+	"agent-repld/internal/wsm"
 )
 
 func TestOnTurnEndedStampsTheTurnsClose(t *testing.T) {

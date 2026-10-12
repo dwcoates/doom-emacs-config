@@ -12,13 +12,13 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/intakegate"
-	"claude-repld/internal/merge"
-	"claude-repld/internal/promptqueue"
-	"claude-repld/internal/workspace"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/intakegate"
+	"agent-repld/internal/merge"
+	"agent-repld/internal/promptqueue"
+	"agent-repld/internal/workspace"
+	"agent-repld/internal/wsm"
 )
 
 // The operation names this package's records carry.
@@ -242,7 +242,7 @@ func (i *ingress) ApplyFile(ctx context.Context, path string) error {
 	}
 	// AN APPLIED FILE IS RETIRED TO THE APPLIED DIRECTORY, so its fate is a
 	// fact on disk a producer can read: claimed is "being applied", applied
-	// and quarantine are the two ends. `claude-repld merge-queue` reads it,
+	// and quarantine are the two ends. `agent-repld merge-queue` reads it,
 	// because an agent's merge request reports nothing else before the
 	// requesting turn ends.
 	if err := i.retire(claimed, i.deps.AppliedDir); err != nil {

@@ -14,7 +14,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
-	"claude-repld/integration/harness"
+	"agent-repld/integration/harness"
 
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -287,7 +287,7 @@ func TestSessionHealthRelaysAnUnhealthyDiagnosticsPush(t *testing.T) {
 // TestSessionHealthReturnsToHealthyAfterAHealthyDiagnosticsPush is the
 // retraction half of TestSessionHealthRelaysAnUnhealthyDiagnosticsPush: the
 // shim's health verdict is the WHOLE verdict on every push
-// (cmd/claude-repld/lifecycle.go OnSessionDiagnostics), so a healthy push
+// (cmd/agent-repld/lifecycle.go OnSessionDiagnostics), so a healthy push
 // closes the standing shim-reported fault and SessionHealth reads healthy
 // again without a restart.
 func TestSessionHealthReturnsToHealthyAfterAHealthyDiagnosticsPush(t *testing.T) {
@@ -1214,7 +1214,7 @@ func TestOpenExternalWithAFailingLauncherAnswersLaunchFailed(t *testing.T) {
 // TestOpenExternalWithNoBrowserConfiguredAnswersNoBrowserConfigured exercises
 // OpenExternalError's no_browser_configured arm. The daemon is started with
 // `--no-browser`, which is the operator's explicit statement that this host
-// has no external browser: cmd/claude-repld/graph.go then leaves the Browser
+// has no external browser: cmd/agent-repld/graph.go then leaves the Browser
 // dependency nil and internal/workspace/links.go refuses.
 func TestOpenExternalWithNoBrowserConfiguredAnswersNoBrowserConfigured(t *testing.T) {
 	t.Parallel()

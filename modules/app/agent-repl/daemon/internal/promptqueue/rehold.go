@@ -4,10 +4,10 @@ import (
 	"context"
 	"errors"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/sessionwatcher"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/sessionwatcher"
+	"agent-repld/internal/wsm"
 )
 
 // A TRY-NOW THE VENDOR TAKES AND THEN BLOCKS GOES BACK ON THE HOLD (owner

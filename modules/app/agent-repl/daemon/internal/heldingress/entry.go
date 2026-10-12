@@ -11,8 +11,8 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"claude-repld/internal/prompthandler"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/prompthandler"
+	"agent-repld/internal/wsm"
 )
 
 // FormatVersion is the one entry format this ingress reads. A file naming any

@@ -35,9 +35,9 @@ import (
 	"os"
 	"sync"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
 )
 
 // opRecount is the one operation every record of this package carries.

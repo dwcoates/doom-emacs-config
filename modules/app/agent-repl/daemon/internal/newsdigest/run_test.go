@@ -11,11 +11,11 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/flock"
-	"claude-repld/internal/headless"
-	"claude-repld/internal/sourcescan"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/flock"
+	"agent-repld/internal/headless"
+	"agent-repld/internal/sourcescan"
+	"agent-repld/internal/wsm"
 )
 
 func TestARefreshWithNewsStandsADigest(t *testing.T) {

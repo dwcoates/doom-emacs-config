@@ -9,7 +9,7 @@ the vendor (`AGENT_REPL_FORBID_VENDOR_CALLS=1` in every process).
 
 ## Harness (`daemon/integration/harness`)
 
-- Build once per `go test` run: `go build -o <tmp>/claude-repld ./cmd/claude-repld`
+- Build once per `go test` run: `go build -o <tmp>/agent-repld ./cmd/agent-repld`
   and `go build -o <tmp>/fakeshim ./integration/fakeshim` (a `TestMain`).
 - `StartDaemon(t, opts) *Daemon`: temp state root; env
   `AGENT_REPL_STATE_DIR`, `AGENT_REPL_FORBID_VENDOR_CALLS=1`; flags `-fake`,
@@ -656,7 +656,7 @@ a spec edit and never a rationalization in the suite.
     routes an `AgentPushNotification` START frame to
     `sinks.Lifecycle.OnNotification` as `agent_addressed`, carrying the pushed
     message as the notification's text.
-  - `no_browser_configured`. `cmd/claude-repld/graph.go` leaves the Browser
+  - `no_browser_configured`. `cmd/agent-repld/graph.go` leaves the Browser
     dependency NIL under `--no-browser`, or when neither
     `$AGENT_REPL_BROWSER_CMD` nor the pinned default launcher exists.
 
@@ -691,7 +691,7 @@ a spec edit and never a rationalization in the suite.
     (`feed.ErrTokenExpired`) fires when a token's pinned start falls out of the
     retained publication log, and `feed.Deps.TailRetention` is now set from
     `--feed-tail-retention` / `$AGENT_REPL_FEED_TAIL_RETENTION` in
-    `cmd/claude-repld/graph.go`. The suite compresses the retention to one row
+    `cmd/agent-repld/graph.go`. The suite compresses the retention to one row
     and asserts the refusal.
 
 - A CORRUPT `creation_jobs` ROW REFUSES THE BOOT (remediated).

@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // This file is the durable half of DETACHED MERGES

@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // DurableFeedRow is one daemon-synthesized feed row a new daemon draws again:

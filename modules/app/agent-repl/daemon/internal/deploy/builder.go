@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/outputtext"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/outputtext"
 )
 
 const opBuild = "daemon.deploy.build"
@@ -137,7 +137,7 @@ func (s Staged) ShimMain() string {
 func (s Staged) WebappDist() string { return filepath.Join(s.Dir, "webapp", "dist") }
 
 // DaemonBin is the staged daemon binary.
-func (s Staged) DaemonBin() string { return filepath.Join(s.Dir, "daemon", "bin", "claude-repld") }
+func (s Staged) DaemonBin() string { return filepath.Join(s.Dir, "daemon", "bin", "agent-repld") }
 
 // CacheBin is a staged cache-bin artifact (shim-store, shim-claude-sidecar,
 // shim-lock).

@@ -5,7 +5,7 @@ import (
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/internal/ids"
+	"agent-repld/internal/ids"
 )
 
 // loginSession is a session a login began.

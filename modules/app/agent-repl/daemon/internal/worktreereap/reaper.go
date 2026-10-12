@@ -25,11 +25,11 @@ import (
 	"sync"
 	"time"
 
-	"claude-repld/internal/clock"
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/gitclient"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/clock"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/gitclient"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
 )
 
 // The records this package writes.

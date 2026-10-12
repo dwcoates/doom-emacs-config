@@ -13,18 +13,18 @@ looks like it does, that goes in section F, not into an assumption here.
 ## A. Module placement decision
 
 **Decision: `modules/app/agent-repl/e2e` gets its OWN `go.mod`
-(`module agentrepl/e2e`), importing `claude-repld/integration/harness` by
+(`module agentrepl/e2e`), importing `agent-repld/integration/harness` by
 `replace`.** Not a package inside `daemon/`.
 
 ### Why
 
-The daemon module (`daemon/go.mod`, `module claude-repld`) and the store
+The daemon module (`daemon/go.mod`, `module agent-repld`) and the store
 module (`agent-shim/shim-store/go.mod`, `module agentrepl/shim-store`) are
 the only two Go modules under `modules/app/agent-repl` today; the sidecar
 (`agent-shim/claude/shim-sidecar/go.mod`, `module
 agentrepl/shim-claude-sidecar`) is a third. `daemon/integration/harness` is
-`package harness`, importable as `claude-repld/integration/harness` — it
-lives inside the `claude-repld` module but NOT under `internal/`, so nothing
+`package harness`, importable as `agent-repld/integration/harness` — it
+lives inside the `agent-repld` module but NOT under `internal/`, so nothing
 about Go's visibility rules stops another module from importing it.
 
 Putting the e2e suite as a package under `daemon/` (the way the deleted
@@ -43,9 +43,9 @@ module by `replace` is the normal Go pattern for this (it is exactly how
 `agentrepl/proto` and `agentrepl/logging` from sibling directories). The one
 wrinkle: Go replace directives are NOT transitive. `daemon/go.mod` replaces
 `agentrepl/proto => ../proto/gen/go` and `agentrepl/logging =>
-../agent-shim/logging/go`, but those replaces apply only when `claude-repld`
+../agent-shim/logging/go`, but those replaces apply only when `agent-repld`
 is the main module. When `agentrepl/e2e` is the main module and it imports
-`claude-repld/integration/harness`, which itself imports
+`agent-repld/integration/harness`, which itself imports
 `agentrepl/proto/...` and `agentrepl/logging`, the e2e module's own `go.mod`
 must repeat those two replaces itself, or the build fails to resolve
 `agentrepl/proto`/`agentrepl/logging` at all (there is no such module
@@ -59,7 +59,7 @@ module agentrepl/e2e
 go 1.23.0
 
 require (
-	claude-repld v0.0.0-00010101000000-000000000000
+	agent-repld v0.0.0-00010101000000-000000000000
 	agentrepl/proto v0.0.0
 	agentrepl/logging v0.0.0
 	connectrpc.com/connect v1.17.0
@@ -67,7 +67,7 @@ require (
 	golang.org/x/net v0.43.0
 )
 
-replace claude-repld => ../daemon
+replace agent-repld => ../daemon
 
 replace agentrepl/proto => ../proto/gen/go
 
@@ -86,7 +86,7 @@ the parent — it resolves its own `go.mod` on its own.
 ### The one daemon-tree change: an additive harness seam
 
 `daemon/integration/harness` was built to run a real daemon against FAKES of
-every neighbor (its own package doc, verbatim: "runs a REAL claude-repld
+every neighbor (its own package doc, verbatim: "runs a REAL agent-repld
 process against FAKES of every neighbor"). Two things in it are hardwired to
 those fakes in a way the e2e suite cannot reuse as-is. Both are additive:
 zero-value behavior is byte-for-byte what every existing `daemon/integration`
@@ -94,13 +94,13 @@ test already gets, so no existing test's behavior changes.
 
 **Seam 1 — `harness.MainAt(m *testing.M, moduleRoot string) int`, new exported func in `daemon/integration/harness/harness.go`.**
 
-`harness.Main` builds `claude-repld`, the fake shim, and the fake `git`
+`harness.Main` builds `agent-repld`, the fake shim, and the fake `git`
 by locating the daemon module root via `moduleRoot()`, which walks UP from
 `os.Getwd()` looking for the nearest `go.mod`. That walk is safe only when
-the calling test binary's module IS `claude-repld` (`daemon/integration`'s
+the calling test binary's module IS `agent-repld` (`daemon/integration`'s
 own suites). Called from `agentrepl/e2e`'s `TestMain`, `os.Getwd()` is
 somewhere under `modules/app/agent-repl/e2e`, which has its OWN `go.mod` —
-the walk stops there and `go build ./cmd/claude-repld` runs in the wrong
+the walk stops there and `go build ./cmd/agent-repld` runs in the wrong
 module and fails.
 
 Fix by refactoring `Main` into a thin wrapper over a new exported entry
@@ -109,7 +109,7 @@ point that takes the module root explicitly:
 ```go
 // MainAt is Main, except the daemon module root is given explicitly
 // instead of discovered by walking up from the working directory. A
-// suite outside the claude-repld module (agentrepl/e2e) cannot use the
+// suite outside the agent-repld module (agentrepl/e2e) cannot use the
 // cwd-walk — its own go.mod would be found first — so it resolves its
 // own relative path to daemon/ and calls this instead of Main.
 func MainAt(m *testing.M, moduleRoot string) int {
@@ -210,7 +210,7 @@ value.
 
 | Binary | Built by | Source | Skip condition |
 |---|---|---|---|---|
-| `claude-repld` | `harness.MainAt` (via seam 1) | `daemon/cmd/claude-repld` | `go` on PATH (else the whole run fails hard — the daemon is not optional) |
+| `agent-repld` | `harness.MainAt` (via seam 1) | `daemon/cmd/agent-repld` | `go` on PATH (else the whole run fails hard — the daemon is not optional) |
 | fake `git` | `harness.MainAt` | `daemon/integration/fakegit/git` | same |
 | real shim bundle | new `e2e` build helper, modeled on the deleted `daemon/e2e`'s `buildShim` | `agent-shim/claude/shim`, `node build.mjs` | `node` on PATH; `agent-shim/claude/shim/node_modules` present — **loud `requireDependency` FAILURE, never an implicit `npm ci`** (a skip only under `AGENT_REPL_E2E_ALLOW_MISSING_DEPS=1`; see `precondition_test.go`) |
 | `shim-store` | new `e2e` build helper, modeled on the deleted `daemon/e2e`'s `buildShimStore` and on `shim-sidecar/integration/helpers_test.go`'s `storeBinary` | `agent-shim/shim-store` (`go build -o <bin> .`) | `go` on PATH (already required) |
@@ -405,7 +405,7 @@ states the fault its own arrangement causes (`refusals_e2e_test.go`'s
 Exactly the deleted `daemon/e2e`'s three: no `node` on `PATH` → skip; no
 `agent-shim/claude/shim/node_modules` → skip naming the exact `npm ci`
 command and directory; no `go` on `PATH` → skip (this one is unlikely to
-ever fire since building `claude-repld` itself already needs `go`, so it is
+ever fire since building `agent-repld` itself already needs `go`, so it is
 really the same precondition, checked defensively at the shim-store/sidecar
 build sites too). **The harness never runs `npm ci` or `go mod download`
 itself.**
@@ -549,7 +549,7 @@ never an ad hoc duration at the call site. This suite needs at minimum:
   `HandoverChainTimeout` — reuse that constant directly if the shape
   matches, rather than mint a same-value twin).
 - `AdoptionChainTimeout` (restart/adoption tests chain a SECOND real
-  `claude-repld` boot onto the same context, exactly the case
+  `agent-repld` boot onto the same context, exactly the case
   `HandoverChainTimeout`'s doc comment describes — reuse it).
 - A store-outage window bound for degraded-state tests: the sidecar's own
   integration suite already picked `UnownedSpoolWindow: 200ms` as "a subject
@@ -560,7 +560,7 @@ never an ad hoc duration at the call site. This suite needs at minimum:
 
 ### Every external dependency is MOCKED (USER RULING, reverses ruling 4)
 
-Only the systems WE OWN run for real in this suite: `claude-repld`, the
+Only the systems WE OWN run for real in this suite: `agent-repld`, the
 shim, `shim-store`, `shim-sidecar`. Everything else is mocked, here exactly
 as everywhere else in the repo:
 
@@ -1109,7 +1109,7 @@ part of that script's default sweep.
 
 | System | Instrumented by | Output |
 |---|---|---|
-| `claude-repld` | `go build -cover` (harness `MainAt`) | `GOCOVERDIR=<dir>/claude-repld`, set by `harness.StartDaemon` |
+| `agent-repld` | `go build -cover` (harness `MainAt`) | `GOCOVERDIR=<dir>/agent-repld`, set by `harness.StartDaemon` |
 | `shim-store` | `go build -cover` (`goBuildCovered`) | `GOCOVERDIR=<dir>/shim-store`, set at both spawn sites |
 | `shim-claude-sidecar` | `go build -cover` (`goBuildCovered`) | `GOCOVERDIR=<dir>/shim-claude-sidecar` |
 | the TypeScript shim | `NODE_V8_COVERAGE`, set on the DAEMON and inherited by every shim it spawns (`shimclient.spawnEnv` copies the daemon's environment forward verbatim outside its fixed override set) | `<dir>/shim`, remapped through the bundle's source map |
@@ -1154,7 +1154,7 @@ byte-for-byte what it was, so the bundle's build identity is unchanged.
 
 | System | Statement coverage |
 |---|---|
-| `claude-repld` | **54.5%** |
+| `agent-repld` | **54.5%** |
 | `shim-store` | **60.2%** |
 | `shim-claude-sidecar` | **63.7%** |
 | shim TypeScript (`agent-shim/**` sources, 94 files) | **82.6%** (24926/30182) |

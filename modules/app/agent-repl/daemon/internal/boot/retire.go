@@ -7,9 +7,9 @@ import (
 	"io/fs"
 	"os"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
 )
 
 // retireGoneRepositories retires every registered repository whose directory

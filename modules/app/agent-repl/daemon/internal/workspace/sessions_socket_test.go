@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"claude-repld/internal/health"
-	"claude-repld/internal/sessionlock"
-	"claude-repld/internal/shimsocket"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/health"
+	"agent-repld/internal/sessionlock"
+	"agent-repld/internal/shimsocket"
+	"agent-repld/internal/wsm"
 )
 
 // TestStartAdoptsASurvivorTheSocketReachesWhenTheLockReadsFree pins the run-9

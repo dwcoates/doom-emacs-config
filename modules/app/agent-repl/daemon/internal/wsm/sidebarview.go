@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // sidebarViewDDL is the layout-23 addition (docs/protobuf-design/

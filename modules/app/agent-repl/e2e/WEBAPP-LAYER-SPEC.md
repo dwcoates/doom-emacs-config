@@ -4,7 +4,7 @@ Scope: how the REAL webapp is put in the loop of the cross-system e2e world,
 so the chain under test is
 
 ```
-fake SDK -> real shim -> real store + real sidecar -> real claude-repld -> real webapp (jsdom)
+fake SDK -> real shim -> real store + real sidecar -> real agent-repld -> real webapp (jsdom)
 ```
 
 This document is a design record plus a scenario list. It states what to

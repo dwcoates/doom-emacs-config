@@ -20,7 +20,7 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"claude-repld/internal/ids"
+	"agent-repld/internal/ids"
 )
 
 // Catalogs is the per-workspace table. The zero value is not usable; build

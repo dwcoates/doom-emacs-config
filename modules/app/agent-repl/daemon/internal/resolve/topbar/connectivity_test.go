@@ -3,8 +3,8 @@ package topbar
 import (
 	"testing"
 
-	"claude-repld/internal/shimclient"
-	"claude-repld/internal/vocab"
+	"agent-repld/internal/shimclient"
+	"agent-repld/internal/vocab"
 )
 
 func TestAnUnobservedLinkIsNoSession(t *testing.T) {

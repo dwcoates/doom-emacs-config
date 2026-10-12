@@ -46,13 +46,13 @@ func TestCoverageDirCreatesThePerBinaryDirectory(t *testing.T) {
 	root := t.TempDir()
 
 	// Act.
-	dir, err := CoverageDir(root, "claude-repld")
+	dir, err := CoverageDir(root, "agent-repld")
 
 	// Assert.
 	if err != nil {
 		t.Fatalf("CoverageDir: %v", err)
 	}
-	if want := filepath.Join(root, "claude-repld"); dir != want {
+	if want := filepath.Join(root, "agent-repld"); dir != want {
 		t.Fatalf("CoverageDir = %q, want %q", dir, want)
 	}
 	info, err := os.Stat(dir)
@@ -63,7 +63,7 @@ func TestCoverageDirCreatesThePerBinaryDirectory(t *testing.T) {
 
 func TestCoverageDirIsInertWhenTheRootIsEmpty(t *testing.T) {
 	// Arrange, Act.
-	dir, err := CoverageDir("", "claude-repld")
+	dir, err := CoverageDir("", "agent-repld")
 
 	// Assert.
 	if err != nil {
@@ -92,7 +92,7 @@ func TestCoverageDirReportsAnUncreatableDirectory(t *testing.T) {
 	}
 
 	// Act.
-	_, err := CoverageDir(file, "claude-repld")
+	_, err := CoverageDir(file, "agent-repld")
 
 	// Assert.
 	if err == nil {

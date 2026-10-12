@@ -64,7 +64,7 @@ import (
 
 	"connectrpc.com/connect"
 
-	"claude-repld/integration/harness"
+	"agent-repld/integration/harness"
 )
 
 // awaitClearedSeparations opens (or re-opens) the workspace's root feed and

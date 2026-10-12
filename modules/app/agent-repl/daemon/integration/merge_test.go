@@ -16,7 +16,7 @@ import (
 	shimv1 "agentrepl/proto/shim/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
-	"claude-repld/integration/harness"
+	"agent-repld/integration/harness"
 
 	"connectrpc.com/connect"
 )
@@ -585,7 +585,7 @@ func TestLandingAMergeWhoseTargetIsTheSelfRepoDeploysOnce(t *testing.T) {
 	// THE BRANCH HAS TO CARRY A COMMIT. The self-reload fires off what the
 	// merge LANDED -- the classifier reads the changed paths -- so a merge
 	// that brought in nothing triggers nothing, correctly.
-	writeCommit(t, repo, f.ws.GetDir(), "modules/app/agent-repl/daemon/cmd/claude-repld/main.go", "landed\n")
+	writeCommit(t, repo, f.ws.GetDir(), "modules/app/agent-repl/daemon/cmd/agent-repld/main.go", "landed\n")
 
 	// THE FEED IS SUBSCRIBED BEFORE THE MERGE IS ENQUEUED. A landing tears the
 	// merged workspace's worktree down, and the feed resolves its log sink by
@@ -673,7 +673,7 @@ func TestASiblingWorktreeOfTheSelfRepoRunsTheEmacsMethodButNeverTriggersTheDeplo
 	pushConcludedTurn(childShim, mainAgent, "sibling7a-child-initial")
 	// A commit that WOULD classify into this daemon's own subsystem, so
 	// nothing but the literal-checkout gate is what keeps the deploy off.
-	writeCommit(t, repo, child.GetDir(), "modules/app/agent-repl/daemon/cmd/claude-repld/main.go", "landed\n")
+	writeCommit(t, repo, child.GetDir(), "modules/app/agent-repl/daemon/cmd/agent-repld/main.go", "landed\n")
 
 	// Act
 	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: child, Source: harness.OwnBranch(false)})); err != nil {
@@ -1143,7 +1143,7 @@ func TestTheTestGateNarrowsToTheBlastRadiusOfTheLandedChange(t *testing.T) {
 	// exactly the single "e2e-emacs" suite. daemon/ paths no longer make a
 	// single-suite example: the rule table now widens a daemon change to
 	// {daemon, e2e, e2e-emacs} (the cross-system suites run a real
-	// claude-repld too), so a daemon-only test needs a genuinely narrow path
+	// agent-repld too), so a daemon-only test needs a genuinely narrow path
 	// to stay a one-suite demonstration.
 	f, d, repo, script := mergeCleanRepo(t)
 	script.SetExitCode(0)

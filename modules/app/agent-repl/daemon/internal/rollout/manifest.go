@@ -10,12 +10,12 @@ import (
 	"syscall"
 	"time"
 
-	"claude-repld/internal/atomicfile"
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/health"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/sessionlock"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/atomicfile"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/health"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/sessionlock"
+	"agent-repld/internal/wsm"
 )
 
 // Intent is what the outgoing daemon MEANT to happen to one session. It is half

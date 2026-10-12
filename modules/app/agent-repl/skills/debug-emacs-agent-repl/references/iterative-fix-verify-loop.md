@@ -64,7 +64,7 @@ abandon the step either; either way the user is owed the finding.
 Deploy, so that no later observation can be blamed on a stale artifact:
 
 ```sh
-modules/app/agent-repl/daemon/bin/claude-repld deploy
+modules/app/agent-repl/daemon/bin/agent-repld deploy
 ```
 
 The daemon owns the deploy's ordering and its failure semantics. It builds

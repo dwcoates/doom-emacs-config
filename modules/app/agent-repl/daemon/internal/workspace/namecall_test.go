@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"claude-repld/internal/headless"
-	"claude-repld/internal/prompts"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/headless"
+	"agent-repld/internal/prompts"
+	"agent-repld/internal/wsm"
 )
 
 // script points the fixture's naming call at a sequence of answers, one per

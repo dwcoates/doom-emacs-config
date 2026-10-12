@@ -8,7 +8,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/integration/harness"
+	"agent-repld/integration/harness"
 )
 
 // rateLimitVerdict is a five-hour rate-limit status with the given verdict.

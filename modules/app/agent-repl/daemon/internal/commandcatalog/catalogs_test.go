@@ -6,8 +6,8 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	"google.golang.org/protobuf/proto"
 
-	"claude-repld/internal/commandcatalog/catalogtest"
-	"claude-repld/internal/ids"
+	"agent-repld/internal/commandcatalog/catalogtest"
+	"agent-repld/internal/ids"
 )
 
 func TestCatalog(t *testing.T) {

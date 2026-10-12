@@ -10,7 +10,7 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // THE PAGE MUX: one stream per browser page, however many views it watches.

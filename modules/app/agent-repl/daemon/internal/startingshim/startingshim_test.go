@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"claude-repld/internal/shimsocket"
+	"agent-repld/internal/shimsocket"
 )
 
 // stepClock is a Clock that never sleeps: every After fires at once and

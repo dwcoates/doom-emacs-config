@@ -13,7 +13,7 @@
 package deployprogress
 
 import (
-	"claude-repld/internal/ids"
+	"agent-repld/internal/ids"
 )
 
 // Phase is where a deploy has got to.

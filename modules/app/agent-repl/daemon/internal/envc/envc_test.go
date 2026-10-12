@@ -3,7 +3,7 @@ package envc_test
 import (
 	"testing"
 
-	"claude-repld/internal/envc"
+	"agent-repld/internal/envc"
 )
 
 func TestLoadFake(t *testing.T) {

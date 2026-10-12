@@ -61,7 +61,7 @@ branch into the target as a non-fast-forward merge.
   - Consequences for the contract: a merge request names the requesting
     workspace AND what it merges (its own branch, another workspace's branch,
     a branch that is no workspace, or its own branch already merged upstream).
-  - Reopens: the `claude-repld merge-queue -branch` landing workspace
+  - Reopens: the `agent-repld merge-queue -branch` landing workspace
     (`merge-queue/<bare>-landing`), which exists only because the queue could
     merge nothing but a workspace.
   - Does not claim: where the rebase's files live. The lead ruled (below)
@@ -224,7 +224,7 @@ branch into the target as a non-fast-forward merge.
     popup (`lisp/popup.el`) already opens a right side window at half the
     frame; only the request's target changes.
   - A merge of a branch that is no workspace no longer makes a landing
-    workspace, so `claude-repld merge-queue -branch` and the merge-queue
+    workspace, so `agent-repld merge-queue -branch` and the merge-queue
     skill send `source.branch` from the calling workspace instead.
   - `fixes` round and `attempt` agree by construction only if the daemon
     uses one bound for both; the daemon states that bound once.
@@ -263,7 +263,7 @@ branch into the target as a non-fast-forward merge.
     runs in the workspace that asked for it".
   - The shutdown drain counts in-flight admission steps under the lock that
     sets `draining` (the race fixed on master first).
-- **The verb and the skill:** `claude-repld merge-queue -own [-keep-open] |
+- **The verb and the skill:** `agent-repld merge-queue -own [-keep-open] |
   -dir | -branch | -pr-merged` asks from the calling workspace, found as the
   roster row whose worktree holds the cwd. Exits: 0 landed or requested, 5
   failed, 6 refused, 2 verb failure; `-wait` is refused while the requester's

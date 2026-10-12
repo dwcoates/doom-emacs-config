@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"claude-repld/internal/flock"
+	"agent-repld/internal/flock"
 )
 
 // This file holds the merge queue's REPO-SCOPED KERNEL LOCK.

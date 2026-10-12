@@ -24,7 +24,7 @@ import (
 	"context"
 	"errors"
 
-	"claude-repld/internal/ids"
+	"agent-repld/internal/ids"
 )
 
 // Func performs a bounce once the workspace is drained: it replaces what

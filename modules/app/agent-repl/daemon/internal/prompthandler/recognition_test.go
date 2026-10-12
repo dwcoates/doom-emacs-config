@@ -5,8 +5,8 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"claude-repld/internal/promptqueue"
-	"claude-repld/internal/sessioncommand"
+	"agent-repld/internal/promptqueue"
+	"agent-repld/internal/sessioncommand"
 )
 
 func TestRecognizeReportsTheFourPanels(t *testing.T) {

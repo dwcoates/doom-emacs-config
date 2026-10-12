@@ -12,11 +12,11 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"claude-repld/internal/ids"
-	"claude-repld/internal/merge"
-	"claude-repld/internal/promptqueue"
-	"claude-repld/internal/workspace"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/merge"
+	"agent-repld/internal/promptqueue"
+	"agent-repld/internal/workspace"
+	"agent-repld/internal/wsm"
 )
 
 func TestNewRefusesMissingCollaborators(t *testing.T) {

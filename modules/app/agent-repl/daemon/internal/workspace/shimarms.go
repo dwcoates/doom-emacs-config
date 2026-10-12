@@ -6,7 +6,7 @@ import (
 
 	shimv1 "agentrepl/proto/shim/v1"
 
-	"claude-repld/internal/promptqueue"
+	"agent-repld/internal/promptqueue"
 )
 
 // The shim's own refusal arm names, spelled exactly as the shim.v1 failure

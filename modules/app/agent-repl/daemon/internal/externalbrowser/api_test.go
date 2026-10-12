@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/externalbrowser"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/externalbrowser"
 )
 
 func TestNewRejectsMissingLogger(t *testing.T) {

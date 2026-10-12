@@ -1,7 +1,7 @@
 // daemonstop_e2e_test.go — the host's stop, measured against the WHOLE world.
 //
 // THE DEFECT, MEASURED. Over one 24-scenario Emacs e2e run the teardown's
-// reaper found 17 surviving `claude-repld` processes, 24 surviving shims and
+// reaper found 17 surviving `agent-repld` processes, 24 surviving shims and
 // 48 surviving `shim-lock` holders, and the container's resident memory
 // climbed from 0.5 GiB to 3.1 GiB across a full run — enough that a second
 // concurrent sandbox OOM-killed the first. Two causes, one per layer:
@@ -31,7 +31,7 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/integration/harness"
+	"agent-repld/integration/harness"
 
 	"connectrpc.com/connect"
 )

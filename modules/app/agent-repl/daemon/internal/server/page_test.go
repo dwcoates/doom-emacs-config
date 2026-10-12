@@ -10,8 +10,8 @@ import (
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/proto"
 
-	"claude-repld/internal/login"
-	"claude-repld/internal/publish"
+	"agent-repld/internal/login"
+	"agent-repld/internal/publish"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	"agentrepl/proto/agentrepl/v1/agentreplv1connect"

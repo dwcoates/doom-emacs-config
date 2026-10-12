@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"claude-repld/internal/bringup"
+	"agent-repld/internal/bringup"
 )
 
 // A START IN FLIGHT WHEN ITS WORKSPACE IS HANDED OVER serves nothing: the

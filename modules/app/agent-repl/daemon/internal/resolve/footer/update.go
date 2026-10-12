@@ -5,8 +5,8 @@ import (
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/internal/deployprogress"
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/deployprogress"
+	"agent-repld/internal/dlog"
 )
 
 // THE UPDATE LINE: a deploy's progress on every workspace's strip (owner

@@ -8,10 +8,10 @@ import (
 	"os"
 	"path/filepath"
 
-	"claude-repld/internal/account"
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/resolve/topbar"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/account"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/resolve/topbar"
+	"agent-repld/internal/wsm"
 )
 
 // Register records a workspace Emacs announced. It is IDEMPOTENT by normalized

@@ -11,12 +11,12 @@ import (
 	"agentrepl/logging/buildreport"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
-	"claude-repld/internal/deployprogress"
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/gitclient"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/rollout"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/deployprogress"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/gitclient"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/rollout"
+	"agent-repld/internal/wsm"
 )
 
 // outcome answers one component's decision out of a result.
@@ -426,7 +426,7 @@ func TestParseMigrationKind(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Act
-			got, err := parseMigrationKind("claude-repld", tt.answer)
+			got, err := parseMigrationKind("agent-repld", tt.answer)
 
 			// Assert
 			if (err != nil) != tt.wantErr || (!tt.wantErr && got != tt.want) {
@@ -447,7 +447,7 @@ func TestTheLayoutQuestionIsAskedOfTheStagedDaemon(t *testing.T) {
 	}
 
 	// Assert
-	if len(h.layoutAsked) != 1 || !strings.HasSuffix(h.layoutAsked[0], filepath.Join("daemon", "bin", "claude-repld")) || strings.HasPrefix(h.layoutAsked[0], h.live.ModuleRoot) {
+	if len(h.layoutAsked) != 1 || !strings.HasSuffix(h.layoutAsked[0], filepath.Join("daemon", "bin", "agent-repld")) || strings.HasPrefix(h.layoutAsked[0], h.live.ModuleRoot) {
 		t.Fatalf("layout asked of %v, want the one staged daemon binary", h.layoutAsked)
 	}
 }

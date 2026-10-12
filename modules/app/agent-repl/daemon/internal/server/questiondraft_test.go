@@ -11,8 +11,8 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
-	"claude-repld/internal/resolve/feed"
-	"claude-repld/internal/workspace"
+	"agent-repld/internal/resolve/feed"
+	"agent-repld/internal/workspace"
 )
 
 // UpdateQuestionDraft: one click on a standing question card, decoded to the

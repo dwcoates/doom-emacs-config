@@ -6,12 +6,12 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/feedid"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/protoarm"
-	"claude-repld/internal/resolve/holds"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/feedid"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/protoarm"
+	"agent-repld/internal/resolve/holds"
+	"agent-repld/internal/wsm"
 )
 
 // THE HELD SECTION (frontend.v1 FeedHeld, feed_held.proto): the part of a

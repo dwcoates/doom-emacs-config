@@ -11,7 +11,7 @@ import (
 	"fmt"
 	"os"
 
-	"claude-repld/integration/fakegit"
+	"agent-repld/integration/fakegit"
 )
 
 func main() {

@@ -7,8 +7,8 @@ import (
 	"slices"
 	"testing"
 
-	"claude-repld/internal/ids"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
 )
 
 // triedUnderBlock holds t1 under a usage limit, then sends t2 with nothing

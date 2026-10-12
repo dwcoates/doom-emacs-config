@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // writeScript writes an executable shell script named name into dir and

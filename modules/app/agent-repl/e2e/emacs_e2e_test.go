@@ -14,7 +14,7 @@ import (
 
 	"agentrepl/logging/buildreport"
 
-	"claude-repld/integration/harness"
+	"agent-repld/integration/harness"
 )
 
 // EmacsWorld is one world whose CLIENT IS EMACS.

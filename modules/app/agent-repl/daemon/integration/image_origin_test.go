@@ -13,7 +13,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/integration/harness"
+	"agent-repld/integration/harness"
 )
 
 // THE ATTACHED IMAGE IS DRAWN, AND ITS BYTES ARE SERVED BY THE DAEMON.

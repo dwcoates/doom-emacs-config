@@ -26,7 +26,7 @@ import (
 
 	"connectrpc.com/connect"
 
-	"claude-repld/integration/harness"
+	"agent-repld/integration/harness"
 )
 
 // TestRosterNeverPublishesReadyBeforeInit walks a workspace's cold start with

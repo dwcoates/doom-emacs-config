@@ -7,8 +7,8 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/usersetup"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/usersetup"
 )
 
 // Brightness levels the display step sets: dimmed to the second gradation

@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"claude-repld/internal/sessionlock"
-	"claude-repld/internal/shimsocket"
+	"agent-repld/internal/sessionlock"
+	"agent-repld/internal/shimsocket"
 )
 
 // TestASpawnRecordsItsPidAtTheFork pins the invariant every other test here

@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"claude-repld/integration/harness"
+	"agent-repld/integration/harness"
 )
 
 // AREA D of EMACS-LAYER-SPEC.md: THE COMPOSER AND PROMPT SUBMISSION.

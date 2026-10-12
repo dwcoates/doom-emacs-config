@@ -3,8 +3,8 @@ package feed
 import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
 )
 
 // ATTRIBUTION BY TURN ID. Every entry the shim serves carries the turn it was

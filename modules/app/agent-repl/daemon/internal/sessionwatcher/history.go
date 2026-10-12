@@ -3,7 +3,7 @@ package sessionwatcher
 import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // HISTORY IS LOADED ON A READER'S REQUEST, NEVER BY A WATCH (owner ruling,

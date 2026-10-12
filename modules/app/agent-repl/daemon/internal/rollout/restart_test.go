@@ -6,8 +6,8 @@ import (
 	"slices"
 	"testing"
 
-	"claude-repld/internal/bounce"
-	"claude-repld/internal/ids"
+	"agent-repld/internal/bounce"
+	"agent-repld/internal/ids"
 )
 
 // runRestart runs a restart of every workspace and joins it to its end.

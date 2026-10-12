@@ -28,11 +28,11 @@
 #                                   (bin/readiness-report.sh)
 #   logs [args...]                  the canonical log reader (bin/logs.sh)
 #   call [args...]                  one unary rpc to the serving daemon
-#                                   (daemon/bin/claude-repld call)
+#                                   (daemon/bin/agent-repld call)
 #   deploy [-force]                 rolling deploy: the serving daemon rebuilds
 #                                   what is stale and moves every workspace
 #                                   onto it without killing turns (-force ends
-#                                   them) (daemon/bin/claude-repld deploy)
+#                                   them) (daemon/bin/agent-repld deploy)
 #   hot-reload FILE.el...           load changed elisp into the running Emacs;
 #                                   refuses every test-*.el, which is a
 #                                   batch-only harness
@@ -49,7 +49,7 @@
 #
 # Honored environment (the test harness's isolation; defaults are the host):
 #   AGENT_REPL_RUNTIME_BUILD, _BYTE_COMPILE, _BOUNCE, _DOCTOR, _READINESS,
-#   _LOGS, _CLAUDE_REPLD   the implementation each verb runs
+#   _LOGS, _AGENT_REPLD   the implementation each verb runs
 #   AGENT_REPL_RUNTIME_CONTRACT_CHECK  answers whether the running daemon speaks
 #                                      the checkout's wire contract
 #   AGENT_REPL_RUNTIME_EMACSCLIENT  emacsclient reaching the running Emacs
@@ -70,7 +70,7 @@ DOCTOR="${AGENT_REPL_RUNTIME_DOCTOR:-$MODULE_DIR/scripts/agent-shim-doctor.sh}"
 READINESS="${AGENT_REPL_RUNTIME_READINESS:-$MODULE_DIR/bin/readiness-report.sh}"
 CONTRACT_CHECK="${AGENT_REPL_RUNTIME_CONTRACT_CHECK:-$MODULE_DIR/bin/daemon-contract-current.sh}"
 LOGS="${AGENT_REPL_RUNTIME_LOGS:-$MODULE_DIR/bin/logs.sh}"
-CLAUDE_REPLD="${AGENT_REPL_RUNTIME_CLAUDE_REPLD:-$MODULE_DIR/daemon/bin/claude-repld}"
+AGENT_REPLD="${AGENT_REPL_RUNTIME_AGENT_REPLD:-$MODULE_DIR/daemon/bin/agent-repld}"
 EMACSCLIENT="${AGENT_REPL_RUNTIME_EMACSCLIENT:-/Applications/Emacs.app/Contents/MacOS/bin/emacsclient}"
 OPEN="${AGENT_REPL_RUNTIME_OPEN:-open}"
 EMACS_APP="${AGENT_REPL_RUNTIME_EMACS_APP:-/Applications/Emacs.app}"
@@ -216,12 +216,12 @@ case "$verb" in
     readiness)    exec "$READINESS" "$@" ;;
     logs)         exec "$LOGS" "$@" ;;
     call)
-        [ -x "$CLAUDE_REPLD" ] || die "no daemon binary at $CLAUDE_REPLD; run: $0 build"
-        exec "$CLAUDE_REPLD" call "$@"
+        [ -x "$AGENT_REPLD" ] || die "no daemon binary at $AGENT_REPLD; run: $0 build"
+        exec "$AGENT_REPLD" call "$@"
         ;;
     deploy)
-        [ -x "$CLAUDE_REPLD" ] || die "no daemon binary at $CLAUDE_REPLD; run: $0 build"
-        exec "$CLAUDE_REPLD" deploy "$@"
+        [ -x "$AGENT_REPLD" ] || die "no daemon binary at $AGENT_REPLD; run: $0 build"
+        exec "$AGENT_REPLD" deploy "$@"
         ;;
     hot-reload)
         [ $# -gt 0 ] || die "hot-reload needs at least one .el file"

@@ -57,7 +57,7 @@ import (
 
 	"connectrpc.com/connect"
 
-	"claude-repld/integration/harness"
+	"agent-repld/integration/harness"
 )
 
 // dbWorkspace registers a fresh workspace against a fresh scripted-git

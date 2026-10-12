@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"claude-repld/internal/classifier"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/classifier"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
 )
 
 // newVendorBlockHarness is the harness whose delivered turns stand in flight

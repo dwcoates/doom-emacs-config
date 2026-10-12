@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"claude-repld/internal/dirpath"
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/tempdirs"
+	"agent-repld/internal/dirpath"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/tempdirs"
 )
 
 // normalizeDir is the ONE spelling of a worktree directory this store keys on:

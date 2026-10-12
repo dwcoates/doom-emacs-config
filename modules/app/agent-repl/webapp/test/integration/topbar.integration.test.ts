@@ -288,10 +288,10 @@ describe("connectivity", () => {
 
   it("draws the served title verbatim", async () => {
     // Arrange / Act
-    await withTopbar({ connectivityTitle: "connected to claude-repld" });
+    await withTopbar({ connectivityTitle: "connected to agent-repld" });
     // Assert
     expect(harness.$(".topbar-connectivity")?.getAttribute("title")).toBe(
-      "connected to claude-repld",
+      "connected to agent-repld",
     );
   });
 

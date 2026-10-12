@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"claude-repld/internal/gitclient"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/gitclient"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
 )
 
 // --- New ---------------------------------------------------------------------

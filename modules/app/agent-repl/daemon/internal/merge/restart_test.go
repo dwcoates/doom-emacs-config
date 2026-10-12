@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // waitingForFree admits the harness's merge into its wait for the workspace to

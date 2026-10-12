@@ -8,8 +8,8 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"claude-repld/internal/ids"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
 )
 
 // TestSubmitHoldsUnderTheMergeLeaseUnclassified covers a prompt submitted

@@ -8,11 +8,11 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
 
-	"claude-repld/internal/claudesettings"
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/effortlevel"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/claudesettings"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/effortlevel"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
 )
 
 // THE EFFORT SELECTOR'S VERB AND ITS STARTING LEVEL (design record

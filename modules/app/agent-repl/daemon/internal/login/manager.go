@@ -10,9 +10,9 @@ import (
 
 	"github.com/creack/pty"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/envc"
-	"claude-repld/internal/ids"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/envc"
+	"agent-repld/internal/ids"
 )
 
 // guardSite is the name the vendor guard records for this call site.

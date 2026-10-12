@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 func TestOpenMigratesALayoutThreeDatabaseForward(t *testing.T) {

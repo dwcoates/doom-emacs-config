@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"testing"
 
-	"claude-repld/internal/tempdirs"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/tempdirs"
+	"agent-repld/internal/wsm"
 )
 
 // insideTemp is the registry's refusal of a scratch folder, as the store

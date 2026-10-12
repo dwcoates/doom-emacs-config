@@ -50,7 +50,7 @@ import (
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/encoding/prototext"
 
-	"claude-repld/integration/harness"
+	"agent-repld/integration/harness"
 )
 
 // ===========================================================================

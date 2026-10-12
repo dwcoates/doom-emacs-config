@@ -15,9 +15,9 @@ import (
 
 	sharedlogging "agentrepl/logging"
 
-	"claude-repld/internal/atomicfile"
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/remint"
+	"agent-repld/internal/atomicfile"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/remint"
 )
 
 // projectsDir is the vendor CLI's own subdirectory of a config root under

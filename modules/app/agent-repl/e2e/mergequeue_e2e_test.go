@@ -55,7 +55,7 @@ import (
 	workspacev1 "agentrepl/proto/workspace/v1"
 	"agentrepl/protohelpers/rosterwalk"
 
-	"claude-repld/integration/harness"
+	"agent-repld/integration/harness"
 
 	"connectrpc.com/connect"
 )
@@ -598,7 +598,7 @@ func TestAWorkspaceWhoseMergeFailedTakesTheNextPromptAsAnOrdinaryTurn(t *testing
 // it runs again from the queue, and it is the boot-time recovery sweep
 // (internal/merge/recover.go's recoverDisplaced) that performs the resubmit.
 //
-// THE CRASH LANDS IN A HELD WINDOW, NEVER A RACED ONE. claude-repld's own
+// THE CRASH LANDS IN A HELD WINDOW, NEVER A RACED ONE. agent-repld's own
 // test seam, AGENT_REPL_MERGE_PAUSE_AFTER_CAPTURE, holds a merge run right
 // after it captured and ended the displaced turn, and logs
 // `daemon.merge.capture_pause` once it is held. This test used to race the
@@ -693,7 +693,7 @@ func TestDisplacedTurnCapturedEndedThenResubmittedExactlyOnce(t *testing.T) {
 	w.AwaitRunLogOperation("daemon.merge.capture_pause")
 	w.Kill()
 
-	// Act: a second real claude-repld boots on the SAME state root, store
+	// Act: a second real agent-repld boots on the SAME state root, store
 	// socket and lock dir.
 	d2Opts := w.SuccessorOpts(t)
 	d2Opts.SelfRepo = repo.Dir

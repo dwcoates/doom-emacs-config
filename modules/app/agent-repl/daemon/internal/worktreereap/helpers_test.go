@@ -11,11 +11,11 @@ import (
 	"testing"
 	"time"
 
-	"claude-repld/internal/clock/clocktest"
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/gitclient"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/clock/clocktest"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/gitclient"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
 )
 
 // GIT IS NEVER CALLED: every git fact below is a scripted answer of fakeGit.

@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
 )
 
 // opServing is the operation every serving claim the fleet makes is recorded

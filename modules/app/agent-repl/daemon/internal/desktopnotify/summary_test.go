@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/headless"
-	"claude-repld/internal/ids"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/headless"
+	"agent-repld/internal/ids"
 )
 
 // fakeHeadless answers one scripted response and records the request.

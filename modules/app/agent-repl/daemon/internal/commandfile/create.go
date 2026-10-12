@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"strings"
 
-	"claude-repld/internal/dirpath"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/workspace"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dirpath"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/workspace"
+	"agent-repld/internal/wsm"
 )
 
 // createSpec maps a create entry onto the CreateSpec the CreateWorkspace rpc

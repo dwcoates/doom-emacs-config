@@ -6,8 +6,8 @@ import (
 	"errors"
 	"fmt"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
 )
 
 // THE PARENT AND THE MERGE TARGET ARE ONE FACT, STORED TWICE. A workspace's

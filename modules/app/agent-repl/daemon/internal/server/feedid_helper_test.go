@@ -3,8 +3,8 @@ package server
 import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/internal/feedid"
-	"claude-repld/internal/ids"
+	"agent-repld/internal/feedid"
+	"agent-repld/internal/ids"
 )
 
 // feedIDFor encodes a root-feed row id for one workspace, which is how a test

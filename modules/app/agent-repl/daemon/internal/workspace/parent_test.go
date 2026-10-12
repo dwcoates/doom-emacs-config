@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"claude-repld/internal/ids"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
 )
 
 // retargetChange is a change from the main checkout to a parent workspace.

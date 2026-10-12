@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"claude-repld/internal/atomicfile"
+	"agent-repld/internal/atomicfile"
 )
 
 // LoopbackHost is the only interface the daemon ever binds. The daemon serves

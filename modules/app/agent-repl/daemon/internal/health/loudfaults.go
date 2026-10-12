@@ -5,9 +5,9 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/publish"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/publish"
 )
 
 // THE DAEMON'S STANDING LOUD FAULTS, as Emacs is told them (owner request,

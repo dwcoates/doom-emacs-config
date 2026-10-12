@@ -27,7 +27,7 @@ import (
 
 	"connectrpc.com/connect"
 
-	"claude-repld/integration/harness"
+	"agent-repld/integration/harness"
 )
 
 // slInitAfterFirstTurn is the world every test here opens: one whose shim's

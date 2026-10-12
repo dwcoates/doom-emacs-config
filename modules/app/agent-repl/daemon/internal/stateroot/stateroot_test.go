@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"claude-repld/internal/stateroot"
+	"agent-repld/internal/stateroot"
 )
 
 func TestRootPrecedence(t *testing.T) {

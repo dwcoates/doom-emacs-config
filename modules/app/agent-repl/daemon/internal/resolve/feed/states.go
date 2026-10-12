@@ -5,7 +5,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 	"time"
 
-	"claude-repld/internal/feedid"
+	"agent-repld/internal/feedid"
 )
 
 // The accumulation. Every one of these exists because a frame of an upserted

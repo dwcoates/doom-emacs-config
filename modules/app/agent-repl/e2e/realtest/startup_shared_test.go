@@ -156,7 +156,7 @@ func quitStandingEmacs(ctx context.Context, t *testing.T, client *Client, why st
 // daemonPattern is what a resident daemon looks like to pgrep. It matches
 // bin/realtest.sh's own vendor-guard enumeration and realtest 1's
 // verifyVendorGuard, so all three agree on what "the daemon is running" means.
-const daemonPattern = "claude-repld"
+const daemonPattern = "agent-repld"
 
 // daemonPIDs is every resident daemon currently running.
 //

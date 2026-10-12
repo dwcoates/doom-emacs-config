@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"claude-repld/internal/tempdirs"
+	"agent-repld/internal/tempdirs"
 )
 
 func TestMain(m *testing.M) { os.Exit(Main(m)) }

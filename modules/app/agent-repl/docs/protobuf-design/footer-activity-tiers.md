@@ -557,7 +557,7 @@ unchanged.
     - Workspace-scoped Warn and Error records produce `daemon_warning` and
       `daemon_error`.
       - These must be copied to the footer at one place in
-        `claude-repld.internal.dlog`, where workspace loggers emit, and never
+        `agent-repld.internal.dlog`, where workspace loggers emit, and never
         per call site.
       - The same rule is how faults reach the footer through
         `health.ObserveFaults`.

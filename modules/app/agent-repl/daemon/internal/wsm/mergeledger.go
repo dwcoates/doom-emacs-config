@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // OpenMergeLedger opens a workspace's ledger for one merge lease. Reopening the

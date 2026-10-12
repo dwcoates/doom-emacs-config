@@ -4,13 +4,13 @@
 // Connect API directly, one layer below the webapp (SPEC.md section B,
 // "Frontends: none"). This file closes that gap without duplicating a byte of
 // bring-up: it builds an ordinary World — real store, real sidecar, real
-// claude-repld, real shim over the fake SDK, scripted fake git — and then
+// agent-repld, real shim over the fake SDK, scripted fake git — and then
 // hands that daemon's own loopback address to a vitest child process which
 // mounts the REAL webapp in jsdom against it.
 //
 // The chain under test is therefore:
 //
-//	fake SDK -> real shim -> real store + real sidecar -> real claude-repld
+//	fake SDK -> real shim -> real store + real sidecar -> real agent-repld
 //	         -> real webapp
 //
 // WHY THE LIFECYCLE STAYS HERE: bring-up in this suite is not "start four
@@ -49,7 +49,7 @@ import (
 
 	"connectrpc.com/connect"
 
-	"claude-repld/integration/harness"
+	"agent-repld/integration/harness"
 )
 
 // WebappLayerTimeout bounds the vitest CHILD PROCESS end to end.
@@ -113,7 +113,7 @@ const WebappLayerTimeout = 45 * time.Second
 // WebappLayerHandoverTimeout bounds the RESTART-HANDOVER area's child, which
 // is structurally longer than a functional area's by two whole process
 // lifecycles: a merge landing, the rollout trigger, the incumbent re-execing
-// itself, a second real claude-repld's full boot, the adoption rendezvous, and
+// itself, a second real agent-repld's full boot, the adoption rendezvous, and
 // only then the `transferred` push the page waits on.
 //
 // The child's own budget for that is HANDOVER_TEST_MS in

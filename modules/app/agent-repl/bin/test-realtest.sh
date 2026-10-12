@@ -533,7 +533,7 @@ if [ "${AGENT_REPL_REALTEST_DAEMON_STOP:-}" = "1" ]; then
         exit 1
     fi
     if [ -f "${STUB_PROCS:-}" ] && [ "${STUB_ORDERLY_IGNORED:-}" != "1" ]; then
-        grep -v 'claude-repld' "$STUB_PROCS" > "$STUB_PROCS.next" || true
+        grep -v 'agent-repld' "$STUB_PROCS" > "$STUB_PROCS.next" || true
         mv "$STUB_PROCS.next" "$STUB_PROCS"
     fi
     exit 0
@@ -653,14 +653,14 @@ standing_emacs() { : > "$SCRATCH/alive"; }
 # guarded_daemon_line PID DIR — a daemon of this checkout, carrying the vendor
 # guard, in the stub process table.
 guarded_daemon_line() {
-    printf '%s %s/daemon/bin/claude-repld --state-dir /tmp AGENT_REPL_FORBID_VENDOR_CALLS=1\n' \
+    printf '%s %s/daemon/bin/agent-repld --state-dir /tmp AGENT_REPL_FORBID_VENDOR_CALLS=1\n' \
         "$1" "$(cd "$2/.." && pwd)"
 }
 
 # The refusal hands the owner the one command that clears it: the daemon owns
 # deploys, so the remedy is its `deploy` subcommand.
 test_declining_names_the_daemon_deploy_remedy() {
-    local name="the not-deployed refusal names claude-repld deploy as the remedy"
+    local name="the not-deployed refusal names agent-repld deploy as the remedy"
     local dir out status=0
     dir="$(scratch_bin not-deployed-remedy)"
     prepare_home
@@ -671,7 +671,7 @@ test_declining_names_the_daemon_deploy_remedy() {
         fail "$name" "exit was $status, want $EXIT_DECLINED; output: $out"
         return
     fi
-    if ! grep_in "$out" -qF 'run daemon/bin/claude-repld deploy, then try again'; then
+    if ! grep_in "$out" -qF 'run daemon/bin/agent-repld deploy, then try again'; then
         fail "$name" "the refusal does not name the deploy remedy: $out"
         return
     fi
@@ -968,7 +968,7 @@ test_declines_when_the_daemon_lacks_the_guard() {
     ready_json > "$SCRATCH/readiness.json"
     # The daemon is matched by its path under the module root, which is the
     # copied script's own parent in this arrangement.
-    printf '55501 %s/daemon/bin/claude-repld --state-dir /tmp PATH=/usr/bin\n' \
+    printf '55501 %s/daemon/bin/agent-repld --state-dir /tmp PATH=/usr/bin\n' \
         "$(cd "$dir/.." && pwd)" > "$SCRATCH/procs"
 
     out="$(run_script "$dir")" || status=$?
@@ -988,7 +988,7 @@ test_declines_when_the_daemon_lacks_the_guard() {
 # the machine every time, because the previous sweep's handback deliberately
 # left the owner a guard-free one.
 unguarded_daemon_line() {
-    printf '%s %s/daemon/bin/claude-repld --state-dir /tmp PATH=/usr/bin\n' \
+    printf '%s %s/daemon/bin/agent-repld --state-dir /tmp PATH=/usr/bin\n' \
         "$1" "$(cd "$2/.." && pwd)"
 }
 

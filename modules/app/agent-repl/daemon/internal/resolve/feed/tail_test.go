@@ -10,7 +10,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"claude-repld/internal/feedid"
+	"agent-repld/internal/feedid"
 )
 
 // tailRows adapts a tail's publications to the rows they carry, in order: a

@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"claude-repld/internal/account"
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/account"
+	"agent-repld/internal/dlog"
 )
 
 // LoginSessions is what a completed login begins: the tracker.

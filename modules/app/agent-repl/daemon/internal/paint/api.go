@@ -11,7 +11,7 @@ package paint
 import (
 	"fmt"
 
-	"claude-repld/internal/vocab"
+	"agent-repld/internal/vocab"
 )
 
 // Span is one painted run of text.

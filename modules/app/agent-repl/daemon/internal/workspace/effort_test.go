@@ -9,8 +9,8 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
 
-	"claude-repld/internal/claudesettings"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/claudesettings"
+	"agent-repld/internal/wsm"
 )
 
 const (

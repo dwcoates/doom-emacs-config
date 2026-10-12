@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"claude-repld/internal/ids"
-	"claude-repld/internal/workspace"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/workspace"
+	"agent-repld/internal/wsm"
 )
 
 // skillCreate is VERBATIM what the /create-or-update-workspace skill's

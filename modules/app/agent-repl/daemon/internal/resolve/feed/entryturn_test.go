@@ -5,7 +5,7 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"claude-repld/internal/ids"
+	"agent-repld/internal/ids"
 )
 
 // A LIVE ROW TAKES THE TURN ITS ENTRY NAMES, not the turn in flight.

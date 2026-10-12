@@ -5,7 +5,7 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"claude-repld/internal/feedid"
+	"agent-repld/internal/feedid"
 )
 
 // THE PEER MESSAGE ROW. A message another Claude session sent in draws as its

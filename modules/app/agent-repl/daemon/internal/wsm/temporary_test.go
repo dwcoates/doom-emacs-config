@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/tempdirs"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/tempdirs"
 )
 
 // outsideTheRun is a temporary folder this test run does NOT own: the run's

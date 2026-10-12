@@ -1,7 +1,7 @@
 package deploy
 
 import (
-	"claude-repld/internal/tempdirs/tempdirstest"
+	"agent-repld/internal/tempdirs/tempdirstest"
 	"context"
 	"errors"
 	"fmt"
@@ -16,7 +16,7 @@ import (
 
 	"agentrepl/logging/buildreport"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // fakeLaunchd scripts launchd. NO TEST EVER REACHES THE LIVE LAUNCHD: this is

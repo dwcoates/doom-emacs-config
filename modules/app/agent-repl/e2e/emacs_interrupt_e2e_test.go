@@ -28,7 +28,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"claude-repld/integration/harness"
+	"agent-repld/integration/harness"
 )
 
 // ---------------------------------------------------------------------------

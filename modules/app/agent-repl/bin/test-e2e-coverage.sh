@@ -49,7 +49,7 @@ make_stubs() {
 case "${1:-} ${2:-}" in
     "test -count=1")
         if [ "${GO_STUB_NO_COUNTERS:-0}" != "1" ]; then
-            for binary in claude-repld shim-store shim-claude-sidecar; do
+            for binary in agent-repld shim-store shim-claude-sidecar; do
                 mkdir -p "$AGENT_REPL_E2E_COVERAGE/$binary"
                 : >"$AGENT_REPL_E2E_COVERAGE/$binary/covmeta.deadbeef"
             done
@@ -123,7 +123,7 @@ test_happy_path_reports_every_module() {
     run_coverage "$tree"
 
     if [ "$RUN_RC" -eq 0 ] &&
-        grep -q 'claude-repld: total:' "$tree/stdout" &&
+        grep -q 'agent-repld: total:' "$tree/stdout" &&
         grep -q 'shim-store: total:' "$tree/stdout" &&
         grep -q 'shim-claude-sidecar: total:' "$tree/stdout" &&
         grep -q 'shim: 60.0% (6/10 statements over 1 files)' "$tree/stdout"; then
@@ -140,7 +140,7 @@ test_suite_failure_still_reports_and_fails() {
 
     if [ "$RUN_RC" -ne 0 ] &&
         grep -q 'suite: FAIL' "$tree/stdout" &&
-        grep -q 'claude-repld: total:' "$tree/stdout"; then
+        grep -q 'agent-repld: total:' "$tree/stdout"; then
         pass "a failing suite still reports the coverage it produced"
     else
         fail "a failing suite still reports the coverage it produced"
@@ -153,7 +153,7 @@ test_missing_counters_are_loud() {
     GO_STUB_NO_COUNTERS=1 run_coverage "$tree"
 
     if [ "$RUN_RC" -ne 0 ] &&
-        grep -q 'claude-repld wrote no coverage counters' "$tree/stderr" &&
+        grep -q 'agent-repld wrote no coverage counters' "$tree/stderr" &&
         grep -q 'the shim wrote no v8 coverage' "$tree/stderr"; then
         pass "a system that wrote no counters is reported, never ignored"
     else
@@ -206,7 +206,7 @@ test_failed_npm_deps_abort_before_the_suite() {
 
     if [ "$RUN_RC" -ne 0 ] &&
         grep -q "npm deps could not be ensured" "$tree/stderr" &&
-        [ ! -d "$tree/cov/claude-repld" ]; then
+        [ ! -d "$tree/cov/agent-repld" ]; then
         pass "npm deps that cannot be ensured abort the run before the suite"
     else
         fail "npm deps that cannot be ensured abort the run before the suite"

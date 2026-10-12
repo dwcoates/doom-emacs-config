@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"strings"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // A FAILED DEPLOY ROLLS BACK (owner ruling, 2026-09-28). Before the install

@@ -7,7 +7,7 @@ import (
 
 // EnvTestUnsyncedWrites asks a TEST RUN's store to open its database with
 // SQLite's forced flushes off. Its one accepted value is "1". The daemon's
-// state database answers the same variable (claude-repld's wsm package).
+// state database answers the same variable (agent-repld's wsm package).
 //
 // A test run's databases are thrown away when the run ends, so the fsync per
 // commit buys nothing, and a full run's hundreds of them starved the owner's

@@ -10,7 +10,7 @@ import (
 	"sort"
 	"time"
 
-	"claude-repld/internal/dlog"
+	"agent-repld/internal/dlog"
 )
 
 // encodeEvidence renders a fault's typed-arm fields as the JSON object the

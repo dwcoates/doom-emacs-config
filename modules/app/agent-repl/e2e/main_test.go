@@ -1,4 +1,4 @@
-// Package e2e is the cross-system end-to-end suite: a real claude-repld, a
+// Package e2e is the cross-system end-to-end suite: a real agent-repld, a
 // real shim-store, a real shim-claude-sidecar, and the real TypeScript shim
 // (built from source, running its `--fake` offline scripted vendor),
 // composed exactly as production wires them. Every area test file imports
@@ -28,12 +28,12 @@ import (
 	"sync"
 	"testing"
 
+	"agent-repld/integration/harness"
 	"agentrepl/testrun/testenv"
-	"claude-repld/integration/harness"
 )
 
 // TestMain runs the grep gate, then hands off to harness.MainAt (seam 1),
-// which builds claude-repld (and the fake shim / fake git this package never
+// which builds agent-repld (and the fake shim / fake git this package never
 // uses — they are harmless byproducts of a build routine this suite does not
 // own) before running the suite.
 func TestMain(m *testing.M) {
@@ -135,7 +135,7 @@ func resolveLayout() (layout, error) {
 
 // e2eBinDir holds every binary this package builds itself (the real shim
 // bundle, the real store, the real sidecar), one per `go test` run, shared
-// across every test. claude-repld and the (unused) fake shim/git live in
+// across every test. agent-repld and the (unused) fake shim/git live in
 // harness's OWN temp dir, built by MainAt above.
 //
 // IT LIVES UNDER THE HARNESS'S OWNER-LOCKED RUN ROOT, which MainAt lays out
@@ -204,7 +204,7 @@ func requireNode(t *testing.T) string {
 	return nodeBin
 }
 
-// checkoutEnv is claude-repld's checkout-root override (checkout.Env).
+// checkoutEnv is agent-repld's checkout-root override (checkout.Env).
 //
 // THE CHECKOUT IS WHERE A DEPLOY INSTALLS. The daemon's own deploy judges and
 // installs against it: the daemon binary lands at <checkout>/daemon/bin, and

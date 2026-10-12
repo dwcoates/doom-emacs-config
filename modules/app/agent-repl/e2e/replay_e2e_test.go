@@ -19,7 +19,7 @@ package e2e
 import (
 	"testing"
 
-	"claude-repld/integration/harness"
+	"agent-repld/integration/harness"
 )
 
 // rpTurnPageEntries answers the entry count StartTurn's opening page carried

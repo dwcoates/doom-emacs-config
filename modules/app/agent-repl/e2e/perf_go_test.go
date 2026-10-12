@@ -37,7 +37,7 @@ import (
 
 	"connectrpc.com/connect"
 
-	"claude-repld/integration/harness"
+	"agent-repld/integration/harness"
 )
 
 // ===========================================================================
@@ -264,7 +264,7 @@ func TestPerfFooterFlipOnParticipantLoss(t *testing.T) {
 // result: a near-zero number, for a stated structural reason.
 //
 // The roster is published BEFORE anything is served —
-// `daemon/cmd/claude-repld/graph.go`'s Prime hook calls
+// `daemon/cmd/agent-repld/graph.go`'s Prime hook calls
 // `workspace/register.go:(*verbs).PublishRegistry` ahead of the listener — and
 // `publish.Topic.Subscribe` REPLAYS the latest value to a new subscriber. So a
 // client subscribing after boot gets the roster immediately with no wait, and

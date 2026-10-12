@@ -11,11 +11,11 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"claude-repld/internal/account"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/prompts"
-	"claude-repld/internal/sourcescan"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/account"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/prompts"
+	"agent-repld/internal/sourcescan"
+	"agent-repld/internal/wsm"
 )
 
 // mainWorktree makes a directory that looks like a repository's MAIN worktree,

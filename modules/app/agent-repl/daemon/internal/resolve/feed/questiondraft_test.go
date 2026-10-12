@@ -11,7 +11,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 	"google.golang.org/protobuf/proto"
 
-	"claude-repld/internal/feedid"
+	"agent-repld/internal/feedid"
 )
 
 // THE QUESTION DRAFT: one daemon-owned record per standing batch, edited by the

@@ -9,10 +9,10 @@ import (
 	"sync"
 	"time"
 
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/ids"
-	"claude-repld/internal/prompts"
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/prompts"
+	"agent-repld/internal/wsm"
 )
 
 // This file holds the orchestrator's shape: its state, its construction, and

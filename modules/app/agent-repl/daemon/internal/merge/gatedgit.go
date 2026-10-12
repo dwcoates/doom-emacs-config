@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"claude-repld/internal/gitclient"
+	"agent-repld/internal/gitclient"
 )
 
 // This file is a run's GIT GATE: every git command a merge run makes goes

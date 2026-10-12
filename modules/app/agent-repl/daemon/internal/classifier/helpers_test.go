@@ -5,9 +5,9 @@ import (
 	"errors"
 	"testing"
 
-	"claude-repld/internal/envc"
-	"claude-repld/internal/headless"
-	"claude-repld/internal/prompts"
+	"agent-repld/internal/envc"
+	"agent-repld/internal/headless"
+	"agent-repld/internal/prompts"
 )
 
 // routingBrief is the loaded brief every vendor-judge subject is served, so no

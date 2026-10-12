@@ -6,7 +6,7 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"claude-repld/internal/wsm"
+	"agent-repld/internal/wsm"
 )
 
 const validSaid = `{"content":{"blocks":[{"text":{"text":"hello"}}]}}`
