@@ -2,8 +2,9 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { forkFakeSession } from "../../src/fake/fork.js";
-import { transcriptPath } from "../../src/fake/vendor-files.js";
+
 import { testTempDir } from "../temp-dir.js";
+import { transcriptPath } from "../../src/engine/vendor-paths.js";
 
 const PARENT_ID = "parent-session";
 const PARENT_DIR = "/repo/parent";

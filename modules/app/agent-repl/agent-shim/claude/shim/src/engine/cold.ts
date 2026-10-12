@@ -32,7 +32,6 @@
  *     records it per user record and the SDK does not restore it on resume).
  */
 import { readFileSync } from "node:fs";
-import path from "node:path";
 import { create } from "@bufbuild/protobuf";
 import { bindLog } from "../log.js";
 import { SYNTHETIC_MODEL } from "../model.js";
@@ -50,23 +49,6 @@ const LOGGER = bindLog({ component: "shim-engine-cold", operation: "shim.engine.
 export const CACHE_TTL_5M_MS = 5 * 60 * 1000;
 /** The 1-hour ephemeral cache tier, in milliseconds. */
 export const CACHE_TTL_1H_MS = 60 * 60 * 1000;
-
-/**
- * The vendor's project-directory slug: every byte outside `[A-Za-z0-9]`
- * becomes `-`.
- *
- * Underscores included, case preserved, existing dashes untouched — verified
- * against the live `~/.claude/projects` tree, where `/Users/x/.config/y`
- * appears as `-Users-x--config-y`.
- */
-export function cwdSlug(cwd: string): string {
-  return cwd.replace(/[^A-Za-z0-9]/g, "-");
-}
-
-/** The session transcript the vendor writes for one conversation. */
-export function transcriptPath(configDir: string, cwd: string, vendorSessionId: string): string {
-  return path.join(configDir, "projects", cwdSlug(cwd), `${vendorSessionId}.jsonl`);
-}
 
 /**
  * The OPENING WORDS cap: 120 characters.

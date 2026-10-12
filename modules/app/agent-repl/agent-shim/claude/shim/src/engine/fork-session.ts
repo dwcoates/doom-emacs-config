@@ -19,8 +19,9 @@ import path from "node:path";
 import type { shimv1 } from "../proto.js";
 import { bindLog } from "../log.js";
 import { workspaceLockKey } from "../locks.js";
-import { transcriptPath } from "./cold.js";
+
 import { createAgentIdentityStore } from "./identity.js";
+import { transcriptPath } from "./vendor-paths.js";
 
 const LOGGER = bindLog({ component: "shim-engine-fork-session", operation: "shim.engine.fork_session" });
 

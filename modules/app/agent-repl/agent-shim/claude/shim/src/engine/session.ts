@@ -131,7 +131,6 @@ import {
   judgeCold,
   readTranscriptFacts,
   sessionCold,
-  transcriptPath,
   underColdGateFloor,
   type TranscriptFacts,
   type TranscriptLine,
@@ -184,6 +183,7 @@ import {
   type OpenTurn,
   type SessionContext,
 } from "./turn.js";
+import { transcriptPath } from "./vendor-paths.js";
 
 const LOGGER = bindLog({ component: "shim-engine-session", operation: "shim.engine.session" });
 
