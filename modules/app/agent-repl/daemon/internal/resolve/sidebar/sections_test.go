@@ -375,7 +375,7 @@ func TestTheRepoGroupingDrawsEveryWorkspaceOfAGoodRegistry(t *testing.T) {
 	// Assert.
 	got := rowNames(repoRows(t, latest(t, r)))
 	// The order is the roster's own; the subject is that nothing is MISSING.
-	if !equal(got, []string{"one", "three", "two"}) {
+	if !equal(got, []string{"one", "two", "three"}) {
 		t.Fatalf("repo grouping rows = %v, want every workspace", got)
 	}
 	if hasError(surfaces.Records(), "daemon.sidebar.repository_view") {
@@ -781,7 +781,7 @@ func TestMaturityViewNestsAFamilyWithinItsStage(t *testing.T) {
 	parent := workspace("w-parent", "parent")
 	parent.LastActivityAt = at(0)
 	child := workspace("w-child", "child")
-	child.ParentBranch = parent.Branch
+	child.Parent = &parent.ID
 	child.LastActivityAt = at(0)
 
 	// Act.
@@ -800,7 +800,7 @@ func TestMaturityViewMakesAChildWhoseParentIsInAnotherStageARoot(t *testing.T) {
 	parent := workspace("w-parent", "parent")
 	parent.LastActivityAt = at(0)
 	child := workspace("w-child", "child")
-	child.ParentBranch = parent.Branch
+	child.Parent = &parent.ID
 
 	// Act.
 	r.SetRegistry(registry(parent, child))
@@ -1028,17 +1028,17 @@ func TestRecentlyMergedGroupKeepsTheRepositoryDir(t *testing.T) {
 	}
 }
 
-func TestRecentlyMergedGroupOrdersItsRowsMostRecentFirst(t *testing.T) {
-	// Arrange.
+func TestRecentlyMergedGroupOrdersItsRowsByPlace(t *testing.T) {
+	// Arrange: the later merge holds the later place.
 	r, _ := newResolver(t)
 
 	// Act.
-	r.SetRegistry(registry(mergedIn("older", repo, 0), mergedIn("newer", repo, time.Minute)))
+	r.SetRegistry(registry(placed(mergedIn("older", repo, 0), 1), placed(mergedIn("newer", repo, time.Minute), 2)))
 
-	// Assert.
+	// Assert: registry order, not merge time (owner ruling, 2026-10-11).
 	got := rowNames(latest(t, r).GetRecentlyMerged().GetGroups()[0].GetRows().GetRows())
-	if !equal(got, []string{"newer", "older"}) {
-		t.Fatalf("group rows = %v, want most recent first", got)
+	if !equal(got, []string{"older", "newer"}) {
+		t.Fatalf("group rows = %v, want registry order", got)
 	}
 }
 

@@ -71,6 +71,12 @@ message WorkspaceRoster {
   // exactly as for a workspace of a collapsed repository section. A merged
   // workspace is in recently_merged, never here. Always set.
   RosterHiddenSection hidden = 9;
+  // THE EDITOR'S TAB BAR, in registry order. The registry holds one order
+  // of every workspace; this is that order restricted to open workspaces,
+  // and it is independent of the groupings above, so repositories
+  // interleave and a child need not follow its parent. Clients draw it as
+  // sent and never derive a tab order from the groupings. Always set.
+  RosterTabBar tab_bar = 10;
   // The selected workspace — the last SelectWorkspace the daemon received.
   // UNSET when there is none.
   optional RosterCurrentWorkspace current = 4;
@@ -93,6 +99,39 @@ message RosterShownTask {}
 
 // The maturity grouping is shown. DELIBERATELY EMPTY: the arm is the fact.
 message RosterShownMaturity {}
+
+// Every open workspace, one tab each, first tab first. A closed workspace
+// has no tab and is absent. Withheld tabs stay in the list so a client
+// cycling from a withheld current workspace still knows its neighbours.
+message RosterTabBar {
+  repeated RosterTab tabs = 1;
+}
+
+// One open workspace's tab.
+message RosterTab {
+  // Which workspace the tab is. The row carrying its name and status is
+  // the one in the groupings with the same ref.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // Whether the tab is drawn. Only a drawn tab takes a number and a stop
+  // for left/right navigation; the two withheld arms say why it is not.
+  oneof visibility {
+    RosterTabDrawn drawn = 2;
+    RosterTabWithheldCollapsed withheld_collapsed = 3;
+    RosterTabWithheldHidden withheld_hidden = 4;
+  }
+}
+
+// The tab is drawn, numbered by its position among drawn tabs.
+message RosterTabDrawn {}
+
+// The tab is not drawn because its repository's sidebar section is
+// collapsed (RosterRepoSection.fold). It returns when the section expands.
+message RosterTabWithheldCollapsed {}
+
+// The tab is not drawn because the user hid the workspace
+// (agentrepl.v1.SetWorkspaceHidden). It returns when the workspace is
+// shown again, at its registry place.
+message RosterTabWithheldHidden {}
 
 // The priority badge's drawn label.
 message RosterRowPriorityBadge {

@@ -5,9 +5,9 @@
 ;; The protojson CODEC for the agentrepl.v1 WORKSPACE VERBS and DAEMON-ADMIN
 ;; verbs Emacs calls: CreateWorkspace, RegisterRepository, OpenWorkspace,
 ;; CloseWorkspace, KillWorkspace, NukeWorkspace, MergeWorkspace,
-;; RestartWorkspace, SetWorkspacePriority, SetWorkspaceHidden, SubmitPrompt,
-;; UpdateShutdownSchedule, Deploy, UpdateMergeQueue, DaemonHealth and
-;; SessionHealth.
+;; RestartWorkspace, SetWorkspacePriority, SetWorkspaceHidden,
+;; MoveWorkspace, SubmitPrompt, UpdateShutdownSchedule, Deploy,
+;; UpdateMergeQueue, DaemonHealth and SessionHealth.
 ;;
 ;; SCOPE.  This file owns exactly the messages declared in those endpoint
 ;; protos.  The shared leaf vocabularies — WorkspaceRef, RepositoryRef,
@@ -419,6 +419,20 @@ fork without a parent is unrepresentable."
   "Encode CreateWorkspaceRequest's `parent' use site from VALUE."
   (agent-repl-wire-encode-create-workspace-parent value))
 
+(defun agent-repl-wire-encode-create-workspace-fork-source-workspace (ref)
+  "Encode CreateWorkspaceForkSource's `workspace' use site from REF."
+  (agent-repl-wire-encode-workspace-ref ref))
+
+(defun agent-repl-wire-encode-create-workspace-fork-source (ref)
+  "Encode CreateWorkspaceForkSource from the source workspace's REF."
+  (list (cons 'workspace
+              (agent-repl-wire-encode-create-workspace-fork-source-workspace
+               (agent-repl-wire-verbs--require "CreateWorkspaceForkSource" "workspace" ref)))))
+
+(defun agent-repl-wire-encode-create-workspace-request-fork-source (ref)
+  "Encode CreateWorkspaceRequest's `fork_source' use site from REF."
+  (agent-repl-wire-encode-create-workspace-fork-source ref))
+
 (defun agent-repl-wire-encode-create-workspace-request-priority (priority)
   "Encode CreateWorkspaceRequest's `priority' use site from PRIORITY."
   (agent-repl-wire-encode-workspace-priority priority))
@@ -429,8 +443,11 @@ fork without a parent is unrepresentable."
 
 (defun agent-repl-wire-encode-create-workspace-request (request)
   "Encode CreateWorkspaceRequest from plist REQUEST.
-REQUEST is (:repository REPO-REF :form ONEOF :parent PARENT :model STRING
-:priority PRIORITY :allow-ungated FLAG).  The repository and the form arm
+REQUEST is (:repository REPO-REF :form ONEOF :parent PARENT
+:fork-source WORKSPACE-REF :model STRING :priority PRIORITY :allow-ungated
+FLAG).  FORK-SOURCE is the workspace whose conversation a fork into the
+primary branch copies; it never rides beside a parent.  The repository
+and the form arm
 are required — the arm IS the creation form, so a request without one is
 refused before it can be sent.  Everything else is optional and absent
 means what the proto says absence means: the daemon's default model, an
@@ -452,6 +469,10 @@ unprioritized workspace, a top-level workspace, no ungated consent."
     (when (plist-get request :parent)
       (push (cons 'parent (agent-repl-wire-encode-create-workspace-request-parent
                            (plist-get request :parent)))
+            out))
+    (when (plist-get request :fork-source)
+      (push (cons 'forkSource (agent-repl-wire-encode-create-workspace-request-fork-source
+                               (plist-get request :fork-source)))
             out))
     (when (plist-get request :model)
       (push (cons 'model (plist-get request :model)) out))
@@ -528,6 +549,49 @@ The base ref does not resolve in the repository."
     (agent-repl-wire-verbs--check-keys message json '(ref))
     (list :ref (agent-repl-wire-verbs--decode-string
                        message 'ref json))))
+
+(defun agent-repl-wire-decode-create-workspace-base-ref-off-primary-branch (json)
+  "Decode CreateWorkspaceBaseRefOffPrimaryBranch from JSON into a plist
+\(`:ref' `:primary-branch').
+A top-level workspace's base ref is not on the primary branch."
+  (let ((message "CreateWorkspaceBaseRefOffPrimaryBranch"))
+    (agent-repl-wire-verbs--check-keys message json '(ref primaryBranch))
+    (list :ref (agent-repl-wire-verbs--decode-string message 'ref json)
+          :primary-branch (agent-repl-wire-verbs--decode-string message 'primaryBranch json))))
+
+(defun agent-repl-wire-decode-create-workspace-fork-source-ref (json)
+  "Decode a fork-source arm's `workspace' use site from JSON."
+  (agent-repl-wire-decode-workspace-ref json))
+
+(defun agent-repl-wire-decode-create-workspace-unknown-fork-source (json)
+  "Decode CreateWorkspaceUnknownForkSource from JSON into (:workspace REF).
+The fork source workspace is not in the daemon's registry."
+  (let ((message "CreateWorkspaceUnknownForkSource"))
+    (agent-repl-wire-verbs--check-keys message json '(workspace))
+    (list :workspace (agent-repl-wire-verbs--decode-optional-message
+                      message 'workspace json
+                      #'agent-repl-wire-decode-create-workspace-fork-source-ref))))
+
+(defun agent-repl-wire-decode-create-workspace-fork-source-has-no-conversation (json)
+  "Decode CreateWorkspaceForkSourceHasNoConversation from JSON into
+\(:workspace REF).  The fork source workspace has no conversation to copy."
+  (let ((message "CreateWorkspaceForkSourceHasNoConversation"))
+    (agent-repl-wire-verbs--check-keys message json '(workspace))
+    (list :workspace (agent-repl-wire-verbs--decode-optional-message
+                      message 'workspace json
+                      #'agent-repl-wire-decode-create-workspace-fork-source-ref))))
+
+(defun agent-repl-wire-decode-create-workspace-error-base-ref-off-primary-branch (json)
+  "Decode CreateWorkspaceError's `base_ref_off_primary_branch' cause arm."
+  (agent-repl-wire-decode-create-workspace-base-ref-off-primary-branch json))
+
+(defun agent-repl-wire-decode-create-workspace-error-unknown-fork-source (json)
+  "Decode CreateWorkspaceError's `unknown_fork_source' cause arm."
+  (agent-repl-wire-decode-create-workspace-unknown-fork-source json))
+
+(defun agent-repl-wire-decode-create-workspace-error-fork-source-has-no-conversation (json)
+  "Decode CreateWorkspaceError's `fork_source_has_no_conversation' cause arm."
+  (agent-repl-wire-decode-create-workspace-fork-source-has-no-conversation json))
 
 (defun agent-repl-wire-decode-create-workspace-worktree-creation-failed (json)
   "Decode CreateWorkspaceWorktreeCreationFailed from JSON into a plist
@@ -639,7 +703,7 @@ temporary directory; JSON carries the canonical `dir' and `temporary_root'."
 THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
 arm this codec does not know is refused as an unknown field."
   (let ((message "CreateWorkspaceError"))
-    (agent-repl-wire-verbs--check-keys message json '(ungatedWithoutConsent noSlug forkParentHasNoConversation briefMissing unknownRepository unknownParent baseRefUnresolved worktreeCreationFailed spawnFailed oneShotPolicyMissing namingFailed insideTemporaryDirectory))
+    (agent-repl-wire-verbs--check-keys message json '(ungatedWithoutConsent noSlug forkParentHasNoConversation briefMissing unknownRepository unknownParent baseRefUnresolved worktreeCreationFailed spawnFailed oneShotPolicyMissing namingFailed insideTemporaryDirectory baseRefOffPrimaryBranch unknownForkSource forkSourceHasNoConversation))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
            message "cause" json
@@ -654,7 +718,10 @@ arm this codec does not know is refused as an unknown field."
          (list 'spawnFailed :spawn-failed #'agent-repl-wire-decode-create-workspace-error-spawn-failed)
          (list 'oneShotPolicyMissing :one-shot-policy-missing #'agent-repl-wire-decode-create-workspace-error-one-shot-policy-missing)
          (list 'namingFailed :naming-failed #'agent-repl-wire-decode-create-workspace-error-naming-failed)
-         (list 'insideTemporaryDirectory :inside-temporary-directory #'agent-repl-wire-decode-create-workspace-error-inside-temporary-directory))))))
+         (list 'insideTemporaryDirectory :inside-temporary-directory #'agent-repl-wire-decode-create-workspace-error-inside-temporary-directory)
+         (list 'baseRefOffPrimaryBranch :base-ref-off-primary-branch #'agent-repl-wire-decode-create-workspace-error-base-ref-off-primary-branch)
+         (list 'unknownForkSource :unknown-fork-source #'agent-repl-wire-decode-create-workspace-error-unknown-fork-source)
+         (list 'forkSourceHasNoConversation :fork-source-has-no-conversation #'agent-repl-wire-decode-create-workspace-error-fork-source-has-no-conversation))))))
 
 (defun agent-repl-wire-decode-create-workspace-response-success (json)
   "Decode CreateWorkspaceResponse's `success' arm from JSON."
@@ -1988,6 +2055,126 @@ arm this codec does not know is refused as an unknown field."
    "SetWorkspacePriorityResponse" json
    #'agent-repl-wire-decode-set-workspace-priority-response-success
    #'agent-repl-wire-decode-set-workspace-priority-response-error))
+
+
+;;;; ---- MoveWorkspace --------------------------------------------
+
+(defun agent-repl-wire-encode-move-workspace-request-workspace (ref)
+  "Encode MoveWorkspaceRequest's `workspace' use site from REF."
+  (agent-repl-wire-encode-workspace-ref ref))
+
+(defun agent-repl-wire-encode-move-workspace-request-target (ref)
+  "Encode MoveWorkspaceRequest's `target' use site from REF."
+  (agent-repl-wire-encode-workspace-ref ref))
+
+(defun agent-repl-wire-encode-move-workspace-request (request)
+  "Encode MoveWorkspaceRequest from plist REQUEST.
+REQUEST is (:workspace REF :target REF): the workspace to move and the one
+whose place in the registry order it takes.  Both are required."
+  (let ((message "MoveWorkspaceRequest"))
+    (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.verbs-encode-move-workspace-request")
+    (list (cons 'workspace
+                (agent-repl-wire-encode-move-workspace-request-workspace
+                 (agent-repl-wire-verbs--require
+                  message "workspace" (plist-get request :workspace))))
+          (cons 'target
+                (agent-repl-wire-encode-move-workspace-request-target
+                 (agent-repl-wire-verbs--require
+                  message "target" (plist-get request :target)))))))
+
+(defun agent-repl-wire-decode-move-workspace-success (json)
+  "Decode MoveWorkspaceSuccess from JSON.
+Empty: the roster push carries the new order."
+  (agent-repl-wire-verbs--decode-empty "MoveWorkspaceSuccess" json))
+
+(defun agent-repl-wire-decode-move-workspace-unknown-workspace-workspace (json)
+  "Decode MoveWorkspaceUnknownWorkspace's `workspace' use site from JSON."
+  (agent-repl-wire-decode-workspace-ref json))
+
+(defun agent-repl-wire-decode-move-workspace-unknown-workspace (json)
+  "Decode MoveWorkspaceUnknownWorkspace from JSON into (:workspace REF).
+The ref the registry does not hold."
+  (let ((message "MoveWorkspaceUnknownWorkspace"))
+    (agent-repl-wire-verbs--check-keys message json '(workspace))
+    (list :workspace (agent-repl-wire-verbs--decode-required-message
+                      message 'workspace json
+                      #'agent-repl-wire-decode-move-workspace-unknown-workspace-workspace))))
+
+(defun agent-repl-wire-decode-move-workspace-workspace-ref-mismatch-workspace (json)
+  "Decode MoveWorkspaceWorkspaceRefMismatch's `workspace' use site from
+JSON."
+  (agent-repl-wire-decode-workspace-ref json))
+
+(defun agent-repl-wire-decode-move-workspace-workspace-ref-mismatch (json)
+  "Decode MoveWorkspaceWorkspaceRefMismatch from JSON into a plist
+\(`:workspace' `:registry-dir').
+The mismatched ref and the dir the registry holds for its id."
+  (let ((message "MoveWorkspaceWorkspaceRefMismatch"))
+    (agent-repl-wire-verbs--check-keys message json '(workspace registryDir))
+    (list :workspace (agent-repl-wire-verbs--decode-required-message
+                      message 'workspace json
+                      #'agent-repl-wire-decode-move-workspace-workspace-ref-mismatch-workspace)
+          :registry-dir (agent-repl-wire-verbs--decode-string
+                         message 'registryDir json))))
+
+(defun agent-repl-wire-decode-move-workspace-transferring-away (json)
+  "Decode MoveWorkspaceTransferringAway from JSON into (:address).
+This daemon released a workspace to a successor; dial `address'."
+  (let ((message "MoveWorkspaceTransferringAway"))
+    (agent-repl-wire-verbs--check-keys message json '(address))
+    (list :address (agent-repl-wire-verbs--decode-string
+                    message 'address json))))
+
+(defun agent-repl-wire-decode-move-workspace-not-yet-adopted (json)
+  "Decode MoveWorkspaceNotYetAdopted from JSON.  Empty: adoption of a
+named workspace is still in progress."
+  (agent-repl-wire-verbs--decode-empty "MoveWorkspaceNotYetAdopted" json))
+
+(defun agent-repl-wire-decode-move-workspace-error-unknown-workspace (json)
+  "Decode MoveWorkspaceError's `unknown_workspace' cause arm from JSON."
+  (agent-repl-wire-decode-move-workspace-unknown-workspace json))
+
+(defun agent-repl-wire-decode-move-workspace-error-workspace-ref-mismatch (json)
+  "Decode MoveWorkspaceError's `workspace_ref_mismatch' cause arm from
+JSON."
+  (agent-repl-wire-decode-move-workspace-workspace-ref-mismatch json))
+
+(defun agent-repl-wire-decode-move-workspace-error-transferring-away (json)
+  "Decode MoveWorkspaceError's `transferring_away' cause arm from JSON."
+  (agent-repl-wire-decode-move-workspace-transferring-away json))
+
+(defun agent-repl-wire-decode-move-workspace-error-not-yet-adopted (json)
+  "Decode MoveWorkspaceError's `not_yet_adopted' cause arm from JSON."
+  (agent-repl-wire-decode-move-workspace-not-yet-adopted json))
+
+(defun agent-repl-wire-decode-move-workspace-error (json)
+  "Decode MoveWorkspaceError from JSON into (:cause (:arm ARM :value V)).
+THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
+arm this codec does not know is refused as an unknown field."
+  (let ((message "MoveWorkspaceError"))
+    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted))
+    (list :cause
+          (agent-repl-wire-verbs--decode-oneof
+           message "cause" json
+           (list (list 'unknownWorkspace :unknown-workspace #'agent-repl-wire-decode-move-workspace-error-unknown-workspace)
+                 (list 'workspaceRefMismatch :workspace-ref-mismatch #'agent-repl-wire-decode-move-workspace-error-workspace-ref-mismatch)
+                 (list 'transferringAway :transferring-away #'agent-repl-wire-decode-move-workspace-error-transferring-away)
+                 (list 'notYetAdopted :not-yet-adopted #'agent-repl-wire-decode-move-workspace-error-not-yet-adopted))))))
+
+(defun agent-repl-wire-decode-move-workspace-response-success (json)
+  "Decode MoveWorkspaceResponse's `success' arm from JSON."
+  (agent-repl-wire-decode-move-workspace-success json))
+
+(defun agent-repl-wire-decode-move-workspace-response-error (json)
+  "Decode MoveWorkspaceResponse's `error' arm from JSON."
+  (agent-repl-wire-decode-move-workspace-error json))
+
+(defun agent-repl-wire-decode-move-workspace-response (json)
+  "Decode MoveWorkspaceResponse from JSON into (:arm ARM :value V)."
+  (agent-repl-wire-verbs--decode-result
+   "MoveWorkspaceResponse" json
+   #'agent-repl-wire-decode-move-workspace-response-success
+   #'agent-repl-wire-decode-move-workspace-response-error))
 
 
 ;;;; ---- RegisterRepository ---------------------------------------------

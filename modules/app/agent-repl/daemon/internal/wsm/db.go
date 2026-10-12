@@ -61,7 +61,8 @@ type DB interface {
 	SetCurrent(ctx context.Context, id WorkspaceID, at time.Time) error
 	// Current reports the currently selected workspace, nil when none is.
 	Current(ctx context.Context) (*WorkspaceID, error)
-	// SetPriority sets or clears a workspace's roster priority.
+	// SetPriority sets or clears a workspace's priority; setting one moves the
+	// workspace to second-to-last within that priority.
 	SetPriority(ctx context.Context, id WorkspaceID, p *Priority) error
 	// SetHidden records whether a workspace sits in the roster's hidden
 	// section; an unknown workspace is ErrNotFound.
@@ -76,6 +77,10 @@ type DB interface {
 	// still stands as the retarget left it; stale reports a retarget that
 	// has since been superseded, which is left alone.
 	RestoreParent(ctx context.Context, change ParentChange) (stale bool, err error)
+	// MovePlace moves workspace ws onto target's place in the registry order,
+	// the workspaces between shifting one step toward the place ws left; an
+	// unknown id is ErrNotFound and nothing is written.
+	MovePlace(ctx context.Context, ws, target WorkspaceID) error
 	// SetAttention sets or clears the roster's attention marker.
 	SetAttention(ctx context.Context, id WorkspaceID, on bool) error
 	// SetResult records, or clears with nil, the roster's last turn result.

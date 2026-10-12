@@ -129,8 +129,8 @@ func TestSetPriorityClearsThePriority(t *testing.T) {
 }
 
 func TestSetPriorityRepublishesTheRoster(t *testing.T) {
-	// Arrange: clients follow roster order strictly, so the order changing is
-	// a roster push.
+	// Arrange: the row draws the priority badge, so a priority change is a
+	// roster push.
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
 	priority := wsm.PriorityP2
@@ -946,5 +946,67 @@ func TestSetHiddenSurfacesAFailedWriteAtError(t *testing.T) {
 	}
 	if len(f.sidebar.registries) != 0 {
 		t.Fatalf("roster republications = %d, want none for a failed write", len(f.sidebar.registries))
+	}
+}
+
+func TestMoveMovesTheWorkspaceAndRepublishes(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.workspace("w2", t.TempDir())
+
+	// Act.
+	if err := f.verbs.Move(context.Background(), "w1", "w2"); err != nil {
+		t.Fatalf("Move: %v", err)
+	}
+
+	// Assert.
+	if want := [][2]ids.WorkspaceID{{"w1", "w2"}}; !slices.Equal(f.db.moves, want) {
+		t.Fatalf("moves = %v, want %v", f.db.moves, want)
+	}
+	if len(f.sidebar.registries) != 1 {
+		t.Fatalf("roster republications = %d, want exactly one", len(f.sidebar.registries))
+	}
+	if !hasRecord(f, dlog.LevelInfo, opMove) {
+		t.Fatal("the move was not recorded at info")
+	}
+}
+
+func TestMoveRefusesAWorkspaceThisDaemonDoesNotServe(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.workspace("w2", t.TempDir())
+	f.owner.standing = StandingTransferringAway
+
+	// Act.
+	err := f.verbs.Move(context.Background(), "w1", "w2")
+
+	// Assert.
+	asRefusal(t, err, ArmTransferringAway)
+	if len(f.db.moves) != 0 {
+		t.Fatalf("a refused move wrote %v", f.db.moves)
+	}
+}
+
+func TestMoveSurfacesAStoreFailure(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.workspace("w2", t.TempDir())
+	f.db.moveErr = errors.New("disk on fire")
+
+	// Act.
+	err := f.verbs.Move(context.Background(), "w1", "w2")
+
+	// Assert.
+	if err == nil || !errors.Is(err, f.db.moveErr) {
+		t.Fatalf("error = %v, want the store's failure", err)
+	}
+	if len(f.sidebar.registries) != 0 {
+		t.Fatalf("a failed move republished %d times", len(f.sidebar.registries))
+	}
+	if !loggedAtError(f, opMove) {
+		t.Fatal("the store failure was not logged at error")
 	}
 }

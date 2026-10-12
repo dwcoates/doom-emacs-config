@@ -64,13 +64,17 @@ COLLAPSED non-nil puts it on the `repository_collapsed' arm."
         :rows (list :rows rows)
         :drawn (list :arm (if collapsed :repository-collapsed :shown) :value nil)))
 
-(cl-defun agent-repl-test-roster--roster (&key sections hidden merged merged-groups current)
+(cl-defun agent-repl-test-roster--roster (&key sections hidden merged merged-groups current tab-bar)
   "Return a decoded `WorkspaceRoster' plist from SECTIONS, HIDDEN, MERGED and CURRENT.
 HIDDEN is the hidden section's rows; the section itself is always there,
 expanded, as the daemon always sends it.  MERGED is the recently-merged
 rows, carried in one shown group; MERGED-GROUPS, when given, is the band's
-groups instead."
+groups instead.  TAB-BAR is the daemon's tab bar, defaulting to the
+fixture's rows in the order it lists them (`agent-repl-test--tab-bar-of'),
+a collapsed merged group's rows withheld."
   (list :repository (list :sections sections)
+        :tab-bar (or tab-bar (agent-repl-test--tab-bar-of
+                              sections hidden merged merged-groups))
         ;; The task view is deliberately POPULATED in these fixtures: it is
         ;; the same workspaces regrouped, and the walk must ignore it.
         :task (list :sections
@@ -2546,6 +2550,65 @@ saying the roster had been asked for one and declined."
       ;; Assert
       (should-not (seq-some (lambda (text) (string-search "elisp.roster.no-tab:" text))
                             logs)))))
+
+;;;; ---- The tab bar's order is the daemon's ----
+
+(defun agent-repl-test-roster--tab (id &optional arm)
+  "Return a decoded `RosterTab' for workspace ID with visibility ARM."
+  (list :workspace (list :id id :dir (concat "/w/" id))
+        :visibility (list :arm (or arm :drawn) :value nil)))
+
+(ert-deftest agent-repl-test-roster-desired-tabs-follow-the-tab-bar-not-the-sections ()
+  "The tabs come in the daemon's tab-bar order, whatever order the sections walk."
+  ;; Arrange: the sections walk a, b, c; the registry puts c first.
+  (agent-repl-test-roster--with-editor
+    (let ((roster (agent-repl-test-roster--roster
+                   :sections (list (agent-repl-test-roster--section
+                                    "repo" (list (agent-repl-test-roster--row "a" "a" :ready)
+                                                 (agent-repl-test-roster--row "b" "b" :ready)
+                                                 (agent-repl-test-roster--row "c" "c" :ready))))
+                   :tab-bar (list :tabs (list (agent-repl-test-roster--tab "c")
+                                              (agent-repl-test-roster--tab "a")
+                                              (agent-repl-test-roster--tab "b"))))))
+      ;; Act
+      (let ((ids (mapcar (lambda (tab) (plist-get tab :id))
+                         (agent-repl-roster-desired-tabs roster))))
+        ;; Assert
+        (should (equal ids '("c" "a" "b")))))))
+
+(ert-deftest agent-repl-test-roster-a-withheld-tab-is-collapsed ()
+  "A tab the daemon withholds keeps its tab but comes back `:collapsed'."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let ((roster (agent-repl-test-roster--roster
+                   :sections (list (agent-repl-test-roster--section
+                                    "repo" (list (agent-repl-test-roster--row "a" "a" :ready)
+                                                 (agent-repl-test-roster--row "h" "h" :ready))))
+                   :tab-bar (list :tabs (list (agent-repl-test-roster--tab "a")
+                                              (agent-repl-test-roster--tab "h" :withheld-hidden))))))
+      ;; Act
+      (let ((collapsed (mapcar (lambda (tab) (cons (plist-get tab :id) (plist-get tab :collapsed)))
+                               (agent-repl-roster-desired-tabs roster))))
+        ;; Assert
+        (should (equal collapsed '(("a") ("h" . t))))))))
+
+(ert-deftest agent-repl-test-roster-a-tab-with-no-row-is-recorded-at-error ()
+  "A tab naming a workspace no grouping draws is a broken roster, said loudly."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let (errors)
+      (cl-letf (((symbol-function 'agent-repl--error)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) errors))))
+        ;; Act
+        (let ((tabs (agent-repl-roster-desired-tabs
+                     (agent-repl-test-roster--roster
+                      :sections (list (agent-repl-test-roster--section
+                                       "repo" (list (agent-repl-test-roster--row "a" "a" :ready))))
+                      :tab-bar (list :tabs (list (agent-repl-test-roster--tab "ghost")
+                                                 (agent-repl-test-roster--tab "a")))))))
+          ;; Assert
+          (should (equal (mapcar (lambda (tab) (plist-get tab :id)) tabs) '("a")))))
+      (should (member "elisp.roster.tab-without-row: id=ghost" errors)))))
 
 ;;;; ---- Opening a workspace opens its panels (owner ruling 2026-09-13, #6) ----
 

@@ -512,6 +512,26 @@ model as the webapp."
                                                 daemon "SelectWorkspace")))
                      (plist-get ref :id))))))
 
+;;;; ---- MoveWorkspace ----
+
+(ert-deftest agent-repl-itest-verbs-move-sends-both-refs ()
+  "A move sends the workspace's ref and the target's over the wire."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-workspace daemon ref
+      (let ((host-ref (symbol-function 'agent-repl-host-ref))
+            (other '(:id "ws-itest-other" :dir "/tmp/itest-other")))
+        (cl-letf (((symbol-function 'agent-repl-host-ref)
+                   (lambda (ws) (if (equal ws "itest-other") other (funcall host-ref ws))))
+                  ((symbol-function 'agent-repl--ws-require-known) (lambda (&rest _) nil)))
+          ;; Act.
+          (agent-repl-verb-move agent-repl-itest-verbs--ws "itest-other")
+          (agent-repl-itest--await-call daemon "MoveWorkspace"))
+        ;; Assert.
+        (let ((body (agent-repl-itest-verbs--body daemon "MoveWorkspace")))
+          (should (equal (agent-repl-itest--body-field body 'workspace 'id) (plist-get ref :id)))
+          (should (equal (agent-repl-itest--body-field body 'target 'id) "ws-itest-other")))))))
+
 ;;;; ---- Daemon-admin verbs ----
 
 (ert-deftest agent-repl-itest-verbs-shutdown-schedule-sends-a-reason ()
@@ -1743,7 +1763,8 @@ schema the rest of the suite does."
            (agent-repl-itest--await-subscriber ,daemon "roster")
            (agent-repl-itest--push
             ,daemon "roster"
-            (list (cons 'roster (agent-repl-itest-verbs--roster ,rows))))
+            (list (cons 'roster (agent-repl-itest--with-tab-bar
+                                 (agent-repl-itest-verbs--roster ,rows)))))
            (agent-repl-itest--wait-until (lambda () agent-repl-roster-view) nil
                                          "the roster push to reach the view")
            ,@body)
@@ -1914,12 +1935,10 @@ are stubbed."
           ;; Assert.
           (should-not (assq 'parent (agent-repl-itest-verbs--body daemon "CreateWorkspace"))))))))
 
-;; audit-3 #53(b)
-(ert-deftest agent-repl-itest-verbs-create-child-workspace-interactive-names-the-parent-without-a-fork ()
-  "`agent-repl-create-child-workspace' makes the new workspace a CHILD, no fork.
-Pins fanout §9: `parent.workspace.id' must echo the CURRENT workspace's
-ref verbatim, and `fork' must stay absent -- a plain child conversation is
-fresh, not a resumed one."
+(ert-deftest agent-repl-itest-verbs-fork-into-primary-sends-the-fork-source-and-no-parent ()
+  "`agent-repl-fork-workspace-into-primary' copies the conversation into a
+TOP-LEVEL workspace: `forkSource.workspace.id' echoes the CURRENT
+workspace's ref verbatim, and no `parent' rides beside it."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-verbs--with-workspace daemon ref
@@ -1940,13 +1959,13 @@ fresh, not a resumed one."
                   ((symbol-function 'read-string)
                    (lambda (prompt &optional initial &rest _) (ignore prompt initial) "")))
           ;; Act.
-          (agent-repl-create-child-workspace)
+          (agent-repl-fork-workspace-into-primary)
           (agent-repl-itest--await-call daemon "CreateWorkspace")
           ;; Assert.
           (let ((body (agent-repl-itest-verbs--body daemon "CreateWorkspace")))
-            (should (equal (agent-repl-itest--body-field body 'parent 'workspace 'id)
+            (should (equal (agent-repl-itest--body-field body 'forkSource 'workspace 'id)
                            (plist-get ref :id)))
-            (should-not (assq 'fork (agent-repl-itest--body-field body 'parent)))))))))
+            (should-not (assq 'parent body))))))))
 
 ;; audit-3 #53(c)
 (ert-deftest agent-repl-itest-verbs-fork-workspace-interactive-sends-parent-and-fork ()

@@ -125,7 +125,57 @@ var migrations = []migration{
 	{To: 32, Name: "hidden_workspaces", Kind: MigrationAdditive, DDL: hiddenWorkspacesDDL},
 	{To: 33, Name: "merge_workspaces", Kind: MigrationAdditive, DDL: mergeWorkspacesDDL},
 	{To: 34, Name: "commit_count", Kind: MigrationAdditive, DDL: commitCountDDL},
+	{To: 35, Name: "workspaces_place", Kind: MigrationAdditive, DDL: workspacePlaceDDL},
 }
+
+// workspacePlaceDDL adds the registry order (schema.go's `place`) and seeds it
+// from the tab order the bar drew before places existed, so the first bar
+// after the upgrade looks exactly like the last one before it: repository
+// sections by name, each section's rows by priority (strongest first,
+// unprioritized last), then name, then id, a child right after its parent,
+// and the merged workspaces last, the most recent merge first. Nesting is
+// taken from the recorded parent; a workspace nested only by branch lineage
+// seeds at its section's top level, which moves it at most within its
+// section, and a row whose recorded parents form a cycle seeds after every
+// other row.
+//
+// IT IS ADDITIVE. The previous build's INSERT names no place, so a row it
+// writes while a joining successor has already migrated takes the default 0,
+// and the workspaces_land_unplaced trigger moves it after every other place
+// before the next write. No row rests on 0, so that insert never meets the
+// unique index's refusal.
+const workspacePlaceDDL = `
+ALTER TABLE workspaces ADD COLUMN place INTEGER NOT NULL DEFAULT 0;
+WITH RECURSIVE
+  keyed AS (
+    SELECT w.id, w.parent_id, w.merged_at,
+           printf('%s|%s|%d|%s|%s', r.name, r.id,
+                  CASE WHEN w.priority IS NULL THEN 99 ELSE w.priority END, w.name, w.id) AS top,
+           printf('%d|%s|%s',
+                  CASE WHEN w.priority IS NULL THEN 99 ELSE w.priority END, w.name, w.id) AS child
+      FROM workspaces w JOIN repositories r ON r.id = w.repo_id
+  ),
+  walked(id, merged_at, path) AS (
+    SELECT id, merged_at, top FROM keyed
+     WHERE parent_id IS NULL OR parent_id NOT IN (SELECT id FROM workspaces)
+    UNION ALL
+    SELECT k.id, k.merged_at, walked.path || char(1) || k.child
+      FROM keyed k JOIN walked ON k.parent_id = walked.id
+  ),
+  ranked AS (
+    SELECT id, ROW_NUMBER() OVER (
+      ORDER BY merged_at IS NOT NULL, -COALESCE(merged_at, 0), path, id
+    ) AS rank FROM walked
+  )
+UPDATE workspaces SET place = COALESCE(
+  (SELECT rank FROM ranked WHERE ranked.id = workspaces.id),
+  (SELECT COUNT(*) FROM workspaces) + rowid);
+CREATE UNIQUE INDEX workspaces_by_place ON workspaces(place);
+CREATE TRIGGER workspaces_land_unplaced AFTER INSERT ON workspaces WHEN NEW.place = 0
+BEGIN
+  UPDATE workspaces SET place = (SELECT MAX(place) FROM workspaces) + 1 WHERE id = NEW.id;
+END;
+`
 
 // repositoriesFoldedDDL adds whether a repository's roster section is
 // collapsed (frontend.v1.RosterRepoSection.fold). Every existing repository
