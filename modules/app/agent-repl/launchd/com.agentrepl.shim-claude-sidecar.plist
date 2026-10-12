@@ -82,12 +82,12 @@
       STANDARD, NEVER BACKGROUND. The live editor waits on this service, so it
       must never rank below a test suite. `Background` is launchd's darwinbg
       policy: efficiency cores only and throttled disk I/O, which is exactly
-      what bin/background.sh measured and REJECTED even for test suites. Test
+      what the test suites' priority helper measured and REJECTED even for them. Test
       suites run at `nice 19` with normal disk I/O, so a `Background` service
       lost every I/O contention to them. Measured 2026-10-12 on a copy of the
       store's database under ordinary suite load: a 200-row write took a
-      median 72-79ms at Standard and 273-363ms under `taskpolicy -b` (the same
-      policy), over the store's 250ms budget, and the live store logged
+      median 72-79ms at Standard and 273-363ms under the darwinbg I/O policy (the same
+      one), over the store's 250ms budget, and the live store logged
       thousands of slow-query warnings (checkpoints up to 99s) while suites ran.
     -->
     <key>ProcessType</key>
