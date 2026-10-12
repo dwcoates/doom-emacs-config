@@ -23,56 +23,61 @@ func processTable() ([]procEntry, error) {
 	entries := make([]procEntry, 0, len(procs))
 	for _, p := range procs {
 		pid := int(p.Proc.P_pid)
-		buf, live, err := procArgs(pid)
+		args, live, err := procArgs(pid, readProcArgs2, readProcessState)
 		if err != nil {
 			return nil, err
 		}
 		if !live {
 			continue
 		}
-		args, err := parseProcArgs2(buf)
-		if err != nil {
-			return nil, fmt.Errorf("decode the argv of pid %d: %w", pid, err)
-		}
 		entries = append(entries, procEntry{pid: pid, args: args})
 	}
 	return entries, nil
 }
 
-// procArgs reads pid's kern.procargs2, answering live=false for a process that
-// has exited (gone, a zombie, or exiting unreaped): it can no longer run, so
-// it is no stray, and `ps` lists it with no argv either.
+// readProcArgs2 reads pid's raw kern.procargs2 buffer.
+func readProcArgs2(pid int) ([]byte, error) { return unix.SysctlRaw("kern.procargs2", pid) }
+
+// procArgs answers pid's decoded argv, answering live=false for a process
+// that has exited (gone, a zombie, or exiting unreaped): it can no longer
+// run, so it is no stray, and `ps` lists it with no argv either.
 //
 // A LIVE PROCESS WITH NO ARGV YET IS WAITED FOR, NEVER SKIPPED. Between a
 // fork and the end of its exec the kernel answers EINVAL, EIO or ESRCH for a
-// process that is still running, and a listing that skipped it would let a
-// leak check pass over a stray that is very much alive. The argv appears the
-// moment the exec completes, so the read is retried on the kernel's state
-// every freezePoll until it is readable or the process has exited, within
-// freezeBound; a process still unreadable after that is an error.
-func procArgs(pid int) ([]byte, bool, error) {
+// process that is still running -- or answers a buffer the exec has not
+// finished writing, whose arguments do not decode yet (seen under a 12-slot
+// full run: "procargs2 argument 0 of 3 is unterminated"). A listing that
+// skipped it, or failed on it, would let a leak check pass over a stray that
+// is very much alive. The argv appears the moment the exec completes, so the
+// read is retried on the kernel's state every freezePoll until it decodes or
+// the process has exited, within freezeBound; a process still unreadable
+// after that is an error.
+func procArgs(pid int, read func(int) ([]byte, error), state func(int) (processState, error)) (string, bool, error) {
 	deadline := time.NewTimer(freezeBound)
 	defer deadline.Stop()
 	poll := time.NewTicker(freezePoll)
 	defer poll.Stop()
 	for {
-		buf, err := unix.SysctlRaw("kern.procargs2", pid)
+		buf, err := read(pid)
 		if err == nil {
-			return buf, true, nil
+			args, decodeErr := parseProcArgs2(buf)
+			if decodeErr == nil {
+				return args, true, nil
+			}
+			err = decodeErr
+		} else if !errors.Is(err, unix.EINVAL) && !errors.Is(err, unix.EIO) && !errors.Is(err, unix.ESRCH) {
+			return "", false, fmt.Errorf("read the argv of pid %d: %w", pid, err)
 		}
-		if !errors.Is(err, unix.EINVAL) && !errors.Is(err, unix.EIO) && !errors.Is(err, unix.ESRCH) {
-			return nil, false, fmt.Errorf("read the argv of pid %d: %w", pid, err)
-		}
-		state, stateErr := readProcessState(pid)
+		st, stateErr := state(pid)
 		if stateErr != nil {
-			return nil, false, fmt.Errorf("read the state of pid %d, whose argv is unreadable (%v): %w", pid, err, stateErr)
+			return "", false, fmt.Errorf("read the state of pid %d, whose argv is unreadable (%v): %w", pid, err, stateErr)
 		}
-		if state.exited {
-			return nil, false, nil
+		if st.exited {
+			return "", false, nil
 		}
 		select {
 		case <-deadline.C:
-			return nil, false, fmt.Errorf("pid %d is %s but its argv stayed unreadable for %s: %w", pid, state.name, freezeBound, err)
+			return "", false, fmt.Errorf("pid %d is %s but its argv stayed unreadable for %s: %w", pid, st.name, freezeBound, err)
 		case <-poll.C:
 		}
 	}
