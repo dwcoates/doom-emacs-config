@@ -30,60 +30,103 @@ func TestEvictRefusesAWorkspaceWithNothingQueued(t *testing.T) {
 	}
 }
 
-// TestFrontRefusesAWorkspaceWithNothingQueued covers the refusal a front
-// request gets for a merge that is not there.
-func TestFrontRefusesAWorkspaceWithNothingQueued(t *testing.T) {
+// TestMoveRefusesAWorkspaceWithNothingQueued covers the refusal a move gets
+// for a merge that is not there.
+func TestMoveRefusesAWorkspaceWithNothingQueued(t *testing.T) {
 	// Arrange: a workspace with no queued merge.
 	h := newHarness(t)
 
 	// Act.
-	err := h.o.Front(context.Background(), theWorkspace)
+	moved, err := h.o.Move(context.Background(), theWorkspace, wsm.MergeMoveUp)
 
 	// Assert.
 	refusal, refused := Refused(err)
-	if !refused || refusal.Arm != ArmNoSuchQueuedMerge {
-		t.Fatalf("Front answered %v, want the %s refusal", err, ArmNoSuchQueuedMerge)
+	if !refused || refusal.Arm != ArmNoSuchQueuedMerge || moved {
+		t.Fatalf("Move answered %v, %v; want the %s refusal", moved, err, ArmNoSuchQueuedMerge)
 	}
 }
 
-// TestFrontRedrawsTheQueueInItsNewOrder covers the publication: every merge
-// on the queue is told its new place.
-func TestFrontRedrawsTheQueueInItsNewOrder(t *testing.T) {
-	// Arrange: three merges wait.
-	h := newHarness(t)
-	enqueue(t, h)
-	queueAnother(t, h, "ws-2", "two")
-	queueAnother(t, h, "ws-3", "three")
-
-	// Act.
-	if err := h.o.Front(context.Background(), "ws-3"); err != nil {
-		t.Fatalf("Front: %v", err)
+// TestMoveRedrawsTheQueueInItsNewOrder covers the publication: every merge on
+// the queue is told its new place, after a move either way.
+func TestMoveRedrawsTheQueueInItsNewOrder(t *testing.T) {
+	tests := []struct {
+		name       string
+		ws         wsm.WorkspaceID
+		move       wsm.MergeMove
+		wantPlaces map[wsm.WorkspaceID]int
+	}{
+		{name: "up", ws: "ws-3", move: wsm.MergeMoveUp,
+			wantPlaces: map[wsm.WorkspaceID]int{theWorkspace: 1, "ws-3": 2, "ws-2": 3}},
+		{name: "down", ws: theWorkspace, move: wsm.MergeMoveDown,
+			wantPlaces: map[wsm.WorkspaceID]int{"ws-2": 1, theWorkspace: 2, "ws-3": 3}},
 	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: three merges wait.
+			h := newHarness(t)
+			enqueue(t, h)
+			queueAnother(t, h, "ws-2", "two")
+			queueAnother(t, h, "ws-3", "three")
 
-	// Assert.
-	first, second, third := h.factsOf("ws-3"), h.factsOf(theWorkspace), h.factsOf("ws-2")
-	if first.QueuePlace != 1 || second.QueuePlace != 2 || third.QueuePlace != 3 {
-		t.Fatalf("places = %d, %d, %d, want 1, 2, 3", first.QueuePlace, second.QueuePlace, third.QueuePlace)
+			// Act.
+			moved, err := h.o.Move(context.Background(), tt.ws, tt.move)
+
+			// Assert.
+			if err != nil || !moved {
+				t.Fatalf("Move = %v, %v; want moved", moved, err)
+			}
+			for ws, want := range tt.wantPlaces {
+				if got := h.factsOf(ws).QueuePlace; got != want {
+					t.Fatalf("%s's place = %d, want %d", ws, got, want)
+				}
+			}
+		})
 	}
 }
 
-// TestFrontLeavesAMergeAlreadyFirstWhereItIs covers the success answer for a
-// merge the request finds where it asks it to be.
-func TestFrontLeavesAMergeAlreadyFirstWhereItIs(t *testing.T) {
+// TestMoveLeavesAMergeWithNoNeighborWhereItIs covers the success answer for
+// a merge with no waiting merge on the side it is asked to move to.
+func TestMoveLeavesAMergeWithNoNeighborWhereItIs(t *testing.T) {
 	// Arrange: two merges wait.
 	h := newHarness(t)
 	enqueue(t, h)
 	queueAnother(t, h, "ws-2", "two")
 
 	// Act.
-	err := h.o.Front(context.Background(), theWorkspace)
+	moved, err := h.o.Move(context.Background(), theWorkspace, wsm.MergeMoveUp)
 
 	// Assert.
-	if err != nil {
-		t.Fatalf("Front: %v", err)
+	if err != nil || moved {
+		t.Fatalf("Move = %v, %v; want unmoved", moved, err)
 	}
 	if got := h.factsOf(theWorkspace); got.QueuePlace != 1 {
 		t.Fatalf("place = %d, want 1", got.QueuePlace)
+	}
+}
+
+// TestMoveRecordsAFailedMoveAndRedrawsNothing covers the store failing the
+// move: the error reaches the caller, is recorded at ERROR with its context,
+// and no bubble is told a new place.
+func TestMoveRecordsAFailedMoveAndRedrawsNothing(t *testing.T) {
+	// Arrange: two merges wait, and the store fails every move.
+	h := newHarness(t)
+	enqueue(t, h)
+	queueAnother(t, h, "ws-2", "two")
+	h.db.moveErr = errors.New("database is locked")
+
+	// Act.
+	moved, err := h.o.Move(context.Background(), "ws-2", wsm.MergeMoveUp)
+
+	// Assert.
+	if err == nil || moved {
+		t.Fatalf("Move = %v, %v; want the store's failure", moved, err)
+	}
+	record, logged := h.recordFor("error", "daemon.merge.move")
+	if !logged || record.Context["error"] != "database is locked" || record.Context["workspace"] != "ws-2" || record.Context["move"] != "up" {
+		t.Fatalf("the failed move was not recorded at ERROR with its context: %+v", h.logs.Records())
+	}
+	if got := h.factsOf("ws-2"); got.QueuePlace != 2 {
+		t.Fatalf("place = %d, want 2", got.QueuePlace)
 	}
 }
 
