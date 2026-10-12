@@ -24,7 +24,8 @@ They are owned elsewhere; read them, do not restate them:
   table-driven tests in Arrange/Act/Assert.
 - No real git in any test (the fake git); mock external dependencies only.
   Owner approval, 2026-10-12: the daemon's TEST logs and TEST state may live
-  in memory (the log pipe, the in-memory state seam). Our own systems
+  in memory (the in-memory state seam; the log pipe was tried and rejected,
+  pitfall 2). Our own systems
   otherwise run for real.
 - Each system's `## Performance lessons (living document)` section in its
   AGENTS.md: that system's own lessons.
@@ -39,9 +40,11 @@ coverage impact (always none).
    - Fix: hard-link the suite's one built binary (`harness.InstallFakeGit`, da3219969). The stray sweep matches by argv, which names the link's path exactly as the copy's.
    - General form: build a fixture ONCE per package (TestMain / `sync.Once`), give each test its own isolated view (a link, a namespace, a key prefix), never a per-test copy.
 
-2. **Test daemons writing their logs to disk.**
-   - Evidence: ~680 records, ~0.5MB per test, each record written to a sink and again to the mirror; the test binary's own writes 553MB -> 283MB with the pipe.
-   - Fix: the test log pipe (`AGENT_REPL_TEST_LOG_PIPE`, 49cfaafc6 and its predecessor): records go over a socket into the harness's memory and are written to files only for a FAILED test. Readers (awaits, warning sweeps, artifacts) read the same bytes.
+2. **Funnelling every test daemon's logs through the one test process. REJECTED.**
+   - What was tried: the test log pipe (`AGENT_REPL_TEST_LOG_PIPE`, 49cfaafc6), records over a unix socket into the harness's memory, files only for a failed test. It halved the test binary's writes (553MB -> 283MB), about 0.5MB per test.
+   - Why it was reverted (2026-10-12, 4e5d4c563): under load the daemon integration suite failed broadly, a different set of waits timing out each run. The daemons' log writes blocked on a collector that had fallen behind.
+   - Why making the daemon's writes non-blocking did not save it (branch `logpipe-v2`, measured with three copies of the integration package at once): the daemons no longer stalled, but each copy still failed 5-8 tests against master's 1 failure in all three, with file logs under the same three-copy load. Every daemon's logs still went through ONE collector in ONE test process; starved of CPU under load, its reads, barriers and log awaits fell behind.
+   - Lesson: do not centralize per-process I/O into the test process to save bytes. Files let each daemon write straight to the kernel and each reader read independently; on the RAM disk they cost almost nothing. Cut the record VOLUME instead (pitfall 4).
 
 3. **Test SQLite on disk.**
    - Fix: the in-memory state seam (`AGENT_REPL_TEST_STATE_IN_MEMORY`, 510ee7408, 0515d102a, 61621f034). ~570 of ~790 integration daemon starts run on memory.
