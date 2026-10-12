@@ -135,11 +135,13 @@ var Suites = []Suite{
 	{Name: "proto", Kind: Script, Path: "bin/report-nonlisp-coverage.sh", Args: []string{"proto"}},
 	{Name: "logging-density", Kind: Script, Path: "bin/report-logging-density.sh"},
 	{Name: "e2e", Kind: E2E, Path: "e2e", TestParallel: map[string]int{".": 8}},
-	// Four slots: the sandbox container is capped to the width it is given
-	// (docker --cpus, GOMAXPROCS), and four CPUs is the VM the Emacs layer's
-	// own parallelism bound of two Emacsen was measured on
-	// (e2e/EMACS-LAYER-SPEC.md, "The parallelism bound, measured").
-	{Name: "e2e-emacs", Kind: Script, Path: "bin/test-e2e-emacs.sh", MayDecline: true, Slots: 4},
+	// Two slots: the sandbox container is capped to the width it is given
+	// (docker --cpus, GOMAXPROCS), and the layer runs its two Emacsen
+	// (e2e/EMACS-LAYER-SPEC.md, "The parallelism bound, measured") on two
+	// CPUs nearly as fast as on four -- 82s against 66s alone, worst Doom
+	// boot 0.88s against its 3.5s bound (2026-10-12) -- while holding half
+	// the run's slots: 264 -> 164 slot-seconds, a fifth of a full run's.
+	{Name: "e2e-emacs", Kind: Script, Path: "bin/test-e2e-emacs.sh", MayDecline: true, Slots: 2},
 }
 
 // NotSuites is every test-named script that is deliberately NOT a suite, with
