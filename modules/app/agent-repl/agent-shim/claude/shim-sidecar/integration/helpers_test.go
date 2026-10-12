@@ -261,6 +261,8 @@ func runSuite(m *testing.M) int {
 	// The mocked vendor's shared throwaway store outlives every subject, so
 	// nothing else can stand it down. It is a no-op when nothing started it.
 	defer stopSharedVendorStore()
+	// The mocked vendor's private bundle (mock_helpers_test.go) goes with it.
+	defer removeMockShimRoot()
 	return m.Run()
 }
 
