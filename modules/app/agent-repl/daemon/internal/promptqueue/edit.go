@@ -386,7 +386,7 @@ func (q *queue) reclassify(ctx context.Context, d *delivery, held wsm.HeldPrompt
 // do it. A running turn's own end delivers otherwise. The caller holds the
 // delivery lock (d).
 func (q *queue) resume(ctx context.Context, d *delivery, log dlog.Logger, op string) {
-	if watcher, ok := q.deps.Watcher(d.ws); ok && watcher.TurnInFlight() != nil {
+	if _, running := q.turnInFlight(d.ws); running {
 		log.Debug(op, "a turn is running; its end delivers the next held prompt", nil)
 		return
 	}

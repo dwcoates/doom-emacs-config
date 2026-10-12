@@ -582,7 +582,7 @@ func (q *queue) popIfIdle(ctx context.Context, d *delivery, log dlog.Logger) {
 	if q.factsPending(d.ws, "the idle delivery", log, q.popIfIdle) {
 		return
 	}
-	if watcher, ok := q.deps.Watcher(d.ws); ok && watcher.TurnInFlight() != nil {
+	if _, running := q.turnInFlight(d.ws); running {
 		return
 	}
 	if _, err := q.popAndDeliver(ctx, d, log); err != nil {
