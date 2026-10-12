@@ -170,9 +170,8 @@ func (v *verbs) SetHidden(ctx context.Context, ws ids.WorkspaceID, hidden bool) 
 	return nil
 }
 
-// SetPriority sets or clears the roster's ordering priority. The roster orders
-// by it; clients — Emacs tabs included — follow roster order strictly, so this
-// is the only place the order is decided.
+// SetPriority sets or clears the roster's priority. Setting one moves the
+// workspace to second-to-last within that priority (wsm's place.go).
 func (v *verbs) SetPriority(ctx context.Context, ws ids.WorkspaceID, p *wsm.Priority) error {
 	_, log, err := v.owned(ctx, "SetWorkspacePriority", ws)
 	if err != nil {
@@ -184,5 +183,28 @@ func (v *verbs) SetPriority(ctx context.Context, ws ids.WorkspaceID, p *wsm.Prio
 	}
 	log.Debug(opSetPriority, "recorded the priority", dlog.Context{"cleared": p == nil})
 	v.republishRegistry(ctx, log, opSetPriority)
+	return nil
+}
+
+// Move moves workspace ws onto target's place in the registry order, the
+// workspaces between shifting one step toward the place ws left (wsm's
+// MovePlace). The sidebar and the tab bar are both views of the registry, so
+// one move shows on both; any two workspaces can move.
+func (v *verbs) Move(ctx context.Context, ws, target ids.WorkspaceID) error {
+	const rpc = "MoveWorkspace"
+	_, log, err := v.owned(ctx, rpc, ws)
+	if err != nil {
+		return err
+	}
+	if _, _, err := v.owned(ctx, rpc, target); err != nil {
+		return err
+	}
+	log = log.With(dlog.Context{"target": string(target)})
+	if err := v.deps.DB.MovePlace(ctx, ws, target); err != nil {
+		log.Error(opMove, "could not move the workspace", dlog.Context{"cause": err.Error()})
+		return fmt.Errorf("move %q onto %q: %w", ws, target, err)
+	}
+	log.Info(opMove, "moved the workspace onto the target's place", nil)
+	v.republishRegistry(ctx, log, opMove)
 	return nil
 }

@@ -298,8 +298,7 @@ func descendsFrom(ctx context.Context, tx *sql.Tx, start, ancestor WorkspaceID) 
 			return true, nil
 		}
 		var parent sql.NullString
-		err := tx.QueryRowContext(ctx, `SELECT parent_id FROM workspaces WHERE id = ?`, at).Scan(&parent)
-		if err != nil {
+		if err := scanWorkspaceRow(ctx, tx, at, "parent_id", &parent); err != nil {
 			return false, fmt.Errorf("wsm: walk the parents of %s at %s: %w", start, at, err)
 		}
 		if !parent.Valid {

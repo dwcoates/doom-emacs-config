@@ -419,10 +419,37 @@ with the repo label rather than resolved by dropping a tab."
              counts)
     collisions))
 
+(defun agent-repl-roster--tab-bar-entries (roster walked)
+  "Return the WALKED entries ROSTER's tab bar names, in the tab bar's order.
+THE DAEMON ORDERS THE TABS (`frontend.v1.WorkspaceRoster.tab_bar', the
+registry order) and Emacs draws them as sent: the walk only supplies each
+tab's row and label.  A tab whose visibility is not `:drawn' -- its
+repository is collapsed or the user hid it -- carries `:collapsed', which
+takes it off the bar's drawing, numbering and navigation exactly as before.
+
+A TAB WITH NO ROW is a broken roster (every open workspace has a row in some
+grouping), so it is recorded at ERROR and given no tab rather than invented."
+  (let ((by-id (make-hash-table :test #'equal)))
+    (dolist (entry walked)
+      (puthash (agent-repl-roster-row-id (plist-get entry :row)) entry by-id))
+    (delq nil
+          (mapcar
+           (lambda (tab)
+             (let* ((id (plist-get (plist-get tab :workspace) :id))
+                    (entry (gethash id by-id)))
+               (if entry
+                   (append (list :collapsed
+                                 (not (eq (plist-get (plist-get tab :visibility) :arm) :drawn)))
+                           entry)
+                 (agent-repl--error '(:agent-repl-central "a tab with no row owns no workspace sink")
+                                    "elisp.roster.tab-without-row: id=%s" id)
+                 nil)))
+           (plist-get (plist-get roster :tab-bar) :tabs)))))
+
 (defun agent-repl-roster-desired-tabs (roster)
   "Return the tabs ROSTER asks for, in order: plists `(:id :name :ref)'.
-Only rows with `closed = false' get a tab; the daemon sets `closed' on
-merged, closed and killed rows, so this is the whole membership rule.
+The tab bar's list is the order and the membership (an open workspace has
+a tab; the daemon leaves closed ones out), so a closed row gets no tab.
 
 THE ROWS IT REFUSES A TAB ARE RECORDED.  This predicate is the whole
 answer to \"why is there no tab for that workspace\", and it used to give
@@ -430,9 +457,7 @@ it silently: a register whose row came back CLOSED produced no tab, and
 nothing anywhere said the roster had been asked for one and declined.
 Once per push over every closed row, which is why it is DEBUG."
   (let* ((all (agent-repl-roster-walk roster))
-         (entries (cl-remove-if (lambda (entry)
-                                  (agent-repl-roster-row-closed-p (plist-get entry :row)))
-                                all))
+         (entries (agent-repl-roster--tab-bar-entries roster all))
          (collisions (agent-repl-roster--colliding-names entries)))
     (dolist (entry all)
       (let ((row (plist-get entry :row)))

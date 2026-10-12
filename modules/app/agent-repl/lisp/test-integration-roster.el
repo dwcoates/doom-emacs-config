@@ -115,7 +115,7 @@ ROWS is a vector of RosterRow alists; ARM is the `drawn' arm's key symbol,
 
 (defun agent-repl-itest-roster--push (daemon roster)
   "Push ROSTER on DAEMON's roster stream."
-  (agent-repl-itest--push daemon "roster" `((roster . ,roster))))
+  (agent-repl-itest--push daemon "roster" `((roster . ,(agent-repl-itest--with-tab-bar roster)))))
 
 (defmacro agent-repl-itest-roster--with-subscription (daemon &rest body)
   "Subscribe the roster consumer to DAEMON, run BODY, then tear it down."
@@ -1677,7 +1677,7 @@ the composer gate alone."
 Stored and replayed to the next subscriber, which is how a reconnect's
 re-pull is staged without driving the real link/reconnect machinery that
 test-integration-link.el owns."
-  (agent-repl-itest--push daemon "roster" `((roster . ,roster)) nil t))
+  (agent-repl-itest--push daemon "roster" `((roster . ,(agent-repl-itest--with-tab-bar roster))) nil t))
 
 ;; audit-3 #33
 (ert-deftest agent-repl-itest-roster-rename-re-keys-the-host-entry ()

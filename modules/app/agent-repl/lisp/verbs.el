@@ -107,6 +107,7 @@
 (declare-function agent-repl-rpc-register-repository "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-set-workspace-priority "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-set-workspace-hidden "agent-repl-rpc" (conn request &rest keys))
+(declare-function agent-repl-rpc-move-workspace "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-deploy "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-update-shutdown-schedule "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-update-merge-queue "agent-repl-rpc" (conn request &rest keys))
@@ -865,12 +866,26 @@ with a record saying so."
           (agent-repl-host-request-switch target 'hide)
         (agent-repl--info ws "elisp.verbs.hide-landing-none ws=%s" ws)))))
 
+(defun agent-repl-verb-move (ws target)
+  "Move WS onto TARGET's place in the registry order.
+The workspaces between the two shift one step toward the place WS left, so
+WS ends where TARGET was.  The tab bar and the sidebar are both views of
+the registry, and the new order arrives on the roster stream, so success
+changes no editor state."
+  (agent-repl-verbs--send
+   #'agent-repl-rpc-move-workspace (agent-repl-verbs--conn ws)
+   (list :workspace (agent-repl-verbs--ref ws) :target (agent-repl-verbs--ref target))
+   :ws ws :op "move"
+   :on-success
+   (lambda (_)
+     (message "agent-repl: moved %s to %s's place" ws target))))
+
 (cl-defun agent-repl-verb-create (repository form
                                              &key initial-prompt base-ref name
                                              merge-actions
                                              prompt
-                                             parent fork model priority allow-ungated
-                                             select)
+                                             parent fork fork-source model priority
+                                             allow-ungated select)
   "Create a workspace in REPOSITORY under FORM.
 FORM is the creation form\'s BARE ARM KEYWORD -- `:standard' or
 `:one-shot' -- and that arm\'s own fields ride as keyword arguments beside
@@ -889,8 +904,10 @@ it, because a caller at a keybinding writes facts, not nested oneofs.
     commission and the agent carries out.
 
 PARENT is the parent\'s `WorkspaceRef\' and FORK the presence-only fork
-fact, which lives INSIDE the parent by construction -- a fork without a
-parent is unrepresentable.  MODEL, PRIORITY (a bare level keyword) and
+fact, which lives INSIDE the parent: a CHILD fork.  FORK-SOURCE is the
+`WorkspaceRef\' a fork INTO THE PRIMARY BRANCH copies the conversation of;
+it has no parent, so it never rides beside PARENT.  MODEL, PRIORITY (a
+bare level keyword) and
 ALLOW-UNGATED are the remaining creation facts and are omitted when nil.
 
 FORK WITHOUT PARENT IS REFUSED BEFORE THE SEND, with no rpc issued: the
@@ -923,7 +940,7 @@ and the new workspace\'s tab arrives through the roster push."
   ;; channel open before this workspace exists.  The callbacks that render them
   ;; are registered BEFORE the send, so a progress event never outruns them.
   (let ((op-id (agent-repl-mutation-progress-new-op-id))
-        (arrival-reason (if fork "forked" "created"))
+        (arrival-reason (if (or fork fork-source) "forked" "created"))
         ;; THE DISPATCH IS THE MOMENT THE USER ASKED to stand on what this
         ;; makes; a switch they make in Emacs after it withdraws the landing.
         (dispatched-at (agent-repl-host-editor-switch-count))
@@ -967,6 +984,7 @@ and the new workspace\'s tab arrives through the roster push."
                   :prompt prompt)
            :parent (when parent
                      (append (list :workspace parent) (when fork (list :fork fork))))
+           :fork-source fork-source
            :model model
            :priority (agent-repl-verbs--level-arm priority)
            :allow-ungated allow-ungated
@@ -2017,18 +2035,15 @@ says where the create stopped, and the caller still sees it stop."
       (user-error "agent-repl: %s" refusal))
     name))
 
-(defun agent-repl-verbs--create-standard (command mode child)
-  "Create a standard workspace in MODE, as a CHILD of the current one when set.
+(defun agent-repl-verbs--create-standard (command mode)
+  "Create a standard TOP-LEVEL workspace in MODE.
 MODE is `dynamic\=' -- a prompt and nothing else, the repository read off
 the current workspace\='s roster section -- or `static\=', which asks for a
 repository and a REQUIRED name and sends no prompt at all.
 
-CHILD non-nil makes the new workspace a child of the current workspace:
-its parent is the current workspace\='s ref, so its merge target is the
-parent\='s worktree and branch rather than the repo\='s main checkout.
-Owner ruling, 2026-09-12: the child variants are their own commands
-rather than a prefix argument, and they share this body so the two
-spellings of one mode cannot drift apart.
+It is cut from the repository\='s primary branch and merges into it; a
+workspace that merges into another one is a CHILD FORK
+\(`agent-repl-verbs--create-fork\').
 
 THE NEW WORKSPACE IS SELECTED.  Creating one is a statement about where
 you intend to work next, so this stands on it the moment the daemon
@@ -2052,14 +2067,10 @@ recorded before the abandonment propagates."
          (prompt (unless static
                    (agent-repl-verbs--read-for
                     command 'prompt
-                    (lambda () (agent-repl-verbs--read-prompt "Initial prompt: ")))))
-         (parent (when child
-                   (agent-repl-verbs--ref (agent-repl--ws-current-name)))))
-    (agent-repl--info agent-repl-verbs--create-log-scope "elisp.verbs.create-standard mode=%s child=%s"
-                      mode (and child t))
+                    (lambda () (agent-repl-verbs--read-prompt "Initial prompt: "))))))
+    (agent-repl--info agent-repl-verbs--create-log-scope "elisp.verbs.create-standard mode=%s" mode)
     (apply #'agent-repl-verb-create
            repository :standard
-           :parent parent
            :select t
            (if (eq mode 'static)
                (list :name name)
@@ -2074,24 +2085,14 @@ The repository is the one the current workspace sits in, off that repo\='s
 MAIN (default) branch -- an absent base ref IS that resolution -- and the
 daemon mints the name.
 
-It never makes a child: `agent-repl-create-child-workspace\=' is the child
-variant, and naming a repository or a name by hand is the STATIC mode\='s
+It never makes a child: the child fork (`agent-repl-fork-workspace\=') is
+the one way to make a workspace that merges into another, and naming a
+repository or a name by hand is the STATIC mode\='s
 business (`agent-repl-create-workspace-static\=').
 
 THE NEW WORKSPACE IS SELECTED."
   (interactive)
-  (agent-repl-verbs--create-standard 'agent-repl-create-workspace 'dynamic nil))
-
-(defun agent-repl-create-child-workspace ()
-  "Create a dynamic CHILD workspace (`SPC TAB c\='): a prompt, and nothing else.
-Owner ruling, 2026-09-12.  Exactly `agent-repl-create-workspace\=', except
-the new workspace is a CHILD of the current one: its parent is the
-current workspace\='s ref, so it merges back into the parent\='s worktree and
-branch rather than the repo\='s main checkout.
-
-THE NEW WORKSPACE IS SELECTED."
-  (interactive)
-  (agent-repl-verbs--create-standard 'agent-repl-create-child-workspace 'dynamic t))
+  (agent-repl-verbs--create-standard 'agent-repl-create-workspace 'dynamic))
 
 (defun agent-repl-create-workspace-static ()
   "Create a STATIC workspace (`SPC TAB N\='): a repository and a name, no prompt.
@@ -2099,32 +2100,23 @@ Owner ruling, 2026-09-12.  This is the one creation mode that asks for a
 repository, and the one that REQUIRES a name; it sends no initial prompt
 at all, so the workspace comes up idle and waits for the user.
 
-It never makes a child: `agent-repl-create-child-workspace-static\=' is the
-child variant.
+It never makes a child: `agent-repl-fork-workspace-static\=' is the named
+child fork.
 
 THE NEW WORKSPACE IS SELECTED, for the same reason the dynamic create\='s
 is."
   (interactive)
-  (agent-repl-verbs--create-standard 'agent-repl-create-workspace-static 'static nil))
-
-(defun agent-repl-create-child-workspace-static ()
-  "Create a static CHILD workspace (`SPC TAB C\='): a repository and a name.
-Owner ruling, 2026-09-12.  Exactly `agent-repl-create-workspace-static\=',
-except the new workspace is a CHILD of the current one and merges back
-into the parent\='s worktree and branch.  It asks no prompt.
-
-THE NEW WORKSPACE IS SELECTED."
-  (interactive)
-  (agent-repl-verbs--create-standard 'agent-repl-create-child-workspace-static 'static t))
+  (agent-repl-verbs--create-standard 'agent-repl-create-workspace-static 'static))
 
 (defun agent-repl-fork-workspace ()
-  "Create a CHILD workspace forking the current one's conversation.
-A fork without a parent is unrepresentable by construction, which is why
-this is its own command rather than a flag on the plain create.
+  "Create a CHILD workspace forking the current one's conversation (`SPC TAB c').
+The child is cut from the current workspace's tip and merges back into
+it, so the roster nests it there; `agent-repl-fork-workspace-into-primary'
+is the fork that merges into the primary branch instead.
 
 It is a DYNAMIC mode (owner ruling, 2026-09-12), so it asks for the
-prompt alone: the repository is the current workspace's, off that repo's
-main branch, and the daemon mints the name.
+prompt alone: the repository is the current workspace's, and the daemon
+mints the name.
 
 THE FORK IS SELECTED, exactly as a plain create is: you forked in order
 to work in the fork.
@@ -2134,7 +2126,7 @@ to work in the fork.
   (agent-repl-verbs--create-fork 'agent-repl-fork-workspace 'dynamic))
 
 (defun agent-repl-fork-workspace-static ()
-  "Fork the current workspace into a NAMED child (`SPC TAB F\='), no prompt.
+  "Fork the current workspace into a NAMED child (`SPC TAB C\='), no prompt.
 Exactly `agent-repl-fork-workspace\=' -- the repository is the current
 workspace\='s, the parent is the current workspace, the conversation is
 forked, the fork is SELECTED -- except it asks for a REQUIRED name instead
@@ -2145,13 +2137,21 @@ its parent\='s by construction."
   (interactive)
   (agent-repl-verbs--create-fork 'agent-repl-fork-workspace-static 'static))
 
-(defun agent-repl-verbs--create-fork (command mode)
-  "Fork the current workspace\='s conversation into a CHILD, in MODE.
+(defun agent-repl-verbs--create-fork (command mode &optional into-primary)
+  "Fork the current workspace\='s conversation into a new workspace, in MODE.
 MODE is `dynamic\=' -- a prompt, and the daemon mints the name -- or
-`static\=', a REQUIRED name and no prompt at all.  Everything else is the
-fork\='s: the repository is the current workspace\='s, the parent is the
-current workspace, and the fork is selected.  Both fork commands share
-this body so the two spellings cannot drift apart.
+`static\=', a REQUIRED name and no prompt at all.
+
+Without INTO-PRIMARY the fork is a CHILD: the current workspace is its
+parent, it is cut from the parent\='s tip and merges back into it.  With
+INTO-PRIMARY it is a TOP-LEVEL workspace cut from the primary branch that
+merges into it, carrying only the conversation (`fork_source\='); the
+daemon opens its first message with a note naming the workspace the
+conversation came from.
+
+Everything else is the fork\='s: the repository is the current
+workspace\='s, and the fork is selected.  All four fork commands share this
+body so their spellings cannot drift apart.
 
 COMMAND is the interactive command running this body; its invocation is
 recorded before any question is asked, and a question it abandons is
@@ -2171,16 +2171,40 @@ recorded before the abandonment propagates."
                    (agent-repl-verbs--read-for
                     command 'prompt
                     (lambda () (agent-repl-verbs--read-prompt "Initial prompt: ")))))
-         (parent (agent-repl-verbs--ref (agent-repl--ws-current-name))))
-    (agent-repl--info agent-repl-verbs--create-log-scope "elisp.verbs.create-fork mode=%s" mode)
+         (source (agent-repl-verbs--ref (agent-repl--ws-current-name))))
+    (agent-repl--info agent-repl-verbs--create-log-scope "elisp.verbs.create-fork mode=%s into-primary=%s"
+                      mode (and into-primary t))
     (apply #'agent-repl-verb-create
            repository :standard
-           :parent parent :fork t
            :select t
-           (if static
-               (list :name name)
-             (list :initial-prompt
-                   (unless (string-empty-p (string-trim prompt)) prompt))))))
+           (append
+            (if into-primary
+                (list :fork-source source)
+              (list :parent source :fork t))
+            (if static
+                (list :name name)
+              (list :initial-prompt
+                    (unless (string-empty-p (string-trim prompt)) prompt)))))))
+
+(defun agent-repl-fork-workspace-into-primary ()
+  "Fork the current conversation into a TOP-LEVEL workspace (`SPC TAB f\=').
+The worktree is cut from the primary branch and merges into it; only the
+conversation is copied.  Asks for the prompt alone, and the daemon mints
+the name.  `agent-repl-fork-workspace-into-primary-static\=' is the NAMED
+variant, and `agent-repl-fork-workspace\=' the CHILD fork.
+
+THE FORK IS SELECTED."
+  (interactive)
+  (agent-repl-verbs--create-fork 'agent-repl-fork-workspace-into-primary 'dynamic t))
+
+(defun agent-repl-fork-workspace-into-primary-static ()
+  "Fork the current conversation into a NAMED top-level workspace (`SPC TAB F\=').
+Exactly `agent-repl-fork-workspace-into-primary\=', except it asks for a
+name and sends no prompt, so the workspace starts idle.
+
+THE FORK IS SELECTED."
+  (interactive)
+  (agent-repl-verbs--create-fork 'agent-repl-fork-workspace-into-primary-static 'static t))
 
 ;;;; ---- One-shots --------------------------------------------------------
 ;;

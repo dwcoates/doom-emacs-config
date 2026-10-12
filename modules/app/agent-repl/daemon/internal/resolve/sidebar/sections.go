@@ -247,7 +247,7 @@ func setMaturityFold(section *frontendv1.RosterMaturitySection, folded bool) {
 
 // mergedSection resolves the recently-merged section: the rows hoisted out of
 // every grouping, ONE GROUP PER REPOSITORY in the repository grouping's order,
-// each group most recently merged first. It is rendered under every grouping
+// each group in registry order like every other list of rows. It is rendered under every grouping
 // because that these workspaces are done is the interesting fact, and its rows
 // are FLAT — a settled merge has no family left to draw.
 //
@@ -269,7 +269,7 @@ func (r *resolver) mergedSection(merged []wsm.Workspace, rc rowContext, log dlog
 			continue
 		}
 		rows := &frontendv1.RosterRows{}
-		for _, ws := range sortMerged(workspaces) {
+		for _, ws := range sortWorkspaces(workspaces) {
 			rows.Rows = append(rows.Rows, r.row(ws, rc, log))
 		}
 		group := &frontendv1.RosterMergedRepoGroup{
@@ -395,21 +395,10 @@ func drawnLiveRowCount(rows *frontendv1.RosterRows) int {
 // is scoped to the section, so the SAME workspace can be a root in the task
 // view (its parent is on another task) and a child in the repo view.
 func (r *resolver) sectionRows(in []wsm.Workspace, rc rowContext, log dlog.Logger) *frontendv1.RosterRows {
-	rc.tree = nest(in, r.defaultBranches(), log)
+	rc.tree = nest(in, log)
 	out := &frontendv1.RosterRows{}
 	for _, ws := range rc.tree.roots {
 		out.Rows = append(out.Rows, r.row(ws, rc, log))
-	}
-	return out
-}
-
-// defaultBranches names every registered repository's default branch. The
-// branch lineage reads it to refuse a family derived from the default branch,
-// which every ordinary workspace in a repository is cut from.
-func (r *resolver) defaultBranches() map[ids.RepoID]string {
-	out := make(map[ids.RepoID]string, len(r.state.reg.Repositories))
-	for _, repo := range r.state.reg.Repositories {
-		out[repo.ID] = repo.DefaultBranch
 	}
 	return out
 }
