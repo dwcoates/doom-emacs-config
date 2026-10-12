@@ -54,11 +54,61 @@ message NewsDigestOverlay {
   // Every source the digest read, with whether reading it worked.
   NewsDigestSources sources = 4;
   // "Since last week": the digest of the past seven days' digests, holding
-  // only what could regress agent-repl. Drawn FIRST, before the sections.
+  // only what could regress agent-repl. Drawn after the IPO outlook and
+  // before the sections.
   // Set on every digest the daemon makes; UNSET only on a digest made before
   // the weekly section existed (kept standing across the deploy that added
   // it), which draws no weekly section.
   NewsDigestWeek week = 5;
+  // "IPO outlook": the current best guess at when Anthropic and OpenAI go
+  // public. Drawn FIRST in the body, above everything else, and large. Set on
+  // every digest the daemon makes; UNSET only on a digest made before the
+  // outlook existed (kept standing across the deploy that added it), which
+  // draws no outlook.
+  NewsDigestIpoOutlook ipo = 6;
+}
+
+// "IPO outlook": a model's best guess, researched on the web at the run, at
+// when each of the two companies holds its initial public offering. Both are
+// always present, Anthropic first, so the order and the pair are the
+// contract's, not a list the webview could find short.
+message NewsDigestIpoOutlook {
+  // The section's heading, composed by the daemon ("IPO outlook").
+  NewsDigestSectionHeading heading = 1;
+  // Anthropic's guess. Drawn first.
+  NewsDigestIpoGuess anthropic = 2;
+  // OpenAI's guess. Drawn second.
+  NewsDigestIpoGuess openai = 3;
+}
+
+// One company's IPO guess.
+message NewsDigestIpoGuess {
+  // The company's name, composed by the daemon ("Anthropic").
+  NewsDigestIpoCompany company = 1;
+  // The guess itself: a short phrase ("Q2 2027", "late 2026, filed
+  // confidentially"), drawn verbatim and LARGE. A guess is always given, never
+  // left blank: the model states its best guess however thin the reporting.
+  NewsDigestIpoEstimate estimate = 2;
+  // Why: one or two sentences on the reporting the guess rests on, drawn
+  // verbatim as markdown.
+  NewsDigestIpoBasis basis = 3;
+  // Where the reporting was read, most authoritative first. Never empty.
+  repeated NewsDigestLink links = 4;
+}
+
+// A company's display name, drawn verbatim.
+message NewsDigestIpoCompany {
+  string text = 1;
+}
+
+// The guessed IPO timing, drawn verbatim. Never empty.
+message NewsDigestIpoEstimate {
+  string text = 1;
+}
+
+// The reporting a guess rests on, drawn verbatim. Never empty.
+message NewsDigestIpoBasis {
+  string text = 1;
 }
 
 // "Since last week": every item of the past seven days' digests that could
