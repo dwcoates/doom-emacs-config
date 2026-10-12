@@ -62,8 +62,8 @@ global."
   "A frontend registry lookup without a workspace is explicitly central."
   ;; Arrange
   (let (scope)
-    (cl-letf (((symbol-function 'agent-repl--log-verbose)
-               (lambda (ws _fmt &rest _args) (setq scope ws))))
+    (cl-letf (((symbol-function 'agent-repl--log-decision)
+               (lambda (_key _decision ws _fmt &rest _args) (setq scope ws))))
       ;; Act
       (agent-repl-frontend-get 'gui)
       ;; Assert
