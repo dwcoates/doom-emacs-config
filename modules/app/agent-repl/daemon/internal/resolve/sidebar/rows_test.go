@@ -1225,53 +1225,6 @@ func TestTheRosterRecordsEachPublishedStatusArmChange(t *testing.T) {
 	}
 }
 
-func TestAMergeWorkspacesRowSaysWhereItLands(t *testing.T) {
-	// Arrange: a merge workspace forked from w1, landing on master.
-	r, _ := newResolver(t)
-	merging := workspace("w2", "one-merge")
-	merging.ParentBranch = "master"
-	merging.MergeOf = &wsm.MergeOrigin{Requester: "w1", Request: "request-1"}
-
-	// Act
-	r.SetRegistry(registry(merging))
-
-	// Assert
-	if got := onlyRow(t, r).GetMergeWorkspace().GetLabel().GetText(); got != "merge → master" {
-		t.Fatalf("marker = %q, want it to say the merge lands on master", got)
-	}
-}
-
-func TestAMergedMergeWorkspacesRowWearsNoMarker(t *testing.T) {
-	// Arrange: a merge workspace that has landed, so it sits in Recently Merged.
-	r, _ := newResolver(t)
-	merged := workspace("w2", "one-merge")
-	merged.ParentBranch = "master"
-	merged.MergeOf = &wsm.MergeOrigin{Requester: "w1", Request: "request-1"}
-	merged.MergedAt = at(0)
-
-	// Act
-	r.SetRegistry(registry(merged))
-
-	// Assert
-	row := rowFor(rosterwalk.MergedRows(latest(t, r)), "w2")
-	if marker := row.GetMergeWorkspace(); marker != nil {
-		t.Fatalf("marker = %+v, want none once the merge workspace has merged", marker)
-	}
-}
-
-func TestAnOrdinaryRowWearsNoMergeWorkspaceMarker(t *testing.T) {
-	// Arrange
-	r, _ := newResolver(t)
-
-	// Act
-	r.SetRegistry(registry(workspace("w1", "one")))
-
-	// Assert
-	if marker := onlyRow(t, r).GetMergeWorkspace(); marker != nil {
-		t.Fatalf("marker = %+v, want none", marker)
-	}
-}
-
 func TestAMergeWorkspaceNestsUnderTheWorkspaceItWasForkedFrom(t *testing.T) {
 	// Arrange
 	r, _ := newResolver(t)

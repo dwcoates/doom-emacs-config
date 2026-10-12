@@ -165,32 +165,6 @@ beside it."
   (agent-repl-wire--decode-empty "RosterRowDetachedLive" value)
   t)
 
-(defun agent-repl-wire-decode-roster-row-merge-workspace-label (value)
-  "Decode VALUE as `RosterRowMergeWorkspaceLabel', a plist `(:text)'.
-Drawn verbatim."
-  (let ((object (agent-repl-wire--object "RosterRowMergeWorkspaceLabel" value)))
-    (agent-repl-wire--check-keys "RosterRowMergeWorkspaceLabel" object '(text))
-    (agent-repl-wire--decoded
-     "RosterRowMergeWorkspaceLabel"
-     (list :text (agent-repl-wire--decode-string
-                  "RosterRowMergeWorkspaceLabel" 'text object)))))
-
-(defun agent-repl-wire-decode-roster-row-merge-workspace (value)
-  "Decode VALUE as `RosterRowMergeWorkspace', a plist `(:label LABEL)'.
-The MERGE-WORKSPACE marker: this row is the workspace a detached merge
-runs in, and LABEL is the daemon-composed text saying where it lands
-\(e.g. \"merge → master\").  Emacs draws nothing from it today; it is
-decoded because the codec refuses unknown fields, and refusing this one
-dropped every roster push while a merge workspace stood, so the frame
-stopped following the roster's `current' (2026-10-11)."
-  (let ((object (agent-repl-wire--object "RosterRowMergeWorkspace" value)))
-    (agent-repl-wire--check-keys "RosterRowMergeWorkspace" object '(label))
-    (agent-repl-wire--decoded
-     "RosterRowMergeWorkspace"
-     (list :label (agent-repl-wire--decode-message
-                   "RosterRowMergeWorkspace" 'label object
-                   #'agent-repl-wire-decode-roster-row-merge-workspace-label)))))
-
 (defun agent-repl-wire-decode-roster-row-one-shot-armed (value)
   "Decode VALUE as the empty `RosterRowOneShotArmed'.
 The one-shot has not ended without a live merge: the tab draws the
@@ -618,7 +592,7 @@ Nested workspaces — a spawned family under its parent — in render order."
   (agent-repl-wire-decode-roster-row value))
 
 (defconst agent-repl-wire--roster-row-keys
-  (append '(workspace attention priority viewed reviving detachedLive oneShot lastSelected availability name current children when detail closed mergeWorkspace)
+  (append '(workspace attention priority viewed reviving detachedLive oneShot lastSelected availability name current children when detail closed)
           (mapcar #'car agent-repl-wire-roster-row-status-arms))
   "Every key `RosterRow' may carry: its own fields plus the 22 status arms.")
 
@@ -626,8 +600,7 @@ Nested workspaces — a spawned family under its parent — in render order."
   "Decode VALUE as `RosterRow'.
 Returns `(:workspace W :attention A :priority P :viewed V :reviving R
 :detached-live DL :one-shot OS :last-selected L :availability AV :name N :status
-S :current C :children ROWS :when WHEN :detail D :closed CLOSED
-:merge-workspace MW)', with
+S :current C :children ROWS :when WHEN :detail D :closed CLOSED)', with
 the message tree preserved as the contract spells it."
   (let ((object (agent-repl-wire--object "RosterRow" value)))
     (agent-repl-wire--check-keys "RosterRow" object agent-repl-wire--roster-row-keys)
@@ -678,10 +651,7 @@ the message tree preserved as the contract spells it."
                     #'agent-repl-wire-decode-roster-row-detail)
            :closed (agent-repl-wire--decode-message
                     "RosterRow" 'closed object
-                    #'agent-repl-wire-decode-roster-row-closed)
-           :merge-workspace (agent-repl-wire--decode-optional-message
-                             "RosterRow" 'mergeWorkspace object
-                             #'agent-repl-wire-decode-roster-row-merge-workspace)))))
+                    #'agent-repl-wire-decode-roster-row-closed)))))
 
 ;;;; ---- Sections ----
 
