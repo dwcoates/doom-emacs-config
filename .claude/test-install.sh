@@ -45,7 +45,7 @@ fail() { echo "  FAIL: $1"; FAIL=$((FAIL + 1)); shift; if [ $# -gt 0 ]; then pri
 # Local skills install.sh expects to find under modules/app/agent-repl/skills/.
 # debug-emacs-agent-repl is deliberately absent: it is PROJECT-scoped
 # (checked-in <repo>/.claude/skills symlink), not a user-level installed skill.
-LOCAL_SKILL_NAMES=( profile-agent-repl runtime-eval-code emit-workspace-commands.sh )
+LOCAL_SKILL_NAMES=( profile-agent-repl write-tests runtime-eval-code emit-workspace-commands.sh )
 
 # Build a synthetic repo containing a fresh copy of install.sh and the
 # requirements runner it delegates to, the pre-commit hook, and a requirements

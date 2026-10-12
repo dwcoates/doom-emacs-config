@@ -1,0 +1,104 @@
+---
+name: write-tests
+description: Write or change agent-repl tests (Go unit/integration/e2e, vitest, ERT, shell harnesses) so they are fast and cheap WITHOUT losing any coverage. Use whenever an agent adds, changes, speeds up, or stabilizes a test anywhere under modules/app/agent-repl, writes a test fixture or harness helper, or picks how to run tests for a change. Holds the measured test-performance pitfalls and their fixes as a living list.
+---
+
+# Write tests (agent-repl)
+
+## The rule
+
+Test performance work NEVER loses coverage. A faster test that tests less is
+a regression, whatever it saves. Every change below keeps the same assertions
+over the same code paths; it changes only what the test costs to run.
+
+## The rules this builds on
+
+They are owned elsewhere; read them, do not restate them:
+
+- `modules/app/agent-repl/AGENTS.md`: one test file per source file, one edge
+  case per test, every change tested, the test-run cadence, the shared suite
+  slot.
+- `daemon/AGENTS.md`, `webapp/AGENTS.md`, `lisp/AGENTS.md`,
+  `agent-shim/*/AGENTS.md`: each suite's exact test and lint invocations.
+- Go: no `time.Sleep` for synchronization (channels, `sync.WaitGroup`);
+  table-driven tests in Arrange/Act/Assert.
+- No real git in any test (the fake git); mock external dependencies only.
+  Owner approval, 2026-10-12: the daemon's TEST logs and TEST state may live
+  in memory (the log pipe, the in-memory state seam). Our own systems
+  otherwise run for real.
+- Each system's `## Performance lessons (living document)` section in its
+  AGENTS.md: that system's own lessons.
+
+## Pitfalls and their fixes (measured)
+
+Each entry: the pitfall, the evidence, the fix, where it landed, and its
+coverage impact (always none).
+
+1. **Copying a fixture binary per test.**
+   - Evidence: every daemon start copied the 3.3MB fake git into its fakebin: ~3GB written per daemon suite, its largest single writer (2026-10-12).
+   - Fix: hard-link the suite's one built binary (`harness.InstallFakeGit`, da3219969). The stray sweep matches by argv, which names the link's path exactly as the copy's.
+   - General form: build a fixture ONCE per package (TestMain / `sync.Once`), give each test its own isolated view (a link, a namespace, a key prefix), never a per-test copy.
+
+2. **Test daemons writing their logs to disk.**
+   - Evidence: ~680 records, ~0.5MB per test, each record written to a sink and again to the mirror; the test binary's own writes 553MB -> 283MB with the pipe.
+   - Fix: the test log pipe (`AGENT_REPL_TEST_LOG_PIPE`, 49cfaafc6 and its predecessor): records go over a socket into the harness's memory and are written to files only for a FAILED test. Readers (awaits, warning sweeps, artifacts) read the same bytes.
+
+3. **Test SQLite on disk.**
+   - Fix: the in-memory state seam (`AGENT_REPL_TEST_STATE_IN_MEMORY`, 510ee7408, 0515d102a, 61621f034). ~570 of ~790 integration daemon starts run on memory.
+   - Pitfall inside the fix: a test that starts a SUCCESSOR daemon on the same state root (restart, handover, crash recovery) or reads `wsm.db` must start its first daemon with `harness.Opts{DurableState: true}`. The harness refuses loudly otherwise ("was started on in-memory state, so nothing of it outlived its daemon"); never silence that, set the option (6146f4fce).
+
+4. **Debug-logging volume.**
+   - Evidence: the integration suite runs its daemons at debug; the sidebar re-logged every workspace's unchanged row decisions on every render, in each of three views (26% of a test daemon's records).
+   - Fix: log a decision when it CHANGES, with one record counting what was skipped (40482a061). Prefer that over lowering a record's level: the suite asserts debug records.
+
+5. **Wait bounds sized on an idle host.**
+   - Evidence: wait-bound tests run 5-7x slower inside a full run than alone (ERT integration files 3.4s -> 28s; an e2e successor test 1.7s -> 10.5s, past its 5s bound) (docs/investigations/2026-10-11-test-speed.md).
+   - Fix: a bound is a small multiple of the healthy max OBSERVED UNDER REALISTIC CONCURRENCY (a full run), stated at the site with its measurement; a genuinely long wait gets its own explicit bound. Never fix a flaky wait by raising a timeout without that measurement.
+
+6. **The macOS RAM disk throttles low-priority I/O.**
+   - Evidence: units run at `taskpolicy -d utility`; on the run's RAM disk a 4KB fsync is p50 0.1ms but p90 166ms, p99 330ms during a run, and 86ms per fsync whenever default-tier I/O touches the same volume (the SSD shows no such effect) (test-speed investigation, fourth round).
+   - Consequence for test design: every fsync and every small write in a hot test loop can cost tens of milliseconds under load. Write less (pitfalls 2-4), batch, and never fsync in a test unless the fsync is the subject.
+
+7. **Running a whole suite when a targeted run would do.**
+   - Evidence: the host has ONE suite slot shared by every session's full runs and every merge gate; gates waited 64-338s for it before any suite started, and a load average of 25-95 turned timing-sensitive tests red across unrelated merges (docs/investigations/2026-10-12-merge-queue-latency.md).
+   - Fix: while developing, run only the tests you touch (`go test -run '^TestName$' ./pkg` through `bin/background.sh`, `npm test -- -t "name"`, one ERT file, `bin/test-all.sh --suites <names>`). Run the full suite once per complete change, before it lands, and never in a polling loop.
+
+8. **Sequential waits that could overlap.**
+   - Fix: `t.Parallel()` with per-test isolation (own temp dirs, own state roots, own sockets); wait-bound packages overlap 8 tests per chunk (df9f409ed; 16 per chunk was slower and failed).
+
+9. **Speculative work that is thrown away.**
+   - Evidence: merge-queue gates passed on a tip that then moved, and restart-cut gates re-ran from scratch, including their slot wait (merge-queue latency report).
+   - Fix in tests: do not start work whose result the test then discards (a full fixture for a test that asserts a refusal at the first call; a second daemon a test never talks to).
+
+10. **Process spawns and polls in the harness.**
+    - Fixes that kept coverage: `isZombie` reads the kernel's state in process instead of spawning `ps` (409602c36); the log reader decodes only what was appended since its last read.
+
+## Changes that LOOK faster and are refused
+
+- Skipping a test, or moving it behind a flag nobody sets: coverage loss.
+- Weakening an assertion (checking less of the result, matching a prefix): coverage loss.
+- Sharing mutable state across tests to save setup: hides order-dependent failures; isolation is the contract.
+- Raising a timeout instead of fixing the wait: hides the race and makes every failure slower.
+- Replacing one of our own systems with a mock outside the owner-approved list above: loses integration coverage.
+
+## Measuring a test change
+
+- Wall and CPU: `/usr/bin/time -p <command>` (user+sys is CPU), before and after, same host load.
+- Bytes written: sample each process's `proc_pid_rusage` `ri_diskio_byteswritten` (per process; short-lived processes and root processes are invisible to it), and the SSD's cumulative counter (`ioreg -c IOBlockStorageDriver -r -l`, "Bytes (Write)") with a quiet baseline before and after. Other sessions' runs contaminate the system counter: say so.
+- Flakes: stress with `-count=N -parallel <high>` (or the suite's repeat equivalent) and report pass counts; never `bin/with-cpu-load.sh` unless the owner asks, never a hand-written busy loop. A flaky test is root-caused and fixed, never retried.
+- Report numbers (bytes, seconds, counts), never "less" or "faster".
+
+## Living document
+
+This file is updated whenever a session finds an important test-performance
+improvement or pitfall. Add or update an entry under "Pitfalls and their
+fixes" with:
+
+- the pitfall,
+- the evidence, with numbers and the date,
+- the fix,
+- the commit or investigation file,
+- its coverage impact (none, or the change is refused).
+
+A lesson specific to one system also goes into that system's AGENTS.md
+`## Performance lessons (living document)` section.
