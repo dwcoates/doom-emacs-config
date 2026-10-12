@@ -474,7 +474,12 @@ records it in wsm's `durable_feed_rows` at its order key, so a new daemon
 it. A held prompt keeps the requester open past the landing
 (`wsm.bindMergeHold`). Briefs are read
 from `prompts/` at use time (`merge-conflict-resolve.md`,
-`merge-test-failure-resolve.md`). Post-merge worktree removal after terminal
+`merge-test-failure-resolve.md`, and `merge-pick.md` for an async pick's
+first turn). A merge is SYNC (in the requester, `in_place`) or ASYNC (in a
+hidden merge workspace, `detached`): an async merge workspace's merge turns
+are drawn in its own feed and MIRRORED, re-identified, into the bubble's tab
+in the requester's feed (`feed.Resolver.SetOutputMirror`, `turns.mirror`),
+and the bubble lives only there (docs/protobuf-design/sync-async-merges.md). Post-merge worktree removal after terminal
 publication. A user-requested merge captures the displaced user turn durably
 and resubmits it exactly once at lease release; an agent-requested one waits
 for the turn instead. A landing on the daemon's own checkout tells the deploy
