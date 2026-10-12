@@ -923,8 +923,9 @@ refused for the same reason. A create maps onto the `CreateSpec` the
 
 ### The merge queue's controls
 
-Three entry types mirror `UpdateMergeQueue`'s three arms and call the same
-orchestrator entry points (`merge.Orchestrator.Evict`, `Pause`, `Unpause`).
+Five entry types mirror `UpdateMergeQueue`'s arms (all but `front`) and call
+the same orchestrator entry points (`merge.Orchestrator.Evict`, `Pause`,
+`Unpause`, `HoldRollouts`, `ReleaseRollouts`).
 Each names its REQUESTER by `project_dir` (or `dir`, or a `workspace` id), as
 a `merge` entry does; that is the workspace whose agent wrote it.
 
@@ -933,14 +934,18 @@ a `merge` entry does; that is the workspace whose agent wrote it.
 | `merge_evict` | `evict_dir` optional: another workspace's worktree root | `Evict` of the workspace at `evict_dir`, else of the requester |
 | `merge_pause` | `repository_dir` optional: a repository's main checkout | `Pause` of that repository's queue, else of every repository |
 | `merge_resume` | `repository_dir` optional, as for a pause | `Unpause`, scoped as a pause is |
+| `merge_hold_rollouts` | none: the hold is daemon-wide | `HoldRollouts`: merges still land, but a landing in the daemon's own checkout no longer tells the deploy; durable (wsm `merge_rollout_hold`) until released |
+| `merge_release_rollouts` | none | `ReleaseRollouts`: the next landing tells the deploy again; nothing is deployed retroactively |
 
 `evict_dir` is refused on any other type, and `repository_dir` on any but a
 pause or a resume. The OUTCOME is the file's fate plus one INFO
 `daemon.commandfile.merge_queue` record whose `path` is the file and whose
-`outcome` is `evicted`, `not_queued`, `paused` or `resumed`. EVICTING A
+`outcome` is `evicted`, `not_queued`, `paused`, `resumed`, `held` or
+`released`. EVICTING A
 WORKSPACE WITH NOTHING ON THE QUEUE IS AN ANSWER, NOT A FAILURE: the rpc's
 `no_such_queued_merge` applies the file with `outcome: not_queued`. Every other
-refusal (`already_paused`, `not_paused`, `unknown_repository`, an unregistered
+refusal (`already_paused`, `not_paused`, `unknown_repository`,
+`rollouts_already_held`, `rollouts_not_held`, an unregistered
 requester or `evict_dir`) quarantines the file at WARN
 `daemon.commandfile.entry` with the arm in its `cause`.
 
