@@ -13,10 +13,10 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/opentabs"
 	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/rollout"
 	"agent-repld/internal/shimclient"
-	"agent-repld/internal/startup"
 	"agent-repld/internal/wsm"
 )
 
@@ -304,7 +304,7 @@ func (f *Fleet) noteNetworkFailure(ctx context.Context, log dlog.Logger, ws ids.
 	offline := run.offline
 	f.mu.Unlock()
 	f.closeRetrying(ctx, log, ws)
-	f.deps.Steps(ws, startup.Step{Kind: startup.StepOffline})
+	f.deps.Steps(ws, opentabs.Step{Kind: opentabs.StepOffline})
 	delay := vendorRetryDelay(offline)
 	log.Info(opBringUp, "the network was unreachable, so the vendor could not start; retrying when it may be back", dlog.Context{
 		"offline_attempts": offline, "cause": cause, "retry_in_ms": delay.Milliseconds(),
@@ -339,7 +339,7 @@ func (f *Fleet) noteRetryableFailure(ctx context.Context, log dlog.Logger, ws id
 		log.Error(opBringUp, "the vendor kept failing to start for the whole retry window; nothing retries until a restart", fields)
 		f.openTerminal(ctx, log, ws, health.KindVendorStartFailed,
 			"the vendor failed to start for the whole retry window", evidence)
-		f.deps.Steps(ws, startup.Step{Kind: startup.StepVendorFailed})
+		f.deps.Steps(ws, opentabs.Step{Kind: opentabs.StepVendorFailed})
 		return 0, false
 	}
 	delay := vendorRetryDelay(failed)
@@ -357,7 +357,7 @@ func (f *Fleet) noteRetryableFailure(ctx context.Context, log dlog.Logger, ws id
 		}
 		f.noteRosterVendor(ws)
 	}
-	f.deps.Steps(ws, startup.Step{Kind: startup.StepVendorRetrying, Attempt: failed})
+	f.deps.Steps(ws, opentabs.Step{Kind: opentabs.StepVendorRetrying, Attempt: failed})
 	// A RETRY IS THE MECHANISM WORKING, not a fault in the daemon: INFO. The
 	// fault is what the user reads; the record is the operator's.
 	log.Info(opBringUp, "the vendor did not start; retrying on the backoff", fields)
@@ -370,7 +370,7 @@ func (f *Fleet) noteVendorRejected(ctx context.Context, log dlog.Logger, ws ids.
 	log.Error(opBringUp, "the vendor refused to start; nothing retries until a restart", dlog.Context{"cause": cause})
 	f.openTerminal(ctx, log, ws, health.KindVendorStartRejected,
 		"the vendor refused to start", map[string]string{health.EvidenceCause: cause})
-	f.deps.Steps(ws, startup.Step{Kind: startup.StepVendorRejected, Text: cause})
+	f.deps.Steps(ws, opentabs.Step{Kind: opentabs.StepVendorRejected, Text: cause})
 }
 
 // openTerminal files a terminal vendor-start fault, replacing the one this

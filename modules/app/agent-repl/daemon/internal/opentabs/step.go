@@ -1,26 +1,29 @@
-// Package startup brings the editor's workspaces up when a NEW Emacs process
-// connects, and tells that Emacs, step by step, what it is doing
-// (agentrepl.v1.DaemonStartupEvent on the Emacs WatchDaemon stream; design
-// record docs/protobuf-design/startup-and-fault-domains.md).
+// Package opentabs serves the editor's OpenTabs: the editor names the
+// workspaces it wants open, the daemon brings each visible one up and answers
+// it `opened` once it is open, and every step on the way is a typed frame
+// (agentrepl.v1.OpenTabsResponse; design record
+// docs/protobuf-design/open-tabs.md).
 //
-// THE BRING-UP IS THE EXISTING ONE. Every workspace a run starts goes through
-// bringup.Run and so through workspace.Fleet.Start, the one bring-up every
-// caller shares; this package adds only the account of it. The fleet reports
-// each step of EVERY bring-up (Coordinator.Step), whoever started it, so a run
-// that begins while the boot's own bring-up of a workspace is in flight still
-// knows how far that one has got.
+// THE BRING-UP IS THE EXISTING ONE. Every workspace an open starts goes
+// through bringup.Run and so through workspace.Fleet.Start, the one bring-up
+// every caller shares; this package adds only the account of it. The fleet
+// reports each step of EVERY bring-up (Coordinator.Step), whoever started it,
+// so an open that begins while the boot's own bring-up of a workspace is in
+// flight still knows how far that one has got.
 //
-// THE GO-AHEAD. A workspace's tab may open once agent-repl's OWN services
-// serve it — the daemon, its shim answering (which proves the store and the
-// sidecar the shim stood up beside), never the vendor or the network — or once
-// its service-level bring-up has settled as failed. Go-aheads are sent in the
-// REGISTRY ORDER (the roster's walk, sidebar.TabOrder), never in the order
-// workspaces become ready: workspace 3 waits for 1 and 2 even when it is ready
-// first, and says so (`waiting_for`).
+// OPEN MEANS SERVED, AND DRAWN WHEN A PAGE IS LOADING. A workspace is served
+// once agent-repl's OWN services serve it — the daemon, its shim answering
+// (which proves the store and the sidecar the shim stood up beside), never the
+// vendor or the network. When the editor loads a web page for it, it is open
+// only once an attached page of it has also reported itself drawn
+// (ReportPageDrawn). A service-level failure opens it too, `failed`.
 //
-// EVENTS, NOT STATE: a run's events go to the stream it was started for and
-// are never replayed. An Emacs that reconnects reads the roster instead.
-package startup
+// NO WORKSPACE WAITS ON ANOTHER. Each is answered the moment it opens; the
+// editor places tabs by the registry's order, never by the answers'.
+//
+// EVENTS, NOT STATE: an open's frames go to the stream that asked for them and
+// are never replayed.
+package opentabs
 
 import (
 	"fmt"
@@ -31,8 +34,9 @@ import (
 // StepKind is one step of one workspace's bring-up, as the fleet reports it.
 type StepKind int
 
-// The steps. The first ones are what the editor prints; the last two are the
-// coordinator's own facts and are never relayed.
+// The steps. The first ones are relayed to the editor as OpenTabsStep arms;
+// StepFailed answers the workspace `opened{failed}`, and the last two are the
+// coordinator's own facts (StepServing is relayed as the `served` step).
 const (
 	// StepStartingSession is a shim being started or adopted.
 	StepStartingSession StepKind = iota + 1
@@ -122,8 +126,13 @@ func (s Step) ends() bool {
 	return false
 }
 
-// relayed reports whether the editor is told the step.
-func (s Step) relayed() bool { return s.Kind != StepServing && s.Kind != StepUp }
+// relayed reports whether the editor is told the step as its own
+// OpenTabsStep arm. Serving is told as `served` once, whichever step proved
+// it; a failure is the workspace's `opened{failed}`; the session up is no step
+// of its own.
+func (s Step) relayed() bool {
+	return s.Kind != StepServing && s.Kind != StepUp && s.Kind != StepFailed
+}
 
 // StepSink is told every bring-up step of every workspace.
 type StepSink func(ws ids.WorkspaceID, step Step)
