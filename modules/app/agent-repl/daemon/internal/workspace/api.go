@@ -297,6 +297,11 @@ type Verbs interface {
 	Nuke(ctx context.Context, ws ids.WorkspaceID) error
 	// BeginNuke is a nuke's fast half, as BeginKill is a kill's.
 	BeginNuke(ctx context.Context, ws ids.WorkspaceID) (Teardown, error)
+	// RetireLanded retires a requester whose detached merge landed: its
+	// session stopped, its worktree removed, the workspace closed and stamped
+	// merged. It answers why it kept the workspace instead (the RetireKept
+	// reasons), empty when it retired it.
+	RetireLanded(ctx context.Context, ws ids.WorkspaceID) (string, error)
 	// Forget removes a CLOSED workspace's registry record, and its repository
 	// record when no other workspace references that repository. It destroys
 	// no files: the directory survives and re-registering it mints a fresh
