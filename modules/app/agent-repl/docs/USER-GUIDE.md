@@ -197,7 +197,7 @@ you are replying to. Sending ends the selection.
 - `RET` still sends.
 - **`C-c C-k` pressed again, with no turn running, rolls back too.**
   - When nothing has answered the latest prompt in the feed yet, that prompt is rolled back at once, with no question, and its words land in the input window.
-    - The rollback counts as "answered" once a response bubble or a purple-titled card has landed after the prompt.
+    - A prompt counts as answered once a response bubble or a purple-titled card has landed after the prompt.
   - When something has answered it, a selection list opens instead, in your completion framework.
     - It holds every prompt a rollback can reach, newest at the top.
     - Each line shows how long ago the prompt was sent and how full the context was just before it.
