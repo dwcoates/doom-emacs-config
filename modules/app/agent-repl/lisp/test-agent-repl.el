@@ -58,6 +58,7 @@
   (load (expand-file-name "test-magit.el" dir) nil t)
   (load (expand-file-name "test-mutation-progress.el" dir) nil t)
   (load (expand-file-name "test-notes.el" dir) nil t)
+  (load (expand-file-name "test-profiling.el" dir) nil t)
   (load (expand-file-name "test-notifications.el" dir) nil t)
   (load (expand-file-name "test-open-progress.el" dir) nil t)
   (load (expand-file-name "test-panels.el" dir) nil t)
