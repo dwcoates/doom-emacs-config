@@ -174,6 +174,74 @@ func TestUnknownRepositoryIsAnAnswer(t *testing.T) {
 	}
 }
 
+// frontRequest asks UpdateMergeQueue to move the harness workspace's merge to
+// the front.
+func frontRequest() *connect.Request[agentreplv1.UpdateMergeQueueRequest] {
+	return connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{
+		Action: &agentreplv1.UpdateMergeQueueRequest_Front{
+			Front: &agentreplv1.UpdateMergeQueueFront{Workspace: ref()},
+		},
+	})
+}
+
+// TestFrontMovesTheNamedWorkspacesMerge pins that the front arm reaches the
+// orchestrator for the workspace it names.
+func TestFrontMovesTheNamedWorkspacesMerge(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	resp, err := h.Client.UpdateMergeQueue(context.Background(), frontRequest())
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("UpdateMergeQueue: %v", err)
+	}
+	if resp.Msg.GetSuccess() == nil {
+		t.Fatalf("result = %v, want success", resp.Msg.GetResult())
+	}
+	if len(h.Merge.fronted) != 1 || string(h.Merge.fronted[0]) != ref().GetId() {
+		t.Fatalf("fronted = %v, want the named workspace", h.Merge.fronted)
+	}
+}
+
+// TestFrontOfNothingQueuedIsAnAnswer pins that a front request for a workspace
+// with no queued merge answers no_such_queued_merge.
+func TestFrontOfNothingQueuedIsAnAnswer(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Merge.frontErr = &merge.RefusalError{Arm: merge.ArmNoSuchQueuedMerge, Reason: "nothing queued"}
+
+	// Act.
+	resp, err := h.Client.UpdateMergeQueue(context.Background(), frontRequest())
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("UpdateMergeQueue: %v", err)
+	}
+	if resp.Msg.GetError().GetNoSuchQueuedMerge() == nil {
+		t.Fatalf("result = %v, want no_such_queued_merge", resp.Msg.GetResult())
+	}
+}
+
+// TestFrontWithNoWorkspaceIsInvalid pins the validation: the front arm names
+// the workspace it moves.
+func TestFrontWithNoWorkspaceIsInvalid(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	_, err := h.Client.UpdateMergeQueue(context.Background(),
+		connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{
+			Action: &agentreplv1.UpdateMergeQueueRequest_Front{Front: &agentreplv1.UpdateMergeQueueFront{}},
+		}))
+
+	// Assert.
+	if connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("UpdateMergeQueue = %v, want InvalidArgument", err)
+	}
+}
+
 // TestUnhealthyDaemonIsAnAnswer pins that unhealthy is an ANSWER, never a
 // transport error.
 func TestUnhealthyDaemonIsAnAnswer(t *testing.T) {
