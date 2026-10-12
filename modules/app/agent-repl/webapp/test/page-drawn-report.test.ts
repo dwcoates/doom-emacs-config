@@ -19,6 +19,7 @@ import { workspaceRef } from "../src/rpc/workspace-ref.js";
 import { createLocalFailures } from "../src/failure/local.js";
 import type { PageStreams } from "../src/rpc/page-streams.js";
 import type { AgentReplClient } from "../src/rpc/client.js";
+import { fakePageSeen } from "./page-seen-fake.js";
 
 
 let sent: ReportPageDrawnRequest[];
@@ -62,6 +63,7 @@ function context(): AppContext {
     workspace: workspaceRef("ws-1", "/w"),
     ticker: createTicker(1000),
     failures: createLocalFailures(),
+    seen: fakePageSeen(),
     composerEnabled: false,
     page: "page-7",
     streams,
