@@ -1543,9 +1543,8 @@ func rt9ReportPhases(t *testing.T, manifest *Manifest, timings rt9Timings) {
 // rt9Turn is one row of the daemon's `turns` table, with the two columns that
 // say a turn is over.
 //
-// It is not rt78Prompt: that shape reads `ported_prompts` and `turns` through
-// the same four fields because a fork assertion compares what was SAID, and it
-// carries neither `closed_at` nor `close_kind`. Realtest 9's subject is a turn
+// It is not rt78Prompt: that shape reads `turns` through a lineage, because a
+// fork assertion compares what was SAID, and it carries neither `closed_at` nor `close_kind`. Realtest 9's subject is a turn
 // running to its end, so the end is what it has to read.
 //
 // `closed_at` IS THE TURN-END EDGE, and it is the daemon's own durable one:
