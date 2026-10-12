@@ -90,6 +90,11 @@ type Resolver interface {
 	// mutation and ONE push: a select's republished registry and the
 	// selection reach every client together.
 	SetRegistrySelected(reg Registry, ws ids.WorkspaceID)
+	// Selected answers the workspace the roster's selection names right now,
+	// and false when it names none. It lets a caller ask whether the roster
+	// already agrees with the selection WSM stores before pushing a roster
+	// that would change nothing.
+	Selected() (ids.WorkspaceID, bool)
 	// SetViewed records that the user has READ the last turn's result — the
 	// editor's report that the user has now SEEN this workspace. It takes
 	// only on a turn-end row (done, interrupted or turn_failed); a report on

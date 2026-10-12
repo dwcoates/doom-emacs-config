@@ -96,6 +96,7 @@ type fakeDB struct {
 	restoreErr   error
 	restores     []wsm.ParentChange
 	current      *ids.WorkspaceID
+	currentErr   error
 	sessions     map[ids.WorkspaceID]wsm.Session
 	// sessionErr makes every session read fail, which is the only way to
 	// reach the roster's session-read error branch: the fake's own map
@@ -359,7 +360,12 @@ func (d *fakeDB) ListRepositories(context.Context) ([]wsm.Repository, error) {
 
 func (d *fakeDB) Tasks(context.Context) ([]wsm.Task, error) { return d.tasks, nil }
 
-func (d *fakeDB) Current(context.Context) (*ids.WorkspaceID, error) { return d.current, nil }
+func (d *fakeDB) Current(context.Context) (*ids.WorkspaceID, error) {
+	if d.currentErr != nil {
+		return nil, d.currentErr
+	}
+	return d.current, nil
+}
 
 func (d *fakeDB) MovePlace(_ context.Context, ws, target ids.WorkspaceID) error {
 	if d.moveErr != nil {
@@ -1373,6 +1379,17 @@ func (s *fakeSidebar) SetSelected(ws ids.WorkspaceID) {
 	defer s.mu.Unlock()
 	s.selected = append(s.selected, ws)
 	s.calls = append(s.calls, "selected")
+}
+
+// Selected answers the last selection the roster was told, as the real
+// resolver's state would.
+func (s *fakeSidebar) Selected() (ids.WorkspaceID, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.selected) == 0 {
+		return "", false
+	}
+	return s.selected[len(s.selected)-1], true
 }
 
 func (s *fakeSidebar) SetViewed(ws ids.WorkspaceID) {
