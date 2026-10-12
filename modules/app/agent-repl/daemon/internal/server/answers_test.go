@@ -10,6 +10,9 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	"agent-repld/internal/feedid"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/merge"
 	"agent-repld/internal/workspace"
 )
 
@@ -103,6 +106,83 @@ func TestInterruptDecodesTheDetachedTarget(t *testing.T) {
 	// Assert.
 	if h.Verbs.interruptTarget.Detached == nil {
 		t.Fatal("the detached target did not reach the verbs")
+	}
+}
+
+// mergeTabIDFor encodes a conflicts tab row of lease-7's bubble in WS's feed.
+func mergeTabIDFor(ws ids.WorkspaceID) *frontendv1.FeedId {
+	lease := ids.LeaseID("lease-7")
+	return feedid.Encode(feedid.Ref{WS: ws, Feed: feedid.Feed{Merge: &lease}, Row: feedid.RowKey{Kind: feedid.KindMergeTab, ID: "conflicts", Sub: "1"}})
+}
+
+func TestInterruptHandsAMergeTabToTheMergeOrchestrator(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Merge.tabRunning = true
+
+	// Act.
+	resp, err := h.Client.Interrupt(context.Background(), connect.NewRequest(&agentreplv1.InterruptRequest{
+		Workspace: ref(), Target: &agentreplv1.InterruptRequest_MergeTab{MergeTab: mergeTabIDFor(testWorkspaceID)},
+	}))
+
+	// Assert.
+	if err != nil || resp.Msg.GetSuccess().GetInterruptedTurn() == nil {
+		t.Fatalf("Interrupt = %v, %v; want interrupted_turn", resp, err)
+	}
+	if len(h.Merge.tabInterrupts) != 1 || h.Merge.tabInterrupts[0].Row.ID != "conflicts" {
+		t.Fatalf("tab interrupts = %+v, want the decoded tab", h.Merge.tabInterrupts)
+	}
+	if h.Verbs.interruptTarget != (workspace.InterruptTarget{}) {
+		t.Fatalf("the verbs were asked to interrupt %+v, want the merge alone", h.Verbs.interruptTarget)
+	}
+}
+
+func TestInterruptOfAMergeTabWithNothingRunningAnswersNothingRunning(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	resp, err := h.Client.Interrupt(context.Background(), connect.NewRequest(&agentreplv1.InterruptRequest{
+		Workspace: ref(), Target: &agentreplv1.InterruptRequest_MergeTab{MergeTab: mergeTabIDFor(testWorkspaceID)},
+	}))
+
+	// Assert.
+	if err != nil || resp.Msg.GetSuccess().GetNothingRunning() == nil {
+		t.Fatalf("Interrupt = %v, %v; want nothing_running", resp, err)
+	}
+}
+
+func TestInterruptOfAnotherWorkspacesMergeTabIsNotMergeTab(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	resp, err := h.Client.Interrupt(context.Background(), connect.NewRequest(&agentreplv1.InterruptRequest{
+		Workspace: ref(), Target: &agentreplv1.InterruptRequest_MergeTab{MergeTab: mergeTabIDFor("ws-other")},
+	}))
+
+	// Assert.
+	if err != nil || resp.Msg.GetError().GetNotMergeTab() == nil {
+		t.Fatalf("Interrupt = %v, %v; want not_merge_tab", resp, err)
+	}
+	if len(h.Merge.tabInterrupts) != 0 {
+		t.Fatal("a tab of another workspace reached the orchestrator")
+	}
+}
+
+func TestInterruptAnswersTheOrchestratorsNotMergeTabRefusal(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Merge.tabErr = &merge.RefusalError{Arm: merge.ArmNotMergeTab, Workspace: testWorkspaceID, Reason: "no live tab"}
+
+	// Act.
+	resp, err := h.Client.Interrupt(context.Background(), connect.NewRequest(&agentreplv1.InterruptRequest{
+		Workspace: ref(), Target: &agentreplv1.InterruptRequest_MergeTab{MergeTab: mergeTabIDFor(testWorkspaceID)},
+	}))
+
+	// Assert.
+	if err != nil || resp.Msg.GetError().GetNotMergeTab() == nil {
+		t.Fatalf("Interrupt = %v, %v; want not_merge_tab", resp, err)
 	}
 }
 

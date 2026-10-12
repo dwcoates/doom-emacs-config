@@ -129,8 +129,8 @@ type fakeMerge struct {
 	by []merge.Requester
 	// sources records what each enqueue merges.
 	sources []wsm.MergeSource
-	// detached is each request's run: true for a detached merge.
-	detached []bool
+	// detached is each request's async run, nil for a sync merge.
+	detached []*merge.DetachedRun
 	oneShot  []bool
 	err      error
 

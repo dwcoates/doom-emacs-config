@@ -10,6 +10,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/workspace"
+	"agent-repld/internal/wsm"
 )
 
 // standingDownSelect arranges a harness whose select verb answers the
@@ -55,5 +56,60 @@ func TestSelectWorkspaceOnADaemonStandingDownWarnsNothing(t *testing.T) {
 		if rec.Level == "warn" || rec.Level == "error" {
 			t.Fatalf("recorded %+v, want no WARN or ERROR for a landed arm", rec)
 		}
+	}
+}
+
+func TestSelectingAHiddenMergeWorkspaceRevealsItFirst(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	record := h.DB.workspaces[testWorkspaceID]
+	record.MergeOf = &wsm.MergeOrigin{Requester: "ws-requester", Request: "r-1"}
+	h.DB.workspaces[testWorkspaceID] = record
+
+	// Act.
+	if _, err := h.Client.SelectWorkspace(context.Background(),
+		connect.NewRequest(&agentreplv1.SelectWorkspaceRequest{Workspace: ref()})); err != nil {
+		t.Fatalf("SelectWorkspace: %v", err)
+	}
+
+	// Assert.
+	if len(h.Merge.reveals) != 1 || h.Merge.reveals[0] != testWorkspaceID {
+		t.Fatalf("reveals = %v, want the merge workspace revealed", h.Merge.reveals)
+	}
+}
+
+func TestSelectingAnOrdinaryWorkspaceRevealsNothing(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	if _, err := h.Client.SelectWorkspace(context.Background(),
+		connect.NewRequest(&agentreplv1.SelectWorkspaceRequest{Workspace: ref()})); err != nil {
+		t.Fatalf("SelectWorkspace: %v", err)
+	}
+
+	// Assert.
+	if len(h.Merge.reveals) != 0 {
+		t.Fatalf("reveals = %v, want none", h.Merge.reveals)
+	}
+}
+
+func TestSelectingARevealedMergeWorkspaceRevealsNothingMore(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	record := h.DB.workspaces[testWorkspaceID]
+	record.MergeOf = &wsm.MergeOrigin{Requester: "ws-requester", Request: "r-1"}
+	record.MergeRevealed = true
+	h.DB.workspaces[testWorkspaceID] = record
+
+	// Act.
+	if _, err := h.Client.SelectWorkspace(context.Background(),
+		connect.NewRequest(&agentreplv1.SelectWorkspaceRequest{Workspace: ref()})); err != nil {
+		t.Fatalf("SelectWorkspace: %v", err)
+	}
+
+	// Assert.
+	if len(h.Merge.reveals) != 0 {
+		t.Fatalf("reveals = %v, want none", h.Merge.reveals)
 	}
 }

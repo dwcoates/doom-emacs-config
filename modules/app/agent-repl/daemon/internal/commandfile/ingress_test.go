@@ -803,13 +803,16 @@ func TestApplyFileMapsEachMergeSourceOntoTheRequest(t *testing.T) {
 		name string
 		body string
 		want wsm.MergeSource
-		// detached is whether the request runs in a merge workspace.
-		detached bool
+		// detached is the request's async run, nil for a sync merge.
+		detached *merge.DetachedRun
 		// oneShot is whether the request announces a one-shot merge.
 		oneShot bool
 	}{
 		{name: "own branch", body: `[{"type":"merge","workspace":"w1"}]`, want: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}},
-		{name: "own branch detached", body: `[{"type":"merge","workspace":"w1","detached":true}]`, want: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}, detached: true},
+		{name: "own branch async", body: `[{"type":"merge","workspace":"w1","detached":true,"detached_name":"reconnect-fix"}]`,
+			want: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}, detached: &merge.DetachedRun{Name: "reconnect-fix"}},
+		{name: "own branch async pick", body: `[{"type":"merge","workspace":"w1","detached":true,"detached_name":"reconnect-fix","pick":" the reconnect fix "}]`,
+			want: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}, detached: &merge.DetachedRun{Name: "reconnect-fix", Pick: "the reconnect fix"}},
 		{name: "own branch one-shot", body: `[{"type":"merge","workspace":"w1","one_shot":true}]`, want: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}, oneShot: true},
 		{name: "own branch kept open", body: `[{"type":"merge","workspace":"w1","keep_open":true}]`, want: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch, KeepOpen: true}},
 		{name: "a branch", body: `[{"type":"merge","workspace":"w1","branch":"agent-1/fix"}]`, want: wsm.MergeSource{Kind: wsm.MergeSourceBranch, Branch: "agent-1/fix"}},
@@ -832,9 +835,12 @@ func TestApplyFileMapsEachMergeSourceOntoTheRequest(t *testing.T) {
 			}
 
 			// Assert.
-			if len(f.merge.sources) != 1 || f.merge.sources[0] != tt.want || f.merge.enqueued[0] != "w1" || f.merge.detached[0] != tt.detached || f.merge.oneShot[0] != tt.oneShot {
-				t.Fatalf("requests = %v (detached %v, one-shot %v) from %v, want %+v (detached %v, one-shot %v) from w1",
-					f.merge.sources, f.merge.detached, f.merge.oneShot, f.merge.enqueued, tt.want, tt.detached, tt.oneShot)
+			if len(f.merge.sources) != 1 || f.merge.sources[0] != tt.want || f.merge.enqueued[0] != "w1" || f.merge.oneShot[0] != tt.oneShot {
+				t.Fatalf("requests = %v (one-shot %v) from %v, want %+v (one-shot %v) from w1", f.merge.sources, f.merge.oneShot, f.merge.enqueued, tt.want, tt.oneShot)
+			}
+			got := f.merge.detached[0]
+			if (got == nil) != (tt.detached == nil) || (got != nil && *got != *tt.detached) {
+				t.Fatalf("async run = %+v, want %+v", got, tt.detached)
 			}
 		})
 	}
