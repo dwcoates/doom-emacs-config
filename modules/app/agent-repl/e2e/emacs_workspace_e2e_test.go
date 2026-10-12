@@ -418,6 +418,13 @@ func TestEmacsANewProjectDoesNotRecycleTheWorkspaceBeingLeft(t *testing.T) {
 		t.Fatalf("agent-repl--ws-tabline-names = %v, want a tab the fixture's own %q is not",
 			f.tabNames(), f.Name)
 	}
+	// The tab is drawn BEFORE the create lands on the workspace it minted, so
+	// wait for the create's complete outcome: until it has selected the created
+	// workspace, a second registration would race the create's own landing
+	// rather than leave the workspace this test is about.
+	e.AwaitEvalFor(emacsVerbBound, "the created workspace to become current",
+		`(agent-repl--ws-current-name)`,
+		func(raw json.RawMessage) bool { return decodeString(raw) == created })
 
 	// Act: a SECOND repository registered, which switches projects out of the
 	// created workspace.
