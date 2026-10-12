@@ -216,13 +216,11 @@ func (r *resolver) RollBackTurns(ws ids.WorkspaceID, turns []ids.TurnID) error {
 		delete(s.promptSaid, turn)
 	}
 	retired := 0
-	for key, f := range s.feeds {
-		for _, id := range append([]string(nil), f.order...) {
-			if s.rolledBack[ids.TurnID(f.rows[id].GetTurn().GetValue())] && r.retire(s, s.feedAddrs[key], id) {
-				retired++
-			}
+	r.eachStoredRow(s, func(addr feedid.Feed, _ *feedState, id string, row *frontendv1.FeedRow) {
+		if s.rolledBack[ids.TurnID(row.GetTurn().GetValue())] && r.retire(s, addr, id) {
+			retired++
 		}
-	}
+	})
 	s.finalAnswers = keepDrawn(s, s.finalAnswers)
 	log := r.logger(ws)
 	fields := dlog.Context{"turns": len(turns), "first": firstTurn(turns), "retired": retired}
