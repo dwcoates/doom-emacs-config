@@ -164,10 +164,11 @@ func (q *queue) OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how sessionwatc
 // is raised from that ending. Every branch of OnTurnEnded ends its turn here,
 // so no live turn end closes without the banner it earns.
 //
-// A MERGE'S OWN TURN EARNS NONE. The merge orchestrator's turns (a conflict's
-// resolution, a suite's fix, the configured pre and post prompts) are steps of
-// a merge run, and the run's own outcome is what the user is told; a banner
-// and chime for each step would sound on every hop from one step to the next.
+// A TURN THE MERGE QUEUE CAUSED EARNS NONE. The merge orchestrator's turns (a
+// conflict's resolution, a suite's fix, the configured pre and post prompts)
+// are steps of a merge run, and a detached merge's handback reports an end the
+// merge queue has already announced; the merge queue's own two banners, as a
+// merge is put in line and as it is resolved, are what the user is told.
 func (q *queue) endTurn(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID, how sessionwatcher.TurnClose, log dlog.Logger) {
 	_ = q.closeTurn(ctx, ws, turn, how, log)
 	if q.earnsBanner(ctx, ws, turn, log) {
@@ -176,7 +177,7 @@ func (q *queue) endTurn(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID
 }
 
 // earnsBanner reports whether a turn's end raises its desktop banner: every
-// turn but one the merge orchestrator started itself (startedByMerge).
+// turn but one the merge queue caused (causedByMergeQueue).
 //
 // A TURN THE WORKSPACE NEVER RECORDED IS NO MERGE'S: the queue records every
 // turn it delivers, a merge's included, before delivering it. A turn whose
@@ -192,7 +193,7 @@ func (q *queue) earnsBanner(ctx context.Context, ws ids.WorkspaceID, turn ids.Tu
 			"turn": string(turn), "cause": err.Error(),
 		})
 		return false
-	case startedByMerge(record.Origin):
+	case causedByMergeQueue(record.Origin):
 		log.Info(opTurnEnded, "a merge's own turn ended; no desktop banner", dlog.Context{
 			"turn": string(turn), "origin": record.Origin,
 		})
