@@ -687,7 +687,8 @@ func (w *watcher) nameMainForViewsLocked(agent *conversationv1.AgentId, source s
 	w.sinks.Footer.OnMainAgent(w.ws, agent)
 }
 
-// waitingTurn is one turn stood behind an adopted turn in flight.
+// waitingTurn is one turn stood behind the turn in flight: behind an adopted
+// turn, or sent to join a turn of the daemon's.
 type waitingTurn struct {
 	turn ids.TurnID
 	// accepted records that the queue handed the turn over (OnTurnOpened), so
@@ -696,6 +697,10 @@ type waitingTurn struct {
 	accepted bool
 	// adopted records that the turn was itself stood by a VENDOR_STARTED row.
 	adopted bool
+	// joined records that the turn was sent to join the turn in flight
+	// (OnTurnJoining). Joins stand in flight OLDEST first, as the shim runs
+	// them (standNextWaitingLocked).
+	joined bool
 }
 
 // OnTurnOpening records the turn a caller is about to hand to the shim. See
@@ -750,7 +755,7 @@ func (w *watcher) OnTurnJoining(ws ids.WorkspaceID, turn ids.TurnID) bool {
 		})
 		return false
 	}
-	w.waiting = append(w.waiting, waitingTurn{turn: turn})
+	w.waiting = append(w.waiting, waitingTurn{turn: turn, joined: true})
 	w.knownTurns[turn] = struct{}{}
 	w.log.Info("daemon.sessionwatcher.turn_joining", "a turn is going to the shim to join the turn in flight; it waits behind it", dlog.Context{
 		"turn_id": string(turn), "turn_in_flight": string(*w.turn),
