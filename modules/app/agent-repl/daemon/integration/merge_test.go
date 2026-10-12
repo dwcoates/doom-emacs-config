@@ -656,6 +656,9 @@ func TestAHoldTakenBeforeARestartKeepsTheSuccessorsLandingFromDeploying(t *testi
 	d1.Stop()
 	d2 := harness.StartDaemon(t, harness.Opts{StateDir: d1.StateDir, SelfRepo: repo.Dir, Timeout: harness.MergeChainTimeout,
 		ExtraEnv: append(env, "AGENT_REPL_LOCK_DIR="+d1.LockDir)})
+	if r := d2.AwaitRunLogOperation("daemon.merge.hold_rollouts"); r.Level != "info" || r.Context["held_since"] == nil {
+		t.Fatalf("the successor's boot record = %+v, want the inherited hold stated at INFO with its start", r)
+	}
 	repoRef := mergeRepositoryRef(t, d2, repo)
 	f := mergeCreateChild(t, d2, repoRef, "held", "do the held thing", nil)
 	writeCommit(t, repo, f.ws.GetDir(), "modules/app/agent-repl/daemon/cmd/agent-repld/main.go", "landed while held\n")
