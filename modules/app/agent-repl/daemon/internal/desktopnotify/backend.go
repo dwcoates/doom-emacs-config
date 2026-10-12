@@ -46,8 +46,8 @@ type Banner struct {
 	// Body is the banner's text below the title.
 	Body string
 	// Silent posts the banner without the platform's sound. A turn end rings
-	// its own chime (Notifier.Ring) whether or not its banner is posted, so
-	// its banner is silent and the turn sounds exactly once.
+	// its own chime with its banner (Notifier.Announce), which posts it
+	// silent so the turn sounds exactly once.
 	Silent bool
 }
 
