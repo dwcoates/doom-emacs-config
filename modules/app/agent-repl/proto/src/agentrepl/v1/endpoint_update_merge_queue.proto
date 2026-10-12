@@ -21,6 +21,10 @@ message UpdateMergeQueueRequest {
     UpdateMergeQueueResume resume = 2;
     // Take ONE workspace's merge off the queue.
     UpdateMergeQueueEvict evict = 3;
+    // Move ONE workspace's waiting merge to the front of its queue: ahead of
+    // every ordinary merge waiting, behind the merge running and behind every
+    // merge already put at the front (as a merge requested with front is).
+    UpdateMergeQueueFront front = 4;
   }
 }
 message UpdateMergeQueuePause {
@@ -37,6 +41,13 @@ message UpdateMergeQueueResume {
 }
 message UpdateMergeQueueEvict {
   // Whose merge to evict.
+  workspace.v1.WorkspaceRef workspace = 1;
+}
+// A merge already at the front, or already running, is answered with success
+// and left where it is: it is where the request asks it to be. A workspace
+// with no merge on any queue is `no_such_queued_merge`.
+message UpdateMergeQueueFront {
+  // Whose merge to move.
   workspace.v1.WorkspaceRef workspace = 1;
 }
 
