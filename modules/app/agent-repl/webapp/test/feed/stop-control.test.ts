@@ -196,7 +196,7 @@ describe("drawStopControl", () => {
 });
 
 describe("the stop control's call sites", () => {
-  it.each(["src/feed/rows/subagent.ts", "src/feed/merge/merge-body.ts", "src/feed/cards/shell.ts"])(
+  it.each(["src/feed/rows/subagent.ts", "src/feed/merge/tab-panels.ts", "src/feed/cards/shell.ts"])(
     "%s draws its stop through drawStopControl rather than a control of its own",
     (file) => {
       const source = readFileSync(join(process.cwd(), file), "utf8");
