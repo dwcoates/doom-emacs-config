@@ -285,6 +285,34 @@ func TestKillReadsAnAbsentAdoptedSocketAsAlreadyStopped(t *testing.T) {
 	}
 }
 
+func TestKillReadsAnAdoptedShimThatExitsBeforeItsGroupIsReadAsAlreadyStopped(t *testing.T) {
+	// Arrange: the socket names a live peer, and the group read then finds
+	// the process gone, as a shim that exits between the two reads does.
+	p := startPeer(t, 0)
+	c := adoptedClientFor(p.uds, 2*time.Second)
+	c.processGroup = func(int) (int, error) { return 0, syscall.ESRCH }
+
+	// Act.
+	err := c.Kill(context.Background(), KillAttribution{Actor: "test", Reason: "the daemon is standing down"})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Kill() error = %v, want nil for a shim that exited before its group was read", err)
+	}
+	found := false
+	for _, r := range c.log.(*dlog.TestLogger).Records() {
+		if r.Level == "info" && r.Message == "the adopted shim exited before it could be stopped; nothing to stop" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("no record that the adopted shim exited before it could be stopped")
+	}
+	if gone(p.pid) {
+		t.Fatal("the peer was signalled although its group read answered it gone")
+	}
+}
+
 // TestKillRefusesAnAdoptedShimThatLeadsNoProcessGroup asserts the guard that
 // keeps this from signalling a group the daemon cannot account for: every shim
 // leads its own group by the spawn contract, and a peer that does not is

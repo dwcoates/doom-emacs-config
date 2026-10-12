@@ -129,6 +129,10 @@ type client struct {
 	// connections counts the links established (Connections, connected).
 	connections atomic.Uint64
 	grace       time.Duration
+	// processGroup reads a pid's process group; nil is syscall.Getpgid. A test
+	// injects the answer a shim that exits between the peer read and the
+	// group read gives (killAdopted).
+	processGroup func(pid int) (int, error)
 
 	// lockProbe answers whether the workspace's kernel lock reads FREE. It is
 	// injected because sessionlock is shimclient's PEER, not its dependency;
@@ -604,7 +608,28 @@ func (c *client) killAdopted(ctx context.Context, attr KillAttribution, grace ti
 		})
 		return fmt.Errorf("shimclient: stop the adopted shim for %q: %w", c.ws, err)
 	}
-	pgid, err := syscall.Getpgid(pid)
+	getpgid := c.processGroup
+	if getpgid == nil {
+		getpgid = syscall.Getpgid
+	}
+	pgid, err := getpgid(pid)
+	if errors.Is(err, syscall.ESRCH) {
+		// THE SHIM LEFT BETWEEN THE TWO READS: its socket named a peer, and
+		// that peer has exited since. That is the state the caller asked for,
+		// exactly as an absent socket is (seen under load: a merge's teardown
+		// stopping the merged workspace's adopted shim failed the merge on
+		// "process group of the adopted shim ...: no such process").
+		c.log.Info("daemon.shimclient.kill", "the adopted shim exited before it could be stopped; nothing to stop", dlog.Context{
+			"workspace_id": string(c.ws), "pid": pid, "actor": attr.Actor,
+		})
+		c.publishExit(ExitInfo{
+			PID:      pid,
+			Code:     -1,
+			Inferred: true,
+			Stderr:   "adopted shim: the process had exited when the daemon went to stop it",
+		})
+		return nil
+	}
 	if err != nil {
 		c.log.Error("daemon.shimclient.kill", "could not read the adopted shim's process group", dlog.Context{
 			"workspace_id": string(c.ws), "pid": pid, "error": err.Error(),
