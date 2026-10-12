@@ -287,8 +287,17 @@ func (v *verbs) Create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 		"parent":   ids.Optional(parent),
 	})
 
+	// A MERGE WORKSPACE IS CUT AT ITS FORK HEAD, never at wherever its
+	// requester's branch has moved to since: the head it records is then
+	// exactly the commit it lands, which is what its requester's landing
+	// names (wsm.Landing). Its base ref stays the branch, which is what the
+	// handback names.
+	materializeAt := baseRef
+	if spec.MergeOf != nil {
+		materializeAt = spec.MergeOf.ForkHead
+	}
 	reportCreateStage(spec, CreateStageCreatingWorktree)
-	if err := v.deps.Git.CreateWorktree(ctx, repoDir, branch, baseRef, worktreeDir); err != nil {
+	if err := v.deps.Git.CreateWorktree(ctx, repoDir, branch, materializeAt, worktreeDir); err != nil {
 		global.Error(opCreate, "could not materialize the worktree", dlog.Context{
 			"branch": branch, "worktree_dir": worktreeDir, "cause": err.Error(),
 		})
@@ -401,10 +410,10 @@ func (v *verbs) validateCreate(log dlog.Logger, spec CreateSpec) error {
 	// MERGE, so a spec that contradicts itself is a defect in that caller, not
 	// a request to refuse.
 	if spec.MergeOf != nil && (spec.ForkFrom == nil || *spec.ForkFrom != spec.MergeOf.Requester ||
-		(spec.Parent != nil && *spec.Parent != spec.MergeOf.Requester) ||
+		(spec.Parent != nil && *spec.Parent != spec.MergeOf.Requester) || spec.MergeOf.ForkHead == "" ||
 		spec.OneShot || strings.TrimSpace(spec.InitialPrompt) != "" || strings.TrimSpace(spec.Name) != "") {
 		log.Error(opCreate, "a merge workspace's create spec contradicts itself", dlog.Context{
-			"requester": string(spec.MergeOf.Requester), "request": string(spec.MergeOf.Request),
+			"requester": string(spec.MergeOf.Requester), "request": string(spec.MergeOf.Request), "fork_head": spec.MergeOf.ForkHead,
 			"fork_from": ids.Optional(spec.ForkFrom), "parent": ids.Optional(spec.Parent), "one_shot": spec.OneShot,
 			"has_prompt": strings.TrimSpace(spec.InitialPrompt) != "", "name": spec.Name,
 		})
@@ -784,6 +793,16 @@ func (v *verbs) CreateMergeWorkspace(ctx context.Context, requester wsm.Workspac
 		})
 		return wsm.Workspace{}, fmt.Errorf("create the merge workspace of %s: %w", requester.ID, err)
 	}
+	// THE FORK HEAD IS READ ONCE, HERE, and the worktree is cut at it: a
+	// commit the requester makes after this is not part of the merge.
+	head, err := v.deps.Git.ResolveRef(ctx, repoDir, "refs/heads/"+base)
+	if err != nil {
+		v.deps.Log.Global().Error(opCreate, "could not resolve the branch a merge workspace is forked from", dlog.Context{
+			"requester": string(requester.ID), "request": string(origin.Request), "branch": base, "repo": repoDir, "cause": err.Error(),
+		})
+		return wsm.Workspace{}, fmt.Errorf("create the merge workspace of %s: resolve %s: %w", requester.ID, base, err)
+	}
+	origin.ForkHead = head
 	from := requester.ID
 	return v.Create(ctx, CreateSpec{
 		RepoDir:   repoDir,
