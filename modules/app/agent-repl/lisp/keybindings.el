@@ -36,6 +36,7 @@
 ;; so the declarations below exist for the byte-compiler alone.
 (declare-function agent-repl--live-ws-names "workspace")
 (declare-function agent-repl--log "core")
+(declare-function agent-repl-refill-keymap "core" (map fill))
 (declare-function agent-repl--ws-current-log-name "workspace")
 (declare-function agent-repl--ws-current-name "workspace")
 (declare-function agent-repl--ws-get "workspace")

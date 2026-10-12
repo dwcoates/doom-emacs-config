@@ -40,6 +40,7 @@
 ;; order config.el establishes and resolve each other's calls at call time,
 ;; so the declarations below exist for the byte-compiler alone.
 (declare-function agent-repl-input-hidden-p "window" (ws))
+(declare-function agent-repl-refill-keymap "core" (map fill))
 (declare-function agent-repl-window-tell-gate-dock "window" (ws))
 (declare-function agent-repl-window-tell-input-background "window" (ws))
 (declare-function agent-repl--fatal "core")
