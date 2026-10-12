@@ -53,8 +53,8 @@ export TMPDIR="$HARNESS_TMP"
 # The fake git, first on PATH for the whole run. Every invocation's argv is
 # recorded in FAKE_GIT_LOG.
 FAKE_GIT_BIN="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
-cp "$THIS_DIR/fake-git.sh" "$FAKE_GIT_BIN/git"
-chmod +x "$FAKE_GIT_BIN/git"
+# The compiled model itself, not the launcher: no shell per call.
+"$THIS_DIR/fake-git.sh" --install "$FAKE_GIT_BIN/git"
 export PATH="$FAKE_GIT_BIN:$PATH"
 export FAKE_GIT_LOG="$FAKE_GIT_BIN/argv.log"
 if [ "$(command -v git)" != "$FAKE_GIT_BIN/git" ]; then
