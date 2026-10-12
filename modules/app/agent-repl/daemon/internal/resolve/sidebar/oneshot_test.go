@@ -269,7 +269,7 @@ func TestOneShotOutcomeSeedsFromTheDurableRecord(t *testing.T) {
 
 			// Assert: a merged workspace files under recently_merged.
 			roster := latest(t, r)
-			rows := append(repoRows(t, roster), roster.GetRecentlyMerged().GetRows().GetRows()...)
+			rows := append(repoRows(t, roster), mergedRows(roster)...)
 			row := rowFor(rows, string(theWS))
 			if row == nil {
 				t.Fatal("the roster carried no row for the workspace")
