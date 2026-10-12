@@ -1733,7 +1733,7 @@ rest of this suite already asserts against."
          . [((key . ((repository . ,agent-repl-itest-verbs--repo-protojson)))
              (header . ((label . ((text . "itest-repo"))) (count . ((workspaces . 1)))))
              (rows . ((rows . ,(vconcat rows))))
-             (expanded . ()))])))
+             (divergence . ((pending . ()))) (expanded . ()))])))
     (task . ((sections . [])))
     (maturity . ((sections . [])))
     (hidden . ((header . ((label . ((text . "Hidden Workspaces"))) (count . ((workspaces . 0)))))

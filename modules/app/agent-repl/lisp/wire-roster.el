@@ -798,11 +798,70 @@ workspaces have no tabs on the bar."
    '((expanded :expanded agent-repl-wire-decode-roster-repo-section-expanded)
      (collapsed :collapsed agent-repl-wire-decode-roster-repo-section-collapsed))))
 
+(defun agent-repl-wire-decode-roster-repo-divergence-pending (value)
+  "Decode VALUE as the empty message `RosterRepoDivergencePending'."
+  (agent-repl-wire--decode-empty "RosterRepoDivergencePending" value))
+
+(defun agent-repl-wire-decode-roster-repo-divergence-counted (value)
+  "Decode VALUE as `RosterRepoDivergenceCounted'.
+A plist `(:branch :upstream :ahead :behind)'."
+  (let ((object (agent-repl-wire--object "RosterRepoDivergenceCounted" value)))
+    (agent-repl-wire--check-keys "RosterRepoDivergenceCounted" object
+                                 '(branch upstream ahead behind))
+    (agent-repl-wire--decoded
+     "RosterRepoDivergenceCounted"
+     (list :branch (agent-repl-wire--decode-string
+                    "RosterRepoDivergenceCounted" 'branch object)
+           :upstream (agent-repl-wire--decode-string
+                      "RosterRepoDivergenceCounted" 'upstream object)
+           :ahead (agent-repl-wire--decode-uint32
+                   "RosterRepoDivergenceCounted" 'ahead object)
+           :behind (agent-repl-wire--decode-uint32
+                    "RosterRepoDivergenceCounted" 'behind object)))))
+
+(defun agent-repl-wire-decode-roster-repo-divergence-no-upstream (value)
+  "Decode VALUE as `RosterRepoDivergenceNoUpstream', a plist `(:branch)'."
+  (let ((object (agent-repl-wire--object "RosterRepoDivergenceNoUpstream" value)))
+    (agent-repl-wire--check-keys "RosterRepoDivergenceNoUpstream" object '(branch))
+    (agent-repl-wire--decoded
+     "RosterRepoDivergenceNoUpstream"
+     (list :branch (agent-repl-wire--decode-string
+                    "RosterRepoDivergenceNoUpstream" 'branch object)))))
+
+(defun agent-repl-wire-decode-roster-repo-divergence-failed (value)
+  "Decode VALUE as `RosterRepoDivergenceFailed', a plist `(:reason)'."
+  (let ((object (agent-repl-wire--object "RosterRepoDivergenceFailed" value)))
+    (agent-repl-wire--check-keys "RosterRepoDivergenceFailed" object '(reason))
+    (agent-repl-wire--decoded
+     "RosterRepoDivergenceFailed"
+     (list :reason (agent-repl-wire--decode-string
+                    "RosterRepoDivergenceFailed" 'reason object)))))
+
+(defun agent-repl-wire-decode-roster-repo-divergence (value)
+  "Decode VALUE as `RosterRepoDivergence', a plist `(:state)'.
+The repository's primary branch against its upstream, which the webview
+draws as the section label's hover.  Emacs draws nothing from it, but the
+codec refuses unknown fields, so it is decoded and validated whole.  THE
+ARM IS THE MEASUREMENT'S OUTCOME, and it is never unset."
+  (let ((object (agent-repl-wire--object "RosterRepoDivergence" value)))
+    (agent-repl-wire--check-keys "RosterRepoDivergence" object
+                                 '(pending counted noUpstream failed))
+    (agent-repl-wire--decoded
+     "RosterRepoDivergence"
+     (list :state
+           (agent-repl-wire--decode-oneof
+            "RosterRepoDivergence" 'state object
+            '((pending :pending agent-repl-wire-decode-roster-repo-divergence-pending)
+              (counted :counted agent-repl-wire-decode-roster-repo-divergence-counted)
+              (noUpstream :no-upstream agent-repl-wire-decode-roster-repo-divergence-no-upstream)
+              (failed :failed agent-repl-wire-decode-roster-repo-divergence-failed)))))))
+
 (defun agent-repl-wire-decode-roster-repo-section (value)
-  "Decode VALUE as `RosterRepoSection', a plist `(:key :header :rows :fold)'."
+  "Decode VALUE as `RosterRepoSection'.
+A plist `(:key :header :rows :fold :divergence)'."
   (let ((object (agent-repl-wire--object "RosterRepoSection" value)))
     (agent-repl-wire--check-keys "RosterRepoSection" object
-                                 '(key header rows expanded collapsed))
+                                 '(key header rows expanded collapsed divergence))
     (agent-repl-wire--decoded
      "RosterRepoSection"
      (list :key (agent-repl-wire--decode-message
@@ -814,7 +873,10 @@ workspaces have no tabs on the bar."
            :rows (agent-repl-wire--decode-message
                   "RosterRepoSection" 'rows object
                   #'agent-repl-wire-decode-roster-repo-section-rows)
-           :fold (agent-repl-wire-decode-roster-repo-section-fold object)))))
+           :fold (agent-repl-wire-decode-roster-repo-section-fold object)
+           :divergence (agent-repl-wire--decode-message
+                        "RosterRepoSection" 'divergence object
+                        #'agent-repl-wire-decode-roster-repo-divergence)))))
 
 (defun agent-repl-wire-decode-roster-task-section-key (value)
   "Decode `RosterTaskSection''s `key' field VALUE as a RosterTaskKey."

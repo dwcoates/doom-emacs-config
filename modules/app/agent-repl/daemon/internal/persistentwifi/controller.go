@@ -117,14 +117,8 @@ func (c *Controller) Refresh(ctx context.Context) {
 
 // Run re-reads the standing every cadence until ctx ends.
 func (c *Controller) Run(ctx context.Context) error {
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-c.clock.After(c.every):
-			c.Refresh(ctx)
-		}
-	}
+	clock.Repeat(ctx, c.clock, c.every, c.every, c.Refresh)
+	return nil
 }
 
 // readLocked reads, records a CHANGE in either fact's readability, and

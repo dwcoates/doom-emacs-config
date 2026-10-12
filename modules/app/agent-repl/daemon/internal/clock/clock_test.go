@@ -51,7 +51,10 @@ func TestNoOtherPackageDeclaresItsOwnWaitingClock(t *testing.T) {
 			return err
 		}
 		rel, _ := filepath.Rel("..", path)
-		if strings.Contains(string(body), "After(d time.Duration) <-chan time.Time") && rel != filepath.Join("clock", "clock.go") {
+		// clocktest.Scripted is no rival clock: it IS a clock.Clock, the one
+		// scripted implementation every schedule's tests drive.
+		sanctioned := rel == filepath.Join("clock", "clock.go") || rel == filepath.Join("clock", "clocktest", "clocktest.go")
+		if strings.Contains(string(body), "After(d time.Duration) <-chan time.Time") && !sanctioned {
 			offenders = append(offenders, rel)
 		}
 		return nil

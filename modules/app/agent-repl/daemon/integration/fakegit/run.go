@@ -133,6 +133,8 @@ func answer(s *State, cwd string, args []string) Result {
 		return rebase(s, repo, wt, subject)
 	case "fetch":
 		return fetch(repo, subject)
+	case "for-each-ref":
+		return forEachRef(repo, subject)
 	}
 	return Result{Stderr: fmt.Sprintf("fatal: fakegit has no fixture for `git %s`\n", strings.Join(subject, " ")), Exit: 128}
 }
@@ -245,6 +247,20 @@ func updateIndex(wt *Worktree, subject []string) Result {
 		return Result{Stdout: "dirty.txt: needs update\n", Exit: 1}
 	}
 	return Result{}
+}
+
+// forEachRef answers the one for-each-ref the daemon asks: a branch's upstream
+// (gitclient.Upstream), printed as `refname NUL remote NUL upstream`. No fake
+// branch tracks a remote, so an existing branch answers both upstream fields
+// empty and a missing one answers no line, exactly as real git does.
+func forEachRef(repo *Repo, subject []string) Result {
+	if len(subject) != 3 || !strings.HasPrefix(subject[1], "--format=") || !strings.HasPrefix(subject[2], "refs/heads/") {
+		return Result{Stderr: "fatal: fakegit: only `for-each-ref --format=<f> refs/heads/<branch>` is modeled\n", Exit: 128}
+	}
+	if !repo.HasBranch(strings.TrimPrefix(subject[2], "refs/heads/")) {
+		return Result{}
+	}
+	return Result{Stdout: subject[2] + "\x00\x00\n"}
 }
 
 func showRef(repo *Repo, subject []string) Result {

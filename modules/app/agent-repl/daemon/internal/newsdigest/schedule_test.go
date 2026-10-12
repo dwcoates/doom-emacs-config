@@ -37,11 +37,11 @@ func startSchedule(t *testing.T, d *Digester) *scheduled {
 func pastStartDelay(t *testing.T, w *world) time.Duration {
 	t.Helper()
 	startSchedule(t, w.digester())
-	if got := <-w.clock.asked; got != DefaultStartDelay {
+	if got := <-w.clock.Asked; got != DefaultStartDelay {
 		t.Fatalf("the first wait = %v, want the start delay %v", got, DefaultStartDelay)
 	}
-	w.clock.fire <- now
-	return <-w.clock.asked
+	w.clock.Fire <- now
+	return <-w.clock.Asked
 }
 
 func TestTheScheduleFirstWaitsTheStartDelay(t *testing.T) {
@@ -52,7 +52,7 @@ func TestTheScheduleFirstWaitsTheStartDelay(t *testing.T) {
 	startSchedule(t, w.digester())
 
 	// Assert
-	if got := <-w.clock.asked; got != DefaultStartDelay {
+	if got := <-w.clock.Asked; got != DefaultStartDelay {
 		t.Fatalf("the first wait = %v, want %v", got, DefaultStartDelay)
 	}
 }
@@ -86,9 +86,9 @@ func TestAnOverdueRunHappensOnceNotOncePerMissedDay(t *testing.T) {
 	pastStartDelay(t, w)
 
 	// Act
-	w.clock.set(now.Add(DefaultRecheck))
-	w.clock.fire <- now
-	<-w.clock.asked
+	w.clock.Set(now.Add(DefaultRecheck))
+	w.clock.Fire <- now
+	<-w.clock.Asked
 
 	// Assert
 	if runs := w.store.recorded(); len(runs) != 1 {
@@ -173,11 +173,11 @@ func TestARunAnotherDaemonJustFinishedIsNotRepeatedAndItsDigestIsDrawn(t *testin
 	}
 	d := w.digester()
 	startSchedule(t, d)
-	<-w.clock.asked
+	<-w.clock.Asked
 
 	// Act
-	w.clock.fire <- now
-	next := <-w.clock.asked
+	w.clock.Fire <- now
+	next := <-w.clock.Asked
 
 	// Assert
 	if len(w.store.recorded()) != 0 {
@@ -225,7 +225,7 @@ func TestTheScheduleEndsWithItsContext(t *testing.T) {
 	// Arrange
 	w := newWorld(t)
 	s := startSchedule(t, w.digester())
-	<-w.clock.asked
+	<-w.clock.Asked
 
 	// Act
 	s.cancel()
