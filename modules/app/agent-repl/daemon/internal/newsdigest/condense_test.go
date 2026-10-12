@@ -3,8 +3,6 @@ package newsdigest
 import (
 	"context"
 	"errors"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -12,6 +10,7 @@ import (
 
 	"claude-repld/internal/headless"
 	"claude-repld/internal/prompts"
+	"claude-repld/internal/sourcescan"
 )
 
 // allowedFixture is the link set the answer tests validate against.
@@ -416,11 +415,11 @@ func TestValidLink(t *testing.T) {
 // check: a source file checking a link's scheme on its own fails here.
 func TestEveryModelWrittenLinkPassesValidLink(t *testing.T) {
 	// Act
-	counts := countInSources(t, `Scheme != "https"`)
+	checks := sourcescan.Count(t, `Scheme != "https"`)
 
 	// Assert
-	if counts[0] != 1 {
-		t.Fatalf("the https check appears %d times in the package, want once, in validLink", counts[0])
+	if checks != 1 {
+		t.Fatalf("the https check appears %d times in the package, want once, in validLink", checks)
 	}
 }
 
@@ -465,33 +464,10 @@ func TestDecodeAnswer(t *testing.T) {
 // one strict decode: a parser building its own decoder fails here.
 func TestEveryModelAnswerIsDecodedByDecodeAnswer(t *testing.T) {
 	// Act
-	counts := countInSources(t, "stripFence(text)", "decodeAnswer(text, &a)")
+	counts := []int{sourcescan.Count(t, "stripFence(text)"), sourcescan.Count(t, "decodeAnswer(text, &a)")}
 
 	// Assert
 	if counts[0] != 1 || counts[1] != 3 {
 		t.Fatalf("strict decoders = %d and decodeAnswer calls = %d, want one decoder in decodeAnswer called by the three parsers", counts[0], counts[1])
 	}
-}
-
-// countInSources counts each shape across the package's non-test sources.
-func countInSources(t *testing.T, shapes ...string) []int {
-	t.Helper()
-	files, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatalf("glob: %v", err)
-	}
-	counts := make([]int, len(shapes))
-	for _, f := range files {
-		if strings.HasSuffix(f, "_test.go") {
-			continue
-		}
-		src, err := os.ReadFile(f)
-		if err != nil {
-			t.Fatalf("read %s: %v", f, err)
-		}
-		for i, shape := range shapes {
-			counts[i] += strings.Count(string(src), shape)
-		}
-	}
-	return counts
 }
