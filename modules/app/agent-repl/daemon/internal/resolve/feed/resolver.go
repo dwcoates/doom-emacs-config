@@ -403,6 +403,12 @@ type wsState struct {
 	// accountLanded is each account's tally when its latest response bubble
 	// LANDED: the base the account's next bubble counts its delta from.
 	accountLanded map[string]uint64
+
+	// contextReadings files, per usage-carrying unit of the MAIN agent, how
+	// full the context was when that API response was made, at the place the
+	// unit's entry sits (context.go). A rollback choice reads the newest one
+	// before its prompt.
+	contextReadings map[string]contextReading
 }
 
 // subFeedHead is the bubble row a sub-feed lives inside.
@@ -733,6 +739,8 @@ func newWSState(ws ids.WorkspaceID) *wsState {
 		accountTally:  map[string]uint64{},
 		accountStated: map[string]bool{},
 		accountLanded: map[string]uint64{},
+
+		contextReadings: map[string]contextReading{},
 
 		plane: planeLive,
 	}

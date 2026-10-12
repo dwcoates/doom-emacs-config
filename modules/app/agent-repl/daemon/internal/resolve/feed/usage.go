@@ -38,15 +38,21 @@ import (
 // agent's current turn, or a subagent's lifetime. The two key spaces carry
 // distinct prefixes, so a turn id can never collide with an agent id.
 func (s *wsState) usageAccount(agent *conversationv1.AgentId) string {
-	id := agent.GetValue()
-	if id == "" || s.mainAgent == "" || id == s.mainAgent {
+	if s.isMainAgent(agent) {
 		turn := ""
 		if t := s.rowTurn(); t != nil {
 			turn = string(*t)
 		}
 		return "turn\x00" + turn
 	}
-	return "agent\x00" + id
+	return "agent\x00" + agent.GetValue()
+}
+
+// isMainAgent reports whether AGENT is the session's main agent: the one the
+// watcher named, or any agent while none is named yet, or an unnamed one.
+func (s *wsState) isMainAgent(agent *conversationv1.AgentId) bool {
+	id := agent.GetValue()
+	return id == "" || s.mainAgent == "" || id == s.mainAgent
 }
 
 // recordUsage files one unit's usage in its agent's account. It reports the
