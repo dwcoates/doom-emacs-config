@@ -177,5 +177,11 @@ func decodeStanding(stored []byte) (*frontendv1.NewsDigestOverlay, error) {
 			return nil, errors.New("newsdigest: the stored overlay's week carries no outcome")
 		}
 	}
+	// Likewise a digest made before the IPO outlook existed carries none.
+	if ipo := overlay.GetIpo(); ipo != nil {
+		if err := checkStoredIpo(ipo); err != nil {
+			return nil, err
+		}
+	}
 	return overlay, nil
 }

@@ -200,14 +200,17 @@ func (f *fakeFetcher) Fetch(ctx context.Context, url string) ([]byte, error) {
 	return []byte(body), nil
 }
 
-// fakeRunner answers the condensing call, and the week's merge call (asked
-// under WeekSite), from a script.
+// fakeRunner answers the condensing call, the week's merge call (asked under
+// WeekSite) and the IPO outlook call (asked under IpoSite) from a script. An
+// unscripted outlook call answers ipoJSON.
 type fakeRunner struct {
 	mu       sync.Mutex
 	text     string
 	err      error
 	weekText string
 	weekErr  error
+	ipoText  string
+	ipoErr   error
 	requests []headless.Request
 	// onRun runs inside Run, before it answers.
 	onRun func(ctx context.Context)
@@ -225,6 +228,15 @@ func (r *fakeRunner) Run(ctx context.Context, req headless.Request) (headless.Re
 			return headless.Response{}, r.weekErr
 		}
 		return headless.Response{Text: r.weekText, Model: req.Model}, nil
+	}
+	if req.Site == IpoSite {
+		if r.ipoErr != nil {
+			return headless.Response{}, r.ipoErr
+		}
+		if r.ipoText == "" {
+			return headless.Response{Text: ipoJSON, Model: req.Model}, nil
+		}
+		return headless.Response{Text: r.ipoText, Model: req.Model}, nil
 	}
 	if r.err != nil {
 		return headless.Response{}, r.err
@@ -314,6 +326,10 @@ func (w *world) withNewFeedEntry() {
 
 // answerJSON is a valid model answer: one backend item linking the new entry.
 const answerJSON = `{"sections":[{"kind":"backend","items":[{"title":"SDK drops subscription billing","summary":"The SDK now needs an API key.","effective":"2026-11-01","links":[{"label":"Release new","url":"https://fixture.test/releases/new"}]}]}]}`
+
+// ipoJSON is a valid outlook answer: a guess for each company.
+const ipoJSON = `{"anthropic":{"estimate":"Q2 2027","basis":"Banks were hired in September.","links":[{"label":"Report","url":"https://press.test/anthropic"}]},` +
+	`"openai":{"estimate":"late 2027","basis":"The restructuring closed in October.","links":[{"label":"Report","url":"https://press.test/openai"}]}}`
 
 // records answers the records at level under operation.
 func records(log *dlog.TestLogger, level, operation string) []dlog.Record {
