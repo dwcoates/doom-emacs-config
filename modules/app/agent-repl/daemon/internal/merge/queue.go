@@ -212,26 +212,28 @@ func (o *orchestrator) Evict(ctx context.Context, ws ids.WorkspaceID) error {
 	return o.dequeue(ctx, ws, CauseUserDrop)
 }
 
-// Front moves a workspace's waiting merge to the front of its queue, and
+// Move moves a workspace's waiting merge one place up or down its queue, and
 // redraws every bubble on that queue when the order changed.
-func (o *orchestrator) Front(ctx context.Context, ws ids.WorkspaceID) error {
-	const op = "daemon.merge.front"
+func (o *orchestrator) Move(ctx context.Context, ws ids.WorkspaceID, move wsm.MergeMove) (bool, error) {
+	const op = "daemon.merge.move"
 	log := o.log(ctx, ws)
 	repo, err := o.queueOf(ctx, ws)
 	if err != nil {
-		return err
+		return false, err
 	}
-	moved, err := o.deps.DB.MoveMergeToFront(ctx, repo, ws)
+	fields := dlog.Context{"workspace": string(ws), "repo": string(repo), "move": move.String()}
+	moved, err := o.deps.DB.MoveMerge(ctx, repo, ws, move)
 	if err != nil {
-		log.Error(op, "could not move a merge to the front of its queue", dlog.Context{"workspace": string(ws), "repo": string(repo), "error": err.Error()})
-		return err
+		fields["error"] = err.Error()
+		log.Error(op, "could not move a merge in its queue", fields)
+		return false, err
 	}
 	if !moved {
-		log.Info(op, "a merge asked to the front already stands where the front puts it", dlog.Context{"workspace": string(ws), "repo": string(repo)})
-		return nil
+		log.Info(op, "a merge asked to move has no waiting merge to pass on that side, and stays where it is", fields)
+		return false, nil
 	}
-	log.Info(op, "moved a merge to the front of its queue", dlog.Context{"workspace": string(ws), "repo": string(repo)})
-	return o.republishQueue(ctx, repo)
+	log.Info(op, "moved a merge one place in its queue", fields)
+	return true, o.republishQueue(ctx, repo)
 }
 
 // dequeue takes one workspace's merge out, whatever it is doing. A merge still
