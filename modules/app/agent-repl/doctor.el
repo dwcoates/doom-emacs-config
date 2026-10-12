@@ -206,6 +206,15 @@ than checking anything itself.  A runner that refuses the manifests (exit
 
 ;;;; ---- Aggregation ----
 
+(defvar agent-repl-doctor-inhibit-checks nil
+  "Non-nil while doctor.el is loaded as a LIBRARY, not run as the doctor.
+`doom doctor' loads this file for the side effect of the aggregation below,
+which runs every check, the requirements runner's processes included.  A
+caller that loads it only to reach its functions (the ERT suite) binds this
+around the load so the load runs no check: it took ~1.8s of a test chunk and
+probed the real host's tools from inside a unit test.")
+
+(unless agent-repl-doctor-inhibit-checks
 (let ((issues
        (apply #'append
               (mapcar
@@ -241,4 +250,4 @@ than checking anything itself.  A runner that refuses the manifests (exit
                 (warn! "FATAL: %s" (cdr issue))))
       (_      (agent-repl--doctor-log
                "doctor: issue-level=%S dispatch=warn! message=%S" (car issue) (cdr issue))
-              (warn! "%s" (cdr issue))))))
+              (warn! "%s" (cdr issue)))))))
