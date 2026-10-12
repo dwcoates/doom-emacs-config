@@ -75,14 +75,17 @@ func (s *store) MergeWorkspaceFor(ctx context.Context, request DetachedMergeID) 
 // onto the merge workspace forked for it, in ONE transaction: the requester's
 // REQUESTED row (which must still carry `request`) is deleted, and the merge
 // workspace's own-branch, in-place, close-on-landing request is written in its
-// place at the back of the queue, still REQUESTED. The caller then puts the
-// merge workspace's request in line as any other.
+// place at the back of the queue, still REQUESTED, carrying the request's PICK
+// when it has one (the merge workspace's pick turn has not begun). The caller
+// then runs the pick, if any, and puts the merge workspace's request in line
+// as any other. The requester's reserved name leaves with its row: the merge
+// workspace now exists under it.
 //
 // Either both rows change or neither does, so a crash leaves the request on
 // exactly one workspace: on the requester (the hand-off is redone, and finds
 // the merge workspace already forked by MergeWorkspaceFor) or on the merge
 // workspace (the hand-off is done).
-func (s *store) HandOffDetachedMerge(ctx context.Context, repo RepoKey, requester WorkspaceID, request DetachedMergeID, mergeWS WorkspaceID, branch string, at time.Time) error {
+func (s *store) HandOffDetachedMerge(ctx context.Context, repo RepoKey, requester WorkspaceID, request DetachedMergeID, mergeWS WorkspaceID, branch, pick string, at time.Time) error {
 	const op = "daemon.wsm.hand_off_detached_merge"
 	key, err := normalizeRepoKey(repo)
 	if err != nil {
@@ -116,7 +119,7 @@ func (s *store) HandOffDetachedMerge(ctx context.Context, repo RepoKey, requeste
 		}
 		// THE MERGE WORKSPACE CARRIES THE REQUEST'S PLACE IN LINE: a detached
 		// merge asked for the front still goes to the front.
-		return insertRequest(ctx, tx, key, mergeWS, MergeSource{Kind: MergeSourceOwnBranch, Branch: branch, Front: front}, at)
+		return insertRequest(ctx, tx, key, mergeWS, MergeSource{Kind: MergeSourceOwnBranch, Branch: branch, Front: front, Pick: pick}, at)
 	})
 }
 
