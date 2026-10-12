@@ -209,9 +209,16 @@ arriving as an unknown field on some later push."
                        #'string<)))
     (should (equal spelled declared))))
 
-(ert-deftest agent-repl-test-wire-roster-row-status-count-is-thirty-one ()
-  "The status vocabulary is the 31 arms the contract declares."
-  (should (equal (length agent-repl-wire-roster-row-status-keywords) 31)))
+(ert-deftest agent-repl-test-wire-roster-row-status-count-is-thirty-two ()
+  "The status vocabulary is the 32 arms the contract declares."
+  (should (equal (length agent-repl-wire-roster-row-status-keywords) 32)))
+
+(ert-deftest agent-repl-test-wire-roster-decodes-the-opening-arm ()
+  "A workspace still opening decodes to its empty arm."
+  (should (equal (agent-repl-wire--decode-oneof
+                  "RosterRow" 'status '((opening))
+                  agent-repl-wire-roster-row-status-arms)
+                 '(:arm :opening :value nil))))
 
 (ert-deftest agent-repl-test-wire-roster-decodes-the-merge-waiting-arm ()
   "The merge_waiting arm decodes to its keyword."
