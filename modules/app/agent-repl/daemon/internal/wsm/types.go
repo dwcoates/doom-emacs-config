@@ -150,6 +150,20 @@ type TurnResult struct {
 	End TurnResultEnd
 	// Read reports that the user has seen the result.
 	Read bool
+	// ReadAt is when the user read the result. Nil while the result is
+	// unread, and for a result read before the instant was kept.
+	ReadAt *time.Time
+}
+
+// Same reports whether two durable results record the same fact: the same
+// end, the same read state and the same read instant. Instants compare by
+// time.Time.Equal, never by pointer, so a result re-read from the store
+// equals the one that was written.
+func (r TurnResult) Same(o TurnResult) bool {
+	if r.End != o.End || r.Read != o.Read || (r.ReadAt == nil) != (o.ReadAt == nil) {
+		return false
+	}
+	return r.ReadAt == nil || r.ReadAt.Equal(*o.ReadAt)
 }
 
 // TurnResultEnd is a turn-end arm, spelled as the roster's status arm.
