@@ -20,6 +20,14 @@
 import type { FeedId, FeedRow } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import type { AppContext } from "../../rpc/context.js";
 
+/**
+ * How a row first entered its feed: a live PUSH on the feed's tail, or a PAGE
+ * (the opening page, a re-open, an older page the walk loaded). Only a pushed
+ * row is new to a reader watching, so only its card types its title out
+ * (title-reveal.ts); a paged row is history and is drawn whole.
+ */
+export type RowArrival = "push" | "page";
+
 /** What a row renderer is told about the row it is drawing. */
 export interface RowContext {
   /** The app-wide capabilities: the client, the workspace, the ticker. */
@@ -28,6 +36,8 @@ export interface RowContext {
   feed: FeedId | "root";
   /** The whole row, for renderers that need its identity or its parent. */
   row: FeedRow;
+  /** How the row first entered this feed; fixed for the row's life. */
+  readonly arrival: RowArrival;
   /**
    * Jump to a row: open what must open to get there, expand the entry, center
    * it (`entryJumped`, scroll.ts; owner request, 2026-10-01) and mark it.

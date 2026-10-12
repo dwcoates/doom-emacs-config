@@ -55,6 +55,7 @@ function harness(reached = true): Harness {
         composerEnabled: false,
       }),
       feed: "root",
+      arrival: "page",
       row: create(FeedRowSchema, { id: create(FeedIdSchema, { value: "row-1" }), order: orderFor("row-1") }),
       revealRow: async (id) => {
         revealed.push(id);

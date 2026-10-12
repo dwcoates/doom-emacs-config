@@ -67,8 +67,10 @@ import type {
   FeedSubagentResult,
 } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import type { FeedChessBoard } from "../../../proto/gen/ts/frontend/v1/chess_board_pb";
+import type { RowArrival } from "./cards/context.js";
 
 export type { Handle };
+export type { RowArrival };
 
 /** What every row renderer is handed. */
 export interface RowContext {
@@ -78,6 +80,8 @@ export interface RowContext {
   feed: FeedId | "root";
   /** The whole row, so a renderer can reach its id, turn and placement arm. */
   row: FeedRow;
+  /** How the row first entered this feed; fixed for the row's life (context.ts). */
+  readonly arrival: RowArrival;
   /**
    * JUMP to another row (owner request, 2026-10-01): open the bubbles along
    * the way, expand the entry, center it (`entryJumped`), and mark it.
