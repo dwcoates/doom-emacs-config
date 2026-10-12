@@ -963,6 +963,18 @@ message FeedResponseRevealPace {
 message FeedResponseError {
   // The partial markdown, kept on screen.
   FeedResponseProse prose = 1;
+  // The sign-in action, drawn INSIDE the broken bubble. SET only on a bubble
+  // whose turn ended on an account cause signing in again cures (the
+  // credential rejected, or the organization the account may not use) — the
+  // same causes whose outcome marker carries
+  // FeedOutcomeVendorFaultExpansion.sign_in — so the reader can act from the
+  // bubble the failure cut short without opening the marker. UNSET on every
+  // other broken bubble. The daemon stamps it when the turn's terminal names
+  // the cause, so a bubble first drawn before its terminal is re-pushed with
+  // it; its click opens the workspace's login flow, exactly as the marker's
+  // action does. A completed sign-in retires the bubble from the feed
+  // outright, so a set action never outlives the failure it answers.
+  optional FeedOutcomeSignIn sign_in = 2;
 }
 // The bubble's markdown element.
 message FeedResponseProse {
