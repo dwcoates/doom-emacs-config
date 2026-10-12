@@ -174,6 +174,7 @@ describe("forkSession", () => {
       point: whole(),
       kind: "unknown_session",
       message: "the fork was refused: no parent transcript under this account root",
+      detail: "no transcript at",
     },
     {
       name: "the point's record is not in the parent transcript",
@@ -182,6 +183,7 @@ describe("forkSession", () => {
       point: throughRecord("missing"),
       kind: "record_absent",
       message: "the fork was refused: the fork point is not in the parent transcript",
+      detail: "missing",
     },
     {
       name: "the parent workspace has no persisted book",
@@ -190,8 +192,9 @@ describe("forkSession", () => {
       point: whole(),
       kind: "parent_book_unknown",
       message: "the fork was refused: the parent workspace has no persisted book identity",
+      detail: "no persisted identity for",
     },
-  ])("refuses when $name, never asking the vendor", async ({ book, parent, point, kind, message }) => {
+  ])("refuses when $name, never asking the vendor", async ({ book, parent, point, kind, message, detail }) => {
     // Arrange
     const { configDir, stateDir } = await fixture({ book });
     if (parent) writeParent(configDir);
@@ -207,9 +210,12 @@ describe("forkSession", () => {
     // Assert
     expect(outcome.kind).toBe(kind);
     expect(fork).not.toHaveBeenCalled();
-    expect(forkRecordsSince(mark)).toMatchObject([
+    const records = forkRecordsSince(mark);
+    expect(records).toMatchObject([
       { level: "error", message, context: { parent_vendor_session_id: PARENT_ID, parent_workspace_dir: PARENT_DIR } },
     ]);
+    const context = records[0]?.context as { detail?: string; cause?: string } | undefined;
+    expect(context?.detail ?? context?.cause).toContain(detail);
   });
 
   it("answers vendor_failed with the vendor's words when its fork throws", async () => {

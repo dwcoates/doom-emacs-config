@@ -15390,6 +15390,7 @@ describe("GetForkPoint and ForkSession", () => {
     // Arrange
     const h = harness();
     await started(h);
+    const mark = logSinkMark();
 
     // Act
     const response = await h.engine.forkSession(
@@ -15402,6 +15403,12 @@ describe("GetForkPoint and ForkSession", () => {
 
     // Assert
     expect(response.result.case === "failure" ? response.result.value.cause.case : "").toBe("alreadyStarted");
+    expect(logRecordsSince(mark).filter((record) => record.level === "error")).toMatchObject([
+      {
+        message: "a fork was asked of a shim whose session already started",
+        context: { parent_vendor_session_id: "parent", detail: expect.stringContaining("already started") as unknown },
+      },
+    ]);
   });
 
   it("forks before any session starts, through the installed vendor fork", async () => {

@@ -139,8 +139,9 @@ export async function forkSession(deps: ForkSessionDeps, ask: ForkSessionAsk): P
   };
   const parentFile = transcriptPath(deps.configDir, ask.parentWorkspaceDir, ask.parentVendorSessionId);
   if (!existsSync(parentFile)) {
-    LOGGER.error({ ...context, parent_transcript: parentFile }, "the fork was refused: no parent transcript under this account root");
-    return { kind: "unknown_session", detail: `no transcript at ${parentFile}` };
+    const detail = `no transcript at ${parentFile}`;
+    LOGGER.error({ ...context, parent_transcript: parentFile, detail }, "the fork was refused: no parent transcript under this account root");
+    return { kind: "unknown_session", detail };
   }
   const upTo = resolveUpTo(forkableRecordUuids(parentFile), ask.point);
   if (upTo.kind === "absent") {
@@ -149,8 +150,9 @@ export async function forkSession(deps: ForkSessionDeps, ask: ForkSessionAsk): P
   }
   const parentBook = await createAgentIdentityStore(deps.stateDir, workspaceLockKey(ask.parentWorkspaceDir)).read();
   if (parentBook === undefined) {
-    LOGGER.error(context, "the fork was refused: the parent workspace has no persisted book identity");
-    return { kind: "parent_book_unknown", detail: `no persisted identity for ${ask.parentWorkspaceDir}` };
+    const detail = `no persisted identity for ${ask.parentWorkspaceDir}`;
+    LOGGER.error({ ...context, detail }, "the fork was refused: the parent workspace has no persisted book identity");
+    return { kind: "parent_book_unknown", detail };
   }
   let forkedId: string;
   try {

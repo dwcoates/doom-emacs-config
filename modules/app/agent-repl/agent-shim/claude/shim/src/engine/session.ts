@@ -1660,8 +1660,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    */
   async function forkSession(request: shimv1.ForkSessionRequest): Promise<shimv1.ForkSessionResponse> {
     if (started) {
-      LOGGER.error({ parent_vendor_session_id: request.parentVendorSessionId }, "a fork was asked of a shim whose session already started");
-      return forkSessionRefused("already_started", "this shim already started its session; a fork is made only before one starts");
+      const detail = "this shim already started its session; a fork is made only before one starts";
+      LOGGER.error({ parent_vendor_session_id: request.parentVendorSessionId, detail }, "a fork was asked of a shim whose session already started");
+      return forkSessionRefused("already_started", detail);
     }
     if (request.point === undefined) {
       // The validator refuses an unset point before the engine is reached.
