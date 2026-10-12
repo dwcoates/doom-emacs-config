@@ -134,6 +134,10 @@ type harness struct {
 	// addressesErr fails that read.
 	addresses    map[ids.TurnID]*wsm.OutputAddress
 	addressesErr error
+	// mirrors are the recorded mirrors of turns the resolver reads on a
+	// replay; mirrorsErr fails that read.
+	mirrors    map[ids.TurnID]*wsm.MirrorAddress
+	mirrorsErr error
 	// owned is the set of turns the workspace recorded as its own; nil
 	// answers every turn owned (a test that is not about a fork's lineage).
 	// ownedErr fails the read.
@@ -232,6 +236,18 @@ func newStoredHarness(t *testing.T, rolledBack RolledBackTurnStore) *harness {
 			for _, turn := range turns {
 				if addr, ok := h.addresses[turn]; ok {
 					out[turn] = addr
+				}
+			}
+			return out, nil
+		},
+		TurnMirrors: func(_ context.Context, _ ids.WorkspaceID, turns []ids.TurnID) (map[ids.TurnID]*wsm.MirrorAddress, error) {
+			if h.mirrorsErr != nil {
+				return nil, h.mirrorsErr
+			}
+			out := map[ids.TurnID]*wsm.MirrorAddress{}
+			for _, turn := range turns {
+				if m, ok := h.mirrors[turn]; ok {
+					out[turn] = m
 				}
 			}
 			return out, nil

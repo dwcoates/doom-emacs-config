@@ -10,7 +10,6 @@ import (
 	workspacev1 "agentrepl/proto/workspace/v1"
 	"google.golang.org/protobuf/proto"
 
-	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
 )
 
@@ -27,27 +26,6 @@ func switchingHeadRow(target ids.WorkspaceID) *frontendv1.FeedRow {
 		}},
 	}
 	return row
-}
-
-// switchingConflictsRow is a conflicts tab on lease-7's sub-feed carrying an
-// available switch to TARGET.
-func switchingConflictsRow(target ids.WorkspaceID) (feedid.Feed, *frontendv1.FeedRow) {
-	lease := ids.LeaseID("lease-7")
-	feed := feedid.Feed{Merge: &lease}
-	return feed, &frontendv1.FeedRow{
-		Id: testEncode(feedid.Ref{WS: testWorkspace, Feed: feed, Row: feedid.RowKey{Kind: feedid.KindMergeTab, ID: "conflicts", Sub: "1"}}),
-		Row: &frontendv1.FeedRow_MergeTab{MergeTab: &frontendv1.FeedMergeTab{
-			Label: &frontendv1.FeedMergeTabLabel{Text: "conflicts", Round: 1},
-			Kind: &frontendv1.FeedMergeTab_Conflicts{Conflicts: &frontendv1.FeedMergeTabConflicts{
-				WorkspaceSwitch: &frontendv1.FeedMergeTabWorkspaceSwitch{
-					Label: &frontendv1.FeedMergeTabWorkspaceSwitchLabel{Text: "resolving conflicts in the merge workspace"},
-					Availability: &frontendv1.FeedMergeTabWorkspaceSwitch_Available{Available: &frontendv1.FeedMergeTabWorkspaceSwitchAvailable{
-						Target: &workspacev1.WorkspaceRef{Id: string(target), Dir: "/tmp/ws-merge"},
-					}},
-				},
-			}},
-		}},
-	}
 }
 
 func TestPromptRowDrawsAMergeHandbackAsItsBadge(t *testing.T) {
@@ -129,33 +107,28 @@ func TestThePromptQueueMirrorDrawsThroughPromptRow(t *testing.T) {
 	}
 }
 
-func TestMarkMergeWorkspaceRemovedRestatesTheHeadAndTheAgenticTab(t *testing.T) {
+func TestMarkMergeWorkspaceRemovedRestatesTheHead(t *testing.T) {
 	// Arrange
 	store := newFakeDurableRows()
 	r, _ := daemonOver(t, store)
-	r.UpsertDurable(testWorkspace, rootFeed(), switchingHeadRow(theMergeWorkspace))
-	tabFeed, tab := switchingConflictsRow(theMergeWorkspace)
-	r.UpsertDurable(testWorkspace, tabFeed, tab)
+	head := switchingHeadRow(theMergeWorkspace)
+	r.UpsertDurable(testWorkspace, rootFeed(), head)
 
 	// Act
 	marked := r.MarkMergeWorkspaceRemoved(testWorkspace, theMergeWorkspace, 1234)
 
-	// Assert: both rows restated, drawn and recorded as removed.
-	if marked != 2 {
-		t.Fatalf("marked = %d, want the head and the tab", marked)
+	// Assert: the head restated, drawn and recorded as removed.
+	if marked != 1 {
+		t.Fatalf("marked = %d, want the head", marked)
 	}
-	head := feedRows(r, rootFeed())[0].GetActivity().GetMerge().GetHead().GetWorkspaceSwitch()
-	if head.GetRemoved().GetRemovedAtMs() != 1234 || head.GetLabel().GetText() != removedSwitchLabel {
-		t.Fatalf("head switch = %+v, want removed at 1234", head)
+	drawn := feedRows(r, rootFeed())[0].GetActivity().GetMerge().GetHead().GetWorkspaceSwitch()
+	if drawn.GetRemoved().GetRemovedAtMs() != 1234 || drawn.GetLabel().GetText() != removedSwitchLabel {
+		t.Fatalf("head switch = %+v, want removed at 1234", drawn)
 	}
-	conflicts := feedRows(r, tabFeed)[0].GetMergeTab().GetConflicts().GetWorkspaceSwitch()
-	if conflicts.GetRemoved().GetRemovedAtMs() != 1234 {
-		t.Fatalf("tab switch = %+v, want removed at 1234", conflicts)
-	}
-	recorded, _ := store.recorded(testWorkspace, tab.GetId().GetValue())
+	recorded, _ := store.recorded(testWorkspace, head.GetId().GetValue())
 	decoded := &frontendv1.FeedRow{}
-	if err := proto.Unmarshal(recorded.Row, decoded); err != nil || decoded.GetMergeTab().GetConflicts().GetWorkspaceSwitch().GetRemoved() == nil {
-		t.Fatalf("recorded tab = %+v, %v; want the removal recorded", decoded, err)
+	if err := proto.Unmarshal(recorded.Row, decoded); err != nil || decoded.GetActivity().GetMerge().GetHead().GetWorkspaceSwitch().GetRemoved() == nil {
+		t.Fatalf("recorded head = %+v, %v; want the removal recorded", decoded, err)
 	}
 }
 

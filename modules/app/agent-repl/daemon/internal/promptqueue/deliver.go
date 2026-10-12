@@ -194,12 +194,25 @@ func (q *queue) logRepeatedStart(log dlog.Logger, verb string, turn ids.TurnID) 
 // chosen, so the live draw (feed.Resolver.AddressTurn) and every replay
 // (feed.Deps.TurnAddresses) place the turn from one fact.
 func (q *queue) recordTurn(ctx context.Context, t wsm.Turn, log dlog.Logger) error {
-	t.Address = q.turnAddress(t, log)
+	t.Mirror = q.turnMirror(t)
+	t.Address = q.turnAddress(t, t.Mirror != nil, log)
 	if err := q.deps.DB.PutTurn(ctx, t); err != nil {
 		return err
 	}
 	q.deps.Feed.AddressTurn(t.Workspace, t.ID, t.Address)
+	q.deps.Feed.MirrorTurn(t.Workspace, t.ID, t.Mirror)
 	return nil
+}
+
+// turnMirror chooses where else a turn draws, BY ITS ORIGIN, exactly as
+// turnAddress chooses where it draws: a turn the merge orchestrator starts
+// itself takes the mirror the merge stands (an async merge workspace's turn,
+// mirrored into the requester's bubble), and every other turn takes none.
+func (q *queue) turnMirror(t wsm.Turn) *wsm.MirrorAddress {
+	if !startedByMerge(t.Origin) {
+		return nil
+	}
+	return q.deps.Feed.OutputMirror(t.Workspace)
 }
 
 // turnAddress chooses where a turn draws, BY ITS ORIGIN. A turn the merge
@@ -207,13 +220,15 @@ func (q *queue) recordTurn(ctx context.Context, t wsm.Turn, log dlog.Logger) err
 // merge stands at, in its tab; every other turn -- the user's own prompts sent
 // while a merge runs, the displaced turn resumed, a vendor-started turn --
 // draws on the root feed. A merge turn opened once no address stands (its
-// merge already ended) draws on the root feed, and that is said at INFO.
-func (q *queue) turnAddress(t wsm.Turn, log dlog.Logger) *wsm.OutputAddress {
+// merge already ended) draws on the root feed, and that is said at INFO —
+// unless it is MIRRORED: an async merge's workspace draws its merge turns on
+// its own root feed by design, and the mirror is where the merge reads them.
+func (q *queue) turnAddress(t wsm.Turn, mirrored bool, log dlog.Logger) *wsm.OutputAddress {
 	if !startedByMerge(t.Origin) {
 		return nil
 	}
 	addr := q.deps.Feed.OutputAddress(t.Workspace)
-	if addr == nil {
+	if addr == nil && !mirrored {
 		log.Info(opDeliver, "a merge's own turn opened with no merge address standing; it draws on the root feed",
 			dlog.Context{"turn": string(t.ID), "origin": t.Origin})
 	}
@@ -221,14 +236,15 @@ func (q *queue) turnAddress(t wsm.Turn, log dlog.Logger) *wsm.OutputAddress {
 }
 
 // mergeStartedOrigins are the origins of the turns the merge orchestrator
-// starts in its own tabs: a conflict's resolution, a suite's fix, and the
-// configured pre and post prompts. MERGE_DISPLACED_TURN_RESUME is not one: it
+// starts in its own tabs: an async merge's pick, a conflict's resolution, a
+// suite's fix, and the configured pre and post prompts. MERGE_DISPLACED_TURN_RESUME is not one: it
 // is the user's own interrupted turn, put back once the merge has ended.
 var mergeStartedOrigins = map[string]bool{
 	conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR.String(): true,
 	conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_TEST_REPAIR.String():     true,
 	conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_BEFORE_ACTION.String():   true,
 	conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_AFTER_ACTION.String():    true,
+	conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_PICK.String():            true,
 }
 
 // startedByMerge reports whether a recorded origin is one the merge

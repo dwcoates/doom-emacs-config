@@ -84,6 +84,13 @@ type wsState struct {
 	// (Deps.TurnAddresses). A turn absent from it draws on the root feed and
 	// its agents' sub-feeds. See turnaddress.go.
 	turnAddresses map[ids.TurnID]*sessionwatcher.OutputAddress
+	// mirror is the mirror a lease holder installed, nil when none stands: the
+	// prompt queue records it on a turn the holder starts (turnmirror.go).
+	mirror *wsm.MirrorAddress
+	// turnMirrors is the mirror each mirrored turn is also drawn at, as the
+	// prompt queue recorded it (MirrorTurn) or a replay read it back
+	// (Deps.TurnMirrors). See turnmirror.go.
+	turnMirrors map[ids.TurnID]*wsm.MirrorAddress
 	// outlivedReported records each addressed turn whose frame was drawn after
 	// the address it was recorded at stopped standing, so that is said once.
 	outlivedReported map[ids.TurnID]bool
@@ -713,6 +720,7 @@ func newWSState(ws ids.WorkspaceID) *wsState {
 		rolledBack:           map[ids.TurnID]bool{},
 		promptSaid:           map[ids.TurnID]*conversationv1.UserSaid{},
 		turnAddresses:        map[ids.TurnID]*sessionwatcher.OutputAddress{},
+		turnMirrors:          map[ids.TurnID]*wsm.MirrorAddress{},
 		outlivedReported:     map[ids.TurnID]bool{},
 		endedTurns:           map[ids.TurnID]bool{},
 		answerMarkdown:       map[string]string{},
@@ -1083,6 +1091,8 @@ func (r *resolver) upsert(s *wsState, at placement, row *frontendv1.FeedRow, dur
 	}
 	f.rows[id] = snapshot
 	s.noteProduced(snapshot)
+	// A ROW OF A MIRRORED TURN IS DRAWN AT THE MIRROR TOO (turnmirror.go).
+	r.mirrorRow(s, snapshot)
 	if !durable {
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "!durable"})
 		f.nonDurable[id] = true

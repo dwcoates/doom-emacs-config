@@ -976,7 +976,11 @@ type fakeFeed struct {
 	address    *sessionwatcher.OutputAddress
 	// turnAddrs are the addresses AddressTurn handed over, by turn; nil
 	// entries are turns handed over with no address.
-	turnAddrs       map[ids.TurnID]*sessionwatcher.OutputAddress
+	turnAddrs map[ids.TurnID]*sessionwatcher.OutputAddress
+	// mirror is the standing output mirror; turnMirrors are the mirrors
+	// MirrorTurn handed over, by turn.
+	mirror          *wsm.MirrorAddress
+	turnMirrors     map[ids.TurnID]*wsm.MirrorAddress
 	clearReceived   []ids.TurnID
 	compactReceived []ids.TurnID
 	cutAborted      []ids.TurnID
@@ -1134,6 +1138,44 @@ func (f *fakeFeed) turnAddress(turn ids.TurnID) (*sessionwatcher.OutputAddress, 
 	defer f.mu.Unlock()
 	addr, ok := f.turnAddrs[turn]
 	return addr, ok
+}
+
+// SetOutputMirror records the standing output mirror an async merge's own
+// turns are recorded with.
+func (f *fakeFeed) SetOutputMirror(_ ids.WorkspaceID, m *wsm.MirrorAddress) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.mirror = m
+}
+
+// OutputMirror answers a copy of the standing output mirror.
+func (f *fakeFeed) OutputMirror(_ ids.WorkspaceID) *wsm.MirrorAddress {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.mirror == nil {
+		return nil
+	}
+	copied := *f.mirror
+	return &copied
+}
+
+// MirrorTurn records the mirror a turn was handed over with.
+func (f *fakeFeed) MirrorTurn(_ ids.WorkspaceID, turn ids.TurnID, m *wsm.MirrorAddress) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.turnMirrors == nil {
+		f.turnMirrors = map[ids.TurnID]*wsm.MirrorAddress{}
+	}
+	f.turnMirrors[turn] = m
+}
+
+// turnMirror answers the mirror a turn was handed over with, and whether it
+// was handed over at all.
+func (f *fakeFeed) turnMirror(turn ids.TurnID) (*wsm.MirrorAddress, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	m, ok := f.turnMirrors[turn]
+	return m, ok
 }
 
 // SetOutputAddress records the standing output address a merge's own turns
