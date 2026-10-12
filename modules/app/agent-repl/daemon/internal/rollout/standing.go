@@ -90,9 +90,9 @@ func (c *controller) recordTransfer(ws ids.WorkspaceID, successor string) {
 // per-workspace rpcs are served here again, and the rendezvous its
 // announcement armed is settled and disarmed so nothing waits on an adoption
 // that will not happen here.
-func (c *controller) untransfer(ws ids.WorkspaceID) {
+func (c *controller) untransfer(ws ids.WorkspaceID) (wasTransferred bool) {
 	c.mu.Lock()
-	previous := c.transferred[ws]
+	previous, wasTransferred := c.transferred[ws]
 	delete(c.transferred, ws)
 	e, armed := c.rendezvous[ws]
 	delete(c.rendezvous, ws)
@@ -101,6 +101,7 @@ func (c *controller) untransfer(ws ids.WorkspaceID) {
 		e.settle(ErrReclaimed)
 	}
 	c.logTransition(opTransfer, ws, "serving_standing", previous, "", dlog.Context{"reclaimed": true})
+	return wasTransferred
 }
 
 // ServesIntake implements Controller.

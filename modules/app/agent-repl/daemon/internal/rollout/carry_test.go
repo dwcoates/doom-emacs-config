@@ -855,8 +855,11 @@ func TestARefusedWorkspaceMovesOnceItFallsFree(t *testing.T) {
 	awaitExit(t, h)
 
 	// Assert
-	if pushes := h.pusher.Calls(); len(pushes) != 2 {
-		t.Fatalf("pushes = %+v, want the mid-work transfer and the one at freeness", pushes)
+	// The refusal's take-back withdraws the first notice between the two
+	// transfers, so the second one is not swallowed as its repeat.
+	pushes := h.pusher.Calls()
+	if len(pushes) != 3 || pushes[0].Kind != "transferred" || pushes[1].Kind != "retract_transferred" || pushes[2].Kind != "transferred" {
+		t.Fatalf("pushes = %+v, want the mid-work transfer, its retraction at the take-back, and the one at freeness", pushes)
 	}
 	if carry := sealedCarry(t, h, ws); carry.MidWork {
 		t.Fatalf("the transfer at freeness was carried mid-work")
