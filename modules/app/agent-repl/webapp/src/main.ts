@@ -56,6 +56,7 @@ import { LevelWindow, selectionContext, selectionNote, selectLevel } from "../..
 import { installPagePresenceLog } from "./page-presence.js";
 import { connectToHost } from "./host/embed.js";
 import { pagePresence } from "./presence.js";
+import { installPageDrawnReport } from "./page-drawn-report.js";
 import { createAgentReplClient, type AgentReplClient } from "./rpc/client.js";
 import { createAppContext, type AppContext } from "./rpc/context.js";
 import { reportClientFailure } from "./rpc/link.js";
@@ -224,6 +225,9 @@ export async function boot(): Promise<void> {
       page: connectionId,
     });
     opened = ctx;
+    // The daemon declares this workspace open (and the editor shows its tab)
+    // only once this page has drawn, which only the page can say.
+    installPageDrawnReport(ctx, document);
     log.info("the webapp booted", {
       operation: "main.boot",
       context: {

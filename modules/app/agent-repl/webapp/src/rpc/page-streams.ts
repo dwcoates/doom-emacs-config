@@ -100,6 +100,12 @@ export interface PageStreams {
   ): AsyncIterable<PageWatchResponse<K>>;
   /** The id this document minted for itself; it rides every page-mux record. */
   readonly page: string;
+  /**
+   * Tell FN every time the page's stream attaches to a daemon: the first
+   * attach and every re-attach after the stream was lost (a daemon restart, a
+   * handover). Answers the unsubscribe.
+   */
+  onAttached(fn: () => void): () => void;
 }
 
 export interface PageStreamsHandle extends PageStreams {
@@ -217,6 +223,7 @@ function newAttachment(): Attachment {
  */
 export function startPageStreams(ctx: PageStreamContext, page: string): PageStreamsHandle {
   const subscriptions = new Map<string, FrameQueue<PageFrame>>();
+  const attachedListeners = new Set<() => void>();
   let attachment = newAttachment();
   let nextId = 0;
 
@@ -236,6 +243,12 @@ export function startPageStreams(ctx: PageStreamContext, page: string): PageStre
   return {
     page,
     watch,
+    onAttached(fn: () => void): () => void {
+      attachedListeners.add(fn);
+      return () => {
+        attachedListeners.delete(fn);
+      };
+    },
     cancel(): void {
       stream.cancel();
       detach();
@@ -252,6 +265,8 @@ export function startPageStreams(ctx: PageStreamContext, page: string): PageStre
           context: { page },
         });
         attachment.resolve();
+        // A copy: a listener may unsubscribe itself as it runs.
+        for (const fn of [...attachedListeners]) fn();
         return;
       case "push": {
         const queue = subscriptions.get(frame.value.subscription);

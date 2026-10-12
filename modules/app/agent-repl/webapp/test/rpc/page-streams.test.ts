@@ -256,6 +256,47 @@ function contextFor(
   });
 }
 
+describe("the page's attach listeners", () => {
+  it("tells a listener when the page's stream attaches", async () => {
+    // Arrange.
+    const { client, daemon } = fakeDaemon();
+    const ctx = contextFor(client, new RecordingSink());
+    let told = 0;
+    ctx.streams.onAttached(() => {
+      told += 1;
+    });
+    await settle();
+
+    // Act.
+    daemon.send(attached());
+    await settle();
+
+    // Assert.
+    expect(told).toBe(1);
+    ctx.quiesce();
+  });
+
+  it("stops telling a listener that unsubscribed", async () => {
+    // Arrange.
+    const { client, daemon } = fakeDaemon();
+    const ctx = contextFor(client, new RecordingSink());
+    let told = 0;
+    const unsubscribe = ctx.streams.onAttached(() => {
+      told += 1;
+    });
+    await settle();
+
+    // Act.
+    unsubscribe();
+    daemon.send(attached());
+    await settle();
+
+    // Assert.
+    expect(told).toBe(0);
+    ctx.quiesce();
+  });
+});
+
 describe("the page's one standing stream", () => {
   it("opens exactly one standing stream for every watch it holds", async () => {
     // Arrange: a page holding FIVE watches at once, every standing view the
@@ -987,9 +1028,11 @@ describe("the page's connection budget", () => {
 
   it("guards every server-streaming rpc the service declares but the mux's own", () => {
     // Arrange: the rpcs the page used to open a connection apiece for, plus
-    // the host watch Emacs holds. Named here so a method DROPPED from the
-    // service is noticed too, rather than quietly shrinking the guard.
+    // the host watch and the tab opening Emacs holds. Named here so a method
+    // DROPPED from the service is noticed too, rather than quietly shrinking
+    // the guard.
     const expected = [
+      "openTabs",
       "watchFeed",
       "watchWorkspaceRoster",
       "watchTopbar",
