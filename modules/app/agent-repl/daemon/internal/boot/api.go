@@ -259,6 +259,13 @@ type Deps struct {
 	// against a store that is gone for good retries a socket that never
 	// appears, and its feed stays blank.
 	EnsureServices func(context.Context) error
+	// EnsureSidecar is the service step's second half: the sidecar's build
+	// judged and, when stale, the sidecar restarted alone (the half
+	// deploy.Restarter.EnsureStoreCurrent answers). It runs BESIDE the
+	// bring-up's starts, not before them: only the store must be current
+	// before a shim starts, and a sidecar restart beside running shims loses
+	// nothing (it resumes from its cursors in the store).
+	EnsureSidecar func(context.Context) error
 	// Unserved states, on a workspace's views, that this daemon serves no
 	// session for it: its link is dead before it ever connected. The
 	// reconciliation calls it for every UNDETERMINED workspace, which no
@@ -354,6 +361,8 @@ func New(deps Deps) (Sequence, error) {
 		return nil, missing("a session starter")
 	case deps.EnsureServices == nil:
 		return nil, missing("a launchd service ensurer")
+	case deps.EnsureSidecar == nil:
+		return nil, missing("a sidecar service ensurer")
 	case deps.Unserved == nil:
 		return nil, missing("an unserved-workspace marker")
 	case deps.BringingUp == nil:

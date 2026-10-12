@@ -804,3 +804,80 @@ func TestAStoreSocketWaitItsCallerCancelsRecordsNoError(t *testing.T) {
 		t.Fatalf("record levels = %v, want no error for a wait its caller cancelled", levelsOf(h.log))
 	}
 }
+
+func TestEnsureStoreCurrentLeavesAStaleSidecarForItsSecondHalf(t *testing.T) {
+	// Arrange
+	h := newRestarter(t)
+	h.running(t, StoreLabel, buildreport.ServiceStore, 10, "new store", "new store")
+	h.running(t, SidecarLabel, buildreport.ServiceSidecar, 20, "old sidecar", "new sidecar")
+
+	// Act
+	_, err := h.r.EnsureStoreCurrent(context.Background())
+
+	// Assert
+	if err != nil || len(h.acts()) != 0 {
+		t.Fatalf("EnsureStoreCurrent = %v, acts %v; want the sidecar untouched until its half runs", err, h.acts())
+	}
+}
+
+func TestEnsureStoreCurrentsSecondHalfRestartsAStaleSidecar(t *testing.T) {
+	// Arrange
+	h := newRestarter(t)
+	h.running(t, StoreLabel, buildreport.ServiceStore, 10, "new store", "new store")
+	h.running(t, SidecarLabel, buildreport.ServiceSidecar, 20, "old sidecar", "new sidecar")
+	sidecar, err := h.r.EnsureStoreCurrent(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	err = sidecar(context.Background())
+
+	// Assert
+	if want := []string{"kickstart " + SidecarLabel}; err != nil || fmt.Sprint(h.acts()) != fmt.Sprint(want) {
+		t.Fatalf("second half = %v, acts %v; want %v", err, h.acts(), want)
+	}
+}
+
+func TestEnsureStoreCurrentsSecondHalfIsANoOpAfterAStoreRestart(t *testing.T) {
+	// Arrange: a stale store takes the sidecar with it in the first half.
+	h := newRestarter(t)
+	h.running(t, StoreLabel, buildreport.ServiceStore, 10, "old store", "new store")
+	h.running(t, SidecarLabel, buildreport.ServiceSidecar, 20, "old sidecar", "new sidecar")
+	h.launchd.onKickstart = func() { h.bindSocket(t) }
+	sidecar, err := h.r.EnsureStoreCurrent(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := len(h.acts())
+
+	// Act
+	err = sidecar(context.Background())
+
+	// Assert
+	if err != nil || len(h.acts()) != before {
+		t.Fatalf("second half = %v, acts %v; want nothing more after the pair's restart", err, h.acts()[before:])
+	}
+}
+
+func TestEnsureStoreCurrentsSecondHalfLeavesASidecarTheFirstHalfBootstrapped(t *testing.T) {
+	// Arrange: the sidecar is unloaded, so the first half bootstraps it from
+	// the installed build, and its report is still the old one.
+	h := newRestarter(t)
+	h.running(t, StoreLabel, buildreport.ServiceStore, 10, "new store", "new store")
+	h.running(t, SidecarLabel, buildreport.ServiceSidecar, 20, "old sidecar", "new sidecar")
+	h.unload(t, SidecarLabel)
+	sidecar, err := h.r.EnsureStoreCurrent(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := len(h.acts())
+
+	// Act
+	err = sidecar(context.Background())
+
+	// Assert
+	if err != nil || len(h.acts()) != before {
+		t.Fatalf("second half = %v, acts %v; want a just-bootstrapped sidecar left alone", err, h.acts()[before:])
+	}
+}

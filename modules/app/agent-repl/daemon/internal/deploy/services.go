@@ -176,10 +176,14 @@ func (r *Restarter) ensureBothLoaded(ctx context.Context) (storeBootstrapped, si
 // sidecar with it, or RestartSidecar alone), judged by the ONE staleness
 // check a deploy uses (serviceStaleness).
 //
-// IT RUNS BEFORE ANY SHIM STARTS, and that is the whole point of it. A bounce
-// rebuilds and installs the services' binaries, stands the daemon down, and
-// leaves the services to the daemon that boots next: restarted here, they are
-// down only while no shim exists to lose them. Stopped from outside instead,
+// The boot runs it as its two halves (EnsureStoreCurrent before any shim
+// starts, then the sidecar half it answers, beside the bring-ups);
+// EnsureCurrent is both, in order.
+//
+// THE STORE IS CURRENT BEFORE ANY SHIM STARTS, and that is the whole point of
+// it. A bounce rebuilds and installs the services' binaries, stands the daemon
+// down, and leaves the services to the daemon that boots next: restarted here,
+// the store is down only while no shim exists to lose it. Stopped from outside instead,
 // they went down under whatever the freshly relaunched daemon had already
 // started (2026-10-03).
 //
@@ -190,26 +194,61 @@ func (r *Restarter) ensureBothLoaded(ctx context.Context) (storeBootstrapped, si
 // can then prove the running service current, and nothing could restart it
 // onto a build that is not there.
 func (r *Restarter) EnsureCurrent(ctx context.Context) error {
-	storeBootstrapped, sidecarBootstrapped, err := r.ensureBothLoaded(ctx)
+	sidecar, err := r.EnsureStoreCurrent(ctx)
 	if err != nil {
 		return err
 	}
+	return sidecar(ctx)
+}
+
+// EnsureStoreCurrent is EnsureCurrent's FIRST HALF, the one shims must wait
+// for: launchd holds both services, and the store runs the installed build
+// (restarted, with the sidecar, when it did not). It answers the SECOND
+// HALF, the sidecar's own judgement and restart, for the caller to run once
+// shims may start.
+//
+// THE SIDECAR NEED NOT BE CURRENT BEFORE A SHIM STARTS. Only the store is: a
+// shim writes into it from its first record, and a store restart under a
+// shim loses what the shim wrote meanwhile. The sidecar only reads
+// transcripts the shims write and resumes from the cursors it keeps in the
+// store, so a sidecar-only restart beside running shims loses nothing —
+// exactly what a deploy's RestartSidecar already does under live sessions.
+// Holding every bring-up on it instead cost a boot the whole kickstart: 29s
+// on 2026-10-12, with every workspace's tab waiting on it.
+func (r *Restarter) EnsureStoreCurrent(ctx context.Context) (func(context.Context) error, error) {
+	storeBootstrapped, sidecarBootstrapped, err := r.ensureBothLoaded(ctx)
+	if err != nil {
+		return nil, err
+	}
 	storeStale, err := r.runningStale(ctx, storeBootstrapped, ComponentStore, StoreLabel, buildreport.ServiceStore)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if storeStale {
 		// A STORE RESTART RESTARTS THE SIDECAR TOO: its socket is out while the
 		// store restarts, and a fresh pair is the known-good state.
 		r.Log.Info(opServices, "the running store is not the installed build; restarting it, and the sidecar with it, before any shim starts", nil)
-		return r.RestartStore(ctx)
+		if err := r.RestartStore(ctx); err != nil {
+			return nil, err
+		}
+		return func(context.Context) error {
+			r.Log.Debug(opServices, "the store's restart already restarted the sidecar onto the installed build", nil)
+			return nil
+		}, nil
 	}
-	sidecarStale, err := r.runningStale(ctx, sidecarBootstrapped, ComponentSidecar, SidecarLabel, buildreport.ServiceSidecar)
+	return func(ctx context.Context) error { return r.ensureSidecarCurrent(ctx, sidecarBootstrapped) }, nil
+}
+
+// ensureSidecarCurrent is EnsureCurrent's second half: the sidecar's build
+// judged and, when stale, the sidecar restarted alone. BOOTSTRAPPED says the
+// first half just started it from the installed build.
+func (r *Restarter) ensureSidecarCurrent(ctx context.Context, bootstrapped bool) error {
+	sidecarStale, err := r.runningStale(ctx, bootstrapped, ComponentSidecar, SidecarLabel, buildreport.ServiceSidecar)
 	if err != nil {
 		return err
 	}
 	if sidecarStale {
-		r.Log.Info(opServices, "the running sidecar is not the installed build; restarting it before any shim starts", nil)
+		r.Log.Info(opServices, "the running sidecar is not the installed build; restarting it", nil)
 		return r.RestartSidecar(ctx)
 	}
 	r.Log.Debug(opServices, "both services run the installed build", nil)

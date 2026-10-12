@@ -106,3 +106,66 @@ func TestBootServiceStepOnlyEnsuresTheServicesForAJoiningSuccessor(t *testing.T)
 		t.Fatalf("a joining successor ran %q, want loaded", called)
 	}
 }
+
+func TestSidecarStepRunsTheHalfTheStoreHalfAnswered(t *testing.T) {
+	// Arrange
+	var ran bool
+	step := &sidecarStep{}
+	_ = step.storeCurrent(func(context.Context) (func(context.Context) error, error) {
+		return func(context.Context) error { ran = true; return nil }, nil
+	})(context.Background())
+
+	// Act
+	err := step.run(context.Background())
+
+	// Assert
+	if err != nil || !ran {
+		t.Fatalf("run = %v, ran = %v; want the recorded half run", err, ran)
+	}
+}
+
+func TestSidecarStepWithNoStoreHalfIsNothingToDo(t *testing.T) {
+	// Arrange: a joining successor never runs the store half.
+	step := &sidecarStep{}
+
+	// Act
+	err := step.run(context.Background())
+
+	// Assert
+	if err != nil {
+		t.Fatalf("run = %v, want nil", err)
+	}
+}
+
+func TestSidecarStepAnswersTheStoreHalfsFailure(t *testing.T) {
+	// Arrange
+	failure := errors.New("store")
+	step := &sidecarStep{}
+
+	// Act
+	err := step.storeCurrent(func(context.Context) (func(context.Context) error, error) {
+		return nil, failure
+	})(context.Background())
+
+	// Assert
+	if !errors.Is(err, failure) || step.run(context.Background()) != nil {
+		t.Fatalf("store half = %v; want its failure and no sidecar half left to run", err)
+	}
+}
+
+func TestSidecarStepSurfacesTheSidecarHalfsFailure(t *testing.T) {
+	// Arrange
+	failure := errors.New("kickstart")
+	step := &sidecarStep{}
+	_ = step.storeCurrent(func(context.Context) (func(context.Context) error, error) {
+		return func(context.Context) error { return failure }, nil
+	})(context.Background())
+
+	// Act
+	err := step.run(context.Background())
+
+	// Assert
+	if !errors.Is(err, failure) {
+		t.Fatalf("run = %v, want the sidecar half's failure", err)
+	}
+}
