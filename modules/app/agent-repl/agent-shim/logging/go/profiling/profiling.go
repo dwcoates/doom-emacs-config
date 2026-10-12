@@ -34,13 +34,15 @@ const DefaultRoot = ".cache/agent-repl/profiles"
 const ActiveFile = "active"
 
 // ArmedDir holds one marker per runtime that is listening for Signal:
-// <root>/armed/<runtime>-<pid>. Go and node terminate on an unhandled SIGUSR2,
-// so the collector signals only a marked, live pid.
+// <root>/armed/<runtime>-<pid>, so the collector signals exactly the runtimes
+// that will answer and reports the ones that cannot.
 const ArmedDir = "armed"
 
 // Signal is the signal every Go and node runtime reconciles its profiling on.
-// SIGUSR1 is node's inspector signal, so both use SIGUSR2.
-var Signal os.Signal = syscall.SIGUSR2
+// SIGWINCH, because its default action is to ignore (no build is ever killed
+// by it), node's SIGUSR1 opens its inspector, the shim's SIGUSR2 is its
+// keep-alive reset, and none of these runtimes has a terminal of its own.
+var Signal os.Signal = syscall.SIGWINCH
 
 // MaxDuration is how long a profile runs before the runtime stops it by
 // itself.

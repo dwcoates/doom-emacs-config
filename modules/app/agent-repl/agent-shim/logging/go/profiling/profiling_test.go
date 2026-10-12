@@ -122,7 +122,7 @@ func TestTheContractMatchesTheSharedFixture(t *testing.T) {
 	if f.DefaultRoot != "~/"+DefaultRoot {
 		t.Fatalf("DefaultRoot = %q, fixture %q", DefaultRoot, f.DefaultRoot)
 	}
-	if f.Signal != "SIGUSR2" || sig != syscall.SIGUSR2 {
+	if f.Signal != "SIGWINCH" || sig != syscall.SIGWINCH {
 		t.Fatalf("Signal = %v, fixture %q", Signal, f.Signal)
 	}
 }
