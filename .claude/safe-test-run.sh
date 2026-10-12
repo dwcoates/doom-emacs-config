@@ -74,13 +74,46 @@ fi
 # movements alike. Everything else stays covered: this checkout's HEAD and
 # branch, its working-tree status, and every ref no sibling worktree owns.
 
-# foreign_owned_refs prints "refs/heads/<branch>" for every branch checked
-# out in a worktree OTHER than this one.
+# foreign_owned_refs prints "refs/heads/<branch>" for every branch a worktree
+# OTHER than this one owns: the branch it has checked out, or, while it is
+# mid-rebase on a detached HEAD, the branch that rebase is rewriting. A merge
+# queue rebasing a sibling workspace detaches it for the rebase's whole run, so
+# without the second arm that sibling's branch flips between owned and unowned
+# across this suite and reads as drift (2026-10-12: workspace-retarget-zci and
+# duration-since-turn-end-merge, both rebased by the queue mid-run).
 foreign_owned_refs() {
+  local dir
   git worktree list --porcelain \
     | awk -v self="worktree $REPO_ROOT" '
-        /^worktree /            { cur = $0 }
-        /^branch / && cur != self { print $2 }'
+        /^worktree /              { cur = $0 }
+        /^branch / && cur != self { print $2 }
+        /^detached$/ && cur != self { print "DETACHED " substr(cur, 10) }' \
+    | while IFS= read -r line; do
+        case "$line" in
+          "DETACHED "*)
+            dir="${line#DETACHED }"
+            rebasing_branch "$dir"
+            ;;
+          *) printf '%s\n' "$line" ;;
+        esac
+      done
+}
+
+# rebasing_branch prints the ref a rebase in worktree DIR is rewriting, and
+# nothing when no rebase is in progress there. A worktree's .git is a file
+# naming its git directory, where git keeps the rebase's head-name.
+rebasing_branch() {
+  local dotgit="$1/.git" gitdir state
+  [ -f "$dotgit" ] || return 0
+  gitdir="$(sed -n 's/^gitdir: //p' "$dotgit")"
+  [ -n "$gitdir" ] || return 0
+  case "$gitdir" in /*) ;; *) gitdir="$1/$gitdir" ;; esac
+  for state in rebase-merge rebase-apply; do
+    if [ -f "$gitdir/$state/head-name" ]; then
+      cat "$gitdir/$state/head-name"
+      return 0
+    fi
+  done
 }
 
 # snapshot_refs prints the drift-scoped ref list: all heads and tags, minus
