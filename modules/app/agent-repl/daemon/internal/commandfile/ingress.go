@@ -423,20 +423,9 @@ func (i *ingress) mergeSourceArm(ctx context.Context, requester ids.WorkspaceID,
 // an agent asking to take a merge out is satisfied when none is in, so the
 // file is applied and the outcome record says nothing was queued.
 func (i *ingress) applyMergeEvict(ctx context.Context, log dlog.Logger, entry Entry) error {
-	requester, err := i.target(ctx, entry)
+	requester, evicted, err := i.queueSubject(ctx, entry, "evict_dir", entry.EvictDir)
 	if err != nil {
 		return err
-	}
-	evicted := requester
-	if entry.EvictDir != "" {
-		if i.deps.DB == nil {
-			return fmt.Errorf("this entry names an evict_dir and the ingress has no state client to resolve it with")
-		}
-		record, err := i.deps.DB.WorkspaceByDir(ctx, entry.EvictDir)
-		if err != nil {
-			return fmt.Errorf("unknown_workspace: no workspace is registered at evict_dir %q: %w", entry.EvictDir, err)
-		}
-		evicted = record.ID
 	}
 	outcome := dlog.Context{
 		"type": entry.Type, "requester": string(requester), "workspace": string(evicted),
@@ -454,6 +443,27 @@ func (i *ingress) applyMergeEvict(ctx context.Context, log dlog.Logger, entry En
 	outcome["outcome"] = "evicted"
 	log.Info(opMergeQueue, "evicted the workspace's merge from the queue", outcome)
 	return nil
+}
+
+// queueSubject resolves a queue control's two workspaces: the REQUESTER the
+// entry targets, and the SUBJECT whose merge it addresses -- the requester's
+// own unless DIR (the entry's FIELD) names another workspace's worktree.
+func (i *ingress) queueSubject(ctx context.Context, entry Entry, field, dir string) (requester, subject wsm.WorkspaceID, err error) {
+	requester, err = i.target(ctx, entry)
+	if err != nil {
+		return "", "", err
+	}
+	if dir == "" {
+		return requester, requester, nil
+	}
+	if i.deps.DB == nil {
+		return "", "", fmt.Errorf("this entry names a %s and the ingress has no state client to resolve it with", field)
+	}
+	record, err := i.deps.DB.WorkspaceByDir(ctx, dir)
+	if err != nil {
+		return "", "", fmt.Errorf("unknown_workspace: no workspace is registered at %s %q: %w", field, dir, err)
+	}
+	return requester, record.ID, nil
 }
 
 // applyMergePause maps a merge_pause or merge_resume entry onto the
