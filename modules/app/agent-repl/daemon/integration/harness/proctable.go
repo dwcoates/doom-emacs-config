@@ -3,8 +3,12 @@ package harness
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 	"strings"
+	"syscall"
 )
 
 // procEntry is one process-table entry: its pid and its argv joined by
@@ -22,6 +26,16 @@ type procEntry struct {
 // teardowns. Reading the table through the kernel's own interface
 // (proctable_darwin.go, proctable_linux.go) answers the same pids and argv
 // without a process spawn per listing.
+
+// exitedMidRead answers whether a read of a process's record failed only
+// because the process left the table during the listing. On linux that is
+// ENOENT when it is gone before the open, and ESRCH when it exits between
+// the open of /proc/<pid>/cmdline and the read (seen under a full run: "read
+// /proc/1425/cmdline: no such process"). Either way it can no longer run, so
+// it is no stray.
+func exitedMidRead(err error) bool {
+	return errors.Is(err, fs.ErrNotExist) || errors.Is(err, os.ErrProcessDone) || errors.Is(err, syscall.ESRCH)
+}
 
 // parseProcArgs2 decodes a darwin `kern.procargs2` buffer: a native-endian
 // int32 argc, the executable path NUL-terminated and NUL-padded, then argc

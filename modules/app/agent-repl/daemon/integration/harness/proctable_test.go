@@ -2,9 +2,12 @@ package harness
 
 import (
 	"encoding/binary"
+	"errors"
+	"io/fs"
 	"os"
 	"os/exec"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -124,4 +127,29 @@ func TestProcessTableListsThisProcess(t *testing.T) {
 		}
 	}
 	t.Fatalf("this process (pid %d) is not in the %d-entry table", os.Getpid(), len(table))
+}
+
+func TestExitedMidRead(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"gone before the open", &fs.PathError{Op: "open", Path: "/proc/1/cmdline", Err: syscall.ENOENT}, true},
+		{"exited between the open and the read", &fs.PathError{Op: "read", Path: "/proc/1/cmdline", Err: syscall.ESRCH}, true},
+		{"already reaped", os.ErrProcessDone, true},
+		{"refused", &fs.PathError{Op: "open", Path: "/proc/1/cmdline", Err: syscall.EACCES}, false},
+		{"any other failure", errors.New("disk on fire"), false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			// Act
+			got := exitedMidRead(c.err)
+
+			// Assert
+			if got != c.want {
+				t.Fatalf("exitedMidRead(%v) = %v, want %v", c.err, got, c.want)
+			}
+		})
+	}
 }
