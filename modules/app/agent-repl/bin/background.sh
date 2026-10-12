@@ -90,6 +90,14 @@ read_niceness() {
     esac
 }
 
+# A TEST'S RUNTIMES PROFILE INTO THE TEST'S OWN TREE. Every daemon, store,
+# sidecar and shim arms runtime profiling at boot and writes an armed marker
+# under the profiles root (proto/vocab/profile-session.json); left at the
+# default, every test-spawned runtime would mark itself in the operator's
+# ~/.cache/agent-repl/profiles, where bin/profile-agent-repl.sh would find and
+# signal it. An explicit setting is kept.
+export AGENT_REPL_PROFILE_ROOT="${AGENT_REPL_PROFILE_ROOT:-${TMPDIR:-/tmp}/agent-repl-test-profiles}"
+
 case $os in
     Darwin|Linux)
         niceness=$(read_niceness) || refuse "could not read this process's niceness"
