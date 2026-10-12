@@ -1,8 +1,10 @@
 package fakegit
 
 import (
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -56,6 +58,72 @@ func TestSaveThenLoadRoundTripsTheWorld(t *testing.T) {
 	// Assert.
 	if len(back.Repos) != 1 || back.Repos[0].Dir != "/w" {
 		t.Fatalf("Load after Save = %+v, want the one repository back", back.Repos)
+	}
+}
+
+func TestSaveReplacesTheFixtureRatherThanRewritingItInPlace(t *testing.T) {
+	// Arrange: a reader holds the fixture as the first world wrote it.
+	path := filepath.Join(t.TempDir(), "state.json")
+	first := NewState()
+	first.Repos = append(first.Repos, &Repo{Dir: "/first"})
+	if err := Save(path, first); err != nil {
+		t.Fatalf("Save(first) = %v", err)
+	}
+	held, err := os.Open(path)
+	if err != nil {
+		t.Fatalf("open the fixture: %v", err)
+	}
+	defer held.Close()
+
+	// Act
+	if err := Save(path, NewState()); err != nil {
+		t.Fatalf("Save(second) = %v", err)
+	}
+
+	// Assert: the held file still reads the whole first world, which only a
+	// rename over it (never a truncation of it) leaves true.
+	body, err := io.ReadAll(held)
+	if err != nil || !strings.Contains(string(body), `"/first"`) {
+		t.Fatalf("the held fixture read %q (%v), want the first world intact", body, err)
+	}
+}
+
+func TestSaveLeavesNoTemporaryFileBehind(t *testing.T) {
+	// Arrange
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.json")
+
+	// Act
+	if err := Save(path, NewState()); err != nil {
+		t.Fatalf("Save = %v", err)
+	}
+
+	// Assert
+	entries, err := os.ReadDir(dir)
+	if err != nil || len(entries) != 1 || entries[0].Name() != "state.json" {
+		t.Fatalf("the fixture directory holds %v (%v), want only state.json", entries, err)
+	}
+}
+
+func TestSaveThatCannotReplaceTheFixtureFailsAndCleansUp(t *testing.T) {
+	// Arrange: the fixture's path is a non-empty directory, which no rename
+	// can replace.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.json")
+	if err := os.MkdirAll(filepath.Join(path, "occupied"), 0o755); err != nil {
+		t.Fatalf("arrange: %v", err)
+	}
+
+	// Act
+	err := Save(path, NewState())
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "rename") {
+		t.Fatalf("Save = %v, want a refused rename", err)
+	}
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 1 {
+		t.Fatalf("the fixture directory holds %v, want the temporary file removed", entries)
 	}
 }
 
