@@ -20,7 +20,7 @@ import (
 // be claimed by a process that is not actually serving the socket.
 //
 // A REFUSED OR ABSENT SOCKET IS NOT AN ERROR TO THE CALLER, it is evidence:
-// `isSocketGone' recognizes it, and a caller stopping a shim reads it as the
+// `shimsocket.Gone' recognizes it, and a caller stopping a shim reads it as the
 // shim already being gone. Every other failure is returned.
 func socketPeerPID(udsPath string) (int, error) {
 	conn, err := net.Dial("unix", udsPath)

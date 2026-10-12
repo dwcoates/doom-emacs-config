@@ -355,40 +355,6 @@ func TestSocketPeerPIDNamesTheServingProcess(t *testing.T) {
 	}
 }
 
-// TestSocketGoneReadsALostPeerAsGone asserts the arm that keeps a shim which
-// exits DURING the credential read from being reported as unstoppable: a dial
-// can win the race with the exit and hand back a socket whose peer has already
-// gone, and every question about that peer then answers ENOTCONN.
-func TestSocketGoneReadsALostPeerAsGone(t *testing.T) {
-	// Arrange: the error exactly as `socketPeerPID' wraps it.
-	err := fmt.Errorf("shimclient: peer credential of %q: %w", "/tmp/peer.sock",
-		fmt.Errorf("getsockopt LOCAL_PEERPID: %w", syscall.ENOTCONN))
-
-	// Act.
-	got := isSocketGone(err)
-
-	// Assert.
-	if !got {
-		t.Fatalf("isSocketGone(%v) = false, want true: a peer that dropped the connection is not serving the socket", err)
-	}
-}
-
-// TestSocketGoneReadsALostPeerAsGoneThroughAnOpError asserts the same arm on
-// the shape the net package produces, so a connection-level ENOTCONN is read
-// the same way as a getsockopt's.
-func TestSocketGoneReadsALostPeerAsGoneThroughAnOpError(t *testing.T) {
-	// Arrange.
-	err := &net.OpError{Op: "read", Net: "unix", Err: syscall.ENOTCONN}
-
-	// Act.
-	got := isSocketGone(err)
-
-	// Assert.
-	if !got {
-		t.Fatalf("isSocketGone(%v) = false, want true for a net.OpError carrying ENOTCONN", err)
-	}
-}
-
 // ---- an adopted shim's own exit, after a stand-down ----
 
 // standingDownAdopted is an adopted client that knows its peer's pid and has
