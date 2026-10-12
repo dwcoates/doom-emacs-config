@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"agentrepl/logging/buildreport"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
@@ -1111,5 +1112,61 @@ func TestDeployNamesTheLockHolderOnlyThroughTheSharedConstant(t *testing.T) {
 	// Assert.
 	if literal != 0 || shared == 0 {
 		t.Fatalf("deploy.go spells the lock holder %d time(s) as a literal and %d through sessionlock.HolderBinary; want only the constant", literal, shared)
+	}
+}
+
+func TestDrainLandingsAnswersAtOnceWithNoLandingDeploy(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	drained := h.d.DrainLandings(time.Second)
+
+	// Assert
+	if !drained {
+		t.Fatal("DrainLandings = false with no landing deploy running, want true")
+	}
+}
+
+func TestDrainLandingsWaitsForALandingDeployToEnd(t *testing.T) {
+	// Arrange: a landing's deploy held in its build.
+	h := newHarness(t)
+	h.builder.started = make(chan struct{}, 1)
+	h.builder.gate = make(chan struct{})
+	h.d.Landed(context.Background(), commitsOf(1))
+	<-h.builder.started
+	drained := make(chan bool, 1)
+	go func() { drained <- h.d.DrainLandings(10 * time.Second) }()
+
+	// Act
+	close(h.builder.gate)
+
+	// Assert
+	if !<-drained {
+		t.Fatal("DrainLandings = false once the landing's deploy ended, want true")
+	}
+	if !logged(h.log, "info", "daemon.deploy.landing", "the landing is deployed") {
+		t.Fatal("the landing's deploy did not record how it ended before the drain answered")
+	}
+}
+
+func TestDrainLandingsAnswersFalseForALandingDeployThatOutlivesItsBound(t *testing.T) {
+	// Arrange: a landing's deploy held in its build for the whole wait.
+	h := newHarness(t)
+	h.builder.started = make(chan struct{}, 1)
+	h.builder.gate = make(chan struct{})
+	t.Cleanup(func() {
+		close(h.builder.gate)
+		h.d.WaitLandings()
+	})
+	h.d.Landed(context.Background(), commitsOf(1))
+	<-h.builder.started
+
+	// Act
+	drained := h.d.DrainLandings(50 * time.Millisecond)
+
+	// Assert
+	if drained {
+		t.Fatal("DrainLandings = true while the landing's deploy still runs, want false")
 	}
 }

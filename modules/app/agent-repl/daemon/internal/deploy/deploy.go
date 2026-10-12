@@ -28,6 +28,7 @@ import (
 	"sort"
 	"sync"
 	"syscall"
+	"time"
 
 	"agentrepl/logging/buildreport"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
@@ -496,6 +497,34 @@ func (d *Deployer) deployLanding(ctx context.Context) {
 
 // WaitLandings joins every deploy a landing started.
 func (d *Deployer) WaitLandings() { d.landings.Wait() }
+
+// DrainLandings waits, at most bound, for every deploy a landing started, and
+// reports whether they all ended.
+//
+// THE EXIT WAITS FOR A LANDING'S DEPLOY TO SAY HOW IT ENDED. A landing's
+// deploy runs off the merge's goroutine and records its outcome only after
+// Deploy returns -- and a deploy that hands this daemon over returns while
+// the daemon is already standing down. Unjoined, a loaded host let the
+// process exit first and the outcome ("the landing is deployed", or its
+// failure) was never written
+// (TestAMergeRunningThroughAHandoverResumesInTheSuccessorAndLands, 2 of 16
+// runs under four-copy load, 2026-10-12). The deploy runs on the daemon's
+// lifetime, which the exit has cancelled, so the wait is short.
+func (d *Deployer) DrainLandings(bound time.Duration) bool {
+	done := make(chan struct{})
+	go func() {
+		d.landings.Wait()
+		close(done)
+	}()
+	timer := time.NewTimer(bound)
+	defer timer.Stop()
+	select {
+	case <-done:
+		return true
+	case <-timer.C:
+		return false
+	}
+}
 
 // begin takes the one deploy slot. A deploy that starts COVERS every landing
 // before it: it builds the checkout as it stands.
