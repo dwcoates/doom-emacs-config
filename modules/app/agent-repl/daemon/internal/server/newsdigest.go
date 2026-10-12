@@ -67,30 +67,24 @@ type EditorInstances interface {
 	Connected(ctx context.Context, instance string) (bool, error)
 }
 
-// Startup brings the editor's workspaces up for a new Emacs process and tells
-// its stream each step (internal/startup).
-type Startup interface {
-	// Run brings every open workspace up and hands emit the events in order
-	// until the last go-ahead and the finish, or until ctx ends.
-	Run(ctx context.Context, emit func(*agentreplv1.DaemonStartupEvent))
-}
-
 // editorConnected judges an Emacs WatchDaemon's instance and does what a NEW
 // Emacs process is owed: the day's digest stands again. A store that cannot
 // record the instance refuses the stream, loudly, rather than serve an Emacs
-// whose restart the daemon could not judge; the editor reconnects.
-func (s *server) editorConnected(ctx context.Context, emacs *agentreplv1.WatchDaemonEmacs) (bool, error) {
+// whose restart the daemon could not judge; the editor reconnects. A new
+// Emacs is owed NO workspace bring-up: the editor asks for its opens
+// explicitly, with OpenTabs.
+func (s *server) editorConnected(ctx context.Context, emacs *agentreplv1.WatchDaemonEmacs) error {
 	isNew, err := s.deps.EditorInstances.Connected(ctx, emacs.GetInstance().GetValue())
 	if err != nil {
-		return false, fail(s.log, "WatchDaemon", err)
+		return fail(s.log, "WatchDaemon", err)
 	}
 	if !isNew {
-		return false, nil
+		return nil
 	}
 	// THE DIGEST'S OWN ERROR RECORD IS THE RECORD: a redisplay that failed is
 	// stated at ERROR by the digest, and the Emacs stream serves on.
 	if err := s.deps.NewsDigest.Redisplay(ctx); err != nil {
 		s.log.Debug("WatchDaemon", "the day's digest was not redisplayed; the digest recorded why", dlog.Context{"cause": err.Error()})
 	}
-	return true, nil
+	return nil
 }
