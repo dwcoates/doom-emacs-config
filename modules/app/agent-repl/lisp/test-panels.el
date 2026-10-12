@@ -1887,7 +1887,25 @@ had already gone on to C."
           ;; Act.
           (agent-repl-test--fire-scheduled (car scheduled)))
         ;; Assert.
-        (should (member "elisp.panels.switch-activation-won ws=ws-c generation=2" records))))))
+        (should (seq-some (lambda (r) (string-prefix-p "elisp.panels.switch-activation-won ws=ws-c generation=2 " r))
+                          records))))))
+
+(ert-deftest agent-repl-test-panels-switch-activation-records-its-wait ()
+  "The pass records how long it waited after being scheduled."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-switch-activations
+      ;; Arrange.
+      (let ((records nil)
+            (now 100.0))
+        (cl-letf (((symbol-function 'agent-repl--info)
+                   (lambda (_ws fmt &rest args) (push (apply #'format fmt args) records)))
+                  ((symbol-function 'float-time) (lambda (&optional _) now)))
+          (agent-repl--schedule-switch-activation "ws-b")
+          (setq now 100.27)
+          ;; Act.
+          (agent-repl-test--fire-scheduled (car scheduled)))
+        ;; Assert.
+        (should (member "elisp.panels.switch-activation-won ws=ws-b generation=1 waited-ms=270" records))))))
 
 (ert-deftest agent-repl-test-panels-switch-activation-cancels-the-pending-timer ()
   "Scheduling a newer pass cancels the pending one's timer."
