@@ -189,7 +189,8 @@ func (s *server) planRollback(ctx context.Context, ws ids.WorkspaceID, restore b
 	}
 	plan.turns, plan.said = target.Turns, target.Said
 	plan.excerpt = excerptOf(target.Said)
-	since, err := s.deps.DB.TurnStartedAt(ctx, ws, target.Turns[0])
+	first, err := s.deps.DB.Turn(ctx, ws, target.Turns[0])
+	since := first.StartedAt
 	switch {
 	case errors.Is(err, wsm.ErrNotFound):
 		// A PROMPT THE WORKSPACE NEVER RECORDED (one the vendor recorded first,

@@ -2,7 +2,6 @@ package wsm
 
 import (
 	"context"
-	"errors"
 	"slices"
 	"testing"
 )
@@ -95,40 +94,5 @@ func TestRecordRolledBackTurnsRefusesAnIncompleteRollback(t *testing.T) {
 				t.Fatalf("RolledBackTurns() = %v, want nothing recorded", got)
 			}
 		})
-	}
-}
-
-func TestTurnStartedAtAnswersARecordedTurnsOpening(t *testing.T) {
-	// Arrange
-	s, _ := testStore(t)
-	ws := testWorkspace(t, s)
-	turn := NewTurnID()
-	if err := s.PutTurn(context.Background(), Turn{ID: turn, Workspace: ws.ID, Text: "q", Origin: "webapp", StartedAt: instant}); err != nil {
-		t.Fatalf("PutTurn: %v", err)
-	}
-
-	// Act
-	got, err := s.TurnStartedAt(context.Background(), ws.ID, turn)
-
-	// Assert
-	if err != nil {
-		t.Fatalf("TurnStartedAt: %v", err)
-	}
-	if !got.Equal(instant) {
-		t.Fatalf("TurnStartedAt() = %v, want %v", got, instant)
-	}
-}
-
-func TestTurnStartedAtAnswersNotFoundForAnUnrecordedTurn(t *testing.T) {
-	// Arrange
-	s, _ := testStore(t)
-	ws := testWorkspace(t, s)
-
-	// Act
-	_, err := s.TurnStartedAt(context.Background(), ws.ID, "never")
-
-	// Assert
-	if !errors.Is(err, ErrNotFound) {
-		t.Fatalf("TurnStartedAt() error = %v, want ErrNotFound", err)
 	}
 }
