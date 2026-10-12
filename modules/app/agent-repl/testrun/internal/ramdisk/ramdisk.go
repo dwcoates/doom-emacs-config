@@ -21,6 +21,7 @@
 package ramdisk
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -29,6 +30,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 )
 
 // DefaultRegistry is where every run's lock record lives.
@@ -71,9 +73,34 @@ func UnitPrefix() []string { return []string{"/usr/sbin/taskpolicy", "-d", UnitI
 // Runner runs one external command and answers its combined output.
 type Runner func(name string, args ...string) (string, error)
 
-// ExecRunner is the real Runner.
+// CommandBound is how long one hdiutil, diskutil or lsof call may run.
+//
+// A WEDGED DISK MANAGER MUST FAIL THE ACQUIRE, NOT HANG THE RUN. Every one of
+// these commands goes through diskarbitrationd, and when it wedged
+// (2026-10-12, after scratch RAM disks were attached and detached by hand) a
+// run sat 36 minutes in `diskutil unmount` with nothing printed. Bounded, the
+// call fails, Acquire undoes what it did, and the run goes on with its temp
+// root on disk, saying why. A healthy call answers in a few seconds; the
+// bound is generous because a RAM disk's erase competes with a loaded host.
+const CommandBound = 60 * time.Second
+
+// ExecRunner is the real Runner: the command, bounded by CommandBound.
 func ExecRunner(name string, args ...string) (string, error) {
-	out, err := exec.Command(name, args...).CombinedOutput()
+	return runBounded(CommandBound, name, args...)
+}
+
+// runBounded runs the command, killing it once bound has passed.
+func runBounded(bound time.Duration, name string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), bound)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, name, args...)
+	// A killed command's output pipe is not waited on past this.
+	cmd.WaitDelay = time.Second
+	out, err := cmd.CombinedOutput()
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return string(out), fmt.Errorf("%s %s did not answer within %s; the disk manager (diskarbitrationd) may be wedged: %w",
+			name, strings.Join(args, " "), bound, ctx.Err())
+	}
 	if err != nil {
 		return string(out), fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, strings.TrimSpace(string(out)))
 	}
