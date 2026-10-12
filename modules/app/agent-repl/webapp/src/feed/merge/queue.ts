@@ -28,13 +28,26 @@
  * THE FRONT ENTRY SHOWS WHAT IT IS DOING, as the very same `FeedMergeTabLabel`
  * its own bubble draws — imported, never respelled — so a waiting user watches
  * real progress instead of a spinner.
+ *
+ * THIS WORKSPACE'S OWN WAITING ROW CARRIES A FRONT CONTROL, which asks
+ * `UpdateMergeQueue` to move this merge ahead of every ordinary merge waiting.
+ * Success draws nothing: the daemon republishes the snapshot in its new order.
+ * A refusal lands at the row, as the jump's does.
  */
-import { createControl } from "../../control.js";
+import { createControl, labelledControl, type Control } from "../../control.js";
 import { columnHeader, COLUMNS_ROW_CLASS } from "../../columns.js";
 import { liveElapsedClock } from "../../elapsed-clock.js";
 import { log } from "../../log.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import { guardMalformed } from "../../rpc/guard.js";
+import {
+  drawMalformedRefusal,
+  drawTransportRefusal,
+  drawTypedRefusal,
+  type SentenceTable,
+} from "../../rpc/refuse.js";
+import { callUnary } from "../../rpc/unary.js";
+import { UpdateMergeQueueResponseSchema } from "../../../../proto/gen/ts/agentrepl/v1/endpoint_update_merge_queue_pb";
 import type {
   FeedMergeQueue,
   FeedMergeQueueEntry,
@@ -55,6 +68,9 @@ export const QUEUE_COLUMNS = ["workspace", "stage", "duration"] as const;
 
 /** A waiting entry's stage, drawn in the stage column. */
 export const WAITING_STAGE = "waiting";
+
+/** The words on this workspace's own waiting row's front control. */
+export const FRONT_LABEL = "move to front";
 
 /** The whole snapshot: ahead front-first, this workspace, behind nearest-first. */
 export function drawFeedMergeQueue(queue: FeedMergeQueue, rc: RowContext): HTMLElement {
@@ -122,6 +138,7 @@ export function drawFeedMergeQueueEntry(
       break;
     case "waiting":
       stage.textContent = WAITING_STAGE;
+      if (place === "current") stage.append(drawFrontControl(el, rc, ref));
       enteredMs = msOf(status.value.stageEnteredAtMs, `${PATH}Waiting.stage_entered_at_ms`);
       break;
     default:
@@ -158,4 +175,83 @@ export function selectQueueEntryWorkspace(
   workspace: WorkspaceRef,
 ): Promise<void> {
   return jumpToWorkspace(entry, rc, workspace, QUEUE_JUMP);
+}
+
+/** The refusals of a front request that are this endpoint's own. */
+const FRONT_SENTENCES: SentenceTable = {
+  noSuchQueuedMerge: () => "this merge is no longer waiting on the queue",
+};
+
+/**
+ * The front control. It sits inside the row's jump, so its click is kept from
+ * reaching the jump.
+ */
+function drawFrontControl(entry: HTMLElement, rc: RowContext, workspace: WorkspaceRef): Control {
+  const control = labelledControl({
+    className: "merge-queue-front",
+    hook: ["data-merge-front", ""],
+    label: FRONT_LABEL,
+    onClick: (clicked) => {
+      void guardMalformed(rc.ctx, "feed.merge.queue.front", moveToFront(entry, rc, workspace, clicked));
+    },
+  });
+  control.addEventListener("click", (event: MouseEvent) => event.stopPropagation());
+  return control;
+}
+
+/**
+ * Ask the daemon to move WORKSPACE's merge to the front, drawing a refusal at
+ * ENTRY. The control is disabled while the call is out, and given back when it
+ * was refused.
+ */
+export async function moveToFront(
+  entry: HTMLElement,
+  rc: RowContext,
+  workspace: WorkspaceRef,
+  control: Control,
+): Promise<void> {
+  log.info("moving a merge to the front of its queue", {
+    operation: "merge.queue-front",
+    context: { workspace: workspace.id },
+  });
+  control.disabled = true;
+  try {
+    const response = await callUnary(
+      rc.ctx,
+      "UpdateMergeQueue",
+      (client) => client.updateMergeQueue({ action: { case: "front", value: { workspace } } }),
+      UpdateMergeQueueResponseSchema,
+    );
+    const result = requireCase(response.result, "UpdateMergeQueueResponse.result");
+    switch (result.case) {
+      case "success":
+        // Nothing is drawn: the snapshot is republished in its new order.
+        return;
+      case "error": {
+        const arm = drawTypedRefusal(
+          entry,
+          "UpdateMergeQueueError.cause",
+          "UpdateMergeQueue",
+          result.value.cause,
+          FRONT_SENTENCES,
+        );
+        log.warn(`UpdateMergeQueue refused a front request: ${arm}`, {
+          operation: "merge.queue-front-refused",
+          context: { arm, workspace: workspace.id },
+        });
+        control.disabled = false;
+        return;
+      }
+      default:
+        return unreachableArm("UpdateMergeQueueResponse.result", armName(result));
+    }
+  } catch (err) {
+    if (drawMalformedRefusal(rc.ctx, entry, "merge.queue-front-unreadable", err)) return;
+    drawTransportRefusal(entry, err);
+    log.error(`UpdateMergeQueue failed for a front request: ${String(err)}`, {
+      operation: "merge.queue-front-failed",
+      context: { workspace: workspace.id, cause: err },
+    });
+    control.disabled = false;
+  }
 }

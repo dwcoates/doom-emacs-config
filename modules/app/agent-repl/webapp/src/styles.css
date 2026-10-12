@@ -564,7 +564,7 @@
    They are drawn here to the native bezel's measured geometry and colors
    (test/webkit/control.webkit.test.ts holds the geometry to a real button's):
    the same box, a rounded fill, a hairline ring and a soft drop. */
-:where(.perm-actions ar-button, .outcome-marker-actions ar-button, ar-button.composer-send, ar-button.command-refused-support, ar-button.merge-workspace-switch-button) {
+:where(.perm-actions ar-button, .outcome-marker-actions ar-button, ar-button.composer-send, ar-button.command-refused-support, ar-button.merge-workspace-switch-button, ar-button.merge-queue-front) {
   min-height: 15px;
   padding: 1px 8px 2px 8px;
   border: 1px solid transparent;
@@ -575,15 +575,15 @@
   background-color: #ffffff;
   box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.14), inset 0 -0.5px 0 rgba(0, 0, 0, 0.18);
 }
-:where(.perm-actions ar-button, .outcome-marker-actions ar-button, ar-button.composer-send, ar-button.command-refused-support, ar-button.merge-workspace-switch-button)[aria-disabled="true"] {
+:where(.perm-actions ar-button, .outcome-marker-actions ar-button, ar-button.composer-send, ar-button.command-refused-support, ar-button.merge-workspace-switch-button, ar-button.merge-queue-front)[aria-disabled="true"] {
   box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.08), inset 0 -0.5px 0 rgba(0, 0, 0, 0.1);
 }
 @media (prefers-color-scheme: dark) {
-  :where(.perm-actions ar-button, .outcome-marker-actions ar-button, ar-button.composer-send, ar-button.command-refused-support, ar-button.merge-workspace-switch-button) {
+  :where(.perm-actions ar-button, .outcome-marker-actions ar-button, ar-button.composer-send, ar-button.command-refused-support, ar-button.merge-workspace-switch-button, ar-button.merge-queue-front) {
     background-color: rgb(86, 86, 86);
     box-shadow: inset 0 0.5px 0 rgba(255, 255, 255, 0.09), inset 0 0 0 0.5px rgba(0, 0, 0, 0.25);
   }
-  :where(.perm-actions ar-button, .outcome-marker-actions ar-button, ar-button.composer-send, ar-button.command-refused-support, ar-button.merge-workspace-switch-button)[aria-disabled="true"] {
+  :where(.perm-actions ar-button, .outcome-marker-actions ar-button, ar-button.composer-send, ar-button.command-refused-support, ar-button.merge-workspace-switch-button, ar-button.merge-queue-front)[aria-disabled="true"] {
     background-color: rgb(58, 58, 58);
   }
 }
@@ -7325,7 +7325,10 @@ ar-button.outcome-marker-pill {
   text-overflow: ellipsis;
 }
 .merge-queue-stage { color: var(--muted); }
-.merge-queue-entry > .merge-queue-refusal { grid-column: 1 / -1; }
+.merge-queue-entry > .merge-queue-refusal,
+.merge-queue-entry > .refusal { grid-column: 1 / -1; }
+/* The front control on this workspace's own waiting row, after its stage. */
+.merge-queue-stage > .merge-queue-front { margin-left: 0.5em; }
 .merge-queue-refusal { color: var(--err); font-size: 0.85em; }
 
 /* The test suites and their daemon-painted output. */
