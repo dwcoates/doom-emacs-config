@@ -45,8 +45,8 @@ type progressDoc struct {
 	Step string `json:"step"`
 	// Repo is the queue the merge was admitted from.
 	Repo string `json:"repo"`
-	// QueuedMS and StartedMS are the bubble head's clock origin and the queue
-	// tab's end.
+	// QueuedMS and StartedMS are the queue tab's start and end. StartedMS is
+	// also the bubble head's clock origin once the run is admitted.
 	QueuedMS  int64 `json:"queued_ms"`
 	StartedMS int64 `json:"started_ms"`
 	// Subject is what the merge lands, resolved ONCE at admission: a resume

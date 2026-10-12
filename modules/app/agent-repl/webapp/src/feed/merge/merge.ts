@@ -13,9 +13,10 @@
  * head badge says merging / merged / failed / abandoned and no more — no counts
  * (R5), no phase word derived from a table the client would own.
  *
- * THE CLOCK IS THE CLIENT'S: the wire ships `started_at_ms` and, on the
- * terminal arms only, `ended_at_ms` — because an end instant means nothing
- * while the run is live. A live head counts up through the shared ticker; a
+ * THE CLOCK IS THE CLIENT'S: the wire ships `started_at_ms` (the enqueue
+ * instant while queued, the admission instant once popped, as the daemon
+ * resolves it) and, on the terminal arms only, `ended_at_ms` — because an
+ * end instant means nothing while the run is live. A live head counts up through the shared ticker; a
  * settled one shows the span that ran and stops.
  *
  * THE GLYPH NAME IS VOCABULARY, NOT DATA. `glyph.icon` is a name from the
@@ -187,7 +188,10 @@ function badge(word: string, tone: string): HTMLElement {
   return el;
 }
 
-/** The live clock, counting up from the enqueue instant. */
+/**
+ * The live clock, counting up from the daemon's resolved origin: the enqueue
+ * instant while the merge waits, its admission once it is being worked on.
+ */
 function drawLiveClock(runtime: FeedMergeRuntime, rc: RowContext): HTMLElement {
   const startedMs = msOf(runtime.startedAtMs, `${PATH}.head.runtime.started_at_ms`);
   return reservedLiveElapsedClock(rc.ctx.ticker, "merge-clock", startedMs);
