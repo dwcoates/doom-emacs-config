@@ -103,3 +103,49 @@ func TestTheRolloutHoldPassesAnUnreadableHoldThrough(t *testing.T) {
 		})
 	}
 }
+
+func TestRecoverStatesAnInheritedHold(t *testing.T) {
+	tests := []struct {
+		name       string
+		held       bool
+		wantRecord bool
+	}{
+		{name: "a held rollout is stated at boot", held: true, wantRecord: true},
+		{name: "an unheld rollout states nothing", held: false, wantRecord: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			if tt.held {
+				h.db.rolloutHold = wsm.RolloutHold{Held: true, Since: time.Unix(1, 0)}
+			}
+
+			// Act
+			err := h.o.Recover(context.Background())
+
+			// Assert
+			if err != nil {
+				t.Fatalf("Recover: %v", err)
+			}
+			if _, got := h.recordFor("info", opHoldRollouts); got != tt.wantRecord {
+				t.Fatalf("INFO %s record at boot = %v, want %v", opHoldRollouts, got, tt.wantRecord)
+			}
+		})
+	}
+}
+
+func TestRecoverPassesAnUnreadableHoldThrough(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	want := errors.New("state database unreadable")
+	h.db.rolloutHoldErr = want
+
+	// Act
+	err := h.o.Recover(context.Background())
+
+	// Assert
+	if !errors.Is(err, want) {
+		t.Fatalf("Recover = %v, want the read's own failure", err)
+	}
+}

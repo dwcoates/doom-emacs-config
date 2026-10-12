@@ -44,6 +44,9 @@ func (o *orchestrator) Recover(ctx context.Context) error {
 	if err := o.recoverDisplaced(ctx); err != nil {
 		return err
 	}
+	if err := o.recordRolloutHold(ctx); err != nil {
+		return err
+	}
 	queues, err := o.deps.DB.AllMergeQueues(ctx)
 	if err != nil {
 		return err
