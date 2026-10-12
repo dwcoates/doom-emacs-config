@@ -137,16 +137,7 @@ func NewEmacsWorld(t *testing.T, box sandbox, options ...EmacsWorldOption) *Emac
 	// here, so this layer does it at the Emacs process instead.
 	git := harness.World(t)
 	fakeBin := filepath.Join(box.Scratch(), "fakebin")
-	if err := os.MkdirAll(fakeBin, 0o755); err != nil {
-		t.Fatalf("e2e: mkdir %s: %v", fakeBin, err)
-	}
-	body, err := os.ReadFile(harness.FakeGitBinary(t))
-	if err != nil {
-		t.Fatalf("e2e: read the fake git: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(fakeBin, "git"), body, 0o755); err != nil {
-		t.Fatalf("e2e: install the fake git: %v", err)
-	}
+	harness.InstallFakeGit(t, fakeBin)
 
 	// THE DEPLOY'S SEAMS. Emacs starts the daemon here, so nothing states
 	// them unless this layer does, and a daemon without them would run the
