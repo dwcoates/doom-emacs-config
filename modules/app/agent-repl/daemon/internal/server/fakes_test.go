@@ -702,6 +702,9 @@ type fakeMerge struct {
 	pauseScope       *merge.RepositoryScope
 	answerDequeueErr error
 	evictErr         error
+	frontErr         error
+	// fronted records every workspace Front was asked to move.
+	fronted []ids.WorkspaceID
 	// enqueuedBy records who each enqueue said asked for the merge, and
 	// requests every request whole.
 	enqueuedBy []merge.Requester
@@ -747,6 +750,11 @@ func (f *fakeMerge) AnswerDequeue(context.Context, ids.WorkspaceID, bool) error 
 }
 
 func (f *fakeMerge) Evict(context.Context, ids.WorkspaceID) error { return f.evictErr }
+
+func (f *fakeMerge) Front(_ context.Context, ws ids.WorkspaceID) error {
+	f.fronted = append(f.fronted, ws)
+	return f.frontErr
+}
 
 func (f *fakeMerge) Pause(_ context.Context, scope *merge.RepositoryScope) error {
 	f.pauseScope = scope
