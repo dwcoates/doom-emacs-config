@@ -289,22 +289,35 @@ func (d *Discoverer) Scan() []Target {
 			add(d.Classify(match))
 		}
 	}
-	// BOTH SPOOL-ROOT SPELLINGS ARE ACCEPTED. The vendor writes spools under
+	// BOTH SPOOL-ROOT SPELLINGS ARE ACCEPTED, and each is globbed only below
+	// the uid dir. The vendor writes spools under
 	// <uid dir>/<cwd-slug>/<vendor session>/tasks/, and a caller may point
 	// --spool-root either at the parent of the uid dir (production: /tmp, which
 	// resolves claude-<uid> itself) or directly at the uid dir (a mock harness,
-	// whose own root default IS that directory). Neither spelling may make a
-	// spool invisible, so both are globbed.
-	for _, match := range globAll(
-		filepath.Join(d.spoolRoot, "claude-*", "*", "*", "tasks", "*.output"),
-		filepath.Join(d.spoolRoot, "*", "*", "tasks", "*.output"),
-	) {
+	// whose own root default IS that directory).
+	//
+	// THE PARENT'S OTHER ENTRIES ARE NEVER READ. Globbing <root>/*/*/tasks under
+	// /tmp listed the children of every directory in /tmp on every rescan:
+	// thousands of test trees, and a RAM disk's mount point whose disk manager
+	// had wedged, where the listing blocked in an uninterruptible wait. The
+	// sidecar then answered no signal, and every launchd stop of it waited out
+	// the 20s ExitTimeOut (2026-10-12, 29s of a boot's startup).
+	for _, match := range globAll(spoolPatterns(d.spoolRoot)...) {
 		d.registerSpool(Normalize(match))
 		add(d.Classify(match))
 	}
 	d.reportHolds()
 	d.log.With(logging.Context{Operation: "discover-scan"}).LogVerbose("scan complete targets=%d", len(out))
 	return out
+}
+
+// spoolPatterns answers the globs that find spools under root: below root
+// itself when root IS a uid dir (claude-<uid>), else below root's uid dirs.
+func spoolPatterns(root string) []string {
+	if uidDir, _ := filepath.Match("claude-*", filepath.Base(root)); uidDir {
+		return []string{filepath.Join(root, "*", "*", "tasks", "*.output")}
+	}
+	return []string{filepath.Join(root, "claude-*", "*", "*", "tasks", "*.output")}
 }
 
 // Classify maps one path to a Target. ok is false only for a path that matches
