@@ -1135,6 +1135,35 @@ func TestAnAcceptanceDoesNotReopenATurnThatAlreadyEnded(t *testing.T) {
 	}
 }
 
+// TestAnAcceptanceOfATurnThatAlreadyEndedIsStillRecorded pins that the
+// hand-over is recorded whatever became of the turn: a turn whose terminal
+// beat StartTurn's response back was still opened, on its own page.
+func TestAnAcceptanceOfATurnThatAlreadyEndedIsStillRecorded(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	h.w.SetMainAgent(agentID("main-1"))
+	h.w.OnTurnOpening("ws-1", ids.TurnID("turn-9"))
+	h.route(h.main, entryFrame(frameSuccess("main-1", completed())))
+
+	// Act.
+	h.w.OnTurnOpened("ws-1", &conversationv1.AgentPrompt{
+		Id:    &conversationv1.TurnId{Value: "turn-9"},
+		Agent: agentID("main-1"),
+	}, &conversationv1.HistoryPage{})
+
+	// Assert.
+	found := false
+	for _, r := range h.log.Records() {
+		if r.Operation == "daemon.sessionwatcher.turn_opened" && r.Context["turn_id"] == "turn-9" {
+			found = r.Level == "info"
+		}
+	}
+	if !found {
+		t.Fatalf("records = %+v, want an info turn_opened for turn-9", h.log.Records())
+	}
+}
+
 // TestOnTurnOpenFailedRetiresTheRecordedTurn covers the refusal: the shim never
 // took the turn, so it must not stand in flight and block the next submission.
 func TestOnTurnOpenFailedRetiresTheRecordedTurn(t *testing.T) {
