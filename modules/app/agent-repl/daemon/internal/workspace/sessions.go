@@ -294,6 +294,9 @@ type Fleet struct {
 	// its shim is up. The map is guarded by mu; each gate is held ACROSS a
 	// whole start, which is why it is not mu itself.
 	startGates map[ids.WorkspaceID]*sync.Mutex
+	// vendorSlots caps the vendor starts in flight across every workspace
+	// (vendorslots.go).
+	vendorSlots vendorSlots
 	// startsUnderWay names the workspaces whose start is under way, from the gate's
 	// liveness check until the start returns. Guarded by mu. See Serving.
 	startsUnderWay map[ids.WorkspaceID]bool
@@ -514,6 +517,7 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 		reapedAt:       map[ids.WorkspaceID]time.Time{},
 		generation:     map[ids.WorkspaceID]int{},
 		startGates:     map[ids.WorkspaceID]*sync.Mutex{},
+		vendorSlots:    newVendorSlots(vendorStartSlots()),
 		startsUnderWay: map[ids.WorkspaceID]bool{},
 		watched:        map[ids.WorkspaceID]sessionwatcher.Watcher{},
 		selected:       map[ids.WorkspaceID]bool{},
