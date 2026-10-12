@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sync"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -217,10 +218,11 @@ type server struct {
 	// turn_in_flight and turnInFlight as the turn waiting behind it, as the
 	// real shim's reannounceStart does.
 	adoptedTurn *conversationv1.TurnId
-	// joiningTurn is the turn a StartTurn with join_running_turn sent while
-	// turnInFlight ran, until a folded prompt row names it or turnInFlight
-	// ends, when it takes turnInFlight's place, as the real shim's join does.
-	joiningTurn *conversationv1.TurnId
+	// joiningTurns are the turns StartTurns with join_running_turn sent while
+	// turnInFlight ran, oldest first, each until a folded prompt row names it
+	// or turnInFlight ends, when the OLDEST takes turnInFlight's place and the
+	// rest wait to join it, as the real shim's joins do.
+	joiningTurns []*conversationv1.TurnId
 	// liveNow, once set_live_work has stated it, is the live membership every
 	// later re-announcement states, as the real shim's reannounceStart
 	// recomputes it; until then the re-announcement states what StartSession
@@ -576,7 +578,7 @@ func (s *server) joinTurn(req *shimv1.StartTurnRequest) bool {
 	if !req.GetJoinRunningTurn() || s.turnInFlight == nil {
 		return false
 	}
-	s.joiningTurn = req.GetTurn()
+	s.joiningTurns = append(s.joiningTurns, req.GetTurn())
 	return true
 }
 
@@ -587,9 +589,9 @@ func (s *server) foldTurn(agent string, prompt *conversationv1.AgentPrompt) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.joiningTurn.GetValue() == prompt.GetId().GetValue() {
-		s.joiningTurn = nil
-	}
+	s.joiningTurns = slices.DeleteFunc(s.joiningTurns, func(turn *conversationv1.TurnId) bool {
+		return turn.GetValue() == prompt.GetId().GetValue()
+	})
 }
 
 // adoptTurn records the turn a VENDOR_STARTED prompt pushed to the main agent
@@ -619,8 +621,10 @@ func (s *server) settleTurn(agent, turn string, frame *conversationv1.AgentFrame
 		case s.adoptedTurn != nil && (turn == "" || turn == s.adoptedTurn.GetValue()):
 			s.adoptedTurn = nil
 		case turn == "" || turn == s.turnInFlight.GetValue():
-			s.turnInFlight = s.joiningTurn
-			s.joiningTurn = nil
+			s.turnInFlight = nil
+			if len(s.joiningTurns) > 0 {
+				s.turnInFlight, s.joiningTurns = s.joiningTurns[0], s.joiningTurns[1:]
+			}
 		}
 	}
 }
