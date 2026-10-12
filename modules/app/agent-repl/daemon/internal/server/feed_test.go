@@ -10,6 +10,7 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/resolve/feed"
 )
 
@@ -278,4 +279,32 @@ func TestWatchFeedPushesTheClearedSelection(t *testing.T) {
 	if sel.GetNone().GetReturnToTail() == nil {
 		t.Fatalf("selection = %v, want none{return_to_tail} after a clear", sel)
 	}
+}
+
+// TestOpenFeedRecordsTheOpenAtInfoWithItsDuration pins that every open is one
+// INFO record naming how long the daemon spent on it: a page's first paint
+// waits on it, and the page's own feed.open-answered says how long it waited.
+func TestOpenFeedRecordsTheOpenAtInfoWithItsDuration(t *testing.T) {
+	// Arrange.
+	log := dlog.NewTestLogger()
+	h := newHarness(t, func(deps *Deps) { deps.Log = &fakeSurfaces{global: log, workspace: log} })
+	h.Feed.page = page()
+	h.Feed.token = &agentreplv1.FeedWatchToken{Value: "ft-1"}
+
+	// Act.
+	if _, err := h.Client.OpenFeed(context.Background(),
+		connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ref()})); err != nil {
+		t.Fatalf("OpenFeed: %v", err)
+	}
+
+	// Assert.
+	for _, rec := range log.Records() {
+		if rec.Operation == "daemon.server.open_feed" && rec.Message == "opened a feed and minted its watch token" {
+			if _, ok := rec.Context["ms"]; rec.Level != "info" || !ok {
+				t.Fatalf("open_feed record = %+v, want info carrying ms", rec)
+			}
+			return
+		}
+	}
+	t.Fatalf("records = %+v, want a daemon.server.open_feed record", log.Records())
 }

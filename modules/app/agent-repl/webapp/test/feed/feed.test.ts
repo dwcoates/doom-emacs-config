@@ -272,6 +272,36 @@ describe("mountFeed: telling Emacs the conversation is on screen", () => {
   });
 });
 
+describe("mountFeed: timing the root feed's open", () => {
+  it("records the open's round trip at info", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+
+    // Act
+    mount();
+    await settle();
+
+    // Assert
+    const record = await forwardedRecord(capture, "feed.open-answered");
+    expect([record.level.case, typeof record.context?.["rpc_ms"]]).toEqual(["info", "number"]);
+  });
+
+  it("records the ask at info before the answer", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+
+    // Act
+    mount();
+    await settle();
+
+    // Assert
+    await forwardedRecord(capture, "feed.open-answered");
+    const ops = capture.sent.map((r) => r.operation);
+    const asked = ops.indexOf("feed.open-asked");
+    expect([asked >= 0, asked < ops.indexOf("feed.open-answered")]).toEqual([true, true]);
+  });
+});
+
 describe("mountFeed: re-opening the tail", () => {
   /**
    * A daemon whose root page is whatever `pages` yields next, tailed on a

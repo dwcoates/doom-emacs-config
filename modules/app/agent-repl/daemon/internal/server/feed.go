@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"time"
 
 	"connectrpc.com/connect"
 
@@ -106,6 +107,7 @@ func (s *server) OpenFeed(
 
 	walk := mintWalk()
 	reader := readerFor(walk, subject.Record.ID, req.Msg.GetFeed())
+	started := time.Now()
 	page, token, held, err := s.deps.Feed.OpenPage(ctx, subject.Record.ID, target, reader)
 	if err != nil {
 		if refused, ok := s.asRefusal(err); ok {
@@ -114,9 +116,13 @@ func (s *server) OpenFeed(
 		return nil, fail(subject.Log, rpc, err)
 	}
 	s.rememberToken(token.GetValue(), subject.Record.ID, target)
-	subject.Log.Debug("daemon.server.open_feed", "opened a feed and minted its watch token",
+	// INFO: an open is a page's first paint waiting on the daemon, once per
+	// page load; its duration is half of what the page's own feed.open-answered
+	// record measures.
+	subject.Log.Info("daemon.server.open_feed", "opened a feed and minted its watch token",
 		dlog.Context{"token": token.GetValue(), "rows": len(page.GetSuccess().GetRows()),
-			"root": target.Root, "held": len(held.GetItems())})
+			"root": target.Root, "held": len(held.GetItems()),
+			"ms": time.Since(started).Milliseconds()})
 	resp.Result = &agentreplv1.OpenFeedResponse_Success{
 		Success: &agentreplv1.OpenFeedSuccess{Page: stampWalk(page, walk), Watch: token, Held: held},
 	}
