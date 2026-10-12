@@ -213,6 +213,14 @@ func (r *resolver) mutateWorkspaceLogged(ws ids.WorkspaceID, operation, message 
 // and the selection. CAUSE is the operation whose fact is being rendered, named
 // on every status arm change the render publishes.
 func (r *resolver) render(log dlog.Logger, cause string) *frontendv1.WorkspaceRoster {
+	if dlog.Enabled(log, dlog.LevelDebug) {
+		if r.state.renderLogs == nil {
+			r.state.renderLogs = map[string]string{}
+		}
+		filter := newRepeatFilter(log, r.state.renderLogs)
+		defer filter.flush()
+		log = filter
+	}
 	rc := rowContext{sessions: r.state.sessions(), selected: r.state.selected, cause: cause}
 
 	// A MERGED workspace files under recently_merged whatever its hidden flag:
