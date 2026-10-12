@@ -116,7 +116,7 @@ func TestAnAsyncMergeWorkspaceIsHiddenUntilItsMergeFailsAndThenRevealed(t *testi
 	pushConcludedTurn(shim, mainAgent, "gave-up")
 
 	// Assert: hidden while the agent worked, revealed once the merge failed,
-	// nested under its requester with its merge marker.
+	// with a row and a tab.
 	if row := liveRow(hidden, mergeWS.GetId()); row != nil {
 		t.Fatalf("the merge workspace had a row %v while hidden, want none", row)
 	}
@@ -128,9 +128,12 @@ func TestAnAsyncMergeWorkspaceIsHiddenUntilItsMergeFailsAndThenRevealed(t *testi
 	revealed := awaitRoster(t, s.d, s.d.WatchRoster(), "the merge workspace revealed", func(r *frontendv1.WorkspaceRoster) bool {
 		return liveRow(r, mergeWS.GetId()) != nil
 	})
-	if marker := liveRow(revealed, mergeWS.GetId()).GetMergeWorkspace(); marker == nil {
-		t.Fatal("the revealed merge workspace's row wears no merge marker")
+	for _, tab := range revealed.GetTabBar().GetTabs() {
+		if tab.GetWorkspace().GetId() == mergeWS.GetId() {
+			return
+		}
 	}
+	t.Fatal("the revealed merge workspace has no tab")
 }
 
 func TestAnAsyncPickStreamsItsAgentIntoThePickTabAndThenLands(t *testing.T) {
