@@ -364,16 +364,7 @@ func (pc *pipeConn) drain() error {
 	pc.requested++
 	ticket := pc.requested
 	if err := pc.c.SetReadDeadline(time.Now()); err != nil {
-		if !errors.Is(err, net.ErrClosed) {
-			return fmt.Errorf("harness: wake the test log pipe's reader: %w", err)
-		}
-		// THE READER CLOSED THE CONNECTION: it read to the end and is
-		// finishing (finish closes before it takes the lock), so everything
-		// the daemon wrote is consumed once it says so.
-		for !pc.closed {
-			pc.cond.Wait()
-		}
-		return pc.err
+		return fmt.Errorf("harness: wake the test log pipe's reader: %w", err)
 	}
 	for pc.served < ticket && !pc.closed {
 		pc.cond.Wait()
