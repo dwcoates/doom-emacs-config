@@ -886,6 +886,23 @@ func TestFleetServingAnswersWhatTheDirectiveCanReach(t *testing.T) {
 			want: false,
 		},
 		{
+			name: "a started session whose start has not returned yet",
+			install: func(f *fleetFixture, ws ids.WorkspaceID) {
+				f.fleet.remember(ws, &live{client: f.client, sessionStarted: true})
+				f.fleet.markStarting(ws, true)
+			},
+			want: false,
+		},
+		{
+			name: "a started session whose start has returned",
+			install: func(f *fleetFixture, ws ids.WorkspaceID) {
+				f.fleet.remember(ws, &live{client: f.client, sessionStarted: true})
+				f.fleet.markStarting(ws, true)
+				f.fleet.markStarting(ws, false)
+			},
+			want: true,
+		},
+		{
 			name: "a session with a live shim",
 			install: func(f *fleetFixture, ws ids.WorkspaceID) {
 				f.fleet.remember(ws, &live{client: f.client, sessionStarted: true})
