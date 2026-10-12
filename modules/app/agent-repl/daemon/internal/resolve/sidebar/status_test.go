@@ -1807,3 +1807,45 @@ func TestARedialingLinkOutranksTheVendorStartRun(t *testing.T) {
 		t.Fatalf("status = %q, want severed", got)
 	}
 }
+
+func TestOpeningDominatesALiveSession(t *testing.T) {
+	// Arrange.
+	r := live(t, arrange(t))
+
+	// Act.
+	r.SetOpening(theWS, true)
+
+	// Assert.
+	if got := statusName(onlyRow(t, r)); got != "opening" {
+		t.Fatalf("status = %q, want opening", got)
+	}
+}
+
+func TestOpeningDominatesInactive(t *testing.T) {
+	// Arrange.
+	closed := workspace(string(theWS), "one")
+	closed.Closed = true
+	r := arrange(t, closed)
+
+	// Act.
+	r.SetOpening(theWS, true)
+
+	// Assert.
+	if got := statusName(onlyRow(t, r)); got != "opening" {
+		t.Fatalf("status = %q, want opening", got)
+	}
+}
+
+func TestALoweredOpeningDrawsTheSessionsOwnArm(t *testing.T) {
+	// Arrange.
+	r := live(t, arrange(t))
+	r.SetOpening(theWS, true)
+
+	// Act.
+	r.SetOpening(theWS, false)
+
+	// Assert.
+	if got := statusName(onlyRow(t, r)); got != "ready" {
+		t.Fatalf("status = %q, want the session's own arm", got)
+	}
+}

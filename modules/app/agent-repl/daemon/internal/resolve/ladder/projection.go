@@ -42,6 +42,7 @@ var rosterArmClaims = map[string]Claim{
 	"ready":           Idle,
 	"none":            Idle,
 	"inactive":        Inactive,
+	"opening":         Opening,
 }
 
 // RosterArmClaim names the claim a roster status arm makes, and false for an
