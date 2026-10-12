@@ -855,6 +855,14 @@ func TestTheMergeQueueVerbWritesEachControl(t *testing.T) {
 			check: func(f *mergeFixture, e commandfile.Entry) bool {
 				return e.Type == commandfile.TypeMergeResume && e.RepositoryDir == f.other
 			}},
+		{name: "hold the rollouts", args: func(*mergeFixture) []string { return []string{"-hold-rollouts"} },
+			check: func(_ *mergeFixture, e commandfile.Entry) bool {
+				return e.Type == commandfile.TypeMergeHoldRollouts && e.RepositoryDir == ""
+			}},
+		{name: "release the rollouts", args: func(*mergeFixture) []string { return []string{"-release-rollouts"} },
+			check: func(_ *mergeFixture, e commandfile.Entry) bool {
+				return e.Type == commandfile.TypeMergeReleaseRollouts && e.RepositoryDir == ""
+			}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -883,6 +891,8 @@ func TestTheMergeQueueVerbReportsEachAppliedOutcome(t *testing.T) {
 		{outcome: "not_queued", args: []string{"-evict"}},
 		{outcome: "paused", args: []string{"-pause"}},
 		{outcome: "resumed", args: []string{"-resume"}},
+		{outcome: "held", args: []string{"-hold-rollouts"}},
+		{outcome: "released", args: []string{"-release-rollouts"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.outcome, func(t *testing.T) {
@@ -1044,6 +1054,9 @@ func TestTheMergeQueueVerbRefusesAMalformedControl(t *testing.T) {
 		{name: "a repository-dir that is not there", args: func(*mergeFixture) []string { return []string{"-pause", "-repository-dir", "/no/such/repo"} }},
 		{name: "a non-positive answer timeout", args: func(*mergeFixture) []string { return []string{"-evict", "-answer-timeout", "0s"} }},
 		{name: "a control to the front", args: func(*mergeFixture) []string { return []string{"-pause", "-front"} }},
+		{name: "a hold and a release", args: func(*mergeFixture) []string { return []string{"-hold-rollouts", "-release-rollouts"} }},
+		{name: "a hold scoped by a repository", args: func(f *mergeFixture) []string { return []string{"-hold-rollouts", "-repository-dir", f.other} }},
+		{name: "a hold that waits", args: func(*mergeFixture) []string { return []string{"-hold-rollouts", "-wait"} }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
