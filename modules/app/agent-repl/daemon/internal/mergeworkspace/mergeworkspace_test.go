@@ -3,6 +3,7 @@ package mergeworkspace
 import (
 	"context"
 	"errors"
+	"os"
 	"regexp"
 	"strings"
 	"sync"
@@ -26,6 +27,8 @@ type fakeWorkspaces struct {
 	t         *testing.T
 	createErr error
 	nukeErr   error
+	// onNuke, when set, runs as Nuke is called, before nukeErr is answered.
+	onNuke func()
 	created   []string
 	nuked     []ids.WorkspaceID
 }
@@ -41,6 +44,9 @@ func (f *fakeWorkspaces) CreateMergeWorkspace(ctx context.Context, requester wsm
 // Nuke records the nuke and, as a real nuke does, removes the workspace from
 // the registry, so a later sweep cannot find it again.
 func (f *fakeWorkspaces) Nuke(ctx context.Context, ws ids.WorkspaceID) error {
+	if f.onNuke != nil {
+		f.onNuke()
+	}
 	if f.nukeErr != nil {
 		return f.nukeErr
 	}
@@ -374,6 +380,122 @@ func TestSweepRestatesNothingForARequesterThatIsGone(t *testing.T) {
 	// Assert
 	if removed != 1 || len(f.feed.marks) != 0 {
 		t.Fatalf("removed %d, marks %v; want it removed with no feed to restate", removed, f.feed.marks)
+	}
+}
+
+func TestSweepCutShortByTheStandDownRecordsItAtInfo(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act
+	removed := f.svc.Sweep(ctx)
+
+	// Assert
+	if removed != 0 {
+		t.Fatalf("removed %d, want nothing", removed)
+	}
+	if f.loggedAt(dlog.LevelError) || f.loggedAt(dlog.LevelWarn) {
+		t.Fatalf("a stand-down was recorded as a failure: %v", f.logs.Records())
+	}
+	for _, r := range f.logs.Records() {
+		if r.Level == dlog.LevelInfo && r.Operation == op && r.Message == "the daemon stood down mid-sweep" &&
+			r.Context["left_undone"] == "could not list the workspaces; no merge workspace is swept" && r.Context["cause"] != nil {
+			return
+		}
+	}
+	t.Fatalf("the stand-down was not recorded with what it left undone: %v", f.logs.Records())
+}
+
+func TestSweepWhoseDestroyTheStandDownCutShortRecordsItAtInfo(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	requester := register(t, f.db, "sample", nil)
+	register(t, f.db, "sample-merge", &wsm.MergeOrigin{Requester: requester.ID, Request: "request-1"})
+	f.now = time.Now().Add(IdleLimit + time.Hour)
+	ctx, cancel := context.WithCancel(context.Background())
+	f.workspaces.onNuke = cancel
+	f.workspaces.nukeErr = context.Canceled
+
+	// Act
+	removed := f.svc.Sweep(ctx)
+
+	// Assert
+	if removed != 0 {
+		t.Fatalf("removed %d, want nothing", removed)
+	}
+	if f.loggedAt(dlog.LevelWarn) {
+		t.Fatalf("a destroy the stand-down cut short was warned: %v", f.logs.Records())
+	}
+	for _, r := range f.logs.Records() {
+		if r.Level == dlog.LevelInfo && r.Message == "the daemon stood down mid-sweep" &&
+			r.Context["left_undone"] == "an idle merge workspace could not be destroyed; the next sweep tries again" &&
+			r.Context["merge_workspace"] != nil {
+			return
+		}
+	}
+	t.Fatalf("the cut-short destroy was not recorded with its workspace: %v", f.logs.Records())
+}
+
+func TestSweepFailed(t *testing.T) {
+	ended, cancel := context.WithCancel(context.Background())
+	cancel()
+	cases := []struct {
+		name      string
+		ctx       context.Context
+		wantLevel string
+		wantMsg   string
+	}{
+		{"a failure under a live lifetime is recorded at its level", context.Background(), dlog.LevelError, "the step failed"},
+		{"a failure under an ended lifetime is a stand-down", ended, dlog.LevelInfo, "the daemon stood down mid-sweep"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			logs := dlog.NewTestSurfaces()
+			log := logs.Global()
+
+			// Act
+			sweepFailed(tc.ctx, log, log.Error, "the step failed", dlog.Context{"merge_workspace": "m1"}, errors.New("boom"))
+
+			// Assert
+			records := logs.Records()
+			if len(records) != 1 {
+				t.Fatalf("records = %v, want one", records)
+			}
+			r := records[0]
+			if r.Level != tc.wantLevel || r.Message != tc.wantMsg || r.Context["cause"] != "boom" || r.Context["merge_workspace"] != "m1" {
+				t.Fatalf("record = %+v, want %s %q with the cause and fields", r, tc.wantLevel, tc.wantMsg)
+			}
+		})
+	}
+}
+
+// TestSweepSitesShareSweepFailed fails a sweep step that records its failure
+// by hand instead of through sweepFailed, which is what keeps a stand-down
+// from reading as a failure.
+func TestSweepSitesShareSweepFailed(t *testing.T) {
+	// Arrange
+	src, err := os.ReadFile("mergeworkspace.go")
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	text := string(src)
+	start := strings.Index(text, "func (s *Service) Sweep(")
+	end := strings.Index(text, "func (s *Service) inAnyQueue(")
+	if start < 0 || end < start {
+		t.Fatal("the sweep's functions were not found")
+	}
+	sweep := text[start:end]
+
+	// Act
+	byHand := strings.Count(sweep, "log.Error(op") + strings.Count(sweep, "log.Warn(op")
+	shared := strings.Count(sweep, "sweepFailed(")
+
+	// Assert
+	if byHand != 0 || shared == 0 {
+		t.Fatalf("the sweep records %d failures by hand and %d through sweepFailed", byHand, shared)
 	}
 }
 
