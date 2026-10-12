@@ -725,6 +725,64 @@ body::after {
   border-bottom: 1px solid var(--border);
 }
 #ws-sidebar .sb-title { font-weight: 600; font-size: 0.95rem; }
+/* THE SEARCH (src/sidebar/search.ts): the magnifier left of the title, and
+   the bar it slides open under the head. The bar hangs absolutely, its top
+   one pixel up so its own bottom rule sits exactly on the head's divider
+   while closed; opening grows its height, so the divider slides down over the
+   rows. It overlaps .sb-scroll rather than taking room from it, so the band
+   fit's measured height never moves for it. */
+#ws-sidebar { position: relative; }
+#ws-sidebar .sb-search-btn {
+  display: inline-flex;
+  align-items: center;
+  color: var(--muted);
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 0.1rem;
+}
+#ws-sidebar .sb-search-btn:hover,
+#ws-sidebar .sb-search-btn.active { color: var(--fg); }
+#ws-sidebar .sb-search-glyph {
+  width: 0.85rem;
+  height: 0.85rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+}
+#ws-sidebar .sb-search {
+  position: absolute;
+  top: calc(var(--topbar-h) - 1px);
+  left: 0;
+  right: 0;
+  z-index: 2;
+  box-sizing: border-box;
+  height: 1px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  padding: 0 0.7rem;
+  background: var(--sidebar-bg);
+  border-bottom: 1px solid var(--border);
+  transition: height 160ms ease-out;
+}
+#ws-sidebar .sb-search.open { height: 2.2rem; }
+#ws-sidebar .sb-search-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  font: inherit;
+  font-size: 0.75rem;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.15rem 0.6rem;
+  outline: none;
+}
+/* What the query leaves out: a row it does not match (nor any row nested
+   under it), and a section or merged group it leaves no row in. */
+#ws-sidebar .sb-search-miss,
+#ws-sidebar .sb-search-empty { display: none; }
 #ws-sidebar .sb-count {
   font-size: 0.72rem;
   color: var(--muted);
@@ -3440,6 +3498,10 @@ html[data-page-hidden] .bubble[data-role="prompt"][data-wave="working"] {
    degrades to a pulse (a pulse in place reads as a stalled spinner) — the
    rotation stays continuous and only slows down. */
 @media (prefers-reduced-motion: reduce) {
+  /* The search bar opens at once rather than sliding. */
+  #ws-sidebar .sb-search {
+    transition: none;
+  }
   .thinking-spinner {
     animation-duration: 1.4s;
   }
