@@ -42,6 +42,7 @@ import type {
   RosterRowWhen,
   RosterRowWhenCreated,
   RosterRowWhenMerged,
+  RosterRowWhenViewed,
   RosterRowWhenTurnEnded,
   RosterRowReviving,
   RosterRowViewed,
@@ -429,6 +430,9 @@ export function drawRosterRowWhen(
     case "merged":
       tickAge(when, sc, drawRosterRowWhenMerged(shown.value, `${path}.merged`));
       return when;
+    case "viewed":
+      tickAge(when, sc, drawRosterRowWhenViewed(shown.value, `${path}.viewed`));
+      return when;
     default: {
       const other: { case: string } = shown;
       return unreachableArm(`${path}.shown`, other.case);
@@ -448,6 +452,11 @@ export function drawRosterRowWhenCreated(u: RosterRowWhenCreated, path: string):
 
 /** When the workspace's merge settled, as an epoch instant. */
 export function drawRosterRowWhenMerged(u: RosterRowWhenMerged, path: string): number {
+  return msOf(u.atMs, `${path}.at_ms`);
+}
+
+/** When the user last viewed the workspace — a viewed row's column — as an epoch instant. */
+export function drawRosterRowWhenViewed(u: RosterRowWhenViewed, path: string): number {
   return msOf(u.atMs, `${path}.at_ms`);
 }
 
