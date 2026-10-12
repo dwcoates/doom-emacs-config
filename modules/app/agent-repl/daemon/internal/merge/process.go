@@ -287,6 +287,18 @@ func (r *run) replayLoop(ctx context.Context, p *replay, step gitclient.RebaseSt
 			step, err = r.git.ContinueRebase(ctx, dir)
 			continue
 		}
+		if len(step.Resolved) > 0 {
+			// A CONFLICT ALREADY RESOLVED ONCE IS NEVER PROMPTED AGAIN: rerere
+			// staged the resolution the session recorded for this same
+			// conflict, and the rebase only waits to be continued.
+			commit := p.commits[min(p.done, len(p.commits)-1)]
+			p.lines = append(p.lines, fmt.Sprintf("%s conflicted in %d file(s), resolved as before", commitLine(commit.SHA, commit.Subject), len(step.Resolved)))
+			r.upsert(p.round, rebasingTab(p.round.live(), p.done, len(p.commits), p.lines))
+			r.o.log(ctx, r.ws).Info("daemon.merge.rerere", "a replayed commit conflicted as before; the recorded resolution was reused and nothing is prompted", dlog.Context{
+				"workspace": string(r.ws), "commit": commit.SHA, "files": strings.Join(step.Resolved, ", "), "worktree": dir})
+			step, err = r.git.ContinueRebase(ctx, dir)
+			continue
+		}
 		r.replayed(ctx, p, step.Done)
 		if step.Done {
 			return nil, nil
