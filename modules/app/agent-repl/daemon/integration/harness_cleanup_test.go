@@ -8,7 +8,11 @@ import (
 	"testing"
 	"time"
 
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
+	shimv1 "agentrepl/proto/shim/v1"
 	"claude-repld/integration/harness"
+
+	"connectrpc.com/connect"
 )
 
 // TestAKilledDaemonLeavesNoProcessNamingItsStateDir proves the harness bounds
@@ -156,4 +160,33 @@ func TestARequiredWarningCountsAsStaleUntilItIsProduced(t *testing.T) {
 	if after := f.d.UnproducedRequiredWarnings(); len(after) != 0 {
 		t.Fatalf("UnproducedRequiredWarnings() after the death = %v, want none", after)
 	}
+}
+
+// TestOpenedShimAnswersTheShimAnOpenBroughtUpEvenOnceItHasLeft: at a short
+// idle cutoff the opened shim can be hibernated before the harness dials its
+// control socket, and OpenedShim must then answer that shim's identity at
+// once instead of waiting the test out for a socket that never returns.
+func TestOpenedShimAnswersTheShimAnOpenBroughtUpEvenOnceItHasLeft(t *testing.T) {
+	t.Parallel()
+	// Arrange: open, then let the idle sweep hibernate the shim away.
+	f := newRegistered(t, harness.Opts{IdleCutoffMS: 50})
+	resp, err := f.d.Client().OpenWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: f.ws}))
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("OpenWorkspace = %v, %v; want a success", resp, err)
+	}
+	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCKillSession, &shimv1.KillSessionRequest{})
+	f.d.AwaitWorkspaceLogRecord(f.repo.Dir, "the hibernated shim's stop", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.shimclient.exit" && r.Message == "supervised shim stopped as asked"
+	})
+
+	// Act
+	start := time.Now()
+	s := f.d.OpenedShim(f.ws)
+
+	// Assert: it answers at once, and the identity it holds is the departed
+	// shim's (AwaitGone waits on exactly that pid).
+	if took := time.Since(start); took > harness.DefaultTimeout {
+		t.Fatalf("OpenedShim took %s for a shim that had already left, want an answer within %s", took, harness.DefaultTimeout)
+	}
+	s.AwaitGone()
 }
