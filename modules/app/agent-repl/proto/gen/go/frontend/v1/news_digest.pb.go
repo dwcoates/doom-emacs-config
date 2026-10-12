@@ -72,11 +72,18 @@ type NewsDigestOverlay struct {
 	// Every source the digest read, with whether reading it worked.
 	Sources *NewsDigestSources `protobuf:"bytes,4,opt,name=sources,proto3" json:"sources,omitempty"`
 	// "Since last week": the digest of the past seven days' digests, holding
-	// only what could regress agent-repl. Drawn FIRST, before the sections.
+	// only what could regress agent-repl. Drawn after the IPO outlook and
+	// before the sections.
 	// Set on every digest the daemon makes; UNSET only on a digest made before
 	// the weekly section existed (kept standing across the deploy that added
 	// it), which draws no weekly section.
-	Week          *NewsDigestWeek `protobuf:"bytes,5,opt,name=week,proto3" json:"week,omitempty"`
+	Week *NewsDigestWeek `protobuf:"bytes,5,opt,name=week,proto3" json:"week,omitempty"`
+	// "IPO outlook": the current best guess at when Anthropic and OpenAI go
+	// public. Drawn FIRST in the body, above everything else, and large. Set on
+	// every digest the daemon makes; UNSET only on a digest made before the
+	// outlook existed (kept standing across the deploy that added it), which
+	// draws no outlook.
+	Ipo           *NewsDigestIpoOutlook `protobuf:"bytes,6,opt,name=ipo,proto3" json:"ipo,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -146,6 +153,291 @@ func (x *NewsDigestOverlay) GetWeek() *NewsDigestWeek {
 	return nil
 }
 
+func (x *NewsDigestOverlay) GetIpo() *NewsDigestIpoOutlook {
+	if x != nil {
+		return x.Ipo
+	}
+	return nil
+}
+
+// "IPO outlook": a model's best guess, researched on the web at the run, at
+// when each of the two companies holds its initial public offering. Both are
+// always present, Anthropic first, so the order and the pair are the
+// contract's, not a list the webview could find short.
+type NewsDigestIpoOutlook struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The section's heading, composed by the daemon ("IPO outlook").
+	Heading *NewsDigestSectionHeading `protobuf:"bytes,1,opt,name=heading,proto3" json:"heading,omitempty"`
+	// Anthropic's guess. Drawn first.
+	Anthropic *NewsDigestIpoGuess `protobuf:"bytes,2,opt,name=anthropic,proto3" json:"anthropic,omitempty"`
+	// OpenAI's guess. Drawn second.
+	Openai        *NewsDigestIpoGuess `protobuf:"bytes,3,opt,name=openai,proto3" json:"openai,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NewsDigestIpoOutlook) Reset() {
+	*x = NewsDigestIpoOutlook{}
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NewsDigestIpoOutlook) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NewsDigestIpoOutlook) ProtoMessage() {}
+
+func (x *NewsDigestIpoOutlook) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NewsDigestIpoOutlook.ProtoReflect.Descriptor instead.
+func (*NewsDigestIpoOutlook) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *NewsDigestIpoOutlook) GetHeading() *NewsDigestSectionHeading {
+	if x != nil {
+		return x.Heading
+	}
+	return nil
+}
+
+func (x *NewsDigestIpoOutlook) GetAnthropic() *NewsDigestIpoGuess {
+	if x != nil {
+		return x.Anthropic
+	}
+	return nil
+}
+
+func (x *NewsDigestIpoOutlook) GetOpenai() *NewsDigestIpoGuess {
+	if x != nil {
+		return x.Openai
+	}
+	return nil
+}
+
+// One company's IPO guess.
+type NewsDigestIpoGuess struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The company's name, composed by the daemon ("Anthropic").
+	Company *NewsDigestIpoCompany `protobuf:"bytes,1,opt,name=company,proto3" json:"company,omitempty"`
+	// The guess itself: a short phrase ("Q2 2027", "late 2026, filed
+	// confidentially"), drawn verbatim and LARGE. A guess is always given, never
+	// left blank: the model states its best guess however thin the reporting.
+	Estimate *NewsDigestIpoEstimate `protobuf:"bytes,2,opt,name=estimate,proto3" json:"estimate,omitempty"`
+	// Why: one or two sentences on the reporting the guess rests on, drawn
+	// verbatim as markdown.
+	Basis *NewsDigestIpoBasis `protobuf:"bytes,3,opt,name=basis,proto3" json:"basis,omitempty"`
+	// Where the reporting was read, most authoritative first. Never empty.
+	Links         []*NewsDigestLink `protobuf:"bytes,4,rep,name=links,proto3" json:"links,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NewsDigestIpoGuess) Reset() {
+	*x = NewsDigestIpoGuess{}
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NewsDigestIpoGuess) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NewsDigestIpoGuess) ProtoMessage() {}
+
+func (x *NewsDigestIpoGuess) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NewsDigestIpoGuess.ProtoReflect.Descriptor instead.
+func (*NewsDigestIpoGuess) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *NewsDigestIpoGuess) GetCompany() *NewsDigestIpoCompany {
+	if x != nil {
+		return x.Company
+	}
+	return nil
+}
+
+func (x *NewsDigestIpoGuess) GetEstimate() *NewsDigestIpoEstimate {
+	if x != nil {
+		return x.Estimate
+	}
+	return nil
+}
+
+func (x *NewsDigestIpoGuess) GetBasis() *NewsDigestIpoBasis {
+	if x != nil {
+		return x.Basis
+	}
+	return nil
+}
+
+func (x *NewsDigestIpoGuess) GetLinks() []*NewsDigestLink {
+	if x != nil {
+		return x.Links
+	}
+	return nil
+}
+
+// A company's display name, drawn verbatim.
+type NewsDigestIpoCompany struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Text          string                 `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NewsDigestIpoCompany) Reset() {
+	*x = NewsDigestIpoCompany{}
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NewsDigestIpoCompany) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NewsDigestIpoCompany) ProtoMessage() {}
+
+func (x *NewsDigestIpoCompany) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NewsDigestIpoCompany.ProtoReflect.Descriptor instead.
+func (*NewsDigestIpoCompany) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *NewsDigestIpoCompany) GetText() string {
+	if x != nil {
+		return x.Text
+	}
+	return ""
+}
+
+// The guessed IPO timing, drawn verbatim. Never empty.
+type NewsDigestIpoEstimate struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Text          string                 `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NewsDigestIpoEstimate) Reset() {
+	*x = NewsDigestIpoEstimate{}
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NewsDigestIpoEstimate) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NewsDigestIpoEstimate) ProtoMessage() {}
+
+func (x *NewsDigestIpoEstimate) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NewsDigestIpoEstimate.ProtoReflect.Descriptor instead.
+func (*NewsDigestIpoEstimate) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *NewsDigestIpoEstimate) GetText() string {
+	if x != nil {
+		return x.Text
+	}
+	return ""
+}
+
+// The reporting a guess rests on, drawn verbatim. Never empty.
+type NewsDigestIpoBasis struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Text          string                 `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NewsDigestIpoBasis) Reset() {
+	*x = NewsDigestIpoBasis{}
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NewsDigestIpoBasis) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NewsDigestIpoBasis) ProtoMessage() {}
+
+func (x *NewsDigestIpoBasis) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NewsDigestIpoBasis.ProtoReflect.Descriptor instead.
+func (*NewsDigestIpoBasis) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *NewsDigestIpoBasis) GetText() string {
+	if x != nil {
+		return x.Text
+	}
+	return ""
+}
+
 // "Since last week": every item of the past seven days' digests that could
 // regress agent-repl (a breaking, deprecated, removed or changed-default
 // behavior of the Agent SDK, Claude Code or the Messages API; a pricing,
@@ -169,7 +461,7 @@ type NewsDigestWeek struct {
 
 func (x *NewsDigestWeek) Reset() {
 	*x = NewsDigestWeek{}
-	mi := &file_frontend_v1_news_digest_proto_msgTypes[1]
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -181,7 +473,7 @@ func (x *NewsDigestWeek) String() string {
 func (*NewsDigestWeek) ProtoMessage() {}
 
 func (x *NewsDigestWeek) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_news_digest_proto_msgTypes[1]
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -194,7 +486,7 @@ func (x *NewsDigestWeek) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NewsDigestWeek.ProtoReflect.Descriptor instead.
 func (*NewsDigestWeek) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{1}
+	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *NewsDigestWeek) GetHeading() *NewsDigestSectionHeading {
@@ -257,7 +549,7 @@ type NewsDigestWeekRisks struct {
 
 func (x *NewsDigestWeekRisks) Reset() {
 	*x = NewsDigestWeekRisks{}
-	mi := &file_frontend_v1_news_digest_proto_msgTypes[2]
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -269,7 +561,7 @@ func (x *NewsDigestWeekRisks) String() string {
 func (*NewsDigestWeekRisks) ProtoMessage() {}
 
 func (x *NewsDigestWeekRisks) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_news_digest_proto_msgTypes[2]
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -282,7 +574,7 @@ func (x *NewsDigestWeekRisks) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NewsDigestWeekRisks.ProtoReflect.Descriptor instead.
 func (*NewsDigestWeekRisks) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{2}
+	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *NewsDigestWeekRisks) GetItems() []*NewsDigestRiskItem {
@@ -306,7 +598,7 @@ type NewsDigestRiskItem struct {
 
 func (x *NewsDigestRiskItem) Reset() {
 	*x = NewsDigestRiskItem{}
-	mi := &file_frontend_v1_news_digest_proto_msgTypes[3]
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -318,7 +610,7 @@ func (x *NewsDigestRiskItem) String() string {
 func (*NewsDigestRiskItem) ProtoMessage() {}
 
 func (x *NewsDigestRiskItem) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_news_digest_proto_msgTypes[3]
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -331,7 +623,7 @@ func (x *NewsDigestRiskItem) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NewsDigestRiskItem.ProtoReflect.Descriptor instead.
 func (*NewsDigestRiskItem) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{3}
+	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *NewsDigestRiskItem) GetItem() *NewsDigestItem {
@@ -358,7 +650,7 @@ type NewsDigestRiskReason struct {
 
 func (x *NewsDigestRiskReason) Reset() {
 	*x = NewsDigestRiskReason{}
-	mi := &file_frontend_v1_news_digest_proto_msgTypes[4]
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -370,7 +662,7 @@ func (x *NewsDigestRiskReason) String() string {
 func (*NewsDigestRiskReason) ProtoMessage() {}
 
 func (x *NewsDigestRiskReason) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_news_digest_proto_msgTypes[4]
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -383,7 +675,7 @@ func (x *NewsDigestRiskReason) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NewsDigestRiskReason.ProtoReflect.Descriptor instead.
 func (*NewsDigestRiskReason) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{4}
+	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *NewsDigestRiskReason) GetText() string {
@@ -406,7 +698,7 @@ type NewsDigestWeekQuiet struct {
 
 func (x *NewsDigestWeekQuiet) Reset() {
 	*x = NewsDigestWeekQuiet{}
-	mi := &file_frontend_v1_news_digest_proto_msgTypes[5]
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -418,7 +710,7 @@ func (x *NewsDigestWeekQuiet) String() string {
 func (*NewsDigestWeekQuiet) ProtoMessage() {}
 
 func (x *NewsDigestWeekQuiet) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_news_digest_proto_msgTypes[5]
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -431,7 +723,7 @@ func (x *NewsDigestWeekQuiet) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NewsDigestWeekQuiet.ProtoReflect.Descriptor instead.
 func (*NewsDigestWeekQuiet) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{5}
+	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *NewsDigestWeekQuiet) GetText() string {
@@ -454,7 +746,7 @@ type NewsDigestId struct {
 
 func (x *NewsDigestId) Reset() {
 	*x = NewsDigestId{}
-	mi := &file_frontend_v1_news_digest_proto_msgTypes[6]
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -466,7 +758,7 @@ func (x *NewsDigestId) String() string {
 func (*NewsDigestId) ProtoMessage() {}
 
 func (x *NewsDigestId) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_news_digest_proto_msgTypes[6]
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -479,7 +771,7 @@ func (x *NewsDigestId) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NewsDigestId.ProtoReflect.Descriptor instead.
 func (*NewsDigestId) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{6}
+	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *NewsDigestId) GetValue() string {
@@ -506,7 +798,7 @@ type NewsDigestHeader struct {
 
 func (x *NewsDigestHeader) Reset() {
 	*x = NewsDigestHeader{}
-	mi := &file_frontend_v1_news_digest_proto_msgTypes[7]
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -518,7 +810,7 @@ func (x *NewsDigestHeader) String() string {
 func (*NewsDigestHeader) ProtoMessage() {}
 
 func (x *NewsDigestHeader) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_news_digest_proto_msgTypes[7]
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -531,7 +823,7 @@ func (x *NewsDigestHeader) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NewsDigestHeader.ProtoReflect.Descriptor instead.
 func (*NewsDigestHeader) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{7}
+	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *NewsDigestHeader) GetTitle() *NewsDigestTitle {
@@ -571,7 +863,7 @@ type NewsDigestSdkVersion struct {
 
 func (x *NewsDigestSdkVersion) Reset() {
 	*x = NewsDigestSdkVersion{}
-	mi := &file_frontend_v1_news_digest_proto_msgTypes[8]
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -583,7 +875,7 @@ func (x *NewsDigestSdkVersion) String() string {
 func (*NewsDigestSdkVersion) ProtoMessage() {}
 
 func (x *NewsDigestSdkVersion) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_news_digest_proto_msgTypes[8]
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -596,7 +888,7 @@ func (x *NewsDigestSdkVersion) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NewsDigestSdkVersion.ProtoReflect.Descriptor instead.
 func (*NewsDigestSdkVersion) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{8}
+	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *NewsDigestSdkVersion) GetAnswer() isNewsDigestSdkVersion_Answer {
@@ -654,7 +946,7 @@ type NewsDigestSdkVersionKnown struct {
 
 func (x *NewsDigestSdkVersionKnown) Reset() {
 	*x = NewsDigestSdkVersionKnown{}
-	mi := &file_frontend_v1_news_digest_proto_msgTypes[9]
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -666,7 +958,7 @@ func (x *NewsDigestSdkVersionKnown) String() string {
 func (*NewsDigestSdkVersionKnown) ProtoMessage() {}
 
 func (x *NewsDigestSdkVersionKnown) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_news_digest_proto_msgTypes[9]
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -679,7 +971,7 @@ func (x *NewsDigestSdkVersionKnown) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NewsDigestSdkVersionKnown.ProtoReflect.Descriptor instead.
 func (*NewsDigestSdkVersionKnown) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{9}
+	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *NewsDigestSdkVersionKnown) GetVersion() string {
@@ -698,7 +990,7 @@ type NewsDigestSdkVersionUnknown struct {
 
 func (x *NewsDigestSdkVersionUnknown) Reset() {
 	*x = NewsDigestSdkVersionUnknown{}
-	mi := &file_frontend_v1_news_digest_proto_msgTypes[10]
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -710,7 +1002,7 @@ func (x *NewsDigestSdkVersionUnknown) String() string {
 func (*NewsDigestSdkVersionUnknown) ProtoMessage() {}
 
 func (x *NewsDigestSdkVersionUnknown) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_news_digest_proto_msgTypes[10]
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -723,7 +1015,7 @@ func (x *NewsDigestSdkVersionUnknown) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NewsDigestSdkVersionUnknown.ProtoReflect.Descriptor instead.
 func (*NewsDigestSdkVersionUnknown) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{10}
+	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{15}
 }
 
 // The title line, composed by the daemon ("Claude news · Oct 2").
@@ -737,7 +1029,7 @@ type NewsDigestTitle struct {
 
 func (x *NewsDigestTitle) Reset() {
 	*x = NewsDigestTitle{}
-	mi := &file_frontend_v1_news_digest_proto_msgTypes[11]
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -749,7 +1041,7 @@ func (x *NewsDigestTitle) String() string {
 func (*NewsDigestTitle) ProtoMessage() {}
 
 func (x *NewsDigestTitle) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_news_digest_proto_msgTypes[11]
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -762,7 +1054,7 @@ func (x *NewsDigestTitle) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NewsDigestTitle.ProtoReflect.Descriptor instead.
 func (*NewsDigestTitle) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{11}
+	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *NewsDigestTitle) GetText() string {
@@ -786,7 +1078,7 @@ type NewsDigestPeriod struct {
 
 func (x *NewsDigestPeriod) Reset() {
 	*x = NewsDigestPeriod{}
-	mi := &file_frontend_v1_news_digest_proto_msgTypes[12]
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -798,7 +1090,7 @@ func (x *NewsDigestPeriod) String() string {
 func (*NewsDigestPeriod) ProtoMessage() {}
 
 func (x *NewsDigestPeriod) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_news_digest_proto_msgTypes[12]
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -811,7 +1103,7 @@ func (x *NewsDigestPeriod) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NewsDigestPeriod.ProtoReflect.Descriptor instead.
 func (*NewsDigestPeriod) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{12}
+	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *NewsDigestPeriod) GetFromMs() int64 {
@@ -845,7 +1137,7 @@ type NewsDigestSection struct {
 
 func (x *NewsDigestSection) Reset() {
 	*x = NewsDigestSection{}
-	mi := &file_frontend_v1_news_digest_proto_msgTypes[13]
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -857,7 +1149,7 @@ func (x *NewsDigestSection) String() string {
 func (*NewsDigestSection) ProtoMessage() {}
 
 func (x *NewsDigestSection) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_news_digest_proto_msgTypes[13]
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -870,7 +1162,7 @@ func (x *NewsDigestSection) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NewsDigestSection.ProtoReflect.Descriptor instead.
 func (*NewsDigestSection) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{13}
+	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *NewsDigestSection) GetHeading() *NewsDigestSectionHeading {
@@ -905,7 +1197,7 @@ type NewsDigestSectionHeading struct {
 
 func (x *NewsDigestSectionHeading) Reset() {
 	*x = NewsDigestSectionHeading{}
-	mi := &file_frontend_v1_news_digest_proto_msgTypes[14]
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -917,7 +1209,7 @@ func (x *NewsDigestSectionHeading) String() string {
 func (*NewsDigestSectionHeading) ProtoMessage() {}
 
 func (x *NewsDigestSectionHeading) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_news_digest_proto_msgTypes[14]
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -930,7 +1222,7 @@ func (x *NewsDigestSectionHeading) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NewsDigestSectionHeading.ProtoReflect.Descriptor instead.
 func (*NewsDigestSectionHeading) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{14}
+	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *NewsDigestSectionHeading) GetText() string {
@@ -958,7 +1250,7 @@ type NewsDigestSectionKind struct {
 
 func (x *NewsDigestSectionKind) Reset() {
 	*x = NewsDigestSectionKind{}
-	mi := &file_frontend_v1_news_digest_proto_msgTypes[15]
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -970,7 +1262,7 @@ func (x *NewsDigestSectionKind) String() string {
 func (*NewsDigestSectionKind) ProtoMessage() {}
 
 func (x *NewsDigestSectionKind) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_news_digest_proto_msgTypes[15]
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -983,7 +1275,7 @@ func (x *NewsDigestSectionKind) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NewsDigestSectionKind.ProtoReflect.Descriptor instead.
 func (*NewsDigestSectionKind) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{15}
+	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *NewsDigestSectionKind) GetKind() isNewsDigestSectionKind_Kind {
@@ -1106,7 +1398,7 @@ type NewsDigestKindBackend struct {
 
 func (x *NewsDigestKindBackend) Reset() {
 	*x = NewsDigestKindBackend{}
-	mi := &file_frontend_v1_news_digest_proto_msgTypes[16]
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1118,7 +1410,7 @@ func (x *NewsDigestKindBackend) String() string {
 func (*NewsDigestKindBackend) ProtoMessage() {}
 
 func (x *NewsDigestKindBackend) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_news_digest_proto_msgTypes[16]
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1131,7 +1423,7 @@ func (x *NewsDigestKindBackend) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NewsDigestKindBackend.ProtoReflect.Descriptor instead.
 func (*NewsDigestKindBackend) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{16}
+	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{21}
 }
 
 // A deprecation or announced removal.
@@ -1143,7 +1435,7 @@ type NewsDigestKindDeprecation struct {
 
 func (x *NewsDigestKindDeprecation) Reset() {
 	*x = NewsDigestKindDeprecation{}
-	mi := &file_frontend_v1_news_digest_proto_msgTypes[17]
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1155,7 +1447,7 @@ func (x *NewsDigestKindDeprecation) String() string {
 func (*NewsDigestKindDeprecation) ProtoMessage() {}
 
 func (x *NewsDigestKindDeprecation) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_news_digest_proto_msgTypes[17]
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1168,7 +1460,7 @@ func (x *NewsDigestKindDeprecation) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NewsDigestKindDeprecation.ProtoReflect.Descriptor instead.
 func (*NewsDigestKindDeprecation) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{17}
+	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{22}
 }
 
 // A pricing, plan, terms or policy change.
@@ -1180,7 +1472,7 @@ type NewsDigestKindPolicy struct {
 
 func (x *NewsDigestKindPolicy) Reset() {
 	*x = NewsDigestKindPolicy{}
-	mi := &file_frontend_v1_news_digest_proto_msgTypes[18]
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1192,7 +1484,7 @@ func (x *NewsDigestKindPolicy) String() string {
 func (*NewsDigestKindPolicy) ProtoMessage() {}
 
 func (x *NewsDigestKindPolicy) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_news_digest_proto_msgTypes[18]
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1205,7 +1497,7 @@ func (x *NewsDigestKindPolicy) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NewsDigestKindPolicy.ProtoReflect.Descriptor instead.
 func (*NewsDigestKindPolicy) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{18}
+	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{23}
 }
 
 // A new feature, model or product.
@@ -1217,7 +1509,7 @@ type NewsDigestKindFeature struct {
 
 func (x *NewsDigestKindFeature) Reset() {
 	*x = NewsDigestKindFeature{}
-	mi := &file_frontend_v1_news_digest_proto_msgTypes[19]
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1229,7 +1521,7 @@ func (x *NewsDigestKindFeature) String() string {
 func (*NewsDigestKindFeature) ProtoMessage() {}
 
 func (x *NewsDigestKindFeature) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_news_digest_proto_msgTypes[19]
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1242,7 +1534,7 @@ func (x *NewsDigestKindFeature) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NewsDigestKindFeature.ProtoReflect.Descriptor instead.
 func (*NewsDigestKindFeature) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{19}
+	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{24}
 }
 
 // A release or changelog entry.
@@ -1254,7 +1546,7 @@ type NewsDigestKindRelease struct {
 
 func (x *NewsDigestKindRelease) Reset() {
 	*x = NewsDigestKindRelease{}
-	mi := &file_frontend_v1_news_digest_proto_msgTypes[20]
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1266,7 +1558,7 @@ func (x *NewsDigestKindRelease) String() string {
 func (*NewsDigestKindRelease) ProtoMessage() {}
 
 func (x *NewsDigestKindRelease) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_news_digest_proto_msgTypes[20]
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1279,7 +1571,7 @@ func (x *NewsDigestKindRelease) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NewsDigestKindRelease.ProtoReflect.Descriptor instead.
 func (*NewsDigestKindRelease) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{20}
+	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{25}
 }
 
 // An incident or outage.
@@ -1291,7 +1583,7 @@ type NewsDigestKindIncident struct {
 
 func (x *NewsDigestKindIncident) Reset() {
 	*x = NewsDigestKindIncident{}
-	mi := &file_frontend_v1_news_digest_proto_msgTypes[21]
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1303,7 +1595,7 @@ func (x *NewsDigestKindIncident) String() string {
 func (*NewsDigestKindIncident) ProtoMessage() {}
 
 func (x *NewsDigestKindIncident) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_news_digest_proto_msgTypes[21]
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1316,7 +1608,7 @@ func (x *NewsDigestKindIncident) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NewsDigestKindIncident.ProtoReflect.Descriptor instead.
 func (*NewsDigestKindIncident) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{21}
+	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{26}
 }
 
 // One piece of news.
@@ -1336,7 +1628,7 @@ type NewsDigestItem struct {
 
 func (x *NewsDigestItem) Reset() {
 	*x = NewsDigestItem{}
-	mi := &file_frontend_v1_news_digest_proto_msgTypes[22]
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1348,7 +1640,7 @@ func (x *NewsDigestItem) String() string {
 func (*NewsDigestItem) ProtoMessage() {}
 
 func (x *NewsDigestItem) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_news_digest_proto_msgTypes[22]
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1361,7 +1653,7 @@ func (x *NewsDigestItem) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NewsDigestItem.ProtoReflect.Descriptor instead.
 func (*NewsDigestItem) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{22}
+	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *NewsDigestItem) GetTitle() *NewsDigestItemTitle {
@@ -1402,7 +1694,7 @@ type NewsDigestItemTitle struct {
 
 func (x *NewsDigestItemTitle) Reset() {
 	*x = NewsDigestItemTitle{}
-	mi := &file_frontend_v1_news_digest_proto_msgTypes[23]
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1414,7 +1706,7 @@ func (x *NewsDigestItemTitle) String() string {
 func (*NewsDigestItemTitle) ProtoMessage() {}
 
 func (x *NewsDigestItemTitle) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_news_digest_proto_msgTypes[23]
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1427,7 +1719,7 @@ func (x *NewsDigestItemTitle) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NewsDigestItemTitle.ProtoReflect.Descriptor instead.
 func (*NewsDigestItemTitle) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{23}
+	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *NewsDigestItemTitle) GetText() string {
@@ -1448,7 +1740,7 @@ type NewsDigestItemSummary struct {
 
 func (x *NewsDigestItemSummary) Reset() {
 	*x = NewsDigestItemSummary{}
-	mi := &file_frontend_v1_news_digest_proto_msgTypes[24]
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1460,7 +1752,7 @@ func (x *NewsDigestItemSummary) String() string {
 func (*NewsDigestItemSummary) ProtoMessage() {}
 
 func (x *NewsDigestItemSummary) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_news_digest_proto_msgTypes[24]
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1473,7 +1765,7 @@ func (x *NewsDigestItemSummary) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NewsDigestItemSummary.ProtoReflect.Descriptor instead.
 func (*NewsDigestItemSummary) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{24}
+	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *NewsDigestItemSummary) GetText() string {
@@ -1495,7 +1787,7 @@ type NewsDigestItemEffective struct {
 
 func (x *NewsDigestItemEffective) Reset() {
 	*x = NewsDigestItemEffective{}
-	mi := &file_frontend_v1_news_digest_proto_msgTypes[25]
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1507,7 +1799,7 @@ func (x *NewsDigestItemEffective) String() string {
 func (*NewsDigestItemEffective) ProtoMessage() {}
 
 func (x *NewsDigestItemEffective) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_news_digest_proto_msgTypes[25]
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1520,7 +1812,7 @@ func (x *NewsDigestItemEffective) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NewsDigestItemEffective.ProtoReflect.Descriptor instead.
 func (*NewsDigestItemEffective) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{25}
+	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *NewsDigestItemEffective) GetText() string {
@@ -1543,7 +1835,7 @@ type NewsDigestLink struct {
 
 func (x *NewsDigestLink) Reset() {
 	*x = NewsDigestLink{}
-	mi := &file_frontend_v1_news_digest_proto_msgTypes[26]
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1555,7 +1847,7 @@ func (x *NewsDigestLink) String() string {
 func (*NewsDigestLink) ProtoMessage() {}
 
 func (x *NewsDigestLink) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_news_digest_proto_msgTypes[26]
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1568,7 +1860,7 @@ func (x *NewsDigestLink) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NewsDigestLink.ProtoReflect.Descriptor instead.
 func (*NewsDigestLink) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{26}
+	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *NewsDigestLink) GetLabel() string {
@@ -1595,7 +1887,7 @@ type NewsDigestSources struct {
 
 func (x *NewsDigestSources) Reset() {
 	*x = NewsDigestSources{}
-	mi := &file_frontend_v1_news_digest_proto_msgTypes[27]
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1607,7 +1899,7 @@ func (x *NewsDigestSources) String() string {
 func (*NewsDigestSources) ProtoMessage() {}
 
 func (x *NewsDigestSources) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_news_digest_proto_msgTypes[27]
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1620,7 +1912,7 @@ func (x *NewsDigestSources) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NewsDigestSources.ProtoReflect.Descriptor instead.
 func (*NewsDigestSources) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{27}
+	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *NewsDigestSources) GetSources() []*NewsDigestSource {
@@ -1650,7 +1942,7 @@ type NewsDigestSource struct {
 
 func (x *NewsDigestSource) Reset() {
 	*x = NewsDigestSource{}
-	mi := &file_frontend_v1_news_digest_proto_msgTypes[28]
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1662,7 +1954,7 @@ func (x *NewsDigestSource) String() string {
 func (*NewsDigestSource) ProtoMessage() {}
 
 func (x *NewsDigestSource) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_news_digest_proto_msgTypes[28]
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1675,7 +1967,7 @@ func (x *NewsDigestSource) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NewsDigestSource.ProtoReflect.Descriptor instead.
 func (*NewsDigestSource) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{28}
+	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *NewsDigestSource) GetName() string {
@@ -1745,7 +2037,7 @@ type NewsDigestSourceRead struct {
 
 func (x *NewsDigestSourceRead) Reset() {
 	*x = NewsDigestSourceRead{}
-	mi := &file_frontend_v1_news_digest_proto_msgTypes[29]
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1757,7 +2049,7 @@ func (x *NewsDigestSourceRead) String() string {
 func (*NewsDigestSourceRead) ProtoMessage() {}
 
 func (x *NewsDigestSourceRead) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_news_digest_proto_msgTypes[29]
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1770,7 +2062,7 @@ func (x *NewsDigestSourceRead) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NewsDigestSourceRead.ProtoReflect.Descriptor instead.
 func (*NewsDigestSourceRead) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{29}
+	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *NewsDigestSourceRead) GetNewEntries() uint32 {
@@ -1791,7 +2083,7 @@ type NewsDigestSourceFailed struct {
 
 func (x *NewsDigestSourceFailed) Reset() {
 	*x = NewsDigestSourceFailed{}
-	mi := &file_frontend_v1_news_digest_proto_msgTypes[30]
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1803,7 +2095,7 @@ func (x *NewsDigestSourceFailed) String() string {
 func (*NewsDigestSourceFailed) ProtoMessage() {}
 
 func (x *NewsDigestSourceFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_news_digest_proto_msgTypes[30]
+	mi := &file_frontend_v1_news_digest_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1816,7 +2108,7 @@ func (x *NewsDigestSourceFailed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NewsDigestSourceFailed.ProtoReflect.Descriptor instead.
 func (*NewsDigestSourceFailed) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{30}
+	return file_frontend_v1_news_digest_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *NewsDigestSourceFailed) GetReason() string {
@@ -1830,13 +2122,29 @@ var File_frontend_v1_news_digest_proto protoreflect.FileDescriptor
 
 const file_frontend_v1_news_digest_proto_rawDesc = "" +
 	"\n" +
-	"\x1dfrontend/v1/news_digest.proto\x12\vfrontend.v1\"\x9c\x02\n" +
+	"\x1dfrontend/v1/news_digest.proto\x12\vfrontend.v1\"\xd1\x02\n" +
 	"\x11NewsDigestOverlay\x12)\n" +
 	"\x02id\x18\x01 \x01(\v2\x19.frontend.v1.NewsDigestIdR\x02id\x125\n" +
 	"\x06header\x18\x02 \x01(\v2\x1d.frontend.v1.NewsDigestHeaderR\x06header\x12:\n" +
 	"\bsections\x18\x03 \x03(\v2\x1e.frontend.v1.NewsDigestSectionR\bsections\x128\n" +
 	"\asources\x18\x04 \x01(\v2\x1e.frontend.v1.NewsDigestSourcesR\asources\x12/\n" +
-	"\x04week\x18\x05 \x01(\v2\x1b.frontend.v1.NewsDigestWeekR\x04week\"\xd0\x01\n" +
+	"\x04week\x18\x05 \x01(\v2\x1b.frontend.v1.NewsDigestWeekR\x04week\x123\n" +
+	"\x03ipo\x18\x06 \x01(\v2!.frontend.v1.NewsDigestIpoOutlookR\x03ipo\"\xcf\x01\n" +
+	"\x14NewsDigestIpoOutlook\x12?\n" +
+	"\aheading\x18\x01 \x01(\v2%.frontend.v1.NewsDigestSectionHeadingR\aheading\x12=\n" +
+	"\tanthropic\x18\x02 \x01(\v2\x1f.frontend.v1.NewsDigestIpoGuessR\tanthropic\x127\n" +
+	"\x06openai\x18\x03 \x01(\v2\x1f.frontend.v1.NewsDigestIpoGuessR\x06openai\"\xfb\x01\n" +
+	"\x12NewsDigestIpoGuess\x12;\n" +
+	"\acompany\x18\x01 \x01(\v2!.frontend.v1.NewsDigestIpoCompanyR\acompany\x12>\n" +
+	"\bestimate\x18\x02 \x01(\v2\".frontend.v1.NewsDigestIpoEstimateR\bestimate\x125\n" +
+	"\x05basis\x18\x03 \x01(\v2\x1f.frontend.v1.NewsDigestIpoBasisR\x05basis\x121\n" +
+	"\x05links\x18\x04 \x03(\v2\x1b.frontend.v1.NewsDigestLinkR\x05links\"*\n" +
+	"\x14NewsDigestIpoCompany\x12\x12\n" +
+	"\x04text\x18\x01 \x01(\tR\x04text\"+\n" +
+	"\x15NewsDigestIpoEstimate\x12\x12\n" +
+	"\x04text\x18\x01 \x01(\tR\x04text\"(\n" +
+	"\x12NewsDigestIpoBasis\x12\x12\n" +
+	"\x04text\x18\x01 \x01(\tR\x04text\"\xd0\x01\n" +
 	"\x0eNewsDigestWeek\x12?\n" +
 	"\aheading\x18\x01 \x01(\v2%.frontend.v1.NewsDigestSectionHeadingR\aheading\x128\n" +
 	"\x05risks\x18\x02 \x01(\v2 .frontend.v1.NewsDigestWeekRisksH\x00R\x05risks\x128\n" +
@@ -1932,78 +2240,91 @@ func file_frontend_v1_news_digest_proto_rawDescGZIP() []byte {
 	return file_frontend_v1_news_digest_proto_rawDescData
 }
 
-var file_frontend_v1_news_digest_proto_msgTypes = make([]protoimpl.MessageInfo, 31)
+var file_frontend_v1_news_digest_proto_msgTypes = make([]protoimpl.MessageInfo, 36)
 var file_frontend_v1_news_digest_proto_goTypes = []any{
 	(*NewsDigestOverlay)(nil),           // 0: frontend.v1.NewsDigestOverlay
-	(*NewsDigestWeek)(nil),              // 1: frontend.v1.NewsDigestWeek
-	(*NewsDigestWeekRisks)(nil),         // 2: frontend.v1.NewsDigestWeekRisks
-	(*NewsDigestRiskItem)(nil),          // 3: frontend.v1.NewsDigestRiskItem
-	(*NewsDigestRiskReason)(nil),        // 4: frontend.v1.NewsDigestRiskReason
-	(*NewsDigestWeekQuiet)(nil),         // 5: frontend.v1.NewsDigestWeekQuiet
-	(*NewsDigestId)(nil),                // 6: frontend.v1.NewsDigestId
-	(*NewsDigestHeader)(nil),            // 7: frontend.v1.NewsDigestHeader
-	(*NewsDigestSdkVersion)(nil),        // 8: frontend.v1.NewsDigestSdkVersion
-	(*NewsDigestSdkVersionKnown)(nil),   // 9: frontend.v1.NewsDigestSdkVersionKnown
-	(*NewsDigestSdkVersionUnknown)(nil), // 10: frontend.v1.NewsDigestSdkVersionUnknown
-	(*NewsDigestTitle)(nil),             // 11: frontend.v1.NewsDigestTitle
-	(*NewsDigestPeriod)(nil),            // 12: frontend.v1.NewsDigestPeriod
-	(*NewsDigestSection)(nil),           // 13: frontend.v1.NewsDigestSection
-	(*NewsDigestSectionHeading)(nil),    // 14: frontend.v1.NewsDigestSectionHeading
-	(*NewsDigestSectionKind)(nil),       // 15: frontend.v1.NewsDigestSectionKind
-	(*NewsDigestKindBackend)(nil),       // 16: frontend.v1.NewsDigestKindBackend
-	(*NewsDigestKindDeprecation)(nil),   // 17: frontend.v1.NewsDigestKindDeprecation
-	(*NewsDigestKindPolicy)(nil),        // 18: frontend.v1.NewsDigestKindPolicy
-	(*NewsDigestKindFeature)(nil),       // 19: frontend.v1.NewsDigestKindFeature
-	(*NewsDigestKindRelease)(nil),       // 20: frontend.v1.NewsDigestKindRelease
-	(*NewsDigestKindIncident)(nil),      // 21: frontend.v1.NewsDigestKindIncident
-	(*NewsDigestItem)(nil),              // 22: frontend.v1.NewsDigestItem
-	(*NewsDigestItemTitle)(nil),         // 23: frontend.v1.NewsDigestItemTitle
-	(*NewsDigestItemSummary)(nil),       // 24: frontend.v1.NewsDigestItemSummary
-	(*NewsDigestItemEffective)(nil),     // 25: frontend.v1.NewsDigestItemEffective
-	(*NewsDigestLink)(nil),              // 26: frontend.v1.NewsDigestLink
-	(*NewsDigestSources)(nil),           // 27: frontend.v1.NewsDigestSources
-	(*NewsDigestSource)(nil),            // 28: frontend.v1.NewsDigestSource
-	(*NewsDigestSourceRead)(nil),        // 29: frontend.v1.NewsDigestSourceRead
-	(*NewsDigestSourceFailed)(nil),      // 30: frontend.v1.NewsDigestSourceFailed
+	(*NewsDigestIpoOutlook)(nil),        // 1: frontend.v1.NewsDigestIpoOutlook
+	(*NewsDigestIpoGuess)(nil),          // 2: frontend.v1.NewsDigestIpoGuess
+	(*NewsDigestIpoCompany)(nil),        // 3: frontend.v1.NewsDigestIpoCompany
+	(*NewsDigestIpoEstimate)(nil),       // 4: frontend.v1.NewsDigestIpoEstimate
+	(*NewsDigestIpoBasis)(nil),          // 5: frontend.v1.NewsDigestIpoBasis
+	(*NewsDigestWeek)(nil),              // 6: frontend.v1.NewsDigestWeek
+	(*NewsDigestWeekRisks)(nil),         // 7: frontend.v1.NewsDigestWeekRisks
+	(*NewsDigestRiskItem)(nil),          // 8: frontend.v1.NewsDigestRiskItem
+	(*NewsDigestRiskReason)(nil),        // 9: frontend.v1.NewsDigestRiskReason
+	(*NewsDigestWeekQuiet)(nil),         // 10: frontend.v1.NewsDigestWeekQuiet
+	(*NewsDigestId)(nil),                // 11: frontend.v1.NewsDigestId
+	(*NewsDigestHeader)(nil),            // 12: frontend.v1.NewsDigestHeader
+	(*NewsDigestSdkVersion)(nil),        // 13: frontend.v1.NewsDigestSdkVersion
+	(*NewsDigestSdkVersionKnown)(nil),   // 14: frontend.v1.NewsDigestSdkVersionKnown
+	(*NewsDigestSdkVersionUnknown)(nil), // 15: frontend.v1.NewsDigestSdkVersionUnknown
+	(*NewsDigestTitle)(nil),             // 16: frontend.v1.NewsDigestTitle
+	(*NewsDigestPeriod)(nil),            // 17: frontend.v1.NewsDigestPeriod
+	(*NewsDigestSection)(nil),           // 18: frontend.v1.NewsDigestSection
+	(*NewsDigestSectionHeading)(nil),    // 19: frontend.v1.NewsDigestSectionHeading
+	(*NewsDigestSectionKind)(nil),       // 20: frontend.v1.NewsDigestSectionKind
+	(*NewsDigestKindBackend)(nil),       // 21: frontend.v1.NewsDigestKindBackend
+	(*NewsDigestKindDeprecation)(nil),   // 22: frontend.v1.NewsDigestKindDeprecation
+	(*NewsDigestKindPolicy)(nil),        // 23: frontend.v1.NewsDigestKindPolicy
+	(*NewsDigestKindFeature)(nil),       // 24: frontend.v1.NewsDigestKindFeature
+	(*NewsDigestKindRelease)(nil),       // 25: frontend.v1.NewsDigestKindRelease
+	(*NewsDigestKindIncident)(nil),      // 26: frontend.v1.NewsDigestKindIncident
+	(*NewsDigestItem)(nil),              // 27: frontend.v1.NewsDigestItem
+	(*NewsDigestItemTitle)(nil),         // 28: frontend.v1.NewsDigestItemTitle
+	(*NewsDigestItemSummary)(nil),       // 29: frontend.v1.NewsDigestItemSummary
+	(*NewsDigestItemEffective)(nil),     // 30: frontend.v1.NewsDigestItemEffective
+	(*NewsDigestLink)(nil),              // 31: frontend.v1.NewsDigestLink
+	(*NewsDigestSources)(nil),           // 32: frontend.v1.NewsDigestSources
+	(*NewsDigestSource)(nil),            // 33: frontend.v1.NewsDigestSource
+	(*NewsDigestSourceRead)(nil),        // 34: frontend.v1.NewsDigestSourceRead
+	(*NewsDigestSourceFailed)(nil),      // 35: frontend.v1.NewsDigestSourceFailed
 }
 var file_frontend_v1_news_digest_proto_depIdxs = []int32{
-	6,  // 0: frontend.v1.NewsDigestOverlay.id:type_name -> frontend.v1.NewsDigestId
-	7,  // 1: frontend.v1.NewsDigestOverlay.header:type_name -> frontend.v1.NewsDigestHeader
-	13, // 2: frontend.v1.NewsDigestOverlay.sections:type_name -> frontend.v1.NewsDigestSection
-	27, // 3: frontend.v1.NewsDigestOverlay.sources:type_name -> frontend.v1.NewsDigestSources
-	1,  // 4: frontend.v1.NewsDigestOverlay.week:type_name -> frontend.v1.NewsDigestWeek
-	14, // 5: frontend.v1.NewsDigestWeek.heading:type_name -> frontend.v1.NewsDigestSectionHeading
-	2,  // 6: frontend.v1.NewsDigestWeek.risks:type_name -> frontend.v1.NewsDigestWeekRisks
-	5,  // 7: frontend.v1.NewsDigestWeek.quiet:type_name -> frontend.v1.NewsDigestWeekQuiet
-	3,  // 8: frontend.v1.NewsDigestWeekRisks.items:type_name -> frontend.v1.NewsDigestRiskItem
-	22, // 9: frontend.v1.NewsDigestRiskItem.item:type_name -> frontend.v1.NewsDigestItem
-	4,  // 10: frontend.v1.NewsDigestRiskItem.reason:type_name -> frontend.v1.NewsDigestRiskReason
-	11, // 11: frontend.v1.NewsDigestHeader.title:type_name -> frontend.v1.NewsDigestTitle
-	12, // 12: frontend.v1.NewsDigestHeader.period:type_name -> frontend.v1.NewsDigestPeriod
-	8,  // 13: frontend.v1.NewsDigestHeader.sdk_version:type_name -> frontend.v1.NewsDigestSdkVersion
-	9,  // 14: frontend.v1.NewsDigestSdkVersion.known:type_name -> frontend.v1.NewsDigestSdkVersionKnown
-	10, // 15: frontend.v1.NewsDigestSdkVersion.unknown:type_name -> frontend.v1.NewsDigestSdkVersionUnknown
-	14, // 16: frontend.v1.NewsDigestSection.heading:type_name -> frontend.v1.NewsDigestSectionHeading
-	15, // 17: frontend.v1.NewsDigestSection.kind:type_name -> frontend.v1.NewsDigestSectionKind
-	22, // 18: frontend.v1.NewsDigestSection.items:type_name -> frontend.v1.NewsDigestItem
-	16, // 19: frontend.v1.NewsDigestSectionKind.backend:type_name -> frontend.v1.NewsDigestKindBackend
-	17, // 20: frontend.v1.NewsDigestSectionKind.deprecation:type_name -> frontend.v1.NewsDigestKindDeprecation
-	18, // 21: frontend.v1.NewsDigestSectionKind.policy:type_name -> frontend.v1.NewsDigestKindPolicy
-	19, // 22: frontend.v1.NewsDigestSectionKind.feature:type_name -> frontend.v1.NewsDigestKindFeature
-	20, // 23: frontend.v1.NewsDigestSectionKind.release:type_name -> frontend.v1.NewsDigestKindRelease
-	21, // 24: frontend.v1.NewsDigestSectionKind.incident:type_name -> frontend.v1.NewsDigestKindIncident
-	23, // 25: frontend.v1.NewsDigestItem.title:type_name -> frontend.v1.NewsDigestItemTitle
-	24, // 26: frontend.v1.NewsDigestItem.summary:type_name -> frontend.v1.NewsDigestItemSummary
-	25, // 27: frontend.v1.NewsDigestItem.effective:type_name -> frontend.v1.NewsDigestItemEffective
-	26, // 28: frontend.v1.NewsDigestItem.links:type_name -> frontend.v1.NewsDigestLink
-	28, // 29: frontend.v1.NewsDigestSources.sources:type_name -> frontend.v1.NewsDigestSource
-	29, // 30: frontend.v1.NewsDigestSource.read:type_name -> frontend.v1.NewsDigestSourceRead
-	30, // 31: frontend.v1.NewsDigestSource.failed:type_name -> frontend.v1.NewsDigestSourceFailed
-	32, // [32:32] is the sub-list for method output_type
-	32, // [32:32] is the sub-list for method input_type
-	32, // [32:32] is the sub-list for extension type_name
-	32, // [32:32] is the sub-list for extension extendee
-	0,  // [0:32] is the sub-list for field type_name
+	11, // 0: frontend.v1.NewsDigestOverlay.id:type_name -> frontend.v1.NewsDigestId
+	12, // 1: frontend.v1.NewsDigestOverlay.header:type_name -> frontend.v1.NewsDigestHeader
+	18, // 2: frontend.v1.NewsDigestOverlay.sections:type_name -> frontend.v1.NewsDigestSection
+	32, // 3: frontend.v1.NewsDigestOverlay.sources:type_name -> frontend.v1.NewsDigestSources
+	6,  // 4: frontend.v1.NewsDigestOverlay.week:type_name -> frontend.v1.NewsDigestWeek
+	1,  // 5: frontend.v1.NewsDigestOverlay.ipo:type_name -> frontend.v1.NewsDigestIpoOutlook
+	19, // 6: frontend.v1.NewsDigestIpoOutlook.heading:type_name -> frontend.v1.NewsDigestSectionHeading
+	2,  // 7: frontend.v1.NewsDigestIpoOutlook.anthropic:type_name -> frontend.v1.NewsDigestIpoGuess
+	2,  // 8: frontend.v1.NewsDigestIpoOutlook.openai:type_name -> frontend.v1.NewsDigestIpoGuess
+	3,  // 9: frontend.v1.NewsDigestIpoGuess.company:type_name -> frontend.v1.NewsDigestIpoCompany
+	4,  // 10: frontend.v1.NewsDigestIpoGuess.estimate:type_name -> frontend.v1.NewsDigestIpoEstimate
+	5,  // 11: frontend.v1.NewsDigestIpoGuess.basis:type_name -> frontend.v1.NewsDigestIpoBasis
+	31, // 12: frontend.v1.NewsDigestIpoGuess.links:type_name -> frontend.v1.NewsDigestLink
+	19, // 13: frontend.v1.NewsDigestWeek.heading:type_name -> frontend.v1.NewsDigestSectionHeading
+	7,  // 14: frontend.v1.NewsDigestWeek.risks:type_name -> frontend.v1.NewsDigestWeekRisks
+	10, // 15: frontend.v1.NewsDigestWeek.quiet:type_name -> frontend.v1.NewsDigestWeekQuiet
+	8,  // 16: frontend.v1.NewsDigestWeekRisks.items:type_name -> frontend.v1.NewsDigestRiskItem
+	27, // 17: frontend.v1.NewsDigestRiskItem.item:type_name -> frontend.v1.NewsDigestItem
+	9,  // 18: frontend.v1.NewsDigestRiskItem.reason:type_name -> frontend.v1.NewsDigestRiskReason
+	16, // 19: frontend.v1.NewsDigestHeader.title:type_name -> frontend.v1.NewsDigestTitle
+	17, // 20: frontend.v1.NewsDigestHeader.period:type_name -> frontend.v1.NewsDigestPeriod
+	13, // 21: frontend.v1.NewsDigestHeader.sdk_version:type_name -> frontend.v1.NewsDigestSdkVersion
+	14, // 22: frontend.v1.NewsDigestSdkVersion.known:type_name -> frontend.v1.NewsDigestSdkVersionKnown
+	15, // 23: frontend.v1.NewsDigestSdkVersion.unknown:type_name -> frontend.v1.NewsDigestSdkVersionUnknown
+	19, // 24: frontend.v1.NewsDigestSection.heading:type_name -> frontend.v1.NewsDigestSectionHeading
+	20, // 25: frontend.v1.NewsDigestSection.kind:type_name -> frontend.v1.NewsDigestSectionKind
+	27, // 26: frontend.v1.NewsDigestSection.items:type_name -> frontend.v1.NewsDigestItem
+	21, // 27: frontend.v1.NewsDigestSectionKind.backend:type_name -> frontend.v1.NewsDigestKindBackend
+	22, // 28: frontend.v1.NewsDigestSectionKind.deprecation:type_name -> frontend.v1.NewsDigestKindDeprecation
+	23, // 29: frontend.v1.NewsDigestSectionKind.policy:type_name -> frontend.v1.NewsDigestKindPolicy
+	24, // 30: frontend.v1.NewsDigestSectionKind.feature:type_name -> frontend.v1.NewsDigestKindFeature
+	25, // 31: frontend.v1.NewsDigestSectionKind.release:type_name -> frontend.v1.NewsDigestKindRelease
+	26, // 32: frontend.v1.NewsDigestSectionKind.incident:type_name -> frontend.v1.NewsDigestKindIncident
+	28, // 33: frontend.v1.NewsDigestItem.title:type_name -> frontend.v1.NewsDigestItemTitle
+	29, // 34: frontend.v1.NewsDigestItem.summary:type_name -> frontend.v1.NewsDigestItemSummary
+	30, // 35: frontend.v1.NewsDigestItem.effective:type_name -> frontend.v1.NewsDigestItemEffective
+	31, // 36: frontend.v1.NewsDigestItem.links:type_name -> frontend.v1.NewsDigestLink
+	33, // 37: frontend.v1.NewsDigestSources.sources:type_name -> frontend.v1.NewsDigestSource
+	34, // 38: frontend.v1.NewsDigestSource.read:type_name -> frontend.v1.NewsDigestSourceRead
+	35, // 39: frontend.v1.NewsDigestSource.failed:type_name -> frontend.v1.NewsDigestSourceFailed
+	40, // [40:40] is the sub-list for method output_type
+	40, // [40:40] is the sub-list for method input_type
+	40, // [40:40] is the sub-list for extension type_name
+	40, // [40:40] is the sub-list for extension extendee
+	0,  // [0:40] is the sub-list for field type_name
 }
 
 func init() { file_frontend_v1_news_digest_proto_init() }
@@ -2011,15 +2332,15 @@ func file_frontend_v1_news_digest_proto_init() {
 	if File_frontend_v1_news_digest_proto != nil {
 		return
 	}
-	file_frontend_v1_news_digest_proto_msgTypes[1].OneofWrappers = []any{
+	file_frontend_v1_news_digest_proto_msgTypes[6].OneofWrappers = []any{
 		(*NewsDigestWeek_Risks)(nil),
 		(*NewsDigestWeek_Quiet)(nil),
 	}
-	file_frontend_v1_news_digest_proto_msgTypes[8].OneofWrappers = []any{
+	file_frontend_v1_news_digest_proto_msgTypes[13].OneofWrappers = []any{
 		(*NewsDigestSdkVersion_Known)(nil),
 		(*NewsDigestSdkVersion_Unknown)(nil),
 	}
-	file_frontend_v1_news_digest_proto_msgTypes[15].OneofWrappers = []any{
+	file_frontend_v1_news_digest_proto_msgTypes[20].OneofWrappers = []any{
 		(*NewsDigestSectionKind_Backend)(nil),
 		(*NewsDigestSectionKind_Deprecation)(nil),
 		(*NewsDigestSectionKind_Policy)(nil),
@@ -2027,8 +2348,8 @@ func file_frontend_v1_news_digest_proto_init() {
 		(*NewsDigestSectionKind_Release)(nil),
 		(*NewsDigestSectionKind_Incident)(nil),
 	}
-	file_frontend_v1_news_digest_proto_msgTypes[22].OneofWrappers = []any{}
-	file_frontend_v1_news_digest_proto_msgTypes[28].OneofWrappers = []any{
+	file_frontend_v1_news_digest_proto_msgTypes[27].OneofWrappers = []any{}
+	file_frontend_v1_news_digest_proto_msgTypes[33].OneofWrappers = []any{
 		(*NewsDigestSource_Read)(nil),
 		(*NewsDigestSource_Failed)(nil),
 	}
@@ -2038,7 +2359,7 @@ func file_frontend_v1_news_digest_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_frontend_v1_news_digest_proto_rawDesc), len(file_frontend_v1_news_digest_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   31,
+			NumMessages:   36,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

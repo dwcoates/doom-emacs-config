@@ -2576,6 +2576,20 @@ HARD as `model_failed`. No marked item is the `quiet` arm, whose text names
 the history's start (`news_digest.history_since`) when it began inside the
 week. A failed merge fails the run as a condensing failure does.
 
+**IPO outlook** (`ipo.go`, `NewsDigestOverlay.ipo`). Every digest-making run
+asks a third Sonnet call (`prompts/news-digest-ipo-outlook.md`, site
+`news_digest_ipo`) for the current best guess at when Anthropic and OpenAI go
+public. It is the one headless call given a tool: `headless.Request.Tools`
+makes `WebSearch` alone available and pre-approved, because the watched
+sources carry no IPO reporting. The latest digest's outlook (wsm
+`latest_overlay`, so a dismissed one still counts) is handed to the call so a
+guess moves only when the reporting does. The answer is validated HARD (both
+companies, a one-line estimate, a basis, at least one link through
+`validLink`, the one https check every model-written link passes); its links
+come from the model's search, so they are not checked against the sources'
+set. A failure fails the run as `model_failed`; the outlook is INFO
+`daemon.newsdigest.ipo` with both estimates.
+
 **SDK version.** The header's `sdk_version` is `workspace.Fleet.SDKVersion`:
 the `SessionRuntime.sdk_version` the last session start reported (an empty
 report is ERROR `daemon.workspace.bring_up` and is not kept). A daemon that has
