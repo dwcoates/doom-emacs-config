@@ -1,0 +1,320 @@
+/**
+ * host — THE ONE WEB VIEW EMACS SHOWS, holding every workspace's page.
+ *
+ * Emacs keeps exactly one WKWebView on screen, at this page, and asks it to
+ * hold one iframe per open workspace (`ensure`), to show the one the user
+ * stands in (`show`), and to drop one whose workspace closed (`remove`). Why
+ * one web view instead of one per workspace is protocol.ts's account: an
+ * iframe of a page on screen is never suspended, so every workspace page is
+ * live and current before the user ever switches to it.
+ *
+ * EMACS OWNS THE DESIRED STATE; THIS PAGE APPLIES IT. Every call states an end
+ * state (this workspace's page is at this URL; this one is shown; this one's
+ * input window paints this color), so calling again is harmless, and a page
+ * that reloads is handed the state it lost the moment it says hello.
+ *
+ * EVERY CALL ANSWERS. Emacs reads each answer back and records it, which is
+ * the host's only way into the logs (it holds no daemon connection of its
+ * own): an answer names the call, the workspace, the outcome, and any notes
+ * the host made since the last answer (a message it could not read, say).
+ * Answers are JSON strings because that is what a script evaluation can hand
+ * Emacs.
+ */
+import {
+  HOST_CHANNEL,
+  onHostChannel,
+  parsePageToHost,
+  type DrawnWhat,
+  type HostToPage,
+  type PageToHost,
+} from "./protocol.js";
+
+/** What the host needs from its environment, injectable for tests. */
+export interface HostEnv {
+  readonly doc: Document;
+  readonly win: Window;
+}
+
+/** The slot the docked gate takes, as Emacs last told it. */
+interface GateDockState {
+  readonly pixels: number;
+  readonly background: string | null;
+}
+
+/** One workspace's page, and everything the host knows and holds for it. */
+interface Frame {
+  readonly id: string;
+  url: string;
+  readonly iframe: HTMLIFrameElement;
+  /** Desired state Emacs gave, replayed to the page on every hello. */
+  inputBackground: string | null;
+  gateDock: GateDockState | null;
+  /** Facts the page pushed, which Emacs reads back. Reset when it reloads. */
+  drawn: DrawnWhat | null;
+  selection: { text: string | null; focused: boolean };
+  editing: boolean;
+}
+
+/** The host's API, as Emacs calls it through `window.agentReplHost`. */
+export interface Host {
+  /** Hold workspace ID's page at URL: create it, re-point it, or leave it. */
+  ensure(id: string, url: string): string;
+  /** Show workspace ID's page and hide every other. */
+  show(id: string): string;
+  /** Drop workspace ID's page. */
+  remove(id: string): string;
+  /** Load workspace ID's page again from its URL. */
+  reload(id: string): string;
+  /** Tell ID's page the background its Emacs input window paints. */
+  setInputBackground(id: string, background: string): string;
+  /** Tell ID's page the slot its docked gate takes. */
+  setGateDock(id: string, pixels: number, background: string | null): string;
+  /** Ask ID's page to close its standing news digest. */
+  dismissDigest(id: string): string;
+  /** Whether ID's page has drawn its conversation. */
+  drawn(id: string): string;
+  /** The shown page's selection and focus. */
+  selection(): string;
+  /** Whether a text field of the shown page holds the keyboard. */
+  editing(): boolean;
+  /** Every workspace id the host holds a page for. */
+  ids(): string;
+  /** Stop listening and drop every page. */
+  dispose(): void;
+}
+
+/** The class every workspace iframe wears; the stylesheet stacks them. */
+const FRAME_CLASS = "workspace-frame";
+/** The attribute naming the workspace an iframe holds. */
+export const FRAME_WORKSPACE_ATTRIBUTE = "data-workspace-id";
+/** The attribute the shown iframe wears. */
+export const FRAME_SHOWN_ATTRIBUTE = "data-shown";
+
+/** The longest a run of notes grows before the oldest are dropped. */
+const NOTE_LIMIT = 50;
+
+/** Build the host over ENV and start listening to its pages. */
+export function createHost(env: HostEnv): Host {
+  const { doc, win } = env;
+  const frames = new Map<string, Frame>();
+  let shownId: string | null = null;
+  let notes: string[] = [];
+
+  const note = (text: string): void => {
+    notes.push(text);
+    if (notes.length > NOTE_LIMIT) notes = notes.slice(notes.length - NOTE_LIMIT);
+  };
+
+  const answer = (op: string, id: string | null, outcome: string, extra: Record<string, unknown> = {}): string => {
+    const taken = notes;
+    notes = [];
+    return JSON.stringify({ op, id, outcome, ...extra, notes: taken });
+  };
+
+  const post = (frame: Frame, message: HostToPage): void => {
+    const target = frame.iframe.contentWindow;
+    // A page not yet attached has no window; it says hello once it boots and
+    // is handed everything then.
+    if (target === null) return;
+    target.postMessage(message, "*");
+  };
+
+  const sendState = (frame: Frame): void => {
+    post(frame, { channel: HOST_CHANNEL, kind: "presence", shown: frame.id === shownId });
+    if (frame.inputBackground !== null) {
+      post(frame, { channel: HOST_CHANNEL, kind: "inputBackground", background: frame.inputBackground });
+    }
+    if (frame.gateDock !== null) {
+      post(frame, {
+        channel: HOST_CHANNEL,
+        kind: "gateDock",
+        pixels: frame.gateDock.pixels,
+        background: frame.gateDock.background,
+      });
+    }
+  };
+
+  const resetFacts = (frame: Frame): void => {
+    frame.drawn = null;
+    frame.selection = { text: "", focused: false };
+    frame.editing = false;
+  };
+
+  const frameOf = (source: MessageEventSource | null): Frame | null => {
+    if (source === null) return null;
+    for (const frame of frames.values()) {
+      if (frame.iframe.contentWindow === source) return frame;
+    }
+    return null;
+  };
+
+  const take = (frame: Frame, message: PageToHost): void => {
+    switch (message.kind) {
+      case "hello":
+        resetFacts(frame);
+        sendState(frame);
+        return;
+      case "drawn":
+        frame.drawn = message.what;
+        return;
+      case "selection":
+        frame.selection = { text: message.text, focused: message.focused };
+        return;
+      case "editing":
+        frame.editing = message.editing;
+        return;
+    }
+  };
+
+  const onMessage = (event: MessageEvent): void => {
+    if (!onHostChannel(event.data)) return;
+    const frame = frameOf(event.source);
+    if (frame === null) {
+      note(`a message on the host channel came from no workspace page: ${JSON.stringify(event.data)}`);
+      return;
+    }
+    const message = parsePageToHost(event.data);
+    if (message === null) {
+      note(`workspace ${frame.id} sent a host message this build cannot read: ${JSON.stringify(event.data)}`);
+      return;
+    }
+    take(frame, message);
+  };
+  win.addEventListener("message", onMessage);
+
+  const applyShown = (frame: Frame, shown: boolean): void => {
+    if (shown) frame.iframe.setAttribute(FRAME_SHOWN_ATTRIBUTE, "");
+    else frame.iframe.removeAttribute(FRAME_SHOWN_ATTRIBUTE);
+  };
+
+  const create = (id: string, url: string): Frame => {
+    const iframe = doc.createElement("iframe");
+    iframe.className = FRAME_CLASS;
+    iframe.setAttribute(FRAME_WORKSPACE_ATTRIBUTE, id);
+    iframe.title = id;
+    // The page copies to the clipboard (copy.ts), which a cross-origin frame
+    // may do only when its embedder allows it.
+    iframe.allow = "clipboard-read; clipboard-write";
+    iframe.src = url;
+    const frame: Frame = {
+      id,
+      url,
+      iframe,
+      inputBackground: null,
+      gateDock: null,
+      drawn: null,
+      selection: { text: "", focused: false },
+      editing: false,
+    };
+    applyShown(frame, id === shownId);
+    frames.set(id, frame);
+    doc.body.append(iframe);
+    return frame;
+  };
+
+  const withFrame = (op: string, id: string, act: (frame: Frame) => string): string => {
+    const frame = frames.get(id);
+    return frame === undefined ? answer(op, id, "absent") : answer(op, id, act(frame));
+  };
+
+  return {
+    ensure(id, url) {
+      const frame = frames.get(id);
+      if (frame === undefined) {
+        create(id, url);
+        return answer("ensure", id, "created");
+      }
+      if (frame.url === url) return answer("ensure", id, "unchanged");
+      frame.url = url;
+      resetFacts(frame);
+      frame.iframe.src = url;
+      return answer("ensure", id, "navigated");
+    },
+    show(id) {
+      const next = frames.get(id);
+      if (next === undefined) return answer("show", id, "absent");
+      if (shownId === id) return answer("show", id, "unchanged");
+      const previous = shownId === null ? undefined : frames.get(shownId);
+      shownId = id;
+      if (previous !== undefined) {
+        applyShown(previous, false);
+        post(previous, { channel: HOST_CHANNEL, kind: "presence", shown: false });
+      }
+      applyShown(next, true);
+      post(next, { channel: HOST_CHANNEL, kind: "presence", shown: true });
+      // The keyboard follows the page on screen: Emacs focused this web view,
+      // so the focus within it moves to the page now shown.
+      if (doc.hasFocus()) next.iframe.focus();
+      return answer("show", id, "shown", { previous: previous?.id ?? null });
+    },
+    remove(id) {
+      return withFrame("remove", id, (frame) => {
+        frames.delete(id);
+        frame.iframe.remove();
+        if (shownId === id) shownId = null;
+        return "removed";
+      });
+    },
+    reload(id) {
+      return withFrame("reload", id, (frame) => {
+        resetFacts(frame);
+        frame.iframe.src = frame.url;
+        return "reloaded";
+      });
+    },
+    setInputBackground(id, background) {
+      return withFrame("setInputBackground", id, (frame) => {
+        frame.inputBackground = background;
+        post(frame, { channel: HOST_CHANNEL, kind: "inputBackground", background });
+        return "sent";
+      });
+    },
+    setGateDock(id, pixels, background) {
+      return withFrame("setGateDock", id, (frame) => {
+        frame.gateDock = { pixels, background };
+        post(frame, { channel: HOST_CHANNEL, kind: "gateDock", pixels, background });
+        return "sent";
+      });
+    },
+    dismissDigest(id) {
+      return withFrame("dismissDigest", id, (frame) => {
+        post(frame, { channel: HOST_CHANNEL, kind: "dismissDigest" });
+        return "sent";
+      });
+    },
+    drawn(id) {
+      const frame = frames.get(id);
+      return answer("drawn", id, frame === undefined ? "absent" : "present", { drawn: frame?.drawn ?? null });
+    },
+    selection() {
+      const frame = shownId === null ? undefined : frames.get(shownId);
+      if (frame === undefined) return answer("selection", null, "none-shown", { text: null, focused: false });
+      return answer("selection", frame.id, "present", {
+        text: frame.selection.text,
+        focused: frame.selection.focused,
+      });
+    },
+    editing() {
+      const frame = shownId === null ? undefined : frames.get(shownId);
+      return frame?.editing ?? false;
+    },
+    ids() {
+      return answer("ids", null, "listed", { ids: [...frames.keys()], shown: shownId });
+    },
+    dispose() {
+      win.removeEventListener("message", onMessage);
+      for (const frame of frames.values()) frame.iframe.remove();
+      frames.clear();
+      shownId = null;
+    },
+  };
+}
+
+/** Whether a text field holds the focus, asking the shown page when an iframe does.
+ * The answer behind `xwHasFocus` (main.ts). */
+export function hostHasFocus(doc: Document, host: Host): boolean {
+  const active = doc.activeElement;
+  if (active === null) return false;
+  if (active.nodeName === "IFRAME") return host.editing();
+  return active.nodeName === "INPUT" || active.nodeName === "TEXTAREA";
+}
