@@ -1996,6 +1996,8 @@ type harness struct {
 	interrupted      []ids.WorkspaceID
 	interruptRunning bool
 	interruptErr     error
+	// banners records the merge queue's desktop banners.
+	banners *fakeBanners
 	// awaitedTurns records every turn AwaitTurnEnd waited on.
 	awaitedTurns []ids.TurnID
 	// awaitGate, when set, holds every AwaitTurnEnd until it is closed or the
@@ -2155,6 +2157,7 @@ func newHarness(t *testing.T) *harness {
 	}
 	h.detached = &fakeDetached{h: h}
 	h.names = &fakeNames{}
+	h.banners = &fakeBanners{}
 	h.queue = &fakeQueue{db: h.db}
 	h.git = newFakeGit(h.next)
 	h.feed = &fakeFeed{seq: h.next}
@@ -2209,7 +2212,7 @@ func newHarness(t *testing.T) *harness {
 func (h *harness) deps() Deps {
 	return Deps{
 		DB: h.db, Git: h.git, Queue: h.queue, Feed: h.feed, Footer: h.footer,
-		Sidebar: h.sidebar, Holds: h.holds, Asks: h.asks, PromptsDir: "prompts",
+		Sidebar: h.sidebar, Holds: h.holds, Asks: h.asks, Banners: h.banners, PromptsDir: "prompts",
 		Policy:      harnessPolicy{h: h},
 		Briefs:      h.loadBrief,
 		SelfRepoDir: "/self/checkout",

@@ -330,6 +330,7 @@ func (d Deps) validate() error {
 	check(d.Footer != nil, "Footer")
 	check(d.Sidebar != nil, "Sidebar")
 	check(d.Holds != nil, "Holds")
+	check(d.Banners != nil, "Banners")
 	check(d.Asks != nil, "Asks")
 	check(d.Names != nil, "Names")
 	check(d.InterruptTurn != nil, "InterruptTurn")

@@ -17,6 +17,7 @@ func TestNewRefusesAnIncompleteDependencySet(t *testing.T) {
 		{name: "no store", drop: func(d *Deps) { d.DB = nil }, want: "DB"},
 		{name: "no git", drop: func(d *Deps) { d.Git = nil }, want: "Git"},
 		{name: "no queue", drop: func(d *Deps) { d.Queue = nil }, want: "Queue"},
+		{name: "no banners", drop: func(d *Deps) { d.Banners = nil }, want: "Banners"},
 		{name: "no brief loader", drop: func(d *Deps) { d.Briefs = nil }, want: "Briefs"},
 		{name: "no painter", drop: func(d *Deps) { d.Painter = nil }, want: "Painter"},
 		{name: "no test runner", drop: func(d *Deps) { d.TestRunner = nil }, want: "TestRunner"},

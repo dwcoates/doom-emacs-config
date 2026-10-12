@@ -306,7 +306,7 @@ func (o *orchestrator) pickFailed(ctx context.Context, p *pick, summary string) 
 	delete(o.ledgerOf, p.ws)
 	o.mu.Unlock()
 	o.withdrawRequest(p.ws)
-	o.handBack(ctx, p.ws, DetachedOutcome{Kind: DetachedFailed, Summary: summary})
+	o.ended(ctx, p.ws, DetachedOutcome{Kind: DetachedFailed, Summary: summary})
 	o.forget(p.ws)
 }
 
