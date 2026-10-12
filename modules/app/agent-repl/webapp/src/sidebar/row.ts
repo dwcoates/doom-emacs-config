@@ -181,11 +181,23 @@ export function drawRosterRow(
   // 2026-10-06), so its openness is the page's own and survives a redraw.
   if (sc.openDetails.has(workspace.id)) ws.classList.add("open");
 
+  // A WORKSPACE BEING OPENED IS NOT SELECTABLE (owner ruling, 2026-10-12):
+  // its row is grey and a click does nothing until the daemon answers it
+  // open, when the row draws its real status and selects again.
+  const opening = status.case === "opening";
   const line = document.createElement("div");
   line.className = "row";
-  line.setAttribute("data-select", "");
+  if (opening) line.setAttribute("aria-disabled", "true");
+  else line.setAttribute("data-select", "");
   line.addEventListener("click", (event) => {
     event.preventDefault();
+    if (opening) {
+      log.debug("a click on a workspace still opening selects nothing", {
+        operation: "sidebar.row.select-opening",
+        context: { workspace: workspace.id },
+      });
+      return;
+    }
     if (place === "hidden") {
       void guardMalformed(sc.ctx, "sidebar.row.show", showWorkspace(line, sc, workspace));
       return;
