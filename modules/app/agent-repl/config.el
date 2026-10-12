@@ -366,6 +366,10 @@ returning the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; `--ws-current-name' and autosave.el's save-on-kill helper — all loaded
 ;; above.
 (agent-repl--load-module "notes")
+;; WHY: profiling.el is Emacs's corner of the runtime profiling session
+;; (proto/vocab/profile-session.json); bin/profile-agent-repl.sh calls its
+;; reconcile through emacsclient.  It reads only core.el's log ladder.
+(agent-repl--load-module "profiling")
 (agent-repl--load-module "prompt-summary")
 (agent-repl--load-module "window")
 (agent-repl--load-module "sibling-popup")
