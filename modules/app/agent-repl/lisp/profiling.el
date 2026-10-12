@@ -15,6 +15,16 @@
 ;;   emacs-<pid>.cpu.txt, emacs-<pid>.mem.txt
 ;;       the reversed call tree, hottest leaf functions first.
 ;;
+;;   webapp-<workspace>.lag.json
+;;       every live page's main-thread stalls over the session: a
+;;       timer-drift sampler the reconcile injects through the webview read
+;;       channel (frontend.el), so the page needs no profiling code of its
+;;       own and no wire change.  WebKit runs no JS CPU profiler without its
+;;       inspector, and a HIDDEN webview's timers are suspended by the
+;;       embedder, so the sampler measures the pages that were on screen;
+;;       the WebKit processes' CPU and memory come from the collector's
+;;       sampler.
+;;
 ;; A profile stops by itself `agent-repl-profiling-max-seconds' after it
 ;; started.  OFF COSTS NOTHING: no timer, no hook, nothing sampled.  A
 ;; profiler the user started by hand is never clobbered; the reconcile fails
@@ -27,6 +37,9 @@
 
 (declare-function agent-repl--info "core" (ws fmt &rest args))
 (declare-function agent-repl--error "core" (ws fmt &rest args))
+(declare-function agent-repl--ws-list-names "workspace" ())
+(declare-function agent-repl--ws-get "workspace" (ws key))
+(declare-function agent-repl--frontend-webview-read-script "frontend" (buf script callback))
 
 (defconst agent-repl-profiling-root-env "AGENT_REPL_PROFILE_ROOT"
   "Environment variable overriding the profiles root.")
@@ -93,8 +106,9 @@ Signals an error when the file names no valid session."
     (setq agent-repl-profiling--timer
           (run-at-time agent-repl-profiling-max-seconds nil
                        #'agent-repl-profiling--expire armed)))
-  (agent-repl--info nil "profiling: started into session %s" session)
-  (format "started %s" session))
+  (let ((pages (agent-repl-profiling--pages 'start session)))
+    (agent-repl--info nil "profiling: started into session %s (%d pages sampled)" session pages)
+    (format "started %s pages=%d" session pages)))
 
 (defun agent-repl-profiling--expire (armed)
   "Stop the profile of generation ARMED at its max duration."
@@ -142,9 +156,79 @@ Answers the files written."
           (push data files)
           (push text files))))
     (setq files (nreverse files))
-    (agent-repl--info nil "profiling: stopped session %s (%s), wrote %s"
-                      session reason (string-join files ", "))
-    (format "stopped %s %s" session (string-join files " "))))
+    (let ((pages (agent-repl-profiling--pages 'stop session)))
+      (agent-repl--info nil "profiling: stopped session %s (%s), wrote %s; %d pages answering"
+                        session reason (string-join files ", ") pages)
+      (format "stopped %s pages=%d %s" session pages (string-join files " ")))))
+
+(defconst agent-repl-profiling--page-start-script
+  (concat "(function(){var p=window.__agentReplLag;if(p&&p.timer){return JSON.stringify({ok:false,why:'already sampling'});}"
+          "p=window.__agentReplLag={stalls:[],ticks:0,began:performance.now(),last:performance.now()};"
+          "p.timer=setInterval(function(){var now=performance.now(),late=now-p.last-50;p.ticks++;"
+          "if(late>=16){p.stalls.push([Math.round(p.last-p.began),Math.round(late)]);}p.last=now;},50);"
+          "return JSON.stringify({ok:true});})()")
+  "Starts the page's main-thread stall sampler: a 50ms timer whose lateness
+past one frame (16ms) is a stall, recorded as [ms since start, ms late].")
+
+(defun agent-repl-profiling--page-stop-script (session ws)
+  "The script stopping the page sampler, answering its stalls.
+The answer names SESSION and WS, so the callback needs no closure."
+  (format (concat "(function(){var p=window.__agentReplLag;if(!p||!p.timer){"
+                  "return JSON.stringify({session:%S,ws:%S,ok:false,why:'no sampler'});}"
+                  "clearInterval(p.timer);p.timer=null;var total=0,longest=0;"
+                  "p.stalls.forEach(function(s){total+=s[1];if(s[1]>longest)longest=s[1];});"
+                  "return JSON.stringify({session:%S,ws:%S,ok:true,interval_ms:50,ticks:p.ticks,"
+                  "wall_ms:Math.round(performance.now()-p.began),stalled_ms:total,longest_ms:longest,"
+                  "stalls:p.stalls});})()")
+          session ws session ws))
+
+(defun agent-repl-profiling--page-buffers ()
+  "Answers (WS . BUFFER) for every agent-repl workspace with a live page."
+  (let (out)
+    (dolist (ws (agent-repl--ws-list-names))
+      (let ((buf (agent-repl--ws-get ws :frontend-buffer)))
+        (when (buffer-live-p buf)
+          (push (cons ws buf) out))))
+    (nreverse out)))
+
+(defun agent-repl-profiling--page-started (raw)
+  "Records a page sampler's start answer RAW; a refusal is an error."
+  (let ((answer (ignore-errors (json-parse-string raw :object-type 'alist))))
+    (unless (eq (alist-get 'ok answer) t)
+      (agent-repl--error nil "profiling: a page sampler did not start: %s" raw))))
+
+(defun agent-repl-profiling--page-file-name (ws)
+  "The lag file name for workspace WS, safe as one path component."
+  (format "webapp-%s.lag.json" (replace-regexp-in-string "[^A-Za-z0-9._-]" "_" ws)))
+
+(defun agent-repl-profiling--page-stopped (raw)
+  "Writes a page sampler's stop answer RAW into its session directory."
+  (let* ((answer (ignore-errors (json-parse-string raw :object-type 'alist)))
+         (session (alist-get 'session answer))
+         (ws (alist-get 'ws answer)))
+    (if (not (and (stringp session) (agent-repl-profiling-valid-session-p session) (stringp ws)))
+        (agent-repl--error nil "profiling: a page sampler answered no session: %s" raw)
+      (let ((file (expand-file-name (agent-repl-profiling--page-file-name ws)
+                                    (expand-file-name session (agent-repl-profiling-root)))))
+        (write-region raw nil file nil 'silent)
+        (unless (eq (alist-get 'ok answer) t)
+          (agent-repl--error nil "profiling: the page sampler of %s answered %s" ws raw))))))
+
+(defun agent-repl-profiling--pages (action session)
+  "Starts (ACTION `start') or stops (`stop') every live page's sampler for SESSION.
+Answers how many pages were reached."
+  (let ((reached 0))
+    (dolist (entry (agent-repl-profiling--page-buffers))
+      (when (agent-repl--frontend-webview-read-script
+             (cdr entry)
+             (if (eq action 'start)
+                 agent-repl-profiling--page-start-script
+               (agent-repl-profiling--page-stop-script session (car entry)))
+             (if (eq action 'start)
+                 'agent-repl-profiling--page-started
+               'agent-repl-profiling--page-stopped))
+        (setq reached (1+ reached))))
+    reached))
 
 (defun agent-repl-profiling-reconcile ()
   "Make Emacs's profiling match the profiles root's active file.
