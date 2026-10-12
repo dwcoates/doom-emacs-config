@@ -145,6 +145,7 @@ These clicks jump to an entry in the feed:
 - **When an async merge ends, a badge in your feed says how (`merge of <branch> landed`), and your agent is told.**
   - A landed merge closes its merge workspace; its conversation stays there to read.
   - A failed merge leaves the merge workspace open where it stopped, for you to finish.
+  - A merge you or an agent take off the queue on purpose ends its bubble, but your agent is not told: nothing failed.
 - **A merge workspace nobody has used for 15 calendar days is removed.**
   - The bubble's button then reads `merge workspace removed` and does nothing.
 - **Your own workspace is retired a day after its async merge lands, if nobody has used it since.**
