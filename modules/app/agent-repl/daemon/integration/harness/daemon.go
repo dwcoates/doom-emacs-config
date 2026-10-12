@@ -408,7 +408,7 @@ type Daemon struct {
 	// Notifier records every desktop banner the daemon posted
 	// (AGENT_REPL_NOTIFIER_CMD), so no test ever raises a real one.
 	Notifier *Recorder
-	// Chime records every turn-end chime the daemon rang
+	// Chime records every banner chime the daemon rang
 	// (AGENT_REPL_CHIME_CMD), so no test ever plays a real sound.
 	Chime *Recorder
 	// HostToolsDir holds the fake persistent-wifi host tools

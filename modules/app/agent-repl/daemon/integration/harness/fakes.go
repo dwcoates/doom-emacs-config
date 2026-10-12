@@ -247,7 +247,7 @@ func NewFakeNotifier(t *testing.T, dir string) *Recorder {
 	return r
 }
 
-// NewFakeChime writes the turn-end sound player the daemon rings through
+// NewFakeChime writes the banner sound player the daemon rings through
 // (AGENT_REPL_CHIME_CMD). It records the platform argv and plays nothing, so
 // no test ever sounds on the host.
 func NewFakeChime(t *testing.T, dir string) *Recorder {

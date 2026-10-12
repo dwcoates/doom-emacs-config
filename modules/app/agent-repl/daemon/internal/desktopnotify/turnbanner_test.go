@@ -21,14 +21,14 @@ func (e fakeEndings) TakeTurnEnding(_ ids.WorkspaceID, turn ids.TurnID) (feed.Tu
 	return ending, ok
 }
 
-// fakeAnnouncer composes each announced banner at once, under a fixed name.
-type fakeAnnouncer struct {
+// fakePoster composes each posted banner at once, under a fixed name.
+type fakePoster struct {
 	workspaces []ids.WorkspaceID
 	kinds      []string
 	banners    []Banner
 }
 
-func (a *fakeAnnouncer) Announce(ws ids.WorkspaceID, kind string, compose Compose) {
+func (a *fakePoster) Post(ws ids.WorkspaceID, kind string, compose Compose) {
 	a.workspaces = append(a.workspaces, ws)
 	a.kinds = append(a.kinds, kind)
 	a.banners = append(a.banners, compose(context.Background(), "my-ws"))
@@ -46,15 +46,15 @@ var turnEndedAt = time.Date(2026, 9, 29, 14, 7, 0, 0, time.Local)
 
 type turnFixture struct {
 	banners   *TurnBanners
-	announcer *fakeAnnouncer
+	poster    *fakePoster
 	summaries *fakeSummaries
 	log       *dlog.TestLogger
 }
 
 func newTurnBanners(endings fakeEndings) turnFixture {
-	f := turnFixture{announcer: &fakeAnnouncer{}, summaries: &fakeSummaries{}, log: dlog.NewTestLogger()}
+	f := turnFixture{poster: &fakePoster{}, summaries: &fakeSummaries{}, log: dlog.NewTestLogger()}
 	f.banners = NewTurnBanners(TurnDeps{
-		Endings: endings, Announcer: f.announcer, Summaries: f.summaries,
+		Endings: endings, Poster: f.poster, Summaries: f.summaries,
 		Now: func() time.Time { return turnEndedAt }, Log: f.log,
 	})
 	return f
@@ -90,13 +90,13 @@ func TestTurnBannerForEachTurnEnd(t *testing.T) {
 			f.banners.OnTurnEnded("ws1", "turn-1", tc.how)
 
 			// Assert
-			if len(f.announcer.banners) != 1 {
-				t.Fatalf("announced %d banners, want 1", len(f.announcer.banners))
+			if len(f.poster.banners) != 1 {
+				t.Fatalf("posted %d banners, want 1", len(f.poster.banners))
 			}
-			got := f.announcer.banners[0]
+			got := f.poster.banners[0]
 			want := Banner{Title: tc.wantTitle, Body: tc.wantBody}
-			if got != want || f.announcer.kinds[0] != KindTurnEnded || f.announcer.workspaces[0] != "ws1" {
-				t.Fatalf("banner = %+v (kind %s, workspace %s), want %+v for ws1", got, f.announcer.kinds[0], f.announcer.workspaces[0], want)
+			if got != want || f.poster.kinds[0] != KindTurnEnded || f.poster.workspaces[0] != "ws1" {
+				t.Fatalf("banner = %+v (kind %s, workspace %s), want %+v for ws1", got, f.poster.kinds[0], f.poster.workspaces[0], want)
 			}
 		})
 	}
@@ -123,8 +123,8 @@ func TestTurnBannerRaisesNothingWithoutALiveEnding(t *testing.T) {
 	f.banners.OnTurnEnded("ws1", "turn-1", wsm.CloseCompleted)
 
 	// Assert
-	if len(f.announcer.banners) != 0 {
-		t.Fatalf("announced %d banners for a turn with no live ending", len(f.announcer.banners))
+	if len(f.poster.banners) != 0 {
+		t.Fatalf("posted %d banners for a turn with no live ending", len(f.poster.banners))
 	}
 	if _, ok := hasRecord(f.log, "info", "the turn drew no live ending (a /clear, or a turn this feed never saw); no banner"); !ok {
 		t.Fatal("the missing ending left no record")
@@ -139,7 +139,7 @@ func TestTurnBannerRefusesAnUnknownClose(t *testing.T) {
 	f.banners.OnTurnEnded("ws1", "turn-1", wsm.TurnClose(99))
 
 	// Assert
-	if len(f.announcer.banners) != 0 {
+	if len(f.poster.banners) != 0 {
 		t.Fatal("an unknown close announced a banner")
 	}
 	r, ok := hasRecord(f.log, "error", "a turn close has no turn end; no banner")
