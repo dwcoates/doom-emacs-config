@@ -25,9 +25,11 @@ import (
 // to a resolution and continues, or leaves the rebase exactly where it is.
 
 // RebaseStep is where a rebase stands after one of its commands. Exactly one
-// of three things is true: Done (every commit is replayed and the branch has
+// of four things is true: Done (every commit is replayed and the branch has
 // moved), Conflicted (the current commit stopped on conflicts, which are
-// listed), or neither (the current commit replayed cleanly and the rebase
+// listed), Resolved (the current commit stopped on conflicts that rerere
+// resolved and staged from a recorded resolution, so the rebase only waits to
+// be continued), or none (the current commit replayed cleanly and the rebase
 // stopped at the break after it, waiting to be continued).
 type RebaseStep struct {
 	// Done reports the rebase finished.
@@ -35,13 +37,30 @@ type RebaseStep struct {
 	// Conflicted lists the paths the current commit left conflicted, nil when
 	// it replayed cleanly.
 	Conflicted []string
+	// Resolved lists the paths whose conflicts rerere resolved from a
+	// recorded resolution, nil when none conflicted.
+	Resolved []string
 }
 
 // rebaseEnv are the bindings every rebase command carries. The daemon has no
 // terminal, so no editor may ever be opened: GIT_EDITOR=true accepts every
 // commit message as it stands (the replayed commit's own, or a resolved
 // conflict's). The sequence editor is set per start, where the todo is known.
-var rebaseEnv = []string{"GIT_EDITOR=true"}
+//
+// REUSE RECORDED RESOLUTION IS ON FOR EVERY QUEUE REBASE. The merge queue
+// rebases a branch more than once onto commits carrying the same conflicting
+// hunks (a chained rebase onto the merge ahead, a restack when that merge's tip
+// moves, the landing rebase onto the target), so rerere records each
+// resolution the session made on `rebase --continue` and replays it, staged
+// (autoUpdate), the next time the same conflict is met. It is set through
+// git's environment configuration, which is scoped to this one command and
+// never written into the repository's own config.
+var rebaseEnv = []string{
+	"GIT_EDITOR=true",
+	"GIT_CONFIG_COUNT=2",
+	"GIT_CONFIG_KEY_0=rerere.enabled", "GIT_CONFIG_VALUE_0=true",
+	"GIT_CONFIG_KEY_1=rerere.autoUpdate", "GIT_CONFIG_VALUE_1=true",
+}
 
 // CommitsBetween lists the commits reachable from tip and not from base,
 // OLDEST FIRST, merges excluded: exactly the commits a rebase of tip onto base
@@ -113,6 +132,20 @@ func (c *client) rebaseCommand(ctx context.Context, operation, dir string, env [
 		return RebaseStep{}, err
 	}
 	if len(conflicted) == 0 {
+		resolved, err := c.rerereResolved(ctx, dir)
+		if err != nil {
+			return RebaseStep{}, err
+		}
+		if len(resolved) > 0 {
+			c.log.Global().Info(operation, "the rebase stopped on conflicts rerere resolved from recorded resolutions; it waits to be continued", dlog.Context{
+				"dir":       dir,
+				"exit_code": in.exitCode,
+				"resolved":  resolved,
+				"stdout":    in.stdout,
+				"stderr":    in.stderr,
+			})
+			return RebaseStep{Resolved: resolved}, nil
+		}
 		c.log.Global().Error(operation, "the rebase failed without leaving conflicts", in.logContext())
 		return RebaseStep{}, in.fail()
 	}
@@ -124,6 +157,30 @@ func (c *client) rebaseCommand(ctx context.Context, operation, dir string, env [
 		"stderr":     in.stderr,
 	})
 	return RebaseStep{Conflicted: conflicted}, nil
+}
+
+// rerereResolved answers the paths of the stopped commit whose conflicts
+// rerere resolved: a rebase still stands, nothing is left unmerged, and rerere
+// tracks the paths it resolved for the resolution it will record. Anything
+// else is no rerere resolution, and the caller reads the stop as the failure
+// it is.
+func (c *client) rerereResolved(ctx context.Context, dir string) ([]string, error) {
+	const operation = "daemon.gitclient.rerere_status"
+	standing, err := c.RebaseInProgress(ctx, dir)
+	if err != nil || !standing {
+		return nil, err
+	}
+	out, err := c.runWithEnv(ctx, operation, dir, rebaseEnv, "rerere", "status")
+	if err != nil {
+		return nil, err
+	}
+	var paths []string
+	for _, line := range strings.Split(out, "\n") {
+		if path := strings.TrimSpace(line); path != "" {
+			paths = append(paths, path)
+		}
+	}
+	return paths, nil
 }
 
 // RebaseInProgress reports whether an interactive rebase stands in dir's

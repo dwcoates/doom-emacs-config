@@ -106,6 +106,25 @@ type progressDoc struct {
 	// Outcome is what the method concluded, recorded once the target moved:
 	// the post-merge prompts run after it, and the terminal needs it.
 	Outcome *outcomeDoc `json:"outcome,omitempty"`
+
+	// The merge's place in its chain (chain.go). Speculative says the step
+	// was taken BEHIND the head -- its Tip is the tip of the merge ahead, not
+	// the target's -- so a resume takes it as a speculative step whatever the
+	// merge's place is now. ChainBase is the commit the branch's own commits
+	// stand on; Tested is the speculative gate's pass; FixesUsed counts the
+	// fixing attempts the merge made, ahead of its turn or at the head.
+	Speculative bool       `json:"speculative,omitempty"`
+	ChainBase   string     `json:"chain_base,omitempty"`
+	Tested      *testedDoc `json:"tested,omitempty"`
+	FixesUsed   int        `json:"fixes_used"`
+}
+
+// testedDoc is a speculative gate's pass: the base it ran on, the head it
+// tested and that head's tree. The pass is valid only for that exact tree.
+type testedDoc struct {
+	Base string `json:"base"`
+	Head string `json:"head"`
+	Tree string `json:"tree"`
 }
 
 // subjectDoc is the durable subject.
@@ -255,6 +274,7 @@ func (r *run) checkpoint(ctx context.Context, step string, mutate func(*progress
 	if r.exiting() {
 		return errMergeStopping
 	}
+	speculative := r.isSpeculative()
 	r.mu.Lock()
 	doc := r.prog
 	previous := doc.Step
@@ -292,6 +312,14 @@ func (r *run) checkpoint(ctx context.Context, step string, mutate func(*progress
 	} else {
 		doc.Displaced = nil
 	}
+	doc.ChainBase, doc.FixesUsed = r.chainBase, r.fixesUsed
+	if r.tested != nil {
+		tested := *r.tested
+		doc.Tested = &tested
+	} else {
+		doc.Tested = nil
+	}
+	doc.Speculative = speculative
 	if mutate != nil {
 		mutate(&doc)
 	}
@@ -395,6 +423,11 @@ func (r *run) restoreFrom(doc progressDoc) {
 	}
 	if doc.Displaced != nil {
 		r.displaced = &Displaced{Turn: ids.TurnID(doc.Displaced.Turn), Text: doc.Displaced.Text}
+	}
+	r.chainBase, r.fixesUsed = doc.ChainBase, doc.FixesUsed
+	if doc.Tested != nil {
+		tested := *doc.Tested
+		r.tested = &tested
 	}
 }
 
