@@ -1,0 +1,75 @@
+// endpoint_get_fork_point.proto — GetForkPoint: where a fork of THIS shim's
+// conversation would end if it were taken now, and which of the conversation's
+// stored rows belong to it.
+//
+// ASKED OF THE PARENT'S SHIM, while the daemon holds the parent's delivery
+// lock, so no prompt reaches the parent between this answer and the fork it
+// governs. The answer is then relayed to the child's ForkSession.
+//
+// SPENDS NOTHING: it reads what the shim already knows and makes no vendor
+// call.
+
+syntax = "proto3";
+
+package shim.v1;
+
+import "conversation/v1/history.proto";
+import "conversation/v1/turn.proto";
+import "shim/v1/fork_point.proto";
+
+option go_package = "agentrepl/proto/shim/v1;shimv1";
+
+// Ask for the fork point of the shim's own conversation. The shim resolves it
+// from its own session, so the request names nothing.
+message GetForkPointRequest {}
+
+// THE ARM IS THE OUTCOME.
+message GetForkPointResponse {
+  // Exactly one arm is set.
+  oneof result {
+    // The point, and how to bound the parent's stored rows to it.
+    GetForkPointSuccess success = 1;
+    // No point could be named.
+    GetForkPointFailure failure = 2;
+  }
+}
+
+// Where the fork ends, and which of the parent's stored rows it carries.
+//
+// THE ROWS A FORK INHERITS are the parent book's rows placed at or before
+// `through` that are stamped with none of `uninherited_turns`. Both parts are
+// needed: `through` keeps out everything the parent does after the fork, and
+// the stamps keep out the rows a turn still in flight wrote BEFORE the fork,
+// which `through` alone would admit.
+message GetForkPointSuccess {
+  // The extent of the parent's transcript the fork carries, relayed unchanged
+  // to ForkSession. `whole` from a shim with no session started, or one that is
+  // idle and has concluded no turn since it started.
+  ForkPoint point = 1;
+  // An inclusive upper bound on the places of the parent book's inherited
+  // rows: the instant the fork point's turn concluded when the point names a
+  // concluded turn's final record, the instant the turn in flight opened when
+  // it names that turn's opener, and the instant of this answer for `whole`.
+  conversation.v1.ConversationThrough through = 2;
+  // The parent's turns open at this answer, in no meaningful order. Their rows
+  // are not the fork's even when placed at or before `through`. Empty when the
+  // parent is idle.
+  repeated conversation.v1.TurnId uninherited_turns = 3;
+}
+
+// The shim could not name a fork point. THE ARM IS WHY.
+message GetForkPointFailure {
+  // Exactly one arm is set.
+  oneof cause {
+    // A turn is in flight and the shim can name neither an earlier turn's
+    // final record nor the in-flight turn's opener, so any extent it named
+    // could carry part of the in-flight turn. NOT RETRYABLE while that turn
+    // runs: asked again once it concludes, the shim names its final record.
+    GetForkPointUnresolved unresolved = 1;
+  }
+  // The shim's account, for a human and for logs; never switched on.
+  string detail = 2;
+}
+
+// No extent that excludes the turn in flight could be named.
+message GetForkPointUnresolved {}

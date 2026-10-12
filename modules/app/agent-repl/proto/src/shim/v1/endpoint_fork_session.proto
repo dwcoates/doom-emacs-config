@@ -1,0 +1,105 @@
+// endpoint_fork_session.proto — ForkSession: make this shim's conversation a
+// fork of another, cut at a fork point, BEFORE any session starts.
+//
+// THE VENDOR WRITES THE FORK. The shim calls the vendor's own session fork,
+// which copies the parent's records with their content unchanged — so the
+// fork's first request reads the parent's whole prefix from the prompt cache —
+// gives the copy a new vendor session id, and stamps every copied record with
+// the parent record it came from. The shim then files the new transcript under
+// its own working directory, where a resume of the new id finds it.
+//
+// SEPARATE FROM StartSession. The daemon persists the fork's vendor session id
+// before it starts the session, so a start refused as cold, or one that fails
+// and is retried, resumes the SAME fork rather than forking again.
+//
+// THE FORK'S BOOK IS ITS OWN. The copied records are the parent's, already
+// filed in the parent's book; the file plane skips them by their stamp, so the
+// fork's book holds only what the fork itself goes on to say. A reader of the
+// fork reads its inherited past from the parent's book, which this answer names.
+//
+// THE PARENT'S TRANSCRIPT MUST BE UNDER THIS SHIM'S ACCOUNT ROOT: the vendor
+// reads it from the root its caller runs under. A parent filed under another
+// account is refused as `unknown_session`.
+
+syntax = "proto3";
+
+package shim.v1;
+
+import "conversation/v1/agent_activity.proto";
+import "shim/v1/fork_point.proto";
+
+option go_package = "agentrepl/proto/shim/v1;shimv1";
+
+// Fork a conversation into this shim.
+message ForkSessionRequest {
+  // The parent conversation's vendor session id, as the parent's own
+  // StartSession reported it.
+  string parent_vendor_session_id = 1;
+  // The parent workspace's working directory: where the parent's transcript is
+  // filed, and where the parent's persisted book identity is kept.
+  string parent_workspace_dir = 2;
+  // How much of the parent's transcript the fork carries: GetForkPoint's answer
+  // from the parent's shim, or `whole` when the parent has no running session.
+  ForkPoint point = 3;
+}
+
+// THE ARM IS THE OUTCOME.
+message ForkSessionResponse {
+  // Exactly one arm is set.
+  oneof result {
+    // The fork exists and can be resumed.
+    ForkSessionSuccess success = 1;
+    // No fork was made.
+    ForkSessionFailure failure = 2;
+  }
+}
+
+// The fork exists, filed under this shim's working directory.
+message ForkSessionSuccess {
+  // The fork's own vendor session id: what the daemon persists and the
+  // following StartSession resumes.
+  string vendor_session_id = 1;
+  // The parent's book: the agent the parent's stored history is filed under,
+  // read from the parent workspace's persisted identity. The fork's inherited
+  // past is read from it.
+  conversation.v1.AgentId parent_book = 2;
+}
+
+// No fork was made, and nothing was written. THE ARM IS WHY.
+message ForkSessionFailure {
+  // Exactly one arm is set.
+  oneof cause {
+    // No transcript of the parent session is filed under this shim's account
+    // root for the parent's working directory. NOT RETRYABLE.
+    ForkSessionUnknownSession unknown_session = 1;
+    // The fork point's record is not in the parent's transcript. NOT
+    // RETRYABLE: the point was named for a different transcript.
+    ForkSessionRecordAbsent record_absent = 2;
+    // The parent workspace has no persisted book identity, so its stored
+    // history cannot be named. NOT RETRYABLE.
+    ForkSessionParentBookUnknown parent_book_unknown = 3;
+    // This shim already holds a session; a fork is made only before one
+    // starts. A defect in the caller.
+    ForkSessionAlreadyStarted already_started = 4;
+    // The vendor's fork failed; `detail` carries what it said. RETRYABLE: the
+    // parent transcript is unchanged and nothing was written.
+    ForkSessionVendorFailed vendor_failed = 5;
+  }
+  // The shim's account, for a human and for logs; never switched on.
+  string detail = 6;
+}
+
+// The parent's transcript is not under this shim's account root.
+message ForkSessionUnknownSession {}
+
+// The fork point names a record the parent's transcript does not hold.
+message ForkSessionRecordAbsent {}
+
+// The parent workspace has no persisted book identity.
+message ForkSessionParentBookUnknown {}
+
+// A session is already started on this shim.
+message ForkSessionAlreadyStarted {}
+
+// The vendor's fork call failed.
+message ForkSessionVendorFailed {}
