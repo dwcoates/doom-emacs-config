@@ -460,7 +460,8 @@ func TestHandoverSkipsASessionlessForeignWorkspaceAtDebug(t *testing.T) {
 }
 
 // expireAdoption runs a handover of one workspace nobody adopts and fires its
-// adoption window, joining the handover to its end.
+// adoption window, returning once the take-back has finished and the
+// workspace's next offer is waiting out its pacing delay.
 func expireAdoption(t *testing.T, h *harness) {
 	t.Helper()
 	if _, err := h.c.HandOver(context.Background(), false); err != nil {
@@ -469,7 +470,8 @@ func expireAdoption(t *testing.T, h *harness) {
 	h.clock.awaitArmed(t, adoptionWindow)
 	h.clock.Fire(adoptionWindow)
 	h.registry.wait()
-	h.c.handoverDone.Wait()
+	// The first re-offer's pacing delay is one adoption window.
+	h.clock.awaitArmed(t, adoptionWindow)
 }
 
 // The reclaim tests are invariant D, the 2026-09-27 incident's second half:
@@ -581,7 +583,12 @@ func TestAnExpiredAdoptionWindowRetractsTheTransferNotice(t *testing.T) {
 	}
 }
 
-func TestAHandoverWithAReclaimedWorkspaceDoesNotExit(t *testing.T) {
+// The re-offer tests are the 2026-10-12 incident: an expired window's
+// take-back used to end the handover -- "not exiting" -- and the incumbent
+// served the workspace alone for nine hours while the successor waited on its
+// exit. A workspace taken back on an expired window is now offered again.
+
+func TestAHandoverWaitingToReofferATakenBackWorkspaceDoesNotExit(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	h.workspace(t)
@@ -595,9 +602,101 @@ func TestAHandoverWithAReclaimedWorkspaceDoesNotExit(t *testing.T) {
 		t.Fatalf("the daemon exited with a workspace it took back")
 	default:
 	}
+	if !recordWithMessage(h, opHandover, "info", "the workspace was taken back after its adoption window expired; it is offered to the successor again") {
+		t.Fatalf("records = %+v, want the re-offer stated at INFO", h.log.Records())
+	}
+}
+
+func TestAnUncleanTakeBackIsNotOfferedAgainAndHoldsTheHandover(t *testing.T) {
+	// Arrange: the take-back's re-attach of the shim fails.
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	setAdoptErr(h.fleet, ws, errors.New("the shim would not answer the re-attach"))
+	if _, err := h.c.HandOver(context.Background(), false); err != nil {
+		t.Fatalf("HandOver: %v", err)
+	}
+	h.clock.awaitArmed(t, adoptionWindow)
+
+	// Act
+	h.clock.Fire(adoptionWindow)
+	h.registry.wait()
+	h.c.handoverDone.Wait()
+
+	// Assert
 	if !loggedError(h.log, opHandover, "were reclaimed and are served here again") {
 		t.Fatalf("records = %+v, want the unfinished handover at ERROR", h.log.Records())
 	}
+	if recordWithMessage(h, opHandover, "info", "the workspace was taken back after its adoption window expired; it is offered to the successor again") {
+		t.Fatal("a workspace taken back uncleanly was offered again")
+	}
+}
+
+// reofferOnce fires the pacing delay expireAdoption left armed and waits for
+// the next offer's own adoption window.
+func reofferOnce(t *testing.T, h *harness) {
+	t.Helper()
+	h.clock.Fire(adoptionWindow)
+	h.clock.awaitArmed(t, adoptionWindow)
+	h.registry.wait()
+}
+
+func TestATakenBackWorkspaceIsTransferredAgainAfterItsDelay(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	expireAdoption(t, h)
+
+	// Act
+	reofferOnce(t, h)
+
+	// Assert
+	var kinds []string
+	for _, call := range h.pusher.Calls() {
+		if call.WS == ws {
+			kinds = append(kinds, call.Kind)
+		}
+	}
+	if len(kinds) != 3 || kinds[2] != "transferred" {
+		t.Fatalf("pushes for the workspace = %v, want a fresh transfer notice after the retraction", kinds)
+	}
+}
+
+func TestAReofferThatLandsLetsTheHandoverExit(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	expireAdoption(t, h)
+	reofferOnce(t, h)
+	lease, held, err := h.db.Lease(context.Background(), ws)
+	if err != nil || !held {
+		t.Fatalf("Lease = (%v, %v), want the re-offer's hold", held, err)
+	}
+
+	// Act: the successor adopts the second offer.
+	if err := h.db.ClaimServing(context.Background(), ws, "daemon-successor"); err != nil {
+		t.Fatalf("ClaimServing: %v", err)
+	}
+	if err := h.db.ReleaseLease(context.Background(), lease.ID); err != nil {
+		t.Fatalf("ReleaseLease: %v", err)
+	}
+
+	// Assert
+	awaitExit(t, h)
+}
+
+func TestEachExpiredReofferDoublesTheWaitBeforeTheNext(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.workspace(t)
+	expireAdoption(t, h)
+	reofferOnce(t, h)
+
+	// Act: the second offer's window expires too.
+	h.clock.Fire(adoptionWindow)
+	h.registry.wait()
+
+	// Assert
+	h.clock.awaitArmed(t, 2*adoptionWindow)
 }
 
 // TestAWorkspaceTheSuccessorClaimedKeepsItsTransferNotice pins that a reclaim
