@@ -270,6 +270,8 @@ type bringingEdge struct {
 
 // harness is one boot sequence under test with every fake reachable.
 type harness struct {
+	// onFile is whether db is a real wsm.db in the state root (newFileHarness).
+	onFile bool
 	// binds counts the boot's BindViews calls; bindErr is what they answer.
 	binds   atomic.Int32
 	bindErr error
@@ -327,10 +329,26 @@ type harness struct {
 	startErrs map[ids.WorkspaceID]error
 }
 
-// newHarness builds a boot sequence over a REAL WSM store in the test's temp
-// dir: the registry, the leases and the held prompts are what the sequence's
-// behavior is made of, so they are exercised for real rather than faked.
+// newHarness builds a boot sequence over a REAL WSM store: the registry, the
+// leases and the held prompts are what the sequence's behavior is made of, so
+// they are exercised for real rather than faked.
+//
+// THE STORE LIVES IN MEMORY (wsm.OpenInMemory) -- the same schema and the same
+// tail of Open as the file. A test whose subject is a second process's handle
+// on the same file (previousProcessLease) uses newFileHarness, and
+// previousProcessLease refuses a memory harness loudly.
 func newHarness(t *testing.T, adjust ...func(*Deps, *harness)) *harness {
+	t.Helper()
+	return newHarnessOn(t, false, adjust...)
+}
+
+// newFileHarness is newHarness on a real wsm.db in the state root.
+func newFileHarness(t *testing.T, adjust ...func(*Deps, *harness)) *harness {
+	t.Helper()
+	return newHarnessOn(t, true, adjust...)
+}
+
+func newHarnessOn(t *testing.T, onFile bool, adjust ...func(*Deps, *harness)) *harness {
 	t.Helper()
 	t.Setenv("AGENT_REPL_FORBID_VENDOR_CALLS", "1")
 
@@ -345,9 +363,15 @@ func newHarness(t *testing.T, adjust ...func(*Deps, *harness)) *harness {
 		t.Fatalf("temp state root: %v", err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(root) })
-	db, err := wsm.Open(context.Background(), filepath.Join(root, "wsm.db"), wsm.WithLogger(log.Global()), wsm.WithUnsyncedWrites(), wsm.WithTemporaryGuard(tempdirstest.Guard(t)))
+	opts := []wsm.Option{wsm.WithLogger(log.Global()), wsm.WithUnsyncedWrites(), wsm.WithTemporaryGuard(tempdirstest.Guard(t))}
+	var db wsm.DB
+	if onFile {
+		db, err = wsm.Open(context.Background(), filepath.Join(root, "wsm.db"), opts...)
+	} else {
+		db, err = wsm.OpenInMemory(context.Background(), opts...)
+	}
 	if err != nil {
-		t.Fatalf("wsm.Open: %v", err)
+		t.Fatalf("open the test's state client: %v", err)
 	}
 	t.Cleanup(func() { db.Close() })
 
@@ -357,6 +381,7 @@ func newHarness(t *testing.T, adjust ...func(*Deps, *harness)) *harness {
 	}
 
 	h := &harness{
+		onFile:     onFile,
 		db:         db,
 		repoDir:    t.TempDir(),
 		supervisor: &fakeSupervisor{},
@@ -534,6 +559,9 @@ func (d failingLease) Lease(context.Context, wsm.WorkspaceID) (wsm.Lease, bool, 
 // would release what it holds.
 func (h *harness) previousProcessLease(t *testing.T, ws wsm.WorkspaceID, holder wsm.LeaseHolder) wsm.Lease {
 	t.Helper()
+	if !h.onFile {
+		t.Fatal("boot test: a previous process's lease is taken on the harness's wsm.db, and this harness's state lives in memory; build it with newFileHarness")
+	}
 	previous, err := wsm.Open(context.Background(), h.deps.Layout.DB(), wsm.WithUnsyncedWrites(), wsm.WithTemporaryGuard(tempdirstest.Guard(t)))
 	if err != nil {
 		t.Fatalf("wsm.Open for the previous process: %v", err)
