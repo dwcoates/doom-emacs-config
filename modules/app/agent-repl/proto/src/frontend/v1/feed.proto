@@ -2705,16 +2705,18 @@ message FeedWorktreeBranch {
 //   │ │  daemon unit ✓   webapp ● …   log: ~/…/merge-logs/…-tests-2.log│ │
 //   │ └───────────────────────────────────────────────────────────────┘ │
 //
-// The bubble lives in the REQUESTING workspace's feed. An IN-PLACE merge runs
-// in that workspace, and its own session does the conflict resolution and the
-// fixing, so those turns ALSO appear in the workspace's main feed as ordinary
-// turns. A DETACHED merge runs in a merge workspace forked from the
-// requester, and its bubble has TWO PLACEMENTS, each a feed of its own: the
-// merge workspace's feed draws it exactly as an in-place merge, and the
-// requester's feed draws it with the head's `workspace_switch` and, on each
-// AGENTIC tab, a switch in place of that tab's rows, which are never streamed
-// across workspaces. The requester's feed also carries the handback marker
-// once the merge ends.
+// The bubble lives in the REQUESTING workspace's feed, and ONLY there. A SYNC
+// (in-place) merge runs in that workspace: its own session does the conflict
+// resolution and the fixing, and those turns draw in the bubble's agentic tabs
+// and nowhere else; the bubble is PINNED to the feed's bottom while the merge
+// is in flight, because the merge is the only thing happening there. An ASYNC
+// (detached) merge runs in a HIDDEN merge workspace forked from the requester:
+// that workspace's turns draw in its own feed as ordinary turns, and are also
+// streamed, re-identified, into the bubble's agentic tabs here; the bubble is
+// PLACED where it was drawn, never pinned, so the conversation moves on past
+// it and several async merges never stack at the feed's bottom. The merge
+// workspace's own feed carries no bubble. The requester's feed also carries
+// the handback marker once an async merge ends.
 message FeedMerge {
   FeedMergeHead head = 1;
   // THE ARM IS THE STATE of the merge as a whole — the head's badge. WHAT it
@@ -2735,11 +2737,13 @@ message FeedMergeHead {
   FeedMergeLabel label = 2;
   FeedMergeRuntime runtime = 3;
   FeedMergeFold fold = 4;
-  // The control that switches to the merge workspace a DETACHED merge runs
-  // in. PRESENT for the whole life of a detached merge's bubble — queued,
-  // running, landed, failed or abandoned — and UNSET on an in-place merge,
-  // which has no other workspace. Its presence is the whole statement of
-  // which run the merge is.
+  // The control that switches to the merge workspace an ASYNC merge runs in.
+  // PRESENT once that workspace is VISIBLE — revealed (its merge failed, its
+  // agent asked the user something, the user interrupted it, or the user
+  // selected it) or landed (a landed merge workspace is an ordinary closed
+  // workspace) — and from then on for the bubble's whole life. UNSET while the
+  // merge workspace is hidden, since there is nothing to switch to, and on
+  // every sync merge, which has no other workspace.
   optional FeedMergeWorkspaceSwitch workspace_switch = 5;
 }
 
@@ -2887,9 +2891,11 @@ message FeedMergeFoldByReader {}
 // THE TAB FAMILY — one row per drawn tab of a merge bubble's sub-feed.
 // TWO TAB SHAPES: RESOLVED tabs (queue, rebasing, tests, committing,
 // updating main) carry their content in this row, replaced whole per push;
-// AGENTIC tabs (pre_prompt, conflicts, fixes, post_prompt) are containers —
-// their content is the sub-feed rows parented to this row (the requesting
-// workspace's own session, routed by the daemon's output address). Tabs are
+// AGENTIC tabs (pick, pre_prompt, conflicts, fixes, post_prompt) are
+// containers — their content is the sub-feed rows parented to this row: the
+// requesting workspace's own session for a sync merge, routed by the daemon's
+// output address, and the hidden merge workspace's session for an async merge,
+// mirrored here from that workspace's feed. Tabs are
 // APPEND-ONLY and CONDITIONAL: a tab appears BECAUSE that work began — no
 // conflicts means no conflicts tab, no test failures means no fixes tab, an
 // unconfigured prompt means no prompt tab — and a tab never reopens: a
@@ -2921,6 +2927,7 @@ message FeedMergeTab {
     FeedMergeTabCommitting committing = 10;
     FeedMergeTabUpdatingMain updating_main = 11;
     FeedMergeTabPostPrompt post_prompt = 8;
+    FeedMergeTabPick pick = 12;
   }
   // Tag 4 (`merge`, the no-FF merge made before the gate) is RETIRED: the
   // branch is rebased first and the merge commit is made only after the gate
@@ -2986,6 +2993,27 @@ message FeedMergeTabQueue {
   FeedMergeQueue queue = 3;
 }
 
+// AGENTIC: an async merge's pick — the first turn of a merge workspace forked
+// to land only some changes of its requester's branch
+// (agentrepl.v1.MergeWorkspaceSourceOwnBranchDetachedPick), its agent
+// cherry-picking those changes onto the target branch and resolving whatever
+// does not apply on its own. Present only on such a merge, as its first tab.
+// Live while the turn runs; settled succeeded when the turn ended with at
+// least one commit ahead of the target and a clean worktree, failed otherwise
+// (which FAILS the merge and reveals the merge workspace). The merge joins
+// the queue once this tab settles succeeded. Content: sub-feed rows parented
+// to this row, mirrored from the merge workspace's feed.
+message FeedMergeTabPick {
+  oneof state {
+    FeedMergeTabLive live = 1;
+    FeedMergeTabSettled settled = 2;
+    // The pick is held on the user: the merge workspace's session has a
+    // permission ask or a question batch open, which also reveals that
+    // workspace.
+    FeedMergeTabWaitingOnUser waiting_on_user = 3;
+  }
+}
+
 // AGENTIC: the configured --before-ws-merge prompt running the
 // workspace's session under the lease. Absent unless configured; its
 // failure FAILS THE RUN. Content: sub-feed rows parented to this row.
@@ -2994,13 +3022,10 @@ message FeedMergeTabPrePrompt {
     FeedMergeTabLive live = 1;
     FeedMergeTabSettled settled = 2;
   }
-  // PRESENT only on the requesting workspace's placement of a DETACHED
-  // merge's bubble (FeedMergeHead.workspace_switch is set there too): this
-  // tab's agentic work runs in the merge workspace, so its rows are NOT
-  // streamed here and the tab draws this switch in their place. UNSET on an
-  // in-place merge and on the merge workspace's own bubble, where the rows
-  // are parented to this tab as usual.
-  optional FeedMergeTabWorkspaceSwitch workspace_switch = 3;
+  // Tag 3 (`workspace_switch`) is RETIRED: an async merge's agentic work is
+  // streamed into this tab, so there is nothing to link to in its place.
+  reserved 3;
+  reserved "workspace_switch";
 }
 
 // RESOLVED: the branch being rebased onto the target's tip, in the
@@ -3046,13 +3071,10 @@ message FeedMergeTabConflicts {
   // Tag 2 (`parked`) is RETIRED: nothing parks.
   reserved 2;
   reserved "parked";
-  // PRESENT only on the requesting workspace's placement of a DETACHED
-  // merge's bubble (FeedMergeHead.workspace_switch is set there too): this
-  // tab's agentic work runs in the merge workspace, so its rows are NOT
-  // streamed here and the tab draws this switch in their place. UNSET on an
-  // in-place merge and on the merge workspace's own bubble, where the rows
-  // are parented to this tab as usual.
-  optional FeedMergeTabWorkspaceSwitch workspace_switch = 5;
+  // Tag 5 (`workspace_switch`) is RETIRED: an async merge's agentic work is
+  // streamed into this tab, so there is nothing to link to in its place.
+  reserved 5;
+  reserved "workspace_switch";
 }
 
 // RESOLVED: the programmatic test run — suites, progress, and COLORED
@@ -3163,13 +3185,10 @@ message FeedMergeTabFixes {
   reserved "parked";
   // Which attempt this is, drawn "attempt 2/3".
   FeedMergeFixAttempt attempt = 4;
-  // PRESENT only on the requesting workspace's placement of a DETACHED
-  // merge's bubble (FeedMergeHead.workspace_switch is set there too): this
-  // tab's agentic work runs in the merge workspace, so its rows are NOT
-  // streamed here and the tab draws this switch in their place. UNSET on an
-  // in-place merge and on the merge workspace's own bubble, where the rows
-  // are parented to this tab as usual.
-  optional FeedMergeTabWorkspaceSwitch workspace_switch = 6;
+  // Tag 6 (`workspace_switch`) is RETIRED: an async merge's agentic work is
+  // streamed into this tab, so there is nothing to link to in its place.
+  reserved 6;
+  reserved "workspace_switch";
 }
 // A fixing attempt's place among the attempts allowed.
 message FeedMergeFixAttempt {
@@ -3234,51 +3253,10 @@ message FeedMergeTabPostPrompt {
     FeedMergeTabLive live = 1;
     FeedMergeTabSettled settled = 2;
   }
-  // PRESENT only on the requesting workspace's placement of a DETACHED
-  // merge's bubble (FeedMergeHead.workspace_switch is set there too): this
-  // tab's agentic work runs in the merge workspace, so its rows are NOT
-  // streamed here and the tab draws this switch in their place. UNSET on an
-  // in-place merge and on the merge workspace's own bubble, where the rows
-  // are parented to this tab as usual.
-  optional FeedMergeTabWorkspaceSwitch workspace_switch = 3;
-}
-
-// An agentic tab's switch to the merge workspace its work runs in, drawn in
-// the tab's content area in place of the rows the requesting workspace's
-// placement does not stream. Shared by every agentic tab kind; it is the
-// tab's own element, distinct from the bubble head's.
-message FeedMergeTabWorkspaceSwitch {
-  // The button's text, daemon-composed and drawn verbatim ("resolving
-  // conflicts in the merge workspace", or, once removed, "merge workspace
-  // removed").
-  FeedMergeTabWorkspaceSwitchLabel label = 1;
-  // Whether there is a workspace to switch to. The two are exclusive: a
-  // removed workspace has no ref a switch could name.
-  oneof availability {
-    // The workspace exists, open or closed.
-    FeedMergeTabWorkspaceSwitchAvailable available = 2;
-    // The daemon removed the workspace; the button is drawn disabled.
-    FeedMergeTabWorkspaceSwitchRemoved removed = 3;
-  }
-}
-
-// The tab switch's label element.
-message FeedMergeTabWorkspaceSwitchLabel {
-  // Drawn verbatim.
-  string text = 1;
-}
-
-// The merge workspace exists. Clicking calls agentrepl.v1.SelectWorkspace
-// with `target`, which revives a closed workspace.
-message FeedMergeTabWorkspaceSwitchAvailable {
-  // The merge workspace, echoed verbatim on the switch.
-  workspace.v1.WorkspaceRef target = 1;
-}
-
-// The merge workspace was removed after 15 calendar days without activity.
-message FeedMergeTabWorkspaceSwitchRemoved {
-  // When the daemon removed it, epoch milliseconds.
-  int64 removed_at_ms = 1;
+  // Tag 3 (`workspace_switch`) is RETIRED: an async merge's agentic work is
+  // streamed into this tab, so there is nothing to link to in its place.
+  reserved 3;
+  reserved "workspace_switch";
 }
 
 // The repo queue snapshot the queue tab draws: who is ahead, this

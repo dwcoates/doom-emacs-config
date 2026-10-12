@@ -242,6 +242,10 @@ message CreateWorkspaceError {
     CreateWorkspaceUnknownForkSource unknown_fork_source = 16;
     // The fork source workspace has no conversation to copy.
     CreateWorkspaceForkSourceHasNoConversation fork_source_has_no_conversation = 17;
+    // The supplied name is reserved by a pending async merge, whose merge
+    // workspace will be created under it when the requesting turn ends
+    // (agentrepl.v1.MergeWorkspaceSourceOwnBranchDetached.name).
+    CreateWorkspaceNameReserved name_reserved = 18;
   }
 }
 message CreateWorkspaceUngatedWithoutConsent {}
@@ -282,6 +286,13 @@ message CreateWorkspaceUnknownForkSource {
 // Names the fork source that has no conversation.
 message CreateWorkspaceForkSourceHasNoConversation {
   workspace.v1.WorkspaceRef workspace = 1;
+}
+// Names the reserved branch. A supplied name skips the disambiguation a
+// derived name gets, so the reservation is checked here instead; without the
+// refusal a create could take the name and the reserving merge could not.
+message CreateWorkspaceNameReserved {
+  // The branch the supplied name resolves to.
+  string branch = 1;
 }
 message CreateWorkspaceWorktreeCreationFailed {
   // Git's own account of the failure.
