@@ -27,6 +27,7 @@
 import { build } from "esbuild";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { esbuildRegistryGuard } from "../../../proto/ts/registry-guard.mjs";
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
 
@@ -56,6 +57,9 @@ await build({
   // Resolve bare imports (notably @bufbuild/protobuf, imported by the
   // out-of-package proto stubs) from THIS package's node_modules.
   nodePaths: [path.join(dir, "node_modules")],
+  // protobuf-es re-walks every booted dependency's closure for each file it
+  // boots; the guard cuts ~55ms from every shim start (proto/ts/registry-guard.mjs).
+  plugins: [esbuildRegistryGuard()],
   // THE BUILD IDENTITY IS NOT BAKED. It is read from the SPAWN ENV at
   // runtime (`process.env.SHIM_BUILD_SHA`, src/build-identity.ts), because a
   // shim outlives its daemon and the daemon must be able to tell what the
