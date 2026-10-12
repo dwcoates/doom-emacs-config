@@ -842,6 +842,7 @@ describe("classifyAdoptionRefusal", () => {
     ],
     ["transferringAway", { case: "transferringAway", value: { address: "a:1" } }, "terminal"],
     ["participantNotExpected", { case: "participantNotExpected", value: {} }, "terminal"],
+    ["transferDeferred", { case: "transferDeferred", value: {} }, "deferred"],
   ];
   for (const [name, cause, kind] of table) {
     it(`treats ${name} as ${kind}`, () => {
@@ -888,6 +889,21 @@ describe("adoptAtBoot", () => {
     });
     const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
     await expect(adoptAtBoot(ctx)).resolves.toBe("no-transfer");
+  });
+
+  it("resolves deferred, calling the verb once, when the incumbent kept the workspace", async () => {
+    // ARRANGE
+    const { client, state } = lifecycleClient({
+      adopt: () => refusal({ case: "transferDeferred", value: {} }),
+    });
+    const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
+
+    // ACT
+    const outcome = await adoptAtBoot(ctx);
+
+    // ASSERT
+    expect(outcome).toBe("deferred");
+    expect(state.adoptCalls).toBe(1);
   });
 
   it("calls the verb exactly once when it is answered at once", async () => {
