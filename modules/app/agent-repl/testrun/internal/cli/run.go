@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -45,6 +46,27 @@ type Deps struct {
 // rather than silently changing that contract.
 func SlotsForHost(numCPU int) int {
 	return numCPU / 2
+}
+
+// CPUBudgetEnv names the core budget bin/suite-slot.sh hands a run: the
+// processors that run claimed from the host-wide budget. Several merge gates
+// share one host, so a run that was handed a budget sizes itself to it rather
+// than assuming it owns half the machine.
+const CPUBudgetEnv = "AGENT_REPL_TEST_CPU_BUDGET"
+
+// Slots is the run's core budget: the claimed budget when one was handed in
+// (budget non-empty), else SlotsForHost. A budget that is not a positive
+// integer is refused, never ignored: a run that silently fell back to half
+// the host would stack on top of the runs it was meant to share with.
+func Slots(numCPU int, budget string) (int, error) {
+	if budget == "" {
+		return SlotsForHost(numCPU), nil
+	}
+	n, err := strconv.Atoi(budget)
+	if err != nil || n < 1 {
+		return 0, fmt.Errorf("%s=%q is not a positive integer", CPUBudgetEnv, budget)
+	}
+	return n, nil
 }
 
 // Run executes `testrun run` and returns the process exit status.
