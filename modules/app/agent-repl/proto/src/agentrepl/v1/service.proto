@@ -86,6 +86,8 @@ import "agentrepl/v1/endpoint_list_slash_commands.proto";
 import "agentrepl/v1/endpoint_watch_web_workspace.proto";
 import "agentrepl/v1/endpoint_adopt_web_workspace.proto";
 import "agentrepl/v1/endpoint_watch_page.proto";
+import "agentrepl/v1/endpoint_open_tabs.proto";
+import "agentrepl/v1/endpoint_report_page_drawn.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
@@ -352,6 +354,12 @@ service AgentRepl {
   // rollout's shutdown announcement). See endpoint_watch_daemon.proto.
   rpc WatchDaemon(WatchDaemonRequest) returns (stream WatchDaemonResponse);
 
+  // Open the workspaces the editor names: each is brought up (when visible)
+  // and answered `opened` once it is served and its page has drawn, with every
+  // step on the way as a frame. The editor shows a tab only on its `opened`.
+  // See endpoint_open_tabs.proto.
+  rpc OpenTabs(OpenTabsRequest) returns (stream OpenTabsResponse);
+
   // Emacs's half of the handover rendezvous, called on the NEW daemon. See
   // endpoint_adopt_host_workspace.proto.
   rpc AdoptHostWorkspace(AdoptHostWorkspaceRequest) returns (AdoptHostWorkspaceResponse);
@@ -408,6 +416,11 @@ service AgentRepl {
   rpc SubscribePage(SubscribePageRequest) returns (SubscribePageResponse);
   // End one subscription, leaving the page's others alone.
   rpc UnsubscribePage(UnsubscribePageRequest) returns (UnsubscribePageResponse);
+
+  // A workspace's page drew its conversation (again on every re-attach while
+  // drawn); an OpenTabs waiting on it may answer `opened`. See
+  // endpoint_report_page_drawn.proto.
+  rpc ReportPageDrawn(ReportPageDrawnRequest) returns (ReportPageDrawnResponse);
 
   // ---- News digest: the daily Claude news overlay ----
   // Takes the standing digest down in every webview. See
