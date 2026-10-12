@@ -72,6 +72,13 @@ var (
 	// under the reconnect hold rather than lost (feed_held.proto,
 	// HeldPromptReconnectHold).
 	ErrShimHasNoSession = errors.New("promptqueue: the shim holds no session")
+	// ErrShimDied is a delivery that failed because the shim DIED under it:
+	// the session read live when the prompt arrived, and the shim was gone
+	// by the time StartTurn reached it. The sender's error answers errors.Is
+	// against it. Like a no_session refusal it is HELD under the reconnect
+	// hold, never refused: the death starts the session's revival, whose
+	// coming up delivers it.
+	ErrShimDied = errors.New("promptqueue: the shim died under the delivery")
 	// ErrColdGate is a submission to a workspace whose session is PARKED AT
 	// ITS COLD GATE. It is deliberately NOT ErrNoSession: a session exists —
 	// the shim is up and serving, which is exactly why the gate could be

@@ -744,6 +744,25 @@ func TestANoSessionRefusalHoldsThePromptForTheReconnect(t *testing.T) {
 	}
 }
 
+// errShimDiedUnder is the sender's answer for a StartTurn the shim died
+// under, as the workspace sender maps it.
+var errShimDiedUnder = fmt.Errorf("start turn: %w: unavailable: connection refused", ErrShimDied)
+
+// A DELIVERY THE SHIM DIED UNDER IS HELD for the revival, never refused.
+func TestADeliveryTheShimDiedUnderHoldsThePromptForTheReconnect(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.sender.startErr = errShimDiedUnder
+
+	// Act
+	got, err := h.q.Submit(context.Background(), submission("t1", "hello"))
+
+	// Assert
+	if err != nil || got.Held == nil || *got.Held != wsm.HoldReconnect {
+		t.Fatalf("Submit = (%+v, %v), want the prompt held under the reconnect hold", got, err)
+	}
+}
+
 func TestANoSessionRefusalTakesTheMirroredRowDown(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
