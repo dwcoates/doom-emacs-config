@@ -89,6 +89,7 @@ import { armName } from "./renderers.js";
 import type {
   BubbleBodyRenderer,
   Handle,
+  RowArrival,
   RowContext,
   RowRenderers,
   SubfeedView,
@@ -204,6 +205,8 @@ interface RowState {
   bubble: BubbleLike | null;
   /** Whether the message changed since the body was last drawn. */
   dirty: boolean;
+  /** How the row first entered this feed (RowContext.arrival). */
+  readonly arrival: RowArrival;
 }
 
 /** How a `LoadFeedThrough` walk ended: the target is loaded, or it is not. */
@@ -347,10 +350,11 @@ export function createFeedController(
     dispose,
   };
 
-  const rowContextFor = (row: FeedRow, previous?: HTMLElement): RowContext => ({
+  const rowContextFor = (row: FeedRow, arrival: RowArrival, previous?: HTMLElement): RowContext => ({
     ctx: opts.ctx,
     feed: opts.feed,
     row,
+    arrival,
     revealRow: opts.revealRow,
     previous,
     findRowElement,
@@ -691,7 +695,7 @@ export function createFeedController(
       },
     );
     const below = atTail ? null : sampleSuccessor(index);
-    insertAt(row, id, key, index);
+    insertAt(row, id, key, index, "push");
     truncateAtSeparation(row, id);
     if (separationBoundsFeed(row) && !separationEndsHistory(row)) {
       reanchoring += 1;
@@ -725,7 +729,7 @@ export function createFeedController(
       operation: "feed.page-row-placed",
       context: { feed: feedName(), row: id, key, position: index },
     });
-    insertAt(row, id, key, index);
+    insertAt(row, id, key, index, "page");
   }
 
   /** One INFO record per page placed: how many rows, and the keys they span. */
@@ -1264,6 +1268,7 @@ export function createFeedController(
     id: string,
     key: string,
     index: number,
+    arrival: RowArrival,
   ): void {
     const element = document.createElement("article");
     element.className = "feed-item";
@@ -1275,13 +1280,14 @@ export function createFeedController(
       body: null,
       bubble: null,
       dirty: true,
+      arrival,
     };
     states.set(id, state);
     fileAt(id, index);
     if (!isBubbleRow(row)) return;
     // A bubble owns its own element for its whole life: the head redraws inside
     // it and the sub-feed hangs beneath it, so the row's body is never replaced.
-    const bubble = opts.bubble(row, rowContextFor(row));
+    const bubble = opts.bubble(row, rowContextFor(row, arrival));
     state.bubble = bubble;
     state.body = bubble.element;
     state.dirty = false;
@@ -1350,7 +1356,7 @@ export function createFeedController(
     }
     let body: HTMLElement;
     try {
-      body = drawRowBody(state.row, rowContextFor(state.row, previous));
+      body = drawRowBody(state.row, rowContextFor(state.row, state.arrival, previous));
     } catch (err) {
       if (!isMalformedView(err)) throw err;
       body = malformedPlaceholder(err, state.row);

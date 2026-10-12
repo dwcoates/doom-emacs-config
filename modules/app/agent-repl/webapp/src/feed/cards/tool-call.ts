@@ -137,7 +137,7 @@ export function drawFeedSimpleToolCall(u: FeedSimpleToolCall, rc: RowContext): H
   // THE INPUT LINE IS THE CARD'S TITLE (owner ruling, 2026-09-23): the
   // one-line title fold, owned by this card's fold. Folded AFTER the terminal
   // stop above, which would otherwise tear down the fold's measurer.
-  foldTitle(input, "card");
+  foldTitle(input, "card", rc);
   return card;
 }
 

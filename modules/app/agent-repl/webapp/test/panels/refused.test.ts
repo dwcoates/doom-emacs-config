@@ -71,7 +71,7 @@ function rowContext(
     composerEnabled: false,
   });
   return {
-    rc: { ctx, feed: "root", row: create(FeedRowSchema, {}), revealRow: async () => true },
+    rc: { ctx, feed: "root", arrival: "page", row: create(FeedRowSchema, {}), revealRow: async () => true },
     seen,
   };
 }
@@ -259,7 +259,7 @@ describe("an answer this build cannot read", () => {
       composerEnabled: false,
     });
     return {
-      rc: { ctx, feed: "root", row: create(FeedRowSchema, {}), revealRow: async () => true },
+      rc: { ctx, feed: "root", arrival: "page", row: create(FeedRowSchema, {}), revealRow: async () => true },
       reported,
     };
   }

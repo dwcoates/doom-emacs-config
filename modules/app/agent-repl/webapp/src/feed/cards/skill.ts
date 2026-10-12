@@ -60,7 +60,7 @@ const OUTCOME_BADGES = {
 export const SKILL_OUTCOME_ARMS: readonly string[] = Object.keys(OUTCOME_BADGES);
 
 /** The skill card. */
-export function drawFeedSkill(u: FeedSkill, _rc: RowContext): HTMLElement {
+export function drawFeedSkill(u: FeedSkill, rc: RowContext): HTMLElement {
   const outcome = requireCase(u.outcome, `${PATH}.outcome`);
   log.debug("drawing a skill card", {
     operation: "feed.cards.skill",
@@ -88,6 +88,7 @@ export function drawFeedSkill(u: FeedSkill, _rc: RowContext): HTMLElement {
     foldTitle(
       drawFeedSkillInvocation(requireMessage(u.invocation, `${PATH}.invocation`), `${PATH}.invocation`),
       outcome.case === "loaded" ? "card" : "standalone",
+      rc,
     ),
   );
 

@@ -174,7 +174,7 @@ export function drawFeedShellHead(u: FeedShell, rc: RowContext): HTMLElement {
   // THE COMMAND IS THE BUBBLE'S TITLE (owner ruling, 2026-09-23): the
   // one-line title fold, owned by the bubble's fold (bubble.ts). Folded AFTER a
   // settled draw's stop, which would otherwise tear down the fold's measurer.
-  foldTitle(command, "card");
+  foldTitle(command, "card", rc);
   return el;
 }
 

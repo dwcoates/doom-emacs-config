@@ -372,6 +372,8 @@ export function mountFeed(
       ctx,
       feed: "root",
       row: create(FeedRowSchema, {}),
+      // No row arrived: the feed itself was opened, as a page is.
+      arrival: "page",
       revealRow,
     };
   }
