@@ -22,9 +22,16 @@ the state of every stream are written down; it is updated at every landing.
   after it, verify every queued item continued where it left off and every
   agent interrupted mid-turn was resumed with its "continue" prompt. Any gap
   dispatches a fix agent.
-- Branches land as they resolve; each must pass its own suites repeatedly and
-  the full suite (`bin/test-all.sh`) before its pick, with every failure
-  either fixed or shown (with evidence) to belong to another session's change.
+- Branches land as they resolve. BEFORE every pick (owner, 2026-10-12): the
+  branch is rebased onto master and its suites are run and fixed THERE, so no
+  merge-queue fixer ever repairs this session's breakage. Full `bin/test-all.sh`
+  runs are avoided while the host's one suite slot is contended; the touched
+  systems' suites run directly instead.
+- The live Emacs runtime is shared with doom-26 (startup and workspace-switch
+  perf), which has PRIORITY: ask doom-26 before every hard bounce and wait for
+  its go; never touch the runtime while it holds it. Startup/switch findings
+  go to doom-26 for awareness; this session no longer investigates that area.
+- The merge queue is PAUSED and its rollouts HELD; the owner resumes the queue.
 - Logging runs at `info`. A measurement that needs `debug` is a logging gap
   to fix, not a reason to raise the level.
 - Mocking is approved (owner, 2026-10-12) for test-run write volume: the
@@ -57,17 +64,32 @@ Status values: queued, running, landed (commit), blocked (reason).
 - After landing: hard bounce, then HOLD rollouts for the profiling program.
 - The queue's existing `pause` / `resume` stay as they are (kept, unused).
 
-### A2. Merge queue: top two race to land (owner, 2026-10-12) — lead implementing
+### A2. Merge queue: top two race to land (owner, 2026-10-12) — landed (5620e6c75)
+- A full pause (578ea375c): a paused queue advances nothing; a pause suspends
+  what runs and the resume takes it on at its recorded step.
 - Window 3 -> 2 landed (8e28c0471).
 - Next: both of the top two rebase onto the TARGET (not chained), both run the
   full sequence; whichever passes first lands; before the post-landing
   restart the other is stopped, the queue advances, and the loser (now first)
   and the new second both restart from a rebase onto the target.
 - Recovery must respect the window (resumed runs currently bypass it).
-- Recovery must resume agents interrupted mid-turn with "continue" (broken at
-  the hard bounce; branch `bounce-continue`).
+- Recovery resumes agents a stand-down cut mid-turn, under the hood (landed
+  fb7b94832 + the Serving regression fix dcec14621); verified only once a
+  bounce cuts an agent mid-turn (the debt is recorded by the daemon being
+  stood down, so the first fixed bounce could not exercise it).
 
-### H. Test-writing guidance (owner, 2026-10-12) — queued after A2
+### I. Merge queue latency (analysis only, owner) — done (docs/investigations/2026-10-12-merge-queue-latency.md)
+- ~75-80% raw inefficiency, ~15-20% restart handling. Top causes: master red
+  2h+ (other sessions' landings), the ONE host suite slot behind every
+  session's full runs at load 25-95, this session's ~60 direct picks moving
+  master under passed gates, restart-cut gates rerunning from scratch,
+  auth-failed fix turns counting as attempts. Of 19 failed/cut gate runs:
+  11 load flakes, 6 master red, 2 restart cuts, 1 genuine conflict.
+- Landed from it: the repair brief runs only the failing tests until they
+  pass (5b362ef54), with a fallback handing an unrunnable-alone test to an
+  investigating workspace (10727f9c4). Other levers await the owner.
+
+### H. Test-writing guidance (owner, 2026-10-12) — running (branch `write-tests-skill`)
 - `/write-tests` skill: test-perf pitfalls and how to avoid them without any
   coverage loss; a living document updated at every important perf finding.
 - A performance-lessons section in each agent-repl system's AGENTS.md, also a
@@ -148,10 +170,12 @@ Status values: queued, running, landed (commit), blocked (reason).
   (4) cap Go heap headroom (SetMemoryLimit/GOGC) once the live set is small;
   (5) Go memory stats in daemon health at INFO. Also: logs dir 5.8GB with no
   seen retention policy; layout backups beside wsm.db ~1GB.
-- E2 sidebar re-render logs every row on every render (26% of daemon records
-  in tests; noise in debug windows): log a row's decisions only when they
-  change; same for the feed's per-row decisions (11%) — proposed, owner
-  ruling pending.
+- E2 sidebar re-render logged every row on every render (26% of test daemon
+  records): landed (40482a061). The feed's row_decision records are per-event
+  branch choices logged once each, not render repeats; nothing to dedupe.
+- E4 merge tests rows: serve the full suite output from the gate's archive on
+  demand (row keeps counts + tail), no visible change — proposed to the owner.
+  wsm.db is 415MB and growing.
 - E3 whatever the collector ranks highest in CPU-seconds and RSS during the
   owner's normal use.
 
@@ -182,10 +206,21 @@ Status values: queued, running, landed (commit), blocked (reason).
 | 2026-10-12 | db277cff6 | merge pump reads a run's lease/chain base under the run's lock (data race) |
 | 2026-10-12 | 8e28c0471 | merge queue window 3 -> 2 (head + one behind) |
 | 2026-10-12 | 55a22a48e | hidden pages hold the newest roster instead of redrawing per push |
+| 2026-10-12 | (11 picks) | rollout hold endpoint + /merge-queue hold-rollouts, release-rollouts |
+| 2026-10-12 | (3 picks) | daemon test logs over a pipe, in memory |
+| 2026-10-12 | (5 picks) | in-memory test state (DurableState opt-in) |
+| 2026-10-12 | (17 picks) | profiling in every runtime + /profile-agent-repl |
+| 2026-10-12 | 5b362ef54, 10727f9c4 | repair brief: failing tests only, until they pass; unrunnable-alone fallback |
+| 2026-10-12 | dcec14621, fb7b94832 | Serving regression fix; under-the-hood resume of cut turns |
+| 2026-10-12 | 578ea375c | a paused queue advances nothing |
+| 2026-10-12 | 02afdccf7 (5 picks) | boot bring-ups beside the sidecar restart; sidecar spool glob; test build reports isolated |
+| 2026-10-12 | 5620e6c75 | the top two race to land |
+| 2026-10-12 | 40482a061 | sidebar logs a row's decisions only when they change |
 
 ## Bounce checkpoints
 
 | When | Recovery | Startup | Notes |
 |---|---|---|---|
+| 2026-10-12 15:34 (after 02afdccf7) | paused queue: 2 in-progress merges recovered as pending resumes, none started | daemon serving +0.9s; every workspace's go-ahead +1.8s (was ~30s); first session +3.5s; all 26 up 14.6s after the Emacs relaunch (was 54s) | -600 relaunch persists; sidecar kickstart still 29s (dead /tmp/artr mount) but no longer blocking |
 | 2026-10-12 14:27 (after 8e28c0471) | 4 interrupted merges resumed at their steps (recovery resumed 3 in-progress merges although the window is now 2: resumed runs bypass the window); 4 agents interrupted mid-turn were NOT resumed with "continue" -> fix dispatched (branch `bounce-continue`) | daemon served 1.3s after boot; sidecar kickstart 29s again; first tabs +30s | Emacs relaunch -600 again |
 | 2026-10-12 13:39 (after 839a72d9f) | 3 merges suspended at `tests`, all resumed at their step; requesters re-raised; chain rebuilt; no turns in flight | daemon served 1.6s after boot; first session +33s (29s sidecar kickstart); 26 sessions up 54s after Emacs relaunch | Emacs relaunch first attempt failed (-600), second succeeded |
