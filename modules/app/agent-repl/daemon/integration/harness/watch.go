@@ -226,6 +226,17 @@ func (d *Daemon) WatchTopbar(ws *workspacev1.WorkspaceRef) *Stream[*frontendv1.T
 		func(r *agentreplv1.WatchTopbarResponse) *frontendv1.TopbarView { return r.GetTopbar() })
 }
 
+// OpenTabs opens one OpenTabs stream: the editor naming the workspaces it
+// wants open. Its frames arrive on C, and C closes after the finish.
+func (d *Daemon) OpenTabs(workspaces ...*agentreplv1.OpenTabsWorkspace) *Stream[*agentreplv1.OpenTabsResponse] {
+	d.t.Helper()
+	return runStream(d.t, d.ctx,
+		func(ctx context.Context) (*connect.ServerStreamForClient[agentreplv1.OpenTabsResponse], error) {
+			return d.Client().OpenTabs(ctx, connect.NewRequest(&agentreplv1.OpenTabsRequest{Workspaces: workspaces}))
+		},
+		func(r *agentreplv1.OpenTabsResponse) *agentreplv1.OpenTabsResponse { return r })
+}
+
 // WatchRoster opens the editor-global workspace roster stream.
 func (d *Daemon) WatchRoster() *Stream[*frontendv1.WorkspaceRoster] {
 	d.t.Helper()
