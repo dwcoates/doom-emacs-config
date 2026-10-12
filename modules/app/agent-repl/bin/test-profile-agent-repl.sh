@@ -200,6 +200,7 @@ cat >"$R/sess/shim-404.heapprofile" <<'EOF'
 {"head":{"callFrame":{"functionName":"(root)","url":"","lineNumber":-1},"selfSize":0,"children":[{"callFrame":{"functionName":"alloc","url":"file:///x/main.js","lineNumber":4},"selfSize":4096,"children":[]}]}}
 EOF
 printf 'reversed tree line 1\nline 2\n' >"$R/sess/emacs-9.cpu.txt"
+printf '{"session":"s","ws":"a","ok":true,"interval_ms":50,"ticks":10,"wall_ms":5000,"stalled_ms":240,"longest_ms":180,"stalls":[[1000,60],[3000,180]]}' >"$R/sess/webapp-a.lag.json"
 cat >"$R/logs.jsonl" <<'EOF'
 {"timestamp":"2026-10-12T12:00:00.000-04:00","runtime":"daemon","operation":"daemon.cmd.boot","message":"boot","workspace_id":""}
 {"timestamp":"2026-10-12T12:00:01.000-04:00","runtime":"emacs","operation":"x","message":"elisp.roster.tab-open: ws=a id=A dir=/a","workspace_id":"A"}
@@ -232,6 +233,12 @@ if grep -q '75.0%  30  hot main.js:10' <<<"$report" && grep -q '100.0%  4096  al
     pass "the report ranks the shim's CPU and heap frames"
 else
     fail "the report ranks the shim's CPU and heap frames" "$report"
+fi
+if grep -q 'main thread stalled 240ms of 5000ms sampled (2 stalls past one frame), longest 180ms' <<<"$report" &&
+    grep -q '+3000ms: stalled 180ms' <<<"$report" && ! grep -q '+1000ms: stalled' <<<"$report"; then
+    pass "the report summarizes a page's main-thread stalls, listing those past 100ms"
+else
+    fail "the report summarizes a page's main-thread stalls, listing those past 100ms" "$report"
 fi
 if grep -q 'reversed tree line 1' <<<"$report"; then
     pass "the report carries Emacs's reversed call tree"
