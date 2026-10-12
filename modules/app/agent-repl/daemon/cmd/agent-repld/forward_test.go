@@ -230,3 +230,114 @@ func TestEveryEarlyRegistryRepublishGoesThroughTheForwarder(t *testing.T) {
 		t.Fatalf("graph.go reads verbsRef.verbs() %d times, want every republish through verbsRef.publishRegistry", handRolled)
 	}
 }
+
+// mergeVerbs is a workspace.Verbs whose live methods are the merge
+// orchestrator's two reaches into the verbs: the name claim and the interrupt.
+type mergeVerbs struct {
+	workspace.Verbs
+	interrupted []ids.WorkspaceID
+}
+
+func (v *mergeVerbs) ClaimMergeName(_ context.Context, _, name string) (string, func(), bool, error) {
+	return "agent/" + name, func() {}, false, nil
+}
+
+func (v *mergeVerbs) Interrupt(_ context.Context, ws ids.WorkspaceID, _ workspace.InterruptTarget, _ bool) (workspace.InterruptOutcome, error) {
+	v.interrupted = append(v.interrupted, ws)
+	return workspace.InterruptOutcome{Turn: true}, nil
+}
+
+func TestVerbsForwarderBound(t *testing.T) {
+	tests := []struct {
+		name    string
+		bind    bool
+		wantErr string
+	}{
+		{name: "verbs bound", bind: true},
+		{name: "verbs not yet bound", wantErr: "agent-repld: a test ran before the workspace verbs existed"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			f := &verbsForwarder{}
+			target := &mergeVerbs{}
+			if tc.bind {
+				f.bind(target)
+			}
+
+			// Act.
+			verbs, err := f.bound("a test ran")
+
+			// Assert.
+			if tc.wantErr == "" && (err != nil || verbs != workspace.Verbs(target)) {
+				t.Fatalf("bound = %v, %v; want the bound verbs", verbs, err)
+			}
+			if tc.wantErr != "" && (err == nil || err.Error() != tc.wantErr || verbs != nil) {
+				t.Fatalf("bound = %v, %v; want %q", verbs, err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestVerbsForwarderMergeReachesBeforeTheVerbsAreErrors(t *testing.T) {
+	tests := []struct {
+		name string
+		call func(f *verbsForwarder) error
+		want string
+	}{
+		{name: "a name claim", call: func(f *verbsForwarder) error {
+			_, _, _, err := f.ClaimMergeName(context.Background(), "/r", "fix")
+			return err
+		}, want: "agent-repld: an async merge's name was checked before the workspace verbs existed"},
+		{name: "a merge tab interrupt", call: func(f *verbsForwarder) error {
+			_, err := f.interruptTurn(context.Background(), "ws-1")
+			return err
+		}, want: "agent-repld: a merge tab's agent was interrupted before the workspace verbs existed"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act.
+			err := tc.call(&verbsForwarder{})
+
+			// Assert.
+			if err == nil || err.Error() != tc.want {
+				t.Fatalf("err = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestVerbsForwarderMergeReachesTheBoundVerbs(t *testing.T) {
+	// Arrange.
+	f := &verbsForwarder{}
+	target := &mergeVerbs{}
+	f.bind(target)
+
+	// Act.
+	branch, _, taken, claimErr := f.ClaimMergeName(context.Background(), "/r", "fix")
+	running, interruptErr := f.interruptTurn(context.Background(), "ws-1")
+
+	// Assert.
+	if claimErr != nil || branch != "agent/fix" || taken || interruptErr != nil || !running || len(target.interrupted) != 1 {
+		t.Fatalf("claim = %q, %v, %v; interrupt = %v, %v (%v); want both carried to the verbs", branch, taken, claimErr, running, interruptErr, target.interrupted)
+	}
+}
+
+// TestEveryForwardedVerbsReadGoesThroughBound pins the shared shape: a method
+// of the forwarder reaches the verbs through bound, so every early call is
+// refused with the same named error.
+func TestEveryForwardedVerbsReadGoesThroughBound(t *testing.T) {
+	// Arrange.
+	source, err := os.ReadFile("forward.go")
+	if err != nil {
+		t.Fatalf("read forward.go: %v", err)
+	}
+
+	// Act.
+	reads := strings.Count(string(source), "f.verbs()")
+
+	// Assert.
+	if reads != 1 {
+		t.Fatalf("forward.go reads f.verbs() %d times, want once, inside bound", reads)
+	}
+}

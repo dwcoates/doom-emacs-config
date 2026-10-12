@@ -201,15 +201,26 @@ func (f *verbsForwarder) verbs() (workspace.Verbs, bool) {
 	return f.target, f.target != nil
 }
 
+// bound answers the workspace verbs for a call made through the forwarder. One
+// made before they are bound is a wiring defect, answered as an error naming
+// WHAT happened that early.
+func (f *verbsForwarder) bound(what string) (workspace.Verbs, error) {
+	verbs, ok := f.verbs()
+	if !ok {
+		return nil, fmt.Errorf("agent-repld: %s before the workspace verbs existed", what)
+	}
+	return verbs, nil
+}
+
 // publishRegistry is the roster's durable-half republish for a component built
 // BEFORE the verbs, which own it. The republish reads the verbs out of the
 // forwarder when it runs; one asked for before they are bound is a wiring
 // defect, answered as an error naming WHAT happened that early.
 func (f *verbsForwarder) publishRegistry(what string) func(context.Context) error {
 	return func(ctx context.Context) error {
-		verbs, ok := f.verbs()
-		if !ok {
-			return fmt.Errorf("agent-repld: %s before the workspace verbs existed", what)
+		verbs, err := f.bound(what)
+		if err != nil {
+			return err
 		}
 		return verbs.PublishRegistry(ctx)
 	}
@@ -219,9 +230,9 @@ func (f *verbsForwarder) publishRegistry(what string) func(context.Context) erro
 // out of the verbs, which are built after the orchestrator. One asked for
 // before they are bound is a wiring defect, answered as an error.
 func (f *verbsForwarder) ClaimMergeName(ctx context.Context, repoDir, name string) (string, func(), bool, error) {
-	verbs, ok := f.verbs()
-	if !ok {
-		return "", nil, false, fmt.Errorf("agent-repld: an async merge's name was checked before the workspace verbs existed")
+	verbs, err := f.bound("an async merge's name was checked")
+	if err != nil {
+		return "", nil, false, err
 	}
 	return verbs.ClaimMergeName(ctx, repoDir, name)
 }
@@ -230,9 +241,9 @@ func (f *verbsForwarder) ClaimMergeName(ctx context.Context, repoDir, name strin
 // the user's own turn interrupt, confirmed, so the agent's detached work stops
 // with it. It reads the verbs out of the forwarder when it runs.
 func (f *verbsForwarder) interruptTurn(ctx context.Context, ws ids.WorkspaceID) (bool, error) {
-	verbs, ok := f.verbs()
-	if !ok {
-		return false, fmt.Errorf("agent-repld: a merge tab's agent was interrupted before the workspace verbs existed")
+	verbs, err := f.bound("a merge tab's agent was interrupted")
+	if err != nil {
+		return false, err
 	}
 	out, err := verbs.Interrupt(ctx, ws, workspace.InterruptTarget{Turn: true}, true)
 	if err != nil {
