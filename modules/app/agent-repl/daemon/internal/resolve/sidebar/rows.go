@@ -110,7 +110,8 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 	}
 	// PRESENCE IS THE FACT, as `frontend.v1.RosterRowDetachedLive` states it:
 	// set exactly while detached work counts as live (asyncLive), on any arm.
-	// An unread turn end outranks `idle_async`, so the status cannot say it.
+	// Every arm above the idle rung (thinking, a permission ask) can stand
+	// beside it, so the status alone cannot say it.
 	if detachedLive {
 		out.DetachedLive = &frontendv1.RosterRowDetachedLive{}
 	}
