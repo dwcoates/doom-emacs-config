@@ -158,6 +158,11 @@ type Stand interface {
 	// durable session row this process never adopted — is SKIPPED rather than
 	// sent a directive that cannot land.
 	Serving(ws ids.WorkspaceID) bool
+	// StartUnderWay reports whether a start of the workspace's session is
+	// still under way. The sweep skips such a workspace: until the start
+	// returns, its session row still carries the engagement from before it,
+	// and a reopened workspace would read idle for hours.
+	StartUnderWay(ws ids.WorkspaceID) bool
 	// Hibernate sends the pre-hibernation directive and waits for the shim's
 	// answer. The REFUSAL is an answer, not an error: turn_in_flight simply
 	// defers the workspace to a later pass. It answers ErrNoLiveSession when

@@ -76,6 +76,13 @@ func (c *controller) Sweep(ctx context.Context, now time.Time) ([]ids.WorkspaceI
 			log.Debug(opSweep, "the workspace has no shim to address; skipping its hibernation", fields)
 			continue
 		}
+		// A START STILL UNDER WAY HAS NOT RECORDED ITS ENGAGEMENT: the row
+		// read above carries the one from before it, so the idle measured is
+		// the workspace's time closed, not the session's time idle.
+		if c.deps.Stand.StartUnderWay(ws.ID) {
+			log.Debug(opSweep, "a start of the workspace's session is under way; skipping its hibernation", fields)
+			continue
+		}
 		// A SESSION A PROMPT IS REVIVING IS ENGAGED, whatever its record says.
 		// The revival's bring-up serves the session and retires its terminal
 		// before it records the session's facts, and delivers the prompt it
