@@ -10,6 +10,7 @@ import (
 	"claude-repld/internal/ids"
 	"claude-repld/internal/prompts"
 	"claude-repld/internal/runecap"
+	"claude-repld/internal/standdown"
 )
 
 // opSummary is the operation the turn summary's records carry.
@@ -93,7 +94,7 @@ func (s Summarizer) summarize(ctx context.Context, ws ids.WorkspaceID, answer st
 		return "", "the summary brief could not be spliced"
 	}
 	configDir, err := s.ConfigDirs.ConfigDirFor(ctx, ws)
-	if stoodDown(ctx, err) {
+	if standdown.CutShort(ctx, err) {
 		// ctx is the notifier's lifetime: the daemon stood down while the
 		// workspace's account was being read, which is the stand-down
 		// working, not a workspace with no account.
@@ -118,7 +119,7 @@ func (s Summarizer) summarize(ctx context.Context, ws ids.WorkspaceID, answer st
 		Prompt:    question,
 		Timeout:   timeout,
 	})
-	if stoodDown(ctx, err) {
+	if standdown.CutShort(ctx, err) {
 		// ctx is the notifier's lifetime: the daemon stood down mid-call and
 		// killed the child, which is the stand-down working, not a failure.
 		log.Info(opSummary, "the daemon stood down during the turn-summary call", dlog.Context{

@@ -1423,3 +1423,57 @@ func TestTurnAddressesOfNoTurnsIsAnEmptyAnswer(t *testing.T) {
 		t.Fatalf("TurnAddresses(nil) = (%+v, %v), want an empty answer", got, err)
 	}
 }
+
+func TestTurnAnswersARecordedTurnWhole(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	turn := NewTurnID()
+	if err := s.PutTurn(context.Background(), Turn{ID: turn, Workspace: ws.ID, Text: "q", Origin: "webapp", StartedAt: instant}); err != nil {
+		t.Fatalf("PutTurn: %v", err)
+	}
+
+	// Act
+	got, err := s.Turn(context.Background(), ws.ID, turn)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Turn: %v", err)
+	}
+	if got.ID != turn || got.Workspace != ws.ID || got.Text != "q" || got.Origin != "webapp" || !got.StartedAt.Equal(instant) || got.Close != nil {
+		t.Fatalf("Turn() = %+v, want the recorded open turn", got)
+	}
+}
+
+func TestTurnAnswersNotFoundForAnUnrecordedTurn(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+
+	// Act
+	_, err := s.Turn(context.Background(), ws.ID, "never")
+
+	// Assert
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Turn() error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestTurnAnswersNotFoundForAnotherWorkspacesTurn(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	owner := testWorkspace(t, s)
+	other := testWorkspace(t, s)
+	turn := NewTurnID()
+	if err := s.PutTurn(context.Background(), Turn{ID: turn, Workspace: owner.ID, Text: "q", Origin: "webapp", StartedAt: instant}); err != nil {
+		t.Fatalf("PutTurn: %v", err)
+	}
+
+	// Act
+	_, err := s.Turn(context.Background(), other.ID, turn)
+
+	// Assert
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Turn() error = %v, want ErrNotFound", err)
+	}
+}

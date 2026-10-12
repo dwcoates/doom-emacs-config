@@ -152,10 +152,43 @@ func (q *queue) OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how sessionwatc
 // endTurn is a LIVE turn end's close: the turn closes through the door, whose
 // feed half draws (and files) its ending, and then the turn's desktop banner
 // is raised from that ending. Every branch of OnTurnEnded ends its turn here,
-// so no live turn end closes without its banner.
+// so no live turn end closes without the banner it earns.
+//
+// A MERGE'S OWN TURN EARNS NONE. The merge orchestrator's turns (a conflict's
+// resolution, a suite's fix, the configured pre and post prompts) are steps of
+// a merge run, and the run's own outcome is what the user is told; a banner
+// and chime for each step would sound on every hop from one step to the next.
 func (q *queue) endTurn(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID, how sessionwatcher.TurnClose, log dlog.Logger) {
 	_ = q.closeTurn(ctx, ws, turn, how, log)
-	q.deps.TurnBanners.OnTurnEnded(ws, turn, how)
+	if q.earnsBanner(ctx, ws, turn, log) {
+		q.deps.TurnBanners.OnTurnEnded(ws, turn, how)
+	}
+}
+
+// earnsBanner reports whether a turn's end raises its desktop banner: every
+// turn but one the merge orchestrator started itself (startedByMerge).
+//
+// A TURN THE WORKSPACE NEVER RECORDED IS NO MERGE'S: the queue records every
+// turn it delivers, a merge's included, before delivering it. A turn whose
+// record cannot be read is NOT GUESSED AT: it is recorded at ERROR and raises
+// nothing, since a merge's step must never sound.
+func (q *queue) earnsBanner(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID, log dlog.Logger) bool {
+	record, err := q.deps.DB.Turn(ctx, ws, turn)
+	switch {
+	case errors.Is(err, wsm.ErrNotFound):
+		return true
+	case err != nil:
+		log.Error(opTurnEnded, "could not read the turn's origin; no desktop banner", dlog.Context{
+			"turn": string(turn), "cause": err.Error(),
+		})
+		return false
+	case startedByMerge(record.Origin):
+		log.Info(opTurnEnded, "a merge's own turn ended; no desktop banner", dlog.Context{
+			"turn": string(turn), "origin": record.Origin,
+		})
+		return false
+	}
+	return true
 }
 
 // OnTurnAdopted is the LifecycleSink's vendor-started turn: a turn the vendor
