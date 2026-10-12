@@ -730,3 +730,65 @@ func TestClientLogWhoseCallerLeftRecordsNoError(t *testing.T) {
 		t.Fatalf("a ClientLog whose caller left recorded %d ERROR(s): %+v", len(errs), errs)
 	}
 }
+
+// TestEveryQueuedMergeArmSharesOneAnswer pins that every UpdateMergeQueue arm
+// acting on one workspace's merge answers through the one shared body
+// (actOnQueuedMerge): an unknown workspace is unknown_workspace with the
+// orchestrator untouched, an orchestrator refusal is its typed arm, and
+// anything else is success.
+func TestEveryQueuedMergeArmSharesOneAnswer(t *testing.T) {
+	arms := []struct {
+		name string
+		req  func(ref *workspacev1.WorkspaceRef) *agentreplv1.UpdateMergeQueueRequest
+	}{
+		{name: "evict", req: func(ref *workspacev1.WorkspaceRef) *agentreplv1.UpdateMergeQueueRequest {
+			return &agentreplv1.UpdateMergeQueueRequest{Action: &agentreplv1.UpdateMergeQueueRequest_Evict{Evict: &agentreplv1.UpdateMergeQueueEvict{Workspace: ref}}}
+		}},
+		{name: "move_up", req: func(ref *workspacev1.WorkspaceRef) *agentreplv1.UpdateMergeQueueRequest {
+			return &agentreplv1.UpdateMergeQueueRequest{Action: &agentreplv1.UpdateMergeQueueRequest_MoveUp{MoveUp: &agentreplv1.UpdateMergeQueueMoveUp{Workspace: ref}}}
+		}},
+		{name: "move_down", req: func(ref *workspacev1.WorkspaceRef) *agentreplv1.UpdateMergeQueueRequest {
+			return &agentreplv1.UpdateMergeQueueRequest{Action: &agentreplv1.UpdateMergeQueueRequest_MoveDown{MoveDown: &agentreplv1.UpdateMergeQueueMoveDown{Workspace: ref}}}
+		}},
+	}
+	cases := []struct {
+		name      string
+		ref       *workspacev1.WorkspaceRef
+		refused   bool
+		wantArm   func(*agentreplv1.UpdateMergeQueueResponse) bool
+		wantDrove bool
+	}{
+		{name: "an unknown workspace", ref: &workspacev1.WorkspaceRef{Id: "ws-forgotten", Dir: "/nowhere"},
+			wantArm: func(r *agentreplv1.UpdateMergeQueueResponse) bool { return r.GetError().GetUnknownWorkspace() != nil }},
+		{name: "an orchestrator refusal", ref: ref(), refused: true, wantDrove: true,
+			wantArm: func(r *agentreplv1.UpdateMergeQueueResponse) bool { return r.GetError().GetNoSuchQueuedMerge() != nil }},
+		{name: "success", ref: ref(), wantDrove: true,
+			wantArm: func(r *agentreplv1.UpdateMergeQueueResponse) bool { return r.GetSuccess() != nil }},
+	}
+	for _, arm := range arms {
+		for _, tc := range cases {
+			t.Run(arm.name+"/"+tc.name, func(t *testing.T) {
+				// Arrange.
+				h := newHarness(t)
+				if tc.refused {
+					refusal := &merge.RefusalError{Arm: merge.ArmNoSuchQueuedMerge, Reason: "nothing queued"}
+					h.Merge.evictErr, h.Merge.moveErr = refusal, refusal
+				}
+
+				// Act.
+				resp, err := h.Client.UpdateMergeQueue(context.Background(), connect.NewRequest(arm.req(tc.ref)))
+
+				// Assert.
+				if err != nil {
+					t.Fatalf("UpdateMergeQueue: %v", err)
+				}
+				if !tc.wantArm(resp.Msg) {
+					t.Fatalf("result = %v, want the %s answer", resp.Msg.GetResult(), tc.name)
+				}
+				if drove := len(h.Merge.evicted)+len(h.Merge.moves) > 0; drove != tc.wantDrove {
+					t.Fatalf("orchestrator driven = %v, want %v", drove, tc.wantDrove)
+				}
+			})
+		}
+	}
+}
