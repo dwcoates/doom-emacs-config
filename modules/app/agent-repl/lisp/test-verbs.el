@@ -90,7 +90,8 @@ current workspace's row sits in, so a create test hands them this."
 
 (defun agent-repl-test-verbs--row (&rest overrides)
   "Return a decoded `RosterRow' with OVERRIDES applied at the top level."
-  (let ((row (list :workspace (list :workspace (agent-repl-test-verbs--ref))
+  (let ((row (list :workspace (list :workspace (agent-repl-test-verbs--ref)
+                                    :repository (agent-repl-test-verbs--repo-ref))
                    :attention nil
                    :priority nil
                    :name (list :text "row-one")
@@ -114,7 +115,9 @@ HIDDEN-ROWS, when given, are the hidden section's rows."
                               :header (list :label (list :text "repo-one"))
                               :rows (list :rows rows)))))
         :task (list :sections nil)
-        :hidden (list :header (list :label (list :text "Hidden Workspaces"))
+        :viewed (list :header (list :label (list :text "Viewed"))
+                      :rows (list :rows nil))
+        :hidden (list :header (list :label (list :text "Hidden"))
                       :rows (list :rows hidden-rows))
         :recently-merged (list :header (list :label (list :text "Recently Merged"))
                                :groups (and merged-rows

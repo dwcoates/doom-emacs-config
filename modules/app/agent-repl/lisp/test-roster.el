@@ -48,33 +48,52 @@ outcome arm keyword), `:current', `:dir', `:availability'
                                     (plist-get overrides :closed)
                                   :false)))))
 
+(defun agent-repl-test-roster--repository (label)
+  "Return the decoded `RepositoryRef' of the fixture repository LABEL."
+  (list :id (concat "repo-" label) :dir (concat "/r/" label)))
+
+(defun agent-repl-test-roster--of-repository (label rows)
+  "Return ROWS, and their children, stating repository LABEL as their own.
+The daemon states every row's repository (`RosterRowWorkspace.repository'),
+equal to its repository section's key."
+  (mapcar (lambda (row)
+            (let ((row (copy-sequence row)))
+              (setq row (plist-put row :workspace
+                                   (plist-put (copy-sequence (plist-get row :workspace))
+                                              :repository (agent-repl-test-roster--repository label))))
+              (plist-put row :children
+                         (agent-repl-test-roster--of-repository label (plist-get row :children)))))
+          rows))
+
 (defun agent-repl-test-roster--section (label rows &optional collapsed)
   "Return a decoded `RosterRepoSection' plist labelled LABEL carrying ROWS.
-COLLAPSED non-nil makes the daemon hold the section collapsed."
-  (list :key (list :repository (list :id (concat "repo-" label) :dir (concat "/r/" label)))
+COLLAPSED non-nil makes the daemon hold the section collapsed.  Every row
+states the section's repository as its own."
+  (list :key (list :repository (agent-repl-test-roster--repository label))
         :header (list :label (list :text label))
-        :rows (list :rows rows)
+        :rows (list :rows (agent-repl-test-roster--of-repository label rows))
         :fold (list :arm (if collapsed :collapsed :expanded) :value nil)))
 
 (defun agent-repl-test-roster--merged-group (label rows &optional collapsed)
   "Return a decoded `RosterMergedRepoGroup' for repository LABEL holding ROWS.
-COLLAPSED non-nil puts it on the `repository_collapsed' arm."
-  (list :key (list :repository (list :id (concat "r-" label) :dir (concat "/r/" label)))
+COLLAPSED non-nil puts it on the `repository_collapsed' arm.  Every row
+states the group's repository as its own."
+  (list :key (list :repository (agent-repl-test-roster--repository label))
         :header (list :label (list :text label))
-        :rows (list :rows rows)
+        :rows (list :rows (agent-repl-test-roster--of-repository label rows))
         :drawn (list :arm (if collapsed :repository-collapsed :shown) :value nil)))
 
-(cl-defun agent-repl-test-roster--roster (&key sections hidden merged merged-groups current tab-bar)
+(cl-defun agent-repl-test-roster--roster (&key sections viewed hidden merged merged-groups current tab-bar)
   "Return a decoded `WorkspaceRoster' plist from SECTIONS, HIDDEN, MERGED and CURRENT.
-HIDDEN is the hidden section's rows; the section itself is always there,
-expanded, as the daemon always sends it.  MERGED is the recently-merged
+VIEWED is the viewed section's rows and HIDDEN the hidden section's; each
+section itself is always there, expanded, as the daemon always sends it.  MERGED is the recently-merged
 rows, carried in one shown group; MERGED-GROUPS, when given, is the band's
 groups instead.  TAB-BAR is the daemon's tab bar, defaulting to the
 fixture's rows in the order it lists them (`agent-repl-test--tab-bar-of'),
 a collapsed merged group's rows withheld."
   (list :repository (list :sections sections)
         :tab-bar (or tab-bar (agent-repl-test--tab-bar-of
-                              sections hidden merged merged-groups))
+                              sections hidden merged merged-groups viewed))
         ;; The task view is deliberately POPULATED in these fixtures: it is
         ;; the same workspaces regrouped, and the walk must ignore it.
         :task (list :sections
@@ -84,7 +103,10 @@ a collapsed merged group's rows withheld."
                                                   :done (list :done :false))
                                     :rows (plist-get s :rows)))
                             sections))
-        :hidden (list :header (list :label (list :text "Hidden Workspaces"))
+        :viewed (list :header (list :label (list :text "Viewed"))
+                      :rows (list :rows viewed)
+                      :fold (list :arm :expanded :value nil))
+        :hidden (list :header (list :label (list :text "Hidden"))
                       :rows (list :rows hidden)
                       :fold (list :arm :expanded :value nil))
         :recently-merged (list :header (list :label (list :text "Recently Merged"))
@@ -245,6 +267,17 @@ whose calls are the observation."
     (should (equal (agent-repl-roster-repository-of "b" roster)
                    '(:id "repo-beta" :dir "/r/beta")))))
 
+(ert-deftest agent-repl-test-roster-repository-of-finds-a-viewed-row ()
+  "A viewed row sits in no repository section and still answers its repository."
+  ;; Arrange
+  (let ((roster (agent-repl-test-roster--roster
+                 :sections (list (agent-repl-test-roster--section "beta" nil))
+                 :viewed (agent-repl-test-roster--of-repository
+                          "beta" (list (agent-repl-test-roster--row "v" "v" :done :viewed t))))))
+    ;; Act / Assert
+    (should (equal (agent-repl-roster-repository-of "v" roster)
+                   '(:id "repo-beta" :dir "/r/beta")))))
+
 (ert-deftest agent-repl-test-roster-repository-of-finds-a-child-row ()
   "A nested row belongs to its section too - the walk is depth-first."
   ;; Arrange
@@ -267,13 +300,14 @@ whose calls are the observation."
     ;; Act / Assert
     (should-not (agent-repl-roster-repository-of "nope" roster))))
 
-(ert-deftest agent-repl-test-roster-repository-of-ignores-the-merged-section ()
-  "The recently-merged section carries no repository key, so it answers nothing."
+(ert-deftest agent-repl-test-roster-repository-of-answers-a-merged-rows-own-repository ()
+  "A recently-merged row states its repository, so it answers that one."
   ;; Arrange
   (let ((roster (agent-repl-test-roster--roster
                  :merged (list (agent-repl-test-roster--row "m" "m-row" :ready)))))
     ;; Act / Assert
-    (should-not (agent-repl-roster-repository-of "m" roster))))
+    (should (equal (agent-repl-roster-repository-of "m" roster)
+                   '(:id "repo-alpha" :dir "/r/alpha")))))
 
 (ert-deftest agent-repl-test-roster-walk-visits-children-depth-first ()
   "A row precedes its children, which is the contract's render order."
@@ -331,15 +365,57 @@ whose calls are the observation."
       (should (plist-get entry :collapsed)))))
 
 (ert-deftest agent-repl-test-roster-walk-keeps-a-shown-merged-group-on-the-bar ()
-  "A merged group on `shown' is walked as drawn, under the band's label."
+  "A merged group on `shown' is walked as drawn, under its repository's label."
   ;; Arrange
   (let ((roster (agent-repl-test-roster--roster
+                 :sections (list (agent-repl-test-roster--section "alpha" nil))
                  :merged (list (agent-repl-test-roster--row "m1" "m1" :merged)))))
     ;; Act
     (let ((entry (car (agent-repl-roster-walk roster))))
       ;; Assert
       (should-not (plist-get entry :collapsed))
-      (should (equal (plist-get entry :label) "Recently Merged")))))
+      (should (equal (plist-get entry :label) "alpha")))))
+
+(ert-deftest agent-repl-test-roster-walk-takes-the-viewed-rows-after-the-sections ()
+  "The viewed band is walked after the repository sections and before hidden."
+  ;; Arrange
+  (let ((roster (agent-repl-test-roster--roster
+                 :sections (list (agent-repl-test-roster--section
+                                  "alpha" (list (agent-repl-test-roster--row "a" "a" :ready))))
+                 :viewed (agent-repl-test-roster--of-repository
+                          "alpha" (list (agent-repl-test-roster--row "v" "v" :done :viewed t)))
+                 :hidden (agent-repl-test-roster--of-repository
+                          "alpha" (list (agent-repl-test-roster--row "h" "h" :ready))))))
+    ;; Act
+    (let ((ids (mapcar (lambda (e) (agent-repl-roster-row-id (plist-get e :row)))
+                       (agent-repl-roster-walk roster))))
+      ;; Assert
+      (should (equal ids '("a" "v" "h"))))))
+
+(ert-deftest agent-repl-test-roster-walk-keeps-a-viewed-row-on-the-bar ()
+  "A viewed row is walked as drawn, under its own repository's label."
+  ;; Arrange
+  (let ((roster (agent-repl-test-roster--roster
+                 :sections (list (agent-repl-test-roster--section "alpha" nil))
+                 :viewed (agent-repl-test-roster--of-repository
+                          "alpha" (list (agent-repl-test-roster--row "v" "v" :done :viewed t))))))
+    ;; Act
+    (let ((entry (car (agent-repl-roster-walk roster))))
+      ;; Assert
+      (should-not (plist-get entry :collapsed))
+      (should (equal (plist-get entry :label) "alpha")))))
+
+(ert-deftest agent-repl-test-roster-repository-labels-name-every-section ()
+  "Each repository section's key id maps to its drawn label."
+  ;; Arrange
+  (let ((roster (agent-repl-test-roster--roster
+                 :sections (list (agent-repl-test-roster--section "alpha" nil)
+                                 (agent-repl-test-roster--section "beta" nil)))))
+    ;; Act
+    (let ((labels (agent-repl-roster--repository-labels roster)))
+      ;; Assert
+      (should (equal (list (gethash "repo-alpha" labels) (gethash "repo-beta" labels))
+                     '("alpha" "beta"))))))
 
 (ert-deftest agent-repl-test-roster-walk-ignores-the-task-view ()
   "The task view is the same rows regrouped; walking it would double them."
@@ -1064,6 +1140,21 @@ that follows must not care which of the two got there first."
                        "repo" (list (agent-repl-test-roster--row "a" "new-name" :ready))))))
     ;; Assert
     (should (equal (length agent-repl-test-roster--created) 1))))
+
+(ert-deftest agent-repl-test-roster-a-viewed-row-keeps-its-collision-suffix ()
+  "A colliding row that moves into the viewed band keeps its repository suffix."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    ;; Act
+    (agent-repl-roster-apply
+     (agent-repl-test-roster--roster
+      :sections (list (agent-repl-test-roster--section
+                       "alpha" (list (agent-repl-test-roster--row "a" "fix" :ready)))
+                      (agent-repl-test-roster--section "beta" nil))
+      :viewed (agent-repl-test-roster--of-repository
+               "beta" (list (agent-repl-test-roster--row "b" "fix" :done :viewed t)))))
+    ;; Assert
+    (should (equal (agent-repl-test-roster--tabs) '("fix·alpha" "fix·beta")))))
 
 (ert-deftest agent-repl-test-roster-colliding-names-take-the-repo-suffix ()
   "Names collide across repos and ids do not, so a collision is suffixed."
