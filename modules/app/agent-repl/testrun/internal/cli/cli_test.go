@@ -78,6 +78,42 @@ func TestSlotsForHost(t *testing.T) {
 	}
 }
 
+func TestSlots(t *testing.T) {
+	tests := []struct {
+		name    string
+		budget  string
+		want    int
+		wantErr bool
+	}{
+		{name: "no budget is half the host", budget: "", want: 8},
+		{name: "a claimed budget is the run's size", budget: "3", want: 3},
+		{name: "a budget above half the host is honored", budget: "12", want: 12},
+		{name: "a zero budget is refused", budget: "0", wantErr: true},
+		{name: "a negative budget is refused", budget: "-2", wantErr: true},
+		{name: "a non-numeric budget is refused", budget: "four", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: a 16-core host.
+			const cpus = 16
+
+			// Act
+			got, err := Slots(cpus, tt.budget)
+
+			// Assert
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("Slots(%d, %q) = %d, want an error", cpus, tt.budget, got)
+				}
+				return
+			}
+			if err != nil || got != tt.want {
+				t.Fatalf("Slots(%d, %q) = %d, %v; want %d", cpus, tt.budget, got, err, tt.want)
+			}
+		})
+	}
+}
+
 func csvFile(t *testing.T, rows ...string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "test_time.csv")
