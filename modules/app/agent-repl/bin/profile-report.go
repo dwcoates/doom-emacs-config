@@ -224,6 +224,8 @@ func frames(w io.Writer, session string) error {
 			text, err = heapprofileTop(path, 12)
 		case strings.HasSuffix(e.Name(), ".txt"):
 			text, err = head(path, 15)
+		case strings.HasSuffix(e.Name(), ".lag.json"):
+			text, err = lagSummary(path)
 		default:
 			continue
 		}
@@ -233,6 +235,34 @@ func frames(w io.Writer, session string) error {
 		fmt.Fprintf(w, "### %s\n\n```\n%s\n```\n\n", e.Name(), strings.TrimRight(text, "\n"))
 	}
 	return nil
+}
+
+// lagSummary answers a page's main-thread stalls: how long it was stalled,
+// its longest stall, and the stalls past 100ms with when they happened.
+func lagSummary(path string) (string, error) {
+	var p struct {
+		OK        bool     `json:"ok"`
+		Why       string   `json:"why"`
+		WallMS    int      `json:"wall_ms"`
+		StalledMS int      `json:"stalled_ms"`
+		LongestMS int      `json:"longest_ms"`
+		Stalls    [][2]int `json:"stalls"`
+	}
+	if err := readJSON(path, &p); err != nil {
+		return "", err
+	}
+	if !p.OK {
+		return "the page answered no samples: " + p.Why, nil
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "main thread stalled %dms of %dms sampled (%d stalls past one frame), longest %dms\n",
+		p.StalledMS, p.WallMS, len(p.Stalls), p.LongestMS)
+	for _, s := range p.Stalls {
+		if s[1] > 100 {
+			fmt.Fprintf(&b, "  +%dms: stalled %dms\n", s[0], s[1])
+		}
+	}
+	return b.String(), nil
 }
 
 func head(path string, n int) (string, error) {
