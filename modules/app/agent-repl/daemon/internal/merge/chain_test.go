@@ -1,6 +1,7 @@
 package merge
 
 import (
+	"agent-repld/internal/wsm"
 	"context"
 	"fmt"
 	"slices"
@@ -575,6 +576,57 @@ func (c *chain) promote(t *testing.T) {
 	}
 }
 
+// drain pumps until the queue is empty. Under the race to land (race.go) how
+// many passes that takes depends on which merge wins each round, and a pass
+// can find the queue's front still STARTING in its chain: its start runs on a
+// goroutine of its own, and the harness's pump runs only when a test calls it
+// (kick is a no-op without o.async), where production's pump is woken by that
+// very admission. A pass that changes nothing therefore waits for a run to
+// go idle -- the started merge, admitted and waiting to be promoted -- before
+// pumping again, instead of spinning past the start (the "outlived its test"
+// flake under load: the start's goroutine had not been scheduled yet).
+func (c *chain) drain(t *testing.T) {
+	t.Helper()
+	bound := time.NewTimer(10 * time.Second)
+	defer bound.Stop()
+	for {
+		queue, err := c.h.db.MergeQueue(context.Background(), c.h.repoKey())
+		if err != nil {
+			t.Fatalf("reading the queue: %v", err)
+		}
+		if len(queue) == 0 {
+			return
+		}
+		c.promote(t)
+		after, err := c.h.db.MergeQueue(context.Background(), c.h.repoKey())
+		if err != nil {
+			t.Fatalf("reading the queue: %v", err)
+		}
+		if !sameLine(queue, after) {
+			continue
+		}
+		select {
+		case <-c.idle:
+		case <-bound.C:
+			t.Fatalf("the queue never drained: %v still in line", after)
+		}
+	}
+}
+
+// sameLine reports whether two reads of the queue hold the same entries in
+// the same states.
+func sameLine(a, b []wsm.MergeQueueEntry) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].Workspace != b[i].Workspace || a[i].State != b[i].State {
+			return false
+		}
+	}
+	return true
+}
+
 func (c *chain) prompts(ws ids.WorkspaceID, origin conversationv1.PromptOrigin) int {
 	c.h.queue.mu.Lock()
 	defer c.h.queue.mu.Unlock()
@@ -617,8 +669,7 @@ func TestTheMergeBehindTheHeadRebasesOntoTheTargetsTip(t *testing.T) {
 	close(releaseBehind)
 	close(releaseHead)
 	<-done
-	c.promote(t)
-	c.promote(t)
+	c.drain(t)
 
 	// Assert.
 	if tree != "b1+base" || !slices.Equal(own, []string{"b1"}) {
@@ -629,14 +680,11 @@ func TestTheMergeBehindTheHeadRebasesOntoTheTargetsTip(t *testing.T) {
 func TestTheRaceWinnerLandsTheTreeItTestedWithoutTestingAgain(t *testing.T) {
 	// Arrange: the head holds in its gate; the merge behind it passes.
 	c := newChain(t)
-	c.runner.hold(c.dirs[theWorkspace])
 	enqueue(t, c.h)
 	c.queue(t, "ws-b", "b1")
 
 	// Act.
-	<-admitAsync(c.h, context.Background())
-	c.promote(t)
-	c.promote(t)
+	c.behindWins(t)
 
 	// Assert.
 	if got := c.runner.ran(c.dirs["ws-b"]); got != 1 {
@@ -650,15 +698,12 @@ func TestTheRaceWinnerLandsTheTreeItTestedWithoutTestingAgain(t *testing.T) {
 func TestAHeadThatLostTheRaceAndThenFailsLandsNothingOfItsOwn(t *testing.T) {
 	// Arrange: the head holds in its first gate and breaks in the next.
 	c := newChain(t)
-	c.runner.hold(c.dirs[theWorkspace])
 	c.runner.script(c.dirs[theWorkspace], broken)
 	enqueue(t, c.h)
 	c.queue(t, "ws-b", "b1")
 
 	// Act.
-	<-admitAsync(c.h, context.Background())
-	c.promote(t)
-	c.promote(t)
+	c.behindWins(t)
 
 	// Assert.
 	if tree := c.git.tree("master"); tree != "b1+base" {
@@ -671,14 +716,11 @@ func TestAConflictMetByTheHeadStartingOverIsResolvedByItsOwnSession(t *testing.T
 	// wins and A starts over on a target that holds b1.
 	c := newChain(t)
 	c.git.conflict("a1", "b1", "x.go")
-	c.runner.hold(c.dirs[theWorkspace])
 	enqueue(t, c.h)
 	c.queue(t, "ws-b", "b1")
 
 	// Act.
-	<-admitAsync(c.h, context.Background())
-	c.promote(t)
-	c.promote(t)
+	c.behindWins(t)
 
 	// Assert.
 	if got := c.prompts(theWorkspace, conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR); got != 1 {
@@ -819,9 +861,7 @@ func TestTheDefaultWindowHoldsTheHeadAndOneMergeBehindIt(t *testing.T) {
 	close(releaseBehind)
 	close(releaseHead)
 	<-done
-	for i := 0; i < 3; i++ {
-		c.promote(t)
-	}
+	c.drain(t)
 
 	// Assert.
 	if cpugov.QueueWindow != 2 {
@@ -858,9 +898,7 @@ func TestARestartMidRaceResumesBothMergesAndLandsEachWithItsOwnCommits(t *testin
 	if err := next.Recover(context.Background()); err != nil {
 		t.Fatalf("Recover: %v", err)
 	}
-	for i := 0; i < 3; i++ {
-		c.promote(t)
-	}
+	c.drain(t)
 
 	// Assert.
 	got := c.git.landedOwn()
