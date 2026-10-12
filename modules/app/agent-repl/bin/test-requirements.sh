@@ -118,6 +118,19 @@ test_the_real_manifests_honor_the_contract() {
   fi
 }
 
+# A live service the editor waits on must never rank below a test suite:
+# launchd's `Background` is darwinbg (efficiency cores, throttled disk I/O),
+# which loses every I/O contention to a `nice 19` suite.
+test_every_launchd_service_runs_at_standard_priority() {
+  local bad="" plist type
+  while IFS= read -r plist; do
+    type="$(plutil -extract ProcessType raw -o - "$MODULE/$plist" 2>/dev/null || echo "<unset>")"
+    [ "$type" = Standard ] || bad="$bad $plist=$type"
+  done < <(find "$MODULE" -name requirements.json -not -path '*/node_modules/*' -not -path '*/testdata/*' -print0 \
+             | xargs -0 jq -r '.requirements[]? | select(.kind == "launchd_service") | .plist')
+  if [ -z "$bad" ]; then pass "every launchd service runs at Standard priority"; else fail "launchd services not at Standard priority:$bad"; fi
+}
+
 test_every_system_with_a_manifest_is_included() {
   local missing="" f rel
   while IFS= read -r f; do
