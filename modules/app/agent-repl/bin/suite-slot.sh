@@ -108,7 +108,7 @@ esac
 
 SUITE_SLOT=""
 TICKET=""
-# shellcheck disable=SC2329  # invoked indirectly, from the EXIT/INT/TERM trap
+# shellcheck disable=SC2329  # invoked indirectly, from the EXIT trap
 release_slot() {
   if [[ -n ${TICKET:-} ]]; then
     rm -f "$TICKET"
@@ -178,7 +178,16 @@ acquire_slot() {
   fi
   mkdir -p "$SLOT_DIR" "$QUEUE_DIR"
   TICKET=$(printf '%s/%d-%012d-%010d' "$QUEUE_DIR" "$TICKET_PRIORITY" "$(date +%s)" "$$")
-  trap release_slot EXIT INT TERM
+  # A SIGNAL ENDS THE RUN. A trap on INT or TERM replaces bash's default
+  # action (terminate) and execution resumes after the handler, so with
+  # release_slot trapped on them directly a waiter that was told to stop
+  # dropped its ticket and went on waiting -- then took the next free slot and
+  # ran the suite nobody wanted any more (the harness's stopped waiter sat out
+  # its holder's whole 60s and ran). The signals exit with their conventional
+  # status instead, and the release runs once, from EXIT.
+  trap release_slot EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
   : > "$TICKET"
   local i waited=0 announced=0 holder ahead
   while true; do
