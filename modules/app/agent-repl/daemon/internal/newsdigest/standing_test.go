@@ -8,6 +8,7 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+
 	"google.golang.org/protobuf/proto"
 )
 
@@ -238,7 +239,7 @@ func dismissedDigest(t *testing.T, w *world, madeAt time.Time) {
 func TestRedisplayStandsTheDaysDismissedDigestAgain(t *testing.T) {
 	// Arrange
 	w := newWorld(t)
-	w.clock.set(localDay(2, 23))
+	w.clock.Set(localDay(2, 23))
 	dismissedDigest(t, w, localDay(2, 1))
 	d := w.digester()
 
@@ -263,7 +264,7 @@ func TestRedisplayStandsTheDaysDismissedDigestAgain(t *testing.T) {
 func TestRedisplayLeavesADigestFromAnEarlierDayDown(t *testing.T) {
 	// Arrange
 	w := newWorld(t)
-	w.clock.set(localDay(2, 1))
+	w.clock.Set(localDay(2, 1))
 	dismissedDigest(t, w, localDay(1, 23))
 	d := w.digester()
 
@@ -282,7 +283,7 @@ func TestRedisplayLeavesADigestFromAnEarlierDayDown(t *testing.T) {
 func TestRedisplayLeavesAStandingDigestUnchanged(t *testing.T) {
 	// Arrange
 	w := newWorld(t)
-	w.clock.set(localDay(2, 23))
+	w.clock.Set(localDay(2, 23))
 	dismissedDigest(t, w, localDay(2, 1))
 	w.store.state.Standing = w.store.state.LatestOverlay
 	d := w.digester()
@@ -331,7 +332,7 @@ func TestRedisplayReportsAnUnreadableStore(t *testing.T) {
 func TestRedisplayReportsAFailedRestand(t *testing.T) {
 	// Arrange
 	w := newWorld(t)
-	w.clock.set(localDay(2, 23))
+	w.clock.Set(localDay(2, 23))
 	dismissedDigest(t, w, localDay(2, 1))
 	w.store.restandErr = errScripted
 	d := w.digester()

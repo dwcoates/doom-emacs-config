@@ -180,15 +180,24 @@ func (s *Service) Run(ctx context.Context, tick <-chan time.Time) {
 // sweep, which keeps the first recorded instant.
 func (s *Service) Sweep(ctx context.Context) int {
 	log := s.deps.Log.Global()
+	// unread records a read that left nothing to sweep. A read the sweep's
+	// own context ended (the daemon stopping) is no fault: the state client
+	// recorded it at INFO, and so does this.
+	unread := func(message string, err error) int {
+		if ctx.Err() != nil {
+			log.Info(op, "the sweep stopped with its context; no merge workspace is swept", dlog.Context{"cause": err.Error()})
+			return 0
+		}
+		log.Error(op, message, dlog.Context{"cause": err.Error()})
+		return 0
+	}
 	all, err := s.deps.DB.ListWorkspaces(ctx)
 	if err != nil {
-		log.Error(op, "could not list the workspaces; no merge workspace is swept", dlog.Context{"cause": err.Error()})
-		return 0
+		return unread("could not list the workspaces; no merge workspace is swept", err)
 	}
 	queued, err := s.inAnyQueue(ctx)
 	if err != nil {
-		log.Error(op, "could not read the merge queues; no merge workspace is swept", dlog.Context{"cause": err.Error()})
-		return 0
+		return unread("could not read the merge queues; no merge workspace is swept", err)
 	}
 	now := s.deps.Now()
 	removed := 0

@@ -11,8 +11,10 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+
 	"google.golang.org/protobuf/proto"
 
+	"claude-repld/internal/clock/clocktest"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/headless"
 	"claude-repld/internal/wsm"
@@ -27,36 +29,6 @@ var now = time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC)
 
 // errScripted is a failure a fake was scripted to answer.
 var errScripted = errors.New("scripted failure")
-
-// fakeClock is a clock whose waits the test fires by hand: every After is
-// announced on asked, and answers when the test sends on fire.
-type fakeClock struct {
-	mu    sync.Mutex
-	at    time.Time
-	asked chan time.Duration
-	fire  chan time.Time
-}
-
-func newFakeClock() *fakeClock {
-	return &fakeClock{at: now, asked: make(chan time.Duration, 16), fire: make(chan time.Time)}
-}
-
-func (c *fakeClock) Now() time.Time {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.at
-}
-
-func (c *fakeClock) set(t time.Time) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.at = t
-}
-
-func (c *fakeClock) After(d time.Duration) <-chan time.Time {
-	c.asked <- d
-	return c.fire
-}
 
 // fakeStore is the digest's store in memory, with scripted failures.
 type fakeStore struct {
@@ -291,7 +263,7 @@ func atomWith(updated time.Time, ids ...string) string {
 // world is one digester under test with every fake it was built from.
 type world struct {
 	t       *testing.T
-	clock   *fakeClock
+	clock   *clocktest.Scripted
 	store   *fakeStore
 	fetcher *fakeFetcher
 	runner  *fakeRunner
@@ -307,7 +279,7 @@ type world struct {
 func newWorld(t *testing.T) *world {
 	t.Helper()
 	return &world{
-		t: t, clock: newFakeClock(), store: newFakeStore(), fetcher: newFakeFetcher(),
+		t: t, clock: clocktest.New(now), store: newFakeStore(), fetcher: newFakeFetcher(),
 		runner: &fakeRunner{}, log: dlog.NewTestLogger(), serves: true,
 		lock: filepath.Join(t.TempDir(), "news-digest.lock"), sources: []Source{feedSource, pageSource},
 	}

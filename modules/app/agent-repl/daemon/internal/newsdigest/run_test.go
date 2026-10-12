@@ -8,6 +8,7 @@ import (
 	"time"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
+
 	"google.golang.org/protobuf/proto"
 
 	"claude-repld/internal/flock"
@@ -457,7 +458,7 @@ func TestTheNextDayMergesTheWeeksRepeatedStory(t *testing.T) {
 	if _, err := first.Refresh(context.Background()); err != nil {
 		t.Fatalf("Refresh: %v", err)
 	}
-	w.clock.set(now.Add(25 * time.Hour))
+	w.clock.Set(now.Add(25 * time.Hour))
 	w.fetcher.bodies[feedSource.URL] = atomWith(now.Add(24*time.Hour), "newer", "new", "old")
 	w.runner.text = strings.ReplaceAll(markedAnswerJSON, "https://fixture.test/releases/new", "https://fixture.test/releases/newer")
 	w.runner.weekText = `{"items":[{"members":["r1","r2"],"title":"SDK drops subscription billing","summary":"S.","reason":"R.","effective":"2026-11-01"}]}`

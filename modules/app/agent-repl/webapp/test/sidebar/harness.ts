@@ -221,12 +221,15 @@ export function repoSection(init: {
   collapsed?: boolean;
   /** The daemon-resolved folded count; the row count unless said. */
   count?: number;
+  /** The label hover's measurement; pending unless said. */
+  divergence?: MessageInitShape<typeof RosterRepoSectionSchema>["divergence"];
 }): RosterRepoSection {
   return create(RosterRepoSectionSchema, {
     key: { repository: { id: init.id, dir: `/repo/${init.id}` } },
     header: { label: { text: init.label ?? init.id }, count: { workspaces: init.count ?? init.rows?.length ?? 0 } },
     rows: { rows: init.rows ?? [] },
     fold: init.collapsed === true ? { case: "collapsed", value: {} } : { case: "expanded", value: {} },
+    divergence: init.divergence ?? { state: { case: "pending", value: {} } },
   });
 }
 

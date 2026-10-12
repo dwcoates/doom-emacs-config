@@ -4,7 +4,10 @@
 // window by hand and no test sleeps.
 package clock
 
-import "time"
+import (
+	"context"
+	"time"
+)
 
 // Clock is a view of time.
 type Clock interface {
@@ -22,3 +25,21 @@ func (System) Now() time.Time { return time.Now() }
 
 // After is time.After.
 func (System) After(d time.Duration) <-chan time.Time { return time.After(d) }
+
+// Repeat is the one periodic schedule: it runs fn once after first, then once
+// every `every` after the previous run RETURNS, until ctx ends, and answers
+// ctx.Err(). Runs happen on the caller's goroutine one after the other, so the
+// schedule never overlaps itself, and a run's own failures are the run's to
+// record: nothing fn does ends the schedule but ctx.
+func Repeat(ctx context.Context, c Clock, first, every time.Duration, fn func(context.Context)) error {
+	wait := first
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-c.After(wait):
+		}
+		fn(ctx)
+		wait = every
+	}
+}
