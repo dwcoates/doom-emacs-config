@@ -40,6 +40,7 @@ func TestRecordTurnRecordsAMergeTurnAtTheStandingAddress(t *testing.T) {
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_TEST_REPAIR,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_BEFORE_ACTION,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_AFTER_ACTION,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_PICK,
 	}
 	for _, origin := range cases {
 		t.Run(origin.String(), func(t *testing.T) {
@@ -116,6 +117,65 @@ func TestRecordTurnHandsTheRecordedAddressToTheFeed(t *testing.T) {
 	got, ok := h.feed.turnAddress("t1")
 	if !ok || got == nil || *got.Feed.Merge != *addr.Feed.Merge {
 		t.Fatalf("feed's turn address = (%+v, %v), want the recorded merge address", got, ok)
+	}
+}
+
+// requesterMirror is a mirror into a requester's pick tab.
+func requesterMirror() *wsm.MirrorAddress {
+	lease := wsm.NewLeaseID()
+	return &wsm.MirrorAddress{
+		Workspace: "ws-requester",
+		Feed:      feedid.Feed{Merge: &lease},
+		Parent:    feedid.Ref{WS: "ws-requester", Feed: feedid.Feed{Merge: &lease}, Row: feedid.RowKey{Kind: feedid.KindMergeTab, ID: "pick", Sub: "1"}},
+	}
+}
+
+func TestRecordTurnRecordsAMergeTurnWithTheStandingMirror(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	mirror := requesterMirror()
+	h.feed.SetOutputMirror(theWorkspace, mirror)
+
+	// Act
+	recordWithOrigin(t, h, conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_PICK)
+
+	// Assert
+	got, ok := h.db.startedTurn("t1")
+	if !ok || got.Mirror == nil || got.Mirror.Workspace != "ws-requester" || got.Address != nil {
+		t.Fatalf("turn = (%+v, %v), want it recorded with the mirror and no address", got, ok)
+	}
+	handed, ok := h.feed.turnMirror("t1")
+	if !ok || handed == nil || handed.Workspace != "ws-requester" {
+		t.Fatalf("feed's turn mirror = (%+v, %v), want the recorded mirror", handed, ok)
+	}
+}
+
+func TestRecordTurnRecordsATurnNotStartedByTheMergeWithNoMirror(t *testing.T) {
+	// Arrange: a merge stands a mirror while the user's turn opens.
+	h := newHarness(t)
+	h.feed.SetOutputMirror(theWorkspace, requesterMirror())
+
+	// Act
+	recordWithOrigin(t, h, conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
+
+	// Assert
+	got, ok := h.db.startedTurn("t1")
+	if !ok || got.Mirror != nil {
+		t.Fatalf("turn = (%+v, %v), want it recorded with no mirror", got, ok)
+	}
+}
+
+func TestRecordTurnSaysNothingOfAMirroredMergeTurnWithNoAddress(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.feed.SetOutputMirror(theWorkspace, requesterMirror())
+
+	// Act
+	recordWithOrigin(t, h, conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR)
+
+	// Assert
+	if logged(h.log.Records(), "info", opDeliver, "a merge's own turn opened with no merge address standing; it draws on the root feed") {
+		t.Fatal("a mirrored merge turn was reported as addressless")
 	}
 }
 
