@@ -180,24 +180,15 @@ func (s *Service) Run(ctx context.Context, tick <-chan time.Time) {
 // sweep, which keeps the first recorded instant.
 func (s *Service) Sweep(ctx context.Context) int {
 	log := s.deps.Log.Global()
-	// unread records a read that left nothing to sweep. A read the sweep's
-	// own context ended (the daemon stopping) is no fault: the state client
-	// recorded it at INFO, and so does this.
-	unread := func(message string, err error) int {
-		if ctx.Err() != nil {
-			log.Info(op, "the sweep stopped with its context; no merge workspace is swept", dlog.Context{"cause": err.Error()})
-			return 0
-		}
-		log.Error(op, message, dlog.Context{"cause": err.Error()})
-		return 0
-	}
 	all, err := s.deps.DB.ListWorkspaces(ctx)
 	if err != nil {
-		return unread("could not list the workspaces; no merge workspace is swept", err)
+		sweepFailed(ctx, log, log.Error, "could not list the workspaces; no merge workspace is swept", dlog.Context{}, err)
+		return 0
 	}
 	queued, err := s.inAnyQueue(ctx)
 	if err != nil {
-		return unread("could not read the merge queues; no merge workspace is swept", err)
+		sweepFailed(ctx, log, log.Error, "could not read the merge queues; no merge workspace is swept", dlog.Context{}, err)
+		return 0
 	}
 	now := s.deps.Now()
 	removed := 0
@@ -222,17 +213,17 @@ func (s *Service) remove(ctx context.Context, ws wsm.Workspace, last, now time.T
 	log := s.deps.Log.Global()
 	fields := dlog.Context{"merge_workspace": string(ws.ID), "requester": string(ws.MergeOf.Requester), "last_active": last, "idle_limit": IdleLimit.String()}
 	if err := s.deps.DB.RecordMergeWorkspaceRemoved(ctx, ws.ID, ws.MergeOf.Requester, now); err != nil {
-		log.Error(op, "could not record an idle merge workspace's removal; it is left in place", withCause(fields, err))
+		sweepFailed(ctx, log, log.Error, "could not record an idle merge workspace's removal; it is left in place", fields, err)
 		return false
 	}
 	at, _, err := s.deps.DB.MergeWorkspaceRemovedAt(ctx, ws.ID)
 	if err != nil {
-		log.Error(op, "could not read back an idle merge workspace's removal; it is left in place", withCause(fields, err))
+		sweepFailed(ctx, log, log.Error, "could not read back an idle merge workspace's removal; it is left in place", fields, err)
 		return false
 	}
 	// The nuke records its own failures at their site.
 	if err := s.deps.Workspaces.Nuke(ctx, ws.ID); err != nil {
-		log.Warn(op, "an idle merge workspace could not be destroyed; the next sweep tries again", withCause(fields, err))
+		sweepFailed(ctx, log, log.Warn, "an idle merge workspace could not be destroyed; the next sweep tries again", fields, err)
 		return false
 	}
 	// A REQUESTER THAT IS ITSELF GONE has no feed to restate.
@@ -241,7 +232,7 @@ func (s *Service) remove(ctx context.Context, ws wsm.Workspace, last, now time.T
 			log.Info(op, "removed an idle merge workspace whose requester is gone", fields)
 			return true
 		}
-		log.Error(op, "could not read an idle merge workspace's requester; its switches still offer the removed workspace", withCause(fields, err))
+		sweepFailed(ctx, log, log.Error, "could not read an idle merge workspace's requester; its switches still offer the removed workspace", fields, err)
 		return true
 	}
 	fields["rows"] = s.deps.Feed.MarkMergeWorkspaceRemoved(ws.MergeOf.Requester, ws.ID, at.UnixMilli())
@@ -275,6 +266,20 @@ func lastActive(ws wsm.Workspace) time.Time {
 		}
 	}
 	return last
+}
+
+// sweepFailed records a sweep step that failed with err at level, unless the
+// daemon was standing down: the sweep runs on the daemon's lifetime, so a step
+// its end cut short is the orderly exit it is, recorded at INFO with what it
+// left undone.
+func sweepFailed(ctx context.Context, log dlog.Logger, level func(operation, message string, ctx dlog.Context), message string, fields dlog.Context, err error) {
+	if ctx.Err() != nil {
+		stood := withCause(fields, err)
+		stood["left_undone"] = message
+		log.Info(op, "the daemon stood down mid-sweep", stood)
+		return
+	}
+	level(op, message, withCause(fields, err))
 }
 
 // withCause adds an error's text to a record's fields.
