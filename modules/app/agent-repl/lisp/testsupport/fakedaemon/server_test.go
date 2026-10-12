@@ -511,3 +511,21 @@ func TestCreateWorkspaceIdIsDistinctFromTheRegisteredIdForOneDir(t *testing.T) {
 			created.Msg.GetSuccess().GetWorkspace().GetId())
 	}
 }
+
+func TestDefaultListRollbackPromptsIsAnEmptySuccess(t *testing.T) {
+	// Arrange.
+	_, baseURL := newTestServer(t)
+	client := newTestClient(t, baseURL)
+
+	// Act.
+	resp, err := client.ListRollbackPrompts(context.Background(),
+		connect.NewRequest(&agentreplv1.ListRollbackPromptsRequest{Workspace: &workspaceRef}))
+	if err != nil {
+		t.Fatalf("ListRollbackPrompts: %v", err)
+	}
+
+	// Assert.
+	if resp.Msg.GetSuccess() == nil || len(resp.Msg.GetSuccess().GetPrompts()) != 0 {
+		t.Fatalf("ListRollbackPrompts default is %v, want an empty success", resp.Msg)
+	}
+}
