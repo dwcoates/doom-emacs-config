@@ -116,6 +116,11 @@ type fakeDB struct {
 	sessionErr error
 	jobs       map[ids.WorkspaceID]wsm.CreationJob
 	held       map[ids.WorkspaceID][]wsm.HeldPrompt
+	// landedWrites is every SetLanded, in order; setLandedErr fails it.
+	landedWrites []*wsm.Landing
+	setLandedErr error
+	// setMergedErr fails SetMergedAt.
+	setMergedErr error
 
 	registerErr error
 	registered  []wsm.RegisterFacts
@@ -654,6 +659,30 @@ func (d *fakeDB) PutPortedPrompts(_ context.Context, id ids.WorkspaceID, rows []
 	return nil
 }
 
+// SetLanded records a requester's landing on its record, as the store's
+// columns do; setLandedErr fails it.
+func (d *fakeDB) SetLanded(_ context.Context, id ids.WorkspaceID, landing *wsm.Landing) error {
+	if d.setLandedErr != nil {
+		return d.setLandedErr
+	}
+	d.landedWrites = append(d.landedWrites, landing)
+	ws := d.workspaces[id]
+	ws.Landed = landing
+	d.with(ws)
+	return nil
+}
+
+// SetMergedAt records the merge stamp on the record; setMergedErr fails it.
+func (d *fakeDB) SetMergedAt(_ context.Context, id ids.WorkspaceID, at time.Time, _ *uint32) error {
+	if d.setMergedErr != nil {
+		return d.setMergedErr
+	}
+	ws := d.workspaces[id]
+	ws.MergedAt = &at
+	d.with(ws)
+	return nil
+}
+
 func (d *fakeDB) HeldPrompts(_ context.Context, id ids.WorkspaceID) ([]wsm.HeldPrompt, error) {
 	return d.held[id], nil
 }
@@ -729,6 +758,16 @@ type fakeGit struct {
 	unregisterErr error
 	restored      []restoredWorktree
 	restoreErr    error
+
+	// heads is what ResolveRef answers for HEAD in a directory; a directory
+	// absent from it answers the default "sha-of-HEAD".
+	heads map[string]string
+	// dirty makes IsClean answer false; isCleanErr fails it.
+	dirty      bool
+	isCleanErr error
+	// removedClean records every RemoveCleanWorktree; removeCleanErr fails it.
+	removedClean   []nukedWorktree
+	removeCleanErr error
 }
 
 type restoredWorktree struct{ RepoDir, WorktreeDir, Branch string }
@@ -736,11 +775,26 @@ type restoredWorktree struct{ RepoDir, WorktreeDir, Branch string }
 type createdWorktree struct{ RepoDir, Branch, BaseRef, WorktreeDir string }
 type nukedWorktree struct{ RepoDir, WorktreeDir, Branch string }
 
-func (g *fakeGit) ResolveRef(_ context.Context, _, ref string) (string, error) {
+func (g *fakeGit) ResolveRef(_ context.Context, dir, ref string) (string, error) {
 	if g.resolveErr != nil {
 		return "", g.resolveErr
 	}
+	if head, ok := g.heads[dir]; ok && ref == "HEAD" {
+		return head, nil
+	}
 	return "sha-of-" + ref, nil
+}
+
+func (g *fakeGit) IsClean(context.Context, string) (bool, error) {
+	return !g.dirty, g.isCleanErr
+}
+
+func (g *fakeGit) RemoveCleanWorktree(_ context.Context, repoDir, worktreeDir string) error {
+	if g.removeCleanErr != nil {
+		return g.removeCleanErr
+	}
+	g.removedClean = append(g.removedClean, nukedWorktree{RepoDir: repoDir, WorktreeDir: worktreeDir})
+	return nil
 }
 
 func (g *fakeGit) IsAncestor(_ context.Context, _, ancestor, descendant string) (bool, error) {
