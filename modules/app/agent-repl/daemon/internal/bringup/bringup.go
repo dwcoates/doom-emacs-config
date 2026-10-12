@@ -1,8 +1,9 @@
 // Package bringup starts the sessions of open workspaces that a daemon has
 // come to serve with no session behind them.
 //
-// AN OPEN WORKSPACE IS NEVER SESSION-LESS (owner rulings, 2026-09-13 and
-// 2026-10-02). A daemon comes to serve a workspace in more than one way: a
+// AN OPEN VISIBLE WORKSPACE IS NEVER SESSION-LESS (owner rulings, 2026-09-13
+// and 2026-10-02, narrowed to VISIBLE workspaces on 2026-10-12: a hidden or
+// collapsed one runs nothing, see visible.go). A daemon comes to serve a workspace in more than one way: a
 // fresh boot reconciles the registry and finds shims that did not survive, and
 // a joining successor takes workspaces over from the daemon it replaces, some
 // of them with no shim at all. Every one of those ways ends here, so a
@@ -59,8 +60,8 @@ type Deps struct {
 	Operation string
 	// Done, when set, is told how each workspace's start ended (nil for a
 	// session that came up or a workspace already being served), the moment
-	// it ends rather than when the whole bring-up does. The editor's startup
-	// (internal/startup) is the one caller that waits on single workspaces.
+	// it ends rather than when the whole bring-up does. The editor's OpenTabs
+	// (internal/opentabs) is the one caller that waits on single workspaces.
 	Done func(ws ids.WorkspaceID, err error)
 }
 
