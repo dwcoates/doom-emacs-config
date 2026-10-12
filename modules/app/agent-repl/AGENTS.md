@@ -230,6 +230,22 @@ bin/e2e-repeat.sh ...` deadlocked — every per-run acquisition queued behind th
 outer holder that was waiting for those very runs to finish, 6000s of "still
 waiting" with nothing running.
 
+**ONE HOST-WIDE TEST BUDGET** (owner ruling, 2026-10-11). Every run behind the
+gate also claims, with the same atomic `mkdir`, PROCESSOR tokens
+(`core-N`, one per logical processor) and MEMORY tokens (`mem-N`, one GiB each,
+half the host's memory in all) under the slot directory, and is handed the
+processors it got as `AGENT_REPL_TEST_CPU_BUDGET` -- the parallelism the runner
+sizes itself to, instead of assuming it owns half the machine. The first half
+of the processors, and one RAM disk's memory, are the merge queue HEAD's
+(`AGENT_REPL_SUITE_PRIORITY=head`): nothing else may claim them. A head run
+wants half the host; every other run a quarter, from the rest, taking what the
+runs before it left. A run's memory is its whole RAM disk
+(`AGENT_REPL_TEST_RAMDISK_MIB`, 8 GiB) or nothing, so three runs never exhaust
+the host. A run short of memory or of a single processor gives back what it
+claimed and waits; nothing is held while waiting. The merge queue's gates
+(`head`, `speculative`) take no run slot: the daemon bounds them to its queue
+window, and the budget is what they share with every other run.
+
 Do NOT gate on the load average instead. It is a decaying mean, so it keeps
 climbing for a minute after the work stops, and every waiter reads the same
 number and starts at the same instant — a thundering herd that recreates the
