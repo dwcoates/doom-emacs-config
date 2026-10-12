@@ -460,3 +460,28 @@ func TestLoadSharesParsesVerdict(t *testing.T) {
 		t.Fatalf("Load error %v and Parse error %v, want the same refusal", loadErr, parseErr)
 	}
 }
+
+func TestTheRoutingBriefRoutesAnAddendumOpenerAfterTheToolCall(t *testing.T) {
+	// Arrange: a prompt opening "also, ..." appends to the request ahead of
+	// it, so the routing brief sends it after the tool call and never holds
+	// it. Against a queued prompt that verdict coalesces the two
+	// (promptqueue.settleQueued).
+	want := []string{
+		"A new message that OPENS as an addendum always answers {{token_after_tool_call}}",
+		`starting with "also", "also,"`,
+		"so it never waits for the turn to finish ({{token_hold}})",
+	}
+
+	// Act.
+	got, err := Load(repoPromptsDir, "queue-routing-classifier")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	for _, phrase := range want {
+		if !strings.Contains(got.Body, phrase) {
+			t.Fatalf("queue-routing-classifier does not say %q", phrase)
+		}
+	}
+}
