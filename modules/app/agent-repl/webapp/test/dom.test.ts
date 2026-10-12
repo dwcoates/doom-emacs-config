@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
-import { ancestorMatching, computedPx, placeChildren, repaintMark, scrollbarWidthPx } from "../src/dom.js";
+import { SVG_NS, ancestorMatching, computedPx, placeChildren, repaintMark, scrollbarWidthPx } from "../src/dom.js";
 import { codeOf } from "./source-text.js";
 
 describe("scrollbarWidthPx", () => {
@@ -274,5 +274,31 @@ describe("repaintMark", () => {
     const shared = sites.filter((source) => source.includes("repaintMark("));
     // Assert
     expect([handRolled.length, shared.length]).toEqual([0, sites.length]);
+  });
+});
+
+describe("SVG_NS", () => {
+  it("is the namespace an svg element is created in", () => {
+    // Arrange / Act
+    const svg = document.createElementNS(SVG_NS, "svg");
+    // Assert
+    expect(svg.namespaceURI).toBe("http://www.w3.org/2000/svg");
+  });
+
+  it("is the one spelling: no source but dom.ts writes the namespace out", () => {
+    // Arrange — every source under src/, comments stripped.
+    const src = join(process.cwd(), "src");
+    const walk = (dir: string): string[] =>
+      readdirSync(dir).flatMap((name) => {
+        const path = join(dir, name);
+        if (statSync(path).isDirectory()) return walk(path);
+        return path.endsWith(".ts") ? [path] : [];
+      });
+    // Act
+    const spelled = walk(src)
+      .filter((path) => codeOf(readFileSync(path, "utf8")).includes("www.w3.org/2000/svg"))
+      .map((path) => relative(src, path));
+    // Assert
+    expect(spelled).toEqual(["dom.ts"]);
   });
 });
