@@ -2,8 +2,9 @@
 // not the merge itself (agentrepl.v1.MergeWorkspaceSourceOwnBranchDetached):
 // forking the hidden merge workspace the merge runs in, revealing it when it
 // needs the user, handing the merge's outcome back to the conversation that
-// asked for it, and removing merge workspaces nobody has used for 15 calendar
-// days. The merge package reaches it only through
+// asked for it, removing merge workspaces nobody has used for 15 calendar
+// days, and retiring the requester whose detached merge landed once it has
+// been idle a day. The merge package reaches it only through
 // merge.DetachedMerges, so nothing about detached merges leaks into the merge
 // run.
 package mergeworkspace
@@ -18,6 +19,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
+	"agent-repld/internal/flock"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/merge"
 	"agent-repld/internal/prompthandler"
@@ -37,6 +39,11 @@ const BriefHandback = "merge-detached-handback"
 // sweep removes it: 15 calendar days (owner ruling, 2026-10-11).
 const IdleLimit = 15 * 24 * time.Hour
 
+// LandedIdleLimit is how long a requester whose detached merge landed may go
+// without activity before the sweep retires it (Workspaces.RetireLanded): one
+// day (owner request, 2026-10-12). Its landing counts as activity.
+const LandedIdleLimit = 24 * time.Hour
+
 // Workspaces is the workspace verbs this package uses.
 type Workspaces interface {
 	// CreateMergeWorkspace creates an async merge's hidden merge workspace,
@@ -47,6 +54,9 @@ type Workspaces interface {
 	RevealMergeWorkspace(ctx context.Context, ws ids.WorkspaceID) (bool, error)
 	// Nuke destroys a workspace: its session, worktree, branch and records.
 	Nuke(ctx context.Context, ws ids.WorkspaceID) error
+	// RetireLanded retires a requester whose detached merge landed, answering
+	// why it kept the workspace instead, empty when it retired it.
+	RetireLanded(ctx context.Context, ws ids.WorkspaceID) (string, error)
 }
 
 // Prompts submits the handback to the requester's session.
@@ -69,6 +79,10 @@ type Deps struct {
 	Briefs merge.BriefLoader
 	Log    dlog.Surfaces
 	Now    func() time.Time
+	// WorktreeLock is the landed-worktree reaper's kernel lock
+	// (worktreereap.Deps.LockPath). The requesters are retired under it, so
+	// the reaper never judges a worktree a retirement is removing.
+	WorktreeLock string
 }
 
 // Service is the detached-merge service. It implements merge.DetachedMerges.
@@ -136,6 +150,9 @@ func (s *Service) HandBack(ctx context.Context, requester ids.WorkspaceID, merge
 		log.Error(op, "could not mint a detached merge handback's idempotency key; its requester is not told", withCause(fields, err))
 		return err
 	}
+	if out.Kind == merge.DetachedLanded {
+		s.stampLanding(ctx, requester, mergeWS, fields)
+	}
 	outcome, err := s.deps.Prompts.Submit(ctx, requester, feed.SaidText(text), key,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_HANDBACK, wsm.DeliveryDeferred, nil)
 	if err != nil {
@@ -145,6 +162,28 @@ func (s *Service) HandBack(ctx context.Context, requester ids.WorkspaceID, merge
 	fields["turn"] = string(outcome.Turn)
 	log.Info(op, "handed a detached merge's outcome back to its requester", fields)
 	return nil
+}
+
+// stampLanding records on REQUESTER which commit of its branch the merge
+// workspace landed (its fork head), and when, which is what the sweep retires
+// it by. A failure is recorded and the handback goes on: telling the requester
+// does not depend on it.
+func (s *Service) stampLanding(ctx context.Context, requester ids.WorkspaceID, mergeWS wsm.Workspace, fields dlog.Context) {
+	log := s.deps.Log.Global()
+	if mergeWS.MergeOf == nil || mergeWS.MergeOf.ForkHead == "" {
+		log.Info(op, "the merge workspace was forked before fork heads were recorded; its requester is not stamped landed and is never retired", fields)
+		return
+	}
+	landing := wsm.Landing{Head: mergeWS.MergeOf.ForkHead, At: s.deps.Now()}
+	stamp := dlog.Context{"landed_head": landing.Head, "landed_at": landing.At}
+	for k, v := range fields {
+		stamp[k] = v
+	}
+	if err := s.deps.DB.SetLanded(ctx, requester, &landing); err != nil {
+		log.Error(op, "could not stamp the requester with its landed merge; it is never retired", withCause(stamp, err))
+		return
+	}
+	log.Info(op, "stamped the requester with the commit its detached merge landed", stamp)
 }
 
 // handbackText composes the badge label and the report for one outcome.
@@ -183,29 +222,46 @@ func (s *Service) Run(ctx context.Context, tick <-chan time.Time) {
 	}
 }
 
+// SweepReport is one sweep's account.
+type SweepReport struct {
+	// Removed counts the idle merge workspaces removed.
+	Removed int
+	// Retired counts the idle requesters whose detached merge landed that
+	// were retired.
+	Retired int
+}
+
 // Sweep removes every merge workspace idle for IdleLimit whose merge is not in
-// any queue, and answers how many it removed.
+// any queue, retires every requester whose detached merge landed that has been
+// idle for LandedIdleLimit, and answers how many of each.
 //
 // THE REMOVAL IS RECORDED BEFORE THE WORKSPACE IS DESTROYED, so a bubble that
 // names a workspace with no record left can always say when it went; a nuke
 // that fails leaves the workspace in place and is tried again by the next
 // sweep, which keeps the first recorded instant.
-func (s *Service) Sweep(ctx context.Context) int {
+func (s *Service) Sweep(ctx context.Context) SweepReport {
 	log := s.deps.Log.Global()
 	all, err := s.deps.DB.ListWorkspaces(ctx)
 	if err != nil {
 		sweepFailed(ctx, log, log.Error, "could not list the workspaces; no merge workspace is swept", dlog.Context{}, err)
-		return 0
+		return SweepReport{}
 	}
 	queued, err := s.inAnyQueue(ctx)
 	if err != nil {
 		sweepFailed(ctx, log, log.Error, "could not read the merge queues; no merge workspace is swept", dlog.Context{}, err)
-		return 0
+		return SweepReport{}
 	}
 	now := s.deps.Now()
-	removed := 0
+	var report SweepReport
+	var landed []wsm.Workspace
 	for _, ws := range all {
-		if ws.MergeOf == nil || queued[ws.ID] {
+		if queued[ws.ID] {
+			continue
+		}
+		if ws.Landed != nil && ws.MergedAt == nil && now.Sub(lastLanded(ws)) >= LandedIdleLimit {
+			landed = append(landed, ws)
+		}
+		if ws.MergeOf == nil {
 			continue
 		}
 		last := lastActive(ws)
@@ -213,10 +269,58 @@ func (s *Service) Sweep(ctx context.Context) int {
 			continue
 		}
 		if s.remove(ctx, ws, last, now) {
-			removed++
+			report.Removed++
 		}
 	}
-	return removed
+	report.Retired = s.retireLanded(ctx, landed, now)
+	return report
+}
+
+// retireLanded retires every idle landed requester in LANDED, under the
+// landed-worktree reaper's kernel lock, and answers how many it retired. While
+// the reaper holds the lock nothing is retired: the next sweep does it.
+func (s *Service) retireLanded(ctx context.Context, landed []wsm.Workspace, now time.Time) int {
+	if len(landed) == 0 {
+		return 0
+	}
+	log := s.deps.Log.Global()
+	lockFields := dlog.Context{"lock": s.deps.WorktreeLock, "requesters": len(landed)}
+	lock, held, err := flock.TryExclusive(s.deps.WorktreeLock)
+	if err != nil {
+		sweepFailed(ctx, log, log.Error, "could not take the worktree lock; no idle landed requester is retired", lockFields, err)
+		return 0
+	}
+	if !held {
+		log.Info(op, "the landed-worktree reaper holds the worktree lock; the idle landed requesters are retired by the next sweep", lockFields)
+		return 0
+	}
+	defer func() {
+		if err := lock.Release(); err != nil {
+			sweepFailed(ctx, log, log.Error, "could not release the worktree lock", lockFields, err)
+		}
+	}()
+	retired := 0
+	for _, ws := range landed {
+		if ctx.Err() != nil {
+			break
+		}
+		last := lastLanded(ws)
+		fields := dlog.Context{"requester": string(ws.ID), "landed_head": ws.Landed.Head, "last_active": last,
+			"idle_for": now.Sub(last).Round(time.Second).String(), "idle_limit": LandedIdleLimit.String()}
+		kept, err := s.deps.Workspaces.RetireLanded(ctx, ws.ID)
+		switch {
+		case err != nil:
+			// The verb records its own failures at their site.
+			sweepFailed(ctx, log, log.Debug, "an idle landed requester was not retired; the next sweep tries again", fields, err)
+		case kept != "":
+			fields["kept"] = kept
+			log.Debug(op, "kept an idle landed requester", fields)
+		default:
+			retired++
+			log.Info(op, "retired a requester idle for a day since its detached merge landed", fields)
+		}
+	}
+	return retired
 }
 
 // remove destroys one idle merge workspace and restates its requester's
@@ -266,6 +370,16 @@ func (s *Service) inAnyQueue(ctx context.Context) (map[ids.WorkspaceID]bool, err
 		}
 	}
 	return out, nil
+}
+
+// lastLanded is a landed requester's last activity: its lastActive, or its
+// landing when that is later.
+func lastLanded(ws wsm.Workspace) time.Time {
+	last := lastActive(ws)
+	if ws.Landed != nil && ws.Landed.At.After(last) {
+		return ws.Landed.At
+	}
+	return last
 }
 
 // lastActive is the latest instant anyone used a workspace: created, selected,

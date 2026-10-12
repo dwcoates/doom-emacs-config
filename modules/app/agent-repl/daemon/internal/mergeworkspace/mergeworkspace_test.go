@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -14,6 +15,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
+	"agent-repld/internal/flock"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/merge"
 	"agent-repld/internal/prompthandler"
@@ -35,6 +37,20 @@ type fakeWorkspaces struct {
 	revealErr error
 	revealed  bool
 	reveals   []ids.WorkspaceID
+	// retireKept and retireErr are RetireLanded's answer; onRetire, when set,
+	// runs as it is called. retired records every requester it was asked for.
+	retireKept string
+	retireErr  error
+	onRetire   func()
+	retired    []ids.WorkspaceID
+}
+
+func (f *fakeWorkspaces) RetireLanded(_ context.Context, ws ids.WorkspaceID) (string, error) {
+	if f.onRetire != nil {
+		f.onRetire()
+	}
+	f.retired = append(f.retired, ws)
+	return f.retireKept, f.retireErr
 }
 
 func (f *fakeWorkspaces) CreateMergeWorkspace(ctx context.Context, requester wsm.Workspace, origin wsm.MergeOrigin, name, base string) (wsm.Workspace, error) {
@@ -141,7 +157,8 @@ func newFixture(t *testing.T) *fixture {
 			}
 			return values["label"] + "\n\n" + values["report"], nil
 		},
-		Now: func() time.Time { return f.now },
+		Now:          func() time.Time { return f.now },
+		WorktreeLock: filepath.Join(t.TempDir(), "worktree-reap.lock"),
 	})
 	return f
 }
@@ -325,7 +342,7 @@ func TestSweepRemovesAMergeWorkspaceIdleFor15Days(t *testing.T) {
 	f.now = time.Now().Add(IdleLimit + time.Hour)
 
 	// Act
-	removed := f.svc.Sweep(context.Background())
+	removed := f.svc.Sweep(context.Background()).Removed
 
 	// Assert: recorded, destroyed, and its requester's switches restated.
 	if removed != 1 || len(f.workspaces.nuked) != 1 || f.workspaces.nuked[0] != idle.ID {
@@ -370,7 +387,7 @@ func TestSweepLeavesWhatIsNotAnIdleMergeWorkspace(t *testing.T) {
 			tt.arrange(t, f)
 
 			// Act
-			removed := f.svc.Sweep(context.Background())
+			removed := f.svc.Sweep(context.Background()).Removed
 
 			// Assert
 			if removed != 0 || len(f.workspaces.nuked) != 0 || len(f.feed.marks) != 0 {
@@ -389,7 +406,7 @@ func TestSweepLeavesAMergeWorkspaceItCouldNotDestroyForTheNextSweep(t *testing.T
 	f.workspaces.nukeErr = errors.New("git refused")
 
 	// Act
-	removed := f.svc.Sweep(context.Background())
+	removed := f.svc.Sweep(context.Background()).Removed
 
 	// Assert: not counted, no switch restated, the removal still recorded for
 	// the retry, and the failure warned.
@@ -415,7 +432,7 @@ func TestSweepRestatesNothingForARequesterThatIsGone(t *testing.T) {
 	f.now = time.Now().Add(IdleLimit + time.Hour)
 
 	// Act
-	removed := f.svc.Sweep(context.Background())
+	removed := f.svc.Sweep(context.Background()).Removed
 
 	// Assert
 	if removed != 1 || len(f.feed.marks) != 0 {
@@ -430,7 +447,7 @@ func TestSweepCutShortByTheStandDownRecordsItAtInfo(t *testing.T) {
 	cancel()
 
 	// Act
-	removed := f.svc.Sweep(ctx)
+	removed := f.svc.Sweep(ctx).Removed
 
 	// Assert
 	if removed != 0 {
@@ -459,7 +476,7 @@ func TestSweepWhoseDestroyTheStandDownCutShortRecordsItAtInfo(t *testing.T) {
 	f.workspaces.nukeErr = context.Canceled
 
 	// Act
-	removed := f.svc.Sweep(ctx)
+	removed := f.svc.Sweep(ctx).Removed
 
 	// Assert
 	if removed != 0 {
@@ -581,7 +598,7 @@ func TestSweepStoppedByItsContextIsNoFault(t *testing.T) {
 	cancel()
 
 	// Act
-	removed := f.svc.Sweep(ctx)
+	removed := f.svc.Sweep(ctx).Removed
 
 	// Assert
 	if removed != 0 || len(f.workspaces.nuked) != 0 {
@@ -598,7 +615,7 @@ func TestSweepThatCannotReadTheRegistryIsAnError(t *testing.T) {
 	f.db.Close()
 
 	// Act
-	removed := f.svc.Sweep(context.Background())
+	removed := f.svc.Sweep(context.Background()).Removed
 
 	// Assert
 	if removed != 0 || len(f.workspaces.nuked) != 0 {
@@ -612,5 +629,272 @@ func TestSweepThatCannotReadTheRegistryIsAnError(t *testing.T) {
 	}
 	if cause == nil {
 		t.Fatal("an unreadable registry was not recorded at ERROR with its cause")
+	}
+}
+
+// landedRequester registers a requester and stamps it landed at LANDEDAT.
+func landedRequester(t *testing.T, f *fixture, landedAt time.Time) wsm.Workspace {
+	t.Helper()
+	ws := register(t, f.db, "sample", nil)
+	if err := f.db.SetLanded(context.Background(), ws.ID, &wsm.Landing{Head: "fork-head", At: landedAt}); err != nil {
+		t.Fatalf("SetLanded: %v", err)
+	}
+	return ws
+}
+
+// recordWith answers the first record of this package at LEVEL whose message
+// is MESSAGE, false when none was written.
+func (f *fixture) recordWith(level, message string) (dlog.Record, bool) {
+	for _, r := range f.logs.Records() {
+		if r.Level == level && r.Operation == op && r.Message == message {
+			return r, true
+		}
+	}
+	return dlog.Record{}, false
+}
+
+func TestHandBackOfALandedMergeStampsTheRequesterWithTheForkHead(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	requester := register(t, f.db, "sample", nil)
+	mergeWS := register(t, f.db, "sample-merge", &wsm.MergeOrigin{Requester: requester.ID, Request: "request-1", ForkHead: "fork-head"})
+
+	// Act
+	err := f.svc.HandBack(context.Background(), requester.ID, mergeWS, merge.DetachedOutcome{Kind: merge.DetachedLanded, Branch: "sample"})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("HandBack: %v", err)
+	}
+	loaded, err := f.db.Workspace(context.Background(), requester.ID)
+	if err != nil || loaded.Landed == nil || loaded.Landed.Head != "fork-head" || !loaded.Landed.At.Equal(f.now) {
+		t.Fatalf("Landed = %+v, %v; want the fork head at the handback's instant", loaded.Landed, err)
+	}
+	if r, ok := f.recordWith(dlog.LevelInfo, "stamped the requester with the commit its detached merge landed"); !ok || r.Context["requester"] != string(requester.ID) || r.Context["landed_head"] != "fork-head" {
+		t.Fatalf("no INFO stamp record naming the requester and head: %+v", f.logs.Records())
+	}
+}
+
+func TestHandBackStampsNoLandingWhenTheMergeDidNotLand(t *testing.T) {
+	tests := []struct {
+		name string
+		kind merge.DetachedOutcomeKind
+	}{
+		{name: "failed", kind: merge.DetachedFailed},
+		{name: "abandoned", kind: merge.DetachedAbandoned},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			requester := register(t, f.db, "sample", nil)
+			mergeWS := register(t, f.db, "sample-merge", &wsm.MergeOrigin{Requester: requester.ID, Request: "request-1", ForkHead: "fork-head"})
+
+			// Act
+			if err := f.svc.HandBack(context.Background(), requester.ID, mergeWS, merge.DetachedOutcome{Kind: tt.kind, Branch: "sample"}); err != nil {
+				t.Fatalf("HandBack: %v", err)
+			}
+
+			// Assert
+			loaded, err := f.db.Workspace(context.Background(), requester.ID)
+			if err != nil || loaded.Landed != nil {
+				t.Fatalf("Landed = %+v, %v; want none", loaded.Landed, err)
+			}
+		})
+	}
+}
+
+func TestHandBackOfAMergeWorkspaceWithNoForkHeadStampsNothing(t *testing.T) {
+	// Arrange: forked before fork heads were recorded.
+	f := newFixture(t)
+	requester := register(t, f.db, "sample", nil)
+	mergeWS := register(t, f.db, "sample-merge", &wsm.MergeOrigin{Requester: requester.ID, Request: "request-1"})
+
+	// Act
+	err := f.svc.HandBack(context.Background(), requester.ID, mergeWS, merge.DetachedOutcome{Kind: merge.DetachedLanded, Branch: "sample"})
+
+	// Assert
+	loaded, readErr := f.db.Workspace(context.Background(), requester.ID)
+	if err != nil || readErr != nil || loaded.Landed != nil || len(f.prompts.sent) != 1 {
+		t.Fatalf("HandBack = %v, Landed = %+v, %v with %d submissions; want the handback alone", err, loaded.Landed, readErr, len(f.prompts.sent))
+	}
+	if _, ok := f.recordWith(dlog.LevelInfo, "the merge workspace was forked before fork heads were recorded; its requester is not stamped landed and is never retired"); !ok {
+		t.Fatalf("no INFO record saying why nothing was stamped: %+v", f.logs.Records())
+	}
+}
+
+func TestHandBackWhoseStampFailsRecordsItAndStillHandsBack(t *testing.T) {
+	// Arrange: a requester the registry does not hold.
+	f := newFixture(t)
+	mergeWS := wsm.Workspace{ID: "ws-merge", Name: "sample-merge", MergeOf: &wsm.MergeOrigin{Requester: "ws-gone", Request: "request-1", ForkHead: "fork-head"}}
+
+	// Act
+	err := f.svc.HandBack(context.Background(), "ws-gone", mergeWS, merge.DetachedOutcome{Kind: merge.DetachedLanded, Branch: "sample"})
+
+	// Assert
+	if err != nil || len(f.prompts.sent) != 1 {
+		t.Fatalf("HandBack = %v with %d submissions, want the handback made", err, len(f.prompts.sent))
+	}
+	r, ok := f.recordWith(dlog.LevelError, "could not stamp the requester with its landed merge; it is never retired")
+	if !ok || r.Context["requester"] != "ws-gone" || r.Context["landed_head"] != "fork-head" || r.Context["cause"] == nil {
+		t.Fatalf("no ERROR stamp record naming the requester, head and cause: %+v", f.logs.Records())
+	}
+}
+
+func TestSweepRetiresARequesterIdleForADaySinceItsLanding(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	landedAt := time.Now()
+	requester := landedRequester(t, f, landedAt)
+	f.now = landedAt.Add(LandedIdleLimit + time.Hour)
+
+	// Act
+	report := f.svc.Sweep(context.Background())
+
+	// Assert
+	if report.Retired != 1 || len(f.workspaces.retired) != 1 || f.workspaces.retired[0] != requester.ID {
+		t.Fatalf("report %+v, retired %v; want the idle requester retired", report, f.workspaces.retired)
+	}
+	if r, ok := f.recordWith(dlog.LevelInfo, "retired a requester idle for a day since its detached merge landed"); !ok || r.Context["requester"] != string(requester.ID) {
+		t.Fatalf("no INFO retirement record naming the requester: %+v", f.logs.Records())
+	}
+}
+
+func TestSweepLeavesWhatIsNotAnIdleLandedRequester(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(t *testing.T, f *fixture)
+	}{
+		{name: "no landing", arrange: func(t *testing.T, f *fixture) {
+			register(t, f.db, "plain", nil)
+			f.now = time.Now().Add(LandedIdleLimit + time.Hour)
+		}},
+		{name: "a landing within the day", arrange: func(t *testing.T, f *fixture) {
+			landedRequester(t, f, time.Now())
+			f.now = time.Now().Add(LandedIdleLimit - time.Hour)
+		}},
+		{name: "a selection within the day", arrange: func(t *testing.T, f *fixture) {
+			ws := landedRequester(t, f, time.Now())
+			f.now = time.Now().Add(LandedIdleLimit + time.Hour)
+			if err := f.db.SetCurrent(context.Background(), ws.ID, f.now.Add(-time.Hour)); err != nil {
+				t.Fatalf("SetCurrent: %v", err)
+			}
+		}},
+		{name: "already merged", arrange: func(t *testing.T, f *fixture) {
+			ws := landedRequester(t, f, time.Now())
+			if err := f.db.SetMergedAt(context.Background(), ws.ID, time.Now(), nil); err != nil {
+				t.Fatalf("SetMergedAt: %v", err)
+			}
+			f.now = time.Now().Add(LandedIdleLimit + time.Hour)
+		}},
+		{name: "a queued merge", arrange: func(t *testing.T, f *fixture) {
+			ws := landedRequester(t, f, time.Now())
+			if err := f.db.RequestMerge(context.Background(), wsm.RepoKey(t.TempDir()), ws.ID, wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}, time.Now()); err != nil {
+				t.Fatalf("RequestMerge: %v", err)
+			}
+			f.now = time.Now().Add(LandedIdleLimit + time.Hour)
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			tt.arrange(t, f)
+
+			// Act
+			report := f.svc.Sweep(context.Background())
+
+			// Assert
+			if report.Retired != 0 || len(f.workspaces.retired) != 0 {
+				t.Fatalf("report %+v, retired %v; want nothing retired", report, f.workspaces.retired)
+			}
+		})
+	}
+}
+
+func TestSweepCountsNoRetirementForARequesterTheVerbKept(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	landedRequester(t, f, time.Now())
+	f.now = time.Now().Add(LandedIdleLimit + time.Hour)
+	f.workspaces.retireKept = "dirty"
+
+	// Act
+	report := f.svc.Sweep(context.Background())
+
+	// Assert
+	if report.Retired != 0 || len(f.workspaces.retired) != 1 {
+		t.Fatalf("report %+v, asked %v; want one ask and no retirement", report, f.workspaces.retired)
+	}
+	if r, ok := f.recordWith(dlog.LevelDebug, "kept an idle landed requester"); !ok || r.Context["kept"] != "dirty" {
+		t.Fatalf("no DEBUG keep record with its reason: %+v", f.logs.Records())
+	}
+}
+
+func TestSweepLeavesARequesterTheVerbFailedOnForTheNextSweep(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	landedRequester(t, f, time.Now())
+	f.now = time.Now().Add(LandedIdleLimit + time.Hour)
+	f.workspaces.retireErr = errors.New("fatal: contains modified or untracked files")
+
+	// Act
+	first := f.svc.Sweep(context.Background())
+	f.workspaces.retireErr = nil
+	second := f.svc.Sweep(context.Background())
+
+	// Assert: the verb records its own failure, so the sweep adds no ERROR.
+	if first.Retired != 0 || second.Retired != 1 || len(f.workspaces.retired) != 2 {
+		t.Fatalf("reports %+v then %+v with asks %v; want a retry that retires", first, second, f.workspaces.retired)
+	}
+	if f.loggedAt(dlog.LevelError) {
+		t.Fatalf("the sweep re-recorded the verb's failure at ERROR: %+v", f.logs.Records())
+	}
+}
+
+func TestSweepRetiresNothingWhileTheReaperHoldsTheWorktreeLock(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	landedRequester(t, f, time.Now())
+	f.now = time.Now().Add(LandedIdleLimit + time.Hour)
+	held, ok, err := flock.TryExclusive(f.svc.deps.WorktreeLock)
+	if err != nil || !ok {
+		t.Fatalf("TryExclusive = %v, %v", ok, err)
+	}
+	defer held.Release()
+
+	// Act
+	report := f.svc.Sweep(context.Background())
+
+	// Assert
+	if report.Retired != 0 || len(f.workspaces.retired) != 0 {
+		t.Fatalf("report %+v, retired %v; want nothing retired under the reaper's lock", report, f.workspaces.retired)
+	}
+	if _, ok := f.recordWith(dlog.LevelInfo, "the landed-worktree reaper holds the worktree lock; the idle landed requesters are retired by the next sweep"); !ok {
+		t.Fatalf("no INFO record of the held lock: %+v", f.logs.Records())
+	}
+}
+
+func TestSweepThatCannotTakeTheWorktreeLockIsAnError(t *testing.T) {
+	// Arrange: the lock's directory is a file.
+	f := newFixture(t)
+	landedRequester(t, f, time.Now())
+	f.now = time.Now().Add(LandedIdleLimit + time.Hour)
+	file := filepath.Join(t.TempDir(), "not-a-dir")
+	if err := os.WriteFile(file, nil, 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	f.svc.deps.WorktreeLock = filepath.Join(file, "worktree-reap.lock")
+
+	// Act
+	report := f.svc.Sweep(context.Background())
+
+	// Assert
+	if report.Retired != 0 || len(f.workspaces.retired) != 0 {
+		t.Fatalf("report %+v, retired %v; want nothing retired", report, f.workspaces.retired)
+	}
+	r, ok := f.recordWith(dlog.LevelError, "could not take the worktree lock; no idle landed requester is retired")
+	if !ok || r.Context["lock"] != f.svc.deps.WorktreeLock || r.Context["cause"] == nil {
+		t.Fatalf("no ERROR lock record with its path and cause: %+v", f.logs.Records())
 	}
 }
