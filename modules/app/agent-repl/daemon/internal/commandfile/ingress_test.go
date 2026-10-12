@@ -1103,6 +1103,73 @@ func TestApplyFileQuarantinesAPauseTheOrchestratorRefuses(t *testing.T) {
 	}
 }
 
+func TestApplyFileHoldsAndReleasesTheRollouts(t *testing.T) {
+	tests := []struct {
+		name                    string
+		body                    string
+		wantHolds, wantReleases int
+		wantOutcome             string
+	}{
+		{name: "hold", body: `[{"type":"merge_hold_rollouts","project_dir":"/tree/w1"}]`, wantHolds: 1, wantOutcome: "held"},
+		{name: "release", body: `[{"type":"merge_release_rollouts","project_dir":"/tree/w1"}]`, wantReleases: 1, wantOutcome: "released"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.workspace("w1", "/tree/w1")
+			path := f.write(t, "workspace_commands_hold.json", tt.body)
+
+			// Act.
+			err := f.ingress.ApplyFile(context.Background(), path)
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("ApplyFile: %v", err)
+			}
+			if f.merge.holds != tt.wantHolds || f.merge.releases != tt.wantReleases {
+				t.Fatalf("holds, releases = %d, %d; want %d, %d", f.merge.holds, f.merge.releases, tt.wantHolds, tt.wantReleases)
+			}
+			record := f.record(t, opMergeQueue, "info")
+			if record.Context["outcome"] != tt.wantOutcome || record.Context["requester"] != "w1" {
+				t.Fatalf("record context %v, want outcome=%s requester=w1", record.Context, tt.wantOutcome)
+			}
+		})
+	}
+}
+
+func TestApplyFileQuarantinesARolloutHoldTheOrchestratorRefuses(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		arm  string
+	}{
+		{name: "holding held rollouts", body: `[{"type":"merge_hold_rollouts","project_dir":"/tree/w1"}]`, arm: merge.ArmRolloutsAlreadyHeld},
+		{name: "releasing rollouts not held", body: `[{"type":"merge_release_rollouts","project_dir":"/tree/w1"}]`, arm: merge.ArmRolloutsNotHeld},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.workspace("w1", "/tree/w1")
+			f.merge.holdErr = &merge.RefusalError{Arm: tt.arm, Reason: "arranged"}
+			path := f.write(t, "workspace_commands_hold.json", tt.body)
+
+			// Act.
+			err := f.ingress.ApplyFile(context.Background(), path)
+
+			// Assert.
+			if !errors.Is(err, ErrQuarantined) {
+				t.Fatalf("ApplyFile = %v, want the file quarantined", err)
+			}
+			record := f.record(t, opEntry, "info")
+			if cause, _ := record.Context["cause"].(string); !strings.Contains(cause, tt.arm) {
+				t.Fatalf("record cause %q, want the %s arm named", cause, tt.arm)
+			}
+		})
+	}
+}
+
 // RETARGET entries reach the retarget operation SetWorkspaceParent runs, the
 // parent keyed by its worktree root and null (or the main checkout) top-level.
 

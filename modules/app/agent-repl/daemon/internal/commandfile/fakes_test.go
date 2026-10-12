@@ -142,6 +142,20 @@ type fakeMerge struct {
 	paused   []*merge.RepositoryScope
 	unpaused []*merge.RepositoryScope
 	pauseErr error
+	// holds and releases count HoldRollouts and ReleaseRollouts, and holdErr
+	// is what either answers.
+	holds, releases int
+	holdErr         error
+}
+
+func (m *fakeMerge) HoldRollouts(context.Context) error {
+	m.holds++
+	return m.holdErr
+}
+
+func (m *fakeMerge) ReleaseRollouts(context.Context) error {
+	m.releases++
+	return m.holdErr
 }
 
 func (m *fakeMerge) Evict(_ context.Context, ws ids.WorkspaceID) error {
