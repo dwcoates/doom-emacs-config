@@ -3671,10 +3671,10 @@ ruling, 2026-10-08), never the red of a working turn."
                    (plist-get (plist-get done :unselected) :bg)))))
 
 (ert-deftest agent-repl-test-status-none-is-a-real-answer ()
-  "Only the two sessionless arms take no colour."
+  "Only the two sessionless arms and a workspace still opening take no colour."
   ;; Act / Assert
   (should (equal (sort (agent-repl-test-status--arms-taking "none") #'string<)
-                 (sort (list :none :inactive)
+                 (sort (list :none :inactive :opening)
                        #'string<))))
 
 (ert-deftest agent-repl-test-status-an-unknown-arm-paints-nothing ()
