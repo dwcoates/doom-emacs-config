@@ -121,7 +121,9 @@ func (o *orchestrator) chainPosition(r *run) chainPlace {
 		}
 		place.rank = i
 		if i > 0 {
-			place.base, place.ahead = o.chains[r.repo][i-1].tip, o.chains[r.repo][i-1].ws
+			// THE MERGE BEHIND THE HEAD STANDS ON THE TARGET, not on the head
+			// (race.go): its base is the target's tip as last read.
+			place.base, place.ahead = o.targetTipLocked(r.repo), o.chains[r.repo][i-1].ws
 		}
 		return place
 	}
@@ -392,11 +394,9 @@ func (r *run) leaseAndBase() (ids.LeaseID, string) {
 // the target itself at the head, and for a step behind the head the target as
 // it will stand once the merge ahead lands.
 func (r *run) briefTarget(targetBranch string) string {
-	ahead := r.briefAhead
-	if ahead == "" || !r.isSpeculative() {
-		return targetBranch
-	}
-	return fmt.Sprintf("%s as it will stand once %s, the merge ahead of this one in the queue, lands", targetBranch, r.o.workspaceName(context.Background(), ahead))
+	// EVERY MERGE STANDS ON THE TARGET ITSELF (race.go), behind the head or
+	// not, so its briefs name the target as it is.
+	return targetBranch
 }
 
 // speculate runs the merge's steps ahead of its turn, for as long as it
@@ -453,6 +453,12 @@ func (r *run) speculate(ctx context.Context) (*outcome, error) {
 			if gaveUp, err := r.speculativeGate(ctx, place, targetBranch); err != nil || gaveUp != nil {
 				return gaveUp, err
 			}
+			continue
+		case place.rank == 1 && r.claimedOn != place.base:
+			// ITS GATE PASSED ON THE TARGET'S TIP while the head still runs:
+			// it claims the race to land, once per base (race.go).
+			r.claimedOn = place.base
+			r.o.claimRace(ctx, r, place.base)
 			continue
 		}
 		if err := r.idle(ctx, place.changed); err != nil {
@@ -615,6 +621,13 @@ func (r *run) watchBase(ctx context.Context, base string, cancel, promoted conte
 			place := r.o.chainPosition(r)
 			if place.head {
 				promoted(errPromoted)
+				// A GATE ON A TIP THE TARGET LEFT IS CUT AT THE HEAD TOO
+				// (race.go): every merge stands on the target, so a pass on
+				// the old tip could only be run again.
+				if tip := r.o.targetTip(r.repo); tip != "" && tip != base {
+					cancel(errBaseMoved)
+					return
+				}
 			} else if place.base != base {
 				cancel(errBaseMoved)
 				return

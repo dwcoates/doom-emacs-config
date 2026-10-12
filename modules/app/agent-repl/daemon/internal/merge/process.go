@@ -93,6 +93,7 @@ func (r *run) attempt(ctx context.Context) (outcome, bool, error) {
 	if err != nil {
 		return outcome{}, false, fmt.Errorf("merge: resolving %s's tip: %w", target, err)
 	}
+	r.o.noteTargetTip(r.repo, tip)
 	// A BRANCH ALREADY ON THE TARGET HAS LANDED: there is nothing to rebase,
 	// gate or commit.
 	contained, err := r.git.IsAncestor(ctx, r.subject.dir, r.subject.branch, tip)
@@ -790,6 +791,16 @@ func failedSuites(suites []*frontendv1.FeedMergeTestSuite) []string {
 // began, which starts the process over on its new tip.
 func (r *run) commit(ctx context.Context, tip, head, targetBranch string) (outcome, bool, error) {
 	const op = "daemon.merge.commit"
+	// A HEAD THE MERGE BEHIND IT IS OVERTAKING NEVER COMMITS (race.go): it
+	// waits for its stop, or goes on if the overtaking could not be recorded.
+	if ok, overtaken := r.o.beginLanding(r); !ok {
+		select {
+		case <-overtaken:
+			return outcome{}, true, nil
+		case <-ctx.Done():
+			return outcome{}, false, context.Cause(ctx)
+		}
+	}
 	target := r.subject.targetDir
 	now, err := r.git.ResolveRef(ctx, target, "HEAD")
 	if err != nil {
@@ -866,6 +877,7 @@ func (r *run) commitIn(ctx context.Context, round tabRound, tip, head, targetBra
 
 // landed reads what a merge commit the target now carries brought in.
 func (r *run) landed(ctx context.Context, commit string) outcome {
+	r.o.noteTargetTip(r.repo, commit)
 	commits, err := r.git.LandedRange(ctx, r.subject.targetDir, commit)
 	if err != nil && r.stopping(err) {
 		return outcome{landed: commit}

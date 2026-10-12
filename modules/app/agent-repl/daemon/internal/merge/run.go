@@ -68,7 +68,13 @@ type run struct {
 	// rebases onto. All three are guarded by the orchestrator's mutex.
 	joined      bool
 	speculative bool
-	tip         string
+	// landing reports the run began committing: nothing overtakes it from
+	// here (race.go). Guarded by o.mu.
+	landing bool
+	// claimedOn is the base the run last claimed the race to land on, so it
+	// claims once per base (race.go).
+	claimedOn string
+	tip       string
 	// chainBase is the commit the branch's OWN commits stand on: the tip its
 	// last rebase replayed them onto, empty before its first. A rebase replays
 	// exactly chainBase..branch, so a merge never carries the commits of a
@@ -691,6 +697,11 @@ func (r *run) execute(ctx context.Context) error {
 	outcome, err := r.method(ctx)
 	if err != nil {
 		r.end(ctx, err)
+		// A HEAD THAT LOST THE RACE TO LAND did not fail: it waits behind the
+		// winner to start over (race.go).
+		if _, lost := raceLostOf(ctx); lost {
+			return nil
+		}
 		return err
 	}
 	// THE TERMINAL IS NOT THE STEP'S TO CANCEL. An abandon arriving once the
@@ -711,6 +722,10 @@ func (r *run) end(ctx context.Context, err error) {
 	// boot to resume, whatever error its step returned on the way out.
 	if r.exiting() {
 		r.suspend(settle, err)
+		return
+	}
+	if winner, lost := raceLostOf(ctx); lost {
+		r.yieldTerminal(settle, winner)
 		return
 	}
 	if cause, abandoned := abandonCauseOf(ctx); abandoned {

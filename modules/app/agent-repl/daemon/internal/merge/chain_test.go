@@ -16,7 +16,6 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/gitclient"
 	"agent-repld/internal/ids"
-	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/scriptrunner"
 )
 
@@ -603,115 +602,62 @@ var broken = scriptedRun{Output: "bash: test-all.sh: command not found\n", Code:
 // failing scripts a failing gate.
 var failing = scriptedRun{Output: "[agent-repl-tests] ERROR: daemon failed after 4s with exit code 1\n", Code: 1}
 
-func TestTheMergeBehindTheHeadRebasesOntoTheHeadsTip(t *testing.T) {
-	// Arrange: the head holds in its gate.
+func TestTheMergeBehindTheHeadRebasesOntoTheTargetsTip(t *testing.T) {
+	// Arrange: both gates hold.
 	c := newChain(t)
-	inGate, release := c.runner.hold(c.dirs[theWorkspace])
+	_, releaseHead := c.runner.hold(c.dirs[theWorkspace])
 	enqueue(t, c.h)
 	c.queue(t, "ws-b", "b1")
+	behindGate, releaseBehind := c.runner.hold(c.dirs["ws-b"])
 	done := admitAsync(c.h, context.Background())
-	<-inGate
 
 	// Act.
-	c.awaitIdle(t, "ws-b", c.onTip("ws-b", theWorkspace))
-	own := c.git.own(c.git.ref("feature"), "b-ws-b")
-	close(release)
+	<-behindGate
+	tree, own := c.git.tree("b-ws-b"), c.git.own(c.git.ref("master"), "b-ws-b")
+	close(releaseBehind)
+	close(releaseHead)
 	<-done
+	c.promote(t)
 	c.promote(t)
 
 	// Assert.
-	if !slices.Equal(own, []string{"b1"}) {
-		t.Fatalf("the merge behind the head carries %v on the head's tip, want its own commits [b1]", own)
+	if tree != "b1+base" || !slices.Equal(own, []string{"b1"}) {
+		t.Fatalf("the merge behind the head holds %s carrying %v, want b1+base carrying [b1]: it stands on the target, not the head", tree, own)
 	}
 }
 
-func TestTheChainLandsHeadFirstEachMergeWithOnlyItsOwnCommits(t *testing.T) {
-	// Arrange.
+func TestTheRaceWinnerLandsTheTreeItTestedWithoutTestingAgain(t *testing.T) {
+	// Arrange: the head holds in its gate; the merge behind it passes.
 	c := newChain(t)
-	inGate, release := c.runner.hold(c.dirs[theWorkspace])
+	c.runner.hold(c.dirs[theWorkspace])
 	enqueue(t, c.h)
 	c.queue(t, "ws-b", "b1")
-	done := admitAsync(c.h, context.Background())
-	<-inGate
-	c.awaitIdle(t, "ws-b", c.onTip("ws-b", theWorkspace))
 
 	// Act.
-	close(release)
-	<-done
+	<-admitAsync(c.h, context.Background())
 	c.promote(t)
-
-	// Assert.
-	if got := c.git.landedOwn(); len(got) != 2 || !slices.Equal(got[0], []string{"a1"}) || !slices.Equal(got[1], []string{"b1"}) {
-		t.Fatalf("landings brought %v, want [a1] then [b1]", got)
-	}
-	if tree := c.git.tree("master"); tree != "a1+b1+base" {
-		t.Fatalf("master holds %s, want a1+b1+base", tree)
-	}
-}
-
-func TestASpeculativePassStandsWhenTheMergeAheadLandedAsTested(t *testing.T) {
-	// Arrange.
-	c := newChain(t)
-	inGate, release := c.runner.hold(c.dirs[theWorkspace])
-	enqueue(t, c.h)
-	c.queue(t, "ws-b", "b1")
-	done := admitAsync(c.h, context.Background())
-	<-inGate
-	c.awaitIdle(t, "ws-b", c.onTip("ws-b", theWorkspace))
-
-	// Act.
-	close(release)
-	<-done
 	c.promote(t)
 
 	// Assert.
 	if got := c.runner.ran(c.dirs["ws-b"]); got != 1 {
-		t.Fatalf("the merge behind the head ran its gate %d times, want once: its pass stood", got)
+		t.Fatalf("the winner ran its gate %d times, want once: its pass stood", got)
 	}
 	if !c.recorded("info", "daemon.merge.speculative", "the speculative pass stands") {
 		t.Fatal("the reused pass was not recorded")
 	}
 }
 
-func TestASpeculativePassIsInvalidatedWhenTheTreeAboutToLandDiffers(t *testing.T) {
-	// Arrange: the head fails, so the merge behind it lands without it.
+func TestAHeadThatLostTheRaceAndThenFailsLandsNothingOfItsOwn(t *testing.T) {
+	// Arrange: the head holds in its first gate and breaks in the next.
 	c := newChain(t)
-	inGate, release := c.runner.hold(c.dirs[theWorkspace])
+	c.runner.hold(c.dirs[theWorkspace])
 	c.runner.script(c.dirs[theWorkspace], broken)
 	enqueue(t, c.h)
 	c.queue(t, "ws-b", "b1")
-	done := admitAsync(c.h, context.Background())
-	<-inGate
-	c.awaitIdle(t, "ws-b", c.onTip("ws-b", theWorkspace))
 
 	// Act.
-	close(release)
-	<-done
+	<-admitAsync(c.h, context.Background())
 	c.promote(t)
-
-	// Assert.
-	if got := c.runner.ran(c.dirs["ws-b"]); got != 2 {
-		t.Fatalf("the merge ran its gate %d times, want twice: its speculative pass was for another tree", got)
-	}
-	if !c.recorded("info", "daemon.merge.speculative", "the pass is invalidated") {
-		t.Fatal("the invalidation was not recorded")
-	}
-}
-
-func TestAMergeWhoseHeadDroppedOutLandsWithoutTheHeadsCommits(t *testing.T) {
-	// Arrange.
-	c := newChain(t)
-	inGate, release := c.runner.hold(c.dirs[theWorkspace])
-	c.runner.script(c.dirs[theWorkspace], broken)
-	enqueue(t, c.h)
-	c.queue(t, "ws-b", "b1")
-	done := admitAsync(c.h, context.Background())
-	<-inGate
-	c.awaitIdle(t, "ws-b", c.onTip("ws-b", theWorkspace))
-
-	// Act.
-	close(release)
-	<-done
 	c.promote(t)
 
 	// Assert.
@@ -720,121 +666,26 @@ func TestAMergeWhoseHeadDroppedOutLandsWithoutTheHeadsCommits(t *testing.T) {
 	}
 }
 
-func TestAMergeRestacksWhenTheMergeAheadDropsOut(t *testing.T) {
-	// Arrange: A holds in its gate; B's speculative gate breaks, with C behind
-	// it.
-	c := newChainOfWidth(t, 3)
-	inGate, release := c.runner.hold(c.dirs[theWorkspace])
-	enqueue(t, c.h)
-	c.queue(t, "ws-b", "b1")
-	c.runner.script(c.dirs["ws-b"], broken)
-	c.queue(t, "ws-c", "c1")
-	done := admitAsync(c.h, context.Background())
-	<-inGate
-
-	// Act.
-	c.awaitIdle(t, "ws-c", func() bool {
-		return c.onTip("ws-c", theWorkspace)() && !strings.Contains(c.git.tree("b-ws-c"), "b1")
-	})
-	tree := c.git.tree("b-ws-c")
-	close(release)
-	<-done
-	c.promote(t)
-
-	// Assert.
-	if tree != "a1+base+c1" {
-		t.Fatalf("C holds %s once B dropped out, want a1+base+c1", tree)
-	}
-}
-
-func TestAMergeRestacksWhenTheMergeAheadMovesItsTip(t *testing.T) {
-	// Arrange: A's first gate fails and its repair commits a fix; its second
-	// gate holds until B restacked.
+func TestAConflictMetByTheHeadStartingOverIsResolvedByItsOwnSession(t *testing.T) {
+	// Arrange: A's commit conflicts with B's; A holds in its first gate, so B
+	// wins and A starts over on a target that holds b1.
 	c := newChain(t)
-	c.runner.script(c.dirs[theWorkspace], failing)
-	c.h.queue.onSubmit = func(sub promptqueue.Submission) {
-		if sub.WS == theWorkspace && sub.Origin == conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_TEST_REPAIR {
-			c.git.commitOn("feature", "afix")
-		}
-	}
-	firstGate, firstRelease := c.runner.hold(c.dirs[theWorkspace])
-	secondGate, secondRelease := c.runner.hold(c.dirs[theWorkspace])
+	c.git.conflict("a1", "b1", "x.go")
+	c.runner.hold(c.dirs[theWorkspace])
 	enqueue(t, c.h)
 	c.queue(t, "ws-b", "b1")
-	done := admitAsync(c.h, context.Background())
-	<-firstGate
-	c.awaitIdle(t, "ws-b", c.onTip("ws-b", theWorkspace))
 
 	// Act.
-	close(firstRelease)
-	<-secondGate
-	c.awaitIdle(t, "ws-b", c.onTip("ws-b", theWorkspace))
-	tree, own := c.git.tree("b-ws-b"), c.git.own(c.git.ref("feature"), "b-ws-b")
-	close(secondRelease)
-	<-done
+	<-admitAsync(c.h, context.Background())
+	c.promote(t)
 	c.promote(t)
 
 	// Assert.
-	if tree != "a1+afix+b1+base" || !slices.Equal(own, []string{"b1"}) {
-		t.Fatalf("B holds %s carrying %v on A's moved tip, want a1+afix+b1+base carrying [b1]", tree, own)
+	if got := c.prompts(theWorkspace, conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR); got != 1 {
+		t.Fatalf("A's session got %d conflict prompts starting over on B's landing, want 1", got)
 	}
-}
-
-func TestAConflictReplayedByRerereOnARestackPromptsNothing(t *testing.T) {
-	// Arrange: B's commit conflicts with A's; A's tip later moves.
-	c := newChain(t)
-	c.git.conflict("b1", "a1", "x.go")
-	c.runner.script(c.dirs[theWorkspace], failing)
-	c.h.queue.onSubmit = func(sub promptqueue.Submission) {
-		if sub.WS == theWorkspace && sub.Origin == conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_TEST_REPAIR {
-			c.git.commitOn("feature", "afix")
-		}
-	}
-	firstGate, firstRelease := c.runner.hold(c.dirs[theWorkspace])
-	secondGate, secondRelease := c.runner.hold(c.dirs[theWorkspace])
-	enqueue(t, c.h)
-	c.queue(t, "ws-b", "b1")
-	done := admitAsync(c.h, context.Background())
-	<-firstGate
-	c.awaitIdle(t, "ws-b", c.onTip("ws-b", theWorkspace))
-	close(firstRelease)
-	<-secondGate
-	c.awaitIdle(t, "ws-b", c.onTip("ws-b", theWorkspace))
-
-	// Act.
-	close(secondRelease)
-	<-done
-	c.promote(t)
-
-	// Assert.
-	if got := c.prompts("ws-b", conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR); got != 1 {
-		t.Fatalf("B's session was prompted %d times for one conflict met on three rebases, want once", got)
-	}
-	if !c.recorded("info", "daemon.merge.rerere", "recorded resolution was reused") {
-		t.Fatal("the reused resolution was not recorded")
-	}
-}
-
-func TestAConflictBehindTheHeadIsResolvedByItsOwnSession(t *testing.T) {
-	// Arrange.
-	c := newChain(t)
-	c.git.conflict("b1", "a1", "x.go")
-	inGate, release := c.runner.hold(c.dirs[theWorkspace])
-	enqueue(t, c.h)
-	c.queue(t, "ws-b", "b1")
-	done := admitAsync(c.h, context.Background())
-	<-inGate
-
-	// Act.
-	c.awaitIdle(t, "ws-b", c.onTip("ws-b", theWorkspace))
-	got := c.prompts("ws-b", conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR)
-	close(release)
-	<-done
-	c.promote(t)
-
-	// Assert.
-	if got != 1 {
-		t.Fatalf("B's session got %d conflict prompts while the head was still in its gate, want 1", got)
+	if got := c.prompts("ws-b", conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR); got != 0 {
+		t.Fatalf("B's session got %d conflict prompts, want none: B stood on the target", got)
 	}
 }
 
@@ -949,55 +800,26 @@ func TestAGateClaimsTheHostBudgetAtItsClassAndASpeculativeOneRunsNiced(t *testin
 	}
 }
 
-func TestNoEntryBeyondTheWindowJoinsTheChain(t *testing.T) {
-	// Arrange: four merges, a window of three.
-	c := newChainOfWidth(t, 3)
-	inGate, release := c.runner.hold(c.dirs[theWorkspace])
-	enqueue(t, c.h)
-	c.queue(t, "ws-b", "b1")
-	c.queue(t, "ws-c", "c1")
-	c.queue(t, "ws-d", "d1")
-	done := admitAsync(c.h, context.Background())
-	<-inGate
-	c.awaitIdle(t, "ws-c", c.onTip("ws-c", "ws-b"))
-
-	// Act.
-	_, dRuns := c.h.o.runFor("ws-d")
-	dRuns = dRuns || c.h.o.inChain(c.h.repoKey(), "ws-d")
-	dTree := c.git.tree("b-ws-d")
-	close(release)
-	<-done
-	for _, ws := range []ids.WorkspaceID{"ws-b", "ws-c", "ws-d"} {
-		c.awaitIdle(t, ws, func() bool { return true })
-		c.promote(t)
-	}
-
-	// Assert.
-	if dRuns || dTree != "base+d1" {
-		t.Fatalf("D ran=%v holding %s while beyond the window, want it untouched", dRuns, dTree)
-	}
-}
-
 func TestTheDefaultWindowHoldsTheHeadAndOneMergeBehindIt(t *testing.T) {
 	// Arrange: three merges at the default window (owner ruling, 2026-10-12:
-	// the top two only).
+	// the top two only); both gates in the window hold.
 	c := newChain(t)
-	inGate, release := c.runner.hold(c.dirs[theWorkspace])
+	_, releaseHead := c.runner.hold(c.dirs[theWorkspace])
 	enqueue(t, c.h)
 	c.queue(t, "ws-b", "b1")
+	behindGate, releaseBehind := c.runner.hold(c.dirs["ws-b"])
 	c.queue(t, "ws-c", "c1")
 	done := admitAsync(c.h, context.Background())
-	<-inGate
-	c.awaitIdle(t, "ws-b", c.onTip("ws-b", theWorkspace))
+	<-behindGate
 
 	// Act.
 	_, cRuns := c.h.o.runFor("ws-c")
 	cRuns = cRuns || c.h.o.inChain(c.h.repoKey(), "ws-c")
 	cTree := c.git.tree("b-ws-c")
-	close(release)
+	close(releaseBehind)
+	close(releaseHead)
 	<-done
-	for _, ws := range []ids.WorkspaceID{"ws-b", "ws-c"} {
-		c.awaitIdle(t, ws, func() bool { return true })
+	for i := 0; i < 3; i++ {
 		c.promote(t)
 	}
 
@@ -1010,17 +832,19 @@ func TestTheDefaultWindowHoldsTheHeadAndOneMergeBehindIt(t *testing.T) {
 	}
 }
 
-func TestARestartMidChainResumesTheMergeBehindTheHeadAtItsStep(t *testing.T) {
-	// Arrange: A holds in its gate with B passed behind it; the daemon exits.
+func TestARestartMidRaceResumesBothMergesAndLandsEachWithItsOwnCommits(t *testing.T) {
+	// Arrange: both gates hold; the daemon exits mid-race.
 	c := newChain(t)
-	inGate, _ := c.runner.hold(c.dirs[theWorkspace])
+	_, releaseHead := c.runner.hold(c.dirs[theWorkspace])
 	enqueue(t, c.h)
 	c.queue(t, "ws-b", "b1")
+	behindGate, releaseBehind := c.runner.hold(c.dirs["ws-b"])
 	first := c.h.o
 	done := admitAsync(c.h, context.Background())
-	<-inGate
-	c.awaitIdle(t, "ws-b", c.onTip("ws-b", theWorkspace))
+	<-behindGate
 	first.Drain(context.Background())
+	close(releaseHead)
+	close(releaseBehind)
 	<-done
 	waitGone(t, first)
 	next, err := newOrchestrator(c.h.deps())
@@ -1034,17 +858,24 @@ func TestARestartMidChainResumesTheMergeBehindTheHeadAtItsStep(t *testing.T) {
 	if err := next.Recover(context.Background()); err != nil {
 		t.Fatalf("Recover: %v", err)
 	}
-	if err := c.h.admit(context.Background()); err != nil {
-		t.Fatalf("the resumed head ended on: %v", err)
+	for i := 0; i < 3; i++ {
+		c.promote(t)
 	}
-	c.promote(t)
 
 	// Assert.
-	if got := c.git.landedOwn(); len(got) != 2 || !slices.Equal(got[1], []string{"b1"}) {
-		t.Fatalf("landings brought %v, want A then B's own b1", got)
+	got := c.git.landedOwn()
+	if len(got) != 2 {
+		t.Fatalf("landings brought %v, want two", got)
 	}
-	if got := c.runner.ran(c.dirs["ws-b"]); got != 1 {
-		t.Fatalf("B ran its gate %d times across the restart, want once: its recorded pass stood", got)
+	own := map[string]bool{}
+	for _, l := range got {
+		own[strings.Join(l, ",")] = true
+	}
+	if !own["a1"] || !own["b1"] {
+		t.Fatalf("landings brought %v, want one of [a1] and one of [b1]", got)
+	}
+	if tree := c.git.tree("master"); tree != "a1+b1+base" {
+		t.Fatalf("master holds %s, want a1+b1+base", tree)
 	}
 }
 

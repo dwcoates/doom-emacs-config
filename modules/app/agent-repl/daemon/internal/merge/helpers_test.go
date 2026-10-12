@@ -533,6 +533,30 @@ func (f *fakeDB) renumber(repo wsm.RepoKey) {
 	}
 }
 
+func (f *fakeDB) YieldMergeHead(_ context.Context, repo wsm.RepoKey, loser, winner ids.WorkspaceID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	queue := f.queues[repo]
+	li, wi := -1, -1
+	for i, entry := range queue {
+		switch entry.Workspace {
+		case loser:
+			li = i
+		case winner:
+			wi = i
+		}
+	}
+	if li < 0 || wi < 0 || li >= wi || queue[li].State != wsm.MergeAdmitted || queue[wi].State != wsm.MergeAdmitted {
+		return fmt.Errorf("yield %s to %s: not two admitted entries in that order", loser, winner)
+	}
+	queue[li].State = wsm.MergeQueued
+	moving := queue[wi]
+	copy(queue[li+1:wi+1], queue[li:wi])
+	queue[li] = moving
+	f.renumber(repo)
+	return nil
+}
+
 func (f *fakeDB) AdmitMerge(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
