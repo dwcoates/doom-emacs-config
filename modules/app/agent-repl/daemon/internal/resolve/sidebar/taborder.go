@@ -6,6 +6,7 @@ import (
 	"agentrepl/protohelpers/rosterwalk"
 
 	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
 )
 
 // tabBar resolves the editor's tab bar: every open workspace in REGISTRY
@@ -14,8 +15,8 @@ import (
 // tab. A tab is withheld, not dropped, when the user hid its workspace or its
 // repository's section is collapsed, so a client cycling from a withheld
 // current workspace still knows its neighbours. A merged workspace files under
-// recently merged whatever its hidden flag, so only its repository's fold can
-// withhold its tab, exactly as its merged group follows that fold. A hidden
+// recently merged whatever its hidden flag (wsm.Workspace.Withheld, the one
+// statement of visibility the daemon also runs sessions by). A hidden
 // merge workspace has no tab at all until it is revealed (wsm.Workspace.MergeHidden).
 func (r *resolver) tabBar() *frontendv1.RosterTabBar {
 	folded := map[ids.RepoID]bool{}
@@ -28,10 +29,10 @@ func (r *resolver) tabBar() *frontendv1.RosterTabBar {
 			continue
 		}
 		tab := &frontendv1.RosterTab{Workspace: &workspacev1.WorkspaceRef{Id: string(ws.ID), Dir: ws.Dir}}
-		switch {
-		case ws.MergedAt == nil && ws.Hidden:
+		switch ws.Withheld(folded[ws.Repo]) {
+		case wsm.WithheldHidden:
 			tab.Visibility = &frontendv1.RosterTab_WithheldHidden{WithheldHidden: &frontendv1.RosterTabWithheldHidden{}}
-		case folded[ws.Repo]:
+		case wsm.WithheldCollapsed:
 			tab.Visibility = &frontendv1.RosterTab_WithheldCollapsed{WithheldCollapsed: &frontendv1.RosterTabWithheldCollapsed{}}
 		default:
 			tab.Visibility = &frontendv1.RosterTab_Drawn{Drawn: &frontendv1.RosterTabDrawn{}}

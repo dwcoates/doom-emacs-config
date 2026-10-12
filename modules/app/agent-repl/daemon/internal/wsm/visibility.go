@@ -1,0 +1,60 @@
+package wsm
+
+// Withholding is whether, and why, the editor's tab bar withholds an open
+// workspace's tab. It is THE ONE STATEMENT of a workspace's visibility: the
+// roster's tab bar draws it, and the daemon decides from it which workspaces
+// run (Runs), so what the user sees and what the daemon runs cannot disagree.
+type Withholding int
+
+const (
+	// Drawn is a workspace the tab bar draws.
+	Drawn Withholding = iota
+	// WithheldHidden is a workspace the user hid (SetWorkspaceHidden).
+	WithheldHidden
+	// WithheldCollapsed is a workspace whose repository section is collapsed.
+	WithheldCollapsed
+)
+
+// String names the withholding for the records.
+func (w Withholding) String() string {
+	switch w {
+	case Drawn:
+		return "drawn"
+	case WithheldHidden:
+		return "hidden"
+	case WithheldCollapsed:
+		return "collapsed"
+	default:
+		return "unknown"
+	}
+}
+
+// Withheld answers whether the tab bar withholds the workspace's tab, given
+// whether its repository's section is collapsed. A merged workspace files under
+// recently merged whatever its hidden flag, so only its repository's fold can
+// withhold it, exactly as its merged group follows that fold.
+func (ws Workspace) Withheld(repoFolded bool) Withholding {
+	switch {
+	case ws.MergedAt == nil && ws.Hidden:
+		return WithheldHidden
+	case repoFolded:
+		return WithheldCollapsed
+	default:
+		return Drawn
+	}
+}
+
+// Runs reports whether the daemon runs the workspace's session (owner
+// principle, docs/protobuf-design/open-tabs.md: ONLY OPEN AND VISIBLE
+// WORKSPACES RUN). A workspace the user hid, or whose repository section is
+// collapsed, runs nothing.
+//
+// A HIDDEN MERGE WORKSPACE RUNS. It is withheld by its async merge, not by
+// the user, and its session is what carries that merge; it is drawn in no tab
+// bar until revealed, and once revealed it follows the ordinary rule.
+func (ws Workspace) Runs(repoFolded bool) bool {
+	if ws.MergeHidden() {
+		return true
+	}
+	return ws.Withheld(repoFolded) == Drawn
+}
