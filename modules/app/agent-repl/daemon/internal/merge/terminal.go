@@ -819,6 +819,25 @@ func (r *run) selfReload(ctx context.Context, out outcome) {
 	if out.failed != "" || out.landed == "" || !r.selfCheckout || len(out.commits) == 0 {
 		return
 	}
+	// A HELD ROLLOUT IS READ AT THE LANDING, never cached, so the hold a
+	// predecessor took is the one a successor answers (rollouthold.go). A hold
+	// that cannot be read does not tell the deploy: a landing not deployed is
+	// recovered by a deploy by hand, a hand-deployed build replaced is not.
+	hold, err := r.o.deps.DB.MergeRolloutHold(ctx)
+	if err != nil {
+		r.o.log(ctx, r.ws).Info(op, "a merge landed in this daemon's own checkout, but the rollout hold could not be read; the deploy is not told",
+			dlog.Context{"workspace": string(r.ws), "commit": out.landed, "commits": len(out.commits), "cause": err.Error()})
+		return
+	}
+	if hold.Held {
+		shas := make([]string, 0, len(out.commits))
+		for _, c := range out.commits {
+			shas = append(shas, c.SHA)
+		}
+		r.o.log(ctx, r.ws).Info(op, "a merge landed in this daemon's own checkout while the rollouts are held; the deploy is not told",
+			dlog.Context{"workspace": string(r.ws), "commit": out.landed, "commits": shas, "held_since": hold.Since})
+		return
+	}
 	// ONE MERGE IS ONE LANDING, AND ONE DEPLOY: the deploy is told once with
 	// every commit the merge landed, never once per commit.
 	r.o.log(ctx, r.ws).Info(op, "a merge landed in this daemon's own checkout; the deploy is told once",

@@ -280,6 +280,59 @@ func TestSelfReloadSkipsAFailedMerge(t *testing.T) {
 	}
 }
 
+// TestSelfReloadSkipsAHeldRollout covers the hold: the merge lands into the
+// daemon's own checkout, and the deploy is not told.
+func TestSelfReloadSkipsAHeldRollout(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.ownCheckout()
+	h.db.rolloutHold = wsm.RolloutHold{Held: true, Since: time.Unix(1, 0)}
+	h.landsCleanly("abc123def4567")
+	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
+	h.gatePasses("daemon")
+	enqueue(t, h)
+
+	// Act.
+	if err := h.admit(context.Background()); err != nil {
+		t.Fatalf("the merge failed: %v", err)
+	}
+
+	// Assert.
+	h.rollout.mu.Lock()
+	fired := h.rollout.fired
+	h.rollout.mu.Unlock()
+	if fired != 0 {
+		t.Fatalf("the self-reload fired %d times while the rollouts are held, want none", fired)
+	}
+	record, ok := h.recordFor("info", "daemon.merge.self_reload")
+	if !ok || record.Message != "a merge landed in this daemon's own checkout while the rollouts are held; the deploy is not told" {
+		t.Fatalf("self_reload INFO record = %+v (found %v), want the held landing named", record, ok)
+	}
+}
+
+// TestSelfReloadSkipsAnUnreadableHold covers the read failure: the deploy is
+// not told, because a deploy could replace the build a hold keeps.
+func TestSelfReloadSkipsAnUnreadableHold(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.ownCheckout()
+	h.db.rolloutHoldErr = errors.New("state database unreadable")
+	h.landsCleanly("abc123def4567")
+	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
+	h.gatePasses("daemon")
+	enqueue(t, h)
+
+	// Act.
+	_ = h.admit(context.Background())
+
+	// Assert.
+	h.rollout.mu.Lock()
+	defer h.rollout.mu.Unlock()
+	if h.rollout.fired != 0 {
+		t.Fatal("the self-reload fired although the rollout hold could not be read")
+	}
+}
+
 // TestDisplacedTurnIsResubmittedExactlyOnce covers the capture's whole purpose:
 // the user's interrupted work comes back, and comes back once.
 func TestDisplacedTurnIsResubmittedExactlyOnce(t *testing.T) {

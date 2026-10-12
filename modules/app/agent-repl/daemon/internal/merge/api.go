@@ -80,6 +80,14 @@ type Orchestrator interface {
 	Pause(ctx context.Context, scope *RepositoryScope) error
 	// Unpause resumes starting merges, with the same scoping as Pause.
 	Unpause(ctx context.Context, scope *RepositoryScope) error
+	// HoldRollouts holds the queue's rollouts, daemon-wide and durably:
+	// merges keep running and landing, but a landing in the daemon's own
+	// checkout no longer tells the deploy, so a hand-deployed build is kept.
+	// A hold of held rollouts is refused (rollouts_already_held).
+	HoldRollouts(ctx context.Context) error
+	// ReleaseRollouts ends the hold; nothing is deployed retroactively. A
+	// release of rollouts that are not held is refused (rollouts_not_held).
+	ReleaseRollouts(ctx context.Context) error
 	// Evict removes a workspace's merge from the queue. A merge that is
 	// already RUNNING is ABANDONED: it is ended through the one release path,
 	// which gives back its lease, its queue entry, its ledger interval and its
