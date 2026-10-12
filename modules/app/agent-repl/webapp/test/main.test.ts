@@ -211,7 +211,7 @@ async function runBoot(rec: BootRecord): Promise<void> {
   vi.doMock("../src/lifecycle/lifecycle.js", () => ({
     adoptAtBoot: vi.fn(async () => {
       rec.order.push("adopt");
-      return await rec.adopt();
+      return rec.adopt();
     }),
     startLifecycle: vi.fn(() => {
       rec.order.push("lifecycle");
