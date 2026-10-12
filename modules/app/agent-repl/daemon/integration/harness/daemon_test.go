@@ -110,3 +110,26 @@ func TestRefuseInMemoryReuseAcceptsADurableRoot(t *testing.T) {
 		t.Fatalf("refuseInMemoryReuse = %v, want a root never run in memory accepted", err)
 	}
 }
+
+func TestRootIsFresh(t *testing.T) {
+	tests := []struct {
+		name string
+		opts Opts
+		want bool
+	}{
+		{name: "a root StartDaemon mints is fresh", opts: Opts{}, want: true},
+		{name: "a root the caller minted and declared is fresh", opts: Opts{StateDir: "/x/state", FreshStateDir: true}, want: true},
+		{name: "a root handed over from another daemon is not", opts: Opts{StateDir: "/x/state"}, want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := rootIsFresh(tc.opts)
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("rootIsFresh(%+v) = %v, want %v", tc.opts, got, tc.want)
+			}
+		})
+	}
+}

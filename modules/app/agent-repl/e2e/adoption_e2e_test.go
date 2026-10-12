@@ -95,7 +95,7 @@ func TestColdBootReadsReplayFromStore(t *testing.T) {
 	// sidecar's own cursor advance) before any bounce is simulated — the
 	// binding alternative to a hand-seeded storedAssistantEvent fixture
 	// (E2E-EVENT-INVENTORY.md ruling 3).
-	w := NewWorld(t, WorldOpts{})
+	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{DurableState: true}})
 	w.ExpectWarnings("daemon.rollout.reconcile")
 	repo := harness.NewRepo(t)
 	ws := harness.Register(t, w.Daemon, repo.Dir)
@@ -157,7 +157,7 @@ func adCountLogMessage(t *testing.T, workspaceDir, op, substr string) int {
 func TestSessionStartedReAnnouncedOnEveryNewWatch(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	w := NewWorld(t, WorldOpts{})
+	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{DurableState: true}})
 	w.ExpectWarnings("daemon.rollout.reconcile")
 	repo := harness.NewRepo(t)
 	ws := harness.Register(t, w.Daemon, repo.Dir)
@@ -298,9 +298,10 @@ func adSelfRepoWorld(t *testing.T) (*harness.Repo, *World) {
 	script.SetExitCode(0)
 	script.SetStdout("e2e: passed in 1s\n")
 	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{
-		SelfRepo: selfRepo.Dir,
-		ExtraEnv: []string{"AGENT_REPL_TEST_ALL_SCRIPT=" + script.Path},
-		Timeout:  HandoverChainTimeout,
+		DurableState: true,
+		SelfRepo:     selfRepo.Dir,
+		ExtraEnv:     []string{"AGENT_REPL_TEST_ALL_SCRIPT=" + script.Path},
+		Timeout:      HandoverChainTimeout,
 	}})
 	return selfRepo, w
 }

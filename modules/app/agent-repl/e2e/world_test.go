@@ -266,6 +266,9 @@ func NewWorld(t *testing.T, opts WorldOpts) *World {
 	daemonOpts.ShimMain = shimMain
 	daemonOpts.StoreSocket = store.Socket
 	daemonOpts.StateDir = stateRoot
+	// A root this world minted is fresh, so its state lives in memory unless
+	// the test asked for DurableState (harness.Opts.FreshStateDir).
+	daemonOpts.FreshStateDir = opts.DaemonOpts.StateDir == ""
 	daemonOpts.ExtraEnv = worldDaemonEnv(daemonOpts.ExtraEnv, spoolRoot, lockBin)
 	// THE REAL SERVICES ARE WHAT A DEPLOY JUDGES. They report their own
 	// builds into the daemon's lock dir (startStore/startSidecar are pointed

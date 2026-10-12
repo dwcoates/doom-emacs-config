@@ -645,7 +645,8 @@ func TestDisplacedTurnCapturedEndedThenResubmittedExactlyOnce(t *testing.T) {
 	gatePath := filepath.Join(t.TempDir(), "displaced-turn-gate")
 	repo, _ := mqCleanRepo(t)
 	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{
-		SelfRepo: repo.Dir,
+		DurableState: true,
+		SelfRepo:     repo.Dir,
 		ExtraEnv: []string{
 			turnGatePathEnv + "=" + gatePath,
 			turnGateTextEnv + "=" + displacedText,
