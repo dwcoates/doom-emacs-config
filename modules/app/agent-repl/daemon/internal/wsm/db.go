@@ -426,9 +426,9 @@ type DB interface {
 	// PutAgentReplSession replaces agent-repl's session whole.
 	PutAgentReplSession(ctx context.Context, session AgentReplSession) error
 
-	// TurnStartedAt answers when a recorded turn was opened; ErrNotFound for a
-	// turn the workspace never recorded.
-	TurnStartedAt(ctx context.Context, id WorkspaceID, turn TurnID) (time.Time, error)
+	// Turn answers one recorded turn whole; ErrNotFound for a turn the
+	// workspace never recorded.
+	Turn(ctx context.Context, id WorkspaceID, turn TurnID) (Turn, error)
 
 	// ClaimServing records this daemon instance as the workspace's serving
 	// owner — the handover's per-workspace transfer.
