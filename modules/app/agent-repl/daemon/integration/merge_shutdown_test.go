@@ -4,6 +4,7 @@ package integration
 
 import (
 	"database/sql"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -176,6 +177,13 @@ func firstRunHoldsGate(t *testing.T) (env []string, started string) {
 	if err := syscall.Mkfifo(hold, 0o600); err != nil {
 		t.Fatalf("making the gate's pipe: %v", err)
 	}
+	// THE HELD RUN ENDS WITH THE TEST, however the test ends. The gate runs
+	// in its own process group, so a daemon the harness SIGKILLs at cleanup
+	// leaves it holding on the pipe forever, reparented and outside every
+	// stray sweep (its argv names this temp dir, not the state root). Opening
+	// the pipe for writing and closing it hands the reader its EOF; with no
+	// reader the open answers ENXIO at once and there is nothing to release.
+	t.Cleanup(func() { releaseHold(t, hold) })
 	gate := filepath.Join(gateDir, "test-all.sh")
 	body := "#!/bin/sh\n" +
 		"if [ ! -f '" + started + "' ]; then : > '" + started + "'; cat '" + hold + "' > /dev/null; fi\n" +
@@ -184,6 +192,23 @@ func firstRunHoldsGate(t *testing.T) (env []string, started string) {
 		t.Fatalf("writing the gate: %v", err)
 	}
 	return []string{"AGENT_REPL_TEST_ALL_SCRIPT=" + gate}, started
+}
+
+// releaseHold gives a reader blocked on the pipe at path its EOF, and does
+// nothing when no reader holds it.
+func releaseHold(t *testing.T, path string) {
+	t.Helper()
+	fd, err := syscall.Open(path, syscall.O_WRONLY|syscall.O_NONBLOCK, 0)
+	if errors.Is(err, syscall.ENXIO) {
+		return
+	}
+	if err != nil {
+		t.Errorf("releasing the gate's pipe %s: %v", path, err)
+		return
+	}
+	if err := syscall.Close(fd); err != nil {
+		t.Errorf("closing the gate's pipe %s: %v", path, err)
+	}
 }
 
 // TestAMergeRunningThroughAHandoverResumesInTheSuccessorAndLands covers the
