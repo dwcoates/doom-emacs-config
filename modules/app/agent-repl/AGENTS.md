@@ -336,7 +336,8 @@ unreachable from a live process.
     with FREEONCLOSE and the close segfaults.
   - Migration tests still migrate from scratch.
 - TESTS WHOSE SUBJECT IS THE FILE STAY ON FILES: migrating or reopening a file,
-  read-only and joining opens, two handles on one file (leases, boot, rollout),
+  read-only and joining opens, two handles on one file (leases, boot, the
+  rollout tests' joining handle, `newFileHarness`),
   the WAL, the checkpoint job, a reader overlapping a held write lock, and the
   connections' pragmas (`fileStore`, `newFileStore`, `newDurableFileStore`).
 - TEST DATABASES SKIP FORCED FLUSHES (`synchronous=OFF`).

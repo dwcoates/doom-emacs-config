@@ -1451,7 +1451,7 @@ func TestAJoiningDaemonKeepsTheRendezvousItArmedAfterRetiringTheManifest(t *test
 func TestAHandoverAdoptionClaimsOnTheJoiningReadOnlyHandle(t *testing.T) {
 	// Arrange: the incumbent has released the transferred workspace, and this
 	// successor still holds the read-only handle it joined with.
-	h := newHarness(t)
+	h := newFileHarness(t)
 	first, _ := joinedWithOneOfTwo(t, h)
 	if err := h.db.ReleaseServing(context.Background(), first, selfInstance); err != nil {
 		t.Fatalf("ReleaseServing: %v", err)
