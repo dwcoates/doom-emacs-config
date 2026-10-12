@@ -8,8 +8,8 @@
 # ASYNC (it runs in a hidden merge workspace forked from it, named by the
 # caller, and the requesting workspace stays free).
 #
-# The queue-control verbs (--dequeue-*, --pause-queue, --resume-queue,
-# --hold-rollouts, --release-rollouts) ask,
+# The queue-control verbs (--dequeue-*, --move-*, --pause-queue,
+# --resume-queue, --hold-rollouts, --release-rollouts) ask,
 # from the workspace this shell is inside, for the queue itself to change, and
 # wait (bounded) for the answer, which they print: the outcome when applied, the
 # refusal's cause when refused.
@@ -55,6 +55,14 @@
 #   --dequeue-own                Take this workspace's own merge off the queue.
 #   --dequeue-workspace <dir>    Take ANOTHER workspace's merge off the queue,
 #                                named by its worktree.
+#   --move-up-own                Move this workspace's own waiting merge one
+#                                place up the queue.
+#   --move-up-workspace <dir>    Move ANOTHER workspace's waiting merge one
+#                                place up the queue, named by its worktree.
+#   --move-down-own              Move this workspace's own waiting merge one
+#                                place down the queue.
+#   --move-down-workspace <dir>  Move ANOTHER workspace's waiting merge one
+#                                place down the queue, named by its worktree.
 #   --pause-queue [<repo-dir>]   Pause the queue of the repository whose main
 #                                checkout is <repo-dir>, else of every
 #                                repository.
@@ -79,8 +87,8 @@
 #   0  requested (end the turn; the outcome reports into this session),
 #      announced (--announce-one-shot; the turn goes on),
 #      removed (--remove-branch), or applied (queue-control verbs; the printed
-#      outcome line is evicted, not_queued, paused, resumed, held or
-#      released, or unread)
+#      outcome line is evicted, moved_up, moved_down, unmoved, not_queued,
+#      paused, resumed, held or released, or unread)
 #   2  script/usage error, or the merge or control could not be requested
 #   5  refused by the daemon; why (or how to read why) is printed (an async
 #      merge's name already taken is refused here: pick another name)
@@ -300,6 +308,20 @@ case "${1:-}" in
     [ -n "${2:-}" ] || die "--dequeue-workspace needs the workspace's worktree directory"
     run_verb -evict-dir "$2"
     ;;
+  --move-up-own | --move-down-own)
+    no_front "$1"
+    [ -z "${2:-}" ] || die "$1 takes no argument, not $2"
+    move=-move-up
+    [ "$1" = --move-up-own ] || move=-move-down
+    run_verb "$move"
+    ;;
+  --move-up-workspace | --move-down-workspace)
+    no_front "$1"
+    [ -n "${2:-}" ] || die "$1 needs the workspace's worktree directory"
+    move=-move-up
+    [ "$1" = --move-up-workspace ] || move=-move-down
+    run_verb "$move" -move-dir "$2"
+    ;;
   --pause-queue | --resume-queue)
     no_front "$1"
     control=-pause
@@ -317,7 +339,7 @@ case "${1:-}" in
     run_verb "$control"
     ;;
   *)
-    printf 'usage: run.sh --enqueue-own [--in-place | --sync | --keep-open | --async <name> [--pick <instruction>]] | --announce-one-shot | --land-workspace <dir> | --land-branch <branch> | --land-commits <commit>... | --pr-merged | --remove-branch <branch> | --dequeue-own | --dequeue-workspace <dir> | --pause-queue [<repo-dir>] | --resume-queue [<repo-dir>] | --hold-rollouts | --release-rollouts  (any merge verb also takes --front)\n' >&2
+    printf 'usage: run.sh --enqueue-own [--in-place | --sync | --keep-open | --async <name> [--pick <instruction>]] | --announce-one-shot | --land-workspace <dir> | --land-branch <branch> | --land-commits <commit>... | --pr-merged | --remove-branch <branch> | --dequeue-own | --dequeue-workspace <dir> | --move-up-own | --move-up-workspace <dir> | --move-down-own | --move-down-workspace <dir> | --pause-queue [<repo-dir>] | --resume-queue [<repo-dir>] | --hold-rollouts | --release-rollouts  (any merge verb also takes --front)\n' >&2
     exit 1
     ;;
 esac
