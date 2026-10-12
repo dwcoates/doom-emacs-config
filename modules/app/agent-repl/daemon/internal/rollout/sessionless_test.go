@@ -133,3 +133,73 @@ func TestBringUpSessionlessGoesThroughTheSharedBringUp(t *testing.T) {
 		t.Fatalf("bring-up records = %v, want bringup.Run's per-workspace record", records(h.log, opBringUp))
 	}
 }
+
+func TestBringUpSessionlessDoesNotStartAHiddenWorkspace(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	if err := h.db.SetHidden(context.Background(), ws, true); err != nil {
+		t.Fatalf("SetHidden: %v", err)
+	}
+
+	// Act
+	h.c.bringUpSessionless([]wsm.Workspace{sessionlessRecord(t, h, ws)}, nil)
+
+	// Assert
+	if got := h.Started(); len(got) != 0 {
+		t.Fatalf("started = %v, want nothing for a hidden workspace", got)
+	}
+}
+
+func TestBringUpSessionlessDoesNotStartACollapsedWorkspace(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	record := sessionlessRecord(t, h, ws)
+	if err := h.db.SetRepositoryFolded(context.Background(), record.Repo, true); err != nil {
+		t.Fatalf("SetRepositoryFolded: %v", err)
+	}
+
+	// Act
+	h.c.bringUpSessionless([]wsm.Workspace{record}, nil)
+
+	// Assert
+	if got := h.Started(); len(got) != 0 {
+		t.Fatalf("started = %v, want nothing for a collapsed workspace", got)
+	}
+}
+
+func TestBringUpSessionlessNeverMarksAHiddenWorkspace(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	if err := h.db.SetHidden(context.Background(), ws, true); err != nil {
+		t.Fatalf("SetHidden: %v", err)
+	}
+
+	// Act
+	h.c.bringUpSessionless([]wsm.Workspace{sessionlessRecord(t, h, ws)}, nil)
+
+	// Assert
+	if got := h.Marker(); len(got) != 0 {
+		t.Fatalf("marker edges = %v, want none for a hidden workspace", got)
+	}
+}
+
+func TestBringUpSessionlessStatesTheWithheldWorkspacesAtInfo(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	if err := h.db.SetHidden(context.Background(), ws, true); err != nil {
+		t.Fatalf("SetHidden: %v", err)
+	}
+
+	// Act
+	h.c.bringUpSessionless([]wsm.Workspace{sessionlessRecord(t, h, ws)}, nil)
+
+	// Assert
+	infos := levelRecords(records(h.log, opBringUp), dlog.LevelInfo)
+	if len(infos) != 1 || !slices.Contains(infos[0].Context["workspaces"].([]string), string(ws)) {
+		t.Fatalf("bring-up info records = %+v, want one naming the hidden workspace", infos)
+	}
+}

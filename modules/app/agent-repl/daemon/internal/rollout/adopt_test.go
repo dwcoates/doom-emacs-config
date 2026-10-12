@@ -1602,6 +1602,26 @@ func TestAnAdoptionOfAClosedFreeLockStartsNoSession(t *testing.T) {
 	}
 }
 
+func TestAnAdoptionOfAHiddenFreeLockStartsNoSession(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := freeLockAdoption(t, h)
+	if err := h.db.SetHidden(context.Background(), ws, true); err != nil {
+		t.Fatalf("SetHidden: %v", err)
+	}
+
+	// Act
+	arm(t, h, ws, Participants{})
+
+	// Assert
+	if got := h.Started(); len(got) != 0 {
+		t.Fatalf("started = %v, want none for a hidden workspace", got)
+	}
+	if got := h.Marker(); len(got) != 0 {
+		t.Fatalf("marker edges = %v, want none for a hidden workspace", got)
+	}
+}
+
 func TestAnAdoptionWhoseViewsFailLowersTheMarkerAndStartsNothing(t *testing.T) {
 	// Arrange
 	h := newHarness(t, func(d *Deps) {
