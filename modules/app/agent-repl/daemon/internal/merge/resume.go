@@ -150,44 +150,51 @@ func (r *run) factsNow() footer.MergeFacts {
 // knows never reached the queue before the restart -- the record was written,
 // the submission was not -- and is submitted now, under the same turn id.
 func (r *run) reattachTurn(ctx context.Context, turn ids.TurnID, text string, origin conversationv1.PromptOrigin) (wsm.TurnClose, error) {
+	return r.o.reattachTurn(ctx, r.ws, dlog.Context{"lease": string(r.lease.ID)}, turn, text, origin)
+}
+
+// reattachTurn answers how a merge turn of WS that a dead daemon submitted
+// ended, by the rule run.reattachTurn states; FIELDS name the merge in each
+// record.
+func (o *orchestrator) reattachTurn(ctx context.Context, ws ids.WorkspaceID, fields dlog.Context, turn ids.TurnID, text string, origin conversationv1.PromptOrigin) (wsm.TurnClose, error) {
 	const op = "daemon.merge.resume"
-	fields := dlog.Context{"workspace": string(r.ws), "lease": string(r.lease.ID), "turn": string(turn)}
+	fields = withField(withField(fields, "workspace", string(ws)), "turn", string(turn))
 	if turn == "" {
 		return wsm.CloseFailed, fmt.Errorf("merge: the progress record names no turn to reattach to")
 	}
-	closes, err := r.o.deps.DB.TurnCloses(ctx, r.ws, []ids.TurnID{turn})
+	closes, err := o.deps.DB.TurnCloses(ctx, ws, []ids.TurnID{turn})
 	if err != nil {
 		return wsm.CloseFailed, fmt.Errorf("merge: reading whether the merge's turn ended: %w", err)
 	}
 	if closed, ok := closes[turn]; ok {
-		r.o.log(ctx, r.ws).Info(op, "the merge's turn ended while the daemon was down; the merge goes on from its end",
+		o.log(ctx, ws).Info(op, "the merge's turn ended while the daemon was down; the merge goes on from its end",
 			withField(fields, "close", closed.How.String()))
 		return closed.How, nil
 	}
-	recorded, err := r.o.deps.DB.RecordedTurns(ctx, r.ws, []ids.TurnID{turn})
+	recorded, err := o.deps.DB.RecordedTurns(ctx, ws, []ids.TurnID{turn})
 	if err != nil {
 		return wsm.CloseFailed, fmt.Errorf("merge: reading whether the merge's turn was delivered: %w", err)
 	}
 	if recorded[turn] {
-		r.o.log(ctx, r.ws).Info(op, "reattached to the merge's turn, still running in the session", fields)
-		return r.o.deps.AwaitTurnEnd(ctx, r.ws, turn)
+		o.log(ctx, ws).Info(op, "reattached to the merge's turn, still running in the session", fields)
+		return o.deps.AwaitTurnEnd(ctx, ws, turn)
 	}
-	held, found, err := r.o.deps.DB.HeldPromptByTurn(ctx, turn)
+	held, found, err := o.deps.DB.HeldPromptByTurn(ctx, turn)
 	if err != nil {
 		return wsm.CloseFailed, fmt.Errorf("merge: reading whether the merge's turn is held: %w", err)
 	}
 	if found && held.Tombstone == nil {
-		r.o.log(ctx, r.ws).Info(op, "the merge's turn is still held in the prompt queue; the merge waits for it", fields)
-		if err := r.ensureSession(ctx); err != nil {
+		o.log(ctx, ws).Info(op, "the merge's turn is still held in the prompt queue; the merge waits for it", fields)
+		if err := o.ensureSession(ctx, ws); err != nil {
 			return wsm.CloseFailed, fmt.Errorf("merge: starting a session for the merge's held turn: %w", err)
 		}
-		return r.o.deps.AwaitTurnEnd(ctx, r.ws, turn)
+		return o.deps.AwaitTurnEnd(ctx, ws, turn)
 	}
-	r.o.log(ctx, r.ws).Info(op, "the merge's turn never reached the session before the restart; it is submitted now", fields)
-	if err := r.ensureSession(ctx); err != nil {
+	o.log(ctx, ws).Info(op, "the merge's turn never reached the session before the restart; it is submitted now", fields)
+	if err := o.ensureSession(ctx, ws); err != nil {
 		return wsm.CloseFailed, fmt.Errorf("merge: starting a session for the merge's turn: %w", err)
 	}
-	return r.submit(ctx, turn, text, origin)
+	return o.submit(ctx, ws, turn, text, origin)
 }
 
 // suspend lets go of what a run holds IN THIS PROCESS when the daemon's exit
