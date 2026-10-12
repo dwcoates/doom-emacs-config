@@ -28,9 +28,9 @@ type fakeWorkspaces struct {
 	createErr error
 	nukeErr   error
 	// onNuke, when set, runs as Nuke is called, before nukeErr is answered.
-	onNuke func()
-	created   []string
-	nuked     []ids.WorkspaceID
+	onNuke  func()
+	created []string
+	nuked   []ids.WorkspaceID
 }
 
 func (f *fakeWorkspaces) CreateMergeWorkspace(ctx context.Context, requester wsm.Workspace, origin wsm.MergeOrigin, branch string) (wsm.Workspace, error) {
