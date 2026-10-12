@@ -354,6 +354,32 @@ func TestTheFixingAttemptBriefPrescribesRunningOnlyTheFailingTestsUntilTheyPass(
 	}
 }
 
+func TestTheFixingAttemptBriefHandsAFailingTestThatCannotRunAloneToAnInvestigatingWorkspace(t *testing.T) {
+	// Arrange.
+	want := []string{
+		"IF A FAILING TEST CANNOT BE RUN ON ITS OWN",
+		"do not weaken the test or the code",
+		"without compromising coverage or production UI/UX",
+		"`/create-or-update-workspace`",
+		"send it a `prompt`",
+		"`create` a new NON-one-shot workspace",
+		"Then carry on with this fix",
+	}
+
+	// Act.
+	got, err := Load(repoPromptsDir, "merge-test-failure-resolve")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	for _, phrase := range want {
+		if !strings.Contains(got.Body, phrase) {
+			t.Fatalf("merge-test-failure-resolve does not say %q", phrase)
+		}
+	}
+}
+
 func TestPathNamesTheBriefsFile(t *testing.T) {
 	// Act.
 	got := Path("/p", "b")
