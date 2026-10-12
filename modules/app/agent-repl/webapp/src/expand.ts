@@ -18,6 +18,7 @@
  * ones when the reader returns to the feed's tail or leaves the page (see
  * `AutoCollapse`). Both go through the one collapse, `collapseSection`.
  */
+import { createPresence, pagePresence, type Presence } from "./presence.js";
 import { CONTROL_SELECTOR } from "./control.js";
 import { ancestorMatching } from "./dom.js";
 import { log } from "./log.js";
@@ -429,8 +430,9 @@ export function expandedSectionsOf(host: HTMLElement): HTMLElement[] {
  *     AppKit hands it on mouse-down), the WKWebView resigns, and WebKit blurs
  *     the page's window. Switching Emacs frames or applications resigns key
  *     window, which blurs it too.
- *   - `pageHidden`: the page went hidden (`visibilitychange`), which the
- *     xwidget reports whenever Emacs is not the frontmost application.
+ *   - `pageHidden`: the reader can no longer see the page (presence.ts): the
+ *     host stopped showing it, or its document went hidden, which the xwidget
+ *     reports whenever Emacs is not the frontmost application.
  *
  * SCROLLING AN OPEN SECTION OUT OF VIEW DOES NOT CLOSE IT (owner ruling,
  * 2026-10-01, replacing the wheel-armed `scrollOutside` close of 2026-09-30):
@@ -441,8 +443,12 @@ export function expandedSectionsOf(host: HTMLElement): HTMLElement[] {
  */
 export class AutoCollapse {
   private readonly hosts = new Map<HTMLElement, { afterToggle?: AfterToggle; owned: OwnedSections }>();
+  private unsubscribePresence: (() => void) | null = null;
 
-  constructor(private readonly doc: Document) {}
+  constructor(
+    private readonly doc: Document,
+    private readonly presence: Presence,
+  ) {}
 
   /**
    * Put HOST's open sections under this owner, closed with AFTER_TOGGLE,
@@ -488,20 +494,21 @@ export class AutoCollapse {
     this.collapseOutside("windowBlur", null);
   };
 
-  private readonly onVisibility = (): void => {
-    if (this.doc.visibilityState !== "hidden") return;
+  private readonly onPresence = (seen: boolean): void => {
+    if (seen) return;
     this.collapseOutside("pageHidden", null);
   };
 
   private attach(): void {
     const win = this.requireWindow();
-    this.doc.addEventListener("visibilitychange", this.onVisibility);
+    this.unsubscribePresence = this.presence.onChange(this.onPresence);
     win.addEventListener("blur", this.onBlur);
   }
 
   private detach(): void {
     const win = this.requireWindow();
-    this.doc.removeEventListener("visibilitychange", this.onVisibility);
+    this.unsubscribePresence?.();
+    this.unsubscribePresence = null;
     win.removeEventListener("blur", this.onBlur);
   }
 
@@ -520,11 +527,15 @@ function roleOf(section: HTMLElement): string | undefined {
 /** The one owner per document. */
 const owners = new WeakMap<Document, AutoCollapse>();
 
-/** The page's one `AutoCollapse`, made on first use. */
+/**
+ * The page's one `AutoCollapse`, made on first use. The page's own document
+ * reads the page's presence; any other document (a test's) reads its own
+ * visibility.
+ */
 export function autoCollapseFor(doc: Document): AutoCollapse {
   let owner = owners.get(doc);
   if (owner === undefined) {
-    owner = new AutoCollapse(doc);
+    owner = new AutoCollapse(doc, doc === document ? pagePresence() : createPresence(doc, false));
     owners.set(doc, owner);
   }
   return owner;

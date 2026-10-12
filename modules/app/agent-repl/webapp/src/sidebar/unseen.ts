@@ -14,20 +14,22 @@
  * last, drawing only the newest is the same final rail with the unseen
  * intermediate states skipped.
  *
- * WHAT "SEEN" MEANS. `document.visibilityState` alone is NOT it: Emacs's
+ * WHAT "SEEN" MEANS. The page's presence (presence.ts) says whether the
+ * host shows it and its document is visible. That alone is NOT it: Emacs's
  * xwidget reports "hidden" whenever Emacs is not the frontmost application,
  * even for the page on screen (prompt-wave-driver.ts), and that page must keep
  * drawing for a reader glancing at it from another application. So a page is
- * seen while it is visible OR while its own workspace is the roster's
+ * seen while its presence says so OR while its own workspace is the roster's
  * `current` -- the workspace Emacs is standing in, whose page is the one shown.
  * A page is held only when both say no.
  *
  * A HELD ROSTER IS DRAWN THE MOMENT THE PAGE IS SEEN AGAIN: on the push that
  * makes its workspace current (that push is the newest, so it is the one
- * drawn), and on the page turning visible (the held one is drawn then).
+ * drawn), and on the page's presence turning seen (the held one is drawn then).
  */
 import type { WorkspaceRoster } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { log } from "../log.js";
+import { createPresence, pagePresence, type Presence } from "../presence.js";
 import { requireMessage } from "../rpc/strict.js";
 
 /** What the gate needs from its environment, injectable for tests. */
@@ -35,6 +37,8 @@ export interface UnseenEnv {
   readonly doc: Document;
   /** Monotonic milliseconds, for the resumed draw's cost. */
   readonly now: () => number;
+  /** Whether a reader can see the page; the document's own visibility when absent. */
+  readonly presence?: Presence;
 }
 
 /** The gate between the roster stream and the rail's drawing. */
@@ -43,13 +47,13 @@ export interface UnseenGate {
   offer(roster: WorkspaceRoster): void;
   /** How many pushes are held, undrawn, right now. */
   held(): number;
-  /** Detach the visibility listener and drop what is held. */
+  /** Detach the presence listener and drop what is held. */
   dispose(): void;
 }
 
 /** The default environment: the page itself. */
 export function unseenEnv(): UnseenEnv {
-  return { doc: document, now: () => performance.now() };
+  return { doc: document, now: () => performance.now(), presence: pagePresence() };
 }
 
 /** The workspace id ROSTER names current, or null when it names none. */
@@ -65,11 +69,14 @@ function currentOf(roster: WorkspaceRoster): string | null {
  */
 export function createUnseenGate(own: string, draw: (roster: WorkspaceRoster) => void, env: UnseenEnv = unseenEnv()): UnseenGate {
   const { doc, now } = env;
+  const owned = env.presence === undefined ? createPresence(doc, false) : null;
+  const presence = env.presence ?? owned;
+  if (presence === null) throw new Error("unseen: no presence");
   let latest: WorkspaceRoster | null = null;
   let heldCount = 0;
 
   /** Draw ROSTER as the end of a hold that SKIPPED pushes never drawn. */
-  const drawHeld = (cause: "visible" | "current", roster: WorkspaceRoster, skipped: number): void => {
+  const drawHeld = (cause: "seen" | "current", roster: WorkspaceRoster, skipped: number): void => {
     latest = null;
     heldCount = 0;
     const started = now();
@@ -84,12 +91,11 @@ export function createUnseenGate(own: string, draw: (roster: WorkspaceRoster) =>
     });
   };
 
-  const onVisibility = (): void => {
-    if (doc.visibilityState !== "visible" || latest === null) return;
+  const unsubscribe = presence.onChange((seen) => {
+    if (!seen || latest === null) return;
     // The newest held push is the one drawn; the rest were skipped.
-    drawHeld("visible", latest, heldCount - 1);
-  };
-  doc.addEventListener("visibilitychange", onVisibility);
+    drawHeld("seen", latest, heldCount - 1);
+  });
 
   return {
     offer(roster: WorkspaceRoster): void {
@@ -103,7 +109,7 @@ export function createUnseenGate(own: string, draw: (roster: WorkspaceRoster) =>
         draw(roster);
         return;
       }
-      if (doc.visibilityState === "visible") {
+      if (presence.seen()) {
         latest = null;
         heldCount = 0;
         draw(roster);
@@ -116,7 +122,8 @@ export function createUnseenGate(own: string, draw: (roster: WorkspaceRoster) =>
       return heldCount;
     },
     dispose(): void {
-      doc.removeEventListener("visibilitychange", onVisibility);
+      unsubscribe();
+      owned?.dispose();
       latest = null;
       heldCount = 0;
     },

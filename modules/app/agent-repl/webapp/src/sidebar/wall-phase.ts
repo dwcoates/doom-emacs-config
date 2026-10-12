@@ -28,6 +28,7 @@
  * animations it suspended, so a seek there cannot be undone by the resume.
  */
 import { log } from "../log.js";
+import { createPresence, pagePresence, type Presence } from "../presence.js";
 
 /** The slice of a Web Animation the seek reads and moves. */
 export interface PhasedAnimation {
@@ -46,8 +47,10 @@ export interface WallPhaseEnv {
   animations?: AnimationSource;
   /** The wall clock, in epoch milliseconds. */
   now?: () => number;
-  /** The document whose visibility is watched. */
+  /** The document whose visibility is watched when no presence is given. */
   doc?: Document;
+  /** Whether a reader can see the page; the page's own presence when absent. */
+  presence?: Presence;
   /** Schedules a callback for the next animation frame. */
   frame?: (callback: () => void) => void;
 }
@@ -124,6 +127,8 @@ export function installWallPhase(host: Element, env: WallPhaseEnv = {}): WallPha
   const now = env.now ?? ((): number => Date.now());
   const doc = env.doc ?? document;
   const frame = env.frame ?? ((callback: () => void): void => void requestAnimationFrame(() => callback()));
+  const owned = env.presence === undefined && doc !== document ? createPresence(doc, false) : null;
+  const presence = env.presence ?? owned ?? pagePresence();
 
   let disposed = false;
   const seek = (): void => {
@@ -133,19 +138,19 @@ export function installWallPhase(host: Element, env: WallPhaseEnv = {}): WallPha
       context: { animations: sought },
     });
   };
-  const shown = (): void => {
-    if (doc.visibilityState !== "visible") return;
+  const unsubscribe = presence.onChange((seen) => {
+    if (!seen) return;
     frame(() => {
       if (!disposed) seek();
     });
-  };
-  doc.addEventListener("visibilitychange", shown);
+  });
 
   return {
     seek,
     dispose(): void {
       disposed = true;
-      doc.removeEventListener("visibilitychange", shown);
+      unsubscribe();
+      owned?.dispose();
     },
   };
 }

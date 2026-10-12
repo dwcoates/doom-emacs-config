@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { createPresence } from "../../src/presence.js";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   installWallPhase,
@@ -232,6 +233,23 @@ describe("keeping a rail on the wall clock", () => {
 
     // Assert
     expect(pulse.currentTime).toBe(300);
+  });
+
+  it("re-seeks on the first frame after its host shows the page", () => {
+    // Arrange
+    const pulse = loop(1300);
+    const doc = fakeDocument("visible");
+    const presence = createPresence(doc, true);
+    const frames = fakeFrames();
+    installWallPhase(document.createElement("nav"), { animations: () => [pulse], now: () => 2900, doc, frame: frames.frame, presence });
+
+    // Act
+    presence.setShown(true);
+    frames.run();
+
+    // Assert
+    expect(pulse.currentTime).toBe(300);
+    presence.dispose();
   });
 
   it("waits for that frame rather than seeking on the event", () => {
