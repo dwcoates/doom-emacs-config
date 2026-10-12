@@ -393,6 +393,8 @@ module, so this is the cheapest place to catch a stale load line."
 `load-file-name' is bound only while a file is loading, so a test body
 that reads it at run time gets nil.")
 
+(defvar agent-repl-doctor-inhibit-checks)
+
 (defun agent-repl-config-test--load-doctor ()
   "Load doctor.el once, with its top-level aggregation neutralized.
 doctor.el is a SCRIPT, not a library: `doom doctor' loads it for the side
@@ -404,7 +406,8 @@ nothing."
     (cl-letf (((symbol-function 'warn!) (lambda (&rest _) nil))
               ((symbol-function 'error!) (lambda (&rest _) nil))
               ((symbol-function 'agent-repl-connect-read-daemon-addr) (lambda () nil)))
-      (load (expand-file-name "doctor.el" agent-repl-config-test--module-root) nil t))
+      (let ((agent-repl-doctor-inhibit-checks t))
+        (load (expand-file-name "doctor.el" agent-repl-config-test--module-root) nil t)))
     (setq agent-repl-config-test--doctor-loaded t)))
 
 (defmacro agent-repl-config-test--with-doctor (&rest body)
@@ -499,6 +502,16 @@ Every doctor log record lands in `agent-repl-config-test--doctor-records'."
   (with-temp-buffer
     (insert-file-contents (expand-file-name "doctor.el" agent-repl-config-test--module-root))
     (should (search-forward "agent-repl--doctor-requirements-issues\n" nil t))))
+
+(ert-deftest agent-repl-config-test-doctor-loaded-as-a-library-runs-no-check ()
+  "Loading doctor.el with the checks inhibited starts no process."
+  (let ((processes 0))
+    (cl-letf (((symbol-function 'call-process) (lambda (&rest _) (cl-incf processes) 0))
+              ((symbol-function 'warn!) (lambda (&rest _) nil))
+              ((symbol-function 'error!) (lambda (&rest _) nil)))
+      (let ((agent-repl-doctor-inhibit-checks t))
+        (load (expand-file-name "doctor.el" agent-repl-config-test--module-root) nil t)))
+    (should (= processes 0))))
 
 (ert-deftest agent-repl-config-test-doctor-reports-no-daemon-addr ()
   "An absent daemon.addr means no daemon has been started."
