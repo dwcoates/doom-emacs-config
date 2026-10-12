@@ -27,6 +27,63 @@ func TestEvictRefusesAWorkspaceWithNothingQueued(t *testing.T) {
 	}
 }
 
+// TestFrontRefusesAWorkspaceWithNothingQueued covers the refusal a front
+// request gets for a merge that is not there.
+func TestFrontRefusesAWorkspaceWithNothingQueued(t *testing.T) {
+	// Arrange: a workspace with no queued merge.
+	h := newHarness(t)
+
+	// Act.
+	err := h.o.Front(context.Background(), theWorkspace)
+
+	// Assert.
+	refusal, refused := Refused(err)
+	if !refused || refusal.Arm != ArmNoSuchQueuedMerge {
+		t.Fatalf("Front answered %v, want the %s refusal", err, ArmNoSuchQueuedMerge)
+	}
+}
+
+// TestFrontRedrawsTheQueueInItsNewOrder covers the publication: every merge
+// on the queue is told its new place.
+func TestFrontRedrawsTheQueueInItsNewOrder(t *testing.T) {
+	// Arrange: three merges wait.
+	h := newHarness(t)
+	enqueue(t, h)
+	queueAnother(t, h, "ws-2", "two")
+	queueAnother(t, h, "ws-3", "three")
+
+	// Act.
+	if err := h.o.Front(context.Background(), "ws-3"); err != nil {
+		t.Fatalf("Front: %v", err)
+	}
+
+	// Assert.
+	first, second, third := h.factsOf("ws-3"), h.factsOf(theWorkspace), h.factsOf("ws-2")
+	if first.QueuePlace != 1 || second.QueuePlace != 2 || third.QueuePlace != 3 {
+		t.Fatalf("places = %d, %d, %d, want 1, 2, 3", first.QueuePlace, second.QueuePlace, third.QueuePlace)
+	}
+}
+
+// TestFrontLeavesAMergeAlreadyFirstWhereItIs covers the success answer for a
+// merge the request finds where it asks it to be.
+func TestFrontLeavesAMergeAlreadyFirstWhereItIs(t *testing.T) {
+	// Arrange: two merges wait.
+	h := newHarness(t)
+	enqueue(t, h)
+	queueAnother(t, h, "ws-2", "two")
+
+	// Act.
+	err := h.o.Front(context.Background(), theWorkspace)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Front: %v", err)
+	}
+	if got := h.factsOf(theWorkspace); got.QueuePlace != 1 {
+		t.Fatalf("place = %d, want 1", got.QueuePlace)
+	}
+}
+
 // TestAdmissionTakesTheRepositoryLock covers the exclusivity: while a merge
 // runs, the repository's lock is held so no second daemon admits from the same
 // queue.
