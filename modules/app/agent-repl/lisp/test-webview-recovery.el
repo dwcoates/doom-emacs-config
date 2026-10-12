@@ -22,20 +22,13 @@
 (defvar agent-repl-test-wr--mounted nil
   "Workspaces the pass asked frontend.el to pre-create, newest first.")
 
-(defvar agent-repl-test-wr--host nil
-  "What the stubbed `agent-repl-webhost-xwidget' answers: the host, or nil.")
-
 (defmacro agent-repl-test-wr--with-pass (&rest body)
-  "Run BODY with a fresh park, a host present, and the mount recorded."
+  "Run BODY with the mount recorded."
   (declare (indent 0))
   `(agent-repl-test--with-clean-state
-     (let ((agent-repl--webview-precreate-parked nil)
-           (agent-repl-test-wr--mounted nil)
-           (agent-repl-test-wr--host 'host-xwidget))
+     (let ((agent-repl-test-wr--mounted nil))
        (cl-letf (((symbol-function 'agent-repl--frontend-precreate-webview)
                   (lambda (ws) (push ws agent-repl-test-wr--mounted) :created))
-                 ((symbol-function 'agent-repl-webhost-xwidget)
-                  (lambda () agent-repl-test-wr--host))
                  ((symbol-function 'agent-repl--panels-on-view-created) #'ignore))
          ,@body))))
 
@@ -161,8 +154,8 @@
         ;; Assert
         (should (equal announced '("alpha")))))))
 
-(ert-deftest agent-repl-test-wr-a-made-page-is-recorded-with-its-reason ()
-  "Each made page says what let it be made."
+(ert-deftest agent-repl-test-wr-a-made-page-is-recorded ()
+  "Each made page is recorded by its workspace."
   ;; Arrange
   (agent-repl-test-wr--with-pass
     (agent-repl-test-wr--eligible '("alpha")
@@ -171,13 +164,12 @@
           ;; Act
           (agent-repl-webview-precreate-all))
         ;; Assert
-        (should (agent-repl-test-wr--said-p logged "precreate-created ws=alpha" "reason=batch"))))))
+        (should (agent-repl-test-wr--said-p logged "precreate-created ws=alpha"))))))
 
 ;;;; ---- The pass's quit deferral ----
 ;;
-;; A pass runs off the desktop FOCUS EDGE, which is the same instant a
-;; keypress arrives, so it is one of the likeliest places for a real `C-g' to
-;; land while Emacs is busy rather than waiting in a read.
+;; A pass can run at the same instant a keypress arrives, so it is a place a
+;; real `C-g' can land while Emacs is busy rather than waiting in a read.
 
 (ert-deftest agent-repl-test-wr-the-pass-defers-a-quit-that-lands-in-it ()
   "A C-g arriving inside a pass is held for the command loop, not taken here."
@@ -200,315 +192,21 @@
       ;; Assert
       (should (equal agent-repl-test-wr--mounted '("alpha"))))))
 
-;;;; ---- Holding: only visible-but-unfocused ----
-;;
-;; Creating a WKWebView instantiates a native view and macOS activates the
-;; owning process when doing so would bring a window forward.  That can
-;; happen from ONE state only: a frame already on screen while Emacs is not
-;; the focused app.  A HIDDEN Emacs (an `open -gj' launch) creating a view
-;; stays hidden, and a FOCUSED Emacs has no focus to steal -- both proceed
-;; and paint.  Only visible-but-unfocused holds.  These pin that invariant,
-;; the created-reason log, and the focus-edge release.  Only the HOST's
-;; creation holds: once the host exists, making a page creates no native view.
-;;
-;; The three macros below drive the guard's two inputs -- visibility and
-;; focus -- directly, so a batch process (which has no real frames) can
-;; exercise every desktop state.  `noninteractive' is bound to nil where
-;; the hold itself is under test, since the hold short-circuits to nil in
-;; batch and every pass test above relies on that.
+;;;; ---- The host regardless of focus ----
 
-(defmacro agent-repl-test-wr--visible-unfocused (&rest body)
-  "Run BODY as a VISIBLE interactive Emacs that does NOT hold focus.
-This is the one held state: creating a view here could foreground Emacs."
-  (declare (indent 0))
-  `(let ((noninteractive nil))
-     (cl-letf (((symbol-function 'agent-repl--emacs-visible-p) (lambda (&rest _) t))
-               ((symbol-function 'agent-repl--emacs-focused-p) (lambda (&rest _) nil)))
-       ,@body)))
-
-(defmacro agent-repl-test-wr--hidden (&rest body)
-  "Run BODY as a HIDDEN interactive Emacs (no visible frame, unfocused).
-Creating a view here cannot foreground a hidden app, so it must proceed."
-  (declare (indent 0))
-  `(let ((noninteractive nil))
-     (cl-letf (((symbol-function 'agent-repl--emacs-visible-p) (lambda (&rest _) nil))
-               ((symbol-function 'agent-repl--emacs-focused-p) (lambda (&rest _) nil)))
-       ,@body)))
-
-(defmacro agent-repl-test-wr--focused (&rest body)
-  "Run BODY as a VISIBLE interactive Emacs that DOES hold desktop focus.
-A focused app has no focus to steal, so creating a view must proceed."
-  (declare (indent 0))
-  `(let ((noninteractive nil))
-     (cl-letf (((symbol-function 'agent-repl--emacs-visible-p) (lambda (&rest _) t))
-               ((symbol-function 'agent-repl--emacs-focused-p) (lambda (&rest _) t)))
-       ,@body)))
-
-;;;; ---- The guard predicates ----
-
-(ert-deftest agent-repl-test-wr-visible-frames-report-visible ()
-  "A mapped frame is a positively-visible answer."
-  ;; Arrange / Act / Assert
-  (cl-letf (((symbol-function 'display-graphic-p) (lambda (&rest _) t))
-            ((symbol-function 'visible-frame-list) (lambda () '(frame))))
-    (should (agent-repl--emacs-visible-p))))
-
-(ert-deftest agent-repl-test-wr-no-visible-frame-is-hidden ()
-  "An empty `visible-frame-list' on a graphic display is the hidden case."
-  ;; Arrange / Act / Assert
-  (cl-letf (((symbol-function 'display-graphic-p) (lambda (&rest _) t))
-            ((symbol-function 'visible-frame-list) (lambda () nil)))
-    (should-not (agent-repl--emacs-visible-p))))
-
-(ert-deftest agent-repl-test-wr-unreadable-visibility-counts-as-visible ()
-  "A state we cannot read errs toward visible, so the guard parks."
-  ;; Arrange — no window system to answer the question.
-  (cl-letf (((symbol-function 'display-graphic-p) (lambda (&rest _) nil)))
-    ;; Act / Assert
-    (should (agent-repl--emacs-visible-p))))
-
-(ert-deftest agent-repl-test-wr-can-foreground-only-when-visible-and-unfocused ()
-  "The foregrounding state is exactly visible AND not focused."
-  ;; Arrange / Act / Assert
-  (cl-letf (((symbol-function 'agent-repl--emacs-visible-p) (lambda (&rest _) t))
-            ((symbol-function 'agent-repl--emacs-focused-p) (lambda (&rest _) nil)))
-    (should (agent-repl--emacs-can-foreground-p))))
-
-(ert-deftest agent-repl-test-wr-hidden-cannot-foreground ()
-  "A hidden app creating a view cannot raise itself."
-  ;; Arrange / Act / Assert
-  (cl-letf (((symbol-function 'agent-repl--emacs-visible-p) (lambda (&rest _) nil))
-            ((symbol-function 'agent-repl--emacs-focused-p) (lambda (&rest _) nil)))
-    (should-not (agent-repl--emacs-can-foreground-p))))
-
-(ert-deftest agent-repl-test-wr-focused-cannot-foreground ()
-  "A focused app has no focus to steal."
-  ;; Arrange / Act / Assert
-  (cl-letf (((symbol-function 'agent-repl--emacs-visible-p) (lambda (&rest _) t))
-            ((symbol-function 'agent-repl--emacs-focused-p) (lambda (&rest _) t)))
-    (should-not (agent-repl--emacs-can-foreground-p))))
-
-;;;; ---- The pass honours the guard ----
-
-(ert-deftest agent-repl-test-wr-a-visible-unfocused-pass-without-a-host-makes-nothing ()
-  "A visible background Emacs must not take the desktop to create the host."
+(ert-deftest agent-repl-test-wr-an-unfocused-emacs-with-no-host-makes-pages ()
+  "THE HOST IS MADE REGARDLESS OF FOCUS (owner ruling, 2026-10-12): a visible
+but unfocused Emacs with no host yet still makes every owed page."
   ;; Arrange
   (agent-repl-test-wr--with-pass
-    (setq agent-repl-test-wr--host nil)
     (agent-repl-test-wr--eligible '("alpha")
-      ;; Act
-      (agent-repl-test-wr--visible-unfocused
-        (agent-repl-webview-precreate-all))
-      ;; Assert
-      (should (null agent-repl-test-wr--mounted)))))
-
-(ert-deftest agent-repl-test-wr-a-visible-unfocused-pass-without-a-host-parks ()
-  "The parked pass waits for the focus edge."
-  ;; Arrange
-  (agent-repl-test-wr--with-pass
-    (setq agent-repl-test-wr--host nil)
-    (agent-repl-test-wr--eligible '("alpha")
-      ;; Act
-      (agent-repl-test-wr--visible-unfocused
-        (agent-repl-webview-precreate-all))
-      ;; Assert
-      (should agent-repl--webview-precreate-parked))))
-
-(ert-deftest agent-repl-test-wr-a-park-is-recorded ()
-  "A pass that did not happen has to say why, and name the state."
-  ;; Arrange
-  (agent-repl-test-wr--with-pass
-    (setq agent-repl-test-wr--host nil)
-    (agent-repl-test-wr--eligible '("alpha")
-      (let (logged)
-        (agent-repl-test-wr--logging logged
+      (let ((noninteractive nil))
+        (cl-letf (((symbol-function 'visible-frame-list) (lambda () '(frame)))
+                  ((symbol-function 'agent-repl--emacs-focused-p) (lambda (&rest _) nil)))
           ;; Act
-          (agent-repl-test-wr--visible-unfocused
-            (agent-repl-webview-precreate-all)))
-        ;; Assert
-        (should (agent-repl-test-wr--said-p logged "precreate-parked" "reason=visible-unfocused"))))))
-
-(ert-deftest agent-repl-test-wr-a-standing-park-is-recorded-once ()
-  "Every roster push re-runs the pass; a standing park says so once."
-  ;; Arrange
-  (agent-repl-test-wr--with-pass
-    (setq agent-repl-test-wr--host nil)
-    (agent-repl-test-wr--eligible '("alpha")
-      (let (logged)
-        (agent-repl-test-wr--logging logged
-          ;; Act
-          (agent-repl-test-wr--visible-unfocused
-            (agent-repl-webview-precreate-all)
-            (agent-repl-webview-precreate-all)))
-        ;; Assert
-        (should (= 1 (seq-count (lambda (text) (string-search "precreate-parked" text)) logged)))))))
-
-(ert-deftest agent-repl-test-wr-a-visible-unfocused-pass-with-a-host-makes-pages ()
-  "Once the host exists a page creates no native view, so nothing holds."
-  ;; Arrange
-  (agent-repl-test-wr--with-pass
-    (agent-repl-test-wr--eligible '("alpha")
-      ;; Act
-      (agent-repl-test-wr--visible-unfocused
-        (agent-repl-webview-precreate-all))
+          (agent-repl-webview-precreate-all)))
       ;; Assert
       (should (equal agent-repl-test-wr--mounted '("alpha"))))))
-
-(ert-deftest agent-repl-test-wr-a-hidden-pass-without-a-host-makes-pages ()
-  "A hidden Emacs creating the host cannot raise itself, so it proceeds."
-  ;; Arrange
-  (agent-repl-test-wr--with-pass
-    (setq agent-repl-test-wr--host nil)
-    (agent-repl-test-wr--eligible '("alpha")
-      ;; Act
-      (agent-repl-test-wr--hidden
-        (agent-repl-webview-precreate-all))
-      ;; Assert
-      (should (equal agent-repl-test-wr--mounted '("alpha"))))))
-
-(ert-deftest agent-repl-test-wr-a-hidden-page-is-recorded-as-hidden ()
-  "The made record names the state that let it be made."
-  ;; Arrange
-  (agent-repl-test-wr--with-pass
-    (setq agent-repl-test-wr--host nil)
-    (agent-repl-test-wr--eligible '("alpha")
-      (let (logged)
-        (agent-repl-test-wr--logging logged
-          ;; Act
-          (agent-repl-test-wr--hidden
-            (agent-repl-webview-precreate-all)))
-        ;; Assert
-        (should (agent-repl-test-wr--said-p logged "precreate-created" "reason=hidden"))))))
-
-(ert-deftest agent-repl-test-wr-a-focused-pass-without-a-host-makes-pages ()
-  "A focused Emacs has no focus to steal, so it proceeds."
-  ;; Arrange
-  (agent-repl-test-wr--with-pass
-    (setq agent-repl-test-wr--host nil)
-    (agent-repl-test-wr--eligible '("alpha")
-      ;; Act
-      (agent-repl-test-wr--focused
-        (agent-repl-webview-precreate-all))
-      ;; Assert
-      (should (equal agent-repl-test-wr--mounted '("alpha"))))))
-
-(ert-deftest agent-repl-test-wr-a-focused-page-is-recorded-as-focused ()
-  "The made record names the state that let it be made."
-  ;; Arrange
-  (agent-repl-test-wr--with-pass
-    (setq agent-repl-test-wr--host nil)
-    (agent-repl-test-wr--eligible '("alpha")
-      (let (logged)
-        (agent-repl-test-wr--logging logged
-          ;; Act
-          (agent-repl-test-wr--focused
-            (agent-repl-webview-precreate-all)))
-        ;; Assert
-        (should (agent-repl-test-wr--said-p logged "precreate-created" "reason=focused"))))))
-
-(ert-deftest agent-repl-test-wr-a-batch-pass-never-holds ()
-  "A batch process has no application to activate, so nothing holds."
-  ;; Arrange / Act / Assert
-  (should (null (agent-repl--webview-precreate-hold-p))))
-
-(ert-deftest agent-repl-test-wr-the-editor-startup-still-holds-a-visible-unfocused-emacs ()
-  "The editor's startup never lifts the focus park: a visible but unfocused
-Emacs creates no host until it is looked at, so the startup cannot take
-focus from another application.  Its tabs then open on the focus edge."
-  ;; Arrange
-  (let ((noninteractive nil)
-        (agent-repl-startup--phase 'running))
-    (cl-letf (((symbol-function 'agent-repl--emacs-can-foreground-p) (lambda () t)))
-      ;; Act / Assert
-      (should (agent-repl--webview-precreate-hold-p)))))
-
-;;;; ---- The focus edge ----
-
-(ert-deftest agent-repl-test-wr-gaining-focus-runs-a-parked-pass ()
-  "The first look is the moment the parked pages were for."
-  ;; Arrange
-  (agent-repl-test-wr--with-pass
-    (setq agent-repl-test-wr--host nil)
-    (agent-repl-test-wr--eligible '("alpha")
-      (agent-repl-test-wr--visible-unfocused
-        (agent-repl-webview-precreate-all))
-      ;; Act
-      (agent-repl-test-wr--focused
-        (agent-repl--webview-precreate-on-focus-change))
-      ;; Assert
-      (should (equal agent-repl-test-wr--mounted '("alpha"))))))
-
-(ert-deftest agent-repl-test-wr-gaining-focus-clears-the-park ()
-  "A resumed pass is no longer parked, so the next focus edge is a no-op."
-  ;; Arrange
-  (agent-repl-test-wr--with-pass
-    (setq agent-repl-test-wr--host nil)
-    (agent-repl-test-wr--eligible '("alpha")
-      (agent-repl-test-wr--visible-unfocused
-        (agent-repl-webview-precreate-all))
-      ;; Act
-      (agent-repl-test-wr--focused
-        (agent-repl--webview-precreate-on-focus-change))
-      ;; Assert
-      (should (null agent-repl--webview-precreate-parked)))))
-
-(ert-deftest agent-repl-test-wr-a-resumed-pass-is-recorded ()
-  "The focus edge that released a park says so."
-  ;; Arrange
-  (agent-repl-test-wr--with-pass
-    (setq agent-repl-test-wr--host nil)
-    (agent-repl-test-wr--eligible '("alpha")
-      (agent-repl-test-wr--visible-unfocused
-        (agent-repl-webview-precreate-all))
-      (let (logged)
-        (agent-repl-test-wr--logging logged
-          ;; Act
-          (agent-repl-test-wr--focused
-            (agent-repl--webview-precreate-on-focus-change)))
-        ;; Assert
-        (should (agent-repl-test-wr--said-p logged "precreate-resumed-on-focus"))))))
-
-(ert-deftest agent-repl-test-wr-a-focus-edge-with-nothing-parked-does-nothing ()
-  "Every focus change runs this; only a parked pass may be run."
-  ;; Arrange
-  (agent-repl-test-wr--with-pass
-    (agent-repl-test-wr--eligible '("alpha")
-      ;; Act
-      (agent-repl-test-wr--focused
-        (agent-repl--webview-precreate-on-focus-change))
-      ;; Assert
-      (should (null agent-repl-test-wr--mounted)))))
-
-(ert-deftest agent-repl-test-wr-a-focus-edge-that-is-still-unfocused-keeps-the-park ()
-  "`after-focus-change-function' also fires on LOSING focus."
-  ;; Arrange
-  (agent-repl-test-wr--with-pass
-    (setq agent-repl-test-wr--host nil)
-    (agent-repl-test-wr--eligible '("alpha")
-      (agent-repl-test-wr--visible-unfocused
-        (agent-repl-webview-precreate-all)
-        ;; Act
-        (agent-repl--webview-precreate-on-focus-change))
-      ;; Assert
-      (should agent-repl--webview-precreate-parked))))
-
-(ert-deftest agent-repl-test-wr-the-focus-resume-is-registered ()
-  "The release rides the same focus edge status.el repaints the tab bar on.
-Asserted by CALLING the edge rather than by inspecting the advice chain:
-what matters is that a real focus change reaches the resume."
-  ;; Arrange
-  (agent-repl-test-wr--with-pass
-    (setq agent-repl-test-wr--host nil)
-    (agent-repl-test-wr--eligible '("alpha")
-      (agent-repl-test-wr--visible-unfocused
-        (agent-repl-webview-precreate-all))
-      ;; Act: the other handlers on this edge answer the frame, which has no
-      ;; focus state in batch, so they no-op and leave ours the observation.
-      (agent-repl-test-wr--focused
-        (cl-letf (((symbol-function 'frame-focus-state) (lambda (&rest _) nil)))
-          (funcall after-focus-change-function)))
-      ;; Assert
-      (should (null agent-repl--webview-precreate-parked)))))
 
 ;;;; ---- The link-up and roster edges ----
 
