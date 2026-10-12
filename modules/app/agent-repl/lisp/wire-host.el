@@ -1000,6 +1000,12 @@ No transfer was announced for this workspace."
 The caller's stream was not open at announcement."
   (agent-repl-wire--decode-empty "AdoptHostWorkspaceParticipantNotExpected" value))
 
+(defun agent-repl-wire-decode-adopt-host-workspace-transfer-deferred (value)
+  "Decode VALUE as the empty message `AdoptHostWorkspaceTransferDeferred'.
+The successor refused a mid-work adoption; the incumbent serves the
+workspace until it is free and its next `transferred' push is the cue."
+  (agent-repl-wire--decode-empty "AdoptHostWorkspaceTransferDeferred" value))
+
 (defun agent-repl-wire-decode-adopt-host-workspace-error-unknown-workspace (value)
   "Decode AdoptHostWorkspaceError's `unknown_workspace' cause arm from VALUE."
   (agent-repl-wire-decode-adopt-host-workspace-unknown-workspace value))
@@ -1027,12 +1033,16 @@ VALUE."
 VALUE."
   (agent-repl-wire-decode-adopt-host-workspace-participant-not-expected value))
 
+(defun agent-repl-wire-decode-adopt-host-workspace-error-transfer-deferred (value)
+  "Decode AdoptHostWorkspaceError's `transfer_deferred' cause arm from VALUE."
+  (agent-repl-wire-decode-adopt-host-workspace-transfer-deferred value))
+
 (defun agent-repl-wire-decode-adopt-host-workspace-error-cause (value)
   "Decode AdoptHostWorkspaceError's `cause' oneof from the object VALUE.
 THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
 arm this codec does not know is refused as an unknown field."
   (let ((object (agent-repl-wire--object "AdoptHostWorkspaceError" value)))
-    (agent-repl-wire--check-keys "AdoptHostWorkspaceError" object '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted noTransferAnnounced participantNotExpected))
+    (agent-repl-wire--check-keys "AdoptHostWorkspaceError" object '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted noTransferAnnounced participantNotExpected transferDeferred))
     (agent-repl-wire--decode-oneof
      "AdoptHostWorkspaceError" 'cause object
      '((unknownWorkspace :unknown-workspace agent-repl-wire-decode-adopt-host-workspace-error-unknown-workspace)
@@ -1040,7 +1050,8 @@ arm this codec does not know is refused as an unknown field."
        (transferringAway :transferring-away agent-repl-wire-decode-adopt-host-workspace-error-transferring-away)
        (notYetAdopted :not-yet-adopted agent-repl-wire-decode-adopt-host-workspace-error-not-yet-adopted)
        (noTransferAnnounced :no-transfer-announced agent-repl-wire-decode-adopt-host-workspace-error-no-transfer-announced)
-       (participantNotExpected :participant-not-expected agent-repl-wire-decode-adopt-host-workspace-error-participant-not-expected)))))
+       (participantNotExpected :participant-not-expected agent-repl-wire-decode-adopt-host-workspace-error-participant-not-expected)
+       (transferDeferred :transfer-deferred agent-repl-wire-decode-adopt-host-workspace-error-transfer-deferred)))))
 
 (defun agent-repl-wire-decode-adopt-host-workspace-error (value)
   "Decode VALUE as `AdoptHostWorkspaceError', a plist (:cause ONEOF)."
