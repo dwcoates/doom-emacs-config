@@ -74,6 +74,10 @@ type DB interface {
 	// SetHidden records whether a workspace sits in the roster's hidden
 	// section; an unknown workspace is ErrNotFound.
 	SetHidden(ctx context.Context, id WorkspaceID, hidden bool) error
+	// RevealMergeWorkspace records that a merge workspace has been revealed,
+	// answering whether this call revealed it; a workspace that is no merge
+	// workspace is refused, an unknown one is ErrNotFound.
+	RevealMergeWorkspace(ctx context.Context, id WorkspaceID) (bool, error)
 	// SetParent retargets a workspace: its recorded parent (nil: top-level)
 	// and its merge target directory, in one transaction. A parent the
 	// registry does not hold, of another repository, or beneath the
@@ -218,6 +222,11 @@ type DB interface {
 	// workspace never recorded is absent. A feed replay places each turn's rows
 	// by it, so a replayed turn is drawn where it was drawn live.
 	TurnAddresses(ctx context.Context, id WorkspaceID, turns []TurnID) (map[TurnID]*OutputAddress, error)
+	// TurnMirrors answers the mirror address each named turn of this
+	// workspace was recorded with, for the turns that have one: where else its
+	// rows were drawn (an async merge workspace's merge turn, in the
+	// requester's bubble). A feed replay mirrors each such turn by it.
+	TurnMirrors(ctx context.Context, id WorkspaceID, turns []TurnID) (map[TurnID]*MirrorAddress, error)
 	// RecordedTurns answers which of the named turns this workspace recorded,
 	// open or closed: the durable statement of which turns are the
 	// workspace's OWN work. A fork's feed reads it to tell the conversation it
@@ -354,7 +363,13 @@ type DB interface {
 	MergeWorkspaceFor(ctx context.Context, request DetachedMergeID) (Workspace, bool, error)
 	// HandOffDetachedMerge moves a detached request from the requester's queue
 	// row onto the merge workspace forked for it, in one transaction.
-	HandOffDetachedMerge(ctx context.Context, repo RepoKey, requester WorkspaceID, request DetachedMergeID, mergeWS WorkspaceID, branch string, at time.Time) error
+	HandOffDetachedMerge(ctx context.Context, repo RepoKey, requester WorkspaceID, request DetachedMergeID, mergeWS WorkspaceID, branch, pick string, at time.Time) error
+	// ReservedMergeNames answers every merge workspace name a standing async
+	// request has reserved, mapped to the workspace that reserved it.
+	ReservedMergeNames(ctx context.Context) (map[string]WorkspaceID, error)
+	// StartMergePick records that a merge workspace's pick began as a turn,
+	// with its bubble's ledger identity, before the turn is submitted.
+	StartMergePick(ctx context.Context, repo RepoKey, id WorkspaceID, ledger LeaseID, turn TurnID, at time.Time) error
 	// RecordMergeWorkspaceRemoved records that the inactivity sweep is
 	// removing a merge workspace, before its records are deleted.
 	RecordMergeWorkspaceRemoved(ctx context.Context, ws WorkspaceID, requester WorkspaceID, at time.Time) error

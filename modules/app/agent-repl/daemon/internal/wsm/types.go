@@ -120,6 +120,13 @@ type Workspace struct {
 	// workspace to carry that workspace's detached merge. Nil for every other
 	// workspace.
 	MergeOf *MergeOrigin
+	// MergeRevealed reports that a MERGE WORKSPACE has been revealed: it
+	// needed the user (its merge failed or was abandoned, its agent asked
+	// something, the user interrupted it) or the user selected it. An
+	// unrevealed, unmerged merge workspace is drawn in no tab bar and no
+	// sidebar section. Once set it stays set. Always false for every other
+	// workspace.
+	MergeRevealed bool
 	// OneShot reports that the workspace was CREATED as a one-shot. It is
 	// READ-ONLY here: the fact is the creation job's (CreationJob.OneShot),
 	// read through the shared select list, so the record and the job can never
@@ -613,6 +620,10 @@ type Turn struct {
 	Origin string
 	// Address is where the turn's output lands, nil for the root feed.
 	Address *OutputAddress
+	// Mirror is where the turn is ALSO drawn, in another workspace's feed: an
+	// async merge workspace's merge turn, mirrored into the bubble's agentic
+	// tab in the requester's feed. Nil for every other turn.
+	Mirror *MirrorAddress
 	// Displaced marks a turn captured by a lease holder for exactly-once
 	// resubmission at release.
 	Displaced bool
@@ -907,6 +918,23 @@ type MergeSource struct {
 	// a recovery finds the one workspace forked for THIS request. Empty for an
 	// in-place merge.
 	Detach DetachedMergeID
+	// DetachName is a detached request's merge workspace name, as the
+	// requesting agent supplied it (unprefixed): RESERVED from the moment the
+	// request is recorded until the merge workspace exists under it. Set iff
+	// Detach is.
+	DetachName string
+	// Pick is the requesting agent's instruction naming which changes of the
+	// requester's branch an async merge lands
+	// (agentrepl.v1.MergeWorkspaceSourceOwnBranchDetachedPick), empty when the
+	// whole branch is merged. It rides the requester's detached request, then
+	// the merge workspace's own request, which carries it until the pick has
+	// run; PickStartedAt says whether it has begun.
+	Pick string
+	// PickStartedAt is when the merge workspace's pick turn began, nil while
+	// it has not. Only a merge workspace's request with a Pick carries it.
+	PickStartedAt *time.Time
+	// PickTurn is the merge workspace's pick turn, set with PickStartedAt.
+	PickTurn TurnID
 	// Front puts the merge at the FRONT of its queue when it is put in line
 	// (QueueMerge): ahead of every merge still waiting, never ahead of the one
 	// already running. Any arm may ask for it; a hotfix that must land before

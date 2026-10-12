@@ -347,6 +347,21 @@ func (m MergeSource) validate() error {
 	if m.Detach != "" && (m.Kind != MergeSourceOwnBranch || m.KeepOpen) {
 		return fmt.Errorf("a detached merge is an own-branch merge that never keeps the requester open, not a %s source with keep_open %v", m.Kind, m.KeepOpen)
 	}
+	// A DETACHED MERGE IS NAMED by its requesting agent, and only a detached
+	// merge reserves a name.
+	if (m.Detach != "") != (m.DetachName != "") {
+		return fmt.Errorf("a detached merge carries its merge workspace's name and only a detached merge does (detach %q, name %q)", m.Detach, m.DetachName)
+	}
+	// A PICK lands only some changes of the requester's own branch: it rides
+	// the requester's detached request, and then the merge workspace's own
+	// request until the pick has run.
+	if m.Pick != "" && (m.Kind != MergeSourceOwnBranch || m.KeepOpen) {
+		return fmt.Errorf("a pick is an own-branch merge that never keeps the requester open, not a %s source with keep_open %v", m.Kind, m.KeepOpen)
+	}
+	// A PICK THAT BEGAN names its turn, and only a pick begins.
+	if (m.PickStartedAt != nil) != (m.PickTurn != "") || (m.PickStartedAt != nil && m.Pick == "") {
+		return fmt.Errorf("a begun pick records both when it began and its turn, and only a pick begins (pick %v, started %v, turn %q)", m.Pick != "", m.PickStartedAt != nil, m.PickTurn)
+	}
 	if (m.Workspace != "") != (m.Kind == MergeSourceWorkspace) {
 		return fmt.Errorf("a %s source names workspace %q", m.Kind, m.Workspace)
 	}

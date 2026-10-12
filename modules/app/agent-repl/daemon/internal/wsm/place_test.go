@@ -456,6 +456,8 @@ func TestTheMigrationSeedsAChildRightAfterItsParent(t *testing.T) {
 	}
 	handle.Close()
 	stampRaw(t, path, 34)
+	// Layout 36's columns come off too, so the file is a layout-34 file again.
+	undoLayout36(t, path)
 	execRaw(t, path, `DROP TRIGGER workspaces_land_unplaced`)
 	execRaw(t, path, `DROP INDEX workspaces_by_place`)
 	execRaw(t, path, `ALTER TABLE workspaces DROP COLUMN place`)
