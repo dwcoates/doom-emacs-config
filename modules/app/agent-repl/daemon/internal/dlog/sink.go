@@ -86,10 +86,6 @@ type sink struct {
 	// closed says the descriptor has been released. It is separate from
 	// poison because a released handle is not a failure; see ErrSinkClosed.
 	closed bool
-	// pipe, when the test log pipe is on, carries this sink's records instead
-	// of its target, which stays open and empty. Never set on the shim sink,
-	// whose records the shim writes itself (see EnvTestLogPipe).
-	pipe *logPipe
 }
 
 // openSink resolves this runtime's target for one workspace sink, opens it
@@ -302,16 +298,6 @@ func (s *sink) write(line []byte) error {
 	}
 	if s.name == "shim" {
 		return s.writeShimLocked(line)
-	}
-	if s.pipe != nil {
-		// A test's log never reaches the cap, and its target holds no bytes to
-		// roll, so a piped sink only counts what it sent.
-		if err := s.pipe.send(PipeRecord, s.target, line); err != nil {
-			s.poisonLocked(fmt.Errorf("append to log target %q: %w", s.target, err))
-			return s.poison
-		}
-		s.size += int64(len(line))
-		return nil
 	}
 	rolled := s.size > 0 && s.size+int64(len(line)) > s.cap
 	if rolled {
