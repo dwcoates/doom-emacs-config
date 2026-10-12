@@ -7285,7 +7285,7 @@ export type FeedUserPrompt = Message<"frontend.v1.FeedUserPrompt"> & {
    * daemon RE-PUBLISHES the row with this UNSET on that edge, and draws every
    * later copy (a history replay, a reconnect's page) of a turn it has seen
    * end UNSET. UNSET = the turn has ended, or the row names no turn, or the
-   * row is a fork's ported prompt (settled in another workspace). The client
+   * row is a prompt a fork inherited (settled in its parent). The client
    * draws the wave from this flag verbatim and from nothing else.
    *
    * @generated from field: bool working = 3;
