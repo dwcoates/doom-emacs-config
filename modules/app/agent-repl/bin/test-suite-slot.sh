@@ -187,12 +187,164 @@ fi
 # occupy two and the host would run more work than the operator asked for.
 d="$TMP/t7"; mkdir -p "$d"
 AGENT_REPL_SUITE_SLOT_DIR="$d/slots" bash "$SCRIPT_UNDER_TEST" \
-    bash "$SCRIPT_UNDER_TEST" bash -c 'ls -A "$0" > "$1"' "$d/slots" "$d/held" 2>"$d/err"
+    bash "$SCRIPT_UNDER_TEST" bash -c 'ls -A "$0" | grep "^slot-" > "$1"' "$d/slots" "$d/held" 2>"$d/err"
 if [ "$(grep -c . "$d/held" 2>/dev/null || echo 0)" -eq 1 ]; then
     pass "a nested invocation holds no slot of its own"
 else
     fail "a nested invocation holds no slot of its own" "slots during the run: $(cat "$d/held")"
 fi
+
+# --- THE HOST'S ONE TEST BUDGET ---------------------------------------------
+# Every case below names its host (processors, GiB) so the budget's arithmetic
+# is the case's own, never the machine's running this harness.
+
+# budget_run DIR PRIORITY CPUS MEM_GIB runs the gate around a command that
+# records the budget it was handed, and answers the gate's status.
+budget_run() {
+    local dir=$1 priority=$2 cpus=$3 mem=$4
+    AGENT_REPL_SUITE_SLOT_DIR="$dir/slots" AGENT_REPL_SUITE_PRIORITY="$priority" \
+        AGENT_REPL_SUITE_HOST_CPUS="$cpus" AGENT_REPL_SUITE_HOST_MEM_GIB="$mem" \
+        bash "$SCRIPT_UNDER_TEST" bash "$BUDGET_PROBE" "$dir/budget" 2>"$dir/err"
+}
+# The probe the budget cases run: it records the processors it was handed.
+BUDGET_PROBE="$TMP/budget-probe.sh"
+cat > "$BUDGET_PROBE" <<'PROBE'
+printf "%s\n" "${AGENT_REPL_TEST_CPU_BUDGET:-unset}" > "$1"
+PROBE
+
+# stage_held DIR TOKEN... stages tokens as held by a live process.
+stage_held() {
+    local dir=$1 token
+    shift
+    for token in "$@"; do
+        mkdir -p "$dir/slots/$token"
+        printf '%s\n' "$STAGE_HOLDER" > "$dir/slots/$token/pid"
+    done
+}
+sleep 600 &
+STAGE_HOLDER=$!
+
+# --- 8. a head run is handed half the host's processors ---------------------
+d="$TMP/t8"; mkdir -p "$d"
+budget_run "$d" head 8 32
+if [ "$(cat "$d/budget" 2>/dev/null)" = "4" ]; then
+    pass "a head run is handed half the host's processors"
+else
+    fail "a head run is handed half the host's processors" "budget: $(cat "$d/budget" 2>/dev/null) err: $(cat "$d/err")"
+fi
+
+# --- 9. a speculative run is handed a quarter -------------------------------
+d="$TMP/t9"; mkdir -p "$d"
+budget_run "$d" speculative 16 48
+if [ "$(cat "$d/budget" 2>/dev/null)" = "4" ]; then
+    pass "a speculative run is handed a quarter of the host's processors"
+else
+    fail "a speculative run is handed a quarter of the host's processors" "budget: $(cat "$d/budget" 2>/dev/null) err: $(cat "$d/err")"
+fi
+
+# --- 10. a later run gets only what the earlier runs left -------------------
+d="$TMP/t10"; mkdir -p "$d"
+stage_held "$d" core-9 core-10 core-11 core-12 core-13 core-14
+budget_run "$d" speculative 16 48
+if [ "$(cat "$d/budget" 2>/dev/null)" = "2" ]; then
+    pass "a later run is handed only the processors the earlier runs left"
+else
+    fail "a later run is handed only the processors the earlier runs left" "budget: $(cat "$d/budget" 2>/dev/null) err: $(cat "$d/err")"
+fi
+
+# --- 11. the head's processors are never a speculative run's ----------------
+# Every shared processor is held; the head's half is free. The speculative run
+# must wait rather than take one of the head's.
+d="$TMP/t11"; mkdir -p "$d"
+stage_held "$d" core-5 core-6 core-7 core-8
+set +e
+set -m
+AGENT_REPL_SUITE_SLOT_DIR="$d/slots" AGENT_REPL_SUITE_PRIORITY=speculative \
+    AGENT_REPL_SUITE_HOST_CPUS=8 AGENT_REPL_SUITE_HOST_MEM_GIB=48 \
+    bash "$SCRIPT_UNDER_TEST" bash "$BUDGET_PROBE" "$d/marker" 2>"$d/err" &
+WAITER=$!
+set +m
+waited=0
+while ! grep -q "WAITING" "$d/err" 2>/dev/null; do
+    if [ "$waited" -ge 100 ]; then break; fi
+    sleep 0.1
+    waited=$((waited + 1))
+done
+GATED=0
+if grep -q "WAITING: the host's test budget has no processors" "$d/err" 2>/dev/null && [ ! -f "$d/marker" ]; then GATED=1; fi
+HEAD_TAKEN=$(find "$d/slots" -maxdepth 1 \( -name core-1 -o -name core-2 -o -name core-3 -o -name core-4 \) 2>/dev/null | tr '\n' ' ')
+kill -TERM -- "-$WAITER" 2>/dev/null
+wait "$WAITER" 2>/dev/null
+set -e
+if [ "$GATED" -eq 1 ] && [ -z "$HEAD_TAKEN" ]; then
+    pass "a speculative run waits rather than take a processor reserved to the head"
+else
+    fail "a speculative run waits rather than take a processor reserved to the head" "took: $HEAD_TAKEN err: $(cat "$d/err")"
+fi
+
+# --- 12. a run whose RAM disk does not fit waits, holding nothing -----------
+# A 16 GiB host gives the runs 8 GiB, all of it the head's one disk.
+d="$TMP/t12"; mkdir -p "$d"
+set +e
+set -m
+AGENT_REPL_SUITE_SLOT_DIR="$d/slots" AGENT_REPL_SUITE_PRIORITY=speculative \
+    AGENT_REPL_SUITE_HOST_CPUS=16 AGENT_REPL_SUITE_HOST_MEM_GIB=16 \
+    bash "$SCRIPT_UNDER_TEST" bash "$BUDGET_PROBE" "$d/marker" 2>"$d/err" &
+WAITER=$!
+set +m
+waited=0
+while ! grep -q "WAITING" "$d/err" 2>/dev/null; do
+    if [ "$waited" -ge 100 ]; then break; fi
+    sleep 0.1
+    waited=$((waited + 1))
+done
+GATED=0
+if grep -q "WAITING: the host's test budget has no memory" "$d/err" 2>/dev/null && [ ! -f "$d/marker" ]; then GATED=1; fi
+HELD=$(find "$d/slots" -maxdepth 1 \( -name 'core-*' -o -name 'mem-*' \) 2>/dev/null | tr '\n' ' ')
+kill -TERM -- "-$WAITER" 2>/dev/null
+wait "$WAITER" 2>/dev/null
+set -e
+if [ "$GATED" -eq 1 ] && [ -z "$HELD" ]; then
+    pass "a run whose RAM disk does not fit the budget waits holding nothing"
+else
+    fail "a run whose RAM disk does not fit the budget waits holding nothing" "held: $HELD err: $(cat "$d/err")"
+fi
+
+# --- 13. a finished run gives its budget back --------------------------------
+d="$TMP/t13"; mkdir -p "$d"
+budget_run "$d" head 16 48
+LEFT=$(find "$d/slots" -mindepth 1 -maxdepth 1 2>/dev/null | tr '\n' ' ')
+if [ -z "$LEFT" ]; then
+    pass "a finished run gives back every processor and GiB it claimed"
+else
+    fail "a finished run gives back every processor and GiB it claimed" "left: $LEFT"
+fi
+
+# --- 14. an unknown priority is refused --------------------------------------
+d="$TMP/t14"; mkdir -p "$d"
+set +e
+budget_run "$d" urgent 16 48
+RC=$?
+set -e
+if [ "$RC" -eq 2 ] && [ ! -f "$d/budget" ]; then
+    pass "an unknown priority is refused"
+else
+    fail "an unknown priority is refused" "rc=$RC err: $(cat "$d/err")"
+fi
+
+# --- 15. a merge queue gate takes no slot ------------------------------------
+# Another suite holds the only slot; the head's gate still runs on its budget.
+d="$TMP/t15"; mkdir -p "$d"
+stage_held "$d" slot-1
+budget_run "$d" head 16 48
+if [ "$(cat "$d/budget" 2>/dev/null)" = "8" ]; then
+    pass "a merge queue gate runs on its budget while another suite holds the slot"
+else
+    fail "a merge queue gate runs on its budget while another suite holds the slot" "budget: $(cat "$d/budget" 2>/dev/null) err: $(cat "$d/err")"
+fi
+
+kill "$STAGE_HOLDER" 2>/dev/null
+wait "$STAGE_HOLDER" 2>/dev/null || true
 
 echo
 echo "passed $PASS, failed $FAIL"
