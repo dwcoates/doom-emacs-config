@@ -1467,13 +1467,32 @@ describe("the one-shot mark", () => {
     expect(dotOf(drawn).textContent).toBe("\u2716\uFE0F");
   });
 
-  it("draws nothing of its own for an armed one-shot", () => {
+  it("draws an armed one-shot's target in place of the dot", () => {
     const drawn = drawRosterRow(
       row({ id: "ws-1", status: { case: "done", value: {} }, oneShot: "armed" }),
       sidebarContext(),
       "R",
     );
+    expect(dotOf(drawn).getAttribute("data-glyph")).toBe("target");
+    expect(dotOf(drawn).textContent).toBe("🎯");
+  });
+
+  it("draws the plain dot for a row that is no one-shot", () => {
+    const drawn = drawRosterRow(
+      row({ id: "ws-1", status: { case: "done", value: {} } }),
+      sidebarContext(),
+      "R",
+    );
     expect(dotOf(drawn).getAttribute("data-glyph")).toBe("dot");
+  });
+
+  it("keeps an open gate's emoji over an armed one-shot", () => {
+    const drawn = drawRosterRow(
+      row({ id: "ws-1", status: { case: "question", value: {} }, oneShot: "armed" }),
+      sidebarContext(),
+      "R",
+    );
+    expect(dotOf(drawn).getAttribute("data-glyph")).toBe("ask");
   });
 
   it("keeps an open gate's emoji over a failed one-shot", () => {
@@ -1500,9 +1519,9 @@ describe("the one-shot mark", () => {
   });
 
   it.each([
-    ["armed", false],
-    ["failed", true],
-  ] as const)("answers whether the %s outcome is drawn", (outcome, drawn) => {
+    ["armed", "target"],
+    ["failed", "failed"],
+  ] as const)("answers the glyph the %s outcome draws", (outcome, drawn) => {
     const mark = row({ id: "ws-1", oneShot: outcome }).oneShot;
     expect(mark).toBeDefined();
     expect(drawRosterRowOneShot(mark!, "R.oneShot")).toBe(drawn);
