@@ -1,14 +1,12 @@
 /**
- * context — the seam a card renderer is handed, declared LOCALLY.
+ * context — the seam a card renderer is handed: THE ONE `RowContext`.
  *
  * The feed core owns the row chrome (the wrapper element, its `data-feed-row`
  * and `data-row-kind` attributes, the upsert by `FeedId`) and calls one
  * renderer per activity unit to draw the row's BODY. This file declares the
- * shape of that call — nothing more — so the card renderers can be written,
- * typechecked and tested against it while `src/feed/renderers.ts` is being
- * written concurrently. The wiring agent reconciles the import: the shape here
- * is the shape the preamble prescribes, so reconciliation is a re-export, not
- * a redesign.
+ * shape of that call — nothing more — and `src/feed/renderers.ts` re-exports
+ * it, so the core and the cards are handed one declaration that cannot drift
+ * into two.
  *
  * WHY `previous` IS PART OF THE CALL. A re-push redraws a row WHOLE — the core
  * replaces the body element — so a renderer keeps no state of its own between
@@ -52,4 +50,9 @@ export interface RowContext {
    * whose scroll box the reader is inside keeps its position across a push.
    */
   previous?: HTMLElement;
+  /**
+   * Find another row's element ON THIS FEED. Provided by the controller that
+   * owns the rows; a renderer with nothing to look up simply never calls it.
+   */
+  findRowElement?(id: FeedId): HTMLElement | null;
 }
