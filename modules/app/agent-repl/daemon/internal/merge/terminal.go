@@ -76,14 +76,14 @@ func (r *run) concludedTerminal(ctx context.Context, log dlog.Logger, op string,
 		r.concluded(MergeFacts{State: StateMerged, Detail: fmt.Sprintf("already on %s; nothing to merge", out.alreadyOn)})
 		// Nothing landed, so the count its turns last recorded stands.
 		r.stampClosed(ctx, log, op, nil)
-		r.o.handBack(ctx, r.ws, DetachedOutcome{Kind: DetachedLanded, Summary: fmt.Sprintf("the branch was already on %s; nothing needed merging", out.alreadyOn)})
+		r.o.ended(ctx, r.ws, DetachedOutcome{Kind: DetachedLanded, Summary: fmt.Sprintf("the branch was already on %s; nothing needed merging", out.alreadyOn)})
 		log.Info(op, "a merge concluded with its branch already on the target", dlog.Context{
 			"workspace": string(r.ws), "lease": string(r.lease.ID), "target": out.alreadyOn, "tip": out.landed})
 	default:
 		r.head(&frontendv1.FeedMergeSuccess{EndedAtMs: endedMS, Commit: out.landed})
 		r.concluded(MergeFacts{State: StateMerged})
 		r.stampClosed(ctx, log, op, landedCount(out))
-		r.o.handBack(ctx, r.ws, DetachedOutcome{Kind: DetachedLanded, Summary: fmt.Sprintf("it landed as commit %s", out.landed)})
+		r.o.ended(ctx, r.ws, DetachedOutcome{Kind: DetachedLanded, Summary: fmt.Sprintf("it landed as commit %s", out.landed)})
 		log.Info(op, "a merge landed", dlog.Context{
 			"workspace": string(r.ws), "lease": string(r.lease.ID), "commit": out.landed, "commits": len(out.commits),
 			"source": r.source.Kind.String(), "closes": string(r.subject.closes)})
@@ -108,7 +108,20 @@ func (r *run) failedTerminal(ctx context.Context, summary string, area footer.Me
 	// prompt's own records), so this record is INFO whatever the area.
 	r.o.log(ctx, r.ws).Info("daemon.merge.abort", "a merge failed and the workspace is handed back", dlog.Context{
 		"workspace": string(r.ws), "lease": string(r.lease.ID), "summary": summary, "area": string(area)})
-	r.o.handBack(ctx, r.ws, DetachedOutcome{Kind: DetachedFailed, Summary: summary})
+	r.o.ended(ctx, r.ws, DetachedOutcome{Kind: DetachedFailed, Summary: summary})
+}
+
+// ended is EVERY MERGE'S RESOLUTION, however it left the queue for good:
+// landed, failed, or abandoned after it was put in line. It raises the
+// merge's second and last desktop banner, on the workspace the merge ran in,
+// and then hands the outcome back to a detached merge's requester (handBack).
+// Every terminal goes through it, so no resolution goes unannounced and none
+// is announced twice.
+func (o *orchestrator) ended(ctx context.Context, ws ids.WorkspaceID, out DetachedOutcome) {
+	o.log(ctx, ws).Debug("daemon.merge.ended", "a merge left the queue for good; raising its resolved banner", dlog.Context{
+		"workspace": string(ws), "outcome": out.Kind.String()})
+	o.deps.Banners.Resolved(ws, out.Kind.mergeEnd(), out.Summary)
+	o.handBack(ctx, ws, out)
 }
 
 // handBack reports how a merge ended to the requester of an ASYNC merge, the
@@ -913,7 +926,14 @@ func (o *orchestrator) publishAbandoned(ctx context.Context, ws ids.WorkspaceID,
 			})
 		o.closeReleasedBubble(ctx, ws, ledger, cause)
 	}
-	o.handBack(ctx, ws, DetachedOutcome{Kind: DetachedAbandoned, Summary: summary, Requested: cause.releases()})
+	out := DetachedOutcome{Kind: DetachedAbandoned, Summary: summary, Requested: cause.releases()}
+	if ledger != "" {
+		o.ended(ctx, ws, out)
+	} else {
+		// A MERGE NEVER PUT IN LINE never raised its queued banner, so it
+		// leaves no resolved one either: it was never in the queue.
+		o.handBack(ctx, ws, out)
+	}
 	// The surfaces come AFTER the terminal, in the teardown's own order: the
 	// footer leaves its merging state and the roster sheds every merge arm
 	// only once the bubble a reader is looking at has ended.
@@ -1067,7 +1087,7 @@ func (r *run) abandonTerminal(ctx context.Context, cause AbandonCause) {
 			Reason:    &frontendv1.FeedMergeError_Abandoned{Abandoned: &frontendv1.FeedMergeAbandoned{Summary: summary}},
 		})
 		r.o.closeReleasedBubble(ctx, r.ws, r.lease.ID, cause)
-		r.o.handBack(ctx, r.ws, DetachedOutcome{Kind: DetachedAbandoned, Summary: summary, Requested: cause.releases()})
+		r.o.ended(ctx, r.ws, DetachedOutcome{Kind: DetachedAbandoned, Summary: summary, Requested: cause.releases()})
 	})
 	// The surfaces come AFTER the terminal and the release, as a queued
 	// merge's abandon orders them: the merge never happened as far as the

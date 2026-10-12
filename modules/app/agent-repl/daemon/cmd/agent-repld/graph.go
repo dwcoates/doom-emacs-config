@@ -975,6 +975,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Footer:          footerResolver,
 		Sidebar:         sidebarResolver,
 		Holds:           feedResolver,
+		Banners:         desktopnotify.NewMergeBanners(notifier, time.Now),
 		PromptsDir:      paths.PromptsDir,
 		CheckoutRoot:    paths.Checkout,
 		Briefs:          merge.BriefsFrom(paths.PromptsDir),
