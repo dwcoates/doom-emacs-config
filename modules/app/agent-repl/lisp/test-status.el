@@ -3512,6 +3512,35 @@ test can assert the re-assertion left an already-correct frame alone."
       ;; Act / Assert
       (should (eq (agent-repl-status-tab-state "alpha") :thinking)))))
 
+(ert-deftest agent-repl-test-status-tab-state-is-recorded-once-per-arm ()
+  "Every redisplay resolves the tab state; only a new arm is recorded."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let (logged)
+      (cl-letf (((symbol-function 'agent-repl--log)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+        (agent-repl-test-status--with-arm "alpha" :thinking
+          ;; Act
+          (agent-repl-status-tab-state "alpha")
+          (agent-repl-status-tab-state "alpha")))
+      ;; Assert
+      (should (equal logged '("elisp.status.tab-state: ws=alpha arm=:thinking"))))))
+
+(ert-deftest agent-repl-test-status-tab-state-is-recorded-when-its-arm-changes ()
+  "A tab whose arm moved records the new one."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let (logged)
+      (cl-letf (((symbol-function 'agent-repl--log)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+        (agent-repl-test-status--with-arm "alpha" :thinking
+          (agent-repl-status-tab-state "alpha"))
+        ;; Act
+        (agent-repl-test-status--with-arm "alpha" :done
+          (agent-repl-status-tab-state "alpha")))
+      ;; Assert
+      (should (equal (car logged) "elisp.status.tab-state: ws=alpha arm=:done")))))
+
 (ert-deftest agent-repl-test-status-tab-state-is-nil-before-the-first-push ()
   "A workspace the roster has not spoken about is drawn uncoloured."
   ;; Arrange

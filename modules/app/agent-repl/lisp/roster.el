@@ -462,11 +462,13 @@ Once per push over every closed row, which is why it is DEBUG."
     (dolist (entry all)
       (let ((row (plist-get entry :row)))
         (when (agent-repl-roster-row-closed-p row)
-          (agent-repl--log '(:agent-repl-central
-                             "a closed row the roster gives no tab owns no workspace sink")
-                           "elisp.roster.no-tab: id=%s name=%s reason=closed"
-                           (agent-repl-roster-row-id row)
-                           (agent-repl-roster-row-name row)))))
+          (agent-repl--log-decision (list 'roster-no-tab (agent-repl-roster-row-id row))
+                                    (agent-repl-roster-row-name row)
+                                    '(:agent-repl-central
+                                      "a closed row the roster gives no tab owns no workspace sink")
+                                    "elisp.roster.no-tab: id=%s name=%s reason=closed"
+                                    (agent-repl-roster-row-id row)
+                                    (agent-repl-roster-row-name row)))))
     (mapcar (lambda (entry)
               (let ((row (plist-get entry :row)))
                 (list :id (agent-repl-roster-row-id row)
@@ -657,7 +659,8 @@ and every other row is still opened and ordered."
           (agent-repl-roster--open-tab want))
          ((equal existing name)
           (agent-repl--ws-put name :ref (plist-get want :ref))
-          (agent-repl--log name "elisp.roster.tab-kept: ws=%s id=%s" name id)
+          (agent-repl--log-decision (list 'roster-tab-kept id) name
+                                    name "elisp.roster.tab-kept: ws=%s id=%s" name id)
           name)
          (t
           (agent-repl-roster--rename-tab existing name (plist-get want :ref))))
@@ -1095,8 +1098,11 @@ Returns the workspaces whose rows crossed the edge."
                    (run-hook-with-args 'agent-repl-roster-finish-functions ws))
                (agent-repl--log scope "elisp.roster.finish-edge: no tab id=%s from=%s to=%s"
                                 id previous current))
-           (agent-repl--log scope "elisp.roster.status: id=%s from=%s to=%s edge=nil"
-                            id previous current)))))
+           ;; A row whose arm did not move is no change, and every push walks
+           ;; every row: only a row that moved is recorded.
+           (unless (equal previous current)
+             (agent-repl--log scope "elisp.roster.status: id=%s from=%s to=%s edge=nil"
+                              id previous current))))))
     (nreverse fired)))
 
 (defun agent-repl-roster--record-drawn-statuses (roster)

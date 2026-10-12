@@ -930,11 +930,13 @@ so answering with one would resurrect a closed workspace."
                           (equal (plist-get (plist-get plist :ref) :id) id))
                  (setq found name)))
              agent-repl--workspaces)
-    (agent-repl--log-verbose
-     (if found
-         found
-       '(:agent-repl-central "an unmatched roster reference has no workspace"))
-     "ws-by-ref-id: id=%s ws=%S" id found)
+    ;; A lookup that finds its workspace is not an event; one that finds
+    ;; none is, and is recorded.  Recording every hit was the single largest
+    ;; record of a workspace switch (1,412 for two switches, 2026-10-12).
+    (unless found
+      (agent-repl--log-verbose
+       '(:agent-repl-central "an unmatched roster reference has no workspace")
+       "ws-by-ref-id: id=%s ws=nil" id))
     found))
 
 ;;;; ---- Render state: the roster row's status arm ---------------------
