@@ -176,11 +176,15 @@ Status values: queued, running, landed (commit), blocked (reason).
 - E2 sidebar re-render logged every row on every render (26% of test daemon
   records): landed (40482a061). The feed's row_decision records are per-event
   branch choices logged once each, not render repeats; nothing to dedupe.
-- E4 merge tests rows: serve the full suite output from the gate's archive on
-  demand (row keeps counts + tail), no visible change — proposed to the owner.
-  wsm.db is 415MB and growing.
+- E4 merge tests rows: each suite keeps a 40-line tail in its row and the
+  full output is read from the gate's archive when shown
+  (GetMergeTestSuiteOutput), drawn once after a brief busy state (owner:
+  option A). Branch `tests-archive` on top of the unlanded
+  `merge-queue-bubble-tabs`: settled run row 830KB -> 3KB, wsm.db+WAL
+  1.55MB -> 0.71MB per 20k-line run. Lands with/after that branch.
 - E3 whatever the collector ranks highest in CPU-seconds and RSS during the
-  owner's normal use.
+  owner's normal use — PARKED (owner, 2026-10-12): UX first; and the
+  collector needs the live runtime, which doom-26 holds.
 
 ### F. Master reds — running (branch `master-reds`)
 - background-harness scan flags a plist comment from 8ade38a7a.
