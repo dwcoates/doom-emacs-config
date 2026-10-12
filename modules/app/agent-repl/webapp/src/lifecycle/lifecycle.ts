@@ -588,7 +588,7 @@ export class AdoptionFailed extends Error {
 export async function adoptAtBoot(
   ctx: AppContext,
   backoff: AdoptBackoff = {},
-): Promise<"adopted" | "no-transfer"> {
+): Promise<"adopted" | "no-transfer" | "deferred"> {
   const initialMs = backoff.initialMs ?? ADOPT_INITIAL_MS;
   const maxMs = backoff.maxMs ?? ADOPT_MAX_MS;
   const budgetMs = backoff.budgetMs ?? ADOPT_BUDGET_MS;
@@ -634,6 +634,15 @@ export async function adoptAtBoot(
       });
       return "no-transfer";
     }
+    if (outcome.kind === "deferred") {
+      // THE INCUMBENT KEPT THIS WORKSPACE until it is free, and Emacs puts the
+      // page back on it. Nothing here is wrong and nothing will change by
+      // waiting, so the page stops without a failure and without a retry.
+      log.info("the incumbent kept this workspace until it is free; this page stops and is reloaded onto it", {
+        operation: "lifecycle.adopt-deferred",
+      });
+      return "deferred";
+    }
     if (outcome.kind === "terminal") {
       log.error(`this page cannot be adopted: ${outcome.detail}`, {
         operation: "lifecycle.adopt-refused",
@@ -661,6 +670,7 @@ export async function adoptAtBoot(
 /** What the adoption loop does about one refusal. */
 export type AdoptionOutcome =
   | { kind: "no-transfer" }
+  | { kind: "deferred" }
   | { kind: "retry"; arm: string }
   | { kind: "terminal"; arm: string; detail: string };
 
@@ -679,6 +689,10 @@ export function classifyAdoptionRefusal(error: AdoptWebWorkspaceError): Adoption
       return { kind: "no-transfer" };
     case "notYetAdopted":
       return { kind: "retry", arm: arm.case };
+    // The successor refused a mid-work adoption and the incumbent took the
+    // workspace back: not a rendezvous under way, so never retried.
+    case "transferDeferred":
+      return { kind: "deferred" };
     case "unknownWorkspace":
       return {
         kind: "terminal",
