@@ -2,8 +2,9 @@
 // for the user to confirm. ROLLBACK section.
 //
 // A rollback returns the main agent's conversation to just before one of its
-// prompts: the selected prompt (frontend.v1.FeedSelectionPrompt) when one is
-// selected, else the latest prompt — which is cancelling it. Emacs asks for a
+// prompts: the prompt the request names, else the selected prompt
+// (frontend.v1.FeedSelectionPrompt) when one is selected, else the latest
+// prompt — which is cancelling it. Emacs asks for a
 // plan with the user's key (`C-c C-RET` keeps files, `C-c M-RET` restores
 // them), shows its effects in the minibuffer, and on a yes sends the plan's
 // token to RollBack. Planning changes nothing.
@@ -17,6 +18,7 @@
 package agentreplv1
 
 import (
+	v11 "agentrepl/proto/frontend/v1"
 	v1 "agentrepl/proto/workspace/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
@@ -43,7 +45,13 @@ type PlanRollbackRequest struct {
 	//
 	//	*PlanRollbackRequest_KeepFiles
 	//	*PlanRollbackRequest_RestoreFiles
-	Files         isPlanRollbackRequest_Files `protobuf_oneof:"files"`
+	Files isPlanRollbackRequest_Files `protobuf_oneof:"files"`
+	// The prompt to roll back to just before, by its root-feed row exactly as
+	// ListRollbackPrompts served it. UNSET means the selected prompt, else the
+	// latest. A named prompt a rollback can no longer reach (rolled back since,
+	// or cut off by a clear or compaction) is refused as `prompt_not_reachable`,
+	// never quietly replaced by another prompt.
+	Prompt        *v11.FeedId `protobuf:"bytes,4,opt,name=prompt,proto3,oneof" json:"prompt,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -106,6 +114,13 @@ func (x *PlanRollbackRequest) GetRestoreFiles() *PlanRollbackRestoreFiles {
 		if x, ok := x.Files.(*PlanRollbackRequest_RestoreFiles); ok {
 			return x.RestoreFiles
 		}
+	}
+	return nil
+}
+
+func (x *PlanRollbackRequest) GetPrompt() *v11.FeedId {
+	if x != nil {
+		return x.Prompt
 	}
 	return nil
 }
@@ -501,6 +516,7 @@ type RollbackPlanTarget struct {
 	//
 	//	*RollbackPlanTarget_Selected
 	//	*RollbackPlanTarget_Latest
+	//	*RollbackPlanTarget_Named
 	Chosen isRollbackPlanTarget_Chosen `protobuf_oneof:"chosen"`
 	// The prompt's opening words, for the confirmation to name it.
 	Excerpt string `protobuf:"bytes,3,opt,name=excerpt,proto3" json:"excerpt,omitempty"`
@@ -565,6 +581,15 @@ func (x *RollbackPlanTarget) GetLatest() *RollbackPlanTargetLatest {
 	return nil
 }
 
+func (x *RollbackPlanTarget) GetNamed() *RollbackPlanTargetNamed {
+	if x != nil {
+		if x, ok := x.Chosen.(*RollbackPlanTarget_Named); ok {
+			return x.Named
+		}
+	}
+	return nil
+}
+
 func (x *RollbackPlanTarget) GetExcerpt() string {
 	if x != nil {
 		return x.Excerpt
@@ -593,9 +618,16 @@ type RollbackPlanTarget_Latest struct {
 	Latest *RollbackPlanTargetLatest `protobuf:"bytes,2,opt,name=latest,proto3,oneof"`
 }
 
+type RollbackPlanTarget_Named struct {
+	// The prompt the request named (PlanRollbackRequest.prompt).
+	Named *RollbackPlanTargetNamed `protobuf:"bytes,5,opt,name=named,proto3,oneof"`
+}
+
 func (*RollbackPlanTarget_Selected) isRollbackPlanTarget_Chosen() {}
 
 func (*RollbackPlanTarget_Latest) isRollbackPlanTarget_Chosen() {}
+
+func (*RollbackPlanTarget_Named) isRollbackPlanTarget_Chosen() {}
 
 // The selected prompt.
 type RollbackPlanTargetSelected struct {
@@ -671,6 +703,43 @@ func (*RollbackPlanTargetLatest) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_plan_rollback_proto_rawDescGZIP(), []int{9}
 }
 
+// The prompt the request named, whether or not anything is selected.
+type RollbackPlanTargetNamed struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RollbackPlanTargetNamed) Reset() {
+	*x = RollbackPlanTargetNamed{}
+	mi := &file_agentrepl_v1_endpoint_plan_rollback_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RollbackPlanTargetNamed) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RollbackPlanTargetNamed) ProtoMessage() {}
+
+func (x *RollbackPlanTargetNamed) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_plan_rollback_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RollbackPlanTargetNamed.ProtoReflect.Descriptor instead.
+func (*RollbackPlanTargetNamed) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_plan_rollback_proto_rawDescGZIP(), []int{10}
+}
+
 // What happens to files and detached work. Exactly one is set.
 type RollbackPlanFiles struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -685,7 +754,7 @@ type RollbackPlanFiles struct {
 
 func (x *RollbackPlanFiles) Reset() {
 	*x = RollbackPlanFiles{}
-	mi := &file_agentrepl_v1_endpoint_plan_rollback_proto_msgTypes[10]
+	mi := &file_agentrepl_v1_endpoint_plan_rollback_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -697,7 +766,7 @@ func (x *RollbackPlanFiles) String() string {
 func (*RollbackPlanFiles) ProtoMessage() {}
 
 func (x *RollbackPlanFiles) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_plan_rollback_proto_msgTypes[10]
+	mi := &file_agentrepl_v1_endpoint_plan_rollback_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -710,7 +779,7 @@ func (x *RollbackPlanFiles) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RollbackPlanFiles.ProtoReflect.Descriptor instead.
 func (*RollbackPlanFiles) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_plan_rollback_proto_rawDescGZIP(), []int{10}
+	return file_agentrepl_v1_endpoint_plan_rollback_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *RollbackPlanFiles) GetFiles() isRollbackPlanFiles_Files {
@@ -765,7 +834,7 @@ type RollbackPlanFilesKept struct {
 
 func (x *RollbackPlanFilesKept) Reset() {
 	*x = RollbackPlanFilesKept{}
-	mi := &file_agentrepl_v1_endpoint_plan_rollback_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_endpoint_plan_rollback_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -777,7 +846,7 @@ func (x *RollbackPlanFilesKept) String() string {
 func (*RollbackPlanFilesKept) ProtoMessage() {}
 
 func (x *RollbackPlanFilesKept) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_plan_rollback_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_endpoint_plan_rollback_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -790,7 +859,7 @@ func (x *RollbackPlanFilesKept) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RollbackPlanFilesKept.ProtoReflect.Descriptor instead.
 func (*RollbackPlanFilesKept) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_plan_rollback_proto_rawDescGZIP(), []int{11}
+	return file_agentrepl_v1_endpoint_plan_rollback_proto_rawDescGZIP(), []int{12}
 }
 
 // Files are restored. Only changes the agent's file-editing tools made are
@@ -807,7 +876,7 @@ type RollbackPlanFilesRestored struct {
 
 func (x *RollbackPlanFilesRestored) Reset() {
 	*x = RollbackPlanFilesRestored{}
-	mi := &file_agentrepl_v1_endpoint_plan_rollback_proto_msgTypes[12]
+	mi := &file_agentrepl_v1_endpoint_plan_rollback_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -819,7 +888,7 @@ func (x *RollbackPlanFilesRestored) String() string {
 func (*RollbackPlanFilesRestored) ProtoMessage() {}
 
 func (x *RollbackPlanFilesRestored) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_plan_rollback_proto_msgTypes[12]
+	mi := &file_agentrepl_v1_endpoint_plan_rollback_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -832,7 +901,7 @@ func (x *RollbackPlanFilesRestored) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RollbackPlanFilesRestored.ProtoReflect.Descriptor instead.
 func (*RollbackPlanFilesRestored) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_plan_rollback_proto_rawDescGZIP(), []int{12}
+	return file_agentrepl_v1_endpoint_plan_rollback_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *RollbackPlanFilesRestored) GetCancelDetached() *RollbackPlanCancelDetached {
@@ -854,7 +923,7 @@ type RollbackPlanCancelDetached struct {
 
 func (x *RollbackPlanCancelDetached) Reset() {
 	*x = RollbackPlanCancelDetached{}
-	mi := &file_agentrepl_v1_endpoint_plan_rollback_proto_msgTypes[13]
+	mi := &file_agentrepl_v1_endpoint_plan_rollback_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -866,7 +935,7 @@ func (x *RollbackPlanCancelDetached) String() string {
 func (*RollbackPlanCancelDetached) ProtoMessage() {}
 
 func (x *RollbackPlanCancelDetached) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_plan_rollback_proto_msgTypes[13]
+	mi := &file_agentrepl_v1_endpoint_plan_rollback_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -879,7 +948,7 @@ func (x *RollbackPlanCancelDetached) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RollbackPlanCancelDetached.ProtoReflect.Descriptor instead.
 func (*RollbackPlanCancelDetached) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_plan_rollback_proto_rawDescGZIP(), []int{13}
+	return file_agentrepl_v1_endpoint_plan_rollback_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *RollbackPlanCancelDetached) GetItems() uint32 {
@@ -898,7 +967,7 @@ type RollbackPlanInterrupt struct {
 
 func (x *RollbackPlanInterrupt) Reset() {
 	*x = RollbackPlanInterrupt{}
-	mi := &file_agentrepl_v1_endpoint_plan_rollback_proto_msgTypes[14]
+	mi := &file_agentrepl_v1_endpoint_plan_rollback_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -910,7 +979,7 @@ func (x *RollbackPlanInterrupt) String() string {
 func (*RollbackPlanInterrupt) ProtoMessage() {}
 
 func (x *RollbackPlanInterrupt) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_plan_rollback_proto_msgTypes[14]
+	mi := &file_agentrepl_v1_endpoint_plan_rollback_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -923,7 +992,7 @@ func (x *RollbackPlanInterrupt) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RollbackPlanInterrupt.ProtoReflect.Descriptor instead.
 func (*RollbackPlanInterrupt) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_plan_rollback_proto_rawDescGZIP(), []int{14}
+	return file_agentrepl_v1_endpoint_plan_rollback_proto_rawDescGZIP(), []int{15}
 }
 
 // Held prompts that will be dropped.
@@ -937,7 +1006,7 @@ type RollbackPlanDropQueued struct {
 
 func (x *RollbackPlanDropQueued) Reset() {
 	*x = RollbackPlanDropQueued{}
-	mi := &file_agentrepl_v1_endpoint_plan_rollback_proto_msgTypes[15]
+	mi := &file_agentrepl_v1_endpoint_plan_rollback_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -949,7 +1018,7 @@ func (x *RollbackPlanDropQueued) String() string {
 func (*RollbackPlanDropQueued) ProtoMessage() {}
 
 func (x *RollbackPlanDropQueued) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_plan_rollback_proto_msgTypes[15]
+	mi := &file_agentrepl_v1_endpoint_plan_rollback_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -962,7 +1031,7 @@ func (x *RollbackPlanDropQueued) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RollbackPlanDropQueued.ProtoReflect.Descriptor instead.
 func (*RollbackPlanDropQueued) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_plan_rollback_proto_rawDescGZIP(), []int{15}
+	return file_agentrepl_v1_endpoint_plan_rollback_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *RollbackPlanDropQueued) GetPrompts() uint32 {
@@ -981,6 +1050,7 @@ type PlanRollbackError struct {
 	//	*PlanRollbackError_WorkspaceRefMismatch
 	//	*PlanRollbackError_TransferringAway
 	//	*PlanRollbackError_NotYetAdopted
+	//	*PlanRollbackError_PromptNotReachable
 	Cause         isPlanRollbackError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -988,7 +1058,7 @@ type PlanRollbackError struct {
 
 func (x *PlanRollbackError) Reset() {
 	*x = PlanRollbackError{}
-	mi := &file_agentrepl_v1_endpoint_plan_rollback_proto_msgTypes[16]
+	mi := &file_agentrepl_v1_endpoint_plan_rollback_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1000,7 +1070,7 @@ func (x *PlanRollbackError) String() string {
 func (*PlanRollbackError) ProtoMessage() {}
 
 func (x *PlanRollbackError) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_plan_rollback_proto_msgTypes[16]
+	mi := &file_agentrepl_v1_endpoint_plan_rollback_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1013,7 +1083,7 @@ func (x *PlanRollbackError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PlanRollbackError.ProtoReflect.Descriptor instead.
 func (*PlanRollbackError) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_plan_rollback_proto_rawDescGZIP(), []int{16}
+	return file_agentrepl_v1_endpoint_plan_rollback_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *PlanRollbackError) GetCause() isPlanRollbackError_Cause {
@@ -1059,6 +1129,15 @@ func (x *PlanRollbackError) GetNotYetAdopted() *PlanRollbackNotYetAdopted {
 	return nil
 }
 
+func (x *PlanRollbackError) GetPromptNotReachable() *PlanRollbackPromptNotReachable {
+	if x != nil {
+		if x, ok := x.Cause.(*PlanRollbackError_PromptNotReachable); ok {
+			return x.PromptNotReachable
+		}
+	}
+	return nil
+}
+
 type isPlanRollbackError_Cause interface {
 	isPlanRollbackError_Cause()
 }
@@ -1083,6 +1162,11 @@ type PlanRollbackError_NotYetAdopted struct {
 	NotYetAdopted *PlanRollbackNotYetAdopted `protobuf:"bytes,4,opt,name=not_yet_adopted,json=notYetAdopted,proto3,oneof"`
 }
 
+type PlanRollbackError_PromptNotReachable struct {
+	// The request named a prompt a rollback cannot reach.
+	PromptNotReachable *PlanRollbackPromptNotReachable `protobuf:"bytes,5,opt,name=prompt_not_reachable,json=promptNotReachable,proto3,oneof"`
+}
+
 func (*PlanRollbackError_UnknownWorkspace) isPlanRollbackError_Cause() {}
 
 func (*PlanRollbackError_WorkspaceRefMismatch) isPlanRollbackError_Cause() {}
@@ -1090,6 +1174,8 @@ func (*PlanRollbackError_WorkspaceRefMismatch) isPlanRollbackError_Cause() {}
 func (*PlanRollbackError_TransferringAway) isPlanRollbackError_Cause() {}
 
 func (*PlanRollbackError_NotYetAdopted) isPlanRollbackError_Cause() {}
+
+func (*PlanRollbackError_PromptNotReachable) isPlanRollbackError_Cause() {}
 
 // The workspace id is not in the daemon's registry.
 type PlanRollbackUnknownWorkspace struct {
@@ -1100,7 +1186,7 @@ type PlanRollbackUnknownWorkspace struct {
 
 func (x *PlanRollbackUnknownWorkspace) Reset() {
 	*x = PlanRollbackUnknownWorkspace{}
-	mi := &file_agentrepl_v1_endpoint_plan_rollback_proto_msgTypes[17]
+	mi := &file_agentrepl_v1_endpoint_plan_rollback_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1112,7 +1198,7 @@ func (x *PlanRollbackUnknownWorkspace) String() string {
 func (*PlanRollbackUnknownWorkspace) ProtoMessage() {}
 
 func (x *PlanRollbackUnknownWorkspace) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_plan_rollback_proto_msgTypes[17]
+	mi := &file_agentrepl_v1_endpoint_plan_rollback_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1125,7 +1211,7 @@ func (x *PlanRollbackUnknownWorkspace) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PlanRollbackUnknownWorkspace.ProtoReflect.Descriptor instead.
 func (*PlanRollbackUnknownWorkspace) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_plan_rollback_proto_rawDescGZIP(), []int{17}
+	return file_agentrepl_v1_endpoint_plan_rollback_proto_rawDescGZIP(), []int{18}
 }
 
 // The echoed dir disagrees with the registry's dir for this id.
@@ -1139,7 +1225,7 @@ type PlanRollbackWorkspaceRefMismatch struct {
 
 func (x *PlanRollbackWorkspaceRefMismatch) Reset() {
 	*x = PlanRollbackWorkspaceRefMismatch{}
-	mi := &file_agentrepl_v1_endpoint_plan_rollback_proto_msgTypes[18]
+	mi := &file_agentrepl_v1_endpoint_plan_rollback_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1151,7 +1237,7 @@ func (x *PlanRollbackWorkspaceRefMismatch) String() string {
 func (*PlanRollbackWorkspaceRefMismatch) ProtoMessage() {}
 
 func (x *PlanRollbackWorkspaceRefMismatch) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_plan_rollback_proto_msgTypes[18]
+	mi := &file_agentrepl_v1_endpoint_plan_rollback_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1164,7 +1250,7 @@ func (x *PlanRollbackWorkspaceRefMismatch) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PlanRollbackWorkspaceRefMismatch.ProtoReflect.Descriptor instead.
 func (*PlanRollbackWorkspaceRefMismatch) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_plan_rollback_proto_rawDescGZIP(), []int{18}
+	return file_agentrepl_v1_endpoint_plan_rollback_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *PlanRollbackWorkspaceRefMismatch) GetRegistryDir() string {
@@ -1185,7 +1271,7 @@ type PlanRollbackTransferringAway struct {
 
 func (x *PlanRollbackTransferringAway) Reset() {
 	*x = PlanRollbackTransferringAway{}
-	mi := &file_agentrepl_v1_endpoint_plan_rollback_proto_msgTypes[19]
+	mi := &file_agentrepl_v1_endpoint_plan_rollback_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1197,7 +1283,7 @@ func (x *PlanRollbackTransferringAway) String() string {
 func (*PlanRollbackTransferringAway) ProtoMessage() {}
 
 func (x *PlanRollbackTransferringAway) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_plan_rollback_proto_msgTypes[19]
+	mi := &file_agentrepl_v1_endpoint_plan_rollback_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1210,7 +1296,7 @@ func (x *PlanRollbackTransferringAway) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PlanRollbackTransferringAway.ProtoReflect.Descriptor instead.
 func (*PlanRollbackTransferringAway) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_plan_rollback_proto_rawDescGZIP(), []int{19}
+	return file_agentrepl_v1_endpoint_plan_rollback_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *PlanRollbackTransferringAway) GetAddress() string {
@@ -1229,7 +1315,7 @@ type PlanRollbackNotYetAdopted struct {
 
 func (x *PlanRollbackNotYetAdopted) Reset() {
 	*x = PlanRollbackNotYetAdopted{}
-	mi := &file_agentrepl_v1_endpoint_plan_rollback_proto_msgTypes[20]
+	mi := &file_agentrepl_v1_endpoint_plan_rollback_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1241,7 +1327,7 @@ func (x *PlanRollbackNotYetAdopted) String() string {
 func (*PlanRollbackNotYetAdopted) ProtoMessage() {}
 
 func (x *PlanRollbackNotYetAdopted) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_plan_rollback_proto_msgTypes[20]
+	mi := &file_agentrepl_v1_endpoint_plan_rollback_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1254,20 +1340,70 @@ func (x *PlanRollbackNotYetAdopted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PlanRollbackNotYetAdopted.ProtoReflect.Descriptor instead.
 func (*PlanRollbackNotYetAdopted) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_plan_rollback_proto_rawDescGZIP(), []int{20}
+	return file_agentrepl_v1_endpoint_plan_rollback_proto_rawDescGZIP(), []int{21}
+}
+
+// The named prompt is not one a rollback can reach: it was rolled back
+// already, a clear or compaction now stands after it, or it was never a prompt
+// of the main agent's own. The frontend asks for the list again.
+type PlanRollbackPromptNotReachable struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The row the request named, echoed.
+	Prompt        *v11.FeedId `protobuf:"bytes,1,opt,name=prompt,proto3" json:"prompt,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PlanRollbackPromptNotReachable) Reset() {
+	*x = PlanRollbackPromptNotReachable{}
+	mi := &file_agentrepl_v1_endpoint_plan_rollback_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PlanRollbackPromptNotReachable) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PlanRollbackPromptNotReachable) ProtoMessage() {}
+
+func (x *PlanRollbackPromptNotReachable) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_plan_rollback_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PlanRollbackPromptNotReachable.ProtoReflect.Descriptor instead.
+func (*PlanRollbackPromptNotReachable) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_plan_rollback_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *PlanRollbackPromptNotReachable) GetPrompt() *v11.FeedId {
+	if x != nil {
+		return x.Prompt
+	}
+	return nil
 }
 
 var File_agentrepl_v1_endpoint_plan_rollback_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_plan_rollback_proto_rawDesc = "" +
 	"\n" +
-	")agentrepl/v1/endpoint_plan_rollback.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\x1a\x1bagentrepl/v1/rollback.proto\"\xed\x01\n" +
+	")agentrepl/v1/endpoint_plan_rollback.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\x1a\x1bagentrepl/v1/rollback.proto\x1a\x16frontend/v1/feed.proto\"\xaa\x02\n" +
 	"\x13PlanRollbackRequest\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12D\n" +
 	"\n" +
 	"keep_files\x18\x02 \x01(\v2#.agentrepl.v1.PlanRollbackKeepFilesH\x00R\tkeepFiles\x12M\n" +
-	"\rrestore_files\x18\x03 \x01(\v2&.agentrepl.v1.PlanRollbackRestoreFilesH\x00R\frestoreFilesB\a\n" +
-	"\x05files\"\x17\n" +
+	"\rrestore_files\x18\x03 \x01(\v2&.agentrepl.v1.PlanRollbackRestoreFilesH\x00R\frestoreFiles\x120\n" +
+	"\x06prompt\x18\x04 \x01(\v2\x13.frontend.v1.FeedIdH\x01R\x06prompt\x88\x01\x01B\a\n" +
+	"\x05filesB\t\n" +
+	"\a_prompt\"\x17\n" +
 	"\x15PlanRollbackKeepFiles\"\x1a\n" +
 	"\x18PlanRollbackRestoreFiles\"\x98\x01\n" +
 	"\x14PlanRollbackResponse\x12=\n" +
@@ -1288,15 +1424,17 @@ const file_agentrepl_v1_endpoint_plan_rollback_proto_rawDesc = "" +
 	"dropQueued\x88\x01\x01B\f\n" +
 	"\n" +
 	"_interruptB\x0e\n" +
-	"\f_drop_queued\"\xeb\x01\n" +
+	"\f_drop_queued\"\xaa\x02\n" +
 	"\x12RollbackPlanTarget\x12F\n" +
 	"\bselected\x18\x01 \x01(\v2(.agentrepl.v1.RollbackPlanTargetSelectedH\x00R\bselected\x12@\n" +
-	"\x06latest\x18\x02 \x01(\v2&.agentrepl.v1.RollbackPlanTargetLatestH\x00R\x06latest\x12\x18\n" +
+	"\x06latest\x18\x02 \x01(\v2&.agentrepl.v1.RollbackPlanTargetLatestH\x00R\x06latest\x12=\n" +
+	"\x05named\x18\x05 \x01(\v2%.agentrepl.v1.RollbackPlanTargetNamedH\x00R\x05named\x12\x18\n" +
 	"\aexcerpt\x18\x03 \x01(\tR\aexcerpt\x12'\n" +
 	"\x0fprompts_dropped\x18\x04 \x01(\rR\x0epromptsDroppedB\b\n" +
 	"\x06chosen\"\x1c\n" +
 	"\x1aRollbackPlanTargetSelected\"\x1a\n" +
-	"\x18RollbackPlanTargetLatest\"\x9e\x01\n" +
+	"\x18RollbackPlanTargetLatest\"\x19\n" +
+	"\x17RollbackPlanTargetNamed\"\x9e\x01\n" +
 	"\x11RollbackPlanFiles\x129\n" +
 	"\x04kept\x18\x01 \x01(\v2#.agentrepl.v1.RollbackPlanFilesKeptH\x00R\x04kept\x12E\n" +
 	"\brestored\x18\x02 \x01(\v2'.agentrepl.v1.RollbackPlanFilesRestoredH\x00R\brestoredB\a\n" +
@@ -1309,19 +1447,22 @@ const file_agentrepl_v1_endpoint_plan_rollback_proto_rawDesc = "" +
 	"\x05items\x18\x01 \x01(\rR\x05items\"\x17\n" +
 	"\x15RollbackPlanInterrupt\"2\n" +
 	"\x16RollbackPlanDropQueued\x12\x18\n" +
-	"\aprompts\x18\x01 \x01(\rR\aprompts\"\x8d\x03\n" +
+	"\aprompts\x18\x01 \x01(\rR\aprompts\"\xef\x03\n" +
 	"\x11PlanRollbackError\x12Y\n" +
 	"\x11unknown_workspace\x18\x01 \x01(\v2*.agentrepl.v1.PlanRollbackUnknownWorkspaceH\x00R\x10unknownWorkspace\x12f\n" +
 	"\x16workspace_ref_mismatch\x18\x02 \x01(\v2..agentrepl.v1.PlanRollbackWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12Y\n" +
 	"\x11transferring_away\x18\x03 \x01(\v2*.agentrepl.v1.PlanRollbackTransferringAwayH\x00R\x10transferringAway\x12Q\n" +
-	"\x0fnot_yet_adopted\x18\x04 \x01(\v2'.agentrepl.v1.PlanRollbackNotYetAdoptedH\x00R\rnotYetAdoptedB\a\n" +
+	"\x0fnot_yet_adopted\x18\x04 \x01(\v2'.agentrepl.v1.PlanRollbackNotYetAdoptedH\x00R\rnotYetAdopted\x12`\n" +
+	"\x14prompt_not_reachable\x18\x05 \x01(\v2,.agentrepl.v1.PlanRollbackPromptNotReachableH\x00R\x12promptNotReachableB\a\n" +
 	"\x05cause\"\x1e\n" +
 	"\x1cPlanRollbackUnknownWorkspace\"E\n" +
 	" PlanRollbackWorkspaceRefMismatch\x12!\n" +
 	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\"8\n" +
 	"\x1cPlanRollbackTransferringAway\x12\x18\n" +
 	"\aaddress\x18\x01 \x01(\tR\aaddress\"\x1b\n" +
-	"\x19PlanRollbackNotYetAdoptedB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\x19PlanRollbackNotYetAdopted\"M\n" +
+	"\x1ePlanRollbackPromptNotReachable\x12+\n" +
+	"\x06prompt\x18\x01 \x01(\v2\x13.frontend.v1.FeedIdR\x06promptB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_plan_rollback_proto_rawDescOnce sync.Once
@@ -1335,7 +1476,7 @@ func file_agentrepl_v1_endpoint_plan_rollback_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_plan_rollback_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_plan_rollback_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
+var file_agentrepl_v1_endpoint_plan_rollback_proto_msgTypes = make([]protoimpl.MessageInfo, 23)
 var file_agentrepl_v1_endpoint_plan_rollback_proto_goTypes = []any{
 	(*PlanRollbackRequest)(nil),              // 0: agentrepl.v1.PlanRollbackRequest
 	(*PlanRollbackKeepFiles)(nil),            // 1: agentrepl.v1.PlanRollbackKeepFiles
@@ -1347,47 +1488,54 @@ var file_agentrepl_v1_endpoint_plan_rollback_proto_goTypes = []any{
 	(*RollbackPlanTarget)(nil),               // 7: agentrepl.v1.RollbackPlanTarget
 	(*RollbackPlanTargetSelected)(nil),       // 8: agentrepl.v1.RollbackPlanTargetSelected
 	(*RollbackPlanTargetLatest)(nil),         // 9: agentrepl.v1.RollbackPlanTargetLatest
-	(*RollbackPlanFiles)(nil),                // 10: agentrepl.v1.RollbackPlanFiles
-	(*RollbackPlanFilesKept)(nil),            // 11: agentrepl.v1.RollbackPlanFilesKept
-	(*RollbackPlanFilesRestored)(nil),        // 12: agentrepl.v1.RollbackPlanFilesRestored
-	(*RollbackPlanCancelDetached)(nil),       // 13: agentrepl.v1.RollbackPlanCancelDetached
-	(*RollbackPlanInterrupt)(nil),            // 14: agentrepl.v1.RollbackPlanInterrupt
-	(*RollbackPlanDropQueued)(nil),           // 15: agentrepl.v1.RollbackPlanDropQueued
-	(*PlanRollbackError)(nil),                // 16: agentrepl.v1.PlanRollbackError
-	(*PlanRollbackUnknownWorkspace)(nil),     // 17: agentrepl.v1.PlanRollbackUnknownWorkspace
-	(*PlanRollbackWorkspaceRefMismatch)(nil), // 18: agentrepl.v1.PlanRollbackWorkspaceRefMismatch
-	(*PlanRollbackTransferringAway)(nil),     // 19: agentrepl.v1.PlanRollbackTransferringAway
-	(*PlanRollbackNotYetAdopted)(nil),        // 20: agentrepl.v1.PlanRollbackNotYetAdopted
-	(*v1.WorkspaceRef)(nil),                  // 21: workspace.v1.WorkspaceRef
-	(*RollbackToken)(nil),                    // 22: agentrepl.v1.RollbackToken
+	(*RollbackPlanTargetNamed)(nil),          // 10: agentrepl.v1.RollbackPlanTargetNamed
+	(*RollbackPlanFiles)(nil),                // 11: agentrepl.v1.RollbackPlanFiles
+	(*RollbackPlanFilesKept)(nil),            // 12: agentrepl.v1.RollbackPlanFilesKept
+	(*RollbackPlanFilesRestored)(nil),        // 13: agentrepl.v1.RollbackPlanFilesRestored
+	(*RollbackPlanCancelDetached)(nil),       // 14: agentrepl.v1.RollbackPlanCancelDetached
+	(*RollbackPlanInterrupt)(nil),            // 15: agentrepl.v1.RollbackPlanInterrupt
+	(*RollbackPlanDropQueued)(nil),           // 16: agentrepl.v1.RollbackPlanDropQueued
+	(*PlanRollbackError)(nil),                // 17: agentrepl.v1.PlanRollbackError
+	(*PlanRollbackUnknownWorkspace)(nil),     // 18: agentrepl.v1.PlanRollbackUnknownWorkspace
+	(*PlanRollbackWorkspaceRefMismatch)(nil), // 19: agentrepl.v1.PlanRollbackWorkspaceRefMismatch
+	(*PlanRollbackTransferringAway)(nil),     // 20: agentrepl.v1.PlanRollbackTransferringAway
+	(*PlanRollbackNotYetAdopted)(nil),        // 21: agentrepl.v1.PlanRollbackNotYetAdopted
+	(*PlanRollbackPromptNotReachable)(nil),   // 22: agentrepl.v1.PlanRollbackPromptNotReachable
+	(*v1.WorkspaceRef)(nil),                  // 23: workspace.v1.WorkspaceRef
+	(*v11.FeedId)(nil),                       // 24: frontend.v1.FeedId
+	(*RollbackToken)(nil),                    // 25: agentrepl.v1.RollbackToken
 }
 var file_agentrepl_v1_endpoint_plan_rollback_proto_depIdxs = []int32{
-	21, // 0: agentrepl.v1.PlanRollbackRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	23, // 0: agentrepl.v1.PlanRollbackRequest.workspace:type_name -> workspace.v1.WorkspaceRef
 	1,  // 1: agentrepl.v1.PlanRollbackRequest.keep_files:type_name -> agentrepl.v1.PlanRollbackKeepFiles
 	2,  // 2: agentrepl.v1.PlanRollbackRequest.restore_files:type_name -> agentrepl.v1.PlanRollbackRestoreFiles
-	4,  // 3: agentrepl.v1.PlanRollbackResponse.success:type_name -> agentrepl.v1.PlanRollbackSuccess
-	16, // 4: agentrepl.v1.PlanRollbackResponse.error:type_name -> agentrepl.v1.PlanRollbackError
-	6,  // 5: agentrepl.v1.PlanRollbackSuccess.plan:type_name -> agentrepl.v1.RollbackPlan
-	5,  // 6: agentrepl.v1.PlanRollbackSuccess.nothing_to_roll_back:type_name -> agentrepl.v1.PlanRollbackNothingToRollBack
-	22, // 7: agentrepl.v1.RollbackPlan.token:type_name -> agentrepl.v1.RollbackToken
-	7,  // 8: agentrepl.v1.RollbackPlan.target:type_name -> agentrepl.v1.RollbackPlanTarget
-	10, // 9: agentrepl.v1.RollbackPlan.files:type_name -> agentrepl.v1.RollbackPlanFiles
-	14, // 10: agentrepl.v1.RollbackPlan.interrupt:type_name -> agentrepl.v1.RollbackPlanInterrupt
-	15, // 11: agentrepl.v1.RollbackPlan.drop_queued:type_name -> agentrepl.v1.RollbackPlanDropQueued
-	8,  // 12: agentrepl.v1.RollbackPlanTarget.selected:type_name -> agentrepl.v1.RollbackPlanTargetSelected
-	9,  // 13: agentrepl.v1.RollbackPlanTarget.latest:type_name -> agentrepl.v1.RollbackPlanTargetLatest
-	11, // 14: agentrepl.v1.RollbackPlanFiles.kept:type_name -> agentrepl.v1.RollbackPlanFilesKept
-	12, // 15: agentrepl.v1.RollbackPlanFiles.restored:type_name -> agentrepl.v1.RollbackPlanFilesRestored
-	13, // 16: agentrepl.v1.RollbackPlanFilesRestored.cancel_detached:type_name -> agentrepl.v1.RollbackPlanCancelDetached
-	17, // 17: agentrepl.v1.PlanRollbackError.unknown_workspace:type_name -> agentrepl.v1.PlanRollbackUnknownWorkspace
-	18, // 18: agentrepl.v1.PlanRollbackError.workspace_ref_mismatch:type_name -> agentrepl.v1.PlanRollbackWorkspaceRefMismatch
-	19, // 19: agentrepl.v1.PlanRollbackError.transferring_away:type_name -> agentrepl.v1.PlanRollbackTransferringAway
-	20, // 20: agentrepl.v1.PlanRollbackError.not_yet_adopted:type_name -> agentrepl.v1.PlanRollbackNotYetAdopted
-	21, // [21:21] is the sub-list for method output_type
-	21, // [21:21] is the sub-list for method input_type
-	21, // [21:21] is the sub-list for extension type_name
-	21, // [21:21] is the sub-list for extension extendee
-	0,  // [0:21] is the sub-list for field type_name
+	24, // 3: agentrepl.v1.PlanRollbackRequest.prompt:type_name -> frontend.v1.FeedId
+	4,  // 4: agentrepl.v1.PlanRollbackResponse.success:type_name -> agentrepl.v1.PlanRollbackSuccess
+	17, // 5: agentrepl.v1.PlanRollbackResponse.error:type_name -> agentrepl.v1.PlanRollbackError
+	6,  // 6: agentrepl.v1.PlanRollbackSuccess.plan:type_name -> agentrepl.v1.RollbackPlan
+	5,  // 7: agentrepl.v1.PlanRollbackSuccess.nothing_to_roll_back:type_name -> agentrepl.v1.PlanRollbackNothingToRollBack
+	25, // 8: agentrepl.v1.RollbackPlan.token:type_name -> agentrepl.v1.RollbackToken
+	7,  // 9: agentrepl.v1.RollbackPlan.target:type_name -> agentrepl.v1.RollbackPlanTarget
+	11, // 10: agentrepl.v1.RollbackPlan.files:type_name -> agentrepl.v1.RollbackPlanFiles
+	15, // 11: agentrepl.v1.RollbackPlan.interrupt:type_name -> agentrepl.v1.RollbackPlanInterrupt
+	16, // 12: agentrepl.v1.RollbackPlan.drop_queued:type_name -> agentrepl.v1.RollbackPlanDropQueued
+	8,  // 13: agentrepl.v1.RollbackPlanTarget.selected:type_name -> agentrepl.v1.RollbackPlanTargetSelected
+	9,  // 14: agentrepl.v1.RollbackPlanTarget.latest:type_name -> agentrepl.v1.RollbackPlanTargetLatest
+	10, // 15: agentrepl.v1.RollbackPlanTarget.named:type_name -> agentrepl.v1.RollbackPlanTargetNamed
+	12, // 16: agentrepl.v1.RollbackPlanFiles.kept:type_name -> agentrepl.v1.RollbackPlanFilesKept
+	13, // 17: agentrepl.v1.RollbackPlanFiles.restored:type_name -> agentrepl.v1.RollbackPlanFilesRestored
+	14, // 18: agentrepl.v1.RollbackPlanFilesRestored.cancel_detached:type_name -> agentrepl.v1.RollbackPlanCancelDetached
+	18, // 19: agentrepl.v1.PlanRollbackError.unknown_workspace:type_name -> agentrepl.v1.PlanRollbackUnknownWorkspace
+	19, // 20: agentrepl.v1.PlanRollbackError.workspace_ref_mismatch:type_name -> agentrepl.v1.PlanRollbackWorkspaceRefMismatch
+	20, // 21: agentrepl.v1.PlanRollbackError.transferring_away:type_name -> agentrepl.v1.PlanRollbackTransferringAway
+	21, // 22: agentrepl.v1.PlanRollbackError.not_yet_adopted:type_name -> agentrepl.v1.PlanRollbackNotYetAdopted
+	22, // 23: agentrepl.v1.PlanRollbackError.prompt_not_reachable:type_name -> agentrepl.v1.PlanRollbackPromptNotReachable
+	24, // 24: agentrepl.v1.PlanRollbackPromptNotReachable.prompt:type_name -> frontend.v1.FeedId
+	25, // [25:25] is the sub-list for method output_type
+	25, // [25:25] is the sub-list for method input_type
+	25, // [25:25] is the sub-list for extension type_name
+	25, // [25:25] is the sub-list for extension extendee
+	0,  // [0:25] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_plan_rollback_proto_init() }
@@ -1412,17 +1560,19 @@ func file_agentrepl_v1_endpoint_plan_rollback_proto_init() {
 	file_agentrepl_v1_endpoint_plan_rollback_proto_msgTypes[7].OneofWrappers = []any{
 		(*RollbackPlanTarget_Selected)(nil),
 		(*RollbackPlanTarget_Latest)(nil),
+		(*RollbackPlanTarget_Named)(nil),
 	}
-	file_agentrepl_v1_endpoint_plan_rollback_proto_msgTypes[10].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_plan_rollback_proto_msgTypes[11].OneofWrappers = []any{
 		(*RollbackPlanFiles_Kept)(nil),
 		(*RollbackPlanFiles_Restored)(nil),
 	}
-	file_agentrepl_v1_endpoint_plan_rollback_proto_msgTypes[12].OneofWrappers = []any{}
-	file_agentrepl_v1_endpoint_plan_rollback_proto_msgTypes[16].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_plan_rollback_proto_msgTypes[13].OneofWrappers = []any{}
+	file_agentrepl_v1_endpoint_plan_rollback_proto_msgTypes[17].OneofWrappers = []any{
 		(*PlanRollbackError_UnknownWorkspace)(nil),
 		(*PlanRollbackError_WorkspaceRefMismatch)(nil),
 		(*PlanRollbackError_TransferringAway)(nil),
 		(*PlanRollbackError_NotYetAdopted)(nil),
+		(*PlanRollbackError_PromptNotReachable)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -1430,7 +1580,7 @@ func file_agentrepl_v1_endpoint_plan_rollback_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_plan_rollback_proto_rawDesc), len(file_agentrepl_v1_endpoint_plan_rollback_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   21,
+			NumMessages:   23,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

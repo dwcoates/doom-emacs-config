@@ -8,6 +8,7 @@ package agentrepl.v1;
 
 import "workspace/v1/workspace.proto";
 import "frontend/v1/feed.proto";
+import "agentrepl/v1/rollback.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
@@ -69,7 +70,50 @@ message InterruptedDetached {
   // has no vocabulary for.
   int64 count = 1;
 }
-message InterruptNothingRunning {}
+// The stop found the session quiet. A turn stop that finds nothing running is
+// the SECOND PRESS of the stop key: the turn it would stop already ended (the
+// first press stopped it, or it concluded on its own), so the key moves on to
+// rolling the latest prompt back.
+message InterruptNothingRunning {
+  // What rolling back offers now, for a turn stop. UNSET when no prompt can be
+  // rolled back (none since the last clear or compaction), and always UNSET on
+  // the detached and all_agents targets, which roll nothing back.
+  optional InterruptNothingRunningRollback rollback = 1;
+}
+
+// How the latest prompt can be rolled back, decided by whether anything the
+// agent produced has landed in the root feed after it.
+message InterruptNothingRunningRollback {
+  // The set arm IS the way: a prompt nothing has answered yet is cancelled
+  // outright, while a prompt with output after it is one a reader must choose
+  // to give up, so the frontend offers every reachable prompt instead.
+  oneof offer {
+    // Nothing the agent produced follows the latest prompt.
+    InterruptNothingRunningRollbackImmediate immediate = 1;
+    // Agent output follows the latest prompt.
+    InterruptNothingRunningRollbackChoose choose = 2;
+  }
+}
+
+// THE LATEST PROMPT HAS NOTHING AFTER IT: no response bubble, tool card,
+// subagent or shell bubble, permission or question card has landed in the root
+// feed since it was sent. Rolling it back drops nothing a reader has seen
+// besides the prompt itself, so the frontend rolls back at once, with no
+// confirmation, by handing `token` to RollBack. The daemon refuses that
+// RollBack as `plan_stale` if agent output has landed after the prompt since,
+// so a token minted here never drops a bubble the reader did not have in front
+// of them when they pressed the key.
+message InterruptNothingRunningRollbackImmediate {
+  // A rollback plan to just before the latest prompt, keeping files, minted
+  // exactly as PlanRollback mints one.
+  RollbackToken token = 1;
+}
+
+// AGENT OUTPUT FOLLOWS THE LATEST PROMPT, so rolling back is a choice with a
+// cost. The frontend lists the reachable prompts (ListRollbackPrompts), lets
+// the reader pick one, and plans that rollback by naming it
+// (PlanRollbackRequest.prompt), confirming as for any other rollback.
+message InterruptNothingRunningRollbackChoose {}
 
 // Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
 // Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
