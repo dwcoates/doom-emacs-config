@@ -194,6 +194,114 @@ else
     fail "a nested invocation holds no slot of its own" "slots during the run: $(cat "$d/held")"
 fi
 
+# --- ordering: tickets in $SLOT_DIR.queue ------------------------------------
+# A waiter's ticket is <priority>-<epoch seconds>-<pid>. These rows stage
+# tickets by hand, each owned by a process that is genuinely alive (or
+# genuinely dead), so no ordering has to be raced into place.
+
+# stage_ticket DIR PRIORITY SECONDS PID -- a ticket as a waiter would write it.
+stage_ticket() {
+    mkdir -p "$1/slots.queue"
+    : > "$(printf '%s/slots.queue/%d-%012d-%010d' "$1" "$2" "$3" "$4")"
+}
+
+# await_file FILE PATTERN -- poll (bounded, 10s) until FILE contains PATTERN.
+await_file() {
+    local waited=0
+    while ! grep -q "$2" "$1" 2>/dev/null; do
+        if [ "$waited" -ge 100 ]; then return 1; fi
+        sleep 0.1
+        waited=$((waited + 1))
+    done
+}
+
+# --- 8. a free slot is NOT taken past an earlier live waiter ----------------
+# The bug this ordering fixes: a freed slot went to whichever poller woke
+# first, so a waiter could lose the race indefinitely.
+d="$TMP/t8"; mkdir -p "$d"
+sleep 60 &
+EARLIER=$!
+stage_ticket "$d" 1 1 "$EARLIER"
+set +e
+set -m
+AGENT_REPL_SUITE_SLOT_DIR="$d/slots" bash "$SCRIPT_UNDER_TEST" \
+    bash -c 'echo ran > "$0"' "$d/marker" 2>"$d/err" &
+WAITER=$!
+set +m
+GATED=0
+if await_file "$d/err" "WAITING" && [ ! -f "$d/marker" ]; then GATED=1; fi
+kill -TERM -- "-$WAITER" 2>/dev/null
+wait "$WAITER" 2>/dev/null
+kill "$EARLIER" 2>/dev/null
+wait "$EARLIER" 2>/dev/null
+set -e
+if [ "$GATED" -eq 1 ]; then
+    pass "a waiter does not take a free slot ahead of an earlier live waiter"
+else
+    fail "a waiter does not take a free slot ahead of an earlier live waiter" "err: $(cat "$d/err")"
+fi
+
+# --- 9. a dead waiter's ticket does not block the line ----------------------
+d="$TMP/t9"; mkdir -p "$d"
+sleep 0 &
+DEAD=$!
+wait "$DEAD"
+stage_ticket "$d" 1 1 "$DEAD"
+set +e
+# shellcheck disable=SC2016  # $0 is the inner bash's, expanded there on purpose
+timeout 30 env AGENT_REPL_SUITE_SLOT_DIR="$d/slots" bash "$SCRIPT_UNDER_TEST" \
+    bash -c 'echo ran > "$0"' "$d/marker" 2>"$d/err"
+RC=$?
+set -e
+if [ "$RC" -eq 0 ] && [ "$(cat "$d/marker" 2>/dev/null)" = "ran" ]; then
+    pass "a dead waiter's ticket is dropped instead of blocking the line"
+else
+    fail "a dead waiter's ticket is dropped instead of blocking the line" "rc=$RC err: $(cat "$d/err")"
+fi
+
+# --- 10. the merge queue's gate goes ahead of an earlier ordinary waiter ----
+# Master does not move while the merge queue waits, so its gate is served
+# before every ad-hoc run, however long that run has been waiting.
+d="$TMP/t10"; mkdir -p "$d"
+sleep 60 &
+EARLIER=$!
+stage_ticket "$d" 1 1 "$EARLIER"
+set +e
+# shellcheck disable=SC2016  # $0 is the inner bash's, expanded there on purpose
+timeout 30 env AGENT_REPL_SUITE_PRIORITY=merge AGENT_REPL_SUITE_SLOT_DIR="$d/slots" \
+    bash "$SCRIPT_UNDER_TEST" bash -c 'echo ran > "$0"' "$d/marker" 2>"$d/err"
+RC=$?
+kill "$EARLIER" 2>/dev/null
+wait "$EARLIER" 2>/dev/null
+set -e
+if [ "$RC" -eq 0 ] && [ "$(cat "$d/marker" 2>/dev/null)" = "ran" ]; then
+    pass "a merge-priority waiter runs ahead of an earlier ordinary waiter"
+else
+    fail "a merge-priority waiter runs ahead of an earlier ordinary waiter" "rc=$RC err: $(cat "$d/err")"
+fi
+
+# --- 11. an unknown priority is refused, not guessed at ---------------------
+d="$TMP/t11"; mkdir -p "$d"
+set +e
+AGENT_REPL_SUITE_PRIORITY=urgent AGENT_REPL_SUITE_SLOT_DIR="$d/slots" \
+    bash "$SCRIPT_UNDER_TEST" bash -c 'echo ran > "$0"' "$d/marker" 2>"$d/err"
+RC=$?
+set -e
+if [ "$RC" -eq 2 ] && [ ! -f "$d/marker" ]; then
+    pass "an unknown priority is refused without running the command"
+else
+    fail "an unknown priority is refused without running the command" "rc=$RC err: $(cat "$d/err")"
+fi
+
+# --- 12. a waiter that ran leaves no ticket behind --------------------------
+d="$TMP/t12"; mkdir -p "$d"
+AGENT_REPL_SUITE_SLOT_DIR="$d/slots" bash "$SCRIPT_UNDER_TEST" true 2>"$d/err"
+if [ -z "$(ls -A "$d/slots.queue" 2>/dev/null)" ]; then
+    pass "a finished run leaves no ticket in the queue"
+else
+    fail "a finished run leaves no ticket in the queue" "queue: $(ls -A "$d/slots.queue")"
+fi
+
 echo
 echo "passed $PASS, failed $FAIL"
 [ "$FAIL" -eq 0 ]

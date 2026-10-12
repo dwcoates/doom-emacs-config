@@ -47,6 +47,23 @@
 # The gate's promise is unchanged: one suite per slot at a time on this host.
 # The nested run is not a second suite, it is the same one, already counted.
 #
+# WAITERS ARE SERVED IN ORDER, AND THE MERGE QUEUE GOES FIRST.
+#
+# The gate used to let every waiter retry `mkdir` every two seconds, so a freed
+# slot went to whichever poller woke first. That is not a queue, and a waiter
+# can lose that race indefinitely: on 2026-10-11 the merge queue's test gate
+# for one merge sat behind six ad-hoc runs from one agent session, one of them
+# waiting 58 minutes, with nothing ordering who went next. Master does not
+# move while the merge queue waits, so every merge stalls behind it.
+#
+# So each waiter takes a TICKET, a file in $SLOT_DIR.queue named
+# <priority>-<epoch seconds>-<pid>, and may claim a free slot only when fewer
+# live tickets sort before its own than there are free slots. Names sort
+# lexically, so priority 0 (AGENT_REPL_SUITE_PRIORITY=merge, which the merge
+# queue's gate sets) is served before priority 1 (every other run), and within
+# a priority the oldest ticket goes first. A ticket whose pid is dead is reaped
+# exactly as a dead holder's slot is, so a killed waiter never blocks the line.
+#
 # Usage:
 #   bin/suite-slot.sh npm test
 #   bin/suite-slot.sh go test ./... -count=1
@@ -77,9 +94,26 @@ SLOT_DIR=${AGENT_REPL_SUITE_SLOT_DIR:-/tmp/agent-repl-suite.slots}
 # suites you have measured as small, and then say so at the call site.
 SUITE_SLOTS=${AGENT_REPL_SUITE_SLOTS:-1}
 
+# WHERE IN THE LINE A WAITER STANDS. The merge queue's gate is the one run
+# that holds master still while it waits, so it is served first. Any other
+# value is a caller's mistake, refused rather than guessed at.
+# A SIBLING of the slot directory, not inside it, so the slot directory holds
+# only slots and a count of its entries stays a count of running suites.
+QUEUE_DIR="$SLOT_DIR.queue"
+case ${AGENT_REPL_SUITE_PRIORITY:-} in
+  merge) TICKET_PRIORITY=0 ;;
+  "") TICKET_PRIORITY=1 ;;
+  *) log "AGENT_REPL_SUITE_PRIORITY=${AGENT_REPL_SUITE_PRIORITY} is not a known priority (the only one is 'merge')"; exit 2 ;;
+esac
+
 SUITE_SLOT=""
+TICKET=""
 # shellcheck disable=SC2329  # invoked indirectly, from the EXIT/INT/TERM trap
 release_slot() {
+  if [[ -n ${TICKET:-} ]]; then
+    rm -f "$TICKET"
+    TICKET=""
+  fi
   [[ -n ${SUITE_SLOT:-} ]] || return 0
   rm -rf "$SUITE_SLOT"
   SUITE_SLOT=""
@@ -100,6 +134,37 @@ reap_dead_slots() {
   done
 }
 
+# A ticket names its own pid, so it is never read half-written.
+reap_dead_tickets() {
+  local ticket pid
+  for ticket in "$QUEUE_DIR"/*; do
+    [[ -f $ticket ]] || continue
+    pid=$(( 10#${ticket##*-} ))
+    kill -0 "$pid" 2>/dev/null && continue
+    log "dropping the ticket of dead waiter pid $pid"
+    rm -f "$ticket"
+  done
+}
+
+# How many live slots are held, and how many live tickets are ahead of ours.
+held_slots() {
+  local slot n=0
+  for slot in "$SLOT_DIR"/slot-*; do
+    [[ -d $slot ]] && n=$(( n + 1 ))
+  done
+  echo "$n"
+}
+
+tickets_ahead() {
+  local ticket mine n=0
+  mine=$(basename "$TICKET")
+  for ticket in "$QUEUE_DIR"/*; do
+    [[ -f $ticket ]] || continue
+    [[ $(basename "$ticket") < $mine ]] && n=$(( n + 1 ))
+  done
+  echo "$n"
+}
+
 acquire_slot() {
   # ALREADY INSIDE A HELD SLOT. Waiting here would be waiting on this very
   # process tree, which is the deadlock the header records. Run through.
@@ -111,12 +176,19 @@ acquire_slot() {
     log "AGENT_REPL_SUITE_NO_GATE=1: running WITHOUT the host gate; concurrent suites will contend for every CPU"
     return 0
   fi
-  mkdir -p "$SLOT_DIR"
-  local i waited=0 announced=0 holder
+  mkdir -p "$SLOT_DIR" "$QUEUE_DIR"
+  TICKET=$(printf '%s/%d-%012d-%010d' "$QUEUE_DIR" "$TICKET_PRIORITY" "$(date +%s)" "$$")
+  trap release_slot EXIT INT TERM
+  : > "$TICKET"
+  local i waited=0 announced=0 holder ahead
   while true; do
     reap_dead_slots
-    for (( i = 1; i <= SUITE_SLOTS; i++ )); do
+    reap_dead_tickets
+    ahead=$(tickets_ahead)
+    (( ahead < SUITE_SLOTS - $(held_slots) )) && for (( i = 1; i <= SUITE_SLOTS; i++ )); do
       if mkdir "$SLOT_DIR/slot-$i" 2>/dev/null; then
+        rm -f "$TICKET"
+        TICKET=""
         SUITE_SLOT="$SLOT_DIR/slot-$i"
         printf '%s\n' "$$" > "$SUITE_SLOT/pid"
         printf '%s\n' "$*" > "$SUITE_SLOT/cmd"
@@ -124,20 +196,19 @@ acquire_slot() {
         # slot: what matters to a nested invocation is whether IT is inside the
         # holder, which is exactly what an inherited environment answers.
         export AGENT_REPL_SUITE_SLOT_HELD="slot-$i"
-        trap release_slot EXIT INT TERM
         (( waited > 0 )) && log "slot $i acquired after ${waited}s"
         return 0
       fi
     done
     if (( announced == 0 )); then
       holder=$(cat "$SLOT_DIR"/slot-*/cmd 2>/dev/null | sed -n 1p)
-      log "WAITING: all $SUITE_SLOTS suite slot(s) are in use${holder:+ (running: $holder)}."
+      log "WAITING: all $SUITE_SLOTS suite slot(s) are in use or promised to earlier waiters ($ahead ahead of this one)${holder:+ (running: $holder)}."
       log "  This is the host concurrency gate, not a hang: $SLOT_DIR holds a directory per running suite."
       log "  A suite already fills this box; running two makes both slower and makes timing bounds lie."
       log "  Set AGENT_REPL_SUITE_NO_GATE=1 to override deliberately."
       announced=1
     elif (( waited % 60 == 0 )); then
-      log "still waiting for a suite slot (${waited}s)"
+      log "still waiting for a suite slot (${waited}s, $ahead ahead of this one)"
     fi
     sleep 2
     waited=$(( waited + 2 ))
