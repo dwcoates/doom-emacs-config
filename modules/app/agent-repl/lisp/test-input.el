@@ -2439,6 +2439,9 @@ The second escape is treated as a FIRST again -- it warns, never clears."
 (defvar agent-repl-test-input--rollback-calls nil
   "Every rollback rpc the stubs received, newest first: (VERB REQUEST).")
 
+(defvar agent-repl-test-input--list-answer nil
+  "What the stubbed ListRollbackPrompts answers: (:response R) or (:failure DETAIL).")
+
 (defvar agent-repl-test-input--asked nil
   "The y/n question the stubbed `y-or-n-p' was asked.")
 
@@ -2463,6 +2466,13 @@ CONFIRM is what the y/n question answers; ROLL-BACK is RollBack's answer."
                       (:response (cadr agent-repl-test-input--plan-answer))
                       (:failure (signal 'agent-repl-connect-error
                                         (cadr agent-repl-test-input--plan-answer))))))
+                 ((symbol-function 'agent-repl-rpc-list-rollback-prompts-sync)
+                  (lambda (_conn request &optional _timeout)
+                    (push (list :list request) agent-repl-test-input--rollback-calls)
+                    (pcase (car agent-repl-test-input--list-answer)
+                      (:response (cadr agent-repl-test-input--list-answer))
+                      (:failure (signal 'agent-repl-connect-error
+                                        (cadr agent-repl-test-input--list-answer))))))
                  ((symbol-function 'agent-repl-rpc-roll-back)
                   (lambda (_conn request &rest keys)
                     (push (list :roll-back request) agent-repl-test-input--rollback-calls)
@@ -2935,6 +2945,245 @@ CONFIRM is what the y/n question answers; ROLL-BACK is RollBack's answer."
       ;; Assert
       (should (cl-some (lambda (m) (string-match-p "rollback-unknown-arm.*verb=plan" m))
                        errors)))))
+
+;;;; ---- The stop key's second press: the rollback offer -----------------
+
+(defun agent-repl-test-input--entry (row excerpt &optional sent-at-ms tokens)
+  "A decoded RollbackPromptEntry for ROW."
+  (list :prompt (list :value row) :excerpt excerpt
+        :sent-at-ms sent-at-ms :context-tokens tokens))
+
+(defun agent-repl-test-input--listed (&rest entries)
+  "A ListRollbackPrompts success answering ENTRIES."
+  (list :response (list :arm :success :value (list :prompts entries))))
+
+(defmacro agent-repl-test-input--picking (line &rest body)
+  "Run BODY with `completing-read' answering the candidate starting with LINE.
+The candidates offered are kept in `agent-repl-test-input--offered'."
+  (declare (indent 1))
+  `(cl-letf (((symbol-function 'completing-read)
+              (lambda (_prompt table &rest _)
+                (setq agent-repl-test-input--offered (all-completions "" table))
+                (cl-find-if (lambda (c) (string-prefix-p ,line c))
+                            agent-repl-test-input--offered))))
+     ,@body))
+
+(defvar agent-repl-test-input--offered nil
+  "The candidates the stubbed `completing-read' was offered.")
+
+(ert-deftest agent-repl-test-input-rollback-offer-immediate-rolls-back-at-once ()
+  "An immediate offer sends RollBack with its token and asks nothing."
+  (agent-repl-test-input--with-rollback nil nil
+      (agent-repl-test-input--done (agent-repl-test-input--said))
+    ;; Act
+    (agent-repl--input-rollback-offer "ws-one" '(:arm :immediate :value (:token (:value "tok-9"))))
+    ;; Assert
+    (should (equal (agent-repl-test-input--roll-back-sent)
+                   (list :workspace agent-repl-test-input--ref :token '(:value "tok-9"))))
+    (should-not agent-repl-test-input--asked)
+    (should-not (assq :plan agent-repl-test-input--rollback-calls))))
+
+(ert-deftest agent-repl-test-input-rollback-offer-immediate-refills-the-composer ()
+  "The immediately rolled-back prompt lands in the composer."
+  (agent-repl-test-input--with-rollback nil nil
+      (agent-repl-test-input--done
+       (agent-repl-test-input--said (agent-repl-test-input--text-block "fix it")))
+    ;; Act
+    (agent-repl--input-rollback-offer "ws-one" '(:arm :immediate :value (:token (:value "tok-9"))))
+    ;; Assert
+    (should (equal (agent-repl-test-input--composer-text) "fix it"))))
+
+(ert-deftest agent-repl-test-input-rollback-offer-immediate-stale-flashes ()
+  "A token the daemon finds stale flashes its refusal."
+  (agent-repl-test-input--with-rollback nil nil
+      (agent-repl-test-input--refusal :plan-stale)
+    ;; Act
+    (agent-repl--input-rollback-offer "ws-one" '(:arm :immediate :value (:token (:value "tok-9"))))
+    ;; Assert
+    (should (equal (agent-repl-test-input--notice)
+                   "rollback: the conversation changed; press the key again"))))
+
+(ert-deftest agent-repl-test-input-rollback-offer-immediate-without-a-ref-sends-nothing ()
+  "A workspace not registered yet rolls nothing back, and says so."
+  (agent-repl-test-input--with-rollback nil nil nil
+    ;; Arrange
+    (cl-letf (((symbol-function 'agent-repl-host-ref) (lambda (_ws) nil)))
+      ;; Act
+      (agent-repl--input-rollback-offer "ws-one" '(:arm :immediate :value (:token (:value "t")))))
+    ;; Assert
+    (should (equal (list (agent-repl-test-input--notice) agent-repl-test-input--rollback-calls)
+                   '("rollback: workspace not ready" nil)))))
+
+(ert-deftest agent-repl-test-input-rollback-offer-unknown-arm-is-an-error ()
+  "An offer arm the composer does not know is logged at ERROR."
+  (agent-repl-test-input--with-rollback nil nil nil
+    (let ((errors nil))
+      (cl-letf (((symbol-function 'agent-repl--error)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) errors))))
+        ;; Act
+        (agent-repl--input-rollback-offer "ws-one" '(:arm :later :value nil)))
+      ;; Assert
+      (should (cl-some (lambda (m) (string-match-p "rollback-unknown-offer.*:later" m)) errors))
+      (should-not agent-repl-test-input--rollback-calls))))
+
+(ert-deftest agent-repl-test-input-rollback-offer-choose-plans-the-pick-by-name ()
+  "Choosing lists the prompts, and the pick is planned by naming its row."
+  (agent-repl-test-input--with-rollback
+      (agent-repl-test-input--plan-answer
+       (agent-repl-test-input--plan :target '(:chosen :named :excerpt "older" :prompts-dropped 2)))
+      t (agent-repl-test-input--done (agent-repl-test-input--said))
+    (let ((agent-repl-test-input--list-answer
+           (agent-repl-test-input--listed (agent-repl-test-input--entry "p2" "newer")
+                                          (agent-repl-test-input--entry "p1" "older"))))
+      (agent-repl-test-input--picking " 2"
+        ;; Act
+        (agent-repl--input-rollback-offer "ws-one" '(:arm :choose :value nil))))
+    ;; Assert
+    (should (equal (plist-get (cadr (assq :plan agent-repl-test-input--rollback-calls)) :prompt)
+                   '(:value "p1")))
+    (should (string-prefix-p "Roll back to before the chosen prompt \"older\""
+                             agent-repl-test-input--asked))
+    (should (agent-repl-test-input--roll-back-sent))))
+
+(ert-deftest agent-repl-test-input-rollback-choose-offers-newest-first ()
+  "The picker lists the prompts in the daemon's order, newest at the top."
+  (agent-repl-test-input--with-rollback
+      (agent-repl-test-input--plan-answer (agent-repl-test-input--plan)) nil nil
+    (let ((agent-repl-test-input--list-answer
+           (agent-repl-test-input--listed (agent-repl-test-input--entry "p2" "newer")
+                                          (agent-repl-test-input--entry "p1" "older"))))
+      (agent-repl-test-input--picking " 1"
+        ;; Act
+        (agent-repl--input-rollback-choose "ws-one")))
+    ;; Assert
+    (should (equal (mapcar (lambda (c) (car (last (split-string c "  +"))))
+                           agent-repl-test-input--offered)
+                   '("newer" "older")))))
+
+(ert-deftest agent-repl-test-input-rollback-choose-with-nothing-listed-flashes ()
+  "An empty list reads nothing and says there is no prompt."
+  (agent-repl-test-input--with-rollback nil nil nil
+    (let ((agent-repl-test-input--list-answer (agent-repl-test-input--listed))
+          (read nil))
+      (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) (setq read t) nil)))
+        ;; Act
+        (agent-repl--input-rollback-choose "ws-one"))
+      ;; Assert
+      (should-not read)
+      (should (equal (agent-repl-test-input--notice) "rollback: no prompt to roll back to")))))
+
+(ert-deftest agent-repl-test-input-rollback-choose-refusal-flashes-and-warns ()
+  "A ListRollbackPrompts refusal flashes and is logged at WARN."
+  (agent-repl-test-input--with-rollback nil nil nil
+    (let ((agent-repl-test-input--list-answer
+           (agent-repl-test-input--refusal :unknown-workspace)))
+      ;; Act
+      (agent-repl--input-rollback-choose "ws-one"))
+    ;; Assert
+    (should (equal (agent-repl-test-input--notice)
+                   "rollback: the daemon does not know this workspace"))
+    (should (cl-some (lambda (m) (string-match-p "rollback-refused.*verb=list" m))
+                     agent-repl-test-input--warned))))
+
+(ert-deftest agent-repl-test-input-rollback-choose-transport-failure-flashes ()
+  "A ListRollbackPrompts the daemon never answers flashes and warns."
+  (agent-repl-test-input--with-rollback nil nil nil
+    (let ((agent-repl-test-input--list-answer '(:failure (:kind :transport :message "down"))))
+      ;; Act
+      (agent-repl--input-rollback-choose "ws-one"))
+    ;; Assert
+    (should (equal (agent-repl-test-input--notice) "rollback: the daemon did not answer"))
+    (should (cl-some (lambda (m) (string-match-p "rollback-failure.*verb=list" m))
+                     agent-repl-test-input--warned))))
+
+(ert-deftest agent-repl-test-input-rollback-choose-unknown-arm-is-an-error ()
+  "A ListRollbackPrompts answer arm the composer does not know is logged at ERROR."
+  (agent-repl-test-input--with-rollback nil nil nil
+    (let ((agent-repl-test-input--list-answer '(:response (:arm :accepted :value nil)))
+          (errors nil))
+      (cl-letf (((symbol-function 'agent-repl--error)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) errors))))
+        ;; Act
+        (agent-repl--input-rollback-choose "ws-one"))
+      ;; Assert
+      (should (cl-some (lambda (m) (string-match-p "rollback-unknown-arm.*verb=list" m)) errors)))))
+
+(ert-deftest agent-repl-test-input-rollback-prompt-not-reachable-reads-plainly ()
+  "A named prompt no longer reachable is said in plain words."
+  (should (equal (agent-repl--input-rollback-refusal-text
+                  '(:arm :prompt-not-reachable :value (:prompt (:value "p1"))))
+                 "rollback: that prompt can no longer be rolled back to; press the key again")))
+
+(ert-deftest agent-repl-test-input-rollback-tokens-text ()
+  "The context column is short, and a missing figure is a dash."
+  (dolist (case '((nil "-") (0 "0") (999 "999") (1000 "1k") (42400 "42k")
+                  (999400 "999k") (1250000 "1.2M")))
+    (should (equal (agent-repl--input-rollback-tokens-text (car case)) (cadr case)))))
+
+(ert-deftest agent-repl-test-input-rollback-candidate-columns ()
+  "A picker line is index, time since sent, context and excerpt."
+  (let ((now 1000.0))
+    (should (equal (agent-repl--input-rollback-candidate
+                    3 (agent-repl-test-input--entry "p" "fix it" (* 1000 (- 1000 600)) 42000) now)
+                   " 3  10m ago          42k  fix it"))))
+
+(ert-deftest agent-repl-test-input-rollback-candidate-without-figures-shows-dashes ()
+  "A prompt with no send time and no context figure shows dashes."
+  (should (equal (agent-repl--input-rollback-candidate
+                  1 (agent-repl-test-input--entry "p" "adopted") 1000.0)
+                 " 1  -                  -  adopted")))
+
+(ert-deftest agent-repl-test-input-rollback-read-entry-keeps-the-daemon-order ()
+  "The completion table tells every backend not to re-sort it."
+  (let (metadata)
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (_prompt table &rest _)
+                 (setq metadata (funcall table "" nil 'metadata))
+                 (car (all-completions "" table)))))
+      ;; Act
+      (let ((entry (agent-repl--input-rollback-read-entry
+                    (list (agent-repl-test-input--entry "p2" "b")
+                          (agent-repl-test-input--entry "p1" "a")))))
+        ;; Assert
+        (should (equal (plist-get entry :prompt) '(:value "p2")))
+        (should (eq (alist-get 'display-sort-function (cdr metadata)) 'identity))
+        (should (eq (alist-get 'cycle-sort-function (cdr metadata)) 'identity))))))
+
+(ert-deftest agent-repl-test-input-rollback-endpoints-answer-ref-and-conn ()
+  "With a ref and a connection the guard answers both and flashes nothing."
+  (agent-repl-test-input--with-rollback nil nil nil
+    ;; Act
+    (let ((endpoints (agent-repl--input-rollback-endpoints "ws-one" nil)))
+      ;; Assert
+      (should (equal (car endpoints) agent-repl-test-input--ref))
+      (should (cdr endpoints))
+      (should-not (agent-repl-test-input--notice)))))
+
+(ert-deftest agent-repl-test-input-rollback-endpoints-without-a-connection-warn ()
+  "No daemon connection is answered nil, flashed and logged at WARN."
+  (agent-repl-test-input--with-rollback nil nil nil
+    (cl-letf (((symbol-function 'agent-repl-host-conn) (lambda (_ws) nil))
+              ((symbol-function 'agent-repl-link-primary) (lambda () nil)))
+      ;; Act
+      (should-not (agent-repl--input-rollback-endpoints "ws-one" '(:offer :choose))))
+    ;; Assert
+    (should (equal (agent-repl-test-input--notice) "rollback: no daemon connection"))
+    (should (cl-some (lambda (m) (string-match-p "rollback-no-conn.*:choose" m))
+                     agent-repl-test-input--warned))))
+
+(ert-deftest agent-repl-test-input-rollback-every-entry-point-shares-the-guard ()
+  "The planned, immediate and chosen rollbacks all send behind one guard."
+  (agent-repl-test-input--with-rollback nil nil nil
+    (let ((guarded nil))
+      (cl-letf (((symbol-function 'agent-repl--input-rollback-endpoints)
+                 (lambda (_ws context) (push context guarded) nil)))
+        ;; Act
+        (agent-repl-rollback-keep-files)
+        (agent-repl--input-rollback-offer "ws-one" '(:arm :immediate :value (:token (:value "t"))))
+        (agent-repl--input-rollback-choose "ws-one"))
+      ;; Assert
+      (should (= (length guarded) 3))
+      (should-not agent-repl-test-input--rollback-calls))))
 
 ;;;; ---- Handover refusals route to host.el ------------------------------
 
