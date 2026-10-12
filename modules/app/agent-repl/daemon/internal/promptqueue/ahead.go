@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	conversationv1 "agentrepl/proto/conversation/v1"
-
 	"agent-repld/internal/classifier"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/holdfold"
@@ -211,7 +209,7 @@ func (q *queue) coalesce(ctx context.Context, sub Submission, into wsm.HeldPromp
 	if err := q.deps.DB.CoalesceHeldPrompts(ctx, wsm.Coalescence{
 		Into:    into.Turn,
 		From:    sub.Turn,
-		Said:    mergedSaid(into.Said, sub.Said),
+		Said:    foldedSaid(into.Said, sub.Said),
 		Retired: wsm.Tombstone{Kind: tombstoneCoalesced, At: q.deps.Now()},
 	}); err != nil {
 		log.Error(opClassify, "could not fold the prompt into the queued prompt ahead; both entries stand as they were", dlog.Context{
@@ -224,12 +222,4 @@ func (q *queue) coalesce(ctx context.Context, sub Submission, into wsm.HeldPromp
 	})
 	q.deps.Footer.OnSubmission(sub.WS, footer.Submission{Stage: footer.StageCoalesced})
 	return q.pushTray(ctx, sub.WS, log)
-}
-
-// mergedSaid is INTO's content followed by FROM's, blocks in order, so an
-// image either carried is kept.
-func mergedSaid(into, from *conversationv1.UserSaid) *conversationv1.UserSaid {
-	blocks := append([]*conversationv1.UserContentBlock{}, into.GetContent().GetBlocks()...)
-	blocks = append(blocks, from.GetContent().GetBlocks()...)
-	return &conversationv1.UserSaid{Content: &conversationv1.UserContent{Blocks: blocks}}
 }

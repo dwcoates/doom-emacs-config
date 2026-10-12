@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 
+	"google.golang.org/protobuf/proto"
+
 	"agent-repld/internal/classifier"
 	"agent-repld/internal/holdfold"
 	"agent-repld/internal/wsm"
@@ -178,16 +180,33 @@ func TestAPromptWhoseQueueCannotBeReadIsNotClassified(t *testing.T) {
 	}
 }
 
-func TestMergedSaidKeepsEveryBlockInOrder(t *testing.T) {
-	// Arrange
-	into, from := userSaid("first"), userSaid("second")
+func TestACoalescenceMergesAsTheFoldDoes(t *testing.T) {
+	// Arrange: the classifier's coalesce is the fold asked for by the
+	// classifier, so both write foldedSaid's shape and the tray draws the
+	// same seam either way.
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"}
+	if _, err := h.q.Submit(context.Background(), submission("older", "fix the parser")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	h.q.waitForClassifications()
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteAfterToolCall, Reason: "an addendum"}
+	want := foldedSaid(userSaid("fix the parser"), userSaid("also, update the docs"))
 
 	// Act
-	merged := mergedSaid(into, from)
+	if _, err := h.q.Submit(context.Background(), submission("later", "also, update the docs")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	h.q.waitForClassifications()
 
 	// Assert
-	if got := saidText(merged); got != "first\nsecond" {
-		t.Fatalf("merged = %q, want first then second", got)
+	standing, err := h.db.HeldPrompts(context.Background(), theWorkspace)
+	if err != nil || len(standing) != 1 || standing[0].Turn != "older" {
+		t.Fatalf("standing = (%+v, %v), want the older prompt alone", standing, err)
+	}
+	if !proto.Equal(standing[0].Said, want) {
+		t.Fatalf("merged = %v, want foldedSaid's shape %v", standing[0].Said, want)
 	}
 }
 
