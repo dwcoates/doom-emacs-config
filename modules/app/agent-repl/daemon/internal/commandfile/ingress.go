@@ -30,7 +30,8 @@ const (
 	opEntry      = "daemon.commandfile.entry"
 	opGate       = "daemon.commandfile.gate"
 	// opMergeQueue is the outcome record of a merge-queue control entry
-	// (merge_evict, merge_pause, merge_resume): the answer the requesting
+	// (merge_evict, merge_pause, merge_resume, merge_hold_rollouts,
+	// merge_release_rollouts): the answer the requesting
 	// agent reads back, keyed by the file's path like every other record here.
 	opMergeQueue = "daemon.commandfile.merge_queue"
 )
@@ -323,6 +324,8 @@ func (i *ingress) apply(ctx context.Context, log dlog.Logger, file string, index
 		return i.applyMergeEvict(ctx, log, entry)
 	case TypeMergePause, TypeMergeResume:
 		return i.applyMergePause(ctx, log, entry)
+	case TypeMergeHoldRollouts, TypeMergeReleaseRollouts:
+		return i.applyRolloutHold(ctx, log, entry)
 	case TypeRetarget:
 		return i.applyRetarget(ctx, log, entry)
 	case TypeClose:
@@ -479,6 +482,34 @@ func (i *ingress) applyMergePause(ctx context.Context, log dlog.Logger, entry En
 	}
 	outcome["outcome"] = "resumed"
 	log.Info(opMergeQueue, "resumed the merge queue", outcome)
+	return nil
+}
+
+// applyRolloutHold maps a merge_hold_rollouts or merge_release_rollouts entry
+// onto the orchestrator's HoldRollouts or ReleaseRollouts, the entry points
+// UpdateMergeQueue's hold_rollouts and release_rollouts arms call. The hold
+// is daemon-wide, so the entry's workspace only names who asked. A refusal
+// (rollouts_already_held, rollouts_not_held) is the rpc's refusal, and
+// quarantines the file.
+func (i *ingress) applyRolloutHold(ctx context.Context, log dlog.Logger, entry Entry) error {
+	requester, err := i.target(ctx, entry)
+	if err != nil {
+		return err
+	}
+	outcome := dlog.Context{"type": entry.Type, "requester": string(requester)}
+	if entry.Type == TypeMergeHoldRollouts {
+		if err := i.deps.Merge.HoldRollouts(ctx); err != nil {
+			return err
+		}
+		outcome["outcome"] = "held"
+		log.Info(opMergeQueue, "held the merge queue's rollouts: merges still land, but a landing no longer redeploys", outcome)
+		return nil
+	}
+	if err := i.deps.Merge.ReleaseRollouts(ctx); err != nil {
+		return err
+	}
+	outcome["outcome"] = "released"
+	log.Info(opMergeQueue, "released the merge queue's rollouts: the next landing redeploys", outcome)
 	return nil
 }
 
