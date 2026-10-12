@@ -675,10 +675,20 @@ func (c *client) LandedRange(ctx context.Context, targetDir, mergeCommit string)
 func (c *client) CountCommits(ctx context.Context, dir, base, tip string) (uint32, error) {
 	const operation = "daemon.gitclient.count_commits"
 
-	out, err := c.run(ctx, operation, dir, "rev-list", "--count", base+".."+tip)
+	// A NONZERO EXIT IS THE CALLER'S TO JUDGE (runRaw), not logged here as an
+	// error: the one caller, the branch recounter, races its workspace's own
+	// teardown (a landing removes the worktree while git runs in it), which is
+	// no fault, and only it can tell that from a real failure. It logs every
+	// failure it does not explain. The error still carries git's stderr.
+	in, err := c.runRaw(ctx, operation, dir, "rev-list", "--count", base+".."+tip)
 	if err != nil {
 		return 0, err
 	}
+	if in.exitCode != 0 {
+		c.log.Global().Debug(operation, "git exited nonzero; the caller judges the failure", in.logContext())
+		return 0, in.fail()
+	}
+	out := strings.TrimRight(in.stdout, "\n")
 	count, err := strconv.ParseUint(strings.TrimSpace(out), 10, 32)
 	if err != nil {
 		c.log.Global().Error(operation, "git's commit count was unreadable", dlog.Context{
