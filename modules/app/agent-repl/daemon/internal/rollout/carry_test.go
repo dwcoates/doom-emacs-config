@@ -464,6 +464,34 @@ func TestASealRecordsWhetherTheWorkspaceWasMidWork(t *testing.T) {
 	}
 }
 
+func TestASealCarriesWhoHoldsTheStreamsAtTheSeal(t *testing.T) {
+	tests := []struct {
+		name string
+		live Participants
+	}{
+		{name: "a workspace with both streams held", live: Participants{Host: true, Web: true}},
+		{name: "a workspace whose page went away", live: Participants{Host: true}},
+		{name: "a workspace with no stream held", live: Participants{}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ws, _ := h.workspace(t)
+			h.participants.Set(ws, tc.live)
+
+			// Act
+			handOverUntilWindow(t, h)
+
+			// Assert
+			got := sealedCarry(t, h, ws).Participants
+			if got == nil || got.Host != tc.live.Host || got.Web != tc.live.Web {
+				t.Fatalf("carried participants = %+v, want %+v", got, tc.live)
+			}
+		})
+	}
+}
+
 func TestASealCarriesTheShimBuildTheIncumbentLastHeard(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

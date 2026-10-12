@@ -866,7 +866,7 @@ func TestTransferAcceptsServingOwnershipThatAlreadyMoved(t *testing.T) {
 	var windows sync.WaitGroup
 
 	// Act.
-	err = h.c.transfer(context.Background(), record, &handoverPlan{successor: "127.0.0.1:7788"}, Participants{}, &windows)
+	err = h.c.transfer(context.Background(), record, &handoverPlan{successor: "127.0.0.1:7788"}, &windows)
 	windows.Wait()
 
 	// Assert.
