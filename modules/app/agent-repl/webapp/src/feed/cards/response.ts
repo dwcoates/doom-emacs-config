@@ -94,7 +94,8 @@ import {
   type BubbleBody,
 } from "../../bubble/body.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
-import { advanceReveal, revealPaceOf, type RevealPace } from "../../reveal-pace.js";
+import { revealPaceOf, type RevealPace } from "../../reveal-pace.js";
+import { typeOut } from "../../type-out.js";
 import { tickWhileShown } from "../ticking.js";
 import { shouldShowMore } from "../bubble-more.js";
 import { tokenHeatColor } from "../../token-heat.js";
@@ -657,43 +658,20 @@ function cutShortMarker(): HTMLElement {
 }
 
 /**
- * Pace the visible growth from RESUMED up to the whole rendered prose.
+ * Pace the visible growth from RESUMED up to the whole rendered prose, through
+ * the one type-out loop (src/type-out.ts), which owns the pacing, the frames,
+ * the collapsed-full stop and the unseen-page stop.
  *
- * EACH FRAME STEPS AT THE SPEED THE BANK CALLS FOR (`advanceReveal`): the
- * rendered text not yet shown is the bank, the reveal follows the speed it is
- * filling at within the daemon's PACE, and a bank past its limit is caught up
- * to it. A push only grows the bank; nothing about the reveal's speed is
- * carried across pushes but the shown length, so the type-out reads the same
- * however the fragments were clumped.
- *
- * THE FRAME IS AN ANIMATION FRAME, not the app ticker: the shared ticker steps
- * once a second, which is the right cadence for a clock and useless for a
- * type-out. The loop is self-limiting — it stops as soon as the shown prefix
- * reaches the end of the rendered text, and on the first frame that finds the
- * element detached (a re-push replaced it) — so no response leaves a running
- * animation behind. A slot not yet painted (prose holding a tree waits for a
- * layout) has no text to pace, so the loop waits for its paint rather than
- * spinning. A host with no `requestAnimationFrame` (a test, an unusual
- * embedder) draws the prose whole rather than not at all.
- *
- * A COLLAPSED BUBBLE STOPS TYPING ONCE IT IS FULL (owner request, 2026-10-10).
- * The type-out is for a reader watching the text arrive, and a collapsed
- * bubble (a thinking bubble's one line, say) shows nothing past its cap, so
- * banking text nobody can see would only make the bubble land later. The
- * first frame on which the revealed text already runs past the collapsed
- * BOX's cap (`shouldShowMore`, the measure the "more" signal draws from) draws
- * the rest whole, which empties the bank, and every later push of the row
- * resumes from that whole and stops on its own first frame, so the bubble
- * lands as the text arrives. Until the cap is reached it types out as before,
- * and an expanded bubble (open folds never show more) or an uncapped one (the
- * final answer) types out to the end. *
- * AN UNSEEN PAGE DOES NOT TYPE (owner request, 2026-10-12). The type-out is
- * for a reader watching, and nobody watches a workspace that is not on screen
- * (src/page-seen.ts); WebKit also suspends a hidden page's frames, so a reveal
- * begun there would still be typing when the reader switched in. A draw on an
- * unseen page is drawn whole, and a page turning unseen mid-reveal draws the
- * rest whole at once, so the reader switching in finds everything that has
- * arrived.
+ * A push only grows the bank; nothing about the reveal's speed is carried
+ * across pushes but the shown length, so the type-out reads the same however
+ * the fragments were clumped. A later paint of this same body (an in-place
+ * update) owns it from then on, so this loop never reveals the previous push's
+ * prose over it. A COLLAPSED BUBBLE STOPS TYPING ONCE IT IS FULL (owner
+ * request, 2026-10-10): its box's cap is measured by `shouldShowMore`, the
+ * measure the "more" signal draws from, and every later push of the row
+ * resumes from the whole it then drew and stops on its own first frame, so
+ * the bubble lands as the text arrives. An expanded bubble (open folds never
+ * show more) or an uncapped one (the final answer) types out to the end.
  */
 function animate(
   bubble: HTMLElement,
@@ -704,91 +682,22 @@ function animate(
   pace: RevealPace,
   rc: RowContext,
 ): void {
-  const frame = globalThis.requestAnimationFrame?.bind(globalThis);
-  if (frame === undefined) {
-    log.debug("no animation frame host; drawing the arriving prose whole", {
-      operation: "feed.cards.response.no-frames",
-      context: { resumed },
-    });
-    showWhole(bubble, body, slot);
-    return;
-  }
-
-  const seen = rc.ctx.seen;
-  const row = rc.row.id?.value ?? "unset";
-  if (!seen.isSeen()) {
-    log.debug("the page is unseen; drawing the arriving prose whole", {
-      operation: "feed.cards.response.unseen",
-      context: { row, resumed },
-    });
-    showWhole(bubble, body, slot);
-    return;
-  }
-
-  // The first frame's step is measured from the push's draw.
-  let last = rc.ctx.ticker.now();
-  let shown = resumed;
-  // A bubble that WAS in the document and no longer is has been replaced by a
-  // re-push, and its animation is over. One that was never mounted (a test, a
-  // draw into a detached fragment) keeps animating: absence of a document is
-  // not the same fact as removal from one.
-  let mounted = bubble.isConnected;
-  // A later paint of this same body (an in-place update) owns it from then on,
-  // so this loop never reveals the previous push's prose over it.
   const generation = paintGeneration(body);
-  let over = false;
-  const unsubscribe = seen.onChange((nowSeen) => {
-    if (nowSeen || over) return;
-    end();
-    if (superseded()) return;
-    log.debug("the page turned unseen mid-reveal; drawing the rest of the arriving prose whole", {
-      operation: "feed.cards.response.unseen",
-      context: { row, shown: Math.floor(shown) },
-    });
-    showWhole(bubble, body, slot);
+  typeOut({
+    ctx: rc.ctx,
+    pace,
+    resumed,
+    operation: "feed.cards.response",
+    logContext: { row: rc.row.id?.value ?? "unset" },
+    element: bubble,
+    reowned: () => paintGeneration(body) !== generation,
+    total: () => slotText(slot)?.length,
+    whenRendered: (fn) => whenSlotPainted(slot, fn),
+    reveal: (shown) => {
+      revealSlot(body, slot, shown);
+      markRevealed(bubble, shown);
+    },
+    showWhole: () => showWhole(bubble, body, slot),
+    full: () => shouldShowMore(box),
   });
-  /** This loop is over: no further frame, and no unseen turn, acts on it. */
-  function end(): void {
-    over = true;
-    unsubscribe();
-  }
-  /** Whether a later push now owns the body, or the bubble was replaced. */
-  function superseded(): boolean {
-    if (paintGeneration(body) !== generation) return true;
-    if (bubble.isConnected) mounted = true;
-    return !bubble.isConnected && mounted;
-  }
-  const step = (): void => {
-    if (over) return;
-    if (superseded()) {
-      end();
-      return;
-    }
-    const text = slotText(slot);
-    if (text === undefined) {
-      whenSlotPainted(slot, () => frame(step));
-      return;
-    }
-    const now = rc.ctx.ticker.now();
-    shown = advanceReveal(Math.min(shown, text.length), text.length, now - last, pace);
-    last = now;
-    const done = shown >= text.length;
-    revealSlot(body, slot, done ? undefined : Math.floor(shown));
-    markRevealed(bubble, Math.floor(shown));
-    if (done) {
-      end();
-      return;
-    }
-    if (shouldShowMore(box)) {
-      log.debug("a collapsed bubble is full; drawing the rest of the arriving prose whole", {
-        operation: "feed.cards.response.collapsed-full",
-        context: { row, shown, total: text.length },
-      });
-      end();
-      showWhole(bubble, body, slot);
-      return;
-    }
-    frame(step);
-  };
-  frame(step);
 }
