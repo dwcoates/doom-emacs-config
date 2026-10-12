@@ -247,6 +247,12 @@ func TestRunComposesTheExactArgv(t *testing.T) {
 			out:  "ok",
 			want: "-p --output-format text " + wantPinned,
 		},
+		{
+			name: "a run with tools makes exactly those available and approved",
+			req:  Request{Site: "news_digest_ipo", Model: ModelSonnet, Format: FormatJSON, Prompt: "q", Tools: []string{"WebSearch", "WebFetch"}},
+			out:  `{"result":"x"}`,
+			want: "-p --output-format json --model " + ModelSonnet + " --tools WebSearch,WebFetch --allowedTools WebSearch,WebFetch " + wantPinned,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -278,6 +284,7 @@ func TestRunPinsItsSettingsWhateverTheRequestSays(t *testing.T) {
 		{name: "a model and a text format", req: Request{Site: "classifier", Model: "sonnet", Format: FormatText, Prompt: "q"}},
 		{name: "a config dir", req: Request{Site: "workspace_naming", ConfigDir: "/roots/multi", Prompt: "q"}},
 		{name: "a timeout", req: Request{Site: "title_synth", Timeout: time.Minute, Prompt: "q"}},
+		{name: "tools", req: Request{Site: "news_digest_ipo", Tools: []string{"WebSearch"}, Prompt: "q"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

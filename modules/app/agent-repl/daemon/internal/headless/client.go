@@ -63,6 +63,10 @@ func (c *Client) Run(ctx context.Context, req Request) (Response, error) {
 	if req.Model != "" {
 		args = append(args, "--model", req.Model)
 	}
+	if len(req.Tools) > 0 {
+		tools := strings.Join(req.Tools, ",")
+		args = append(args, "--tools", tools, "--allowedTools", tools)
+	}
 	args = append(args, pinnedArgs...)
 
 	env := os.Environ()
