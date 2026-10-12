@@ -57,6 +57,7 @@ import (
 	"claude-repld/internal/revealpace"
 	"claude-repld/internal/rollout"
 	"claude-repld/internal/scriptrunner"
+	"claude-repld/internal/selectionfollow"
 	"claude-repld/internal/server"
 	"claude-repld/internal/sessionlock"
 	"claude-repld/internal/sessionwatcher"
@@ -1103,6 +1104,22 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		return nil, fmt.Errorf("claude-repld: build the repository divergence measurer: %w", err)
 	}
 
+	// THE SELECTION FOLLOWER keeps this daemon's roster on the selection WSM
+	// stores when another daemon sharing the state file stamped it: across a
+	// handover both daemons serve a roster, and a select lands on whichever
+	// owns the workspace. Background work; the follow itself takes Select's
+	// lock, so it never interleaves with a select here.
+	selectionFollower, err := selectionfollow.New(selectionfollow.Deps{
+		Versions: p.DB,
+		Follow:   verbs.FollowStoredSelection,
+		Clock:    clock.System{},
+		Every:    selectionfollow.DefaultEvery,
+		Log:      log,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("claude-repld: build the selection follower: %w", err)
+	}
+
 	// THE DAILY NEWS DIGEST runs only on the daemon that serves, one run at a
 	// time across processes, and its condensing call bills the default account.
 	digest, err := buildNewsDigest(newsDigestInputs{
@@ -1146,6 +1163,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		}},
 		{Name: "worktree_reaper", Run: reaper.Run},
 		{Name: "repo_divergence", Run: divergence.Run},
+		{Name: "selection_follow", Run: selectionFollower.Run},
 		{Name: "merge_workspace_sweep", Run: func(ctx context.Context) error {
 			// HOURLY: a merge workspace goes after 15 calendar days idle, so
 			// an hour's lateness is nothing, and a sweep reads two tables.

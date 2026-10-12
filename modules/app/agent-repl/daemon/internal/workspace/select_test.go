@@ -384,6 +384,119 @@ func TestSelectLogsTheReselectionReceiptAtInfo(t *testing.T) {
 	}
 }
 
+// ---- FollowStoredSelection -------------------------------------------------
+
+// followFixture arranges a roster naming w1 while WSM stores STORED, the state
+// a peer daemon's select leaves this daemon in.
+func followFixture(t *testing.T, stored *ids.WorkspaceID) *fixture {
+	t.Helper()
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.workspace("w2", t.TempDir())
+	f.sidebar.selected = []ids.WorkspaceID{"w1"}
+	f.db.current = stored
+	return f
+}
+
+func storedSelection(ws ids.WorkspaceID) *ids.WorkspaceID { return &ws }
+
+func TestFollowStoredSelectionPushesTheStoredSelection(t *testing.T) {
+	// Arrange: the peer daemon stamped w2.
+	f := followFixture(t, storedSelection("w2"))
+
+	// Act.
+	if err := f.verbs.FollowStoredSelection(context.Background()); err != nil {
+		t.Fatalf("FollowStoredSelection: %v", err)
+	}
+
+	// Assert: one push, carrying the registry and the stored selection.
+	if want := []string{"registry+selected"}; !slices.Equal(f.sidebar.calls, want) {
+		t.Fatalf("roster calls = %v, want %v", f.sidebar.calls, want)
+	}
+	if got, _ := f.sidebar.Selected(); got != "w2" {
+		t.Fatalf("roster selection = %q, want w2", got)
+	}
+}
+
+func TestFollowStoredSelectionPushesNothingWhenTheRosterAgrees(t *testing.T) {
+	// Arrange: the roster already names what WSM stores.
+	f := followFixture(t, storedSelection("w1"))
+
+	// Act.
+	if err := f.verbs.FollowStoredSelection(context.Background()); err != nil {
+		t.Fatalf("FollowStoredSelection: %v", err)
+	}
+
+	// Assert.
+	if len(f.sidebar.calls) != 0 {
+		t.Fatalf("roster calls = %v, want none", f.sidebar.calls)
+	}
+}
+
+func TestFollowStoredSelectionPushesNothingWhenWSMStoresNone(t *testing.T) {
+	// Arrange.
+	f := followFixture(t, nil)
+
+	// Act.
+	if err := f.verbs.FollowStoredSelection(context.Background()); err != nil {
+		t.Fatalf("FollowStoredSelection: %v", err)
+	}
+
+	// Assert.
+	if len(f.sidebar.calls) != 0 {
+		t.Fatalf("roster calls = %v, want none", f.sidebar.calls)
+	}
+}
+
+func TestFollowStoredSelectionFailsWhenTheStoredSelectionCannotBeRead(t *testing.T) {
+	// Arrange.
+	f := followFixture(t, storedSelection("w2"))
+	f.db.currentErr = errFake
+
+	// Act.
+	err := f.verbs.FollowStoredSelection(context.Background())
+
+	// Assert.
+	if !errors.Is(err, errFake) {
+		t.Fatalf("FollowStoredSelection error = %v, want it to wrap %v", err, errFake)
+	}
+	if got := recordLevel(f, "could not read the stored selection"); got != "error" {
+		t.Fatalf("the failed read was recorded at %q, want error", got)
+	}
+}
+
+func TestFollowStoredSelectionFailsWithoutAPushWhenTheRegistryCannotBeRead(t *testing.T) {
+	// Arrange.
+	f := followFixture(t, storedSelection("w2"))
+	f.db.listWorkspacesErr = errFake
+
+	// Act.
+	err := f.verbs.FollowStoredSelection(context.Background())
+
+	// Assert: the failure is answered and nothing half-built reaches the roster.
+	if err == nil {
+		t.Fatal("FollowStoredSelection answered nil for an unreadable registry")
+	}
+	if len(f.sidebar.calls) != 0 {
+		t.Fatalf("roster calls = %v, want none", f.sidebar.calls)
+	}
+}
+
+func TestFollowStoredSelectionLogsTheFollowAtInfo(t *testing.T) {
+	// Arrange.
+	f := followFixture(t, storedSelection("w2"))
+
+	// Act.
+	if err := f.verbs.FollowStoredSelection(context.Background()); err != nil {
+		t.Fatalf("FollowStoredSelection: %v", err)
+	}
+
+	// Assert: a roster that moved on another daemon's word leaves a trace.
+	if got := recordLevel(f, "the roster took the selection another daemon stored"); got != "info" {
+		t.Fatalf("the follow receipt is %q, want info", got)
+	}
+}
+
 // ---- MarkViewed ------------------------------------------------------------
 
 func TestMarkViewedTellsTheRoster(t *testing.T) {

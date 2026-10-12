@@ -131,6 +131,63 @@ func (v *verbs) selectCurrent(ctx context.Context, log dlog.Logger, ws ids.Works
 	return nil
 }
 
+// FollowStoredSelection is the roster's half of a selection ANOTHER daemon
+// made.
+//
+// TWO DAEMONS SERVE ROSTERS ACROSS A HANDOVER, and a select lands on the one
+// that owns the workspace: the successor for every workspace already handed
+// over, the predecessor for one it took back mid-turn. Each stamps the
+// selection into the state file both share, but only the stamping daemon's
+// roster heard of it, so a client still watching the other daemon's roster
+// kept the old selection and never moved (2026-10-11: Emacs's roster stayed on
+// the predecessor through a long handover, and every switch was deferred
+// against a selection that no longer stood). WSM is the one place both
+// daemons write, so it is the selection's one source: this reads it and, when
+// the roster names anything else, pushes the registry WSM holds, which carries
+// that selection.
+//
+// It does NOT return the feed to its tail or revive anything: the daemon that
+// took the select did both for the workspace it serves.
+func (v *verbs) FollowStoredSelection(ctx context.Context) error {
+	v.selection.Lock()
+	defer v.selection.Unlock()
+
+	log := v.deps.Log.Global()
+	stored, err := v.deps.DB.Current(ctx)
+	if err != nil {
+		if canceled(err) {
+			log.Info(opFollowSelected, "the stored selection's read ended when its context was cancelled", dlog.Context{"cause": err.Error()})
+			return err
+		}
+		log.Error(opFollowSelected, "could not read the stored selection", dlog.Context{"cause": err.Error()})
+		return fmt.Errorf("follow the stored selection: %w", err)
+	}
+	if stored == nil {
+		log.Debug(opFollowSelected, "WSM stores no selection; the roster's stands", nil)
+		return nil
+	}
+	shown, ok := v.deps.Sidebar.Selected()
+	if ok && shown == *stored {
+		log.Debug(opFollowSelected, "the roster already names the stored selection", dlog.Context{"workspace": string(shown)})
+		return nil
+	}
+	reg, readable := v.readRegistry(ctx, log, opFollowSelected)
+	if !readable {
+		// readRegistry recorded why; the roster keeps the selection it had
+		// until the next commit tries again.
+		return fmt.Errorf("follow the stored selection %q: the registry could not be read", *stored)
+	}
+	v.deps.Sidebar.SetRegistrySelected(reg, *stored)
+	previous := ""
+	if ok {
+		previous = string(shown)
+	}
+	log.Info(opFollowSelected, "the roster took the selection another daemon stored", dlog.Context{
+		"workspace": string(*stored), "previous": previous,
+	})
+	return nil
+}
+
 // MarkViewed records that the user has SEEN the workspace, which reads the
 // last turn's result and draws its roster row PARTIAL (the name recedes; the
 // status dot keeps its colour) — only when the row is on a turn-end arm, done
