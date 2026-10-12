@@ -108,17 +108,6 @@ func (w bannerWorkspaces) Workspace(ctx context.Context, ws ids.WorkspaceID) (de
 	return desktopnotify.Workspace{Name: record.Name, Dir: record.Dir}, nil
 }
 
-// Concealed answers whether a workspace is a hidden merge workspace
-// (desktopnotify.Concealed): an async merge's workspace that has neither been
-// revealed nor landed.
-func (w bannerWorkspaces) Concealed(ctx context.Context, ws ids.WorkspaceID) (bool, error) {
-	record, err := w.db.Workspace(ctx, ws)
-	if err != nil {
-		return false, fmt.Errorf("read workspace %q for its visibility: %w", ws, err)
-	}
-	return record.MergeOf != nil && !record.MergeRevealed && record.MergedAt == nil, nil
-}
-
 // clickForwarder carries a READ-BACK banner's click to the server's host
 // stream. The
 // notifier is built before the server exists, so the server is bound late,
