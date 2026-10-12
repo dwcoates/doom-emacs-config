@@ -1,0 +1,436 @@
+;;; test-webhost.el --- ERT tests for webhost.el -*- lexical-binding: t; -*-
+
+;;; Commentary:
+
+;; The one web view that holds every workspace's page: the call scripts and
+;; their queueing, the answers and their notes, the desired state Emacs keeps
+;; and replays, the coalesced reload, and the guard on the host's buffer.
+;;
+;; Run with:
+;;   AGENT_REPL_FORBID_VENDOR_CALLS=1 emacs -batch -Q -l ert \
+;;     -l lisp/test-webhost.el -f ert-run-tests-batch-and-exit
+
+;;; Code:
+
+(load (expand-file-name "test-helpers.el" (file-name-directory
+                                            (or load-file-name buffer-file-name)))
+      nil t)
+
+(require 'cl-lib)
+
+;;;; ---- Harness ----
+
+(defvar agent-repl-test-wh--calls nil
+  "Scripts the host was sent, as (SCRIPT . CALLBACK), newest first.")
+
+(defvar agent-repl-test-wh--host 'host-xwidget
+  "What the stubbed host lookup answers: the host, or nil.")
+
+(defmacro agent-repl-test-wh--with-host (&rest body)
+  "Run BODY with a host present, its scripts recorded, and refs for two workspaces."
+  (declare (indent 0))
+  `(agent-repl-test--with-clean-state
+     (let ((agent-repl-test-wh--calls nil)
+           (agent-repl-test-wh--host 'host-xwidget))
+       (cl-letf (((symbol-function 'agent-repl-webhost-xwidget)
+                  (lambda () agent-repl-test-wh--host))
+                 ((symbol-function 'agent-repl--frontend-webview-execute-script-value)
+                  (lambda (_xw script callback) (push (cons script callback) agent-repl-test-wh--calls)))
+                 ((symbol-function 'agent-repl-host-ref)
+                  (lambda (ws) (list :id (concat "id-" ws) :dir (concat "/tmp/" ws))))
+                 ((symbol-function 'agent-repl-host-conn) (lambda (_ws) 'conn))
+                 ((symbol-function 'agent-repl-webhost-ensure) (lambda (_conn) 'host-xwidget))
+                 ((symbol-function 'agent-repl-frontend-webview-url)
+                  (lambda (ws) (concat "http://ws-" ws ".localhost:1/"))))
+         ,@body))))
+
+(defun agent-repl-test-wh--conn (address)
+  "A REAL connection at ADDRESS: struct accessors are inlined at load time,
+so stubbing the accessor would not reach the code under test."
+  (agent-repl-connect-connection-create :address address))
+
+(defun agent-repl-test-wh--sent (method)
+  "The scripts sent that call the host's METHOD, oldest first."
+  (seq-filter (lambda (script) (string-search (format "h.%s(" method) script))
+              (reverse (mapcar #'car agent-repl-test-wh--calls))))
+
+;;;; ---- The call script ----
+
+(ert-deftest agent-repl-test-wh-a-script-calls-the-method-with-encoded-arguments ()
+  "Arguments are JSON-encoded, so nothing is spliced into the script unquoted."
+  ;; Act
+  (let ((script (agent-repl--webhost-script "ensure" "id-\"a\"" "http://x/")))
+    ;; Assert
+    (should (string-search "h.ensure(\"id-\\\"a\\\"\",\"http://x/\")" script))))
+
+(ert-deftest agent-repl-test-wh-a-script-queues-itself-when-the-host-has-not-started ()
+  "A call made before the host's code started is queued on the page."
+  ;; Act
+  (let ((script (agent-repl--webhost-script "show" "id-a")))
+    ;; Assert
+    (should (string-search "window.__agentReplHostPending" script))))
+
+(ert-deftest agent-repl-test-wh-a-queued-answer-names-the-workspace ()
+  "The queued answer names the id its first argument carries, so it can be asked again."
+  ;; Act
+  (let ((script (agent-repl--webhost-script "drawn" "id-a")))
+    ;; Assert
+    (should (string-search "id:\"id-a\",outcome:\"queued\"" script))))
+
+(ert-deftest agent-repl-test-wh-a-null-argument-is-encoded-as-null ()
+  "A gate given no background sends JSON null, not a string."
+  ;; Act
+  (let ((script (agent-repl--webhost-script "setGateDock" "id-a" 90 nil)))
+    ;; Assert
+    (should (string-search "h.setGateDock(\"id-a\",90,null)" script))))
+
+;;;; ---- Answers ----
+
+(ert-deftest agent-repl-test-wh-an-answer-is-recorded ()
+  "Every answer is logged with its call and outcome."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let (logged)
+      (cl-letf (((symbol-function 'agent-repl--log)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+        ;; Act
+        (agent-repl--webhost-answered "{\"op\":\"show\",\"id\":null,\"outcome\":\"shown\",\"notes\":[]}"))
+      ;; Assert
+      (should (equal logged '("elisp.webhost.answer op=show id=nil outcome=shown"))))))
+
+(ert-deftest agent-repl-test-wh-a-note-is-recorded-at-warn ()
+  "A note the host made reaches the log at WARN, never dropped."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let (warned)
+      (cl-letf (((symbol-function 'agent-repl--log) #'ignore)
+                ((symbol-function 'agent-repl--warn)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warned))))
+        ;; Act
+        (agent-repl--webhost-answered "{\"op\":\"ids\",\"id\":null,\"outcome\":\"listed\",\"notes\":[\"unreadable\"]}"))
+      ;; Assert
+      (should (equal warned '("elisp.webhost.note op=ids note=unreadable"))))))
+
+(ert-deftest agent-repl-test-wh-an-unreadable-answer-is-an-error ()
+  "An answer that is not the host's JSON is recorded at ERROR."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let (errors)
+      (cl-letf (((symbol-function 'agent-repl--error)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) errors))))
+        ;; Act
+        (agent-repl--webhost-answered "not json"))
+      ;; Assert
+      (should (string-prefix-p "elisp.webhost.answer-unreadable" (car errors))))))
+
+;;;; ---- Calls without a host ----
+
+(ert-deftest agent-repl-test-wh-a-call-without-a-host-sends-nothing ()
+  "With no host there is nowhere to send; the desired state is replayed later."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (setq agent-repl-test-wh--host nil)
+    ;; Act
+    (let ((sent (agent-repl--webhost-call "show" "id-a")))
+      ;; Assert
+      (should-not sent)
+      (should (null agent-repl-test-wh--calls)))))
+
+(ert-deftest agent-repl-test-wh-a-read-without-a-host-answers-nil ()
+  "A question with no host to ask is not asked."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (setq agent-repl-test-wh--host nil)
+    ;; Act / Assert
+    (should-not (agent-repl-webhost-read "drawn" '("id-a") 'ignore))))
+
+(ert-deftest agent-repl-test-wh-a-read-hands-the-answer-to-its-callback ()
+  "A question is sent with the caller's callback symbol."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    ;; Act
+    (agent-repl-webhost-read "drawn" '("id-a") 'my-callback)
+    ;; Assert
+    (should (eq (cdar agent-repl-test-wh--calls) 'my-callback))))
+
+;;;; ---- Pages ----
+
+(ert-deftest agent-repl-test-wh-ensuring-a-page-records-its-url ()
+  "The host is meant to hold the page at the workspace's URL."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    ;; Act
+    (agent-repl-webhost-ensure-page "alpha")
+    ;; Assert
+    (should (equal (gethash "id-alpha" agent-repl--webhost-pages) "http://ws-alpha.localhost:1/"))))
+
+(ert-deftest agent-repl-test-wh-ensuring-a-page-asks-the-host ()
+  "The host is told to hold the page."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    ;; Act
+    (agent-repl-webhost-ensure-page "alpha")
+    ;; Assert
+    (should (= 1 (length (agent-repl-test-wh--sent "ensure"))))))
+
+(ert-deftest agent-repl-test-wh-ensuring-a-page-twice-records-it-once ()
+  "A page already held at its URL is recorded at INFO only when it changes."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (let (logged)
+      (cl-letf (((symbol-function 'agent-repl--info)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+        ;; Act
+        (agent-repl-webhost-ensure-page "alpha")
+        (agent-repl-webhost-ensure-page "alpha"))
+      ;; Assert
+      (should (= 1 (seq-count (lambda (text) (string-search "page-ensured" text)) logged))))))
+
+(ert-deftest agent-repl-test-wh-showing-a-page-asks-the-host ()
+  "The host is told which page to show."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    ;; Act
+    (agent-repl-webhost-show "alpha")
+    ;; Assert
+    (should (equal agent-repl--webhost-shown "id-alpha"))
+    (should (= 1 (length (agent-repl-test-wh--sent "show"))))))
+
+(ert-deftest agent-repl-test-wh-showing-the-shown-page-sends-nothing ()
+  "Every window change asks; only a change of page reaches the host."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (agent-repl-webhost-show "alpha")
+    ;; Act
+    (agent-repl-webhost-show "alpha")
+    ;; Assert
+    (should (= 1 (length (agent-repl-test-wh--sent "show"))))))
+
+(ert-deftest agent-repl-test-wh-removing-a-page-forgets-it ()
+  "A removed page is no longer held, nor its state kept."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (agent-repl-webhost-ensure-page "alpha")
+    (agent-repl-webhost-set-input-background "alpha" "#000")
+    ;; Act
+    (agent-repl-webhost-remove "alpha")
+    ;; Assert
+    (should-not (gethash "id-alpha" agent-repl--webhost-pages))
+    (should-not (gethash "id-alpha" agent-repl--webhost-input-backgrounds))))
+
+(ert-deftest agent-repl-test-wh-removing-the-shown-page-shows-none ()
+  "The host shows nothing it no longer holds."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (agent-repl-webhost-show "alpha")
+    ;; Act
+    (agent-repl-webhost-remove "alpha")
+    ;; Assert
+    (should (null agent-repl--webhost-shown))))
+
+(ert-deftest agent-repl-test-wh-a-held-page-is-reported-held ()
+  "The host is meant to hold a page that was ensured."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (agent-repl-webhost-ensure-page "alpha")
+    ;; Act / Assert
+    (should (agent-repl-webhost-has-page-p "alpha"))))
+
+(ert-deftest agent-repl-test-wh-reloading-a-page-at-its-url-reloads-it ()
+  "A page whose URL did not move is reloaded in place."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (agent-repl-webhost-ensure-page "alpha")
+    ;; Act
+    (agent-repl-webhost-reload-page "alpha")
+    ;; Assert
+    (should (= 1 (length (agent-repl-test-wh--sent "reload"))))))
+
+(ert-deftest agent-repl-test-wh-reloading-a-page-whose-url-moved-re-points-it ()
+  "A handover moves the URL; the page is pointed at the new one."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (agent-repl-webhost-ensure-page "alpha")
+    (cl-letf (((symbol-function 'agent-repl-frontend-webview-url)
+               (lambda (_ws) "http://ws-alpha.localhost:2/")))
+      ;; Act
+      (agent-repl-webhost-reload-page "alpha"))
+    ;; Assert
+    (should (equal (gethash "id-alpha" agent-repl--webhost-pages) "http://ws-alpha.localhost:2/"))
+    (should (= 2 (length (agent-repl-test-wh--sent "ensure"))))))
+
+(ert-deftest agent-repl-test-wh-an-input-background-is-kept-for-reloads ()
+  "The background is recorded, so a reloaded host gets it again."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    ;; Act
+    (agent-repl-webhost-set-input-background "alpha" "#101010")
+    ;; Assert
+    (should (equal (gethash "id-alpha" agent-repl--webhost-input-backgrounds) "#101010"))))
+
+(ert-deftest agent-repl-test-wh-a-gate-dock-is-kept-for-reloads ()
+  "The gate's slot is recorded, so a reloaded host gets it again."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    ;; Act
+    (agent-repl-webhost-set-gate-dock "alpha" 90 nil)
+    ;; Assert
+    (should (equal (gethash "id-alpha" agent-repl--webhost-gate-docks) '(90)))))
+
+(ert-deftest agent-repl-test-wh-dismissing-a-digest-asks-the-page ()
+  "The host relays the close to the workspace's page."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    ;; Act
+    (agent-repl-webhost-dismiss-digest "alpha")
+    ;; Assert
+    (should (= 1 (length (agent-repl-test-wh--sent "dismissDigest"))))))
+
+;;;; ---- Replay ----
+
+(ert-deftest agent-repl-test-wh-a-load-replays-every-page ()
+  "A loaded host starts empty, so every page is handed to it again."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (agent-repl-webhost-ensure-page "alpha")
+    (agent-repl-webhost-ensure-page "beta")
+    (setq agent-repl-test-wh--calls nil)
+    ;; Act
+    (agent-repl--webhost-on-load 'load-changed)
+    ;; Assert
+    (should (= 2 (length (agent-repl-test-wh--sent "ensure"))))))
+
+(ert-deftest agent-repl-test-wh-a-load-replays-the-shown-page ()
+  "A loaded host shows the page Emacs stands on again."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (agent-repl-webhost-ensure-page "alpha")
+    (agent-repl-webhost-show "alpha")
+    (setq agent-repl-test-wh--calls nil)
+    ;; Act
+    (agent-repl--webhost-on-load 'load-changed)
+    ;; Assert
+    (should (= 1 (length (agent-repl-test-wh--sent "show"))))))
+
+(ert-deftest agent-repl-test-wh-a-load-replays-each-pages-state ()
+  "A loaded host gets every page's input background and gate slot again."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (agent-repl-webhost-set-input-background "alpha" "#101010")
+    (agent-repl-webhost-set-gate-dock "alpha" 90 "#101010")
+    (setq agent-repl-test-wh--calls nil)
+    ;; Act
+    (agent-repl--webhost-on-load 'load-changed)
+    ;; Assert
+    (should (= 1 (length (agent-repl-test-wh--sent "setInputBackground"))))
+    (should (= 1 (length (agent-repl-test-wh--sent "setGateDock"))))))
+
+(ert-deftest agent-repl-test-wh-another-event-replays-nothing ()
+  "Only a load replays."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (agent-repl-webhost-ensure-page "alpha")
+    (setq agent-repl-test-wh--calls nil)
+    ;; Act
+    (agent-repl--webhost-on-load 'decide-policy)
+    ;; Assert
+    (should (null agent-repl-test-wh--calls))))
+
+(ert-deftest agent-repl-test-wh-the-load-watch-keeps-the-prior-handler ()
+  "The xwidget's own handler still gets every event."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (let ((props nil) (seen nil))
+      (cl-letf (((symbol-function 'xwidget-get) (lambda (_xw prop) (plist-get props prop)))
+                ((symbol-function 'xwidget-put) (lambda (_xw prop value) (setq props (plist-put props prop value)))))
+        (setq props (list 'callback (lambda (_xw event) (push event seen))))
+        (agent-repl--webhost-watch-load 'host-xwidget)
+        ;; Act
+        (funcall (plist-get props 'callback) 'host-xwidget 'load-changed))
+      ;; Assert
+      (should (equal seen '(load-changed))))))
+
+;;;; ---- Reload ----
+
+(ert-deftest agent-repl-test-wh-a-reload-burst-reloads-the-host-once ()
+  "A rollout's burst of pushes reloads the host once, on the next turn."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (let ((armed 0))
+      (cl-letf (((symbol-function 'run-at-time)
+                 (lambda (&rest _) (setq armed (1+ armed)) 'reload-timer)))
+        ;; Act
+        (agent-repl-webhost-reload 'conn)
+        (agent-repl-webhost-reload 'conn))
+      ;; Assert
+      (should (= armed 1)))))
+
+(ert-deftest agent-repl-test-wh-a-reload-navigates-the-host-to-its-url ()
+  "The host is navigated to the host page on the daemon."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (let (navigated)
+      (cl-letf (((symbol-function 'agent-repl--frontend-webview-navigate-widget)
+                 (lambda (_xw uri) (setq navigated uri))))
+        ;; Act
+        (agent-repl--webhost-reload-now (agent-repl-test-wh--conn "127.0.0.1:4242")))
+      ;; Assert
+      (should (equal navigated "http://host.localhost:4242/?host=1")))))
+
+(ert-deftest agent-repl-test-wh-a-reload-clears-the-burst ()
+  "Once the host reloaded, the next rollout reloads it again."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (setq agent-repl--webhost-reload-timer 'reload-timer)
+    (cl-letf (((symbol-function 'agent-repl--frontend-webview-navigate-widget) #'ignore))
+      ;; Act
+      (agent-repl--webhost-reload-now (agent-repl-test-wh--conn "127.0.0.1:4242")))
+    ;; Assert
+    (should (null agent-repl--webhost-reload-timer))))
+
+;;;; ---- The host's address ----
+
+(ert-deftest agent-repl-test-wh-the-host-url-is-on-the-daemons-port ()
+  "The host page is served by the daemon, at a host name of its own."
+  ;; Arrange
+  (let ((conn (agent-repl-test-wh--conn "127.0.0.1:5151")))
+    ;; Act / Assert
+    (should (equal (agent-repl-webhost-url conn) "http://host.localhost:5151/?host=1"))))
+
+(ert-deftest agent-repl-test-wh-a-host-url-without-an-address-signals ()
+  "A host addressed at nothing is refused loudly."
+  ;; Arrange
+  (let ((conn (agent-repl-test-wh--conn nil)))
+    ;; Act / Assert
+    (should-error (agent-repl-webhost-url conn))))
+
+;;;; ---- The host's buffer ----
+
+(ert-deftest agent-repl-test-wh-the-host-buffer-refuses-a-foreign-kill ()
+  "A perspective killing its buffers must not take every page with it."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'agent-repl--warn) #'ignore))
+      ;; Act / Assert
+      (should-not (agent-repl--webhost-refuse-kill)))))
+
+(ert-deftest agent-repl-test-wh-a-refused-kill-is-recorded ()
+  "The refusal is recorded at WARN, never silent."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let (warned)
+      (cl-letf (((symbol-function 'agent-repl--warn)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warned))))
+        ;; Act
+        (agent-repl--webhost-refuse-kill))
+      ;; Assert
+      (should (string-prefix-p "elisp.webhost.kill-refused" (car warned))))))
+
+(ert-deftest agent-repl-test-wh-the-host-buffer-allows-its-own-kill ()
+  "This module's own kill goes through."
+  ;; Arrange
+  (let ((agent-repl--webhost-killing t))
+    ;; Act / Assert
+    (should (agent-repl--webhost-refuse-kill))))
+
+;;; test-webhost.el ends here

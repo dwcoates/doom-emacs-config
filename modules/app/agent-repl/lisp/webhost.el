@@ -1,0 +1,348 @@
+;;; webhost.el --- the one web view that holds every workspace's page -*- lexical-binding: t; -*-
+
+;;; Commentary:
+
+;; ONE WEB VIEW, EVERY PAGE.  Emacs keeps exactly one WKWebView, the HOST, at
+;; the webapp's host page (`?host=1', webapp/src/host/host.ts), and the host
+;; holds every open workspace's page as an iframe at the workspace's own
+;; origin.  The host is on screen whenever any workspace's page is, so WebKit
+;; never suspends it, and an iframe of a page on screen is never suspended
+;; either: every workspace page is live and current before the user switches
+;; to it.  A switch only tells the host which iframe to show.
+;;
+;; WHY.  With a WKWebView per workspace, WebKit froze each hidden page about
+;; half a second after it loaded; on the switch to it the page woke (up to
+;; ~350ms) and replayed every push it had missed before it could paint, 0.7 to
+;; 2.6s in all (measured 2026-10-12), and 36 web views held 36 WebKit content
+;; processes and 11GB.  The host keeps one process.
+;;
+;; THE BUFFERS STAY WHAT THEY WERE.  Every workspace still has its own webview
+;; buffer (`*agent-frontend-WS*', frontend.el), with its name, its owner stamp
+;; and its place in the workspace's window layout.  It is a SLOT: it holds no
+;; web view of its own, only a display of the host's one xwidget, so showing
+;; any workspace's slot in a window shows the host there.  The host's own
+;; buffer is hidden (its name starts with a space), belongs to no workspace,
+;; and refuses to be killed by anything but this module.
+;;
+;; EMACS OWNS THE DESIRED STATE, THE HOST APPLIES IT.  Which pages exist (and
+;; at which URL), which one is shown, and each page's input background and gate
+;; slot are recorded here, and every call to the host states an end state, so
+;; the whole of it is replayed whenever the host (re)loads.  A call made before
+;; the host's script has started is queued ON THE PAGE and run when it starts
+;; (`startHost', webapp/src/host/main.ts), so no call is lost to timing.
+;;
+;; EVERY CALL IS ANSWERED, AND THE ANSWER IS LOGGED.  The host has no daemon
+;; connection, so its answers (and the notes it attaches to them, such as a
+;; page message it could not read) are its only way into the logs.
+
+;;; Code:
+
+(require 'cl-lib)
+(require 'json)
+
+(declare-function agent-repl--log "core" (ws fmt &rest args))
+(declare-function agent-repl--info "core" (ws fmt &rest args))
+(declare-function agent-repl--warn "core" (ws fmt &rest args))
+(declare-function agent-repl--error "core" (ws fmt &rest args))
+(declare-function agent-repl-host-ref "host" (ws))
+(declare-function agent-repl-host-conn "host" (ws))
+(declare-function agent-repl-connect-connection-address "connect" (conn))
+(declare-function agent-repl--frontend-make-webview-buffer "frontend" (url))
+(declare-function agent-repl--frontend-webview-live-widget "frontend" (buf))
+(declare-function agent-repl--frontend-webview-execute-script-value "frontend" (xw script callback))
+(declare-function agent-repl--frontend-webview-navigate-widget "frontend" (xwidget uri))
+(declare-function agent-repl--frontend-kill-webview "frontend" (buf))
+(declare-function agent-repl-frontend-webview-url "frontend" (ws))
+(declare-function agent-repl--ws-by-ref-id "workspace" (id))
+(declare-function xwidget-get "xwidget" (xwidget propname))
+(declare-function xwidget-put "xwidget" (xwidget propname value))
+
+(defvar xwidget-webkit-buffer-name-format)
+
+(defconst agent-repl-webhost-buffer-name " *agent-webview-host*"
+  "The host's buffer.  The leading space hides it from buffer lists, and it
+matches no workspace buffer pattern, so no panel machinery mistakes it for a
+workspace's own.")
+
+(defconst agent-repl--webhost-central
+  '(:agent-repl-central "the web view host spans every workspace")
+  "The log scope of a host record that names no workspace.")
+
+;;;; ---- Desired state ---------------------------------------------------------
+
+(defvar agent-repl--webhost-pages (make-hash-table :test #'equal)
+  "Workspace id -> the URL its page is held at.  What the host should hold.")
+
+(defvar agent-repl--webhost-shown nil
+  "The workspace id whose page the host should show, or nil.")
+
+(defvar agent-repl--webhost-input-backgrounds (make-hash-table :test #'equal)
+  "Workspace id -> the background its Emacs input window paints.")
+
+(defvar agent-repl--webhost-gate-docks (make-hash-table :test #'equal)
+  "Workspace id -> (PIXELS . BACKGROUND), the slot its docked gate takes.")
+
+(defvar agent-repl--webhost-reload-timer nil
+  "The pending host reload of a rollout burst, or nil.")
+
+(defvar agent-repl--webhost-killing nil
+  "Non-nil only while this module itself kills the host buffer.")
+
+;;;; ---- The host web view -----------------------------------------------------
+
+(defvar agent-repl--webhost-buffer nil
+  "The host's buffer, held by identity: the one this module created.
+A buffer that merely carries the host's name is not the host.")
+
+(defun agent-repl-webhost-buffer ()
+  "Return the live host buffer, or nil."
+  (and (buffer-live-p agent-repl--webhost-buffer) agent-repl--webhost-buffer))
+
+(defun agent-repl-webhost-xwidget ()
+  "Return the host's live xwidget, or nil when there is no host."
+  (when-let ((buf (agent-repl-webhost-buffer)))
+    (agent-repl--frontend-webview-live-widget buf)))
+
+(defun agent-repl-webhost-url (conn)
+  "Return the host page's URL on CONN's daemon.
+  http://host.localhost:<daemon port>/?host=1
+The host page is the webapp's own bundle, served by the daemon like a
+workspace's page, at a host name of its own so its loads share no
+connection budget with any workspace's page (frontend.el's page origin)."
+  (let* ((address (and conn (agent-repl-connect-connection-address conn)))
+         (port (and address (string-match ":\\([0-9]+\\)\\'" address)
+                    (match-string 1 address))))
+    (unless port
+      (error "agent-repl: the web view host has no daemon address to load from (address=%S)" address))
+    (format "http://host.localhost:%s/?host=1" port)))
+
+(defun agent-repl--webhost-refuse-kill ()
+  "Keep the host buffer alive against every kill but this module's own.
+On `kill-buffer-query-functions' in the host buffer only: a perspective that
+kills its buffers would otherwise take every workspace's page with it."
+  (or agent-repl--webhost-killing
+      (progn
+        (agent-repl--warn agent-repl--webhost-central
+                          "elisp.webhost.kill-refused command=%S" this-command)
+        nil)))
+
+(defun agent-repl--webhost-on-load (event-type)
+  "Replay the desired state when the host reports EVENT-TYPE `load-changed'."
+  (when (eq event-type 'load-changed)
+    (agent-repl--info agent-repl--webhost-central "elisp.webhost.load-changed pages=%d shown=%s"
+                      (hash-table-count agent-repl--webhost-pages) agent-repl--webhost-shown)
+    (agent-repl--webhost-replay)))
+
+(defun agent-repl--webhost-watch-load (xw)
+  "Make XW replay the desired state on every load, keeping its own handler.
+The xwidget event handler calls the widget's `callback' property, so the
+existing one is WRAPPED rather than replaced: the webkit machinery still gets
+every event it needs."
+  (let ((prior (xwidget-get xw 'callback)))
+    (xwidget-put xw 'callback
+                 (lambda (xwidget event-type)
+                   (when (functionp prior) (funcall prior xwidget event-type))
+                   (agent-repl--webhost-on-load event-type)))))
+
+(defun agent-repl-webhost-ensure (conn)
+  "Return the host's live xwidget, creating the host on CONN's daemon if needed.
+The host is created once and lives for the session.  No window is touched:
+the host buffer is never displayed itself; workspace slots display it."
+  (or (agent-repl-webhost-xwidget)
+      (let* ((url (agent-repl-webhost-url conn))
+             (buf (save-window-excursion (agent-repl--frontend-make-webview-buffer url))))
+        (with-current-buffer buf
+          (setq-local xwidget-webkit-buffer-name-format agent-repl-webhost-buffer-name)
+          (setq-local header-line-format nil)
+          (rename-buffer agent-repl-webhost-buffer-name t)
+          (add-hook 'kill-buffer-query-functions #'agent-repl--webhost-refuse-kill nil t))
+        (let ((xw (agent-repl--frontend-webview-live-widget buf)))
+          (unless xw
+            (let ((agent-repl--webhost-killing t))
+              (agent-repl--frontend-kill-webview buf))
+            (error "agent-repl: the web view host was created without a live xwidget"))
+          (setq agent-repl--webhost-buffer buf)
+          (agent-repl--webhost-watch-load xw)
+          (agent-repl--info agent-repl--webhost-central "elisp.webhost.created url=%s" url)
+          xw))))
+
+(defun agent-repl-webhost-kill ()
+  "Kill the host and forget its desired state.  Every page goes with it."
+  (when-let ((buf (agent-repl-webhost-buffer)))
+    (let ((agent-repl--webhost-killing t))
+      (agent-repl--frontend-kill-webview buf))
+    (setq agent-repl--webhost-buffer nil)
+    (agent-repl--info agent-repl--webhost-central "elisp.webhost.killed")))
+
+;;;; ---- Calls -----------------------------------------------------------------
+
+(defun agent-repl--webhost-script (method &rest args)
+  "The script calling the host's METHOD with ARGS, queued until the host starts.
+Each of ARGS is JSON-encoded, so nothing is spliced into the script unquoted.
+A queued call answers `queued', naming the workspace id when the first of
+ARGS is one, so the caller can ask again.
+The answer is always a string: a null answer is dropped without a callback."
+  (let ((call (format "h.%s(%s)" method (mapconcat #'json-encode args ",")))
+        (id (if (stringp (car args)) (json-encode (car args)) "null")))
+    (format (concat "(function(){var c=function(h){return %s;};var h=window.agentReplHost;"
+                    "if(h){return c(h);}"
+                    "(window.__agentReplHostPending=window.__agentReplHostPending||[]).push(c);"
+                    "return JSON.stringify({op:%s,id:%s,outcome:\"queued\",notes:[]});})()")
+            call (json-encode method) id)))
+
+(defun agent-repl--webhost-answer-ws (answer)
+  "The log scope for ANSWER: the workspace it names, or the central scope."
+  (let ((id (plist-get answer :id)))
+    (or (and (stringp id) (fboundp 'agent-repl--ws-by-ref-id)
+             (agent-repl--ws-by-ref-id id))
+        agent-repl--webhost-central)))
+
+(defun agent-repl--webhost-answered (raw)
+  "Record the host's RAW answer to a call, and every note it carries.
+The xwidget `javascript-callback' handler calls this BY SYMBOL: see
+`agent-repl--frontend-webview-read-script' for why a closure would crash."
+  (condition-case err
+      (let* ((answer (json-parse-string raw :object-type 'plist :array-type 'list
+                                        :null-object nil :false-object nil))
+             (scope (agent-repl--webhost-answer-ws answer)))
+        (agent-repl--log scope "elisp.webhost.answer op=%s id=%s outcome=%s"
+                         (plist-get answer :op) (plist-get answer :id) (plist-get answer :outcome))
+        (dolist (note (plist-get answer :notes))
+          (agent-repl--warn scope "elisp.webhost.note op=%s note=%s" (plist-get answer :op) note)))
+    (error
+     (agent-repl--error agent-repl--webhost-central
+                        "elisp.webhost.answer-unreadable raw=%S error=%S" raw err))))
+
+(defun agent-repl--webhost-call (method &rest args)
+  "Call the host's METHOD with ARGS; non-nil when the call was sent.
+A call with no host to send it to sends nothing: the desired state it served
+is recorded by the caller and replayed when the host loads."
+  (if-let ((xw (agent-repl-webhost-xwidget)))
+      (progn
+        (agent-repl--frontend-webview-execute-script-value
+         xw (apply #'agent-repl--webhost-script method args) 'agent-repl--webhost-answered)
+        t)
+    (agent-repl--log agent-repl--webhost-central "elisp.webhost.call-skipped method=%s reason=no-host" method)
+    nil))
+
+(defun agent-repl-webhost-read (method args callback)
+  "Ask the host's METHOD with ARGS, handing its answer string to CALLBACK.
+CALLBACK must be a symbol naming a function (the read channel's crash
+invariant).  Non-nil when the question was sent; nil when there is no host."
+  (if-let ((xw (agent-repl-webhost-xwidget)))
+      (progn
+        (agent-repl--frontend-webview-execute-script-value
+         xw (apply #'agent-repl--webhost-script method args) callback)
+        t)
+    nil))
+
+;;;; ---- Pages ----------------------------------------------------------------
+
+(defun agent-repl--webhost-id (ws)
+  "WS's workspace id, the key the host holds its page under; nil without a ref."
+  (plist-get (and (fboundp 'agent-repl-host-ref) (agent-repl-host-ref ws)) :id))
+
+(defun agent-repl-webhost-ensure-page (ws)
+  "Hold WS's page in the host at WS's URL, creating the host if needed.
+Answers WS's id.  Signals when WS has no ref or no connection: its URL cannot
+be built (`agent-repl-frontend-webview-url')."
+  (let* ((url (agent-repl-frontend-webview-url ws))
+         (id (agent-repl--webhost-id ws)))
+    (agent-repl-webhost-ensure (agent-repl-host-conn ws))
+    (unless (equal (gethash id agent-repl--webhost-pages) url)
+      (puthash id url agent-repl--webhost-pages)
+      (agent-repl--info ws "elisp.webhost.page-ensured ws=%s id=%s" ws id))
+    (agent-repl--webhost-call "ensure" id url)
+    id))
+
+(defun agent-repl-webhost-show (ws)
+  "Show WS's page in the host.  Nothing is sent when it is already the one shown."
+  (let ((id (agent-repl--webhost-id ws)))
+    (when (and id (not (equal id agent-repl--webhost-shown)))
+      (setq agent-repl--webhost-shown id)
+      (agent-repl--info ws "elisp.webhost.show ws=%s id=%s" ws id)
+      (agent-repl--webhost-call "show" id))))
+
+(defun agent-repl-webhost-remove (ws)
+  "Drop WS's page from the host, and everything held for it."
+  (when-let ((id (agent-repl--webhost-id ws)))
+    (remhash id agent-repl--webhost-pages)
+    (remhash id agent-repl--webhost-input-backgrounds)
+    (remhash id agent-repl--webhost-gate-docks)
+    (when (equal id agent-repl--webhost-shown)
+      (setq agent-repl--webhost-shown nil))
+    (agent-repl--info ws "elisp.webhost.page-removed ws=%s id=%s" ws id)
+    (agent-repl--webhost-call "remove" id)))
+
+(defun agent-repl-webhost-has-page-p (ws)
+  "Non-nil when the host is meant to hold WS's page."
+  (let ((id (agent-repl--webhost-id ws)))
+    (and id (gethash id agent-repl--webhost-pages) t)))
+
+(defun agent-repl-webhost-reload-page (ws)
+  "Load WS's page again, at its URL now: re-point it when the URL moved
+\(a daemon handover), reload it in place otherwise."
+  (let* ((url (agent-repl-frontend-webview-url ws))
+         (id (agent-repl--webhost-id ws)))
+    (if (equal (gethash id agent-repl--webhost-pages) url)
+        (agent-repl--webhost-call "reload" id)
+      (puthash id url agent-repl--webhost-pages)
+      (agent-repl--webhost-call "ensure" id url))
+    (agent-repl--info ws "elisp.webhost.page-reloaded ws=%s id=%s" ws id)
+    id))
+
+(defun agent-repl-webhost-set-input-background (ws background)
+  "Tell WS's page the BACKGROUND its input window paints; kept for its reloads."
+  (when-let ((id (agent-repl--webhost-id ws)))
+    (puthash id background agent-repl--webhost-input-backgrounds)
+    (agent-repl--webhost-call "setInputBackground" id background)))
+
+(defun agent-repl-webhost-set-gate-dock (ws pixels background)
+  "Tell WS's page the slot its docked gate takes; kept for its reloads.
+BACKGROUND is the input window's, or nil when it has none."
+  (when-let ((id (agent-repl--webhost-id ws)))
+    (puthash id (cons pixels background) agent-repl--webhost-gate-docks)
+    (agent-repl--webhost-call "setGateDock" id pixels background)))
+
+(defun agent-repl-webhost-dismiss-digest (ws)
+  "Ask WS's page to close its standing news digest."
+  (when-let ((id (agent-repl--webhost-id ws)))
+    (agent-repl--webhost-call "dismissDigest" id)))
+
+;;;; ---- Replay and reload -----------------------------------------------------
+
+(defun agent-repl--webhost-replay ()
+  "Hand the host everything it should hold: every page, the shown one, and
+each page's state.  Run on every load of the host, which starts empty."
+  (maphash (lambda (id url) (agent-repl--webhost-call "ensure" id url))
+           agent-repl--webhost-pages)
+  (maphash (lambda (id background) (agent-repl--webhost-call "setInputBackground" id background))
+           agent-repl--webhost-input-backgrounds)
+  (maphash (lambda (id dock)
+             (agent-repl--webhost-call "setGateDock" id (car dock) (cdr dock)))
+           agent-repl--webhost-gate-docks)
+  (when agent-repl--webhost-shown
+    (agent-repl--webhost-call "show" agent-repl--webhost-shown)))
+
+(defun agent-repl--webhost-reload-now (conn)
+  "Navigate the host to its URL on CONN's daemon; its load replays the rest."
+  (setq agent-repl--webhost-reload-timer nil)
+  (if-let ((xw (agent-repl-webhost-xwidget)))
+      (progn
+        (agent-repl--frontend-webview-navigate-widget xw (agent-repl-webhost-url conn))
+        (agent-repl--info agent-repl--webhost-central "elisp.webhost.reloaded pages=%d"
+                          (hash-table-count agent-repl--webhost-pages)))
+    (agent-repl--log agent-repl--webhost-central "elisp.webhost.reload-skipped reason=no-host")))
+
+(defun agent-repl-webhost-reload (conn)
+  "Reload the host, and so every page, on CONN's daemon, once per burst.
+A rollout tells every workspace to reload in one burst of pushes; the host
+reloads once for all of them, on the next turn of the command loop, which
+also brings the host page's own code up to the new build."
+  (unless agent-repl--webhost-reload-timer
+    (setq agent-repl--webhost-reload-timer
+          (run-at-time 0 nil #'agent-repl--webhost-reload-now conn))))
+
+(provide 'webhost)
+
+;;; webhost.el ends here
