@@ -788,8 +788,11 @@ func validateUpdateMergeQueueRequest(req *agentreplv1.UpdateMergeQueueRequest) *
 	if evict := req.GetEvict(); evict != nil {
 		return validateWorkspaceRef("evict.workspace", evict.GetWorkspace())
 	}
-	if front := req.GetFront(); front != nil {
-		return validateWorkspaceRef("front.workspace", front.GetWorkspace())
+	if up := req.GetMoveUp(); up != nil {
+		return validateWorkspaceRef("move_up.workspace", up.GetWorkspace())
+	}
+	if down := req.GetMoveDown(); down != nil {
+		return validateWorkspaceRef("move_down.workspace", down.GetWorkspace())
 	}
 	return nil
 }

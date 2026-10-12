@@ -703,13 +703,13 @@ type fakeMerge struct {
 	pauseScope       *merge.RepositoryScope
 	answerDequeueErr error
 	evictErr         error
-	frontErr         error
 	holdErr          error
 	releaseErr       error
 	// holds and releases count the rollout-hold verbs.
 	holds, releases int
-	// fronted records every workspace Front was asked to move.
-	fronted []ids.WorkspaceID
+	moveErr         error
+	// moves records every move Move was asked for.
+	moves []fakeMove
 	// enqueuedBy records who each enqueue said asked for the merge, and
 	// requests every request whole.
 	enqueuedBy []merge.Requester
@@ -774,9 +774,15 @@ func (f *fakeMerge) AnswerDequeue(context.Context, ids.WorkspaceID, bool) error 
 
 func (f *fakeMerge) Evict(context.Context, ids.WorkspaceID) error { return f.evictErr }
 
-func (f *fakeMerge) Front(_ context.Context, ws ids.WorkspaceID) error {
-	f.fronted = append(f.fronted, ws)
-	return f.frontErr
+// fakeMove is one move fakeMerge was asked for.
+type fakeMove struct {
+	ws   ids.WorkspaceID
+	move wsm.MergeMove
+}
+
+func (f *fakeMerge) Move(_ context.Context, ws ids.WorkspaceID, move wsm.MergeMove) (bool, error) {
+	f.moves = append(f.moves, fakeMove{ws: ws, move: move})
+	return f.moveErr == nil, f.moveErr
 }
 
 func (f *fakeMerge) HoldRollouts(context.Context) error {
