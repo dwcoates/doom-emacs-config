@@ -1123,3 +1123,35 @@ func TestMoveSurfacesAStoreFailure(t *testing.T) {
 		t.Fatal("the store failure was not logged at error")
 	}
 }
+
+func TestSetHiddenStandsTheSessionDown(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+
+	// Act
+	if err := f.verbs.SetHidden(context.Background(), "w1", true); err != nil {
+		t.Fatalf("SetHidden: %v", err)
+	}
+
+	// Assert
+	if !slices.Equal(f.standDowns, []ids.WorkspaceID{"w1"}) {
+		t.Fatalf("stand-downs = %v, want the hidden workspace", f.standDowns)
+	}
+}
+
+func TestShowingAWorkspaceStartsNothingAndStandsNothingDown(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+
+	// Act
+	if err := f.verbs.SetHidden(context.Background(), "w1", false); err != nil {
+		t.Fatalf("SetHidden: %v", err)
+	}
+
+	// Assert
+	if len(f.standDowns) != 0 {
+		t.Fatalf("stand-downs = %v, want none for a show", f.standDowns)
+	}
+}
