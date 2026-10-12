@@ -1799,11 +1799,12 @@ that completes or is interrupted leaves its result UNREAD;
 `MarkWorkspaceViewed` on the row while it shows that turn-end arm (`done` or
 `interrupted`) READS it; the next turn resets it. The daemon draws the marker
 exactly when the row stands on a turn-end arm and the result is read, resolved
-in the same render as the status. An UNREAD turn end outranks `idle_async`, so
-a turn that finishes while detached work runs shows its green `done` (or
-`interrupted`) until the user has viewed it; once viewed the row shows
-`idle_async`, full; when the work ends the row returns to its turn-end arm
-PARTIAL, never a fresh full one claiming an unread result.
+in the same render as the status. Live detached work outranks an unread turn
+end (owner ruling, 2026-10-12): a turn that finishes while detached work runs
+shows yellow `idle_async`, full, at once, without waiting for the user to view
+it. Viewing that `idle_async` row reads the result too, so when the work ends
+the row returns to its turn-end arm PARTIAL if the user viewed it meanwhile,
+and FULL if not.
 
 **Emacs DETECTS and REPORTS; it does not decide.** The dwell is measured in
 Emacs, because only Emacs knows what the user is standing in front of, and its
@@ -1813,7 +1814,6 @@ owner ruling, 2026-10-02):
 | case | dwell |
 |---|---|
 | a `done` lands while the user is viewing the workspace | 1 s (`agent-repl-tab-dwell-fast-demote-seconds`) |
-| the user walks into a `done` whose row carries `RosterRowDetachedLive` (background work runs; once read it shows yellow `idle_async`) | 1 s |
 | the user walks into any other turn end that already stood; any interrupted, failed or vendor-blocked row | 5 s (`agent-repl-tab-dwell-demote-seconds`) |
 | a `/clear` or compaction completes | none: the daemon reads the result in `SetTurnEnded` and the push that ends the cut already carries the marker |
 

@@ -672,12 +672,12 @@ func TestRowStatesItsLiveDetachedWork(t *testing.T) {
 		wantStatus string
 		wantLive   bool
 	}{
-		{name: "an unread done with detached work states it", arrange: func(t *testing.T, r sidebarResolver) {
+		{name: "an unread turn end with detached work states it", arrange: func(t *testing.T, r sidebarResolver) {
 			live(t, r)
 			r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
 			r.OnDetachedWork(theWS, agent("a1"), detachedWork("work-1"))
 			r.SetTurnEnded(theWS, wsm.CloseCompleted)
-		}, wantStatus: "done", wantLive: true},
+		}, wantStatus: "idle_async", wantLive: true},
 		{name: "idle_async states it", arrange: func(t *testing.T, r sidebarResolver) {
 			live(t, r)
 			r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})

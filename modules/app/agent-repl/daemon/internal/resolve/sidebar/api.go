@@ -115,11 +115,11 @@ type Resolver interface {
 	Row(ws ids.WorkspaceID) (*frontendv1.RosterRow, uint64, bool)
 	// SetViewed records that the user has READ the last turn's result — the
 	// editor's report that the user has now SEEN this workspace. It takes
-	// only on a turn-end row (done, interrupted or turn_failed); a report on
-	// any other arm is dropped. A read result draws the row PARTIAL whenever it stands on
-	// its turn-end arm, and lets an unread-held row yield to idle_async while
-	// detached work runs. There is no lowering setter: the next turn is what
-	// makes a new result unread.
+	// only on a turn-end row (done, interrupted or turn_failed), or on an
+	// idle_async row over an unread turn end; a report on any other arm is
+	// dropped. A read result draws the row PARTIAL whenever it stands on its
+	// turn-end arm. There is no lowering setter: the next turn is what makes
+	// a new result unread.
 	SetViewed(ws ids.WorkspaceID)
 	// SetStateUnreported installs, or lifts, the fact that a shim taken back
 	// after a failed handover has not re-reported its session state: the
