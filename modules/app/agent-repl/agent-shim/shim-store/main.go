@@ -117,7 +117,7 @@ func runWithLogger(socketPath, dbPath, pprofAddr string, watchBuffer int, log *l
 		}
 	}()
 	// RUNTIME PROFILING is armed beside the surface: a session the collector
-	// opens (bin/profile-agent-repl.sh) starts it on SIGUSR2 without a restart.
+	// opens (bin/profile-agent-repl.sh) starts it on SIGWINCH without a restart.
 	stopProfiling, err := startRuntimeProfiling(log, os.Getenv, os.UserHomeDir)
 	if err != nil {
 		return err
