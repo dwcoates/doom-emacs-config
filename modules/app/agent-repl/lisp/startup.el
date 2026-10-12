@@ -50,7 +50,9 @@
 (declare-function agent-repl-roster-drawn-tab-order "roster" ())
 (declare-function agent-repl--ensure-input-buffer "panels" (ws))
 (declare-function agent-repl--frontend-precreate-refusal "frontend" (ws))
-(declare-function agent-repl--frontend-webview-read-script "frontend" (buf script callback))
+(declare-function agent-repl-webhost-read "webhost" (method args callback))
+(declare-function agent-repl-host-ref "host" (ws))
+(declare-function agent-repl-open-progress-note-loaded "open-progress" (ws))
 (declare-function agent-repl--ws-get "workspace" (ws key))
 (declare-function doom-run-hooks "doom-lib" (&rest hooks))
 
@@ -360,52 +362,48 @@ to run again -- and the failure is recorded and re-signalled."
 
 ;;;; ---- Edges ------------------------------------------------------------------
 
-(defconst agent-repl-startup--drawn-attribute "data-conversation-drawn"
-  "The attribute the page sets on its root element once its conversation drew.
-The webapp sets it after the root feed's opening page is applied and painted
-\(webapp/src/feed/conversation-drawn.ts).  An HTML load (`load-changed')
-precedes it: the page is up before any of the conversation is.")
-
 (defconst agent-repl-startup--probe-interval 0.25
   "Seconds between two reads of a loaded page that has not drawn yet.")
 
-(defun agent-repl-startup--probe-script (ws)
-  "The read that answers whether WS's page has drawn its conversation.
-WS rides in the script and comes back in the reply, because the read's
-callback must be a symbol (`agent-repl--frontend-webview-read-script').
-The reply is always a string: a null reply is dropped without a callback."
-  (format "(function(){return JSON.stringify({ws:%s,drawn:document.documentElement.hasAttribute(%s)});})()"
-          (json-encode ws) (json-encode agent-repl-startup--drawn-attribute)))
-
 (defun agent-repl-startup--probe (ws)
-  "Ask WS's page whether its conversation is on screen.
-Nothing is asked once the startup is over or WS's page is known drawn."
+  "Ask the host whether WS's page has drawn its conversation.
+The page reports its drawn mark to the host as it is set (webhost.el), so
+the host answers at once.  Nothing is asked once the startup is over or
+WS's page is known drawn."
   (when (and (agent-repl-startup-active-p)
              (not (gethash ws agent-repl-startup--loaded)))
-    (let ((buf (agent-repl--ws-get ws :frontend-buffer)))
-      (unless (and (buffer-live-p buf)
-                   (agent-repl--frontend-webview-read-script
-                    buf (agent-repl-startup--probe-script ws)
-                    #'agent-repl-startup--on-probe))
-        ;; The page went away under the probe; its next load asks again.
-        (agent-repl--info ws "elisp.startup.probe-skipped ws=%s reason=no-webview" ws)))))
+    (let ((id (plist-get (agent-repl-host-ref ws) :id)))
+      (unless (and id
+                   (agent-repl-webhost-read "drawn" (list id) #'agent-repl-startup--on-probe))
+        ;; No host yet (or no ref): the page is asked again when its slot is made.
+        (agent-repl--info ws "elisp.startup.probe-skipped ws=%s reason=%s"
+                          ws (if id "no-host" "no-ref"))))))
 
 (defun agent-repl-startup--on-probe (raw)
-  "Take the page's RAW reply to `agent-repl-startup--probe-script'.
-A drawn page opens its tab when due; an undrawn one is asked again."
+  "Take the host's RAW answer to a drawn question.
+A drawn page opens its tab when due (and its open's placeholder learns the
+page is up); an undrawn one is asked again."
   (let* ((reply (condition-case err
-                    (json-parse-string raw :object-type 'plist)
+                    (json-parse-string raw :object-type 'plist :null-object nil)
                   (error
                    (agent-repl--error '(:agent-repl-central "a reply naming no workspace cannot be routed")
                                       "elisp.startup.probe-unreadable raw=%S error=%S" raw err)
                    nil)))
-         (ws (plist-get reply :ws)))
+         (id (plist-get reply :id))
+         (ws (and (stringp id) (agent-repl--ws-by-ref-id id))))
     (cond
      ((null reply) nil)
-     ((not (stringp ws))
+     ((null ws)
       (agent-repl--error '(:agent-repl-central "a reply naming no workspace cannot be routed")
                          "elisp.startup.probe-unreadable raw=%S error=no-workspace" raw))
-     ((eq (plist-get reply :drawn) t)
+     ((equal (plist-get reply :outcome) "queued")
+      ;; The host's code had not started; the queued question's answer goes
+      ;; nowhere, so it is asked again.
+      (agent-repl--log ws "elisp.startup.probe-queued ws=%s" ws)
+      (run-at-time agent-repl-startup--probe-interval nil #'agent-repl-startup--probe ws))
+     ((plist-get reply :drawn)
+      (when (fboundp 'agent-repl-open-progress-note-loaded)
+        (agent-repl-open-progress-note-loaded ws))
       (agent-repl-startup--page-drawn ws))
      (t
       (agent-repl--log ws "elisp.startup.probe ws=%s drawn=nil" ws)

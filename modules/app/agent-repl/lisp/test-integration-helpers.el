@@ -1039,6 +1039,15 @@ signals."
                 ;; perspective switch that scenario never asked for.
                 (agent-repl--panels-arrivals-armed nil)
                 (agent-repl--panels-arrival-reasons (make-hash-table :test 'equal))
+                ;; The web view host (webhost.el) is process-wide: a host a
+                ;; scenario creates, and every page it was told to hold, must
+                ;; not reach the next scenario, nor any later unit test.
+                (agent-repl--webhost-buffer nil)
+                (agent-repl--webhost-pages (make-hash-table :test 'equal))
+                (agent-repl--webhost-shown nil)
+                (agent-repl--webhost-input-backgrounds (make-hash-table :test 'equal))
+                (agent-repl--webhost-gate-docks (make-hash-table :test 'equal))
+                (agent-repl--webhost-reload-timer nil)
                 ;; The editor's startup is process-wide (startup.el): each
                 ;; scenario runs with it over unless it stages one itself.
                 (agent-repl-startup--phase 'done)

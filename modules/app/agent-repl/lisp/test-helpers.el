@@ -781,6 +781,14 @@ re-routes their frontend resolution instead."
          ;; Logging's per-directory canonical spellings: a directory a test
          ;; created and removed must not stay resolved into the next test.
          (agent-repl--log-dir-truenames (make-hash-table :test 'equal))
+         ;; The web view host's desired state (webhost.el): a page a test
+         ;; asked the host to hold must not be held into the next test.
+         (agent-repl--webhost-buffer nil)
+         (agent-repl--webhost-pages (make-hash-table :test 'equal))
+         (agent-repl--webhost-shown nil)
+         (agent-repl--webhost-input-backgrounds (make-hash-table :test 'equal))
+         (agent-repl--webhost-gate-docks (make-hash-table :test 'equal))
+         (agent-repl--webhost-reload-timer nil)
          ;; Repo-fold set: global UI state, so a test that folds a repo
          ;; would otherwise leak that fold into every later test's
          ;; tab-bar render.

@@ -1,109 +1,53 @@
-;;; webview-recovery.el --- paced webview pre-creation -*- lexical-binding: t; -*-
+;;; webview-recovery.el --- every workspace's page, made ahead of the look -*- lexical-binding: t; -*-
 
 ;;; Commentary:
 
-;; WEBVIEW PRE-CREATION, STAGGERED.  Mounting a WKWebView and loading the
-;; webapp is the slow part of opening a workspace; doing it at first look
-;; puts that cost in front of the user every time.  So every eligible
-;; workspace's page is built ahead of the look, and the mounts are paced one
-;; per tick so a link-up owing ten of them does not spawn ten WebKit content
-;; processes in one command-loop turn.  Each webview is then BOUND TO ITS
-;; WORKSPACE BUFFER FOR LIFE.
+;; PAGES ARE MADE AHEAD OF THE LOOK.  Every eligible workspace gets its
+;; webview slot and its page in the host web view (webhost.el) the moment it
+;; is buildable -- on the link-up, on every roster push, when its tab is
+;; created -- so a switch to it shows a page that is already live and drawn.
+;; A slot is a buffer and a page is one call to the host, so every owed page
+;; is made in one immediate pass; nothing is staggered or queued.
+;;
+;; ONLY THE HOST'S CREATION WAITS, AND ONLY FOR ONE STATE.  The host is the
+;; one native view Emacs makes, and making a native view while Emacs is on
+;; screen but not focused can bring Emacs to the front, taking the desktop
+;; from whatever the user is looking at.  So while there is no host and Emacs
+;; is visible but unfocused, the pass is PARKED and runs on the focus edge.
+;; A hidden Emacs (an `open -gj' launch) and a focused one both proceed.  The
+;; tabs do not wait for a parked pass (startup.el).
 ;;
 ;; THE STALE-WEBVIEW SWEEP IS GONE, and so is every script it drove.  A
-;; rebuilt webapp reaches a live page through the daemon's own
-;; `reload_webapp' push (frontend.el navigates the widget), and a daemon
-;; handover re-attaches the page as a side effect — neither needs Emacs to
-;; go looking for pages to repair, and neither needs a JavaScript hook.
-;; There is no `window.agentRepl*' surface at all: the webview is purely
-;; daemon-driven.
+;; rebuilt webapp reaches every page through the daemon's own
+;; `reload_webapp' push (frontend.el reloads the host), and a daemon handover
+;; re-points a page as a side effect.
 
 ;;; Code:
 
 
 (require 'cl-lib)
-(require 'url-util)
 
 (declare-function agent-repl--panels-on-view-created "panels" (ws))
-(declare-function agent-repl--ws-current-name "workspace" ())
 (declare-function agent-repl--with-deferred-quit "agent-repl-core")
-(declare-function agent-repl--deferred-quit-arm-audit "agent-repl-core" (context))
-(declare-function agent-repl--deferred-quit-hand-off "agent-repl-core" (context))
-(declare-function agent-repl--log"agent-repl-core" (ws fmt &rest args))
-(declare-function agent-repl--log-verbose "agent-repl-core" (ws fmt &rest args))
+(declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--warn "agent-repl-core" (ws fmt &rest args))
+(declare-function agent-repl--info "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--live-ws-names "agent-repl-workspace" ())
-(declare-function agent-repl--ws-get "agent-repl-workspace" (ws key))
 (declare-function agent-repl--frontend-precreate-webview "agent-repl-frontend" (ws))
 (declare-function agent-repl--frontend-precreate-refusal "agent-repl-frontend" (ws))
-(declare-function agent-repl--ws-live-p "agent-repl-workspace" (ws))
-(declare-function agent-repl--ws-gui-frontend-p "agent-repl-frontends" (ws))
-(declare-function agent-repl--info "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--emacs-focused-p "agent-repl-notifications" (&optional ws))
+(declare-function agent-repl-webhost-xwidget "webhost" ())
 
 (defvar agent-repl-link-up-functions)
 (defvar agent-repl-roster-update-functions)
 
-
-(defcustom agent-repl-webview-precreate-stagger-seconds 0.02
-  "Seconds between two paced webview pre-creations.
-Each pre-creation spawns a WebKit content process, and a startup sweep
-can be owed ten of them at once.  The timer chain exists so eligibility
-is re-checked between mounts and the command loop is handed back after
-each one; the interval is deliberately near-zero because a full burst is
-brief (each mount itself is milliseconds -- the heavy work happens in
-WebKit's own processes) and a fast rollout is preferred over a stretched
-one.  Raise this if a burst ever produces a visible hitch."
-  :type 'number
-  :group 'agent-repl)
-
-(defvar agent-repl--webview-precreate-queue nil
-  "Workspaces still owed a paced pre-creation, in creation order.")
-
-(defvar agent-repl--webview-precreate-timer nil
-  "The timer draining `agent-repl--webview-precreate-queue', or nil.")
+(defconst agent-repl--webview-precreate-central
+  '(:agent-repl-central "webview recovery spans workspaces")
+  "The log scope of a pre-creation record.")
 
 (defvar agent-repl--webview-precreate-parked nil
-  "Non-nil while the drain is HOLDING for Emacs to have desktop focus.
-The queue is kept whole; nothing is dropped and no timer stands.")
-
-(defvar agent-repl--webview-precreate-pass-open nil
-  "Non-nil while a DRAIN PASS admitted by a clear hold is running.
-
-THE HOLD ADMITS A PASS, NOT AN ITEM.  A pass opens on the tick that finds
-the hold clear and closes on the tick that empties the queue; while it is
-open the hold is not consulted again, so the whole queue that pass can
-reach is drained without re-asking.
-
-Why the hold is not re-asked per item: mounting is what perturbs the very
-state the hold reads.  Instantiating a WKWebView hands key-window status
-around, and an Emacs that was focused when the pass opened can read back
-as visible-but-unfocused microseconds later -- so a per-item hold parks
-the remainder after mounting exactly one page and waits for a fresh focus
-edge to mount the next.  That is the twenty-second, two-focus-edge,
-one-panel-per-edge cold start realtest 5 caught: the resume worked, it
-just bought one item at a time.
-
-Why relaxing it is safe: the hold exists so a mount cannot RAISE an Emacs
-the user is not looking at.  A pass only opens when creating a view could
-not do that -- Emacs hidden, or Emacs already frontmost -- and it spans
-only the queue in hand at 20ms a mount, so the window in which a user
-could tab away mid-pass is tens of milliseconds and its worst outcome is
-returning them to the app they were in a moment ago.  The alternative,
-measured, is a panel that stays blank until something focuses Emacs
-again.  The hold is asked in full again for the NEXT pass.")
-
-(defvar agent-repl--webview-precreate-pass-mounted 0
-  "How many pages the open pass has mounted, for its completion record.")
-
-(defun agent-repl--webview-precreate-arm ()
-  "Arm the paced drain for the queue's next workspace, if one is owed."
-  (when (and agent-repl--webview-precreate-queue
-             (null agent-repl--webview-precreate-timer))
-    (setq agent-repl--webview-precreate-timer
-          (run-at-time agent-repl-webview-precreate-stagger-seconds nil
-                       #'agent-repl--webview-precreate-drain)))
-  agent-repl--webview-precreate-timer)
+  "Non-nil while a pass waits for Emacs to have desktop focus before it
+creates the host.  Nothing is dropped: the next pass makes every page owed.")
 
 (defun agent-repl--emacs-visible-p ()
   "Return nil ONLY when we KNOW Emacs shows nothing on the desktop.
@@ -165,10 +109,10 @@ both of those proceed and paint; only visible-but-unfocused holds.
 Parking a hidden launch is exactly the collision realtest 1 caught: focus
 was preserved but no panel painted.
 
-Holding costs the warm page nothing it was for: pre-creation exists so
-the mount is not paid at first LOOK, and a look is a focus.  The hold is
+Only the HOST's creation holds (`agent-repl--webview-precreate-pass'):
+once the host exists, making a page creates no native view.  The hold is
 released by `agent-repl--webview-precreate-on-focus-change' the moment
-Emacs is frontmost, which is at or before that first look.
+Emacs is frontmost, which is at or before the user's first look.
 
 Under `noninteractive' nothing holds -- a batch process has no
 application to activate, and the suites drive this drain directly.  The
@@ -192,204 +136,99 @@ directly by the suites.  Reported as a `reason=' tag on the created log."
    (t "allowed")))
 
 (defun agent-repl--webview-precreate-park ()
-  "Hold the drain until creating a view can no longer foreground Emacs.
-The only held state is visible-but-unfocused; the queue is kept whole,
-nothing is dropped and no timer stands.  Reached only between passes: an
-open pass does not re-ask the hold (see
-`agent-repl--webview-precreate-pass-open')."
-  (setq agent-repl--webview-precreate-parked t)
-  (agent-repl--info '(:agent-repl-central "webview recovery spans workspaces")
-                    "elisp.webview-recovery.precreate-parked queued=%d reason=visible-unfocused"
-                    (length agent-repl--webview-precreate-queue))
+  "Hold the pass until creating the host can no longer foreground Emacs."
+  (unless agent-repl--webview-precreate-parked
+    (setq agent-repl--webview-precreate-parked t)
+    (agent-repl--info agent-repl--webview-precreate-central
+                      "elisp.webview-recovery.precreate-parked owed=%d reason=visible-unfocused"
+                      (length (agent-repl--webview-precreate-missing))))
   t)
 
-(defun agent-repl--webview-precreate-open-pass ()
-  "Open a drain pass, naming what admitted it, and clear any park.
-Called by the tick that found the hold clear.  From here to the tick that
-empties the queue the hold is not asked again."
-  (setq agent-repl--webview-precreate-pass-open t
-        agent-repl--webview-precreate-pass-mounted 0
-        agent-repl--webview-precreate-parked nil)
-  (agent-repl--info '(:agent-repl-central "webview recovery spans workspaces")
-                    "elisp.webview-recovery.precreate-pass-opened queued=%d reason=%s"
-                    (1+ (length agent-repl--webview-precreate-queue))
-                    (agent-repl--webview-precreate-allow-reason)))
-
-(defun agent-repl--webview-precreate-close-pass ()
-  "Close the open pass once the queue is empty, recording what it mounted.
-A no-op when no pass is open, which is every tick that finds an already
-empty queue."
-  (when agent-repl--webview-precreate-pass-open
-    (agent-repl--info '(:agent-repl-central "webview recovery spans workspaces")
-                      "elisp.webview-recovery.precreate-pass-completed mounted=%d"
-                      agent-repl--webview-precreate-pass-mounted)
-    (setq agent-repl--webview-precreate-pass-open nil
-          agent-repl--webview-precreate-pass-mounted 0)))
-
-(defun agent-repl--webview-precreate-on-focus-change ()
-  "Resume a parked drain once Emacs actually holds desktop focus.
-Registered on `after-focus-change-function', the same edge status.el
-repaints the tab bar on.  A no-op when nothing is parked."
-  (when (and agent-repl--webview-precreate-parked
-             (not (agent-repl--webview-precreate-hold-p)))
-    (setq agent-repl--webview-precreate-parked nil)
-    ;; The tick this arms opens the pass; from there the hold is not
-    ;; re-asked, so ONE focus edge drains the whole queue it can reach.
-    (agent-repl--info '(:agent-repl-central "webview recovery spans workspaces")
-                      "elisp.webview-recovery.precreate-drained-on-focus queued=%d reason=focus-edge"
-                      (length agent-repl--webview-precreate-queue))
-    (agent-repl--webview-precreate-arm)))
-
 (defun agent-repl--webview-precreate-needed-p (ws)
-  "Return non-nil when WS is owed a webview and has none.
-
-Answered by `agent-repl--frontend-precreate-refusal' — the SAME
-eligibility the mount itself applies — so the queue can never hold a
-workspace the mount would then refuse, nor skip one it would accept.
-It is re-asked here as well as at the mount because a workspace can be
-closed, killed, merged or fenced during the seconds a paced queue takes
-to drain, and a page for it must not appear afterwards."
+  "Return non-nil when WS is owed a webview slot and page and has none.
+Answered by `agent-repl--frontend-precreate-refusal' -- the SAME
+eligibility the mount itself applies -- so a pass can never make a page the
+mount would refuse, nor skip one it would accept."
   (null (agent-repl--frontend-precreate-refusal ws)))
 
-(defun agent-repl--webview-precreate-drain ()
-  "Pre-create the queue's next workspace, then re-arm for the one after.
-
-One mount per tick.  ELIGIBILITY is RE-CHECKED at the tick rather than
-trusted from when the workspace was queued, so a workspace closed mid
-drain gets no page.  A mount that signals is warned about and the drain
-continues: one workspace's failure must not strand the rest of the queue.
-
-THE HOLD, unlike eligibility, is asked ONCE PER PASS rather than once per
-item.  The first tick with a clear hold opens a pass; every tick after it
-drains, and the tick that empties the queue closes it.  Re-asking the
-hold per item is what stranded a cold start for twenty seconds, because
-the mount itself perturbs the focus state the hold reads -- see
-`agent-repl--webview-precreate-pass-open' for the whole argument.  A tick
-that finds the hold set with NO pass open still parks, whole, and waits
-for `agent-repl--webview-precreate-on-focus-change'.
-
-A TICK IS A CRITICAL SECTION FOR QUITS.  This drain is set off by the
-desktop FOCUS EDGE, which is the same instant a keypress arrives -- a key
-event can only reach Emacs once Emacs is the active application, so
-bringing it forward is what precedes one.  A `C-g' landing here found
-Emacs BUSY rather than waiting in `read_char', so Emacs could only arm
-`quit-flag'; the flag was then taken at a checkpoint inside this tick,
-which sits inside a standing minibuffer's own recursive edit, so the echo
-area said `Quit' and the prompt stayed up.  That is why the tick runs
-under `agent-repl--with-deferred-quit\': the guard holds the quit off the
-tick and LEAVES IT ARMED, so Emacs's own input wait turns it into the
-`C-g' event the standing read aborts on.
-
-That guard is also what made the 2026-09-13 realtest 5-8 failures land
-HERE and nowhere else: only a run with a pending pre-creation runs a
-guarded section on the focus edge, and the delivery timer the guard used
-to arm was clearing the flag without honouring it.  See core.el's
-commentary.
-
-The mid-tick state this also protects is real on its own terms: the timer
-is cleared at the top and re-armed at the bottom, so a quit between them
-would leave the queue standing with no timer to drain it."
-  (agent-repl--with-deferred-quit "webview-precreate-drain"
-    (agent-repl--webview-precreate-tick)))
-
-(defun agent-repl--webview-precreate-tick ()
-  "Run one pre-creation tick: the quit-guarded body of the drain.
-Named separately so `agent-repl--webview-precreate-drain\' has a body to
-guard and so a tick is drivable from a test without a timer."
-  (setq agent-repl--webview-precreate-timer nil)
-  (if (and agent-repl--webview-precreate-queue
-           (not agent-repl--webview-precreate-pass-open)
-           (agent-repl--webview-precreate-hold-p))
-      (agent-repl--webview-precreate-park)
-    (let ((ws (agent-repl--webview-precreate-next)))
-      (when ws
-        (unless agent-repl--webview-precreate-pass-open
-          (agent-repl--webview-precreate-open-pass))
-        (condition-case err
-            (when (agent-repl--webview-precreate-needed-p ws)
-              (agent-repl--info '(:agent-repl-central "webview recovery spans workspaces")
-                                "elisp.webview-recovery.precreate-created ws=%s reason=%s"
-                                ws (agent-repl--webview-precreate-allow-reason))
-              (agent-repl--frontend-precreate-webview ws)
-              (setq agent-repl--webview-precreate-pass-mounted
-                    (1+ agent-repl--webview-precreate-pass-mounted))
-              ;; The workspace the user stands on may have declined its
-              ;; panel restore for want of exactly this view.
-              (agent-repl--panels-on-view-created ws))
-          (error (agent-repl--warn ws "webview-precreate: ws=%s outcome=failed err=%S"
-                                   ws err))))
-      (unless agent-repl--webview-precreate-queue
-        (agent-repl--webview-precreate-close-pass))
-      (agent-repl--webview-precreate-arm))))
-
-(defun agent-repl--webview-precreate-next ()
-  "Take the next workspace off the pre-creation queue.
-THE WORKSPACE THE USER STANDS ON GOES FIRST when it is queued: it is the
-one whose panels are waiting on its view (`agent-repl--panels-on-view-created'),
-and at startup it is the first thing the user sees.  Otherwise the queue
-drains in order."
-  (let ((current (agent-repl--ws-current-name)))
-    (if (and current (member current agent-repl--webview-precreate-queue))
-        (progn
-          (setq agent-repl--webview-precreate-queue
-                (delete current agent-repl--webview-precreate-queue))
-          current)
-      (pop agent-repl--webview-precreate-queue))))
-
-(defun agent-repl--webview-precreate-schedule (workspaces)
-  "Queue WORKSPACES for paced pre-creation, returning how many were queued.
-Appends rather than replaces, so a sweep landing while an earlier queue
-is draining cannot drop the workspaces that queue still owes.  A
-workspace already queued is not queued twice."
-  (let ((added 0))
-    (dolist (ws workspaces)
-      (unless (member ws agent-repl--webview-precreate-queue)
-        (setq agent-repl--webview-precreate-queue
-              (append agent-repl--webview-precreate-queue (list ws)))
-        (setq added (1+ added))))
-    (agent-repl--webview-precreate-arm)
-    added))
-
 (defun agent-repl--webview-precreate-missing ()
-  "Return every live workspace owed a webview it does not have."
+  "Return every live workspace owed a webview slot and page it does not have."
   (cl-remove-if-not #'agent-repl--webview-precreate-needed-p
                     (agent-repl--live-ws-names)))
 
+(defun agent-repl--webview-precreate-pass ()
+  "Make every owed workspace's slot and page now, or park for focus.
+The body of `agent-repl-webview-precreate-all'.  A workspace whose mount
+signals is warned about and the pass goes on: one workspace's failure must
+not cost the rest their pages."
+  (let ((owed (agent-repl--webview-precreate-missing)))
+    (cond
+     ((null owed) 0)
+     ((and (null (agent-repl-webhost-xwidget))
+           (agent-repl--webview-precreate-hold-p))
+      (agent-repl--webview-precreate-park)
+      0)
+     (t
+      (setq agent-repl--webview-precreate-parked nil)
+      (let ((made 0))
+        (dolist (ws owed)
+          (condition-case err
+              (progn
+                (agent-repl--frontend-precreate-webview ws)
+                (setq made (1+ made))
+                (agent-repl--info agent-repl--webview-precreate-central
+                                  "elisp.webview-recovery.precreate-created ws=%s reason=%s"
+                                  ws (agent-repl--webview-precreate-allow-reason))
+                ;; The workspace the user stands on may have declined its
+                ;; panel restore for want of exactly this view.
+                (agent-repl--panels-on-view-created ws))
+            (error (agent-repl--warn ws "webview-precreate: ws=%s outcome=failed err=%S"
+                                     ws err))))
+        made)))))
+
 (defun agent-repl-webview-precreate-all ()
-  "Queue every live workspace owed a webview, returning how many were queued.
-The whole of what a link-up needs: a workspace whose page is already
-mounted is not queued again, and one that becomes ineligible while the
-queue drains is skipped at its tick."
-  (let ((queued (agent-repl--webview-precreate-schedule
-                 (agent-repl--webview-precreate-missing))))
-    (agent-repl--info '(:agent-repl-central "webview recovery spans workspaces") "elisp.webview-recovery.precreate-all: queued=%d" queued)
-    queued))
+  "Make every live workspace's owed slot and page, returning how many were made.
+
+A PASS IS A CRITICAL SECTION FOR QUITS.  A pass runs on the desktop FOCUS
+EDGE, which is the same instant a keypress arrives; a `C-g' landing here
+found Emacs BUSY rather than waiting in `read_char', so it could only arm
+`quit-flag', which a checkpoint inside the pass then took inside a standing
+minibuffer's own recursive edit.  So the pass runs under
+`agent-repl--with-deferred-quit', which holds the quit off and LEAVES IT
+ARMED for Emacs's own input wait to turn into the `C-g' the read aborts on."
+  (let ((made (agent-repl--with-deferred-quit "webview-precreate-pass"
+                (agent-repl--webview-precreate-pass))))
+    (when (> made 0)
+      (agent-repl--info agent-repl--webview-precreate-central
+                        "elisp.webview-recovery.precreate-all: made=%d" made))
+    made))
+
+(defun agent-repl--webview-precreate-on-focus-change ()
+  "Run a parked pass once Emacs actually holds desktop focus.
+Registered on `after-focus-change-function'.  A no-op when nothing is parked."
+  (when (and agent-repl--webview-precreate-parked
+             (not (agent-repl--webview-precreate-hold-p)))
+    (agent-repl--info agent-repl--webview-precreate-central
+                      "elisp.webview-recovery.precreate-resumed-on-focus")
+    (agent-repl-webview-precreate-all)))
 
 (defun agent-repl--webview-precreate-on-link-up (&optional _conn)
-  "Pre-create the pages the link-up made buildable.
-Registered on `agent-repl-link-up-functions': before the link is up
-there is no daemon address to build a URL from, so a workspace's page
-cannot be mounted, and this edge is the first moment every open
-workspace is buildable."
-  (agent-repl--log '(:agent-repl-central "webview recovery spans workspaces") "elisp.webview-recovery.link-up: pre-creating")
+  "Make the pages the link-up made buildable.
+Registered on `agent-repl-link-up-functions': before the link is up there
+is no daemon address to build a URL from, and this edge is the first
+moment every open workspace is buildable."
   (agent-repl-webview-precreate-all))
 
 (add-hook 'agent-repl-link-up-functions #'agent-repl--webview-precreate-on-link-up)
 
 (defun agent-repl--webview-precreate-on-roster-update (&optional _roster)
-  "Pre-create the pages a roster push made buildable.
-Registered on `agent-repl-roster-update-functions', which runs after
-every accepted push.  A COLD start has no workspaces registered at
-link-up -- their `WorkspaceRef's arrive seconds later on the first
-WatchWorkspaceRoster push, and until then every workspace refuses
-pre-creation with `:no-ref', so the link-up edge queues nothing.  This
-edge is the moment those refs exist, so it is the first moment a cold
-workspace is buildable.  It shares `agent-repl-webview-precreate-all'
-with the link-up edge, whose eligibility test skips a mounted page and
-whose queue skips a duplicate, so running on both hooks never double
-queues.  The roster argument is unused: the buildable set is read from
-live state, not from the push."
-  (agent-repl--log '(:agent-repl-central "webview recovery spans workspaces") "elisp.webview-recovery.roster-update: pre-creating")
+  "Make the pages a roster push made buildable.
+Registered on `agent-repl-roster-update-functions'.  A COLD start has no
+workspaces registered at link-up -- their `WorkspaceRef's arrive on the
+first roster push, and until then every workspace refuses with `:no-ref'
+-- so this edge is the first moment a cold workspace is buildable.  A
+workspace that already has its page is not owed one, so running on both
+hooks makes nothing twice."
   (agent-repl-webview-precreate-all))
 
 (add-hook 'agent-repl-roster-update-functions #'agent-repl--webview-precreate-on-roster-update)
