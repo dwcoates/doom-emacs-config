@@ -14,6 +14,7 @@ import {
   TOOL_CLOCK_CLASS,
   TOOL_HEAD_CLASS,
   TOOL_NAME_CLASS,
+  drawToolCardBadge,
   drawToolCardClock,
   drawToolCardHead,
   drawToolHead,
@@ -141,6 +142,21 @@ describe("drawToolCardClock", () => {
   });
 });
 
+describe("drawToolCardBadge", () => {
+  it("draws the word in a span wearing the shared badge class and its tones", () => {
+    const badge = drawToolCardBadge("done", ["ok"]);
+    expect([badge.localName, badge.className, badge.textContent]).toEqual(["span", "badge ok", "done"]);
+  });
+
+  it("names the card's arm when given", () => {
+    expect(drawToolCardBadge("blocked", ["err"], "blocked").getAttribute("data-arm")).toBe("blocked");
+  });
+
+  it("names no arm when none is given", () => {
+    expect(drawToolCardBadge("waiting").hasAttribute("data-arm")).toBe(false);
+  });
+});
+
 describe("drawToolHead", () => {
   it("draws a bare head row wearing the shared class first", () => {
     const head = drawToolHead("bubble-head");
@@ -180,5 +196,16 @@ describe("every tool card heads through the one builder", () => {
       .filter((file) => file !== own)
       .filter((file) => /className\s*=\s*["'`]tool-(head|name|clock)\b/.test(readFileSync(file, "utf8")));
     expect(offenders.map((file) => path.relative(SRC, file))).toEqual([]);
+  });
+});
+
+describe("every tool card badges through the one builder", () => {
+  it.each(TOOL_CARDS)("builds no badge by hand in %s", (file) => {
+    // An exit code is content, not the head's badge, and keeps its own chip.
+    const source = readFileSync(path.join(SRC, file), "utf8");
+    const handRolled = [...source.matchAll(/className\s*=\s*[^;]*["'`]badge\b[^;]*;/g)]
+      .map((m) => m[0])
+      .filter((assignment) => !/exit|q-chip/.test(assignment));
+    expect(handRolled).toEqual([]);
   });
 });

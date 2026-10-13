@@ -36,7 +36,8 @@
  * can no longer match. Markdown is presentation only: what a click echoes is
  * the served string, never the drawn one.
  */
-import { drawToolCardHead } from "../cards/tool-head.js";
+import { drawToolCardBadge, drawToolCardHead } from "../cards/tool-head.js";
+import { ASK_WAITING_WORD } from "./ask-words.js";
 import { createControl, type Control } from "../../control.js";
 import { log } from "../../log.js";
 import { setInlineMarkdown } from "../../markdown.js";
@@ -83,9 +84,6 @@ export const TYPED_LABEL = "typed:";
 
 /** What an expired card's badge says. */
 export const EXPIRED_TEXT = "expired unanswered";
-
-/** What the badge of a card still waiting on the user says. */
-export const WAITING_TEXT = "waiting";
 
 /** What an answered card's badge says. */
 export const ANSWERED_TEXT = "answered";
@@ -381,21 +379,13 @@ export function optionNumeral(number: number): string {
 
 /** The head's badge: the ask's state, in the question card's own words. */
 export function drawFeedQuestionBadge(state: string): HTMLElement {
-  const word = document.createElement("span");
-  word.setAttribute("data-arm", state);
   switch (state) {
     case "open":
-      word.className = "badge";
-      word.textContent = WAITING_TEXT;
-      return word;
+      return drawToolCardBadge(ASK_WAITING_WORD, [], state);
     case "answered":
-      word.className = "badge ok";
-      word.textContent = ANSWERED_TEXT;
-      return word;
+      return drawToolCardBadge(ANSWERED_TEXT, ["ok"], state);
     case "expired":
-      word.className = "badge muted";
-      word.textContent = EXPIRED_TEXT;
-      return word;
+      return drawToolCardBadge(EXPIRED_TEXT, ["muted"], state);
     default:
       return unreachableArm(`${PATH}.state`, state);
   }
