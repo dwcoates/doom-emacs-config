@@ -28,7 +28,6 @@ import {
   QUESTION_STATE_ARMS,
   ANSWERED_TEXT,
   QUESTION_TITLE,
-  WAITING_TEXT,
   TAB_GLYPHS,
   optionNumeral,
   TYPED_LABEL,
@@ -36,6 +35,7 @@ import {
 import { drawFeedTab, FEED_TAB_CLASS, FEED_TAB_STRIP_CLASS } from "../../../src/feed/tabs.js";
 import { armsOf } from "../arms.js";
 import { askHarness, ROW_ID, settle as drain, WORKSPACE } from "./harness.js";
+import { ASK_WAITING_WORD } from "../../../src/feed/asks/ask-words.js";
 import { runningClock, stoppedClock, toolCardHeadParts } from "../cards/tool-card-head-shape.js";
 import { orderFor } from "../../feed-order.js";
 
@@ -126,7 +126,7 @@ describe("the card's chrome", () => {
     const el = drawFeedQuestion(u, askHarness().rc);
 
     // Assert
-    expect(toolCardHeadParts(el)).toEqual([`title:${QUESTION_TITLE}`, `badge:${WAITING_TEXT}`, "clock:30s"]);
+    expect(toolCardHeadParts(el)).toEqual([`title:${QUESTION_TITLE}`, `badge:${ASK_WAITING_WORD}`, "clock:30s"]);
   });
 
   it("heads with the answered badge and the stopped clock once answered", () => {

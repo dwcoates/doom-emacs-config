@@ -37,7 +37,8 @@
  * text as the reason relayed to the agent (agentrepl.v1.
  * SubmitPromptAskAnswered), and the card says so. It has no text field.
  */
-import { drawToolCardHead } from "../cards/tool-head.js";
+import { drawToolCardBadge, drawToolCardHead } from "../cards/tool-head.js";
+import { ASK_WAITING_WORD } from "./ask-words.js";
 import { drawAskHint } from "./hint.js";
 import { createControl, type Control } from "../../control.js";
 import { log } from "../../log.js";
@@ -95,9 +96,6 @@ export const PERMISSION_ANSWERED_ARMS: readonly string[] = [
   "deniedByPolicy",
   "deniedUndecidable",
 ];
-
-/** What the badge of a card still waiting on the user says. */
-export const WAITING_WORD = "waiting";
 
 /** What the badge of a card nobody answered says. */
 export const ABANDONED_WORD = "went away unanswered";
@@ -237,12 +235,8 @@ export function drawFeedPermissionArguments(
 export function drawFeedPermissionBadge(u: FeedPermission): HTMLElement {
   const state = requireCase(u.state, `${PATH}.state`);
   switch (state.case) {
-    case "open": {
-      const word = document.createElement("span");
-      word.className = "badge";
-      word.textContent = WAITING_WORD;
-      return word;
-    }
+    case "open":
+      return drawToolCardBadge(ASK_WAITING_WORD);
     case "answered":
       return drawFeedPermissionAnswered(state.value, `${PATH}.answered`);
     case "abandoned":
@@ -259,39 +253,36 @@ export function drawFeedPermissionAnswered(u: FeedPermissionAnswered, path: stri
     operation: "feed.asks.permission.answered",
     context: { path, answer: answer.case },
   });
-  const word = document.createElement("span");
-  word.setAttribute("data-arm", answer.case);
-  word.setAttribute(VERDICT_ATTRIBUTE, answer.case);
+  const verdict = (word: string, tones: readonly string[]): HTMLElement => {
+    const badge = drawToolCardBadge(word, tones, answer.case);
+    badge.setAttribute(VERDICT_ATTRIBUTE, answer.case);
+    return badge;
+  };
   switch (answer.case) {
     case "allowedOnce":
     case "allowedStanding":
-      word.className = "badge ok";
-      word.textContent = VERDICT_WORDS[answer.case];
-      return word;
+      return verdict(VERDICT_WORDS[answer.case], ["ok"]);
     case "deniedByUser":
       // A DENIAL BY THE USER IS AN ANSWER, NOT AN ERROR (owner ruling,
       // 2026-10-06): its badge is neutral, never red, and says it in the
       // daemon's own words.
-      word.className = "badge muted";
-      word.textContent = requireMessage(
-        requireMessage(answer.value.marker, `${path}.denied_by_user.marker`).label,
-        `${path}.denied_by_user.marker.label`,
-      ).text;
-      return word;
+      return verdict(
+        requireMessage(
+          requireMessage(answer.value.marker, `${path}.denied_by_user.marker`).label,
+          `${path}.denied_by_user.marker.label`,
+        ).text,
+        ["muted"],
+      );
     case "deniedByPolicy":
       // The daemon's own wording, so a policy refusal never reads as the user's
       // act — which is the whole reason this arm carries text at all.
-      word.className = "badge err";
-      word.textContent = answer.value.text;
-      return word;
+      return verdict(answer.value.text, ["err"]);
     case "deniedUndecidable":
       // ITS OWN ARM, NOT A POLICY DENIAL. Nobody decided — no rule refused and
       // no user refused — so it carries its own verdict value and its own
       // class, and like the policy arm its wording is the daemon's, verbatim,
       // so it can never read as the user's act.
-      word.className = "badge err arm-deniedUndecidable";
-      word.textContent = answer.value.text;
-      return word;
+      return verdict(answer.value.text, ["err", "arm-deniedUndecidable"]);
     default:
       return unreachableArm(`${path}.answer`, armName(answer));
   }
@@ -303,11 +294,7 @@ export function drawFeedPermissionAbandoned(_u: FeedPermissionAbandoned, path: s
     operation: "feed.asks.permission.abandoned",
     context: { path },
   });
-  const word = document.createElement("span");
-  word.className = "badge muted";
-  word.setAttribute("data-arm", "abandoned");
-  word.textContent = ABANDONED_WORD;
-  return word;
+  return drawToolCardBadge(ABANDONED_WORD, ["muted"], "abandoned");
 }
 
 /** The open state's buttons. */

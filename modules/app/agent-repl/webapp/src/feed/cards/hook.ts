@@ -17,7 +17,7 @@
  * real card with its output.
  */
 import { drawToolExitLine } from "./exit-line.js";
-import { drawToolCardHead } from "./tool-head.js";
+import { drawToolCardBadge, drawToolCardHead } from "./tool-head.js";
 import { armButtonRole } from "../../control.js";
 import type {
   FeedHook,
@@ -115,11 +115,7 @@ export const HOOK_BADGE_WORDS = { blocked: "blocked", failed: "failed" } as cons
 /** The head's badge: how the hook failed. */
 export function drawFeedHookBadge(outcome: string): HTMLElement {
   if (outcome !== "blocked" && outcome !== "failed") return unreachableArm("FeedHook.outcome", outcome);
-  const word = document.createElement("span");
-  word.className = "badge err";
-  word.setAttribute("data-arm", outcome);
-  word.textContent = HOOK_BADGE_WORDS[outcome];
-  return word;
+  return drawToolCardBadge(HOOK_BADGE_WORDS[outcome], ["err"], outcome);
 }
 
 /**

@@ -28,7 +28,7 @@
  * row's `data-unit="skill"` so a skill's nested work keeps the teal card's
  * always-open, shared-cap, scrolled-not-clipped guarantees.
  */
-import { drawToolCardHead } from "./tool-head.js";
+import { drawToolCardBadge, drawToolCardHead } from "./tool-head.js";
 import type {
   FeedSkill,
   FeedSkillAllowances,
@@ -50,11 +50,11 @@ export const SKILL_TITLE = "Skill";
 
 /** The badge each outcome wears, and the word it says. */
 const OUTCOME_BADGES = {
-  running: { className: "badge run", text: "loading" },
-  loaded: { className: "badge ok", text: "loaded" },
-  failed: { className: "badge err", text: "failed" },
-  denied: { className: "badge err", text: "denied" },
-} as const satisfies Record<string, { className: string; text: string }>;
+  running: { tone: "run", text: "loading" },
+  loaded: { tone: "ok", text: "loaded" },
+  failed: { tone: "err", text: "failed" },
+  denied: { tone: "err", text: "denied" },
+} as const satisfies Record<string, { tone: string; text: string }>;
 
 /** Every outcome this build draws, for the suite to hold to the schema. */
 export const SKILL_OUTCOME_ARMS: readonly string[] = Object.keys(OUTCOME_BADGES);
@@ -205,8 +205,5 @@ export function drawFeedSkillFailed(u: FeedSkillFailed, path: string): HTMLEleme
 export function drawFeedSkillBadge(arm: string): HTMLElement {
   if (!Object.hasOwn(OUTCOME_BADGES, arm)) return unreachableArm(`${PATH}.outcome`, arm);
   const spec = OUTCOME_BADGES[arm as keyof typeof OUTCOME_BADGES];
-  const el = document.createElement("span");
-  el.className = spec.className;
-  el.textContent = spec.text;
-  return el;
+  return drawToolCardBadge(spec.text, [spec.tone]);
 }

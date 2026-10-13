@@ -94,6 +94,20 @@ export function drawToolCardClock(clock: FeedToolCardClock, path: string, ticker
 }
 
 /**
+ * A tool card's status badge: WORD, in the card's own vocabulary, wearing the
+ * shared badge class and TONES (`ok`, `err`, `muted`, `run`, …), and naming
+ * the card's ARM when given. The one way any tool card's badge is built, so
+ * every card's badge is the same pill.
+ */
+export function drawToolCardBadge(word: string, tones: readonly string[] = [], arm?: string): HTMLElement {
+  const badge = document.createElement("span");
+  badge.classList.add("badge", ...tones);
+  if (arm !== undefined) badge.setAttribute("data-arm", arm);
+  badge.textContent = word;
+  return badge;
+}
+
+/**
  * A bare head row, wearing EXTRA classes beside the shared one. Exported for
  * the bubbles' head row, which lays out its own head inside it; a tool card
  * heads through `drawToolCardHead`.
