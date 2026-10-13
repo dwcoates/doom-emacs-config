@@ -298,13 +298,12 @@ func readsResult(arm string) bool {
 }
 
 // viewReadsResult reports whether a viewed report on arm READS the last
-// turn's result: every arm readsResult names, and `idle_async` or
-// `async_merging` while the result is unread, because live detached work or
-// an async merge of the workspace's branch draws that arm in place of the
-// unread turn end (idleArm, asyncMergeArm). The user viewing that row is viewing the
+// turn's result: every arm readsResult names, and `idle_async` while the
+// result is unread, because live detached work draws that arm in place of the
+// unread turn end (idleArm). The user viewing that row is viewing the
 // finished turn, so the row comes back PARTIAL when the work ends.
 func (s *wsState) viewReadsResult(arm string) bool {
-	return readsResult(arm) || ((arm == "idle_async" || arm == armAsyncMerging) && s.resultUnreadNow())
+	return readsResult(arm) || (arm == "idle_async" && s.resultUnreadNow())
 }
 
 // turnEndArm names the turn-end arm the last close resolves to, through

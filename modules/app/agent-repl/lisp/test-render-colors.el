@@ -230,6 +230,18 @@ A new glyph section checked by a hand-rolled loop instead of
                  (sort (copy-sequence (agent-repl-test--fixture "one_shot_glyph_arms"))
                        #'string<))))
 
+(ert-deftest agent-repl-test-colors-async-merge-tab-bracket-matches-the-fixture ()
+  "The tab bar\='s async-merge bracket is the fixture\='s `async_merge_mark.tab_bracket\='."
+  ;; Act / Assert
+  (should (equal agent-repl-status-async-merge-tab-bracket
+                 (cdr (assoc "tab_bracket" (agent-repl-test--fixture "async_merge_mark"))))))
+
+(ert-deftest agent-repl-test-colors-async-merge-tab-bracket-has-a-color ()
+  "The async-merge bracket names a color this renderer can draw."
+  ;; Act / Assert
+  (should (stringp (cdr (assoc agent-repl-status-async-merge-tab-bracket
+                               agent-repl--color-by-name)))))
+
 ;;;; ---- The five colors -------------------------------------------------
 
 (ert-deftest agent-repl-test-colors-the-palette-is-the-fixtures-five ()

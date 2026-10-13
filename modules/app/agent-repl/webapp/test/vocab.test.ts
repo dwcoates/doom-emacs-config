@@ -31,6 +31,7 @@ import {
   mergeGlyph,
   glyphInk,
   oneShotGlyphArm,
+  asyncMergeMark,
   gateGlyph,
   paintClass,
   protoArmName,
@@ -248,6 +249,19 @@ describe("oneShotGlyphArm", () => {
       expect(oneShotGlyphArm(arm)).toBe(false);
     },
   );
+});
+
+describe("asyncMergeMark", () => {
+  it("is the file's breathing purple", () => {
+    expect(asyncMergeMark()).toEqual({ ink: "purple", motion: "breathes" });
+  });
+
+  it("reads the file's section rather than a local copy", () => {
+    expect(asyncMergeMark()).toEqual({
+      ink: renderColors.async_merge_mark.ink,
+      motion: renderColors.async_merge_mark.motion,
+    });
+  });
 });
 
 describe("mergeGlyph", () => {
