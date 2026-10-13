@@ -1063,9 +1063,10 @@ html.webhost-sidebar #ws-sidebar[hidden] {
    same message. `viewed.ts` decides which rows
    carry the class. */
 #ws-sidebar .row .name.viewed { color: var(--muted); }
-/* A Recently Merged row's NAME is drawn in the repository section headers'
-   colour (owner request, 2026-10-03); the row's timestamp keeps its grey. */
-#ws-sidebar .row .name.merged-name { color: var(--repo-head-expanded); }
+/* A BAND ROW'S NAME -- Recently Merged and Hidden alike -- is drawn in the
+   repository section headers' colour (owner requests, 2026-10-03 and
+   2026-10-13); a merged row's timestamp keeps its grey. */
+#ws-sidebar .row .name.band-name { color: var(--repo-head-expanded); }
 /* A merge that landed TODAY (local date) keeps the name's grey and marks the
    ROW with an off-white gutter bar shaped like the selection's (owner request,
    2026-10-11). `merged-today` is toggled on the row by the shared ticker in
