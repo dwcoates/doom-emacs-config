@@ -453,7 +453,7 @@ func TestOnlyAnAgentsInPlaceRequestFlushesTheHeldPrompts(t *testing.T) {
 	}{
 		{name: "an agent's in-place request", req: Request{Workspace: theWorkspace, Source: ownBranch, By: RequestedByAgent}, want: []ids.WorkspaceID{theWorkspace}},
 		{name: "an agent's one-shot", req: Request{Workspace: theWorkspace, Source: ownBranch, By: RequestedByAgent, OneShot: true}, want: []ids.WorkspaceID{theWorkspace}},
-		{name: "an agent's detached request", req: Request{Workspace: theWorkspace, Source: ownBranch, By: RequestedByAgent, Detached: true}, want: nil},
+		{name: "an agent's async request", req: Request{Workspace: theWorkspace, Source: ownBranch, By: RequestedByAgent, Detached: &DetachedRun{Name: "flush-async"}}, want: nil},
 		{name: "the user's request", req: Request{Workspace: theWorkspace, Source: ownBranch, By: RequestedByUser}, want: nil},
 	}
 	for _, tt := range tests {
