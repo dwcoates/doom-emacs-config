@@ -110,6 +110,14 @@ func (c *client) ContinueRebase(ctx context.Context, dir string) (RebaseStep, er
 	return c.rebaseCommand(ctx, "daemon.gitclient.continue_rebase", dir, rebaseEnv, "rebase", "--continue")
 }
 
+// AbortRebase ends the rebase standing in dir: git puts the branch and the
+// worktree back where they stood before the rebase began. Only a caller that
+// owns the rebase asks for it; a conflict is never aborted on its own.
+func (c *client) AbortRebase(ctx context.Context, dir string) error {
+	_, err := c.runWithEnv(ctx, "daemon.gitclient.abort_rebase", dir, rebaseEnv, "rebase", "--abort")
+	return err
+}
+
 // rebaseCommand runs one rebase command and reads where the rebase stands.
 // Exit 0 is a replayed commit: the rebase is Done when no rebase is in
 // progress any more, and stopped at a break otherwise. A nonzero exit is a
