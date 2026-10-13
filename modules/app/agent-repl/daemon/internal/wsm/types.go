@@ -127,6 +127,9 @@ type Workspace struct {
 	// sidebar section. Once set it stays set. Always false for every other
 	// workspace.
 	MergeRevealed bool
+	// Landed is set on a REQUESTER whose detached merge landed: the commit of
+	// its own branch that landed, and when (see landed.go). Nil when none has.
+	Landed *Landing
 	// OneShot reports that the workspace was CREATED as a one-shot. It is
 	// READ-ONLY here: the fact is the creation job's (CreationJob.OneShot),
 	// read through the shared select list, so the record and the job can never
@@ -969,6 +972,11 @@ type MergeOrigin struct {
 	Requester WorkspaceID
 	// Request is the detached request the merge workspace was forked for.
 	Request DetachedMergeID
+	// ForkHead is the commit the merge workspace was cut at: the requester's
+	// branch tip when the merge was handed off, which is exactly what the
+	// merge lands. Empty only on a merge workspace forked before layout 41
+	// recorded it.
+	ForkHead string
 }
 
 // MergeQueueEntry is one workspace's place in its repository's merge queue. The

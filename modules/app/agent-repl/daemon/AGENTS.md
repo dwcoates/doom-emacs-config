@@ -2660,6 +2660,55 @@ children are NOT niced: the daemon has no idiom for lowering a child's
 priority (`bin/background.sh` is the test suites'), and git inherits the
 daemon's own.
 
+## A detached merge's requester is retired a day after its merge lands (`internal/mergeworkspace`)
+
+An in-place own merge closes its requester and removes its worktree the moment
+it lands. A DETACHED merge lands from its merge workspace instead, so the
+requester stays open with its worktree, and nothing closes it. The merge
+workspace sweep retires it once it has been idle a day (owner request,
+2026-10-12).
+
+**What landed.** A merge workspace is CUT AT ITS FORK HEAD:
+`workspace.CreateMergeWorkspace` resolves the requester's branch once, and
+`Create` materializes the worktree at that commit, recorded on the row as
+`wsm.MergeOrigin.ForkHead` (`workspaces.merge_fork_head`, layout 41). The
+creation job's base stays the branch, which the handback names. When the merge
+lands, `mergeworkspace.Service.HandBack` stamps the requester with that commit
+and the instant (`wsm.Landing`, `workspaces.landed_head`/`landed_at`, through
+`SetLanded`; INFO `daemon.mergeworkspace` "stamped the requester ..."). A
+merge workspace forked before layout 41 has no fork head, and its requester is
+never stamped (INFO). A failed stamp is ERROR and the handback still goes.
+
+**When.** The hourly `merge_workspace_sweep` asks `Workspaces.RetireLanded` for
+every requester with a landing, no `merged_at`, no merge-queue row, and no
+activity for `mergeworkspace.LandedIdleLimit` (`24h`): its `created_at`,
+`last_activity_at`, `last_selected_at` and its landing. The asks run under the
+landed-worktree reaper's own kernel lock (`worktreeLockPath`, the reaper's
+`worktree-reap.lock`), so the reaper never judges a tree a retirement is
+removing; while the reaper holds it nothing is retired (INFO) and the next
+sweep tries again. `Sweep` answers a `SweepReport` of removals and retirements.
+
+**What is kept** (`workspace.RetireLanded`, each answered as its reason,
+DEBUG `daemon.workspace.retire_landed`): no landing or already merged
+(`not_landed`), an open workspace cut from it by parent or by branch
+(`parent_of_open_workspace`), a turn, live work, a held prompt or a queued
+merge (`not_quiet`, the close verb's own judgement), a missing directory
+(`directory_missing`), a HEAD that is no longer the landed commit
+(`moved_on`, which CLEARS the landing at INFO, since what the branch holds now
+never landed), and modified or untracked content (`dirty`).
+
+**Retirement**, in order: the session is killed (`kill`, as the kill verb
+does, which also closes the row), the worktree is removed through
+`gitclient.RemoveCleanWorktree` (no `--force`: a tree dirtied after it was
+judged is refused by git and kept), and the row is stamped `merged_at` at the
+LANDING's instant, which files it under Recently Merged by when its merge
+landed. The branch is kept, as an in-place merge keeps it. INFO
+`daemon.workspace.retire_landed` names the requester, its head and landing;
+every failed read or write is ERROR there and leaves the requester as it was
+(a removal git refused leaves it closed with its tree; a stamp that failed
+after the removal leaves it closed and unmerged, so an open restores the tree
+from its branch).
+
 ## The news digest (`internal/newsdigest`)
 
 A daily digest of Claude news (new features, and above all announced changes
