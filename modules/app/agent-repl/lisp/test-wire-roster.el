@@ -67,6 +67,7 @@ status arm and whatever else the case is about."
                    :detached-live nil
                    :one-shot nil
                    :opening nil
+                   :async-merging nil
                    :last-selected nil
                    :availability (:arm :available :value nil)
                    :name (:text "fix-flaky")
@@ -92,6 +93,25 @@ status arm and whatever else the case is about."
                   (agent-repl-test-wire-roster--row
                    "\"ready\":{}" "\"oneShot\":{\"failed\":{}}"))
                  '("RosterRowOneShot" failed "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-roster-row-decodes-the-async-merging-marker ()
+  "A row carrying `asyncMerging\=' decodes it as PRESENT, beside its status arm."
+  ;; Act
+  (let ((row (agent-repl-test-wire-roster--decode
+              #'agent-repl-wire-decode-roster-row
+              (agent-repl-test-wire-roster--row "\"thinking\":{}" "\"asyncMerging\":{}"))))
+    ;; Assert
+    (should (eq (plist-get row :async-merging) t))
+    (should (equal (plist-get row :status) '(:arm :thinking :value nil)))))
+
+(ert-deftest agent-repl-test-wire-roster-row-async-merging-marker-carries-no-payload ()
+  "`RosterRowAsyncMerging\=' is EMPTY: a field inside it is an unknown field."
+  ;; Act / Assert
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-row
+                  (agent-repl-test-wire-roster--row
+                   "\"ready\":{}" "\"asyncMerging\":{\"repo\":{}}"))
+                 '("RosterRowAsyncMerging" repo "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-roster-row-decodes-the-opening-marker ()
   "A row carrying `opening' decodes it as PRESENT, beside its status arm."
@@ -207,9 +227,9 @@ arriving as an unknown field on some later push."
                        #'string<)))
     (should (equal spelled declared))))
 
-(ert-deftest agent-repl-test-wire-roster-row-status-count-is-thirty-two ()
-  "The status vocabulary is the 32 arms the contract declares."
-  (should (equal (length agent-repl-wire-roster-row-status-keywords) 32)))
+(ert-deftest agent-repl-test-wire-roster-row-status-count-is-thirty-one ()
+  "The status vocabulary is the 31 arms the contract declares."
+  (should (equal (length agent-repl-wire-roster-row-status-keywords) 31)))
 
 (ert-deftest agent-repl-test-wire-roster-decodes-the-cold-gate-arm ()
   "A session parked on its cold gate decodes to its empty arm."
@@ -241,11 +261,11 @@ arriving as an unknown field on some later push."
   (should (assq 'turnDied agent-repl-wire-roster-row-status-arms))
   (should (memq :turn-died agent-repl-wire-roster-row-status-keywords)))
 
-(ert-deftest agent-repl-test-wire-roster-decodes-the-async-merging-arm ()
-  "The async-merging arm decodes to its keyword (owner request, 2026-10-13)."
+(ert-deftest agent-repl-test-wire-roster-async-merging-is-no-status-arm ()
+  "An async merge is a row marker, never a status arm (owner request, 2026-10-13)."
   ;; Act / Assert
-  (should (assq 'asyncMerging agent-repl-wire-roster-row-status-arms))
-  (should (memq :async-merging agent-repl-wire-roster-row-status-keywords)))
+  (should-not (assq 'asyncMerging agent-repl-wire-roster-row-status-arms))
+  (should-not (memq :async-merging agent-repl-wire-roster-row-status-keywords)))
 
 (ert-deftest agent-repl-test-wire-roster-row-unset-status-is-a-breach ()
   "A row with no lifecycle is a contract breach, not a default dot."
