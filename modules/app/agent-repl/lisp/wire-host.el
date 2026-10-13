@@ -42,6 +42,7 @@
 (declare-function agent-repl-wire--encode-empty "wire-common")
 (declare-function agent-repl-wire--encode-oneof "wire-common")
 (declare-function agent-repl-wire--encode-repeated "wire-common")
+(declare-function agent-repl-wire-decode-roster-row "wire-roster" (value))
 (declare-function agent-repl-wire--encode-string "wire-common")
 (declare-function agent-repl-wire--encoded "wire-common")
 (declare-function agent-repl-wire--fail "wire-common")
@@ -1695,6 +1696,10 @@ An empty list is refused here: the daemon would refuse it as malformed."
  agent-repl-wire-decode-open-tabs-step-page-connected "OpenTabsStepPageConnected")
 (agent-repl-wire--define-empty-decoder
  agent-repl-wire-decode-open-tabs-step-page-drawn "OpenTabsStepPageDrawn")
+(agent-repl-wire--define-empty-decoder
+ agent-repl-wire-decode-open-tabs-step-conversation-read "OpenTabsStepConversationRead")
+(agent-repl-wire--define-empty-decoder
+ agent-repl-wire-decode-open-tabs-step-resuming-cut-turn "OpenTabsStepResumingCutTurn")
 
 (defconst agent-repl-wire-open-tabs-step-arms
   '((startingSession :starting-session agent-repl-wire-decode-open-tabs-step-starting-session)
@@ -1707,7 +1712,9 @@ An empty list is refused here: the daemon would refuse it as malformed."
     (offline :offline agent-repl-wire-decode-open-tabs-step-offline)
     (served :served agent-repl-wire-decode-open-tabs-step-served)
     (pageConnected :page-connected agent-repl-wire-decode-open-tabs-step-page-connected)
-    (pageDrawn :page-drawn agent-repl-wire-decode-open-tabs-step-page-drawn))
+    (pageDrawn :page-drawn agent-repl-wire-decode-open-tabs-step-page-drawn)
+    (conversationRead :conversation-read agent-repl-wire-decode-open-tabs-step-conversation-read)
+    (resumingCutTurn :resuming-cut-turn agent-repl-wire-decode-open-tabs-step-resuming-cut-turn))
   "`OpenTabsStep.step''s arms: (WIRE-KEY ARM-KEYWORD DECODER).")
 
 (defun agent-repl-wire-decode-open-tabs-step (value)
@@ -1723,16 +1730,28 @@ An empty list is refused here: the daemon would refuse it as malformed."
            :step (agent-repl-wire--decode-oneof
                   "OpenTabsStep" 'step object agent-repl-wire-open-tabs-step-arms)))))
 
-(agent-repl-wire--define-empty-decoder
- agent-repl-wire-decode-open-tabs-opened-ready "OpenTabsOpenedReady")
+(defun agent-repl-wire-decode-open-tabs-opened-ready (value)
+  "Decode VALUE as `OpenTabsOpenedReady', `(:row ROW :roster-revision N)'.
+ROW is the workspace's decoded roster row as of the answer, REQUIRED."
+  (let ((object (agent-repl-wire--object "OpenTabsOpenedReady" value)))
+    (agent-repl-wire--check-keys "OpenTabsOpenedReady" object '(row rosterRevision))
+    (list :row (agent-repl-wire--decode-message "OpenTabsOpenedReady" 'row object
+                                                #'agent-repl-wire-decode-roster-row)
+          :roster-revision (agent-repl-wire--decode-uint64
+                            "OpenTabsOpenedReady" 'rosterRevision object))))
 (agent-repl-wire--define-empty-decoder
  agent-repl-wire-decode-open-tabs-opened-hidden "OpenTabsOpenedHidden")
 
 (defun agent-repl-wire-decode-open-tabs-opened-failed (value)
-  "Decode VALUE as `OpenTabsOpenedFailed', a plist `(:reason S)'."
+  "Decode VALUE as `OpenTabsOpenedFailed'.
+Returns `(:reason S :row ROW :roster-revision N)'."
   (let ((object (agent-repl-wire--object "OpenTabsOpenedFailed" value)))
-    (agent-repl-wire--check-keys "OpenTabsOpenedFailed" object '(reason))
-    (list :reason (agent-repl-wire--decode-string "OpenTabsOpenedFailed" 'reason object))))
+    (agent-repl-wire--check-keys "OpenTabsOpenedFailed" object '(reason row rosterRevision))
+    (list :reason (agent-repl-wire--decode-string "OpenTabsOpenedFailed" 'reason object)
+          :row (agent-repl-wire--decode-message "OpenTabsOpenedFailed" 'row object
+                                                #'agent-repl-wire-decode-roster-row)
+          :roster-revision (agent-repl-wire--decode-uint64
+                            "OpenTabsOpenedFailed" 'rosterRevision object))))
 
 (agent-repl-wire--define-empty-decoder
  agent-repl-wire-decode-open-tabs-refused-unknown-workspace "OpenTabsRefusedUnknownWorkspace")
