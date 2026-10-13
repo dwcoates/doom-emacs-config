@@ -78,6 +78,8 @@ type orchestrator struct {
 	// lockDir is where the per-repo queue locks live. It is under the state
 	// root so a test's state root isolates its locks with everything else.
 	lockDir string
+	// asyncMerges serializes the roster's async sets (publishAsyncMerges).
+	asyncMerges asyncMergesPublisher
 
 	mu sync.Mutex
 	// facts is every workspace's last published merge facts, which is what
@@ -290,6 +292,10 @@ func newOrchestrator(deps Deps) (*orchestrator, error) {
 		repoOf:          map[ids.WorkspaceID]wsm.RepoKey{},
 		pumping:         map[wsm.RepoKey]bool{},
 	}
+	// EVERY WRITE THAT ADDS OR REMOVES A QUEUE ROW REPUBLISHES THE ROSTER'S
+	// ASYNC SET (asyncmerges.go): the orchestrator only ever writes through
+	// the wrapped DB.
+	o.deps.DB = asyncMergesDB{DB: deps.DB, o: o}
 	deps.Asks.bind(o.askChanged)
 	return o, nil
 }
