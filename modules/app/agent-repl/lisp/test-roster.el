@@ -22,6 +22,10 @@
 
 ;;;; ---- Fixture builders ----
 
+(defconst agent-repl-test-roster--dir
+  (file-name-directory (or load-file-name buffer-file-name))
+  "The directory this suite and `roster.el' live in.")
+
 (defun agent-repl-test-roster--row (id name status &rest overrides)
   "Return a decoded `RosterRow' plist for ID, NAME and STATUS.
 OVERRIDES is a plist merged over the defaults: `:closed', `:children',
@@ -2446,6 +2450,50 @@ is the finish edge (owner ruling, 2026-10-06)."
   ;; Act / Assert
   (should-not (memq :async-merging agent-repl-roster-settled-statuses))
   (should-not (memq :async-merging agent-repl-roster-running-statuses)))
+
+(ert-deftest agent-repl-test-roster-for-ws-applies-the-reader-to-the-row ()
+  "`agent-repl-roster--for-ws' answers READER of WS's current row."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (agent-repl-roster-apply
+     (agent-repl-test-roster--roster
+      :sections (list (agent-repl-test-roster--section
+                       "repo" (list (agent-repl-test-roster--row "a" "one" :done))))))
+    ;; Act / Assert
+    (should (equal (agent-repl-roster--for-ws "one" (lambda (row) (plist-get row :name)))
+                   '(:text "one")))))
+
+(ert-deftest agent-repl-test-roster-for-ws-before-any-push-never-calls-the-reader ()
+  "Before any push carried its row, the reader is never called and nil answers."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let ((called nil))
+      ;; Act
+      (should-not (agent-repl-roster--for-ws "one" (lambda (_) (setq called t))))
+      ;; Assert
+      (should-not called))))
+
+(ert-deftest agent-repl-test-roster-for-ws-readers-share-the-one-shape ()
+  "Every `agent-repl-roster-*-for-ws' reader goes through `agent-repl-roster--for-ws'."
+  ;; Arrange
+  (let ((forms nil))
+    (with-temp-buffer
+      (insert-file-contents (expand-file-name "roster.el" agent-repl-test-roster--dir))
+      (condition-case nil
+          (while t (push (read (current-buffer)) forms))
+        (end-of-file nil)))
+    ;; Act
+    (let ((readers (seq-filter (lambda (form)
+                                 (and (eq (car-safe form) 'defun)
+                                      (string-match-p "\\`agent-repl-roster-.*-for-ws\\'"
+                                                      (symbol-name (nth 1 form)))
+                                      (not (memq (nth 1 form) '(agent-repl-roster-row-for-ws
+                                                                agent-repl-roster--for-ws)))))
+                               forms)))
+      ;; Assert
+      (should (>= (length readers) 4))
+      (dolist (form readers)
+        (should (eq (car-safe (car (last form))) 'agent-repl-roster--for-ws))))))
 
 ;;; test-roster.el ends here
 
