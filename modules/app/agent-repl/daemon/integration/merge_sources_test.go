@@ -596,12 +596,9 @@ func TestARelaunchedDaemonReplaysARepairTurnInItsTabAlone(t *testing.T) {
 			}},
 		}),
 	})
-	d2 := harness.StartDaemon(t, harness.Opts{
-		DurableState: true,
-		StateDir:     s.d.StateDir,
-		ProfileDir:   s.d.ProfileDir,
-		ExtraArgs:    []string{"--default-config-dir", s.d.DefaultConfigDir},
-	})
+	successorOpts := s.d.SuccessorOpts()
+	successorOpts.DurableState = true
+	d2 := harness.StartDaemon(t, successorOpts)
 	f2 := &fixture{d: d2, repo: s.repo, ws: s.f.ws, t: t}
 	if again := harness.Register(t, d2, s.f.ws.GetDir()); again.GetId() != s.f.ws.GetId() {
 		t.Fatalf("RegisterWorkspace after the relaunch = %q, want the same workspace %q", again.GetId(), s.f.ws.GetId())
@@ -649,12 +646,9 @@ func TestARelaunchedDaemonDrawsTheLandedMergesBubbleAgain(t *testing.T) {
 		t.Fatalf("UpdateShutdownSchedule{now} = %v, want the immediate shutdown accepted", err)
 	}
 	s.d.AwaitExit()
-	d2 := harness.StartDaemon(t, harness.Opts{
-		DurableState: true,
-		StateDir:     s.d.StateDir,
-		ProfileDir:   s.d.ProfileDir,
-		ExtraArgs:    []string{"--default-config-dir", s.d.DefaultConfigDir},
-	})
+	successorOpts := s.d.SuccessorOpts()
+	successorOpts.DurableState = true
+	d2 := harness.StartDaemon(t, successorOpts)
 	f2 := &fixture{d: d2, repo: s.repo, ws: s.f.ws, t: t}
 	if again := harness.Register(t, d2, s.f.ws.GetDir()); again.GetId() != s.f.ws.GetId() {
 		t.Fatalf("RegisterWorkspace after the relaunch = %q, want the same workspace %q", again.GetId(), s.f.ws.GetId())
