@@ -39,9 +39,9 @@ func awaitFrozen(pid int, bound time.Duration) error {
 	poll := time.NewTicker(freezePoll)
 	defer poll.Stop()
 	for {
-		state, err := readProcessState(pid)
+		state, err := heldState(pid)
 		if err != nil {
-			return fmt.Errorf("read the state of process %d: %w", pid, err)
+			return err
 		}
 		if state.frozen {
 			return nil
@@ -52,6 +52,36 @@ func awaitFrozen(pid int, bound time.Duration) error {
 		case <-poll.C:
 		}
 	}
+}
+
+// heldState reads pid as a wait for a stop to hold reads it: frozen only once
+// the kernel reports it stopped (or exited) AND none of its threads still
+// runs.
+//
+// A STOPPED p_stat IS NOT YET A STOPPED PROCESS. The kernel marks the process
+// stopped as it posts SIGSTOP, before its threads are suspended: a thread
+// already running finishes its slice first. Under a loaded host a daemon read
+// "stopped" went on to read a frame from its shim, log it and close a turn
+// (TestTheTakeoversOrphanRecoveryReconcilesItsOpenTurn). The thread check is
+// made here, in the wait, and not in readProcessState: a thread the kernel
+// wakes in a truly stopped process (a child's exit) reads as running for an
+// instant, which a one-shot read would misreport and a wait polls past.
+func heldState(pid int) (processState, error) {
+	state, err := readProcessState(pid)
+	if err != nil {
+		return processState{}, fmt.Errorf("read the state of process %d: %w", pid, err)
+	}
+	if !state.frozen || state.exited {
+		return state, nil
+	}
+	halted, name, err := threadsHalted(pid)
+	if err != nil {
+		return processState{}, err
+	}
+	if !halted {
+		return processState{name: name}, nil
+	}
+	return state, nil
 }
 
 // stopResendEvery is how often stopFrozen re-sends SIGSTOP to a process that
@@ -80,9 +110,9 @@ func stopFrozen(pid int, bound time.Duration, signal func(int, syscall.Signal) e
 	defer poll.Stop()
 	lastSent := time.Now()
 	for {
-		state, err := readProcessState(pid)
+		state, err := heldState(pid)
 		if err != nil {
-			return fmt.Errorf("read the state of process %d: %w", pid, err)
+			return err
 		}
 		if state.frozen {
 			return nil
