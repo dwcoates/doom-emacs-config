@@ -6682,8 +6682,8 @@ ar-button.outcome-marker-pill {
    Emacs hides the input window while it stands and this webview grows into
    that space, so the banner takes the input's exact slot: #gate-dock, the
    body grid's full-width second row under the rail AND the main column (the
-   rail keeps its height), fit to its content and at most the input window's
-   height. Emacs tells the page that height in pixels (--gate-dock-height, set on the root before the input
+   rail keeps its height), exactly the input window's height. Emacs tells
+   the page that height in pixels (--gate-dock-height, set on the root before the input
    hides; lisp/window.el); 18.4vh, `agent-repl-input-height-fraction`, is the
    fallback only for a page Emacs never told, which gate-dock.ts records. The
    banner's row stays in the feed, hidden, so the feed draws no inline gate
@@ -6691,12 +6691,15 @@ ar-button.outcome-marker-pill {
 #gate-dock {
   grid-column: 1 / -1;
   grid-row: 2;
-  /* THE DOCK FITS ITS CONTENT (owner request, 2026-10-03), capped at the
-     input window's slot: the one-line gate is a little shorter than the
-     input it replaces, and a taller one (the open compact submenu) scrolls
-     inside the slot rather than squeezing the feed further. */
-  max-height: var(--gate-dock-height, 18.4vh);
+  /* THE DOCK IS EXACTLY THE INPUT WINDOW'S HEIGHT (owner request,
+     2026-10-13), so the banner neither grows nor shrinks the feed as it
+     replaces the input; a gate taller than the slot (the open compact
+     submenu) scrolls inside it rather than squeezing the feed further. A
+     column, so the docked card can fill it. */
+  height: var(--gate-dock-height, 18.4vh);
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
   box-sizing: border-box;
   /* THE FRAME'S BOTTOM EDGE STAYS ON SCREEN (owner, 2026-10-06): flush with
      the page's last row, the card's bottom border lost half its width to the
@@ -6717,7 +6720,25 @@ ar-button.outcome-marker-pill {
   box-sizing: border-box;
   border-radius: 0;
   border-width: 1px;
+  /* THE CARD FILLS THE SLOT AND ITS CONTENT SITS CENTERED IN IT (owner
+     request, 2026-10-13): the title, the token and model line and the button
+     row are each centered on the card's middle, and the slot's spare height
+     is split evenly above the title and below the buttons; the gaps between
+     them stay what they always were. The card grows past the slot rather than
+     shrinking its content, so a taller gate's top stays reachable by scroll. */
+  flex: 1 0 auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
 }
+/* The button row centers within the actions too, so opening the wider
+   compact submenu below it does not shift it off the card's middle. */
+#gate-dock > .cold-gate-docked .cold-gate-buttons { margin-inline: auto; }
+/* The submenu's radio lists stay a left-aligned list: centered, the radios
+   would not line up under one another. */
+#gate-dock > .cold-gate-docked .cold-gate-submenu { text-align: start; }
 #feed > .gate-docked-row { display: none; }
 /* ---- tool card input forms (src/feed/cards/tool-call.ts) ---- */
 /* The daemon names the drawn form of the card's one input line and the client
