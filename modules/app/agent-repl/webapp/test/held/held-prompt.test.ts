@@ -986,6 +986,21 @@ describe("the said body", () => {
     );
   });
 
+  it("draws each typed line as its own paragraph, as the feed's prompt does", () => {
+    const { tc } = trayContext();
+    const card = drawHeldPrompt(
+      heldPrompt({
+        said: {
+          content: {
+            blocks: [{ block: { case: "text", value: { text: "one\ntwo" } } }],
+          },
+        },
+      }),
+      tc,
+    );
+    expect(card.querySelectorAll(".queued-text p")).toHaveLength(2);
+  });
+
   it("draws a url image as a picture", () => {
     const { tc } = trayContext();
     const card = drawHeldPrompt(
