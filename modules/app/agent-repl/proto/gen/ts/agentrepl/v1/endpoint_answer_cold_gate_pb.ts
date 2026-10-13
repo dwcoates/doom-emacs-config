@@ -26,7 +26,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_answer_cold_gate.proto.
  */
 export const file_agentrepl_v1_endpoint_answer_cold_gate: GenFile = /*@__PURE__*/
-  fileDesc("CixhZ2VudHJlcGwvdjEvZW5kcG9pbnRfYW5zd2VyX2NvbGRfZ2F0ZS5wcm90bxIMYWdlbnRyZXBsLnYxIo8CChVBbnN3ZXJDb2xkR2F0ZVJlcXVlc3QSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhIhCgRnYXRlGAIgASgLMhMuZnJvbnRlbmQudjEuRmVlZElkEi4KA3BheRgDIAEoCzIfLmFnZW50cmVwbC52MS5BbnN3ZXJDb2xkR2F0ZVBheUgAEjIKBWNsZWFyGAQgASgLMiEuYWdlbnRyZXBsLnYxLkFuc3dlckNvbGRHYXRlQ2xlYXJIABI2Cgdjb21wYWN0GAUgASgLMiMuYWdlbnRyZXBsLnYxLkFuc3dlckNvbGRHYXRlQ29tcGFjdEgAQggKBmNob2ljZSITChFBbnN3ZXJDb2xkR2F0ZVBheSIVChNBbnN3ZXJDb2xkR2F0ZUNsZWFyIngKFUFuc3dlckNvbGRHYXRlQ29tcGFjdBIqCgVtb2RlbBgBIAEoCzIbLmNvbnZlcnNhdGlvbi52MS5BZ2VudE1vZGVsEjMKBXNjb3BlGAIgASgOMiQuY29udmVyc2F0aW9uLnYxLlNlc3Npb25Db21wYWN0U2NvcGUijgEKFkFuc3dlckNvbGRHYXRlUmVzcG9uc2USNgoHc3VjY2VzcxgBIAEoCzIjLmFnZW50cmVwbC52MS5BbnN3ZXJDb2xkR2F0ZVN1Y2Nlc3NIABIyCgVlcnJvchgCIAEoCzIhLmFnZW50cmVwbC52MS5BbnN3ZXJDb2xkR2F0ZUVycm9ySABCCAoGcmVzdWx0IhcKFUFuc3dlckNvbGRHYXRlU3VjY2VzcyLfBAoTQW5zd2VyQ29sZEdhdGVFcnJvchJJChF1bmtub3duX3dvcmtzcGFjZRgBIAEoCzIsLmFnZW50cmVwbC52MS5BbnN3ZXJDb2xkR2F0ZVVua25vd25Xb3Jrc3BhY2VIABJSChZ3b3Jrc3BhY2VfcmVmX21pc21hdGNoGAIgASgLMjAuYWdlbnRyZXBsLnYxLkFuc3dlckNvbGRHYXRlV29ya3NwYWNlUmVmTWlzbWF0Y2hIABJJChF0cmFuc2ZlcnJpbmdfYXdheRgDIAEoCzIsLmFnZW50cmVwbC52MS5BbnN3ZXJDb2xkR2F0ZVRyYW5zZmVycmluZ0F3YXlIABJECg9ub3RfeWV0X2Fkb3B0ZWQYBCABKAsyKS5hZ2VudHJlcGwudjEuQW5zd2VyQ29sZEdhdGVOb3RZZXRBZG9wdGVkSAASPgoMbm9fY29sZF9nYXRlGAUgASgLMiYuYWdlbnRyZXBsLnYxLkFuc3dlckNvbGRHYXRlTm9Db2xkR2F0ZUgAEk8KFHVuc2VydmVkX3JlbWVkaWF0aW9uGAYgASgLMi8uYWdlbnRyZXBsLnYxLkFuc3dlckNvbGRHYXRlVW5zZXJ2ZWRSZW1lZGlhdGlvbkgAEjsKCm5vX3Nlc3Npb24YByABKAsyJS5hZ2VudHJlcGwudjEuQW5zd2VyQ29sZEdhdGVOb1Nlc3Npb25IABJBCg1yZW9wZW5fZmFpbGVkGAggASgLMiguYWdlbnRyZXBsLnYxLkFuc3dlckNvbGRHYXRlUmVvcGVuRmFpbGVkSABCBwoFY2F1c2UiIAoeQW5zd2VyQ29sZEdhdGVVbmtub3duV29ya3NwYWNlIjoKIkFuc3dlckNvbGRHYXRlV29ya3NwYWNlUmVmTWlzbWF0Y2gSFAoMcmVnaXN0cnlfZGlyGAEgASgJIjEKHkFuc3dlckNvbGRHYXRlVHJhbnNmZXJyaW5nQXdheRIPCgdhZGRyZXNzGAEgASgJIh0KG0Fuc3dlckNvbGRHYXRlTm90WWV0QWRvcHRlZCIaChhBbnN3ZXJDb2xkR2F0ZU5vQ29sZEdhdGUiIwohQW5zd2VyQ29sZEdhdGVVbnNlcnZlZFJlbWVkaWF0aW9uIhkKF0Fuc3dlckNvbGRHYXRlTm9TZXNzaW9uIiwKGkFuc3dlckNvbGRHYXRlUmVvcGVuRmFpbGVkEg4KBmRldGFpbBgBIAEoCUIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_workspace_v1_workspace, file_frontend_v1_feed, file_conversation_v1_api, file_conversation_v1_session]);
+  fileDesc("CixhZ2VudHJlcGwvdjEvZW5kcG9pbnRfYW5zd2VyX2NvbGRfZ2F0ZS5wcm90bxIMYWdlbnRyZXBsLnYxItICChVBbnN3ZXJDb2xkR2F0ZVJlcXVlc3QSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhIhCgRnYXRlGAIgASgLMhMuZnJvbnRlbmQudjEuRmVlZElkEi4KA3BheRgDIAEoCzIfLmFnZW50cmVwbC52MS5BbnN3ZXJDb2xkR2F0ZVBheUgAEjIKBWNsZWFyGAQgASgLMiEuYWdlbnRyZXBsLnYxLkFuc3dlckNvbGRHYXRlQ2xlYXJIABI2Cgdjb21wYWN0GAUgASgLMiMuYWdlbnRyZXBsLnYxLkFuc3dlckNvbGRHYXRlQ29tcGFjdEgAEkEKEmNvbXBhY3RfYW5kX3Jlc3VtZRgGIAEoCzIjLmFnZW50cmVwbC52MS5BbnN3ZXJDb2xkR2F0ZUNvbXBhY3RIAEIICgZjaG9pY2UiEwoRQW5zd2VyQ29sZEdhdGVQYXkiFQoTQW5zd2VyQ29sZEdhdGVDbGVhciJ4ChVBbnN3ZXJDb2xkR2F0ZUNvbXBhY3QSKgoFbW9kZWwYASABKAsyGy5jb252ZXJzYXRpb24udjEuQWdlbnRNb2RlbBIzCgVzY29wZRgCIAEoDjIkLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uQ29tcGFjdFNjb3BlIo4BChZBbnN3ZXJDb2xkR2F0ZVJlc3BvbnNlEjYKB3N1Y2Nlc3MYASABKAsyIy5hZ2VudHJlcGwudjEuQW5zd2VyQ29sZEdhdGVTdWNjZXNzSAASMgoFZXJyb3IYAiABKAsyIS5hZ2VudHJlcGwudjEuQW5zd2VyQ29sZEdhdGVFcnJvckgAQggKBnJlc3VsdCIXChVBbnN3ZXJDb2xkR2F0ZVN1Y2Nlc3Mi3wQKE0Fuc3dlckNvbGRHYXRlRXJyb3ISSQoRdW5rbm93bl93b3Jrc3BhY2UYASABKAsyLC5hZ2VudHJlcGwudjEuQW5zd2VyQ29sZEdhdGVVbmtub3duV29ya3NwYWNlSAASUgoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzIwLmFnZW50cmVwbC52MS5BbnN3ZXJDb2xkR2F0ZVdvcmtzcGFjZVJlZk1pc21hdGNoSAASSQoRdHJhbnNmZXJyaW5nX2F3YXkYAyABKAsyLC5hZ2VudHJlcGwudjEuQW5zd2VyQ29sZEdhdGVUcmFuc2ZlcnJpbmdBd2F5SAASRAoPbm90X3lldF9hZG9wdGVkGAQgASgLMikuYWdlbnRyZXBsLnYxLkFuc3dlckNvbGRHYXRlTm90WWV0QWRvcHRlZEgAEj4KDG5vX2NvbGRfZ2F0ZRgFIAEoCzImLmFnZW50cmVwbC52MS5BbnN3ZXJDb2xkR2F0ZU5vQ29sZEdhdGVIABJPChR1bnNlcnZlZF9yZW1lZGlhdGlvbhgGIAEoCzIvLmFnZW50cmVwbC52MS5BbnN3ZXJDb2xkR2F0ZVVuc2VydmVkUmVtZWRpYXRpb25IABI7Cgpub19zZXNzaW9uGAcgASgLMiUuYWdlbnRyZXBsLnYxLkFuc3dlckNvbGRHYXRlTm9TZXNzaW9uSAASQQoNcmVvcGVuX2ZhaWxlZBgIIAEoCzIoLmFnZW50cmVwbC52MS5BbnN3ZXJDb2xkR2F0ZVJlb3BlbkZhaWxlZEgAQgcKBWNhdXNlIiAKHkFuc3dlckNvbGRHYXRlVW5rbm93bldvcmtzcGFjZSI6CiJBbnN3ZXJDb2xkR2F0ZVdvcmtzcGFjZVJlZk1pc21hdGNoEhQKDHJlZ2lzdHJ5X2RpchgBIAEoCSIxCh5BbnN3ZXJDb2xkR2F0ZVRyYW5zZmVycmluZ0F3YXkSDwoHYWRkcmVzcxgBIAEoCSIdChtBbnN3ZXJDb2xkR2F0ZU5vdFlldEFkb3B0ZWQiGgoYQW5zd2VyQ29sZEdhdGVOb0NvbGRHYXRlIiMKIUFuc3dlckNvbGRHYXRlVW5zZXJ2ZWRSZW1lZGlhdGlvbiIZChdBbnN3ZXJDb2xkR2F0ZU5vU2Vzc2lvbiIsChpBbnN3ZXJDb2xkR2F0ZVJlb3BlbkZhaWxlZBIOCgZkZXRhaWwYASABKAlCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace, file_frontend_v1_feed, file_conversation_v1_api, file_conversation_v1_session]);
 
 /**
  * @generated from message agentrepl.v1.AnswerColdGateRequest
@@ -48,13 +48,16 @@ export type AnswerColdGateRequest = Message<"agentrepl.v1.AnswerColdGateRequest"
 
   /**
    * Which button. THE ARM IS THE REMEDIATION, mirroring
-   * conversation.v1.SessionColdRemediation's three forms.
+   * conversation.v1.SessionColdRemediation's three forms, plus what becomes of
+   * the prompts held at the gate. ONLY compact_and_resume sends them; no
+   * other answer sends anything.
    *
    * @generated from oneof agentrepl.v1.AnswerColdGateRequest.choice
    */
   choice: {
     /**
-     * Pay & resume: take the cold read now, in the background.
+     * Pay & resume: take the cold read now, in the background. The prompts
+     * held at the gate are KEPT, held until the user sends them.
      *
      * @generated from field: agentrepl.v1.AnswerColdGatePay pay = 3;
      */
@@ -62,7 +65,8 @@ export type AnswerColdGateRequest = Message<"agentrepl.v1.AnswerColdGateRequest"
     case: "pay";
   } | {
     /**
-     * Clear context and resume fresh.
+     * Clear context and resume fresh. The prompts held at the gate are
+     * DISCARDED the moment the daemon takes the answer: clear spends nothing.
      *
      * @generated from field: agentrepl.v1.AnswerColdGateClear clear = 4;
      */
@@ -70,12 +74,25 @@ export type AnswerColdGateRequest = Message<"agentrepl.v1.AnswerColdGateRequest"
     case: "clear";
   } | {
     /**
-     * Compact first, then resume from the compacted transcript.
+     * Compact first, then resume from the compacted transcript. The prompts
+     * held at the gate are KEPT, held until the user sends them.
      *
      * @generated from field: agentrepl.v1.AnswerColdGateCompact compact = 5;
      */
     value: AnswerColdGateCompact;
     case: "compact";
+  } | {
+    /**
+     * Compact exactly as `compact`, then SEND the prompts held at the gate
+     * once the compacted session is up. Served only while the gate's
+     * `frontend.v1.FeedColdGateStanding.compact_and_resume` is set; refused
+     * `unserved_remediation` when the gate served no compact menu. Prompts
+     * cancelled since the gate was drawn are simply not sent.
+     *
+     * @generated from field: agentrepl.v1.AnswerColdGateCompact compact_and_resume = 6;
+     */
+    value: AnswerColdGateCompact;
+    case: "compactAndResume";
   } | { case: undefined; value?: undefined };
 };
 
@@ -113,7 +130,8 @@ export const AnswerColdGateClearSchema: GenMessage<AnswerColdGateClear> = /*@__P
   messageDesc(file_agentrepl_v1_endpoint_answer_cold_gate, 2);
 
 /**
- * The compact button's payload.
+ * The payload of both compact buttons, compact and compact-and-resume: the
+ * same submenu chooses the summarizer and the scope for either.
  *
  * @generated from message agentrepl.v1.AnswerColdGateCompact
  */
