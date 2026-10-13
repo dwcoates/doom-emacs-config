@@ -10,10 +10,11 @@
  * two surfaces is a defect rather than a taste difference.
  *
  * WHAT THIS DRAWS, AND WHAT IT LEAVES ALONE. In partial mode the row's NAME
- * text recedes to the muted colour and nothing else changes: the status dot
- * keeps its tone, the badges, the when-column and the highlight are untouched.
- * The mode says what the user has seen; it never says what the workspace is
- * doing, and the dot is the thing that says that.
+ * text and its status dot recede to the muted colour (owner request,
+ * 2026-10-12: a viewed workspace stays in its grouping, and the grey dot is
+ * what sets it apart). The badges, the when-column and the highlight are
+ * untouched. The marker only rides a turn-end arm, so greying the dot never
+ * hides live work.
  *
  * THE WIRE'S MARKER IS THE WHOLE ANSWER. The daemon derives the marker from
  * the workspace's read-result fact in the same render that resolves the
