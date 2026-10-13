@@ -3,7 +3,7 @@
 // visible. See src/presence.ts.
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createPresence, pageIsEmbedded, pagePresence, type PresenceCause, type PresenceSource } from "../src/presence.js";
+import { createPresence, pageIsEmbedded, pagePresence, warmthCondition, type PresenceCause, type PresenceSource } from "../src/presence.js";
 
 let presence: PresenceSource | null = null;
 
@@ -140,5 +140,87 @@ describe("pagePresence", () => {
 
     // Assert
     expect(second).not.toBe(first);
+  });
+});
+
+describe("warmth", () => {
+  it("is cold in a host until the host warms it", () => {
+    // Arrange / Act
+    presence = createPresence(document, true);
+
+    // Assert
+    expect(presence.warm()).toBe(false);
+  });
+
+  it("is warm in no host", () => {
+    // Arrange / Act
+    presence = createPresence(document, false);
+
+    // Assert
+    expect(presence.warm()).toBe(true);
+  });
+
+  it("is warm while shown, whatever it was told of warmth", () => {
+    // Arrange
+    presence = createPresence(document, true);
+
+    // Act
+    presence.setShown(true);
+
+    // Assert
+    expect(presence.warm()).toBe(true);
+  });
+
+  it("is warm once the host warms it", () => {
+    // Arrange
+    presence = createPresence(document, true);
+
+    // Act
+    presence.setWarm(true);
+
+    // Assert
+    expect(presence.warm()).toBe(true);
+  });
+
+  it("tells its listeners when it warms", () => {
+    // Arrange
+    presence = createPresence(document, true);
+    const causes: PresenceCause[] = [];
+    presence.onChange((_seen, cause) => causes.push(cause));
+
+    // Act
+    presence.setWarm(true);
+
+    // Assert
+    expect(causes).toEqual(["host"]);
+  });
+
+  it("tells no one when its warmth does not change", () => {
+    // Arrange
+    presence = createPresence(document, true);
+    const causes: PresenceCause[] = [];
+    presence.onChange((_seen, cause) => causes.push(cause));
+
+    // Act
+    presence.setWarm(false);
+
+    // Assert
+    expect(causes).toEqual([]);
+  });
+
+  it("gives its standing views a condition that follows its warmth", () => {
+    // Arrange
+    presence = createPresence(document, true);
+    const cond = warmthCondition(presence);
+    let told = 0;
+    cond.onChange(() => {
+      told += 1;
+    });
+
+    // Act
+    presence.setWarm(true);
+
+    // Assert
+    expect([cond.active(), told]).toEqual([true, 1]);
   });
 });
