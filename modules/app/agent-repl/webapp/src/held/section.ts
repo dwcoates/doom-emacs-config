@@ -36,7 +36,6 @@ import { log } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import type { HeldContext } from "./context.js";
-import { drawHeldOffer } from "./held-offer.js";
 import { drawHeldPrompt } from "./held-prompt.js";
 import { ClassifierUpdateForms } from "./classifier-update.js";
 import { placeChildren } from "../dom.js";
@@ -205,7 +204,7 @@ function heldTurns(host: HTMLElement): string[] {
 /**
  * One held item. THE ARM IS THE KIND.
  *
- * A prompt is released or dropped and an offer is answered, so the routing is
+ * A prompt is released or dropped, so the routing is
  * on the arm and never on anything inside it. CARDS are the previous drawing's
  * items by id.
  */
@@ -226,9 +225,6 @@ export function drawHeldItem(
     case "prompt":
       // This item's card from the last drawing, updated in place.
       element = drawHeldPrompt(item.value, tc, cards.get(id.value));
-      break;
-    case "offer":
-      element = drawHeldOffer(item.value, tc);
       break;
     default: {
       const other: { case: string } = item;

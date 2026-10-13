@@ -101,7 +101,7 @@ import { FoldHeldPromptResponseSchema } from "../../../proto/gen/ts/agentrepl/v1
 import { UpdateClassifierPromptResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_classifier_prompt_pb";
 import { FoldRepositoryResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_fold_repository_pb";
 import { UpdateSidebarViewResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_sidebar_view_pb";
-import { AnswerHeldOfferResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_answer_held_offer_pb";
+import { AnswerMergeQueueOfferResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_answer_merge_queue_offer_pb";
 import { UpdateShutdownScheduleResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_shutdown_schedule_pb";
 import { UpdateMergeQueueResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_merge_queue_pb";
 import { DaemonHealthResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_daemon_health_pb";
@@ -1412,9 +1412,9 @@ export function createFakeDaemon(): FakeDaemon {
           result: { case: "success", value: { commit: "0123456789abcdef", path: "/prompts/queue-routing-classifier.md" } },
         });
       },
-      answerHeldOffer(request) {
-        record("answerHeldOffer", request);
-        return answerFor("answerHeldOffer", AnswerHeldOfferResponseSchema, {
+      answerMergeQueueOffer(request) {
+        record("answerMergeQueueOffer", request);
+        return answerFor("answerMergeQueueOffer", AnswerMergeQueueOfferResponseSchema, {
           result: { case: "success", value: {} },
         });
       },
