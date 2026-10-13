@@ -27,9 +27,11 @@ const theMergeWorkspace = ids.WorkspaceID("ws-merge")
 type fakeDetached struct {
 	h *harness
 
-	mu        sync.Mutex
-	forkErr   error
-	forks     []string
+	mu      sync.Mutex
+	forkErr error
+	forks   []string
+	// origins records the origin each fork was handed, in order.
+	origins   []wsm.MergeOrigin
 	handbacks []handback
 	// revealErr fails every reveal; reveals records each merge workspace a
 	// reveal named.
@@ -47,19 +49,20 @@ type handback struct {
 	outcome   DetachedOutcome
 }
 
-func (d *fakeDetached) Fork(_ context.Context, requester wsm.Workspace, request wsm.DetachedMergeID, name, base string) (wsm.Workspace, error) {
+func (d *fakeDetached) Fork(_ context.Context, requester wsm.Workspace, origin wsm.MergeOrigin, name, base string) (wsm.Workspace, error) {
 	d.h.names.mu.Lock()
 	standing := len(d.h.names.claims) - d.h.names.releases
 	d.h.names.mu.Unlock()
 	d.mu.Lock()
 	d.claimsAtFork = append(d.claimsAtFork, standing)
 	d.forks = append(d.forks, fmt.Sprintf("%s:%s:%s", requester.ID, name, base))
+	d.origins = append(d.origins, origin)
 	err := d.forkErr
 	d.mu.Unlock()
 	if err != nil {
 		return wsm.Workspace{}, err
 	}
-	return d.h.registerMergeWorkspace(requester.ID, request, base), nil
+	return d.h.registerMergeWorkspaceFor(origin, base), nil
 }
 
 func (d *fakeDetached) Reveal(_ context.Context, mergeWS ids.WorkspaceID) (bool, error) {
@@ -107,9 +110,16 @@ func (d *fakeDetached) sent() []handback {
 // registerMergeWorkspace registers the merge workspace forked from requester
 // for request, cut from branch, in the harness's one repository.
 func (h *harness) registerMergeWorkspace(requester ids.WorkspaceID, request wsm.DetachedMergeID, branch string) wsm.Workspace {
+	return h.registerMergeWorkspaceFor(wsm.MergeOrigin{Requester: requester, Request: request}, branch)
+}
+
+// registerMergeWorkspaceFor registers the merge workspace forked for origin,
+// cut from branch, in the harness's one repository.
+func (h *harness) registerMergeWorkspaceFor(origin wsm.MergeOrigin, branch string) wsm.Workspace {
 	dir := h.t.TempDir()
+	requester := origin.Requester
 	ws := wsm.Workspace{ID: theMergeWorkspace, Name: "feature-merge", Dir: dir, Branch: "feature-merge", Repo: theRepository,
-		Parent: &requester, MergeOf: &wsm.MergeOrigin{Requester: requester, Request: request}}
+		Parent: &requester, MergeOf: &origin}
 	h.db.mu.Lock()
 	h.db.workspaces[ws.ID] = ws
 	h.db.jobs[ws.ID] = wsm.CreationJob{Workspace: ws.ID, BaseRef: branch, Layout: wsm.MergeLayout{
@@ -358,6 +368,57 @@ func TestAnAsyncRequestIsHandedToTheMergeWorkspaceForkedUnderItsName(t *testing.
 	entry, ok := h.entryOf(theMergeWorkspace)
 	if !ok || entry.State != wsm.MergeQueued || entry.Source.Detach != "" || entry.Source.KeepOpen {
 		t.Fatalf("merge workspace entry = %+v, %v; want its own in-place merge in line", entry, ok)
+	}
+}
+
+func TestAnAsyncRequestThatCompactsAfterRecordsTheAskOnItsEntry(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.mu.Lock()
+	h.inFlight = "turn-asking"
+	h.mu.Unlock()
+
+	// Act: an agent's request, still waiting on the turn that asked.
+	err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch},
+		By: RequestedByAgent, Detached: &DetachedRun{Name: "reconnect-fix", CompactAfter: true}})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	entry, ok := h.entryOf(theWorkspace)
+	if !ok || !entry.Source.CompactAfter || entry.Source.Detach == "" {
+		t.Fatalf("entry = %+v, %v; want a detached request that compacts after it lands", entry, ok)
+	}
+}
+
+func TestAnAsyncRequestsHandOffForksWithItsCompactAfterAsk(t *testing.T) {
+	tests := []struct {
+		name         string
+		compactAfter bool
+	}{
+		{name: "asked", compactAfter: true},
+		{name: "not asked", compactAfter: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+
+			// Act: the user's ask is put in line at once, which hands it off.
+			err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch},
+				By: RequestedByUser, Detached: &DetachedRun{Name: "reconnect-fix", CompactAfter: tt.compactAfter}})
+
+			// Assert: the fork's origin names the requester, the request, and
+			// the ask, which the merge workspace's handback reads.
+			if err != nil {
+				t.Fatalf("Enqueue: %v", err)
+			}
+			origins := h.detached.origins
+			if len(origins) != 1 || origins[0].Requester != theWorkspace || origins[0].Request == "" || origins[0].CompactAfter != tt.compactAfter {
+				t.Fatalf("origins = %+v, want one for the requester's request with compact_after %v", origins, tt.compactAfter)
+			}
+		})
 	}
 }
 

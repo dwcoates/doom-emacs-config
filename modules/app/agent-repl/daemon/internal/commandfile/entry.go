@@ -188,6 +188,10 @@ type Entry struct {
 	// (source.own_branch.detached.pick.instruction); empty merges the whole
 	// branch. Async only.
 	Pick string `json:"pick,omitempty"`
+	// CompactAfter compacts the requester's conversation once its async merge
+	// lands (source.own_branch.detached.compact_after). Async only: an
+	// in-place merge carrying it is refused.
+	CompactAfter bool `json:"compact_after,omitempty"`
 	// PRWasMerged says the requester's own branch already merged upstream
 	// through its pull request (source.merged_upstream): the default branch
 	// is updated from upstream and the requester closed.
@@ -430,6 +434,7 @@ func (e Entry) mergeOnly() string {
 		{"detached", e.Detached},
 		{"detached_name", e.DetachedName != ""},
 		{"pick", e.Pick != ""},
+		{"compact_after", e.CompactAfter},
 		{"pr_was_merged", e.PRWasMerged},
 		{"front", e.Front},
 	}
@@ -469,6 +474,8 @@ func (e Entry) validateMergeSource() error {
 		return fmt.Errorf("%s: a detached merge names its merge workspace (detached_name)", TypeMerge)
 	case !e.Detached && (e.DetachedName != "" || e.Pick != ""):
 		return fmt.Errorf("%s: detached_name and pick belong to a detached merge", TypeMerge)
+	case !e.Detached && e.CompactAfter:
+		return fmt.Errorf("%s: compact_after belongs to a detached merge; an in-place merge cannot compact after it lands", TypeMerge)
 	case e.Pick != "" && strings.TrimSpace(e.Pick) == "":
 		return fmt.Errorf("%s: a pick names the changes it lands", TypeMerge)
 	}

@@ -31,7 +31,7 @@ import (
 // THE `merge-queue` VERB:
 //
 //	agent-repld merge-queue -own [-keep-open | -one-shot] [-front] [-wait] [-state-dir DIR]
-//	agent-repld merge-queue -own -async -name NAME [-pick INSTRUCTION] [-front] [-state-dir DIR]
+//	agent-repld merge-queue -own -async -name NAME [-pick INSTRUCTION] [-compact-after] [-front] [-state-dir DIR]
 //	agent-repld merge-queue -dir WORKTREE [-front] [-wait] [-state-dir DIR]
 //	agent-repld merge-queue -branch BRANCH [-front] [-wait] [-state-dir DIR]
 //	agent-repld merge-queue -pr-merged [-front] [-wait] [-state-dir DIR]
@@ -249,6 +249,7 @@ func runMergeQueueVerb(ctx context.Context, args []string, dial mergeQueueDialer
 	async := fs.Bool("async", false, "with -own and -name: merge async, in a hidden merge workspace forked from the calling workspace, which stays free")
 	name := fs.String("name", "", "with -async: the merge workspace's name, a short slug naming what is merged")
 	pick := fs.String("pick", "", "with -async: land only the changes this instruction names, which the merge agent cherry-picks onto the target branch")
+	compactAfter := fs.Bool("compact-after", false, "with -async: compact the calling workspace's conversation once its branch lands")
 	dir := fs.String("dir", "", "merge another workspace's branch, by its worktree; it closes once it lands")
 	branch := fs.String("branch", "", "merge a branch that is no workspace (a subagent's)")
 	prMerged := fs.Bool("pr-merged", false, "the calling workspace's branch already merged upstream: update the default branch and close it")
@@ -273,7 +274,7 @@ func runMergeQueueVerb(ctx context.Context, args []string, dial mergeQueueDialer
 		return fail("unexpected arguments: %s", strings.Join(fs.Args(), " "))
 	}
 	source, err := resolveMergeQueueSource(mergeQueueFlags{
-		own: *own, keepOpen: *keepOpen, oneShot: *oneShot, inPlace: *inPlace || *syncRun, async: *async, name: *name, pick: *pick,
+		own: *own, keepOpen: *keepOpen, oneShot: *oneShot, inPlace: *inPlace || *syncRun, async: *async, name: *name, pick: *pick, compactAfter: *compactAfter,
 		wait: *wait, dir: *dir, branch: *branch, prMerged: *prMerged, front: *front,
 		evict: *evict, evictDir: *evictDir, moveUp: *moveUp, moveDown: *moveDown, moveDir: *moveDir,
 		pause: *pause, resume: *resume, repositoryDir: *repositoryDir,
@@ -312,10 +313,14 @@ type mergeQueueFlags struct {
 	oneShot bool
 	// async asks for an own-branch merge ASYNC, in a hidden merge workspace
 	// named name; pick, when set, lands only the changes it names.
-	async       bool
-	name, pick  string
-	dir, branch string
-	prMerged    bool
+	async      bool
+	name, pick string
+	// compactAfter asks, with async, that the calling workspace's
+	// conversation be compacted once its branch lands. A sync merge cannot
+	// ask it.
+	compactAfter bool
+	dir, branch  string
+	prMerged     bool
 	// front puts the merge at the front of its queue (commandfile.Entry.Front).
 	front    bool
 	evict    bool
@@ -379,6 +384,8 @@ func resolveMergeQueueRequest(f mergeQueueFlags) (mergeQueueSource, error) {
 		return mergeQueueSource{}, errors.New("-name and -pick go with -async")
 	case f.pick != "" && strings.TrimSpace(f.pick) == "":
 		return mergeQueueSource{}, errors.New("-pick names the changes it lands")
+	case f.compactAfter && !f.async:
+		return mergeQueueSource{}, errors.New("-compact-after goes with -async: only an async merge leaves the calling workspace free to compact once it lands")
 	case f.moveDir != "" && !f.moveUp && !f.moveDown:
 		return mergeQueueSource{}, errors.New("-move-dir goes with -move-up or -move-down: it names the workspace whose merge they move")
 	case f.repositoryDir != "" && !f.pause && !f.resume:
@@ -452,7 +459,10 @@ func resolveMergeQueueRequest(f mergeQueueFlags) (mergeQueueSource, error) {
 		if pick != "" {
 			label = "a pick of its own branch, async, in merge workspace " + name
 		}
-		return mergeQueueSource{label: label, entry: commandfile.Entry{Type: commandfile.TypeMerge, Detached: true, DetachedName: name, Pick: pick}}, nil
+		if f.compactAfter {
+			label += ", compacting this workspace once it lands"
+		}
+		return mergeQueueSource{label: label, entry: commandfile.Entry{Type: commandfile.TypeMerge, Detached: true, DetachedName: name, Pick: pick, CompactAfter: f.compactAfter}}, nil
 	}
 	return mergeQueueSource{label: "its own branch, in place", entry: commandfile.Entry{Type: commandfile.TypeMerge, KeepOpen: f.keepOpen}}, nil
 }

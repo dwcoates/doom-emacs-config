@@ -1258,6 +1258,9 @@ func TestMergeWorkspaceMapsEachSourceArm(t *testing.T) {
 		{name: "own branch async pick", source: asyncSource(&agentreplv1.MergeWorkspaceSourceOwnBranchDetached{Name: "reconnect-fix",
 			Content: &agentreplv1.MergeWorkspaceSourceOwnBranchDetached_Pick{Pick: &agentreplv1.MergeWorkspaceSourceOwnBranchDetachedPick{Instruction: "the fix"}}}),
 			want: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}, detached: &merge.DetachedRun{Name: "reconnect-fix", Pick: "the fix"}},
+		{name: "own branch async compact after", source: asyncSource(&agentreplv1.MergeWorkspaceSourceOwnBranchDetached{Name: "reconnect-fix", CompactAfter: true,
+			Content: &agentreplv1.MergeWorkspaceSourceOwnBranchDetached_WholeBranch{WholeBranch: &agentreplv1.MergeWorkspaceSourceOwnBranchDetachedWholeBranch{}}}),
+			want: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}, detached: &merge.DetachedRun{Name: "reconnect-fix", CompactAfter: true}},
 		{name: "a branch", source: &agentreplv1.MergeWorkspaceSource{Source: &agentreplv1.MergeWorkspaceSource_Branch{
 			Branch: &agentreplv1.MergeWorkspaceSourceBranch{Name: "agent-1/fix"}}},
 			want: wsm.MergeSource{Kind: wsm.MergeSourceBranch, Branch: "agent-1/fix"}},
