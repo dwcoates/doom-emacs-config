@@ -21,6 +21,7 @@ package merge
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"agent-repld/internal/cpugov"
@@ -237,6 +238,14 @@ type DetachedRun struct {
 	// CompactAfter compacts the requester's conversation once the merge
 	// lands (agentrepl.v1.MergeWorkspaceSourceOwnBranchDetached.compact_after).
 	CompactAfter bool
+}
+
+// NewDetachedRun is the async run an ingress reads off a request: the merge
+// workspace's name and the pick instruction with their surrounding space
+// trimmed, and the compact-after ask as given. Every ingress builds its run
+// here, so the rpc and the command file cannot read the same request apart.
+func NewDetachedRun(name, pick string, compactAfter bool) *DetachedRun {
+	return &DetachedRun{Name: strings.TrimSpace(name), Pick: strings.TrimSpace(pick), CompactAfter: compactAfter}
 }
 
 // DetachedMerges forks the merge workspace a detached request runs in, and
