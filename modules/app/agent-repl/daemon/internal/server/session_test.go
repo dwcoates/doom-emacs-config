@@ -11,6 +11,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/ids"
+	"agent-repld/internal/merge"
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/workspace"
 )
@@ -127,31 +128,86 @@ func TestUpdateHeldPromptMapsAcceptNotApplicable(t *testing.T) {
 	}
 }
 
-// TestAnswerHeldOfferAnswersTheDequeue pins that the tray's one offer reaches
-// the merge orchestrator.
-func TestAnswerHeldOfferAnswersTheDequeue(t *testing.T) {
+// TestAnswerMergeQueueOfferHandsEachAnswerToTheMerge pins that every decision
+// arm reaches the merge orchestrator as its own answer.
+func TestAnswerMergeQueueOfferHandsEachAnswerToTheMerge(t *testing.T) {
+	tests := []struct {
+		name     string
+		decision func(*agentreplv1.AnswerMergeQueueOfferRequest)
+		want     merge.QueueOfferAnswer
+	}{
+		{name: "evict", want: merge.QueueOfferEvict, decision: func(r *agentreplv1.AnswerMergeQueueOfferRequest) {
+			r.Decision = &agentreplv1.AnswerMergeQueueOfferRequest_Evict{Evict: &agentreplv1.AnswerMergeQueueOfferEvict{}}
+		}},
+		{name: "prioritize", want: merge.QueueOfferPrioritize, decision: func(r *agentreplv1.AnswerMergeQueueOfferRequest) {
+			r.Decision = &agentreplv1.AnswerMergeQueueOfferRequest_Prioritize{Prioritize: &agentreplv1.AnswerMergeQueueOfferPrioritize{}}
+		}},
+		{name: "cancel", want: merge.QueueOfferCancel, decision: func(r *agentreplv1.AnswerMergeQueueOfferRequest) {
+			r.Decision = &agentreplv1.AnswerMergeQueueOfferRequest_Cancel{Cancel: &agentreplv1.AnswerMergeQueueOfferCancel{}}
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			req := &agentreplv1.AnswerMergeQueueOfferRequest{Workspace: ref()}
+			tt.decision(req)
+
+			// Act.
+			resp, err := h.Client.AnswerMergeQueueOffer(context.Background(), connect.NewRequest(req))
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("AnswerMergeQueueOffer: %v", err)
+			}
+			if resp.Msg.GetSuccess() == nil {
+				t.Fatalf("result = %v, want success", resp.Msg.GetResult())
+			}
+			if got := h.Merge.queueOfferAnswers; len(got) != 1 || got[0] != tt.want {
+				t.Fatalf("answers = %v, want [%v]", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestAnswerMergeQueueOfferMapsNoOfferStanding pins the endpoint's own refusal.
+func TestAnswerMergeQueueOfferMapsNoOfferStanding(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
+	h.Merge.answerQueueOfferErr = &merge.RefusalError{Arm: merge.ArmNoOfferStanding, Workspace: "w1", Reason: "none standing"}
 
 	// Act.
-	resp, err := h.Client.AnswerHeldOffer(context.Background(),
-		connect.NewRequest(&agentreplv1.AnswerHeldOfferRequest{
+	resp, err := h.Client.AnswerMergeQueueOffer(context.Background(),
+		connect.NewRequest(&agentreplv1.AnswerMergeQueueOfferRequest{
 			Workspace: ref(),
-			Answer: &agentreplv1.AnswerHeldOfferRequest_MergeDequeue{
-				MergeDequeue: &agentreplv1.AnswerHeldOfferMergeDequeue{
-					Decision: &agentreplv1.AnswerHeldOfferMergeDequeue_Keep{
-						Keep: &agentreplv1.AnswerHeldOfferKeep{},
-					},
-				},
-			},
+			Decision:  &agentreplv1.AnswerMergeQueueOfferRequest_Cancel{Cancel: &agentreplv1.AnswerMergeQueueOfferCancel{}},
 		}))
 
 	// Assert.
 	if err != nil {
-		t.Fatalf("AnswerHeldOffer: %v", err)
+		t.Fatalf("AnswerMergeQueueOffer: %v", err)
 	}
-	if resp.Msg.GetSuccess() == nil {
-		t.Fatalf("result = %v, want success", resp.Msg.GetResult())
+	if resp.Msg.GetError().GetNoOfferStanding() == nil {
+		t.Fatalf("result = %v, want no_offer_standing", resp.Msg.GetResult())
+	}
+}
+
+// TestAnswerMergeQueueOfferRefusesAnUnsetDecision pins validation: an answer
+// with no arm is InvalidArgument and reaches no orchestrator.
+func TestAnswerMergeQueueOfferRefusesAnUnsetDecision(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	_, err := h.Client.AnswerMergeQueueOffer(context.Background(),
+		connect.NewRequest(&agentreplv1.AnswerMergeQueueOfferRequest{Workspace: ref()}))
+
+	// Assert.
+	if connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("err = %v, want InvalidArgument", err)
+	}
+	if len(h.Merge.queueOfferAnswers) != 0 {
+		t.Fatalf("answers = %v, want none", h.Merge.queueOfferAnswers)
 	}
 }
 

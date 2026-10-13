@@ -272,6 +272,11 @@ export function drawInterruptSuccess(success: InterruptSuccess, path: string): H
     case "nothingRunning":
       note.textContent = "nothing running";
       break;
+    case "mergeQueueOffered":
+      // The turn ended before the stop reached it, and the workspace's merge
+      // is queued: the question now stands in the merge bubble.
+      note.textContent = "asking about the queued merge";
+      break;
     default: {
       const other: { case: string } = outcome;
       return unreachableArm(`${path}.outcome`, other.case);

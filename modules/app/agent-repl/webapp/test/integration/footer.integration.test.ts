@@ -1097,11 +1097,27 @@ describe("the turn stop", () => {
     expect(harness.refusalArms()).toEqual([]);
   });
 
+  it("draws no refusal for a merge-queue-question answer", async () => {
+    // Arrange
+    await withFooter({ status: "working" });
+    harness.fake.answer(
+      "interrupt",
+      create(InterruptResponseSchema, {
+        result: { case: "success", value: { outcome: { case: "mergeQueueOffered", value: {} } } },
+      }),
+    );
+    // Act
+    await harness.click(".footer-clock [data-interrupt]");
+    // Assert
+    expect(harness.refusalArms()).toEqual([]);
+  });
+
   it("covers every Interrupt success outcome", () => {
     assertCoversOneof(InterruptSuccessSchema, "outcome", [
       "interruptedTurn",
       "interruptedDetached",
       "nothingRunning",
+      "mergeQueueOffered",
     ]);
   });
 });

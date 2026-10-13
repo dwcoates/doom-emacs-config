@@ -12,6 +12,7 @@
  * below its cap never wraps. It paints on attach when it needs a width, and
  * re-wraps only when the containing block's width moves the budget.
  */
+import { createConnectHookElement, type ConnectHookElement } from "../connect-hook.js";
 import { log } from "../log.js";
 import { inline, hasFencedTree, renderMarkdown, type TreeCols } from "../markdown.js";
 import { findTreeRegion, renderTreeHtml, type TreeIssue } from "../metaprompt-tree.js";
@@ -238,30 +239,13 @@ export const BUBBLE_BODY_CLASS = "bubble-body";
 /** The attribute every markdown slot wears; its source is held beside it. */
 export const MARKDOWN_SLOT_ATTRIBUTE = "data-markdown";
 
-/** A bubble's body, which runs its hooks every time it joins the document. */
-export interface BubbleBody extends HTMLElement {
-  onConnect(hook: () => void): void;
-}
-
 /**
- * The body as a custom element. `connectedCallback` runs synchronously inside
- * the DOM operation that attaches the row — before any frame is painted, and
- * whether or not the webview is visible — which is what lets a tree's first
- * paint wait for a containing block without ever showing a wrong-width frame.
+ * A bubble's body, which runs its hooks every time it joins the document
+ * (connect-hook.ts). `connectedCallback` runs synchronously inside the DOM
+ * operation that attaches the row, which is what lets a tree's first paint
+ * wait for a containing block without ever showing a wrong-width frame.
  */
-function bubbleBodyClass(): CustomElementConstructor {
-  return class extends HTMLElement implements BubbleBody {
-    private readonly hooks: Array<() => void> = [];
-
-    onConnect(hook: () => void): void {
-      this.hooks.push(hook);
-    }
-
-    connectedCallback(): void {
-      for (const hook of this.hooks) hook();
-    }
-  };
-}
+export type BubbleBody = ConnectHookElement;
 
 /** What paints one body: all of its slots, or one of them, at the cap's budget. */
 interface Painter {
@@ -276,10 +260,7 @@ const slotSources = new WeakMap<Element, string>();
 
 /** A fresh bubble body, the custom element defined on first use, its painter armed. */
 export function createBubbleBody(): BubbleBody {
-  if (customElements.get(BUBBLE_BODY_TAG) === undefined) {
-    customElements.define(BUBBLE_BODY_TAG, bubbleBodyClass());
-  }
-  const body = document.createElement(BUBBLE_BODY_TAG) as BubbleBody;
+  const body = createConnectHookElement(BUBBLE_BODY_TAG);
   body.className = BUBBLE_BODY_CLASS;
   painters.set(body, armPainter(body));
   return body;

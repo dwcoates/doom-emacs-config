@@ -220,8 +220,8 @@ func (s *fakeServer) UpdateClassifierPrompt(ctx context.Context, req *connect.Re
 	return handleUnary[v1.UpdateClassifierPromptRequest, v1.UpdateClassifierPromptResponse](ctx, s, "UpdateClassifierPrompt", req.Msg)
 }
 
-func (s *fakeServer) AnswerHeldOffer(ctx context.Context, req *connect.Request[v1.AnswerHeldOfferRequest]) (*connect.Response[v1.AnswerHeldOfferResponse], error) {
-	return handleUnary[v1.AnswerHeldOfferRequest, v1.AnswerHeldOfferResponse](ctx, s, "AnswerHeldOffer", req.Msg)
+func (s *fakeServer) AnswerMergeQueueOffer(ctx context.Context, req *connect.Request[v1.AnswerMergeQueueOfferRequest]) (*connect.Response[v1.AnswerMergeQueueOfferResponse], error) {
+	return handleUnary[v1.AnswerMergeQueueOfferRequest, v1.AnswerMergeQueueOfferResponse](ctx, s, "AnswerMergeQueueOffer", req.Msg)
 }
 
 func (s *fakeServer) UpdateShutdownSchedule(ctx context.Context, req *connect.Request[v1.UpdateShutdownScheduleRequest]) (*connect.Response[v1.UpdateShutdownScheduleResponse], error) {

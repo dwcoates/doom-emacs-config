@@ -1,0 +1,77 @@
+// endpoint_answer_merge_queue_offer.proto — AnswerMergeQueueOffer: answering
+// the merge-queue question an interrupt raised in a workspace's pinned merge
+// bubble (frontend.v1.FeedMerge.queue_offer). MERGE section. Addressed by the
+// WORKSPACE: a workspace has at most one merge, so at most one question
+// stands, and a token would over-address.
+//
+// THE ANSWER IS THE ONLY THING THAT ACTS ON THE QUEUE. The interrupt that
+// raised the question changed nothing; every answer retires the question.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message AnswerMergeQueueOfferRequest {
+  workspace.v1.WorkspaceRef workspace = 1;
+  // THE ARM IS THE ANSWER.
+  oneof decision {
+    // Take the merge out of the queue. A merge already running is abandoned,
+    // as UpdateMergeQueue's evict does.
+    AnswerMergeQueueOfferEvict evict = 2;
+    // Move the merge to the front of the merges WAITING in its queue, so it
+    // runs next: right behind the merge that holds the repository's slot.
+    // A merge that is itself running, or already first in line, stays where
+    // it is.
+    AnswerMergeQueueOfferPrioritize prioritize = 3;
+    // Leave the queue as it is.
+    AnswerMergeQueueOfferCancel cancel = 4;
+  }
+}
+message AnswerMergeQueueOfferEvict {}
+message AnswerMergeQueueOfferPrioritize {}
+message AnswerMergeQueueOfferCancel {}
+
+// THE ARM IS THE OUTCOME.
+message AnswerMergeQueueOfferResponse {
+  oneof result {
+    AnswerMergeQueueOfferSuccess success = 1;
+    AnswerMergeQueueOfferError error = 2;
+  }
+}
+
+// Done; the bubble's new state, the question gone, arrives on the feed's
+// watch.
+message AnswerMergeQueueOfferSuccess {}
+
+// Validation failures (unset field, blank string) are Connect
+// InvalidArgument, never an arm.
+message AnswerMergeQueueOfferError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    AnswerMergeQueueOfferUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    AnswerMergeQueueOfferWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    AnswerMergeQueueOfferTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    AnswerMergeQueueOfferNotYetAdopted not_yet_adopted = 4;
+    // No question is standing for this workspace: it was already answered,
+    // or its merge ended.
+    AnswerMergeQueueOfferNoOfferStanding no_offer_standing = 5;
+  }
+}
+message AnswerMergeQueueOfferUnknownWorkspace {}
+message AnswerMergeQueueOfferWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+message AnswerMergeQueueOfferTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+message AnswerMergeQueueOfferNotYetAdopted {}
+message AnswerMergeQueueOfferNoOfferStanding {}

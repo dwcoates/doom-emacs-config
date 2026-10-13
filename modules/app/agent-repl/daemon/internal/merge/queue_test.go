@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -11,6 +12,7 @@ import (
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/wsm"
 )
 
@@ -1191,4 +1193,120 @@ func TestAMergeInLineWithNoBubbleIdentityIsRecordedAtInfo(t *testing.T) {
 		}
 	}
 	t.Fatal("no INFO record names the merge whose queue tab cannot be redrawn")
+}
+
+// reorderingFor is a test reordering whose store answer is DO.
+func reorderingFor(do func(wsm.RepoKey) (bool, error)) reordering {
+	return reordering{
+		op:      "daemon.merge.test_reorder",
+		fields:  dlog.Context{"how": "test"},
+		failed:  "could not reorder",
+		unmoved: "stayed",
+		moved:   "moved",
+		do:      do,
+	}
+}
+
+func TestReorderAnswersTheQueuesRefusalUnrecordedAndRunsNoStoreReorder(t *testing.T) {
+	// Arrange: a workspace with nothing queued.
+	h := newHarness(t)
+	ran := false
+
+	// Act.
+	moved, err := h.o.reorder(context.Background(), theWorkspace, reorderingFor(func(wsm.RepoKey) (bool, error) {
+		ran = true
+		return true, nil
+	}))
+
+	// Assert.
+	if refusal, refused := Refused(err); !refused || refusal.Arm != ArmNoSuchQueuedMerge || moved || ran {
+		t.Fatalf("reorder = %v, %v (store ran %v); want the %s refusal and no store reorder", moved, err, ran, ArmNoSuchQueuedMerge)
+	}
+	if _, logged := h.recordFor("error", "daemon.merge.test_reorder"); logged {
+		t.Fatal("the queue's refusal was recorded at ERROR")
+	}
+}
+
+func TestReorderRecordsAStoreFailureOnceWithItsContext(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	enqueue(t, h)
+
+	// Act.
+	moved, err := h.o.reorder(context.Background(), theWorkspace, reorderingFor(func(wsm.RepoKey) (bool, error) {
+		return false, errors.New("database is locked")
+	}))
+
+	// Assert.
+	if err == nil || moved {
+		t.Fatalf("reorder = %v, %v; want the store's failure", moved, err)
+	}
+	record, logged := h.recordFor("error", "daemon.merge.test_reorder")
+	if !logged || record.Context["error"] != "database is locked" || record.Context["how"] != "test" ||
+		record.Context["workspace"] != string(theWorkspace) || record.Context["repo"] == nil {
+		t.Fatalf("the failure was not recorded at ERROR with its context: %+v", h.logs.Records())
+	}
+}
+
+func TestReorderRedrawsTheQueueOnlyWhenTheOrderChanged(t *testing.T) {
+	tests := []struct {
+		name      string
+		moved     bool
+		wantPlace int
+	}{
+		{name: "moved", moved: true, wantPlace: 1},
+		{name: "unmoved", moved: false, wantPlace: 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: two merges wait; the reorder swaps them in the store
+			// only when it says it moved.
+			h := newHarness(t)
+			enqueue(t, h)
+			queueAnother(t, h, "ws-2", "two")
+
+			// Act.
+			moved, err := h.o.reorder(context.Background(), "ws-2", reorderingFor(func(repo wsm.RepoKey) (bool, error) {
+				if !tt.moved {
+					return false, nil
+				}
+				return h.db.MoveMerge(context.Background(), repo, "ws-2", wsm.MergeMoveUp)
+			}))
+
+			// Assert.
+			if err != nil || moved != tt.moved {
+				t.Fatalf("reorder = %v, %v; want %v", moved, err, tt.moved)
+			}
+			if got := h.factsOf("ws-2").QueuePlace; got != tt.wantPlace {
+				t.Fatalf("ws-2's drawn place = %d, want %d", got, tt.wantPlace)
+			}
+		})
+	}
+}
+
+func TestEveryQueueReorderingRunsThroughReorder(t *testing.T) {
+	// Arrange.
+	var calls []string
+	for _, file := range []string{"queue.go", "terminal.go"} {
+		code, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatalf("read %s: %v", file, err)
+		}
+		// Act.
+		for _, call := range []string{"o.deps.DB.MoveMerge(", "o.deps.DB.PrioritizeMerge(", "o.reorder(ctx, ws, reordering{"} {
+			for range strings.Count(string(code), call) {
+				calls = append(calls, file+":"+call)
+			}
+		}
+	}
+
+	// Assert: each store reorder is called once, inside the reordering its
+	// verb hands to reorder.
+	want := []string{
+		"queue.go:o.deps.DB.MoveMerge(", "queue.go:o.reorder(ctx, ws, reordering{",
+		"terminal.go:o.deps.DB.PrioritizeMerge(", "terminal.go:o.reorder(ctx, ws, reordering{",
+	}
+	if !slices.Equal(calls, want) {
+		t.Fatalf("reorder sites = %v, want %v", calls, want)
+	}
 }

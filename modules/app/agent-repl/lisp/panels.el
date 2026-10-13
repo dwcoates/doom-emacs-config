@@ -1832,6 +1832,13 @@ Frontend-blind: dispatches the workspace's registered frontend's
     (agent-repl--log ws "restart")
     (funcall (agent-repl-frontend-restart-fn (agent-repl--ws-frontend ws)) ws)))
 
+(defun agent-repl--webview-window (ws)
+  "Return the window showing WS's webview on the selected frame, or nil.
+Nil too when WS has no live webview buffer.  This is the one lookup every
+caller that hands the keyboard to the feed selects."
+  (let ((webview (agent-repl--ws-get ws :frontend-buffer)))
+    (and (buffer-live-p webview) (get-buffer-window webview))))
+
 (defun agent-repl-focus-input ()
   "Focus the agent input buffer, or return to the webview if already there.
 If the agent isn't running, start it (same as `agent-repl')."
@@ -1850,14 +1857,14 @@ If the agent isn't running, start it (same as `agent-repl')."
       ;;
       ;; With no webview window the press is a recorded no-op: there is
       ;; nowhere to jump back to, and an error is not an answer to that.
-      (let* ((webview (agent-repl--ws-get ws :frontend-buffer))
-             (win (and (buffer-live-p webview) (get-buffer-window webview))))
+      (let ((win (agent-repl--webview-window ws)))
         (if win
             (progn
               (agent-repl--log ws "focus-input branch=jump-back win=%s" win)
               (select-window win))
           (agent-repl--log ws "focus-input branch=jump-back-nowhere webview=%s"
-                           (agent-repl--safe-buffer-name webview)))))
+                           (agent-repl--safe-buffer-name
+                            (agent-repl--ws-get ws :frontend-buffer))))))
      ;; No composer buffer yet — bring the workspace's panels up.  The
      ;; question here is editor-local ("are this workspace's panels
      ;; mounted?"), not "is a session running": session liveness is the

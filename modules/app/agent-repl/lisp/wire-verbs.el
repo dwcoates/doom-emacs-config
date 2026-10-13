@@ -4085,7 +4085,7 @@ THE ARM IS WHAT THE STOP DID, so each outcome is its own arm; `nothing_running'
 is one of them, not a failure smuggled into success."
   (let ((message "InterruptSuccess"))
     (agent-repl-wire-verbs--check-keys
-     message json '(interruptedTurn interruptedDetached nothingRunning))
+     message json '(interruptedTurn interruptedDetached nothingRunning mergeQueueOffered))
     (agent-repl-wire-verbs--decode-oneof
      message "outcome" json
      (list (list 'interruptedTurn :interrupted-turn
@@ -4093,7 +4093,9 @@ is one of them, not a failure smuggled into success."
            (list 'interruptedDetached :interrupted-detached
                  #'agent-repl-wire-decode-interrupt-interrupted-detached)
            (list 'nothingRunning :nothing-running
-                 #'agent-repl-wire-decode-interrupt-nothing-running)))))
+                 #'agent-repl-wire-decode-interrupt-nothing-running)
+           (list 'mergeQueueOffered :merge-queue-offered
+                 (agent-repl-wire-verbs--empty-arm "InterruptMergeQueueOffered"))))))
 
 (defun agent-repl-wire-decode-interrupt-confirm-required (json)
   "Decode InterruptConfirmRequired from JSON into a plist (`:live-agent-count').

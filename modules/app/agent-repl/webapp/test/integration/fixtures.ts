@@ -32,8 +32,10 @@ import { SessionCommand } from "../../../proto/gen/ts/conversation/v1/slash_comm
 import { PromptOrigin } from "../../../proto/gen/ts/conversation/v1/prompt_origin_pb";
 import {
   FeedIdSchema,
+  FeedMergeQueueOfferSchema,
   FeedPageSchema,
   FeedOutcomeMarkerSchema,
+  FeedRowOrderSchema,
   FeedRowSchema,
   FeedTurnActivitySchema,
   type FeedId,
@@ -1476,6 +1478,23 @@ export const mergeTabRow = (
     overrides,
   );
 
+/** The sentence the merge-queue question leads with. */
+export const MERGE_QUEUE_OFFER_HEADLINE = "this merge is in the queue: evict it, run it next, or leave it be?";
+
+/**
+ * A running sync merge's head, PINNED to the feed's bottom and carrying the
+ * merge-queue question an interrupt raised (FeedMerge.queue_offer).
+ */
+export const mergeQueueOfferRow = (overrides?: Partial<RowInit>): FeedRow => {
+  const row = activityRow(mergeUnit("update"), { id: feedId("merge-q"), ...overrides });
+  row.order = create(FeedRowOrderSchema, { key: "zzzz-pin", pinned: {} });
+  if (row.row.case !== "activity" || row.row.value.unit.case !== "merge") throw new Error("mergeUnit built no merge");
+  row.row.value.unit.value.queueOffer = create(FeedMergeQueueOfferSchema, {
+    headline: { text: MERGE_QUEUE_OFFER_HEADLINE },
+  });
+  return row;
+};
+
 export const MERGE_RESULTS = ["update", "success", "failed", "abandoned"] as const;
 export type MergeResult = (typeof MERGE_RESULTS)[number];
 
@@ -2705,17 +2724,6 @@ export function heldPrompt(init?: {
 export const heldPromptItem = (init?: Parameters<typeof heldPrompt>[0]): HeldItemInit => ({
   id: { value: `held:prompt:${init?.turn ?? HELD_TURN_ID}` },
   item: { case: "prompt", value: heldPrompt(init) },
-});
-
-export const HELD_OFFER_ARMS = ["mergeDequeue"] as const;
-export const HELD_OFFER_HEADLINE = "your merge is queued behind 2 others";
-
-export const heldOfferItem = (headline = HELD_OFFER_HEADLINE): HeldItemInit => ({
-  id: { value: "held:offer:merge_dequeue" },
-  item: {
-    case: "offer",
-    value: { offer: { case: "mergeDequeue", value: { headline: { text: headline } } } },
-  },
 });
 
 export function heldSection(init?: { items?: HeldItemInit[] }): FeedHeld {

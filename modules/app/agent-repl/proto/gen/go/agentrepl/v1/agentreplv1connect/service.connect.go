@@ -170,9 +170,9 @@ const (
 	// AgentReplUpdateClassifierPromptProcedure is the fully-qualified name of the AgentRepl's
 	// UpdateClassifierPrompt RPC.
 	AgentReplUpdateClassifierPromptProcedure = "/agentrepl.v1.AgentRepl/UpdateClassifierPrompt"
-	// AgentReplAnswerHeldOfferProcedure is the fully-qualified name of the AgentRepl's AnswerHeldOffer
-	// RPC.
-	AgentReplAnswerHeldOfferProcedure = "/agentrepl.v1.AgentRepl/AnswerHeldOffer"
+	// AgentReplAnswerMergeQueueOfferProcedure is the fully-qualified name of the AgentRepl's
+	// AnswerMergeQueueOffer RPC.
+	AgentReplAnswerMergeQueueOfferProcedure = "/agentrepl.v1.AgentRepl/AnswerMergeQueueOffer"
 	// AgentReplUpdateShutdownScheduleProcedure is the fully-qualified name of the AgentRepl's
 	// UpdateShutdownSchedule RPC.
 	AgentReplUpdateShutdownScheduleProcedure = "/agentrepl.v1.AgentRepl/UpdateShutdownSchedule"
@@ -305,7 +305,7 @@ var (
 	agentReplEditHeldPromptMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("EditHeldPrompt")
 	agentReplFoldHeldPromptMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("FoldHeldPrompt")
 	agentReplUpdateClassifierPromptMethodDescriptor   = agentReplServiceDescriptor.Methods().ByName("UpdateClassifierPrompt")
-	agentReplAnswerHeldOfferMethodDescriptor          = agentReplServiceDescriptor.Methods().ByName("AnswerHeldOffer")
+	agentReplAnswerMergeQueueOfferMethodDescriptor    = agentReplServiceDescriptor.Methods().ByName("AnswerMergeQueueOffer")
 	agentReplUpdateShutdownScheduleMethodDescriptor   = agentReplServiceDescriptor.Methods().ByName("UpdateShutdownSchedule")
 	agentReplDeployMethodDescriptor                   = agentReplServiceDescriptor.Methods().ByName("Deploy")
 	agentReplUpdateMergeQueueMethodDescriptor         = agentReplServiceDescriptor.Methods().ByName("UpdateMergeQueue")
@@ -492,9 +492,9 @@ type AgentReplClient interface {
 	// the daemon commits that one file. See
 	// endpoint_update_classifier_prompt.proto.
 	UpdateClassifierPrompt(context.Context, *connect.Request[v1.UpdateClassifierPromptRequest]) (*connect.Response[v1.UpdateClassifierPromptResponse], error)
-	// Answer a question the daemon holds in the feed's held section. See
-	// endpoint_answer_held_offer.proto.
-	AnswerHeldOffer(context.Context, *connect.Request[v1.AnswerHeldOfferRequest]) (*connect.Response[v1.AnswerHeldOfferResponse], error)
+	// Answer the merge-queue question an interrupt raised in the merge bubble.
+	// See endpoint_answer_merge_queue_offer.proto.
+	AnswerMergeQueueOffer(context.Context, *connect.Request[v1.AnswerMergeQueueOfferRequest]) (*connect.Response[v1.AnswerMergeQueueOfferResponse], error)
 	// The deploy tooling's drain-and-exit control. See
 	// endpoint_update_shutdown_schedule.proto.
 	UpdateShutdownSchedule(context.Context, *connect.Request[v1.UpdateShutdownScheduleRequest]) (*connect.Response[v1.UpdateShutdownScheduleResponse], error)
@@ -897,10 +897,10 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(agentReplUpdateClassifierPromptMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
-		answerHeldOffer: connect.NewClient[v1.AnswerHeldOfferRequest, v1.AnswerHeldOfferResponse](
+		answerMergeQueueOffer: connect.NewClient[v1.AnswerMergeQueueOfferRequest, v1.AnswerMergeQueueOfferResponse](
 			httpClient,
-			baseURL+AgentReplAnswerHeldOfferProcedure,
-			connect.WithSchema(agentReplAnswerHeldOfferMethodDescriptor),
+			baseURL+AgentReplAnswerMergeQueueOfferProcedure,
+			connect.WithSchema(agentReplAnswerMergeQueueOfferMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
 		updateShutdownSchedule: connect.NewClient[v1.UpdateShutdownScheduleRequest, v1.UpdateShutdownScheduleResponse](
@@ -1137,7 +1137,7 @@ type agentReplClient struct {
 	editHeldPrompt           *connect.Client[v1.EditHeldPromptRequest, v1.EditHeldPromptResponse]
 	foldHeldPrompt           *connect.Client[v1.FoldHeldPromptRequest, v1.FoldHeldPromptResponse]
 	updateClassifierPrompt   *connect.Client[v1.UpdateClassifierPromptRequest, v1.UpdateClassifierPromptResponse]
-	answerHeldOffer          *connect.Client[v1.AnswerHeldOfferRequest, v1.AnswerHeldOfferResponse]
+	answerMergeQueueOffer    *connect.Client[v1.AnswerMergeQueueOfferRequest, v1.AnswerMergeQueueOfferResponse]
 	updateShutdownSchedule   *connect.Client[v1.UpdateShutdownScheduleRequest, v1.UpdateShutdownScheduleResponse]
 	deploy                   *connect.Client[v1.DeployRequest, v1.DeployResponse]
 	updateMergeQueue         *connect.Client[v1.UpdateMergeQueueRequest, v1.UpdateMergeQueueResponse]
@@ -1415,9 +1415,9 @@ func (c *agentReplClient) UpdateClassifierPrompt(ctx context.Context, req *conne
 	return c.updateClassifierPrompt.CallUnary(ctx, req)
 }
 
-// AnswerHeldOffer calls agentrepl.v1.AgentRepl.AnswerHeldOffer.
-func (c *agentReplClient) AnswerHeldOffer(ctx context.Context, req *connect.Request[v1.AnswerHeldOfferRequest]) (*connect.Response[v1.AnswerHeldOfferResponse], error) {
-	return c.answerHeldOffer.CallUnary(ctx, req)
+// AnswerMergeQueueOffer calls agentrepl.v1.AgentRepl.AnswerMergeQueueOffer.
+func (c *agentReplClient) AnswerMergeQueueOffer(ctx context.Context, req *connect.Request[v1.AnswerMergeQueueOfferRequest]) (*connect.Response[v1.AnswerMergeQueueOfferResponse], error) {
+	return c.answerMergeQueueOffer.CallUnary(ctx, req)
 }
 
 // UpdateShutdownSchedule calls agentrepl.v1.AgentRepl.UpdateShutdownSchedule.
@@ -1724,9 +1724,9 @@ type AgentReplHandler interface {
 	// the daemon commits that one file. See
 	// endpoint_update_classifier_prompt.proto.
 	UpdateClassifierPrompt(context.Context, *connect.Request[v1.UpdateClassifierPromptRequest]) (*connect.Response[v1.UpdateClassifierPromptResponse], error)
-	// Answer a question the daemon holds in the feed's held section. See
-	// endpoint_answer_held_offer.proto.
-	AnswerHeldOffer(context.Context, *connect.Request[v1.AnswerHeldOfferRequest]) (*connect.Response[v1.AnswerHeldOfferResponse], error)
+	// Answer the merge-queue question an interrupt raised in the merge bubble.
+	// See endpoint_answer_merge_queue_offer.proto.
+	AnswerMergeQueueOffer(context.Context, *connect.Request[v1.AnswerMergeQueueOfferRequest]) (*connect.Response[v1.AnswerMergeQueueOfferResponse], error)
 	// The deploy tooling's drain-and-exit control. See
 	// endpoint_update_shutdown_schedule.proto.
 	UpdateShutdownSchedule(context.Context, *connect.Request[v1.UpdateShutdownScheduleRequest]) (*connect.Response[v1.UpdateShutdownScheduleResponse], error)
@@ -2125,10 +2125,10 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(agentReplUpdateClassifierPromptMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
-	agentReplAnswerHeldOfferHandler := connect.NewUnaryHandler(
-		AgentReplAnswerHeldOfferProcedure,
-		svc.AnswerHeldOffer,
-		connect.WithSchema(agentReplAnswerHeldOfferMethodDescriptor),
+	agentReplAnswerMergeQueueOfferHandler := connect.NewUnaryHandler(
+		AgentReplAnswerMergeQueueOfferProcedure,
+		svc.AnswerMergeQueueOffer,
+		connect.WithSchema(agentReplAnswerMergeQueueOfferMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
 	agentReplUpdateShutdownScheduleHandler := connect.NewUnaryHandler(
@@ -2411,8 +2411,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplFoldHeldPromptHandler.ServeHTTP(w, r)
 		case AgentReplUpdateClassifierPromptProcedure:
 			agentReplUpdateClassifierPromptHandler.ServeHTTP(w, r)
-		case AgentReplAnswerHeldOfferProcedure:
-			agentReplAnswerHeldOfferHandler.ServeHTTP(w, r)
+		case AgentReplAnswerMergeQueueOfferProcedure:
+			agentReplAnswerMergeQueueOfferHandler.ServeHTTP(w, r)
 		case AgentReplUpdateShutdownScheduleProcedure:
 			agentReplUpdateShutdownScheduleHandler.ServeHTTP(w, r)
 		case AgentReplDeployProcedure:
@@ -2678,8 +2678,8 @@ func (UnimplementedAgentReplHandler) UpdateClassifierPrompt(context.Context, *co
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.UpdateClassifierPrompt is not implemented"))
 }
 
-func (UnimplementedAgentReplHandler) AnswerHeldOffer(context.Context, *connect.Request[v1.AnswerHeldOfferRequest]) (*connect.Response[v1.AnswerHeldOfferResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.AnswerHeldOffer is not implemented"))
+func (UnimplementedAgentReplHandler) AnswerMergeQueueOffer(context.Context, *connect.Request[v1.AnswerMergeQueueOfferRequest]) (*connect.Response[v1.AnswerMergeQueueOfferResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.AnswerMergeQueueOffer is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) UpdateShutdownSchedule(context.Context, *connect.Request[v1.UpdateShutdownScheduleRequest]) (*connect.Response[v1.UpdateShutdownScheduleResponse], error) {

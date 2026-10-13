@@ -3,6 +3,7 @@ package merge
 import (
 	"context"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
@@ -215,24 +216,54 @@ func (o *orchestrator) Evict(ctx context.Context, ws ids.WorkspaceID) error {
 // Move moves a workspace's waiting merge one place up or down its queue, and
 // redraws every bubble on that queue when the order changed.
 func (o *orchestrator) Move(ctx context.Context, ws ids.WorkspaceID, move wsm.MergeMove) (bool, error) {
-	const op = "daemon.merge.move"
+	return o.reorder(ctx, ws, reordering{
+		op:      "daemon.merge.move",
+		fields:  dlog.Context{"move": move.String()},
+		failed:  "could not move a merge in its queue",
+		unmoved: "a merge asked to move has no waiting merge to pass on that side, and stays where it is",
+		moved:   "moved a merge one place in its queue",
+		do: func(repo wsm.RepoKey) (bool, error) {
+			return o.deps.DB.MoveMerge(ctx, repo, ws, move)
+		},
+	})
+}
+
+// reordering is one way a waiting merge's place in its queue is changed: the
+// store's reorder, and the records each of its outcomes leaves.
+type reordering struct {
+	op string
+	// fields are the reordering's own context, beside the workspace and the
+	// repository every record carries.
+	fields  dlog.Context
+	failed  string
+	unmoved string
+	moved   string
+	do      func(repo wsm.RepoKey) (bool, error)
+}
+
+// reorder runs one reordering of WS's waiting merge, answering whether it
+// moved, and redraws every bubble on that queue when the order changed. A
+// store failure is recorded at ERROR here, once; a workspace with nothing
+// queued is the queue's refusal, answered as it is.
+func (o *orchestrator) reorder(ctx context.Context, ws ids.WorkspaceID, r reordering) (bool, error) {
 	log := o.log(ctx, ws)
 	repo, err := o.queueOf(ctx, ws)
 	if err != nil {
 		return false, err
 	}
-	fields := dlog.Context{"workspace": string(ws), "repo": string(repo), "move": move.String()}
-	moved, err := o.deps.DB.MoveMerge(ctx, repo, ws, move)
+	fields := dlog.Context{"workspace": string(ws), "repo": string(repo)}
+	maps.Copy(fields, r.fields)
+	moved, err := r.do(repo)
 	if err != nil {
 		fields["error"] = err.Error()
-		log.Error(op, "could not move a merge in its queue", fields)
+		log.Error(r.op, r.failed, fields)
 		return false, err
 	}
 	if !moved {
-		log.Info(op, "a merge asked to move has no waiting merge to pass on that side, and stays where it is", fields)
+		log.Info(r.op, r.unmoved, fields)
 		return false, nil
 	}
-	log.Info(op, "moved a merge one place in its queue", fields)
+	log.Info(r.op, r.moved, fields)
 	return true, o.republishQueue(ctx, repo)
 }
 

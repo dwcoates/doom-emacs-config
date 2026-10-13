@@ -164,6 +164,10 @@ func (s *server) Interrupt(
 	}
 	success := &agentreplv1.InterruptSuccess{}
 	switch {
+	case outcome.MergeQueueOffered:
+		success.Outcome = &agentreplv1.InterruptSuccess_MergeQueueOffered{
+			MergeQueueOffered: &agentreplv1.InterruptMergeQueueOffered{},
+		}
 	case outcome.NothingRunning:
 		nothing := &agentreplv1.InterruptNothingRunning{}
 		if target.Turn {
@@ -188,7 +192,7 @@ func (s *server) Interrupt(
 		}
 	}
 	subject.Log.Debug("daemon.server.interrupt", "answered what the interrupt stopped",
-		dlog.Context{"nothing_running": outcome.NothingRunning, "detached": outcome.DetachedCount})
+		dlog.Context{"nothing_running": outcome.NothingRunning, "merge_queue_offered": outcome.MergeQueueOffered, "detached": outcome.DetachedCount})
 	resp.Result = &agentreplv1.InterruptResponse_Success{Success: success}
 	return connect.NewResponse(resp), nil
 }
