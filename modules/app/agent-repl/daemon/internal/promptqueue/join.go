@@ -3,6 +3,8 @@ package promptqueue
 import (
 	"context"
 	"errors"
+	"fmt"
+	"slices"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
@@ -37,8 +39,12 @@ import (
 // an interjecting prompt runs next with the folded text already in its
 // transcript.
 //
-// ONE PROMPT JOINS AT A TIME. While one waits, a prompt behind it is never
-// classified: it waits its turn, as it would behind a session act.
+// ONE PROMPT IS JUDGED TO JOIN AT A TIME. While one waits, a prompt behind it
+// is never classified: it waits its turn, as it would behind a session act.
+// A FLUSH (flush.go) sends every held prompt to join at once, and the shim
+// takes any number: when the turn they joined ends with them unfolded, the
+// OLDEST runs as its own turn and the rest join it, as the vendor runs them
+// all as one prompt batch (shim.v1.StartTurnRequest.join_running_turn).
 
 // opJoin is the operation a join's records are filed under.
 const opJoin = "daemon.promptqueue.join"
@@ -55,15 +61,16 @@ type joiningPrompt struct {
 	origin conversationv1.PromptOrigin
 }
 
-// joining answers the prompt waiting to join the running turn, if one does.
+// joining answers the oldest prompt waiting to join the running turn, if one
+// does.
 func (q *queue) joining(ws ids.WorkspaceID) (joiningPrompt, bool) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	state, ok := q.states[ws]
-	if !ok || state.joining == nil {
+	if !ok || len(state.joins) == 0 {
 		return joiningPrompt{}, false
 	}
-	return *state.joining, true
+	return state.joins[0], true
 }
 
 // behindJoinVerdict is the verdict a prompt earns while another waits to join
@@ -101,24 +108,37 @@ func (q *queue) settleJoin(ctx context.Context, sub Submission, running ids.Turn
 	}
 	q.record(ctx, sub, c, log)
 	state.verdicts.Unlock()
-	q.joinLocked(ctx, d, sub, running, log)
+	q.joinLocked(ctx, d, sub, running, joinJudged, log)
 }
 
-// joinLocked sends SUB to join RUNNING. The caller holds the delivery lock
-// (d), which is released for the call itself (call.go). Every way the join
-// cannot go leaves the prompt held for the running turn's end, with the reason
-// stamped on its verdict.
-func (q *queue) joinLocked(ctx context.Context, d *delivery, sub Submission, running ids.TurnID, log dlog.Logger) {
+// joinCause is why a prompt is sent to join the running turn.
+type joinCause int
+
+const (
+	// joinJudged is the classifier's after_tool_call verdict: one prompt
+	// joins at a time.
+	joinJudged joinCause = iota
+	// joinFlushed is a flush of the held queue (flush.go): every held prompt
+	// joins at once, beside the ones already waiting.
+	joinFlushed
+)
+
+// joinLocked sends SUB to join RUNNING, for CAUSE. The caller holds the
+// delivery lock (d), which is released for the call itself (call.go). Every
+// way the join cannot go leaves the prompt held for the running turn's end,
+// with the reason stamped on its verdict. It answers what became of the
+// prompt.
+func (q *queue) joinLocked(ctx context.Context, d *delivery, sub Submission, running ids.TurnID, cause joinCause, log dlog.Logger) joinOutcome {
 	log = log.With(dlog.Context{"turn": string(sub.Turn), "running_turn": string(running)})
 	held, err := q.standingHold(ctx, sub.WS, sub.Turn)
 	switch {
 	case errors.Is(err, ErrAlreadyDelivered), errors.Is(err, ErrNoSuchHold):
 		log.Info(opJoin, "the prompt no longer stands; there is nothing to send to join the running turn", dlog.Context{"cause": err.Error()})
-		return
+		return joinGone
 	case err != nil:
 		log.Error(opJoin, "could not read the prompt's hold; it waits for the running turn to end", dlog.Context{"cause": err.Error()})
 		q.recordWaiting(ctx, sub, "the prompt's hold could not be read, so it waits for the running turn to end", log)
-		return
+		return joinWaiting
 	}
 	// A SHIM CALL IN FLIGHT DEFERS THE JOIN, it does not refuse it (call.go):
 	// one call at a time keeps the join off the shim until the call settles,
@@ -129,31 +149,31 @@ func (q *queue) joinLocked(ctx context.Context, d *delivery, sub Submission, run
 	// 2026-10-11). The call's settle takes the join again (redrive).
 	if q.deferToCall(d, log, "join") {
 		q.mu.Lock()
-		d.state.deferredJoins = append(d.state.deferredJoins, deferredJoin{sub: sub, running: running})
+		d.state.deferredJoins = append(d.state.deferredJoins, deferredJoin{sub: sub, running: running, cause: cause})
 		q.mu.Unlock()
-		return
+		return joinDeferred
 	}
-	if reason, blocked := q.joinBlocked(sub.WS, held, running); blocked {
+	if reason, blocked := q.joinBlocked(sub.WS, held, running, cause); blocked {
 		log.Info(opJoin, "the prompt cannot join the running turn; it waits for it to end", dlog.Context{"why": reason})
 		q.recordWaiting(ctx, sub, reason, log)
-		return
+		return joinWaiting
 	}
 	sender, ok := q.deps.Client(sub.WS)
 	if !ok {
 		log.Info(opJoin, "the workspace has no session to send the prompt to; it waits for the running turn to end", nil)
 		q.recordWaiting(ctx, sub, "the session was not there to take the prompt into the running turn, so it waits for it to end", log)
-		return
+		return joinWaiting
 	}
 	watcher, ok := q.deps.Watcher(sub.WS)
 	if !ok {
 		log.Info(opJoin, "the workspace has no session watcher; the prompt waits for the running turn to end", nil)
 		q.recordWaiting(ctx, sub, "the session was not there to take the prompt into the running turn, so it waits for it to end", log)
-		return
+		return joinWaiting
 	}
 	if !watcher.OnTurnJoining(sub.WS, sub.Turn) {
 		log.Info(opJoin, "the running turn is one the vendor started, which is never joined; the prompt waits for it to end", nil)
 		q.recordWaiting(ctx, sub, "the running turn is one the agent started on its own, which is never joined, so the prompt waits for it to end", log)
-		return
+		return joinWaiting
 	}
 	text := saidText(sub.Said)
 	if err := q.recordTurn(ctx, wsm.Turn{
@@ -162,7 +182,7 @@ func (q *queue) joinLocked(ctx context.Context, d *delivery, sub Submission, run
 		watcher.OnTurnOpenFailed(sub.WS, sub.Turn)
 		log.Error(opJoin, "could not record the turn before sending the prompt to join the running turn; it waits for it to end", dlog.Context{"cause": err.Error()})
 		q.recordWaiting(ctx, sub, "the prompt's turn could not be recorded, so it waits for the running turn to end", log)
-		return
+		return joinWaiting
 	}
 	q.mirrorAccepted(sub.WS, sub.Turn, sub.Said, sub.Origin)
 	// THE JOIN IS RECORDED BEFORE THE PROMPT IS SENT. The shim's answer and
@@ -173,7 +193,7 @@ func (q *queue) joinLocked(ctx context.Context, d *delivery, sub Submission, run
 	// a turn the queue never sent to join" (integration
 	// TestAFoldedJoinRunsNoTurnOfItsOwn under load, 2026-10-03). A refused
 	// send withdraws it.
-	q.setJoining(sub.WS, joiningPrompt{turn: sub.Turn, into: running, said: sub.Said, origin: sub.Origin})
+	q.addJoin(sub.WS, joiningPrompt{turn: sub.Turn, into: running, said: sub.Said, origin: sub.Origin})
 	var success *shimv1.StartTurnSuccess
 	d.outside(shimCall{what: "join", turn: sub.Turn, holds: []ids.TurnID{sub.Turn}}, log, func() {
 		success, err = sender.JoinRunningTurn(ctx, sub.Turn, sub.Said, sub.Origin)
@@ -183,26 +203,54 @@ func (q *queue) joinLocked(ctx context.Context, d *delivery, sub Submission, run
 		watcher.OnTurnOpenFailed(sub.WS, sub.Turn)
 		log.Error(opJoin, "the shim refused the prompt sent to join the running turn; it waits for it to end", dlog.Context{"cause": err.Error()})
 		q.recordWaiting(ctx, sub, "the session would not take the prompt into the running turn, so it waits for it to end", log)
-		return
+		return joinWaiting
 	}
 	q.deps.Footer.OnSubmission(sub.WS, footer.Submission{Stage: footer.StageAfterToolCall})
 	handOver(sub.WS, success, watcher)
 	q.touchEngagement(ctx, sub.WS, log)
-	log.Info(opJoin, "sent the prompt to join the running turn after its current tool call; nothing was interrupted", nil)
+	log.Info(opJoin, "sent the prompt to join the running turn after its current tool call; nothing was interrupted", dlog.Context{"cause": cause.String()})
 	// A retirement that fails is recorded at ERROR where it failed.
 	_ = q.retireDelivered(ctx, sub.WS, sub.Turn, log)
+	return joinSent
+}
+
+// joinOutcome is what became of a prompt sent to join the running turn.
+type joinOutcome int
+
+const (
+	// joinSent: the shim took it into the running turn.
+	joinSent joinOutcome = iota
+	// joinDeferred: a shim call stands, and its settle sends it (redrive).
+	joinDeferred
+	// joinWaiting: it could not go, and waits for the running turn's end with
+	// the reason on its verdict.
+	joinWaiting
+	// joinGone: it no longer stands; something else delivered or dropped it.
+	joinGone
+)
+
+func (c joinCause) String() string {
+	switch c {
+	case joinJudged:
+		return "judged"
+	case joinFlushed:
+		return "flushed"
+	default:
+		return fmt.Sprintf("join_cause(%d)", int(c))
+	}
 }
 
 // joinBlocked answers why HELD cannot join RUNNING now, if something keeps
 // it: the running turn ended before the prompt was sent (it then waits for the
-// pop, in order), another prompt already joins it, the workspace drains for a
+// pop, in order), another prompt already joins it (for a judged join alone: a
+// flush sends every prompt beside the rest), the workspace drains for a
 // bounce, or an edit withholds the prompt. A shim call in flight is not among
 // them: it defers the join to its settle (joinLocked).
-func (q *queue) joinBlocked(ws ids.WorkspaceID, held wsm.HeldPrompt, running ids.TurnID) (string, bool) {
+func (q *queue) joinBlocked(ws ids.WorkspaceID, held wsm.HeldPrompt, running ids.TurnID, cause joinCause) (string, bool) {
 	if !q.isRunning(ws, running) {
 		return "the turn it was to join ended before it was sent, so it waits its turn", true
 	}
-	if other, ok := q.joining(ws); ok {
+	if other, ok := q.joining(ws); ok && cause == joinJudged {
 		return "another prompt (" + string(other.turn) + ") is already joining the running turn, so this one waits for it to end", true
 	}
 	if q.isDraining(ws) {
@@ -214,14 +262,16 @@ func (q *queue) joinBlocked(ws ids.WorkspaceID, held wsm.HeldPrompt, running ids
 	return "", false
 }
 
-// setJoining records the prompt sent to join the running turn.
-func (q *queue) setJoining(ws ids.WorkspaceID, joined joiningPrompt) {
+// addJoin records a prompt sent to join the running turn, behind any already
+// waiting.
+func (q *queue) addJoin(ws ids.WorkspaceID, joined joiningPrompt) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	q.stateLocked(ws).joining = &joined
+	state := q.stateLocked(ws)
+	state.joins = append(state.joins, joined)
 }
 
-// withdrawJoining clears the joining prompt when TURN is its own turn: a send
+// withdrawJoining clears the joining prompt whose own turn is TURN: a send
 // the shim refused joined nothing.
 func (q *queue) withdrawJoining(ws ids.WorkspaceID, turn ids.TurnID) {
 	q.mu.Lock()
@@ -229,15 +279,40 @@ func (q *queue) withdrawJoining(ws ids.WorkspaceID, turn ids.TurnID) {
 	q.stateLocked(ws).endJoiningLocked(turn)
 }
 
-// endJoiningLocked clears the joining prompt when TURN is its own turn, and
+// endJoiningLocked clears the joining prompt whose own turn is TURN, and
 // answers it; q.mu is held.
 func (state *wsState) endJoiningLocked(turn ids.TurnID) (joiningPrompt, bool) {
-	if state.joining == nil || state.joining.turn != turn {
-		return joiningPrompt{}, false
+	for i, joined := range state.joins {
+		if joined.turn != turn {
+			continue
+		}
+		state.joins = slices.Delete(state.joins, i, i+1)
+		return joined, true
 	}
-	joined := *state.joining
-	state.joining = nil
-	return joined, true
+	return joiningPrompt{}, false
+}
+
+// standJoinsLocked takes the prompts sent to join ENDED, which ended without
+// folding them in, and answers the OLDEST, which now runs as its own turn: the
+// rest now join it, as the vendor runs them all as one prompt batch. q.mu is
+// held.
+func (state *wsState) standJoinsLocked(ended ids.TurnID) (joiningPrompt, bool) {
+	var stood joiningPrompt
+	found := false
+	kept := state.joins[:0]
+	for _, joined := range state.joins {
+		switch {
+		case joined.into != ended:
+			kept = append(kept, joined)
+		case !found:
+			stood, found = joined, true
+		default:
+			joined.into = stood.turn
+			kept = append(kept, joined)
+		}
+	}
+	state.joins = kept
+	return stood, found
 }
 
 // onFolded closes the turn of a prompt the vendor folded into the running

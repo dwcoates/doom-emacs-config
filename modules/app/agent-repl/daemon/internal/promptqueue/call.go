@@ -189,6 +189,7 @@ func takeAll[T any](q *queue, ledger *[]T) []T {
 type deferredJoin struct {
 	sub     Submission
 	running ids.TurnID
+	cause   joinCause
 }
 
 // redriveJoins takes again every join deferred behind the settled call. Each
@@ -201,7 +202,7 @@ func (q *queue) redriveJoins(ctx context.Context, d *delivery, log dlog.Logger) 
 		log.Debug(opCall, "taking again a join deferred behind the shim call", dlog.Context{
 			"turn": string(join.sub.Turn), "running_turn": string(join.running),
 		})
-		q.joinLocked(ctx, d, join.sub, join.running, log)
+		q.joinLocked(ctx, d, join.sub, join.running, join.cause, log)
 	}
 }
 

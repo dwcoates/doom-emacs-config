@@ -2430,6 +2430,126 @@ describe("a prompt joining the running turn", () => {
     // Assert
     expect(h.queries[0]?.query.calls ?? []).not.toContain("interrupt");
   });
+
+  it("writes every folded prompt's row naming the running turn, in the order the vendor took them", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await realPrompt(h, "turn-1");
+    const running = h.minted.at(-1) ?? "";
+    const second = await join(h, "turn-2");
+    const third = await join(h, "turn-3");
+
+    // Act
+    await h.engine.onSdkMessage(consumed(assistantMessage("after-the-tool"), running, [running, second, third]));
+
+    // Assert
+    expect(promptRows(h)).toEqual([
+      ["turn-1", undefined],
+      ["turn-2", "turn-1"],
+      ["turn-3", "turn-1"],
+    ]);
+  });
+
+  it("opens the first unfolded join as its own turn and folds the rest of the vendor's batch into it", async () => {
+    // Arrange: the vendor runs both queued prompts as one batch, answering the last.
+    const h = harness();
+    await started(h);
+    await realPrompt(h, "turn-1");
+    const running = h.minted.at(-1) ?? "";
+    const second = await join(h, "turn-2");
+    const third = await join(h, "turn-3");
+    await h.engine.onSdkMessage(consumed(resultMessage("turn-1-result"), running, [running]));
+
+    // Act
+    await h.engine.onSdkMessage(consumed(assistantMessage("batch-reply"), third, [second, third]));
+
+    // Assert
+    expect(promptRows(h)).toEqual([
+      ["turn-1", undefined],
+      ["turn-2", undefined],
+      ["turn-3", "turn-2"],
+    ]);
+  });
+
+  it("charges the vendor's batch to the first unfolded join's turn", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await realPrompt(h, "turn-1");
+    const running = h.minted.at(-1) ?? "";
+    const second = await join(h, "turn-2");
+    const third = await join(h, "turn-3");
+    await h.engine.onSdkMessage(consumed(resultMessage("turn-1-result"), running, [running]));
+
+    // Act
+    await h.engine.onSdkMessage(consumed(assistantMessage("batch-reply"), third, [second, third]));
+
+    // Assert
+    expect(h.fold.contexts.at(-1)?.turnId?.value).toBe("turn-2");
+  });
+
+  it("closes the first unfolded join's turn on the batch's result, freeing the slot", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await realPrompt(h, "turn-1");
+    const running = h.minted.at(-1) ?? "";
+    const second = await join(h, "turn-2");
+    const third = await join(h, "turn-3");
+    await h.engine.onSdkMessage(consumed(resultMessage("turn-1-result"), running, [running]));
+    await h.engine.onSdkMessage(consumed(assistantMessage("batch-reply"), third, [second, third]));
+
+    // Act
+    await h.engine.onSdkMessage(consumed(resultMessage("batch-result"), third, [second, third]));
+
+    // Assert
+    expect((await startDuring(h, "turn-4")).result.case).toBe("success");
+  });
+
+  it("runs a join the vendor left out of the batch as its own turn once the batch ends", async () => {
+    // Arrange: the vendor runs turn-2 alone, so turn-3 is still queued behind it.
+    const h = harness();
+    await started(h);
+    await realPrompt(h, "turn-1");
+    const running = h.minted.at(-1) ?? "";
+    const second = await join(h, "turn-2");
+    await join(h, "turn-3");
+    await h.engine.onSdkMessage(consumed(resultMessage("turn-1-result"), running, [running]));
+    await h.engine.onSdkMessage(consumed(assistantMessage("turn-2-reply"), second, [second]));
+
+    // Act
+    await h.engine.onSdkMessage(consumed(resultMessage("turn-2-result"), second, [second]));
+
+    // Assert
+    expect(promptRows(h)).toEqual([
+      ["turn-1", undefined],
+      ["turn-2", undefined],
+      ["turn-3", undefined],
+    ]);
+  });
+
+  it("ends every waiting prompt's turn when the query dies, in the order they were sent", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await realPrompt(h, "turn-1");
+    await join(h, "turn-2");
+    await join(h, "turn-3");
+
+    // Act
+    h.queries[0]?.query.end();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    // Assert
+    expect(rowsAfterStart(h).slice(-5)).toEqual([
+      "terminal:turn-1",
+      "prompt:turn-2",
+      "terminal:turn-2",
+      "prompt:turn-3",
+      "terminal:turn-3",
+    ]);
+  });
 });
 
 /**

@@ -168,7 +168,7 @@ func (q *queue) settleQueuedLocked(ctx context.Context, sub Submission, ahead ws
 		})
 		if route == classifier.RouteAfterToolCall {
 			// THE DELIVERY LOCK IS ALREADY HELD, which is what the join needs.
-			q.joinLocked(ctx, d, sub, ahead.Turn, log)
+			q.joinLocked(ctx, d, sub, ahead.Turn, joinJudged, log)
 			return false
 		}
 		return true
@@ -190,12 +190,22 @@ func (q *queue) recordWaiting(ctx context.Context, sub Submission, reason string
 
 // isRunning reports whether TURN is the session's running turn.
 func (q *queue) isRunning(ws ids.WorkspaceID, turn ids.TurnID) bool {
+	running, ok := q.turnInFlight(ws)
+	return ok && running == turn
+}
+
+// turnInFlight answers the turn the session's watcher stands in flight. None
+// when no turn runs, or when the workspace has no watcher.
+func (q *queue) turnInFlight(ws ids.WorkspaceID) (ids.TurnID, bool) {
 	watcher, ok := q.deps.Watcher(ws)
 	if !ok {
-		return false
+		return "", false
 	}
 	running := watcher.TurnInFlight()
-	return running != nil && *running == turn
+	if running == nil {
+		return "", false
+	}
+	return *running, true
 }
 
 // coalesce folds SUB into the queued prompt INTO: INTO keeps its place and

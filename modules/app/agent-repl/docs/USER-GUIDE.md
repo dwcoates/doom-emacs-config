@@ -114,6 +114,8 @@ These clicks jump to an entry in the feed:
 
 - **A merge is SYNC or ASYNC.**
   - A sync merge runs in your workspace: your agent resolves its conflicts and fixes its tests in the bubble's tabs, and your prompts are held until it ends.
+    - The prompts you queued before the agent asked for it are sent to the agent at once, in order, without interrupting it, so it answers them before the merge starts.
+    - Prompts you send once the merge is running wait for it to end.
   - An async merge runs in a hidden merge workspace forked from yours, and your workspace stays free.
   - "Sync" and "in place" mean the same thing, and so do "async" and "detached".
 - **An agent's `/merge-queue own` merges sync, and your workspace closes once it lands.**
