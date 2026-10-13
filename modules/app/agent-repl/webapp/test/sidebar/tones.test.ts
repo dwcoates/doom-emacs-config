@@ -23,7 +23,7 @@ const GATE_GLYPHS = renderColors.gate_glyphs as Record<string, string>;
 const GLYPH_INKS = renderColors.glyph_inks as Record<string, string>;
 /** The arms a one-shot's glyph replaces the mark on, in the generated spelling. */
 const ONE_SHOT_ARMS: string[] = ROSTER_STATUS_CASES.filter((arm) =>
-  (renderColors.one_shot_glyph_arms as string[]).includes(protoArmName(arm)),
+  renderColors.one_shot_glyph_arms.includes(protoArmName(arm)),
 );
 
 describe("the rail's arm table against the schema", () => {
