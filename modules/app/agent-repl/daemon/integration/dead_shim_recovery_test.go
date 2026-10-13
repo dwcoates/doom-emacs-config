@@ -297,11 +297,9 @@ func bootAfterADeadShim(t *testing.T, extraEnv ...string) (*fixture, *harness.Da
 		t.Fatalf("kill the fake shim %d: %v", pid, err)
 	}
 	harness.AwaitProcessGone(t, f.d.Ctx(), pid)
-	successor := harness.StartDaemon(t, harness.Opts{
-		StateDir: f.d.StateDir, ProfileDir: f.d.ProfileDir,
-		ExtraArgs: []string{"--default-config-dir", f.d.DefaultConfigDir},
-		ExtraEnv:  append([]string{"AGENT_REPL_LOCK_DIR=" + f.d.LockDir}, extraEnv...),
-	})
+	opts := f.d.SuccessorOpts()
+	opts.ExtraEnv = extraEnv
+	successor := harness.StartDaemon(t, opts)
 	f.d = successor
 	f.host = successor.WatchHost(f.ws)
 	f.web = successor.WatchWeb(f.ws)
@@ -419,11 +417,7 @@ func TestATurnCutBeforeABootReplaysAsEnded(t *testing.T) {
 	})
 
 	// Act: a successor boots on the same machine.
-	successor := harness.StartDaemon(t, harness.Opts{
-		StateDir: f.d.StateDir, ProfileDir: f.d.ProfileDir,
-		ExtraArgs: []string{"--default-config-dir", f.d.DefaultConfigDir},
-		ExtraEnv:  []string{"AGENT_REPL_LOCK_DIR=" + f.d.LockDir},
-	})
+	successor := harness.StartDaemon(t, f.d.SuccessorOpts())
 	// The boot closing a turn the crash cut is loud by design.
 	successor.ExpectWarnings("daemon.promptqueue.restore_holds")
 	f.d = successor

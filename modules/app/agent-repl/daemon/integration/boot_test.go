@@ -1407,11 +1407,7 @@ func TestBootAnswersHealthWhileTheOpenWorkspacesSessionsComeUp(t *testing.T) {
 	// written BEFORE the successor starts, because the successor's own boot is
 	// what spawns the shim that reads it.
 	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{DelayDiagnostics: true})
-	d2 := harness.StartDaemon(t, harness.Opts{
-		StateDir:   f.d.StateDir,
-		ProfileDir: f.d.ProfileDir,
-		ExtraArgs:  []string{"--default-config-dir", f.d.DefaultConfigDir},
-	})
+	d2 := harness.StartDaemon(t, f.d.SuccessorOpts())
 
 	// Act: the identity query Emacs recognizes a replacement by, under the
 	// bound Emacs gives it.

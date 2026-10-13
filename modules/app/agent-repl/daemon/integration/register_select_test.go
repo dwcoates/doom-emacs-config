@@ -448,15 +448,9 @@ func TestRegisterWorkspaceAnswersWhileTheBootsOwnBringUpIsStuck(t *testing.T) {
 	// successor starts: its own boot bring-up is what spawns the shim that
 	// reads it, which is exactly the race a control-socket script would lose.
 	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{HangStartSession: true})
-	successor := harness.StartDaemon(t, harness.Opts{
-		StateDir:   f.d.StateDir,
-		ProfileDir: f.d.ProfileDir,
-		ExtraArgs: []string{
-			"--default-config-dir", f.d.DefaultConfigDir,
-			"--multi-repo-config-dir", f.d.MultiRepoConfigDir,
-		},
-		ExtraEnv: []string{"AGENT_REPL_LOCK_DIR=" + f.d.LockDir},
-	})
+	opts := f.d.SuccessorOpts()
+	opts.ExtraArgs = append(opts.ExtraArgs, "--multi-repo-config-dir", f.d.MultiRepoConfigDir)
+	successor := harness.StartDaemon(t, opts)
 	// NOTHING IS DECLARED FOR THE STUCK START. The boot's own bring-up and the
 	// register's detached revival both call Sessions.Start against a shim that
 	// never answers, and both settle only when this daemon's own teardown

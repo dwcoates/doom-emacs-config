@@ -115,11 +115,7 @@ func TestARelaunchedDaemonRehydratesAnAnnouncedWorkspacesConversation(t *testing
 	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{
 		ResumeHistory: harness.EncodeHistory(t, relaunchAnswerEntry(), relaunchPromptEntry()),
 	})
-	d2 := harness.StartDaemon(t, harness.Opts{
-		StateDir:   f.d.StateDir,
-		ProfileDir: f.d.ProfileDir,
-		ExtraArgs:  []string{"--default-config-dir", f.d.DefaultConfigDir},
-	})
+	d2 := harness.StartDaemon(t, f.d.SuccessorOpts())
 	f2 := &fixture{d: d2, repo: f.repo, ws: f.ws, t: t}
 
 	// Act: Emacs announces the workspace it still holds.
