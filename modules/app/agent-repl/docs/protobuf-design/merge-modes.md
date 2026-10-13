@@ -88,3 +88,35 @@ ASYNC merge. A sync merge exists only as a ONE-SHOT.
   worktree with uncommitted changes (plain `git worktree remove`, never
   forced; a refusal is logged). Branches are never deleted.
 - The `pick` tab (leftmost, before queue) becomes the `resolving` tab.
+
+### Landed: MergeWorkspaceRequest is one_shot | async; the pick tab is the resolving tab
+
+- WHAT: `agentrepl.v1.MergeWorkspaceRequest.source` is replaced by the `mode`
+  oneof of `MergeWorkspaceOneShot` (landing: own_branch | merged_upstream) and
+  `MergeWorkspaceAsync` (name, branch, optional instruction, optional
+  one_shot workspace to close, cleanup_worktree, compact_after). Refusals:
+  `unknown_source_workspace` (9) becomes `unknown_one_shot_workspace`, and
+  `branch_checked_out_in_requester` (12) is new. `frontend.v1.FeedMergeTabPick`
+  becomes `FeedMergeTabResolving`, keeping field number 12.
+- WHY: a sync merge exists only to conclude the workspace; everything else is
+  async, so the API states the one choice an agent makes.
+- Consequences:
+  - Every MergeWorkspace caller moves to the new request: the daemon's server
+    validation and routing (daemon/internal/server/workspaces.go,
+    validate.go, requestlog_server.go), Emacs (lisp/wire-verbs.el), the
+    merge-queue skill's run.sh, and their tests.
+  - The async merge's worktree starts at the named branch's tip (before: the
+    requester's own tip, or the target's tip for a pick). This is the one
+    change to where a merge starts.
+  - The requester is now handed back a failed ONE-SHOT too (before: only async
+    merges were handed back).
+  - The async one-shot closes the named workspace on landing; cleanup removes
+    the recorded worktrees on landing. Both are new landing-time effects.
+  - `conversation.v1.PromptOrigin.PROMPT_ORIGIN_MERGE_PICK` KEEPS its name:
+    held prompts are stored as protojson (daemon/internal/heldingress), whose
+    decoder reads enum NAMES, so renaming the value would break reading held
+    prompts written before the change. Its comment describes the resolving
+    turn. Likewise the daemon's internal "pick" identifiers
+    (merge/pick.go, wsm.StartMergePick) keep their names: the machinery is
+    unchanged. Stored feed rows (durable_feed_rows) are binary protobuf, so the
+    FeedMergeTab field rename is safe on disk.
