@@ -2671,12 +2671,12 @@ workspace sweep retires it once it has been idle a day (owner request,
 **What landed.** A merge workspace is CUT AT ITS FORK HEAD:
 `workspace.CreateMergeWorkspace` resolves the requester's branch once, and
 `Create` materializes the worktree at that commit, recorded on the row as
-`wsm.MergeOrigin.ForkHead` (`workspaces.merge_fork_head`, layout 40). The
+`wsm.MergeOrigin.ForkHead` (`workspaces.merge_fork_head`, layout 41). The
 creation job's base stays the branch, which the handback names. When the merge
 lands, `mergeworkspace.Service.HandBack` stamps the requester with that commit
 and the instant (`wsm.Landing`, `workspaces.landed_head`/`landed_at`, through
 `SetLanded`; INFO `daemon.mergeworkspace` "stamped the requester ..."). A
-merge workspace forked before layout 40 has no fork head, and its requester is
+merge workspace forked before layout 41 has no fork head, and its requester is
 never stamped (INFO). A failed stamp is ERROR and the handback still goes.
 
 **When.** The hourly `merge_workspace_sweep` asks `Workspaces.RetireLanded` for
