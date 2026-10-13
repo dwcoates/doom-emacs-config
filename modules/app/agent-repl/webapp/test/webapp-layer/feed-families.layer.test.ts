@@ -32,6 +32,7 @@ import {
   BOOT_BUDGET_MS,
   TURN_TEST_MS,
   awaitDrawn,
+  awaitTitleTypedOut,
   awaitTypedOut,
   bootLayer,
   driveTurn,
@@ -255,6 +256,7 @@ it(
   async () => {
     // Arrange / Act
     const row = await family("hook-blocked", "activity", "hook");
+    await awaitTitleTypedOut(app, row);
     // Assert — the BLOCKED arm specifically. src/feed/cards/hook.ts sets
     // `data-state` to the outcome's oneof case and gives only the blocked arm
     // the loud `.tool-hook-blocked` treatment, and the daemon composes the
@@ -287,6 +289,7 @@ it(
   async () => {
     // Arrange / Act
     const row = await family("hook-failed", "activity", "hook");
+    await awaitTitleTypedOut(app, row);
     // Assert — the FAILED arm specifically, and NOT the blocked arm's loud
     // treatment: the two are different facts and hook.ts draws them
     // differently.
