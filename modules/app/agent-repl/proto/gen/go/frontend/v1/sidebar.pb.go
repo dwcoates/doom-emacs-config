@@ -92,6 +92,12 @@ type WorkspaceRoster struct {
 	// interleave and a child need not follow its parent. Clients draw it as
 	// sent and never derive a tab order from the groupings. Always set.
 	TabBar *RosterTabBar `protobuf:"bytes,10,opt,name=tab_bar,json=tabBar,proto3" json:"tab_bar,omitempty"`
+	// THE ROSTER'S REVISION: the daemon raises it for every roster it
+	// resolves, so of two rosters (or a roster and an OpenTabs answer's row,
+	// OpenTabsOpenedReady.roster_revision) the higher revision is the newer
+	// state. It orders what arrives over separate streams; nothing else is
+	// read off it.
+	Revision uint64 `protobuf:"varint,11,opt,name=revision,proto3" json:"revision,omitempty"`
 	// The selected workspace — the last SelectWorkspace the daemon received.
 	// UNSET when there is none.
 	Current *RosterCurrentWorkspace `protobuf:"bytes,4,opt,name=current,proto3,oneof" json:"current,omitempty"`
@@ -180,6 +186,13 @@ func (x *WorkspaceRoster) GetTabBar() *RosterTabBar {
 		return x.TabBar
 	}
 	return nil
+}
+
+func (x *WorkspaceRoster) GetRevision() uint64 {
+	if x != nil {
+		return x.Revision
+	}
+	return 0
 }
 
 func (x *WorkspaceRoster) GetCurrent() *RosterCurrentWorkspace {
@@ -6300,7 +6313,7 @@ var File_frontend_v1_sidebar_proto protoreflect.FileDescriptor
 
 const file_frontend_v1_sidebar_proto_rawDesc = "" +
 	"\n" +
-	"\x19frontend/v1/sidebar.proto\x12\vfrontend.v1\x1a\x1cworkspace/v1/workspace.proto\"\xaf\x05\n" +
+	"\x19frontend/v1/sidebar.proto\x12\vfrontend.v1\x1a\x1cworkspace/v1/workspace.proto\"\xcb\x05\n" +
 	"\x0fWorkspaceRoster\x12A\n" +
 	"\n" +
 	"repository\x18\x01 \x01(\v2!.frontend.v1.RosterRepositoryViewR\n" +
@@ -6310,7 +6323,8 @@ const file_frontend_v1_sidebar_proto_rawDesc = "" +
 	"\x0frecently_merged\x18\x03 \x01(\v2 .frontend.v1.RosterMergedSectionR\x0erecentlyMerged\x128\n" +
 	"\x06hidden\x18\t \x01(\v2 .frontend.v1.RosterHiddenSectionR\x06hidden\x122\n" +
 	"\atab_bar\x18\n" +
-	" \x01(\v2\x19.frontend.v1.RosterTabBarR\x06tabBar\x12B\n" +
+	" \x01(\v2\x19.frontend.v1.RosterTabBarR\x06tabBar\x12\x1a\n" +
+	"\brevision\x18\v \x01(\x04R\brevision\x12B\n" +
 	"\acurrent\x18\x04 \x01(\v2#.frontend.v1.RosterCurrentWorkspaceH\x01R\acurrent\x88\x01\x01\x12O\n" +
 	"\x10shown_repository\x18\x05 \x01(\v2\".frontend.v1.RosterShownRepositoryH\x00R\x0fshownRepository\x12=\n" +
 	"\n" +
