@@ -321,7 +321,11 @@ The footer's `disconnected` status has three vendor substatuses for a Claude SDK
 - **A prompt that is waiting on the cold gate shows the badge "awaiting cold gate".**
   - This happens when you send to a workspace with no live session and it comes back parked at its cold gate.
   - The prompt never answers the gate for you, because answering it spends money: pay, clear or compact in the gate card.
-  - The session your answer brings up delivers the prompt.
+  - Your answer decides what happens to the held prompts, and only one answer sends them:
+    - "clear context" discards them, so clearing spends nothing at all.
+    - "pay and resume" and "compact first" keep them, with the badge "held for you", until you press Send now or Cancel.
+    - "compact and resume" compacts, then sends them once the session is back.
+      - The gate shows this button only while prompts are held at it.
   - Send now is refused while the gate stands, and Cancel still drops the prompt.
 - **A held prompt reads "classifying" only while the classifier is actually deciding it.**
   - A prompt that nothing is classifying and nothing holds reads "queued", and it is delivered in order.
