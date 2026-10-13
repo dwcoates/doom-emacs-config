@@ -78,8 +78,10 @@
      share this fill — the user's own and the agent-to-agent amber-bordered
      one (`.bubble[data-role="prompt"]`) — read as slightly too bright; this
      is one small step down in lightness, not a new color, applied once since
-     the two kinds already shared the one token. #e0ecff -> #ccdfff. */
-  --user: #ccdfff;
+     the two kinds already shared the one token. #e0ecff -> #ccdfff, then
+     the same step again (owner request, 2026-10-13, "just slightly
+     darker"): #ccdfff -> #b8d2ff. */
+  --user: #b8d2ff;
   /* THE RESPONSE BUBBLE'S FILL IS THE TOOL CARD'S (owner ruling, 2026-10-11,
      "a slightly darker background ... same color as the toolcard
      backgrounds"): derived from --tool-card-bg rather than copied, so a
@@ -459,8 +461,9 @@
        darker the same day because #0a84ff read a tad bright. */
     /* A further notch darker still (owner ruling, 2026-10-08, "a few percent
        darker"): #0978ea -> #086ed6, the same small lightness step the light
-       theme's pair takes. */
-    --user: #086ed6;
+       theme's pair takes. The same step again (owner request, 2026-10-13,
+       "just slightly darker"): #086ed6 -> #0764c2. */
+    --user: #0764c2;
     /* A dark navy, so a link stands out on the dark theme's prompt blue
        (owner ruling, 2026-09-27). */
     --prompt-link: #0a2a5e;
